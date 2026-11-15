@@ -89,6 +89,8 @@
                   find-spiral-building-placement
                   select-producer-tags-for-unit
                   frame0-pro-worker-split-commands
+                  compute-initial-worker-split-commands
+                  townhall-offline?
                   pick-safe-mule-mineral-patch
                   saturate-workers-and-gas-commands
                   translate-bot-actions->sc2-raw-commands
@@ -12251,6 +12253,305 @@
   (define pylon-build (findf (lambda (a) (and (pair? a) (memq (car a) '(build build-structure)) (eq? (second a) 'pylon))) p5-acts))
   (assert-true! (and pylon-build (<= (third pylon-build) 53.0))
                 "[BUG-5 P] Subsequent Protoss Pylons must place in safe interior rather than exposed forward wall"))
+
+;; =============================================================================
+;; Suite 49: Exact Attribute/Damage Combat Predictor, Timing Suppression,
+;;           Opp-Cost / Recovery Macro Modes, Wire Worker Micro & Multi-Base Defense
+;; =============================================================================
+(run-suite "49. Exact Attribute/Damage Combat Predictor, Timing Suppression, Opp-Cost/Recovery, Wire Worker Micro & Multi-Base Defense"
+  ;; ---------------------------------------------------------------------------
+  ;; 49.1 Exact attribute masks, hit damage, spell gating, predictor & runtime wiring
+  ;; ---------------------------------------------------------------------------
+  (define attr49-marine (unit-attribute-mask 'marine))
+  (define attr49-immortal (unit-attribute-mask 'immortal))
+  (assert-true! (and (positive? (bitwise-and attr49-marine SC2-UNIT-ATTR-LIGHT))
+                     (positive? (bitwise-and attr49-marine SC2-UNIT-ATTR-BIOLOGICAL))
+                     (zero? (bitwise-and attr49-marine SC2-UNIT-ATTR-ARMORED)))
+                "Marine attribute mask must set Light + Biological and clear Armored")
+  (assert-true! (and (positive? (bitwise-and attr49-immortal SC2-UNIT-ATTR-ARMORED))
+                     (positive? (bitwise-and attr49-immortal SC2-UNIT-ATTR-MECHANICAL))
+                     (positive? (bitwise-and attr49-immortal SC2-UNIT-ATTR-SHIELDED)))
+                "Immortal attribute mask must set Armored + Mechanical + Shielded")
+
+  ;; Siege Tank vs Roach = 70 - 1 = 69.0; Siege Tank vs Immortal w/ Barrier = 34.5;
+  ;; Marine (+2 Atk) vs Zealot w/ Anti-Armor Missile (+2/+3 net + Guardian Shield) > base 5.0
+  (assert-eq! (compute-exact-hit-damage-vs-target 'siege-tank-sieged 'roach) 69.0
+              "Siege Tank (Sieged) vs Roach (1 armor) must deal 69.0")
+  (assert-eq! (compute-exact-hit-damage-vs-target 'siege-tank-sieged 'immortal #:target-shields 0 #:barrier-active? #t)
+              34.5
+              "Immortal Barrier must halve post-armor Siege Tank hit damage to 34.5")
+  (assert-true! (> (compute-exact-hit-damage-vs-target 'marine 'zealot
+                                                      #:attacker-upgrades 2
+                                                      #:aam-debuff? #t
+                                                      #:guardian-shield? #t)
+                   (compute-exact-hit-damage-vs-target 'marine 'zealot))
+                "Marine +2 upgrades + Anti-Armor Missile debuff must exceed un-upgraded Marine hit damage vs Zealot")
+
+  ;; Spell target-attribute validity
+  (assert-true! (and (spell-valid-for-target-attrs? 'snipe 'ultralisk)
+                     (not (spell-valid-for-target-attrs? 'snipe 'colossus)))
+                "Ghost Snipe must target Biological Ultralisk and reject Mechanical Colossus")
+  (assert-true! (and (spell-valid-for-target-attrs? 'feedback 'high-templar 50 40)
+                     (not (spell-valid-for-target-attrs? 'feedback 'roach 0 0)))
+                "Feedback must accept energy Psionic targets and reject 0-energy non-Psionic targets")
+  (assert-true! (and (spell-valid-for-target-attrs? 'interference-matrix 'siege-tank-sieged)
+                     (not (spell-valid-for-target-attrs? 'interference-matrix 'zealot)))
+                "Interference Matrix must target Mechanical/Psionic units and reject Bio-Light Zealot")
+
+  ;; Engagement predictor outcomes
+  (define pred49-1v4 (predict-engagement-outcome '((stalker . 1)) '((marauder . 4))))
+  (assert-true! (not (hash-ref pred49-1v4 'should-engage? #t))
+                "1 Stalker vs 4 Marauders must suppress engagement (should-engage? = #f)")
+  (assert-eq! (hash-ref pred49-1v4 'recommended-posture #f) 'retreat-and-remacro-counter
+              "1 Stalker vs 4 Marauders must recommend 'retreat-and-remacro-counter")
+
+  (define pred49-aadef (predict-engagement-outcome '((zealot . 10)) '((void-ray . 3))))
+  (assert-true! (and (hash-ref pred49-aadef 'anti-air-deficit? #f)
+                     (not (hash-ref pred49-aadef 'should-engage? #t)))
+                "10 Zealots vs 3 Void Rays must detect anti-air-deficit? and refuse engagement")
+
+  (define pred49-open (predict-engagement-outcome '((stalker . 6)) '((stalker . 7)) #:defending-home? #f))
+  (define pred49-home (predict-engagement-outcome '((stalker . 6)) '((stalker . 7)) #:defending-home? #t))
+  (assert-true! (and (not (hash-ref pred49-open 'should-engage? #t))
+                     (hash-ref pred49-home 'should-engage? #f))
+                "6v7 Stalkers (~0.73 Lanchester ratio) must retreat in open field but engage when defending home")
+
+  ;; Live runtime wiring (`step-live-bot-runtime!`): suppress offensive attacks when should-engage? = #f far from TH,
+  ;; and engage when threat is within 14.0 tiles of our TownHall
+  (define rt49-far (make-live-bot-runtime #:race 'Protoss))
+  (define acts49-far
+    (hash-ref
+     (step-live-bot-runtime!
+      rt49-far
+      (hash 'frame 7200 'minerals 400 'gas 200 'supply-used 40 'supply-cap 60 'supply-left 20
+            'mineral-harvesters 20 'vespene-harvesters 4 'enemy-race 'Terran
+            'base-x 28.5 'base-y 28.5 'natural-x 52.5 'natural-y 28.5
+            'ally-buildings (list (hash 'id 49001 'type 'nexus 'x 28.5 'y 28.5 'hp 1000 'shields 1000 'build-progress 1.0))
+            'ally-units (append
+                         (for/list ([i (in-range 12)]) (hash 'id (+ 49010 i) 'type 'probe 'x 26.5 'y 28.5 'hp 20 'shields 20))
+                         (list (hash 'id 49050 'type 'stalker 'x 80.0 'y 80.0 'hp 80 'shields 80)
+                               (hash 'id 49051 'type 'stalker 'x 81.0 'y 80.0 'hp 80 'shields 80)))
+            'enemy-units (for/list ([i (in-range 6)])
+                           (hash 'id (+ 49100 i) 'type 'marauder 'x (+ 90.0 (* 0.5 i)) 'y 80.0 'hp 125))))
+     'actions '()))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (memq (car a) '(attack attack-unit attack-pos)))) acts49-far))
+                "step-live-bot-runtime! must suppress attack/attack-unit/attack-pos when 2 Stalkers face 6 Marauders far from TH")
+  (assert-true! (and (ormap (lambda (a) (and (pair? a) (eq? (car a) 'kite))) acts49-far) #t)
+                "step-live-bot-runtime! must emit kite actions when combat predictor recommends retreat far from TH")
+
+  (define rt49-home (make-live-bot-runtime #:race 'Protoss))
+  (define acts49-home
+    (hash-ref
+     (step-live-bot-runtime!
+      rt49-home
+      (hash 'frame 7200 'minerals 400 'gas 200 'supply-used 40 'supply-cap 60 'supply-left 20
+            'mineral-harvesters 20 'vespene-harvesters 4 'enemy-race 'Terran
+            'base-x 28.5 'base-y 28.5 'natural-x 52.5 'natural-y 28.5
+            'ally-buildings (list (hash 'id 49001 'type 'nexus 'x 28.5 'y 28.5 'hp 1000 'shields 1000 'build-progress 1.0))
+            'ally-units (for/list ([i (in-range 6)])
+                          (hash 'id (+ 49050 i) 'type 'stalker 'x (+ 35.5 (* 0.2 i)) 'y 28.5 'hp 80 'shields 80))
+            'enemy-units (for/list ([i (in-range 7)])
+                           (hash 'id (+ 49100 i) 'type 'stalker 'x (+ 38.0 (* 0.2 i)) 'y 28.5 'hp 80 'shields 80))))
+     'actions '()))
+  (assert-true! (and (ormap (lambda (a) (and (pair? a) (memq (car a) '(attack attack-unit attack-pos)))) acts49-home) #t)
+                "step-live-bot-runtime! must allow 6v7 Stalker engagement when enemy threatens within 14.0 tiles of TownHall")
+
+  ;; ---------------------------------------------------------------------------
+  ;; 49.2 Opponent opportunity-cost commitment & loss-recovery macro modes
+  ;; ---------------------------------------------------------------------------
+  (define opp49
+    (evaluate-opponent-opportunity-cost-commitment
+     '((battlecruiser . 2)) '((fusion-core . 1) (starport . 2)) 12000 3 4))
+  (assert-eq! (hash-ref opp49 'dominant-path #f) 'capital-air-fleet
+              "2 Battlecruisers + Fusion Core + 2 Starports must classify as 'capital-air-fleet")
+  (assert-true! (hash-ref opp49 'hard-override-build-order? #f)
+                "Capital-air commitment must assert hard-override-build-order?")
+  (assert-true! (and (memq 'viking (hash-ref opp49 'recommended-counter-units '()))
+                     (memq 'corruptor (hash-ref opp49 'recommended-counter-units '()))
+                     (memq 'void-ray (hash-ref opp49 'recommended-counter-units '()))
+                     #t)
+                "Capital-air commitment must recommend anti-air counters (viking/corruptor/void-ray)")
+  (assert-true! (and (memq 'zealot (hash-ref opp49 'suppressed-non-counter-units '()))
+                     (memq 'roach (hash-ref opp49 'suppressed-non-counter-units '()))
+                     (memq 'marauder (hash-ref opp49 'suppressed-non-counter-units '()))
+                     #t)
+                "Capital-air commitment must suppress non-anti-air ground units (zealot/roach/marauder)")
+
+  (define rec49-worker
+    (evaluate-loss-recovery-macro-mode
+     (hash 'workers 20 'peak-workers 44 'active-bases 2 'peak-bases 2
+           'supply-used 60 'peak-supply-reached 80 'army-supply 30 'enemy-threat-supply 15 'frame 8000)))
+  (assert-eq! (hash-ref rec49-worker 'mode #f) 'worker-loss-recovery
+              "Severe worker drop (20 vs 44 peak) must trigger 'worker-loss-recovery")
+  (assert-true! (and (hash-ref rec49-worker 'boost-workers? #f)
+                     (hash-ref rec49-worker 'unlock-locked-path? #f)
+                     (hash-ref rec49-worker 'preempt-greedy-tech? #f))
+                "worker-loss-recovery must set boost-workers?, unlock-locked-path?, preempt-greedy-tech?")
+
+  (define rec49-base
+    (evaluate-loss-recovery-macro-mode
+     (hash 'workers 40 'peak-workers 44 'active-bases 1 'peak-bases 3
+           'supply-used 70 'peak-supply-reached 100 'army-supply 30 'enemy-threat-supply 15 'frame 9000)))
+  (assert-eq! (hash-ref rec49-base 'mode #f) 'base-loss-recovery
+              "Dropping from 3 peak bases to 1 active base must trigger 'base-loss-recovery")
+  (assert-true! (hash-ref rec49-base 'boost-expand? #f)
+                "base-loss-recovery must set boost-expand?")
+
+  (define rec49-army
+    (evaluate-loss-recovery-macro-mode
+     (hash 'workers 50 'peak-workers 52 'active-bases 3 'peak-bases 3
+           'supply-used 80 'peak-supply-reached 150 'army-supply 20 'enemy-threat-supply 65 'frame 11000)))
+  (assert-eq! (hash-ref rec49-army 'mode #f) 'army-wipe-counter-pivot-recovery
+              "Heavy army wipe against large enemy threat must trigger 'army-wipe-counter-pivot-recovery")
+  (assert-true! (and (hash-ref rec49-army 'suppress-failing-comp? #f)
+                     (hash-ref rec49-army 'boost-static-defense? #f))
+                "army-wipe-counter-pivot-recovery must suppress failing comp & boost static defense")
+
+  (define rec49-none
+    (evaluate-loss-recovery-macro-mode
+     (hash 'workers 60 'peak-workers 60 'active-bases 3 'peak-bases 3
+           'supply-used 140 'peak-supply-reached 140 'army-supply 80 'enemy-threat-supply 40 'frame 11000)))
+  (assert-eq! (hash-ref rec49-none 'mode #f) 'none
+              "Healthy matching peak/current macro must return 'none recovery mode")
+
+  ;; ---------------------------------------------------------------------------
+  ;; 49.3 Initial 4x2+4x1 split, townhall-offline?, & wire pick-worker-near Far-Patch
+  ;; ---------------------------------------------------------------------------
+  (define (mk49-wire-u tag ut x y #:all [all 1] #:hp [hp 45.0] #:mhp [mhp hp] #:mc [mc 0] #:buffs [buffs '()] #:orders [orders '()])
+    (sc2-unit 1 all tag ut (if (= all 1) 1 0) (sc2-point3d x y 10.0) 0.0 0.5 1.0 0 #f #f #f
+              hp mhp 0.0 0.0 0.0 0.0 mc 0 #f #f #f #f #f orders 0 buffs 0 0 0.0 0 0 0 0))
+
+  (define th49 (mk49-wire-u 49500 18 32.5 32.5 #:hp 1500.0))
+  (define mins49
+    (append (for/list ([i (in-range 4)]) (mk49-wire-u (+ 49510 i) 341 26.5 (+ 29.5 (* 2.0 i)) #:all 3 #:hp 10000.0 #:mc 1200))
+            (for/list ([i (in-range 4)]) (mk49-wire-u (+ 49520 i) 341 25.0 (+ 29.5 (* 2.0 i)) #:all 3 #:hp 10000.0 #:mc 1200))))
+  (define wrks49
+    (for/list ([i (in-range 12)]) (mk49-wire-u (+ 49530 i) 45 29.5 (+ 28.0 (* 0.8 i)) #:hp 45.0)))
+  (define split49-obs
+    (sc2-observation 0 (sc2-player-common 1 50 0 12 15 0 12 0 1 0 1)
+                     (cons th49 (append mins49 wrks49))
+                     '() '() #f '() '() '() '() '() '()))
+  (define split49-cmds (compute-initial-worker-split-commands split49-obs))
+  (define split49-near-counts
+    (for/list ([c (in-list split49-cmds)]
+               #:when (<= 49510 (sc2-raw-unit-command-target-unit-tag c) 49513))
+      (length (sc2-raw-unit-command-unit-tags c))))
+  (define split49-far-counts
+    (for/list ([c (in-list split49-cmds)]
+               #:when (<= 49520 (sc2-raw-unit-command-target-unit-tag c) 49523))
+      (length (sc2-raw-unit-command-unit-tags c))))
+  (assert-true! (and (= (length split49-cmds) 8)
+                     (equal? split49-near-counts '(2 2 2 2))
+                     (equal? split49-far-counts '(1 1 1 1))
+                     (= (length (remove-duplicates (apply append (map sc2-raw-unit-command-unit-tags split49-cmds)))) 12))
+                "compute-initial-worker-split-commands must pair 4x2 Near + 4x1 Far across all 12 distinct workers")
+
+  (assert-true! (not (townhall-offline? th49 mins49 '() wrks49))
+                "Healthy active TownHall with patches and no attackers must not be marked offline")
+  (assert-true! (townhall-offline? th49 '() '() wrks49)
+                "Mined-out TownHall with zero mineral patches must be marked offline")
+  (assert-true! (townhall-offline?
+                 (mk49-wire-u 49599 18 32.5 32.5 #:hp 500.0 #:mhp 1500.0)
+                 mins49
+                 (for/list ([i (in-range 4)]) (mk49-wire-u (+ 49600 i) 48 (+ 35.0 (* 0.5 i)) 32.5 #:all 4 #:hp 45.0))
+                 wrks49)
+                "Damaged TownHall overrun by 4 Marines must be marked offline")
+
+  ;; End-to-end wire `pick-worker-near` via `translate-bot-actions->sc2-raw-commands`
+  (define pwn49-th (mk49-wire-u 49700 18 32.5 32.5))
+  (define pwn49-m-near (mk49-wire-u 49701 341 26.5 32.5 #:all 3 #:hp 10000.0 #:mc 1200))
+  (define pwn49-m-far  (mk49-wire-u 49702 341 22.0 32.5 #:all 3 #:hp 10000.0 #:mc 1200))
+  (define pwn49-carry-buff (mk49-wire-u 49711 45 26.4 32.5 #:buffs '(271)))
+  (define pwn49-carry-ord  (mk49-wire-u 49712 45 26.2 32.5 #:orders (list (sc2-unit-order 299 #f 49700 0.0))))
+  (define pwn49-near-free  (mk49-wire-u 49713 45 26.6 32.5 #:orders (list (sc2-unit-order 298 #f 49701 0.0))))
+  (define pwn49-far-free   (mk49-wire-u 49714 45 22.1 32.5 #:orders (list (sc2-unit-order 298 #f 49702 0.0))))
+  (define pwn49-obs
+    (sc2-observation 500 (sc2-player-common 1 500 0 16 23 12 4 0 1 0 1)
+                     (list pwn49-th pwn49-m-near pwn49-m-far
+                           pwn49-carry-buff pwn49-carry-ord pwn49-near-free pwn49-far-free)
+                     '() '() #f '() '() '() '() '() '()))
+  (define pwn49-cmds
+    (filter sc2-raw-unit-command?
+            (translate-bot-actions->sc2-raw-commands '((clear-expansion-block 52.5 32.5)) pwn49-obs)))
+  (assert-true! (and (= (length pwn49-cmds) 1)
+                     (equal? (sc2-raw-unit-command-unit-tags (car pwn49-cmds)) '(49714)))
+                "translate-bot-actions->sc2-raw-commands (pick-worker-near) must prefer non-carrying Far-Patch worker #49714")
+
+  ;; ---------------------------------------------------------------------------
+  ;; 49.4 Multi-base mineral-line & critical-infra static defense placement
+  ;; ---------------------------------------------------------------------------
+  (define (dist2d49 x1 y1 x2 y2) (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define mins49-multi
+    (list (hash 'x 26.0 'y 32.5 'mineral-contents 1200)
+          (hash 'x 26.0 'y 34.5 'mineral-contents 1200)
+          (hash 'x 74.0 'y 32.5 'mineral-contents 1200)
+          (hash 'x 74.0 'y 34.5 'mineral-contents 1200)))
+  (define terran49-bldgs
+    (list (hash 'id 1 'type 'command-center 'x 32.5 'y 32.5 'radius 2.75)
+          (hash 'id 2 'type 'command-center 'x 80.5 'y 32.5 'radius 2.75)
+          (hash 'id 3 'type 'missile-turret 'x 28.0 'y 33.5 'radius 1.0)
+          (hash 'id 4 'type 'starport 'x 38.0 'y 24.0 'radius 1.5)))
+  (define-values (t49-b2x t49-b2y)
+    (solve-pro-simcity-layout-placement 'missile-turret 'Terran 32.5 32.5 80.5 32.5
+                                        #:enemy-x 150.0 #:enemy-y 150.0
+                                        #:ally-bldgs terran49-bldgs
+                                        #:mineral-patches mins49-multi))
+  (assert-true! (and t49-b2x (<= (dist2d49 t49-b2x t49-b2y 74.0 33.5) 9.0))
+                "Terran missile-turret must cover uncovered 2nd-base mineral line (<= 9.0 tiles)")
+
+  (define-values (t49-ix t49-iy)
+    (solve-pro-simcity-layout-placement 'missile-turret 'Terran 32.5 32.5 80.5 32.5
+                                        #:enemy-x 150.0 #:enemy-y 150.0
+                                        #:ally-bldgs (cons (hash 'id 5 'type 'missile-turret 'x 76.0 'y 33.5 'radius 1.0)
+                                                           terran49-bldgs)
+                                        #:mineral-patches mins49-multi))
+  (assert-true! (and t49-ix (<= (dist2d49 t49-ix t49-iy 38.0 24.0) 9.5))
+                "Terran missile-turret must cover Starport critical infra once all mineral lines are defended (<= 9.5 tiles)")
+
+  (define protoss49-bldgs
+    (list (hash 'id 11 'type 'nexus 'x 32.5 'y 32.5 'radius 2.75)
+          (hash 'id 12 'type 'nexus 'x 80.5 'y 32.5 'radius 2.75)
+          (hash 'id 13 'type 'pylon 'x 28.0 'y 33.5 'radius 1.0)
+          (hash 'id 14 'type 'pylon 'x 76.0 'y 33.5 'radius 1.0)
+          (hash 'id 15 'type 'pylon 'x 38.0 'y 25.0 'radius 1.0)
+          (hash 'id 16 'type 'photon-cannon 'x 28.5 'y 31.5 'radius 1.0)
+          (hash 'id 17 'type 'shield-battery 'x 29.5 'y 35.5 'radius 1.0)
+          (hash 'id 18 'type 'robotics-facility 'x 39.5 'y 24.0 'radius 1.5)))
+  (define-values (p49-cx p49-cy)
+    (solve-pro-simcity-layout-placement 'photon-cannon 'Protoss 32.5 32.5 80.5 32.5
+                                        #:enemy-x 150.0 #:enemy-y 150.0
+                                        #:ally-bldgs protoss49-bldgs
+                                        #:mineral-patches mins49-multi))
+  (define-values (p49-bx p49-by)
+    (solve-pro-simcity-layout-placement 'shield-battery 'Protoss 32.5 32.5 80.5 32.5
+                                        #:enemy-x 150.0 #:enemy-y 150.0
+                                        #:ally-bldgs (cons (hash 'id 19 'type 'photon-cannon 'x 76.0 'y 31.5 'radius 1.0)
+                                                           protoss49-bldgs)
+                                        #:mineral-patches mins49-multi))
+  (assert-true! (and p49-cx (<= (dist2d49 p49-cx p49-cy 74.0 33.5) 9.0)
+                     p49-bx (<= (dist2d49 p49-bx p49-by 74.0 33.5) 9.0))
+                "Protoss photon-cannon & shield-battery must defend uncovered 2nd-base mineral line (<= 9.0 tiles)")
+
+  (define zerg49-bldgs
+    (list (hash 'id 21 'type 'hatchery 'x 32.5 'y 32.5 'radius 2.75)
+          (hash 'id 22 'type 'hatchery 'x 80.5 'y 32.5 'radius 2.75)
+          (hash 'id 23 'type 'spore-crawler 'x 28.5 'y 33.5 'radius 1.0)
+          (hash 'id 24 'type 'spire 'x 38.0 'y 24.0 'radius 1.0)))
+  (define-values (z49-spx z49-spy)
+    (solve-pro-simcity-layout-placement 'spore-crawler 'Zerg 32.5 32.5 80.5 32.5
+                                        #:enemy-x 150.0 #:enemy-y 150.0
+                                        #:ally-bldgs zerg49-bldgs
+                                        #:mineral-patches mins49-multi))
+  (define-values (z49-stx z49-sty)
+    (solve-pro-simcity-layout-placement 'spine-crawler 'Zerg 32.5 32.5 80.5 32.5
+                                        #:enemy-x 150.0 #:enemy-y 150.0
+                                        #:ally-bldgs (list (hash 'id 21 'type 'hatchery 'x 32.5 'y 32.5 'radius 2.75)
+                                                           (hash 'id 22 'type 'hatchery 'x 80.5 'y 32.5 'radius 2.75)
+                                                           (hash 'id 25 'type 'spine-crawler 'x 28.5 'y 33.5 'radius 1.0))
+                                        #:mineral-patches mins49-multi))
+  (assert-true! (and z49-spx (<= (dist2d49 z49-spx z49-spy 74.0 33.5) 9.0)
+                     z49-stx (<= (dist2d49 z49-stx z49-sty 80.5 32.5) 9.0))
+                "Zerg spore-crawler & spine-crawler must defend uncovered 2nd-base mineral line / expansion"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

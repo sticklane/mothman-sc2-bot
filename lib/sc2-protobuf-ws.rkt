@@ -163,6 +163,9 @@
  SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP
  select-producer-tags-for-unit
  frame0-pro-worker-split-commands
+ compute-initial-worker-split-commands
+ classify-townhall-mineral-patches
+ townhall-offline?
  pick-safe-mule-mineral-patch
  worker-carrying-cargo?
  pick-far-patch-scout-worker
@@ -6883,6 +6886,69 @@
 (define SC2-WORKER-ANTIBOUNCE-COOLDOWN (make-hasheqv))
 (define SC2-WORKER-SPEEDMINE-COOLDOWN (make-hasheqv))
 
+(define (classify-townhall-mineral-patches th mineral-fields [radius 11.5] [max-patches 8])
+  (define tp (sc2-unit-pos th))
+  (define hx (sc2-point3d-x tp))
+  (define hy (sc2-point3d-y tp))
+  (define with-dist
+    (for/list ([m (in-list mineral-fields)]
+               #:when (let* ([mp (sc2-unit-pos m)]
+                             [d (pt-dist hx hy (sc2-point3d-x mp) (sc2-point3d-y mp))])
+                        (<= d radius)))
+      (define mp (sc2-unit-pos m))
+      (cons (pt-dist hx hy (sc2-point3d-x mp) (sc2-point3d-y mp)) m)))
+  (define sorted-pairs (sort with-dist < #:key car))
+  (define capped
+    (map cdr (if (> (length sorted-pairs) max-patches)
+                 (take sorted-pairs max-patches)
+                 sorted-pairs)))
+  (define near-cnt (quotient (length capped) 2))
+  (values (take capped near-cnt) (drop capped near-cnt) capped))
+
+(define (townhall-combat-metrics th enemy-combat-units ally-combat-units radius)
+  (define tp (sc2-unit-pos th))
+  (define tx (sc2-point3d-x tp))
+  (define ty (sc2-point3d-y tp))
+  (define e-cnt 0)
+  (define e-hp 0.0)
+  (define a-hp 0.0)
+  (for ([u (in-list enemy-combat-units)])
+    (define up (sc2-unit-pos u))
+    (when (<= (pt-dist tx ty (sc2-point3d-x up) (sc2-point3d-y up)) radius)
+      (set! e-cnt (add1 e-cnt))
+      (set! e-hp (+ e-hp (sc2-unit-health u) (sc2-unit-shield u)))))
+  (for ([u (in-list ally-combat-units)])
+    (define up (sc2-unit-pos u))
+    (when (<= (pt-dist tx ty (sc2-point3d-x up) (sc2-point3d-y up)) radius)
+      (set! a-hp (+ a-hp (sc2-unit-health u) (sc2-unit-shield u)))))
+  (values e-cnt e-hp a-hp))
+
+(define (townhall-offline? th mineral-fields enemy-units [ally-units '()])
+  (define-values (_near _far local-mins)
+    (classify-townhall-mineral-patches th mineral-fields 11.5 8))
+  (define enemy-combat-units
+    (filter (lambda (u)
+              (and (not (sc2-unit-is-worker? u))
+                   (not (sc2-unit-is-structure? u))))
+            enemy-units))
+  (define ally-combat-units
+    (filter (lambda (u)
+              (define sym (sc2-id->unit-symbol (sc2-unit-unit-type u)))
+              (and (not (sc2-unit-is-worker? u))
+                   (not (sc2-unit-is-structure? u))
+                   (not (memq sym '(larva egg overlord overseer observer warp-prism mule)))))
+            ally-units))
+  (define-values (e-cnt e-hp a-hp)
+    (townhall-combat-metrics th enemy-combat-units ally-combat-units 10.5))
+  (define-values (e-cnt-fire _e-hp-fire _a-hp-fire)
+    (townhall-combat-metrics th enemy-combat-units ally-combat-units 15.0))
+  (define max-hp (sc2-unit-health-max th))
+  (or (null? local-mins)
+      (and (>= e-cnt 2) (> e-hp (* 1.3 a-hp)))
+      (and (> max-hp 0.0)
+           (< (sc2-unit-health th) (* 0.30 max-hp))
+           (>= e-cnt-fire 1))))
+
 (define (frame0-pro-worker-split-commands obs)
   (cond
     [(not (sc2-observation? obs)) '()]
@@ -6919,39 +6985,30 @@
         '()]
        [else
         (define th0 (first townhalls))
-        (define tp0 (sc2-unit-pos th0))
-        (define hx (sc2-point3d-x tp0))
-        (define hy (sc2-point3d-y tp0))
-        (define local-mins
-          (sort (filter (lambda (m)
-                          (define mp (sc2-unit-pos m))
-                          (<= (pt-dist hx hy (sc2-point3d-x mp) (sc2-point3d-y mp)) 11.0))
-                        mineral-fields)
-                <
-                #:key (lambda (m)
-                        (define mp (sc2-unit-pos m))
-                        (pt-dist hx hy (sc2-point3d-x mp) (sc2-point3d-y mp)))))
-        (define base-mins (take local-mins (min 8 (length local-mins))))
+        (define-values (near-mins far-mins base-mins)
+          (classify-townhall-mineral-patches th0 mineral-fields 11.5 8))
         (cond
           [(null? base-mins) '()]
           [else
            (define n (length workers))
            (define n-mins (length base-mins))
-           ;; Build `n` target slots: for standard 12 workers & 8 patches -> 4 closest patches get 2 slots, 4 far patches get 1 slot
+           (define near-cnt (length near-mins))
+           ;; Build `n` target slots: 1st Near -> 1st Far -> 2nd Near -> 2nd Far
+           ;; For 12 workers on 8 patches: 4 Near Patches x2 (8) + 4 Far Patches x1 (4).
            (define slots-list
              (cond
                [(<= n n-mins)
                 (take base-mins n)]
                [else
                 (define extra (- n n-mins))
-                (define double-count (min n-mins extra))
-                (define base-plus-close
-                  (append base-mins (take base-mins double-count)))
-                (if (= (length base-plus-close) n)
-                    base-plus-close
-                    (append base-plus-close
-                            (for/list ([k (in-range (- n (length base-plus-close)))])
-                              (list-ref base-mins (modulo k n-mins)))))]))
+                (define near-extra (min near-cnt extra))
+                (define far-extra (- extra near-extra))
+                (append base-mins
+                        (take near-mins near-extra)
+                        (if (and (> far-extra 0) (pair? far-mins))
+                            (for/list ([k (in-range far-extra)])
+                              (list-ref far-mins (modulo k (length far-mins))))
+                            '()))]))
            (define workers-vec (list->vector workers))
            (define slots-vec (list->vector slots-list))
            (define dist-mat (make-vector (* n n) 0.0))
@@ -7033,6 +7090,8 @@
                     (sc2-raw-unit-command 3666 #f ptag wtags #f))))
             base-mins)])])]))
 
+(define compute-initial-worker-split-commands frame0-pro-worker-split-commands)
+
 (define SC2-WORKER-TRANSFER-LAST-LOOP (box 0))
 (define SC2-WORKER-TRANSFER-COOLDOWN-UNTIL (make-hasheqv))
 
@@ -7066,14 +7125,32 @@
               (and (sc2-unit-is-mineral-field? m)
                    (= (sc2-unit-display-type m) 1)))
             neutral-units))
+  (define enemy-units
+    (filter (lambda (u) (and (= (sc2-unit-alliance u) 4)
+                             (not (= (sc2-unit-display-type u) 4))))
+            units))
+  (define enemy-combat-units
+    (filter (lambda (u)
+              (and (not (sc2-unit-is-worker? u))
+                   (not (sc2-unit-is-structure? u))))
+            enemy-units))
+  (define ally-combat-units
+    (filter (lambda (u)
+              (define sym (sc2-id->unit-symbol (sc2-unit-unit-type u)))
+              (and (not (sc2-unit-is-worker? u))
+                   (not (sc2-unit-is-structure? u))
+                   (not (memq sym '(larva egg overlord overseer observer warp-prism mule)))))
+            self-units))
+  (define (th-is-nonflying? u)
+    (and (sc2-unit-is-townhall? u)
+         (not (sc2-unit-is-flying u))
+         (not (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
+                    '(command-center-flying orbital-command-flying)))))
   (define ready-townhalls
     (sort-townhalls-main-first
      (filter (lambda (u)
-               (and (sc2-unit-is-townhall? u)
-                    (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
-                    (not (sc2-unit-is-flying u))
-                    (not (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
-                               '(command-center-flying orbital-command-flying)))))
+               (and (th-is-nonflying? u)
+                    (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
              self-units)))
   (define ready-gas-bldgs
     (filter (lambda (u)
@@ -7111,20 +7188,111 @@
                     (sc2-unit-orders w)))
            workers))
 
-  ;; Helper: live mineral fields strictly near a specific TownHall (NEVER falls back to cross-map unowned patches!)
+  ;; Helper: live mineral fields strictly near a specific TownHall (<= 11.5 tiles, capped to 8 patches).
   (define (minerals-near-townhall th)
-    (define tp (sc2-unit-pos th))
-    (filter (lambda (m)
-              (define mp (sc2-unit-pos m))
-              (<= (pt-dist (sc2-point3d-x tp) (sc2-point3d-y tp)
-                           (sc2-point3d-x mp) (sc2-point3d-y mp))
-                  SC2-BASE-RESOURCE-RADIUS))
-            mineral-fields))
+    (define-values (_near _far sorted)
+      (classify-townhall-mineral-patches th mineral-fields 11.5 8))
+    sorted)
+
+  (define (th-local-offline? th)
+    (define-values (_near _far local-mins)
+      (classify-townhall-mineral-patches th mineral-fields 11.5 8))
+    (define-values (e-cnt e-hp a-hp)
+      (townhall-combat-metrics th enemy-combat-units ally-combat-units 10.5))
+    (define-values (e-cnt-fire _ef _af)
+      (townhall-combat-metrics th enemy-combat-units ally-combat-units 15.0))
+    (define max-hp (sc2-unit-health-max th))
+    (or (null? local-mins)
+        (and (>= e-cnt 2) (> e-hp (* 1.3 a-hp)))
+        (and (> max-hp 0.0)
+             (< (sc2-unit-health th) (* 0.30 max-hp))
+             (>= e-cnt-fire 1))))
+
+  (define (th-coming-online-safe? th)
+    (define bp (sc2-unit-build-progress th))
+    (and (th-is-nonflying? th)
+         (>= bp 0.85)
+         (< bp SC2-BUILD-COMPLETE-PROGRESS)
+         (not (null? (minerals-near-townhall th)))
+         (let-values ([(e-cnt e-hp a-hp)
+                       (townhall-combat-metrics th enemy-combat-units ally-combat-units 12.0)])
+           (or (= e-cnt 0)
+               (and (< e-cnt 2) (<= e-hp (max 80.0 (* 1.0 a-hp))))))))
+
+  (define (th-safety-score th)
+    (define-values (e-cnt e-hp a-hp)
+      (townhall-combat-metrics th enemy-combat-units ally-combat-units 12.0))
+    (+ (* 1000.0 e-cnt) (max 0.0 (- e-hp (* 0.5 a-hp)))))
+
+  (define-values (offline-townhalls online-ready-townhalls)
+    (let lp ([rem ready-townhalls] [off '()] [on '()])
+      (cond
+        [(null? rem) (values (reverse off) (reverse on))]
+        [(th-local-offline? (car rem))
+         (lp (cdr rem) (cons (car rem) off) on)]
+        [else
+         (lp (cdr rem) off (cons (car rem) on))])))
+
+  (define coming-online-townhalls
+    (sort-townhalls-main-first (filter th-coming-online-safe? self-units)))
+
+  (define online-townhalls
+    (append online-ready-townhalls coming-online-townhalls))
+  (define safe-online-townhalls
+    (sort online-townhalls < #:key th-safety-score))
 
   (define owned-base-minerals
-    (if (null? ready-townhalls)
-        mineral-fields
-        (remove-duplicates (append* (map minerals-near-townhall ready-townhalls)))))
+    (cond
+      [(not (null? online-townhalls))
+       (remove-duplicates (append* (map minerals-near-townhall online-townhalls)))]
+      [(null? ready-townhalls) mineral-fields]
+      [else '()]))
+
+  (define th-near-ht (make-hasheqv))
+  (define th-far-ht (make-hasheqv))
+  (define th-min-tags-ht (make-hasheqv))
+  (define min-is-far-ht (make-hasheqv))
+  (define min-th-dist-online (make-hasheqv))
+  (for ([th (in-list online-townhalls)])
+    (define th-tag (sc2-unit-tag th))
+    (define tp (sc2-unit-pos th))
+    (define tx (sc2-point3d-x tp))
+    (define ty (sc2-point3d-y tp))
+    (define-values (near-m far-m all-m)
+      (classify-townhall-mineral-patches th mineral-fields 11.5 8))
+    (hash-set! th-near-ht th-tag near-m)
+    (hash-set! th-far-ht th-tag far-m)
+    (hash-set! th-min-tags-ht th-tag (list->seteqv (map sc2-unit-tag all-m)))
+    (for ([m (in-list all-m)])
+      (define mtag (sc2-unit-tag m))
+      (define mp (sc2-unit-pos m))
+      (define d (pt-dist tx ty (sc2-point3d-x mp) (sc2-point3d-y mp)))
+      (define prev-d (hash-ref min-th-dist-online mtag +inf.0))
+      (when (< d prev-d)
+        (hash-set! min-th-dist-online mtag d)
+        (hash-set! min-is-far-ht mtag (and (memq m far-m) #t)))))
+
+  (define (th-effective-ideal th)
+    (define ih (sc2-unit-ideal-harvesters th))
+    (if (> ih 0)
+        ih
+        (min SC2-IDEAL-WORKERS-PER-MINERAL-LINE
+             (* 2 (length (minerals-near-townhall th))))))
+
+  (define (th-workers-targeting-mins th)
+    (define tset (hash-ref th-min-tags-ht (sc2-unit-tag th) (seteqv)))
+    (count (lambda (w)
+             (ormap (lambda (o)
+                      (and (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666))
+                           (set-member? tset (sc2-unit-order-target-unit-tag o))))
+                    (sc2-unit-orders w)))
+           workers))
+
+  (define (th-effective-assigned th)
+    (if (< (sc2-unit-build-progress th) SC2-BUILD-COMPLETE-PROGRESS)
+        (max (sc2-unit-assigned-harvesters th)
+             (th-workers-targeting-mins th))
+        (sc2-unit-assigned-harvesters th)))
 
   (define under-gas
     (filter (lambda (u)
@@ -7140,21 +7308,20 @@
                                 (<= (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
                                              (sc2-point3d-x tp) (sc2-point3d-y tp))
                                     SC2-BASE-RESOURCE-RADIUS))
-                              ready-townhalls))))
+                              online-ready-townhalls))))
             ready-gas-bldgs))
   (define under-townhalls
-    (filter (lambda (th)
-              (define ih (sc2-unit-ideal-harvesters th))
-              (and (not (null? (minerals-near-townhall th)))
-                   (< (sc2-unit-assigned-harvesters th)
-                      (if (> ih 0) ih SC2-IDEAL-WORKERS-PER-MINERAL-LINE))))
-            ready-townhalls))
+    (sort
+     (filter (lambda (th)
+               (and (not (null? (minerals-near-townhall th)))
+                    (< (th-effective-assigned th) (th-effective-ideal th))))
+             online-townhalls)
+     <
+     #:key th-safety-score))
   (define over-townhalls
     (filter (lambda (th)
-              (define ih (sc2-unit-ideal-harvesters th))
-              (> (sc2-unit-assigned-harvesters th)
-                 (if (> ih 0) ih SC2-IDEAL-WORKERS-PER-MINERAL-LINE)))
-            ready-townhalls))
+              (> (sc2-unit-assigned-harvesters th) (th-effective-ideal th)))
+            online-ready-townhalls))
 
   (define commanded-this-frame (mutable-seteqv))
   (define cmds '())
@@ -7184,18 +7351,21 @@
       (values (sc2-unit-tag m) m)))
   (define min-th-dist
     (for/hasheqv ([m (in-list owned-base-minerals)])
+      (define mtag (sc2-unit-tag m))
       (define mp (sc2-unit-pos m))
       (define mx (sc2-point3d-x mp))
       (define my (sc2-point3d-y mp))
       (define th-d
-        (if (null? ready-townhalls)
-            0.0
-            (apply min
-                   (map (lambda (th)
-                          (define tp (sc2-unit-pos th))
-                          (pt-dist (sc2-point3d-x tp) (sc2-point3d-y tp) mx my))
-                        ready-townhalls))))
-      (values (sc2-unit-tag m) th-d)))
+        (if (hash-has-key? min-th-dist-online mtag)
+            (hash-ref min-th-dist-online mtag)
+            (if (null? ready-townhalls)
+                0.0
+                (apply min
+                       (map (lambda (th)
+                              (define tp (sc2-unit-pos th))
+                              (pt-dist (sc2-point3d-x tp) (sc2-point3d-y tp) mx my))
+                            ready-townhalls)))))
+      (values mtag th-d)))
   (define patch-worker-counts (make-hasheqv))
   (for ([w (in-list workers)])
     (define wtag (sc2-unit-tag w))
@@ -7211,9 +7381,111 @@
     (when eff-tgt
       (hash-set! patch-worker-counts eff-tgt (add1 (hash-ref patch-worker-counts eff-tgt 0)))))
 
-  ;; 1. Send idle workers to mineral patches at under-saturated owned TownHalls first
-  ;;    using capacity-aware per-patch pairing (<= 2 workers/patch, close patches first);
-  ;;    if no owned mineral patches exist, cancel any expired stuck build order via Stop (3665).
+  ;; Priority slot selector: 1st Near -> 1st Far -> 2nd Near -> 2nd Far
+  (define (pick-best-slot-patch w cand-mins)
+    (define wp (sc2-unit-pos w))
+    (define wx (sc2-point3d-x wp))
+    (define wy (sc2-point3d-y wp))
+    (define under2-mins
+      (filter (lambda (m) (< (hash-ref patch-worker-counts (sc2-unit-tag m) 0) 2))
+              cand-mins))
+    (if (pair? under2-mins)
+        (argmin (lambda (m)
+                  (define mtag (sc2-unit-tag m))
+                  (define mp (sc2-unit-pos m))
+                  (define cnt (hash-ref patch-worker-counts mtag 0))
+                  (define far? (hash-ref min-is-far-ht mtag #f))
+                  (+ (* 100.0 (exact->inexact cnt))
+                     (if far? 25.0 0.0)
+                     (* 1.0 (hash-ref min-th-dist mtag 0.0))
+                     (* 0.05 (pt-dist wx wy (sc2-point3d-x mp) (sc2-point3d-y mp)))))
+                under2-mins)
+        (argmin (lambda (m)
+                  (define mtag (sc2-unit-tag m))
+                  (define mp (sc2-unit-pos m))
+                  (define cnt (hash-ref patch-worker-counts mtag 0))
+                  (define far? (hash-ref min-is-far-ht mtag #f))
+                  (+ (* 100.0 (exact->inexact cnt))
+                     (if far? 25.0 0.0)
+                     (* 0.1 (pt-dist wx wy (sc2-point3d-x mp) (sc2-point3d-y mp)))))
+                cand-mins)))
+
+  ;; 0b. Offline Base Evacuation & Orphaned Worker Recovery:
+  ;;     Immediately evacuate mineral workers from combat-offline or mined-out TownHalls
+  ;;     and orphaned harvest workers to the safest online under-saturated TownHall's Near Patches.
+  (when (and (not (null? owned-base-minerals)) (not (null? safe-online-townhalls)))
+    (define evac-dst-th
+      (if (not (null? under-townhalls)) (first under-townhalls) (first safe-online-townhalls)))
+    (define evac-cand-mins (minerals-near-townhall evac-dst-th))
+    (define offline-min-tags
+      (for/fold ([s (seteqv)]) ([oth (in-list offline-townhalls)])
+        (for/fold ([s2 s]) ([m (in-list (minerals-near-townhall oth))])
+          (define mtag (sc2-unit-tag m))
+          (if (hash-has-key? owned-min-by-tag mtag)
+              s2
+              (set-add s2 mtag)))))
+    (define online-gas-tags
+      (for/seteqv ([gb (in-list ready-gas-bldgs)]
+                   #:when (let ([gp (sc2-unit-pos gb)])
+                            (ormap (lambda (th)
+                                     (define tp (sc2-unit-pos th))
+                                     (<= (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
+                                                  (sc2-point3d-x tp) (sc2-point3d-y tp))
+                                         SC2-BASE-RESOURCE-RADIUS))
+                                   online-ready-townhalls)))
+        (sc2-unit-tag gb)))
+    (when (not (null? evac-cand-mins))
+      (for ([w (in-list workers)]
+            #:when (let* ([wtag (sc2-unit-tag w)]
+                          [wp (sc2-unit-pos w)]
+                          [wx (sc2-point3d-x wp)]
+                          [wy (sc2-point3d-y wp)]
+                          [orders (sc2-unit-orders w)]
+                          [targeting-online-min?
+                           (ormap (lambda (o)
+                                    (and (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666))
+                                         (hash-has-key? owned-min-by-tag (sc2-unit-order-target-unit-tag o))))
+                                  orders)]
+                          [targeting-online-gas?
+                           (ormap (lambda (o) (set-member? online-gas-tags (sc2-unit-order-target-unit-tag o)))
+                                  orders)]
+                          [targeting-offline-or-orphan-min?
+                           (ormap (lambda (o)
+                                    (define ab (sc2-unit-order-ability-id o))
+                                    (define tgt (sc2-unit-order-target-unit-tag o))
+                                    (and (memv ab '(166 295 298 1183 3666))
+                                         (or (set-member? offline-min-tags tgt)
+                                             (and (> tgt 0)
+                                                  (not (set-member? all-gas-tags tgt))
+                                                  (not (hash-has-key? owned-min-by-tag tgt))))))
+                                  orders)]
+                          [near-offline-th?
+                           (and (not (null? offline-townhalls))
+                                (ormap (lambda (oth)
+                                         (define tp (sc2-unit-pos oth))
+                                         (<= (pt-dist wx wy (sc2-point3d-x tp) (sc2-point3d-y tp))
+                                             SC2-BASE-RESOURCE-RADIUS))
+                                       offline-townhalls)
+                                (for/and ([onth (in-list online-townhalls)])
+                                  (define tp (sc2-unit-pos onth))
+                                  (> (pt-dist wx wy (sc2-point3d-x tp) (sc2-point3d-y tp))
+                                     SC2-BASE-RESOURCE-RADIUS)))])
+                     (and (not (set-member? commanded-this-frame wtag))
+                          (not (worker-carrying-gas? w))
+                          (not targeting-online-gas?)
+                          (not targeting-online-min?)
+                          (or targeting-offline-or-orphan-min?
+                              (and near-offline-th? (not (worker-returning-cargo? w)))))))
+        (define wtag (sc2-unit-tag w))
+        (define best-min (pick-best-slot-patch w evac-cand-mins))
+        (define bmtag (sc2-unit-tag best-min))
+        (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
+        (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wtag bmtag)
+        (issue-gather! w bmtag))))
+
+  ;; 1. Send idle workers to mineral patches at under-saturated online TownHalls first
+  ;;    using capacity-aware per-patch pairing (1st Near -> 1st Far -> 2nd Near -> 2nd Far);
+  ;;    if no online mineral patches exist, cancel any expired stuck build order via Stop (3665).
   (cond
     [(and (not (null? idle-workers)) (not (null? owned-base-minerals)))
      (define candidate-mins
@@ -7223,27 +7495,10 @@
      (define sorted-cand-mins
        (sort candidate-mins < #:key (lambda (m) (hash-ref min-th-dist (sc2-unit-tag m) 999.0))))
      (for ([w (in-list idle-workers)]
-           #:when (not (worker-returning-cargo? w)))
+           #:when (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
+                       (not (worker-returning-cargo? w))))
        (define wtag (sc2-unit-tag w))
-       (define wp (sc2-unit-pos w))
-       (define wx (sc2-point3d-x wp))
-       (define wy (sc2-point3d-y wp))
-       (define under2-mins
-         (filter (lambda (m) (< (hash-ref patch-worker-counts (sc2-unit-tag m) 0) 2))
-                 sorted-cand-mins))
-       (define best-min
-         (if (pair? under2-mins)
-             (argmin (lambda (m)
-                       (define mtag (sc2-unit-tag m))
-                       (define mp (sc2-unit-pos m))
-                       (+ (* 100.0 (exact->inexact (hash-ref patch-worker-counts mtag 0)))
-                          (* 2.0 (hash-ref min-th-dist mtag 0.0))
-                          (* 0.1 (pt-dist wx wy (sc2-point3d-x mp) (sc2-point3d-y mp)))))
-                     under2-mins)
-             (argmin (lambda (m)
-                       (define mp (sc2-unit-pos m))
-                       (pt-dist wx wy (sc2-point3d-x mp) (sc2-point3d-y mp)))
-                     sorted-cand-mins)))
+       (define best-min (pick-best-slot-patch w sorted-cand-mins))
        (define bmtag (sc2-unit-tag best-min))
        (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
        (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wtag bmtag)
@@ -7371,22 +7626,17 @@
                 candidate-workers))
       (issue-gather! best-w (sc2-unit-tag gb))))
 
-  ;; 3. Transfer 1 worker per step from over-saturated TownHall to under-saturated expansion,
-  ;;    enforcing a >= 2 imbalance deadband + 48-loop per-worker transfer cooldown to prevent ping-pong!
-  (when (and (not (null? over-townhalls))
-             (not (null? under-townhalls))
+  ;; 3. Transfer 1 far-patch non-carrying worker per step from over-saturated TownHall OR >= 14-worker
+  ;;    donor base to under-saturated/coming-online expansion's Near Patches (`2` per near patch first),
+  ;;    enforcing imbalance deadband + 48-loop per-worker transfer cooldown + in-flight deduplication.
+  (when (and (not (null? under-townhalls))
              (not (null? owned-base-minerals)))
-    (define src-th (first over-townhalls))
     (define dst-th (first under-townhalls))
-    (define sp (sc2-unit-pos src-th))
     (define dp (sc2-unit-pos dst-th))
-    (define src-ih (let ([ih (sc2-unit-ideal-harvesters src-th)])
-                     (if (> ih 0) ih SC2-IDEAL-WORKERS-PER-MINERAL-LINE)))
-    (define dst-ih (let ([ih (sc2-unit-ideal-harvesters dst-th)])
-                     (if (> ih 0) ih SC2-IDEAL-WORKERS-PER-MINERAL-LINE)))
-    (define src-surplus (max 0 (- (sc2-unit-assigned-harvesters src-th) src-ih)))
-    (define dst-deficit (max 0 (- dst-ih (sc2-unit-assigned-harvesters dst-th))))
+    (define dst-ih (th-effective-ideal dst-th))
+    (define dst-deficit (max 0 (- dst-ih (th-effective-assigned dst-th))))
     (define dst-mins (minerals-near-townhall dst-th))
+    (define dst-near-mins (hash-ref th-near-ht (sc2-unit-tag dst-th) '()))
     (define dst-min-tags (list->seteqv (map sc2-unit-tag dst-mins)))
     (define in-flight-to-dst
       (count (lambda (w)
@@ -7398,34 +7648,84 @@
                              (set-member? dst-min-tags (sc2-unit-order-target-unit-tag o)))
                            (sc2-unit-orders w))))
              workers))
-    (define transferable
-      (filter (lambda (w)
-                (define wp (sc2-unit-pos w))
-                (define wtag (sc2-unit-tag w))
-                (and (not (set-member? commanded-this-frame wtag))
-                     (>= cur-loop (hash-ref SC2-WORKER-TRANSFER-COOLDOWN-UNTIL wtag 0))
-                     (not (worker-returning-cargo? w))
-                     (not (ormap (lambda (o)
-                                   (or (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o))
-                                       (set-member? dst-min-tags (sc2-unit-order-target-unit-tag o))))
-                                 (sc2-unit-orders w)))
-                     (<= (pt-dist (sc2-point3d-x sp) (sc2-point3d-y sp)
-                                  (sc2-point3d-x wp) (sc2-point3d-y wp))
-                         SC2-BASE-RESOURCE-RADIUS)
-                     (for/and ([gb (in-list ready-gas-bldgs)])
-                       (define gp (sc2-unit-pos gb))
-                       (> (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
-                                   (sc2-point3d-x wp) (sc2-point3d-y wp))
-                          SC2-GAS-HARVESTER-EXCLUSION-RADIUS))))
-              workers))
-    (when (and (>= (+ src-surplus dst-deficit) 2)
-               (> src-surplus in-flight-to-dst)
-               (> dst-deficit in-flight-to-dst)
-               (not (null? transferable))
-               (not (null? dst-mins)))
-      (define chosen-w (first transferable))
-      (hash-set! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL (sc2-unit-tag chosen-w) (+ cur-loop 48))
-      (issue-gather! chosen-w (sc2-unit-tag (first dst-mins)))))
+    (define dst-near-slots-needed
+      (for/sum ([m (in-list dst-near-mins)])
+        (max 0 (- 2 (hash-ref patch-worker-counts (sc2-unit-tag m) 0)))))
+    (define donor-candidates
+      (filter (lambda (th)
+                (and (not (= (sc2-unit-tag th) (sc2-unit-tag dst-th)))
+                     (>= (th-effective-assigned th) 14)))
+              online-ready-townhalls))
+    (define-values (src-th src-surplus transfer-eligible?)
+      (cond
+        [(not (null? over-townhalls))
+         (define sth (first over-townhalls))
+         (define sth-surp (max 0 (- (sc2-unit-assigned-harvesters sth) (th-effective-ideal sth))))
+         (values sth
+                 sth-surp
+                 (and (not (= (sc2-unit-tag sth) (sc2-unit-tag dst-th)))
+                      (>= (+ sth-surp dst-deficit) 2)
+                      (> sth-surp in-flight-to-dst)
+                      (> dst-deficit in-flight-to-dst)))]
+        [(and (pair? donor-candidates) (> dst-near-slots-needed 0))
+         (define sth (argmax th-effective-assigned donor-candidates))
+         (define sth-surp (max 0 (- (th-effective-assigned sth) 13)))
+         (values sth
+                 sth-surp
+                 (and (> dst-near-slots-needed in-flight-to-dst)
+                      (> sth-surp in-flight-to-dst)
+                      (> dst-deficit in-flight-to-dst)))]
+        [else (values #f 0 #f)]))
+    (when (and src-th transfer-eligible? (not (null? dst-mins)))
+      (define sp (sc2-unit-pos src-th))
+      (define transferable
+        (filter (lambda (w)
+                  (define wp (sc2-unit-pos w))
+                  (define wtag (sc2-unit-tag w))
+                  (and (not (set-member? commanded-this-frame wtag))
+                       (>= cur-loop (hash-ref SC2-WORKER-TRANSFER-COOLDOWN-UNTIL wtag 0))
+                       (not (worker-carrying-cargo? w))
+                       (not (worker-returning-cargo? w))
+                       (not (ormap (lambda (o)
+                                     (or (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o))
+                                         (set-member? dst-min-tags (sc2-unit-order-target-unit-tag o))))
+                                   (sc2-unit-orders w)))
+                       (<= (pt-dist (sc2-point3d-x sp) (sc2-point3d-y sp)
+                                    (sc2-point3d-x wp) (sc2-point3d-y wp))
+                           SC2-BASE-RESOURCE-RADIUS)
+                       (for/and ([gb (in-list ready-gas-bldgs)])
+                         (define gp (sc2-unit-pos gb))
+                         (> (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
+                                     (sc2-point3d-x wp) (sc2-point3d-y wp))
+                            SC2-GAS-HARVESTER-EXCLUSION-RADIUS))))
+                workers))
+      (when (not (null? transferable))
+        (define chosen-w
+          (argmin (lambda (w)
+                    (define wp (sc2-unit-pos w))
+                    (define wtag (sc2-unit-tag w))
+                    (define ord-tgt
+                      (for/first ([o (in-list (sc2-unit-orders w))]
+                                  #:when (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666)))
+                        (sc2-unit-order-target-unit-tag o)))
+                    (define eff-tgt (or ord-tgt (hash-ref SC2-WORKER-PATCH-ASSIGNMENT wtag #f)))
+                    (define patch-far?
+                      (if (and eff-tgt (hash-has-key? min-is-far-ht eff-tgt))
+                          (hash-ref min-is-far-ht eff-tgt #f)
+                          (>= (pt-dist (sc2-point3d-x sp) (sc2-point3d-y sp)
+                                       (sc2-point3d-x wp) (sc2-point3d-y wp))
+                              6.75)))
+                    (+ (if patch-far? -25.0 25.0)
+                       (if (null? (sc2-unit-orders w)) -5.0 0.0)
+                       (* 0.1 (pt-dist (sc2-point3d-x dp) (sc2-point3d-y dp)
+                                       (sc2-point3d-x wp) (sc2-point3d-y wp)))))
+                  transferable))
+        (define best-dst-min (pick-best-slot-patch chosen-w dst-mins))
+        (define bmtag (sc2-unit-tag best-dst-min))
+        (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
+        (hash-set! SC2-WORKER-PATCH-ASSIGNMENT (sc2-unit-tag chosen-w) bmtag)
+        (hash-set! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL (sc2-unit-tag chosen-w) (+ cur-loop 48))
+        (issue-gather! chosen-w bmtag))))
 
   ;; 4. Pull 1 gas worker back to owned minerals when floating gas while mineral-starved
   (when (and gas-over-banked? (not (null? owned-base-minerals)) (not (null? ready-gas-bldgs)))
@@ -7442,14 +7742,11 @@
                                      (sc2-unit-orders w))))
         w))
     (when (and gas-worker (not (null? cand-mins)))
-      (define wp (sc2-unit-pos gas-worker))
-      (define best-min
-        (argmin (lambda (m)
-                  (define mp (sc2-unit-pos m))
-                  (pt-dist (sc2-point3d-x wp) (sc2-point3d-y wp)
-                           (sc2-point3d-x mp) (sc2-point3d-y mp)))
-                cand-mins))
-      (issue-gather! gas-worker (sc2-unit-tag best-min))))
+      (define best-min (pick-best-slot-patch gas-worker cand-mins))
+      (define bmtag (sc2-unit-tag best-min))
+      (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
+      (hash-set! SC2-WORKER-PATCH-ASSIGNMENT (sc2-unit-tag gas-worker) bmtag)
+      (issue-gather! gas-worker bmtag)))
 
   ;; 5. Idle MULE Re-Tasking: re-task idle MULEs (268) ONLY onto live mineral patches within 12 tiles
   ;;    of a completed grounded friendly TownHall and within 14 tiles of the MULE (never cross-map!).
@@ -7487,7 +7784,7 @@
   (when (and (> cur-loop 8)
              (<= cur-loop 2688)
              (not worker-rush-evacuate-gas?)
-             (not (null? ready-townhalls))
+             (not (null? online-ready-townhalls))
              (>= (length owned-base-minerals) 4))
     (define speedmine-count 0)
     (for ([w (in-list workers)]
@@ -7511,7 +7808,7 @@
            (argmin (lambda (th)
                      (define tp (sc2-unit-pos th))
                      (pt-dist wx wy (sc2-point3d-x tp) (sc2-point3d-y tp)))
-                   ready-townhalls))
+                   online-ready-townhalls))
          (define tp (sc2-unit-pos near-th))
          (define thx (sc2-point3d-x tp))
          (define thy (sc2-point3d-y tp))
@@ -7550,7 +7847,7 @@
              (argmin (lambda (th)
                        (define tp (sc2-unit-pos th))
                        (pt-dist mx my (sc2-point3d-x tp) (sc2-point3d-y tp)))
-                     ready-townhalls))
+                     online-ready-townhalls))
            (define tp (sc2-unit-pos near-th))
            (define-values (app-x app-y _rx _ry)
              (compute-pro-speed-mining-contact-point mx my (sc2-point3d-x tp) (sc2-point3d-y tp)))
@@ -8216,6 +8513,49 @@
              (set-member? gas-bldg-tags-set (sc2-unit-order-target-unit-tag o)))
            (sc2-unit-orders w)))
 
+  (define step-patch-role-ht (make-hasheqv))
+  (define step-min-th-dist-ht (make-hasheqv))
+  (for ([th (in-list townhalls)])
+    (define tp (sc2-unit-pos th))
+    (define tx (sc2-point3d-x tp))
+    (define ty (sc2-point3d-y tp))
+    (define-values (near-m far-m all-m)
+      (classify-townhall-mineral-patches th mineral-fields 11.5 8))
+    (for ([m (in-list all-m)])
+      (define mtag (sc2-unit-tag m))
+      (define mp (sc2-unit-pos m))
+      (define d (pt-dist tx ty (sc2-point3d-x mp) (sc2-point3d-y mp)))
+      (when (< d (hash-ref step-min-th-dist-ht mtag +inf.0))
+        (hash-set! step-min-th-dist-ht mtag d)
+        (hash-set! step-patch-role-ht mtag (if (memq m far-m) 'far 'near)))))
+
+  (define (worker-patch-role w)
+    (define wtag (sc2-unit-tag w))
+    (define wp (sc2-unit-pos w))
+    (define wx (sc2-point3d-x wp))
+    (define wy (sc2-point3d-y wp))
+    (define ord-tgt
+      (for/first ([o (in-list (sc2-unit-orders w))]
+                  #:when (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666)))
+        (sc2-unit-order-target-unit-tag o)))
+    (define eff-tgt (or ord-tgt (hash-ref SC2-WORKER-PATCH-ASSIGNMENT wtag #f)))
+    (cond
+      [(and eff-tgt (hash-ref step-patch-role-ht eff-tgt #f))
+       => values]
+      [(and eff-tgt (hash-ref step-min-th-dist-ht eff-tgt #f))
+       => (lambda (d) (if (>= d 6.75) 'far 'near))]
+      [(not (null? townhalls))
+       (define d-th
+         (apply min (map (lambda (th)
+                           (define tp (sc2-unit-pos th))
+                           (pt-dist wx wy (sc2-point3d-x tp) (sc2-point3d-y tp)))
+                         townhalls)))
+       (cond
+         [(and (>= d-th 6.75) (<= d-th 11.5)) 'far]
+         [(and (>= d-th 3.25) (< d-th 6.75))  'near]
+         [else                               'neutral])]
+      [else 'neutral]))
+
   (define (pick-worker-near tx ty)
     (define non-scout-avail
       (filter (lambda (w)
@@ -8255,10 +8595,17 @@
                (sc2-unit-tag
                 (argmin (lambda (w)
                           (define wp (sc2-unit-pos w))
+                          (define carrying? (worker-carrying-cargo? w))
+                          (define gas-harv? (worker-is-gas-harvester? w))
+                          (define role (worker-patch-role w))
                           (+ (pt-dist tx ty (sc2-point3d-x wp) (sc2-point3d-y wp))
                              (if (null? (sc2-unit-orders w)) 0.0 4.0)
-                             (if (worker-carrying-cargo? w) 5000.0 0.0)
-                             (if (worker-is-gas-harvester? w) 12.0 0.0)))
+                             (if carrying? 5000.0 0.0)
+                             (if gas-harv? 500.0 0.0)
+                             (cond
+                               [(and (not carrying?) (eq? role 'far)) -18.0]
+                               [(eq? role 'near) 14.0]
+                               [else 0.0])))
                         pool))])
           (record-worker-used! chosen #t)
           (when (hash? role-leases)

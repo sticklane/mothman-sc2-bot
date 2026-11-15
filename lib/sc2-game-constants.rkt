@@ -13,6 +13,9 @@
 (require racket/list
          racket/match
          racket/math
+         racket/fixnum
+         racket/flonum
+         racket/string
          typed/racket/unsafe
          (except-in racket/set set-member? set-mutable? set-add!)
          "sc2-types.rkt")
@@ -1973,4 +1976,769 @@
          [(< total-workers 54) 18.0]
          [(< total-workers 64) 32.0]
          [else 48.0])))
+
+;; -----------------------------------------------------------------------------
+;; 12. LotV O(1) Unit Attributes, Collision Radii, Exact Weapon-vs-Armor Math
+;;     & Attribute-Gated Spell Eligibility (Zero External Dependencies)
+;; -----------------------------------------------------------------------------
+
+(: SC2-UNIT-ATTR-LIGHT Fixnum)
+(define SC2-UNIT-ATTR-LIGHT 1)
+(: SC2-UNIT-ATTR-ARMORED Fixnum)
+(define SC2-UNIT-ATTR-ARMORED 2)
+(: SC2-UNIT-ATTR-BIOLOGICAL Fixnum)
+(define SC2-UNIT-ATTR-BIOLOGICAL 4)
+(: SC2-UNIT-ATTR-MECHANICAL Fixnum)
+(define SC2-UNIT-ATTR-MECHANICAL 8)
+(: SC2-UNIT-ATTR-PSIONIC Fixnum)
+(define SC2-UNIT-ATTR-PSIONIC 16)
+(: SC2-UNIT-ATTR-MASSIVE Fixnum)
+(define SC2-UNIT-ATTR-MASSIVE 32)
+(: SC2-UNIT-ATTR-SHIELDED Fixnum)
+(define SC2-UNIT-ATTR-SHIELDED 64)
+(: SC2-UNIT-ATTR-FRENZIED Fixnum)
+(define SC2-UNIT-ATTR-FRENZIED 128)
+(: SC2-UNIT-ATTR-STRUCTURE Fixnum)
+(define SC2-UNIT-ATTR-STRUCTURE 256)
+(: SC2-UNIT-ATTR-HEROIC Fixnum)
+(define SC2-UNIT-ATTR-HEROIC 512)
+
+;; Canonical numeric unit_type ID -> symbol map for O(1) attribute/radius lookup
+(: SC2-UNIT-ID->SYM-TABLE (Immutable-HashTable Integer Symbol))
+(define SC2-UNIT-ID->SYM-TABLE
+  (hasheqv
+   ;; Zerg Units & Structures
+   151 'larva 103 'egg 104 'drone 116 'drone-burrowed
+   106 'overlord 128 'overlord-cocoon 892 'transport-overlord-cocoon
+   893 'overlord-transport 129 'overseer 1912 'overseer-siege-mode
+   105 'zergling 119 'zergling-burrowed
+   8 'baneling-cocoon 9 'baneling 115 'baneling-burrowed
+   110 'roach 118 'roach-burrowed
+   687 'ravager-cocoon 688 'ravager 690 'ravager-burrowed
+   107 'hydralisk 117 'hydralisk-burrowed
+   501 'lurker-egg 502 'lurker 503 'lurker-burrowed
+   108 'mutalisk 112 'corruptor 113 'brood-lord-cocoon 114 'brood-lord
+   126 'queen 125 'queen-burrowed
+   111 'infestor 127 'infestor-burrowed
+   494 'swarm-host 493 'swarm-host-burrowed
+   109 'ultralisk 131 'ultralisk-burrowed
+   499 'viper
+   12 'changeling 13 'changeling-zealot 14 'changeling-marine-shield
+   15 'changeling-marine 16 'changeling-zergling-wings 17 'changeling-zergling
+   489 'locust 693 'locust-flying 289 'broodling 143 'broodling-escort
+   824 'parasitic-bomb-dummy
+   86 'hatchery 100 'lair 101 'hive 88 'extractor 1995 'extractor-rich
+   89 'spawning-pool 90 'evolution-chamber 97 'roach-warren 96 'baneling-nest
+   91 'hydralisk-den 504 'lurker-den 92 'spire 102 'greater-spire
+   94 'infestation-pit 93 'ultralisk-cavern 95 'nydus-network 142 'nydus-worm
+   98 'spine-crawler 139 'spine-crawler-uprooted
+   99 'spore-crawler 140 'spore-crawler-uprooted
+   87 'creep-tumor 137 'creep-tumor-burrowed 138 'creep-tumor-queen
+   ;; Terran Units & Structures
+   45 'scv 268 'mule 48 'marine 51 'marauder 49 'reaper 50 'ghost
+   53 'hellion 484 'hellbat 498 'widow-mine 500 'widow-mine-burrowed
+   33 'siege-tank 32 'siege-tank-sieged 692 'cyclone
+   52 'thor 691 'thor-ap 35 'viking 34 'viking-assault
+   54 'medivac 689 'liberator 734 'liberator-ag
+   56 'raven 55 'banshee 57 'battlecruiser
+   31 'auto-turret 11 'point-defense-drone 830 'kd8-charge 1913 'raven-repair-drone
+   18 'command-center 36 'command-center-flying
+   132 'orbital-command 134 'orbital-command-flying
+   130 'planetary-fortress 19 'supply-depot 47 'supply-depot-lowered
+   20 'refinery 1943 'refinery-rich 21 'barracks 46 'barracks-flying
+   27 'factory 43 'factory-flying 28 'starport 44 'starport-flying
+   22 'engineering-bay 29 'armory 24 'bunker 23 'missile-turret
+   25 'sensor-tower 26 'ghost-academy 30 'fusion-core
+   5 'tech-lab 6 'reactor 37 'barracks-tech-lab 38 'barracks-reactor
+   39 'factory-tech-lab 40 'factory-reactor 41 'starport-tech-lab 42 'starport-reactor
+   ;; Protoss Units & Structures
+   84 'probe 73 'zealot 74 'stalker 77 'sentry 311 'adept 801 'adept-phase-shift
+   75 'high-templar 76 'dark-templar 141 'archon 83 'immortal
+   82 'observer 1911 'observer-siege-mode 81 'warp-prism 136 'warp-prism-phasing
+   4 'colossus 694 'disruptor 733 'disruptor-phased
+   78 'phoenix 80 'void-ray 495 'oracle 79 'carrier 496 'tempest
+   10 'mothership 488 'mothership-core 85 'interceptor
+   59 'nexus 60 'pylon 894 'pylon-overcharged 61 'assimilator 1994 'assimilator-rich
+   62 'gateway 133 'warp-gate 63 'forge 72 'cybernetics-core
+   66 'photon-cannon 1910 'shield-battery 65 'twilight-council
+   71 'robotics-facility 70 'robotics-bay 67 'stargate
+   68 'templar-archive 69 'dark-shrine 64 'fleet-beacon 732 'oracle-stasis-trap))
+
+(: SC2-UNIT-SYM-ALIAS-TABLE (Immutable-HashTable Symbol Symbol))
+(define SC2-UNIT-SYM-ALIAS-TABLE
+  (hasheq
+   'broodlord 'brood-lord
+   'voidray 'void-ray
+   'swarmhost 'swarm-host
+   'hellion-tank 'hellbat
+   'viking-fighter 'viking
+   'warpgate 'warp-gate
+   'lurker-mp 'lurker
+   'lurker-mp-burrowed 'lurker-burrowed
+   'lurker-mp-egg 'lurker-egg
+   'robotics-support-bay 'robotics-bay
+   'templar-archives 'templar-archive
+   'nydus-canal 'nydus-worm
+   'stasis-ward 'oracle-stasis-trap
+   'techlab 'tech-lab
+   'barracks-techlab 'barracks-tech-lab
+   'factory-techlab 'factory-tech-lab
+   'starport-techlab 'starport-tech-lab))
+
+(: canonical-unit-type-sym (-> Any Symbol))
+(define (canonical-unit-type-sym unit-type-or-id)
+  (cond
+    [(symbol? unit-type-or-id)
+     (hash-ref SC2-UNIT-SYM-ALIAS-TABLE unit-type-or-id (lambda () unit-type-or-id))]
+    [(exact-integer? unit-type-or-id)
+     (hash-ref SC2-UNIT-ID->SYM-TABLE unit-type-or-id (lambda () 'unknown))]
+    [(string? unit-type-or-id)
+     (define sym (string->symbol (string-replace (string-downcase (string-trim unit-type-or-id)) "_" "-")))
+     (hash-ref SC2-UNIT-SYM-ALIAS-TABLE sym (lambda () sym))]
+    [else 'unknown]))
+
+(: fx-attr-or (-> Fixnum * Fixnum))
+(define (fx-attr-or . bits)
+  (for/fold ([acc : Fixnum 0]) ([b (in-list bits)])
+    (fxior acc b)))
+
+(: SC2-UNIT-ATTRIBUTE-MASK-TABLE (Immutable-HashTable Symbol Fixnum))
+(define SC2-UNIT-ATTRIBUTE-MASK-TABLE
+  (let ([L SC2-UNIT-ATTR-LIGHT]
+        [A SC2-UNIT-ATTR-ARMORED]
+        [B SC2-UNIT-ATTR-BIOLOGICAL]
+        [M SC2-UNIT-ATTR-MECHANICAL]
+        [P SC2-UNIT-ATTR-PSIONIC]
+        [X SC2-UNIT-ATTR-MASSIVE]
+        [S SC2-UNIT-ATTR-SHIELDED]
+        [F SC2-UNIT-ATTR-FRENZIED]
+        [T SC2-UNIT-ATTR-STRUCTURE]
+        [H SC2-UNIT-ATTR-HEROIC]
+        [fxior fx-attr-or])
+    (hasheq
+     ;; Zerg Units
+     'larva                       (fxior L B)
+     'egg                         B
+     'cocoon                      B
+     'baneling-cocoon             B
+     'ravager-cocoon              B
+     'brood-lord-cocoon           B
+     'lurker-egg                  B
+     'drone                       (fxior L B)
+     'drone-burrowed              (fxior L B)
+     'zergling                    (fxior L B)
+     'zergling-burrowed           (fxior L B)
+     'baneling                    B
+     'baneling-burrowed           B
+     'queen                       (fxior B P)
+     'queen-burrowed              (fxior B P)
+     'roach                       (fxior A B)
+     'roach-burrowed              (fxior A B)
+     'ravager                     B
+     'ravager-burrowed            B
+     'hydralisk                   (fxior L B)
+     'hydralisk-burrowed          (fxior L B)
+     'lurker                      (fxior A B)
+     'lurker-burrowed             (fxior A B)
+     'mutalisk                    (fxior L B)
+     'corruptor                   (fxior A B)
+     'brood-lord                  (fxior A B X)
+     'infestor                    (fxior A B P)
+     'infestor-burrowed           (fxior A B P)
+     'swarm-host                  (fxior A B)
+     'swarm-host-burrowed         (fxior A B)
+     'ultralisk                   (fxior A B X F)
+     'ultralisk-burrowed          (fxior A B X F)
+     'viper                       (fxior A B P)
+     'overlord                    (fxior A B)
+     'overlord-transport          (fxior A B)
+     'overlord-cocoon             (fxior A B)
+     'transport-overlord-cocoon   (fxior A B)
+     'overseer                    (fxior A B)
+     'overseer-siege-mode         (fxior A B)
+     'locust                      (fxior L B)
+     'locust-flying               (fxior L B)
+     'broodling                   (fxior L B)
+     'broodling-escort            (fxior L B)
+     'changeling                  (fxior L B)
+     'changeling-zealot           (fxior L B)
+     'changeling-marine-shield    (fxior L B)
+     'changeling-marine           (fxior L B)
+     'changeling-zergling-wings   (fxior L B)
+     'changeling-zergling         (fxior L B)
+     ;; Zerg Structures
+     'hatchery                    (fxior A B T)
+     'lair                        (fxior A B T)
+     'hive                        (fxior A B T)
+     'extractor                   (fxior A B T)
+     'extractor-rich              (fxior A B T)
+     'spawning-pool               (fxior A B T)
+     'evolution-chamber           (fxior A B T)
+     'roach-warren                (fxior A B T)
+     'baneling-nest               (fxior A B T)
+     'hydralisk-den               (fxior A B T)
+     'lurker-den                  (fxior A B T)
+     'spire                       (fxior A B T)
+     'greater-spire               (fxior A B T)
+     'infestation-pit             (fxior A B T)
+     'ultralisk-cavern            (fxior A B T)
+     'nydus-network               (fxior A B T)
+     'nydus-worm                  (fxior A B T)
+     'spine-crawler               (fxior A B T)
+     'spine-crawler-uprooted      (fxior A B)
+     'spore-crawler               (fxior A B T)
+     'spore-crawler-uprooted      (fxior A B)
+     'creep-tumor                 (fxior L B T)
+     'creep-tumor-burrowed        (fxior L B T)
+     'creep-tumor-queen           (fxior L B T)
+     ;; Terran Units
+     'scv                         (fxior L B M)
+     'mule                        (fxior L M)
+     'marine                      (fxior L B)
+     'marauder                    (fxior A B)
+     'reaper                      (fxior L B)
+     'ghost                       (fxior B P)
+     'hellion                     (fxior L M)
+     'hellbat                     (fxior L B M)
+     'widow-mine                  (fxior L M)
+     'widow-mine-burrowed         (fxior L M)
+     'cyclone                     (fxior A M)
+     'siege-tank                  (fxior A M)
+     'siege-tank-sieged           (fxior A M)
+     'thor                        (fxior A M X)
+     'thor-ap                     (fxior A M X)
+     'viking                      (fxior A M)
+     'viking-assault              (fxior A M)
+     'medivac                     (fxior A M)
+     'liberator                   (fxior A M)
+     'liberator-ag                (fxior A M)
+     'raven                       (fxior L M)
+     'banshee                     (fxior L M)
+     'battlecruiser               (fxior A M X)
+     ;; Terran Structures / Summons
+     'auto-turret                 (fxior A M T)
+     'point-defense-drone         (fxior A M T)
+     'raven-repair-drone          (fxior A M)
+     'command-center              (fxior A M T)
+     'command-center-flying       (fxior A M T)
+     'orbital-command             (fxior A M T)
+     'orbital-command-flying      (fxior A M T)
+     'planetary-fortress          (fxior A M T)
+     'supply-depot                (fxior A M T)
+     'supply-depot-lowered        (fxior A M T)
+     'refinery                    (fxior A M T)
+     'refinery-rich               (fxior A M T)
+     'barracks                    (fxior A M T)
+     'barracks-flying             (fxior A M T)
+     'factory                     (fxior A M T)
+     'factory-flying              (fxior A M T)
+     'starport                    (fxior A M T)
+     'starport-flying             (fxior A M T)
+     'engineering-bay             (fxior A M T)
+     'armory                      (fxior A M T)
+     'bunker                      (fxior A M T)
+     'missile-turret              (fxior A M T)
+     'sensor-tower                (fxior A M T)
+     'ghost-academy               (fxior A M T)
+     'fusion-core                 (fxior A M T)
+     'tech-lab                    (fxior A M T)
+     'reactor                     (fxior A M T)
+     'barracks-tech-lab           (fxior A M T)
+     'barracks-reactor            (fxior A M T)
+     'factory-tech-lab            (fxior A M T)
+     'factory-reactor             (fxior A M T)
+     'starport-tech-lab           (fxior A M T)
+     'starport-reactor            (fxior A M T)
+     ;; Protoss Units
+     'probe                       (fxior L M S)
+     'zealot                      (fxior L B S)
+     'stalker                     (fxior A M S)
+     'sentry                      (fxior L M P S)
+     'adept                       (fxior L B S)
+     'high-templar                (fxior L B P S)
+     'dark-templar                (fxior L B P S)
+     'archon                      (fxior P X S)
+     'immortal                    (fxior A M S)
+     'colossus                    (fxior A M X S)
+     'disruptor                   (fxior A M S)
+     'observer                    (fxior L M S)
+     'observer-siege-mode         (fxior L M S)
+     'warp-prism                  (fxior A M P S)
+     'warp-prism-phasing          (fxior A M P S)
+     'phoenix                     (fxior L M S)
+     'void-ray                    (fxior A M S)
+     'oracle                      (fxior A M P S)
+     'carrier                     (fxior A M X S)
+     'interceptor                 (fxior L M S)
+     'tempest                     (fxior A M X S)
+     'mothership                  (fxior A M P X S H)
+     'mothership-core             (fxior A M P S)
+     ;; Protoss Structures
+     'nexus                       (fxior A T S)
+     'pylon                       (fxior A T S)
+     'pylon-overcharged           (fxior A T S)
+     'assimilator                 (fxior A T S)
+     'assimilator-rich            (fxior A T S)
+     'gateway                     (fxior A T S)
+     'warp-gate                   (fxior A T S)
+     'forge                       (fxior A T S)
+     'cybernetics-core            (fxior A T S)
+     'photon-cannon               (fxior A T S)
+     'shield-battery              (fxior A T S)
+     'twilight-council            (fxior A T S)
+     'robotics-facility           (fxior A T S)
+     'robotics-bay                (fxior A T S)
+     'stargate                    (fxior A T S)
+     'templar-archive             (fxior A T S)
+     'dark-shrine                 (fxior A T S)
+     'fleet-beacon                (fxior A T S)
+     'oracle-stasis-trap          (fxior L M T S))))
+
+(void fx-attr-or)
+
+(: unit-attribute-mask (-> Any Fixnum))
+(define unit-attribute-mask
+  (let ([zero-thunk : (-> Fixnum) (lambda () 0)])
+    (lambda (unit-type-or-id)
+      (define sym (canonical-unit-type-sym unit-type-or-id))
+      (hash-ref SC2-UNIT-ATTRIBUTE-MASK-TABLE sym zero-thunk))))
+
+(: SC2-UNIT-COLLISION-RADIUS-TABLE (Immutable-HashTable Symbol Flonum))
+(define SC2-UNIT-COLLISION-RADIUS-TABLE
+  (hasheq
+   ;; 0.25 tiny summons
+   'broodling 0.25 'interceptor 0.25
+   ;; 0.375 light/worker/ling/bane/marine
+   'scv 0.375 'probe 0.375 'drone 0.375 'drone-burrowed 0.375 'mule 0.375
+   'zergling 0.375 'zergling-burrowed 0.375
+   'baneling 0.375 'baneling-burrowed 0.375
+   'marine 0.375 'reaper 0.375 'locust 0.375 'locust-flying 0.375 'larva 0.375
+   'changeling 0.375 'changeling-zealot 0.375 'changeling-marine-shield 0.375
+   'changeling-marine 0.375 'changeling-zergling-wings 0.375 'changeling-zergling 0.375
+   ;; 0.50 medium
+   'roach 0.5 'roach-burrowed 0.5 'ravager 0.5 'ravager-burrowed 0.5
+   'hydralisk 0.5 'hydralisk-burrowed 0.5
+   'marauder 0.5 'ghost 0.5
+   'zealot 0.5 'adept 0.5 'sentry 0.5 'high-templar 0.5 'dark-templar 0.5
+   'infestor 0.5 'infestor-burrowed 0.5
+   'widow-mine 0.5 'widow-mine-burrowed 0.5
+   'observer 0.5 'observer-siege-mode 0.5 'oracle-stasis-trap 0.5
+   'egg 0.5 'baneling-cocoon 0.5 'ravager-cocoon 0.5 'lurker-egg 0.5 'brood-lord-cocoon 0.5
+   ;; 0.625 heavy infantry / medium walkers
+   'stalker 0.625 'immortal 0.625 'disruptor 0.625
+   'lurker 0.625 'lurker-burrowed 0.625 'queen 0.625 'queen-burrowed 0.625
+   ;; 0.75 mechanized / flyers / archon
+   'archon 0.75 'siege-tank 0.75 'siege-tank-sieged 0.75 'cyclone 0.75
+   'hellion 0.75 'hellbat 0.75 'viking 0.75 'viking-assault 0.75
+   'medivac 0.75 'liberator 0.75 'liberator-ag 0.75 'raven 0.75 'banshee 0.75
+   'void-ray 0.75 'oracle 0.75 'phoenix 0.75 'mutalisk 0.75 'corruptor 0.75 'viper 0.75
+   'overlord 0.75 'overlord-transport 0.75 'overlord-cocoon 0.75 'transport-overlord-cocoon 0.75
+   'overseer 0.75 'overseer-siege-mode 0.75
+   'warp-prism 0.75 'warp-prism-phasing 0.75 'swarm-host 0.75 'swarm-host-burrowed 0.75
+   'auto-turret 0.75
+   ;; 0.875 - 1.375 bulky / massive / capitals
+   'colossus 0.875 'brood-lord 0.875 'tempest 0.875
+   'thor 1.0 'thor-ap 1.0 'ultralisk 1.0 'ultralisk-burrowed 1.0
+   'battlecruiser 1.0 'carrier 1.0 'mothership 1.375 'mothership-core 0.875
+   ;; Structures
+   'supply-depot 1.0 'supply-depot-lowered 1.0 'missile-turret 1.0
+   'pylon 1.0 'pylon-overcharged 1.0 'photon-cannon 1.0 'shield-battery 1.0
+   'spine-crawler 1.0 'spine-crawler-uprooted 1.0 'spore-crawler 1.0 'spore-crawler-uprooted 1.0
+   'spawning-pool 1.5 'evolution-chamber 1.5 'roach-warren 1.5 'baneling-nest 1.5
+   'hydralisk-den 1.5 'lurker-den 1.5 'spire 1.0 'greater-spire 1.0 'infestation-pit 1.5
+   'ultralisk-cavern 1.5 'nydus-network 1.5 'nydus-worm 1.5 'extractor 1.5 'extractor-rich 1.5
+   'barracks 1.5 'factory 1.5 'starport 1.5 'engineering-bay 1.5 'armory 1.5 'bunker 1.5
+   'ghost-academy 1.5 'fusion-core 1.5 'refinery 1.5 'refinery-rich 1.5
+   'gateway 1.5 'warp-gate 1.5 'forge 1.5 'cybernetics-core 1.5 'twilight-council 1.5
+   'robotics-facility 1.5 'robotics-bay 1.5 'stargate 1.5 'templar-archive 1.5
+   'dark-shrine 1.5 'fleet-beacon 1.5 'assimilator 1.5 'assimilator-rich 1.5
+   'hatchery 2.5 'lair 2.5 'hive 2.5
+   'command-center 2.5 'command-center-flying 2.5
+   'orbital-command 2.5 'orbital-command-flying 2.5 'planetary-fortress 2.5
+   'nexus 2.5))
+
+(: unit-collision-radius (-> Any Flonum))
+(define unit-collision-radius
+  (let ([default-thunk : (-> Flonum) (lambda () 0.5)])
+    (lambda (unit-type-or-id)
+      (define sym (canonical-unit-type-sym unit-type-or-id))
+      (hash-ref SC2-UNIT-COLLISION-RADIUS-TABLE sym default-thunk))))
+
+(: aoe-radius-packing-multiplier (-> Any Any Flonum))
+(define (aoe-radius-packing-multiplier target-radius aoe-radius)
+  (define raw-r : Flonum (if (real? target-radius) (->float target-radius) 0.5))
+  (define raw-a : Flonum (if (real? aoe-radius) (->float aoe-radius) 1.5))
+  (define r (flmax 0.25 (if (and (fl> raw-r -inf.0) (fl< raw-r +inf.0)) raw-r 0.5)))
+  (define a (flmax 0.5 (if (and (fl> raw-a -inf.0) (fl< raw-a +inf.0)) raw-a 1.5)))
+  (define ratio (fl/ 0.5 r))
+  (define inv-r (fl* ratio (flsqrt ratio)))
+  (define fit (fl* 1.3333333333333333 (fl/ a (fl+ a r))))
+  (flmin 2.5 (flmax 0.25 (fl* inv-r fit))))
+
+(: SC2-UNIT-PRIMARY-BONUS-ATTR-TABLE (Immutable-HashTable Symbol Fixnum))
+(define SC2-UNIT-PRIMARY-BONUS-ATTR-TABLE
+  (let ([L SC2-UNIT-ATTR-LIGHT]
+        [A SC2-UNIT-ATTR-ARMORED]
+        [B SC2-UNIT-ATTR-BIOLOGICAL]
+        [M SC2-UNIT-ATTR-MECHANICAL]
+        [X SC2-UNIT-ATTR-MASSIVE])
+    (hasheq
+     'immortal          A
+     'marauder          A
+     'stalker           A
+     'lurker            A
+     'lurker-burrowed   A
+     'void-ray          A
+     'siege-tank        A
+     'siege-tank-sieged A
+     'spine-crawler     A
+     'viking            A
+     'viking-assault    M
+     'colossus          L
+     'hellbat           L
+     'hellion           L
+     'adept             L
+     'oracle            L
+     'phoenix           L
+     'baneling          L
+     'baneling-burrowed L
+     'ghost             L
+     'archon            B
+     'spore-crawler     B
+     'thor              (fxior L X)
+     'thor-ap           X
+     'tempest           X
+     'corruptor         X)))
+
+(: unit-primary-bonus-attr-mask (-> Any Fixnum))
+(define unit-primary-bonus-attr-mask
+  (let ([zero-thunk : (-> Fixnum) (lambda () 0)])
+    (lambda (attacker-type)
+      (define sym (canonical-unit-type-sym attacker-type))
+      (hash-ref SC2-UNIT-PRIMARY-BONUS-ATTR-TABLE sym zero-thunk))))
+
+;; Exact LotV Weapon Specs (single weapon profile per domain)
+(struct sc2-weapon-spec
+  ([hits : Fixnum]
+   [base : Flonum]
+   [upg-base : Flonum]
+   [bonus-mask : Fixnum]
+   [bonus : Flonum]
+   [upg-bonus : Flonum]
+   [period : Flonum]
+   [ranged? : Boolean])
+  #:transparent)
+
+(: SC2-GROUND-WEAPON-TABLE (Immutable-HashTable Symbol sc2-weapon-spec))
+(define SC2-GROUND-WEAPON-TABLE
+  (let ([L SC2-UNIT-ATTR-LIGHT]
+        [A SC2-UNIT-ATTR-ARMORED]
+        [B SC2-UNIT-ATTR-BIOLOGICAL]
+        [M SC2-UNIT-ATTR-MECHANICAL])
+    (hasheq
+     ;; Workers
+     'scv               (sc2-weapon-spec 1 5.0  0.0 0 0.0  0.0 1.07  #f)
+     'probe             (sc2-weapon-spec 1 5.0  0.0 0 0.0  0.0 1.07  #f)
+     'drone             (sc2-weapon-spec 1 5.0  0.0 0 0.0  0.0 1.07  #f)
+     ;; Terran Ground
+     'marine            (sc2-weapon-spec 1 6.0  1.0 0 0.0  0.0 0.61  #t)
+     'marauder          (sc2-weapon-spec 1 10.0 1.0 A 10.0 1.0 1.07  #t)
+     'reaper            (sc2-weapon-spec 2 4.0  1.0 0 0.0  0.0 0.79  #t)
+     'ghost             (sc2-weapon-spec 1 10.0 1.0 L 10.0 1.0 1.07  #t)
+     'hellion           (sc2-weapon-spec 1 8.0  1.0 L 6.0  1.0 1.79  #t)
+     'hellbat           (sc2-weapon-spec 1 18.0 2.0 L 12.0 1.0 1.43  #t)
+     'widow-mine-burrowed (sc2-weapon-spec 1 125.0 0.0 0 0.0 0.0 29.0 #f)
+     'cyclone           (sc2-weapon-spec 1 11.0 1.0 0 0.0  0.0 0.48  #t)
+     'siege-tank        (sc2-weapon-spec 1 15.0 2.0 A 10.0 1.0 0.74  #t)
+     'siege-tank-sieged (sc2-weapon-spec 1 40.0 4.0 A 30.0 1.0 2.14  #t)
+     'thor              (sc2-weapon-spec 2 30.0 3.0 0 0.0  0.0 0.91  #t)
+     'thor-ap           (sc2-weapon-spec 2 30.0 3.0 0 0.0  0.0 0.91  #t)
+     'viking-assault    (sc2-weapon-spec 1 12.0 1.0 M 8.0  1.0 0.71  #t)
+     'liberator-ag      (sc2-weapon-spec 1 75.0 5.0 0 0.0  0.0 1.14  #t)
+     'banshee           (sc2-weapon-spec 2 12.0 1.0 0 0.0  0.0 0.89  #t)
+     'battlecruiser     (sc2-weapon-spec 1 8.0  1.0 0 0.0  0.0 0.16  #t)
+     'auto-turret       (sc2-weapon-spec 1 18.0 0.0 0 0.0  0.0 0.57  #t)
+     'bunker            (sc2-weapon-spec 4 6.0  1.0 0 0.0  0.0 0.61  #t)
+     'planetary-fortress (sc2-weapon-spec 1 40.0 0.0 0 0.0 0.0 1.43  #t)
+     ;; Zerg Ground
+     'zergling          (sc2-weapon-spec 1 5.0  1.0 0 0.0  0.0 0.497 #f)
+     'baneling          (sc2-weapon-spec 1 16.0 2.0 L 19.0 2.0 1.0   #f)
+     'baneling-burrowed (sc2-weapon-spec 1 16.0 2.0 L 19.0 2.0 1.0   #f)
+     'roach             (sc2-weapon-spec 1 16.0 2.0 0 0.0  0.0 1.43  #t)
+     'ravager           (sc2-weapon-spec 1 16.0 2.0 0 0.0  0.0 1.14  #t)
+     'hydralisk         (sc2-weapon-spec 1 12.0 1.0 0 0.0  0.0 0.59  #t)
+     'lurker            (sc2-weapon-spec 1 20.0 2.0 A 10.0 1.0 1.43  #t)
+     'lurker-burrowed   (sc2-weapon-spec 1 20.0 2.0 A 10.0 1.0 1.43  #t)
+     'queen             (sc2-weapon-spec 2 4.0  1.0 0 0.0  0.0 0.71  #t)
+     'mutalisk          (sc2-weapon-spec 1 9.0  1.0 0 0.0  0.0 1.09  #t)
+     'brood-lord        (sc2-weapon-spec 2 20.0 2.0 0 0.0  0.0 1.79  #t)
+     'ultralisk         (sc2-weapon-spec 1 35.0 3.0 0 0.0  0.0 0.61  #f)
+     'locust            (sc2-weapon-spec 1 10.0 1.0 0 0.0  0.0 0.43  #t)
+     'broodling         (sc2-weapon-spec 1 4.0  1.0 0 0.0  0.0 0.46  #f)
+     'spine-crawler     (sc2-weapon-spec 1 25.0 0.0 A 5.0  0.0 1.32  #t)
+     ;; Protoss Ground
+     'zealot            (sc2-weapon-spec 2 8.0  1.0 0 0.0  0.0 0.86  #f)
+     'stalker           (sc2-weapon-spec 1 13.0 1.0 A 5.0  1.0 1.34  #t)
+     'sentry            (sc2-weapon-spec 1 6.0  1.0 0 0.0  0.0 0.71  #t)
+     'adept             (sc2-weapon-spec 1 10.0 1.0 L 12.0 1.0 1.61  #t)
+     'high-templar      (sc2-weapon-spec 1 4.0  1.0 0 0.0  0.0 1.25  #t)
+     'dark-templar      (sc2-weapon-spec 1 45.0 5.0 0 0.0  0.0 1.21  #f)
+     'archon            (sc2-weapon-spec 1 25.0 3.0 B 10.0 1.0 1.25  #t)
+     'immortal          (sc2-weapon-spec 1 20.0 2.0 A 30.0 3.0 1.04  #t)
+     'colossus          (sc2-weapon-spec 2 10.0 1.0 L 5.0  1.0 1.07  #t)
+     'void-ray          (sc2-weapon-spec 1 6.0  1.0 A 4.0  0.0 0.36  #t)
+     'oracle            (sc2-weapon-spec 1 15.0 0.0 L 7.0  0.0 0.61  #t)
+     'carrier           (sc2-weapon-spec 8 5.0  1.0 0 0.0  0.0 1.07  #t)
+     'interceptor       (sc2-weapon-spec 2 5.0  1.0 0 0.0  0.0 2.14  #t)
+     'tempest           (sc2-weapon-spec 1 40.0 4.0 0 0.0  0.0 2.36  #t)
+     'mothership        (sc2-weapon-spec 6 6.0  1.0 0 0.0  0.0 1.58  #t)
+     'photon-cannon     (sc2-weapon-spec 1 20.0 0.0 0 0.0  0.0 0.89  #t))))
+
+(: SC2-AIR-WEAPON-TABLE (Immutable-HashTable Symbol sc2-weapon-spec))
+(define SC2-AIR-WEAPON-TABLE
+  (let ([L SC2-UNIT-ATTR-LIGHT]
+        [A SC2-UNIT-ATTR-ARMORED]
+        [B SC2-UNIT-ATTR-BIOLOGICAL]
+        [X SC2-UNIT-ATTR-MASSIVE])
+    (hasheq
+     ;; Terran Air
+     'marine            (sc2-weapon-spec 1 6.0  1.0 0 0.0  0.0 0.61 #t)
+     'ghost             (sc2-weapon-spec 1 10.0 1.0 L 10.0 1.0 1.07 #t)
+     'widow-mine-burrowed (sc2-weapon-spec 1 125.0 0.0 0 0.0 0.0 29.0 #f)
+     'cyclone           (sc2-weapon-spec 1 11.0 1.0 0 0.0  0.0 0.48 #t)
+     'thor              (sc2-weapon-spec 4 6.0  1.0 L 6.0  1.0 2.14 #t)
+     'thor-ap           (sc2-weapon-spec 1 25.0 3.0 X 15.0 1.0 0.91 #t)
+     'viking            (sc2-weapon-spec 2 10.0 1.0 A 4.0  0.0 1.43 #t)
+     'liberator         (sc2-weapon-spec 2 5.0  1.0 0 0.0  0.0 1.29 #t)
+     'battlecruiser     (sc2-weapon-spec 1 5.0  1.0 0 0.0  0.0 0.16 #t)
+     'auto-turret       (sc2-weapon-spec 1 18.0 0.0 0 0.0  0.0 0.57 #t)
+     'missile-turret    (sc2-weapon-spec 2 12.0 0.0 0 0.0  0.0 0.61 #t)
+     'bunker            (sc2-weapon-spec 4 6.0  1.0 0 0.0  0.0 0.61 #t)
+     ;; Zerg Air
+     'hydralisk         (sc2-weapon-spec 1 12.0 1.0 0 0.0  0.0 0.59 #t)
+     'queen             (sc2-weapon-spec 1 9.0  1.0 0 0.0  0.0 0.71 #t)
+     'mutalisk          (sc2-weapon-spec 1 9.0  1.0 0 0.0  0.0 1.09 #t)
+     'corruptor         (sc2-weapon-spec 1 14.0 1.0 X 6.0  1.0 1.36 #t)
+     'spore-crawler     (sc2-weapon-spec 1 15.0 0.0 B 15.0 0.0 0.61 #t)
+     ;; Protoss Air
+     'stalker           (sc2-weapon-spec 1 13.0 1.0 A 5.0  1.0 1.34 #t)
+     'sentry            (sc2-weapon-spec 1 6.0  1.0 0 0.0  0.0 0.71 #t)
+     'archon            (sc2-weapon-spec 1 25.0 3.0 B 10.0 1.0 1.25 #t)
+     'phoenix           (sc2-weapon-spec 2 5.0  1.0 L 5.0  0.0 0.79 #t)
+     'void-ray          (sc2-weapon-spec 1 6.0  1.0 A 4.0  0.0 0.36 #t)
+     'carrier           (sc2-weapon-spec 8 5.0  1.0 0 0.0  0.0 1.07 #t)
+     'interceptor       (sc2-weapon-spec 2 5.0  1.0 0 0.0  0.0 2.14 #t)
+     'tempest           (sc2-weapon-spec 1 30.0 3.0 X 22.0 2.0 2.36 #t)
+     'mothership        (sc2-weapon-spec 6 6.0  1.0 0 0.0  0.0 1.58 #t)
+     'photon-cannon     (sc2-weapon-spec 1 20.0 0.0 0 0.0  0.0 0.89 #t))))
+
+(: SC2-UNIT-HULL-ARMOR-TABLE (Immutable-HashTable Symbol Flonum))
+(define SC2-UNIT-HULL-ARMOR-TABLE
+  (for/hasheq : (Immutable-HashTable Symbol Flonum)
+              ([(k stats) (in-hash SC2-UNIT-COMBAT-STATS-TABLE)])
+    (define raw (hash-ref stats 'armor (lambda () 0)))
+    (values k (if (real? raw) (->float raw) 0.0))))
+
+(: select-weapon-spec-for-target (-> Symbol Symbol Boolean (Option sc2-weapon-spec)))
+(define select-weapon-spec-for-target
+  (let ([false-thunk : (-> False) (lambda () #f)])
+    (lambda (atk-sym tgt-sym tgt-flying?)
+      (cond
+        [tgt-flying?
+         (hash-ref SC2-AIR-WEAPON-TABLE atk-sym false-thunk)]
+        [(eq? tgt-sym 'colossus)
+         (or (hash-ref SC2-GROUND-WEAPON-TABLE atk-sym false-thunk)
+             (hash-ref SC2-AIR-WEAPON-TABLE atk-sym false-thunk))]
+        [else
+         (hash-ref SC2-GROUND-WEAPON-TABLE atk-sym false-thunk)]))))
+
+(: SC2-BANELING-STRUCT-WEAPON sc2-weapon-spec)
+(define SC2-BANELING-STRUCT-WEAPON
+  (sc2-weapon-spec 1 80.0 5.0 0 0.0 0.0 1.0 #f))
+
+(: nonneg-fl (-> Any Flonum Flonum))
+(define (nonneg-fl v default)
+  (if (real? v)
+      (let ([fv : Flonum (->float v)])
+        (if (and (fl> fv -inf.0) (fl< fv +inf.0))
+            (flmax 0.0 fv)
+            default))
+      default))
+
+(: resolve-weapon-spec-and-hull (-> Any Any (Values (Option sc2-weapon-spec) Fixnum Flonum)))
+(define resolve-weapon-spec-and-hull
+  (let ([zero-fl-thunk : (-> Flonum) (lambda () 0.0)])
+    (lambda (attacker-type target-type)
+      (define atk-sym (canonical-unit-type-sym attacker-type))
+      (define tgt-sym (canonical-unit-type-sym target-type))
+      (define tmask (unit-attribute-mask tgt-sym))
+      (define flying? (sc2-unit-is-flying-sym? tgt-sym))
+      (define hull-base (hash-ref SC2-UNIT-HULL-ARMOR-TABLE tgt-sym zero-fl-thunk))
+      (define spec
+        (if (and (eq? atk-sym 'baneling)
+                 (fx> (fxand tmask SC2-UNIT-ATTR-STRUCTURE) 0))
+            SC2-BANELING-STRUCT-WEAPON
+            (select-weapon-spec-for-target atk-sym tgt-sym flying?)))
+      (values spec tmask hull-base))))
+
+(: compute-exact-weapon-per-volley
+   (-> sc2-weapon-spec Fixnum Flonum Flonum Flonum Flonum Boolean Boolean
+       (Values Flonum Flonum Flonum)))
+(define (compute-exact-weapon-per-volley spec tmask hull-base upgs-f aupg-f supg-f aam? gs?)
+  (define hits-f : Flonum (->float (sc2-weapon-spec-hits spec)))
+  (define bonus-match? (fx> (fxand (sc2-weapon-spec-bonus-mask spec) tmask) 0))
+  (define raw-hit
+    (fl+ (fl+ (sc2-weapon-spec-base spec)
+              (fl* upgs-f (sc2-weapon-spec-upg-base spec)))
+         (if bonus-match?
+             (fl+ (sc2-weapon-spec-bonus spec)
+                  (fl* upgs-f (sc2-weapon-spec-upg-bonus spec)))
+             0.0)))
+  (define gs-red (if (and gs? (sc2-weapon-spec-ranged? spec)) 2.0 0.0))
+  (define aam-delta (if aam? -2.0 0.0))
+  (define shield-armor (fl+ supg-f aam-delta))
+  (define hull-armor (fl+ hull-base (fl+ aupg-f aam-delta)))
+  (define per-hit-shield (flmax 0.5 (fl- (fl- raw-hit shield-armor) gs-red)))
+  (define per-hit-hull (flmax 0.5 (fl- (fl- raw-hit hull-armor) gs-red)))
+  (values (fl* hits-f per-hit-shield)
+          (fl* hits-f per-hit-hull)
+          (sc2-weapon-spec-period spec)))
+
+(: compute-exact-hit-damage-vs-target/fast
+   (-> Any Any Real Real Real Real Real Any Any Any Flonum))
+(define (compute-exact-hit-damage-vs-target/fast
+         attacker-type target-type upgs aupg supg sh hp barrier? aam? gs?)
+  (define-values (spec tmask hull-base)
+    (resolve-weapon-spec-and-hull attacker-type target-type))
+  (cond
+    [(not spec) 0.0]
+    [else
+     (define upgs-f (nonneg-fl upgs 0.0))
+     (define aupg-f (nonneg-fl aupg 0.0))
+     (define supg-f (nonneg-fl supg 0.0))
+     (define sh-f (nonneg-fl sh 0.0))
+     (define hp-f (nonneg-fl hp 100.0))
+     (define-values (v-shield v-hull _period)
+       (compute-exact-weapon-per-volley spec tmask hull-base upgs-f aupg-f supg-f
+                                        (and aam? #t) (and gs? #t)))
+     (define raw-volley
+       (cond
+         [(fl<= sh-f 0.0) v-hull]
+         [(fl<= v-shield sh-f) v-shield]
+         [else
+          (define sh-frac (fl/ sh-f (flmax 0.5 v-shield)))
+          (fl+ sh-f (fl* (fl- 1.0 sh-frac) v-hull))]))
+     (if barrier?
+         (let ([ehp (flmax 1.0 (fl+ sh-f hp-f))])
+           (fl* raw-volley (fl/ ehp (fl+ ehp 100.0))))
+         raw-volley)]))
+
+(: compute-exact-hit-damage-vs-target
+   (->* (Any Any)
+        (#:attacker-upgrades Any
+         #:target-armor-upg Any
+         #:target-shield-upg Any
+         #:target-shields Any
+         #:target-hp Any
+         #:barrier-active? Any
+         #:aam-debuff? Any
+         #:guardian-shield? Any)
+        Flonum))
+(define (compute-exact-hit-damage-vs-target attacker-type target-type
+                                            #:attacker-upgrades [upgs 0]
+                                            #:target-armor-upg [aupg 0]
+                                            #:target-shield-upg [supg 0]
+                                            #:target-shields [sh 0]
+                                            #:target-hp [hp 100]
+                                            #:barrier-active? [barrier? #f]
+                                            #:aam-debuff? [aam? #f]
+                                            #:guardian-shield? [gs? #f])
+  (compute-exact-hit-damage-vs-target/fast
+   attacker-type target-type
+   (nonneg-fl upgs 0.0)
+   (nonneg-fl aupg 0.0)
+   (nonneg-fl supg 0.0)
+   (nonneg-fl sh 0.0)
+   (nonneg-fl hp 100.0)
+   barrier? aam? gs?))
+
+(: compute-exact-weapon-dps-vs-target
+   (->* (Any Any)
+        (#:attacker-upgrades Any
+         #:target-armor-upg Any
+         #:target-shield-upg Any
+         #:target-shields Any
+         #:target-hp Any
+         #:barrier-active? Any
+         #:aam-debuff? Any
+         #:guardian-shield? Any)
+        Flonum))
+(define (compute-exact-weapon-dps-vs-target attacker-type target-type
+                                            #:attacker-upgrades [upgs 0]
+                                            #:target-armor-upg [aupg 0]
+                                            #:target-shield-upg [supg 0]
+                                            #:target-shields [sh 0]
+                                            #:target-hp [hp 100]
+                                            #:barrier-active? [barrier? #f]
+                                            #:aam-debuff? [aam? #f]
+                                            #:guardian-shield? [gs? #f])
+  (define-values (spec tmask hull-base)
+    (resolve-weapon-spec-and-hull attacker-type target-type))
+  (cond
+    [(not spec) 0.0]
+    [else
+     (define upgs-f (nonneg-fl upgs 0.0))
+     (define aupg-f (nonneg-fl aupg 0.0))
+     (define supg-f (nonneg-fl supg 0.0))
+     (define sh-f (nonneg-fl sh 0.0))
+     (define hp-f (nonneg-fl hp 100.0))
+     (define-values (v-shield v-hull period)
+       (compute-exact-weapon-per-volley spec tmask hull-base upgs-f aupg-f supg-f
+                                        (and aam? #t) (and gs? #t)))
+     (define dps-shield (fl/ v-shield period))
+     (define dps-hull (fl/ v-hull period))
+     (define total-ehp (fl+ sh-f hp-f))
+     (define shield-phase (fl+ sh-f (if barrier? 100.0 0.0)))
+     (cond
+       [(fl<= total-ehp 0.0)
+        (if (fl> shield-phase 0.0) dps-shield dps-hull)]
+       [else
+        (define ttk
+          (fl+ (if (fl> shield-phase 0.0) (fl/ shield-phase dps-shield) 0.0)
+               (if (fl> hp-f 0.0) (fl/ hp-f dps-hull) 0.0)))
+        (fl/ total-ehp (flmax 1e-6 ttk))])]))
+
+(: spell-valid-for-target-attrs? (->* (Any Any) (Any Any) Boolean))
+(define (spell-valid-for-target-attrs? spell-sym target-type [target-energy 0] [target-shields 0])
+  (define mask (unit-attribute-mask target-type))
+  (define e-val (nonneg-fl target-energy 0.0))
+  (define s-val (nonneg-fl target-shields 0.0))
+  (define bio? (fx> (fxand mask SC2-UNIT-ATTR-BIOLOGICAL) 0))
+  (define mech? (fx> (fxand mask SC2-UNIT-ATTR-MECHANICAL) 0))
+  (define psi? (fx> (fxand mask SC2-UNIT-ATTR-PSIONIC) 0))
+  (define frenzied? (fx> (fxand mask SC2-UNIT-ATTR-FRENZIED) 0))
+  (define struct? (fx> (fxand mask SC2-UNIT-ATTR-STRUCTURE) 0))
+  (define heroic? (fx> (fxand mask SC2-UNIT-ATTR-HEROIC) 0))
+  (case spell-sym
+    [(snipe steady-targeting)
+     (and bio? (not struct?))]
+    [(emp emp-round)
+     (or (fl> s-val 0.0) psi? (fl> e-val 0.0))]
+    [(feedback)
+     (and (not struct?) (fl>= e-val 50.0))]
+    [(interference-matrix)
+     (and (or mech? psi?) (not frenzied?) (not struct?))]
+    [(neural-parasite)
+     (and (fx> mask 0) (not frenzied?) (not struct?) (not heroic?))]
+    [(abduct)
+     (and (fx> mask 0) (not frenzied?) (not struct?))]
+    [(repair)
+     mech?]
+    [(transfuse transfusion)
+     bio?]
+    [(heal)
+     (and bio? (not struct?))]
+    [else
+     (fx> mask 0)]))
+
 

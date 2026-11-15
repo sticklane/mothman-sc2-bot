@@ -560,7 +560,9 @@
    y
    radius
    eta-sec         ;; 0.0 if already in arena, > 0.0 for arriving reinforcements
-   attr-flags)     ;; fixnum bitmask: 1=anti-armor 2=armored 4=anti-light 8=light 16=worker 32=hero
+   attr-flags      ;; fixnum bitmask: 1=anti-armor 2=armored 4=anti-light 8=light 16=worker 32=hero 64=barrier 128=aam 256=gs
+   attr-mask       ;; fixnum LotV SC2-UNIT-ATTR-* bitmask
+   collision-radius) ;; flonum collision radius
   #:mutable
   #:transparent)
 
@@ -643,6 +645,8 @@
 
 (define UNIT-STAT-CACHE (make-hasheq))
 
+(define NEXT-UNIT-TYPE-IDX 0)
+
 (define (fast-unit-stat-vec utype)
   (hash-ref!
    UNIT-STAT-CACHE
@@ -659,6 +663,10 @@
         (if (hash-ref LIGHT-TARGETS utype #f) 8 0)
         (if (hash-ref WORKER-TYPE-SET utype #f) 16 0)
         (if (hash-ref HERO-LOSS-TYPE-SET utype #f) 32 0)))
+     (define attr-mask (unit-attribute-mask utype))
+     (define coll-rad (unit-collision-radius utype))
+     (define tidx NEXT-UNIT-TYPE-IDX)
+     (set! NEXT-UNIT-TYPE-IDX (unsafe-fx+ tidx 1))
      (vector-immutable
       (exact->inexact (+ m-cost (* 1.5 g-cost)))
       (exact->inexact (hash-ref stats 'max-hp 80))
@@ -676,7 +684,10 @@
       (eq? (hash-ref stats 'detector? #f) #t)
       (eq? (hash-ref stats 'can-cloak? #f) #t)
       (exact->inexact (hash-ref stats 'radius 0.5))
-      aflags))))
+      aflags
+      attr-mask
+      coll-rad
+      tidx))))
 
 (define ANTI-ARMOR-ATTACKERS
   (hasheq 'immortal #t 'marauder #t 'stalker #t 'siege-tank #t 'siege-tank-sieged #t
@@ -724,7 +735,38 @@
 
 (define-syntax-rule (fast->fl v)
   (let ([x v])
-    (if (flonum? x) x (exact->inexact x))))
+    (if (flonum? x)
+        x
+        (if (fixnum? x)
+            (unsafe-fx->fl x)
+            (exact->inexact x)))))
+
+(define-syntax-rule (same-num-fl? raw flv)
+  (let ([r raw])
+    (if (flonum? r)
+        (fl= r flv)
+        (and (fixnum? r) (fl= (unsafe-fx->fl r) flv)))))
+
+(define (unit-buff-list-bits bfs)
+  (let loop ([rem bfs] [bits 0])
+    (if (null? rem)
+        bits
+        (let ([b (car rem)])
+          (loop (cdr rem)
+                (cond
+                  [(or (eq? b 'immortal-overload) (eq? b 'immortal-barrier) (eqv? b 102))
+                   (unsafe-fxior bits 64)]
+                  [(or (eq? b 'anti-armor-missile) (eq? b 'anti-armor-missile-debuff))
+                   (unsafe-fxior bits 128)]
+                  [(or (eq? b 'guardian-shield) (eqv? b 18))
+                   (unsafe-fxior bits 256)]
+                  [else bits]))))))
+
+(define (unit-buff-attr-bits u)
+  (let ([bfs (hash-ref u 'buffs #f)])
+    (if (pair? bfs)
+        (unit-buff-list-bits bfs)
+        0)))
 
 (define (unit-hash->tactical-sim-unit u [side 'ally] #:eta-sec [eta-sec 0.0])
   (define utype (hash-ref u 'type 'marine))
@@ -762,13 +804,18 @@
    (fast->fl (hash-ref u 'y 32.5))
    (fast->fl (hash-ref u 'radius (vector-ref sv 15)))
    (fast->fl eta-sec)
-   (vector-ref sv 16)))
+   (unsafe-fxior (vector-ref sv 16)
+                 (unit-buff-attr-bits u)
+                 (unsafe-fxlshift (hash-ref UNIT-REFRESH-FLAGS-HT utype 0) 10))
+   (vector-ref sv 17)
+   (vector-ref sv 18)))
 
 (define (ensure-fl-sim-unit su)
   (if (and (flonum? (tactical-sim-unit-hp su))
            (flonum? (tactical-sim-unit-max-hp su))
            (flonum? (tactical-sim-unit-ground-dps su))
-           (flonum? (tactical-sim-unit-x su)))
+           (flonum? (tactical-sim-unit-x su))
+           (flonum? (tactical-sim-unit-collision-radius su)))
       su
       (struct-copy tactical-sim-unit su
                    [hp (fast->fl (tactical-sim-unit-hp su))]
@@ -789,7 +836,8 @@
                    [x (fast->fl (tactical-sim-unit-x su))]
                    [y (fast->fl (tactical-sim-unit-y su))]
                    [radius (fast->fl (tactical-sim-unit-radius su))]
-                   [eta-sec (fast->fl (tactical-sim-unit-eta-sec su))])))
+                   [eta-sec (fast->fl (tactical-sim-unit-eta-sec su))]
+                   [collision-radius (fast->fl (tactical-sim-unit-collision-radius su))])))
 
 (define (clone-tactical-sim-unit su)
   (struct-copy tactical-sim-unit (ensure-fl-sim-unit su)))
@@ -1815,32 +1863,34 @@
 (define (vec4> a b)
   (fl> (vector-ref a 4) (vector-ref b 4)))
 
-(define (unit-id-table-lookup tbl gen uid)
+(define-syntax-rule (unit-id-table-lookup tbl gen uid)
   (let ([slot (hash-ref tbl uid #f)])
     (and slot (eqv? (mcar slot) gen) (mcdr slot))))
 
 (define (refresh-unit-id-table! tbl units gen)
-  (when (> (hash-count tbl) (* 2 (max 64 (length units))))
+  (when (and (> (hash-count tbl) 128)
+             (> (hash-count tbl) (* 2 (length units))))
     (hash-clear! tbl))
-  (let loop ([rem units] [cnt 0] [dup? #f])
+  (let loop ([rem units] [cnt 0] [dup? #f] [all-imm? #t])
     (if (null? rem)
-        (values cnt dup?)
+        (values cnt dup? all-imm?)
         (let ([u (car rem)])
           (if (hash? u)
-              (let* ([uid (hash-ref u 'id -1)]
+              (let* ([imm? (and all-imm? (immutable? u))]
+                     [uid (hash-ref u 'id -1)]
                      [slot (hash-ref tbl uid #f)])
                 (cond
                   [(not slot)
                    (hash-set! tbl uid (mcons gen u))
-                   (loop (cdr rem) (+ cnt 1) dup?)]
-                  [(eqv? (mcar slot) gen)
+                   (loop (cdr rem) (unsafe-fx+ cnt 1) dup? imm?)]
+                  [(eq? (mcar slot) gen)
                    (set-mcdr! slot u)
-                   (loop (cdr rem) cnt #t)]
+                   (loop (cdr rem) cnt #t imm?)]
                   [else
                    (set-mcar! slot gen)
                    (set-mcdr! slot u)
-                   (loop (cdr rem) (+ cnt 1) dup?)]))
-              (loop (cdr rem) cnt dup?))))))
+                   (loop (cdr rem) (unsafe-fx+ cnt 1) dup? imm?)]))
+              (loop (cdr rem) cnt dup? #f))))))
 
 (define (fast-enemy-priority-const etype arena-has-stealth? su)
   (define ht (if arena-has-stealth? ENEMY-PRIORITY-CONST-CACHE-T ENEMY-PRIORITY-CONST-CACHE-F))
@@ -1862,47 +1912,49 @@
       [(real? x) (= x flv)]
       [else #f])))
 
-(define (refresh-sim-unit-from-hash! su u [acx #f] [acy #f])
+(define (refresh-sim-unit-from-hash! su u [acx #f] [acy #f] [force-eta? #f])
   (define utype (hash-ref u 'type 'marine))
   (and (eq? utype (tactical-sim-unit-type su))
        (let* ([rx (hash-ref u 'x 32.5)]
               [ry (hash-ref u 'y 32.5)]
               [old-x (tactical-sim-unit-x su)]
               [old-y (tactical-sim-unit-y su)]
-              [same-pos? (and (fast-num=fl? rx old-x) (fast-num=fl? ry old-y))]
-              [ux (if same-pos? old-x (if (flonum? rx) rx (exact->inexact rx)))]
-              [uy (if same-pos? old-y (if (flonum? ry) ry (exact->inexact ry)))])
+              [same-pos? (and (same-num-fl? rx old-x) (same-num-fl? ry old-y))]
+              [ux (if same-pos? old-x (fast->fl rx))]
+              [uy (if same-pos? old-y (fast->fl ry))])
          (and (or same-pos?
                   (and (fl<= (flabs (fl- ux old-x)) 4.5)
                        (fl<= (flabs (fl- uy old-y)) 4.5)))
               (let* ([mhp (tactical-sim-unit-max-hp su)]
                      [rhp (hash-ref u 'hp mhp)]
                      [old-hp (tactical-sim-unit-hp su)]
-                     [rflags (hash-ref UNIT-REFRESH-FLAGS-HT utype 0)]
+                     [old-af (tactical-sim-unit-attr-flags su)]
+                     [rflags (unsafe-fxand (unsafe-fxrshift old-af 10) 7)]
                      [wc (hash-ref u 'weapon-cooldown #f)]
                      [old-wc (tactical-sim-unit-weapon-cooldown su)])
-                (unless (fast-num=fl? rhp old-hp)
-                  (let ([hp (let ([fhp (if (flonum? rhp) rhp (exact->inexact rhp))])
+                (unless (same-num-fl? rhp old-hp)
+                  (let ([hp (let ([fhp (fast->fl rhp)])
                               (if (fl> fhp 1.0) fhp 1.0))])
                     (unless (fl= hp old-hp)
                       (set-tactical-sim-unit-hp! su hp))))
-                (when (or (bitwise-bit-set? rflags 0) (fl> (tactical-sim-unit-shield su) 0.0))
+                (when (or (not (unsafe-fx= (unsafe-fxand rflags 1) 0))
+                          (fl> (tactical-sim-unit-shield su) 0.0))
                   (let ([sh (hash-ref u 'shield #f)]
                         [old-sh (tactical-sim-unit-shield su)])
-                    (when (and sh (not (fast-num=fl? sh old-sh)))
-                      (let ([fsh (let ([fs (if (flonum? sh) sh (exact->inexact sh))])
+                    (when (and sh (not (same-num-fl? sh old-sh)))
+                      (let ([fsh (let ([fs (fast->fl sh)])
                                    (if (fl> fs 0.0) fs 0.0))])
                         (unless (fl= fsh old-sh)
                           (set-tactical-sim-unit-shield! su fsh))))))
                 (if wc
-                    (unless (fast-num=fl? wc old-wc)
-                      (let ([fwc (let ([fw (if (flonum? wc) wc (exact->inexact wc))])
+                    (unless (same-num-fl? wc old-wc)
+                      (let ([fwc (let ([fw (fast->fl wc)])
                                    (if (fl> fw 0.0) fw 0.0))])
                         (unless (fl= fwc old-wc)
                           (set-tactical-sim-unit-weapon-cooldown! su fwc))))
                     (unless (fl= 0.0 old-wc)
                       (set-tactical-sim-unit-weapon-cooldown! su 0.0)))
-                (when (or (bitwise-bit-set? rflags 1)
+                (when (or (not (unsafe-fx= (unsafe-fxand rflags 2) 0))
                           (tactical-sim-unit-can-cloak? su)
                           (tactical-sim-unit-cloaked? su))
                   (define clk?
@@ -1910,14 +1962,21 @@
                         (eq? (hash-ref u 'burrowed #f) #t)))
                   (unless (eq? clk? (tactical-sim-unit-cloaked? su))
                     (set-tactical-sim-unit-cloaked?! su clk?)))
-                (when (or (bitwise-bit-set? rflags 2) (fl> (tactical-sim-unit-energy su) 0.0))
+                (when (or (not (unsafe-fx= (unsafe-fxand rflags 4) 0))
+                          (fl> (tactical-sim-unit-energy su) 0.0))
                   (let ([en (hash-ref u 'energy #f)]
                         [old-en (tactical-sim-unit-energy su)])
-                    (when (and en (not (fast-num=fl? en old-en)))
-                      (set-tactical-sim-unit-energy! su (if (flonum? en) en (exact->inexact en))))))
-                (unless same-pos?
-                  (set-tactical-sim-unit-x! su ux)
-                  (set-tactical-sim-unit-y! su uy)
+                    (when (and en (not (same-num-fl? en old-en)))
+                      (set-tactical-sim-unit-energy! su (fast->fl en)))))
+                (let* ([bfs (hash-ref u 'buffs #f)]
+                       [bbits (if (pair? bfs) (unit-buff-list-bits bfs) 0)]
+                       [new-af (unsafe-fxior (unsafe-fxand old-af 7231) bbits)])
+                  (unless (unsafe-fx= new-af old-af)
+                    (set-tactical-sim-unit-attr-flags! su new-af)))
+                (when (or (not same-pos?) force-eta?)
+                  (unless same-pos?
+                    (set-tactical-sim-unit-x! su ux)
+                    (set-tactical-sim-unit-y! su uy))
                   (when (and acx acy (fl> (tactical-sim-unit-eta-sec su) 0.0))
                     (define spd (flmax 2.0 (tactical-sim-unit-speed su)))
                     (define dx (fl- ux acx))
@@ -1926,35 +1985,107 @@
                     (set-tactical-sim-unit-eta-sec! su (flmax 0.0 (fl/ (fl- d 6.0) spd)))))
                 #t)))))
 
-(define (refresh-cached-arenas! cached-arenas ally-by-id enemy-by-id [id-gen #f])
+;; Lightweight position/type validation for reinforcing sim units so cached reuse-locked frames skip full hash sweeps.
+(define (validate-reinf-unit-from-hash! su u)
+  (and (eq? (hash-ref u 'type 'marine) (tactical-sim-unit-type su))
+       (let* ([rx (hash-ref u 'x 32.5)]
+              [ry (hash-ref u 'y 32.5)]
+              [old-x (tactical-sim-unit-x su)]
+              [old-y (tactical-sim-unit-y su)]
+              [same-pos? (and (same-num-fl? rx old-x) (same-num-fl? ry old-y))])
+         (or same-pos?
+             (let ([ux (fast->fl rx)]
+                   [uy (fast->fl ry)])
+               (and (fl<= (flabs (fl- ux old-x)) 4.5)
+                    (fl<= (flabs (fl- uy old-y)) 4.5)
+                    (begin
+                      (set-tactical-sim-unit-x! su ux)
+                      (set-tactical-sim-unit-y! su uy)
+                      #t)))))))
+
+(define (refresh-arena-reinforcing! ar ally-by-id enemy-by-id id-gen enemy-id-gen)
+  (define raw-cx (tactical-arena-center-x ar))
+  (define raw-cy (tactical-arena-center-y ar))
+  (define acx (if (flonum? raw-cx) raw-cx (exact->inexact raw-cx)))
+  (define acy (if (flonum? raw-cy) raw-cy (exact->inexact raw-cy)))
+  (define-syntax-rule (refresh-reinf-list! sus tbl gen)
+    (let loop-u ([rem-u sus])
+      (or (null? rem-u)
+          (let* ([su (car rem-u)]
+                 [uid (tactical-sim-unit-id su)]
+                 [u (if gen (unit-id-table-lookup tbl gen uid) (hash-ref tbl uid #f))])
+            (and u
+                 (refresh-sim-unit-from-hash! su u acx acy #t)
+                 (loop-u (cdr rem-u)))))))
+  (and (refresh-reinf-list! (tactical-arena-reinforcing-allies ar) ally-by-id id-gen)
+       (refresh-reinf-list! (tactical-arena-reinforcing-enemies ar) enemy-by-id enemy-id-gen)))
+
+(define (refresh-cached-arenas! cached-arenas ally-by-id enemy-by-id
+                                [id-gen #f]
+                                [enemy-id-gen id-gen]
+                                [su-last-ht #f]
+                                [reinf-a-seen #f]
+                                [reinf-e-seen #f])
+  (when reinf-a-seen (hash-clear! reinf-a-seen))
+  (when reinf-e-seen (hash-clear! reinf-e-seen))
+  (define-syntax-rule (refresh-unit-list! sus tbl gen seen-tbl)
+    (let loop-u ([rem-u sus])
+      (if (null? rem-u)
+          #t
+          (let* ([su (car rem-u)]
+                 [uid (tactical-sim-unit-id su)]
+                 [u (if gen
+                        (unit-id-table-lookup tbl gen uid)
+                        (hash-ref tbl uid #f))])
+            (and u
+                 (if (and su-last-ht (immutable? u) (eq? (hash-ref su-last-ht su #f) u))
+                     (begin
+                       (when seen-tbl (hash-set! seen-tbl uid su))
+                       #t)
+                     (and (refresh-sim-unit-from-hash! su u #f #f)
+                          (begin
+                            (when (and su-last-ht (immutable? u))
+                              (hash-set! su-last-ht su u))
+                            (when seen-tbl (hash-set! seen-tbl uid su))
+                            #t)))
+                 (loop-u (cdr rem-u)))))))
+  (define-syntax-rule (validate-reinf-list! sus tbl gen seen-tbl)
+    (let loop-r ([rem-r sus])
+      (if (null? rem-r)
+          #t
+          (let* ([su (car rem-r)]
+                 [uid (tactical-sim-unit-id su)]
+                 [cached-su (and seen-tbl (hash-ref seen-tbl uid #f))])
+            (and (if cached-su
+                     (and (eq? (tactical-sim-unit-type su) (tactical-sim-unit-type cached-su))
+                          (let ([nx (tactical-sim-unit-x cached-su)]
+                                [ny (tactical-sim-unit-y cached-su)]
+                                [ox (tactical-sim-unit-x su)]
+                                [oy (tactical-sim-unit-y su)])
+                            (or (and (fl= ox nx) (fl= oy ny))
+                                (and (fl<= (flabs (fl- nx ox)) 4.5)
+                                     (fl<= (flabs (fl- ny oy)) 4.5)
+                                     (begin
+                                       (set-tactical-sim-unit-x! su nx)
+                                       (set-tactical-sim-unit-y! su ny)
+                                       #t)))))
+                     (let ([u (if gen
+                                  (unit-id-table-lookup tbl gen uid)
+                                  (hash-ref tbl uid #f))])
+                       (and u
+                            (validate-reinf-unit-from-hash! su u)
+                            (begin
+                              (when seen-tbl (hash-set! seen-tbl uid su))
+                              #t))))
+                 (loop-r (cdr rem-r)))))))
   (let loop-arenas ([rem cached-arenas])
     (if (null? rem)
         #t
-        (let* ([ar (car rem)]
-               [raw-cx (tactical-arena-center-x ar)]
-               [raw-cy (tactical-arena-center-y ar)]
-               [acx (if (flonum? raw-cx) raw-cx (exact->inexact raw-cx))]
-               [acy (if (flonum? raw-cy) raw-cy (exact->inexact raw-cy))])
-          (and (for/and ([su (in-list (tactical-arena-ally-units ar))])
-                 (define u (if id-gen
-                               (unit-id-table-lookup ally-by-id id-gen (tactical-sim-unit-id su))
-                               (hash-ref ally-by-id (tactical-sim-unit-id su) #f)))
-                 (and u (refresh-sim-unit-from-hash! su u)))
-               (for/and ([su (in-list (tactical-arena-enemy-units ar))])
-                 (define e (if id-gen
-                               (unit-id-table-lookup enemy-by-id id-gen (tactical-sim-unit-id su))
-                               (hash-ref enemy-by-id (tactical-sim-unit-id su) #f)))
-                 (and e (refresh-sim-unit-from-hash! su e)))
-               (for/and ([su (in-list (tactical-arena-reinforcing-allies ar))])
-                 (define u (if id-gen
-                               (unit-id-table-lookup ally-by-id id-gen (tactical-sim-unit-id su))
-                               (hash-ref ally-by-id (tactical-sim-unit-id su) #f)))
-                 (and u (refresh-sim-unit-from-hash! su u acx acy)))
-               (for/and ([su (in-list (tactical-arena-reinforcing-enemies ar))])
-                 (define e (if id-gen
-                               (unit-id-table-lookup enemy-by-id id-gen (tactical-sim-unit-id su))
-                               (hash-ref enemy-by-id (tactical-sim-unit-id su) #f)))
-                 (and e (refresh-sim-unit-from-hash! su e acx acy)))
+        (let ([ar (car rem)])
+          (and (refresh-unit-list! (tactical-arena-ally-units ar) ally-by-id id-gen reinf-a-seen)
+               (refresh-unit-list! (tactical-arena-enemy-units ar) enemy-by-id enemy-id-gen reinf-e-seen)
+               (validate-reinf-list! (tactical-arena-reinforcing-allies ar) ally-by-id id-gen reinf-a-seen)
+               (validate-reinf-list! (tactical-arena-reinforcing-enemies ar) enemy-by-id enemy-id-gen reinf-e-seen)
                (loop-arenas (cdr rem)))))))
 
 (define (scan-target-vecs vecs ux uy best best-sc best-sc2)
@@ -1976,8 +2107,105 @@
                     (loop (cdr rem) (vector-ref ev 0) sc (if (fl> sc 0.0) (fl* sc sc) 0.0))
                     (loop (cdr rem) b bsc bsc2))))))))
 
+;; Cached LotV attacker-vs-target focus multiplier rows indexed by compact unit-type index.
+;; Each entry is an 8-element flvector for state bits: (if sh? 1 0) | (if aam? 2 0) | (if gs? 4 0).
+(define PAIR-FOCUS-PROF-CACHE (make-hasheq))
+
+(define (fast-atk-focus-profile atk-type)
+  (hash-ref!
+   PAIR-FOCUS-PROF-CACHE
+   atk-type
+   (lambda ()
+     (define ast (fast-unit-stat-vec atk-type))
+     (define bmask (unit-primary-bonus-attr-mask atk-type))
+     (define massive-bonus? (not (fx= (fxand bmask SC2-UNIT-ATTR-MASSIVE) 0)))
+     (define nb-scale (if (fx> bmask 0) 0.75 1.0))
+     (define max-b-scale (if massive-bonus? 3.25 2.55))
+     ;; Admissible upper bounds (dps-ratio clamped to 3.5 max):
+     ;;   non-bonus: max dps-ratio (~1.50 without AAM, ~1.85 with AAM) * nb-scale
+     ;;   bonus: max dps-ratio (3.5) * max-b-scale
+     (vector (make-vector 256 #f)
+             ast
+             bmask
+             (fl* 1.40 nb-scale)
+             (fl* 1.90 nb-scale)
+             (fl* 3.5 max-b-scale)))))
+
+(define (compute-pair-focus-flvec atk-type ast atk-bonus tgt-type)
+  (define tgt-sv (fast-unit-stat-vec tgt-type))
+  (define tgt-attr (vector-ref tgt-sv 17))
+  (define tgt-flying? (vector-ref tgt-sv 12))
+  (define base-gd (vector-ref ast 5))
+  (define base-ad (vector-ref ast 6))
+  (define use-air? (or tgt-flying? (and (eq? tgt-type 'colossus) (fl<= base-gd 0.0))))
+  (define ref-dps (flmax 1.0 (if use-air? base-ad base-gd)))
+  (define has-bonus? (fx> atk-bonus 0))
+  (define bonus-match? (and has-bonus? (fx> (fxand atk-bonus tgt-attr) 0)))
+  (define massive-match? (and has-bonus? (fx> (fxand (fxand atk-bonus SC2-UNIT-ATTR-MASSIVE) tgt-attr) 0)))
+  (define attr-pref
+    (cond
+      [massive-match? 3.25]
+      [bonus-match? 2.55]
+      [has-bonus? 0.75]
+      [else 1.0]))
+  (define fv (make-flvector 8 1.0))
+  (for ([s (in-range 8)])
+    (define sh? (not (fx= (fxand s 1) 0)))
+    (define aam? (not (fx= (fxand s 2) 0)))
+    (define gs? (not (fx= (fxand s 4) 0)))
+    (define exact-dps
+      (compute-exact-weapon-dps-vs-target
+       atk-type tgt-type
+       #:target-shields (if sh? 999.0 0.0)
+       #:aam-debuff? aam?
+       #:guardian-shield? gs?))
+    (define dps-ratio
+      (if (fl<= exact-dps 0.0)
+          0.25
+          (flmin 3.5 (flmax 0.25 (fl/ exact-dps ref-dps)))))
+    (unsafe-flvector-set! fv s (fl* dps-ratio attr-pref)))
+  fv)
+
+(define (lookup-pair-focus-flvec! row tidx atk-type ast atk-bonus tgt-type)
+  (let ([cached (unsafe-vector-ref row tidx)])
+    (or cached
+        (let ([fv (compute-pair-focus-flvec atk-type ast atk-bonus tgt-type)])
+          (unsafe-vector-set! row tidx fv)
+          fv))))
+
+(define (eval-ev-focus-mult row atk-type ast atk-bonus ev)
+  (define tidx (unsafe-vector-ref ev 5))
+  (define fv (lookup-pair-focus-flvec! row tidx atk-type ast atk-bonus (tactical-sim-unit-type (unsafe-vector-ref ev 0))))
+  (define sb (unsafe-vector-ref ev 6))
+  (define base-mult (unsafe-flvector-ref fv (unsafe-fxand sb 7)))
+  (if (unsafe-fx= (unsafe-fxand sb 8) 0)
+      base-mult
+      (let* ([e (unsafe-vector-ref ev 0)]
+             [ehp (flmax 1.0 (fl+ (tactical-sim-unit-hp e) (tactical-sim-unit-shield e)))])
+        (fl* base-mult (fl/ ehp (fl+ ehp 100.0))))))
+
+(define (scan-target-vecs/atk vecs ux uy best best-sc best-sc2 row atk-type ast atk-bonus)
+  (let loop ([rem vecs] [b best] [bsc best-sc] [bsc2 best-sc2])
+    (if (null? rem)
+        (values b bsc bsc2)
+        (let* ([ev (car rem)]
+               [dx (fl- (vector-ref ev 2) ux)]
+               [dy (fl- (vector-ref ev 3) uy)]
+               [d2 (flmax 1.0 (fl+ (fl* dx dx) (fl* dy dy)))]
+               [mult (eval-ev-focus-mult row atk-type ast atk-bonus ev)]
+               [val (fl* (vector-ref ev 4) mult)])
+          (if (and (fl> bsc 0.0) (fl> val 0.0))
+              (if (fl> (fl* val val) (fl* bsc2 d2))
+                  (let ([sc (fl/ val (flsqrt d2))])
+                    (loop (cdr rem) (vector-ref ev 0) sc (fl* sc sc)))
+                  (loop (cdr rem) b bsc bsc2))
+              (let ([sc (fl/ val (flsqrt d2))])
+                (if (fl> sc bsc)
+                    (loop (cdr rem) (vector-ref ev 0) sc (if (fl> sc 0.0) (fl* sc sc) 0.0))
+                    (loop (cdr rem) b bsc bsc2))))))))
+
 ;; Pair of (#f . vecs) for small lists, or (#t . cell-list) where each cell is
-;; (vector xmin xmax ymin ymax max-val sorted-vecs-desc-by-val).
+;; (vector xmin xmax ymin ymax max-val sorted-vecs-desc-by-val cell-attr-or).
 (define (build-target-spatial-plan vecs [pad-fl 0.0])
   (cond
     [(null? vecs) #f]
@@ -2017,7 +2245,12 @@
          (define x0 (vector-ref ev0 2))
          (define y0 (vector-ref ev0 3))
          (define v0 (vector-ref ev0 4))
-         (let loop ([rem (cdr evs)] [xmin x0] [xmax x0] [ymin y0] [ymax y0] [vmax v0])
+         (define a0 (let ([base-m (tactical-sim-unit-attr-mask (vector-ref ev0 0))])
+                      (if (and (>= (vector-length ev0) 7)
+                               (not (fx= (fxand (vector-ref ev0 6) 2) 0)))
+                          (fxior base-m 1073741824)
+                          base-m)))
+         (let loop ([rem (cdr evs)] [xmin x0] [xmax x0] [ymin y0] [ymax y0] [vmax v0] [aor a0])
            (if (null? rem)
                (let ([sorted (cond
                                [(null? (cdr evs)) evs]
@@ -2028,17 +2261,23 @@
                                       (list e2 e1)))]
                                [else
                                 (sort evs vec4>)])])
-                 (vector (fl- xmin pad-fl) (fl+ xmax pad-fl) (fl- ymin pad-fl) (fl+ ymax pad-fl) vmax sorted))
+                 (vector (fl- xmin pad-fl) (fl+ xmax pad-fl) (fl- ymin pad-fl) (fl+ ymax pad-fl) vmax sorted aor))
                (let* ([e (car rem)]
                       [x (vector-ref e 2)]
                       [y (vector-ref e 3)]
-                      [v (vector-ref e 4)])
+                      [v (vector-ref e 4)]
+                      [am (tactical-sim-unit-attr-mask (vector-ref e 0))]
+                      [am2 (if (and (>= (vector-length e) 7)
+                                    (not (fx= (fxand (vector-ref e 6) 2) 0)))
+                               (fxior am 1073741824)
+                               am)])
                  (loop (cdr rem)
                        (if (fl< x xmin) x xmin)
                        (if (fl> x xmax) x xmax)
                        (if (fl< y ymin) y ymin)
                        (if (fl> y ymax) y ymax)
-                       (if (fl> v vmax) v vmax)))))))
+                       (if (fl> v vmax) v vmax)
+                       (fxior aor am2)))))))
      (cons #t cells)]))
 
 (define (cell-min-d2 cell ux uy)
@@ -2071,14 +2310,61 @@
                           (loop (cdr rem) (vector-ref ev 0) sc (if (fl> sc 0.0) (fl* sc sc) 0.0))
                           (loop (cdr rem) b bsc bsc2))))))))))
 
-(define (pick-best-target-from-plan plan ux uy best best-sc best-sc2)
+(define (scan-cell-vecs/atk vecs min-d2 cell-ub ux uy best best-sc best-sc2 row atk-type ast atk-bonus)
+  (let loop ([rem vecs] [b best] [bsc best-sc] [bsc2 best-sc2])
+    (if (null? rem)
+        (values b bsc bsc2)
+        (let* ([ev (car rem)]
+               [base-val (vector-ref ev 4)]
+               [ub-val (fl* base-val cell-ub)])
+          (if (and (fl> bsc 0.0) (fl> ub-val 0.0) (fl<= (fl* ub-val ub-val) (fl* bsc2 min-d2)))
+              (values b bsc bsc2)
+              (let* ([dx (fl- (vector-ref ev 2) ux)]
+                     [dy (fl- (vector-ref ev 3) uy)]
+                     [d2 (flmax 1.0 (fl+ (fl* dx dx) (fl* dy dy)))]
+                     [mult (eval-ev-focus-mult row atk-type ast atk-bonus ev)]
+                     [val (fl* base-val mult)])
+                (if (and (fl> bsc 0.0) (fl> val 0.0))
+                    (if (fl> (fl* val val) (fl* bsc2 d2))
+                        (let ([sc (fl/ val (flsqrt d2))])
+                          (loop (cdr rem) (vector-ref ev 0) sc (fl* sc sc)))
+                        (loop (cdr rem) b bsc bsc2))
+                    (let ([sc (fl/ val (flsqrt d2))])
+                      (if (fl> sc bsc)
+                          (loop (cdr rem) (vector-ref ev 0) sc (if (fl> sc 0.0) (fl* sc sc) 0.0))
+                          (loop (cdr rem) b bsc bsc2))))))))))
+
+(define (cell-focus-ub c prof)
+  (define bmask (vector-ref prof 2))
+  (define aor (vector-ref c 6))
+  (cond
+    [(and (fx> bmask 0) (not (fx= (fxand aor bmask) 0)))
+     (vector-ref prof 5)]
+    [(not (fx= (fxand aor 1073741824) 0))
+     (vector-ref prof 4)]
+    [else
+     (vector-ref prof 3)]))
+
+(define (pick-best-target-from-plan plan ux uy best best-sc best-sc2 [attacker #f])
   (define fux (if (flonum? ux) ux (exact->inexact ux)))
   (define fuy (if (flonum? uy) uy (exact->inexact uy)))
   (define fbest-sc (if (flonum? best-sc) best-sc (exact->inexact best-sc)))
   (define fbest-sc2 (if (flonum? best-sc2) best-sc2 (exact->inexact best-sc2)))
+  (define use-atk?
+    (and attacker
+         (let ([evs (and plan (if (car plan) (vector-ref (cadr plan) 5) (cdr plan)))])
+           (and (pair? evs) (>= (vector-length (car evs)) 7)))))
+  (define atk-type (and use-atk? (tactical-sim-unit-type attacker)))
+  (define atk-prof (and use-atk? (fast-atk-focus-profile atk-type)))
+  (define atk-row (and atk-prof (vector-ref atk-prof 0)))
+  (define atk-ast (and atk-prof (vector-ref atk-prof 1)))
+  (define atk-bonus (and atk-prof (vector-ref atk-prof 2)))
   (cond
     [(not plan) (values best fbest-sc fbest-sc2)]
-    [(not (car plan)) (scan-target-vecs (cdr plan) fux fuy best fbest-sc fbest-sc2)]
+    [(not (car plan))
+     (if use-atk?
+         (scan-target-vecs/atk (cdr plan) fux fuy best fbest-sc fbest-sc2 atk-row atk-type atk-ast atk-bonus)
+         (scan-target-vecs (cdr plan) fux fuy best fbest-sc fbest-sc2))]
     [else
      (define cells (cdr plan))
      ;; Seed with the spatially nearest cell so best-sc immediately prunes distant cells
@@ -2092,23 +2378,39 @@
                    (loop (cdr rem) c d2)
                    (loop (cdr rem) bc bd2))))))
      (define-values (b0 bsc0 bsc20)
-       (let ([cmax (vector-ref first-c 4)])
-         (if (and (fl> fbest-sc 0.0) (fl> cmax 0.0) (fl<= (fl* cmax cmax) (fl* fbest-sc2 md2)))
-             (values best fbest-sc fbest-sc2)
-             (scan-cell-vecs (vector-ref first-c 5) md2 fux fuy best fbest-sc fbest-sc2))))
+       (if use-atk?
+           (let* ([cub (cell-focus-ub first-c atk-prof)]
+                  [cmax (fl* (vector-ref first-c 4) cub)])
+             (if (and (fl> fbest-sc 0.0) (fl> cmax 0.0) (fl<= (fl* cmax cmax) (fl* fbest-sc2 md2)))
+                 (values best fbest-sc fbest-sc2)
+                 (scan-cell-vecs/atk (vector-ref first-c 5) md2 cub fux fuy best fbest-sc fbest-sc2
+                                     atk-row atk-type atk-ast atk-bonus)))
+           (let ([cmax (vector-ref first-c 4)])
+             (if (and (fl> fbest-sc 0.0) (fl> cmax 0.0) (fl<= (fl* cmax cmax) (fl* fbest-sc2 md2)))
+                 (values best fbest-sc fbest-sc2)
+                 (scan-cell-vecs (vector-ref first-c 5) md2 fux fuy best fbest-sc fbest-sc2)))))
      (let loop ([rem cells] [b b0] [bsc bsc0] [bsc2 bsc20])
        (if (null? rem)
            (values b bsc bsc2)
            (let ([c (car rem)])
              (if (eq? c first-c)
                  (loop (cdr rem) b bsc bsc2)
-                 (let ([md2 (cell-min-d2 c fux fuy)]
-                       [cmax (vector-ref c 4)])
-                   (if (and (fl> bsc 0.0) (fl> cmax 0.0) (fl<= (fl* cmax cmax) (fl* bsc2 md2)))
-                       (loop (cdr rem) b bsc bsc2)
-                       (let-values ([(nb nbsc nbsc2)
-                                     (scan-cell-vecs (vector-ref c 5) md2 fux fuy b bsc bsc2)])
-                         (loop (cdr rem) nb nbsc nbsc2))))))))]))
+                 (let ([md2 (cell-min-d2 c fux fuy)])
+                   (if use-atk?
+                       (let* ([cub (cell-focus-ub c atk-prof)]
+                              [cmax (fl* (vector-ref c 4) cub)])
+                         (if (and (fl> bsc 0.0) (fl> cmax 0.0) (fl<= (fl* cmax cmax) (fl* bsc2 md2)))
+                             (loop (cdr rem) b bsc bsc2)
+                             (let-values ([(nb nbsc nbsc2)
+                                           (scan-cell-vecs/atk (vector-ref c 5) md2 cub fux fuy b bsc bsc2
+                                                               atk-row atk-type atk-ast atk-bonus)])
+                               (loop (cdr rem) nb nbsc nbsc2))))
+                       (let ([cmax (vector-ref c 4)])
+                         (if (and (fl> bsc 0.0) (fl> cmax 0.0) (fl<= (fl* cmax cmax) (fl* bsc2 md2)))
+                             (loop (cdr rem) b bsc bsc2)
+                             (let-values ([(nb nbsc nbsc2)
+                                           (scan-cell-vecs (vector-ref c 5) md2 fux fuy b bsc bsc2)])
+                               (loop (cdr rem) nb nbsc nbsc2))))))))))]))
 
 ;; Direct `tactical-sim-unit` splash-commit evaluator avoiding 400-hash allocation per frame.
 (define *ARENA-SPLASH-EXCLUDED-HT*
@@ -2413,7 +2715,9 @@
                                      #:tactical-disposition [kw-disp #f]
                                      #:lanchester-ratio [kw-lr #f]
                                      #:enemy-upgrades [kw-enemy-upgs #f]
-                                     #:has-detector? [kw-has-detector? #f])
+                                     #:has-detector? [kw-has-detector? #f]
+                                     #:combat-should-engage? [kw-combat-should-engage? #t]
+                                     #:defending-home? [kw-defending-home? #f])
   (define-values (obs ledger)
     (if (hash? arg1)
         (values arg1 (or kw-ledger arg2))
@@ -2436,6 +2740,12 @@
         (hash-ref obs 'enemy-upgrades
                   (hash-ref obs 'observed-enemy-upgrades
                             (hash-ref obs 'mirror-observed-upgrades '())))))
+  (define mirror-tact-target (hash-ref obs 'mirror-tactical-target #f))
+  (define mirror-pred-unit (hash-ref obs 'mirror-predicted-enemy-unit #f))
+  (define mirror-base-fx (fast->fl base-x))
+  (define mirror-base-fy (fast->fl base-y))
+  (define mirror-nat-fx (fast->fl nat-x))
+  (define mirror-nat-fy (fast->fl nat-y))
   (define has-splash-effect?
     (and (pair? effects)
          (for/or ([eff (in-list effects)])
@@ -2455,8 +2765,25 @@
   (define enemy-z (hash-ref obs 'enemy-terrain-z 10))
 
   (define brain-cache (hash-ref! ROLLOUT-CACHE-BY-STATE brain make-hasheqv))
-  (define id-gen (+ (hash-ref brain-cache '__id-gen 0) 1))
-  (hash-set! brain-cache '__id-gen id-gen)
+  (define ally-id-cache (hash-ref! brain-cache '__ally-id-cache (lambda () (vector #f #f 0 0 #f))))
+  (define enemy-id-cache (hash-ref! brain-cache '__enemy-id-cache (lambda () (vector #f #f 0 0 #f))))
+  (define (ensure-unit-id-table! tbl-key id-cache units)
+    (define tbl (hash-ref! brain-cache tbl-key make-hasheqv))
+    (cond
+      [(and (eq? units (vector-ref id-cache 0))
+            (vector-ref id-cache 1))
+       (values tbl (vector-ref id-cache 2) (vector-ref id-cache 3) (vector-ref id-cache 4))]
+      [else
+       (define g (unsafe-fx+ (vector-ref id-cache 2) 1))
+       (define-values (cnt dup? all-imm?) (refresh-unit-id-table! tbl units g))
+       (vector-set! id-cache 0 units)
+       (vector-set! id-cache 1 all-imm?)
+       (vector-set! id-cache 2 g)
+       (vector-set! id-cache 3 cnt)
+       (vector-set! id-cache 4 dup?)
+       (values tbl g cnt dup?)]))
+  (define ally-id-gen (vector-ref ally-id-cache 2))
+  (define enemy-id-gen (vector-ref enemy-id-cache 2))
   (define len-au (length ally-units))
   (define len-eu (length enemy-units))
   (define len-eb (length enemy-bldgs))
@@ -2464,6 +2791,10 @@
   (define ally-by-id #f)
   (define enemy-by-id #f)
   (define cc (hash-ref brain-cache '__cluster-cache #f))
+  (define su-last-ht (hash-ref! brain-cache '__su-last-ht make-hasheqv))
+  (define reinf-a-seen (hash-ref! brain-cache '__reinf-a-seen make-hasheqv))
+  (define reinf-e-seen (hash-ref! brain-cache '__reinf-e-seen make-hasheqv))
+  (define arenas-from-cache? #f)
   (define arenas
     (or (and cc
              (pair? (vector-ref cc 7))
@@ -2475,21 +2806,24 @@
              (equal? our-z (vector-ref cc 5))
              (equal? enemy-z (vector-ref cc 6))
              (= clen (vector-ref cc 8))
-             (let ([abid (hash-ref! brain-cache '__ally-by-id make-hasheqv)]
-                   [ebid (hash-ref! brain-cache '__enemy-by-id make-hasheqv)])
-               (define-values (acnt adup?) (refresh-unit-id-table! abid ally-units id-gen))
+             (let-values ([(abid ag acnt adup?) (ensure-unit-id-table! '__ally-by-id ally-id-cache ally-units)])
                (set! ally-by-id abid)
+               (set! ally-id-gen ag)
                (and (not adup?)
                     (= acnt len-au)
-                    (let-values ([(ecnt edup?) (refresh-unit-id-table! ebid enemy-units id-gen)])
+                    (let-values ([(ebid eg ecnt edup?) (ensure-unit-id-table! '__enemy-by-id enemy-id-cache enemy-units)])
                       (set! enemy-by-id ebid)
-                      (and (not edup?) (= ecnt len-eu)))
-                    (refresh-cached-arenas! (vector-ref cc 7) abid ebid id-gen)
-                    (begin
-                      (vector-set! cc 0 frame)
-                      (vector-ref cc 7)))))
+                      (set! enemy-id-gen eg)
+                      (and (not edup?)
+                           (= ecnt len-eu)
+                           (refresh-cached-arenas! (vector-ref cc 7) abid ebid ag eg su-last-ht reinf-a-seen reinf-e-seen)
+                           (begin
+                             (set! arenas-from-cache? #t)
+                             (vector-set! cc 0 frame)
+                             (vector-ref cc 7)))))))
         (let ([fresh (cluster-tactical-arenas ally-units enemy-units enemy-bldgs
                                               #:chokes chokes #:our-z our-z #:enemy-z enemy-z)])
+          (hash-clear! su-last-ht)
           (when (and (pair? fresh) (or (>= len-au 16) (>= len-eu 16)))
             (let* ([raw-exp (+ frame 120)]
                    [exp-f (if (= (modulo raw-exp 16) 8) (+ raw-exp 4) raw-exp)])
@@ -2497,18 +2831,20 @@
                          (vector frame exp-f len-au len-eu len-eb our-z enemy-z fresh clen))))
           fresh)))
   (unless ally-by-id
-    (define abid (hash-ref! brain-cache '__ally-by-id make-hasheqv))
-    (refresh-unit-id-table! abid ally-units id-gen)
-    (set! ally-by-id abid))
+    (let-values ([(abid ag _acnt _adup?) (ensure-unit-id-table! '__ally-by-id ally-id-cache ally-units)])
+      (set! ally-by-id abid)
+      (set! ally-id-gen ag)))
   (set-tactical-mirror-brain-active-arenas! brain arenas)
   (cond
     [(null? arenas)
      (set-tactical-mirror-brain-last-decisions! brain '())
      (values '() (mutable-seteqv) '())]
     [else
-     (define ev-pool (hash-ref! brain-cache '__ev-pool make-hasheqv))
-     (when (> (hash-count ev-pool) 1024)
-       (hash-clear! ev-pool))
+     (define ev-pool-box (hash-ref! brain-cache '__ev-pool-box (lambda () (box (make-vector 256 #f)))))
+     (define ev-pool (unbox ev-pool-box))
+     (when (> (vector-length ev-pool) 1024)
+       (set! ev-pool (make-vector 256 #f))
+       (set-box! ev-pool-box ev-pool))
      (define ev-idx 0)
      (define actions '())
      (define committed-tags (mutable-seteqv))
@@ -2549,23 +2885,37 @@
                      (<= (abs (- re-cnt (vector-ref cached-entry 8))) 2)
                      (eq? sig-ew (vector-ref cached-entry 9))
                      (<= (+ (* dx dx) (* dy dy)) 9.0)))))
-       (define-values (raw-best pred-enemy best-val cur-val rollout committed-act locked?)
+       (define combat-suppress-arena?
+         (and (not kw-combat-should-engage?)
+              (not kw-defending-home?)))
+       (define-values (raw-best pred-enemy best-val cur-val rollout raw-committed-act locked?)
          (if reuse-locked?
              (let ([cr (vector-ref cached-entry 3)])
                (values (vector-ref cr 0) (vector-ref cr 1) (vector-ref cr 2)
                        (vector-ref cr 3) (vector-ref cr 4)
                        (arena-commitment-state-committed-action prev-st) #t))
-             (let-values ([(rb pe bv cv ro)
-                           (evaluate-arena-minimax-and-regret! brain arena frame #:strategic-opp-depth opp-d)])
-               (define-values (ca lk?)
-                 (resolve-committed-micro-action! brain arena frame rb pe bv cv))
-               (let* ([base-exp (+ frame (if cached-entry 28 (+ 20 (* 4 (modulo a-idx 4)))))]
-                      [next-exp (if (= (modulo base-exp 16) 8) (+ base-exp 4) base-exp)])
-                 (hash-set! brain-cache
-                            aid
-                            (vector #f acx acy (vector rb pe bv cv ro) next-exp
-                                    a-cnt e-cnt ra-cnt re-cnt sig-ew)))
-               (values rb pe bv cv ro ca lk?))))
+             (begin
+               (when arenas-from-cache?
+                 (unless enemy-by-id
+                   (let-values ([(ebid eg _ecnt _edup?) (ensure-unit-id-table! '__enemy-by-id enemy-id-cache enemy-units)])
+                     (set! enemy-by-id ebid)
+                     (set! enemy-id-gen eg)))
+                 (refresh-arena-reinforcing! arena ally-by-id enemy-by-id ally-id-gen enemy-id-gen))
+               (let-values ([(rb pe bv cv ro)
+                             (evaluate-arena-minimax-and-regret! brain arena frame #:strategic-opp-depth opp-d)])
+                 (define-values (ca lk?)
+                   (resolve-committed-micro-action! brain arena frame rb pe bv cv))
+                 (let* ([base-exp (+ frame (if cached-entry 28 (+ 20 (* 4 (modulo a-idx 4)))))]
+                        [next-exp (if (= (modulo base-exp 16) 8) (+ base-exp 4) base-exp)])
+                   (hash-set! brain-cache
+                              aid
+                              (vector #f acx acy (vector rb pe bv cv ro) next-exp
+                                      a-cnt e-cnt ra-cnt re-cnt sig-ew)))
+                 (values rb pe bv cv ro ca lk?)))))
+       (define committed-act
+         (if combat-suppress-arena?
+             'DisengageRetreat
+             raw-committed-act))
        (define d1-val (tactical-horizon-eval-net-value (mirrored-rollout-result-d1-eval rollout)))
        (define d2-val (tactical-horizon-eval-net-value (mirrored-rollout-result-d2-eval rollout)))
        (define d3-val (tactical-horizon-eval-net-value (mirrored-rollout-result-d3-eval rollout)))
@@ -2604,10 +2954,10 @@
        (define cached-a (and need-spatial-targets? any-ally-air-dps? (hash-ref brain-cache a-plan-key #f)))
        (define (resolve-enemy-splash-hash e etype)
          (unless enemy-by-id
-           (let ([ebid (hash-ref! brain-cache '__enemy-by-id make-hasheqv)])
-             (refresh-unit-id-table! ebid enemy-units id-gen)
-             (set! enemy-by-id ebid)))
-         (or (unit-id-table-lookup enemy-by-id id-gen (tactical-sim-unit-id e))
+           (let-values ([(ebid eg _ecnt _edup?) (ensure-unit-id-table! '__enemy-by-id enemy-id-cache enemy-units)])
+             (set! enemy-by-id ebid)
+             (set! enemy-id-gen eg)))
+         (or (unit-id-table-lookup enemy-by-id enemy-id-gen (tactical-sim-unit-id e))
              (hash 'id (tactical-sim-unit-id e)
                    'type etype
                    'x (tactical-sim-unit-x e)
@@ -2637,12 +2987,55 @@
                            (cons (resolve-enemy-splash-hash e etype) tlrev))
                      (let* ([ed-air (tactical-sim-unit-air-dps e)]
                             [flying? (tactical-sim-unit-flying? e)]
+                            [colossus? (eq? etype 'colossus)]
                             [ev
                              (if need-spatial-targets?
-                                 (let* ([pconst (fast-enemy-priority-const etype arena-has-stealth? e)]
+                                 (let* ([tact-mult
+                                         (if (or mirror-tact-target mirror-pred-unit)
+                                             (let ([zone-m
+                                                    (cond
+                                                      [(eq? mirror-tact-target 'main-mineral-line-drop-or-air)
+                                                       (let ([mdx (fl- (tactical-sim-unit-x e) mirror-base-fx)]
+                                                             [mdy (fl- (tactical-sim-unit-y e) mirror-base-fy)])
+                                                         (if (fl<= (fl+ (fl* mdx mdx) (fl* mdy mdy)) 256.0)
+                                                             (if (or flying?
+                                                                     (memq etype '(medivac warp-prism warp-prism-phasing overlord-transport
+                                                                                   liberator banshee oracle mutalisk dark-templar)))
+                                                                 1.45
+                                                                 1.25)
+                                                             1.0))]
+                                                      [(eq? mirror-tact-target 'natural-choke-timing-push)
+                                                       (let ([ndx (fl- (tactical-sim-unit-x e) mirror-nat-fx)]
+                                                             [ndy (fl- (tactical-sim-unit-y e) mirror-nat-fy)])
+                                                         (if (fl<= (fl+ (fl* ndx ndx) (fl* ndy ndy)) 256.0)
+                                                             1.25
+                                                             1.0))]
+                                                      [(eq? mirror-tact-target 'hidden-third-base-expansion)
+                                                       (if (memq etype '(drone probe scv)) 1.35 1.10)]
+                                                      [else 1.0])])
+                                               (if (and mirror-pred-unit (eq? etype mirror-pred-unit))
+                                                   (fl* zone-m 1.15)
+                                                   zone-m))
+                                             1.0)]
+                                        [pconst (fl* (fast-enemy-priority-const etype arena-has-stealth? e) tact-mult)]
                                         [ehp (flmax 1e-6 (fl+ (tactical-sim-unit-hp e) (tactical-sim-unit-shield e)))]
-                                        [slot (hash-ref ev-pool ev-idx #f)])
-                                   (set! ev-idx (+ ev-idx 1))
+                                        [tidx (vector-ref (fast-unit-stat-vec etype) 19)]
+                                        [eflags (tactical-sim-unit-attr-flags e)]
+                                        [sbits (unsafe-fxior
+                                                (unsafe-fxior
+                                                 (if (fl> (tactical-sim-unit-shield e) 0.0) 1 0)
+                                                 (if (not (unsafe-fx= (unsafe-fxand eflags 128) 0)) 2 0))
+                                                (unsafe-fxior
+                                                 (if (not (unsafe-fx= (unsafe-fxand eflags 256) 0)) 4 0)
+                                                 (if (not (unsafe-fx= (unsafe-fxand eflags 64) 0)) 8 0)))]
+                                        [slot (begin
+                                                (when (>= ev-idx (vector-length ev-pool))
+                                                  (let* ([old-len (vector-length ev-pool)]
+                                                         [new-v (make-vector (max 512 (* 2 old-len)) #f)])
+                                                    (vector-copy! new-v 0 ev-pool)
+                                                    (set! ev-pool new-v)
+                                                    (set-box! ev-pool-box new-v)))
+                                                (vector-ref ev-pool ev-idx))])
                                    (if slot
                                        (begin
                                          (vector-set! slot 0 e)
@@ -2650,13 +3043,19 @@
                                          (vector-set! slot 2 (tactical-sim-unit-x e))
                                          (vector-set! slot 3 (tactical-sim-unit-y e))
                                          (vector-set! slot 4 (fl/ pconst ehp))
+                                         (vector-set! slot 5 tidx)
+                                         (vector-set! slot 6 sbits)
+                                         (set! ev-idx (+ ev-idx 1))
                                          slot)
                                        (let ([v (vector e
                                                         flying?
                                                         (tactical-sim-unit-x e)
                                                         (tactical-sim-unit-y e)
-                                                        (fl/ pconst ehp))])
-                                         (hash-set! ev-pool (- ev-idx 1) v)
+                                                        (fl/ pconst ehp)
+                                                        tidx
+                                                        sbits)])
+                                         (vector-set! ev-pool ev-idx v)
+                                         (set! ev-idx (+ ev-idx 1))
                                          v)))
                                  #f)]
                             [raw-e
@@ -2686,7 +3085,7 @@
                              (or first-e e)
                              (or aa? (fl> ed-air 0.0))
                              (if (and ev (not flying?)) (cons ev gvecs) gvecs)
-                             (if (and ev flying?) (cons ev avecs) avecs)
+                             (if (and ev (or flying? colossus?)) (cons ev avecs) avecs)
                              tlrev2)))))))
        (define splash-hazard-present? (or (pair? arena-tank-lurkers-rev) has-splash-effect?))
        (define arena-commit-splash?
@@ -2707,7 +3106,7 @@
                                ([su (in-list arena-ally-units)])
                        (let* ([uid (tactical-sim-unit-id su)]
                               [utype (tactical-sim-unit-type su)]
-                              [u-hash (or (unit-id-table-lookup ally-by-id id-gen uid)
+                              [u-hash (or (unit-id-table-lookup ally-by-id ally-id-gen uid)
                                           (hash 'id uid 'type utype
                                                 'x (tactical-sim-unit-x su)
                                                 'y (tactical-sim-unit-y su)
@@ -2755,6 +3154,9 @@
                  (< (- frame (vector-ref cached 0)) 20)
                  (>= frame (vector-ref cached 0))
                  (eq? arena-has-stealth? (vector-ref cached 1))
+                 (>= (vector-length cached) 6)
+                 (eq? mirror-tact-target (vector-ref cached 4))
+                 (eq? mirror-pred-unit (vector-ref cached 5))
                  (let ([snap (vector-ref cached 2)])
                    (and (= (length vecs) (vector-length snap))
                         (let vloop ([rem vecs] [i 0])
@@ -2764,6 +3166,7 @@
                              (define ev (car rem))
                              (define sp (vector-ref snap i))
                              (and (eq? (vector-ref ev 0) (vector-ref sp 0))
+                                  (fx= (vector-ref ev 6) (vector-ref sp 4))
                                   (fl<= (flabs (fl- (vector-ref ev 2) (vector-ref sp 1))) 0.65)
                                   (fl<= (flabs (fl- (vector-ref ev 3) (vector-ref sp 2))) 0.65)
                                   (fl<= (flabs (fl- (vector-ref ev 4) (vector-ref sp 3)))
@@ -2775,8 +3178,8 @@
             (when (and plan (car plan))
               (define snap
                 (for/vector ([ev (in-list vecs)])
-                  (vector-immutable (vector-ref ev 0) (vector-ref ev 2) (vector-ref ev 3) (vector-ref ev 4))))
-              (hash-set! brain-cache pkey (vector frame arena-has-stealth? snap plan)))
+                  (vector-immutable (vector-ref ev 0) (vector-ref ev 2) (vector-ref ev 3) (vector-ref ev 4) (vector-ref ev 6))))
+              (hash-set! brain-cache pkey (vector frame arena-has-stealth? snap plan mirror-tact-target mirror-pred-unit)))
             plan]))
        (define ground-plan (and need-spatial-targets? any-ally-ground-dps? (pair? ground-vecs)
                                 (resolve-cached-spatial-plan g-plan-key cached-g ground-vecs)))
@@ -2797,7 +3200,7 @@
                (values (vector-ref cached-meta 0)
                        (vector-ref cached-meta 1)
                        (vector-ref cached-meta 2))
-               (let* ([uh (or (unit-id-table-lookup ally-by-id id-gen uid)
+               (let* ([uh (or (unit-id-table-lookup ally-by-id ally-id-gen uid)
                               (hash 'id uid 'type utype 'x ux 'y uy 'weapon-cooldown w-cd))]
                       [isw? (and ledger (order-ledger-unit-in-attack-swing? ledger uh frame))]
                       [u-ab-id (let ([raw-id (hash-ref uh 'order-ability-id 0)])
@@ -2842,11 +3245,11 @@
                         (> (tactical-sim-unit-ground-dps su) 0.0))
                    (define best-w
                      (argmin (lambda (w0)
-                               (define w (if enemy-by-id (or (unit-id-table-lookup enemy-by-id id-gen (hash-ref w0 'id -1)) w0) w0))
+                               (define w (if enemy-by-id (or (unit-id-table-lookup enemy-by-id enemy-id-gen (hash-ref w0 'id -1)) w0) w0))
                                (+ (hash-ref w 'hp 40) (hash-ref w 'shield 0)))
                              arena-workers))
                    (unit-hash->tactical-sim-unit
-                    (if enemy-by-id (or (unit-id-table-lookup enemy-by-id id-gen (hash-ref best-w 'id -1)) best-w) best-w)
+                    (if enemy-by-id (or (unit-id-table-lookup enemy-by-id enemy-id-gen (hash-ref best-w 'id -1)) best-w) best-w)
                     'enemy)]
                   [else
                    (define best-hittable
@@ -2854,11 +3257,11 @@
                            [adps (tactical-sim-unit-air-dps su)])
                        (define-values (b1 sc1 sc21)
                          (if (and ground-plan (> gdps 0.0))
-                             (pick-best-target-from-plan ground-plan ux uy #f -inf.0 0.0)
+                             (pick-best-target-from-plan ground-plan ux uy #f -inf.0 0.0 su)
                              (values #f -inf.0 0.0)))
                        (define-values (b2 _sc2 _sc22)
                          (if (and air-plan (> adps 0.0))
-                             (pick-best-target-from-plan air-plan ux uy b1 sc1 sc21)
+                             (pick-best-target-from-plan air-plan ux uy b1 sc1 sc21 su)
                              (values b1 sc1 sc21)))
                        b2))
                    (cond
@@ -2870,7 +3273,11 @@
            (and target-su
                 (not disruptor?)
                 (not (eq? committed-act 'DisengageRetreat))
-                (let ([wr (sim-unit-weapon-range-vs su target-su)])
+                (let ([wr (if (and (eq? (tactical-sim-unit-type target-su) 'colossus)
+                                   (fl> (tactical-sim-unit-air-range su) 0.0)
+                                   (fl<= (tactical-sim-unit-ground-range su) 0.0))
+                              (tactical-sim-unit-air-range su)
+                              (sim-unit-weapon-range-vs su target-su))])
                   (and (fl> wr 0.0)
                        (fl<= (fast-dist2d ux uy
                                           (tactical-sim-unit-x target-su)

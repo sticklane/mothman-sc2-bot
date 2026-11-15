@@ -9,13 +9,19 @@
 
 ;; Safe dynamic bridge for calling untyped map-grid predicate callbacks from Typed Racket.
 (module grid-dyn racket/base
-  (provide grid-call-2)
+  (provide grid-call-2 grid-call-2-fast valid-grid-ref2)
+  (define (valid-grid-ref2 proc)
+    (and (procedure? proc) (procedure-arity-includes? proc 2) proc))
+  (define (grid-call-2-fast proc x y)
+    (proc x y))
   (define (grid-call-2 proc x y)
     (if (and (procedure? proc) (procedure-arity-includes? proc 2))
         (proc x y)
         #f)))
 
 (unsafe-require/typed (submod "." grid-dyn)
+  [valid-grid-ref2 (-> Any Any)]
+  [grid-call-2-fast (-> Any Integer Integer Any)]
   [grid-call-2 (-> Any Integer Integer Any)])
 
 (provide
@@ -242,9 +248,10 @@
 
 (: wrap-grid-ref (-> Any GridRef2))
 (define (wrap-grid-ref proc)
-  (if (procedure? proc)
+  (define checked (valid-grid-ref2 proc))
+  (if checked
       (lambda ([ix : Integer] [iy : Integer])
-        (grid-call-2 proc ix iy))
+        (grid-call-2-fast checked ix iy))
       #f))
 
 (: extract-map-grid-accessors (-> Any (Values Boolean Integer Integer GridRef2 GridRef2 GridRef2)))
@@ -282,8 +289,11 @@
   (define y0 : Integer (exact-round (- fcy fhh)))
   (define y1 : Integer (exact-round (+ fcy fhh)))
   (define total-cells : Integer (* (- x1 x0) (- y1 y0)))
+  (define bref-ok? : Boolean (not (not (valid-grid-ref2 bref))))
+  (define pref-ok? : Boolean (not (not (valid-grid-ref2 pref))))
+  (define href-ok? : Boolean (and check-height? (not (not (valid-grid-ref2 href)))))
   (cond
-    [(not (and (>= x0 0) (<= x1 w) (>= y0 0) (<= y1 h) (> total-cells 0)))
+    [(not (and bref-ok? (>= x0 0) (<= x1 w) (>= y0 0) (<= y1 h) (> total-cells 0)))
      #f]
     [else
      (let loop-x ([ix : Integer x0]
@@ -292,10 +302,10 @@
                   [pathable-cells : Nonnegative-Integer 0])
        (cond
          [(>= ix x1)
-          (and (or (not (procedure? pref))
+          (and (or (not pref-ok?)
                    (>= (* 2 pathable-cells) total-cells))
                (or (not check-height?)
-                   (not (procedure? href))
+                   (not href-ok?)
                    (> min-th max-th)
                    (<= (- max-th min-th) 1.5)))]
          [else
@@ -305,14 +315,15 @@
                        [pc : Nonnegative-Integer pathable-cells])
             (cond
               [(>= iy y1) (loop-x (add1 ix) mn mx pc)]
-              [(not (grid-cell-positive? (grid-call-2 bref ix iy))) #f]
+              [(not (grid-cell-positive? (grid-call-2-fast bref ix iy))) #f]
               [else
                (define next-pc : Nonnegative-Integer
-                 (if (and (procedure? pref) (grid-cell-positive? (grid-call-2 pref ix iy)))
+                 (if (and pref-ok? (grid-cell-positive? (grid-call-2-fast pref ix iy)))
                      (add1 pc)
                      pc))
-               (if (and check-height? (procedure? href))
-                   (let ([th : Float (grid-height-val href ix iy fth)])
+               (if href-ok?
+                   (let* ([v (grid-call-2-fast href ix iy)]
+                          [th : Float (if (real? v) (->float v) fth)])
                      (if (<= (abs (- th fth)) 1.75)
                          (loop-y (add1 iy) (min mn th) (max mx th) next-pc)
                          #f))
@@ -348,10 +359,11 @@
   (define win-h : Nonnegative-Integer (max 1 (min win-size (- h win-y0))))
   (define n-cells : Nonnegative-Integer (* win-w win-h))
   (define base-pass : Bytes (make-bytes n-cells 0))
-  (for* ([ly : Nonnegative-Integer (in-range win-h)]
-         [lx : Nonnegative-Integer (in-range win-w)])
-    (when (grid-cell-positive? (grid-call-2 pref (+ win-x0 lx) (+ win-y0 ly)))
-      (bytes-set! base-pass (+ (* ly win-w) lx) 1)))
+  (when (valid-grid-ref2 pref)
+    (for* ([ly : Nonnegative-Integer (in-range win-h)]
+           [lx : Nonnegative-Integer (in-range win-w)])
+      (when (grid-cell-positive? (grid-call-2-fast pref (+ win-x0 lx) (+ win-y0 ly)))
+        (bytes-set! base-pass (+ (* ly win-w) lx) 1))))
 
   (: snap-passable-local (-> Real Real Any (U False (Pairof Integer Integer))))
   (define (snap-passable-local target-wx target-wy [cell-ok? #f])
@@ -523,10 +535,10 @@
   (define h : Nonnegative-Integer (max 1 raw-h))
   (define n : Nonnegative-Integer (* w h))
   (define walk : Bytes (make-bytes n 1))
-  (when (procedure? pref)
+  (when (valid-grid-ref2 pref)
     (for* ([y : Nonnegative-Integer (in-range h)]
            [x : Nonnegative-Integer (in-range w)])
-      (unless (grid-cell-positive? (grid-call-2 pref x y))
+      (unless (grid-cell-positive? (grid-call-2-fast pref x y))
         (bytes-set! walk (+ x (* y w)) 0))))
   (for ([r : Any (in-list blocked-rects)])
     (define-values (rcx rcy rhw rhh) (rect-spec->xywh r))

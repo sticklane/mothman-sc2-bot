@@ -2,10 +2,10 @@
 
 ;; =============================================================================
 ;; `tools/run-lotv-unit-tester.rkt`
-;; Offline Pure-Racket CLI for Mothman's 8 Asymmetric LotV Unit-Tester Scenarios
+;; Offline Pure-Racket CLI for Mothman's 19 Asymmetric LotV Unit-Tester Scenarios
 ;;
 ;; Supports:
-;;   --all             Run all 8 asymmetric LotV scenarios (`default-ai` & `mothman-tactics`)
+;;   --all             Run all 19 asymmetric LotV scenarios (`default-ai` & `mothman-tactics`)
 ;;   --scenario <id>   Run one named scenario
 ;;   --json            Emit structured JSON report to stdout
 ;;   --verify          Verify all selected scenarios (`default-ai -> enemy`,
@@ -31,16 +31,16 @@
     [else v]))
 
 (define (print-scenario-table results)
-  (printf "==========================================================================================\n")
+  (printf "==================================================================================================\n")
   (printf "MOTHMAN LOTV UNIT TESTER (default-ai vs mothman-tactics)\n")
-  (printf "==========================================================================================\n")
+  (printf "==================================================================================================\n")
   (printf "~a ~a ~a ~a ~a\n"
-          (~a "SCENARIO" #:min-width 48)
+          (~a "SCENARIO" #:min-width 58)
           (~a "DEFAULT" #:min-width 9)
           (~a "MOTHMAN" #:min-width 9)
           (~a "ALIVE(D/M)" #:min-width 12)
           "STATUS")
-  (printf "------------------------------------------------------------------------------------------\n")
+  (printf "--------------------------------------------------------------------------------------------------\n")
   (for ([r (in-list results)])
     (define def (hash-ref r 'default_ai))
     (define moth (hash-ref r 'mothman_tactics))
@@ -49,12 +49,12 @@
               (hash-ref def 'ally_alive) (hash-ref def 'ally_start)
               (hash-ref moth 'ally_alive) (hash-ref moth 'ally_start)))
     (printf "~a ~a ~a ~a ~a\n"
-            (~a (hash-ref r 'scenario) #:min-width 48)
+            (~a (hash-ref r 'scenario) #:min-width 58)
             (~a (hash-ref r 'default_winner) #:min-width 9)
             (~a (hash-ref r 'mothman_winner) #:min-width 9)
             (~a alive-str #:min-width 12)
             (if (hash-ref r 'passed #f) "PASS" "FAIL")))
-  (printf "==========================================================================================\n"))
+  (printf "==================================================================================================\n"))
 
 (module+ main
   (define run-all? #f)
@@ -66,7 +66,7 @@
   (command-line
    #:program "run-lotv-unit-tester.rkt"
    #:once-each
-   [("--all") "Run all 8 LotV asymmetric combat scenarios"
+   [("--all") "Run all 19 LotV asymmetric combat scenarios"
               (set! run-all? #t)]
    [("--scenario") sid "Run a single scenario by ID"
                    (set! one-scenario sid)]
@@ -92,7 +92,7 @@
                      'failed (if (hash-ref res 'passed #f) 0 1)
                      'all_passed (hash-ref res 'passed #f)
                      'results (list res)))
-           (run-all-lotv-unit-tester-scenarios)))
+           (run-all-lotv-unit-tester-scenarios #:scenarios LOTV-UNIT-TESTER-SCENARIOS)))
      (cond
        [emit-json?
         (write-json (sanitize-for-json summary))

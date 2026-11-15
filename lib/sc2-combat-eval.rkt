@@ -17,6 +17,8 @@
          racket/match
          racket/math
          racket/set
+         racket/fixnum
+         racket/flonum
          typed/racket/unsafe
          "sc2-types.rkt"
          "sc2-game-constants.rkt"
@@ -115,7 +117,29 @@
  fap-posture-with-hysteresis
  purplewave-traffic-retreat
  compute-kite-vector
- compute-concave-arc)
+ compute-concave-arc
+
+ ;; 9. LotV Attribute Bitmasks, Collision Radii, Exact Weapon-vs-Armor & Spell Gates
+ SC2-UNIT-ATTR-LIGHT
+ SC2-UNIT-ATTR-ARMORED
+ SC2-UNIT-ATTR-BIOLOGICAL
+ SC2-UNIT-ATTR-MECHANICAL
+ SC2-UNIT-ATTR-PSIONIC
+ SC2-UNIT-ATTR-MASSIVE
+ SC2-UNIT-ATTR-SHIELDED
+ SC2-UNIT-ATTR-FRENZIED
+ SC2-UNIT-ATTR-STRUCTURE
+ SC2-UNIT-ATTR-HEROIC
+ canonical-unit-type-sym
+ unit-attribute-mask
+ unit-collision-radius
+ aoe-radius-packing-multiplier
+ unit-primary-bonus-attr-mask
+ compute-exact-hit-damage-vs-target/fast
+ compute-exact-hit-damage-vs-target
+ compute-exact-weapon-dps-vs-target
+ spell-valid-for-target-attrs?
+ predict-engagement-outcome)
 
 ;; =============================================================================
 ;; Internal Safe Numeric & Extraction Helpers
@@ -346,6 +370,7 @@
          (counter-branch 'stalker-colossus 'hydralisk 'lurker   '(lair hydralisk-den)         250)
          (counter-branch 'sky-toss         'hydralisk 'corruptor '(lair hydralisk-den)        250)
          (counter-branch 'muta-flock       'hydralisk 'queen    '(lair hydralisk-den)         250)
+         (counter-branch 'queen-infestor   'lurker    'ravager  '(lair hydralisk-den lurker-den) 350)
          (counter-branch 'early-rush       'roach     'zergling '(roach-warren)               150))))
 
 (: PROTOSS-COUNTER-TREE plausible-counter-tree)
@@ -359,11 +384,12 @@
          (counter-branch 'roach-ravager    'immortal 'zealot   '(cybernetics-core robotics-facility) 350)
          (counter-branch 'lurker-contain   'immortal 'zealot   '(cybernetics-core robotics-facility) 350)
          (counter-branch 'bio-ball         'colossus 'stalker  '(robotics-facility robotics-bay)    500)
-         (counter-branch 'air-fleet        'stalker  'archon   '(cybernetics-core)                  150)
+         (counter-branch 'air-fleet        'void-ray 'tempest  '(cybernetics-core stargate)         300)
          (counter-branch 'mech-siege       'immortal 'zealot   '(cybernetics-core robotics-facility) 350)
          (counter-branch 'stalker-colossus 'immortal 'zealot   '(cybernetics-core robotics-facility) 350)
-         (counter-branch 'sky-toss         'stalker  'archon   '(cybernetics-core)                  150)
+         (counter-branch 'sky-toss         'void-ray 'tempest  '(cybernetics-core stargate)         300)
          (counter-branch 'muta-flock       'phoenix  'archon   '(cybernetics-core stargate)         300)
+         (counter-branch 'queen-infestor   'archon   'colossus '(templar-archive)                   350)
          (counter-branch 'ling-bane-hydra  'colossus 'zealot   '(robotics-facility robotics-bay)    500)
          (counter-branch 'early-rush       'zealot   'stalker  '(gateway)                           150))))
 
@@ -377,13 +403,14 @@
          (counter-branch 'zergling-flood   'widow-mine 'hellion  '(factory)          200)
          (counter-branch 'roach-ravager    'marauder   'siege-tank '(barracks-techlab) 100)
          (counter-branch 'lurker-contain   'siege-tank 'marauder '(factory)          250)
-         (counter-branch 'protoss-deathball 'marauder  'viking   '(barracks-techlab) 200)
+         (counter-branch 'protoss-deathball 'marauder  'ghost    '(barracks-techlab ghost-academy) 200)
          (counter-branch 'air-fleet        'viking     'marine   '(starport)         250)
          (counter-branch 'bio-ball         'siege-tank 'marauder '(factory)          250)
          (counter-branch 'mech-siege       'siege-tank 'marauder '(factory)          250)
-         (counter-branch 'stalker-colossus 'marauder   'viking   '(barracks-techlab) 100)
+         (counter-branch 'stalker-colossus 'marauder   'ghost    '(barracks-techlab ghost-academy) 150)
          (counter-branch 'sky-toss         'viking     'marine   '(starport)         250)
          (counter-branch 'muta-flock       'thor       'marine   '(factory armory)   300)
+         (counter-branch 'queen-infestor   'ghost      'liberator '(barracks ghost-academy) 250)
          (counter-branch 'ling-bane-hydra  'siege-tank 'hellion  '(factory)          250)
          (counter-branch 'early-rush       'marauder   'marine   '(barracks-techlab) 100))))
 
@@ -411,6 +438,8 @@
            types))
   (define viking-cnt : Integer
     (count (lambda ([t : Symbol]) (not (not (memq t '(viking viking-fighter))))) types))
+  (define queen-infestor-cnt : Integer
+    (count (lambda ([t : Symbol]) (not (not (memq t '(queen infestor infestor-burrowed))))) types))
   (cond
     [(or (memq 'lurker types) (memq 'lurker-burrowed types) (memq 'lurker-mp-burrowed types))
      'lurker-contain]
@@ -420,6 +449,8 @@
      'air-fleet]
     [(>= (count (lambda ([t : Symbol]) (eq? t 'zergling)) types) 6)
      'zergling-flood]
+    [(or (memq 'infestor types) (memq 'infestor-burrowed types) (>= queen-infestor-cnt 4))
+     'queen-infestor]
     [(or (memq 'siege-tank types) (memq 'siege-tank-sieged types)) 'mech-siege]
     [(or (memq 'roach types) (memq 'ravager types)) 'roach-ravager]
     [(>= bio-cnt 5)
@@ -441,6 +472,8 @@
      'stalker-colossus]
     [(memq 'zergling types)
      'ling-bane-hydra]
+    [(memq 'queen types)
+     'queen-infestor]
     [else 'standard-macro]))
 
 (: normalize-mastermind-bldg-sym (-> Any Symbol))
@@ -886,11 +919,25 @@
 
 ;; Shared target scoring used by `select-focus-fire-target` (live/FAP combat).
 (: score-focus-fire-priority (-> Any Any Real Boolean Boolean Flonum Flonum Flonum Flonum))
-(define (score-focus-fire-priority _attacker e arange stealth-active? has-attacker-pos? ax ay default-dps)
+(define (score-focus-fire-priority attacker e arange stealth-active? has-attacker-pos? ax ay default-dps)
   (define etype : Symbol
     (if (fap-unit? e)
         'unknown
         (symbol-or-default (dyn-hash-ref e 'type 'unknown) 'unknown)))
+  (define attacker-type : Symbol
+    (if (hash? attacker)
+        (symbol-or-default (dyn-hash-ref attacker 'type 'unknown) 'unknown)
+        'unknown))
+  (define attr-bonus-mult : Flonum
+    (if (and (not (eq? attacker-type 'unknown))
+             (not (eq? etype 'unknown)))
+        (let ([bmask (unit-primary-bonus-attr-mask attacker-type)]
+              [tmask (unit-attribute-mask etype)])
+          (cond
+            [(fx= bmask 0) 1.0]
+            [(fx> (fxand bmask tmask) 0) 3.0]
+            [else 0.55]))
+        1.0))
   (define detector-target? : Boolean
     (not (not (or (memq etype SC2-MOBILE-DETECTOR-SYMS)
                   (memq etype SC2-STATIC-DETECTOR-SYMS)))))
@@ -903,7 +950,8 @@
     (max 1.0
          (if (fap-unit? e)
              (safe-real (fap-unit-hp e) 45.0)
-             (safe-real (dyn-hash-ref e 'hp 45.0) 45.0))))
+             (+ (safe-real (dyn-hash-ref e 'hp 45.0) 45.0)
+                (safe-real (dyn-hash-ref e 'shields 0.0) 0.0)))))
   (define raw-dps : Flonum
     (cond
       [(and detector-target? stealth-active?)
@@ -915,7 +963,7 @@
       [(fap-unit? e) (safe-real (fap-unit-dps e) default-dps)]
       [else (safe-real (dyn-hash-ref e 'dps 12.0) 12.0)]))
   (define dps : Flonum (max 1.0 raw-dps))
-  (define base-priority : Flonum (* decoy-mult (/ dps hp)))
+  (define base-priority : Flonum (* decoy-mult attr-bonus-mult (/ dps hp)))
   (define reach-weight : Flonum
     (if has-attacker-pos?
         (let* ([ex (if (fap-unit? e)
@@ -1147,3 +1195,549 @@
   (define mag (max 1.0 (dist2d fx fy fex fey)))
   (values (exact-round (+ fx (* sd (/ dx mag))))
           (exact-round (+ fy (* sd (/ dy mag))))))
+
+;; =============================================================================
+;; 9. Predictive Engagement Outcome Evaluator (Slice 1.5A)
+;; =============================================================================
+
+(define *combat-norm-sym-cache* : (HashTable String Symbol) (make-hash))
+
+(: normalize-combat-unit-sym (-> Any Symbol))
+(define (normalize-combat-unit-sym raw)
+  (cond
+    [(symbol? raw)
+     (define key (symbol->string raw))
+     (define cached (hash-ref *combat-norm-sym-cache* key #f))
+     (if cached
+         cached
+         (let* ([kebab (string->kebab-canon key)]
+                [canon (canonical-unit-type-sym (string->symbol kebab))]
+                [final (resolve-combat-sym-alias canon)])
+           (hash-set! *combat-norm-sym-cache* key final)
+           final))]
+    [(string? raw)
+     (define cached (hash-ref *combat-norm-sym-cache* raw #f))
+     (if cached
+         cached
+         (let* ([kebab (string->kebab-canon raw)]
+                [canon (canonical-unit-type-sym (string->symbol kebab))]
+                [final (resolve-combat-sym-alias canon)])
+           (hash-set! *combat-norm-sym-cache* raw final)
+           final))]
+    [else 'unknown]))
+
+(: string->kebab-canon (-> String String))
+(define (string->kebab-canon s)
+  (define len (string-length s))
+  (define out (open-output-string))
+  (let loop ([i : Nonnegative-Fixnum 0]
+             [prev-ch : (U False Char) #f]
+             [prev-dash? : Boolean #t])
+    (if (< i len)
+        (let ([ch (string-ref s i)])
+          (cond
+            [(or (char=? ch #\_) (char=? ch #\space) (char=? ch #\-))
+             (unless prev-dash?
+               (write-char #\- out))
+             (loop (fx+ i 1) ch #t)]
+            [(and (char-upper-case? ch)
+                  prev-ch
+                  (not prev-dash?)
+                  (or (char-lower-case? prev-ch) (char-numeric? prev-ch)))
+             (write-char #\- out)
+             (write-char (char-downcase ch) out)
+             (loop (fx+ i 1) ch #f)]
+            [else
+             (write-char (char-downcase ch) out)
+             (loop (fx+ i 1) ch #f)]))
+        (get-output-string out))))
+
+(: resolve-combat-sym-alias (-> Symbol Symbol))
+(define (resolve-combat-sym-alias s)
+  (case s
+    [(viking-fighter vikingfighter) 'viking]
+    [(siegetanksieged siegetank) (if (eq? s 'siegetanksieged) 'siege-tank-sieged 'siege-tank)]
+    [(thorap) 'thor-ap]
+    [(lurker-mp lurker-burrowed-mp) 'lurker]
+    [(baneling-cocoon) 'baneling]
+    [(broodlord) 'brood-lord]
+    [(swarmhost swarm-host-mp) 'swarm-host]
+    [(voidray) 'void-ray]
+    [(hightemplar) 'high-templar]
+    [(darktemplar) 'dark-templar]
+    [(missileturret) 'missile-turret]
+    [(photoncannon) 'photon-cannon]
+    [(shieldbattery) 'shield-battery]
+    [(sporecrawler) 'spore-crawler]
+    [(spinecrawler) 'spine-crawler]
+    [else s]))
+
+(: parse-combat-upgrade-suffix (-> String Nonnegative-Fixnum))
+(define (parse-combat-upgrade-suffix s)
+  (define len (string-length s))
+  (if (> len 0)
+      (let ([last-c (string-ref s (- len 1))])
+        (cond
+          [(char=? last-c #\3) 3]
+          [(char=? last-c #\2) 2]
+          [(char=? last-c #\1) 1]
+          [else 0]))
+      0))
+
+(struct combat-upgrade-levels
+  ([gen-atk : Nonnegative-Fixnum]
+   [bio-atk : Nonnegative-Fixnum]
+   [mech-atk : Nonnegative-Fixnum]
+   [air-atk : Nonnegative-Fixnum]
+   [melee-atk : Nonnegative-Fixnum]
+   [missile-atk : Nonnegative-Fixnum]
+   [ground-armor : Nonnegative-Fixnum]
+   [air-armor : Nonnegative-Fixnum]
+   [shields : Nonnegative-Fixnum]))
+
+(: parse-combat-upgrades (-> Any combat-upgrade-levels))
+(define (parse-combat-upgrades raw)
+  (define gen-atk : Nonnegative-Fixnum 0)
+  (define bio-atk : Nonnegative-Fixnum 0)
+  (define mech-atk : Nonnegative-Fixnum 0)
+  (define air-atk : Nonnegative-Fixnum 0)
+  (define melee-atk : Nonnegative-Fixnum 0)
+  (define missile-atk : Nonnegative-Fixnum 0)
+  (define ground-armor : Nonnegative-Fixnum 0)
+  (define air-armor : Nonnegative-Fixnum 0)
+  (define shield-lvl : Nonnegative-Fixnum 0)
+  (: add-upg-sym! (-> Symbol Void))
+  (define (add-upg-sym! s)
+    (define k (normalize-combat-unit-sym s))
+    (define str (symbol->string k))
+    (define lvl (parse-combat-upgrade-suffix str))
+    (when (> lvl 0)
+      (cond
+        [(regexp-match? #rx"shield" str)
+         (when (> lvl shield-lvl) (set! shield-lvl lvl))]
+        [(or (regexp-match? #rx"armor" str)
+             (regexp-match? #rx"plating" str)
+             (regexp-match? #rx"carapace" str))
+         (cond
+           [(regexp-match? #rx"vehicle-and-ship" str)
+            (when (> lvl ground-armor) (set! ground-armor lvl))
+            (when (> lvl air-armor) (set! air-armor lvl))]
+           [(or (regexp-match? #rx"ship" str)
+                (regexp-match? #rx"flyer" str)
+                (regexp-match? #rx"air" str))
+            (when (> lvl air-armor) (set! air-armor lvl))]
+           [else
+            (when (> lvl ground-armor) (set! ground-armor lvl))])]
+        [(or (regexp-match? #rx"weapon" str)
+             (regexp-match? #rx"attack" str))
+         (cond
+           [(regexp-match? #rx"melee" str)
+            (when (> lvl melee-atk) (set! melee-atk lvl))]
+           [(regexp-match? #rx"missile" str)
+            (when (> lvl missile-atk) (set! missile-atk lvl))]
+           [(regexp-match? #rx"infantry" str)
+            (when (> lvl bio-atk) (set! bio-atk lvl))]
+           [(or (regexp-match? #rx"vehicle-and-ship" str))
+            (when (> lvl mech-atk) (set! mech-atk lvl))
+            (when (> lvl air-atk) (set! air-atk lvl))]
+           [(regexp-match? #rx"vehicle" str)
+            (when (> lvl mech-atk) (set! mech-atk lvl))]
+           [(or (regexp-match? #rx"ship" str)
+                (regexp-match? #rx"flyer" str)
+                (regexp-match? #rx"air" str))
+            (when (> lvl air-atk) (set! air-atk lvl))]
+           [(regexp-match? #rx"ground" str)
+            (when (> lvl bio-atk) (set! bio-atk lvl))
+            (when (> lvl mech-atk) (set! mech-atk lvl))]
+           [else
+            (when (> lvl gen-atk) (set! gen-atk lvl))])])))
+  (: clamp-lvl (-> Any Nonnegative-Fixnum))
+  (define (clamp-lvl v)
+    (if (real? v)
+        (let ([n (exact-floor v)])
+          (cond [(>= n 3) 3] [(= n 2) 2] [(= n 1) 1] [else 0]))
+        0))
+  (cond
+    [(list? raw)
+     (for ([x (in-list raw)])
+       (cond
+         [(or (symbol? x) (string? x)) (add-upg-sym! (if (symbol? x) x (string->symbol x)))]
+         [(and (pair? x) (or (symbol? (car x)) (string? (car x))) (cdr x))
+          (define c (car x))
+          (add-upg-sym! (if (symbol? c) c (string->symbol c)))]))]
+    [(vector? raw)
+     (for ([x (in-vector raw)])
+       (when (or (symbol? x) (string? x))
+         (add-upg-sym! (if (symbol? x) x (string->symbol x)))))]
+    [(hash? raw)
+     (when (dyn-hash-has-key? raw 'attack)
+       (define al (clamp-lvl (dyn-hash-ref raw 'attack 0)))
+       (when (> al gen-atk) (set! gen-atk al)))
+     (when (dyn-hash-has-key? raw 'weapons)
+       (define al (clamp-lvl (dyn-hash-ref raw 'weapons 0)))
+       (when (> al gen-atk) (set! gen-atk al)))
+     (when (dyn-hash-has-key? raw 'armor)
+       (define al (clamp-lvl (dyn-hash-ref raw 'armor 0)))
+       (when (> al ground-armor) (set! ground-armor al))
+       (when (> al air-armor) (set! air-armor al)))
+     (when (dyn-hash-has-key? raw 'armor-upg)
+       (define al (clamp-lvl (dyn-hash-ref raw 'armor-upg 0)))
+       (when (> al ground-armor) (set! ground-armor al))
+       (when (> al air-armor) (set! air-armor al)))
+     (when (dyn-hash-has-key? raw 'ground-armor)
+       (define al (clamp-lvl (dyn-hash-ref raw 'ground-armor 0)))
+       (when (> al ground-armor) (set! ground-armor al)))
+     (when (dyn-hash-has-key? raw 'air-armor)
+       (define al (clamp-lvl (dyn-hash-ref raw 'air-armor 0)))
+       (when (> al air-armor) (set! air-armor al)))
+     (when (dyn-hash-has-key? raw 'shields)
+       (define sl (clamp-lvl (dyn-hash-ref raw 'shields 0)))
+       (when (> sl shield-lvl) (set! shield-lvl sl)))
+     (when (dyn-hash-has-key? raw 'shield-upg)
+       (define sl (clamp-lvl (dyn-hash-ref raw 'shield-upg 0)))
+       (when (> sl shield-lvl) (set! shield-lvl sl)))
+     (for ([(k v) (in-hash raw)])
+       (when (and v
+                  (or (symbol? k) (string? k))
+                  (not (memq k '(attack weapons armor armor-upg ground-armor air-armor shields shield-upg))))
+         (add-upg-sym! (if (symbol? k) k (string->symbol k)))))]
+    [(real? raw)
+     (define lvl (clamp-lvl raw))
+     (set! gen-atk lvl)
+     (set! ground-armor lvl)
+     (set! air-armor lvl)])
+  (combat-upgrade-levels gen-atk bio-atk mech-atk air-atk melee-atk missile-atk ground-armor air-armor shield-lvl))
+
+(: attacker-weapon-upgrade-lvl (-> Symbol Boolean combat-upgrade-levels Nonnegative-Fixnum))
+(define (attacker-weapon-upgrade-lvl atk-type atk-flying? upgs)
+  (define specific : Nonnegative-Fixnum
+    (cond
+      [(or atk-flying? (memq atk-type '(viking viking-fighter liberator banshee raven battlecruiser
+                                                mutalisk corruptor brood-lord viper
+                                                phoenix void-ray oracle carrier interceptor tempest mothership)))
+       (combat-upgrade-levels-air-atk upgs)]
+      [(memq atk-type '(zergling baneling ultralisk broodling))
+       (combat-upgrade-levels-melee-atk upgs)]
+      [(memq atk-type '(roach ravager hydralisk lurker lurker-burrowed queen locust))
+       (combat-upgrade-levels-missile-atk upgs)]
+      [(memq atk-type '(hellion hellbat widow-mine widow-mine-burrowed cyclone siege-tank siege-tank-sieged thor thor-ap viking-assault))
+       (combat-upgrade-levels-mech-atk upgs)]
+      [(memq atk-type '(photon-cannon spine-crawler spore-crawler missile-turret bunker))
+       0]
+      [else
+       (combat-upgrade-levels-bio-atk upgs)]))
+  (if (> specific (combat-upgrade-levels-gen-atk upgs))
+      specific
+      (combat-upgrade-levels-gen-atk upgs)))
+
+(struct norm-combat-unit
+  ([type : Symbol]
+   [hp : Flonum]
+   [shields : Flonum]
+   [ehp : Flonum]
+   [flying? : Boolean]
+   [can-air? : Boolean]
+   [count : Positive-Integer]
+   [barrier? : Boolean]
+   [aam? : Boolean]
+   [gs? : Boolean]))
+
+(: bool-hash-flag (-> Any (Listof Symbol) Boolean Boolean))
+(define (bool-hash-flag h keys default-val)
+  (let loop ([ks keys])
+    (if (null? ks)
+        default-val
+        (let ([k (car ks)])
+          (if (dyn-hash-has-key? h k)
+              (let ([v (dyn-hash-ref h k #f)])
+                (if (boolean? v) v (if v #t #f)))
+              (loop (cdr ks)))))))
+
+(: first-hash-val (-> Any (Listof Symbol) Any Any))
+(define (first-hash-val h keys default-val)
+  (let loop ([ks keys])
+    (if (null? ks)
+        default-val
+        (let ([k (car ks)])
+          (if (dyn-hash-has-key? h k)
+              (dyn-hash-ref h k default-val)
+              (loop (cdr ks)))))))
+
+(: build-norm-combat-unit (-> Symbol Any Flonum Boolean (Values norm-combat-unit Boolean)))
+(define (build-norm-combat-unit canon src-hash cnt flying-default?)
+  (define st (sc2-unit-combat-stats canon))
+  (define st-hp (safe-finite-real (dyn-hash-ref st 'max-hp 0.0) 0.0))
+  (define st-sh (safe-finite-real (dyn-hash-ref st 'max-shield 0.0) 0.0))
+  (define default-hp (if (> st-hp 0.0) st-hp 100.0))
+  (define hp
+    (if src-hash
+        (max 1.0 (safe-finite-real (first-hash-val src-hash '(hp health) default-hp) default-hp))
+        default-hp))
+  (define sh
+    (if src-hash
+        (max 0.0 (safe-finite-real (first-hash-val src-hash '(shields shield) st-sh) st-sh))
+        st-sh))
+  (define flying?
+    (if src-hash
+        (bool-hash-flag src-hash '(flying? is_flying is-flying) flying-default?)
+        flying-default?))
+  (define barrier?
+    (if src-hash
+        (bool-hash-flag src-hash '(barrier-active? barrier?) #f)
+        #f))
+  (define aam?
+    (if src-hash
+        (bool-hash-flag src-hash '(aam-debuff?) #f)
+        #f))
+  (define gs?
+    (if src-hash
+        (bool-hash-flag src-hash '(guardian-shield?) #f)
+        #f))
+  (define ehp (max 1.0 (+ hp sh)))
+  (define can-air? (sc2-unit-can-attack-air? canon))
+  (define cnt-int (exact-floor cnt))
+  (define pos-cnt : Positive-Integer (if (> cnt-int 0) cnt-int 1))
+  (values (norm-combat-unit canon hp sh ehp flying? can-air? pos-cnt barrier? aam? gs?)
+          (> cnt-int 0)))
+
+(: parse-combat-unit-list (-> Any (Listof norm-combat-unit)))
+(define (parse-combat-unit-list raw)
+  (define raw-items : (Listof Any)
+    (cond
+      [(list? raw) raw]
+      [(vector? raw) (vector->list raw)]
+      [(hash? raw)
+       (if (or (dyn-hash-has-key? raw 'type)
+               (dyn-hash-has-key? raw 'unit_type)
+               (dyn-hash-has-key? raw 'unit-type)
+               (dyn-hash-has-key? raw 'name)
+               (dyn-hash-has-key? raw 'unit-name))
+           (list raw)
+           (for/list : (Listof Any) ([(k v) (in-hash raw)])
+             (cons k v)))]
+      [else '()]))
+  ;; Group identical (type, hp, shields, flying?, barrier?, aam?, gs?) entries so 200v200 calls stay microsecond-fast
+  (define grouped : (HashTable (List Symbol Integer Integer Boolean Boolean Boolean Boolean)
+                               (List norm-combat-unit Integer))
+    (make-hash))
+  (for ([item (in-list raw-items)])
+    (define-values (canon src-hash raw-cnt)
+      (cond
+        [(or (symbol? item) (string? item))
+         (values (normalize-combat-unit-sym item) #f 1.0)]
+        [(hash? item)
+         (define t (first-hash-val item '(type unit_type unit-type name unit-name) 'unknown))
+         (define c (safe-finite-real (first-hash-val item '(count qty) 1.0) 1.0))
+         (values (normalize-combat-unit-sym t) item c)]
+        [(pair? item)
+         (define c (safe-finite-real (if (list? (cdr item)) (car (cdr item)) (cdr item)) 1.0))
+         (values (normalize-combat-unit-sym (car item)) #f c)]
+        [else (values 'unknown #f 0.0)]))
+    (when (and (not (eq? canon 'unknown)) (> raw-cnt 0.0))
+      (define flying-def? (sc2-unit-is-flying-sym? canon))
+      (define-values (nu ok?) (build-norm-combat-unit canon src-hash raw-cnt flying-def?))
+      (when ok?
+        (define key (list (norm-combat-unit-type nu)
+                          (exact-round (norm-combat-unit-hp nu))
+                          (exact-round (norm-combat-unit-shields nu))
+                          (norm-combat-unit-flying? nu)
+                          (norm-combat-unit-barrier? nu)
+                          (norm-combat-unit-aam? nu)
+                          (norm-combat-unit-gs? nu)))
+        (define cur (hash-ref grouped key #f))
+        (if cur
+            (hash-set! grouped key (list (car cur) (+ (cadr cur) (norm-combat-unit-count nu))))
+            (hash-set! grouped key (list nu (norm-combat-unit-count nu)))))))
+  (for/list : (Listof norm-combat-unit) ([entry (in-hash-values grouped)])
+    (define u (car entry))
+    (define n (cadr entry))
+    (define pos-n : Positive-Integer (if (> n 0) n 1))
+    (norm-combat-unit (norm-combat-unit-type u)
+                      (norm-combat-unit-hp u)
+                      (norm-combat-unit-shields u)
+                      (norm-combat-unit-ehp u)
+                      (norm-combat-unit-flying? u)
+                      (norm-combat-unit-can-air? u)
+                      pos-n
+                      (norm-combat-unit-barrier? u)
+                      (norm-combat-unit-aam? u)
+                      (norm-combat-unit-gs? u))))
+
+(: exact-unit-dps-vs (-> norm-combat-unit norm-combat-unit combat-upgrade-levels combat-upgrade-levels Flonum))
+(define (exact-unit-dps-vs atk tgt atk-upgs tgt-upgs)
+  (define a-type (norm-combat-unit-type atk))
+  (define t-type (norm-combat-unit-type tgt))
+  (define atk-lvl (attacker-weapon-upgrade-lvl a-type (norm-combat-unit-flying? atk) atk-upgs))
+  (define t-shield-lvl (combat-upgrade-levels-shields tgt-upgs))
+  (if (norm-combat-unit-flying? tgt)
+      (if (norm-combat-unit-can-air? atk)
+          (compute-exact-weapon-dps-vs-target
+           a-type t-type
+           #:attacker-upgrades atk-lvl
+           #:target-armor-upg (combat-upgrade-levels-air-armor tgt-upgs)
+           #:target-shield-upg t-shield-lvl
+           #:target-shields (norm-combat-unit-shields tgt)
+           #:target-hp (norm-combat-unit-hp tgt)
+           #:barrier-active? (norm-combat-unit-barrier? tgt)
+           #:aam-debuff? (norm-combat-unit-aam? tgt)
+           #:guardian-shield? (norm-combat-unit-gs? tgt))
+          0.0)
+      (compute-exact-weapon-dps-vs-target
+       a-type t-type
+       #:attacker-upgrades atk-lvl
+       #:target-armor-upg (combat-upgrade-levels-ground-armor tgt-upgs)
+       #:target-shield-upg t-shield-lvl
+       #:target-shields (norm-combat-unit-shields tgt)
+       #:target-hp (norm-combat-unit-hp tgt)
+       #:barrier-active? (norm-combat-unit-barrier? tgt)
+       #:aam-debuff? (norm-combat-unit-aam? tgt)
+       #:guardian-shield? (norm-combat-unit-gs? tgt))))
+
+(: predict-engagement-outcome
+   (->* (Any Any)
+        (#:ally-upgrades Any
+         #:enemy-upgrades Any
+         #:defending-home? Any)
+        (Immutable-HashTable Symbol Any)))
+(define (predict-engagement-outcome ally-units enemy-units
+                                    #:ally-upgrades [au '()]
+                                    #:enemy-upgrades [eu '()]
+                                    #:defending-home? [def? #f])
+  (define allies (parse-combat-unit-list ally-units))
+  (define enemies (parse-combat-unit-list enemy-units))
+  (define ally-upgs (parse-combat-upgrades au))
+  (define enemy-upgs (parse-combat-upgrades eu))
+  (define home? (if def? #t #f))
+  (define ally-total-ehp
+    (for/fold ([acc : Flonum 0.0]) ([a (in-list allies)])
+      (+ acc (* (exact->inexact (norm-combat-unit-count a)) (norm-combat-unit-ehp a)))))
+  (define enemy-total-ehp
+    (for/fold ([acc : Flonum 0.0]) ([e (in-list enemies)])
+      (+ acc (* (exact->inexact (norm-combat-unit-count e)) (norm-combat-unit-ehp e)))))
+  (define ally-aa-ehp
+    (for/fold ([acc : Flonum 0.0]) ([a (in-list allies)])
+      (if (norm-combat-unit-can-air? a)
+          (+ acc (* (exact->inexact (norm-combat-unit-count a)) (norm-combat-unit-ehp a)))
+          acc)))
+  (define enemy-air-ehp
+    (for/fold ([acc : Flonum 0.0]) ([e (in-list enemies)])
+      (if (norm-combat-unit-flying? e)
+          (+ acc (* (exact->inexact (norm-combat-unit-count e)) (norm-combat-unit-ehp e)))
+          acc)))
+  ;; 1. Ally effective DPS vs enemy force + fraction of enemy EHP allies can damage
+  (define damageable-enemy-ehp : Flonum 0.0)
+  (for ([e (in-list enemies)])
+    (define e-pool (* (exact->inexact (norm-combat-unit-count e)) (norm-combat-unit-ehp e)))
+    (define any-hit?
+      (for/or : Boolean ([a (in-list allies)])
+        (> (exact-unit-dps-vs a e ally-upgs enemy-upgs) 0.0)))
+    (when any-hit?
+      (set! damageable-enemy-ehp (+ damageable-enemy-ehp e-pool))))
+  (define ally-eff-dps : Flonum
+    (if (<= enemy-total-ehp 0.0)
+        0.0
+        (for/fold ([sum : Flonum 0.0]) ([a (in-list allies)])
+          (define ca (exact->inexact (norm-combat-unit-count a)))
+          (define weighted-dps-vs-e
+            (/ (for/fold ([ws : Flonum 0.0]) ([e (in-list enemies)])
+                 (define e-pool (* (exact->inexact (norm-combat-unit-count e)) (norm-combat-unit-ehp e)))
+                 (+ ws (* e-pool (exact-unit-dps-vs a e ally-upgs enemy-upgs))))
+               enemy-total-ehp))
+          (+ sum (* ca weighted-dps-vs-e)))))
+  ;; 2. Ally AA-only DPS against flying enemy units (weighted over enemy-air-ehp)
+  (define ally-aa-dps : Flonum
+    (if (<= enemy-air-ehp 0.0)
+        0.0
+        (for/fold ([sum : Flonum 0.0]) ([a (in-list allies)])
+          (if (norm-combat-unit-can-air? a)
+              (let* ([ca (exact->inexact (norm-combat-unit-count a))]
+                     [w-dps
+                      (/ (for/fold ([ws : Flonum 0.0]) ([e (in-list enemies)])
+                           (if (norm-combat-unit-flying? e)
+                               (let ([e-pool (* (exact->inexact (norm-combat-unit-count e))
+                                                (norm-combat-unit-ehp e))])
+                                 (+ ws (* e-pool (exact-unit-dps-vs a e ally-upgs enemy-upgs))))
+                               ws))
+                         enemy-air-ehp)])
+                (+ sum (* ca w-dps)))
+              sum))))
+  ;; 3. Enemy effective DPS vs ally force & enemy flying DPS vs ally AA/army
+  (define enemy-eff-dps : Flonum
+    (if (<= ally-total-ehp 0.0)
+        0.0
+        (for/fold ([sum : Flonum 0.0]) ([e (in-list enemies)])
+          (define ce (exact->inexact (norm-combat-unit-count e)))
+          (define weighted-dps-vs-a
+            (/ (for/fold ([ws : Flonum 0.0]) ([a (in-list allies)])
+                 (define a-pool (* (exact->inexact (norm-combat-unit-count a)) (norm-combat-unit-ehp a)))
+                 (+ ws (* a-pool (exact-unit-dps-vs e a enemy-upgs ally-upgs))))
+               ally-total-ehp))
+          (+ sum (* ce weighted-dps-vs-a)))))
+  ;; Enemy flying DPS weighed primarily against Ally AA sub-force (falling back to whole ally force if Ally has 0 AA)
+  (define enemy-air-dps : Flonum
+    (if (<= enemy-air-ehp 0.0)
+        0.0
+        (let ([denom (if (> ally-aa-ehp 0.0) ally-aa-ehp ally-total-ehp)])
+          (if (<= denom 0.0)
+              (for/fold ([sum : Flonum 0.0]) ([e (in-list enemies)])
+                (if (norm-combat-unit-flying? e)
+                    (let* ([ce (exact->inexact (norm-combat-unit-count e))]
+                           [st (sc2-unit-combat-stats (norm-combat-unit-type e))]
+                           [gdps (safe-finite-real (dyn-hash-ref st 'ground-dps 0.0) 0.0)]
+                           [adps (safe-finite-real (dyn-hash-ref st 'air-dps 0.0) 0.0)])
+                      (+ sum (* ce (max gdps adps))))
+                    sum))
+              (for/fold ([sum : Flonum 0.0]) ([e (in-list enemies)])
+                (if (norm-combat-unit-flying? e)
+                    (let* ([ce (exact->inexact (norm-combat-unit-count e))]
+                           [w-dps
+                            (/ (for/fold ([ws : Flonum 0.0]) ([a (in-list allies)])
+                                 (if (or (<= ally-aa-ehp 0.0) (norm-combat-unit-can-air? a))
+                                     (let ([a-pool (* (exact->inexact (norm-combat-unit-count a))
+                                                      (norm-combat-unit-ehp a))])
+                                       (+ ws (* a-pool (exact-unit-dps-vs e a enemy-upgs ally-upgs))))
+                                     ws))
+                               denom)])
+                      (+ sum (* ce w-dps)))
+                    sum))))))
+  (define can-damage-enemy-pct : Flonum
+    (if (> enemy-total-ehp 0.0)
+        (min 1.0 (max 0.0 (/ damageable-enemy-ehp enemy-total-ehp)))
+        1.0))
+  (define anti-air-deficit? : Boolean
+    (and (> enemy-air-ehp 0.0)
+         (> enemy-air-dps 0.0)
+         (< (* ally-aa-dps ally-aa-ehp)
+            (* 0.90 enemy-air-dps enemy-air-ehp))))
+  (define ally-power (* ally-eff-dps ally-total-ehp))
+  (define enemy-power (* enemy-eff-dps enemy-total-ehp))
+  (define predicted-lanchester-ratio : Flonum
+    (cond
+      [(<= ally-total-ehp 0.0) 0.0]
+      [(<= enemy-total-ehp 0.0) 10.0]
+      [(<= enemy-power 0.0)
+       (if (> ally-eff-dps 0.0) 10.0 0.0)]
+      [else
+       (/ ally-power enemy-power)]))
+  (define engage-threshold : Flonum (if home? 0.62 0.95))
+  (define should-engage? : Boolean
+    (and (> ally-total-ehp 0.0)
+         (>= predicted-lanchester-ratio engage-threshold)
+         (not anti-air-deficit?)
+         (>= can-damage-enemy-pct 0.50)))
+  (define recommended-posture : Symbol
+    (cond
+      [(or anti-air-deficit?
+           (< can-damage-enemy-pct 0.50)
+           (< predicted-lanchester-ratio (if home? 0.62 0.75)))
+       'retreat-and-remacro-counter]
+      [(and should-engage?
+            (>= predicted-lanchester-ratio (if home? 0.90 1.05)))
+       'press-advantage]
+      [else
+       'skirmish-kite]))
+  (hasheq 'predicted-lanchester-ratio predicted-lanchester-ratio
+          'can-damage-enemy-pct can-damage-enemy-pct
+          'anti-air-deficit? anti-air-deficit?
+          'should-engage? should-engage?
+          'recommended-posture recommended-posture))

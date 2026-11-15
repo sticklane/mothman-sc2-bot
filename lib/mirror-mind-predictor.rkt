@@ -37,6 +37,7 @@
          racket/match
          racket/math
          racket/flonum
+         racket/fixnum
          racket/string
          racket/performance-hint
          racket/set
@@ -63,18 +64,26 @@
   (hasheq
    'probe 'Protoss 'zealot 'Protoss 'stalker 'Protoss 'sentry 'Protoss 'adept 'Protoss
    'high-templar 'Protoss 'dark-templar 'Protoss 'archon 'Protoss 'immortal 'Protoss
-   'colossus 'Protoss 'void-ray 'Protoss 'carrier 'Protoss 'oracle 'Protoss 'phoenix 'Protoss
+   'colossus 'Protoss 'disruptor 'Protoss 'void-ray 'Protoss 'carrier 'Protoss 'tempest 'Protoss
+   'mothership 'Protoss 'oracle 'Protoss 'phoenix 'Protoss
    'nexus 'Protoss 'pylon 'Protoss 'gateway 'Protoss 'cybernetics-core 'Protoss
    'photon-cannon 'Protoss 'stargate 'Protoss 'robotics-facility 'Protoss
+   'fleet-beacon 'Protoss 'robotics-bay 'Protoss 'templar-archive 'Protoss 'twilight-council 'Protoss
    'scv 'Terran 'marine 'Terran 'marauder 'Terran 'reaper 'Terran 'ghost 'Terran
-   'hellion 'Terran 'widow-mine 'Terran 'cyclone 'Terran 'siege-tank 'Terran 'thor 'Terran
-   'viking 'Terran 'medivac 'Terran 'banshee 'Terran 'battlecruiser 'Terran
-   'command-center 'Terran 'orbital-command 'Terran 'supply-depot 'Terran 'barracks 'Terran
-   'factory 'Terran 'starport 'Terran 'bunker 'Terran
+   'hellion 'Terran 'hellbat 'Terran 'widow-mine 'Terran 'cyclone 'Terran 'siege-tank 'Terran
+   'siege-tank-sieged 'Terran 'thor 'Terran 'viking 'Terran 'viking-fighter 'Terran
+   'viking-assault 'Terran 'medivac 'Terran 'liberator 'Terran 'raven 'Terran
+   'banshee 'Terran 'battlecruiser 'Terran
+   'command-center 'Terran 'orbital-command 'Terran 'planetary-fortress 'Terran
+   'supply-depot 'Terran 'barracks 'Terran 'barracks-techlab 'Terran
+   'factory 'Terran 'factory-techlab 'Terran 'armory 'Terran
+   'starport 'Terran 'starport-techlab 'Terran 'fusion-core 'Terran 'bunker 'Terran
    'drone 'Zerg 'zergling 'Zerg 'baneling 'Zerg 'queen 'Zerg 'roach 'Zerg 'ravager 'Zerg
    'hydralisk 'Zerg 'lurker 'Zerg 'mutalisk 'Zerg 'corruptor 'Zerg 'ultralisk 'Zerg
-   'brood-lord 'Zerg 'overlord 'Zerg 'overseer 'Zerg 'hatchery 'Zerg 'lair 'Zerg 'hive 'Zerg
-   'spawning-pool 'Zerg 'roach-warren 'Zerg 'hydralisk-den 'Zerg 'spire 'Zerg))
+   'brood-lord 'Zerg 'viper 'Zerg 'infestor 'Zerg 'overlord 'Zerg 'overseer 'Zerg
+   'hatchery 'Zerg 'lair 'Zerg 'hive 'Zerg
+   'spawning-pool 'Zerg 'roach-warren 'Zerg 'hydralisk-den 'Zerg 'lurker-den 'Zerg
+   'spire 'Zerg 'greater-spire 'Zerg 'infestation-pit 'Zerg 'ultralisk-cavern 'Zerg))
 
 (provide (struct-out shadow-ledger)
          (struct-out enemy-tech-observation)
@@ -125,6 +134,10 @@
          evaluate-enemy-army-spatio-temporal-reachability
          infer-enemy-implied-tech-and-upgrades
          record-enemy-tech-building-destroyed!
+         evaluate-mirror-opportunity-cost-profile
+         zero-sum-exclusion-reading-opportunity-cost-profile
+         zero-sum-exclusion-reading-commitment-score
+         mirror-mind-state-signals-ht
          evaluate-zero-sum-negative-exclusions
          compute-enemy-feasible-tech-and-budget
          compute-opponent-shadow-ledger
@@ -197,6 +210,8 @@
    'siege-tank-sieged (cons 150 125)
    'thor              (cons 300 200)
    'viking            (cons 150 75)
+   'viking-fighter    (cons 150 75)
+   'viking-assault    (cons 150 75)
    'medivac           (cons 100 100)
    'liberator         (cons 150 125)
    'banshee           (cons 150 100)
@@ -213,6 +228,8 @@
    'factory           (cons 150 100)
    'factory-techlab   (cons 50 25)
    'starport          (cons 150 100)
+   'starport-techlab  (cons 50 25)
+   'starport-reactor  (cons 50 50)
    'engineering-bay   (cons 125 0)
    'armory            (cons 150 100)
    'fusion-core       (cons 150 150)
@@ -237,6 +254,7 @@
    'oracle            (cons 150 150)
    'tempest           (cons 250 175)
    'carrier           (cons 350 250)
+   'mothership        (cons 400 400)
    'nexus             (cons 400 0)
    'pylon             (cons 100 0)
    'assimilator       (cons 75 0)
@@ -2455,10 +2473,180 @@
 ;; 2d. Zero-Sum Opportunity-Cost / Negative Exclusion & Bayesian Bluff Detector
 ;; =============================================================================
 
+(define MIRROR-ZERO-SUM-OPP-COST-TABLE (make-weak-hasheq))
+(define ZERO-COST-PROFILE-DEFAULT
+  (hasheq 'opportunity-cost-commitment #f
+          'commitment-score 0.0
+          'dominant-path 'uncommitted
+          'committed-primary-branch 'uncommitted
+          'gas-devoted 0
+          'minerals-devoted 0
+          'gas-envelope 150
+          'minerals-envelope 500
+          'gas-ratio 0.0
+          'mineral-ratio 0.0
+          'closed-branches '()
+          'capital-air-trigger? #f
+          'recommended-enemy-unit #f))
+
+(define (zero-sum-exclusion-reading-opportunity-cost-profile zs)
+  (if (zero-sum-exclusion-reading? zs)
+      (hash-ref MIRROR-ZERO-SUM-OPP-COST-TABLE zs ZERO-COST-PROFILE-DEFAULT)
+      ZERO-COST-PROFILE-DEFAULT))
+
+(define (zero-sum-exclusion-reading-commitment-score zs)
+  (hash-ref (zero-sum-exclusion-reading-opportunity-cost-profile zs) 'commitment-score 0.0))
+
+(define (sym->opp-cost-path sym)
+  (case sym
+    [(fusion-core battlecruiser starport starport-techlab starport-reactor
+      banshee liberator raven viking viking-fighter viking-assault medivac
+      yamato-cannon cloaking-field corvid-reactor)
+     'air-starport-bc]
+    [(fleet-beacon carrier tempest mothership stargate void-ray voidray
+      phoenix oracle anion-pulse-crystals flux-vanes graviton-catapult)
+     'stargate-fleet]
+    [(greater-spire brood-lord brood-lord-cocoon spire corruptor mutalisk viper)
+     'greater-spire]
+    [(siege-tank siege-tank-sieged thor thor-ap factory factory-techlab armory
+      immortal colossus disruptor robotics-facility robotics-bay robotics-support-bay
+      lurker lurker-burrowed lurker-mp lurker-mp-burrowed lurker-den lurker-den-mp
+      ultralisk ultralisk-cavern roach ravager roach-warren marauder)
+     'armored-siege]
+    [(templar-archive templar-archives high-templar archon dark-shrine dark-templar
+      twilight-council psi-storm psi-storm-tech blink blink-cast charge charge-cast)
+     'twilight-templar-ground]
+    [(barracks-techlab stimpack stimpack-cast combat-shield ghost ghost-academy)
+     'bio-stim-medivac]
+    [(baneling baneling-nest baneling-cocoon baneling-burrowed hydralisk hydralisk-den
+      infestor infestation-pit)
+     'ling-bane-hydra]
+    [else #f]))
+
+(define (evaluate-mirror-opportunity-cost-profile raw-frame raw-enemy-units raw-enemy-bldgs
+                                                 [tech-obs #f] [ledger #f])
+  (define frame (safe-frame raw-frame))
+  (define enemy-units (safe-hash-list raw-enemy-units))
+  (define enemy-bldgs (safe-hash-list raw-enemy-bldgs))
+  (define est-workers
+    (if (shadow-ledger? ledger)
+        (max 12 (shadow-ledger-estimated-workers ledger))
+        (max 12 (min 66 (+ 12 (quotient frame 268))))))
+  (define avg-workers (/ (+ 12.0 est-workers) 2.0))
+  (define env-min
+    (max 500
+         (if (shadow-ledger? ledger) (shadow-ledger-expected-minerals ledger) 0)
+         (exact-round (+ 1050.0 (* frame avg-workers 0.036)))))
+  (define env-gas
+    (max 150
+         (if (shadow-ledger? ledger) (shadow-ledger-expected-gas ledger) 0)
+         (exact-round (* (max 0 (- frame 700)) 0.19))))
+  (define path-gas (make-hasheq))
+  (define path-min (make-hasheq))
+  (define visible-bldg-ht (make-hasheq))
+  (define capital-air-trigger? #f)
+  (define rec-enemy-unit #f)
+  (define (record-sym! sym)
+    (when (memq sym '(fusion-core fleet-beacon greater-spire
+                      battlecruiser carrier tempest mothership brood-lord))
+      (set! capital-air-trigger? #t))
+    (when (memq sym '(battlecruiser carrier tempest mothership brood-lord))
+      (set! rec-enemy-unit
+            (case sym
+              [(battlecruiser) 'battlecruiser]
+              [(carrier tempest mothership brood-lord) sym]
+              [else rec-enemy-unit])))
+    (define p (sym->opp-cost-path sym))
+    (when p
+      (define c (unit-resource-cost sym))
+      (hash-set! path-min p (+ (hash-ref path-min p 0) (car c)))
+      (hash-set! path-gas p (+ (hash-ref path-gas p 0) (cdr c)))))
+  (for ([u (in-list enemy-units)]
+        #:unless (or (enemy-unit-hallucination? u) (enemy-unit-changeling? u)))
+    (record-sym! (unit-type-sym u)))
+  (for ([b (in-list enemy-bldgs)]
+        #:unless (or (hash-ref b 'canceled? #f) (hash-ref b 'canceled #f)))
+    (define bs (unit-type-sym b))
+    (hash-set! visible-bldg-ht bs #t)
+    (record-sym! bs))
+  (when (enemy-tech-observation? tech-obs)
+    (for ([ib (in-list (enemy-tech-observation-implied-tech-buildings tech-obs))]
+          #:unless (hash-has-key? visible-bldg-ht ib))
+      (hash-set! visible-bldg-ht ib #t)
+      (record-sym! ib)))
+  (define path-order
+    '(air-starport-bc stargate-fleet greater-spire armored-siege
+      twilight-templar-ground bio-stim-medivac ling-bane-hydra))
+  (define-values (dom-path dom-gas dom-min)
+    (for/fold ([bp 'uncommitted] [bg 0] [bm 0]) ([p (in-list path-order)])
+      (define pg (hash-ref path-gas p 0))
+      (define pm (hash-ref path-min p 0))
+      (if (or (> pg bg) (and (= pg bg) (> pm bm)))
+          (values p pg pm)
+          (values bp bg bm))))
+  (define gas-ratio (/ (exact->inexact dom-gas) (exact->inexact (max 1 env-gas))))
+  (define min-ratio (/ (exact->inexact dom-min) (exact->inexact (max 1 env-min))))
+  (define committed?
+    (and (not (eq? dom-path 'uncommitted))
+         (or (>= gas-ratio 0.40)
+             (>= dom-gas 350)
+             capital-air-trigger?)))
+  (define commitment-score
+    (exact->inexact
+     (max 0.0
+          (min 1.0
+               (cond
+                 [capital-air-trigger? (max 0.88 gas-ratio (if (>= dom-gas 350) 0.92 0.88))]
+                 [(>= dom-gas 350) (max 0.78 gas-ratio)]
+                 [else gas-ratio])))))
+  (define eff-rec-enemy
+    (or rec-enemy-unit
+        (case dom-path
+          [(air-starport-bc) (if (or (hash-has-key? visible-bldg-ht 'fusion-core) capital-air-trigger?)
+                                 'battlecruiser
+                                 'banshee)]
+          [(stargate-fleet) (if (hash-has-key? visible-bldg-ht 'fleet-beacon) 'carrier 'void-ray)]
+          [(greater-spire) (if (hash-has-key? visible-bldg-ht 'greater-spire) 'brood-lord 'mutalisk)]
+          [(armored-siege) 'siege-tank]
+          [else #f])))
+  (define closed-branches
+    (if committed?
+        (case dom-path
+          [(air-starport-bc)
+           '(closed-by-opportunity-cost heavy-bio-stim-timing mass-factory-mech-thor)]
+          [(stargate-fleet)
+           '(closed-by-opportunity-cost templar-archive-storm dark-shrine-dt-rush colossus-thermal-lance-rush)]
+          [(greater-spire)
+           '(closed-by-opportunity-cost lurker-den-siege roach-ravager-max-upgrades early-ultralisk-rush)]
+          [(armored-siege)
+           '(closed-by-opportunity-cost stargate-air-rush fleet-beacon-carriers bio-stim-marine-marauder-flood spire-mutalisk-rush)]
+          [(twilight-templar-ground)
+           '(closed-by-opportunity-cost stargate-air-rush fleet-beacon-carriers colossus-thermal-lance-rush)]
+          [else '(closed-by-opportunity-cost)])
+        '()))
+  (hasheq 'opportunity-cost-commitment committed?
+          'commitment-score commitment-score
+          'dominant-path dom-path
+          'committed-primary-branch (if committed? dom-path 'uncommitted)
+          'gas-devoted dom-gas
+          'minerals-devoted dom-min
+          'gas-envelope env-gas
+          'minerals-envelope env-min
+          'gas-ratio gas-ratio
+          'mineral-ratio min-ratio
+          'closed-branches closed-branches
+          'capital-air-trigger? capital-air-trigger?
+          'recommended-enemy-unit eff-rec-enemy))
+
 (define (evaluate-zero-sum-negative-exclusions raw-frame raw-enemy-units raw-enemy-bldgs tech-obs ledger)
   (define frame (safe-frame raw-frame))
   (define enemy-units (safe-hash-list raw-enemy-units))
   (define enemy-bldgs (safe-hash-list raw-enemy-bldgs))
+  (define opp-profile
+    (evaluate-mirror-opportunity-cost-profile frame enemy-units enemy-bldgs tech-obs ledger))
+  (define opp-committed? (hash-ref opp-profile 'opportunity-cost-commitment #f))
+  (define opp-dom-path (hash-ref opp-profile 'dominant-path 'uncommitted))
+  (define opp-closed (hash-ref opp-profile 'closed-branches '()))
   (define hallucinated-units '())
   (define active-pool-set (make-hasheq))
   (for ([u (in-list enemy-units)])
@@ -2472,10 +2660,18 @@
     (analyze-enemy-structure-activity-and-bluffs enemy-bldgs))
   (for ([p (in-list (enemy-structure-activity-previewed-units struct-act))])
     (hash-set! active-pool-set p #t))
-  (define obs-upgs (enemy-tech-observation-observed-upgrades tech-obs))
-  (define obs-spells (enemy-tech-observation-observed-spells tech-obs))
-  (define implied-bldgs (enemy-tech-observation-implied-tech-buildings tech-obs))
-  (define active-res (enemy-tech-observation-active-research-buildings tech-obs))
+  (define obs-upgs (if (enemy-tech-observation? tech-obs)
+                       (enemy-tech-observation-observed-upgrades tech-obs)
+                       '()))
+  (define obs-spells (if (enemy-tech-observation? tech-obs)
+                         (enemy-tech-observation-observed-spells tech-obs)
+                         '()))
+  (define implied-bldgs (if (enemy-tech-observation? tech-obs)
+                            (enemy-tech-observation-implied-tech-buildings tech-obs)
+                            '()))
+  (define active-res (if (enemy-tech-observation? tech-obs)
+                         (enemy-tech-observation-active-research-buildings tech-obs)
+                         '()))
   (for ([s (in-list obs-upgs)]) (hash-set! active-pool-set s #t))
   (for ([s (in-list obs-spells)]) (hash-set! active-pool-set s #t))
   (define bldg-sym-set (make-hasheq))
@@ -2489,9 +2685,29 @@
           (hash-has-key? bldg-sym-set s)
           (and (pair? implied-bldgs) (memq s implied-bldgs) #t))))
 
+  (define queen-cnt
+    (for/sum ([u (in-list enemy-units)])
+      (if (eq? (unit-type-sym u) 'queen) 1 0)))
+
   (define-values (candidate-branch candidate-exclusions confirming-syms)
     (cond
-      ;; Protoss branches
+      ;; Protoss branches: check Fleet Beacon / Stargate Sky-Toss BEFORE Twilight/Blink so
+      ;; Blink + 5 Stargate + Tempest/Carrier is never misclassified as ground!
+      ;; Wait: if Templar Archives / High Templar / Psi Storm exists without Fleet Beacon /
+      ;; Tempest / Carrier / VoidRay, prefer 'twilight-templar-ground.
+      [(or (and opp-committed? (eq? opp-dom-path 'stargate-fleet))
+           (any-in-pool? '(fleet-beacon carrier tempest mothership void-ray voidray)))
+       (values (if opp-committed? 'stargate-fleet 'stargate-sky-fleet)
+               '(templar-archive-storm dark-shrine-dt-rush colossus-thermal-lance-rush)
+               '(phoenix oracle void-ray voidray carrier tempest mothership fleet-beacon
+                 oracle-revelation pulsar-beam chrono-boost-active))]
+      [(and (any-in-pool? '(stargate phoenix oracle oracle-revelation pulsar-beam))
+            (not (any-in-pool? '(templar-archive templar-archives high-templar
+                                 psi-storm psi-storm-tech))))
+       (values (if opp-committed? 'stargate-fleet 'stargate-sky-fleet)
+               '(templar-archive-storm dark-shrine-dt-rush colossus-thermal-lance-rush)
+               '(phoenix oracle void-ray voidray carrier tempest
+                 oracle-revelation pulsar-beam chrono-boost-active))]
       [(or (any-in-pool? '(templar-archive templar-archives high-templar archon
                            psi-storm psi-storm-tech charge charge-cast blink blink-cast
                            resonating-glaives resonating-glaives-cast))
@@ -2501,38 +2717,45 @@
                '(stargate-air-rush fleet-beacon-carriers colossus-thermal-lance-rush)
                '(high-templar archon psi-storm psi-storm-tech charge charge-cast
                  blink blink-cast resonating-glaives resonating-glaives-cast chrono-boost-active))]
-      [(any-in-pool? '(stargate fleet-beacon phoenix oracle void-ray voidray
-                       carrier tempest oracle-revelation pulsar-beam))
-       (values 'stargate-sky-fleet
-               '(templar-archive-storm dark-shrine-dt-rush colossus-thermal-lance-rush)
-               '(phoenix oracle void-ray voidray carrier tempest
-                 oracle-revelation pulsar-beam chrono-boost-active))]
-      [(any-in-pool? '(robotics-bay robotics-support-bay colossus disruptor
-                       immortal robotics-facility))
-       (values 'robotics-heavy-siege
+      [(or (and opp-committed? (eq? opp-dom-path 'armored-siege)
+                (any-in-pool? '(colossus immortal disruptor robotics-bay robotics-support-bay robotics-facility)))
+           (any-in-pool? '(robotics-bay robotics-support-bay colossus disruptor
+                           immortal robotics-facility)))
+       (values (if opp-committed? 'armored-siege 'robotics-heavy-siege)
                '(stargate-air-rush fleet-beacon-carriers templar-archive-storm)
                '(immortal colossus disruptor extended-thermal-lance chrono-boost-active))]
       ;; Zerg branches
-      [(any-in-pool? '(spire greater-spire mutalisk corruptor))
-       (values 'spire-air-muta
+      [(or (and opp-committed? (eq? opp-dom-path 'greater-spire))
+           (any-in-pool? '(greater-spire brood-lord spire mutalisk corruptor)))
+       (values (if opp-committed? 'greater-spire 'spire-air-muta)
                '(lurker-den-siege roach-ravager-max-upgrades early-ultralisk-rush)
-               '(mutalisk corruptor))]
+               '(mutalisk corruptor brood-lord greater-spire))]
       [(any-in-pool? '(hydralisk-den lurker-den lurker-den-mp hydralisk lurker lurker-mp lurker-spines))
        (values 'hydra-lurker-den
                '(spire-mutalisk-rush early-brood-lord-rush)
                '(hydralisk lurker lurker-mp lurker-spines grooved-spines muscular-augments lurker-aspect))]
+      [(or (any-in-pool? '(infestation-pit infestor infestor-burrowed neural-parasite fungal-growth))
+           (>= queen-cnt 4))
+       (values 'infestor-queen-spell
+               '(spire-mutalisk-rush early-zergling-all-in)
+               '(infestor infestor-burrowed queen neural-parasite fungal-growth))]
       [(any-in-pool? '(roach-warren roach ravager glial-reconstitution corrosive-bile))
        (values 'roach-ravager-ground
                '(spire-mutalisk-rush baneling-flood-bust)
                '(roach ravager glial-reconstitution corrosive-bile))]
+      [(any-in-pool? '(baneling-nest baneling baneling-burrowed centrifugal-hooks))
+       (values 'ling-bane-flood
+               '(roach-ravager-max-upgrades early-ultralisk-rush)
+               '(baneling baneling-burrowed centrifugal-hooks zergling))]
       ;; Terran branches
-      [(any-in-pool? '(starport-techlab fusion-core banshee battlecruiser
-                       raven banshee-cloak-cast cloaking-field))
-       (values 'starport-cloak-or-bc
+      [(or (and opp-committed? (eq? opp-dom-path 'air-starport-bc))
+           (any-in-pool? '(starport-techlab fusion-core banshee battlecruiser
+                           raven banshee-cloak-cast cloaking-field)))
+       (values (if opp-committed? 'air-starport-bc 'starport-cloak-or-bc)
                '(heavy-bio-stim-timing mass-factory-mech-thor)
-               '(banshee battlecruiser raven banshee-cloak-cast cloaking-field))]
+               '(fusion-core battlecruiser banshee raven banshee-cloak-cast cloaking-field))]
       [(any-in-pool? '(factory-techlab armory siege-tank siege-tank-sieged thor hellbat cyclone))
-       (values 'factory-mech-siege
+       (values (if opp-committed? 'armored-siege 'factory-mech-siege)
                '(bio-stim-marine-marauder-flood battlecruiser-fusion-rush)
                '(siege-tank siege-tank-sieged thor hellbat cyclone siege-mode))]
       [(any-in-pool? '(barracks-techlab stimpack stimpack-cast combat-shield marauder medivac))
@@ -2543,14 +2766,15 @@
        (values 'uncommitted '() '())]))
 
   (define macro-exclusions
-    (if (and (>= (shadow-ledger-predicted-enemy-bases ledger) 3)
+    (if (and (>= (if (shadow-ledger? ledger) (shadow-ledger-predicted-enemy-bases ledger) 1) 3)
              (< frame 4500))
         '(one-or-two-base-all-in)
         '()))
 
-  (define rem-gas (shadow-ledger-unaccounted-gas ledger))
+  (define rem-gas (if (shadow-ledger? ledger) (shadow-ledger-unaccounted-gas ledger) 0))
   (define confirmed-commitment?
-    (or (for/or ([s (in-list confirming-syms)]) (hash-has-key? active-pool-set s))
+    (or opp-committed?
+        (for/or ([s (in-list confirming-syms)]) (hash-has-key? active-pool-set s))
         (not (null? active-res))
         (enemy-structure-activity-research-under-attack? struct-act)
         (not (null? (enemy-structure-activity-previewed-units struct-act)))
@@ -2573,37 +2797,49 @@
      #:confirmed-commitment? confirmed-commitment?))
 
   (define bluff-suspected?
-    (and (not (enemy-structure-activity-research-under-attack? struct-act))
+    (and (not opp-committed?)
+         (not (enemy-structure-activity-research-under-attack? struct-act))
          (>= bluff-posterior 0.55)))
 
-  (cond
-    [(and (eq? candidate-branch 'uncommitted) (not bluff-suspected?))
-     (zero-sum-exclusion-reading 'uncommitted
-                                 macro-exclusions
-                                 #f
-                                 rem-gas
-                                 0.50
-                                 'no-tech-branch-observed-yet)]
-    [bluff-suspected?
-     (zero-sum-exclusion-reading candidate-branch
-                                 macro-exclusions
-                                 #t
-                                 rem-gas
-                                 (exact->inexact (max 0.15 (min 0.45 (- 1.0 bluff-posterior))))
-                                 (cond
-                                   [(enemy-structure-activity-bluff-or-feint-suspected? struct-act)
-                                    'fake-build-or-research-cancel-bluff]
-                                   [combat-hallucination-bait?
-                                    'hallucination-bait-or-scout-detected]
-                                   [else
-                                    'suspected-tech-bluff-unspent-gas-surplus]))]
-    [else
-     (zero-sum-exclusion-reading candidate-branch
-                                 (remove-duplicates (append candidate-exclusions macro-exclusions))
-                                 #f
-                                 rem-gas
-                                 (exact->inexact (max 0.72 (min 0.95 (- 1.0 (* 0.5 bluff-posterior)))))
-                                 'zero-sum-gas-committed-orthogonal-excluded)]))
+  (define reading-out
+    (cond
+      [(and (eq? candidate-branch 'uncommitted) (not bluff-suspected?))
+       (zero-sum-exclusion-reading 'uncommitted
+                                   macro-exclusions
+                                   #f
+                                   rem-gas
+                                   0.50
+                                   'no-tech-branch-observed-yet)]
+      [bluff-suspected?
+       (zero-sum-exclusion-reading candidate-branch
+                                   macro-exclusions
+                                   #t
+                                   rem-gas
+                                   (exact->inexact (max 0.15 (min 0.45 (- 1.0 bluff-posterior))))
+                                   (cond
+                                     [(enemy-structure-activity-bluff-or-feint-suspected? struct-act)
+                                      'fake-build-or-research-cancel-bluff]
+                                     [combat-hallucination-bait?
+                                      'hallucination-bait-or-scout-detected]
+                                     [else
+                                      'suspected-tech-bluff-unspent-gas-surplus]))]
+      [else
+       (define final-exclusions
+         (remove-duplicates (append opp-closed candidate-exclusions macro-exclusions)))
+       (define final-conf
+         (exact->inexact
+          (max (if opp-committed? (hash-ref opp-profile 'commitment-score 0.85) 0.72)
+               (min 0.96 (- 1.0 (* 0.5 bluff-posterior))))))
+       (zero-sum-exclusion-reading candidate-branch
+                                   final-exclusions
+                                   #f
+                                   rem-gas
+                                   final-conf
+                                   (if opp-committed?
+                                       'opportunity-cost-committed-branches-closed
+                                       'zero-sum-gas-committed-orthogonal-excluded))]))
+  (hash-set! MIRROR-ZERO-SUM-OPP-COST-TABLE reading-out opp-profile)
+  reading-out)
 
 ;; =============================================================================
 ;; 3. Component 1: Shadow Economy & Dark-Matter Resource Ledger
@@ -3147,15 +3383,16 @@
 
 (define ALL-RATIONAL-TECH
   '(spawning-pool roach-warren baneling-nest lair hydralisk-den spire lurker-den
-    barracks factory starport
-    gateway cybernetics-core robotics-facility robotics-bay stargate twilight-council))
+    infestation-pit hive ultralisk-cavern greater-spire
+    barracks barracks-techlab factory factory-techlab starport starport-techlab armory ghost-academy fusion-core
+    gateway cybernetics-core robotics-facility robotics-bay stargate twilight-council templar-archive dark-shrine fleet-beacon))
 
 (define (unit-to-archetype unit-sym)
   (case unit-sym
     [(marine marauder reaper ghost medivac
       barracks barracks-techlab barracks-reactor ghost-academy)
      'bio-ball]
-    [(siege-tank siege-tank-sieged hellion hellbat cyclone thor widow-mine widow-mine-burrowed
+    [(siege-tank siege-tank-sieged hellion hellbat cyclone thor thor-ap widow-mine widow-mine-burrowed
       factory factory-techlab armory)
      'mech-siege]
     [(zealot stalker adept sentry colossus immortal archon disruptor
@@ -3163,15 +3400,16 @@
       gateway warp-gate cybernetics-core twilight-council robotics-facility robotics-bay templar-archive dark-shrine)
      'stalker-colossus]
     [(void-ray carrier tempest oracle phoenix mothership
-      viking banshee battlecruiser liberator liberator-ag raven
+      viking viking-fighter banshee battlecruiser liberator liberator-ag raven
       stargate fleet-beacon starport starport-techlab fusion-core)
      'sky-toss]
-    [(zergling baneling hydralisk lurker lurker-mp-burrowed queen ultralisk swarm-host
+    [(zergling zergling-burrowed baneling baneling-burrowed hydralisk hydralisk-burrowed
+      lurker lurker-burrowed lurker-mp lurker-mp-burrowed queen queen-burrowed ultralisk ultralisk-burrowed swarm-host
       spawning-pool baneling-nest hydralisk-den lurker-den lurker-den-mp infestation-pit ultralisk-cavern)
      'ling-bane-hydra]
-    [(roach ravager roach-warren)
+    [(roach roach-burrowed ravager ravager-burrowed roach-warren)
      'roach-ravager]
-    [(mutalisk corruptor brood-lord viper spire greater-spire)
+    [(mutalisk corruptor brood-lord viper infestor infestor-burrowed spire greater-spire)
      'muta-flock]
     [else
      'early-rush]))
@@ -3279,6 +3517,10 @@
        (memq raw-unit '(void-ray carrier tempest phoenix oracle high-templar))]
       [(roach-ravager-ground)
        (memq raw-unit '(mutalisk corruptor baneling))]
+      [(infestor-queen-spell)
+       (memq raw-unit '(mutalisk baneling))]
+      [(ling-bane-flood)
+       (memq raw-unit '(brood-lord lurker ultralisk))]
       [(spire-air-muta)
        (memq raw-unit '(lurker ultralisk))]
       [(hydra-lurker-den)
@@ -3295,10 +3537,13 @@
       raw-unit
       (case committed-branch
         [(twilight-templar-ground) 'archon]
-        [(stargate-sky-fleet)      'void-ray]
+        [(stargate-sky-fleet)
+         (if (memq 'fleet-beacon feasible-tech) 'tempest 'void-ray)]
         [(robotics-heavy-siege)
          (if (memq 'robotics-bay feasible-tech) 'colossus 'immortal)]
         [(roach-ravager-ground)    'ravager]
+        [(infestor-queen-spell)    'infestor]
+        [(ling-bane-flood)         'baneling]
         [(spire-air-muta)          'mutalisk]
         [(hydra-lurker-den)
          (if (memq 'lurker-den feasible-tech) 'lurker 'hydralisk)]
@@ -3326,21 +3571,217 @@
               [else 'marauder])]
            [else raw-unit])])))
 
-(define (counter-unit-for-race race target-archetype available-tech raw-minerals raw-gas)
+;; Attribute-accurate LotV enemy-unit identification & counter selection helpers
+(define MIRROR-ENEMY-UNIT-THREAT-WEIGHTS
+  (hasheq
+   'mothership 140 'carrier 130 'battlecruiser 128 'tempest 125
+   'colossus 122 'brood-lord 120 'thor 118 'thor-ap 118 'ultralisk 116
+   'disruptor 114 'siege-tank-sieged 112 'siege-tank 108 'immortal 106
+   'infestor 104 'infestor-burrowed 104 'viper 102 'high-templar 100
+   'lurker-burrowed 98 'lurker 98 'ghost 96 'raven 94 'archon 92
+   'liberator-ag 90 'liberator 86 'void-ray 84 'dark-templar 82 'oracle 80
+   'banshee 78 'queen 76 'mutalisk 74 'corruptor 72 'ravager 70
+   'cyclones 68 'cyclone 68 'hydralisk 64 'viking 62 'viking-fighter 62
+   'stalker 58 'marauder 56 'roach 54 'phoenix 52 'hellbat 50 'widow-mine 48
+   'adept 44 'zealot 42 'baneling 40 'hellion 38 'marine 34 'reaper 30
+   'zergling 26 'sentry 24 'medivac 22))
+
+(define (dominant-observed-enemy-unit enemy-units)
+  (define best-sym #f)
+  (define best-score -1.0)
+  (for ([u (in-list enemy-units)]
+        #:when (hash? u))
+    (define ut (unit-type-sym u))
+    (unless (or (enemy-unit-hallucination? u)
+                (memq ut '(larva egg cocoon baneling-cocoon ravager-cocoon
+                           overlord overlord-transport observer overseer
+                           parasitic-bomb-dummy kd8-charge scv probe drone mule)))
+      (define w (exact->inexact (hash-ref MIRROR-ENEMY-UNIT-THREAT-WEIGHTS ut 20)))
+      (define count-sc (+ w (* 0.08 (exact->inexact (safe-int (hash-ref u 'hp 60) 60)))))
+      (when (> count-sc best-score)
+        (set! best-score count-sc)
+        (set! best-sym ut))))
+  best-sym)
+
+(define (lotv-tech-prereq-ok? req available-tech)
+  (cond
+    [(not req) #t]
+    [(memq req available-tech) #t]
+    [(eq? req 'lurker-den) (memq 'lurker-den-mp available-tech)]
+    [(eq? req 'templar-archive) (memq 'templar-archives available-tech)]
+    [(eq? req 'robotics-bay) (memq 'robotics-support-bay available-tech)]
+    [(memq req '(barracks-techlab factory-techlab starport-techlab))
+     (define parent
+       (case req
+         [(barracks-techlab) 'barracks]
+         [(factory-techlab) 'factory]
+         [else 'starport]))
+     (and (memq parent available-tech) (memq 'techlab available-tech))]
+    [else #f]))
+
+(define (lotv-pick-first-feasible candidates available-tech minerals gas)
+  (for/or ([c (in-list candidates)])
+    (define unit-sym (car c))
+    (define req (cadr c))
+    (define min-m (if (pair? (cddr c)) (caddr c) 0))
+    (define min-g (if (and (pair? (cddr c)) (pair? (cdddr c))) (cadddr c) 0))
+    (and (lotv-tech-prereq-ok? req available-tech)
+         (>= minerals (min 250 min-m))
+         (>= gas (min 150 min-g))
+         unit-sym)))
+
+;; Explicit LotV attribute-accurate counter preference lists:
+;;   ((candidate-unit required-tech min-minerals min-gas) ...)
+(define LOTV-UNIT-COUNTERS-TABLE
+  (hasheq
+   'immortal
+   (hasheq
+    'Zerg    '((hydralisk hydralisk-den 100 50) (lurker lurker-den 150 150) (ravager roach-warren 100 100) (zergling spawning-pool 50 0))
+    'Terran  '((marauder barracks-techlab 100 25) (liberator starport 150 150) (marine barracks 50 0))
+    'Protoss '((zealot gateway 100 0) (immortal robotics-facility 275 100)))
+   'queen
+   (hasheq
+    'Terran  '((ghost ghost-academy 150 125) (marauder barracks-techlab 100 25) (marine barracks 50 0))
+    'Zerg    '((ultralisk ultralisk-cavern 275 200) (hydralisk hydralisk-den 100 50) (ravager roach-warren 100 100))
+    'Protoss '((high-templar templar-archive 50 150) (archon templar-archive 100 150) (stalker cybernetics-core 125 50)))
+   'infestor
+   (hasheq
+    'Terran  '((ghost ghost-academy 150 125) (marauder barracks-techlab 100 25) (marine barracks 50 0))
+    'Zerg    '((ultralisk ultralisk-cavern 275 200) (lurker lurker-den 150 150) (ravager roach-warren 100 100))
+    'Protoss '((high-templar templar-archive 50 150) (archon templar-archive 100 150) (immortal robotics-facility 275 100)))
+   'siege-tank
+   (hasheq
+    'Terran  '((raven starport-techlab 100 150) (liberator starport 150 150) (viking starport 150 75) (marauder barracks-techlab 100 25))
+    'Zerg    '((viper hive 100 200) (ravager roach-warren 100 100) (mutalisk spire 100 100))
+    'Protoss '((immortal robotics-facility 275 100) (disruptor robotics-bay 150 150) (phoenix stargate 150 100) (zealot gateway 100 0)))
+   'tempest
+   (hasheq
+    'Terran  '((viking-fighter starport 150 75) (thor armory 300 200) (marine barracks 50 0))
+    'Zerg    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50) (queen spawning-pool 150 0))
+    'Protoss '((void-ray stargate 250 150) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
+   'battlecruiser
+   (hasheq
+    'Terran  '((viking-fighter starport 150 75) (thor armory 300 200) (marine barracks 50 0))
+    'Zerg    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50) (queen spawning-pool 150 0))
+    'Protoss '((void-ray stargate 250 150) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
+   'carrier
+   (hasheq
+    'Terran  '((viking-fighter starport 150 75) (thor armory 300 200) (marine barracks 50 0))
+    'Zerg    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50))
+    'Protoss '((void-ray stargate 250 150) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
+   'brood-lord
+   (hasheq
+    'Terran  '((viking-fighter starport 150 75) (thor armory 300 200) (marine barracks 50 0))
+    'Zerg    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50))
+    'Protoss '((void-ray stargate 250 150) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
+   'mothership
+   (hasheq
+    'Terran  '((viking-fighter starport 150 75) (thor armory 300 200) (marine barracks 50 0))
+    'Zerg    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50))
+    'Protoss '((void-ray stargate 250 150) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
+   'roach
+   (hasheq
+    'Protoss '((immortal robotics-facility 275 100) (stalker cybernetics-core 125 50))
+    'Terran  '((marauder barracks-techlab 100 25) (siege-tank factory-techlab 150 125) (marine barracks 50 0))
+    'Zerg    '((lurker lurker-den 150 150) (ravager roach-warren 100 100) (roach roach-warren 75 25)))
+   'zealot
+   (hasheq
+    'Zerg    '((baneling baneling-nest 50 25) (roach roach-warren 75 25))
+    'Terran  '((hellbat armory 100 0) (hellion factory 100 0) (marine barracks 50 0))
+    'Protoss '((archon templar-archive 100 150) (colossus robotics-bay 300 200) (adept cybernetics-core 100 25)))
+   'zergling
+   (hasheq
+    'Zerg    '((baneling baneling-nest 50 25) (roach roach-warren 75 25))
+    'Terran  '((hellbat armory 100 0) (hellion factory 100 0) (marine barracks 50 0))
+    'Protoss '((colossus robotics-bay 300 200) (archon templar-archive 100 150) (zealot gateway 100 0)))
+   'adept
+   (hasheq
+    'Zerg    '((baneling baneling-nest 50 25) (roach roach-warren 75 25))
+    'Terran  '((hellbat armory 100 0) (marauder barracks-techlab 100 25) (marine barracks 50 0))
+    'Protoss '((archon templar-archive 100 150) (stalker cybernetics-core 125 50)))
+   'colossus
+   (hasheq
+    'Terran  '((viking starport 150 75) (marauder barracks-techlab 100 25))
+    'Zerg    '((corruptor spire 150 100) (viper hive 100 200) (lurker lurker-den 150 150))
+    'Protoss '((immortal robotics-facility 275 100) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
+   'mutalisk
+   (hasheq
+    'Terran  '((thor armory 300 200) (viking starport 150 75) (marine barracks 50 0))
+    'Zerg    '((hydralisk hydralisk-den 100 50) (corruptor spire 150 100) (queen spawning-pool 150 0))
+    'Protoss '((phoenix stargate 150 100) (archon templar-archive 100 150) (stalker cybernetics-core 125 50)))))
+
+(define (normalize-counter-enemy-key sym)
+  (case sym
+    [(siege-tank-sieged) 'siege-tank]
+    [(infestor-burrowed) 'infestor]
+    [(queen-burrowed) 'queen]
+    [(roach-burrowed) 'roach]
+    [(zergling-burrowed) 'zergling]
+    [(thor-ap) 'thor]
+    [(lurker-burrowed lurker-mp lurker-mp-burrowed) 'lurker]
+    [(viking-fighter viking-assault) 'viking]
+    [(liberator-ag) 'liberator]
+    [else sym]))
+
+(define (attribute-counter-unit-for-enemy race enemy-unit available-tech minerals gas)
+  (define eff-tech
+    (if (or (not (list? available-tech)) (null? available-tech))
+        ALL-RATIONAL-TECH
+        available-tech))
+  (define ekey (and (symbol? enemy-unit) (normalize-counter-enemy-key enemy-unit)))
+  (define race-ht (and ekey (hash-ref LOTV-UNIT-COUNTERS-TABLE ekey #f)))
+  (define explicit-pick
+    (and race-ht
+         (let ([cands (hash-ref race-ht race #f)])
+           (and cands (lotv-pick-first-feasible cands eff-tech minerals gas)))))
+  (or explicit-pick
+      (and ekey
+           (let* ([mask (unit-attribute-mask ekey)]
+                  [massive? (fx> (fxand mask SC2-UNIT-ATTR-MASSIVE) 0)]
+                  [armored? (fx> (fxand mask SC2-UNIT-ATTR-ARMORED) 0)]
+                  [light? (fx> (fxand mask SC2-UNIT-ATTR-LIGHT) 0)]
+                  [bio? (fx> (fxand mask SC2-UNIT-ATTR-BIOLOGICAL) 0)]
+                  [fallback-cands
+                   (cond
+                     [massive?
+                      (case race
+                        [(Terran)  '((viking starport 150 75) (thor armory 300 200) (marauder barracks-techlab 100 25))]
+                        [(Zerg)    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50))]
+                        [(Protoss) '((tempest fleet-beacon 250 175) (immortal robotics-facility 275 100) (stalker cybernetics-core 125 50))]
+                        [else      #f])]
+                     [armored?
+                      (case race
+                        [(Terran)  '((marauder barracks-techlab 100 25) (siege-tank factory-techlab 150 125))]
+                        [(Zerg)    '((hydralisk hydralisk-den 100 50) (lurker lurker-den 150 150) (ravager roach-warren 100 100))]
+                        [(Protoss) '((immortal robotics-facility 275 100) (stalker cybernetics-core 125 50))]
+                        [else      #f])]
+                     [(and light? bio?)
+                      (case race
+                        [(Terran)  '((hellbat armory 100 0) (hellion factory 100 0) (siege-tank factory-techlab 150 125))]
+                        [(Zerg)    '((baneling baneling-nest 50 25) (roach roach-warren 75 25))]
+                        [(Protoss) '((archon templar-archive 100 150) (colossus robotics-bay 300 200) (adept cybernetics-core 100 25))]
+                        [else      #f])]
+                     [else #f])])
+             (and fallback-cands
+                  (lotv-pick-first-feasible fallback-cands eff-tech minerals gas))))))
+
+(define (counter-unit-for-race race target-archetype available-tech raw-minerals raw-gas
+                               #:enemy-unit [enemy-unit #f])
   (define minerals (max 250 (safe-int raw-minerals 300)))
   (define gas (max 150 (safe-int raw-gas 150)))
-  (define tree (get-race-counter-tree race))
-  (define res
-    (resolve-demand-pull tree
-                         target-archetype
-                         (if (or (not (list? available-tech)) (null? available-tech))
-                             ALL-RATIONAL-TECH
-                             available-tech)
-                         #:minerals minerals
-                         #:gas gas))
-  (if (hash? res)
-      (hash-ref res 'selected-unit 'roach)
-      res))
+  (or (and enemy-unit
+           (attribute-counter-unit-for-enemy race enemy-unit available-tech minerals gas))
+      (let* ([tree (get-race-counter-tree race)]
+             [res (resolve-demand-pull tree
+                                       target-archetype
+                                       (if (or (not (list? available-tech)) (null? available-tech))
+                                           ALL-RATIONAL-TECH
+                                           available-tech)
+                                       #:minerals minerals
+                                       #:gas gas)])
+        (if (hash? res)
+            (hash-ref res 'selected-unit 'roach)
+            res))))
 
 ;; What does the opponent predict about US at depth 1 (using what they know
 ;; about us, including transitive implied tech buildings, spells from our units,
@@ -3534,11 +3975,14 @@
      (define obs-enemy-arch (classify-enemy-archetype enemy-units))
      (define obs-enemy-unit
        (or previewed-unit
+           (dominant-observed-enemy-unit enemy-units)
            (if (and (null? enemy-units) (not (null? enemy-bldgs)))
                (build-order-tree-projection-predicted-primary-unit opp-bo-proj)
                (archetype-signature-unit enemy-race obs-enemy-arch))))
      (define our-d0-unit
-       (counter-unit-for-race our-race (unit-to-archetype obs-enemy-unit) our-tech our-minerals our-gas))
+       (counter-unit-for-race our-race (unit-to-archetype obs-enemy-unit)
+                              our-tech our-minerals our-gas
+                              #:enemy-unit obs-enemy-unit))
      (depth-node 0
                  'none
                  obs-enemy-unit
@@ -3554,6 +3998,7 @@
     ;; -------------------------------------------------------------------------
     [(= depth 1)
      (define obs-enemy-arch (classify-enemy-archetype enemy-units))
+     (define dom-obs-unit (dominant-observed-enemy-unit enemy-units))
      (define implied-bldgs
        (if tech-obs (enemy-tech-observation-implied-tech-buildings tech-obs) '()))
      (define committed-branch
@@ -3566,33 +4011,115 @@
          [bluff?
           (case committed-branch
             [(twilight-templar-ground) 'high-templar]
-            [(stargate-sky-fleet)      'void-ray]
+            [(stargate-sky-fleet stargate-fleet)
+             (cond
+               [(memq dom-obs-unit '(tempest carrier void-ray mothership phoenix oracle)) dom-obs-unit]
+               [(or (memq 'fleet-beacon implied-bldgs)
+                    (for/or ([b (in-list enemy-bldgs)]) (eq? (unit-type-sym b) 'fleet-beacon)))
+                'carrier]
+               [else 'void-ray])]
             [(robotics-heavy-siege)    'colossus]
+            [(armored-siege)
+             (cond
+               [(memq dom-obs-unit '(siege-tank siege-tank-sieged thor colossus immortal disruptor lurker ultralisk))
+                (if (eq? dom-obs-unit 'siege-tank-sieged) 'siege-tank dom-obs-unit)]
+               [(eq? enemy-race 'Terran) 'siege-tank]
+               [(eq? enemy-race 'Protoss) 'colossus]
+               [else 'lurker])]
             [(roach-ravager-ground)    'roach]
+            [(infestor-queen-spell)    'infestor]
+            [(ling-bane-flood)         'baneling]
             [(spire-air-muta)          'mutalisk]
+            [(greater-spire)
+             (cond
+               [(memq dom-obs-unit '(brood-lord corruptor mutalisk)) dom-obs-unit]
+               [(or (memq 'greater-spire implied-bldgs)
+                    (for/or ([b (in-list enemy-bldgs)]) (eq? (unit-type-sym b) 'greater-spire)))
+                'brood-lord]
+               [else 'mutalisk])]
             [(hydra-lurker-den)        'lurker]
             [(bio-stim-medivac)        'marauder]
             [(factory-mech-siege)      'siege-tank]
-            [(starport-cloak-or-bc)    'banshee]
+            [(starport-cloak-or-bc air-starport-bc)
+             (cond
+               [(memq dom-obs-unit '(battlecruiser raven liberator banshee)) dom-obs-unit]
+               [(or (eq? committed-branch 'air-starport-bc)
+                    (memq 'fusion-core implied-bldgs)
+                    (for/or ([b (in-list enemy-bldgs)]) (eq? (unit-type-sym b) 'fusion-core)))
+                'battlecruiser]
+               [else 'banshee])]
             [else                      (archetype-signature-unit enemy-race obs-enemy-arch)])]
+         [(and zs-reading
+               (memq 'closed-by-opportunity-cost
+                     (zero-sum-exclusion-reading-excluded-tech-branches zs-reading)))
+          (or (hash-ref (zero-sum-exclusion-reading-opportunity-cost-profile zs-reading)
+                        'recommended-enemy-unit #f)
+              dom-obs-unit
+              (archetype-signature-unit enemy-race obs-enemy-arch))]
          [(and ledger
                (eq? (shadow-ledger-dark-matter-hypothesis ledger)
                     'hidden-air-or-cloak-tech-switch))
           (race-hidden-gas-threat enemy-race)]
          [(not (eq? committed-branch 'uncommitted))
           (case committed-branch
-            [(twilight-templar-ground) 'stalker]
-            [(stargate-sky-fleet)      'void-ray]
-            [(robotics-heavy-siege)    'immortal]
-            [(roach-ravager-ground)    'roach]
-            [(spire-air-muta)          'mutalisk]
-            [(hydra-lurker-den)        'hydralisk]
-            [(bio-stim-medivac)        'marauder]
-            [(factory-mech-siege)      'siege-tank]
-            [(starport-cloak-or-bc)    'banshee]
+            [(twilight-templar-ground)
+             (if (memq dom-obs-unit '(high-templar archon dark-templar adept zealot stalker))
+                 dom-obs-unit
+                 'stalker)]
+            [(stargate-sky-fleet stargate-fleet)
+             (cond
+               [(memq dom-obs-unit '(tempest carrier void-ray mothership phoenix oracle)) dom-obs-unit]
+               [(or (memq 'fleet-beacon implied-bldgs)
+                    (for/or ([b (in-list enemy-bldgs)]) (eq? (unit-type-sym b) 'fleet-beacon)))
+                'carrier]
+               [else 'void-ray])]
+            [(robotics-heavy-siege)
+             (if (memq dom-obs-unit '(colossus disruptor immortal))
+                 dom-obs-unit
+                 'immortal)]
+            [(armored-siege)
+             (cond
+               [(memq dom-obs-unit '(siege-tank siege-tank-sieged thor colossus immortal disruptor lurker ultralisk))
+                (if (eq? dom-obs-unit 'siege-tank-sieged) 'siege-tank dom-obs-unit)]
+               [(eq? enemy-race 'Terran) 'siege-tank]
+               [(eq? enemy-race 'Protoss) 'colossus]
+               [else 'lurker])]
+            [(roach-ravager-ground)
+             (if (memq dom-obs-unit '(ravager roach)) dom-obs-unit 'roach)]
+            [(infestor-queen-spell)
+             (if (eq? dom-obs-unit 'queen) 'queen 'infestor)]
+            [(ling-bane-flood)         'baneling]
+            [(spire-air-muta)
+             (if (memq dom-obs-unit '(brood-lord corruptor mutalisk)) dom-obs-unit 'mutalisk)]
+            [(greater-spire)
+             (cond
+               [(memq dom-obs-unit '(brood-lord corruptor mutalisk)) dom-obs-unit]
+               [(or (memq 'greater-spire implied-bldgs)
+                    (for/or ([b (in-list enemy-bldgs)]) (eq? (unit-type-sym b) 'greater-spire)))
+                'brood-lord]
+               [else 'mutalisk])]
+            [(hydra-lurker-den)
+             (if (memq dom-obs-unit '(lurker lurker-burrowed hydralisk)) dom-obs-unit 'hydralisk)]
+            [(bio-stim-medivac)
+             (if (memq dom-obs-unit '(marauder ghost marine medivac)) dom-obs-unit 'marauder)]
+            [(factory-mech-siege)
+             (if (memq dom-obs-unit '(siege-tank siege-tank-sieged thor cyclone hellbat))
+                 (if (eq? dom-obs-unit 'siege-tank-sieged) 'siege-tank dom-obs-unit)
+                 'siege-tank)]
+            [(starport-cloak-or-bc air-starport-bc)
+             (cond
+               [(memq dom-obs-unit '(battlecruiser raven liberator banshee)) dom-obs-unit]
+               [(or (eq? committed-branch 'air-starport-bc)
+                    (memq 'fusion-core implied-bldgs)
+                    (for/or ([b (in-list enemy-bldgs)]) (eq? (unit-type-sym b) 'fusion-core)))
+                'battlecruiser]
+               [else 'banshee])]
             [else                      (archetype-signature-unit enemy-race obs-enemy-arch)])]
+         [dom-obs-unit dom-obs-unit]
          [(or (memq 'spire implied-bldgs) (memq 'greater-spire implied-bldgs)) 'mutalisk]
          [(or (memq 'hydralisk-den implied-bldgs) (memq 'lurker-den implied-bldgs)) 'hydralisk]
+         [(memq 'infestation-pit implied-bldgs) 'infestor]
+         [(memq 'baneling-nest implied-bldgs) 'baneling]
          [(memq 'roach-warren implied-bldgs) 'roach]
          [(memq 'stargate implied-bldgs) 'void-ray]
          [(or (memq 'robotics-facility implied-bldgs) (memq 'twilight-council implied-bldgs)) 'stalker]
@@ -3616,7 +4143,8 @@
             enemy-race raw-d1-enemy-unit enemy-feasible-tech zs-reading tech-obs)))
      (define d1-enemy-arch (unit-to-archetype d1-enemy-unit))
      (define our-d1-unit
-       (counter-unit-for-race our-race d1-enemy-arch our-tech our-minerals our-gas))
+       (counter-unit-for-race our-race d1-enemy-arch our-tech our-minerals our-gas
+                              #:enemy-unit d1-enemy-unit))
      (define-values (tact-sym tx ty) (tactical-target-at-depth-1 mstate obs))
      (depth-node 1
                  'unmodeled-at-d1
@@ -3663,7 +4191,8 @@
             enemy-race raw-d2-enemy-unit bo-tree-tech zs-reading tech-obs)))
      (define d2-enemy-arch (unit-to-archetype d2-enemy-unit))
      (define our-d2-unit
-       (counter-unit-for-race our-race d2-enemy-arch our-tech our-minerals our-gas))
+       (counter-unit-for-race our-race d2-enemy-arch our-tech our-minerals our-gas
+                              #:enemy-unit d2-enemy-unit))
      (define-values (tact-sym tx ty)
        (if (or bluff? (and reading (action-lens-reading-feint-or-poke-detected? reading)))
            (values 'main-mineral-line-drop-or-air
@@ -3709,7 +4238,8 @@
             enemy-race raw-dk-enemy-unit bo-tree-tech zs-reading tech-obs)))
      (define dk-enemy-arch (unit-to-archetype dk-enemy-unit))
      (define our-dk-unit
-       (counter-unit-for-race our-race dk-enemy-arch our-tech our-minerals our-gas))
+       (counter-unit-for-race our-race dk-enemy-arch our-tech our-minerals our-gas
+                              #:enemy-unit dk-enemy-unit))
      (define-values (tact-sym tx ty)
        (tactical-target-at-higher-depth (depth-node-tactical-target prev-node) obs))
      (depth-node depth
@@ -4662,20 +5192,41 @@
      (define zs-reading (mirror-mind-state-last-zero-sum-reading mstate))
      (define reading (mirror-mind-state-last-action-reading mstate))
      (define ledger (mirror-mind-state-last-shadow-ledger mstate))
-     (define committed-no-transition?
+     (define seen-enemy-evidence?
+       (or (> (hash-count (mirror-mind-state-seen-enemy-unit-costs mstate)) 0)
+           (> (hash-count (mirror-mind-state-seen-enemy-bldg-costs mstate)) 0)
+           (> (mirror-mind-state-probes-completed mstate) 0)))
+     (define proxy-rush-detected?
+       (and reading (action-lens-reading-proxy-or-rush-detected? reading)))
+     (define feint-or-hidden?
+       (or (and zs-reading (zero-sum-exclusion-reading-bluff-or-feint-suspected? zs-reading))
+           (and reading (action-lens-reading-feint-or-poke-detected? reading))
+           (and ledger (eq? (shadow-ledger-dark-matter-hypothesis ledger)
+                            'hidden-air-or-cloak-tech-switch))))
+     (define opp-cost-lock?
        (and (not depth-accuracy-scores)
-            (eq? probe-resp 'untested)
-            (= def-d 2)
+            zs-reading
+            (memq 'closed-by-opportunity-cost
+                  (zero-sum-exclusion-reading-excluded-tech-branches zs-reading))))
+     (define committed-single-branch-lock?
+       (and (not depth-accuracy-scores)
             zs-reading
             (not (eq? (zero-sum-exclusion-reading-committed-primary-branch zs-reading) 'uncommitted))
             (not (zero-sum-exclusion-reading-bluff-or-feint-suspected? zs-reading))
-            (< (zero-sum-exclusion-reading-remaining-gas-budget zs-reading) 150)
-            (not (and reading
-                      (or (action-lens-reading-opponent-scouted-us? reading)
-                          (action-lens-reading-feint-or-poke-detected? reading))))
+            (>= (safe-real (zero-sum-exclusion-reading-confidence-score zs-reading) 0.0) 0.70)
+            (or opp-cost-lock?
+                (not (and ledger
+                          (eq? (shadow-ledger-dark-matter-hypothesis ledger)
+                               'hidden-air-or-cloak-tech-switch))))))
+     (define scripted-low-depth-lock?
+       (and (eq? probe-resp 'untested)
             (not (and ledger
                       (eq? (shadow-ledger-dark-matter-hypothesis ledger)
-                           'hidden-air-or-cloak-tech-switch)))))
+                           'hidden-air-or-cloak-tech-switch)))
+            (or (<= opp-d 0)
+                (and (<= opp-d 1)
+                     seen-enemy-evidence?
+                     (not feint-or-hidden?)))))
      (define chosen
        (cond
          ;; If explicit depth-accuracy-scores were supplied, or if any depth d* in 0..5
@@ -4683,8 +5234,10 @@
          ;; or >= +0.10 overall), switch directly to best-d!
          [(and depth-accuracy-scores (>= best-acc def-acc))
           best-d]
+         [opp-cost-lock? 1]
          [(and (eq? probe-resp 'untested)
                (>= overall 0.45)
+               (not proxy-rush-detected?)
                (> best-acc (+ def-acc 0.06)))
           best-d]
          ;; Low-End Occam's Razor: opponent ignores probes ('no-reaction) or accuracy is low -> Depth 1!
@@ -4702,13 +5255,15 @@
               (> acc-4 (+ (max def-acc acc-2 acc-3) 0.06)))
           4]
          [(or (eq? probe-resp 'second-order-pivot-or-cancel)
-              (= opp-d 2)
-              (and (>= acc-2 0.70) (> acc-3 (+ (max def-acc acc-2) 0.06))))
+              (and (>= opp-d 2) (>= acc-2 0.70) (> acc-3 (+ (max def-acc acc-2) 0.06))))
           3]
+         ;; Lock to Depth 1 (direct hard counter) on proxy/rush, >= 0.70 single-branch commitment,
+         ;; or confirmed low-depth (<= 1) scripted ladder bots instead of over-levelling to Depth 2!
+         [proxy-rush-detected? 1]
+         [committed-single-branch-lock? 1]
+         [scripted-low-depth-lock? 1]
          [(eq? probe-resp 'direct-counter) 2]
-         ;; When opponent is locked into a confirmed build-order branch with < 150G remaining
-         ;; and no bluff/scout/transition signal is active, favor Depth 1 committed production!
-         [committed-no-transition? 1]
+         [(>= opp-d 2) 2]
          [(> best-acc (+ def-acc 0.06)) best-d]
          [(and (> def-d 2) (>= (safe-real (hash-ref d-acc def-d 0.60) 0.60) 0.58))
           def-d]
@@ -4920,18 +5475,24 @@
       [(or strat-hit? tact-hit?)
        (define new-strat
          (+ (* (- 1.0 alpha) (mirror-mind-state-strategic-accuracy mstate))
-            (* alpha (if strat-hit? (max 0.85 strat-score) 0.75))))
+            (* alpha (if strat-hit? (max 0.85 strat-score) (max 0.15 strat-score)))))
        (define new-tact
          (+ (* (- 1.0 alpha) (mirror-mind-state-tactical-accuracy mstate))
             (* alpha (if tact-hit? 1.0 0.75))))
-       (set-mirror-mind-state-strategic-accuracy! mstate (min 0.98 new-strat))
+       (set-mirror-mind-state-strategic-accuracy! mstate (min 0.98 (max 0.15 new-strat)))
        (set-mirror-mind-state-tactical-accuracy! mstate (min 0.98 new-tact))
-       ;; Update per-depth accuracy for `fc-depth` weighted by resource/transition match quality
+       ;; Update per-depth accuracy for `fc-depth` without awarding `d=2` inflation
+       ;; (>= 0.82) when tactical proximity matched but strategic unit prediction missed!
        (define old-d-acc (safe-real (hash-ref d-acc fc-depth 0.65) 0.65))
-       (define hit-credit (if strat-hit? (max 0.85 strat-score) 0.82))
-       (hash-set! d-acc fc-depth (min 0.98 (+ (* (- 1.0 alpha) old-d-acc) (* alpha hit-credit))))
-       (set-mirror-mind-state-resolved-hits!
-        mstate (add1 (mirror-mind-state-resolved-hits mstate)))
+       (define hit-credit
+         (if strat-hit?
+             (max 0.85 strat-score)
+             (min 0.45 (max 0.25 (+ 0.20 (* 0.50 strat-score))))))
+       (hash-set! d-acc fc-depth
+                  (min 0.98 (max 0.15 (+ (* (- 1.0 alpha) old-d-acc) (* alpha hit-credit)))))
+       (when strat-hit?
+         (set-mirror-mind-state-resolved-hits!
+          mstate (add1 (mirror-mind-state-resolved-hits mstate))))
        (set-mirror-mind-state-resolved-total!
         mstate (add1 (mirror-mind-state-resolved-total mstate)))]
 
@@ -4970,6 +5531,21 @@
   (not (and (hash? raw-obs) (hash-has-key? raw-obs 'actual-race))))
 
 (define MIRROR-SCOUT-LAST-EMIT-FRAME (make-weak-hasheq))
+(define MIRROR-MIND-SIGNALS-HT-TABLE (make-weak-hasheq))
+
+(define (mirror-mind-state-signals-ht mstate)
+  (if (mirror-mind-state? mstate)
+      (hash-ref MIRROR-MIND-SIGNALS-HT-TABLE mstate
+                (lambda ()
+                  (hasheq 'opportunity-cost-commitment #f
+                          'commitment-score 0.0
+                          'committed-primary-branch 'uncommitted
+                          'excluded-tech-branches '()
+                          'closed-by-opportunity-cost? #f
+                          'chosen-depth (mirror-mind-state-active-depth mstate)
+                          'recommended-counter-unit (mirror-mind-state-preemptive-counter-unit mstate)
+                          'mirror-preemptive-unit (mirror-mind-state-preemptive-counter-unit mstate))))
+      (hasheq)))
 
 (define (step-mirror-mind-predictor! mstate raw-obs)
   (if (current-halluc-memo)
@@ -5125,11 +5701,27 @@
   (define d0-node (first nodes))
 
   (define pred-enemy-unit (depth-node-predicted-enemy-unit active-node))
+  (define zs-opp-profile
+    (zero-sum-exclusion-reading-opportunity-cost-profile zs-reading))
+  (define zs-opp-committed?
+    (hash-ref zs-opp-profile 'opportunity-cost-commitment #f))
+  (define zs-opp-dom-path
+    (hash-ref zs-opp-profile 'dominant-path 'uncommitted))
   (define chosen-counter-unit
-    (if (or (eq? (mirror-mind-state-trust-mode mstate) 'skeptical-observational-fallback)
-            (eq? (mirror-toolbox-allocation-toolbox-role alloc) 'survival-fundamentals-only))
-        (depth-node-our-response-unit d0-node)
-        (depth-node-our-response-unit active-node)))
+    (cond
+      [(and zs-opp-committed?
+            (or (memq zs-opp-dom-path '(air-starport-bc stargate-fleet greater-spire))
+                (memq pred-enemy-unit '(battlecruiser carrier tempest mothership brood-lord))))
+       (case (mirror-mind-state-our-race mstate)
+         [(Zerg)    'corruptor]
+         [(Terran)  'viking-fighter]
+         [(Protoss) 'void-ray]
+         [else      (depth-node-our-response-unit active-node)])]
+      [(or (eq? (mirror-mind-state-trust-mode mstate) 'skeptical-observational-fallback)
+           (eq? (mirror-toolbox-allocation-toolbox-role alloc) 'survival-fundamentals-only))
+       (depth-node-our-response-unit d0-node)]
+      [else
+       (depth-node-our-response-unit active-node)]))
   (define tact-target (depth-node-tactical-target active-node))
   (define tx (depth-node-target-x active-node))
   (define ty (depth-node-target-y active-node))
@@ -5188,6 +5780,49 @@
           (build-order-tree-projection-active-node-id opp-bo-proj)
           (build-order-tree-projection-predicted-primary-unit opp-bo-proj)
           (build-order-tree-projection-recommended-next-build-step self-bo-proj)))
+  (define opp-profile
+    (zero-sum-exclusion-reading-opportunity-cost-profile zs-reading))
+  (define opp-committed? (hash-ref opp-profile 'opportunity-cost-commitment #f))
+  (define opp-score (hash-ref opp-profile 'commitment-score 0.0))
+  (define opp-dom-path (hash-ref opp-profile 'dominant-path 'uncommitted))
+  (define opp-req-aa?
+    (and opp-committed?
+         (not (not (memq opp-dom-path '(air-starport-bc stargate-fleet greater-spire))))))
+  (define opp-signals-ht
+    (hasheq 'opportunity-cost-commitment opp-committed?
+            'commitment-score opp-score
+            'committed-primary-branch (zero-sum-exclusion-reading-committed-primary-branch zs-reading)
+            'excluded-tech-branches (zero-sum-exclusion-reading-excluded-tech-branches zs-reading)
+            'closed-by-opportunity-cost? (not (not (memq 'closed-by-opportunity-cost
+                                                         (zero-sum-exclusion-reading-excluded-tech-branches zs-reading))))
+            'chosen-depth active-d
+            'recommended-counter-unit chosen-counter-unit
+            'mirror-preemptive-unit chosen-counter-unit
+            'mirror-predicted-enemy-unit pred-enemy-unit
+            'mirror-recommended-min-bases rec-min-bases
+            'mirror-macro-verdict macro-verdict
+            'mirror-requires-detection? (enemy-tech-observation-requires-detection? tech-obs)
+            'mirror-requires-anti-air? (or opp-req-aa?
+                                            (enemy-tech-observation-requires-anti-air? tech-obs))
+            'mirror-enemy-upgrade-advantage (enemy-tech-observation-enemy-upgrade-advantage tech-obs)
+            'mirror-trust-mode trust-mode
+            'mirror-strategy strat-hyp
+            'dominant-opportunity-cost-path opp-dom-path
+            'opponent-gas-devoted (hash-ref opp-profile 'gas-devoted 0)
+            'opponent-gas-envelope (hash-ref opp-profile 'gas-envelope 150)
+            'opponent-minerals-devoted (hash-ref opp-profile 'minerals-devoted 0)
+            'opponent-minerals-envelope (hash-ref opp-profile 'minerals-envelope 500)))
+  (hash-set! MIRROR-MIND-SIGNALS-HT-TABLE mstate opp-signals-ht)
+  (define opp-commitment-log-directive
+    (list 'log
+          (list 'mirror-opportunity-cost-commitment
+                opp-committed?
+                opp-score
+                (zero-sum-exclusion-reading-committed-primary-branch zs-reading)
+                chosen-counter-unit
+                active-d
+                (hash-ref opp-profile 'gas-devoted 0)
+                (hash-ref opp-profile 'gas-envelope 150))))
   (define horizon-curve-directive
     (cons 'mirror-horizon-curve
           (for/list ([s (in-list horizon-snapshots)])
@@ -5234,8 +5869,8 @@
 
   (define bo-and-horizon-actions
     (if (emit-top-level-bo-directives? raw-obs)
-        (list bo-tree-directive horizon-curve-directive)
-        (list (list 'log bo-tree-directive horizon-curve-directive))))
+        (list bo-tree-directive horizon-curve-directive opp-commitment-log-directive)
+        (list (list 'log bo-tree-directive horizon-curve-directive opp-commitment-log-directive))))
 
   (define want-mirror-scout?
     (or (eq? trust-mode 'skeptical-observational-fallback)

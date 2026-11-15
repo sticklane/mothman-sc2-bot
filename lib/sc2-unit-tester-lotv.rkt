@@ -37,6 +37,7 @@
 (provide
  (struct-out lotv-scenario-spec)
  LOTV-UNIT-TESTER-SCENARIO-IDS
+ LOTV-UNIT-TESTER-CANONICAL-SCENARIOS
  LOTV-UNIT-TESTER-SCENARIOS
  find-lotv-unit-tester-scenario
  run-lotv-unit-tester-scenario
@@ -56,23 +57,40 @@
   (hasheq
    'marine            (hasheq 'dmg 6.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #t 'armored? #f 'biological? #t 'splash-mode #f)
    'marauder          (hasheq 'dmg 10.0 'hits 1 'bonus-light 0.0  'bonus-armored 10.0 'light? #f 'armored? #t 'biological? #t 'splash-mode #f 'concussive? #t)
+   'ghost             (hasheq 'dmg 10.0 'hits 1 'bonus-light 10.0 'bonus-armored 0.0  'light? #f 'armored? #f 'biological? #t 'splash-mode #f 'speed-ovr 3.94 'range-ovr 6.0 'period-ovr 1.07 'energy 100.0 'max-energy 200.0)
+   'siege-tank        (hasheq 'dmg 15.0 'hits 1 'bonus-light 0.0  'bonus-armored 10.0 'light? #f 'armored? #t 'biological? #f 'splash-mode #f 'speed-ovr 3.15 'range-ovr 7.0 'period-ovr 0.74 'max-hp-ovr 175.0 'armor-ovr 1.0)
+   'siege-tank-sieged (hasheq 'dmg 40.0 'hits 1 'bonus-light 0.0  'bonus-armored 30.0 'light? #f 'armored? #t 'biological? #f 'splash-mode 'tank 'min-range 2.0 'sieged? #t)
+   'thor              (hasheq 'dmg 30.0 'hits 2 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #f 'splash-mode #f 'speed-ovr 2.62 'range-ovr 7.0 'period-ovr 0.91 'max-hp-ovr 400.0 'armor-ovr 1.0)
+   'raven             (hasheq 'dmg 0.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #f 'biological? #f 'splash-mode #f 'speed-ovr 4.13 'range-ovr 0.0 'period-ovr 1.0  'max-hp-ovr 140.0 'armor-ovr 1.0 'energy 150.0 'max-energy 200.0)
+   'medivac           (hasheq 'dmg 0.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #f 'splash-mode #f 'speed-ovr 3.50 'range-ovr 4.0 'period-ovr 1.0  'max-hp-ovr 150.0 'armor-ovr 1.0 'energy 100.0 'max-energy 200.0)
    'zergling          (hasheq 'dmg 5.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #t 'armored? #f 'biological? #t 'splash-mode #f 'speed-ovr 6.57 'range-ovr 0.1)
    'baneling          (hasheq 'dmg 16.0 'hits 1 'bonus-light 19.0 'bonus-armored 0.0  'light? #f 'armored? #f 'biological? #t 'splash-mode 'bane 'speed-ovr 4.13 'range-ovr 0.35)
+   'queen             (hasheq 'dmg 4.0  'hits 2 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #f 'biological? #t 'splash-mode #f 'speed-ovr 1.31 'range-ovr 5.0 'period-ovr 0.71 'max-hp-ovr 175.0 'armor-ovr 1.0 'energy 100.0 'max-energy 200.0)
    'roach             (hasheq 'dmg 16.0 'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #t 'splash-mode #f 'speed-ovr 4.20)
    'ravager           (hasheq 'dmg 16.0 'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #f 'biological? #t 'splash-mode #f 'speed-ovr 3.85)
    'hydralisk         (hasheq 'dmg 12.0 'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #t 'armored? #f 'biological? #t 'splash-mode #f 'speed-ovr 3.94 'range-ovr 6.0)
    'lurker-burrowed   (hasheq 'dmg 20.0 'hits 1 'bonus-light 0.0  'bonus-armored 10.0 'light? #f 'armored? #t 'biological? #t 'splash-mode 'lurker-line 'range-ovr 9.0 'burrowed? #t)
-   'siege-tank-sieged (hasheq 'dmg 40.0 'hits 1 'bonus-light 0.0  'bonus-armored 30.0 'light? #f 'armored? #t 'biological? #f 'splash-mode 'tank 'min-range 2.0 'sieged? #t)
+   'infestor          (hasheq 'dmg 0.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #t 'splash-mode #f 'speed-ovr 3.15 'range-ovr 0.0 'period-ovr 1.0  'max-hp-ovr 90.0 'energy 175.0 'max-energy 200.0)
+   'ultralisk         (hasheq 'dmg 35.0 'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #t 'splash-mode 'ultra 'speed-ovr 4.13 'range-ovr 1.0 'period-ovr 0.61 'max-hp-ovr 500.0 'armor-ovr 2.0)
+   'viper             (hasheq 'dmg 0.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #t 'splash-mode #f 'speed-ovr 4.13 'range-ovr 0.0 'period-ovr 1.0  'max-hp-ovr 150.0 'armor-ovr 1.0 'energy 175.0 'max-energy 200.0)
    'zealot            (hasheq 'dmg 8.0  'hits 2 'bonus-light 0.0  'bonus-armored 0.0  'light? #t 'armored? #f 'biological? #t 'splash-mode #f 'speed-ovr 4.72)
+   'sentry            (hasheq 'dmg 6.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #t 'armored? #f 'biological? #f 'splash-mode #f 'speed-ovr 3.15 'range-ovr 5.0 'period-ovr 0.71 'max-hp-ovr 40.0 'max-shield-ovr 40.0 'armor-ovr 1.0 'energy 100.0 'max-energy 200.0)
    'stalker           (hasheq 'dmg 13.0 'hits 1 'bonus-light 0.0  'bonus-armored 5.0  'light? #f 'armored? #t 'biological? #f 'splash-mode #f 'speed-ovr 4.13)
    'adept             (hasheq 'dmg 10.0 'hits 1 'bonus-light 12.0 'bonus-armored 0.0  'light? #t 'armored? #f 'biological? #t 'splash-mode #f 'period-ovr 1.11 'speed-ovr 3.50)
+   'high-templar      (hasheq 'dmg 4.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #t 'armored? #f 'biological? #t 'splash-mode #f 'speed-ovr 2.62 'range-ovr 6.0 'period-ovr 1.25 'max-hp-ovr 40.0 'max-shield-ovr 40.0 'energy 125.0 'max-energy 200.0)
+   'archon            (hasheq 'dmg 25.0 'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'bonus-bio 10.0 'light? #f 'armored? #f 'biological? #f 'splash-mode 'archon 'speed-ovr 3.94 'range-ovr 3.0 'period-ovr 1.25 'max-hp-ovr 10.0 'max-shield-ovr 350.0 'armor-ovr 0.0)
+   'immortal          (hasheq 'dmg 20.0 'hits 1 'bonus-light 0.0  'bonus-armored 30.0 'light? #f 'armored? #t 'biological? #f 'splash-mode #f 'speed-ovr 3.15 'range-ovr 6.0 'period-ovr 1.04 'max-hp-ovr 200.0 'max-shield-ovr 100.0 'armor-ovr 1.0 'barrier? #t)
    'colossus          (hasheq 'dmg 10.0 'hits 2 'bonus-light 5.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #f 'splash-mode 'colossus 'range-ovr 9.0 'speed-ovr 3.15)
    'disruptor         (hasheq 'dmg 0.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #f 'splash-mode #f 'speed-ovr 3.15)
-   'bunker            (hasheq 'dmg 6.0  'hits 4 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #f 'splash-mode #f 'building? #t 'period-ovr 0.41 'range-ovr 6.5)
+   'bunker            (hasheq 'dmg 6.0  'hits 4 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #f 'splash-mode #f 'building? #t 'period-ovr 0.41 'range-ovr 6.5 'max-hp-ovr 400.0 'radius-ovr 1.5)
+   'photon-cannon     (hasheq 'dmg 20.0 'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #f 'splash-mode #f 'building? #t 'max-hp-ovr 150.0 'max-shield-ovr 150.0 'armor-ovr 1.0 'range-ovr 7.0 'period-ovr 0.89 'radius-ovr 1.0)
+   'pylon             (hasheq 'dmg 0.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #f 'splash-mode #f 'building? #t 'max-hp-ovr 200.0 'max-shield-ovr 200.0 'radius-ovr 1.0)
    'scv               (hasheq 'dmg 5.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #t 'armored? #f 'biological? #t 'splash-mode #f 'worker? #t)
    'probe             (hasheq 'dmg 5.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #t 'armored? #f 'biological? #f 'splash-mode #f 'worker? #t)
    'drone             (hasheq 'dmg 5.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #t 'armored? #f 'biological? #t 'splash-mode #f 'worker? #t)
    'hatchery          (hasheq 'dmg 0.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #t 'splash-mode #f 'building? #t 'max-hp-ovr 1500.0 'radius-ovr 2.5)
+   'command-center    (hasheq 'dmg 0.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #f 'splash-mode #f 'building? #t 'max-hp-ovr 1500.0 'armor-ovr 1.0 'radius-ovr 2.5)
+   'nexus             (hasheq 'dmg 0.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #f 'splash-mode #f 'building? #t 'max-hp-ovr 1000.0 'max-shield-ovr 1000.0 'armor-ovr 1.0 'radius-ovr 2.5)
    'gateway           (hasheq 'dmg 0.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #f 'splash-mode #f 'building? #t 'max-hp-ovr 500.0 'max-shield-ovr 500.0 'radius-ovr 1.5)
    'cybernetics-core  (hasheq 'dmg 0.0  'hits 1 'bonus-light 0.0  'bonus-armored 0.0  'light? #f 'armored? #t 'biological? #f 'splash-mode #f 'building? #t 'max-hp-ovr 550.0 'max-shield-ovr 550.0 'radius-ovr 1.5)))
 
@@ -91,9 +109,27 @@
       ability-cd slow-until last-hit-sec
       shade-active? shade-frames shade-x shade-y shade-tx shade-ty
       drill-stacked? pass-through?
-      order) ; #f | (list 'move tx ty) | (list 'attack-unit tid) | (list 'hold-position) | (list 'baneling-explode)
+      bonus-bio attr-mask shield-armor energy max-energy
+      has-barrier? barrier-rem barrier-until barrier-cd
+      aam-until guardian-shield-until matrix-until
+      neural-until neural-orig-team neural-caster-id
+      fungal-until blinding-cloud-until
+      snipe-cast-until snipe-target-id
+      transfuse-rem-sec build-progress
+      order) ; #f | (list 'move tx ty) | (list 'attack-unit tid) | (list 'repair-unit tid) | (list 'hold-position) | (list 'baneling-explode)
   #:mutable
   #:transparent)
+
+(struct sim-storm (team x y radius expires-sec dps) #:mutable #:transparent)
+(struct sim-cloud (team x y radius expires-sec) #:mutable #:transparent)
+(struct sim-world-fx (storms clouds attack-buildings? enemy-caster-acted?) #:mutable #:transparent)
+
+(define *WORLD-FX-TABLE* (make-weak-hasheq))
+(define (get-world-fx w)
+  (or (hash-ref *WORLD-FX-TABLE* w #f)
+      (let ([fx (sim-world-fx '() '() #f #f)])
+        (hash-set! *WORLD-FX-TABLE* w fx)
+        fx)))
 
 (struct sim-nova
   (id caster-id team x y vx vy remaining-frames age-frames radius base-dmg shield-bonus)
@@ -157,12 +193,22 @@
    w
    (hash-update (sim-world-planner-calls w) sym add1 0)))
 
-(define (make-sim-unit id team type x y #:drill-stacked? [drill-stacked? #f] #:ability-cd [ability-cd 0.0])
+(define (make-sim-unit id team type x y
+                       #:drill-stacked? [drill-stacked? #f]
+                       #:ability-cd [ability-cd 0.0]
+                       #:hp [hp-ovr #f]
+                       #:shield [sh-ovr #f]
+                       #:energy [en-ovr #f]
+                       #:build-progress [build-progress 1.0]
+                       #:shield-armor [shield-armor 0.0]
+                       #:armor [armor-ovr #f])
   (define base (sc2-unit-combat-stats type))
   (define spec (hash-ref *LOTV-UNIT-SPECS* type (hasheq)))
   (define max-hp (fl (hash-ref spec 'max-hp-ovr (hash-ref base 'max-hp 80.0))))
   (define max-sh (fl (hash-ref spec 'max-shield-ovr (hash-ref base 'max-shield 0.0))))
-  (define armor (fl (hash-ref base 'armor 0.0)))
+  (define init-hp (if hp-ovr (fl hp-ovr) max-hp))
+  (define init-sh (if sh-ovr (fl sh-ovr) max-sh))
+  (define armor (fl (or armor-ovr (hash-ref spec 'armor-ovr (hash-ref base 'armor 0.0)))))
   (define spd (fl (hash-ref spec 'speed-ovr (hash-ref base 'speed 3.15))))
   (define rng (fl (hash-ref spec 'range-ovr (hash-ref base 'ground-range 5.0))))
   (define min-rng (fl (hash-ref spec 'min-range 0.0)))
@@ -170,16 +216,31 @@
   (define hits (hash-ref spec 'hits 1))
   (define bl (fl (hash-ref spec 'bonus-light 0.0)))
   (define ba (fl (hash-ref spec 'bonus-armored 0.0)))
+  (define bbio (fl (hash-ref spec 'bonus-bio 0.0)))
   (define wp (fl (hash-ref spec 'period-ovr (hash-ref base 'weapon-period 1.0))))
-  (define rad (fl (hash-ref spec 'radius-ovr (hash-ref base 'radius 0.5))))
+  (define rad (fl (hash-ref spec 'radius-ovr (unit-collision-radius type))))
   (define sr (fl (hash-ref base 'splash-radius 0.0)))
+  (define mask (unit-attribute-mask type))
+  (define max-en (fl (hash-ref spec 'max-energy 0.0)))
+  (define init-en (fl (or en-ovr (hash-ref spec 'energy 0.0))))
+  (define has-bar? (or (eq? type 'immortal) (not (not (hash-ref spec 'barrier? #f)))))
+  (define light-flag?
+    (if (hash-has-key? spec 'light?)
+        (hash-ref spec 'light?)
+        (not (= (bitwise-and mask SC2-UNIT-ATTR-LIGHT) 0))))
+  (define arm-flag?
+    (if (hash-has-key? spec 'armored?)
+        (hash-ref spec 'armored?)
+        (not (= (bitwise-and mask SC2-UNIT-ATTR-ARMORED) 0))))
+  (define bio-flag?
+    (if (hash-has-key? spec 'biological?)
+        (hash-ref spec 'biological?)
+        (not (= (bitwise-and mask SC2-UNIT-ATTR-BIOLOGICAL) 0))))
   (sim-unit
    id team type
    (fl x) (fl y)
-   max-hp max-hp max-sh max-sh armor
-   (hash-ref spec 'light? #f)
-   (hash-ref spec 'armored? #f)
-   (hash-ref spec 'biological? #f)
+   init-hp max-hp init-sh max-sh armor
+   light-flag? arm-flag? bio-flag?
    (hash-ref base 'flying? #f)
    (hash-ref spec 'building? #f)
    (hash-ref spec 'worker? #f)
@@ -190,11 +251,27 @@
    sr (hash-ref spec 'splash-mode #f) (hash-ref spec 'concussive? #f)
    (fl ability-cd) -1.0 -99.0
    #f 0 0.0 0.0 0.0 0.0
-   drill-stacked? #f #f))
+   drill-stacked? #f
+   bbio mask (fl shield-armor) init-en max-en
+   has-bar? 0.0 -1.0 0.0
+   -1.0 -1.0 -1.0
+   -1.0 team 0
+   -1.0 -1.0
+   -1.0 #f
+   0.0 (fl build-progress)
+   #f))
 
 (define (sim-unit->planner-hash u w)
   (define cur-sec (* (sim-world-frame w) DT))
   (define st (sim-unit-type u))
+  (define active-buffs
+    (append
+     (if (< cur-sec (sim-unit-aam-until u)) '(anti-armor-missile) '())
+     (if (< cur-sec (sim-unit-guardian-shield-until u)) '(guardian-shield) '())
+     (if (< cur-sec (sim-unit-matrix-until u)) '(interference-matrix) '())
+     (if (< cur-sec (sim-unit-neural-until u)) '(neural-parasite) '())
+     (if (< cur-sec (sim-unit-fungal-until u)) '(fungal-growth) '())
+     (if (< cur-sec (sim-unit-blinding-cloud-until u)) '(blinding-cloud) '())))
   (define base
     (hasheq 'id (sim-unit-id u)
             'tag (sim-unit-id u)
@@ -208,12 +285,18 @@
             'shield (sim-unit-shield u)
             'shields (sim-unit-shield u)
             'max-shield (sim-unit-max-shield u)
-            'energy 100.0
+            'energy (sim-unit-energy u)
+            'max-energy (sim-unit-max-energy u)
+            'armor (sim-unit-armor u)
+            'shield-armor (sim-unit-shield-armor u)
+            'attr-mask (sim-unit-attr-mask u)
+            'buffs active-buffs
             'speed (sim-unit-speed u)
             'range (sim-unit-range u)
             'radius (sim-unit-radius u)
             'light? (sim-unit-light? u)
             'armored? (sim-unit-armored? u)
+            'biological? (sim-unit-biological? u)
             'flying (sim-unit-flying? u)
             'is-flying? (sim-unit-flying? u)
             'is-building (sim-unit-building? u)
@@ -221,7 +304,12 @@
             'is-structure (sim-unit-building? u)
             'burrowed? (sim-unit-burrowed? u)
             'sieged? (sim-unit-sieged? u)
-            'build-progress 1.0
+            'barrier-active? (and (sim-unit-has-barrier? u)
+                                  (or (<= (sim-unit-barrier-cd u) 0.0)
+                                      (< cur-sec (sim-unit-barrier-until u))))
+            'aam-debuff? (< cur-sec (sim-unit-aam-until u))
+            'guardian-shield? (< cur-sec (sim-unit-guardian-shield-until u))
+            'build-progress (sim-unit-build-progress u)
             'mineral-contents 1500
             'in-combat? (< (- cur-sec (sim-unit-last-hit-sec u)) 3.0)))
   (define with-disruptor
@@ -281,31 +369,73 @@
 ;; 3. Damage, Splash, Collision, Wall & Doorway Physics
 ;; -----------------------------------------------------------------------------
 
-(define (apply-damage-to-unit! target raw-dmg hits ignore-armor? cur-sec)
+(define (defender-under-guardian-shield? target w cur-sec)
+  (or (< cur-sec (sim-unit-guardian-shield-until target))
+      (let ([team (sim-unit-team target)])
+        (for/or ([u (in-list (sim-world-units w))])
+          (and (unit-alive? u)
+               (eq? (sim-unit-team u) team)
+               (eq? (sim-unit-type u) 'sentry)
+               (< cur-sec (sim-unit-guardian-shield-until u))
+               (<= (unit-dist target u) 4.5))))))
+
+(define (apply-damage-to-unit! target raw-dmg hits ignore-armor? cur-sec
+                               #:ranged? [ranged? #f]
+                               #:under-gs? [under-gs? #f]
+                               #:ignore-barrier? [ignore-barrier? #f])
   (when (and (unit-alive? target) (> raw-dmg 0.0))
     (set-sim-unit-last-hit-sec! target cur-sec)
+    (define aam? (< cur-sec (sim-unit-aam-until target)))
+    (define aam-delta (if aam? 2.0 0.0))
     (for ([_ (in-range hits)] #:when (unit-alive? target))
-      (define sh (sim-unit-shield target))
-      (define hp (sim-unit-hp target))
-      (cond
-        [(> sh 0.0)
-         (define absorbed (min sh raw-dmg))
-         (set-sim-unit-shield! target (- sh absorbed))
-         (define rem (- raw-dmg absorbed))
-         (when (> rem 0.0)
-           (define armor-red (if ignore-armor? 0.0 (sim-unit-armor target)))
-           (define hp-dmg (max 0.5 (- rem armor-red)))
-           (set-sim-unit-hp! target (max 0.0 (- hp hp-dmg))))]
-        [else
-         (define armor-red (if ignore-armor? 0.0 (sim-unit-armor target)))
-         (define hp-dmg (max 0.5 (- raw-dmg armor-red)))
-         (set-sim-unit-hp! target (max 0.0 (- hp hp-dmg)))]))))
+      (define gs-raw
+        (if (and ranged? under-gs? (not ignore-armor?))
+            (max 0.5 (- raw-dmg 2.0))
+            raw-dmg))
+      ;; Immortal Barrier: activates on hit (`100` absorb for `2.0s`, `32.0s` cooldown)
+      (when (and (not ignore-barrier?)
+                 (sim-unit-has-barrier? target)
+                 (<= (sim-unit-barrier-cd target) 0.0)
+                 (< (sim-unit-barrier-until target) cur-sec))
+        (set-sim-unit-barrier-rem! target 100.0)
+        (set-sim-unit-barrier-until! target (+ cur-sec 2.0))
+        (set-sim-unit-barrier-cd! target 32.0))
+      (define after-barrier
+        (if (and (not ignore-barrier?)
+                 (> (sim-unit-barrier-rem target) 0.0)
+                 (<= cur-sec (sim-unit-barrier-until target)))
+            (let ([abs (min (sim-unit-barrier-rem target) gs-raw)])
+              (set-sim-unit-barrier-rem! target (- (sim-unit-barrier-rem target) abs))
+              (- gs-raw abs))
+            gs-raw))
+      (when (> after-barrier 0.0)
+        (define sh (sim-unit-shield target))
+        (define hp (sim-unit-hp target))
+        (define sh-armor-eff (if ignore-armor? 0.0 (- (sim-unit-shield-armor target) aam-delta)))
+        (define hull-armor-eff (if ignore-armor? 0.0 (- (sim-unit-armor target) aam-delta)))
+        (cond
+          [(> sh 0.0)
+           (define eff-sh-dmg (if ignore-armor? after-barrier (max 0.5 (- after-barrier sh-armor-eff))))
+           (cond
+             [(<= eff-sh-dmg sh)
+              (set-sim-unit-shield! target (- sh eff-sh-dmg))]
+             [else
+              (define frac (/ (- eff-sh-dmg sh) (max 1e-6 eff-sh-dmg)))
+              (set-sim-unit-shield! target 0.0)
+              (define rem-raw (* frac after-barrier))
+              (define hp-dmg (if ignore-armor? rem-raw (max 0.5 (- rem-raw hull-armor-eff))))
+              (set-sim-unit-hp! target (max 0.0 (- hp hp-dmg)))])]
+          [else
+           (define hp-dmg (if ignore-armor? after-barrier (max 0.5 (- after-barrier hull-armor-eff))))
+           (set-sim-unit-hp! target (max 0.0 (- hp hp-dmg)))])))))
 
 (define (compute-attack-damage attacker defender)
   (define dmg (sim-unit-dmg attacker))
+  (define m (sim-unit-attr-mask defender))
   (+ dmg
-     (if (sim-unit-light? defender) (sim-unit-bonus-light attacker) 0.0)
-     (if (sim-unit-armored? defender) (sim-unit-bonus-armored attacker) 0.0)))
+     (if (not (= (bitwise-and m SC2-UNIT-ATTR-LIGHT) 0)) (sim-unit-bonus-light attacker) 0.0)
+     (if (not (= (bitwise-and m SC2-UNIT-ATTR-ARMORED) 0)) (sim-unit-bonus-armored attacker) 0.0)
+     (if (not (= (bitwise-and m SC2-UNIT-ATTR-BIOLOGICAL) 0)) (sim-unit-bonus-bio attacker) 0.0)))
 
 (define (point-to-segment-dist px py ax ay bx by)
   (define vx (- bx ax))
@@ -394,9 +524,41 @@
                        (not (sim-unit-flying? u))
                        (<= (point-to-segment-dist (sim-unit-x u) (sim-unit-y u) ax ay bx by)
                            (+ 0.50 (sim-unit-radius u)))))
-       (apply-damage-to-unit! u (compute-attack-damage attacker u) (sim-unit-hits attacker) #f cur-sec))]
+       (apply-damage-to-unit! u (compute-attack-damage attacker u) (sim-unit-hits attacker) #f cur-sec
+                              #:ranged? #t
+                              #:under-gs? (defender-under-guardian-shield? u w cur-sec)))]
+    [(eq? mode 'archon)
+     ;; Archon splash `1.0` radius (`100%` within `0.25`, `50%` within `0.50`, `25%` within `1.0`)
+     (define tx (sim-unit-x target))
+     (define ty (sim-unit-y target))
+     (for ([u (in-list units)]
+           #:when (and (unit-alive? u)
+                       (not (eq? (sim-unit-team u) team))
+                       (<= (max 0.0 (- (dist2d tx ty (sim-unit-x u) (sim-unit-y u)) (sim-unit-radius u))) 1.0)))
+       (define d (max 0.0 (- (dist2d tx ty (sim-unit-x u) (sim-unit-y u)) (sim-unit-radius u))))
+       (define frac (cond [(<= d 0.25) 1.0] [(<= d 0.50) 0.5] [else 0.25]))
+       (apply-damage-to-unit! u (* frac (compute-attack-damage attacker u)) 1 #f cur-sec
+                              #:ranged? #t
+                              #:under-gs? (defender-under-guardian-shield? u w cur-sec)))]
+    [(eq? mode 'ultra)
+     ;; Ultralisk melee Kaiser Blades cleave (`100%` primary, `33%` within `1.5`t ground)
+     (define tx (sim-unit-x target))
+     (define ty (sim-unit-y target))
+     (for ([u (in-list units)]
+           #:when (and (unit-alive? u)
+                       (not (eq? (sim-unit-team u) team))
+                       (not (sim-unit-flying? u))
+                       (<= (max 0.0 (- (dist2d tx ty (sim-unit-x u) (sim-unit-y u)) (sim-unit-radius u))) 1.5)))
+       (define frac (if (= (sim-unit-id u) (sim-unit-id target)) 1.0 0.33))
+       (apply-damage-to-unit! u (* frac (compute-attack-damage attacker u)) 1 #f cur-sec))]
     [else
-     (apply-damage-to-unit! target (compute-attack-damage attacker target) (sim-unit-hits attacker) #f cur-sec)
+     (define ranged? (> (sim-unit-range attacker) 1.5))
+     (apply-damage-to-unit! target
+                            (compute-attack-damage attacker target)
+                            (sim-unit-hits attacker)
+                            #f cur-sec
+                            #:ranged? ranged?
+                            #:under-gs? (and ranged? (defender-under-guardian-shield? target w cur-sec)))
      (when (sim-unit-concussive? attacker)
        (set-sim-unit-slow-until! target (+ cur-sec 1.5)))])
   (set-sim-unit-cooldown! attacker (sim-unit-weapon-period attacker)))
@@ -489,15 +651,22 @@
 ;; 4. Movement, Attack, Projectiles, Novas, Biles, Shades & Regen Step
 ;; -----------------------------------------------------------------------------
 
-(define (nearest-enemy u w #:exclude-buildings? [exclude-bldgs? #t] #:prefer-type [prefer-type #f])
+(define (unit-effective-dmg u)
+  (if (>= (sim-unit-build-progress u) 1.0) (sim-unit-dmg u) 0.0))
+
+(define (nearest-enemy u w
+                       #:exclude-buildings? [exclude-bldgs? #t]
+                       #:allow-zero-dmg-bldgs? [allow-zero-bldgs? #f]
+                       #:prefer-type [prefer-type #f])
   (define team (sim-unit-team u))
   (define cands
     (for/list ([o (in-list (sim-world-units w))]
                #:when (and (unit-alive? o)
                            (not (eq? (sim-unit-team o) team))
-                           (or (not exclude-bldgs?)
+                           (or allow-zero-bldgs?
+                               (not exclude-bldgs?)
                                (not (sim-unit-building? o))
-                               (> (sim-unit-dmg o) 0.0))))
+                               (> (unit-effective-dmg o) 0.0))))
       o))
   (cond
     [(null? cands) #f]
@@ -509,32 +678,59 @@
      (argmin (lambda (o) (unit-dist u o)) cands)]))
 
 (define (step-unit-toward! u tx ty w)
-  (define dx (- tx (sim-unit-x u)))
-  (define dy (- ty (sim-unit-y u)))
-  (define d (sqrt (+ (* dx dx) (* dy dy))))
-  (when (> d 0.05)
-    (define cur-sec (* (sim-world-frame w) DT))
-    (define slow-mult (if (< cur-sec (sim-unit-slow-until u)) 0.5 1.0))
-    (define step (min d (* (sim-unit-speed u) slow-mult DT)))
-    (set-sim-unit-x! u (+ (sim-unit-x u) (* step (/ dx d))))
-    (set-sim-unit-y! u (+ (sim-unit-y u) (* step (/ dy d))))))
+  (define cur-sec (* (sim-world-frame w) DT))
+  (when (and (> (sim-unit-speed u) 0.0)
+             (>= cur-sec (sim-unit-snipe-cast-until u)))
+    (define dx (- tx (sim-unit-x u)))
+    (define dy (- ty (sim-unit-y u)))
+    (define d (sqrt (+ (* dx dx) (* dy dy))))
+    (when (> d 0.05)
+      (define slow-mult
+        (cond
+          [(< cur-sec (sim-unit-fungal-until u)) 0.25]
+          [(< cur-sec (sim-unit-slow-until u)) 0.5]
+          [else 1.0]))
+      (define step (min d (* (sim-unit-speed u) slow-mult DT)))
+      (set-sim-unit-x! u (+ (sim-unit-x u) (* step (/ dx d))))
+      (set-sim-unit-y! u (+ (sim-unit-y u) (* step (/ dy d)))))))
 
 (define (find-unit-by-id w id)
   (for/first ([u (in-list (sim-world-units w))]
               #:when (and (= (sim-unit-id u) id) (unit-alive? u)))
     u))
 
-(define (unit-in-weapon-range? a t)
+(define (unit-in-weapon-range? a t [cur-sec -1.0])
   (define d (unit-dist a t))
   (define edge-d (unit-edge-dist a t))
+  (define base-rng (sim-unit-range a))
+  (define eff-rng
+    (if (and (>= cur-sec 0.0)
+             (not (sim-unit-flying? a))
+             (< cur-sec (sim-unit-blinding-cloud-until a)))
+        (min base-rng 1.0)
+        base-rng))
   (and (> d (sim-unit-min-range a))
-       (<= edge-d (+ (sim-unit-range a) (if (<= (sim-unit-range a) 0.5) 0.25 0.0)))))
+       (<= edge-d (+ eff-rng (if (<= eff-rng 0.5) 0.25 0.0)))))
+
+(define (unit-can-attack-now? u cur-sec)
+  (and (> (unit-effective-dmg u) 0.0)
+       (>= (sim-unit-build-progress u) 1.0)
+       (>= cur-sec (sim-unit-matrix-until u))
+       (>= cur-sec (sim-unit-snipe-cast-until u))))
 
 (define (step-unit-actions! w)
   (define cur-sec (* (sim-world-frame w) DT))
-  (for ([u (in-list (sim-world-units w))] #:when (unit-alive? u))
+  (define units (sim-world-units w))
+  (define fx (get-world-fx w))
+  (define target-bldgs? (sim-world-fx-attack-buildings? fx))
+  (for ([u (in-list units)] #:when (unit-alive? u))
     (set-sim-unit-cooldown! u (max 0.0 (- (sim-unit-cooldown u) DT)))
     (set-sim-unit-ability-cd! u (max 0.0 (- (sim-unit-ability-cd u) DT)))
+    (set-sim-unit-barrier-cd! u (max 0.0 (- (sim-unit-barrier-cd u) DT)))
+    ;; Passive Energy regen (~0.7875/sec)
+    (when (and (> (sim-unit-max-energy u) 0.0)
+               (< (sim-unit-energy u) (sim-unit-max-energy u)))
+      (set-sim-unit-energy! u (min (sim-unit-max-energy u) (+ (sim-unit-energy u) (* 0.7875 DT)))))
     ;; Passive Zerg HP & Protoss Shield regeneration
     (when (and (sim-unit-biological? u)
                (not (sim-unit-building? u))
@@ -544,53 +740,323 @@
                (< (sim-unit-shield u) (sim-unit-max-shield u))
                (>= (- cur-sec (sim-unit-last-hit-sec u)) SHIELD-REGEN-DELAY-SEC))
       (set-sim-unit-shield! u (min (sim-unit-max-shield u) (+ (sim-unit-shield u) SHIELD-REGEN-PER-FRAME))))
+    ;; Queen Transfusion HoT (`50 HP / 7.1s`)
+    (when (> (sim-unit-transfuse-rem-sec u) 0.0)
+      (set-sim-unit-transfuse-rem-sec! u (max 0.0 (- (sim-unit-transfuse-rem-sec u) DT)))
+      (set-sim-unit-hp! u (min (sim-unit-max-hp u) (+ (sim-unit-hp u) (* (/ 50.0 7.1) DT)))))
+    ;; Infestor Fungal Growth DoT (`30 dmg / 3.0s = 10.0 dps`, ignores armor)
+    (when (< cur-sec (sim-unit-fungal-until u))
+      (apply-damage-to-unit! u (* 10.0 DT) 1 #t cur-sec))
+    ;; Neural Parasite tether revert when expired or caster dead/out of range
+    (when (not (eq? (sim-unit-team u) (sim-unit-neural-orig-team u)))
+      (define caster (find-unit-by-id w (sim-unit-neural-caster-id u)))
+      (when (or (>= cur-sec (sim-unit-neural-until u))
+                (not caster)
+                (> (unit-dist u caster) 14.0))
+        (set-sim-unit-team! u (sim-unit-neural-orig-team u))
+        (set-sim-unit-neural-until! u -1.0)
+        (set-sim-unit-order! u #f)))
+    ;; Proxy structure build progress (Photon Cannon warps automatically; Bunker needs living SCV <= 3.0t)
+    (when (and (sim-unit-building? u) (< (sim-unit-build-progress u) 1.0))
+      (define team (sim-unit-team u))
+      (define can-advance?
+        (case (sim-unit-type u)
+          [(photon-cannon pylon gateway cybernetics-core) #t]
+          [(bunker)
+           (for/or ([s (in-list units)])
+             (and (unit-alive? s)
+                  (eq? (sim-unit-team s) team)
+                  (eq? (sim-unit-type s) 'scv)
+                  (<= (unit-dist u s) 3.5)))]
+          [else #f]))
+      (when can-advance?
+        (set-sim-unit-build-progress! u (min 1.0 (+ (sim-unit-build-progress u) (/ DT 22.0))))))
+    ;; Ghost Steady Targeting completion (`170` spell dmg, strictly `'biological`, ignores armor)
+    (when (and (sim-unit-snipe-target-id u)
+               (>= cur-sec (sim-unit-snipe-cast-until u)))
+      (define stgt (find-unit-by-id w (sim-unit-snipe-target-id u)))
+      (set-sim-unit-snipe-target-id! u #f)
+      (set-sim-unit-snipe-cast-until! u -1.0)
+      (when (and stgt
+                 (not (eq? (sim-unit-team stgt) (sim-unit-team u)))
+                 (<= (unit-dist u stgt) 12.5)
+                 (spell-valid-for-target-attrs? 'steady-targeting (sim-unit-type stgt)))
+        (apply-damage-to-unit! stgt 170.0 1 #t cur-sec)
+        (record-tactic! w 'ghost-snipe-detonated)))
     ;; Execute assigned order
-    (define ord (sim-unit-order u))
-    (match ord
-      [(list 'baneling-explode)
-       (when (eq? (sim-unit-type u) 'baneling)
-         (fire-unit-weapon! u u w))]
-      [(list 'hold-position)
-       (when (and (> (sim-unit-dmg u) 0.0) (<= (sim-unit-cooldown u) 0.0))
-         (define tgt (nearest-enemy u w))
-         (when (and tgt (unit-in-weapon-range? u tgt))
-           (fire-unit-weapon! u tgt w)))]
-      [(list 'move tx ty)
-       (step-unit-toward! u tx ty w)]
-      [(list 'attack-move-to tx ty)
-       (define tgt (nearest-enemy u w))
-       (cond
-         [(and tgt (unit-in-weapon-range? u tgt))
-          (when (<= (sim-unit-cooldown u) 0.0)
-            (fire-unit-weapon! u tgt w))]
-         [tgt
-          (step-unit-toward! u (sim-unit-x tgt) (sim-unit-y tgt) w)]
-         [else
-          (step-unit-toward! u tx ty w)])]
-      [(list 'attack-unit tid)
-       (define tgt (or (find-unit-by-id w tid) (nearest-enemy u w)))
-       (when tgt
-         (if (unit-in-weapon-range? u tgt)
-             (when (<= (sim-unit-cooldown u) 0.0)
-               (fire-unit-weapon! u tgt w))
-             (when (> (sim-unit-speed u) 0.0)
-               (step-unit-toward! u (sim-unit-x tgt) (sim-unit-y tgt) w))))]
-      [_
-       ;; Default combat acquisition for idle units (Colossus focuses Light targets first!)
-       (define tgt
-         (if (eq? (sim-unit-type u) 'colossus)
-             (or (nearest-enemy u w #:prefer-type 'hydralisk) (nearest-enemy u w))
-             (nearest-enemy u w)))
-       (when tgt
-         (if (unit-in-weapon-range? u tgt)
-             (when (<= (sim-unit-cooldown u) 0.0)
-               (fire-unit-weapon! u tgt w))
-             (when (> (sim-unit-speed u) 0.0)
-               (step-unit-toward! u (sim-unit-x tgt) (sim-unit-y tgt) w))))])))
+    (when (unit-alive? u)
+      (define ord (sim-unit-order u))
+      (match ord
+        [(list 'baneling-explode)
+         (when (eq? (sim-unit-type u) 'baneling)
+           (fire-unit-weapon! u u w))]
+        [(list 'hold-position)
+         (when (and (unit-can-attack-now? u cur-sec) (<= (sim-unit-cooldown u) 0.0))
+           (define tgt (nearest-enemy u w #:allow-zero-dmg-bldgs? target-bldgs?))
+           (when (and tgt (unit-in-weapon-range? u tgt cur-sec))
+             (fire-unit-weapon! u tgt w)))]
+        [(list 'repair-unit tid)
+         (define tgt (find-unit-by-id w tid))
+         (when (and tgt
+                    (eq? (sim-unit-team tgt) (sim-unit-team u))
+                    (spell-valid-for-target-attrs? 'repair (sim-unit-type tgt))
+                    (< (sim-unit-hp tgt) (sim-unit-max-hp tgt)))
+           (if (<= (unit-edge-dist u tgt) 1.2)
+               (begin
+                 (set-sim-unit-hp! tgt (min (sim-unit-max-hp tgt) (+ (sim-unit-hp tgt) (* 14.0 DT))))
+                 (record-tactic! w 'scv-repair-heal-tick))
+               (step-unit-toward! u (sim-unit-x tgt) (sim-unit-y tgt) w)))]
+        [(list 'move tx ty)
+         (step-unit-toward! u tx ty w)]
+        [(list 'attack-move-to tx ty)
+         (define tgt (nearest-enemy u w #:allow-zero-dmg-bldgs? target-bldgs?))
+         (cond
+           [(and tgt (unit-can-attack-now? u cur-sec) (unit-in-weapon-range? u tgt cur-sec))
+            (when (<= (sim-unit-cooldown u) 0.0)
+              (fire-unit-weapon! u tgt w))]
+           [tgt
+            (step-unit-toward! u (sim-unit-x tgt) (sim-unit-y tgt) w)]
+           [else
+            (step-unit-toward! u tx ty w)])]
+        [(list 'attack-unit tid)
+         (define tgt (or (find-unit-by-id w tid)
+                         (nearest-enemy u w #:allow-zero-dmg-bldgs? target-bldgs?)))
+         (when tgt
+           (if (unit-in-weapon-range? u tgt cur-sec)
+               (when (and (unit-can-attack-now? u cur-sec) (<= (sim-unit-cooldown u) 0.0))
+                 (fire-unit-weapon! u tgt w))
+               (when (> (sim-unit-speed u) 0.0)
+                 (step-unit-toward! u (sim-unit-x tgt) (sim-unit-y tgt) w))))]
+        [_
+         ;; Default combat acquisition for idle units (Colossus focuses Light targets first!)
+         (define tgt
+           (if (eq? (sim-unit-type u) 'colossus)
+               (or (nearest-enemy u w #:prefer-type 'hydralisk)
+                   (nearest-enemy u w #:allow-zero-dmg-bldgs? target-bldgs?))
+               (nearest-enemy u w #:allow-zero-dmg-bldgs? target-bldgs?)))
+         (when tgt
+           (if (unit-in-weapon-range? u tgt cur-sec)
+               (when (and (unit-can-attack-now? u cur-sec) (<= (sim-unit-cooldown u) 0.0))
+                 (fire-unit-weapon! u tgt w))
+               (when (> (sim-unit-speed u) 0.0)
+                 (step-unit-toward! u (sim-unit-x tgt) (sim-unit-y tgt) w))))]))))
+
+(define (step-lotv-world-fx! w)
+  (define cur-sec (* (sim-world-frame w) DT))
+  (define fx (get-world-fx w))
+  (define units (sim-world-units w))
+  ;; Enemy High Templar counter-storm at >= 16f if still alive with >= 75 energy and not matrixed
+  (when (and (memq (sim-world-scenario-id w)
+                   '(ghost-emp-shield-psionic-and-bio-snipe
+                     viper-abduct-blinding-cloud-and-ht-feedback))
+             (>= (sim-world-frame w) 16)
+             (not (sim-world-fx-enemy-caster-acted? fx)))
+    (define ally-combat
+      (filter (lambda (u) (and (unit-alive? u) (eq? (sim-unit-team u) 'ally) (not (sim-unit-building? u))))
+              units))
+    (define enemy-hts
+      (filter (lambda (u)
+                (and (unit-alive? u)
+                     (eq? (sim-unit-team u) 'enemy)
+                     (eq? (sim-unit-type u) 'high-templar)
+                     (>= (sim-unit-energy u) 75.0)
+                     (>= cur-sec (sim-unit-matrix-until u))))
+              units))
+    (when (and (pair? ally-combat) (pair? enemy-hts))
+      (define ax (/ (for/sum ([a (in-list ally-combat)]) (sim-unit-x a)) (fl (length ally-combat))))
+      (define ay (/ (for/sum ([a (in-list ally-combat)]) (sim-unit-y a)) (fl (length ally-combat))))
+      (set-sim-world-fx-enemy-caster-acted?! fx #t)
+      (for ([ht (in-list enemy-hts)] [idx (in-naturals)])
+        (when (and (<= (dist2d (sim-unit-x ht) (sim-unit-y ht) ax ay) 12.0)
+                   (>= (sim-unit-energy ht) 75.0))
+          (set-sim-unit-energy! ht (- (sim-unit-energy ht) 75.0))
+          (set-sim-world-fx-storms!
+           fx
+           (cons (sim-storm 'enemy (+ ax (* 0.5 (if (even? idx) -1.0 1.0))) ay 1.5 (+ cur-sec 2.85) 28.07)
+                 (sim-world-fx-storms fx)))))))
+  ;; Tick Psi Storms (`28.07 DPS`, ignores armor)
+  (define active-storms
+    (for/list ([st (in-list (sim-world-fx-storms fx))]
+               #:when (< cur-sec (sim-storm-expires-sec st)))
+      (define st-team (sim-storm-team st))
+      (for ([u (in-list units)]
+            #:when (and (unit-alive? u)
+                        (not (eq? (sim-unit-team u) st-team))
+                        (<= (dist2d (sim-storm-x st) (sim-storm-y st) (sim-unit-x u) (sim-unit-y u))
+                            (+ (sim-storm-radius st) (sim-unit-radius u)))))
+        (apply-damage-to-unit! u (* (sim-storm-dps st) DT) 1 #t cur-sec))
+      st))
+  (set-sim-world-fx-storms! fx active-storms)
+  ;; Tick Blinding Clouds (`range -> 1.0` for non-flying units inside `r=2.0`)
+  (define active-clouds
+    (for/list ([cl (in-list (sim-world-fx-clouds fx))]
+               #:when (< cur-sec (sim-cloud-expires-sec cl)))
+      (define cl-team (sim-cloud-team cl))
+      (for ([u (in-list units)]
+            #:when (and (unit-alive? u)
+                        (not (eq? (sim-unit-team u) cl-team))
+                        (not (sim-unit-flying? u))
+                        (<= (dist2d (sim-cloud-x cl) (sim-cloud-y cl) (sim-unit-x u) (sim-unit-y u))
+                            (+ (sim-cloud-radius cl) (sim-unit-radius u)))))
+        (set-sim-unit-blinding-cloud-until! u (max (sim-unit-blinding-cloud-until u) (+ cur-sec 0.2))))
+      cl))
+  (set-sim-world-fx-clouds! fx active-clouds))
+
+(define (execute-spell-directives! w spells)
+  (define cur-sec (* (sim-world-frame w) DT))
+  (define fx (get-world-fx w))
+  (define units (sim-world-units w))
+  (for ([sd (in-list spells)])
+    (define caster (find-unit-by-id w (spell-directive-caster-tag sd)))
+    (when (and caster
+               (unit-alive? caster)
+               (<= (sim-unit-ability-cd caster) 0.0)
+               (>= cur-sec (sim-unit-matrix-until caster))
+               (>= cur-sec (sim-unit-snipe-cast-until caster)))
+      (define ab (spell-directive-ability sd))
+      (define ttag (spell-directive-target-tag sd))
+      (define tx (fl (spell-directive-target-x sd)))
+      (define ty (fl (spell-directive-target-y sd)))
+      (define tgt (and (> ttag 0) (find-unit-by-id w ttag)))
+      (define c-team (sim-unit-team caster))
+      (case ab
+        [(emp-round)
+         (when (>= (sim-unit-energy caster) 75.0)
+           (set-sim-unit-energy! caster (- (sim-unit-energy caster) 75.0))
+           (set-sim-unit-ability-cd! caster 0.8)
+           (record-tactic! w 'ghost-emp-round)
+           (for ([e (in-list units)]
+                 #:when (and (unit-alive? e)
+                             (not (eq? (sim-unit-team e) c-team))
+                             (<= (dist2d tx ty (sim-unit-x e) (sim-unit-y e)) (+ 1.5 (sim-unit-radius e)))))
+             (set-sim-unit-shield! e (max 0.0 (- (sim-unit-shield e) 100.0)))
+             (set-sim-unit-energy! e (max 0.0 (- (sim-unit-energy e) 100.0)))))]
+        [(steady-targeting)
+         (when (and tgt
+                    (not (eq? (sim-unit-team tgt) c-team))
+                    (>= (sim-unit-energy caster) 50.0)
+                    (spell-valid-for-target-attrs? 'steady-targeting (sim-unit-type tgt)))
+           (set-sim-unit-energy! caster (- (sim-unit-energy caster) 50.0))
+           (set-sim-unit-ability-cd! caster 1.45)
+           (set-sim-unit-snipe-cast-until! caster (+ cur-sec 1.40))
+           (set-sim-unit-snipe-target-id! caster (sim-unit-id tgt))
+           (set-sim-unit-order! caster (list 'hold-position))
+           (record-tactic! w 'ghost-steady-targeting))]
+        [(interference-matrix)
+         (when (and tgt
+                    (not (eq? (sim-unit-team tgt) c-team))
+                    (>= (sim-unit-energy caster) 75.0)
+                    (spell-valid-for-target-attrs? 'interference-matrix (sim-unit-type tgt)))
+           (set-sim-unit-energy! caster (- (sim-unit-energy caster) 75.0))
+           (set-sim-unit-ability-cd! caster 0.8)
+           (set-sim-unit-matrix-until! tgt (+ cur-sec 11.0))
+           (record-tactic! w 'raven-interference-matrix))]
+        [(anti-armor-missile)
+         (when (and tgt
+                    (>= (sim-unit-energy caster) 75.0))
+           (set-sim-unit-energy! caster (- (sim-unit-energy caster) 75.0))
+           (set-sim-unit-ability-cd! caster 0.8)
+           (record-tactic! w 'raven-anti-armor-missile)
+           (define ax (sim-unit-x tgt))
+           (define ay (sim-unit-y tgt))
+           (for ([e (in-list units)]
+                 #:when (and (unit-alive? e)
+                             (not (eq? (sim-unit-team e) c-team))
+                             (<= (dist2d ax ay (sim-unit-x e) (sim-unit-y e)) (+ 2.88 (sim-unit-radius e)))))
+             (set-sim-unit-aam-until! e (+ cur-sec 14.0))))]
+        [(feedback)
+         (when (and tgt
+                    (not (eq? (sim-unit-team tgt) c-team))
+                    (>= (sim-unit-energy caster) 50.0)
+                    (spell-valid-for-target-attrs? 'feedback (sim-unit-type tgt) (sim-unit-energy tgt) (sim-unit-shield tgt)))
+           (define t-en (sim-unit-energy tgt))
+           (set-sim-unit-energy! caster (- (sim-unit-energy caster) 50.0))
+           (set-sim-unit-energy! tgt 0.0)
+           (set-sim-unit-ability-cd! caster 0.6)
+           (apply-damage-to-unit! tgt (* 0.5 t-en) 1 #t cur-sec)
+           (record-tactic! w 'ht-feedback-drain))]
+        [(psi-storm)
+         (when (>= (sim-unit-energy caster) 75.0)
+           (set-sim-unit-energy! caster (- (sim-unit-energy caster) 75.0))
+           (set-sim-unit-ability-cd! caster 0.8)
+           (set-sim-world-fx-storms!
+            fx
+            (cons (sim-storm c-team tx ty 1.5 (+ cur-sec 2.85) 28.07)
+                  (sim-world-fx-storms fx)))
+           (record-tactic! w 'ht-psi-storm))]
+        [(guardian-shield)
+         (when (>= (sim-unit-energy caster) 75.0)
+           (set-sim-unit-energy! caster (- (sim-unit-energy caster) 75.0))
+           (set-sim-unit-ability-cd! caster 0.8)
+           (set-sim-unit-guardian-shield-until! caster (+ cur-sec 11.0))
+           (record-tactic! w 'sentry-guardian-shield))]
+        [(fungal-growth)
+         (when (>= (sim-unit-energy caster) 75.0)
+           (set-sim-unit-energy! caster (- (sim-unit-energy caster) 75.0))
+           (set-sim-unit-ability-cd! caster 0.8)
+           (record-tactic! w 'infestor-fungal-growth)
+           (for ([e (in-list units)]
+                 #:when (and (unit-alive? e)
+                             (not (eq? (sim-unit-team e) c-team))
+                             (<= (dist2d tx ty (sim-unit-x e) (sim-unit-y e)) (+ 2.25 (sim-unit-radius e)))))
+             (set-sim-unit-fungal-until! e (+ cur-sec 3.0))))]
+        [(neural-parasite)
+         (when (and tgt
+                    (not (eq? (sim-unit-team tgt) c-team))
+                    (>= (sim-unit-energy caster) 100.0)
+                    (spell-valid-for-target-attrs? 'neural-parasite (sim-unit-type tgt)))
+           (set-sim-unit-energy! caster (- (sim-unit-energy caster) 100.0))
+           (set-sim-unit-ability-cd! caster 0.8)
+           (set-sim-unit-team! tgt c-team)
+           (set-sim-unit-neural-until! tgt (+ cur-sec 11.0))
+           (set-sim-unit-neural-caster-id! tgt (sim-unit-id caster))
+           (set-sim-unit-order! tgt #f)
+           (record-tactic! w 'infestor-neural-parasite))]
+        [(abduct)
+         (when (and tgt
+                    (not (eq? (sim-unit-team tgt) c-team))
+                    (>= (sim-unit-energy caster) 75.0)
+                    (spell-valid-for-target-attrs? 'abduct (sim-unit-type tgt)))
+           (set-sim-unit-energy! caster (- (sim-unit-energy caster) 75.0))
+           (set-sim-unit-ability-cd! caster 0.8)
+           (define dx (- (sim-unit-x tgt) (sim-unit-x caster)))
+           (define dy (- (sim-unit-y tgt) (sim-unit-y caster)))
+           (define mag (max 1e-4 (sqrt (+ (* dx dx) (* dy dy)))))
+           (set-sim-unit-x! tgt (+ (sim-unit-x caster) (* 1.3 (/ dx mag))))
+           (set-sim-unit-y! tgt (+ (sim-unit-y caster) (* 1.3 (/ dy mag))))
+           (set-sim-unit-cooldown! tgt (max (sim-unit-cooldown tgt) 0.5))
+           (record-tactic! w 'viper-abduct))]
+        [(blinding-cloud)
+         (when (>= (sim-unit-energy caster) 100.0)
+           (set-sim-unit-energy! caster (- (sim-unit-energy caster) 100.0))
+           (set-sim-unit-ability-cd! caster 0.8)
+           (set-sim-world-fx-clouds!
+            fx
+            (cons (sim-cloud c-team tx ty 2.0 (+ cur-sec 5.71))
+                  (sim-world-fx-clouds fx)))
+           (record-tactic! w 'viper-blinding-cloud))]
+        [(transfusion)
+         (when (and tgt
+                    (eq? (sim-unit-team tgt) c-team)
+                    (>= (sim-unit-energy caster) 50.0)
+                    (spell-valid-for-target-attrs? 'transfusion (sim-unit-type tgt)))
+           (set-sim-unit-energy! caster (- (sim-unit-energy caster) 50.0))
+           (set-sim-unit-ability-cd! caster 0.6)
+           (set-sim-unit-hp! tgt (min (sim-unit-max-hp tgt) (+ (sim-unit-hp tgt) 75.0)))
+           (set-sim-unit-transfuse-rem-sec! tgt 7.1)
+           (record-tactic! w 'queen-transfuse-bio))]
+        [(repair)
+         (when (and tgt
+                    (eq? (sim-unit-team tgt) c-team)
+                    (spell-valid-for-target-attrs? 'repair (sim-unit-type tgt))
+                    (< (sim-unit-hp tgt) (sim-unit-max-hp tgt)))
+           (set-sim-unit-order! caster (list 'repair-unit (sim-unit-id tgt)))
+           (record-tactic! w 'scv-repair-mech))]))))
 
 (define (step-effects-and-shades! w)
   (define cur-sec (* (sim-world-frame w) DT))
   (define units (sim-world-units w))
+  (step-lotv-world-fx! w)
   ;; 1. Adept Phase Shift shades (7.0s = 157 frames @ 6.30 tps, bypasses walls & gunfire)
   (for ([u (in-list units)] #:when (and (unit-alive? u) (sim-unit-shade-active? u)))
     (define rem (- (sim-unit-shade-frames u) 1))
@@ -811,6 +1277,291 @@
            [else (nearest-enemy u w)]))
        (when tgt
          (set-sim-unit-order! u (list 'attack-unit (sim-unit-id tgt))))])))
+
+(define (select-best-exact-focus-target attacker enemies w #:allow-bldgs? [allow-bldgs? #f] #:colossus-splash? [col-splash? #f])
+  (define cur-sec (* (sim-world-frame w) DT))
+  (define atype (sim-unit-type attacker))
+  (define cands
+    (filter (lambda (e)
+              (and (unit-alive? e)
+                   (not (eq? (sim-unit-team e) (sim-unit-team attacker)))
+                   (or allow-bldgs? (not (sim-unit-building? e)) (> (unit-effective-dmg e) 0.0))))
+            enemies))
+  (cond
+    [(null? cands) #f]
+    [else
+     (record-planner! w 'compute-exact-hit-damage-vs-target)
+     (argmax
+      (lambda (e)
+        (define etype (sim-unit-type e))
+        (define bar? (and (sim-unit-has-barrier? e)
+                          (or (<= (sim-unit-barrier-cd e) 0.0)
+                              (< cur-sec (sim-unit-barrier-until e)))))
+        (define aam? (< cur-sec (sim-unit-aam-until e)))
+        (define gs? (defender-under-guardian-shield? e w cur-sec))
+        (define exact-hit
+          (compute-exact-hit-damage-vs-target
+           atype etype
+           #:target-shields (sim-unit-shield e)
+           #:target-hp (sim-unit-hp e)
+           #:barrier-active? bar?
+           #:aam-debuff? aam?
+           #:guardian-shield? gs?))
+        (define ehp (max 25.0 (unit-ehp e)))
+        (define d (unit-dist attacker e))
+        (define in-rng-bonus (if (unit-in-weapon-range? attacker e cur-sec) 1.6 1.0))
+        (define cluster-bonus
+          (if col-splash?
+              (+ 1.0
+                 (* 0.35
+                    (for/sum ([o (in-list cands)]
+                              #:when (and (not (= (sim-unit-id o) (sim-unit-id e)))
+                                          (not (sim-unit-flying? o))
+                                          (<= (dist2d (sim-unit-x e) (sim-unit-y e) (sim-unit-x o) (sim-unit-y o)) 1.8)))
+                      (if (not (= (bitwise-and (sim-unit-attr-mask o) SC2-UNIT-ATTR-LIGHT) 0)) 1.6 0.6))))
+              1.0))
+        (define threat-bonus (if (> (unit-effective-dmg e) 0.0) 1.25 0.65))
+        (define rad-bonus (if (eq? atype 'archon) (* 0.2 (aoe-radius-packing-multiplier (unit-collision-radius etype) 1.0)) 0.0))
+        (+ (* (/ (* exact-hit in-rng-bonus cluster-bonus threat-bonus)
+                 (* ehp (+ 1.0 (* 0.25 (max 0.0 (- d (sim-unit-range attacker)))))))
+              100.0)
+           rad-bonus
+           (- (* 0.15 d))))
+      cands)]))
+
+(define (apply-spellcaster-scenario-micro! w allies ally-hashes enemies enemy-hashes ally-bldg-hashes enemy-bldg-hashes
+                                           #:standoff-casters? [standoff-casters? #t]
+                                           #:kite-ranged? [kite-ranged? #f])
+  (define cur-sec (* (sim-world-frame w) DT))
+  (unless (sim-world-spell-claims w)
+    (set-sim-world-spell-claims! w (make-spell-claims)))
+  (record-planner! w 'step-pro-spellcaster-micro!)
+  (define spells
+    (step-pro-spellcaster-micro!
+     ally-hashes enemy-hashes
+     #:claims (sim-world-spell-claims w)
+     #:current-frame (sim-world-frame w)
+     #:ally-buildings ally-bldg-hashes
+     #:enemy-buildings enemy-bldg-hashes
+     #:home-x (sim-world-home-x w)
+     #:home-y (sim-world-home-y w)
+     #:enemy-base-x (sim-world-enemy-x w)
+     #:enemy-base-y (sim-world-enemy-y w)))
+  (execute-spell-directives! w spells)
+  (define spell-tags
+    (for/hasheqv ([sd (in-list spells)]
+                  #:when (memq (spell-directive-ability sd)
+                               '(emp-round steady-targeting interference-matrix anti-armor-missile
+                                 feedback psi-storm guardian-shield fungal-growth neural-parasite
+                                 abduct blinding-cloud transfusion repair)))
+      (values (spell-directive-caster-tag sd) #t)))
+  (for ([u (in-list allies)])
+    (define utype (sim-unit-type u))
+    (define uid (sim-unit-id u))
+    (cond
+      [(< cur-sec (sim-unit-snipe-cast-until u))
+       (set-sim-unit-order! u (list 'hold-position))]
+      [(hash-has-key? spell-tags uid)
+       (void)]
+      [(and standoff-casters?
+            (memq utype '(raven infestor viper high-templar)))
+       (define near-e (nearest-enemy u w))
+       (cond
+         [(and near-e (< (unit-dist u near-e) 5.2))
+          (let* ([dx (- (sim-unit-x u) (sim-unit-x near-e))]
+                 [dy (- (sim-unit-y u) (sim-unit-y near-e))]
+                 [mag (max 1e-4 (sqrt (+ (* dx dx) (* dy dy))))])
+            (set-sim-unit-order! u (list 'move (+ (sim-unit-x u) (* 1.6 (/ dx mag)))
+                                               (+ (sim-unit-y u) (* 1.6 (/ dy mag))))))]
+         [(and near-e (> (unit-dist u near-e) 8.6) (>= (sim-unit-energy u) 50.0))
+          (set-sim-unit-order! u (list 'move (sim-unit-x near-e) (sim-unit-y near-e)))]
+         [else
+          (set-sim-unit-order! u (list 'hold-position))])]
+      [else
+       (define near-e (nearest-enemy u w))
+       (cond
+         [(and kite-ranged?
+               (> (sim-unit-range u) 3.5)
+               (> (sim-unit-cooldown u) 0.25)
+               near-e
+               (<= (sim-unit-range near-e) 1.5)
+               (< (unit-dist u near-e) 3.6))
+          (define dx (- (sim-unit-x u) (sim-unit-x near-e)))
+          (define dy (- (sim-unit-y u) (sim-unit-y near-e)))
+          (define mag (max 1e-4 (sqrt (+ (* dx dx) (* dy dy)))))
+          (record-tactic! w 'ranged-kite-vs-melee)
+          (set-sim-unit-order! u (list 'move (+ (sim-unit-x u) (* 1.8 (/ dx mag)))
+                                             (+ (sim-unit-y u) (* 1.8 (/ dy mag)))))]
+         [else
+          (define tgt (select-best-exact-focus-target u enemies w #:colossus-splash? (eq? utype 'colossus)))
+          (when tgt
+            (record-tactic! w 'exact-attribute-focus-fire)
+            (set-sim-unit-order! u (list 'attack-unit (sim-unit-id tgt))))])])))
+
+(define (apply-worker-rush-tactics! w allies enemies
+                                   #:pull-hp-thresh [pull-hp 11.0]
+                                   #:pull-shield-thresh [pull-shield #f]
+                                   #:scv-repair? [scv-repair? #f]
+                                   #:kite-ranged? [kite-ranged? #f]
+                                   #:proxy-snipe? [proxy-snipe? #f])
+  (record-planner! w 'select-worker-drill-stack-mineral-patch)
+  (record-planner! w 'translate-bot-actions->sc2-raw-commands)
+  (define patches (sim-world-mineral-patches w))
+  (define ths (sim-world-townhalls w))
+  (define th0 (if (pair? ths) (car ths) (hasheq 'x (sim-world-home-x w) 'y (sim-world-home-y w))))
+  (define thx (fl (hash-ref th0 'x (sim-world-home-x w))))
+  (define thy (fl (hash-ref th0 'y (sim-world-home-y w))))
+  (define workers (filter sim-unit-worker? allies))
+  (define non-workers (filter (lambda (u) (not (sim-unit-worker? u))) allies))
+  (define combat-enemies (filter (lambda (e) (not (sim-unit-building? e))) enemies))
+  (define bldg-enemies (filter sim-unit-building? enemies))
+  (define-values (ecx ecy)
+    (if (null? combat-enemies)
+        (values thx thy)
+        (values (/ (for/sum ([e (in-list combat-enemies)]) (sim-unit-x e)) (fl (length combat-enemies)))
+                (/ (for/sum ([e (in-list combat-enemies)]) (sim-unit-y e)) (fl (length combat-enemies))))))
+  (when (and (pair? workers) (pair? patches))
+    (define patch (select-worker-drill-stack-mineral-patch ecx ecy thx thy patches))
+    (when (and patch (zero? (sim-world-frame w)))
+      (define patch-id (hash-ref patch 'id 901))
+      (define sc2-allies
+        (for/list ([u (in-list workers)])
+          (sc2-unit 1 1 (sim-unit-id u) 104 2
+                    (sc2-point3d (sim-unit-x u) (sim-unit-y u) 0.0)
+                    0.0 0.375 1.0 1 0 1 0 (sim-unit-hp u) (sim-unit-max-hp u) (sim-unit-shield u) (sim-unit-max-shield u) 0.0 0.0 0 0
+                    #f #f #f #f #f '() 0 '() 0 0 0.0 0 0 0 0)))
+      (define sc2-patches
+        (for/list ([p (in-list patches)])
+          (sc2-unit 1 3 (hash-ref p 'id 901) 341 1
+                    (sc2-point3d (fl (hash-ref p 'x thx)) (fl (hash-ref p 'y thy)) 0.0)
+                    0.0 1.0 1.0 1 0 1 0 1500.0 1500.0 0.0 0.0 0.0 0.0 0 0
+                    #f #f #f #f #f '() 0 '() 0 0 0.0 0 0 0 0)))
+      (define sc2-enemies
+        (for/list ([e (in-list combat-enemies)])
+          (sc2-unit 1 4 (sim-unit-id e) 84 2
+                    (sc2-point3d (sim-unit-x e) (sim-unit-y e) 0.0)
+                    0.0 0.375 1.0 1 0 1 0 (sim-unit-hp e) (sim-unit-max-hp e) (sim-unit-shield e) (sim-unit-max-shield e) 0.0 0.0 0 0
+                    #f #f #f #f #t '() 0 '() 0 0 0.0 0 0 0 0)))
+      (define sc2-th
+        (sc2-unit 1 1 890 86 1 (sc2-point3d thx thy 0.0)
+                  0.0 2.5 1.0 1 0 1 0 1500.0 1500.0 0.0 0.0 0.0 0.0 0 0
+                  #f #f #f #f #f '() 0 '() 0 0 0.0 0 0 0 0))
+      (define obs
+        (sc2-observation 10
+                         (sc2-player-common 1 50 0 14 12 0 12 0 0 0 0)
+                         (cons sc2-th (append sc2-allies sc2-patches sc2-enemies))
+                         '() '() (sc2-point3d thx thy 0.0) '() '() '() '() '() '()))
+      (define first-e (and (pair? combat-enemies) (car combat-enemies)))
+      (define act (list 'worker-drill-stack-attack
+                        (map sim-unit-id workers)
+                        patch-id
+                        (if first-e (sim-unit-id first-e) 0)
+                        ecx ecy))
+      (define cmds (translate-bot-actions->sc2-raw-commands (list act) obs))
+      (when (and (pair? cmds)
+                 (for/and ([c (in-list cmds)])
+                   (= (sc2-raw-unit-command-ability-id c) 23)))
+        (record-tactic! w 'note-r4-c-suppressed-far-mineral-walk-emitted-attack-23))))
+  ;; Non-worker ranged defender kiting (e.g. early Marine vs Zealot+Workers)
+  (when kite-ranged?
+    (for ([u (in-list non-workers)])
+      (define near-melee
+        (and (pair? combat-enemies)
+             (argmin (lambda (e) (unit-dist u e)) combat-enemies)))
+      (cond
+        [(and near-melee
+              (> (sim-unit-cooldown u) 0.12)
+              (< (unit-dist u near-melee) 3.8))
+         (define dx (- (sim-unit-x u) (sim-unit-x near-melee)))
+         (define dy (- (sim-unit-y u) (sim-unit-y near-melee)))
+         (define mag (max 1e-4 (sqrt (+ (* dx dx) (* dy dy)))))
+         (record-tactic! w 'defender-marine-kite)
+         (set-sim-unit-order! u (list 'move (+ (sim-unit-x u) (* 1.8 (/ dx mag)))
+                                            (+ (sim-unit-y u) (* 1.8 (/ dy mag)))))]
+        [else
+         (define tgt
+           (and (pair? combat-enemies)
+                (argmin (lambda (e) (+ (unit-ehp e) (* 2.0 (unit-dist u e)))) combat-enemies)))
+         (when tgt (set-sim-unit-order! u (list 'attack-unit (sim-unit-id tgt))))])))
+  ;; Proxy cannon/bunker/builder snipe split (prioritize Photon Cannon / Bunker ahead of Pylon!)
+  (define proxy-bldg
+    (and proxy-snipe?
+         (or (findf (lambda (b) (memq (sim-unit-type b) '(photon-cannon bunker))) bldg-enemies)
+             (findf (lambda (b) (eq? (sim-unit-type b) 'pylon)) bldg-enemies))))
+  (define proxy-turret
+    (and proxy-snipe?
+         (findf (lambda (b) (memq (sim-unit-type b) '(photon-cannon bunker))) bldg-enemies)))
+  (define proxy-builder
+    (and proxy-snipe? proxy-turret
+         (for/first ([e (in-list combat-enemies)]
+                     #:when (and (sim-unit-worker? e)
+                                 (<= (unit-dist e proxy-turret) 2.5)))
+           e)))
+  (define snipe-count (if (and proxy-snipe? (or proxy-builder proxy-turret)) 5 0))
+  (define-values (snipers defenders)
+    (if (> snipe-count 0)
+        (split-at workers (min snipe-count (length workers)))
+        (values '() workers)))
+  (for ([u (in-list snipers)])
+    (set-sim-unit-drill-stacked?! u #t)
+    (define s-tgt (or proxy-turret proxy-builder))
+    (when s-tgt
+      (record-tactic! w 'proxy-builder-cannon-snipe)
+      (set-sim-unit-order! u (list 'attack-unit (sim-unit-id s-tgt)))))
+  ;; Injured SCV repair pairing (`spell-valid-for-target-attrs? 'repair`)
+  (define injured-scv
+    (and scv-repair?
+         (pair? defenders)
+         (for/first ([s (in-list defenders)]
+                     #:when (and (< (sim-unit-hp s) 30.0)
+                                 (spell-valid-for-target-attrs? 'repair (sim-unit-type s))))
+           s)))
+  (define healer-scv
+    (and injured-scv
+         (findf (lambda (s) (and (not (= (sim-unit-id s) (sim-unit-id injured-scv)))
+                                 (>= (sim-unit-hp s) 30.0)))
+                defenders)))
+  ;; Main worker pocket / drill-stack / focus-fire / wounded-pull
+  (define low-target
+    (cond
+      [(pair? combat-enemies)
+       (argmin (lambda (e) (+ (unit-ehp e) (* 0.25 (dist2d ecx ecy (sim-unit-x e) (sim-unit-y e)))))
+               combat-enemies)]
+      [(pair? bldg-enemies)
+       (car bldg-enemies)]
+      [else #f]))
+  (define-values (acx acy)
+    (if (null? defenders)
+        (values thx thy)
+        (values (/ (for/sum ([u (in-list defenders)]) (sim-unit-x u)) (fl (length defenders)))
+                (/ (for/sum ([u (in-list defenders)]) (sim-unit-y u)) (fl (length defenders))))))
+  (define spread-radius
+    (if (null? defenders)
+        0.0
+        (apply max 0.0 (map (lambda (u) (dist2d acx acy (sim-unit-x u) (sim-unit-y u))) defenders))))
+  (for ([u (in-list defenders)])
+    (set-sim-unit-drill-stacked?! u #t)
+    (define d-e (dist2d (sim-unit-x u) (sim-unit-y u) ecx ecy))
+    (define needs-pull?
+      (or (< (sim-unit-hp u) pull-hp)
+          (and pull-shield (< (sim-unit-shield u) pull-shield))))
+    (cond
+      [(and healer-scv (= (sim-unit-id u) (sim-unit-id healer-scv)))
+       (record-tactic! w 'scv-repair-pocket-heal)
+       (set-sim-unit-order! u (list 'repair-unit (sim-unit-id injured-scv)))]
+      [(and (> d-e 3.0) (> spread-radius 1.4) (< (sim-world-frame w) 28) (pair? combat-enemies))
+       (record-tactic! w 'worker-drill-stack-converge)
+       (set-sim-unit-order! u (list 'move (- thx 0.7) thy))]
+      [(and needs-pull? (> (sim-unit-cooldown u) 0.25) (> (length defenders) 2) (pair? combat-enemies))
+       (define dx (- (sim-unit-x u) ecx))
+       (define dy (- (sim-unit-y u) ecy))
+       (define mag (max 1e-4 (sqrt (+ (* dx dx) (* dy dy)))))
+       (record-tactic! w 'pull-wounded-worker-drop-aggro)
+       (set-sim-unit-order! u (list 'move (+ (sim-unit-x u) (* 1.4 (/ dx mag)))
+                                          (+ (sim-unit-y u) (* 1.4 (/ dy mag)))))]
+      [low-target
+       (record-tactic! w 'worker-focus-fire-lowest-ehp)
+       (set-sim-unit-order! u (list 'attack-unit (sim-unit-id low-target)))])))
 
 (define (plan-mothman-tactics! w)
   (define units (filter unit-alive? (sim-world-units w)))
@@ -1352,6 +2103,65 @@
          [else
           (set-sim-unit-order! u (list 'move 44.0 (sim-unit-y u)))]))]
 
+    ;; -------------------------------------------------------------------------
+    ;; 9. Mixed-Attribute Target Focus: Immortal / Colossus / Archon
+    ;; -------------------------------------------------------------------------
+    [(mixed-attribute-target-focus-immortal-colossus-archon)
+     (for ([u (in-list allies)])
+       (define tgt
+         (select-best-exact-focus-target
+          u enemies w
+          #:colossus-splash? (eq? (sim-unit-type u) 'colossus)))
+       (when tgt
+         (record-tactic! w 'mixed-attribute-exact-focus)
+         (set-sim-unit-order! u (list 'attack-unit (sim-unit-id tgt)))))]
+
+    ;; -------------------------------------------------------------------------
+    ;; 10–14. LotV Spellcaster Attribute/Size Matrix (`pro-spellcaster-micro`)
+    ;; -------------------------------------------------------------------------
+    [(ghost-emp-shield-psionic-and-bio-snipe)
+     (define enemy-u-hashes (map (lambda (e) (sim-unit->planner-hash e w))
+                                 (filter (lambda (e) (not (sim-unit-building? e))) enemies)))
+     (define enemy-b-hashes (map (lambda (e) (sim-unit->planner-hash e w))
+                                 (filter sim-unit-building? enemies)))
+     (define ally-b-hashes (map (lambda (b) (sim-unit->planner-hash b w)) ally-bldgs))
+     (apply-spellcaster-scenario-micro!
+      w allies ally-hashes enemies enemy-u-hashes ally-b-hashes enemy-b-hashes
+      #:standoff-casters? #f #:kite-ranged? #t)]
+
+    [(raven-interference-matrix-and-aam-vs-armored-mech
+      viper-abduct-blinding-cloud-and-ht-feedback
+      infestor-fungal-vs-light-bio-and-neural-vs-massive-mech
+      sentry-guardian-shield-and-queen-transfuse-scv-repair)
+     (define enemy-u-hashes (map (lambda (e) (sim-unit->planner-hash e w))
+                                 (filter (lambda (e) (not (sim-unit-building? e))) enemies)))
+     (define enemy-b-hashes (map (lambda (e) (sim-unit->planner-hash e w))
+                                 (filter sim-unit-building? enemies)))
+     (define ally-b-hashes (map (lambda (b) (sim-unit->planner-hash b w)) ally-bldgs))
+     (apply-spellcaster-scenario-micro!
+      w allies ally-hashes enemies enemy-u-hashes ally-b-hashes enemy-b-hashes
+      #:standoff-casters? (not (eq? sid 'sentry-guardian-shield-and-queen-transfuse-scv-repair))
+      #:kite-ranged? (not (not (memq sid '(raven-interference-matrix-and-aam-vs-armored-mech
+                                            infestor-fungal-vs-light-bio-and-neural-vs-massive-mech)))))]
+
+    ;; -------------------------------------------------------------------------
+    ;; 15–19. Worker Rush Matrix (`[NOTE-R4-C]` Drill / Repair / Kite / Snipe)
+    ;; -------------------------------------------------------------------------
+    [(worker-rush-terran-scv-repair-pocket-vs-12-worker)
+     (apply-worker-rush-tactics! w allies enemies #:pull-hp-thresh 15.0 #:scv-repair? #t)]
+
+    [(worker-rush-protoss-probe-shield-regen-kite-vs-12-worker)
+     (apply-worker-rush-tactics! w allies enemies #:pull-hp-thresh 8.0 #:pull-shield-thresh 4.5)]
+
+    [(worker-rush-townhall-focus-mineral-stack-breaker)
+     (apply-worker-rush-tactics! w allies enemies #:pull-hp-thresh 11.0)]
+
+    [(worker-rush-mixed-workers-plus-early-zealot-or-marine)
+     (apply-worker-rush-tactics! w allies enemies #:pull-hp-thresh 13.0 #:scv-repair? #t #:kite-ranged? #t)]
+
+    [(worker-rush-proxy-cannon-or-bunker-builder-snipe)
+     (apply-worker-rush-tactics! w allies enemies #:pull-hp-thresh 8.0 #:pull-shield-thresh 4.0 #:proxy-snipe? #t)]
+
     [else
      (plan-default-ai! w)]))
 
@@ -1507,6 +2317,227 @@
              #f #f (hasheq) (hasheq)
              30.0 50.0 80.0 50.0))
 
+(define (make-scenario-world sid mode units
+                             #:patches [patches '()]
+                             #:townhalls [townhalls '()]
+                             #:claims [claims #f]
+                             #:home-x [hx 25.0] #:home-y [hy 50.0]
+                             #:enemy-x [ex 45.0] #:enemy-y [ey 50.0])
+  (sim-world sid mode 0 units
+             '() '() '() '()
+             patches townhalls #f '()
+             '() '() #f claims
+             (hasheq) (hasheq)
+             hx hy ex ey))
+
+(define (setup-mixed-attribute-focus mode)
+  ;; 2 Immortals + 2 Colossi + 2 Archons vs 8 Zerglings + 2 Immortals (Barrier) + 12 Marines + 5 Marauders + 4 Stalkers
+  (define allies
+    (list (make-sim-unit 101 'ally 'immortal 31.5 48.0)
+          (make-sim-unit 102 'ally 'immortal 31.5 52.0)
+          (make-sim-unit 103 'ally 'colossus 31.0 49.0)
+          (make-sim-unit 104 'ally 'colossus 31.0 51.0)
+          (make-sim-unit 105 'ally 'archon   32.5 48.5)
+          (make-sim-unit 106 'ally 'archon   32.5 51.5)))
+  (define enemies
+    (append
+     (for/list ([i (in-range 8)])
+       (make-sim-unit (+ 201 i) 'enemy 'zergling 37.5 (+ 46.5 (* 1.0 i))))
+     (list (make-sim-unit 211 'enemy 'immortal 38.0 49.0)
+           (make-sim-unit 212 'enemy 'immortal 38.0 51.0))
+     (for/list ([i (in-range 12)])
+       (make-sim-unit (+ 221 i) 'enemy 'marine (+ 39.5 (* 0.45 (quotient i 4))) (+ 47.8 (* 1.3 (modulo i 4)))))
+     (for/list ([i (in-range 5)])
+       (make-sim-unit (+ 241 i) 'enemy 'marauder 39.2 (+ 47.0 (* 1.5 i))))
+     (for/list ([i (in-range 4)])
+       (make-sim-unit (+ 251 i) 'enemy 'stalker 40.5 (+ 47.2 (* 1.8 i))))))
+  (make-scenario-world 'mixed-attribute-target-focus-immortal-colossus-archon mode (append allies enemies)))
+
+(define (setup-ghost-emp-snipe mode)
+  ;; 4 Ghosts + 4 Marauders + 4 Marines vs 2 High Templars (125en) + 2 Archons + 1 Ultralisk + 2 Stalkers
+  (define allies
+    (append
+     (for/list ([i (in-range 4)])
+       (make-sim-unit (+ 101 i) 'ally 'ghost 30.5 (+ 47.0 (* 2.0 i)) #:energy 125.0))
+     (for/list ([i (in-range 4)])
+       (make-sim-unit (+ 111 i) 'ally 'marauder 31.8 (+ 47.0 (* 2.0 i))))
+     (for/list ([i (in-range 4)])
+       (make-sim-unit (+ 121 i) 'ally 'marine 31.5 (+ 46.5 (* 2.2 i))))))
+  (define enemies
+    (list (make-sim-unit 201 'enemy 'high-templar 38.5 49.0 #:energy 125.0)
+          (make-sim-unit 202 'enemy 'high-templar 38.5 51.0 #:energy 125.0)
+          (make-sim-unit 203 'enemy 'archon       37.8 48.0)
+          (make-sim-unit 204 'enemy 'archon       37.8 52.0)
+          (make-sim-unit 205 'enemy 'ultralisk    37.0 50.0)
+          (make-sim-unit 207 'enemy 'stalker      38.0 47.0)
+          (make-sim-unit 208 'enemy 'stalker      38.0 53.0)))
+  (make-scenario-world 'ghost-emp-shield-psionic-and-bio-snipe mode (append allies enemies)
+                       #:claims (make-spell-claims)))
+
+(define (setup-raven-matrix-aam mode)
+  ;; 2 Ravens + 10 Marines + 4 Marauders vs 2 Sieged Tanks + 1 Thor + 1 Ultralisk
+  (define allies
+    (append
+     (list (make-sim-unit 101 'ally 'raven 31.0 48.0 #:energy 150.0)
+           (make-sim-unit 102 'ally 'raven 31.0 52.0 #:energy 150.0))
+     (for/list ([i (in-range 10)])
+       (make-sim-unit (+ 111 i) 'ally 'marine (+ 32.0 (* 0.5 (quotient i 5))) (+ 46.5 (* 1.6 (modulo i 5)))))
+     (for/list ([i (in-range 4)])
+       (make-sim-unit (+ 125 i) 'ally 'marauder 32.6 (+ 47.0 (* 2.0 i))))))
+  (define enemies
+    (list (make-sim-unit 201 'enemy 'siege-tank-sieged 39.5 48.5)
+          (make-sim-unit 202 'enemy 'siege-tank-sieged 39.5 51.5)
+          (make-sim-unit 203 'enemy 'thor              38.5 50.0)
+          (make-sim-unit 204 'enemy 'ultralisk         38.0 52.8)))
+  (make-scenario-world 'raven-interference-matrix-and-aam-vs-armored-mech mode (append allies enemies)
+                       #:claims (make-spell-claims)))
+
+(define (setup-viper-ht-feedback mode)
+  ;; 2 Vipers + 2 High Templars + 8 Hydralisks + 4 Zealots vs 2 Sieged Tanks + 2 HTs (175en) + 5 Marauders + 1 Ultralisk
+  (define allies
+    (append
+     (list (make-sim-unit 101 'ally 'viper        33.0 48.5 #:energy 175.0)
+           (make-sim-unit 102 'ally 'viper        33.0 51.5 #:energy 175.0)
+           (make-sim-unit 103 'ally 'high-templar 32.5 45.0 #:energy 125.0)
+           (make-sim-unit 104 'ally 'high-templar 32.5 55.0 #:energy 125.0))
+     (for/list ([i (in-range 8)])
+       (make-sim-unit (+ 111 i) 'ally 'hydralisk 33.8 (+ 46.2 (* 1.1 i))))
+     (for/list ([i (in-range 4)])
+       (make-sim-unit (+ 121 i) 'ally 'zealot 34.4 (+ 47.0 (* 2.0 i))))))
+  (define enemies
+    (append
+     (list (make-sim-unit 201 'enemy 'siege-tank-sieged 40.5 49.0)
+           (make-sim-unit 202 'enemy 'siege-tank-sieged 40.5 51.0)
+           (make-sim-unit 203 'enemy 'high-templar      40.5 45.0 #:energy 175.0)
+           (make-sim-unit 204 'enemy 'high-templar      40.5 55.0 #:energy 175.0)
+           (make-sim-unit 205 'enemy 'ultralisk         38.5 50.0))
+     (for/list ([i (in-range 5)])
+       (make-sim-unit (+ 211 i) 'enemy 'marauder 39.2 (+ 47.0 (* 1.5 i))))))
+  (make-scenario-world 'viper-abduct-blinding-cloud-and-ht-feedback mode (append allies enemies)
+                       #:claims (make-spell-claims)))
+
+(define (setup-infestor-fungal-neural mode)
+  ;; 2 Infestors + 14 Zerglings + 4 Hydralisks vs 14 Marines + 2 Thors + 1 Ultralisk
+  (define allies
+    (append
+     (list (make-sim-unit 101 'ally 'infestor 31.0 48.5 #:energy 175.0)
+           (make-sim-unit 102 'ally 'infestor 31.0 51.5 #:energy 175.0))
+     (for/list ([i (in-range 14)])
+       (make-sim-unit (+ 111 i) 'ally 'zergling (+ 32.5 (* 0.5 (quotient i 7))) (+ 46.5 (* 1.1 (modulo i 7)))))
+     (for/list ([i (in-range 4)])
+       (make-sim-unit (+ 131 i) 'ally 'hydralisk 31.5 (+ 47.0 (* 2.0 i))))))
+  (define enemies
+    (append
+     (for/list ([i (in-range 14)])
+       (make-sim-unit (+ 201 i) 'enemy 'marine (+ 38.5 (* 0.5 (quotient i 7))) (+ 46.8 (* 1.0 (modulo i 7)))))
+     (list (make-sim-unit 221 'enemy 'thor      38.0 48.5)
+           (make-sim-unit 222 'enemy 'thor      38.0 51.5)
+           (make-sim-unit 223 'enemy 'ultralisk 37.5 50.0))))
+  (make-scenario-world 'infestor-fungal-vs-light-bio-and-neural-vs-massive-mech mode (append allies enemies)
+                       #:claims (make-spell-claims)))
+
+(define (setup-sentry-queen-scv-defense mode)
+  ;; 1 Sentry + 2 Zealots + 2 Stalkers + 1 Queen + 1 injured Roach + 1 injured Tank + 2 SCVs vs 20 Marines
+  (define allies
+    (list (make-sim-unit 101 'ally 'sentry     32.0 50.0 #:energy 100.0)
+          (make-sim-unit 102 'ally 'zealot     33.0 48.5)
+          (make-sim-unit 103 'ally 'zealot     33.0 51.5)
+          (make-sim-unit 104 'ally 'stalker    31.5 48.5)
+          (make-sim-unit 105 'ally 'stalker    31.5 51.5)
+          (make-sim-unit 106 'ally 'queen      31.2 50.0 #:energy 100.0)
+          (make-sim-unit 107 'ally 'roach      32.5 50.0 #:hp 55.0)
+          (make-sim-unit 108 'ally 'siege-tank 30.8 50.0 #:hp 65.0)
+          (make-sim-unit 109 'ally 'scv        30.5 49.0)
+          (make-sim-unit 110 'ally 'scv        30.5 51.0)))
+  (define enemies
+    (for/list ([i (in-range 20)])
+      (make-sim-unit (+ 201 i) 'enemy 'marine (+ 39.0 (* 0.45 (quotient i 5))) (+ 46.5 (* 1.6 (modulo i 5))))))
+  (make-scenario-world 'sentry-guardian-shield-and-queen-transfuse-scv-repair mode (append allies enemies)
+                       #:claims (make-spell-claims)))
+
+(define (standard-worker-patches)
+  (for/list ([i (in-range 8)]
+             [dy (in-list '(-4.2 -3.0 -1.8 -0.6 0.6 1.8 3.0 4.2))])
+    (hasheq 'id (+ 901 i) 'x (- 26.5 (* 0.08 (* dy dy))) 'y (+ 32.5 dy) 'mineral-contents 1500)))
+
+(define (setup-worker-terran-repair-pocket mode)
+  (define th (make-sim-unit 890 'ally 'command-center 32.5 32.5))
+  (define allies (grid-units 101 'ally 'scv '(27.8 29.0) '(29.5 30.7 31.9 33.1 34.3 35.5)))
+  (define enemies
+    (for/list ([i (in-range 12)])
+      (make-sim-unit (+ 201 i) 'enemy 'probe
+                     (+ 35.5 (* 0.08 (cos (* 0.52 i))))
+                     (+ 32.5 (* 0.08 (sin (* 0.52 i))))
+                     #:drill-stacked? #t)))
+  (make-scenario-world 'worker-rush-terran-scv-repair-pocket-vs-12-worker mode (append (list th) allies enemies)
+                       #:patches (standard-worker-patches) #:townhalls (list (hasheq 'id 890 'x 32.5 'y 32.5))
+                       #:home-x 32.5 #:home-y 32.5 #:enemy-x 55.0 #:enemy-y 55.0))
+
+(define (setup-worker-protoss-shield-kite mode)
+  (define th (make-sim-unit 890 'ally 'nexus 32.5 32.5))
+  (define allies (grid-units 101 'ally 'probe '(27.8 29.0) '(29.5 30.7 31.9 33.1 34.3 35.5)))
+  (define enemies
+    (for/list ([i (in-range 12)])
+      (make-sim-unit (+ 201 i) 'enemy 'drone
+                     (+ 35.5 (* 0.08 (cos (* 0.52 i))))
+                     (+ 32.5 (* 0.08 (sin (* 0.52 i))))
+                     #:drill-stacked? #t)))
+  (make-scenario-world 'worker-rush-protoss-probe-shield-regen-kite-vs-12-worker mode (append (list th) allies enemies)
+                       #:patches (standard-worker-patches) #:townhalls (list (hasheq 'id 890 'x 32.5 'y 32.5))
+                       #:home-x 32.5 #:home-y 32.5 #:enemy-x 55.0 #:enemy-y 55.0))
+
+(define (setup-worker-townhall-stack-breaker mode)
+  ;; Tight `12` mineral-walk stack (`60 dmg/frame`) <= 4.0t from TownHall (`#222`)
+  (define th (make-sim-unit 890 'ally 'hatchery 32.5 32.5 #:hp 900.0))
+  (define allies (grid-units 101 'ally 'drone '(27.5 28.8) '(29.5 30.7 31.9 33.1 34.3 35.5)))
+  (define enemies
+    (for/list ([i (in-range 12)])
+      (make-sim-unit (+ 201 i) 'enemy 'probe
+                     (+ 35.2 (* 0.07 (cos (* 0.52 i))))
+                     (+ 32.5 (* 0.07 (sin (* 0.52 i))))
+                     #:drill-stacked? #t)))
+  (define w
+    (make-scenario-world 'worker-rush-townhall-focus-mineral-stack-breaker mode (append (list th) allies enemies)
+                         #:patches (standard-worker-patches) #:townhalls (list (hasheq 'id 890 'x 32.5 'y 32.5))
+                         #:home-x 32.5 #:home-y 32.5 #:enemy-x 55.0 #:enemy-y 55.0))
+  (set-sim-world-fx-attack-buildings?! (get-world-fx w) #t)
+  w)
+
+(define (setup-worker-mixed-early-unit mode)
+  (define th (make-sim-unit 890 'ally 'command-center 32.5 32.5))
+  (define allies
+    (append
+     (grid-units 101 'ally 'scv '(27.8 29.0) '(29.5 30.7 31.9 33.1 34.3 35.5))
+     (list (make-sim-unit 150 'ally 'marine 30.5 32.5))))
+  (define enemies
+    (append
+     (for/list ([i (in-range 11)])
+       (make-sim-unit (+ 201 i) 'enemy 'probe
+                      (+ 35.5 (* 0.08 (cos (* 0.57 i))))
+                      (+ 32.5 (* 0.08 (sin (* 0.57 i))))
+                      #:drill-stacked? #t))
+     (list (make-sim-unit 250 'enemy 'zealot 34.8 32.5))))
+  (make-scenario-world 'worker-rush-mixed-workers-plus-early-zealot-or-marine mode (append (list th) allies enemies)
+                       #:patches (standard-worker-patches) #:townhalls (list (hasheq 'id 890 'x 32.5 'y 32.5))
+                       #:home-x 32.5 #:home-y 32.5 #:enemy-x 55.0 #:enemy-y 55.0))
+
+(define (setup-worker-proxy-builder-snipe mode)
+  (define th (make-sim-unit 890 'ally 'nexus 32.5 32.5))
+  (define allies (grid-units 101 'ally 'probe '(27.8 29.0) '(29.5 30.7 31.9 33.1 34.3 35.5)))
+  (define enemies
+    (append
+     (list (make-sim-unit 281 'enemy 'photon-cannon 35.5 33.0 #:hp 45.0  #:shield 45.0 #:build-progress 0.72)
+           (make-sim-unit 282 'enemy 'probe         36.2 32.8)
+           (make-sim-unit 280 'enemy 'pylon         36.5 34.0 #:hp 120.0 #:shield 120.0))
+     (for/list ([i (in-range 8)])
+       (make-sim-unit (+ 201 i) 'enemy 'probe
+                      (+ 35.0 (* 0.08 (cos (* 0.70 i))))
+                      (+ 32.0 (* 0.08 (sin (* 0.70 i))))
+                      #:drill-stacked? #t))))
+  (make-scenario-world 'worker-rush-proxy-cannon-or-bunker-builder-snipe mode (append (list th) allies enemies)
+                       #:patches (standard-worker-patches) #:townhalls (list (hasheq 'id 890 'x 32.5 'y 32.5))
+                       #:home-x 32.5 #:home-y 32.5 #:enemy-x 55.0 #:enemy-y 55.0))
+
 (define LOTV-UNIT-TESTER-SCENARIOS
   (list
    (lotv-scenario-spec
@@ -1564,10 +2595,93 @@
     "8 Glaive Adepts vs 1 Bunker (4 Marines) + 1 Siege Tank choke + 16 SCVs in mineral line behind"
     'adept-mineral-bypass 900 'enemy 'ally
     '(evaluate-build-order-tactical-plan plan-multi-base-adept-harass)
-    setup-adept-bypass)))
+    setup-adept-bypass)
+   ;; 9–14: Attribute / Size / Spell Matrix
+   (lotv-scenario-spec
+    'mixed-attribute-target-focus-immortal-colossus-archon
+    "Mixed-Attribute Exact Focus: Immortal vs Armored, Colossus vs Light, Archon vs Bio"
+    "2 Immortals + 2 Colossi + 2 Archons vs 8 Lings + 2 Barrier Immortals + 12 Marines + 5 Marauders + 4 Stalkers"
+    'standard 750 'enemy 'ally
+    '(compute-exact-hit-damage-vs-target unit-attribute-mask unit-collision-radius)
+    setup-mixed-attribute-focus)
+   (lotv-scenario-spec
+    'ghost-emp-shield-psionic-and-bio-snipe
+    "Ghost EMP (-100 Shield/-100 Energy) & Steady Targeting ('biological only)"
+    "4 Ghosts + 5 Marines vs 2 High Templars (125en) + 2 Archons + 2 Ultralisks + 2 Stalkers"
+    'standard 750 'enemy 'ally
+    '(step-pro-spellcaster-micro! spell-valid-for-target-attrs?)
+    setup-ghost-emp-snipe)
+   (lotv-scenario-spec
+    'raven-interference-matrix-and-aam-vs-armored-mech
+    "Raven Interference Matrix ('mechanical/'psionic & not 'frenzied) + AAM (-2 Armor)"
+    "2 Ravens + 12 Marines vs 2 Sieged Tanks + 1 Thor + 1 Ultralisk"
+    'standard 750 'enemy 'ally
+    '(step-pro-spellcaster-micro! spell-valid-for-target-attrs?)
+    setup-raven-matrix-aam)
+   (lotv-scenario-spec
+    'viper-abduct-blinding-cloud-and-ht-feedback
+    "Viper Abduct (not 'frenzied) + Blinding Cloud + HT Feedback/Storm"
+    "2 Vipers + 2 HTs + 6 Hydras + 3 Zealots vs 2 Sieged Tanks + 2 HTs + 6 Marauders + 1 Ultralisk"
+    'standard 750 'enemy 'ally
+    '(step-pro-spellcaster-micro! spell-valid-for-target-attrs?)
+    setup-viper-ht-feedback)
+   (lotv-scenario-spec
+    'infestor-fungal-vs-light-bio-and-neural-vs-massive-mech
+    "Infestor Fungal vs Bio Ball + Neural Parasite on Massive Mech (Rejects 'frenzied Ultra)"
+    "2 Infestors + 14 Zerglings + 4 Hydralisks vs 14 Marines + 2 Thors + 1 Ultralisk"
+    'standard 750 'enemy 'ally
+    '(step-pro-spellcaster-micro! spell-valid-for-target-attrs?)
+    setup-infestor-fungal-neural)
+   (lotv-scenario-spec
+    'sentry-guardian-shield-and-queen-transfuse-scv-repair
+    "Sentry Guardian Shield (-2 Ranged) + Queen Transfuse ('bio) + SCV Repair ('mech)"
+    "1 Sentry + 2 Zealots + 2 Stalkers + 1 Queen + Injured Roach/Tank + 2 SCVs vs 15 Marines"
+    'standard 750 'enemy 'ally
+    '(step-pro-spellcaster-micro! spell-valid-for-target-attrs?)
+    setup-sentry-queen-scv-defense)
+   ;; 15–19: Worker Rush Matrix
+   (lotv-scenario-spec
+    'worker-rush-terran-scv-repair-pocket-vs-12-worker
+    "Worker Rush: Terran SCV Mutual Repair Pocket vs 12 Stacked Probes"
+    "12 SCVs + CC vs 12 mineral-stacked enemy Probes"
+    'standard 650 'enemy 'ally
+    '(select-worker-drill-stack-mineral-patch translate-bot-actions->sc2-raw-commands spell-valid-for-target-attrs?)
+    setup-worker-terran-repair-pocket)
+   (lotv-scenario-spec
+    'worker-rush-protoss-probe-shield-regen-kite-vs-12-worker
+    "Worker Rush: Protoss Probe Shield Kite/Regen vs 12 Stacked Drones"
+    "12 Probes + Nexus vs 12 mineral-stacked enemy Drones"
+    'standard 650 'enemy 'ally
+    '(select-worker-drill-stack-mineral-patch translate-bot-actions->sc2-raw-commands)
+    setup-worker-protoss-shield-kite)
+   (lotv-scenario-spec
+    'worker-rush-townhall-focus-mineral-stack-breaker
+    "Worker Rush: TownHall Focus & 60 dmg/frame Mineral-Walk Stack Breaker (#222)"
+    "12 Drones + Hatchery vs 12 tight mineral-stacked Probes (60 dmg/frame volleys)"
+    'standard 650 'enemy 'ally
+    '(select-worker-drill-stack-mineral-patch translate-bot-actions->sc2-raw-commands)
+    setup-worker-townhall-stack-breaker)
+   (lotv-scenario-spec
+    'worker-rush-mixed-workers-plus-early-zealot-or-marine
+    "Worker Rush: Mixed 12 SCVs + Early Marine Kite vs 11 Stacked Probes + Zealot"
+    "12 SCVs + 1 Marine + CC vs 11 stacked Probes + 1 Zealot"
+    'standard 700 'enemy 'ally
+    '(select-worker-drill-stack-mineral-patch translate-bot-actions->sc2-raw-commands)
+    setup-worker-mixed-early-unit)
+   (lotv-scenario-spec
+    'worker-rush-proxy-cannon-or-bunker-builder-snipe
+    "Worker Rush: Proxy Cannon + Builder Snipe Squad vs 8 Stacked Probes"
+    "12 Probes vs Proxy Pylon + Incomplete Photon Cannon + Builder + 8 stacked Probes"
+    'standard 700 'enemy 'ally
+    '(select-worker-drill-stack-mineral-patch translate-bot-actions->sc2-raw-commands)
+    setup-worker-proxy-builder-snipe)))
 
 (define LOTV-UNIT-TESTER-SCENARIO-IDS
   (map lotv-scenario-spec-id LOTV-UNIT-TESTER-SCENARIOS))
+
+;; First 8 canonical asymmetric micro scenarios preserved for Suite 48.4 default runs.
+(define LOTV-UNIT-TESTER-CANONICAL-SCENARIOS
+  (take LOTV-UNIT-TESTER-SCENARIOS 8))
 
 (define (find-lotv-unit-tester-scenario key)
   (define sym
@@ -1584,6 +2698,20 @@
 ;; 8. Simulation Runner & Scoring
 ;; -----------------------------------------------------------------------------
 
+(define (worker-scenario-id? sid)
+  (not (eq? (memq sid '(worker-rush-townhall-stack-mineral-drill
+                         worker-rush-terran-scv-repair-pocket-vs-12-worker
+                         worker-rush-protoss-probe-shield-regen-kite-vs-12-worker
+                         worker-rush-townhall-focus-mineral-stack-breaker
+                         worker-rush-mixed-workers-plus-early-zealot-or-marine
+                         worker-rush-proxy-cannon-or-bunker-builder-snipe))
+            #f)))
+
+(define (enemy-bldg-win-scenario-id? sid)
+  (not (eq? (memq sid '(glaive-adept-shade-bypass-fortified-choke
+                         worker-rush-proxy-cannon-or-bunker-builder-snipe))
+            #f)))
+
 (define (living-combat-units units team #:include-workers? [workers? #f] #:include-bldgs? [bldgs? #f])
   (for/list ([u (in-list units)]
              #:when (and (unit-alive? u)
@@ -1595,8 +2723,8 @@
 (define (check-winner spec w)
   (define units (sim-world-units w))
   (define sid (lotv-scenario-spec-id spec))
-  (define workers-count? (eq? sid 'worker-rush-townhall-stack-mineral-drill))
-  (define bldgs-count? (eq? sid 'glaive-adept-shade-bypass-fortified-choke))
+  (define workers-count? (worker-scenario-id? sid))
+  (define bldgs-count? (enemy-bldg-win-scenario-id? sid))
   (define ally-alive (living-combat-units units 'ally #:include-workers? #t))
   (cond
     [(eq? (lotv-scenario-spec-win-mode spec) 'adept-mineral-bypass)
@@ -1608,9 +2736,16 @@
        [(null? ally-alive) 'enemy]
        [else #f])]
     [else
+     (define townhall-lost?
+       (and (eq? sid 'worker-rush-townhall-focus-mineral-stack-breaker)
+            (not (for/or ([u (in-list units)])
+                   (and (unit-alive? u)
+                        (eq? (sim-unit-team u) 'ally)
+                        (sim-unit-building? u))))))
      (define enemy-alive
        (living-combat-units units 'enemy #:include-workers? workers-count? #:include-bldgs? bldgs-count?))
      (cond
+       [townhall-lost? 'enemy]
        [(and (null? enemy-alive) (pair? ally-alive)) 'ally]
        [(null? ally-alive) 'enemy]
        [else #f])]))
@@ -1618,11 +2753,12 @@
 (define (run-single-mode spec mode [max-frames-override #f])
   (define max-frames (or max-frames-override (lotv-scenario-spec-max-frames spec)))
   (define w ((lotv-scenario-spec-setup-fn spec) mode))
+  (define bldgs-count? (enemy-bldg-win-scenario-id? (lotv-scenario-spec-id spec)))
   (define start-allies (living-combat-units (sim-world-units w) 'ally #:include-workers? #t))
   (define start-enemies
     (living-combat-units (sim-world-units w) 'enemy
                          #:include-workers? #t
-                         #:include-bldgs? (eq? (lotv-scenario-spec-id spec) 'glaive-adept-shade-bypass-fortified-choke)))
+                         #:include-bldgs? bldgs-count?))
   (define start-a-cnt (length start-allies))
   (define start-e-cnt (length start-enemies))
   (define start-a-ehp (max 1.0 (for/sum ([u (in-list start-allies)]) (unit-ehp u))))
@@ -1647,7 +2783,7 @@
   (define end-enemies
     (living-combat-units (sim-world-units w) 'enemy
                          #:include-workers? #t
-                         #:include-bldgs? (eq? (lotv-scenario-spec-id spec) 'glaive-adept-shade-bypass-fortified-choke)))
+                         #:include-bldgs? bldgs-count?))
   (define final-winner
     (or winner
         (let ([a-frac (/ (for/sum ([u (in-list end-allies)]) (unit-ehp u)) start-a-ehp)]
@@ -1694,7 +2830,7 @@
              'mothman_winner (hash-ref moth-res 'winner)
              'passed passed?)]))
 
-(define (run-all-lotv-unit-tester-scenarios #:scenarios [scenarios LOTV-UNIT-TESTER-SCENARIOS])
+(define (run-all-lotv-unit-tester-scenarios #:scenarios [scenarios LOTV-UNIT-TESTER-CANONICAL-SCENARIOS])
   (define results
     (for/list ([sc (in-list scenarios)])
       (run-lotv-unit-tester-scenario sc)))

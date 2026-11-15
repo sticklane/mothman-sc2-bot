@@ -36,6 +36,8 @@
          compiler/find-exe
          setup/dirs
          file/gzip
+         ffi/unsafe
+         ffi/unsafe/define
          json
          "../sim/racket-sc2-ladder-main.rkt")
 
@@ -99,11 +101,35 @@
                    (arithmetic-shift acc -8))))
   (bitwise-and (bitwise-not c) #xffffffff))
 
+(define libz-handle
+  (with-handlers ([exn:fail? (lambda (_e) #f)])
+    (ffi-lib "libz" '("1" #f) #:fail (lambda () #f))))
+
+(define libz-compress-bound #f)
+(define libz-compress2 #f)
+(when libz-handle
+  (define-ffi-definer def-libz libz-handle)
+  (def-libz compressBound (_fun _ulong -> _ulong))
+  (def-libz compress2 (_fun _bytes [len : (_ptr io _ulong)] _bytes _ulong _int -> [rc : _int] -> (values rc len)))
+  (set! libz-compress-bound compressBound)
+  (set! libz-compress2 compress2))
+
 (define (deflate-bytes raw-bstr)
-  (define in (open-input-bytes raw-bstr))
-  (define out (open-output-bytes))
-  (deflate in out)
-  (get-output-bytes out))
+  (define raw-len (bytes-length raw-bstr))
+  (or (and libz-compress-bound
+           libz-compress2
+           (let* ([max-len (libz-compress-bound raw-len)]
+                  [out (make-bytes max-len)])
+             (define-values (rc out-len) (libz-compress2 out max-len raw-bstr raw-len 9))
+             ;; RFC 1950 zlib stream without FDICT (#x20): strip 2-byte header + 4-byte Adler-32 trailer -> raw RFC 1951 DEFLATE
+             (and (zero? rc)
+                  (> out-len 6)
+                  (zero? (bitwise-and (bytes-ref out 1) #x20))
+                  (subbytes out 2 (- out-len 4)))))
+      (let ([in (open-input-bytes raw-bstr)]
+            [out (open-output-bytes)])
+        (deflate in out)
+        (get-output-bytes out))))
 
 (define (write-u16le v out)
   (write-bytes (integer->integer-bytes (bitwise-and v #xffff) 2 #f #f) out))
@@ -582,7 +608,8 @@
                               '("lib/bot-crash-fuzzer.rkt"
                                 "lib/state-machine-verifier.rkt"
                                 "lib/sc2-mpq-replay-parser.rkt"
-                                "lib/pro-replay-starvation-audit.rkt"))
+                                "lib/pro-replay-starvation-audit.rkt"
+                                "lib/sc2-unit-tester-lotv.rkt"))
                       ;; In `sc-bot/`, only pack `sc-bot/main.rkt`
                       (and (string-prefix? rel "sc-bot/")
                            (not (equal? rel "sc-bot/main.rkt"))))
