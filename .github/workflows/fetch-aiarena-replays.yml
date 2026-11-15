@@ -1,0 +1,259 @@
+name: Fetch AI Arena Replays
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max recent matches to download across Mothman bots"
+        required: false
+        default: "15"
+      since_match:
+        description: "Optional minimum numeric match ID (e.g. 5117325)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetch-aiarena-replays
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Live Status, Replays, and Match Logs from AI Arena
+        env:
+          AIARENA_API_TOKEN: ${{ secrets.AIARENA_API_TOKEN }}
+          LIMIT_STR: ${{ inputs.limit }}
+          SINCE_MATCH_STR: ${{ inputs.since_match }}
+        run: |
+          mkdir -p out_replays
+          python3 - <<'PY'
+          import concurrent.futures
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          import threading
+
+          BOT_IDS = {
+              1457: "Mothman-R",
+              1458: "Mothman-Z",
+              1459: "Mothman-T",
+              1460: "Mothman-P",
+              1461: "Mothman-X",
+          }
+          QUERY_BOT_IDS = [1458, 1459, 1460, 1461]
+          USER_ID = 3871
+          COMPETITION_ID = 38
+          OUT_DIR = "out_replays"
+
+          token = os.environ.get("AIARENA_API_TOKEN", "").strip()
+          if not token:
+              print("ERROR: AIARENA_API_TOKEN secret is empty", file=sys.stderr)
+              sys.exit(1)
+
+          raw_limit = os.environ.get("LIMIT_STR", "15").strip()
+          limit = int(raw_limit) if raw_limit.isdigit() and int(raw_limit) > 0 else 15
+          limit = min(limit, 100)
+          raw_since = os.environ.get("SINCE_MATCH_STR", "").strip()
+          since_match = int(raw_since) if raw_since.isdigit() else None
+
+          def safe_token(s):
+              cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(s or ""))
+              return cleaned or "Opponent"
+
+          def api_get(url):
+              full_url = url if url.startswith("http") else f"https://aiarena.net/api/{url.lstrip('/')}"
+              res = subprocess.run(
+                  [
+                      "curl", "-sL", "--max-time", "25",
+                      "-H", f"Authorization: Token {token}",
+                      "-H", "User-Agent: mothman-racket-forensics/3.0",
+                      full_url,
+                  ],
+                  capture_output=True,
+                  text=True,
+              )
+              if res.returncode != 0 or not res.stdout.strip():
+                  return None
+              try:
+                  return json.loads(res.stdout)
+              except Exception:
+                  return None
+
+          def download_file(url, dest_path):
+              if not url:
+                  return False
+              part_path = dest_path + ".part"
+              cmd = [
+                  "curl", "-sfL", "--max-time", "30",
+                  "-H", "User-Agent: mothman-racket-forensics/3.0",
+                  "-o", part_path,
+              ]
+              if "aiarena.net" in url:
+                  cmd.extend(["-H", f"Authorization: Token {token}"])
+              cmd.append(url)
+              res = subprocess.run(cmd, capture_output=True)
+              if res.returncode == 0 and os.path.isfile(part_path) and os.path.getsize(part_path) > 0:
+                  os.replace(part_path, dest_path)
+                  return True
+              if os.path.isfile(part_path):
+                  os.remove(part_path)
+              return False
+
+          # 1. Live Bot & Competition Status
+          status_lines = [
+              "============================================================================",
+              f"  AI Arena Live Bot & Match Status (User #{USER_ID}, Competition #{COMPETITION_ID})",
+              "============================================================================",
+          ]
+          bots_resp = api_get(f"bots/?user={USER_ID}")
+          all_bots = bots_resp.get("results", []) if isinstance(bots_resp, dict) else []
+          for b in all_bots:
+              bid = b.get("id")
+              bname = b.get("name")
+              btype = b.get("type")
+              zupd = b.get("bot_zip_updated")
+              zmd5 = b.get("bot_zip_md5hash")
+              cp_resp = api_get(f"competition-participations/?bot={bid}&competition={COMPETITION_ID}")
+              cp_list = cp_resp.get("results", []) if isinstance(cp_resp, dict) else []
+              cp0 = cp_list[0] if cp_list else {}
+              active = cp0.get("active")
+              elo = cp0.get("elo")
+              div_num = cp0.get("division_num")
+              status_lines.append(
+                  f"  * {bname} (#{bid}, {btype}) | active={active} elo={elo if elo is not None else 'N/A'} "
+                  f"div={div_num if div_num is not None else 'N/A'} | updated={zupd} md5={zmd5}"
+              )
+              mp_resp = api_get(f"match-participations/?bot={bid}&ordering=-match&limit=5")
+              mp_list = mp_resp.get("results", []) if isinstance(mp_resp, dict) else []
+              for p in mp_list[:5]:
+                  mid = p.get("match")
+                  res = p.get("result") or "QUEUED/IN_PROGRESS"
+                  cause = p.get("result_cause") or "-"
+                  elo_chg = p.get("elo_change") or 0
+                  step_s = p.get("avg_step_time")
+                  step_str = f"{round(step_s * 1000.0, 2)}ms" if isinstance(step_s, (int, float)) else "N/A"
+                  status_lines.append(
+                      f"      - Match #{mid} (https://aiarena.net/matches/{mid}/): "
+                      f"status={res} cause={cause} elo_chg={elo_chg} step={step_str}"
+                  )
+
+          status_text = "\n".join(status_lines) + "\n"
+          print(status_text)
+          with open(os.path.join(OUT_DIR, "live_status.txt"), "w", encoding="utf-8") as fh:
+              fh.write(status_text)
+
+          # 2. Discover recent match IDs across Mothman bots
+          per_bot_limit = max(limit, 40) if since_match is not None else limit
+          mids_set = set()
+          for bid in QUERY_BOT_IDS:
+              resp = api_get(f"match-participations/?bot={bid}&ordering=-match&limit={per_bot_limit}")
+              rows = resp.get("results", []) if isinstance(resp, dict) else []
+              for r in rows:
+                  mid = r.get("match") if isinstance(r, dict) else None
+                  if isinstance(mid, int) and mid > 0:
+                      mids_set.add(mid)
+
+          all_mids = sorted(mids_set)
+          if since_match is not None:
+              selected_mids = [m for m in all_mids if m >= since_match]
+          else:
+              selected_mids = all_mids[-limit:]
+
+          print(f"[FETCH] Downloading {len(selected_mids)} AI Arena match(es): {selected_mids}")
+
+          name_lock = threading.Lock()
+          known_names = dict(BOT_IDS)
+
+          def resolve_bot_name(bot_id):
+              if not isinstance(bot_id, int) or bot_id <= 0:
+                  return "Opponent"
+              with name_lock:
+                  if bot_id in known_names:
+                      return known_names[bot_id]
+              resp = api_get(f"bots/{bot_id}/")
+              bname = resp.get("name") if isinstance(resp, dict) else None
+              final_name = bname if isinstance(bname, str) and bname else f"Bot{bot_id}"
+              with name_lock:
+                  known_names[bot_id] = final_name
+              return final_name
+
+          def fetch_match(mid):
+              mp_resp = api_get(f"match-participations/?match={mid}")
+              parts = mp_resp.get("results", []) if isinstance(mp_resp, dict) else []
+              res_resp = api_get(f"results/?match={mid}")
+              res_list = res_resp.get("results", []) if isinstance(res_resp, dict) else []
+              r0 = res_list[0] if res_list else {}
+
+              our_part = next(
+                  (p for p in parts if isinstance(p, dict) and p.get("bot") in BOT_IDS),
+                  None,
+              )
+              our_pid = our_part.get("id") if our_part else None
+              opp_part = next(
+                  (p for p in parts if isinstance(p, dict) and p.get("id") != our_pid),
+                  None,
+              )
+
+              our_bid = our_part.get("bot") if our_part else None
+              opp_bid = opp_part.get("bot") if opp_part else None
+              our_bname = BOT_IDS.get(our_bid, f"Bot{our_bid}") if our_bid else "Mothman"
+              opp_bname = resolve_bot_name(opp_bid) if opp_bid else "Opponent"
+              avg_step_sec = our_part.get("avg_step_time") if our_part else None
+              avg_step_ms = round(avg_step_sec * 1000.0, 2) if isinstance(avg_step_sec, (int, float)) else 0.0
+
+              meta = {
+                  "match_id": mid,
+                  "our_bot_id": our_bid or 0,
+                  "our_bot_name": our_bname,
+                  "opp_bot_id": opp_bid or 0,
+                  "opp_bot_name": opp_bname,
+                  "our_participant_number": (our_part.get("participant_number") if our_part else None) or 0,
+                  "result": (our_part.get("result") if our_part else None) or "in_progress",
+                  "result_cause": (our_part.get("result_cause") if our_part else None) or "",
+                  "elo_change": (our_part.get("elo_change") if our_part else None) or 0,
+                  "resultant_elo": (our_part.get("resultant_elo") if our_part else None) or 0,
+                  "avg_step_time_ms": avg_step_ms,
+                  "match_log_url": (our_part.get("match_log") if our_part else None) or "",
+                  "result_type": r0.get("type") or "",
+                  "game_steps": r0.get("game_steps") or 0,
+                  "replay_url": r0.get("replay_file") or "",
+                  "created": r0.get("created") or "",
+              }
+              meta_path = os.path.join(OUT_DIR, f"{mid}_meta.json")
+              with open(meta_path, "w", encoding="utf-8") as fh:
+                  json.dump(meta, fh)
+
+              log_ok = False
+              if meta["match_log_url"]:
+                  log_ok = download_file(meta["match_log_url"], os.path.join(OUT_DIR, f"{mid}_match_log.zip"))
+
+              rep_ok = False
+              if meta["replay_url"]:
+                  rep_name = f"{mid}_{safe_token(our_bname)}_vs_{safe_token(opp_bname)}.SC2Replay"
+                  rep_ok = download_file(meta["replay_url"], os.path.join(OUT_DIR, rep_name))
+
+              print(
+                  f"  Match #{mid}: {our_bname} vs {opp_bname} | result={meta['result']} "
+                  f"cause={meta['result_cause']} elo={meta['elo_change']} | replay={rep_ok} log={log_ok}"
+              )
+
+          with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+              list(pool.map(fetch_match, selected_mids))
+
+          with open(os.path.join(OUT_DIR, "bot_names_cache.json"), "w", encoding="utf-8") as fh:
+              json.dump({str(k): v for k, v in known_names.items()}, fh)
+          PY
+
+      - name: Upload Replays & Telemetry Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aiarena-replays
+          path: out_replays/
+          retention-days: 7
+          if-no-files-found: error
