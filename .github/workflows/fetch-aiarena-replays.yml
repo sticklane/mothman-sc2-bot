@@ -11,6 +11,14 @@ on:
         description: "Optional minimum numeric match ID (e.g. 5117325)"
         required: false
         default: ""
+      since_date:
+        description: "Optional minimum UTC date prefix YYYY-MM-DD (e.g. 2026-11-15)"
+        required: false
+        default: ""
+      skip_matches:
+        description: "Optional comma-separated match IDs already downloaded"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -28,6 +36,8 @@ jobs:
           AIARENA_API_TOKEN: ${{ secrets.AIARENA_API_TOKEN }}
           LIMIT_STR: ${{ inputs.limit }}
           SINCE_MATCH_STR: ${{ inputs.since_match }}
+          SINCE_DATE_STR: ${{ inputs.since_date }}
+          SKIP_MATCHES_STR: ${{ inputs.skip_matches }}
         run: |
           mkdir -p out_replays
           python3 - <<'PY'
@@ -60,6 +70,9 @@ jobs:
           limit = min(limit, 100)
           raw_since = os.environ.get("SINCE_MATCH_STR", "").strip()
           since_match = int(raw_since) if raw_since.isdigit() else None
+          since_date = os.environ.get("SINCE_DATE_STR", "").strip()
+          raw_skip = os.environ.get("SKIP_MATCHES_STR", "")
+          skip_mids = {int(x.strip()) for x in raw_skip.split(",") if x.strip().isdigit()}
 
           def safe_token(s):
               cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(s or ""))
@@ -145,7 +158,10 @@ jobs:
               return False
 
           # 1. Live Bot & Competition Status (cache match-participations per bot for step 2)
-          per_bot_limit = min(100, max(limit * 2, 40) if since_match is not None else max(limit * 2, 20))
+          per_bot_limit = min(
+              100,
+              max(limit * 2, 60) if (since_match is not None or since_date) else max(limit * 2, 20),
+          )
           mp_cache = {}
           status_lines = [
               "============================================================================",
@@ -170,6 +186,8 @@ jobs:
                   f"  * {bname} (#{bid}, {btype}) | active={active} elo={elo if elo is not None else 'N/A'} "
                   f"div={div_num if div_num is not None else 'N/A'} | updated={zupd} md5={zmd5}"
               )
+              if not active and bid not in QUERY_BOT_IDS:
+                  continue
               mp_resp = api_get(f"match-participations/?bot={bid}&ordering=-match&limit={per_bot_limit}")
               mp_list = mp_resp.get("results", []) if isinstance(mp_resp, dict) else []
               mp_cache[bid] = mp_list
@@ -202,12 +220,14 @@ jobs:
                   if r.get("result") not in ("win", "loss", "tie") and not r.get("match_log"):
                       continue
                   mid = r.get("match")
-                  if isinstance(mid, int) and mid > 0:
+                  if isinstance(mid, int) and mid > 0 and mid not in skip_mids:
                       mids_set.add(mid)
 
           all_mids = sorted(mids_set)
           if since_match is not None:
               selected_mids = [m for m in all_mids if m >= since_match]
+          elif since_date:
+              selected_mids = sorted(all_mids, reverse=True)[:limit]
           else:
               selected_mids = all_mids[-limit:]
 
@@ -227,11 +247,16 @@ jobs:
               return final_name
 
           def fetch_match(mid):
-              mp_resp = api_get(f"match-participations/?match={mid}")
-              parts = mp_resp.get("results", []) if isinstance(mp_resp, dict) else []
               res_resp = api_get(f"results/?match={mid}")
               res_list = res_resp.get("results", []) if isinstance(res_resp, dict) else []
               r0 = res_list[0] if res_list else {}
+              created = r0.get("created") or ""
+              if since_date and created and created[:10] < since_date:
+                  print(f"  Match #{mid}: created={created} < {since_date}, skipping")
+                  return "too_old"
+
+              mp_resp = api_get(f"match-participations/?match={mid}")
+              parts = mp_resp.get("results", []) if isinstance(mp_resp, dict) else []
 
               our_part = next(
                   (p for p in parts if isinstance(p, dict) and p.get("bot") in BOT_IDS),
@@ -266,11 +291,11 @@ jobs:
                   "result_type": r0.get("type") or "",
                   "game_steps": r0.get("game_steps") or 0,
                   "replay_url": r0.get("replay_file") or "",
-                  "created": r0.get("created") or "",
+                  "created": created,
               }
               if not (our_bid or meta["replay_url"] or meta["match_log_url"]):
                   print(f"  [WARN] Match #{mid}: skipping empty/unpopulated API response", file=sys.stderr)
-                  return
+                  return "skipped"
 
               meta_path = os.path.join(OUT_DIR, f"{mid}_meta.json")
               with open(meta_path, "w", encoding="utf-8") as fh:
@@ -289,9 +314,18 @@ jobs:
                   f"  Match #{mid}: {our_bname} vs {opp_bname} | result={meta['result']} "
                   f"cause={meta['result_cause']} elo={meta['elo_change']} | replay={rep_ok} log={log_ok}"
               )
+              return "downloaded"
 
+          older_streak = 0
           for mid in selected_mids:
-              fetch_match(mid)
+              st = fetch_match(mid)
+              if st == "too_old":
+                  older_streak += 1
+                  if older_streak >= 8:
+                      print(f"[FETCH] Stopping early after {older_streak} consecutive matches older than {since_date}")
+                      break
+              elif st == "downloaded":
+                  older_streak = 0
 
           with open(os.path.join(OUT_DIR, "bot_names_cache.json"), "w", encoding="utf-8") as fh:
               json.dump({str(k): v for k, v in known_names.items()}, fh)
