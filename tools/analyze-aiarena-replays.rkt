@@ -45,6 +45,10 @@
          compute-matchup-code
          parse-matchup-filter
          summarize-reports-by-matchup
+         infer-our-build-order-category
+         infer-opponent-strategy-category
+         summarize-reports-by-build-order
+         summarize-reports-by-opponent-strategy
          extract-experiment-meta-from-record
          summarize-experiments-from-telemetry
          parse-match-log-zip
@@ -598,6 +602,315 @@
           'by_matchup by-matchup-ht
           'race_rows race-rows
           'matchup_rows matchup-rows))
+
+(define (strategy-entry-name item)
+  (cond
+    [(pair? item)
+     (define a (car item))
+     (define b (cdr item))
+     (cond
+       [(real? a)
+        (if (pair? b) (format "~a" (car b)) (format "~a" b))]
+       [else (format "~a" a)])]
+    [(hash? item) (format "~a" (or (hash-ref item 'name #f) (hash-ref item 'type #f) ""))]
+    [(or (string? item) (symbol? item)) (format "~a" item)]
+    [else ""]))
+
+(define (strategy-entry-sec item)
+  (cond
+    [(and (pair? item) (real? (car item))) (exact->inexact (car item))]
+    [(and (list? item) (= (length item) 2) (real? (first item))) (exact->inexact (first item))]
+    [else #f]))
+
+(define (report-born-count born-list . names)
+  (define targets (map string-downcase names))
+  (cond
+    [(hash? born-list)
+     (for/sum ([(k v) (in-hash born-list)]
+               #:when (and (real? v) (member (string-downcase (format "~a" k)) targets)))
+       (inexact->exact (truncate v)))]
+    [(list? born-list)
+     (for/sum ([entry (in-list born-list)])
+       (define nm
+         (cond
+           [(pair? entry) (string-downcase (format "~a" (car entry)))]
+           [else ""]))
+       (define cnt
+         (cond
+           [(and (pair? entry) (list? (cdr entry)) (pair? (cdr entry)) (real? (cadr entry)))
+            (cadr entry)]
+           [(and (pair? entry) (real? (cdr entry))) (cdr entry)]
+           [else 0]))
+       (if (member nm targets) (inexact->exact (truncate cnt)) 0))]
+    [else 0]))
+
+(define (report-morph-min-sec entries . names)
+  (define targets (map string-downcase names))
+  (define secs
+    (for/list ([it (in-list (if (list? entries) entries '()))]
+               #:when (let ([nm (string-downcase (strategy-entry-name it))])
+                        (ormap (lambda (t) (string-contains? nm t)) targets)))
+      (or (strategy-entry-sec it) 9999.0)))
+  (and (pair? secs) (apply min secs)))
+
+(define (report-has-upgrade? upg-list . names)
+  (define targets (map string-downcase names))
+  (for/or ([u (in-list (if (list? upg-list) upg-list '()))])
+    (define s (string-downcase (strategy-entry-name u)))
+    (ormap (lambda (t) (string-contains? s t)) targets)))
+
+(define (report-nth-expansion-sec exp-list n)
+  (define secs
+    (sort
+     (for/list ([it (in-list (if (list? exp-list) exp-list '()))]
+                #:when (strategy-entry-sec it))
+       (strategy-entry-sec it))
+     <))
+  (and (>= (length secs) n) (list-ref secs (sub1 n))))
+
+(define (infer-our-build-order-category r)
+  (define explicit
+    (for/or ([k (in-list '(our_build_order build_order))])
+      (define v (hash-ref r k #f))
+      (and (string? v)
+           (let ([t (string-trim v)])
+             (and (not (string=? t ""))
+                  (not (string-ci=? t "unknown"))
+                  t)))))
+  (cond
+    [explicit explicit]
+    [else
+     (define race (report-our-race-short r))
+     (define rprefix (if (member race CANONICAL-RACES) race "?"))
+     (define exp-meta (extract-experiment-meta-from-record r))
+     (define exp-id (hash-ref exp-meta 'experiment_id "baseline"))
+     (define proxies (hash-ref r 'our_proxy_structures '()))
+     (define morphs (hash-ref r 'our_tech_morphs '()))
+     (define born (hash-ref r 'our_units_born '()))
+     (define exps (hash-ref r 'our_expansions '()))
+     (define upgs (hash-ref r 'our_upgrades '()))
+     (define findings (hash-ref r 'findings '()))
+     (define tag-bo
+       (for/or ([t (in-list (hash-ref r 'tags '()))])
+         (and (string? t)
+              (let ([m (regexp-match #px"(?i:(?:build[_-]order|bo)[=:]([A-Za-z0-9_/-]+))" t)])
+                (and m (cadr m))))))
+     (cond
+       [tag-bo (format "~a: ~a" rprefix tag-bo)]
+       [(not (string=? exp-id "baseline"))
+        (format "~a: exp/~a" rprefix exp-id)]
+       [(pair? proxies)
+        (format "~a: Proxy Rush" rprefix)]
+       [(string=? rprefix "Z")
+        (define pool-sec (report-morph-min-sec morphs "spawningpool"))
+        (define nat-sec (report-nth-expansion-sec exps 1))
+        (define third-sec (report-nth-expansion-sec exps 2))
+        (define opening
+          (cond
+            [(and pool-sec (<= pool-sec 62.0) (or (not nat-sec) (< pool-sec nat-sec))) "12/13-Pool"]
+            [(and nat-sec (or (not pool-sec) (<= nat-sec (+ pool-sec 2.0)))) "16-Hatch"]
+            [else "Hatch-Expand"]))
+        (define has-spire? (or (report-morph-min-sec morphs "spire" "greaterspire")
+                               (> (report-born-count born "Mutalisk" "Corruptor" "BroodLord") 0)))
+        (define has-lurker? (or (report-morph-min-sec morphs "lurkerden")
+                                (> (report-born-count born "LurkerMP" "Lurker") 0)))
+        (define has-hydra? (or (report-morph-min-sec morphs "hydraliskden")
+                               (> (report-born-count born "Hydralisk") 0)))
+        (define has-roach? (or (report-morph-min-sec morphs "roachwarren")
+                               (> (report-born-count born "Roach" "Ravager") 0)))
+        (define has-bane? (or (report-morph-min-sec morphs "banelingnest")
+                              (> (report-born-count born "Baneling") 0)))
+        (define has-ultra? (or (report-morph-min-sec morphs "ultraliskcavern")
+                               (> (report-born-count born "Ultralisk") 0)))
+        (define tech-core
+          (cond
+            [(and has-hydra? has-lurker?) "Hydra-Lurker"]
+            [(and has-roach? has-hydra?) "Roach-Hydra"]
+            [(and has-spire? has-bane?) "Muta-Ling-Bane"]
+            [has-spire? "Spire/Corruptor"]
+            [has-ultra? "Ultra-Hive"]
+            [has-roach? "Roach-Ravager"]
+            [has-bane? "Ling-Bane"]
+            [(and third-sec (<= third-sec 210.0)) "Fast-3Base-Macro"]
+            [(ormap (lambda (f) (string-contains? (format "~a" f) "POOL_FIRST")) findings) "Pool-First"]
+            [else "Standard-Macro"]))
+        (format "Z: ~a ~a" opening tech-core)]
+       [(string=? rprefix "T")
+        (define nat-sec (report-nth-expansion-sec exps 1))
+        (define has-bc? (or (report-morph-min-sec morphs "fusioncore")
+                            (> (report-born-count born "Battlecruiser") 0)))
+        (define has-ghost? (or (report-morph-min-sec morphs "ghostacademy")
+                               (> (report-born-count born "Ghost") 0)))
+        (define has-tank? (> (report-born-count born "SiegeTank") 0))
+        (define has-med? (> (report-born-count born "Medivac") 0))
+        (define has-vik? (> (report-born-count born "VikingFighter" "Viking") 0))
+        (define bio-cnt (report-born-count born "Marine" "Marauder"))
+        (define mech-cnt (report-born-count born "Hellion" "HellionTank" "Cyclone" "Thor" "SiegeTank"))
+        (define opening (if (and nat-sec (<= nat-sec 140.0)) "CC-Expand" "1-Base/1-1-1"))
+        (define core
+          (cond
+            [has-bc? "Sky-Terran/BC"]
+            [has-ghost? "Bio-Ghost-Lib"]
+            [(and (> mech-cnt bio-cnt) (>= mech-cnt 6)) "Mech"]
+            [(and has-tank? has-vik? has-med?) "Bio-Tank-Viking"]
+            [(and has-tank? has-med?) "Bio-Tank-Medivac"]
+            [(report-has-upgrade? upgs "stim") "Bio-Medivac"]
+            [else "Bio/Standard"]))
+        (format "T: ~a ~a" opening core)]
+       [(string=? rprefix "P")
+        (define nat-sec (report-nth-expansion-sec exps 1))
+        (define has-skytoss? (or (report-morph-min-sec morphs "fleetbeacon")
+                                 (> (report-born-count born "Carrier" "Tempest") 0)))
+        (define has-sg? (or (report-morph-min-sec morphs "stargate")
+                            (> (report-born-count born "VoidRay" "Oracle" "Phoenix") 0)))
+        (define has-disruptor? (> (report-born-count born "Disruptor") 0))
+        (define has-col? (or (report-morph-min-sec morphs "roboticsbay")
+                             (> (report-born-count born "Colossus") 0)))
+        (define has-templar? (or (report-morph-min-sec morphs "templararchive")
+                                 (> (report-born-count born "HighTemplar" "Archon") 0)))
+        (define has-robo? (or (report-morph-min-sec morphs "roboticsfacility")
+                              (> (report-born-count born "Immortal") 0)))
+        (define opening (if (and nat-sec (<= nat-sec 135.0)) "Nexus-Expand" "1-Base/Gate"))
+        (define core
+          (cond
+            [has-skytoss? "SkyToss/Tempest"]
+            [has-disruptor? "Blink-Disruptor"]
+            [has-col? "Robo-Colossus"]
+            [(and has-sg? has-templar?) "Stargate-Twilight"]
+            [has-sg? "Stargate-Air"]
+            [(and has-robo? has-templar?) "Robo-Twilight-Archon"]
+            [has-robo? "Robo-Immortal-Blink"]
+            [else "Gateway-Timing"]))
+        (format "P: ~a ~a" opening core)]
+       [else "Unknown"])]))
+
+(define (infer-opponent-strategy-category r)
+  (define explicit
+    (for/or ([k (in-list '(opponent_strategy opp_strategy))])
+      (define v (hash-ref r k #f))
+      (and (string? v)
+           (let ([t (string-trim v)])
+             (and (not (string=? t ""))
+                  (not (string-ci=? t "unknown"))
+                  t)))))
+  (cond
+    [explicit explicit]
+    [else
+     (define opp-race (normalize-race-short (hash-ref r 'opp_race "Unknown")))
+     (define oprefix (if (member opp-race CANONICAL-RACES) opp-race "?"))
+     (define proxies (hash-ref r 'opp_proxy_structures '()))
+     (define morphs (hash-ref r 'opp_tech_morphs '()))
+     (define born (hash-ref r 'opp_units_born '()))
+     (define exps (hash-ref r 'opp_expansions '()))
+     (define dur (let ([d (hash-ref r 'duration_sec 0.0)]) (if (real? d) (exact->inexact d) 0.0)))
+     (define max-ow (hash-ref r 'max_opp_workers 0))
+     (define s2 (hash-ref r 'schema2_summary (hasheq)))
+     (define committed (and (hash? s2) (hash-ref s2 'enemy_committed_branch #f)))
+     (define worker-rush?
+       (and (> dur 0.0) (<= dur 200.0) (<= max-ow 16)
+            (null? morphs) (= (hash-ref r 'max_opp_army_value 0) 0)))
+     (cond
+       [worker-rush? (format "~a: Worker Rush" oprefix)]
+       [(pair? proxies)
+        (if (and (string=? oprefix "P")
+                 (or (report-morph-min-sec morphs "forge")
+                     (ormap (lambda (p) (string-contains? (string-downcase (format "~a" p)) "cannon")) proxies)))
+            "P: Cannon Contain/Rush"
+            (format "~a: Proxy All-In" oprefix))]
+       [(string=? oprefix "T")
+        (define has-bc? (or (report-morph-min-sec morphs "fusioncore")
+                            (> (report-born-count born "Battlecruiser") 0)))
+        (define has-mech? (and (> (+ (report-born-count born "Thor" "Cyclone" "Hellion" "HellionTank")
+                                     (report-born-count born "SiegeTank"))
+                                  (+ (report-born-count born "Marine" "Marauder") 2))
+                               (>= (report-born-count born "Hellion" "Cyclone" "SiegeTank" "Thor") 4)))
+        (define has-tank? (> (report-born-count born "SiegeTank") 0))
+        (define has-mine? (> (report-born-count born "WidowMine") 0))
+        (define has-lib-ban? (> (report-born-count born "Liberator" "Banshee") 0))
+        (define has-med? (> (report-born-count born "Medivac") 0))
+        (cond
+          [has-bc? "T: FastBC / Sky-Terran"]
+          [has-mech? "T: Mech (Tank/Thor/Hellbat)"]
+          [(and has-tank? has-med?) "T: Bio-Tank-Medivac"]
+          [(and has-mine? has-med?) "T: Bio-Mine Drop"]
+          [(and has-lib-ban? (< dur 360.0)) "T: Banshee/Lib Harass"]
+          [(and (<= (length exps) 1) (> dur 150.0) (<= dur 330.0)) "T: 1-Base Timing Push"]
+          [(and (string? committed) (not (string=? committed ""))) (format "T: ~a" committed)]
+          [else "T: Bio / Standard Macro"])]
+       [(string=? oprefix "P")
+        (define has-skytoss? (or (report-morph-min-sec morphs "fleetbeacon")
+                                 (> (report-born-count born "Carrier" "Tempest" "Mothership") 0)))
+        (define has-sg? (or (report-morph-min-sec morphs "stargate")
+                            (> (report-born-count born "VoidRay" "Oracle" "Phoenix") 0)))
+        (define has-dt? (or (report-morph-min-sec morphs "darkshrine")
+                            (> (report-born-count born "DarkTemplar") 0)))
+        (define has-dis? (> (report-born-count born "Disruptor") 0))
+        (define has-col? (or (report-morph-min-sec morphs "roboticsbay")
+                             (> (report-born-count born "Colossus") 0)))
+        (define has-ht? (or (report-morph-min-sec morphs "templararchive")
+                            (> (report-born-count born "HighTemplar" "Archon") 0)))
+        (define has-adept? (>= (report-born-count born "Adept") 4))
+        (cond
+          [has-skytoss? "P: SkyToss (Carrier/Tempest)"]
+          [has-sg? "P: Stargate (VoidRay/Oracle)"]
+          [has-dt? "P: Dark Templar Timing"]
+          [has-dis? "P: Robo-Disruptor-Blink"]
+          [has-col? "P: Robo-Colossus Deathball"]
+          [has-ht? "P: Charge-Archon-Storm"]
+          [has-adept? "P: Glaive Adept Harass"]
+          [(and (<= (length exps) 1) (> dur 150.0) (<= dur 320.0)) "P: 1-Base Gateway All-In"]
+          [(and (string? committed) (not (string=? committed ""))) (format "P: ~a" committed)]
+          [else "P: Blink/Robo Macro"])]
+       [(string=? oprefix "Z")
+        (define pool-sec (report-morph-min-sec morphs "spawningpool"))
+        (define q-cnt (report-born-count born "Queen"))
+        (define has-inf? (> (report-born-count born "Infestor") 0))
+        (define has-bl? (or (report-morph-min-sec morphs "greaterspire")
+                            (> (report-born-count born "BroodLord" "Ultralisk" "Viper") 0)))
+        (define has-muta? (or (report-morph-min-sec morphs "spire")
+                              (> (report-born-count born "Mutalisk") 0)))
+        (define has-lurker? (or (report-morph-min-sec morphs "lurkerden")
+                                (> (report-born-count born "LurkerMP" "Lurker") 0)))
+        (define has-roach? (> (report-born-count born "Roach" "Ravager") 0))
+        (define has-bane? (> (report-born-count born "Baneling") 0))
+        (cond
+          [(and pool-sec (<= pool-sec 52.0)) "Z: 12-Pool Early Ling Rush"]
+          [(and (>= q-cnt 6) (or has-inf? (>= q-cnt 8))) "Z: Mass Queen + Infestor"]
+          [has-bl? "Z: Hive BroodLord/Ultra"]
+          [has-muta? "Z: Muta-Ling-Bane"]
+          [has-lurker? "Z: Hydra-Lurker"]
+          [has-roach? "Z: Roach-Ravager-Hydra"]
+          [(and (<= dur 260.0) (or (> (report-born-count born "Zergling") 8) has-bane?))
+           "Z: Early Ling-Bane Flood"]
+          [has-bane? "Z: Macro Ling-Bane"]
+          [(and (string? committed) (not (string=? committed ""))) (format "Z: ~a" committed)]
+          [else "Z: Standard Macro"])]
+       [else "Unknown"])]))
+
+(define (summarize-reports-by-category reports key-fn)
+  (define groups (make-hash))
+  (for ([r (in-list reports)]
+        #:when (hash? r))
+    (define k (key-fn r))
+    (hash-update! groups k (lambda (prev) (cons r prev)) '()))
+  (define rows
+    (sort
+     (for/list ([(k rs) (in-hash groups)])
+       (aggregate-report-bucket k k (reverse rs)))
+     (lambda (a b)
+       (define ma (hash-ref a 'matches 0))
+       (define mb (hash-ref b 'matches 0))
+       (if (= ma mb)
+           (string<? (hash-ref a 'key "") (hash-ref b 'key ""))
+           (> ma mb)))))
+  (hasheq 'total_matches (length reports)
+          'rows rows))
+
+(define (summarize-reports-by-build-order reports)
+  (summarize-reports-by-category reports infer-our-build-order-category))
+
+(define (summarize-reports-by-opponent-strategy reports)
+  (summarize-reports-by-category reports infer-opponent-strategy-category))
 
 (define (normalize-exp-id-str v)
   (cond
@@ -1662,6 +1975,44 @@
 (define (format-signed-elo n)
   (if (>= n 0) (format "+~a" n) (format "~a" n)))
 
+(define (print-category-summary-table! title col-header summary-ht)
+  (define rows (hash-ref summary-ht 'rows '()))
+  (printf "  ~a (~a group(s)):\n" title (length rows))
+  (printf "     ~a | Total W-L-T (WR%)   | Ext W-L-T (WR%)      | Net/Ext ELO | AvgPkW | AvgMaxFloat | AvgROI | Top Finding Tags\n"
+          (~a col-header #:min-width 28))
+  (printf "     ~a-+--------------------+----------------------+-------------+--------+-------------+--------+-----------------------------------------\n"
+          (make-string 28 #\-))
+  (for ([b (in-list rows)])
+    (define n-m (hash-ref b 'matches 0))
+    (define tot-col
+      (format "~a-~a-~a (~a%)"
+              (hash-ref b 'wins 0)
+              (hash-ref b 'losses 0)
+              (hash-ref b 'ties 0)
+              (hash-ref b 'win_rate_pct 0.0)))
+    (define ext-dec (+ (hash-ref b 'ext_wins 0)
+                       (hash-ref b 'ext_losses 0)
+                       (hash-ref b 'ext_ties 0)))
+    (define ext-col
+      (format "~a-~a-~a (~a%)"
+              (hash-ref b 'ext_wins 0)
+              (hash-ref b 'ext_losses 0)
+              (hash-ref b 'ext_ties 0)
+              (if (> ext-dec 0) (hash-ref b 'ext_win_rate_pct 0.0) "0.0")))
+    (define elo-col
+      (format "~a/~a"
+              (format-signed-elo (hash-ref b 'net_elo_delta 0))
+              (format-signed-elo (hash-ref b 'ext_elo_delta 0))))
+    (printf "     ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
+            (~a (hash-ref b 'key "?") #:min-width 28 #:max-width 28 #:limit-marker "..")
+            (~a tot-col #:min-width 18)
+            (~a ext-col #:min-width 20)
+            (~a elo-col #:min-width 11)
+            (~a (if (> n-m 0) (hash-ref b 'avg_peak_workers 0.0) "-") #:min-width 6)
+            (~a (if (> n-m 0) (format "~aM" (hash-ref b 'avg_max_mineral_float 0.0)) "-") #:min-width 11)
+            (~a (if (> n-m 0) (hash-ref b 'avg_combat_roi 0.0) "-") #:min-width 6)
+            (format-bucket-top-tags b))))
+
 (define (run-aiarena-forensic-analysis! #:dir [dir-in DEFAULT-CACHE-DIR]
                                         #:fetch? [fetch? #f]
                                         #:match-ids [explicit-match-ids '()]
@@ -1672,6 +2023,8 @@
                                         #:json-out [json-out #f]
                                         #:token [token DEFAULT-TOKEN]
                                         #:with-sidecar? [with-sidecar? #f]
+                                        #:by-build-order? [by-build-order? #f]
+                                        #:by-opponent-strategy? [by-opponent-strategy? #f]
                                         #:quiet? [quiet? #f])
   (define out-dir (if (path? dir-in) dir-in (string->path dir-in)))
   (make-directory* out-dir)
@@ -1789,13 +2142,19 @@
          '())))
 
   (define reports
-    (if eff-matchup-filter
-        (filter (lambda (r) (matchup-matches-filter? r eff-matchup-filter)) raw-reports)
-        raw-reports))
+    (for/list ([r (in-list raw-reports)]
+               #:when (or (not eff-matchup-filter)
+                          (matchup-matches-filter? r eff-matchup-filter)))
+      (if (hash? r)
+          (hash-set (hash-set r 'our_build_order (infer-our-build-order-category r))
+                    'opponent_strategy (infer-opponent-strategy-category r))
+          r)))
 
-  ;; Aggregate Per-Bot, Per-Race & 9-Matchup Rollups + Experiment Slices
+  ;; Aggregate Per-Bot, Per-Race & 9-Matchup Rollups + Experiment Slices + Build Order / Opponent Strategy
   (define matchup-summary (summarize-reports-by-matchup reports))
   (define experiment-summary (summarize-experiments-from-telemetry reports))
+  (define build-order-summary (summarize-reports-by-build-order reports))
+  (define opponent-strategy-summary (summarize-reports-by-opponent-strategy reports))
   (define overall-bucket (hash-ref matchup-summary 'overall))
   (define finding-freq (make-hash))
   (define by-bot (make-hash))
@@ -1825,6 +2184,8 @@
   (call-with-output-file out-json-path #:exists 'replace
     (lambda (out)
       (write-json (hasheq 'matchup_summary matchup-summary
+                          'build_order_summary build-order-summary
+                          'opponent_strategy_summary opponent-strategy-summary
                           'experiment_summary experiment-summary
                           'reports reports)
                   out)))
@@ -1935,6 +2296,10 @@
                 (hash-ref er 'mean_worker_kills 0.0)
                 (hash-ref er 'mean_supply_delta 0.0)
                 (format-signed-elo (hash-ref er 'net_elo_delta 0)))))
+    (when by-build-order?
+      (print-category-summary-table! "6. Win Rate by Build Order" "Build Order" build-order-summary))
+    (when by-opponent-strategy?
+      (print-category-summary-table! "7. Win Rate by Opponent Strategy" "Opponent Strategy" opponent-strategy-summary))
     (when (> (hash-count finding-freq) 0)
       (printf "  Top Root-Cause Finding Frequencies: ~s\n" (top-k-counts finding-freq 12)))
     (printf "[OK] Wrote ~a forensic match report(s) + matchup_summary + experiment_summary to ~a\n"
@@ -1950,6 +2315,8 @@
 (module+ main
   (define do-fetch? #f)
   (define use-sidecar? #f)
+  (define by-build-order? #f)
+  (define by-opponent-strategy? #f)
   (define match-ids-str #f)
   (define since-match-num #f)
   (define bots-filter-str #f)
@@ -1965,6 +2332,10 @@
                 (set! do-fetch? #t)]
    [("--with-sidecar") "Enrich replay forensics via Rust crates/s2protocol-sidecar (GameEvents + BalanceData)"
                        (set! use-sidecar? #t)]
+   [("--by-build-order") "Print win-rate and economy summary table grouped by inferred build order"
+                         (set! by-build-order? #t)]
+   [("--by-opponent-strategy") "Print win-rate and economy summary table grouped by inferred opponent strategy"
+                               (set! by-opponent-strategy? #t)]
    [("--match-ids") ids "Comma-separated match IDs (e.g. 5117325,5117326)"
                     (set! match-ids-str ids)]
    [("--since-match") sm "Analyze matches with numeric ID >= <ID> (e.g. 5115348)"
@@ -1990,4 +2361,6 @@
     #:matchup-filter (parse-matchup-filter matchup-filter-str)
     #:limit limit-num
     #:json-out json-out-str
-    #:with-sidecar? use-sidecar?)))
+    #:with-sidecar? use-sidecar?
+    #:by-build-order? by-build-order?
+    #:by-opponent-strategy? by-opponent-strategy?)))

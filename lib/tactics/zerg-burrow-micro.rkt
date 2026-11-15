@@ -34,6 +34,8 @@
            fast-build-enemy-xy
            fast-flvec-det-within?
            fast-flvec-xy-within?
+           fast-disruptor-nova-catchable-range
+           fast-should-commit-through-splash?
            fast-plan-avoid-siege-tank-and-lurker-splash-zones)
   (define (dyn-hash-ref h k default)
     (if (hash? h)
@@ -305,16 +307,428 @@
              (loop (fx+ i 2)))])))
 
   (define (splash-fl v default)
-    (if (real? v)
-        (let ([f (exact->inexact v)])
-          (if (rational? f) f default))
-        default))
+    (cond
+      [(flonum? v)
+       (if (and (fl> v -inf.0) (fl< v +inf.0)) v default)]
+      [(fixnum? v) (exact->inexact v)]
+      [(real? v)
+       (let ([f (exact->inexact v)])
+         (if (rational? f) f default))]
+      [else default]))
 
   (define (splash-sym v)
     (cond
       [(symbol? v) v]
       [(string? v) (string->symbol (string-downcase v))]
       [else 'unknown]))
+
+  ;; Canonicalize CamelCase / lowercase compact unit names & SC2 type IDs in O(1)
+  (define *splash-type-alias-table*
+    (hasheq
+     'siegetanksieged 'siege-tank-sieged
+     'siegetank 'siege-tank
+     'lurkermpburrowed 'lurker-mp-burrowed
+     'lurkermp 'lurker-mp
+     'lurkerburrowed 'lurker-burrowed
+     'hightemplar 'high-templar
+     'darktemplar 'dark-templar
+     'disruptorphased 'disruptor-phased
+     'disruptorphaser 'disruptor-phased
+     'disruptor-phaser 'disruptor-phased
+     'purificationnova 'purification-nova
+     'disruptornova 'purification-nova
+     'widowmine 'widow-mine
+     'widowmineburrowed 'widow-mine-burrowed
+     'broodlord 'brood-lord
+     'swarmhost 'swarm-host
+     'voidray 'void-ray
+     'helliontank 'hellion-tank))
+
+  (define (splash-unit-type-by-id u)
+    (define uid (or (hash-ref u 'unit_type #f) (hash-ref u 'unit-type 0)))
+    (cond
+      [(equal? uid 694) 'disruptor]
+      [(equal? uid 733) 'disruptor-phased]
+      [(equal? uid 33) 'siege-tank-sieged]
+      [(equal? uid 91) 'lurker-mp-burrowed]
+      [(equal? uid 4) 'colossus]
+      [(equal? uid 75) 'high-templar]
+      [else 'unknown]))
+
+  (define (splash-unit-type u)
+    (define raw (hash-ref u 'type #f))
+    (cond
+      [(symbol? raw)
+       (if (eq? raw 'unknown)
+           (splash-unit-type-by-id u)
+           (hash-ref *splash-type-alias-table* raw raw))]
+      [(string? raw)
+       (define sym (string->symbol (string-downcase raw)))
+       (if (eq? sym 'unknown)
+           (splash-unit-type-by-id u)
+           (hash-ref *splash-type-alias-table* sym sym))]
+      [else
+       (splash-unit-type-by-id u)]))
+
+  (define *splash-nova-unit-syms*
+    '(disruptor-phased disruptor-phaser purification-nova disruptor-nova nova))
+
+  ;; Base LotV speed (Faster tiles/sec) for fast O(1) speed-aware nova standoff checks
+  (define *splash-unit-speed-table*
+    (hasheq
+     'scv 3.94 'probe 3.94 'drone 3.94 'mule 3.94
+     'marine 3.15 'marauder 3.15 'reaper 5.25 'ghost 3.94
+     'hellion 5.95 'hellbat 3.15 'hellion-tank 3.15 'widow-mine 3.94
+     'cyclone 4.13 'siege-tank 3.15 'thor 2.62 'thor-ap 2.62
+     'viking-assault 3.15 'zergling 4.13 'baneling 3.50 'queen 1.31
+     'roach 3.15 'ravager 3.85 'hydralisk 3.15 'lurker 4.13 'lurker-mp 4.13
+     'infestor 3.15 'swarm-host 4.13 'ultralisk 4.13 'broodling 5.37
+     'zealot 3.15 'stalker 4.13 'sentry 3.15 'adept 3.50
+     'high-templar 2.62 'dark-templar 3.94 'archon 3.94
+     'immortal 3.15 'colossus 3.15 'disruptor 3.15))
+
+  (define (splash-unit-speed u ut)
+    (define raw-s (hash-ref u 'speed #f))
+    (cond
+      [(and (real? raw-s) (> raw-s 0.0)) (splash-fl raw-s 3.15)]
+      [else
+       (define base (hash-ref *splash-unit-speed-table* ut 3.15))
+       (define stim?
+         (and (or (eq? ut 'marine) (eq? ut 'marauder))
+              (or (hash-ref u 'stimmed? #f) (hash-ref u 'stimmed #f) (hash-ref u 'stim? #f))))
+       (define ling-spd? (and (eq? ut 'zergling)
+                              (or (hash-ref u 'metabolic-boost? #f)
+                                  (hash-ref u 'speed-upgraded? #f)
+                                  (hash-ref u 'fast? #f))))
+       (define creep? (hash-ref u 'on-creep? #f))
+       (define adj
+         (cond
+           [stim? (fl* base 1.5)]
+           [ling-spd? 6.58]
+           [else base]))
+       (if creep? (fl* adj 1.3) adj)]))
+
+  ;; LotV per-unit supply (1 zergling = 0.5 supply, 1 ravager/lurker = 3.0, etc.)
+  (define *splash-unit-supply-table*
+    (hasheq
+     'zergling 0.5 'zergling-burrowed 0.5 'baneling 0.5 'baneling-burrowed 0.5
+     'queen 2.0 'roach 2.0 'roach-burrowed 2.0 'ravager 3.0 'ravager-burrowed 3.0
+     'hydralisk 2.0 'hydralisk-burrowed 2.0 'lurker 3.0 'lurker-mp 3.0
+     'lurker-burrowed 3.0 'lurker-mp-burrowed 3.0 'infestor 2.0 'infestor-burrowed 2.0
+     'swarm-host 3.0 'swarm-host-burrowed 3.0 'mutalisk 2.0 'corruptor 2.0
+     'viper 3.0 'brood-lord 4.0 'ultralisk 6.0 'ultralisk-burrowed 6.0
+     'marine 1.0 'reaper 1.0 'marauder 2.0 'ghost 2.0
+     'hellion 2.0 'hellbat 2.0 'hellion-tank 2.0 'widow-mine 2.0 'widow-mine-burrowed 2.0
+     'siege-tank 3.0 'siege-tank-sieged 3.0 'cyclone 3.0 'thor 6.0 'thor-ap 6.0
+     'viking 2.0 'viking-fighter 2.0 'viking-assault 2.0 'medivac 2.0
+     'liberator 3.0 'liberator-ag 3.0 'raven 2.0 'banshee 3.0 'battlecruiser 6.0
+     'zealot 2.0 'stalker 2.0 'sentry 2.0 'adept 2.0
+     'high-templar 2.0 'dark-templar 2.0 'archon 4.0 'immortal 4.0
+     'colossus 6.0 'disruptor 4.0 'phoenix 2.0 'void-ray 4.0
+     'oracle 3.0 'carrier 6.0 'tempest 5.0 'mothership 6.0
+     'drone 1.0 'scv 1.0 'probe 1.0))
+
+  ;; Combat power (ehp . dps) from sc2-game-constants for fallback Lanchester estimate
+  (define *splash-unit-power-table*
+    (hasheq
+     'zergling '(35.0 . 10.0) 'baneling '(30.0 . 20.0) 'queen '(175.0 . 12.0)
+     'roach '(145.0 . 11.2) 'ravager '(120.0 . 14.0) 'hydralisk '(90.0 . 20.4)
+     'lurker '(200.0 . 20.0) 'lurker-burrowed '(200.0 . 24.0)
+     'lurker-mp '(200.0 . 20.0) 'lurker-mp-burrowed '(200.0 . 24.0)
+     'mutalisk '(120.0 . 11.9) 'corruptor '(200.0 . 14.7) 'brood-lord '(225.0 . 22.4)
+     'ultralisk '(500.0 . 57.4) 'marine '(45.0 . 9.8) 'marauder '(125.0 . 13.9)
+     'reaper '(60.0 . 10.1) 'ghost '(100.0 . 14.4) 'hellion '(90.0 . 6.5)
+     'hellbat '(135.0 . 16.8) 'hellion-tank '(135.0 . 16.8) 'cyclone '(130.0 . 22.4)
+     'siege-tank '(175.0 . 26.0) 'siege-tank-sieged '(175.0 . 30.0)
+     'thor '(400.0 . 50.0) 'viking '(135.0 . 14.0) 'viking-fighter '(135.0 . 14.0)
+     'viking-assault '(135.0 . 16.8) 'medivac '(150.0 . 0.0)
+     'liberator '(180.0 . 14.0) 'liberator-ag '(180.0 . 65.8)
+     'banshee '(140.0 . 27.0) 'battlecruiser '(550.0 . 49.8)
+     'zealot '(150.0 . 18.6) 'stalker '(160.0 . 13.4) 'sentry '(80.0 . 8.4)
+     'adept '(140.0 . 9.6) 'high-templar '(80.0 . 8.0) 'dark-templar '(120.0 . 37.2)
+     'archon '(360.0 . 25.0) 'immortal '(300.0 . 29.0)
+     'colossus '(350.0 . 34.0) 'disruptor '(200.0 . 18.0)
+     'phoenix '(180.0 . 14.0) 'void-ray '(250.0 . 22.4) 'oracle '(160.0 . 24.4)
+     'carrier '(450.0 . 37.5) 'tempest '(300.0 . 16.8)
+     'drone '(40.0 . 4.7) 'scv '(45.0 . 4.7) 'probe '(40.0 . 4.7)))
+
+  (define (splash-unit-supply u ut)
+    (define raw (hash-ref u 'supply #f))
+    (if (and (real? raw) (> raw 0.0))
+        (splash-fl raw 1.0)
+        (hash-ref *splash-unit-supply-table* ut 1.0)))
+
+  (define (splash-upgrade-present? upgrades target-syms)
+    (for/or ([up (in-list upgrades)])
+      (define sym
+        (cond
+          [(symbol? up) up]
+          [(string? up) (string->symbol (string-downcase up))]
+          [else #f]))
+      (and sym (not (not (memq sym target-syms))))))
+
+  (define *etl-upgrade-syms*
+    '(extended-thermal-lance extendedthermallance thermal-lance thermallance
+      colossus-range protoss-extended-thermal-lance))
+
+  (define *seismic-upgrade-syms*
+    '(seismic-spines seismicspines lurker-range lurkerrange zerg-seismic-spines))
+
+  (define (fast-disruptor-nova-catchable-range unit-speed-tps clumped? ready?)
+    (if (not ready?)
+        0.0
+        (let* ([spd (flmax 0.0 (splash-fl unit-speed-tps 3.15))]
+               [raw (fl+ (fl- 14.25 (fl* 1.85 spd))
+                         (if clumped? 1.0 0.0))])
+          (flmax 6.5 (flmin 13.5 raw)))))
+
+  (define (splash-disruptor-on-cooldown? e)
+    (or (fl> (splash-fl (hash-ref e 'nova-cooldown #f) 0.0) 0.0)
+        (fl> (splash-fl (hash-ref e 'cooldown-remaining #f) 0.0) 0.0)
+        (fl> (splash-fl (hash-ref e 'cooldown #f) 0.0) 0.0)
+        (fl> (splash-fl (hash-ref e 'weapon-cooldown #f) 0.0) 0.0)
+        (eq? (splash-sym (hash-ref e 'state #f)) 'on-cooldown)))
+
+  (define (splash-burrowed-lurker? e et)
+    (or (memq et '(lurker-burrowed lurker-mp-burrowed))
+        (and (memq et '(lurker lurker-mp))
+             (or (hash-ref e 'burrowed #f)
+                 (hash-ref e 'burrowed? #f)
+                 (hash-ref e 'is-burrowed? #f)))))
+
+  (define (splash-sieged-tank? e et)
+    (or (eq? et 'siege-tank-sieged)
+        (and (eq? et 'siege-tank)
+             (or (hash-ref e 'sieged #f)
+                 (hash-ref e 'sieged? #f)
+                 (hash-ref e 'is-sieged? #f)))))
+
+  ;; Compute minimal angular arc span [0, 360] around centroid (cx, cy) without wrap-around errors
+  (define (compute-points-arc-deg xs ys cx cy)
+    (define n (length xs))
+    (cond
+      [(fx< n 2) 0.0]
+      [else
+       (define angs
+         (sort
+          (let loop ([rx xs] [ry ys] [acc '()])
+            (if (null? rx)
+                acc
+                (let* ([dx (fl- (car rx) cx)]
+                       [dy (fl- (car ry) cy)]
+                       [deg (if (and (fl< (flabs dx) 1e-6) (fl< (flabs dy) 1e-6))
+                                0.0
+                                (let ([a (fl* (atan dy dx) 57.29577951308232)])
+                                  (if (fl< a 0.0) (fl+ a 360.0) a)))])
+                  (loop (cdr rx) (cdr ry) (cons deg acc)))))
+          fl<))
+       (define first-a (car angs))
+       (define-values (prev max-gap)
+         (for/fold ([p first-a] [mg 0.0])
+                   ([a (in-list (cdr angs))])
+           (define g (fl- a p))
+           (values a (if (fl> g mg) g mg))))
+       (define wrap-gap (fl- (fl+ first-a 360.0) prev))
+       (define best-gap (if (fl> wrap-gap max-gap) wrap-gap max-gap))
+       (flmax 0.0 (flmin 360.0 (fl- 360.0 best-gap)))]))
+
+  (define (fast-should-commit-through-splash? friendly-units enemy-units disp ratio has-detector? arc-deg)
+    (define timing-commit? (eq? disp 'execute-timing-attack-commit))
+    (cond
+      [(or (null? friendly-units) (null? enemy-units))
+       timing-commit?]
+      [else
+       (define need-eff? (not (real? ratio)))
+       ;; 1. Scan enemy-units FIRST so battles without splash enemies exit before scanning allies.
+       (define e-sup 0.0)
+       (define e-ehp 0.0)
+       (define e-dps 0.0)
+       (define n-tanks 0)
+       (define n-lurkers 0)
+       (define n-colossi 0)
+       (define n-disruptors 0)
+       (define n-disruptors-cd 0)
+       (define n-hts 0)
+       (define sp-x '())
+       (define sp-y '())
+       (define sp-r2 '())
+       (define sum-cx 0.0)
+       (define sum-cy 0.0)
+       (define n-sp 0)
+
+       (for ([e (in-list enemy-units)])
+         (when (hash? e)
+           (define ut (splash-unit-type e))
+           (unless (or (hash-ref *splash-commit-skip-set* ut #f)
+                       (hash-ref e 'is-building? #f)
+                       (hash-ref e 'structure? #f))
+             (define raw-hp (or (hash-ref e 'hp #f) (hash-ref e 'health #f)))
+             (define raw-sh (or (hash-ref e 'shield #f) (hash-ref e 'shields #f)))
+             (define hp+sh
+               (if (or (real? raw-hp) (real? raw-sh))
+                   (fl+ (splash-fl raw-hp 0.0) (splash-fl raw-sh 0.0))
+                   +nan.0))
+             (define alive? (if (rational? hp+sh) (fl> hp+sh 0.0) #t))
+             (when alive?
+               (set! e-sup (fl+ e-sup (splash-unit-supply e ut)))
+               (when need-eff?
+                 (define pw (hash-ref *splash-unit-power-table* ut '(80.0 . 10.0)))
+                 (set! e-ehp (fl+ e-ehp (if (rational? hp+sh) hp+sh (car pw))))
+                 (set! e-dps (fl+ e-dps (cdr pw))))
+               (define thr-r 0.0)
+               (case ut
+                 [(siege-tank-sieged)
+                  (set! n-tanks (fx+ n-tanks 1))
+                  (set! thr-r 13.5)]
+                 [(siege-tank)
+                  (when (or (hash-ref e 'sieged #f)
+                            (hash-ref e 'sieged? #f)
+                            (hash-ref e 'is-sieged? #f))
+                    (set! n-tanks (fx+ n-tanks 1))
+                    (set! thr-r 13.5))]
+                 [(lurker-burrowed lurker-mp-burrowed)
+                  (set! n-lurkers (fx+ n-lurkers 1))
+                  (set! thr-r 10.5)]
+                 [(lurker lurker-mp)
+                  (when (or (hash-ref e 'burrowed #f)
+                            (hash-ref e 'burrowed? #f)
+                            (hash-ref e 'is-burrowed? #f))
+                    (set! n-lurkers (fx+ n-lurkers 1))
+                    (set! thr-r 10.5))]
+                 [(colossus)
+                  (set! n-colossi (fx+ n-colossi 1))
+                  (set! thr-r 9.5)]
+                 [(disruptor)
+                  (set! n-disruptors (fx+ n-disruptors 1))
+                  (when (splash-disruptor-on-cooldown? e)
+                    (set! n-disruptors-cd (fx+ n-disruptors-cd 1)))
+                  (set! thr-r 12.0)]
+                 [(high-templar)
+                  (set! n-hts (fx+ n-hts 1))
+                  (set! thr-r 10.5)])
+               (when (fl> thr-r 0.0)
+                 (define ex (splash-fl (hash-ref e 'x #f) +nan.0))
+                 (define ey (splash-fl (hash-ref e 'y #f) +nan.0))
+                 (when (and (rational? ex) (rational? ey))
+                   (set! sp-x (cons ex sp-x))
+                   (set! sp-y (cons ey sp-y))
+                   (set! sp-r2 (cons (fl* thr-r thr-r) sp-r2))
+                   (set! sum-cx (fl+ sum-cx ex))
+                   (set! sum-cy (fl+ sum-cy ey))
+                   (set! n-sp (fx+ n-sp 1))))))))
+
+       (define n-splash (fx+ (fx+ n-tanks n-lurkers) (fx+ (fx+ n-colossi n-disruptors) n-hts)))
+       (cond
+         [(and (fx= n-splash 0) (not timing-commit?))
+          #f]
+         [else
+          ;; 2. Accumulate fg-x/fg-y ONLY when enemy has tanks or lurkers (and not timing-commit).
+          (define need-fg? (and (not timing-commit?) (or (fx> n-tanks 0) (fx> n-lurkers 0))))
+          (define f-sup 0.0)
+          (define f-ehp 0.0)
+          (define f-dps 0.0)
+          (define fg-x '())
+          (define fg-y '())
+          (for ([u (in-list friendly-units)])
+            (when (hash? u)
+              (define ut (splash-unit-type u))
+              (unless (or (hash-ref *splash-commit-skip-set* ut #f)
+                          (hash-ref u 'is-building? #f)
+                          (hash-ref u 'structure? #f))
+                (define raw-hp (or (hash-ref u 'hp #f) (hash-ref u 'health #f)))
+                (define raw-sh (or (hash-ref u 'shield #f) (hash-ref u 'shields #f)))
+                (define hp+sh
+                  (if (or (real? raw-hp) (real? raw-sh))
+                      (fl+ (splash-fl raw-hp 0.0) (splash-fl raw-sh 0.0))
+                      +nan.0))
+                (define alive? (if (rational? hp+sh) (fl> hp+sh 0.0) #t))
+                (when alive?
+                  (set! f-sup (fl+ f-sup (splash-unit-supply u ut)))
+                  (when need-eff?
+                    (define pw (hash-ref *splash-unit-power-table* ut '(80.0 . 10.0)))
+                    (set! f-ehp (fl+ f-ehp (if (rational? hp+sh) hp+sh (car pw))))
+                    (set! f-dps (fl+ f-dps (cdr pw))))
+                  (when need-fg?
+                    (unless (or (hash-ref *splash-flying-set* ut #f)
+                                (hash-ref *splash-worker-set* ut #f)
+                                (hash-ref u 'is-flying? #f)
+                                (hash-ref u 'flying #f)
+                                (hash-ref u 'air? #f))
+                      (define ux (splash-fl (hash-ref u 'x #f) +nan.0))
+                      (define uy (splash-fl (hash-ref u 'y #f) +nan.0))
+                      (when (and (rational? ux) (rational? uy))
+                        (set! fg-x (cons ux fg-x))
+                        (set! fg-y (cons uy fg-y)))))))))
+
+          (define sup-ratio
+            (if (fl<= f-sup 0.0)
+                0.0
+                (fl/ f-sup (flmax 0.5 e-sup))))
+          (define eff-ratio
+            (if (not need-eff?)
+                (splash-fl ratio 1.0)
+                (let ([ep (fl* e-ehp e-dps)])
+                  (if (fl> ep 0.0)
+                      (fl/ (fl* f-ehp f-dps) ep)
+                      (if (fl> f-sup 0.0) (fl* sup-ratio sup-ratio) 1.0)))))
+          (cond
+            [(fl<= f-sup 0.0) #f]
+            [timing-commit?
+             (not (and (fx> n-lurkers 0)
+                       (not has-detector?)
+                       (or (fl< sup-ratio 0.90) (fl< eff-ratio 0.90))))]
+            [(and (fx> n-disruptors 0)
+                  (fl>= (fl/ (exact->inexact n-disruptors-cd) (exact->inexact n-disruptors)) 0.50)
+                  (fl>= sup-ratio 0.90))
+             #t]
+            [(and (fx> n-colossi 0)
+                  (fl>= sup-ratio 1.20)
+                  (fl>= eff-ratio 1.50))
+             #t]
+            [(and (fx> n-hts 0)
+                  (fl>= sup-ratio 1.10)
+                  (fl>= eff-ratio 1.25))
+             #t]
+            [else
+             ;; Strictly lazy arc check (only when Tank or detected-Lurker ratio passes)
+             (define tank-arc-ok?
+               (and (fx> n-tanks 0) (fl>= sup-ratio 1.25) (fl>= eff-ratio 1.35)))
+             (define lurk-arc-ok?
+               (and (fx> n-lurkers 0) has-detector? (fl>= sup-ratio 1.35) (fl>= eff-ratio 1.25)))
+             (define arc-commit?
+               (and (or tank-arc-ok? lurk-arc-ok?)
+                    (let ([arc (cond
+                                 [(real? arc-deg) (splash-fl arc-deg 0.0)]
+                                 [(and (fx> n-sp 0) (fx>= (length fg-x) 2))
+                                  (compute-points-arc-deg fg-x fg-y
+                                                          (fl/ sum-cx (exact->inexact n-sp))
+                                                          (fl/ sum-cy (exact->inexact n-sp)))]
+                                 [else 0.0])])
+                      (or (and tank-arc-ok? (fl>= arc 35.0))
+                          (and lurk-arc-ok? (fl>= arc 45.0))))))
+             (or arc-commit?
+                 ;; Strictly lazy frac-in-splash check (only when arc failed & ratio qualifies)
+                 (and (or (and (fx> n-tanks 0) (fl>= sup-ratio 1.05))
+                          (and (fx> n-lurkers 0) has-detector? (fl>= sup-ratio 1.15)))
+                      (let ([n-fg (length fg-x)])
+                        (and (fx> n-fg 0)
+                             (fx> n-sp 0)
+                             (let loop ([uxs fg-x] [uys fg-y] [in-cnt 0])
+                               (if (null? uxs)
+                                   (fl>= (fl/ (exact->inexact in-cnt) (exact->inexact n-fg)) 0.55)
+                                   (let ([ux (car uxs)] [uy (car uys)])
+                                     (define hit?
+                                       (let sloop ([sx sp-x] [sy sp-y] [sr2 sp-r2])
+                                         (and (pair? sx)
+                                              (let ([dx (fl- ux (car sx))]
+                                                    [dy (fl- uy (car sy))])
+                                                (or (fl<= (fl+ (fl* dx dx) (fl* dy dy)) (car sr2))
+                                                    (sloop (cdr sx) (cdr sy) (cdr sr2)))))))
+                                     (loop (cdr uxs) (cdr uys) (if hit? (fx+ in-cnt 1) in-cnt)))))))))])])]))
+
+  (define (splash-syms->hasheq syms)
+    (for/hasheq ([s (in-list syms)])
+      (values s #t)))
 
   (define *splash-flying-types*
     '(overlord overseer overseer-siege-mode mutalisk corruptor brood-lord viper
@@ -348,10 +762,55 @@
   (define *splash-burrow-intent-syms*
     '(burrow burrow-down burrowing morph-lurker-burrowed))
 
-  (define (fast-plan-avoid-siege-tank-and-lurker-splash-zones ally-units enemy-units effects home-x home-y)
-    ;; 1. Collect hazard AoE zones & spine effects from effects list
+  (define *splash-nova-set*
+    (splash-syms->hasheq *splash-nova-unit-syms*))
+
+  (define *splash-flying-set*
+    (splash-syms->hasheq *splash-flying-types*))
+
+  (define *splash-noncombat-or-structure-set*
+    (splash-syms->hasheq *splash-noncombat-or-structure-types*))
+
+  (define *splash-commit-skip-set*
+    (splash-syms->hasheq
+     (append *splash-noncombat-or-structure-types*
+             *splash-nova-unit-syms*
+             '(observer overseer overseer-siege-mode overlord warp-prism warp-prism-phasing interceptor))))
+
+  (define *splash-worker-set*
+    (splash-syms->hasheq *splash-worker-types*))
+
+  (define *splash-deadzone-dive-set*
+    (splash-syms->hasheq *splash-deadzone-dive-types*))
+
+  (define *splash-hazard-ally-skip-set*
+    (splash-syms->hasheq
+     (append *splash-noncombat-or-structure-types* *splash-flying-types*)))
+
+  (define *splash-hazard-enemy-set*
+    (splash-syms->hasheq
+     (append *splash-nova-unit-syms*
+             '(disruptor colossus lurker lurker-mp lurker-burrowed lurker-mp-burrowed
+               siege-tank siege-tank-sieged high-templar))))
+
+  (define (fast-plan-avoid-siege-tank-and-lurker-splash-zones
+           ally-units enemy-units effects home-x home-y
+           [commit-through-splash? #f]
+           [enemy-upgrades '()]
+           [tactical-disposition #f]
+           [lanchester-ratio 1.0])
+    (define effective-commit?
+      (or (not (not commit-through-splash?))
+          (eq? tactical-disposition 'execute-timing-attack-commit)))
+    (define has-etl-upgrade?
+      (and (pair? enemy-upgrades) (splash-upgrade-present? enemy-upgrades *etl-upgrade-syms*)))
+    (define has-seismic-lurker?
+      (and (pair? enemy-upgrades) (splash-upgrade-present? enemy-upgrades *seismic-upgrade-syms*)))
+
+    ;; 1. Collect hazard AoE zones, spine effects & active Nova projectiles from effects list
     (define spine-effects '())
     (define aoe-effects '())
+    (define active-novas '())
     (when (pair? effects)
       (for ([eff (in-list effects)])
         (when (hash? eff)
@@ -365,7 +824,8 @@
                         (or (hash-ref eff 'kind #f)
                             (hash-ref eff 'ability #f)
                             (hash-ref eff 'name 'unknown)))))))
-          (define kind (splash-sym raw-kind))
+          (define raw-sym (splash-sym raw-kind))
+          (define kind (hash-ref *splash-type-alias-table* raw-sym raw-sym))
           (define eff-id (hash-ref eff 'effect-id 0))
           (define norm-kind
             (cond
@@ -379,6 +839,8 @@
           (define ey (splash-fl (hash-ref eff 'y #f) +nan.0))
           (when (and (rational? ex) (rational? ey))
             (cond
+              [(hash-ref *splash-nova-set* norm-kind #f)
+               (set! active-novas (cons (cons ex ey) active-novas))]
               [(memq norm-kind '(lurker-spines lurker-spine lurker-mp-spines))
                (define tx (splash-fl (or (hash-ref eff 'target-x #f) (hash-ref eff 'end-x #f)) +nan.0))
                (define ty (splash-fl (or (hash-ref eff 'target-y #f) (hash-ref eff 'end-y #f)) +nan.0))
@@ -396,97 +858,295 @@
                (define trig-r (if (real? raw-r) (fl+ eff-r 0.35) eff-r))
                (set! aoe-effects (cons (vector norm-kind ex ey eff-r trig-r) aoe-effects))])))))
 
-    ;; 2. Fast preflight scan of enemy-units for Lurkers & Siege Tanks
+    ;; 2. Fast preflight scan of enemy-units for Lurkers, Tanks, Colossi, Disruptors & Novas
     (define burrowed-lurkers '())
     (define intent-lurkers '())
     (define sieged-tanks '())
+    (define enemy-colossi '())
+    (define enemy-disruptors '())
+    (define enemy-hts '())
+    (define need-ht-pts? (and effective-commit? (pair? aoe-effects)))
     (when (pair? enemy-units)
       (for ([e (in-list enemy-units)])
         (when (hash? e)
-          (define raw-hp (or (hash-ref e 'hp #f) (hash-ref e 'health #f)))
-          (define alive? (or (not (real? raw-hp)) (fl> (splash-fl raw-hp 1.0) 0.0)))
-          (when alive?
-            (define et (splash-sym (hash-ref e 'type 'unknown)))
-            (define ex (splash-fl (hash-ref e 'x #f) +nan.0))
-            (define ey (splash-fl (hash-ref e 'y #f) +nan.0))
-            (when (and (rational? ex) (rational? ey))
-              (cond
-                [(or (memq et '(lurker-burrowed lurker-mp-burrowed))
-                     (and (memq et '(lurker lurker-mp))
-                          (or (hash-ref e 'burrowed #f) (hash-ref e 'is-burrowed? #f))))
-                 (set! burrowed-lurkers (cons (cons ex ey) burrowed-lurkers))]
-                [(and (memq et '(lurker lurker-mp))
-                      (or (hash-ref e 'burrow-intent? #f)
-                          (hash-ref e 'burrow-intent #f)
-                          (hash-ref e 'burrowing? #f)
-                          (hash-ref e 'is-burrowing? #f)
-                          (hash-ref e 'preparing-burrow? #f)
-                          (memq (splash-sym (hash-ref e 'intent #f)) *splash-burrow-intent-syms*)
-                          (memq (splash-sym (hash-ref e 'order #f)) *splash-burrow-intent-syms*)
-                          (memq (splash-sym (hash-ref e 'ability #f)) *splash-burrow-intent-syms*)
-                          (fl> (splash-fl (hash-ref e 'burrow-progress #f) 0.0) 0.0)))
-                 (set! intent-lurkers (cons (cons ex ey) intent-lurkers))]
-                [(or (eq? et 'siege-tank-sieged)
-                     (and (eq? et 'siege-tank)
-                          (or (hash-ref e 'sieged #f) (hash-ref e 'is-sieged? #f))))
-                 (set! sieged-tanks (cons (cons ex ey) sieged-tanks))]))))))
+          (define et (splash-unit-type e))
+          (when (hash-ref *splash-hazard-enemy-set* et #f)
+            (define raw-hp (or (hash-ref e 'hp #f) (hash-ref e 'health #f)))
+            (define raw-sh (or (hash-ref e 'shield #f) (hash-ref e 'shields #f)))
+            (define alive?
+              (if (or (real? raw-hp) (real? raw-sh))
+                  (fl> (fl+ (splash-fl raw-hp 0.0) (splash-fl raw-sh 0.0)) 0.0)
+                  #t))
+            (when alive?
+              (case et
+                [(disruptor)
+                 (define ex (splash-fl (hash-ref e 'x #f) +nan.0))
+                 (define ey (splash-fl (hash-ref e 'y #f) +nan.0))
+                 (when (and (rational? ex) (rational? ey))
+                   (set! enemy-disruptors
+                         (cons (vector ex ey (splash-disruptor-on-cooldown? e)) enemy-disruptors)))]
+                [(colossus)
+                 (define ex (splash-fl (hash-ref e 'x #f) +nan.0))
+                 (define ey (splash-fl (hash-ref e 'y #f) +nan.0))
+                 (when (and (rational? ex) (rational? ey))
+                   (define etl?
+                     (or has-etl-upgrade?
+                         (hash-ref e 'extended-thermal-lance #f)
+                         (hash-ref e 'has-etl? #f)
+                         (fl>= (splash-fl (hash-ref e 'range #f) 0.0) 8.5)))
+                   (set! enemy-colossi (cons (vector ex ey (if etl? 10.2 8.5)) enemy-colossi)))]
+                [(lurker-burrowed lurker-mp-burrowed)
+                 (define ex (splash-fl (hash-ref e 'x #f) +nan.0))
+                 (define ey (splash-fl (hash-ref e 'y #f) +nan.0))
+                 (when (and (rational? ex) (rational? ey))
+                   (when (or (hash-ref e 'seismic-spines #f)
+                             (hash-ref e 'seismic-spines? #f)
+                             (fl>= (splash-fl (hash-ref e 'range #f) 0.0) 9.5))
+                     (set! has-seismic-lurker? #t))
+                   (set! burrowed-lurkers (cons (cons ex ey) burrowed-lurkers)))]
+                [(lurker lurker-mp)
+                 (cond
+                   [(or (hash-ref e 'burrowed #f)
+                        (hash-ref e 'burrowed? #f)
+                        (hash-ref e 'is-burrowed? #f))
+                    (define ex (splash-fl (hash-ref e 'x #f) +nan.0))
+                    (define ey (splash-fl (hash-ref e 'y #f) +nan.0))
+                    (when (and (rational? ex) (rational? ey))
+                      (when (or (hash-ref e 'seismic-spines #f)
+                                (hash-ref e 'seismic-spines? #f)
+                                (fl>= (splash-fl (hash-ref e 'range #f) 0.0) 9.5))
+                        (set! has-seismic-lurker? #t))
+                      (set! burrowed-lurkers (cons (cons ex ey) burrowed-lurkers)))]
+                   [(or (hash-ref e 'burrow-intent? #f)
+                        (hash-ref e 'burrow-intent #f)
+                        (hash-ref e 'burrowing? #f)
+                        (hash-ref e 'is-burrowing? #f)
+                        (hash-ref e 'preparing-burrow? #f)
+                        (memq (splash-sym (hash-ref e 'intent #f)) *splash-burrow-intent-syms*)
+                        (memq (splash-sym (hash-ref e 'order #f)) *splash-burrow-intent-syms*)
+                        (memq (splash-sym (hash-ref e 'ability #f)) *splash-burrow-intent-syms*)
+                        (fl> (splash-fl (hash-ref e 'burrow-progress #f) 0.0) 0.0))
+                    (define ex (splash-fl (hash-ref e 'x #f) +nan.0))
+                    (define ey (splash-fl (hash-ref e 'y #f) +nan.0))
+                    (when (and (rational? ex) (rational? ey))
+                      (when (or (hash-ref e 'seismic-spines #f)
+                                (hash-ref e 'seismic-spines? #f)
+                                (fl>= (splash-fl (hash-ref e 'range #f) 0.0) 9.5))
+                        (set! has-seismic-lurker? #t))
+                      (set! intent-lurkers (cons (cons ex ey) intent-lurkers)))])]
+                [(siege-tank-sieged)
+                 (define ex (splash-fl (hash-ref e 'x #f) +nan.0))
+                 (define ey (splash-fl (hash-ref e 'y #f) +nan.0))
+                 (when (and (rational? ex) (rational? ey))
+                   (set! sieged-tanks (cons (cons ex ey) sieged-tanks)))]
+                [(siege-tank)
+                 (when (or (hash-ref e 'sieged #f)
+                           (hash-ref e 'sieged? #f)
+                           (hash-ref e 'is-sieged? #f))
+                   (define ex (splash-fl (hash-ref e 'x #f) +nan.0))
+                   (define ey (splash-fl (hash-ref e 'y #f) +nan.0))
+                   (when (and (rational? ex) (rational? ey))
+                     (set! sieged-tanks (cons (cons ex ey) sieged-tanks))))]
+                [(high-templar)
+                 (when need-ht-pts?
+                   (define ex (splash-fl (hash-ref e 'x #f) +nan.0))
+                   (define ey (splash-fl (hash-ref e 'y #f) +nan.0))
+                   (when (and (rational? ex) (rational? ey))
+                     (set! enemy-hts (cons (cons ex ey) enemy-hts))))]
+                [else
+                 (define ex (splash-fl (hash-ref e 'x #f) +nan.0))
+                 (define ey (splash-fl (hash-ref e 'y #f) +nan.0))
+                 (when (and (rational? ex) (rational? ey))
+                   (set! active-novas (cons (cons ex ey) active-novas)))]))))))
 
-    ;; Early exit when zero Siege Tank / Lurker / Hazard AoE threats exist
+    ;; Early exit when zero splash threats or hazard AoE effects exist
     (cond
       [(and (null? spine-effects)
             (null? aoe-effects)
+            (null? active-novas)
+            (null? enemy-disruptors)
+            (null? enemy-colossi)
             (null? burrowed-lurkers)
             (null? intent-lurkers)
             (null? sieged-tanks))
        '()]
       [else
-       ;; 3. Collect friendly ground units into compact arrays
-       (define rev-allies '())
+       ;; 3. Collect friendly ground units directly into unboxed arrays (zero tuple boxing)
+       (define need-speed? (pair? enemy-disruptors))
+       (define nmax (length ally-units))
+       (define ax (make-flvector nmax 0.0))
+       (define ay (make-flvector nmax 0.0))
+       (define aspd (make-flvector nmax 3.15))
+       (define auid (make-vector nmax #f))
+       (define acombat (make-vector nmax #f))
+       (define adive (make-vector nmax #f))
+       (define n 0)
        (for ([u (in-list ally-units)])
          (when (hash? u)
-           (define raw-hp (or (hash-ref u 'hp #f) (hash-ref u 'health #f)))
-           (define alive? (or (not (real? raw-hp)) (fl> (splash-fl raw-hp 1.0) 0.0)))
-           (when alive?
-             (define ut (splash-sym (hash-ref u 'type 'unknown)))
-             (define air?
-               (or (hash-ref u 'is-flying? #f)
-                   (hash-ref u 'flying #f)
-                   (hash-ref u 'air? #f)
-                   (memq ut *splash-flying-types*)))
-             (define struct?
-               (or (hash-ref u 'is-building? #f)
-                   (hash-ref u 'structure? #f)
-                   (memq ut *splash-noncombat-or-structure-types*)))
-             (when (and (not air?) (not struct?))
+           (define ut (splash-unit-type u))
+           (unless (or (hash-ref *splash-hazard-ally-skip-set* ut #f)
+                       (hash-ref u 'is-flying? #f)
+                       (hash-ref u 'flying #f)
+                       (hash-ref u 'air? #f)
+                       (hash-ref u 'is-building? #f)
+                       (hash-ref u 'structure? #f))
+             (define raw-hp (or (hash-ref u 'hp #f) (hash-ref u 'health #f)))
+             (define alive? (or (not (real? raw-hp)) (fl> (splash-fl raw-hp 1.0) 0.0)))
+             (when alive?
                (define uid (or (hash-ref u 'unit-id #f)
                                (hash-ref u 'id #f)
                                (hash-ref u 'tag #f)))
-               (define ux (splash-fl (hash-ref u 'x #f) +nan.0))
-               (define uy (splash-fl (hash-ref u 'y #f) +nan.0))
-               (when (and uid (rational? ux) (rational? uy))
-                 (define combat? (not (memq ut *splash-worker-types*)))
-                 (define dive? (not (not (memq ut *splash-deadzone-dive-types*))))
-                 (set! rev-allies (cons (vector uid ux uy combat? dive?) rev-allies)))))))
+               (when uid
+                 (define ux (splash-fl (hash-ref u 'x #f) +nan.0))
+                 (define uy (splash-fl (hash-ref u 'y #f) +nan.0))
+                 (when (and (rational? ux) (rational? uy))
+                   (vector-set! auid n uid)
+                   (flvector-set! ax n ux)
+                   (flvector-set! ay n uy)
+                   (vector-set! acombat n (not (hash-ref *splash-worker-set* ut #f)))
+                   (vector-set! adive n (not (not (hash-ref *splash-deadzone-dive-set* ut #f))))
+                   (when need-speed?
+                     (flvector-set! aspd n (splash-unit-speed u ut)))
+                   (set! n (fx+ n 1))))))))
 
-       (define n (length rev-allies))
        (cond
          [(fx= n 0) '()]
          [else
-          (define ax (make-flvector n 0.0))
-          (define ay (make-flvector n 0.0))
-          (define auid (make-vector n #f))
-          (define acombat (make-vector n #f))
-          (define adive (make-vector n #f))
           (define acmd (make-vector n #f))
-          (let fill ([xs (reverse rev-allies)] [i 0])
-            (unless (null? xs)
-              (define item (car xs))
-              (vector-set! auid i (vector-ref item 0))
-              (flvector-set! ax i (vector-ref item 1))
-              (flvector-set! ay i (vector-ref item 2))
-              (vector-set! acombat i (vector-ref item 3))
-              (vector-set! adive i (vector-ref item 4))
-              (fill (cdr xs) (fx+ i 1))))
+
+          ;; Priority 0: Active Purification Nova (`<= 6.5` tiles, front/targeted clump flare >= 3.0 spacing)
+          (when (pair? active-novas)
+            (define nnv (length active-novas))
+            (define nxv (make-flvector nnv 0.0))
+            (define nyv (make-flvector nnv 0.0))
+            (let fill-nv ([xs active-novas] [k 0])
+              (unless (null? xs)
+                (flvector-set! nxv k (caar xs))
+                (flvector-set! nyv k (cdar xs))
+                (fill-nv (cdr xs) (fx+ k 1))))
+            (define cand-idx '())
+            (define ctxv (make-flvector n 0.0))
+            (define ctyv (make-flvector n 0.0))
+            (define cnxv (make-flvector n 0.0))
+            (define cnyv (make-flvector n 0.0))
+            (let uloop ([i 0])
+              (when (fx< i n)
+                (define ux (flvector-ref ax i))
+                (define uy (flvector-ref ay i))
+                (define best-d2 42.25) ; 6.5^2
+                (define best-k -1)
+                (let kloop ([k 0])
+                  (when (fx< k nnv)
+                    (define dx (flabs (fl- ux (flvector-ref nxv k))))
+                    (when (fl<= dx 6.5)
+                      (define dy (flabs (fl- uy (flvector-ref nyv k))))
+                      (when (fl<= dy 6.5)
+                        (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
+                        (when (and (fl<= d2 42.25)
+                                   (or (fx= best-k -1) (fl< d2 best-d2)))
+                          (set! best-d2 d2)
+                          (set! best-k k))))
+                    (kloop (fx+ k 1))))
+                (unless (fx= best-k -1)
+                  (define nx (flvector-ref nxv best-k))
+                  (define ny (flvector-ref nyv best-k))
+                  (define d (flsqrt best-d2))
+                  (define-values (rx ry)
+                    (if (fl> d 0.05)
+                        (values (fl/ (fl- ux nx) d) (fl/ (fl- uy ny) d))
+                        (let* ([hx (fl- home-x ux)]
+                               [hy (fl- home-y uy)]
+                               [hd (flsqrt (fl+ (fl* hx hx) (fl* hy hy)))])
+                          (if (fl> hd 0.05)
+                              (values (fl/ hx hd) (fl/ hy hd))
+                              (values 1.0 0.0)))))
+                  (define px (fl- ry))
+                  (define py rx)
+                  (define sep-x 0.0)
+                  (define sep-y 0.0)
+                  (let jloop ([j 0])
+                    (when (fx< j n)
+                      (unless (fx= i j)
+                        (define dx (fl- ux (flvector-ref ax j)))
+                        (when (fl<= (flabs dx) 3.2)
+                          (define dy (fl- uy (flvector-ref ay j)))
+                          (when (fl<= (flabs dy) 3.2)
+                            (define nd2 (fl+ (fl* dx dx) (fl* dy dy)))
+                            (when (fl<= nd2 10.24)
+                              (if (fl> nd2 0.0001)
+                                  (let* ([nd (flsqrt nd2)]
+                                         [w (fl/ 1.0 (flmax 0.3 nd))])
+                                    (set! sep-x (fl+ sep-x (fl* w (fl/ dx nd))))
+                                    (set! sep-y (fl+ sep-y (fl* w (fl/ dy nd)))))
+                                  (let ([s (if (fx< i j) -1.0 1.0)])
+                                    (set! sep-x (fl+ sep-x (fl* s px)))
+                                    (set! sep-y (fl+ sep-y (fl* s py)))))))))
+                      (jloop (fx+ j 1))))
+                  (define smag (flsqrt (fl+ (fl* sep-x sep-x) (fl* sep-y sep-y))))
+                  (define-values (sux suy)
+                    (if (fl> smag 0.01)
+                        (values (fl/ sep-x smag) (fl/ sep-y smag))
+                        (let ([s (if (fx= (remainder i 2) 0) 1.0 -1.0)])
+                          (values (fl* s px) (fl* s py)))))
+                  (define pdot (fl+ (fl* sux px) (fl* suy py)))
+                  (define p-sign
+                    (cond
+                      [(fl> pdot 0.05) 1.0]
+                      [(fl< pdot -0.05) -1.0]
+                      [(fx= (remainder i 2) 0) 1.0]
+                      [else -1.0]))
+                  (define bx (fl+ (fl+ (fl* 0.55 rx) (fl* 0.65 (fl* p-sign px))) (fl* 0.45 sux)))
+                  (define by (fl+ (fl+ (fl* 0.55 ry) (fl* 0.65 (fl* p-sign py))) (fl* 0.45 suy)))
+                  (define bmag (flsqrt (fl+ (fl* bx bx) (fl* by by))))
+                  (define-values (mx my)
+                    (if (fl> bmag 0.01)
+                        (values (fl/ bx bmag) (fl/ by bmag))
+                        (values rx ry)))
+                  (define step (flmax 3.4 (flmin 4.8 (fl- 7.0 d))))
+                  (flvector-set! ctxv i (fl+ ux (fl* step mx)))
+                  (flvector-set! ctyv i (fl+ uy (fl* step my)))
+                  (flvector-set! cnxv i nx)
+                  (flvector-set! cnyv i ny)
+                  (set! cand-idx (cons i cand-idx)))
+                (uloop (fx+ i 1))))
+            ;; Target-spacing relaxation pass so clumped units achieve >= 3.0 tile spacing
+            (define rev-cands (reverse cand-idx))
+            (let relax ([xs rev-cands])
+              (unless (null? xs)
+                (define i (car xs))
+                (define txi (flvector-ref ctxv i))
+                (define tyi (flvector-ref ctyv i))
+                (let ploop ([ys rev-cands])
+                  (unless (null? ys)
+                    (define j (car ys))
+                    (when (fx< j i)
+                      (define dx (fl- txi (flvector-ref ctxv j)))
+                      (define dy (fl- tyi (flvector-ref ctyv j)))
+                      (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
+                      (when (fl< d2 9.3025) ; 3.05^2
+                        (define d (flsqrt d2))
+                        (define nx (flvector-ref cnxv i))
+                        (define ny (flvector-ref cnyv i))
+                        (define rx (fl- txi nx))
+                        (define ry (fl- tyi ny))
+                        (define rmag (flmax 0.1 (flsqrt (fl+ (fl* rx rx) (fl* ry ry)))))
+                        (define-values (ux-p uy-p)
+                          (if (fl> d 0.05)
+                              (values (fl/ dx d) (fl/ dy d))
+                              (let ([s (if (fx= (remainder i 2) 0) 1.0 -1.0)])
+                                (values (fl* s (fl- (fl/ ry rmag))) (fl* s (fl/ rx rmag))))))
+                        (define push (fl+ (fl- 3.1 d) 0.15))
+                        (set! txi (fl+ txi (fl* push ux-p)))
+                        (set! tyi (fl+ tyi (fl* push uy-p)))))
+                    (ploop (cdr ys))))
+                (vector-set! acmd i
+                  (hasheq 'action 'move
+                          'unit-id (vector-ref auid i)
+                          'role 'dodge-active-disruptor-nova
+                          'reason 'flare-away-from-active-disruptor-nova
+                          'target-x txi
+                          'target-y tyi))
+                (relax (cdr xs)))))
 
           ;; Helper: nearest friendly ground unit (prefer combat) within range
           (define (find-nearest-spine-target lx ly max-r)
@@ -532,11 +1192,12 @@
                       (values (fl/ hx hd) (fl/ hy hd))
                       (values 1.0 0.0)))))
 
+          (define lurker-scan-r (if (and has-seismic-lurker? (not effective-commit?)) 11.5 10.0))
           (for ([lp (in-list burrowed-lurkers)])
             (define lx (car lp))
             (define ly (cdr lp))
             (set! lurker-pts (cons lp lurker-pts))
-            (define ti (find-nearest-spine-target lx ly 10.0))
+            (define ti (find-nearest-spine-target lx ly lurker-scan-r))
             (when (not (fx= ti -1))
               (define-values (vx vy) (unit-dir-to lx ly (flvector-ref ax ti) (flvector-ref ay ti)))
               (add-lurker-seg! lx ly vx vy)))
@@ -567,7 +1228,7 @@
                (define d (flsqrt (fl+ (fl* dx dx) (fl* dy dy))))
                (add-lurker-seg! lx ly (fl/ dx d) (fl/ dy d))]
               [else
-               (define ti (find-nearest-spine-target lx ly 10.0))
+               (define ti (find-nearest-spine-target lx ly lurker-scan-r))
                (when (not (fx= ti -1))
                  (define-values (vx vy) (unit-dir-to lx ly (flvector-ref ax ti) (flvector-ref ay ti)))
                  (add-lurker-seg! lx ly vx vy))]))
@@ -684,7 +1345,10 @@
                     (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
                     (when (fl< d2 min-ld2) (set! min-ld2 d2))
                     (lloop (fx+ k 1))))
-                (set! sc (fl+ sc (fl* 20.0 (flsqrt min-ld2)))))
+                ;; Run-through commit flips +20.0*d -> -14.0*d so off-ray steps advance diagonally forward
+                (if effective-commit?
+                    (set! sc (fl- sc (fl* 14.0 (flsqrt min-ld2))))
+                    (set! sc (fl+ sc (fl* 20.0 (flsqrt min-ld2))))))
               (when (fx> ne 0)
                 (define min-ed2 225.0)
                 (let eloop ([k 0])
@@ -696,12 +1360,16 @@
                         (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
                         (when (fl< d2 min-ed2) (set! min-ed2 d2))))
                     (eloop (fx+ k 1))))
-                (set! sc (fl+ sc (fl* 8.0 (flsqrt min-ed2)))))
+                (if effective-commit?
+                    (set! sc (fl- sc (fl* 4.0 (flsqrt min-ed2))))
+                    (set! sc (fl+ sc (fl* 8.0 (flsqrt min-ed2))))))
               (when (fl> perp-dot 0.05)
                 (set! sc (fl+ sc 2.0)))
-              (define hdx (fl- px home-x))
-              (define hdy (fl- py home-y))
-              (fl- sc (fl* 0.05 (flsqrt (fl+ (fl* hdx hdx) (fl* hdy hdy))))))
+              (if effective-commit?
+                  sc
+                  (let ([hdx (fl- px home-x)]
+                        [hdy (fl- py home-y)])
+                    (fl- sc (fl* 0.05 (flsqrt (fl+ (fl* hdx hdx) (fl* hdy hdy))))))))
 
             (define direct-hit (make-vector n #f))
             (define best-seg-idx (make-vector n -1))
@@ -760,7 +1428,7 @@
             (let eloop ([i 0])
               (when (fx< i n)
                 (define si (vector-ref best-seg-idx i))
-                (unless (fx= si -1)
+                (when (and (not (fx= si -1)) (not (vector-ref acmd i)))
                   (define ux (flvector-ref ax i))
                   (define uy (flvector-ref ay i))
                   (define vx (flvector-ref svxv si))
@@ -771,24 +1439,79 @@
                   (define n2y (fl- vx))
                   (define perp (fl+ (fl* (fl- ux (flvector-ref slxv si)) (fl- vy))
                                     (fl* (fl- uy (flvector-ref slyv si)) vx)))
-                  (define p1x (fl+ ux (fl* 2.5 n1x)))
-                  (define p1y (fl+ uy (fl* 2.5 n1y)))
-                  (define p2x (fl+ ux (fl* 2.5 n2x)))
-                  (define p2y (fl+ uy (fl* 2.5 n2y)))
-                  (define s1 (score-lurker-step p1x p1y perp))
-                  (define s2 (score-lurker-step p2x p2y (fl- perp)))
-                  (define use1? (fl>= s1 s2))
-                  (vector-set! acmd i
-                    (hasheq 'action 'move
-                            'unit-id (vector-ref auid i)
-                            'role 'avoid-lurker-linear-spine-splash
-                            'reason 'step-perpendicular-out-of-lurker-spines
-                            'target-x (if use1? p1x p2x)
-                            'target-y (if use1? p1y p2y))))
+                  (cond
+                    [effective-commit?
+                     ;; Forward-diagonal step off the 0.5-1.5t spine corridor toward the Lurker
+                     (define-values (fx fy) (unit-dir-to ux uy (flvector-ref slxv si) (flvector-ref slyv si)))
+                     (define f1x (fl+ (fl* 0.65 fx) (fl* 0.76 n1x)))
+                     (define f1y (fl+ (fl* 0.65 fy) (fl* 0.76 n1y)))
+                     (define f1m (flmax 0.01 (flsqrt (fl+ (fl* f1x f1x) (fl* f1y f1y)))))
+                     (define f2x (fl+ (fl* 0.65 fx) (fl* 0.76 n2x)))
+                     (define f2y (fl+ (fl* 0.65 fy) (fl* 0.76 n2y)))
+                     (define f2m (flmax 0.01 (flsqrt (fl+ (fl* f2x f2x) (fl* f2y f2y)))))
+                     (define p1x (fl+ ux (fl* 2.4 (fl/ f1x f1m))))
+                     (define p1y (fl+ uy (fl* 2.4 (fl/ f1y f1m))))
+                     (define p2x (fl+ ux (fl* 2.4 (fl/ f2x f2m))))
+                     (define p2y (fl+ uy (fl* 2.4 (fl/ f2y f2m))))
+                     (define p3x (fl+ ux (fl* 2.5 n1x)))
+                     (define p3y (fl+ uy (fl* 2.5 n1y)))
+                     (define p4x (fl+ ux (fl* 2.5 n2x)))
+                     (define p4y (fl+ uy (fl* 2.5 n2y)))
+                     (define s1 (score-lurker-step p1x p1y perp))
+                     (define s2 (score-lurker-step p2x p2y (fl- perp)))
+                     (define s3 (score-lurker-step p3x p3y perp))
+                     (define s4 (score-lurker-step p4x p4y (fl- perp)))
+                     (define-values (best-x best-y _)
+                       (let ([bx p1x] [by p1y] [bs s1])
+                         (when (fl> s2 bs) (set! bx p2x) (set! by p2y) (set! bs s2))
+                         (when (fl> s3 bs) (set! bx p3x) (set! by p3y) (set! bs s3))
+                         (when (fl> s4 bs) (set! bx p4x) (set! by p4y) (set! bs s4))
+                         (values bx by bs)))
+                     (vector-set! acmd i
+                       (hasheq 'action 'move
+                               'unit-id (vector-ref auid i)
+                               'role 'commit-run-through-splash-concave
+                               'reason 'diagonal-forward-step-off-lurker-spines
+                               'target-x best-x
+                               'target-y best-y))]
+                    [else
+                     (define p1x (fl+ ux (fl* 2.5 n1x)))
+                     (define p1y (fl+ uy (fl* 2.5 n1y)))
+                     (define p2x (fl+ ux (fl* 2.5 n2x)))
+                     (define p2y (fl+ uy (fl* 2.5 n2y)))
+                     (define s1 (score-lurker-step p1x p1y perp))
+                     (define s2 (score-lurker-step p2x p2y (fl- perp)))
+                     (define use1? (fl>= s1 s2))
+                     (vector-set! acmd i
+                       (hasheq 'action 'move
+                               'unit-id (vector-ref auid i)
+                               'role 'avoid-lurker-linear-spine-splash
+                               'reason 'step-perpendicular-out-of-lurker-spines
+                               'target-x (if use1? p1x p2x)
+                               'target-y (if use1? p1y p2y)))]))
                 (eloop (fx+ i 1)))))
 
           ;; Priority 2: AoE Hazard Effects ('corrosive-bile, 'psionic-storm/'psi-storm, 'nuke/'nuke-persistent)
           (when (pair? aoe-effects)
+            ;; Build enemy High Templar / backline target list lazily if committing through Psi Storm
+            (define storm-forward-pts
+              (if (not effective-commit?)
+                  '()
+                  (if (pair? enemy-hts)
+                      enemy-hts
+                      (let ([pts '()])
+                        (for ([e (in-list enemy-units)])
+                          (when (hash? e)
+                            (define raw-hp (or (hash-ref e 'hp #f) (hash-ref e 'health #f)))
+                            (when (or (not (real? raw-hp)) (fl> (splash-fl raw-hp 1.0) 0.0))
+                              (define et (splash-unit-type e))
+                              (unless (or (hash-ref *splash-nova-set* et #f)
+                                          (hash-ref *splash-noncombat-or-structure-set* et #f))
+                                (define ex (splash-fl (hash-ref e 'x #f) +nan.0))
+                                (define ey (splash-fl (hash-ref e 'y #f) +nan.0))
+                                (when (and (rational? ex) (rational? ey))
+                                  (set! pts (cons (cons ex ey) pts)))))))
+                        pts))))
             (let uloop ([i 0])
               (when (fx< i n)
                 (unless (vector-ref acmd i)
@@ -827,27 +1550,317 @@
                                   (set! ry (fl+ ry (fl/ hy hd))))
                                 (set! rx (fl+ rx 1.0)))))))
                   (when hit?
-                    (define rmag (flsqrt (fl+ (fl* rx rx) (fl* ry ry))))
-                    (define-values (ux-m uy-m)
-                      (if (fl> rmag 0.01)
-                          (values (fl/ rx rmag) (fl/ ry rmag))
-                          (values 1.0 0.0)))
-                    (define step (flmin 4.5 (flmax 2.3 max-need)))
-                    (define reason-sym
-                      (cond
-                        [(eq? worst-kind 'corrosive-bile) 'evade-corrosive-bile]
-                        [(memq worst-kind '(nuke nuke-persistent)) 'evade-nuke-zone]
-                        [else 'evade-psionic-storm]))
-                    (vector-set! acmd i
-                      (hasheq 'action 'move
-                              'unit-id (vector-ref auid i)
-                              'role 'avoid-aoe-splash-effect
-                              'reason reason-sym
-                              'target-x (fl+ ux (fl* step ux-m))
-                              'target-y (fl+ uy (fl* step uy-m))))))
+                    (cond
+                      [(and effective-commit?
+                            (memq worst-kind '(psionic-storm psi-storm))
+                            (pair? storm-forward-pts))
+                       ;; Step 2.2t forward-perpendicular through 1.5r Storm onto HTs/backline
+                       (define best-pt (car storm-forward-pts))
+                       (define best-d2 1e9)
+                       (for ([pt (in-list storm-forward-pts)])
+                         (define dx (fl- (car pt) ux))
+                         (define dy (fl- (cdr pt) uy))
+                         (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
+                         (when (fl< d2 best-d2)
+                           (set! best-d2 d2)
+                           (set! best-pt pt)))
+                       (define fd (flsqrt best-d2))
+                       (define-values (fx fy)
+                         (if (fl> fd 0.05)
+                             (values (fl/ (fl- (car best-pt) ux) fd)
+                                     (fl/ (fl- (cdr best-pt) uy) fd))
+                             (values 1.0 0.0)))
+                       (define p1x (fl- fy))
+                       (define p1y fx)
+                       (define rdot (fl+ (fl* rx p1x) (fl* ry p1y)))
+                       (define psign
+                         (cond
+                           [(fl> rdot 0.05) 1.0]
+                           [(fl< rdot -0.05) -1.0]
+                           [(fx= (remainder i 2) 0) 1.0]
+                           [else -1.0]))
+                       (define bx (fl+ (fl* 0.80 fx) (fl* 0.55 (fl* psign p1x))))
+                       (define by (fl+ (fl* 0.80 fy) (fl* 0.55 (fl* psign p1y))))
+                       (define bmag (flmax 0.01 (flsqrt (fl+ (fl* bx bx) (fl* by by)))))
+                       (vector-set! acmd i
+                         (hasheq 'action 'move
+                                 'unit-id (vector-ref auid i)
+                                 'role 'commit-run-through-splash-concave
+                                 'reason 'push-forward-through-psi-storm
+                                 'target-x (fl+ ux (fl* 2.2 (fl/ bx bmag)))
+                                 'target-y (fl+ uy (fl* 2.2 (fl/ by bmag)))))]
+                      [else
+                       (define rmag (flsqrt (fl+ (fl* rx rx) (fl* ry ry))))
+                       (define-values (ux-m uy-m)
+                         (if (fl> rmag 0.01)
+                             (values (fl/ rx rmag) (fl/ ry rmag))
+                             (values 1.0 0.0)))
+                       (define step (flmin 4.5 (flmax 2.3 max-need)))
+                       (define reason-sym
+                         (cond
+                           [(eq? worst-kind 'corrosive-bile) 'evade-corrosive-bile]
+                           [(memq worst-kind '(nuke nuke-persistent)) 'evade-nuke-zone]
+                           [else 'evade-psionic-storm]))
+                       (vector-set! acmd i
+                         (hasheq 'action 'move
+                                 'unit-id (vector-ref auid i)
+                                 'role 'avoid-aoe-splash-effect
+                                 'reason reason-sym
+                                 'target-x (fl+ ux (fl* step ux-m))
+                                 'target-y (fl+ uy (fl* step uy-m))))])))
                 (uloop (fx+ i 1)))))
 
-          ;; Priority 3 & 4: Siege Tank Deadzone Dive + Lateral Pre-Split
+          ;; Priority 3: Ready vs Cooldown Enemy Disruptor Speed-Aware Standoff / Commit Split Dive
+          (when (pair? enemy-disruptors)
+            (define nd (length enemy-disruptors))
+            (define dxv (make-flvector nd 0.0))
+            (define dyv (make-flvector nd 0.0))
+            (define dcdv (make-vector nd #f))
+            (let fill-d ([xs enemy-disruptors] [k 0])
+              (unless (null? xs)
+                (define item (car xs))
+                (flvector-set! dxv k (vector-ref item 0))
+                (flvector-set! dyv k (vector-ref item 1))
+                (vector-set! dcdv k (vector-ref item 2))
+                (fill-d (cdr xs) (fx+ k 1))))
+            (let uloop ([i 0])
+              (when (fx< i n)
+                (unless (vector-ref acmd i)
+                  (define ux (flvector-ref ax i))
+                  (define uy (flvector-ref ay i))
+                  (define best-ri -1)
+                  (define best-rd2 1e9)
+                  (define best-ai -1)
+                  (define best-ad2 1e9)
+                  (let kloop ([k 0])
+                    (when (fx< k nd)
+                      (define dx (fl- ux (flvector-ref dxv k)))
+                      (when (fl<= (flabs dx) 15.5)
+                        (define dy (fl- uy (flvector-ref dyv k)))
+                        (when (fl<= (flabs dy) 15.5)
+                          (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
+                          (when (fl<= d2 240.25) ; 15.5^2
+                            (when (or (fx= best-ai -1) (fl< d2 best-ad2))
+                              (set! best-ad2 d2)
+                              (set! best-ai k))
+                            (unless (vector-ref dcdv k)
+                              (when (or (fx= best-ri -1) (fl< d2 best-rd2))
+                                (set! best-rd2 d2)
+                                (set! best-ri k))))))
+                      (kloop (fx+ k 1))))
+                  (unless (fx= best-ai -1)
+                    (define sep-x 0.0)
+                    (define sep-y 0.0)
+                    (define nbr-cnt 0)
+                    (let jloop ([j 0])
+                      (when (fx< j n)
+                        (unless (fx= i j)
+                          (define dx (fl- ux (flvector-ref ax j)))
+                          (when (fl< (flabs dx) 2.8)
+                            (define dy (fl- uy (flvector-ref ay j)))
+                            (when (fl< (flabs dy) 2.8)
+                              (define nd2 (fl+ (fl* dx dx) (fl* dy dy)))
+                              (when (fl< nd2 7.84)
+                                (set! nbr-cnt (fx+ nbr-cnt 1))
+                                (if (fl> nd2 0.0001)
+                                    (let* ([nd (flsqrt nd2)]
+                                           [w (fl/ 1.0 (flmax 0.3 nd))])
+                                      (set! sep-x (fl+ sep-x (fl* w (fl/ dx nd))))
+                                      (set! sep-y (fl+ sep-y (fl* w (fl/ dy nd)))))
+                                    (let ([s (if (fx< i j) -1.0 1.0)])
+                                      (set! sep-x (fl+ sep-x s))))))))
+                        (jloop (fx+ j 1))))
+                    (define clumped? (fx>= nbr-cnt 1))
+                    (define catch-r (fast-disruptor-nova-catchable-range (flvector-ref aspd i) clumped? #t))
+                    (define rd (if (fx= best-ri -1) 999.0 (flsqrt best-rd2)))
+                    (define ad (flsqrt best-ad2))
+                    (cond
+                      [(and (not effective-commit?)
+                            (not (fx= best-ri -1))
+                            (fl<= rd catch-r))
+                       (define rdx (flvector-ref dxv best-ri))
+                       (define rdy (flvector-ref dyv best-ri))
+                       (define-values (rx ry)
+                         (if (fl> rd 0.05)
+                             (values (fl/ (fl- ux rdx) rd) (fl/ (fl- uy rdy) rd))
+                             (values -1.0 0.0)))
+                       (define smag (flsqrt (fl+ (fl* sep-x sep-x) (fl* sep-y sep-y))))
+                       (define-values (mx my)
+                         (if (and clumped? (fl> smag 0.01))
+                             (let* ([sux (fl/ sep-x smag)]
+                                    [suy (fl/ sep-y smag)]
+                                    [bx (fl+ (fl* 0.72 rx) (fl* 0.45 sux))]
+                                    [by (fl+ (fl* 0.72 ry) (fl* 0.45 suy))]
+                                    [bm (flmax 0.01 (flsqrt (fl+ (fl* bx bx) (fl* by by))))])
+                               (values (fl/ bx bm) (fl/ by bm)))
+                             (values rx ry)))
+                       (define step (flmax 2.2 (flmin 5.0 (fl- (fl+ catch-r 0.45) rd))))
+                       (vector-set! acmd i
+                         (hasheq 'action 'move
+                                 'unit-id (vector-ref auid i)
+                                 'role 'avoid-disruptor-nova-catchable-range
+                                 'reason 'standoff-outside-catchable-nova-range
+                                 'target-x (fl+ ux (fl* step mx))
+                                 'target-y (fl+ uy (fl* step my))))]
+                      [(and (fl<= ad 15.0)
+                            (or effective-commit?
+                                (and (vector-ref dcdv best-ai)
+                                     (or (fx= best-ri -1) (fl<= ad 7.5)))))
+                       (define ex (flvector-ref dxv best-ai))
+                       (define ey (flvector-ref dyv best-ai))
+                       (define-values (fx fy)
+                         (if (fl> ad 0.05)
+                             (values (fl/ (fl- ex ux) ad) (fl/ (fl- ey uy) ad))
+                             (values 1.0 0.0)))
+                       (define px (fl- fy))
+                       (define py fx)
+                       (define smag (flsqrt (fl+ (fl* sep-x sep-x) (fl* sep-y sep-y))))
+                       (define-values (sux suy)
+                         (if (fl> smag 0.01)
+                             (let* ([sx (fl/ sep-x smag)]
+                                    [sy (fl/ sep-y smag)]
+                                    ;; Project slightly off backward so units split laterally >= 2.8t while diving
+                                    [fdot (fl+ (fl* sx fx) (fl* sy fy))]
+                                    [lx (fl- sx (fl* (flmin 0.0 fdot) fx))]
+                                    [ly (fl- sy (fl* (flmin 0.0 fdot) fy))]
+                                    [lm (flsqrt (fl+ (fl* lx lx) (fl* ly ly)))])
+                               (if (fl> lm 0.05)
+                                   (values (fl/ lx lm) (fl/ ly lm))
+                                   (let ([s (if (fx= (remainder i 2) 0) 1.0 -1.0)])
+                                     (values (fl* s px) (fl* s py)))))
+                             (let ([s (if (fx= (remainder i 2) 0) 1.0 -1.0)])
+                               (values (fl* s px) (fl* s py)))))
+                       (define bx (fl+ (fl* 0.75 fx) (fl* 0.65 sux)))
+                       (define by (fl+ (fl* 0.75 fy) (fl* 0.65 suy)))
+                       (define bm (flmax 0.01 (flsqrt (fl+ (fl* bx bx) (fl* by by)))))
+                       (define step (flmax 2.2 (flmin 3.8 (fl- ad 1.5))))
+                       (vector-set! acmd i
+                         (hasheq 'action 'move
+                                 'unit-id (vector-ref auid i)
+                                 'role 'commit-run-through-disruptor-split
+                                 'reason (if (vector-ref dcdv best-ai)
+                                             'cooldown-punish-dive-split
+                                             'commit-run-through-disruptor-split)
+                                 'target-x (fl+ ux (fl* step (fl/ bx bm)))
+                                 'target-y (fl+ uy (fl* step (fl/ by bm)))))])))
+                (uloop (fx+ i 1)))))
+
+          ;; Priority 4: Enemy Colossus (`9.0` ETL / `7.0` base) Standoff vs Radial/Depth-Staggered Split Dive
+          (when (pair? enemy-colossi)
+            (define nc (length enemy-colossi))
+            (define cxv (make-flvector nc 0.0))
+            (define cyv (make-flvector nc 0.0))
+            (define crv (make-flvector nc 8.5))
+            (let fill-c ([xs enemy-colossi] [k 0])
+              (unless (null? xs)
+                (define item (car xs))
+                (flvector-set! cxv k (vector-ref item 0))
+                (flvector-set! cyv k (vector-ref item 1))
+                (flvector-set! crv k (vector-ref item 2))
+                (fill-c (cdr xs) (fx+ k 1))))
+            (let uloop ([i 0])
+              (when (fx< i n)
+                (unless (vector-ref acmd i)
+                  (define ux (flvector-ref ax i))
+                  (define uy (flvector-ref ay i))
+                  (define best-cd2 1e9)
+                  (define best-ci -1)
+                  (let cloop ([k 0])
+                    (when (fx< k nc)
+                      (define dx (fl- ux (flvector-ref cxv k)))
+                      (when (fl<= (flabs dx) 11.0)
+                        (define dy (fl- uy (flvector-ref cyv k)))
+                        (when (fl<= (flabs dy) 11.0)
+                          (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
+                          (when (and (fl<= d2 114.49) ; 10.7^2
+                                     (or (fx= best-ci -1) (fl< d2 best-cd2)))
+                            (set! best-cd2 d2)
+                            (set! best-ci k))))
+                      (cloop (fx+ k 1))))
+                  (unless (fx= best-ci -1)
+                    (define cx (flvector-ref cxv best-ci))
+                    (define cy (flvector-ref cyv best-ci))
+                    (define standoff-r (flvector-ref crv best-ci))
+                    (define d (flsqrt best-cd2))
+                    (define-values (rx ry)
+                      (if (fl> d 0.05)
+                          (values (fl/ (fl- ux cx) d) (fl/ (fl- uy cy) d))
+                          (values 1.0 0.0)))
+                    (cond
+                      [(and (not effective-commit?) (fl> d 5.5) (fl<= d standoff-r))
+                       (define step (flmax 2.0 (flmin 5.2 (fl- (fl+ standoff-r 0.4) d))))
+                       (vector-set! acmd i
+                         (hasheq 'action 'move
+                                 'unit-id (vector-ref auid i)
+                                 'role 'avoid-colossus-sweep-standoff
+                                 'reason (if (fl> standoff-r 9.0)
+                                             'standoff-outside-colossus-etl-range
+                                             'standoff-outside-colossus-base-range)
+                                 'target-x (fl+ ux (fl* step rx))
+                                 'target-y (fl+ uy (fl* step ry))))]
+                      [(and (or effective-commit? (fl<= d 5.5)) (fl<= d (fl+ standoff-r 0.4)))
+                       ;; Radial/depth-staggered split avoiding 3.0t perpendicular sweep strips + dive <= 3.5-5.0t
+                       (define px (fl- ry))
+                       (define py rx)
+                       (define sweep-lat 0.0)
+                       (define sweep-rad 0.0)
+                       (let nloop ([j 0])
+                         (when (fx< j n)
+                           (unless (fx= i j)
+                             (define dx (fl- ux (flvector-ref ax j)))
+                             (when (fl<= (flabs dx) 3.2)
+                               (define dy (fl- uy (flvector-ref ay j)))
+                               (when (fl<= (flabs dy) 3.2)
+                                 (define drad (fl+ (fl* dx rx) (fl* dy ry)))
+                                 (define dlat (fl+ (fl* dx px) (fl* dy py)))
+                                 (when (and (fl<= (flabs drad) 0.95) (fl<= (flabs dlat) 1.85))
+                                   (define lsign (cond [(fl> dlat 0.05) 1.0]
+                                                       [(fl< dlat -0.05) -1.0]
+                                                       [(fx< i j) -1.0]
+                                                       [else 1.0]))
+                                   (define rsign (cond [(fl> drad 0.05) 1.0]
+                                                       [(fl< drad -0.05) -1.0]
+                                                       [(fx= (remainder i 2) 0) -1.0]
+                                                       [else 1.0]))
+                                   (set! sweep-lat (fl+ sweep-lat lsign))
+                                   (set! sweep-rad (fl+ sweep-rad rsign))))))
+                           (nloop (fx+ j 1))))
+                       ;; Alternating radial depth tier (3.2 vs 4.6) + angular fan around Colossus
+                       (define r-target (if (fx= (remainder i 2) 0) 3.1 4.6))
+                       (define fan-sign
+                         (cond
+                           [(fl> sweep-lat 0.1) 1.0]
+                           [(fl< sweep-lat -0.1) -1.0]
+                           [else (case (remainder i 3) [(0) 0.0] [(1) 1.0] [else -1.0])]))
+                       (define depth-offset
+                         (cond
+                           [(fl> sweep-rad 0.1) 0.7]
+                           [(fl< sweep-rad -0.1) -0.7]
+                           [else 0.0]))
+                       (define r-goal (flmax 2.0 (flmin 4.9 (fl+ r-target depth-offset))))
+                       (define fx-goal (fl+ rx (fl* (fl* 0.55 fan-sign) px)))
+                       (define fy-goal (fl+ ry (fl* (fl* 0.55 fan-sign) py)))
+                       (define fmag (flmax 0.01 (flsqrt (fl+ (fl* fx-goal fx-goal) (fl* fy-goal fy-goal)))))
+                       (define gx (fl+ cx (fl* r-goal (fl/ fx-goal fmag))))
+                       (define gy (fl+ cy (fl* r-goal (fl/ fy-goal fmag))))
+                       (define mvx (fl- gx ux))
+                       (define mvy (fl- gy uy))
+                       (define mdist (flsqrt (fl+ (fl* mvx mvx) (fl* mvy mvy))))
+                       (define-values (tx ty)
+                         (if (fl<= mdist 4.2)
+                             (values gx gy)
+                             (values (fl+ ux (fl* 4.2 (fl/ mvx mdist)))
+                                     (fl+ uy (fl* 4.2 (fl/ mvy mdist))))))
+                       (vector-set! acmd i
+                         (hasheq 'action 'move
+                                 'unit-id (vector-ref auid i)
+                                 'role 'colossus-radial-split-dive
+                                 'reason 'radial-depth-stagger-and-dive-inside-colossus-sweep
+                                 'target-x tx
+                                 'target-y ty))])))
+                (uloop (fx+ i 1)))))
+
+          ;; Priority 5: Siege Tank Deadzone Dive + Lateral Split (standoff) / Forward-Diagonal Push (commit)
           (when (pair? sieged-tanks)
             (define nt (length sieged-tanks))
             (define txv (make-flvector nt 0.0))
@@ -867,12 +1880,14 @@
                   (let tloop ([k 0])
                     (when (fx< k nt)
                       (define dx (fl- ux (flvector-ref txv k)))
-                      (define dy (fl- uy (flvector-ref tyv k)))
-                      (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
-                      (when (and (fl<= d2 182.25)
-                                 (or (fx= best-ti -1) (fl< d2 best-td2)))
-                        (set! best-td2 d2)
-                        (set! best-ti k))
+                      (when (fl<= (flabs dx) 13.85)
+                        (define dy (fl- uy (flvector-ref tyv k)))
+                        (when (fl<= (flabs dy) 13.85)
+                          (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
+                          (when (and (fl<= d2 190.44) ; 13.8^2
+                                     (or (fx= best-ti -1) (fl< d2 best-td2)))
+                            (set! best-td2 d2)
+                            (set! best-ti k))))
                       (tloop (fx+ k 1))))
                   (unless (fx= best-ti -1)
                     (define sx (flvector-ref txv best-ti))
@@ -889,7 +1904,55 @@
                                  'reason 'enter-siege-tank-min-range-deadzone
                                  'target-x (fl+ sx (fl* 1.1 rx))
                                  'target-y (fl+ sy (fl* 1.1 ry))))]
-                      [(and (fl> d 3.8) (fl<= d 13.5))
+                      [(and effective-commit? (fl> d 3.8) (fl<= d 13.8))
+                       ;; Disable pure sideways shuffle; forward-diagonal push straight into < 3.5 deadzone
+                       (define fx (fl/ (fl- sx ux) d))
+                       (define fy (fl/ (fl- sy uy) d))
+                       (define p1x (fl- fy))
+                       (define p1y fx)
+                       (define sep-x 0.0)
+                       (define sep-y 0.0)
+                       (define has-nbr? #f)
+                       (let nloop ([j 0])
+                         (when (fx< j n)
+                           (unless (fx= i j)
+                             (define dx (fl- ux (flvector-ref ax j)))
+                             (when (fl<= (flabs dx) 1.85)
+                               (define dy (fl- uy (flvector-ref ay j)))
+                               (when (fl<= (flabs dy) 1.85)
+                                 (define nd2 (fl+ (fl* dx dx) (fl* dy dy)))
+                                 (when (fl<= nd2 3.4225)
+                                   (set! has-nbr? #t)
+                                   (when (fl> nd2 0.0001)
+                                     (let* ([nd (flsqrt nd2)]
+                                            [w (fl/ 1.0 (flmax 0.25 nd))])
+                                       (set! sep-x (fl+ sep-x (fl* w (fl/ dx nd))))
+                                       (set! sep-y (fl+ sep-y (fl* w (fl/ dy nd))))))))))
+                           (nloop (fx+ j 1))))
+                       (define-values (lx ly)
+                         (if has-nbr?
+                             (let* ([pdot (fl+ (fl* sep-x p1x) (fl* sep-y p1y))]
+                                    [sign (cond
+                                            [(fl> pdot 0.05) 1.0]
+                                            [(fl< pdot -0.05) -1.0]
+                                            [(fx= (remainder i 2) 0) 1.0]
+                                            [else -1.0])])
+                               (values (fl* sign p1x) (fl* sign p1y)))
+                             (let ([sign (if (fx= (remainder i 2) 0) 1.0 -1.0)])
+                               (values (fl* 0.55 (fl* sign p1x))
+                                       (fl* 0.55 (fl* sign p1y))))))
+                       (define bx (fl+ (fl* 0.75 fx) (fl* 0.45 lx)))
+                       (define by (fl+ (fl* 0.75 fy) (fl* 0.45 ly)))
+                       (define bmag (flmax 0.01 (flsqrt (fl+ (fl* bx bx) (fl* by by)))))
+                       (define step (flmax 2.3 (flmin 3.8 (fl- d 2.2))))
+                       (vector-set! acmd i
+                         (hasheq 'action 'move
+                                 'unit-id (vector-ref auid i)
+                                 'role 'commit-run-through-splash-concave
+                                 'reason 'forward-diagonal-push-into-tank-deadzone
+                                 'target-x (fl+ ux (fl* step (fl/ bx bmag)))
+                                 'target-y (fl+ uy (fl* step (fl/ by bmag)))))]
+                      [(and (not effective-commit?) (fl> d 3.8) (fl<= d 13.5))
                        (define sep-x 0.0)
                        (define sep-y 0.0)
                        (define has-nbr? #f)
@@ -945,7 +2008,67 @@
                                    'role 'avoid-siege-tank-splash-split
                                    'reason 'pre-split-against-siege-tank-splash
                                    'target-x (fl+ ux (fl* 2.3 mx))
-                                   'target-y (fl+ uy (fl* 2.3 my)))))])))
+                                   'target-y (fl+ uy (fl* 2.3 my)))))]
+                      [(and (not effective-commit?) (fl> d 13.5) (fl<= d 13.8))
+                       (define rx (fl/ (fl- ux sx) d))
+                       (define ry (fl/ (fl- uy sy) d))
+                       (define step (flmax 1.5 (fl- 13.95 d)))
+                       (vector-set! acmd i
+                         (hasheq 'action 'move
+                                 'unit-id (vector-ref auid i)
+                                 'role 'avoid-siege-tank-standoff-edge
+                                 'reason 'hold-outside-siege-tank-13.8-range
+                                 'target-x (fl+ ux (fl* step rx))
+                                 'target-y (fl+ uy (fl* step ry))))])))
+                (uloop (fx+ i 1)))))
+
+          ;; Priority 5b: Burrowed Lurker Non-Commit Standoff Hold (>= 9.5 base / >= 11.5 Seismic)
+          (when (and (not effective-commit?) (pair? burrowed-lurkers))
+            (define nl (length burrowed-lurkers))
+            (define blxv (make-flvector nl 0.0))
+            (define blyv (make-flvector nl 0.0))
+            (let fill-bl ([xs burrowed-lurkers] [k 0])
+              (unless (null? xs)
+                (flvector-set! blxv k (caar xs))
+                (flvector-set! blyv k (cdar xs))
+                (fill-bl (cdr xs) (fx+ k 1))))
+            (define standoff-r (if has-seismic-lurker? 11.5 9.5))
+            (define standoff-r2 (fl* standoff-r standoff-r))
+            (let uloop ([i 0])
+              (when (fx< i n)
+                (unless (vector-ref acmd i)
+                  (define ux (flvector-ref ax i))
+                  (define uy (flvector-ref ay i))
+                  (define best-d2 1e9)
+                  (define best-k -1)
+                  (let kloop ([k 0])
+                    (when (fx< k nl)
+                      (define dx (fl- ux (flvector-ref blxv k)))
+                      (when (fl<= (flabs dx) standoff-r)
+                        (define dy (fl- uy (flvector-ref blyv k)))
+                        (when (fl<= (flabs dy) standoff-r)
+                          (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
+                          (when (and (fl<= d2 standoff-r2)
+                                     (or (fx= best-k -1) (fl< d2 best-d2)))
+                            (set! best-d2 d2)
+                            (set! best-k k))))
+                      (kloop (fx+ k 1))))
+                  (unless (fx= best-k -1)
+                    (define d (flsqrt best-d2))
+                    (define lx (flvector-ref blxv best-k))
+                    (define ly (flvector-ref blyv best-k))
+                    (define-values (rx ry)
+                      (if (fl> d 0.05)
+                          (values (fl/ (fl- ux lx) d) (fl/ (fl- uy ly) d))
+                          (values -1.0 0.0)))
+                    (define step (flmax 1.8 (flmin 4.8 (fl- (fl+ standoff-r 0.35) d))))
+                    (vector-set! acmd i
+                      (hasheq 'action 'move
+                              'unit-id (vector-ref auid i)
+                              'role 'avoid-lurker-standoff-range
+                              'reason 'hold-outside-lurker-standoff-range
+                              'target-x (fl+ ux (fl* step rx))
+                              'target-y (fl+ uy (fl* step ry))))))
                 (uloop (fx+ i 1)))))
 
           (let collect ([i (fx- n 1)] [acc '()])
@@ -985,8 +2108,12 @@
   [fast-build-enemy-xy (-> (Listof Any) (Listof Symbol) (Values FlVector Fixnum))]
   [fast-flvec-det-within? (-> FlVector Fixnum Flonum Flonum Flonum Boolean)]
   [fast-flvec-xy-within? (-> FlVector Fixnum Flonum Flonum Flonum Boolean)]
+  [fast-disruptor-nova-catchable-range (-> Real Boolean Boolean Flonum)]
+  [fast-should-commit-through-splash?
+   (-> (Listof Any) (Listof Any) Any (Option Real) Boolean (Option Real) Boolean)]
   [fast-plan-avoid-siege-tank-and-lurker-splash-zones
    (-> (Listof Any) (Listof Any) (Listof Any) Flonum Flonum
+       Boolean (Listof Any) Any Flonum
        (Listof (Immutable-HashTable Symbol Any)))])
 
 (provide
@@ -1004,6 +2131,8 @@
  plan-counter-burrow-response
  plan-burrowed-zergling-expansion-blocks
  plan-clear-own-expansion-block-for-build
+ disruptor-nova-catchable-range
+ should-commit-through-splash?
  plan-avoid-siege-tank-and-lurker-splash-zones)
 
 (: zerg-unit-burrowed? (-> Any Symbol Boolean))
@@ -2393,16 +3522,50 @@
                 (set! actions (cons (list 'move lid px py) actions))))]))
      (append unblock-cmds (reverse actions))]))
 
-;; Plans immediate linear spine avoidance, AoE hazard evasion, Siege Tank
-;; deadzone dives, and lateral splash pre-splits for friendly ground units.
+;; Computes speed-aware Disruptor Purification Nova catchable standoff range.
+(: disruptor-nova-catchable-range
+   (->* (Real) (Boolean #:disruptor-ready? Boolean) Flonum))
+(define (disruptor-nova-catchable-range unit-speed-tps [clumped? #f] #:disruptor-ready? [ready? #t])
+  (fast-disruptor-nova-catchable-range unit-speed-tps clumped? ready?))
+
+;; Evaluates whether friendly army should commit through enemy splash zones rather than hold standoff.
+(: should-commit-through-splash?
+   (->* ((Listof Any) (Listof Any))
+        (#:tactical-disposition Any
+         #:lanchester-ratio (Option Real)
+         #:has-detector? Boolean
+         #:concavity-deg (Option Real))
+        Boolean))
+(define (should-commit-through-splash? friendly-units enemy-units
+                                       #:tactical-disposition [disp #f]
+                                       #:lanchester-ratio [ratio #f]
+                                       #:has-detector? [has-detector? #t]
+                                       #:concavity-deg [arc-deg #f])
+  (fast-should-commit-through-splash? friendly-units enemy-units disp ratio has-detector? arc-deg))
+
+;; Plans immediate Nova flare, linear spine avoidance, AoE hazard evasion, Siege Tank
+;; deadzone dives, Colossus standoff/radial-split dive, and splash pre-splits/commit pushes.
 (: plan-avoid-siege-tank-and-lurker-splash-zones
    (->* ((Listof Any) (Listof Any))
-        (#:effects (Listof Any) #:home-x Real #:home-y Real)
+        (#:effects (Listof Any)
+         #:home-x Real
+         #:home-y Real
+         #:commit-through-splash? Boolean
+         #:enemy-upgrades (Listof Any)
+         #:tactical-disposition Any
+         #:lanchester-ratio Real)
         (Listof (Immutable-HashTable Symbol Any))))
 (define (plan-avoid-siege-tank-and-lurker-splash-zones ally-units enemy-units
                                                       #:effects [effects '()]
                                                       #:home-x [home-x 30.0]
-                                                      #:home-y [home-y 30.0])
+                                                      #:home-y [home-y 30.0]
+                                                      #:commit-through-splash? [commit-through-splash? #f]
+                                                      #:enemy-upgrades [enemy-upgrades '()]
+                                                      #:tactical-disposition [tactical-disposition #f]
+                                                      #:lanchester-ratio [lanchester-ratio 1.0])
   (define hx : Flonum (if (rational? home-x) (real->double-flonum home-x) 30.0))
   (define hy : Flonum (if (rational? home-y) (real->double-flonum home-y) 30.0))
-  (fast-plan-avoid-siege-tank-and-lurker-splash-zones ally-units enemy-units effects hx hy))
+  (define lr : Flonum (if (rational? lanchester-ratio) (real->double-flonum lanchester-ratio) 1.0))
+  (fast-plan-avoid-siege-tank-and-lurker-splash-zones
+   ally-units enemy-units effects hx hy
+   commit-through-splash? enemy-upgrades tactical-disposition lr))

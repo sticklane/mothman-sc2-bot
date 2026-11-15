@@ -33,6 +33,7 @@
          "../bots/Mothman-R.rkt"
          "../tools/sc2-replay-decompiler.rkt"
          "../lib/state-machine-verifier.rkt"
+         "../lib/sc2-unit-tester-lotv.rkt"
          "../ladder/build-aiarena-zip.rkt"
          "../lib/pro-replay-starvation-audit.rkt"
          "../lib/sc2-typed-commands.rkt"
@@ -11880,6 +11881,376 @@
               "Fortified natural + cannon-defended mineral lines on ZvP 3-base denial must emit 'contain-and-deny-third")
   (assert-eq! (bo-active-tactical-plan-primary-target-x zvp-contain) 102.0
               "ZvP third-base containment must anchor primary target at enemy third base"))
+
+;; =============================================================================
+;; 48. Pro-Replay Splash Commit, Disruptor Nova Range, 8 LotV Scenarios & #200 Guards
+;; =============================================================================
+(run-suite "48. Pro-Replay Splash Commit, Disruptor Nova Range, 8 LotV Scenarios & Live #200 Regressions"
+  (define (s48-d2 x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define (s48-find-cmd cmds uid)
+    (findf (lambda (c) (equal? (hash-ref c 'unit-id #f) uid)) cmds))
+  (define (s48-cmd-targets-uid? act uid)
+    (and (pair? act)
+         (>= (length act) 2)
+         (let ([a2 (second act)])
+           (or (equal? a2 uid)
+               (and (list? a2) (member uid a2))))))
+
+  ;; 48.1 Disruptor Nova Catchable Range, Cooldown Dive (`cooldown-dive-ok?`) & Active/Pre-Split/Commit Modes
+  (define rng-slow (disruptor-nova-catchable-range 3.15 #f))
+  (define rng-slow-clump (disruptor-nova-catchable-range 3.15 #t))
+  (define rng-fast (disruptor-nova-catchable-range 4.73 #f))
+  (define rng-off (disruptor-nova-catchable-range 3.15 #t #:disruptor-ready? #f))
+  (assert-true! (and (>= rng-slow 8.4) (< rng-slow 9.5))
+                (format "Un-stimmed 3.15 tps Disruptor catchable range must be in [8.4, 9.5), got ~a" rng-slow))
+  (assert-true! (> rng-slow-clump rng-slow)
+                "Clumped Disruptor catchable range must exceed spread range")
+  (assert-true! (= rng-fast 6.5)
+                (format "Fast 4.73 tps Disruptor catchable range must hit 6.5 floor, got ~a" rng-fast))
+  (assert-eq! rng-off 0.0
+              "disruptor-nova-catchable-range #:disruptor-ready? #f must return 0.0")
+
+  (define nova-cmds
+    (plan-avoid-siege-tank-and-lurker-splash-zones
+     (list (hasheq 'unit-id 1 'type 'roach 'x 44.5 'y 40.0 'hp 145.0)
+           (hasheq 'unit-id 2 'type 'roach 'x 44.7 'y 40.2 'hp 145.0))
+     (list (hasheq 'id 90 'type 'disruptor-phaser 'x 40.0 'y 40.0 'hp 100.0))
+     #:home-x 60.0 #:home-y 40.0))
+  (define nc1 (s48-find-cmd nova-cmds 1))
+  (define nc2 (s48-find-cmd nova-cmds 2))
+  (assert-true! (and nc1 nc2
+                     (eq? (hash-ref nc1 'role #f) 'dodge-active-disruptor-nova)
+                     (eq? (hash-ref nc2 'role #f) 'dodge-active-disruptor-nova)
+                     (>= (s48-d2 (hash-ref nc1 'target-x) (hash-ref nc1 'target-y)
+                                 (hash-ref nc2 'target-x) (hash-ref nc2 'target-y))
+                         3.0))
+                "Active Purification Nova clump must emit 'dodge-active-disruptor-nova with >= 3.0 separation")
+
+  (define dis-ready (list (hasheq 'id 9602 'type 'disruptor 'x 50.0 'y 50.0 'hp 100.0 'shields 100.0)))
+  (define dis-standoff
+    (plan-avoid-siege-tank-and-lurker-splash-zones
+     (list (hasheq 'unit-id 611 'type 'marine 'x 42.5 'y 50.0 'hp 45.0)
+           (hasheq 'unit-id 612 'type 'zergling 'metabolic-boost? #t 'x 42.5 'y 54.0 'hp 35.0))
+     dis-ready #:commit-through-splash? #f))
+  (assert-true! (and (s48-find-cmd dis-standoff 611)
+                     (eq? (hash-ref (s48-find-cmd dis-standoff 611) 'role #f) 'avoid-disruptor-nova-catchable-range)
+                     (not (s48-find-cmd dis-standoff 612)))
+                "Ready Disruptor must emit 'avoid-disruptor-nova-catchable-range for slow Marine while Speedling holds")
+
+  (define dis-commit
+    (plan-avoid-siege-tank-and-lurker-splash-zones
+     (list (hasheq 'unit-id 621 'type 'stalker 'x 41.0 'y 50.0 'hp 80.0 'shields 80.0)
+           (hasheq 'unit-id 622 'type 'stalker 'x 41.0 'y 50.5 'hp 80.0 'shields 80.0))
+     dis-ready #:commit-through-splash? #t))
+  (assert-true! (and (eq? (hash-ref (s48-find-cmd dis-commit 621) 'role #f) 'commit-run-through-disruptor-split)
+                     (< (s48-d2 (hash-ref (s48-find-cmd dis-commit 621) 'target-x)
+                                (hash-ref (s48-find-cmd dis-commit 621) 'target-y)
+                                50.0 50.0)
+                        9.0))
+                "Commit through Disruptor must emit 'commit-run-through-disruptor-split advancing forward")
+
+  (define df-f
+    (for/list ([i (in-range 6)])
+      (hasheq 'id (+ 900 i) 'type 'stalker 'x 40.0 'y (+ 48.0 (* 0.5 i)) 'hp 80.0 'shields 80.0)))
+  (define se-cd
+    (evaluate-disruptor-snipe-and-cooldowns
+     df-f
+     (list (hasheq 'id 9901 'type 'disruptor 'x 50.0 'y 50.0 'hp 100.0 'shields 100.0 'nova-cooldown 300)
+           (hasheq 'id 9902 'type 'stalker 'x 52.0 'y 50.0 'hp 80.0 'shields 80.0))
+     #:supply-ratio 1.15))
+  (assert-true! (and (= (length se-cd) 1)
+                     (disruptor-snipe-eval? (car se-cd))
+                     (eq? (disruptor-snipe-eval-state (car se-cd)) 'on-cooldown)
+                     (>= (disruptor-snipe-eval-cooldown-remaining (car se-cd)) DISRUPTOR-COOLDOWN-DIVE-MIN-FRAMES)
+                     (disruptor-snipe-eval-cooldown-dive-ok? (car se-cd)))
+                "evaluate-disruptor-snipe-and-cooldowns 11th field cooldown-dive-ok? must authorize cooldown dive")
+  (define se-cd-low
+    (evaluate-disruptor-snipe-and-cooldowns
+     df-f
+     (list (hasheq 'id 9901 'type 'disruptor 'x 50.0 'y 50.0 'hp 100.0 'shields 100.0 'nova-cooldown 300))
+     #:supply-ratio 0.65))
+  (assert-true! (not (disruptor-snipe-eval-cooldown-dive-ok? (car se-cd-low)))
+                "Supply-disadvantaged cooldown check (0.65 < 0.90) must keep cooldown-dive-ok? = #f")
+  (define cd-micro-acts
+    (step-disruptor-tactical-micro!
+     df-f
+     (list (hasheq 'id 9901 'type 'disruptor 'x 50.0 'y 50.0 'hp 100.0 'shields 100.0 'nova-cooldown 300))))
+  (assert-true! (>= (length (filter (lambda (a) (eq? (car a) 'attack-unit)) cd-micro-acts)) 6)
+                "step-disruptor-tactical-micro! must emit dive attack-unit commands on cooldown-dive-ok?")
+
+  ;; 48.2 Colossus Extended Thermal Lance (9.0t) vs Base (7.0t) Standoff & Radial Split Dive
+  (define col-e (list (hasheq 'id 9701 'type 'colossus 'x 60.0 'y 50.0 'hp 200.0 'shields 150.0)))
+  (define col-f (list (hasheq 'unit-id 701 'type 'marine 'x 50.8 'y 50.0 'hp 45.0)))
+  (assert-true! (null? (plan-avoid-siege-tank-and-lurker-splash-zones col-f col-e #:commit-through-splash? #f #:enemy-upgrades '()))
+                "Units at 9.2t outside base Colossus 8.5t standoff must hold without retreating")
+  (define col-etl-in
+    (plan-avoid-siege-tank-and-lurker-splash-zones col-f col-e #:commit-through-splash? #f #:enemy-upgrades '(extended-thermal-lance)))
+  (assert-true! (and (= (length col-etl-in) 1)
+                     (eq? (hash-ref (car col-etl-in) 'role #f) 'avoid-colossus-sweep-standoff)
+                     (>= (s48-d2 (hash-ref (car col-etl-in) 'target-x) (hash-ref (car col-etl-in) 'target-y) 60.0 50.0) 10.2))
+                "ETL Colossus at 9.2t must emit 'avoid-colossus-sweep-standoff outside 10.2t")
+  (define col-commit
+    (plan-avoid-siege-tank-and-lurker-splash-zones
+     (for/list ([i (in-range 6)]) (hasheq 'unit-id (+ 710 i) 'type 'hydralisk 'x 52.5 'y (+ 49.0 (* 0.4 i)) 'hp 90.0))
+     col-e #:commit-through-splash? #t))
+  (assert-true! (and (= (length col-commit) 6)
+                     (andmap (lambda (c)
+                               (and (eq? (hash-ref c 'role #f) 'colossus-radial-split-dive)
+                                    (<= (s48-d2 (hash-ref c 'target-x) (hash-ref c 'target-y) 60.0 50.0) 5.05)))
+                             col-commit))
+                "Colossus commit must emit 'colossus-radial-split-dive diving inside <= 5.0t")
+
+  ;; 48.3 should-commit-through-splash? & Run-Through-Splash Forward Concave (Tank, Lurker, Storm)
+  (define arc-army
+    (list (hasheq 'unit-id 100 'type 'roach 'x 36.0 'y 39.0 'hp 145.0)
+          (hasheq 'unit-id 101 'type 'roach 'x 35.0 'y 45.0 'hp 145.0)
+          (hasheq 'unit-id 102 'type 'roach 'x 35.0 'y 55.0 'hp 145.0)
+          (hasheq 'unit-id 103 'type 'roach 'x 36.0 'y 61.0 'hp 145.0)))
+  (define one-tank (list (hasheq 'id 500 'type 'siege-tank-sieged 'x 50.0 'y 50.0 'hp 175.0)))
+  (define one-lurker (list (hasheq 'id 501 'type 'lurker-burrowed 'x 20.0 'y 20.0 'hp 200.0)))
+  (assert-true! (should-commit-through-splash? arc-army one-tank #:tactical-disposition 'commit #:lanchester-ratio 1.6 #:concavity-deg 75.0)
+                "Strong concave + 'commit + 1.6x Lanchester ratio must commit through Tank splash")
+  (assert-true! (not (should-commit-through-splash? arc-army one-lurker #:tactical-disposition 'commit #:lanchester-ratio 1.6 #:has-detector? #f #:concavity-deg 75.0))
+                "Missing detector vs burrowed Lurker must veto commit through splash")
+  (assert-true! (not (should-commit-through-splash? (take arc-army 2) one-tank #:tactical-disposition 'hold #:lanchester-ratio 0.8 #:concavity-deg 20.0))
+                "Disadvantaged 'hold narrow arc must stay at standoff (#f)")
+
+  (define tank-commit-cmds
+    (plan-avoid-siege-tank-and-lurker-splash-zones
+     (list (hasheq 'unit-id 801 'type 'marine 'x 40.0 'y 50.0 'hp 45.0)
+           (hasheq 'unit-id 802 'type 'marine 'x 40.0 'y 51.0 'hp 45.0))
+     one-tank #:home-x 10.0 #:home-y 50.0 #:commit-through-splash? #t))
+  (assert-true! (and (= (length tank-commit-cmds) 2)
+                     (andmap (lambda (c)
+                               (and (eq? (hash-ref c 'role #f) 'commit-run-through-splash-concave)
+                                    (< (s48-d2 (hash-ref c 'target-x) (hash-ref c 'target-y) 50.0 50.0) 9.0)))
+                             tank-commit-cmds))
+                "Siege Tank commit must emit 'commit-run-through-splash-concave closing toward deadzone")
+
+  (define lurker-commit-cmds
+    (plan-avoid-siege-tank-and-lurker-splash-zones
+     (list (hasheq 'unit-id 811 'type 'roach 'x 27.0 'y 20.0 'hp 145.0))
+     one-lurker #:home-x 60.0 #:home-y 20.0 #:commit-through-splash? #t))
+  (assert-true! (and (= (length lurker-commit-cmds) 1)
+                     (eq? (hash-ref (car lurker-commit-cmds) 'role #f) 'commit-run-through-splash-concave)
+                     (< (hash-ref (car lurker-commit-cmds) 'target-x) 27.0)
+                     (> (abs (- (hash-ref (car lurker-commit-cmds) 'target-y) 20.0)) 1.4))
+                "Burrowed Lurker commit must step diagonally forward off spine toward Lurker")
+
+  (define storm-commit-cmds
+    (plan-avoid-siege-tank-and-lurker-splash-zones
+     (list (hasheq 'unit-id 821 'type 'roach 'x 40.0 'y 40.0 'hp 145.0))
+     (list (hasheq 'id 9821 'type 'high-templar 'x 48.0 'y 40.0 'hp 40.0 'shields 40.0))
+     #:effects (list (hasheq 'type 'psionic-storm 'x 40.0 'y 40.0 'radius 1.5))
+     #:home-x 10.0 #:home-y 40.0 #:commit-through-splash? #t))
+  (assert-true! (and (= (length storm-commit-cmds) 1)
+                     (eq? (hash-ref (car storm-commit-cmds) 'role #f) 'commit-run-through-splash-concave)
+                     (> (hash-ref (car storm-commit-cmds) 'target-x) 41.0))
+                "Psi Storm commit must push diagonally forward toward enemy HTs rather than home")
+
+  ;; 48.4 All 8 SC2 LotV Unit Tester Asymmetric Micro Scenarios (`default-ai -> enemy`, `mothman-tactics -> ally`)
+  (define all-lotv (run-all-lotv-unit-tester-scenarios))
+  (assert-true! (hash-ref all-lotv 'all_passed #f) "All 8 SC2 LotV Unit Tester asymmetric scenarios must pass")
+  (assert-eq! (hash-ref all-lotv 'total 0) 8 "LotV Unit Tester must run all 8 canonical scenarios")
+  (assert-eq! (hash-ref all-lotv 'failed 1) 0 "LotV Unit Tester must report 0 failed scenarios")
+  (for ([r (in-list (hash-ref all-lotv 'results '()))])
+    (define sid (hash-ref r 'scenario))
+    (define def-m (hash-ref r 'default_ai))
+    (define moth-m (hash-ref r 'mothman_tactics))
+    (assert-eq! (hash-ref r 'default_winner) 'enemy (format "LotV scenario ~a: default_ai must lose" sid))
+    (assert-eq! (hash-ref r 'mothman_winner) 'ally (format "LotV scenario ~a: mothman_tactics must win" sid))
+    (assert-true! (> (hash-ref moth-m 'ally_hp_pct 0.0) (hash-ref def-m 'ally_hp_pct 0.0))
+                  (format "LotV scenario ~a: Mothman surviving HP% must strictly exceed default_ai" sid)))
+
+  ;; 48.5 Key #200 Live AI Arena Regression Guards (`[REG-1]`, `[BUG-2]..[BUG-5]`)
+  ;; [REG-1a] Calm 16-Hatch Zerg must not let SpawningPool steal minerals ahead of 2nd Hatchery
+  (define rt-z16 (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define z16-acts
+    (hash-ref
+     (step-live-bot-runtime!
+      rt-z16
+      (hash 'frame 1380 'minerals 215 'gas 0 'supply-used 16 'supply-cap 22 'supply-left 6
+            'mineral-harvesters 15 'vespene-harvesters 0 'enemy-race 'Terran
+            'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+            'enemy-x 140.0 'enemy-y 140.0 'larva-count 3
+            'ally-units (append
+                         (for/list ([i (in-range 16)]) (hash 'id (+ 100 i) 'type 'drone 'x 22.0 'y 48.5 'hp 40))
+                         (list (hash 'id 201 'type 'overlord 'x 26.0 'y 48.5 'hp 200 'flying? #t)
+                               (hash 'id 202 'type 'larva 'x 24.5 'y 47.0 'hp 25)
+                               (hash 'id 203 'type 'larva 'x 24.5 'y 47.2 'hp 25)))
+            'ally-buildings (list (hash 'id 301 'type 'hatchery 'x 24.5 'y 48.5 'hp 1500 'build-progress 1.0))
+            'enemy-units '() 'enemy-buildings '()))
+     'actions '()))
+  (assert-true! (not (ormap (lambda (a)
+                              (and (pair? a) (memq (car a) '(build build-structure)) (eq? (second a) 'spawning-pool)))
+                            z16-acts))
+                "[REG-1] Calm 16-Hatch Zerg must not build SpawningPool ahead of 2nd Hatchery at 215M")
+
+  ;; [REG-1b] Blind natural 16-Hatch abort when forward proxy Barracks is detected
+  (define rt-zproxy (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define zp-acts
+    (hash-ref
+     (step-live-bot-runtime!
+      rt-zproxy
+      (hash 'frame 1600 'minerals 340 'gas 0 'supply-used 16 'supply-cap 22 'supply-left 6
+            'mineral-harvesters 15 'vespene-harvesters 0 'enemy-race 'Terran
+            'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+            'enemy-x 140.0 'enemy-y 140.0
+            'ally-units (for/list ([i (in-range 16)]) (hash 'id (+ 100 i) 'type 'drone 'x 22.0 'y 48.5 'hp 40))
+            'ally-buildings (list (hash 'id 301 'type 'hatchery 'x 24.5 'y 48.5 'hp 1500 'build-progress 1.0))
+            'enemy-units '()
+            'enemy-buildings (list (hash 'id 9901 'type 'barracks 'x 56.0 'y 55.9 'hp 1000 'build-progress 1.0 'is-proxy? #t))))
+     'actions '()))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'expand) (eq? (second a) 'hatchery))) zp-acts))
+                "[REG-1b] Zerg must abort blind natural expand when forward proxy structure is detected")
+
+  ;; [BUG-2] `(morph baneling)` preserved against Phase 6 `attack-pos` in wire translation & active morph runtime
+  (define (s48-mk-u tag ut x y #:all [all 1] #:ab [ab 0])
+    (sc2-unit 1 all tag ut (if (= all 1) 1 2) (sc2-point3d x y 8.0) 0.0 0.75 1.0 0 #f #f #f
+              35.0 35.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #t '() 0 '() 0 0 0.0 0 0 0 ab))
+  (define morph-wire-obs
+    (sc2-observation 2400 (sc2-player-common 1 200 100 40 60 10 20 0 1 0 2)
+                     (list (s48-mk-u 101 105 30.0 48.5)
+                           (s48-mk-u 201 96 22.0 48.5))
+                     '() '() #f '() '() '() '() '() '()))
+  (define morph-cmds
+    (filter sc2-raw-unit-command?
+            (translate-bot-actions->sc2-raw-commands
+             (list '(morph baneling) (list 'attack-pos '(101) 80.0 80.0))
+             morph-wire-obs)))
+  (assert-true! (and (ormap (lambda (c) (and (= (sc2-raw-unit-command-ability-id c) 80)
+                                             (member 101 (sc2-raw-unit-command-unit-tags c))))
+                            morph-cmds)
+                     (not (ormap (lambda (c) (and (= (sc2-raw-unit-command-ability-id c) 23)
+                                                  (member 101 (sc2-raw-unit-command-unit-tags c))))
+                                 morph-cmds)))
+                "[BUG-2] Wire translation must preserve morph-baneling (80) without Phase 6 attack-pos (23) overwrite")
+
+  (define rt-zmorph (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define zm-acts
+    (hash-ref
+     (step-live-bot-runtime!
+      rt-zmorph
+      (hash 'frame 3200 'minerals 200 'gas 100 'supply-used 40 'supply-cap 60 'supply-left 20
+            'mineral-harvesters 16 'vespene-harvesters 0
+            'enemy-race 'Terran 'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+            'enemy-x 140.0 'enemy-y 140.0
+            'ally-units (list (hash 'id 101 'type 'zergling 'x 36.0 'y 48.5 'hp 35 'order-ability-id 80)
+                              (hash 'id 102 'type 'zergling 'x 36.5 'y 48.5 'hp 35))
+            'ally-buildings (list (hash 'id 301 'type 'hatchery 'x 24.5 'y 48.5 'hp 1500 'build-progress 1.0)
+                                  (hash 'id 302 'type 'baneling-nest 'x 22.0 'y 46.0 'hp 850 'build-progress 1.0))
+            'enemy-units (list (hash 'id 901 'type 'marine 'x 60.0 'y 48.5 'hp 45))
+            'enemy-buildings '()))
+     'actions '()))
+  (assert-true! (not (ormap (lambda (a)
+                              (and (pair? a)
+                                   (memq (car a) '(attack-pos attack-unit))
+                                   (s48-cmd-targets-uid? a 101)))
+                            zm-acts))
+                "[BUG-2] step-live-bot-runtime! must not overwrite active morph-baneling (80) Zergling with attack-pos/attack-unit")
+
+  ;; [BUG-3 / NOTE-R4-C] TownHall-stack 12-Probe rush emits ATTACK 23 instead of HARVEST_GATHER 3666
+  (define r4c-allies
+    (for/list ([i (in-range 12)])
+      (sc2-unit 1 1 (+ 700 i) 104 1 (sc2-point3d (+ 24.0 (* 0.2 i)) 48.5 8.0)
+                0.0 0.375 1.0 1 0 1 0 40.0 40.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #f #t '() 0 '() 0 0 0.0 0 0 0 0)))
+  (define r4c-enemies
+    (for/list ([i (in-range 12)])
+      (sc2-unit 1 4 (+ 800 i) 84 2 (sc2-point3d (+ 25.0 (* 0.1 i)) 48.5 8.0)
+                0.0 0.375 1.0 1 0 1 0 20.0 20.0 20.0 20.0 0.0 0.0 0 0 #f #f #f #f #t '() 0 '() 0 0 0.0 0 0 0 0)))
+  (define r4c-th
+    (sc2-unit 1 1 890 86 1 (sc2-point3d 24.5 48.5 8.0)
+              0.0 2.5 1.0 1 0 1 0 1500.0 1500.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #f #f '() 0 '() 0 0 0.0 0 0 0 0))
+  (define r4c-patch
+    (sc2-unit 1 3 901 341 0 (sc2-point3d 17.5 48.5 8.0)
+              0.0 1.0 1.0 1 0 1 0 1500.0 1500.0 0.0 0.0 0.0 0.0 1500 0 #f #f #f #f #f '() 0 '() 0 0 0.0 0 0 0 0))
+  (define r4c-obs
+    (sc2-observation 60 (sc2-player-common 1 50 0 14 14 0 12 0 0 0 0)
+                     (cons r4c-th (cons r4c-patch (append r4c-allies r4c-enemies)))
+                     '() '() (sc2-point3d 24.5 48.5 8.0) '() '() '() '() '() '()))
+  (define r4c-cmds
+    (filter sc2-raw-unit-command?
+            (translate-bot-actions->sc2-raw-commands
+             (list (list 'worker-drill-stack-attack (for/list ([i (in-range 12)]) (+ 700 i)) 901 800 25.5 48.5))
+             r4c-obs)))
+  (assert-true! (and (pair? r4c-cmds)
+                     (andmap (lambda (c) (= (sc2-raw-unit-command-ability-id c) 23)) r4c-cmds))
+                "[BUG-3 / NOTE-R4-C] TownHall-stack 12-Probe rush must emit ATTACK 23 instead of mineral-walk 3666")
+
+  ;; [BUG-4] Protoss Tempest/VoidRay & Terran Viking/Starport scaling vs Capital Air
+  (define p-cap-brain
+    (macro-brain-decision-scheduled-ids
+     (step-priority-macro-brain
+      (make-macro-world-state
+       #:race 'Protoss #:enemy-race 'Terran #:frame 14000
+       #:minerals 900 #:gas 600 #:supply-used 90 #:supply-cap 130 #:workers 46 #:active-bases 3
+       #:army-supply 44 #:enemy-threat-supply 36 #:under-attack? #f
+       #:ready-building-counts (hash 'nexus 3 'cybernetics-core 1 'stargate 2 'fleet-beacon 1)
+       #:total-building-counts (hash 'nexus 3 'cybernetics-core 1 'stargate 2 'fleet-beacon 1)
+       #:unit-counts (hash 'probe 46 'stalker 8)
+       #:enemy-unit-counts (hash 'battlecruiser 5)
+       #:requires-anti-air? #t
+       #:open-facility-slots (hash 'gateway 2 'stargate 2 'nexus 3)))))
+  (assert-true! (and (or (memq 'tempest p-cap-brain) (memq 'void-ray p-cap-brain))
+                     (not (memq 'phoenix p-cap-brain)))
+                "[BUG-4 P] Capital Air threat must schedule Tempest/VoidRay and suppress Phoenix spam")
+
+  (define t-cap-brain
+    (macro-brain-decision-scheduled-ids
+     (step-priority-macro-brain
+      (make-macro-world-state
+       #:race 'Terran #:enemy-race 'Terran #:frame 14000
+       #:minerals 900 #:gas 600 #:supply-used 90 #:supply-cap 130 #:workers 46 #:active-bases 3
+       #:army-supply 44 #:enemy-threat-supply 36 #:under-attack? #f
+       #:ready-building-counts (hash 'command-center 3 'barracks 2 'factory 1 'starport 1)
+       #:total-building-counts (hash 'command-center 3 'barracks 2 'factory 1 'starport 1)
+       #:unit-counts (hash 'scv 46 'marine 12 'viking-fighter 2)
+       #:enemy-unit-counts (hash 'battlecruiser 5)
+       #:requires-anti-air? #t
+       #:open-facility-slots (hash 'barracks 2 'factory 1 'starport 1 'command-center 3)))))
+  (assert-true! (and (memq 'viking-fighter t-cap-brain)
+                     (memq 'starport t-cap-brain))
+                "[BUG-4 T] Capital Air threat must prioritize VikingFighter & multi-Starport scaling")
+
+  ;; [BUG-5] Terran breakout CC + Ghost Academy vs Queen+Infestor + Protoss interior Pylon placement
+  (define t-brk-brain
+    (macro-brain-decision-scheduled-ids
+     (step-priority-macro-brain
+      (make-macro-world-state
+       #:race 'Terran #:enemy-race 'Zerg #:frame 14000
+       #:minerals 2200 #:gas 500 #:supply-used 100 #:supply-cap 130 #:workers 32 #:active-bases 2
+       #:army-supply 55 #:enemy-threat-supply 20 #:under-attack? #f
+       #:ready-building-counts (hash 'command-center 2 'barracks 3 'factory 1)
+       #:total-building-counts (hash 'command-center 2 'barracks 3 'factory 1)
+       #:unit-counts (hash 'scv 32 'marine 20 'marauder 8)
+       #:enemy-unit-counts (hash 'queen 8 'infestor 2)
+       #:open-facility-slots (hash 'barracks 3 'factory 1 'command-center 2)))))
+  (assert-true! (memq 'command-center t-brk-brain)
+                "[BUG-5 T] Contained <=3 CC with >=1500M bank must schedule breakout Command Center")
+  (assert-true! (memq 'ghost-academy t-brk-brain)
+                "[BUG-5 T] >=2 bases vs Queen+Infestor swarm must schedule Ghost Academy")
+
+  (define rt-p5 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define p5-acts
+    (hash-ref
+     (step-live-bot-runtime!
+      rt-p5
+      (hash 'frame 4500 'minerals 200 'gas 50 'supply-used 45 'supply-cap 46 'supply-left 1
+            'mineral-harvesters 30 'vespene-harvesters 3 'enemy-race 'Terran
+            'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
+            'enemy-x 140.0 'enemy-y 140.0
+            'ally-units (for/list ([i (in-range 20)]) (hash 'id (+ 500 i) 'type 'probe 'x 22.0 'y 48.5 'hp 20 'shields 20))
+            'ally-buildings (list (hash 'id 601 'type 'nexus 'x 24.5 'y 48.5 'hp 1000 'shields 1000 'build-progress 1.0)
+                                  (hash 'id 602 'type 'nexus 'x 52.5 'y 48.5 'hp 1000 'shields 1000 'build-progress 1.0)
+                                  (hash 'id 603 'type 'pylon 'x 48.0 'y 50.0 'hp 200 'shields 200 'build-progress 1.0)
+                                  (hash 'id 604 'type 'pylon 'x 36.0 'y 48.5 'hp 200 'shields 200 'build-progress 1.0)
+                                  (hash 'id 605 'type 'pylon 'x 28.0 'y 46.0 'hp 200 'shields 200 'build-progress 1.0))
+            'enemy-units '() 'enemy-buildings '()))
+     'actions '()))
+  (define pylon-build (findf (lambda (a) (and (pair? a) (memq (car a) '(build build-structure)) (eq? (second a) 'pylon))) p5-acts))
+  (assert-true! (and pylon-build (<= (third pylon-build) 53.0))
+                "[BUG-5 P] Subsequent Protoss Pylons must place in safe interior rather than exposed forward wall"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

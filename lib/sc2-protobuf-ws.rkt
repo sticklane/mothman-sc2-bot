@@ -86,6 +86,11 @@
  make-request-action
  make-request-step
  make-request-query-placement
+ encode-debug-create-unit
+ encode-debug-kill-unit
+ encode-debug-test-process
+ encode-request-debug
+ make-request-debug
  make-request-save-replay
  decode-response-save-replay-bytes
  sc2-ws-save-replay!
@@ -2261,6 +2266,119 @@
                    (apply bytes-append valid-subs)
                    (if ignore-res? (encode-bool 4 #t) #""))])
         (wrap-sc2-request 14 body req-id))))
+
+;; =============================================================================
+;; `s2clientprotocol/debug.proto` RequestDebug Builders (Request.debug = field 20)
+;; =============================================================================
+
+;; Encodes DebugCommand { create_unit = 3 (DebugCreateUnit { unit_type=1, owner=2, pos=3, quantity=4 }) }.
+(define (encode-debug-create-unit unit-type owner x-or-pos [y-or-qty 1] [opt-qty 1])
+  (define unit-id
+    (if (exact-integer? unit-type)
+        unit-type
+        (unit-symbol->sc2-id unit-type 0)))
+  (define-values (px py qty)
+    (cond
+      [(any-point? x-or-pos)
+       (values (any-point-x x-or-pos)
+               (any-point-y x-or-pos)
+               (if (exact-positive-integer? y-or-qty) y-or-qty 1))]
+      [else
+       (values x-or-pos
+               (if (real? y-or-qty) y-or-qty 0.0)
+               (if (exact-positive-integer? opt-qty) opt-qty 1))]))
+  (if (and (exact-positive-integer? unit-id)
+           (<= unit-id #xFFFFFFFF)
+           (exact-integer? owner)
+           (valid-world-coord? px)
+           (valid-world-coord? py)
+           (exact-positive-integer? qty)
+           (<= qty #xFFFFFFFF))
+      (let ([create-bs
+             (bytes-append
+              (encode-uint32 1 unit-id)
+              (encode-int32 2 owner)
+              (encode-submessage-field 3 (encode-point2d px py))
+              (encode-uint32 4 qty))])
+        (encode-submessage-field 3 create-bs))
+      #""))
+
+;; Encodes DebugCommand { kill_unit = 4 (DebugKillUnit { repeated uint64 tag = 1 }) }.
+(define (encode-debug-kill-unit tags)
+  (define raw-tags (if (list? tags) tags (list tags)))
+  (define valid-tags
+    (for/list ([t (in-list raw-tags)]
+               #:when (and (exact-integer? t)
+                           (> t 0)
+                           (<= t #xFFFFFFFFFFFFFFFF)))
+      t))
+  (if (null? valid-tags)
+      #""
+      (let ([kill-bs
+             (apply bytes-append
+                    (for/list ([t (in-list valid-tags)])
+                      (encode-uint64 1 t)))])
+        (encode-submessage-field 4 kill-bs))))
+
+;; Encodes DebugCommand { test_process = 5 (DebugTestProcess { test=1 (hang=1, crash=2, exit=3), delay_ms=2 }) }.
+(define (encode-debug-test-process [test-type 'exit] [delay-ms #f])
+  (define test-enum
+    (cond
+      [(and (exact-integer? test-type) (<= 1 test-type 3)) test-type]
+      [(symbol? test-type)
+       (case (normalize-sc2-name->symbol test-type)
+         [(hang) 1]
+         [(crash) 2]
+         [(exit) 3]
+         [else #f])]
+      [else #f]))
+  (if test-enum
+      (let ([tp-bs
+             (bytes-append
+              (encode-int32 1 test-enum)
+              (if (and (exact-integer? delay-ms) (>= delay-ms 0) (<= delay-ms #x7FFFFFFF))
+                  (encode-int32 2 delay-ms)
+                  #""))])
+        (encode-submessage-field 5 tp-bs))
+      #""))
+
+;; Encodes Request { RequestDebug debug = 20 { repeated DebugCommand debug = 1 } } (data/proto/sc2api.proto:116,505).
+(define (encode-request-debug debug-cmds #:id [req-id #f])
+  (define cmd-list
+    (cond
+      [(list? debug-cmds) debug-cmds]
+      [(bytes? debug-cmds) (list debug-cmds)]
+      [(pair? debug-cmds) (list debug-cmds)]
+      [else '()]))
+  (define body
+    (apply bytes-append
+           (for/list ([c (in-list cmd-list)])
+             (define bs
+               (cond
+                 [(bytes? c) c]
+                 [else
+                  (match c
+                    [(list 'create-unit ut owner x y qty)
+                     (encode-debug-create-unit ut owner x y qty)]
+                    [(list 'create-unit ut owner x y)
+                     (encode-debug-create-unit ut owner x y 1)]
+                    [(list 'create-unit ut owner pos)
+                     (encode-debug-create-unit ut owner pos 1)]
+                    [(list 'kill-unit tags)
+                     (encode-debug-kill-unit tags)]
+                    [(list 'test-process test-sym delay-ms)
+                     (encode-debug-test-process test-sym delay-ms)]
+                    [(list 'test-process test-sym)
+                     (encode-debug-test-process test-sym)]
+                    [_ #""])]))
+             (if (and (bytes? bs) (> (bytes-length bs) 0))
+                 (encode-submessage-field 1 bs)
+                 #""))))
+  (if (> (bytes-length body) 0)
+      (wrap-sc2-request 20 body req-id)
+      #""))
+
+(define make-request-debug encode-request-debug)
 
 (define (make-request-save-replay #:id [req-id #f])
   (wrap-sc2-request 15 #"" req-id))
@@ -8358,6 +8476,7 @@
                 (and (exact-integer? t)
                      (> t 0)
                      (not (set-member? commanded-combat-tags t))
+                     (not (set-member? used-producer-tags t))
                      (not (set-member? used-worker-tags t))
                      (not (and u (worker-has-build-order? u)))
                      (not (unit-has-protected-order? t))
@@ -8600,13 +8719,17 @@
                  patrol-block-expansion burrow-block clear-expansion-block
                  cast-deception-and-scout-spells
                  pull-workers-attack worker-drill-stack-attack mineral-walk))))
+  (define (morph-action? a)
+    (and (pair? a) (eq? (car a) 'morph)))
   (define (routine-harvest-action? a)
     (and (pair? a)
          (memq (car a) '(harvest-mineral harvest-gas rebalance-gas-to-minerals))))
   (define ordered-actions
     (append (filter priority-first-action? actions)
+            (filter morph-action? actions)
             (filter (lambda (a)
                       (and (not (priority-first-action? a))
+                           (not (morph-action? a))
                            (not (routine-harvest-action? a))))
                     actions)
             (filter routine-harvest-action? actions)))
@@ -9126,6 +9249,7 @@
                      (wire-nonstack-allow?! (list 'wire-morph norm-target uid-list) 24))
             (for ([t (in-list uid-list)])
               (set-add! used-producer-tags t)
+              (set-add! commanded-combat-tags t)
               (hash-set! used-producer-counts t (add1 (hash-ref used-producer-counts t 0))))
             (emit! (sc2-raw-unit-command ab-id #f 0 uid-list #f)))])]
       [(list 'morph target-sym)
@@ -9163,6 +9287,7 @@
             (define chosen2 (take ptags 2))
             (for ([t (in-list chosen2)])
               (set-add! used-producer-tags t)
+              (set-add! commanded-combat-tags t)
               (hash-set! used-producer-counts t (add1 (hash-ref used-producer-counts t 0))))
             (emit! (sc2-raw-unit-command ab-id #f 0 chosen2 #f)))]
          [else
@@ -9174,6 +9299,7 @@
             (define ptag (first ptags))
             (when (wire-nonstack-allow?! (list 'wire-morph norm-target (list ptag)) 24)
               (set-add! used-producer-tags ptag)
+              (set-add! commanded-combat-tags ptag)
               (hash-set! used-producer-counts ptag (add1 (hash-ref used-producer-counts ptag 0)))
               (emit! (sc2-raw-unit-command ab-id #f 0 (list ptag) #f))))])]
 
@@ -9325,6 +9451,7 @@
                    (and (exact-integer? t)
                         (> t 0)
                         (not (set-member? commanded-combat-tags t))
+                        (not (set-member? used-producer-tags t))
                         (not (set-member? used-worker-tags t))
                         (not (and u (worker-has-build-order? u)))
                         (not (unit-has-protected-order? t))))
@@ -9819,48 +9946,93 @@
        (define tx (scale-bot-coord-to-world raw-x home-x))
        (define ty (scale-bot-coord-to-world raw-y home-y))
        (define wlist
-         (filter (lambda (t) (and (exact-integer? t) (> t 0)))
-                 (if (list? worker-ids) worker-ids (list worker-ids))))
-       (define eff-patch-id
-         (cond
-           [(and (exact-integer? patch-id) (> patch-id 0))
-            (if (and (not (null? mineral-fields))
-                     (not (ormap (lambda (m) (= (sc2-unit-tag m) patch-id)) mineral-fields)))
-                (sc2-unit-tag
-                 (argmin (lambda (m)
-                           (define mp (sc2-unit-pos m))
-                           (pt-dist tx ty (sc2-point3d-x mp) (sc2-point3d-y mp)))
-                         mineral-fields))
-                patch-id)]
-           [else 0]))
-       (define drill-wids '())
-       (define strike-wids '())
-       (for ([wid (in-list wlist)])
-         (record-worker-used! wid)
-         (set-add! commanded-combat-tags wid)
-         (define-values (wx wy)
+         (filter (lambda (t)
+                   (and (not (set-member? commanded-combat-tags t))
+                        (not (set-member? used-producer-tags t))))
+                 (valid-non-builder-worker-tags worker-ids)))
+       (when (not (null? wlist))
+         (define eff-patch-id
            (cond
-             [(hash-ref self-unit-by-tag wid #f)
-              => (lambda (u)
-                   (define p (sc2-unit-pos u))
-                   (values (sc2-point3d-x p) (sc2-point3d-y p)))]
-             [(hash-ref hash-ally-by-id wid #f)
-              => (lambda (u)
-                   (values (exact->inexact (hash-ref u 'x home-x))
-                           (exact->inexact (hash-ref u 'y home-y))))]
-             [else (values home-x home-y)]))
-         (if (and (> eff-patch-id 0) (> (pt-dist wx wy tx ty) 1.5))
-             (set! drill-wids (cons wid drill-wids))
-             (set! strike-wids (cons wid strike-wids))))
-       (when (not (null? drill-wids))
-         (emit! (mark-urgent-survival-cmd!
-                 (sc2-raw-unit-command 3666 #f eff-patch-id (reverse drill-wids) #f))))
-       (when (not (null? strike-wids))
-         (if (and (exact-integer? target-id) (> target-id 0))
-             (emit! (mark-urgent-survival-cmd!
-                     (sc2-raw-unit-command 23 #f target-id (reverse strike-wids) #f)))
-             (emit! (mark-urgent-survival-cmd!
-                     (sc2-raw-unit-command 23 (sc2-point2d tx ty) 0 (reverse strike-wids) #f)))))]
+             [(and (exact-integer? patch-id) (> patch-id 0))
+              (if (and (not (null? mineral-fields))
+                       (not (ormap (lambda (m) (= (sc2-unit-tag m) patch-id)) mineral-fields)))
+                  (sc2-unit-tag
+                   (argmin (lambda (m)
+                             (define mp (sc2-unit-pos m))
+                             (pt-dist tx ty (sc2-point3d-x mp) (sc2-point3d-y mp)))
+                           mineral-fields))
+                  patch-id)]
+             [else 0]))
+         (define patch-u
+           (and (> eff-patch-id 0)
+                (for/first ([m (in-list mineral-fields)]
+                            #:when (= (sc2-unit-tag m) eff-patch-id))
+                  m)))
+         (define-values (px py patch-known?)
+           (if patch-u
+               (let ([pp (sc2-unit-pos patch-u)])
+                 (values (sc2-point3d-x pp) (sc2-point3d-y pp) #t))
+               (values tx ty #f)))
+         ;; Never mineral-walk workers when enemy stack is near TownHall / far from `drill-patch-id`!
+         (define target-near-patch?
+           (or (not patch-known?)
+               (<= (pt-dist tx ty px py) 4.0)))
+         (define enemy-combat-pts
+           (for/list ([eu (in-list enemy-units)]
+                      #:when (not (sc2-unit-is-structure? eu)))
+             (define ep (sc2-unit-pos eu))
+             (cons (sc2-point3d-x ep) (sc2-point3d-y ep))))
+         (define drill-wids '())
+         (define strike-wids '())
+         (for ([wid (in-list wlist)])
+           (record-worker-used! wid)
+           (set-add! commanded-combat-tags wid)
+           (define-values (wx wy)
+             (cond
+               [(hash-ref self-unit-by-tag wid #f)
+                => (lambda (u)
+                     (define p (sc2-unit-pos u))
+                     (values (sc2-point3d-x p) (sc2-point3d-y p)))]
+               [(hash-ref hash-ally-by-id wid #f)
+                => (lambda (u)
+                     (values (exact->inexact (hash-ref u 'x home-x))
+                             (exact->inexact (hash-ref u 'y home-y))))]
+               [else (values home-x home-y)]))
+           (define worker-near-patch?
+             (or (not patch-known?)
+                 (<= (pt-dist wx wy px py) 6.5)))
+           (define in-melee-range?
+             (or (<= (pt-dist wx wy tx ty) 2.0)
+                 (for/or ([ep (in-list enemy-combat-pts)])
+                   (<= (pt-dist wx wy (car ep) (cdr ep)) 2.0))))
+           (if (and (> eff-patch-id 0)
+                    target-near-patch?
+                    worker-near-patch?
+                    (not in-melee-range?)
+                    (> (pt-dist wx wy tx ty) 2.0))
+               (set! drill-wids (cons wid drill-wids))
+               (set! strike-wids (cons wid strike-wids))))
+         (define need-drill
+           (filter (lambda (wid)
+                     (not (unit-already-executing-order? wid 3666 #f eff-patch-id)))
+                   (reverse drill-wids)))
+         (when (not (null? need-drill))
+           (emit! (mark-urgent-survival-cmd!
+                   (sc2-raw-unit-command 3666 #f eff-patch-id need-drill #f))))
+         (define valid-unit-tgt?
+           (and (exact-integer? target-id)
+                (> target-id 0)
+                (or (not enforce-live-enemy-tag-filter?)
+                    (set-member? live-visible-enemy-tags target-id))))
+         (define eff-tgt-id (if valid-unit-tgt? target-id 0))
+         (define target-pt (if valid-unit-tgt? #f (sc2-point2d tx ty)))
+         (define need-strike
+           (filter (lambda (wid)
+                     (not (unit-already-executing-order? wid 23 target-pt eff-tgt-id)))
+                   (reverse strike-wids)))
+         (when (not (null? need-strike))
+           (emit! (mark-urgent-survival-cmd!
+                   (sc2-raw-unit-command 23 target-pt eff-tgt-id need-strike #f)))))]
 
       [(list 'harvest-mineral wid patch-id)
        (define wlist

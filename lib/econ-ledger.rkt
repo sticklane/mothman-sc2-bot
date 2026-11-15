@@ -1051,7 +1051,7 @@
          ground-weapons-1 ground-armor-1))
      (define base-counter-tech
        (case threat-family
-         [(air-fleet)          '(cybernetics-core stargate twilight-council templar-archives photon-cannon)]
+         [(air-fleet)          '(cybernetics-core stargate fleet-beacon twilight-council)]
          [(armored-mech-siege) '(robotics-facility robotics-bay twilight-council)]
          [else                 '(robotics-facility robotics-bay twilight-council templar-archives)]))
      (define counter-tech
@@ -1070,7 +1070,7 @@
        '(warp-gate archon))
      (define unit-mix
        (case threat-family
-         [(air-fleet)          '((stalker . 0.45) (archon . 0.30) (phoenix . 0.25))]
+         [(air-fleet)          '((tempest . 0.45) (void-ray . 0.30) (stalker . 0.25))]
          [(armored-mech-siege) '((immortal . 0.45) (colossus . 0.25) (zealot . 0.20) (archon . 0.10))]
          [else                 '((colossus . 0.35) (archon . 0.25) (high-templar . 0.15) (zealot . 0.25))]))
      (define target-gm-ratio
@@ -2211,7 +2211,10 @@
       1))
 
 (define (terran-enemy-needs-ghost? enemy-u-counts)
-  (enemy-counts-have-any? enemy-u-counts TERRAN-GHOST-COUNTER-ENEMY-SYMS))
+  (or (enemy-counts-have-any? enemy-u-counts TERRAN-GHOST-COUNTER-ENEMY-SYMS)
+      (>= (+ (enemy-any-count enemy-u-counts #f 'queen)
+             (enemy-any-count enemy-u-counts #f 'queen-burrowed))
+          6)))
 
 (define (terran-enemy-needs-liberator? enemy-u-counts)
   (enemy-counts-have-any? enemy-u-counts TERRAN-LIBERATOR-COUNTER-ENEMY-SYMS))
@@ -2822,15 +2825,15 @@
              [else 0.0])]
           [else 0.0])
         (if (and (eq? m-race 'Terran) (eq? id 'ghost) (or enemy-needs-ghost? (memq m-enemy-race '(Zerg Protoss))))
-            34.0
+            48.0
             0.0)
         (if (and (eq? m-race 'Terran) (eq? id 'liberator) enemy-needs-liberator?)
             38.0
             0.0)
         (if (and (eq? m-race 'Protoss) enemy-capital-air?)
             (case id
-              [(tempest) 48.0]
-              [(void-ray) 44.0]
+              [(tempest) 68.0]
+              [(void-ray) 56.0]
               [(stalker) 38.0]
               [(carrier) 24.0]
               [else 0.0])
@@ -2843,6 +2846,9 @@
             0.0)
         (if (and (eq? m-race 'Terran) (memq id '(thor thor-ap)) enemy-capital-air?)
             (if enemy-cap-air-ground-aa? 135.0 105.0)
+            0.0)
+        (if (and (eq? m-race 'Terran) (memq id '(viking viking-fighter)) enemy-capital-air?)
+            45.0
             0.0)
         (if (and (eq? m-race 'Zerg) zvp-stargate-threat? (eq? id 'hydralisk))
             46.0
@@ -2891,7 +2897,7 @@
                0.0
                (* 15.0 (min 2.0 gas-imbalance)))))
      (define tech-matchup-adj
-       (+ (if (and (eq? m-race 'Terran) (eq? id 'ghost-academy) (or enemy-needs-ghost? (eq? m-enemy-race 'Zerg))) 38.0 0.0)
+       (+ (if (and (eq? m-race 'Terran) (eq? id 'ghost-academy) (or enemy-needs-ghost? (eq? m-enemy-race 'Zerg))) 55.0 0.0)
           (if (and (eq? m-race 'Terran) (eq? id 'armory) enemy-capital-air?
                    (or enemy-cap-air-ground-aa? has-armory? (>= gas 80)))
               (if enemy-cap-air-ground-aa? 95.0 60.0)
@@ -2903,7 +2909,7 @@
                 [(zerg-flyer-armor-1) 65.0]
                 [else 0.0])
               0.0)
-          (if (and (eq? m-race 'Protoss) enemy-capital-air? (eq? id 'fleet-beacon)) 45.0 0.0)))
+          (if (and (eq? m-race 'Protoss) enemy-capital-air? (eq? id 'fleet-beacon)) 65.0 0.0)))
      (define eff-bo-boost (if outnumbered-by-threat? 0.0 bo-head-boost))
      (if crisis-deferred-here?
          5.0
@@ -2918,7 +2924,8 @@
        (+ (if (and (eq? m-race 'Terran) (memq m-enemy-race '(Terran Protoss)) (eq? id 'barracks-techlab)) 36.0 0.0)
           (if (and (eq? m-race 'Terran) (eq? m-enemy-race 'Terran) (memq id '(factory factory-techlab))) 38.0 0.0)
           (if (and (eq? m-race 'Terran) tvp-cannon-contain? (memq id '(factory factory-techlab))) 52.0 0.0)
-          (if (and (eq? m-race 'Protoss) enemy-capital-air? (eq? id 'stargate)) 46.0 0.0)))
+          (if (and (eq? m-race 'Terran) enemy-capital-air? (memq id '(starport starport-reactor))) 55.0 0.0)
+          (if (and (eq? m-race 'Protoss) enemy-capital-air? (eq? id 'stargate)) 54.0 0.0)))
      (+ 116.0 gas-tech-bonus (* 45.0 (min 3.0 facility-scaling-pressure)) prod-matchup-adj pv5-boost bo-head-boost)]
 
     [(worker)
@@ -3242,14 +3249,21 @@
                   (>= min-val 350)
                   (>= frame-val 2688)
                   (or root-combat-ready? (>= army-val 6.0))))))
+  (define terran-breakout-cc-due?
+    (and (eq? race 'Terran)
+         (<= active-bases 3)
+         (>= min-val 1500)
+         (>= live-workers 18)))
   (define exp-blocking?
     (and (or (= active-bases 1)
+             terran-breakout-cc-due?
              (protoss-4th-nexus-due? race active-bases live-workers army-val min-val enemy-cap-air?)
              (and (hash? open-prod-slots)
                   (not (not (memq bo-goal-sym '(hatchery nexus command-center))))))
-         escrow-ok?
+         (or terran-breakout-cc-due? escrow-ok?)
          (if (hash? open-prod-slots)
-             (or (protoss-4th-nexus-due? race active-bases live-workers army-val min-val enemy-cap-air?)
+             (or terran-breakout-cc-due?
+                 (protoss-4th-nexus-due? race active-bases live-workers army-val min-val enemy-cap-air?)
                  (not (not (memq bo-goal-sym '(hatchery nexus command-center))))
                  (>= min-val 350)
                  (>= live-workers (if (eq? race 'Zerg) 16 19)))
@@ -3742,15 +3756,15 @@
                  (< (unit-ht-count '(void-ray voidray))
                     (if enemy-cap-air? 8 4)))
             (list (boost-cand 'void-ray 'combat-unit '(train void-ray) #t
-                              (if enemy-cap-air? 165.0 135.0)))
+                              (if enemy-cap-air? 172.0 135.0)))
             '())
         (if (and (ready-bldg-has? 'fleet-beacon)
                  (facility-slot-open? 'stargate 'fleet-beacon)
                  (or t3-endgame? enemy-cap-air?)
                  (< (unit-ht-count 'tempest)
-                    (if enemy-cap-air? 6 3)))
+                    (if enemy-cap-air? 10 3)))
             (list (boost-cand 'tempest 'combat-unit '(train tempest) #t
-                              (if enemy-cap-air? 170.0 145.0)))
+                              (if enemy-cap-air? 185.0 145.0)))
             '())
         (if (and (not (crisis-deferred-sym? 'stargate crisis-defer? #:defer-stargate? defer-stargate?))
                  (or enemy-cap-air?
@@ -3762,10 +3776,11 @@
                                     (> (bldg-eq-count 'robotics-facility) 0)
                                     (> (bldg-eq-count 'twilight-council) 0)))))
                  has-core?
-                 (= (bldg-eq-count 'stargate) 0))
+                 (< (bldg-eq-count 'stargate)
+                    (if (and enemy-cap-air? (>= active-bases 2)) 2 1)))
             (list (boost-cand 'stargate 'production-scaling
                               (list 'build 'stargate (safe-tile-coord (+ base-x 5.5)) (safe-tile-coord (+ base-y 5.5)))
-                              #t (if enemy-cap-air? 160.0 140.0)))
+                              #t (if enemy-cap-air? 172.0 140.0)))
             '())
         (if (and (not crisis-defer?)
                  (or enemy-cap-air? (and t3-endgame? (>= active-bases 4)))
@@ -3773,7 +3788,7 @@
                  (= (bldg-eq-count 'fleet-beacon) 0))
             (list (boost-cand 'fleet-beacon 'tech-upgrade
                               (list 'build 'fleet-beacon (safe-tile-coord (- base-x 6.5)) (safe-tile-coord (+ base-y 5.5)))
-                              #t (if enemy-cap-air? 160.0 150.0)))
+                              #t (if enemy-cap-air? 180.0 150.0)))
             '())
         (if (and t3-endgame? (not crisis-defer?))
             (append
@@ -3885,7 +3900,8 @@
                          (list 'combat-unit '(train sentry) #t 130.0))]
           [(warp-prism) (and (facility-slot-open? 'robotics-facility 'robotics-facility)
                              (list 'combat-unit '(train warp-prism) #t 135.0))]
-          [(phoenix) (and (facility-slot-open? 'stargate 'stargate)
+          [(phoenix) (and (not enemy-cap-air?)
+                          (facility-slot-open? 'stargate 'stargate)
                           (list 'counter-tech '(train phoenix) #t 135.0))]
           [(colossus disruptor) (and has-robo-bay?
                                      (facility-slot-open? 'robotics-facility 'robotics-facility)
@@ -3976,14 +3992,35 @@
                               (list 'build 'factory (safe-tile-coord (+ base-x 6.0)) (safe-tile-coord (+ base-y 2.5)))
                               #t 150.0))
             '())
-        ;; Ready-tech / enemy-triggered Ghost Academy, Ghosts (< 10) & Liberators (< 6-8) (#5123937)
+        ;; Ready-tech / enemy-triggered Ghost Academy (`>= 2` bases when mass Queen/Infestor/HT/Lurker/Viper),
+        ;; Ghosts (< 10) & Liberators (< 6-8) (#5123937)
         (if (and has-rax-ready?
                  (= (bldg-eq-count 'ghost-academy) 0)
                  (or t3-endgame?
-                     (and (>= active-bases 3) (terran-enemy-needs-ghost? enemy-u-counts))))
+                     (and (>= active-bases 2) (terran-enemy-needs-ghost? enemy-u-counts))))
             (list (boost-cand 'ghost-academy 'tech-upgrade
                               (list 'build 'ghost-academy (safe-tile-coord (- base-x 4.5)) (safe-tile-coord (- base-y 4.5)))
-                              #t (if (terran-enemy-needs-ghost? enemy-u-counts) 160.0 140.0)))
+                              #t (if (terran-enemy-needs-ghost? enemy-u-counts) 172.0 140.0)))
+            '())
+        ;; [BUG-4] Multi-Starport + StarportReactor scaling vs enemy capital air (FastBC / Tempest / Carrier / BroodLord)
+        (if (and enemy-cap-air?
+                 has-fac-ready?
+                 (< (bldg-eq-count 'starport) (if (>= active-bases 3) 3 2)))
+            (list (boost-cand 'starport 'production-scaling
+                              (list 'build 'starport (safe-tile-coord (+ base-x 7.0)) (safe-tile-coord (- base-y 2.5)))
+                              #t 172.0))
+            '())
+        (if (and enemy-cap-air?
+                 (hash? open-prod-slots)
+                 (> (ready-bldg-eq-count 'starport)
+                    (+ (bldg-eq-count 'starport-techlab) (bldg-eq-count 'starport-reactor)))
+                 (< (bldg-eq-count 'starport-reactor) (if (>= active-bases 3) 2 1))
+                 (or (>= (bldg-eq-count 'starport-techlab) 1)
+                     (>= (bldg-eq-count 'starport) 2)
+                     (not raw-requires-detection?)))
+            (list (boost-cand 'starport-reactor 'production-scaling
+                              (list 'build 'starport-reactor (safe-tile-coord (+ base-x 9.5)) (safe-tile-coord (- base-y 2.0)))
+                              #t 168.0))
             '())
         (if (and (facility-slot-open? 'starport 'starport)
                  (or t3-endgame?
@@ -4100,8 +4137,10 @@
                      (facility-slot-open? 'starport 'starport)
                      (if (and has-port-ready?
                               (< (unit-ht-count '(viking viking-fighter viking-assault))
-                                 (max 2 (hash-ref benchmark-targets 'viking-fighter 0))))
-                         135.0
+                                 (if enemy-cap-air?
+                                     20
+                                     (max 2 (hash-ref benchmark-targets 'viking-fighter 0)))))
+                         (if enemy-cap-air? 185.0 135.0)
                          0.0))
          (cand 'marauder 'combat-unit '(train marauder)
                (if (hash? open-prod-slots) (and (facility-slot-open? 'barracks 'barracks) has-rax-tl?) #t))

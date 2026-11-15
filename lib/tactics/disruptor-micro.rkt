@@ -38,7 +38,8 @@
          typed/racket/unsafe
          "../sc2-types.rkt"
          "../sc2-geometry.rkt"
-         (except-in "../sc2-game-constants.rkt" aabb-overlaps?))
+         (except-in "../sc2-game-constants.rkt" aabb-overlaps?)
+         (only-in "zerg-burrow-micro.rkt" disruptor-nova-catchable-range))
 
 ;; Safe bridge for inspecting heterogeneous untyped/mutable/immutable unit hashes.
 (module dyn-hash-ops racket/base
@@ -419,6 +420,8 @@
  DISRUPTOR-BLINK-COOLDOWN-FRAMES
  DISRUPTOR-PRESPLIT-THREAT-RANGE
  DISRUPTOR-PRESPLIT-SPACING-TARGET
+ DISRUPTOR-COOLDOWN-DIVE-MIN-FRAMES
+ disruptor-nova-catchable-range
 
  ;; Output & state structs
  (struct-out nova-impact-score)
@@ -528,6 +531,9 @@
 (: DISRUPTOR-PRESPLIT-SPACING-TARGET Float)
 (define DISRUPTOR-PRESPLIT-SPACING-TARGET 3.0)
 
+(: DISRUPTOR-COOLDOWN-DIVE-MIN-FRAMES Integer)
+(define DISRUPTOR-COOLDOWN-DIVE-MIN-FRAMES 112)
+
 (: DISRUPTOR-HIGH-VALUE-SYMS (Listof Symbol))
 (define DISRUPTOR-HIGH-VALUE-SYMS
   '(lurker lurker-burrowed siege-tank siege-tank-sieged ghost high-templar
@@ -592,7 +598,8 @@
    [snipe-feasible? : Boolean]
    [attacker-tags : (Listof Integer)]
    [projected-burst-dps : Float]
-   [effective-ehp : Float])
+   [effective-ehp : Float]
+   [cooldown-dive-ok? : Boolean])
   #:transparent)
 
 ;; =============================================================================
@@ -754,6 +761,41 @@
         (clamp-real (safe-finite-real (dyn-hash-ref u 'radius 0.0) 0.0) 0.0 0.65)
         0.0))
   (+ raw extra-margin))
+
+(: unit-ground-speed-tps (-> Any Float))
+(define (unit-ground-speed-tps u)
+  (define explicit (dyn-hash-ref u 'speed #f))
+  (cond
+    [(and (real? explicit) (> explicit 0.0))
+     (safe-finite-real explicit 3.15)]
+    [else
+     (define ut (resolved-unit-type u))
+     (define stats (sc2-unit-combat-stats ut))
+     (define base (max 1.0 (safe-finite-real (hash-ref stats 'speed (lambda () 3.15)) 3.15)))
+     (define stim? (or (eq? (dyn-hash-ref u 'stimmed? #f) #t)
+                       (eq? (dyn-hash-ref u 'stimmed #f) #t)
+                       (eq? (dyn-hash-ref u 'stim? #f) #t)))
+     (define ling-spd? (and (eq? ut 'zergling)
+                            (or (eq? (dyn-hash-ref u 'metabolic-boost? #f) #t)
+                                (eq? (dyn-hash-ref u 'speed-upgraded? #f) #t)
+                                (eq? (dyn-hash-ref u 'fast? #f) #t))))
+     (define creep? (eq? (dyn-hash-ref u 'on-creep? #f) #t))
+     (define adj (cond [stim? (* base 1.5)] [ling-spd? 6.58] [else base]))
+     (if creep? (* adj 1.3) adj)]))
+
+(: disruptor-unit-supply-val (-> Any Float))
+(define (disruptor-unit-supply-val u)
+  (define explicit (dyn-hash-ref u 'supply #f))
+  (cond
+    [(and (real? explicit) (> explicit 0.0)) (safe-finite-real explicit 1.0)]
+    [else
+     (define ut (resolved-unit-type u))
+     (case ut
+       [(zergling zergling-burrowed baneling baneling-burrowed) 0.5]
+       [(ravager ravager-burrowed lurker lurker-mp lurker-burrowed lurker-mp-burrowed) 3.0]
+       [(brood-lord archon disruptor void-ray immortal) 4.0]
+       [(colossus ultralisk ultralisk-burrowed thor thor-ap carrier battlecruiser mothership) 6.0]
+       [else (->float (sc2-supply-cost ut 1))])]))
 
 (: clamp-to-playable (-> Real Real point2d))
 (define (clamp-to-playable x y)
@@ -2090,7 +2132,7 @@
                                         'radial-perp-split))
                                    orders))])]
 
-            ;; No live Nova threatening `u`: check ready enemy Disruptor pre-split spacing pressure
+            ;; No live Nova threatening `u`: check ready enemy Disruptor speed-aware pre-split spacing pressure
             [(pair? ready-enemy-casters)
              (define-values (near-ed near-ed-dist)
                (for/fold ([bd-e : Any (car ready-enemy-casters)]
@@ -2098,28 +2140,30 @@
                          ([ed (in-list ready-enemy-casters)])
                  (define d (dist-2d ux uy (unit-x ed) (unit-y ed)))
                  (if (< d bd) (values ed d) (values bd-e bd))))
-             (when (<= near-ed-dist DISRUPTOR-PRESPLIT-THREAT-RANGE)
-               ;; Check tight friendly ground neighbors within 2.8 tiles (< 3.0 splash diameter)
-               (define-values (clx cly cl-cnt)
-                 (for/fold ([sx : Float 0.0]
-                            [sy : Float 0.0]
-                            [c : Integer 0])
-                           ([other (in-list ground-allies)]
-                            #:when (and (not (= (unit-tag-int other) uid))
-                                        (not (disruptor-caster-unit? other))
-                                        (< (dist-2d ux uy (unit-x other) (unit-y other)) 2.8)))
-                   (values (+ sx (unit-x other)) (+ sy (unit-y other)) (+ c 1))))
-               (when (>= cl-cnt 1)
-                 (define cx (/ clx (->float cl-cnt)))
-                 (define cy (/ cly (->float cl-cnt)))
-                 (define-values (rep-x rep-y rmag) (unit-vec-2d (- ux cx) (- uy cy)))
-                 (when (> rmag 0.05)
-                   (define tgt (clamp-to-playable (+ ux (* 2.2 rep-x))
-                                                  (+ uy (* 2.2 rep-y))))
-                   (set! orders (cons (anti-nova-dodge-order
-                                       uid 'pre-split (point2d-x tgt) (point2d-y tgt)
-                                       (unit-tag-int near-ed) near-ed-dist 'disruptor-pre-split)
-                                      orders)))))]))
+             ;; Check tight friendly ground neighbors within 2.8 tiles (< 3.0 splash diameter)
+             (define-values (clx cly cl-cnt)
+               (for/fold ([sx : Float 0.0]
+                          [sy : Float 0.0]
+                          [c : Integer 0])
+                         ([other (in-list ground-allies)]
+                          #:when (and (not (= (unit-tag-int other) uid))
+                                      (not (disruptor-caster-unit? other))
+                                      (< (dist-2d ux uy (unit-x other) (unit-y other)) 2.8)))
+                 (values (+ sx (unit-x other)) (+ sy (unit-y other)) (+ c 1))))
+             (define u-speed (unit-ground-speed-tps u))
+             (define catchable-range
+               (disruptor-nova-catchable-range u-speed (>= cl-cnt 1) #:disruptor-ready? #t))
+             (when (and (<= near-ed-dist catchable-range) (>= cl-cnt 1))
+               (define cx (/ clx (->float cl-cnt)))
+               (define cy (/ cly (->float cl-cnt)))
+               (define-values (rep-x rep-y rmag) (unit-vec-2d (- ux cx) (- uy cy)))
+               (when (> rmag 0.05)
+                 (define tgt (clamp-to-playable (+ ux (* 2.2 rep-x))
+                                                (+ uy (* 2.2 rep-y))))
+                 (set! orders (cons (anti-nova-dodge-order
+                                     uid 'pre-split (point2d-x tgt) (point2d-y tgt)
+                                     (unit-tag-int near-ed) near-ed-dist 'disruptor-pre-split)
+                                    orders))))]))
         (reverse orders))))
 
 ;; =============================================================================
@@ -2132,15 +2176,17 @@
 ;;   within 3.5 tiles + explicit `'orders` / `'nova-cooldown` support).
 ;; - Computes whether nearby friendly ranged/air units can lethally burst an
 ;;   active-casting parent Disruptor before its Nova detonates (killing the caster
-;;   fizzles the Nova!).
+;;   fizzles the Nova!), and flags `'on-cooldown` dive readiness (`cooldown-dive-ok?`).
 (: evaluate-disruptor-snipe-and-cooldowns
    (->* ((Listof Any) (Listof Any))
         (#:tracker (Option disruptor-tactical-tracker)
-         #:current-frame Integer)
+         #:current-frame Integer
+         #:supply-ratio (Option Real))
         (Listof disruptor-snipe-eval)))
 (define (evaluate-disruptor-snipe-and-cooldowns ally-units enemy-units
                                                 #:tracker [tr #f]
-                                                #:current-frame [current-frame 0])
+                                                #:current-frame [current-frame 0]
+                                                #:supply-ratio [supply-ratio-arg #f])
   (when (and tr (not (internal-skip-sync?)))
     (sync-tracker-state! tr ally-units enemy-units current-frame))
   (define-values (raw-enemy-casters enemy-novas)
@@ -2162,31 +2208,97 @@
                        (not (memq (resolved-unit-type a) '(probe scv drone mule observer)))))
                 (filter-units-within-range ally-units enemy-casters 15.0))))
 
-  (for/list : (Listof disruptor-snipe-eval) ([ed (in-list enemy-casters)])
-    (define etag (unit-tag-int ed))
-    (define ex (unit-x ed))
-    (define ey (unit-y ed))
-    (define ehp (+ (unit-hp ed 100.0) (unit-shield ed 100.0)))
+  ;; Compute army-wide combat supply ratio for cooldown-punish dive gating
+  (define (sum-combat-supply [units : (Listof Any)]) : Float
+    (for/fold ([acc : Float 0.0]) ([u (in-list units)])
+      (if (and (hash? u)
+               (unit-alive? u)
+               (not (purification-nova-unit? u))
+               (not (unit-is-structure? u))
+               (not (memq (resolved-unit-type u)
+                          '(probe scv drone mule observer overseer overseer-siege-mode
+                            overlord warp-prism warp-prism-phasing interceptor larva egg))))
+          (+ acc (disruptor-unit-supply-val u))
+          acc)))
+  (define sup-ratio : Float
+    (cond
+      [(null? enemy-casters) 1.0]
+      [(and supply-ratio-arg (rational? supply-ratio-arg))
+       (max 0.0 (real->double-flonum supply-ratio-arg))]
+      [else
+       (define a-sup (sum-combat-supply ally-units))
+       (define e-sup (sum-combat-supply enemy-units))
+       (if (<= e-sup 0.0) 1.0 (/ a-sup (max 0.5 e-sup)))]))
 
-    (define explicit-cd (safe-exact-int (dyn-hash-ref ed 'nova-cooldown 0) 0))
-    (define tr-cd (if tr (disruptor-tracker-enemy-cooldown tr etag current-frame) 0))
-    (define tr-nova-left (if tr (disruptor-tracker-enemy-active-nova-frames tr etag current-frame) 0))
+  ;; Pre-resolve each enemy Disruptor state so we have accurate enemy-cd-frac
+  (define caster-states
+    (for/list : (Listof (Vector Any Integer Float Float Float Integer Integer Symbol))
+              ([ed (in-list enemy-casters)])
+      (define etag (unit-tag-int ed))
+      (define ex (unit-x ed))
+      (define ey (unit-y ed))
+      (define ehp (+ (unit-hp ed 100.0) (unit-shield ed 100.0)))
+      (define explicit-cd
+        (max (safe-exact-int (dyn-hash-ref ed 'nova-cooldown 0) 0)
+             (safe-exact-int (dyn-hash-ref ed 'cooldown-remaining 0) 0)
+             (safe-exact-int (dyn-hash-ref ed 'cooldown 0) 0)
+             (safe-exact-int (dyn-hash-ref ed 'weapon-cooldown 0) 0)))
+      (define tr-cd (if tr (disruptor-tracker-enemy-cooldown tr etag current-frame) 0))
+      (define tr-nova-left (if tr (disruptor-tracker-enemy-active-nova-frames tr etag current-frame) 0))
+      ;; Fallback if no tracker passed: associate nearby live enemy Nova within 3.5 tiles
+      (define fallback-nova-left : Integer
+        (if (and (= tr-nova-left 0)
+                 (or (explicit-nova-order? ed)
+                     (for/or : Boolean ([en (in-list enemy-novas)])
+                       (<= (dist-2d ex ey (unit-x en) (unit-y en)) 3.5))))
+            DISRUPTOR-NOVA-LIFETIME-FRAMES
+            0))
+      (define active-left (max tr-nova-left fallback-nova-left))
+      (define cd-rem (max explicit-cd tr-cd (if (> active-left 0) DISRUPTOR-NOVA-COOLDOWN-FRAMES 0)))
+      (define state : Symbol
+        (cond
+          [(> active-left 0) 'active-casting]
+          [(> cd-rem 0) 'on-cooldown]
+          [else 'ready]))
+      (vector ed etag ex ey ehp cd-rem active-left state)))
 
-    ;; Fallback if no tracker passed: associate nearby live enemy Nova within 3.5 tiles
-    (define fallback-nova-left : Integer
-      (if (and (= tr-nova-left 0)
-               (or (explicit-nova-order? ed)
-                   (for/or : Boolean ([en (in-list enemy-novas)])
-                     (<= (dist-2d ex ey (unit-x en) (unit-y en)) 3.5))))
-          DISRUPTOR-NOVA-LIFETIME-FRAMES
-          0))
-    (define active-left (max tr-nova-left fallback-nova-left))
-    (define cd-rem (max explicit-cd tr-cd (if (> active-left 0) DISRUPTOR-NOVA-COOLDOWN-FRAMES 0)))
-    (define state : Symbol
-      (cond
-        [(> active-left 0) 'active-casting]
-        [(> cd-rem 0) 'on-cooldown]
-        [else 'ready]))
+  (define n-ed (length caster-states))
+  (define n-ed-cd
+    (for/sum : Integer ([cs (in-list caster-states)])
+      (if (eq? (vector-ref cs 7) 'on-cooldown) 1 0)))
+  (define enemy-cd-frac : Float
+    (if (> n-ed 0) (/ (->float n-ed-cd) (->float n-ed)) 0.0))
+
+  ;; Combat allies for computing d-front to each enemy Disruptor
+  (define combat-allies : (Listof Any)
+    (if (null? enemy-casters)
+        '()
+        (filter (lambda ([a : Any])
+                  (and (hash? a)
+                       (unit-alive? a)
+                       (not (purification-nova-unit? a))
+                       (not (unit-is-structure? a))
+                       (not (memq (resolved-unit-type a) '(probe scv drone mule observer)))))
+                ally-units)))
+
+  (for/list : (Listof disruptor-snipe-eval) ([cs (in-list caster-states)])
+    (define etag (vector-ref cs 1))
+    (define ex (vector-ref cs 2))
+    (define ey (vector-ref cs 3))
+    (define ehp (vector-ref cs 4))
+    (define cd-rem (vector-ref cs 5))
+    (define active-left (vector-ref cs 6))
+    (define state (vector-ref cs 7))
+
+    (define d-front : Float
+      (for/fold ([md : Float 999.0]) ([a (in-list combat-allies)])
+        (min md (dist-2d (unit-x a) (unit-y a) ex ey))))
+
+    (define cooldown-dive-ok? : Boolean
+      (and (eq? state 'on-cooldown)
+           (>= cd-rem DISRUPTOR-COOLDOWN-DIVE-MIN-FRAMES)
+           (or (>= enemy-cd-frac 0.50) (<= d-front 7.5))
+           (>= sup-ratio 0.90)))
 
     ;; Burst window: active Nova frames remaining minus ~5f reaction margin (min 0.25s),
     ;; or 1.6s reference window for DPS assessment.
@@ -2213,15 +2325,19 @@
                (for/or : Boolean ([en (in-list enemy-novas)])
                  (< (dist-2d (unit-x a) (unit-y a) (unit-x en) (unit-y en))
                     DISRUPTOR-BLINK-DODGE-RADIUS))))
+        (define in-range? (<= d (+ grange 1.5)))
+        (define dive-range? (and cooldown-dive-ok? (<= d 14.5)))
         (if (and (> gdps 0.0)
-                 (<= d (+ grange 1.5))
+                 (or in-range? dive-range?)
                  (not must-dodge-now?))
             (let* ([walk-sec (if (<= d (+ grange 0.35)) 0.0 (/ (- d (+ grange 0.35)) spd))]
                    [t-eff (max 0.0 (- t-win-sec walk-sec))]
                    [volley-bonus (if (<= d (+ grange 0.35)) (* 0.45 wperiod) 0.0)]
-                   [dmg (* gdps (+ t-eff volley-bonus))])
-              (if (> dmg 0.0)
-                  (values (cons (unit-tag-int a) tags) (+ dps-acc gdps) (+ dmg-acc dmg))
+                   [dmg (if in-range? (* gdps (+ t-eff volley-bonus)) 0.0)])
+              (if (or (> dmg 0.0) dive-range?)
+                  (values (cons (unit-tag-int a) tags)
+                          (+ dps-acc (if in-range? gdps 0.0))
+                          (+ dmg-acc dmg))
                   (values tags dps-acc dmg-acc)))
             (values tags dps-acc dmg-acc))))
 
@@ -2231,7 +2347,7 @@
            (>= total-burst-dmg (* 1.05 ehp))))
 
     (disruptor-snipe-eval etag ex ey state cd-rem active-left snipe-ok?
-                          (reverse att-tags) burst-dps ehp)))
+                          (reverse att-tags) burst-dps ehp cooldown-dive-ok?)))
 
 ;; =============================================================================
 ;; 6. Unified S-Expression Action Orchestrator (`step-disruptor-tactical-micro!`)
@@ -2353,7 +2469,8 @@
                       (anti-nova-dodge-order-tx do)
                       (anti-nova-dodge-order-ty do))))
        (for ([se (in-list snipe-evals)]
-             #:when (disruptor-snipe-eval-snipe-feasible? se))
+             #:when (or (disruptor-snipe-eval-snipe-feasible? se)
+                        (disruptor-snipe-eval-cooldown-dive-ok? se)))
          (define etag (disruptor-snipe-eval-enemy-tag se))
          (for ([att-id (in-list (disruptor-snipe-eval-attacker-tags se))]
                #:when (not (set-member? dodging-tags att-id)))
