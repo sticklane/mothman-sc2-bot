@@ -1,12 +1,12 @@
 #lang racket/base
 
 ;; =============================================================================
-;; `lib/tactics/static-defense-tactics.rkt`
-;; Symmetric Static-Defense, Proxy-Cannon, & Swarm-Host Tactics Module
+;; `lib/plan/static-defense.rkt`
+;; Symmetric Static-Defense, Proxy-Cannon, & Swarm-Host Plans Module
 ;;
 ;; Layering invariant: imports ONLY `"../sc2-geometry.rkt"`,
 ;; `"../sc2-game-constants.rkt"`, and `"../sc2-common.rkt"` (plus `racket/*`).
-;; Never imports `sc2-placement.rkt`, `tactics-sim.rkt`, or `nydus-tactics.rkt`.
+;; Never imports `sc2-placement.rkt`, `tactics-sim.rkt`, or `nydus.rkt`.
 ;;
 ;; Symmetric Pairs (Offense <-> Counter):
 ;;   a) `plan-spread-burrowed-swarm-host-harass` <-> `plan-counter-spread-swarm-host-harass`

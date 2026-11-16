@@ -20,6 +20,9 @@
          "sc2-logging.rkt"
          "perception-grid.rkt"
          "econ-ledger.rkt"
+         (except-in "plan-sim.rkt"
+                    MORPH-VIKING-ASSAULT-ABILITY-ID
+                    MORPH-VIKING-FIGHTER-ABILITY-ID)
          "tactics-sim.rkt"
          "human-cortex.rkt"
          "mirror-mind-predictor.rkt"
@@ -27,13 +30,13 @@
          (only-in "tactics/unit-mode-micro.rkt"
                   mode-unit-input
                   MARAUDER-ACQUIRE-MAX-RANGE)
-         (only-in "tactics/map-elements-and-experiments.rkt"
+         (only-in "plan/map-elements-and-experiments.rkt"
                   plan-trapped-unit-dropship-rescue
                   plan-warp-prism-and-recall-tactics
                   plan-counter-warp-prism-and-recall
                   dropship-rescues->sexps
                   map-element-directives->sexps)
-         (only-in "situational-counter-planner.rkt"
+         (only-in "plan/situational-counter.rkt"
                   evaluate-situational-counter-plan
                   select-situational-upgrades
                   situational-counter-plan-primary-situation

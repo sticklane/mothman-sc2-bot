@@ -1,7 +1,7 @@
 #lang typed/racket/base
 
 ;; =============================================================================
-;; `lib/tactics/wall-and-block-tactics.rkt`
+;; `lib/plan/wall-and-block.rkt`
 ;; Wall Integrity, Unwalled Opponent Punish, Expansion/Gas Blocks & Smart Unblock:
 ;;   - Bayesian unwalled/gapped-wall/open-depot-door classification & flood plan
 ;;   - Own wall integrity defense (Supply Depot raise `558` + door `hold-position`)
@@ -19,7 +19,7 @@
          "../sc2-geometry.rkt"
          (except-in "../sc2-game-constants.rkt" aabb-overlaps?)
          "../sc2-bayesian.rkt"
-         "zerg-burrow-micro.rkt")
+         "../tactics/zerg-burrow-micro.rkt")
 
 (module dyn-hash-ops racket/base
   (provide dyn-hash-ref

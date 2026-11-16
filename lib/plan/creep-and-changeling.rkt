@@ -1,7 +1,7 @@
 #lang typed/racket/base
 
 ;; =============================================================================
-;; `lib/tactics/creep-and-changeling-tactics.rkt`
+;; `lib/plan/creep-and-changeling.rkt`
 ;; Multi-Highway Creep Spread, Counter-Creep Clearing, Changeling Free-Unit
 ;; Saturation/Body-Blocking/Shot-Baiting, and 1:1 Counter-Changeling Snipe:
 ;;   - 3-highway creep network (Primary, Flank A, Flank B) with Queen-local

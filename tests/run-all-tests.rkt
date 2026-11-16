@@ -22,6 +22,9 @@
          "../lib/build-orders.rkt"
          "../lib/perception-grid.rkt"
          "../lib/econ-ledger.rkt"
+         (except-in "../lib/plan-sim.rkt"
+                    MORPH-VIKING-ASSAULT-ABILITY-ID
+                    MORPH-VIKING-FIGHTER-ABILITY-ID)
          "../lib/tactics-sim.rkt"
          "../lib/human-cortex.rkt"
          "../lib/mirror-mind-predictor.rkt"
@@ -9736,7 +9739,7 @@
            'enemy-buildings (list (hash 'id 10 'type 'nydus-worm 'x 35.0 'y 35.0 'build-progress 0.4)))))
   (assert-true! (not (ormap (lambda (a) (and (pair? a) (memq (car a) '(build-nydus-worm nydus-load nydus-unload pull-workers-attack))))
                             sd-split-acts))
-                "Separated static-defense-tactics.rkt must not emit Nydus or counter-Nydus commands")
+                "Separated lib/plan/static-defense.rkt must not emit Nydus or counter-Nydus commands")
   (define nydus-split-acts
     (plan-nydus-actions
      (hash 'frame 5000 'base-x 32.0 'base-y 32.0 'enemy-x 110.0 'enemy-y 110.0
@@ -9746,7 +9749,31 @@
            'enemy-buildings (list (hash 'id 10 'type 'nydus-worm 'x 35.0 'y 35.0 'build-progress 0.4)))))
   (assert-true! (and (pair? (assq 'build-nydus-worm nydus-split-acts))
                      (pair? (assq 'pull-workers-attack nydus-split-acts)))
-                "Separated nydus-tactics.rkt must emit both build-nydus-worm and counter-nydus pull-workers-attack")
+                "Separated lib/plan/nydus.rkt must emit both build-nydus-worm and counter-nydus pull-workers-attack")
+  (assert-true! (directory-exists? "lib/plan")
+                "lib/plan directory must exist to separate planning modules from lib/tactics")
+  (for ([pf (in-list '("situational-counter.rkt"
+                       "creep-and-changeling.rkt"
+                       "wall-and-block.rkt"
+                       "static-defense.rkt"
+                       "nydus.rkt"
+                       "terran-addon-swap.rkt"
+                       "multitask-harass-and-proxy.rkt"
+                       "map-elements-and-experiments.rkt"))])
+    (assert-true! (not (string-prefix? pf "plan-"))
+                  (format "Plan module ~a must not carry a plan- prefix inside lib/plan/" pf))
+    (assert-true! (file-exists? (build-path "lib" "plan" pf))
+                  (format "Expected separated plan module lib/plan/~a" pf)))
+  (for ([tf (in-list '("order-ledger.rkt"
+                       "arena-minimax.rkt"
+                       "zerg-burrow-micro.rkt"
+                       "stealth-shimmer-response.rkt"
+                       "disruptor-micro.rkt"
+                       "pro-spellcaster-micro.rkt"
+                       "unit-mode-micro.rkt"
+                       "transport-drop-micro.rkt"))])
+    (assert-true! (file-exists? (build-path "lib" "tactics" tf))
+                  (format "Expected real-time tactics/micro module lib/tactics/~a" tf)))
 
   ;; 42.6 lib/sc2-logging.rkt: cadence, record extraction, [SCBOT_STATE] line & hash roundtrip
   (assert-true! (should-emit-step-log? 0 64 #f))

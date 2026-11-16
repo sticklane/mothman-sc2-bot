@@ -1,12 +1,12 @@
 #lang racket/base
 
 ;; =============================================================================
-;; `lib/tactics/nydus-tactics.rkt`
-;; Symmetric Zerg Nydus Network / Nydus Worm Offense <-> Counter-Nydus Tactics
+;; `lib/plan/nydus.rkt`
+;; Symmetric Zerg Nydus Network / Nydus Worm Offense <-> Counter-Nydus Plans
 ;;
 ;; Layering invariant: imports ONLY `"../sc2-geometry.rkt"`,
 ;; `"../sc2-game-constants.rkt"`, and `"../sc2-common.rkt"` (plus `racket/*`).
-;; Never imports `sc2-placement.rkt`, `tactics-sim.rkt`, or `static-defense-tactics.rkt`.
+;; Never imports `sc2-placement.rkt`, `tactics-sim.rkt`, or `static-defense.rkt`.
 ;;
 ;; Symmetric Pair (Offense <-> Counter):
 ;;   `plan-nydus-worm-tactics` <-> `plan-counter-nydus-worm-tactics`

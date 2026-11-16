@@ -73,7 +73,7 @@
 (define MIN-BOT-ZIP-SIZE-BYTES         3000000)
 (define MIN-STANDALONE-ELF-BYTES       45000000)
 
-(define INCLUDE-DIRS '("sc-bot" "compiler" "lib" "sim" "bots" "ffi"))
+(define INCLUDE-DIRS '("bots" "ffi"))
 (define INCLUDE-TOP-FILES '("run.py" "main.rkt" "info.rkt"))
 
 (define VARIANTS
@@ -312,6 +312,7 @@
   (current-directory ROOT-DIR)
   (clean-compiled-zo-tree!)
   (define build-order-subfiles (discover-sorted-sub-rkt-relpaths "lib/build-orders"))
+  (define plan-subfiles (discover-sorted-sub-rkt-relpaths "lib/plan"))
   (define tactic-subfiles (discover-sorted-sub-rkt-relpaths "lib/tactics"))
   (define lib-all-subfiles (discover-sorted-sub-rkt-relpaths "lib"))
   (define ordered-core-targets
@@ -335,12 +336,14 @@
        "lib/perception-grid.rkt"
        "lib/sc2-placement.rkt"
        "lib/sc2-combat-eval.rkt")
+     plan-subfiles
      tactic-subfiles
      '(;; Layer 3
        "lib/econ-ledger.rkt"
        "lib/priority-macro-brain.rkt"
        "lib/mirror-mind-predictor.rkt"
        "lib/human-cortex.rkt"
+       "lib/plan-sim.rkt"
        "lib/tactics-sim.rkt"
        ;; Layer 4 + tooling/runtime libraries
        "lib/sc2-mpq-replay-parser.rkt"

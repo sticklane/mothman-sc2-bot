@@ -30,8 +30,8 @@
          "econ-ledger.rkt"
          "tactics/zerg-burrow-micro.rkt"
          "tactics/disruptor-micro.rkt"
-         "tactics/wall-and-block-tactics.rkt"
-         "tactics/multitask-harass-and-proxy.rkt"
+         "plan/wall-and-block.rkt"
+         "plan/multitask-harass-and-proxy.rkt"
          "tactics/pro-spellcaster-micro.rkt")
 
 (provide

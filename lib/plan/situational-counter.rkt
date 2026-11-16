@@ -1,12 +1,12 @@
 #lang typed/racket/base
 
 ;; =============================================================================
-;; `lib/situational-counter-planner.rkt`
+;; `lib/plan/situational-counter.rkt`
 ;; Standalone Mid-Level LotV Situational Counter, Ability & Upgrade Planner
 ;;
-;; Layering invariant: imports ONLY `"sc2-types.rkt"` and `"sc2-game-constants.rkt"`
+;; Layering invariant: imports ONLY `"../sc2-types.rkt"` and `"../sc2-game-constants.rkt"`
 ;; (plus `racket/*` stdlib) so it compiles fast and independently of upstream edits.
-;; Sits between global `build-orders.rkt` and frame-level `tactics/*.rkt`.
+;; Sits between global `build-orders.rkt` and frame-level `plan/*.rkt` / `tactics/*.rkt`.
 ;; =============================================================================
 
 (require racket/list
@@ -14,8 +14,8 @@
          racket/math
          racket/set
          typed/racket/unsafe
-         "sc2-types.rkt"
-         "sc2-game-constants.rkt")
+         "../sc2-types.rkt"
+         "../sc2-game-constants.rkt")
 
 ;; Safe dynamic inspection of untyped observation/unit hashes without polluting Typed invariants.
 (module dyn-ops racket/base

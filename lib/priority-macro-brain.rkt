@@ -8,7 +8,7 @@
          "sc2-game-constants.rkt"
          "build-orders.rkt"
          "econ-ledger.rkt"
-         "situational-counter-planner.rkt")
+         "plan/situational-counter.rkt")
 
 (provide
  ;; 1. Declarative SC2 Tech, Cost, Build-Time, Facility-Slot & Prerequisite DAG

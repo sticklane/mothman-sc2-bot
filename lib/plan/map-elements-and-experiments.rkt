@@ -1,7 +1,7 @@
 #lang typed/racket/base
 
 ;; =============================================================================
-;; `lib/tactics/map-elements-and-experiments.rkt`
+;; `lib/plan/map-elements-and-experiments.rkt`
 ;; Wave 1D Typed Tactics & Experimentation Framework:
 ;;   A. Strategy & Multi-Spot Experimentation Framework (`EXPERIMENT-CATALOG`,
 ;;      `select-match-experiment`, `format-experiment-log-tag`,

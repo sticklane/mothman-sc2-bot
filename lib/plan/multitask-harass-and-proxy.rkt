@@ -1,7 +1,7 @@
 #lang typed/racket/base
 
 ;; =============================================================================
-;; `lib/tactics/multitask-harass-and-proxy.rkt`
+;; `lib/plan/multitask-harass-and-proxy.rkt`
 ;; Multi-Tasking Harass, Off-Path Proxy All-Ins (Each Race + Random Variants),
 ;; Air Worker Harass, Simultaneous Multi-Base Viking Landings & Anti-Baneling
 ;; Splitting / Zero-Overkill Target-Fire <-> Baneling Move-Past & Landmines.

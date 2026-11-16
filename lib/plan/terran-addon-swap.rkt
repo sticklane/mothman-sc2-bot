@@ -1,7 +1,7 @@
 #lang racket/base
 
 ;; =============================================================================
-;; `lib/tactics/terran-addon-swap.rkt`
+;; `lib/plan/terran-addon-swap.rkt`
 ;; Pro Terran Production Building Lift-Off & Add-On Swapping Coordination:
 ;;   - 448-loop (`20.0s`) per-building relift cooldown
 ;;   - 1-to-1 add-on claim lock & donor offset landing pad tracking
