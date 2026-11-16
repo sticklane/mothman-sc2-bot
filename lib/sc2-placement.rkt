@@ -3024,6 +3024,7 @@
                       #:do [(define sx (+ ax (* c (car dr))))
                             (define sy (+ ay (* r (cdr dr))))]
                       #:when (and (placement-in-playable-bounds? sx sy)
+                                  (<= (dist2d sx sy bx-f by-f) 22.0)
                                   (or (not grids-ok?)
                                       (footprint-buildable-at-height? sx sy 1.5 1.5 w h bref href (if (real? main-h) main-h 0.0) (real? main-h) pref))))
              1))
@@ -3266,22 +3267,29 @@
     (cond
       ;; 1. 2x5 Production Matrix (`dx=7.0`, `dy=5.0` aligned, AddOns & 2-tile egress guaranteed)
       [(memq canon '(barracks factory starport))
+       (define (slot-in-base-or-nat? pt)
+         (or (<= (dist2d (car pt) (cdr pt) bx-f by-f) 22.0)
+             (<= (dist2d (car pt) (cdr pt) nx-f ny-f) 15.0)))
        (define primary-slots
-         (for*/list ([c (in-range 5)]
-                     [r (in-range 2)])
-           (cons (+ mx0 (* c cd)) (+ my0 (* r rd)))))
+         (filter slot-in-base-or-nat?
+                 (for*/list ([c (in-range 5)]
+                             [r (in-range 2)])
+                   (cons (+ mx0 (* c cd)) (+ my0 (* r rd))))))
        (define overflow-slots
-         (for*/list ([c (in-list '(-1 5 -2 6))]
-                     [r (in-list '(0 1 -1 2))])
-           (cons (+ mx0 (* c cd)) (+ my0 (* r rd)))))
+         (filter slot-in-base-or-nat?
+                 (for*/list ([c (in-list '(-1 5 -2 6))]
+                             [r (in-list '(0 1 -1 2))])
+                   (cons (+ mx0 (* c cd)) (+ my0 (* r rd))))))
        (or (first-valid primary-slots main-h)
            (first-valid overflow-slots main-h)
+           (first-valid (append primary-slots overflow-slots) nat-h)
            (for*/first ([allow-addon? (in-list '(#f #t))]
                         [pt (in-list (append primary-slots overflow-slots))]
                         #:do [(define sx (snap-fn (car pt)))
                               (define sy (snap-fn (cdr pt)))]
                         #:when (simcity-site-valid? canon sx sy phys-aabbs addon-aabbs res-aabbs exp-pads
-                                                    grids-ok? w h pref bref href #f
+                                                    grids-ok? w h pref bref href
+                                                    (if (<= (dist2d sx sy bx-f by-f) 22.0) main-h nat-h)
                                                     #:disallow-aabbs '()
                                                     #:corridors '()
                                                     #:require-terrain? grids-ok?

@@ -7966,8 +7966,10 @@
   (define margin (compute-supply-preemption-margin cap))
   (define proj-cap (+ cap (* 8 pend)))
   (and (< cap 200)
-       (not (and (<= cap 14) (<= used 12)))
-       (>= used (- cap margin))
+       (cond
+         [(<= cap 14) (>= used cap)]
+         [(= cap 15)  (>= used 14)]
+         [else        (>= used (- cap margin))])
        (or (= pend 0)
            (and (< proj-cap 200)
                 (<= (- proj-cap used) margin)))))

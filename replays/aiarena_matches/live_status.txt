@@ -2,27 +2,27 @@
   AI Arena Live Bot & Match Status (User #3871, Competition #38)
 ============================================================================
   * Mothman-R (#1457, python) | active=False elo=1600 div=0 | updated=2026-11-07T13:48:17.234289Z md5=bf8f384cb14cc0bb7025aeae736a0d34
-  * Mothman-Z (#1458, cpplinux) | active=True elo=1247 div=9 | updated=2026-11-15T16:01:23.700566Z md5=2e5a3a3ca709ddcd1aef8c615bdf8a07
-      - Match #5127138 (https://aiarena.net/matches/5127138/): status=QUEUED/IN_PROGRESS cause=- elo_chg=0 step=N/A
-      - Match #5127137 (https://aiarena.net/matches/5127137/): status=QUEUED/IN_PROGRESS cause=- elo_chg=0 step=N/A
-      - Match #5127136 (https://aiarena.net/matches/5127136/): status=QUEUED/IN_PROGRESS cause=- elo_chg=0 step=N/A
-      - Match #5127135 (https://aiarena.net/matches/5127135/): status=QUEUED/IN_PROGRESS cause=- elo_chg=0 step=N/A
-      - Match #5127134 (https://aiarena.net/matches/5127134/): status=loss cause=game_rules elo_chg=-2 step=13.3ms
-  * Mothman-P (#1460, cpplinux) | active=True elo=1286 div=9 | updated=2026-11-15T16:01:41.303918Z md5=a38503ae5ba678fcce2c32377d62bb4b
+  * Mothman-Z (#1458, cpplinux) | active=True elo=1250 div=9 | updated=2026-11-16T02:01:19.406254Z md5=cda2c21153a59205d1e0ebaeb6043547
+      - Match #5127715 (https://aiarena.net/matches/5127715/): status=loss cause=game_rules elo_chg=0 step=2.11ms
+      - Match #5127711 (https://aiarena.net/matches/5127711/): status=loss cause=game_rules elo_chg=0 step=2.5ms
+      - Match #5127702 (https://aiarena.net/matches/5127702/): status=tie cause=game_rules elo_chg=0 step=18.1ms
+      - Match #5127698 (https://aiarena.net/matches/5127698/): status=loss cause=game_rules elo_chg=0 step=1.56ms
+      - Match #5127138 (https://aiarena.net/matches/5127138/): status=tie cause=game_rules elo_chg=1 step=23.62ms
+  * Mothman-P (#1460, cpplinux) | active=True elo=1248 div=9 | updated=2026-11-16T02:01:33.329745Z md5=244fbc16ed1f921cdb7bc753885ad157
+      - Match #5127717 (https://aiarena.net/matches/5127717/): status=loss cause=game_rules elo_chg=0 step=2.03ms
+      - Match #5127713 (https://aiarena.net/matches/5127713/): status=loss cause=game_rules elo_chg=0 step=1.82ms
+      - Match #5127704 (https://aiarena.net/matches/5127704/): status=loss cause=game_rules elo_chg=0 step=1.85ms
+      - Match #5127700 (https://aiarena.net/matches/5127700/): status=loss cause=game_rules elo_chg=0 step=2.66ms
       - Match #5127157 (https://aiarena.net/matches/5127157/): status=loss cause=game_rules elo_chg=-4 step=7.02ms
-      - Match #5127156 (https://aiarena.net/matches/5127156/): status=QUEUED/IN_PROGRESS cause=- elo_chg=0 step=N/A
-      - Match #5127155 (https://aiarena.net/matches/5127155/): status=QUEUED/IN_PROGRESS cause=- elo_chg=0 step=N/A
-      - Match #5127154 (https://aiarena.net/matches/5127154/): status=QUEUED/IN_PROGRESS cause=- elo_chg=0 step=N/A
-      - Match #5127153 (https://aiarena.net/matches/5127153/): status=QUEUED/IN_PROGRESS cause=- elo_chg=0 step=N/A
-  * Mothman-T (#1459, cpplinux) | active=True elo=1230 div=9 | updated=2026-11-15T16:01:33.500550Z md5=d78ede646d9463c4ee6dfea638c860e2
+  * Mothman-T (#1459, cpplinux) | active=True elo=1210 div=9 | updated=2026-11-16T02:01:27.131787Z md5=598a6e5c55aaa17848dabce3d2946648
+      - Match #5127716 (https://aiarena.net/matches/5127716/): status=loss cause=game_rules elo_chg=0 step=2.75ms
+      - Match #5127712 (https://aiarena.net/matches/5127712/): status=loss cause=game_rules elo_chg=0 step=1.72ms
+      - Match #5127703 (https://aiarena.net/matches/5127703/): status=loss cause=game_rules elo_chg=0 step=2.65ms
+      - Match #5127699 (https://aiarena.net/matches/5127699/): status=loss cause=game_rules elo_chg=0 step=3.09ms
       - Match #5127148 (https://aiarena.net/matches/5127148/): status=loss cause=game_rules elo_chg=-3 step=3.64ms
-      - Match #5127147 (https://aiarena.net/matches/5127147/): status=win cause=game_rules elo_chg=4 step=3.84ms
-      - Match #5127146 (https://aiarena.net/matches/5127146/): status=QUEUED/IN_PROGRESS cause=- elo_chg=0 step=N/A
-      - Match #5127145 (https://aiarena.net/matches/5127145/): status=QUEUED/IN_PROGRESS cause=- elo_chg=0 step=N/A
-      - Match #5127144 (https://aiarena.net/matches/5127144/): status=loss cause=game_rules elo_chg=-2 step=5.69ms
-  * Mothman-X (#1461, cpplinux) | active=True elo=1261 div=9 | updated=2026-11-15T16:01:52.169227Z md5=3651ce28a6345a1f5d7736cb240c109a
-      - Match #5127165 (https://aiarena.net/matches/5127165/): status=QUEUED/IN_PROGRESS cause=- elo_chg=0 step=N/A
-      - Match #5127164 (https://aiarena.net/matches/5127164/): status=win cause=game_rules elo_chg=4 step=4.17ms
-      - Match #5127163 (https://aiarena.net/matches/5127163/): status=loss cause=game_rules elo_chg=-2 step=6.97ms
-      - Match #5127162 (https://aiarena.net/matches/5127162/): status=QUEUED/IN_PROGRESS cause=- elo_chg=0 step=N/A
-      - Match #5127161 (https://aiarena.net/matches/5127161/): status=QUEUED/IN_PROGRESS cause=- elo_chg=0 step=N/A
+  * Mothman-X (#1461, cpplinux) | active=True elo=1247 div=9 | updated=2026-11-16T02:01:42.266028Z md5=05adde1f909ae393937c4180d0f86f27
+      - Match #5127718 (https://aiarena.net/matches/5127718/): status=loss cause=game_rules elo_chg=0 step=1.8ms
+      - Match #5127714 (https://aiarena.net/matches/5127714/): status=loss cause=game_rules elo_chg=0 step=2.64ms
+      - Match #5127705 (https://aiarena.net/matches/5127705/): status=loss cause=game_rules elo_chg=0 step=2.69ms
+      - Match #5127701 (https://aiarena.net/matches/5127701/): status=loss cause=game_rules elo_chg=0 step=6.0ms
+      - Match #5127165 (https://aiarena.net/matches/5127165/): status=loss cause=game_rules elo_chg=-3 step=13.66ms

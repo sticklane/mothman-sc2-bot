@@ -9889,11 +9889,13 @@
   (define escrow-making-progress?
     (and escrow-same-goal?
          (not already-suppressed-goal?)
-         (memq active-escrow-sym '(hatchery nexus command-center))
+         (memq active-escrow-sym '(hatchery nexus command-center
+                                   spawning-pool barracks gateway cybernetics-core
+                                   roach-warren baneling-nest factory starport robotics-facility stargate))
          (> total-workers 0)
-         (< (- frame cur-escrow-start-frame) 448)
+         (< (- frame cur-escrow-start-frame) 672)
          (< obs-minerals (sc2-min-cost active-escrow-sym))
-         (> obs-minerals prev-escrow-peak-min)))
+         (> obs-minerals prev-escrow-min)))
   (define cur-escrow-peak-min
     (if escrow-same-goal?
         (max prev-escrow-peak-min obs-minerals)
@@ -9923,7 +9925,7 @@
          exp-goal-sym-this-step
          (not (< frame prev-suppressed-until))
          (exact-integer? cur-exp-streak-start)
-         (>= (- frame cur-exp-streak-start) 448)
+         (>= (- frame cur-exp-streak-start) (if (> obs-minerals prev-escrow-min) 672 448))
          (or (>= obs-minerals 350) (>= (- frame cur-exp-streak-start) 672))))
   (define max-escrow-timeout-frames 224)
   (set-l2-ctx-max-escrow-timeout-frames! ctx max-escrow-timeout-frames)
@@ -12281,15 +12283,20 @@
   (define first-ready-pylon
        (or (findf (lambda (b)
                     (or (not live-game-obs?)
-                        (not (or worker-rush-active? in-base-proxy-detected?))
                         (<= (dist2d base-x base-y
                                     (hash-ref b 'x -999.0)
                                     (hash-ref b 'y -999.0))
-                            7.5)))
+                            (if (or worker-rush-active? in-base-proxy-detected?)
+                                7.5
+                                18.0))))
                   ready-pylons)
            (and (> frame 500)
-                (pair? ready-pylons)
-                (car ready-pylons))))
+                (findf (lambda (b)
+                         (<= (dist2d base-x base-y
+                                     (hash-ref b 'x -999.0)
+                                     (hash-ref b 'y -999.0))
+                             22.0))
+                       ready-pylons))))
   (set-l2-ctx-first-ready-pylon! ctx first-ready-pylon)
   (define inmain-powered-gx
        (if first-ready-pylon
@@ -13743,7 +13750,11 @@
   (define terran-contained-bank-breakout?
        (and live-game?
             (<= (length ccs) 3)
-            (>= (l2-ctx-minerals ctx) 1500)
+            (>= (l2-ctx-minerals ctx)
+                (cond
+                  [(>= (length ccs) 3) 1500]
+                  [(l2-ctx-bldg-actively-damaged? ctx) 1400]
+                  [else 750]))
             (not early-survival-crisis?)))
   (when (and (>= (l2-ctx-minerals ctx) (sc2-min-cost 'command-center))
                 (or terran-contained-bank-breakout?
@@ -21786,7 +21797,24 @@
                  'scouted-enemy-main? (or (pair? enemy-bldgs) (hash-ref obs 'scouted-enemy-main? #f))))
     (emit-direct-batch! (UnwalledPunishPlan-commands (plan-unwalled-opponent-punish punish-obs))))
   (when (or (<= frame 2800) has-ally-wall-block-bldg?)
-    (emit-direct-batch! (plan-expansion-and-gas-blocks obs)))
+    (define raw-block-acts (plan-expansion-and-gas-blocks obs))
+    (define live-block-obs? (hash-has-key? obs 'mineral-harvesters))
+    (define eff-block-acts
+      (if (not live-block-obs?)
+          raw-block-acts
+          (let ([active-bases-now
+                 (count (lambda (b)
+                          (and (hash? b)
+                               (memq (fast-canonical-structure-sym (unit-type-sym b))
+                                     '(hatchery lair hive nexus command-center orbital-command planetary-fortress))))
+                        ally-bldgs)]
+                [mins-now (exact->inexact (fast-finite-real (hash-ref obs 'minerals 0.0) 0.0))])
+            (if (and (>= active-bases-now 2) (>= mins-now 450.0) (>= frame 3360))
+                raw-block-acts
+                (filter (lambda (a)
+                          (not (and (pair? a) (eq? (car a) 'build))))
+                        raw-block-acts)))))
+    (emit-direct-batch! eff-block-acts))
   (when (or (pair? enemy-bldgs)
             (and (<= frame 3600)
                  (>= (exact->inexact (fast-finite-real (hash-ref obs 'minerals 0.0) 0.0)) 180.0)))

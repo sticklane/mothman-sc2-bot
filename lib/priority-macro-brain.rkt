@@ -3696,13 +3696,25 @@
     (for/sum ([s (in-list '(hatchery lair hive nexus command-center orbital-command planetary-fortress))])
       (hash-ref total-bldg-counts s 0)))
   (define escrow-state-entry
-    (macro-escrow-sync-entry! race enemy-race frame minerals eff-th-total-cnt))
+    (macro-escrow-sync-entry! race enemy-race frame minerals eff-th-total-cnt
+                              #:workers workers #:gas gas))
   (define (cand-can-escrow? sym)
     (define (compute)
       (define node (lookup-sc2-tech-node sym))
       (define nsym (normalize-brain-sym sym))
       (define supply-sym? (memq nsym '(overlord pylon supply-depot)))
       (define nat-exp-sym? (and natural-exp-window? (eq? nsym race-expand-sym)))
+      (define core-or-bo-escrow?
+        (and node
+             (or (and bo-goal-sym (same-brain-sym? sym bo-goal-sym))
+                 (is-repaired-prereq? sym)
+                 (eq? (sc2-tech-node-category node) 'expansion)
+                 (and (memq nsym '(hatchery nexus command-center
+                                   spawning-pool barracks gateway cybernetics-core
+                                   roach-warren baneling-nest lair hive orbital-command
+                                   factory starport robotics-facility stargate
+                                   twilight-council forge engineering-bay armory))
+                      #t))))
       (and node
            (or supply-sym? (not supply-preempt-now?))
            (or supply-sym? (not (macro-escrow-in-backoff? escrow-state-entry frame nsym)))
@@ -3721,7 +3733,8 @@
                 minerals gas
                 (sc2-tech-node-min-cost node) (sc2-tech-node-gas-cost node)
                 mineral-harvesters gas-harvesters
-                workers ready-bldg-counts race #:frames 120))
+                workers ready-bldg-counts race
+                #:frames (if core-or-bo-escrow? 480 120)))
            (not (step-already-satisfied? sym))
            (step-prereqs-ready? sym)))
     (if (symbol? sym)
@@ -5802,7 +5815,7 @@
              (can-fund-within-frames?
               rem-min rem-gas (sc2-min-cost final-bo-goal-sym 0) (sc2-gas-cost final-bo-goal-sym 0)
               mineral-harvesters gas-harvesters
-              workers ready-bldg-counts race #:frames 120))
+              workers ready-bldg-counts race #:frames 480))
          (<= final-bo-sup-cost supply-left)
          (not (and (memq final-bo-goal-sym '(hatchery nexus command-center))
                    (hash? open-facility-slots)
@@ -5876,7 +5889,8 @@
 (define (reset-macro-escrow-tracker!)
   (hash-clear! *macro-escrow-state-ht*))
 
-(define (macro-escrow-sync-entry! race enemy-race frame minerals total-th)
+(define (macro-escrow-sync-entry! race enemy-race frame minerals total-th
+                                 #:workers [workers #f] #:gas [gas 0])
   (define key (list race enemy-race))
   (define prev (hash-ref *macro-escrow-state-ht* key #f))
   (define last-f (if prev (hash-ref prev 'last-frame -9999) -9999))
@@ -5891,25 +5905,45 @@
               'start-frame frame
               'start-min minerals
               'peak-min minerals
+              'last-min minerals
+              'last-gain-frame -9999
               'th-count total-th
               'backoff-ht (hash))
         (let* ([aid (hash-ref prev 'active-id #f)]
                [sf (hash-ref prev 'start-frame frame)]
                [sm (hash-ref prev 'start-min minerals)]
                [pm (hash-ref prev 'peak-min minerals)]
+               [last-min (hash-ref prev 'last-min sm)]
+               [prev-gain-f (hash-ref prev 'last-gain-frame -9999)]
+               [cur-gain-f (if (> minerals last-min) frame prev-gain-f)]
+               [has-mining-gain? (and (exact-integer? cur-gain-f)
+                                      (>= cur-gain-f sf)
+                                      (<= (- frame cur-gain-f) 160))]
                [prev-th (hash-ref prev 'th-count total-th)]
                [bht0 (hash-ref prev 'backoff-ht (hash))]
                [bht (for/hash ([(k until) (in-hash bht0)]
                                #:when (< frame until))
                       (values k until))]
+               [core-or-exp-saving?
+                (and aid
+                     (memq aid '(hatchery nexus command-center
+                                 spawning-pool barracks gateway cybernetics-core
+                                 roach-warren baneling-nest lair hive orbital-command
+                                 factory starport robotics-facility stargate))
+                     (if (exact-integer? workers) (> workers 0) #t)
+                     (or (< minerals (sc2-min-cost aid 0))
+                         (< gas (sc2-gas-cost aid 0)))
+                     has-mining-gain?)]
                [nat-age
-                (if (and aid
-                         (memq aid '(hatchery nexus command-center))
-                         (< total-th 2)
-                         (= total-th prev-th)
-                         (> minerals sm))
-                    (if (>= minerals 200) 672 448)
-                    MAX-ESCROW-AGE-FRAMES)]
+                (cond
+                  [core-or-exp-saving? (max MAX-ESCROW-AGE-FRAMES 672)]
+                  [(and aid
+                        (memq aid '(hatchery nexus command-center))
+                        (< total-th 2)
+                        (= total-th prev-th)
+                        (> minerals sm))
+                   (if (>= minerals 200) 672 448)]
+                  [else MAX-ESCROW-AGE-FRAMES])]
                [expired? (and aid (>= (- frame sf) nat-age))])
           (if expired?
               (hash 'last-frame frame
@@ -5917,6 +5951,8 @@
                     'start-frame frame
                     'start-min minerals
                     'peak-min minerals
+                    'last-min minerals
+                    'last-gain-frame -9999
                     'th-count total-th
                     'backoff-ht (hash-set bht aid (+ frame ESCROW-EXPIRATION-BACKOFF-FRAMES)))
               (hash 'last-frame frame
@@ -5924,6 +5960,8 @@
                     'start-frame sf
                     'start-min sm
                     'peak-min (max pm minerals)
+                    'last-min minerals
+                    'last-gain-frame cur-gain-f
                     'th-count total-th
                     'backoff-ht bht)))))
   (hash-set! *macro-escrow-state-ht* key cur)
@@ -5969,6 +6007,10 @@
                      'start-frame next-sf
                      'start-min next-sm
                      'peak-min next-pm
+                     'last-min minerals
+                     'last-gain-frame (if (and next-aid (eq? next-aid prev-aid))
+                                          (hash-ref cur 'last-gain-frame -9999)
+                                          -9999)
                      'th-count total-th
                      'backoff-ht bht))))
 
