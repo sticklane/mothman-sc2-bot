@@ -26,11 +26,12 @@
                     MORPH-VIKING-ASSAULT-ABILITY-ID
                     MORPH-VIKING-FIGHTER-ABILITY-ID)
          "tactics/map-elements-and-experiments.rkt"
-         (except-in "tactics/static-defense-and-nydus-tactics.rkt"
+         (except-in "tactics/static-defense-tactics.rkt"
                     NEXUS-ENERGY-RECHARGE-ABILITY-ID
                     SHIELD-BATTERY-RECHARGE-ABILITY-ID
                     SHIELD-BATTERY-RESTORE-LEGACY-ID
-                    LOCUST-SWOOP-ABILITY-ID))
+                    LOCUST-SWOOP-ABILITY-ID)
+         "tactics/nydus-tactics.rkt")
 
 (provide
  (all-from-out "sc2-geometry.rkt")
@@ -51,4 +52,11 @@
  (all-from-out "tactics/wall-and-block-tactics.rkt")
  (all-from-out "tactics/multitask-harass-and-proxy.rkt")
  (all-from-out "tactics/map-elements-and-experiments.rkt")
- (all-from-out "tactics/static-defense-and-nydus-tactics.rkt"))
+ (all-from-out "tactics/static-defense-tactics.rkt")
+ (all-from-out "tactics/nydus-tactics.rkt")
+ plan-static-defense-and-nydus-actions)
+
+;; Compatibility wrapper preserving the combined orchestrator signature.
+(define (plan-static-defense-and-nydus-actions raw-obs)
+  (append (plan-static-defense-actions raw-obs)
+          (plan-nydus-actions raw-obs)))

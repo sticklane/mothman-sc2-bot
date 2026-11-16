@@ -1,12 +1,12 @@
 #lang racket/base
 
 ;; =============================================================================
-;; `lib/tactics/static-defense-and-nydus-tactics.rkt`
-;; Symmetric Static-Defense, Proxy-Cannon, Swarm-Host & Nydus Tactics Module
+;; `lib/tactics/static-defense-tactics.rkt`
+;; Symmetric Static-Defense, Proxy-Cannon, & Swarm-Host Tactics Module
 ;;
 ;; Layering invariant: imports ONLY `"../sc2-geometry.rkt"`,
 ;; `"../sc2-game-constants.rkt"`, and `"../sc2-common.rkt"` (plus `racket/*`).
-;; Never imports `sc2-placement.rkt` or `tactics-sim.rkt`.
+;; Never imports `sc2-placement.rkt`, `tactics-sim.rkt`, or `nydus-tactics.rkt`.
 ;;
 ;; Symmetric Pairs (Offense <-> Counter):
 ;;   a) `plan-spread-burrowed-swarm-host-harass` <-> `plan-counter-spread-swarm-host-harass`
@@ -15,9 +15,8 @@
 ;;   d) `plan-bunker-tactics`                    <-> `plan-counter-bunker-tactics`
 ;;   e) `plan-missile-turret-tactics`            <-> `plan-counter-missile-turret-tactics`
 ;;   f) `plan-planetary-fortress-tactics`        <-> `plan-counter-planetary-fortress-tactics`
-;;   g) `plan-nydus-worm-tactics`                <-> `plan-counter-nydus-worm-tactics`
-;;   h) `plan-shield-battery-and-nexus-overcharge-tactics` <-> `plan-counter-shield-battery-tactics`
-;;   i) `plan-spore-crawler-tactics`             <-> `plan-counter-spore-crawler-tactics`
+;;   g) `plan-shield-battery-and-nexus-overcharge-tactics` <-> `plan-counter-shield-battery-tactics`
+;;   h) `plan-spore-crawler-tactics`             <-> `plan-counter-spore-crawler-tactics`
 ;;      `plan-spine-crawler-tactics`             <-> `plan-counter-spine-crawler-tactics`
 ;; =============================================================================
 
@@ -40,7 +39,7 @@
  SWARM-HOST-COOLDOWN-FRAMES
  SWARM-HOST-STAGGER-MODULO
  BATTERY-OVERCHARGE-WINDOW-FRAMES
- ;; 9 Symmetric Tactic <-> Counter Pairs
+ ;; 8 Symmetric Static-Defense & Swarm-Host Tactic <-> Counter Pairs
  plan-spread-burrowed-swarm-host-harass
  plan-counter-spread-swarm-host-harass
  plan-pro-cannon-rush-tactics
@@ -53,8 +52,6 @@
  plan-counter-missile-turret-tactics
  plan-planetary-fortress-tactics
  plan-counter-planetary-fortress-tactics
- plan-nydus-worm-tactics
- plan-counter-nydus-worm-tactics
  plan-shield-battery-and-nexus-overcharge-tactics
  plan-counter-shield-battery-tactics
  plan-spore-crawler-tactics
@@ -62,7 +59,7 @@
  plan-spine-crawler-tactics
  plan-counter-spine-crawler-tactics
  ;; Top-level orchestrator
- plan-static-defense-and-nydus-actions)
+ plan-static-defense-actions)
 
 ;; -----------------------------------------------------------------------------
 ;; 1. Canonical Ability & Window Constants
@@ -1906,7 +1903,6 @@
         (define sentry
           (for/or ([u (in-list (hash-ref (sd-index-ally-u-by-type idx) 'sentry '()))])
             (and (> (u-id u) 0) (>= (u-energy u 0.0) 50.0) u)))
-        (define nydus (first-pos-id (sd-index-ally-b-by-type idx) 'nydus-network))
         (define actions '())
         (define (emit! a) (set! actions (cons a actions)))
         (for ([bk (in-list e-bunkers)])
@@ -1920,11 +1916,7 @@
             (for ([act (in-list (find-aoe-helper-cast/idx idx (u-x lead-scv bkx) (u-y lead-scv bky)))])
               (emit! act))
             (when sentry
-              (emit! (list 'cast-spell (u-id sentry) 'force-field (u-x lead-scv bkx) (u-y lead-scv bky)))))
-          (when nydus
-            (emit! (list 'build-nydus-worm (u-id nydus)
-                         (clamp-coord (- (sd-index-ex idx) 10.0))
-                         (clamp-coord (+ (sd-index-ey idx) 8.0))))))
+              (emit! (list 'cast-spell (u-id sentry) 'force-field (u-x lead-scv bkx) (u-y lead-scv bky))))))
         (reverse actions))))
 
 (define (plan-counter-bunker-tactics raw-obs)
@@ -2165,133 +2157,7 @@
   (plan-counter-planetary-fortress-tactics/idx (build-sd-index raw-obs)))
 
 ;; -----------------------------------------------------------------------------
-;; 3g. Nydus Worm Tactics <-> Counter Nydus Worm Tactics
-;; -----------------------------------------------------------------------------
-
-(define (plan-nydus-worm-tactics/idx idx)
-  (define ab-ht (sd-index-ally-b-by-type idx))
-  (define nets (bucket-pos-ids ab-ht '(nydus-network)))
-  (define worms (bucket-pos-ids ab-ht '(nydus-canal nydus-worm)))
-  (if (and (null? nets) (null? worms))
-      '()
-      (let ()
-        (define bx (sd-index-bx idx))
-        (define by (sd-index-by idx))
-        (define ex (sd-index-ex idx))
-        (define ey (sd-index-ey idx))
-        (define eex (sd-index-eex idx))
-        (define eey (sd-index-eey idx))
-        (define au-ht (sd-index-ally-u-by-type idx))
-        (define queens (bucket-pos-ids au-ht '(queen)))
-        (define actions '())
-        (define (emit! a) (set! actions (cons a actions)))
-
-        (when (and (pair? nets) (null? worms))
-          (emit! (list 'build-nydus-worm (u-id (first nets))
-                       (clamp-coord (+ ex 9.0)) (clamp-coord (+ ey 9.0))))
-          (when (>= (length nets) 2)
-            (emit! (list 'build-nydus-worm (u-id (second nets))
-                         (clamp-coord (- eex 10.0)) (clamp-coord (+ eey 10.0))))))
-
-        (when (and (pair? nets) (pair? worms))
-          (define army (bucket-pos-ids au-ht '(zergling baneling roach ravager hydralisk lurker ultralisk)))
-          (define net0 (first nets))
-          (define nx0 (u-x net0 bx))
-          (define ny0 (u-y net0 by))
-          (for ([q (in-list (k-nearest-to nx0 ny0 3 queens 22.0))])
-            (emit! (list 'nydus-load (u-id net0) (u-id q))))
-          (for ([au (in-list (k-nearest-to nx0 ny0 8 army 24.0))])
-            (emit! (list 'nydus-load (u-id net0) (u-id au)))))
-
-        (define completed-worms
-          (for/fold ([acc '()] #:result (reverse acc))
-                    ([w (in-list worms)])
-            (if (u-complete? w) (cons w acc) acc)))
-        (when (pair? completed-worms)
-          (define au-cld (ensure-au-cloud! idx))
-          (define eu-cld (ensure-eu-cloud! idx))
-          (define queen-pts
-            (for/list ([q (in-list queens)])
-              (vector (u-id q) (u-x q bx) (u-y q by) (u-energy q 0.0))))
-          (for ([w (in-list completed-worms)])
-            (define wid (u-id w))
-            (define wx (u-x w ex))
-            (define wy (u-y w ey))
-            (define local-allies (cloud-entities-within au-cld wx wy 12.0))
-            (define trapped-or-dying?
-              (and (pair? local-allies)
-                   (or (< (u-hp-frac w) 0.35)
-                       (let ([limit (+ 1 (* 2 (length local-allies)))])
-                         (>= (cloud-count-within? eu-cld wx wy 14.0 limit) limit)))))
-            (cond
-              [trapped-or-dying?
-               (for ([au (in-list local-allies)])
-                 (emit! (list 'nydus-load wid (u-id au))))]
-              [else
-               (emit! (list 'nydus-unload wid))
-               (when (pair? queen-pts)
-                 (define low-hp? (< (u-hp-frac w) 0.90))
-                 (define tumor-x (clamp-coord (+ wx 2.0)))
-                 (define tumor-y (clamp-coord (+ wy 2.0)))
-                 (for ([qp (in-list queen-pts)])
-                   (when (<= (fast-dist2 wx wy (vector-ref qp 1) (vector-ref qp 2)) 64.0)
-                     (define qid (vector-ref qp 0))
-                     (when low-hp?
-                       (emit! (list 'cast-spell qid 'transfusion wid)))
-                     (when (>= (vector-ref qp 3) 25.0)
-                       (emit! (list 'cast-spell qid 'spawn-creep-tumor tumor-x tumor-y))))))])))
-
-        (reverse actions))))
-
-(define (plan-nydus-worm-tactics raw-obs)
-  (plan-nydus-worm-tactics/idx (build-sd-index raw-obs)))
-
-(define (plan-counter-nydus-worm-tactics/idx idx)
-  (define eb-ht (sd-index-enemy-b-by-type idx))
-  (define enemy-worms (bucket-pos-ids eb-ht '(nydus-canal nydus-worm)))
-  (define combat (sd-index-ally-combat idx))
-  (define frame (sd-index-frame idx))
-  (if (and (null? enemy-worms)
-           (or (< frame 4500) (null? combat)))
-      '()
-      (let ()
-        (define bx (sd-index-bx idx))
-        (define by (sd-index-by idx))
-        (define nx (sd-index-nx idx))
-        (define ny (sd-index-ny idx))
-        (define actions '())
-        (define (emit! a) (set! actions (cons a actions)))
-
-        (when (pair? enemy-worms)
-          (define workers (sd-index-ally-workers idx))
-          (define combat-cld (and (pair? (cdr enemy-worms)) (ensure-combat-cloud! idx)))
-          (for ([ew (in-list enemy-worms)])
-            (define wx (u-x ew bx))
-            (define wy (u-y ew by))
-            (define pull-cnt (if (< (u-progress ew 1.0) 1.0) 8 6))
-            (define pulled (k-nearest-to wx wy pull-cnt workers 26.0))
-            (when (pair? pulled)
-              (emit! (list 'pull-workers-attack (map u-id pulled) (u-id ew) wx wy)))
-            (define local-def
-              (if combat-cld
-                  (cloud-k-nearest-to combat-cld wx wy 12 26.0)
-                  (k-nearest-to wx wy 12 combat 26.0)))
-            (when (pair? local-def)
-              (emit! (list 'focus-fire (map u-id local-def) (u-id ew))))))
-
-        (when (and (>= frame 4500) (pair? combat))
-          (define spotter (first combat))
-          (emit! (list 'patrol (u-id spotter) (clamp-coord (- bx 9.0)) (clamp-coord (- by 9.0))))
-          (when (pair? (cdr combat))
-            (emit! (list 'patrol (u-id (second combat)) (clamp-coord (+ nx 9.0)) (clamp-coord (- ny 8.0))))))
-
-        (reverse actions))))
-
-(define (plan-counter-nydus-worm-tactics raw-obs)
-  (plan-counter-nydus-worm-tactics/idx (build-sd-index raw-obs)))
-
-;; -----------------------------------------------------------------------------
-;; 3h. Shield Battery & Nexus Overcharge / Energy Recharge <-> Counter
+;; 3g. Shield Battery & Nexus Overcharge / Energy Recharge <-> Counter
 ;; -----------------------------------------------------------------------------
 
 (define (plan-shield-battery-and-nexus-overcharge-tactics/idx idx)
@@ -2754,7 +2620,7 @@
   (plan-counter-spine-crawler-tactics/idx (build-sd-index raw-obs)))
 
 ;; -----------------------------------------------------------------------------
-;; 4. Top-Level Unified Orchestrator (`plan-static-defense-and-nydus-actions`)
+;; 4. Top-Level Unified Orchestrator (`plan-static-defense-actions`)
 ;; -----------------------------------------------------------------------------
 
 (define (dedup-action-slot a)
@@ -2853,7 +2719,7 @@
                                (hash-set! f2 a #t)
                                (loop-act rest (cons a acc) n v f2)))))])))))))
 
-(define (plan-static-defense-and-nydus-actions raw-obs)
+(define (plan-static-defense-actions raw-obs)
   (define obs (ensure-obs raw-obs))
   (define idx (build-sd-index obs))
   (define race-raw (obs-ref obs 'race #f))
@@ -2880,8 +2746,6 @@
      (plan-counter-missile-turret-tactics/idx idx)
      (plan-planetary-fortress-tactics/idx idx)
      (plan-counter-planetary-fortress-tactics/idx idx)
-     (plan-nydus-worm-tactics/idx idx)
-     (plan-counter-nydus-worm-tactics/idx idx)
      (plan-shield-battery-and-nexus-overcharge-tactics/idx idx)
      (plan-counter-shield-battery-tactics/idx idx)
      (plan-spore-crawler-tactics/idx idx)

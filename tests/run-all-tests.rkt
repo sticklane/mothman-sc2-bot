@@ -9726,6 +9726,27 @@
                  (hash 'id 3 'type 'factory 'x 48.0 'y 40.0 'build-progress 1.0))
            'enemy-units '())))
   (assert-true! (and (pair? swap-acts) (eq? (caar swap-acts) 'terran-addon-swap)))
+  (define sd-split-acts
+    (plan-static-defense-actions
+     (hash 'frame 3200 'base-x 32.0 'base-y 32.0 'enemy-x 110.0 'enemy-y 110.0
+           'ally-units (list (hash 'id 1 'type 'probe 'x 40.0 'y 40.0))
+           'ally-buildings (list (hash 'id 2 'type 'shield-battery 'x 42.0 'y 42.0 'energy 100.0)
+                                 (hash 'id 3 'type 'nydus-network 'x 34.0 'y 34.0))
+           'enemy-units (list (hash 'id 9 'type 'zergling 'x 44.0 'y 42.0))
+           'enemy-buildings (list (hash 'id 10 'type 'nydus-worm 'x 35.0 'y 35.0 'build-progress 0.4)))))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (memq (car a) '(build-nydus-worm nydus-load nydus-unload pull-workers-attack))))
+                            sd-split-acts))
+                "Separated static-defense-tactics.rkt must not emit Nydus or counter-Nydus commands")
+  (define nydus-split-acts
+    (plan-nydus-actions
+     (hash 'frame 5000 'base-x 32.0 'base-y 32.0 'enemy-x 110.0 'enemy-y 110.0
+           'ally-units (list (hash 'id 1 'type 'drone 'x 34.0 'y 34.0)
+                             (hash 'id 2 'type 'zergling 'x 36.0 'y 36.0))
+           'ally-buildings (list (hash 'id 3 'type 'nydus-network 'x 34.0 'y 34.0))
+           'enemy-buildings (list (hash 'id 10 'type 'nydus-worm 'x 35.0 'y 35.0 'build-progress 0.4)))))
+  (assert-true! (and (pair? (assq 'build-nydus-worm nydus-split-acts))
+                     (pair? (assq 'pull-workers-attack nydus-split-acts)))
+                "Separated nydus-tactics.rkt must emit both build-nydus-worm and counter-nydus pull-workers-attack")
 
   ;; 42.6 lib/sc2-logging.rkt: cadence, record extraction, [SCBOT_STATE] line & hash roundtrip
   (assert-true! (should-emit-step-log? 0 64 #f))

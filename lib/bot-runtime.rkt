@@ -21501,7 +21501,7 @@
           (set! unclaimed-allies-cache res)
           res)))
 
-  ;; Direct Tactic #1: `zerg-burrow-micro.rkt` + Swarm Host (`static-defense-and-nydus-tactics.rkt`)
+  ;; Direct Tactic #1: `zerg-burrow-micro.rkt` + Swarm Host (`static-defense-tactics.rkt`)
   ;; (Roach tunneling + Infestor burrow cast already executed directly at lines ~13101-13110)
   (when (and has-any-enemy? zerg-or-random? ally-zerg-burrow-candidate?)
     (emit-direct-batch!
@@ -21823,9 +21823,11 @@
             (hash-set* obs 'enemy-buildings '() 'ally-buildings '())))
       (emit-direct-batch! (plan-counter-expansion-and-gas-blocks cegb-obs))))
 
-  ;; Direct Tactic #5: `static-defense-and-nydus-tactics.rkt`
+  ;; Direct Tactic #5a: `static-defense-tactics.rkt`
+  ;; Direct Tactic #5b: `nydus-tactics.rkt`
   (when (or has-ally-static-def-or-nydus? has-enemy-static-def-or-nydus?)
-    (emit-direct-batch! (plan-static-defense-and-nydus-actions obs)))
+    (emit-direct-batch! (plan-static-defense-actions obs))
+    (emit-direct-batch! (plan-nydus-actions obs)))
 
   ;; Direct Tactic #6: `map-elements-and-experiments.rkt`
   (let ([neutrals (let ([v (hash-ref obs 'neutral-units '())]) (if (list? v) v '()))])
