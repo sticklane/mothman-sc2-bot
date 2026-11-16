@@ -4207,11 +4207,14 @@
          (> (l2-ctx-supply-left ctx) 0)))
 
 (define (l2-spend-resources-and-supply! ctx m-cost g-cost s-cost)
-    (set-l2-ctx-minerals! ctx (max 0 (- (l2-ctx-minerals ctx) m-cost)))
-    (set-l2-ctx-gas! ctx (max 0 (- (l2-ctx-gas ctx) g-cost)))
-    (when (> s-cost 0)
-      (set-l2-ctx-supply-left! ctx (max 0 (- (l2-ctx-supply-left ctx) s-cost)))
-      (set-l2-ctx-effective-free-supply! ctx (max 0 (- (l2-ctx-effective-free-supply ctx) s-cost)))))
+  (set-l2-ctx-minerals! ctx (max 0 (- (l2-ctx-minerals ctx) m-cost)))
+  (set-l2-ctx-gas! ctx (max 0 (- (l2-ctx-gas ctx) g-cost)))
+  (when (and (> g-cost 0) (> (l2-ctx-bo-reserved-gas ctx) 0))
+    (set-l2-ctx-bo-reserved-gas! ctx (max 0 (- (l2-ctx-bo-reserved-gas ctx) g-cost)))
+    (set-l2-ctx-bo-reserved-min! ctx (max 0 (- (l2-ctx-bo-reserved-min ctx) m-cost))))
+  (when (> s-cost 0)
+    (set-l2-ctx-supply-left! ctx (max 0 (- (l2-ctx-supply-left ctx) s-cost)))
+    (set-l2-ctx-effective-free-supply! ctx (max 0 (- (l2-ctx-effective-free-supply ctx) s-cost)))))
 
 (define (l2-upgrade-needed? ctx upg-sym)
   (define frame (l2-ctx-frame ctx))
@@ -4649,7 +4652,7 @@
                             '(spawning-pool cybernetics-core forge
                               orbital-command barracks-techlab factory starport engineering-bay
                               robotics-facility twilight-council))
-                      (and (<= live-enemy-threat-supply 0)
+                      (and (<= live-enemy-threat-supply 4.0)
                            (or (eq? target-sym bo-goal-sym)
                                (eq? target-sym active-escrow-sym)
                                (memq target-sym
@@ -4795,9 +4798,11 @@
              (>= (l2-ctx-minerals ctx) m-cost)
              (>= (l2-ctx-gas ctx) g-cost))
         (and (eq? cat-sym 'combat-unit)
+             (>= (l2-ctx-minerals ctx) m-cost)
+             (>= (- (l2-ctx-minerals ctx) m-cost) (l2-ctx-hard-supply-lockout-reserve-min ctx))
              (>= (- (l2-ctx-gas ctx) g-cost) (if (> g-cost 0) protoss-pending-robo-gas-reserve 0))
              (or under-base-attack?
-                 (> live-enemy-threat-supply 0)
+                 (>= live-enemy-threat-supply (max 6 (+ (l2-ctx-live-army-supply ctx) 2)))
                  escrow-suppressed-active?
                  (and severe-intel-blindness? (null? ally-combat-units))))
         (macro-brain-can-spend? macro-decision id-sym (l2-ctx-minerals ctx) (l2-ctx-gas ctx) cat-sym)
@@ -4805,7 +4810,10 @@
              (macro-brain-can-spend? macro-decision alt-sym (l2-ctx-minerals ctx) (l2-ctx-gas ctx) cat-sym))
         (and (eq? cat-sym 'combat-unit)
              (>= (l2-ctx-minerals ctx) m-cost)
-             (>= (- (l2-ctx-gas ctx) g-cost) (if (> g-cost 0) protoss-pending-robo-gas-reserve 0))
+             (>= (- (l2-ctx-minerals ctx) m-cost) (l2-ctx-bo-reserved-min ctx))
+             (>= (- (l2-ctx-gas ctx) g-cost)
+                 (max (l2-ctx-bo-reserved-gas ctx)
+                      (if (> g-cost 0) protoss-pending-robo-gas-reserve 0)))
              (or (l2-tech-plan-boosted-unit? ctx id-sym)
                  (and alt-sym (l2-tech-plan-boosted-unit? ctx alt-sym))))
         (and (not under-base-attack?)
@@ -5035,7 +5043,7 @@
          (not blocked-nat-expanded-early?)
          (not (and live-game? (= cur-base-count 1) natural-blocked?))
          (not (and live-game? (<= cur-base-count 1) forward-proxy-detected?))
-         (<= live-enemy-threat-supply 0)
+         (<= live-enemy-threat-supply (if (= cur-base-count 1) 4.0 2.0))
          (not urgent-combat-or-intel-need?)
          (not escrow-suppressed-active?)
          (not (l2-macro-brain-expand-backed-off? ctx))
@@ -8817,7 +8825,7 @@
              protoss-power-grid-saturated?)))
   (set-l2-ctx-protoss-emergency-pylon?! ctx protoss-emergency-pylon?)
   (define terran-depot-count
-    (count (lambda (t) (eq? t 'supply-depot)) (l2-ctx-bldg-types ctx)))
+    (count (lambda (t) (memq t '(supply-depot supply-depot-lowered))) (l2-ctx-bldg-types ctx)))
   (define terran-emergency-depot?
     (and (eq? race 'Terran)
          (not (null? workers))
@@ -9026,7 +9034,8 @@
          (set! early-larvae-consumed (add1 early-larvae-consumed))
          (set-l2-ctx-minerals! ctx (- (l2-ctx-minerals ctx) (sc2-min-cost 'overlord)))
          (set-l2-ctx-pending-supply! ctx (add1 (l2-ctx-pending-supply ctx)))
-         (set! eff-pending-supply (add1 eff-pending-supply)))]
+         (set! eff-pending-supply (add1 eff-pending-supply))
+         (set-l2-ctx-eff-pending-supply! ctx eff-pending-supply))]
       [(Protoss)
        (define wall-pylon-pt
          (and allow-exact-wall-slot?
@@ -9101,10 +9110,11 @@
        (set-l2-ctx-bldg-types! ctx (cons 'pylon (l2-ctx-bldg-types ctx)))
        (set-l2-ctx-minerals! ctx (- (l2-ctx-minerals ctx) (sc2-min-cost 'pylon)))
        (set-l2-ctx-pending-supply! ctx (add1 (l2-ctx-pending-supply ctx)))
-       (set! eff-pending-supply (add1 eff-pending-supply))]
+       (set! eff-pending-supply (add1 eff-pending-supply))
+       (set-l2-ctx-eff-pending-supply! ctx eff-pending-supply)]
       [(Terran)
        (define depot-count
-         (count (lambda (t) (eq? t 'supply-depot)) (l2-ctx-bldg-types ctx)))
+         (count (lambda (t) (memq t '(supply-depot supply-depot-lowered))) (l2-ctx-bldg-types ctx)))
        (define wall-depot-entry
          (and allow-exact-wall-slot?
               (cond
@@ -9148,7 +9158,8 @@
        (set-l2-ctx-bldg-types! ctx (cons 'supply-depot (l2-ctx-bldg-types ctx)))
        (set-l2-ctx-minerals! ctx (- (l2-ctx-minerals ctx) (sc2-min-cost 'supply-depot)))
        (set-l2-ctx-pending-supply! ctx (add1 (l2-ctx-pending-supply ctx)))
-       (set! eff-pending-supply (add1 eff-pending-supply))]
+       (set! eff-pending-supply (add1 eff-pending-supply))
+       (set-l2-ctx-eff-pending-supply! ctx eff-pending-supply)]
       [else (void)]))
   (define hard-supply-lockout?
     (and (< supply-cap SC2-MAX-SUPPLY)
@@ -9833,6 +9844,7 @@
   (define prev-escrow-frame (hash-ref prev-telemetry-ht 'escrow-last-frame frame))
   (define prev-escrow-peak-min (hash-ref prev-telemetry-ht 'escrow-peak-min obs-minerals))
   (define prev-escrow-min (hash-ref prev-telemetry-ht 'escrow-prev-min obs-minerals))
+  (define prev-escrow-gain-frame (hash-ref prev-telemetry-ht 'escrow-last-gain-frame -9999))
   (define prev-escrow-start-frame (hash-ref prev-telemetry-ht 'escrow-start-frame frame))
   (define prev-suppressed-goal (hash-ref prev-telemetry-ht 'escrow-suppressed-goal #f))
   (define prev-suppressed-until
@@ -9886,6 +9898,16 @@
        prev-suppressed-until]
       [else prev-escrow-start-frame]))
   (set-l2-ctx-cur-escrow-start-frame! ctx cur-escrow-start-frame)
+  (define cur-escrow-gain-frame
+    (cond
+      [(not escrow-same-goal?) -9999]
+      [(> obs-minerals prev-escrow-min) frame]
+      [else prev-escrow-gain-frame]))
+  (define recent-escrow-mineral-gain?
+    (or (> obs-minerals prev-escrow-min)
+        (and (exact-integer? cur-escrow-gain-frame)
+             (>= cur-escrow-gain-frame cur-escrow-start-frame)
+             (<= (- frame cur-escrow-gain-frame) 160))))
   (define escrow-making-progress?
     (and escrow-same-goal?
          (not already-suppressed-goal?)
@@ -9895,7 +9917,7 @@
          (> total-workers 0)
          (< (- frame cur-escrow-start-frame) 672)
          (< obs-minerals (sc2-min-cost active-escrow-sym))
-         (> obs-minerals prev-escrow-min)))
+         recent-escrow-mineral-gain?))
   (define cur-escrow-peak-min
     (if escrow-same-goal?
         (max prev-escrow-peak-min obs-minerals)
@@ -9925,8 +9947,8 @@
          exp-goal-sym-this-step
          (not (< frame prev-suppressed-until))
          (exact-integer? cur-exp-streak-start)
-         (>= (- frame cur-exp-streak-start) (if (> obs-minerals prev-escrow-min) 672 448))
-         (or (>= obs-minerals 350) (>= (- frame cur-exp-streak-start) 672))))
+         (>= (- frame cur-exp-streak-start) (if recent-escrow-mineral-gain? 672 448))
+         (or (>= obs-minerals (sc2-min-cost exp-goal-sym-this-step)) (>= (- frame cur-exp-streak-start) 672))))
   (define max-escrow-timeout-frames 224)
   (set-l2-ctx-max-escrow-timeout-frames! ctx max-escrow-timeout-frames)
   (define escrow-timed-out-now?
@@ -9982,7 +10004,7 @@
   (define urgent-combat-or-intel-need?
     (or (and (< live-army-supply 8)
              (or under-base-attack?
-                 (> live-enemy-threat-supply 0)))
+                 (>= live-enemy-threat-supply 6)))
         (and live-game?
              (null? ally-combat-units)
              (or escrow-suppressed-active?
@@ -10793,6 +10815,33 @@
          (set-add! (live-bot-runtime-used-creep-tumors rt) tid))
        (l2-emit! ctx (list 'cast tid 'spread-creep-tumor target-x target-y))))
 
+;; Reserve scheduled un-emitted townhall expansion minerals on ctx so phase2/3 spenders
+;; cannot consume the expansion bank when the `'expand` action waits on cooldown or pad checks.
+(define (l2-protect-unemitted-scheduled-expansion! ctx race-th-sym)
+  (define md (l2-ctx-macro-decision ctx))
+  (when (and (l2-ctx-live-obs-harvesters? ctx)
+             md
+             (= (order-ledger-pending-count-for-type (l2-ctx-oledger ctx) race-th-sym (l2-ctx-frame ctx)) 0)
+             (not (l2-ctx-escrow-suppressed-active? ctx))
+             (not (l2-ctx-under-base-attack? ctx))
+             (not (l2-ctx-early-survival-crisis? ctx))
+             (not (l2-ctx-urgent-combat-or-intel-need? ctx))
+             (not (l2-ctx-crisis-tech-upgrade-deferral? ctx))
+             (<= (l2-ctx-live-enemy-threat-supply ctx) 2.0)
+             (< (l2-ctx-minerals ctx) 600)
+             (memq race-th-sym (macro-brain-decision-scheduled-ids md)))
+    (set-l2-ctx-bo-reserved-min! ctx
+                                 (max (l2-ctx-bo-reserved-min ctx)
+                                      (sc2-min-cost race-th-sym)))))
+
+;; Respect mineral-only escrows unconditionally, and gas-gated escrows while gas is within 25G.
+(define (l2-worker-respect-bo-reserve? ctx)
+  (and (l2-ctx-live-obs-harvesters? ctx)
+       (or (> (l2-ctx-bo-reserved-min ctx) 0)
+           (> (l2-ctx-bo-reserved-gas ctx) 0))
+       (or (<= (l2-ctx-bo-reserved-gas ctx) 0)
+           (>= (l2-ctx-gas ctx) (- (l2-ctx-bo-reserved-gas ctx) 25)))))
+
 (define (l2-zerg-phase2-expand-tech-def! ctx)
   (define active-extractors (l2-ctx-active-extractors ctx))
   (define ally-bldgs (l2-ctx-ally-bldgs ctx))
@@ -10926,6 +10975,7 @@
     (define-values (mh-ax mh-ay)
       (l2-safe-zerg-build-anchor ctx (safe-coord (+ base-x 6.0)) (safe-coord (+ base-y 5.0))))
     (l2-emit-build-verified! ctx 'hatchery mh-ax mh-ay))
+  (l2-protect-unemitted-scheduled-expansion! ctx 'hatchery)
   (define zerg-saving-for-expand? (l2-saving-for-expansion-now? ctx (length hatcheries)))
   (set-l2-ctx-zerg-saving-for-expand?! ctx zerg-saving-for-expand?)
   (when (and (or (not zerg-saving-for-expand?)
@@ -11675,18 +11725,12 @@
   (when zerg-drone-priority?
        (l2-try-train-unit! ctx 'drone 'larva zerg-drone-batch
                         #:respect-bo-reserve?
-                        (and live-game?
+                        (and (l2-worker-respect-bo-reserve? ctx)
                              (or (not zerg-3base-interleave-drone-ok?)
-                                 (enemy-tech-observation-requires-anti-air? tech-obs))
-                             (or (>= total-workers 24)
-                                 (>= total-workers zerg-ideal-worker-cap)
-                                 (and (>= total-workers 16)
-                                      (> (l2-ctx-bo-reserved-gas ctx) 0)
-                                      (>= (l2-ctx-gas ctx) (l2-ctx-bo-reserved-gas ctx))))
-                             (not (memq bo-goal-sym
-                                        (if (>= total-workers 16)
-                                            '(drone probe scv)
-                                            '(hatchery nexus command-center drone probe scv)))))))
+                                 zerg-saving-for-expand?
+                                 (>= (l2-ctx-bo-reserved-min ctx) 150)
+                                 (< total-workers 16)
+                                 (enemy-tech-observation-requires-anti-air? tech-obs)))))
   (when (and live-game?
                 zerg-saving-for-expand?
                 (>= (length hatcheries) 3)
@@ -11914,7 +11958,7 @@
                 (or (member '(train drone) prio-scheduled-actions)
                     (< (hash-ref pressure-metrics 'threat-pressure 0.0) 1.0)))
        (l2-try-train-unit! ctx 'drone 'larva zerg-drone-batch
-                        #:respect-bo-reserve? (and live-game? (>= total-workers 24)))))
+                        #:respect-bo-reserve? (l2-worker-respect-bo-reserve? ctx))))
 
 (define (l2-protoss-phase1-chrono-wall! ctx)
   (define allow-exact-wall-slot? (l2-ctx-allow-exact-wall-slot? ctx))
@@ -12272,6 +12316,7 @@
          (l2-emit! ctx (list 'expand protoss-exp-x protoss-exp-y))
          (order-ledger-record-issued! oledger (+ 810000 (modulo frame 10000)) 'expand 'nexus protoss-exp-x protoss-exp-y frame)
          (l2-spend-resources-and-supply! ctx (sc2-min-cost 'nexus) 0 0)))
+  (l2-protect-unemitted-scheduled-expansion! ctx 'nexus)
   (define protoss-saving-for-expand? (l2-saving-for-expansion-now? ctx (length nexuses)))
   (set-l2-ctx-protoss-saving-for-expand?! ctx protoss-saving-for-expand?)
   (define ready-pylons
@@ -13151,7 +13196,7 @@
        (l2-compute-race-ideal-worker-cap ctx nexuses))
   (define protoss-probe-priority?
        (and (or (not protoss-saving-for-expand?)
-                (and (< total-workers 19) (< (l2-ctx-minerals ctx) 350)))
+                (and (< total-workers 17) (< (l2-ctx-minerals ctx) 200)))
             (not crisis-freeze-workers?)
             (l2-worker-army-curve-satisfied? ctx)
             (not urgent-combat-or-intel-need?)
@@ -13182,14 +13227,7 @@
             (< (hash-ref pressure-metrics 'threat-pressure 0.0) 0.85)))
   (when protoss-probe-priority?
        (l2-try-train-unit! ctx 'probe 'townhall 4
-                        #:respect-bo-reserve?
-                        (and live-game?
-                             (or (>= total-workers 24)
-                                 (>= total-workers protoss-ideal-worker-cap)
-                                 (and (>= total-workers 16)
-                                      (> (l2-ctx-bo-reserved-gas ctx) 0)
-                                      (>= (l2-ctx-gas ctx) (l2-ctx-bo-reserved-gas ctx))))
-                             (not (memq bo-goal-sym '(hatchery nexus command-center drone probe scv))))))
+                        #:respect-bo-reserve? (l2-worker-respect-bo-reserve? ctx)))
   (define (gateway-unit-colossus-ok? u-sym)
        (or crisis-tech-upgrade-deferral?
            (and (or (<= (sc2-gas-cost u-sym) 0)
@@ -13378,7 +13416,7 @@
                     (< total-workers 14)
                     (< (hash-ref pressure-metrics 'threat-pressure 0.0) 1.0)))
        (l2-try-train-unit! ctx 'probe 'townhall 4
-                        #:respect-bo-reserve? (and live-game? (>= total-workers 24)))))
+                        #:respect-bo-reserve? (l2-worker-respect-bo-reserve? ctx))))
 
 (define (l2-terran-phase1-orbital-addon-expand! ctx)
   (define allow-exact-wall-slot? (l2-ctx-allow-exact-wall-slot? ctx))
@@ -13845,6 +13883,7 @@
                                   (not (null? orphaned-prereqs))))
            0))
   (set-l2-ctx-reserved-expansion-minerals! ctx reserved-expansion-minerals)
+  (l2-protect-unemitted-scheduled-expansion! ctx 'command-center)
   (define terran-saving-for-expand?
        (or (l2-saving-for-expansion-now? ctx (length ccs))
            (and (> reserved-expansion-minerals 0) (< (l2-ctx-minerals ctx) reserved-expansion-minerals))
@@ -14656,7 +14695,7 @@
            (not (hash-has-key? raw-obs 'mineral-harvesters))))
   (define terran-scv-priority?
        (and (or (not terran-saving-for-expand?)
-                (and (not terran-saving-for-orbital?) (< total-workers 19) (< (l2-ctx-minerals ctx) 350)))
+                (and (not terran-saving-for-orbital?) (< total-workers 17) (< (l2-ctx-minerals ctx) 200)))
             (not crisis-freeze-workers?)
             (l2-worker-army-curve-satisfied? ctx)
             (not terran-saving-for-orbital?)
@@ -14676,16 +14715,7 @@
             (< (hash-ref pressure-metrics 'threat-pressure 0.0) 0.85)))
   (when terran-scv-priority?
        (l2-try-train-unit! ctx 'scv 'townhall 4
-                        #:respect-bo-reserve?
-                        (and live-game?
-                             (or (>= total-workers 24)
-                                 (>= total-workers terran-ideal-worker-cap)
-                                 (and (>= total-workers 16)
-                                      (> (l2-ctx-bo-reserved-gas ctx) 0)
-                                      (>= (l2-ctx-gas ctx) (l2-ctx-bo-reserved-gas ctx))))
-                             (or (<= (l2-ctx-bo-reserved-gas ctx) 0)
-                                 (>= (l2-ctx-gas ctx) (- (l2-ctx-bo-reserved-gas ctx) 25)))
-                             (not (memq bo-goal-sym '(hatchery nexus command-center drone probe scv))))))
+                        #:respect-bo-reserve? (l2-worker-respect-bo-reserve? ctx)))
   (define terran-expand-escrow-imminent?
        (and live-game?
             (not crisis-tech-upgrade-deferral?)
@@ -15082,7 +15112,7 @@
                     (< total-workers 14)
                     (< (hash-ref pressure-metrics 'threat-pressure 0.0) 1.0)))
        (l2-try-train-unit! ctx 'scv 'townhall 4
-                        #:respect-bo-reserve? (and live-game? (>= total-workers 24))))
+                        #:respect-bo-reserve? (l2-worker-respect-bo-reserve? ctx)))
   (define depot-bldgs
        (if (or (eq? race 'Terran)
                (memq 'supply-depot (l2-ctx-bldg-types ctx))
@@ -15484,6 +15514,19 @@
               'escrow-age-frames (if escrow-timed-out-now? 0 cur-escrow-age-frames)
               'escrow-peak-min (if escrow-timed-out-now? obs-minerals cur-escrow-peak-min)
               'escrow-prev-min obs-minerals
+              'escrow-last-gain-frame
+              (let* ([prev-tel (or (l2-ctx-prev-telemetry-ht ctx) (hash))]
+                     [prev-g (hash-ref prev-tel 'escrow-goal-sym #f)]
+                     [prev-m (hash-ref prev-tel 'escrow-prev-min obs-minerals)]
+                     [prev-gf (hash-ref prev-tel 'escrow-last-gain-frame -9999)])
+                (cond
+                  [escrow-timed-out-now? -9999]
+                  [(not (and active-escrow-sym
+                             (not (eq? active-escrow-sym 'none))
+                             (eq? active-escrow-sym prev-g)))
+                   -9999]
+                  [(> obs-minerals prev-m) frame]
+                  [else prev-gf]))
               'escrow-start-frame (if escrow-timed-out-now? frame cur-escrow-start-frame)
               'escrow-last-frame frame
               'escrow-suppressed-goal escrow-suppressed-goal

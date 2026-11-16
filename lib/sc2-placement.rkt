@@ -62,7 +62,6 @@
  placement-site-free?
  solve-spiral-placement
  solve-pro-simcity-layout-placement
- compute-pro-speed-mining-contact-point
  select-worker-drill-stack-mineral-patch
 
  ;; Pylon Power & Protoss Placement Anchors
@@ -3988,30 +3987,6 @@
      (solve-zerg-pro-simcity canon bx-f by-f nx-f ny-f ex-f ey-f
                              ally-bldgs phys-aabbs addon-aabbs res-aabbs expansion-pads
                              min-pts geyser-pts grids-ok? w h pref bref href main-h nat-h corridors)]))
-
-;; Computes deceleration-bypass speed-mining contact coordinates:
-;; `(values harvest-contact-x harvest-contact-y return-contact-x return-contact-y)`
-;; where harvest contact is `approach-dist` (default 0.65) from mineral center toward TownHall
-;; and return contact is `return-dist` (default 2.70) from TownHall center toward mineral patch.
-(define (compute-pro-speed-mining-contact-point patch-x patch-y townhall-x townhall-y
-                                                [approach-dist 0.65] [return-dist 2.70])
-  (define px (exact->inexact patch-x))
-  (define py (exact->inexact patch-y))
-  (define tx (exact->inexact townhall-x))
-  (define ty (exact->inexact townhall-y))
-  (define ad (exact->inexact approach-dist))
-  (define rd (exact->inexact return-dist))
-  (define dx (- tx px))
-  (define dy (- ty py))
-  (define d (sqrt (+ (* dx dx) (* dy dy))))
-  (define-values (ux uy)
-    (if (> d 1e-6)
-        (values (/ dx d) (/ dy d))
-        (values 1.0 0.0)))
-  (values (+ px (* ad ux))
-          (+ py (* ad uy))
-          (- tx (* rd ux))
-          (- ty (* rd uy))))
 
 ;; Selects the mineral patch record/hash closest to `(enemy-cx, enemy-cy)` within 14.0 tiles
 ;; of `(townhall-x, townhall-y)` for mineral-walk drill-stacking defenders onto an enemy worker stack.

@@ -20,8 +20,6 @@
          net/base64
          "sc2-game-constants.rkt"
          "sc2-typed-commands.rkt"
-         (only-in "sc2-placement.rkt"
-                  compute-pro-speed-mining-contact-point)
          (only-in "sc2-common.rkt"
                   SC2-SINGLETON-TECH-BUILDINGS
                   SC2-DUAL-CAP-TECH-BUILDINGS))
@@ -4440,17 +4438,46 @@
       [else 0]))
 
   ;; Pending supply (Overlord eggs / in-progress Depots / in-progress Pylons / in-transit worker build orders)
+  (define in-progress-pylons
+    (filter (lambda (u)
+              (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
+                         '(pylon pylon-overcharged))
+                   (< (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
+            self-units))
+  (define in-progress-depots
+    (filter (lambda (u)
+              (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
+                         '(supply-depot supply-depot-lowered))
+                   (< (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
+            self-units))
+  (define active-depot-worker-orders
+    (for/sum ([w (in-list my-workers)]
+              #:when (not (worker-build-order-stuck? w cur-loop)))
+      (count (lambda (o) (= (sc2-unit-order-ability-id o) 319))
+             (sc2-unit-orders w))))
+  (define in-transit-pylon-worker-orders
+    (for*/sum ([w (in-list my-workers)]
+               #:when (not (worker-build-order-stuck? w cur-loop))
+               [o (in-list (sc2-unit-orders w))]
+               #:when (= (sc2-unit-order-ability-id o) 881))
+      (define tp (sc2-unit-order-target-pos o))
+      (if (and (any-point? tp)
+               (ormap (lambda (p)
+                        (define pp (sc2-unit-pos p))
+                        (<= (pt-dist (any-point-x tp) (any-point-y tp)
+                                     (sc2-point3d-x pp) (sc2-point3d-y pp))
+                            2.5))
+                      in-progress-pylons))
+          0
+          1)))
   (define pending-supply
-    (+ (for/sum ([u (in-list self-units)]
-                 #:when (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
-                                   '(supply-depot supply-depot-lowered pylon pylon-overcharged))
-                             (< (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
-         1)
-       (for/sum ([w (in-list my-workers)]
-                 #:when (not (worker-build-order-stuck? w cur-loop)))
-         (count (lambda (o)
-                  (memv (sc2-unit-order-ability-id o) '(319 881))) ;; TERRANBUILD_SUPPLYDEPOT=319, PROTOSSBUILD_PYLON=881
-                (sc2-unit-orders w)))
+    (+ (length in-progress-pylons)
+       in-transit-pylon-worker-orders
+       (if (> active-depot-worker-orders 0)
+           active-depot-worker-orders
+           (if (or (null? my-workers) (< cur-loop 8))
+               (length in-progress-depots)
+               0))
        (for/sum ([u (in-list self-units)]
                  #:when (= (sc2-unit-unit-type u) 103)) ;; EGG
          (if (ormap (lambda (o) (= (sc2-unit-order-ability-id o) 1344))
@@ -5768,14 +5795,20 @@
   (define in-transit-terran-addon-pts '())
   (define terran-addon-pts '())
   (define blocking-circles '())
+  (define local-blocking-res '())
   (for ([u (in-list existing-units)])
     (define is-struct? (sc2-unit-is-structure? u))
-    (when (or is-struct?
-              (sc2-unit-is-mineral-field? u)
-              (sc2-unit-is-vespene-geyser? u))
+    (define is-res?
+      (or (sc2-unit-is-mineral-field? u)
+          (sc2-unit-is-vespene-geyser? u)))
+    (when (or is-struct? is-res?)
       (define p (sc2-unit-pos u))
       (define px (sc2-point3d-x p))
       (define py (sc2-point3d-y p))
+      (when (and is-townhall-build?
+                 is-res?
+                 (<= (pt-dist anchor-x anchor-y px py) 25.0))
+        (set! local-blocking-res (cons u local-blocking-res)))
       (define req-d
         (if ws-active-placement?
             (max 2.0 (+ 0.85 (max 0.5 (sc2-unit-radius u))))
@@ -5821,7 +5854,7 @@
   (define valid-reserved-aabbs
     (filter reserved-aabb? reserved-aabbs))
 
-  (define (clear-spot? cx cy)
+  (define (fast-spot-ok? cx cy)
     (and (>= cx play-x0) (<= cx play-x1)
          (>= cy play-y0) (<= cy play-y1)
          ;; Static footprint placement_grid pre-filter when StartRaw grids are available
@@ -5829,6 +5862,9 @@
          ;; Expansion Pad Protection: non-TownHall structures must stay >= min-pad-clearance (default 4.5, tight creep 3.95/3.45) off solved pads
          (for/and ([ep (in-list exp-pad-xys)])
            (>= (max (abs (- cx (car ep))) (abs (- cy (cdr ep)))) min-pad-clearance))
+         ;; TownHall placements must respect SC2's hard resource minimum distance rule
+         (or (not is-townhall-build?)
+             (sc2-townhall-all-resources-legal? cx cy local-blocking-res))
          ;; Reserved Chebyshev AABB exclusion (door gap, wall slots, ramp corridor, add-on footprints)
          (for/and ([b (in-list valid-reserved-aabbs)])
            (not (aabb-overlaps? cx cy cand-hw cand-hh b)))
@@ -5836,8 +5872,9 @@
            (> (+ (sqr (- cx (car rp))) (sqr (- cy (cdr rp)))) reserved-dist-sq))
          (for/and ([bc (in-list blocking-circles)])
            (> (+ (sqr (- cx (vector-ref bc 0))) (sqr (- cy (vector-ref bc 1))))
-              (vector-ref bc 2)))
-         (or (not check-bfs)
+              (vector-ref bc 2)))))
+  (define (clear-spot? cx cy)
+    (and (or (not check-bfs)
              (< (check-bfs cx cy 4) +inf.0))
          (or (not layout-safety-ok?)
              (layout-safety-ok? cx cy (or canon-bldg 'barracks) cand-hw cand-hh))))
@@ -5871,12 +5908,13 @@
                       (inexact->exact (round (* 4.0 cy)))))
       (unless (hash-has-key? seen-pts k)
         (hash-set! seen-pts k #t)
-        (set! eval-count (add1 eval-count))
-        (when (box? eval-budget)
-          (set-box! eval-budget (sub1 (unbox eval-budget))))
-        (when (clear-spot? cx cy)
-          (set! acc (cons (sc2-point2d cx cy) acc))
-          (set! acc-len (add1 acc-len))))))
+        (when (fast-spot-ok? cx cy)
+          (set! eval-count (add1 eval-count))
+          (when (box? eval-budget)
+            (set-box! eval-budget (sub1 (unbox eval-budget))))
+          (when (clear-spot? cx cy)
+            (set! acc (cons (sc2-point2d cx cy) acc))
+            (set! acc-len (add1 acc-len)))))))
   (try-add-cand! anchor-x anchor-y)
   (let r-loop ([r step])
     (when (and (<= r max-radius) (budget-ok?))
@@ -6226,7 +6264,7 @@
                                           (car shared-base-ref) (cdr shared-base-ref)
                                           shared-check-bfs)))
 
-  (define spiral-eval-budget (box (if ws-active? 640 320)))
+  (define spiral-eval-budget (box (if ws-active? 2400 900)))
   (define primary-cand-limit
     (if ws-active? 32 (if (or first-rax-allow-wall-3x3? needs-terran-addon-clearance?) 8 2)))
   (define spiral-cands
@@ -6238,7 +6276,7 @@
                                          #:max-radius max-radius
                                          #:step step
                                          #:limit primary-cand-limit
-                                         #:max-evals 256
+                                         #:max-evals 900
                                          #:eval-budget spiral-eval-budget
                                          #:extra-reserved-points extra-reserved-points
                                          #:ws-active-placement? ws-active?
@@ -6281,6 +6319,7 @@
   (define (relaxed-safety-cands)
     (define relax-aabbs?
       (memq canon-bldg '(starport bunker missile-turret ghost-academy)))
+    (define rel-budget (box 900))
     (define raw-rel
       (interleave-lists
        (for/list ([ap (in-list anchors)])
@@ -6291,8 +6330,8 @@
                                     #:max-radius (max 18.0 max-radius)
                                     #:step 1.0
                                     #:limit (if ws-active? 32 4)
-                                    #:max-evals 256
-                                    #:eval-budget spiral-eval-budget
+                                    #:max-evals 900
+                                    #:eval-budget rel-budget
                                     #:extra-reserved-points extra-reserved-points
                                     #:ws-active-placement? ws-active?
                                     #:reserved-aabbs (if relax-aabbs? '() eff-reserved-aabbs)
@@ -6318,8 +6357,7 @@
       (if is-zerg-creep-bldg?
           (min 1.15 min-spacing)
           (min 2.0 min-spacing)))
-    (define em-budget
-      (if (< (unbox spiral-eval-budget) 64) (box 64) spiral-eval-budget))
+    (define em-budget (box 900))
     (define raw-em
       (interleave-lists
        (for/list ([ap (in-list em-anchors)])
@@ -6328,7 +6366,7 @@
                                     #:max-radius em-rad
                                     #:step 1.0
                                     #:limit (if ws-active? 32 4)
-                                    #:max-evals 256
+                                    #:max-evals 900
                                     #:eval-budget em-budget
                                     #:extra-reserved-points extra-reserved-points
                                     #:ws-active-placement? ws-active?
@@ -6342,6 +6380,7 @@
     (dedup-point2ds (take raw-em (min 96 (length raw-em)))))
 
   (define (collect-creep-tight-cands max-r safety? gi?)
+    (define creep-budget (box 900))
     (define pts
       (interleave-lists
        (for/list ([ap (in-list anchors)])
@@ -6350,8 +6389,8 @@
                                     #:max-radius max-r
                                     #:step 1.0
                                     #:limit (if ws-active? 32 4)
-                                    #:max-evals 256
-                                    #:eval-budget spiral-eval-budget
+                                    #:max-evals 900
+                                    #:eval-budget creep-budget
                                     #:extra-reserved-points extra-reserved-points
                                     #:ws-active-placement? ws-active?
                                     #:reserved-aabbs eff-reserved-aabbs
@@ -6512,16 +6551,17 @@
                [else
                 ;; Expand search radius across all anchors (including safe-base-anchor) to find a spot where BOTH 3x3 + East 2x2 add-on fit!
                 (define wide-raw
-                  (let ([pts
-                         (interleave-lists
-                          (for/list ([ap (in-list anchors)])
-                            (collect-spiral-candidates (car ap) (cdr ap) existing-units
-                                                       #:min-spacing min-spacing
-                                                       #:max-radius (max 18.0 (+ max-radius 4.0))
-                                                       #:step 1.0
-                                                       #:limit (if ws-active? 32 4)
-                                                       #:max-evals 256
-                                                       #:eval-budget spiral-eval-budget
+                  (let* ([wide-budget (box 900)]
+                         [pts
+                          (interleave-lists
+                           (for/list ([ap (in-list anchors)])
+                             (collect-spiral-candidates (car ap) (cdr ap) existing-units
+                                                        #:min-spacing min-spacing
+                                                        #:max-radius (max 18.0 (+ max-radius 4.0))
+                                                        #:step 1.0
+                                                        #:limit (if ws-active? 32 4)
+                                                        #:max-evals 900
+                                                        #:eval-budget wide-budget
                                                        #:extra-reserved-points extra-reserved-points
                                                        #:ws-active-placement? ws-active?
                                                        #:reserved-aabbs eff-reserved-aabbs
@@ -6554,7 +6594,8 @@
           (or verified-pt
               (and is-zerg-creep-bldg?
                    (query-creep-fallbacks-ws!))
-              (let* ([wide-pts
+              (let* ([wide-budget (box 900)]
+                     [wide-pts
                       (interleave-lists
                        (for/list ([ap (in-list anchors)])
                          (collect-spiral-candidates (car ap) (cdr ap) existing-units
@@ -6562,8 +6603,8 @@
                                                     #:max-radius (max 18.0 (+ max-radius 4.0))
                                                     #:step 1.0
                                                     #:limit (if ws-active? 32 4)
-                                                    #:max-evals 256
-                                                    #:eval-budget spiral-eval-budget
+                                                    #:max-evals 900
+                                                    #:eval-budget wide-budget
                                                     #:extra-reserved-points extra-reserved-points
                                                     #:ws-active-placement? ws-active?
                                                     #:reserved-aabbs eff-reserved-aabbs
@@ -7203,7 +7244,6 @@
 (define SC2-WORKER-ASSIGN-LAST-LOOP (box 0))
 (define SC2-WORKER-PATCH-ASSIGNMENT (make-hasheqv))
 (define SC2-WORKER-ANTIBOUNCE-COOLDOWN (make-hasheqv))
-(define SC2-WORKER-SPEEDMINE-COOLDOWN (make-hasheqv))
 
 (define (classify-townhall-mineral-patches th mineral-fields [radius 11.5] [max-patches 8])
   (define tp (sc2-unit-pos th))
@@ -7275,8 +7315,7 @@
      (define obs-loop (sc2-observation-game-loop obs))
      (when (or (<= obs-loop 8) (< obs-loop (unbox SC2-WORKER-ASSIGN-LAST-LOOP)))
        (hash-clear! SC2-WORKER-PATCH-ASSIGNMENT)
-       (hash-clear! SC2-WORKER-ANTIBOUNCE-COOLDOWN)
-       (hash-clear! SC2-WORKER-SPEEDMINE-COOLDOWN))
+       (hash-clear! SC2-WORKER-ANTIBOUNCE-COOLDOWN))
      (set-box! SC2-WORKER-ASSIGN-LAST-LOOP obs-loop)
      (define units (sc2-observation-units obs))
      (define self-units
@@ -7426,8 +7465,7 @@
   (set-box! SC2-WORKER-TRANSFER-LAST-LOOP cur-loop)
   (when (< cur-loop (unbox SC2-WORKER-ASSIGN-LAST-LOOP))
     (hash-clear! SC2-WORKER-PATCH-ASSIGNMENT)
-    (hash-clear! SC2-WORKER-ANTIBOUNCE-COOLDOWN)
-    (hash-clear! SC2-WORKER-SPEEDMINE-COOLDOWN))
+    (hash-clear! SC2-WORKER-ANTIBOUNCE-COOLDOWN))
   (set-box! SC2-WORKER-ASSIGN-LAST-LOOP cur-loop)
 
   (define pc (sc2-observation-player-common obs))
@@ -8096,87 +8134,6 @@
         (set! cmds
               (cons (sc2-raw-unit-command 3666 #f (sc2-unit-tag best-m) (list (sc2-unit-tag u)) #f)
                     cmds)))))
-
-  ;; 4b. Deceleration-Bypass Speed-Mining (`8 < cur-loop <= 2688`):
-  ;;     At most 2 workers per step, >= 24-loop cooldown, skipped during worker rush and never on gas workers.
-  (when (and (> cur-loop 8)
-             (<= cur-loop 2688)
-             (not worker-rush-evacuate-gas?)
-             (not (null? online-ready-townhalls))
-             (>= (length owned-base-minerals) 4))
-    (define speedmine-count 0)
-    (for ([w (in-list workers)]
-          #:break (>= speedmine-count 2)
-          #:when (let ([wtag (sc2-unit-tag w)]
-                       [ords (sc2-unit-orders w)])
-                   (and (not (set-member? commanded-this-frame wtag))
-                        (>= cur-loop (hash-ref SC2-WORKER-SPEEDMINE-COOLDOWN wtag 0))
-                        (= (length ords) 1)
-                        (not (worker-carrying-gas? w)))))
-      (define wtag (sc2-unit-tag w))
-      (define wp (sc2-unit-pos w))
-      (define wx (sc2-point3d-x wp))
-      (define wy (sc2-point3d-y wp))
-      (define ord0 (first (sc2-unit-orders w)))
-      (define ab0 (sc2-unit-order-ability-id ord0))
-      (define tgt0 (sc2-unit-order-target-unit-tag ord0))
-      (cond
-        [(worker-carrying-mineral? w)
-         (define near-th
-           (argmin (lambda (th)
-                     (define tp (sc2-unit-pos th))
-                     (pt-dist wx wy (sc2-point3d-x tp) (sc2-point3d-y tp)))
-                   online-ready-townhalls))
-         (define tp (sc2-unit-pos near-th))
-         (define thx (sc2-point3d-x tp))
-         (define thy (sc2-point3d-y tp))
-         (define d-th (pt-dist wx wy thx thy))
-         (when (and (>= d-th 3.4) (<= d-th 5.2))
-           (define src-m
-             (or (let ([atag (hash-ref SC2-WORKER-PATCH-ASSIGNMENT wtag #f)])
-                   (and atag (hash-ref owned-min-by-tag atag #f)))
-                 (let ([local-ms (minerals-near-townhall near-th)])
-                   (and (pair? local-ms)
-                        (argmin (lambda (m)
-                                  (define mp (sc2-unit-pos m))
-                                  (pt-dist wx wy (sc2-point3d-x mp) (sc2-point3d-y mp)))
-                                local-ms)))))
-           (when src-m
-             (define mp (sc2-unit-pos src-m))
-             (define-values (_ax _ay ret-x ret-y)
-               (compute-pro-speed-mining-contact-point (sc2-point3d-x mp) (sc2-point3d-y mp) thx thy))
-             (when (>= (pt-dist wx wy ret-x ret-y) 0.45)
-               (hash-set! SC2-WORKER-SPEEDMINE-COOLDOWN wtag (+ cur-loop 24))
-               (set-add! commanded-this-frame wtag)
-               (set! speedmine-count (add1 speedmine-count))
-               (define move-cmd (sc2-raw-unit-command 16 (sc2-point2d ret-x ret-y) 0 (list wtag) #f))
-               (define ret-cmd (sc2-raw-unit-command 3667 #f 0 (list wtag) #t))
-               (set! cmds (cons ret-cmd (cons move-cmd cmds))))))]
-        [(and (memv ab0 '(166 295 298 1183 3666))
-              (not (worker-carrying-cargo? w))
-              (hash-has-key? owned-min-by-tag tgt0)
-              (<= (hash-ref patch-worker-counts tgt0 0) 2))
-         (define m (hash-ref owned-min-by-tag tgt0))
-         (define mp (sc2-unit-pos m))
-         (define mx (sc2-point3d-x mp))
-         (define my (sc2-point3d-y mp))
-         (define d-min (pt-dist wx wy mx my))
-         (when (and (>= d-min 1.3) (<= d-min 2.8))
-           (define near-th
-             (argmin (lambda (th)
-                       (define tp (sc2-unit-pos th))
-                       (pt-dist mx my (sc2-point3d-x tp) (sc2-point3d-y tp)))
-                     online-ready-townhalls))
-           (define tp (sc2-unit-pos near-th))
-           (define-values (app-x app-y _rx _ry)
-             (compute-pro-speed-mining-contact-point mx my (sc2-point3d-x tp) (sc2-point3d-y tp)))
-           (when (>= (pt-dist wx wy app-x app-y) 0.35)
-             (hash-set! SC2-WORKER-SPEEDMINE-COOLDOWN wtag (+ cur-loop 24))
-             (set-add! commanded-this-frame wtag)
-             (set! speedmine-count (add1 speedmine-count))
-             (define move-cmd (sc2-raw-unit-command 16 (sc2-point2d app-x app-y) 0 (list wtag) #f))
-             (define gath-cmd (sc2-raw-unit-command 3666 #f tgt0 (list wtag) #t))
-             (set! cmds (cons gath-cmd (cons move-cmd cmds)))))])))
 
   (reverse cmds))
 
@@ -9741,10 +9698,11 @@
                                                               #:ignore-resource-requirements? #t)))
                  (define q-results (sc2-response-query-placements q-resp))
                  (if (= (length q-results) (length cand-facs))
-                     (for/first ([u (in-list cand-facs)]
-                                 [res (in-list q-results)]
-                                 #:when (= res 1))
-                       u)
+                     (or (for/first ([u (in-list cand-facs)]
+                                     [res (in-list q-results)]
+                                     #:when (= res 1))
+                           u)
+                         (first cand-facs))
                      (first cand-facs))]
                 [else (first cand-facs)]))
             (when (and fac-u (wire-nonstack-allow?! (list 'wire-addon norm (sc2-unit-tag fac-u)) 24))
@@ -9889,16 +9847,23 @@
                (append (list (cons req-x req-y) (cons home-x home-y))
                        th-overflow-anchors)))
             (define place-pt
-              (find-verified-building-placement ws-conn ab-id req-x req-y units
-                                                #:min-spacing 2.0
-                                                #:max-radius 15.0
-                                                #:step 1.0
-                                                #:extra-reserved-points step-reserved-build-pts
-                                                #:anchor-points std-anchors
-                                                #:reserved-aabbs reserved-aabbs
-                                                #:expansion-pads all-expansion-pads
-                                                #:bldg-sym norm
-                                                #:game-info eff-game-info))
+              (or (and (memq norm '(command-center nexus hatchery))
+                       (> (pt-dist home-x home-y req-x req-y) SC2-BASE-RESOURCE-RADIUS)
+                       (find-best-expansion-placement ws-conn ab-id home-x home-y units
+                                                      #:req-x req-x
+                                                      #:req-y req-y
+                                                      #:game-info eff-game-info
+                                                      #:remembered-enemies SC2-LAST-KNOWN-ENEMY-POS))
+                  (find-verified-building-placement ws-conn ab-id req-x req-y units
+                                                    #:min-spacing 2.0
+                                                    #:max-radius 15.0
+                                                    #:step 1.0
+                                                    #:extra-reserved-points step-reserved-build-pts
+                                                    #:anchor-points std-anchors
+                                                    #:reserved-aabbs reserved-aabbs
+                                                    #:expansion-pads all-expansion-pads
+                                                    #:bldg-sym norm
+                                                    #:game-info eff-game-info)))
             (when place-pt
               (reserve-step-build-pt! place-pt ab-id)
               (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))

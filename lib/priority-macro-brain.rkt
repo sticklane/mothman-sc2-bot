@@ -5802,14 +5802,18 @@
     (and has-mineral-income?
          final-bo-goal-sym
          (not supply-preempt-saving?)
+         (not (ormap (lambda (s) (same-brain-sym? s final-bo-goal-sym)) final-ids))
          (or (not supply-preempt-now?)
              final-bo-is-supply?
              final-bo-is-nat-expand?)
          (not (macro-escrow-in-backoff? escrow-state-entry frame final-bo-goal-sym))
+         (step-prereqs-ready? final-bo-goal-sym)
          (upgrade-allowed-by-unit-and-order-gates?
           race final-bo-goal-sym frame workers
           ready-bldg-counts total-bldg-counts unit-counts
           researched-upgrades pending-upgrades)
+         (or (< minerals (sc2-min-cost final-bo-goal-sym 0))
+             (< gas (sc2-gas-cost final-bo-goal-sym 0)))
          (or final-bo-is-supply?
              final-bo-is-nat-expand?
              (can-fund-within-frames?
@@ -5839,8 +5843,28 @@
          [reserved-cand (priority-candidate-id reserved-cand)]
          [final-bo-eligible-for-saving-fallback? final-bo-goal-sym]
          [else 'none])))
-  (define out-min-floor (if supply-preempt-saving? 100 min-floor))
-  (define out-gas-floor (if supply-preempt-saving? 0 gas-floor))
+  (define fallback-saving?
+    (and (not supply-preempt-saving?)
+         (not reserved-cand)
+         (not (eq? saving-id 'none))))
+  (define out-min-floor
+    (cond
+      [supply-preempt-saving? 100]
+      [fallback-saving?
+       (max min-floor
+            (if (< minerals (sc2-min-cost saving-id 0))
+                (sc2-min-cost saving-id 0)
+                0))]
+      [else min-floor]))
+  (define out-gas-floor
+    (cond
+      [supply-preempt-saving? 0]
+      [fallback-saving?
+       (max gas-floor
+            (if (< gas (sc2-gas-cost saving-id 0))
+                (sc2-gas-cost saving-id 0)
+                0))]
+      [else gas-floor]))
   (define out-reserved-slots (if supply-preempt-saving? '() (reverse reserved-slots)))
   (macro-escrow-record-decision! race enemy-race frame minerals eff-th-total-cnt saving-id final-ids)
   (define log-str
