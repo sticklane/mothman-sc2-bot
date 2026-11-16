@@ -149,7 +149,13 @@
  ;; Tracker Management & Accessors
  transport-tracker?
  make-transport-tracker
+ TRANSPORT-LOAD-UNLOAD-COOLDOWN-FRAMES
+ WARP-PRISM-MODE-TOGGLE-COOLDOWN-FRAMES
  transport-tracker-record-pickup!
+ transport-tracker-record-load!
+ transport-tracker-record-unload!
+ transport-tracker-load-cooldown
+ transport-tracker-unload-cooldown
  transport-tracker-record-boost!
  transport-tracker-passenger-pickup-frame
  transport-tracker-carry-dwell-frames
@@ -255,10 +261,10 @@
 (define STANDARD-TRANSPORT-PICKUP-RANGE 1.5)
 
 (: SAVE-BRUISED-HP-RATIO Float)
-(define SAVE-BRUISED-HP-RATIO 0.42)
+(define SAVE-BRUISED-HP-RATIO 0.35)
 
 (: SAVE-UNDER-FIRE-HP-RATIO Float)
-(define SAVE-UNDER-FIRE-HP-RATIO 0.55)
+(define SAVE-UNDER-FIRE-HP-RATIO 0.35)
 
 (: SAVE-HIGH-VALUE-SYMS (Listof Symbol))
 (define SAVE-HIGH-VALUE-SYMS
@@ -266,6 +272,9 @@
     cyclone ghost marauder lurker ravager roach hydralisk queen infestor))
 
 ;; Drop & Emergency Dump Constants
+(: TRANSPORT-LOAD-UNLOAD-COOLDOWN-FRAMES Integer)
+(define TRANSPORT-LOAD-UNLOAD-COOLDOWN-FRAMES 44)
+
 (: SAFE-DROP-REAR-OFFSET-MIN Float)
 (define SAFE-DROP-REAR-OFFSET-MIN 3.5)
 
@@ -287,7 +296,10 @@
 (: EMERGENCY-DUMP-HP-RATIO Float)
 (define EMERGENCY-DUMP-HP-RATIO 0.25)
 
-;; WarpPrism Phasing Constants (`#115` empirical dwells)
+;; WarpPrism Phasing Constants (`#115` empirical dwells & anti-oscillation cooldowns)
+(: WARP-PRISM-MODE-TOGGLE-COOLDOWN-FRAMES Integer)
+(define WARP-PRISM-MODE-TOGGLE-COOLDOWN-FRAMES 44)
+
 (: WARP-PRISM-MIN-PHASING-DWELL-FRAMES Integer)
 (define WARP-PRISM-MIN-PHASING-DWELL-FRAMES 140)
 
@@ -298,7 +310,7 @@
 (define WARP-PRISM-REPHASE-COOLDOWN-FRAMES 160)
 
 (: WARP-PRISM-THREAT-UNPHASE-RADIUS Float)
-(define WARP-PRISM-THREAT-UNPHASE-RADIUS 10.0)
+(define WARP-PRISM-THREAT-UNPHASE-RADIUS 6.0)
 
 (: WARP-PRISM-UNPHASE-HP-RATIO Float)
 (define WARP-PRISM-UNPHASE-HP-RATIO 0.65)
@@ -375,7 +387,10 @@
   ([passenger-pickup-table : (Mutable-HashTable Integer Integer)]
    [transport-cargo-since : (Mutable-HashTable Integer Integer)]
    [medivac-last-boost : (Mutable-HashTable Integer Integer)]
-   [prism-phases : (Mutable-HashTable Integer prism-phase-rec)]))
+   [prism-phases : (Mutable-HashTable Integer prism-phase-rec)]
+   [transport-last-load : (Mutable-HashTable Integer Integer)]
+   [transport-last-unload : (Mutable-HashTable Integer Integer)]
+   [transport-seen-empty : (Mutable-HashTable Integer Boolean)]))
 
 ;; Creates a fresh empty `transport-tracker`.
 (: make-transport-tracker (-> transport-tracker))
@@ -384,7 +399,39 @@
    (make-hasheqv)
    (make-hasheqv)
    (make-hasheqv)
+   (make-hasheqv)
+   (make-hasheqv)
+   (make-hasheqv)
    (make-hasheqv)))
+
+;; Records a transport Load (`MedivacLoad` / `WarpPrismLoad` / `3668`) frame.
+(: transport-tracker-record-load! (-> transport-tracker Integer Integer Void))
+(define (transport-tracker-record-load! tr tr-tag current-frame)
+  (when (> tr-tag 0)
+    (hash-set! (transport-tracker-transport-last-load tr) tr-tag current-frame)
+    (hash-remove! (transport-tracker-transport-seen-empty tr) tr-tag)))
+
+;; Records a transport UnloadAt (`396` / `913` / `1408` / `3669`) frame.
+(: transport-tracker-record-unload! (-> transport-tracker Integer Integer Void))
+(define (transport-tracker-record-unload! tr tr-tag current-frame)
+  (when (> tr-tag 0)
+    (hash-set! (transport-tracker-transport-last-unload tr) tr-tag current-frame)))
+
+;; Returns remaining loops before `tr-tag` may Load again after an UnloadAt (0 when ready).
+(: transport-tracker-load-cooldown (-> transport-tracker Integer Integer Integer))
+(define (transport-tracker-load-cooldown tr tr-tag current-frame)
+  (define last-u (hash-ref (transport-tracker-transport-last-unload tr) tr-tag (lambda () #f)))
+  (if last-u
+      (max 0 (- (+ last-u TRANSPORT-LOAD-UNLOAD-COOLDOWN-FRAMES) current-frame))
+      0))
+
+;; Returns remaining loops before `tr-tag` may UnloadAt again after a Load (0 when ready).
+(: transport-tracker-unload-cooldown (-> transport-tracker Integer Integer Integer))
+(define (transport-tracker-unload-cooldown tr tr-tag current-frame)
+  (define last-l (hash-ref (transport-tracker-transport-last-load tr) tr-tag (lambda () #f)))
+  (if last-l
+      (max 0 (- (+ last-l TRANSPORT-LOAD-UNLOAD-COOLDOWN-FRAMES) current-frame))
+      0))
 
 ;; Records that `passenger-tag` was loaded at `current-frame` (preserving earliest timestamp if carried).
 (: transport-tracker-record-pickup! (-> transport-tracker Integer Integer Integer Void))
@@ -396,7 +443,8 @@
   (when (> tr-tag 0)
     (define c-tbl (transport-tracker-transport-cargo-since tr))
     (unless (hash-has-key? c-tbl tr-tag)
-      (hash-set! c-tbl tr-tag current-frame))))
+      (hash-set! c-tbl tr-tag current-frame))
+    (transport-tracker-record-load! tr tr-tag current-frame)))
 
 ;; Records a Medivac `Boost` (`2116`) activation frame for Boost -> Unload `16f-36f` cadence tracking.
 (: transport-tracker-record-boost! (-> transport-tracker Integer Integer Void))
@@ -446,6 +494,13 @@
       (max 0 (- (+ (prism-phase-rec-last-unphase-frame rec) WARP-PRISM-REPHASE-COOLDOWN-FRAMES)
                 current-frame))
       0))
+
+;; Returns `#t` iff a phased WarpPrism has met the `44f` mode-toggle dwell cooldown (or no tracker).
+(: prism-can-unphase? (-> (Option transport-tracker) Integer Integer Boolean))
+(define (prism-can-unphase? tr prism-tag current-frame)
+  (or (not tr)
+      (>= (transport-tracker-prism-phase-dwell tr prism-tag current-frame)
+          WARP-PRISM-MODE-TOGGLE-COOLDOWN-FRAMES)))
 
 ;; =============================================================================
 ;; Internal Unit Normalization & Cargo Inspection Helpers
@@ -823,6 +878,9 @@
   (define c-tbl (transport-tracker-transport-cargo-since tr))
   (define phase-tbl (transport-tracker-prism-phases tr))
   (define boost-tbl (transport-tracker-medivac-last-boost tr))
+  (define last-load-tbl (transport-tracker-transport-last-load tr))
+  (define last-unload-tbl (transport-tracker-transport-last-unload tr))
+  (define seen-empty-tbl (transport-tracker-transport-seen-empty tr))
 
   (for ([a (in-list ally-units)])
     (define ut (exact-unit-type a))
@@ -835,13 +893,26 @@
           (hash-set! active-passengers ptag #t)
           (unless (hash-has-key? p-tbl ptag)
             (hash-set! p-tbl ptag current-frame)))
-        (if (or (pair? ptags) (> cargo-used 0))
-            (unless (hash-has-key? c-tbl tag)
-              (define earliest-p
-                (for/fold ([best : Integer current-frame]) ([pt (in-list ptags)])
-                  (min best (hash-ref p-tbl pt (lambda () current-frame)))))
-              (hash-set! c-tbl tag earliest-p))
-            (hash-remove! c-tbl tag))
+        (cond
+          [(or (pair? ptags) (> cargo-used 0))
+           (when (or (hash-has-key? seen-empty-tbl tag)
+                     (and (hash-has-key? last-unload-tbl tag)
+                          (not (hash-has-key? c-tbl tag))))
+             (hash-set! last-load-tbl tag current-frame))
+           (hash-remove! seen-empty-tbl tag)
+           (unless (hash-has-key? c-tbl tag)
+             (define earliest-p
+               (for/fold ([best : Integer current-frame]) ([pt (in-list ptags)])
+                 (min best (hash-ref p-tbl pt (lambda () current-frame)))))
+             (hash-set! c-tbl tag earliest-p))]
+          [else
+           (define prev-cargo-since (hash-ref c-tbl tag (lambda () #f)))
+           (when prev-cargo-since
+             (define prev-u (hash-ref last-unload-tbl tag (lambda () #f)))
+             (when (or (not prev-u) (< prev-u prev-cargo-since))
+               (hash-set! last-unload-tbl tag current-frame)))
+           (hash-remove! c-tbl tag)
+           (hash-set! seen-empty-tbl tag #t)])
         (when (memq ut '(warp-prism warp-prism-phasing))
           (define phasing-now? (eq? ut 'warp-prism-phasing))
           (define prev (hash-ref phase-tbl tag (lambda () #f)))
@@ -870,7 +941,10 @@
   (for ([dt (in-list dead-tags)])
     (hash-remove! c-tbl dt)
     (hash-remove! phase-tbl dt)
-    (hash-remove! boost-tbl dt)))
+    (hash-remove! boost-tbl dt)
+    (hash-remove! last-load-tbl dt)
+    (hash-remove! last-unload-tbl dt)
+    (hash-remove! seen-empty-tbl dt)))
 
 ;; =============================================================================
 ;; Active Danger Zones & Threat Inspection
@@ -1241,18 +1315,21 @@
      (cond
        [(not victim) #f]
        [(eq? tr-sym 'warp-prism-phasing)
-        ;; Unphase immediately so WarpPrism becomes mobile for save-pickup/escape
-        (when tr
-          (define p-tbl (transport-tracker-prism-phases tr))
-          (define prev (hash-ref p-tbl tr-tag (lambda () #f)))
-          (hash-set! p-tbl tr-tag
-                     (prism-phase-rec (if prev (prism-phase-rec-phase-start-frame prev) current-frame)
-                                      current-frame
-                                      #f)))
-        (transport-directive tr-tag tr-sym 'morph-warp-prism-transport
-                             'morph-warp-prism-transport MORPH-WARP-PRISM-TRANSPORT-ABILITY-ID
-                             tr-tag '() (u-x tr-u) (u-y tr-u)
-                             'warp-prism-unphase-emergency-save)]
+        (cond
+          [(not (prism-can-unphase? tr tr-tag current-frame)) #f]
+          [else
+           ;; Unphase only after >= 44f phase dwell so WarpPrism does not oscillate on save-pickup
+           (when tr
+             (define p-tbl (transport-tracker-prism-phases tr))
+             (define prev (hash-ref p-tbl tr-tag (lambda () #f)))
+             (hash-set! p-tbl tr-tag
+                        (prism-phase-rec (if prev (prism-phase-rec-phase-start-frame prev) current-frame)
+                                         current-frame
+                                         #f)))
+           (transport-directive tr-tag tr-sym 'morph-warp-prism-transport
+                                'morph-warp-prism-transport MORPH-WARP-PRISM-TRANSPORT-ABILITY-ID
+                                tr-tag '() (u-x tr-u) (u-y tr-u)
+                                'warp-prism-unphase-emergency-save)])]
        [else
         (define vtag (u-tag victim))
         (define vx (u-x victim))
@@ -1260,9 +1337,13 @@
         (define d (dist-2d (u-x tr-u) (u-y tr-u) vx vy))
         (define p-range (transport-pickup-range tr-sym))
         (cond
+          [(or (< (u-hp-ratio tr-u) EMERGENCY-DUMP-HP-RATIO)
+               (and tr (> (transport-tracker-load-cooldown tr tr-tag current-frame) 0)))
+           #f]
           [(<= d p-range)
            (when tr
-             (transport-tracker-record-pickup! tr tr-tag vtag current-frame))
+             (transport-tracker-record-pickup! tr tr-tag vtag current-frame)
+             (transport-tracker-record-load! tr tr-tag current-frame))
            (transport-directive tr-tag tr-sym 'load-unit 'load-transport
                                 LOAD-TRANSPORT-ABILITY-ID vtag (list vtag) vx vy reason)]
           [else
@@ -1421,10 +1502,15 @@
        (and (eq? tr-sym 'medivac)
             (u-boost-ready? tr-u)
             (>= boost-delta 224)))
+     (define unload-cd
+       (if tr (transport-tracker-unload-cooldown tr tr-tag current-frame) 0))
+     (define can-unload?
+       (or (= unload-cd 0) (>= carry-dwell STUCK-CARGO-CEILING-FRAMES)))
 
      (cond
-       ;; 1. `< 25%` HP+shields emergency dump immediately
-       [(< hp-rat EMERGENCY-DUMP-HP-RATIO)
+       ;; 1. `< 25%` HP+shields emergency dump (only when `>= 44f` Load->UnloadAt cooldown satisfied)
+       [(and can-unload? (< hp-rat EMERGENCY-DUMP-HP-RATIO))
+        (when tr (transport-tracker-record-unload! tr tr-tag current-frame))
         (if pos-safe?
             (transport-directive tr-tag tr-sym 'transport-drop-moving 'transport-drop-moving
                                  unload-ab-id tr-tag ptags tx ty 'emergency-low-hp-dump)
@@ -1433,24 +1519,29 @@
 
        ;; 2. `672f` (30s) stuck-cargo safety unload ceiling
        [(>= carry-dwell STUCK-CARGO-CEILING-FRAMES)
+        (when tr (transport-tracker-record-unload! tr tr-tag current-frame))
         (if pos-safe?
             (transport-directive tr-tag tr-sym 'transport-drop-moving 'transport-drop-moving
                                  unload-ab-id tr-tag ptags tx ty 'stuck-cargo-ceiling-672f)
             (transport-directive tr-tag tr-sym 'transport-drop-point 'unload-all-at
                                  unload-ab-id 0 ptags sx sy 'stuck-cargo-ceiling-offset-672f))]
 
-       ;; 3. `< 18f` carry dwell -> protect cargo while repositioning away from focus-fire
-       [(< carry-dwell MIN-CARRY-DWELL-FRAMES)
+       ;; 3. `< 18f` carry dwell or `< 44f` Load->UnloadAt cooldown -> hold/reposition safely
+       [(or (< carry-dwell MIN-CARRY-DWELL-FRAMES) (not can-unload?))
         (if (and boost-available? (> (dist-2d tx ty sx sy) 4.0))
             (begin
               (when tr (transport-tracker-record-boost! tr tr-tag current-frame))
               (transport-directive tr-tag tr-sym 'medivac-boost 'medivac-boost
                                    MEDIVAC-BOOST-ABILITY-ID tr-tag ptags sx sy 'medivac-boost-escape-hold))
             (transport-directive tr-tag tr-sym 'hold-and-reposition 'move
-                                 16 tr-tag ptags sx sy 'carry-dwell-protect-hold))]
+                                 16 tr-tag ptags sx sy
+                                 (if (< carry-dwell MIN-CARRY-DWELL-FRAMES)
+                                     'carry-dwell-protect-hold
+                                     'load-unload-cooldown-44f-hold)))]
 
-       ;; 4. `>= 18f` Medivac Boost -> Unload `16f-36f` moving self-drop cadence
+       ;; 4. `>= 18f` (and `>= 44f` after Load) Medivac Boost -> Unload `16f-36f` moving self-drop cadence
        [(and in-boost-unload-window? pos-safe?)
+        (when tr (transport-tracker-record-unload! tr tr-tag current-frame))
         (transport-directive tr-tag tr-sym 'transport-drop-moving 'transport-drop-moving
                              unload-ab-id tr-tag ptags tx ty 'medivac-boost-moving-self-drop)]
 
@@ -1458,11 +1549,13 @@
        [(and pos-safe?
              (or prefer-moving-drop? (u-moving? tr-u))
              (<= (dist-2d tx ty sx sy) 6.5))
+        (when tr (transport-tracker-record-unload! tr tr-tag current-frame))
         (transport-directive tr-tag tr-sym 'transport-drop-moving 'transport-drop-moving
                              unload-ab-id tr-tag ptags tx ty 'transport-moving-self-drop)]
 
        ;; 6. Arrived at safe rear-offset drop point `[3.5..5.0]` outside AoE zones
        [(<= (dist-2d tx ty sx sy) 3.0)
+        (when tr (transport-tracker-record-unload! tr tr-tag current-frame))
         (if prefer-moving-drop?
             (transport-directive tr-tag tr-sym 'transport-drop-moving 'transport-drop-moving
                                  unload-ab-id tr-tag ptags sx sy 'transport-moving-self-drop)
@@ -1542,34 +1635,42 @@
        [is-phasing?
         (define phase-dwell
           (if tr (transport-tracker-prism-phase-dwell tr tag current-frame) WARP-PRISM-TARGET-WARP-CYCLE-FRAMES))
+        (define can-unphase? (prism-can-unphase? tr tag current-frame))
         (define-values (emergency-victim _why)
-          (if check-emergency-save?
+          (if (and can-unphase? check-emergency-save?)
               (find-save-pickup-target prism-u ut ally-units enemy-units zones)
               (values #f 'none)))
+        (define-values (has-army? acx acy)
+          (for/fold ([sx : Float 0.0] [sy : Float 0.0] [n : Integer 0]
+                     #:result (if (> n 0)
+                                  (values #t (/ sx (->float n)) (/ sy (->float n)))
+                                  (values #f 0.0 0.0)))
+                    ([a (in-list ally-units)]
+                     #:when (and (u-alive? a)
+                                 (not (u-flying? a))
+                                 (not (u-structure? a))
+                                 (not (memq (exact-unit-type a) '(probe)))))
+            (values (+ sx (u-x a)) (+ sy (u-y a)) (add1 n))))
         (define immediate-reason : (Option Symbol)
           (cond
+            [(not can-unphase?)                      #f]
             [emergency-victim                         'warp-prism-unphase-emergency-save]
             [(< hp-rat WARP-PRISM-UNPHASE-HP-RATIO)   'warp-prism-unphase-low-hp]
             [(< (nearest-enemy-combat-dist px py enemy-units) WARP-PRISM-THREAT-UNPHASE-RADIUS)
              'warp-prism-unphase-threat-close]
-            [else
-             (define-values (has-army? acx acy)
-               (for/fold ([sx : Float 0.0] [sy : Float 0.0] [n : Integer 0]
-                          #:result (if (> n 0)
-                                       (values #t (/ sx (->float n)) (/ sy (->float n)))
-                                       (values #f 0.0 0.0)))
-                         ([a (in-list ally-units)]
-                          #:when (and (u-alive? a)
-                                      (not (u-flying? a))
-                                      (not (u-structure? a))
-                                      (not (memq (exact-unit-type a) '(probe)))))
-                 (values (+ sx (u-x a)) (+ sy (u-y a)) (add1 n))))
-             (if (and has-army? (> (dist-2d px py acx acy) WARP-PRISM-ARMY-LEASH-RADIUS))
-                 'warp-prism-unphase-army-far
-                 #f)]))
+            [(and has-army?
+                  (not warp-in-requested?)
+                  (> (dist-2d px py acx acy) WARP-PRISM-ARMY-LEASH-RADIUS))
+             'warp-prism-unphase-army-far]
+            [else #f]))
+        (define keep-phasing-for-warp-or-army?
+          (or warp-in-requested?
+              (and has-army? (not warp-in-complete?))))
         (define cycle-reason : (Option Symbol)
           (cond
+            [(not can-unphase?) #f]
             [immediate-reason immediate-reason]
+            [keep-phasing-for-warp-or-army? #f]
             [(>= phase-dwell WARP-PRISM-TARGET-WARP-CYCLE-FRAMES)
              'warp-prism-unphase-cycle-complete]
             [(and warp-in-complete? (>= phase-dwell WARP-PRISM-MIN-PHASING-DWELL-FRAMES))

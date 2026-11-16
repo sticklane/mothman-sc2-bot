@@ -157,7 +157,13 @@
          predict-opponent-tactical-target
          resolve-pending-forecasts!
          select-mirror-trust-mode
-         step-mirror-mind-predictor!)
+         step-mirror-mind-predictor!
+         mirror-classify-enemy-archetype
+         counter-unit-for-archetype
+         counter-unit-for-race
+         archetype-signature-unit
+         compute-calibrated-win-prob
+         compute-calibrated-snowball-adv)
 
 ;; =============================================================================
 ;; 1. Unit & Structure Cost Table (Minerals . Gas)
@@ -3387,6 +3393,181 @@
     barracks barracks-techlab factory factory-techlab starport starport-techlab armory ghost-academy fusion-core
     gateway cybernetics-core robotics-facility robotics-bay stargate twilight-council templar-archive dark-shrine fleet-beacon))
 
+(define MIRROR-BUILDING-OR-NONCOMBAT-HT
+  (hasheq
+   'drone #t 'scv #t 'probe #t 'mule #t
+   'larva #t 'egg #t 'cocoon #t 'baneling-cocoon #t 'ravager-cocoon #t 'lurker-cocoon #t 'brood-lord-cocoon #t
+   'overlord #t 'overseer #t 'overlord-transport #t 'observer #t 'changeling #t
+   'creep-tumor #t 'creep-tumor-burrowed #t 'creep-tumor-queen #t 'point-defense-drone #t
+   'hatchery #t 'lair #t 'hive #t 'spawning-pool #t 'extractor #t 'extractor-rich #t
+   'roach-warren #t 'baneling-nest #t 'hydralisk-den #t 'lurker-den #t 'lurker-den-mp #t
+   'spire #t 'greater-spire #t 'infestation-pit #t 'ultralisk-cavern #t 'evolution-chamber #t
+   'spine-crawler #t 'spore-crawler #t 'spine-crawler-uprooted #t 'spore-crawler-uprooted #t
+   'nydus-network #t 'nydus-canal #t
+   'command-center #t 'command-center-flying #t 'orbital-command #t 'orbital-command-flying #t
+   'planetary-fortress #t 'supply-depot #t 'supply-depot-lowered #t 'refinery #t 'refinery-rich #t
+   'barracks #t 'barracks-flying #t 'barracks-techlab #t 'barracks-reactor #t
+   'factory #t 'factory-flying #t 'factory-techlab #t 'factory-reactor #t
+   'starport #t 'starport-flying #t 'starport-techlab #t 'starport-reactor #t
+   'engineering-bay #t 'armory #t 'fusion-core #t 'ghost-academy #t
+   'bunker #t 'missile-turret #t 'sensor-tower #t 'techlab #t 'reactor #t
+   'nexus #t 'pylon #t 'assimilator #t 'assimilator-rich #t 'gateway #t 'warp-gate #t 'warpgate #t
+   'forge #t 'cybernetics-core #t 'photon-cannon #t 'shield-battery #t 'twilight-council #t
+   'robotics-facility #t 'robotics-bay #t 'robotics-support-bay #t 'stargate #t
+   'templar-archive #t 'dark-shrine #t 'fleet-beacon #t))
+
+(define (mirror-building-or-noncombat-sym? sym)
+  (and (symbol? sym)
+       (or (hash-ref MIRROR-BUILDING-OR-NONCOMBAT-HT sym #f)
+           (and (not (hash-ref SC2-UNIT-COMBAT-STATS-TABLE sym #f))
+                (zero? (sc2-supply-cost sym 1))))))
+
+(define (mirror-combat-unit-entry? u)
+  (define sym (unit-type-sym u))
+  (and (symbol? sym)
+       (not (eq? sym 'unknown))
+       (not (mirror-building-or-noncombat-sym? sym))))
+
+(define PROTOSS-AIR-TECH-SYMS
+  '(void-ray voidray carrier tempest oracle phoenix mothership stargate fleet-beacon))
+(define PROTOSS-AIR-COMBAT-SYMS
+  '(void-ray voidray carrier tempest oracle phoenix mothership))
+(define PROTOSS-CAPITAL-AIR-SYMS
+  '(carrier tempest mothership void-ray voidray))
+(define TERRAN-AIR-COMBAT-SYMS
+  '(viking viking-fighter viking-assault banshee battlecruiser liberator liberator-ag raven))
+(define TERRAN-AIR-TECH-SYMS
+  '(viking viking-fighter viking-assault banshee battlecruiser liberator liberator-ag raven
+    starport starport-techlab starport-reactor fusion-core))
+(define ZERG-AIR-COMBAT-SYMS
+  '(mutalisk corruptor brood-lord viper))
+(define ZERG-AIR-TECH-SYMS
+  '(mutalisk corruptor brood-lord viper spire greater-spire))
+
+(define (mirror-canonical-unit-sym sym)
+  (case sym
+    [(voidray) 'void-ray]
+    [(warpgate) 'warp-gate]
+    [(lurker-mp lurker-burrowed lurker-mp-burrowed) 'lurker]
+    [(siege-tank-sieged) 'siege-tank]
+    [(liberator-ag) 'liberator]
+    [(thor-ap) 'thor]
+    [(viking) 'viking-fighter]
+    [(zergling-burrowed) 'zergling]
+    [(baneling-burrowed) 'baneling]
+    [(roach-burrowed) 'roach]
+    [(ravager-burrowed) 'ravager]
+    [(hydralisk-burrowed) 'hydralisk]
+    [(infestor-burrowed) 'infestor]
+    [(ultralisk-burrowed) 'ultralisk]
+    [else sym]))
+
+(define (mirror-accumulate-unit-counts! counts-ht raw-items)
+  (define (add-sym! s [n 1])
+    (when (and (symbol? s) (not (eq? s 'unknown)) (> n 0))
+      (define c (mirror-canonical-unit-sym s))
+      (hash-set! counts-ht c (+ (hash-ref counts-ht c 0) n))))
+  (cond
+    [(hash? raw-items)
+     (for ([(k v) (in-hash raw-items)])
+       (when (and (symbol? k) (number? v) (> v 0))
+         (add-sym! k (exact-round v))))]
+    [(list? raw-items)
+     (for ([item (in-list raw-items)])
+       (cond
+         [(symbol? item) (add-sym! item 1)]
+         [(and (pair? item) (symbol? (car item)) (number? (cdr item)))
+          (add-sym! (car item) (exact-round (cdr item)))]
+         [(hash? item)
+          (define s (unit-type-sym item))
+          (define cnt (safe-int (hash-ref item 'count 1) 1))
+          (add-sym! s (max 1 cnt))]))]))
+
+(define (mirror-classify-enemy-archetype raw-enemy-units [raw-enemy-bldgs '()] [enemy-race #f])
+  (define counts-ht (make-hasheq))
+  (mirror-accumulate-unit-counts! counts-ht raw-enemy-units)
+  (mirror-accumulate-unit-counts! counts-ht raw-enemy-bldgs)
+  (define (cnt syms)
+    (for/sum ([s (in-list syms)])
+      (hash-ref counts-ht s 0)))
+  (define proto-air-units (cnt '(void-ray carrier tempest oracle phoenix mothership)))
+  (define proto-air-bldgs (cnt '(stargate fleet-beacon)))
+  (define proto-air-cnt (+ proto-air-units proto-air-bldgs))
+  (define proto-gnd-units (cnt '(zealot stalker adept sentry colossus immortal archon disruptor high-templar dark-templar)))
+  (define proto-gnd-bldgs (cnt '(gateway warp-gate cybernetics-core twilight-council robotics-facility robotics-bay robotics-support-bay templar-archive dark-shrine forge)))
+  (define proto-gnd-cnt (+ proto-gnd-units proto-gnd-bldgs))
+  (define terran-air-units (cnt '(viking-fighter viking-assault banshee battlecruiser liberator raven)))
+  (define terran-air-bldgs (cnt '(starport starport-techlab starport-reactor fusion-core)))
+  (define terran-air-cnt (+ terran-air-units terran-air-bldgs))
+  (define terran-bio-cnt (cnt '(marine marauder reaper ghost medivac barracks barracks-techlab barracks-reactor ghost-academy)))
+  (define terran-mech-cnt (cnt '(siege-tank hellion hellbat cyclone thor widow-mine widow-mine-burrowed factory factory-techlab factory-reactor armory)))
+  (define zerg-air-units (cnt '(mutalisk corruptor brood-lord viper)))
+  (define zerg-air-bldgs (cnt '(spire greater-spire)))
+  (define zerg-air-cnt (+ zerg-air-units zerg-air-bldgs))
+  (define zerg-lurker-cnt (cnt '(lurker lurker-den lurker-den-mp)))
+  (define zerg-roach-cnt (cnt '(roach ravager roach-warren)))
+  (define zerg-ling-cnt (cnt '(zergling)))
+  (define zerg-bane-hydra-cnt (cnt '(baneling hydralisk swarm-host ultralisk baneling-nest hydralisk-den infestation-pit ultralisk-cavern)))
+  (define race-sym (and enemy-race (normalize-known-race enemy-race)))
+  (define proto-evidence (+ proto-air-cnt proto-gnd-cnt (hash-ref counts-ht 'nexus 0) (hash-ref counts-ht 'pylon 0) (hash-ref counts-ht 'probe 0)))
+  (define terran-evidence (+ terran-air-cnt terran-bio-cnt terran-mech-cnt (hash-ref counts-ht 'command-center 0) (hash-ref counts-ht 'orbital-command 0) (hash-ref counts-ht 'scv 0)))
+  (define zerg-evidence (+ zerg-air-cnt zerg-lurker-cnt zerg-roach-cnt zerg-ling-cnt zerg-bane-hydra-cnt (hash-ref counts-ht 'hatchery 0) (hash-ref counts-ht 'lair 0) (hash-ref counts-ht 'hive 0) (hash-ref counts-ht 'spawning-pool 0) (hash-ref counts-ht 'drone 0)))
+  (define eff-race
+    (cond
+      [(memq race-sym '(Protoss Terran Zerg)) race-sym]
+      [(and (> proto-evidence terran-evidence) (> proto-evidence zerg-evidence)) 'Protoss]
+      [(and (> terran-evidence proto-evidence) (> terran-evidence zerg-evidence)) 'Terran]
+      [(> zerg-evidence 0) 'Zerg]
+      [else 'Unknown]))
+  (cond
+    [(eq? eff-race 'Protoss)
+     (cond
+       ;; Strict Stargate/Air guard: Protoss MUST have actual Protoss air/Stargate units or buildings
+       ;; (observer/warp-prism/colossus alone are NEVER sufficient for 'sky-toss or 'air-fleet).
+       [(and (> proto-air-cnt 0)
+             (or (>= (+ (cnt '(carrier tempest mothership)) (hash-ref counts-ht 'fleet-beacon 0)) 2)
+                 (>= proto-air-units (max 2 proto-gnd-units))
+                 (and (>= proto-air-bldgs 1) (<= proto-gnd-units 4))
+                 (>= proto-air-units 3)))
+        'sky-toss]
+       [(>= (cnt '(stalker colossus immortal archon disruptor high-templar dark-templar cybernetics-core twilight-council robotics-facility robotics-bay templar-archive dark-shrine)) 1)
+        'stalker-colossus]
+       [(>= (+ proto-gnd-units proto-gnd-bldgs) 1)
+        (if (< proto-gnd-units 4) 'early-rush 'stalker-colossus)]
+       [else 'standard-macro])]
+    [(eq? eff-race 'Terran)
+     (cond
+       [(and (> terran-air-cnt 0)
+             (or (>= terran-air-units (max 2 (+ terran-bio-cnt terran-mech-cnt)))
+                 (and (>= terran-air-bldgs 1) (< (+ terran-bio-cnt terran-mech-cnt) 4))))
+        'terran-air]
+       [(and (> terran-mech-cnt 0)
+             (>= terran-mech-cnt (max 1 (quotient terran-bio-cnt 2))))
+        'mech-siege]
+       [(> terran-bio-cnt 0)
+        'bio-ball]
+       [else 'standard-macro])]
+    [(eq? eff-race 'Zerg)
+     (cond
+       [(>= zerg-lurker-cnt 1) 'lurker-contain]
+       [(and (> zerg-air-cnt 0)
+             (>= zerg-air-cnt (max 2 (+ zerg-roach-cnt zerg-bane-hydra-cnt))))
+        'muta-flock]
+       [(and (> zerg-roach-cnt 0)
+             (>= zerg-roach-cnt (max 1 (+ zerg-bane-hydra-cnt (quotient zerg-ling-cnt 4)))))
+        'roach-ravager]
+       [(or (> zerg-bane-hydra-cnt 0) (>= zerg-ling-cnt 8))
+        'ling-bane-hydra]
+       [(> zerg-ling-cnt 0)
+        'zergling-flood]
+       [else 'standard-macro])]
+    [else
+     (cond
+       [(> proto-air-cnt 0) 'sky-toss]
+       [(> terran-air-cnt 0) 'terran-air]
+       [(> zerg-air-cnt 0) 'muta-flock]
+       [else 'standard-macro])]))
+
 (define (unit-to-archetype unit-sym)
   (case unit-sym
     [(marine marauder reaper ghost medivac
@@ -3399,10 +3580,12 @@
       high-templar dark-templar
       gateway warp-gate cybernetics-core twilight-council robotics-facility robotics-bay templar-archive dark-shrine)
      'stalker-colossus]
-    [(void-ray carrier tempest oracle phoenix mothership
-      viking viking-fighter banshee battlecruiser liberator liberator-ag raven
-      stargate fleet-beacon starport starport-techlab fusion-core)
+    [(void-ray voidray carrier tempest oracle phoenix mothership
+      stargate fleet-beacon)
      'sky-toss]
+    [(viking viking-fighter viking-assault banshee battlecruiser liberator liberator-ag raven
+      starport starport-techlab starport-reactor fusion-core)
+     'terran-air]
     [(zergling zergling-burrowed baneling baneling-burrowed hydralisk hydralisk-burrowed
       lurker lurker-burrowed lurker-mp lurker-mp-burrowed queen queen-burrowed ultralisk ultralisk-burrowed swarm-host
       spawning-pool baneling-nest hydralisk-den lurker-den lurker-den-mp infestation-pit ultralisk-cavern)
@@ -3414,17 +3597,49 @@
     [else
      'early-rush]))
 
-(define (archetype-signature-unit race arch)
+(define (archetype-signature-unit race arch [frame 0] [enemy-air-ratio 0.0] [available-tech #f])
+  (define tech-list (and (list? available-tech) (not (null? available-tech)) available-tech))
+  (define f (safe-int frame 0))
+  (define ar (max 0.0 (min 1.0 (safe-real enemy-air-ratio 0.0))))
   (case arch
     [(bio-ball)          'marauder]
     [(mech-siege)        'siege-tank]
     [(stalker-colossus protoss-deathball) 'stalker]
-    [(sky-toss air-fleet) (case race [(Terran) 'banshee] [(Zerg) 'mutalisk] [else 'void-ray])]
+    [(sky-toss air-fleet terran-air)
+     (case race
+       [(Terran)
+        ;; Never return 'banshee against air/SkyToss (Banshees have 0.0 air DPS).
+        ;; Choose phase- and tech-appropriate Terran AA: Viking-Fighter / Thor / Marine.
+        (cond
+          [(and tech-list
+                (not (memq 'starport tech-list))
+                (not (memq 'armory tech-list)))
+           'marine]
+          [(and (>= f 13440)
+                (>= ar 0.60)
+                (or (not tech-list) (memq 'armory tech-list)))
+           'thor]
+          [else 'viking-fighter])]
+       [(Zerg)
+        (cond
+          [(and tech-list
+                (not (memq 'spire tech-list))
+                (not (memq 'greater-spire tech-list)))
+           (if (memq 'hydralisk-den tech-list) 'hydralisk 'queen)]
+          [else 'corruptor])]
+       [else 'void-ray])]
     [(ling-bane-hydra)   'hydralisk]
     [(lurker-contain)    'lurker]
     [(zergling-flood)    'zergling]
     [(roach-ravager)     'roach]
-    [(muta-flock)        'mutalisk]
+    [(muta-flock)
+     (case race
+       [(Terran)
+        (if (and (>= f 11000) (or (not tech-list) (memq 'armory tech-list)))
+            'thor
+            'marine)]
+       [(Protoss) 'phoenix]
+       [else 'mutalisk])]
     [else                (case race [(Terran) 'marine] [(Protoss) 'zealot] [else 'zergling])]))
 
 (define (race-hidden-gas-threat enemy-race)
@@ -3433,6 +3648,290 @@
     [(Terran)  'banshee]
     [(Zerg)    'mutalisk]
     [else      'void-ray]))
+
+(define (mirror-unit-gas-cost sym)
+  (cdr (unit-resource-cost sym)))
+
+(define (mirror-unit-min-cost sym)
+  (car (unit-resource-cost sym)))
+
+(define (mirror-tech-has? tech-list reqs)
+  (cond
+    [(null? reqs) #t]
+    [else
+     (for/and ([r (in-list reqs)])
+       (not (not (memq r tech-list))))]))
+
+(define (mirror-unit-required-tech u)
+  (case u
+    [(marine) '(barracks)]
+    [(marauder) '(barracks-techlab)]
+    [(reaper) '(barracks)]
+    [(ghost) '(barracks-techlab ghost-academy)]
+    [(hellion hellbat) '(factory)]
+    [(widow-mine) '(factory)]
+    [(cyclone) '(factory-techlab)]
+    [(siege-tank) '(factory-techlab)]
+    [(thor) '(factory armory)]
+    [(viking viking-fighter medivac liberator) '(starport)]
+    [(banshee raven) '(starport-techlab)]
+    [(battlecruiser) '(starport-techlab fusion-core)]
+    [(zergling queen) '(spawning-pool)]
+    [(roach ravager) '(roach-warren)]
+    [(baneling) '(spawning-pool baneling-nest)]
+    [(hydralisk) '(lair hydralisk-den)]
+    [(lurker) '(lair hydralisk-den lurker-den)]
+    [(mutalisk corruptor) '(lair spire)]
+    [(brood-lord) '(hive greater-spire)]
+    [(infestor swarm-host) '(lair infestation-pit)]
+    [(viper) '(hive infestation-pit)]
+    [(ultralisk) '(hive ultralisk-cavern)]
+    [(zealot) '(gateway)]
+    [(stalker sentry adept) '(cybernetics-core)]
+    [(immortal observer warp-prism) '(cybernetics-core robotics-facility)]
+    [(colossus disruptor) '(robotics-facility robotics-bay)]
+    [(phoenix void-ray oracle) '(cybernetics-core stargate)]
+    [(tempest carrier) '(stargate fleet-beacon)]
+    [(high-templar archon) '(twilight-council templar-archive)]
+    [(dark-templar) '(twilight-council dark-shrine)]
+    [else '()]))
+
+;; Phase-, enemy air-ratio-, and opportunity-cost-aware unit counter selector.
+;; Replaces trap/zero-air-DPS assignments (e.g., Terran 'banshee vs SkyToss),
+;; enforces <40-worker / unfinished-natural gas-heavy penalties, avoids late-game
+;; un-upgraded T1 units into splash, and accounts for enemy air share.
+(define (counter-unit-for-archetype
+         race
+         target-archetype
+         [available-tech ALL-RATIONAL-TECH]
+         [raw-minerals 400]
+         [raw-gas 200]
+         #:frame [frame 6000]
+         #:enemy-air-ratio [raw-air-ratio 0.0]
+         #:workers [raw-workers 44]
+         #:natural-ready? [natural-ready? #t]
+         #:researched-upgrades [raw-upgrades '()]
+         #:enemy-unit [enemy-unit #f]
+         #:enemy-has-splash? [enemy-has-splash? #f])
+  (define r (normalize-known-race race))
+  (define arch (if (symbol? target-archetype) target-archetype 'standard-macro))
+  (define minerals (max 250 (safe-int raw-minerals 400)))
+  (define gas (max 150 (safe-int raw-gas 200)))
+  (define f (max 0 (safe-int frame 6000)))
+  (define air-ratio (max 0.0 (min 1.0 (safe-real raw-air-ratio 0.0))))
+  (define workers (max 0 (safe-int raw-workers 44)))
+  (define upgs (safe-list raw-upgrades))
+  (define tech-list
+    (if (or (not (list? available-tech)) (null? available-tech))
+        ALL-RATIONAL-TECH
+        available-tech))
+  (define econ-constrained?
+    (or (< workers 40) (not natural-ready?)))
+  (define splash-present?
+    (or enemy-has-splash?
+        (not (not (memq enemy-unit '(colossus siege-tank siege-tank-sieged baneling lurker lurker-mp lurker-mp-burrowed high-templar archon disruptor hellbat liberator liberator-ag))))
+        (not (not (memq arch '(stalker-colossus protoss-deathball mech-siege lurker-contain ling-bane-hydra))))))
+  (define air-threat?
+    (or (memq arch '(sky-toss air-fleet terran-air muta-flock))
+        (>= air-ratio 0.35)
+        (not (not (memq enemy-unit '(void-ray voidray carrier tempest oracle phoenix mothership battlecruiser banshee liberator liberator-ag viking viking-fighter raven mutalisk corruptor brood-lord viper))))))
+  (define (feasible? u [allow-expensive? #t])
+    (define reqs (mirror-unit-required-tech u))
+    (define m-cost (mirror-unit-min-cost u))
+    (define g-cost (mirror-unit-gas-cost u))
+    (define gas-hog? (>= g-cost 150))
+    (and (mirror-tech-has? tech-list reqs)
+         (>= minerals (max 50 m-cost))
+         (>= gas g-cost)
+         (or allow-expensive?
+             (not econ-constrained?)
+             (not gas-hog?))))
+  (define (pick-first candidates default-unit [allow-expensive? (not econ-constrained?)])
+    (or (for/first ([c (in-list candidates)] #:when (feasible? c allow-expensive?)) c)
+        (for/first ([c (in-list candidates)] #:when (feasible? c #t)) c)
+        default-unit))
+  (cond
+    ;; 1. Air-dominant / SkyToss / Air-Fleet / Terran-Air / Muta-Flock branch
+    [air-threat?
+     (case r
+       [(Terran)
+        (cond
+          ;; Never choose 'banshee or 'marauder against air threats!
+          [(eq? arch 'muta-flock)
+           (if (< f 5500)
+               (pick-first '(marine cyclone widow-mine) 'marine #t)
+               (pick-first (if (>= air-ratio 0.50)
+                               '(thor marine cyclone liberator)
+                               '(marine thor widow-mine))
+                           'marine))]
+          [(or (memq enemy-unit '(tempest carrier void-ray voidray battlecruiser liberator liberator-ag))
+               (memq arch '(sky-toss air-fleet terran-air)))
+           (cond
+             ;; Heavy late-game mass air with Armory & strong econ -> Thor + Viking
+             [(and (>= f 13440)
+                   (>= air-ratio 0.65)
+                   (not econ-constrained?)
+                   (not (eq? enemy-unit 'tempest))
+                   (feasible? 'thor #t))
+              'thor]
+             [(and (< f 4200) (not (memq 'starport tech-list)))
+              'marine]
+             [else
+              (pick-first '(viking-fighter marine thor) 'marine)])]
+          [else
+           (pick-first '(viking-fighter marine thor) 'marine)])]
+       [(Zerg)
+        (cond
+          [(< f 4200)
+           (pick-first '(queen hydralisk spore-crawler) 'queen #t)]
+          [(and (or (>= air-ratio 0.45)
+                    (memq enemy-unit '(carrier tempest mothership battlecruiser brood-lord))
+                    (>= f 11000))
+                (feasible? 'corruptor #t))
+           'corruptor]
+          [(eq? arch 'muta-flock)
+           (pick-first '(hydralisk queen corruptor) 'queen)]
+          [else
+           (pick-first '(corruptor hydralisk queen) 'queen)])]
+       [(Protoss)
+        (cond
+          [(eq? arch 'muta-flock)
+           (pick-first '(phoenix archon stalker) 'stalker)]
+          [(and (>= f 13440) (>= air-ratio 0.55) (not econ-constrained?) (feasible? 'tempest #t))
+           'tempest]
+          [else
+           (pick-first '(void-ray stalker tempest phoenix) 'stalker)])]
+       [else 'marine])]
+
+    ;; 2. Ground situational, phase, splash & opportunity-cost branches
+    [else
+     (define late-t1-splash? (and (> f 13440) splash-present?))
+     (define marine-upgraded?
+       (for/or ([u (in-list upgs)])
+         (not (not (memq u '(stimpack stimpack-cast combat-shield combat-shields shield-wall shieldwall))))))
+     (define zealot-charged?
+       (for/or ([u (in-list upgs)])
+         (not (not (memq u '(charge zealot-charge))))))
+     (define base-choice
+       (case r
+         [(Terran)
+          (case arch
+            [(mech-siege)
+             (pick-first (if (>= f 11000)
+                             '(viking-fighter liberator marauder siege-tank)
+                             '(marauder siege-tank viking-fighter))
+                         'marauder)]
+            [(lurker-contain)
+             (pick-first (if (>= f 11000)
+                             '(siege-tank ghost liberator marauder)
+                             '(siege-tank marauder))
+                         'marauder)]
+            [(bio-ball)
+             (pick-first '(siege-tank marine marauder) 'marine)]
+            [(roach-ravager)
+             (pick-first '(marauder siege-tank marine) 'marauder)]
+            [(zergling-flood early-rush)
+             (pick-first (if (< f 6500) '(hellion widow-mine marine) '(hellbat siege-tank widow-mine))
+                         'marine)]
+            [(ling-bane-hydra)
+             (pick-first '(siege-tank widow-mine hellbat marine) 'marine)]
+            [(stalker-colossus protoss-deathball)
+             (cond
+               [(eq? enemy-unit 'colossus)
+                (pick-first '(viking-fighter marauder liberator) 'marauder)]
+               [(memq enemy-unit '(high-templar archon disruptor))
+                (pick-first '(ghost marauder liberator) 'marauder)]
+               [(memq enemy-unit '(stalker immortal zealot adept))
+                (pick-first '(marauder siege-tank marine) 'marauder)]
+               [else
+                (pick-first '(marauder siege-tank ghost viking-fighter) 'marauder)])]
+            [else #f])]
+         [(Zerg)
+          (case arch
+            [(mech-siege)
+             (pick-first (if (and (>= f 12000) (not econ-constrained?))
+                             '(ravager viper corruptor hydralisk roach)
+                             '(ravager roach hydralisk))
+                         'roach)]
+            [(lurker-contain)
+             (pick-first '(lurker ravager roach hydralisk) 'roach)]
+            [(bio-ball)
+             (pick-first (if (and (>= f 13440) (not econ-constrained?))
+                             '(baneling ultralisk hydralisk roach)
+                             '(baneling hydralisk roach zergling))
+                         'zergling)]
+            [(roach-ravager)
+             (pick-first (if (>= f 9000)
+                             '(lurker ravager roach hydralisk)
+                             '(roach ravager))
+                         'roach)]
+            [(zergling-flood early-rush)
+             (pick-first '(baneling roach zergling queen) 'zergling)]
+            [(ling-bane-hydra)
+             (pick-first (if (>= f 9000) '(lurker baneling roach) '(baneling roach)) 'roach)]
+            [(stalker-colossus protoss-deathball)
+             (cond
+               [(eq? enemy-unit 'colossus)
+                (pick-first '(corruptor lurker ravager roach) 'roach)]
+               [(eq? enemy-unit 'immortal)
+                (pick-first (if late-t1-splash? '(hydralisk lurker ravager roach) '(hydralisk zergling roach)) 'roach)]
+               [else
+                (pick-first (if late-t1-splash? '(lurker hydralisk ravager roach) '(hydralisk roach zergling)) 'roach)])]
+            [else #f])]
+         [(Protoss)
+          (case arch
+            [(mech-siege)
+             (pick-first (if (not econ-constrained?)
+                             '(immortal disruptor zealot phoenix)
+                             '(immortal zealot stalker))
+                         'immortal)]
+            [(lurker-contain)
+             ;; Trap avoidance: never over-mass Stalkers into Lurkers!
+             (pick-first (if (not econ-constrained?)
+                             '(immortal disruptor carrier archon)
+                             '(immortal adept))
+                         'immortal)]
+            [(bio-ball)
+             (pick-first (if (not econ-constrained?)
+                             '(colossus high-templar archon zealot)
+                             '(immortal zealot adept stalker))
+                         'zealot)]
+            [(roach-ravager)
+             ;; Trap avoidance: Immortals counter Roaches/Ravagers; avoid mass Stalkers.
+             (pick-first '(immortal archon zealot) 'immortal)]
+            [(zergling-flood early-rush)
+             (pick-first (if (< f 6500) '(adept zealot sentry) '(archon zealot adept immortal)) 'adept)]
+            [(ling-bane-hydra)
+             (pick-first (if (not econ-constrained?)
+                             '(colossus archon high-templar zealot)
+                             '(adept immortal stalker))
+                         'immortal)]
+            [(stalker-colossus protoss-deathball)
+             (pick-first '(immortal disruptor archon zealot) 'immortal)]
+            [else #f])]
+         [else #f]))
+     (define resolved
+       (or base-choice
+           (and enemy-unit
+                (attribute-counter-unit-for-enemy r enemy-unit tech-list minerals gas))
+           (let* ([tree (get-race-counter-tree r)]
+                  [res (resolve-demand-pull tree arch tech-list #:minerals minerals #:gas gas)])
+             (if (hash? res) (hash-ref res 'selected-unit 'marine) res))))
+     ;; Enforce late-game fragile T1 penalty vs splash & economic gas gate
+     (cond
+       [(and late-t1-splash? (eq? r 'Zerg) (eq? resolved 'zergling))
+        (pick-first '(roach ravager hydralisk lurker) 'roach)]
+       [(and late-t1-splash? (eq? r 'Terran) (eq? resolved 'marine) (not marine-upgraded?))
+        (pick-first '(marauder siege-tank liberator ghost) 'marauder)]
+       [(and late-t1-splash? (eq? r 'Protoss) (eq? resolved 'zealot) (not zealot-charged?))
+        (pick-first '(immortal archon colossus stalker) 'immortal)]
+       [(and econ-constrained? (>= (mirror-unit-gas-cost resolved) 150))
+        (case r
+          [(Terran) (pick-first '(marine marauder viking-fighter) resolved #t)]
+          [(Zerg)   (pick-first '(roach ravager queen zergling) resolved #t)]
+          [(Protoss) (pick-first '(zealot adept stalker immortal) resolved #t)]
+          [else resolved])]
+       [else resolved])]))
 
 (define (excluded-branch->bldgs branch)
   (case branch
@@ -3549,7 +4048,12 @@
          (if (memq 'lurker-den feasible-tech) 'lurker 'hydralisk)]
         [(bio-stim-medivac)        'marauder]
         [(factory-mech-siege)      'siege-tank]
-        [(starport-cloak-or-bc)    'banshee]
+        [(starport-cloak-or-bc)
+         (if (and tech-obs
+                  (enemy-tech-observation-requires-anti-air? tech-obs)
+                  (not (enemy-tech-observation-requires-detection? tech-obs)))
+             'viking-fighter
+             'banshee)]
         [else
          (case enemy-race
            [(Zerg)
@@ -3566,7 +4070,12 @@
               [else 'stalker])]
            [(Terran)
             (cond
-              [(and (memq 'starport feasible-tech) (not (memq 'starport crippled))) 'banshee]
+              [(and (memq 'starport feasible-tech) (not (memq 'starport crippled)))
+               (if (and tech-obs
+                        (enemy-tech-observation-requires-detection? tech-obs)
+                        (not (enemy-tech-observation-requires-anti-air? tech-obs)))
+                   'banshee
+                   'viking-fighter)]
               [(and (memq 'factory feasible-tech) (not (memq 'factory crippled))) 'siege-tank]
               [else 'marauder])]
            [else raw-unit])])))
@@ -3765,23 +4274,108 @@
              (and fallback-cands
                   (lotv-pick-first-feasible fallback-cands eff-tech minerals gas))))))
 
+(define (mirror-obs-enemy-air-ratio enemy-units)
+  (define total-sup 0.0)
+  (define air-sup 0.0)
+  (for ([u (in-list (safe-hash-list enemy-units))])
+    (define sym (unit-type-sym u))
+    (when (and (symbol? sym) (not (mirror-building-or-noncombat-sym? sym)))
+      (define cs (mirror-canonical-unit-sym sym))
+      (define sup (exact->inexact (if (eq? cs 'zergling) 0.5 (sc2-supply-cost cs 1))))
+      (define stats (hash-ref SC2-UNIT-COMBAT-STATS-TABLE cs #f))
+      (define fly?
+        (or (and (hash? u) (eq? (hash-ref u 'flying? #f) #t))
+            (and (hash? stats) (eq? (hash-ref stats 'flying? #f) #t))
+            (not (not (memq cs '(void-ray carrier tempest oracle phoenix mothership
+                                  viking-fighter banshee battlecruiser liberator raven
+                                  mutalisk corruptor brood-lord viper))))))
+      (set! total-sup (+ total-sup sup))
+      (when fly?
+        (set! air-sup (+ air-sup sup)))))
+  (if (<= total-sup 0.0)
+      0.0
+      (min 1.0 (/ air-sup total-sup))))
+
+(define (mirror-obs-worker-count obs raw-units [kind 'self])
+  (define explicit
+    (if (eq? kind 'self)
+        (or (and (number? (hash-ref obs 'worker-count #f)) (hash-ref obs 'worker-count #f))
+            (and (number? (hash-ref obs 'workers #f)) (hash-ref obs 'workers #f))
+            (and (number? (hash-ref obs 'food-workers #f)) (hash-ref obs 'food-workers #f))
+            (and (number? (hash-ref obs 'harvesters #f)) (hash-ref obs 'harvesters #f)))
+        (or (and (number? (hash-ref obs 'enemy-worker-count #f)) (hash-ref obs 'enemy-worker-count #f))
+            (and (number? (hash-ref obs 'enemy-workers #f)) (hash-ref obs 'enemy-workers #f)))))
+  (cond
+    [(number? explicit) (max 0 (exact-round explicit))]
+    [(and (eq? kind 'self)
+          (or (number? (hash-ref obs 'mineral-harvesters #f))
+              (number? (hash-ref obs 'vespene-harvesters #f))))
+     (+ (max 0 (safe-int (hash-ref obs 'mineral-harvesters 0) 0))
+        (max 0 (safe-int (hash-ref obs 'vespene-harvesters 0) 0)))]
+    [else
+     (define unit-cnt
+       (for/sum ([u (in-list (safe-hash-list raw-units))])
+         (if (memq (unit-type-sym u) '(drone scv probe)) 1 0)))
+     (define counts-ht
+       (hash-ref obs (if (eq? kind 'self) 'unit-counts 'enemy-unit-counts) #f))
+     (define ht-cnt
+       (if (hash? counts-ht)
+           (+ (safe-int (hash-ref counts-ht 'drone 0) 0)
+              (safe-int (hash-ref counts-ht 'scv 0) 0)
+              (safe-int (hash-ref counts-ht 'probe 0) 0))
+           0))
+     (max unit-cnt ht-cnt)]))
+
+(define (mirror-obs-effective-workers obs raw-units)
+  (define has-explicit?
+    (or (number? (hash-ref obs 'worker-count #f))
+        (number? (hash-ref obs 'workers #f))
+        (number? (hash-ref obs 'food-workers #f))
+        (number? (hash-ref obs 'harvesters #f))
+        (number? (hash-ref obs 'mineral-harvesters #f))
+        (number? (hash-ref obs 'vespene-harvesters #f))))
+  (define obs-w (mirror-obs-worker-count obs raw-units 'self))
+  (if (or has-explicit? (> obs-w 0))
+      obs-w
+      44))
+
+(define (mirror-obs-natural-ready? obs ally-bldgs)
+  (define explicit (hash-ref obs 'natural-ready? 'missing))
+  (cond
+    [(boolean? explicit) explicit]
+    [else
+     (define frame (safe-frame (hash-ref obs 'frame 6000)))
+     (define th-cnt
+       (for/sum ([b (in-list (safe-hash-list ally-bldgs))])
+         (define s (unit-type-sym b))
+         (define prog (safe-real (if (hash? b) (hash-ref b 'build-progress 1.0) 1.0) 1.0))
+         (if (and (memq s '(hatchery lair hive nexus command-center orbital-command planetary-fortress))
+                  (>= prog 0.99))
+             1
+             0)))
+     (or (>= th-cnt 2) (and (null? (safe-hash-list ally-bldgs)) (>= frame 4700)))]))
+
 (define (counter-unit-for-race race target-archetype available-tech raw-minerals raw-gas
-                               #:enemy-unit [enemy-unit #f])
-  (define minerals (max 250 (safe-int raw-minerals 300)))
-  (define gas (max 150 (safe-int raw-gas 150)))
-  (or (and enemy-unit
-           (attribute-counter-unit-for-enemy race enemy-unit available-tech minerals gas))
-      (let* ([tree (get-race-counter-tree race)]
-             [res (resolve-demand-pull tree
-                                       target-archetype
-                                       (if (or (not (list? available-tech)) (null? available-tech))
-                                           ALL-RATIONAL-TECH
-                                           available-tech)
-                                       #:minerals minerals
-                                       #:gas gas)])
-        (if (hash? res)
-            (hash-ref res 'selected-unit 'roach)
-            res))))
+                               #:enemy-unit [enemy-unit #f]
+                               #:frame [frame 6000]
+                               #:enemy-air-ratio [enemy-air-ratio 0.0]
+                               #:workers [workers 44]
+                               #:natural-ready? [natural-ready? #t]
+                               #:researched-upgrades [researched-upgrades '()]
+                               #:enemy-has-splash? [enemy-has-splash? #f])
+  (counter-unit-for-archetype
+   race
+   target-archetype
+   available-tech
+   raw-minerals
+   raw-gas
+   #:frame frame
+   #:enemy-air-ratio enemy-air-ratio
+   #:workers workers
+   #:natural-ready? natural-ready?
+   #:researched-upgrades researched-upgrades
+   #:enemy-unit enemy-unit
+   #:enemy-has-splash? enemy-has-splash?))
 
 ;; What does the opponent predict about US at depth 1 (using what they know
 ;; about us, including transitive implied tech buildings, spells from our units,
@@ -3817,11 +4411,15 @@
              (eq? (build-order-tree-node-id n)
                   (build-order-tree-projection-active-node-id self-bo-proj)))
            (lookup-race-build-order-tree our-race)))
-  (define visible-arch (classify-enemy-archetype ally-units))
+  (define visible-arch (mirror-classify-enemy-archetype ally-units ally-bldgs our-race))
   (cond
     ;; If we have Spire/Stargate (directly or implied by our units), a smart opponent predicts air/tech
-    [(or (memq 'spire bldg-syms) (memq 'stargate bldg-syms))
-     (if (eq? our-race 'Zerg) 'muta-flock 'sky-toss)]
+    [(or (memq 'spire bldg-syms) (memq 'stargate bldg-syms) (memq 'starport bldg-syms))
+     (case our-race
+       [(Zerg)    (if (memq 'spire bldg-syms) 'muta-flock visible-arch)]
+       [(Protoss) (if (memq 'stargate bldg-syms) 'sky-toss visible-arch)]
+       [(Terran)  (if (or (memq 'starport bldg-syms) (memq 'fusion-core bldg-syms)) 'terran-air visible-arch)]
+       [else      visible-arch])]
     [(not (memq visible-arch '(early-rush standard-macro)))
      visible-arch]
     [(memq 'robotics-facility bldg-syms)
@@ -3972,7 +4570,7 @@
     ;; DEPTH 0: Pure Observational Baseline (No theory of mind)
     ;; -------------------------------------------------------------------------
     [(<= depth 0)
-     (define obs-enemy-arch (classify-enemy-archetype enemy-units))
+     (define obs-enemy-arch (mirror-classify-enemy-archetype enemy-units enemy-bldgs enemy-race))
      (define obs-enemy-unit
        (or previewed-unit
            (dominant-observed-enemy-unit enemy-units)
@@ -3997,7 +4595,7 @@
     ;; ("Use what we know about the opponent to predict what they will do")
     ;; -------------------------------------------------------------------------
     [(= depth 1)
-     (define obs-enemy-arch (classify-enemy-archetype enemy-units))
+     (define obs-enemy-arch (mirror-classify-enemy-archetype enemy-units enemy-bldgs enemy-race))
      (define dom-obs-unit (dominant-observed-enemy-unit enemy-units))
      (define implied-bldgs
        (if tech-obs (enemy-tech-observation-implied-tech-buildings tech-obs) '()))
@@ -4042,12 +4640,14 @@
             [(factory-mech-siege)      'siege-tank]
             [(starport-cloak-or-bc air-starport-bc)
              (cond
-               [(memq dom-obs-unit '(battlecruiser raven liberator banshee)) dom-obs-unit]
+               [(memq dom-obs-unit '(battlecruiser raven liberator viking viking-fighter banshee)) dom-obs-unit]
                [(or (eq? committed-branch 'air-starport-bc)
                     (memq 'fusion-core implied-bldgs)
                     (for/or ([b (in-list enemy-bldgs)]) (eq? (unit-type-sym b) 'fusion-core)))
                 'battlecruiser]
-               [else 'banshee])]
+               [(and tech-obs (enemy-tech-observation-requires-detection? tech-obs))
+                'banshee]
+               [else 'viking-fighter])]
             [else                      (archetype-signature-unit enemy-race obs-enemy-arch)])]
          [(and zs-reading
                (memq 'closed-by-opportunity-cost
@@ -4108,12 +4708,14 @@
                  'siege-tank)]
             [(starport-cloak-or-bc air-starport-bc)
              (cond
-               [(memq dom-obs-unit '(battlecruiser raven liberator banshee)) dom-obs-unit]
+               [(memq dom-obs-unit '(battlecruiser raven liberator viking viking-fighter banshee)) dom-obs-unit]
                [(or (eq? committed-branch 'air-starport-bc)
                     (memq 'fusion-core implied-bldgs)
                     (for/or ([b (in-list enemy-bldgs)]) (eq? (unit-type-sym b) 'fusion-core)))
                 'battlecruiser]
-               [else 'banshee])]
+               [(and tech-obs (enemy-tech-observation-requires-detection? tech-obs))
+                'banshee]
+               [else 'viking-fighter])]
             [else                      (archetype-signature-unit enemy-race obs-enemy-arch)])]
          [dom-obs-unit dom-obs-unit]
          [(or (memq 'spire implied-bldgs) (memq 'greater-spire implied-bldgs)) 'mutalisk]
@@ -4123,7 +4725,10 @@
          [(memq 'roach-warren implied-bldgs) 'roach]
          [(memq 'stargate implied-bldgs) 'void-ray]
          [(or (memq 'robotics-facility implied-bldgs) (memq 'twilight-council implied-bldgs)) 'stalker]
-         [(memq 'starport-techlab implied-bldgs) 'banshee]
+         [(memq 'starport-techlab implied-bldgs)
+          (if (and tech-obs (enemy-tech-observation-requires-detection? tech-obs))
+              'banshee
+              'viking-fighter)]
          [(or (memq 'factory-techlab implied-bldgs) (memq 'armory implied-bldgs)) 'siege-tank]
          [(memq 'barracks implied-bldgs) 'marauder]
          [(and reading (action-lens-reading-opponent-turtling? reading))
@@ -4144,7 +4749,12 @@
      (define d1-enemy-arch (unit-to-archetype d1-enemy-unit))
      (define our-d1-unit
        (counter-unit-for-race our-race d1-enemy-arch our-tech our-minerals our-gas
-                              #:enemy-unit d1-enemy-unit))
+                              #:enemy-unit d1-enemy-unit
+                              #:frame (safe-frame (hash-ref obs 'frame 6000))
+                              #:enemy-air-ratio (mirror-obs-enemy-air-ratio enemy-units)
+                              #:workers (mirror-obs-effective-workers obs ally-units)
+                              #:natural-ready? (mirror-obs-natural-ready? obs ally-bldgs)
+                              #:researched-upgrades (safe-list (hash-ref obs 'researched-upgrades '()))))
      (define-values (tact-sym tx ty) (tactical-target-at-depth-1 mstate obs))
      (depth-node 1
                  'unmodeled-at-d1
@@ -4183,7 +4793,9 @@
                                  opp-belief-arch
                                  bo-tree-tech
                                  enemy-rem-min
-                                 enemy-rem-gas)]))
+                                 enemy-rem-gas
+                                 #:frame (safe-frame (hash-ref obs 'frame 6000))
+                                 #:enemy-air-ratio (mirror-obs-enemy-air-ratio ally-units))]))
      (define d2-enemy-unit
        (if bluff?
            raw-d2-enemy-unit
@@ -4192,7 +4804,12 @@
      (define d2-enemy-arch (unit-to-archetype d2-enemy-unit))
      (define our-d2-unit
        (counter-unit-for-race our-race d2-enemy-arch our-tech our-minerals our-gas
-                              #:enemy-unit d2-enemy-unit))
+                              #:enemy-unit d2-enemy-unit
+                              #:frame (safe-frame (hash-ref obs 'frame 6000))
+                              #:enemy-air-ratio (mirror-obs-enemy-air-ratio enemy-units)
+                              #:workers (mirror-obs-effective-workers obs ally-units)
+                              #:natural-ready? (mirror-obs-natural-ready? obs ally-bldgs)
+                              #:researched-upgrades (safe-list (hash-ref obs 'researched-upgrades '()))))
      (define-values (tact-sym tx ty)
        (if (or bluff? (and reading (action-lens-reading-feint-or-poke-detected? reading)))
            (values 'main-mineral-line-drop-or-air
@@ -4230,7 +4847,9 @@
                               opp-belief-arch
                               bo-tree-tech
                               enemy-rem-min
-                              enemy-rem-gas))
+                              enemy-rem-gas
+                              #:frame (safe-frame (hash-ref obs 'frame 6000))
+                              #:enemy-air-ratio (mirror-obs-enemy-air-ratio ally-units)))
      (define dk-enemy-unit
        (if bluff?
            raw-dk-enemy-unit
@@ -4239,7 +4858,12 @@
      (define dk-enemy-arch (unit-to-archetype dk-enemy-unit))
      (define our-dk-unit
        (counter-unit-for-race our-race dk-enemy-arch our-tech our-minerals our-gas
-                              #:enemy-unit dk-enemy-unit))
+                              #:enemy-unit dk-enemy-unit
+                              #:frame (safe-frame (hash-ref obs 'frame 6000))
+                              #:enemy-air-ratio (mirror-obs-enemy-air-ratio enemy-units)
+                              #:workers (mirror-obs-effective-workers obs ally-units)
+                              #:natural-ready? (mirror-obs-natural-ready? obs ally-bldgs)
+                              #:researched-upgrades (safe-list (hash-ref obs 'researched-upgrades '()))))
      (define-values (tact-sym tx ty)
        (tactical-target-at-higher-depth (depth-node-tactical-target prev-node) obs))
      (depth-node depth
@@ -4368,7 +4992,7 @@
   (define enemy-units (safe-hash-list raw-enemy-units))
   (define probe-x (safe-coord raw-probe-x 74))
   (define probe-y (safe-coord raw-probe-y 74))
-  (define base-arch (classify-enemy-archetype enemy-units))
+  (define base-arch (mirror-classify-enemy-archetype enemy-units '() (mirror-mind-state-enemy-race mstate)))
   (define avg-ex
     (if (null? enemy-units)
         160
@@ -4442,7 +5066,7 @@
   (for ([p (in-list probes)])
     (cond
       [(>= frame (diagnostic-probe-deadline-frame p))
-       (define cur-arch (classify-enemy-archetype enemy-units))
+       (define cur-arch (mirror-classify-enemy-archetype enemy-units '() (mirror-mind-state-enemy-race mstate)))
        (define avg-ex
          (if (null? enemy-units)
              (diagnostic-probe-baseline-enemy-x p)
@@ -4677,11 +5301,11 @@
       [(and (memq pred-arch '(bio-ball ling-bane-hydra early-rush))
             (memq true-arch '(bio-ball ling-bane-hydra early-rush)))
        0.60]
-      [(and (memq pred-arch '(sky-toss muta-flock))
-            (memq true-arch '(sky-toss muta-flock)))
+      [(and (memq pred-arch '(sky-toss air-fleet terran-air muta-flock))
+            (memq true-arch '(sky-toss air-fleet terran-air muta-flock)))
        0.75]
       [(and (eq? pred-arch 'early-rush)
-            (memq true-arch '(sky-toss muta-flock mech-siege stalker-colossus)))
+            (memq true-arch '(sky-toss air-fleet terran-air muta-flock mech-siege stalker-colossus)))
        0.20]
       [else 0.30]))
 
@@ -4924,7 +5548,10 @@
         MIRROR-HORIZON-SNAPSHOTS-SEC))
   (define obs-enemy-sig-unit
     (and (not (null? enemy-units))
-         (archetype-signature-unit enemy-race (classify-enemy-archetype enemy-units))))
+         (archetype-signature-unit enemy-race
+                                  (mirror-classify-enemy-archetype enemy-units enemy-bldgs enemy-race)
+                                  frame
+                                  (mirror-obs-enemy-air-ratio enemy-units))))
   (define-values (sig-preview? sig-trans? sig-low-gas?)
     (compute-horizon-depth-signals enriched-obs))
 
@@ -4982,7 +5609,13 @@
     (define ckey (cons pred-arch self-reach-tech))
     (define our-counter
       (or (hash-ref counter-cache ckey #f)
-          (let ([res (counter-unit-for-race our-race pred-arch self-reach-tech minerals gas)])
+          (let ([res (counter-unit-for-race our-race pred-arch self-reach-tech minerals gas
+                                           #:enemy-unit pred-enemy-u
+                                           #:frame frame
+                                           #:enemy-air-ratio (mirror-obs-enemy-air-ratio enemy-units)
+                                           #:workers (mirror-obs-effective-workers obs ally-units)
+                                           #:natural-ready? (mirror-obs-natural-ready? obs ally-bldgs)
+                                           #:researched-upgrades (safe-list (hash-ref obs 'researched-upgrades '())))])
             (hash-set! counter-cache ckey res)
             res)))
     (horizon-snapshot-forecast h-sec
@@ -5276,15 +5909,279 @@
 ;; the main strategic or tactical determinant — just a bounded tool in the toolbox
 ;; (strictly <= 0.25 weight, 0.0 during crisis, 0.08 when snowballing ahead, and
 ;; allow-posture-override? = #f always).
+(define (mirror-tanh x)
+  (define cx (max -20.0 (min 20.0 (exact->inexact x))))
+  (define e+ (exp cx))
+  (define e- (exp (- cx)))
+  (/ (- e+ e-) (+ e+ e-)))
+
+(define (mirror-extract-combat-supply-and-value raw-units raw-counts-ht)
+  (define unit-list (safe-hash-list raw-units))
+  (cond
+    [(not (null? unit-list))
+     (define total-sup 0.0)
+     (define total-val 0.0)
+     (for ([u (in-list unit-list)])
+       (when (mirror-combat-unit-entry? u)
+         (define cs (mirror-canonical-unit-sym (unit-type-sym u)))
+         (define cnt (max 1 (safe-int (if (hash? u) (hash-ref u 'count 1) 1) 1)))
+         (define sup (* cnt (if (eq? cs 'zergling) 0.5 (exact->inexact (sc2-supply-cost cs 1)))))
+         (define mcost (if (eq? cs 'zergling) 25.0 (exact->inexact (mirror-unit-min-cost cs))))
+         (define gcost (exact->inexact (mirror-unit-gas-cost cs)))
+         (set! total-sup (+ total-sup sup))
+         (set! total-val (+ total-val (* cnt (+ mcost (* 1.25 gcost)))))))
+     (values total-sup total-val)]
+    [(hash? raw-counts-ht)
+     (define total-sup 0.0)
+     (define total-val 0.0)
+     (for ([(k v) (in-hash raw-counts-ht)])
+       (when (and (symbol? k) (number? v) (> v 0) (not (mirror-building-or-noncombat-sym? k)))
+         (define cs (mirror-canonical-unit-sym k))
+         (define cnt (exact->inexact v))
+         (define sup (* cnt (if (eq? cs 'zergling) 0.5 (exact->inexact (sc2-supply-cost cs 1)))))
+         (define mcost (if (eq? cs 'zergling) 25.0 (exact->inexact (mirror-unit-min-cost cs))))
+         (define gcost (exact->inexact (mirror-unit-gas-cost cs)))
+         (set! total-sup (+ total-sup sup))
+         (set! total-val (+ total-val (* cnt (+ mcost (* 1.25 gcost)))))))
+     (values total-sup total-val)]
+    [else
+     (values #f #f)]))
+
+;; Computes calibrated (values win-prob snowball-adv) strictly from economic/combat/trade fundamentals:
+;; workers, combat-only army supply & resource value (excluding buildings, eggs, overlords, workers),
+;; trade efficiency, and upgrades. Unspent mineral/gas banks and structure counts have 0.0 weight
+;; and can never inflate win-prob into 0.73-1.00 when behind on fundamentals.
+(define (compute-calibrated-advantage-breakdown
+         [raw-obs (hash)]
+         #:our-workers [kw-our-w #f]
+         #:enemy-workers [kw-en-w #f]
+         #:our-army-supply [kw-our-sup #f]
+         #:enemy-army-supply [kw-en-sup #f]
+         #:ally-units [kw-ally #f]
+         #:enemy-units [kw-enemy #f]
+         #:our-lost-value [kw-our-lost #f]
+         #:enemy-lost-value [kw-en-lost #f]
+         #:our-upgrades [kw-our-upg #f]
+         #:enemy-upgrades [kw-en-upg #f]
+         #:mstate [mstate #f])
+  (define obs (if (hash? raw-obs) raw-obs (hash)))
+  (define ally-units (or (and kw-ally (safe-hash-list kw-ally))
+                         (safe-hash-list (hash-ref obs 'ally-units '()))))
+  (define enemy-units (or (and kw-enemy (safe-hash-list kw-enemy))
+                          (safe-hash-list (hash-ref obs 'enemy-units '()))))
+  (define unit-counts-ht (hash-ref obs 'unit-counts #f))
+  (define enemy-counts-ht (hash-ref obs 'enemy-unit-counts #f))
+  (define has-self-worker-info?
+    (or (number? kw-our-w)
+        (number? (hash-ref obs 'worker-count #f))
+        (number? (hash-ref obs 'workers #f))
+        (number? (hash-ref obs 'food-workers #f))
+        (number? (hash-ref obs 'harvesters #f))
+        (number? (hash-ref obs 'mineral-harvesters #f))
+        (number? (hash-ref obs 'vespene-harvesters #f))
+        (and (hash? unit-counts-ht)
+             (> (+ (safe-int (hash-ref unit-counts-ht 'drone 0) 0)
+                   (safe-int (hash-ref unit-counts-ht 'scv 0) 0)
+                   (safe-int (hash-ref unit-counts-ht 'probe 0) 0))
+                0))
+        (for/or ([u (in-list ally-units)])
+          (memq (unit-type-sym u) '(drone scv probe)))))
+  (define our-w
+    (exact->inexact
+     (max 0
+          (cond
+            [(number? kw-our-w) (exact-round kw-our-w)]
+            [has-self-worker-info? (mirror-obs-worker-count obs ally-units 'self)]
+            [else 12]))))
+  (define has-enemy-worker-info?
+    (or (number? kw-en-w)
+        (number? (hash-ref obs 'enemy-worker-count #f))
+        (number? (hash-ref obs 'enemy-workers #f))
+        (and (hash? enemy-counts-ht)
+             (> (+ (safe-int (hash-ref enemy-counts-ht 'drone 0) 0)
+                   (safe-int (hash-ref enemy-counts-ht 'scv 0) 0)
+                   (safe-int (hash-ref enemy-counts-ht 'probe 0) 0))
+                0))
+        (for/or ([u (in-list enemy-units)])
+          (memq (unit-type-sym u) '(drone scv probe)))))
+  (define en-w
+    (exact->inexact
+     (max 0
+          (cond
+            [(number? kw-en-w) (exact-round kw-en-w)]
+            [has-enemy-worker-info? (mirror-obs-worker-count obs enemy-units 'enemy)]
+            [(number? (hash-ref obs 'predicted-enemy-workers #f))
+             (safe-int (hash-ref obs 'predicted-enemy-workers 12) 12)]
+            [(and mstate (number? (mirror-mind-state-predicted-enemy-workers mstate)))
+             (safe-int (mirror-mind-state-predicted-enemy-workers mstate) 12)]
+            [else (exact-round our-w)]))))
+  (define-values (obs-our-sup obs-our-val)
+    (mirror-extract-combat-supply-and-value ally-units unit-counts-ht))
+  (define-values (obs-en-sup obs-en-val)
+    (mirror-extract-combat-supply-and-value enemy-units enemy-counts-ht))
+  (define our-sup
+    (exact->inexact
+     (max 0.0
+          (cond
+            [(number? kw-our-sup) kw-our-sup]
+            [obs-our-sup obs-our-sup]
+            [(number? (hash-ref obs 'combat-army-supply #f)) (hash-ref obs 'combat-army-supply 0.0)]
+            [(number? (hash-ref obs 'our-army-supply #f)) (hash-ref obs 'our-army-supply 0.0)]
+            [(number? (hash-ref obs 'army-supply #f)) (hash-ref obs 'army-supply 0.0)]
+            [else 0.0]))))
+  (define en-sup
+    (exact->inexact
+     (max 0.0
+          (cond
+            [(number? kw-en-sup) kw-en-sup]
+            [obs-en-sup obs-en-sup]
+            [(number? (hash-ref obs 'enemy-combat-army-supply #f)) (hash-ref obs 'enemy-combat-army-supply 0.0)]
+            [(number? (hash-ref obs 'enemy-army-supply #f)) (hash-ref obs 'enemy-army-supply 0.0)]
+            [(number? (hash-ref obs 'enemy-threat-supply #f)) (hash-ref obs 'enemy-threat-supply 0.0)]
+            [else 0.0]))))
+  (define our-val
+    (if (and obs-our-val (not (number? kw-our-sup)))
+        obs-our-val
+        (* 62.5 our-sup)))
+  (define en-val
+    (if (and obs-en-val (not (number? kw-en-sup)))
+        obs-en-val
+        (* 62.5 en-sup)))
+  (define raw-our-lost
+    (or (and (number? kw-our-lost) kw-our-lost)
+        (and (number? (hash-ref obs 'our-lost-value #f)) (hash-ref obs 'our-lost-value #f))
+        (and (number? (hash-ref obs 'lost-value #f)) (hash-ref obs 'lost-value #f))
+        (and (or (number? (hash-ref obs 'lost-minerals #f))
+                 (number? (hash-ref obs 'lost-gas #f)))
+             (+ (safe-real (hash-ref obs 'lost-minerals 0.0) 0.0)
+                (* 1.25 (safe-real (hash-ref obs 'lost-gas 0.0) 0.0))))
+        (and (or (number? (hash-ref obs 'our-lost-minerals #f))
+                 (number? (hash-ref obs 'our-lost-gas #f)))
+             (+ (safe-real (hash-ref obs 'our-lost-minerals 0.0) 0.0)
+                (* 1.25 (safe-real (hash-ref obs 'our-lost-gas 0.0) 0.0))))))
+  (define raw-en-lost
+    (or (and (number? kw-en-lost) kw-en-lost)
+        (and (number? (hash-ref obs 'enemy-lost-value #f)) (hash-ref obs 'enemy-lost-value #f))
+        (and (number? (hash-ref obs 'enemy-killed-value #f)) (hash-ref obs 'enemy-killed-value #f))
+        (and (or (number? (hash-ref obs 'enemy-lost-minerals #f))
+                 (number? (hash-ref obs 'enemy-lost-gas #f)))
+             (+ (safe-real (hash-ref obs 'enemy-lost-minerals 0.0) 0.0)
+                (* 1.25 (safe-real (hash-ref obs 'enemy-lost-gas 0.0) 0.0))))))
+  (define trade-ratio
+    (cond
+      [(or (number? raw-our-lost) (number? raw-en-lost))
+       (define ol (max 0.0 (safe-real raw-our-lost 0.0)))
+       (define el (max 0.0 (safe-real raw-en-lost 0.0)))
+       (if (and (zero? ol) (zero? el))
+           1.0
+           (/ (+ el 100.0) (+ ol 100.0)))]
+      [(number? (hash-ref obs 'trade-ratio #f))
+       (max 0.05 (min 20.0 (safe-real (hash-ref obs 'trade-ratio 1.0) 1.0)))]
+      [else 1.0]))
+  (define our-upgs (length (safe-list (or kw-our-upg (hash-ref obs 'researched-upgrades '())))))
+  (define en-upgs (length (safe-list (or kw-en-upg (hash-ref obs 'enemy-upgrades '())))))
+  (define upg-delta (max -6 (min 6 (- our-upgs en-upgs))))
+  (define w-term (log (/ (+ our-w 6.0) (+ en-w 6.0))))
+  (define a-term (log (/ (+ our-sup 3.0) (+ en-sup 3.0))))
+  (define v-term (log (/ (+ our-val 150.0) (+ en-val 150.0))))
+  (define t-term (log (max 0.25 (min 4.0 trade-ratio))))
+  (define raw-logit
+    (+ (* 1.35 w-term)
+       (* 1.85 a-term)
+       (* 0.55 v-term)
+       (* 0.75 t-term)
+       (* 0.12 upg-delta)))
+  (define worker-deficit? (< our-w en-w))
+  (define army-deficit? (< our-sup en-sup))
+  (define trade-deficit? (< trade-ratio 0.98))
+  (define zero-army-behind? (and (<= our-sup 0.0) (> en-sup 0.0)))
+  (define deficit-cnt
+    (+ (if worker-deficit? 1 0)
+       (if army-deficit? 1 0)
+       (if trade-deficit? 1 0)))
+  (define logit
+    (cond
+      [(and worker-deficit? army-deficit? trade-deficit?)
+       (min raw-logit -0.45)]
+      [(or (and worker-deficit? army-deficit?)
+           (>= deficit-cnt 2)
+           zero-army-behind?)
+       (min raw-logit -0.25)]
+      [(or (and worker-deficit? (<= our-sup (* 1.05 en-sup)) (<= trade-ratio 1.05))
+           (and army-deficit? (<= our-w (* 1.05 en-w)) (<= trade-ratio 1.05)))
+       (min raw-logit -0.05)]
+      [else raw-logit]))
+  (define clamped-logit (max -8.0 (min 8.0 logit)))
+  (define win-prob (max 0.01 (min 0.99 (/ 1.0 (+ 1.0 (exp (- clamped-logit)))))))
+  (define snowball-adv (max -1.0 (min 1.0 (mirror-tanh (* 0.50 clamped-logit)))))
+  (values win-prob snowball-adv our-sup en-sup trade-ratio))
+
+(define (compute-calibrated-win-prob
+         [raw-obs (hash)]
+         #:our-workers [kw-our-w #f]
+         #:enemy-workers [kw-en-w #f]
+         #:our-army-supply [kw-our-sup #f]
+         #:enemy-army-supply [kw-en-sup #f]
+         #:ally-units [kw-ally #f]
+         #:enemy-units [kw-enemy #f]
+         #:our-lost-value [kw-our-lost #f]
+         #:enemy-lost-value [kw-en-lost #f]
+         #:our-upgrades [kw-our-upg #f]
+         #:enemy-upgrades [kw-en-upg #f]
+         #:mstate [mstate #f])
+  (define-values (wp _sb _os _es _tr)
+    (compute-calibrated-advantage-breakdown
+     raw-obs
+     #:our-workers kw-our-w
+     #:enemy-workers kw-en-w
+     #:our-army-supply kw-our-sup
+     #:enemy-army-supply kw-en-sup
+     #:ally-units kw-ally
+     #:enemy-units kw-enemy
+     #:our-lost-value kw-our-lost
+     #:enemy-lost-value kw-en-lost
+     #:our-upgrades kw-our-upg
+     #:enemy-upgrades kw-en-upg
+     #:mstate mstate))
+  wp)
+
+(define (compute-calibrated-snowball-adv
+         [raw-obs (hash)]
+         #:our-workers [kw-our-w #f]
+         #:enemy-workers [kw-en-w #f]
+         #:our-army-supply [kw-our-sup #f]
+         #:enemy-army-supply [kw-en-sup #f]
+         #:ally-units [kw-ally #f]
+         #:enemy-units [kw-enemy #f]
+         #:our-lost-value [kw-our-lost #f]
+         #:enemy-lost-value [kw-en-lost #f]
+         #:our-upgrades [kw-our-upg #f]
+         #:enemy-upgrades [kw-en-upg #f]
+         #:mstate [mstate #f])
+  (define-values (_wp sb _os _es _tr)
+    (compute-calibrated-advantage-breakdown
+     raw-obs
+     #:our-workers kw-our-w
+     #:enemy-workers kw-en-w
+     #:our-army-supply kw-our-sup
+     #:enemy-army-supply kw-en-sup
+     #:ally-units kw-ally
+     #:enemy-units kw-enemy
+     #:our-lost-value kw-our-lost
+     #:enemy-lost-value kw-en-lost
+     #:our-upgrades kw-our-upg
+     #:enemy-upgrades kw-en-upg
+     #:mstate mstate))
+  sb)
+
 (define (compute-mirror-toolbox-allocation mstate raw-ally-units raw-enemy-units
                                            #:crisis? [crisis? #f])
   (define ally-units (safe-hash-list raw-ally-units))
   (define enemy-units (safe-hash-list raw-enemy-units))
-  (define worker-syms '(drone scv probe))
-  (define ally-combat
-    (filter (lambda (u) (not (memq (unit-type-sym u) worker-syms))) ally-units))
-  (define enemy-combat
-    (filter (lambda (u) (not (memq (unit-type-sym u) worker-syms))) enemy-units))
+  ;; Strictly filter to genuine mobile combat units: structures, workers, eggs,
+  ;; overlords, and observers must never inflate combat Lanchester power.
+  (define ally-combat (filter mirror-combat-unit-entry? ally-units))
+  (define enemy-combat (filter mirror-combat-unit-entry? enemy-units))
   (define ally-power
     (for/sum ([u (in-list ally-combat)])
       (* (max 10 (safe-int (hash-ref u 'hp 45) 45))
@@ -5811,7 +6708,9 @@
             'opponent-gas-devoted (hash-ref opp-profile 'gas-devoted 0)
             'opponent-gas-envelope (hash-ref opp-profile 'gas-envelope 150)
             'opponent-minerals-devoted (hash-ref opp-profile 'minerals-devoted 0)
-            'opponent-minerals-envelope (hash-ref opp-profile 'minerals-envelope 500)))
+            'opponent-minerals-envelope (hash-ref opp-profile 'minerals-envelope 500)
+            'win-prob (compute-calibrated-win-prob raw-obs #:mstate mstate)
+            'snowball-adv (compute-calibrated-snowball-adv raw-obs #:mstate mstate)))
   (hash-set! MIRROR-MIND-SIGNALS-HT-TABLE mstate opp-signals-ht)
   (define opp-commitment-log-directive
     (list 'log

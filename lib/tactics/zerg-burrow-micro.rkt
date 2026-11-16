@@ -155,11 +155,13 @@
     (define frame (safe-int (hash-ref s-obs 'frame 0) 0))
     (define upgrades (let ([v (hash-ref s-obs 'researched-upgrades '())]) (if (list? v) v '())))
     (define has-burrow?
-      (if (hash-has-key? s-obs 'burrow-researched?)
-          (not (not (hash-ref s-obs 'burrow-researched? #f)))
-          (or (not (hash-has-key? s-obs 'researched-upgrades))
-              (not (not (or (memq 'burrow upgrades)
-                            (memq 'tunneling-claws upgrades)))))))
+      (let ([flag (hash-ref s-obs 'burrow-researched? 'unset)])
+        (if (boolean? flag)
+            flag
+            (not (not (or (memq 'burrow upgrades)
+                          (memq 'burrow-upgrade upgrades)
+                          (memq 'tunneling-claws upgrades)
+                          (memv 64 upgrades)))))))
     (define has-tunneling?
       (not (not (or (memq 'tunneling-claws upgrades)
                     (hash-ref s-obs 'tunneling-claws? #f)))))
@@ -2117,6 +2119,11 @@
        (Listof (Immutable-HashTable Symbol Any)))])
 
 (provide
+ ZERG-UNIT-BURROW-DOWN-ABILITY-TABLE
+ zerg-innate-burrower-sym?
+ zerg-unit-type->burrow-ability-id
+ zerg-burrow-upgrade-researched?
+ zerg-unit-burrow-allowed?
  zerg-unit-burrowed?
  execute-roach-tunneling-burrow-micro
  execute-infestor-burrow-cast-micro
@@ -2134,6 +2141,54 @@
  disruptor-nova-catchable-range
  should-commit-through-splash?
  plan-avoid-siege-tank-and-lurker-splash-zones)
+
+;; Exact unit-type -> Burrow*Down SC2 wire ability ID (Bug 8c: never broadcast generic `3661` across mixed units).
+(: ZERG-UNIT-BURROW-DOWN-ABILITY-TABLE (Immutable-HashTable Symbol Integer))
+(define ZERG-UNIT-BURROW-DOWN-ABILITY-TABLE
+  (hasheq
+   'zergling       1390
+   'baneling       1374
+   'drone          1378
+   'roach          1386
+   'hydralisk      1382
+   'infestor       1444
+   'lurker         2108
+   'lurker-mp      2108
+   'queen          1433
+   'ravager        2340
+   'swarm-host     2014
+   'swarm-host-mp  2014
+   'widow-mine     2095))
+
+(: zerg-innate-burrower-sym? (-> Any Boolean))
+(define (zerg-innate-burrower-sym? ut)
+  (not (not (memq ut '(lurker lurker-mp swarm-host swarm-host-mp widow-mine)))))
+
+(: zerg-unit-type->burrow-ability-id (-> Any (Option Integer)))
+(define (zerg-unit-type->burrow-ability-id ut)
+  (and (symbol? ut)
+       (hash-ref ZERG-UNIT-BURROW-DOWN-ABILITY-TABLE ut (lambda () #f))))
+
+;; Returns `#t` iff `burrow` (or `tunneling-claws`) is explicitly researched in `obs` (never `#t` by omission).
+(: zerg-burrow-upgrade-researched? (-> Any Boolean))
+(define (zerg-burrow-upgrade-researched? obs)
+  (if (not (hash? obs))
+      #f
+      (let ([flag (dyn-hash-ref obs 'burrow-researched? 'unset)])
+        (if (boolean? flag)
+            flag
+            (let ([upgrades (let ([v (dyn-hash-ref obs 'researched-upgrades '())])
+                              (if (list? v) v '()))])
+              (not (not (or (memq 'burrow upgrades)
+                            (memq 'burrow-upgrade upgrades)
+                            (memq 'tunneling-claws upgrades)
+                            (memv 64 upgrades)))))))))
+
+(: zerg-unit-burrow-allowed? (-> Any Boolean Boolean))
+(define (zerg-unit-burrow-allowed? ut burrow-researched?)
+  (and (zerg-unit-type->burrow-ability-id ut)
+       (or burrow-researched?
+           (zerg-innate-burrower-sym? ut))))
 
 (: zerg-unit-burrowed? (-> Any Symbol Boolean))
 (define (zerg-unit-burrowed? u burrowed-type)
@@ -2186,11 +2241,9 @@
      (define upgrades-raw (dyn-hash-ref sanitized-obs 'researched-upgrades '()))
      (define upgrades : (Listof Any) (if (list? upgrades-raw) upgrades-raw '()))
      (define has-burrow? : Boolean
-       (or (not (dyn-hash-has-key? sanitized-obs 'researched-upgrades))
-           (not (not (or (memq 'burrow upgrades)
-                         (memq 'tunneling-claws upgrades))))))
+       (zerg-burrow-upgrade-researched? sanitized-obs))
      (define has-tunneling? : Boolean
-       (or (not (dyn-hash-has-key? sanitized-obs 'researched-upgrades))
+       (or (not (not (dyn-hash-ref sanitized-obs 'tunneling-claws? #f)))
            (not (not (memq 'tunneling-claws upgrades)))))
      (define base-x (safe-exact-int (dyn-hash-ref sanitized-obs 'base-x SC2-DEFAULT-HOME-BASE-X) 32))
      (define base-y (safe-exact-int (dyn-hash-ref sanitized-obs 'base-y SC2-DEFAULT-HOME-BASE-Y) 32))
@@ -2216,7 +2269,7 @@
            [(and (not burrowed?)
                  (<= hp-pct SC2-ROACH-BURROW-HP-PCT-THRESH)
                  (<= dist-e 12.0))
-            (emit! (list 'burrow-down uid 'roach-regen-escape))
+            (emit! (list 'burrow-down uid 'roach-regen-escape 1386))
             (when has-tunneling?
               (define-values (kx ky)
                 (if nearest-e
@@ -2262,6 +2315,9 @@
   (define capital-syms : (Listof Symbol)
     '(thor battlecruiser siege-tank siege-tank-sieged colossus immortal archon
            carrier tempest mothership ultralisk))
+  (define has-burrow? : Boolean
+    (and (pair? scan-allies)
+         (zerg-burrow-upgrade-researched? sanitized-obs)))
   (define actions : (Listof (Listof Any)) '())
   (: emit! (-> (Listof Any) Void))
   (define (emit! a) (set! actions (cons a actions)))
@@ -2289,15 +2345,15 @@
                enemy-units))
       (cond
         [(< energy SC2-INFESTOR-FUNGAL-ENERGY)
-         (unless burrowed?
-           (emit! (list 'burrow-down uid 'infestor-post-cast-hide)))
+         (when (and has-burrow? (not burrowed?))
+           (emit! (list 'burrow-down uid 'infestor-post-cast-hide 1444)))
          (emit! (list 'move uid base-x base-y))]
         [(and capital-target (>= energy SC2-INFESTOR-NEURAL-ENERGY))
          (define ctag (dyn-hash-ref capital-target 'id 0))
          (define cx (safe-exact-int (dyn-hash-ref capital-target 'x ex) ex))
          (define cy (safe-exact-int (dyn-hash-ref capital-target 'y ey) ey))
-         (unless burrowed?
-           (emit! (list 'burrow-down uid 'infestor-stealth-neural)))
+         (when (and has-burrow? (not burrowed?))
+           (emit! (list 'burrow-down uid 'infestor-stealth-neural 1444)))
          (if (and (exact-integer? ctag) (> ctag 0))
              (emit! (list 'cast-spell uid 'neural-parasite ctag))
              (emit! (list 'cast-spell uid 'fungal-growth cx cy)))]
@@ -2307,8 +2363,8 @@
            (emit! (list 'burrow-up uid 'infestor-unburrow-for-fungal)))
          (emit! (list 'cast-spell uid 'fungal-growth ex ey))]
         [(<= dist-e SC2-INFESTOR-BURROW-APPROACH-RANGE)
-         (unless burrowed?
-           (emit! (list 'burrow-down uid 'infestor-stealth-approach)))
+         (when (and has-burrow? (not burrowed?))
+           (emit! (list 'burrow-down uid 'infestor-stealth-approach 1444)))
          (emit! (list 'move uid ex ey))])))
   (reverse actions))
 
@@ -2338,15 +2394,18 @@
 (: BURROWABLE-ZERG-SYMS (Listof Symbol))
 (define BURROWABLE-ZERG-SYMS
   '(zergling roach hydralisk baneling ravager queen drone infestor lurker lurker-mp
+    swarm-host swarm-host-mp widow-mine
     zergling-burrowed roach-burrowed hydralisk-burrowed baneling-burrowed
     ravager-burrowed queen-burrowed drone-burrowed infestor-burrowed
-    lurker-burrowed lurker-mp-burrowed))
+    lurker-burrowed lurker-mp-burrowed swarm-host-burrowed swarm-host-mp-burrowed
+    widow-mine-burrowed))
 
 (: BURROWED-UNIT-TYPE-SYMS (Listof Symbol))
 (define BURROWED-UNIT-TYPE-SYMS
   '(zergling-burrowed roach-burrowed hydralisk-burrowed baneling-burrowed
     ravager-burrowed queen-burrowed drone-burrowed infestor-burrowed
-    lurker-burrowed lurker-mp-burrowed))
+    lurker-burrowed lurker-mp-burrowed swarm-host-burrowed swarm-host-mp-burrowed
+    widow-mine-burrowed))
 
 (: BURROW-RANGED-THREAT-SYMS (Listof Symbol))
 (define BURROW-RANGED-THREAT-SYMS
@@ -2567,7 +2626,9 @@
 
           (cond
             [(not burrowed?)
-             (when (and has-burrow?
+             (define ab-id (zerg-unit-type->burrow-ability-id utype))
+             (when (and ab-id
+                        (zerg-unit-burrow-allowed? utype has-burrow?)
                         (>= (- frame last-unburrow) 24)
                         (<= hp-pct 0.75)
                         (or took-damage?
@@ -2575,7 +2636,7 @@
                                  (ranged-within? ux uy 8.5)))
                         (not (det-within? u ux uy 11.0)))
                (set! new-last-burrow frame)
-               (emit! (list 'burrow-down raw-uid 'reactive-attack-dodge)))]
+               (emit! (list 'burrow-down raw-uid 'reactive-attack-dodge ab-id)))]
             [else
              (define dwell (- frame last-burrow))
              (define roach? (memq utype '(roach roach-burrowed)))
@@ -2647,11 +2708,7 @@
   (define has-burrow? : Boolean
     (if (null? static-detectors)
         #f
-        (if (dyn-hash-has-key? sanitized-obs 'burrow-researched?)
-            (not (not (dyn-hash-ref sanitized-obs 'burrow-researched? #f)))
-            (or (not (dyn-hash-has-key? sanitized-obs 'researched-upgrades))
-                (not (not (or (memq 'burrow upgrades)
-                              (memq 'tunneling-claws upgrades))))))))
+        (zerg-burrow-upgrade-researched? sanitized-obs)))
 
   (define actions : (Listof (Listof Any)) '())
   (: emit! (-> (Listof Any) Void))
@@ -2779,8 +2836,11 @@
              (define d-det (dist2d rx ry det-x det-y))
              (cond
                [(and (<= 11.8 d-det) (<= d-det 13.0))
-                (when (and has-burrow? (not burrowed?))
-                  (emit! (list 'burrow-down uid 'stationary-detector-ring-ambush)))]
+                (define ab-id (zerg-unit-type->burrow-ability-id rt))
+                (when (and ab-id
+                           (not burrowed?)
+                           (zerg-unit-burrow-allowed? rt has-burrow?))
+                  (emit! (list 'burrow-down uid 'stationary-detector-ring-ambush ab-id)))]
                [else
                 ;; Compute radial point on the 11.8-13.0 ring (midpoint 12.4 tiles from detector)
                 (define vx (- rx det-x))
@@ -3419,10 +3479,8 @@
   (define tr : burrow-dodge-tracker (or opt-tr DEFAULT-BURROW-DODGE-TRACKER))
   (define sanitized-obs : Any (if (hash? obs) obs (hash)))
   (define unblock-cmds (plan-clear-own-expansion-block-for-build sanitized-obs #:tracker tr))
-  (define researched (dyn-list (dyn-hash-ref sanitized-obs 'researched-upgrades '())))
   (define burrow-ready?
-    (or (not (not (dyn-hash-ref sanitized-obs 'burrow-researched? #f)))
-        (not (not (memq 'burrow researched)))))
+    (zerg-burrow-upgrade-researched? sanitized-obs))
   (define ally-units (dyn-list (dyn-hash-ref sanitized-obs 'ally-units '())))
   (define has-enough-lings? : Boolean
     (and burrow-ready?
@@ -3518,7 +3576,7 @@
             (hash-set! used-lings lid #t)
             (set! assigned-pads (add1 assigned-pads))
             (if (<= (dist2d lx ly px py) 1.5)
-                (set! actions (cons (list 'burrow-down lid 'expansion-pad-block) actions))
+                (set! actions (cons (list 'burrow-down lid 'expansion-pad-block 1390) actions))
                 (set! actions (cons (list 'move lid px py) actions))))]))
      (append unblock-cmds (reverse actions))]))
 

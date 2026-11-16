@@ -660,35 +660,91 @@
      (define enemy-nat-y
        (safe-real (dyn-hash-ref sanitized-obs 'enemy-natural-y (- enemy-y 16.0)) (- enemy-y 16.0)))
      (define ally-units (dyn-list (dyn-hash-ref sanitized-obs 'ally-units '())))
+     (define enemy-units (dyn-list (dyn-hash-ref sanitized-obs 'enemy-units '())))
      (define enemy-bldgs (dyn-list (dyn-hash-ref sanitized-obs 'enemy-buildings '())))
 
      (define actions : (Listof (Listof Any)) '())
      (: emit! (-> (Listof Any) Void))
      (define (emit! a) (set! actions (cons a actions)))
 
-     ;; 1. Auto-cancel (`314`) dying (`hp-pct <= 0.18`) or nearly completed (`build-progress >= 0.90`)
-     ;;    offensive block / gas-steal buildings near enemy base/natural
+     (: enemy-weapon-bearing? (-> Any Boolean))
+     (define (enemy-weapon-bearing? e)
+       (and (hash? e)
+            (let ([sym (dyn-symbol (dyn-hash-ref e 'type 'unknown) 'unknown)])
+              (and (not (memq sym SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS))
+                   (let ([st (sc2-unit-combat-stats sym)])
+                     (or (> (safe-real (hash-ref st 'ground-dps (lambda () 0.0)) 0.0) 0.0)
+                         (> (safe-real (hash-ref st 'air-dps (lambda () 0.0)) 0.0) 0.0)))))))
+
+     (: bldg-actual-vitality-frac (-> Any Flonum))
+     (define (bldg-actual-vitality-frac b)
+       (cond
+         [(not (hash? b)) 1.0]
+         [(dyn-hash-has-key? b 'hull-hp)
+          (define cur (safe-real (or (dyn-hash-ref b 'hp #f) (dyn-hash-ref b 'health #f) 100.0) 100.0))
+          (define tot (max 1.0 (safe-real (or (dyn-hash-ref b 'max-hp #f) (dyn-hash-ref b 'health-max #f) (max 1.0 cur)) (max 1.0 cur))))
+          (/ cur tot)]
+         [else
+          (define hp (safe-real (or (dyn-hash-ref b 'hp #f) (dyn-hash-ref b 'health #f) 100.0) 100.0))
+          (define mhp (max 1.0 (safe-real (or (dyn-hash-ref b 'max-hp #f) (dyn-hash-ref b 'health-max #f) (max 1.0 hp)) (max 1.0 hp))))
+          (define sh (safe-real (or (dyn-hash-ref b 'shield #f) (dyn-hash-ref b 'shields #f) 0.0) 0.0))
+          (define msh (safe-real (or (dyn-hash-ref b 'max-shield #f)
+                                     (dyn-hash-ref b 'shield-max #f)
+                                     (dyn-hash-ref b 'max-shields #f)
+                                     0.0)
+                                 0.0))
+          (define cur (+ hp sh))
+          (define tot (max 1.0 (+ mhp msh)))
+          (if (> msh 0.0) (/ cur tot) (min 1.0 (/ cur tot)))]))
+
+     ;; 1. Auto-cancel (`314`) ONLY forward scout-block / gas-steal buildings near enemy base
+     ;;    (`dist-to-enemy-base < 22.0` AND `dist-to-own-main > 40.0`) using shield-inclusive
+     ;;    construction vitality (`0.10 + 0.90*progress`) + weapon-bearing enemy attacker <= 8.0,
+     ;;    or >= 90% build completion on scout blocks. NEVER cancel home/natural/third/fourth bases or infra.
      (when has-incomplete-block-bldg?
        (for ([b (in-list ally-bldgs)]
              #:when (hash? b))
          (define bt (dyn-symbol (dyn-hash-ref b 'type 'unknown) 'unknown))
-         (define prog (safe-real (dyn-hash-ref b 'build-progress 1.0) 1.0))
-         (define hp-pct (unit-hp-pct b))
+         (define prog (max 0.0 (min 1.0 (safe-real (dyn-hash-ref b 'build-progress 1.0) 1.0))))
          (define bx (safe-real (dyn-hash-ref b 'x base-x) base-x))
          (define by (safe-real (dyn-hash-ref b 'y base-y) base-y))
          (define bid (dyn-hash-ref b 'id 0))
-         (define is-offensive-block?
+         (define is-forward-scout-block?
            (and (not (not (memq bt OFFENSIVE-BLOCK-BLDGS)))
-                (or (not (not (dyn-hash-ref b 'block-structure? #f)))
-                    (<= (dist2d bx by enemy-x enemy-y) 15.0)
-                    (<= (dist2d bx by enemy-nat-x enemy-nat-y) 10.0))))
-         (when (and is-offensive-block?
+                (< (dist2d bx by enemy-x enemy-y) 22.0)
+                (> (dist2d bx by base-x base-y) 40.0)))
+         (when (and is-forward-scout-block?
                     (not (dyn-hash-ref b 'keep-finish? #f))
                     (< prog SC2-BUILD-COMPLETE-PROGRESS)
                     (exact-integer? bid)
-                    (> bid 0)
-                    (or (<= hp-pct 0.18) (>= prog 0.90)))
-           (emit! (list 'cancel-building bid)))))
+                    (> bid 0))
+           (define expected-vit (+ 0.10 (* 0.90 prog)))
+           (define actual-vit (bldg-actual-vitality-frac b))
+           (define attacker-near?
+             (or (for/or : Boolean ([e (in-list enemy-units)])
+                   (and (enemy-weapon-bearing? e)
+                        (<= (dist2d bx by
+                                    (safe-real (dyn-hash-ref e 'x 9999.0) 9999.0)
+                                    (safe-real (dyn-hash-ref e 'y 9999.0) 9999.0))
+                            8.0)))
+                 (for/or : Boolean ([eb (in-list enemy-bldgs)])
+                   (and (enemy-weapon-bearing? eb)
+                        (>= (safe-real (dyn-hash-ref eb 'build-progress 1.0) 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                        (<= (dist2d bx by
+                                    (safe-real (dyn-hash-ref eb 'x 9999.0) 9999.0)
+                                    (safe-real (dyn-hash-ref eb 'y 9999.0) 9999.0))
+                            8.0)))))
+           (define low-hp-under-attack?
+             (and attacker-near?
+                  (< actual-vit (* 0.35 expected-vit))
+                  (< actual-vit 0.12)))
+           (define nearly-finished-block?
+             (and (>= prog 0.90)
+                  (or (not (not (memq bt WALL-GAS-BUILDING-SYMS)))
+                      (not (not (dyn-hash-ref b 'block-structure? #f)))
+                      (<= frame 3500))))
+           (when (or low-hp-under-attack? nearly-finished-block?)
+             (emit! (list 'cancel-building bid))))))
 
      ;; 2. Natural expansion block (`frame 850..2100`) & 3. Main gas-steal (`<= 2800`)
      (define nat-already-taken-or-blocked? : Boolean

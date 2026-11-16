@@ -27,6 +27,9 @@
            dyn-int
            dyn-bool
            dyn-unit-type
+           dyn-unit-type-and-count
+           dyn-unit-build-progress
+           dyn-obs-nat-flags
            dyn-unit-id-energy
            dyn-unit-dist2
            dyn-unit-stealth?
@@ -69,9 +72,56 @@
          [(symbol? raw-t) raw-t]
          [(string? raw-t) (string->symbol (string-downcase raw-t))]
          [else 'unknown])]
+      [(and (pair? u) (symbol? (car u)) (exact-integer? (cdr u)))
+       (car u)]
       [(symbol? u) u]
       [(string? u) (string->symbol (string-downcase u))]
       [else 'unknown]))
+  (define (dyn-unit-type-and-count u)
+    (cond
+      [(hash? u)
+       (define raw-t (hash-ref u 'type 'unknown))
+       (define sym
+         (cond
+           [(symbol? raw-t) raw-t]
+           [(string? raw-t) (string->symbol (string-downcase raw-t))]
+           [else 'unknown]))
+       (define cnt (max 1 (dyn-int (hash-ref u 'count 1) 1)))
+       (define bp (dyn-real (hash-ref u 'build-progress (hash-ref u 'build_progress 1.0)) 1.0))
+       (values sym cnt bp)]
+      [(and (pair? u) (symbol? (car u)) (exact-integer? (cdr u)))
+       (values (car u) (max 1 (cdr u)) 1.0)]
+      [(symbol? u) (values u 1 1.0)]
+      [(string? u) (values (string->symbol (string-downcase u)) 1 1.0)]
+      [else (values 'unknown 1 1.0)]))
+  (define (dyn-unit-build-progress u)
+    (if (hash? u)
+        (dyn-real (hash-ref u 'build-progress (hash-ref u 'build_progress 1.0)) 1.0)
+        1.0))
+  (define (dyn-obs-nat-flags raw-obs)
+    (define obs (if (hash? raw-obs) raw-obs (hash)))
+    (define nat-val
+      (cond
+        [(hash-has-key? obs 'natural-ready?) (hash-ref obs 'natural-ready?)]
+        [(hash-has-key? obs 'natural-finished?) (hash-ref obs 'natural-finished?)]
+        [(hash-has-key? obs 'natural-ready?) (hash-ref obs 'natural-ready?)]
+        [else 'unset]))
+    (define nat-sym
+      (cond
+        [(eq? nat-val 'unset) 'unset]
+        [nat-val 'yes]
+        [else 'no]))
+    (define base-cnt
+      (cond
+        [(hash-has-key? obs 'ally-bases) (dyn-int (hash-ref obs 'ally-bases -1) -1)]
+        [(hash-has-key? obs 'townhalls) (dyn-int (hash-ref obs 'townhalls -1) -1)]
+        [(hash-has-key? obs 'ready-bases) (dyn-int (hash-ref obs 'ready-bases -1) -1)]
+        [else -1]))
+    (define enemy-air-sup-ovr
+      (if (hash-has-key? obs 'enemy-air-supply)
+          (dyn-real (hash-ref obs 'enemy-air-supply -1.0) -1.0)
+          -1.0))
+    (values nat-sym base-cnt enemy-air-sup-ovr))
   (define (dyn-unit-id-energy u)
     (if (hash? u)
         (let ([id (dyn-int (hash-ref u 'id 0) 0)])
@@ -132,7 +182,16 @@
     (define by (dyn-real (hash-ref obs 'base-y 32.5) 32.5))
     (define ex (dyn-real (hash-ref obs 'enemy-x 160.5) 160.5))
     (define ey (dyn-real (hash-ref obs 'enemy-y 160.5) 160.5))
-    (define our-workers (dyn-int (hash-ref obs 'workers 20) 20))
+    (define our-workers
+      (cond
+        [(hash-has-key? obs 'workers) (dyn-int (hash-ref obs 'workers 20) 20)]
+        [(hash-has-key? obs 'worker-count) (dyn-int (hash-ref obs 'worker-count 20) 20)]
+        [(hash-has-key? obs 'food-workers) (dyn-int (hash-ref obs 'food-workers 20) 20)]
+        [(hash-has-key? obs 'harvesters) (dyn-int (hash-ref obs 'harvesters 20) 20)]
+        [(or (hash-has-key? obs 'mineral-harvesters) (hash-has-key? obs 'vespene-harvesters))
+         (+ (dyn-int (hash-ref obs 'mineral-harvesters 0) 0)
+            (dyn-int (hash-ref obs 'vespene-harvesters 0) 0))]
+        [else 20]))
     (define est-enemy-workers (dyn-int (hash-ref obs 'estimated-enemy-workers 20) 20))
     (define enemy-bases (dyn-int (hash-ref obs 'enemy-known-bases 1) 1))
     (define wall-sealed? (dyn-bool (hash-ref obs 'opponent-walled? #t) #t))
@@ -160,6 +219,9 @@
   [dyn-int (->* (Any) (Integer) Integer)]
   [dyn-bool (->* (Any) (Boolean) Boolean)]
   [dyn-unit-type (-> Any Symbol)]
+  [dyn-unit-type-and-count (-> Any (Values Symbol Positive-Integer Float))]
+  [dyn-unit-build-progress (-> Any Float)]
+  [dyn-obs-nat-flags (-> Any (Values Symbol Integer Float))]
   [dyn-unit-id-energy (-> Any (Values Integer Float))]
   [dyn-unit-dist2 (-> Any Float Float Float Float)]
   [dyn-unit-stealth? (-> Any Boolean)]
@@ -209,9 +271,14 @@
  COMPLETE-UNIT-COUNTER-MATRIX
  COMPLETE-STRUCTURE-COUNTER-MATRIX
  ;; Selectors & Evaluators
+ loop->game-phase
+ matchup-key
  lookup-ability-entry
  lookup-upgrade-entry
  lookup-unit-counter-entry
+ lookup-situational-counter-matrix
+ situational-unit-weight
+ evaluate-situational-unit-weights
  select-situational-ability-actions
  select-situational-upgrades
  evaluate-situational-counter-plan)
@@ -1550,12 +1617,484 @@
     (upgrade-catalog-entry-sym (cdr p))))
 
 ;; -----------------------------------------------------------------------------
-;; 6. Top-Level 16-Situation Operational Evaluator
+;; 5B. Empirical Pro DB 9-Matchup x 4-Phase x Situation Counter Weight Engine
 ;; -----------------------------------------------------------------------------
 
-(: evaluate-situational-counter-plan
-   (->* (Any) (Any Any (Option Integer)) situational-counter-plan))
-(define (evaluate-situational-counter-plan raw-obs [raw-our-race 'Zerg] [raw-enemy-race 'Unknown] [frame-arg #f])
+(: loop->game-phase (-> Integer Symbol))
+(define (loop->game-phase frame)
+  (cond
+    [(<= frame 4704)  'opening]    ;; 0:00 - 3:30
+    [(<= frame 8736)  'early-mid]  ;; 3:30 - 6:30
+    [(<= frame 14784) 'mid-game]   ;; 6:30 - 11:00
+    [else             'late-game]))
+
+(: normalize-race-or-unknown (-> Any Symbol))
+(define (normalize-race-or-unknown r)
+  (cond
+    [(memq r '(Zerg zerg Z z))       'Zerg]
+    [(memq r '(Terran terran T t))   'Terran]
+    [(memq r '(Protoss protoss P p)) 'Protoss]
+    [(string? r)
+     (let ([dl (string-downcase r)])
+       (cond
+         [(member dl '("zerg" "z")) 'Zerg]
+         [(member dl '("terran" "t")) 'Terran]
+         [(member dl '("protoss" "p")) 'Protoss]
+         [else 'Unknown]))]
+    [else 'Unknown]))
+
+(: infer-enemy-race-from-syms (-> (Listof Symbol) Symbol Symbol))
+(define (infer-enemy-race-from-syms syms fallback)
+  (if (memq fallback '(Zerg Terran Protoss))
+      fallback
+      (let loop ([xs : (Listof Symbol) syms])
+        (if (null? xs)
+            'Unknown
+            (let ([u (fast-canon-unit-sym (car xs))])
+              (cond
+                [(memq u '(zergling baneling roach ravager hydralisk lurker mutalisk
+                           corruptor brood-lord infestor viper ultralisk queen
+                           swarm-host hatchery spawning-pool roach-warren spire
+                           drone overlord overseer))
+                 'Zerg]
+                [(memq u '(marine marauder reaper ghost hellion hellbat widow-mine
+                           siege-tank cyclone thor medivac viking viking-fighter
+                           liberator banshee raven battlecruiser command-center
+                           orbital-command barracks factory starport scv))
+                 'Terran]
+                [(memq u '(zealot adept stalker sentry high-templar dark-templar
+                           archon immortal colossus disruptor observer warp-prism
+                           phoenix oracle void-ray carrier tempest mothership nexus
+                           gateway warp-gate stargate robotics-facility probe))
+                 'Protoss]
+                [else (loop (cdr xs))]))))))
+
+(: matchup-key (-> Symbol Symbol Symbol))
+(define (matchup-key our-race enemy-race)
+  (define r1 (normalize-race-or-unknown our-race))
+  (define r2 (normalize-race-or-unknown enemy-race))
+  (case r1
+    [(Zerg)    (case r2 [(Zerg) 'ZvZ] [(Terran) 'ZvT] [(Protoss) 'ZvP] [else 'ZvUnknown])]
+    [(Terran)  (case r2 [(Zerg) 'TvZ] [(Terran) 'TvT] [(Protoss) 'TvP] [else 'TvUnknown])]
+    [(Protoss) (case r2 [(Zerg) 'PvZ] [(Terran) 'PvT] [(Protoss) 'PvP] [else 'PvUnknown])]
+    [else      'Unknown]))
+
+(: canon-counter-unit (-> Symbol Symbol))
+(define (canon-counter-unit sym)
+  (define c (fast-canon-unit-sym sym))
+  (case c
+    [(viking viking-assault) 'viking-fighter]
+    [(lurker-mp lurker-burrowed lurker-mp-burrowed lurker-egg lurker-mp-egg) 'lurker]
+    [(siege-tank-sieged) 'siege-tank]
+    [(liberator-ag) 'liberator]
+    [(thor-ap) 'thor]
+    [(broodlord) 'brood-lord]
+    [(voidray) 'void-ray]
+    [(hightemplar) 'high-templar]
+    [(darktemplar) 'dark-templar]
+    [(baneling-burrowed) 'baneling]
+    [(roach-burrowed) 'roach]
+    [(widow-mine-burrowed) 'widow-mine]
+    [(swarm-host-burrowed swarm-host-burrowed-mp swarm-host-mp) 'swarm-host]
+    [else
+     (case sym
+       [(viking viking-assault viking-fighter) 'viking-fighter]
+       [(brood-lord broodlord) 'brood-lord]
+       [(void-ray voidray) 'void-ray]
+       [(high-templar hightemplar) 'high-templar]
+       [(dark-templar darktemplar) 'dark-templar]
+       [(swarm-host swarm-host-mp) 'swarm-host]
+       [else c])]))
+
+(: unit-gas-cost (-> Symbol Integer))
+(define (unit-gas-cost sym)
+  (define c (canon-counter-unit sym))
+  (define row (or (hash-ref SC2-LOTV-COST-TABLE c #f)
+                  (hash-ref SC2-LOTV-COST-TABLE sym #f)))
+  (define raw-gas (if row (cadr row) 0))
+  ;; Morphs like lurker/brood-lord carry incremental morph cost in SC2-LOTV-COST-TABLE;
+  ;; enforce total tech gas commitment for specialist gating.
+  (case c
+    [(lurker) (max raw-gas 150)]
+    [(brood-lord) (max raw-gas 250)]
+    [(archon) 300]
+    [(ravager) (max raw-gas 75)]
+    [else raw-gas]))
+
+(: unit-supply-cost (-> Symbol Float))
+(define (unit-supply-cost sym)
+  (define c (canon-counter-unit sym))
+  (define row (or (hash-ref SC2-LOTV-COST-TABLE c #f)
+                  (hash-ref SC2-LOTV-COST-TABLE sym #f)))
+  (define raw-sup (if row (caddr row) 0))
+  (cond
+    [(> raw-sup 0) (->float raw-sup)]
+    [(memq c '(carrier tempest mothership battlecruiser ultralisk brood-lord)) 6.0]
+    [(memq c '(void-ray)) 4.0]
+    [(memq c '(liberator banshee viper lurker)) 3.0]
+    [(memq c '(corruptor viking-fighter phoenix oracle raven medivac mutalisk infestor swarm-host)) 2.0]
+    [else 1.0]))
+
+(define GAS-HEAVY-SPECIALIST-UNITS : (Listof Symbol)
+  '(ravager mutalisk corruptor lurker infestor viper brood-lord ultralisk swarm-host
+    banshee raven battlecruiser thor liberator ghost siege-tank cyclone medivac
+    sentry phoenix oracle void-ray carrier tempest mothership
+    immortal colossus disruptor high-templar dark-templar archon))
+
+(define ENEMY-SPLASH-UNITS : (Listof Symbol)
+  '(colossus siege-tank siege-tank-sieged baneling lurker lurker-burrowed
+    lurker-mp lurker-mp-burrowed high-templar archon hellbat disruptor widow-mine ultralisk))
+
+(define ENEMY-SPLASH-STRUCTURES : (Listof Symbol)
+  '(robotics-bay templar-archive templar-archives lurker-den lurker-den-mp baneling-nest))
+
+(define TOWNHALL-STRUCTURES : (Listof Symbol)
+  '(hatchery lair hive command-center orbital-command planetary-fortress nexus))
+
+(define AIR-NON-COMBAT-UNITS : (Listof Symbol)
+  '(overlord overlord-transport overseer overseer-siege-mode observer observer-siege-mode
+    interceptor changeling changeling-zealot changeling-marine changeling-marine-shield
+    changeling-zergling changeling-zergling-wings larva egg broodling locust locust-flying mule))
+
+(struct phase-matrix-entry
+  ([primary : (Listof Symbol)]
+   [secondary : (Listof Symbol)]
+   [traps : (Listof Symbol)])
+  #:transparent)
+
+(: pme (-> (Listof Symbol) (Listof Symbol) (Listof Symbol) phase-matrix-entry))
+(define (pme p s t) (phase-matrix-entry p s t))
+
+;; Empirical Pro DB counter table keyed by '(matchup phase) across all 9 matchups x 4 phases
+(define PRO-PHASE-COUNTER-TABLE : (Immutable-HashTable (Pairof Symbol Symbol) phase-matrix-entry)
+  (make-immutable-hash
+   (list
+    ;; Zerg Matchups
+    (cons '(ZvZ . opening)   (pme '(zergling baneling queen) '(spine-crawler) '(mutalisk lurker ultralisk brood-lord viper infestor)))
+    (cons '(ZvZ . early-mid) (pme '(roach baneling zergling) '(queen ravager) '(mutalisk corruptor ultralisk brood-lord)))
+    (cons '(ZvZ . mid-game)  (pme '(roach ravager hydralisk baneling) '(infestor mutalisk lurker) '(corruptor ultralisk brood-lord)))
+    (cons '(ZvZ . late-game) (pme '(lurker hydralisk roach viper) '(infestor ravager ultralisk) '(zergling corruptor)))
+
+    (cons '(ZvT . opening)   (pme '(queen zergling) '(spore-crawler) '(roach hydralisk mutalisk lurker corruptor)))
+    (cons '(ZvT . early-mid) (pme '(zergling baneling queen) '(roach ravager) '(hydralisk mutalisk corruptor brood-lord)))
+    (cons '(ZvT . mid-game)  (pme '(zergling baneling hydralisk) '(mutalisk ravager corruptor) '(queen)))
+    (cons '(ZvT . late-game) (pme '(ultralisk baneling viper zergling) '(corruptor infestor lurker) '(queen)))
+
+    (cons '(ZvP . opening)   (pme '(zergling queen) '(ravager spine-crawler spore-crawler) '(hydralisk mutalisk corruptor)))
+    (cons '(ZvP . early-mid) (pme '(roach ravager zergling) '(baneling queen overseer) '(hydralisk corruptor brood-lord)))
+    (cons '(ZvP . mid-game)  (pme '(hydralisk baneling roach ravager) '(lurker corruptor zergling) '(queen)))
+    (cons '(ZvP . late-game) (pme '(lurker corruptor viper hydralisk) '(infestor brood-lord baneling) '(queen zergling)))
+
+    ;; Terran Matchups
+    (cons '(TvZ . opening)   (pme '(reaper hellion marine) '(widow-mine) '(marauder banshee thor battlecruiser)))
+    (cons '(TvZ . early-mid) (pme '(marine hellion medivac widow-mine) '(siege-tank banshee viking-fighter) '(marauder thor)))
+    (cons '(TvZ . mid-game)  (pme '(marine medivac siege-tank widow-mine) '(marauder liberator thor) '(banshee)))
+    (cons '(TvZ . late-game) (pme '(marine marauder liberator thor ghost) '(siege-tank widow-mine viking-fighter) '(banshee)))
+
+    (cons '(TvT . opening)   (pme '(reaper marine hellion) '(cyclone siege-tank) '(marauder thor battlecruiser)))
+    (cons '(TvT . early-mid) (pme '(marine siege-tank raven viking-fighter) '(medivac cyclone) '(marauder banshee)))
+    (cons '(TvT . mid-game)  (pme '(marine siege-tank viking-fighter medivac) '(raven hellion hellbat) '(marauder)))
+    (cons '(TvT . late-game) (pme '(siege-tank viking-fighter liberator marine) '(thor battlecruiser raven) '()))
+
+    (cons '(TvP . opening)   (pme '(marine reaper widow-mine) '(cyclone) '(marauder banshee thor battlecruiser)))
+    (cons '(TvP . early-mid) (pme '(marine marauder medivac widow-mine) '(siege-tank raven viking-fighter) '(banshee)))
+    (cons '(TvP . mid-game)  (pme '(marauder marine medivac viking-fighter) '(widow-mine liberator ghost) '(banshee)))
+    (cons '(TvP . late-game) (pme '(marauder ghost liberator viking-fighter) '(marine thor widow-mine) '(banshee)))
+
+    ;; Protoss Matchups
+    (cons '(PvZ . opening)   (pme '(adept zealot oracle) '(stalker sentry) '(immortal colossus carrier tempest disruptor)))
+    (cons '(PvZ . early-mid) (pme '(adept oracle immortal sentry) '(stalker archon void-ray) '(carrier tempest)))
+    (cons '(PvZ . mid-game)  (pme '(immortal archon zealot high-templar) '(stalker colossus warp-prism) '(carrier)))
+    (cons '(PvZ . late-game) (pme '(high-templar archon carrier immortal) '(zealot tempest mothership disruptor) '(stalker void-ray)))
+
+    (cons '(PvT . opening)   (pme '(stalker adept sentry) '(oracle) '(zealot colossus high-templar carrier)))
+    (cons '(PvT . early-mid) (pme '(stalker colossus zealot observer) '(sentry phoenix immortal) '(carrier tempest)))
+    (cons '(PvT . mid-game)  (pme '(zealot colossus high-templar stalker) '(disruptor archon observer) '(void-ray)))
+    (cons '(PvT . late-game) (pme '(high-templar zealot disruptor archon) '(colossus stalker tempest) '(void-ray)))
+
+    (cons '(PvP . opening)   (pme '(stalker sentry adept) '(zealot) '(carrier tempest high-templar)))
+    (cons '(PvP . early-mid) (pme '(immortal stalker sentry) '(zealot phoenix observer) '(carrier tempest)))
+    (cons '(PvP . mid-game)  (pme '(immortal archon zealot) '(disruptor stalker phoenix) '(void-ray)))
+    (cons '(PvP . late-game) (pme '(disruptor immortal archon tempest) '(carrier zealot high-templar) '(stalker))))))
+
+(: lookup-phase-matrix-entry (-> Symbol Symbol Symbol phase-matrix-entry))
+(define (lookup-phase-matrix-entry our-race enemy-race phase)
+  (define mk (matchup-key our-race enemy-race))
+  (define fallback-mk
+    (case our-race
+      [(Zerg) 'ZvT]
+      [(Terran) 'TvP]
+      [else 'PvZ]))
+  (or (hash-ref PRO-PHASE-COUNTER-TABLE (cons mk phase) #f)
+      (hash-ref PRO-PHASE-COUNTER-TABLE (cons fallback-mk phase) #f)
+      (pme '() '() '())))
+
+(: PRO-SITUATION-OVERRIDES (Immutable-HashTable (Pairof Symbol Symbol) phase-matrix-entry))
+(define PRO-SITUATION-OVERRIDES
+  (make-immutable-hash
+   (list
+    ;; 1. Cannon rush / proxy defense
+    (cons '(Zerg . cannon-rush-proxy)     (pme '(ravager queen zergling) '(spine-crawler roach) '(hydralisk mutalisk lurker)))
+    (cons '(Terran . cannon-rush-proxy)   (pme '(marine siege-tank cyclone) '(bunker marauder) '(banshee thor battlecruiser)))
+    (cons '(Protoss . cannon-rush-proxy)  (pme '(stalker immortal shield-battery) '(zealot adept) '(carrier tempest high-templar)))
+    ;; 2. 1-base all-in hold
+    (cons '(Zerg . 1base-all-in-hold)     (pme '(queen zergling roach baneling) '(spine-crawler ravager) '(mutalisk lurker ultralisk brood-lord)))
+    (cons '(Terran . 1base-all-in-hold)   (pme '(marine siege-tank widow-mine) '(bunker marauder cyclone) '(battlecruiser thor banshee)))
+    (cons '(Protoss . 1base-all-in-hold)  (pme '(stalker immortal shield-battery sentry) '(zealot adept) '(carrier tempest dark-templar)))
+    ;; 3. Unwalled runby / punish
+    (cons '(Zerg . unwalled-runby-punish) (pme '(zergling baneling roach) '(mutalisk) '(ultralisk brood-lord)))
+    (cons '(Terran . unwalled-runby-punish) (pme '(hellion marine cyclone) '(reaper liberator medivac) '(thor battlecruiser)))
+    (cons '(Protoss . unwalled-runby-punish) (pme '(adept zealot stalker) '(oracle phoenix warp-prism) '(tempest carrier)))
+    ;; 4. SkyToss / Air transition
+    (cons '(Zerg . skytoss-air-transition) (pme '(corruptor viper hydralisk) '(queen infestor spore-crawler) '(roach zergling lurker)))
+    (cons '(Terran . skytoss-air-transition) (pme '(viking-fighter marine thor) '(ghost liberator cyclone) '(banshee siege-tank marauder)))
+    (cons '(Protoss . skytoss-air-transition) (pme '(tempest void-ray carrier) '(phoenix high-templar archon) '(colossus immortal disruptor)))
+    ;; 5. Mech / Siege line
+    (cons '(Zerg . mech-siege-line)       (pme '(ravager viper hydralisk) '(corruptor brood-lord roach) '(zergling baneling)))
+    (cons '(Terran . mech-siege-line)     (pme '(siege-tank viking-fighter liberator) '(marauder battlecruiser raven) '(marine hellbat)))
+    (cons '(Protoss . mech-siege-line)    (pme '(immortal disruptor tempest) '(carrier zealot phoenix) '(stalker adept)))
+    ;; 6. Bio-Mine / Bio-Tank tempo
+    (cons '(Zerg . bio-mine-tank-tempo)   (pme '(zergling baneling hydralisk) '(mutalisk ultralisk viper) '(roach swarm-host)))
+    (cons '(Terran . bio-mine-tank-tempo) (pme '(siege-tank marine widow-mine) '(medivac marauder viking-fighter) '(banshee battlecruiser)))
+    (cons '(Protoss . bio-mine-tank-tempo) (pme '(colossus high-templar zealot) '(stalker sentry disruptor) '(void-ray tempest)))
+    ;; 7. Roach-Ravager-Ling flood
+    (cons '(Zerg . roach-ravager-ling-flood) (pme '(roach ravager baneling) '(lurker zergling) '(mutalisk corruptor)))
+    (cons '(Terran . roach-ravager-ling-flood) (pme '(marauder siege-tank widow-mine) '(marine medivac banshee) '(hellion reaper)))
+    (cons '(Protoss . roach-ravager-ling-flood) (pme '(immortal archon zealot) '(sentry void-ray disruptor) '(stalker adept)))
+    ;; 8. Lurker / Swarm Host siege
+    (cons '(Zerg . lurker-swarm-host-siege) (pme '(lurker ravager viper) '(overseer hydralisk corruptor) '(zergling roach)))
+    (cons '(Terran . lurker-swarm-host-siege) (pme '(siege-tank ghost liberator) '(raven viking-fighter marauder) '(marine hellbat)))
+    (cons '(Protoss . lurker-swarm-host-siege) (pme '(immortal disruptor carrier) '(oracle observer tempest) '(stalker zealot)))
+    ;; 9. Cloaked / Burrowed threat
+    (cons '(Zerg . cloaked-burrowed-threat) (pme '(overseer zergling roach) '(spore-crawler hydralisk ravager) '(ultralisk brood-lord)))
+    (cons '(Terran . cloaked-burrowed-threat) (pme '(raven marine cyclone) '(missile-turret widow-mine siege-tank) '(banshee battlecruiser)))
+    (cons '(Protoss . cloaked-burrowed-threat) (pme '(observer oracle immortal) '(photon-cannon stalker archon) '(dark-templar tempest))))))
+
+(: lookup-situational-counter-matrix
+   (->* (Symbol Symbol) (Symbol Symbol) (Immutable-HashTable Symbol Any)))
+(define (lookup-situational-counter-matrix raw-our raw-enemy [raw-phase 'opening] [situation 'macro])
+  (define r1 (normalize-race-or-unknown raw-our))
+  (define r2 (normalize-race-or-unknown raw-enemy))
+  (define phase (if (memq raw-phase '(opening early-mid mid-game late-game)) raw-phase 'opening))
+  (define sit-ent (hash-ref PRO-SITUATION-OVERRIDES (cons r1 situation) #f))
+  (define ent (or sit-ent (lookup-phase-matrix-entry r1 r2 phase)))
+  (hasheq 'matchup (matchup-key r1 r2)
+          'phase phase
+          'situation situation
+          'primary (phase-matrix-entry-primary ent)
+          'secondary (phase-matrix-entry-secondary ent)
+          'traps (phase-matrix-entry-traps ent)))
+
+(: race-combat-roster (-> Symbol (Listof Symbol)))
+(define (race-combat-roster race)
+  (case race
+    [(Zerg)    '(zergling baneling queen roach ravager hydralisk lurker mutalisk
+                 corruptor infestor swarm-host viper ultralisk brood-lord overseer)]
+    [(Terran)  '(marine reaper marauder ghost hellion hellbat widow-mine siege-tank
+                 cyclone thor medivac viking-fighter liberator banshee raven battlecruiser)]
+    [else      '(zealot adept stalker sentry high-templar dark-templar archon immortal
+                 colossus disruptor observer warp-prism phoenix oracle void-ray carrier
+                 tempest mothership)]))
+
+(: compute-situational-weights
+   (-> Symbol Symbol Integer Integer Boolean
+       Float Float Boolean Boolean Boolean Boolean
+       (Listof Symbol) (Listof Symbol) (Listof Symbol)
+       (Immutable-HashTable Symbol Any)))
+(define (compute-situational-weights our-race enemy-race frame our-workers natural-finished?
+                                     enemy-air-supply our-aa-supply enemy-has-splash?
+                                     enemy-cloak-burrow? enemy-contain? enemy-air-heavy?
+                                     researched-upgs unit-counter-recs ally-bldg-syms)
+  (define phase : Symbol (loop->game-phase frame))
+  (define mk : Symbol (matchup-key our-race enemy-race))
+  (define ent (lookup-phase-matrix-entry our-race enemy-race phase))
+  (define primary (phase-matrix-entry-primary ent))
+  (define secondary (phase-matrix-entry-secondary ent))
+  (define traps (phase-matrix-entry-traps ent))
+  (define gas-gated? : Boolean (or (< our-workers 40) (not natural-finished?)))
+  (define late-splash? : Boolean (and (> frame 13440) enemy-has-splash?))
+  (define marine-upgraded? : Boolean
+    (and (or (memq 'stimpack researched-upgs)
+             (memq 'stimpack-cast researched-upgs)
+             (memq 'combat-shield researched-upgs)
+             (memq 'combat-shields researched-upgs)
+             (memq 'shield-wall researched-upgs)
+             (memq 'shieldwall researched-upgs))
+         #t))
+  (define zealot-upgraded? : Boolean
+    (and (or (memq 'charge researched-upgs)
+             (memq 'zealot-charge researched-upgs))
+         #t))
+  (define hydra-range-ready? : Boolean
+    (and (memq 'grooved-spines researched-upgs)
+         (or (memq 'lair ally-bldg-syms)
+             (memq 'hive ally-bldg-syms)
+             (memq 'hydralisk-den ally-bldg-syms))
+         #t))
+  (define aa-supply-cap : Float (* 1.25 enemy-air-supply))
+  (define max-aa-units : Nonnegative-Integer
+    (max 0 (exact-floor (/ aa-supply-cap 2.0))))
+  (define roster (race-combat-roster our-race))
+
+  (define penalty-ht : (HashTable Symbol Symbol) (make-hasheq))
+  (define raw-weights : (Listof (Pairof Symbol Float))
+    (for/list : (Listof (Pairof Symbol Float)) ([u (in-list roster)])
+      (define base-w : Float
+        (cond
+          [(memq u primary)   1.75]
+          [(memq u secondary) 1.25]
+          [(memq u traps)     0.25]
+          [else               0.85]))
+      (define sit-w : Float
+        (if (memq u unit-counter-recs)
+            (* base-w (if (memq u traps) 1.05 1.30))
+            base-w))
+      ;; Trap penalty record
+      (when (memq u traps)
+        (hash-set! penalty-ht u 'matchup-trap-unit))
+
+      ;; Specific tactical counters & trap mitigations
+      (define tac-w : Float
+        (let ([w sit-w])
+          ;; 1. Banshee NEVER vs air/SkyToss (0 air DPS)
+          (cond
+            [(and (eq? u 'banshee) (or (> enemy-air-supply 0.0) enemy-air-heavy?))
+             (hash-set! penalty-ht u 'banshee-cannot-shoot-air)
+             (min w 0.08)]
+            ;; 2. Anti-air vs confirmed air threats
+            [(and (or (> enemy-air-supply 0.0) enemy-air-heavy?)
+                  (memq u '(viking-fighter thor marine corruptor viper hydralisk
+                            phoenix tempest stalker archon high-templar)))
+             (* w (if enemy-air-heavy? 1.35 1.15))]
+            ;; 3. Contain / cannon rush defense
+            [(and enemy-contain?
+                  (memq u '(ravager zergling siege-tank cyclone marine stalker immortal)))
+             (* w 1.35)]
+            ;; 4. Cloak / burrow mobile detector boost
+            [(and enemy-cloak-burrow? (memq u '(overseer raven observer oracle)))
+             (max w 1.90)]
+            ;; 5. Pre-range / pre-Lair Hydra into splash trap
+            [(and (eq? u 'hydralisk) enemy-has-splash? (not hydra-range-ready?))
+             (hash-set! penalty-ht u 'pre-range-hydra-vs-splash)
+             (min w 0.45)]
+            ;; 6. Pure Marauder / Stalker / Immortal vs wrong swarm when no air/armor target
+            [else w])))
+
+      ;; Hard Guardrail A: Gas-heavy specialist penalty when workers < 40 or natural unfinished
+      (define detector-exempt? : Boolean
+        (and enemy-cloak-burrow? (memq u '(overseer observer)) #t))
+      (define gas-w : Float
+        (if (and gas-gated?
+                 (not detector-exempt?)
+                 (or (memq u GAS-HEAVY-SPECIALIST-UNITS)
+                     (>= (unit-gas-cost u) 75)))
+            (begin
+              (hash-set! penalty-ht u 'early-econ-gas-starvation)
+              (min 0.32 (* tac-w 0.25)))
+            tac-w))
+
+      ;; Hard Guardrail B: Anti-air specialist target cap (corruptor, viking-fighter <= 1.25x enemy air supply)
+      (define aa-w : Float
+        (if (memq u '(corruptor viking-fighter))
+            (cond
+              [(<= enemy-air-supply 0.0)
+               (hash-set! penalty-ht u 'no-enemy-air-supply)
+               (min 0.18 (* gas-w 0.12))]
+              [(>= our-aa-supply aa-supply-cap)
+               (hash-set! penalty-ht u 'aa-supply-over-cap)
+               (min 0.18 (* gas-w 0.12))]
+              [else gas-w])
+            gas-w))
+
+      ;; Hard Guardrail C: Late-game (loop > 13440) fragile T1 penalty vs splash
+      (define final-w : Float
+        (if (and late-splash?
+                 (or (eq? u 'zergling)
+                     (and (eq? u 'marine) (not marine-upgraded?))
+                     (and (eq? u 'zealot) (not zealot-upgraded?))))
+            (begin
+              (hash-set! penalty-ht u 'late-t1-vs-splash)
+              (min 0.24 (* aa-w 0.20)))
+            aa-w))
+
+      (define clamped : Float (max 0.05 (min 2.60 final-w)))
+      (cons u clamped)))
+
+  ;; Build immutable weights hash (+ helpful aliases like 'viking for 'viking-fighter)
+  (define weight-ht : (HashTable Symbol Float) (make-hasheq))
+  (for ([p (in-list raw-weights)])
+    (hash-set! weight-ht (car p) (cdr p))
+    (when (eq? (car p) 'viking-fighter)
+      (hash-set! weight-ht 'viking (cdr p))))
+  (define imm-weights : (Immutable-HashTable Symbol Float)
+    (for/hasheq : (Immutable-HashTable Symbol Float) ([(k v) (in-hash weight-ht)])
+      (values k v)))
+  (define imm-penalties : (Immutable-HashTable Symbol Symbol)
+    (for/hasheq : (Immutable-HashTable Symbol Symbol) ([(k v) (in-hash penalty-ht)])
+      (values k v)))
+
+  (define sorted-pairs
+    (sort raw-weights
+          (lambda ([a : (Pairof Symbol Float)] [b : (Pairof Symbol Float)])
+            (> (cdr a) (cdr b)))))
+  (define recs : (Listof Symbol)
+    (for/list : (Listof Symbol)
+              ([p (in-list sorted-pairs)]
+               #:when (and (>= (cdr p) 0.55)
+                           (not (hash-ref penalty-ht (car p) #f))))
+      (car p)))
+  (define suppressed : (Listof Symbol)
+    (for/list : (Listof Symbol)
+              ([p (in-list sorted-pairs)]
+               #:when (or (< (cdr p) 0.50)
+                          (hash-ref penalty-ht (car p) #f)))
+      (car p)))
+
+  (define unit-caps : (Immutable-HashTable Symbol Nonnegative-Integer)
+    (hasheq 'corruptor max-aa-units
+            'viking-fighter max-aa-units
+            'viking max-aa-units))
+
+  (hasheq 'matchup mk
+          'phase phase
+          'our-race our-race
+          'enemy-race enemy-race
+          'weights imm-weights
+          'recommended-units recs
+          'suppressed-units suppressed
+          'unit-caps unit-caps
+          'enemy-air-supply enemy-air-supply
+          'our-aa-supply our-aa-supply
+          'aa-supply-cap aa-supply-cap
+          'natural-finished? natural-finished?
+          'workers our-workers
+          'gas-gated? gas-gated?
+          'late-splash-threat? late-splash?
+          'penalties imm-penalties))
+
+(: situational-unit-weight
+   (->* ((Immutable-HashTable Symbol Any) Symbol) (Float) Float))
+(define (situational-unit-weight weight-res raw-unit [default 1.0])
+  (define cu (canon-counter-unit raw-unit))
+  (define w-ht (hash-ref weight-res 'weights #f))
+  (cond
+    [(hash? w-ht)
+     (let ([v (or (hash-ref w-ht cu #f) (hash-ref w-ht raw-unit #f))])
+       (if (flonum? v) v (if (real? v) (real->double-flonum v) default)))]
+    [else
+     (let ([v (or (hash-ref weight-res cu #f) (hash-ref weight-res raw-unit #f))])
+       (if (flonum? v) v (if (real? v) (real->double-flonum v) default)))]))
+
+
+
+;; -----------------------------------------------------------------------------
+;; 6. Top-Level 16-Situation Operational Evaluator + Situational Weights API
+;; -----------------------------------------------------------------------------
+
+(: %evaluate-situational-core
+   (-> Any Any Any (Option Integer) Boolean
+       (Values situational-counter-plan (Immutable-HashTable Symbol Any))))
+(define (%evaluate-situational-core raw-obs raw-our-race raw-enemy-race frame-arg build-plan?)
   (define-values
     (raw-our enemy-race-raw frame bx by ex ey
      ally-units ally-bldgs enemy-units enemy-bldgs
@@ -1564,6 +2103,8 @@
      wall-sealed? enemy-wall-count proxy-flag? trapped?
      gold-contest? base-threat-score raw-minerals raw-gas)
     (dyn-extract-plan-scalars raw-obs raw-our-race raw-enemy-race frame-arg))
+  (define-values (nat-hint base-cnt-hint enemy-air-sup-override)
+    (dyn-obs-nat-flags raw-obs))
 
   (define our-race : Symbol (normalize-known-race raw-our))
   (define minerals : Nonnegative-Integer (if (> raw-minerals 0) raw-minerals 0))
@@ -1571,53 +2112,65 @@
 
   (define actor-ht : (HashTable Symbol (Listof actor-entry)) (make-hasheq))
 
-  ;; Single pass over ally units: army count + situational-ability actor indexing
-  (define-values (seq-after-units ally-army-count)
-    (let loop-au : (Values Integer Integer)
+  ;; Single pass over ally units: army count, AA specialist supply & optional actor indexing
+  (define-values (seq-after-units ally-army-count our-aa-supply)
+    (let loop-au : (Values Integer Integer Float)
                  ([xs : (Listof Any) ally-units]
                   [seq : Integer 0]
-                  [army : Integer 0])
+                  [army : Integer 0]
+                  [aa-sup : Float 0.0])
       (if (pair? xs)
-          (let* ([u (car xs)]
-                 [m (fast-unit-meta (dyn-unit-type u))]
-                 [max-req (unit-type-meta-actor-max-energy m)])
-            (when max-req
-              (maybe-push-actor! actor-ht (unit-type-meta-canon-unit m) max-req seq u))
-            (loop-au (cdr xs)
-                     (+ seq 1)
-                     (if (unit-type-meta-army? m) (+ army 1) army)))
-          (values seq army))))
+          (let*-values ([(u) (car xs)]
+                        [(raw-t cnt _bp) (dyn-unit-type-and-count u)])
+            (let* ([m (fast-unit-meta raw-t)]
+                   [cu (canon-counter-unit raw-t)]
+                   [max-req (and build-plan? (unit-type-meta-actor-max-energy m))]
+                   [is-aa? (memq cu '(corruptor viking-fighter))])
+              (when max-req
+                (maybe-push-actor! actor-ht (unit-type-meta-canon-unit m) max-req seq u))
+              (loop-au (cdr xs)
+                       (+ seq 1)
+                       (if (unit-type-meta-army? m) (+ army cnt) army)
+                       (if is-aa? (+ aa-sup (* (->float cnt) 2.0)) aa-sup))))
+          (values seq army aa-sup))))
 
-  ;; Single pass over ally buildings: canonical structure list + actor indexing
-  (define ally-bldg-syms-rev : (Listof Symbol)
-    (let loop-ab : (Listof Symbol)
+  ;; Single pass over ally buildings: canonical structure list, completed TownHalls & actor indexing
+  (define-values (ally-bldg-syms-rev ready-townhalls)
+    (let loop-ab : (Values (Listof Symbol) Integer)
                  ([xs : (Listof Any) ally-bldgs]
                   [seq : Integer seq-after-units]
-                  [bldgs-rev : (Listof Symbol) '()])
+                  [bldgs-rev : (Listof Symbol) '()]
+                  [ready-th : Integer 0])
       (if (pair? xs)
-          (let* ([b (car xs)]
-                 [m (fast-unit-meta (dyn-unit-type b))]
-                 [cs (unit-type-meta-canon-struct m)]
-                 [max-req (unit-type-meta-actor-max-energy m)])
-            (when max-req
-              (maybe-push-actor! actor-ht (unit-type-meta-canon-unit m) max-req seq b))
-            (loop-ab (cdr xs)
-                     (+ seq 1)
-                     (if (memq cs bldgs-rev) bldgs-rev (cons cs bldgs-rev))))
-          bldgs-rev)))
+          (let*-values ([(b) (car xs)]
+                        [(raw-t cnt bp) (dyn-unit-type-and-count b)])
+            (let* ([m (fast-unit-meta raw-t)]
+                   [cs (unit-type-meta-canon-struct m)]
+                   [max-req (and build-plan? (unit-type-meta-actor-max-energy m))]
+                   [th-ready? (and (memq cs TOWNHALL-STRUCTURES) (>= bp 0.99))])
+              (when max-req
+                (maybe-push-actor! actor-ht (unit-type-meta-canon-unit m) max-req seq b))
+              (loop-ab (cdr xs)
+                       (+ seq 1)
+                       (if (memq cs bldgs-rev) bldgs-rev (cons cs bldgs-rev))
+                       (if th-ready? (+ ready-th cnt) ready-th))))
+          (values bldgs-rev ready-th))))
 
-  (finalize-actor-ht! actor-ht)
+  (when build-plan?
+    (finalize-actor-ht! actor-ht))
 
-  ;; Single pass over enemy units: composition, proximity, air, cloak/burrow, casters, siege, drops
+  ;; Single pass over enemy units: composition, proximity, air supply, splash, cloak/burrow, casters, siege, drops
   (define-values
     (enemy-army-count enemy-syms-rev0 last-c0
      enemy-near-home0 enemy-workers-near-home enemy-air-count
      enemy-cloak-burrow-count enemy-spellcaster-count
      enemy-sky-mech-count0 enemy-siege-lurker-count
-     enemy-drop-runby-count enemy-followup-near?)
+     enemy-drop-runby-count enemy-followup-near?
+     enemy-air-combat-supply0 enemy-total-supply0 enemy-has-splash-u?)
     (let loop-eu : (Values Integer (Listof Symbol) (Option Symbol)
                            Integer Integer Integer Integer Integer
-                           Integer Integer Integer Boolean)
+                           Integer Integer Integer Boolean
+                           Float Float Boolean)
                  ([xs : (Listof Any) enemy-units]
                   [enemy-army : Integer 0]
                   [esyms-rev : (Listof Symbol) '()]
@@ -1630,41 +2183,55 @@
                   [sky-mech : Integer 0]
                   [siege : Integer 0]
                   [drop-runby : Integer 0]
-                  [followup-near? : Boolean #f])
+                  [followup-near? : Boolean #f]
+                  [air-sup : Float 0.0]
+                  [tot-sup : Float 0.0]
+                  [splash? : Boolean #f])
       (if (pair? xs)
-          (let* ([u (car xs)]
-                 [m (fast-unit-meta (dyn-unit-type u))]
-                 [c (unit-type-meta-canon-unit m)]
-                 [next-esyms (if (or (eq? c last-c) (memq c esyms-rev)) esyms-rev (cons c esyms-rev))]
-                 [d2 : Float (dyn-unit-dist2 u bx by 9999.0)]
-                 [near-45? (<= d2 2025.0)]
-                 [near-38? (and near-45? (<= d2 1444.0))]
-                 [rmask : Fixnum (unit-type-meta-enemy-rmask m)]
-                 [nz-rmask? (not (= 0 rmask))]
-                 [cloak-hit? (or (and nz-rmask? (not (= 0 (bitwise-and rmask BIT-CLOAK-BURROW))))
-                                 (dyn-unit-stealth? u))])
-            (loop-eu
-             (cdr xs)
-             (if (unit-type-meta-army? m) (+ enemy-army 1) enemy-army)
-             next-esyms
-             c
-             (if near-38? (+ near-home 1) near-home)
-             (if (and near-38? (<= d2 1156.0) (unit-type-meta-worker? m)) (+ workers-near 1) workers-near)
-             (if (unit-type-meta-flying? m) (+ air 1) air)
-             (if cloak-hit? (+ cloak 1) cloak)
-             (if (and nz-rmask? (not (= 0 (bitwise-and rmask BIT-CASTER)))) (+ caster 1) caster)
-             (if (and nz-rmask? (not (= 0 (bitwise-and rmask BIT-SKY-MECH)))) (+ sky-mech 1) sky-mech)
-             (if (and nz-rmask? (not (= 0 (bitwise-and rmask BIT-SIEGE-LURKER)))) (+ siege 1) siege)
-             (if (and nz-rmask? (not (= 0 (bitwise-and rmask BIT-DROP-RUNBY)))) (+ drop-runby 1) drop-runby)
-             (or followup-near? (and near-45? (unit-type-meta-followup? m)))))
+          (let*-values ([(u) (car xs)]
+                        [(raw-t cnt _bp) (dyn-unit-type-and-count u)])
+            (let* ([m (fast-unit-meta raw-t)]
+                   [c (unit-type-meta-canon-unit m)]
+                   [cu (canon-counter-unit raw-t)]
+                   [next-esyms (if (or (eq? c last-c) (memq c esyms-rev)) esyms-rev (cons c esyms-rev))]
+                   [d2 : Float (dyn-unit-dist2 u bx by 9999.0)]
+                   [near-45? (<= d2 2025.0)]
+                   [near-38? (and near-45? (<= d2 1444.0))]
+                   [rmask : Fixnum (unit-type-meta-enemy-rmask m)]
+                   [nz-rmask? (not (= 0 rmask))]
+                   [cloak-hit? (or (and nz-rmask? (not (= 0 (bitwise-and rmask BIT-CLOAK-BURROW))))
+                                   (dyn-unit-stealth? u))]
+                   [flying? (unit-type-meta-flying? m)]
+                   [army? (unit-type-meta-army? m)]
+                   [combat-fly? (and flying? (not (memq cu AIR-NON-COMBAT-UNITS)) (not (memq c AIR-NON-COMBAT-UNITS)))]
+                   [unit-sup : Float (if army? (* (->float cnt) (unit-supply-cost raw-t)) 0.0)]
+                   [splash-hit? (or (memq cu ENEMY-SPLASH-UNITS) (memq c ENEMY-SPLASH-UNITS))])
+              (loop-eu
+               (cdr xs)
+               (if army? (+ enemy-army cnt) enemy-army)
+               next-esyms
+               c
+               (if near-38? (+ near-home cnt) near-home)
+               (if (and near-38? (<= d2 1156.0) (unit-type-meta-worker? m)) (+ workers-near cnt) workers-near)
+               (if flying? (+ air cnt) air)
+               (if cloak-hit? (+ cloak cnt) cloak)
+               (if (and nz-rmask? (not (= 0 (bitwise-and rmask BIT-CASTER)))) (+ caster cnt) caster)
+               (if (and nz-rmask? (not (= 0 (bitwise-and rmask BIT-SKY-MECH)))) (+ sky-mech cnt) sky-mech)
+               (if (and nz-rmask? (not (= 0 (bitwise-and rmask BIT-SIEGE-LURKER)))) (+ siege cnt) siege)
+               (if (and nz-rmask? (not (= 0 (bitwise-and rmask BIT-DROP-RUNBY)))) (+ drop-runby cnt) drop-runby)
+               (or followup-near? (and near-45? (unit-type-meta-followup? m)))
+               (if combat-fly? (+ air-sup unit-sup) air-sup)
+               (+ tot-sup unit-sup)
+               (or splash? (and splash-hit? #t)))))
           (values enemy-army esyms-rev last-c near-home workers-near air
-                  cloak caster sky-mech siege drop-runby followup-near?))))
+                  cloak caster sky-mech siege drop-runby followup-near?
+                  air-sup tot-sup splash?))))
 
   ;; Single pass over enemy buildings: composition, sky/mech structures, proximity contain checks
   (define-values
     (enemy-syms-rev enemy-near-home enemy-static-near-home
-     enemy-sky-mech-count enemy-contain-direct? enemy-pylon-near?)
-    (let loop-eb : (Values (Listof Symbol) Integer Integer Integer Boolean Boolean)
+     enemy-sky-mech-count enemy-contain-direct? enemy-pylon-near? enemy-has-splash-b?)
+    (let loop-eb : (Values (Listof Symbol) Integer Integer Integer Boolean Boolean Boolean)
                  ([xs : (Listof Any) enemy-bldgs]
                   [esyms-rev : (Listof Symbol) enemy-syms-rev0]
                   [last-c : (Option Symbol) last-c0]
@@ -1672,30 +2239,34 @@
                   [static-near : Integer 0]
                   [sky-mech : Integer enemy-sky-mech-count0]
                   [contain-direct? : Boolean #f]
-                  [pylon-near? : Boolean #f])
+                  [pylon-near? : Boolean #f]
+                  [splash-b? : Boolean #f])
       (if (pair? xs)
-          (let* ([b (car xs)]
-                 [m (fast-unit-meta (dyn-unit-type b))]
-                 [c (unit-type-meta-canon-unit m)]
-                 [next-esyms (if (or (eq? c last-c) (memq c esyms-rev)) esyms-rev (cons c esyms-rev))]
-                 [rmask : Fixnum (unit-type-meta-enemy-rmask m)]
-                 [d2 : Float (dyn-unit-dist2 b bx by 9999.0)]
-                 [near-45? (<= d2 2025.0)]
-                 [near-38? (and near-45? (<= d2 1444.0))]
-                 [smask : Fixnum (if near-45? (unit-type-meta-enemy-smask m) 0)]
-                 [nz-smask? (not (= 0 smask))])
-            (loop-eb
-             (cdr xs)
-             next-esyms
-             c
-             (if near-38? (+ near-home 1) near-home)
-             (if (and nz-smask? (<= d2 1764.0) (not (= 0 (bitwise-and smask BIT-STATIC-NEAR))))
-                 (+ static-near 1)
-                 static-near)
-             (if (not (= 0 (bitwise-and rmask BIT-SKY-MECH))) (+ sky-mech 1) sky-mech)
-             (or contain-direct? (and nz-smask? (not (= 0 (bitwise-and smask BIT-CONTAIN)))))
-             (or pylon-near? (and near-45? (eq? (unit-type-meta-canon-struct m) 'pylon)))))
-          (values esyms-rev near-home static-near sky-mech contain-direct? pylon-near?))))
+          (let*-values ([(b) (car xs)]
+                        [(raw-t cnt _bp) (dyn-unit-type-and-count b)])
+            (let* ([m (fast-unit-meta raw-t)]
+                   [c (unit-type-meta-canon-unit m)]
+                   [cs (unit-type-meta-canon-struct m)]
+                   [next-esyms (if (or (eq? c last-c) (memq c esyms-rev)) esyms-rev (cons c esyms-rev))]
+                   [rmask : Fixnum (unit-type-meta-enemy-rmask m)]
+                   [d2 : Float (dyn-unit-dist2 b bx by 9999.0)]
+                   [near-45? (<= d2 2025.0)]
+                   [near-38? (and near-45? (<= d2 1444.0))]
+                   [smask : Fixnum (if near-45? (unit-type-meta-enemy-smask m) 0)]
+                   [nz-smask? (not (= 0 smask))])
+              (loop-eb
+               (cdr xs)
+               next-esyms
+               c
+               (if near-38? (+ near-home cnt) near-home)
+               (if (and nz-smask? (<= d2 1764.0) (not (= 0 (bitwise-and smask BIT-STATIC-NEAR))))
+                   (+ static-near cnt)
+                   static-near)
+               (if (not (= 0 (bitwise-and rmask BIT-SKY-MECH))) (+ sky-mech cnt) sky-mech)
+               (or contain-direct? (and nz-smask? (not (= 0 (bitwise-and smask BIT-CONTAIN)))))
+               (or pylon-near? (and near-45? (eq? cs 'pylon)))
+               (or splash-b? (and (memq cs ENEMY-SPLASH-STRUCTURES) #t)))))
+          (values esyms-rev near-home static-near sky-mech contain-direct? pylon-near? splash-b?))))
 
   (define enemy-contain-near? : Boolean
     (or enemy-contain-direct? (and enemy-pylon-near? enemy-followup-near?)))
@@ -1824,78 +2395,168 @@
   ;; Printf Cannon-Rush & Proxy-Contain Follow-Up Directives across ZvP / TvP / PvP
   (define printf-contain? : Boolean
     (or (eq? primary-sit 'enemy-cannon-or-bunker-contain) enemy-contain-near?))
-  (define unit-counter-recs : (Listof Symbol)
+  (define unit-counter-recs0 : (Listof Symbol)
     (reverse
      (if printf-contain?
          (push-unique-syms
           (case our-race
             [(Zerg)    '(ravager spine-crawler nydus-canal queen hydralisk)]
-            [(Terran)  '(siege-tank cyclone bunker scv-repair viking)]
+            [(Terran)  '(siege-tank cyclone bunker scv-repair viking-fighter)]
             [else      '(stalker shield-battery immortal warp-prism tempest void-ray)])
           unit-counter-recs-rev0)
          unit-counter-recs-rev0)))
-  (define pos-dirs : (Listof Symbol)
+  (define unit-counter-recs-canon : (Listof Symbol)
+    (for/list : (Listof Symbol) ([u (in-list unit-counter-recs0)])
+      (canon-counter-unit u)))
+
+  (define enemy-race-inferred : Symbol
+    (infer-enemy-race-from-syms enemy-syms (normalize-race-or-unknown enemy-race-raw)))
+  (define natural-finished? : Boolean
+    (case nat-hint
+      [(yes) #t]
+      [(no) #f]
+      [else (or (>= ready-townhalls 2) (>= base-cnt-hint 2))]))
+  (define enemy-air-combat-supply : Float
+    (if (>= enemy-air-sup-override 0.0) enemy-air-sup-override enemy-air-combat-supply0))
+  (define enemy-air-heavy? : Boolean
+    (and (> enemy-air-combat-supply 0.0)
+         (or (>= enemy-air-combat-supply (* 0.30 (max 1.0 enemy-total-supply0)))
+             (>= enemy-sky-mech-count 4)
+             (eq? primary-sit 'enemy-turtle-skytoss-or-mech))))
+  (define enemy-has-splash? : Boolean
+    (or enemy-has-splash-u? enemy-has-splash-b?))
+
+  (define weight-res : (Immutable-HashTable Symbol Any)
+    (compute-situational-weights
+     our-race
+     enemy-race-inferred
+     frame
+     our-workers
+     natural-finished?
+     enemy-air-combat-supply
+     our-aa-supply
+     enemy-has-splash?
+     (> enemy-cloak-burrow-count 0)
+     printf-contain?
+     enemy-air-heavy?
+     researched-upgs
+     unit-counter-recs-canon
+     ally-bldg-syms))
+
+  (define weight-recs : (Listof Symbol)
+    (let ([v (hash-ref weight-res 'recommended-units #f)])
+      (if (and (list? v) (andmap symbol? v)) v '())))
+  (define weight-suppressed : (Listof Symbol)
+    (let ([v (hash-ref weight-res 'suppressed-units #f)])
+      (if (and (list? v) (andmap symbol? v)) v '())))
+
+  ;; Merge matrix situational counters with weighted enemy counter recs while removing suppressed traps
+  (define filtered-raw-recs : (Listof Symbol)
+    (filter (lambda ([u : Symbol]) (not (memq (canon-counter-unit u) weight-suppressed)))
+            unit-counter-recs0))
+  (define merged-recs : (Listof Symbol)
     (reverse
-     (if printf-contain?
-         (push-unique-syms
+     (push-unique-syms
+      filtered-raw-recs
+      (reverse weight-recs))))
+  (define unit-counter-recs : (Listof Symbol)
+    (sort merged-recs
+          (lambda ([a : Symbol] [b : Symbol])
+            (> (situational-unit-weight weight-res a 0.5)
+               (situational-unit-weight weight-res b 0.5)))))
+
+  (if (not build-plan?)
+      (values
+       (situational-counter-plan
+        primary-sit
+        active-sits
+        imm-scores
+        'map-control-contest
+        unit-counter-recs
+        '()
+        '()
+        '()
+        '()
+        (format "weights phase=~a matchup=~a" (loop->game-phase frame) (matchup-key our-race enemy-race-inferred)))
+       weight-res)
+      (let ()
+        (define pos-dirs : (Listof Symbol)
+          (reverse
+           (if printf-contain?
+               (push-unique-syms
+                (case our-race
+                  [(Zerg)    '(ravager-bile-walled-cannons spine-root-7.2-tiles reroute-expansion-to-third nydus-counter-main)]
+                  [(Terran)  '(high-ground-bunker-1.5t-from-cliff swap-bunker-builder-scv siege-tank-range-13-cyclone-lock-on scv-resume-cc)]
+                  [else      '(multi-probe-independent-chase corner-pre-block-probe abort-walled-cannon-pull stalker-battery-nexus-overcharge)])
+                pos-dirs-rev0)
+               pos-dirs-rev0)))
+
+        (define upg-recs
+          (select-situational-upgrades our-race primary-sit enemy-syms
+                                       researched-upgs pending-upgs
+                                       ally-bldg-syms minerals gas))
+
+        (define ab-recs
+          (select-ability-actions-from-ht primary-sit enemy-syms actor-ht frame))
+
+        (define posture : Symbol
+          (case primary-sit
+            [(opponent-unwalled-punish our-snowball-finish-window) 'all-out-attack]
+            [(opponent-proxy-all-in-defense enemy-early-pool-or-worker-rush enemy-cannon-or-bunker-contain) 'hold-and-defend]
+            [(enemy-air-harass-transition enemy-cloaked-or-burrowed-threat enemy-multi-prong-drop-or-runby) 'split-defend-and-detect]
+            [(enemy-fast-3cc-or-nexus-greed our-eco-deficit-comeback-harass) 'multi-prong-harass]
+            [(enemy-siege-or-lurker-contain enemy-turtle-skytoss-or-mech late-game-spellcaster-standoff) 'tech-siege-and-poke]
+            [(our-army-trapped-or-out-of-position) 'rescue-and-regroup]
+            [(base-trade-race) 'base-race-recall-or-snipe]
+            [else 'map-control-contest]))
+
+        (define static-def : (Listof Symbol)
           (case our-race
-            [(Zerg)    '(ravager-bile-walled-cannons spine-root-7.2-tiles reroute-expansion-to-third nydus-counter-main)]
-            [(Terran)  '(high-ground-bunker-1.5t-from-cliff swap-bunker-builder-scv siege-tank-range-13-cyclone-lock-on scv-resume-cc)]
-            [else      '(multi-probe-independent-chase corner-pre-block-probe abort-walled-cannon-pull stalker-battery-nexus-overcharge)])
-          pos-dirs-rev0)
-         pos-dirs-rev0)))
+            [(Zerg)
+             (case primary-sit
+               [(enemy-air-harass-transition enemy-cloaked-or-burrowed-threat) '(spore-crawler-mineral-lines queen-transfuse)]
+               [(enemy-cannon-or-bunker-contain) '(spine-crawler-7.2-tiles spine-crawler-front ravager-corrosive-bile reroute-expansion-to-third nydus-worm-counter-main queen-block)]
+               [(opponent-proxy-all-in-defense enemy-early-pool-or-worker-rush) '(spine-crawler-front queen-block)]
+               [(our-eco-deficit-comeback-harass enemy-fast-3cc-or-nexus-greed) '(nydus-worm-backdoor spread-swarm-host)]
+               [else '(creep-highway-control)])]
+            [(Terran)
+             (case primary-sit
+               [(enemy-air-harass-transition enemy-cloaked-or-burrowed-threat) '(missile-turret-mineral-lines turret-tank-flank)]
+               [(enemy-cannon-or-bunker-contain) '(high-ground-bunker-1.5t swap-bunker-builder-scv siege-tank-range-13 cyclone-lock-on scv-resume-cc scv-repair-3-6)]
+               [(opponent-proxy-all-in-defense enemy-early-pool-or-worker-rush) '(bunker-ramp scv-repair-3-6 raise-depot)]
+               [(map-split-or-gold-base-contest enemy-multi-prong-drop-or-runby) '(morph-planetary-fortress-outer scv-surround-repair)]
+               [else '(bunker-salvage-if-idle)])]
+            [else
+             (case primary-sit
+               [(enemy-air-harass-transition enemy-cloaked-or-burrowed-threat) '(photon-cannon-plus-shield-battery dual-pylon-redundancy)]
+               [(enemy-cannon-or-bunker-contain) '(shield-battery-overcharge corner-hold-probe multi-probe-chase abort-walled-cannon-pull stalker-battery-contain)]
+               [(opponent-proxy-all-in-defense enemy-early-pool-or-worker-rush) '(shield-battery-overcharge corner-hold-probe)]
+               [else '(nexus-energy-recharge-casters nexus-recall-contingency)])]))
 
-  (define upg-recs
-    (select-situational-upgrades our-race primary-sit enemy-syms
-                                 researched-upgs pending-upgs
-                                 ally-bldg-syms minerals gas))
+        (define base-dist2 : Float (+ (* (- bx ex) (- bx ex)) (* (- by ey) (- by ey))))
+        (values
+         (situational-counter-plan
+          primary-sit
+          active-sits
+          imm-scores
+          posture
+          unit-counter-recs
+          upg-recs
+          ab-recs
+          (if (null? pos-dirs) (list (if (< base-dist2 8100.0) 'hold-choke 'take-map-control)) pos-dirs)
+          static-def
+          (format "primary=~a active=~a posture=~a phase=~a"
+                  primary-sit active-sits posture (loop->game-phase frame)))
+         weight-res))))
 
-  (define ab-recs
-    (select-ability-actions-from-ht primary-sit enemy-syms actor-ht frame))
+(: evaluate-situational-counter-plan
+   (->* (Any) (Any Any (Option Integer)) situational-counter-plan))
+(define (evaluate-situational-counter-plan raw-obs [raw-our-race 'Zerg] [raw-enemy-race 'Unknown] [frame-arg #f])
+  (define-values (plan _weights) (%evaluate-situational-core raw-obs raw-our-race raw-enemy-race frame-arg #t))
+  plan)
 
-  (define posture : Symbol
-    (case primary-sit
-      [(opponent-unwalled-punish our-snowball-finish-window) 'all-out-attack]
-      [(opponent-proxy-all-in-defense enemy-early-pool-or-worker-rush enemy-cannon-or-bunker-contain) 'hold-and-defend]
-      [(enemy-air-harass-transition enemy-cloaked-or-burrowed-threat enemy-multi-prong-drop-or-runby) 'split-defend-and-detect]
-      [(enemy-fast-3cc-or-nexus-greed our-eco-deficit-comeback-harass) 'multi-prong-harass]
-      [(enemy-siege-or-lurker-contain enemy-turtle-skytoss-or-mech late-game-spellcaster-standoff) 'tech-siege-and-poke]
-      [(our-army-trapped-or-out-of-position) 'rescue-and-regroup]
-      [(base-trade-race) 'base-race-recall-or-snipe]
-      [else 'map-control-contest]))
-
-  (define static-def : (Listof Symbol)
-    (case our-race
-      [(Zerg)
-       (case primary-sit
-         [(enemy-air-harass-transition enemy-cloaked-or-burrowed-threat) '(spore-crawler-mineral-lines queen-transfuse)]
-         [(enemy-cannon-or-bunker-contain) '(spine-crawler-7.2-tiles spine-crawler-front ravager-corrosive-bile reroute-expansion-to-third nydus-worm-counter-main queen-block)]
-         [(opponent-proxy-all-in-defense enemy-early-pool-or-worker-rush) '(spine-crawler-front queen-block)]
-         [(our-eco-deficit-comeback-harass enemy-fast-3cc-or-nexus-greed) '(nydus-worm-backdoor spread-swarm-host)]
-         [else '(creep-highway-control)])]
-      [(Terran)
-       (case primary-sit
-         [(enemy-air-harass-transition enemy-cloaked-or-burrowed-threat) '(missile-turret-mineral-lines turret-tank-flank)]
-         [(enemy-cannon-or-bunker-contain) '(high-ground-bunker-1.5t swap-bunker-builder-scv siege-tank-range-13 cyclone-lock-on scv-resume-cc scv-repair-3-6)]
-         [(opponent-proxy-all-in-defense enemy-early-pool-or-worker-rush) '(bunker-ramp scv-repair-3-6 raise-depot)]
-         [(map-split-or-gold-base-contest enemy-multi-prong-drop-or-runby) '(morph-planetary-fortress-outer scv-surround-repair)]
-         [else '(bunker-salvage-if-idle)])]
-      [else
-       (case primary-sit
-         [(enemy-air-harass-transition enemy-cloaked-or-burrowed-threat) '(photon-cannon-plus-shield-battery dual-pylon-redundancy)]
-         [(enemy-cannon-or-bunker-contain) '(shield-battery-overcharge corner-hold-probe multi-probe-chase abort-walled-cannon-pull stalker-battery-contain)]
-         [(opponent-proxy-all-in-defense enemy-early-pool-or-worker-rush) '(shield-battery-overcharge corner-hold-probe)]
-         [else '(nexus-energy-recharge-casters nexus-recall-contingency)])]))
-
-  (define base-dist2 : Float (+ (* (- bx ex) (- bx ex)) (* (- by ey) (- by ey))))
-  (situational-counter-plan
-   primary-sit
-   active-sits
-   imm-scores
-   posture
-   unit-counter-recs
-   upg-recs
-   ab-recs
-   (if (null? pos-dirs) (list (if (< base-dist2 8100.0) 'hold-choke 'take-map-control)) pos-dirs)
-   static-def
-   (format "primary=~a active=~a posture=~a" primary-sit active-sits posture)))
+(: evaluate-situational-unit-weights
+   (->* (Any) (Any Any (Option Integer)) (Immutable-HashTable Symbol Any)))
+(define (evaluate-situational-unit-weights raw-obs [raw-our-race 'Zerg] [raw-enemy-race 'Unknown] [frame-arg #f])
+  (define-values (_plan weights) (%evaluate-situational-core raw-obs raw-our-race raw-enemy-race frame-arg #f))
+  weights)

@@ -9612,7 +9612,7 @@
      #:active-bases 2
      #:ready-building-counts tvp-clock-bldgs
      #:total-building-counts tvp-clock-bldgs
-     #:unit-counts (hash 'scv 12)
+     #:unit-counts (hash 'scv 12 'banshee 2)
      #:open-facility-slots (hash 'command-center 1 'barracks 2 'barracks-techlab 1 'factory-techlab 1 'starport 1 'starport-techlab 1)))
   (define brain-clock-dec (step-priority-macro-brain brain-clock-state))
   (define brain-clock-ids (macro-brain-decision-scheduled-ids brain-clock-dec))

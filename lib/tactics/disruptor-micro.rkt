@@ -237,8 +237,8 @@
     (values min-xs min-ys min-d2s threat-cnt))
 
   (define (fast-flvec-pick-best-nova-target
-           e-cnt near-cnt exv eyv ehrv ehr2v ecv
-           a-hit-cnt a-cnt axv ayv ahrv ahr2v acv
+           e-cnt near-cnt exv eyv ehrv ehr2v ecv esv
+           a-hit-cnt a-cnt axv ayv ahrv ahr2v acv asv acbv
            res-cnt rxv ryv
            ox oy max-r dec-d pmin pmax)
     (define max-r2 (fl* max-r max-r))
@@ -270,6 +270,7 @@
             #t))
       (when clear?
         (define eraw 0.0)
+        (define esup 0.0)
         (define ehits 0)
         (let eloop ([i 0])
           (when (fx< i e-cnt)
@@ -280,25 +281,41 @@
               (when (and (fl<= dy hr)
                          (fl<= (fl+ (fl* dx dx) (fl* dy dy)) (flvector-ref ehr2v i)))
                 (set! eraw (fl+ eraw (flvector-ref ecv i)))
+                (set! esup (fl+ esup (flvector-ref esv i)))
                 (set! ehits (fx+ ehits 1))))
             (eloop (fx+ i 1))))
         (define apen 0.0)
         (define ahits 0)
+        (define asup22 0.0)
+        (define acnt22 0)
+        (define acmb20 0)
         (let aloop ([i 0])
-          (when (fx< i a-hit-cnt)
-            (define hr (flvector-ref ahrv i))
+          (when (fx< i a-cnt)
             (define dx (flabs (fl- cx (flvector-ref axv i))))
-            (when (fl<= dx hr)
-              (define dy (flabs (fl- cy (flvector-ref ayv i))))
-              (when (and (fl<= dy hr)
-                         (fl<= (fl+ (fl* dx dx) (fl* dy dy)) (flvector-ref ahr2v i)))
+            (define dy (flabs (fl- cy (flvector-ref ayv i))))
+            (when (and (fl<= dx 2.6) (fl<= dy 2.6))
+              (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
+              (when (and (fx< i a-hit-cnt)
+                         (fl<= d2 (flvector-ref ahr2v i)))
                 (set! apen (fl+ apen (flvector-ref acv i)))
-                (set! ahits (fx+ ahits 1))))
+                (set! ahits (fx+ ahits 1)))
+              (when (fl<= d2 4.84) ;; 2.2^2
+                (set! asup22 (fl+ asup22 (flvector-ref asv i)))
+                (set! acnt22 (fx+ acnt22 1))
+                (when (and (fl<= d2 4.0) ;; 2.0^2
+                           (fl> (flvector-ref acbv i) 0.5))
+                  (set! acmb20 (fx+ acmb20 1)))))
             (aloop (fx+ i 1))))
+        ;; Bug 9 guard: reject targets with >= 2 friendly combat units inside 2.0 tiles
+        ;; or friendly supply within 2.2 tiles >= enemy supply in splash radius.
+        (define ff-unsafe?
+          (or (fx>= acmb20 2)
+              (and (fx> acnt22 0) (fl>= asup22 esup))))
         (define net (fl- eraw apen))
-        (when (or (not found?)
-                  (fl> net best-net)
-                  (and (fl= net best-net) (fl< od2 best-od2)))
+        (when (and (not ff-unsafe?)
+                   (or (not found?)
+                       (fl> net best-net)
+                       (and (fl= net best-net) (fl< od2 best-od2))))
           (set! found? #t)
           (set! best-x cx)
           (set! best-y cy)
@@ -373,8 +390,14 @@
             (define mag2 (fl+ (fl* away-x away-x) (fl* away-y away-y)))
             (when (fl> mag2 0.0025)
               (define mag (flsqrt mag2))
-              (try-cand! (fl+ x1 (fl* 1.15 (fl/ away-x mag)))
-                         (fl+ y1 (fl* 1.15 (fl/ away-y mag)))))))
+              (define ux (fl/ away-x mag))
+              (define uy (fl/ away-y mag))
+              (try-cand! (fl+ x1 (fl* 1.15 ux))
+                         (fl+ y1 (fl* 1.15 uy)))
+              (try-cand! (fl+ x1 (fl* 1.45 ux))
+                         (fl+ y1 (fl* 1.45 uy)))
+              (try-cand! (fl+ x1 (fl* 2.3 ux))
+                         (fl+ y1 (fl* 2.3 uy))))))
         (loop-i (fx+ i 1))))
     (values found? best-x best-y best-net best-ehits best-ahits best-eraw best-apen)))
 
@@ -388,8 +411,8 @@
   [fast-compute-army-anchor-raw (-> (Listof Any) (HashTable Symbol Symbol) (Values Float Float Fixnum (Listof Any)))]
   [fast-nearest-kite-threats (-> (Listof Any) FlVector FlVector Fixnum (Values FlVector FlVector FlVector Fixnum))]
   [fast-flvec-pick-best-nova-target
-   (-> Fixnum Fixnum FlVector FlVector FlVector FlVector FlVector
-       Fixnum Fixnum FlVector FlVector FlVector FlVector FlVector
+   (-> Fixnum Fixnum FlVector FlVector FlVector FlVector FlVector FlVector
+       Fixnum Fixnum FlVector FlVector FlVector FlVector FlVector FlVector FlVector
        Fixnum FlVector FlVector
        Float Float Float Float Float Float
        (Values Boolean Float Float Float Integer Integer Float Float))])
@@ -446,6 +469,9 @@
  ground-nova-vulnerable-unit?
  filter-targetable-ground-units
  score-purification-nova-impact
+ purification-nova-friendly-fire-unsafe?
+ DISRUPTOR-NOVA-FF-CHECK-RADIUS
+ DISRUPTOR-NOVA-FF-COMBAT-COUNT-RADIUS
 
  ;; Offensive & defensive tactical planners
  plan-disruptor-nova-casts
@@ -470,6 +496,12 @@
 
 (: DISRUPTOR-NOVA-SPLASH-RADIUS Float)
 (define DISRUPTOR-NOVA-SPLASH-RADIUS 1.5)
+
+(: DISRUPTOR-NOVA-FF-CHECK-RADIUS Float)
+(define DISRUPTOR-NOVA-FF-CHECK-RADIUS 2.2)
+
+(: DISRUPTOR-NOVA-FF-COMBAT-COUNT-RADIUS Float)
+(define DISRUPTOR-NOVA-FF-COMBAT-COUNT-RADIUS 2.0)
 
 (: DISRUPTOR-NOVA-BASE-DAMAGE Float)
 (define DISRUPTOR-NOVA-BASE-DAMAGE 145.0)
@@ -993,8 +1025,59 @@
    [y : Float]
    [hit-r : Float]
    [hit-r2 : Float]
-   [contrib : Float])
+   [contrib : Float]
+   [supply : Float]
+   [combat? : Boolean])
   #:transparent)
+
+(: nova-unit-supply-from-sym (-> Symbol Float))
+(define (nova-unit-supply-from-sym ut)
+  (case ut
+    [(zergling baneling) 0.5]
+    [else (->float (sc2-supply-cost ut 1))]))
+
+(: nova-unit-combat-from-sym? (-> Symbol Boolean))
+(define (nova-unit-combat-from-sym? ut)
+  (not (or (eq? ut 'probe)
+           (eq? ut 'scv)
+           (eq? ut 'drone)
+           (eq? ut 'mule)
+           (eq? ut 'larva)
+           (eq? ut 'egg)
+           (memq ut SC2-ALL-STRUCTURE-SYMS))))
+
+;; Returns `#t` iff detonating a Purification Nova (radius `1.5`) at `(tx, ty)` risks
+;; friendly fire: friendly units within `2.2` tiles AND (`friendly-supply >= enemy-supply`
+;; OR `>= 2` friendly combat units inside `2.0` tiles).
+(: purification-nova-friendly-fire-unsafe? (-> Real Real (Listof Any) (Listof Any) Boolean))
+(define (purification-nova-friendly-fire-unsafe? tx ty ally-units enemy-units)
+  (define ftx (->float tx))
+  (define fty (->float ty))
+  (define-values (asup acnt22 acmb20)
+    (for/fold ([sup : Float 0.0] [cnt22 : Integer 0] [cmb20 : Integer 0])
+              ([a (in-list ally-units)]
+               #:when (ground-nova-vulnerable-unit? a))
+      (define d (dist-2d ftx fty (unit-x a) (unit-y a)))
+      (if (<= d DISRUPTOR-NOVA-FF-CHECK-RADIUS)
+          (let* ([ut (unit-type-sym a)]
+                 [u-sup (nova-unit-supply-from-sym ut)]
+                 [is-cmb? (and (<= d DISRUPTOR-NOVA-FF-COMBAT-COUNT-RADIUS)
+                               (nova-unit-combat-from-sym? ut))])
+            (values (+ sup u-sup) (+ cnt22 1) (if is-cmb? (+ cmb20 1) cmb20)))
+          (values sup cnt22 cmb20))))
+  (cond
+    [(>= acmb20 2) #t]
+    [(= acnt22 0) #f]
+    [else
+     (define esup : Float
+       (for/fold ([sup : Float 0.0])
+                 ([e (in-list enemy-units)]
+                  #:when (ground-nova-vulnerable-unit? e))
+         (define d (dist-2d ftx fty (unit-x e) (unit-y e)))
+         (if (<= d (+ DISRUPTOR-NOVA-SPLASH-RADIUS (unit-radius-bonus e 0.0)))
+             (+ sup (nova-unit-supply-from-sym (unit-type-sym e)))
+             sup)))
+     (>= asup esup)]))
 
 (: precompute-nova-eval-units
    (-> (Listof Any) (Listof (Pairof Float Float)) Float Boolean (Listof nova-eval-unit)))
@@ -1048,7 +1131,9 @@
                 (define kill-mult (if (<= ehp nova-dmg) 1.15 0.85))
                 (define contrib (* mult (* uval frac kill-mult)))
                 (define hr (+ DISRUPTOR-NOVA-SPLASH-RADIUS (+ rad extra-r)))
-                (cons (nova-eval-unit ux uy hr (* hr hr) contrib) acc)])])))))
+                (define u-sup (nova-unit-supply-from-sym ut))
+                (define u-cmb? (nova-unit-combat-from-sym? ut))
+                (cons (nova-eval-unit ux uy hr (* hr hr) contrib u-sup u-cmb?) acc)])])))))
 
 (: filter-nova-eval-units-within (-> (Listof nova-eval-unit) Float Float Float (Listof nova-eval-unit)))
 (define (filter-nova-eval-units-within evals ox oy max-r)
@@ -1244,6 +1329,7 @@
         (define ehrv (make-flvector e-fx 0.0))
         (define ehr2v (make-flvector e-fx 0.0))
         (define ecv (make-flvector e-fx 0.0))
+        (define esv (make-flvector e-fx 0.0))
         (let eloop ([es ordered-enemies] [i : Fixnum 0])
           (unless (null? es)
             (define eu (car es))
@@ -1252,6 +1338,7 @@
             (flvector-set! ehrv i (nova-eval-unit-hit-r eu))
             (flvector-set! ehr2v i (nova-eval-unit-hit-r2 eu))
             (flvector-set! ecv i (nova-eval-unit-contrib eu))
+            (flvector-set! esv i (nova-eval-unit-supply eu))
             (eloop (cdr es) (fx+ i 1))))
 
         (define hit-lim (+ max-range 2.5))
@@ -1278,6 +1365,8 @@
         (define ahrv (make-flvector a-fx 0.0))
         (define ahr2v (make-flvector a-fx 0.0))
         (define acv (make-flvector a-fx 0.0))
+        (define asv (make-flvector a-fx 0.0))
+        (define acbv (make-flvector a-fx 0.0))
         (let aloop ([as hit-allies] [i : Fixnum 0] [in-hit? #t])
           (cond
             [(not (null? as))
@@ -1287,6 +1376,8 @@
              (flvector-set! ahrv i (nova-eval-unit-hit-r au))
              (flvector-set! ahr2v i (nova-eval-unit-hit-r2 au))
              (flvector-set! acv i (nova-eval-unit-contrib au))
+             (flvector-set! asv i (nova-eval-unit-supply au))
+             (flvector-set! acbv i (if (nova-eval-unit-combat? au) 1.0 0.0))
              (aloop (cdr as) (fx+ i 1) in-hit?)]
             [(and in-hit? (pair? outer-allies))
              (aloop outer-allies i #f)]
@@ -1304,8 +1395,8 @@
 
         (define-values (found? bx by bnet behits bahits beraw bapen)
           (fast-flvec-pick-best-nova-target
-           e-fx near-fx exv eyv ehrv ehr2v ecv
-           a-hit-fx a-fx axv ayv ahrv ahr2v acv
+           e-fx near-fx exv eyv ehrv ehr2v ecv esv
+           a-hit-fx a-fx axv ayv ahrv ahr2v acv asv acbv
            res-fx rxv ryv
            origin-x origin-y max-range deconflict-dist
            (->float SC2-MAP-PLAYABLE-MIN-COORD)
@@ -1631,6 +1722,30 @@
           (define travel-reach
             (+ DISRUPTOR-NOVA-SPLASH-RADIUS
                (* (->float rem-frames) DISRUPTOR-NOVA-SPEED-PER-FRAME)))
+          (define close-allies-22 : (Listof nova-eval-unit)
+            (filter-nova-eval-units-within eval-allies nx ny DISRUPTOR-NOVA-FF-CHECK-RADIUS))
+          (define cur-ff-unsafe? : Boolean
+            (and (pair? close-allies-22)
+                 (let ()
+                   (define-values (asup acmb20)
+                     (for/fold ([sup : Float 0.0] [cmb : Integer 0])
+                               ([au (in-list close-allies-22)])
+                       (define d2 (dist-sq-2d nx ny (nova-eval-unit-x au) (nova-eval-unit-y au)))
+                       (values (+ sup (nova-eval-unit-supply au))
+                               (if (and (<= d2 4.0) (nova-eval-unit-combat? au)) (+ cmb 1) cmb))))
+                   (define esup : Float
+                     (for/fold ([sup : Float 0.0])
+                               ([eu (in-list eval-enemies)])
+                       (define dx (abs (- nx (nova-eval-unit-x eu))))
+                       (define hr (nova-eval-unit-hit-r eu))
+                       (if (and (<= dx hr)
+                                (<= (abs (- ny (nova-eval-unit-y eu))) hr)
+                                (<= (dist-sq-2d nx ny (nova-eval-unit-x eu) (nova-eval-unit-y eu))
+                                    (nova-eval-unit-hit-r2 eu)))
+                           (+ sup (nova-eval-unit-supply eu))
+                           sup)))
+                   (or (>= acmb20 2) (>= asup esup)))))
+          (define max-travel-dist (* (->float rem-frames) DISRUPTOR-NOVA-SPEED-PER-FRAME))
           (define-values (best-pt sc)
             (if (null? eval-enemies)
                 (values #f (nova-impact-score -1.0 0 0 0.0 0.0))
@@ -1642,8 +1757,16 @@
                       (values pt1 sc1)
                       ;; Fallback without de-confliction if only 1 enemy cluster exists
                       (pick-best-nova-target/eval eval-enemies eval-allies nx ny travel-reach '() 0.0)))))
+          (define steer-away-cur-ff?
+            (and cur-ff-unsafe?
+                 (pair? close-allies-22)
+                 (or (not best-pt)
+                     (<= (nova-impact-score-enemy-hits sc) 0)
+                     (< (nova-impact-score-net-score sc) 0.0)
+                     (> (dist-2d nx ny (point2d-x best-pt) (point2d-y best-pt)) max-travel-dist))))
           (cond
-            [(and best-pt
+            [(and (not steer-away-cur-ff?)
+                  best-pt
                   (> (nova-impact-score-enemy-hits sc) 0)
                   (>= (nova-impact-score-net-score sc) 0.0))
              (set! claimed-targets (cons best-pt claimed-targets))
@@ -1652,11 +1775,16 @@
                                                   (nova-impact-score-enemy-hits sc))
                                 orders))]
             [else
-             ;; If only friendly units are near the live Nova (avoid friendly fire!) or
-             ;; enemies are slightly beyond remaining reach, steer away from ally cluster.
-             (define near-ally-pts : (Listof point2d)
-               (for/list : (Listof point2d) ([a (in-list (filter-nova-eval-units-within eval-allies nx ny (+ travel-reach 2.5)))])
+             ;; Steer Nova away from friendly units within 2.2 tiles first (Bug 9),
+             ;; then broader ally neighborhood if empty, or lunge toward enemies if no allies near.
+             (define near-22-pts : (Listof point2d)
+               (for/list : (Listof point2d) ([a (in-list close-allies-22)])
                  (point2d (nova-eval-unit-x a) (nova-eval-unit-y a))))
+             (define near-ally-pts : (Listof point2d)
+               (if (pair? near-22-pts)
+                   near-22-pts
+                   (for/list : (Listof point2d) ([a (in-list (filter-nova-eval-units-within eval-allies nx ny (+ travel-reach 2.5)))])
+                     (point2d (nova-eval-unit-x a) (nova-eval-unit-y a)))))
              (cond
                [(pair? near-ally-pts)
                 (define ac (centroid-2d near-ally-pts))

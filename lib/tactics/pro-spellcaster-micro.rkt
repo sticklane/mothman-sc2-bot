@@ -204,6 +204,8 @@
  CORROSIVE-BILE-CLAIM-TTL
  CORROSIVE-BILE-STAGGER-OFFSET
  CORROSIVE-BILE-COOLDOWN-FRAMES
+ CORROSIVE-BILE-FF-CHECK-RADIUS
+ corrosive-bile-target-safe?
  ANTI-ARMOR-CLAIM-RADIUS
  ANTI-ARMOR-CLAIM-TTL
  MICROBIAL-SHROUD-CLAIM-RADIUS
@@ -284,6 +286,7 @@
 (define CORROSIVE-BILE-CLAIM-TTL : Integer 36)
 (define CORROSIVE-BILE-STAGGER-OFFSET : Float 0.75)
 (define CORROSIVE-BILE-COOLDOWN-FRAMES : Integer 157)
+(define CORROSIVE-BILE-FF-CHECK-RADIUS : Float 1.75)
 
 (define ANTI-ARMOR-CLAIM-RADIUS : Float 2.5)
 (define ANTI-ARMOR-CLAIM-TTL : Integer 48)
@@ -2002,16 +2005,84 @@
         [(hatchery lair hive) 58.0]
         [else 0.0])))
 
+(define ZERG-BILE-SIEGE-STATIC-SYMS : (Listof Symbol)
+  '(siege-tank-sieged liberator-ag lurker-burrowed lurker-mp-burrowed
+    warp-prism-phasing photon-cannon bunker shield-battery
+    spine-crawler spore-crawler missile-turret))
+
 (: zerg-bile-siege-or-static? (-> Any Boolean))
 (define (zerg-bile-siege-or-static? e)
-  (and (memq (uh-type e)
-             '(siege-tank-sieged liberator-ag lurker-burrowed lurker-mp-burrowed
-               warp-prism-phasing photon-cannon bunker shield-battery
-               spine-crawler spore-crawler missile-turret))
-       #t))
+  (or (and (memq (uh-raw-type e) ZERG-BILE-SIEGE-STATIC-SYMS) #t)
+      (and (memq (uh-type e) ZERG-BILE-SIEGE-STATIC-SYMS) #t)
+      (eq? (dyn-hash-ref e 'sieged #f) #t)))
 
-(: ravager-try-bile-point! (-> spell-claims Integer Float Float Float Float Float Boolean Integer Symbol (Option spell-directive)))
-(define (ravager-try-bile-point! claims r-tag rx ry bx by cluster-hp force-field? current-frame pattern)
+(define current-bile-allies : (Parameterof (Listof Any)) (make-parameter '()))
+
+(define BILE-IMMOBILE-OR-BURROWED-SYMS : (Listof Symbol)
+  '(siege-tank-sieged liberator-ag warp-prism-phasing
+    observer-siege-mode overseer-siege-mode
+    zergling-burrowed baneling-burrowed drone-burrowed
+    roach-burrowed hydralisk-burrowed infestor-burrowed
+    infestor-terran-burrowed queen-burrowed
+    lurker-burrowed lurker-mp-burrowed
+    ravager-burrowed swarm-host-burrowed swarm-host-mp-burrowed
+    widow-mine-burrowed
+    creep-tumor creep-tumor-burrowed creep-tumor-queen
+    spine-crawler spore-crawler
+    larva egg baneling-cocoon ravager-cocoon
+    lurker-cocoon lurker-mp-egg overlord-cocoon transport-overlord-cocoon))
+
+(: ally-immobile-or-burrowed? (-> Any Boolean))
+(define (ally-immobile-or-burrowed? a)
+  (define ut (uh-type a))
+  (define uraw (uh-raw-type a))
+  (or (uh-burrowed? a)
+      (eq? (dyn-hash-ref a 'burrowed #f) #t)
+      (eq? (dyn-hash-ref a 'is-burrowed #f) #t)
+      (eq? (dyn-hash-ref a 'sieged #f) #t)
+      (eq? (dyn-hash-ref a 'immobile? #f) #t)
+      (eq? (dyn-hash-ref a 'is-building #f) #t)
+      (and (memq ut BILE-IMMOBILE-OR-BURROWED-SYMS) #t)
+      (and (memq uraw BILE-IMMOBILE-OR-BURROWED-SYMS) #t)
+      (and (memq ut SC2-ALL-STRUCTURE-SYMS) #t)
+      (and (memq uraw SC2-ALL-STRUCTURE-SYMS) #t)))
+
+(: corrosive-bile-target-safe? (-> Float Float (Listof Any) Boolean))
+(define (corrosive-bile-target-safe? tx ty allies)
+  (cond
+    [(null? allies) #t]
+    [else
+     (let loop ([rem : (Listof Any) allies]
+                [ground-cnt : Integer 0])
+       (cond
+         [(null? rem) #t]
+         [else
+          (define a (car rem))
+          (cond
+            [(not (and (hash? a)
+                       (or (> (uh-total-hp a) 0.0)
+                           (and (not (dyn-hash-has-key? a 'hp))
+                                (not (dyn-hash-has-key? a 'hull-hp))))
+                       (not (uh-hallucination? a))))
+             (loop (cdr rem) ground-cnt)]
+            [(> (dist2 tx ty (uh-x a) (uh-y a)) CORROSIVE-BILE-FF-CHECK-RADIUS)
+             (loop (cdr rem) ground-cnt)]
+            [(ally-immobile-or-burrowed? a)
+             #f]
+            [(not (uh-flying? a))
+             (define next-cnt (+ ground-cnt 1))
+             (if (>= next-cnt 2)
+                 #f
+                 (loop (cdr rem) next-cnt))]
+            [else
+             (loop (cdr rem) ground-cnt)])]))]))
+
+(: ravager-try-bile-point!
+   (->* (spell-claims Integer Float Float Float Float Float Boolean Integer Symbol)
+        (#:allies (Listof Any))
+        (Option spell-directive)))
+(define (ravager-try-bile-point! claims r-tag rx ry bx by cluster-hp force-field? current-frame pattern
+                               #:allies [allies (current-bile-allies)])
   (define max-biles : Integer
     (if force-field?
         1
@@ -2039,6 +2110,7 @@
        (define cx (clamp-coord (+ bx (car off))))
        (define cy (clamp-coord (+ by (cdr off))))
        (and (<= (dist2 rx ry cx cy) 9.0)
+            (corrosive-bile-target-safe? cx cy allies)
             (spell-claim-point?! claims 'corrosive-bile cx cy
                                  CORROSIVE-BILE-CLAIM-RADIUS
                                  current-frame
@@ -2158,9 +2230,10 @@
   (define all-allies (if (null? ally-buildings) ally-units (append ally-units ally-buildings)))
 
   (define-values (dirs-rev _)
-    (for/fold ([acc : (Listof spell-directive) '()]
-               [used-tags : (Listof Integer) exclude-tags])
-              ([u (in-list caster-units)])
+    (parameterize ([current-bile-allies all-allies])
+      (for/fold ([acc : (Listof spell-directive) '()]
+                 [used-tags : (Listof Integer) exclude-tags])
+                ([u (in-list caster-units)])
       (define tag (if (hash? u) (uh-tag u) 0))
       (define sym (if (hash? u) (uh-type u) 'unknown))
       (cond
@@ -2594,7 +2667,7 @@
              [else #f]))
          (if dir
              (values (cons dir acc) (cons tag used-tags))
-             (values acc used-tags))])))
+             (values acc used-tags))]))))
   (reverse dirs-rev))
 
 ;; Plan #115-calibrated Zerg spellcaster micro (`queen`, `ravager`, `infestor`,

@@ -2813,11 +2813,15 @@
                              #:disallow-aabbs [disallow-aabbs '()]
                              #:corridors [corridors '()]
                              #:corridor-min-dist [corridor-min-dist 2.0]
-                             #:require-terrain? [require-terrain? #t])
+                             #:require-terrain? [require-terrain? #t]
+                             #:allow-addon-overlap? [allow-addon-overlap? #f])
   (define-values (hw hh) (if (symbol? canon) (sc2-structure-half-dims canon) (values 1.5 1.5)))
-  (define addon-fac? (memq canon '(barracks factory starport)))
+  (define addon-fac? (and (not allow-addon-overlap?) (memq canon '(barracks factory starport))))
+  ;; When addon overlap fallback is explicitly enabled for 3x3 Terran production, skip East addon clearance while preserving 3x3 footprint.
+  (define free-canon (if (and allow-addon-overlap? (memq canon '(barracks factory starport))) 'engineering-bay canon))
+  (define eff-addon-aabbs (if allow-addon-overlap? '() addon-aabbs))
   (define-values (ax ay) (terran-addon-pad-pos cx cy))
-  (and (placement-site-free? canon cx cy phys-aabbs addon-aabbs exp-pads #f)
+  (and (placement-site-free? free-canon cx cy phys-aabbs eff-addon-aabbs exp-pads #f)
        (not (ormap (lambda (b) (aabb-overlaps? cx cy hw hh b)) res-aabbs))
        (not (ormap (lambda (b) (aabb-overlaps? cx cy hw hh b)) disallow-aabbs))
        (or (not addon-fac?)
@@ -3187,6 +3191,50 @@
     (define ang (* k (/ (* 2.0 pi) 8.0)))
     (cons (+ ax (* r (cos ang))) (+ ay (* r (sin ang))))))
 
+;; Bounded radial buildable-terrain fallback for SimCity solvers when strict slots are full/blocked.
+;; Caps spiral evaluations at `max-evals` and validates buildable terrain before any gridless fallback.
+(define (simcity-buildable-spiral-fallback canon anchors phys-aabbs addon-aabbs res-aabbs exp-pads
+                                          grids-ok? w h pref bref href
+                                          #:fallback-pt [fallback-pt #f]
+                                          #:max-evals [max-evals 64]
+                                          #:allow-addon-fallback? [allow-addon-fallback? #t])
+  (define snap-fn (if (sc2-odd-footprint-structure? canon) snap-3x3-coord snap-2x2-coord))
+  (define is-addon-fac? (memq canon '(barracks factory starport)))
+  (define (search-pass allow-addon? req-terr? eval-cap)
+    (define evals 0)
+    (define seen (make-hash))
+    (for*/first ([anc (in-list anchors)]
+                 #:break (>= evals eval-cap)
+                 [r (in-list '(3.0 4.5 6.0 7.5 9.0 11.5 14.0))]
+                 #:break (>= evals eval-cap)
+                 [k (in-range 8)]
+                 #:break (>= evals eval-cap)
+                 #:do [(define ang (* k (/ (* 2.0 pi) 8.0)))
+                       (define sx (snap-fn (+ (car anc) (* r (cos ang)))))
+                       (define sy (snap-fn (+ (cdr anc) (* r (sin ang)))))
+                       (define sk (cons sx sy))]
+                 #:unless (hash-has-key? seen sk)
+                 #:do [(hash-set! seen sk #t)
+                       (set! evals (add1 evals))]
+                 #:when (simcity-site-valid? canon sx sy phys-aabbs addon-aabbs res-aabbs exp-pads
+                                             grids-ok? w h pref bref href #f
+                                             #:disallow-aabbs '()
+                                             #:corridors '()
+                                             #:require-terrain? req-terr?
+                                             #:allow-addon-overlap? allow-addon?))
+      (cons sx sy)))
+  (define found
+    (or (search-pass #f grids-ok? max-evals)
+        (and allow-addon-fallback? is-addon-fac?
+             (search-pass #t grids-ok? (max 32 (quotient max-evals 2))))))
+  (cond
+    [found (values (car found) (cdr found))]
+    [else
+     (define fb (or fallback-pt (and (pair? anchors) (car anchors)) (cons 64.0 64.0)))
+     (spiral-search-free-point canon (car fb) (cdr fb)
+                               phys-aabbs (if (and allow-addon-fallback? is-addon-fac?) '() addon-aabbs)
+                               exp-pads #f)]))
+
 (define (solve-terran-pro-simcity canon bx-f by-f nx-f ny-f ex-f ey-f
                                   ally-bldgs phys-aabbs addon-aabbs res-aabbs exp-pads
                                   min-pts geyser-pts grids-ok? w h pref bref href main-h nat-h map-grids corridors)
@@ -3228,7 +3276,17 @@
            (cons (+ mx0 (* c cd)) (+ my0 (* r rd)))))
        (or (first-valid primary-slots main-h)
            (first-valid overflow-slots main-h)
-           (first-valid primary-slots #f '() #f))]
+           (for*/first ([allow-addon? (in-list '(#f #t))]
+                        [pt (in-list (append primary-slots overflow-slots))]
+                        #:do [(define sx (snap-fn (car pt)))
+                              (define sy (snap-fn (cdr pt)))]
+                        #:when (simcity-site-valid? canon sx sy phys-aabbs addon-aabbs res-aabbs exp-pads
+                                                    grids-ok? w h pref bref href #f
+                                                    #:disallow-aabbs '()
+                                                    #:corridors '()
+                                                    #:require-terrain? grids-ok?
+                                                    #:allow-addon-overlap? allow-addon?))
+             (cons sx sy)))]
       ;; 2. SupplyDepot: ramp wall slots first, then outer cliff perimeter vision ring (never inside matrix)
       [(eq? canon 'supply-depot)
        (define wall-depots
@@ -3357,11 +3415,29 @@
                      [r (in-list '(7.5 10.0 12.5))])
            (define ang (* k (/ (* 2.0 pi) 12.0)))
            (cons (+ bx-f (* r (cos ang))) (+ by-f (* r (sin ang))))))
-       (first-valid cands main-h (list matrix-aabb))]))
+       (define nat-cands
+         (for*/list ([k (in-range 8)]
+                     [r (in-list '(6.5 9.0 11.5))])
+           (define ang (* k (/ (* 2.0 pi) 8.0)))
+           (cons (+ nx-f (* r (cos ang))) (+ ny-f (* r (sin ang))))))
+       (or (first-valid cands main-h (list matrix-aabb))
+           (first-valid cands #f (list matrix-aabb) grids-ok?)
+           (first-valid cands #f '() grids-ok?)
+           (first-valid nat-cands nat-h '() grids-ok?)
+           (first-valid nat-cands #f '() grids-ok?))]))
   (if picked
       (values (car picked) (cdr picked))
-      (spiral-search-free-point canon (+ bx-f (* 8.0 away-ux)) (+ by-f (* 8.0 away-uy))
-                                phys-aabbs addon-aabbs exp-pads #f)))
+      (let ([fb-anchors (if (memq canon '(bunker missile-turret))
+                            (list (cons nx-f ny-f)
+                                  (cons bx-f by-f)
+                                  (cons (+ bx-f (* 8.0 away-ux)) (+ by-f (* 8.0 away-uy))))
+                            (list (cons (+ bx-f (* 8.0 away-ux)) (+ by-f (* 8.0 away-uy)))
+                                  (cons bx-f by-f)
+                                  (cons nx-f ny-f)))])
+        (simcity-buildable-spiral-fallback
+         canon fb-anchors phys-aabbs addon-aabbs res-aabbs exp-pads
+         grids-ok? w h pref bref href
+         #:fallback-pt (cons (+ bx-f (* 8.0 away-ux)) (+ by-f (* 8.0 away-uy)))))))
 
 ;; Protoss Pro SimCity (`Dual-Pylon` power matrix, Natural/Third 1-tile anti-runby wedge, rear mineral shadow tech).
 (define (solve-protoss-pro-simcity canon bx-f by-f nx-f ny-f ex-f ey-f
@@ -3583,10 +3659,41 @@
                        [cands (if require-power? (only-powered raw-cands) raw-cands)])
                   (or (first-valid cands ah0)
                       (first-valid cands #f #f))))))
-       (or (and choke-needs-this? (first-valid powered-choke-cands exp-h))
+       (define completed-pylons
+         (filter (lambda (p)
+                   (define bp (hash-ref p 'build-progress #f))
+                   (or (not (real? bp)) (>= bp 0.999)))
+                 pylons))
+       (define (only-ready-powered cands)
+         (define eff-pylons (if (pair? completed-pylons) completed-pylons pylons))
+         (filter (lambda (pt)
+                   (define sx (snap-fn (car pt)))
+                   (define sy (snap-fn (cdr pt)))
+                   (for/or ([p (in-list eff-pylons)])
+                     (<= (dist2d sx sy (hash-ref p 'x -9999.0) (hash-ref p 'y -9999.0)) 6.2)))
+                 cands))
+       (define pylon-ring-cands
+         (if (null? pylons)
+             '()
+             (sort
+              (for*/list ([p (in-list (if (pair? completed-pylons) completed-pylons pylons))]
+                          #:do [(define px0 (exact->inexact (hash-ref p 'x bx-f)))
+                                (define py0 (exact->inexact (hash-ref p 'y by-f)))]
+                          [r (in-list '(3.5 5.0))]
+                          [k (in-range 8)])
+                (define ang (* k (/ (* 2.0 pi) 8.0)))
+                (cons (+ px0 (* r (cos ang))) (+ py0 (* r (sin ang)))))
+              < #:key (lambda (pt) (dist2d (car pt) (cdr pt) (car choke-anchor) (cdr choke-anchor))))))
+       (or (and choke-needs-this? (first-valid (only-ready-powered choke-cands) exp-h))
+           (and choke-needs-this? (first-valid powered-choke-cands exp-h))
            (pick-mineral-line #t)
            (pick-infra #t)
+           (first-valid (only-ready-powered choke-cands) exp-h)
            (first-valid powered-choke-cands exp-h)
+           (and (eq? canon 'photon-cannon) (pair? pylon-ring-cands)
+                (or (first-valid (only-ready-powered pylon-ring-cands) exp-h)
+                    (first-valid (only-ready-powered pylon-ring-cands) main-h)
+                    (first-valid (only-ready-powered pylon-ring-cands) #f grids-ok?)))
            (and choke-needs-this? (or (first-valid choke-cands exp-h) (first-valid choke-cands #f #f)))
            (pick-mineral-line #f)
            (pick-infra #f)
@@ -3610,13 +3717,21 @@
            (first-valid dual-powered-slots main-h)
            (first-valid single-powered-slots main-h)
            (first-valid matrix-3x3-slots main-h)
-           (first-valid flank-cands exp-h))]
+           (first-valid flank-cands exp-h)
+           (first-valid matrix-3x3-slots #f grids-ok?))]
       [else
-       (first-valid matrix-3x3-slots main-h)]))
+       (or (first-valid matrix-3x3-slots main-h)
+           (first-valid matrix-3x3-slots #f grids-ok?))]))
   (if picked
       (values (car picked) (cdr picked))
-      (spiral-search-free-point canon (+ bx-f (* 8.0 away-ux)) (+ by-f (* 8.0 away-uy))
-                                phys-aabbs addon-aabbs exp-pads #f)))
+      (simcity-buildable-spiral-fallback
+       canon
+       (list (cons (+ bx-f (* 8.0 away-ux)) (+ by-f (* 8.0 away-uy)))
+             (cons bx-f by-f)
+             (cons nx-f ny-f))
+       phys-aabbs addon-aabbs res-aabbs exp-pads
+       grids-ok? w h pref bref href
+       #:fallback-pt (cons (+ bx-f (* 8.0 away-ux)) (+ by-f (* 8.0 away-uy))))))
 
 ;; Zerg Pro SimCity (Mineral-Pocket tech tuck, Natural/Third choke Evo/Roach semi-wall, Spine behind semi-wall).
 (define (solve-zerg-pro-simcity canon bx-f by-f nx-f ny-f ex-f ey-f

@@ -1,0 +1,2398 @@
+{
+  "schema_version": "1.0.0",
+  "generated_from": [
+    "data/pro_build_orders_summary.json",
+    "data/pro_tactical_catalog_examples.json",
+    "benchmarks/full_corpus_multi_horizon_report.json",
+    "benchmarks/full_corpus_stealth_burrow_detector_report.json",
+    "benchmarks/full_corpus_upgrades_and_addon_swaps_report.json",
+    "replays/aiarena_matches/forensic_summary.json",
+    "replays/pro_corpus/*.SC2Replay (late >=11m human-vs-human filter)"
+  ],
+  "corpus_totals": {
+    "pro_corpus_scanned": 1698,
+    "pro_valid_1v1_games": 278,
+    "pro_game_events_decoded": 277,
+    "pro_player_trajectories": 556,
+    "aiarena_scanned": 138,
+    "pro_build_orders_lotv_replays": 298,
+    "pro_build_orders_perspectives": 596,
+    "multi_horizon_valid_decoded_replays": 1649,
+    "multi_horizon_checkpoints": 9907,
+    "aiarena_forensic_matches": 26,
+    "aiarena_forensic_win_rate_pct": 7.7,
+    "aiarena_counter_unit_mismatch_matches": 20,
+    "aiarena_delayed_natural_matches": 13
+  },
+  "game_phases": {
+    "opening": {
+      "label": "Opening",
+      "time_range": "0:00-3:30",
+      "frame_range": [
+        0,
+        4704
+      ]
+    },
+    "early-mid": {
+      "label": "Early-Mid Timing/Defense",
+      "time_range": "3:30-6:30",
+      "frame_range": [
+        4704,
+        8736
+      ]
+    },
+    "mid-game": {
+      "label": "Mid-Game Macro/Tech Transition",
+      "time_range": "6:30-11:00",
+      "frame_range": [
+        8736,
+        14784
+      ]
+    },
+    "late-game": {
+      "label": "Late-Game / Ultimate Composition",
+      "time_range": "11:00+",
+      "frame_range": [
+        14784,
+        999999
+      ]
+    }
+  },
+  "global_empirical_guardrails": {
+    "early_econ_gas_gate": {
+      "worker_threshold": 40,
+      "requires_natural_finished": true,
+      "penalized_units": [
+        "ravager",
+        "mutalisk",
+        "corruptor",
+        "lurker",
+        "infestor",
+        "viper",
+        "brood-lord",
+        "ultralisk",
+        "swarm-host",
+        "banshee",
+        "raven",
+        "battlecruiser",
+        "thor",
+        "liberator",
+        "ghost",
+        "siege-tank",
+        "cyclone",
+        "colossus",
+        "disruptor",
+        "high-templar",
+        "dark-templar",
+        "archon",
+        "immortal",
+        "carrier",
+        "tempest",
+        "void-ray",
+        "oracle"
+      ],
+      "causal_why": "Across pro minute benchmarks, workers reach 32-45 at m5 and 38-53 at m6 (PvP 38, TvT 39.5, TvP 40, TvZ 44, ZvZ 44, PvT 46, PvZ 48, ZvT 52.5, ZvP 53). Meanwhile Mothman lost 13/26 AIArena matches with DELAYED_NATURAL_EXPANSION (>180s, 197.9s-263.5s vs pro 48.7s-136.6s) and had ESCROW_STALL streaks saving for premature hydralisk/cyclone (e.g., 5126899, 5126900)."
+    },
+    "anti_air_specialist_supply_cap": {
+      "units": [
+        "corruptor",
+        "viking-fighter"
+      ],
+      "max_ratio_vs_enemy_air_supply": 1.25,
+      "causal_why": "Corruptors cannot attack ground and landed Vikings lose air superiority/DPS efficiency while consuming 2 supply and 75-100 gas each. Pro late-game ZvP builds corruptors in 22/58 games (med 11 born over full match) only to mirror Stargate fleets while maintaining ground core (Zergling med 177, Hydralisk 41.5, Roach 46.5). Exceeding 1.25x enemy air supply stranding dead supply allows Protoss Zealot/Archon/Immortal or Terran Bio to win every ground fight."
+    },
+    "late_game_fragile_t1_vs_splash_penalty": {
+      "frame_threshold": 13440,
+      "penalized_units": [
+        "zergling",
+        "marine-unupgraded",
+        "zealot-uncharged"
+      ],
+      "enemy_splash_triggers": [
+        "colossus",
+        "siege-tank-sieged",
+        "siege-tank",
+        "baneling",
+        "lurker-mp-burrowed",
+        "lurker",
+        "lurker-burrowed",
+        "high-templar",
+        "archon",
+        "hellbat",
+        "disruptor",
+        "widow-mine"
+      ],
+      "causal_why": "At m10+ (frame > 13440), pro Protoss deploys HighTemplar Storm (727 casts, med 10:28), Archon, and Colossus; Terran deploys SiegeTank/WidowMine/Liberator; Zerg deploys LurkerMPBurrowed (3880 transitions) and Baneling. Un-upgraded Marines (no Stimpack/Combat Shield) and un-charged Zealots get kited or evaporated before closing distance, while pure Zerglings evaporate to Colossus/Storm/Tank/Hellbat unless paired with Baneling/Lurker/Ultralisk/Viper."
+    },
+    "detector_mortality_and_static_backup": {
+      "pro_mobile_detector_mortality_pct": 71.0,
+      "pro_static_detector_mortality_pct": 39.0,
+      "pro_post_snipe_damage_resources_60s": 666.1,
+      "aiarena_win_rate_when_sniping_detector_pct": 75.0,
+      "aiarena_win_rate_without_snipe_pct": 47.1,
+      "causal_why": "71.0% of pro mobile detectors die (1621/2283), yielding 666.1 avg resources damaged in the 60s post-snipe window; emergency Overseer morphs (164), Spore/Cannon/Turret starts (300), and Scan/Revelation (368/334) prevent uncontested DT/Banshee/Lurker/WidowMine damage."
+    },
+    "terran_addon_swapping_deficit": {
+      "pro_terran_replays_with_swap_pct": 5.5,
+      "pro_addon_swap_events": 480,
+      "pro_median_first_swap_sec": 198.6,
+      "aiarena_terran_replays_with_swap_pct": 0.0,
+      "causal_why": "Pro Terrans swap Barracks->Factory (111) and Barracks->Starport (77) at med 198.6s to immediately produce double Medivac/Hellion/Cyclone/Tank/Banshee; AIArena bots executed 0/58 swaps (0.0%)."
+    }
+  },
+  "matchups": {
+    "ZvZ": {
+      "build_benchmarks": {
+        "total_perspectives": 130,
+        "pro_perspectives": 116,
+        "exemplar_replay": "Starcraft2ReplayPackager_d4d9a3ea4005_Serral_vs_Elazer_ZvZ__Ascension_to_Aiur_LE_WCS_Montreal.SC2Replay",
+        "expansions": [
+          {
+            "base_num": 2,
+            "median_sec": 51.1,
+            "median_workers": 16,
+            "count": 58
+          },
+          {
+            "base_num": 3,
+            "median_sec": 158.7,
+            "median_workers": 24,
+            "count": 54
+          },
+          {
+            "base_num": 4,
+            "median_sec": 364.5,
+            "median_workers": 55,
+            "count": 15
+          }
+        ],
+        "key_tech_timings_sec": {
+          "overlord": 13.3,
+          "hatchery": 51.1,
+          "extractor": 67.8,
+          "spawning-pool": 71.9,
+          "baneling-nest": 166.7,
+          "evolution-chamber": 233.5,
+          "roach-warren": 233.9,
+          "spine-crawler": 268.4,
+          "lair": 279.2,
+          "spire": 347.1,
+          "spore-crawler": 366.8
+        },
+        "key_upgrade_timings_sec": {
+          "zergling-movementspeed": {
+            "median_start_sec": 129.5,
+            "median_complete_sec": 208.5,
+            "count": 50
+          },
+          "zerg-melee-weapons-1": {
+            "median_start_sec": 225.2,
+            "median_complete_sec": 339.2,
+            "count": 5
+          },
+          "zerg-missile-weapons-1": {
+            "median_start_sec": 277.4,
+            "median_complete_sec": 391.4,
+            "count": 34
+          },
+          "centrifugal-hooks": {
+            "median_start_sec": 323.0,
+            "median_complete_sec": 402.0,
+            "count": 1
+          },
+          "glial-reconstitution": {
+            "median_start_sec": 340.4,
+            "median_complete_sec": 419.5,
+            "count": 23
+          },
+          "pneumatized-carapace": {
+            "median_start_sec": 340.5,
+            "median_complete_sec": 383.5,
+            "count": 7
+          },
+          "zerg-ground-carapace-1": {
+            "median_start_sec": 342.1,
+            "median_complete_sec": 456.2,
+            "count": 7
+          },
+          "burrow": {
+            "median_start_sec": 356.8,
+            "median_complete_sec": 427.8,
+            "count": 2
+          },
+          "zerg-missile-weapons-2": {
+            "median_start_sec": 381.7,
+            "median_complete_sec": 517.7,
+            "count": 13
+          },
+          "tunneling-claws": {
+            "median_start_sec": 397.1,
+            "median_complete_sec": 476.2,
+            "count": 1
+          }
+        }
+      },
+      "late_corpus_stats": {
+        "clean_perspectives_ge_11m": 52,
+        "wins": 26,
+        "median_dur_min": 13.1,
+        "median_bases": 4.0,
+        "median_workers": 44.5,
+        "top_combat_units_presence_median": {
+          "zergling": "52/52 (med born 40; m10 alive mean 9.6)",
+          "queen": "52/52 (med 5)",
+          "roach": "46/52 (med 104; m10 alive mean 22.2)",
+          "hydralisk": "27/52 (med 31)",
+          "mutalisk": "19/52 (med 16)",
+          "baneling": "18/52 (med 19)",
+          "infestor": "10/52 (med 3.5)",
+          "viper": "9/52 (med 5)"
+        },
+        "exemplar_replays": [
+          "Starcraft2ReplayPackager_d4d9a3ea4005_Serral_vs_Elazer_ZvZ__Ascension_to_Aiur_LE_WCS_Montreal.SC2Replay",
+          "Starcraft2ReplayPackager_0af0e4628f16_Serral_vs_TRUE_Odyssey_LE_WCS_Valencia__2_.SC2Replay",
+          "Starcraft2ReplayPackager_53944710d0c1_TooDming_vs_Serral_ZvZ__Newkirk_Precinct_TE__Void__WCS_Austi.SC2Replay",
+          "Starcraft2ReplayPackager_56d714c0fe1b_Serral_vs_Zanster_Odyssey_LE_WCS_Valencia.SC2Replay"
+        ]
+      },
+      "phases": {
+        "opening": {
+          "primary_counters": [
+            "zergling",
+            "queen",
+            "baneling"
+          ],
+          "secondary_counters": [
+            "spine-crawler"
+          ],
+          "trap_units_to_avoid": [
+            "roach-pre-pool-cheese-without-safety-lings",
+            "pure-queen-off-creep"
+          ],
+          "opportunity_cost_analysis": "Spawning Pool med 71.9s, Hatchery2 51.1s (16 wkr), Speed 129.5s, Baneling Nest 166.7s. Opening 2 Queens + defensive Zerglings + early Baneling Nest preserves larva for Drones (m4 med 33 wkr, 3 bases) while shutting down Speedling floods; skipping Baneling Nest loses natural immediately or forces Spine Crawlers (100m + lost Drone).",
+          "causal_why": "In match 5127134 (ZvZ LOSS), Mothman lost with Queen vs 8x Zergling @ 350.4s (score=-0.22); slow Queens without Banelings or Speedlings cannot zone Speedling surrounds on natural Drones."
+        },
+        "early-mid": {
+          "primary_counters": [
+            "roach",
+            "baneling",
+            "zergling"
+          ],
+          "secondary_counters": [
+            "queen",
+            "spine-crawler",
+            "ravager"
+          ],
+          "trap_units_to_avoid": [
+            "naked-mutalisk-pre-40-workers",
+            "over-built-pure-zergling-vs-baneling-wall"
+          ],
+          "opportunity_cost_analysis": "Roach Warren hits med 233.9s (Evo 233.5s, +1 Missile 277.4s, Lair 279.2s). Transitioning off pure Ling-Bane onto 2-base/3-base saturated Roach (+1 Missile -> +1 Carapace/Glial 340.4s) protects larva efficiency; rushing 5+ Ravagers or early Spire before 40 workers collapses Drone count (pro m6 med 44 wkr).",
+          "causal_why": "Pro benchmarks show Zergling alive_mean peaks around m4-m6 (11.3 -> 14.5) while Roach scales from 0 at m4 to 6.9 alive_mean at m6 to crush un-supported Ling-Bane."
+        },
+        "mid-game": {
+          "primary_counters": [
+            "roach",
+            "ravager",
+            "hydralisk",
+            "baneling"
+          ],
+          "secondary_counters": [
+            "infestor",
+            "mutalisk",
+            "spore-crawler"
+          ],
+          "trap_units_to_avoid": [
+            "un-upgraded-zergling-flood-into-lurker-roach",
+            "over-committed-mutalisk-without-map-control"
+          ],
+          "opportunity_cost_analysis": "Glial Reconstitution starts med 340.4s, Spire 347.1s, Spore Crawler 366.8s, +2 Missile 381.7s, Tunneling Claws 397.1s. Committing 1000+ gas to 10+ Mutalisks risks dying to a timing push of +1/+1 Speed Roach-Ravager-Infestor across the map while Zerg has 3-4 bases (m8 med 4 bases).",
+          "causal_why": "At m10, Roach reaches 22.2 alive_mean (p51 produced) vs Mutalisk 4.0 and Zergling 9.6; upgraded Roach-Ravager trades decisively with static Spore/Queen anti-Muta anchor."
+        },
+        "late-game": {
+          "primary_counters": [
+            "lurker",
+            "hydralisk",
+            "roach",
+            "viper"
+          ],
+          "secondary_counters": [
+            "infestor",
+            "ravager",
+            "ultralisk"
+          ],
+          "trap_units_to_avoid": [
+            "pure-zergling-into-lurker-baneling",
+            "over-building-corruptors-with-no-brood-lords"
+          ],
+          "opportunity_cost_analysis": "Late-game gas dictates Lurker + Hydra + Viper Abduct/Blinding Cloud (pro Viper Abduct 98 casts, med 16:50; Blinding Cloud 76 casts, med 14:08) over mass T1 Zergling. Wasting larva and upgrades on un-supported Zerglings fails instantly against Lurker splash and Banelings.",
+          "causal_why": "In 52 clean >=11m ZvZ pro perspectives, Roach appears in 46/52 (med 104 born), Hydralisk 27/52 (med 31), Infestor 10/52, Viper 9/52 \u2014 long games resolve via Lurker/Viper positional siege."
+        }
+      }
+    },
+    "ZvT": {
+      "build_benchmarks": {
+        "total_perspectives": 64,
+        "pro_perspectives": 43,
+        "exemplar_replay": "Starcraft2ReplayPackager_935a0d2f58ac_SpeCial_vs_Serral_TvZ__Proxima_Station_LE_WCS_Austin.SC2Replay",
+        "expansions": [
+          {
+            "base_num": 2,
+            "median_sec": 52.5,
+            "median_workers": 17,
+            "count": 22
+          },
+          {
+            "base_num": 3,
+            "median_sec": 172.0,
+            "median_workers": 23,
+            "count": 21
+          },
+          {
+            "base_num": 4,
+            "median_sec": 377.9,
+            "median_workers": 57,
+            "count": 12
+          }
+        ],
+        "key_tech_timings_sec": {
+          "overlord": 13.4,
+          "hatchery": 52.5,
+          "extractor": 68.0,
+          "spawning-pool": 71.1,
+          "spine-crawler": 225.7,
+          "roach-warren": 249.7,
+          "lair": 262.0,
+          "spore-crawler": 295.7,
+          "evolution-chamber": 301.9,
+          "baneling-nest": 309.0,
+          "spire": 362.0,
+          "infestation-pit": 366.9
+        },
+        "key_upgrade_timings_sec": {
+          "zergling-movementspeed": {
+            "median_start_sec": 140.8,
+            "median_complete_sec": 219.8,
+            "count": 20
+          },
+          "pneumatized-carapace": {
+            "median_start_sec": 190.4,
+            "median_complete_sec": 233.4,
+            "count": 4
+          },
+          "zerg-ground-carapace-1": {
+            "median_start_sec": 331.0,
+            "median_complete_sec": 445.0,
+            "count": 14
+          },
+          "glial-reconstitution": {
+            "median_start_sec": 345.3,
+            "median_complete_sec": 424.3,
+            "count": 7
+          },
+          "zerg-melee-weapons-1": {
+            "median_start_sec": 354.2,
+            "median_complete_sec": 468.2,
+            "count": 8
+          },
+          "zerg-missile-weapons-1": {
+            "median_start_sec": 374.1,
+            "median_complete_sec": 488.2,
+            "count": 4
+          },
+          "burrow": {
+            "median_start_sec": 375.8,
+            "median_complete_sec": 446.8,
+            "count": 1
+          },
+          "centrifugal-hooks": {
+            "median_start_sec": 382.0,
+            "median_complete_sec": 461.0,
+            "count": 6
+          },
+          "zerg-ground-carapace-2": {
+            "median_start_sec": 401.4,
+            "median_complete_sec": 537.4,
+            "count": 2
+          },
+          "zerg-melee-weapons-2": {
+            "median_start_sec": 403.9,
+            "median_complete_sec": 539.9,
+            "count": 1
+          }
+        }
+      },
+      "late_corpus_stats": {
+        "clean_perspectives_ge_11m": 36,
+        "wins": 19,
+        "median_dur_min": 15.0,
+        "median_bases": 6.0,
+        "median_workers": 62.0,
+        "top_combat_units_presence_median": {
+          "queen": "36/36 (med 9)",
+          "zergling": "35/36 (med 260; m10 alive mean 31.6)",
+          "baneling": "23/36 (med 61; m10 alive mean 8.1)",
+          "mutalisk": "15/36 (med 30)",
+          "ultralisk": "15/36 (med 11; 11/15 wins = 73.3%)",
+          "roach": "15/36 (med 39)",
+          "hydralisk": "12/36 (med 26.5)",
+          "infestor": "9/36 (med 4; 7/9 wins)",
+          "viper": "8/36 (med 3.5)",
+          "corruptor": "7/36 (med 13; 6/7 wins)"
+        },
+        "exemplar_replays": [
+          "Starcraft2ReplayPackager_935a0d2f58ac_SpeCial_vs_Serral_TvZ__Proxima_Station_LE_WCS_Austin.SC2Replay",
+          "Starcraft2ReplayPackager_bff9e8ac8516_SpeCial_vs_Serral_TvZ__Abyssal_Reef_LE_WCS_Austin.SC2Replay",
+          "Starcraft2ReplayPackager_c198ecff7f4f_Serral_vs_SpeCial_ZvT__Cactus_Valley_LE__Void__WCS_Austin.SC2Replay",
+          "Starcraft2ReplayPackager_2ce5abf418df_Serral_vs_Arctur_Proxima_Station_LE_WCS_Valencia.SC2Replay"
+        ]
+      },
+      "phases": {
+        "opening": {
+          "primary_counters": [
+            "queen",
+            "zergling"
+          ],
+          "secondary_counters": [
+            "spore-crawler"
+          ],
+          "trap_units_to_avoid": [
+            "early-blind-roach-warren-vs-reaper-hellion",
+            "slow-hydralisk-or-muta-rush"
+          ],
+          "opportunity_cost_analysis": "Hatch2 med 52.5s (17 wkr), Hatch3 med 172.0s (23 wkr), Speed 140.8s. Investing in Queens (m4 alive 3.0) + minimal Speedlings (m4 alive 6.2) preserves Drone saturation to 52.5 workers by m6; building an early blind Roach Warren slows 3rd Hatchery and gas-starves Lair/upgrades.",
+          "causal_why": "3-base mineral income + Creep Queens deflect 1 Reaper + 4 Hellions cleanly; Mothman lost 5126032/5126899/5126902 because Queens without Ling/Bane speed got kited by 3-8 Marines @ 243-281s (scores -0.75 to -0.42)."
+        },
+        "early-mid": {
+          "primary_counters": [
+            "zergling",
+            "baneling",
+            "queen"
+          ],
+          "secondary_counters": [
+            "roach",
+            "ravager",
+            "spore-crawler"
+          ],
+          "trap_units_to_avoid": [
+            "mass-queen-off-creep-vs-bio",
+            "un-supported-roach-vs-stim-marauder-tank"
+          ],
+          "opportunity_cost_analysis": "Lair med 262.0s, Spore 295.7s (timed vs 4:07 Banshee Cloak), Baneling Nest 309.0s, Carapace-1 331.0s. Baneling-Speedling demands gas for Baneling Nest + Centrifugal Hooks (382.0s) and Creep spread (3067 corpus events); rushing Hydras early before 50 Drones leaves Zerg short on larva vs double Medivac drops.",
+          "causal_why": "Pro ZvT reaches 52.5 wkr at m6 and 67.0 wkr at m10 (m6 Bio timing hit by Stim 273.2s); Banelings + Speedlings collapse onto bio before Tank siege lines lock down creep."
+        },
+        "mid-game": {
+          "primary_counters": [
+            "zergling",
+            "baneling",
+            "hydralisk"
+          ],
+          "secondary_counters": [
+            "mutalisk",
+            "ravager",
+            "corruptor"
+          ],
+          "trap_units_to_avoid": [
+            "pre-lair-no-range-hydras-vs-tank-bio",
+            "pure-roach-vs-bio-tank-medivac"
+          ],
+          "opportunity_cost_analysis": "Spire 362.0s, Infestation Pit 366.9s, Hooks 382.0s, +2/+2 melee/carapace 401-403s. In 5126899, Mothman stalled 52 frames trying to escrow for Hydralisk while behind; pro ZvT leans on Ling-Bane (m10 Zergling 31.6 + Baneling 8.1) to afford fast Hive/2-2 upgrades.",
+          "causal_why": "Bio-Mine/Bio-Tank punishes slow mid-tier Roach/non-upgraded Hydra armies on open maps; Ling-Bane surrounds clear Widow Mines and force continuous Terran micro."
+        },
+        "late-game": {
+          "primary_counters": [
+            "ultralisk",
+            "zergling",
+            "baneling",
+            "viper"
+          ],
+          "secondary_counters": [
+            "corruptor",
+            "infestor",
+            "lurker"
+          ],
+          "trap_units_to_avoid": [
+            "pure-zergling-without-bane-ultra-or-viper-vs-tank-hellbat",
+            "over-built-corruptors-vs-pure-bio"
+          ],
+          "opportunity_cost_analysis": "Late Hive pivots into Chitinous Ultralisks (15/36 >=11m games, 11/15 wins), Infestors (7/9 wins), Vipers (Abduct tanks/Liberators, Blinding Cloud), and Corruptors ONLY matched <=1.25x enemy Medivac/Liberator/BC air supply (6/7 wins when present).",
+          "causal_why": "Chitinous Ultralisks + Adrenal/Baneling soak Bio/Mine fire while Viper Blinding Cloud/Abduct breaks entrenched Siege Tank + Liberator zones."
+        }
+      }
+    },
+    "ZvP": {
+      "build_benchmarks": {
+        "total_perspectives": 81,
+        "pro_perspectives": 43,
+        "exemplar_replay": "Starcraft2ReplayPackager_d50aea3825a6_Lost_and_Found_LE__3_.SC2Replay",
+        "expansions": [
+          {
+            "base_num": 2,
+            "median_sec": 48.7,
+            "median_workers": 15,
+            "count": 27
+          },
+          {
+            "base_num": 3,
+            "median_sec": 162.9,
+            "median_workers": 25,
+            "count": 26
+          },
+          {
+            "base_num": 4,
+            "median_sec": 339.2,
+            "median_workers": 56,
+            "count": 19
+          }
+        ],
+        "key_tech_timings_sec": {
+          "overlord": 13.1,
+          "hatchery": 48.7,
+          "extractor": 64.8,
+          "spawning-pool": 73.3,
+          "spore-crawler": 212.7,
+          "spine-crawler": 219.3,
+          "lair": 277.9,
+          "roach-warren": 280.8,
+          "evolution-chamber": 304.5,
+          "spire": 344.4,
+          "hydralisk-den": 362.8,
+          "baneling-nest": 394.9
+        },
+        "key_upgrade_timings_sec": {
+          "zergling-movementspeed": {
+            "median_start_sec": 134.6,
+            "median_complete_sec": 213.6,
+            "count": 26
+          },
+          "zerg-melee-weapons-1": {
+            "median_start_sec": 337.3,
+            "median_complete_sec": 451.3,
+            "count": 11
+          },
+          "zerg-ground-carapace-1": {
+            "median_start_sec": 341.0,
+            "median_complete_sec": 455.0,
+            "count": 2
+          },
+          "glial-reconstitution": {
+            "median_start_sec": 341.7,
+            "median_complete_sec": 420.7,
+            "count": 13
+          },
+          "pneumatized-carapace": {
+            "median_start_sec": 345.7,
+            "median_complete_sec": 388.7,
+            "count": 5
+          },
+          "zerg-missile-weapons-1": {
+            "median_start_sec": 365.6,
+            "median_complete_sec": 479.6,
+            "count": 11
+          },
+          "grooved-spines": {
+            "median_start_sec": 388.8,
+            "median_complete_sec": 438.8,
+            "count": 2
+          },
+          "muscular-augments": {
+            "median_start_sec": 391.2,
+            "median_complete_sec": 441.2,
+            "count": 3
+          }
+        }
+      },
+      "late_corpus_stats": {
+        "clean_perspectives_ge_11m": 58,
+        "wins": 33,
+        "median_dur_min": 14.0,
+        "median_bases": 5.0,
+        "median_workers": 56.0,
+        "top_combat_units_presence_median": {
+          "zergling": "58/58 (med 177; m10 alive 25.3)",
+          "queen": "57/58 (med 7)",
+          "hydralisk": "44/58 (med 41.5; m10 alive 8.4)",
+          "roach": "34/58 (med 46.5; m10 alive 8.1)",
+          "corruptor": "22/58 (med 11)",
+          "baneling": "15/58 (med 43)",
+          "mutalisk": "12/58 (med 8.5)",
+          "infestor": "11/58 (med 12)",
+          "viper": "8/58 (med 3)",
+          "ultralisk": "7/58 (med 4)"
+        },
+        "exemplar_replays": [
+          "Starcraft2ReplayPackager_d50aea3825a6_Lost_and_Found_LE__3_.SC2Replay",
+          "Starcraft2ReplayPackager_0ebbcd5892ed_Serral_vs_MaNa_ZvP__Abyssal_Reef_LE_WCS_Montreal.SC2Replay",
+          "Starcraft2ReplayPackager_1079893b2a00_DnS_vs_Serral_PvZ__Mech_Depot_LE_WCS_Montreal.SC2Replay",
+          "Starcraft2ReplayPackager_3576eb279e59_MaNa_vs_Serral_PvZ__Mech_Depot_LE_WCS_Montreal.SC2Replay"
+        ]
+      },
+      "phases": {
+        "opening": {
+          "primary_counters": [
+            "zergling",
+            "queen",
+            "spine-crawler"
+          ],
+          "secondary_counters": [
+            "ravager",
+            "spore-crawler"
+          ],
+          "trap_units_to_avoid": [
+            "early-hydralisk-before-natural-drone-saturation",
+            "slow-roach-vs-cannon-rush"
+          ],
+          "opportunity_cost_analysis": "Hatch2 med 48.7s, Hatch3 162.9s, Speed 134.6s, early Spore med 212.7s (3:33 vs 4:26 Oracle harass). Adept Glaives & Oracle threaten Drone lines; Queens + 6-12 Zerglings hold early Adepts while Ravagers clear Pylon/Cannon walls without delaying Lair.",
+          "causal_why": "Pro Oracle harass occurs at med 4:26 (970 pro events), and Cannon Rushes at med 2:07 (110 pro events). Early Ling/Queen/Ravager holds while 5127129 failed using Queen vs Zealot @ 248.3s (score=-1.0)."
+        },
+        "early-mid": {
+          "primary_counters": [
+            "roach",
+            "ravager",
+            "zergling"
+          ],
+          "secondary_counters": [
+            "baneling",
+            "queen",
+            "overseer"
+          ],
+          "trap_units_to_avoid": [
+            "naked-hydras-without-range-speed-vs-storm-colossus",
+            "over-built-corruptors-before-stargate-fleet"
+          ],
+          "opportunity_cost_analysis": "Lair 277.9s, Roach Warren 280.8s, Evo 304.5s, Glial 341.7s, Hydralisk Den 362.8s. Roach-Ravager-Ling bridges 40->53 workers cleanly at lower gas/tech inertia than immediate Hydra Den + double upgrades.",
+          "causal_why": "Protoss 2-base Twilight Charge/Immortal or Glaive-Adept timing hits around 5:00-6:00 (med Charge 317.2s); Roach-Ravager + Ling surround absorbs Immortals better than fragile un-upgraded Hydras."
+        },
+        "mid-game": {
+          "primary_counters": [
+            "hydralisk",
+            "baneling",
+            "roach",
+            "ravager"
+          ],
+          "secondary_counters": [
+            "lurker",
+            "corruptor",
+            "zergling"
+          ],
+          "trap_units_to_avoid": [
+            "un-upgraded-hydralisk-without-grooved-spines-vs-colossus-storm",
+            "pure-roach-vs-carrier-voidray"
+          ],
+          "opportunity_cost_analysis": "Grooved Spines 388.8s, Muscular Augments 391.2s, Baneling Nest 394.9s, Spire 344.4s. Hydralisks REQUIRE both upgrades before trading into Protoss AOE; mixing Banelings deletes Zealot-HT clumps, while premature Corruptors (>1.25x enemy air) lose to Zealot-Archon-Immortal.",
+          "causal_why": "Pro m10 ZvP fields 74.0 workers, 25.3 Zergling, 8.4 Hydra, 8.1 Roach, 4.1 Bane; vs Stargate transitions, Zerg pairs Corruptor strictly matched to air supply with Hydra/Lurker/Bane ground control."
+        },
+        "late-game": {
+          "primary_counters": [
+            "lurker",
+            "corruptor",
+            "viper",
+            "hydralisk"
+          ],
+          "secondary_counters": [
+            "infestor",
+            "brood-lord",
+            "baneling"
+          ],
+          "trap_units_to_avoid": [
+            "pure-zergling-into-colossus-archon-storm",
+            "excess-corruptor-past-1.25x-air-supply"
+          ],
+          "opportunity_cost_analysis": "High Templar Storm hits med 10:28 (727 pro casts), Archon + Carrier/Tempest force Zerg into Viper Abduct/Parasitic Bomb + Lurker Range + capped Corruptors (22/58 late ZvP games, med 11 born). Over-building Corruptors leaves zero ground splash vs Chargelots/HT; Zerglings melt instantly to Storm/Archon.",
+          "causal_why": "Viper Abduct pulls Carriers/Colossi/HT over Lurker spines while Corruptors focus Capitals and Parasitic Bomb forces Void Ray/Phoenix splits."
+        }
+      }
+    },
+    "TvZ": {
+      "build_benchmarks": {
+        "total_perspectives": 64,
+        "pro_perspectives": 43,
+        "exemplar_replay": "Starcraft2ReplayPackager_d178c16e60e6_Abyssal_Reef_LE__3_.SC2Replay",
+        "expansions": [
+          {
+            "base_num": 2,
+            "median_sec": 103.2,
+            "median_workers": 19,
+            "count": 19
+          },
+          {
+            "base_num": 3,
+            "median_sec": 257.1,
+            "median_workers": 34,
+            "count": 16
+          }
+        ],
+        "key_tech_timings_sec": {
+          "supply-depot": 17.8,
+          "refinery": 43.4,
+          "barracks": 44.5,
+          "orbital-command": 91.8,
+          "command-center": 103.2,
+          "factory": 128.1,
+          "barracks-reactor": 134.2,
+          "starport": 176.1,
+          "barracks-techlab": 194.9,
+          "factory-techlab": 206.1,
+          "bunker": 235.6,
+          "engineering-bay": 289.4,
+          "factory-reactor": 290.6,
+          "starport-reactor": 318.9
+        },
+        "key_upgrade_timings_sec": {
+          "cloaking-field": {
+            "median_start_sec": 247.8,
+            "median_complete_sec": 326.9,
+            "count": 4
+          },
+          "stimpack": {
+            "median_start_sec": 273.2,
+            "median_complete_sec": 373.2,
+            "count": 14
+          },
+          "terran-vehicle-plating-1": {
+            "median_start_sec": 293.7,
+            "median_complete_sec": 407.7,
+            "count": 1
+          },
+          "terran-vehicle-weapons-1": {
+            "median_start_sec": 295.5,
+            "median_complete_sec": 409.5,
+            "count": 2
+          },
+          "terran-infantry-weapons-1": {
+            "median_start_sec": 317.0,
+            "median_complete_sec": 431.0,
+            "count": 12
+          },
+          "terran-infantry-armor-1": {
+            "median_start_sec": 319.9,
+            "median_complete_sec": 433.9,
+            "count": 12
+          },
+          "combat-shield": {
+            "median_start_sec": 366.5,
+            "median_complete_sec": 445.5,
+            "count": 8
+          },
+          "drilling-claws": {
+            "median_start_sec": 366.7,
+            "median_complete_sec": 445.7,
+            "count": 1
+          },
+          "terran-infantry-weapons-2": {
+            "median_start_sec": 388.7,
+            "median_complete_sec": 524.7,
+            "count": 4
+          },
+          "terran-infantry-armor-2": {
+            "median_start_sec": 400.4,
+            "median_complete_sec": 536.5,
+            "count": 4
+          }
+        }
+      },
+      "late_corpus_stats": {
+        "clean_perspectives_ge_11m": 36,
+        "wins": 16,
+        "median_dur_min": 14.0,
+        "median_bases": 3.5,
+        "median_workers": 46.0,
+        "top_combat_units_presence_median": {
+          "marine": "34/36 (med 103; m10 alive 28.2)",
+          "medivac": "32/36 (med 9; m10 alive 4.8)",
+          "hellion": "26/36 (med 6)",
+          "marauder": "26/36 (med 28.5; m10 alive 3.9)",
+          "siege-tank": "26/36 (med 7; m10 alive 2.2)",
+          "widow-mine": "24/36 (med 13.5; m10 alive 1.9)",
+          "liberator": "18/36 (med 3.5)",
+          "raven": "12/36 (med 1)",
+          "thor": "11/36 (med 4)"
+        },
+        "exemplar_replays": [
+          "Starcraft2ReplayPackager_d178c16e60e6_Abyssal_Reef_LE__3_.SC2Replay",
+          "Starcraft2ReplayPackager_935a0d2f58ac_SpeCial_vs_Serral_TvZ__Proxima_Station_LE_WCS_Austin.SC2Replay",
+          "Starcraft2ReplayPackager_bff9e8ac8516_SpeCial_vs_Serral_TvZ__Abyssal_Reef_LE_WCS_Austin.SC2Replay"
+        ]
+      },
+      "phases": {
+        "opening": {
+          "primary_counters": [
+            "reaper",
+            "hellion",
+            "marine"
+          ],
+          "secondary_counters": [
+            "bunker",
+            "widow-mine"
+          ],
+          "trap_units_to_avoid": [
+            "early-marauder-heavy-opening-vs-zergling",
+            "delayed-natural-beyond-150s"
+          ],
+          "opportunity_cost_analysis": "Rax 44.5s, OC 91.8s, CC2 103.2s (19 wkr), Factory 128.1s -> Rax Reactor 134.2s, Starport 176.1s, addon swap med 198.6s. Swapping Reactor Barracks to Factory delivers 4-6 Hellions quickly to force Zerglings/Queens while staying mineral-heavy for fast CC3 (257.1s).",
+          "causal_why": "In 5126033, 5127144, 5127148 (all TvZ LOSS), Mothman built Marauders which failed vs 10-32x Zerglings (scores -0.73 to -0.24); Marauders deal bonus only to Armored and have half Marine DPS vs Light Zerglings."
+        },
+        "early-mid": {
+          "primary_counters": [
+            "marine",
+            "hellion",
+            "medivac",
+            "widow-mine"
+          ],
+          "secondary_counters": [
+            "siege-tank",
+            "banshee",
+            "viking-fighter"
+          ],
+          "trap_units_to_avoid": [
+            "banshee-into-corruptor-heavy-spill",
+            "pure-marauder-vs-ling-bane"
+          ],
+          "opportunity_cost_analysis": "Cloaking Field 247.8s (when Banshee opener), Stimpack 273.2s, +1 Bio Attack/Armor 317-319.9s, Combat Shield 366.5s, Drilling Claws 366.7s. Gas prioritizes Stim, +1/+1 E-Bays (289.4s), and 2 Medivacs; premature multiple Starport TechLab units starve bio upgrades.",
+          "causal_why": "Stim +1/+1 Marine-Medivac-Mine/Tank drops punish greedy 4-base Zerg (med 262.0s Lair) and clear creep tumors while Hellions deny runbys."
+        },
+        "mid-game": {
+          "primary_counters": [
+            "marine",
+            "medivac",
+            "siege-tank",
+            "widow-mine"
+          ],
+          "secondary_counters": [
+            "marauder",
+            "liberator",
+            "thor"
+          ],
+          "trap_units_to_avoid": [
+            "un-upgraded-marines-without-stim-medivac-tank-vs-bane",
+            "over-built-vikings-vs-ground-zerg"
+          ],
+          "opportunity_cost_analysis": "+2/+2 Bio at 388.7s-400.4s with 2-3 Siege Tanks or Drilling Claws Widow Mines + 8-Rax/5-Rax Bio production. Marauders are added selectively (~4 at m8-m10 vs 28 Marines) ONLY to tank Banelings or kill Roaches/Ultras.",
+          "causal_why": "In clean TvZ pro games, Marines lead 28.2 alive_mean vs 3.9 Marauders at m10; pre-splitting Marines behind Siege Tank/Widow Mine splash maximizes cost trade."
+        },
+        "late-game": {
+          "primary_counters": [
+            "marine",
+            "marauder",
+            "liberator",
+            "thor",
+            "ghost"
+          ],
+          "secondary_counters": [
+            "siege-tank",
+            "widow-mine",
+            "viking-fighter"
+          ],
+          "trap_units_to_avoid": [
+            "un-upgraded-marine-clumps-vs-ultralisk-baneling-lurker",
+            "banshee-vs-corruptor-viper"
+          ],
+          "opportunity_cost_analysis": "Armory + Liberators (18/36 late TvZ) + Thors (11/36, med 4) + Ghosts (Snipe med 13:00) counter Hive Ultralisk/BroodLord/Lurker. Ghost Snipe & Liberator zones trade efficiently only when backed by Planetary Fortresses (403 pro mass repair events) and Sensor Towers.",
+          "causal_why": "Hive Chitinous Ultralisks (11/15 ZvT wins) crush pure Marine; Marauder-Ghost-Liberator-Thor provides anti-armor DPS and ranged Snipe."
+        }
+      }
+    },
+    "TvT": {
+      "build_benchmarks": {
+        "total_perspectives": 10,
+        "pro_perspectives": 8,
+        "exemplar_replay": "sc2reader_2cc116699e5b_4.SC2Replay",
+        "expansions": [
+          {
+            "base_num": 2,
+            "median_sec": 108.6,
+            "median_workers": 19,
+            "count": 3
+          },
+          {
+            "base_num": 3,
+            "median_sec": 377.1,
+            "median_workers": 48,
+            "count": 1
+          }
+        ],
+        "key_tech_timings_sec": {
+          "supply-depot": 17.8,
+          "barracks": 41.7,
+          "refinery": 45.9,
+          "orbital-command": 93.3,
+          "command-center": 108.6,
+          "factory": 131.4,
+          "barracks-reactor": 141.2,
+          "starport": 177.3,
+          "factory-reactor": 181.9,
+          "factory-techlab": 224.9,
+          "starport-reactor": 258.4,
+          "barracks-techlab": 266.8,
+          "engineering-bay": 300.9,
+          "missile-turret": 316.1
+        },
+        "key_upgrade_timings_sec": {
+          "stimpack": {
+            "median_start_sec": 293.7,
+            "median_complete_sec": 393.7,
+            "count": 3
+          },
+          "terran-infantry-weapons-1": {
+            "median_start_sec": 331.6,
+            "median_complete_sec": 445.6,
+            "count": 2
+          },
+          "combat-shield": {
+            "median_start_sec": 350.1,
+            "median_complete_sec": 429.1,
+            "count": 2
+          },
+          "terran-infantry-armor-1": {
+            "median_start_sec": 370.9,
+            "median_complete_sec": 485.0,
+            "count": 1
+          }
+        }
+      },
+      "late_corpus_stats": {
+        "clean_perspectives_ge_11m": 0,
+        "note": "0 clean >=11m TvT perspectives survived strict non-Scion human filter; Phase 1-3 backed by pro_build_orders_summary (n=10 persp, 8 pro) and minute benchmarks (m1-m8, n=4-6).",
+        "top_combat_units_m6_m8_benchmarks": {
+          "marine": "m6 alive_mean 15.5, m8 alive_mean 25.0",
+          "siege-tank": "m6 alive_mean 2.0, m8 alive_mean 1.8 (p3.0 produced)",
+          "medivac": "m6 alive_mean 1.2, m8 alive_mean 3.5",
+          "viking-fighter": "m8 alive_mean 1.5",
+          "hellion": "m4-m6 alive_mean 0.5",
+          "raven": "m6 alive_mean 0.5"
+        },
+        "exemplar_replays": [
+          "sc2reader_2cc116699e5b_4.SC2Replay"
+        ]
+      },
+      "phases": {
+        "opening": {
+          "primary_counters": [
+            "reaper",
+            "marine",
+            "hellion"
+          ],
+          "secondary_counters": [
+            "cyclone",
+            "siege-tank"
+          ],
+          "trap_units_to_avoid": [
+            "blind-marauder-opening-vs-reaper-hellion-marine",
+            "naked-greedy-cc-without-bunker-tank"
+          ],
+          "opportunity_cost_analysis": "Depot 17.8s, Rax 41.7s, Gas 45.9s, OC 93.3s, CC2 108.6s (19 wkr), Factory 131.4s, Starport 177.3s. Double-gas Reaper/Hellion -> Raven/Viking/Tank holds drops/proxies without risking build-order loss.",
+          "causal_why": "In 5126258 and 5126900 (TvT LOSS), Mothman built early Marauders which scored -1.0 and -0.5 vs 3x Marine @ 228-245s because Marauders lack anti-Light/anti-Reaper mobility and delay Tank/Raven gas."
+        },
+        "early-mid": {
+          "primary_counters": [
+            "marine",
+            "siege-tank",
+            "raven",
+            "viking-fighter"
+          ],
+          "secondary_counters": [
+            "medivac",
+            "cyclone"
+          ],
+          "trap_units_to_avoid": [
+            "banshee-against-opponent-raven-viking",
+            "mass-marauder-without-tank-air-control"
+          ],
+          "opportunity_cost_analysis": "Factory TechLab 224.9s -> Tank + Starport Raven/Viking (Starport TechLab/Reactor 258.4s), Stim 293.7s, E-Bay 300.9s, Missile Turret 316.1s. Skipping Raven Interference Matrix (10:45 pro cast) or Vikings surrenders both Siege Tank vision range and drop safety.",
+          "causal_why": "In TvT, whoever holds Viking air dominance sees further than Tank siege range (13) and zones enemy Tanks/Medivacs while Raven IM disables defending Tanks."
+        },
+        "mid-game": {
+          "primary_counters": [
+            "marine",
+            "siege-tank",
+            "viking-fighter",
+            "medivac"
+          ],
+          "secondary_counters": [
+            "raven",
+            "hellion",
+            "hellbat"
+          ],
+          "trap_units_to_avoid": [
+            "walking-bio-into-siege-line-without-air-vision-or-drops",
+            "zero-viking-mech"
+          ],
+          "opportunity_cost_analysis": "Marine (m8 25.0 alive) + Tank (1.8-3.0) + Medivac (3.5) + Viking (1.5) around CC3 (377.1s). Viking count scales strictly to win air count (+1-2 above opponent Vikings/Medivacs) while excess Starport cycles divert to Medivacs/Liberators.",
+          "causal_why": "Tank + Viking + Marine Doom-drop mobility punishes immobile slow-mech or bio caught unsieged."
+        },
+        "late-game": {
+          "primary_counters": [
+            "siege-tank",
+            "viking-fighter",
+            "liberator",
+            "marine"
+          ],
+          "secondary_counters": [
+            "thor",
+            "battlecruiser",
+            "raven"
+          ],
+          "trap_units_to_avoid": [
+            "un-upgraded-marine-charge-into-siege-tank-hellbat",
+            "pure-viking-without-tank-liberator-ground-punch"
+          ],
+          "opportunity_cost_analysis": "Late-game transitions to Tank-Viking-Liberator or Fusion Core Battlecruiser/Thor air-mech swap behind Sensor Towers & Planetary Fortresses. Over-building Vikings > 1.25x enemy air leaves Terran weak to Thor/Marine-Marauder base trades.",
+          "causal_why": "Range-upgraded Liberators + Vikings push entrenched Tanks off bases while BCs Teleport snipe unprotected Mineral Lines."
+        }
+      }
+    },
+    "TvP": {
+      "build_benchmarks": {
+        "total_perspectives": 59,
+        "pro_perspectives": 28,
+        "exemplar_replay": "sc2readerjs_ec72e1287ad6_QM_-_ShoWTimE_vs_Maru_-_G2_-_Pylon.SC2Replay",
+        "expansions": [
+          {
+            "base_num": 2,
+            "median_sec": 136.6,
+            "median_workers": 20,
+            "count": 14
+          },
+          {
+            "base_num": 3,
+            "median_sec": 383.7,
+            "median_workers": 48,
+            "count": 6
+          }
+        ],
+        "key_tech_timings_sec": {
+          "supply-depot": 17.3,
+          "barracks": 40.3,
+          "refinery": 43.2,
+          "orbital-command": 87.5,
+          "factory": 103.5,
+          "barracks-techlab": 119.9,
+          "command-center": 136.6,
+          "barracks-reactor": 158.0,
+          "starport": 161.5,
+          "factory-techlab": 186.7,
+          "starport-techlab": 231.7,
+          "bunker": 257.6,
+          "engineering-bay": 288.8,
+          "starport-reactor": 337.3
+        },
+        "key_upgrade_timings_sec": {
+          "cloaking-field": {
+            "median_start_sec": 259.1,
+            "median_complete_sec": 338.1,
+            "count": 1
+          },
+          "stimpack": {
+            "median_start_sec": 308.0,
+            "median_complete_sec": 408.0,
+            "count": 9
+          },
+          "terran-infantry-weapons-1": {
+            "median_start_sec": 327.5,
+            "median_complete_sec": 441.5,
+            "count": 9
+          },
+          "combat-shield": {
+            "median_start_sec": 356.5,
+            "median_complete_sec": 435.5,
+            "count": 9
+          },
+          "concussive-shells": {
+            "median_start_sec": 367.9,
+            "median_complete_sec": 410.9,
+            "count": 4
+          },
+          "terran-infantry-armor-1": {
+            "median_start_sec": 419.0,
+            "median_complete_sec": 533.0,
+            "count": 1
+          }
+        }
+      },
+      "late_corpus_stats": {
+        "clean_perspectives_ge_11m": 33,
+        "wins": 18,
+        "median_dur_min": 15.0,
+        "median_bases": 4.0,
+        "median_workers": 46.0,
+        "top_combat_units_presence_median": {
+          "marine": "33/33 (med 83; m10 alive 25.0)",
+          "marauder": "31/33 (med 37; m10 alive 8.5)",
+          "medivac": "30/33 (med 9; m10 alive 3.2)",
+          "siege-tank": "26/33 (med 5; m10 alive 2.0)",
+          "widow-mine": "22/33 (med 7.5; m10 alive 1.9)",
+          "liberator": "18/33 (med 7.5)",
+          "viking-fighter": "18/33 (med 6; m10 alive 1.5)",
+          "ghost": "14/33 (med 8)",
+          "raven": "10/33 (med 1)"
+        },
+        "exemplar_replays": [
+          "sc2readerjs_ec72e1287ad6_QM_-_ShoWTimE_vs_Maru_-_G2_-_Pylon.SC2Replay",
+          "sc2readerjs_0012fb3422e0_QM_-_Classic_vs_Clem_-_G2_-_Persephone.SC2Replay",
+          "sc2readerjs_1205b0f30219_Ro4_-_Classic_vs_Maru_-_G4_-_Ultralove.SC2Replay",
+          "sc2readerjs_249075cccb2d_QM_-_Classic_vs_Clem_-_G1_-_Torches.SC2Replay"
+        ]
+      },
+      "phases": {
+        "opening": {
+          "primary_counters": [
+            "marine",
+            "reaper",
+            "widow-mine"
+          ],
+          "secondary_counters": [
+            "cyclone",
+            "bunker"
+          ],
+          "trap_units_to_avoid": [
+            "naked-marauder-vs-zealot-adept-opening",
+            "banshee-against-stargate-phoenix-oracle"
+          ],
+          "opportunity_cost_analysis": "Rax 40.3s, Factory 103.5s -> Rax TechLab 119.9s (early Concussive Marauder OR fast Reactor/Mine), CC2 136.6s, Starport 161.5s. A single defensive Cyclone/Widow Mine + Bunker prevents Oracle/Blink Stalker/4-Gate abuse without sacrificing 3-base economy.",
+          "causal_why": "In 5127142 (TvP LOSS), Mothman's Marauder failed vs 2x Zealot @ 271.7s (score=-1.0), and in 5126029/5127140 un-upgraded Marines without Stim/Marauder failed vs Adept+Sentry (-0.11 to -0.46)."
+        },
+        "early-mid": {
+          "primary_counters": [
+            "marine",
+            "marauder",
+            "medivac",
+            "widow-mine"
+          ],
+          "secondary_counters": [
+            "siege-tank",
+            "raven",
+            "viking-fighter"
+          ],
+          "trap_units_to_avoid": [
+            "banshee-vs-stargate-skytoss",
+            "un-upgraded-marine-push-into-colossus"
+          ],
+          "opportunity_cost_analysis": "Stimpack 308.0s, +1 Attack 327.5s, Combat Shield 356.5s, Concussive Shells 367.9s, E-Bay 288.8s, Bunker 257.6s. Raven Interference Matrix and Missile Turret/Scan detection shut down DT/Oracle/Blink harassment (note Dark Shrine hits as early as med 206.6s in PvZ pro timings) while 2-Medivac Stim timing hits before Protoss 3rd/Storm.",
+          "causal_why": "Concussive Marauders + Stim Marines punish Blink Stalkers (which take bonus damage vs Marauders) while Mines clear Zealots."
+        },
+        "mid-game": {
+          "primary_counters": [
+            "marauder",
+            "marine",
+            "medivac",
+            "viking-fighter"
+          ],
+          "secondary_counters": [
+            "widow-mine",
+            "liberator",
+            "ghost"
+          ],
+          "trap_units_to_avoid": [
+            "banshee-into-carrier-voidray-phoenix",
+            "pure-marine-without-marauder-viking-vs-colossus-stalker"
+          ],
+          "opportunity_cost_analysis": "By m8-m10, Terran adds Marauders (4.8->8.5 alive) + Vikings (specifically 3-6 vs Colossus / matched <=1.25x vs Stargate air) + Liberators. CRITICAL PREDICTOR BUG FIX: mirror-mind-predictor.rkt L3422 returned 'banshee vs sky-toss \u2014 Banshees CANNOT shoot air! Viking-Fighter / Marine / Thor handle SkyToss.",
+          "causal_why": "Vikings outrange Colossi (9 range) and kite Void Rays/Tempests; Ghosts EMP HT shields (med 11:58); Marauders tank Disruptor/Archon/Stalker shots."
+        },
+        "late-game": {
+          "primary_counters": [
+            "marauder",
+            "ghost",
+            "liberator",
+            "viking-fighter"
+          ],
+          "secondary_counters": [
+            "marine",
+            "thor",
+            "widow-mine"
+          ],
+          "trap_units_to_avoid": [
+            "un-upgraded-t1-marines-vs-storm-colossus-disruptor",
+            "excess-vikings-vs-chargelot-ht-remake"
+          ],
+          "opportunity_cost_analysis": "Ghosts (14/33 >=11m games, med 8 born; EMP med 11:58, 76 casts) strip Protoss Archon/Shields/HT energy; Liberators zone Zealots/Immortals; excess un-supported Marines melt to Storm (727 pro casts).",
+          "causal_why": "Marauder-Ghost-Liberator-Medivac-Viking (with selective Thors vs Carrier fleets) is Maru/Clem's standard late TvP backbone across 33 clean >=11m games."
+        }
+      }
+    },
+    "PvZ": {
+      "build_benchmarks": {
+        "total_perspectives": 81,
+        "pro_perspectives": 43,
+        "exemplar_replay": "Starcraft2ReplayPackager_cd1bf6ef1d5b_Fracture_LE.SC2Replay",
+        "expansions": [
+          {
+            "base_num": 2,
+            "median_sec": 86.2,
+            "median_workers": 19,
+            "count": 16
+          },
+          {
+            "base_num": 3,
+            "median_sec": 235.8,
+            "median_workers": 37,
+            "count": 13
+          },
+          {
+            "base_num": 4,
+            "median_sec": 389.1,
+            "median_workers": 67,
+            "count": 1
+          }
+        ],
+        "key_tech_timings_sec": {
+          "pylon": 19.6,
+          "gateway": 41.1,
+          "assimilator": 49.3,
+          "nexus": 86.2,
+          "cybernetics-core": 94.9,
+          "stargate": 141.0,
+          "dark-shrine": 206.6,
+          "warpgate": 248.4,
+          "twilight-council": 276.0,
+          "forge": 289.2,
+          "shield-battery": 314.1,
+          "robotics-facility": 328.8,
+          "templar-archive": 369.0,
+          "photon-cannon": 395.6
+        },
+        "key_upgrade_timings_sec": {
+          "warp-gate-research": {
+            "median_start_sec": 147.1,
+            "median_complete_sec": 247.1,
+            "count": 16
+          },
+          "resonating-glaives": {
+            "median_start_sec": 255.9,
+            "median_complete_sec": 355.9,
+            "count": 1
+          },
+          "charge": {
+            "median_start_sec": 317.2,
+            "median_complete_sec": 417.2,
+            "count": 8
+          },
+          "blink": {
+            "median_start_sec": 318.6,
+            "median_complete_sec": 439.6,
+            "count": 8
+          },
+          "protoss-ground-weapons-1": {
+            "median_start_sec": 336.9,
+            "median_complete_sec": 450.9,
+            "count": 12
+          },
+          "psi-storm": {
+            "median_start_sec": 382.4,
+            "median_complete_sec": 461.4,
+            "count": 6
+          },
+          "protoss-ground-armor-1": {
+            "median_start_sec": 415.8,
+            "median_complete_sec": 529.8,
+            "count": 1
+          }
+        }
+      },
+      "late_corpus_stats": {
+        "clean_perspectives_ge_11m": 58,
+        "wins": 28,
+        "median_dur_min": 14.0,
+        "median_bases": 4.5,
+        "median_workers": 52.5,
+        "top_combat_units_presence_median": {
+          "zealot": "57/58 (med 53; m10 alive 9.8)",
+          "archon": "50/58 (med 9; m10 alive 2.0)",
+          "stalker": "49/58 (med 15; m10 alive 7.3)",
+          "adept": "48/58 (med 4)",
+          "high-templar": "46/58 (med 21; m10 alive 3.0)",
+          "observer": "45/58 (med 2)",
+          "immortal": "44/58 (med 6; m10 alive 1.8)",
+          "sentry": "36/58 (med 3)",
+          "oracle": "29/58 (med 3; m6-m8 alive 1.1-1.3)",
+          "phoenix": "23/58 (med 1)"
+        },
+        "exemplar_replays": [
+          "Starcraft2ReplayPackager_cd1bf6ef1d5b_Fracture_LE.SC2Replay",
+          "Starcraft2ReplayPackager_0ebbcd5892ed_Serral_vs_MaNa_ZvP__Abyssal_Reef_LE_WCS_Montreal.SC2Replay",
+          "Starcraft2ReplayPackager_1079893b2a00_DnS_vs_Serral_PvZ__Mech_Depot_LE_WCS_Montreal.SC2Replay",
+          "Starcraft2ReplayPackager_486d2e46ad18_Serral_vs_Cloudy_Abyssal_Reef_LE_WCS_Valencia.SC2Replay"
+        ]
+      },
+      "phases": {
+        "opening": {
+          "primary_counters": [
+            "adept",
+            "zealot",
+            "oracle",
+            "shield-battery"
+          ],
+          "secondary_counters": [
+            "stalker",
+            "sentry"
+          ],
+          "trap_units_to_avoid": [
+            "mass-stalker-into-speedling-flood",
+            "unwalled-natural-nexus"
+          ],
+          "opportunity_cost_analysis": "Nexus2 86.2s, Cyber 94.9s, Stargate 141.0s, WarpGate 147.1s. Adept wall-off + Oracle (141s Stargate) forces Zerg Queens/Spores (med 212.7s) while keeping Nexus Probe chrono uninterrupted (m4 36 workers).",
+          "causal_why": "In 5127157 (PvZ LOSS), Mothman built Stalker vs 32x Zergling @ 229.2s (score=-0.73); Stalkers shoot slowly at 1.34s cooldown with low DPS per cost vs Light Zerglings, whereas wall-off Adept/Zealot + Oracle trades cleanly."
+        },
+        "early-mid": {
+          "primary_counters": [
+            "adept",
+            "oracle",
+            "immortal",
+            "sentry"
+          ],
+          "secondary_counters": [
+            "stalker",
+            "archon",
+            "void-ray"
+          ],
+          "trap_units_to_avoid": [
+            "naked-stalker-blink-without-aoe-vs-roach-ling",
+            "un-charged-zealot-without-shield-battery"
+          ],
+          "opportunity_cost_analysis": "Glaives 255.9s, Twilight 276.0s, Forge 289.2s, Battery 314.1s, Charge 317.2s, Robo 328.8s, +1 Attack 336.9s. Taking Nexus3 at 235.8s (37 workers) demands Oracle Revelation / Stasis Wards (72.8% pro Stasis at defensive ramp choke!) + Archon/Immortal core.",
+          "causal_why": "Stasis Wards on ramp chokes (139 pro events, 229 workers/units caught) + Force Fields buy time for 3-base Chrono economy and Immortal/Archon production."
+        },
+        "mid-game": {
+          "primary_counters": [
+            "immortal",
+            "archon",
+            "zealot",
+            "high-templar"
+          ],
+          "secondary_counters": [
+            "stalker",
+            "colossus",
+            "warp-prism"
+          ],
+          "trap_units_to_avoid": [
+            "over-massing-stalkers-vs-ling-hydra-lurker",
+            "early-carrier-switch-before-storm-immortal-foundation"
+          ],
+          "opportunity_cost_analysis": "Templar Archive 369.0s, Psi Storm 382.4s, Charge 317.2s. Chargelot-Immortal-Archon-Storm (CIA + HT) kills Hydra-Ling-Bane efficiently; switching to Carriers on 3 bases leaves Protoss gas-broke and crushed by Hydra-Corruptor/Roach.",
+          "causal_why": "Pro m10 PvZ reaches 68.0 workers & 4 bases with Zealot (9.8 alive), HT (3.0), Archon (2.0), Immortal (1.8); Storm + Archon splash erases Hydras & Zerglings."
+        },
+        "late-game": {
+          "primary_counters": [
+            "high-templar",
+            "archon",
+            "carrier",
+            "immortal"
+          ],
+          "secondary_counters": [
+            "zealot",
+            "tempest",
+            "mothership",
+            "disruptor"
+          ],
+          "trap_units_to_avoid": [
+            "mass-stalker-into-lurker-zergling-viper",
+            "un-charged-zealot-into-baneling-lurker",
+            "naked-void-ray-fleet-only-1-of-11-wins"
+          ],
+          "opportunity_cost_analysis": "In our clean >=11m PvZ scan, VoidRay appeared in 11/56 games with only 1/11 in wins, whereas HighTemplar (46/58, med 21), Archon (50/58), Immortal (44/58), and Mothership (9 games) anchor lategame; Protoss transitions to Carrier-HT-Archon-Mothership only off 4+ saturated bases so Storm protects Interceptors from Corruptor/Viper Parasitic Bomb.",
+          "causal_why": "Storm zones Corruptors/Hydras away from Carriers while Archons/Chargelots clear runbys and Lurker contain lines."
+        }
+      }
+    },
+    "PvT": {
+      "build_benchmarks": {
+        "total_perspectives": 59,
+        "pro_perspectives": 28,
+        "exemplar_replay": "sc2readerjs_c609fa7c0528_QM_-_Classic_vs_Bunny_-_G1_-_Ultralove.SC2Replay",
+        "expansions": [
+          {
+            "base_num": 2,
+            "median_sec": 93.1,
+            "median_workers": 20,
+            "count": 11
+          },
+          {
+            "base_num": 3,
+            "median_sec": 245.4,
+            "median_workers": 38,
+            "count": 8
+          },
+          {
+            "base_num": 4,
+            "median_sec": 395.4,
+            "median_workers": 60,
+            "count": 2
+          }
+        ],
+        "key_tech_timings_sec": {
+          "pylon": 17.1,
+          "gateway": 36.1,
+          "assimilator": 46.5,
+          "cybernetics-core": 84.3,
+          "nexus": 93.1,
+          "stargate": 157.9,
+          "twilight-council": 167.4,
+          "warpgate": 223.1,
+          "robotics-facility": 250.8,
+          "shield-battery": 281.8,
+          "robotics-bay": 307.5,
+          "templar-archive": 331.8,
+          "forge": 357.3
+        },
+        "key_upgrade_timings_sec": {
+          "warp-gate-research": {
+            "median_start_sec": 123.0,
+            "median_complete_sec": 223.0,
+            "count": 11
+          },
+          "blink": {
+            "median_start_sec": 189.2,
+            "median_complete_sec": 310.2,
+            "count": 10
+          },
+          "charge": {
+            "median_start_sec": 310.8,
+            "median_complete_sec": 410.8,
+            "count": 7
+          },
+          "psi-storm": {
+            "median_start_sec": 355.4,
+            "median_complete_sec": 434.4,
+            "count": 2
+          },
+          "protoss-ground-weapons-1": {
+            "median_start_sec": 358.7,
+            "median_complete_sec": 472.7,
+            "count": 5
+          },
+          "extended-thermal-lance": {
+            "median_start_sec": 361.4,
+            "median_complete_sec": 461.4,
+            "count": 1
+          }
+        }
+      },
+      "late_corpus_stats": {
+        "clean_perspectives_ge_11m": 33,
+        "wins": 15,
+        "median_dur_min": 15.0,
+        "median_bases": 4.0,
+        "median_workers": 51.0,
+        "top_combat_units_presence_median": {
+          "stalker": "32/33 (med 27; m10 alive 8.7)",
+          "zealot": "31/33 (med 58; m10 alive 10.4)",
+          "observer": "29/33 (med 3)",
+          "warp-prism": "20/33 (med 1)",
+          "sentry": "20/33 (med 2)",
+          "high-templar": "19/33 (med 12; 12/19 wins = 63.2%!)",
+          "immortal": "19/33 (med 3)",
+          "archon": "18/33 (med 5)",
+          "colossus": "13/33 (med 4)",
+          "phoenix": "12/33 (med 1)"
+        },
+        "exemplar_replays": [
+          "sc2readerjs_c609fa7c0528_QM_-_Classic_vs_Bunny_-_G1_-_Ultralove.SC2Replay",
+          "sc2readerjs_0012fb3422e0_QM_-_Classic_vs_Clem_-_G2_-_Persephone.SC2Replay",
+          "sc2readerjs_1205b0f30219_Ro4_-_Classic_vs_Maru_-_G4_-_Ultralove.SC2Replay",
+          "sc2readerjs_57a5c5ac809f_QM_-_Classic_vs_Clem_-_G3_-_Ultralove.SC2Replay"
+        ]
+      },
+      "phases": {
+        "opening": {
+          "primary_counters": [
+            "stalker",
+            "adept",
+            "sentry"
+          ],
+          "secondary_counters": [
+            "shield-battery",
+            "oracle"
+          ],
+          "trap_units_to_avoid": [
+            "naked-un-upgraded-zealot-vs-reaper-marine",
+            "greedy-nexus-without-cyber-unit-shield-battery"
+          ],
+          "opportunity_cost_analysis": "Cyber 84.3s, Nexus2 93.1s, WarpGate 123.0s, Twilight 167.4s, Blink 189.2s. Adept scout + 2-3 Stalkers shoo away Reapers and deny early Widow Mine drops cleanly while chrono-boosting Probes (m4 34 wkr).",
+          "causal_why": "Stalkers outrange Reapers and Marines pre-Stim, protecting natural mineral lines until Blink finishes ~4:15."
+        },
+        "early-mid": {
+          "primary_counters": [
+            "stalker",
+            "colossus",
+            "zealot",
+            "observer"
+          ],
+          "secondary_counters": [
+            "shield-battery",
+            "sentry",
+            "phoenix"
+          ],
+          "trap_units_to_avoid": [
+            "over-massing-stalkers-into-stim-marauder",
+            "over-producing-immortals-vs-mass-marine"
+          ],
+          "opportunity_cost_analysis": "Nexus3 245.4s, Robo 250.8s, Battery 281.8s, RoboBay 307.5s, Charge 310.8s, Templar Archive 331.8s. Blink Stalkers hold multi-angle Medivac drops until Colossus/Charge/Storm AOE arrives.",
+          "causal_why": "In 5126259 and 5126975 (PvT LOSS), Stalkers alone scored -0.16 and -0.25 vs Marauders; in 5126901 and 5127163 (PvT LOSS), Immortals scored -0.25 and -0.92 vs 22-54x Marines \u2014 Protoss MUST pivot to AOE (Colossus/Storm/Disruptor) + Chargelot meatshield."
+        },
+        "mid-game": {
+          "primary_counters": [
+            "zealot",
+            "colossus",
+            "high-templar",
+            "stalker"
+          ],
+          "secondary_counters": [
+            "disruptor",
+            "archon",
+            "observer"
+          ],
+          "trap_units_to_avoid": [
+            "pure-stalker-army-vs-bio-tank-marauder",
+            "pure-immortal-vs-stim-marine-medivac"
+          ],
+          "opportunity_cost_analysis": "Extended Thermal Lance 361.4s, Psi Storm 355.4s, Forge +1 358.7s. Double-forge Chargelot-Colossus forces Vikings, setting up the Storm/Disruptor switch so Protoss never runs out of gas on one AOE track.",
+          "causal_why": "Pro m10 PvT averages 67.0 wkr, 4 bases, 10.4 Zealot, 8.7 Stalker, 1.7 HT, 1.1 Colossus \u2014 Chargelots eat Stim bio/Mines while Colossus & Storm melt Marine clumps."
+        },
+        "late-game": {
+          "primary_counters": [
+            "high-templar",
+            "zealot",
+            "disruptor",
+            "archon"
+          ],
+          "secondary_counters": [
+            "colossus",
+            "stalker",
+            "tempest"
+          ],
+          "trap_units_to_avoid": [
+            "over-massed-stalkers-vs-marauder-ghost-liberator",
+            "un-charged-zealots-vs-widow-mine-bio",
+            "un-split-ht-vs-ghost-emp"
+          ],
+          "opportunity_cost_analysis": "HighTemplar appeared in 19/33 >=11m PvT perspectives with 12/19 wins (63.2%); Warp Prism protects HT from Ghost EMP (med 11:58, 76 casts), while Tempests break range Liberator walls.",
+          "causal_why": "Disruptor Nova + Prism HT Storm + Charge Zealot counter-attacks bypass Terran Siege/Liberator lines and punish Ghost energy reliance."
+        }
+      }
+    },
+    "PvP": {
+      "build_benchmarks": {
+        "total_perspectives": 48,
+        "pro_perspectives": 4,
+        "exemplar_replay": "Starcraft2Metrics_6ae1a113f78a_2019-07-05_-__P_VOID_VS__P_KaelThas.SC2Replay",
+        "expansions": [
+          {
+            "base_num": 2,
+            "median_sec": 194.2,
+            "median_workers": 24,
+            "count": 20
+          },
+          {
+            "base_num": 3,
+            "median_sec": 369.5,
+            "median_workers": 41,
+            "count": 8
+          }
+        ],
+        "key_tech_timings_sec": {
+          "pylon": 18.8,
+          "gateway": 41.0,
+          "assimilator": 48.8,
+          "cybernetics-core": 90.3,
+          "nexus": 194.2,
+          "robotics-facility": 205.2,
+          "shield-battery": 233.5,
+          "warpgate": 235.4,
+          "twilight-council": 282.4,
+          "forge": 326.8
+        },
+        "key_upgrade_timings_sec": {
+          "warp-gate-research": {
+            "median_start_sec": 133.1,
+            "median_complete_sec": 233.1,
+            "count": 22
+          },
+          "charge": {
+            "median_start_sec": 320.0,
+            "median_complete_sec": 420.0,
+            "count": 9
+          },
+          "protoss-ground-weapons-1": {
+            "median_start_sec": 320.8,
+            "median_complete_sec": 434.8,
+            "count": 8
+          },
+          "protoss-ground-weapons-2": {
+            "median_start_sec": 408.6,
+            "median_complete_sec": 544.6,
+            "count": 3
+          }
+        }
+      },
+      "late_corpus_stats": {
+        "clean_perspectives_ge_11m": 20,
+        "wins": 10,
+        "median_dur_min": 13.0,
+        "median_bases": 3.0,
+        "median_workers": 51.5,
+        "top_combat_units_presence_median": {
+          "stalker": "20/20 (med 14.5; m10 alive 6.6)",
+          "zealot": "19/20 (med 42; m10 alive 6.5)",
+          "immortal": "18/20 (med 7; m10 alive 2.2)",
+          "observer": "18/20 (med 2)",
+          "warp-prism": "16/20 (med 1)",
+          "high-templar": "16/20 (med 12.5; m10 alive 1.1)",
+          "sentry": "15/20 (med 3)",
+          "archon": "15/20 (med 6; m10 alive 1.5)",
+          "phoenix": "13/20 (med 4)",
+          "dark-templar": "6/20 (med 6.5)"
+        },
+        "exemplar_replays": [
+          "Starcraft2Metrics_6ae1a113f78a_2019-07-05_-__P_VOID_VS__P_KaelThas.SC2Replay",
+          "Starcraft2Metrics_3aacfec472e1_2019-07-09_-__P_NULL_VS__P_gnegnegnegne.SC2Replay",
+          "Starcraft2Metrics_4eac8dddcfed_2019-07-24_-__P_NULL_VS__P_NardDog.SC2Replay"
+        ]
+      },
+      "phases": {
+        "opening": {
+          "primary_counters": [
+            "stalker",
+            "sentry",
+            "adept"
+          ],
+          "secondary_counters": [
+            "shield-battery",
+            "zealot"
+          ],
+          "trap_units_to_avoid": [
+            "naked-16-nexus-vs-2gate-proxy-stalker-adept",
+            "un-detected-no-robo-vs-dt"
+          ],
+          "opportunity_cost_analysis": "PvP delays Nexus2 to med 194.2s (24 wkr) \u2014 over 100s later than PvZ/PvT \u2014 investing early gas in 2-Gate Stalker/Sentry + Battery (233.5s) and Robo (205.2s) for Observer detection.",
+          "causal_why": "1-base proxy/4-gate/Oracle/DT volatility punishes fast low-ground Nexus; Robo/Oracle gives instant detection while Sentry Guardian Shield swings Stalker volleys."
+        },
+        "early-mid": {
+          "primary_counters": [
+            "immortal",
+            "stalker",
+            "sentry"
+          ],
+          "secondary_counters": [
+            "zealot",
+            "phoenix",
+            "observer"
+          ],
+          "trap_units_to_avoid": [
+            "pure-stalker-into-immortal-chargelot-archon",
+            "over-built-phoenix-past-6-without-ground"
+          ],
+          "opportunity_cost_analysis": "Twilight 282.4s, Charge 320.0s, Forge +1 320.8s, Nexus3 369.5s. Immortal production off Robo anchors ground fights; over-massing Stalkers vs Immortal wastes 50g each against a unit with Barrier + +30 bonus vs Armored.",
+          "causal_why": "In 5127151 (PvP LOSS), isolated Immortals without Chargelots/Archons scored -0.07 vs 5x Zealot; Immortals need Chargelot/Archon buffer."
+        },
+        "mid-game": {
+          "primary_counters": [
+            "immortal",
+            "archon",
+            "zealot"
+          ],
+          "secondary_counters": [
+            "disruptor",
+            "stalker",
+            "phoenix"
+          ],
+          "trap_units_to_avoid": [
+            "pure-stalker-ball-vs-cia-disruptor",
+            "un-detected-army-vs-dt-blink"
+          ],
+          "opportunity_cost_analysis": "m10 PvP stabilizes at 3 bases (52.5 wkr), 2.2 Immortals, 1.5 Archons, 6.5 Zealots, 6.6 Stalkers. Archon-Chargelot-Immortal (CIA) shreds pure Stalker and Phoenix lifts; Disruptors break mirror CIA stalemates.",
+          "causal_why": "Archons ignore bonus Armored penalties and cleave Zealots/VoidRays/Interceptors, turning Stalker-heavy opponents inefficient."
+        },
+        "late-game": {
+          "primary_counters": [
+            "disruptor",
+            "immortal",
+            "archon",
+            "tempest"
+          ],
+          "secondary_counters": [
+            "carrier",
+            "zealot",
+            "high-templar"
+          ],
+          "trap_units_to_avoid": [
+            "pure-stalker-in-maxed-ciad-fights",
+            "un-charged-zealot-vs-archon-disruptor"
+          ],
+          "opportunity_cost_analysis": "Maxed PvP hinges on Disruptor purification hits (204 pro casts across corpus), Archon+Immortal DPS, and Tempest sniping enemy Carriers/Disruptors without burning supply on Stalkers.",
+          "causal_why": "In 20 clean >=11m PvP perspectives, Immortal (18/20, med 7), Archon (15/20, med 6), HighTemplar (16/20), and Disruptor/Tempest decide maxed engagements."
+        }
+      }
+    }
+  },
+  "situations": {
+    "cannon_rush_proxy_defense": {
+      "situational_trigger": "Enemy Probe + Pylon/Photon Cannon <220s near natural/main ramp OR 0-nat high-production proxy Gate/Rax",
+      "pro_db_evidence": {
+        "cannon_rush_events_total": 132,
+        "cannon_rush_events_pro": 110,
+        "cannon_rush_median_sec": 127.0,
+        "aiarena_5126034_loss": "PvT Loss vs Proxy All-In (roi=0.03, 0 expansions)"
+      },
+      "by_race": {
+        "Zerg": {
+          "primary_counters": [
+            "ravager",
+            "zergling",
+            "spine-crawler"
+          ],
+          "secondary_counters": [
+            "queen"
+          ],
+          "trap_units_to_avoid": [
+            "delayed-mutalisk",
+            "slow-hydralisk"
+          ],
+          "opportunity_cost_analysis": "3-4 Drones pull early + Roach Warren -> 3 Ravagers (Corrosive Bile clears high-ground/walled Cannons safely) vs losing natural Hatchery (300m).",
+          "causal_why": "Corrosive Bile (9 range, 60 dmg) kills Cannons/Batteries out of range without losing Drones/Lings to melee funnels."
+        },
+        "Terran": {
+          "primary_counters": [
+            "marine",
+            "siege-tank",
+            "cyclone"
+          ],
+          "secondary_counters": [
+            "bunker",
+            "reaper"
+          ],
+          "trap_units_to_avoid": [
+            "naked-banshee-without-bunker",
+            "marauder-only-no-dps"
+          ],
+          "opportunity_cost_analysis": "High-ground Bunker + Siege Tank (or Cyclone lock-on) immediately breaks Cannon contain while Orbital + floating CC keeps mining uninterrupted.",
+          "causal_why": "Siege Tank (13 range) outranges Photon Cannon (7 range) and Salvage Bunker returns 75% mineral cost once stable."
+        },
+        "Protoss": {
+          "primary_counters": [
+            "stalker",
+            "immortal",
+            "shield-battery"
+          ],
+          "secondary_counters": [
+            "zealot"
+          ],
+          "trap_units_to_avoid": [
+            "excess-forge-cannon-war-starving-cyber",
+            "un-detected-dark-shrine-gambit"
+          ],
+          "opportunity_cost_analysis": "Fast Cyber + Stalker + Shield Battery + Robo Immortal shuts down Cannon DPS while matching Probe count.",
+          "causal_why": "Immortal + Stalker focus-fire Pylons/Batteries cleanly under defensive Shield Battery Overcharge."
+        }
+      }
+    },
+    "one_base_all_in_hold": {
+      "situational_trigger": "Enemy bases==1 after frame 3360 (2:30+) with high barracks/gateway/warren production",
+      "pro_db_evidence": {
+        "aiarena_5126028_loss": "ZvP Loss vs 1-Base Gateway All-In (roi=0.04)",
+        "bunker_events_total": 5322,
+        "shield_battery_overcharge_pro": 672
+      },
+      "by_race": {
+        "Zerg": {
+          "primary_counters": [
+            "zergling",
+            "queen",
+            "spine-crawler",
+            "baneling"
+          ],
+          "secondary_counters": [
+            "roach"
+          ],
+          "trap_units_to_avoid": [
+            "greedy-drifting-4th-hatch",
+            "mutalisk-before-stabilizing"
+          ],
+          "opportunity_cost_analysis": "Pause Drones at ~26-32 once 1-base commit confirmed; convert larva to Speedling/Bane/Roach + 1-2 Spines until all-in breaks.",
+          "causal_why": "Even 10 extra Drones above 32 kills Zerg if larva wasn't converted to army before Gateway/Rax arrival."
+        },
+        "Terran": {
+          "primary_counters": [
+            "bunker",
+            "marine",
+            "siege-tank",
+            "widow-mine"
+          ],
+          "secondary_counters": [
+            "cyclone",
+            "marauder"
+          ],
+          "trap_units_to_avoid": [
+            "unbunkered-natural-or-banshee-greed"
+          ],
+          "opportunity_cost_analysis": "Pull 3-4 SCVs to repair Bunker (Med 9:45 pro bunker save) + rush first Tank/Cyclone; MULEs keep mineral parity.",
+          "causal_why": "Salvageable Bunkers multiply Marine survival 3x while Tank splash terminates low-tech 1-base pushes."
+        },
+        "Protoss": {
+          "primary_counters": [
+            "shield-battery",
+            "stalker",
+            "immortal",
+            "sentry"
+          ],
+          "secondary_counters": [
+            "adept",
+            "void-ray"
+          ],
+          "trap_units_to_avoid": [
+            "naked-4-chrono-probes-over-warpins",
+            "early-dt-without-defense"
+          ],
+          "opportunity_cost_analysis": "Chrono Robo Immortal + Battery Overcharge (672 pro uses, med 8:22) on natural ramp; Force Field splits wave in half.",
+          "causal_why": "Splitting 1-base army with Sentry + healed Immortal trades at >=3:1 resource efficiency."
+        }
+      }
+    },
+    "unwalled_punish_runby": {
+      "situational_trigger": "Unwalled opponent natural OR split multi-base exposure >6:00",
+      "pro_db_evidence": {
+        "unwalled_punish_pro": 11,
+        "unwalled_punish_median_sec": 180.0,
+        "coordinated_runbys_total": 593,
+        "multi_angle_drops_total": 4670
+      },
+      "by_race": {
+        "Zerg": {
+          "primary_counters": [
+            "zergling",
+            "baneling"
+          ],
+          "secondary_counters": [
+            "mutalisk"
+          ],
+          "trap_units_to_avoid": [
+            "slow-roach-only-chasing-across-map",
+            "queen-walk-past-330"
+          ],
+          "opportunity_cost_analysis": "12-16 Speedlings cost 300-400m / 0g and punish missing wall-off at ~3:00 (med 180s) for massive worker kills.",
+          "causal_why": "Ling speed finishes ~3:30 (140s start + research), turning unwalled mineral lines into instant game-ending trades."
+        },
+        "Terran": {
+          "primary_counters": [
+            "hellion",
+            "reaper",
+            "marine",
+            "medivac"
+          ],
+          "secondary_counters": [
+            "widow-mine"
+          ],
+          "trap_units_to_avoid": [
+            "slow-thor-march-into-empty-natural"
+          ],
+          "opportunity_cost_analysis": "4 Hellions or 2-Medivac Stim drop forces whole enemy army back while keeping 3rd CC safe.",
+          "causal_why": "Hellions two-shot Probes/Drones with line splash and escape; drops tax low-APM defenders."
+        },
+        "Protoss": {
+          "primary_counters": [
+            "adept",
+            "zealot",
+            "warp-prism",
+            "oracle"
+          ],
+          "secondary_counters": [
+            "dark-templar"
+          ],
+          "trap_units_to_avoid": [
+            "immortal-walk-across-map-for-harass"
+          ],
+          "opportunity_cost_analysis": "2 Shade Adepts + Warp Prism Chargelot warp-in (2132 pro Warp Prism attacks, med 10:15) trades minerals only while preserving gas for HT/Immortal.",
+          "causal_why": "Chargelots cost 0 gas and force defensive emergency splits out of Zerg/Terran main armies."
+        }
+      }
+    },
+    "air_skytoss_transition": {
+      "situational_trigger": "Enemy fields Stargate/Fleet Beacon/Spire/BC air (>=25% air combat ratio or VoidRay/Carrier/Tempest/Oracle/Phoenix/BC/Mutalisk observed)",
+      "pro_db_evidence": {
+        "mirror_bug_fixed": "mirror-mind-predictor.rkt L3422 previously returned Terran 'banshee vs sky-toss (0 air DPS!)",
+        "oracle_harass_pro": 970,
+        "mothership_pro_late_zvp_pvp": "Seen in late PvZ (9/56 games)",
+        "voidray_late_pvz_wr": "Only 1/11 games won when VoidRay massed alone without HT/Carrier"
+      },
+      "by_race": {
+        "Zerg": {
+          "primary_counters": [
+            "corruptor",
+            "viper",
+            "hydralisk"
+          ],
+          "secondary_counters": [
+            "queen",
+            "spore-crawler",
+            "infestor"
+          ],
+          "trap_units_to_avoid": [
+            "excess-corruptors-above-1.25x-air-supply",
+            "mass-baneling-only",
+            "slow-roach-only"
+          ],
+          "opportunity_cost_analysis": "Cap Corruptors <= 1.25x enemy air supply; dump excess gas into Viper Parasitic Bomb/Abduct + Spore forest + Lurker/Hydra/Bane ground threat.",
+          "causal_why": "Corruptors have zero ground attack; capping them prevents dead supply while Viper Abduct picks off Carriers/Tempests one by one."
+        },
+        "Terran": {
+          "primary_counters": [
+            "viking-fighter",
+            "marine",
+            "thor"
+          ],
+          "secondary_counters": [
+            "widow-mine",
+            "liberator",
+            "cyclone",
+            "raven"
+          ],
+          "trap_units_to_avoid": [
+            "banshee-zero-air-dps",
+            "pure-marauder-zero-air-dps",
+            "siege-tank-only"
+          ],
+          "opportunity_cost_analysis": "Reactored Vikings (capped <= 1.25x enemy air) + High-Impact Payload Thors + 3/3 Marines trade dramatically ahead vs Carriers/BCs; NEVER build Banshees or Marauders against air fleets.",
+          "causal_why": "Banshees and Marauders deal 0 damage to air units; Vikings outrange Carriers (9 vs 8) while High-Impact Thors vaporize Capital ships."
+        },
+        "Protoss": {
+          "primary_counters": [
+            "stalker",
+            "phoenix",
+            "tempest",
+            "high-templar"
+          ],
+          "secondary_counters": [
+            "archon",
+            "void-ray",
+            "carrier"
+          ],
+          "trap_units_to_avoid": [
+            "immortal-zealot-ground-only-no-aa",
+            "disruptor-vs-mass-air"
+          ],
+          "opportunity_cost_analysis": "Blink Stalker timing punishes early slow Stargate before Carrier critical mass; late-game Tempest + HT Storm + Archon counters Carrier/BC fleets.",
+          "causal_why": "Carriers punish low-range ground armies; Blink focus-fire or Tempest+Storm/Archon splash clears Interceptors and Hulls."
+        }
+      }
+    },
+    "mech_siege_line": {
+      "situational_trigger": "Enemy fields Siege Tank (>=2), Thor, Liberator, or Lurker entrenched defensive lines",
+      "pro_db_evidence": {
+        "viper_abduct_pro": 98,
+        "viper_blinding_cloud_pro": 76,
+        "raven_interference_matrix_med_sec": 645
+      },
+      "by_race": {
+        "Zerg": {
+          "primary_counters": [
+            "viper",
+            "ravager",
+            "hydralisk",
+            "brood-lord"
+          ],
+          "secondary_counters": [
+            "zergling",
+            "baneling",
+            "lurker"
+          ],
+          "trap_units_to_avoid": [
+            "naked-roach-a-move-into-sieged-tanks",
+            "un-supported-zergling-into-hellbat-tank"
+          ],
+          "opportunity_cost_analysis": "Requires fast Hive + Viper (or Ravager Bile early) instead of throwing away 60 supply of Roaches/Hydras into choke points.",
+          "causal_why": "Blinding Cloud shrinks Tank/Thor range to melee while Abduct pulls high-value Tanks out of formation."
+        },
+        "Terran": {
+          "primary_counters": [
+            "siege-tank",
+            "viking-fighter",
+            "liberator",
+            "marauder"
+          ],
+          "secondary_counters": [
+            "raven",
+            "battlecruiser"
+          ],
+          "trap_units_to_avoid": [
+            "stim-marine-charging-tanks-without-viking-vision",
+            "pure-hellbat-vs-tanks"
+          ],
+          "opportunity_cost_analysis": "Double-Starport Viking control + Raven IM / Liberator range wins tank wars without feeding Bio supply.",
+          "causal_why": "Air vision + Liberator circles force Siege Tanks to un-siege, exposing the entire line."
+        },
+        "Protoss": {
+          "primary_counters": [
+            "immortal",
+            "disruptor",
+            "tempest",
+            "zealot"
+          ],
+          "secondary_counters": [
+            "carrier",
+            "blink-stalker",
+            "warp-prism"
+          ],
+          "trap_units_to_avoid": [
+            "clumped-stalker-walk-into-siege-choke"
+          ],
+          "opportunity_cost_analysis": "Warp Prism Chargelot drops behind lines + Tempest range chip or Disruptor shots break static Tank/Hellbat formations cheaply.",
+          "causal_why": "Stalkers take extra Siege Tank armored shots in chokes; Tempests and Chargelot flanks stretch immobile Mech across bases."
+        }
+      }
+    },
+    "bio_mine_bio_tank_tempo": {
+      "situational_trigger": "Enemy Terran fields Bio + Medivac + Widow Mine / Siege Tank multi-prong drops",
+      "pro_db_evidence": {
+        "pro_zvT_m10_ling_bane": "Zergling 31.6 + Baneling 8.1 alive_mean; Zerg 73.0 workers",
+        "pro_pvt_ht_win_share": "12/19 (63.2%) PvT >=11m games won with HighTemplar"
+      },
+      "by_race": {
+        "Zerg": {
+          "primary_counters": [
+            "zergling",
+            "baneling",
+            "hydralisk",
+            "ultralisk"
+          ],
+          "secondary_counters": [
+            "overseer",
+            "mutalisk",
+            "infestor"
+          ],
+          "trap_units_to_avoid": [
+            "queen-walking-vs-marine-medivac",
+            "slow-roach-only-on-large-maps"
+          ],
+          "opportunity_cost_analysis": "Creep spread + Overseers + Ling-Bane flanking preserves gas for Hive Chitinous Ultralisks + Infestor Fungal.",
+          "causal_why": "Banelings force Terran splits while Fungal / Creep flanks punish over-extended Bio."
+        },
+        "Terran": {
+          "primary_counters": [
+            "marine",
+            "siege-tank",
+            "medivac",
+            "viking-fighter"
+          ],
+          "secondary_counters": [
+            "widow-mine",
+            "raven"
+          ],
+          "trap_units_to_avoid": [
+            "slow-un-supported-marauder-opening-vs-marine"
+          ],
+          "opportunity_cost_analysis": "Match Bio+Medivac+Tank upgrades and Turret rings to shut down Doom drops before 3rd/4th base trades.",
+          "causal_why": "Tanks positioned defensively shred enemy Stim pushes."
+        },
+        "Protoss": {
+          "primary_counters": [
+            "colossus",
+            "high-templar",
+            "zealot",
+            "stalker"
+          ],
+          "secondary_counters": [
+            "disruptor",
+            "observer",
+            "shield-battery"
+          ],
+          "trap_units_to_avoid": [
+            "pure-immortal-without-aoe-vs-54-marines",
+            "stalker-only-vs-marauder-medivac"
+          ],
+          "opportunity_cost_analysis": "Blink Stalkers zone Medivacs while Colossus + Storm + Chargelots win direct 200/200 clashes.",
+          "causal_why": "Colossus/Storm splash punishes tightly stacked Marine-Medivac-Mine clumps."
+        }
+      }
+    },
+    "roach_ravager_ling_flood": {
+      "situational_trigger": "Enemy Zerg commits to Roach-Ravager timing or Speedling-Baneling flood",
+      "pro_db_evidence": {
+        "aiarena_5127157_loss": "PvZ Loss: Stalker failed vs 32x Zergling @ 229.2s (score=-0.73)",
+        "aiarena_5127148_loss": "TvZ Loss: Marauder failed vs 32x Zergling @ 251.3s (score=-0.73)"
+      },
+      "by_race": {
+        "Zerg": {
+          "primary_counters": [
+            "roach",
+            "ravager",
+            "baneling"
+          ],
+          "secondary_counters": [
+            "lurker",
+            "spine-crawler",
+            "mutalisk"
+          ],
+          "trap_units_to_avoid": [
+            "zergling-only-into-baneling-roach-wall"
+          ],
+          "opportunity_cost_analysis": "Match Roach Warren + Banelings on ramp/choke while preserving Drone lead.",
+          "causal_why": "Banelings delete Ling floods; +1 Missile Roaches + Lurkers crush pure Roach-Ravager."
+        },
+        "Terran": {
+          "primary_counters": [
+            "siege-tank",
+            "marine",
+            "marauder",
+            "bunker"
+          ],
+          "secondary_counters": [
+            "banshee",
+            "liberator",
+            "hellbat"
+          ],
+          "trap_units_to_avoid": [
+            "pure-marauder-vs-speedling-flood",
+            "pure-hellion-vs-roach-ravager"
+          ],
+          "opportunity_cost_analysis": "Tanks behind Depot walls + Marines clear Lings/Biles; add Marauders ONLY vs Armored Roaches.",
+          "causal_why": "Marauders crush Roaches (+10 vs Armored) but fold vs Lings; Tanks+Marines+Bunkers cover both."
+        },
+        "Protoss": {
+          "primary_counters": [
+            "immortal",
+            "adept",
+            "sentry",
+            "shield-battery"
+          ],
+          "secondary_counters": [
+            "zealot",
+            "oracle",
+            "archon"
+          ],
+          "trap_units_to_avoid": [
+            "mass-stalker-into-32-zerglings-or-ravagers"
+          ],
+          "opportunity_cost_analysis": "Force Field ramp + Chrono Immortals + Glaive Adepts/Archons annihilate Roach-Ling floods.",
+          "causal_why": "Immortals three-shot Roaches; Adepts/Archons shred Light Zerglings while Stalkers crumble to both."
+        }
+      }
+    },
+    "lurker_swarm_host_siege": {
+      "situational_trigger": "Enemy fields Lurker / Lurker-Burrowed / Swarm Host Locust waves",
+      "pro_db_evidence": {
+        "pro_lurker_burrowed_events": 3880,
+        "pro_swarm_host_burrowed_events": 460,
+        "pro_swarm_host_harass_events": 83
+      },
+      "by_race": {
+        "Zerg": {
+          "primary_counters": [
+            "lurker",
+            "viper",
+            "ravager",
+            "overseer"
+          ],
+          "secondary_counters": [
+            "brood-lord",
+            "mutalisk"
+          ],
+          "trap_units_to_avoid": [
+            "mass-zergling-without-detection-into-lurkers",
+            "roach-only-a-move"
+          ],
+          "opportunity_cost_analysis": "Maintain 2+ Overseers + Viper Abduct/Blinding Cloud; match Lurkers + Brood Lords rather than feeding ground melee.",
+          "causal_why": "Lurkers deal linear splash destroying Zerglings/Hydras/Roaches; Viper Abduct removes Lurkers one-by-one."
+        },
+        "Terran": {
+          "primary_counters": [
+            "siege-tank",
+            "liberator",
+            "ghost",
+            "raven"
+          ],
+          "secondary_counters": [
+            "marauder",
+            "medivac",
+            "viking-fighter"
+          ],
+          "trap_units_to_avoid": [
+            "un-detected-marine-stim-into-burrowed-lurkers",
+            "hellbat-charge"
+          ],
+          "opportunity_cost_analysis": "Save 2+ Orbital Scans + Raven detection; Range Liberators + Ghosts (Snipe) + Tanks outrange Lurkers.",
+          "causal_why": "Walking Bio into burrowed Lurker spines is instant army deletion; Scan + Tank/Liberator clears safely."
+        },
+        "Protoss": {
+          "primary_counters": [
+            "immortal",
+            "disruptor",
+            "oracle",
+            "carrier"
+          ],
+          "secondary_counters": [
+            "high-templar",
+            "observer",
+            "archon"
+          ],
+          "trap_units_to_avoid": [
+            "mass-stalker-without-observer-vs-lurkers",
+            "un-charged-zealot-clumps"
+          ],
+          "opportunity_cost_analysis": "Oracle Revelation (334 pro casts!) + 2+ Observers + Disruptor/Carrier/Tempest breaks Lurker contain without sacrificing Chargelots.",
+          "causal_why": "Revelation reveals burrowed Lurkers/SwarmHosts even if slow Observers get sniped (71% mobile detector mortality!)."
+        }
+      }
+    },
+    "cloaked_burrowed_threat": {
+      "situational_trigger": "Enemy fields Dark Templar, Cloaked Banshee, Ghost, Burrowed Widow Mine, Burrowed Roach, or Infestor",
+      "pro_db_evidence": {
+        "pro_dt_spawned": 1461,
+        "pro_widow_mine_burrowed": 1827,
+        "pro_roach_burrowed": 1408,
+        "pro_banshee_cloak_upgrades": 212,
+        "pro_detector_mortality_pct": 71.0,
+        "pro_emergency_responses": "164 emergency Overseers + 300 emergency Spore/Cannon/Turret starts + 368 Scans + 334 Revelations"
+      },
+      "by_race": {
+        "Zerg": {
+          "primary_counters": [
+            "overseer",
+            "spore-crawler",
+            "zergling",
+            "queen"
+          ],
+          "secondary_counters": [
+            "hydralisk",
+            "ravager"
+          ],
+          "trap_units_to_avoid": [
+            "single-overseer-only-prone-to-snipe",
+            "no-spore-per-mineral-line"
+          ],
+          "opportunity_cost_analysis": "Build 1 Spore per mineral line + 2-3 Overseers (75% cheaper than losing 16 Drones = 800m + larva).",
+          "causal_why": "71.0% of mobile detectors die in fights; pairing static Spore with backup Overseers eliminates post-snipe wipes (666.1 avg resources lost)."
+        },
+        "Terran": {
+          "primary_counters": [
+            "raven",
+            "missile-turret",
+            "scanner-sweep",
+            "marine"
+          ],
+          "secondary_counters": [
+            "viking-fighter",
+            "hellion"
+          ],
+          "trap_units_to_avoid": [
+            "burning-all-oc-energy-on-mules-at-4m-window",
+            "zero-turrets-vs-dt-banshee"
+          ],
+          "opportunity_cost_analysis": "Bank 1 Scan (50 energy = ~225 MULE minerals) + 1 Missile Turret per mineral line + 1 Raven vs cloaked/burrowed armies.",
+          "causal_why": "1 Raven + Turret pays off immediately against DTs, Banshees, Widow Mines, and Tunneling Roaches."
+        },
+        "Protoss": {
+          "primary_counters": [
+            "observer",
+            "oracle",
+            "photon-cannon",
+            "stalker"
+          ],
+          "secondary_counters": [
+            "immortal",
+            "shield-battery"
+          ],
+          "trap_units_to_avoid": [
+            "zero-robo-and-zero-stargate-oracle-vs-cloak",
+            "single-observer-f2-suicide"
+          ],
+          "opportunity_cost_analysis": "Keep 2 Observers (one Surveillance mode behind army) + Cannon/Battery at exposed 3rd base + Oracle Revelation.",
+          "causal_why": "Observers frequently die to focus fire; Oracle Revelation + static Cannons prevent game-losing DT/Mine/Lurker ambushes."
+        }
+      }
+    }
+  },
+  "aiarena_forensic_root_cause_audit": {
+    "matches_analyzed": 26,
+    "wins": 2,
+    "losses": 22,
+    "ties": 2,
+    "win_rate_pct": 7.7,
+    "counter_unit_mismatch_matches": 20,
+    "delayed_natural_matches": 13,
+    "representative_failures": [
+      {
+        "match_id": "5126032",
+        "mu": "ZvT",
+        "res": "LOSS",
+        "bug_signature": "Queen vs 8x Marine @ 281.5s (score=-0.42) + Delayed Natural 227.8s"
+      },
+      {
+        "match_id": "5126899",
+        "mu": "ZvT",
+        "res": "LOSS",
+        "bug_signature": "Queen vs 3x Marine @ 243.1s (score=-0.75) + Escrow Stall 52f hydralisk"
+      },
+      {
+        "match_id": "5127129",
+        "mu": "ZvP",
+        "res": "TIE",
+        "bug_signature": "Queen vs 1x Zealot @ 248.3s (score=-1.0) \u2014 178 mismatch snapshots"
+      },
+      {
+        "match_id": "5127134",
+        "mu": "ZvZ",
+        "res": "LOSS",
+        "bug_signature": "Queen vs 8x Zergling @ 350.4s (score=-0.22)"
+      },
+      {
+        "match_id": "5126033",
+        "mu": "TvZ",
+        "res": "LOSS",
+        "bug_signature": "Marauder vs 10x Zergling @ 295.6s (score=-0.38)"
+      },
+      {
+        "match_id": "5127148",
+        "mu": "TvZ",
+        "res": "LOSS",
+        "bug_signature": "Marauder vs 32x Zergling @ 251.3s (score=-0.73)"
+      },
+      {
+        "match_id": "5126258",
+        "mu": "TvT",
+        "res": "LOSS",
+        "bug_signature": "Marauder vs 3x Marine @ 245.2s (score=-1.0) + Delayed Natural 263.5s"
+      },
+      {
+        "match_id": "5127142",
+        "mu": "TvP",
+        "res": "LOSS",
+        "bug_signature": "Marauder vs 2x Zealot @ 271.7s (score=-1.0)"
+      },
+      {
+        "match_id": "5126029",
+        "mu": "TvP",
+        "res": "LOSS",
+        "bug_signature": "Marine vs 1x Adept,1x Sentry @ 381.7s + Delayed Natural 203.2s"
+      },
+      {
+        "match_id": "5126259",
+        "mu": "PvT",
+        "res": "LOSS",
+        "bug_signature": "Stalker vs 4x Marauder @ 401.1s (score=-0.16) + Delayed Natural 214.3s"
+      },
+      {
+        "match_id": "5126901",
+        "mu": "PvT",
+        "res": "LOSS",
+        "bug_signature": "Immortal vs 54x Marine @ 691.9s (score=-0.25) + Delayed Natural 197.9s"
+      },
+      {
+        "match_id": "5127163",
+        "mu": "PvT",
+        "res": "LOSS",
+        "bug_signature": "Immortal vs 22x Marine @ 372.0s (score=-0.92)"
+      },
+      {
+        "match_id": "5127157",
+        "mu": "PvZ",
+        "res": "LOSS",
+        "bug_signature": "Stalker vs 32x Zergling @ 229.2s (score=-0.73)"
+      },
+      {
+        "match_id": "5127151",
+        "mu": "PvP",
+        "res": "LOSS",
+        "bug_signature": "Immortal vs 5x Zealot @ 393.4s (score=-0.07)"
+      }
+    ]
+  }
+}

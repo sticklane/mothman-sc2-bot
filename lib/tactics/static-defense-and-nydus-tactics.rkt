@@ -1194,28 +1194,81 @@
                         (loop-can (cdr rem) ninc (cons c fwd) nrdy nanc))
                       (loop-can (cdr rem) ninc fwd rdy anc))))))
 
-        (define incomplete-bldgs-rev
+  (define (u-actual-vitality-frac b)
+    (if (hash? b)
+        (let* ([has-hull-hp? (hash-has-key? b 'hull-hp)]
+               [hp (u-hp b 100.0)]
+               [mhp (u-max-hp b 100.0)]
+               [sh (if has-hull-hp? 0.0 (u-shield b 0.0))]
+               [raw-msh (if has-hull-hp?
+                            0.0
+                            (let ([ms1 (hash-ref b 'max-shield *missing*)])
+                              (cond
+                                [(not (eq? ms1 *missing*)) (fast-safe-real ms1 0.0)]
+                                [(not (eq? (hash-ref b 'shield-max *missing*) *missing*))
+                                 (fast-safe-real (hash-ref b 'shield-max 0.0) 0.0)]
+                                [else (fast-safe-real (hash-ref b 'max-shields 0.0) 0.0)])))]
+               [cur (+ hp sh)]
+               [tot (max 1.0 (+ mhp raw-msh))])
+          (if (> raw-msh 0.0)
+              (/ cur tot)
+              (min 1.0 (/ cur tot))))
+        1.0))
+
+  (define (enemy-weapon-attacker-near? x y radius)
+    (define cld (get-eu-cld))
+    (define near-eu (cloud-entities-within cld x y radius))
+    (define (armed? ent)
+      (and (hash? ent)
+           (let ([sym (u-sym ent)])
+             (and (not (memq sym SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS))
+                  (let ([st (sc2-unit-combat-stats sym)])
+                    (or (> (hash-ref st 'ground-dps 0.0) 0.0)
+                        (> (hash-ref st 'air-dps 0.0) 0.0)))))))
+    (or (for/or ([e (in-list near-eu)])
+          (armed? e))
+        (let ([r2 (* radius radius)])
+          (for/or ([eb (in-list (sd-index-enemy-bldgs idx))])
+            (and (armed? eb)
+                 (u-complete? eb)
+                 (<= (fast-dist2 x y (u-x eb 9999.0) (u-y eb 9999.0)) r2))))))
+
+  (define incomplete-bldgs-rev
           (let loop-gw ([rem gateways] [inc incomplete-pc-rev])
             (if (null? rem)
                 inc
                 (let ([g (car rem)])
                   (loop-gw (cdr rem) (if (u-complete? g) inc (cons g inc)))))))
 
-        ;; 1. Cancel low-HP (<15%), wedge Pylons after push, or redundant low-ground bait Pylons (`314`)
+        ;; 1. Cancel under-fire dying forward proxy buildings (`314`) using SC2 construction
+        ;;    vitality (`0.10 + 0.90*progress`, shield-inclusive), wedge Pylons after push, or
+        ;;    redundant low-ground bait Pylons. NEVER cancel home/natural/third structures.
         ;;    + Printf (`printf-cancel-and-rewall`): step 1.5 tiles back toward defended Cannon/home
         (for ([b (in-list (reverse incomplete-bldgs-rev))])
           (define bid (u-id b))
-          (define low-hp? (< (u-hp-frac b) 0.15))
-          (define push-wedge? (eq? (obs-ref b 'push-wedge? #f) #t))
-          (define redundant-bait? (and (eq? (obs-ref b 'low-ground-bait? #f) #t) completed-hg-pylon?))
+          (define bkx (u-x b bx))
+          (define bky (u-y b by))
+          (define d2-b-enemy (fast-dist2 bkx bky ex ey))
+          (define d2-b-home (fast-dist2 bkx bky bx by))
+          (define forward-proxy?
+            (and (< d2-b-enemy 1764.0)  ;; dist-to-enemy < 42.0
+                 (> d2-b-home 1225.0))) ;; dist-to-own-main > 35.0
+          (define prog (max 0.0 (min 1.0 (u-progress b 1.0))))
+          (define expected-vitality-frac (+ 0.10 (* 0.90 prog)))
+          (define actual-vitality-frac (u-actual-vitality-frac b))
+          (define low-hp?
+            (and forward-proxy?
+                 (< actual-vitality-frac (* 0.35 expected-vitality-frac))
+                 (< actual-vitality-frac 0.12)
+                 (enemy-weapon-attacker-near? bkx bky 9.0)))
+          (define push-wedge? (and forward-proxy? (eq? (obs-ref b 'push-wedge? #f) #t)))
+          (define redundant-bait?
+            (and forward-proxy? (eq? (obs-ref b 'low-ground-bait? #f) #t) completed-hg-pylon?))
           (when (or low-hp? push-wedge? redundant-bait?)
             (emit! (list 'cancel-building bid))
             (when low-hp?
-              (define bkx (u-x b bx))
-              (define bky (u-y b by))
-              (when (or (> (fast-dist2 bkx bky bx by) 676.0)
+              (when (or (> d2-b-home 676.0)
                         (pair? forward-cannons))
-                (define d2-b-enemy (fast-dist2 bkx bky ex ey))
                 (define-values (back-x back-y)
                   (let loop ([cs forward-cannons] [best-d2 +inf.0] [tx bx] [ty by])
                     (if (null? cs)

@@ -7,7 +7,8 @@
          "sc2-common.rkt"
          "sc2-game-constants.rkt"
          "build-orders.rkt"
-         "econ-ledger.rkt")
+         "econ-ledger.rkt"
+         "situational-counter-planner.rkt")
 
 (provide
  ;; 1. Declarative SC2 Tech, Cost, Build-Time, Facility-Slot & Prerequisite DAG
@@ -51,6 +52,10 @@
  macro-world-state-depleting-bases
  macro-world-state-natural-blocked?
  macro-world-state->ledger-hash
+ reset-macro-escrow-tracker!
+ macro-escrow-sync-entry!
+ macro-escrow-record-decision!
+ macro-escrow-in-backoff?
 
  ;; 3. Fast Standalone Macro Simulator & Chaos Monkey Engine
  (struct-out macro-sim-task)
@@ -87,6 +92,9 @@
 
 (define SC2-TECH-NODES-LIST
   (list
+   (sc2-tech-node 'gravitic-drive 'Protoss 'research 'tech-upgrade 100 100 0 0 1280 'robotics-bay '(robotics-bay) #t)
+   (sc2-tech-node 'hyperflight-rotors 'Terran 'research 'tech-upgrade 150 150 0 0 2240 'starport-techlab '(starport-techlab) #t)
+   (sc2-tech-node 'cyclone-lock-on-damage 'Terran 'research 'tech-upgrade 100 100 0 0 1760 'factory-techlab '(factory-techlab) #t)
    ;; -------------------------------------------------------------------------
    ;; ZERG
    ;; -------------------------------------------------------------------------
@@ -285,7 +293,28 @@
 ;; Normalizes unit, structure, add-on, and upgrade aliases onto SC2-TECH-GRAPH node IDs.
 (define *brain-sym-norm-ht*
   (hasheq
-   'viking                    'viking-fighter
+   'shield-wall                    'combat-shield
+   'punisher-grenades              'concussive-shells
+   'blink-tech                     'blink
+   'adept-piercing-attack          'resonating-glaives
+   'observer-gravitic-booster      'gravitic-booster
+   'gravitic-boosters              'gravitic-booster
+   'high-capacity-barrels          'infernal-pre-igniter
+   'infernal-preigniter            'infernal-pre-igniter
+   'drill-claws                    'drilling-claws
+   'zerg-ling-metabolic-boost      'metabolic-boost
+   'protoss-air-weapons-level-1    'protoss-air-weapons-1
+   'protoss-air-weapons-level-2    'protoss-air-weapons-2
+   'protoss-air-weapons-level-3    'protoss-air-weapons-3
+   'protoss-air-armor-level-1      'protoss-air-armor-1
+   'protoss-air-armor-level-2      'protoss-air-armor-2
+   'protoss-air-armor-level-3      'protoss-air-armor-3
+   'protoss-air-armors-1           'protoss-air-armor-1
+   'protoss-air-armors-2           'protoss-air-armor-2
+   'protoss-air-armors-3           'protoss-air-armor-3
+   'cyclone-lock-on-damage-upgrade 'cyclone-lock-on-damage
+   'mag-field-accelerator          'cyclone-lock-on-damage
+   'viking                         'viking-fighter
    'viking-assault            'viking-fighter
    'siege-tank-sieged         'siege-tank
    'widow-mine-burrowed       'widow-mine
@@ -1435,9 +1464,9 @@
            (and (> mirror-min-bases active-bases)
                 (or (< active-bases 2)
                     (eq? race 'Zerg)
-                    (and (>= workers 32)
-                         (or (>= army-supply 10)
-                             (>= minerals 550))))))))
+                    (and (>= workers 42)
+                         (>= army-supply 10))
+                    (>= minerals 550))))))
 
 ;; Earlier Colossus tech unlock in PvT once >=52 supply and >=1 Immortal with Robotics Facility ready.
 (define (pvt-immortal-robo-bay-due? race enemy-race eff-supply
@@ -1744,14 +1773,39 @@
 
   (define raw-goal-specs '())
   (define (add-goal-spec! id track kind target-count weight reason)
-    (when (and (lookup-sc2-tech-node id)
-               (not (crisis-deferred-sym? (normalize-brain-sym id) crisis-defer?
-                                          #:defer-stargate? defer-stargate?
-                                          #:keep-ship-weapons? ship-weap-due?
-                                          #:keep-spire-aa? keep-spire-aa?)))
-      (set! raw-goal-specs
-            (cons (list id track kind target-count weight reason)
-                  raw-goal-specs))))
+    (define nsym (normalize-brain-sym id))
+    (define not-crisis-def?
+      (not (crisis-deferred-sym? nsym crisis-defer?
+                                 #:defer-stargate? defer-stargate?
+                                 #:keep-ship-weapons? ship-weap-due?
+                                 #:keep-spire-aa? keep-spire-aa?)))
+    (define upg-gate-ok?
+      (or (not (eq? kind 'research))
+          (upgrade-allowed-by-unit-and-order-gates?
+           race nsym frame workers
+           ready-bldg-counts total-bldg-counts unit-counts
+           researched-upgrades pending-upgrades)))
+    (cond
+      [(and (lookup-sc2-tech-node id) upg-gate-ok? not-crisis-def?)
+       (set! raw-goal-specs
+             (cons (list id track kind target-count weight reason)
+                   raw-goal-specs))]
+      [(and (eq? kind 'research)
+            (not upg-gate-ok?)
+            not-crisis-def?
+            (memq reason '(macro-tech-plan timing-upgrade-plan))
+            (sc2-tech-prereqs-ready? nsym ready-bldg-counts unit-counts))
+       (define sub
+         (bug5-gated-upgrade-prereq-spec
+          race nsym ready-bldg-counts researched-upgrades pending-upgrades))
+       (when (and sub (lookup-sc2-tech-node (second sub)))
+         (define p-kind (first sub))
+         (define p-sym (second sub))
+         (define p-tgt (third sub))
+         (define p-track (if (eq? p-kind 'research) 'tech-infrastructure 'army-production))
+         (set! raw-goal-specs
+               (cons (list p-sym p-track p-kind p-tgt (max weight 488.0) 'bug5-upgrade-prereq)
+                     raw-goal-specs)))]))
 
   ;; Track 1: Survival, Hard Supply-Lockout Unblock, Worker-Rush Override & Broken Prereq Repair
   (when supply-lockout-active?
@@ -1761,6 +1815,14 @@
                     (add1 plan-cur-supply-cnt)
                     980.0
                     'emergency-supply-unblock))
+
+  (when (and (<= plan-total-townhalls 1)
+             (natural-expansion-window-active?
+              race frame workers plan-total-townhalls
+              ready-bldg-counts total-bldg-counts
+              under-attack? enemy-threat-supply under-early-rush-crisis?))
+    (add-goal-spec! (case race [(Zerg) 'hatchery] [(Terran) 'command-center] [else 'nexus])
+                    'economy-expansion 'build 2 620.0 'pro-benchmark-natural-expand))
 
   (when under-early-rush-crisis?
     (cond
@@ -2679,6 +2741,10 @@
         (cond
           [(and und
                 (eq? (sc2-tech-node-race und) race)
+                (upgrade-allowed-by-unit-and-order-gates?
+                 race (normalize-brain-sym usym) frame workers
+                 ready-bldg-counts total-bldg-counts unit-counts
+                 researched-upgrades pending-upgrades)
                 (not (and zerg-t3-on? (zerg-t3-obsolete-unbuilt? usym total-bldg-counts)))
                 (not (sc2-tech-already-satisfied? usym total-bldg-counts researched-upgrades pending-upgrades 1))
                 (or sg-upg-escalation?
@@ -3028,6 +3094,102 @@
   (define cat-ht (priority-schedule-result-category-utilities sched))
   (and (hash? cat-ht) (hash-ref cat-ht 'dynamic-plan #f)))
 
+;; Shared single-source prerequisite-unit/upgrade table for Bug 5 gated BO research goals.
+(define (bug5-gated-upgrade-prereq-spec race gsym ready-bldg-counts researched-upgrades pending-upgrades)
+  (case gsym
+    [(grooved-spines muscular-augments) '(train hydralisk 3 hydralisk-den)]
+    [(centrifical-hooks) '(morph baneling 3 baneling-nest)]
+    [(blink) '(train stalker 3 gateway)]
+    [(charge) '(train zealot 3 gateway)]
+    [(resonating-glaives) '(train adept 3 gateway)]
+    [(gravitic-drive) '(train warp-prism 1 robotics-facility)]
+    [(gravitic-booster) '(train observer 1 robotics-facility)]
+    [(protoss-air-weapons-1 protoss-air-armor-1)
+     (and (> (bldg-count-equivalent ready-bldg-counts 'stargate) 0)
+          '(train void-ray 2 stargate))]
+    [(infernal-pre-igniter) '(train hellion 3 factory)]
+    [(drilling-claws) '(train widow-mine 3 factory)]
+    [(cyclone-lock-on-damage) '(train cyclone 2 factory)]
+    [(banshee-cloak hyperflight-rotors) '(train banshee 2 starport)]
+    [(combat-shield) '(research stimpack 1 barracks-techlab)]
+    [(concussive-shells)
+     (if (not (or (memq 'stimpack researched-upgrades)
+                  (memq 'stimpack pending-upgrades)))
+         '(research stimpack 1 barracks-techlab)
+         '(research combat-shield 1 barracks-techlab))]
+    [(burrow)
+     (and (eq? race 'Zerg)
+          (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+          (not (or (memq 'metabolic-boost researched-upgrades)
+                   (memq 'zergling-movementspeed researched-upgrades)
+                   (memq 'zerg-ling-metabolic-boost researched-upgrades)
+                   (memq 'metabolic-boost pending-upgrades)
+                   (memq 'glial-reconstitution researched-upgrades)
+                   (memq 'glial-reconstitution pending-upgrades)))
+          '(research metabolic-boost 1 spawning-pool))]
+    [else #f]))
+
+;; When a pro BO research goal has its building prerequisite ready but is blocked by Bug 5 unit/order gates,
+;; pivot the active BO sub-goal to the required unit count or prerequisite upgrade so build orders never stall.
+(define (resolve-gated-upgrade-prereq-goal race raw-goal frame workers
+                                           ready-bldg-counts total-bldg-counts unit-counts
+                                           researched-upgrades pending-upgrades)
+  (and (pro-bo-goal? raw-goal)
+       (eq? (pro-bo-goal-kind raw-goal) 'research)
+       (let* ([gsym (normalize-brain-sym (pro-bo-goal-target-sym raw-goal))]
+              [ready? (sc2-tech-prereqs-ready? gsym ready-bldg-counts unit-counts)])
+         (and ready?
+              (not (upgrade-allowed-by-unit-and-order-gates?
+                    race gsym frame workers
+                    ready-bldg-counts total-bldg-counts unit-counts
+                    researched-upgrades pending-upgrades))
+              (let ([sub (bug5-gated-upgrade-prereq-spec
+                          race gsym ready-bldg-counts researched-upgrades pending-upgrades)])
+                (and sub
+                     (pro-bo-goal (first sub) (second sub) (third sub)
+                                  (pro-bo-goal-min-supply raw-goal)
+                                  (fourth sub)
+                                  (pro-bo-goal-target-sec raw-goal))))))))
+
+;; Convert symbol->count hashes into compact '(sym . count) pairs for situational-counter-planner.
+(define (counts-ht->obs-pairs ht)
+  (if (hash? ht)
+      (for/list ([(k v) (in-hash ht)]
+                 #:when (and (symbol? k) (real? v) (> v 0)))
+        (cons k (max 1 (inexact->exact (round v)))))
+      '()))
+
+(define (build-brain-situational-weights race enemy-race frame minerals gas workers active-bases
+                                         ready-bldg-counts unit-counts enemy-u-counts enemy-b-counts
+                                         researched-upgrades pending-upgrades
+                                         eff-req-aa? enemy-cap-air? enemy-threat-supply)
+  (define ready-th-cnt
+    (for/sum ([th-sym (in-list '(hatchery lair hive nexus command-center orbital-command planetary-fortress))])
+      (bldg-count-equivalent ready-bldg-counts th-sym)))
+  (define base-obs
+    (hasheq 'race race
+            'enemy-race enemy-race
+            'frame frame
+            'minerals minerals
+            'gas gas
+            'workers workers
+            'ally-bases active-bases
+            'natural-ready? (>= ready-th-cnt 2)
+            'ally-units (counts-ht->obs-pairs unit-counts)
+            'ally-buildings (counts-ht->obs-pairs ready-bldg-counts)
+            'enemy-units (counts-ht->obs-pairs enemy-u-counts)
+            'enemy-buildings (counts-ht->obs-pairs enemy-b-counts)
+            'researched-upgrades (if (list? researched-upgrades) researched-upgrades '())
+            'pending-upgrades (if (list? pending-upgrades) pending-upgrades '())))
+  ;; Only fall back to heuristic enemy-air-supply when the caller flagged requires-anti-air?
+  ;; without populating enemy-u-counts (legacy unit tests); preserve exact 1.25x caps when units exist.
+  (define sit-obs
+    (if (and (or eff-req-aa? enemy-cap-air?)
+             (or (not (hash? enemy-u-counts)) (= (hash-count enemy-u-counts) 0)))
+        (hash-set base-obs 'enemy-air-supply (max 8.0 (* 2.0 (max 1.0 (exact->inexact enemy-threat-supply)))))
+        base-obs))
+  (evaluate-situational-unit-weights sit-obs race enemy-race frame))
+
 ;; Pure Core Priority & Dynamic Plan Brain Step:
 ;; Synthesizes the live 5-track `dynamic-macro-plan`, translates active goals into
 ;; concrete ready next-actions, self-heals broken/deleted prerequisite chains,
@@ -3169,6 +3331,17 @@
                      [have (+ (or cur-cnt (unit-count-equivalent unit-counts nsym)) add-sched)])
                  (< have cap)))))
 
+    (define sit-weights
+      (build-brain-situational-weights
+       race enemy-race frame minerals gas workers active-bases
+       ready-bldg-counts unit-counts enemy-u-counts enemy-b-counts
+       researched-upgrades pending-upgrades
+       eff-req-aa? enemy-cap-air? enemy-threat-supply))
+    (define sit-recommended-units (hash-ref sit-weights 'recommended-units '()))
+    (define sit-suppressed-units (hash-ref sit-weights 'suppressed-units '()))
+    (define sit-unit-caps (hash-ref sit-weights 'unit-caps (hasheq)))
+    (define sit-penalties (hash-ref sit-weights 'penalties (hasheq)))
+
     ;; 2. Self-Healing Tech Prerequisite DAG Check & O(1) due-goal tables:
     (define all-due-goals
       (append (if bo-raw-goal (list bo-raw-goal) '())
@@ -3176,6 +3349,7 @@
               due-timing-goals))
     (define timing-sec-ht (make-hasheq))
     (define goal-target-count-ht (make-hasheq))
+    (define bo-unit-target-ht (make-hasheq))
     (for ([g (in-list all-due-goals)]
           #:when (pro-bo-goal? g))
       (define key (normalize-brain-sym (pro-bo-goal-target-sym g)))
@@ -3185,7 +3359,11 @@
         (hash-set! timing-sec-ht key tsec))
       (hash-set! goal-target-count-ht key
                  (max (hash-ref goal-target-count-ht key 1)
-                      (pro-bo-goal-target-count g))))
+                      (pro-bo-goal-target-count g)))
+      (when (eq? (pro-bo-goal-kind g) 'train)
+        (hash-set! bo-unit-target-ht key
+                   (max (hash-ref bo-unit-target-ht key 0)
+                        (pro-bo-goal-target-count g)))))
     (for ([n (in-list plan-active-nodes)])
       (define key (normalize-brain-sym (plan-goal-node-id n)))
       (hash-set! goal-target-count-ht key
@@ -3338,26 +3516,32 @@
                   (> (pro-bo-goal-target-sec bo-raw-goal) 0.0)
                   bo-raw-goal))))
   (define effective-bo-goal
-    (if (and (pro-bo-goal? raw-effective-bo-goal)
-             (eq? (pro-bo-goal-kind raw-effective-bo-goal) 'train))
-        (let* ([g-sym (pro-bo-goal-target-sym raw-effective-bo-goal)]
-               [g-node (lookup-sc2-tech-node g-sym)]
-               [prereq-sym (or (pro-bo-goal-prereq-ready-sym raw-effective-bo-goal)
-                               (and g-node
-                                    (pair? (sc2-tech-node-prereqs g-node))
-                                    (first (sc2-tech-node-prereqs g-node))))])
-          (if (and prereq-sym
-                   (= (bldg-count-equivalent total-bldg-counts prereq-sym) 0))
-              (let* ([p-node (lookup-sc2-tech-node prereq-sym)]
-                     [p-prereqs (and p-node (sc2-tech-node-prereqs p-node))])
-                (pro-bo-goal (if (and p-node (eq? (sc2-tech-node-kind p-node) 'morph)) 'morph 'build)
-                             prereq-sym
-                             1
-                             (pro-bo-goal-min-supply raw-effective-bo-goal)
-                             (and (pair? p-prereqs) (first p-prereqs))
-                             (pro-bo-goal-target-sec raw-effective-bo-goal)))
-              raw-effective-bo-goal))
-        raw-effective-bo-goal))
+    (cond
+      [(and (pro-bo-goal? raw-effective-bo-goal)
+            (eq? (pro-bo-goal-kind raw-effective-bo-goal) 'train))
+       (let* ([g-sym (pro-bo-goal-target-sym raw-effective-bo-goal)]
+              [g-node (lookup-sc2-tech-node g-sym)]
+              [prereq-sym (or (pro-bo-goal-prereq-ready-sym raw-effective-bo-goal)
+                              (and g-node
+                                   (pair? (sc2-tech-node-prereqs g-node))
+                                   (first (sc2-tech-node-prereqs g-node))))])
+         (if (and prereq-sym
+                  (= (bldg-count-equivalent total-bldg-counts prereq-sym) 0))
+             (let* ([p-node (lookup-sc2-tech-node prereq-sym)]
+                    [p-prereqs (and p-node (sc2-tech-node-prereqs p-node))])
+               (pro-bo-goal (if (and p-node (eq? (sc2-tech-node-kind p-node) 'morph)) 'morph 'build)
+                            prereq-sym
+                            1
+                            (pro-bo-goal-min-supply raw-effective-bo-goal)
+                            (and (pair? p-prereqs) (first p-prereqs))
+                            (pro-bo-goal-target-sec raw-effective-bo-goal)))
+             raw-effective-bo-goal))]
+      [(resolve-gated-upgrade-prereq-goal
+        race raw-effective-bo-goal frame workers
+        ready-bldg-counts total-bldg-counts unit-counts
+        researched-upgrades pending-upgrades)
+       => values]
+      [else raw-effective-bo-goal]))
 
   (define bo-goal-sym
     (and (pro-bo-goal? effective-bo-goal)
@@ -3508,15 +3692,36 @@
         (compute)))
 
   (define can-escrow-cache (make-hasheq))
+  (define eff-th-total-cnt
+    (for/sum ([s (in-list '(hatchery lair hive nexus command-center orbital-command planetary-fortress))])
+      (hash-ref total-bldg-counts s 0)))
+  (define escrow-state-entry
+    (macro-escrow-sync-entry! race enemy-race frame minerals eff-th-total-cnt))
   (define (cand-can-escrow? sym)
     (define (compute)
       (define node (lookup-sc2-tech-node sym))
+      (define nsym (normalize-brain-sym sym))
+      (define supply-sym? (memq nsym '(overlord pylon supply-depot)))
+      (define nat-exp-sym? (and natural-exp-window? (eq? nsym race-expand-sym)))
       (and node
+           (or supply-sym? (not supply-preempt-now?))
+           (or supply-sym? (not (macro-escrow-in-backoff? escrow-state-entry frame nsym)))
+           (or (not (eq? (sc2-tech-node-kind node) 'research))
+               (upgrade-allowed-by-unit-and-order-gates?
+                race nsym frame workers ready-bldg-counts total-bldg-counts
+                unit-counts researched-upgrades pending-upgrades))
            (or (>= workers 6)
                (and emergency-army-before-workers?
                     (eq? (sc2-tech-node-category node) 'combat-unit)))
            (or (>= minerals (sc2-tech-node-min-cost node)) has-mineral-income?)
            (or (>= gas (sc2-tech-node-gas-cost node)) has-gas-income?)
+           (or supply-sym?
+               nat-exp-sym?
+               (can-fund-within-frames?
+                minerals gas
+                (sc2-tech-node-min-cost node) (sc2-tech-node-gas-cost node)
+                mineral-harvesters gas-harvesters
+                workers ready-bldg-counts race #:frames 120))
            (not (step-already-satisfied? sym))
            (step-prereqs-ready? sym)))
     (if (symbol? sym)
@@ -3642,8 +3847,12 @@
       [(< supply-left 0) 3]
       [(and (hash? open-facility-slots) (or (>= supply-cap 66) (>= prod-fac-count 5))) 3]
       [else 2]))
+  (define supply-margin (compute-supply-preemption-margin supply-cap))
+  (define supply-preempt-now?
+    (supply-preemption-needed? supply-used supply-cap pending-supply))
   (define supply-crisis?
     (or supply-lockout-active?
+        supply-preempt-now?
         (and (< supply-cap 200)
              (< (+ supply-cap (* 8 pending-supply)) 200)
              (< pending-supply max-crisis-pending-supply)
@@ -3653,17 +3862,24 @@
                       (>= minerals 400)
                       (<= (+ supply-left (* 8 pending-supply)) (max 8 supply-buffer)))))))
 
-  (define overdue-1base-expand?
-    (and (>= minerals 400)
-         (= active-bases 1)
-         (<= total-townhalls-incl-pending 1)
-         (>= frame 2688)
-         (not under-attack?)
-         (<= enemy-threat-supply 0)
-         (>= workers 12)))
-
   (define race-expand-sym
     (case race [(Zerg) 'hatchery] [(Terran) 'command-center] [else 'nexus]))
+  (define natural-exp-window?
+    (and (<= total-townhalls-incl-pending 1)
+         (natural-expansion-window-active?
+          race frame workers (max eff-th-total-cnt total-townhalls-incl-pending)
+          ready-bldg-counts total-bldg-counts
+          under-attack? enemy-threat-supply
+          under-early-rush-crisis?)))
+  (define overdue-1base-expand?
+    (or natural-exp-window?
+        (and (>= minerals 400)
+             (= active-bases 1)
+             (<= total-townhalls-incl-pending 1)
+             (>= frame 2688)
+             (not under-attack?)
+             (< enemy-threat-supply 6.0)
+             (>= workers 12))))
 
   (define emergency-rush-syms
     (if under-early-rush-crisis?
@@ -4025,9 +4241,43 @@
 
   (define (cand-wanted-now? c)
     (define id (priority-candidate-id c))
+    (define c-norm (normalize-brain-sym id))
     (define cat (priority-candidate-category c))
+    (define act (priority-candidate-action c))
     (define blk0 (priority-candidate-blocking-allowed? c))
-    (define node (lookup-sc2-tech-node id))
+    (define research-allowed?
+      (or (not (and (pair? act) (eq? (car act) 'research)))
+          (upgrade-allowed-by-unit-and-order-gates?
+           race c-norm frame workers ready-bldg-counts total-bldg-counts
+           unit-counts researched-upgrades pending-upgrades)))
+    (define nat-exp-defers-cand?
+      (and natural-exp-window?
+           (not (eq? c-norm race-expand-sym))
+           (not (memq c-norm '(overlord pylon supply-depot drone probe scv)))
+           (case race
+             [(Zerg) (or (and (eq? c-norm 'spawning-pool)
+                              (or (not (pro-bo-goal? effective-bo-goal))
+                                  (not (eq? (pro-bo-goal-target-sym effective-bo-goal) 'spawning-pool))
+                                  (>= (pro-bo-goal-min-supply effective-bo-goal) 16)))
+                         (memq c-norm '(roach-warren extractor queen zergling)))]
+             [(Protoss) (or (and (eq? c-norm 'gateway)
+                                 (>= (bldg-count-equivalent total-bldg-counts 'gateway) 1))
+                            (and (eq? cat 'tech-upgrade)
+                                 (pair? act)
+                                 (eq? (car act) 'research))
+                            (and (eq? cat 'combat-unit)
+                                 (memq c-norm '(zealot stalker adept sentry))
+                                 (>= army-supply 2)))]
+             [(Terran) (or (and (eq? c-norm 'barracks)
+                                (>= (bldg-count-equivalent total-bldg-counts 'barracks) 1))
+                           (eq? c-norm 'factory)
+                           (and (eq? c-norm 'marine)
+                                (>= (unit-count-equivalent unit-counts 'marine) 1)))]
+             [else #f])))
+    (if (or (not research-allowed?) nat-exp-defers-cand?)
+        #f
+        (let ()
+          (define node (lookup-sc2-tech-node id))
     (define plan-node
       (or (hash-ref plan-next-actions-ht id #f)
           (hash-ref plan-next-actions-ht (normalize-brain-sym id) #f)))
@@ -4361,7 +4611,7 @@
                      (> enemy-threat-supply 0)
                      (< army-supply 8)
                      (>= workers (min 24 (* 11 active-bases)))))]
-           [else blk0])))
+           [else blk0])))))
 
   (define all-adjusted-cands
     (for/list ([c (in-list (append raw-cands extra-cands))]
@@ -4509,25 +4759,41 @@
          (define protoss-4th-nexus-ready?
            (and (protoss-4th-nexus-due? race active-bases workers army-supply minerals enemy-cap-air?)
                 light-expand-threat-ok?))
+         (define exp-in-backoff? (macro-escrow-in-backoff? escrow-state-entry frame sym))
+         (define exp-affordable-now?
+           (and (>= minerals (priority-candidate-min-cost c))
+                (>= gas (priority-candidate-gas-cost c))))
          (define exp-ok?
-           (or slice15-base-loss-expand-now?
-               (and (or (not ws-natural-blocked?) (>= minerals 350))
-                    (or blk0 is-bo-goal? is-repaired? overdue-1base-expand? protoss-3rd-nexus-due? protoss-4th-nexus-ready? terran-contained-breakout-cc? depletion-or-mirror-exp? high-bank-exp?)
-                    (or terran-contained-breakout-cc? (not under-attack?))
-                    light-expand-threat-ok?
-                    (not premature-3rd-base-starving-army?)
-                    (or overdue-1base-expand?
-                        terran-contained-breakout-cc?
-                        (>= workers (if (eq? race 'Zerg) 14 16)))
-                    has-mineral-income?)))
+           (and (not supply-preempt-now?)
+                (not exp-in-backoff?)
+                (or natural-exp-window?
+                    slice15-base-loss-expand-now?
+                    overdue-1base-expand?
+                    (can-fund-within-frames?
+                     minerals gas (priority-candidate-min-cost c) (priority-candidate-gas-cost c)
+                     mineral-harvesters gas-harvesters workers ready-bldg-counts race #:frames 90))
+                (or slice15-base-loss-expand-now?
+                    (and (or (not ws-natural-blocked?) (>= minerals 350))
+                         (or blk0 is-bo-goal? is-repaired? natural-exp-window? overdue-1base-expand? protoss-3rd-nexus-due? protoss-4th-nexus-ready? terran-contained-breakout-cc? depletion-or-mirror-exp? high-bank-exp?)
+                         (or terran-contained-breakout-cc? (not under-attack?))
+                         (or natural-exp-window? light-expand-threat-ok?)
+                         (not premature-3rd-base-starving-army?)
+                         (or overdue-1base-expand?
+                             terran-contained-breakout-cc?
+                             (>= workers (if (eq? race 'Zerg) 14 16)))
+                         has-mineral-income?))))
          (define exp-u
            (cond
+             [(and exp-in-backoff? (not exp-affordable-now?)) (min u0 20.0)]
              [slice15-base-loss-expand-now? (max 492.0 plan-weight u0)]
              [(and (not terran-contained-breakout-cc?)
-                   (or under-attack? (not light-expand-threat-ok?) premature-3rd-base-starving-army?
+                   (or under-attack?
+                       (and (not natural-exp-window?) (not light-expand-threat-ok?))
+                       premature-3rd-base-starving-army?
                        (and ws-natural-blocked? (< minerals 350))))
               (min u0 45.0)]
              [is-repaired? (max 520.0 u0)]
+             [natural-exp-window? (max 620.0 plan-weight u0)]
              [terran-contained-breakout-cc? (max 478.0 plan-weight u0)]
              [(and depletion-or-mirror-exp? exp-ok?) (max 474.0 plan-weight u0)]
              [(and high-bank-exp? exp-ok?) (max 470.0 plan-weight u0)]
@@ -4617,6 +4883,32 @@
                          (>= gas 100)
                          (= (bldg-count-equivalent total-bldg-counts 'starport) 0)
                          (> (bldg-count-equivalent ready-bldg-counts 'factory) 0)))))
+         (define act (priority-candidate-action c))
+         (define nsym (normalize-brain-sym sym))
+         (define is-combat-unit-cand?
+           (or (eq? cat 'combat-unit)
+               (and (eq? cat 'counter-tech)
+                    (pair? act)
+                    (memq (car act) '(train morph)))))
+         (define static-roi-bias
+           (if is-combat-unit-cand?
+               (let ([gc (priority-candidate-gas-cost c)]
+                     [mc (priority-candidate-min-cost c)])
+                 (if (> gc 0)
+                     (+ (if (eq? cat 'combat-unit) 14.0 0.0)
+                        (min 16.0 (+ (* 0.025 (exact->inexact mc))
+                                     (* 0.075 (exact->inexact gc)))))
+                     0.0))
+               0.0))
+         (define sit-w (if is-combat-unit-cand? (situational-unit-weight sit-weights nsym 1.0) 1.0))
+         (define sit-penalty (and is-combat-unit-cand? (hash-ref sit-penalties nsym #f)))
+         (define sit-suppressed? (and is-combat-unit-cand? (not (not (memq nsym sit-suppressed-units)))))
+         (define sit-recommended? (and is-combat-unit-cand? (not (not (memq nsym sit-recommended-units)))))
+         (define sit-cap-val (and is-combat-unit-cand? (hash-ref sit-unit-caps nsym #f)))
+         (define sit-over-cap?
+           (and is-combat-unit-cand?
+                (exact-integer? sit-cap-val)
+                (>= (unit-count-equivalent unit-counts nsym) sit-cap-val)))
          (define mineral-only-gas-locked?
            (and (hash? open-facility-slots)
                 (eq? cat 'combat-unit)
@@ -4629,10 +4921,6 @@
            (and is-bo-goal?
                 (not mineral-only-gas-locked?)
                 (not queen-defer-for-first-lings?)))
-         (define u-after-gas-lock
-           (if mineral-only-gas-locked?
-               (/ u0 (+ 1.0 (expt (/ (exact->inexact gas) 100.0) 2)))
-               u0))
          (define colossus-unlock-needed?
            (and (eq? race 'Protoss)
                 (eq? sym 'colossus)
@@ -4688,6 +4976,11 @@
                proactive-overseer-boost?
                emergency-rush-root-boost?
                emergency-rush-def-boost?))
+         (define first-robo-under-attack-ok?
+           (and (eq? sym 'robotics-facility)
+                (= (bldg-count-equivalent total-bldg-counts 'robotics-facility) 0)
+                (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
+                (>= workers 20)))
          (define tech-under-attack-escrow-ok?
            (or (not (hash? open-facility-slots))
                (and (not under-attack?) (<= enemy-threat-supply 0))
@@ -4695,10 +4988,7 @@
                (eq? cat 'supply)
                is-repaired?
                answers-aa-or-det?
-               (and (eq? sym 'robotics-facility)
-                    (= (bldg-count-equivalent total-bldg-counts 'robotics-facility) 0)
-                    (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
-                    (>= workers 20))))
+               first-robo-under-attack-ok?))
          (define secondary-starving-primary-slots?
            (and (hash? open-facility-slots)
                 (eq? cat 'combat-unit)
@@ -4748,9 +5038,59 @@
                          (not (eq? sym 'orbital-command))
                          (not (and (eq? sym 'queen) inject-queen-boost?)))
                     tvt-optional-scaling-defer?)))
+         (define sit-hard-counter-exempt?
+           (or opp-cap-air-override?
+               emergency-rush-def-boost?
+               answers-aa-or-det?
+               colossus-unlock-needed?
+               pvt-robo-bay-boost?
+               (and tvp-cannon-contain? (eq? nsym 'siege-tank))
+               (and under-attack? (< army-supply 4))))
+         (define sit-penalized-block?
+           (and is-combat-unit-cand?
+                (or sit-over-cap?
+                    sit-suppressed?
+                    (symbol? sit-penalty))
+                (cond
+                  [(eq? sit-penalty 'banshee-cannot-shoot-air) #t]
+                  [(eq? sit-penalty 'aa-supply-over-cap) #t]
+                  [(eq? sit-penalty 'no-enemy-air-supply)
+                   (let ([bo-tgt (hash-ref bo-unit-target-ht nsym 0)])
+                     (not (or opp-cap-air-override?
+                              answers-aa-or-det?
+                              (and is-bo-goal?
+                                   (> bo-tgt 0)
+                                   (<= bo-tgt 2)
+                                   (< (unit-count-equivalent unit-counts nsym) bo-tgt)))))]
+                  [(eq? sit-penalty 'early-econ-gas-starvation)
+                   (not (or sit-hard-counter-exempt?
+                            (and (>= gas 250)
+                                 (>= active-bases 2)
+                                 (or effective-bo-goal? is-timing-plan?))))]
+                  [(memq sit-penalty '(pre-range-hydra-vs-splash late-t1-vs-splash))
+                   (not sit-hard-counter-exempt?)]
+                  [else
+                   (not (or sit-hard-counter-exempt? effective-bo-goal?))])))
+         (define u-after-gas-lock
+           (let* ([u-gas (if mineral-only-gas-locked?
+                             (/ u0 (+ 1.0 (expt (/ (exact->inexact gas) 100.0) 2)))
+                             u0)]
+                  [u-clean (if is-combat-unit-cand?
+                               (max 10.0 (- u-gas static-roi-bias))
+                               u-gas)])
+             (cond
+               [(not is-combat-unit-cand?) u-clean]
+               [sit-penalized-block?
+                (min (if (eq? sit-penalty 'early-econ-gas-starvation) 85.0 35.0)
+                     (+ (* u-clean (+ 0.25 (* 0.35 sit-w)))
+                        (if (eq? sit-penalty 'early-econ-gas-starvation) 15.0 0.0)))]
+               [else
+                (+ (* u-clean (+ 0.45 (* 0.55 sit-w)))
+                   (if sit-recommended? (* 35.0 (max 0.0 (- sit-w 1.0))) 0.0))])))
          (define can-esc?
            (and (not queen-defer-for-first-lings?)
                 (not defer-for-worker-recovery?)
+                (not sit-penalized-block?)
                 (or blk0
                     effective-bo-goal?
                     colossus-unlock-needed?
@@ -4784,21 +5124,23 @@
               (if (and (< army-supply 4) (< minerals 200))
                   (min 390.0 u-after-gas-lock)
                   (max 515.0 (+ 200.0 u0)))]
+             [sit-penalized-block? u-after-gas-lock]
              [(and effective-bo-goal? (memq plan-reason '(anti-capital-air opp-cap-air-override)))
               (max plan-weight (+ 650.0 u0) 930.0)]
              [pvt-robo-bay-boost? (max 960.0 (+ 400.0 u0))]
              [is-repaired? (max (+ 380.0 u0) 520.0)]
              [defer-for-worker-recovery? (min 425.0 u-after-gas-lock)]
              [proactive-overseer-boost? (max 475.0 (+ 140.0 u0))]
+             [colossus-unlock-needed? (max plan-weight 496.0 u0)]
              [(and effective-bo-goal?
                    (or (and (not under-attack?) (<= enemy-threat-supply 0))
                        (eq? cat 'combat-unit)
                        answers-aa-or-det?
-                       (memq (normalize-brain-sym sym) '(baneling lurker ultralisk brood-lord ravager archon))))
+                       (memq nsym '(baneling lurker ultralisk brood-lord ravager archon))))
               (max plan-weight
                    (if answers-aa-or-det? u-after-gas-lock 0.0)
                    (if (and bo-goal-sym (same-brain-sym? sym bo-goal-sym)) (+ 200.0 u0) 0.0)
-                   465.0)]
+                   (if is-combat-unit-cand? (+ 465.0 (* 18.0 (- sit-w 1.0))) 465.0))]
              [(and (eq? cat 'tech-upgrade)
                    (not under-attack?)
                    (> sg-upg-mult 1.25)
@@ -4811,7 +5153,6 @@
               ;; Light non-attack threat should not drop matchup scaling behind generic upgrades while
               ;; staying strictly below boosted combat units (465+) and keeping `can-esc?` gated above.
               (max 420.0 u-after-gas-lock)]
-             [colossus-unlock-needed? (max plan-weight 465.0 u0)]
              [(and is-timing-plan?
                    (or (and (not under-attack?) (<= enemy-threat-supply 0))
                        answers-aa-or-det?))
@@ -4826,6 +5167,8 @@
                    (<= enemy-threat-supply 0)
                    (>= army-supply 2))
               (min 415.0 u-after-gas-lock)]
+             [(and first-robo-under-attack-ok? (>= army-supply 6))
+              (max plan-weight 475.0 u0)]
              [(and is-repaired-raw? (not is-repaired?))
               (max 50.0 (- u-after-gas-lock 300.0))]
              [else u-after-gas-lock]))
@@ -4834,7 +5177,84 @@
                       [blocking-allowed? can-esc?])])))
 
   ;; Slice 1.5A utility overrides, counter pivots, escrow preemptions, and failing-comp suppression
-  (define raw-adjusted-cands all-adjusted-cands)
+  (define protoss-ground-combat-cnt
+    (if (eq? race 'Protoss)
+        (+ (unit-count-equivalent unit-counts 'zealot)
+           (unit-count-equivalent unit-counts 'stalker)
+           (unit-count-equivalent unit-counts 'adept)
+           (unit-count-equivalent unit-counts 'sentry)
+           (unit-count-equivalent unit-counts 'immortal)
+           (unit-count-equivalent unit-counts 'colossus)
+           (unit-count-equivalent unit-counts 'disruptor)
+           (unit-count-equivalent unit-counts 'high-templar)
+           (unit-count-equivalent unit-counts 'dark-templar)
+           (unit-count-equivalent unit-counts 'archon))
+        0))
+  (define protoss-air-combat-cnt
+    (if (eq? race 'Protoss)
+        (+ (unit-count-equivalent unit-counts 'void-ray)
+           (unit-count-equivalent unit-counts 'carrier)
+           (unit-count-equivalent unit-counts 'tempest)
+           (unit-count-equivalent unit-counts 'phoenix)
+           (unit-count-equivalent unit-counts 'oracle))
+        0))
+  (define (post-adjust-candidate c)
+    (define id (priority-candidate-id c))
+    (define nsym (normalize-brain-sym id))
+    (define cat (priority-candidate-category c))
+    (define act (priority-candidate-action c))
+    (define u (priority-candidate-utility-score c))
+    (define blk? (priority-candidate-blocking-allowed? c))
+    (define in-backoff? (macro-escrow-in-backoff? escrow-state-entry frame nsym))
+    (define affordable-now?
+      (and (>= minerals (priority-candidate-min-cost c))
+           (>= gas (priority-candidate-gas-cost c))))
+    (cond
+      [(eq? cat 'supply)
+       (if supply-preempt-now?
+           (struct-copy priority-candidate c
+                        [utility-score (max u 1350.0)]
+                        [blocking-allowed? #t])
+           c)]
+      [(and in-backoff? (not affordable-now?))
+       (struct-copy priority-candidate c
+                    [utility-score (min u 20.0)]
+                    [blocking-allowed? #f])]
+      [(and (pair? act)
+            (eq? (car act) 'research)
+            (not (upgrade-allowed-by-unit-and-order-gates?
+                  race nsym frame workers ready-bldg-counts total-bldg-counts
+                  unit-counts researched-upgrades pending-upgrades)))
+       (struct-copy priority-candidate c
+                    [utility-score 0.0]
+                    [blocking-allowed? #f])]
+      [else
+       (define u1
+         (cond
+           [(and (eq? race 'Protoss)
+                 (>= protoss-ground-combat-cnt protoss-air-combat-cnt)
+                 (memq nsym '(protoss-ground-weapons-1 protoss-ground-weapons-2 protoss-ground-weapons-3
+                              protoss-ground-armor-1 protoss-ground-armor-2 protoss-ground-armor-3)))
+            (max u 476.0)]
+           [(and (eq? race 'Protoss)
+                 (> protoss-ground-combat-cnt protoss-air-combat-cnt)
+                 (memq nsym '(protoss-air-weapons-1 protoss-air-weapons-2 protoss-air-weapons-3
+                              protoss-air-armor-1 protoss-air-armor-2 protoss-air-armor-3)))
+            (min u 440.0)]
+           [(and natural-exp-window? (eq? nsym race-expand-sym))
+            (max u 620.0)]
+           [(and natural-exp-window? (not (memq cat '(supply worker))))
+            (min u 460.0)]
+           [else u]))
+       (define blk1
+         (cond
+           [(or supply-preempt-now? in-backoff?) #f]
+           [(and natural-exp-window? (eq? nsym race-expand-sym)) #t]
+           [else blk?]))
+       (struct-copy priority-candidate c
+                    [utility-score u1]
+                    [blocking-allowed? blk1])]))
+  (define raw-adjusted-cands (map post-adjust-candidate all-adjusted-cands))
   (define slice15-adjusted-cands
     (if (and (not opp-cap-air-override?) (eq? loss-recovery-mode 'none))
         raw-adjusted-cands
@@ -4859,13 +5279,21 @@
                  #t))
           (define is-rep? (is-repaired-prereq? cid))
           ;; Step 1: Opportunity-cost capital-air-fleet hard override (485..515 counters, -140 ground non-counters)
+          (define sit-aa-capped-here?
+            (let ([cap (hash-ref sit-unit-caps csym #f)])
+              (or (eq? (hash-ref sit-penalties csym #f) 'aa-supply-over-cap)
+                  (and (exact-integer? cap)
+                       (> (unit-count-equivalent unit-counts csym) 0)
+                       (>= (unit-count-equivalent unit-counts csym) cap)))))
           (define-values (u1 blk1)
             (if opp-cap-air-override?
                 (let ([cap-u (hash-ref cap-air-boost-table csym #f)])
                   (cond
-                    [cap-u
+                    [(and cap-u (not sit-aa-capped-here?))
                      (values (max u cap-u)
                              (or prereq-ok? (memq csym '(spire starport stargate fleet-beacon))))]
+                    [(and cap-u sit-aa-capped-here?)
+                     (values (min u 35.0) #f)]
                     [(memq csym *slice15-cap-air-suppressed-syms*)
                      (values (- u 140.0) #f)]
                     [else (values u blk)]))
@@ -5168,8 +5596,17 @@
               (or (>= gas 400) (>= rem-gas g-cost))
               (memq cat '(tech-upgrade counter-tech production-scaling))
               (not (and node (eq? (sc2-tech-node-kind node) 'train)))))
+       (define rem-escrow-plausible?
+         (or (not (and (eq? cat 'expansion)
+                       (>= active-bases 2)
+                       (not slice15-base-loss-expand-now?)))
+             (can-fund-within-frames?
+              rem-min rem-gas m-cost g-cost
+              mineral-harvesters gas-harvesters
+              workers ready-bldg-counts race #:frames 120)))
        (define escrowed-now? #f)
        (when (and tech-cap-ok? unit-cap-ok? prereq-ok? slot-ok? worker-slot-escrow-ok? blk-ok? supply-ok?
+                  rem-escrow-plausible?
                   (not high-bank-skip-tech-escrow?)
                   (or (< rem-min m-cost) (< rem-gas g-cost)))
          (define pure-gas-starved?
@@ -5338,19 +5775,45 @@
              (eq? (pro-bo-goal-kind final-effective-bo-goal) 'train))
         (sc2-supply-cost final-bo-goal-sym 0)
         0))
+  (define supply-scheduled-this-step?
+    (ormap (lambda (s) (memq (normalize-brain-sym s) '(overlord pylon supply-depot))) final-ids))
+  (define supply-preempt-saving?
+    (and supply-preempt-now? (not supply-scheduled-this-step?)))
+  (define final-bo-goal-norm
+    (and final-bo-goal-sym (normalize-brain-sym final-bo-goal-sym)))
+  (define final-bo-is-supply?
+    (not (not (memq final-bo-goal-norm '(overlord pylon supply-depot)))))
+  (define final-bo-is-nat-expand?
+    (and natural-exp-window? (eq? final-bo-goal-norm race-expand-sym)))
   (define final-bo-eligible-for-saving-fallback?
     (and has-mineral-income?
          final-bo-goal-sym
+         (not supply-preempt-saving?)
+         (or (not supply-preempt-now?)
+             final-bo-is-supply?
+             final-bo-is-nat-expand?)
+         (not (macro-escrow-in-backoff? escrow-state-entry frame final-bo-goal-sym))
+         (upgrade-allowed-by-unit-and-order-gates?
+          race final-bo-goal-sym frame workers
+          ready-bldg-counts total-bldg-counts unit-counts
+          researched-upgrades pending-upgrades)
+         (or final-bo-is-supply?
+             final-bo-is-nat-expand?
+             (can-fund-within-frames?
+              rem-min rem-gas (sc2-min-cost final-bo-goal-sym 0) (sc2-gas-cost final-bo-goal-sym 0)
+              mineral-harvesters gas-harvesters
+              workers ready-bldg-counts race #:frames 120))
          (<= final-bo-sup-cost supply-left)
          (not (and (memq final-bo-goal-sym '(hatchery nexus command-center))
                    (hash? open-facility-slots)
                    (>= active-bases 2)
                    (not (eq? race 'Zerg))
                    (< army-supply 10)
-                   (< minerals 550)))))
+                   (< rem-min 550)))))
    (define saving-id
      (let ([high-bank-tech-release?
-            (and (>= minerals 600)
+            (and (not supply-preempt-saving?)
+                 (>= minerals 600)
                  (>= supply-left 2)
                  (or (>= gas 400) (<= gas-floor 0))
                  (if reserved-cand
@@ -5358,10 +5821,15 @@
                            '(tech-upgrade counter-tech production-scaling))
                      (not (memq final-bo-goal-sym '(overlord pylon supply-depot)))))])
        (cond
+         [supply-preempt-saving? race-supply-sym]
          [high-bank-tech-release? 'none]
          [reserved-cand (priority-candidate-id reserved-cand)]
          [final-bo-eligible-for-saving-fallback? final-bo-goal-sym]
          [else 'none])))
+  (define out-min-floor (if supply-preempt-saving? 100 min-floor))
+  (define out-gas-floor (if supply-preempt-saving? 0 gas-floor))
+  (define out-reserved-slots (if supply-preempt-saving? '() (reverse reserved-slots)))
+  (macro-escrow-record-decision! race enemy-race frame minerals eff-th-total-cnt saving-id final-ids)
   (define log-str
     (format-priority-schedule-log-line
      sched-result
@@ -5371,9 +5839,9 @@
      #:gas gas
      #:supply-used supply-used
      #:supply-cap supply-cap
-     #:bo-goal-sym (and has-mineral-income? final-bo-goal-sym)
-     #:bo-reserved-min min-floor
-     #:bo-reserved-gas gas-floor))
+     #:bo-goal-sym (and has-mineral-income? (not supply-preempt-saving?) final-bo-goal-sym)
+     #:bo-reserved-min out-min-floor
+     #:bo-reserved-gas out-gas-floor))
 
   (define reported-effective-bo-goal
     (if (and (not bo-goal-deadlocked?)
@@ -5386,9 +5854,9 @@
    final-actions
    final-ids
    saving-id
-   min-floor
-   gas-floor
-   (reverse reserved-slots)
+   out-min-floor
+   out-gas-floor
+   out-reserved-slots
    reported-effective-bo-goal
    repaired-prereqs
    sched-result
@@ -5400,6 +5868,114 @@
        (>= rem-sup 2)
        (not (and reserved-cand
                  (eq? (priority-candidate-category reserved-cand) 'supply)))))
+
+;; Per-game escrow age & 112-frame re-escrow backoff tracker for Bug 3 Rule 2.
+;; Keys: (list race enemy-race) -> (hash 'last-frame f 'active-id sym 'start-frame f 'peak-min m 'backoff-ht (hash sym -> until-frame))
+(define *macro-escrow-state-ht* (make-hash))
+
+(define (reset-macro-escrow-tracker!)
+  (hash-clear! *macro-escrow-state-ht*))
+
+(define (macro-escrow-sync-entry! race enemy-race frame minerals total-th)
+  (define key (list race enemy-race))
+  (define prev (hash-ref *macro-escrow-state-ht* key #f))
+  (define last-f (if prev (hash-ref prev 'last-frame -9999) -9999))
+  (define new-game?
+    (or (not prev)
+        (< frame last-f)
+        (and (<= frame 16) (> last-f 32))))
+  (define cur
+    (if new-game?
+        (hash 'last-frame frame
+              'active-id #f
+              'start-frame frame
+              'start-min minerals
+              'peak-min minerals
+              'th-count total-th
+              'backoff-ht (hash))
+        (let* ([aid (hash-ref prev 'active-id #f)]
+               [sf (hash-ref prev 'start-frame frame)]
+               [sm (hash-ref prev 'start-min minerals)]
+               [pm (hash-ref prev 'peak-min minerals)]
+               [prev-th (hash-ref prev 'th-count total-th)]
+               [bht0 (hash-ref prev 'backoff-ht (hash))]
+               [bht (for/hash ([(k until) (in-hash bht0)]
+                               #:when (< frame until))
+                      (values k until))]
+               [nat-age
+                (if (and aid
+                         (memq aid '(hatchery nexus command-center))
+                         (< total-th 2)
+                         (= total-th prev-th)
+                         (> minerals sm))
+                    (if (>= minerals 200) 672 448)
+                    MAX-ESCROW-AGE-FRAMES)]
+               [expired? (and aid (>= (- frame sf) nat-age))])
+          (if expired?
+              (hash 'last-frame frame
+                    'active-id #f
+                    'start-frame frame
+                    'start-min minerals
+                    'peak-min minerals
+                    'th-count total-th
+                    'backoff-ht (hash-set bht aid (+ frame ESCROW-EXPIRATION-BACKOFF-FRAMES)))
+              (hash 'last-frame frame
+                    'active-id aid
+                    'start-frame sf
+                    'start-min sm
+                    'peak-min (max pm minerals)
+                    'th-count total-th
+                    'backoff-ht bht)))))
+  (hash-set! *macro-escrow-state-ht* key cur)
+  cur)
+
+(define (macro-escrow-record-decision! race enemy-race frame minerals total-th saving-id scheduled-ids)
+  (define key (list race enemy-race))
+  (define cur (hash-ref *macro-escrow-state-ht* key #f))
+  (when cur
+    (define prev-aid (hash-ref cur 'active-id #f))
+    (define bht (hash-ref cur 'backoff-ht (hash)))
+    (define norm-save
+      (if (and saving-id (not (eq? saving-id 'none)))
+          (normalize-brain-sym saving-id)
+          #f))
+    (define sched-norm?
+      (and norm-save
+           (ormap (lambda (s) (eq? (normalize-brain-sym s) norm-save)) scheduled-ids)))
+    (define next-aid
+      (if (and norm-save
+               (not sched-norm?)
+               (not (memq norm-save '(overlord pylon supply-depot))))
+          norm-save
+          #f))
+    (define next-sf
+      (cond
+        [(not next-aid) frame]
+        [(eq? next-aid prev-aid) (hash-ref cur 'start-frame frame)]
+        [else frame]))
+    (define next-sm
+      (cond
+        [(not next-aid) minerals]
+        [(eq? next-aid prev-aid) (hash-ref cur 'start-min minerals)]
+        [else minerals]))
+    (define next-pm
+      (cond
+        [(not next-aid) minerals]
+        [(eq? next-aid prev-aid) (max (hash-ref cur 'peak-min minerals) minerals)]
+        [else minerals]))
+    (hash-set! *macro-escrow-state-ht* key
+               (hash 'last-frame frame
+                     'active-id next-aid
+                     'start-frame next-sf
+                     'start-min next-sm
+                     'peak-min next-pm
+                     'th-count total-th
+                     'backoff-ht bht))))
+
+(define (macro-escrow-in-backoff? escrow-entry frame id)
+  (define bht (if escrow-entry (hash-ref escrow-entry 'backoff-ht (hash)) (hash)))
+  (define nid (normalize-brain-sym id))
+  (< frame (hash-ref bht nid 0)))
 
 (define (macro-brain-can-spend? decision id-sym cur-min cur-gas [cat-sym 'combat-unit])
   (define norm-id (normalize-brain-sym id-sym))
