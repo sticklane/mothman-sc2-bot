@@ -454,7 +454,7 @@
     (when pos
       (define lst (unbox (hash-iterate-value ht pos)))
       (hash-set! ht (hash-iterate-key ht pos)
-                 (if (pair? (cdr lst)) (reverse lst) lst))
+                 (if (and (pair? lst) (pair? (cdr lst))) (reverse lst) lst))
       (loop (hash-iterate-next ht pos)))))
 
 (define (bucket-pos-ids ht syms)

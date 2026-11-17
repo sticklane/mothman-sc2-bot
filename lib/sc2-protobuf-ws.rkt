@@ -7509,11 +7509,23 @@
                (and (th-is-nonflying? u)
                     (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
              self-units)))
-  (define ready-gas-bldgs
+  (define all-ready-gas-bldgs
     (filter (lambda (u)
               (and (sc2-unit-is-gas-building? u)
                    (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
             self-units))
+  ;; Exclude depleted Vespene geysers (vespene-contents == 0 && ideal-harvesters == 0 in live SC2, #5129552)
+  ;; so a mined-out main Extractor never pins `(first under-gas)` and starves remaining Extractors at 0G/min!
+  (define ready-gas-bldgs
+    (filter (lambda (u)
+              (or (> (sc2-unit-vespene-contents u) 0)
+                  (> (sc2-unit-ideal-harvesters u) 0)))
+            all-ready-gas-bldgs))
+  (define depleted-gas-tags
+    (for/seteqv ([u (in-list all-ready-gas-bldgs)]
+                 #:when (and (<= (sc2-unit-vespene-contents u) 0)
+                             (<= (sc2-unit-ideal-harvesters u) 0)))
+      (sc2-unit-tag u)))
   (define all-gas-tags (list->seteqv (map sc2-unit-tag ready-gas-bldgs)))
 
   (define (worker-returning-cargo? w)
@@ -7548,19 +7560,25 @@
       (classify-townhall-mineral-patches th mineral-fields 11.5 8))
     sorted)
 
-  (define (th-local-offline? th)
-    (define-values (_near _far local-mins)
-      (classify-townhall-mineral-patches th mineral-fields 11.5 8))
+  (define (th-combat-unsafe? th)
     (define-values (e-cnt e-hp a-hp)
       (townhall-combat-metrics th enemy-combat-units ally-combat-units 10.5))
     (define-values (e-cnt-fire _ef _af)
       (townhall-combat-metrics th enemy-combat-units ally-combat-units 15.0))
     (define max-hp (sc2-unit-health-max th))
-    (or (null? local-mins)
-        (and (>= e-cnt 2) (> e-hp (* 1.3 a-hp)))
+    (or (and (>= e-cnt 2) (> e-hp (* 1.3 a-hp)))
         (and (> max-hp 0.0)
              (< (sc2-unit-health th) (* 0.30 max-hp))
              (>= e-cnt-fire 1))))
+
+  (define (th-local-offline? th)
+    (define-values (_near _far local-mins)
+      (classify-townhall-mineral-patches th mineral-fields 11.5 8))
+    (or (null? local-mins)
+        (th-combat-unsafe? th)))
+
+  (define safe-gas-ready-townhalls
+    (filter (lambda (th) (not (th-combat-unsafe? th))) ready-townhalls))
 
   (define (th-coming-online-safe? th)
     (define bp (sc2-unit-build-progress th))
@@ -7648,22 +7666,27 @@
              (th-workers-targeting-mins th))
         (sc2-unit-assigned-harvesters th)))
 
+  (define (gas-eff-assigned u)
+    (max (sc2-unit-assigned-harvesters u)
+         (in-flight-workers-targeting-tag (sc2-unit-tag u))))
+
   (define under-gas
-    (filter (lambda (u)
-              (define gp (sc2-unit-pos u))
-              (define eff-assigned
-                (max (sc2-unit-assigned-harvesters u)
-                     (in-flight-workers-targeting-tag (sc2-unit-tag u))))
-              (and (< eff-assigned
-                      (max SC2-IDEAL-WORKERS-PER-GEYSER (sc2-unit-ideal-harvesters u)))
-                   (or (null? ready-townhalls)
-                       (ormap (lambda (th)
-                                (define tp (sc2-unit-pos th))
-                                (<= (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
-                                             (sc2-point3d-x tp) (sc2-point3d-y tp))
-                                    SC2-BASE-RESOURCE-RADIUS))
-                              online-ready-townhalls))))
-            ready-gas-bldgs))
+    (sort
+     (filter (lambda (u)
+               (define gp (sc2-unit-pos u))
+               (define eff-assigned (gas-eff-assigned u))
+               (and (< eff-assigned
+                       (max SC2-IDEAL-WORKERS-PER-GEYSER (sc2-unit-ideal-harvesters u)))
+                    (or (null? ready-townhalls)
+                        (ormap (lambda (th)
+                                 (define tp (sc2-unit-pos th))
+                                 (<= (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
+                                              (sc2-point3d-x tp) (sc2-point3d-y tp))
+                                     SC2-BASE-RESOURCE-RADIUS))
+                               safe-gas-ready-townhalls))))
+             ready-gas-bldgs)
+     <
+     #:key gas-eff-assigned))
   (define under-townhalls
     (sort
      (filter (lambda (th)
@@ -7787,8 +7810,9 @@
                                      (<= (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
                                                   (sc2-point3d-x tp) (sc2-point3d-y tp))
                                          SC2-BASE-RESOURCE-RADIUS))
-                                   online-ready-townhalls)))
+                                   safe-gas-ready-townhalls)))
         (sc2-unit-tag gb)))
+    (define all-owned-ths (append ready-townhalls coming-online-townhalls))
     (when (not (null? evac-cand-mins))
       (for ([w (in-list workers)]
             #:when (let* ([wtag (sc2-unit-tag w)]
@@ -7804,6 +7828,17 @@
                           [targeting-online-gas?
                            (ormap (lambda (o) (set-member? online-gas-tags (sc2-unit-order-target-unit-tag o)))
                                   orders)]
+                          [targeting-depleted-gas?
+                           (ormap (lambda (o) (set-member? depleted-gas-tags (sc2-unit-order-target-unit-tag o)))
+                                  orders)]
+                          [unleashed-attack-chase?
+                           (and (not (null? all-owned-ths))
+                                (ormap (lambda (o)
+                                         (memv (sc2-unit-order-ability-id o) '(23 3674 3675)))
+                                       orders)
+                                (for/and ([th (in-list all-owned-ths)])
+                                  (define tp (sc2-unit-pos th))
+                                  (> (pt-dist wx wy (sc2-point3d-x tp) (sc2-point3d-y tp)) 22.0)))]
                           [targeting-offline-or-orphan-min?
                            (ormap (lambda (o)
                                     (define ab (sc2-unit-order-ability-id o))
@@ -7830,6 +7865,8 @@
                           (not targeting-online-gas?)
                           (not targeting-online-min?)
                           (or targeting-offline-or-orphan-min?
+                              targeting-depleted-gas?
+                              unleashed-attack-chase?
                               (and near-offline-th? (not (worker-returning-cargo? w)))))))
         (define wtag (sc2-unit-tag w))
         (define best-min (pick-best-slot-patch w evac-cand-mins))

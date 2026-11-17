@@ -1895,15 +1895,23 @@
     (hash-set! seen-step-keys (cons kind (normalize-brain-sym sym)) #t)
     (define redundant-scaling-fac-with-idle-slots?
       (and live-slots?
-           (< minerals 300)
            (or (and (eq? sym 'barracks)
-                    (>= (bldg-count-equivalent total-bldg-counts 'barracks) (if (>= active-bases 2) 4 2))
-                    (>= (hash-ref open-facility-slots 'barracks 0) 2))
+                    (< minerals 225)
+                    (let ([cur-rax (bldg-count-equivalent total-bldg-counts 'barracks)]
+                          [open-rax (hash-ref open-facility-slots 'barracks 0)])
+                      (and (>= cur-rax 1)
+                           (or (>= open-rax 2)
+                               (and (>= cur-rax 2) (>= open-rax 1))))))
                (and (eq? sym 'gateway)
-                    (>= (bldg-count-equivalent total-bldg-counts 'gateway) (if (>= active-bases 2) 5 2))
-                    (>= (+ (hash-ref open-facility-slots 'gateway 0)
-                           (hash-ref open-facility-slots 'warp-gate 0))
-                        2)))))
+                    (< minerals 275)
+                    (let ([cur-gw (bldg-count-equivalent total-bldg-counts 'gateway)]
+                          [open-gw (+ (hash-ref open-facility-slots 'gateway 0)
+                                      (hash-ref open-facility-slots 'warp-gate 0))])
+                      (and (>= cur-gw 1)
+                           (or (>= cur-gw 2)
+                               (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0))
+                           (or (>= open-gw 2)
+                               (and (>= cur-gw 2) (>= open-gw 1)))))))))
     (define protoss-1base-2nd-gas-capped?
       (and (eq? race 'Protoss)
            (eq? sym 'assimilator)
@@ -5016,6 +5024,23 @@
                        (hash-ref open-facility-slots 'barracks 0))
                     2)
                 (< minerals (- (priority-candidate-min-cost c) 75))))
+         ;; Never let an additional Gateway/Barracks (`150M`) escrow-block or outrank combat units
+         ;; while existing Gateways/WarpGates/Barracks ALREADY have open slots and bank cannot fund both (#5129550)!
+         (define scaling-fac-starving-open-slots?
+           (and (hash? open-facility-slots)
+                (or (and (eq? sym 'gateway)
+                         (< minerals 275)
+                         (let ([cur-gw (bldg-count-equivalent total-bldg-counts 'gateway)]
+                               [open-gw (+ (hash-ref open-facility-slots 'gateway 0)
+                                           (hash-ref open-facility-slots 'warp-gate 0))])
+                           (and (>= cur-gw 1)
+                                (or (>= cur-gw 2)
+                                    (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0))
+                                (>= open-gw 1))))
+                    (and (eq? sym 'barracks)
+                         (< minerals 225)
+                         (>= (bldg-count-equivalent total-bldg-counts 'barracks) 1)
+                         (>= (hash-ref open-facility-slots 'barracks 0) 1)))))
          (define worker-recovery-target
            (cond
              [(eq? cat 'tech-upgrade) (min 22 (* 11 active-bases))]
@@ -5122,6 +5147,7 @@
                 queen-escrow-ok?
                 tech-under-attack-escrow-ok?
                 (not secondary-starving-primary-slots?)
+                (not scaling-fac-starving-open-slots?)
                 (not (and (memq sym '(spine-crawler bunker shield-battery))
                           (< army-supply 4)
                           (< minerals 200)))
@@ -5133,6 +5159,7 @@
          (define boosted-u
            (cond
              [queen-defer-for-first-lings? (min 80.0 u-after-gas-lock)]
+             [scaling-fac-starving-open-slots? (min 380.0 u-after-gas-lock)]
              [emergency-rush-root-boost? (max 680.0 (+ 500.0 u0))]
              [(and emergency-rush-def-boost? (eq? cat 'combat-unit))
               (max 620.0 (+ 340.0 u0))]
@@ -5411,7 +5438,11 @@
   (define rem-sup (max 0 supply-left))
   (define rem-slots
     (if (hash? open-facility-slots)
-        (hash-copy open-facility-slots)
+        (let ([h (hash-copy open-facility-slots)])
+          (when (> (hash-ref h 'warp-gate 0) 0)
+            (hash-set! h 'gateway (+ (hash-ref h 'gateway 0) (hash-ref h 'warp-gate 0)))
+            (hash-set! h 'warp-gate 0))
+          h)
         #f))
   (define reserved-slots '())
   (define seen-tech-counts (make-hasheq))

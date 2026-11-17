@@ -4084,6 +4084,44 @@
   (assert-eq! (saturate-workers-and-gas-commands obs-exp-xfer) '()
               "Expansion worker transfer must count in-flight worker 299 and emit 0 redundant gather resets")
 
+  ;; 1d. Match #5129552 regression: depleted main Extractor (gas=0, ideal=0) & mined-out main minerals
+  ;;     must NOT block saturating non-empty Extractor #502, and un-leased worker chasing >22t recalls to minerals!
+  (define obs-depleted-gas-and-chase
+    (sc2-observation
+     9600
+     (sc2-player-common 1 400 14 84 48 12 36 0 2 0 0)
+     (append
+      (list ;; Main Hatchery (86) whose mineral line mined out (0 local mineral patches), still safe for gas!
+            (mk-sc2-u 400 86 1 32.5 32.5 #:assigned 0 #:ideal 0)
+            ;; Natural Hatchery (86) with active mineral patch #702
+            (mk-sc2-u 401 86 1 60.5 60.5 #:assigned 14 #:ideal 16)
+            ;; Depleted 1st Extractor #501 (vespene=0, ideal=0, assigned=0) — previously pinned `(first under-gas)`!
+            (mk-sc2-u 501 88 1 36.5 34.5 #:assigned 0 #:ideal 0 #:gas 0)
+            ;; Fresh 2nd Extractor #502 at mined-out main (vespene=1500, ideal=3, assigned=0)
+            (mk-sc2-u 502 88 1 28.5 36.5 #:assigned 0 #:ideal 3 #:gas 1500)
+            (mk-sc2-u 702 341 3 66.5 60.5 #:mins 1500)
+            ;; Drone #190 stranded on depleted Extractor #501
+            (mk-sc2-u 190 104 1 36.0 34.5 #:orders (list (sc2-unit-order 3666 #f 501 0.0)))
+            ;; Un-leased Drone #191 chasing enemy across map @(130, 140) with Attack order (23)
+            (mk-sc2-u 191 104 1 130.0 140.0 #:orders (list (sc2-unit-order 23 #f 9999 0.0))))
+      (for/list ([i (in-range 14)])
+        (mk-sc2-u (+ 200 i) 104 1 64.0 60.5 #:orders (list (sc2-unit-order 3666 #f 702 0.0)))))
+     '() '() #f '() '() '() '() '() '()))
+  (define cmds-dep-gas (saturate-workers-and-gas-commands obs-depleted-gas-and-chase))
+  (assert-true! (not (ormap (lambda (c) (= (sc2-raw-unit-command-target-unit-tag c) 501)) cmds-dep-gas))
+                "Match #5129552: Depleted Extractor 501 (0 gas, 0 ideal) must NEVER receive gather orders")
+  (assert-true! (ormap (lambda (c) (= (sc2-raw-unit-command-target-unit-tag c) 502)) cmds-dep-gas)
+                "Match #5129552: Non-empty Extractor 502 at mined-out safe TownHall must be saturated")
+  (assert-true! (and (ormap (lambda (c)
+                              (and (= (sc2-raw-unit-command-target-unit-tag c) 702)
+                                   (equal? (sc2-raw-unit-command-unit-tags c) '(190))))
+                            cmds-dep-gas)
+                     (ormap (lambda (c)
+                              (and (= (sc2-raw-unit-command-target-unit-tag c) 702)
+                                   (equal? (sc2-raw-unit-command-unit-tags c) '(191))))
+                            cmds-dep-gas))
+                "Match #5129552: Stranded depleted-gas Drone 190 & over-chasing Drone 191 (>22t) must recall to minerals")
+
   ;; 2. Live runtime does NOT emit gather-resetting harvest-gas / rebalance-gas-to-minerals & throttles scout spam
   (define rt-live-no-thrash (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
   (define (mk-live-z-obs fr)
@@ -12599,7 +12637,86 @@
                                         #:mineral-patches mins49-multi))
   (assert-true! (and z49-spx (<= (dist2d49 z49-spx z49-spy 74.0 33.5) 9.0)
                      z49-stx (<= (dist2d49 z49-stx z49-sty 80.5 32.5) 9.0))
-                "Zerg spore-crawler & spine-crawler must defend uncovered 2nd-base mineral line / expansion"))
+                "Zerg spore-crawler & spine-crawler must defend uncovered 2nd-base mineral line / expansion")
+
+  ;; Match #5129553 regression: SiegeTank + enemy CreepTumor with 0 SpineCrawlers must NOT crash on `(cdr e-spines)`
+  (define sd-5129553-acts
+    (plan-static-defense-actions
+     (hash 'frame 9142 'base-x 141.0 'base-y 137.0 'enemy-x 42.0 'enemy-y 46.0
+           'ally-units (list (hash 'id 1 'type 'siege-tank 'x 115.0 'y 130.0)
+                             (hash 'id 2 'type 'marauder 'x 116.0 'y 131.0))
+           'ally-buildings (list (hash 'id 3 'type 'command-center 'x 141.0 'y 137.0))
+           'enemy-units '()
+           'enemy-buildings (list (hash 'id 99 'type 'creep-tumor-burrowed 'x 108.0 'y 128.0)))))
+  (assert-true! (list? sd-5129553-acts)
+                "Match #5129553: plan-static-defense-actions with SiegeTank + CreepTumor and 0 SpineCrawlers must not crash")
+
+  ;; Match #5129548/#5129555 & #5129549 regression: Protoss worker rush (>=4 Probes, 0 Pylons/Cannons) must NOT
+  ;; trigger cannon-rush Probe chase, and completed Cannon must block pulling workers onto adjacent warping Cannon!
+  (define sd-5129548-acts
+    (plan-static-defense-actions
+     (hash 'frame 1120 'base-x 72.0 'base-y 171.0 'enemy-x 175.0 'enemy-y 76.0
+           'mineral-harvesters 12
+           'ally-units (for/list ([i (in-range 12)])
+                         (hash 'id (+ 10 i) 'type 'drone 'x 72.0 'y 171.0 'hp 40))
+           'ally-buildings (list (hash 'id 1 'type 'hatchery 'x 72.0 'y 171.0))
+           'enemy-units (for/list ([i (in-range 10)])
+                          (hash 'id (+ 500 i) 'type 'probe 'x 95.0 'y 155.0 'hp 20 'shield 20))
+           'enemy-buildings '())))
+  (assert-true! (null? sd-5129548-acts)
+                "Match #5129548/#5129555: >=4 enemy Probes with 0 Pylons/Cannons must NOT trigger 44t cannon-rush worker chase")
+
+  (define sd-5129549-acts
+    (plan-static-defense-actions
+     (hash 'frame 2812 'base-x 38.0 'base-y 141.0 'enemy-x 141.0 'enemy-y 38.0
+           'mineral-harvesters 14 'race 'Terran
+           'ally-units (for/list ([i (in-range 12)])
+                         (hash 'id (+ 10 i) 'type 'scv 'x 38.0 'y 141.0 'hp 45))
+           'ally-buildings (list (hash 'id 1 'type 'command-center 'x 38.0 'y 141.0))
+           'enemy-units (list (hash 'id 801 'type 'probe 'x 46.0 'y 138.0 'hp 20 'shield 20))
+           'enemy-buildings (list (hash 'id 901 'type 'pylon 'x 49.0 'y 137.0 'build-progress 1.0)
+                                  (hash 'id 902 'type 'photon-cannon 'x 45.0 'y 141.0 'build-progress 1.0 'powered? #t)
+                                  (hash 'id 903 'type 'photon-cannon 'x 45.0 'y 137.0 'build-progress 0.4 'powered? #t)))))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack))) sd-5129549-acts))
+                "Match #5129549: Completed powered PhotonCannon must abort pulling SCVs onto adjacent warping Cannon")
+
+  ;; Match #5129554 regression: Enemy Proxy Nexus + 1 Probe in live obs must NOT trigger `pull-workers-attack`
+  (define rt-5129554 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define res-5129554
+    (step-live-bot-runtime!
+     rt-5129554
+     (hash 'frame 2080 'minerals 90 'gas 48 'supply-used 22 'supply-cap 23 'supply-left 1
+           'mineral-harvesters 16 'vespene-harvesters 3
+           'base-x 42.0 'base-y 40.0 'natural-x 54.0 'natural-y 30.0
+           'enemy-x 155.0 'enemy-y 133.0
+           'ally-units (for/list ([i (in-range 20)])
+                         (hash 'id (+ 10 i) 'type 'probe 'x 40.0 'y 40.0 'hp 20 'shield 20))
+           'ally-buildings (list (hash 'id 101 'type 'nexus 'x 42.0 'y 40.0 'build-progress 1.0)
+                                 (hash 'id 102 'type 'pylon 'x 36.0 'y 51.0 'build-progress 1.0)
+                                 (hash 'id 103 'type 'gateway 'x 36.0 'y 48.0 'build-progress 1.0))
+           'enemy-units (list (hash 'id 701 'type 'probe 'x 52.0 'y 32.0 'hp 20 'shield 20))
+           'enemy-buildings (list (hash 'id 702 'type 'nexus 'x 54.0 'y 30.0 'hp 500 'build-progress 0.35)))))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack)))
+                            (hash-ref res-5129554 'actions)))
+                "Match #5129554: Proxy Nexus + 1 Probe must NOT bait live Probes off minerals via pull-workers-attack")
+
+  ;; Match #5129550 regression: Open WarpGate slots at < 275M must NOT escrow-save `gateway` ahead of Stalker/Adept!
+  (define md-5129550
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Zerg #:frame 5200
+      #:minerals 130 #:gas 320 #:supply-used 40 #:supply-cap 54
+      #:workers 30 #:active-bases 2 #:army-supply 10
+      #:unit-counts (hasheq 'probe 30 'zealot 2 'stalker 1 'immortal 1 'observer 1)
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 3 'warp-gate 2 'cybernetics-core 1 'assimilator 2 'robotics-facility 1 'twilight-council 1 'forge 1)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 3 'warp-gate 2 'cybernetics-core 1 'assimilator 2 'robotics-facility 1 'twilight-council 1 'forge 1)
+      #:open-facility-slots (hasheq 'gateway 0 'warp-gate 2 'robotics-facility 0))))
+  (assert-true! (not (eq? (macro-brain-decision-saving-for md-5129550) 'gateway))
+                "Match #5129550: With 2 open WarpGate slots at 130M/320G, macro brain must NOT escrow-save for gateway")
+  (assert-true! (let ([sids (macro-brain-decision-scheduled-ids md-5129550)])
+                  (or (pair? (memq 'stalker sids))
+                      (pair? (memq 'adept sids))))
+                "Match #5129550: With 2 open WarpGate slots at 130M/320G, macro brain must schedule gateway combat unit"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

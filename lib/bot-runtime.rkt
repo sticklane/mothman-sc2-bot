@@ -5746,8 +5746,13 @@
             (define dx (- (exact->inexact (hash-ref e 'x 9999)) base-x))
             (define dy (- (exact->inexact (hash-ref e 'y 9999)) base-y))
             (<= (+ (* dx dx) (* dy dy)) cheese-r2))
+          (define (cheese-bldg-candidate? eb)
+            (and (near-cheese? eb)
+                 (not (and live-obs-harvesters?
+                           (memq (fast-canonical-structure-sym (unit-type-sym eb))
+                                 '(nexus command-center orbital-command assimilator extractor refinery))))))
           (append (filter near-cheese? ground-enemy-units-for-cheese)
-                  (filter near-cheese? enemy-bldgs)))
+                  (filter cheese-bldg-candidate? enemy-bldgs)))
         '()))
   (set-l2-ctx-proxy-or-cheese-enemies! ctx proxy-or-cheese-enemies)
   (define under-early-cheese?
@@ -6734,15 +6739,25 @@
       ;; Keep at least 4 workers mining so economy never hits 0 income while clearing proxy!
       (define surplus-cnt (max 0 (- (length healthy-proxy-workers) 4)))
       (when (> surplus-cnt 0)
+        (define proxy-pylon-cnt
+          (count (lambda (eb)
+                   (eq? (fast-canonical-structure-sym (unit-type-sym eb)) 'pylon))
+                 pullable-proxy-structures))
         (define sorted-proxies
           (sort pullable-proxy-structures
                 <
                 #:key (lambda (eb)
                         (define canon (fast-canonical-structure-sym (unit-type-sym eb)))
                         (define prog (hash-ref eb 'build-progress 1.0))
+                        ;; Single Artosis Pylon: snipe the Pylon (0.0); >= 2 Pylons (#5129549):
+                        ;; kill warping Photon Cannons first (0.0) so backup Pylons can't re-power completed Cannons!
                         (define prio-rank
                           (cond
-                            [(eq? canon 'pylon) 0.0]
+                            [(and (>= proxy-pylon-cnt 2)
+                                  (memq canon '(photon-cannon bunker spine-crawler))
+                                  (< prog SC2-BUILD-COMPLETE-PROGRESS))
+                             0.0]
+                            [(eq? canon 'pylon) (if (>= proxy-pylon-cnt 2) 100.0 0.0)]
                             [(and (memq canon '(photon-cannon bunker spine-crawler))
                                   (< prog SC2-BUILD-COMPLETE-PROGRESS))
                              100.0]
@@ -6805,7 +6820,7 @@
                  (and (not worker-rush-active?)
                       (not in-base-proxy-detected?)
                       (< frame 2500)
-                      (<= (length ally-combat-units) 2)
+                      (null? ally-combat-units)
                       (refractory-allow-action?! cd-tracker 'early-cheese-worker-pull frame 112))))
     (define reserved-pool-wid (l2-ctx-rush-pool-builder-wid ctx))
     (define healthy-workers
@@ -6817,8 +6832,12 @@
                               (not (order-ledger-unit-has-active-build? oledger-early wid w))))
                      (>= (hash-ref w 'hp SC2-DRONE-MAX-HP) SC2-HEALTHY-WORKER-PULL-MIN-HP)))
               workers))
+    (define pull-cap
+      (if live-obs-harvesters?
+          (min 4 (max 0 (- (length healthy-workers) 8)))
+          (min SC2-MAX-WORKER-PULL-COUNT (length healthy-workers))))
     (define pull-workers
-      (take healthy-workers (min SC2-MAX-WORKER-PULL-COUNT (length healthy-workers))))
+      (take healthy-workers pull-cap))
     (define pull-ids
       (map (lambda (w) (hash-ref w 'id 10)) pull-workers))
     (define fallback-threats
@@ -6836,13 +6855,16 @@
       (define threat-is-combat-unit?
         (and (combat-unit-record? threat)
              (not (memq (unit-type-sym threat) '(probe scv drone)))))
-      (define skip-suicidal-combat-pull?
-        (and threat-is-combat-unit?
-             (or (not (null? ally-combat-units))
-                 (and live-obs-harvesters?
-                      (eq? (fast-canonical-unit-sym (unit-type-sym threat)) 'zealot)))))
       (define tx (hash-ref threat 'x (safe-coord (+ base-x 5.0))))
       (define ty (hash-ref threat 'y (safe-coord (+ base-y 5.0))))
+      (define skip-suicidal-combat-pull?
+        (or (and live-obs-harvesters?
+                 (> (dist2d base-x base-y tx ty) 15.0))
+            (and threat-is-combat-unit?
+                 (or (not (null? ally-combat-units))
+                     (and live-obs-harvesters?
+                          (memq (fast-canonical-unit-sym (unit-type-sym threat))
+                                '(zealot stalker adept marine marauder reaper hellion roach)))))))
       (define drill-patch-id (hash-ref obs 'mineral-patch-id SC2-SYNTHETIC-MINERAL-PATCH-ID))
       (define drill-wids
         (if live-obs-harvesters?
@@ -7115,38 +7137,7 @@
               [else prev-evac-until]))
           (when (or threatened? (< frame evac-until))
             (define ttl (if (> evac-until frame) (max 1 (- evac-until frame)) 24))
-            (acquire-unit-lease! leases wid 'evac frame ttl #:x wx #:y wy)))))
-    (when (and live-obs-harvesters?
-               (not worker-rush-active?)
-               (not in-base-proxy-detected?)
-               (null? ally-combat-units)
-               (>= (length non-builder-defense-workers) 8)
-               (pair? undefended-harassers))
-      (define ground-intruders
-        (filter (lambda (h)
-                  (and (not (harasser-is-flying? h))
-                       (<= (dist2d base-x base-y (hash-ref h 'x 9999.0) (hash-ref h 'y 9999.0)) 9.5)))
-                undefended-harassers))
-      (when (and (pair? ground-intruders)
-                 (<= (length ground-intruders) 2)
-                 (refractory-allow-action?! cd-tracker 'zero-army-intruder-pull frame 24))
-        (define t0 (car ground-intruders))
-        (define t0x (safe-coord (hash-ref t0 'x base-x) base-x))
-        (define t0y (safe-coord (hash-ref t0 'y base-y) base-y))
-        (define healthy-int-workers
-          (filter (lambda (w) (> (unit-total-hp-and-shield w) 20))
-                  non-builder-defense-workers))
-        (define pull-n (min 6 (max 0 (- (length healthy-int-workers) 6))))
-        (when (>= pull-n 2)
-          (define chosen-workers
-            (take (sort healthy-int-workers <
-                        #:key (lambda (w) (dist2d t0x t0y (hash-ref w 'x base-x) (hash-ref w 'y base-y))))
-                  pull-n))
-          (l2-emit! ctx (list 'pull-workers-attack
-                       (map (lambda (w) (hash-ref w 'id 10)) chosen-workers)
-                       (hash-ref t0 'id 0)
-                       t0x
-                       t0y))))))
+            (acquire-unit-lease! leases wid 'evac frame ttl #:x wx #:y wy))))))
   (define raw-enemy-units-for-drill
     (let ([reu (and (hash? raw-obs) (hash-ref raw-obs 'enemy-units #f))])
       (if (and (list? reu) (for/and ([e (in-list reu)]) (hash? e)))
@@ -13462,17 +13453,20 @@
              (when (and (gateway-unit-colossus-ok? 'stalker)
                         (or pvz-air-threat?
                             (and (not pvz-matchup?) (enemy-tech-observation-requires-anti-air? tech-obs))
-                            (< (l2-unit-count ctx 'stalker) 2))
+                            (< (l2-unit-count ctx 'stalker)
+                               (if (>= (l2-ctx-gas ctx) 225) 8 2)))
                         (l2-can-spend-by-priority? ctx 'stalker 'combat-unit))
                (l2-try-train-unit! ctx 'stalker 'gateway 5 #:respect-bo-reserve? #t))]
             [pvz-anti-ground-mode?
              ;; In PvZ vs Roach/Ravager/Zergling (`P0-2b`), conserve gas for Immortals/Archons/Colossi,
-             ;; but when floating >= 150G (and not starving an open Robo for Immortal minerals), convert gas into Stalkers!
+             ;; but when floating >= 150G (and not actively saving for Immortal), convert gas into Stalkers!
              (when (and (gateway-unit-colossus-ok? 'stalker)
                         (>= (l2-ctx-gas ctx) 150)
                         (< (l2-unit-count ctx 'stalker) (if (>= (l2-ctx-gas ctx) 300) 10 5))
                         (not (and (memq 'robotics-facility ready-bldg-types)
                                   (> (hash-ref open-prod-slots 'robotics-facility 0) 0)
+                                  (or (eq? bo-goal-sym 'immortal)
+                                      (eq? prio-saving-for-sym 'immortal))
                                   (< (l2-ctx-minerals ctx) (+ (sc2-min-cost 'immortal) (sc2-min-cost 'stalker)))))
                         (l2-can-spend-by-priority? ctx 'stalker 'combat-unit))
                (l2-try-train-unit! ctx 'stalker 'gateway 5 #:respect-bo-reserve? #t))

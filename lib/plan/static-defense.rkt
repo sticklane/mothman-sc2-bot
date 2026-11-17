@@ -725,7 +725,7 @@
     (when pos
       (define lst (unbox (hash-iterate-value ht pos)))
       (hash-set! ht (hash-iterate-key ht pos)
-                 (if (pair? (cdr lst)) (reverse lst) lst))
+                 (if (and (pair? lst) (pair? (cdr lst))) (reverse lst) lst))
       (loop (hash-iterate-next ht pos)))))
 
 (define (has-bucket? ht syms)
@@ -1555,13 +1555,33 @@
               raw-cannons))
         (define nearby-pylons (entities-within bx by 44.0 (hash-ref eb-ht 'pylon '())))
 
-        (if (and (null? nearby-probes) (null? nearby-cannons) (null? nearby-pylons))
+        (define live-harvesters-obs?
+          (and (hash? obs) (hash-has-key? obs 'mineral-harvesters)))
+        (if (or (and (null? nearby-probes) (null? nearby-cannons) (null? nearby-pylons))
+                ;; Protoss worker rush (>= 4 Probes with 0 enemy Pylons/Cannons, #5129548/#5129555)
+                ;; or single scouting Probe in live obs (#5129551) is NOT a cannon rush!
+                (and (null? nearby-cannons)
+                     (null? nearby-pylons)
+                     (or (>= (length nearby-probes) 4)
+                         (and live-harvesters-obs?
+                              (or (null? nearby-probes)
+                                  (null? (cdr nearby-probes))
+                                  (for/and ([ep (in-list nearby-probes)])
+                                    (> (fast-dist2 bx by (u-x ep 9999.0) (u-y ep 9999.0)) 484.0)))))))
             '()
             (let ()
               (define avail-workers (sd-index-ally-workers idx))
               (define used-ht (make-hasheq))
               (define actions '())
               (define (emit! a) (set! actions (cons a actions)))
+              (define completed-powered-cannons
+                (for/list ([c (in-list nearby-cannons)]
+                           #:when (and (u-complete? c)
+                                       (not (eq? (obs-ref c 'powered? #t) #f))))
+                  c))
+              (define (in-completed-cannon-range? x y)
+                (for/or ([cc (in-list completed-powered-cannons)])
+                  (<= (fast-dist2 x y (u-x cc 9999.0) (u-y cc 9999.0)) 76.5625)))
               (define any-warping-cannon?
                 (for/or ([c (in-list nearby-cannons)])
                   (< (u-progress c 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
@@ -1574,11 +1594,13 @@
                     nearby-pylons))
               (define wall-pool (bucket-pos-ids eb-ht *printf-wall-structs*))
 
-              ;; 1. Chase enemy Probes: 1 dedicated chaser per Probe (`printf-multi-probe-chase` when >= 2)
+              ;; 1. Chase enemy Probes outside completed Cannon range: 1 dedicated chaser per Probe (`printf-multi-probe-chase` when >= 2)
               (when (and (pair? nearby-probes) (pair? avail-workers))
                 (define multi-probes? (pair? (cdr nearby-probes)))
                 (for ([ep (in-list nearby-probes)]
-                      #:when (pair? avail-workers))
+                      #:when (and (pair? avail-workers)
+                                  (or (not live-harvesters-obs?)
+                                      (not (in-completed-cannon-range? (u-x ep bx) (u-y ep by))))))
                   (define chaser (nearest-entity-to (u-x ep bx) (u-y ep by) avail-workers))
                   (when chaser
                     (hash-set! used-ht (u-id chaser) #t)
@@ -1587,8 +1609,8 @@
                       (emit! (list 'printf-multi-probe-chase (u-id chaser) (u-id ep))))
                     (emit! (list 'attack-unit (u-id chaser) (u-id ep))))))
 
-              ;; 2. Anti-trap abort for >= 3-wall or complete Cannons; otherwise pull 3-4 workers per warping Cannon
-              (define aborted-walled-cannon? #f)
+              ;; 2. Anti-trap abort for >= 3-wall or complete Cannons; never pull workers into completed Cannon range (#5129549)
+              (define aborted-walled-cannon? (pair? completed-powered-cannons))
               (for ([c (in-list nearby-cannons)])
                 (define cx (u-x c bx))
                 (define cy (u-y c by))
@@ -1605,7 +1627,7 @@
                   [(or (>= adj-wall-cnt 3) (u-complete? c))
                    (set! aborted-walled-cannon? #t)
                    (emit! (list 'printf-abort-walled-cannon-pull (u-id c)))]
-                  [else
+                  [(not (in-completed-cannon-range? cx cy))
                    (define need-cnt (if (< (u-progress c 1.0) 0.65) 4 3))
                    (define squad (k-nearest-to cx cy need-cnt avail-workers 30.0))
                    (when (pair? squad)
@@ -2014,8 +2036,11 @@
 
 (define (pf-best-splash-target near-idxs eu-cld)
   (define uv (xy-cloud-units eu-cld))
-  (if (null? (cdr near-idxs))
-      (vector-ref uv (car near-idxs))
+  (cond
+    [(null? near-idxs) #f]
+    [(null? (cdr near-idxs))
+     (vector-ref uv (car near-idxs))]
+    [else
       (let* ([xv (xy-cloud-xs eu-cld)]
              [yv (xy-cloud-ys eu-cld)]
              [n (length near-idxs)]
@@ -2051,7 +2076,7 @@
               (let ([sc (fxvector-ref sv i)])
                 (if (fx> sc best-sc)
                     (loop (fx+ i 1) sc (vector-ref pu i))
-                    (loop (fx+ i 1) best-sc best-u))))))))
+                    (loop (fx+ i 1) best-sc best-u))))))]))
 
 (define (plan-planetary-fortress-tactics/idx idx)
   (define ab-ht (sd-index-ally-b-by-type idx))
@@ -2111,9 +2136,9 @@
         (define actions '())
         (define (emit! a) (set! actions (cons a actions)))
         (define rvn-id (and rvn (u-id rvn)))
-        (define siege-pts
-          (if (and (pair? siege-units) (pair? (cdr e-pfs)))
-              (for/list ([su (in-list siege-units)])
+         (define siege-pts
+           (if (and (pair? siege-units) (pair? e-pfs) (pair? (cdr e-pfs)))
+               (for/list ([su (in-list siege-units)])
                 (vector (u-id su) (u-x su 0.0) (u-y su 0.0) (eq? (u-sym su) 'siege-tank)))
               #f))
         (for ([pf (in-list e-pfs)]
@@ -2587,7 +2612,7 @@
         (when (and (pair? e-tumors) (pair? attackers))
           (emit! (list 'focus-fire (map u-id attackers) (u-id (first e-tumors)))))
         (define siege-pts
-          (if (and (pair? siege-units) (pair? (cdr e-spines)))
+          (if (and (pair? siege-units) (pair? e-spines) (pair? (cdr e-spines)))
               (for/list ([su (in-list siege-units)])
                 (vector (u-id su) (u-x su 0.0) (u-y su 0.0)))
               #f))
