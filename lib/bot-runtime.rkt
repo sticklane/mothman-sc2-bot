@@ -4687,22 +4687,30 @@
      (for/fold ([r-min 0] [r-gas 0])
                ([d (in-list decisions)])
        (define u-sym (and (hash? d) (hash-ref d 'id #f)))
+       (define d-cat (and (hash? d) (hash-ref d 'category #f)))
        (if (and u-sym
-                (eq? (hash-ref d 'category #f) 'combat-unit)
                 (eq? (hash-ref d 'outcome #f) 'scheduled)
                 (> (hash-ref d 'utility 0.0) target-u)
-                (not (l2-unit-suppressed-by-counter-pivot? ctx u-sym))
-                (l2-can-spend-supply? ctx (sc2-supply-cost u-sym))
-                (let* ([lookup-sym (case u-sym [(viking-fighter viking-assault) 'viking] [else u-sym])]
-                       [node (lookup-sc2-tech-node lookup-sym)]
-                       [pslot0 (and node (sc2-tech-node-producer-slot node))]
-                       [slot (case pslot0
-                               [(warp-gate warpgate) 'gateway]
-                               [(hatchery lair hive) 'larva]
-                               [else pslot0])])
-                  (and slot (hash? open-prod-slots) (> (hash-ref open-prod-slots slot 0) 0)))
                 (>= (l2-ctx-minerals ctx) (sc2-min-cost u-sym))
-                (>= (l2-ctx-gas ctx) (sc2-gas-cost u-sym)))
+                (>= (l2-ctx-gas ctx) (sc2-gas-cost u-sym))
+                (or (and (eq? d-cat 'combat-unit)
+                         (not (l2-unit-suppressed-by-counter-pivot? ctx u-sym))
+                         (l2-can-spend-supply? ctx (sc2-supply-cost u-sym))
+                         (let* ([lookup-sym (case u-sym [(viking-fighter viking-assault) 'viking] [else u-sym])]
+                                [node (lookup-sc2-tech-node lookup-sym)]
+                                [pslot0 (and node (sc2-tech-node-producer-slot node))]
+                                [slot (case pslot0
+                                        [(warp-gate warpgate) 'gateway]
+                                        [(hatchery lair hive) 'larva]
+                                        [else pslot0])])
+                           (and slot (hash? open-prod-slots) (> (hash-ref open-prod-slots slot 0) 0))))
+                    (and (memq d-cat '(counter-tech tech-upgrade))
+                         (let ([node (lookup-sc2-tech-node u-sym)])
+                           (and node (eq? (sc2-tech-node-kind node) 'build)))
+                         (not (l2-building-present-or-pending? ctx u-sym))
+                         (or (eq? u-sym (l2-ctx-bo-goal-sym ctx))
+                             (and target-sym
+                                  (not (memq target-sym (macro-brain-decision-scheduled-ids md))))))))
            (values (max r-min (sc2-min-cost u-sym))
                    (max r-gas (sc2-gas-cost u-sym)))
            (values r-min r-gas)))]))
@@ -4843,7 +4851,10 @@
     (define s-cost (sc2-supply-cost unit-sym))
     (define alt-u-sym (if (eq? unit-sym 'viking) 'viking-fighter #f))
     (define is-bo-head?
-      (or (eq? bo-goal-sym unit-sym)
+      (or (and (eq? bo-goal-sym unit-sym)
+               (or (not live-game?)
+                   (not (memq unit-sym '(drone probe scv)))
+                   (memq (l2-ctx-prio-saving-for-sym ctx) (list 'none #f unit-sym))))
           (and alt-u-sym (eq? bo-goal-sym alt-u-sym))
           (and live-game?
                (or (not (not (memq unit-sym (macro-brain-decision-scheduled-ids macro-decision))))
@@ -5082,6 +5093,12 @@
                       (if (and live-game? (= cur-base-count 2))
                           (if (eq? race 'Zerg) 28 35)
                           (* (max 1 cur-base-count) SC2-IDEAL-WORKERS-PER-BASE)))
+                  (or (not live-game?)
+                      (= cur-base-count 1)
+                      (eq? bo-goal-sym race-th-sym)
+                      (eq? (l2-ctx-prio-saving-for-sym ctx) race-th-sym)
+                      (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
+                           (not (not (memq race-th-sym (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx)))))))
                   (if live-game?
                       (or (= cur-base-count 1)
                           (and (= cur-base-count 2) (l2-third-base-prereqs-ready-for-escrow? ctx))
@@ -5981,7 +5998,7 @@
       (if (and worker-rush-active? (>= (length enemy-rush-workers) 8))
           6
           SC2-FIGHTING-WORKER-REENGAGE-HP))
-    (define disengage-cands '())
+    (define raw-disengage-cands '())
     (for ([w (in-list non-builder-defense-workers)])
       (define wid (hash-ref w 'id 10))
       (define whp (unit-total-hp-and-shield w))
@@ -6013,15 +6030,15 @@
       (define needs-disengage?
         (or (<= whp eff-disengage-hp)
             probe-shield-depleted?))
-      (when (and needs-disengage?
-                 enemy-close?
-                 just-swung-or-critical?
-                 (or (>= frame prev-cd-until)
-                     (and (<= whp 10)
-                          (>= frame prev-dis-until))))
-        (set! prev-dis-until (+ frame 24))
-        (set! prev-cd-until  (+ frame 45))
-        (hash-set! rush-def-st wid (cons prev-dis-until prev-cd-until)))
+      (define update-timer?
+        (and needs-disengage?
+             enemy-close?
+             just-swung-or-critical?
+             (or (>= frame prev-cd-until)
+                 (and (<= whp 10)
+                      (>= frame prev-dis-until)))))
+      (define new-dis-until (if update-timer? (+ frame 24) prev-dis-until))
+      (define new-cd-until  (if update-timer? (+ frame 45) prev-cd-until))
       (define near-enemy-combat?
         (and mixed-worker-combat-rush?
              (ormap (lambda (ec)
@@ -6033,11 +6050,41 @@
                    (min best (dist2d evac-px evac-py (hash-ref ec 'x 9999.0) (hash-ref ec 'y 9999.0))))
                  3.8)))
       (define disengaging-now?
-        (or (< frame prev-dis-until)
+        (or (< frame new-dis-until)
             (and near-enemy-combat? (not cornered-at-evac?))))
       (when disengaging-now?
-        (set-l2-ctx-cur-rush-disengaging-wids! ctx (cons wid (l2-ctx-cur-rush-disengaging-wids ctx)))
-        (set! disengage-cands (cons (list w wid near-enemy-combat? whp) disengage-cands))))
+        (set! raw-disengage-cands
+              (cons (list w wid near-enemy-combat? whp update-timer? new-dis-until new-cd-until)
+                    raw-disengage-cands))))
+    (define max-noncrit-dis
+      (if (>= (length enemy-rush-workers) 6)
+          (max 1 (min 2 (- (length non-builder-defense-workers) (length enemy-rush-workers) -2)))
+          999))
+    (define sorted-disengage-cands
+      (sort (reverse raw-disengage-cands) < #:key fourth))
+    (define-values (kept-disengage-entries capped-stay-fighting-wids)
+      (let loop ([rem sorted-disengage-cands] [kept-rev '()] [capped-rev '()] [noncrit-kept 0])
+        (cond
+          [(null? rem)
+           (values (reverse kept-rev) (reverse capped-rev))]
+          [else
+           (define e (car rem))
+           (define wid (second e))
+           (define combat-flee? (third e))
+           (define whp (fourth e))
+           (cond
+             [(or combat-flee? (<= whp 10))
+              (loop (cdr rem) (cons e kept-rev) capped-rev noncrit-kept)]
+             [(< noncrit-kept max-noncrit-dis)
+              (loop (cdr rem) (cons e kept-rev) capped-rev (add1 noncrit-kept))]
+             [else
+              (loop (cdr rem) kept-rev (cons wid capped-rev) noncrit-kept)])])))
+    (for ([e (in-list kept-disengage-entries)])
+      (when (fifth e)
+        (hash-set! rush-def-st (second e) (cons (sixth e) (seventh e)))))
+    (define disengage-cands
+      (map (lambda (e) (take e 4)) (reverse kept-disengage-entries)))
+    (set-l2-ctx-cur-rush-disengaging-wids! ctx (map second kept-disengage-entries))
 
     ;; Terran SCV mutual & pocket Auto-Repair before emitting mineral-walk (so repair SCVs aren't double-ordered)
     (define repair-busy-ht (make-hasheqv))
@@ -6160,6 +6207,7 @@
                   (and (not (memv wid (l2-ctx-cur-rush-disengaging-wids ctx)))
                        (<= (dist-to-owned-townhall wx wy) rush-chase-leash-rad)
                        (cond
+                         [(memv wid capped-stay-fighting-wids) (> whp 5)]
                          [in-post-slide-window? (> whp 5)]
                          [(memv wid prev-rush-fighting-wids) (> whp eff-disengage-hp)]
                          [else (>= whp eff-reengage-hp)])))
@@ -6244,6 +6292,7 @@
       (define all-hands-mineral-brawl?
         (and (>= eff-e-cnt 6)
              (or th-focus-stack-trigger?
+                 (>= eff-e-cnt 11)
                  (>= breached-mineral-cnt 3)
                  (and (>= th-breach-cnt 3) (< unthreatened-miners-cnt 3))
                  (ormap (lambda (b)
@@ -6392,7 +6441,12 @@
           (define cap (if (mineral-line-stacked-enemy? ew) 8 3))
           (min cap (max 2 swings-needed)))
         (define (effective-chaser-cap ew)
-          (min 3 (effective-melee-cap ew)))
+          (min (if (and (>= e-cnt 6)
+                        primary-focus-id
+                        (equal? (hash-ref ew 'id -1) primary-focus-id))
+                   6
+                   3)
+               (effective-melee-cap ew)))
         (define assigned-target-counts (make-hasheqv))
         (define worker-assignments (make-hasheqv))
         (define frontline-first
@@ -6991,12 +7045,36 @@
                                      undefended-harassers)])
                    (and (<= (dist2d wx wy (hash-ref cand 'x 9999.0) (hash-ref cand 'y 9999.0)) 7.0)
                         cand))))
-          (define threatened? (not (not near-harasser)))
+          (define near-h-flying? (and near-harasser (harasser-is-flying? near-harasser)))
+          (define near-h-dist
+            (if near-harasser
+                (dist2d wx wy (hash-ref near-harasser 'x 9999.0) (hash-ref near-harasser 'y 9999.0))
+                +inf.0))
+          (define threatened?
+            (and (not (not near-harasser))
+                 (if (or best-safe-mp near-h-flying?)
+                     #t
+                     (or (<= near-h-dist 3.5)
+                         (and (<= (unit-total-hp-and-shield w) 20)
+                              (<= near-h-dist 5.5))))))
           (define evac-until
             (cond
               [(and threatened?
                     (refractory-allow-action?! cd-tracker (list 'harass-evac wid) frame 24))
-               (define new-until (+ frame 24))
+               (define hx (hash-ref near-harasser 'x base-x))
+               (define hy (hash-ref near-harasser 'y base-y))
+               (define far-local-mp
+                 (and (not best-safe-mp)
+                      (not near-h-flying?)
+                      (not (null? owned-mineral-patches))
+                      (let* ([cand-mp (argmax (lambda (mp)
+                                                (dist2d hx hy (hash-ref mp 'x base-x) (hash-ref mp 'y base-y)))
+                                              owned-mineral-patches)]
+                             [d-mp (dist2d hx hy (hash-ref cand-mp 'x base-x) (hash-ref cand-mp 'y base-y))])
+                        (and (>= d-mp 4.5)
+                             (>= (- d-mp near-h-dist) 2.0)
+                             cand-mp))))
+               (define new-until (+ frame (if far-local-mp 8 24)))
                (unless harass-evac-ht
                  (set! harass-evac-ht (make-hasheqv))
                  (hash-set! rush-def-st 'harass-evac-by-wid harass-evac-ht))
@@ -7011,9 +7089,13 @@
                                (safe-nonneg-int (hash-ref best-safe-mp 'id 0) 0)
                                (safe-coord (hash-ref best-safe-mp 'x base-x) base-x)
                                (safe-coord (hash-ref best-safe-mp 'y base-y) base-y)))]
+                 [far-local-mp
+                  (l2-emit! ctx (list 'mineral-walk
+                               wid
+                               (safe-nonneg-int (hash-ref far-local-mp 'id 0) 0)
+                               (safe-coord (hash-ref far-local-mp 'x base-x) base-x)
+                               (safe-coord (hash-ref far-local-mp 'y base-y) base-y)))]
                  [else
-                  (define hx (hash-ref near-harasser 'x base-x))
-                  (define hy (hash-ref near-harasser 'y base-y))
                   (define raw-dx (- (exact->inexact wx) (exact->inexact hx)))
                   (define raw-dy (- (exact->inexact wy) (exact->inexact hy)))
                   (define raw-d (sqrt (+ (* raw-dx raw-dx) (* raw-dy raw-dy))))
@@ -7033,7 +7115,38 @@
               [else prev-evac-until]))
           (when (or threatened? (< frame evac-until))
             (define ttl (if (> evac-until frame) (max 1 (- evac-until frame)) 24))
-            (acquire-unit-lease! leases wid 'evac frame ttl #:x wx #:y wy))))))
+            (acquire-unit-lease! leases wid 'evac frame ttl #:x wx #:y wy)))))
+    (when (and live-obs-harvesters?
+               (not worker-rush-active?)
+               (not in-base-proxy-detected?)
+               (null? ally-combat-units)
+               (>= (length non-builder-defense-workers) 8)
+               (pair? undefended-harassers))
+      (define ground-intruders
+        (filter (lambda (h)
+                  (and (not (harasser-is-flying? h))
+                       (<= (dist2d base-x base-y (hash-ref h 'x 9999.0) (hash-ref h 'y 9999.0)) 9.5)))
+                undefended-harassers))
+      (when (and (pair? ground-intruders)
+                 (<= (length ground-intruders) 2)
+                 (refractory-allow-action?! cd-tracker 'zero-army-intruder-pull frame 24))
+        (define t0 (car ground-intruders))
+        (define t0x (safe-coord (hash-ref t0 'x base-x) base-x))
+        (define t0y (safe-coord (hash-ref t0 'y base-y) base-y))
+        (define healthy-int-workers
+          (filter (lambda (w) (> (unit-total-hp-and-shield w) 20))
+                  non-builder-defense-workers))
+        (define pull-n (min 6 (max 0 (- (length healthy-int-workers) 6))))
+        (when (>= pull-n 2)
+          (define chosen-workers
+            (take (sort healthy-int-workers <
+                        #:key (lambda (w) (dist2d t0x t0y (hash-ref w 'x base-x) (hash-ref w 'y base-y))))
+                  pull-n))
+          (l2-emit! ctx (list 'pull-workers-attack
+                       (map (lambda (w) (hash-ref w 'id 10)) chosen-workers)
+                       (hash-ref t0 'id 0)
+                       t0x
+                       t0y))))))
   (define raw-enemy-units-for-drill
     (let ([reu (and (hash? raw-obs) (hash-ref raw-obs 'enemy-units #f))])
       (if (and (list? reu) (for/and ([e (in-list reu)]) (hash? e)))
@@ -8819,7 +8932,12 @@
                       (<= (l2-ctx-supply-left ctx) 0)
                       (and live-game-obs? (>= (l2-ctx-minerals ctx) 100) (< frame 3000))))
              (and live-game-obs?
-                  (or worker-rush-active? in-base-proxy-detected?)
+                  (or in-base-proxy-detected?
+                      (and worker-rush-active?
+                           (or (= protoss-pylon-count 0)
+                               (<= (l2-ctx-supply-left ctx) 1)
+                               (ormap (lambda (s) (memq s (l2-ctx-bldg-types ctx)))
+                                      '(gateway warp-gate)))))
                   (= safe-inmain-pylon-count 0))
              has-unpowered-bldg?
              protoss-power-grid-saturated?)))
@@ -9453,6 +9571,7 @@
   (set-l2-ctx-bo-reserved-min! ctx (pro-bo-eval-result-reserved-minerals bo-eval))
   (set-l2-ctx-bo-reserved-gas! ctx (pro-bo-eval-result-reserved-gas bo-eval))
   (set! target-workers (max target-workers (pro-bo-eval-result-target-workers bo-eval)))
+  (set-l2-ctx-target-workers! ctx target-workers)
   (define open-prod-slots (make-hasheq))
   (set-l2-ctx-open-prod-slots! ctx open-prod-slots)
   (for ([cap (in-list (list cg4-cap cg5-cap cg6-cap cg7-cap))])
@@ -9817,7 +9936,9 @@
   (set-l2-ctx-repaired-prereqs! ctx repaired-prereqs)
   (when live-game?
     (set! bo-active-goal (macro-brain-decision-bo-active-goal macro-decision))
+    (set-l2-ctx-bo-active-goal! ctx bo-active-goal)
     (set! bo-goal-sym (and bo-active-goal (pro-bo-goal-target-sym bo-active-goal)))
+    (set-l2-ctx-bo-goal-sym! ctx bo-goal-sym)
     (set-l2-ctx-bo-reserved-min! ctx (macro-brain-decision-reserved-min-floor macro-decision))
     (set-l2-ctx-bo-reserved-gas! ctx (macro-brain-decision-reserved-gas-floor macro-decision))
     (when (and (<= eff-gas-harvesters 0)
@@ -10153,7 +10274,8 @@
                     #:supply-cap supply-cap
                     #:bo-goal-sym bo-goal-sym
                     #:bo-reserved-min cur-bo-res-min
-                    #:bo-reserved-gas cur-bo-res-gas)])
+                    #:bo-reserved-gas cur-bo-res-gas
+                    #:saving-for (macro-brain-decision-saving-for macro-decision))])
           (when (and live-game? (> frame 60))
             (vector-set! mc-cv 53 bt)
             (vector-set! mc-cv 54 gsa)
@@ -10201,6 +10323,13 @@
                 ally-bldgs)))
   (define crisis-freeze-workers?
     (or zerg-pool-nearly-done-under-rush?
+        (and worker-rush-active?
+             (>= total-workers 6)
+             (not (ormap (lambda (s) (memq s (l2-ctx-bldg-types ctx)))
+                         '(spawning-pool barracks gateway warp-gate)))
+             (< (l2-ctx-minerals ctx)
+                (+ (sc2-min-cost (case race [(Zerg) 'spawning-pool] [(Terran) 'barracks] [else 'gateway]))
+                   (sc2-min-cost (case race [(Zerg) 'drone] [(Terran) 'scv] [else 'probe])))))
         (and early-survival-crisis?
              (not (and (or worker-rush-active? (< total-workers 14))
                        (or (< total-workers 10)
@@ -12688,10 +12817,15 @@
                     (l2-can-spend-supply? ctx (sc2-supply-cost 'immortal)))
            (l2-try-train-unit! ctx 'immortal 'robotics-facility 6 #:respect-bo-reserve? (not crisis-tech-upgrade-deferral?)))
          (when (and (< (l2-unit-count ctx 'warp-prism) 1)
+                    (not (eq? bo-goal-sym 'immortal))
+                    (not (eq? prio-saving-for-sym 'immortal))
                     (l2-protoss-colossus-escrow-ok? ctx (sc2-min-cost 'warp-prism) (sc2-gas-cost 'warp-prism))
                     (aa-stargate-min-ok? (sc2-min-cost 'warp-prism))
                     (or (l2-plan-wants-now? ctx 'warp-prism)
-                        (and live-game? (>= live-army-supply 20) (>= (l2-ctx-minerals ctx) 350)))
+                        (and live-game?
+                             (>= (l2-unit-count ctx 'immortal) 1)
+                             (>= live-army-supply 20)
+                             (>= (l2-ctx-minerals ctx) 350)))
                     (l2-can-spend-supply? ctx (sc2-supply-cost 'warp-prism)))
            (l2-try-train-unit! ctx 'warp-prism 'robotics-facility 6 #:respect-bo-reserve? #t))))
   (define protoss-corner-flyers-needed?
@@ -12912,7 +13046,7 @@
                        protoss-nat-reserve
                        (if protoss-holding-forge-min? (sc2-min-cost 'forge) 0))
                     (sc2-min-cost 'gateway))
-                (l2-non-combat-min-ok? ctx (sc2-min-cost 'gateway)))
+                (l2-non-combat-min-ok? ctx (sc2-min-cost 'gateway) 'gateway))
        (define gw-idx (length gateways))
        (if (and allow-exact-wall-slot?
                 (not worker-rush-active?)
@@ -13139,8 +13273,8 @@
                              (>= eff-phase-supply 76))))
                 (>= (l2-ctx-minerals ctx) (sc2-min-cost 'robotics-bay))
                 (>= (l2-ctx-gas ctx) (sc2-gas-cost 'robotics-bay))
-                (l2-non-combat-min-ok? ctx (sc2-min-cost 'robotics-bay))
-                (l2-non-combat-gas-ok? ctx (sc2-gas-cost 'robotics-bay)))
+                (l2-non-combat-min-ok? ctx (sc2-min-cost 'robotics-bay) 'robotics-bay)
+                (l2-non-combat-gas-ok? ctx (sc2-gas-cost 'robotics-bay) 'robotics-bay))
        (l2-emit-build-verified! ctx 'robotics-bay (safe-coord (+ base-x 7.0)) (safe-coord (+ base-y 7.0)))
        (when (or (not live-game?) (memq 'forge ready-bldg-types))
          (l2-emit-research-verified! ctx 'protoss-ground-weapons-1))
@@ -13332,11 +13466,18 @@
                         (l2-can-spend-by-priority? ctx 'stalker 'combat-unit))
                (l2-try-train-unit! ctx 'stalker 'gateway 5 #:respect-bo-reserve? #t))]
             [pvz-anti-ground-mode?
-             ;; In PvZ vs Roach/Ravager/Zergling (`P0-2b`), conserve gas for Immortals/Archons/Colossi
-             ;; by training Zealots first and strictly capping low-value Stalkers!
+             ;; In PvZ vs Roach/Ravager/Zergling (`P0-2b`), conserve gas for Immortals/Archons/Colossi,
+             ;; but when floating >= 150G (and not starving an open Robo for Immortal minerals), convert gas into Stalkers!
+             (when (and (gateway-unit-colossus-ok? 'stalker)
+                        (>= (l2-ctx-gas ctx) 150)
+                        (< (l2-unit-count ctx 'stalker) (if (>= (l2-ctx-gas ctx) 300) 10 5))
+                        (not (and (memq 'robotics-facility ready-bldg-types)
+                                  (> (hash-ref open-prod-slots 'robotics-facility 0) 0)
+                                  (< (l2-ctx-minerals ctx) (+ (sc2-min-cost 'immortal) (sc2-min-cost 'stalker)))))
+                        (l2-can-spend-by-priority? ctx 'stalker 'combat-unit))
+               (l2-try-train-unit! ctx 'stalker 'gateway 5 #:respect-bo-reserve? #t))
              (when (and (gateway-unit-colossus-ok? 'zealot)
-                        (or (l2-can-spend-by-priority? ctx 'zealot 'combat-unit)
-                            (>= (l2-ctx-minerals ctx) (sc2-min-cost 'zealot))))
+                        (l2-can-spend-by-priority? ctx 'zealot 'combat-unit))
                (l2-try-train-unit! ctx 'zealot 'gateway 5 #:respect-bo-reserve? #t))
              (when (and (< (l2-unit-count ctx 'adept) 3)
                         (< frame 4000)
@@ -14121,7 +14262,9 @@
          [(and (l2-upgrade-needed? ctx 'concussive-shells)
                (l2-starport-escrow-ok? ctx (sc2-min-cost 'concussive-shells) (sc2-gas-cost 'concussive-shells))
                (or (not live-game?)
-                   (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'concussive-shells)) (l2-ctx-bo-reserved-min ctx)))
+                   (and (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'concussive-shells)) (l2-ctx-bo-reserved-min ctx))
+                        (l2-non-combat-min-ok? ctx (sc2-min-cost 'concussive-shells) 'concussive-shells)
+                        (l2-non-combat-gas-ok? ctx (sc2-gas-cost 'concussive-shells) 'concussive-shells)))
                (>= (l2-ctx-minerals ctx) (sc2-min-cost 'concussive-shells))
                (>= (l2-ctx-gas ctx) (sc2-gas-cost 'concussive-shells)))
           (l2-emit-research-verified! ctx 'concussive-shells)]))
@@ -15451,17 +15594,30 @@
              live-game?
              (not under-base-attack?)
              (not crisis-tech-upgrade-deferral?)
+             (not (l2-ctx-urgent-combat-or-intel-need? ctx))
+             (not (l2-ctx-zerg-saving-for-expand? ctx))
+             (not (l2-ctx-protoss-saving-for-expand? ctx))
+             (not (l2-ctx-terran-saving-for-expand? ctx))
              (or (>= (l2-ctx-minerals ctx) 150) (>= (l2-ctx-gas ctx) 100))
              (refractory-allow-action?! cd-tracker 'situational-upgrade frame 32))
     (define enemy-comp-syms (hash-keys enemy-u-counts))
+    (define ready-bldgs (l2-ctx-ready-bldg-types ctx))
     (define sit-upgs
       (select-situational-upgrades
        race sit-primary enemy-comp-syms
-       researched-upgs (l2-ctx-pending-upgs ctx) (l2-ctx-bldg-types ctx) (l2-ctx-minerals ctx) (l2-ctx-gas ctx)))
+       researched-upgs (l2-ctx-pending-upgs ctx) ready-bldgs (l2-ctx-minerals ctx) (l2-ctx-gas ctx)))
     (for/first ([su (in-list sit-upgs)]
-                #:when (let ([before (length (l2-ctx-actions ctx))])
-                         (l2-emit-research-verified! ctx su)
-                         (> (length (l2-ctx-actions ctx)) before)))
+                #:when (and (or (not (eq? su 'drilling-claws))
+                                (and (memq 'armory ready-bldgs)
+                                     (>= (l2-unit-count ctx 'widow-mine) 2)))
+                            (>= (- (l2-ctx-minerals ctx) (sc2-min-cost su)) (l2-ctx-bo-reserved-min ctx))
+                            (>= (- (l2-ctx-gas ctx) (sc2-gas-cost su)) (l2-ctx-bo-reserved-gas ctx))
+                            (l2-non-combat-min-ok? ctx (sc2-min-cost su) su)
+                            (l2-non-combat-gas-ok? ctx (sc2-gas-cost su) su)
+                            (l2-can-spend-by-priority? ctx su 'tech-upgrade)
+                            (let ([before (length (l2-ctx-actions ctx))])
+                              (l2-emit-research-verified! ctx su)
+                              (> (length (l2-ctx-actions ctx)) before))))
       #t))
   (define prev-tel (live-bot-runtime-last-telemetry rt))
   (set-live-bot-runtime-last-telemetry!

@@ -5071,7 +5071,8 @@
          #:supply-cap [supply-cap 15]
          #:bo-goal-sym [bo-goal-sym #f]
          #:bo-reserved-min [bo-reserved-min 0]
-         #:bo-reserved-gas [bo-reserved-gas 0])
+         #:bo-reserved-gas [bo-reserved-gas 0]
+         #:saving-for [saving-for #f])
   (define trace (priority-schedule-decision-trace sched))
   (define res-cand (and (priority-schedule-result? sched)
                         (priority-schedule-result-reserved-candidate sched)))
@@ -5088,6 +5089,12 @@
     (if high-bank-unlock?
         0
         (max bo-reserved-gas (hash-ref cu 'reserved-gas-floor 0))))
+  (define saving-id
+    (cond
+      [(and (<= res-min-floor 0) (<= res-gas-floor 0)) 'none]
+      [(and saving-for (symbol? saving-for)) saving-for]
+      [res-cand (priority-candidate-id res-cand)]
+      [else (or bo-goal-sym 'none)]))
   (hash 'frame frame
         'race race
         'minerals minerals
@@ -5095,7 +5102,7 @@
         'supply-used supply-used
         'supply-cap supply-cap
         'bo-goal (or bo-goal-sym 'none)
-        'saving-for (if res-cand (priority-candidate-id res-cand) (or bo-goal-sym 'none))
+        'saving-for saving-id
         'reserved-min-floor res-min-floor
         'reserved-gas-floor res-gas-floor
         'scheduled-ids (if (priority-schedule-result? sched)
@@ -5123,7 +5130,8 @@
          #:supply-cap [supply-cap 15]
          #:bo-goal-sym [bo-goal-sym #f]
          #:bo-reserved-min [bo-reserved-min 0]
-         #:bo-reserved-gas [bo-reserved-gas 0])
+         #:bo-reserved-gas [bo-reserved-gas 0]
+         #:saving-for [saving-for #f])
   (define trace (priority-schedule-decision-trace sched))
   (define res-cand (and (priority-schedule-result? sched)
                         (priority-schedule-result-reserved-candidate sched)))
@@ -5140,7 +5148,12 @@
     (if high-bank-unlock?
         0
         (max bo-reserved-gas (hash-ref cu 'reserved-gas-floor 0))))
-  (define saving-id (if res-cand (priority-candidate-id res-cand) (or bo-goal-sym 'none)))
+  (define saving-id
+    (cond
+      [(and (<= res-min-floor 0) (<= res-gas-floor 0)) 'none]
+      [(and saving-for (symbol? saving-for)) saving-for]
+      [res-cand (priority-candidate-id res-cand)]
+      [else (or bo-goal-sym 'none)]))
   (define out (open-output-string))
   (display "[SCBOT_PRIORITY] f=" out)
   (display frame out)

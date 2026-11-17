@@ -1820,7 +1820,10 @@
              (natural-expansion-window-active?
               race frame workers plan-total-townhalls
               ready-bldg-counts total-bldg-counts
-              under-attack? enemy-threat-supply under-early-rush-crisis?))
+              under-attack? enemy-threat-supply
+              (or under-early-rush-crisis?
+                  (and (> enemy-threat-supply 0)
+                       (< army-supply (+ enemy-threat-supply 2))))))
     (add-goal-spec! (case race [(Zerg) 'hatchery] [(Terran) 'command-center] [else 'nexus])
                     'economy-expansion 'build 2 620.0 'pro-benchmark-natural-expand))
 
@@ -3573,24 +3576,22 @@
 
   ;; Supply threshold: continuously coupled to active bases, production facilities & worker saturation
   ;; so multi-Rax/Gate/Hatch cycles trigger Overlord/Depot/Pylon lead time BEFORE hitting 100% cap.
-  ;; Adds +2 supply lead headroom between 30 and 90 supply used while leaving < 30 openings unchanged.
   (define supply-buffer
-    (+ (if (hash? open-facility-slots)
-           (compute-production-coupled-supply-buffer
-            #:active-bases active-bases
-            #:production-facilities prod-fac-count
-            #:workers workers
-            #:target-workers target-workers
-            #:min-buffer 1
-            #:max-buffer 16)
-           (compute-production-coupled-supply-buffer
-            #:active-bases active-bases
-            #:production-facilities (min 2 prod-fac-count)
-            #:workers workers
-            #:target-workers target-workers
-            #:min-buffer 1
-            #:max-buffer 6))
-       (if (and (>= supply-used 30) (<= supply-used 90)) 2 0)))
+    (if (hash? open-facility-slots)
+        (compute-production-coupled-supply-buffer
+         #:active-bases active-bases
+         #:production-facilities prod-fac-count
+         #:workers workers
+         #:target-workers target-workers
+         #:min-buffer 1
+         #:max-buffer 16)
+        (compute-production-coupled-supply-buffer
+         #:active-bases active-bases
+         #:production-facilities (min 2 prod-fac-count)
+         #:workers workers
+         #:target-workers target-workers
+         #:min-buffer 1
+         #:max-buffer 6)))
 
   (define eff-desired-bases
     (max sg-desired-bases
@@ -3883,7 +3884,9 @@
           race frame workers (max eff-th-total-cnt total-townhalls-incl-pending)
           ready-bldg-counts total-bldg-counts
           under-attack? enemy-threat-supply
-          under-early-rush-crisis?)))
+          (or under-early-rush-crisis?
+              (and (> enemy-threat-supply 0)
+                   (< army-supply (+ enemy-threat-supply 2)))))))
   (define overdue-1base-expand?
     (or natural-exp-window?
         (and (>= minerals 400)
@@ -5827,7 +5830,7 @@
                    (not (eq? race 'Zerg))
                    (< army-supply 10)
                    (< rem-min 550)))))
-   (define saving-id
+   (define raw-saving-id
      (let ([high-bank-tech-release?
             (and (not supply-preempt-saving?)
                  (>= minerals 600)
@@ -5846,14 +5849,14 @@
   (define fallback-saving?
     (and (not supply-preempt-saving?)
          (not reserved-cand)
-         (not (eq? saving-id 'none))))
+         (not (eq? raw-saving-id 'none))))
   (define out-min-floor
     (cond
       [supply-preempt-saving? 100]
       [fallback-saving?
        (max min-floor
-            (if (< minerals (sc2-min-cost saving-id 0))
-                (sc2-min-cost saving-id 0)
+            (if (< minerals (sc2-min-cost raw-saving-id 0))
+                (sc2-min-cost raw-saving-id 0)
                 0))]
       [else min-floor]))
   (define out-gas-floor
@@ -5861,10 +5864,14 @@
       [supply-preempt-saving? 0]
       [fallback-saving?
        (max gas-floor
-            (if (< gas (sc2-gas-cost saving-id 0))
-                (sc2-gas-cost saving-id 0)
+            (if (< gas (sc2-gas-cost raw-saving-id 0))
+                (sc2-gas-cost raw-saving-id 0)
                 0))]
       [else gas-floor]))
+  (define saving-id
+    (if (and (<= out-min-floor 0) (<= out-gas-floor 0))
+        'none
+        raw-saving-id))
   (define out-reserved-slots (if supply-preempt-saving? '() (reverse reserved-slots)))
   (macro-escrow-record-decision! race enemy-race frame minerals eff-th-total-cnt saving-id final-ids)
   (define log-str
@@ -5878,7 +5885,8 @@
      #:supply-cap supply-cap
      #:bo-goal-sym (and has-mineral-income? (not supply-preempt-saving?) final-bo-goal-sym)
      #:bo-reserved-min out-min-floor
-     #:bo-reserved-gas out-gas-floor))
+     #:bo-reserved-gas out-gas-floor
+     #:saving-for saving-id))
 
   (define reported-effective-bo-goal
     (if (and (not bo-goal-deadlocked?)
