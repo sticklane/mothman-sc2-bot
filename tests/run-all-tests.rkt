@@ -12716,7 +12716,155 @@
   (assert-true! (let ([sids (macro-brain-decision-scheduled-ids md-5129550)])
                   (or (pair? (memq 'stalker sids))
                       (pair? (memq 'adept sids))))
-                "Match #5129550: With 2 open WarpGate slots at 130M/320G, macro brain must schedule gateway combat unit"))
+                "Match #5129550: With 2 open WarpGate slots at 130M/320G, macro brain must schedule gateway combat unit")
+
+  ;; ---------------------------------------------------------------------------
+  ;; 49.6 Architectural & Layering Regressions (#5130439, #5131238, #5131026, #5131027, #5131251, #5131248)
+  ;; ---------------------------------------------------------------------------
+  ;; (a) Wire APM Governor P1 Macro Anti-Starvation (#5130439 7,690M float, #5131238 10,545M float):
+  ;;     Continuous P0 + P2 combat micro spam must NEVER starve P1 macro (`train`/`research`) to 0!
+  (define gov-p1 (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define p1-train-emitted 0)
+  (for ([step-idx (in-range 80)])
+    (define gl (* step-idx 4))
+    (define batch-p1
+      (list (sc2-raw-unit-command 314 #f 4001 (list (+ 7000 (modulo step-idx 6))) #f) ;; P0 repair
+            (sc2-raw-unit-command 388 #f 0 (list (+ 7100 (modulo step-idx 4))) #f)    ;; P0 siege
+            (sc2-raw-unit-command 560 #f 0 (list (+ 5001 (modulo step-idx 7))) #f)    ;; P1 train Marine
+            (sc2-raw-unit-command 23 (sc2-point2d 90.0 90.0) 0 (list (+ 8000 (modulo step-idx 12))) #f) ;; P2 attack
+            (sc2-raw-unit-command 16 (sc2-point2d 85.0 85.0) 0 (list (+ 8100 (modulo step-idx 12))) #f) ;; P2 move
+            (sc2-raw-camera-move 88.0 88.0 0.0)))
+    (for ([c (in-list (govern-sc2-wire-actions! gov-p1 batch-p1 gl))])
+      (when (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 560))
+        (set! p1-train-emitted (add1 p1-train-emitted)))))
+  (assert-true! (>= p1-train-emitted 15)
+                (format "Match #5130439/#5131238: Wire APM governor must emit P1 macro train commands under heavy P0+P2 combat (got ~a)"
+                        p1-train-emitted))
+
+  ;; (b) Gateway + WarpGate combined producer pool (#5131026): 1 Gateway + 2 WarpGates must return all 3 tags
+  (define (mk49-powered-bldg tag ut x y)
+    (struct-copy sc2-unit (mk49-wire-u tag ut x y #:hp 500.0) [is-powered #t]))
+  (set-box! SC2-WARPGATE-LAST-LOOP 5000)
+  (define gw-wg-powered-tags
+    (select-producer-tags-for-unit
+     'stalker
+     (list (mk49-powered-bldg 6201 62 34.0 34.0)
+           (mk49-powered-bldg 6202 133 37.0 34.0)
+           (mk49-powered-bldg 6203 133 40.0 34.0))
+     '()))
+  (assert-eq! (length gw-wg-powered-tags) 3
+              "Match #5131026: 1 idle Gateway + 2 off-cooldown WarpGates must expose all 3 producer tags")
+
+  ;; (c) Opponent opportunity-cost & loss-recovery calibration (#5131026, #5130656, #5131238):
+  ;;     Bare Starport + Marines or Zergling/Infestor >= 350G must NOT false-trigger capital-air or suppress Immortal/Roach!
+  (define opp-std-terran
+    (evaluate-opponent-opportunity-cost-commitment
+     '((marine . 12)) '((starport . 1) (barracks . 3)) 7000 2 2))
+  (assert-true! (not (eq? (hash-ref opp-std-terran 'dominant-path #f) 'capital-air-fleet))
+                "Bare Starport without capital air units must NOT classify as 'capital-air-fleet")
+  (assert-true! (not (hash-ref opp-std-terran 'hard-override-build-order? #f))
+                "Standard 12-Marine + 1-Starport Terran must NOT assert hard-override-build-order?")
+  (define opp-std-zerg
+    (evaluate-opponent-opportunity-cost-commitment
+     '((zergling . 30) (queen . 4) (infestor . 2)) '((spawning-pool . 1) (infestation-pit . 1)) 12000 4 6))
+  (assert-true! (not (memq 'immortal (hash-ref opp-std-zerg 'suppressed-non-counter-units '())))
+                "Match #5131026: Zergling/Queen/Infestor must NEVER hard-suppress Protoss Immortal")
+  (define rec-5base-terran
+    (evaluate-loss-recovery-macro-mode
+     (hash 'workers 65 'peak-workers 69 'active-bases 5 'peak-bases 6
+           'supply-used 114 'peak-supply-reached 122 'army-supply 42 'enemy-threat-supply 18 'frame 28000)))
+  (assert-true! (not (hash-ref rec-5base-terran 'preempt-greedy-tech? #f))
+                "Match #5131238: Healthy 5-base 65-SCV Terran down 1 outer base must NOT lock preempt-greedy-tech?")
+
+  ;; (d) Layer 3/4 Macro-Purity Invariant in live games (#5131238 50 ShieldBatteries) & #5131027 Cannon cap:
+  (define rt-no-sb-leak (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define res-no-sb-leak
+    (step-live-bot-runtime!
+     rt-no-sb-leak
+     (hash 'frame 9000 'minerals 250 'gas 150 'supply-used 64 'supply-cap 86 'supply-left 22
+           'mineral-harvesters 36 'vespene-harvesters 6
+           'base-x 32.0 'base-y 32.0 'natural-x 50.0 'natural-y 32.0 'enemy-x 150.0 'enemy-y 150.0
+           'ally-units (append (for/list ([i (in-range 38)])
+                                 (hash 'id (+ 10 i) 'type 'probe 'x 32.0 'y 32.0 'hp 20 'shield 20))
+                               (list (hash 'id 201 'type 'stalker 'x 48.0 'y 32.0 'hp 80 'shield 80)))
+           'ally-buildings (list (hash 'id 101 'type 'nexus 'x 32.0 'y 32.0 'build-progress 1.0)
+                                 (hash 'id 102 'type 'nexus 'x 50.0 'y 32.0 'build-progress 1.0)
+                                 (hash 'id 103 'type 'pylon 'x 36.0 'y 35.0 'build-progress 1.0)
+                                 (hash 'id 104 'type 'pylon 'x 46.0 'y 35.0 'build-progress 1.0)
+                                 (hash 'id 105 'type 'cybernetics-core 'x 35.0 'y 35.0 'build-progress 1.0 'powered? #t)
+                                 (hash 'id 106 'type 'forge 'x 38.0 'y 35.0 'build-progress 1.0 'powered? #t)
+                                 (hash 'id 107 'type 'photon-cannon 'x 53.0 'y 34.0 'build-progress 1.0 'powered? #t)
+                                 (hash 'id 108 'type 'shield-battery 'x 34.0 'y 30.0 'build-progress 1.0 'powered? #t)
+                                 (hash 'id 109 'type 'shield-battery 'x 44.0 'y 30.0 'build-progress 1.0 'powered? #t))
+           'enemy-units '()
+           'enemy-buildings '())))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'shield-battery)))
+                            (hash-ref res-no-sb-leak 'actions)))
+                "Match #5131238: Live Layer 3/4 static-defense tactics must NOT leak unbudgeted ShieldBattery builds past cap")
+
+  (define md-5131027
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Zerg #:frame 11000
+      #:minerals 80 #:gas 120 #:supply-used 52 #:supply-cap 78
+      #:workers 40 #:active-bases 2 #:army-supply 8 #:enemy-threat-supply 24
+      #:unit-counts (hasheq 'probe 40 'zealot 2 'stalker 2)
+      #:enemy-unit-counts (hasheq 'zergling 36 'queen 4)
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 5 'warp-gate 4 'cybernetics-core 1 'forge 1 'photon-cannon 1 'shield-battery 1)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 5 'warp-gate 4 'cybernetics-core 1 'forge 1 'photon-cannon 1 'shield-battery 1)
+      #:open-facility-slots (hasheq 'gateway 0 'warp-gate 4))))
+  (assert-true! (not (eq? (macro-brain-decision-saving-for md-5131027) 'photon-cannon))
+                "Match #5131027: Macro brain must NOT escrow-stall on 2nd photon-cannon vs ground-only Zerg")
+
+  ;; (e) Terran 1-base camped natural (#5131251) & Zerg worker-rush Zergling priority (#5131248):
+  (define rt-5131251 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define res-5131251
+    (step-live-bot-runtime!
+     rt-5131251
+     (hash 'frame 5800 'minerals 460 'gas 180 'supply-used 24 'supply-cap 31 'supply-left 7
+           'mineral-harvesters 16 'vespene-harvesters 3
+           'base-x 32.0 'base-y 32.0 'natural-x 52.0 'natural-y 32.0 'third-x 72.0 'third-y 32.0
+           'enemy-x 152.0 'enemy-y 152.0
+           'expansion-candidates (list (list 52.0 32.0))
+           'ally-units (append (for/list ([i (in-range 19)])
+                                 (hash 'id (+ 10 i) 'type 'scv 'x 32.0 'y 32.0 'hp 45))
+                               (list (hash 'id 301 'type 'marine 'x 38.0 'y 32.0 'hp 45)
+                                     (hash 'id 302 'type 'marauder 'x 38.5 'y 32.0 'hp 125)))
+           'ally-buildings (list (hash 'id 101 'type 'orbital-command 'x 32.0 'y 32.0 'build-progress 1.0)
+                                 (hash 'id 102 'type 'supply-depot 'x 36.0 'y 35.0 'build-progress 1.0)
+                                 (hash 'id 103 'type 'supply-depot 'x 38.0 'y 35.0 'build-progress 1.0)
+                                 (hash 'id 104 'type 'barracks 'x 35.0 'y 28.0 'build-progress 1.0)
+                                 (hash 'id 105 'type 'refinery 'x 28.0 'y 35.0 'build-progress 1.0 'vespene-contents 1800))
+           ;; Enemy Stalkers camping the natural pad at (52, 32)
+           'enemy-units (list (hash 'id 901 'type 'stalker 'x 52.5 'y 32.5 'hp 80 'shield 80)
+                              (hash 'id 902 'type 'stalker 'x 51.5 'y 31.5 'hp 80 'shield 80))
+           'enemy-buildings '())))
+  (assert-true! (ormap (lambda (a)
+                         (and (pair? a)
+                              (or (and (eq? (car a) 'build) (eq? (cadr a) 'command-center))
+                                  (eq? (car a) 'expand))))
+                       (hash-ref res-5131251 'actions))
+                "Match #5131251: 1-base Terran at 460M with camped natural pad must build in-main macro CommandCenter")
+
+  (define md-5131248
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 2600
+      #:minerals 75 #:gas 0 #:supply-used 15 #:supply-cap 22
+      #:workers 12 #:active-bases 1 #:army-supply 1 #:enemy-threat-supply 6
+      #:under-attack? #t
+      #:loss-recovery-ht (evaluate-loss-recovery-macro-mode
+                          (hash 'workers 12 'peak-workers 17 'active-bases 1 'peak-bases 1
+                                'supply-used 15 'peak-supply-reached 17 'army-supply 1 'enemy-threat-supply 6 'frame 2600))
+      #:unit-counts (hasheq 'drone 12 'overlord 2 'zergling 2)
+      #:enemy-unit-counts (hasheq 'probe 12)
+      #:ready-building-counts (hasheq 'hatchery 1 'spawning-pool 1)
+      #:total-building-counts (hasheq 'hatchery 1 'spawning-pool 1)
+      #:open-facility-slots (hasheq 'larva 2 'townhall 1))))
+  (assert-true! (not (memq (macro-brain-decision-saving-for md-5131248) '(queen overlord drone)))
+                "Match #5131248: During 12-Probe worker rush at 15/22 supply with 2 lings, Zerg must NOT escrow-save queen/overlord/drone")
+  (assert-true! (pair? (memq 'zergling (macro-brain-decision-scheduled-ids md-5131248)))
+                "Match #5131248: During 12-Probe worker rush at 75M with 2 larvae, Zerg must schedule zergling immediately"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

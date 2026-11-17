@@ -4761,7 +4761,7 @@
              'buffs b-buffs
              'orders b-order-records
              'order-count eff-order-count
-             'busy? (or wg-busy? (pair? b-ords))
+             'busy? (or wg-busy? (>= eff-order-count (if (eq? addon-kind 'reactor) 2 1)))
              'order-ability-id (if b-ord0 (sc2-unit-order-ability-id b-ord0) 0)
              'order-ability-sym (if b-ord0 (sc2-id->ability-symbol (sc2-unit-order-ability-id b-ord0) #f) #f)))
      in-transit-bldg-records))
@@ -7003,10 +7003,8 @@
     [(memq norm '(warp-gate warpgate))
      (idle-ready-of-types '(gateway))]
     [(memq norm '(zealot stalker sentry adept high-templar dark-templar))
-     (define gws (idle-ready-of-types '(gateway)))
-     (if (not (null? gws))
-         gws
-         (idle-ready-of-types '(warp-gate warpgate)))]
+     (append (idle-ready-of-types '(gateway))
+             (idle-ready-of-types '(warp-gate warpgate)))]
     [(memq norm '(observer immortal warp-prism colossus disruptor))
      (idle-ready-of-types '(robotics-facility))]
     [(memq norm '(phoenix void-ray voidray oracle carrier tempest))
@@ -12377,6 +12375,7 @@
        (define-values (hd tl) (split-at rem max-chunk))
        (loop tl (cons hd acc))])))
 
+(define SC2-GOV-LAST-P1-LOOP (make-weak-hasheq))
 (define SC2-GOV-LAST-P2-LOOP (make-weak-hasheq))
 
 (define (govern-sc2-wire-actions! gov raw-cmds game-loop [_obs #f])
@@ -12391,6 +12390,7 @@
     (set-wire-apm-governor-rolling-events! gov '())
     (set-box! SC2-GOV-LAST-CAM-X #f)
     (set-box! SC2-GOV-LAST-CAM-Y #f)
+    (hash-set! SC2-GOV-LAST-P1-LOOP gov -1000)
     (hash-set! SC2-GOV-LAST-P2-LOOP gov -1000))
 
   ;; 1. Refill token bucket purely from game-loop delta (22.4 loops/sec = 1344 loops/min)
@@ -12495,14 +12495,14 @@
   (define (tier-token-floor tier cmd)
     (case tier
       [(0)  (if (or (urgent-survival-cmd? cmd) (opening-worker-split-cmd? cmd)) -4.0 -1.0)]
-      [(1)  2.0]  ;; P1 macro leaves >= 2 tokens for P0
+      [(1)  0.0]  ;; P1 macro executes whenever >= ev-cost tokens remain (never starved behind P2!)
       [(2)  4.0]  ;; P2 combat leaves >= 4 tokens for P0/P1
       [(3)  8.0]  ;; P3 harvest/lower leaves >= 8 tokens for P0/P1/P2
       [else 10.0]))
   (define (tier-headroom-floor tier)
     (case tier
       [(0)  0.0]  ;; P0 strictly obeys rolling 60s hard-cap-apm
-      [(1)  6.0]
+      [(1)  2.0]
       [(2) 12.0]
       [(3) 24.0]
       [else 30.0]))
@@ -12557,6 +12557,8 @@
             [(sc2-raw-unit-command? chosen)
              (set! cur-sel (sc2-raw-unit-command-unit-tags chosen))
              (set-wire-apm-governor-last-selected-tags! gov cur-sel)])
+          (when (and (= (eff-cmd-tier chosen) 1) (not (sc2-raw-camera-move? chosen)))
+            (hash-set! SC2-GOV-LAST-P1-LOOP gov cur-loop))
           (when (= (eff-cmd-tier chosen) 2)
             (hash-set! SC2-GOV-LAST-P2-LOOP gov cur-loop))
           (hash-set! emitted-set chosen #t)
@@ -12566,25 +12568,37 @@
   (define (cmds-for-tier tier)
     (filter (lambda (c) (= (eff-cmd-tier c) tier)) coalesced))
 
-  ;; Run P0 urgent survival/spells first.
+  ;; 1. Run P0 urgent survival/spells first.
   (run-cmd-list! (cmds-for-tier 0)
                  (lambda (c) (tier-token-floor 0 c))
                  (lambda (_) (tier-headroom-floor 0)))
 
-  ;; Anti-starvation rescue ahead of P1 macro: when P1 sits near 2..4 tokens continuously,
-  ;; periodically grant overdue P2 combat (>= 12 loops stale) and 1 overdue routine P4 camera (>= 44 loops).
+  ;; 2. Run P1 macro (`train`, `warp-in`, `build`, `expand`, `morph`, `research`, `MULE`) BEFORE P2/P4 rescue
+  ;;    so continuous P0/P2 combat micro NEVER starves macro production, expansions, or upgrades (#5130439, #5131238)!
+  (define p1-cmds (cmds-for-tier 1))
+  (run-cmd-list! p1-cmds
+                 (lambda (c) (tier-token-floor 1 c))
+                 (lambda (_) (tier-headroom-floor 1)))
+  (define p1-macro-rem
+    (filter (lambda (c) (and (not (hash-has-key? emitted-set c)) (not (sc2-raw-camera-move? c))))
+            p1-cmds))
+  (when (and (pair? p1-macro-rem)
+             (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-LOOP gov -1000)) 8))
+    (run-cmd-list! p1-macro-rem (lambda (_) -3.0) (lambda (_) 2.0) #:max-count 4))
+
+  ;; 3. Bounded anti-starvation rescue for overdue P2 combat (>= 12 loops stale) and 1 overdue routine P4 camera (>= 44 loops).
   (define p2-cmds (cmds-for-tier 2))
   (when (and (pair? p2-cmds)
              (>= (- cur-loop (hash-ref SC2-GOV-LAST-P2-LOOP gov -1000)) 12))
-    (run-cmd-list! p2-cmds (lambda (_) 1.0) (lambda (_) 6.0)))
+    (run-cmd-list! p2-cmds (lambda (_) 1.5) (lambda (_) 6.0) #:max-count 3))
   (define p4-cam-cmds
     (filter sc2-raw-camera-move? (cmds-for-tier 4)))
   (when (and (pair? p4-cam-cmds)
              (>= (- cur-loop (wire-apm-governor-last-cam-loop gov)) 44))
     (run-cmd-list! p4-cam-cmds (lambda (_) 0.0) (lambda (_) 6.0) #:max-count 1))
 
-  ;; Normal tier drain P1..P4 (`emitted-set` prevents re-emitting rescued P2/P4 commands).
-  (for ([tier (in-range 1 5)])
+  ;; 4. Normal tier drain P2..P4 (`emitted-set` prevents re-emitting rescued P2/P4 commands).
+  (for ([tier (in-range 2 5)])
     (define hr-floor (tier-headroom-floor tier))
     (run-cmd-list! (cmds-for-tier tier)
                    (lambda (c) (tier-token-floor tier c))

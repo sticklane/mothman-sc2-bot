@@ -1774,16 +1774,21 @@
         (define actions '())
         (define (emit! a) (set! actions (cons a actions)))
 
+        (define max-batteries (max 2 (length (bucket-pos-ids ab-ht '(nexus)))))
+        (define emitted-sb? #f)
         (for ([c (in-list cannons)])
           (define cx (u-x c bx))
           (define cy (u-y c by))
-          (when (not (any-entity-within? cx cy 5.0 batteries))
+          (when (and (not emitted-sb?)
+                     (< (length batteries) max-batteries)
+                     (not (any-entity-within? cx cy 10.0 batteries)))
+            (set! emitted-sb? #t)
             (define-values (sbx sby) (step-from-to cx cy bx by 3.0))
             (emit! (list 'build 'shield-battery sbx sby)))
           (define powering-cnt
             (for/sum ([p (in-list pylons)])
               (if (<= (fast-dist2 cx cy (u-x p 9999.0) (u-y p 9999.0)) 42.25) 1 0)))
-          (when (= powering-cnt 1)
+          (when (and (= powering-cnt 1) (< (length pylons) 12))
             (define def-cnt
               (for/sum ([d (in-list local-pool)])
                 (if (<= (fast-dist2 cx cy (u-x d 9999.0) (u-y d 9999.0)) 42.25) 1 0)))
@@ -1965,13 +1970,25 @@
         (define actions '())
         (define (emit! a) (set! actions (cons a actions)))
 
-        (when (and (pair? air-threats) (not (any-entity-within? bx by 9.0 turrets)))
+        (define combat-air-threats
+          (filter (lambda (e)
+                    (not (memq (u-sym e) '(overlord overseer observer warp-prism warp-prism-phasing))))
+                  air-threats))
+        (define max-turrets (max 2 (* 2 (max 1 (length (bucket-pos-ids ab-ht '(command-center orbital-command planetary-fortress)))))))
+        (when (and (pair? combat-air-threats)
+                   (< (length turrets) max-turrets)
+                   (not (any-entity-within? bx by 12.0 turrets)))
           (emit! (list 'build 'missile-turret (clamp-coord (- bx 4.0)) (clamp-coord (- by 4.0)))))
-        (when (and (pair? air-threats) (pair? tanks))
+        (when (and (pair? combat-air-threats)
+                   (pair? tanks)
+                   (< (length turrets) max-turrets))
           (define t0 (first tanks))
           (define tx (u-x t0 nx))
           (define ty (u-y t0 ny))
-          (when (not (any-entity-within? tx ty 8.0 turrets))
+          ;; Only fortify a defensive Siege Tank line near home/natural (<= 22 tiles), NEVER across the map!
+          (when (and (or (<= (fast-dist2 tx ty bx by) 484.0)
+                         (<= (fast-dist2 tx ty nx ny) 484.0))
+                     (not (any-entity-within? tx ty 12.0 turrets)))
             (emit! (list 'build 'missile-turret (clamp-coord (- tx 3.0)) (clamp-coord (+ ty 3.0))))))
 
         (for ([mt (in-list turrets)]

@@ -1297,7 +1297,9 @@
                         (cond
                           [(string-contains? line "[SCBOT_PRIORITY]")
                            (scan-priority-line! line)]
-                          [(string-prefix? line "[SCBOT_TELEMETRY]")
+                          [(or (string-prefix? line "[SCBOT_TELEMETRY]")
+                               (string-prefix? line "[SCBOT_STATE]")
+                               (and (string-prefix? line "{") (string-suffix? line "}")))
                            (void)]
                           [else
                            (set! stderr-exceptions (cons line stderr-exceptions))])))]))))))

@@ -2528,9 +2528,13 @@
   (when (eq? race 'Protoss)
     (when (and pvt-fast-kiter-threat?
                (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0))
-      (add-goal-spec! 'stalker 'army-production 'train 8 492.0 'pvt-fast-kiter-counter)
-      (add-goal-spec! 'adept 'army-production 'train 4 486.0 'pvt-fast-kiter-counter)
-      (add-goal-spec! 'shield-battery 'survival-supply 'build 2 484.0 'pvt-fast-kiter-counter))
+      (define mass-reapers? (>= (unit-count-equivalent enemy-u-counts 'reaper) 2))
+      (add-goal-spec! 'stalker 'army-production 'train 8 (if mass-reapers? 512.0 492.0) 'pvt-fast-kiter-counter)
+      (unless mass-reapers?
+        (add-goal-spec! 'adept 'army-production 'train 4 486.0 'pvt-fast-kiter-counter))
+      (add-goal-spec! 'shield-battery 'survival-supply 'build 2 (if mass-reapers? 496.0 484.0) 'pvt-fast-kiter-counter)
+      (when (and mass-reapers? (< (bldg-count-equivalent total-bldg-counts 'gateway) 2))
+        (add-goal-spec! 'gateway 'production-scaling 'build 2 488.0 'pvt-fast-kiter-counter)))
     (when (and (not pvt-fast-kiter-threat?)
                (not suppress-opening-harass?)
                (sg-unit-allowed? 'adept)
@@ -3841,6 +3845,10 @@
         (let* ([has-ready-counter?
                 (for/or ([k (in-hash-keys wipe-counter-boost-table)])
                   (sc2-tech-prereqs-ready? k ready-bldg-counts unit-counts))]
+               [core-backbone-syms
+                '(marine marauder siege-tank medivac viking-fighter
+                  zealot stalker immortal colossus archon
+                  zergling roach hydralisk corruptor)]
                [ally-prev-failing
                 (if has-ready-counter?
                     (for/list ([(u cnt) (in-hash unit-counts)]
@@ -3849,6 +3857,7 @@
                                                  [nd (lookup-sc2-tech-node (normalize-brain-sym u))])
                                              (and nd
                                                   (eq? (sc2-tech-node-category nd) 'combat-unit)
+                                                  (not (memq nu core-backbone-syms))
                                                   (not (memq nu opp-rec-counters))
                                                   (not (hash-has-key? wipe-counter-boost-table nu))))))
                       (normalize-brain-sym u))
@@ -4673,16 +4682,26 @@
             is-plan-milestone?))
       (cond
         ;; Supply candidate during supply crisis or hard 15/15 lockout
+        ;; Never let a non-crisis supply item (`u=280`, e.g. at 15/22 during worker rush or 10/38 during Reaper harass)
+        ;; escrow-block combat units when plenty of free supply (`> 6`) already exists (#5131248, #5131254)!
         [(eq? cat 'supply)
          (define u-sup
            (cond
              [supply-lockout-active? (max 2200.0 u0)]
              [supply-crisis? (max 1350.0 u0)]
              [else (max 280.0 u0)]))
+         (define sup-blk?
+           (and (or supply-lockout-active?
+                    supply-crisis?
+                    (and is-bo-goal?
+                         (not under-early-rush-crisis?)
+                         (not under-attack?)
+                         (<= supply-left 6)))
+                (or has-mineral-income?
+                    (>= minerals (priority-candidate-min-cost c)))))
          (struct-copy priority-candidate c
                       [utility-score u-sup]
-                      [blocking-allowed? (or has-mineral-income?
-                                             (>= minerals (priority-candidate-min-cost c)))])]
+                      [blocking-allowed? sup-blk?])]
 
         ;; Worker candidate: emergency recovery when workers < 14, and sustained saturation up to min(70, 22 * bases)
         ;; Gated by `worker-army-curve-ok?` (`required-army-supply-for-worker-growth`) at `workers >= 24`.
@@ -4840,8 +4859,10 @@
          (define max-queens desired-queens)
          (define queen-defer-for-first-lings?
            (and (eq? sym 'queen)
-                (or under-attack? (> enemy-threat-supply 2))
-                (< army-supply 4)))
+                (or (and (or under-attack? (> enemy-threat-supply 2))
+                         (< army-supply 4))
+                    (and under-early-rush-crisis?
+                         (< (unit-count-equivalent unit-counts 'zergling) 8)))))
          (define queen-sat-cap
            (if (and (not (or zvp-stargate-threat? enemy-cap-air? early-aggro?))
                     (< workers (if (>= active-bases 2) 18 14)))
@@ -5359,14 +5380,16 @@
                            (and (eq? csym 'extended-thermal-lance)
                                 (>= (unit-count-equivalent unit-counts 'colossus) 1))))
                   (values (max u1 500.0) #t)]
-                 [(or (eq? csym slice15-worker-sym)
-                      (and (eq? race 'Zerg)
-                           (eq? csym 'queen)
-                           (< (unit-count-equivalent unit-counts 'queen) desired-queens))
-                      (and (eq? race 'Terran)
-                           (eq? csym 'orbital-command)
-                           (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
-                           (< (bldg-count-equivalent total-bldg-counts 'orbital-command) active-bases)))
+                 [(and (not (and under-early-rush-crisis? (< army-supply 6)))
+                       (or (eq? csym slice15-worker-sym)
+                           (and (eq? race 'Zerg)
+                                (eq? csym 'queen)
+                                (not (and (or under-attack? (> enemy-threat-supply 2)) (< army-supply 4)))
+                                (< (unit-count-equivalent unit-counts 'queen) desired-queens))
+                           (and (eq? race 'Terran)
+                                (eq? csym 'orbital-command)
+                                (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
+                                (< (bldg-count-equivalent total-bldg-counts 'orbital-command) active-bases))))
                   (values (if (eq? cat 'supply) u1 (max u1 498.0)) #t)]
                  [(and lr-boost-static-def?
                        (memq csym slice15-mineral-def-syms)
@@ -5396,7 +5419,10 @@
                (define w-counter-u (hash-ref wipe-counter-boost-table csym #f))
                (cond
                  [(and (memq csym slice15-choke-def-syms)
-                       (< (bldg-count-equivalent total-bldg-counts csym) (max 2 active-bases)))
+                       (< (bldg-count-equivalent total-bldg-counts csym)
+                          (if (eq? csym 'photon-cannon)
+                              (if (or eff-req-aa? eff-req-det?) (min 2 active-bases) 1)
+                              (max 2 active-bases))))
                   (values (max u1 494.0) prereq-ok?)]
                  [(and (not opp-cap-air-override?) w-counter-u)
                   (values (max u1 w-counter-u) prereq-ok?)]
@@ -5504,12 +5530,21 @@
                        (goal-target-count-for 'stargate))))]
         [(eq? csym 'spore-crawler)
          (< (+ existing-tech-cnt sched-tech-cnt) (max 1 desired-spores))]
+        [(eq? csym 'photon-cannon)
+         (< (+ existing-tech-cnt sched-tech-cnt)
+            (if (or eff-req-aa? eff-req-det? enemy-cap-air?)
+                (min 3 (max 1 active-bases))
+                1))]
+        [(memq csym '(shield-battery missile-turret bunker spine-crawler))
+         (< (+ existing-tech-cnt sched-tech-cnt)
+            (min 4 (max 2 active-bases)))]
         [else #t]))
     (define unit-cap-ok?
       (and
        (sg-unit-allowed? csym #f (hash-ref seen-unit-counts csym 0))
        (not (and (eq? cat 'combat-unit)
-                 (memq csym slice15-all-suppressed-units)))
+                 (memq csym slice15-all-suppressed-units)
+                 (or opp-cap-air-override? (< minerals 650))))
        (case csym
          [(queen)
           (< (+ (unit-count-equivalent unit-counts 'queen)

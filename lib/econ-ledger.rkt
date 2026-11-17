@@ -7683,13 +7683,10 @@
 
 (define *opp-path-unit-table*
   (hasheq
-   ;; 'capital-air-fleet
+   ;; 'capital-air-fleet (only true capital/heavy air & T3 air anchors; bare Starport/Stargate/Spire added conditionally below)
    'fusion-core     'capital-air-fleet
    'fleet-beacon    'capital-air-fleet
    'greater-spire   'capital-air-fleet
-   'starport        'capital-air-fleet
-   'stargate        'capital-air-fleet
-   'spire           'capital-air-fleet
    'battlecruiser   'capital-air-fleet
    'carrier         'capital-air-fleet
    'tempest         'capital-air-fleet
@@ -7704,6 +7701,7 @@
    'immortal        'armored-ground-siege
    'colossus        'armored-ground-siege
    'disruptor       'armored-ground-siege
+   'stalker         'armored-ground-siege
    'lurker          'armored-ground-siege
    'lurker-burrowed 'armored-ground-siege
    'ultralisk       'armored-ground-siege
@@ -7750,12 +7748,12 @@
      (values '(ravager zergling viper brood-lord spire mutalisk hydralisk
                marauder starport liberator banshee siege-tank battlecruiser
                robotics-facility immortal stargate void-ray tempest disruptor zealot)
-             '(hellion reaper adept roach))]
+             '(hellion reaper))]
     [(light-bio-swarm)
      (values '(baneling lurker ultralisk infestor
                hellbat siege-tank widow-mine ghost
                colossus high-templar disruptor archon adept)
-             '(thor tempest void-ray immortal))]
+             '(tempest void-ray))]
     [(psionic-caster-swarm)
      (values '(zergling ultralisk hydralisk lurker
                ghost marauder viking liberator
@@ -7774,7 +7772,13 @@
   (define path-bonus (make-hasheq))
   (define total-minerals 0.0)
   (define total-gas 0.0)
-  (define cap-air-t3-present? #f)
+  (define cap-air-t3-present?
+    (or (for/or ([sym (in-list *opp-path-t3-anchor-syms*)])
+          (> (+ (hash-ref unit-counts sym 0) (hash-ref bldg-counts sym 0)) 0))
+        #f))
+  (define cap-air-real-commitment?
+    (or cap-air-t3-present?
+        (>= (hash-ref unit-counts 'void-ray 0) 2)))
   (define (sym-cost s)
     (define m0 (sc2-min-cost s))
     (define g0 (sc2-gas-cost s))
@@ -7792,7 +7796,11 @@
                                        supply-depot pylon overlord assimilator extractor refinery)))
           (set! total-minerals (+ total-minerals add-m))
           (set! total-gas (+ total-gas add-g)))
-        (define p (hash-ref *opp-path-unit-table* sym #f))
+        (define p
+          (or (hash-ref *opp-path-unit-table* sym #f)
+              (and cap-air-real-commitment?
+                   (memq sym '(starport stargate spire))
+                   'capital-air-fleet)))
         (when p
           (hash-set! path-mins p (+ add-m (hash-ref path-mins p 0.0)))
           (hash-set! path-gas p (+ add-g (hash-ref path-gas p 0.0)))
@@ -7849,7 +7857,7 @@
   (define dom-env-ratio
     (min 1.0 (/ (+ dom-min (* 2.2 dom-gas) (if cap-air-t3-present? 400.0 0.0))
                 (max 1.0 (* 0.55 (+ max-possible-minerals (* 2.2 max-possible-gas)))))))
-  (define gas-gate-boost (min 1.0 (/ (max total-gas dom-gas) 700.0)))
+  (define gas-gate-boost (min 1.0 (/ dom-gas 900.0)))
   (define raw-commit-score
     (if (= total-path-weight 0.0)
         0.0
@@ -7857,12 +7865,15 @@
              (* dom-share
                 (max dom-env-ratio
                      gas-gate-boost
-                     (if (or cap-air-t3-present? (>= total-gas 350.0)) 0.65 0.0))))))
+                     (if cap-air-real-commitment? 0.65 0.0))))))
+  ;; Only assert `hard-override-build-order?` on genuine capital-air commitments or massive single-path investments,
+  ;; NEVER on standard midgame 350G spending (`#5131026`, `#5131251`, `#5130502`, `#5130656`)!
   (define hard-override?
     (and (not (eq? best-path 'none))
-         (or (>= raw-commit-score 0.40)
-             (>= total-gas 350.0)
-             cap-air-t3-present?)))
+         (or (and (eq? best-path 'capital-air-fleet) cap-air-real-commitment?)
+             (and (not (eq? best-path 'capital-air-fleet))
+                  (>= raw-commit-score 0.72)
+                  (>= (+ dom-min (* 2.0 dom-gas)) 1400.0)))))
   (define closed-paths
     (if hard-override?
         (for/fold ([ht (hasheq)]) ([p (in-list *opp-all-paths*)])
@@ -7900,20 +7911,25 @@
   (define enemy-threat-supply (mref 'enemy-threat-supply 0))
   (define frame (mref 'frame 0))
   ;; Separate sharp loss events from steady-state macro deficits so under-saturated macro
-  ;; never masks an acute army wipe when peak-workers was never lost.
+  ;; never masks an acute army wipe, and healthy 3+ base / 48+ worker economies don't stay locked
+  ;; in permanent recovery/upgrade-deferral after losing 1 outer base (#5131238, #5130439)!
   (define direct-worker-loss?
-    (and (> peak-workers 0) (<= workers (- peak-workers 5))))
+    (and (> peak-workers 0)
+         (<= workers (- peak-workers (if (>= workers 44) 10 5)))
+         (< workers 56)))
   (define chronic-worker-deficit?
     (and (>= frame 3500)
          (< workers (if (>= frame 5500)
                         (max 16 (min 66 (* active-bases 16)))
                         16))))
   (define direct-base-loss?
-    (and (> peak-bases 0) (< active-bases peak-bases)))
+    (and (> peak-bases 0)
+         (< active-bases peak-bases)
+         (or (< active-bases 3) (< workers 48))))
   (define chronic-base-deficit?
     (and (>= frame 6000)
          (or (< active-bases 2)
-             (>= workers (* active-bases 22)))))
+             (and (< active-bases 5) (>= workers (* active-bases 22))))))
   (define army-wipe?
     (or (and (> peak-supply 0) (<= supply-used (- peak-supply 16)))
         (and (>= frame 4000)
@@ -7934,7 +7950,8 @@
   (define boost-static-defense?
     (or direct-worker-loss? direct-base-loss? army-wipe?))
   (define preempt-greedy-tech?
-    (or boost-workers? direct-base-loss? suppress-failing-comp?))
+    (and (or boost-workers? direct-base-loss? suppress-failing-comp?)
+         (or (< workers 36) (< active-bases 2) (< army-supply 16))))
   (hasheq 'mode mode
           'unlock-locked-path? unlock-locked-path?
           'preempt-greedy-tech? preempt-greedy-tech?
