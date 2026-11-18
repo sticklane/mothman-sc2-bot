@@ -38,21 +38,30 @@
     (pro-bo-goal 'train    'immortal               1 34 'robotics-facility 322.4) ;; 5:22
     (pro-bo-goal 'train    'observer               1 36 'robotics-facility 312.9) ;; 5:13
     (pro-bo-goal 'research 'charge                 1 38 'twilight-council 317.2) ;; 5:17
-    ;; 42-64 +1 Ground, Robotics Bay, 3rd Nexus & Thermal Lance
-    (pro-bo-goal 'build    'assimilator            3 42 'robotics-facility 260.0) ;; 4:20
-    (pro-bo-goal 'build    'forge                  1 48 'cybernetics-core 289.2) ;; 4:49
-    (pro-bo-goal 'research 'protoss-ground-weapons-1 1 52 'forge           336.9) ;; 5:37
-    (pro-bo-goal 'build    'robotics-bay           1 56 'robotics-facility 350.0) ;; 5:50
-    (pro-bo-goal 'expand   'nexus                  3 60 'robotics-facility 297.8) ;; 4:58
-    (pro-bo-goal 'research 'extended-thermal-lance 1 64 'robotics-bay     400.0)) ;; 6:40
-   ;; Empirical pro supply checkpoints: (minute . (workers . army-supply))
+    ;; 42-96 +1 Ground, 3rd Nexus, Robotics Bay, Thermal Lance, Templar Archive & 4th Nexus
+    (pro-bo-goal 'build    'assimilator            3 42 'robotics-facility 260.0) ;; 4:20 (Pro Gas #3 @ 36w)
+    (pro-bo-goal 'expand   'nexus                  3 46 'robotics-facility 282.0) ;; 4:42 (3rd Base!)
+    (pro-bo-goal 'build    'forge                  1 50 'cybernetics-core 289.2) ;; 4:49
+    (pro-bo-goal 'build    'assimilator            4 54 'robotics-facility 302.0) ;; 5:02 (Pro Gas #4 @ 40w)
+    (pro-bo-goal 'research 'protoss-ground-weapons-1 1 56 'forge           336.9) ;; 5:37
+    (pro-bo-goal 'build    'robotics-bay           1 60 'robotics-facility 345.0) ;; 5:45
+    (pro-bo-goal 'build    'templar-archive        1 66 'twilight-council  365.0) ;; 6:05
+    (pro-bo-goal 'build    'gateway                4 72 'cybernetics-core  380.0) ;; 6:20
+    (pro-bo-goal 'build    'gateway                5 76 'cybernetics-core  390.0) ;; 6:30
+    (pro-bo-goal 'research 'extended-thermal-lance 1 80 'robotics-bay      400.0) ;; 6:40
+    (pro-bo-goal 'build    'gateway                6 86 'cybernetics-core  420.0) ;; 7:00
+    (pro-bo-goal 'expand   'nexus                  4 94 'robotics-bay      440.0)) ;; 7:20 (4th Base Macro!)
+   ;; Empirical pro 4+ base macro supply checkpoints: (minute . (workers . army-supply))
    '((1 . (17.0 .  1.0))
      (2 . (21.0 .  1.0))
-     (3 . (28.0 .  6.0))
-     (4 . (38.0 . 14.0))
-     (5 . (45.0 . 20.0))
-     (6 . (54.0 . 24.0))
-     (7 . (65.0 . 32.5)))
+     (3 . (29.0 .  6.0))
+     (4 . (39.0 . 14.0))
+     (5 . (49.0 . 20.0))
+     (6 . (59.0 . 26.0))
+     (7 . (66.0 . 36.0))
+     (8 . (70.0 . 54.0))
+     (9 . (70.0 . 74.0))
+     (10 . (70.0 . 94.0)))
    ;; Empirical pro unit production timings (Faster LotV sec)
    (list
     (pro-unit-timing 'adept      2 28 140.6 'cybernetics-core)  ;; 2:21

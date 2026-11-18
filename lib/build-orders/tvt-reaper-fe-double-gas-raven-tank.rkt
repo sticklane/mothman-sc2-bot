@@ -47,16 +47,23 @@
     (pro-bo-goal 'build    'engineering-bay          1 46 'barracks         286.0) ;; 4:46
     (pro-bo-goal 'build    'refinery                 3 48 'factory          320.0) ;; 5:20
     (pro-bo-goal 'research 'terran-infantry-weapons-1 1 50 'engineering-bay 331.6) ;; 5:32
-    (pro-bo-goal 'expand   'command-center           3 54 'starport         377.1) ;; 6:17
-    (pro-bo-goal 'build    'armory                   1 58 'factory          405.5)) ;; 6:46
-   ;; Empirical pro supply checkpoints: (minute . (workers . army-supply))
+    (pro-bo-goal 'expand   'command-center           3 54 'starport         355.0) ;; 5:55 (3rd Base!)
+    (pro-bo-goal 'build    'refinery                 4 58 'factory          375.0) ;; 6:15
+    (pro-bo-goal 'build    'armory                   1 62 'factory          405.5) ;; 6:46
+    (pro-bo-goal 'build    'barracks                 4 76 'starport         430.0) ;; 7:10
+    (pro-bo-goal 'build    'barracks                 5 82 'starport         445.0) ;; 7:25
+    (pro-bo-goal 'expand   'command-center           4 90 'starport         465.0)) ;; 7:45 (4th Base Macro!)
+   ;; Empirical pro 4+ base macro supply checkpoints: (minute . (workers . army-supply))
    '((1 . (16.0 .  1.0))
      (2 . (19.0 .  1.0))
-     (3 . (23.0 .  7.0))
-     (4 . (28.5 . 15.5))
-     (5 . (35.5 . 24.0))
-     (6 . (43.0 . 37.0))
-     (7 . (49.5 . 52.5)))
+     (3 . (25.0 .  7.0))
+     (4 . (33.0 . 15.5))
+     (5 . (42.0 . 24.0))
+     (6 . (52.0 . 37.0))
+     (7 . (60.0 . 52.5))
+     (8 . (66.0 . 68.0))
+     (9 . (66.0 . 84.0))
+     (10 . (66.0 . 102.0)))
    ;; Empirical pro unit production timings (Faster LotV sec)
    (list
     (pro-unit-timing 'reaper          1 20  99.5 'barracks)         ;; 1:40

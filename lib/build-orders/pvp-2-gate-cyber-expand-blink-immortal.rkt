@@ -39,20 +39,28 @@
     (pro-bo-goal 'train    'observer               1 36 'robotics-facility 245.0) ;; 4:05
     (pro-bo-goal 'build    'gateway                3 38 'cybernetics-core 265.0) ;; 4:25
     (pro-bo-goal 'research 'blink                  1 40 'twilight-council 280.0) ;; 4:40
-    ;; 44-60 +1 Weapons, Robotics Bay & 3rd Nexus
-    (pro-bo-goal 'build    'assimilator            3 44 'robotics-facility 300.0) ;; 5:00
-    (pro-bo-goal 'build    'forge                  1 48 'cybernetics-core 326.8) ;; 5:27
-    (pro-bo-goal 'research 'protoss-ground-weapons-1 1 52 'forge           320.8) ;; 5:21
-    (pro-bo-goal 'build    'robotics-bay           1 56 'robotics-facility 350.0) ;; 5:50
-    (pro-bo-goal 'expand   'nexus                  3 60 'robotics-facility 369.5)) ;; 6:10
-   ;; Empirical pro supply checkpoints: (minute . (workers . army-supply))
+    ;; 44-94 +1 Weapons, 3rd Nexus, Robotics Bay, Templar Archive & 4th Nexus
+    (pro-bo-goal 'build    'assimilator            3 44 'robotics-facility 300.0) ;; 5:00 (Pro Gas #3 @ 36w)
+    (pro-bo-goal 'build    'forge                  1 48 'cybernetics-core 318.0) ;; 5:18
+    (pro-bo-goal 'research 'protoss-ground-weapons-1 1 52 'forge           325.0) ;; 5:25
+    (pro-bo-goal 'expand   'nexus                  3 56 'robotics-facility 345.0) ;; 5:45 (3rd Base!)
+    (pro-bo-goal 'build    'robotics-bay           1 60 'robotics-facility 360.0) ;; 6:00
+    (pro-bo-goal 'build    'assimilator            4 64 'robotics-facility 372.0) ;; 6:12
+    (pro-bo-goal 'build    'templar-archive        1 70 'twilight-council  395.0) ;; 6:35
+    (pro-bo-goal 'build    'gateway                4 76 'cybernetics-core  410.0) ;; 6:50
+    (pro-bo-goal 'build    'gateway                5 82 'cybernetics-core  425.0) ;; 7:05
+    (pro-bo-goal 'expand   'nexus                  4 92 'robotics-bay      455.0)) ;; 7:35 (4th Base Macro!)
+   ;; Empirical pro 4+ base macro supply checkpoints: (minute . (workers . army-supply))
    '((1 . (17.0 .  1.0))
      (2 . (22.0 .  1.0))
-     (3 . (24.0 .  8.0))
-     (4 . (26.0 . 11.5))
-     (5 . (29.5 . 19.0))
-     (6 . (35.0 . 25.0))
-     (7 . (40.0 . 32.0)))
+     (3 . (26.0 .  8.0))
+     (4 . (34.0 . 11.5))
+     (5 . (44.0 . 19.0))
+     (6 . (54.0 . 26.0))
+     (7 . (63.0 . 36.0))
+     (8 . (70.0 . 52.0))
+     (9 . (70.0 . 72.0))
+     (10 . (70.0 . 92.0)))
    ;; Empirical pro unit production timings (Faster LotV sec)
    (list
     (pro-unit-timing 'adept    2 24 117.4 'cybernetics-core)  ;; 1:57

@@ -29,30 +29,38 @@
     (pro-bo-goal 'train    'queen                  2 20 'spawning-pool     151.4) ;; 2:31
     (pro-bo-goal 'train    'zergling               4 20 'spawning-pool     139.4) ;; 2:19
     (pro-bo-goal 'research 'metabolic-boost        1 22 'spawning-pool     134.6) ;; 2:15
-    ;; 30-44 Fast 3rd Hatchery, Queens, Roach Warren & Baneling Nest
+    ;; 30-44 Fast 3rd Hatchery, Queens, Pro Geyser #2 (@30w), Lair & Roach Warren
     (pro-bo-goal 'expand   'hatchery               3 30 'spawning-pool     162.9) ;; 2:43
-    (pro-bo-goal 'train    'queen                  3 32 'spawning-pool     214.3) ;; 3:34
-    (pro-bo-goal 'build    'roach-warren           1 36 'spawning-pool     280.8) ;; 4:41
-    (pro-bo-goal 'build    'baneling-nest          1 38 'spawning-pool     295.0) ;; 4:55
-    (pro-bo-goal 'build    'extractor              2 40 'spawning-pool     227.5) ;; 3:48
-    (pro-bo-goal 'build    'extractor              3 44 'spawning-pool     278.1) ;; 4:38
-    ;; 46-68 Lair, Upgrades, and Hydra Den transition
-    (pro-bo-goal 'morph    'lair                   1 46 'spawning-pool     272.2) ;; 4:32
-    (pro-bo-goal 'build    'evolution-chamber      1 48 'spawning-pool     304.5) ;; 5:05
-    (pro-bo-goal 'research 'glial-reconstitution   1 54 'lair              341.7) ;; 5:42
-    (pro-bo-goal 'research 'centrifical-hooks      1 56 'lair              355.0) ;; 5:55
-    (pro-bo-goal 'research 'zerg-missile-weapons-1 1 58 'evolution-chamber 365.6) ;; 6:06
-    (pro-bo-goal 'build    'hydralisk-den          1 62 'lair              362.8) ;; 6:03
-    (pro-bo-goal 'build    'extractor              4 64 'lair              308.1) ;; 5:08
-    (pro-bo-goal 'research 'grooved-spines         1 68 'hydralisk-den     388.8)) ;; 6:29
-   ;; Empirical pro supply checkpoints: (minute . (workers . army-supply))
+    (pro-bo-goal 'train    'queen                  3 32 'spawning-pool     205.0) ;; 3:25
+    (pro-bo-goal 'build    'extractor              2 34 'spawning-pool     227.5) ;; 3:48 (Pro Gas #2 @ ~30w)
+    (pro-bo-goal 'build    'roach-warren           1 38 'spawning-pool     245.0) ;; 4:05
+    (pro-bo-goal 'morph    'lair                   1 44 'spawning-pool     260.0) ;; 4:20
+    (pro-bo-goal 'build    'extractor              3 48 'spawning-pool     278.1) ;; 4:38 (Pro Gas #3 @ ~40w)
+    (pro-bo-goal 'build    'baneling-nest          1 50 'spawning-pool     290.0) ;; 4:50
+    ;; 52-110 4th Hatchery, Upgrades, Hydra/Lurker Den & Hive 5th-Base Macro
+    (pro-bo-goal 'build    'evolution-chamber      1 52 'spawning-pool     300.0) ;; 5:00
+    (pro-bo-goal 'build    'extractor              4 58 'lair              308.1) ;; 5:08 (Pro Gas #4 @ ~47w)
+    (pro-bo-goal 'expand   'hatchery               4 62 'lair              325.0) ;; 5:25 (4th Base Macro!)
+    (pro-bo-goal 'research 'glial-reconstitution   1 64 'lair              341.7) ;; 5:42
+    (pro-bo-goal 'build    'hydralisk-den          1 66 'lair              352.0) ;; 5:52
+    (pro-bo-goal 'research 'zerg-missile-weapons-1 1 68 'evolution-chamber 365.6) ;; 6:06
+    (pro-bo-goal 'research 'grooved-spines         1 72 'hydralisk-den     388.8) ;; 6:29
+    (pro-bo-goal 'build    'lurker-den             1 82 'hydralisk-den     415.0) ;; 6:55
+    (pro-bo-goal 'build    'infestation-pit        1 90 'lair              440.0) ;; 7:20
+    (pro-bo-goal 'morph    'hive                   1 98 'infestation-pit   470.0) ;; 7:50
+    (pro-bo-goal 'expand   'hatchery               5 106 'lair             485.0) ;; 8:05 (5th Base Macro!)
+    (pro-bo-goal 'research 'adaptive-talons        1 112 'hive             515.0)) ;; 8:35
+   ;; Empirical pro 4+ base macro supply checkpoints: (minute . (workers . army-supply))
    '((1 . (15.0 .  2.0))
      (2 . (20.0 .  2.0))
-     (3 . (25.0 . 10.0))
-     (4 . (35.0 . 16.0))
-     (5 . (48.0 . 21.0))
-     (6 . (58.5 . 28.0))
-     (7 . (62.0 . 51.0)))
+     (3 . (28.0 .  8.0))
+     (4 . (38.0 . 14.0))
+     (5 . (50.0 . 21.0))
+     (6 . (61.0 . 28.0))
+     (7 . (68.0 . 51.0))
+     (8 . (74.0 . 64.0))
+     (9 . (76.0 . 78.0))
+     (10 . (76.0 . 92.0)))
    ;; Empirical pro unit production timings (Faster LotV sec)
    (list
     (pro-unit-timing 'overlord 2 13  12.4 #f)             ;; 0:12

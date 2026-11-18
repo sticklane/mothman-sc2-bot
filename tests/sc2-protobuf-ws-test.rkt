@@ -1044,6 +1044,43 @@
                           (= (sc2-raw-unit-command-target-unit-tag c) 0)))
                    sd-cmds))
 
+;; Dynamic Gas Pull + Automatic Hysteresis Re-Saturation (no worker ping-pong!)
+(define (make-hysteresis-gas-obs loop mins vesp)
+  (make-test-obs
+   loop mins vesp
+   (append
+    (list (make-test-unit 1 86 1 32.0 32.0 #:assigned 12 #:ideal 16)
+          (make-test-unit 2 88 1 32.0 25.0 #:assigned 2 #:ideal 3)
+          (make-test-unit 50 341 3 32.0 38.0 #:minerals 1500)
+          ;; 2 gas Drones targeting Extractor #2
+          (make-test-unit 201 104 1 32.0 26.0 #:orders (list (sc2-unit-order 1183 #f 2 0.0)))
+          (make-test-unit 202 104 1 32.5 26.0 #:orders (list (sc2-unit-order 1183 #f 2 0.0))))
+    ;; 12 mineral Drones targeting Mineral #50
+    (for/list ([i (in-range 12)])
+      (make-test-unit (+ 210 i) 104 1 (+ 29.0 (* 0.4 i)) 35.0
+                      #:orders (list (sc2-unit-order 1183 #f 50 0.0)))))))
+
+(define hyst-pull-cmds (saturate-workers-and-gas-commands (make-hysteresis-gas-obs 6000 110 320)))
+(check-true "gas-pull-fires-at-320G-110M"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-target-unit-tag c) 50)
+                          (or (member 201 (sc2-raw-unit-command-unit-tags c))
+                              (member 202 (sc2-raw-unit-command-unit-tags c)))))
+                   hyst-pull-cmds))
+(define hyst-deadband-cmds (saturate-workers-and-gas-commands (make-hysteresis-gas-obs 6016 180 240)))
+(check-true "gas-hysteresis-deadband-prevents-pingpong-at-240G-180M"
+            (not (ormap (lambda (c)
+                          (and (sc2-raw-unit-command? c)
+                               (= (sc2-raw-unit-command-target-unit-tag c) 2)))
+                        hyst-deadband-cmds)))
+(define hyst-resat-cmds (saturate-workers-and-gas-commands (make-hysteresis-gas-obs 6032 180 175)))
+(check-true "gas-auto-resaturates-when-vespene-drops-below-200G"
+            (ormap (lambda (c)
+                     (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-target-unit-tag c) 2)))
+                   hyst-resat-cmds))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

@@ -61,7 +61,16 @@
  due-pro-upgrade-timings
  pro-unit-timing->bo-goal
  pro-upgrade-timing->bo-goal
+ race-macro-worker-cap
  pro-supply-curve-target
+ pro-supply-curve-target-for-spec
+ PvZ-ANTI-EARLY-POOL-BUILD-ORDER
+ TvZ-ANTI-EARLY-POOL-BUILD-ORDER
+ ZvX-ANTI-EARLY-RUSH-BUILD-ORDER
+ TvP-2BASE-STIM-TIMING-BUILD-ORDER
+ ZvP-2BASE-ROACH-RAVAGER-TIMING-BUILD-ORDER
+ REACTIVE-BUILD-ORDER-VARIANTS
+ select-reactive-build-order-spec
  PRO-BUILD-ORDER-DB
  find-matchup-entry
  select-pro-build-order
@@ -238,23 +247,245 @@
                (pro-upgrade-timing-prereq-ready-sym up)
                (pro-upgrade-timing-start-sec up)))
 
-(: pro-supply-curve-target (->* (Any) (Any Any Any) (Values Integer Integer)))
-(define (pro-supply-curve-target race [enemy-race 'Unknown] [raw-frame 0] [raw-active-bases 1])
+(: race-macro-worker-cap (-> Any Integer))
+(define (race-macro-worker-cap race)
+  (case (normalize-known-race race)
+    [(Zerg)    76]
+    [(Protoss) 70]
+    [(Terran)  66]))
+
+(: pro-supply-curve-target-for-spec (->* (build-order-spec) (Any Any) (Values Integer Integer)))
+(define (pro-supply-curve-target-for-spec spec [raw-frame 0] [raw-active-bases 1])
   (define frame (safe-nonneg-int raw-frame 0))
   (define active-bases (max 1 (safe-nonneg-int raw-active-bases 1)))
   (define sec (/ (->float frame) 22.4))
-  (define spec (lookup-build-order-for-matchup race enemy-race))
-  (define minute-idx (max 1 (min 7 (+ 1 (exact-floor (/ sec 60.0))))))
-  (define pt (assv minute-idx (build-order-spec-supply-curve spec)))
+  (define race-cap (race-macro-worker-cap (build-order-spec-race spec)))
+  (define minute-idx (max 1 (min 10 (+ 1 (exact-floor (/ sec 60.0))))))
+  (define curve (build-order-spec-supply-curve spec))
+  (define pt
+    (or (assv minute-idx curve)
+        (assv (min 7 minute-idx) curve)))
   (define workers-val : Real
     (if pt (car (cdr pt)) (* 22.0 (min 4 active-bases))))
   (define army-val : Real
     (if pt (cdr (cdr pt)) (max 2.0 (* 8.0 minute-idx))))
   (define curve-workers (exact-round workers-val))
   (define curve-army (exact-round army-val))
-  (define base-scaled-workers
-    (min 70 (max 22 (* 22 (min 4 active-bases)) curve-workers)))
+  (define timing-cut-archetype?
+    (memq (build-order-spec-archetype spec)
+          '(two-base-timing one-base-all-in roach-ravager-timing bio-timing-allin)))
+  (define base-scaled-workers : Integer
+    (if (and timing-cut-archetype? (< sec 420.0))
+        (min race-cap (max 16 curve-workers))
+        (min race-cap (max 22 (* 22 (min 4 active-bases)) curve-workers))))
   (values base-scaled-workers curve-army))
+
+(: pro-supply-curve-target (->* (Any) (Any Any Any) (Values Integer Integer)))
+(define (pro-supply-curve-target race [enemy-race 'Unknown] [raw-frame 0] [raw-active-bases 1])
+  (define spec (lookup-build-order-for-matchup race enemy-race))
+  (pro-supply-curve-target-for-spec spec raw-frame raw-active-bases))
+
+;; -----------------------------------------------------------------------------
+;; 1b. Reactive Anti-Early-Pool / Rush & Intentional Worker-Cut Timing Variants
+;; -----------------------------------------------------------------------------
+
+(: PvZ-ANTI-EARLY-POOL-BUILD-ORDER build-order-spec)
+(define PvZ-ANTI-EARLY-POOL-BUILD-ORDER
+  (build-order-spec
+   'PvZ
+   'Protoss
+   "PvZ Reactive Core-Zealot-Battery vs Early Pool into 4-Base Macro"
+   'stalker-colossus
+   "Scouted 12-pool / pool-first response: Cybernetics Core + Zealot + Pylon #2 + Shield Battery BEFORE Natural Nexus, then 4-base macro."
+   (list
+    (pro-bo-goal 'build    'pylon                  1 14 #f                 17.5)
+    (pro-bo-goal 'build    'gateway                1 16 'pylon             44.5)
+    (pro-bo-goal 'build    'assimilator            1 16 'pylon             46.8)
+    (pro-bo-goal 'build    'cybernetics-core       1 18 'gateway           72.0)  ;; Core BEFORE Nexus!
+    (pro-bo-goal 'train    'zealot                 1 18 'gateway           76.0)  ;; Chrono Zealot to hold lings!
+    (pro-bo-goal 'build    'pylon                  2 19 'gateway           88.0)
+    (pro-bo-goal 'train    'adept                  1 20 'cybernetics-core 104.0)
+    (pro-bo-goal 'build    'shield-battery         1 21 'cybernetics-core 112.0)
+    (pro-bo-goal 'expand   'nexus                  2 22 'cybernetics-core 135.0)  ;; Safe Natural Nexus after hold!
+    (pro-bo-goal 'research 'warp-gate-research     1 24 'cybernetics-core 145.0)
+    (pro-bo-goal 'build    'assimilator            2 26 'cybernetics-core 155.0)
+    (pro-bo-goal 'build    'robotics-facility      1 30 'cybernetics-core 195.0)
+    (pro-bo-goal 'build    'twilight-council       1 32 'cybernetics-core 210.0)
+    (pro-bo-goal 'build    'gateway                2 34 'cybernetics-core 225.0)
+    (pro-bo-goal 'build    'gateway                3 36 'cybernetics-core 235.0)
+    (pro-bo-goal 'expand   'nexus                  3 48 'robotics-facility 295.0)
+    (pro-bo-goal 'build    'assimilator            3 50 'robotics-facility 305.0)
+    (pro-bo-goal 'research 'charge                 1 52 'twilight-council  320.0)
+    (pro-bo-goal 'build    'forge                  1 56 'cybernetics-core  335.0)
+    (pro-bo-goal 'build    'robotics-bay           1 62 'robotics-facility 365.0)
+    (pro-bo-goal 'expand   'nexus                  4 92 'robotics-bay      450.0))
+   '((1 . (17.0 .  1.0))
+     (2 . (19.0 .  4.0))
+     (3 . (26.0 .  8.0))
+     (4 . (36.0 . 14.0))
+     (5 . (47.0 . 20.0))
+     (6 . (58.0 . 26.0))
+     (7 . (66.0 . 36.0))
+     (8 . (70.0 . 54.0))
+     (9 . (70.0 . 74.0))
+     (10 . (70.0 . 94.0)))
+   (build-order-spec-unit-timings PvZ-BUILD-ORDER)
+   (build-order-spec-upgrade-timings PvZ-BUILD-ORDER)))
+
+(: TvZ-ANTI-EARLY-POOL-BUILD-ORDER build-order-spec)
+(define TvZ-ANTI-EARLY-POOL-BUILD-ORDER
+  (build-order-spec
+   'TvZ
+   'Terran
+   "TvZ Reactive Wall-Reaper-Hellion High-Ground CC vs Early Pool"
+   'bio-tank
+   "Scouted 12-pool / pool-first response: complete Depot wall + Reaper/Marine + Factory + Reactor Hellions + safe CC2, then 4-base macro."
+   (list
+    (pro-bo-goal 'build    'supply-depot             1 14 #f                 17.1)
+    (pro-bo-goal 'build    'barracks                 1 16 'supply-depot      40.6)
+    (pro-bo-goal 'build    'refinery                 1 16 'supply-depot      43.9)
+    (pro-bo-goal 'build    'supply-depot             2 18 'barracks          78.0)  ;; Wall closed vs 12-pool!
+    (pro-bo-goal 'morph    'orbital-command          1 19 'barracks          91.1)
+    (pro-bo-goal 'build    'factory                  1 20 'barracks         106.0)
+    (pro-bo-goal 'build    'barracks-reactor         1 21 'barracks         114.0)
+    (pro-bo-goal 'build    'bunker                   1 21 'barracks         120.0)
+    (pro-bo-goal 'expand   'command-center           2 22 'factory          140.0)  ;; Safe CC2 after wall + Factory!
+    (pro-bo-goal 'train    'hellion                  4 26 'factory          185.0)
+    (pro-bo-goal 'build    'refinery                 2 28 'factory          190.0)
+    (pro-bo-goal 'build    'starport                 1 30 'factory          205.0)
+    (pro-bo-goal 'morph    'orbital-command          2 32 'barracks         215.0)
+    (pro-bo-goal 'build    'barracks                 2 36 'barracks         235.0)
+    (pro-bo-goal 'build    'barracks-techlab         1 38 'barracks         248.0)
+    (pro-bo-goal 'expand   'command-center           3 44 'starport         275.0)
+    (pro-bo-goal 'research 'stimpack                 1 46 'barracks-techlab 285.0)
+    (pro-bo-goal 'build    'barracks                 3 50 'barracks         300.0)
+    (pro-bo-goal 'build    'engineering-bay          1 52 'barracks         310.0)
+    (pro-bo-goal 'expand   'command-center           4 90 'starport         450.0))
+   '((1 . (16.0 .  1.0))
+     (2 . (18.0 .  4.0))
+     (3 . (25.0 .  8.0))
+     (4 . (35.0 . 14.0))
+     (5 . (45.0 . 22.0))
+     (6 . (55.0 . 32.0))
+     (7 . (64.0 . 44.0))
+     (8 . (66.0 . 62.0))
+     (9 . (66.0 . 82.0))
+     (10 . (66.0 . 102.0)))
+   (build-order-spec-unit-timings TvZ-BUILD-ORDER)
+   (build-order-spec-upgrade-timings TvZ-BUILD-ORDER)))
+
+(: ZvX-ANTI-EARLY-RUSH-BUILD-ORDER build-order-spec)
+(define ZvX-ANTI-EARLY-RUSH-BUILD-ORDER
+  (build-order-spec
+   'ZvZ
+   'Zerg
+   "ZvX Reactive Pool-Ling-Queen-Spine-Roach Hold into 4-Base Macro"
+   'ling-bane-roach
+   "Scouted 12-pool / proxy / cannon rush response: immediate Pool, Lings, Queens, Spine Crawler & Roach Warren before 3rd Hatchery."
+   (list
+    (pro-bo-goal 'build    'spawning-pool          1 14 #f                  48.0)
+    (pro-bo-goal 'build    'extractor              1 15 #f                  58.0)
+    (pro-bo-goal 'train    'overlord               2 15 #f                  65.0)
+    (pro-bo-goal 'train    'zergling               6 16 'spawning-pool      92.0)
+    (pro-bo-goal 'train    'queen                  2 18 'spawning-pool     102.0)
+    (pro-bo-goal 'build    'spine-crawler          1 19 'spawning-pool     108.0)
+    (pro-bo-goal 'research 'metabolic-boost        1 20 'spawning-pool     118.0)
+    (pro-bo-goal 'build    'roach-warren           1 22 'spawning-pool     135.0)
+    (pro-bo-goal 'expand   'hatchery               2 24 'spawning-pool     155.0)
+    (pro-bo-goal 'build    'baneling-nest          1 28 'spawning-pool     175.0)
+    (pro-bo-goal 'expand   'hatchery               3 34 'spawning-pool     215.0)
+    (pro-bo-goal 'build    'extractor              2 38 'spawning-pool     235.0)
+    (pro-bo-goal 'morph    'lair                   1 44 'spawning-pool     265.0)
+    (pro-bo-goal 'expand   'hatchery               4 64 'lair              360.0)
+    (pro-bo-goal 'build    'hydralisk-den          1 68 'lair              385.0))
+   '((1 . (14.0 .  4.0))
+     (2 . (18.0 .  8.0))
+     (3 . (25.0 . 12.0))
+     (4 . (34.0 . 18.0))
+     (5 . (44.0 . 26.0))
+     (6 . (54.0 . 38.0))
+     (7 . (64.0 . 54.0))
+     (8 . (70.0 . 66.0))
+     (9 . (76.0 . 78.0))
+     (10 . (76.0 . 90.0)))
+   (build-order-spec-unit-timings ZvZ-BUILD-ORDER)
+   (build-order-spec-upgrade-timings ZvZ-BUILD-ORDER)))
+
+(: TvP-2BASE-STIM-TIMING-BUILD-ORDER build-order-spec)
+(define TvP-2BASE-STIM-TIMING-BUILD-ORDER
+  (build-order-spec
+   'TvP
+   'Terran
+   "TvP 2-Base 44-SCV 3-Rax Stim/Medivac/+1 Timing -> 4-Base Transition"
+   'two-base-timing
+   "Intentional worker cut at 44 SCVs for crisp 2-base Stim/Medivac/+1 timing push, auto-transitioning to 3rd/4th CC at 7:00 if held."
+   (build-order-spec-steps TvP-BUILD-ORDER)
+   '((1 . (16.0 .  1.0))
+     (2 . (19.0 .  2.0))
+     (3 . (26.0 .  6.0))
+     (4 . (36.0 . 18.0))
+     (5 . (44.0 . 30.0))
+     (6 . (44.0 . 46.0))
+     (7 . (44.0 . 62.0))
+     (8 . (58.0 . 72.0))
+     (9 . (66.0 . 86.0))
+     (10 . (66.0 . 102.0)))
+   (build-order-spec-unit-timings TvP-BUILD-ORDER)
+   (build-order-spec-upgrade-timings TvP-BUILD-ORDER)))
+
+(: ZvP-2BASE-ROACH-RAVAGER-TIMING-BUILD-ORDER build-order-spec)
+(define ZvP-2BASE-ROACH-RAVAGER-TIMING-BUILD-ORDER
+  (build-order-spec
+   'ZvP
+   'Zerg
+   "ZvP 38-Drone Roach-Ravager-Ling Timing -> 4-Base Macro Transition"
+   'roach-ravager-timing
+   "Intentional worker cut at 38 Drones for Roach-Ravager-Speedling timing, auto-transitioning to Lair + 4th Hatchery at 7:00 if held."
+   (build-order-spec-steps ZvP-BUILD-ORDER)
+   '((1 . (15.0 .  2.0))
+     (2 . (20.0 .  2.0))
+     (3 . (28.0 . 10.0))
+     (4 . (38.0 . 22.0))
+     (5 . (38.0 . 38.0))
+     (6 . (38.0 . 54.0))
+     (7 . (52.0 . 62.0))
+     (8 . (66.0 . 70.0))
+     (9 . (76.0 . 82.0))
+     (10 . (76.0 . 94.0)))
+   (build-order-spec-unit-timings ZvP-BUILD-ORDER)
+   (build-order-spec-upgrade-timings ZvP-BUILD-ORDER)))
+
+(: REACTIVE-BUILD-ORDER-VARIANTS (Listof build-order-spec))
+(define REACTIVE-BUILD-ORDER-VARIANTS
+  (list PvZ-ANTI-EARLY-POOL-BUILD-ORDER
+        TvZ-ANTI-EARLY-POOL-BUILD-ORDER
+        ZvX-ANTI-EARLY-RUSH-BUILD-ORDER
+        TvP-2BASE-STIM-TIMING-BUILD-ORDER
+        ZvP-2BASE-ROACH-RAVAGER-TIMING-BUILD-ORDER))
+
+(: select-reactive-build-order-spec
+   (->* (Any)
+        (Any #:early-pool-or-rush? Boolean #:variant (Option Symbol))
+        build-order-spec))
+(define (select-reactive-build-order-spec race
+                                          [enemy-race 'Unknown]
+                                          #:early-pool-or-rush? [early-pool-or-rush? #f]
+                                          #:variant [variant #f])
+  (define m-sym (resolve-matchup-symbol race enemy-race))
+  (cond
+    [(eq? variant 'two-base-timing)
+     (case m-sym
+       [(TvP) TvP-2BASE-STIM-TIMING-BUILD-ORDER]
+       [(ZvP) ZvP-2BASE-ROACH-RAVAGER-TIMING-BUILD-ORDER]
+       [else (lookup-build-order-for-matchup race enemy-race)])]
+    [early-pool-or-rush?
+     (case m-sym
+       [(PvZ) PvZ-ANTI-EARLY-POOL-BUILD-ORDER]
+       [(TvZ) TvZ-ANTI-EARLY-POOL-BUILD-ORDER]
+       [(ZvZ ZvT ZvP) ZvX-ANTI-EARLY-RUSH-BUILD-ORDER]
+       [else (lookup-build-order-for-matchup race enemy-race)])]
+    [else
+     (lookup-build-order-for-matchup race enemy-race)]))
 
 ;; Backwards-compatible S-expression view constructed directly from typed specs
 (: build-order-spec->sexp (-> build-order-spec (Listof Any)))

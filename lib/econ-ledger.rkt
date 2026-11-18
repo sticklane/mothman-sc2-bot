@@ -185,7 +185,16 @@
  pro-upgrade-timings-for-matchup
  due-pro-unit-timings
  due-pro-upgrade-timings
+ race-macro-worker-cap
  pro-supply-curve-target
+ pro-supply-curve-target-for-spec
+ PvZ-ANTI-EARLY-POOL-BUILD-ORDER
+ TvZ-ANTI-EARLY-POOL-BUILD-ORDER
+ ZvX-ANTI-EARLY-RUSH-BUILD-ORDER
+ TvP-2BASE-STIM-TIMING-BUILD-ORDER
+ ZvP-2BASE-ROACH-RAVAGER-TIMING-BUILD-ORDER
+ REACTIVE-BUILD-ORDER-VARIANTS
+ select-reactive-build-order-spec
  evaluate-build-order-next-step
  compute-natural-expansion-mineral-reserve
  ;; Build-Order Tactical Execution & Timing-Attack Plans
@@ -5224,7 +5233,9 @@
          #:nat-x [raw-nat-x 50.5]
          #:nat-y [raw-nat-y 50.5]
          #:third-x [raw-third-x 60.5]
-         #:third-y [raw-third-y 40.5])
+         #:third-y [raw-third-y 40.5]
+         #:early-pool-or-rush? [early-pool-or-rush? #f]
+         #:variant [variant #f])
   (define race (normalize-ledger-race raw-race))
   (define m-sym (resolve-matchup-symbol race enemy-race))
   (define frame (safe-nonneg-int raw-frame 0))
@@ -5237,8 +5248,13 @@
   (define nat-y (safe-tile-coord raw-nat-y 50.5))
   (define third-x (safe-tile-coord raw-third-x 60.5))
   (define third-y (safe-tile-coord raw-third-y 40.5))
+  (define active-bo-spec
+    (select-reactive-build-order-spec
+     race enemy-race
+     #:early-pool-or-rush? (and early-pool-or-rush? #t)
+     #:variant variant))
   (define-values (target-workers target-army)
-    (pro-supply-curve-target race enemy-race frame active-bases))
+    (pro-supply-curve-target-for-spec active-bo-spec frame active-bases))
 
   (define all-upgs
     (append (if (list? researched-upgrades) researched-upgrades '())
@@ -5385,7 +5401,7 @@
                        (and (not (eq? m-sym 'PvP))
                             (< (count-total-bldg 'nexus) 2)))))))
 
-  (define steps (pro-build-order-steps-for-matchup race enemy-race))
+  (define steps (build-order-spec-steps active-bo-spec))
   (define zerg-creep-steps
     (if (eq? race 'Zerg)
         (append

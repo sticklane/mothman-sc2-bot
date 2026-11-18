@@ -20,41 +20,49 @@
    'bio-tank
    "16 Rax / Gas Reaper expand into 1-1-1 Starport pressure, Stim + Combat Shield +1 Bio, and 3rd Command Center."
    (list
-    ;; 14-21 Reaper Fast Expand -> Reactor/TechLab & Factory
+    ;; 14-24 Reaper Fast Expand -> Factory + Reactor Hellions (100% Pro TvZ Standard!)
     (pro-bo-goal 'build    'supply-depot             1 14 #f                 17.1)  ;; 0:17
-    (pro-bo-goal 'build    'barracks                 1 16 'supply-depot     44.6)  ;; 0:45
-    (pro-bo-goal 'build    'refinery                 1 16 'supply-depot     28.9)  ;; 0:29
+    (pro-bo-goal 'build    'barracks                 1 16 'supply-depot     40.6)  ;; 0:41
+    (pro-bo-goal 'build    'refinery                 1 16 'supply-depot     43.9)  ;; 0:44
     (pro-bo-goal 'morph    'orbital-command          1 19 'barracks         91.1)  ;; 1:31
     (pro-bo-goal 'expand   'command-center           2 20 #f                 103.2) ;; 1:43
-    (pro-bo-goal 'build    'supply-depot             2 21 'barracks         135.3) ;; 2:15
-    (pro-bo-goal 'build    'barracks-techlab         1 21 'barracks         229.2) ;; 3:49
     (pro-bo-goal 'build    'factory                  1 21 'barracks         114.4) ;; 1:54
-    (pro-bo-goal 'research 'stimpack                 1 21 'barracks-techlab 273.2) ;; 4:33
-    (pro-bo-goal 'build    'refinery                 2 22 'barracks         123.8) ;; 2:04
-    ;; 26-40 1-1-1 Starport + 3-Rax Production Converge
+    (pro-bo-goal 'build    'barracks-reactor         1 21 'barracks         118.0) ;; 1:58 (Reactor BEFORE TechLab for Hellion swap!)
+    (pro-bo-goal 'build    'supply-depot             2 22 'barracks         128.0) ;; 2:08
+    (pro-bo-goal 'build    'refinery                 2 23 'barracks         135.0) ;; 2:15 (Pro Gas #2 @ 20w AFTER CC2!)
+    ;; 26-42 1-1-1 Starport + Hellion Map Control + 3rd CC + 3-Rax Stim Converge
     (pro-bo-goal 'morph    'orbital-command          2 26 'barracks         175.9) ;; 2:56
     (pro-bo-goal 'build    'starport                 1 28 'factory          161.8) ;; 2:42
-    (pro-bo-goal 'build    'factory-techlab          1 30 'factory          192.4) ;; 3:12
-    (pro-bo-goal 'build    'barracks                 2 32 'barracks         291.7) ;; 4:52
-    (pro-bo-goal 'build    'barracks                 3 36 'barracks         295.1) ;; 4:55
-    (pro-bo-goal 'build    'barracks-reactor         1 36 'barracks         125.5) ;; 2:06
-    (pro-bo-goal 'build    'starport-reactor         1 38 'starport         318.9) ;; 5:19
-    (pro-bo-goal 'research 'combat-shield            1 40 'barracks-techlab 366.5) ;; 6:07
-    ;; 44-60 Upgrades, 3rd CC & Armory
-    (pro-bo-goal 'build    'engineering-bay          1 44 'barracks         289.4) ;; 4:49
-    (pro-bo-goal 'build    'refinery                 3 46 'factory          300.0) ;; 5:00
-    (pro-bo-goal 'research 'terran-infantry-weapons-1 1 48 'engineering-bay 317.0) ;; 5:17
-    (pro-bo-goal 'expand   'command-center           3 52 'starport         257.1) ;; 4:17
-    (pro-bo-goal 'research 'concussive-shells        1 56 'barracks-techlab 375.0) ;; 6:15
-    (pro-bo-goal 'build    'armory                   1 60 'factory          326.4)) ;; 5:26
-   ;; Empirical pro supply checkpoints: (minute . (workers . army-supply))
+    (pro-bo-goal 'train    'hellion                  4 30 'factory          198.0) ;; 3:18
+    (pro-bo-goal 'build    'barracks                 2 34 'barracks         215.0) ;; 3:35
+    (pro-bo-goal 'build    'barracks-techlab         1 36 'barracks         229.2) ;; 3:49
+    (pro-bo-goal 'expand   'command-center           3 40 'starport         257.1) ;; 4:17 (3rd Base!)
+    (pro-bo-goal 'research 'stimpack                 1 42 'barracks-techlab 273.2) ;; 4:33
+    (pro-bo-goal 'build    'barracks                 3 44 'barracks         285.0) ;; 4:45
+    (pro-bo-goal 'build    'engineering-bay          1 46 'barracks         289.4) ;; 4:49
+    (pro-bo-goal 'build    'refinery                 3 48 'factory          298.0) ;; 4:58 (Pro Gas #3 @ 38w)
+    (pro-bo-goal 'build    'starport-reactor         1 50 'starport         312.0) ;; 5:12
+    ;; 52-104 Double Upgrades, Tank/Mine Tech, 4th CC & 5-Rax Macro
+    (pro-bo-goal 'research 'terran-infantry-weapons-1 1 52 'engineering-bay 317.0) ;; 5:17
+    (pro-bo-goal 'build    'factory-techlab          1 54 'factory          322.0) ;; 5:22
+    (pro-bo-goal 'build    'armory                   1 58 'factory          340.0) ;; 5:40
+    (pro-bo-goal 'build    'refinery                 4 60 'factory          352.0) ;; 5:52 (Pro Gas #4 @ 41w)
+    (pro-bo-goal 'research 'combat-shield            1 64 'barracks-techlab 366.5) ;; 6:07
+    (pro-bo-goal 'research 'concussive-shells        1 68 'barracks-techlab 385.0) ;; 6:25
+    (pro-bo-goal 'build    'barracks                 4 78 'starport         410.0) ;; 6:50
+    (pro-bo-goal 'build    'barracks                 5 82 'starport         420.0) ;; 7:00
+    (pro-bo-goal 'expand   'command-center           4 90 'starport         445.0)) ;; 7:25 (4th Base Macro!)
+   ;; Empirical pro 4+ base macro supply checkpoints: (minute . (workers . army-supply))
    '((1 . (16.0 .  1.0))
      (2 . (19.0 .  2.0))
-     (3 . (23.0 .  4.0))
-     (4 . (31.0 . 14.0))
-     (5 . (40.0 . 21.0))
-     (6 . (49.0 . 31.5))
-     (7 . (58.0 . 41.0)))
+     (3 . (27.0 .  6.0))
+     (4 . (36.0 . 14.0))
+     (5 . (46.0 . 21.0))
+     (6 . (56.0 . 31.5))
+     (7 . (64.0 . 44.0))
+     (8 . (66.0 . 62.0))
+     (9 . (66.0 . 82.0))
+     (10 . (66.0 . 102.0)))
    ;; Empirical pro unit production timings (Faster LotV sec)
    (list
     (pro-unit-timing 'reaper      1 20  91.7 'barracks)         ;; 1:32

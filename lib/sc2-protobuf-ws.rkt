@@ -7450,6 +7450,7 @@
 
 (define SC2-WORKER-TRANSFER-LAST-LOOP (box 0))
 (define SC2-WORKER-TRANSFER-COOLDOWN-UNTIL (make-hasheqv))
+(define SC2-GAS-PULL-HYSTERESIS-LATCH (box #f))
 
 (define (saturate-workers-and-gas-commands obs
                                            #:excluded-worker-tags [excluded-worker-tags (seteqv)]
@@ -7459,7 +7460,8 @@
   (void reserved-aabbs game-info)
   (define cur-loop (sc2-observation-game-loop obs))
   (when (or (<= cur-loop 8) (< cur-loop (unbox SC2-WORKER-TRANSFER-LAST-LOOP)))
-    (hash-clear! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL))
+    (hash-clear! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL)
+    (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f))
   (set-box! SC2-WORKER-TRANSFER-LAST-LOOP cur-loop)
   (when (< cur-loop (unbox SC2-WORKER-ASSIGN-LAST-LOOP))
     (hash-clear! SC2-WORKER-PATCH-ASSIGNMENT)
@@ -7966,12 +7968,8 @@
                 owned-base-minerals))
       (issue-gather! w (sc2-unit-tag best-min))))
 
-  (define gas-over-banked?
-    (or worker-rush-evacuate-gas?
-        (and (>= cur-gas SC2-GAS-FLOAT-REBALANCE-THRESH)
-             (< cur-min 250))
-        (and (> cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD)
-             (< cur-min 450))))
+  (define self-is-zerg?
+    (ormap (lambda (u) (memv (sc2-unit-unit-type u) '(86 100 101 104 88))) self-units))
   (define active-gas-worker-count
     (count (lambda (w)
              (or (ormap (lambda (bid) (memv bid '(273 274 275))) (sc2-unit-buff-ids w))
@@ -7979,16 +7977,47 @@
                           (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
                         (sc2-unit-orders w))))
            workers))
+  ;; Hysteresis latch for dynamic gas pulling & automatic re-saturation:
+  ;;   Pull ON:  (>= 300G & < 160M & < 66w) OR (>= 350G & < 250M) OR (> 600G & < 450M)
+  ;;   Pull OFF: (< 200G) OR (>= 300M & <= 600G) OR (>= 66w & <= 600G)
+  (cond
+    [(or (and (>= cur-gas 300) (< cur-min 160) (< (length workers) 66))
+         (and (>= cur-gas SC2-GAS-FLOAT-REBALANCE-THRESH) (< cur-min 250))
+         (and (> cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD) (< cur-min 450)))
+     (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #t)]
+    [(and (<= cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD)
+          (or (< cur-gas 200)
+              (>= cur-min 300)
+              (>= (length workers) 66)))
+     (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)])
+  ;; Zerg Post-Ling-Speed Mineral Surge: below 28 Drones on 2+ bases (< 3:45), once >= 108G is banked
+  ;; while minerals < 250M, keep 1 Drone on gas and pull 2 back to minerals; auto-resaturate to 3/3
+  ;; once workers >= 28, cur-gas < 75, or cur-min >= 325!
+  (define zerg-post-speed-surge-active?
+    (and self-is-zerg?
+         (< cur-loop 5040)
+         (>= (length online-townhalls) 2)
+         (< (length workers) 28)
+         (< cur-min 250)
+         (>= cur-gas 108)))
+  (define gas-over-banked?
+    (or worker-rush-evacuate-gas?
+        (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)))
+  (define gas-resaturate-blocked?
+    (or gas-over-banked?
+        (and zerg-post-speed-surge-active? (>= active-gas-worker-count 1))))
   (define min-mineral-workers-for-next-gas
     (cond
       [(= active-gas-worker-count 0) 6]
       [(= active-gas-worker-count 1) 8]
-      [else 10]))
+      [(= active-gas-worker-count 2) 10]
+      [(< active-gas-worker-count 6) (if (>= cur-min 300) 10 14)]
+      [else                          (if (>= cur-min 400) 14 22)]))
   (when (and (not (null? under-gas))
              (or (null? owned-base-minerals)
                  (>= (- (length workers) active-gas-worker-count)
                      min-mineral-workers-for-next-gas))
-             (not gas-over-banked?))
+             (not gas-resaturate-blocked?))
     (define gb (first under-gas))
     (define gp (sc2-unit-pos gb))
     (define (eligible-for-gas? w)
@@ -8119,7 +8148,12 @@
         (issue-gather! chosen-w bmtag))))
 
   ;; 4. Pull 1 gas worker back to owned minerals when floating gas while mineral-starved
-  (when (and gas-over-banked? (not (null? owned-base-minerals)) (not (null? ready-gas-bldgs)))
+  ;;    (or down to 1 gas Drone during Zerg post-Ling-Speed mineral surge < 28 Drones);
+  ;;    automatically re-saturates in Step 2 once hysteresis clears!
+  (define should-pull-one-gas-worker?
+    (or gas-over-banked?
+        (and zerg-post-speed-surge-active? (> active-gas-worker-count 1))))
+  (when (and should-pull-one-gas-worker? (not (null? owned-base-minerals)) (not (null? ready-gas-bldgs)))
     (define cand-mins
       (if (not (null? under-townhalls))
           (minerals-near-townhall (first under-townhalls))

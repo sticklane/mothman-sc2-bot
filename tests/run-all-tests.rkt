@@ -9567,7 +9567,7 @@
     (assert-true! (>= (length (build-order-spec-steps spec)) 15))
     (assert-true! (andmap (lambda (g) (> (pro-bo-goal-target-sec g) 0.0))
                           (build-order-spec-steps spec)))
-    (assert-eq! (length (build-order-spec-supply-curve spec)) 7)
+    (assert-eq! (length (build-order-spec-supply-curve spec)) 10)
     (define uts (build-order-spec-unit-timings spec))
     (define ups (build-order-spec-upgrade-timings spec))
     (assert-true! (>= (length uts) 6))
@@ -12865,6 +12865,151 @@
                 "Match #5131248: During 12-Probe worker rush at 15/22 supply with 2 lings, Zerg must NOT escrow-save queen/overlord/drone")
   (assert-true! (pair? (memq 'zergling (macro-brain-decision-scheduled-ids md-5131248)))
                 "Match #5131248: During 12-Probe worker rush at 75M with 2 larvae, Zerg must schedule zergling immediately"))
+
+;; =============================================================================
+;; Suite 50: Trajectory-First 4+ Base Macro Regime, Pro Geyser Law & Reactive Scouting
+;; =============================================================================
+(run-suite "50. Trajectory-First 4+ Base Macro Regime, Pro Geyser Law & Reactive Scouting"
+  ;; 50.1 Full 4+ Base Macro Caps & Timing-Cut Auto-Transition Variants
+  (assert-eq! (race-macro-worker-cap 'Zerg) 76)
+  (assert-eq! (race-macro-worker-cap 'Protoss) 70)
+  (assert-eq! (race-macro-worker-cap 'Terran) 66)
+  (let-values ([(zw _za) (pro-supply-curve-target 'Zerg 'Terran (exact-round (* 510.0 22.4)) 4)]
+               [(pw _pa) (pro-supply-curve-target 'Protoss 'Zerg (exact-round (* 510.0 22.4)) 4)]
+               [(tw _ta) (pro-supply-curve-target 'Terran 'Zerg (exact-round (* 510.0 22.4)) 4)])
+    (assert-eq! zw 76 "Zerg 4+ base macro target must reach 76 Drones")
+    (assert-eq! pw 70 "Protoss 4+ base macro target must reach 70 Probes")
+    (assert-eq! tw 66 "Terran 4+ base macro target must reach 66 SCVs"))
+  (let-values ([(cut-w _ca) (pro-supply-curve-target-for-spec TvP-2BASE-STIM-TIMING-BUILD-ORDER (exact-round (* 330.0 22.4)) 2)]
+               [(trans-w _ta) (pro-supply-curve-target-for-spec TvP-2BASE-STIM-TIMING-BUILD-ORDER (exact-round (* 510.0 22.4)) 4)])
+    (assert-eq! cut-w 44 "2-base Stim timing variant must cut workers at 44 SCVs during timing window")
+    (assert-eq! trans-w 66 "2-base Stim timing variant must transition to 66 SCVs after 7:00 if held"))
+
+  ;; 50.2 Pro Geyser Law (`pro-min-workers-for-next-gas-bldg`)
+  (assert-eq! (pro-min-workers-for-next-gas-bldg 'Zerg 'Terran 1) 28)
+  (assert-eq! (pro-min-workers-for-next-gas-bldg 'Zerg 'Terran 2) 38)
+  (assert-eq! (pro-min-workers-for-next-gas-bldg 'Terran 'Zerg 1) 20)
+  (assert-eq! (pro-min-workers-for-next-gas-bldg 'Terran 'Terran 1) 17)
+  (assert-eq! (pro-min-workers-for-next-gas-bldg 'Protoss 'Zerg 2) 34)
+  (assert-eq! (pro-min-workers-for-next-gas-bldg 'Protoss 'Protoss 1) 17)
+  (define z-early-gas2-dec
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Terran #:frame 3800
+      #:minerals 200 #:gas 60 #:supply-used 28 #:supply-cap 36 #:workers 22 #:active-bases 2
+      #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'extractor 1)
+      #:total-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'extractor 1)
+      #:unit-counts (hasheq 'drone 22 'queen 2 'zergling 4))))
+  (assert-true! (not (memq 'extractor (macro-brain-decision-scheduled-ids z-early-gas2-dec)))
+                "Zerg at 22 Drones must NOT build premature 2nd Extractor before 28 Drones")
+
+  ;; 50.3 PvZ vs Scouted 12-Pool -> Cybernetics Core + Zealot BEFORE 2nd Nexus
+  (define pvz-12p-rt (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define pvz-12p-acts
+    (hash-ref
+     (step-live-bot-runtime!
+      pvz-12p-rt
+      (hash 'frame 1420 'race 'Protoss 'enemy-race 'Zerg
+            'minerals 400 'gas 50 'supply-used 19 'supply-cap 23 'supply-left 4
+            'mineral-harvesters 16 'vespene-harvesters 3
+            'base-x 32.0 'base-y 32.0 'natural-x 52.0 'natural-y 36.0 'third-x 72.0 'third-y 40.0
+            'enemy-x 152.0 'enemy-y 152.0
+            'expansion-candidates '((52.0 36.0) (72.0 40.0))
+            'ally-units (append (for/list ([i (in-range 18)])
+                                  (hash 'id (+ 100 i) 'type 'probe 'x 33.0 'y 33.0 'hp 40))
+                                (list (hash 'id 199 'type 'probe 'x 150.0 'y 150.0 'hp 40)))
+            'ally-buildings (list (hash 'id 1 'type 'nexus 'x 32.0 'y 32.0 'build-progress 1.0 'powered? #t)
+                                  (hash 'id 2 'type 'pylon 'x 38.0 'y 34.0 'build-progress 1.0 'powered? #t)
+                                  (hash 'id 3 'type 'gateway 'x 40.0 'y 34.0 'build-progress 1.0 'powered? #t)
+                                  (hash 'id 4 'type 'assimilator 'x 28.0 'y 32.0 'build-progress 1.0 'powered? #t 'vespene-contents 1500))
+            'enemy-units '()
+            'enemy-buildings (list (hash 'id 601 'type 'hatchery 'x 152.0 'y 152.0 'build-progress 1.0)
+                                   (hash 'id 602 'type 'spawning-pool 'x 148.0 'y 150.0 'build-progress 1.0))))
+     'actions '()))
+  (assert-true! (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'cybernetics-core))) pvz-12p-acts)))
+                "PvZ scouting 12-pool must build Cybernetics Core before expanding")
+  (assert-true! (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (cadr a) 'zealot))) pvz-12p-acts)))
+                "PvZ scouting 12-pool must train Zealot immediately")
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'expand))) pvz-12p-acts))
+                "PvZ scouting 12-pool must NOT blindly expand before Core + Zealot")
+
+  ;; 50.4 TvZ Opening: Factory / Reactor BEFORE Barracks TechLab + No 18-SCV Plateau Under Mid-Map Poke
+  (define tvz-open-dec
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Zerg #:frame 2576
+      #:minerals 200 #:gas 100 #:supply-used 22 #:supply-cap 31 #:workers 19 #:active-bases 2
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 1 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 19 'reaper 1 'marine 1))))
+  (assert-true! (and (memq 'factory (macro-brain-decision-scheduled-ids tvz-open-dec))
+                     (not (memq 'barracks-techlab (macro-brain-decision-scheduled-ids tvz-open-dec))))
+                "TvZ opening must schedule Factory before Barracks TechLab")
+
+  (define tvp-no-plateau-rt (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define tvp-no-plateau-acts
+    (hash-ref
+     (step-live-bot-runtime!
+      tvp-no-plateau-rt
+      (hash 'frame 4500 'race 'Terran 'enemy-race 'Protoss
+            'minerals 130 'gas 50 'supply-used 28 'supply-cap 46 'supply-left 18
+            'mineral-harvesters 16 'vespene-harvesters 3
+            'base-x 32.0 'base-y 32.0 'natural-x 52.0 'natural-y 36.0
+            'ally-units (append (for/list ([i (in-range 19)])
+                                  (hash 'id (+ 10 i) 'type 'scv 'x 33.0 'y 33.0 'hp 45))
+                                (for/list ([i (in-range 4)])
+                                  (hash 'id (+ 50 i) 'type 'marine 'x 48.0 'y 35.0 'hp 45)))
+            'ally-buildings (list (hash 'id 1 'type 'orbital-command 'x 32.0 'y 32.0 'build-progress 1.0)
+                                  (hash 'id 2 'type 'orbital-command 'x 52.0 'y 36.0 'build-progress 1.0)
+                                  (hash 'id 3 'type 'supply-depot 'x 38.0 'y 34.0 'build-progress 1.0)
+                                  (hash 'id 4 'type 'barracks 'x 40.0 'y 34.0 'build-progress 1.0)
+                                  (hash 'id 5 'type 'factory 'x 36.0 'y 28.0 'build-progress 1.0)
+                                  (hash 'id 6 'type 'refinery 'x 28.0 'y 32.0 'build-progress 1.0 'vespene-contents 1500))
+            ;; Mid-map Stalkers 60+ tiles away must NOT freeze SCV production at 19!
+            'enemy-units (list (hash 'id 801 'type 'stalker 'x 96.0 'y 96.0 'hp 80 'shields 80)
+                               (hash 'id 802 'type 'stalker 'x 97.0 'y 96.0 'hp 80 'shields 80))
+            'enemy-buildings '()))
+     'actions '()))
+  (assert-true! (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (cadr a) 'scv))) tvp-no-plateau-acts)))
+                "Mid-map enemy Stalkers must NOT freeze Terran SCV production past 18 SCVs")
+
+  ;; 50.5 Zerg Pure Drone Wave at 50 Drones (Peaceful) & Uprooted SporeCrawler Cap
+  (define z-wave-dec
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Terran #:frame 6500
+      #:minerals 200 #:gas 80 #:supply-used 60 #:supply-cap 84 #:workers 50 #:active-bases 3
+      #:army-supply 8 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 3)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 3)
+      #:unit-counts (hasheq 'drone 50 'queen 4)
+      #:open-facility-slots (hasheq 'larva 5 'townhall 3))))
+  (assert-true! (not (not (memq 'drone (macro-brain-decision-scheduled-ids z-wave-dec))))
+                "Peaceful Zerg at 50 Drones with 4 Queens must continue Pure Drone Wave toward 66-76")
+
+  (define z-uproot-rt (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define z-uproot-acts
+    (hash-ref
+     (step-live-bot-runtime!
+      z-uproot-rt
+      (hash 'frame 6800 'race 'Zerg 'enemy-race 'Protoss
+            'minerals 400 'gas 100 'supply-used 52 'supply-cap 66 'supply-left 14
+            'mineral-harvesters 32 'vespene-harvesters 6
+            'base-x 32.0 'base-y 32.0 'natural-x 52.0 'natural-y 36.0
+            'ally-units (append (for/list ([i (in-range 38)])
+                                  (hash 'id (+ 10 i) 'type 'drone 'x 33.0 'y 33.0 'hp 40))
+                                ;; 3 uprooted Spore Crawlers in ally-units!
+                                (list (hash 'id 701 'type 'spore-crawler-uprooted 'x 35.0 'y 35.0 'hp 400)
+                                      (hash 'id 702 'type 'spore-crawler-uprooted 'x 50.0 'y 35.0 'hp 400)
+                                      (hash 'id 703 'type 'spore-crawler-uprooted 'x 42.0 'y 35.0 'hp 400)))
+            'ally-buildings (list (hash 'id 1 'type 'lair 'x 32.0 'y 32.0 'build-progress 1.0)
+                                  (hash 'id 2 'type 'hatchery 'x 52.0 'y 36.0 'build-progress 1.0)
+                                  (hash 'id 3 'type 'spawning-pool 'x 36.0 'y 30.0 'build-progress 1.0))
+            'enemy-units (list (hash 'id 901 'type 'oracle 'x 80.0 'y 80.0 'hp 100 'shields 60))
+            'enemy-buildings '()))
+     'actions '()))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'spore-crawler))) z-uproot-acts))
+                "Uprooted Spore Crawlers in ally-units must count against Spore Crawler cap (#5129698)"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

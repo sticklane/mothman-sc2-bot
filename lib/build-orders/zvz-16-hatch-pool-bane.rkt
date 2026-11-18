@@ -32,24 +32,33 @@
     (pro-bo-goal 'research 'metabolic-boost        1 22 'spawning-pool     129.5) ;; 2:10
     (pro-bo-goal 'build    'baneling-nest          1 28 'spawning-pool     148.5) ;; 2:29
     (pro-bo-goal 'expand   'hatchery               3 30 'spawning-pool     170.4) ;; 2:50
-    ;; 36-62 Roach Warren -> Lair -> +1 Missile -> Hydralisk transition
+    ;; 36-108 Roach Warren -> Lair -> +1 Missile -> 4th Base -> Hydra/Lurker/Hive Macro
     (pro-bo-goal 'build    'roach-warren           1 36 'spawning-pool     233.9) ;; 3:54
-    (pro-bo-goal 'build    'extractor              2 38 'spawning-pool     240.8) ;; 4:01
-    (pro-bo-goal 'morph    'lair                   1 44 'spawning-pool     279.2) ;; 4:39
-    (pro-bo-goal 'build    'evolution-chamber      1 46 'spawning-pool     233.5) ;; 3:54
-    (pro-bo-goal 'build    'extractor              3 50 'lair              263.5) ;; 4:24
-    (pro-bo-goal 'research 'glial-reconstitution   1 52 'lair              340.4) ;; 5:40
-    (pro-bo-goal 'research 'zerg-missile-weapons-1 1 54 'evolution-chamber 277.4) ;; 4:37
-    (pro-bo-goal 'research 'burrow                 1 58 'hatchery          356.8) ;; 5:57
-    (pro-bo-goal 'build    'hydralisk-den          1 62 'lair              375.0)) ;; 6:15
-   ;; Empirical pro supply checkpoints: (minute . (workers . army-supply))
+    (pro-bo-goal 'build    'evolution-chamber      1 38 'spawning-pool     235.0) ;; 3:55
+    (pro-bo-goal 'build    'extractor              2 38 'spawning-pool     240.8) ;; 4:01 (Pro Gas #2 @ ~31w)
+    (pro-bo-goal 'morph    'lair                   1 44 'spawning-pool     265.0) ;; 4:25
+    (pro-bo-goal 'build    'extractor              3 50 'lair              275.0) ;; 4:35 (Pro Gas #3 @ ~39w)
+    (pro-bo-goal 'research 'zerg-missile-weapons-1 1 54 'evolution-chamber 280.0) ;; 4:40
+    (pro-bo-goal 'research 'glial-reconstitution   1 56 'lair              325.0) ;; 5:25
+    (pro-bo-goal 'build    'extractor              4 60 'lair              340.0) ;; 5:40 (Pro Gas #4 @ ~46w)
+    (pro-bo-goal 'expand   'hatchery               4 64 'lair              350.0) ;; 5:50 (4th Base Macro!)
+    (pro-bo-goal 'build    'hydralisk-den          1 68 'lair              375.0) ;; 6:15
+    (pro-bo-goal 'research 'grooved-spines         1 74 'hydralisk-den     400.0) ;; 6:40
+    (pro-bo-goal 'build    'lurker-den             1 84 'hydralisk-den     430.0) ;; 7:10
+    (pro-bo-goal 'build    'infestation-pit        1 92 'lair              455.0) ;; 7:35
+    (pro-bo-goal 'morph    'hive                   1 100 'infestation-pit  485.0) ;; 8:05
+    (pro-bo-goal 'expand   'hatchery               5 108 'lair             500.0)) ;; 8:20 (5th Base Macro!)
+   ;; Empirical pro 4+ base macro supply checkpoints: (minute . (workers . army-supply))
    '((1 . (15.0 .  2.0))
      (2 . (20.0 .  4.0))
-     (3 . (24.5 .  8.0))
+     (3 . (26.0 .  8.0))
      (4 . (34.0 . 16.0))
-     (5 . (38.0 . 26.0))
-     (6 . (42.0 . 38.0))
-     (7 . (48.0 . 54.5)))
+     (5 . (44.0 . 26.0))
+     (6 . (54.0 . 38.0))
+     (7 . (64.0 . 54.5))
+     (8 . (70.0 . 66.0))
+     (9 . (76.0 . 78.0))
+     (10 . (76.0 . 90.0)))
    ;; Empirical pro unit production timings (Faster LotV sec)
    (list
     (pro-unit-timing 'overlord  2 13  13.0 #f)               ;; 0:13
