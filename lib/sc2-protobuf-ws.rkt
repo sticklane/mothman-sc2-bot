@@ -4807,7 +4807,10 @@
             'buffs (filter-map (lambda (bid) (buff-id->symbol bid #f))
                                (sc2-unit-buff-ids eu))
             'weapon-cooldown (sc2-unit-weapon-cooldown eu)
-            'engaged-target-tag (sc2-unit-engaged-target-tag eu))))
+            'engaged-target-tag (sc2-unit-engaged-target-tag eu)
+            'attack-upgrade-level (sc2-unit-attack-upgrade-level eu)
+            'armor-upgrade-level (sc2-unit-armor-upgrade-level eu)
+            'shield-upgrade-level (sc2-unit-shield-upgrade-level eu))))
 
   (define shimmer-and-burrow-ripples
     (filter (lambda (eu)
@@ -4872,6 +4875,11 @@
             'is-hallucination is-halluc?
             'hallucination is-halluc?
             'is-proxy? is-proxy?
+            'vespene-contents (sc2-unit-vespene-contents eb)
+            'active? (sc2-unit-is-active eb)
+            'add-on-tag (sc2-unit-add-on-tag eb)
+            'buffs (filter-map (lambda (bid) (buff-id->symbol bid #f))
+                               (sc2-unit-buff-ids eb))
             'engaged-target-tag (sc2-unit-engaged-target-tag eb))))
   (define enemy-proxy-bldg-records
     (filter (lambda (eb) (eq? (hash-ref eb 'is-proxy? #f) #t)) enemy-bldg-records))
@@ -5139,6 +5147,7 @@
         'shimmer-and-burrow-ripples shimmer-and-burrow-ripples
         'free-addons free-addons
         'effects effect-records
+        'dead-unit-tags (or (sc2-observation-dead-unit-tags obs) '())
         'researched-upgrades researched-upgrades
         'pending-upgrades pending-upgrades
         'depleting-bases depleting-bases

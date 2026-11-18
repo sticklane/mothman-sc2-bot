@@ -870,7 +870,8 @@
          #:enemy-lost-value [raw-enemy-lost-value 0]
          #:predicted-enemy-bases [raw-predicted-enemy-bases 1]
          #:predicted-enemy-workers [raw-predicted-enemy-workers 16]
-         #:observed-enemy-geysers [raw-observed-enemy-geysers 1])
+         #:observed-enemy-geysers [raw-observed-enemy-geysers 1]
+         #:believed-enemy-army-value [raw-believed-enemy-val 0])
   (define ally-units (safe-hash-list raw-ally-units))
   (define enemy-units (safe-hash-list raw-enemy-units))
   (define our-lost-value (max 0 (safe-int raw-our-lost-value 0)))
@@ -878,7 +879,13 @@
   (define predicted-enemy-bases (max 1 (safe-int raw-predicted-enemy-bases 1)))
   (define predicted-enemy-workers (max 0 (safe-int raw-predicted-enemy-workers 16)))
   (define observed-enemy-geysers (max 0 (safe-int raw-observed-enemy-geysers 1)))
-  (define noncombat '(drone probe scv overlord observer larva egg))
+  (define believed-enemy-val (max 0 (safe-int raw-believed-enemy-val 0)))
+  (define noncombat
+    '(drone probe scv overlord overseer observer larva egg
+      locust locust-mp locustmp locust-flying locust-precursor locustmpprecursor
+      broodling broodling-escort auto-turret autoturret mule
+      oracle-stasis-trap stasis-ward force-field
+      cocoon baneling-cocoon ravager-cocoon lurker-egg brood-lord-cocoon))
   (define (army-val units)
     (for/sum ([u (in-list units)]
               #:when (and (not (memq (unit-type-sym u) noncombat))
@@ -887,7 +894,16 @@
       (define c (unit-resource-cost (unit-type-sym u)))
       (+ (car c) (exact-round (* 1.5 (cdr c))))))
   (define our-val (army-val ally-units))
-  (define enemy-val (army-val enemy-units))
+  (define vis-enemy-val (army-val enemy-units))
+  ;; Never hallucinate a decisive army advantage against empty fog (`enemy-units == '()`)
+  ;; unless we have actually won a positive attrition trade (`enemy-lost > our-lost + 150`)!
+  (define enemy-val
+    (cond
+      [(> believed-enemy-val vis-enemy-val) believed-enemy-val]
+      [(and (null? enemy-units)
+            (<= enemy-lost-value (+ our-lost-value 150)))
+       (max vis-enemy-val our-val)]
+      [else vis-enemy-val]))
   (define trade-eff
     (exact->inexact (/ (+ enemy-lost-value 100.0) (+ our-lost-value 100.0))))
   (define rel-army
@@ -3070,23 +3086,30 @@
             (>= delta-min 450)
             proxy-attack-near-us?)
        'proxy-production-or-all-in]
-      [(and (>= frame 2200)
-            (<= (length enemy-townhalls) 1)
-            (>= delta-min 450))
-       'hidden-expansion-or-macro-boom]
-      [(and (>= delta-min 500) (>= delta-gas 100))
+      [(and (>= delta-min 450)
+            (or (>= delta-gas 100)
+                (and (>= frame 2200)
+                     (<= frame 6048)
+                     (<= (length enemy-townhalls) 1))))
+       ;; Rational-Opponent Principle: unaccounted resources under 1-base fog in the
+       ;; early/mid game are potentially threatening unseen Army/Tech — NEVER free greed!
        'imminent-fog-timing-wave]
+      [(or (and (>= (length enemy-townhalls) 3) (<= enemy-combat-count 4))
+           (and (> frame 6048)
+                (<= (length enemy-townhalls) 1)
+                (>= delta-min 750)
+                (< delta-gas 150)))
+       'hidden-expansion-or-macro-boom]
       [else
        'accounted-visible-macro]))
 
-  ;; Predict enemy bases: active visible townhalls + dark-matter imminent expansion
+  ;; Predict enemy bases: active visible townhalls + post-early-window unscouted expansion
   (define visible-enemy-bases (max 1 (length enemy-townhalls)))
   (define dark-matter-imminent-bases
     (cond
       [(or proxy-attack-near-us? (eq? hypothesis 'proxy-production-or-all-in)) 0]
-      [(and (>= frame 5500) (= visible-enemy-bases 1) (>= delta-min 700)) 2]
-      [(and (>= frame 3400) (<= visible-enemy-bases 2) (>= delta-min 400)) 1]
-      [(and (>= frame 1400) (= visible-enemy-bases 1) (>= delta-min 300)) 1]
+      [(and (>= frame 6200) (= visible-enemy-bases 1) (>= delta-min 700)) 2]
+      [(and (>= frame 4000) (<= visible-enemy-bases 2) (>= delta-min 500)) 1]
       [else 0]))
   (define pred-enemy-bases
     (min 12 (+ visible-enemy-bases dark-matter-imminent-bases)))
@@ -3110,8 +3133,8 @@
     (if (> frame 4000) pred-enemy-bases visible-enemy-bases))
   (define initial-verdict
     (cond
-      [(or (and (>= pred-enemy-bases 3) (<= enemy-combat-count 4) (not proxy-attack-near-us?))
-           (and (eq? hypothesis 'hidden-expansion-or-macro-boom) (<= enemy-combat-count 3)))
+      [(and (>= visible-enemy-bases 3) (<= enemy-combat-count 4) (not proxy-attack-near-us?))
+       ;; Strictly require POSITIVELY OBSERVED greedy expansions — never trigger on unscouted fog!
        'punish-And-Deny-Greedy-Expand]
       [(and (<= pred-enemy-bases 2) static-defense? (not proxy-attack-near-us?))
        'out-Expand-Passive-Turtle]
@@ -3351,10 +3374,12 @@
       [(and (not active-attack-near-us?)
             (not proxy-or-rush?)
             (not turtling?)
-            (or (and (>= pred-enemy-bases 3) (<= enemy-combat-count 4))
-                (and (> visible-enemy-townhalls our-bases) (<= enemy-combat-count 3))
-                (and (> pred-enemy-bases our-bases) (<= enemy-combat-count 3))
-                (and (eq? hyp 'hidden-expansion-or-macro-boom) (<= enemy-combat-count 3))))
+            (or (and (>= visible-enemy-townhalls 3) (<= enemy-combat-count 4))
+                (and (>= visible-enemy-townhalls 2)
+                     (> visible-enemy-townhalls our-bases)
+                     (<= frame 2464)
+                     (<= enemy-combat-count 2))))
+       ;; Strictly require positively observed greedy expansions (never unscouted fog!)
        'punish-And-Deny-Greedy-Expand]
       [(or active-attack-near-us?
            one-base-all-in-window?)

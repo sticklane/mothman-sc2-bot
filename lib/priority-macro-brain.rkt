@@ -1976,14 +1976,29 @@
                  protoss-1base-2nd-gas-capped?
                  (and (> cur-gb 0)
                       (>= gas (if (and (>= cur-gb 2) (>= workers 42)) 450 250)))))))
+    (define t3-foundation-ready?
+      (and (>= active-bases 3)
+           (>= workers 46)
+           (>= army-supply 24)))
     (define late-tech-deferred-by-low-army?
       (and live-slots?
-           (memq sym '(armory ghost-academy))
-           (< army-supply 18)
-           (not (>= active-bases 3))
-           (not (and (eq? sym 'armory) (eq? race 'Terran) enemy-cap-air?))
-           (not (and (eq? sym 'ghost-academy) (eq? race 'Terran) (terran-enemy-needs-ghost? enemy-u-counts) (>= active-bases 2)))
-           (not (ormap (lambda (r) (same-brain-sym? sym r)) repaired-prereqs))))
+           (or (and (memq sym '(armory ghost-academy))
+                    (< army-supply 18)
+                    (not (>= active-bases 3))
+                    (not (and (eq? sym 'armory) (eq? race 'Terran) enemy-cap-air?))
+                    (not (and (eq? sym 'ghost-academy) (eq? race 'Terran) (terran-enemy-needs-ghost? enemy-u-counts) (>= active-bases 2) (>= army-supply 20)))
+                    (not (ormap (lambda (r) (same-brain-sym? sym r)) repaired-prereqs)))
+               (and (memq sym '(ghost-academy fusion-core templar-archive templar-archives
+                                fleet-beacon ultralisk-cavern greater-spire dark-shrine))
+                    (not t3-foundation-ready?)
+                    (not (and (memq sym '(fleet-beacon greater-spire fusion-core))
+                              (or enemy-cap-air? opp-cap-air-override?)))
+                    (not (and (eq? sym 'ghost-academy)
+                              (eq? race 'Terran)
+                              (>= active-bases 2)
+                              (>= army-supply 20)
+                              (terran-enemy-needs-ghost? enemy-u-counts)))
+                    (not (ormap (lambda (r) (same-brain-sym? sym r)) repaired-prereqs))))))
     (define zerg-hatch-first-defer?
       (and zerg-hatch-first-opening?
            (memq sym '(extractor spawning-pool))
@@ -2414,15 +2429,52 @@
       (add-goal-spec! 'roach 'army-production 'train 16
                       (if (> (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0) 442.0 462.0)
                       'zerg-roach-mineral-sink))
-    ;; Boost ready-tech Ultralisk & Brood Lord whenever Ultralisk Cavern / Greater Spire are ready.
+    ;; Boost ready-tech Ultralisk & Brood Lord whenever Ultralisk Cavern / Greater Spire are ready,
+    ;; AND proactively escalate to Lurkers / Brood Lords / Vipers past 54 Drones vs Bunkers/Planetaries/Siege!
+    (define zerg-siege-breaker-needed?
+      (and (>= active-bases 3)
+           (>= workers 52)
+           (or (> (bldg-count-equivalent enemy-b-counts 'bunker) 0)
+               (> (bldg-count-equivalent enemy-b-counts 'planetary-fortress) 0)
+               (> (bldg-count-equivalent enemy-b-counts 'photon-cannon) 1)
+               (> (unit-count-equivalent enemy-u-counts 'siege-tank) 0)
+               (> (unit-count-equivalent enemy-u-counts 'colossus) 0)
+               (and (hash? raw-mirror-signals)
+                    (> (safe-exact-int (hash-ref raw-mirror-signals 'enemy-siege-or-turtle-count 0) 0) 0)))))
+    (when zerg-siege-breaker-needed?
+      (when (and has-lair-or-hive-ready?
+                 (= (bldg-count-equivalent total-bldg-counts 'hydralisk-den) 0))
+        (add-goal-spec! 'hydralisk-den 'tech-infrastructure 'build 1 488.0 'zerg-siege-breaker))
+      (when (and (> (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0)
+                 (= (bldg-count-equivalent total-bldg-counts 'lurker-den) 0))
+        (add-goal-spec! 'lurker-den 'tech-infrastructure 'morph 1 492.0 'zerg-siege-breaker))
+      (when (> (bldg-count-equivalent ready-bldg-counts 'lurker-den) 0)
+        (when (< (unit-count-equivalent unit-counts 'hydralisk) 4)
+          (add-goal-spec! 'hydralisk 'army-production 'train 6 493.0 'zerg-siege-breaker))
+        (add-goal-spec! 'lurker 'army-production 'morph 8 496.0 'zerg-siege-breaker))
+      (when (and has-lair-or-hive-ready?
+                 (= (bldg-count-equivalent total-bldg-counts 'infestation-pit) 0)
+                 (= (bldg-count-equivalent total-bldg-counts 'hive) 0))
+        (add-goal-spec! 'infestation-pit 'tech-infrastructure 'build 1 486.0 'zerg-siege-breaker))
+      (when (and (> (bldg-count-equivalent ready-bldg-counts 'infestation-pit) 0)
+                 (= (bldg-count-equivalent total-bldg-counts 'hive) 0))
+        (add-goal-spec! 'hive 'tech-infrastructure 'morph 1 490.0 'zerg-siege-breaker))
+      (when (> (bldg-count-equivalent ready-bldg-counts 'hive) 0)
+        (add-goal-spec! 'viper 'army-production 'train 2 495.0 'zerg-siege-breaker)
+        (when (and (= (bldg-count-equivalent total-bldg-counts 'spire) 0)
+                   (= (bldg-count-equivalent total-bldg-counts 'greater-spire) 0))
+          (add-goal-spec! 'spire 'tech-infrastructure 'build 1 488.0 'zerg-siege-breaker))
+        (when (and (> (bldg-count-equivalent ready-bldg-counts 'spire) 0)
+                   (= (bldg-count-equivalent total-bldg-counts 'greater-spire) 0))
+          (add-goal-spec! 'greater-spire 'tech-infrastructure 'morph 1 492.0 'zerg-siege-breaker))))
     (when (> (bldg-count-equivalent ready-bldg-counts 'ultralisk-cavern) 0)
       (add-goal-spec! 'chitinous-plating 'tech-infrastructure 'research 1 462.0 't3-endgame-tech)
       (add-goal-spec! 'anabolic-synthesis 'tech-infrastructure 'research 1 458.0 't3-endgame-tech)
       (add-goal-spec! 'ultralisk 'army-production 'train (if (>= active-bases 4) 6 4) 470.0 'ready-tech-ultralisk))
     (when (> (bldg-count-equivalent ready-bldg-counts 'greater-spire) 0)
-      (when (< (unit-count-equivalent unit-counts 'corruptor) 1)
-        (add-goal-spec! 'corruptor 'army-production 'train 2 466.0 'ready-tech-brood-lord))
-      (add-goal-spec! 'brood-lord 'army-production 'morph (if (>= active-bases 4) 5 3) 474.0 'ready-tech-brood-lord)))
+      (when (< (unit-count-equivalent unit-counts 'corruptor) 2)
+        (add-goal-spec! 'corruptor 'army-production 'train 4 (if zerg-siege-breaker-needed? 494.0 466.0) 'ready-tech-brood-lord))
+      (add-goal-spec! 'brood-lord 'army-production 'morph (if (>= active-bases 4) 6 4) (if zerg-siege-breaker-needed? 497.0 474.0) 'ready-tech-brood-lord)))
 
   ;; TvT scaling (`barracks-techlab`, 2nd `factory`, `marauder`, `siege-tank`, `medivac`, `viking-fighter`)
   ;; and ready-tech / enemy-triggered Ghost & Liberator counters (`#5123417`, `#5123667`, `#5123937`).
@@ -3837,15 +3889,50 @@
     (terran-desired-ghost-cap active-bases supply-used enemy-race enemy-u-counts))
   (define desired-libs
     (terran-desired-liberator-cap active-bases enemy-u-counts))
+  ;; Holistic Opponent-World-Model Belief Signals (`believed-enemy-army-supply` & `opp-stopped-expanding?`):
+  ;;   - When opponent stopped expanding (`B_opp < B*_happy(t)`), they are funneling saved macro resources
+  ;;     into Army/Tech -> enforce `>= 0.85 * believed-opp-army-sup` standing army parity!
+  ;;   - Even in normal fog macro, once >= 30 workers (`2`-base saturation), scale standing army parity
+  ;;     with `believed-opp-army-sup` so we never sit at 10 army supply against an 8-Gateway/Bio ball!
+  (define believed-opp-army-sup
+    (if (hash? raw-mirror-signals)
+        (max 0.0 (exact->inexact (hash-ref raw-mirror-signals 'believed-enemy-army-supply 0)))
+        0.0))
+  (define opp-stopped-expanding?
+    (and (hash? raw-mirror-signals)
+         (eq? (hash-ref raw-mirror-signals 'opp-stopped-expanding? #f) #t)))
+  (define belief-army-floor
+    (cond
+      [(< frame 2464) 0.0]
+      [(and opp-stopped-expanding? (>= workers 16))
+       (* 0.85 believed-opp-army-sup)]
+      [(>= workers 52)
+       (* 0.80 believed-opp-army-sup)]
+      [(>= workers 32)
+       (* 0.60 believed-opp-army-sup)]
+      [else 0.0]))
+  (define belief-army-deficit?
+    (and (> belief-army-floor 0.0)
+         (or opp-stopped-expanding? (eq? race 'Zerg))
+         (< (exact->inexact army-supply) belief-army-floor)))
+
   ;; Zerg Bimodal Wave Controller:
   ;;   - When enemy threat or attack is present: require >= max(6, 1.15 * threat) (Pure Army Wave!).
-  ;;   - When peaceful: require only minimal safety Queens/Lings so Zerg executes Pure Drone Waves up to 76!
+  ;;   - When OpponentWorldModel detects unseen army / stopped-expanding push: match `belief-army-floor`!
+  ;;   - When peaceful & opponent is macroing on happy path: Pure Drone Waves up to 76!
   (define zerg-wave-safety-floor
     (cond
       [(not (eq? race 'Zerg)) 0.0]
       [(<= (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0) 0.0]
       [(or under-attack? (> enemy-threat-supply 0))
-       (exact->inexact (max 6 (exact-ceiling (* 1.15 enemy-threat-supply))))]
+       (max belief-army-floor
+            (exact->inexact (max 6 (exact-ceiling (* 1.15 enemy-threat-supply)))))]
+      [(> belief-army-floor 0.0)
+       (max belief-army-floor
+            (cond [(>= workers 58) 12.0]
+                  [(>= workers 44)  6.0]
+                  [(>= workers 24)  2.0]
+                  [else 0.0]))]
       [(>= workers 58) 10.0]
       [(>= workers 44)  6.0]
       [(>= workers 24)  2.0]
@@ -4295,8 +4382,12 @@
   ;;   2. 'timing-cut       : intentional build-order / full-macro worker cap reached (`workers >= worker-cap-now`)
   ;;   3. 'zerg-army-wave   : Zerg larva wave below `zerg-wave-safety-floor` (`not zerg-army-step-ok?`)
   ;;   4. 'happy-path-macro : DEFAULT — never cut workers for distant map-wide poke or optional scaling buildings!
+  (define pending-townhalls-cnt
+    (max 0 (- (max eff-th-total-cnt total-townhalls-incl-pending) active-bases)))
   (define worker-cap-now
-    (min race-max-workers (max target-workers (* 22 active-bases))))
+    (min race-max-workers
+         (max target-workers
+              (+ (* 22 active-bases) (* 10 pending-townhalls-cnt)))))
   (define macro-regime
     (cond
       [(or emergency-army-before-workers?
@@ -4452,22 +4543,29 @@
                     (>= (+ (hash-ref open-facility-slots 'gateway 0)
                            (hash-ref open-facility-slots 'warp-gate 0))
                         2)))))
+    (define step-t3-foundation-ready?
+      (and (>= active-bases 3)
+           (>= workers 46)
+           (>= army-supply 24)))
     (define late-tech-army-ok?
       (or (not (hash? open-facility-slots))
-          (not (memq id '(armory ghost-academy fusion-core ultralisk-cavern templar-archive dark-shrine)))
+          (not (memq id '(armory ghost-academy fusion-core ultralisk-cavern
+                          templar-archive templar-archives fleet-beacon greater-spire dark-shrine)))
           (is-repaired-prereq? id)
-          (and (> (hash-ref sg-rec-units id 0.0) 0.0)
-               sg-counter-inject-active?)
+          (and (memq id '(fleet-beacon greater-spire fusion-core))
+               (or enemy-cap-air? opp-cap-air-override?))
           (and (eq? id 'armory)
                (eq? race 'Terran)
-               enemy-cap-air?
-               (or enemy-cap-air-ground-aa?
-                   (> (bldg-count-equivalent total-bldg-counts 'factory-techlab) 0)))
-          (and (eq? id 'ghost-academy) (>= active-bases 2) terran-need-ghost?)
-          (>= army-supply 18)
-          (and (memq id '(templar-archive dark-shrine ultralisk-cavern fusion-core armory ghost-academy))
-               (or (and bo-goal-sym (same-brain-sym? id bo-goal-sym))
-                   (and plan-node (>= (plan-goal-node-priority-weight plan-node) 440.0))))))
+               (or (>= army-supply 18)
+                   step-t3-foundation-ready?
+                   (and enemy-cap-air?
+                        (or enemy-cap-air-ground-aa?
+                            (> (bldg-count-equivalent total-bldg-counts 'factory-techlab) 0)))))
+          (and (eq? id 'ghost-academy)
+               (>= active-bases 2)
+               (>= army-supply 20)
+               terran-need-ghost?)
+          step-t3-foundation-ready?))
     (define zerg-drone-sacrifice-ok?
       (or (not (eq? race 'Zerg))
           (not node)
@@ -4620,7 +4718,7 @@
                 tvp-worker-recovery?
                 (if (hash? open-facility-slots)
                     (and (or (< workers 8) zerg-army-step-ok?)
-                         (< workers (min race-max-workers (max target-workers (* 22 active-bases)))))
+                         (< workers worker-cap-now))
                     (< workers (min 80 (max target-workers (* 20 active-bases))))))]
            [(eq? cat 'expansion)
             (or terran-contained-breakout-cc?
@@ -4735,12 +4833,32 @@
                  (or (not (hash? open-facility-slots))
                      (not (eq? csym 'zergling))
                      (< (unit-count-equivalent unit-counts 'zergling)
-                        (zergling-target-cap minerals enemy-u-counts)))
+                        (zergling-target-cap minerals enemy-u-counts
+                                             #:workers workers
+                                             #:gas gas
+                                             #:enemy-b-counts enemy-b-counts)))
                  (or under-attack?
                      (> enemy-threat-supply 0)
+                     belief-army-deficit?
                      (< army-supply 8)
                      (>= workers (min 24 (* 11 active-bases)))))]
            [else blk0])))))
+
+  ;; Imminent-only 1-base natural escrow: when Nexus/CC/Hatchery is still far from
+  ;; affordable (`< 240M` for P/T, `< 190M` for Z) AND an idle TownHall/larva slot is open
+  ;; with `< 21` workers, let the `50M` worker (`478.0..488.0`) schedule FIRST while `477.0`
+  ;; still escrows remaining minerals ahead of all `<= 460.0` non-worker items!
+  (define nat-exp-yield-to-open-worker-slot?
+    (and natural-exp-window?
+         (hash? open-facility-slots)
+         (= active-bases 1)
+         (<= total-townhalls-incl-pending 1)
+         (< workers 21)
+         (< minerals (if (eq? race 'Zerg) 190 240))
+         (> (hash-ref open-facility-slots
+                      (if (eq? race 'Zerg) 'larva 'townhall)
+                      0)
+            0)))
 
   (define all-adjusted-cands
     (for/list ([c (in-list (append raw-cands extra-cands))]
@@ -4803,8 +4921,10 @@
         ;; or intentional timing-cut target), yielding ONLY to `survival-defense` or `zerg-army-wave`!
         [(eq? cat 'worker)
          (define sat-target worker-cap-now)
-         (define undersat-bases-thresh (min race-max-workers (* 19 active-bases)))
-         (define fullsat-bases-thresh (min race-max-workers (* 21 active-bases)))
+         (define undersat-bases-thresh
+           (min race-max-workers (+ (* 19 active-bases) (* 8 pending-townhalls-cnt))))
+         (define fullsat-bases-thresh
+           (min race-max-workers (+ (* 21 active-bases) (* 10 pending-townhalls-cnt))))
          (define emergency-worker-boost
            (cond
              [(= workers 0) 1500.0]
@@ -4938,6 +5058,7 @@
                        (and ws-natural-blocked? (< minerals 350))))
               (min u0 45.0)]
              [is-repaired? (max 520.0 u0)]
+             [nat-exp-yield-to-open-worker-slot? 477.0]
              [natural-exp-window? (max 620.0 plan-weight u0)]
              [terran-contained-breakout-cc? (max 484.0 plan-weight u0)]
              [(and depletion-or-mirror-exp? exp-ok?) (max 484.0 plan-weight u0)]
@@ -5086,6 +5207,7 @@
                     colossus-unlock-needed?
                     under-attack?
                     (> enemy-threat-supply 0)
+                    belief-army-deficit?
                     (and (>= frame 1800) (< army-supply 6))
                     (>= workers (min target-workers worker-sat-thresh)))))
          (define queen-escrow-ok?
@@ -5193,6 +5315,7 @@
            (and (hash? open-facility-slots)
                 (not under-attack?)
                 (<= enemy-threat-supply 0)
+                (not belief-army-deficit?)
                 (>= army-supply 6)
                 (< workers worker-recovery-target)
                 (not (and gas-unlock-tech-boost? (>= gas 150)))
@@ -5307,6 +5430,11 @@
              [defer-for-worker-recovery? (min 425.0 u-after-gas-lock)]
              [proactive-overseer-boost? (max 475.0 (+ 140.0 u0))]
              [colossus-unlock-needed? (max plan-weight 496.0 u0)]
+             [(and belief-army-deficit?
+                   is-combat-unit-cand?
+                   (not mineral-only-gas-locked?))
+              (max plan-weight u-after-gas-lock
+                   (if opp-stopped-expanding? 494.0 482.0))]
              [(and effective-bo-goal?
                    (or (and (not under-attack?) (<= enemy-threat-supply 0))
                        (eq? cat 'combat-unit)
@@ -5417,7 +5545,7 @@
                               protoss-air-armor-1 protoss-air-armor-2 protoss-air-armor-3)))
             (min u 440.0)]
            [(and natural-exp-window? (eq? nsym race-expand-sym))
-            (max u 620.0)]
+            (if nat-exp-yield-to-open-worker-slot? 477.0 (max u 620.0))]
            [(and natural-exp-window? (not (memq cat '(supply worker))))
             (min u 460.0)]
            [else u]))
@@ -5691,7 +5819,10 @@
           (or (not (hash? open-facility-slots))
               (< (+ (unit-count-equivalent unit-counts 'zergling)
                     (hash-ref seen-unit-counts 'zergling 0))
-                 (zergling-target-cap minerals enemy-u-counts)))]
+                 (zergling-target-cap minerals enemy-u-counts
+                                      #:workers workers
+                                      #:gas gas
+                                      #:enemy-b-counts enemy-b-counts)))]
          [(ghost)
           (< (+ (unit-count-equivalent unit-counts 'ghost)
                 (hash-ref seen-unit-counts 'ghost 0))
@@ -5726,7 +5857,7 @@
               (and (or (< workers 8)
                        zerg-army-step-ok?
                        (and (eq? loss-recovery-mode 'worker-loss-recovery) lr-boost-workers?))
-                   (< workers (min race-max-workers (max target-workers (* 22 active-bases)))))
+                   (< workers worker-cap-now))
               (< workers (min 80 (max target-workers (* 20 active-bases)))))))
 
     (define supply-ok? (or (<= s-cost 0) (>= rem-sup s-cost)))

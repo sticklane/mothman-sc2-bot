@@ -2338,7 +2338,7 @@
         (caar sorted-hot)
         (if (eq? enemy-race-raw 'Random)
             'opponent-proxy-all-in-defense
-            'enemy-fast-3cc-or-nexus-greed)))
+            'map-split-or-gold-base-contest)))
 
   (define active-sits : (Listof Symbol)
     (if (pair? sorted-hot)

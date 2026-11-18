@@ -28,6 +28,7 @@
          "../lib/tactics-sim.rkt"
          "../lib/human-cortex.rkt"
          "../lib/mirror-mind-predictor.rkt"
+         "../lib/opponent-world-model.rkt"
          "../lib/priority-macro-brain.rkt"
          "../lib/bot-runtime.rkt"
          "../bots/Mothman-Z.rkt"
@@ -13010,6 +13011,187 @@
      'actions '()))
   (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (cadr a) 'spore-crawler))) z-uproot-acts))
                 "Uprooted Spore Crawlers in ally-units must count against Spore Crawler cap (#5129698)"))
+
+;; =============================================================================
+;; Suite 51: Holistic Opponent World Model, Belief-Coupled Army Parity & Loss-Forensics Regressions
+;; =============================================================================
+(run-suite "51. Holistic Opponent World Model, Belief-Coupled Army Parity & Loss-Forensics Regressions"
+  ;; 51.1 Cumulative Resource Integration (0 Enemy Workers Seen) + Exact Geyser Depletion + Dead-Tag Sunk Costs
+  (define owm1 (make-opponent-world-model 'Protoss))
+  (define sum1a
+    (step-opponent-world-model!
+     owm1
+     (hash 'frame 4480 ; 200s = 3m20s
+           'enemy-race 'Protoss
+           'base-x 32.0 'base-y 32.0 'natural-x 52.0 'natural-y 36.0
+           'enemy-x 160.0 'enemy-y 160.0 'enemy-exp-x 140.0 'enemy-exp-y 144.0
+           ;; Zero enemy Probes visible! Only Nexus + 2 Assimilators with exact vespene-contents = 1850 each (400 mined each = 800G!)
+           'ally-units (list (hash 'id 1 'type 'overlord 'x 140.0 'y 144.0 'hp 200))
+           'enemy-units (list (hash 'id 501 'type 'stalker 'x 152.0 'y 152.0 'hp 160 'attack-upgrade-level 1))
+           'enemy-buildings (list (hash 'id 601 'type 'nexus 'x 160.0 'y 160.0 'hp 2000 'build-progress 1.0)
+                                  (hash 'id 602 'type 'assimilator 'x 156.0 'y 162.0 'hp 900 'build-progress 1.0 'vespene-contents 1850)
+                                  (hash 'id 603 'type 'assimilator 'x 162.0 'y 156.0 'hp 900 'build-progress 1.0 'vespene-contents 1850)))))
+  (assert-true! (>= (opponent-world-summary-cum-minerals-mined sum1a) 2200)
+                "OpponentWorldModel must integrate cumulative minerals from base timeline without seeing enemy workers")
+  (assert-true! (>= (opponent-world-summary-cum-gas-mined sum1a) 800)
+                "OpponentWorldModel must anchor cumulative gas to exact `2250 - vespene-contents` geyser depletion")
+  (assert-eq! (opponent-world-summary-stopped-expanding? sum1a) #t
+              "Enemy natural sight-cleared empty past pro happy-path deadline (3m20s) must set stopped-expanding? = #t")
+  (assert-true! (>= (opponent-world-summary-believed-total-army-supply sum1a) 12)
+                "Stopped-expanding 1-base 2-gas Protoss with unaccounted resources must yield threatening believed-total-army-supply")
+  ;; Killing Stalker tag 501 transfers its cost to confirmed destroyed (not double-counted as alive OR unseen!)
+  (define sum1b
+    (step-opponent-world-model!
+     owm1
+     (hash 'frame 4520 'enemy-race 'Protoss
+           'base-x 32.0 'base-y 32.0 'natural-x 52.0 'natural-y 36.0
+           'enemy-x 160.0 'enemy-y 160.0 'enemy-exp-x 140.0 'enemy-exp-y 144.0
+           'dead-unit-tags '(501)
+           'ally-units '() 'enemy-units '() 'enemy-buildings '())))
+  (assert-eq! (opponent-world-summary-destroyed-min sum1b) 125
+              "Confirmed dead-unit-tags must credit Stalker 125M to destroyed-min")
+  (assert-eq! (opponent-world-summary-destroyed-gas sum1b) 50
+              "Confirmed dead-unit-tags must credit Stalker 50G to destroyed-gas")
+  (assert-eq! (hash-ref (opponent-world-summary-known-unit-counts sum1b) 'stalker 0) 0
+              "Dead Stalker tag 501 must be removed from known-unit-counts")
+
+  ;; 51.2 No Dark-Matter Greed Inversion Under Fog + Belief-Coupled Zerg Army Wave Parity (#5131381)
+  (define mm-fog (make-mirror-mind-state #:our-race 'Protoss #:enemy-race 'Terran #:depth 2))
+  (step-mirror-mind-predictor!
+   mm-fog
+   (hash 'frame 3800 'minerals 300 'gas 100
+         'ally-units (list (hash 'id 1 'type 'stalker 'x 48 'y 36 'hp 160))
+         'ally-buildings (list (hash 'id 10 'type 'nexus 'x 32 'y 32 'hp 2000)
+                               (hash 'id 11 'type 'nexus 'x 52 'y 36 'hp 2000))
+         'enemy-units '()
+         'enemy-buildings (list (hash 'id 90 'type 'orbital-command 'x 160 'y 160 'hp 1500))))
+  (assert-true! (not (eq? (mirror-mind-state-mirror-macro-verdict mm-fog) 'punish-And-Deny-Greedy-Expand))
+                "Unscouted 1-base fog must NEVER trigger false 'punish-And-Deny-Greedy-Expand (#5131383)")
+
+  (define z-belief-dec
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 7500
+      #:minerals 350 #:gas 200 #:supply-used 68 #:supply-cap 100 #:workers 54 #:active-bases 3
+      #:army-supply 10 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'extractor 4)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'extractor 4)
+      #:unit-counts (hasheq 'drone 54 'queen 4 'roach 5)
+      #:enemy-unit-counts (hasheq 'stalker 18 'immortal 3)
+      #:enemy-building-counts (hasheq 'nexus 2 'gateway 8 'robotics-facility 1)
+      #:mirror-signals (hasheq 'believed-enemy-army-supply 54 'opp-stopped-expanding? #t)
+      #:open-facility-slots (hasheq 'larva 6 'townhall 3))))
+  (define z-belief-ids (macro-brain-decision-scheduled-ids z-belief-dec))
+  (assert-true! (and (or (memq 'hydralisk z-belief-ids) (memq 'roach z-belief-ids) (memq 'ravager z-belief-ids))
+                     (not (memq 'drone z-belief-ids)))
+                "Zerg at 54 Drones & 10 army supply vs believed 54-supply 8-Gate Protoss must switch to Pure Army Wave (#5131381)")
+
+  ;; 51.3 Free-Summon Split: Locust Wave Kiting + Swarm Host Cooldown Window (#5132988)
+  (define rt-locust (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define locust-acts
+    (hash-ref
+     (step-live-bot-runtime!
+      rt-locust
+      (hash 'frame 6000 'race 'Protoss 'enemy-race 'Zerg
+            'enable-opponent-world-model #t
+            'minerals 200 'gas 100 'supply-used 48 'supply-cap 62 'supply-left 14
+            'mineral-harvesters 32 'vespene-harvesters 6
+            'base-x 32.0 'base-y 32.0 'natural-x 52.0 'natural-y 36.0
+            'enemy-x 160.0 'enemy-y 160.0
+            'ally-units (append (for/list ([i (in-range 24)])
+                                  (hash 'id (+ 10 i) 'type 'probe 'x 33.0 'y 33.0 'hp 40))
+                                (for/list ([k (in-range 6)])
+                                  (hash 'id (+ 200 k) 'type 'stalker 'x 96.0 'y 96.0 'hp 80 'shields 80)))
+            'ally-buildings (list (hash 'id 1 'type 'nexus 'x 32.0 'y 32.0 'build-progress 1.0)
+                                  (hash 'id 2 'type 'nexus 'x 52.0 'y 36.0 'build-progress 1.0))
+            'enemy-units (for/list ([j (in-range 6)])
+                           (hash 'id (+ 900 j) 'type 'locust-mp 'x 102.0 'y 102.0 'hp 50))
+            'enemy-buildings '()))
+     'actions '()))
+  (define owm-loc-sum1 (opponent-world-model-last-summary (rt-opponent-world-model rt-locust)))
+  (assert-eq! (opponent-world-summary-known-army-supply owm-loc-sum1) 0
+              "Free temporary LocustMP summons must contribute 0 standing army sunk cost")
+  (assert-eq! (opponent-world-summary-locust-wave-active? owm-loc-sum1) #t
+              "Active LocustMP wave must set locust-wave-active? = #t")
+  (assert-true! (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move))) locust-acts)))
+                "Combat units facing exposed LocustMP wave without Swarm Hosts in range must kite back toward natural (#5132988)")
+  ;; Step 20 frames after Locusts expire -> Swarm Host vulnerable cooldown window opens!
+  (step-opponent-world-model!
+   (rt-opponent-world-model rt-locust)
+   (hash 'frame 6020 'enemy-race 'Zerg
+         'base-x 32.0 'base-y 32.0 'natural-x 52.0 'natural-y 36.0
+         'enemy-x 160.0 'enemy-y 160.0
+         'ally-units '() 'enemy-units '() 'enemy-buildings '()))
+  (define owm-loc-sum2 (opponent-world-model-last-summary (rt-opponent-world-model rt-locust)))
+  (assert-eq! (opponent-world-summary-swarm-host-cooldown-window? owm-loc-sum2) #t
+              "Expired Locust wave must immediately open swarm-host-cooldown-window? = #t")
+
+  ;; 51.4 T3 Tech Foundation Gate: No Premature 3:45 Ghost Academy Escrow at 31 Supply (#5132983)
+  (define t-no-early-ga
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 5040
+      #:minerals 125 #:gas 75 #:supply-used 31 #:supply-cap 46 #:workers 20 #:active-bases 2
+      #:army-supply 11 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 2 'barracks 2 'barracks-techlab 1 'factory 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 2 'barracks 2 'barracks-techlab 1 'factory 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 20 'marine 5 'marauder 3)
+      #:open-facility-slots (hasheq 'barracks 2 'factory 1 'townhall 2))))
+  (assert-true! (and (not (memq 'ghost-academy (macro-brain-decision-scheduled-ids t-no-early-ga)))
+                     (not (eq? (macro-brain-decision-saving-for t-no-early-ga) 'ghost-academy)))
+                "Terran at 3:45 (31 supply, 20 SCVs, 2 bases) must NOT escrow Ghost Academy over Marines/Marauders/SCVs (#5132983)")
+
+  ;; 51.5 Imminent-Only 1-Base Natural Escrow (<240M Trains Probe!) & Pending-CC Worker Cap Credit (#5131383, #5132985)
+  (define p-100m-nat-dec
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 1900
+      #:minerals 110 #:gas 40 #:supply-used 21 #:supply-cap 31 #:workers 19 #:active-bases 1
+      #:army-supply 2 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:unit-counts (hasheq 'probe 19 'adept 1)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 1))))
+  (assert-true! (not (not (memq 'probe (macro-brain-decision-scheduled-ids p-100m-nat-dec))))
+                "Protoss at 110M (<240M) with idle Nexus must train Probe before locking 400M Nexus escrow (#5131383)")
+
+  (define t-pending-cc-dec
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Zerg #:frame 2600
+      #:minerals 150 #:gas 50 #:supply-used 25 #:supply-cap 39 #:workers 22 #:active-bases 1
+      #:army-supply 3 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 22 'reaper 1 'marine 2)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1))))
+  (assert-true! (not (not (memq 'scv (macro-brain-decision-scheduled-ids t-pending-cc-dec))))
+                "In-progress natural Command Center must credit worker cap past 22 so SCVs train continuously (#5132985)")
+
+  ;; 51.6 Late-Game Zerg Zergling Cap & T3 Siege-Breaker Escalation vs Bunkers/Siege Tanks (#5131434, #5132986)
+  (assert-true! (<= (zergling-target-cap 2500 (hasheq 'marine 10)
+                                         #:workers 72
+                                         #:enemy-b-counts (hasheq 'bunker 2 'planetary-fortress 1))
+                    20)
+                "Zerg vs Bunkers/Planetaries at 72 Drones must cap Zerglings at <= 20 even with 2500M bank")
+  (define z-siege-dec
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Terran #:frame 18000
+      #:minerals 1800 #:gas 900 #:supply-used 130 #:supply-cap 200 #:workers 72 #:active-bases 5
+      #:army-supply 50 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 4 'hive 1 'spawning-pool 1 'hydralisk-den 1 'lurker-den 1 'infestation-pit 1 'spire 1 'greater-spire 1 'extractor 8)
+      #:total-building-counts (hasheq 'hatchery 4 'hive 1 'spawning-pool 1 'hydralisk-den 1 'lurker-den 1 'infestation-pit 1 'spire 1 'greater-spire 1 'extractor 8)
+      #:unit-counts (hasheq 'drone 72 'queen 6 'zergling 24 'hydralisk 6 'corruptor 4)
+      #:enemy-unit-counts (hasheq 'marine 14 'siege-tank 4)
+      #:enemy-building-counts (hasheq 'orbital-command 2 'planetary-fortress 1 'bunker 2)
+      #:open-facility-slots (hasheq 'larva 12 'townhall 5 'hydralisk-den 1 'corruptor 4))))
+  (define z-siege-ids (macro-brain-decision-scheduled-ids z-siege-dec))
+  (assert-true! (and (not (memq 'zergling z-siege-ids))
+                     (or (memq 'lurker z-siege-ids)
+                         (memq 'brood-lord z-siege-ids)
+                         (memq 'viper z-siege-ids)))
+                "Late-game 72-Drone Zerg vs Bunkers/Tanks must suppress 25th+ Zergling and schedule Lurker/BroodLord/Viper (#5131434)"))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

@@ -2259,10 +2259,25 @@
   (>= (max 0.0 (safe-real army-supply 0.0))
       (zerg-stepped-drone-army-floor race enemy-race workers)))
 
-(define (zergling-target-cap minerals enemy-u-counts)
+(define (zergling-target-cap minerals enemy-u-counts
+                             #:workers [workers 0]
+                             #:gas [gas 0]
+                             #:enemy-b-counts [enemy-b-counts #f])
+  (define m-val (safe-nonneg-int minerals 0))
+  (define w-val (safe-nonneg-int workers 0))
+  (define g-val (safe-nonneg-int gas 0))
   (cond
-    [(enemy-counts-have-any? enemy-u-counts ZERG-SIEGE-SPLASH-ENEMY-SYMS) 20]
-    [(>= (safe-nonneg-int minerals 0) 1500) 9999]
+    [(or (enemy-counts-have-any? enemy-u-counts ZERG-SIEGE-SPLASH-ENEMY-SYMS)
+         (and (hash? enemy-b-counts)
+              (enemy-counts-have-any? enemy-b-counts
+                                      '(bunker planetary-fortress photon-cannon spine-crawler))))
+     20]
+    [(and (>= w-val 58) (>= g-val 200))
+     24]
+    [(>= m-val 1500)
+     120]
+    [(>= w-val 58)
+     24]
     [else 32]))
 
 (define (terran-desired-barracks-techlabs race enemy-race barracks-cnt)

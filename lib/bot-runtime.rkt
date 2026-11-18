@@ -26,6 +26,7 @@
          "tactics-sim.rkt"
          "human-cortex.rkt"
          "mirror-mind-predictor.rkt"
+         "opponent-world-model.rkt"
          "priority-macro-brain.rkt"
          (only-in "tactics/unit-mode-micro.rkt"
                   mode-unit-input
@@ -93,6 +94,7 @@
  combat-unit-record?
  rt-role-leases
  rt-bistable-states
+ rt-opponent-world-model
  rt-scout-state
  rt-spotter-lings
  rt-tumor-state
@@ -229,12 +231,15 @@
   (make-resettable-rt-weak-state make-unit-mode-tracker))
 (define-values (rt-transport-tracker reset-rt-transport-tracker!)
   (make-resettable-rt-weak-state make-transport-tracker))
+(define-values (rt-opponent-world-model reset-rt-opponent-world-model!)
+  (make-resettable-rt-weak-state make-opponent-world-model))
 
 (define (reset-wave3-tactical-state! rt)
   (reset-rt-disruptor-tracker! rt)
   (reset-rt-spell-claims! rt)
   (reset-rt-unit-mode-tracker! rt)
   (reset-rt-transport-tracker! rt)
+  (reset-rt-opponent-world-model! rt)
   (set-box! (rt-wave3-frame-box rt) -1)
   (set-box! (rt-macro-bundle-cache rt) #f)
   (set-box! (rt-l1b-cache rt) #f)
@@ -6892,8 +6897,15 @@
       (define healthy-proxy-workers
         (filter (lambda (w) (> (unit-total-hp-and-shield w) SC2-FIGHTING-WORKER-DISENGAGE-HP))
                 non-builder-defense-workers))
-      ;; Keep at least 4 workers mining so economy never hits 0 income while clearing proxy!
-      (define surplus-cnt (max 0 (- (length healthy-proxy-workers) 4)))
+      ;; Keep >= 8 workers mining in live games once >= 12 healthy workers exist (4 otherwise)
+      ;; so multi-pylon/cannon rushes (#5132982, #5132989) never collapse mineral income!
+      (define min-mining-floor
+        (if (and live-obs-harvesters? (>= (length healthy-proxy-workers) 12))
+            8
+            4))
+      (define surplus-cnt
+        (min (if live-obs-harvesters? 8 99)
+             (max 0 (- (length healthy-proxy-workers) min-mining-floor))))
       (when (> surplus-cnt 0)
         (define proxy-pylon-cnt
           (count (lambda (eb)
@@ -7785,12 +7797,15 @@
          (not scout-rush-aborted-latch?)
          (not in-base-proxy-detected?)
          (or force-synth-harass?
-             (and (>= frame 300)
-                  (>= supply-used 14)
-                  (< frame 3600)
-                  (not under-early-cheese?)
-                  (not early-survival-crisis?)
-                  (>= (length workers) (if live-obs-harvesters? 13 2))))))
+             (let ([vs-random?
+                    (or (eq? (hash-ref obs 'enemy-race #f) 'Random)
+                        (and rt (eq? (unbox (rt-initial-enemy-race-box rt)) 'Random)))])
+               (and (>= frame (if vs-random? 168 300))
+                    (>= supply-used (if vs-random? 13 14))
+                    (< frame 3600)
+                    (not under-early-cheese?)
+                    (not early-survival-crisis?)
+                    (>= (length workers) (if live-obs-harvesters? 12 2)))))))
   (define latched-scout-id
     (or (hash-ref scout-st 'scout-id #f)
         (and (not already-dispatched-scout?)
@@ -8620,6 +8635,24 @@
   (set-l2-ctx-has-nat?! ctx has-nat?)
   (define has-third? (>= active-bases 3))
   (set-l2-ctx-has-third?! ctx has-third?)
+  ;; Holistic Constraint-Narrowing Opponent World Model (`lib/opponent-world-model.rkt`):
+  ;; Continuously integrates enemy base/geyser timelines, geyser depletion, dead tags,
+  ;; tech DAG closure, happy-path deviation (`stopped-expanding?`), and summon windows!
+  (define owm-inst (and rt (rt-opponent-world-model rt)))
+  (define owm-live-eligible?
+    (and owm-inst
+         (or (eq? (hash-ref obs 'enable-opponent-world-model #f) #t)
+             (and live-obs-harvesters?
+                  (or (<= frame 128)
+                      (>= (opponent-world-model-last-frame owm-inst) 0))))))
+  (define owm-sum
+    (and owm-live-eligible?
+         (step-opponent-world-model!
+          owm-inst
+          (hash-set* obs
+                     'enemy-race effective-enemy-race
+                     'enemy-exp-x enemy-exp-x
+                     'enemy-exp-y enemy-exp-y))))
   (define-values (raw-prox-sup distant-enemy-combat-supply)
     (if live-obs-harvesters?
         (for/fold ([prox 0.0] [dist-sup 0.0]) ([e (in-list rush-threat-enemies)])
@@ -8815,23 +8848,29 @@
          (or (< live-army-supply (* 1.15 live-enemy-threat-supply))
              (< total-workers 30))))
   (set-l2-ctx-crisis-tech-upgrade-deferral?! ctx crisis-tech-upgrade-deferral?)
+  (define owm-urgent-pad (and owm-sum (opponent-world-summary-urgent-scout-pad owm-sum)))
   (when (and (>= frame 448)
              (or (< intel-confidence 0.65)
+                 (pair? owm-urgent-pad)
                  (zero? (modulo frame 672)))
              (or (not live-obs-harvesters?)
                  (refractory-allow-action?! cd-tracker 'live-periodic-scout frame 96)))
     (define recon-tx
-      (case intel-priority-sector
-        [(enemy-natural) enemy-exp-x]
-        [(enemy-main)    enemy-x]
-        [(enemy-third)   enemy-third-x]
-        [else            corridor-mid-x]))
+      (if (pair? owm-urgent-pad)
+          (car owm-urgent-pad)
+          (case intel-priority-sector
+            [(enemy-natural) enemy-exp-x]
+            [(enemy-main)    enemy-x]
+            [(enemy-third)   enemy-third-x]
+            [else            corridor-mid-x])))
     (define recon-ty
-      (case intel-priority-sector
-        [(enemy-natural) enemy-exp-y]
-        [(enemy-main)    enemy-y]
-        [(enemy-third)   enemy-third-y]
-        [else            corridor-mid-y]))
+      (if (pair? owm-urgent-pad)
+          (cdr owm-urgent-pad)
+          (case intel-priority-sector
+            [(enemy-natural) enemy-exp-y]
+            [(enemy-main)    enemy-y]
+            [(enemy-third)   enemy-third-y]
+            [else            corridor-mid-y])))
     (case race
       [(Protoss)
        (define obs-unit (findf (lambda (u) (eq? (unit-type-sym u) 'observer)) ally-units))
@@ -9915,16 +9954,45 @@
                        (+ (length (l2-ctx-cur-rush-fighting-wids ctx))
                           (length (l2-ctx-cur-rush-disengaging-wids ctx))))))
         (and (= total-workers 0) 0)))
+  (define owm-sum-p8
+    (let ([rt0 (l2-ctx-rt ctx)])
+      (and rt0
+           (or live-obs-harvesters? (eq? (hash-ref obs 'enable-opponent-world-model #f) #t))
+           (opponent-world-model-last-summary (rt-opponent-world-model rt0)))))
   (define enemy-u-counts
     (let ([m (pooled-hasheq! l2-sc 'enemy-u-counts-m)])
       (for ([eu (in-list enemy-units)])
         (define sym (unit-type-sym eu))
-        (hash-set! m sym (+ 1 (hash-ref m sym 0))))
+        (unless (free-summon-unit-sym? sym)
+          (hash-set! m sym (+ 1 (hash-ref m sym 0)))))
+      (when owm-sum-p8
+        (for ([(ksym kcnt) (in-hash (opponent-world-summary-known-unit-counts owm-sum-p8))])
+          (when (> kcnt (hash-ref m ksym 0))
+            (hash-set! m ksym kcnt))))
       (reuse-or-freeze-hasheq! l2-sc 'enemy-u-counts-immut m)))
   (set-l2-ctx-enemy-u-counts! ctx enemy-u-counts)
+  (define enemy-b-counts
+    (let ([m (pooled-hasheq! l2-sc 'enemy-b-counts-m)])
+      (for ([eb (in-list (l2-ctx-enemy-bldgs ctx))])
+        (define csym (fast-canonical-structure-sym (unit-type-sym eb)))
+        (hash-set! m csym (+ 1 (hash-ref m csym 0))))
+      (when owm-sum-p8
+        (for ([(bsym bcnt) (in-hash (opponent-world-summary-known-bldg-counts owm-sum-p8))])
+          (when (> bcnt (hash-ref m bsym 0))
+            (hash-set! m bsym bcnt))))
+      (reuse-or-freeze-hasheq! l2-sc 'enemy-b-counts-immut m)))
   (define eff-gas-harv-arg (and has-explicit-gas-harvesters? eff-gas-harvesters))
-  (define req-aa? (enemy-tech-observation-requires-anti-air? tech-obs))
-  (define req-det? (enemy-tech-observation-requires-detection? tech-obs))
+  (define req-aa?
+    (or (enemy-tech-observation-requires-anti-air? tech-obs)
+        (and owm-sum-p8 (opponent-world-summary-requires-anti-air? owm-sum-p8))))
+  (define req-det?
+    (or (enemy-tech-observation-requires-detection? tech-obs)
+        (and owm-sum-p8 (opponent-world-summary-requires-detection? owm-sum-p8))))
+  (define owm-believed-sup (if owm-sum-p8 (opponent-world-summary-believed-total-army-supply owm-sum-p8) 0))
+  (define owm-believed-val (if owm-sum-p8 (opponent-world-summary-believed-total-army-value owm-sum-p8) 0))
+  (define owm-stopped-exp? (not (not (and owm-sum-p8 (opponent-world-summary-stopped-expanding? owm-sum-p8)))))
+  (define owm-siege-cnt (if owm-sum-p8 (opponent-world-summary-enemy-siege-or-turtle-count owm-sum-p8) 0))
+  (define owm-believed-sup-bkt (quotient owm-believed-sup 4))
   (define depleting-bases (l2-ctx-depleting-bases ctx))
   (define natural-blocked? (l2-ctx-natural-blocked? ctx))
   (define mmstate (let ([rt (l2-ctx-rt ctx)]) (and rt (live-bot-runtime-mirror-mind rt))))
@@ -9998,7 +10066,11 @@
          (eq? (vector-ref mc-cv 45) ms-trust)
          (eq? (vector-ref mc-cv 46) ms-strat)
          (equal? (vector-ref mc-cv 47) depleting-bases)
-         (eq? (vector-ref mc-cv 48) (not (not natural-blocked?)))))
+         (eq? (vector-ref mc-cv 48) (not (not natural-blocked?)))
+         (equal? (vector-ref mc-cv 49) enemy-b-counts)
+         (equal? (vector-ref mc-cv 50) owm-believed-sup-bkt)
+         (eq? (vector-ref mc-cv 51) owm-stopped-exp?)
+         (equal? (vector-ref mc-cv 52) owm-siege-cnt)))
   (define-values (macro-world macro-decision dyn-plan plan-next-actions-ht repaired-prereqs)
     (if macro-cache-ok?
         (values (vector-ref mc-cv 1)
@@ -10015,7 +10087,11 @@
                         'mirror-requires-anti-air? ms-aa?
                         'mirror-enemy-upgrade-advantage ms-upg-adv
                         'mirror-trust-mode ms-trust
-                        'mirror-strategy ms-strat)]
+                        'mirror-strategy ms-strat
+                        'believed-enemy-army-supply owm-believed-sup
+                        'believed-enemy-army-value owm-believed-val
+                        'opp-stopped-expanding? owm-stopped-exp?
+                        'enemy-siege-or-turtle-count owm-siege-cnt)]
                [mw (make-macro-world-state
                     #:race race
                     #:enemy-race effective-enemy-race
@@ -10034,6 +10110,7 @@
                     #:total-building-counts total-bldg-counts
                     #:unit-counts (l2-ctx-unit-counts ctx)
                     #:enemy-unit-counts enemy-u-counts
+                    #:enemy-building-counts enemy-b-counts
                     #:researched-upgrades researched-upgs
                     #:pending-upgrades (l2-ctx-pending-upgs ctx)
                     #:open-facility-slots open-prod-slots-snapshot
@@ -10105,7 +10182,11 @@
             (vector-set! mc-cv 45 ms-trust)
             (vector-set! mc-cv 46 ms-strat)
             (vector-set! mc-cv 47 depleting-bases)
-            (vector-set! mc-cv 48 (not (not natural-blocked?))))
+            (vector-set! mc-cv 48 (not (not natural-blocked?)))
+            (vector-set! mc-cv 49 enemy-b-counts)
+            (vector-set! mc-cv 50 owm-believed-sup-bkt)
+            (vector-set! mc-cv 51 owm-stopped-exp?)
+            (vector-set! mc-cv 52 owm-siege-cnt))
           (values mw md dp pn rp))))
   (set-l2-ctx-macro-decision! ctx macro-decision)
   (set-l2-ctx-dyn-plan! ctx dyn-plan)
@@ -17571,17 +17652,60 @@
                     (threat-within-14-of-th? e)))
              (for/or ([eb (in-list enemy-def-bldgs)])
                (threat-within-14-of-th? eb)))))
+  (define owm-tactics
+    (and (or (l34-ctx-live-obs? ctx) (eq? (hash-ref obs 'enable-opponent-world-model #f) #t))
+         rt
+         (opponent-world-model-last-summary (rt-opponent-world-model rt))))
+  (define our-combat-val
+    (if owm-tactics
+        (for/sum ([u (in-list combat-units)])
+          (define ut (fast-canonical-unit-sym (unit-type-sym u)))
+          (if (free-summon-unit-sym? ut)
+              0
+              (+ (max 0 (sc2-min-cost ut))
+                 (exact-round (* 1.5 (max 0 (sc2-gas-cost ut)))))))
+        0))
+  (define owm-believed-val
+    (if owm-tactics (opponent-world-summary-believed-total-army-value owm-tactics) 0))
+  (define owm-locust-wave?
+    (and owm-tactics (opponent-world-summary-locust-wave-active? owm-tactics)))
+  (define owm-sh-cooldown?
+    (and owm-tactics (opponent-world-summary-swarm-host-cooldown-window? owm-tactics)))
+  (define exposed-swarm-host-near?
+    (and owm-locust-wave?
+         (pair? combat-units)
+         (let ([cx (exact->inexact (l34-ctx-prelim-army-cx ctx))]
+               [cy (exact->inexact (l34-ctx-prelim-army-cy ctx))])
+           (for/or ([e (in-list enemy-units)])
+             (and (memq (unit-type-sym e) '(swarm-host swarm-host-burrowed))
+                  (<= (dist2d cx cy (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 11.5))))))
+  (define locust-kite-retreat?
+    (and owm-locust-wave?
+         (not exposed-swarm-host-near?)
+         (not enemy-within-14-of-th?)))
+  (define fog-belief-suppress?
+    (and owm-tactics
+         (not enemy-within-14-of-th?)
+         (not owm-sh-cooldown?)
+         (< (safe-nonneg-int (hash-ref obs 'supply-used 0) 0) 182)
+         (> owm-believed-val 550)
+         (< our-combat-val (* 1.12 owm-believed-val))))
   (define eval-enemies
-    (if (null? enemy-def-bldgs)
-        enemy-units
-        (append enemy-units enemy-def-bldgs)))
+    (let ([non-summon-enemies
+           (if owm-tactics
+               (filter (lambda (e) (not (free-summon-unit-sym? (unit-type-sym e)))) enemy-units)
+               enemy-units)])
+      (if (null? enemy-def-bldgs)
+          non-summon-enemies
+          (append non-summon-enemies enemy-def-bldgs))))
   (cond
     [(or (null? combat-units) (null? eval-enemies))
+     (define fog-suppress-now? (or locust-kite-retreat? fog-belief-suppress?))
      (set-l34-ctx-combat-pred-ht! ctx #f)
-     (set-l34-ctx-combat-pred-ratio! ctx (if (pair? combat-units) 10.0 #f))
-     (set-l34-ctx-combat-should-engage?! ctx #t)
+     (set-l34-ctx-combat-pred-ratio! ctx (if (pair? combat-units) (if fog-suppress-now? 0.65 10.0) #f))
+     (set-l34-ctx-combat-should-engage?! ctx (not fog-suppress-now?))
      (set-l34-ctx-enemy-within-14-of-th?! ctx enemy-within-14-of-th?)
-     (set-l34-ctx-combat-suppress-attack?! ctx #f)]
+     (set-l34-ctx-combat-suppress-attack?! ctx fog-suppress-now?)]
     [else
      (define tb-mm (live-bot-runtime-mirror-mind rt))
      (define tb-mmtech (and tb-mm (mirror-mind-state-last-tech-observation tb-mm)))
@@ -17621,8 +17745,15 @@
                 (let ([est-e (hash-ref wstate 'est-enemy-army-supply 0.0)]
                       [our-s (hash-ref wstate 'combat-army-supply (or (l34-ctx-live-combat-supply ctx) 0.0))])
                   (and (> est-e 0.0) (< our-s (* 0.85 est-e)))))))
-     (define engage? (and (not pullback-active?) (hash-ref pred-ht 'should-engage? #t) #t))
-     (define suppress? (and (or (not engage?) pullback-active?) (not enemy-within-14-of-th?)))
+     (define engage?
+       (and (not pullback-active?)
+            (not locust-kite-retreat?)
+            (not fog-belief-suppress?)
+            (hash-ref pred-ht 'should-engage? #t)
+            #t))
+     (define suppress?
+       (and (or (not engage?) pullback-active? locust-kite-retreat? fog-belief-suppress?)
+            (not enemy-within-14-of-th?)))
      (set-l34-ctx-combat-pred-ht! ctx pred-ht)
      (set-l34-ctx-combat-pred-ratio! ctx (hash-ref pred-ht 'predicted-lanchester-ratio #f))
      (set-l34-ctx-combat-should-engage?! ctx engage?)
@@ -17659,6 +17790,44 @@
   (define tbrain (l34-ctx-tbrain ctx))
   (define transport-tr (l34-ctx-transport-tr ctx))
   (define wave3-handled-tags (l34-ctx-wave3-handled-tags ctx))
+  ;; Kite out of free temporary Swarm Host Locust waves (`#5132988`): never stand and trade
+  ;; permanent units into `0`-value `18s` Locusts on creep when no Swarm Host is exposed!
+  (define owm-p2
+    (and (or (l34-ctx-live-obs? ctx) (eq? (hash-ref obs 'enable-opponent-world-model #f) #t))
+         rt
+         (opponent-world-model-last-summary (rt-opponent-world-model rt))))
+  (when (and owm-p2
+             (opponent-world-summary-locust-wave-active? owm-p2)
+             (not enemy-within-14-of-th?)
+             (pair? combat-units))
+    (define locust-units
+      (filter (lambda (e) (memq (unit-type-sym e) '(locust locust-mp locustmp locust-flying)))
+              enemy-units))
+    (define exposed-sh?
+      (for/or ([e (in-list enemy-units)])
+        (and (memq (unit-type-sym e) '(swarm-host swarm-host-burrowed))
+             (<= (dist2d prelim-army-cx prelim-army-cy
+                         (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0))
+                 11.5))))
+    (when (and (pair? locust-units) (not exposed-sh?))
+      (define kite-ids
+        (for/list ([u (in-list combat-units)]
+                   #:when (let ([uid (hash-ref u 'id -1)]
+                                [ux (hash-ref u 'x base-x)]
+                                [uy (hash-ref u 'y base-y)])
+                            (and (exact-integer? uid)
+                                 (> uid 0)
+                                 (not (set-member? wave3-handled-tags uid))
+                                 (> (dist2d ux uy nat-x nat-y) 8.0)
+                                 (ormap (lambda (loc)
+                                          (<= (dist2d ux uy (hash-ref loc 'x 9999.0) (hash-ref loc 'y 9999.0))
+                                              15.0))
+                                        locust-units))))
+          (define uid (hash-ref u 'id -1))
+          (set-add! wave3-handled-tags uid)
+          uid))
+      (when (pair? kite-ids)
+        (l34-emit-preserved! ctx (list 'move kite-ids nat-x nat-y)))))
   ;; ---------------------------------------------------------------------------
   ;; Multi-Depth Mirrored Tactical Micro Brain (0.5s, 2.0s, 5.0s Horizons)
   ;; ---------------------------------------------------------------------------
