@@ -22,7 +22,7 @@ import math
 import os
 import statistics
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PRO_BASELINES = os.path.join(SCRIPT_DIR, "pro_baselines.json")
@@ -65,10 +65,15 @@ def normalize_match(m):
         else "Unknown"
     )
     dur = safe_num(m.get("duration_sec")) or 0.0
+    kv = safe_num(m.get("killed_val")) or 0.0
+    lv = safe_num(m.get("lost_val")) or 0.0
+    opp_pk = safe_num(m.get("opp_peak_army")) or 0.0
     opp_crash = bool(
         m.get("opp_early_crash")
-        or (dur < 20.0 and m.get("result") == "win" and (m.get("killed_val") or 0) == 0)
+        or (dur < 20.0 and m.get("result") == "win" and kv == 0)
+        or (dur < 180.0 and m.get("result") == "win" and kv == 0 and lv == 0 and opp_pk == 0)
     )
+    ut = m.get("upgrade_timings") or {}
     return {
         "match_id": str(m.get("id") if m.get("id") is not None else m.get("match_id", "")),
         "file": m.get("file", ""),
@@ -80,8 +85,8 @@ def normalize_match(m):
         "result": m.get("result", "unknown"),
         "opp_early_crash": opp_crash,
         "duration_sec": dur,
-        "killed_val": safe_num(m.get("killed_val")) or 0.0,
-        "lost_val": safe_num(m.get("lost_val")) or 0.0,
+        "killed_val": kv,
+        "lost_val": lv,
         "trade_ratio": safe_num(m.get("trade_ratio")),
         "our_bases": safe_num(m.get("our_bases")),
         "opp_bases": safe_num(m.get("opp_bases")),
@@ -89,6 +94,7 @@ def normalize_match(m):
         "our_w4": safe_num(m.get("our_w4") if m.get("our_w4") is not None else mt.get("w4m")),
         "our_w6": safe_num(m.get("our_w6") if m.get("our_w6") is not None else mt.get("w6m")),
         "our_w8": safe_num(m.get("our_w8") if m.get("our_w8") is not None else mt.get("w8m")),
+        "our_w10": safe_num(m.get("our_w10") if m.get("our_w10") is not None else mt.get("w10m")),
         "opp_w4": safe_num(m.get("opp_w4")),
         "opp_w6": safe_num(m.get("opp_w6")),
         "our_peak_workers": safe_num(m.get("our_peak_workers")),
@@ -104,8 +110,46 @@ def normalize_match(m):
         "gas2_sec": safe_num(mt.get("gas2_sec")),
         "prod1_sec": safe_num(mt.get("prod1_sec")),
         "tech1_sec": safe_num(mt.get("tech1_sec")),
+        "tech2_sec": safe_num(mt.get("tech2_sec")),
         "lair_sec": safe_num(mt.get("lair_sec")),
         "orbital1_sec": safe_num(mt.get("orbital1_sec")),
+        "bases_4m": safe_num(mt.get("bases_4m")),
+        "bases_6m": safe_num(mt.get("bases_6m")),
+        "bases_8m": safe_num(mt.get("bases_8m")),
+        "bases_10m": safe_num(mt.get("bases_10m")),
+        "prod_cnt_4m": safe_num(mt.get("prod_cnt_4m")),
+        "prod_cnt_6m": safe_num(mt.get("prod_cnt_6m")),
+        "prod_cnt_8m": safe_num(mt.get("prod_cnt_8m")),
+        "prod_cnt_10m": safe_num(mt.get("prod_cnt_10m")),
+        "primary_prod_4m": safe_num(mt.get("primary_prod_4m")),
+        "primary_prod_6m": safe_num(mt.get("primary_prod_6m")),
+        "primary_prod_8m": safe_num(mt.get("primary_prod_8m")),
+        "primary_prod_10m": safe_num(mt.get("primary_prod_10m")),
+        "queens_4m": safe_num(mt.get("queens_4m")),
+        "queens_6m": safe_num(mt.get("queens_6m")),
+        "queens_8m": safe_num(mt.get("queens_8m")),
+        "army_val_2m": safe_num(mt.get("army_val_2m")),
+        "army_val_4m": safe_num(mt.get("army_val_4m")),
+        "army_val_6m": safe_num(mt.get("army_val_6m")),
+        "army_val_8m": safe_num(mt.get("army_val_8m")),
+        "army_val_10m": safe_num(mt.get("army_val_10m")),
+        "army_sup_4m": safe_num(mt.get("army_sup_4m")),
+        "army_sup_6m": safe_num(mt.get("army_sup_6m")),
+        "army_sup_8m": safe_num(mt.get("army_sup_8m")),
+        "first_scout_sec": safe_num(m.get("first_scout_sec") if m.get("first_scout_sec") is not None else mt.get("first_scout_sec")),
+        "enemy_first_seen_sec": safe_num(mt.get("enemy_first_seen_sec")),
+        "first_scout_unit": m.get("first_scout_unit") or m.get("first_scout_unit_type") or None,
+        "opening_bo_sequence": m.get("opening_bo_sequence") or None,
+        "warpgate_sec": safe_num(ut.get("warpgate_sec") if ut.get("warpgate_sec") is not None else mt.get("warpgate_sec")),
+        "blink_sec": safe_num(ut.get("blink_sec") if ut.get("blink_sec") is not None else mt.get("blink_sec")),
+        "charge_sec": safe_num(ut.get("charge_sec") if ut.get("charge_sec") is not None else mt.get("charge_sec")),
+        "stim_sec": safe_num(ut.get("stim_sec") if ut.get("stim_sec") is not None else mt.get("stim_sec")),
+        "combat_shield_sec": safe_num(ut.get("combat_shield_sec") if ut.get("combat_shield_sec") is not None else mt.get("combat_shield_sec")),
+        "ling_speed_sec": safe_num(ut.get("ling_speed_sec") if ut.get("ling_speed_sec") is not None else mt.get("ling_speed_sec")),
+        "bane_speed_sec": safe_num(ut.get("bane_speed_sec") if ut.get("bane_speed_sec") is not None else mt.get("bane_speed_sec")),
+        "roach_speed_sec": safe_num(ut.get("roach_speed_sec") if ut.get("roach_speed_sec") is not None else mt.get("roach_speed_sec")),
+        "plus1_atk_sec": safe_num(ut.get("plus1_atk_sec") if ut.get("plus1_atk_sec") is not None else mt.get("plus1_atk_sec")),
+        "plus1_arm_sec": safe_num(ut.get("plus1_arm_sec") if ut.get("plus1_arm_sec") is not None else mt.get("plus1_arm_sec")),
         "army_to_worker_6m": safe_num(
             m.get("army_to_worker_6m")
             if m.get("army_to_worker_6m") is not None
@@ -118,6 +162,9 @@ def normalize_match(m):
         ),
         "step_p50": safe_num(m.get("step_p50") if m.get("step_p50") is not None else m.get("step_ms_p50")),
         "step_p95": safe_num(m.get("step_p95") if m.get("step_p95") is not None else m.get("step_ms_p95")),
+        "step_max": safe_num(m.get("step_max") if m.get("step_max") is not None else m.get("step_ms_max")),
+        "endgame_home_stall_sec": safe_num(m.get("endgame_home_stall_sec")),
+        "own_base_retreat_frames": safe_num(m.get("own_base_retreat_frames")),
         "action_rejects": int(m.get("action_rejects") or 0),
         "crashes": m.get("crashes") or [],
         "signatures": m.get("signatures") or [],
@@ -152,6 +199,10 @@ def summarize_slice(rows):
     w6_all = [r["our_w6"] for r in rows if r["our_w6"] is not None]
     w6_alive = [r["our_w6"] for r in rows if r["our_w6"] is not None and r["our_w6"] >= 10]
     w8_alive = [r["our_w8"] for r in rows if r["our_w8"] is not None and r["our_w8"] >= 10]
+    w10_alive = [r["our_w10"] for r in rows if r["our_w10"] is not None and r["our_w10"] >= 10]
+
+    scout_units = Counter(r["first_scout_unit"] for r in rows if r.get("first_scout_unit"))
+    bo_seqs = Counter(r["opening_bo_sequence"] for r in rows if r.get("opening_bo_sequence"))
 
     anom_counts = defaultdict(int)
     for r in rows:
@@ -165,8 +216,27 @@ def summarize_slice(rows):
                 anom_counts["self_cancel_loops"] += 1
             if an.get("endgame_stall"):
                 anom_counts["endgame_stall"] += 1
+            if an.get("endgame_home_stall") or (r.get("endgame_home_stall_sec") or 0.0) >= 90.0:
+                anom_counts["endgame_home_stall"] += 1
+            if an.get("own_base_retreat") or (r.get("own_base_retreat_frames") or 0.0) >= 440.0:
+                anom_counts["own_base_retreat"] += 1
             if an.get("air_aa_starvation"):
                 anom_counts["air_aa_starvation"] += 1
+
+    ehs_vals = [r["endgame_home_stall_sec"] for r in rows if r.get("endgame_home_stall_sec") is not None]
+    obr_vals = [r["own_base_retreat_frames"] for r in rows if r.get("own_base_retreat_frames") is not None]
+
+    pk_army_ratios = [
+        r["our_peak_army"] / max(1.0, r["opp_peak_army"])
+        for r in rows
+        if r["our_peak_army"] is not None and r["opp_peak_army"] is not None and r["opp_peak_army"] > 0
+    ]
+    step_max_vals = [r["step_max"] for r in rows if r["step_max"] is not None]
+    step_outliers = [
+        {"match_id": r["match_id"], "our_bot": r["our_bot"], "opp_bot": r["opp_bot"], "step_max": round(r["step_max"], 1)}
+        for r in rows
+        if r["step_max"] is not None and r["step_max"] > 500.0
+    ]
 
     return {
         "n": n,
@@ -185,9 +255,45 @@ def summarize_slice(rows):
         "w6_avg": mean_opt(w6_all),
         "w6_alive_med": med_opt(w6_alive),
         "w8_alive_med": med_opt(w8_alive),
+        "w10_alive_med": med_opt(w10_alive),
+        "bases_4m_med": med_opt([r["bases_4m"] for r in rows]),
+        "bases_6m_med": med_opt([r["bases_6m"] for r in rows]),
+        "bases_8m_med": med_opt([r["bases_8m"] for r in rows]),
+        "prod_cnt_4m_med": med_opt([r["prod_cnt_4m"] for r in rows]),
+        "prod_cnt_6m_med": med_opt([r["prod_cnt_6m"] for r in rows]),
+        "prod_cnt_8m_med": med_opt([r["prod_cnt_8m"] for r in rows]),
+        "prod_cnt_10m_med": med_opt([r["prod_cnt_10m"] for r in rows]),
+        "primary_prod_4m_med": med_opt([r["primary_prod_4m"] for r in rows]),
+        "primary_prod_6m_med": med_opt([r["primary_prod_6m"] for r in rows]),
+        "primary_prod_8m_med": med_opt([r["primary_prod_8m"] for r in rows]),
+        "queens_4m_med": med_opt([r["queens_4m"] for r in rows]),
+        "queens_6m_med": med_opt([r["queens_6m"] for r in rows]),
+        "queens_8m_med": med_opt([r["queens_8m"] for r in rows]),
+        "army_val_4m_med": med_opt([r["army_val_4m"] for r in rows]),
+        "army_val_6m_med": med_opt([r["army_val_6m"] for r in rows]),
+        "army_val_8m_med": med_opt([r["army_val_8m"] for r in rows]),
+        "army_val_10m_med": med_opt([r["army_val_10m"] for r in rows]),
+        "first_scout_sec_med": med_opt([r["first_scout_sec"] for r in rows]),
+        "enemy_first_seen_sec_med": med_opt([r["enemy_first_seen_sec"] for r in rows]),
+        "scout_unit_counts": scout_units.most_common(4),
+        "top_opening_sequences": bo_seqs.most_common(3),
+        "upgrades_med": {
+            "warpgate_sec": med_opt([r["warpgate_sec"] for r in rows]),
+            "blink_sec": med_opt([r["blink_sec"] for r in rows]),
+            "charge_sec": med_opt([r["charge_sec"] for r in rows]),
+            "stim_sec": med_opt([r["stim_sec"] for r in rows]),
+            "combat_shield_sec": med_opt([r["combat_shield_sec"] for r in rows]),
+            "ling_speed_sec": med_opt([r["ling_speed_sec"] for r in rows]),
+            "bane_speed_sec": med_opt([r["bane_speed_sec"] for r in rows]),
+            "roach_speed_sec": med_opt([r["roach_speed_sec"] for r in rows]),
+            "plus1_atk_sec": med_opt([r["plus1_atk_sec"] for r in rows]),
+            "plus1_arm_sec": med_opt([r["plus1_arm_sec"] for r in rows]),
+        },
+        "tech2_sec_med": med_opt([r["tech2_sec"] for r in rows]),
         "pk_workers_avg": mean_opt([r["our_peak_workers"] for r in rows]),
         "pk_army_avg": mean_opt([r["our_peak_army"] for r in rows]),
         "opp_pk_army_avg": mean_opt([r["opp_peak_army"] for r in rows]),
+        "pk_army_ratio_med": med_opt2(pk_army_ratios),
         "avg_min_bank": mean_opt([r["our_avg_min"] for r in rows]),
         "avg_gas_bank": mean_opt([r["our_avg_gas"] for r in rows]),
         "sup_blk_avg": mean_opt([r["supply_block_pct"] for r in rows]),
@@ -203,6 +309,12 @@ def summarize_slice(rows):
         "army_to_worker_8m_med": med_opt2([r["army_to_worker_8m"] for r in rows]),
         "step_p50_med": med_opt([r["step_p50"] for r in rows]),
         "step_p95_med": med_opt([r["step_p95"] for r in rows]),
+        "step_max_worst": round(max(step_max_vals), 1) if step_max_vals else None,
+        "step_outliers_gt_500ms": step_outliers,
+        "endgame_home_stall_count": sum(1 for v in ehs_vals if v >= 90.0),
+        "endgame_home_stall_max_sec": round(max(ehs_vals), 1) if ehs_vals else None,
+        "total_own_base_retreat_frames": int(round(sum(obr_vals))) if obr_vals else None,
+        "own_base_retreat_matches": sum(1 for v in obr_vals if v >= 440.0),
         "action_rejects": sum(r["action_rejects"] for r in rows),
         "crashes": sum(len(r["crashes"]) for r in rows),
         "anomalies": dict(anom_counts),
@@ -230,15 +342,48 @@ def fmt_delta(v, suffix="", prec=1):
     return f"{sign}{v:.{prec}f}{suffix}"
 
 
-def compare_vs_pro(summary, pro_ref):
+def compare_vs_pro(summary, pro_ref, race=None):
     """Compute signed gaps (Mothman - Pro) and normalized divergence flags."""
     if not summary or summary.get("n", 0) == 0 or not pro_ref:
         return {}
+    mc = pro_ref.get("minute_curves") or {}
+    m4, m6, m8, m10 = mc.get("m4") or {}, mc.get("m6") or {}, mc.get("m8") or {}, mc.get("m10") or {}
+    pro_prod4 = safe_num(m4.get("prod_cnt_med"))
+    pro_prod6 = safe_num(m6.get("prod_cnt_med"))
+    pro_prod8 = safe_num(m8.get("prod_cnt_med"))
+    pro_av4 = safe_num(m4.get("army_val_med"))
+    pro_av6 = safe_num(m6.get("army_val_med"))
+    pro_av8 = safe_num(m8.get("army_val_med"))
+    pro_av10 = safe_num(m10.get("army_val_med"))
+    pro_q4 = safe_num(m4.get("queens_med"))
+
+    av6_ratio = (
+        round(summary["army_val_6m_med"] / pro_av6, 2)
+        if summary.get("army_val_6m_med") is not None and pro_av6 and pro_av6 > 0
+        else None
+    )
+    av8_ratio = (
+        round(summary["army_val_8m_med"] / pro_av8, 2)
+        if summary.get("army_val_8m_med") is not None and pro_av8 and pro_av8 > 0
+        else None
+    )
+
     gaps = {
         "w2_gap": diff_val(summary.get("w2_med"), pro_ref.get("w2m")),
         "w4_gap": diff_val(summary.get("w4_alive_med"), pro_ref.get("w4m")),
         "w6_gap": diff_val(summary.get("w6_alive_med"), pro_ref.get("w6m")),
         "w8_gap": diff_val(summary.get("w8_alive_med"), pro_ref.get("w8m")),
+        "w10_gap": diff_val(summary.get("w10_alive_med"), pro_ref.get("w10m")),
+        "prod4_gap": diff_val(summary.get("prod_cnt_4m_med"), pro_prod4),
+        "prod6_gap": diff_val(summary.get("prod_cnt_6m_med"), pro_prod6),
+        "prod8_gap": diff_val(summary.get("prod_cnt_8m_med"), pro_prod8),
+        "queens4_gap": diff_val(summary.get("queens_4m_med"), pro_q4) if race == "Zerg" else None,
+        "army_val_4m_gap": diff_val(summary.get("army_val_4m_med"), pro_av4, 0),
+        "army_val_6m_gap": diff_val(summary.get("army_val_6m_med"), pro_av6, 0),
+        "army_val_8m_gap": diff_val(summary.get("army_val_8m_med"), pro_av8, 0),
+        "army_val_10m_gap": diff_val(summary.get("army_val_10m_med"), pro_av10, 0),
+        "army_val_6m_ratio": av6_ratio,
+        "army_val_8m_ratio": av8_ratio,
         "nat_sec_gap": diff_val(summary.get("nat_sec_med"), pro_ref.get("nat_sec")),
         "third_sec_gap": diff_val(summary.get("third_sec_med"), pro_ref.get("third_sec")),
         "gas1_sec_gap": diff_val(summary.get("gas1_sec_med"), pro_ref.get("gas1_sec")),
@@ -257,6 +402,19 @@ def compare_vs_pro(summary, pro_ref):
         flags.append(f"WORKER_DEFICIT_4M({gaps['w4_gap']:+.1f})")
     if gaps["w6_gap"] is not None and gaps["w6_gap"] <= -8.0:
         flags.append(f"WORKER_DEFICIT_6M({gaps['w6_gap']:+.1f})")
+    if gaps["prod6_gap"] is not None and gaps["prod6_gap"] <= -2.0:
+        flags.append(f"PROD_DEFICIT_6M({gaps['prod6_gap']:+.1f})")
+    if gaps["prod8_gap"] is not None and gaps["prod8_gap"] <= -2.5:
+        flags.append(f"PROD_DEFICIT_8M({gaps['prod8_gap']:+.1f})")
+    if av8_ratio is not None and av8_ratio < 0.55:
+        flags.append(f"ARMY_DEFICIT_8M({av8_ratio:.2f}x)")
+    if race == "Zerg" and gaps["queens4_gap"] is not None and gaps["queens4_gap"] <= -1.5:
+        flags.append(f"QUEEN_DEFICIT_4M({gaps['queens4_gap']:+.1f})")
+    if race == "Zerg":
+        su = dict(summary.get("scout_unit_counts") or [])
+        tot_s = sum(su.values())
+        if tot_s > 0 and (su.get("Drone", 0) / tot_s) > 0.25:
+            flags.append(f"ANTI_PRO_DRONE_SCOUT({su['Drone']}/{tot_s})")
     if gaps["nat_sec_gap"] is not None and abs(gaps["nat_sec_gap"]) >= 25.0:
         tag = "LATE_NAT" if gaps["nat_sec_gap"] > 0 else "EARLY_NAT"
         flags.append(f"{tag}({gaps['nat_sec_gap']:+.0f}s)")
@@ -268,6 +426,39 @@ def compare_vs_pro(summary, pro_ref):
         flags.append(f"HIGH_SUP_BLK({summary['sup_blk_avg']:.1f}%)")
     gaps["divergence_flags"] = flags
     return gaps
+
+
+def compute_paired_diff(cur_rows, base_rows):
+    """Pair matches strictly by (our_bot, opp_bot) — never numeric match_id."""
+    if not base_rows:
+        return []
+    b_idx = {(r["our_bot"], r["opp_bot"]): r for r in base_rows}
+    pairs = []
+    for c in sorted(cur_rows, key=lambda r: (r["our_bot"], r["opp_bot"])):
+        b = b_idx.get((c["our_bot"], c["opp_bot"]))
+        if not b:
+            continue
+        pairs.append({
+            "our_bot": c["our_bot"],
+            "opp_bot": c["opp_bot"],
+            "matchup": c["matchup"],
+            "base_result": b["result"],
+            "cur_result": c["result"],
+            "flipped": b["result"] != c["result"],
+            "base_trade": b["trade_ratio"],
+            "cur_trade": c["trade_ratio"],
+            "trade_delta": diff_val(c["trade_ratio"], b["trade_ratio"], 2),
+            "base_pk_army": b["our_peak_army"],
+            "cur_pk_army": c["our_peak_army"],
+            "opp_pk_army": c["opp_peak_army"],
+            "base_w6": b["our_w6"],
+            "cur_w6": c["our_w6"],
+            "base_sup_blk": b["supply_block_pct"],
+            "cur_sup_blk": c["supply_block_pct"],
+            "cur_step_max": c["step_max"],
+            "cur_anomalies": [k for k, v in (c["anomalies"] or {}).items() if v],
+        })
+    return pairs
 
 
 def evaluate_promotion_gates(overall, by_race, tactics_data=None):
@@ -285,10 +476,11 @@ def evaluate_promotion_gates(overall, by_race, tactics_data=None):
         "every_race_w4_within_6_of_pro": True,  # filled below
     }
     if tactics_data:
-        passed = tactics_data.get("passed")
-        total = tactics_data.get("total")
+        tsum = tactics_data.get("summary") if isinstance(tactics_data.get("summary"), dict) else tactics_data
+        passed = tsum.get("passed")
+        total = tsum.get("total")
         if passed is not None and total:
-            gates["tactics_suite_100pct"] = (passed == total)
+            gates["tactics_suite_100pct"] = (passed == total and tsum.get("total_wire_rejects", 0) == 0)
     return gates
 
 
@@ -296,6 +488,7 @@ def main():
     ap = argparse.ArgumentParser(description="Compare Mothman gauntlet scores against Pro Replay Corpus baselines.")
     ap.add_argument("--current", required=True, help="Current wave score JSON from score-replay-batch.rkt")
     ap.add_argument("--baseline", default=None, help="Optional baseline/previous wave score JSON for delta")
+    ap.add_argument("--hwm", default=None, help="Optional High-Water Mark score JSON for side-by-side HWM delta")
     ap.add_argument("--pro-baselines", default=DEFAULT_PRO_BASELINES, help="Path to pro_baselines.json")
     ap.add_argument("--tactics", default=None, help="Optional tactics scorecard JSON")
     ap.add_argument("--out-json", default=None, help="Optional output JSON path")
@@ -309,6 +502,9 @@ def main():
     base_raw, base_rows = (None, [])
     if args.baseline:
         base_raw, base_rows = load_score_json(args.baseline, args.exclude_opp_crash)
+    hwm_raw, hwm_rows = (None, [])
+    if args.hwm:
+        hwm_raw, hwm_rows = load_score_json(args.hwm, args.exclude_opp_crash)
 
     tactics_data = None
     if args.tactics and os.path.exists(args.tactics):
@@ -317,13 +513,14 @@ def main():
 
     cur_all = summarize_slice(cur_rows)
     base_all = summarize_slice(base_rows) if base_rows else None
+    hwm_all = summarize_slice(hwm_rows) if hwm_rows else None
 
     by_race = {}
     for r in RACES:
         cr = summarize_slice([m for m in cur_rows if m["our_race"] == r])
         br = summarize_slice([m for m in base_rows if m["our_race"] == r]) if base_rows else None
         pr = pro["by_race"].get(r, {})
-        gaps = compare_vs_pro(cr, pr)
+        gaps = compare_vs_pro(cr, pr, race=r)
         by_race[r] = {"current": cr, "baseline": br, "pro": pr, "gaps_vs_pro": gaps}
 
     by_matchup = {}
@@ -333,7 +530,8 @@ def main():
             continue
         bm = summarize_slice([m for m in base_rows if m["matchup"] == mu]) if base_rows else None
         pm = pro["by_matchup"].get(mu, {})
-        gaps = compare_vs_pro(cm, pm)
+        race_for_mu = {"P": "Protoss", "T": "Terran", "Z": "Zerg"}.get(mu[0])
+        gaps = compare_vs_pro(cm, pm, race=race_for_mu)
         by_matchup[mu] = {"current": cm, "baseline": bm, "pro": pm, "gaps_vs_pro": gaps}
 
     gates = evaluate_promotion_gates(cur_all, {r: by_race[r]["current"] for r in RACES}, tactics_data)
@@ -343,13 +541,17 @@ def main():
     )
     gates["ready_to_promote"] = all(gates.values())
 
+    paired_diff = compute_paired_diff(cur_rows, base_rows)
+
     report = {
         "current_path": os.path.abspath(args.current),
         "baseline_path": os.path.abspath(args.baseline) if args.baseline else None,
+        "hwm_path": os.path.abspath(args.hwm) if args.hwm else None,
         "exclude_opp_crash": args.exclude_opp_crash,
-        "overall": {"current": cur_all, "baseline": base_all},
+        "overall": {"current": cur_all, "baseline": base_all, "hwm": hwm_all},
         "by_race": by_race,
         "by_matchup": by_matchup,
+        "paired_diff": paired_diff,
         "tactics": tactics_data,
         "promotion_gates": gates,
     }
@@ -383,6 +585,43 @@ def main():
             f"| {', '.join(g.get('divergence_flags', [])) or 'OK'} |"
         )
 
+    print("\n### Pro-Corpus v2 Curves: Production, ArmyVal, Scouting, Opening BO & Upgrades (`Bot / Pro`)")
+    print("| Race | ProdFac 4/6/8m (Bot / Pro) | ArmyVal 4/6/8m (Bot / Pro) | Scout 1st (Unit / Seen@) | Top BO vs Pro #1 | Key Upgrades (Bot / Pro) |")
+    print("|---|---|---|---|---|---|")
+    for r in RACES:
+        c = by_race[r]["current"]
+        p = by_race[r]["pro"]
+        if c["n"] == 0:
+            continue
+        mc = p.get("minute_curves") or {}
+        m4, m6, m8 = mc.get("m4") or {}, mc.get("m6") or {}, mc.get("m8") or {}
+        prod_bot = f"{fmt(c.get('prod_cnt_4m_med'),'',0)}/{fmt(c.get('prod_cnt_6m_med'),'',0)}/{fmt(c.get('prod_cnt_8m_med'),'',0)}"
+        prod_pro = f"{fmt(safe_num(m4.get('prod_cnt_med')),'',0)}/{fmt(safe_num(m6.get('prod_cnt_med')),'',0)}/{fmt(safe_num(m8.get('prod_cnt_med')),'',0)}"
+        if r == "Zerg":
+            prod_bot += f" (Q4:{fmt(c.get('queens_4m_med'),'',0)})"
+            prod_pro += f" (Q4:{fmt(safe_num(m4.get('queens_med')),'',0)})"
+        av_bot = f"{fmt(c.get('army_val_4m_med'),'',0)}/{fmt(c.get('army_val_6m_med'),'',0)}/{fmt(c.get('army_val_8m_med'),'',0)}"
+        av_pro = f"{fmt(safe_num(m4.get('army_val_med')),'',0)}/{fmt(safe_num(m6.get('army_val_med')),'',0)}/{fmt(safe_num(m8.get('army_val_med')),'',0)}"
+        su_str = ", ".join(f"{u}:{cnt}" for u, cnt in (c.get("scout_unit_counts") or [])[:2]) or "-"
+        seen_str = fmt(c.get("enemy_first_seen_sec_med"), "s", 0)
+        pro_sc = (p.get("scouting") or {}).get("first_scout_top_units") or []
+        pro_sc_top = pro_sc[0] if pro_sc else "-"
+        bo_top = c["top_opening_sequences"][0][0] if c.get("top_opening_sequences") else "-"
+        pro_bo_top = (p.get("top_opening_sequences") or ["-"])[0].split(" (")[0]
+        bo_match = "MATCH" if bo_top == pro_bo_top else "DRIFT"
+        up_b = c.get("upgrades_med") or {}
+        up_p = p.get("tech_and_upgrade_sec_med") or {}
+        if r == "Protoss":
+            up_str = f"WG {fmt(up_b.get('warpgate_sec'),'s',0)}/{fmt(safe_num(up_p.get('warp_gate')),'s',0)}, +1A {fmt(up_b.get('plus1_atk_sec'),'s',0)}/{fmt(safe_num(up_p.get('plus1_atk')),'s',0)}"
+        elif r == "Terran":
+            up_str = f"Stim {fmt(up_b.get('stim_sec'),'s',0)}/{fmt(safe_num(up_p.get('stimpack')),'s',0)}, CS {fmt(up_b.get('combat_shield_sec'),'s',0)}/{fmt(safe_num(up_p.get('combat_shield')),'s',0)}"
+        else:
+            up_str = f"LingSpd {fmt(up_b.get('ling_speed_sec'),'s',0)}/{fmt(safe_num(up_p.get('ling_speed')),'s',0)}, +1A {fmt(up_b.get('plus1_atk_sec'),'s',0)}/{fmt(safe_num(up_p.get('plus1_atk')),'s',0)}"
+        print(
+            f"| **{r}** | {prod_bot} / {prod_pro} | {av_bot} / {av_pro} "
+            f"| {su_str} ({seen_str}) vs {pro_sc_top} | `{bo_top}` ({bo_match}) | {up_str} |"
+        )
+
     print("\n### Matchup Breakdown vs Pro Medians")
     print("| Matchup | n | W-L-T | Trade Agg | W@4m (Bot/Pro) | W@6m (Bot/Pro) | Nat@ (Bot/Pro) | Tech1@ (Bot/Pro) | PkArmy | SupBlk% |")
     print("|---|---:|---|---:|---:|---:|---:|---:|---:|---:|")
@@ -396,6 +635,46 @@ def main():
             f"| {fmt(c['nat_sec_med'],'s',0)}/{fmt(p.get('nat_sec'),'s',0)} "
             f"| {fmt(t1_bot,'s',0)}/{fmt(p.get('tech1_sec'),'s',0)} "
             f"| {fmt(c['pk_army_avg'],'',0)} | {fmt(c['sup_blk_avg'],'%')} |"
+        )
+
+    if paired_diff:
+        flips = [p for p in paired_diff if p["flipped"]]
+        if flips:
+            print("\n### Paired `(our_bot, opp_bot)` Result Flips vs Baseline")
+            print("| Match | MU | Result | Trade | PkArmy (Ours/Opp) | SupBlk% | Anomalies |")
+            print("|---|---|---|---:|---:|---:|---|")
+            for p in flips:
+                print(
+                    f"| `{p['our_bot']}` vs `{p['opp_bot']}` | {p['matchup']} "
+                    f"| {p['base_result'][0].upper()}->{p['cur_result'][0].upper()} "
+                    f"| {fmt(p['base_trade'],'x',2)}->{fmt(p['cur_trade'],'x',2)} "
+                    f"| {fmt(p['base_pk_army'],'',0)}->{fmt(p['cur_pk_army'],'',0)}/{fmt(p['opp_pk_army'],'',0)} "
+                    f"| {fmt(p['base_sup_blk'],'%')}->{fmt(p['cur_sup_blk'],'%')} "
+                    f"| {', '.join(p['cur_anomalies']) or '-'} |"
+                )
+
+    outliers = cur_all.get("step_outliers_gt_500ms") or []
+    if outliers:
+        print(f"\n### Latency Outliers (`step_max > 500ms`: {len(outliers)}/{cur_all['n']})")
+        for o in outliers:
+            print(f"- `#{o['match_id']}` `{o['our_bot']}` vs `{o['opp_bot']}`: **`{o['step_max']}ms`**")
+
+    if cur_all.get("endgame_home_stall_max_sec") is not None or cur_all.get("total_own_base_retreat_frames") is not None:
+        print(
+            f"\n### Stall & Own-Base Retreat Watch (`W7-LOOP-2`): "
+            f"`endgame_home_stall >= 90s` = **{cur_all.get('endgame_home_stall_count', 0)}/{cur_all['n']}** "
+            f"(max `{fmt(cur_all.get('endgame_home_stall_max_sec'),'s')}`) | "
+            f"`own_base_retreat >= 440f` = **{cur_all.get('own_base_retreat_matches', 0)}/{cur_all['n']}** "
+            f"(total `{cur_all.get('total_own_base_retreat_frames', 0):,}f`)"
+        )
+
+    if hwm_all:
+        print(
+            f"\n### High-Water Mark Check: Current `{cur_all['wins']}W-{cur_all['losses']}L-{cur_all['ties']}T` "
+            f"(`{cur_all['wr_pct']:.1f}%`, Trade `{fmt(cur_all['trade_agg'],'x',2)}`/`{fmt(cur_all['trade_med'],'x',2)}`, "
+            f"SupBlk `{fmt(cur_all['sup_blk_avg'],'%')}`) vs HWM `{hwm_all['wins']}W-{hwm_all['losses']}L-{hwm_all['ties']}T` "
+            f"(`{hwm_all['wr_pct']:.1f}%`, Trade `{fmt(hwm_all['trade_agg'],'x',2)}`/`{fmt(hwm_all['trade_med'],'x',2)}`, "
+            f"SupBlk `{fmt(hwm_all['sup_blk_avg'],'%')}`) -> **{'NEW HWM!' if (cur_all['wins'] > hwm_all['wins'] or (cur_all['wins'] == hwm_all['wins'] and (cur_all['losses'] < hwm_all['losses'] or (cur_all['losses'] == hwm_all['losses'] and cur_all['trade_agg'] >= hwm_all['trade_agg'])))) else 'BELOW HWM (hold commit)'}**"
         )
 
     passed_gates = sum(1 for k, v in gates.items() if k != "ready_to_promote" and v)

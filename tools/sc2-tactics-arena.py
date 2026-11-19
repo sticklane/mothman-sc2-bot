@@ -47,6 +47,7 @@ DEFAULT_MAP = "AcropolisAIE.SC2Map"
 UNIT_IDS: dict[str, int] = {
     # Terran
     "marine": 48,
+    "reaper": 49,
     "marauder": 51,
     "medivac": 54,
     "siege-tank": 33,
@@ -92,6 +93,7 @@ UNIT_IDS: dict[str, int] = {
 # Approximate mineral + 1.5*gas weighted combat value per unit
 UNIT_VALUES: dict[int, float] = {
     48: 50.0,     # marine
+    49: 125.0,    # reaper
     51: 137.5,    # marauder
     54: 250.0,    # medivac
     33: 337.5,    # siege-tank
@@ -195,7 +197,16 @@ DEFAULT_SKIRMISHES: list[SkirmishSpec] = [
         p2_units=[("zergling", 10, 4.0, 0.0), ("hydralisk", 8, 5.2, 0.0), ("infestor", 2, 5.8, 0.0)],
         max_loops=336,
     ),
-    # --- Terran (5 real-SC2 combat physics scenarios) ---
+    SkirmishSpec(
+        id="sc2-real-p06-early-12pool-zealot-adept-vs-lings",
+        our_race="Protoss",
+        enemy_race="Zerg",
+        description="Real SC2 (W5-EARLY-1): 2 Zealots + 2 Adepts + 1 Stalker defending vs 14 early 12-Pool Zerglings",
+        p1_units=[("zealot", 2, -3.5, 0.0), ("adept", 2, -4.5, 0.0), ("stalker", 1, -5.5, 0.0)],
+        p2_units=[("zergling", 14, 4.2, 0.0)],
+        max_loops=336,
+    ),
+    # --- Terran (6 real-SC2 combat physics scenarios) ---
     SkirmishSpec(
         id="sc2-real-t01-bio-medivac-vs-zealot-stalker",
         our_race="Terran",
@@ -241,7 +252,16 @@ DEFAULT_SKIRMISHES: list[SkirmishSpec] = [
         p2_units=[("zergling", 16, 4.2, 0.0), ("baneling", 6, 4.8, 0.0)],
         max_loops=336,
     ),
-    # --- Zerg (5 real-SC2 combat physics scenarios) ---
+    SkirmishSpec(
+        id="sc2-real-t06-early-12pool-marines-reaper-vs-lings",
+        our_race="Terran",
+        enemy_race="Zerg",
+        description="Real SC2 (W5-EARLY-1): 6 Marines + 1 Reaper defending vs 14 early 12-Pool Zerglings",
+        p1_units=[("marine", 6, -4.5, 0.0), ("reaper", 1, -3.8, 0.0)],
+        p2_units=[("zergling", 14, 4.2, 0.0)],
+        max_loops=336,
+    ),
+    # --- Zerg (6 real-SC2 combat physics scenarios) ---
     SkirmishSpec(
         id="sc2-real-z01-lings-vs-marines-open",
         our_race="Zerg",
@@ -285,6 +305,15 @@ DEFAULT_SKIRMISHES: list[SkirmishSpec] = [
         description="Real SC2: 8 Hydralisks + 4 Roaches vs 3 Void Rays + 4 Zealots (ground-vs-air target filtering + anti-air focus fire)",
         p1_units=[("roach", 4, -3.5, 0.0), ("hydralisk", 8, -5.0, 0.0)],
         p2_units=[("zealot", 4, 4.0, 0.0), ("void-ray", 3, 5.0, 0.0)],
+        max_loops=336,
+    ),
+    SkirmishSpec(
+        id="sc2-real-z06-early-12pool-queen-lings-vs-lings",
+        our_race="Zerg",
+        enemy_race="Zerg",
+        description="Real SC2 (W5-EARLY-1): 2 Queens + 10 Zerglings defending vs 14 early 12-Pool Zerglings (guards W5-TAC-1/2 spotter & queen recall)",
+        p1_units=[("zergling", 10, -3.8, 0.0), ("queen", 2, -5.0, 0.0)],
+        p2_units=[("zergling", 14, 4.2, 0.0)],
         max_loops=336,
     ),
 ]
@@ -355,6 +384,24 @@ def run_host_driver(args: argparse.Namespace) -> int:
         agg_trade = round(tot_p2_lost / max(1.0, tot_p1_lost), 2) if tot_p1_lost > 0 else 99.0
         tot_atk = sum(int(s.get("mothman_attack_unit_cmds", 0)) for s in all_scens)
         tot_mov = sum(int(s.get("mothman_move_unit_cmds", 0)) for s in all_scens)
+        tot_spl = sum(int(s.get("mothman_spell_unit_cmds", 0)) for s in all_scens)
+        by_race: dict[str, Any] = {}
+        for r in races:
+            rs = [s for s in all_scens if s.get("race") == r]
+            r_p1 = sum(float(s.get("p1_lost_val", 0.0)) for s in rs)
+            r_p2 = sum(float(s.get("p2_lost_val", 0.0)) for s in rs)
+            r_atk = sum(int(s.get("mothman_attack_unit_cmds", 0)) for s in rs)
+            r_mov = sum(int(s.get("mothman_move_unit_cmds", 0)) for s in rs)
+            r_spl = sum(int(s.get("mothman_spell_unit_cmds", 0)) for s in rs)
+            by_race[r] = {
+                "total": len(rs),
+                "mothman_wins": sum(1 for s in rs if s.get("winner") == "Mothman"),
+                "agg_trade_ratio": round(r_p2 / max(1.0, r_p1), 2) if r_p1 > 0 else 99.0,
+                "attack_unit_cmds": r_atk,
+                "move_unit_cmds": r_mov,
+                "spell_unit_cmds": r_spl,
+                "am_ratio": round(r_atk / max(1, r_mov), 2),
+            }
         report = {
             "mode": "duel",
             "engine": "SC2_x64_Base75689",
@@ -368,11 +415,69 @@ def run_host_driver(args: argparse.Namespace) -> int:
                 "total_p2_lost_val": round(tot_p2_lost, 1),
                 "total_attack_unit_cmds": tot_atk,
                 "total_move_unit_cmds": tot_mov,
+                "total_spell_unit_cmds": tot_spl,
+                "am_ratio": round(tot_atk / max(1, tot_mov), 2),
+                "by_race": by_race,
             },
             "scenarios": all_scens,
         }
     else:
         report = run_single_container(args, args.race)
+
+    if args.compare:
+        base_path = Path(args.compare)
+        if base_path.is_file():
+            base_doc = json.loads(base_path.read_text(encoding="utf-8"))
+            base_by_id = {s["id"]: s for s in base_doc.get("scenarios", []) if "id" in s}
+            cur_by_id = {s["id"]: s for s in report.get("scenarios", []) if "id" in s}
+            common_ids = [sid for sid in cur_by_id if sid in base_by_id]
+            c_wins_base = sum(1 for sid in common_ids if base_by_id[sid].get("winner") == "Mothman")
+            c_wins_cur = sum(1 for sid in common_ids if cur_by_id[sid].get("winner") == "Mothman")
+            b_p1 = sum(float(base_by_id[sid].get("p1_lost_val", 0.0)) for sid in common_ids)
+            b_p2 = sum(float(base_by_id[sid].get("p2_lost_val", 0.0)) for sid in common_ids)
+            c_p1 = sum(float(cur_by_id[sid].get("p1_lost_val", 0.0)) for sid in common_ids)
+            c_p2 = sum(float(cur_by_id[sid].get("p2_lost_val", 0.0)) for sid in common_ids)
+            b_agg = round(b_p2 / max(1.0, b_p1), 2) if b_p1 > 0 else 99.0
+            c_agg = round(c_p2 / max(1.0, c_p1), 2) if c_p1 > 0 else 99.0
+            b_atk = sum(int(base_by_id[sid].get("mothman_attack_unit_cmds", 0)) for sid in common_ids)
+            b_mov = sum(int(base_by_id[sid].get("mothman_move_unit_cmds", 0)) for sid in common_ids)
+            c_atk = sum(int(cur_by_id[sid].get("mothman_attack_unit_cmds", 0)) for sid in common_ids)
+            c_mov = sum(int(cur_by_id[sid].get("mothman_move_unit_cmds", 0)) for sid in common_ids)
+            b_am = round(b_atk / max(1, b_mov), 2)
+            c_am = round(c_atk / max(1, c_mov), 2)
+            per_scen = []
+            for sid in common_ids:
+                bs, cs = base_by_id[sid], cur_by_id[sid]
+                bt = float(bs.get("trade_ratio", 0.0))
+                ct = float(cs.get("trade_ratio", 0.0))
+                per_scen.append({
+                    "id": sid,
+                    "prev_winner": bs.get("winner"),
+                    "winner": cs.get("winner"),
+                    "prev_trade": bt,
+                    "trade": ct,
+                    "trade_delta": round(ct - bt, 2),
+                    "prev_atk": int(bs.get("mothman_attack_unit_cmds", 0)),
+                    "atk": int(cs.get("mothman_attack_unit_cmds", 0)),
+                    "prev_mov": int(bs.get("mothman_move_unit_cmds", 0)),
+                    "mov": int(cs.get("mothman_move_unit_cmds", 0)),
+                })
+            report["comparison"] = {
+                "baseline_path": str(base_path),
+                "common_count": len(common_ids),
+                "prev_wins": c_wins_base,
+                "cur_wins": c_wins_cur,
+                "wins_delta": c_wins_cur - c_wins_base,
+                "prev_agg_trade": b_agg,
+                "cur_agg_trade": c_agg,
+                "agg_trade_delta": round(c_agg - b_agg, 2),
+                "prev_am_ratio": b_am,
+                "cur_am_ratio": c_am,
+                "am_ratio_delta": round(c_am - b_am, 2),
+                "flipped_to_win": [x["id"] for x in per_scen if x["prev_winner"] != "Mothman" and x["winner"] == "Mothman"],
+                "flipped_from_win": [x["id"] for x in per_scen if x["prev_winner"] == "Mothman" and x["winner"] != "Mothman"],
+                "by_scenario": per_scen,
+            }
 
     if args.out:
         out_path = Path(args.out)
@@ -526,6 +631,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         "attack_cmds": 0,
                         "move_cmds": 0,
                         "spell_cmds": 0,
+                        "ability_counts": {},
                         "p1_start_cnt": 0,
                         "p2_start_cnt": 0,
                         "p1_start_types": {},
@@ -620,6 +726,10 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             "mothman_attack_unit_cmds": dstate["attack_cmds"],
                             "mothman_move_unit_cmds": dstate["move_cmds"],
                             "mothman_spell_unit_cmds": dstate["spell_cmds"],
+                            "mothman_ability_breakdown": dict(
+                                sorted(dstate["ability_counts"].items(), key=lambda kv: -kv[1])[:10]
+                            ),
+                            "first_action_loop_offset": dstate.get("first_action_loop_offset", -1),
                             "loops_simulated": cur_loop - dstate["phase_start_loop"],
                             "wall_ms": round((time.monotonic() - dstate["round_t0"]) * 1000.0, 1),
                         })
@@ -638,12 +748,18 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                     for a in req.action.actions:
                                         if a.HasField("action_raw") and a.action_raw.HasField("unit_command"):
                                             ab = a.action_raw.unit_command.ability_id
+                                            n_tags = len(a.action_raw.unit_command.unit_tags)
+                                            dstate["ability_counts"][str(ab)] = dstate["ability_counts"].get(str(ab), 0) + n_tags
                                             if ab == 23:
-                                                dstate["attack_cmds"] += len(a.action_raw.unit_command.unit_tags)
+                                                dstate["attack_cmds"] += n_tags
+                                                if dstate.get("first_action_loop_offset", -1) < 0:
+                                                    dstate["first_action_loop_offset"] = max(0, dstate.get("last_obs_loop", dstate["phase_start_loop"]) - dstate["phase_start_loop"])
                                             elif ab == 16:
-                                                dstate["move_cmds"] += len(a.action_raw.unit_command.unit_tags)
+                                                dstate["move_cmds"] += n_tags
                                             elif ab not in (298, 299, 3666):
-                                                dstate["spell_cmds"] += len(a.action_raw.unit_command.unit_tags)
+                                                dstate["spell_cmds"] += n_tags
+                                                if dstate.get("first_action_loop_offset", -1) < 0:
+                                                    dstate["first_action_loop_offset"] = max(0, dstate.get("last_obs_loop", dstate["phase_start_loop"]) - dstate["phase_start_loop"])
 
                                 if req.HasField("join_game"):
                                     dstate["p1_joined"].set()
@@ -658,6 +774,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 if req.HasField("observation") and resp.HasField("observation"):
                                     obs = resp.observation.observation
                                     gl = obs.game_loop
+                                    dstate["last_obs_loop"] = gl
                                     cx, cy = dstate["arena_cx"], dstate["arena_cy"]
 
                                     if dstate["phase"] == "wait_init" and gl >= 4:
@@ -711,6 +828,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         dstate["attack_cmds"] = 0
                                         dstate["move_cmds"] = 0
                                         dstate["spell_cmds"] = 0
+                                        dstate["ability_counts"] = {}
+                                        dstate["first_action_loop_offset"] = -1
                                         dstate["p1_start_cnt"] = 0
                                         dstate["p2_start_cnt"] = 0
                                         dstate["p1_start_val"] = 0.0
@@ -960,6 +1079,7 @@ def main() -> int:
     parser.add_argument("--maps-dir", default=str(DEFAULT_MAPS_DIR))
     parser.add_argument("--arena-dir", default=str(DEFAULT_ARENA_DIR))
     parser.add_argument("--out", default="")
+    parser.add_argument("--compare", default="", help="Optional baseline JSON path to emit A/B delta comparison")
     args = parser.parse_args()
     if args.in_container:
         return asyncio.run(run_in_container(args))

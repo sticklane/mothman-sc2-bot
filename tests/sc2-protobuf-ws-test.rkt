@@ -1885,6 +1885,480 @@
   (check-true (format "w4-p1-1-pvz-choke-~a-under-150ms" cw)
               (< dt 150.0)))
 
+;; -----------------------------------------------------------------------------
+;; Wave 5 Tests: W5-P0-1a-wire (Late-Zerg translate_ms < 4.5ms, Creep Tumor
+;;               <=1/step + <=1 RPC/8 loops + <=16 fan, skip enemy burrowed tumors,
+;;               and Lair/Hive safe-idle preference + anti-Queen-starvation)
+;; -----------------------------------------------------------------------------
+(printf "[Wave 5] Testing W5-P0-1a-wire Creep Tumor throttling, late-Zerg translate_ms, & Lair morph unblock...\n")
+
+;; 1. Creep Tumor <= 1 placement/step (offline), <= 1 RPC per 8 loops, <= 16 fan batch, and enemy tumor non-blocking
+(hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
+(set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
+(let ()
+  (define hatch-w5 (sc2-unit 1 1 9500 86 1 (sc2-point3d 32.5 32.5 8.0) 0.0 2.75 1.0 0 #f #t #f
+                             1500.0 1500.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+  (define tumors-w5
+    (for/list ([i (in-range 10)])
+      (sc2-unit 1 1 (+ 9510 i) 137 1 (sc2-point3d 40.0 (+ 34.0 (* 4.0 i)) 8.0) 0.0 0.5 1.0 0 #f #t #f
+                50.0 50.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0)))
+  (define enemy-tumor-on-spot
+    (sc2-unit 1 4 9599 137 2 (sc2-point3d 48.5 34.5 8.0) 0.0 0.5 1.0 0 #f #t #f
+              50.0 50.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+  (define tumor-acts-10
+    (for/list ([i (in-range 10)])
+      (list 'cast (+ 9510 i) 'spread-creep-tumor 48.5 (+ 34.5 (* 4.0 i)))))
+  ;; Offline (no WS): 10 tumors in 1 step -> throttled to <= 1 spread command AND ignores enemy burrowed tumor!
+  (define off-cmds
+    (translate-bot-actions->sc2-raw-commands
+     tumor-acts-10
+     (make-test-obs 5900 500 200 (append (list hatch-w5 enemy-tumor-on-spot) tumors-w5))
+     #:game-info w3-ginfo))
+  (define off-spreads
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1733))) off-cmds))
+  (check-eqv "w5-p0-1a-offline-10-tumors-throttled-to-1-per-step" (length off-spreads) 1)
+  (check-true "w5-p0-1a-enemy-burrowed-tumor-does-not-block-target-spot"
+              (and (pair? off-spreads)
+                   (equal? (sc2-raw-unit-command-target-pos (first off-spreads)) (sc2-point2d 48.5 34.5))))
+  ;; Active WS: <= 1 RPC per 8 game loops AND fan batch size <= 16
+  (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
+  (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
+  (let-values ([(ws rpc-cnt bsizes cleanup!)
+                (w3-start-mock-placement-ws (lambda (_rpc _idx _n) 1))])
+    (define obs-6000 (make-test-obs 6000 500 200 (append (list hatch-w5) tumors-w5)))
+    (define obs-6004 (make-test-obs 6004 500 200 (append (list hatch-w5) tumors-w5)))
+    (define obs-6008 (make-test-obs 6008 500 200 (append (list hatch-w5) tumors-w5)))
+    (void (translate-bot-actions->sc2-raw-commands '((cast 9511 spread-creep-tumor 48.5 38.5)) obs-6000 #:ws-conn ws #:game-info w3-ginfo))
+    (check-eqv "w5-p0-1a-tumor-rpc-fires-at-loop-6000" (unbox rpc-cnt) 1)
+    (check-true "w5-p0-1a-tumor-fan-batch-le-16" (and (pair? (unbox bsizes)) (<= (first (unbox bsizes)) 16)))
+    ;; 4 loops later (< 8): DIFFERENT tumor off cooldown must NOT fire RPC!
+    (void (translate-bot-actions->sc2-raw-commands '((cast 9512 spread-creep-tumor 48.5 42.5)) obs-6004 #:ws-conn ws #:game-info w3-ginfo))
+    (check-eqv "w5-p0-1a-tumor-rpc-throttled-within-8-loops" (unbox rpc-cnt) 1)
+    ;; 8 loops later (>= 8): RPC window reopens!
+    (void (translate-bot-actions->sc2-raw-commands '((cast 9512 spread-creep-tumor 48.5 42.5)) obs-6008 #:ws-conn ws #:game-info w3-ginfo))
+    (check-eqv "w5-p0-1a-tumor-rpc-allowed-after-8-loops" (unbox rpc-cnt) 2)
+    (cleanup!)))
+
+;; 2. Late-Zerg translate_ms benchmark (< 4.5ms/step on 135 actions + 25 tumors + 300 enemy burrowed tumors)
+(let ()
+  (define w5-allies
+    (append
+     (for/list ([i (in-range 6)])
+       (sc2-unit 1 1 (+ 9600 i) 86 1 (sc2-point3d (+ 24.5 (* 18.0 (remainder i 3))) (+ 24.5 (* 24.0 (quotient i 3))) 8.0)
+                 0.0 2.75 1.0 0 #f #t #f 1500.0 1500.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+     (for/list ([i (in-range 50)]) (make-test-unit (+ 9620 i) 104 1 (+ 26.0 (remainder i 10)) (+ 25.0 (quotient i 10)) #:hp 40.0))
+     (for/list ([i (in-range 110)]) (make-test-unit (+ 9700 i) 105 1 (+ 60.0 (* 0.5 (remainder i 20))) (+ 60.0 (* 0.5 (quotient i 20))) #:hp 35.0))
+     (for/list ([i (in-range 25)])
+       (sc2-unit 1 1 (+ 9820 i) 137 1 (sc2-point3d (+ 35.0 (* 3.0 (remainder i 10))) (+ 35.0 (* 3.0 (quotient i 10))) 8.0)
+                 0.0 0.5 1.0 0 #f #t #f 50.0 50.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))))
+  (define w5-enemies
+    (append
+     (for/list ([i (in-range 300)])
+       (sc2-unit 1 4 (+ 29000 i) 137 2 (sc2-point3d (+ 70.0 (* 1.5 (remainder i 20))) (+ 70.0 (* 1.5 (quotient i 20))) 8.0)
+                 0.0 0.5 1.0 0 #f #t #f 50.0 50.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+     (for/list ([i (in-range 30)]) (make-test-unit (+ 29400 i) 105 4 (+ 85.0 (* 0.5 (remainder i 10))) (+ 85.0 (* 0.5 (quotient i 10))) #:hp 35.0))))
+  (define w5-acts
+    (append
+     (for/list ([i (in-range 25)]) (list 'cast (+ 9820 i) 'spread-creep-tumor (+ 43.0 (* 3.0 (remainder i 10))) (+ 43.0 (* 3.0 (quotient i 10)))))
+     (for/list ([i (in-range 110)]) (list 'attack-unit (+ 9700 i) (+ 29400 (remainder i 30))))))
+  (define w5-units (append w5-allies w5-enemies))
+  (void (translate-bot-actions->sc2-raw-commands w5-acts (make-test-obs 22000 1200 400 w5-units) #:game-info w3-ginfo #:enemy-base '(100.0 100.0)))
+  (define t0-w5 (current-inexact-milliseconds))
+  (for ([k (in-range 10)])
+    (void (translate-bot-actions->sc2-raw-commands w5-acts (make-test-obs (+ 22004 (* k 4)) 1200 400 w5-units) #:game-info w3-ginfo #:enemy-base '(100.0 100.0))))
+  (define avg-w5-ms (/ (- (current-inexact-milliseconds) t0-w5) 10.0))
+  (check-true (format "w5-p0-1a-late-zerg-translate-under-4.5ms (~a ms)" (real->decimal-string avg-w5-ms 2))
+              (< avg-w5-ms 4.5)))
+
+;; 3. Lair/Hive morph prefers safe idle Hatchery closest to home AND prevents Queen training from starving Lair
+(set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP #f)
+(let ()
+  (define (mk-hatch tag x y [ords '()])
+    (sc2-unit 1 1 tag 86 1 (sc2-point3d x y 8.0) 0.0 2.75 1.0 0 #f #t #f
+              1500.0 1500.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f ords 0 '() 0 0 0.0 0 0 0 0))
+  (define (mk-lair tag x y)
+    (sc2-unit 1 1 tag 100 1 (sc2-point3d x y 8.0) 0.0 2.75 1.0 0 #f #t #f
+              2000.0 2000.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+  ;; A. Main idle Hatchery (9851 at 32.5,32.5) preferred over exposed 3rd (9852 at 80.5,80.5) even when 3rd is first in list
+  ;;    Wait: home-x/y defaults to first townhall if SC2-HOME-BASE-ANCHOR unset; initialize anchor with main first!
+  (void (sc2-observation->runtime-obs-hash (make-test-obs 100 200 100 (list (mk-hatch 9851 32.5 32.5)))))
+  (define cmds-lair-main
+    (translate-bot-actions->sc2-raw-commands
+     '((build lair))
+     (make-test-obs 7000 300 200 (list (mk-hatch 9852 80.5 80.5) (mk-hatch 9851 32.5 32.5)))))
+  (define lair-cmd-a (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1216))) cmds-lair-main))
+  (check-eqv "w5-p0-1a-lair-prefers-safe-idle-main-hatch"
+             (and lair-cmd-a (sc2-raw-unit-command-unit-tags lair-cmd-a))
+             '(9851))
+  ;; B. Main Hatchery busy training Queen (1632) -> Lair immediately picks idle natural Hatchery (9852)
+  (define cmds-lair-idle-nat
+    (translate-bot-actions->sc2-raw-commands
+     '((build lair))
+     (make-test-obs 7040 300 200 (list (mk-hatch 9851 32.5 32.5 (list (sc2-unit-order 1632 #f 0 0.5)))
+                                       (mk-hatch 9852 54.5 32.5)))))
+  (define lair-cmd-b (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1216))) cmds-lair-idle-nat))
+  (check-eqv "w5-p0-1a-lair-picks-idle-hatch-when-main-busy"
+             (and lair-cmd-b (sc2-raw-unit-command-unit-tags lair-cmd-b))
+             '(9852))
+  ;; C. Single Hatchery busy when (build lair) requested -> sets Lair reservation -> 20 loops later when idle,
+  ;;    (train queen) MUST NOT steal the last idle Hatchery!
+  (set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP #f)
+  (void (translate-bot-actions->sc2-raw-commands
+         '((build lair))
+         (make-test-obs 7100 300 200 (list (mk-hatch 9851 32.5 32.5 (list (sc2-unit-order 1632 #f 0 0.9)))))))
+  (define cmds-q-blocked
+    (translate-bot-actions->sc2-raw-commands
+     '((train queen))
+     (make-test-obs 7120 300 200 (list (mk-hatch 9851 32.5 32.5)))))
+  (check-true "w5-p0-1a-queen-does-not-starve-last-idle-hatch-while-lair-reserved"
+              (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1632)))
+                          cmds-q-blocked)))
+  ;; D. With 2 idle Hatcheries while Lair is reserved, (train queen) trains on the non-main Hatchery (9852), keeping main (9851) free!
+  (define cmds-q-2hatch
+    (translate-bot-actions->sc2-raw-commands
+     '((train queen))
+     (make-test-obs 7124 300 200 (list (mk-hatch 9851 32.5 32.5) (mk-hatch 9852 54.5 32.5)))))
+  (define q-cmd-d (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1632))) cmds-q-2hatch))
+  (check-eqv "w5-p0-1a-queen-uses-second-hatch-keeping-main-for-lair"
+             (and q-cmd-d (sc2-raw-unit-command-unit-tags q-cmd-d))
+             '(9852))
+  ;; E. Once Lair exists, reservation clears and (train queen) resumes freely!
+  (define cmds-q-after-lair
+    (translate-bot-actions->sc2-raw-commands
+     '((train queen))
+     (make-test-obs 7128 300 200 (list (mk-lair 9851 32.5 32.5)))))
+  (check-true "w5-p0-1a-queen-resumes-once-lair-exists"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1632)))
+                     cmds-q-after-lair)))
+(set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP #f)
+
+(printf "[Wave 6] Testing W6-TAC-2 Zerg combat morph proximity guard & W6-TAC-4-wire patrol-block-expansion reservation...\n")
+
+;; 1. W6-TAC-2: Zerg combat morphs (baneling/ravager/lurker/brood-lord) never morph within <= 10.0t of live enemy combat
+(let ()
+  (define (mk-u tag utype ally x y [ords '()])
+    (sc2-unit 1 ally tag utype 1 (sc2-point3d x y 8.0) 0.0 0.5 1.0 0 #f #f #f
+              100.0 100.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f ords 0 '() 0 0 0.0 0 0 0 0))
+  (define (mk-bldg tag utype ally x y)
+    (sc2-unit 1 ally tag utype 1 (sc2-point3d x y 8.0) 0.0 2.0 1.0 0 #f #t #f
+              500.0 500.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+  (define front-roach (mk-u 9901 110 1 80.0 80.0))     ;; 4.0t from Marine
+  (define front-ling  (mk-u 9902 105 1 81.5 80.0))     ;; 2.5t from Marine
+  (define front-hydra (mk-u 9903 107 1 78.0 80.0))     ;; 6.0t from Marine
+  (define front-corr  (mk-u 9904 112 1 76.0 80.0))     ;; 8.0t from Marine
+  (define enemy-marine (mk-u 29901 48 4 84.0 80.0))
+  (define front-allies (list front-roach front-ling front-hydra front-corr))
+  (check-eqv "w6-tac-2-frontline-ravager-blocked"
+             (select-producer-tags-for-unit 'ravager front-allies (list enemy-marine))
+             '())
+  (check-eqv "w6-tac-2-frontline-baneling-blocked"
+             (select-producer-tags-for-unit 'baneling front-allies (list enemy-marine))
+             '())
+  (check-eqv "w6-tac-2-frontline-lurker-blocked"
+             (select-producer-tags-for-unit 'lurker front-allies (list enemy-marine))
+             '())
+  (check-eqv "w6-tac-2-frontline-broodlord-blocked"
+             (select-producer-tags-for-unit 'brood-lord front-allies (list enemy-marine))
+             '())
+  ;; Full wire translation rejects train/morph/explicit-morph when all units are in combat
+  (define front-obs (make-test-obs 15000 500 500 (append front-allies (list enemy-marine))))
+  (define front-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((train ravager) (train baneling) (morph lurker) (morph 9901 ravager) (morph brood-lord))
+     front-obs))
+  (check-true "w6-tac-2-wire-emits-zero-midfight-cocoon-morphs"
+              (not (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (memv (sc2-raw-unit-command-ability-id c) '(80 2330 2332 1372))))
+                          front-cmds)))
+  ;; Rear units (> 10.0t) ARE allowed, sorted farthest-first, and explicit frontline morph falls back to rear unit!
+  (define mid-roach  (mk-u 9905 110 1 68.0 80.0))      ;; 16.0t from Marine
+  (define rear-roach (mk-u 9906 110 1 60.0 80.0))      ;; 24.0t from Marine
+  (check-eqv "w6-tac-2-prefers-farthest-safe-rear-roach"
+             (select-producer-tags-for-unit 'ravager (list front-roach mid-roach rear-roach) (list enemy-marine))
+             '(9906 9905))
+  (define fallback-obs
+    (make-test-obs 15010 500 500 (list front-roach mid-roach rear-roach enemy-marine)))
+  (define fallback-cmds
+    (translate-bot-actions->sc2-raw-commands '((morph 9901 ravager)) fallback-obs))
+  (define rav-cmd (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2330))) fallback-cmds))
+  (check-eqv "w6-tac-2-explicit-frontline-morph-falls-back-to-rear-roach"
+             (and rav-cmd (sc2-raw-unit-command-unit-tags rav-cmd))
+             '(9906))
+  ;; Defensive structure (Photon Cannon at 6t) blocks cocoon morph; passive Nexus/Overlord at 4t does NOT block!
+  (define enemy-cannon (mk-bldg 29902 66 4 86.0 80.0))
+  (define enemy-nexus  (mk-bldg 29903 59 4 84.0 80.0))
+  (define enemy-ovie   (mk-u    29904 106 4 84.0 80.0))
+  (check-eqv "w6-tac-2-defensive-structure-blocks-cocoon-morph"
+             (select-producer-tags-for-unit 'ravager (list front-roach) (list enemy-cannon))
+             '())
+  (check-eqv "w6-tac-2-passive-building-or-overlord-allows-morph"
+             (select-producer-tags-for-unit 'ravager (list front-roach) (list enemy-nexus enemy-ovie))
+             '(9901)))
+
+;; 2. W6-TAC-4-wire: patrol-block-expansion routes through claim-combat-tags-for-order! & runs post-combat
+(let ()
+  (define (mk-u tag utype ally x y [ords '()])
+    (sc2-unit 1 ally tag utype 1 (sc2-point3d x y 8.0) 0.0 0.625 1.0 0 #f #f #f
+              80.0 80.0 80.0 80.0 0.0 0.0 0 0 #f #f #f #t #f ords 0 '() 0 0 0.0 0 0 0 0))
+  (define (mk-min tag x y)
+    (sc2-unit 1 3 tag 341 1 (sc2-point3d x y 8.0) 0.0 1.0 1.0 0 #f #f #f
+              0.0 0.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+  (define stalker-fight (mk-u 9951 74 1 80.5 78.0))
+  (define enemy-marine  (mk-u 29951 48 4 85.0 78.0))
+  ;; Even when patrol-block-expansion appears BEFORE attack-unit, combat order claims 9951 and patrol is dropped!
+  (define cmds-combat-wins
+    (translate-bot-actions->sc2-raw-commands
+     '((patrol-block-expansion 9951 48.0 48.0)
+       (attack-unit 9951 29951))
+     (make-test-obs 2400 220 100 (list stalker-fight enemy-marine))))
+  (check-true "w6-tac-4-wire-combat-order-beats-patrol-block-expansion"
+              (and (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 23)
+                                 (memv 9951 (sc2-raw-unit-command-unit-tags c))))
+                          cmds-combat-wins)
+                   (not (ormap (lambda (c)
+                                 (and (sc2-raw-unit-command? c)
+                                      (= (sc2-raw-unit-command-ability-id c) 17)
+                                      (memv 9951 (sc2-raw-unit-command-unit-tags c))))
+                               cmds-combat-wins))))
+  ;; Protected active order (e.g., Ghost Snipe channel 2714) is NOT stolen by patrol-block-expansion
+  (define ghost-chan (mk-u 9952 50 1 80.0 80.0 (list (sc2-unit-order 2714 #f 29951 0.5))))
+  (define cmds-prot
+    (translate-bot-actions->sc2-raw-commands
+     '((patrol-block-expansion 9952 48.0 48.0))
+     (make-test-obs 2420 220 100 (list ghost-chan enemy-marine))))
+  (check-true "w6-tac-4-wire-protected-order-not-stolen-by-patrol"
+              (not (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 17)
+                                 (memv 9952 (sc2-raw-unit-command-unit-tags c))))
+                          cmds-prot)))
+  ;; Unclaimed idle unit DOES execute patrol-block-expansion cleanly
+  (define idle-marine (mk-u 9953 48 1 46.0 46.0))
+  (define cmds-idle-patrol
+    (translate-bot-actions->sc2-raw-commands
+     '((patrol-block-expansion 9953 48.0 48.0))
+     (make-test-obs 2440 220 100 (list idle-marine))))
+  (check-true "w6-tac-4-wire-idle-unit-emits-patrol-17"
+              (ormap (lambda (c)
+                       (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-ability-id c) 17)
+                            (equal? (sc2-raw-unit-command-unit-tags c) '(9953))))
+                     cmds-idle-patrol))
+  ;; Idle worker patrolling nat is protected from trailing harvest-mineral (3666)
+  (define idle-probe (mk-u 9954 84 1 46.0 46.0))
+  (define min-patch  (mk-min 29954 30.0 30.0))
+  (define cmds-worker-patrol
+    (translate-bot-actions->sc2-raw-commands
+     '((patrol-block-expansion 9954 48.0 48.0)
+       (harvest-mineral 9954 29954))
+     (make-test-obs 2460 220 100 (list idle-probe min-patch))))
+  (check-true "w6-tac-4-wire-patrolling-worker-not-overwritten-by-harvest"
+              (and (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 17)
+                                 (memv 9954 (sc2-raw-unit-command-unit-tags c))))
+                          cmds-worker-patrol)
+                   (not (ormap (lambda (c)
+                                 (and (sc2-raw-unit-command? c)
+                                      (= (sc2-raw-unit-command-ability-id c) 3666)
+                                      (memv 9954 (sc2-raw-unit-command-unit-tags c))))
+                               cmds-worker-patrol))))
+  ;; Already-patrolling unit at same point is deduplicated by claim-combat-tags-for-order!
+  (define already-patrol (mk-u 9955 48 1 46.0 46.0 (list (sc2-unit-order 17 (sc2-point3d 48.0 48.0 8.0) 0 0.0))))
+  (define cmds-dedup
+    (translate-bot-actions->sc2-raw-commands
+     '((patrol-block-expansion 9955 48.0 48.0))
+     (make-test-obs 2480 220 100 (list already-patrol))))
+  (check-true "w6-tac-4-wire-already-patrolling-unit-deduped"
+              (not (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 17)
+                                 (memv 9955 (sc2-raw-unit-command-unit-tags c))))
+                          cmds-dedup))))
+
+(printf "[Wave 7] Testing W7-P0-2-wire governor large-P2 rescue & maxed-army push vs sticky-hold/hg-hold...\n")
+
+;; 1. W7-P0-2-wire Governor: continuous P1 creep-tumor / macro spam NEVER starves overdue (>= 8 loops)
+;;    large multi-unit (>= 8 tags, AB 23/16) P2 combat marches, while keeping P1 healthy & APM <= hard cap!
+(let ()
+  (define gov-w7 (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define large-p2-emitted 0)
+  (define p1-macro-emitted 0)
+  (define sim-ev-total 0)
+  (define sim-sel #f)
+  (define squad-a (for/list ([i (in-range 12)]) (+ 8100 i)))
+  (define squad-b (for/list ([i (in-range 8)])  (+ 8200 i)))
+  (for ([step-idx (in-range 60)])
+    (define gl (* step-idx 4))
+    (define batch
+      (list (sc2-raw-unit-command 1733 (sc2-point2d (+ 45.0 (modulo step-idx 10)) 45.0) 0 (list (+ 6001 (modulo step-idx 7))) #f)
+            (sc2-raw-unit-command 1343 #f 0 (list (+ 6101 (modulo step-idx 7))) #f)
+            (sc2-raw-unit-command 1342 #f 0 (list (+ 6201 (modulo step-idx 7))) #f)
+            (sc2-raw-unit-command 1340 #f 0 (list (+ 6301 (modulo step-idx 7))) #f)
+            (sc2-raw-unit-command 1632 #f 0 (list (+ 6401 (modulo step-idx 5))) #f)
+            (sc2-raw-unit-command 1152 (sc2-point2d 54.5 32.5) 0 (list (+ 6501 (modulo step-idx 5))) #f)
+            (sc2-raw-unit-command 23 (sc2-point2d 143.5 143.5) 0 squad-a #f)
+            (sc2-raw-unit-command 16 (sc2-point2d 135.0 135.0) 0 squad-b #f)))
+    (for ([c (in-list (govern-sc2-wire-actions! gov-w7 batch gl))])
+      (when (sc2-raw-unit-command? c)
+        (define ab (sc2-raw-unit-command-ability-id c))
+        (define tags (sc2-raw-unit-command-unit-tags c))
+        (if (and sim-sel (equal? tags sim-sel))
+            (set! sim-ev-total (+ sim-ev-total 1))
+            (begin (set! sim-sel tags) (set! sim-ev-total (+ sim-ev-total 2))))
+        (cond
+          [(and (memv ab '(23 16)) (>= (length tags) 8))
+           (set! large-p2-emitted (add1 large-p2-emitted))]
+          [(memv ab '(1733 1343 1342 1340 1632 1152))
+           (set! p1-macro-emitted (add1 p1-macro-emitted))]))))
+  (check-true (format "w7-p0-2-wire-gov-large-p2-not-starved-by-p1-spam (got ~a)" large-p2-emitted)
+              (>= large-p2-emitted 12))
+  (check-true (format "w7-p0-2-wire-gov-p1-macro-remains-healthy (got ~a)" p1-macro-emitted)
+              (>= p1-macro-emitted 20))
+  (check-true (format "w7-p0-2-wire-gov-rolling-apm-within-hard-cap (ev=~a)" sim-ev-total)
+              (<= sim-ev-total 485))
+
+  ;; Overdue (>= 8 loops) multi-squad burst with 4 large P2 squads + 10 P1 commands emits all 4 squads
+  ;; ahead of P1 drain (and sorts largest army first when tokens only allow a subset)!
+  (define gov-w7b (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define p1-burst
+    (for/list ([i (in-range 10)])
+      (sc2-raw-unit-command 1733 (sc2-point2d (+ 50.0 i) 50.0) 0 (list (+ 6600 i)) #f)))
+  (define sq4-cmds
+    (list (sc2-raw-unit-command 23 (sc2-point2d 140.0 140.0) 0 (for/list ([i (in-range 8)])  (+ 8300 i)) #f)
+          (sc2-raw-unit-command 23 (sc2-point2d 142.0 40.0)  0 (for/list ([i (in-range 10)]) (+ 8400 i)) #f)
+          (sc2-raw-unit-command 23 (sc2-point2d 40.0 142.0)  0 (for/list ([i (in-range 16)]) (+ 8500 i)) #f)
+          (sc2-raw-unit-command 16 (sc2-point2d 120.0 120.0) 0 (for/list ([i (in-range 9)])  (+ 8600 i)) #f)))
+  (define out-4sq (govern-sc2-wire-actions! gov-w7b (append p1-burst sq4-cmds) 100))
+  (define emitted-large-sq
+    (filter (lambda (c) (and (sc2-raw-unit-command? c)
+                             (memv (sc2-raw-unit-command-ability-id c) '(23 16))
+                             (>= (length (sc2-raw-unit-command-unit-tags c)) 8)))
+            out-4sq))
+  (check-eqv "w7-p0-2-wire-gov-overdue-4-large-p2-squads-all-rescued"
+             (length emitted-large-sq)
+             4)
+  (check-eqv "w7-p0-2-wire-gov-largest-army-squad-emitted-first"
+             (length (sc2-raw-unit-command-unit-tags (first emitted-large-sq)))
+             16))
+
+;; 2. W7-P0-2-wire Hold-Posture: maxed/dominant armies (>= 40 combat supply, no explicit hold/suppress)
+;;    with empty targetable-enemy-units and active/recent offensive push or enemy-main-cleared? are NEVER
+;;    pulled backward to home staging by `action-has-hg-hold?` or `sticky-hold-pt`!
+(let ()
+  (define (mk-u tag utype ally x y)
+    (sc2-unit 1 ally tag utype 1 (sc2-point3d x y 8.0) 0.0 0.625 1.0 0 #f #f #f
+              145.0 145.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+  (define (mk-th tag x y)
+    (sc2-unit 1 1 tag 86 1 (sc2-point3d x y 8.0) 0.0 2.75 1.0 0 #f #t #f
+              1500.0 1500.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+  (define home-th (mk-th 9970 32.5 32.5))
+  (define roach-tags-40 (for/list ([i (in-range 20)]) (+ 9971 i))) ;; 20 Roaches = 40 combat supply
+  ;; Reset match state cleanly at loop 100, then advance to late game 16000
+  (void (sc2-observation->runtime-obs-hash (make-test-obs 100 200 100 (list home-th))))
+  ;; Step A (loop 16000): Offensive attack-pos push toward enemy base (143.5, 143.5)
+  (define obs-push-16000
+    (make-test-obs
+     16000 1000 500
+     (cons home-th
+           (for/list ([t (in-list roach-tags-40)] [i (in-naturals)])
+             (mk-u t 110 1 (+ 55.0 (* 0.3 i)) (+ 55.0 (* 0.2 i)))))))
+  (void (translate-bot-actions->sc2-raw-commands
+         (list (list 'attack-pos roach-tags-40 143.5 143.5))
+         obs-push-16000
+         #:game-info p02-ginfo
+         #:enemy-base '(143.5 143.5)))
+  ;; Step B (loop 16016, inside 44-loop refractory window): stray high-ground-tactics hold at home ramp (44, 44)
+  ;; MUST NOT pull the 40-supply idle army back to (44, 44) — army must march forward toward (143.5, 143.5)!
+  (define obs-hg-16016
+    (make-test-obs
+     16016 1000 500
+     (cons home-th
+           (for/list ([t (in-list roach-tags-40)] [i (in-naturals)])
+             (mk-u t 110 1 (+ 56.0 (* 0.3 i)) (+ 56.0 (* 0.2 i)))))))
+  (define cmds-hg-16016
+    (translate-bot-actions->sc2-raw-commands
+     '((high-ground-tactics hold-high-ground-ramp-arc 44.0 44.0 #f))
+     obs-hg-16016
+     #:game-info p02-ginfo
+     #:enemy-base '(143.5 143.5)))
+  (define atk-pts-hg
+    (filter (lambda (c) (and (sc2-raw-unit-command? c)
+                             (= (sc2-raw-unit-command-ability-id c) 23)
+                             (sc2-point2d? (sc2-raw-unit-command-target-pos c))))
+            cmds-hg-16016))
+  (check-true "w7-p0-2-wire-maxed-push-not-pulled-back-by-hg-hold"
+              (and (pair? atk-pts-hg)
+                   (not (ormap (lambda (c)
+                                 (let ([p (sc2-raw-unit-command-target-pos c)])
+                                   (and (< (sc2-point2d-x p) 70.0)
+                                        (< (sc2-point2d-y p) 70.0))))
+                               atk-pts-hg))
+                   (ormap (lambda (c)
+                            (let ([p (sc2-raw-unit-command-target-pos c)])
+                              (and (> (sc2-point2d-x p) 120.0)
+                                   (> (sc2-point2d-y p) 120.0))))
+                          atk-pts-hg)))
+  ;; Step C (loop 16100 -> 16112 -> 16120): sticky-hold-pt set earlier does NOT pull a 40-supply army back
+  ;; once enemy-main-cleared? is active!
+  (define obs-hold-16100
+    (make-test-obs
+     16100 1000 500
+     (cons home-th
+           (for/list ([t (in-list roach-tags-40)] [i (in-naturals)])
+             (mk-u t 110 1 (+ 85.0 (* 0.3 i)) (+ 85.0 (* 0.2 i)))))))
+  (void (translate-bot-actions->sc2-raw-commands
+         '((execute-spatial-maneuver safe-to-expand-enemy-pinned-far 48.0 48.0))
+         obs-hold-16100
+         #:game-info p02-ginfo
+         #:enemy-base '(143.5 143.5)))
+  (define obs-cleared-16112
+    (make-test-obs
+     16112 1000 500
+     (cons home-th
+           (append
+            (list (mk-u 9971 110 1 142.0 142.0)
+                  (mk-u 9972 110 1 143.0 142.0))
+            (for/list ([t (in-list (cddr roach-tags-40))] [i (in-naturals)])
+              (mk-u t 110 1 (+ 90.0 (* 0.3 i)) (+ 90.0 (* 0.2 i))))))))
+  (define cmds-cleared-16112
+    (translate-bot-actions->sc2-raw-commands
+     '()
+     obs-cleared-16112
+     #:game-info p02-ginfo
+     #:enemy-base '(143.5 143.5)))
+  (define atk-pts-cleared
+    (filter (lambda (c) (and (sc2-raw-unit-command? c)
+                             (= (sc2-raw-unit-command-ability-id c) 23)
+                             (sc2-point2d? (sc2-raw-unit-command-target-pos c))))
+            cmds-cleared-16112))
+  (check-true "w7-p0-2-wire-enemy-main-cleared-ignores-stale-sticky-hold"
+              (not (ormap (lambda (c)
+                            (let ([p (sc2-raw-unit-command-target-pos c)])
+                              (and (<= (abs (- (sc2-point2d-x p) 48.0)) 2.0)
+                                   (<= (abs (- (sc2-point2d-y p) 48.0)) 2.0))))
+                          atk-pts-cleared)))
+  ;; Step D: Explicit #:suppress-attack? #t STILL overrides and keeps even a 40-supply army from pushing cross-map!
+  (define cmds-explicit-suppress
+    (translate-bot-actions->sc2-raw-commands
+     '()
+     obs-hg-16016
+     #:game-info p02-ginfo
+     #:enemy-base '(143.5 143.5)
+     #:suppress-attack? #t))
+  (check-true "w7-p0-2-wire-explicit-suppress-still-respected-for-maxed-army"
+              (not (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 23)
+                                 (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                                 (let ([p (sc2-raw-unit-command-target-pos c)])
+                                   (or (> (sc2-point2d-x p) 100.0)
+                                       (> (sc2-point2d-y p) 100.0)))))
+                          cmds-explicit-suppress))))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

@@ -2130,7 +2130,8 @@
       [(>= bases 3) (+ bases 3 (if zvp-stargate-threat? 1 0))]
       [(= bases 2)  (+ 4 threat-bonus)]
       [else         (+ 2 (if zvp-stargate-threat? 1 0))]))
-  (min SC2-MAX-QUEENS-CAP base-target))
+  ;; W7-P0-3-belief (#16): Hard-cap Zerg Queens at min(10, 2*bases + 2, SC2-MAX-QUEENS-CAP)
+  (min 10 (+ (* 2 bases) 2) SC2-MAX-QUEENS-CAP base-target))
 
 (define zerg-queen-target desired-zerg-queen-count)
 
@@ -2149,10 +2150,12 @@
   (define bases (max 1 (safe-nonneg-int active-bases 1)))
   (define army (max 0.0 (safe-real army-supply 0.0)))
   (define w (safe-nonneg-int workers 0))
-  (if (and has-lair-or-hive? (not under-attack?) (>= w 26) (>= army 16.0))
+  ;; W6-P0-1b-belief (#1): Never request/escrow Overlord-Transport while army-supply < 60
+  ;; so larva & gas go to Roach/Hydra/Baneling waves first.
+  (if (and has-lair-or-hive? (not under-attack?) (>= w 26) (>= army 60.0))
       (cond
-        [(and (>= bases 3) (>= army 40.0)) 3]
-        [(or (>= bases 3) (>= army 28.0)) 2]
+        [(and (>= bases 3) (>= army 90.0)) 3]
+        [(or (>= bases 3) (>= army 72.0)) 2]
         [else 1])
       0))
 
@@ -2225,12 +2228,16 @@
          enemy-u-counts enemy-b-counts)
   (define cannon? (terran-enemy-cannon-contain? race enemy-race enemy-u-counts enemy-b-counts))
   (and (eq? race 'Terran)
-       (or cannon? (eq? enemy-race 'Protoss))
        (>= (safe-nonneg-int cur-rax 0) 1)
        (< (safe-nonneg-int minerals 0) 600)
        (or (and cannon?
                 (or (= (safe-nonneg-int cur-fac 0) 0)
                     (< (safe-nonneg-int cur-tanks 0) 3)))
+           ;; W6-P0-3-belief (#8): In ALL matchups once gas >= 100 and Factory #1 isn't down yet,
+           ;; suppress Barracks #2+ (< 450M) so minerals never drain out from under Factory #1!
+           (and (= (safe-nonneg-int cur-fac 0) 0)
+                (>= (safe-nonneg-int gas 0) 100)
+                (< (safe-nonneg-int minerals 0) 450))
            (and (eq? enemy-race 'Protoss)
                 (= (safe-nonneg-int cur-fac 0) 0)
                 (or (> (safe-nonneg-int total-gas-bldgs 0) 0)
@@ -4172,8 +4179,18 @@
                               (list 'build 'fleet-beacon (safe-tile-coord (- base-x 6.5)) (safe-tile-coord (+ base-y 5.5)))
                               #t (if enemy-cap-air? 180.0 150.0)))
             '())
+        ;; W6-P0-2-belief (#15): Gate Protoss Forge on >=2 bases, >=16 army, and >=4480f (or >=4 Gates w/ WarpGate)
+        ;; unless confirmed cannon-rush or cloaked/burrowed detection threat!
         (if (and (not crisis-defer?)
                  has-core?
+                 (or raw-requires-detection?
+                     (enemy-any-counts-have? enemy-u-counts enemy-b-counts
+                                             '(photon-cannon forge dark-templar dark-shrine banshee lurker lurker-burrowed widow-mine widow-mine-burrowed))
+                     (and (>= active-bases 2)
+                          (>= army-val 16.0)
+                          (or (>= frame-val 4480)
+                              (and (>= (bldg-eq-count 'gateway) 4)
+                                   (has-upgrade-sym? 'warp-gate-research upgs)))))
                  (or t3-endgame? upg-escalation? (> (sg-rec-bonus 'forge) 0.0))
                  (< (bldg-eq-count 'forge)
                     (if (or upg-escalation? (> (sg-rec-bonus 'forge) 0.0)) 2 1)))
@@ -4298,9 +4315,9 @@
                                           [(memq enemy-race '(Protoss Random)) 2]
                                           [else 1]))])
                      (and (< cur-gates gate-cap)
-                          (or (< cur-gates 3)
+                          (or (< cur-gates (if (>= active-bases 2) 4 3))
                               (not gw-slot-open?)
-                              (>= min-val 400))
+                              (>= min-val (if (and (>= active-bases 2) (< cur-gates 4)) 225 275)))
                           (or (> active-bases 1)
                               (and (memq enemy-race '(Protoss Random)) (< cur-gates 2))
                               (< raw-prod-facilities 1)
@@ -4576,6 +4593,7 @@
        (and (= cur-fac-cnt 0)
             has-rax-ready?
             (or tvp-cannon-contain?
+                (>= gas-val 100)
                 (and (eq? enemy-race 'Protoss)
                      (or (>= gas-val 60) (> (bldg-eq-count 'refinery) 0) (>= frame-val 1800))))))
      (define want-widow-mines
@@ -8055,7 +8073,9 @@
   (define used (if (number? food-used) (inexact->exact (ceiling food-used)) 0))
   (define cap (if (number? food-cap) (inexact->exact (floor food-cap)) 0))
   (define pend (if (number? pending-supply) (max 0 (inexact->exact (floor pending-supply))) 0))
-  (define margin (compute-supply-preemption-margin cap))
+  (define base-margin (compute-supply-preemption-margin cap))
+  ;; W7-P0-4-belief: Protoss Warp-Gate waves burst 6-16 supply instantaneously -> +2 headroom at cap >= 30
+  (define margin (if (and (eq? race 'Protoss) (>= cap 30)) (+ base-margin 2) base-margin))
   (define proj-cap (+ cap (* 8 pend)))
   (and (< cap 200)
        (cond
@@ -8259,12 +8279,16 @@
           (or (>= workers 16) (>= frame 1000))]
          [(Protoss)
           (if (eq? enemy-race 'Protoss)
-              ;; W3-P0-3b: PvP 2-Gate Double-Gas Cyber Expand aligned with Pro ~180–194s
+              ;; W3-P0-3b + W5-P0-2-belief: PvP 2-Gate Double-Gas Cyber Expand aligned with Pro ~180–194s;
+              ;; after 2:30 (3360f), never let a missing 2nd Gate/Assim permanently block 1-base natural expansion!
               (and (>= (bc 'pylon) 1)
-                   (>= (bc 'assimilator) 2)
                    (>= (bc 'cybernetics-core) 1)
-                   (>= (+ (bc 'gateway) (bc 'warp-gate)) 2)
-                   (or (>= workers 20) (>= frame 2688)))
+                   (or (and (>= (bc 'assimilator) 2)
+                            (>= (+ (bc 'gateway) (bc 'warp-gate)) 2)
+                            (or (>= workers 20) (>= frame 2688)))
+                       (and (>= frame 3360)
+                            (>= (bc 'assimilator) 1)
+                            (>= (+ (bc 'gateway) (bc 'warp-gate)) 1))))
               ;; PvZ/PvT: require >= 19 workers OR (>= 17 workers & frame >= 1450) — never hijack at 17 Probes / 53s
               (and (>= (bc 'pylon) 1)
                    (>= (+ (bc 'gateway) (bc 'warp-gate)) 1)

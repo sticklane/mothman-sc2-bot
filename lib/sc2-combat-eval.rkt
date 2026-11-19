@@ -917,6 +917,52 @@
     [(memq etype SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS) 0.05]
     [else 1.0]))
 
+;; W7-P0-1-eval (w7-tac-1): Extract `(values hull-hp shields total-ehp)` without double-counting
+;; Protoss shields on live `sc2-protobuf-ws` hashes where `'hp = (+ health shield)` and `'hull-hp = health`,
+;; while preserving synthetic split hashes (`'hp` = hull only, `'shield`/`'shields` = shield) matching
+;; `pro-spellcaster-micro.rkt:1009` (`uh-total-hp`).
+(: extract-unit-hull-and-shields (-> Any Flonum Flonum Flonum (Values Flonum Flonum Flonum)))
+(define (extract-unit-hull-and-shields src-hash default-hp default-sh table-max-hp)
+  (cond
+    [(not (hash? src-hash))
+     (define h (max 1.0 default-hp))
+     (define s (max 0.0 default-sh))
+     (values h s (max 1.0 (+ h s)))]
+    [else
+     (define sh : Flonum
+       (max 0.0
+            (safe-finite-real
+             (cond
+               [(dyn-hash-has-key? src-hash 'shields) (dyn-hash-ref src-hash 'shields default-sh)]
+               [(dyn-hash-has-key? src-hash 'shield)  (dyn-hash-ref src-hash 'shield default-sh)]
+               [else default-sh])
+             default-sh)))
+     (cond
+       [(dyn-hash-has-key? src-hash 'hull-hp)
+        (define hull : Flonum (max 1.0 (safe-finite-real (dyn-hash-ref src-hash 'hull-hp default-hp) default-hp)))
+        (values hull sh (max 1.0 (+ hull sh)))]
+       [else
+        (define raw-hp : Flonum
+          (safe-finite-real
+           (cond
+             [(dyn-hash-has-key? src-hash 'hp)     (dyn-hash-ref src-hash 'hp default-hp)]
+             [(dyn-hash-has-key? src-hash 'health) (dyn-hash-ref src-hash 'health default-hp)]
+             [else default-hp])
+           default-hp))
+        (define has-max? : Boolean (dyn-hash-has-key? src-hash 'max-hp))
+        (define raw-max : Flonum
+          (if has-max? (safe-finite-real (dyn-hash-ref src-hash 'max-hp 0.0) 0.0) 0.0))
+        (define already-combined? : Boolean
+          (and (> sh 0.0)
+               (or (and (> table-max-hp 0.0) (> raw-hp (+ table-max-hp 0.5)))
+                   (and (<= table-max-hp 0.0) has-max? (> raw-max (+ sh 0.5)) (>= raw-hp sh)))))
+        (if already-combined?
+            (let* ([tot (max 1.0 raw-hp)]
+                   [hull (max 1.0 (- tot sh))])
+              (values hull sh tot))
+            (let ([hull (max 1.0 raw-hp)])
+              (values hull sh (max 1.0 (+ hull sh)))))])]))
+
 ;; Shared target scoring used by `select-focus-fire-target` (live/FAP combat).
 (: score-focus-fire-priority (-> Any Any Real Boolean Boolean Flonum Flonum Flonum Flonum))
 (define (score-focus-fire-priority attacker e arange stealth-active? has-attacker-pos? ax ay default-dps)
@@ -950,8 +996,10 @@
     (max 1.0
          (if (fap-unit? e)
              (safe-real (fap-unit-hp e) 45.0)
-             (+ (safe-real (dyn-hash-ref e 'hp 45.0) 45.0)
-                (safe-real (dyn-hash-ref e 'shields 0.0) 0.0)))))
+             (let* ([st (if (eq? etype 'unknown) #f (sc2-unit-combat-stats etype))]
+                    [t-hull (if st (safe-finite-real (dyn-hash-ref st 'max-hp 0.0) 0.0) 0.0)])
+               (define-values (_hull _sh tot) (extract-unit-hull-and-shields e 45.0 0.0 t-hull))
+               tot))))
   (define raw-dps : Flonum
     (cond
       [(and detector-target? stealth-active?)
@@ -1469,14 +1517,11 @@
   (define st-hp (safe-finite-real (dyn-hash-ref st 'max-hp 0.0) 0.0))
   (define st-sh (safe-finite-real (dyn-hash-ref st 'max-shield 0.0) 0.0))
   (define default-hp (if (> st-hp 0.0) st-hp 100.0))
-  (define hp
+  ;; W7-P0-1-eval (w7-tac-1): Never double-count shields when src-hash already stores combined 'hp + 'hull-hp
+  (define-values (hp sh ehp)
     (if src-hash
-        (max 1.0 (safe-finite-real (first-hash-val src-hash '(hp health) default-hp) default-hp))
-        default-hp))
-  (define sh
-    (if src-hash
-        (max 0.0 (safe-finite-real (first-hash-val src-hash '(shields shield) st-sh) st-sh))
-        st-sh))
+        (extract-unit-hull-and-shields src-hash default-hp st-sh st-hp)
+        (values default-hp st-sh (max 1.0 (+ default-hp st-sh)))))
   (define flying?
     (if src-hash
         (bool-hash-flag src-hash '(flying? is_flying is-flying) flying-default?)
@@ -1493,7 +1538,6 @@
     (if src-hash
         (bool-hash-flag src-hash '(guardian-shield?) #f)
         #f))
-  (define ehp (max 1.0 (+ hp sh)))
   (define can-air? (sc2-unit-can-attack-air? canon))
   (define cnt-int (exact-floor cnt))
   (define pos-cnt : Positive-Integer (if (> cnt-int 0) cnt-int 1))

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter4_wave4",
+  "active_wave": "iter6_wave6",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -322,7 +322,7 @@
     },
     {
       "id": "iter4_wave4",
-      "status": "verified_gauntlet_running",
+      "status": "completed_committed",
       "spec_summary": [
         "W4-P1-1 (@wire-author, lib/sc2-placement.rkt:1444-1509,1780-1809): Prune PvZ natural-choke 1b O(D*S^2*P) quartic search (pre-filter door-touching s1, rear-side pylons, indexed touching s2 neighbors, cap nat-cands<=4, <=40ms/cand & <=120ms total budget -> drops 3480ms spike to <60ms)",
         "W4-TAC-2-wire (@wire-author, lib/sc2-protobuf-ws.rkt:7303-7345): Guard live wire MORPH-ARCHON (1766) against merging HTs with >=50en or when enemy combat <=8.5t (fixes w4-tac-2)",
@@ -353,7 +353,7 @@
         "W5-MACRO-1: Terran CC #3 timing (458s vs Pro 257-384s) & Zerg 3rd Hatchery (308s vs Pro 163s) + mid-game Zerg Roach/Hydra production scaling vs 161-Roach opponents (#22)",
         "W5-EXP-1: Audit experimental off-path proxy/drop plans (exp-terran-widow-mine-drop-runby #17, exp-zerg-burrow-dodge-base-trap #28) so macro army core is never starved below Pro A/W@6m floors"
       ],
-      "rev": "9e39858f",
+      "rev": "5588af67",
       "verification_summary": "ALL 7/7 gates PASS: 21-mod raco make, state-machine-verifier 24/24 (117,220 states), sc2-protobuf-ws-test 442/442 (+25 W4), run-all-tests 2,289 assertions (Suite 46 PvZ wall 1,718ms->77ms = 22.3x faster!), starvation audit 0/0/0/0, Pro Expand Recall 59.8%, L2 Vetoed Brain Protoss 21.7%->21.0%->20.2%",
       "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_wave4.json",
       "tactics_summary": {
@@ -361,7 +361,349 @@
         "passed": "80/80 (100.0%, wire_rejects=0, wave4-repro 0/6->6/6)",
         "sc2_duel15_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_wave4_15.json",
         "sc2_duel15_summary": "7/15 wins (up from 6/15), 1.32x agg trade (+17.9% vs W3 1.12x), pure-MOVE -43.4% (613->347), A:M ratio 1.42->2.65 (p05 0.05x->1.00x W, p04 15.0x W, p02 5.06x, p03 0.12->0.75x, t01 0.27->0.66x, z03 1.78->3.11x W)"
-      }
+      },
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261119_072313_iter4_wave4",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter4_wave4_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter4_wave4.json",
+      "clean_n": 36,
+      "record_clean": "7W-24L-5T",
+      "wr_pct_clean": 19.4,
+      "trade_agg": 0.55,
+      "trade_med": 0.16,
+      "sup_blk_avg": 7.9,
+      "wall_sec": 676.5,
+      "latency_summary": "W4-P1-1 eliminated 100% of PvZ 2.1-3.5s spikes (Protoss max 3479.6->198.9ms, 35/36 matches <=311.7ms); single outlier #1 Z v titania 2311.2ms + late Zerg tr=9.5-9.8ms/rt=10.2-10.9ms",
+      "by_race": {
+        "Protoss": {
+          "record": "4W-8L-0T",
+          "trade_agg": 0.73,
+          "w4_alive_med": 26.0,
+          "w6_alive_med": 34.0,
+          "nat_sec": 90.0,
+          "gas1_sec": 45.0,
+          "tech1_sec": 107.0,
+          "a2w_6m": 27.8,
+          "sup_blk": 8.1
+        },
+        "Terran": {
+          "record": "3W-8L-1T",
+          "trade_agg": 0.73,
+          "w4_alive_med": 22.5,
+          "w6_alive_med": 28.0,
+          "nat_sec": 93.0,
+          "gas1_sec": 46.0,
+          "tech1_sec": 198.0,
+          "a2w_6m": 25.1,
+          "sup_blk": 11.1
+        },
+        "Zerg": {
+          "record": "0W-8L-4T",
+          "trade_agg": 0.36,
+          "w4_alive_med": 31.0,
+          "w6_alive_med": 44.0,
+          "nat_sec": 58.0,
+          "gas1_sec": 61.0,
+          "tech1_sec": 239.0,
+          "a2w_6m": 24.2,
+          "sup_blk": 4.5
+        }
+      },
+      "anomalies": {
+        "zero_fire_retreat": 24,
+        "escrow_lockouts": 12,
+        "self_cancel_loops": 2,
+        "endgame_stall": 1,
+        "air_aa_starvation": 2
+      },
+      "key_wins": [
+        "All-time high clean record 7W-24L-5T (19.4% WR, 0 oppFault), TradeAgg 0.55x (Protoss 0.73x, PvZ 1.24x 3W-2L; Terran 0.73x, TvZ 1.40x 2W-2L), PkArmy 2,109 (+50%), SupBlk 7.9% (all-time low)",
+        "Protoss surged 0-10-2 -> 4W-8L-0T (33.3% WR, 0 ties, beat titania/monsterbot/Chance/oberon ELO 1420), A/W@6m 15.6->27.8 (+78%), PvP CyberCore 204->114s, max_step_ms 3480->199ms (17.5x faster)",
+        "Terran surged 1-9-2 -> 3W-8L-1T (25.0% WR, beat titania/monsterbot/Chance, #11 puck 1.94x Tie); Zerg Gas1 100->61s, Pool 88->73s, SupBlk 4.5%, TradeAgg 0.22->0.36x",
+        "80/80 (100%) strict tactics + real-SC2 15-duel agg trade 1.12x->1.32x (+17.9%, pure-MOVE -43.4%, A:M 1.42->2.65)"
+      ],
+      "promotion_gates_passed": "2/9 (zero_crashes_and_rejects, tactics_suite_100pct 80/80; Protoss hit every_race_wr_ge_33pct at 33.3%)"
+    },
+    {
+      "id": "iter5_wave5",
+      "status": "completed_no_commit_below_hwm",
+      "loop_self_improvements": [
+        "W5-LOOP-0 (@loop-architect, DONE on nzqsykmo): Upgraded tools/iteration-loop/compare-vs-pro.py with automatic paired (our_bot, opp_bot) Result Flips table, pk_army_ratio_med, step_max > 500ms latency outlier report, and 0-combat opponent-DC exclusion",
+        "W5-LOOP-1 (@analyzer, tools/score-replay-batch.rkt): Ingest summary.json per-match wall_sec/avg_runtime_ms/avg_translate_ms/max_step_ms into v2 JSON & scoreboard to auto-distinguish CPU wall-timeout ties vs combat stalls, and separate 0-combat opp-DCs from combat wins",
+        "W5-LOOP-2 (@tactics-tester, tools/tactics-unit-tester.rkt + tools/sc2-tactics-arena.py): Expanded deterministic suite 80->92 (+7 novel shields, +5 wave5-repro) and expand real-SC2 arena 15->18 duels adding 3 PvZ/TvZ/ZvZ 12-Pool rush-defense physics duels"
+      ],
+      "spec_summary": [
+        "W5-P0-1a-wire (@wire-author, lib/sc2-protobuf-ws.rkt:11318-11395,10324-10350): Cut late-Zerg translate_ms (9.8ms -> <4.5ms) by throttling/capping Creep Tumor fan search (max 1 tumor placement RPC per 8 loops, pre-prune enemy CreepTumorBurrowed from blocking/combat hot paths, cap active tumor spreads per step <=1) and ensure Lair/Hive morph isn't silently starved forever by continuous Queen queueing",
+        "W5-P0-1b-belief (@belief-author, lib/priority-macro-brain.rkt): Enforce mandatory Zerg Lair transition (u>=580, blocking-allowed? #t) once >=2 bases & (>=32W or >=4480f) with Pool ready & 0 Lair/Hive (fixes #4/#10 lair=NONE at 16:45 with 2.4kM bank on pure Lings!), plus ensure 2nd/3rd Extractors build by 30W/40W & T2/T3 Roach/Hydra tech scales when banking >800M",
+        "W5-P0-1c-rt (@runtime-author, lib/bot-runtime.rkt): Cut late-Zerg runtime_ms (10.5ms -> <6ms) & eliminate #1's 2311ms spike by filtering enemy CreepTumorBurrowed out of combat-unit / l34 inner loops once per step; fix #1's 11x SporeCrawler self-cancel loop at (146,34) (longer contested-site radius/TTL + cap spore rebuild retries per contested site); ensure #1's 8,650 army finishes last 3 buildings (Lair + 2 Extractors) cleanly instead of stalling 5m",
+        "W5-P0-2 (@belief-author + @runtime-author, lib/econ-ledger.rkt:8246-8252, lib/priority-macro-brain.rkt:5161-5184, lib/bot-runtime.rkt): Fix PvP 0/4 Natural Nexus regression! Never apply exp-in-backoff? (u=20.0) to 1-base natural expansion when minerals>=250, keep 1-base natural expansion at u=560.0 (above Twilight/Forge/Robo/Stalker, below Pylon/CyberCore) up to frame<7200 & !under-attack?, and let L2 emit (expand nat) promptly once minerals>=400 in PvP (#30 Creepy 1.44x -> Win!)",
+        "W5-P0-3 (@belief-author + @runtime-author, W5-EARLY-1): General Early-Rush / 12-Pool Defense across P/T/Z! PvZ: train Zealot #1 immediately on Gateway #1 completion (before CyberCore when early-pool/lings detected, or Gate->Zealot1->CyberCore wall-plug) & abort/cancel unstarted/low-prog Nat Nexus on pre-2:30 Ling flood; TvZ: prioritize ramp-wall 2nd Depot + continuous 0-gas Marines over low-ground CC/Orbital when early Lings/rush detected; ZvZ: detect incoming early Lings & immediately spend larva on 6-8 Zerglings + Spine Crawler instead of Overlord/Drone at 1:45-1:55 (#34/#35/#36 + #14)",
+        "W5-P0-4 (@belief-author, lib/priority-macro-brain.rkt:6106-6122): Eliminate gas_starved_min_lockout (#18 stalker 370M/0G, #30 void-ray 245M/39G) & high_bank_escrow rebound (5->12): trigger pure-gas-starved? whenever (> g-cost 0) & (< rem-gas g-cost) & (or (not has-gas-income?) (< rem-gas (- g-cost 30))), prevent lower-priority 400M expansions from stacking a 400M mineral floor behind a gas-starved candidate when under-attack? or army-supply<20, and keep Terran SCV/Bio production flowing cleanly (W@4m 22.5->26+, TvP Tech1 277->~140s)",
+        "W5-TAC-1 (@runtime-author, lib/bot-runtime.rkt:18052-18073): Exclude Zerglings <=16t of enemy combat from rt-spotter-lings (fixes w5-tac-1 & z04)",
+        "W5-TAC-2 (@runtime-author, lib/bot-runtime.rkt:20979-20990): Guard queen-home-recall against recalling frontline Queens when enemy combat <=16t or allied combat engaged <=12t (fixes w5-tac-2 & z04)",
+        "W5-TAC-3 (@runtime-author, lib/bot-runtime.rkt:516-518): Add the 12 missing PRO-CASTER-RACE-HT units (phoenix, swarm-host, swarm-host-mp, medivac, corruptor, overseer, overseer-siege-mode, lurker*, infestor-burrowed, cyclone, scv, disruptor) to RUNTIME-SPELLCASTER-SET (fixes w5-tac-3 systemic 12-unit dead-code bug!)",
+        "W5-TAC-4 (@runtime-author, lib/tactics/pro-spellcaster-micro.rkt:3095-3105,3148-3164): Enforce Medivac Heal max-casters=1 + claim filter and BC Yamato claim/HP-cap filter in best-unit-target (fixes w5-tac-4 & t04)",
+        "W5-TAC-5 (@runtime-author, lib/bot-runtime.rkt:17538-17618,21586): Don't suppress ready-weapon ranged Bio behind channeling Ghosts / engaged melee frontline in competitive fights (fixes w5-tac-5 & t04)"
+      ],
+      "queued_for_wave6": [
+        "W6-COMBAT: Fold in Round-5 real-SC2 micro findings (t04 Ghost Snipe channel, p01 Stalker/Zealot MOVE, z04 Ultra/Queen melee MOVE) + mid-game Terran TvT / Protoss PvP army volume",
+        "W6-MACRO: Terran CC#3 (401s -> ~300s) & Zerg 3rd Hatch (280s -> ~190s) + audit experimental off-path plans (W5-EXP-1)"
+      ],
+      "acceptance_target": "All 7/7 verifier gates PASS + racket tools/tactics-unit-tester.rkt --all --strict -> 92/92 (100%, wire_rejects=0) + 18-duel real-SC2 A/B",
+      "rev": "a9452285",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261119_081150_iter5_wave5",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter5_wave5_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter5_wave5.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_wave5.json",
+      "clean_n": 36,
+      "record_clean": "4W-26L-6T",
+      "wr_pct_clean": 11.1,
+      "trade_agg": 0.46,
+      "trade_med": 0.25,
+      "sup_blk_avg": 9.1,
+      "wall_sec": 636.4,
+      "latency_summary": "ALL 36/36 <= 280.9ms (0 spikes >=500ms!); Mothman-Z max plunged 2311.2->149.2ms (15.5x drop!), tr 4.22->2.80ms, rt 6.34->5.35ms; fastest gauntlet 10.6m",
+      "by_race": {
+        "Protoss": {
+          "record": "3W-8L-1T",
+          "trade_agg": 0.72,
+          "w4_alive_med": 26.0,
+          "w6_alive_med": 33.0,
+          "nat_sec": 132.0,
+          "gas1_sec": 44.0,
+          "tech1_sec": 111.0,
+          "a2w_6m": 21.2,
+          "sup_blk": 9.8
+        },
+        "Terran": {
+          "record": "1W-9L-2T",
+          "trade_agg": 0.52,
+          "w4_alive_med": 23.0,
+          "w6_alive_med": 31.0,
+          "nat_sec": 97.0,
+          "gas1_sec": 47.0,
+          "tech1_sec": 256.0,
+          "a2w_6m": 26.1,
+          "sup_blk": 11.3
+        },
+        "Zerg": {
+          "record": "0W-9L-3T",
+          "trade_agg": 0.26,
+          "w4_alive_med": 30.5,
+          "w6_alive_med": 45.0,
+          "nat_sec": 57.0,
+          "gas1_sec": 61.0,
+          "tech1_sec": 282.0,
+          "a2w_6m": 26.1,
+          "sup_blk": 6.1
+        }
+      },
+      "anomalies": {
+        "zero_fire_retreat": 28,
+        "escrow_lockouts": 11,
+        "self_cancel_loops": 0,
+        "endgame_stall": 1,
+        "air_aa_starvation": 2,
+        "step_spikes_ge_500ms": 0
+      },
+      "tactics_summary": {
+        "rev": "nzqsykmo a9452285 (wave5)",
+        "passed": "92/92 (100.0%, wire_rejects=0, wave5-repro 0/5->5/5)",
+        "sc2_duel18_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_wave5_18.json",
+        "sc2_duel18_summary": "11/18 wins (61.1%), 1.39x agg trade (15-duel apples-to-apples 8/15 wins, 1.37x vs W4 1.32x; Zerg 5/6 1.99x, 3/3 12-Pool duels WON)"
+      },
+      "key_wins": [
+        "36/36 matches <=280.9ms (0 spikes >=500ms; Zerg max 2311->149ms = 15.5x drop!), self_cancel_loops 2->0",
+        "All-time high median trade 0.15->0.25x (Zerg 0.14->0.29x, Terran 0.20->0.25x), W@4m 23.8->24.3, W@6m 29.5->30.8",
+        "PvP flipped 0-4-0 (0.51x) -> 2-3-0 (1.13x), #30 Creepy L->W (5.20x, Nat@ 167.6s Pro-exact, PkA 8,975); Pro Expand Recall up all 3 races (T 74.1%, P 65.4%, Z 70.4%)",
+        "92/92 (100%) strict tactics + 11/18 (61.1%) real-SC2 wins (1.39x agg trade)"
+      ],
+      "key_regressions": [
+        "Clean WR dipped 7W -> 4W (1W variance #8 Chance rolled Zerg vs Protoss; #2 T v titania 12m stall on Hatchery(84,145); #15 P v oberon built Forge@1:35 + 2 CyberCores + 11 Pylons; #4 Z v monsterbot queen@499 blocked all Lings/Spines to death; Terran Factory regressed 198->245s in TvP/TvZ)"
+      ],
+      "promotion_gates_passed": "2/9 (zero_crashes_and_rejects, tactics_suite_100pct 92/92)"
+    },
+    {
+      "id": "iter6_wave6",
+      "status": "completed_no_commit_below_hwm",
+      "loop_self_improvements": [
+        "W6-LOOP-0 (@loop-architect, DONE on nzqsykmo): Built tools/iteration-loop/measure-pro-scouting.rkt (scanned 288 LotV Pro replays / 576 perspectives in 12.4s), merged Pro scouting, opening BO, 4/6/8m production-facility & army-value curves, and upgrade timings into pro_baselines.json, and added --hwm comparison + full Pro-Corpus v2 alignment table & 9-gate evaluation to compare-vs-pro.py",
+        "W6-LOOP-1 (@analyzer, DONE #195): Upgraded tools/score-replay-batch.rkt (~0.85s on 36 matches) emitting prod_cnt_4/6/8/10m, primary_prod, queens_4/6/8m, army_val_2/4/6/8/10m, upgrade_timings, opening_bo_sequence, and first_scout_sec/unit matching pro_baselines.json v2",
+        "W6-LOOP-2 (@tactics-tester, DONE #190/#205/#209): Expanded deterministic live-pipeline suite 92->102 (102/102 on W6) -> 112 (107/112 on W6; +5 novel shields +5 wave7-repro); upgraded sc2-tactics-arena.py with --compare & first_action_loop_offset"
+      ],
+      "spec_summary": [
+        "W6-P0-1a (@runtime-author): Keep endgame-building-hunt active across 44-loop refractory window + Orbital Scanner Sweep",
+        "W6-P0-1b (@belief-author): Expand queen-defer-for-first-lings? under threat; cap 4-base Zerg Hatchery & defer infestation-pit/overlord-transport until army>=60",
+        "W6-P0-2 (@belief-author + @runtime-author): Gate Protoss forge on >=2 bases & army>=16 & frame>=4480; singleton CyberCore; scale Gates/Robo",
+        "W6-P0-3 (@belief-author + @runtime-author): Emit Terran Factory #1 before Barracks #2+/Bunkers/EBay/Marauders once gas>=100",
+        "W6-P0-4 (@runtime-author + @belief-author): Pro-Corpus-aligned scouting (P post-Gate, T post-Rax, Z NO 14-Drone scout -> Overlord #1/#2 + Zerglings) + PvZ >=4 continuous Zealots vs early Ling flood",
+        "W6-TAC-1..4: Ghost 'personal-cloaking gate, Zerg <=10t combat morph guard, weapon-ready stutter-fire in [nearest-enemy-tank], patrol-block-expansion combat exclusion & reservation"
+      ],
+      "rev": "30414208",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261119_090149_iter6_wave6",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter6_wave6_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter6_wave6.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_wave6.json",
+      "clean_n": 36,
+      "record_clean": "5W-23L-8T",
+      "wr_pct_clean": 13.9,
+      "trade_agg": 0.54,
+      "trade_med": 0.14,
+      "sup_blk_avg": 8.2,
+      "wall_sec": 676.1,
+      "latency_summary": "NEW ALL-TIME LOW max_step_ms=253.15ms across all 36/36 (0 spikes >=500ms; P<=153ms, Z<=160ms, T<=253ms; avg=9.34ms, p95=16.69ms)",
+      "by_race": {
+        "Protoss": {
+          "record": "3W-7L-2T",
+          "trade_agg": 1.13,
+          "w4_alive_med": 26.5,
+          "w6_alive_med": 41.0,
+          "nat_sec": 93.0,
+          "gas1_sec": 44.0,
+          "tech1_sec": 101.0,
+          "prod_cnt_4_6_8m": "3/4/6",
+          "a2w_6m": 35.7,
+          "sup_blk": 11.3
+        },
+        "Terran": {
+          "record": "2W-8L-2T",
+          "trade_agg": 0.48,
+          "w4_alive_med": 24.0,
+          "w6_alive_med": 32.5,
+          "nat_sec": 94.0,
+          "gas1_sec": 47.0,
+          "tech1_sec": 174.0,
+          "prod_cnt_4_6_8m": "2/3/4",
+          "a2w_6m": 17.6,
+          "sup_blk": 8.1
+        },
+        "Zerg": {
+          "record": "0W-8L-4T",
+          "trade_agg": 0.22,
+          "w4_alive_med": 29.0,
+          "w6_alive_med": 45.0,
+          "nat_sec": 55.0,
+          "gas1_sec": 71.0,
+          "tech1_sec": 283.0,
+          "prod_cnt_4_6_8m": "2/2/4",
+          "queens_4m": 1.0,
+          "a2w_6m": 25.4,
+          "sup_blk": 5.3
+        }
+      },
+      "tactics_summary": {
+        "rev": "nzqsykmo 30414208 (wave6)",
+        "passed": "102/102 (100.0%, wire_rejects=0, wave6-repro 4/4)",
+        "expanded112": "107/112 (wave7-repro 0/5, novel 60/60, wire_rejects=0)",
+        "sc2_duel18_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_wave6_18.json",
+        "sc2_duel18_summary": "10W-0L-8T (ZERO LOSSES!), ALL-TIME HIGH 1.60x agg trade (+0.21x vs W5), A:M 3.34 (+0.73 vs W5; Zerg 5/6 W 2.76x, Terran 1.26x, Protoss 1.20x; t04 0.35->1.15x)"
+      },
+      "key_wins": [
+        "All-time lowest losses (23L, 36.1% non-loss), first-ever win vs RustyNikolaj (Mothman-P 2.38x, 8,200 vs 3,800, SB 2.1%), undefeated vs puck (0-0-3) & titania (1-0-2)",
+        "Protoss broke >1.0x TradeAgg for first time ever (1.13x; PvT 1.52x, PvZ 1.43x), Nat@ 93s exact-Pro, ProdFac 4/6/8m 2/3/3->3/4/6, A/W@6m 21.2->35.7",
+        "Terran Factory slashed 256->174s (-82s, TvZ 162s), SupBlk 11.3->8.1%; Zerg PkArmy +892 (1,463->2,354), ArmyVal@6m 1,350 vs Pro 1,425, SupBlk 5.3% (<6% gate!), W@10m 61 vs Pro 64",
+        "NEW ALL-TIME LOW max_step_ms=253.15ms (36/36), 102/102 strict tactics, 10W-0L-8T real-SC2_x64 (1.60x agg trade, A:M 3.34!)"
+      ],
+      "key_blockers_found_for_wave7": [
+        "W7-P0-1 BOMBSHELL (#209): Protoss shields DOUBLE-COUNTED (+33%..+97% fake EHP!) across bot-runtime.rkt:18885, sc2-combat-eval.rkt:953/1474, arena-minimax.rkt:775/1934",
+        "W7-P0-2 BOMBSHELL (verified via step-live-bot-runtime! probe): endgame-building-hunt used l34-emit! instead of l34-emit-preserved! & attack-pos is NOT in PRESERVED-TACTIC-HEAD-SET -> cortex-filter-actions! silently DROPPED endgame-hunt attack-pos behind econ-acts while locking refractory-allow-action?! for 44 loops -> stranded 200/200 armies in #1/#2/#6/#10 ties!",
+        "W7-P0-3: priority-macro-brain.rkt:5186 (< active-bases 2) bypassed (not under-attack?), causing immediate 400M Nexus / 300M Hatchery re-escrow under active 12-Pool rush (#34/#36); #12 P v puck built Immortals/Zealots + 0 AA vs arch=sky-toss; Zerg #16 built 10 Hatches + 20 Queens",
+        "W7-TAC-5 (1-line bug bot-runtime.rkt:8303): W6-P0-4-rt read missing 'enemy-race instead of (l2-ctx-effective-enemy-race ctx) so live P/T still sent 13.4s 14-supply scout"
+      ],
+      "promotion_gates_passed": "2/9 (zero_crashes_and_rejects, tactics_suite_100pct 102/102; Protoss broke >1.0x TradeAgg at 1.13x, Zerg hit SupBlk 5.3% <=6%)"
+    },
+    {
+      "id": "iter7_wave7",
+      "status": "completed_hwm_checkpoint",
+      "loop_self_improvements": [
+        "W7-LOOP-1 (@loop-architect, DONE on nzqsykmo): Upgraded compare-vs-pro.py with full Pro-Corpus v2 Curves table (ProdFac 4/6/8m, ArmyVal 4/6/8m, Queens@4m, Scout Unit/Seen@, Top BO vs Pro #1, Key Upgrades), v2 divergence flags, 9/9 Promotion Gates tactics parser, and W7-LOOP-2 stall/retreat ingestion",
+        "W7-LOOP-2 (@analyzer, DONE #215): Upgraded tools/score-replay-batch.rkt (~0.84s on 36 matches) emitting endgame_home_stall_sec & own_base_retreat_frames (proved endgame_home_stall 2->0 in W7!)"
+      ],
+      "spec_summary": [
+        "W7-P0-1 (@runtime-author + @belief-author, W7-TAC-1): Fixed Protoss shield DOUBLE-COUNTING (+33%..+97% fake EHP) across bot-runtime.rkt:18885, arena-minimax.rkt:775-777/1934-1948, and sc2-combat-eval.rkt:953/1474",
+        "W7-P0-2 (@runtime-author + @wire-author): Emitted endgame-building-hunt attack-pos & Orbital scans via l34-emit-preserved! + wire overdue >=8-tag P2 anti-starvation + 64-loop offensive-push latch disabling home pullbacks -> converted #1 Z v titania (18.88x W), #2 T v titania (4.48x W), #6 P v monsterbot (3.53x W)!",
+        "W7-P0-3 (@belief-author): Gated (< active-bases 2) expansion during early rush, capped Zerg Hatches/Queens, boosted Protoss AA vs Sky-Toss",
+        "W7-P0-4 (@runtime-author + @belief-author, Pro v2 + W7-TAC-2..5): Fixed L8303 (l2-ctx-effective-enemy-race ctx) activating live P/T Pro scouting; arena-minimax Bio cohesion & enemy-retreat tie-break; commit-run-through-splash gr+2.5; Zerg/Terran/Protoss Pro curves"
+      ],
+      "rev": "cddadf48",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261119_095648_iter7_wave7",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter7_wave7_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter7_wave7.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_wave7.json",
+      "clean_n": 36,
+      "record_clean": "7W-23L-6T",
+      "wr_pct_clean": 19.4,
+      "non_loss_pct": 36.1,
+      "trade_agg": 0.44,
+      "trade_med": 0.15,
+      "sup_blk_avg": 7.6,
+      "endgame_home_stall_count": 0,
+      "own_base_retreat_frames": 171980,
+      "wall_sec": 918.5,
+      "latency_summary": "36/36 <= 255.6ms (0 spikes >=500ms; P<=183ms, Z<=190ms, T<=256ms; avg=9.94ms, p95=18.43ms)",
+      "by_race": {
+        "Protoss": {
+          "record": "3W-8L-1T",
+          "trade_agg": 0.41,
+          "w4_alive_med": 28.0,
+          "w6_alive_med": 37.0,
+          "nat_sec": 104.0,
+          "tech1_sec": 107.0,
+          "prod_cnt_4_6_8m": "3/5/5",
+          "a2w_6m": 30.2,
+          "sup_blk": 9.1
+        },
+        "Terran": {
+          "record": "3W-7L-2T",
+          "trade_agg": 0.70,
+          "w4_alive_med": 22.0,
+          "w6_alive_med": 33.0,
+          "nat_sec": 94.0,
+          "tech1_sec": 192.0,
+          "prod_cnt_4_6_8m": "2/4/4",
+          "a2w_6m": 17.1,
+          "sup_blk": 8.3
+        },
+        "Zerg": {
+          "record": "1W-8L-3T",
+          "trade_agg": 0.31,
+          "w4_alive_med": 25.0,
+          "w6_alive_med": 36.0,
+          "nat_sec": 55.0,
+          "tech1_sec": 368.0,
+          "prod_cnt_4_6_8m": "2/2/3",
+          "queens_4m": 1.0,
+          "a2w_6m": 17.3,
+          "sup_blk": 5.3
+        }
+      },
+      "tactics_summary": {
+        "rev": "nzqsykmo cddadf48 (wave7)",
+        "passed": "112/112 (100.0%, wire_rejects=0, wave7-repro 5/5)",
+        "sc2_duel18_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_wave7_18.json",
+        "sc2_duel18_summary": "10W-0L-8T (ZERO LOSSES!), 1.35x agg trade, A:M 3.28 (Terran doubled 2->4/6 W incl. first-ever t02 3.00x W, Zerg A:M 12.13 ALL-TIME HIGH, z05 8.11x W fa 28->4 M 34->0)"
+      },
+      "key_wins": [
+        "NEW HWM 7W-23L-6T (19.4% WR, 36.1% non-loss, all 3 races winning, SupBlk 7.6% all-time low, 36/36 <=255.6ms, 112/112 strict tactics)",
+        "FIRST-EVER CLEAN MOTHMAN-Z WIN (#1 Z v titania 10:42, 18.88x) + titania 3W-0L SWEEP (100%) + first non-loss vs sludgement2-revived (#23 T 1.19x T)",
+        "endgame_home_stall_count 2->0 (all 3 dominating ties #1/#2/#6 converted to clean 10.7-13.5m wins!)",
+        "Terran TradeAgg 0.48->0.70x (+0.22x, TvZ 2.02x), Starport -94s; Protoss hit EXACT PRO ProdFac 3/5 @ 4/6m & ArmyVal@4m 525>500 & PvZ 1.77x; Zerg ZvZ 0.19->0.77x & SupBlk 5.3%"
+      ],
+      "promotion_gates_passed": "2/9 (zero_crashes_and_rejects, tactics_suite_100pct 112/112; Zerg SupBlk 5.3% <=6%)"
+    },
+    {
+      "id": "iter8_wave8",
+      "status": "kicked_off",
+      "loop_self_improvements": [
+        "W8-LOOP-1 (@tactics-tester, AFTER Wave-7 HWM jj commit + jj new): Promote staged Round-8 expansion (tools/tactics-unit-tester.rkt: 112->120+, +4 verified wave8-repro W8-TAC-1..4 + novel shields)",
+        "W8-LOOP-2 (@analyzer, tools/score-replay-batch.rkt): Add non_combat_robo_waste_val (tracks Observer>2 / WarpPrism>1 mineral+gas waste) & zerg_non_ling_army_pct (flags pure-Zergling flood <25% gas combat units at 6-10m) to v2 scorer (<1.0s)"
+      ],
+      "spec_summary": [
+        "W8-P0-1 (@runtime-author + @belief-author): Fix Protoss Robo non-combat spam (#18 15 Observers, #33 7 Observers, #30 8 Warp Prisms + 16 Gateways + 141 shield-battery schedules) & anti-capital escrow lock (void-ray/tempest blocking Stalkers across 16 Gates vs 29 Tempests): count pending observers, enforce >=224f observer cooldown even when cloak visible & >=448f after loss, block warp-prism under air superiority/attack, cap gateways<=min(10,2*bases+2) & shield-batteries<=min(4,bases), never let void-ray/tempest/robo-bay escrow block Stalkers when >=3 ready Gates & requires-anti-air?",
+        "W8-P0-2 (@belief-author + @runtime-author): Fix Zerg queen #1 escrow blocker (570 ticks) + naked-Zergling flood (#16 1,086 Lings / 20 Queens / 9 Roaches / 0 Hydras): make queen non-blocking when cur-queens>=active-bases or larva>=3 & army<20 while cleanly training Q#2/#3 at 2:30-3:45 (Q@4m 1->2-3); hard-cap Zerg queens<=min(8,bases+3), hatches<=5, spores<=bases, spines<=2; prioritize gas combat (roach/hydralisk/baneling/corruptor) above naked zergling when gas>=50 & tech ready; enforce mutually exclusive RW/BN before 3rd Hatchery in BOTH PMB & L2 + earlier 3rd Hatch (~28-32W)",
+        "W8-P0-3 (@belief-author + @runtime-author): Fix Terran Rax scaling (1/2/2->2/3/4), 3rd CC stall (#23 1.19x stuck on 2 bases 26.5m -> 3rd CC outranks marine/marauder once bases==2 & workers>=34 & frame>=6048), starport 530M escrow lockout (#29 1.15x), and early-rush Bunker/Marine balance (#35 19 bunker schedules / 1 marine -> pump continuous Marines u>=640 until >=6 before Reactor/2nd Bunker + auto-load ready Bunker under base attack!)",
+        "W8-P0-4 (@runtime-author + @wire-author, W8-TAC-1..4): Fix dedicated-harass-units stealing fighting units (p06, bot-runtime.rkt:23341-23389, w8-tac-1); gate Infestor Neural Parasite (249) on 'neural-parasite upgrade (pro-spellcaster-micro.rkt:2385-2442, w8-tac-2); never order fragile High Templars ATTACK-UNIT (23) into enemy army (arena-minimax.rkt:3450-3539, w8-tac-3); guard Sentry Hallucination Phoenix (154) when enemy combat <=12t so Guardian Shield (76) fires first (bot-runtime.rkt:9439-9448, w8-tac-4); tighten own-base home defense (prevent non-retreat local fights from fleeing in own base)"
+      ],
+      "acceptance_target": "First: @verifier commits & pushes iter7_wave7 HWM (112/112) to main/master via jj + jj new. Then Wave 8: 7/7 verifier gates + 100% strict tactics (including W8-TAC-1..4) + 18-duel real-SC2 A/B + iter8_wave8 beats HWM (>=10-12W, TradeAgg >=0.75x) -> leads into Loop 9 54-match full-roster gauntlet!"
     }
   ],
   "harness_config": {
@@ -374,5 +716,27 @@
     "est_36_match_wall_min": "8.5-10.0",
     "est_54_match_wall_min": "13.0-14.5",
     "report_json": "/home/sjaconette/sc2-local-arena/runs/concurrency_sweep_report.json"
+  },
+  "goal_target_loop": 14,
+  "high_water_mark": {
+    "wave_id": "iter7_wave7",
+    "commit": "nzqsykmo (pending @verifier jj push)",
+    "clean_n": 36,
+    "record_clean": "7W-23L-6T",
+    "wr_pct_clean": 19.4,
+    "non_loss_pct": 36.1,
+    "trade_agg": 0.44,
+    "trade_med": 0.15,
+    "ties": 6,
+    "pk_army_avg": 2037.0,
+    "sup_blk_avg": 7.6,
+    "endgame_home_stall_count": 0,
+    "max_step_ms": 255.6,
+    "protoss_wr_pct": 25.0,
+    "terran_wr_pct": 25.0,
+    "zerg_wr_pct": 8.3,
+    "tactics_strict": "112/112 (100.0%, wire_rejects=0)",
+    "sc2_duel18_trade": 1.35,
+    "sc2_duel18_wins": "10W-0L-8T"
   }
 }

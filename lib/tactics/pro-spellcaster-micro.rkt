@@ -2809,15 +2809,17 @@
    (->* ((Listof Any) (Listof Any) (Listof Any) spell-claims Integer
          (Listof Any) (Listof Any) (Listof Any) (Listof Any) Boolean Float Float
          (Listof Integer))
-        ((Option (Listof Any)))
+        ((Option (Listof Any)) Boolean)
         (Listof spell-directive)))
 (define (run-terran-spellcaster-micro
          caster-units ally-units enemy-units
          claims current-frame ally-buildings enemy-buildings _effects
          researched-upgrades yamato-researched? home-x home-y exclude-tags
-         [precomputed-repair-targets #f])
+         [precomputed-repair-targets #f]
+         [ghost-cloak-researched? #t])
   (define all-enemies (if (null? enemy-buildings) enemy-units (append enemy-units enemy-buildings)))
   (define yamato-ok? (terran-upgrade-ready? researched-upgrades 'weapon-refit yamato-researched?))
+  (define ghost-cloak-ok? (terran-upgrade-ready? researched-upgrades 'personal-cloaking ghost-cloak-researched?))
 
   (define-values (dirs-rev _)
     (for/fold ([acc : (Listof spell-directive) '()]
@@ -2928,8 +2930,10 @@
                           (try-ghost-emp #f))
                       (or (try-ghost-emp #f)
                           (try-ghost-snipe)))
-                  ;; 3. Ghost Cloak (`energy >= 50`, engaging `< 10.0`, no enemy detector `< 11.0`)
-                  (and (>= en 50.0)
+                  ;; 3. Ghost Cloak (W6-TAC-1: requires 'personal-cloaking upgrade, `energy >= 50`,
+                  ;;    engaging `< 10.0`, no enemy detector `< 11.0`)
+                  (and ghost-cloak-ok?
+                       (>= en 50.0)
                        (not (uh-cloaked? u))
                        (> (- current-frame (hash-ref (spell-claims-ghost-cloak-frame claims) tag (lambda () -10000))) 20)
                        (any-unit-within? enemy-units ux uy 10.0 sc2-enemy-unit-targetable?)
@@ -3090,15 +3094,19 @@
                        (> (dist2 ux uy home-x home-y) 12.0)
                        (spell-directive tag 'battlecruiser 'tactical-jump 'point 0 home-x home-y
                                         'bc-emergency-tactical-jump))
-                  ;; 2. Yamato Cannon (`ceil(hp/240)` claim cap)
+                  ;; 2. Yamato Cannon (`ceil(hp/240)` claim cap; W5-TAC-4 claim filter & spread)
                   (and yam-ready?
                        (let-values ([(ok? tgt _w)
                                      (best-unit-target
                                       ux uy 10.0 enemy-units
                                       (lambda ([e : Any])
                                         (and (not (uh-hallucination? e))
+                                             (< (spell-unit-claim-count claims 'yamato-cannon (uh-tag e) current-frame)
+                                                (unit-claim-effective-cap 'yamato-cannon (uh-total-hp e) 0.0 #f #t))
                                              (> (bc-yamato-weight e) 0.0)))
-                                      (lambda ([e : Any]) (bc-yamato-weight e)))])
+                                      (lambda ([e : Any])
+                                        (define cc (spell-unit-claim-count claims 'yamato-cannon (uh-tag e) current-frame))
+                                        (- (bc-yamato-weight e) (* 15.0 (->float cc)))))])
                          (and ok?
                               (spell-claim-unit?! claims 'yamato-cannon (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
                                                   #:caster-tag tag #:target-hp (uh-total-hp tgt))
@@ -3145,6 +3153,7 @@
                     danger-near?
                     (let-values ([(rx ry) (safe-retreat-point ux uy all-enemies home-x home-y 9.0)])
                       (spell-directive tag 'medivac 'move 'kite 0 rx ry 'medivac-retreat-low-hp-empty)))
+               ;; W5-TAC-4: SC2 permits strictly 1 Medivac heal beam per target (`#:max-casters 1`)
                (let-values ([(ok? tgt _w)
                              (best-unit-target
                               ux uy 5.5 ally-units
@@ -3153,13 +3162,14 @@
                                      (not (uh-hallucination? a))
                                      (spell-valid-for-target-attrs? 'heal (uh-type a))
                                      (memq (uh-type a) '(marine marauder reaper ghost hellbat scv))
-                                     (< (uh-hp-ratio a) 0.92)))
+                                     (< (uh-hp-ratio a) 0.92)
+                                     (= (spell-unit-claim-count claims 'heal (uh-tag a) current-frame) 0)))
                               (lambda ([a : Any])
                                 (+ (* 100.0 (- 1.0 (uh-hp-ratio a)))
                                    (case (uh-type a) [(ghost) 25.0] [(marauder) 15.0] [(marine) 12.0] [else 5.0]))))])
                  (and ok?
                       (let ([ttag (uh-tag tgt)])
-                        (and (spell-claim-unit?! claims 'heal ttag current-frame 16 #:caster-tag tag #:max-casters 2)
+                        (and (spell-claim-unit?! claims 'heal ttag current-frame 16 #:caster-tag tag #:max-casters 1)
                              (spell-directive tag 'medivac 'heal 'unit ttag
                                               (uh-x tgt) (uh-y tgt) 'medivac-heal-injured-bio))))))]
 
@@ -3241,6 +3251,7 @@
          #:effects (Listof Any)
          #:researched-upgrades (Listof Any)
          #:yamato-researched? Boolean
+         #:ghost-cloak-researched? Boolean
          #:home-x Float
          #:home-y Float
          #:exclude-tags (Listof Integer))
@@ -3254,6 +3265,7 @@
          #:effects [effects '()]
          #:researched-upgrades [researched-upgrades '()]
          #:yamato-researched? [yamato-researched? #t]
+         #:ghost-cloak-researched? [ghost-cloak-researched? #t]
          #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
          #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
          #:exclude-tags [exclude-tags '()])
@@ -3295,7 +3307,7 @@
       (run-terran-spellcaster-micro
        effective-casters ally-units enemy-units claims current-frame
        ally-buildings enemy-buildings effects researched-upgrades
-       yamato-researched? home-x home-y exclude-tags repair-targets)))
+       yamato-researched? home-x home-y exclude-tags repair-targets ghost-cloak-researched?)))
 
 ;; -----------------------------------------------------------------------------
 ;; 8. Protoss Spellcaster Patterns (Sentry, High Templar, Oracle)
@@ -3851,6 +3863,7 @@
          #:researched-upgrades (Listof Any)
          #:psi-storm-researched? Boolean
          #:yamato-researched? Boolean
+         #:ghost-cloak-researched? Boolean
          #:home-x Float
          #:home-y Float
          #:natural-x Float
@@ -3871,6 +3884,7 @@
          #:researched-upgrades [researched-upgrades '()]
          #:psi-storm-researched? [psi-storm-researched? #t]
          #:yamato-researched? [yamato-researched? #t]
+         #:ghost-cloak-researched? [ghost-cloak-researched? #t]
          #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
          #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
          #:natural-x [natural-x SC2-DEFAULT-NATURAL-X]
@@ -3940,7 +3954,7 @@
                 (run-terran-spellcaster-micro
                  eff-t-casters ally-units enemy-units claims current-frame
                  ally-buildings enemy-buildings effects researched-upgrades
-                 yamato-researched? home-x home-y exclude-tags t-repair-targets))
+                 yamato-researched? home-x home-y exclude-tags t-repair-targets ghost-cloak-researched?))
             (if (null? p-casters)
                 '()
                 (run-protoss-spellcaster-micro
@@ -3965,6 +3979,7 @@
          #:researched-upgrades (Listof Any)
          #:psi-storm-researched? Boolean
          #:yamato-researched? Boolean
+         #:ghost-cloak-researched? Boolean
          #:home-x Float
          #:home-y Float
          #:natural-x Float
@@ -3985,6 +4000,7 @@
          #:researched-upgrades [researched-upgrades '()]
          #:psi-storm-researched? [psi-storm-researched? #t]
          #:yamato-researched? [yamato-researched? #t]
+         #:ghost-cloak-researched? [ghost-cloak-researched? #t]
          #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
          #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
          #:natural-x [natural-x SC2-DEFAULT-NATURAL-X]
@@ -4005,6 +4021,7 @@
         #:researched-upgrades researched-upgrades
         #:psi-storm-researched? psi-storm-researched?
         #:yamato-researched? yamato-researched?
+        #:ghost-cloak-researched? ghost-cloak-researched?
         #:home-x home-x
         #:home-y home-y
         #:natural-x natural-x

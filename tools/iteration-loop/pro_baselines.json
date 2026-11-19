@@ -77,7 +77,92 @@
       "army_val_6m": 1800,
       "army_to_worker_6m": 0.66,
       "army_to_worker_8m": null,
-      "army_val_per_worker_6m": 47.4
+      "army_val_per_worker_6m": 47.4,
+      "scouting": {
+        "first_scout_arrive_sec_med": 172.7,
+        "first_scout_top_units": [
+          "Probe:37%",
+          "Adept:7%",
+          "Stalker:3%",
+          "Phoenix:3%"
+        ],
+        "overlord_arrive_sec_med": false,
+        "reaper_arrive_sec_med": false,
+        "worker_arrive_sec_med": 157.0,
+        "worker_cnt_at_cross_med": 25.0,
+        "worker_est_send_sec_med": 141.7,
+        "worker_est_send_sec_p25": 126.7,
+        "worker_est_send_sec_p75": 165.8,
+        "worker_scout_pct": 48.3
+      },
+      "top_opening_sequences": [
+        "Pylon->Gateway->Assimilator->Assimilator->Gateway (35%)",
+        "Pylon->Gateway->Assimilator->Nexus->CyberneticsCore (10%)",
+        "Pylon->Gateway->Assimilator->Pylon->CyberneticsCore (7%)"
+      ],
+      "minute_curves": {
+        "m10": {
+          "a2w_med": 76.6,
+          "army_sup_med": 57.0,
+          "army_val_med": 3725.0,
+          "n": 34,
+          "primary_prod_med": 6.0,
+          "prod_cnt_med": 8.0,
+          "queens_med": 0,
+          "workers_med": 51.5
+        },
+        "m2": {
+          "a2w_med": 0.0,
+          "army_sup_med": 1.0,
+          "army_val_med": 0.0,
+          "n": 56,
+          "primary_prod_med": 2.0,
+          "prod_cnt_med": 2.0,
+          "queens_med": 0,
+          "workers_med": 21.0
+        },
+        "m4": {
+          "a2w_med": 23.3,
+          "army_sup_med": 11.0,
+          "army_val_med": 662.5,
+          "n": 56,
+          "primary_prod_med": 2.0,
+          "prod_cnt_med": 3.0,
+          "queens_med": 0,
+          "workers_med": 27.0
+        },
+        "m6": {
+          "a2w_med": 48.5,
+          "army_sup_med": 24.0,
+          "army_val_med": 1762.5,
+          "n": 54,
+          "primary_prod_med": 4.0,
+          "prod_cnt_med": 5.0,
+          "queens_med": 0,
+          "workers_med": 38.0
+        },
+        "m8": {
+          "a2w_med": 69.3,
+          "army_sup_med": 43.0,
+          "army_val_med": 3175.0,
+          "n": 40,
+          "primary_prod_med": 6.0,
+          "prod_cnt_med": 7.0,
+          "queens_med": 0,
+          "workers_med": 45.5
+        }
+      },
+      "tech_and_upgrade_sec_med": {
+        "blink": 446.3,
+        "charge": 445.4,
+        "cyber": 95.1,
+        "plus1_arm": 546.6,
+        "plus1_atk": 481.5,
+        "robo": 203.3,
+        "stargate": 158.4,
+        "twilight": 299.9,
+        "warp_gate": 236.4
+      }
     },
     "PvT": {
       "race": "Protoss",
@@ -105,7 +190,92 @@
       "army_val_6m": 1650,
       "army_to_worker_6m": 0.5,
       "army_to_worker_8m": null,
-      "army_val_per_worker_6m": 35.9
+      "army_val_per_worker_6m": 35.9,
+      "scouting": {
+        "first_scout_arrive_sec_med": 107.1,
+        "first_scout_top_units": [
+          "Probe:70%",
+          "Adept:8%",
+          "Stalker:2%",
+          "Phoenix:2%"
+        ],
+        "overlord_arrive_sec_med": false,
+        "reaper_arrive_sec_med": false,
+        "worker_arrive_sec_med": 96.4,
+        "worker_cnt_at_cross_med": 20.0,
+        "worker_est_send_sec_med": 67.1,
+        "worker_est_send_sec_p25": 51.9,
+        "worker_est_send_sec_p75": 81.5,
+        "worker_scout_pct": 68.3
+      },
+      "top_opening_sequences": [
+        "Pylon->Gateway->Assimilator->Nexus->CyberneticsCore (43%)",
+        "Pylon->Gateway->Assimilator->CyberneticsCore->Nexus (28%)",
+        "Pylon->Assimilator->Gateway->Nexus->CyberneticsCore (7%)"
+      ],
+      "minute_curves": {
+        "m10": {
+          "a2w_med": 81.6,
+          "army_sup_med": 67.0,
+          "army_val_med": 4850.0,
+          "n": 33,
+          "primary_prod_med": 8.0,
+          "prod_cnt_med": 9.0,
+          "queens_med": 0,
+          "workers_med": 67.0
+        },
+        "m2": {
+          "a2w_med": 0.0,
+          "army_sup_med": 1.0,
+          "army_val_med": 0.0,
+          "n": 60,
+          "primary_prod_med": 1.0,
+          "prod_cnt_med": 1.0,
+          "queens_med": 0,
+          "workers_med": 20.0
+        },
+        "m4": {
+          "a2w_med": 13.5,
+          "army_sup_med": 8.0,
+          "army_val_med": 475.0,
+          "n": 57,
+          "primary_prod_med": 2.0,
+          "prod_cnt_med": 3.0,
+          "queens_med": 0,
+          "workers_med": 34.0
+        },
+        "m6": {
+          "a2w_med": 34.3,
+          "army_sup_med": 22.0,
+          "army_val_med": 1575.0,
+          "n": 52,
+          "primary_prod_med": 3.0,
+          "prod_cnt_med": 4.0,
+          "queens_med": 0,
+          "workers_med": 45.5
+        },
+        "m8": {
+          "a2w_med": 56.0,
+          "army_sup_med": 43.0,
+          "army_val_med": 3050.0,
+          "n": 45,
+          "primary_prod_med": 7.0,
+          "prod_cnt_med": 8.0,
+          "queens_med": 0,
+          "workers_med": 58.0
+        }
+      },
+      "tech_and_upgrade_sec_med": {
+        "blink": 315.9,
+        "charge": 450.8,
+        "cyber": 93.6,
+        "plus1_arm": 497.6,
+        "plus1_atk": 490.9,
+        "robo": 214.9,
+        "stargate": 174.4,
+        "twilight": 181.4,
+        "warp_gate": 234.8
+      }
     },
     "PvZ": {
       "race": "Protoss",
@@ -133,7 +303,92 @@
       "army_val_6m": 1900,
       "army_to_worker_6m": 0.5,
       "army_to_worker_8m": null,
-      "army_val_per_worker_6m": 39.6
+      "army_val_per_worker_6m": 39.6,
+      "scouting": {
+        "first_scout_arrive_sec_med": 117.9,
+        "first_scout_top_units": [
+          "Probe:56%",
+          "Adept:11%",
+          "Oracle:1%",
+          "Phoenix:1%"
+        ],
+        "overlord_arrive_sec_med": false,
+        "reaper_arrive_sec_med": false,
+        "worker_arrive_sec_med": 107.1,
+        "worker_cnt_at_cross_med": 21.0,
+        "worker_est_send_sec_med": 83.1,
+        "worker_est_send_sec_p25": 51.3,
+        "worker_est_send_sec_p75": 126.3,
+        "worker_scout_pct": 71.6
+      },
+      "top_opening_sequences": [
+        "Pylon->Gateway->Assimilator->Nexus->CyberneticsCore (73%)",
+        "Pylon->Assimilator->Gateway->Nexus->CyberneticsCore (5%)",
+        "Pylon->Gateway->Assimilator->Gateway->CyberneticsCore (3%)"
+      ],
+      "minute_curves": {
+        "m10": {
+          "a2w_med": 87.5,
+          "army_sup_med": 73.0,
+          "army_val_med": 5415.0,
+          "n": 61,
+          "primary_prod_med": 8.0,
+          "prod_cnt_med": 10.0,
+          "queens_med": 0,
+          "workers_med": 68.0
+        },
+        "m2": {
+          "a2w_med": 0.0,
+          "army_sup_med": 1.0,
+          "army_val_med": 0.0,
+          "n": 87,
+          "primary_prod_med": 1.0,
+          "prod_cnt_med": 1.0,
+          "queens_med": 0,
+          "workers_med": 21.0
+        },
+        "m4": {
+          "a2w_med": 12.1,
+          "army_sup_med": 10.0,
+          "army_val_med": 425.0,
+          "n": 86,
+          "primary_prod_med": 2.0,
+          "prod_cnt_med": 3.0,
+          "queens_med": 0,
+          "workers_med": 36.0
+        },
+        "m6": {
+          "a2w_med": 35.7,
+          "army_sup_med": 24.0,
+          "army_val_med": 1675.0,
+          "n": 83,
+          "primary_prod_med": 5.0,
+          "prod_cnt_med": 6.0,
+          "queens_med": 0,
+          "workers_med": 48.0
+        },
+        "m8": {
+          "a2w_med": 59.7,
+          "army_sup_med": 49.0,
+          "army_val_med": 3725.0,
+          "n": 75,
+          "primary_prod_med": 8.0,
+          "prod_cnt_med": 9.0,
+          "queens_med": 0,
+          "workers_med": 63.0
+        }
+      },
+      "tech_and_upgrade_sec_med": {
+        "blink": 423.9,
+        "charge": 463.8,
+        "cyber": 96.9,
+        "plus1_arm": 537.9,
+        "plus1_atk": 467.6,
+        "robo": 209.4,
+        "stargate": 143.3,
+        "twilight": 248.2,
+        "warp_gate": 245.7
+      }
     },
     "TvP": {
       "race": "Terran",
@@ -161,7 +416,90 @@
       "army_val_6m": 1838,
       "army_to_worker_6m": 0.8,
       "army_to_worker_8m": null,
-      "army_val_per_worker_6m": 46.0
+      "army_val_per_worker_6m": 46.0,
+      "scouting": {
+        "first_scout_arrive_sec_med": 160.7,
+        "first_scout_top_units": [
+          "Reaper:42%",
+          "SCV:13%",
+          "Marine:3%",
+          "Hellion:2%"
+        ],
+        "overlord_arrive_sec_med": false,
+        "reaper_arrive_sec_med": 160.7,
+        "worker_arrive_sec_med": 139.3,
+        "worker_cnt_at_cross_med": 19.0,
+        "worker_est_send_sec_med": 111.5,
+        "worker_est_send_sec_p25": 68.0,
+        "worker_est_send_sec_p75": 128.4,
+        "worker_scout_pct": 20.0
+      },
+      "top_opening_sequences": [
+        "SupplyDepot->Barracks->Refinery->CommandCenter->SupplyDepot (22%)",
+        "SupplyDepot->Barracks->Refinery->Refinery->Factory (13%)",
+        "SupplyDepot->Barracks->Refinery->Refinery->SupplyDepot (12%)"
+      ],
+      "minute_curves": {
+        "m10": {
+          "a2w_med": 75.0,
+          "army_sup_med": 79.0,
+          "army_val_med": 4450.0,
+          "n": 33,
+          "primary_prod_med": 5.0,
+          "prod_cnt_med": 7.0,
+          "queens_med": 0,
+          "workers_med": 59.0
+        },
+        "m2": {
+          "a2w_med": 0.0,
+          "army_sup_med": 1.0,
+          "army_val_med": 0.0,
+          "n": 60,
+          "primary_prod_med": 1.0,
+          "prod_cnt_med": 1.0,
+          "queens_med": 0,
+          "workers_med": 19.0
+        },
+        "m4": {
+          "a2w_med": 18.3,
+          "army_sup_med": 15.0,
+          "army_val_med": 500.0,
+          "n": 57,
+          "primary_prod_med": 2.0,
+          "prod_cnt_med": 4.0,
+          "queens_med": 0,
+          "workers_med": 27.0
+        },
+        "m6": {
+          "a2w_med": 38.3,
+          "army_sup_med": 32.0,
+          "army_val_med": 1600.0,
+          "n": 52,
+          "primary_prod_med": 3.0,
+          "prod_cnt_med": 5.0,
+          "queens_med": 0,
+          "workers_med": 40.0
+        },
+        "m8": {
+          "a2w_med": 57.7,
+          "army_sup_med": 51.0,
+          "army_val_med": 2825.0,
+          "n": 45,
+          "primary_prod_med": 4.0,
+          "prod_cnt_med": 6.0,
+          "queens_med": 0,
+          "workers_med": 49.0
+        }
+      },
+      "tech_and_upgrade_sec_med": {
+        "combat_shield": 435.5,
+        "factory": 126.2,
+        "orbital": 114.4,
+        "plus1_arm": 506.5,
+        "plus1_atk": 441.5,
+        "starport": 184.5,
+        "stimpack": 418.6
+      }
     },
     "TvT": {
       "race": "Terran",
@@ -189,7 +527,86 @@
       "army_val_6m": 1688,
       "army_to_worker_6m": 0.94,
       "army_to_worker_8m": null,
-      "army_val_per_worker_6m": 42.7
+      "army_val_per_worker_6m": 42.7,
+      "scouting": {
+        "first_scout_arrive_sec_med": 203.6,
+        "first_scout_top_units": [
+          "Reaper:33%",
+          "SCV:17%"
+        ],
+        "overlord_arrive_sec_med": false,
+        "reaper_arrive_sec_med": 198.2,
+        "worker_arrive_sec_med": false,
+        "worker_cnt_at_cross_med": 28.0,
+        "worker_est_send_sec_med": 215.6,
+        "worker_est_send_sec_p25": 215.6,
+        "worker_est_send_sec_p75": 215.6,
+        "worker_scout_pct": 16.7
+      },
+      "top_opening_sequences": [
+        "SupplyDepot->Barracks->Refinery->CommandCenter->SupplyDepot (33%)",
+        "SupplyDepot->Barracks->Refinery->Refinery->SupplyDepot (17%)",
+        "SupplyDepot->Barracks->Refinery->SupplyDepot->Barracks (17%)"
+      ],
+      "minute_curves": {
+        "m10": {
+          "a2w_med": false,
+          "army_sup_med": false,
+          "army_val_med": false,
+          "n": 0,
+          "primary_prod_med": false,
+          "prod_cnt_med": false,
+          "queens_med": false,
+          "workers_med": false
+        },
+        "m2": {
+          "a2w_med": 0.0,
+          "army_sup_med": 1.0,
+          "army_val_med": 0.0,
+          "n": 6,
+          "primary_prod_med": 1.0,
+          "prod_cnt_med": 2.0,
+          "queens_med": 0,
+          "workers_med": 19.0
+        },
+        "m4": {
+          "a2w_med": 16.6,
+          "army_sup_med": 12.5,
+          "army_val_med": 450.0,
+          "n": 6,
+          "primary_prod_med": 2.5,
+          "prod_cnt_med": 4.5,
+          "queens_med": 0,
+          "workers_med": 26.5
+        },
+        "m6": {
+          "a2w_med": 49.5,
+          "army_sup_med": 36.0,
+          "army_val_med": 2112.5,
+          "n": 6,
+          "primary_prod_med": 3.0,
+          "prod_cnt_med": 5.0,
+          "queens_med": 0,
+          "workers_med": 39.5
+        },
+        "m8": {
+          "a2w_med": 61.5,
+          "army_sup_med": 52.0,
+          "army_val_med": 3200.0,
+          "n": 4,
+          "primary_prod_med": 3.0,
+          "prod_cnt_med": 5.0,
+          "queens_med": 0,
+          "workers_med": 45.5
+        }
+      },
+      "tech_and_upgrade_sec_med": {
+        "combat_shield": 455.9,
+        "factory": 136.5,
+        "orbital": 116.2,
+        "starport": 183.2,
+        "stimpack": 364.8
+      }
     },
     "TvZ": {
       "race": "Terran",
@@ -217,7 +634,89 @@
       "army_val_6m": 1288,
       "army_to_worker_6m": 0.72,
       "army_to_worker_8m": null,
-      "army_val_per_worker_6m": 29.3
+      "army_val_per_worker_6m": 29.3,
+      "scouting": {
+        "first_scout_arrive_sec_med": 155.4,
+        "first_scout_top_units": [
+          "Reaper:50%",
+          "SCV:14%",
+          "Hellion:4%"
+        ],
+        "overlord_arrive_sec_med": false,
+        "reaper_arrive_sec_med": 150.0,
+        "worker_arrive_sec_med": 133.9,
+        "worker_cnt_at_cross_med": 19.5,
+        "worker_est_send_sec_med": 99.3,
+        "worker_est_send_sec_p25": 59.0,
+        "worker_est_send_sec_p75": 115.3,
+        "worker_scout_pct": 20.0
+      },
+      "top_opening_sequences": [
+        "SupplyDepot->Barracks->Refinery->CommandCenter->SupplyDepot (32%)",
+        "SupplyDepot->Refinery->Barracks->CommandCenter->Factory (20%)",
+        "SupplyDepot->Refinery->Barracks->CommandCenter->SupplyDepot (6%)"
+      ],
+      "minute_curves": {
+        "m10": {
+          "a2w_med": 77.4,
+          "army_sup_med": 80.0,
+          "army_val_med": 4325.0,
+          "n": 35,
+          "primary_prod_med": 6.0,
+          "prod_cnt_med": 9.0,
+          "queens_med": 0,
+          "workers_med": 58.0
+        },
+        "m2": {
+          "a2w_med": 0.0,
+          "army_sup_med": 1.0,
+          "army_val_med": 0.0,
+          "n": 48,
+          "primary_prod_med": 1.0,
+          "prod_cnt_med": 1.0,
+          "queens_med": 0,
+          "workers_med": 19.0
+        },
+        "m4": {
+          "a2w_med": 14.4,
+          "army_sup_med": 12.5,
+          "army_val_med": 400.0,
+          "n": 48,
+          "primary_prod_med": 1.0,
+          "prod_cnt_med": 3.0,
+          "queens_med": 0,
+          "workers_med": 28.0
+        },
+        "m6": {
+          "a2w_med": 30.0,
+          "army_sup_med": 29.0,
+          "army_val_med": 1325.0,
+          "n": 46,
+          "primary_prod_med": 3.0,
+          "prod_cnt_med": 5.0,
+          "queens_med": 0,
+          "workers_med": 43.5
+        },
+        "m8": {
+          "a2w_med": 51.6,
+          "army_sup_med": 54.0,
+          "army_val_med": 2875.0,
+          "n": 43,
+          "primary_prod_med": 5.0,
+          "prod_cnt_med": 7.0,
+          "queens_med": 0,
+          "workers_med": 56.0
+        }
+      },
+      "tech_and_upgrade_sec_med": {
+        "combat_shield": 477.9,
+        "factory": 129.5,
+        "orbital": 116.8,
+        "plus1_arm": 458.7,
+        "plus1_atk": 447.1,
+        "starport": 180.0,
+        "stimpack": 376.0
+      }
     },
     "ZvP": {
       "race": "Zerg",
@@ -245,7 +744,90 @@
       "army_val_6m": 1512,
       "army_to_worker_6m": 0.53,
       "army_to_worker_8m": null,
-      "army_val_per_worker_6m": 28.5
+      "army_val_per_worker_6m": 28.5,
+      "scouting": {
+        "first_scout_arrive_sec_med": 198.2,
+        "first_scout_top_units": [
+          "Zergling:27%",
+          "Overlord:19%",
+          "Drone:3%"
+        ],
+        "overlord_arrive_sec_med": 214.3,
+        "reaper_arrive_sec_med": false,
+        "worker_arrive_sec_med": 110.1,
+        "worker_cnt_at_cross_med": 34.0,
+        "worker_est_send_sec_med": 215.9,
+        "worker_est_send_sec_p25": 144.2,
+        "worker_est_send_sec_p75": 222.5,
+        "worker_scout_pct": 39.8
+      },
+      "top_opening_sequences": [
+        "Extractor->Hatchery->Extractor->SpawningPool->Hatchery (19%)",
+        "Hatchery->Extractor->SpawningPool->Hatchery->Extractor (16%)",
+        "Hatchery->Extractor->SpawningPool->Hatchery->RoachWarren (9%)"
+      ],
+      "minute_curves": {
+        "m10": {
+          "a2w_med": 74.7,
+          "army_sup_med": 86.0,
+          "army_val_med": 5300.0,
+          "n": 61,
+          "primary_prod_med": 4.0,
+          "prod_cnt_med": 4.0,
+          "queens_med": 5.0,
+          "workers_med": 73.0
+        },
+        "m2": {
+          "a2w_med": 0.0,
+          "army_sup_med": 1.0,
+          "army_val_med": 0.0,
+          "n": 87,
+          "primary_prod_med": 2.0,
+          "prod_cnt_med": 2.0,
+          "queens_med": 0,
+          "workers_med": 19.0
+        },
+        "m4": {
+          "a2w_med": 19.1,
+          "army_sup_med": 14.0,
+          "army_val_med": 600.0,
+          "n": 86,
+          "primary_prod_med": 3.0,
+          "prod_cnt_med": 3.0,
+          "queens_med": 3.0,
+          "workers_med": 33.5
+        },
+        "m6": {
+          "a2w_med": 25.8,
+          "army_sup_med": 26.5,
+          "army_val_med": 1275.0,
+          "n": 83,
+          "primary_prod_med": 3.0,
+          "prod_cnt_med": 3.0,
+          "queens_med": 4.0,
+          "workers_med": 51.0
+        },
+        "m8": {
+          "a2w_med": 48.9,
+          "army_sup_med": 58.0,
+          "army_val_med": 3000.0,
+          "n": 75,
+          "primary_prod_med": 4.0,
+          "prod_cnt_med": 4.0,
+          "queens_med": 5.0,
+          "workers_med": 62.0
+        }
+      },
+      "tech_and_upgrade_sec_med": {
+        "bane_nest": 385.7,
+        "hive": 578.3,
+        "lair": 335.3,
+        "ling_speed": 213.4,
+        "plus1_arm": 466.3,
+        "pool": 72.9,
+        "roach_speed": 439.6,
+        "roach_warren": 254.1
+      }
     },
     "ZvT": {
       "race": "Zerg",
@@ -273,7 +855,90 @@
       "army_val_6m": 1625,
       "army_to_worker_6m": 0.55,
       "army_to_worker_8m": null,
-      "army_val_per_worker_6m": 31.0
+      "army_val_per_worker_6m": 31.0,
+      "scouting": {
+        "first_scout_arrive_sec_med": 171.4,
+        "first_scout_top_units": [
+          "Zergling:44%",
+          "Overlord:14%",
+          "Drone:12%"
+        ],
+        "overlord_arrive_sec_med": 219.6,
+        "reaper_arrive_sec_med": false,
+        "worker_arrive_sec_med": 97.6,
+        "worker_cnt_at_cross_med": 27.5,
+        "worker_est_send_sec_med": 192.0,
+        "worker_est_send_sec_p25": 92.9,
+        "worker_est_send_sec_p75": 200.9,
+        "worker_scout_pct": 36.0
+      },
+      "top_opening_sequences": [
+        "Extractor->Hatchery->Extractor->SpawningPool->Hatchery (18%)",
+        "Hatchery->Extractor->SpawningPool->Hatchery->Extractor (16%)",
+        "Extractor->SpawningPool->Hatchery->Hatchery->Extractor (8%)"
+      ],
+      "minute_curves": {
+        "m10": {
+          "a2w_med": 74.3,
+          "army_sup_med": 78.0,
+          "army_val_med": 5150.0,
+          "n": 35,
+          "primary_prod_med": 5.0,
+          "prod_cnt_med": 5.0,
+          "queens_med": 5.0,
+          "workers_med": 72.0
+        },
+        "m2": {
+          "a2w_med": 0.0,
+          "army_sup_med": 1.0,
+          "army_val_med": 0.0,
+          "n": 48,
+          "primary_prod_med": 2.0,
+          "prod_cnt_med": 2.0,
+          "queens_med": 0,
+          "workers_med": 19.0
+        },
+        "m4": {
+          "a2w_med": 18.2,
+          "army_sup_med": 14.0,
+          "army_val_med": 600.0,
+          "n": 48,
+          "primary_prod_med": 3.0,
+          "prod_cnt_med": 3.0,
+          "queens_med": 3.0,
+          "workers_med": 33.0
+        },
+        "m6": {
+          "a2w_med": 26.1,
+          "army_sup_med": 27.2,
+          "army_val_med": 1525.0,
+          "n": 46,
+          "primary_prod_med": 3.0,
+          "prod_cnt_med": 3.0,
+          "queens_med": 5.0,
+          "workers_med": 51.0
+        },
+        "m8": {
+          "a2w_med": 44.3,
+          "army_sup_med": 49.5,
+          "army_val_med": 3100.0,
+          "n": 43,
+          "primary_prod_med": 4.0,
+          "prod_cnt_med": 4.0,
+          "queens_med": 5.0,
+          "workers_med": 66.0
+        }
+      },
+      "tech_and_upgrade_sec_med": {
+        "bane_nest": 297.5,
+        "hive": 494.7,
+        "lair": 319.6,
+        "ling_speed": 212.1,
+        "plus1_arm": 472.7,
+        "pool": 67.4,
+        "roach_speed": 432.7,
+        "roach_warren": 230.9
+      }
     },
     "ZvZ": {
       "race": "Zerg",
@@ -301,7 +966,89 @@
       "army_val_6m": 1688,
       "army_to_worker_6m": 0.86,
       "army_to_worker_8m": null,
-      "army_val_per_worker_6m": 38.4
+      "army_val_per_worker_6m": 38.4,
+      "scouting": {
+        "first_scout_arrive_sec_med": 192.9,
+        "first_scout_top_units": [
+          "Zergling:54%",
+          "Drone:4%",
+          "Overlord:4%"
+        ],
+        "overlord_arrive_sec_med": 182.1,
+        "reaper_arrive_sec_med": false,
+        "worker_arrive_sec_med": 107.1,
+        "worker_cnt_at_cross_med": 32.5,
+        "worker_est_send_sec_med": 215.6,
+        "worker_est_send_sec_p25": 202.3,
+        "worker_est_send_sec_p75": 221.1,
+        "worker_scout_pct": 47.4
+      },
+      "top_opening_sequences": [
+        "Extractor->Hatchery->Extractor->SpawningPool->Hatchery (24%)",
+        "Hatchery->Extractor->SpawningPool->Hatchery->BanelingNest (18%)",
+        "Hatchery->Extractor->SpawningPool->BanelingNest->Hatchery (5%)"
+      ],
+      "minute_curves": {
+        "m10": {
+          "a2w_med": 90.2,
+          "army_sup_med": 92.8,
+          "army_val_med": 5200.0,
+          "n": 64,
+          "primary_prod_med": 4.0,
+          "prod_cnt_med": 4.0,
+          "queens_med": 3.0,
+          "workers_med": 58.0
+        },
+        "m2": {
+          "a2w_med": 0.0,
+          "army_sup_med": 1.0,
+          "army_val_med": 0.0,
+          "n": 112,
+          "primary_prod_med": 2.0,
+          "prod_cnt_med": 2.0,
+          "queens_med": 0,
+          "workers_med": 19.0
+        },
+        "m4": {
+          "a2w_med": 21.7,
+          "army_sup_med": 15.0,
+          "army_val_med": 662.5,
+          "n": 110,
+          "primary_prod_med": 3.0,
+          "prod_cnt_med": 3.0,
+          "queens_med": 2.0,
+          "workers_med": 32.0
+        },
+        "m6": {
+          "a2w_med": 38.0,
+          "army_sup_med": 35.2,
+          "army_val_med": 1575.0,
+          "n": 106,
+          "primary_prod_med": 3.0,
+          "prod_cnt_med": 3.0,
+          "queens_med": 3.0,
+          "workers_med": 43.5
+        },
+        "m8": {
+          "a2w_med": 58.4,
+          "army_sup_med": 60.0,
+          "army_val_med": 3100.0,
+          "n": 86,
+          "primary_prod_med": 3.0,
+          "prod_cnt_med": 3.0,
+          "queens_med": 3.0,
+          "workers_med": 53.0
+        }
+      },
+      "tech_and_upgrade_sec_med": {
+        "bane_nest": 167.5,
+        "lair": 339.0,
+        "ling_speed": 208.0,
+        "plus1_arm": 482.9,
+        "pool": 71.8,
+        "roach_speed": 439.7,
+        "roach_warren": 239.9
+      }
     }
   },
   "by_race": {
@@ -328,7 +1075,92 @@
       "bank_gas_4m": 153.0,
       "bank_min_6m": 265.0,
       "bank_gas_6m": 267.5,
-      "army_val_per_worker_6m": 39.6
+      "army_val_per_worker_6m": 39.6,
+      "scouting": {
+        "first_scout_arrive_sec_med": 117.9,
+        "first_scout_top_units": [
+          "Probe:54%",
+          "Adept:9%",
+          "Phoenix:2%",
+          "Stalker:1%"
+        ],
+        "overlord_arrive_sec_med": false,
+        "reaper_arrive_sec_med": false,
+        "worker_arrive_sec_med": 107.1,
+        "worker_cnt_at_cross_med": 21.0,
+        "worker_est_send_sec_med": 83.2,
+        "worker_est_send_sec_p25": 54.5,
+        "worker_est_send_sec_p75": 132.9,
+        "worker_scout_pct": 63.9
+      },
+      "top_opening_sequences": [
+        "Pylon->Gateway->Assimilator->Nexus->CyberneticsCore (46%)",
+        "Pylon->Gateway->Assimilator->Assimilator->Gateway (10%)",
+        "Pylon->Gateway->Assimilator->CyberneticsCore->Nexus (8%)"
+      ],
+      "minute_curves": {
+        "m10": {
+          "a2w_med": 82.6,
+          "army_sup_med": 66.5,
+          "army_val_med": 5000.0,
+          "n": 128,
+          "primary_prod_med": 8.0,
+          "prod_cnt_med": 9.0,
+          "queens_med": 0,
+          "workers_med": 65.0
+        },
+        "m2": {
+          "a2w_med": 0.0,
+          "army_sup_med": 1.0,
+          "army_val_med": 0.0,
+          "n": 203,
+          "primary_prod_med": 1.0,
+          "prod_cnt_med": 1.0,
+          "queens_med": 0,
+          "workers_med": 21.0
+        },
+        "m4": {
+          "a2w_med": 14.5,
+          "army_sup_med": 10.0,
+          "army_val_med": 500.0,
+          "n": 199,
+          "primary_prod_med": 2.0,
+          "prod_cnt_med": 3.0,
+          "queens_med": 0,
+          "workers_med": 33.0
+        },
+        "m6": {
+          "a2w_med": 37.8,
+          "army_sup_med": 24.0,
+          "army_val_med": 1700.0,
+          "n": 189,
+          "primary_prod_med": 4.0,
+          "prod_cnt_med": 5.0,
+          "queens_med": 0,
+          "workers_med": 45.0
+        },
+        "m8": {
+          "a2w_med": 62.4,
+          "army_sup_med": 45.0,
+          "army_val_med": 3312.5,
+          "n": 160,
+          "primary_prod_med": 8.0,
+          "prod_cnt_med": 9.0,
+          "queens_med": 0,
+          "workers_med": 57.0
+        }
+      },
+      "tech_and_upgrade_sec_med": {
+        "blink": 388.7,
+        "charge": 460.5,
+        "cyber": 96.3,
+        "plus1_arm": 523.3,
+        "plus1_atk": 475.2,
+        "robo": 209.4,
+        "stargate": 144.3,
+        "twilight": 244.9,
+        "warp_gate": 240.7
+      }
     },
     "Terran": {
       "w2m": 19.0,
@@ -353,7 +1185,90 @@
       "bank_gas_4m": 151,
       "bank_min_6m": 247.5,
       "bank_gas_6m": 169.0,
-      "army_val_per_worker_6m": 42.7
+      "army_val_per_worker_6m": 42.7,
+      "scouting": {
+        "first_scout_arrive_sec_med": 160.7,
+        "first_scout_top_units": [
+          "Reaper:45%",
+          "SCV:14%",
+          "Hellion:3%",
+          "Marine:2%"
+        ],
+        "overlord_arrive_sec_med": false,
+        "reaper_arrive_sec_med": 160.7,
+        "worker_arrive_sec_med": 139.3,
+        "worker_cnt_at_cross_med": 19.0,
+        "worker_est_send_sec_med": 99.7,
+        "worker_est_send_sec_p25": 68.0,
+        "worker_est_send_sec_p75": 128.4,
+        "worker_scout_pct": 19.8
+      },
+      "top_opening_sequences": [
+        "SupplyDepot->Barracks->Refinery->CommandCenter->SupplyDepot (27%)",
+        "SupplyDepot->Refinery->Barracks->CommandCenter->Factory (10%)",
+        "SupplyDepot->Barracks->Refinery->Refinery->Factory (9%)"
+      ],
+      "minute_curves": {
+        "m10": {
+          "a2w_med": 76.1,
+          "army_sup_med": 79.0,
+          "army_val_med": 4425.0,
+          "n": 68,
+          "primary_prod_med": 5.0,
+          "prod_cnt_med": 8.0,
+          "queens_med": 0,
+          "workers_med": 59.0
+        },
+        "m2": {
+          "a2w_med": 0.0,
+          "army_sup_med": 1.0,
+          "army_val_med": 0.0,
+          "n": 114,
+          "primary_prod_med": 1.0,
+          "prod_cnt_med": 1.0,
+          "queens_med": 0,
+          "workers_med": 19.0
+        },
+        "m4": {
+          "a2w_med": 17.2,
+          "army_sup_med": 13.0,
+          "army_val_med": 450.0,
+          "n": 111,
+          "primary_prod_med": 2.0,
+          "prod_cnt_med": 3.0,
+          "queens_med": 0,
+          "workers_med": 27.0
+        },
+        "m6": {
+          "a2w_med": 36.3,
+          "army_sup_med": 31.0,
+          "army_val_med": 1477.5,
+          "n": 104,
+          "primary_prod_med": 3.0,
+          "prod_cnt_med": 5.0,
+          "queens_med": 0,
+          "workers_med": 42.0
+        },
+        "m8": {
+          "a2w_med": 54.7,
+          "army_sup_med": 53.5,
+          "army_val_med": 2850.0,
+          "n": 92,
+          "primary_prod_med": 4.0,
+          "prod_cnt_med": 7.0,
+          "queens_med": 0,
+          "workers_med": 50.5
+        }
+      },
+      "tech_and_upgrade_sec_med": {
+        "combat_shield": 463.0,
+        "factory": 128.2,
+        "orbital": 116.0,
+        "plus1_arm": 495.4,
+        "plus1_atk": 443.5,
+        "starport": 182.2,
+        "stimpack": 399.9
+      }
     },
     "Zerg": {
       "w2m": 20.0,
@@ -378,7 +1293,96 @@
       "bank_gas_4m": 104,
       "bank_min_6m": 235,
       "bank_gas_6m": 196,
-      "army_val_per_worker_6m": 31.0
+      "army_val_per_worker_6m": 31.0,
+      "scouting": {
+        "first_scout_arrive_sec_med": 192.9,
+        "first_scout_top_units": [
+          "Zergling:42%",
+          "Overlord:11%",
+          "Drone:5%"
+        ],
+        "overlord_arrive_sec_med": 203.6,
+        "reaper_arrive_sec_med": false,
+        "worker_arrive_sec_med": 101.8,
+        "worker_cnt_at_cross_med": 32.0,
+        "worker_est_send_sec_med": 211.7,
+        "worker_est_send_sec_p25": 183.7,
+        "worker_est_send_sec_p75": 221.4,
+        "worker_scout_pct": 42.5
+      },
+      "top_opening_sequences": [
+        "Extractor->Hatchery->Extractor->SpawningPool->Hatchery (21%)",
+        "Hatchery->Extractor->SpawningPool->Hatchery->BanelingNest (9%)",
+        "Hatchery->Extractor->SpawningPool->Hatchery->Extractor (9%)"
+      ],
+      "minute_curves": {
+        "m10": {
+          "a2w_med": 79.3,
+          "army_sup_med": 85.5,
+          "army_val_med": 5200.0,
+          "n": 160,
+          "primary_prod_med": 4.0,
+          "prod_cnt_med": 4.0,
+          "queens_med": 4.0,
+          "workers_med": 64.0
+        },
+        "m2": {
+          "a2w_med": 0.0,
+          "army_sup_med": 1.0,
+          "army_val_med": 0.0,
+          "n": 247,
+          "primary_prod_med": 2.0,
+          "prod_cnt_med": 2.0,
+          "queens_med": 0,
+          "workers_med": 19.0
+        },
+        "m4": {
+          "a2w_med": 19.6,
+          "army_sup_med": 14.8,
+          "army_val_med": 625.0,
+          "n": 244,
+          "primary_prod_med": 3.0,
+          "prod_cnt_med": 3.0,
+          "queens_med": 3.0,
+          "workers_med": 33.0
+        },
+        "m6": {
+          "a2w_med": 28.8,
+          "army_sup_med": 29.0,
+          "army_val_med": 1425.0,
+          "n": 235,
+          "primary_prod_med": 3.0,
+          "prod_cnt_med": 3.0,
+          "queens_med": 3.0,
+          "workers_med": 46.0
+        },
+        "m8": {
+          "a2w_med": 52.4,
+          "army_sup_med": 57.2,
+          "army_val_med": 3062.5,
+          "n": 204,
+          "primary_prod_med": 4.0,
+          "prod_cnt_med": 4.0,
+          "queens_med": 4.0,
+          "workers_med": 59.0
+        }
+      },
+      "tech_and_upgrade_sec_med": {
+        "bane_nest": 220.1,
+        "hive": 540.3,
+        "lair": 333.5,
+        "ling_speed": 210.0,
+        "plus1_arm": 472.7,
+        "pool": 71.9,
+        "roach_speed": 438.9,
+        "roach_warren": 246.3
+      }
     }
+  },
+  "pro_benchmarks_v2_source": "288 LotV Pro Replays (576 perspectives) via tools/iteration-loop/measure-pro-scouting.rkt",
+  "pro_scouting_laws": {
+    "Protoss": "Send Probe scout after Gateway #1 (~16-17 supply, ~45-55s; 71.6% PvZ, 68.3% PvT; arrives 96-107s) \u2014 NEVER at 13.4s/14-supply! Check enemy natural & Pool timing before committing to 2nd Nexus/CyberCore.",
+    "Terran": "Send SCV scout after Barracks #1 (~17 supply, ~48-60s in TvP/TvZ; 20% SCV, 45-50% Reaper #1 arriving 150-161s) \u2014 NEVER at 13.4s/14-supply! Use Reaper #1 for follow-up scouting.",
+    "Zerg": "NEVER send an early 14-Drone scout (only 3-12% of pros ever Drone-scout; wasting a Drone at 13.4s bleeds ~130M opening eco!). Send Overlord #1 at 0:00 to enemy natural + Overlord #2 over our own natural/choke to spot incoming 12-Pool Lings/proxies, followed by Zergling scouts (42-54%) as soon as Pool finishes."
   }
 }

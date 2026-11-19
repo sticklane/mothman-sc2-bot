@@ -139,6 +139,42 @@
 (define TECH1-BLDG-SET
   (set "CyberneticsCore" "Factory" "Lair" "RoachWarren" "BanelingNest"))
 
+(define TECH2-BLDG-SET
+  (set "RoboticsFacility" "Stargate" "TwilightCouncil"
+       "Starport" "StarportFlying"
+       "HydraliskDen" "Spire" "LurkerDenMP" "InfestationPit"))
+
+(define PROD-FACILITY-SET
+  (set "Gateway" "WarpGate" "RoboticsFacility" "Stargate"
+       "Barracks" "BarracksFlying" "Factory" "FactoryFlying" "Starport" "StarportFlying"
+       "Hatchery" "Lair" "Hive"))
+
+(define PRIMARY-PROD-SET
+  (set "Gateway" "WarpGate"
+       "Barracks" "BarracksFlying"
+       "Hatchery" "Lair" "Hive"))
+
+(define TECH-PROD-SET
+  (set "RoboticsFacility" "Stargate" "TwilightCouncil"
+       "Factory" "FactoryFlying" "Starport" "StarportFlying"
+       "HydraliskDen" "Spire" "GreaterSpire" "RoachWarren" "BanelingNest"))
+
+(define (canon-opening-bldg ut)
+  (cond
+    [(or (string=? ut "WarpGate") (string=? ut "Gateway")) "Gateway"]
+    [(or (string=? ut "SupplyDepotLowered") (string=? ut "SupplyDepot")) "SupplyDepot"]
+    [(string=? ut "BarracksFlying") "Barracks"]
+    [(string=? ut "FactoryFlying") "Factory"]
+    [(string=? ut "StarportFlying") "Starport"]
+    [(member ut '("CommandCenter" "CommandCenterFlying" "OrbitalCommand" "OrbitalCommandFlying" "PlanetaryFortress")) "CommandCenter"]
+    [(member ut '("Hatchery" "Lair" "Hive")) "Hatchery"]
+    [else ut]))
+
+(define SCOUT-IGNORE-SET
+  (set "Larva" "Egg" "CreepTumor" "CreepTumorBurrowed" "CreepTumorQueen"
+       "Broodling" "Interceptor" "AdeptPhaseShift" "KD8Charge" "ForceField"
+       "MULE" "AutoTurret" "LocustMP" "LocustMPFlying"))
+
 (define CREEP-TUMOR-SET
   (set "CreepTumor" "CreepTumorBurrowed" "CreepTumorQueen"))
 
@@ -205,6 +241,7 @@
           'pos-attack 0
           'pos-hold 0
           'pos-retreat 0
+          'retreat-frames '()
           'pos-by-min (make-hasheqv) ; min -> (vector atk hld ret)
           'hexp-high 0
           'rush-high 0
@@ -274,6 +311,7 @@
   (define pos-atk (hash-ref m 'pos-attack))
   (define pos-hld (hash-ref m 'pos-hold))
   (define pos-ret (hash-ref m 'pos-retreat))
+  (define ret-frames (hash-ref m 'retreat-frames))
   (define hexp-hi (hash-ref m 'hexp-high))
   (define rush-hi (hash-ref m 'rush-high))
   (define step-ms (hash-ref m 'step-ms))
@@ -371,7 +409,8 @@
            (define v (string->number (cadr mm)))
            (when v (set! step-ms (cons v step-ms)))))
        (define mf (regexp-match RX-FRAME ln))
-       (define minute (if mf (quotient (or (string->number (cadr mf)) 0) 1344) 0))
+       (define st-fr (if mf (or (string->number (cadr mf)) 0) 0))
+       (define minute (quotient st-fr 1344))
        (define pvec (hash-ref! pos-by-min minute (lambda () (vector 0 0 0))))
        (cond
          [(string-contains? ln "pos=attack")
@@ -379,6 +418,7 @@
           (vector-set! pvec 0 (add1 (vector-ref pvec 0)))]
          [(string-contains? ln "pos=retreat")
           (set! pos-ret (add1 pos-ret))
+          (set! ret-frames (cons st-fr ret-frames))
           (vector-set! pvec 2 (add1 (vector-ref pvec 2)))]
          [(string-contains? ln "pos=hold")
           (set! pos-hld (add1 pos-hld))
@@ -420,6 +460,7 @@
              'pos-attack pos-atk
              'pos-hold pos-hld
              'pos-retreat pos-ret
+             'retreat-frames ret-frames
              'hexp-high hexp-hi
              'rush-high rush-hi
              'step-ms step-ms
@@ -478,11 +519,16 @@
       [(or (string-contains? bn "summary.json") (string=? bn "results.json"))
        (with-handlers ([exn:fail? void])
          (define js (call-with-input-file p read-json))
+         (define run-timeout-sec
+           (and (hash? js)
+                (let ([tv (hash-ref js 'timeout_sec #f)])
+                  (and (real? tv) tv))))
          (define ms (cond [(and (hash? js) (list? (hash-ref js 'matches #f))) (hash-ref js 'matches)]
                           [(list? js) js]
                           [else '()]))
-         (for ([m (in-list ms)] #:when (hash? m))
-           (define mid (or (hash-ref m 'match_id #f) (hash-ref m 'id #f)))
+         (for ([m0 (in-list ms)] #:when (hash? m0))
+           (define m (if run-timeout-sec (hash-set m0 'run_timeout_sec run-timeout-sec) m0))
+           (define mid (or (hash-ref m 'match_id #f) (hash-ref m 'id #f) (hash-ref m 'index #f)))
            (when mid (hash-set! tbl mid m))
            (define slg (hash-ref m 'slug #f))
            (when (and (string? slg) (not (string=? slg "")))
@@ -705,10 +751,24 @@
           (define gas-timings (make-hasheqv '((1 . ()) (2 . ()))))
           (define sup-timings (make-hasheqv '((1 . ()) (2 . ()))))
           (define prod1-sec (make-hasheqv))
+          (define prod-bldg-timings (make-hasheqv '((1 . ()) (2 . ()))))
           (define tech1-sec (make-hasheqv))
+          (define tech2-sec (make-hasheqv))
           (define orbital1-sec (make-hasheqv))
           (define lair-sec (make-hasheqv))
           (define aa-tech-first-sec (make-hasheqv))
+          ;; Pro-benchmarking trackers: opening BO, production lifecycles, upgrades, early scout
+          (define opening-bo-rev '())
+          (define opening-bldg5-rev '())
+          (define opening-ol-cnt 0)
+          (define prod-lifespans (make-hasheqv)) ; our tag -> (vector ut start-sec died-sec)
+          (define upg-timings (make-hasheq))     ; sym -> first-completion sec
+          (define idx->owner-type (make-hasheqv)) ; tracker unitTagIndex -> (cons pid ut)
+          (define our-main-xy #f)
+          (define opp-main-xy #f)
+          (define base-dist #f)
+          (define first-scout-cross-sec #f)
+          (define first-scout-unit-type #f)
           (define our-units-ht (make-hash))
           (define opp-units-ht (make-hash))
           (define our-bldgs-ht (make-hash))
@@ -728,6 +788,22 @@
           (define opp-air-first-sec #f)
           (define opp-air-types (make-hash))
           (define our-aa-unit-cnt 0)
+          ;; W7-LOOP-2: Endgame home-stall (>=40 army sup sitting <=45t of home while opp <20)
+          ;; and own-base-under-attack buckets (for exact own_base_retreat_frames)
+          (define our-th-coords '())
+          (define idx->combat-pid (make-hasheqv)) ; tracker unitTagIndex -> pid (combat units only)
+          (define own-base-attack-buckets (make-hasheqv)) ; (quotient gl 224) -> #t
+          (define last-opp-asup 0)
+          (define prev-our-stat-sec 0.0)
+          (define prev-our-killed 0)
+          (define last-away-combat-sec -999.0)
+          (define home-stall-streak-sec 0.0)
+          (define max-home-stall-sec 0.0)
+          (define (near-any-our-th? px py)
+            (for/or ([tc (in-list our-th-coords)])
+              (define dx (- px (car tc)))
+              (define dy (- py (cdr tc)))
+              (<= (+ (* dx dx) (* dy dy)) 784.0))) ; <= 28.0 tiles
           (define max-tracker-loop 0)
 
           (for ([ev (in-list tracker-events)])
@@ -744,6 +820,30 @@
                  (when (and (memv p '(1 2)) (hash? st))
                    (define fu (quotient (hash-ref st 29 0) 4096))
                    (define fm (quotient (hash-ref st 30 0) 4096))
+                   (define w-cur (hash-ref st 4 0))
+                   (define k-min (+ (hash-ref st 23 0) (hash-ref st 24 0) (hash-ref st 25 0)))
+                   (define k-gas (+ (hash-ref st 26 0) (hash-ref st 27 0) (hash-ref st 28 0)))
+                   (define cur-asup (max 0 (- fu w-cur)))
+                   (cond
+                     [(= p opp-pid)
+                      (set! last-opp-asup cur-asup)]
+                     [(= p our-pid)
+                      (define kval (+ k-min k-gas))
+                      (define dt (max 0.0 (- sec prev-our-stat-sec)))
+                      (when (>= (- kval prev-our-killed) 150)
+                        (set! last-away-combat-sec sec))
+                      (define away-active? (<= (- sec last-away-combat-sec) 25.0))
+                      (if (and (>= cur-asup 40)
+                               (< last-opp-asup 20)
+                               (not away-active?)
+                               (> prev-our-stat-sec 0.0))
+                          (begin
+                            (set! home-stall-streak-sec (+ home-stall-streak-sec dt))
+                            (when (> home-stall-streak-sec max-home-stall-sec)
+                              (set! max-home-stall-sec home-stall-streak-sec)))
+                          (set! home-stall-streak-sec 0.0))
+                      (set! prev-our-stat-sec sec)
+                      (set! prev-our-killed kval)])
                    (hash-update! total-stat-ev p add1 0)
                    (when (and (>= fu fm) (< fm 200) (> gl 224))
                      (hash-update! sb-steps p add1 0))
@@ -754,15 +854,16 @@
                                       'loop gl
                                       'min_cur (hash-ref st 0 0)
                                       'gas_cur (hash-ref st 1 0)
-                                      'workers (hash-ref st 4 0)
+                                      'workers w-cur
                                       'food_used fu
                                       'food_made fm
                                       'army_min (hash-ref st 11 0)
                                       'army_gas (hash-ref st 14 0)
-                                      'killed_min (+ (hash-ref st 23 0) (hash-ref st 24 0) (hash-ref st 25 0))
-                                      'killed_gas (+ (hash-ref st 26 0) (hash-ref st 27 0) (hash-ref st 28 0)))))]
+                                      'killed_min k-min
+                                      'killed_gas k-gas)))]
                 [(1 6) ; SUnitBornEvent (1) or SUnitInitEvent (6)
-                 (define tag (bitwise-ior (arithmetic-shift (hash-ref pl 0 0) 18)
+                 (define u-idx (hash-ref pl 0 0))
+                 (define tag (bitwise-ior (arithmetic-shift u-idx 18)
                                           (hash-ref pl 1 0)))
                  (define p (hash-ref pl 3 0))
                  (define ut (b->s (hash-ref pl 2 #"")))
@@ -771,11 +872,56 @@
                  (hash-set! unit-owner tag p)
                  (hash-set! unit-type tag ut)
                  (hash-set! unit-xy tag (cons ux uy))
+                 (when (and (= p our-pid) (not first-scout-cross-sec) (<= sec 360.0))
+                   (hash-set! idx->owner-type u-idx ut))
+                 (when (and (memv p '(1 2))
+                            (or (= eid 1) (set-member? WARPABLE-UNIT-SET ut))
+                            (not (set-member? NON-COMBAT-UNIT-SET ut))
+                            (not (set-member? SCOUT-IGNORE-SET ut))
+                            (not (set-member? WIN-BLDG-SET ut))
+                            (not (string-prefix? ut "Beacon")))
+                   (hash-set! idx->combat-pid u-idx p))
+                 (when (and (= p our-pid) (set-member? TOWNHALL-SET ut))
+                   (set! our-th-coords (cons (cons (exact->inexact ux) (exact->inexact uy)) our-th-coords)))
                  (when (= eid 6)
                    (hash-set! unit-init-sec tag sec))
                  (when (= p opp-pid)
                    (hash-set! alive-opp tag (list ut ux uy)))
+                 ;; Frame-0 main base coordinates & starting townhall lifecycle
+                 (when (and (= gl 0) (set-member? TOWNHALL-SET ut))
+                   (cond
+                     [(= p our-pid)
+                      (unless our-main-xy (set! our-main-xy (cons (exact->inexact ux) (exact->inexact uy))))
+                      (hash-set! prod-lifespans tag (vector ut 0.0 +inf.0))]
+                     [(= p opp-pid)
+                      (unless opp-main-xy (set! opp-main-xy (cons (exact->inexact ux) (exact->inexact uy))))])
+                   (when (and our-main-xy opp-main-xy (not base-dist))
+                     (set! base-dist (max 1.0 (sqrt (+ (sqr (- (car opp-main-xy) (car our-main-xy)))
+                                                       (sqr (- (cdr opp-main-xy) (cdr our-main-xy)))))))))
                  (when (and (> gl 0) (memv p '(1 2)))
+                   ;; Track our production, tech-prod, base, and Queen lifecycles for 4m/6m/8m/10m curves
+                   (when (and (= p our-pid)
+                              (<= sec 615.0)
+                              (or (set-member? TOWNHALL-SET ut)
+                                  (set-member? PROD-FACILITY-SET ut)
+                                  (set-member? TECH-PROD-SET ut)
+                                  (string=? ut "Queen")))
+                     (hash-set! prod-lifespans tag (vector ut sec +inf.0)))
+                   ;; Canonical opening BO (first 8 structures / key opening events + 5-building signature)
+                   (when (and (= p our-pid) (= eid 6)
+                              (< (length opening-bldg5-rev) 5)
+                              (not (set-member? WARPABLE-UNIT-SET ut))
+                              (not (set-member? CREEP-TUMOR-SET ut)))
+                     (set! opening-bldg5-rev (cons (canon-opening-bldg ut) opening-bldg5-rev)))
+                   (when (and (= p our-pid) (< (length opening-bo-rev) 8))
+                     (cond
+                       [(and (= eid 6)
+                             (not (set-member? WARPABLE-UNIT-SET ut))
+                             (not (set-member? CREEP-TUMOR-SET ut)))
+                        (set! opening-bo-rev (cons (list ut (round1 sec)) opening-bo-rev))]
+                       [(and (= eid 1) (string=? ut "Overlord") (< opening-ol-cnt 2))
+                        (set! opening-ol-cnt (add1 opening-ol-cnt))
+                        (set! opening-bo-rev (cons (list ut (round1 sec)) opening-bo-rev))]))
                    ;; Macro structure timing captures
                    (when (set-member? TOWNHALL-SET ut)
                      (hash-update! th-timings p (lambda (lst) (cons (round1 sec) lst))))
@@ -784,10 +930,15 @@
                    (when (and (set-member? SUPPLY-BLDG-SET ut)
                               (or (= eid 6) (string=? ut "Overlord")))
                      (hash-update! sup-timings p (lambda (lst) (cons (round1 sec) lst))))
-                   (when (and (set-member? PROD1-BLDG-SET ut) (not (hash-has-key? prod1-sec p)))
-                     (hash-set! prod1-sec p (round1 sec)))
+                   (when (set-member? PROD1-BLDG-SET ut)
+                     (unless (hash-has-key? prod1-sec p)
+                       (hash-set! prod1-sec p (round1 sec)))
+                     (when (= eid 6)
+                       (hash-update! prod-bldg-timings p (lambda (lst) (cons (round1 sec) lst)))))
                    (when (and (set-member? TECH1-BLDG-SET ut) (not (hash-has-key? tech1-sec p)))
                      (hash-set! tech1-sec p (round1 sec)))
+                   (when (and (set-member? TECH2-BLDG-SET ut) (not (hash-has-key? tech2-sec p)))
+                     (hash-set! tech2-sec p (round1 sec)))
                    (when (and (set-member? AA-TECH-BLDG-SET ut) (not (hash-has-key? aa-tech-first-sec p)))
                      (hash-set! aa-tech-first-sec p (round1 sec)))
                    ;; Unit & building production counts
@@ -836,16 +987,22 @@
                        (hash-set! alive-opp tag (list (hash-ref unit-type tag "?") (car xy) (cdr xy))))
                      (hash-remove! alive-opp tag))]
                 [(4) ; SUnitTypeChangeEvent (morphs: Orbital, Lair, Hive, WarpGate, Ravager, Lurker, etc.)
-                 (define tag (bitwise-ior (arithmetic-shift (hash-ref pl 0 0) 18)
+                 (define u-idx (hash-ref pl 0 0))
+                 (define tag (bitwise-ior (arithmetic-shift u-idx 18)
                                           (hash-ref pl 1 0)))
                  (define ut (b->s (hash-ref pl 2 #"")))
                  (define p (hash-ref unit-owner tag 0))
                  (when (not (string=? ut ""))
                    (hash-set! unit-type tag ut)
+                   (when (and (= p our-pid) (not first-scout-cross-sec) (<= sec 360.0))
+                     (hash-set! idx->owner-type u-idx ut))
                    (when (= p opp-pid)
                      (define xy (hash-ref unit-xy tag '(0 . 0)))
                      (hash-set! alive-opp tag (list ut (car xy) (cdr xy))))
                    (when (and (> gl 0) (memv p '(1 2)))
+                     (when (and (= p our-pid) (< (length opening-bo-rev) 8)
+                                (or (string=? ut "OrbitalCommand") (string=? ut "Lair")))
+                       (set! opening-bo-rev (cons (list ut (round1 sec)) opening-bo-rev)))
                      (when (and (string=? ut "OrbitalCommand") (not (hash-has-key? orbital1-sec p)))
                        (hash-set! orbital1-sec p (round1 sec)))
                      (when (and (string=? ut "Lair") (not (hash-has-key? lair-sec p)))
@@ -854,6 +1011,44 @@
                        (unless (hash-has-key? aa-tech-first-sec p) (hash-set! aa-tech-first-sec p (round1 sec))))
                      (when (and (string=? ut "GreaterSpire") (not (hash-has-key? aa-tech-first-sec p)))
                        (hash-set! aa-tech-first-sec p (round1 sec)))))]
+                [(8) ; SUnitPositionsEvent — early scout crossing + away-from-home + own-base threat
+                 (when our-main-xy
+                   (define fidx (hash-ref pl 0 0))
+                   (define items (hash-ref pl 1 '()))
+                   (define ox (car our-main-xy)) (define oy (cdr our-main-xy))
+                   (define check-scout? (and (not first-scout-cross-sec) (<= sec 360.0) opp-main-xy base-dist))
+                   (define ex (if opp-main-xy (car opp-main-xy) 0.0))
+                   (define ey (if opp-main-xy (cdr opp-main-xy) 0.0))
+                   (define min-home-d (if base-dist (* 0.45 base-dist) 9999.0))
+                   (define max-opp-d (if base-dist (* 0.75 base-dist) 0.0))
+                   (define atk-bkt (quotient gl 224))
+                   (let loop ([rem items] [cidx fidx])
+                     (when (and (pair? rem) (pair? (cdr rem)) (pair? (cddr rem)))
+                       (define nidx (+ cidx (first rem)))
+                       (define px (exact->inexact (second rem)))
+                       (define py (exact->inexact (third rem)))
+                       (when (and check-scout? (not first-scout-cross-sec))
+                         (define ut (hash-ref idx->owner-type nidx #f))
+                         (when ut
+                           (unless (or (set-member? WIN-BLDG-SET ut)
+                                       (set-member? SCOUT-IGNORE-SET ut)
+                                       (string-prefix? ut "Beacon"))
+                             (define dh (sqrt (+ (sqr (- px ox)) (sqr (- py oy)))))
+                             (define de (sqrt (+ (sqr (- px ex)) (sqr (- py ey)))))
+                             (when (and (>= dh min-home-d) (<= de max-opp-d))
+                               (set! first-scout-cross-sec (round1 sec))
+                               (set! first-scout-unit-type ut)))))
+                       (define cpid (hash-ref idx->combat-pid nidx #f))
+                       (when cpid
+                         (cond
+                           [(= cpid our-pid)
+                            (define dx (- px ox)) (define dy (- py oy))
+                            (when (> (+ (* dx dx) (* dy dy)) 2025.0) ; > 45.0 tiles from own main
+                              (set! last-away-combat-sec sec))]
+                           [(= cpid opp-pid)
+                            (when (near-any-our-th? px py)
+                              (hash-set! own-base-attack-buckets atk-bkt #t))]))
+                       (loop (cdddr rem) nidx))))]
                 [(2) ; SUnitDiedEvent
                  (define tag (bitwise-ior (arithmetic-shift (hash-ref pl 0 0) 18)
                                           (hash-ref pl 1 0)))
@@ -861,6 +1056,37 @@
                  (define ut (hash-ref unit-type tag "?"))
                  (define killer-pid (hash-ref pl 2 #f))
                  (hash-remove! alive-opp tag)
+                 (define ls (hash-ref prod-lifespans tag #f))
+                 (when ls (vector-set! ls 2 sec))
+                 ;; Mark own-base-under-attack buckets when combat/worker deaths happen near our bases
+                 (when (and (> gl 100)
+                            (pair? our-th-coords)
+                            (not (is-morph-death? ut killer-pid))
+                            (or (and (= p our-pid) (equal? killer-pid opp-pid))
+                                (and (= p opp-pid)
+                                     (not (set-member? NON-COMBAT-UNIT-SET ut))
+                                     (not (set-member? SCOUT-IGNORE-SET ut)))))
+                   (define dx (exact->inexact (hash-ref pl 3 -9999)))
+                   (define dy (exact->inexact (hash-ref pl 4 -9999)))
+                   (when (near-any-our-th? dx dy)
+                     (hash-set! own-base-attack-buckets (quotient gl 224) #t)))
+                 ;; Also detect early scout killed in enemy territory between SUnitPositions ticks
+                 (when (and (not first-scout-cross-sec)
+                            (= p our-pid)
+                            (<= sec 360.0)
+                            (> gl 100)
+                            killer-pid
+                            our-main-xy opp-main-xy base-dist
+                            (not (set-member? WIN-BLDG-SET ut))
+                            (not (set-member? SCOUT-IGNORE-SET ut))
+                            (not (string-prefix? ut "Beacon")))
+                   (define dx (exact->inexact (hash-ref pl 3 0)))
+                   (define dy (exact->inexact (hash-ref pl 4 0)))
+                   (define dh (sqrt (+ (sqr (- dx (car our-main-xy))) (sqr (- dy (cdr our-main-xy))))))
+                   (define de (sqrt (+ (sqr (- dx (car opp-main-xy))) (sqr (- dy (cdr opp-main-xy))))))
+                   (when (and (>= dh (* 0.45 base-dist)) (<= de (* 0.75 base-dist)))
+                     (set! first-scout-cross-sec (round1 sec))
+                     (set! first-scout-unit-type ut)))
                  ;; Self-cancel detector: our initiated building died by our own pid before completion within 15s
                  (when (and (= p our-pid)
                             (equal? killer-pid our-pid)
@@ -895,7 +1121,26 @@
                             (not (string=? upg ""))
                             (not (string-prefix? upg "Spray"))
                             (not (string-prefix? upg "RewardDance")))
-                   (hash-update! upg-cnt p add1 0))])))
+                   (hash-update! upg-cnt p add1 0)
+                   (when (and (= p our-pid) (> gl 0))
+                     (define ulow (string-downcase upg))
+                     (define s1 (round1 sec))
+                     (define (rec-upg! k)
+                       (unless (hash-has-key? upg-timings k) (hash-set! upg-timings k s1))
+                       (unless (hash-has-key? upg-timings 'first_combat_upg_sec)
+                         (hash-set! upg-timings 'first_combat_upg_sec s1)))
+                     (cond
+                       [(string=? ulow "warpgateresearch") (rec-upg! 'warpgate_sec)]
+                       [(string=? ulow "blinktech") (rec-upg! 'blink_sec)]
+                       [(string=? ulow "charge") (rec-upg! 'charge_sec)]
+                       [(string=? ulow "stimpack") (rec-upg! 'stim_sec)]
+                       [(string=? ulow "shieldwall") (rec-upg! 'combat_shield_sec)]
+                       [(string=? ulow "punishergrenades") (rec-upg! 'concussive_sec)]
+                       [(string=? ulow "zerglingmovementspeed") (rec-upg! 'ling_speed_sec)]
+                       [(string=? ulow "centrificalhooks") (rec-upg! 'bane_speed_sec)]
+                       [(string=? ulow "glialreconstitution") (rec-upg! 'roach_speed_sec)]
+                       [(or (string-contains? ulow "weaponslevel1")) (rec-upg! 'plus1_atk_sec)]
+                       [(or (string-contains? ulow "armorslevel1")) (rec-upg! 'plus1_arm_sec)])))])))
 
           ;; Duration & Result
           (define total-loops (max header-loops max-tracker-loop))
@@ -914,6 +1159,27 @@
               [else 'unknown]))
           (define opp-early-crash?
             (and (eq? res 'win) (<= total-loops 300)))
+
+          ;; Runner summary.json wall & step latency telemetry (gracefully #f when absent)
+          (define wall-sec
+            (let ([v (hash-ref meta 'wall_sec #f)])
+              (and (real? v) (round1 v))))
+          (define run-timeout-sec
+            (let ([v (hash-ref meta 'run_timeout_sec #f)])
+              (and (real? v) (exact->inexact v))))
+          (define runner-timed-out? (eq? (hash-ref meta 'timed_out #f) #t))
+          (define our-tel
+            (let ([t (hash-ref meta 'our_telemetry #f)])
+              (if (hash? t) t (hasheq))))
+          (define (tel-ms k)
+            (let ([v (hash-ref our-tel k #f)])
+              (and (real? v) (round2 v))))
+          (define tel-avg-obs-ms (tel-ms 'avg_obs_ms))
+          (define tel-avg-rt-ms (tel-ms 'avg_runtime_ms))
+          (define tel-avg-tr-ms (tel-ms 'avg_translate_ms))
+          (define tel-avg-step-ms (tel-ms 'avg_step_ms))
+          (define tel-p95-step-ms (tel-ms 'p95_step_ms))
+          (define tel-max-step-ms (tel-ms 'max_step_ms))
 
           ;; Core stats extraction
           (define our-s (hash-ref stats-by-min our-pid))
@@ -940,15 +1206,77 @@
             (define h (stat-near-sec sbm-p t))
             (and h (+ (safe-num (hash-ref h 'army_min 0))
                       (safe-num (hash-ref h 'army_gas 0)))))
+          (define (army-sup-at sbm-p t)
+            (define h (stat-near-sec sbm-p t))
+            (and h (max 0 (- (safe-num (hash-ref h 'food_used 0))
+                             (safe-num (hash-ref h 'workers 0))))))
 
           (define our-w2 (w-at our-s 120.0)) (define opp-w2 (w-at opp-s 120.0))
           (define our-w4 (w-at our-s 240.0)) (define opp-w4 (w-at opp-s 240.0))
           (define our-w6 (w-at our-s 360.0)) (define opp-w6 (w-at opp-s 360.0))
           (define our-w8 (w-at our-s 480.0)) (define opp-w8 (w-at opp-s 480.0))
+          (define our-w10 (w-at our-s 600.0)) (define opp-w10 (w-at opp-s 600.0))
+          (define a2 (army-val-at our-s 120.0))
+          (define a4 (army-val-at our-s 240.0))
           (define a6 (army-val-at our-s 360.0))
           (define a8 (army-val-at our-s 480.0))
+          (define a10 (army-val-at our-s 600.0))
+          (define asup2 (army-sup-at our-s 120.0))
+          (define asup4 (army-sup-at our-s 240.0))
+          (define asup6 (army-sup-at our-s 360.0))
+          (define asup8 (army-sup-at our-s 480.0))
+          (define asup10 (army-sup-at our-s 600.0))
+          (define a2w-4m (and a4 our-w4 (> our-w4 0) (round1 (/ (exact->inexact a4) our-w4))))
           (define a2w-6m (and a6 our-w6 (> our-w6 0) (round1 (/ (exact->inexact a6) our-w6))))
           (define a2w-8m (and a8 our-w8 (> our-w8 0) (round1 (/ (exact->inexact a8) our-w8))))
+          (define a2w-10m (and a10 our-w10 (> our-w10 0) (round1 (/ (exact->inexact a10) our-w10))))
+
+          ;; Production, base, tech-prod, and Queen counts alive at 4m/6m/8m/10m
+          (define (alive-cnt-at t pred)
+            (and (>= dur (- t 15.0))
+                 (for/sum ([(_tag vec) (in-hash prod-lifespans)]
+                           #:when (and (<= (vector-ref vec 1) t)
+                                       (< t (vector-ref vec 2))
+                                       (pred (vector-ref vec 0))))
+                   1)))
+          (define (is-th? ut) (set-member? TOWNHALL-SET ut))
+          (define (is-prod? ut) (set-member? PROD-FACILITY-SET ut))
+          (define (is-pprod? ut) (set-member? PRIMARY-PROD-SET ut))
+          (define (is-tprod? ut) (set-member? TECH-PROD-SET ut))
+          (define (is-queen? ut) (string=? ut "Queen"))
+          (define bases-4m (alive-cnt-at 240.0 is-th?))
+          (define bases-6m (alive-cnt-at 360.0 is-th?))
+          (define bases-8m (alive-cnt-at 480.0 is-th?))
+          (define bases-10m (alive-cnt-at 600.0 is-th?))
+          (define prod-4m (alive-cnt-at 240.0 is-prod?))
+          (define prod-6m (alive-cnt-at 360.0 is-prod?))
+          (define prod-8m (alive-cnt-at 480.0 is-prod?))
+          (define prod-10m (alive-cnt-at 600.0 is-prod?))
+          (define pprod-4m (alive-cnt-at 240.0 is-pprod?))
+          (define pprod-6m (alive-cnt-at 360.0 is-pprod?))
+          (define pprod-8m (alive-cnt-at 480.0 is-pprod?))
+          (define pprod-10m (alive-cnt-at 600.0 is-pprod?))
+          (define tprod-4m (alive-cnt-at 240.0 is-tprod?))
+          (define tprod-6m (alive-cnt-at 360.0 is-tprod?))
+          (define tprod-8m (alive-cnt-at 480.0 is-tprod?))
+          (define tprod-10m (alive-cnt-at 600.0 is-tprod?))
+          (define queens-4m (alive-cnt-at 240.0 is-queen?))
+          (define queens-6m (alive-cnt-at 360.0 is-queen?))
+          (define queens-8m (alive-cnt-at 480.0 is-queen?))
+          (define queens-10m (alive-cnt-at 600.0 is-queen?))
+
+          ;; Early scouting & opening BO / upgrade timings
+          (define our-prod-list (reverse (hash-ref prod-bldg-timings our-pid '())))
+          (define enemy-first-seen-sec
+            (let ([lp (hash-ref our-tel 'enemy_first_seen_loop #f)])
+              (and (real? lp) (> lp 0) (round1 (/ (exact->inexact lp) 22.4)))))
+          (define first-scout-sec (or first-scout-cross-sec enemy-first-seen-sec))
+          (define opening-bo (reverse opening-bo-rev))
+          (define opening-seq5
+            (and (pair? opening-bldg5-rev)
+                 (string-join (reverse opening-bldg5-rev) "->")))
+          (define upg-timings-imm
+            (for/hasheq ([(k v) (in-hash upg-timings)]) (values k v)))
 
           (define our-pk-w (peak-stat our-s (lambda (h) (safe-num (hash-ref h 'workers 0)))))
           (define opp-pk-w (peak-stat opp-s (lambda (h) (safe-num (hash-ref h 'workers 0)))))
@@ -976,11 +1304,38 @@
                     'supply1_sec (and (>= (length our-sup-list) 1) (first our-sup-list))
                     'supply2_sec (and (>= (length our-sup-list) 2) (second our-sup-list))
                     'prod1_sec (hash-ref prod1-sec our-pid #f)
+                    'prod2_sec (and (>= (length our-prod-list) 2) (second our-prod-list))
+                    'prod3_sec (and (>= (length our-prod-list) 3) (third our-prod-list))
                     'tech1_sec (hash-ref tech1-sec our-pid #f)
+                    'tech2_sec (hash-ref tech2-sec our-pid #f)
                     'orbital1_sec (hash-ref orbital1-sec our-pid #f)
                     'lair_sec (hash-ref lair-sec our-pid #f)
-                    'w2m our-w2 'w4m our-w4 'w6m our-w6 'w8m our-w8
-                    'army_to_worker_6m a2w-6m 'army_to_worker_8m a2w-8m))
+                    'w2m our-w2 'w4m our-w4 'w6m our-w6 'w8m our-w8 'w10m our-w10
+                    'bases_4m bases-4m 'bases_6m bases-6m 'bases_8m bases-8m 'bases_10m bases-10m
+                    'prod_cnt_4m prod-4m 'prod_cnt_6m prod-6m 'prod_cnt_8m prod-8m 'prod_cnt_10m prod-10m
+                    'prod_count_4m prod-4m 'prod_count_6m prod-6m 'prod_count_8m prod-8m 'prod_count_10m prod-10m
+                    'primary_prod_4m pprod-4m 'primary_prod_6m pprod-6m 'primary_prod_8m pprod-8m 'primary_prod_10m pprod-10m
+                    'tech_prod_4m tprod-4m 'tech_prod_6m tprod-6m 'tech_prod_8m tprod-8m 'tech_prod_10m tprod-10m
+                    'queens_4m queens-4m 'queens_6m queens-6m 'queens_8m queens-8m 'queens_10m queens-10m
+                    'army_val_2m a2 'army_val_4m a4 'army_val_6m a6 'army_val_8m a8 'army_val_10m a10
+                    'army_sup_2m asup2 'army_sup_4m asup4 'army_sup_6m asup6 'army_sup_8m asup8 'army_sup_10m asup10
+                    'army_to_worker_4m a2w-4m 'army_to_worker_6m a2w-6m
+                    'army_to_worker_8m a2w-8m 'army_to_worker_10m a2w-10m
+                    'first_scout_sec first-scout-sec
+                    'first_scout_cross_sec first-scout-cross-sec
+                    'enemy_first_seen_sec enemy-first-seen-sec
+                    'warpgate_sec (hash-ref upg-timings 'warpgate_sec #f)
+                    'blink_sec (hash-ref upg-timings 'blink_sec #f)
+                    'charge_sec (hash-ref upg-timings 'charge_sec #f)
+                    'stim_sec (hash-ref upg-timings 'stim_sec #f)
+                    'combat_shield_sec (hash-ref upg-timings 'combat_shield_sec #f)
+                    'concussive_sec (hash-ref upg-timings 'concussive_sec #f)
+                    'ling_speed_sec (hash-ref upg-timings 'ling_speed_sec #f)
+                    'bane_speed_sec (hash-ref upg-timings 'bane_speed_sec #f)
+                    'roach_speed_sec (hash-ref upg-timings 'roach_speed_sec #f)
+                    'plus1_atk_sec (hash-ref upg-timings 'plus1_atk_sec #f)
+                    'plus1_arm_sec (hash-ref upg-timings 'plus1_arm_sec #f)
+                    'first_combat_upg_sec (hash-ref upg-timings 'first_combat_upg_sec #f)))
 
           ;; Surviving enemy breakdown (win-condition structures vs CreepTumor/Overlord/etc.)
           (define surv-win-ht (make-hash))
@@ -1126,17 +1481,92 @@
                                 'our_aa_tech_sec our-aa-tech-s
                                 'our_lair_sec our-lair-s)))))
 
+          ;; W7-LOOP-2: Compute exact own_base_retreat_frames & endgame_home_stall_sec
+          (define endgame-home-stall-sec (round1 max-home-stall-sec))
+          (define endgame-home-stall-anomaly
+            (and (>= max-home-stall-sec 90.0)
+                 (hasheq 'max_streak_sec endgame-home-stall-sec)))
+          (define-values (own-base-retreat-frames own-base-retreat-ticks)
+            (let ([rfs (reverse (hash-ref log-acc 'retreat-frames '()))])
+              (for/fold ([frames 0] [ticks 0] [prev-fr #f] #:result (values frames ticks))
+                        ([fr (in-list rfs)])
+                (define b (quotient fr 224))
+                (if (or (hash-has-key? own-base-attack-buckets b)
+                        (hash-has-key? own-base-attack-buckets (sub1 b))
+                        (hash-has-key? own-base-attack-buckets (add1 b)))
+                    (let ([step-f (if (and prev-fr (> fr prev-fr) (<= (- fr prev-fr) 96))
+                                      (- fr prev-fr)
+                                      44)])
+                      (values (+ frames step-f) (add1 ticks) fr))
+                    (values frames ticks #f)))))
+          (define own-base-retreat-anomaly
+            (and (>= own-base-retreat-frames 440)
+                 (hasheq 'frames own-base-retreat-frames
+                         'ticks own-base-retreat-ticks
+                         'sec (round1 (/ own-base-retreat-frames 22.4)))))
+
           (define anomalies
             (hasheq 'zero_fire_retreat zero-fire-retreat-anomaly
                     'escrow_lockouts escrow-lockouts
                     'self_cancel_loops self-cancel-loops
                     'endgame_stall endgame-stall-anomaly
+                    'endgame_home_stall endgame-home-stall-anomaly
+                    'own_base_retreat own-base-retreat-anomaly
                     'air_aa_starvation air-aa-starvation))
+
+          ;; Classify 0-combat opponent disconnects (e.g., mid-early client drop) separately from real combat wins
+          (define opp-zero-combat-dc?
+            (and (eq? res 'win)
+                 (not opp-early-crash?)
+                 (<= dur 300.0)
+                 (= killed-val 0)
+                 (= lost-val 0)
+                 (= our-pk-army 0)
+                 (= opp-pk-army 0)))
+          (define opp-fault? (or opp-early-crash? opp-zero-combat-dc?))
+
+          ;; Distinguish CPU wall-timeout ties vs 30m loop-cap ties vs combat stalls
+          (define loop-cap-tie? (and (eq? res 'tie) (>= dur 1780.0)))
+          (define wall-timeout-tie?
+            (and (eq? res 'tie)
+                 (not loop-cap-tie?)
+                 (or runner-timed-out?
+                     (and wall-sec
+                          (>= wall-sec (if run-timeout-sec (* 0.90 run-timeout-sec) 480.0))))))
+          (define tie-cause
+            (cond
+              [(not (eq? res 'tie)) #f]
+              [loop-cap-tie? "loop_cap_30m"]
+              [(and wall-timeout-tie? (hash? endgame-stall-anomaly)) "cpu_wall_timeout_and_stall"]
+              [wall-timeout-tie? "cpu_wall_timeout"]
+              [(hash? endgame-stall-anomaly) "endgame_stall"]
+              [else "other_tie"]))
+
+          (define step-sorted (sort (hash-ref log-acc 'step-ms '()) <))
+          (define step-p50 (percentile-sorted step-sorted 0.50))
+          (define step-p95 (percentile-sorted step-sorted 0.95))
+          (define log-step-max (and (pair? step-sorted) (round2 (last step-sorted))))
+          (define true-step-max
+            (cond
+              [(and tel-max-step-ms log-step-max) (max tel-max-step-ms log-step-max)]
+              [tel-max-step-ms tel-max-step-ms]
+              [else log-step-max]))
+          (define eff-p95-step-ms
+            (or tel-p95-step-ms (and step-p95 (round2 step-p95))))
 
           ;; Build crisp signatures list
           (define sigs '())
           (define (add-sig! s) (set! sigs (cons s sigs)))
-          (when (and (eq? res 'tie) (>= dur 1780.0)) (add-sig! "STALEMATE_TIE"))
+          (when opp-early-crash? (add-sig! "OPP_EARLY_CRASH"))
+          (when opp-zero-combat-dc? (add-sig! "OPP_ZERO_COMBAT_DC"))
+          (when loop-cap-tie? (add-sig! "STALEMATE_TIE"))
+          (when wall-timeout-tie?
+            (add-sig! (format "WALL_TIMEOUT_TIE(~as,rt=~a/tr=~ams)"
+                              (if wall-sec (r0 wall-sec) "?")
+                              (if tel-avg-rt-ms (r1 tel-avg-rt-ms) "-")
+                              (if tel-avg-tr-ms (r1 tel-avg-tr-ms) "-"))))
+          (when (and true-step-max (>= true-step-max 500.0))
+            (add-sig! (format "STEP_SPIKE(~ams)" (r0 true-step-max))))
           (when endgame-stall-anomaly
             (add-sig! (if (hash-ref endgame-stall-anomaly 'creep_or_ol_blocked #f)
                           (format "ENDGAME_STALL_CREEP_OL(~am,~ab)"
@@ -1144,6 +1574,10 @@
                                   (hash-ref endgame-stall-anomaly 'surviving_win_bldgs))
                           (format "ENDGAME_STALL(~am)"
                                   (hash-ref endgame-stall-anomaly 'stall_minutes)))))
+          (when endgame-home-stall-anomaly
+            (add-sig! (format "ENDGAME_HOME_STALL(~as)" (r0 endgame-home-stall-sec))))
+          (when own-base-retreat-anomaly
+            (add-sig! (format "OWN_BASE_RETREAT(~af)" own-base-retreat-frames)))
           (when zero-fire-retreat-anomaly
             (add-sig! (if (hash-ref zero-fire-retreat-anomaly 'retreat_driven #f)
                           (format "SUICIDE_KITE_RETREAT(~ax,ret=~a%)"
@@ -1177,10 +1611,6 @@
           (when (> (hash-ref log-acc 'action-err-total 0) 20) (add-sig! "HIGH_ACTION_REJECTS(>20)"))
           (when (pair? (hash-ref log-acc 'crashes '())) (add-sig! "STDERR_EXCEPTION"))
 
-          (define step-sorted (sort (hash-ref log-acc 'step-ms '()) <))
-          (define step-p50 (percentile-sorted step-sorted 0.50))
-          (define step-p95 (percentile-sorted step-sorted 0.95))
-          (define step-max (and (pair? step-sorted) (round2 (last step-sorted))))
           (define mid (extract-match-id-from-name bn))
           (define match-label
             (cond [mid (number->string mid)]
@@ -1197,6 +1627,11 @@
                   'matchup matchup
                   'result (symbol->string res)
                   'opp_early_crash opp-early-crash?
+                  'opp_zero_combat_dc opp-zero-combat-dc?
+                  'opp_fault opp-fault?
+                  'tie_cause tie-cause
+                  'wall_timeout_tie wall-timeout-tie?
+                  'wall_sec wall-sec
                   'duration_sec dur
                   'killed_val killed-val
                   'lost_val lost-val
@@ -1207,8 +1642,20 @@
                   'our_w4 our-w4 'opp_w4 opp-w4
                   'our_w6 our-w6 'opp_w6 opp-w6
                   'our_w8 our-w8 'opp_w8 opp-w8
+                  'our_w10 our-w10 'opp_w10 opp-w10
+                  'army_to_worker_4m a2w-4m
                   'army_to_worker_6m a2w-6m
                   'army_to_worker_8m a2w-8m
+                  'army_to_worker_10m a2w-10m
+                  'first_scout_sec first-scout-sec
+                  'first_scout_cross_sec first-scout-cross-sec
+                  'enemy_first_seen_sec enemy-first-seen-sec
+                  'first_scout_unit first-scout-unit-type
+                  'first_scout_unit_type first-scout-unit-type
+                  'opening_bo opening-bo
+                  'opening_bo_sequence opening-seq5
+                  'opening_seq5 opening-seq5
+                  'upgrade_timings upg-timings-imm
                   'our_peak_workers our-pk-w
                   'opp_peak_workers opp-pk-w
                   'our_peak_army our-pk-army
@@ -1240,6 +1687,9 @@
                   'pos_attack (hash-ref log-acc 'pos-attack 0)
                   'pos_hold (hash-ref log-acc 'pos-hold 0)
                   'pos_retreat (hash-ref log-acc 'pos-retreat 0)
+                  'endgame_home_stall_sec endgame-home-stall-sec
+                  'own_base_retreat_frames own-base-retreat-frames
+                  'own_base_retreat_ticks own-base-retreat-ticks
                   'hexp_high (hash-ref log-acc 'hexp-high 0)
                   'rush_high (hash-ref log-acc 'rush-high 0)
                   'saving_top (for/list ([p (in-list (top-k-pairs (hash-ref log-acc 'saving-counts) 5))])
@@ -1248,9 +1698,16 @@
                                  (list (car p) (cdr p)))
                   'max_escrow_streak_len (hash-ref log-acc 'max-escrow-streak-len 0)
                   'max_escrow_streak_target (hash-ref log-acc 'max-escrow-streak-target "none")
+                  'avg_obs_ms tel-avg-obs-ms
+                  'avg_runtime_ms tel-avg-rt-ms
+                  'avg_translate_ms tel-avg-tr-ms
+                  'avg_step_ms tel-avg-step-ms
+                  'p95_step_ms eff-p95-step-ms
+                  'max_step_ms true-step-max
                   'step_p50 (and step-p50 (round2 step-p50))
-                  'step_p95 (and step-p95 (round2 step-p95))
-                  'step_max step-max
+                  'step_p95 eff-p95-step-ms
+                  'step_max true-step-max
+                  'log_step_max log-step-max
                   'crashes (reverse (hash-ref log-acc 'crashes '()))
                   'signatures (reverse sigs))))))
 
@@ -1335,6 +1792,12 @@
         (define (avg-opt k)
           (define vs (filter real? (map (lambda (r) (hash-ref r k #f)) rows)))
           (and (pair? vs) (round1 (/ (apply + vs) (length vs)))))
+        (define (avg-opt2 k)
+          (define vs (filter real? (map (lambda (r) (hash-ref r k #f)) rows)))
+          (and (pair? vs) (round2 (/ (apply + vs) (length vs)))))
+        (define (max-opt k)
+          (define vs (filter real? (map (lambda (r) (hash-ref r k #f)) rows)))
+          (and (pair? vs) (round1 (apply max vs))))
         (define (timing-dist k)
           (num-dist (map (lambda (r) (hash-ref (hash-ref r 'macro_timings (hasheq)) k #f)) rows)))
         ;; Anomaly counts
@@ -1345,6 +1808,17 @@
           (for ([s (in-list (hash-ref r 'signatures '()))])
             (define base-s (car (string-split s "(")))
             (hash-update! sig-ht base-s add1 0)))
+        (define wall-timeout-ties (count (lambda (r) (eq? (hash-ref r 'wall_timeout_tie #f) #t)) rows))
+        (define opp-zero-combat-dcs (count (lambda (r) (eq? (hash-ref r 'opp_zero_combat_dc #f) #t)) rows))
+        (define step-spike-500-cnt
+          (count (lambda (r) (let ([v (hash-ref r 'step_max #f)]) (and (real? v) (>= v 500.0)))) rows))
+        (define scout-unit-ht (make-hash))
+        (define open-seq-ht (make-hash))
+        (for ([r (in-list rows)])
+          (define su (hash-ref r 'first_scout_unit_type #f))
+          (when (string? su) (hash-update! scout-unit-ht su add1 0))
+          (define oseq (hash-ref r 'opening_seq5 #f))
+          (when (string? oseq) (hash-update! open-seq-ht oseq add1 0)))
         (hasheq 'n n
                 'wins wins 'losses losses 'ties ties
                 'win_rate_pct (round1 (* 100.0 (/ wins n)))
@@ -1352,12 +1826,27 @@
                 'killed_val tot-k 'lost_val tot-l
                 'trade_agg agg-tr 'trade_med med-tr
                 'avg_dur_sec (avg-field 'duration_sec)
+                'avg_wall_sec (avg-opt 'wall_sec)
+                'avg_obs_ms (avg-opt2 'avg_obs_ms)
+                'avg_runtime_ms (avg-opt2 'avg_runtime_ms)
+                'avg_translate_ms (avg-opt2 'avg_translate_ms)
+                'avg_step_ms (avg-opt2 'avg_step_ms)
+                'avg_p95_step_ms (avg-opt2 'p95_step_ms)
+                'max_step_ms (max-opt 'step_max)
+                'step_spike_500ms_count step-spike-500-cnt
+                'wall_timeout_ties wall-timeout-ties
+                'opp_zero_combat_dcs opp-zero-combat-dcs
+                'endgame_home_stall_count (count (lambda (r) (>= (safe-num (hash-ref r 'endgame_home_stall_sec 0.0) 0.0) 90.0)) rows)
+                'avg_endgame_home_stall_sec (avg-field 'endgame_home_stall_sec)
+                'total_own_base_retreat_frames (for/sum ([r (in-list rows)]) (hash-ref r 'own_base_retreat_frames 0))
+                'own_base_retreat_matches (count (lambda (r) (>= (hash-ref r 'own_base_retreat_frames 0) 440)) rows)
                 'our_bases (avg-field2 'our_bases)
                 'opp_bases (avg-field2 'opp_bases)
                 'our_w2 (avg-opt 'our_w2) 'opp_w2 (avg-opt 'opp_w2)
                 'our_w4 (avg-opt 'our_w4) 'opp_w4 (avg-opt 'opp_w4)
                 'our_w6 (avg-opt 'our_w6) 'opp_w6 (avg-opt 'opp_w6)
                 'our_w8 (avg-opt 'our_w8) 'opp_w8 (avg-opt 'opp_w8)
+                'our_w10 (avg-opt 'our_w10) 'opp_w10 (avg-opt 'opp_w10)
                 'our_peak_workers (avg-field 'our_peak_workers)
                 'opp_peak_workers (avg-field 'opp_peak_workers)
                 'our_peak_army (round1 (avg-field 'our_peak_army))
@@ -1370,20 +1859,81 @@
                 'upgrades (avg-field 'upgrades)
                 'action_rejects (for/sum ([r (in-list rows)]) (hash-ref r 'action_rejects 0))
                 'logged (count (lambda (r) (hash-ref r 'has_logs #f)) rows)
+                'first_scout_unit_counts (for/list ([p (in-list (top-k-pairs scout-unit-ht 6))])
+                                           (list (car p) (cdr p)))
+                'top_opening_sequences (for/list ([p (in-list (top-k-pairs open-seq-ht 5))])
+                                         (list (car p) (cdr p)))
                 'macro_timing_dists
                 (hasheq 'w2m (timing-dist 'w2m)
                         'w4m (timing-dist 'w4m)
                         'w6m (timing-dist 'w6m)
                         'w8m (timing-dist 'w8m)
+                        'w10m (timing-dist 'w10m)
                         'nat_sec (timing-dist 'nat_sec)
                         'third_sec (timing-dist 'third_sec)
                         'gas1_sec (timing-dist 'gas1_sec)
+                        'gas2_sec (timing-dist 'gas2_sec)
                         'supply1_sec (timing-dist 'supply1_sec)
                         'prod1_sec (timing-dist 'prod1_sec)
+                        'prod2_sec (timing-dist 'prod2_sec)
+                        'prod3_sec (timing-dist 'prod3_sec)
                         'tech1_sec (timing-dist 'tech1_sec)
+                        'tech2_sec (timing-dist 'tech2_sec)
                         'orbital1_sec (timing-dist 'orbital1_sec)
+                        'lair_sec (timing-dist 'lair_sec)
+                        'bases_4m (timing-dist 'bases_4m)
+                        'bases_6m (timing-dist 'bases_6m)
+                        'bases_8m (timing-dist 'bases_8m)
+                        'bases_10m (timing-dist 'bases_10m)
+                        'prod_cnt_4m (timing-dist 'prod_cnt_4m)
+                        'prod_cnt_6m (timing-dist 'prod_cnt_6m)
+                        'prod_cnt_8m (timing-dist 'prod_cnt_8m)
+                        'prod_cnt_10m (timing-dist 'prod_cnt_10m)
+                        'prod_count_4m (timing-dist 'prod_count_4m)
+                        'prod_count_6m (timing-dist 'prod_count_6m)
+                        'prod_count_8m (timing-dist 'prod_count_8m)
+                        'prod_count_10m (timing-dist 'prod_count_10m)
+                        'primary_prod_4m (timing-dist 'primary_prod_4m)
+                        'primary_prod_6m (timing-dist 'primary_prod_6m)
+                        'primary_prod_8m (timing-dist 'primary_prod_8m)
+                        'primary_prod_10m (timing-dist 'primary_prod_10m)
+                        'tech_prod_4m (timing-dist 'tech_prod_4m)
+                        'tech_prod_6m (timing-dist 'tech_prod_6m)
+                        'tech_prod_8m (timing-dist 'tech_prod_8m)
+                        'tech_prod_10m (timing-dist 'tech_prod_10m)
+                        'queens_4m (timing-dist 'queens_4m)
+                        'queens_6m (timing-dist 'queens_6m)
+                        'queens_8m (timing-dist 'queens_8m)
+                        'queens_10m (timing-dist 'queens_10m)
+                        'army_val_2m (timing-dist 'army_val_2m)
+                        'army_val_4m (timing-dist 'army_val_4m)
+                        'army_val_6m (timing-dist 'army_val_6m)
+                        'army_val_8m (timing-dist 'army_val_8m)
+                        'army_val_10m (timing-dist 'army_val_10m)
+                        'army_sup_2m (timing-dist 'army_sup_2m)
+                        'army_sup_4m (timing-dist 'army_sup_4m)
+                        'army_sup_6m (timing-dist 'army_sup_6m)
+                        'army_sup_8m (timing-dist 'army_sup_8m)
+                        'army_sup_10m (timing-dist 'army_sup_10m)
+                        'army_to_worker_4m (timing-dist 'army_to_worker_4m)
                         'army_to_worker_6m (timing-dist 'army_to_worker_6m)
-                        'army_to_worker_8m (timing-dist 'army_to_worker_8m))
+                        'army_to_worker_8m (timing-dist 'army_to_worker_8m)
+                        'army_to_worker_10m (timing-dist 'army_to_worker_10m)
+                        'first_scout_sec (timing-dist 'first_scout_sec)
+                        'first_scout_cross_sec (timing-dist 'first_scout_cross_sec)
+                        'enemy_first_seen_sec (timing-dist 'enemy_first_seen_sec)
+                        'warpgate_sec (timing-dist 'warpgate_sec)
+                        'blink_sec (timing-dist 'blink_sec)
+                        'charge_sec (timing-dist 'charge_sec)
+                        'stim_sec (timing-dist 'stim_sec)
+                        'combat_shield_sec (timing-dist 'combat_shield_sec)
+                        'concussive_sec (timing-dist 'concussive_sec)
+                        'ling_speed_sec (timing-dist 'ling_speed_sec)
+                        'bane_speed_sec (timing-dist 'bane_speed_sec)
+                        'roach_speed_sec (timing-dist 'roach_speed_sec)
+                        'plus1_atk_sec (timing-dist 'plus1_atk_sec)
+                        'plus1_arm_sec (timing-dist 'plus1_arm_sec)
+                        'first_combat_upg_sec (timing-dist 'first_combat_upg_sec))
                 'anomaly_counts
                 (hasheq 'zero_fire_retreat (anom-cnt (lambda (a) (and (hash? (hash-ref a 'zero_fire_retreat #f)) #t)))
                         'suicide_kite_retreat
@@ -1393,7 +1943,12 @@
                         'escrow_lockout (anom-cnt (lambda (a) (pair? (hash-ref a 'escrow_lockouts '()))))
                         'self_cancel_loop (anom-cnt (lambda (a) (pair? (hash-ref a 'self_cancel_loops '()))))
                         'endgame_stall (anom-cnt (lambda (a) (and (hash? (hash-ref a 'endgame_stall #f)) #t)))
-                        'air_aa_starvation (anom-cnt (lambda (a) (and (hash? (hash-ref a 'air_aa_starvation #f)) #t))))
+                        'endgame_home_stall (anom-cnt (lambda (a) (and (hash? (hash-ref a 'endgame_home_stall #f)) #t)))
+                        'own_base_retreat (anom-cnt (lambda (a) (and (hash? (hash-ref a 'own_base_retreat #f)) #t)))
+                        'air_aa_starvation (anom-cnt (lambda (a) (and (hash? (hash-ref a 'air_aa_starvation #f)) #t)))
+                        'wall_timeout_tie wall-timeout-ties
+                        'step_spike_500ms step-spike-500-cnt
+                        'opp_zero_combat_dc opp-zero-combat-dcs)
                 'top_signatures (for/list ([p (in-list (top-k-pairs sig-ht 6))])
                                   (list (car p) (cdr p)))))))
 
@@ -1417,13 +1972,28 @@
             (r0 (hash-ref agg 'our_peak_army 0)) (r0 (hash-ref agg 'opp_peak_army 0))
             (r0 (hash-ref agg 'our_avg_min 0)) (r0 (hash-ref agg 'our_avg_gas 0))
             (r1 (hash-ref agg 'supply_block_pct 0)) (r1 (hash-ref agg 'upgrades 0)))
-    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a\n"
+    (define rt-ms (hash-ref agg 'avg_runtime_ms #f))
+    (define tr-ms (hash-ref agg 'avg_translate_ms #f))
+    (define p95-ms (hash-ref agg 'avg_p95_step_ms #f))
+    (define mx-ms (hash-ref agg 'max_step_ms #f))
+    (define lat-str
+      (if (or rt-ms tr-ms mx-ms)
+          (format " | Lat(rt/tr/p95/max)=~a/~a/~a/~ams | WallTies=~a | Spikes>=500=~a"
+                  (if rt-ms (r1 rt-ms) "-")
+                  (if tr-ms (r1 tr-ms) "-")
+                  (if p95-ms (r1 p95-ms) "-")
+                  (if mx-ms (r0 mx-ms) "-")
+                  (hash-ref agg 'wall_timeout_ties 0)
+                  (hash-ref agg 'step_spike_500ms_count 0))
+          ""))
+    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a~a\n"
             (hash-ref ac 'suicide_kite_retreat 0)
             (hash-ref ac 'zero_fire_retreat 0)
             (hash-ref ac 'escrow_lockout 0)
             (hash-ref ac 'self_cancel_loop 0)
             (hash-ref ac 'endgame_stall 0)
-            (hash-ref ac 'air_aa_starvation 0))))
+            (hash-ref ac 'air_aa_starvation 0)
+            lat-str)))
 
 ;; -----------------------------------------------------------------------------
 ;; `--compare <baseline.json>` Diff Printer (Works with v1 & v2 JSONs!)
@@ -1549,11 +2119,15 @@
            (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'endgame_stall #f))) rows)
            (lambda (r)
              (define s (hash-ref (hash-ref r 'anomalies) 'endgame_stall))
-             (printf "  #~a ~a v ~a ~a(~a): stalled ~am (m~a-m~a, pkArmy=~a) | survWinBldgs=~a ~a | nonWin=~a ~a\n"
+             (printf "  #~a ~a v ~a ~a(~a): stalled ~am (m~a-m~a, pkArmy=~a) | wall=~as rt/tr=~a/~ams | survWinBldgs=~a ~a | nonWin=~a ~a\n"
                      (hash-ref r 'id) (hash-ref r 'our_bot) (hash-ref r 'opp_bot)
                      (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
                      (hash-ref s 'stall_minutes) (hash-ref s 'start_min) (hash-ref s 'end_min)
-                     (hash-ref s 'peak_army_during_stall) (hash-ref s 'surviving_win_bldgs)
+                     (hash-ref s 'peak_army_during_stall)
+                     (or (hash-ref r 'wall_sec) "-")
+                     (if (hash-ref r 'avg_runtime_ms #f) (r1 (hash-ref r 'avg_runtime_ms)) "-")
+                     (if (hash-ref r 'avg_translate_ms #f) (r1 (hash-ref r 'avg_translate_ms)) "-")
+                     (hash-ref s 'surviving_win_bldgs)
                      (hash-ref s 'surviving_win_locs) (hash-ref r 'surviving_enemy_nonwin)
                      (if (hash-ref s 'creep_or_ol_blocked) "[CREEP/OL-BLOCKED]" ""))))
 
@@ -1568,7 +2142,30 @@
                      (hash-ref a 'opp_air_count) (r0 (hash-ref a 'opp_air_first_sec))
                      (hash-ref a 'opp_air_types) (hash-ref a 'our_aa_units)
                      (or (hash-ref a 'our_aa_tech_sec) "NONE")
-                     (or (hash-ref a 'our_lair_sec) "NONE")))))
+                     (or (hash-ref a 'our_lair_sec) "NONE"))))
+
+  (section "6. CPU Wall-Timeout Ties, Step Spikes (>=500ms) & Opp Zero-Combat DCs"
+           (filter (lambda (r)
+                     (or (eq? (hash-ref r 'wall_timeout_tie #f) #t)
+                         (let ([mx (hash-ref r 'step_max #f)]) (and (real? mx) (>= mx 500.0)))
+                         (eq? (hash-ref r 'opp_zero_combat_dc #f) #t)
+                         (eq? (hash-ref r 'opp_early_crash #f) #t)))
+                   rows)
+           (lambda (r)
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | wall=~as | rt/tr/p95/max=~a/~a/~a/~ams | tieCause=~a~a\n"
+                     (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
+                     (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
+                     (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
+                     (or (hash-ref r 'wall_sec) "-")
+                     (if (hash-ref r 'avg_runtime_ms #f) (r1 (hash-ref r 'avg_runtime_ms)) "-")
+                     (if (hash-ref r 'avg_translate_ms #f) (r1 (hash-ref r 'avg_translate_ms)) "-")
+                     (if (hash-ref r 'p95_step_ms #f) (r1 (hash-ref r 'p95_step_ms)) "-")
+                     (if (hash-ref r 'step_max #f) (r0 (hash-ref r 'step_max)) "-")
+                     (or (hash-ref r 'tie_cause) "-")
+                     (cond
+                       [(eq? (hash-ref r 'opp_early_crash #f) #t) " [OPP_EARLY_CRASH]"]
+                       [(eq? (hash-ref r 'opp_zero_combat_dc #f) #t) " [OPP_ZERO_COMBAT_DC]"]
+                       [else ""])))))
 
 ;; -----------------------------------------------------------------------------
 ;; Main CLI Driver
@@ -1622,7 +2219,11 @@
     (filter (lambda (r) (and (not (hash-has-key? r 'skip)) (not (hash-has-key? r 'error))))
             raw-results))
   (define clean-scored
-    (filter (lambda (r) (not (hash-ref r 'opp_early_crash #f))) scored))
+    (filter (lambda (r)
+              (not (or (hash-ref r 'opp_fault #f)
+                       (hash-ref r 'opp_early_crash #f)
+                       (hash-ref r 'opp_zero_combat_dc #f))))
+            scored))
 
   (define elapsed-ms (inexact->exact (round (- (current-inexact-milliseconds) t0))))
 
@@ -1694,7 +2295,7 @@
               (aggregate-slice (filter (lambda (r) (string=? (hash-ref r 'result) rs)) clean-scored)))))
 
   (printf "\n================================================================================================================================\n")
-  (printf "  AGGREGATE SUMMARY (Clean excludes opponent loop<=300 instant crashes)\n")
+  (printf "  AGGREGATE SUMMARY (Clean excludes opponent loop<=300 crashes & 0-combat disconnects)\n")
   (printf "================================================================================================================================\n")
   (print-agg-line "ALL_MATCHES  " agg-all)
   (when (< (length clean-scored) (length scored))

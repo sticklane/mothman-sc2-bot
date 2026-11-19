@@ -165,6 +165,8 @@
  SC2-PLACEMENT-POS-CACHE
  SC2-TUMOR-PLACEMENT-CACHE
  SC2-PLACEMENT-CACHE-TTL
+ SC2-LAST-TUMOR-RPC-LOOP
+ SC2-ZERG-TH-MORPH-RESERVE-LOOP
  SC2-WARPGATE-LAST-LOOP
  SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP
  select-producer-tags-for-unit
@@ -4179,12 +4181,16 @@
 (define SC2-ENEMY-MAIN-CLEARED-AT (box #f))
 (define SC2-EVER-SAW-MINERALS? (box #f))
 (define SC2-WIRE-HOLD-POSTURE-STATE (box #f))
+(define SC2-WIRE-OFFENSIVE-PUSH-STATE (box #f))
 (define SC2-CACHED-MAP-BASE-CLUSTERS (box '()))
 (define SC2-CORNER-SCAN-LAST-LOOP (box -9999))
 (define SC2-ACTIVE-GAME-INFO (box #f))
 (define SC2-PLACEMENT-NEG-COOLDOWN (make-hash))
 (define SC2-PLACEMENT-POS-CACHE (make-hash))
 (define SC2-TUMOR-PLACEMENT-CACHE (make-hash))
+(define SC2-LAST-TUMOR-RPC-LOOP (box -9999))
+(define SC2-ZERG-TH-MORPH-RESERVE-LOOP (box #f))
+(define SC2-ENEMY-POS-PURGE-LAST-LOOP (box -9999))
 (define SC2-PLACEMENT-CACHE-SIG (box #f))
 (define SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP (box -9999))
 
@@ -4331,12 +4337,16 @@
     (set-box! SC2-ENEMY-MAIN-CLEARED-AT #f)
     (set-box! SC2-EVER-SAW-MINERALS? #f)
     (set-box! SC2-WIRE-HOLD-POSTURE-STATE #f)
+    (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE #f)
     (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
     (set-box! SC2-CACHED-GROUND-BFS #f)
     (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999)
     (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
     (hash-clear! SC2-PLACEMENT-POS-CACHE)
     (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
+    (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
+    (set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP #f)
+    (set-box! SC2-ENEMY-POS-PURGE-LAST-LOOP -9999)
     (set-box! SC2-PLACEMENT-CACHE-SIG #f)
     (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999))
   (set-box! SC2-WARPGATE-LAST-LOOP cur-loop)
@@ -4411,6 +4421,7 @@
     (set-box! SC2-ENEMY-MAIN-CLEARED-AT #f)
     (set-box! SC2-EVER-SAW-MINERALS? #f)
     (set-box! SC2-WIRE-HOLD-POSTURE-STATE #f)
+    (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE #f)
     (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
     (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999))
   (when (not (null? mineral-fields))
@@ -7157,6 +7168,31 @@
        (sc2-templar-energy-allows-archon-merge? u2 enemy-combat enemy-muta-cnt)
        (sc2-archon-merge-midpoint-safe? u1 u2 enemy-combat enemy-muta-cnt)))
 
+;; W6-TAC-2: Zerg combat morph safety guard (`baneling`, `ravager`, `lurker`, `brood-lord`).
+;; Never morph a fighting unit into an immobile 12-24s cocoon while a live targetable enemy
+;; combat unit sits within 10.0 tiles (`100.0` sq-dist). Prefers rear/idle units first.
+(define SC2-ZERG-COMBAT-MORPH-SYMS
+  '(baneling ravager lurker lurker-mp brood-lord broodlord))
+
+(define SC2-ZERG-COMBAT-MORPH-DANGER-RADIUS-SQ 100.0)
+
+(define (sc2-unit-nearest-enemy-combat-dist-sq u enemy-combat)
+  (if (null? enemy-combat)
+      +inf.0
+      (let* ([up (sc2-unit-pos u)]
+             [ux (sc2-point3d-x up)]
+             [uy (sc2-point3d-y up)])
+        (for/fold ([best-d2 +inf.0]) ([e (in-list enemy-combat)])
+          (define ep (sc2-unit-pos e))
+          (define dx (- ux (sc2-point3d-x ep)))
+          (define dy (- uy (sc2-point3d-y ep)))
+          (define d2 (+ (* dx dx) (* dy dy)))
+          (if (< d2 best-d2) d2 best-d2)))))
+
+(define (sc2-zerg-combat-morph-unit-safe? u enemy-combat)
+  (> (sc2-unit-nearest-enemy-combat-dist-sq u enemy-combat)
+     SC2-ZERG-COMBAT-MORPH-DANGER-RADIUS-SQ))
+
 (define (select-producer-tags-for-unit unit-sym self-units [enemy-units '()]
                                        #:unit-by-tag [pre-unit-by-tag #f]
                                        #:units-by-sym [units-by-sym #f])
@@ -7243,8 +7279,13 @@
                 (reverse techlab-zero-tags)
                 (reverse reactor-one-tags))))
   (define (morph-ready-of-types syms)
-    (define zero-order-tags '())
-    (define active-combat-tags '())
+    (define enemy-combat
+      (if (null? enemy-units)
+          '()
+          (filter sc2-unit-targetable-enemy-combat? enemy-units)))
+    (define has-enemies? (pair? enemy-combat))
+    (define zero-order-cands '())
+    (define active-combat-cands '())
     (for ([u (in-list (units-of-types syms))]
           #:when (let ([usym (sc2-id->unit-symbol (sc2-unit-unit-type u))])
                    (and (not (= (sc2-unit-display-type u) 4))
@@ -7258,11 +7299,17 @@
       (define prot (and (> first-ab 0) (sc2-order-protection-class first-ab)))
       (unless (or (memq prot '(morph channel cast-walk))
                   (and first-sym (string-prefix? (symbol->string first-sym) "morph-")))
-        (define utag (sc2-unit-tag u))
-        (if (null? ords)
-            (set! zero-order-tags (cons utag zero-order-tags))
-            (set! active-combat-tags (cons utag active-combat-tags)))))
-    (append (reverse zero-order-tags) (reverse active-combat-tags)))
+        (define d2 (if has-enemies? (sc2-unit-nearest-enemy-combat-dist-sq u enemy-combat) +inf.0))
+        (when (> d2 SC2-ZERG-COMBAT-MORPH-DANGER-RADIUS-SQ)
+          (define utag (sc2-unit-tag u))
+          (if (null? ords)
+              (set! zero-order-cands (cons (cons utag d2) zero-order-cands))
+              (set! active-combat-cands (cons (cons utag d2) active-combat-cands))))))
+    (define (order-tags cands)
+      (if (and has-enemies? (pair? cands) (pair? (cdr cands)))
+          (map car (sort cands > #:key cdr))
+          (map car (reverse cands))))
+    (append (order-tags zero-order-cands) (order-tags active-combat-cands)))
   (cond
     ;; Zerg larva-trained units
     [(memq norm '(drone overlord zergling roach hydralisk mutalisk corruptor
@@ -8783,10 +8830,14 @@
       (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
       (hash-clear! SC2-PLACEMENT-POS-CACHE)
       (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
+      (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
+      (set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP #f)
+      (set-box! SC2-ENEMY-POS-PURGE-LAST-LOOP -9999)
       (set-box! SC2-PLACEMENT-CACHE-SIG #f)
       (set-box! SC2-ENEMY-MAIN-CLEARED-AT #f)
       (set-box! SC2-EVER-SAW-MINERALS? #f)
-      (set-box! SC2-WIRE-HOLD-POSTURE-STATE #f))
+      (set-box! SC2-WIRE-HOLD-POSTURE-STATE #f)
+      (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE #f))
     (set-box! SC2-WIRE-LAST-LOOP-BOX cur-loop))
   (when (sc2-observation? obs)
     (when (or (< cur-loop (unbox SC2-ENEMY-POS-LAST-LOOP))
@@ -8803,6 +8854,9 @@
       (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
       (hash-clear! SC2-PLACEMENT-POS-CACHE)
       (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
+      (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
+      (set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP #f)
+      (set-box! SC2-ENEMY-POS-PURGE-LAST-LOOP -9999)
       (set-box! SC2-PLACEMENT-CACHE-SIG #f)
       (hash-clear! SC2-BASE-SAFETY-CHECKER-CACHE)
       (set-box! SC2-CONTROL-GROUPED-TAGS (hasheqv))
@@ -8815,6 +8869,7 @@
       (set-box! SC2-ENEMY-MAIN-CLEARED-AT #f)
       (set-box! SC2-EVER-SAW-MINERALS? #f)
       (set-box! SC2-WIRE-HOLD-POSTURE-STATE #f)
+      (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE #f)
       (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
       (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999))
     (set-box! SC2-ENEMY-POS-LAST-LOOP cur-loop)
@@ -8863,8 +8918,13 @@
     (define utag (sc2-unit-tag u))
     (define al (sc2-unit-alliance u))
     (define dt (sc2-unit-display-type u))
+    (define utype (sc2-unit-unit-type u))
     (hash-set! all-unit-by-tag utag u)
+    ;; Skip non-blocking enemy CreepTumors (87/137/138) and lowered SupplyDepots (47) so ZvZ late-game
+    ;; doesn't bloat `blocking-unit-circles` with 300+ non-blocking tumor circles.
     (when (and (not (sc2-unit-is-flying u))
+               (not (= utype 47))
+               (not (and (= al 4) (memv utype '(87 137 138))))
                (or (sc2-unit-is-structure? u)
                    (sc2-unit-is-mineral-field? u)
                    (sc2-unit-is-vespene-geyser? u)))
@@ -8929,13 +8989,16 @@
     (define esym (sc2-id->unit-symbol utype))
     (define struct? (sc2-unit-is-structure? eu))
     (define worker? (sc2-unit-is-worker? eu))
+    (define non-combat-tumor? (memv utype '(87 137 138)))
+    (define non-combat-egg? (memv utype '(151 103)))
     (when (valid-u64-tag? etag)
-      (hash-set! SC2-LAST-KNOWN-ENEMY-POS etag
-                 (cons (sc2-point3d-x ep) (sc2-point3d-y ep)))
+      (unless (or non-combat-tumor? non-combat-egg?)
+        (hash-set! SC2-LAST-KNOWN-ENEMY-POS etag
+                   (cons (sc2-point3d-x ep) (sc2-point3d-y ep))))
       (when (and (= (sc2-unit-display-type eu) 1)
                  (> (+ (sc2-unit-health eu) (sc2-unit-shield eu)) 0.0))
         (set-add! live-visible-enemy-tags etag)))
-    (when (not (sc2-unit-is-flying eu))
+    (when (and (not (sc2-unit-is-flying eu)) (not non-combat-tumor?))
       (set! enemy-ground-units (cons eu enemy-ground-units))
       (when (memq esym '(zergling baneling reaper hellion hellbat adept zealot dark-templar))
         (set! enemy-fast-breach-units (cons eu enemy-fast-breach-units))))
@@ -8963,18 +9026,26 @@
                    (not (eq? (hash-ref eh 'snapshot? #f) #t))
                    (equal? (hash-ref eh 'display-type 1) 1))
           (set-add! live-visible-enemy-tags eid)))))
-  ;; Purge stale remembered enemy coordinates once friendly vision covers their tile with no live unit present
-  (when (not (null? self-units))
+  ;; Purge stale remembered enemy coordinates once friendly vision covers their tile with no live unit present.
+  ;; Runs at most once per 8 game loops using squared-distance + Chebyshev reject (avoids O(|M|*|N|) sqrt every step).
+  (when (and (not (null? self-units))
+             (> (hash-count SC2-LAST-KNOWN-ENEMY-POS) 0)
+             (let ([last-p (unbox SC2-ENEMY-POS-PURGE-LAST-LOOP)])
+               (or (< cur-loop last-p) (>= (- cur-loop last-p) 8))))
+    (set-box! SC2-ENEMY-POS-PURGE-LAST-LOOP cur-loop)
     (define stale-etags
       (for/list ([(etag pt) (in-hash SC2-LAST-KNOWN-ENEMY-POS)]
                  #:when (and (pair? pt)
                              (not (set-member? live-visible-enemy-tags etag))
-                             (ormap (lambda (u)
-                                      (define up (sc2-unit-pos u))
-                                      (<= (pt-dist (sc2-point3d-x up) (sc2-point3d-y up)
-                                                   (car pt) (cdr pt))
-                                          7.0))
-                                    self-units)))
+                             (let ([px (car pt)] [py (cdr pt)])
+                               (ormap (lambda (u)
+                                        (define up (sc2-unit-pos u))
+                                        (define dx (- (sc2-point3d-x up) px))
+                                        (define dy (- (sc2-point3d-y up) py))
+                                        (and (<= (abs dx) 7.0)
+                                             (<= (abs dy) 7.0)
+                                             (<= (+ (* dx dx) (* dy dy)) 49.0)))
+                                      self-units))))
         etag))
     (for ([etag (in-list stale-etags)])
       (hash-remove! SC2-LAST-KNOWN-ENEMY-POS etag)))
@@ -9226,68 +9297,92 @@
   (define action-has-hg-hold? #f)
   (define action-defensive-maneuver-pt #f)
   (define action-hg-hold-pt #f)
-  (for ([act (in-list actions)])
-    (match act
-      [(list 'posture-transition p)
-       (when (defensive-hold-posture-sym? p)
-         (set! action-explicit-suppress? #t))]
-      [(or (list (or 'execute-spatial-maneuver 'mirror-spatial-maneuver) msym raw-x raw-y)
-           (and (list 'execute-spatial-maneuver (? real? raw-x) (? real? raw-y) (? real? _) (? real? _))
-                (app (lambda (_) 'multiprong-rotate-and-pin) msym)))
-       (define tx (scale-bot-coord-to-world raw-x home-x))
-       (define ty (scale-bot-coord-to-world raw-y home-y))
+  (define step-wants-lair? #f)
+  (define step-wants-hive? #f)
+  (for ([act (in-list actions)]
+        #:when (pair? act))
+    (case (car act)
+      [(build morph)
+       (define tgt-sym
+         (cond
+           [(and (eq? (car act) 'build) (pair? (cdr act)))
+            (normalize-sc2-name->symbol (cadr act))]
+           [(and (eq? (car act) 'morph) (= (length act) 2))
+            (normalize-sc2-name->symbol (cadr act))]
+           [(and (eq? (car act) 'morph) (= (length act) 3))
+            (normalize-sc2-name->symbol (caddr act))]
+           [else #f]))
        (cond
-         [(hard-defensive-spatial-maneuver-sym? msym)
-          (set! action-explicit-suppress? #t)
-          (set! action-has-defensive-spatial-maneuver? #t)
-          (set! action-defensive-maneuver-pt (cons tx ty))]
-         [(defensive-spatial-maneuver-sym? msym)
-          (set! action-has-defensive-spatial-maneuver? #t)
-          (set! action-defensive-maneuver-pt (cons tx ty))]
-         [(point-on-home-side? tx ty)
-          (set! action-has-home-spatial-target? #t)
-          (unless action-defensive-maneuver-pt
-            (set! action-defensive-maneuver-pt (cons tx ty)))]
-         [else
-          (set! action-has-offensive-push? #t)])]
-      [(list 'high-ground-tactics 'hold-high-ground-ramp-arc (? real? raw-x) (? real? raw-y) _)
-       (define tx (scale-bot-coord-to-world raw-x home-x))
-       (define ty (scale-bot-coord-to-world raw-y home-y))
-       (set! action-has-hg-hold? #t)
-       (set! action-hg-hold-pt (cons tx ty))]
-      [(list 'retreat uid (? real? raw-x) (? real? raw-y))
-       (when (> (count-combat-tags uid) 0)
-         (set! action-explicit-suppress? #t)
-         (define tx (scale-bot-coord-to-world raw-x home-x))
-         (define ty (scale-bot-coord-to-world raw-y home-y))
-         (when (and (point-on-home-side? tx ty) (not action-defensive-maneuver-pt))
-           (set! action-defensive-maneuver-pt (cons tx ty))))]
-      [(list 'hold-position uid rest ...)
-       (define cnt (count-combat-tags uid))
-       (when (> cnt 0)
-         (set! hold-pos-combat-count (+ hold-pos-combat-count cnt))
-         (when (and (>= (length rest) 2) (real? (first rest)) (real? (second rest))
-                    (not action-defensive-maneuver-pt))
-           (define tx (scale-bot-coord-to-world (first rest) home-x))
-           (define ty (scale-bot-coord-to-world (second rest) home-y))
-           (when (point-on-home-side? tx ty)
-             (set! action-defensive-maneuver-pt (cons tx ty)))))]
-      [(list 'move uid (? real? raw-x) (? real? raw-y))
-       (define cnt (count-combat-tags uid))
-       (when (> cnt 0)
-         (define tx (scale-bot-coord-to-world raw-x home-x))
-         (define ty (scale-bot-coord-to-world raw-y home-y))
-         (when (point-on-home-side? tx ty)
-           (set! home-move-combat-count (+ home-move-combat-count cnt))
-           (unless action-defensive-maneuver-pt
-             (set! action-defensive-maneuver-pt (cons tx ty)))))]
-      [(list 'attack-pos ids (? real? raw-x) (? real? raw-y))
-       (when (> (count-combat-tags ids) 0)
-         (define tx (scale-bot-coord-to-world raw-x home-x))
-         (define ty (scale-bot-coord-to-world raw-y home-y))
-         (unless (point-on-home-side? tx ty)
-           (set! action-has-offensive-push? #t)))]
-      [_ (void)]))
+         [(eq? tgt-sym 'lair) (set! step-wants-lair? #t)]
+         [(eq? tgt-sym 'hive) (set! step-wants-hive? #t)])]
+      [(posture-transition execute-spatial-maneuver mirror-spatial-maneuver
+        high-ground-tactics retreat hold-position move attack-pos)
+       (match act
+         [(list 'posture-transition p)
+          (when (defensive-hold-posture-sym? p)
+            (set! action-explicit-suppress? #t))]
+         [(or (list (or 'execute-spatial-maneuver 'mirror-spatial-maneuver) msym raw-x raw-y)
+              (and (list 'execute-spatial-maneuver (? real? raw-x) (? real? raw-y) (? real? _) (? real? _))
+                   (app (lambda (_) 'multiprong-rotate-and-pin) msym)))
+          (define tx (scale-bot-coord-to-world raw-x home-x))
+          (define ty (scale-bot-coord-to-world raw-y home-y))
+          (cond
+            [(hard-defensive-spatial-maneuver-sym? msym)
+             (set! action-explicit-suppress? #t)
+             (set! action-has-defensive-spatial-maneuver? #t)
+             (set! action-defensive-maneuver-pt (cons tx ty))]
+            [(defensive-spatial-maneuver-sym? msym)
+             (set! action-has-defensive-spatial-maneuver? #t)
+             (set! action-defensive-maneuver-pt (cons tx ty))]
+            [(point-on-home-side? tx ty)
+             (set! action-has-home-spatial-target? #t)
+             (unless action-defensive-maneuver-pt
+               (set! action-defensive-maneuver-pt (cons tx ty)))]
+            [else
+             (set! action-has-offensive-push? #t)])]
+         [(list 'high-ground-tactics 'hold-high-ground-ramp-arc (? real? raw-x) (? real? raw-y) _)
+          (define tx (scale-bot-coord-to-world raw-x home-x))
+          (define ty (scale-bot-coord-to-world raw-y home-y))
+          (set! action-has-hg-hold? #t)
+          (set! action-hg-hold-pt (cons tx ty))]
+         [(list 'retreat uid (? real? raw-x) (? real? raw-y))
+          (when (> (count-combat-tags uid) 0)
+            (set! action-explicit-suppress? #t)
+            (define tx (scale-bot-coord-to-world raw-x home-x))
+            (define ty (scale-bot-coord-to-world raw-y home-y))
+            (when (and (point-on-home-side? tx ty) (not action-defensive-maneuver-pt))
+              (set! action-defensive-maneuver-pt (cons tx ty))))]
+         [(list 'hold-position uid rest ...)
+          (define cnt (count-combat-tags uid))
+          (when (> cnt 0)
+            (set! hold-pos-combat-count (+ hold-pos-combat-count cnt))
+            (when (and (>= (length rest) 2) (real? (first rest)) (real? (second rest))
+                       (not action-defensive-maneuver-pt))
+              (define tx (scale-bot-coord-to-world (first rest) home-x))
+              (define ty (scale-bot-coord-to-world (second rest) home-y))
+              (when (point-on-home-side? tx ty)
+                (set! action-defensive-maneuver-pt (cons tx ty)))))]
+         [(list 'move uid (? real? raw-x) (? real? raw-y))
+          (define cnt (count-combat-tags uid))
+          (when (> cnt 0)
+            (define tx (scale-bot-coord-to-world raw-x home-x))
+            (define ty (scale-bot-coord-to-world raw-y home-y))
+            (when (point-on-home-side? tx ty)
+              (set! home-move-combat-count (+ home-move-combat-count cnt))
+              (unless action-defensive-maneuver-pt
+                (set! action-defensive-maneuver-pt (cons tx ty)))))]
+         [(list 'attack-pos ids (? real? raw-x) (? real? raw-y))
+          (when (> (count-combat-tags ids) 0)
+            (define tx (scale-bot-coord-to-world raw-x home-x))
+            (define ty (scale-bot-coord-to-world raw-y home-y))
+            (unless (point-on-home-side? tx ty)
+              (set! action-has-offensive-push? #t)))]
+         [_ (void)])]
+      [else (void)]))
+  (when step-wants-lair?
+    (set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP (cons 'lair cur-loop)))
+  (when step-wants-hive?
+    (set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP (cons 'hive cur-loop)))
 
   (define army-hold-quorum (max 2 (quotient (length combat-units) 3)))
   (define explicit-hold-or-suppress?
@@ -9326,10 +9421,32 @@
              (and map-mined-out-cleanup? can-push-or-sweep?)
              (and explicit-endgame-cleanup? can-push-or-sweep?))))
 
+  ;; W7-P0-2-wire: Never let transient `sticky-hold-pt` or `action-has-hg-hold?` pull idle
+  ;; maxed/dominant armies (>= 40 combat supply, no explicit hold/suppress) backward to home
+  ;; staging when `targetable-enemy-units` is empty and an offensive push or `enemy-main-cleared?`
+  ;; is/was active!
+  (define offensive-push-entry (unbox SC2-WIRE-OFFENSIVE-PUSH-STATE))
+  (define recent-offensive-push-active?
+    (or action-has-offensive-push?
+        (and (list? offensive-push-entry)
+             (= (length offensive-push-entry) 4)
+             (>= cur-loop (first offensive-push-entry))
+             (<= cur-loop (second offensive-push-entry))
+             (<= (pt-dist home-x home-y (third offensive-push-entry) (fourth offensive-push-entry)) 6.0))))
+  (define maxed-army-push-suppresses-home-hold?
+    (and (>= total-combat-supply 40)
+         (not explicit-hold-or-suppress?)
+         (null? targetable-enemy-units)
+         (or recent-offensive-push-active?
+             enemy-main-cleared?
+             map-mined-out-cleanup?
+             explicit-endgame-cleanup?)))
+
   (define sticky-hold-entry (unbox SC2-WIRE-HOLD-POSTURE-STATE))
   (define sticky-hold-pt
     (and (not sweep-context-active?)
          (not action-has-offensive-push?)
+         (not maxed-army-push-suppresses-home-hold?)
          (list? sticky-hold-entry)
          (= (length sticky-hold-entry) 6)
          (> cur-loop (first sticky-hold-entry))
@@ -9341,6 +9458,7 @@
          (not (null? townhalls))
          (or action-has-defensive-spatial-maneuver?
              (and (not action-has-offensive-push?)
+                  (not maxed-army-push-suppresses-home-hold?)
                   (or action-has-home-spatial-target?
                       action-has-hg-hold?)))))
   (define tactical-hold-posture?
@@ -9351,19 +9469,30 @@
     (cond
       [(pair? action-defensive-maneuver-pt)
        (values (car action-defensive-maneuver-pt) (cdr action-defensive-maneuver-pt))]
-      [(and action-has-hg-hold? (not action-has-offensive-push?) (pair? action-hg-hold-pt))
+      [(and action-has-hg-hold?
+            (not action-has-offensive-push?)
+            (not maxed-army-push-suppresses-home-hold?)
+            (pair? action-hg-hold-pt))
        (values (car action-hg-hold-pt) (cdr action-hg-hold-pt))]
       [(pair? sticky-hold-pt)
        (values (car sticky-hold-pt) (cdr sticky-hold-pt))]
       [else
        (values default-stage-x default-stage-y)]))
   (cond
-    [(and (or action-has-offensive-push? sweep-context-active?)
+    [(and (or action-has-offensive-push?
+              sweep-context-active?
+              maxed-army-push-suppresses-home-hold?)
           (not explicit-hold-or-suppress?))
      (set-box! SC2-WIRE-HOLD-POSTURE-STATE #f)]
     [(or explicit-hold-or-suppress? action-defensive-maneuver-active?)
      (set-box! SC2-WIRE-HOLD-POSTURE-STATE
                (list cur-loop (+ cur-loop 36) eff-hold-x eff-hold-y home-x home-y))])
+  (cond
+    [explicit-hold-or-suppress?
+     (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE #f)]
+    [action-has-offensive-push?
+     (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE
+               (list cur-loop (+ cur-loop 64) home-x home-y))])
 
   ;; Playable-area sweep bounds derived strictly from `sc2-game-info` `playable-area` / `map-size`
   ;; (NEVER hardcoded `240.0`!), inset by `3.5` tiles so both ground and air sweepers stay inside bounds.
@@ -9499,9 +9628,10 @@
   (define used-geyser-tags (mutable-seteqv))
   (define commanded-combat-tags (mutable-seteqv))
   ;; Per-step placement RPC budget (<= 2 RPCs/step; P1 macro builds run first in `ordered-actions`)
-  ;; and Creep Tumor throttle (<= 1 placement RPC/step) to eliminate late-game wire latency spikes.
+  ;; and Creep Tumor throttle (<= 1 fan search/step & <= 1 RPC per 8 loops) to keep late-Zerg tr < 4.5ms.
   (define step-placement-rpc-budget (box 2))
   (define step-tumor-rpc-count 0)
+  (define step-tumor-placement-count 0)
   (define step-reserved-build-pts '())
   (define step-built-structure-counts (make-hasheq))
   (define last-cam-pt #f)
@@ -9939,7 +10069,7 @@
                      (not (set-member? commanded-combat-tags t))
                      (not (set-member? used-producer-tags t))
                      (not (set-member? used-worker-tags t))
-                     (not (and u (worker-has-build-order? u cur-loop self-structures)))
+                     (not (and u (sc2-unit-is-worker? u) (worker-has-build-order? u cur-loop self-structures)))
                      (not (unit-has-protected-order? t))
                      (not (and (hash? role-leases)
                                (unit-leased-above? role-leases t 'army cur-loop)))))
@@ -9950,10 +10080,13 @@
                         (not (unit-already-executing-order? t ab-id target-pt target-unit-id))))
       t))
 
-  (define (control-grouped-tag? tag)
+  (define (rebuild-all-control-grouped-tags)
     (define ht (unbox SC2-CONTROL-GROUPED-TAGS))
-    (for/or ([g (in-range 0 8)])
-      (set-member? (hash-ref ht g (seteqv)) tag)))
+    (for/fold ([acc (seteqv)]) ([(_g s) (in-hash ht)])
+      (set-union acc s)))
+  (define all-control-grouped-tags (rebuild-all-control-grouped-tags))
+  (define (control-grouped-tag? tag)
+    (set-member? all-control-grouped-tags tag))
   (define (update-control-grouped-tags! op g raw-tags)
     (when (exact-integer? g)
       (define tags
@@ -9979,8 +10112,17 @@
            (for/hasheqv ([(kg vs) (in-hash cur)])
              (values kg (if (= kg g) merged (set-subtract vs tset)))))
          (set-box! SC2-CONTROL-GROUPED-TAGS (hash-set stripped g merged))]
-        [else (void)])))
+        [else (void)])
+      (set! all-control-grouped-tags (rebuild-all-control-grouped-tags))))
   (define raw-cmds '())
+  (define step-obs-cam-pt
+    (let ([cam (and (sc2-observation? obs) (sc2-observation-camera obs))])
+      (and (sc2-point3d? cam)
+           (finite-world-coord? (sc2-point3d-x cam))
+           (finite-world-coord? (sc2-point3d-y cam))
+           (or (> (sc2-point3d-x cam) 0.5) (> (sc2-point3d-y cam) 0.5))
+           (cons (exact->inexact (sc2-point3d-x cam))
+                 (exact->inexact (sc2-point3d-y cam))))))
   (define (maybe-emit-framing-cam-before! cmd)
     (when (sc2-raw-unit-command? cmd)
       (define ab (sc2-raw-unit-command-ability-id cmd))
@@ -10008,14 +10150,6 @@
         (when focus-pt
           (define fx (car focus-pt))
           (define fy (cdr focus-pt))
-          (define obs-cam-pt
-            (let ([cam (and (sc2-observation? obs) (sc2-observation-camera obs))])
-              (and (sc2-point3d? cam)
-                   (finite-world-coord? (sc2-point3d-x cam))
-                   (finite-world-coord? (sc2-point3d-y cam))
-                   (or (> (sc2-point3d-x cam) 0.5) (> (sc2-point3d-y cam) 0.5))
-                   (cons (exact->inexact (sc2-point3d-x cam))
-                         (exact->inexact (sc2-point3d-y cam))))))
           (define ref-cam-pt
             (cond
               [(pair? last-cam-pt) last-cam-pt]
@@ -10026,7 +10160,7 @@
               [(and (real? (unbox SC2-GOV-LAST-CAM-X))
                     (real? (unbox SC2-GOV-LAST-CAM-Y)))
                (cons (unbox SC2-GOV-LAST-CAM-X) (unbox SC2-GOV-LAST-CAM-Y))]
-              [obs-cam-pt obs-cam-pt]
+              [step-obs-cam-pt step-obs-cam-pt]
               [(and (real? (unbox SC2-TRANS-LAST-CAM-X))
                     (real? (unbox SC2-TRANS-LAST-CAM-Y)))
                (cons (unbox SC2-TRANS-LAST-CAM-X) (unbox SC2-TRANS-LAST-CAM-Y))]
@@ -10175,11 +10309,15 @@
                  baneling-explode
                  worker-scout overlord-scout periodic-scout scout-sector
                  mineral-harass worker-harass harass-workers
-                 patrol-block-expansion burrow-block clear-expansion-block
+                 burrow-block clear-expansion-block
                  cast-deception-and-scout-spells
                  pull-workers-attack worker-drill-stack-attack mineral-walk))))
   (define (morph-action? a)
     (and (pair? a) (eq? (car a) 'morph)))
+  ;; W6-TAC-4-wire: Expansion patrol runs AFTER standard combat orders (never preempting
+  ;; fighting units via priority-first) and BEFORE routine worker harvest.
+  (define (post-combat-patrol-action? a)
+    (and (pair? a) (eq? (car a) 'patrol-block-expansion)))
   (define (routine-harvest-action? a)
     (and (pair? a)
          (memq (car a) '(harvest-mineral harvest-gas rebalance-gas-to-minerals))))
@@ -10189,23 +10327,132 @@
             (filter (lambda (a)
                       (and (not (priority-first-action? a))
                            (not (morph-action? a))
+                           (not (post-combat-patrol-action? a))
                            (not (routine-harvest-action? a))))
                     actions)
+            (filter post-combat-patrol-action? actions)
             (filter routine-harvest-action? actions)))
 
+  ;; W5-P0-1a-wire: Reserve 1 safe idle Hatchery (for Lair) or Lair (for Hive) against `(train queen)`
+  ;; whenever Lair/Hive is requested this step or within the last 64 loops (and not yet built/morphing),
+  ;; so continuous Queen training NEVER starves Lair/Hive indefinitely!
+  (define active-zerg-th-morph-reserve
+    (let* ([entry (unbox SC2-ZERG-TH-MORPH-RESERVE-LOOP)]
+           [res-sym
+            (cond
+              [step-wants-lair? 'lair]
+              [step-wants-hive? 'hive]
+              [(and (pair? entry)
+                    (>= cur-loop (cdr entry))
+                    (< (- cur-loop (cdr entry)) SC2-PLACEMENT-CACHE-TTL))
+               (car entry)]
+              [else #f])])
+      (cond
+        [(eq? res-sym 'lair)
+         (define has-or-morphing-lair?
+           (or (pair? (hash-ref self-units-by-sym 'lair '()))
+               (pair? (hash-ref self-units-by-sym 'hive '()))
+               (ormap (lambda (u)
+                        (ormap (lambda (o) (= (sc2-unit-order-ability-id o) 1216))
+                               (sc2-unit-orders u)))
+                      (hash-ref self-units-by-sym 'hatchery '()))))
+         (if has-or-morphing-lair?
+             (begin (set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP #f) #f)
+             'lair)]
+        [(eq? res-sym 'hive)
+         (define has-or-morphing-hive?
+           (or (pair? (hash-ref self-units-by-sym 'hive '()))
+               (ormap (lambda (u)
+                        (ormap (lambda (o) (= (sc2-unit-order-ability-id o) 1218))
+                               (sc2-unit-orders u)))
+                      (hash-ref self-units-by-sym 'lair '()))))
+         (if has-or-morphing-hive?
+             (begin (set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP #f) #f)
+             'hive)]
+        [else #f])))
+
   (for ([act (in-list ordered-actions)])
+    (cond
+      ;; Fast-path O(1) dispatch for high-frequency per-unit `attack` / `attack-unit` actions
+      ;; (avoids scanning 15+ complex `match` clauses on 130+ micro actions per late-game step)
+      [(and (pair? act)
+            (memq (car act) '(attack attack-unit))
+            (pair? (cdr act))
+            (pair? (cddr act))
+            (null? (cdddr act))
+            (let ([uid (cadr act)] [target-id (caddr act)])
+              (and (or (exact-integer? uid) (list? uid))
+                   (exact-integer? target-id))))
+       (define uid (cadr act))
+       (define target-id (caddr act))
+       (cond
+         [(or (not enforce-live-enemy-tag-filter?)
+              (set-member? live-visible-enemy-tags target-id))
+          (define tag-list (claim-combat-tags-for-order! uid 23 #f target-id))
+          (when (not (null? tag-list))
+            (emit! (sc2-raw-unit-command 23 #f target-id tag-list #f)))]
+         [else
+          (define cached-pt (hash-ref SC2-LAST-KNOWN-ENEMY-POS target-id #f))
+          (define fallback-pt
+            (if (pair? cached-pt)
+                (sc2-point2d (car cached-pt) (cdr cached-pt))
+                (sc2-point2d default-eb-x default-eb-y)))
+          (define tag-list (claim-combat-tags-for-order! uid 23 fallback-pt 0))
+          (when (not (null? tag-list))
+            (emit! (sc2-raw-unit-command 23 fallback-pt 0 tag-list #f)))])]
+      [else
     (match act
       ;; 1. Train unit: `(train <unit-sym>)` or `(train-unit <prod-id> <unit-sym>)`
       [(or (list 'train unit-sym)
            (list 'train-unit _ unit-sym))
        (define explicit-prod-id (and (eq? (car act) 'train-unit) (second act)))
+       (define norm-train-sym (normalize-sc2-name->symbol unit-sym))
        (define ab-id (train-symbol->ability-id unit-sym))
        (define all-prod-tags (select-producer-tags-for-unit unit-sym self-units enemy-units #:units-by-sym self-units-by-sym))
-       (define prod-tags
+       (define zerg-combat-morph? (not (not (memq norm-train-sym SC2-ZERG-COMBAT-MORPH-SYMS))))
+       (define raw-prod-tags
          (filter (lambda (t)
-                   (< (hash-ref used-producer-counts t 0)
-                      (count (lambda (x) (= x t)) all-prod-tags)))
+                   (and (< (hash-ref used-producer-counts t 0)
+                           (count (lambda (x) (= x t)) all-prod-tags))
+                        (or (not zerg-combat-morph?)
+                            (not (set-member? commanded-combat-tags t)))))
                  all-prod-tags))
+       (define prod-tags
+         (cond
+           [(and (eq? norm-train-sym 'queen)
+                 (eq? active-zerg-th-morph-reserve 'lair))
+            (define idle-hatch-tags
+              (filter (lambda (t)
+                        (define u (hash-ref self-unit-by-tag t #f))
+                        (and u (eq? (sc2-id->unit-symbol (sc2-unit-unit-type u)) 'hatchery)))
+                      raw-prod-tags))
+            (define non-hatch-tags
+              (filter (lambda (t) (not (memv t idle-hatch-tags))) raw-prod-tags))
+            (cond
+              [(pair? non-hatch-tags) non-hatch-tags]
+              [(<= (length idle-hatch-tags) 1) '()] ;; preserve the last idle Hatchery for Lair morph!
+              [else
+               ;; Keep the Hatchery closest to home-x/home-y free for Lair, train Queen on another Hatchery
+               (define sorted-h
+                 (sort idle-hatch-tags <
+                       #:key (lambda (t)
+                               (define p (sc2-unit-pos (hash-ref self-unit-by-tag t)))
+                               (pt-dist home-x home-y (sc2-point3d-x p) (sc2-point3d-y p)))))
+               (cdr sorted-h)])]
+           [(and (eq? norm-train-sym 'queen)
+                 (eq? active-zerg-th-morph-reserve 'hive))
+            (define idle-lair-tags
+              (filter (lambda (t)
+                        (define u (hash-ref self-unit-by-tag t #f))
+                        (and u (eq? (sc2-id->unit-symbol (sc2-unit-unit-type u)) 'lair)))
+                      raw-prod-tags))
+            (define non-lair-tags
+              (filter (lambda (t) (not (memv t idle-lair-tags))) raw-prod-tags))
+            (cond
+              [(pair? non-lair-tags) non-lair-tags]
+              [(<= (length idle-lair-tags) 1) '()]
+              [else (cdr idle-lair-tags)])]
+           [else raw-prod-tags]))
        (when (and ab-id (not (null? prod-tags)))
          (define ptag
            (if (and (exact-integer? explicit-prod-id)
@@ -10214,6 +10461,8 @@
                (first prod-tags)))
          (hash-set! used-producer-counts ptag (add1 (hash-ref used-producer-counts ptag 0)))
          (set-add! used-producer-tags ptag)
+         (when zerg-combat-morph?
+           (set-add! commanded-combat-tags ptag))
          (define prod-u (hash-ref self-unit-by-tag ptag #f))
          ;; Bug #17 fix: if producer is a WarpGate (133), issue WARP_IN_* at an open Pylon power-field point
          ;; (never pass unit warp-in ability IDs 1413..1419 to RequestQueryBuildingPlacement, which rejects non-buildings
@@ -10329,18 +10578,25 @@
                 [(greater-spire) '(spire)]
                 [(orbital-command planetary-fortress) '(command-center)]
                 [else '()]))
-            (define src-u
-              (for/first ([u (in-list self-units)]
-                          #:when (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u)) src-types)
-                                      (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
-                                      (null? (sc2-unit-orders u))
-                                      (not (set-member? used-producer-tags (sc2-unit-tag u)))
-                                      (or (<= cur-loop 0)
-                                          (>= cur-loop
-                                              (hash-ref SC2-WIRE-NONSTACK-CMD-COOLDOWN
-                                                        (list 'wire-build-morph norm (sc2-unit-tag u))
-                                                        -1)))))
+            (define idle-src-cands
+              (for/list ([u (in-list self-units)]
+                         #:when (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u)) src-types)
+                                     (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                                     (null? (sc2-unit-orders u))
+                                     (not (set-member? used-producer-tags (sc2-unit-tag u)))
+                                     (or (<= cur-loop 0)
+                                         (>= cur-loop
+                                             (hash-ref SC2-WIRE-NONSTACK-CMD-COOLDOWN
+                                                       (list 'wire-build-morph norm (sc2-unit-tag u))
+                                                       -1)))))
                 u))
+            ;; Prefer the idle Hatchery/Lair closest to home main base (safest Lair/Hive tech site)
+            (define src-u
+              (and (pair? idle-src-cands)
+                   (argmin (lambda (u)
+                             (define up (sc2-unit-pos u))
+                             (pt-dist home-x home-y (sc2-point3d-x up) (sc2-point3d-y up)))
+                           idle-src-cands)))
             (when (and src-u (wire-nonstack-allow?! (list 'wire-build-morph norm (sc2-unit-tag src-u)) 24))
               (set-add! used-producer-tags (sc2-unit-tag src-u))
               (hash-set! used-producer-counts (sc2-unit-tag src-u)
@@ -10752,6 +11008,26 @@
                     (filter (lambda (t) (not (set-member? used-producer-tags t)))
                             (select-producer-tags-for-unit 'archon self-units enemy-units #:units-by-sym self-units-by-sym)))
                   (if (>= (length fb) 2) (take fb 2) '())])]
+              [(and (not (null? self-units))
+                    (memq norm-target SC2-ZERG-COMBAT-MORPH-SYMS))
+               (define enemy-combat
+                 (if (null? enemy-units)
+                     '()
+                     (filter sc2-unit-targetable-enemy-combat? enemy-units)))
+               (define safe-explicit
+                 (filter (lambda (t)
+                           (define su (hash-ref self-unit-by-tag t #f))
+                           (and su
+                                (>= (sc2-unit-build-progress su) SC2-BUILD-COMPLETE-PROGRESS)
+                                (not (sc2-unit-is-hallucination su))
+                                (not (sc2-unit-is-burrowed su))
+                                (sc2-zerg-combat-morph-unit-safe? su enemy-combat)))
+                         raw-uid-list))
+               (if (not (null? safe-explicit))
+                   safe-explicit
+                   (let ([fb (filter (lambda (t) (not (set-member? used-producer-tags t)))
+                                     (select-producer-tags-for-unit norm-target self-units enemy-units #:units-by-sym self-units-by-sym))])
+                     (if (not (null? fb)) (list (first fb)) '())))]
               [(and (not (null? self-units))
                     (memq norm-target '(lair hive greater-spire orbital-command planetary-fortress warp-gate warpgate)))
                (define valid-idle
@@ -11315,10 +11591,13 @@
                  (emit! (sc2-raw-unit-command ab-id #f 0 caster-ids #f))])]
 
              ;; Case B: Creep Tumor placement (verified creep, passable, unblocked, energy >= 25, off cooldown)
+             ;; W5-P0-1a-wire: Throttle BEFORE building nearby-blockers/fan-cands (<= 1 tumor placement/step,
+             ;; <= 1 tumor RPC per 8 game loops, compact <= 16 fan probes) so late-Zerg tr stays < 4.5ms!
              [(memv ab-id '(1662 1694 1733 3691))
               (define queen-cast? (memv ab-id '(1662 1694 3691)))
               (define tumor-ready?
-                (and (not (unit-has-protected-order? caster-id))
+                (and (< step-tumor-placement-count 1)
+                     (not (unit-has-protected-order? caster-id))
                      (>= (- cur-loop (hash-ref SC2-CREEP-TUMOR-COOLDOWN caster-id -9999))
                          (if queen-cast? 24 44))
                      (or (not queen-cast?)
@@ -11334,69 +11613,6 @@
                       (let ([cp (sc2-unit-pos caster-u)])
                         (values (sc2-point3d-x cp) (sc2-point3d-y cp)))
                       (values tx ty)))
-                (define base-ang
-                  (let ([dx (- tx ox)]
-                        [dy (- ty oy)])
-                    (if (< (+ (* dx dx) (* dy dy)) 0.25)
-                        (atan (- (* 0.5 SC2-DEFAULT-MAP-HEIGHT) oy)
-                              (- (* 0.5 SC2-DEFAULT-MAP-WIDTH) ox))
-                        (atan dy dx))))
-                (define nearby-blockers
-                  (for/list ([bc (in-list blocking-unit-circles)]
-                             #:when (<= (pt-dist ox oy (vector-ref bc 0) (vector-ref bc 1)) 14.5))
-                    bc))
-                (define (point-on-creep? px py)
-                  (cond
-                    [step-creep-grid (image-grid-pixel-set? step-creep-grid px py)]
-                    [(pair? creep-source-circles)
-                     (for/or ([cs (in-list creep-source-circles)])
-                       (<= (pt-dist px py (vector-ref cs 0) (vector-ref cs 1))
-                           (vector-ref cs 2)))]
-                    [else (null? self-units)]))
-                (define (tumor-cand-clear? px py)
-                  (and (>= px SC2-MAP-PLAYABLE-MIN-COORD) (<= px SC2-MAP-PLAYABLE-MAX-COORD)
-                       (>= py SC2-MAP-PLAYABLE-MIN-COORD) (<= py SC2-MAP-PLAYABLE-MAX-COORD)
-                       (or (not step-path-grid) (image-grid-pixel-set? step-path-grid px py))
-                       (or (not step-pl-grid) (image-grid-pixel-set? step-pl-grid px py))
-                       (point-on-creep? px py)
-                       (for/and ([ep (in-list all-expansion-pads)])
-                         (>= (max (abs (- px (car ep))) (abs (- py (cdr ep)))) 4.5))
-                       (for/and ([rp (in-list step-reserved-build-pts)]
-                                 #:when (any-point? rp))
-                         (> (pt-dist px py (any-point-x rp) (any-point-y rp)) 1.5))
-                       (for/and ([bc (in-list nearby-blockers)])
-                         (> (pt-dist px py (vector-ref bc 0) (vector-ref bc 1))
-                            (+ 0.75 (max 0.5 (vector-ref bc 2)))))))
-                (define stx (+ (floor tx) 0.5))
-                (define sty (+ (floor ty) 0.5))
-                (define target-cand
-                  (if (and (or (not (= ab-id 1733)) (<= (pt-dist ox oy stx sty) 10.0))
-                           (tumor-cand-clear? stx sty))
-                      (list (sc2-point2d stx sty))
-                      '()))
-                (define fan-cands
-                  (append
-                   target-cand
-                   (if (= ab-id 1733)
-                       (for*/list ([r (in-list '(9.5 8.5 7.5 6.5 5.5))]
-                                   [da (in-list '(0.0 0.26 -0.26 0.52 -0.52 0.78 -0.78 1.05 -1.05 1.31 -1.31))]
-                                   [px (in-value (+ (floor (+ ox (* r (cos (+ base-ang da))))) 0.5))]
-                                   [py (in-value (+ (floor (+ oy (* r (sin (+ base-ang da))))) 0.5))]
-                                   #:when (tumor-cand-clear? px py))
-                         (sc2-point2d px py))
-                       (for*/list ([r (in-list '(3.5 2.5 4.2 1.8))]
-                                   [da (in-list '(0.0 0.52 -0.52 1.05 -1.05 1.57 -1.57 2.09 -2.09 2.62 -2.62 3.14))]
-                                   [px (in-value (+ (floor (+ ox (* r (cos (+ base-ang da))))) 0.5))]
-                                   [py (in-value (+ (floor (+ oy (* r (sin (+ base-ang da))))) 0.5))]
-                                   #:when (tumor-cand-clear? px py))
-                         (sc2-point2d px py)))))
-                (define dedup-fan
-                  (let ([seen (make-hash)])
-                    (filter (lambda (pt)
-                              (define k (cons (sc2-point2d-x pt) (sc2-point2d-y pt)))
-                              (if (hash-has-key? seen k) #f (begin (hash-set! seen k #t) #t)))
-                            fan-cands)))
-                (define capped-fan (if (> (length dedup-fan) 16) (take dedup-fan 16) dedup-fan))
                 (define tumor-ws-active? (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))
                 (define tumor-cache-key
                   (and tumor-ws-active?
@@ -11414,52 +11630,142 @@
                               entry))))
                 (define tumor-cached-neg?
                   (and tumor-cache-entry (not (cadr tumor-cache-entry))))
-                (define tumor-cached-pos
+                (define tumor-cached-raw-pos
                   (and tumor-cache-entry
                        (sc2-point2d? (cadr tumor-cache-entry))
-                       (let ([cpt (cadr tumor-cache-entry)])
-                         (and (or (not (= ab-id 1733))
-                                  (<= (pt-dist ox oy (sc2-point2d-x cpt) (sc2-point2d-y cpt)) 10.5))
-                              (tumor-cand-clear? (sc2-point2d-x cpt) (sc2-point2d-y cpt))
-                              cpt))))
-                (define verified-tumor-pt
-                  (cond
-                    [(null? capped-fan) #f]
-                    [tumor-ws-active?
-                     (cond
-                       [tumor-cached-pos tumor-cached-pos]
-                       [tumor-cached-neg? #f]
-                       [(and (< step-tumor-rpc-count 1)
-                             (consume-placement-rpc-budget! step-placement-rpc-budget))
-                        (set! step-tumor-rpc-count (add1 step-tumor-rpc-count))
-                        (define q-items
-                          (for/list ([pt (in-list capped-fan)])
-                            (sc2-query-placement ab-id (sc2-point2d-x pt) (sc2-point2d-y pt) 0)))
-                        (define q-resp
-                          (sc2-ws-rpc! ws-conn
-                                       (make-request-query-placement q-items
-                                                                     #:ignore-resource-requirements? #t)))
-                        (define q-results (sc2-response-query-placements q-resp))
-                        (define found-pt
-                          (for/first ([pt (in-list capped-fan)]
-                                      [res (in-list q-results)]
-                                      #:when (= res 1))
-                            pt))
-                        (when tumor-cache-key
-                          (when (> (hash-count SC2-TUMOR-PLACEMENT-CACHE) 512)
-                            (hash-clear! SC2-TUMOR-PLACEMENT-CACHE))
-                          (hash-set! SC2-TUMOR-PLACEMENT-CACHE tumor-cache-key (list cur-loop found-pt)))
-                        found-pt]
-                       [else #f])]
-                    [else (first capped-fan)]))
-                (when verified-tumor-pt
-                  (reserve-step-build-pt! verified-tumor-pt ab-id)
-                  (for ([cid (in-list caster-ids)])
-                    (hash-set! SC2-CREEP-TUMOR-COOLDOWN cid cur-loop))
-                  (when (and (= ab-id 1733) (set-mutable? used-tumors))
+                       (cadr tumor-cache-entry)))
+                (define last-tumor-rpc-l (unbox SC2-LAST-TUMOR-RPC-LOOP))
+                (define tumor-rpc-window-open?
+                  (and (< step-tumor-rpc-count 1)
+                       (> (unbox step-placement-rpc-budget) 0)
+                       (or (< cur-loop last-tumor-rpc-l)
+                           (>= (- cur-loop last-tumor-rpc-l) 8))))
+                ;; Skip ALL fan/blocker work immediately on negative cache hit or when RPC window is closed!
+                (when (and (not tumor-cached-neg?)
+                           (or (not tumor-ws-active?)
+                               tumor-cached-raw-pos
+                               tumor-rpc-window-open?))
+                  (set! step-tumor-placement-count (add1 step-tumor-placement-count))
+                  (define base-ang
+                    (let ([dx (- tx ox)]
+                          [dy (- ty oy)])
+                      (if (< (+ (* dx dx) (* dy dy)) 0.25)
+                          (atan (- (* 0.5 SC2-DEFAULT-MAP-HEIGHT) oy)
+                                (- (* 0.5 SC2-DEFAULT-MAP-WIDTH) ox))
+                          (atan dy dx))))
+                  (define nearby-blockers
+                    (for/list ([bc (in-list blocking-unit-circles)]
+                               #:when (let ([dx (- ox (vector-ref bc 0))]
+                                            [dy (- oy (vector-ref bc 1))])
+                                        (and (<= (abs dx) 14.5)
+                                             (<= (abs dy) 14.5)
+                                             (<= (+ (* dx dx) (* dy dy)) 210.25))))
+                      bc))
+                  (define (point-on-creep? px py)
+                    (cond
+                      [step-creep-grid (image-grid-pixel-set? step-creep-grid px py)]
+                      [(pair? creep-source-circles)
+                       (for/or ([cs (in-list creep-source-circles)])
+                         (define dx (- px (vector-ref cs 0)))
+                         (define dy (- py (vector-ref cs 1)))
+                         (define r (vector-ref cs 2))
+                         (and (<= (abs dx) r)
+                              (<= (abs dy) r)
+                              (<= (+ (* dx dx) (* dy dy)) (* r r))))]
+                      [else (null? self-units)]))
+                  (define (tumor-cand-clear? px py)
+                    (and (>= px SC2-MAP-PLAYABLE-MIN-COORD) (<= px SC2-MAP-PLAYABLE-MAX-COORD)
+                         (>= py SC2-MAP-PLAYABLE-MIN-COORD) (<= py SC2-MAP-PLAYABLE-MAX-COORD)
+                         (or (not step-path-grid) (image-grid-pixel-set? step-path-grid px py))
+                         (or (not step-pl-grid) (image-grid-pixel-set? step-pl-grid px py))
+                         (point-on-creep? px py)
+                         (for/and ([ep (in-list all-expansion-pads)])
+                           (>= (max (abs (- px (car ep))) (abs (- py (cdr ep)))) 4.5))
+                         (for/and ([rp (in-list step-reserved-build-pts)]
+                                   #:when (any-point? rp))
+                           (> (pt-dist px py (any-point-x rp) (any-point-y rp)) 1.5))
+                         (for/and ([bc (in-list nearby-blockers)])
+                           (define dx (- px (vector-ref bc 0)))
+                           (define dy (- py (vector-ref bc 1)))
+                           (define mr (+ 0.75 (max 0.5 (vector-ref bc 2))))
+                           (> (+ (* dx dx) (* dy dy)) (* mr mr)))))
+                  (define tumor-cached-pos
+                    (and tumor-cached-raw-pos
+                         (or (not (= ab-id 1733))
+                             (<= (pt-dist ox oy (sc2-point2d-x tumor-cached-raw-pos) (sc2-point2d-y tumor-cached-raw-pos)) 10.5))
+                         (tumor-cand-clear? (sc2-point2d-x tumor-cached-raw-pos) (sc2-point2d-y tumor-cached-raw-pos))
+                         tumor-cached-raw-pos))
+                  (define verified-tumor-pt
+                    (cond
+                      [tumor-cached-pos tumor-cached-pos]
+                      [else
+                       (define stx (+ (floor tx) 0.5))
+                       (define sty (+ (floor ty) 0.5))
+                       (define target-cand
+                         (if (and (or (not (= ab-id 1733)) (<= (pt-dist ox oy stx sty) 10.0))
+                                  (tumor-cand-clear? stx sty))
+                             (list (sc2-point2d stx sty))
+                             '()))
+                       ;; Compact <= 16 candidate fan (3 radii x 5 angles + target-cand)
+                       (define fan-cands
+                         (append
+                          target-cand
+                          (if (= ab-id 1733)
+                              (for*/list ([r (in-list '(9.5 8.0 6.5))]
+                                          [da (in-list '(0.0 0.35 -0.35 0.78 -0.78))]
+                                          [px (in-value (+ (floor (+ ox (* r (cos (+ base-ang da))))) 0.5))]
+                                          [py (in-value (+ (floor (+ oy (* r (sin (+ base-ang da))))) 0.5))]
+                                          #:when (tumor-cand-clear? px py))
+                                (sc2-point2d px py))
+                              (for*/list ([r (in-list '(3.5 2.5 4.2))]
+                                          [da (in-list '(0.0 0.78 -0.78 1.57 -1.57))]
+                                          [px (in-value (+ (floor (+ ox (* r (cos (+ base-ang da))))) 0.5))]
+                                          [py (in-value (+ (floor (+ oy (* r (sin (+ base-ang da))))) 0.5))]
+                                          #:when (tumor-cand-clear? px py))
+                                (sc2-point2d px py)))))
+                       (define dedup-fan
+                         (let ([seen (make-hash)])
+                           (filter (lambda (pt)
+                                     (define k (cons (sc2-point2d-x pt) (sc2-point2d-y pt)))
+                                     (if (hash-has-key? seen k) #f (begin (hash-set! seen k #t) #t)))
+                                   fan-cands)))
+                       (define capped-fan (if (> (length dedup-fan) 16) (take dedup-fan 16) dedup-fan))
+                       (cond
+                         [(null? capped-fan) #f]
+                         [tumor-ws-active?
+                          (cond
+                            [(and tumor-rpc-window-open?
+                                  (consume-placement-rpc-budget! step-placement-rpc-budget))
+                             (set! step-tumor-rpc-count (add1 step-tumor-rpc-count))
+                             (set-box! SC2-LAST-TUMOR-RPC-LOOP cur-loop)
+                             (define q-items
+                               (for/list ([pt (in-list capped-fan)])
+                                 (sc2-query-placement ab-id (sc2-point2d-x pt) (sc2-point2d-y pt) 0)))
+                             (define q-resp
+                               (sc2-ws-rpc! ws-conn
+                                            (make-request-query-placement q-items
+                                                                          #:ignore-resource-requirements? #t)))
+                             (define q-results (sc2-response-query-placements q-resp))
+                             (define found-pt
+                               (for/first ([pt (in-list capped-fan)]
+                                           [res (in-list q-results)]
+                                           #:when (= res 1))
+                                 pt))
+                             (when tumor-cache-key
+                               (when (> (hash-count SC2-TUMOR-PLACEMENT-CACHE) 512)
+                                 (hash-clear! SC2-TUMOR-PLACEMENT-CACHE))
+                               (hash-set! SC2-TUMOR-PLACEMENT-CACHE tumor-cache-key (list cur-loop found-pt)))
+                             found-pt]
+                            [else #f])]
+                         [else (first capped-fan)])]))
+                  (when verified-tumor-pt
+                    (reserve-step-build-pt! verified-tumor-pt ab-id)
                     (for ([cid (in-list caster-ids)])
-                      (set-add! used-tumors cid)))
-                  (emit! (sc2-raw-unit-command ab-id verified-tumor-pt 0 caster-ids #f))))]
+                      (hash-set! SC2-CREEP-TUMOR-COOLDOWN cid cur-loop))
+                    (when (and (= ab-id 1733) (set-mutable? used-tumors))
+                      (for ([cid (in-list caster-ids)])
+                        (set-add! used-tumors cid)))
+                    (emit! (sc2-raw-unit-command ab-id verified-tumor-pt 0 caster-ids #f)))))]
 
              ;; Case C: Orbital Command Calldown MULE (171) -> resolve ONLY to safe friendly-base mineral field tag
              [(= ab-id 171)
@@ -11884,12 +12190,18 @@
 
       [(list 'patrol-block-expansion bid raw-x raw-y)
        (when (and (exact-integer? bid) (> bid 0))
-         (record-unit-used! bid)
          (define tx (scale-bot-coord-to-world raw-x home-x))
          (define ty (scale-bot-coord-to-world raw-y home-y))
          (define target-pt (sc2-point2d tx ty))
-         (unless (unit-already-executing-order? bid 17 target-pt 0)
-           (emit! (sc2-raw-unit-command 17 target-pt 0 (list bid) #f))))]
+         (define was-claimed? (set-member? commanded-combat-tags bid))
+         (define tag-list (claim-combat-tags-for-order! bid 17 target-pt 0))
+         (when (and (not was-claimed?)
+                    (set-member? commanded-combat-tags bid))
+           (define u (hash-ref self-unit-by-tag bid #f))
+           (when (and u (sc2-unit-is-worker? u))
+             (record-worker-used! bid)))
+         (when (not (null? tag-list))
+           (emit! (sc2-raw-unit-command 17 target-pt 0 tag-list #f))))]
 
       [(list 'burrow-block bid raw-x raw-y)
        (when (and (exact-integer? bid) (> bid 0))
@@ -12663,33 +12975,36 @@
             (record-unit-used! itag)
             (emit! (sc2-raw-unit-command 2545 (sc2-point2d tx ty) 0 (list itag) #f)))])]
 
-      [(list 'high-ground-tactics _ (? real? raw-x) (? real? raw-y) spot-flag)
+      [(list 'high-ground-tactics hg-mode (? real? raw-x) (? real? raw-y) spot-flag)
        (define tx (scale-bot-coord-to-world raw-x home-x))
        (define ty (scale-bot-coord-to-world raw-y home-y))
-       (define target-pt (sc2-point2d tx ty))
-       (when spot-flag
-         (define air-spotter
-           (for/first ([u (in-list self-units)]
-                       #:when (and (sc2-unit-is-flying u)
-                                   (not (sc2-unit-is-structure? u))
-                                   (not (memv (sc2-unit-unit-type u) '(106 129)))
-                                   (not (set-member? commanded-combat-tags (sc2-unit-tag u)))
-                                   (null? (sc2-unit-orders u))))
-             u))
-         (when air-spotter
-           (define astag (sc2-unit-tag air-spotter))
-           (record-unit-used! astag)
-           (emit! (sc2-raw-unit-command 16 target-pt 0 (list astag) #f))))
-       (define hg-combat
-         (filter (lambda (u)
-                   (define up (sc2-unit-pos u))
-                   (and (not (set-member? commanded-combat-tags (sc2-unit-tag u)))
-                        (not (memv (sc2-unit-unit-type u) '(32 126 500 503)))
-                        (<= (pt-dist tx ty (sc2-point3d-x up) (sc2-point3d-y up)) 22.0)))
-                 combat-units))
-       (define hg-tags (claim-combat-tags-for-order! (map sc2-unit-tag hg-combat) 23 target-pt 0))
-       (when (not (null? hg-tags))
-         (emit! (sc2-raw-unit-command 23 target-pt 0 hg-tags #f)))]
+       (unless (and (eq? hg-mode 'hold-high-ground-ramp-arc)
+                    maxed-army-push-suppresses-home-hold?
+                    (point-on-home-side? tx ty))
+         (define target-pt (sc2-point2d tx ty))
+         (when spot-flag
+           (define air-spotter
+             (for/first ([u (in-list self-units)]
+                         #:when (and (sc2-unit-is-flying u)
+                                     (not (sc2-unit-is-structure? u))
+                                     (not (memv (sc2-unit-unit-type u) '(106 129)))
+                                     (not (set-member? commanded-combat-tags (sc2-unit-tag u)))
+                                     (null? (sc2-unit-orders u))))
+               u))
+           (when air-spotter
+             (define astag (sc2-unit-tag air-spotter))
+             (record-unit-used! astag)
+             (emit! (sc2-raw-unit-command 16 target-pt 0 (list astag) #f))))
+         (define hg-combat
+           (filter (lambda (u)
+                     (define up (sc2-unit-pos u))
+                     (and (not (set-member? commanded-combat-tags (sc2-unit-tag u)))
+                          (not (memv (sc2-unit-unit-type u) '(32 126 500 503)))
+                          (<= (pt-dist tx ty (sc2-point3d-x up) (sc2-point3d-y up)) 22.0)))
+                   combat-units))
+         (define hg-tags (claim-combat-tags-for-order! (map sc2-unit-tag hg-combat) 23 target-pt 0))
+         (when (not (null? hg-tags))
+           (emit! (sc2-raw-unit-command 23 target-pt 0 hg-tags #f))))]
 
       ;; 11. Control Groups (`ActionUI.control_group` is a wire no-op in Raw mode!) & Camera Saccades
       [(list (and op (or 'control-group-set 'control-group-append 'control-group-steal
@@ -12709,7 +13024,7 @@
       [(list 'camera-bookmark-jump _ raw-x raw-y)
        (emit-camera-move! raw-x raw-y)]
 
-      [_ (void)]))
+      [_ (void)])]))
 
   ;; 11b. Friendly Expansion Pad Clearance:
   ;;      When a friendly worker is actively walking to build a TownHall at `(px, py)`,
@@ -13007,9 +13322,10 @@
   ;;     Merge compatible combat/stance/spell/depot/unburrow `sc2-raw-unit-command` packets
   ;;     that share `(ability-id, target-pos, target-unit-tag, queue?)` into a single multi-tag packet
   ;;     to eliminate per-unit command duplication while preserving Reactor multi-slot train queues.
-  (define coalescable-abilities
-    (seteqv 16 17 18 23 76 171 380 388 390 556 558 1036 1042 1442 1526 2095 2097 2108 2110 2328 2338 2346 2375 2393 3661 3662 3665 3666 3667 3674 3675 3687))
-  (coalesce-sc2-raw-commands (reverse raw-cmds) coalescable-abilities #f))
+  (coalesce-sc2-raw-commands (reverse raw-cmds) SC2-COALESCABLE-ABILITIES #f))
+
+(define SC2-COALESCABLE-ABILITIES
+  (seteqv 16 17 18 23 76 171 380 388 390 556 558 1036 1042 1442 1526 2095 2097 2108 2110 2328 2338 2346 2375 2393 3661 3662 3665 3666 3667 3674 3675 3687))
 
 ;; Shared O(C) raw unit command coalescer preserving first-appearance command order.
 ;; When `chunk-fn` is provided, also sorts/dedups/chunks all unit command tag lists to `<= 64` tags.
@@ -13017,14 +13333,17 @@
   (define groups (make-hash))
   (define rev-slots '())
   (define (dedup-tags tags)
-    (define seen (mutable-seteqv))
-    (for/fold ([acc '()] #:result (reverse acc))
-              ([t (in-list tags)])
-      (if (set-member? seen t)
-          acc
-          (begin
-            (set-add! seen t)
-            (cons t acc)))))
+    (cond
+      [(or (null? tags) (null? (cdr tags))) tags]
+      [else
+       (define seen (mutable-seteqv))
+       (for/fold ([acc '()] #:result (reverse acc))
+                 ([t (in-list tags)])
+         (if (set-member? seen t)
+             acc
+             (begin
+               (set-add! seen t)
+               (cons t acc))))]))
   (define (emit-cmd ab tp tu tags q? urgent? paired-cam out-rev)
     (define eff-tags
       (if chunk-fn
@@ -13360,6 +13679,23 @@
                  (lambda (c) (tier-token-floor 0 c))
                  (lambda (_) (tier-headroom-floor 0)))
 
+  ;; 1b. W7-P0-2-wire: Guaranteed overdue rescue slot for large multi-unit P2 combat march/attack
+  ;;     commands (>= 8 tags, AB 23/16) when >= 8 loops have elapsed since last P2 emission, so
+  ;;     late-game P1 creep-tumor / macro bursts NEVER starve army-wide marches or endgame hunts!
+  (define p2-cmds (cmds-for-tier 2))
+  (define p2-large-cmds
+    (sort
+     (filter (lambda (c)
+               (and (sc2-raw-unit-command? c)
+                    (memv (sc2-raw-unit-command-ability-id c) '(23 16))
+                    (>= (length (sc2-raw-unit-command-unit-tags c)) 8)))
+             p2-cmds)
+     >
+     #:key (lambda (c) (length (sc2-raw-unit-command-unit-tags c)))))
+  (when (and (pair? p2-large-cmds)
+             (>= (- cur-loop (hash-ref SC2-GOV-LAST-P2-LOOP gov -1000)) 8))
+    (run-cmd-list! p2-large-cmds (lambda (_) -2.0) (lambda (_) 2.0) #:max-count 4))
+
   ;; 2. Run P1 macro (`train`, `warp-in`, `build`, `expand`, `morph`, `research`, `MULE`) BEFORE P2/P4 rescue
   ;;    so continuous P0/P2 combat micro NEVER starves macro production, expansions, or upgrades (#5130439, #5131238)!
   (define p1-cmds (cmds-for-tier 1))
@@ -13374,7 +13710,6 @@
     (run-cmd-list! p1-macro-rem (lambda (_) -3.0) (lambda (_) 2.0) #:max-count 4))
 
   ;; 3. Bounded anti-starvation rescue for overdue P2 combat (>= 12 loops stale) and 1 overdue routine P4 camera (>= 44 loops).
-  (define p2-cmds (cmds-for-tier 2))
   (when (and (pair? p2-cmds)
              (>= (- cur-loop (hash-ref SC2-GOV-LAST-P2-LOOP gov -1000)) 12))
     (run-cmd-list! p2-cmds (lambda (_) 1.5) (lambda (_) 6.0) #:max-count 3))

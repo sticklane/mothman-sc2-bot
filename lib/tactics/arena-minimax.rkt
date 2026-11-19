@@ -451,23 +451,40 @@
                                     params scratch out-vals)
   (define oa0 (unsafe-fxvector-ref our-cands-fx 0))
   (unsafe-flvector-set! scratch 10 +inf.0) ;; pred-val0
-  (define-values (pred-idx pred-ea)
-    (let loop ([j 0] [best-j 0] [best-ea (unsafe-fxvector-ref enemy-cands-fx 0)])
+  (unsafe-flvector-set! scratch 16 +inf.0) ;; eng-min0 (ea != 5)
+  (unsafe-flvector-set! scratch 17 0.0)    ;; eng-sum0 (ea != 5)
+  (define-values (pred-idx pred-ea eng-cnt0)
+    (let loop ([j 0] [best-j 0] [best-ea (unsafe-fxvector-ref enemy-cands-fx 0)] [ec 0])
       (if (unsafe-fx>= j n-en)
-          (values best-j best-ea)
+          (values best-j best-ea ec)
           (let ([ea (unsafe-fxvector-ref enemy-cands-fx j)])
             (sim-pair-score-buf! init-a-fl init-a-fx sim-a-fl sim-a-fx na
                                  init-e-fl init-e-fx sim-e-fl sim-e-fx ne
                                  trap-xy ntraps oa0 ea ally-det? enemy-det? check-stasis?
                                  d1t d2t d3t params scratch 14)
-            (let ([v (unsafe-flvector-ref scratch 14)])
+            (let* ([v (unsafe-flvector-ref scratch 14)]
+                   [nec (if (unsafe-fx= ea 5)
+                            ec
+                            (begin
+                              (when (unsafe-fl< v (unsafe-flvector-ref scratch 16))
+                                (unsafe-flvector-set! scratch 16 v))
+                              (unsafe-flvector-set! scratch 17
+                                (unsafe-fl+ (unsafe-flvector-ref scratch 17) v))
+                              (unsafe-fx+ ec 1)))])
               (if (unsafe-fl< v (unsafe-flvector-ref scratch 10))
                   (begin
                     (unsafe-flvector-set! scratch 10 v)
-                    (loop (unsafe-fx+ j 1) j ea))
-                  (loop (unsafe-fx+ j 1) best-j best-ea)))))))
+                    (loop (unsafe-fx+ j 1) j ea nec))
+                  (loop (unsafe-fx+ j 1) best-j best-ea nec)))))))
   (unsafe-flvector-set! scratch 11 (unsafe-flvector-ref scratch 10)) ;; bval = sc0 = pred-val0
   (unsafe-flvector-set! scratch 12 (unsafe-flvector-ref scratch 10)) ;; cv
+  ;; W7-TAC-3: Engaged-combat (`ea != 5`) min/mean tie-breaker so enemy `DisengageRetreat`
+  ;; flattening the payoff matrix never hides StutterKiteBack's combat dominance.
+  (unsafe-flvector-set! scratch 18
+    (if (unsafe-fx> eng-cnt0 0)
+        (unsafe-fl+ (unsafe-fl* 0.5 (unsafe-flvector-ref scratch 16))
+                    (unsafe-fl* 0.5 (unsafe-fl/ (unsafe-flvector-ref scratch 17) (unsafe-fx->fl eng-cnt0))))
+        (unsafe-flvector-ref scratch 10)))
   (define 1mlam (unsafe-flvector-ref params 8))
   (define lam (unsafe-flvector-ref params 9))
   (define-values (best-oa found-c?)
@@ -477,28 +494,54 @@
           (let ([oa (unsafe-fxvector-ref our-cands-fx i)])
             (unsafe-flvector-set! scratch 13 0.0)    ;; vp
             (unsafe-flvector-set! scratch 14 +inf.0) ;; w
-            (let eloop ([j 0])
-              (when (unsafe-fx< j n-en)
-                (define ea (unsafe-fxvector-ref enemy-cands-fx j))
-                (sim-pair-score-buf! init-a-fl init-a-fx sim-a-fl sim-a-fx na
-                                     init-e-fl init-e-fx sim-e-fl sim-e-fx ne
-                                     trap-xy ntraps oa ea ally-det? enemy-det? check-stasis?
-                                     d1t d2t d3t params scratch 15)
-                (let ([v (unsafe-flvector-ref scratch 15)])
-                  (when (unsafe-fx= j pred-idx)
-                    (unsafe-flvector-set! scratch 13 v))
-                  (when (unsafe-fl< v (unsafe-flvector-ref scratch 14))
-                    (unsafe-flvector-set! scratch 14 v)))
-                (eloop (unsafe-fx+ j 1))))
+            (unsafe-flvector-set! scratch 16 +inf.0) ;; eng-min (ea != 5)
+            (unsafe-flvector-set! scratch 17 0.0)    ;; eng-sum (ea != 5)
+            (define eng-cnt
+              (let eloop ([j 0] [ec 0])
+                (if (unsafe-fx>= j n-en)
+                    ec
+                    (let ([ea (unsafe-fxvector-ref enemy-cands-fx j)])
+                      (sim-pair-score-buf! init-a-fl init-a-fx sim-a-fl sim-a-fx na
+                                           init-e-fl init-e-fx sim-e-fl sim-e-fx ne
+                                           trap-xy ntraps oa ea ally-det? enemy-det? check-stasis?
+                                           d1t d2t d3t params scratch 15)
+                      (let* ([v (unsafe-flvector-ref scratch 15)]
+                             [nec (if (unsafe-fx= ea 5)
+                                      ec
+                                      (begin
+                                        (when (unsafe-fl< v (unsafe-flvector-ref scratch 16))
+                                          (unsafe-flvector-set! scratch 16 v))
+                                        (unsafe-flvector-set! scratch 17
+                                          (unsafe-fl+ (unsafe-flvector-ref scratch 17) v))
+                                        (unsafe-fx+ ec 1)))])
+                        (when (unsafe-fx= j pred-idx)
+                          (unsafe-flvector-set! scratch 13 v))
+                        (when (unsafe-fl< v (unsafe-flvector-ref scratch 14))
+                          (unsafe-flvector-set! scratch 14 v))
+                        (eloop (unsafe-fx+ j 1) nec))))))
             (let* ([sc (unsafe-fl+ (unsafe-fl* 1mlam (unsafe-flvector-ref scratch 13))
                                    (unsafe-fl* lam (unsafe-flvector-ref scratch 14)))]
+                   [eng-tie (if (unsafe-fx> eng-cnt 0)
+                                (unsafe-fl+ (unsafe-fl* 0.5 (unsafe-flvector-ref scratch 16))
+                                            (unsafe-fl* 0.5 (unsafe-fl/ (unsafe-flvector-ref scratch 17)
+                                                                        (unsafe-fx->fl eng-cnt))))
+                                sc)]
+                   [bval (unsafe-flvector-ref scratch 11)]
+                   [btie (unsafe-flvector-ref scratch 18)]
                    [match-c? (unsafe-fx= oa cur-committed-code)]
-                   [nfc? (or fc? match-c?)])
+                   [nfc? (or fc? match-c?)]
+                   [better?
+                    (or (unsafe-fl> sc (unsafe-fl+ bval 1.5))
+                        (and (unsafe-fl>= sc (unsafe-fl- bval 1.5))
+                             (or (unsafe-fx= pred-ea 5)
+                                 (unsafe-fl<= (unsafe-flabs (unsafe-fl- sc bval)) 1.5))
+                             (unsafe-fl> eng-tie btie)))])
               (when match-c?
                 (unsafe-flvector-set! scratch 12 sc))
-              (if (unsafe-fl> sc (unsafe-flvector-ref scratch 11))
+              (if better?
                   (begin
                     (unsafe-flvector-set! scratch 11 sc)
+                    (unsafe-flvector-set! scratch 18 eng-tie)
                     (oloop (unsafe-fx+ i 1) oa nfc?))
                   (oloop (unsafe-fx+ i 1) bo nfc?)))))))
   (unsafe-flvector-set! out-vals 0 (unsafe-flvector-ref scratch 11))
@@ -772,9 +815,23 @@
   (define utype (hash-ref u 'type 'marine))
   (define weaponless-disruptor? (or (eq? utype 'disruptor) (eq? utype 'disruptor-phased)))
   (define sv (fast-unit-stat-vec utype))
-  (define max-hp (flmax 1.0 (fast->fl (hash-ref u 'max-hp (vector-ref sv 1)))))
-  (define hp (flmax 1.0 (fast->fl (hash-ref u 'hp max-hp))))
-  (define shd (flmax 0.0 (fast->fl (hash-ref u 'shield (vector-ref sv 2)))))
+  ;; W7-P0-1-rt: Live `runtime-obs-hash` stores combined `'hp = (+ health shield)` and
+  ;; `'max-hp = (+ health-max shield-max)` alongside raw `'hull-hp` + `'shield`. Prefer
+  ;; `'hull-hp` and hull-only `max-hp` so Protoss shields are never double-counted!
+  (define has-hull-hp? (hash-has-key? u 'hull-hp))
+  (define shd (flmax 0.0 (fast->fl (or (hash-ref u 'shield #f) (hash-ref u 'shields #f) (vector-ref sv 2)))))
+  (define hp (flmax 1.0 (fast->fl (if has-hull-hp?
+                                      (hash-ref u 'hull-hp (vector-ref sv 1))
+                                      (hash-ref u 'hp (hash-ref u 'max-hp (vector-ref sv 1)))))))
+  (define max-hp
+    (flmax 1.0
+           (if has-hull-hp?
+               (let ([tbl-hull (vector-ref sv 1)]
+                     [tbl-shd (vector-ref sv 2)])
+                 (if (fl> tbl-hull 0.0)
+                     (flmax hp tbl-hull)
+                     (flmax hp (fl- (fast->fl (hash-ref u 'max-hp hp)) (flmax shd tbl-shd)))))
+               (fast->fl (hash-ref u 'max-hp (vector-ref sv 1))))))
   (define wcd (fast->fl (hash-ref u 'weapon-cooldown 0.0)))
   (tactical-sim-unit
    (hash-ref u 'id 0)
@@ -1926,7 +1983,7 @@
                   (and (fl<= (flabs (fl- ux old-x)) 4.5)
                        (fl<= (flabs (fl- uy old-y)) 4.5)))
               (let* ([mhp (tactical-sim-unit-max-hp su)]
-                     [rhp (hash-ref u 'hp mhp)]
+                     [rhp (or (hash-ref u 'hull-hp #f) (hash-ref u 'hp mhp))]
                      [old-hp (tactical-sim-unit-hp su)]
                      [old-af (tactical-sim-unit-attr-flags su)]
                      [rflags (unsafe-fxand (unsafe-fxrshift old-af 10) 7)]
@@ -1939,7 +1996,7 @@
                       (set-tactical-sim-unit-hp! su hp))))
                 (when (or (not (unsafe-fx= (unsafe-fxand rflags 1) 0))
                           (fl> (tactical-sim-unit-shield su) 0.0))
-                  (let ([sh (hash-ref u 'shield #f)]
+                  (let ([sh (or (hash-ref u 'shield #f) (hash-ref u 'shields #f))]
                         [old-sh (tactical-sim-unit-shield su)])
                     (when (and sh (not (same-num-fl? sh old-sh)))
                       (let ([fsh (let ([fs (fast->fl sh)])
@@ -2916,9 +2973,12 @@
                                       a-cnt e-cnt ra-cnt re-cnt sig-ew)))
                  (values rb pe bv cv ro ca lk?)))))
        (define committed-act
-         (if combat-suppress-arena?
-             'DisengageRetreat
-             raw-committed-act))
+         (cond
+           [combat-suppress-arena? 'DisengageRetreat]
+           ;; W7-P0-2-rt: Never retreat inside our own base when enemies are within 14t of TownHall!
+           [(and kw-defending-home? (eq? raw-committed-act 'DisengageRetreat))
+            'CommitFocusFire]
+           [else raw-committed-act]))
        (define d1-val (tactical-horizon-eval-net-value (mirrored-rollout-result-d1-eval rollout)))
        (define d2-val (tactical-horizon-eval-net-value (mirrored-rollout-result-d2-eval rollout)))
        (define d3-val (tactical-horizon-eval-net-value (mirrored-rollout-result-d3-eval rollout)))
@@ -3188,6 +3248,58 @@
                                 (resolve-cached-spatial-plan g-plan-key cached-g ground-vecs)))
        (define air-plan (and need-spatial-targets? any-ally-air-dps? (pair? air-vecs)
                              (resolve-cached-spatial-plan a-plan-key cached-a air-vecs)))
+       ;; W7-TAC-2: Precompute frontline allies committing to fire under DisengageRetreat so
+       ;; trailing ranged allies (e.g. Marines 1t behind Marauders) extend fire radius by +2.0t
+       ;; and support them instead of splitting off in pure MOVE!
+       (define (nearest-hittable-enemy-for su)
+         (define su-x (tactical-sim-unit-x su))
+         (define su-y (tactical-sim-unit-y su))
+         (for/fold ([best-e #f] [best-d2 +inf.0] #:result best-e)
+                   ([e (in-list arena-enemy-sims)])
+           (define wr-e
+             (if (and (eq? (tactical-sim-unit-type e) 'colossus)
+                      (fl> (tactical-sim-unit-air-range su) 0.0)
+                      (fl<= (tactical-sim-unit-ground-range su) 0.0))
+                 (tactical-sim-unit-air-range su)
+                 (sim-unit-weapon-range-vs su e)))
+           (if (fl<= wr-e 0.0)
+               (values best-e best-d2)
+               (let* ([dx (fl- su-x (tactical-sim-unit-x e))]
+                      [dy (fl- su-y (tactical-sim-unit-y e))]
+                      [d2 (fl+ (fl* dx dx) (fl* dy dy))])
+                 (if (fl< d2 best-d2)
+                     (values e d2)
+                     (values best-e best-d2))))))
+       (define disengage-committed-pts
+         (if (and (eq? committed-act 'DisengageRetreat) (pair? arena-enemy-sims))
+             (for/fold ([pts '()]) ([au (in-list arena-ally-units)])
+               (define aut (tactical-sim-unit-type au))
+               (if (or (eq? aut 'disruptor) (eq? aut 'disruptor-phased))
+                   pts
+                   (let ([ne (nearest-hittable-enemy-for au)])
+                     (if (and ne
+                              (not (memq (tactical-sim-unit-type ne)
+                                         '(locust locust-mp locustmp locust-flying))))
+                         (let* ([ax (tactical-sim-unit-x au)]
+                                [ay (tactical-sim-unit-y au)]
+                                [wr-a (if (and (eq? (tactical-sim-unit-type ne) 'colossus)
+                                               (fl> (tactical-sim-unit-air-range au) 0.0)
+                                               (fl<= (tactical-sim-unit-ground-range au) 0.0))
+                                          (tactical-sim-unit-air-range au)
+                                          (sim-unit-weapon-range-vs au ne))]
+                                [d-a (fast-dist2d ax ay (tactical-sim-unit-x ne) (tactical-sim-unit-y ne))]
+                                [wp-a (flmax 0.16 (exact->inexact (tactical-sim-unit-weapon-period au)))]
+                                [kmin-a (flmax 0.22 (fl* 0.38 wp-a))]
+                                [wcd-a (exact->inexact (tactical-sim-unit-weapon-cooldown au))]
+                                [commits?
+                                 (and (fl> wr-a 0.0)
+                                      (or (and (fl<= wr-a 1.5) (fl<= d-a 8.5))
+                                          (and (fl> wr-a 1.5)
+                                               (fl<= d-a (fl+ wr-a 2.5))
+                                               (fl< wcd-a kmin-a))))])
+                           (if commits? (cons (cons ax ay) pts) pts))
+                         pts))))
+             '()))
        (for ([su (in-list arena-ally-units)])
          (define uid (tactical-sim-unit-id su))
          (define utype (tactical-sim-unit-type su))
@@ -3249,7 +3361,8 @@
                    (define best-w
                      (argmin (lambda (w0)
                                (define w (if enemy-by-id (or (unit-id-table-lookup enemy-by-id enemy-id-gen (hash-ref w0 'id -1)) w0) w0))
-                               (+ (hash-ref w 'hp 40) (hash-ref w 'shield 0)))
+                               (+ (or (hash-ref w 'hull-hp #f) (hash-ref w 'hp 40))
+                                  (or (hash-ref w 'shield #f) (hash-ref w 'shields 0))))
                              arena-workers))
                    (unit-hash->tactical-sim-unit
                     (if enemy-by-id (or (unit-id-table-lookup enemy-by-id enemy-id-gen (hash-ref best-w 'id -1)) best-w) best-w)
@@ -3270,7 +3383,7 @@
                    (cond
                      [best-hittable best-hittable]
                      [(and (eq? committed-act 'DisengageRetreat) first-arena-enemy)
-                      first-arena-enemy]
+                      (or (nearest-hittable-enemy-for su) first-arena-enemy)]
                      [else #f])])))
          (define target-in-weapon-range?
            (and target-su
@@ -3285,9 +3398,13 @@
                        (fl<= (fast-dist2d ux uy
                                           (tactical-sim-unit-x target-su)
                                           (tactical-sim-unit-y target-su))
-                             (fl+ wr
-                                  (fl+ (tactical-sim-unit-radius su)
-                                       (tactical-sim-unit-radius target-su))))))))
+                             (if (and splash-move-pt
+                                      (not active-spell-dodge?)
+                                      (eq? sprole 'commit-run-through-splash-concave))
+                                 (fl+ wr 2.5)
+                                 (fl+ wr
+                                      (fl+ (tactical-sim-unit-radius su)
+                                           (tactical-sim-unit-radius target-su)))))))))
          (define maxed-splash-breakthrough?
            (and arena-commit-splash?
                 (>= arena-supply-used 185)))
@@ -3331,12 +3448,19 @@
                 (define kite-cd-min (flmax 0.22 (fl* 0.38 w-period)))
                 (define has-weap? (and (not disruptor?) non-free-t? (fl> wr 0.0)))
                 (define melee-fight? (and has-weap? (fl<= wr 1.5) (fl<= edist 8.5)))
-                ;; W4-TAC-3: Fire when weapon is ready/nearly-ready up to `wr + 2.5` (stops 5.9t Marines
-                ;; from pure-MOVEing at 0 DPS while 6-range Stalkers shoot them for free); when on cooldown,
-                ;; step back <= 2.0t inside threat range instead of a full-map retreat!
+                ;; W4-TAC-3 + W7-TAC-2: Fire when weapon is ready/nearly-ready up to `wr + 2.5`
+                ;; (or `wr + 4.5` when protecting a nearby committed ally within `<= 10.0t`, matching
+                ;; `W5-TAC-5` so Marines 1t behind committing Marauders fire instead of fleeing!);
+                ;; when on cooldown, step back <= 2.0t inside threat range instead of a full-map retreat!
+                (define protect-committed-ally?
+                  (and (pair? disengage-committed-pts)
+                       (for/or ([pt (in-list disengage-committed-pts)])
+                         (define dx (fl- ux (car pt)))
+                         (define dy (fl- uy (cdr pt)))
+                         (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 100.0))))
                 (define ranged-stutter-fire?
                   (and has-weap? (fl> wr 1.5)
-                       (fl<= edist (fl+ wr 2.5))
+                       (fl<= edist (fl+ wr (if protect-committed-ally? 4.5 2.5)))
                        (fl< (exact->inexact w-cd) kite-cd-min)))
                 (if (or melee-fight? ranged-stutter-fire?)
                     (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'attack-unit eid ex ey frame))
