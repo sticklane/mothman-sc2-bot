@@ -292,6 +292,7 @@
 (define RX-FRAME       #px"f=([0-9]+)")
 (define RX-PRIO-FULL   #px"f=([0-9]+).*?bank=([0-9]+)M/([0-9]+)G sup=([0-9]+)/([0-9]+).*?saving_for=([a-z0-9-]+)\\(floor=([0-9]+)M/([0-9]+)G\\)")
 (define RX-SAVING-FALL #px"saving_for=([a-z0-9-]+)")
+(define RX-SCHED-PROD  #px"sched=\\([^)]*\\b(barracks|gateway|factory|starport)@")
 (define RX-BLOCKED     #px"([a-z0-9-]+)\\(blocked-by-escrow")
 (define RX-HEXP        #px"hexp=([0-9]+\\.[0-9]+)")
 (define RX-RUSH        #px"rush=([0-9]+\\.[0-9]+)")
@@ -335,6 +336,13 @@
           ;; W11-LOOP-2: Gas-rich / mineral-starved stall ticks (gas>=200 & min<100, unmaxed)
           'gas-rich-min-starved-ticks 0
           'gas-rich-min-starved-peak-gas 0
+          ;; W13-LOOP-2: Production building placement stall ticks (barracks/gateway/factory/starport scheduled with >=150M)
+          'prod-stall-ticks 0
+          'prod-stall-cur-streak 0
+          'prod-stall-cur-bldg ""
+          'prod-stall-max-streak 0
+          'prod-stall-max-bldg ""
+          'prod-stall-counts (make-hash)
           'step-ms '()
           'action-err-total 0
           'action-err-counts (make-hash)
@@ -394,6 +402,12 @@
   (define cur-stgt (hash-ref m 'cur-streak-target))
   (define grms-ticks (hash-ref m 'gas-rich-min-starved-ticks 0))
   (define grms-peak-gas (hash-ref m 'gas-rich-min-starved-peak-gas 0))
+  (define pstall-ticks (hash-ref m 'prod-stall-ticks 0))
+  (define pstall-cur-streak (hash-ref m 'prod-stall-cur-streak 0))
+  (define pstall-cur-bldg (hash-ref m 'prod-stall-cur-bldg ""))
+  (define pstall-max-streak (hash-ref m 'prod-stall-max-streak 0))
+  (define pstall-max-bldg (hash-ref m 'prod-stall-max-bldg ""))
+  (define pstall-ht (hash-ref m 'prod-stall-counts))
   (define crashes (hash-ref m 'crashes))
   (define last-prio-f 0)
 
@@ -476,6 +490,26 @@
          (set! grms-ticks (add1 grms-ticks))
          (when (> bgas grms-peak-gas)
            (set! grms-peak-gas bgas)))
+       ;; W13-LOOP-2: Production building placement stall ticks (barracks/gateway/factory/starport scheduled with >=150M)
+       (define pstall-m
+         (and mp (>= bmin 150) (< su 194)
+              (string-contains? ln "sched=(")
+              (regexp-match RX-SCHED-PROD ln)))
+       (cond
+         [pstall-m
+          (define pb (cadr pstall-m))
+          (set! pstall-ticks (add1 pstall-ticks))
+          (hash-update! pstall-ht pb add1 0)
+          (if (string=? pb pstall-cur-bldg)
+              (set! pstall-cur-streak (add1 pstall-cur-streak))
+              (begin (set! pstall-cur-bldg pb)
+                     (set! pstall-cur-streak 1)))
+          (when (> pstall-cur-streak pstall-max-streak)
+            (set! pstall-max-streak pstall-cur-streak)
+            (set! pstall-max-bldg pb))]
+         [else
+          (set! pstall-cur-bldg "")
+          (set! pstall-cur-streak 0)])
        ;; Blocked-by-escrow counts
        (when (string-contains? ln "blocked-by-escrow")
          (for ([bm (in-list (regexp-match* RX-BLOCKED ln #:match-select cadr))])
@@ -552,6 +586,11 @@
              'gs-windows (reverse (hash-ref m 'gs-windows '()))
              'gas-rich-min-starved-ticks grms-ticks
              'gas-rich-min-starved-peak-gas grms-peak-gas
+             'prod-stall-ticks pstall-ticks
+             'prod-stall-cur-streak pstall-cur-streak
+             'prod-stall-cur-bldg pstall-cur-bldg
+             'prod-stall-max-streak pstall-max-streak
+             'prod-stall-max-bldg pstall-max-bldg
              'crashes crashes))
 
 (define (scan-log-zip! acc zpath)
@@ -1760,6 +1799,33 @@
                          'avg_min our-avg-min
                          'avg_gas our-avg-gas)))
 
+          ;; W13-LOOP-2: Production building placement stall (>=30 ticks or >=8 streak on <300s match)
+          ;; and PvP Natural Nexus delay (PvP Nat@ > 210s)
+          (define prod-placement-stall-ticks (hash-ref log-acc 'prod-stall-ticks 0))
+          (define prod-placement-stall-max-streak (hash-ref log-acc 'prod-stall-max-streak 0))
+          (define prod-placement-stall-max-bldg (hash-ref log-acc 'prod-stall-max-bldg ""))
+          (define prod-placement-stall-counts (hash-ref log-acc 'prod-stall-counts (make-hash)))
+          (define prod-placement-stall?
+            (or (>= prod-placement-stall-ticks 30)
+                (and (<= dur 300.0) (>= prod-placement-stall-max-streak 8))))
+          (define prod-placement-stall-anomaly
+            (and prod-placement-stall?
+                 (hasheq 'ticks prod-placement-stall-ticks
+                         'max_streak prod-placement-stall-max-streak
+                         'top_bldg prod-placement-stall-max-bldg
+                         'by_bldg (for/list ([p (in-list (top-k-pairs prod-placement-stall-counts 4))])
+                                    (format "~a:~a" (car p) (cdr p))))))
+          (define our-nat-sec-val (hash-ref macro-timings 'nat_sec #f))
+          (define pvp-nat-delay-flag?
+            (and (string=? matchup "PvP")
+                 (>= dur 210.0)
+                 (or (not (real? our-nat-sec-val))
+                     (> our-nat-sec-val 210.0))))
+          (define pvp-nat-delay-anomaly
+            (and pvp-nat-delay-flag?
+                 (hasheq 'nat_sec our-nat-sec-val
+                         'duration_sec dur)))
+
           (define anomalies
             (hasheq 'zero_fire_retreat zero-fire-retreat-anomaly
                     'escrow_lockouts escrow-lockouts
@@ -1773,6 +1839,8 @@
                     'siege_range_zero_dps_loss siege-zero-dps-loss-anomaly
                     'cloaked_unit_damage_loss cloaked-unit-damage-loss-anomaly
                     'gas_rich_min_starved gas-rich-min-starved-anomaly
+                    'prod_placement_stall prod-placement-stall-anomaly
+                    'pvp_nat_delay pvp-nat-delay-anomaly
                     'air_aa_starvation air-aa-starvation))
 
           ;; Classify 0-combat opponent disconnects (e.g., mid-early client drop) separately from real combat wins
@@ -1884,6 +1952,14 @@
             (add-sig! (format "GAS_RICH_MIN_STARVED(~at,pk=~aG)"
                               gas-rich-min-starved-ticks
                               gas-rich-min-starved-peak-gas)))
+          (when prod-placement-stall-anomaly
+            (add-sig! (format "PROD_PLACE_STALL(~at,~ax~a)"
+                              prod-placement-stall-ticks
+                              prod-placement-stall-max-streak
+                              prod-placement-stall-max-bldg)))
+          (when pvp-nat-delay-anomaly
+            (add-sig! (format "PVP_NAT_DELAY(~as)"
+                              (if (real? our-nat-sec-val) (r0 our-nat-sec-val) "NONE"))))
           (when (and (not (eq? res 'win)) (< trade-ratio 0.50) (>= lost-val 1500))
             (add-sig! "SEVERE_BAD_TRADES(<0.5x)"))
           (when (and (not (eq? res 'win)) (<= dur 330.0)) (add-sig! "EARLY_RUSH_LOSS"))
@@ -1990,6 +2066,10 @@
                   'army_val_8m_ratio_vs_pro army-val-8m-ratio-vs-pro
                   'gas_rich_min_starved_ticks gas-rich-min-starved-ticks
                   'gas_rich_min_starved gas-rich-min-starved?
+                  'prod_placement_stall_ticks prod-placement-stall-ticks
+                  'prod_placement_stall_max_streak prod-placement-stall-max-streak
+                  'prod_placement_stall prod-placement-stall?
+                  'pvp_nat_delay_flag pvp-nat-delay-flag?
                   'hexp_high (hash-ref log-acc 'hexp-high 0)
                   'rush_high (hash-ref log-acc 'rush-high 0)
                   'saving_top (for/list ([p (in-list (top-k-pairs (hash-ref log-acc 'saving-counts) 5))])
@@ -2158,6 +2238,9 @@
                 'army_val_8m_ratio_vs_pro_mean (avg-opt2 'army_val_8m_ratio_vs_pro)
                 'total_gas_rich_min_starved_ticks (for/sum ([r (in-list rows)]) (hash-ref r 'gas_rich_min_starved_ticks 0))
                 'gas_rich_min_starved_matches (count (lambda (r) (eq? (hash-ref r 'gas_rich_min_starved #f) #t)) rows)
+                'total_prod_placement_stall_ticks (for/sum ([r (in-list rows)]) (hash-ref r 'prod_placement_stall_ticks 0))
+                'prod_placement_stall_matches (count (lambda (r) (eq? (hash-ref r 'prod_placement_stall #f) #t)) rows)
+                'pvp_nat_delay_matches (count (lambda (r) (eq? (hash-ref r 'pvp_nat_delay_flag #f) #t)) rows)
                 'our_bases (avg-field2 'our_bases)
                 'opp_bases (avg-field2 'opp_bases)
                 'our_w2 (avg-opt 'our_w2) 'opp_w2 (avg-opt 'opp_w2)
@@ -2271,6 +2354,8 @@
                         'siege_range_zero_dps_losses (anom-cnt (lambda (a) (and (hash? (hash-ref a 'siege_range_zero_dps_loss #f)) #t)))
                         'cloaked_unit_damage_losses (anom-cnt (lambda (a) (and (hash? (hash-ref a 'cloaked_unit_damage_loss #f)) #t)))
                         'gas_rich_min_starved (anom-cnt (lambda (a) (and (hash? (hash-ref a 'gas_rich_min_starved #f)) #t)))
+                        'prod_placement_stall (anom-cnt (lambda (a) (and (hash? (hash-ref a 'prod_placement_stall #f)) #t)))
+                        'pvp_nat_delay (anom-cnt (lambda (a) (and (hash? (hash-ref a 'pvp_nat_delay #f)) #t)))
                         'air_aa_starvation (anom-cnt (lambda (a) (and (hash? (hash-ref a 'air_aa_starvation #f)) #t)))
                         'wall_timeout_tie wall-timeout-ties
                         'step_spike_500ms step-spike-500-cnt
@@ -2512,7 +2597,30 @@
                      (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
                      (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
                      (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
-                     (hash-ref e 'ticks) (hash-ref e 'post100_ticks) (hash-ref e 'peak_min)))))
+                     (hash-ref e 'ticks) (hash-ref e 'post100_ticks) (hash-ref e 'peak_min))))
+
+  (section "9. Production Placement Stalls (>=30t or >=8-streak <5m w/ >=150M) & PvP Nat Delays (>210s)"
+           (filter (lambda (r)
+                     (or (hash? (hash-ref (hash-ref r 'anomalies) 'prod_placement_stall #f))
+                         (hash? (hash-ref (hash-ref r 'anomalies) 'pvp_nat_delay #f))))
+                   rows)
+           (lambda (r)
+             (define ps (hash-ref (hash-ref r 'anomalies) 'prod_placement_stall #f))
+             (define pn (hash-ref (hash-ref r 'anomalies) 'pvp_nat_delay #f))
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | ~a~a\n"
+                     (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
+                     (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
+                     (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
+                     (if (hash? ps)
+                         (format "ProdStall=~at (maxStreak=~a ~a ~a)"
+                                 (hash-ref ps 'ticks) (hash-ref ps 'max_streak)
+                                 (hash-ref ps 'top_bldg) (hash-ref ps 'by_bldg))
+                         "")
+                     (if (hash? pn)
+                         (format "~aPvPNatDelay=~as"
+                                 (if (hash? ps) " | " "")
+                                 (or (hash-ref pn 'nat_sec) "NONE"))
+                         "")))))
 
 ;; -----------------------------------------------------------------------------
 ;; Main CLI Driver
@@ -2643,9 +2751,52 @@
   ;; W9-LOOP-2: 54-match full-roster generalization cohort split (`core_12` vs `unseen_6`)
   (define core12-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "core_12")) clean-scored))
   (define unseen6-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "unseen_6")) clean-scored))
+  (define unseen6-all-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "unseen_6")) scored))
   (define agg-core12 (aggregate-slice core12-rows))
   (define agg-unseen6 (aggregate-slice unseen6-rows))
   (define by-cohort (hasheq 'core_12 agg-core12 'unseen_6 agg-unseen6))
+  ;; W14-LOOP-2: Per-opponent `unseen_6_breakdown` for 54-match full-roster ship scorecard
+  (define unseen6-opps
+    (sort (remove-duplicates (map (lambda (r) (hash-ref r 'opp_bot "Unknown")) unseen6-all-rows))
+          string-ci<?))
+  (define unseen6-breakdown
+    (for/hasheq ([opp (in-list unseen6-opps)])
+      (define all-rs (filter (lambda (r) (equal? (hash-ref r 'opp_bot "") opp)) unseen6-all-rows))
+      (define cl-rs (filter (lambda (r) (equal? (hash-ref r 'opp_bot "") opp)) unseen6-rows))
+      (define agg (aggregate-slice cl-rs))
+      (define faults (- (length all-rs) (length cl-rs)))
+      (define race-summary
+        (string-join
+         (for/list ([rc (in-list '("Protoss" "Terran" "Zerg"))])
+           (define rs-rc (filter (lambda (r) (string=? (hash-ref r 'our_race "") rc)) cl-rs))
+           (if (null? rs-rc)
+               (format "~a:-" (race-initial rc))
+               (format "~a:~a"
+                       (race-initial rc)
+                       (string-join
+                        (map (lambda (r) (string-upcase (substring (hash-ref r 'result "?") 0 1))) rs-rc)
+                        ""))))
+         " "))
+      (values (string->symbol opp)
+              (hasheq 'opp_bot opp
+                      'n (length cl-rs)
+                      'n_total (length all-rs)
+                      'opp_faults faults
+                      'wins (hash-ref agg 'wins 0)
+                      'losses (hash-ref agg 'losses 0)
+                      'ties (hash-ref agg 'ties 0)
+                      'win_rate_pct (hash-ref agg 'win_rate_pct 0.0)
+                      'non_loss_pct (hash-ref agg 'non_loss_pct 0.0)
+                      'trade_agg (hash-ref agg 'trade_agg 0.0)
+                      'trade_med (hash-ref agg 'trade_med 0.0)
+                      'killed_val (hash-ref agg 'killed_val 0)
+                      'lost_val (hash-ref agg 'lost_val 0)
+                      'cloak_loss (hash-ref agg 'cloaked_unit_damage_losses 0)
+                      'siege_0dps (hash-ref agg 'siege_range_zero_dps_losses 0)
+                      'supply_block_pct (hash-ref agg 'supply_block_pct 0.0)
+                      'our_peak_army (hash-ref agg 'our_peak_army 0.0)
+                      'avg_dur_sec (hash-ref agg 'avg_dur_sec 0.0)
+                      'by_race race-summary))))
 
   (printf "\n================================================================================================================================\n")
   (printf "  AGGREGATE SUMMARY (Clean excludes opponent loop<=300 crashes & 0-combat disconnects)\n")
@@ -2653,9 +2804,20 @@
   (print-agg-line "ALL_MATCHES  " agg-all)
   (when (< (length clean-scored) (length scored))
     (print-agg-line "CLEAN_MATCHES" agg-clean))
-  (when (pair? unseen6-rows)
+  (when (pair? unseen6-all-rows)
     (print-agg-line "COHORT=CORE12" agg-core12)
-    (print-agg-line "COHORT=UNSEEN" agg-unseen6))
+    (print-agg-line "COHORT=UNSEEN" agg-unseen6)
+    (printf "\n  UNSEEN-6 GENERALIZATION BREAKDOWN (n_clean=~a / n_total=~a):\n"
+            (length unseen6-rows) (length unseen6-all-rows))
+    (for ([opp (in-list unseen6-opps)])
+      (define b (hash-ref unseen6-breakdown (string->symbol opp)))
+      (printf "    ~a | ~aW-~aL-~aT (n=~a/~a, ~a) | TradeAgg=~ax (~a/~a) | CloakLoss=~a | Siege0=~a | PkArmy=~a | SB=~a%\n"
+              (pad-r opp 18)
+              (hash-ref b 'wins) (hash-ref b 'losses) (hash-ref b 'ties)
+              (hash-ref b 'n) (hash-ref b 'n_total) (hash-ref b 'by_race)
+              (r2 (hash-ref b 'trade_agg)) (hash-ref b 'killed_val) (hash-ref b 'lost_val)
+              (hash-ref b 'cloak_loss) (hash-ref b 'siege_0dps)
+              (r0 (hash-ref b 'our_peak_army)) (r1 (hash-ref b 'supply_block_pct)))))
   (for ([rc (in-list '(Protoss Terran Zerg))])
     (print-agg-line (format "RACE=~a" (pad-r rc 8)) (hash-ref by-race rc)))
   (for ([rs (in-list '(win loss tie))])
@@ -2713,8 +2875,9 @@
                             'mirror_skip (length mirrors)
                             'parse_errors (length errors))
             'overall (hasheq 'all agg-all 'clean agg-clean)
-            'summary (hasheq 'core_12 agg-core12 'unseen_6 agg-unseen6)
+            'summary (hasheq 'core_12 agg-core12 'unseen_6 agg-unseen6 'unseen_6_breakdown unseen6-breakdown)
             'by_cohort by-cohort
+            'unseen_6_breakdown unseen6-breakdown
             'by_race by-race
             'by_matchup by-matchup
             'by_result by-result

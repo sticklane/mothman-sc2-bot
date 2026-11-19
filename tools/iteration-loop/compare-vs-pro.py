@@ -188,6 +188,9 @@ def normalize_match(m):
         "gas_rich_min_starved": bool(m.get("gas_rich_min_starved") or (m.get("anomalies") or {}).get("gas_rich_min_starved")),
         "early_rush_idle_bank_3m": bool(m.get("early_rush_idle_bank_3m") or (m.get("anomalies") or {}).get("early_rush_idle_bank_3m")),
         "own_territory_retreat_frames": safe_num(m.get("own_territory_retreat_frames")),
+        "prod_placement_stall_ticks": safe_num(m.get("prod_placement_stall_ticks")),
+        "prod_placement_stall": bool(m.get("prod_placement_stall") or (m.get("anomalies") or {}).get("prod_placement_stall")),
+        "pvp_nat_delay_flag": bool(m.get("pvp_nat_delay_flag") or (m.get("anomalies") or {}).get("pvp_nat_delay")),
         "action_rejects": int(m.get("action_rejects") or 0),
         "crashes": m.get("crashes") or [],
         "signatures": m.get("signatures") or [],
@@ -252,6 +255,7 @@ def summarize_slice(rows):
     znl_vals = [r["zerg_non_ling_army_pct"] for r in rows if r.get("zerg_non_ling_army_pct") is not None and r["our_race"] == "Zerg"]
     grms_vals = [r["gas_rich_min_starved_ticks"] for r in rows if r.get("gas_rich_min_starved_ticks") is not None]
     otr_vals = [r["own_territory_retreat_frames"] for r in rows if r.get("own_territory_retreat_frames") is not None]
+    pps_vals = [r["prod_placement_stall_ticks"] for r in rows if r.get("prod_placement_stall_ticks") is not None]
 
     pk_army_ratios = [
         r["our_peak_army"] / max(1.0, r["opp_peak_army"])
@@ -353,6 +357,9 @@ def summarize_slice(rows):
         "early_rush_idle_bank_3m_losses": sum(1 for r in rows if r.get("early_rush_idle_bank_3m")),
         "total_own_territory_retreat_frames": int(round(sum(otr_vals))) if otr_vals else None,
         "own_territory_retreat_matches": sum(1 for v in otr_vals if v >= 440.0),
+        "prod_placement_stall_matches": sum(1 for r in rows if r.get("prod_placement_stall")),
+        "total_prod_placement_stall_ticks": int(round(sum(pps_vals))) if pps_vals else None,
+        "pvp_nat_delay_matches": sum(1 for r in rows if r.get("pvp_nat_delay_flag")),
         "action_rejects": sum(r["action_rejects"] for r in rows),
         "crashes": sum(len(r["crashes"]) for r in rows),
         "anomalies": dict(anom_counts),
@@ -557,10 +564,15 @@ def main():
     cur_unseen_rows = [m for m in cur_rows if m["opp_bot"] not in CORE_12_OPPONENTS]
     cohorts = None
     if cur_unseen_rows:
+        unseen_opps = sorted(set(m["opp_bot"] for m in cur_unseen_rows))
         cohorts = {
             "core_12": summarize_slice(cur_core_rows),
             "unseen_roster": summarize_slice(cur_unseen_rows),
-            "unseen_opponents": sorted(set(m["opp_bot"] for m in cur_unseen_rows)),
+            "unseen_opponents": unseen_opps,
+            "unseen_by_opponent": {
+                opp: summarize_slice([m for m in cur_unseen_rows if m["opp_bot"] == opp])
+                for opp in unseen_opps
+            },
         }
 
     by_race = {}
@@ -731,6 +743,11 @@ def main():
                     f" | `RushIdle3m` = **{cur_all.get('early_rush_idle_bank_3m_losses', 0)}**"
                     f" | `OwnTerrRet(<=38t)` = **{cur_all.get('own_territory_retreat_matches', 0)}/{cur_all['n']} ({(cur_all.get('total_own_territory_retreat_frames') or 0):,}f)**"
                 )
+            if cur_all.get("total_prod_placement_stall_ticks") is not None or cur_all.get("pvp_nat_delay_matches", 0) > 0:
+                extra_w8 += (
+                    f" | `ProdPlaceStall` = **{cur_all.get('prod_placement_stall_matches', 0)}/{cur_all['n']} ({(cur_all.get('total_prod_placement_stall_ticks') or 0):,}t)**"
+                    f" | `PvPNatDelay` = **{cur_all.get('pvp_nat_delay_matches', 0)}**"
+                )
         print(
             f"\n### Stall, Retreat & Waste Watch (`W7/W8-LOOP-2`): "
             f"`endgame_home_stall >= 90s` = **{cur_all.get('endgame_home_stall_count', 0)}/{cur_all['n']}** "
@@ -745,6 +762,16 @@ def main():
         print("\n### Full-Roster Generalization Split (`core_12` vs `unseen_roster`)")
         print(f"- **`core_12` (`n={c12['n']}`):** `{c12['wins']}W-{c12['losses']}L-{c12['ties']}T` (`{c12['wr_pct']:.1f}%` WR, Trade `{fmt(c12['trade_agg'],'x',2)}`/`{fmt(c12['trade_med'],'x',2)}`, SupBlk `{fmt(c12['sup_blk_avg'],'%')}`, PkArmy `{fmt(c12['pk_army_avg'],'',0)}`)")
         print(f"- **`unseen_roster` (`n={cu['n']}`, {', '.join(cohorts['unseen_opponents'])}):** `{cu['wins']}W-{cu['losses']}L-{cu['ties']}T` (`{cu['wr_pct']:.1f}%` WR, Trade `{fmt(cu['trade_agg'],'x',2)}`/`{fmt(cu['trade_med'],'x',2)}`, SupBlk `{fmt(cu['sup_blk_avg'],'%')}`, PkArmy `{fmt(cu['pk_army_avg'],'',0)}`)")
+        if cohorts.get("unseen_by_opponent"):
+            print("\n| Unseen Opponent | n | W-L-T | Trade Agg | PkArmy | SupBlk% | CloakLoss | Siege0DPS |")
+            print("|---|---:|---|---:|---:|---:|---:|---:|")
+            for opp, osum in cohorts["unseen_by_opponent"].items():
+                print(
+                    f"| `{opp}` | {osum['n']} | {osum['wins']}-{osum['losses']}-{osum['ties']} "
+                    f"| {fmt(osum['trade_agg'],'x',2)} | {fmt(osum['pk_army_avg'],'',0)} "
+                    f"| {fmt(osum['sup_blk_avg'],'%')} | {osum.get('cloaked_unit_damage_losses', 0)} "
+                    f"| {osum.get('siege_range_zero_dps_losses', 0)} |"
+                )
 
     if hwm_all:
         cmp_slice = cohorts["core_12"] if (cohorts and hwm_all["n"] <= 36 and cur_all["n"] > 36) else cur_all

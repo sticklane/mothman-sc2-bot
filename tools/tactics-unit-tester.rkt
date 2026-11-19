@@ -136,6 +136,12 @@
 (define AB-KD8-CHARGE 2588)
 (define AB-MORPH-WARP-PRISM-TRANSPORT 1530)
 (define AB-INJECT-LARVA 251)
+(define AB-NEXUS-MASS-RECALL 3757)
+(define AB-DECLOAK-GHOST 383)
+(define AB-DECLOAK-BANSHEE 393)
+(define AB-UPROOT-SPINE 1725)
+(define AB-UPROOT-SPORE 1727)
+(define AB-CREEP-TUMOR-TUMOR 1733)
 
 ;; Minimal SC2 protobuf wire encoders (for true wire-level decoding regression tests)
 (define (pb-varint n)
@@ -7764,8 +7770,439 @@
               (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0)
                         (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
 
+
 ;; -----------------------------------------------------------------------------
-;; Full Scenario Catalog (187 Scenarios)
+;; Round-13 Pro-Inspired Regression Shields (novel-114..122 -> Milestone 200!)
+;; -----------------------------------------------------------------------------
+(define scen-novel-114
+  (tactical-scenario
+   "novel-114-banshee-and-ghost-cloak-researched-activate-and-preserve"
+   "novel" "Terran" "Terran" "cloak"
+   "Researched Banshee (392) & Ghost (382) Cloak activate on step 1 while attacking and emit 0 duplicate cloak or decloak on step 2 with buffs 7/8 active"
+   (lambda ()
+     (define home (mk-home-base-units 'Terran #:workers 16))
+     (define enemy (for/list ([i (in-range 6)]) (mk-unit (+ 8301 i) 'marine 4 79.0 (+ 78.0 (* i 0.6)) #:hp 45.0 #:hp-max 45.0)))
+     (define ally1 (append home (list (mk-unit 5301 'banshee 1 75.0 80.0 #:hp 60.0 #:hp-max 140.0 #:energy 100.0)
+                                      (mk-unit 5302 'ghost 1 75.0 82.0 #:hp 40.0 #:hp-max 100.0 #:energy 100.0))))
+     (define ally2 (append home (list (mk-unit 5301 'banshee 1 75.0 80.0 #:hp 60.0 #:hp-max 140.0 #:energy 70.0 #:cloak 1 #:buffs '(7))
+                                      (mk-unit 5302 'ghost 1 75.0 82.0 #:hp 40.0 #:hp-max 100.0 #:energy 70.0 #:cloak 1 #:buffs '(8)))))
+     (define outs
+       (run-pipeline-sequence 'Terran 'Terran
+         (list (hash 'obs (mk-obs 12000 (append ally1 enemy) #:upgrades '(banshee-cloak personal-cloaking) #:food-used 30 #:food-cap 50 #:food-army 14 #:food-workers 16))
+               (hash 'obs (mk-obs 12008 (append ally2 enemy) #:upgrades '(banshee-cloak personal-cloaking) #:food-used 30 #:food-cap 50 #:food-army 14 #:food-workers 16)))))
+     (define b-clk1? (wire-has-ability? (step-outcome-wire-cmds (first outs)) '(5301) AB-CLOAK-BANSHEE))
+     (define g-clk1? (wire-has-ability? (step-outcome-wire-cmds (first outs)) '(5302) AB-CLOAK-GHOST))
+     (define bad-clk2? (wire-any-ability? (step-outcome-wire-cmds (second outs)) '(5301 5302) (list AB-CLOAK-BANSHEE AB-CLOAK-GHOST AB-DECLOAK-BANSHEE AB-DECLOAK-GHOST)))
+     (define total-rej (+ (step-outcome-wire-rejects (first outs)) (step-outcome-wire-rejects (second outs))))
+     (values (second outs)
+             (list
+              (mk-check "banshee-and-ghost-cloak-step1" (and b-clk1? g-clk1?) (format "step1 banshee-cloak=~a ghost-cloak=~a" b-clk1? g-clk1?))
+              (mk-check "no-duplicate-cloak-or-decloak-step2" (not bad-clk2?) (format "step2 cloak/decloak spam=~a" bad-clk2?))
+              (mk-check "zero-wire-rejects" (= total-rej 0) (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-novel-115
+  (tactical-scenario
+   "novel-115-marine-stimpack-skips-buff27-and-critical-12hp"
+   "novel" "Terran" "Zerg" "spellcaster"
+   "Marines emit 0 re-stim when already carrying buff 27 (stimpack) AND 0 suicide-stim at critical 12/45 HP while all 8 engage"
+   (lambda ()
+     (define home (mk-home-base-units 'Terran #:workers 16))
+     (define enemy (for/list ([i (in-range 6)]) (mk-unit (+ 8401 i) 'roach 4 80.0 (+ 78.0 (* i 0.8)) #:hp 145.0 #:hp-max 145.0)))
+     (define tags1 (for/list ([i (in-range 8)]) (+ 5401 i)))
+     (define tags2 (for/list ([i (in-range 8)]) (+ 5411 i)))
+     (define o1 (last (run-pipeline-sequence 'Terran 'Zerg
+                        (list (hash 'obs (mk-obs 10000 (append home (for/list ([i (in-range 8)]) (mk-unit (+ 5401 i) 'marine 1 75.0 (+ 77.5 (* i 0.7)) #:hp 35.0 #:hp-max 45.0 #:buffs '(27))) enemy)
+                                                 #:upgrades '(stimpack) #:food-used 32 #:food-cap 54 #:food-army 16 #:food-workers 16))))))
+     (define o2 (last (run-pipeline-sequence 'Terran 'Zerg
+                        (list (hash 'obs (mk-obs 10000 (append home (for/list ([i (in-range 8)]) (mk-unit (+ 5411 i) 'marine 1 75.0 (+ 77.5 (* i 0.7)) #:hp 12.0 #:hp-max 45.0)) enemy)
+                                                 #:upgrades '(stimpack) #:food-used 32 #:food-cap 54 #:food-army 16 #:food-workers 16))))))
+     (define bad-st1? (wire-any-ability? (step-outcome-wire-cmds o1) tags1 (list AB-STIMPACK AB-STIM-ALT)))
+     (define bad-st2? (wire-any-ability? (step-outcome-wire-cmds o2) tags2 (list AB-STIMPACK AB-STIM-ALT)))
+     (define atk1 (wire-count-tags-with-ability (step-outcome-wire-cmds o1) tags1 AB-ATTACK))
+     (define atk2 (wire-count-tags-with-ability (step-outcome-wire-cmds o2) tags2 AB-ATTACK))
+     (define total-rej (+ (step-outcome-wire-rejects o1) (step-outcome-wire-rejects o2)))
+     (values o2
+             (list
+              (mk-check "no-restim-on-buff27-marines" (not bad-st1?) (format "re-stimmed buff-27 Marines=~a" bad-st1?))
+              (mk-check "no-suicide-stim-on-12hp-marines" (not bad-st2?) (format "suicide-stimmed 12HP Marines=~a" bad-st2?))
+              (mk-check "both-marine-squads-engage" (and (>= atk1 6) (>= atk2 6)) (format "ATK buff27=~a/8 lowHP=~a/8" atk1 atk2))
+              (mk-check "zero-wire-rejects" (= total-rej 0) (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-novel-116
+  (tactical-scenario
+   "novel-116-infestors-vs-skytoss-split-fungal-neural-no-4.11-shroud"
+   "novel" "Zerg" "Protoss" "spellcaster"
+   "Two Infestors vs Carriers + Void Rays split Fungal Growth (74) and Neural Parasite (249) with 0 Patch-4.11 Microbial Shroud (2545)"
+   (lambda ()
+     (define home (mk-home-base-units 'Zerg #:workers 16))
+     (define allies (append home
+                            (list (mk-unit 5201 'infestor 1 75.0 80.0 #:hp 90.0 #:hp-max 90.0 #:energy 150.0)
+                                  (mk-unit 5202 'infestor 1 75.0 81.5 #:hp 90.0 #:hp-max 90.0 #:energy 150.0))
+                            (for/list ([i (in-range 8)]) (mk-unit (+ 5210 i) 'hydralisk 1 76.0 (+ 77.0 (* i 0.8)) #:hp 90.0 #:hp-max 90.0))))
+     (define enemies (append (for/list ([i (in-range 3)]) (mk-unit (+ 8201 i) 'carrier 4 82.0 (+ 78.5 (* i 1.5)) #:hp 300.0 #:hp-max 300.0 #:shield 150.0 #:shield-max 150.0))
+                             (for/list ([i (in-range 3)]) (mk-unit (+ 8210 i) 'void-ray 4 81.0 (+ 78.5 (* i 1.2)) #:hp 150.0 #:hp-max 150.0 #:shield 100.0 #:shield-max 100.0))))
+     (define out (last (run-pipeline-sequence 'Zerg 'Protoss
+                         (list (hash 'obs (mk-obs 14000 (append allies enemies) #:upgrades '(neural-parasite) #:food-used 46 #:food-cap 66 #:food-army 30 #:food-workers 16))))))
+     (define wcmds (step-outcome-wire-cmds out))
+     (define fung? (wire-has-ability? wcmds '(5201 5202) AB-FUNGAL-GROWTH))
+     (define neur? (wire-has-ability? wcmds '(5201 5202) AB-NEURAL-PARASITE))
+     (define shroud? (wire-has-ability? wcmds '(5201 5202) AB-MICROBIAL-SHROUD))
+     (values out
+             (list
+              (mk-check "infestors-cast-fungal-and-neural" (and fung? neur?) (format "Fungal=~a Neural=~a" fung? neur?))
+              (mk-check "zero-4.11-microbial-shroud-on-4.10.0" (not shroud?) (format "Microbial Shroud (2545)=~a" shroud?))
+              (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0) (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
+
+(define scen-novel-117
+  (tactical-scenario
+   "novel-117-protoss-tempest-carrier-dt-engage-and-build-interceptors"
+   "novel" "Protoss" "Terran" "late-game"
+   "Tempest, Carrier, and Dark Templar all engage enemy Marauders cleanly AND Carrier builds Interceptors (1042)"
+   (lambda ()
+     (define home (mk-home-base-units 'Protoss #:workers 16))
+     (define allies (append home (list (mk-unit 5501 'tempest 1 72.0 80.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0)
+                                       (mk-unit 5502 'carrier 1 74.0 80.0 #:hp 300.0 #:hp-max 300.0 #:shield 150.0 #:shield-max 150.0)
+                                       (mk-unit 5503 'dark-templar 1 78.0 80.0 #:hp 40.0 #:hp-max 40.0 #:shield 80.0 #:shield-max 80.0 #:cloak 1))))
+     (define enemies (for/list ([i (in-range 6)]) (mk-unit (+ 8501 i) 'marauder 4 82.0 (+ 78.0 (* i 0.9)) #:hp 125.0 #:hp-max 125.0)))
+     (define out (last (run-pipeline-sequence 'Protoss 'Terran (list (hash 'obs (mk-obs 15000 (append allies enemies) #:food-used 40 #:food-cap 66 #:food-army 24 #:food-workers 16))))))
+     (define wcmds (step-outcome-wire-cmds out))
+     (define atk (wire-count-tags-with-ability wcmds '(5501 5502 5503) AB-ATTACK))
+     (define inter? (wire-has-ability? wcmds '(5502) AB-BUILD-INTERCEPTORS))
+     (values out
+             (list
+              (mk-check "tempest-carrier-dt-all-engage" (= atk 3) (format "Attackers=~a/3" atk))
+              (mk-check "carrier-queues-interceptors-1042" inter? (format "Carrier 1042=~a" inter?))
+              (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0) (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
+
+(define scen-novel-118
+  (tactical-scenario
+   "novel-118-protoss-mothership-and-tempests-commit"
+   "novel" "Protoss" "Terran" "late-game"
+   "Mothership and 4 Tempests commit cleanly to attacking 12 Marines with zero passive stall"
+   (lambda ()
+     (define home (mk-home-base-units 'Protoss #:workers 16))
+     (define tags '(5201 5210 5211 5212 5213))
+     (define allies (append home (list (mk-unit 5201 'mothership 1 74.0 80.0 #:hp 350.0 #:hp-max 350.0 #:shield 350.0 #:shield-max 350.0 #:energy 150.0))
+                            (for/list ([i (in-range 4)]) (mk-unit (+ 5210 i) 'tempest 1 73.0 (+ 78.0 (* i 1.2)) #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0))))
+     (define enemies (for/list ([i (in-range 12)]) (mk-unit (+ 8201 i) 'marine 4 81.0 (+ 77.0 (* i 0.5)) #:hp 45.0 #:hp-max 45.0)))
+     (define out (last (run-pipeline-sequence 'Protoss 'Terran (list (hash 'obs (mk-obs 16000 (append allies enemies) #:food-used 52 #:food-cap 80 #:food-army 36 #:food-workers 16))))))
+     (define atk (wire-count-tags-with-ability (step-outcome-wire-cmds out) tags AB-ATTACK))
+     (values out
+             (list
+              (mk-check "mothership-and-tempests-all-attack" (= atk 5) (format "Attackers=~a/5" atk))
+              (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0) (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
+
+(define scen-novel-119
+  (tactical-scenario
+   "novel-119-zerg-corruptors-focus-carriers-ignoring-ground-zealots"
+   "novel" "Zerg" "Protoss" "anti-air"
+   "8 Zerg Corruptors focus-fire 3 enemy Carriers directly without stalling on 6 ground Zealots"
+   (lambda ()
+     (define home (mk-home-base-units 'Zerg #:workers 16))
+     (define tags (for/list ([i (in-range 8)]) (+ 5101 i)))
+     (define allies (append home (for/list ([i (in-range 8)]) (mk-unit (+ 5101 i) 'corruptor 1 75.0 (+ 77.0 (* i 0.8)) #:hp 200.0 #:hp-max 200.0))))
+     (define enemies (append (for/list ([i (in-range 3)]) (mk-unit (+ 8101 i) 'carrier 4 81.0 (+ 78.5 (* i 1.2)) #:hp 300.0 #:hp-max 300.0 #:shield 150.0 #:shield-max 150.0))
+                             (for/list ([i (in-range 6)]) (mk-unit (+ 8110 i) 'zealot 4 79.0 (+ 78.0 (* i 0.7)) #:hp 100.0 #:hp-max 100.0 #:shield 50.0 #:shield-max 50.0))))
+     (define out (last (run-pipeline-sequence 'Zerg 'Protoss (list (hash 'obs (mk-obs 14000 (append allies enemies) #:food-used 46 #:food-cap 66 #:food-army 30 #:food-workers 16))))))
+     (define tgts (wire-targets-for-tags (step-outcome-wire-cmds out) tags AB-ATTACK))
+     (define hit-carr (for/sum ([t (in-list tgts)]) (if (memv (second t) '(8101 8102 8103)) (length (first t)) 0)))
+     (values out
+             (list
+              (mk-check "corruptors-focus-air-carriers" (= hit-carr 8) (format "Corruptors attacking Carriers=~a/8" hit-carr))
+              (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0) (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
+
+(define scen-novel-120
+  (tactical-scenario
+   "novel-120-zerg-broodlords-and-mutalisks-engage-marauders"
+   "novel" "Zerg" "Terran" "late-game"
+   "2 Brood Lords and 2 Mutalisks all engage ground Marauders cleanly with zero retreat"
+   (lambda ()
+     (define home (mk-home-base-units 'Zerg #:workers 16))
+     (define tags '(5511 5512 5513 5514))
+     (define allies (append home (list (mk-unit 5511 'brood-lord 1 73.0 80.0 #:hp 225.0 #:hp-max 225.0)
+                                       (mk-unit 5512 'brood-lord 1 73.0 82.0 #:hp 225.0 #:hp-max 225.0)
+                                       (mk-unit 5513 'mutalisk 1 76.0 79.0 #:hp 120.0 #:hp-max 120.0)
+                                       (mk-unit 5514 'mutalisk 1 76.0 81.0 #:hp 120.0 #:hp-max 120.0))))
+     (define enemies (for/list ([i (in-range 6)]) (mk-unit (+ 8501 i) 'marauder 4 82.0 (+ 78.0 (* i 0.9)) #:hp 125.0 #:hp-max 125.0)))
+     (define out (last (run-pipeline-sequence 'Zerg 'Terran (list (hash 'obs (mk-obs 15000 (append allies enemies) #:food-used 40 #:food-cap 66 #:food-army 24 #:food-workers 16))))))
+     (define atk (wire-count-tags-with-ability (step-outcome-wire-cmds out) tags AB-ATTACK))
+     (values out
+             (list
+              (mk-check "broodlords-and-mutas-all-attack" (= atk 4) (format "Attackers=~a/4" atk))
+              (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0) (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
+
+(define scen-novel-121
+  (tactical-scenario
+   "novel-121-terran-hellbats-roast-zerglings"
+   "novel" "Terran" "Zerg" "melee"
+   "4 Terran Hellbats (hellion-tank) cleanly engage 12 Zerglings with 100% attack commitment"
+   (lambda ()
+     (define home (mk-home-base-units 'Terran #:workers 16))
+     (define tags '(5521 5522 5523 5524))
+     (define allies (append home (for/list ([i (in-range 4)]) (mk-unit (+ 5521 i) 'hellion-tank 1 76.0 (+ 78.5 (* i 0.9)) #:hp 135.0 #:hp-max 135.0))))
+     (define enemies (for/list ([i (in-range 12)]) (mk-unit (+ 8521 i) 'zergling 4 80.0 (+ 77.5 (* i 0.5)) #:hp 35.0 #:hp-max 35.0)))
+     (define out (last (run-pipeline-sequence 'Terran 'Zerg (list (hash 'obs (mk-obs 9000 (append allies enemies) #:food-used 32 #:food-cap 54 #:food-army 16 #:food-workers 16))))))
+     (define atk (wire-count-tags-with-ability (step-outcome-wire-cmds out) tags AB-ATTACK))
+     (values out
+             (list
+              (mk-check "hellbats-all-attack-zerglings" (= atk 4) (format "Hellbat attackers=~a/4" atk))
+              (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0) (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
+
+(define scen-novel-122
+  (tactical-scenario
+   "novel-122-terran-battlecruisers-engage-carriers"
+   "novel" "Terran" "Protoss" "late-game"
+   "2 Terran Battlecruisers cleanly engage 2 Protoss Carriers with zero retreat"
+   (lambda ()
+     (define home (mk-home-base-units 'Terran #:workers 16))
+     (define allies (append home (list (mk-unit 5301 'battlecruiser 1 75.0 79.0 #:hp 550.0 #:hp-max 550.0)
+                                       (mk-unit 5302 'battlecruiser 1 75.0 81.0 #:hp 550.0 #:hp-max 550.0))))
+     (define enemies (list (mk-unit 8301 'carrier 4 81.0 79.0 #:hp 300.0 #:hp-max 300.0 #:shield 150.0 #:shield-max 150.0)
+                           (mk-unit 8302 'carrier 4 81.0 81.0 #:hp 300.0 #:hp-max 300.0 #:shield 150.0 #:shield-max 150.0)))
+     (define out (last (run-pipeline-sequence 'Terran 'Protoss (list (hash 'obs (mk-obs 16000 (append allies enemies) #:upgrades '(yamato-cannon) #:food-used 46 #:food-cap 66 #:food-army 30 #:food-workers 16))))))
+     (define atk (wire-count-tags-with-ability (step-outcome-wire-cmds out) '(5301 5302) AB-ATTACK))
+     (values out
+             (list
+              (mk-check "battlecruisers-both-engage-carriers" (= atk 2) (format "BC attackers=~a/2" atk))
+              (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0) (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
+
+;; -----------------------------------------------------------------------------
+;; Round-14 Final Ship-Gate Pro Regression Shields (novel-123..130 -> 204 Total!)
+;; -----------------------------------------------------------------------------
+(define scen-novel-123
+  (tactical-scenario
+   "novel-123-ht-archon-merge-when-dry-safe-and-storm-when-full-energy"
+   "novel" "Protoss" "Terran" "spellcaster"
+   "Two spent 10-energy HTs safely at 14t merge into an Archon (1766), while 125-energy HTs cast Psi Storm (1036) instead of merging"
+   (lambda ()
+     (define home (mk-home-base-units 'Protoss #:workers 16))
+     (define o-dry
+       (last (run-pipeline-sequence 'Protoss 'Terran
+               (list (hash 'obs (mk-obs 12000
+                                        (append home
+                                                (list (mk-unit 5001 'high-templar 1 70.0 80.0 #:hp 40.0 #:hp-max 40.0 #:shield 40.0 #:shield-max 40.0 #:energy 10.0)
+                                                      (mk-unit 5002 'high-templar 1 70.0 81.2 #:hp 40.0 #:hp-max 40.0 #:shield 40.0 #:shield-max 40.0 #:energy 10.0))
+                                                (for/list ([i (in-range 6)]) (mk-unit (+ 8001 i) 'marine 4 84.0 (+ 78.0 (* i 0.7)) #:hp 45.0 #:hp-max 45.0)))
+                                        #:upgrades '(psi-storm) #:food-used 32 #:food-cap 54 #:food-army 16 #:food-workers 16))))))
+     (define o-hi
+       (last (run-pipeline-sequence 'Protoss 'Terran
+               (list (hash 'obs (mk-obs 12000
+                                        (append home
+                                                (list (mk-unit 5021 'high-templar 1 74.0 80.0 #:hp 40.0 #:hp-max 40.0 #:shield 40.0 #:shield-max 40.0 #:energy 125.0)
+                                                      (mk-unit 5022 'high-templar 1 74.0 81.2 #:hp 40.0 #:hp-max 40.0 #:shield 40.0 #:shield-max 40.0 #:energy 125.0))
+                                                (for/list ([i (in-range 6)]) (mk-unit (+ 5030 i) 'stalker 1 75.5 (+ 77.5 (* i 0.9)) #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0))
+                                                (for/list ([i (in-range 8)]) (mk-unit (+ 8021 i) 'marine 4 81.0 (+ 77.5 (* i 0.7)) #:hp 45.0 #:hp-max 45.0)))
+                                        #:upgrades '(psi-storm) #:food-used 40 #:food-cap 66 #:food-army 24 #:food-workers 16))))))
+     (define merged? (wire-has-ability? (step-outcome-wire-cmds o-dry) '(5001 5002) AB-MORPH-ARCHON))
+     (define hi-merged? (wire-has-ability? (step-outcome-wire-cmds o-hi) '(5021 5022) AB-MORPH-ARCHON))
+     (define hi-storm? (wire-has-ability? (step-outcome-wire-cmds o-hi) '(5021 5022) AB-PSI-STORM))
+     (define total-rej (+ (step-outcome-wire-rejects o-dry) (step-outcome-wire-rejects o-hi)))
+     (values o-dry
+             (list
+              (mk-check "dry-safe-hts-merge-archon-1766" merged? (format "Dry HT Archon merge=~a" merged?))
+              (mk-check "full-energy-hts-storm-not-merge" (and hi-storm? (not hi-merged?)) (format "125en HT storm=~a merge=~a" hi-storm? hi-merged?))
+              (mk-check "zero-wire-rejects" (= total-rej 0) (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-novel-124
+  (tactical-scenario
+   "novel-124-oracle-pulsar-beam-on-vs-workers-and-off-after-dwell-safe"
+   "novel" "Protoss" "Terran" "harass"
+   "Oracle activates Pulsar Beam (2375) near enemy workers and deactivates Pulsar Beam (2376) after 120f dwell when no enemies are nearby"
+   (lambda ()
+     (define home (mk-home-base-units 'Protoss #:workers 16))
+     (define o-on
+       (last (run-pipeline-sequence 'Protoss 'Terran
+               (list (hash 'obs (mk-obs 7000
+                                        (append home
+                                                (list (mk-unit 5101 'oracle 1 155.0 158.0 #:hp 100.0 #:hp-max 100.0 #:shield 60.0 #:shield-max 60.0 #:energy 80.0))
+                                                (for/list ([i (in-range 8)]) (mk-unit (+ 8101 i) 'scv 4 159.0 (+ 156.0 (* i 0.5)) #:hp 45.0 #:hp-max 45.0)))
+                                        #:food-used 20 #:food-cap 31 #:food-army 4 #:food-workers 16))))))
+     (define ally-off (append home (list (mk-unit 5111 'oracle 1 70.0 70.0 #:hp 100.0 #:hp-max 100.0 #:shield 60.0 #:shield-max 60.0 #:energy 60.0 #:buffs '(56)))))
+     (define outs-off
+       (run-pipeline-sequence 'Protoss 'Terran
+         (list (hash 'obs (mk-obs 7200 ally-off #:food-used 20 #:food-cap 31 #:food-army 4 #:food-workers 16))
+               (hash 'obs (mk-obs 7320 ally-off #:food-used 20 #:food-cap 31 #:food-army 4 #:food-workers 16)))))
+     (define on?  (wire-has-ability? (step-outcome-wire-cmds o-on) '(5101) AB-PULSAR-BEAM-ON))
+     (define off? (wire-has-ability? (step-outcome-wire-cmds (second outs-off)) '(5111) AB-PULSAR-BEAM-OFF))
+     (define total-rej (+ (step-outcome-wire-rejects o-on) (step-outcome-wire-rejects (first outs-off)) (step-outcome-wire-rejects (second outs-off))))
+     (values (second outs-off)
+             (list
+              (mk-check "oracle-turns-pulsar-beam-on-near-workers" on? (format "Pulsar Beam ON (2375)=~a" on?))
+              (mk-check "oracle-turns-pulsar-beam-off-when-safe-after-dwell" off? (format "Pulsar Beam OFF (2376)=~a" off?))
+              (mk-check "zero-wire-rejects" (= total-rej 0) (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-novel-125
+  (tactical-scenario
+   "novel-125-vipers-split-blinding-cloud-abduct-and-safe-consume"
+   "novel" "Zerg" "Terran" "spellcaster"
+   "Two Vipers vs 3 unblinded Sieged Tanks split Blinding Cloud (2063) + Abduct (2067) AND low-energy (30en) Viper safely Consumes (2073) home building"
+   (lambda ()
+     (define home (mk-home-base-units 'Zerg #:workers 16))
+     (define o-tanks
+       (last (run-pipeline-sequence 'Zerg 'Terran
+               (list (hash 'obs (mk-obs 14000
+                                        (append home
+                                                (list (mk-unit 5201 'viper 1 75.0 79.5 #:hp 150.0 #:hp-max 150.0 #:energy 120.0)
+                                                      (mk-unit 5202 'viper 1 75.0 81.5 #:hp 150.0 #:hp-max 150.0 #:energy 120.0))
+                                                (for/list ([i (in-range 8)]) (mk-unit (+ 5210 i) 'roach 1 76.0 (+ 77.0 (* i 0.8)) #:hp 145.0 #:hp-max 145.0))
+                                                (list (mk-unit 8201 'siege-tank-sieged 4 82.0 79.5 #:hp 175.0 #:hp-max 175.0)
+                                                      (mk-unit 8202 'siege-tank-sieged 4 82.0 80.5 #:hp 175.0 #:hp-max 175.0)
+                                                      (mk-unit 8203 'siege-tank-sieged 4 82.0 81.5 #:hp 175.0 #:hp-max 175.0)))
+                                        #:food-used 46 #:food-cap 66 #:food-army 30 #:food-workers 16))))))
+     (define o-con
+       (last (run-pipeline-sequence 'Zerg 'Terran
+               (list (hash 'obs (mk-obs 14000
+                                        (append home
+                                                (list (mk-unit 5221 'viper 1 36.0 34.0 #:hp 150.0 #:hp-max 150.0 #:energy 30.0)
+                                                      (mk-unit 5222 'evolution-chamber 1 38.0 34.0 #:hp 750.0 #:hp-max 750.0)))
+                                        #:food-used 30 #:food-cap 50 #:food-army 6 #:food-workers 16))))))
+     (define bc-cnt (wire-count-tags-with-ability (step-outcome-wire-cmds o-tanks) '(5201 5202) AB-BLINDING-CLOUD))
+     (define ab-cnt (wire-count-tags-with-ability (step-outcome-wire-cmds o-tanks) '(5201 5202) AB-ABDUCT))
+     (define con?   (wire-has-ability? (step-outcome-wire-cmds o-con) '(5221) AB-VIPER-CONSUME))
+     (define total-rej (+ (step-outcome-wire-rejects o-tanks) (step-outcome-wire-rejects o-con)))
+     (values o-tanks
+             (list
+              (mk-check "two-vipers-split-blinding-cloud-and-abduct" (and (= bc-cnt 1) (= ab-cnt 1))
+                        (format "Viper BlindingCloud=~a Abduct=~a (expected 1 and 1)" bc-cnt ab-cnt))
+              (mk-check "lowen-viper-consumes-home-structure" con? (format "Viper Consume (2073)=~a" con?))
+              (mk-check "zero-wire-rejects" (= total-rej 0) (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-novel-126
+  (tactical-scenario
+   "novel-126-crawlers-stay-rooted-under-attack-and-creep-tumor-spreads"
+   "novel" "Zerg" "Protoss" "defense"
+   "Spine & Spore Crawlers stay rooted under Zealot + Oracle attack (0 uproot 1725/1727) AND active Creep Tumor spreads creep (1733)"
+   (lambda ()
+     (define home (mk-home-base-units 'Zerg #:workers 16 #:with-natural? #t))
+     (define o-def
+       (last (run-pipeline-sequence 'Zerg 'Protoss
+               (list (hash 'obs (mk-obs 8000
+                                        (append home
+                                                (list (mk-unit 5301 'spine-crawler 1 56.0 32.0 #:hp 300.0 #:hp-max 300.0)
+                                                      (mk-unit 5302 'spore-crawler 1 54.0 34.0 #:hp 400.0 #:hp-max 400.0))
+                                                (for/list ([i (in-range 6)]) (mk-unit (+ 8301 i) 'zealot 4 59.0 (+ 30.0 (* i 0.7)) #:hp 100.0 #:hp-max 100.0 #:shield 50.0 #:shield-max 50.0))
+                                                (list (mk-unit 8310 'oracle 4 56.0 36.0 #:hp 100.0 #:hp-max 100.0 #:shield 60.0 #:shield-max 60.0)))
+                                        #:food-used 24 #:food-cap 44 #:food-army 0 #:food-workers 16))))))
+     (define o-crp
+       (last (run-pipeline-sequence 'Zerg 'Terran
+               (list (hash 'obs (mk-obs 6000
+                                        (append (mk-home-base-units 'Zerg #:workers 16)
+                                                (list (mk-unit 5701 'creep-tumor-burrowed 1 42.0 42.0 #:hp 50.0 #:hp-max 50.0 #:burrowed? #t)))
+                                        #:food-used 20 #:food-cap 36 #:food-army 0 #:food-workers 16))))))
+     (define bad-uproot? (wire-any-ability? (step-outcome-wire-cmds o-def) '(5301 5302) (list AB-UPROOT-SPINE AB-UPROOT-SPORE)))
+     (define spread?     (wire-has-ability? (step-outcome-wire-cmds o-crp) '(5701) AB-CREEP-TUMOR-TUMOR))
+     (define total-rej (+ (step-outcome-wire-rejects o-def) (step-outcome-wire-rejects o-crp)))
+     (values o-def
+             (list
+              (mk-check "crawlers-stay-rooted-under-attack" (not bad-uproot?) (format "Crawlers uprooted under attack=~a" bad-uproot?))
+              (mk-check "creep-tumor-spreads-creep-1733" spread? (format "Creep Tumor emitted 1733=~a" spread?))
+              (mk-check "zero-wire-rejects" (= total-rej 0) (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-novel-127
+  (tactical-scenario
+   "novel-127-planetary-fortress-and-scvs-repair-35pct-thor"
+   "novel" "Terran" "Zerg" "defense"
+   "SCVs auto-repair (3685/316) critically injured 35%-HP Thor beside Planetary Fortress while Thor engages Roaches"
+   (lambda ()
+     (define allies
+       (append (list (mk-unit 1001 'planetary-fortress 1 52.0 32.0 #:hp 900.0 #:hp-max 1500.0)
+                     (mk-unit 5401 'thor 1 56.0 32.0 #:hp 140.0 #:hp-max 400.0)
+                     (mk-unit 5402 'scv 1 54.5 32.0 #:hp 45.0 #:hp-max 45.0)
+                     (mk-unit 5403 'scv 1 54.5 33.0 #:hp 45.0 #:hp-max 45.0))
+               (for/list ([i (in-range 12)])
+                 (mk-unit (+ 1100 i) 'scv 1 (+ 48.0 (* 0.4 (modulo i 4))) (+ 30.0 (* 0.4 (quotient i 4)))
+                          #:orders (list (sc2-unit-order AB-GATHER #f 90011 0.0))))))
+     (define enemies (for/list ([i (in-range 8)]) (mk-unit (+ 8401 i) 'roach 4 59.0 (+ 30.0 (* i 0.7)) #:hp 145.0 #:hp-max 145.0)))
+     (define out (last (run-pipeline-sequence 'Terran 'Zerg (list (hash 'obs (mk-obs 12000 (append allies enemies) #:food-used 36 #:food-cap 66 #:food-army 12 #:food-workers 14))))))
+     (define wcmds (step-outcome-wire-cmds out))
+     (define rep-cnt (+ (wire-count-tags-with-ability wcmds '(5402 5403) AB-REPAIR-GENERIC)
+                        (wire-count-tags-with-ability wcmds '(5402 5403) AB-REPAIR-SCV)))
+     (define thor-atk? (wire-has-ability? wcmds '(5401) AB-ATTACK))
+     (values out
+             (list
+              (mk-check "scvs-auto-repair-injured-thor" (>= rep-cnt 1) (format "SCVs repairing Thor=~a/2" rep-cnt))
+              (mk-check "thor-keeps-engaging-roaches" thor-atk? (format "Thor attacking=~a" thor-atk?))
+              (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0) (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
+
+(define scen-novel-128
+  (tactical-scenario
+   "novel-128-supply-depot-wall-raises-vs-lings-and-lowers-when-safe"
+   "novel" "Terran" "Zerg" "defense"
+   "Lowered Supply Depot raises (558) when Zerglings rush within 4t AND raised Supply Depot lowers (556) when safe for army exit"
+   (lambda ()
+     (define home (mk-home-base-units 'Terran #:workers 16))
+     (define marines (for/list ([i (in-range 4)]) (mk-unit (+ 5610 i) 'marine 1 40.0 (+ 33.0 (* i 0.6)) #:hp 45.0 #:hp-max 45.0)))
+     (define lings   (for/list ([i (in-range 6)]) (mk-unit (+ 8601 i) 'zergling 4 46.0 (+ 33.0 (* i 0.5)) #:hp 35.0 #:hp-max 35.0)))
+     (define o-up (last (run-pipeline-sequence 'Terran 'Zerg (list (hash 'obs (mk-obs 5000 (append home (list (mk-unit 5601 'supply-depot-lowered 1 42.0 34.0 #:hp 400.0 #:hp-max 400.0)) marines lings) #:food-used 24 #:food-cap 39 #:food-army 4 #:food-workers 16))))))
+     (define o-dn (last (run-pipeline-sequence 'Terran 'Zerg (list (hash 'obs (mk-obs 5000 (append home (list (mk-unit 5602 'supply-depot 1 42.0 34.0 #:hp 400.0 #:hp-max 400.0)) marines) #:food-used 24 #:food-cap 39 #:food-army 4 #:food-workers 16))))))
+     (define raised?  (wire-has-ability? (step-outcome-wire-cmds o-up) '(5601) AB-DEPOT-RAISE))
+     (define lowered? (wire-has-ability? (step-outcome-wire-cmds o-dn) '(5602) AB-DEPOT-LOWER))
+     (define total-rej (+ (step-outcome-wire-rejects o-up) (step-outcome-wire-rejects o-dn)))
+     (values o-up
+             (list
+              (mk-check "lowered-depot-raises-558-vs-lings" raised? (format "Depot raised (558)=~a" raised?))
+              (mk-check "raised-depot-lowers-556-when-safe" lowered? (format "Depot lowered (556)=~a" lowered?))
+              (mk-check "zero-wire-rejects" (= total-rej 0) (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-novel-129
+  (tactical-scenario
+   "novel-129-zero-energy-protoss-casters-emit-zero-invalid-spells"
+   "novel" "Protoss" "Terran" "wire-hygiene"
+   "0-energy High Templar, Sentry, Oracle, and Phoenix emit 0 invalid energy-requiring spells in combat"
+   (lambda ()
+     (define home (mk-home-base-units 'Protoss #:workers 16))
+     (define allies (append home (list (mk-unit 5301 'high-templar 1 74.0 80.0 #:energy 0.0)
+                                       (mk-unit 5302 'sentry 1 74.0 81.0 #:energy 0.0)
+                                       (mk-unit 5303 'oracle 1 74.0 79.0 #:energy 0.0)
+                                       (mk-unit 5304 'phoenix 1 74.0 82.0 #:energy 0.0))))
+     (define enemies (for/list ([i (in-range 8)]) (mk-unit (+ 8301 i) 'marine 4 80.0 (+ 77.5 (* i 0.6)) #:hp 45.0 #:hp-max 45.0)))
+     (define out (last (run-pipeline-sequence 'Protoss 'Terran (list (hash 'obs (mk-obs 12000 (append allies enemies) #:upgrades '(psi-storm) #:food-used 32 #:food-cap 54 #:food-army 16 #:food-workers 16))))))
+     (define bad-spell? (wire-any-ability? (step-outcome-wire-cmds out) '(5301 5302 5303 5304)
+                                           (list AB-PSI-STORM AB-FEEDBACK AB-GUARDIAN-SHIELD AB-FORCE-FIELD AB-ORACLE-REVELATION AB-PULSAR-BEAM-ON AB-GRAVITON-BEAM AB-STASIS-WARD)))
+     (values out
+             (list
+              (mk-check "zero-energy-protoss-casters-emit-no-spells" (not bad-spell?) (format "0-energy Protoss caster emitted spell=~a" bad-spell?))
+              (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0) (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
+
+(define scen-novel-130
+  (tactical-scenario
+   "novel-130-zero-energy-zerg-and-terran-casters-emit-zero-invalid-spells"
+   "novel" "Zerg" "Protoss" "wire-hygiene"
+   "0-energy Infestor, Viper, Queen, Overseer, Ghost, Raven, and Banshee emit 0 invalid energy-requiring spells in combat"
+   (lambda ()
+     (define o-z
+       (last (run-pipeline-sequence 'Zerg 'Protoss
+               (list (hash 'obs (mk-obs 12000
+                                        (append (mk-home-base-units 'Zerg #:workers 16)
+                                                (list (mk-unit 5501 'infestor 1 74.0 80.0 #:energy 0.0)
+                                                      (mk-unit 5502 'viper 1 74.0 81.0 #:energy 0.0)
+                                                      (mk-unit 5503 'queen 1 74.0 79.0 #:energy 0.0)
+                                                      (mk-unit 5504 'overseer 1 74.0 82.0 #:energy 0.0)
+                                                      (mk-unit 5505 'ultralisk 1 75.5 79.0 #:hp 120.0 #:hp-max 500.0)
+                                                      (mk-unit 8501 'carrier 4 80.0 80.0 #:hp 300.0 #:hp-max 300.0 #:shield 150.0 #:shield-max 150.0)))
+                                        #:upgrades '(neural-parasite) #:food-used 32 #:food-cap 54 #:food-army 16 #:food-workers 16))))))
+     (define o-t
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 12000
+                                        (append (mk-home-base-units 'Terran #:workers 16)
+                                                (list (mk-unit 5401 'ghost 1 74.0 80.0 #:energy 0.0)
+                                                      (mk-unit 5402 'raven 1 74.0 81.0 #:energy 0.0)
+                                                      (mk-unit 5403 'banshee 1 74.0 79.0 #:energy 0.0)
+                                                      (mk-unit 8401 'colossus 4 80.0 80.0 #:hp 200.0 #:hp-max 200.0 #:shield 150.0 #:shield-max 150.0)))
+                                        #:upgrades '(banshee-cloak personal-cloaking) #:food-used 32 #:food-cap 54 #:food-army 16 #:food-workers 16))))))
+     (define bad-z? (wire-any-ability? (step-outcome-wire-cmds o-z) '(5501 5502 5503 5504)
+                                       (list AB-FUNGAL-GROWTH AB-NEURAL-PARASITE AB-PARASITIC-BOMB AB-BLINDING-CLOUD AB-ABDUCT AB-TRANSFUSE AB-SPAWN-CHANGELING AB-CONTAMINATE)))
+     (define bad-t? (wire-any-ability? (step-outcome-wire-cmds o-t) '(5401 5402 5403)
+                                       (list AB-EMP AB-SNIPE AB-CLOAK-GHOST AB-CLOAK-BANSHEE AB-INTERFERENCE-MATRIX AB-ANTI-ARMOR-MISSILE AB-AUTO-TURRET)))
+     (define total-rej (+ (step-outcome-wire-rejects o-z) (step-outcome-wire-rejects o-t)))
+     (values o-z
+             (list
+              (mk-check "zero-energy-zerg-casters-emit-no-spells" (not bad-z?) (format "0-energy Zerg caster emitted spell=~a" bad-z?))
+              (mk-check "zero-energy-terran-casters-emit-no-spells" (not bad-t?) (format "0-energy Terran caster emitted spell=~a" bad-t?))
+              (mk-check "zero-wire-rejects" (= total-rej 0) (format "wire_rejects=~a" total-rej)))))))
+
+;; -----------------------------------------------------------------------------
+;; Full Scenario Catalog (204 Scenarios)
 ;; -----------------------------------------------------------------------------
 (define ALL-TACTICAL-SCENARIOS
   (list
@@ -7902,6 +8339,23 @@
    scen-novel-111
    scen-novel-112
    scen-novel-113
+   scen-novel-114
+   scen-novel-115
+   scen-novel-116
+   scen-novel-117
+   scen-novel-118
+   scen-novel-119
+   scen-novel-120
+   scen-novel-121
+   scen-novel-122
+   scen-novel-123
+   scen-novel-124
+   scen-novel-125
+   scen-novel-126
+   scen-novel-127
+   scen-novel-128
+   scen-novel-129
+   scen-novel-130
    ;; Tier 4: Wave-3 verified live-pipeline bug reproductions (8)
    scen-w3-p0-1
    scen-novel-21

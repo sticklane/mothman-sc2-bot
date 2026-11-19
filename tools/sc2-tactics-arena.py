@@ -216,9 +216,9 @@ DEFAULT_SKIRMISHES: list[SkirmishSpec] = [
         id="sc2-real-p07-stalkers-vs-tempests-voidrays",
         our_race="Protoss",
         enemy_race="Protoss",
-        description="Real SC2 (W12-LOOP-1): 10 Stalkers diving 3 Tempests + 2 Void Rays at 14t separation (guards W9/W11 capital siege dive)",
+        description="Real SC2 (W12-LOOP-1): 10 Stalkers diving 3 Tempests + 2 Void Rays at 13.5t separation (guards W9/W11 capital siege dive)",
         p1_units=[("stalker", 10, -6.0, 0.0)],
-        p2_units=[("void-ray", 2, 6.5, 0.0), ("tempest", 3, 8.0, 0.0)],
+        p2_units=[("void-ray", 2, 6.0, 0.0), ("tempest", 1, 7.5, -2.5), ("tempest", 1, 7.5, 0.0), ("tempest", 1, 7.5, 2.5)],
         max_loops=336,
     ),
     # --- Terran (7 real-SC2 combat physics scenarios) ---
@@ -874,7 +874,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         p2u = [u for u in obs.raw_data.units if u.display_type == 1 and u.alliance == 4 and u.unit_type in COMBAT_IDS]
                                         exp_p1 = sum(cnt for _, cnt, _, _ in scen.p1_units)
                                         exp_p2 = sum(cnt for _, cnt, _, _ in scen.p2_units)
-                                        if dstate["p1_start_cnt"] == 0 and (len(p1u) >= exp_p1 and len(p2u) >= exp_p2 or (gl >= dstate["phase_start_loop"] + 8 and p1u and p2u)):
+                                        if dstate["p1_start_cnt"] == 0 and (len(p1u) >= exp_p1 and len(p2u) >= exp_p2 or (gl >= dstate["phase_start_loop"] + 16 and p1u and p2u)):
                                             dstate["p1_start_cnt"] = len(p1u)
                                             dstate["p2_start_cnt"] = len(p2u)
                                             id_to_name = {v: k for k, v in UNIT_IDS.items()}

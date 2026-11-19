@@ -986,21 +986,111 @@
     },
     {
       "id": "iter13_wave13",
-      "status": "kicked_off_pending_hwm_commit",
+      "status": "completed_no_commit_below_hwm",
       "loop_self_improvements": [
-        "W13-LOOP-1 (@tactics-tester, ONLY tools/tactics-unit-tester.rkt + tools/sc2-tactics-arena.py, AFTER @verifier commits & calls jj new): Land Milestone 200-scenario suite (+9 novel-114..122 -> 115/115 novel, +4 wave13-repro w13-tac-1..4 from #345) + fix p07 Tempest spawn snapshot timing in sc2-tactics-arena.py",
-        "W13-LOOP-2 (@analyzer, ONLY tools/score-replay-batch.rkt, AFTER @verifier commits & calls jj new): Add prod_placement_stall_ticks (flags >=30 ticks where barracks/gateway/factory/starport is scheduled with >=150M bank yet never places as in #23/#36) + pvp_nat_delay_flag (flags PvP Nat@ > 210s)"
+        "W13-LOOP-1 (@tactics-tester, DONE #354/#368): Landed Milestone 200-scenario suite (+9 novel-114..122 -> 115/115 novel, +4 wave13-repro w13-tac-1..4; 200/200 PASS 100%, wire_rejects=0) + fixed p07 Tempest spawn snapshot -> FIRST-EVER UNDEFEATED 21-duel real-SC2_x64 run (10W-0L-11T, 0 losses!, 1.44x, P 0.70->1.28x!)",
+        "W13-LOOP-2 (@analyzer, DONE #356 + @loop-architect compare-vs-pro.py): Added prod_placement_stall_ticks & pvp_nat_delay_flag to scorer (<0.9s) and compare-vs-pro.py"
       ],
       "spec_summary": [
-        "W13-P0-1 (@belief-author + @wire-author, Terran W@4m 22->26+ & A8Pro 0.18->0.55+): Make Barracks#2/#3 & Factory/Starport non-blocking against SCV (u>=510 while w<44) & Marine (u>=520 while army<14) so #14/#20/#23 stop blocking 30-35 SCVs; fix #23 Barracks 186-tick placement stall with wider natural/3rd/relaxed-addon fallback in sc2-placement.rkt/sc2-protobuf-ws.rkt; keep 3rd CC & SiegeTank scaling",
-        "W13-P0-2 (@belief-author + @runtime-author, Zerg Tr 0.52x->0.90x+ & Bank 500M->=250M): Hard-cap spore-crawler (<=1/base normal, <=2/base vs real air/cloak, <=4 total — fixes #28 167-tick Spore spam!); prevent lair/spire/hydralisk-den blocking roach/baneling; convert >=400M 3+-base bank into Macro Hatch#4/#5 + Roach/Ravager/Hydra/Baneling instead of 868 pure Lings (#16 30m tie -> WIN!)",
-        "W13-P0-3 (@belief-author + @runtime-author, Protoss W@4m 25->29+ [UNLOCKS 5th GATE!] & PvP Nat@ <=185s): Keep Probe continuous (u>=520 while w<44, never blocked by Gateway#3/#4/Stalker escrow -> fixes W@4m -9->-4!); cap peaceful PvP Natural Nexus timing <=185s (#09/#21/#27/#30 stalled 191-376s!); spend excess gas (gas>=250 & min<120) on Archon/HT/VoidRay/Charge/Blink keeping 3rd Nexus <=400s & RoboWaste=0",
-        "W13-P0-4 (@belief-author + @runtime-author + @wire-author, +3W 12PoolBot #34/#35/#36 + Milestone 200/200 Tactics w13-tac-1..4): Cancel unfinished (<75%) Natural CC/Nexus/Hatchery when >=4 enemy Lings/Zealots enter <=16t of base <2:45 (f<3700); under <3:00 attack w/ 0 production buildings (#36), rank Pylon+Gateway/Barracks+Zealot/Marine+Battery/Bunker u>=900 above probe/nexus + ensure safe in-main Pylon/Gateway placement; proportional 8-12 worker pull vs <=2:45 base-intrusion Lings; land #345 w13-tac-1..4 (t07/z07 DisengageRetreat & Carrier dive, Infestor buff=22 dedup, Sieged Tank unsiege vs air-only, Nexus 3757 85s CD)"
+        "W13-P0-1 (@belief-author + @wire-author): Terran W@4m 22->26 & Pri4m 1->2 & SB 5.7% & A8Pro 0.18->0.43, BUT delayed CC#2 (92->107s) & starved CC#3 (Bases 3.08->2.25) while #17 Barracks still stalled 116t -> surgically restored W12 CC#2/#3 priority in W14",
+        "W13-P0-2 (@belief-author + @runtime-author): Zerg spore-crawler<=4 hard cap kept, BUT W13 Zerg macro changes caused #01 8,110M bank lockout & OBRet +80% (45k->82k) -> cleanly restored W12 winning Zerg macro in W14 (keeping spore<=4 cap!)",
+        "W13-P0-3 (@belief-author + @runtime-author): Unlocked every_race_w4_within_6_of_pro (P W@4m 25->29, PvPNatDelay 3->2, P ProdStall -47%), BUT Probe@520 outranked early Stalker/Pylon crashing A4 (-41%) & spiking SB 5->9% -> surgically fixed to gentle peaceful Probe nudge below Pylon/Stalker in W14",
+        "W13-P0-4 (@runtime-author + @wire-author, w13-tac-1..4): PURE WIN — Milestone 200/200 strict tactics + UNDEFEATED 21-duel SC2_x64 (10W-0L-11T, p07 3.29x, z07 1st Viper Abduct, t07 0-loss!) + 1st-ever Z non-loss vs mini-puck!"
       ],
-      "checkpoint_policy": "FIRST @verifier commits & pushes Waves 9-12 HWM (14W-19L-3T) to main/master and opens jj new; THEN Wave 13 executes cleanly on fresh revision targeting 18-22W+ & >=6/9 Gates before Loop 14 54-match full-roster finale!",
-      "acceptance_target": "All 7/7 verifier gates PASS + 200/200 (100%) strict tactics + 21-duel real-SC2 A/B + iter13_wave13 beats 14W-19L-3T HWM (targeting 18-22W+, TradeAgg>=1.0x, Ties<=2, >=6/9 Gates!)"
+      "rev": "55068c3e",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261119_151136_iter13_wave13",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter13_wave13_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter13_wave13.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_wave13.json",
+      "clean_n": 36,
+      "record_clean": "8W-21L-7T",
+      "wr_pct_clean": 22.2,
+      "non_loss_pct": 41.7,
+      "trade_agg": 0.49,
+      "trade_med": 0.24,
+      "pk_army_avg": 2184.0,
+      "sup_blk_avg": 7.0,
+      "endgame_home_stall_count": 1,
+      "non_combat_robo_waste_val": 0,
+      "prod_placement_stall_matches": 7,
+      "prod_placement_stall_ticks": 605,
+      "pvp_nat_delay_matches": 2,
+      "wall_sec": 729.0,
+      "latency_summary": "35/36 <=230.5ms (T<=203.4ms, P<=230.5ms); 1 spike #13 Z v oberon 2,183.1ms",
+      "by_race": {
+        "Protoss": {"record": "4W-7L-1T", "trade_agg": 0.65, "w4_alive_med": 29.0, "w6_alive_med": 46.0, "nat_sec": 99.0, "sup_blk": 9.0},
+        "Terran": {"record": "2W-8L-2T", "trade_agg": 0.45, "w4_alive_med": 26.0, "w6_alive_med": 39.0, "nat_sec": 107.0, "sup_blk": 5.7},
+        "Zerg": {"record": "2W-6L-4T", "trade_agg": 0.42, "w4_alive_med": 30.0, "w6_alive_med": 56.0, "nat_sec": 55.0, "sup_blk": 6.4}
+      },
+      "tactics_summary": {
+        "rev": "uzqylkro 55068c3e (wave13)",
+        "passed": "200/200 (100.0%, wire_rejects=0, wave13-repro 4/4, novel 115/115)",
+        "sc2_duel21_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_wave13_21.json",
+        "sc2_duel21_summary": "FIRST-EVER UNDEFEATED 21-DUEL RUN (10W-0L-11T, 0 LOSSES!), 1.44x (+0.05x), A:M 2.66, ALL 3 RACES >=1.15x (P 0.70->1.28x, p07 3.29x, z07 1st Viper Abduct, t05 9.25x W)"
+      },
+      "key_wins": [
+        "Milestone 200/200 strict tactics & FIRST-EVER UNDEFEATED 21-duel real-SC2_x64 run (10W-0L-11T, 0 losses, P 0.70->1.28x!)",
+        "Flipped every_race_w4_within_6_of_pro FAIL->PASS (P 25->29, T 22->26, Z 30), cut P ProdStall -47%, PvPNatDelay 3->2, 1st-ever Z non-loss vs mini-puck"
+      ],
+      "promotion_gates_passed": "3/9 (zero_crashes_and_rejects, every_race_w4_within_6_of_pro, tactics_suite_100pct 200/200)"
+    },
+    {
+      "id": "iter14_wave14",
+      "status": "completed_final_milestone_54_no_bot_commit_below_core12_hwm",
+      "milestone_full_roster_54": true,
+      "loop_self_improvements": [
+        "W14-LOOP-1 (@tactics-tester, DONE #377/#388): Landed Final 210-scenario suite (+8 novel-123..130 -> 123/123 novel incl. 12/12 P/T/Z zero-energy caster audit, +2 wave14-repro w14-tac-1..2; 210/210 PASS 100%, wire_rejects=0) + 2nd straight UNDEFEATED 21-duel real-SC2_x64 run (10W-0L-11T, 1.46x ATH, A:M 3.12 ATH!)",
+        "W14-LOOP-2 (@analyzer, DONE #378 + @loop-architect compare-vs-pro.py): Added unseen_6_breakdown per-opponent generalization table across all 6 unseen opponents to scorer (<1.4s on 54 replays) and compare-vs-pro.py"
+      ],
+      "spec_summary": [
+        "W14-P0-1 (@belief-author): Restored W12 HWM macro foundation + gentle peaceful Probe/SCV nudges + Zerg spore<=4 cap -> BOTH Protoss & Terran matched Pro #1 BO across 53 clean matches (P Nat@ 93s/93s, WG 238/241s; T W@4m 27/27, Prd4/6 3/5, CS 463/463s!)",
+        "W14-P0-2 (@runtime-author): Landed w14-tac-1 (Medivac >=5en Heal guard) & w14-tac-2 (44f unload CD -> t07 396 13->2, 0.20->0.85x!) + 6x6 endgame sweep grid + tightened L2 Probe/SCV pass-through",
+        "W14-P0-3 (@wire-author): Kept W13 Protoss -47% ProdStall + added Terran Barracks placement audit (562/562 wire tests)"
+      ],
+      "rev": "44710cd4",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261119_155715_iter14_wave14",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter14_wave14_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter14_wave14.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_wave14.json",
+      "clean_n": 53,
+      "record_all_raw": "14W-36L-4T (n=54, 1 #07 Chance loop-4 crash; Mulebot 3/3 clean!)",
+      "record_all_clean": "13W-36L-4T (n=53, 24.5% WR, 32.1% NL — NEW FULL-ROSTER CLEAN HIGH vs Loop 9 12W-33L-6T!)",
+      "record_core_12_clean": "9W-23L-3T (n=35 clean, 10W raw; 25.7% WR — below committed W12 HWM 14W-19L-3T -> ship W12 HWM 45ca28a6 bot code!)",
+      "record_unseen_6_clean": "4W-13L-1T (n=18/18 clean, 22.2% WR — DOUBLED vs Loop 9 2W-11L-2T 13.3%! CryptBotRevival 3-0 23.25x SWEEP, onlyfans 1-1-1 CloakLoss 2->0, who 12x Trade 0.02->0.24x, QueenBot +70% Trade, SupBlk 4.8%!)",
+      "trade_agg_all": 0.51,
+      "trade_agg_core12": 0.58,
+      "trade_agg_unseen6": 0.40,
+      "sup_blk_avg": 6.2,
+      "cloaked_unit_damage_losses": 2,
+      "wall_sec": 976.0,
+      "latency_summary": "NEW ALL-TIME LOW max_step_ms=200.57ms across ALL 54/54 matches (0 spikes >=500ms; T<=193.7ms, Z<=197.1ms, P<=200.6ms)",
+      "by_race_all_clean": {
+        "Protoss": {"record": "7W-11L-0T (38.9% WR, core 5-7-0)", "trade_agg": 0.74, "w4_alive_med": 26.0, "w6_alive_med": 42.0, "nat_sec": 93.0, "sup_blk": 7.6},
+        "Terran": {"record": "4W-12L-2T (2x L9!, core 3-8-1)", "trade_agg": 0.60, "w4_alive_med": 27.0, "w6_alive_med": 36.0, "nat_sec": 93.0, "sup_blk": 6.6},
+        "Zerg": {"record": "2W-13L-2T (+1 oppFault, core 1-8-2)", "trade_agg": 0.31, "w4_alive_med": 31.0, "w6_alive_med": 51.5, "nat_sec": 55.0, "sup_blk": 4.2}
+      },
+      "tactics_summary": {
+        "rev": "uzqylkro 44710cd4 (wave14)",
+        "passed": "210/210 (100.0%, wire_rejects=0, wave14-repro 2/2, novel 123/123 — 12/12 casters zero-energy clean)",
+        "sc2_duel21_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_wave14_21.json",
+        "sc2_duel21_summary": "2nd straight UNDEFEATED 21-duel run (10W-0L-11T, 0 losses!), NEW ATH A:M 3.12 & 21-duel Trade 1.46x (P 1.43x ATH, t07 396 13->2 0.20->0.85x, z04 7.70x W)"
+      },
+      "key_wins": [
+        "NEW FULL-ROSTER CLEAN HIGH 13W-36L-4T (n=53) & DOUBLED unseen_6 generalization (2W->4W, 13.3%->22.2% WR, 18/18 clean, SupBlk 4.8%!): CryptBotRevival 3-0 SWEEP (23.25x!), onlyfans 1-1-1 (CloakLoss 2->0, 97 Banshees killed!), who 12x Trade jump!",
+        "NEW ALL-TIME LOW LATENCY 200.57ms across ALL 54/54 matches (0 spikes, 0 errors, 0 ourFault, Mulebot 3/3 clean!)",
+        "BOTH Protoss & Terran matched Pro #1 BO & exact Pro curves across 53 clean matches (P Nat@ 93/93s, WG 238/241s; T W@4m 27/27, Prd4/6 3/5, CS 463/463s!)"
+      ],
+      "ship_gate_decision": "HOLD bot lib/ edits from uzqylkro (core_12 9W-23L-3T clean < HWM 14W-19L-3T). SHIP committed HWM pyxzmspx 45ca28a6 bot code (14W-19L-3T, 38.9% WR, 0.82x Trade, 5.6% SupBlk, 205.7ms max step, 4/9 Gates, 187/187 strict tactics) + optionally keep pure non-bot tooling (score-replay-batch.rkt, compare-vs-pro.py, loop_ledger.json, sc2-tactics-arena.py)!"
     }
   ],
+  "final_14_loop_summary": {
+    "status": "COMPLETED_ALL_14_LOOPS_READY_FOR_FINAL_SHIP",
+    "baseline_core12": "3W-22L-8T (9.1% WR, 33.3% NL, 0.44x TradeAgg, 9.4% SupBlk, 2,311ms max step, 1/9 Gates)",
+    "shipped_hwm_core12": "14W-19L-3T (38.9% WR, 47.2% NL, 0.82x TradeAgg [P 1.13x, T 1.10x], 5.6% SupBlk, 205.7ms max step, 0 HomeStall/RoboWaste/CloakLoss/SelfCancel, 4/9 Gates, 187/187 strict tactics) at commit pyxzmspx 45ca28a6",
+    "total_net_gain_baseline_to_hwm": "+11W (+29.8pp WR, +13.9pp NL), +0.38x TradeAgg (+86%), -3.8pp SupBlk (<=6% gate PASS), -91.1% max step latency (2,311ms -> 205.7ms), ALL 3 races >=33.3% WR (Mothman-P 6W-6L-0T = 50.0% WR!), 3/3 3-0 sweeps (titania, monsterbot, Chance) + undefeated vs RustyNikolaj (2-0-1) & puck (1-0-2)",
+    "full_roster_generalization_proof": "Loop 9 (12W-33L-6T, unseen_6 2W-11L-2T 13.3%) -> Loop 14 (13W-36L-4T, unseen_6 DOUBLED 4W-13L-1T 22.2% WR, 18/18 clean, CryptBotRevival 3-0 23.25x, onlyfans 1-1-1 CloakLoss=0, 54/54 <= 200.57ms!)",
+    "ship_artifact_commit": "pyxzmspx 45ca28a6 (bot lib/ + tests/ + 187/187 tactics) + clean non-bot tooling commit (tools/score-replay-batch.rkt, tools/iteration-loop/compare-vs-pro.py, tools/iteration-loop/loop_ledger.json, tools/sc2-tactics-arena.py)"
+  },
   "harness_config": {
     "recommended_jobs": 14,
     "max_safe_tested_jobs": 24,
@@ -1015,7 +1105,7 @@
   "goal_target_loop": 14,
   "high_water_mark": {
     "wave_id": "iter12_wave12",
-    "commit": "pyxzmspx 22a5e340 (committing Waves 9-12 HWM via @verifier)",
+    "commit": "pyxzmspx 45ca28a6 (main/master — FINAL SHIP HWM)",
     "clean_n": 36,
     "record_clean": "14W-19L-3T",
     "wr_pct_clean": 38.9,
