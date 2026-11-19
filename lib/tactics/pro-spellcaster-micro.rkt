@@ -119,6 +119,8 @@
          [(49) (eq? target 'oracle-revelation)]
          [(56) (eq? target 'oracle-weapon)]
          [(83) (eq? target 'blinding-cloud)]
+         [(89) (eq? target 'medivac-speed-boost)]
+         [(116) (eq? target 'lock-on)]
          [(132) (eq? target 'parasitic-bomb)]
          [else #f])]
       [(string? b)
@@ -287,6 +289,12 @@
 (define CORROSIVE-BILE-STAGGER-OFFSET : Float 0.75)
 (define CORROSIVE-BILE-COOLDOWN-FRAMES : Integer 157)
 (define CORROSIVE-BILE-FF-CHECK-RADIUS : Float 1.75)
+;; W10-TAC-1 / W10-TAC-2 / W10-TAC-5: Exact SC2 live per-unit ability cooldowns (22.4 fps).
+(define MEDIVAC-BOOST-COOLDOWN-FRAMES : Integer 320)
+(define CYCLONE-LOCK-ON-COOLDOWN-FRAMES : Integer 196)
+(define BC-TACTICAL-JUMP-COOLDOWN-FRAMES : Integer 1590)
+(define BC-YAMATO-COOLDOWN-FRAMES : Integer 1590)
+(define CORRUPTOR-CAUSTIC-SPRAY-COOLDOWN-FRAMES : Integer 1008)
 
 (define ANTI-ARMOR-CLAIM-RADIUS : Float 2.5)
 (define ANTI-ARMOR-CLAIM-TTL : Integer 48)
@@ -359,7 +367,12 @@
    [ravager-bile-ready-frame : (HashTable Integer Integer)]
    [ht-storm-frame : (HashTable Integer Integer)]
    [ht-merge-lock-until : (HashTable Integer Integer)]
-   [ghost-cloak-frame : (HashTable Integer Integer)])
+   [ghost-cloak-frame : (HashTable Integer Integer)]
+   [medivac-boost-ready-frame : (HashTable Integer Integer)]
+   [cyclone-lock-on-ready-frame : (HashTable Integer Integer)]
+   [bc-jump-ready-frame : (HashTable Integer Integer)]
+   [bc-yamato-ready-frame : (HashTable Integer Integer)]
+   [corruptor-spray-ready-frame : (HashTable Integer Integer)])
   #:mutable
   #:transparent)
 
@@ -372,6 +385,11 @@
    -10000
    -10000
    -10000
+   (make-hasheqv)
+   (make-hasheqv)
+   (make-hasheqv)
+   (make-hasheqv)
+   (make-hasheqv)
    (make-hasheqv)
    (make-hasheqv)
    (make-hasheqv)
@@ -1070,6 +1088,8 @@
        [(49) 'oracle-revelation]
        [(56) 'oracle-weapon]
        [(83) 'blinding-cloud]
+       [(89) 'medivac-speed-boost]
+       [(116) 'lock-on]
        [(132) 'parasitic-bomb]
        [else #f])]
     [else #f]))
@@ -1250,7 +1270,12 @@
      c))
   (prune-hash-below! (spell-claims-ghost-snipe-unlock claims) current-frame)
   (prune-hash-below! (spell-claims-ht-merge-lock-until claims) current-frame)
-  (prune-hash-below! (spell-claims-ravager-bile-ready-frame claims) current-frame))
+  (prune-hash-below! (spell-claims-ravager-bile-ready-frame claims) current-frame)
+  (prune-hash-below! (spell-claims-medivac-boost-ready-frame claims) current-frame)
+  (prune-hash-below! (spell-claims-cyclone-lock-on-ready-frame claims) current-frame)
+  (prune-hash-below! (spell-claims-bc-jump-ready-frame claims) current-frame)
+  (prune-hash-below! (spell-claims-bc-yamato-ready-frame claims) current-frame)
+  (prune-hash-below! (spell-claims-corruptor-spray-ready-frame claims) current-frame))
 
 ;; Returns `#t` if an active claim of `ability` covers `(x, y)` at `current-frame`.
 ;; Supports `(claims ability x y frame)` and `(claims ability x y radius frame)`.
@@ -2581,8 +2606,13 @@
 
              ;; --- CORRUPTOR ---
              [(corruptor)
+              (define spray-unlock (hash-ref (spell-claims-corruptor-spray-ready-frame claims) tag (lambda () -1)))
+              (define spray-ready?
+                (and (not (eq? (dyn-hash-ref u 'caustic-spray-ready? #t) #f))
+                     (<= (safe-int (dyn-hash-ref u 'caustic-spray-cooldown 0) 0) 0)
+                     (>= current-frame spray-unlock)))
               (cond
-                [(spellcaster-channel-protected? u) #f]
+                [(or (spellcaster-channel-protected? u) (not spray-ready?)) #f]
                 [else
                  (let-values ([(ok? th _w)
                                (best-unit-target
@@ -2591,8 +2621,12 @@
                                 (lambda ([e : Any]) (uh-total-hp e)))])
                    (and ok?
                         (not (any-unit-within? all-enemies ux uy 11.0 enemy-anti-air-or-air-threat?))
-                        (spell-directive tag 'corruptor 'caustic-spray 'unit (uh-tag th)
-                                         (uh-x th) (uh-y th) 'corruptor-caustic-spray)))])]
+                        (begin
+                          (hash-set! (spell-claims-corruptor-spray-ready-frame claims)
+                                     tag
+                                     (+ current-frame CORRUPTOR-CAUSTIC-SPRAY-COOLDOWN-FRAMES))
+                          (spell-directive tag 'corruptor 'caustic-spray 'unit (uh-tag th)
+                                           (uh-x th) (uh-y th) 'corruptor-caustic-spray))))])]
 
              ;; --- OVERSEER (Contaminate 1825/182, SpawnChangeling 181, Oversight 3745/1912) ---
              [(overseer overseer-siege-mode)
@@ -3105,15 +3139,28 @@
               (cond
                 [(spellcaster-channel-protected? u) #f]
                 [else
-                 (define jump-ready? (not (eq? (dyn-hash-ref u 'tactical-jump-ready? #t) #f)))
-                 (define yam-ready? (and yamato-ok? (not (eq? (dyn-hash-ref u 'yamato-ready? #t) #f))))
+                 (define jump-unlock (hash-ref (spell-claims-bc-jump-ready-frame claims) tag (lambda () -1)))
+                 (define yam-unlock (hash-ref (spell-claims-bc-yamato-ready-frame claims) tag (lambda () -1)))
+                 (define jump-ready?
+                   (and (not (eq? (dyn-hash-ref u 'tactical-jump-ready? #t) #f))
+                        (<= (safe-int (dyn-hash-ref u 'tactical-jump-cooldown 0) 0) 0)
+                        (>= current-frame jump-unlock)))
+                 (define yam-ready?
+                   (and yamato-ok?
+                        (not (eq? (dyn-hash-ref u 'yamato-ready? #t) #f))
+                        (<= (safe-int (dyn-hash-ref u 'yamato-cooldown 0) 0) 0)
+                        (>= current-frame yam-unlock)))
                  (or
                   ;; 1. Emergency Tactical Jump home when HP ratio < 0.32
                   (and jump-ready?
                        (< (uh-hp-ratio u) 0.32)
                        (> (dist2 ux uy home-x home-y) 12.0)
-                       (spell-directive tag 'battlecruiser 'tactical-jump 'point 0 home-x home-y
-                                        'bc-emergency-tactical-jump))
+                       (begin
+                         (hash-set! (spell-claims-bc-jump-ready-frame claims)
+                                    tag
+                                    (+ current-frame BC-TACTICAL-JUMP-COOLDOWN-FRAMES))
+                         (spell-directive tag 'battlecruiser 'tactical-jump 'point 0 home-x home-y
+                                          'bc-emergency-tactical-jump)))
                   ;; 2. Yamato Cannon (`ceil(hp/240)` claim cap; W5-TAC-4 claim filter & spread)
                   (and yam-ready?
                        (let-values ([(ok? tgt _w)
@@ -3130,8 +3177,12 @@
                          (and ok?
                               (spell-claim-unit?! claims 'yamato-cannon (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
                                                   #:caster-tag tag #:target-hp (uh-total-hp tgt))
-                              (spell-directive tag 'battlecruiser 'yamato-cannon 'unit (uh-tag tgt)
-                                               (uh-x tgt) (uh-y tgt) 'bc-yamato-snipe))))
+                              (begin
+                                (hash-set! (spell-claims-bc-yamato-ready-frame claims)
+                                           tag
+                                           (+ current-frame BC-YAMATO-COOLDOWN-FRAMES))
+                                (spell-directive tag 'battlecruiser 'yamato-cannon 'unit (uh-tag tgt)
+                                                 (uh-x tgt) (uh-y tgt) 'bc-yamato-snipe)))))
                   ;; 3. Offensive Tactical Jump onto undefended remote worker line when healthy (>=85% HP, no threat <16)
                   (and jump-ready?
                        (>= (uh-hp-ratio u) 0.85)
@@ -3151,14 +3202,21 @@
                                             0.0)))])
                          (and ok?
                               (spell-claim-point?! claims 'tactical-jump jx jy 6.0 current-frame 64)
-                              (spell-directive tag 'battlecruiser 'tactical-jump 'point 0 jx jy
-                                               'bc-tactical-jump-backstab)))))])]
+                              (begin
+                                (hash-set! (spell-claims-bc-jump-ready-frame claims)
+                                           tag
+                                           (+ current-frame BC-TACTICAL-JUMP-COOLDOWN-FRAMES))
+                                (spell-directive tag 'battlecruiser 'tactical-jump 'point 0 jx jy
+                                                 'bc-tactical-jump-backstab))))))])]
 
              ;; --- MEDIVAC (Boost 2116 / Heal 386 / Low-HP Retreat) ---
              [(medivac)
+              (define boost-unlock (hash-ref (spell-claims-medivac-boost-ready-frame claims) tag (lambda () -1)))
               (define boost-ready?
                 (and (not (eq? (dyn-hash-ref u 'boost-ready? #t) #f))
-                     (<= (safe-int (dyn-hash-ref u 'boost-cooldown 0) 0) 0)))
+                     (<= (safe-int (dyn-hash-ref u 'boost-cooldown 0) 0) 0)
+                     (not (uh-has-buff? u 'medivac-speed-boost))
+                     (>= current-frame boost-unlock)))
               (define cargo-cnt (safe-int (dyn-hash-ref u 'cargo-count 0) 0))
               (define hp-rat (uh-hp-ratio u))
               (define danger-near? (any-unit-within? all-enemies ux uy 9.5 enemy-anti-air-or-air-threat?))
@@ -3166,8 +3224,12 @@
                (and boost-ready?
                     (or (> cargo-cnt 0)
                         (and (< hp-rat 0.45) danger-near?))
-                    (spell-directive tag 'medivac 'medivac-boost 'none 0 ux uy
-                                     (if (> cargo-cnt 0) 'medivac-boost-loaded-drop 'medivac-boost-rescue-evac)))
+                    (begin
+                      (hash-set! (spell-claims-medivac-boost-ready-frame claims)
+                                 tag
+                                 (+ current-frame MEDIVAC-BOOST-COOLDOWN-FRAMES))
+                      (spell-directive tag 'medivac 'medivac-boost 'none 0 ux uy
+                                       (if (> cargo-cnt 0) 'medivac-boost-loaded-drop 'medivac-boost-rescue-evac))))
                (and (< hp-rat 0.45)
                     (= cargo-cnt 0)
                     danger-near?
@@ -3195,10 +3257,12 @@
 
              ;; --- CYCLONE (Lock-On 2350) ---
              [(cyclone)
+              (define lock-unlock (hash-ref (spell-claims-cyclone-lock-on-ready-frame claims) tag (lambda () -1)))
               (define lock-ready?
                 (and (not (spellcaster-channel-protected? u))
                      (not (eq? (dyn-hash-ref u 'lock-on-ready? #t) #f))
-                     (<= (safe-int (dyn-hash-ref u 'lock-on-cooldown 0) 0) 0)))
+                     (<= (safe-int (dyn-hash-ref u 'lock-on-cooldown 0) 0) 0)
+                     (>= current-frame lock-unlock)))
               (: cyclone-lock-weight (-> Any Float))
               (define (cyclone-lock-weight e)
                 (case (uh-type e)
@@ -3220,8 +3284,12 @@
                      (and ok?
                           (let ([ttag (uh-tag tgt)])
                             (and (spell-claim-unit?! claims 'lock-on ttag current-frame 36 #:caster-tag tag #:max-casters 1)
-                                 (spell-directive tag 'cyclone 'lock-on 'unit ttag
-                                                  (uh-x tgt) (uh-y tgt) 'cyclone-lock-on-high-value))))))]
+                                 (begin
+                                   (hash-set! (spell-claims-cyclone-lock-on-ready-frame claims)
+                                              tag
+                                              (+ current-frame CYCLONE-LOCK-ON-COOLDOWN-FRAMES))
+                                   (spell-directive tag 'cyclone 'lock-on 'unit ttag
+                                                    (uh-x tgt) (uh-y tgt) 'cyclone-lock-on-high-value)))))))]
 
              ;; --- SCV (Repair 3685: strictly 'mechanical units/structures) ---
              [(scv)

@@ -147,6 +147,8 @@
  desired-zerg-overseer-count
  desired-zerg-overlord-transport-count
  zerg-enemy-stargate-air-threat?
+ enemy-passive-only-cloak?
+ enemy-passive-only-air?
  ZERG-HARASS-AIR-ENEMY-SYMS
  zerg-enemy-air-spire-needed?
  zerg-enemy-capital-air-corruptor-cap
@@ -1942,7 +1944,7 @@
   '(queen hydralisk corruptor mutalisk spore-crawler
     hydralisk-den spire
     viking-fighter viking thor cyclone liberator missile-turret engineering-bay starport
-    stalker phoenix void-ray carrier tempest archon photon-cannon cybernetics-core stargate shield-battery))
+    stalker phoenix void-ray carrier tempest archon photon-cannon cybernetics-core stargate))
 
 (define PV5-DETECTOR-SYMS
   '(spore-crawler overseer lair
@@ -1955,7 +1957,11 @@
 (define PV5-PURE-ANTI-AIR-SYMS
   '(queen hydralisk corruptor mutalisk hydralisk-den spire
     viking-fighter viking thor cyclone liberator
-    stalker phoenix void-ray carrier tempest archon cybernetics-core stargate shield-battery))
+    stalker phoenix void-ray carrier tempest archon cybernetics-core stargate))
+
+;; Ground-only static defense structures (cannot shoot air and have no detection).
+(define PV5-GROUND-ONLY-STATIC-SYMS
+  '(spine-crawler shield-battery bunker))
 
 (define PV5-COUNTER-TECH-AND-UNIT-SYMS
   (remove-duplicates (append PV5-ANTI-AIR-SYMS PV5-DETECTOR-SYMS) eq?))
@@ -2119,8 +2125,17 @@
 
 (define (zerg-enemy-stargate-air-threat? enemy-u-counts enemy-b-counts enemy-race requires-aa?)
   (or (enemy-any-counts-have? enemy-u-counts enemy-b-counts
-                              '(phoenix oracle stargate void-ray voidray carrier tempest))
-      (and (eq? enemy-race 'Protoss) (eq? requires-aa? #t))))
+                              '(oracle stargate void-ray voidray carrier tempest))
+      (and (>= (enemy-any-count enemy-u-counts enemy-b-counts 'phoenix) 4)
+           (< (+ (enemy-any-count enemy-u-counts #f 'stalker)
+                 (enemy-any-count enemy-u-counts #f 'zealot)
+                 (enemy-any-count enemy-u-counts #f 'adept)
+                 (enemy-any-count enemy-u-counts #f 'immortal))
+              12))
+      (and (eq? enemy-race 'Protoss)
+           (eq? requires-aa? #t)
+           (or (not (hash? enemy-u-counts))
+               (= (enemy-any-count enemy-u-counts #f 'phoenix) 0)))))
 
 (define (desired-zerg-queen-count active-bases [zvp-stargate-threat? #f] [early-aggro? #f])
   (define bases (max 1 (safe-nonneg-int active-bases 1)))
@@ -2139,12 +2154,9 @@
   (define bases (max 1 (safe-nonneg-int active-bases 1)))
   (define army (max 0.0 (safe-real army-supply 0.0)))
   (cond
-    [(and has-lair-or-hive?
-          (or (>= bases 3) requires-detection? (>= army 50.0)))
-     3]
-    [has-lair-or-hive? 2]
-    [requires-detection? 1]
-    [else 0]))
+    [(not has-lair-or-hive?) 0]
+    [(or requires-detection? (>= bases 3) (>= army 50.0)) 2]
+    [else 1]))
 
 (define (desired-zerg-overlord-transport-count active-bases army-supply workers has-lair-or-hive? [under-attack? #f])
   (define bases (max 1 (safe-nonneg-int active-bases 1)))
@@ -2159,9 +2171,62 @@
         [else 1])
       0))
 
+;; W11-P0-1-belief (#19/#13/#16) + W12-P0-4-belief (#31): Distinguish passive/support cloak (Observer)
+;; and visible non-cloaked ground/Medivac armies (>=8 ground combat units with ZERO explicit stealth
+;; units/tech) from real cloaked/burrowed threats. Returns #f when enemy-u-counts is empty so synthetic
+;; unit tests passing raw #:requires-anti-air? / #:requires-detection? remain untouched.
+(define (enemy-passive-only-cloak? enemy-u-counts enemy-b-counts)
+  (and (hash? enemy-u-counts)
+       (not (enemy-any-counts-have?
+             enemy-u-counts enemy-b-counts
+             '(banshee dark-templar dark-shrine lurker lurker-burrowed lurker-den
+               ghost ghost-academy widow-mine-burrowed mothership starport-techlab
+               roach-burrowed infestor-burrowed swarm-host-burrowed)))
+       (or (> (enemy-any-count enemy-u-counts #f 'observer) 0)
+           (let* ([ground-cnt
+                   (for/sum ([u (in-list '(zealot stalker adept immortal colossus archon high-templar sentry
+                                           marine marauder siege-tank siege-tank-sieged hellion hellbat cyclone thor
+                                           zergling baneling roach ravager hydralisk ultralisk))])
+                     (enemy-any-count enemy-u-counts #f u))]
+                  [real-air-cnt
+                   (for/sum ([u (in-list '(banshee liberator liberator-ag mutalisk oracle
+                                           void-ray voidray carrier tempest mothership
+                                           battlecruiser brood-lord corruptor))])
+                     (enemy-any-count enemy-u-counts #f u))])
+             (and (>= ground-cnt 8)
+                  (= real-air-cnt 0))))))
+
+(define (enemy-passive-only-air? enemy-u-counts enemy-b-counts)
+  (and (hash? enemy-u-counts)
+       (let* ([real-air-cnt
+               (for/sum ([u (in-list '(banshee liberator liberator-ag mutalisk oracle
+                                       void-ray voidray carrier tempest mothership
+                                       battlecruiser brood-lord corruptor
+                                       viking-fighter viking viper))])
+                 (enemy-any-count enemy-u-counts #f u))]
+              [ground-cnt
+               (for/sum ([u (in-list '(zealot stalker adept immortal colossus archon high-templar dark-templar sentry
+                                       marine marauder siege-tank siege-tank-sieged hellion hellbat cyclone thor ghost
+                                       zergling baneling roach ravager hydralisk lurker lurker-burrowed ultralisk))])
+                 (enemy-any-count enemy-u-counts #f u))]
+              [phoenix-cnt (enemy-any-count enemy-u-counts #f 'phoenix)]
+              [passive-support-cnt
+               (for/sum ([u (in-list '(overlord overseer observer medivac warp-prism
+                                       warp-prism-phasing overlord-transport))])
+                 (enemy-any-count enemy-u-counts #f u))]
+              [has-stargate-no-ground?
+               (and (enemy-any-counts-have? enemy-u-counts enemy-b-counts '(stargate))
+                    (< ground-cnt 12))]
+              [phoenix-harass-only?
+               (and (> phoenix-cnt 0) (< ground-cnt 12))])
+         (and (= real-air-cnt 0)
+              (not has-stargate-no-ground?)
+              (not phoenix-harass-only?)
+              (or (> passive-support-cnt 0)
+                  (and (> phoenix-cnt 0) (>= ground-cnt 12)))))))
+
 (define ZERG-HARASS-AIR-ENEMY-SYMS
-  '(banshee liberator liberator-ag mutalisk oracle void-ray voidray phoenix
-    warp-prism warp-prism-phasing medivac))
+  '(banshee liberator liberator-ag mutalisk oracle void-ray voidray))
 
 (define (zerg-enemy-air-spire-needed? enemy-u-counts enemy-b-counts enemy-race requires-aa?)
   (or (protoss-enemy-capital-air? enemy-u-counts)
@@ -2250,14 +2315,14 @@
 (define (gas-building-cap-ok? cur-gas-bldgs active-bases)
   (< (safe-nonneg-int cur-gas-bldgs 0) (gas-building-cap active-bases)))
 
-;; Mirrors runtime stepped Zerg Drone pause vs Terran/Protoss:
-;; >38 Drones requires >=12 army supply, >46 requires >=22, >54 requires >=34.
+;; Mirrors runtime stepped Zerg Drone pause across all matchups (W9-P0-4-belief):
+;; >38 Drones requires >=12 army supply, >=46 (or >=44 in ZvZ) requires >=35 army supply!
 (define (zerg-stepped-drone-army-floor race enemy-race workers)
   (define w (safe-nonneg-int workers 0))
-  (if (and (eq? race 'Zerg) (memq enemy-race '(Terran Protoss)))
+  (if (eq? race 'Zerg)
       (cond
-        [(> w 54) 34.0]
-        [(> w 46) 22.0]
+        [(>= w 46) 34.0]
+        [(and (eq? enemy-race 'Zerg) (>= w 44)) 34.0]
         [(> w 38) 12.0]
         [else 0.0])
       0.0))
@@ -2273,7 +2338,15 @@
   (define m-val (safe-nonneg-int minerals 0))
   (define w-val (safe-nonneg-int workers 0))
   (define g-val (safe-nonneg-int gas 0))
+  (define enemy-air-cnt
+    (if (hash? enemy-u-counts)
+        (for/sum ([u (in-list '(banshee mutalisk void-ray voidray carrier tempest battlecruiser
+                                oracle liberator liberator-ag phoenix corruptor brood-lord))])
+          (safe-nonneg-int (hash-ref enemy-u-counts u 0) 0))
+        0))
   (cond
+    [(>= enemy-air-cnt 3)
+     16]
     [(or (enemy-counts-have-any? enemy-u-counts ZERG-SIEGE-SPLASH-ENEMY-SYMS)
          (and (hash? enemy-b-counts)
               (enemy-counts-have-any? enemy-b-counts
@@ -2808,11 +2881,13 @@
   ;; and multi-role static defense (`missile-turret`, `photon-cannon`, `spore-crawler`) matches both.
   (define matches-aa-counter?
     (and requires-anti-air?
+         (not (memq id PV5-GROUND-ONLY-STATIC-SYMS))
          (or (not (not (memq id PV5-ANTI-AIR-SYMS)))
              (and (eq? cat 'counter-tech)
                   (not (memq id PV5-PURE-DETECTOR-SYMS))))))
   (define matches-det-counter?
     (and requires-detection?
+         (not (memq id PV5-GROUND-ONLY-STATIC-SYMS))
          (or (not (not (memq id PV5-DETECTOR-SYMS)))
              (and (eq? cat 'counter-tech)
                   (not (memq id PV5-PURE-ANTI-AIR-SYMS))))))
@@ -3202,6 +3277,10 @@
   (define (ready-bldg-eq-count sym)
     (for/sum ([s (in-list (sc2-structure-equivalent-syms sym #f))])
       (safe-nonneg-int (hash-ref r-bldgs-ht s 0) 0)))
+  (define passive-only-air? (enemy-passive-only-air? enemy-u-counts enemy-b-counts))
+  (define passive-only-cloak? (enemy-passive-only-cloak? enemy-u-counts enemy-b-counts))
+  (define eff-req-aa-here? (and raw-requires-anti-air? (not passive-only-air?)))
+  (define eff-req-det-here? (and raw-requires-detection? (not passive-only-cloak?)))
   (define enemy-ground-army?
     (if (and (hash? enemy-u-counts) (> (hash-count enemy-u-counts) 0))
         (let ([ground-cnt
@@ -3222,8 +3301,8 @@
                                                phoenix oracle void-ray voidray carrier tempest mothership)))
                  (safe-nonneg-int cnt 0))])
           (or (> ground-cnt 0)
-              (and (not raw-requires-anti-air?) (= air-combat-cnt 0))))
-        (not raw-requires-anti-air?)))
+              (and (not eff-req-aa-here?) (= air-combat-cnt 0))))
+        (not eff-req-aa-here?)))
   (define live-workers (safe-nonneg-int raw-workers 12))
   (define has-robo? (> (bldg-eq-count 'robotics-facility) 0))
   (define has-armory? (> (bldg-eq-count 'armory) 0))
@@ -3249,7 +3328,7 @@
         (normalized-pro-unit-benchmarks race enemy-race frame-val active-bases)))
   (define zvp-stargate-threat?
     (and (eq? race 'Zerg)
-         (zerg-enemy-stargate-air-threat? enemy-u-counts enemy-b-counts enemy-race raw-requires-anti-air?)))
+         (zerg-enemy-stargate-air-threat? enemy-u-counts enemy-b-counts enemy-race eff-req-aa-here?)))
   (define pvt-fast-kiter-threat?
     (and (eq? race 'Protoss)
          (protoss-enemy-fast-kiter-threat? enemy-u-counts)))
@@ -3264,7 +3343,7 @@
     (crisis-defense-tech-defer-active?
      raw-under-attack? raw-army-supply raw-enemy-threat-supply live-workers))
   (define defer-stargate?
-    (or has-robo? (and (not raw-requires-anti-air?) (not enemy-cap-air?))))
+    (or has-robo? (and (not eff-req-aa-here?) (not enemy-cap-air?))))
   (define enemy-cap-air-ground-aa?
     (terran-enemy-capital-air-with-ground-aa? enemy-u-counts))
   (define desired-thor-cap (terran-desired-thor-cap enemy-u-counts))
@@ -3286,8 +3365,8 @@
             'army-supply raw-army-supply
             'enemy-threat-supply raw-enemy-threat-supply
             'under-attack? raw-under-attack?
-            'requires-anti-air? raw-requires-anti-air?
-            'requires-detection? raw-requires-detection?
+            'requires-anti-air? eff-req-aa-here?
+            'requires-detection? eff-req-det-here?
             'researched-upgrades upgs
             'unit-counts unit-counts-ht
             'building-counts bldgs-ht
@@ -3306,8 +3385,8 @@
   (define sg-desired-bases (max raw-desired-bases (safe-nonneg-int (hash-ref post-bo-goals 'desired-bases raw-desired-bases) raw-desired-bases)))
   (define sg-mirror-min-bases (safe-nonneg-int (hash-ref post-bo-goals 'mirror-recommended-min-bases 0) 0))
   (define sg-suppress-opening? (eq? (hash-ref post-bo-goals 'suppress-opening-harass? #f) #t))
-  (define sg-reqs-aa? (or raw-requires-anti-air? (eq? (hash-ref post-bo-goals 'requires-anti-air? #f) #t)))
-  (define sg-reqs-det? (or raw-requires-detection? (eq? (hash-ref post-bo-goals 'requires-detection? #f) #t)))
+  (define sg-reqs-aa? (and (or eff-req-aa-here? (eq? (hash-ref post-bo-goals 'requires-anti-air? #f) #t)) (not passive-only-air?)))
+  (define sg-reqs-det? (and (or eff-req-det-here? (eq? (hash-ref post-bo-goals 'requires-detection? #f) #t)) (not passive-only-cloak?)))
   (define sg-recs (hash-ref post-bo-goals 'recommended-units (hasheq)))
   (define sg-suppressed (hash-ref post-bo-goals 'suppressed-units '()))
   (define sg-rec-upgs (hash-ref post-bo-goals 'recommended-upgrades '()))
@@ -3498,9 +3577,9 @@
       (make-scored-candidate id
                              category
                              action
-                             (sc2-min-cost id)
-                             (sc2-gas-cost id)
-                             (sc2-supply-cost id 0)
+                             (if (eq? id 'archon) 0 (sc2-min-cost id))
+                             (if (eq? id 'archon) 0 (sc2-gas-cost id))
+                             (if (eq? id 'archon) 0 (sc2-supply-cost id 0))
                              (if (and worker-survival-crisis? (not (memq category '(supply worker))))
                                  #f
                                  blocking-allowed?)
@@ -3648,7 +3727,7 @@
            #t))
      (define zerg-upg-ready? (zerg-upg-prereq-ok? upg-sym))
      (define keep-spire-aa?
-       (zerg-enemy-air-spire-needed? enemy-u-counts enemy-b-counts enemy-race raw-requires-anti-air?))
+       (zerg-enemy-air-spire-needed? enemy-u-counts enemy-b-counts enemy-race eff-req-aa-here?))
      (define zerg-second-upg-sym
        (for/or ([u (in-list (if (pair? sg-rec-upgs) sg-rec-upgs '()))])
          (and (not (eq? u upg-sym))
@@ -3662,7 +3741,7 @@
             (if enemy-cap-air? SC2-MAX-QUEENS-CAP 0)))
      (define cur-overseers (unit-ht-count '(overseer overseer-siege-mode overlord-cocoon)))
      (define want-overseers
-       (desired-zerg-overseer-count active-bases army-val has-lair-or-hive? raw-requires-detection?))
+       (desired-zerg-overseer-count active-bases army-val has-lair-or-hive? eff-req-det-here?))
      (define cur-droppers (unit-ht-count '(overlord-transport transport-overlord-cocoon)))
      (define want-droppers
        (max (desired-zerg-overlord-transport-count active-bases army-val live-workers has-lair-or-hive? raw-under-attack?)
@@ -3671,7 +3750,7 @@
      (define cur-spores (bldg-eq-count 'spore-crawler))
      (define want-spores
        (desired-zerg-spore-count active-bases enemy-u-counts enemy-b-counts enemy-race
-                                 raw-requires-anti-air? raw-requires-detection?))
+                                 eff-req-aa-here? eff-req-det-here?))
      (define zerg-rush-cands
        (if (or under-early-rush-crisis? severe-crisis-static-def?)
            (append
@@ -3689,19 +3768,19 @@
      (define zerg-pit-spire-army-ok?
        (and (>= active-bases 3) (>= army-val 28.0)))
      (define corruptor-cap
-       (zerg-enemy-capital-air-corruptor-cap enemy-u-counts raw-requires-anti-air? enemy-race))
+       (zerg-enemy-capital-air-corruptor-cap enemy-u-counts eff-req-aa-here? enemy-race))
      (define cur-corruptors
        (unit-ht-count '(corruptor brood-lord broodlord brood-lord-cocoon)))
      (define zerg-t3-cands
        (append
-        ;; Emergency AA Spire remains permitted when `raw-requires-anti-air?` or enemy air/capital-air is active
+        ;; Emergency AA Spire remains permitted when `eff-req-aa-here?` or enemy air/capital-air is active
         ;; even before T3 army threshold; normal `infestation-pit` and `spire` wait for 3 bases + 28 army.
         (if (and (not crisis-defer?)
                  has-lair-or-hive?
                  (= (bldg-eq-count 'infestation-pit) 0)
                  (or zerg-pit-spire-army-ok?
-                     raw-requires-anti-air?
-                     raw-requires-detection?))
+                     eff-req-aa-here?
+                     eff-req-det-here?))
             (list (boost-cand 'infestation-pit 'tech-upgrade
                               (list 'build 'infestation-pit (safe-tile-coord (+ base-x 5.5)) (safe-tile-coord (- base-y 4.5)))
                               #t 145.0))
@@ -3709,7 +3788,7 @@
         (if (and (or (not crisis-defer?) keep-spire-aa?)
                  has-lair-or-hive?
                  (= (bldg-eq-count 'spire) 0)
-                 (or zerg-pit-spire-army-ok? enemy-cap-air? raw-requires-anti-air?))
+                 (or zerg-pit-spire-army-ok? enemy-cap-air? eff-req-aa-here?))
             (list (boost-cand 'spire 'tech-upgrade
                               (list 'build 'spire (safe-tile-coord (- base-x 4.5)) (safe-tile-coord (+ base-y 4.5)))
                               #t (if enemy-cap-air? 185.0 140.0)))
@@ -3718,7 +3797,7 @@
                      (and (ready-bldg-has? 'greater-spire) (= cur-corruptors 0)))
                  (or (ready-bldg-has? 'spire) (ready-bldg-has? 'greater-spire))
                  (facility-slot-open? 'larva)
-                 (or (bldg-has? 'greater-spire) enemy-cap-air? raw-requires-anti-air?)
+                 (or (bldg-has? 'greater-spire) enemy-cap-air? eff-req-aa-here?)
                  (< cur-corruptors (max corruptor-cap (if (ready-bldg-has? 'greater-spire) 2 0))))
             (list (boost-cand 'corruptor 'combat-unit '(train corruptor) #t
                               (if enemy-cap-air? 185.0 135.0)))
@@ -3894,7 +3973,11 @@
                               (>= cur-overlords 1)
                               (< cur-overseers want-overseers))
                          #t)
-                     (if (and has-lair-or-hive? (< cur-overseers (if sg-reqs-det? 3 2))) 145.0 0.0))
+                     (if (and has-lair-or-hive?
+                              (or sg-reqs-det? (and (not raw-under-attack?) (not crisis-defer?)))
+                              (< cur-overseers (if sg-reqs-det? 3 2)))
+                         145.0
+                         0.0))
          (boost-cand 'roach 'combat-unit '(train roach)
                      (and (facility-slot-open? 'larva 'roach-warren)
                           (not (sg-suppressed? 'roach)))
@@ -4106,8 +4189,15 @@
        (or (facility-slot-open? 'gateway 'cybernetics-core)
            (facility-slot-open? 'warp-gate 'cybernetics-core)))
      (define suppress-zealot?
-       (and pvt-fast-kiter-threat?
-            (or has-core? (>= gas-val 25) (> army-val 0.0))))
+       (or (and pvt-fast-kiter-threat?
+                (or has-core? (>= gas-val 25) (> army-val 0.0)))
+           ;; W12-P0-2-belief (#15/#24): Narrow Zealot suppression strictly to >=3 ready Gateways,
+           ;; gas >= 100, and minerals < 150 (outside early Zergling rush) so 1-2 Gate openings never stall!
+           (and has-core?
+                (>= (+ (ready-bldg-eq-count 'gateway) (ready-bldg-eq-count 'warp-gate)) 3)
+                (>= gas-val 100)
+                (< min-val 150)
+                (not (and (eq? enemy-race 'Zerg) (< frame-val 3600) (< army-val 6.0))))))
      (define protoss-ready-tech-units
        (append
         (if (and has-robo-bay?
@@ -4260,7 +4350,25 @@
                      (sg-rec-bonus 'robotics-facility))
          (cand 'observer 'counter-tech '(train observer)
                (and (facility-slot-open? 'robotics-facility 'robotics-facility)
-                    (if (hash? open-prod-slots) (< (unit-ht-count 'observer) (if sg-reqs-det? 2 1)) #t)))
+                    (if (hash? open-prod-slots)
+                        (let* ([real-cloak?
+                                (or sg-reqs-det?
+                                    (enemy-any-counts-have?
+                                     enemy-u-counts enemy-b-counts
+                                     '(dark-templar dark-shrine banshee lurker lurker-burrowed lurker-den widow-mine-burrowed)))]
+                               [e-air-cnt (if (hash? enemy-u-counts)
+                                              (for/sum ([u (in-list '(mutalisk corruptor brood-lord phoenix oracle void-ray voidray
+                                                                      carrier tempest mothership banshee liberator liberator-ag
+                                                                      viking-fighter battlecruiser))])
+                                                (safe-nonneg-int (hash-ref enemy-u-counts u 0) 0))
+                                              0)]
+                               [obs-cap (cond
+                                          [(and (< army-val 8.0) (not real-cloak?)) 0]
+                                          [(or enemy-cap-air? (>= e-air-cnt 4)) 1]
+                                          [real-cloak? 2]
+                                          [else 1])])
+                          (< (unit-ht-count '(observer observer-siege-mode)) obs-cap))
+                        #t)))
          (boost-cand 'stalker 'combat-unit '(train stalker)
                      gw-slot-open?
                      (max (cond
@@ -4333,12 +4441,23 @@
       (lambda (u-sym)
         (case u-sym
           [(sentry) (and gw-slot-open?
-                         (< (unit-ht-count 'sentry) (if (>= active-bases 4) 3 2))
-                         (list 'combat-unit '(train sentry) #t 130.0))]
-          [(warp-prism) (and (facility-slot-open? 'robotics-facility 'robotics-facility)
+                         (< (unit-ht-count 'sentry) 2)
+                         (list 'combat-unit '(train sentry) #f 45.0))]
+          [(warp-prism) (and (not enemy-cap-air?)
+                             (not sg-reqs-aa?)
+                             (not raw-under-attack?)
+                             (<= threat-val 0.0)
+                             (>= active-bases 2)
+                             (>= army-val 20.0)
+                             (< (unit-ht-count '(warp-prism warp-prism-phasing)) 1)
+                             (facility-slot-open? 'robotics-facility 'robotics-facility)
                              (list 'combat-unit '(train warp-prism) #t 135.0))]
-          [(phoenix) (and (not (eq? enemy-race 'Terran))
+          [(phoenix) (and (or (not (eq? enemy-race 'Terran))
+                              (and sg-reqs-det? sg-reqs-aa?)
+                              (enemy-any-counts-have? enemy-u-counts enemy-b-counts '(banshee liberator liberator-ag)))
                           (or pvz-muta-aa-needed?
+                              (and sg-reqs-det? sg-reqs-aa?)
+                              (enemy-any-counts-have? enemy-u-counts enemy-b-counts '(banshee))
                               (and (not enemy-cap-air?)
                                    (not (sg-suppressed? 'phoenix))
                                    (< cur-phoenix 1)))
@@ -4718,6 +4837,7 @@
           [(hellion) (and (facility-slot-open? 'factory 'factory)
                           (list 'combat-unit '(train hellion) #t 130.0))]
           [(cyclone) (and (facility-slot-open? 'factory 'factory) has-fac-tl?
+                          (< (unit-ht-count 'cyclone) 2)
                           (list 'combat-unit '(train cyclone) #t 140.0))]
           [(thor) (and (facility-slot-open? 'factory 'armory) has-fac-tl?
                        (list 'combat-unit '(train thor) #t 145.0))]
@@ -8074,8 +8194,14 @@
   (define cap (if (number? food-cap) (inexact->exact (floor food-cap)) 0))
   (define pend (if (number? pending-supply) (max 0 (inexact->exact (floor pending-supply))) 0))
   (define base-margin (compute-supply-preemption-margin cap))
-  ;; W7-P0-4-belief: Protoss Warp-Gate waves burst 6-16 supply instantaneously -> +2 headroom at cap >= 30
-  (define margin (if (and (eq? race 'Protoss) (>= cap 30)) (+ base-margin 2) base-margin))
+  ;; W7-P0-4-belief + W9-P0-1/3-belief + W10-P0-2-belief: Protoss Warp-Gate bursts & Terran multi-Rax/Fac/Port
+  ;; need extra midgame supply lead time (+2 at cap>=30, +3 at cap>=60), while keeping Terran cap=23 at margin=2
+  ;; so Natural CommandCenter #2 drops strictly BEFORE SupplyDepot #2 (Pro #1 Dep->Rax->Ref->CC->Dep)!
+  (define margin
+    (cond
+      [(and (memq race '(Protoss Terran)) (>= cap 60)) (+ base-margin 3)]
+      [(and (memq race '(Protoss Terran)) (>= cap 30)) (+ base-margin 2)]
+      [else base-margin]))
   (define proj-cap (+ cap (* 8 pend)))
   (and (< cap 200)
        (cond

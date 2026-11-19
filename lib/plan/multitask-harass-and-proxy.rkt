@@ -1811,7 +1811,19 @@
                (for/fold ([hit : (Option Any) #f])
                          ([e (in-list enemy-units)]
                           #:when (and (not hit)
-                                      (or (eq? (dyn-hash-ref e 'cloaked? #f) #t)
+                                      ;; W12-P0-4-rt (`w12-tac-1`): Skip enemies already detected (`cloak=2`)
+                                      ;; or carrying OracleRevelation (`buff=49`) so Oracles never spam 2146.
+                                      (let ([cval (dyn-hash-ref e 'cloak 0)]
+                                            [bfs (dyn-hash-ref e 'buffs '())])
+                                        (and (not (eqv? cval 2))
+                                             (not (eq? cval 'cloaked-detected))
+                                             (not (and (list? bfs)
+                                                       (for/or : Boolean ([b (in-list bfs)])
+                                                         (or (eqv? b 49)
+                                                             (eq? b 'oracle-revelation)
+                                                             (eq? b 'revelation)))))))
+                                      (or (eqv? (dyn-hash-ref e 'cloak 0) 1)
+                                          (eq? (dyn-hash-ref e 'cloaked? #f) #t)
                                           (memq (u-type e) '(banshee dark-templar widow-mine-burrowed lurker-burrowed)))
                                       (u-alive? e)
                                       (<= (dist2 ox oy (u-x e) (u-y e)) 11.0)))

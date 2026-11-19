@@ -1958,17 +1958,27 @@
             (define d (dist-2d cx cy-y (u-x e) (u-y e)))
             (cond
               [(or (> etag 0) (= etag 0))
+               ;; W12-P0-4-rt (`w12-tac-2`): Skip enemies already carrying Cyclone Lock-On (`buff=116`)
+               ;; or already claimed by another Cyclone on this tick so 2350 is never double-burned.
+               (define already-locked-buff?
+                 (let ([bfs (dyn-hash-ref e 'buffs '())])
+                   (and (list? bfs)
+                        (for/or : Boolean ([b (in-list bfs)])
+                          (or (eqv? b 116)
+                              (eq? b 'lock-on)
+                              (eq? b 'cyclone-lock-on))))))
+               (define already-claimed?
+                 (and claimed-targets (hash-has-key? claimed-targets etag)))
                (define valid?
                  (and (> etag 0)
                       (<= d CYCLONE-LOCK-ON-CAST-RANGE)
+                      (not already-locked-buff?)
+                      (not already-claimed?)
                       (not (memq et '(larva egg)))
                       (not (u-structure? e))))
                (if (not valid?)
                    (values bt bs)
-                   (let* ([already-claimed?
-                           (and claimed-targets (hash-has-key? claimed-targets etag))]
-                          [sc0 (cyclone-target-priority-score et (u-total-ehp e) d)]
-                          [sc (if already-claimed? (- sc0 300.0) sc0)])
+                   (let ([sc (cyclone-target-priority-score et (u-total-ehp e) d)])
                      (if (> sc bs)
                          (values e sc)
                          (values bt bs))))]
@@ -2880,10 +2890,21 @@
     [(cast-spell)
      (define ab (unit-mode-directive-ability d))
      (define tgt (unit-mode-directive-target-tag d))
-     (list 'cast-spell
-           (unit-mode-directive-unit-tag d)
-           (or ab 'unknown)
-           (if (> tgt 0) tgt (unit-mode-directive-unit-tag d)))]
+     ;; W12-P0-4-rt (`w12-tac-3`): Emit zero-target mode toggles as 3-element `(cast-spell uid ab)`
+     ;; so Layer-5 `pre-coalesced-actions` & `human-cortex` coalesce full squads into 1 command!
+     (if (memq ab '(morph-viking-fighter morph-viking-assault
+                    morph-hellbat morph-hellion
+                    morph-thor-high-impact morph-thor-explosive
+                    siege-mode unsiege-mode
+                    widow-mine-burrow widow-mine-unburrow
+                    lurker-burrow lurker-unburrow))
+         (list 'cast-spell
+               (unit-mode-directive-unit-tag d)
+               ab)
+         (list 'cast-spell
+               (unit-mode-directive-unit-tag d)
+               (or ab 'unknown)
+               (if (> tgt 0) tgt (unit-mode-directive-unit-tag d))))]
     [(move kite retreat attack-pos)
      (list (unit-mode-directive-action d)
            (unit-mode-directive-unit-tag d)

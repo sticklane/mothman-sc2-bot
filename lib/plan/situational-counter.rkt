@@ -30,6 +30,7 @@
            dyn-unit-type-and-count
            dyn-unit-build-progress
            dyn-obs-nat-flags
+           dyn-obs-live?
            dyn-unit-id-energy
            dyn-unit-dist2
            dyn-unit-stealth?
@@ -122,6 +123,14 @@
           (dyn-real (hash-ref obs 'enemy-air-supply -1.0) -1.0)
           -1.0))
     (values nat-sym base-cnt enemy-air-sup-ovr))
+  (define (dyn-obs-live? raw-obs)
+    (and (hash? raw-obs)
+         (or (hash-has-key? raw-obs 'raw-mineral-harvesters)
+             (hash-has-key? raw-obs 'ideal-mineral-harvesters)
+             (hash-has-key? raw-obs 'mineral-patches)
+             (hash-has-key? raw-obs 'dead-unit-tags)
+             (hash-has-key? raw-obs 'map-grids)
+             (eq? (hash-ref raw-obs 'live-obs? #f) #t))))
   (define (dyn-unit-id-energy u)
     (if (hash? u)
         (let ([id (dyn-int (hash-ref u 'id 0) 0)])
@@ -222,6 +231,7 @@
   [dyn-unit-type-and-count (-> Any (Values Symbol Positive-Integer Float))]
   [dyn-unit-build-progress (-> Any Float)]
   [dyn-obs-nat-flags (-> Any (Values Symbol Integer Float))]
+  [dyn-obs-live? (-> Any Boolean)]
   [dyn-unit-id-energy (-> Any (Values Integer Float))]
   [dyn-unit-dist2 (-> Any Float Float Float Float)]
   [dyn-unit-stealth? (-> Any Boolean)]
@@ -1325,8 +1335,10 @@
        #t))
 
 (: select-ability-actions-from-ht
-   (-> Symbol (Listof Symbol) (HashTable Symbol (Listof actor-entry)) Integer (Listof (Listof Any))))
-(define (select-ability-actions-from-ht situation enemy-comp actor-ht frame)
+   (->* (Symbol (Listof Symbol) (HashTable Symbol (Listof actor-entry)) Integer)
+        (Boolean)
+        (Listof (Listof Any))))
+(define (select-ability-actions-from-ht situation enemy-comp actor-ht frame [live-obs? #f])
   (define actions : (Listof (Listof Any)) '())
   (: emit! (-> (Listof Any) Void))
   (define (emit! a) (set! actions (cons a actions)))
@@ -1363,28 +1375,35 @@
            (and (memq t types) #t))
          #t))
 
-  ;; Recommend high-leverage spellcasts matching canonical `sc2-typed-commands.rkt` S-exprs
+  ;; Recommend high-leverage spellcasts matching canonical `sc2-typed-commands.rkt` S-exprs.
+  ;; W11-P0-4-wire (`w11-tac-3` & `w11-tac-4`): On live SC2 observations (`live-obs? = #t`),
+  ;; NEVER emit legacy hardcoded-coordinate (`90.0 90.0`, `48.0 48.0`, `88.0 88.0`, `45.0 45.0`,
+  ;; `152.0 152.0`, etc.) or dummy-tag-`1` (`parasitic-bomb 1`, `abduct 1`, `lock-on 1`, etc.)
+  ;; casts — `pro-spellcaster-micro` + `arena-minimax` handle real target coordinates, ranges,
+  ;; and buff-132 deduplication! Also NEVER freeze mobile detectors (`morph-oversight-mode` /
+  ;; `morph-observer-siege-mode`) during `enemy-cloaked-or-burrowed-threat` so Overseers and
+  ;; Observers stay mobile to fly onto Cloaked Banshees / DTs / Lurkers.
   (case situation
     [(opponent-unwalled-punish enemy-early-pool-or-worker-rush)
      (cond
-       [(find-unit1 'sentry 50.0)
+       [(and (not live-obs?) (find-unit1 'sentry 50.0))
         => (lambda ([sid : Integer]) (emit! (list 'cast-spell sid 'force-field 44.0 44.0)))]
        [(find-unit1 'nexus 50.0)
         => (lambda ([nid : Integer])
              (define bat (find-unit1 'shield-battery 0.0))
              (when bat (emit! (list 'cast-spell nid 'battery-overcharge bat))))]
-       [(find-unit1 'queen 50.0)
+       [(and (not live-obs?) (find-unit1 'queen 50.0))
         => (lambda ([qid : Integer]) (emit! (list 'cast-spell qid 'transfusion qid)))]
-       [(find-unit-any '(marine marauder) 0.0)
+       [(and (not live-obs?) (find-unit-any '(marine marauder) 0.0))
         => (lambda ([mid : Integer]) (emit! (list 'cast-spell mid 'stimpack)))])]
 
     [(opponent-proxy-all-in-defense)
      (cond
-       [(find-unit1 'ravager 0.0)
+       [(and (not live-obs?) (find-unit1 'ravager 0.0))
         => (lambda ([rid : Integer]) (emit! (list 'cast-spell rid 'corrosive-bile 48.0 48.0)))]
-       [(find-unit1 'siege-tank 0.0)
+       [(and (not live-obs?) (find-unit1 'siege-tank 0.0))
         => (lambda ([tid : Integer]) (emit! (list 'cast-spell tid 'siege-mode)))]
-       [(find-unit1 'cyclone 0.0)
+       [(and (not live-obs?) (find-unit1 'cyclone 0.0))
         => (lambda ([cid : Integer]) (emit! (list 'cast-spell cid 'lock-on 1)))]
        [(find-unit1 'nexus 50.0)
         => (lambda ([nid : Integer])
@@ -1396,14 +1415,15 @@
              (when bio (emit! (list 'bunker-load bid bio))))])]
 
     [(enemy-cannon-or-bunker-contain)
-     (let ([rid (find-unit1 'ravager 0.0)])
-       (when rid (emit! (list 'cast-spell rid 'corrosive-bile 48.0 48.0))))
-     (let ([tid (find-unit1 'siege-tank 0.0)])
-       (when tid (emit! (list 'cast-spell tid 'siege-mode))))
-     (let ([cid (find-unit1 'cyclone 0.0)])
-       (when cid (emit! (list 'cast-spell cid 'lock-on 1))))
-     (let ([nyd (find-unit1 'nydus-network 0.0)])
-       (when nyd (emit! (list 'cast-spell nyd 'build-nydus-worm 148.0 162.0))))
+     (unless live-obs?
+       (let ([rid (find-unit1 'ravager 0.0)])
+         (when rid (emit! (list 'cast-spell rid 'corrosive-bile 48.0 48.0))))
+       (let ([tid (find-unit1 'siege-tank 0.0)])
+         (when tid (emit! (list 'cast-spell tid 'siege-mode))))
+       (let ([cid (find-unit1 'cyclone 0.0)])
+         (when cid (emit! (list 'cast-spell cid 'lock-on 1))))
+       (let ([nyd (find-unit1 'nydus-network 0.0)])
+         (when nyd (emit! (list 'cast-spell nyd 'build-nydus-worm 148.0 162.0)))))
      (let ([nid (find-unit1 'nexus 50.0)]
            [bat (find-unit1 'shield-battery 0.0)])
        (when (and nid bat)
@@ -1420,81 +1440,84 @@
        (when pid (emit! (list 'cast-spell pid 'morph-warp-prism-transport))))]
 
     [(enemy-cloaked-or-burrowed-threat)
-     (cond
-       [(find-unit1 'orbital-command 50.0)
-        => (lambda ([oid : Integer]) (emit! (list 'cast-spell oid 'scanner-sweep 45.0 45.0)))]
-       [(find-unit1 'oracle 25.0)
-        => (lambda ([oid : Integer]) (emit! (list 'cast-spell oid 'oracle-revelation 48.0 48.0)))]
-       [(find-unit1 'overseer 0.0)
-        => (lambda ([oid : Integer]) (emit! (list 'cast-spell oid 'morph-oversight-mode)))]
-       [(find-unit1 'observer 0.0)
-        => (lambda ([oid : Integer]) (emit! (list 'cast-spell oid 'morph-observer-siege-mode)))])]
+     ;; Never cast `morph-oversight-mode` (3745) or `morph-observer-siege-mode` (3741) here:
+     ;; detectors must remain mobile to fly directly to active cloaked/burrowed threats!
+     (unless live-obs?
+       (cond
+         [(find-unit1 'orbital-command 50.0)
+          => (lambda ([oid : Integer]) (emit! (list 'cast-spell oid 'scanner-sweep 45.0 45.0)))]
+         [(find-unit1 'oracle 25.0)
+          => (lambda ([oid : Integer]) (emit! (list 'cast-spell oid 'oracle-revelation 48.0 48.0)))]))]
 
     [(enemy-siege-or-lurker-contain)
-     (cond
-       [(find-unit1 'viper 75.0)
-        => (lambda ([vid : Integer])
-             (emit! (list 'cast-spell vid 'blinding-cloud 90.0 90.0))
-             (when (find-unit1 'viper 100.0)
-               (emit! (list 'cast-spell vid 'abduct 1))))]
-       [(find-unit1 'disruptor 0.0)
-        => (lambda ([did : Integer]) (emit! (list 'cast-spell did 'purification-nova 90.0 90.0)))]
-       [(find-unit1 'raven 75.0)
-        => (lambda ([rid : Integer]) (emit! (list 'cast-spell rid 'interference-matrix 1)))]
-       [(find-unit1 'ravager 0.0)
-        => (lambda ([rid : Integer]) (emit! (list 'cast-spell rid 'corrosive-bile 90.0 90.0)))])]
+     (unless live-obs?
+       (cond
+         [(find-unit1 'viper 75.0)
+          => (lambda ([vid : Integer])
+               (emit! (list 'cast-spell vid 'blinding-cloud 90.0 90.0))
+               (when (find-unit1 'viper 100.0)
+                 (emit! (list 'cast-spell vid 'abduct 1))))]
+         [(find-unit1 'disruptor 0.0)
+          => (lambda ([did : Integer]) (emit! (list 'cast-spell did 'purification-nova 90.0 90.0)))]
+         [(find-unit1 'raven 75.0)
+          => (lambda ([rid : Integer]) (emit! (list 'cast-spell rid 'interference-matrix 1)))]
+         [(find-unit1 'ravager 0.0)
+          => (lambda ([rid : Integer]) (emit! (list 'cast-spell rid 'corrosive-bile 90.0 90.0)))]))]
 
     [(enemy-air-harass-transition enemy-turtle-skytoss-or-mech)
-     (cond
-       [(find-unit1 'infestor 100.0)
-        => (lambda ([iid : Integer])
-             (emit! (list 'cast-spell iid
-                          (if (has-enemy? '(carrier tempest battlecruiser void-ray))
-                              'microbial-shroud
-                              'fungal-growth)
-                          88.0 88.0)))]
-       [(find-unit1 'viper 125.0)
-        => (lambda ([vid : Integer]) (emit! (list 'cast-spell vid 'parasitic-bomb 1)))]
-       [(find-unit1 'raven 75.0)
-        => (lambda ([rid : Integer]) (emit! (list 'cast-spell rid 'anti-armor-missile 1)))]
-       [(find-unit1 'ghost 75.0)
-        => (lambda ([gid : Integer]) (emit! (list 'cast-spell gid 'emp-round 88.0 88.0)))]
-       [(find-unit1 'cyclone 0.0)
-        => (lambda ([cid : Integer]) (emit! (list 'cast-spell cid 'lock-on 1)))])]
+     (unless live-obs?
+       (cond
+         [(find-unit1 'infestor 100.0)
+          => (lambda ([iid : Integer])
+               (emit! (list 'cast-spell iid
+                            (if (has-enemy? '(carrier tempest battlecruiser void-ray))
+                                'microbial-shroud
+                                'fungal-growth)
+                            88.0 88.0)))]
+         [(find-unit1 'viper 125.0)
+          => (lambda ([vid : Integer]) (emit! (list 'cast-spell vid 'parasitic-bomb 1)))]
+         [(find-unit1 'raven 75.0)
+          => (lambda ([rid : Integer]) (emit! (list 'cast-spell rid 'anti-armor-missile 1)))]
+         [(find-unit1 'ghost 75.0)
+          => (lambda ([gid : Integer]) (emit! (list 'cast-spell gid 'emp-round 88.0 88.0)))]
+         [(find-unit1 'cyclone 0.0)
+          => (lambda ([cid : Integer]) (emit! (list 'cast-spell cid 'lock-on 1)))]))]
 
     [(enemy-fast-3cc-or-nexus-greed our-eco-deficit-comeback-harass)
-     (cond
-       [(find-unit-any '(swarm-host swarm-host-burrowed) 0.0)
-        => (lambda ([shid : Integer]) (emit! (list 'cast-spell shid 'spawn-locusts 152.0 152.0)))]
-       [(find-unit1 'raven 50.0)
-        => (lambda ([rid : Integer]) (emit! (list 'cast-spell rid 'auto-turret 152.0 152.0)))]
-       [(find-unit1 'overseer 125.0)
-        => (lambda ([oid : Integer]) (emit! (list 'cast-spell oid 'contaminate 1)))]
-       [(find-unit1 'oracle 25.0)
-        => (lambda ([oid : Integer]) (emit! (list 'cast-spell oid 'pulsar-beam)))]
-       [(find-unit1 'nydus-network 0.0)
-        => (lambda ([nid : Integer]) (emit! (list 'cast-spell nid 'build-nydus-worm 148.0 162.0)))]
-       [(find-unit1 'orbital-command 50.0)
-        => (lambda ([oid : Integer]) (emit! (list 'cast-spell oid 'calldown-mule 1)))])]
+     (unless live-obs?
+       (cond
+         [(find-unit-any '(swarm-host swarm-host-burrowed) 0.0)
+          => (lambda ([shid : Integer]) (emit! (list 'cast-spell shid 'spawn-locusts 152.0 152.0)))]
+         [(find-unit1 'raven 50.0)
+          => (lambda ([rid : Integer]) (emit! (list 'cast-spell rid 'auto-turret 152.0 152.0)))]
+         [(find-unit1 'overseer 125.0)
+          => (lambda ([oid : Integer]) (emit! (list 'cast-spell oid 'contaminate 1)))]
+         [(find-unit1 'oracle 25.0)
+          => (lambda ([oid : Integer]) (emit! (list 'cast-spell oid 'pulsar-beam)))]
+         [(find-unit1 'nydus-network 0.0)
+          => (lambda ([nid : Integer]) (emit! (list 'cast-spell nid 'build-nydus-worm 148.0 162.0)))]
+         [(find-unit1 'orbital-command 50.0)
+          => (lambda ([oid : Integer]) (emit! (list 'cast-spell oid 'calldown-mule 1)))]))]
 
     [(our-army-trapped-or-out-of-position base-trade-race)
-     (cond
-       [(find-unit1 'nexus 0.0)
-        => (lambda ([nid : Integer]) (emit! (list 'cast-spell nid 'mass-recall 32.5 32.5)))]
-       [(find-unit1 'mothership 0.0)
-        => (lambda ([mid : Integer]) (emit! (list 'cast-spell mid 'mothership-mass-recall 88.0 88.0)))]
-       [(find-unit1 'battlecruiser 0.0)
-        => (lambda ([bcid : Integer]) (emit! (list 'cast-spell bcid 'tactical-jump 32.5 32.5)))]
-       [(find-unit1 'stalker 0.0)
-        => (lambda ([sid : Integer]) (emit! (list 'cast-spell sid 'blink 36.0 36.0)))]
-       [(find-unit1 'nydus-network 0.0)
-        => (lambda ([nid : Integer]) (emit! (list 'cast-spell nid 'build-nydus-worm 38.0 38.0)))])]
+     (unless live-obs?
+       (cond
+         [(find-unit1 'nexus 0.0)
+          => (lambda ([nid : Integer]) (emit! (list 'cast-spell nid 'mass-recall 32.5 32.5)))]
+         [(find-unit1 'mothership 0.0)
+          => (lambda ([mid : Integer]) (emit! (list 'cast-spell mid 'mothership-mass-recall 88.0 88.0)))]
+         [(find-unit1 'battlecruiser 0.0)
+          => (lambda ([bcid : Integer]) (emit! (list 'cast-spell bcid 'tactical-jump 32.5 32.5)))]
+         [(find-unit1 'stalker 0.0)
+          => (lambda ([sid : Integer]) (emit! (list 'cast-spell sid 'blink 36.0 36.0)))]
+         [(find-unit1 'nydus-network 0.0)
+          => (lambda ([nid : Integer]) (emit! (list 'cast-spell nid 'build-nydus-worm 38.0 38.0)))]))]
 
     [(late-game-spellcaster-standoff)
      (cond
-       [(find-unit1 'ghost 75.0)
+       [(and (not live-obs?) (find-unit1 'ghost 75.0))
         => (lambda ([gid : Integer]) (emit! (list 'cast-spell gid 'emp-round 88.0 88.0)))]
-       [(find-unit1 'high-templar 75.0)
+       [(and (not live-obs?) (find-unit1 'high-templar 75.0))
         => (lambda ([hid : Integer])
              (emit! (list 'cast-spell hid 'psi-storm 88.0 88.0))
              (emit! (list 'cast-spell hid 'feedback 1)))]
@@ -1502,13 +1525,13 @@
         => (lambda ([nid : Integer])
              (define ht (find-unit-any '(high-templar oracle sentry) 0.0))
              (when ht (emit! (list 'cast-spell nid 'nexus-energy-recharge ht))))]
-       [(find-unit1 'viper 75.0)
+       [(and (not live-obs?) (find-unit1 'viper 75.0))
         => (lambda ([vid : Integer]) (emit! (list 'cast-spell vid 'abduct 1)))]
-       [(find-unit1 'infestor 75.0)
+       [(and (not live-obs?) (find-unit1 'infestor 75.0))
         => (lambda ([iid : Integer]) (emit! (list 'cast-spell iid 'fungal-growth 88.0 88.0)))])]
 
     [else
-     (when (even? frame)
+     (when (and (not live-obs?) (even? frame))
        (define qid (find-unit1 'queen 25.0))
        (when qid (emit! (list 'cast-spell qid 'spawn-creep-tumor 46.0 46.0))))])
 
@@ -2497,7 +2520,7 @@
                                        ally-bldg-syms minerals gas))
 
         (define ab-recs
-          (select-ability-actions-from-ht primary-sit enemy-syms actor-ht frame))
+          (select-ability-actions-from-ht primary-sit enemy-syms actor-ht frame (dyn-obs-live? raw-obs)))
 
         (define posture : Symbol
           (case primary-sit

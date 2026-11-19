@@ -194,6 +194,56 @@
         "Ultralisk" 475
         "BroodLord" 550))
 
+;; W9-LOOP-2: Long-range siege/capital unit set & core-12 opponent cohort set
+(define SIEGE-CAPITAL-UNIT-SET
+  (set "Tempest" "SiegeTank" "SiegeTankSieged" "Colossus" "Carrier"
+       "BroodLord" "LurkerMP" "LurkerMPBurrowed"))
+
+;; W10-LOOP-2: Cloaked threat unit set & Pro v2 8m army-value reference medians
+(define CLOAK-THREAT-UNIT-SET
+  (set "Banshee" "DarkTemplar" "LurkerMP" "LurkerMPBurrowed"))
+
+;; W11-LOOP-2: Pro v2 4m army-value reference medians
+(define PRO-ARMY-VAL-4M-BY-RACE
+  (hash "Protoss" 500.0
+        "Terran"  450.0
+        "Zerg"    625.0))
+
+(define PRO-ARMY-VAL-8M-BY-RACE
+  (hash "Protoss" 3312.5
+        "Terran"  2850.0
+        "Zerg"    3062.5))
+
+(define CORE-12-OPPONENTS-LC
+  (set "titania" "monsterbot" "chance" "puck" "oberon" "rustynikolaj"
+       "mini-puck" "sludgement2-revived" "thssprtssbt" "creepy_strategies"
+       "smoothbrain" "12poolbot"))
+
+(define (load-core-opponent-set)
+  (define roster-p "/home/sjaconette/sc2-local-arena/bots/roster.json")
+  (if (file-exists? roster-p)
+      (with-handlers ([exn:fail? (lambda (_e) CORE-12-OPPONENTS-LC)])
+        (define js (call-with-input-file roster-p read-json))
+        (define items (cond [(list? js) js]
+                            [(and (hash? js) (list? (hash-ref js 'bots #f))) (hash-ref js 'bots)]
+                            [else '()]))
+        (define cs
+          (for/set ([e (in-list items)]
+                    #:when (and (hash? e)
+                                (eq? (hash-ref e 'gauntlet_core #f) #t)
+                                (string? (hash-ref e 'name #f))))
+            (string-downcase (hash-ref e 'name))))
+        (if (set-empty? cs) CORE-12-OPPONENTS-LC cs))
+      CORE-12-OPPONENTS-LC))
+
+(define ACTIVE-CORE-OPP-SET (load-core-opponent-set))
+
+(define (classify-opp-cohort opp-name)
+  (if (and (string? opp-name)
+           (set-member? ACTIVE-CORE-OPP-SET (string-downcase (string-trim opp-name))))
+      "core_12"
+      "unseen_6"))
+
 (define CREEP-TUMOR-SET
   (set "CreepTumor" "CreepTumorBurrowed" "CreepTumorQueen"))
 
@@ -282,6 +332,9 @@
           'gs-cur-peak-m 0
           'gs-cur-min-g 9999
           'gs-windows '()
+          ;; W11-LOOP-2: Gas-rich / mineral-starved stall ticks (gas>=200 & min<100, unmaxed)
+          'gas-rich-min-starved-ticks 0
+          'gas-rich-min-starved-peak-gas 0
           'step-ms '()
           'action-err-total 0
           'action-err-counts (make-hash)
@@ -339,6 +392,8 @@
   (define max-stgt (hash-ref m 'max-escrow-streak-target))
   (define cur-slen (hash-ref m 'cur-streak-len))
   (define cur-stgt (hash-ref m 'cur-streak-target))
+  (define grms-ticks (hash-ref m 'gas-rich-min-starved-ticks 0))
+  (define grms-peak-gas (hash-ref m 'gas-rich-min-starved-peak-gas 0))
   (define crashes (hash-ref m 'crashes))
   (define last-prio-f 0)
 
@@ -416,6 +471,11 @@
              (when (< bgas (hash-ref m 'gs-cur-min-g 9999))
                (hash-set! m 'gs-cur-min-g bgas)))
            (flush-gs-window! m fr))
+       ;; W11-LOOP-2: Gas-rich / mineral-starved production stall ticks (vespene >= 200 & minerals < 100)
+       (when (and mp (>= bgas 200) (< bmin 100) (< su 194))
+         (set! grms-ticks (add1 grms-ticks))
+         (when (> bgas grms-peak-gas)
+           (set! grms-peak-gas bgas)))
        ;; Blocked-by-escrow counts
        (when (string-contains? ln "blocked-by-escrow")
          (for ([bm (in-list (regexp-match* RX-BLOCKED ln #:match-select cadr))])
@@ -490,6 +550,8 @@
              'cur-streak-target cur-stgt
              'hb-windows (reverse (hash-ref m 'hb-windows '()))
              'gs-windows (reverse (hash-ref m 'gs-windows '()))
+             'gas-rich-min-starved-ticks grms-ticks
+             'gas-rich-min-starved-peak-gas grms-peak-gas
              'crashes crashes))
 
 (define (scan-log-zip! acc zpath)
@@ -807,11 +869,17 @@
           (define opp-air-first-sec #f)
           (define opp-air-types (make-hash))
           (define our-aa-unit-cnt 0)
+          (define opp-cloak-killed-cnt 0)
           ;; W7-LOOP-2: Endgame home-stall (>=40 army sup sitting <=45t of home while opp <20)
           ;; and own-base-under-attack buckets (for exact own_base_retreat_frames)
           (define our-th-coords '())
           (define idx->combat-pid (make-hasheqv)) ; tracker unitTagIndex -> pid (combat units only)
-          (define own-base-attack-buckets (make-hasheqv)) ; (quotient gl 224) -> #t
+          (define own-base-attack-buckets (make-hasheqv)) ; (quotient gl 224) -> #t (<= 28t)
+          (define own-terr-attack-buckets (make-hasheqv)) ; (quotient gl 224) -> #t (<= 38t, W12-LOOP-2)
+          ;; W12-LOOP-2: Pre-3:30 early-rush idle-bank tracking (minerals >= 250 while army_sup <= 4)
+          (define early-rush-idle-bank-ticks 0)
+          (define early-rush-idle-bank-post100-ticks 0)
+          (define early-rush-idle-bank-peak-min 0)
           (define last-opp-asup 0)
           (define prev-our-stat-sec 0.0)
           (define prev-our-killed 0)
@@ -822,11 +890,12 @@
           (define our-zerg? (string=? our-race "Zerg"))
           (define zerg-combat-spans '()) ; list of (vector cost is-ling? start-sec died-sec)
           (define zerg-combat-live (make-hasheqv)) ; tag -> current vector
-          (define (near-any-our-th? px py)
-            (for/or ([tc (in-list our-th-coords)])
+          (define (min-dist2-to-our-th px py)
+            (for/fold ([best +inf.0]) ([tc (in-list our-th-coords)])
               (define dx (- px (car tc)))
               (define dy (- py (cdr tc)))
-              (<= (+ (* dx dx) (* dy dy)) 784.0))) ; <= 28.0 tiles
+              (define d2 (+ (* dx dx) (* dy dy)))
+              (if (< d2 best) d2 best)))
           (define max-tracker-loop 0)
 
           (for ([ev (in-list tracker-events)])
@@ -866,7 +935,15 @@
                               (set! max-home-stall-sec home-stall-streak-sec)))
                           (set! home-stall-streak-sec 0.0))
                       (set! prev-our-stat-sec sec)
-                      (set! prev-our-killed kval)])
+                      (set! prev-our-killed kval)
+                      ;; W12-LOOP-2: Track pre-3:30 idle bank (min_cur >= 250 while army_sup <= 4)
+                      (when (and (<= gl 4704) (>= (hash-ref st 0 0) 250) (<= cur-asup 4))
+                        (define mc0 (hash-ref st 0 0))
+                        (set! early-rush-idle-bank-ticks (add1 early-rush-idle-bank-ticks))
+                        (when (>= sec 100.0)
+                          (set! early-rush-idle-bank-post100-ticks (add1 early-rush-idle-bank-post100-ticks)))
+                        (when (> mc0 early-rush-idle-bank-peak-min)
+                          (set! early-rush-idle-bank-peak-min mc0)))])
                    (hash-update! total-stat-ev p add1 0)
                    (when (and (>= fu fm) (< fm 200) (> gl 224))
                      (hash-update! sb-steps p add1 0))
@@ -1083,8 +1160,11 @@
                             (when (> (+ (* dx dx) (* dy dy)) 2025.0) ; > 45.0 tiles from own main
                               (set! last-away-combat-sec sec))]
                            [(= cpid opp-pid)
-                            (when (near-any-our-th? px py)
-                              (hash-set! own-base-attack-buckets atk-bkt #t))]))
+                            (define d2th (min-dist2-to-our-th px py))
+                            (when (<= d2th 1444.0) ; <= 38.0 tiles (own territory)
+                              (hash-set! own-terr-attack-buckets atk-bkt #t)
+                              (when (<= d2th 784.0) ; <= 28.0 tiles (own base)
+                                (hash-set! own-base-attack-buckets atk-bkt #t)))]))
                        (loop (cdddr rem) nidx))))]
                 [(2) ; SUnitDiedEvent
                  (define tag (bitwise-ior (arithmetic-shift (hash-ref pl 0 0) 18)
@@ -1110,8 +1190,12 @@
                                      (not (set-member? SCOUT-IGNORE-SET ut)))))
                    (define dx (exact->inexact (hash-ref pl 3 -9999)))
                    (define dy (exact->inexact (hash-ref pl 4 -9999)))
-                   (when (near-any-our-th? dx dy)
-                     (hash-set! own-base-attack-buckets (quotient gl 224) #t)))
+                   (define d2th (min-dist2-to-our-th dx dy))
+                   (when (<= d2th 1444.0)
+                     (define atk-b (quotient gl 224))
+                     (hash-set! own-terr-attack-buckets atk-b #t)
+                     (when (<= d2th 784.0)
+                       (hash-set! own-base-attack-buckets atk-b #t))))
                  ;; Also detect early scout killed in enemy territory between SUnitPositions ticks
                  (when (and (not first-scout-cross-sec)
                             (= p our-pid)
@@ -1129,6 +1213,10 @@
                    (when (and (>= dh (* 0.45 base-dist)) (<= de (* 0.75 base-dist)))
                      (set! first-scout-cross-sec (round1 sec))
                      (set! first-scout-unit-type ut)))
+                 (when (and (= p opp-pid)
+                            (equal? killer-pid our-pid)
+                            (set-member? CLOAK-THREAT-UNIT-SET ut))
+                   (set! opp-cloak-killed-cnt (add1 opp-cloak-killed-cnt)))
                  ;; Self-cancel detector: our initiated building died by our own pid before completion within 15s
                  (when (and (= p our-pid)
                             (equal? killer-pid our-pid)
@@ -1272,6 +1360,12 @@
           (define a2w-6m (and a6 our-w6 (> our-w6 0) (round1 (/ (exact->inexact a6) our-w6))))
           (define a2w-8m (and a8 our-w8 (> our-w8 0) (round1 (/ (exact->inexact a8) our-w8))))
           (define a2w-10m (and a10 our-w10 (> our-w10 0) (round1 (/ (exact->inexact a10) our-w10))))
+          (define pro-a4-ref (hash-ref PRO-ARMY-VAL-4M-BY-RACE our-race #f))
+          (define army-val-4m-ratio-vs-pro
+            (and a4 pro-a4-ref (> pro-a4-ref 0.0) (round2 (/ (exact->inexact a4) pro-a4-ref))))
+          (define pro-a8-ref (hash-ref PRO-ARMY-VAL-8M-BY-RACE our-race #f))
+          (define army-val-8m-ratio-vs-pro
+            (and a8 pro-a8-ref (> pro-a8-ref 0.0) (round2 (/ (exact->inexact a8) pro-a8-ref))))
 
           ;; Production, base, tech-prod, and Queen counts alive at 4m/6m/8m/10m
           (define (alive-cnt-at t pred)
@@ -1363,6 +1457,8 @@
                     'army_sup_2m asup2 'army_sup_4m asup4 'army_sup_6m asup6 'army_sup_8m asup8 'army_sup_10m asup10
                     'army_to_worker_4m a2w-4m 'army_to_worker_6m a2w-6m
                     'army_to_worker_8m a2w-8m 'army_to_worker_10m a2w-10m
+                    'army_val_4m_ratio_vs_pro army-val-4m-ratio-vs-pro
+                    'army_val_8m_ratio_vs_pro army-val-8m-ratio-vs-pro
                     'first_scout_sec first-scout-sec
                     'first_scout_cross_sec first-scout-cross-sec
                     'enemy_first_seen_sec enemy-first-seen-sec
@@ -1546,6 +1642,36 @@
                  (hasheq 'frames own-base-retreat-frames
                          'ticks own-base-retreat-ticks
                          'sec (round1 (/ own-base-retreat-frames 22.4)))))
+          ;; W12-LOOP-2: Own-territory retreat frames (enemies <= 38t of any friendly base)
+          (define-values (own-terr-retreat-frames own-terr-retreat-ticks)
+            (let ([rfs (reverse (hash-ref log-acc 'retreat-frames '()))])
+              (for/fold ([frames 0] [ticks 0] [prev-fr #f] #:result (values frames ticks))
+                        ([fr (in-list rfs)])
+                (define b (quotient fr 224))
+                (if (or (hash-has-key? own-terr-attack-buckets b)
+                        (hash-has-key? own-terr-attack-buckets (sub1 b))
+                        (hash-has-key? own-terr-attack-buckets (add1 b)))
+                    (let ([step-f (if (and prev-fr (> fr prev-fr) (<= (- fr prev-fr) 96))
+                                      (- fr prev-fr)
+                                      44)])
+                      (values (+ frames step-f) (add1 ticks) fr))
+                    (values frames ticks #f)))))
+          (define own-terr-retreat-anomaly
+            (and (>= own-terr-retreat-frames 440)
+                 (hasheq 'frames own-terr-retreat-frames
+                         'ticks own-terr-retreat-ticks
+                         'sec (round1 (/ own-terr-retreat-frames 22.4)))))
+          ;; W12-LOOP-2: Pre-3:30 early-rush idle-bank loss detector (minerals >= 250 while army_sup <= 4)
+          (define early-rush-idle-bank-3m?
+            (and (eq? res 'loss)
+                 (or (and (<= dur 240.0) (>= early-rush-idle-bank-ticks 2))
+                     (and (<= dur 380.0) (>= early-rush-idle-bank-post100-ticks 2)))))
+          (define early-rush-idle-bank-3m-anomaly
+            (and early-rush-idle-bank-3m?
+                 (hasheq 'ticks early-rush-idle-bank-ticks
+                         'post100_ticks early-rush-idle-bank-post100-ticks
+                         'peak_min early-rush-idle-bank-peak-min
+                         'duration_sec dur)))
 
           ;; W8-LOOP-2: Protoss non-combat Robo waste (Observer > 2 @ 100, WarpPrism > 1 @ 250)
           ;; and Zerg non-Ling combat value share at 6m-10m
@@ -1576,6 +1702,64 @@
                    (and (> all-tot 0)
                         (round1 (* 100.0 (/ (exact->inexact nl-tot) all-tot)))))))
 
+          ;; W9-LOOP-2: Siege-range 0-DPS loss detector (>=15 combat deaths at <0.10x vs Tempest/Tank/Colossus/Carrier)
+          (define opp-siege-types-ht (make-hash))
+          (define opp-siege-cnt
+            (for/sum ([(ut cnt) (in-hash opp-units-ht)]
+                      #:when (set-member? SIEGE-CAPITAL-UNIT-SET ut))
+              (hash-set! opp-siege-types-ht ut cnt)
+              cnt))
+          (define our-combat-deaths-total
+            (for/sum ([(_m c) (in-hash our-deaths-by-min)]) c))
+          (define zfr-deaths
+            (if (hash? zero-fire-retreat-anomaly) (hash-ref zero-fire-retreat-anomaly 'deaths 0) 0))
+          (define zfr-ratio
+            (if (hash? zero-fire-retreat-anomaly) (hash-ref zero-fire-retreat-anomaly 'trade_ratio 1.0) 1.0))
+          (define siege-zero-dps-loss?
+            (and (eq? res 'loss)
+                 (>= opp-siege-cnt 2)
+                 (or (and (>= our-combat-deaths-total 15) (< trade-ratio 0.10))
+                     (and (>= zfr-deaths 15) (< zfr-ratio 0.10)))))
+          (define siege-zero-dps-loss-anomaly
+            (and siege-zero-dps-loss?
+                 (hasheq 'opp_siege_count opp-siege-cnt
+                         'opp_siege_types (for/list ([p (in-list (top-k-pairs opp-siege-types-ht 4))])
+                                            (format "~a:~a" (car p) (cdr p)))
+                         'our_deaths (max our-combat-deaths-total zfr-deaths)
+                         'trade_ratio trade-ratio
+                         'collapse_ratio zfr-ratio)))
+          ;; W10-LOOP-2: Cloaked-unit damage loss detector (>=3 Banshee/DT/Lurker with <=0.15x trade or 0 killed)
+          (define opp-cloak-types-ht (make-hash))
+          (define opp-cloak-cnt
+            (for/sum ([(ut cnt) (in-hash opp-units-ht)]
+                      #:when (set-member? CLOAK-THREAT-UNIT-SET ut))
+              (hash-set! opp-cloak-types-ht ut cnt)
+              cnt))
+          (define cloaked-unit-damage-loss?
+            (and (eq? res 'loss)
+                 (>= opp-cloak-cnt 3)
+                 (or (<= trade-ratio 0.15)
+                     (= opp-cloak-killed-cnt 0))))
+          (define cloaked-unit-damage-loss-anomaly
+            (and cloaked-unit-damage-loss?
+                 (hasheq 'opp_cloak_count opp-cloak-cnt
+                         'opp_cloak_killed opp-cloak-killed-cnt
+                         'opp_cloak_types (for/list ([p (in-list (top-k-pairs opp-cloak-types-ht 4))])
+                                            (format "~a:~a" (car p) (cdr p)))
+                         'trade_ratio trade-ratio)))
+          (define opp-cohort (classify-opp-cohort opp-bot))
+
+          ;; W11-LOOP-2: Gas-rich / mineral-starved stall detector (>= 30 [SCBOT_PRIORITY] ticks of gas>=200 & min<100)
+          (define gas-rich-min-starved-ticks (hash-ref log-acc 'gas-rich-min-starved-ticks 0))
+          (define gas-rich-min-starved-peak-gas (hash-ref log-acc 'gas-rich-min-starved-peak-gas 0))
+          (define gas-rich-min-starved? (>= gas-rich-min-starved-ticks 30))
+          (define gas-rich-min-starved-anomaly
+            (and gas-rich-min-starved?
+                 (hasheq 'ticks gas-rich-min-starved-ticks
+                         'peak_gas gas-rich-min-starved-peak-gas
+                         'avg_min our-avg-min
+                         'avg_gas our-avg-gas)))
+
           (define anomalies
             (hasheq 'zero_fire_retreat zero-fire-retreat-anomaly
                     'escrow_lockouts escrow-lockouts
@@ -1583,7 +1767,12 @@
                     'endgame_stall endgame-stall-anomaly
                     'endgame_home_stall endgame-home-stall-anomaly
                     'own_base_retreat own-base-retreat-anomaly
+                    'own_territory_retreat own-terr-retreat-anomaly
+                    'early_rush_idle_bank_3m early-rush-idle-bank-3m-anomaly
                     'non_combat_robo_waste non-combat-robo-waste-anomaly
+                    'siege_range_zero_dps_loss siege-zero-dps-loss-anomaly
+                    'cloaked_unit_damage_loss cloaked-unit-damage-loss-anomaly
+                    'gas_rich_min_starved gas-rich-min-starved-anomaly
                     'air_aa_starvation air-aa-starvation))
 
           ;; Classify 0-combat opponent disconnects (e.g., mid-early client drop) separately from real combat wins
@@ -1650,9 +1839,26 @@
             (add-sig! (format "ENDGAME_HOME_STALL(~as)" (r0 endgame-home-stall-sec))))
           (when own-base-retreat-anomaly
             (add-sig! (format "OWN_BASE_RETREAT(~af)" own-base-retreat-frames)))
+          (when (and own-terr-retreat-anomaly
+                     (> own-terr-retreat-frames own-base-retreat-frames))
+            (add-sig! (format "OWN_TERR_RETREAT(~af)" own-terr-retreat-frames)))
+          (when early-rush-idle-bank-3m-anomaly
+            (add-sig! (format "EARLY_RUSH_IDLE_BANK_3M(~at,pk=~aM)"
+                              early-rush-idle-bank-ticks
+                              early-rush-idle-bank-peak-min)))
           (when non-combat-robo-waste-anomaly
             (add-sig! (format "ROBO_NONCOMBAT_WASTE(~a,Obs=~a,WP=~a)"
                               non-combat-robo-waste-val obs-built wp-built)))
+          (when siege-zero-dps-loss-anomaly
+            (add-sig! (format "SIEGE_ZERO_DPS_LOSS(~ax,~ad,~a)"
+                              (r2 (min trade-ratio zfr-ratio))
+                              (hash-ref siege-zero-dps-loss-anomaly 'our_deaths)
+                              (string-join (hash-ref siege-zero-dps-loss-anomaly 'opp_siege_types) "+"))))
+          (when cloaked-unit-damage-loss-anomaly
+            (add-sig! (format "CLOAK_DAMAGE_LOSS(~ax,k=~a,~a)"
+                              (r2 trade-ratio)
+                              opp-cloak-killed-cnt
+                              (string-join (hash-ref cloaked-unit-damage-loss-anomaly 'opp_cloak_types) "+"))))
           (when zero-fire-retreat-anomaly
             (add-sig! (if (hash-ref zero-fire-retreat-anomaly 'retreat_driven #f)
                           (format "SUICIDE_KITE_RETREAT(~ax,ret=~a%)"
@@ -1674,6 +1880,10 @@
                               (if (string=? (hash-ref e0 'kind) "gas_starved_min_lockout") "gas" "bank")
                               (hash-ref e0 'target)
                               (hash-ref e0 'peak_min))))
+          (when gas-rich-min-starved-anomaly
+            (add-sig! (format "GAS_RICH_MIN_STARVED(~at,pk=~aG)"
+                              gas-rich-min-starved-ticks
+                              gas-rich-min-starved-peak-gas)))
           (when (and (not (eq? res 'win)) (< trade-ratio 0.50) (>= lost-val 1500))
             (add-sig! "SEVERE_BAD_TRADES(<0.5x)"))
           (when (and (not (eq? res 'win)) (<= dur 330.0)) (add-sig! "EARLY_RUSH_LOSS"))
@@ -1697,6 +1907,7 @@
                   'map_name map-name
                   'our_bot our-bot
                   'opp_bot opp-bot
+                  'opp_cohort opp-cohort
                   'our_race our-race
                   'opp_race opp-race
                   'matchup matchup
@@ -1765,8 +1976,20 @@
                   'endgame_home_stall_sec endgame-home-stall-sec
                   'own_base_retreat_frames own-base-retreat-frames
                   'own_base_retreat_ticks own-base-retreat-ticks
+                  'own_territory_retreat_frames own-terr-retreat-frames
+                  'own_territory_retreat_ticks own-terr-retreat-ticks
+                  'early_rush_idle_bank_3m early-rush-idle-bank-3m?
+                  'early_rush_idle_bank_ticks early-rush-idle-bank-ticks
+                  'early_rush_idle_bank_peak_min early-rush-idle-bank-peak-min
                   'non_combat_robo_waste_val non-combat-robo-waste-val
                   'zerg_non_ling_army_pct zerg-non-ling-army-pct
+                  'siege_range_zero_dps_loss siege-zero-dps-loss?
+                  'cloaked_unit_damage_loss cloaked-unit-damage-loss?
+                  'opp_cloak_killed_cnt opp-cloak-killed-cnt
+                  'army_val_4m_ratio_vs_pro army-val-4m-ratio-vs-pro
+                  'army_val_8m_ratio_vs_pro army-val-8m-ratio-vs-pro
+                  'gas_rich_min_starved_ticks gas-rich-min-starved-ticks
+                  'gas_rich_min_starved gas-rich-min-starved?
                   'hexp_high (hash-ref log-acc 'hexp-high 0)
                   'rush_high (hash-ref log-acc 'rush-high 0)
                   'saving_top (for/list ([p (in-list (top-k-pairs (hash-ref log-acc 'saving-counts) 5))])
@@ -1917,9 +2140,24 @@
                 'avg_endgame_home_stall_sec (avg-field 'endgame_home_stall_sec)
                 'total_own_base_retreat_frames (for/sum ([r (in-list rows)]) (hash-ref r 'own_base_retreat_frames 0))
                 'own_base_retreat_matches (count (lambda (r) (>= (hash-ref r 'own_base_retreat_frames 0) 440)) rows)
+                'total_own_territory_retreat_frames (for/sum ([r (in-list rows)]) (hash-ref r 'own_territory_retreat_frames 0))
+                'own_territory_retreat_matches (count (lambda (r) (>= (hash-ref r 'own_territory_retreat_frames 0) 440)) rows)
+                'early_rush_idle_bank_3m_losses (count (lambda (r) (eq? (hash-ref r 'early_rush_idle_bank_3m #f) #t)) rows)
                 'total_non_combat_robo_waste_val (for/sum ([r (in-list rows)]) (hash-ref r 'non_combat_robo_waste_val 0))
                 'non_combat_robo_waste_matches (count (lambda (r) (>= (hash-ref r 'non_combat_robo_waste_val 0) 500)) rows)
                 'avg_zerg_non_ling_army_pct (avg-opt 'zerg_non_ling_army_pct)
+                'siege_range_zero_dps_losses (count (lambda (r) (eq? (hash-ref r 'siege_range_zero_dps_loss #f) #t)) rows)
+                'cloaked_unit_damage_losses (count (lambda (r) (eq? (hash-ref r 'cloaked_unit_damage_loss #f) #t)) rows)
+                'army_val_4m_ratio_vs_pro
+                (let ([vs (sort (filter real? (map (lambda (r) (hash-ref r 'army_val_4m_ratio_vs_pro #f)) rows)) <)])
+                  (and (pair? vs) (round2 (percentile-sorted vs 0.50))))
+                'army_val_4m_ratio_vs_pro_mean (avg-opt2 'army_val_4m_ratio_vs_pro)
+                'army_val_8m_ratio_vs_pro
+                (let ([vs (sort (filter real? (map (lambda (r) (hash-ref r 'army_val_8m_ratio_vs_pro #f)) rows)) <)])
+                  (and (pair? vs) (round2 (percentile-sorted vs 0.50))))
+                'army_val_8m_ratio_vs_pro_mean (avg-opt2 'army_val_8m_ratio_vs_pro)
+                'total_gas_rich_min_starved_ticks (for/sum ([r (in-list rows)]) (hash-ref r 'gas_rich_min_starved_ticks 0))
+                'gas_rich_min_starved_matches (count (lambda (r) (eq? (hash-ref r 'gas_rich_min_starved #f) #t)) rows)
                 'our_bases (avg-field2 'our_bases)
                 'opp_bases (avg-field2 'opp_bases)
                 'our_w2 (avg-opt 'our_w2) 'opp_w2 (avg-opt 'opp_w2)
@@ -1999,6 +2237,8 @@
                         'army_to_worker_6m (timing-dist 'army_to_worker_6m)
                         'army_to_worker_8m (timing-dist 'army_to_worker_8m)
                         'army_to_worker_10m (timing-dist 'army_to_worker_10m)
+                        'army_val_4m_ratio_vs_pro (timing-dist 'army_val_4m_ratio_vs_pro)
+                        'army_val_8m_ratio_vs_pro (timing-dist 'army_val_8m_ratio_vs_pro)
                         'first_scout_sec (timing-dist 'first_scout_sec)
                         'first_scout_cross_sec (timing-dist 'first_scout_cross_sec)
                         'enemy_first_seen_sec (timing-dist 'enemy_first_seen_sec)
@@ -2025,7 +2265,12 @@
                         'endgame_stall (anom-cnt (lambda (a) (and (hash? (hash-ref a 'endgame_stall #f)) #t)))
                         'endgame_home_stall (anom-cnt (lambda (a) (and (hash? (hash-ref a 'endgame_home_stall #f)) #t)))
                         'own_base_retreat (anom-cnt (lambda (a) (and (hash? (hash-ref a 'own_base_retreat #f)) #t)))
+                        'own_territory_retreat (anom-cnt (lambda (a) (and (hash? (hash-ref a 'own_territory_retreat #f)) #t)))
+                        'early_rush_idle_bank_3m (anom-cnt (lambda (a) (and (hash? (hash-ref a 'early_rush_idle_bank_3m #f)) #t)))
                         'non_combat_robo_waste (anom-cnt (lambda (a) (and (hash? (hash-ref a 'non_combat_robo_waste #f)) #t)))
+                        'siege_range_zero_dps_losses (anom-cnt (lambda (a) (and (hash? (hash-ref a 'siege_range_zero_dps_loss #f)) #t)))
+                        'cloaked_unit_damage_losses (anom-cnt (lambda (a) (and (hash? (hash-ref a 'cloaked_unit_damage_loss #f)) #t)))
+                        'gas_rich_min_starved (anom-cnt (lambda (a) (and (hash? (hash-ref a 'gas_rich_min_starved #f)) #t)))
                         'air_aa_starvation (anom-cnt (lambda (a) (and (hash? (hash-ref a 'air_aa_starvation #f)) #t)))
                         'wall_timeout_tie wall-timeout-ties
                         'step_spike_500ms step-spike-500-cnt
@@ -2246,7 +2491,28 @@
                      (cond
                        [(eq? (hash-ref r 'opp_early_crash #f) #t) " [OPP_EARLY_CRASH]"]
                        [(eq? (hash-ref r 'opp_zero_combat_dc #f) #t) " [OPP_ZERO_COMBAT_DC]"]
-                       [else ""])))))
+                       [else ""]))))
+
+  (section "7. Gas-Rich / Mineral-Starved Production Stalls (>=30 ticks of gas>=200 & min<100)"
+           (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'gas_rich_min_starved #f))) rows)
+           (lambda (r)
+             (define g (hash-ref (hash-ref r 'anomalies) 'gas_rich_min_starved))
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | ticks=~a | pkG=~a | avgBank=~aM/~aG\n"
+                     (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
+                     (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
+                     (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
+                     (hash-ref g 'ticks) (hash-ref g 'peak_gas)
+                     (r0 (hash-ref g 'avg_min 0)) (r0 (hash-ref g 'avg_gas 0)))))
+
+  (section "8. Early-Rush Idle Bank Losses (pre-3:30 min>=250 & army_sup<=4)"
+           (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'early_rush_idle_bank_3m #f))) rows)
+           (lambda (r)
+             (define e (hash-ref (hash-ref r 'anomalies) 'early_rush_idle_bank_3m))
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | ticks=~a (post100=~a) | pkM=~aM\n"
+                     (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
+                     (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
+                     (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
+                     (hash-ref e 'ticks) (hash-ref e 'post100_ticks) (hash-ref e 'peak_min)))))
 
 ;; -----------------------------------------------------------------------------
 ;; Main CLI Driver
@@ -2374,6 +2640,12 @@
     (for/hasheq ([rs (in-list '("win" "loss" "tie"))])
       (values (string->symbol rs)
               (aggregate-slice (filter (lambda (r) (string=? (hash-ref r 'result) rs)) clean-scored)))))
+  ;; W9-LOOP-2: 54-match full-roster generalization cohort split (`core_12` vs `unseen_6`)
+  (define core12-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "core_12")) clean-scored))
+  (define unseen6-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "unseen_6")) clean-scored))
+  (define agg-core12 (aggregate-slice core12-rows))
+  (define agg-unseen6 (aggregate-slice unseen6-rows))
+  (define by-cohort (hasheq 'core_12 agg-core12 'unseen_6 agg-unseen6))
 
   (printf "\n================================================================================================================================\n")
   (printf "  AGGREGATE SUMMARY (Clean excludes opponent loop<=300 crashes & 0-combat disconnects)\n")
@@ -2381,6 +2653,9 @@
   (print-agg-line "ALL_MATCHES  " agg-all)
   (when (< (length clean-scored) (length scored))
     (print-agg-line "CLEAN_MATCHES" agg-clean))
+  (when (pair? unseen6-rows)
+    (print-agg-line "COHORT=CORE12" agg-core12)
+    (print-agg-line "COHORT=UNSEEN" agg-unseen6))
   (for ([rc (in-list '(Protoss Terran Zerg))])
     (print-agg-line (format "RACE=~a" (pad-r rc 8)) (hash-ref by-race rc)))
   (for ([rs (in-list '(win loss tie))])
@@ -2438,6 +2713,8 @@
                             'mirror_skip (length mirrors)
                             'parse_errors (length errors))
             'overall (hasheq 'all agg-all 'clean agg-clean)
+            'summary (hasheq 'core_12 agg-core12 'unseen_6 agg-unseen6)
+            'by_cohort by-cohort
             'by_race by-race
             'by_matchup by-matchup
             'by_result by-result

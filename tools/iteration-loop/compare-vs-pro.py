@@ -29,6 +29,11 @@ DEFAULT_PRO_BASELINES = os.path.join(SCRIPT_DIR, "pro_baselines.json")
 
 RACES = ("Protoss", "Terran", "Zerg")
 MATCHUPS = ("PvP", "PvT", "PvZ", "TvP", "TvT", "TvZ", "ZvP", "ZvT", "ZvZ")
+CORE_12_OPPONENTS = frozenset({
+    "12PoolBot", "Chance", "Creepy_strategies", "RustyNikolaj", "SmoothBrain",
+    "Thssprtssbt", "mini-puck", "monsterbot", "oberon", "puck",
+    "sludgement2-revived", "titania",
+})
 
 
 def safe_num(v):
@@ -167,6 +172,22 @@ def normalize_match(m):
         "own_base_retreat_frames": safe_num(m.get("own_base_retreat_frames")),
         "non_combat_robo_waste_val": safe_num(m.get("non_combat_robo_waste_val")),
         "zerg_non_ling_army_pct": safe_num(m.get("zerg_non_ling_army_pct")),
+        "siege_range_zero_dps_loss": bool(m.get("siege_range_zero_dps_loss") or (m.get("anomalies") or {}).get("siege_range_zero_dps_loss")),
+        "cloaked_unit_damage_loss": bool(m.get("cloaked_unit_damage_loss") or (m.get("anomalies") or {}).get("cloaked_unit_damage_loss")),
+        "army_val_4m_ratio_vs_pro": safe_num(
+            m.get("army_val_4m_ratio_vs_pro")
+            if m.get("army_val_4m_ratio_vs_pro") is not None
+            else mt.get("army_val_4m_ratio_vs_pro")
+        ),
+        "army_val_8m_ratio_vs_pro": safe_num(
+            m.get("army_val_8m_ratio_vs_pro")
+            if m.get("army_val_8m_ratio_vs_pro") is not None
+            else mt.get("army_val_8m_ratio_vs_pro")
+        ),
+        "gas_rich_min_starved_ticks": safe_num(m.get("gas_rich_min_starved_ticks")),
+        "gas_rich_min_starved": bool(m.get("gas_rich_min_starved") or (m.get("anomalies") or {}).get("gas_rich_min_starved")),
+        "early_rush_idle_bank_3m": bool(m.get("early_rush_idle_bank_3m") or (m.get("anomalies") or {}).get("early_rush_idle_bank_3m")),
+        "own_territory_retreat_frames": safe_num(m.get("own_territory_retreat_frames")),
         "action_rejects": int(m.get("action_rejects") or 0),
         "crashes": m.get("crashes") or [],
         "signatures": m.get("signatures") or [],
@@ -229,6 +250,8 @@ def summarize_slice(rows):
     obr_vals = [r["own_base_retreat_frames"] for r in rows if r.get("own_base_retreat_frames") is not None]
     robo_waste_vals = [r["non_combat_robo_waste_val"] for r in rows if r.get("non_combat_robo_waste_val") is not None]
     znl_vals = [r["zerg_non_ling_army_pct"] for r in rows if r.get("zerg_non_ling_army_pct") is not None and r["our_race"] == "Zerg"]
+    grms_vals = [r["gas_rich_min_starved_ticks"] for r in rows if r.get("gas_rich_min_starved_ticks") is not None]
+    otr_vals = [r["own_territory_retreat_frames"] for r in rows if r.get("own_territory_retreat_frames") is not None]
 
     pk_army_ratios = [
         r["our_peak_army"] / max(1.0, r["opp_peak_army"])
@@ -321,6 +344,15 @@ def summarize_slice(rows):
         "own_base_retreat_matches": sum(1 for v in obr_vals if v >= 440.0),
         "total_non_combat_robo_waste_val": int(round(sum(robo_waste_vals))) if robo_waste_vals else None,
         "avg_zerg_non_ling_army_pct": mean_opt(znl_vals),
+        "siege_range_zero_dps_losses": sum(1 for r in rows if r.get("siege_range_zero_dps_loss")),
+        "cloaked_unit_damage_losses": sum(1 for r in rows if r.get("cloaked_unit_damage_loss")),
+        "army_val_4m_ratio_vs_pro_med": med_opt2([r["army_val_4m_ratio_vs_pro"] for r in rows]),
+        "army_val_8m_ratio_vs_pro_med": med_opt2([r["army_val_8m_ratio_vs_pro"] for r in rows]),
+        "gas_rich_min_starved_matches": sum(1 for r in rows if r.get("gas_rich_min_starved") or (r.get("gas_rich_min_starved_ticks") or 0) >= 30),
+        "total_gas_rich_min_starved_ticks": int(round(sum(grms_vals))) if grms_vals else None,
+        "early_rush_idle_bank_3m_losses": sum(1 for r in rows if r.get("early_rush_idle_bank_3m")),
+        "total_own_territory_retreat_frames": int(round(sum(otr_vals))) if otr_vals else None,
+        "own_territory_retreat_matches": sum(1 for v in otr_vals if v >= 440.0),
         "action_rejects": sum(r["action_rejects"] for r in rows),
         "crashes": sum(len(r["crashes"]) for r in rows),
         "anomalies": dict(anom_counts),
@@ -521,6 +553,16 @@ def main():
     base_all = summarize_slice(base_rows) if base_rows else None
     hwm_all = summarize_slice(hwm_rows) if hwm_rows else None
 
+    cur_core_rows = [m for m in cur_rows if m["opp_bot"] in CORE_12_OPPONENTS]
+    cur_unseen_rows = [m for m in cur_rows if m["opp_bot"] not in CORE_12_OPPONENTS]
+    cohorts = None
+    if cur_unseen_rows:
+        cohorts = {
+            "core_12": summarize_slice(cur_core_rows),
+            "unseen_roster": summarize_slice(cur_unseen_rows),
+            "unseen_opponents": sorted(set(m["opp_bot"] for m in cur_unseen_rows)),
+        }
+
     by_race = {}
     for r in RACES:
         cr = summarize_slice([m for m in cur_rows if m["our_race"] == r])
@@ -555,6 +597,7 @@ def main():
         "hwm_path": os.path.abspath(args.hwm) if args.hwm else None,
         "exclude_opp_crash": args.exclude_opp_crash,
         "overall": {"current": cur_all, "baseline": base_all, "hwm": hwm_all},
+        "cohorts": cohorts,
         "by_race": by_race,
         "by_matchup": by_matchup,
         "paired_diff": paired_diff,
@@ -671,7 +714,23 @@ def main():
             extra_w8 = (
                 f" | `P RoboWaste` = **{cur_all.get('total_non_combat_robo_waste_val', 0):,}**"
                 f" | `Z NonLing6-10m` = **{fmt(cur_all.get('avg_zerg_non_ling_army_pct'),'%')}**"
+                f" | `Siege0DPS` = **{cur_all.get('siege_range_zero_dps_losses', 0)}**"
+                f" | `CloakLoss` = **{cur_all.get('cloaked_unit_damage_losses', 0)}**"
             )
+            if (
+                cur_all.get("army_val_4m_ratio_vs_pro_med") is not None
+                or cur_all.get("army_val_8m_ratio_vs_pro_med") is not None
+                or cur_all.get("total_gas_rich_min_starved_ticks") is not None
+            ):
+                extra_w8 += (
+                    f" | `A4/A8Pro` = **{fmt(cur_all.get('army_val_4m_ratio_vs_pro_med'),'',2)}/{fmt(cur_all.get('army_val_8m_ratio_vs_pro_med'),'',2)}**"
+                    f" | `GasRichMinStarve` = **{cur_all.get('gas_rich_min_starved_matches', 0)}/{cur_all['n']} ({(cur_all.get('total_gas_rich_min_starved_ticks') or 0):,}t)**"
+                )
+            if cur_all.get("total_own_territory_retreat_frames") is not None or cur_all.get("early_rush_idle_bank_3m_losses", 0) > 0:
+                extra_w8 += (
+                    f" | `RushIdle3m` = **{cur_all.get('early_rush_idle_bank_3m_losses', 0)}**"
+                    f" | `OwnTerrRet(<=38t)` = **{cur_all.get('own_territory_retreat_matches', 0)}/{cur_all['n']} ({(cur_all.get('total_own_territory_retreat_frames') or 0):,}f)**"
+                )
         print(
             f"\n### Stall, Retreat & Waste Watch (`W7/W8-LOOP-2`): "
             f"`endgame_home_stall >= 90s` = **{cur_all.get('endgame_home_stall_count', 0)}/{cur_all['n']}** "
@@ -680,13 +739,22 @@ def main():
             f"(total `{cur_all.get('total_own_base_retreat_frames', 0):,}f`){extra_w8}"
         )
 
+    if cohorts:
+        c12 = cohorts["core_12"]
+        cu = cohorts["unseen_roster"]
+        print("\n### Full-Roster Generalization Split (`core_12` vs `unseen_roster`)")
+        print(f"- **`core_12` (`n={c12['n']}`):** `{c12['wins']}W-{c12['losses']}L-{c12['ties']}T` (`{c12['wr_pct']:.1f}%` WR, Trade `{fmt(c12['trade_agg'],'x',2)}`/`{fmt(c12['trade_med'],'x',2)}`, SupBlk `{fmt(c12['sup_blk_avg'],'%')}`, PkArmy `{fmt(c12['pk_army_avg'],'',0)}`)")
+        print(f"- **`unseen_roster` (`n={cu['n']}`, {', '.join(cohorts['unseen_opponents'])}):** `{cu['wins']}W-{cu['losses']}L-{cu['ties']}T` (`{cu['wr_pct']:.1f}%` WR, Trade `{fmt(cu['trade_agg'],'x',2)}`/`{fmt(cu['trade_med'],'x',2)}`, SupBlk `{fmt(cu['sup_blk_avg'],'%')}`, PkArmy `{fmt(cu['pk_army_avg'],'',0)}`)")
+
     if hwm_all:
+        cmp_slice = cohorts["core_12"] if (cohorts and hwm_all["n"] <= 36 and cur_all["n"] > 36) else cur_all
+        cmp_lbl = "Current core_12" if cmp_slice is not cur_all else "Current"
         print(
-            f"\n### High-Water Mark Check: Current `{cur_all['wins']}W-{cur_all['losses']}L-{cur_all['ties']}T` "
-            f"(`{cur_all['wr_pct']:.1f}%`, Trade `{fmt(cur_all['trade_agg'],'x',2)}`/`{fmt(cur_all['trade_med'],'x',2)}`, "
-            f"SupBlk `{fmt(cur_all['sup_blk_avg'],'%')}`) vs HWM `{hwm_all['wins']}W-{hwm_all['losses']}L-{hwm_all['ties']}T` "
+            f"\n### High-Water Mark Check: {cmp_lbl} `{cmp_slice['wins']}W-{cmp_slice['losses']}L-{cmp_slice['ties']}T` "
+            f"(`{cmp_slice['wr_pct']:.1f}%`, Trade `{fmt(cmp_slice['trade_agg'],'x',2)}`/`{fmt(cmp_slice['trade_med'],'x',2)}`, "
+            f"SupBlk `{fmt(cmp_slice['sup_blk_avg'],'%')}`) vs HWM `{hwm_all['wins']}W-{hwm_all['losses']}L-{hwm_all['ties']}T` "
             f"(`{hwm_all['wr_pct']:.1f}%`, Trade `{fmt(hwm_all['trade_agg'],'x',2)}`/`{fmt(hwm_all['trade_med'],'x',2)}`, "
-            f"SupBlk `{fmt(hwm_all['sup_blk_avg'],'%')}`) -> **{'NEW HWM!' if (cur_all['wins'] > hwm_all['wins'] or (cur_all['wins'] == hwm_all['wins'] and (cur_all['losses'] < hwm_all['losses'] or (cur_all['losses'] == hwm_all['losses'] and cur_all['trade_agg'] >= hwm_all['trade_agg'])))) else 'BELOW HWM (hold commit)'}**"
+            f"SupBlk `{fmt(hwm_all['sup_blk_avg'],'%')}`) -> **{'NEW HWM!' if (cmp_slice['wins'] > hwm_all['wins'] or (cmp_slice['wins'] == hwm_all['wins'] and (cmp_slice['losses'] < hwm_all['losses'] or (cmp_slice['losses'] == hwm_all['losses'] and cmp_slice['trade_agg'] >= hwm_all['trade_agg'])))) else 'BELOW HWM (hold commit)'}**"
         )
 
     passed_gates = sum(1 for k, v in gates.items() if k != "ready_to_promote" and v)

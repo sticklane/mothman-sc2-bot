@@ -2337,7 +2337,11 @@
           bldgs))
 
 ;; Computes an open in-main anchor near `(base-x, base-y)` stepping away from mineral patches.
-(define (emergency-inmain-supply-anchor base-x base-y nat-x nat-y retry-idx [mineral-patches '()])
+;; W12-P0-3-wire: Optionally accepts `#:enemy-pts` and `#:map-grids` so emergency rush placement
+;; avoids cliffs and enemy rush units camping the ramp/wall while remaining 100% backwards-compatible.
+(define (emergency-inmain-supply-anchor base-x base-y nat-x nat-y retry-idx [mineral-patches '()]
+                                        #:enemy-pts [enemy-pts '()]
+                                        #:map-grids [map-grids #f])
   (define main-mps
     (filter (lambda (mp)
               (and (hash? mp)
@@ -2362,14 +2366,40 @@
        (define d (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
        (values (/ dx d) (/ dy d))]))
   (define angle-offsets '#(0.0 0.55 -0.55 1.10 -1.10 1.65 -1.65))
-  (define ang (vector-ref angle-offsets (modulo (max 0 retry-idx) (vector-length angle-offsets))))
-  (define ca (cos ang))
-  (define sa (sin ang))
-  (define rx (- (* ux ca) (* uy sa)))
-  (define ry (+ (* ux sa) (* uy ca)))
-  (define rad (+ 5.5 (* 0.5 (quotient (max 0 retry-idx) (vector-length angle-offsets)))))
-  (values (safe-coord (+ base-x (* rad rx)) (+ base-x 4.5))
-          (safe-coord (+ base-y (* rad ry)) (+ base-y 4.5))))
+  (define (cand-at idx rad)
+    (define ang (vector-ref angle-offsets (modulo (max 0 idx) (vector-length angle-offsets))))
+    (define ca (cos ang))
+    (define sa (sin ang))
+    (define rx (- (* ux ca) (* uy sa)))
+    (define ry (+ (* ux sa) (* uy ca)))
+    (values (safe-coord (+ base-x (* rad rx)) (+ base-x 4.5))
+            (safe-coord (+ base-y (* rad ry)) (+ base-y 4.5))))
+  (define has-enemies? (and (list? enemy-pts) (pair? enemy-pts)))
+  (define-values (grids-ok? gw gh pref bref href)
+    (if (hash? map-grids)
+        (extract-map-grid-accessors map-grids)
+        (values #f 0 0 #f #f #f)))
+  (define base-h (if (and grids-ok? href) (grid-height-val href (exact-floor base-x) (exact-floor base-y) 0.0) 0.0))
+  (define (safe-cand? cx cy)
+    (and (or (not grids-ok?)
+             (footprint-buildable-at-height? cx cy 1.0 1.0 gw gh bref href base-h (procedure? href) pref))
+         (or (not has-enemies?)
+             (for/and ([ep (in-list enemy-pts)])
+               (define ex (if (pair? ep) (car ep) (hash-ref ep 'x -999.0)))
+               (define ey (if (pair? ep) (cdr ep) (hash-ref ep 'y -999.0)))
+               (> (dist2d cx cy ex ey) 5.5)))))
+  (cond
+    [(or has-enemies? grids-ok?)
+     (define found
+       (for*/or ([rad (in-list '(5.5 6.5 7.5 8.5))]
+                 [k (in-range (vector-length angle-offsets))])
+         (define-values (cx cy) (cand-at (+ retry-idx k) rad))
+         (and (safe-cand? cx cy) (cons cx cy))))
+     (if found
+         (values (car found) (cdr found))
+         (cand-at retry-idx (+ 5.5 (* 0.5 (quotient (max 0 retry-idx) (vector-length angle-offsets))))))]
+    [else
+     (cand-at retry-idx (+ 5.5 (* 0.5 (quotient (max 0 retry-idx) (vector-length angle-offsets)))))]))
 
 ;; Chooses `(values raw-px raw-py use-exact-wall?)` for the next Protoss Pylon placement.
 (define (select-pylon-power-anchor #:base-x base-x

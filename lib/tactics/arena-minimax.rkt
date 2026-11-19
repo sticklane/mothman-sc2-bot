@@ -811,9 +811,38 @@
         (unit-buff-list-bits bfs)
         0)))
 
+;; W11-P0-4-rt (`w11-tac-2`): Distinguish SC2 undetected cloak (`cloak=1` / `'cloaked`)
+;; from detected cloak (`cloak=2` / `'cloaked-detected`, which still sets `'cloaked #t` in obs).
+(define (hash-undetected-cloak? u)
+  (define cval (hash-ref u 'cloak #f))
+  (cond
+    [(or (eqv? cval 1) (eq? cval 'cloaked)) #t]
+    [(or (eqv? cval 2) (eqv? cval 3) (memq cval '(cloaked-detected not-cloaked))) #f]
+    [else (or (eq? (hash-ref u 'cloaked #f) #t)
+              (eq? (hash-ref u 'burrowed #f) #t))]))
+
 (define (unit-hash->tactical-sim-unit u [side 'ally] #:eta-sec [eta-sec 0.0])
   (define utype (hash-ref u 'type 'marine))
   (define weaponless-disruptor? (or (eq? utype 'disruptor) (eq? utype 'disruptor-phased)))
+  ;; W12-P0-4-rt (`w12-tac-1` + Suite 5.18): An Oracle with live buff/beam/cooldown state
+  ;; and WITHOUT active Pulsar Beam (`buff=56` / `'oracle-weapon` / `'pulsar-beam`) has NO
+  ;; weapon and must never emit suicide `ATTACK (23)`. Synthetic stat hashes omitting those
+  ;; live keys preserve nominal active-beam combat DPS.
+  (define weaponless-beam-off-oracle?
+    (and (eq? utype 'oracle)
+         (or (hash-has-key? u 'buffs)
+             (hash-has-key? u 'pulsar-beam-on?)
+             (hash-has-key? u 'pulsar-beam-active?)
+             (hash-has-key? u 'weapon-cooldown))
+         (not (eq? (hash-ref u 'pulsar-beam-on? #f) #t))
+         (not (eq? (hash-ref u 'pulsar-beam-active? #f) #t))
+         (let ([bfs (hash-ref u 'buffs #f)])
+           (not (and (pair? bfs)
+                     (for/or ([b (in-list bfs)])
+                       (or (eqv? b 56)
+                           (eq? b 'oracle-weapon)
+                           (eq? b 'pulsar-beam))))))))
+  (define weaponless-caster? (or weaponless-disruptor? weaponless-beam-off-oracle?))
   (define sv (fast-unit-stat-vec utype))
   ;; W7-P0-1-rt: Live `runtime-obs-hash` stores combined `'hp = (+ health shield)` and
   ;; `'max-hp = (+ health-max shield-max)` alongside raw `'hull-hp` + `'shield`. Prefer
@@ -842,18 +871,17 @@
    shd
    (vector-ref sv 3)
    (fast->fl (hash-ref u 'speed (vector-ref sv 4)))
-   (if weaponless-disruptor? 0.0 (vector-ref sv 5))
-   (if weaponless-disruptor? 0.0 (vector-ref sv 6))
-   (if weaponless-disruptor? 0.0 (vector-ref sv 7))
-   (if weaponless-disruptor? 0.0 (vector-ref sv 8))
+   (if weaponless-caster? 0.0 (vector-ref sv 5))
+   (if weaponless-caster? 0.0 (vector-ref sv 6))
+   (if weaponless-caster? 0.0 (vector-ref sv 7))
+   (if weaponless-caster? 0.0 (vector-ref sv 8))
    (vector-ref sv 9)
    (vector-ref sv 10)
    (if (fl> wcd 0.0) wcd 0.0)
    (vector-ref sv 11)
    (eq? (hash-ref u 'flying? (vector-ref sv 12)) #t)
    (vector-ref sv 13)
-   (or (eq? (hash-ref u 'cloaked #f) #t)
-       (eq? (hash-ref u 'burrowed #f) #t))
+   (hash-undetected-cloak? u)
    (vector-ref sv 14)
    (fast->fl (hash-ref u 'energy 0))
    (vector-ref sv 0)
@@ -1000,6 +1028,10 @@
         (define reinf-rad-sq (fast->fl (* SC2-TACTICAL-REINFORCE-RADIUS SC2-TACTICAL-REINFORCE-RADIUS)))
         (define cluster-rad-sq2 (fast->fl (* SC2-TACTICAL-ARENA-CLUSTER-RADIUS SC2-TACTICAL-ARENA-CLUSTER-RADIUS)))
         (define eng-rad-sq-fl (fast->fl eng-rad-sq))
+        ;; W11-P0-4-rt (`w11-tac-6` / `#30 P v Creepy`): Tempest weapon range is 15.0 + 1.9 = 16.9t!
+        ;; Extend arena engage discovery to 18.5t (`342.25` sq-dist) for long-range capital/siege
+        ;; enemies so armies being shelled at 16.0t enter arena-minimax instead of rally-retreating!
+        (define siege-cap-eng-rad-sq-fl (flmax eng-rad-sq-fl 342.25))
         (define (get-ally-sim vi)
           (or (vector-ref vi 4)
               (let ([su (unit-hash->tactical-sim-unit (vector-ref vi 0) 'ally)])
@@ -1020,9 +1052,13 @@
           (define cy-fl (fast->fl cy))
           (define local-enemy-vecs
             (for/list ([ev (in-list enemy-vecs)]
-                       #:when (let ([dx (fl- (fast->fl (vector-ref ev 1)) cx-fl)]
-                                    [dy (fl- (fast->fl (vector-ref ev 2)) cy-fl)])
-                                (fl<= (fl+ (fl* dx dx) (fl* dy dy)) eng-rad-sq-fl)))
+                       #:when (let* ([dx (fl- (fast->fl (vector-ref ev 1)) cx-fl)]
+                                     [dy (fl- (fast->fl (vector-ref ev 2)) cy-fl)]
+                                     [lim-sq (if (memq (vector-ref ev 3)
+                                                       '(tempest carrier brood-lord broodlord battlecruiser siege-tank-sieged))
+                                                 siege-cap-eng-rad-sq-fl
+                                                 eng-rad-sq-fl)])
+                                (fl<= (fl+ (fl* dx dx) (fl* dy dy)) lim-sq)))
               ev))
           (define local-enemy-bldgs
             (for/list ([bv (in-list bldg-vecs)]
@@ -2014,9 +2050,7 @@
                 (when (or (not (unsafe-fx= (unsafe-fxand rflags 2) 0))
                           (tactical-sim-unit-can-cloak? su)
                           (tactical-sim-unit-cloaked? su))
-                  (define clk?
-                    (or (eq? (hash-ref u 'cloaked #f) #t)
-                        (eq? (hash-ref u 'burrowed #f) #t)))
+                  (define clk? (hash-undetected-cloak? u))
                   (unless (eq? clk? (tactical-sim-unit-cloaked? su))
                     (set-tactical-sim-unit-cloaked?! su clk?)))
                 (when (or (not (unsafe-fx= (unsafe-fxand rflags 4) 0))
@@ -2241,25 +2275,35 @@
              [ehp (flmax 1.0 (fl+ (tactical-sim-unit-hp e) (tactical-sim-unit-shield e)))])
         (fl* base-mult (fl/ ehp (fl+ ehp 100.0))))))
 
-(define (scan-target-vecs/atk vecs ux uy best best-sc best-sc2 row atk-type ast atk-bonus)
+;; W10-TAC-4: Exact SC2 Crucio Shock Cannon 2.0t edge-to-edge minimum-range deadzone
+;; (`center_dist < 2.0 + r_tank + r_target` is strictly untargetable in SC2, e.g. <3.25t for Zerglings).
+(define (sieged-tank-in-min-range-deadzone? atk-type atk-r tgt-su raw-d2)
+  (and (eq? atk-type 'siege-tank-sieged)
+       (let ([min-c (fl+ 2.0 (fl+ atk-r (tactical-sim-unit-radius tgt-su)))])
+         (fl< raw-d2 (fl* min-c min-c)))))
+
+(define (scan-target-vecs/atk vecs ux uy best best-sc best-sc2 row atk-type ast atk-bonus [atk-r 0.875])
   (let loop ([rem vecs] [b best] [bsc best-sc] [bsc2 best-sc2])
     (if (null? rem)
         (values b bsc bsc2)
         (let* ([ev (car rem)]
                [dx (fl- (vector-ref ev 2) ux)]
                [dy (fl- (vector-ref ev 3) uy)]
-               [d2 (flmax 1.0 (fl+ (fl* dx dx) (fl* dy dy)))]
-               [mult (eval-ev-focus-mult row atk-type ast atk-bonus ev)]
-               [val (fl* (vector-ref ev 4) mult)])
-          (if (and (fl> bsc 0.0) (fl> val 0.0))
-              (if (fl> (fl* val val) (fl* bsc2 d2))
-                  (let ([sc (fl/ val (flsqrt d2))])
-                    (loop (cdr rem) (vector-ref ev 0) sc (fl* sc sc)))
-                  (loop (cdr rem) b bsc bsc2))
-              (let ([sc (fl/ val (flsqrt d2))])
-                (if (fl> sc bsc)
-                    (loop (cdr rem) (vector-ref ev 0) sc (if (fl> sc 0.0) (fl* sc sc) 0.0))
-                    (loop (cdr rem) b bsc bsc2))))))))
+               [raw-d2 (fl+ (fl* dx dx) (fl* dy dy))])
+          (if (sieged-tank-in-min-range-deadzone? atk-type atk-r (vector-ref ev 0) raw-d2)
+              (loop (cdr rem) b bsc bsc2)
+              (let* ([d2 (flmax 1.0 raw-d2)]
+                     [mult (eval-ev-focus-mult row atk-type ast atk-bonus ev)]
+                     [val (fl* (vector-ref ev 4) mult)])
+                (if (and (fl> bsc 0.0) (fl> val 0.0))
+                    (if (fl> (fl* val val) (fl* bsc2 d2))
+                        (let ([sc (fl/ val (flsqrt d2))])
+                          (loop (cdr rem) (vector-ref ev 0) sc (fl* sc sc)))
+                        (loop (cdr rem) b bsc bsc2))
+                    (let ([sc (fl/ val (flsqrt d2))])
+                      (if (fl> sc bsc)
+                          (loop (cdr rem) (vector-ref ev 0) sc (if (fl> sc 0.0) (fl* sc sc) 0.0))
+                          (loop (cdr rem) b bsc bsc2))))))))))
 
 ;; Pair of (#f . vecs) for small lists, or (#t . cell-list) where each cell is
 ;; (vector xmin xmax ymin ymax max-val sorted-vecs-desc-by-val cell-attr-or).
@@ -2367,7 +2411,7 @@
                           (loop (cdr rem) (vector-ref ev 0) sc (if (fl> sc 0.0) (fl* sc sc) 0.0))
                           (loop (cdr rem) b bsc bsc2))))))))))
 
-(define (scan-cell-vecs/atk vecs min-d2 cell-ub ux uy best best-sc best-sc2 row atk-type ast atk-bonus)
+(define (scan-cell-vecs/atk vecs min-d2 cell-ub ux uy best best-sc best-sc2 row atk-type ast atk-bonus [atk-r 0.875])
   (let loop ([rem vecs] [b best] [bsc best-sc] [bsc2 best-sc2])
     (if (null? rem)
         (values b bsc bsc2)
@@ -2378,18 +2422,21 @@
               (values b bsc bsc2)
               (let* ([dx (fl- (vector-ref ev 2) ux)]
                      [dy (fl- (vector-ref ev 3) uy)]
-                     [d2 (flmax 1.0 (fl+ (fl* dx dx) (fl* dy dy)))]
-                     [mult (eval-ev-focus-mult row atk-type ast atk-bonus ev)]
-                     [val (fl* base-val mult)])
-                (if (and (fl> bsc 0.0) (fl> val 0.0))
-                    (if (fl> (fl* val val) (fl* bsc2 d2))
-                        (let ([sc (fl/ val (flsqrt d2))])
-                          (loop (cdr rem) (vector-ref ev 0) sc (fl* sc sc)))
-                        (loop (cdr rem) b bsc bsc2))
-                    (let ([sc (fl/ val (flsqrt d2))])
-                      (if (fl> sc bsc)
-                          (loop (cdr rem) (vector-ref ev 0) sc (if (fl> sc 0.0) (fl* sc sc) 0.0))
-                          (loop (cdr rem) b bsc bsc2))))))))))
+                     [raw-d2 (fl+ (fl* dx dx) (fl* dy dy))])
+                (if (sieged-tank-in-min-range-deadzone? atk-type atk-r (vector-ref ev 0) raw-d2)
+                    (loop (cdr rem) b bsc bsc2)
+                    (let* ([d2 (flmax 1.0 raw-d2)]
+                           [mult (eval-ev-focus-mult row atk-type ast atk-bonus ev)]
+                           [val (fl* base-val mult)])
+                      (if (and (fl> bsc 0.0) (fl> val 0.0))
+                          (if (fl> (fl* val val) (fl* bsc2 d2))
+                              (let ([sc (fl/ val (flsqrt d2))])
+                                (loop (cdr rem) (vector-ref ev 0) sc (fl* sc sc)))
+                              (loop (cdr rem) b bsc bsc2))
+                          (let ([sc (fl/ val (flsqrt d2))])
+                            (if (fl> sc bsc)
+                                (loop (cdr rem) (vector-ref ev 0) sc (if (fl> sc 0.0) (fl* sc sc) 0.0))
+                                (loop (cdr rem) b bsc bsc2))))))))))))
 
 (define (cell-focus-ub c prof)
   (define bmask (vector-ref prof 2))
@@ -2412,6 +2459,7 @@
          (let ([evs (and plan (if (car plan) (vector-ref (cadr plan) 5) (cdr plan)))])
            (and (pair? evs) (>= (vector-length (car evs)) 7)))))
   (define atk-type (and use-atk? (tactical-sim-unit-type attacker)))
+  (define atk-r (if use-atk? (tactical-sim-unit-radius attacker) 0.875))
   (define atk-prof (and use-atk? (fast-atk-focus-profile atk-type)))
   (define atk-row (and atk-prof (vector-ref atk-prof 0)))
   (define atk-ast (and atk-prof (vector-ref atk-prof 1)))
@@ -2420,7 +2468,7 @@
     [(not plan) (values best fbest-sc fbest-sc2)]
     [(not (car plan))
      (if use-atk?
-         (scan-target-vecs/atk (cdr plan) fux fuy best fbest-sc fbest-sc2 atk-row atk-type atk-ast atk-bonus)
+         (scan-target-vecs/atk (cdr plan) fux fuy best fbest-sc fbest-sc2 atk-row atk-type atk-ast atk-bonus atk-r)
          (scan-target-vecs (cdr plan) fux fuy best fbest-sc fbest-sc2))]
     [else
      (define cells (cdr plan))
@@ -2441,7 +2489,7 @@
              (if (and (fl> fbest-sc 0.0) (fl> cmax 0.0) (fl<= (fl* cmax cmax) (fl* fbest-sc2 md2)))
                  (values best fbest-sc fbest-sc2)
                  (scan-cell-vecs/atk (vector-ref first-c 5) md2 cub fux fuy best fbest-sc fbest-sc2
-                                     atk-row atk-type atk-ast atk-bonus)))
+                                     atk-row atk-type atk-ast atk-bonus atk-r)))
            (let ([cmax (vector-ref first-c 4)])
              (if (and (fl> fbest-sc 0.0) (fl> cmax 0.0) (fl<= (fl* cmax cmax) (fl* fbest-sc2 md2)))
                  (values best fbest-sc fbest-sc2)
@@ -2460,7 +2508,7 @@
                              (loop (cdr rem) b bsc bsc2)
                              (let-values ([(nb nbsc nbsc2)
                                            (scan-cell-vecs/atk (vector-ref c 5) md2 cub fux fuy b bsc bsc2
-                                                               atk-row atk-type atk-ast atk-bonus)])
+                                                               atk-row atk-type atk-ast atk-bonus atk-r)])
                                (loop (cdr rem) nb nbsc nbsc2))))
                        (let ([cmax (vector-ref c 4)])
                          (if (and (fl> bsc 0.0) (fl> cmax 0.0) (fl<= (fl* cmax cmax) (fl* bsc2 md2)))
@@ -3030,126 +3078,158 @@
                    'burrowed? (not (not (memq etype '(lurker-burrowed lurker-mp-burrowed))))
                    'sieged (eq? etype 'siege-tank-sieged))))
        (define arena-enemy-sims (tactical-arena-enemy-units arena))
-       (define-values (first-arena-enemy enemy-has-aa? ground-vecs air-vecs arena-tank-lurkers-rev)
+       (define arena-ally-has-det? (or kw-has-detector? (tactical-arena-ally-has-detection? arena)))
+       ;; W11-P0-4-rt (`w11-tac-2`): Never unit-target ATTACK (23) undetected `cloak=1` enemies
+       ;; (SC2 strictly rejects them!). Still target detected `cloak=2` & visible `cloak=3` enemies.
+       (define (enemy-sim-untargetable-cloak? e)
+         (and (tactical-sim-unit-cloaked? e)
+              (let ([uh (begin
+                          (unless enemy-by-id
+                            (let-values ([(ebid eg _ecnt _edup?)
+                                          (ensure-unit-id-table! '__enemy-by-id enemy-id-cache enemy-units)])
+                              (set! enemy-by-id ebid)
+                              (set! enemy-id-gen eg)))
+                          (unit-id-table-lookup enemy-by-id enemy-id-gen (tactical-sim-unit-id e)))])
+                (if uh
+                    (let ([cval (hash-ref uh 'cloak #f)])
+                      (cond
+                        [(or (eqv? cval 1) (eq? cval 'cloaked)) #t]
+                        [(or (eqv? cval 2) (eqv? cval 3) (memq cval '(cloaked-detected not-cloaked))) #f]
+                        [else (not arena-ally-has-det?)]))
+                    (not arena-ally-has-det?)))))
+       (define-values (first-arena-enemy enemy-has-aa? ground-vecs air-vecs arena-tank-lurkers-rev untargetable-cloaked-rev)
          (let loop ([rem arena-enemy-sims]
                     [first-e #f]
                     [aa? #f]
                     [gvecs '()]
                     [avecs '()]
-                    [tlrev '()])
+                    [tlrev '()]
+                    [uclkrev '()])
            (if (null? rem)
-               (values first-e aa? (reverse gvecs) (reverse avecs) tlrev)
+               (values first-e aa? (reverse gvecs) (reverse avecs) tlrev uclkrev)
                (let* ([e (car rem)]
                       [etype (tactical-sim-unit-type e)])
-                 (if (eq? etype 'disruptor-phased)
-                     (loop (cdr rem)
-                           first-e
-                           aa?
-                           gvecs
-                           avecs
-                           (cons (resolve-enemy-splash-hash e etype) tlrev))
-                     (let* ([ed-air (tactical-sim-unit-air-dps e)]
-                            [flying? (tactical-sim-unit-flying? e)]
-                            [colossus? (eq? etype 'colossus)]
-                            [ev
-                             (if need-spatial-targets?
-                                 (let* ([tact-mult
-                                         (if (or mirror-tact-target mirror-pred-unit)
-                                             (let ([zone-m
-                                                    (cond
-                                                      [(eq? mirror-tact-target 'main-mineral-line-drop-or-air)
-                                                       (let ([mdx (fl- (tactical-sim-unit-x e) mirror-base-fx)]
-                                                             [mdy (fl- (tactical-sim-unit-y e) mirror-base-fy)])
-                                                         (if (fl<= (fl+ (fl* mdx mdx) (fl* mdy mdy)) 256.0)
-                                                             (if (or flying?
-                                                                     (memq etype '(medivac warp-prism warp-prism-phasing overlord-transport
-                                                                                   liberator banshee oracle mutalisk dark-templar)))
-                                                                 1.45
-                                                                 1.25)
-                                                             1.0))]
-                                                      [(eq? mirror-tact-target 'natural-choke-timing-push)
-                                                       (let ([ndx (fl- (tactical-sim-unit-x e) mirror-nat-fx)]
-                                                             [ndy (fl- (tactical-sim-unit-y e) mirror-nat-fy)])
-                                                         (if (fl<= (fl+ (fl* ndx ndx) (fl* ndy ndy)) 256.0)
-                                                             1.25
-                                                             1.0))]
-                                                      [(eq? mirror-tact-target 'hidden-third-base-expansion)
-                                                       (if (memq etype '(drone probe scv)) 1.35 1.10)]
-                                                      [else 1.0])])
-                                               (if (and mirror-pred-unit (eq? etype mirror-pred-unit))
-                                                   (fl* zone-m 1.15)
-                                                   zone-m))
-                                             1.0)]
-                                        [pconst (fl* (fast-enemy-priority-const etype arena-has-stealth? e) tact-mult)]
-                                        [ehp (flmax 1e-6 (fl+ (tactical-sim-unit-hp e) (tactical-sim-unit-shield e)))]
-                                        [tidx (vector-ref (fast-unit-stat-vec etype) 19)]
-                                        [eflags (tactical-sim-unit-attr-flags e)]
-                                        [sbits (unsafe-fxior
-                                                (unsafe-fxior
-                                                 (if (fl> (tactical-sim-unit-shield e) 0.0) 1 0)
-                                                 (if (not (unsafe-fx= (unsafe-fxand eflags 128) 0)) 2 0))
-                                                (unsafe-fxior
-                                                 (if (not (unsafe-fx= (unsafe-fxand eflags 256) 0)) 4 0)
-                                                 (if (not (unsafe-fx= (unsafe-fxand eflags 64) 0)) 8 0)))]
-                                        [slot (begin
-                                                (when (>= ev-idx (vector-length ev-pool))
-                                                  (let* ([old-len (vector-length ev-pool)]
-                                                         [new-v (make-vector (max 512 (* 2 old-len)) #f)])
-                                                    (vector-copy! new-v 0 ev-pool)
-                                                    (set! ev-pool new-v)
-                                                    (set-box! ev-pool-box new-v)))
-                                                (vector-ref ev-pool ev-idx))])
-                                   (if slot
-                                       (begin
-                                         (vector-set! slot 0 e)
-                                         (vector-set! slot 1 flying?)
-                                         (vector-set! slot 2 (tactical-sim-unit-x e))
-                                         (vector-set! slot 3 (tactical-sim-unit-y e))
-                                         (vector-set! slot 4 (fl/ pconst ehp))
-                                         (vector-set! slot 5 tidx)
-                                         (vector-set! slot 6 sbits)
-                                         (set! ev-idx (+ ev-idx 1))
-                                         slot)
-                                       (let ([v (vector e
-                                                        flying?
-                                                        (tactical-sim-unit-x e)
-                                                        (tactical-sim-unit-y e)
-                                                        (fl/ pconst ehp)
-                                                        tidx
-                                                        sbits)])
-                                         (vector-set! ev-pool ev-idx v)
-                                         (set! ev-idx (+ ev-idx 1))
-                                         v)))
-                                 #f)]
-                            [raw-e
-                             (and (memq etype '(siege-tank-sieged
-                                                lurker-burrowed lurker-mp-burrowed
-                                                siege-tank lurker lurker-mp
-                                                colossus disruptor high-templar))
-                                  (resolve-enemy-splash-hash e etype))]
-                            [tlrev2
-                             (if (and raw-e
-                                      (or (memq etype '(siege-tank-sieged lurker-burrowed lurker-mp-burrowed colossus disruptor high-templar))
-                                          (and (eq? etype 'siege-tank)
-                                               (or (hash-ref raw-e 'sieged #f)
-                                                   (hash-ref raw-e 'is-sieged? #f)))
-                                          (and (memq etype '(lurker lurker-mp))
-                                               (or (hash-ref raw-e 'burrowed #f)
-                                                   (hash-ref raw-e 'burrowed? #f)
-                                                   (hash-ref raw-e 'is-burrowed? #f)
-                                                   (hash-ref raw-e 'burrow-intent? #f)
-                                                   (hash-ref raw-e 'burrow-intent #f)
-                                                   (hash-ref raw-e 'burrowing? #f)
-                                                   (hash-ref raw-e 'is-burrowing? #f)
-                                                   (hash-ref raw-e 'preparing-burrow? #f)))))
-                                 (cons raw-e tlrev)
-                                 tlrev)])
-                       (loop (cdr rem)
-                             (or first-e e)
-                             (or aa? (fl> ed-air 0.0))
-                             (if (and ev (not flying?)) (cons ev gvecs) gvecs)
-                             (if (and ev (or flying? colossus?)) (cons ev avecs) avecs)
-                             tlrev2)))))))
+                 (cond
+                   [(eq? etype 'disruptor-phased)
+                    (loop (cdr rem)
+                          first-e
+                          aa?
+                          gvecs
+                          avecs
+                          (cons (resolve-enemy-splash-hash e etype) tlrev)
+                          uclkrev)]
+                   [(enemy-sim-untargetable-cloak? e)
+                    (loop (cdr rem)
+                          first-e
+                          (or aa? (fl> (tactical-sim-unit-air-dps e) 0.0))
+                          gvecs
+                          avecs
+                          tlrev
+                          (cons e uclkrev))]
+                   [else
+                    (let* ([ed-air (tactical-sim-unit-air-dps e)]
+                           [flying? (tactical-sim-unit-flying? e)]
+                           [colossus? (eq? etype 'colossus)]
+                           [ev
+                            (if need-spatial-targets?
+                                (let* ([tact-mult
+                                        (if (or mirror-tact-target mirror-pred-unit)
+                                            (let ([zone-m
+                                                   (cond
+                                                     [(eq? mirror-tact-target 'main-mineral-line-drop-or-air)
+                                                      (let ([mdx (fl- (tactical-sim-unit-x e) mirror-base-fx)]
+                                                            [mdy (fl- (tactical-sim-unit-y e) mirror-base-fy)])
+                                                        (if (fl<= (fl+ (fl* mdx mdx) (fl* mdy mdy)) 256.0)
+                                                            (if (or flying?
+                                                                    (memq etype '(medivac warp-prism warp-prism-phasing overlord-transport
+                                                                                  liberator banshee oracle mutalisk dark-templar)))
+                                                                1.45
+                                                                1.25)
+                                                            1.0))]
+                                                     [(eq? mirror-tact-target 'natural-choke-timing-push)
+                                                      (let ([ndx (fl- (tactical-sim-unit-x e) mirror-nat-fx)]
+                                                            [ndy (fl- (tactical-sim-unit-y e) mirror-nat-fy)])
+                                                        (if (fl<= (fl+ (fl* ndx ndx) (fl* ndy ndy)) 256.0)
+                                                            1.25
+                                                            1.0))]
+                                                     [(eq? mirror-tact-target 'hidden-third-base-expansion)
+                                                      (if (memq etype '(drone probe scv)) 1.35 1.10)]
+                                                     [else 1.0])])
+                                              (if (and mirror-pred-unit (eq? etype mirror-pred-unit))
+                                                  (fl* zone-m 1.15)
+                                                  zone-m))
+                                            1.0)]
+                                       [pconst (fl* (fast-enemy-priority-const etype arena-has-stealth? e) tact-mult)]
+                                       [ehp (flmax 1e-6 (fl+ (tactical-sim-unit-hp e) (tactical-sim-unit-shield e)))]
+                                       [tidx (vector-ref (fast-unit-stat-vec etype) 19)]
+                                       [eflags (tactical-sim-unit-attr-flags e)]
+                                       [sbits (unsafe-fxior
+                                               (unsafe-fxior
+                                                (if (fl> (tactical-sim-unit-shield e) 0.0) 1 0)
+                                                (if (not (unsafe-fx= (unsafe-fxand eflags 128) 0)) 2 0))
+                                               (unsafe-fxior
+                                                (if (not (unsafe-fx= (unsafe-fxand eflags 256) 0)) 4 0)
+                                                (if (not (unsafe-fx= (unsafe-fxand eflags 64) 0)) 8 0)))]
+                                       [slot (begin
+                                               (when (>= ev-idx (vector-length ev-pool))
+                                                 (let* ([old-len (vector-length ev-pool)]
+                                                        [new-v (make-vector (max 512 (* 2 old-len)) #f)])
+                                                   (vector-copy! new-v 0 ev-pool)
+                                                   (set! ev-pool new-v)
+                                                   (set-box! ev-pool-box new-v)))
+                                               (vector-ref ev-pool ev-idx))])
+                                  (if slot
+                                      (begin
+                                        (vector-set! slot 0 e)
+                                        (vector-set! slot 1 flying?)
+                                        (vector-set! slot 2 (tactical-sim-unit-x e))
+                                        (vector-set! slot 3 (tactical-sim-unit-y e))
+                                        (vector-set! slot 4 (fl/ pconst ehp))
+                                        (vector-set! slot 5 tidx)
+                                        (vector-set! slot 6 sbits)
+                                        (set! ev-idx (+ ev-idx 1))
+                                        slot)
+                                      (let ([v (vector e
+                                                       flying?
+                                                       (tactical-sim-unit-x e)
+                                                       (tactical-sim-unit-y e)
+                                                       (fl/ pconst ehp)
+                                                       tidx
+                                                       sbits)])
+                                        (vector-set! ev-pool ev-idx v)
+                                        (set! ev-idx (+ ev-idx 1))
+                                        v)))
+                                #f)]
+                           [raw-e
+                            (and (memq etype '(siege-tank-sieged
+                                               lurker-burrowed lurker-mp-burrowed
+                                               siege-tank lurker lurker-mp
+                                               colossus disruptor high-templar))
+                                 (resolve-enemy-splash-hash e etype))]
+                           [tlrev2
+                            (if (and raw-e
+                                     (or (memq etype '(siege-tank-sieged lurker-burrowed lurker-mp-burrowed colossus disruptor high-templar))
+                                         (and (eq? etype 'siege-tank)
+                                              (or (hash-ref raw-e 'sieged #f)
+                                                  (hash-ref raw-e 'is-sieged? #f)))
+                                         (and (memq etype '(lurker lurker-mp))
+                                              (or (hash-ref raw-e 'burrowed #f)
+                                                  (hash-ref raw-e 'burrowed? #f)
+                                                  (hash-ref raw-e 'is-burrowed? #f)
+                                                  (hash-ref raw-e 'burrow-intent? #f)
+                                                  (hash-ref raw-e 'burrow-intent #f)
+                                                  (hash-ref raw-e 'burrowing? #f)
+                                                  (hash-ref raw-e 'is-burrowing? #f)
+                                                  (hash-ref raw-e 'preparing-burrow? #f)))))
+                                (cons raw-e tlrev)
+                                tlrev)])
+                      (loop (cdr rem)
+                            (or first-e e)
+                            (or aa? (fl> ed-air 0.0))
+                            (if (and ev (not flying?)) (cons ev gvecs) gvecs)
+                            (if (and ev (or flying? colossus?)) (cons ev avecs) avecs)
+                            tlrev2
+                            uclkrev))])))))
        (define splash-hazard-present? (or (pair? arena-tank-lurkers-rev) has-splash-effect?))
        (define arena-commit-splash?
          (and splash-hazard-present?
@@ -3254,22 +3334,27 @@
        (define (nearest-hittable-enemy-for su)
          (define su-x (tactical-sim-unit-x su))
          (define su-y (tactical-sim-unit-y su))
+         (define su-type (tactical-sim-unit-type su))
+         (define su-r (tactical-sim-unit-radius su))
          (for/fold ([best-e #f] [best-d2 +inf.0] #:result best-e)
                    ([e (in-list arena-enemy-sims)])
-           (define wr-e
-             (if (and (eq? (tactical-sim-unit-type e) 'colossus)
-                      (fl> (tactical-sim-unit-air-range su) 0.0)
-                      (fl<= (tactical-sim-unit-ground-range su) 0.0))
-                 (tactical-sim-unit-air-range su)
-                 (sim-unit-weapon-range-vs su e)))
-           (if (fl<= wr-e 0.0)
+           (if (enemy-sim-untargetable-cloak? e)
                (values best-e best-d2)
-               (let* ([dx (fl- su-x (tactical-sim-unit-x e))]
-                      [dy (fl- su-y (tactical-sim-unit-y e))]
-                      [d2 (fl+ (fl* dx dx) (fl* dy dy))])
-                 (if (fl< d2 best-d2)
-                     (values e d2)
-                     (values best-e best-d2))))))
+               (let ([wr-e
+                      (if (and (eq? (tactical-sim-unit-type e) 'colossus)
+                               (fl> (tactical-sim-unit-air-range su) 0.0)
+                               (fl<= (tactical-sim-unit-ground-range su) 0.0))
+                          (tactical-sim-unit-air-range su)
+                          (sim-unit-weapon-range-vs su e))])
+                 (if (fl<= wr-e 0.0)
+                     (values best-e best-d2)
+                     (let* ([dx (fl- su-x (tactical-sim-unit-x e))]
+                            [dy (fl- su-y (tactical-sim-unit-y e))]
+                            [d2 (fl+ (fl* dx dx) (fl* dy dy))])
+                       (if (and (fl< d2 best-d2)
+                                (not (sieged-tank-in-min-range-deadzone? su-type su-r e d2)))
+                           (values e d2)
+                           (values best-e best-d2))))))))
        ;; W8-TAC-3: Never let fragile High Templars suicide-`attack-unit` directly into an enemy
        ;; army when non-HT combat allies exist in the arena (matches Disruptor protection, fixes `p05`).
        (define arena-has-non-ht-ally?
@@ -3353,8 +3438,13 @@
          (define spy (and splash-move-pt (vector-ref splash-move-pt 1)))
          (define sprole (and splash-move-pt (vector-ref splash-move-pt 2)))
          (define disruptor? (or (eq? utype 'disruptor) (eq? utype 'disruptor-phased)))
+         (define weaponless-oracle?
+           (and (eq? utype 'oracle)
+                (fl<= (tactical-sim-unit-ground-dps su) 0.0)
+                (fl<= (tactical-sim-unit-air-dps su) 0.0)))
          (define fragile-caster-no-atk?
            (or disruptor?
+               weaponless-oracle?
                (and (eq? utype 'high-templar) arena-has-non-ht-ally?)))
          (define active-spell-dodge?
            (and splash-move-pt
@@ -3394,28 +3484,38 @@
                    (cond
                      [best-hittable best-hittable]
                      [(and (eq? committed-act 'DisengageRetreat) first-arena-enemy)
-                      (or (nearest-hittable-enemy-for su) first-arena-enemy)]
+                      (or (nearest-hittable-enemy-for su)
+                          (and (not (eq? utype 'siege-tank-sieged)) first-arena-enemy))]
                      [else #f])])))
+         ;; W11-P0-4-rt (`w11-tac-1` / `Siege0DPS` + `z02`): Allow ready-weapon units to fire
+         ;; before stepping in `avoid-siege-tank-splash-split` (`DisengageRetreat`) AND allow
+         ;; `commit-run-through-splash-concave` units (`z02` Roaches/Ravagers) to attack-close
+         ;; instead of pure-MOVE walking into Marine+Tank fire at 0 DPS!
          (define target-in-weapon-range?
            (and target-su
                 (not fragile-caster-no-atk?)
-                (not (eq? committed-act 'DisengageRetreat))
-                (let ([wr (if (and (eq? (tactical-sim-unit-type target-su) 'colossus)
-                                   (fl> (tactical-sim-unit-air-range su) 0.0)
-                                   (fl<= (tactical-sim-unit-ground-range su) 0.0))
-                              (tactical-sim-unit-air-range su)
-                              (sim-unit-weapon-range-vs su target-su))])
+                (let* ([wr (if (and (eq? (tactical-sim-unit-type target-su) 'colossus)
+                                    (fl> (tactical-sim-unit-air-range su) 0.0)
+                                    (fl<= (tactical-sim-unit-ground-range su) 0.0))
+                               (tactical-sim-unit-air-range su)
+                               (sim-unit-weapon-range-vs su target-su))]
+                       [td (fast-dist2d ux uy
+                                        (tactical-sim-unit-x target-su)
+                                        (tactical-sim-unit-y target-su))])
                   (and (fl> wr 0.0)
-                       (fl<= (fast-dist2d ux uy
-                                          (tactical-sim-unit-x target-su)
-                                          (tactical-sim-unit-y target-su))
-                             (if (and splash-move-pt
-                                      (not active-spell-dodge?)
-                                      (eq? sprole 'commit-run-through-splash-concave))
-                                 (fl+ wr 2.5)
-                                 (fl+ wr
-                                      (fl+ (tactical-sim-unit-radius su)
-                                           (tactical-sim-unit-radius target-su)))))))))
+                       (not (sieged-tank-in-min-range-deadzone? utype (tactical-sim-unit-radius su) target-su (fl* td td)))
+                       (fl<= td
+                             (cond
+                               [(and splash-move-pt
+                                     (not active-spell-dodge?)
+                                     (eq? sprole 'commit-run-through-splash-concave))
+                                (flmax 10.5 (fl+ wr 5.0))]
+                               [(eq? committed-act 'DisengageRetreat)
+                                (if (fl<= wr 1.5) 9.0 (fl+ wr 4.5))]
+                               [else
+                                (fl+ wr
+                                     (fl+ (tactical-sim-unit-radius su)
+                                          (tactical-sim-unit-radius target-su)))]))))))
          (define maxed-splash-breakthrough?
            (and arena-commit-splash?
                 (>= arena-supply-used 185)))
@@ -3439,53 +3539,97 @@
                 (order-ledger-record-issued! ledger uid 'move 'move #:target-x spx #:target-y spy #:frame frame))
               (emit! (list 'move uid spx spy)))]
            [else
-            (when target-su
-              (define eid (tactical-sim-unit-id target-su))
-              (define ex (tactical-sim-unit-x target-su))
-              (define ey (tactical-sim-unit-y target-su))
-              (case committed-act
-               [(DisengageRetreat)
-                (define wr
-                  (if (and (eq? (tactical-sim-unit-type target-su) 'colossus)
-                           (fl> (tactical-sim-unit-air-range su) 0.0)
-                           (fl<= (tactical-sim-unit-ground-range su) 0.0))
-                      (tactical-sim-unit-air-range su)
-                      (sim-unit-weapon-range-vs su target-su)))
-                (define edist (fast-dist2d ux uy ex ey))
-                (define non-free-t?
-                  (not (memq (tactical-sim-unit-type target-su)
-                             '(locust locust-mp locustmp locust-flying))))
-                (define w-period (flmax 0.16 (exact->inexact (tactical-sim-unit-weapon-period su))))
-                (define kite-cd-min (flmax 0.22 (fl* 0.38 w-period)))
-                (define has-weap? (and (not fragile-caster-no-atk?) non-free-t? (fl> wr 0.0)))
-                (define melee-fight? (and has-weap? (fl<= wr 1.5) (fl<= edist 8.5)))
-                ;; W4-TAC-3 + W7-TAC-2: Fire when weapon is ready/nearly-ready up to `wr + 2.5`
-                ;; (or `wr + 4.5` when protecting a nearby committed ally within `<= 10.0t`, matching
-                ;; `W5-TAC-5` so Marines 1t behind committing Marauders fire instead of fleeing!);
-                ;; when on cooldown, step back <= 2.0t inside threat range instead of a full-map retreat!
-                (define protect-committed-ally?
-                  (and (pair? disengage-committed-pts)
-                       (for/or ([pt (in-list disengage-committed-pts)])
-                         (define dx (fl- ux (car pt)))
-                         (define dy (fl- uy (cdr pt)))
-                         (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 100.0))))
+            (cond
+              [(and (not target-su) (pair? untargetable-cloaked-rev))
+               ;; W11-P0-4-rt (`w11-tac-2`): Only undetected `cloak=1` enemies in arena -> pull back
+               ;; cleanly via MOVE/kite instead of issuing SC2-rejected `ATTACK (23)`!
+               (unless (eq? utype 'siege-tank-sieged)
+                 (define nearest-clk
+                   (for/fold ([bc (car untargetable-cloaked-rev)]
+                              [bd2 +inf.0]
+                              #:result bc)
+                             ([ce (in-list untargetable-cloaked-rev)])
+                     (define dx (fl- ux (tactical-sim-unit-x ce)))
+                     (define dy (fl- uy (tactical-sim-unit-y ce)))
+                     (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
+                     (if (fl< d2 bd2) (values ce d2) (values bc bd2))))
+                 (define-values (kx ky)
+                   (compute-kite-vector ux uy (tactical-sim-unit-x nearest-clk) (tactical-sim-unit-y nearest-clk) 5.0))
+                 (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 kx ky frame))
+                   (when (and ledger record-ledger?)
+                     (order-ledger-record-issued! ledger uid 'kite 'move #:target-x kx #:target-y ky #:frame frame))
+                   (emit! (list 'kite uid kx ky))))]
+              [target-su
+               (define eid (tactical-sim-unit-id target-su))
+               (define ex (tactical-sim-unit-x target-su))
+               (define ey (tactical-sim-unit-y target-su))
+               (case committed-act
+                [(DisengageRetreat)
+                 (define wr
+                   (if (and (eq? (tactical-sim-unit-type target-su) 'colossus)
+                            (fl> (tactical-sim-unit-air-range su) 0.0)
+                            (fl<= (tactical-sim-unit-ground-range su) 0.0))
+                       (tactical-sim-unit-air-range su)
+                       (sim-unit-weapon-range-vs su target-su)))
+                 (define edist (fast-dist2d ux uy ex ey))
+                 (define non-free-t?
+                   (not (memq (tactical-sim-unit-type target-su)
+                              '(locust locust-mp locustmp locust-flying))))
+                 (define w-period (flmax 0.16 (exact->inexact (tactical-sim-unit-weapon-period su))))
+                 (define kite-cd-min (flmax 0.22 (fl* 0.38 w-period)))
+                 (define has-weap? (and (not fragile-caster-no-atk?) non-free-t? (fl> wr 0.0)))
+                 (define melee-fight? (and has-weap? (fl<= wr 1.5) (fl<= edist 8.5)))
+                 ;; W4-TAC-3 + W7-TAC-2: Fire when weapon is ready/nearly-ready up to `wr + 2.5`
+                 ;; (or `wr + 4.5` when protecting a nearby committed ally within `<= 10.0t`, matching
+                 ;; `W5-TAC-5` so Marines 1t behind committing Marauders fire instead of fleeing!);
+                 ;; when on cooldown, step back <= 2.0t inside threat range instead of a full-map retreat!
+                 (define protect-committed-ally?
+                   (and (pair? disengage-committed-pts)
+                        (for/or ([pt (in-list disengage-committed-pts)])
+                          (define dx (fl- ux (car pt)))
+                          (define dy (fl- uy (cdr pt)))
+                          (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 100.0))))
+                 ;; W9-P0-2-rt / W10-P0-3-rt / W11-P0-4-rt (`w9-tac-6` / `w11-tac-6` / `#30 P v Creepy`):
+                 ;; When long-range capital/siege units (Tempest 16.9t range, Carrier, BroodLord, BC)
+                 ;; are within <= 18.5t and we have >= 3 combat allies (or Sieged Tank <= 13.5t with
+                 ;; home defense or >= 6 allies), dive in & attack instead of 0-DPS retreat!
+                 (define capital-siege-dive?
+                   (and has-weap? (fl> wr 1.5)
+                        (or (and (memq (tactical-sim-unit-type target-su)
+                                       '(tempest carrier brood-lord broodlord battlecruiser))
+                                 (>= (length arena-ally-units) 3)
+                                 (fl<= edist 18.5))
+                            (and (eq? (tactical-sim-unit-type target-su) 'siege-tank-sieged)
+                                 (or (and kw-defending-home? (>= (length arena-ally-units) 3) (fl<= edist 15.5))
+                                     (and (>= (length arena-ally-units) 6) (fl<= edist 13.5)))))
+                        (fl< (exact->inexact w-cd) kite-cd-min)))
                 (define ranged-stutter-fire?
-                  (and has-weap? (fl> wr 1.5)
-                       (fl<= edist (fl+ wr (if protect-committed-ally? 4.5 2.5)))
-                       (fl< (exact->inexact w-cd) kite-cd-min)))
-                (if (or melee-fight? ranged-stutter-fire?)
-                    (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'attack-unit eid ex ey frame))
-                      (when (and ledger record-ledger?)
-                        (order-ledger-record-issued! ledger uid 'attack-unit 'attack #:target-id eid #:frame frame))
-                      (emit! (list 'attack-unit uid eid)))
-                    (let-values ([(kx ky)
-                                  (if (and has-weap? (fl> wr 1.5) (fl<= edist (flmax (fl+ wr 3.0) 11.0)))
-                                      (compute-kite-vector ux uy ex ey 2.0)
-                                      (values base-x base-y))])
-                      (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 kx ky frame))
-                        (when (and ledger record-ledger?)
-                          (order-ledger-record-issued! ledger uid 'kite 'move #:target-x kx #:target-y ky #:frame frame))
-                        (emit! (list 'kite uid kx ky)))))]
+                  (or capital-siege-dive?
+                      (and has-weap? (fl> wr 1.5)
+                           (fl<= edist (fl+ wr (if protect-committed-ally? 4.5 2.5)))
+                           (fl< (exact->inexact w-cd) kite-cd-min))))
+                (cond
+                  [(eq? utype 'siege-tank-sieged)
+                   (when (and has-weap?
+                              (not (sieged-tank-in-min-range-deadzone? utype (tactical-sim-unit-radius su) target-su (fl* edist edist))))
+                     (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'attack-unit eid ex ey frame))
+                       (when (and ledger record-ledger?)
+                         (order-ledger-record-issued! ledger uid 'attack-unit 'attack #:target-id eid #:frame frame))
+                       (emit! (list 'attack-unit uid eid))))]
+                  [(or melee-fight? ranged-stutter-fire?)
+                   (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'attack-unit eid ex ey frame))
+                     (when (and ledger record-ledger?)
+                       (order-ledger-record-issued! ledger uid 'attack-unit 'attack #:target-id eid #:frame frame))
+                     (emit! (list 'attack-unit uid eid)))]
+                  [else
+                   (let-values ([(kx ky)
+                                 (if (and has-weap? (fl> wr 1.5) (fl<= edist (flmax (fl+ wr 3.0) 11.0)))
+                                     (compute-kite-vector ux uy ex ey 2.0)
+                                     (values base-x base-y))])
+                     (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 kx ky frame))
+                       (when (and ledger record-ledger?)
+                         (order-ledger-record-issued! ledger uid 'kite 'move #:target-x kx #:target-y ky #:frame frame))
+                       (emit! (list 'kite uid kx ky))))])]
 
                [(StutterKiteBack CloakHarassWorkers)
                 (define eff-wr
@@ -3514,6 +3658,7 @@
                        (order-ledger-record-issued! ledger uid 'kite 'move #:target-x kx #:target-y ky #:frame frame))
                      (emit! (list 'kite uid kx ky)))]
                   [(and (not (eq? utype 'baneling))
+                        (not (eq? utype 'siege-tank-sieged))
                         (fl> eff-wr 1.5)
                         (fl>= (exact->inexact w-cd) kite-cd-min)
                         (or (eq? committed-act 'CloakHarassWorkers)
@@ -3547,7 +3692,7 @@
                   (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'attack-unit eid ex ey frame))
                     (when (and ledger record-ledger?)
                       (order-ledger-record-issued! ledger uid 'attack-unit 'attack #:target-id eid #:frame frame))
-                    (emit! (list 'attack-unit uid eid))))]))])))
+                    (emit! (list 'attack-unit uid eid))))])])])))
 
      (set-tactical-mirror-brain-last-decisions! brain (reverse decisions))
      (values (reverse actions) committed-tags (reverse decisions))]))

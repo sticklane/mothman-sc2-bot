@@ -60,6 +60,7 @@ UNIT_IDS: dict[str, int] = {
     "widow-mine-burrowed": 500,
     "liberator": 689,
     "liberator-ag": 734,
+    "cyclone": 692,
     "scv": 45,
     # Protoss
     "zealot": 73,
@@ -72,6 +73,8 @@ UNIT_IDS: dict[str, int] = {
     "archon": 141,
     "oracle": 495,
     "void-ray": 80,
+    "carrier": 79,
+    "tempest": 496,
     "probe": 84,
     # Zerg
     "zergling": 105,
@@ -106,6 +109,7 @@ UNIT_VALUES: dict[int, float] = {
     500: 112.5,   # widow-mine-burrowed
     689: 375.0,   # liberator
     734: 375.0,   # liberator-ag
+    692: 300.0,   # cyclone
     45: 50.0,     # scv
     73: 100.0,    # zealot
     74: 200.0,    # stalker
@@ -117,6 +121,8 @@ UNIT_VALUES: dict[int, float] = {
     141: 550.0,   # archon
     495: 375.0,   # oracle
     80: 475.0,    # void-ray
+    79: 725.0,    # carrier
+    496: 512.5,   # tempest
     84: 50.0,     # probe
     105: 25.0,    # zergling
     9: 87.5,      # baneling
@@ -206,7 +212,16 @@ DEFAULT_SKIRMISHES: list[SkirmishSpec] = [
         p2_units=[("zergling", 14, 4.2, 0.0)],
         max_loops=336,
     ),
-    # --- Terran (6 real-SC2 combat physics scenarios) ---
+    SkirmishSpec(
+        id="sc2-real-p07-stalkers-vs-tempests-voidrays",
+        our_race="Protoss",
+        enemy_race="Protoss",
+        description="Real SC2 (W12-LOOP-1): 10 Stalkers diving 3 Tempests + 2 Void Rays at 14t separation (guards W9/W11 capital siege dive)",
+        p1_units=[("stalker", 10, -6.0, 0.0)],
+        p2_units=[("void-ray", 2, 6.5, 0.0), ("tempest", 3, 8.0, 0.0)],
+        max_loops=336,
+    ),
+    # --- Terran (7 real-SC2 combat physics scenarios) ---
     SkirmishSpec(
         id="sc2-real-t01-bio-medivac-vs-zealot-stalker",
         our_race="Terran",
@@ -261,7 +276,16 @@ DEFAULT_SKIRMISHES: list[SkirmishSpec] = [
         p2_units=[("zergling", 14, 4.2, 0.0)],
         max_loops=336,
     ),
-    # --- Zerg (6 real-SC2 combat physics scenarios) ---
+    SkirmishSpec(
+        id="sc2-real-t07-bio-cyclones-vs-stalker-immortal",
+        our_race="Terran",
+        enemy_race="Protoss",
+        description="Real SC2 (W12-LOOP-1): 2 Cyclones + 8 Marines + 1 Medivac vs 5 Stalkers + 2 Immortals (guards W10/W12 Cyclone Lock-On dedup + bio)",
+        p1_units=[("cyclone", 2, -4.0, 0.0), ("marine", 8, -4.8, 0.0), ("medivac", 1, -5.8, 0.0)],
+        p2_units=[("immortal", 2, 3.8, 0.0), ("stalker", 5, 4.8, 0.0)],
+        max_loops=336,
+    ),
+    # --- Zerg (7 real-SC2 combat physics scenarios) ---
     SkirmishSpec(
         id="sc2-real-z01-lings-vs-marines-open",
         our_race="Zerg",
@@ -314,6 +338,15 @@ DEFAULT_SKIRMISHES: list[SkirmishSpec] = [
         description="Real SC2 (W5-EARLY-1): 2 Queens + 10 Zerglings defending vs 14 early 12-Pool Zerglings (guards W5-TAC-1/2 spotter & queen recall)",
         p1_units=[("zergling", 10, -3.8, 0.0), ("queen", 2, -5.0, 0.0)],
         p2_units=[("zergling", 14, 4.2, 0.0)],
+        max_loops=336,
+    ),
+    SkirmishSpec(
+        id="sc2-real-z07-hydras-vipers-vs-carriers-voidrays",
+        our_race="Zerg",
+        enemy_race="Protoss",
+        description="Real SC2 (W12-LOOP-1): 10 Hydralisks + 2 Vipers vs 2 Carriers + 3 Void Rays (guards Viper Parasitic Bomb/Abduct + Hydra AA)",
+        p1_units=[("hydralisk", 10, -4.5, 0.0), ("viper", 2, -6.0, 0.0)],
+        p2_units=[("void-ray", 3, 4.5, 0.0), ("carrier", 2, 5.5, 0.0)],
         max_loops=336,
     ),
 ]
@@ -857,12 +890,12 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             dstate["p2_start_types"] = t2
                                             dstate["p1_start_val"] = sum(UNIT_VALUES.get(u.unit_type, 100.0) for u in p1u)
                                             dstate["p2_start_val"] = sum(UNIT_VALUES.get(u.unit_type, 100.0) for u in p2u)
-                                            # Boost spawned casters/supports (HT, Ghost, Sentry, Queen, Medivac, Infestor) to 120 energy
+                                            # Boost spawned casters/supports (HT, Ghost, Sentry, Queen, Medivac, Infestor) to 120 energy, Viper (499) to 140 for Parasitic Bomb (125)
                                             energy_cmds = [
                                                 debug_pb2.DebugCommand(
                                                     unit_value=debug_pb2.DebugSetUnitValue(
                                                         unit_value=debug_pb2.DebugSetUnitValue.Energy,
-                                                        value=min(120.0, float(u.energy_max)),
+                                                        value=min(140.0 if u.unit_type == 499 else 120.0, float(u.energy_max)),
                                                         unit_tag=u.tag,
                                                     )
                                                 )

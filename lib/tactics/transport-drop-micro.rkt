@@ -266,6 +266,13 @@
 (: SAVE-UNDER-FIRE-HP-RATIO Float)
 (define SAVE-UNDER-FIRE-HP-RATIO 0.35)
 
+;; W11-P0-4-rt (`w11-tac-5` / `t04` + `novel-84`): Frontline Medivac-healable bio (`marauder`)
+;; should stay fighting and absorb `12.6 HP/s` Medivac heal beam rather than being `3668`-yanked
+;; at 30% HP when no lethal AoE is present; still rescue at lethal-threshold `<= 22%` HP (e.g.
+;; `25/125` one-swipe Ultralisk danger in `novel-84`) or whenever inside an AoE danger zone.
+(: SAVE-CRITICAL-BIO-HP-RATIO Float)
+(define SAVE-CRITICAL-BIO-HP-RATIO 0.22)
+
 (: SAVE-HIGH-VALUE-SYMS (Listof Symbol))
 (define SAVE-HIGH-VALUE-SYMS
   '(immortal archon colossus high-templar disruptor siege-tank thor thor-ap
@@ -1137,6 +1144,40 @@
 ;; 1. Combat Save-Pickup Priority & Execution
 ;; =============================================================================
 
+;; W9-TAC-5-rt: Detect units actively channeling Steady Targeting (2714) or other
+;; protected spell channels so Medivacs do not cancel a 170-damage Snipe at standoff!
+(: u-channeling-protected-order? (-> Any Boolean))
+(define (u-channeling-protected-order? u)
+  (cond
+    [(not (hash? u)) #f]
+    [else
+     (define top-ab (safe-exact-int (dyn-hash-ref u 'order-ability-id 0) 0))
+     (define top-ab2 (safe-exact-int (dyn-hash-ref u 'ability-id 0) 0))
+     (define top-sym (dyn-hash-ref u 'order #f))
+     (define orders-raw (dyn-hash-ref u 'orders '()))
+     (define ord-list : (Listof Any)
+       (cond
+         [(list? orders-raw) orders-raw]
+         [(vector? orders-raw) (vector->list orders-raw)]
+         [else '()]))
+     (define (chan-ab? [ab : Integer]) : Boolean
+       (or (= ab 2714) ;; Ghost Steady Targeting (Snipe channel)
+           (= ab 249)  ;; Infestor Neural Parasite channel
+           (= ab 401)  ;; Battlecruiser Yamato Gun channel
+           (= ab 1622))) ;; Ghost Nuke Calldown channel
+     (or (chan-ab? top-ab)
+         (chan-ab? top-ab2)
+         (and (symbol? top-sym)
+              (not (not (memq top-sym '(steady-targeting snipe neural-parasite yamato-gun nuke-calldown)))))
+         (for/or : Boolean ([ord (in-list ord-list)])
+           (cond
+             [(exact-integer? ord) (chan-ab? ord)]
+             [(hash? ord)
+              (define id1 (safe-exact-int (dyn-hash-ref ord 'ability-id 0) 0))
+              (define id2 (safe-exact-int (dyn-hash-ref ord 'ability_id 0) 0))
+              (or (chan-ab? id1) (chan-ab? id2))]
+             [else #f])))]))
+
 (: ally-base-save-priority (-> Any Symbol Integer (Listof Any) (Listof danger-zone) (Values Float Boolean)))
 (define (ally-base-save-priority ally-u ut sz enemy-units zones)
   (define has-zones? (pair? zones))
@@ -1152,19 +1193,28 @@
      (define ux (u-x ally-u))
      (define uy (u-y ally-u))
      (define in-aoe? (and has-zones? (point-in-danger-zones? ux uy zones 0.35)))
+     (define channel-standoff-protected?
+       (and (not in-aoe?)
+            (u-channeling-protected-order? ally-u)
+            (> (nearest-enemy-combat-dist ux uy enemy-units) 3.5)))
      (define disruptor-cd-danger?
        (and is-disr?
             (not (u-nova-ready? ally-u))
             (<= (nearest-enemy-combat-dist ux uy enemy-units) 9.0)))
      (cond
-       [(not (or in-aoe? disruptor-cd-danger? high-val?))
+       [(or channel-standoff-protected?
+            (not (or in-aoe? disruptor-cd-danger? high-val?)))
         (values 0.0 #f)]
        [else
         (define hp-rat (if (or in-aoe? disruptor-cd-danger?) 1.0 (u-hp-ratio ally-u)))
+        (define save-hp-thresh
+          (if (eq? ut 'marauder) SAVE-CRITICAL-BIO-HP-RATIO SAVE-UNDER-FIRE-HP-RATIO))
+        (define bruised-hp-thresh
+          (if (eq? ut 'marauder) SAVE-CRITICAL-BIO-HP-RATIO SAVE-BRUISED-HP-RATIO))
         (define need-rescue?
           (or in-aoe?
               disruptor-cd-danger?
-              (and high-val? (< hp-rat SAVE-UNDER-FIRE-HP-RATIO))))
+              (and high-val? (< hp-rat save-hp-thresh))))
         (cond
           [(or (not need-rescue?)
                (u-flying? ally-u)
@@ -1174,8 +1224,8 @@
            (define bruised?
              (and high-val?
                   (let ([r (if (or in-aoe? disruptor-cd-danger?) (u-hp-ratio ally-u) hp-rat)])
-                    (or (< r SAVE-BRUISED-HP-RATIO)
-                        (and (< r SAVE-UNDER-FIRE-HP-RATIO)
+                    (or (< r bruised-hp-thresh)
+                        (and (< r save-hp-thresh)
                              (>= (count-attackers-in-range ally-u enemy-units) 2))))))
            (if (or in-aoe? disruptor-cd-danger? bruised?)
                (let* ([r (if (or in-aoe? disruptor-cd-danger?) (u-hp-ratio ally-u) hp-rat)]

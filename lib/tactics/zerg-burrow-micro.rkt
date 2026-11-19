@@ -204,11 +204,14 @@
     (and (hash? u)
          (or (not (not (hash-ref u 'revealed? #f)))
              (not (not (hash-ref u 'detected? #f)))
+             (eqv? (hash-ref u 'cloak 0) 2)
+             (eq? (hash-ref u 'cloak #f) 'cloaked-detected)
              (let ([buffs (hash-ref u 'buffs '())])
                (and (list? buffs)
                     (for/or ([b (in-list buffs)])
-                      (or (not (not (memq b '(oracle-revelation revelation 281 99))))
-                          (and (exact-integer? b) (= b 281)))))))))
+                      ;; W12-P0-4-rt (`w12-tac-1`): Official SC2 buff ID for OracleRevelation is 49 (NOT 281 ChronoBoost!).
+                      (or (not (not (memq b '(oracle-revelation revelation 49 99))))
+                          (and (exact-integer? b) (= b 49)))))))))
 
   (define (fast-dodge-fallback-state u frame bur? default-hp)
     (define php (safe-fl (hash-ref u 'prev-hp default-hp) default-hp))

@@ -15,6 +15,7 @@
          racket/tcp
          "../lib/sc2-game-constants.rkt"
          (prefix-in pl: "../lib/sc2-placement.rkt")
+         "../lib/plan/situational-counter.rkt"
          "../lib/sc2-protobuf-ws.rkt"
          "../sim/racket-sc2-ladder-main.rkt")
 
@@ -2488,6 +2489,761 @@
      (make-test-obs 17420 100 50 (list cc-home sentry-fight))))
   (check-true "w8-tac-4-wire-peacetime-sentry-still-casts-hallucination-154"
               (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 154) (memv 4300 (sc2-raw-unit-command-unit-tags c)))) sentry-peace-cmds)))
+
+(printf "[Wave 9] Testing W9-TAC-1 hold-posture frontline guard, W9-TAC-3 OC scan dedupe, W9-TAC-4 Changeling dedupe, & W9-TAC-5 channeling pickup guard...\n")
+
+(let ()
+  (define (w9-dist x1 y1 x2 y2) (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define (mk-u tag utype ally x y #:en [en 0.0] #:hp [hp 100.0] #:hpm [hpm 100.0]
+                #:struct? [struct? #f] #:flying? [fly? #f] #:ords [ords '()])
+    (sc2-unit 1 ally tag utype 1 (sc2-point3d x y 8.0) 0.0 (if struct? 2.0 0.5) 1.0 0 #f struct? fly?
+              hp hpm 0.0 0.0 en (if (> en 0.0) 200.0 0.0) 0 0 #f #f #f #t #f ords 0 '() 0 0 0.0 0 0 0 0))
+
+  ;; 1. W9-TAC-1: Under tactical-hold-posture?, idle frontline Marines/Phoenixes <= 16t from enemy combat
+  ;;    are NEVER yanked back home (engage locally), fragile HTs aren't yanked or suicide-attacked,
+  ;;    while distant rear units (> 16t from enemies) still rally cohesively to the hold point!
+  (define cc-w9    (mk-u 1001 18 1 32.5 32.5 #:struct? #t))
+  (define mar-fl   (mk-u 5011 48 1 76.5 79.0 #:hp 45.0 #:hpm 45.0))
+  (define phx-fl   (mk-u 5702 78 1 78.0 82.0 #:flying? #t))
+  (define ht-fl    (mk-u 5709 75 1 77.0 80.0 #:en 100.0))
+  (define mar-rear (mk-u 5099 48 1 90.0 32.5 #:hp 45.0 #:hpm 45.0)) ;; > 45t from enemy, > 8t from home hold
+  (define ling-e   (mk-u 8010 105 4 84.0 79.0 #:hp 35.0 #:hpm 35.0))
+  (define imm-e    (mk-u 8701 83 4 82.5 80.5 #:hp 200.0 #:hpm 200.0))
+  (define hold-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '()
+     (make-test-obs 12000 300 100 (list cc-w9 mar-fl phx-fl ht-fl mar-rear ling-e imm-e))
+     #:tactical-posture 'hold
+     #:enemy-base '(143.5 143.5)))
+  (define (cmds-for-tag cs t)
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (memv t (sc2-raw-unit-command-unit-tags c)))) cs))
+  (check-true "w9-tac-1-frontline-marine-engages-locally-never-yanked-home"
+              (let ([cs (cmds-for-tag hold-cmds 5011)])
+                (and (pair? cs)
+                     (andmap (lambda (c)
+                               (define p (sc2-raw-unit-command-target-pos c))
+                               (and (= (sc2-raw-unit-command-ability-id c) 23)
+                                    (sc2-point2d? p)
+                                    (<= (w9-dist 84.0 79.0 (sc2-point2d-x p) (sc2-point2d-y p)) 10.0)))
+                             cs))))
+  (check-true "w9-tac-1-frontline-phoenix-never-yanked-home"
+              (let ([cs (cmds-for-tag hold-cmds 5702)])
+                (and (pair? cs)
+                     (andmap (lambda (c)
+                               (define p (sc2-raw-unit-command-target-pos c))
+                               (and (sc2-point2d? p)
+                                    (<= (w9-dist 82.5 80.5 (sc2-point2d-x p) (sc2-point2d-y p)) 10.0)))
+                             cs))))
+  (check-true "w9-tac-1-frontline-ht-neither-yanked-home-nor-suicide-attacked"
+              (null? (cmds-for-tag hold-cmds 5709)))
+  (check-true "w9-tac-1-rear-idle-marine-still-rallies-to-hold-point"
+              (let ([cs (cmds-for-tag hold-cmds 5099)])
+                (and (pair? cs)
+                     (ormap (lambda (c)
+                              (define p (sc2-raw-unit-command-target-pos c))
+                              (and (= (sc2-raw-unit-command-ability-id c) 23)
+                                   (sc2-point2d? p)
+                                   (< (sc2-point2d-x p) 65.0)
+                                   (< (sc2-point2d-y p) 65.0)))
+                            cs))))
+
+  ;; 2. W9-TAC-3: Orbital Command Scanner Sweep (399) deduped per OC tag & within <= 10.0t same step!
+  (define oc-1 (mk-u 1001 132 1 32.0 32.0 #:en 100.0 #:struct? #t))
+  (define oc-2 (mk-u 1002 132 1 52.0 32.0 #:en 75.0  #:struct? #t))
+  (define scan-dedup-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 1001 scanner-sweep 81.5 80.0)
+       (blind-skillshot-shimmer 1001 scanner-sweep 81.5 80.5)
+       (cast-spell 1002 scanner-sweep 82.0 80.5))
+     (make-test-obs 9600 200 100 (list oc-1 oc-2))))
+  (check-eqv "w9-tac-3-double-scan-same-cluster-deduped-to-1"
+             (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 399)))
+                    scan-dedup-cmds)
+             1)
+  (define scan-two-far-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 1001 scanner-sweep 81.5 80.0)
+       (cast-spell 1002 scanner-sweep 140.0 140.0))
+     (make-test-obs 9604 200 100 (list oc-1 oc-2))))
+  (check-eqv "w9-tac-3-two-distinct-ocs-distant-points-both-scan"
+             (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 399)))
+                    scan-two-far-cmds)
+             2)
+
+  ;; 3. W9-TAC-4: Overseer Spawn Changeling (181) deduped <= 1 per Overseer tag per step!
+  (define ov-1 (mk-u 6101 129 1 80.0 80.0 #:en 100.0 #:flying? #t))
+  (define ov-2 (mk-u 6102 129 1 90.0 90.0 #:en 100.0 #:flying? #t))
+  (define chg-dedup-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast 6101 spawn-changeling)
+       (cast-spell 6101 spawn-changeling)
+       (cast-deception-and-scout-spells))
+     (make-test-obs 10000 200 100 (list ov-1))))
+  (check-eqv "w9-tac-4-overseer-triple-changeling-deduped-to-1"
+             (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 181)))
+                    chg-dedup-cmds)
+             1)
+  (define chg-two-ov-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast 6101 spawn-changeling)
+       (cast 6102 spawn-changeling))
+     (make-test-obs 10004 200 100 (list ov-1 ov-2))))
+  (check-eqv "w9-tac-4-two-distinct-overseers-both-spawn-changeling"
+             (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 181)))
+                    chg-two-ov-cmds)
+             2)
+
+  ;; 4. W9-TAC-5-wire: Medivac LOAD_TRANSPORT (3668) never cancels channeling Ghost Snipe (2714) at safe standoff,
+  ;;    still saves Ghost in immediate melee danger (<= 2.5t), and still rescues non-channeling units!
+  (define ghost-chan (mk-u 7301 50 1 76.0 80.0 #:hp 25.0 #:hpm 100.0 #:en 100.0
+                           #:ords (list (sc2-unit-order 2714 #f 9601 0.0))))
+  (define med-7302   (mk-u 7302 54 1 75.5 80.0 #:hp 150.0 #:hpm 150.0 #:en 100.0 #:flying? #t))
+  (define mar-7305   (mk-u 7305 51 1 76.0 81.0 #:hp 20.0 #:hpm 125.0))
+  (define ultra-far  (mk-u 9601 109 4 84.0 80.0 #:hp 500.0 #:hpm 500.0)) ;; 8.0t standoff
+  (define ultra-near (mk-u 9601 109 4 78.0 80.0 #:hp 500.0 #:hpm 500.0)) ;; 2.0t melee danger
+  (define pickup-standoff-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((load-unit 7302 7301)
+       (transport-pickup 7302 7301)
+       (cast-spell 7302 load-transport 7301))
+     (make-test-obs 13800 200 100 (list cc-w9 ghost-chan med-7302 ultra-far))))
+  (check-true "w9-tac-5-wire-no-load-transport-on-channeling-ghost-at-standoff"
+              (not (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (memv (sc2-raw-unit-command-ability-id c) '(394 3668))
+                                 (= (sc2-raw-unit-command-target-unit-tag c) 7301)))
+                          pickup-standoff-cmds)))
+  (define pickup-melee-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((load-unit 7302 7301))
+     (make-test-obs 13804 200 100 (list cc-w9 ghost-chan med-7302 ultra-near))))
+  (check-true "w9-tac-5-wire-emergency-pickup-allowed-when-enemy-in-melee-range"
+              (ormap (lambda (c)
+                       (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-ability-id c) 3668)
+                            (= (sc2-raw-unit-command-target-unit-tag c) 7301)))
+                     pickup-melee-cmds))
+  (define pickup-normal-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((load-unit 7302 7305))
+     (make-test-obs 13808 200 100 (list cc-w9 mar-7305 med-7302 ultra-far))))
+  (check-true "w9-tac-5-wire-normal-nonchanneling-unit-still-picked-up"
+              (ormap (lambda (c)
+                       (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-ability-id c) 3668)
+                            (= (sc2-raw-unit-command-target-unit-tag c) 7305)))
+                     pickup-normal-cmds)))
+
+(printf "[Wave 10] Testing W10-TAC-3 race-specific transport unload (396/913/1408) & W10-TAC-6 Observer defense preservation...\n")
+
+(let ()
+  (define (mk-u tag utype ally x y #:flying? [fly? #f] #:cloak [clk 0]
+                #:cargo-taken [ct 0] #:cargo-max [cm 0] #:pax [pax '()])
+    (sc2-unit 1 ally tag utype 1 (sc2-point3d x y 8.0) 0.0 0.625 1.0 clk #f #f fly?
+              100.0 100.0 0.0 0.0 50.0 200.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0
+              pax ct cm))
+
+  ;; 1. W10-TAC-3: transport-juggle emits race-specific 396/913/1408 (NEVER generic 3669) and skips empty transports!
+  (define med-loaded   (mk-u 5101 54  1 82.0 80.0 #:flying? #t #:cargo-taken 2 #:cargo-max 8))
+  (define prism-loaded (mk-u 5102 81  1 82.0 80.0 #:flying? #t #:cargo-taken 4 #:cargo-max 8))
+  (define drop-loaded  (mk-u 5103 893 1 82.0 80.0 #:flying? #t #:cargo-taken 4 #:cargo-max 8))
+  (define med-empty    (mk-u 5104 54  1 82.0 80.0 #:flying? #t #:cargo-taken 0 #:cargo-max 8))
+  (define tr-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((transport-juggle 5101 76.0 80.0)
+       (transport-juggle 5102 76.0 82.0)
+       (transport-juggle 5103 76.0 84.0)
+       (transport-juggle 5104 76.0 86.0))
+     (make-test-obs 13800 200 100 (list med-loaded prism-loaded drop-loaded med-empty))))
+  (check-true "w10-tac-3-medivac-juggle-emits-396-not-3669"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 396) (equal? (sc2-raw-unit-command-unit-tags c) '(5101)))) tr-cmds)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3669))) tr-cmds))))
+  (check-true "w10-tac-3-warp-prism-juggle-emits-913"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 913) (equal? (sc2-raw-unit-command-unit-tags c) '(5102)))) tr-cmds))
+  (check-true "w10-tac-3-dropperlord-juggle-emits-1408"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1408) (equal? (sc2-raw-unit-command-unit-tags c) '(5103)))) tr-cmds))
+  (check-true "w10-tac-3-empty-medivac-emits-zero-unload-spam"
+              (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (memv 5104 (sc2-raw-unit-command-unit-tags c)))) tr-cmds)))
+
+  ;; 2. W10-TAC-6: cast-deception-and-scout-spells & scout-sector NEVER overwrite a commanded Observer
+  ;;    and NEVER send an Observer (82) cross-map when cloaked/burrowed enemies are present!
+  (define obs-5001  (mk-u 5001 82 1 52.0 34.0 #:flying? #t))
+  (define chg-5009  (mk-u 5009 15 1 60.0 60.0))
+  (define dt-cloak  (mk-u 8001 76 4 30.0 32.0 #:cloak 1))
+  (define banshee-e (mk-u 8002 55 4 40.0 40.0 #:flying? #t))
+  ;; (a) Commanded Observer is NEVER overwritten to enemy main even without cloaked enemies
+  (define obs-cmd-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((move 5001 44.4 32.04)
+       (cast-deception-and-scout-spells))
+     (make-test-obs 10000 200 100 (list obs-5001))
+     #:enemy-base '(160.0 160.0)))
+  (check-true "w10-tac-6-commanded-observer-never-overwritten-by-deception-scout"
+              (and (= (count (lambda (c) (and (sc2-raw-unit-command? c) (memv 5001 (sc2-raw-unit-command-unit-tags c)))) obs-cmd-cmds) 1)
+                   (not (ormap (lambda (c)
+                                 (and (sc2-raw-unit-command? c)
+                                      (memv 5001 (sc2-raw-unit-command-unit-tags c))
+                                      (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                                      (> (sc2-point2d-x (sc2-raw-unit-command-target-pos c)) 100.0)))
+                               obs-cmd-cmds))))
+  ;; (b) Idle Observer under cloaked DT attack is NOT sent to enemy main (instead flies to detect DT at home, while Changeling still scouts)
+  (define obs-dt-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-deception-and-scout-spells))
+     (make-test-obs 10004 200 100 (list obs-5001 chg-5009 dt-cloak))
+     #:enemy-base '(160.0 160.0)))
+  (check-true "w10-tac-6-idle-observer-stays-home-under-cloaked-dt-attack"
+              (and (not (ormap (lambda (c)
+                                 (and (sc2-raw-unit-command? c)
+                                      (memv 5001 (sc2-raw-unit-command-unit-tags c))
+                                      (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                                      (> (sc2-point2d-x (sc2-raw-unit-command-target-pos c)) 100.0)))
+                               obs-dt-cmds))
+                   (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 16)
+                                 (memv 5001 (sc2-raw-unit-command-unit-tags c))
+                                 (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                                 (<= (sqrt (+ (sqr (- (sc2-point2d-x (sc2-raw-unit-command-target-pos c)) 30.0))
+                                              (sqr (- (sc2-point2d-y (sc2-raw-unit-command-target-pos c)) 32.0))))
+                                     10.5)))
+                          obs-dt-cmds)))
+  (check-true "w10-tac-6-changeling-still-scouts-under-cloaked-dt-attack"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 16) (memv 5009 (sc2-raw-unit-command-unit-tags c)))) obs-dt-cmds))
+  ;; (c) scout-sector skips Observer when enemy Banshee cloak threat is visible
+  (define obs-sec-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((scout-sector 160.0 160.0))
+     (make-test-obs 10008 200 100 (list obs-5001 banshee-e))
+     #:enemy-base '(160.0 160.0)))
+  (check-true "w10-tac-6-scout-sector-never-steals-observer-under-banshee-threat"
+              (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (memv 5001 (sc2-raw-unit-command-unit-tags c)))) obs-sec-cmds)))
+  ;; (d) Peacetime idle Observer with NO cloaked threat still scouts enemy base normally
+  (define obs-peace-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-deception-and-scout-spells))
+     (make-test-obs 10012 200 100 (list obs-5001))
+     #:enemy-base '(160.0 160.0)))
+  (check-true "w10-tac-6-peacetime-idle-observer-still-scouts"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 16) (memv 5001 (sc2-raw-unit-command-unit-tags c)))) obs-peace-cmds)))
+
+;; =============================================================================
+;; Wave 11 Regression Checks:
+;;   - W11-P0-4-wire (`w11-tac-3` & `w11-tac-4`): situational-counter live-obs
+;;     hardcoded-coord/dummy-tag-1 suppression + Overseer/Observer stealth intercept
+;;   - W11-P0-3-wire: WarpGate multi-gate batching, grid safety, Chronoboost CD,
+;;     action-error & warp_gate_count reconciliation, and governor-drop CD release
+;; =============================================================================
+(printf "[Wave 11] Testing W11-P0-4-wire (situational-counter live-obs + Overseer stealth intercept) & W11-P0-3-wire (WarpGate batching)...\n")
+(let ()
+  (define (w11-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define (mk-w11-u tag utype all x y
+                    #:hp [hp 150.0] #:en [en 0.0] #:flying? [fly? #f]
+                    #:cloak [cl 0] #:burrowed? [bur? #f] #:powered? [pow? #t]
+                    #:buffs [buffs '()] #:rad [rad 0.75])
+    (sc2-unit 1 all tag utype (if (= all 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 cl #f #f #f
+              hp hp 0.0 0.0 en 200.0 0 0 fly? bur?
+              #f (if pow? #t #f) #f '() 0 buffs
+              0 0 0.0 0 0 0 0))
+
+  ;; 1. W11-P0-4-wire (`w11-tac-3`): situational-counter suppresses dummy-tag-1 & hardcoded (90,90)
+  ;;    casts on live observations while preserving real-ally-tag abilities (`battery-overcharge`)
+  ;;    and NEVER emitting `morph-oversight-mode` / `morph-observer-siege-mode` on cloak threats.
+  (define live-viper-plan
+    (evaluate-situational-counter-plan
+     (hash 'frame 12200 'race 'Zerg 'enemy-race 'Terran
+           'raw-mineral-harvesters 16 'ideal-mineral-harvesters 16 'mineral-patches '()
+           'ally-units (list (hash 'id 6301 'type 'viper 'x 74.0 'y 80.0 'energy 175.0))
+           'ally-buildings (list (hash 'id 1001 'type 'hatchery 'x 32.5 'y 32.5 'build-progress 1.0))
+           'enemy-units (list (hash 'id 9301 'type 'viking-fighter 'x 80.0 'y 78.5)
+                              (hash 'id 9302 'type 'viking-fighter 'x 80.0 'y 79.5)
+                              (hash 'id 9303 'type 'viking-fighter 'x 80.0 'y 80.5)))
+     'Zerg 'Terran 12200))
+  (check-true "w11-tac-3-live-obs-zero-dummy-tag-1-parasitic-bomb"
+              (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (third a) 'parasitic-bomb)))
+                          (situational-counter-plan-ability-actions live-viper-plan))))
+
+  (define live-ravager-plan
+    (evaluate-situational-counter-plan
+     (hash 'frame 14000 'race 'Zerg 'enemy-race 'Terran
+           'raw-mineral-harvesters 16 'ideal-mineral-harvesters 16 'mineral-patches '()
+           'ally-units (list (hash 'id 6321 'type 'ravager 'x 108.0 'y 115.0 'energy 0.0))
+           'ally-buildings (list (hash 'id 1001 'type 'hatchery 'x 32.5 'y 32.5 'build-progress 1.0))
+           'enemy-units (list (hash 'id 9321 'type 'siege-tank-sieged 'x 125.0 'y 115.0)
+                              (hash 'id 9322 'type 'siege-tank-sieged 'x 125.0 'y 117.0)
+                              (hash 'id 9323 'type 'siege-tank-sieged 'x 125.0 'y 119.0)))
+     'Zerg 'Terran 14000))
+  (check-true "w11-tac-3-live-obs-zero-hardcoded-90-90-corrosive-bile"
+              (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (third a) 'corrosive-bile)))
+                          (situational-counter-plan-ability-actions live-ravager-plan))))
+
+  (define live-overseer-cloak-plan
+    (evaluate-situational-counter-plan
+     (hash 'frame 11000 'race 'Zerg 'enemy-race 'Terran
+           'raw-mineral-harvesters 16 'ideal-mineral-harvesters 16 'mineral-patches '()
+           'ally-units (list (hash 'id 6401 'type 'overseer 'x 60.0 'y 60.0 'energy 0.0))
+           'ally-buildings (list (hash 'id 1001 'type 'hatchery 'x 32.5 'y 32.5 'build-progress 1.0))
+           'enemy-units (list (hash 'id 9401 'type 'banshee 'x 115.0 'y 115.0 'cloaked #t)))
+     'Zerg 'Terran 11000))
+  (check-true "w11-tac-4-situational-counter-never-emits-oversight-mode-on-cloak"
+              (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell)
+                                           (memq (third a) '(morph-oversight-mode morph-observer-siege-mode))))
+                          (situational-counter-plan-ability-actions live-overseer-cloak-plan))))
+  (check-true "w11-tac-4-standalone-selector-never-emits-oversight-mode-on-cloak"
+              (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell)
+                                           (memq (third a) '(morph-oversight-mode morph-observer-siege-mode))))
+                          (select-situational-ability-actions
+                           'enemy-cloaked-or-burrowed-threat '(banshee)
+                           (list (hash 'id 6401 'type 'overseer 'energy 0.0)
+                                 (hash 'id 6402 'type 'observer 'energy 0.0))))))
+
+  ;; Real allied-tag abilities (`battery-overcharge`) remain active on live obs
+  (define live-battery-plan
+    (evaluate-situational-counter-plan
+     (hash 'frame 3200 'race 'Protoss 'enemy-race 'Protoss
+           'raw-mineral-harvesters 16 'ideal-mineral-harvesters 16 'mineral-patches '()
+           'proxy-detected? #t
+           'ally-units '()
+           'ally-buildings (list (hash 'id 5001 'type 'nexus 'x 32.5 'y 32.5 'energy 100.0 'build-progress 1.0)
+                                 (hash 'id 5002 'type 'shield-battery 'x 36.0 'y 36.0 'energy 100.0 'build-progress 1.0))
+           'enemy-buildings (list (hash 'id 9001 'type 'photon-cannon 'x 44.0 'y 44.0)))
+     'Protoss 'Protoss 3200))
+  (check-true "w11-tac-3-live-obs-preserves-real-tag-battery-overcharge"
+              (not (not (ormap (lambda (a) (equal? a '(cast-spell 5001 battery-overcharge 5002)))
+                               (situational-counter-plan-ability-actions live-battery-plan)))))
+
+  ;; 2. W11-P0-4-wire (`w11-tac-4`): Wire suppresses 3745/181 and flies Overseer directly to
+  ;;    uncovered Cloaked Banshee (115,115) / (35,35), and unmorphs OverseerSiege (1912) via 3743!
+  (define ov-a-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 6401 morph-oversight-mode))
+     (make-test-obs 11000 300 200
+                    (list (mk-w11-u 1001 86 1 32.5 32.5 #:hp 1500.0 #:rad 2.75)
+                          (mk-w11-u 6401 129 1 60.0 60.0 #:hp 200.0 #:en 0.0 #:flying? #t)
+                          (mk-w11-u 6410 107 1 112.0 113.0 #:hp 90.0)
+                          (mk-w11-u 9401 55 4 115.0 115.0 #:hp 140.0 #:flying? #t #:cloak 1)))))
+  (check-true "w11-tac-4-wire-0en-overseer-skips-3745-and-moves-to-cloaked-banshee"
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3745))) ov-a-cmds))
+                   (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 16)
+                                 (memv 6401 (sc2-raw-unit-command-unit-tags c))
+                                 (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                                 (<= (w11-dist (sc2-point2d-x (sc2-raw-unit-command-target-pos c))
+                                               (sc2-point2d-y (sc2-raw-unit-command-target-pos c))
+                                               115.0 115.0)
+                                     15.0)))
+                          ov-a-cmds)))
+
+  (define ov-b-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast 6421 spawn-changeling 160.0 160.0)
+       (cast-spell 6421 morph-oversight-mode)
+       (cast-deception-and-scout-spells))
+     (make-test-obs 11004 300 200
+                    (list (mk-w11-u 1001 86 1 32.5 32.5 #:hp 1500.0 #:rad 2.75)
+                          (mk-w11-u 6421 129 1 60.0 60.0 #:hp 200.0 #:en 50.0 #:flying? #t)
+                          (mk-w11-u 6430 107 1 36.0 34.0 #:hp 90.0)
+                          (mk-w11-u 9421 55 4 35.0 35.0 #:hp 140.0 #:flying? #t #:cloak 1)))))
+  (check-true "w11-tac-4-wire-50en-overseer-skips-181-3745-and-moves-home-to-banshee"
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (memv (sc2-raw-unit-command-ability-id c) '(181 3745)))) ov-b-cmds))
+                   (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 16)
+                                 (memv 6421 (sc2-raw-unit-command-unit-tags c))
+                                 (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                                 (<= (w11-dist (sc2-point2d-x (sc2-raw-unit-command-target-pos c))
+                                               (sc2-point2d-y (sc2-raw-unit-command-target-pos c))
+                                               35.0 35.0)
+                                     15.0)))
+                          ov-b-cmds)))
+
+  (define ov-siege-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '()
+     (make-test-obs 11008 300 200
+                    (list (mk-w11-u 1001 86 1 32.5 32.5 #:hp 1500.0 #:rad 2.75)
+                          (mk-w11-u 6441 1912 1 60.0 60.0 #:hp 200.0 #:flying? #t)
+                          (mk-w11-u 9441 55 4 115.0 115.0 #:hp 140.0 #:flying? #t #:cloak 1)))))
+  (check-true "w11-tac-4-wire-unmorphs-sieged-overseer-1912-via-3743"
+              (ormap (lambda (c)
+                       (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-ability-id c) 3743)
+                            (memv 6441 (sc2-raw-unit-command-unit-tags c))))
+                     ov-siege-cmds))
+
+  (define ov-peace-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 6450 morph-oversight-mode))
+     (make-test-obs 11012 300 200
+                    (list (mk-w11-u 6450 129 1 60.0 60.0 #:hp 200.0 #:flying? #t)))))
+  (check-true "w11-tac-4-peacetime-explicit-oversight-3745-still-allowed"
+              (ormap (lambda (c)
+                       (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-ability-id c) 3745)
+                            (memv 6450 (sc2-raw-unit-command-unit-tags c))))
+                     ov-peace-cmds))
+
+  ;; 3. W11-P0-3-wire: WarpGate multi-gate batching, grid safety, Chronoboost CD,
+  ;;    governor-drop CD release, action-error & player_common.warp_gate_count reconciliation!
+  ;; Build a 100x100 8bpp pathing+placement grid where x < 40 is unpathable cliff (0) and x >= 40 is open (1)
+  (define w11-grid-bytes (make-bytes (* 100 100) 0))
+  (for* ([y (in-range 100)] [x (in-range 40 100)])
+    (bytes-set! w11-grid-bytes (+ x (* y 100)) 1))
+  (define w11-grid (sc2-image-grid 8 100 100 w11-grid-bytes #f #f))
+  (define w11-gi (sc2-game-info "TestMap" "" '() '(100 . 100) '(0 0 100 100) '() w11-grid #f w11-grid))
+  (define w11-wg-units
+    (list (mk-w11-u 7100 59 1 46.0 50.0 #:hp 1000.0 #:rad 2.75) ;; Nexus
+          (mk-w11-u 7110 60 1 40.5 50.0 #:hp 200.0 #:rad 1.0)   ;; Pylon on cliff edge x=40.5
+          (mk-w11-u 7101 133 1 44.0 44.0 #:hp 500.0 #:rad 1.5 #:buffs '(281)) ;; Chronoboosted WG
+          (mk-w11-u 7102 133 1 47.0 44.0 #:hp 500.0 #:rad 1.5)
+          (mk-w11-u 7103 133 1 50.0 44.0 #:hp 500.0 #:rad 1.5)
+          (mk-w11-u 7104 133 1 53.0 44.0 #:hp 500.0 #:rad 1.5)
+          (mk-w11-u 7105 62  1 56.0 44.0 #:hp 500.0 #:rad 1.5))) ;; Un-morphed Gateway
+  (define w11-wg-obs1
+    (sc2-observation 2000 (sc2-player-common 1 800 400 50 90 20 30 0 10 4 0)
+                     w11-wg-units '(84)
+                     (list (sc2-power-source (sc2-point3d 40.5 50.0 8.0) 6.5 7110))
+                     (sc2-point3d 46.0 50.0 0.0) '() '() '() '() '() '()))
+  (define wg-batch-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1414)))
+            (translate-bot-actions->sc2-raw-commands
+             '((train stalker) (train stalker) (train stalker) (train stalker))
+             w11-wg-obs1
+             #:game-info w11-gi)))
+  (define wg-batch-tags (apply append (map sc2-raw-unit-command-unit-tags wg-batch-cmds)))
+  (define wg-batch-pts (map sc2-raw-unit-command-target-pos wg-batch-cmds))
+  (check-eqv "w11-p0-3-4-ready-warpgates-batch-all-4-stalkers-in-one-step"
+             (length wg-batch-cmds) 4)
+  (check-true "w11-p0-3-warpgates-preferred-over-unmorphed-gateway-7105"
+              (and (= (length (remove-duplicates wg-batch-tags)) 4)
+                   (not (memv 7105 wg-batch-tags))))
+  (check-true "w11-p0-3-all-4-warp-spots-respect-cliff-grid-and-1.5t-separation"
+              (and (andmap (lambda (p) (and (sc2-point2d? p) (>= (sc2-point2d-x p) 40.45))) wg-batch-pts)
+                   (for*/and ([i (in-range (length wg-batch-pts))]
+                              [j (in-range (add1 i) (length wg-batch-pts))])
+                     (define p1 (list-ref wg-batch-pts i))
+                     (define p2 (list-ref wg-batch-pts j))
+                     (> (w11-dist (sc2-point2d-x p1) (sc2-point2d-y p1)
+                                  (sc2-point2d-x p2) (sc2-point2d-y p2))
+                        1.5))))
+
+  ;; Chronoboosted WG 7101 finishes ~343 loops (ready at loop 2350), while non-chrono 7102..7104 wait until 2515!
+  (define w11-wg-obs-chrono
+    (sc2-observation 2350 (sc2-player-common 1 800 400 50 90 20 30 0 10 0 0)
+                     w11-wg-units '(84)
+                     (list (sc2-power-source (sc2-point3d 40.5 50.0 8.0) 6.5 7110))
+                     (sc2-point3d 46.0 50.0 0.0) '() '() '() '() '() '()))
+  (define wg-chrono-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1414)))
+            (translate-bot-actions->sc2-raw-commands '((train stalker)) w11-wg-obs-chrono #:game-info w11-gi)))
+  (check-true "w11-p0-3-chronoboosted-warpgate-7101-ready-early-at-350-loops"
+              (and (= (length wg-chrono-cmds) 1)
+                   (equal? (sc2-raw-unit-command-unit-tags (first wg-chrono-cmds)) '(7101))))
+
+  ;; Action-error on WG 7102 (`ability-id 1414, result 47`) immediately unlocks WG 7102!
+  (define w11-wg-obs-err
+    (sc2-observation 2354 (sc2-player-common 1 800 400 50 90 20 30 0 10 0 0)
+                     w11-wg-units '(84)
+                     (list (sc2-power-source (sc2-point3d 40.5 50.0 8.0) 6.5 7110))
+                     (sc2-point3d 46.0 50.0 0.0) '() '() '()
+                     (list (hash 'unit-tag 7102 'ability-id 1414 'result 47))
+                     '() '()))
+  (define wg-err-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1414)))
+            (translate-bot-actions->sc2-raw-commands '((train stalker)) w11-wg-obs-err #:game-info w11-gi)))
+  (check-true "w11-p0-3-action-error-unlocks-rejected-warpgate-7102-immediately"
+              (and (= (length wg-err-cmds) 1)
+                   (equal? (sc2-raw-unit-command-unit-tags (first wg-err-cmds)) '(7102))))
+
+  ;; Ground-truth `player_common.warp_gate_count = 2` unlocks 2 still-locked WarpGates (7103 & 7104)!
+  (define w11-wg-obs-pc
+    (sc2-observation 2358 (sc2-player-common 1 800 400 50 90 20 30 0 10 2 0)
+                     w11-wg-units '(84)
+                     (list (sc2-power-source (sc2-point3d 40.5 50.0 8.0) 6.5 7110))
+                     (sc2-point3d 46.0 50.0 0.0) '() '() '() '() '() '()))
+  (define wg-pc-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1414)))
+            (translate-bot-actions->sc2-raw-commands '((train stalker) (train stalker)) w11-wg-obs-pc #:game-info w11-gi)))
+  (check-eqv "w11-p0-3-player-common-warp-gate-count-reconciles-2-ready-gates"
+             (length wg-pc-cmds) 2)
+
+  ;; Governor-dropped warp-in commands release their WarpGate cooldown immediately!
+  (define wg-gov (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  ;; Drain 22 of 24 initial tokens at loop 2998 via 11 non-coalescable P1 cmds -> ~2.6 tokens & recent P1 at loop 3000
+  (void (govern-sc2-wire-actions!
+         wg-gov
+         (for/list ([i (in-range 11)])
+           (sc2-raw-unit-command 1006 #f 0 (list (+ 9500 i)) #f))
+         2998))
+  (define w11-wg-obs-gov
+    (sc2-observation 3000 (sc2-player-common 1 800 400 50 90 20 30 0 10 0 0)
+                     w11-wg-units '(84)
+                     (list (sc2-power-source (sc2-point3d 40.5 50.0 8.0) 6.5 7110))
+                     (sc2-point3d 46.0 50.0 0.0) '() '() '() '() '() '()))
+  (define wg-raw-4
+    (translate-bot-actions->sc2-raw-commands
+     '((train stalker) (train stalker) (train stalker) (train stalker))
+     w11-wg-obs-gov #:game-info w11-gi))
+  (define wg-gov-emitted (govern-sc2-wire-actions! wg-gov wg-raw-4 3000))
+  (define wg-gov-emitted-cnt
+    (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1414)))
+           wg-gov-emitted))
+  ;; Next step at 3004: the dropped WarpGates must STILL be ready (NOT locked out for 515 loops!)
+  (define w11-wg-obs-gov-next
+    (sc2-observation 3004 (sc2-player-common 1 800 400 50 90 20 30 0 10 0 0)
+                     w11-wg-units '(84)
+                     (list (sc2-power-source (sc2-point3d 40.5 50.0 8.0) 6.5 7110))
+                     (sc2-point3d 46.0 50.0 0.0) '() '() '() '() '() '()))
+  (define wg-retry-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1414)))
+            (translate-bot-actions->sc2-raw-commands
+             '((train stalker) (train stalker) (train stalker) (train stalker))
+             w11-wg-obs-gov-next #:game-info w11-gi)))
+  (check-true "w11-p0-3-governor-dropped-warpgates-unlock-immediately-for-next-step"
+              (and (< wg-gov-emitted-cnt 4)
+                   (= (+ wg-gov-emitted-cnt (length wg-retry-cmds)) 4)))
+
+  ;; Phasing WarpPrism (`radius 3.75`) keeps warp-in inside <= 3.1t radius
+  (define w11-prism-obs
+    (sc2-observation 3600 (sc2-player-common 1 400 200 50 90 20 30 0 10 1 0)
+                     (list (mk-w11-u 7201 133 1 44.0 44.0 #:hp 500.0 #:rad 1.5)
+                           (mk-w11-u 7202 136 1 60.0 60.0 #:hp 100.0 #:flying? #t))
+                     '(84)
+                     (list (sc2-power-source (sc2-point3d 60.0 60.0 8.0) 3.75 7202))
+                     (sc2-point3d 60.0 60.0 0.0) '() '() '() '() '() '()))
+  (define wg-prism-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1414)))
+            (translate-bot-actions->sc2-raw-commands '((train stalker)) w11-prism-obs)))
+  (check-true "w11-p0-3-phasing-warp-prism-respects-3.75-power-radius"
+              (and (= (length wg-prism-cmds) 1)
+                   (let ([p (sc2-raw-unit-command-target-pos (first wg-prism-cmds))])
+                     (and (sc2-point2d? p)
+                          (<= (w11-dist (sc2-point2d-x p) (sc2-point2d-y p) 60.0 60.0) 3.15))))))
+
+;; =============================================================================
+;; Wave 12 Regression Checks (`W12-P0-3-wire`):
+;;   - Early-rush placement stall fixes (`#36 P v 12PoolBot`, `#35 T v 12PoolBot`):
+;;     build-priority strictly ahead of `pull-workers-attack`, contested-site
+;;     in-main safe fallback, enemy ground unit avoidance in spiral search, and
+;;     terrain/enemy-aware `emergency-inmain-supply-anchor`.
+;;   - Defense-in-depth wire dedupe & P0 legality (`w12-tac-1..4`):
+;;     Oracle Revelation `2146` (buff=49 skip + single-cast + weaponless beam-off
+;;     Oracle no-ATTACK), Cyclone Lock-On `2350` (buff=116 skip + single-cast),
+;;     Viking `405` dedupe + coalescing, and Void Ray `2393` / Reaper `2588` P0 legality.
+;; =============================================================================
+(printf "[Wave 12] Testing W12-P0-3-wire (early-rush placement stall fixes + 2146/2350/405/2393/2588 wire dedupe & legality)...\n")
+(let ()
+  (define (w12-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define (mk-w12-u tag utype all x y
+                    #:hp [hp 100.0] #:en [en 100.0] #:flying? [fly? #f]
+                    #:cloak [cl 0] #:buffs [buffs '()] #:rad [rad 0.5])
+    (sc2-unit 1 all tag utype (if (= all 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 cl #f #f #f
+              hp hp 0.0 0.0 en 200.0 0 0 fly? #f
+              #f #t #f '() 0 buffs
+              0 0 0.0 0 0 0 0))
+
+  ;; 1a. Build priority runs strictly ahead of `pull-workers-attack` so a 12-Pool worker pull
+  ;;     NEVER starves emergency Pylon/SupplyDepot/Bunker placement of a builder worker!
+  (define rush-probes
+    (list (mk-w12-u 7301 84 1 30.0 32.0 #:hp 20.0)
+          (mk-w12-u 7302 84 1 30.5 32.5 #:hp 20.0)
+          (mk-w12-u 7303 84 1 31.0 32.0 #:hp 20.0)
+          (mk-w12-u 7304 84 1 31.5 32.5 #:hp 20.0)))
+  (define rush-lings
+    (for/list ([i (in-range 6)])
+      (mk-w12-u (+ 8301 i) 105 4 (+ 47.5 (* 0.3 i)) (+ 47.5 (* 0.3 i)) #:hp 35.0)))
+  (define rush-mins
+    (for/list ([i (in-range 6)])
+      (mk-w12-u (+ 9301 i) 341 3 25.5 (+ 29.0 (* 1.2 i)) #:rad 0.75)))
+  (define rush-p-obs
+    (make-test-obs 1900 440 40
+                   (append (list (mk-w12-u 7300 59 1 32.5 32.5 #:hp 1000.0 #:rad 2.75))
+                           rush-probes rush-lings rush-mins)))
+  (define rush-p-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((pull-workers-attack (7301 7302 7303 7304) 8301 47.5 47.5)
+       (build pylon 48.0 48.0))
+     rush-p-obs))
+  (define pylon-build-cmd
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 881)))
+           rush-p-cmds))
+  (define pull-atk-tags
+    (apply append
+           (for/list ([c (in-list rush-p-cmds)]
+                      #:when (and (sc2-raw-unit-command? c)
+                                  (= (sc2-raw-unit-command-ability-id c) 23)))
+             (sc2-raw-unit-command-unit-tags c))))
+  (check-true "w12-p0-3-build-pylon-claims-builder-before-pull-workers-attack"
+              (and (sc2-raw-unit-command? pylon-build-cmd)
+                   (= (length (sc2-raw-unit-command-unit-tags pylon-build-cmd)) 1)
+                   (= (length pull-atk-tags) 3)
+                   (not (memv (first (sc2-raw-unit-command-unit-tags pylon-build-cmd)) pull-atk-tags))))
+  (check-true "w12-p0-3-contested-rush-pylon-falls-back-to-safe-inmain-spot"
+              (and (sc2-raw-unit-command? pylon-build-cmd)
+                   (let ([pt (sc2-raw-unit-command-target-pos pylon-build-cmd)])
+                     (and (sc2-point2d? pt)
+                          (> (w12-dist (sc2-point2d-x pt) (sc2-point2d-y pt) 48.0 48.0) 5.0)
+                          (<= (w12-dist (sc2-point2d-x pt) (sc2-point2d-y pt) 32.5 32.5) 16.0)))))
+
+  ;; 1b. Contested Terran Supply Depot under 12-Pool rush falls back safely in-main AND claims 1 SCV ahead of pull!
+  (define rush-scvs
+    (list (mk-w12-u 7311 45 1 30.0 32.0 #:hp 45.0)
+          (mk-w12-u 7312 45 1 30.5 32.5 #:hp 45.0)
+          (mk-w12-u 7313 45 1 31.0 32.0 #:hp 45.0)))
+  (define rush-t-obs
+    (make-test-obs 1904 395 40
+                   (append (list (mk-w12-u 7310 18 1 32.5 32.5 #:hp 1500.0 #:rad 2.75))
+                           rush-scvs rush-lings rush-mins)))
+  (define rush-t-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((pull-workers-attack (7311 7312 7313) 8301 47.5 47.5)
+       (build supply-depot 48.0 48.0))
+     rush-t-obs))
+  (define depot-build-cmd
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 319)))
+           rush-t-cmds))
+  (check-true "w12-p0-3-contested-rush-supply-depot-builds-safely-inmain-before-pull"
+              (and (sc2-raw-unit-command? depot-build-cmd)
+                   (let ([pt (sc2-raw-unit-command-target-pos depot-build-cmd)])
+                     (and (sc2-point2d? pt)
+                          (> (w12-dist (sc2-point2d-x pt) (sc2-point2d-y pt) 48.0 48.0) 5.0)
+                          (<= (w12-dist (sc2-point2d-x pt) (sc2-point2d-y pt) 32.5 32.5) 16.0)))))
+
+  ;; 1c. `collect-spiral-candidates` excludes tiles directly occupied by live non-flying enemy units!
+  (define spiral-vs-ling
+    (collect-spiral-candidates 48.0 48.0 rush-lings
+                               #:min-spacing 2.0 #:max-radius 6.0 #:step 1.0 #:limit 6 #:bldg-sym 'pylon))
+  (check-true "w12-p0-3-spiral-candidates-skip-enemy-ground-occupied-tiles"
+              (and (pair? spiral-vs-ling)
+                   (for/and ([pt (in-list spiral-vs-ling)])
+                     (for/and ([e (in-list rush-lings)])
+                       (define ep (sc2-unit-pos e))
+                       (> (w12-dist (sc2-point2d-x pt) (sc2-point2d-y pt)
+                                    (sc2-point3d-x ep) (sc2-point3d-y ep))
+                          2.0)))))
+
+  ;; 1d. `pl:emergency-inmain-supply-anchor` avoids unbuildable cliff regions and enemy rush positions!
+  (define w12-map-grids
+    (hash 'width 80 'height 80
+          'pathing-ref (lambda (x y) (if (>= y 30) 1 0))
+          'placement-ref (lambda (x y) (if (>= y 30) 1 0))
+          'height-ref (lambda (x y) 10.0)))
+  (define-values (em-ax em-ay)
+    (pl:emergency-inmain-supply-anchor
+     32.5 32.5 52.0 32.5 0
+     (list (hash 'x 25.5 'y 32.5))
+     #:enemy-pts '((38.5 . 32.5))
+     #:map-grids w12-map-grids))
+  (check-true "w12-p0-3-emergency-inmain-supply-anchor-avoids-enemies-and-cliffs"
+              (and (>= em-ay 31.0)
+                   (> (w12-dist em-ax em-ay 38.5 32.5) 5.5)))
+
+  ;; 2a. `w12-tac-1` wire defense-in-depth: Oracle Revelation (2146) single-cast dedupe,
+  ;;     buff=49 skip, weaponless beam-off Oracle no-ATTACK (23), beam-on Oracle ATTACK allowed!
+  (define ora-7401 (mk-w12-u 7401 495 1 75.0 80.0 #:hp 100.0 #:en 100.0 #:flying? #t))
+  (define dt-unrev (mk-w12-u 8401 76  4 79.0 80.0 #:hp 40.0 #:cloak 1))
+  (define dt-rev49 (mk-w12-u 8401 76  4 79.0 80.0 #:hp 40.0 #:cloak 2 #:buffs '(49)))
+  (define scv-8402 (mk-w12-u 8402 45  4 78.0 80.0 #:hp 45.0))
+  (define rev-step1-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 7401 oracle-revelation 79.0 80.0)
+       (blind-skillshot-shimmer 7401 oracle-revelation 79.0 80.0)
+       (cast 7401 oracle-revelation 79.0 80.0))
+     (make-test-obs 12200 200 100 (list ora-7401 dt-unrev))))
+  (check-eqv "w12-tac-1-wire-oracle-revelation-single-cast-dedupe"
+             (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2146)))
+                    rev-step1-cmds)
+             1)
+  (define rev-step2-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 7401 oracle-revelation 79.0 80.0)
+       (attack 7401 8401))
+     (make-test-obs 12208 200 100 (list ora-7401 dt-rev49))))
+  (check-true "w12-tac-1-wire-oracle-skips-buff49-revelation-and-weaponless-attack"
+              (and (= (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2146))) rev-step2-cmds) 0)
+                   (= (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23)
+                                              (memv 7401 (sc2-raw-unit-command-unit-tags c)))) rev-step2-cmds) 0)))
+  (define ora-beam-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 7401 pulsar-beam)
+       (attack 7401 8402))
+     (make-test-obs 12212 200 100 (list ora-7401 scv-8402))))
+  (check-true "w12-tac-1-wire-oracle-activating-pulsar-beam-still-allowed-attack"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2375))) ora-beam-cmds)
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23)
+                                           (memv 7401 (sc2-raw-unit-command-unit-tags c)))) ora-beam-cmds)))
+
+  ;; 2b. `w12-tac-2` wire defense-in-depth: Cyclone Lock-On (2350) single-cast per target + buff=116 skip!
+  (define cyc-1 (mk-w12-u 7411 692 1 75.0 80.0 #:hp 120.0))
+  (define cyc-2 (mk-w12-u 7412 692 1 75.0 81.5 #:hp 120.0))
+  (define imm-clean (mk-w12-u 8411 83 4 81.0 80.0 #:hp 200.0))
+  (define imm-buff116 (mk-w12-u 8411 83 4 81.0 80.0 #:hp 200.0 #:buffs '(116)))
+  (define lock-clean-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 7411 lock-on 8411)
+       (cast-spell 7412 lock-on 8411))
+     (make-test-obs 12300 200 100 (list cyc-1 cyc-2 imm-clean))))
+  (check-eqv "w12-tac-2-wire-cyclone-lockon-single-cast-per-target"
+             (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2350)))
+                    lock-clean-cmds)
+             1)
+  (define lock-buff116-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 7411 lock-on 8411)
+       (cast-spell 7412 lock-on 8411))
+     (make-test-obs 12304 200 100 (list cyc-1 cyc-2 imm-buff116))))
+  (check-eqv "w12-tac-2-wire-cyclone-skips-already-locked-buff116-target"
+             (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2350)))
+                    lock-buff116-cmds)
+             0)
+
+  ;; 2c. `w12-tac-3` wire defense-in-depth: Viking Assault `405` dedupe + multi-tag coalescing!
+  (define vik-a1 (mk-w12-u 7421 34 1 75.0 80.0 #:hp 135.0))
+  (define vik-a2 (mk-w12-u 7422 34 1 75.0 81.5 #:hp 135.0))
+  (define vik-f3 (mk-w12-u 7423 35 1 75.0 83.0 #:hp 135.0 #:flying? #t))
+  (define vik-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 7421 morph-viking-fighter)
+       (morph 7421 viking-fighter)
+       (cast 7421 morph-viking-fighter)
+       (cast-spell 7422 morph-viking-fighter)
+       (morph 7422 viking-fighter)
+       (cast-spell 7423 morph-viking-fighter))
+     (make-test-obs 12600 200 100 (list vik-a1 vik-a2 vik-f3))))
+  (define vik-405-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 405)))
+            vik-cmds))
+  (check-true "w12-tac-3-wire-viking-405-deduped-coalesced-and-skips-already-fighter"
+              (and (= (length vik-405-cmds) 1)
+                   (equal? (sort (sc2-raw-unit-command-unit-tags (first vik-405-cmds)) <) '(7421 7422))))
+
+  ;; 2d. `w12-tac-4` wire legality & P0 priority: Void Ray Prismatic Alignment (2393) & Reaper KD8 Charge (2588)!
+  (define vr-7431 (mk-w12-u 7431 80 1 75.0 80.0 #:hp 150.0 #:flying? #t))
+  (define rpr-7441 (mk-w12-u 7441 49 1 75.0 80.0 #:hp 60.0))
+  (define ab2393-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 7431 prismatic-alignment)
+       (cast-spell 7431 prismatic-alignment)
+       (cast-spell 7441 kd8-charge 79.0 80.0)
+       (cast-spell 7441 kd8-charge 79.0 80.0))
+     (make-test-obs 12700 200 100 (list vr-7431 rpr-7441))))
+  (define vr-cmd (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2393))) ab2393-cmds))
+  (define rpr-cmd (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2588))) ab2393-cmds))
+  (check-true "w12-tac-4-wire-prismatic-alignment-2393-deduped-notarget-and-p0"
+              (and (= (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2393))) ab2393-cmds) 1)
+                   (not (sc2-raw-unit-command-target-pos vr-cmd))
+                   (= (sc2-raw-unit-command-target-unit-tag vr-cmd) 0)
+                   (= (wire-cmd-priority-tier vr-cmd) 0)))
+  (check-true "w12-tac-4-wire-reaper-kd8-charge-2588-deduped-pointtarget-and-p0"
+              (and (= (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2588))) ab2393-cmds) 1)
+                   (sc2-point2d? (sc2-raw-unit-command-target-pos rpr-cmd))
+                   (= (sc2-raw-unit-command-target-unit-tag rpr-cmd) 0)
+                   (= (wire-cmd-priority-tier rpr-cmd) 0))))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
