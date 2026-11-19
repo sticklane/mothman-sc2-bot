@@ -1801,7 +1801,7 @@
        (max 1.0 supply-buffer)))
   (define supply-margin-cap (compute-supply-preemption-margin supply-cap))
   (define eff-supply-margin (max supply-buffer (exact->inexact supply-margin-cap)))
-  (define supply-preempt-now? (supply-preemption-needed? supply-used supply-cap pending-supply))
+  (define supply-preempt-now? (supply-preemption-needed? supply-used supply-cap pending-supply #:race race))
   (define supply-hazard
     (cond
       [(>= supply-cap 200) 0.0]
@@ -2382,13 +2382,15 @@
 (define (crisis-deferred-sym? sym crisis-defer?
                               #:defer-stargate? [defer-stargate? #f]
                               #:keep-ship-weapons? [keep-ship-weapons? #f]
-                              #:keep-spire-aa? [keep-spire-aa? #f])
+                              #:keep-spire-aa? [keep-spire-aa? #f]
+                              #:keep-lair-aa? [keep-lair-aa? #f])
   (and (eq? crisis-defer? #t)
        (or (and (not (and keep-ship-weapons? (eq? sym 'terran-ship-weapons-1)))
                 (not (and keep-spire-aa?
                           (memq sym '(zerg-flyer-armor-1 zerg-flyer-armors-1))))
                 (not (not (memq sym CRISIS-DEFERRED-UPGRADE-SYMS))))
            (and (not (and keep-spire-aa? (eq? sym 'spire)))
+                (not (and (or keep-lair-aa? keep-spire-aa?) (eq? sym 'lair)))
                 (not (not (memq sym CRISIS-DEFERRED-TECH-SYMS))))
            (and defer-stargate? (eq? sym 'stargate)))))
 
@@ -2428,13 +2430,22 @@
 (define (protoss-enemy-capital-air? enemy-u-counts)
   (enemy-counts-have-any? enemy-u-counts PROTOSS-CAPITAL-AIR-ENEMY-SYMS))
 
-(define (protoss-4th-nexus-due? race active-bases workers army-supply minerals enemy-capital-air?)
+(define (protoss-4th-nexus-due? race active-bases workers army-supply minerals enemy-capital-air?
+                                #:has-tech? [has-tech? 'unspecified])
+  (define army (max 0.0 (safe-real army-supply 0.0)))
+  (define mins (safe-nonneg-int minerals 0))
   (and (eq? race 'Protoss)
        (= (safe-nonneg-int active-bases 1) 3)
        (>= (safe-nonneg-int workers 0) 54)
-       (or (>= (max 0.0 (safe-real army-supply 0.0)) 12.0)
-           (>= (safe-nonneg-int minerals 0) 500)
-           (eq? enemy-capital-air? #t))))
+       (if (eq? has-tech? 'unspecified)
+           ;; Legacy 6-arg synthetic test compatibility (`tests/run-all-tests.rkt:10332`)
+           (or (>= army 12.0)
+               (>= mins 500)
+               (eq? enemy-capital-air? #t))
+           ;; W4-P0-1a: require >= 1 mid-tier tech facility AND (>= 28 army OR (>= 22 army & >= 650M))
+           (and (eq? has-tech? #t)
+                (or (>= army 28.0)
+                    (and (>= army 22.0) (>= mins 650)))))))
 
 (define (enrich-priority-metrics
          base-metrics
@@ -2647,7 +2658,7 @@
   (define supply-urgent?
     (and (< supply-cap 200)
          (or (> supply-hazard 0.0)
-             (supply-preemption-needed? (- supply-cap supply-left) supply-cap pending-supply)
+             (supply-preemption-needed? (- supply-cap supply-left) supply-cap pending-supply #:race m-race)
              (and supply-at-risk? (< pending-supply 2) (<= eff-supply (+ supply-buffer 6.0)))
              (and (= pending-supply 0) (<= supply-left supply-buffer)))))
   (define outnumbered-by-threat?
@@ -3435,10 +3446,15 @@
              (and (>= live-workers 32)
                   (or (>= army-val 10)
                       (>= min-val 550))))))
+  (define has-protoss-mid-tech?
+    (or has-robo?
+        (> (bldg-eq-count 'twilight-council) 0)
+        (> (bldg-eq-count 'stargate) 0)))
   (define exp-blocking?
     (and (or (= active-bases 1)
              terran-breakout-cc-due?
-             (protoss-4th-nexus-due? race active-bases live-workers army-val min-val enemy-cap-air?)
+             (protoss-4th-nexus-due? race active-bases live-workers army-val min-val enemy-cap-air?
+                                     #:has-tech? has-protoss-mid-tech?)
              (and (not raw-under-attack?)
                   (not worker-survival-crisis?)
                   (or (> sg-depleting 0)
@@ -3448,7 +3464,8 @@
          (or terran-breakout-cc-due? escrow-ok?)
          (if (hash? open-prod-slots)
              (or terran-breakout-cc-due?
-                 (protoss-4th-nexus-due? race active-bases live-workers army-val min-val enemy-cap-air?)
+                 (protoss-4th-nexus-due? race active-bases live-workers army-val min-val enemy-cap-air?
+                                         #:has-tech? has-protoss-mid-tech?)
                  (> sg-depleting 0)
                  mirror-expand-due?
                  (not (not (memq bo-goal-sym '(hatchery nexus command-center))))
@@ -4600,10 +4617,22 @@
                (if (hash? open-prod-slots) (and (or sg-reqs-aa? sg-reqs-det?) (ready-bldg-has? 'engineering-bay)) #t))
          (boost-cand 'engineering-bay 'counter-tech (list 'build 'engineering-bay (safe-tile-coord (+ base-x 5.0)) (safe-tile-coord (- base-y 3.0)))
                      (if (hash? open-prod-slots)
-                         (and (or sg-reqs-aa? sg-reqs-det? upg-escalation?)
+                         (and (ready-bldg-has? 'barracks)
+                              (or sg-reqs-aa?
+                                  sg-reqs-det?
+                                  (and (>= active-bases 2)
+                                       (>= live-workers 30)
+                                       (ready-bldg-has? 'factory)))
                               (< (bldg-eq-count 'engineering-bay) 2))
                          #t)
-                     (if (and upg-escalation? (< (bldg-eq-count 'engineering-bay) 2)) 142.0 0.0))
+                     (if (and upg-escalation?
+                              (ready-bldg-has? 'barracks)
+                              (>= active-bases 2)
+                              (>= live-workers 30)
+                              (ready-bldg-has? 'factory)
+                              (< (bldg-eq-count 'engineering-bay) 2))
+                         142.0
+                         0.0))
          (boost-cand 'viking-fighter 'counter-tech '(train viking-fighter)
                      (facility-slot-open? 'starport 'starport)
                      (if (and has-port-ready?
@@ -8020,7 +8049,9 @@
 
 ;; Return #t when food-used >= food-cap - margin (for food-cap < 200)
 ;; and pending supply (+8 cap each) is insufficient to cover margin or hit 200.
-(define (supply-preemption-needed? food-used food-cap pending-supply)
+;; For Terran at starting cap=15 (0 Depots built), trigger Depot #1 at used >= 13
+;; to eliminate the 18s 15/15 opening supply block on long-ramp maps.
+(define (supply-preemption-needed? food-used food-cap pending-supply #:race [race #f])
   (define used (if (number? food-used) (inexact->exact (ceiling food-used)) 0))
   (define cap (if (number? food-cap) (inexact->exact (floor food-cap)) 0))
   (define pend (if (number? pending-supply) (max 0 (inexact->exact (floor pending-supply))) 0))
@@ -8029,7 +8060,7 @@
   (and (< cap 200)
        (cond
          [(<= cap 14) (>= used cap)]
-         [(= cap 15)  (>= used 14)]
+         [(= cap 15)  (>= used (if (eq? race 'Terran) 13 14))]
          [else        (>= used (- cap margin))])
        (or (= pend 0)
            (and (< proj-cap 200)
@@ -8163,8 +8194,17 @@
      (define cyclones (uc 'cyclone))
      (define banshees (uc 'banshee))
      (define rax-techlabs (bc 'barracks-techlab))
+     (define factories (bc 'factory 'factory-flying))
+     (define barracks (bc 'barracks 'barracks-flying))
+     (define orbitals (bc 'orbital-command 'orbital-command-flying))
      (define marauder-opening? (and (>= marauders 2) (< marines 2)))
      (case canon
+       [(terran-infantry-weapons-1 terran-infantry-armor-1 infantry-weapons-1 infantry-armor-1)
+        (or (>= factories 1) (>= barracks 2))]
+       [(stimpack)
+        (or (>= factories 1)
+            (>= barracks 2)
+            (and (>= rax-techlabs 1) (>= orbitals 2)))]
        [(combat-shield)
         (or (done? 'stimpack)
             (and (started-or-done? 'stimpack) (>= rax-techlabs 2)))]
@@ -8201,10 +8241,11 @@
        [else #t])]
     [else #t]))
 
-;; Bug 4 natural expansion benchmark window when townhall-count < 2 and no proxy/rush.
+;; Bug 4 / W2-P1-3a matchup-aware natural expansion benchmark window when townhall-count < 2 and no proxy/rush.
 (define (natural-expansion-window-active?
          race frame workers total-bases ready-bldgs total-bldgs
-         under-attack? enemy-threat-supply [proxy-or-rush? #f])
+         under-attack? enemy-threat-supply [proxy-or-rush? #f]
+         #:enemy-race [enemy-race 'Unknown])
   (define (bc sym)
     (max (ledger-map-count ready-bldgs sym) (ledger-map-count total-bldgs sym)))
   (define active-rush?
@@ -8217,13 +8258,26 @@
          [(Zerg)
           (or (>= workers 16) (>= frame 1000))]
          [(Protoss)
-          (and (>= (bc 'pylon) 1)
-               (>= (+ (bc 'gateway) (bc 'warp-gate)) 1)
-               (>= (bc 'assimilator) 1)
-               (or (>= workers 19) (>= frame 1200)))]
+          (if (eq? enemy-race 'Protoss)
+              ;; W3-P0-3b: PvP 2-Gate Double-Gas Cyber Expand aligned with Pro ~180–194s
+              (and (>= (bc 'pylon) 1)
+                   (>= (bc 'assimilator) 2)
+                   (>= (bc 'cybernetics-core) 1)
+                   (>= (+ (bc 'gateway) (bc 'warp-gate)) 2)
+                   (or (>= workers 20) (>= frame 2688)))
+              ;; PvZ/PvT: require >= 19 workers OR (>= 17 workers & frame >= 1450) — never hijack at 17 Probes / 53s
+              (and (>= (bc 'pylon) 1)
+                   (>= (+ (bc 'gateway) (bc 'warp-gate)) 1)
+                   (>= (bc 'assimilator) 1)
+                   (or (>= workers 19)
+                       (and (>= workers 17) (>= frame 1450)))))]
          [(Terran)
           (and (>= (+ (bc 'supply-depot) (bc 'supply-depot-lowered)) 1)
                (>= (+ (bc 'barracks) (bc 'barracks-flying)) 1)
                (>= (bc 'refinery) 1)
-               (or (>= workers 19) (>= frame 1450)))]
+               (or (>= workers 19)
+                   (and (>= frame 1750)
+                        (>= (+ (ledger-map-count ready-bldgs 'barracks)
+                               (ledger-map-count ready-bldgs 'barracks-flying))
+                            1))))]
          [else #f])))

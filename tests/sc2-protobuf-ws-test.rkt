@@ -14,6 +14,7 @@
          racket/string
          racket/tcp
          "../lib/sc2-game-constants.rkt"
+         (prefix-in pl: "../lib/sc2-placement.rkt")
          "../lib/sc2-protobuf-ws.rkt"
          "../sim/racket-sc2-ladder-main.rkt")
 
@@ -322,14 +323,15 @@
                         #:orders [orders '()]
                         #:add-on-tag [add-on-tag 0]
                         #:buffs [buffs '()]
-                        #:flying? [flying? #f])
+                        #:flying? [flying? #f]
+                        #:weapon-cooldown [weapon-cooldown 0.0])
   (sc2-unit 1 alliance tag unit-type (if (= alliance 1) 1 2)
             (sc2-point3d x y 8.0) 0.0 1.0 1.0 0 #f #f #f
             hp hp 0.0 0.0 energy 200.0
             (if (= alliance 3) min-contents 0)
             (if (or (= alliance 3) (memv unit-type '(88 61 20))) vesp-contents 0)
             flying? #f #f #t #f
-            orders add-on-tag buffs assigned ideal 0.0 0 0 0 0))
+            orders add-on-tag buffs assigned ideal weapon-cooldown 0 0 0 0))
 
 (define (make-test-obs loop minerals vespene units)
   (sc2-observation loop
@@ -1080,6 +1082,808 @@
                      (and (sc2-raw-unit-command? c)
                           (= (sc2-raw-unit-command-target-unit-tag c) 2)))
                    hyst-resat-cmds))
+
+;; P0-2 Regression: Cohesive Midgame Armies (No 6-10 Way Scatter), Hold/Suppress Posture
+;;                  Preservation, and Strictly Verified Endgame Building-Cleanup Sweeps
+(define p02-ginfo
+  (sc2-game-info "P02-CohesiveMidgame-Map" "" '() (cons 176 176) (list 8 8 168 168)
+                 (list (sc2-point2d 32.5 32.5) (sc2-point2d 143.5 143.5))
+                 #f #f #f))
+
+(define p02-map-minerals
+  (list (make-test-unit 9801 341 3 26.0 32.5)
+        (make-test-unit 9802 341 3 56.0 32.5)
+        (make-test-unit 9803 341 3 32.5 68.0)
+        (make-test-unit 9804 341 3 118.0 143.5)
+        (make-test-unit 9805 341 3 149.0 143.5)))
+
+(define (p02-attack-point-cmds cmds)
+  (filter (lambda (c)
+            (and (sc2-raw-unit-command? c)
+                 (= (sc2-raw-unit-command-ability-id c) 23)
+                 (sc2-point2d? (sc2-raw-unit-command-target-pos c))))
+          cmds))
+
+(define (p02-distinct-attack-pts cmds)
+  (remove-duplicates
+   (for/list ([c (in-list (p02-attack-point-cmds cmds))])
+     (define p (sc2-raw-unit-command-target-pos c))
+     (cons (sc2-point2d-x p) (sc2-point2d-y p)))))
+
+(define (p02-has-corner-scan? cmds)
+  (ormap (lambda (c)
+           (and (sc2-raw-unit-command? c)
+                (= (sc2-raw-unit-command-ability-id c) 399)))
+         cmds))
+
+;; Reset match state cleanly at loop 4 and populate base clusters
+(void
+ (translate-bot-actions->sc2-raw-commands
+  '()
+  (make-test-obs
+   4 50 0
+   (cons (make-test-unit 9001 132 1 32.5 32.5 #:energy 50.0)
+         p02-map-minerals))
+  #:game-info p02-ginfo
+  #:enemy-base '(143.5 143.5)))
+
+;; 1. Midgame 20-supply army (10 Stalkers = 20 supply) at loop 5500 AND loop 8000 with EMPTY enemy-units,
+;;    normal mineral fields, and sc2-game-info -> MUST stay cohesive (1 unified target, NO 6-10 way scatter,
+;;    NO premature Orbital Command corner scan!).
+(define p02-midgame-20sup-obs-5500
+  (make-test-obs
+   5500 350 150
+   (append
+    (list (make-test-unit 9001 132 1 32.5 32.5 #:energy 110.0))
+    (for/list ([i (in-range 10)])
+      (make-test-unit (+ 9100 i) 74 1 (+ 38.0 (* 0.5 i)) 34.0))
+    p02-map-minerals)))
+
+(define p02-midgame-sp-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((execute-spatial-maneuver multiprong-rotate-and-pin 143.5 143.5))
+   p02-midgame-20sup-obs-5500
+   #:game-info p02-ginfo
+   #:enemy-base '(143.5 143.5)))
+
+(check-eqv "p02-midgame-20sup-spatial-maneuver-single-cohesive-target"
+           (length (p02-distinct-attack-pts p02-midgame-sp-cmds))
+           1)
+(check-true "p02-midgame-20sup-spatial-maneuver-unifies-all-10-stalkers"
+            (ormap (lambda (c)
+                     (and (= (length (sc2-raw-unit-command-unit-tags c)) 10)
+                          (let ([p (sc2-raw-unit-command-target-pos c)])
+                            (and (= (sc2-point2d-x p) 143.5)
+                                 (= (sc2-point2d-y p) 143.5)))))
+                   (p02-attack-point-cmds p02-midgame-sp-cmds)))
+(check-true "p02-midgame-20sup-no-premature-corner-scan"
+            (not (p02-has-corner-scan? p02-midgame-sp-cmds)))
+
+;; 2. Midgame >= 6000 loops (loop 7200) idle-combat fallback with empty enemy-units & 20-supply army
+;;    MUST also stay cohesive (single ball, NO fan-out scatter, NO premature corner scan!).
+(define p02-midgame-20sup-obs-7200
+  (make-test-obs
+   7200 350 150
+   (append
+    (list (make-test-unit 9001 132 1 32.5 32.5 #:energy 110.0))
+    (for/list ([i (in-range 10)])
+      (make-test-unit (+ 9100 i) 74 1 (+ 38.0 (* 0.5 i)) 34.0))
+    p02-map-minerals)))
+
+(define p02-midgame-idle-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '()
+   p02-midgame-20sup-obs-7200
+   #:game-info p02-ginfo
+   #:enemy-base '(143.5 143.5)))
+
+(check-eqv "p02-midgame-7200-idle-fallback-single-cohesive-target"
+           (length (p02-distinct-attack-pts p02-midgame-idle-cmds))
+           1)
+(check-true "p02-midgame-7200-idle-fallback-unifies-all-10-stalkers"
+            (ormap (lambda (c) (= (length (sc2-raw-unit-command-unit-tags c)) 10))
+                   (p02-attack-point-cmds p02-midgame-idle-cmds)))
+(check-true "p02-midgame-7200-no-premature-corner-scan"
+            (not (p02-has-corner-scan? p02-midgame-idle-cmds)))
+
+;; 3. Midgame small squad (4 Marines at loop 7300 >= 6000, normal map, enemy main not cleared)
+;;    MUST NOT stream across the map (no 4-unit conga line of death!).
+(define p02-small-squad-obs
+  (make-test-obs
+   7300 200 50
+   (append
+    (list (make-test-unit 9001 132 1 32.5 32.5 #:energy 50.0))
+    (for/list ([i (in-range 4)])
+      (make-test-unit (+ 9150 i) 48 1 (+ 34.0 (* 0.5 i)) 34.0))
+    p02-map-minerals)))
+(define p02-small-squad-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((execute-spatial-maneuver multiprong-rotate-and-pin 143.5 143.5))
+   p02-small-squad-obs
+   #:game-info p02-ginfo
+   #:enemy-base '(143.5 143.5)))
+(check-true "p02-midgame-4-marine-squad-never-pushes-cross-map"
+            (not (ormap (lambda (c)
+                          (let ([p (sc2-raw-unit-command-target-pos c)])
+                            (or (> (sc2-point2d-x p) 80.0)
+                                (> (sc2-point2d-y p) 80.0))))
+                        (p02-attack-point-cmds p02-small-squad-cmds))))
+
+;; 4. Layer 3/4 hold / intercept / suppress-attack posture NEVER overridden by wire layer
+;;    (including across the 28-frame spatial-maneuver refractory cooldown!).
+(define p02-hold-obs-7500
+  (make-test-obs
+   7500 350 150
+   (append
+    (list (make-test-unit 9001 132 1 32.5 32.5 #:energy 110.0))
+    (for/list ([i (in-range 10)])
+      (make-test-unit (+ 9100 i) 74 1 (+ 36.0 (* 0.5 i)) 34.0))
+    p02-map-minerals)))
+(define p02-intercept-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((execute-spatial-maneuver pre-rotate-intercept-incoming-threat 56.5 32.5))
+   p02-hold-obs-7500
+   #:game-info p02-ginfo
+   #:enemy-base '(143.5 143.5)))
+(check-eqv "p02-midgame-pre-rotate-intercept-single-defensive-target"
+           (length (p02-distinct-attack-pts p02-intercept-cmds))
+           1)
+(check-true "p02-midgame-pre-rotate-intercept-respects-natural-rally"
+            (ormap (lambda (c)
+                     (let ([p (sc2-raw-unit-command-target-pos c)])
+                       (and (= (sc2-point2d-x p) 56.5)
+                            (= (sc2-point2d-y p) 32.5)
+                            (= (length (sc2-raw-unit-command-unit-tags c)) 10))))
+                   (p02-attack-point-cmds p02-intercept-cmds)))
+
+;; Next step inside 28-loop refractory cooldown (loop 7516, raw-actions = '(), units idle at natural):
+;; wire idle fallback MUST keep them holding cohesively at (56.5, 32.5) rather than marching cross-map!
+(define p02-sticky-hold-obs-7516
+  (make-test-obs
+   7516 350 150
+   (append
+    (list (make-test-unit 9001 132 1 32.5 32.5 #:energy 110.0))
+    (for/list ([i (in-range 10)])
+      (make-test-unit (+ 9100 i) 74 1 (+ 55.0 (* 0.3 i)) 32.5))
+    p02-map-minerals)))
+(define p02-sticky-hold-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '()
+   p02-sticky-hold-obs-7516
+   #:game-info p02-ginfo
+   #:enemy-base '(143.5 143.5)))
+(check-true "p02-sticky-hold-preserves-natural-hold-during-cooldown"
+            (null? (p02-attack-point-cmds p02-sticky-hold-cmds)))
+
+;; Explicit #:suppress-attack? #t MUST override even an offensive spatial maneuver and keep units near home!
+(define p02-suppress-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((execute-spatial-maneuver multiprong-rotate-and-pin 143.5 143.5))
+   p02-midgame-20sup-obs-7200
+   #:game-info p02-ginfo
+   #:enemy-base '(143.5 143.5)
+   #:suppress-attack? #t))
+(check-true "p02-explicit-suppress-attack-never-marches-to-enemy-base"
+            (not (ormap (lambda (c)
+                          (let ([p (sc2-raw-unit-command-target-pos c)])
+                            (or (> (sc2-point2d-x p) 70.0)
+                                (> (sc2-point2d-y p) 70.0))))
+                        (p02-attack-point-cmds p02-suppress-cmds))))
+
+;; Explicit crisis posture-transition MUST keep idle 20-supply army holding near home (never cross-map)
+(define p02-crisis-hold-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((posture-transition CrisisEarlyBust))
+   p02-midgame-20sup-obs-7200
+   #:game-info p02-ginfo
+   #:enemy-base '(143.5 143.5)))
+(check-true "p02-crisis-posture-prevents-cross-map-idle-push"
+            (not (ormap (lambda (c)
+                          (let ([p (sc2-raw-unit-command-target-pos c)])
+                            (or (> (sc2-point2d-x p) 70.0)
+                                (> (sc2-point2d-y p) 70.0))))
+                        (p02-attack-point-cmds p02-crisis-hold-cmds))))
+
+;; Base defense STILL overrides hold/suppress posture when an enemy attacks inside SC2-BASE-DEFENSE-RADIUS!
+(define p02-base-threat-obs
+  (make-test-obs
+   7600 350 150
+   (append
+    (list (make-test-unit 9001 132 1 32.5 32.5 #:energy 50.0)
+          (make-test-unit 9999 48 4 42.0 34.0))
+    (for/list ([i (in-range 10)])
+      (make-test-unit (+ 9100 i) 74 1 (+ 50.0 (* 0.3 i)) 34.0))
+    p02-map-minerals)))
+(define p02-base-threat-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '()
+   p02-base-threat-obs
+   #:game-info p02-ginfo
+   #:enemy-base '(143.5 143.5)
+   #:suppress-attack? #t))
+(check-true "p02-base-defense-still-engages-local-threat-under-suppress"
+            (ormap (lambda (c)
+                     (let ([p (sc2-raw-unit-command-target-pos c)])
+                       (and (= (sc2-point2d-x p) 42.0)
+                            (= (sc2-point2d-y p) 34.0)
+                            (= (length (sc2-raw-unit-command-unit-tags c)) 10))))
+                   (p02-attack-point-cmds p02-base-threat-cmds)))
+
+;; 5. Verified Endgame Cleanup A (Enemy Main Cleared with normal mineral fields still on map!):
+;;    Decisive army arrives at (143.5, 143.5) with 0 visible/snapshot enemies -> sweep activates cleanly!
+(define p02-cleared-main-obs
+  (make-test-obs
+   9000 600 300
+   (append
+    (list (make-test-unit 9001 132 1 32.5 32.5 #:energy 110.0)
+          (make-test-unit 9220 34 1 142.0 142.0 #:flying? #t)
+          (make-test-unit 9221 34 1 143.0 142.0 #:flying? #t))
+    (for/list ([i (in-range 12)])
+      (make-test-unit (+ 9200 i) 48 1 (+ 140.0 (* 0.4 i)) 143.5))
+    (for/list ([i (in-range 4)])
+      (make-test-unit (+ 9230 i) 51 1 (+ 141.0 (* 0.5 i)) 144.5))
+    p02-map-minerals)))
+(define p02-cleared-main-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((execute-spatial-maneuver multiprong-rotate-and-pin 143.5 143.5))
+   p02-cleared-main-obs
+   #:game-info p02-ginfo
+   #:enemy-base '(143.5 143.5)))
+(define p02-cleared-main-pts (p02-distinct-attack-pts p02-cleared-main-cmds))
+(check-true "p02-verified-enemy-main-cleared-scans-corner"
+            (p02-has-corner-scan? p02-cleared-main-cmds))
+(check-true "p02-verified-enemy-main-cleared-sweeps-multiple-waypoints"
+            (>= (length p02-cleared-main-pts) 3))
+(check-true "p02-verified-enemy-main-cleared-waypoints-inside-playable-bounds"
+            (for/and ([pt (in-list p02-cleared-main-pts)])
+              (and (>= (car pt) 11.0) (<= (car pt) 165.0)
+                   (>= (cdr pt) 11.0) (<= (cdr pt) 165.0))))
+
+;; 6. Verified Endgame Cleanup B (Mined-Out Map at loop 8000 after loop-4 cluster cache):
+;;    Fresh match rewind at loop 4 -> loop 8000 with '() mineral fields -> scans corner & sweeps >= 3 waypoints!
+(void
+ (translate-bot-actions->sc2-raw-commands
+  '()
+  (make-test-obs
+   4 50 0
+   (cons (make-test-unit 9301 132 1 32.5 32.5 #:energy 50.0)
+         p02-map-minerals))
+  #:game-info p02-ginfo
+  #:enemy-base '(143.5 143.5)))
+(define p02-mined-out-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((execute-spatial-maneuver pre-rotate-intercept-incoming-threat 56.5 32.5))
+   (make-test-obs
+    8000 800 400
+    (list (make-test-unit 9301 132 1 32.5 32.5 #:energy 110.0)
+          (make-test-unit 9311 83 1 38.0 34.0)
+          (make-test-unit 9312 83 1 39.0 34.0)
+          (make-test-unit 9313 83 1 40.0 34.0)
+          (make-test-unit 9314 83 1 41.0 34.0)
+          (make-test-unit 9315 83 1 42.0 34.0)
+          (make-test-unit 9316 78 1 40.0 36.0 #:flying? #t)
+          (make-test-unit 9317 78 1 41.0 36.0 #:flying? #t)))
+   #:game-info p02-ginfo
+   #:enemy-base '(143.5 143.5)))
+(define p02-mined-out-pts (p02-distinct-attack-pts p02-mined-out-cmds))
+(check-true "p02-mined-out-endgame-scans-corner"
+            (p02-has-corner-scan? p02-mined-out-cmds))
+(check-true "p02-mined-out-endgame-sweeps-at-least-3-waypoints"
+            (>= (length p02-mined-out-pts) 3))
+
+;; 7. Explicit #:endgame-cleanup? #t activates sweep even with minerals present,
+;;    while hard #:suppress-attack? #t takes precedence over #:endgame-cleanup? #t!
+(define p02-explicit-cleanup-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((execute-spatial-maneuver multiprong-rotate-and-pin 143.5 143.5))
+   p02-midgame-20sup-obs-7200
+   #:game-info p02-ginfo
+   #:enemy-base '(143.5 143.5)
+   #:endgame-cleanup? #t))
+(check-true "p02-explicit-endgame-cleanup-sweeps-cleanly"
+            (>= (length (p02-distinct-attack-pts p02-explicit-cleanup-cmds)) 3))
+(define p02-explicit-cleanup-suppressed-cmds
+  (translate-bot-actions->sc2-raw-commands
+   '((execute-spatial-maneuver multiprong-rotate-and-pin 143.5 143.5))
+   p02-midgame-20sup-obs-7200
+   #:game-info p02-ginfo
+   #:enemy-base '(143.5 143.5)
+   #:endgame-cleanup? #t
+   #:suppress-attack? #t))
+(check-true "p02-suppress-attack-overrides-endgame-cleanup"
+            (not (ormap (lambda (c)
+                          (let ([p (sc2-raw-unit-command-target-pos c)])
+                            (or (> (sc2-point2d-x p) 70.0)
+                                (> (sc2-point2d-y p) 70.0))))
+                        (p02-attack-point-cmds p02-explicit-cleanup-suppressed-cmds))))
+
+;; W2-P0-0 Regression: Normalize SC2 Unit.weapon_cooldown from game loops (22.4/s) to Faster seconds
+;;                     at the wire boundary for BOTH ally and enemy unit hashes.
+(check-approx "w2-p0-0-helper-zero-loops" (sc2-weapon-cooldown-loops->seconds 0.0) 0.0 1e-6)
+(check-approx "w2-p0-0-helper-marine-13.7-loops" (sc2-weapon-cooldown-loops->seconds 13.7) (/ 13.7 22.4) 1e-4)
+(check-approx "w2-p0-0-helper-one-second-22.4-loops" (sc2-weapon-cooldown-loops->seconds 22.4) 1.0 1e-6)
+(check-approx "w2-p0-0-helper-negative-clamps-to-zero" (sc2-weapon-cooldown-loops->seconds -5.0) 0.0 1e-6)
+(check-approx "w2-p0-0-helper-nan-clamps-to-zero" (sc2-weapon-cooldown-loops->seconds +nan.0) 0.0 1e-6)
+(check-approx "w2-p0-0-helper-inf-clamps-to-zero" (sc2-weapon-cooldown-loops->seconds +inf.0) 0.0 1e-6)
+(check-approx "w2-p0-0-helper-nonreal-clamps-to-zero" (sc2-weapon-cooldown-loops->seconds #f) 0.0 1e-6)
+
+(define w2-p0-0-obs
+  (make-test-obs
+   3000 200 100
+   (list (make-test-unit 9600 18 1 32.5 32.5) ;; Command Center
+         (make-test-unit 9601 48 1 40.0 34.0 #:weapon-cooldown 0.0)
+         (make-test-unit 9602 48 1 41.0 34.0 #:weapon-cooldown 13.7)
+         (make-test-unit 9603 74 1 42.0 34.0 #:weapon-cooldown 22.4)
+         (make-test-unit 9604 48 1 43.0 34.0 #:weapon-cooldown -4.2)
+         (make-test-unit 9701 74 4 50.0 34.0 #:weapon-cooldown 0.0)
+         (make-test-unit 9702 48 4 51.0 34.0 #:weapon-cooldown 13.7)
+         (make-test-unit 9703 74 4 52.0 34.0 #:weapon-cooldown 22.4)
+         (make-test-unit 9704 48 4 53.0 34.0 #:weapon-cooldown -3.5))))
+(define w2-p0-0-rt-hash (sc2-observation->runtime-obs-hash w2-p0-0-obs))
+(define (w2-p0-0-find-cd lst id)
+  (define rec (findf (lambda (h) (= (hash-ref h 'id -1) id)) lst))
+  (and rec (hash-ref rec 'weapon-cooldown #f)))
+(define w2-p0-0-allies (hash-ref w2-p0-0-rt-hash 'ally-units '()))
+(define w2-p0-0-enemies (hash-ref w2-p0-0-rt-hash 'enemy-units '()))
+
+(check-approx "w2-p0-0-ally-zero-loops-to-0.0s" (w2-p0-0-find-cd w2-p0-0-allies 9601) 0.0 1e-6)
+(check-approx "w2-p0-0-ally-13.7-loops-to-0.612s" (w2-p0-0-find-cd w2-p0-0-allies 9602) 0.6116 1e-3)
+(check-approx "w2-p0-0-ally-22.4-loops-to-1.0s" (w2-p0-0-find-cd w2-p0-0-allies 9603) 1.0 1e-6)
+(check-approx "w2-p0-0-ally-negative-loops-to-0.0s" (w2-p0-0-find-cd w2-p0-0-allies 9604) 0.0 1e-6)
+(check-approx "w2-p0-0-enemy-zero-loops-to-0.0s" (w2-p0-0-find-cd w2-p0-0-enemies 9701) 0.0 1e-6)
+(check-approx "w2-p0-0-enemy-13.7-loops-to-0.612s" (w2-p0-0-find-cd w2-p0-0-enemies 9702) 0.6116 1e-3)
+(check-approx "w2-p0-0-enemy-22.4-loops-to-1.0s" (w2-p0-0-find-cd w2-p0-0-enemies 9703) 1.0 1e-6)
+(check-approx "w2-p0-0-enemy-negative-loops-to-0.0s" (w2-p0-0-find-cd w2-p0-0-enemies 9704) 0.0 1e-6)
+
+;; -----------------------------------------------------------------------------
+;; Wave 3 Tests: W3-TAC-4 (Enemy Energy), W3-TAC-5 (Cargo/Passengers Fields 24-26),
+;;               W3-P1-1 (Single-RPC Batched Placement, 64-Loop Caches, <=2 RPC Budget & <=1 Tumor Throttle)
+;; -----------------------------------------------------------------------------
+(printf "[Wave 3] Testing W3-TAC-4 enemy energy, W3-TAC-5 cargo/passengers, W3-P1-1 placement batching/budget...\n")
+
+;; W3-TAC-4: Enemy unit hashes MUST carry 'energy and 'energy-max for live Feedback/EMP targeting
+(define w3-tac4-obs
+  (make-test-obs
+   3200 200 100
+   (list (make-test-unit 9800 59 1 32.5 32.5) ;; Nexus
+         (sc2-unit 1 1 9810 75 1 (sc2-point3d 40.0 34.0 8.0) 0.0 0.5 1.0 0 #f #f #f
+                   40.0 40.0 40.0 40.0 110.0 200.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0)
+         (sc2-unit 1 4 9801 56 2 (sc2-point3d 48.0 34.0 8.0) 0.0 0.625 1.0 0 #f #f #f
+                   140.0 140.0 0.0 0.0 150.0 200.0 0 0 #t #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0)
+         (sc2-unit 1 4 9802 111 2 (sc2-point3d 49.0 34.0 8.0) 0.0 0.75 1.0 0 #f #f #f
+                   90.0 90.0 0.0 0.0 125.4 200.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0)
+         (sc2-unit 1 4 9803 48 2 (sc2-point3d 50.0 34.0 8.0) 0.0 0.375 1.0 0 #f #f #f
+                   45.0 45.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0)
+         (sc2-unit 1 4 9804 75 2 (sc2-point3d 51.0 34.0 8.0) 0.0 0.5 1.0 0 #f #f #f
+                   40.0 40.0 40.0 40.0 92.6 200.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))))
+(define w3-tac4-rt (sc2-observation->runtime-obs-hash w3-tac4-obs))
+(define (w3-find-rec lst id)
+  (findf (lambda (h) (= (hash-ref h 'id -1) id)) lst))
+(define w3-tac4-raven (w3-find-rec (hash-ref w3-tac4-rt 'enemy-units '()) 9801))
+(define w3-tac4-infestor (w3-find-rec (hash-ref w3-tac4-rt 'enemy-units '()) 9802))
+(define w3-tac4-marine (w3-find-rec (hash-ref w3-tac4-rt 'enemy-units '()) 9803))
+(define w3-tac4-enemy-ht (w3-find-rec (hash-ref w3-tac4-rt 'enemy-units '()) 9804))
+(define w3-tac4-ally-ht (w3-find-rec (hash-ref w3-tac4-rt 'ally-units '()) 9810))
+(check-eqv "w3-tac4-enemy-raven-energy" (and w3-tac4-raven (hash-ref w3-tac4-raven 'energy #f)) 150)
+(check-eqv "w3-tac4-enemy-raven-energy-max" (and w3-tac4-raven (hash-ref w3-tac4-raven 'energy-max #f)) 200)
+(check-eqv "w3-tac4-enemy-infestor-energy" (and w3-tac4-infestor (hash-ref w3-tac4-infestor 'energy #f)) 125)
+(check-eqv "w3-tac4-enemy-infestor-energy-max" (and w3-tac4-infestor (hash-ref w3-tac4-infestor 'energy-max #f)) 200)
+(check-eqv "w3-tac4-enemy-marine-energy-zero" (and w3-tac4-marine (hash-ref w3-tac4-marine 'energy #f)) 0)
+(check-eqv "w3-tac4-enemy-marine-energy-max-zero" (and w3-tac4-marine (hash-ref w3-tac4-marine 'energy-max #f)) 0)
+(check-eqv "w3-tac4-enemy-ht-energy-rounded" (and w3-tac4-enemy-ht (hash-ref w3-tac4-enemy-ht 'energy #f)) 93)
+(check-eqv "w3-tac4-ally-ht-energy-max" (and w3-tac4-ally-ht (hash-ref w3-tac4-ally-ht 'energy-max #f)) 200)
+
+;; W3-TAC-5: Protobuf Unit fields 24 (passengers), 25 (cargo_space_taken), 26 (cargo_space_max)
+(define (w3-f32 fnum v)
+  (bytes-append (encode-tag fnum 5) (encode-float32 v)))
+
+(define (w3-encode-passenger tag utype hp hp-max
+                             #:shield [sh 0.0] #:shield-max [sh-max 0.0]
+                             #:energy [en 0.0] #:energy-max [en-max 0.0]
+                             #:legacy-field8-utype? [legacy-f8? #f])
+  (bytes-append
+   (encode-uint64 1 tag)
+   (w3-f32 2 hp)
+   (w3-f32 3 hp-max)
+   (w3-f32 4 sh)
+   (w3-f32 5 en)
+   (if legacy-f8?
+       (encode-uint32 8 utype)
+       (bytes-append (encode-uint32 6 utype)
+                     (w3-f32 7 sh-max)
+                     (w3-f32 8 en-max)))))
+
+(define (w3-encode-cargo-unit tag utype alliance x y hp passengers-bytes cargo-taken cargo-max)
+  (bytes-append
+   (encode-synthetic-unit tag utype alliance x y hp 0.0)
+   (apply bytes-append (for/list ([pb (in-list passengers-bytes)])
+                         (encode-submessage-field 24 pb)))
+   (encode-int32 25 cargo-taken)
+   (encode-int32 26 cargo-max)))
+
+(define w3-tac5-medivac-pb
+  (w3-encode-cargo-unit
+   9901 54 1 45.0 45.0 150.0
+   (list (w3-encode-passenger 9910 48 45.0 45.0)
+         (w3-encode-passenger 9911 51 110.0 125.0 #:energy 30.0 #:energy-max 100.0))
+   3 8))
+(define w3-tac5-prism-pb
+  (w3-encode-cargo-unit
+   9902 81 1 50.0 50.0 80.0
+   (list (w3-encode-passenger 9912 83 200.0 200.0 #:shield 100.0 #:legacy-field8-utype? #t))
+   4 8))
+(define w3-tac5-bunker-pb
+  (w3-encode-cargo-unit
+   9903 24 1 38.0 38.0 400.0
+   (list (w3-encode-passenger 9913 48 45.0 45.0)
+         (w3-encode-passenger 9914 48 40.0 45.0))
+   2 4))
+(define w3-tac5-cc-pb (encode-synthetic-unit 9900 18 1 32.5 32.5 1500.0 0.0))
+(define w3-tac5-resp
+  (decode-sc2-response
+   (encode-synthetic-observation-response
+    3400 300 150 40 54
+    (list w3-tac5-cc-pb w3-tac5-medivac-pb w3-tac5-prism-pb w3-tac5-bunker-pb))))
+(define w3-tac5-obs (sc2-response-observation w3-tac5-resp))
+(define (w3-find-sc2-unit obs tag)
+  (findf (lambda (u) (= (sc2-unit-tag u) tag)) (sc2-observation-units obs)))
+(define w3-medivac-u (w3-find-sc2-unit w3-tac5-obs 9901))
+(define w3-prism-u (w3-find-sc2-unit w3-tac5-obs 9902))
+(define w3-bunker-u (w3-find-sc2-unit w3-tac5-obs 9903))
+
+(check-eqv "w3-tac5-medivac-cargo-taken" (sc2-unit-cargo-space-taken w3-medivac-u) 3)
+(check-eqv "w3-tac5-medivac-cargo-max" (sc2-unit-cargo-space-max w3-medivac-u) 8)
+(check-eqv "w3-tac5-medivac-passenger-count" (length (sc2-unit-passengers w3-medivac-u)) 2)
+(check-eqv "w3-tac5-medivac-pax0-tag" (sc2-passenger-unit-tag (first (sc2-unit-passengers w3-medivac-u))) 9910)
+(check-eqv "w3-tac5-medivac-pax0-type" (sc2-passenger-unit-unit-type (first (sc2-unit-passengers w3-medivac-u))) 48)
+(check-eqv "w3-tac5-medivac-pax1-type" (sc2-passenger-unit-unit-type (second (sc2-unit-passengers w3-medivac-u))) 51)
+(check-approx "w3-tac5-medivac-pax1-energy-max" (sc2-passenger-unit-energy-max (second (sc2-unit-passengers w3-medivac-u))) 100.0 1e-4)
+(check-eqv "w3-tac5-prism-cargo-taken" (sc2-unit-cargo-space-taken w3-prism-u) 4)
+(check-eqv "w3-tac5-prism-legacy-f8-pax-type" (sc2-passenger-unit-unit-type (first (sc2-unit-passengers w3-prism-u))) 83)
+
+;; struct-copy sc2-unit MUST preserve decoded passengers/cargo fields cleanly across module boundaries
+(define w3-medivac-copied (struct-copy sc2-unit w3-medivac-u [health 120.0]))
+(check-approx "w3-tac5-struct-copy-updates-health" (sc2-unit-health w3-medivac-copied) 120.0 1e-4)
+(check-eqv "w3-tac5-struct-copy-preserves-cargo-taken" (sc2-unit-cargo-space-taken w3-medivac-copied) 3)
+(check-eqv "w3-tac5-struct-copy-preserves-cargo-max" (sc2-unit-cargo-space-max w3-medivac-copied) 8)
+(check-eqv "w3-tac5-struct-copy-preserves-passengers" (length (sc2-unit-passengers w3-medivac-copied)) 2)
+
+;; Runtime obs hash exposes cargo fields on BOTH ally units and ally buildings
+(define w3-tac5-rt (sc2-observation->runtime-obs-hash w3-tac5-obs))
+(define w3-rt-medivac (w3-find-rec (hash-ref w3-tac5-rt 'ally-units '()) 9901))
+(define w3-rt-prism (w3-find-rec (hash-ref w3-tac5-rt 'ally-units '()) 9902))
+(define w3-rt-bunker (w3-find-rec (hash-ref w3-tac5-rt 'ally-buildings '()) 9903))
+(check-eqv "w3-tac5-rt-medivac-cargo-taken" (hash-ref w3-rt-medivac 'cargo-space-taken -1) 3)
+(check-eqv "w3-tac5-rt-medivac-cargo-max" (hash-ref w3-rt-medivac 'cargo-space-max -1) 8)
+(check-eqv "w3-tac5-rt-medivac-pax-types"
+           (map (lambda (p) (hash-ref p 'type 'unknown)) (hash-ref w3-rt-medivac 'passengers '()))
+           '(marine marauder))
+(check-eqv "w3-tac5-rt-prism-pax-type"
+           (hash-ref (first (hash-ref w3-rt-prism 'passengers '())) 'type 'unknown)
+           'immortal)
+(check-eqv "w3-tac5-rt-prism-pax-shield"
+           (hash-ref (first (hash-ref w3-rt-prism 'passengers '())) 'shield -1)
+           100)
+(check-eqv "w3-tac5-rt-bunker-cargo-taken" (hash-ref w3-rt-bunker 'cargo-space-taken -1) 2)
+(check-eqv "w3-tac5-rt-bunker-cargo-max" (hash-ref w3-rt-bunker 'cargo-space-max -1) 4)
+(check-eqv "w3-tac5-rt-bunker-pax-count" (length (hash-ref w3-rt-bunker 'passengers '())) 2)
+
+;; W3-P1-1: Single-RPC batched placement, 64-loop pos/neg caches, <= 2 RPC/step budget, <= 1 tumor RPC/step
+(define (w3-start-mock-placement-ws policy-fn)
+  ;; policy-fn: (rpc-index, item-index, total-items) -> result-code (1=Success, 2=Invalid)
+  (define-values (c-in s-out) (make-pipe))
+  (define-values (s-in c-out) (make-pipe))
+  (define ws (sc2-ws-conn "127.0.0.1" 0 "/sc2api" c-in c-out #f 1))
+  (define rpc-count (box 0))
+  (define batch-sizes (box '()))
+  (define thd
+    (thread
+     (lambda ()
+       (let lp ()
+         (define hdr2 (read-bytes 2 s-in))
+         (unless (eof-object? hdr2)
+           (define b0 (bytes-ref hdr2 0))
+           (define b1 (bytes-ref hdr2 1))
+           (define opcode (bitwise-and b0 #x0F))
+           (define masked? (not (zero? (bitwise-and b1 #x80))))
+           (define len7 (bitwise-and b1 #x7F))
+           (define plen
+             (cond [(< len7 126) len7]
+                   [(= len7 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                   [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+           (define mkey (if masked? (read-bytes 4 s-in) #f))
+           (define raw (read-bytes plen s-in))
+           (define payload (if masked? (mask-ws-payload raw mkey) raw))
+           (when (= opcode 2)
+             (define cur-rpc (unbox rpc-count))
+             (set-box! rpc-count (add1 cur-rpc))
+             (define req-f (decode-protobuf-message payload))
+             (define req-id-p (assoc 97 req-f))
+             (define id-b (if req-id-p (encode-uint32 97 (third req-id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define n-items (length p-items))
+               (set-box! batch-sizes (append (unbox batch-sizes) (list n-items)))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([_it (in-list p-items)]
+                                   [idx (in-naturals 0)])
+                          (encode-submessage-field 3 (encode-int32 1 (policy-fn cur-rpc idx n-items))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp)))))))
+  (values ws rpc-count batch-sizes
+          (lambda ()
+            (close-output-port c-out)
+            (close-input-port c-in)
+            (thread-wait thd))))
+
+(define w3-full-grid (sc2-image-grid 8 128 128 (make-bytes (* 128 128) 1) #f #f))
+(define w3-ginfo
+  (sc2-game-info "W3PlacementMap" "" '() '(128 128) '(4 4 124 124)
+                 (list (sc2-point2d 100.0 100.0))
+                 w3-full-grid #f w3-full-grid))
+
+;; W3-P1-1A: Single batched RequestQuery RPC even when all primary spots (0..35) fail and fallback spot succeeds
+(hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+(hash-clear! SC2-PLACEMENT-POS-CACHE)
+(hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
+(let-values ([(ws rpc-cnt bsizes cleanup!)
+              (w3-start-mock-placement-ws (lambda (_rpc idx n) (if (= idx (sub1 n)) 1 2)))])
+  (define pylon-u (sc2-unit 1 1 8801 60 1 (sc2-point3d 30.0 30.0 8.0) 0.0 1.0 1.0 0 #f #t #f
+                            200.0 200.0 200.0 200.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+  (define nexus-u (sc2-unit 1 1 8800 59 1 (sc2-point3d 24.5 24.5 8.0) 0.0 2.75 1.0 0 #f #t #f
+                            1000.0 1000.0 1000.0 1000.0 50.0 200.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+  (define pt1
+    (find-verified-building-placement ws 882 30.0 30.0 (list nexus-u pylon-u)
+                                      #:min-spacing 2.0 #:max-radius 6.5 #:step 1.0
+                                      #:bldg-sym 'gateway #:game-info w3-ginfo #:cur-loop 500))
+  (check-true "w3-p1-1a-single-rpc-finds-fallback-spot" (sc2-point2d? pt1))
+  (check-eqv "w3-p1-1a-single-batched-rpc-count" (unbox rpc-cnt) 1)
+  (check-true "w3-p1-1a-batch-contains-multiple-candidates"
+              (and (pair? (unbox bsizes)) (>= (first (unbox bsizes)) 8)))
+  ;; W3-P1-1B: Positive cache hit within 64 loops -> 0 additional RPCs!
+  (define pt2
+    (find-verified-building-placement ws 882 30.0 30.0 (list nexus-u pylon-u)
+                                      #:min-spacing 2.0 #:max-radius 6.5 #:step 1.0
+                                      #:bldg-sym 'gateway #:game-info w3-ginfo #:cur-loop 540))
+  (check-eqv "w3-p1-1b-pos-cache-hit-same-pt" pt2 pt1)
+  (check-eqv "w3-p1-1b-pos-cache-hit-zero-extra-rpcs" (unbox rpc-cnt) 1)
+  ;; Positive cache invalidates on step-reserved collision (extra-reserved-points) so two builds never overlap
+  (define pt3
+    (find-verified-building-placement ws 882 30.0 30.0 (list nexus-u pylon-u)
+                                      #:min-spacing 2.0 #:max-radius 6.5 #:step 1.0
+                                      #:extra-reserved-points (list pt1)
+                                      #:bldg-sym 'gateway #:game-info w3-ginfo #:cur-loop 540))
+  (check-true "w3-p1-1b-pos-cache-skips-reserved-collision"
+              (and (sc2-point2d? pt3) (not (equal? pt3 pt1))))
+  (check-eqv "w3-p1-1b-reserved-collision-triggers-1-rpc" (unbox rpc-cnt) 2)
+  (cleanup!))
+
+;; W3-P1-1C: Negative cooldown 64-loop TTL skips retries at +48 loops and re-queries at +65 loops
+(hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+(hash-clear! SC2-PLACEMENT-POS-CACHE)
+(let-values ([(ws rpc-cnt _bsizes cleanup!)
+              (w3-start-mock-placement-ws (lambda (_rpc _idx _n) 2))])
+  (define pylon-u (sc2-unit 1 1 8811 60 1 (sc2-point3d 30.0 30.0 8.0) 0.0 1.0 1.0 0 #f #t #f
+                            200.0 200.0 200.0 200.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+  (define r1 (find-verified-building-placement ws 882 30.0 30.0 (list pylon-u)
+                                               #:bldg-sym 'gateway #:game-info w3-ginfo #:cur-loop 1000))
+  (define r2 (find-verified-building-placement ws 882 30.0 30.0 (list pylon-u)
+                                               #:bldg-sym 'gateway #:game-info w3-ginfo #:cur-loop 1048))
+  (define r3 (find-verified-building-placement ws 882 30.0 30.0 (list pylon-u)
+                                               #:bldg-sym 'gateway #:game-info w3-ginfo #:cur-loop 1065))
+  (check-eqv "w3-p1-1c-neg-cache-all-fail" (list r1 r2 r3) '(#f #f #f))
+  (check-eqv "w3-p1-1c-neg-cache-64-loop-ttl-only-2-rpcs" (unbox rpc-cnt) 2)
+  (cleanup!))
+
+;; W3-P1-1D: Per-step Creep Tumor <= 1 RPC/step throttle & <= 2 total placement RPCs/step budget (P1 macro first!)
+(hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+(hash-clear! SC2-PLACEMENT-POS-CACHE)
+(hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
+(let-values ([(ws rpc-cnt _bsizes cleanup!)
+              (w3-start-mock-placement-ws (lambda (_rpc _idx _n) 1))])
+  (define hatch-u (sc2-unit 1 1 8900 86 1 (sc2-point3d 32.5 32.5 8.0) 0.0 2.75 1.0 0 #f #t #f
+                            1500.0 1500.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+  (define drones (for/list ([i (in-range 4)])
+                   (make-test-unit (+ 8901 i) 104 1 (+ 35.0 i) 32.0 #:hp 40.0)))
+  (define tumors (for/list ([i (in-range 8)])
+                   (sc2-unit 1 1 (+ 8920 i) 137 1 (sc2-point3d (+ 40.0 (* 4.0 i)) 34.0 8.0) 0.0 0.5 1.0 0 #f #t #f
+                             50.0 50.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0)))
+  (define zerg-obs (make-test-obs 4000 1000 500 (append (list hatch-u) drones tumors)))
+  ;; Subtest D1: 8 Creep Tumors casting in one step -> throttled to <= 1 RPC and <= 1 cast emitted!
+  (define tumor-actions
+    (for/list ([i (in-range 8)])
+      (list 'cast (+ 8920 i) 'spread-creep-tumor (+ 48.0 (* 4.0 i)) 34.0)))
+  (define tumor-cmds
+    (translate-bot-actions->sc2-raw-commands tumor-actions zerg-obs #:ws-conn ws #:game-info w3-ginfo))
+  (define tumor-spread-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1733)))
+            tumor-cmds))
+  (check-eqv "w3-p1-1d-8-tumors-throttled-to-1-rpc" (unbox rpc-cnt) 1)
+  (check-eqv "w3-p1-1d-8-tumors-emits-1-spread-cmd" (length tumor-spread-cmds) 1)
+  ;; Subtest D2: 3 distinct P1 macro builds + 4 Creep Tumors in one step -> <= 2 total RPCs/step,
+  ;; P1 macro buildings get priority over Creep Tumors, and deferred 3rd build does NOT poison neg cooldown!
+  (define rpcs-before-d2 (unbox rpc-cnt))
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (define zerg-obs-d2 (make-test-obs 4008 1000 500 (append (list hatch-u) drones tumors)))
+  (define mixed-actions
+    (append
+     (take tumor-actions 4) ;; deliberately placed BEFORE builds in input to prove P1 macro priority!
+     '((build spawning-pool 36.0 36.0)
+       (build roach-warren 28.0 36.0)
+       (build evolution-chamber 36.0 28.0))))
+  (define mixed-cmds
+    (translate-bot-actions->sc2-raw-commands mixed-actions zerg-obs-d2 #:ws-conn ws #:game-info w3-ginfo))
+  (define d2-rpcs (- (unbox rpc-cnt) rpcs-before-d2))
+  (define d2-bldg-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (memv (sc2-raw-unit-command-ability-id c) '(1155 1165 1156))))
+            mixed-cmds))
+  (define d2-tumor-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1733)))
+            mixed-cmds))
+  (check-true "w3-p1-1d-mixed-step-respects-2-rpc-budget" (<= d2-rpcs 2))
+  (check-eqv "w3-p1-1d-p1-macro-gets-both-rpcs" (length d2-bldg-cmds) 2)
+  (check-eqv "w3-p1-1d-tumors-deferred-when-macro-uses-budget" (length d2-tumor-cmds) 0)
+  (check-true "w3-p1-1d-deferred-3rd-build-does-not-poison-neg-cooldown"
+              (= (hash-count SC2-PLACEMENT-NEG-COOLDOWN) 0))
+  (cleanup!))
+
+;; W3-P1-1D3: Creep Tumor negative placement cache (64-loop TTL) skips redundant RPCs
+(hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
+(let-values ([(ws rpc-cnt _bsizes cleanup!)
+              (w3-start-mock-placement-ws (lambda (_rpc _idx _n) 2))])
+  (define hatch-u (sc2-unit 1 1 8960 86 1 (sc2-point3d 32.5 32.5 8.0) 0.0 2.75 1.0 0 #f #t #f
+                            1500.0 1500.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+  (define tumor-u (sc2-unit 1 1 8961 137 1 (sc2-point3d 40.0 34.0 8.0) 0.0 0.5 1.0 0 #f #t #f
+                            50.0 50.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+  (define act '((cast 8961 spread-creep-tumor 48.0 34.0)))
+  (void (translate-bot-actions->sc2-raw-commands act (make-test-obs 4200 400 100 (list hatch-u tumor-u)) #:ws-conn ws #:game-info w3-ginfo))
+  (void (translate-bot-actions->sc2-raw-commands act (make-test-obs 4240 400 100 (list hatch-u tumor-u)) #:ws-conn ws #:game-info w3-ginfo))
+  (void (translate-bot-actions->sc2-raw-commands act (make-test-obs 4268 400 100 (list hatch-u tumor-u)) #:ws-conn ws #:game-info w3-ginfo))
+  (check-eqv "w3-p1-1d3-tumor-neg-cache-64-loop-ttl-only-2-rpcs" (unbox rpc-cnt) 2)
+  (cleanup!))
+
+;; W3-P1-1E: Multi-base find-best-expansion-placement batches across bases in 1 SINGLE RPC!
+(let-values ([(ws rpc-cnt bsizes cleanup!)
+              ;; Reject all Base #0 candidates and accept the last candidate (inside Base #1)!
+              (w3-start-mock-placement-ws (lambda (_rpc idx n) (if (= idx (sub1 n)) 1 2)))])
+  (define (mk-exp-cluster tag0 px py)
+    (append
+     (for/list ([k (in-range 8)])
+       (make-test-unit (+ tag0 k) 341 3 (- px 6.5) (+ (- py 3.5) k) #:minerals 1500))
+     (list (make-test-unit (+ tag0 8) 342 3 px (- py 7.0) #:vespene 2250)
+           (make-test-unit (+ tag0 9) 342 3 px (+ py 7.0) #:vespene 2250))))
+  (define exp-units
+    (append
+     (list (sc2-unit 1 1 8950 86 1 (sc2-point3d 24.5 24.5 8.0) 0.0 2.75 1.0 0 #f #t #f
+                     1500.0 1500.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+     (mk-exp-cluster 9100 24.5 24.5)
+     (mk-exp-cluster 9200 24.5 56.5)
+     (mk-exp-cluster 9300 64.5 24.5)))
+  (define exp-pt
+    (find-best-expansion-placement ws 1152 24.5 24.5 exp-units #:game-info w3-ginfo))
+  (check-true "w3-p1-1e-batched-expand-finds-2nd-base"
+              (and (sc2-point2d? exp-pt)
+                   (<= (sqrt (+ (sqr (- (sc2-point2d-x exp-pt) 64.5))
+                                (sqr (- (sc2-point2d-y exp-pt) 24.5))))
+                       6.0)))
+  (check-eqv "w3-p1-1e-batched-expand-only-1-rpc" (unbox rpc-cnt) 1)
+  (check-true "w3-p1-1e-batched-expand-spans-multiple-bases"
+              (and (pair? (unbox bsizes)) (>= (first (unbox bsizes)) 6)))
+  (cleanup!))
+
+(hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+(hash-clear! SC2-PLACEMENT-POS-CACHE)
+(hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
+
+;; -----------------------------------------------------------------------------
+;; Wave 4 Tests: W4-TAC-2-wire (No Mid-Fight / Armed-HT Archon Merge)
+;;               W4-P1-1 (Pruned PvZ Natural-Wall Solver Latency & Validity)
+;; -----------------------------------------------------------------------------
+(printf "[Wave 4] Testing W4-TAC-2-wire Archon merge guards & W4-P1-1 PvZ wall solver latency...\n")
+
+(define (w4-has-1766? cmds)
+  (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1766)))
+         cmds))
+
+(define w4-ht-armed-1 (make-test-unit 9951 75 1 78.5 79.5 #:hp 40.0 #:energy 65.0))
+(define w4-ht-armed-2 (make-test-unit 9952 75 1 78.5 80.5 #:hp 40.0 #:energy 65.0))
+(define w4-ht-50en-1  (make-test-unit 9953 75 1 78.5 79.5 #:hp 40.0 #:energy 50.0))
+(define w4-ht-50en-2  (make-test-unit 9954 75 1 78.5 80.5 #:hp 40.0 #:energy 50.0))
+(define w4-ht-spent-1 (make-test-unit 9955 75 1 78.5 79.5 #:hp 40.0 #:energy 20.0))
+(define w4-ht-spent-2 (make-test-unit 9956 75 1 78.5 80.5 #:hp 40.0 #:energy 15.0))
+(define w4-close-ling (make-test-unit 9960 105 4 84.5 80.0 #:hp 35.0)) ;; 6.0t <= 8.5t
+(define w4-far-hydra  (make-test-unit 9961 107 4 92.5 80.0 #:hp 90.0)) ;; 14.0t > 8.5t
+(define w4-close-ovi  (make-test-unit 9962 106 4 82.0 80.0 #:hp 200.0 #:flying? #t)) ;; non-combat
+(define w4-3-mutas-far
+  (for/list ([i (in-range 3)]) (make-test-unit (+ 9970 i) 108 4 (+ 86.0 i) 80.0 #:hp 120.0 #:flying? #t))) ;; 7.5t > 4.5t
+(define w4-3-mutas-close
+  (for/list ([i (in-range 3)]) (make-test-unit (+ 9975 i) 108 4 (+ 81.5 i) 80.0 #:hp 120.0 #:flying? #t))) ;; 3.0t <= 4.5t
+
+;; 1. Armed HTs (65en > 50) NEVER merge even with 0 enemies across ALL 4 wire paths
+(check-eqv "w4-tac2-65en-no-enemies-producer-blocked"
+           (select-producer-tags-for-unit 'archon (list w4-ht-armed-1 w4-ht-armed-2) '())
+           '())
+(define w4-obs-65en (make-test-obs 5000 300 200 (list w4-ht-armed-1 w4-ht-armed-2)))
+(check-true "w4-tac2-65en-morph-archon-blocked"
+            (not (w4-has-1766? (translate-bot-actions->sc2-raw-commands '((morph archon)) w4-obs-65en))))
+(check-true "w4-tac2-65en-morph-ids-archon-blocked"
+            (not (w4-has-1766? (translate-bot-actions->sc2-raw-commands '((morph (9951 9952) archon)) w4-obs-65en))))
+(check-true "w4-tac2-65en-cast-morph-archon-blocked"
+            (not (w4-has-1766? (translate-bot-actions->sc2-raw-commands '((cast (9951 9952) morph-archon)) w4-obs-65en))))
+
+;; 2. 50en HTs: blocked when combat enemies are visible (Feedback-ready), allowed at home with 0 enemies (Suite 25)
+(check-eqv "w4-tac2-50en-with-visible-combat-blocked"
+           (select-producer-tags-for-unit 'archon (list w4-ht-50en-1 w4-ht-50en-2) (list w4-far-hydra))
+           '())
+(check-eqv "w4-tac2-50en-at-home-no-enemies-allowed"
+           (sort (select-producer-tags-for-unit 'archon (list w4-ht-50en-1 w4-ht-50en-2) '()) <)
+           '(9953 9954))
+
+;; 3. Spent HTs (<50en) NEVER merge while enemy combat is within 8.5t of merge midpoint across ALL paths
+(check-eqv "w4-tac2-spent-ht-close-ling-producer-blocked"
+           (select-producer-tags-for-unit 'archon (list w4-ht-spent-1 w4-ht-spent-2) (list w4-close-ling))
+           '())
+(define w4-obs-spent-close (make-test-obs 5010 300 200 (list w4-ht-spent-1 w4-ht-spent-2 w4-close-ling)))
+(check-true "w4-tac2-spent-ht-close-ling-morph-blocked"
+            (not (w4-has-1766? (translate-bot-actions->sc2-raw-commands '((morph archon)) w4-obs-spent-close))))
+(check-true "w4-tac2-spent-ht-close-ling-morph-ids-blocked"
+            (not (w4-has-1766? (translate-bot-actions->sc2-raw-commands '((morph (9955 9956) archon)) w4-obs-spent-close))))
+(check-true "w4-tac2-spent-ht-close-ling-cast-blocked"
+            (not (w4-has-1766? (translate-bot-actions->sc2-raw-commands '((cast (9955 9956) morph-archon)) w4-obs-spent-close))))
+
+;; 4. Spent HTs safely > 8.5t from combat (or near non-combat Overlord) merge cleanly!
+(define w4-obs-spent-safe (make-test-obs 5020 300 200 (list w4-ht-spent-1 w4-ht-spent-2 w4-far-hydra w4-close-ovi)))
+(check-true "w4-tac2-spent-ht-safe-dist-allows-merge"
+            (w4-has-1766? (translate-bot-actions->sc2-raw-commands '((morph (9955 9956) archon)) w4-obs-spent-safe)))
+
+;; 5. >= 3 Mutalisks AA-Archon override works at 7.5t (> 4.5t), blocked when Mutalisks dive inside <= 4.5t
+(check-eqv "w4-tac2-3-mutas-at-7.5t-allows-aa-archon-override"
+           (sort (select-producer-tags-for-unit 'archon (list w4-ht-armed-1 w4-ht-armed-2) w4-3-mutas-far) <)
+           '(9951 9952))
+(check-eqv "w4-tac2-3-mutas-at-3.0t-blocks-cocoon-suicide"
+           (select-producer-tags-for-unit 'archon (list w4-ht-armed-1 w4-ht-armed-2) w4-3-mutas-close)
+           '())
+
+;; W4-P1-1: Pruned PvZ natural-choke wall solver stays < 150ms across 6..12t chokes & open fields
+(define (w4-mk-choke-grid w h cy0 cy1 gx0 gx1)
+  (hash 'width w 'height h
+        'pathing-ref
+        (lambda (ix iy)
+          (cond [(or (< ix 2) (>= ix (- w 2)) (< iy 2) (>= iy (- h 2))) 0]
+                [(and (>= iy cy0) (< iy cy1)) (if (and (>= ix gx0) (< ix gx1)) 1 0)]
+                [else 1]))
+        'placement-ref
+        (lambda (ix iy)
+          (cond [(or (< ix 2) (>= ix (- w 2)) (< iy 2) (>= iy (- h 2))) 0]
+                [(and (>= iy cy0) (< iy cy1)) (if (and (>= ix gx0) (< ix gx1)) 1 0)]
+                [else 1]))
+        'height-ref (lambda (_ix _iy) 112.0)))
+
+(for ([cw (in-list '(6 7 8 9 10 12))])
+  (define gr (w4-mk-choke-grid 96 96 40 56 36 (+ 36 cw)))
+  (define t0 (current-inexact-milliseconds))
+  (define wres (pl:solve-protoss-matchup-wall 20.5 14.5 36.5 34.5 'Zerg
+                                              #:map-grids gr #:enemy-x 41.0 #:enemy-y (+ 84.5 cw)))
+  (define dt (- (current-inexact-milliseconds) t0))
+  (check-true (format "w4-p1-1-pvz-choke-~a-valid-natural-wall" cw)
+              (and (hash? wres)
+                   (eq? (hash-ref wres 'locus #f) 'natural-choke)
+                   (eq? (hash-ref wres 'slot-3 'unset) #f)
+                   (pl:protoss-wall-valid-on-grids? wres 20.5 14.5 36.5 34.5 gr)))
+  (check-true (format "w4-p1-1-pvz-choke-~a-under-150ms" cw)
+              (< dt 150.0)))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"

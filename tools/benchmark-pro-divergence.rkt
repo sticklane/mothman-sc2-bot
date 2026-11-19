@@ -334,9 +334,12 @@
                                                                 'build-progress (if done? 1.0 0.5)
                                                                 'powered? #t 'vespene-contents 1500)
                                                           ally-b)))
-                                     (begin
+                                     (let ([synth-hp (if (memq sym '(overlord overseer overlord-transport))
+                                                         200
+                                                         45)])
                                        (when (eq? sym 'larva) (set! explicit-larva (add1 explicit-larva)))
-                                       (set! ally-u (cons (hash 'id utag 'type sym 'x (car xy) 'y (cdr xy) 'hp 45)
+                                       (set! ally-u (cons (hash 'id utag 'type sym 'x (car xy) 'y (cdr xy)
+                                                                'hp synth-hp 'max-hp synth-hp)
                                                           ally-u))))]
                                 [else
                                  (define d-own (min (dist2d (car xy) (cdr xy) (car b0) (cdr b0))

@@ -1352,23 +1352,43 @@
            (add-bldg! 'roach-warren)
            (add-bldg! 'lair)))
 
-       ;; Burrow / Cloak / Subterranean detection triggers
-       (when (or (hash-ref u 'burrowed? #f)
-                 (hash-ref u 'burrowed #f)
-                 (memq utype '(lurker lurker-mp widow-mine widowmine roach-burrowed zergling-burrowed)))
-         (add-upg! 'burrow-or-subterranean-tech)
-         (set! req-det? #t))
-       (unless req-det?
-         (when (or (hash-ref u 'cloaked? #f)
-                   (hash-ref u 'cloaked #f)
-                   (memq utype '(dark-templar banshee ghost mothership lurker lurker-mp widow-mine widowmine observer)))
-           (set! req-det? #t)))
+       ;; Burrow / Cloak / Subterranean detection triggers.
+       ;; Exclude non-combat Creep Tumors (`creep-tumor*`) so ZvZ/TvZ/PvZ never panic-build
+       ;; static detection or infer burrow tech from routine enemy creep spread!
+       (unless (memq utype '(creep-tumor creep-tumor-burrowed creep-tumor-queen))
+         (when (or (hash-ref u 'burrowed? #f)
+                   (hash-ref u 'burrowed #f)
+                   (hash-ref u 'is-burrowed #f)
+                   (memq utype '(lurker lurker-mp widow-mine widowmine roach-burrowed zergling-burrowed)))
+           (add-upg! 'burrow-or-subterranean-tech)
+           (set! req-det? #t))
+         (unless req-det?
+           (when (or (hash-ref u 'cloaked? #f)
+                     (hash-ref u 'cloaked #f)
+                     (memq utype '(dark-templar banshee ghost mothership lurker lurker-mp widow-mine widowmine observer)))
+             (set! req-det? #t))))
 
-       ;; Air threat trigger (unit type OR explicit flying? / flying / is-flying flag)
+       ;; Air threat trigger (unit type OR explicit flying? / flying / is-flying flag).
+       ;; Exclude ALL non-combat flying units (scouts, detectors, transports, cocoons,
+       ;; changelings, flying locusts) so an opening scouting Overlord NEVER permanently
+       ;; triggers `requires-anti-air? = #t` / `'air-fleet`!
        (unless (or req-aa?
-                   (memq utype '(medivac warp-prism warp-prism-phasing overlord-transport)))
+                   (memq utype '(medivac
+                                 overlord overlord-cocoon overlord-transport
+                                 transport-overlord-cocoon dropperlord
+                                 overseer overseer-siege-mode
+                                 observer observer-siege-mode
+                                 warp-prism warp-prism-phasing
+                                 changeling changeling-zealot changeling-marine
+                                 changeling-marine-shield changeling-zergling
+                                 changeling-zergling-wings
+                                 locust locust-mp locustmp locust-flying locust-mp-flying
+                                 locust-precursor locustmpprecursor
+                                 broodling broodling-escort
+                                 larva egg cocoon baneling-cocoon ravager-cocoon
+                                 lurker-egg mule)))
          (when (or (memq utype '(mutalisk corruptor brood-lord broodlord viper
-                                 viking viking-fighter liberator banshee raven battlecruiser
+                                 viking viking-fighter liberator liberator-ag banshee raven battlecruiser
                                  phoenix oracle void-ray voidray carrier tempest mothership
                                  colossus))
                    (hash-ref u 'flying? #f)
@@ -3422,7 +3442,11 @@
   (hasheq
    'drone #t 'scv #t 'probe #t 'mule #t
    'larva #t 'egg #t 'cocoon #t 'baneling-cocoon #t 'ravager-cocoon #t 'lurker-cocoon #t 'brood-lord-cocoon #t
-   'overlord #t 'overseer #t 'overlord-transport #t 'observer #t 'changeling #t
+   'overlord #t 'overlord-cocoon #t 'overlord-transport #t 'transport-overlord-cocoon #t 'dropperlord #t
+   'overseer #t 'overseer-siege-mode #t 'observer #t 'observer-siege-mode #t
+   'changeling #t 'changeling-zealot #t 'changeling-marine #t 'changeling-marine-shield #t
+   'changeling-zergling #t 'changeling-zergling-wings #t
+   'locust-flying #t 'locust-mp-flying #t
    'creep-tumor #t 'creep-tumor-burrowed #t 'creep-tumor-queen #t 'point-defense-drone #t
    'hatchery #t 'lair #t 'hive #t 'spawning-pool #t 'extractor #t 'extractor-rich #t
    'roach-warren #t 'baneling-nest #t 'hydralisk-den #t 'lurker-den #t 'lurker-den-mp #t
@@ -6834,16 +6858,19 @@
   (define enemy-units (safe-hash-list (hash-ref sanitized-obs 'enemy-units '())))
   (define scanned-from-units
     (for/list ([e (in-list enemy-units)]
-               #:when (let ([dt (safe-int (hash-ref e 'display-type 1) 1)]
+               #:when (let ([ut (unit-type-sym e)]
+                            [dt (safe-int (hash-ref e 'display-type 1) 1)]
                             [cs (safe-int (hash-ref e 'cloak-state 0) 0)]
                             [shim? (hash-ref e 'is-shimmer? #f)]
                             [bur? (or (hash-ref e 'burrowed #f)
                                       (hash-ref e 'is-burrowed? #f)
+                                      (hash-ref e 'is-burrowed #f)
                                       (memq (unit-type-sym e)
                                             '(roach-burrowed infestor-burrowed lurker-burrowed
                                               widow-mine-burrowed swarm-host-burrowed
                                               baneling-burrowed)))])
-                        (or shim? (= dt SC2-SHIMMER-DISPLAY-TYPE-HIDDEN) (= cs 2) bur?)))
+                        (and (not (memq ut '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
+                             (or shim? (= dt SC2-SHIMMER-DISPLAY-TYPE-HIDDEN) (= cs 2) bur?))))
       (define utype (unit-type-sym e))
       (define bur?
         (or (hash-ref e 'burrowed #f)

@@ -2257,11 +2257,14 @@
                                            (not (uh-hallucination? a))
                                            (> (queen-transfuse-priority (uh-type a)) 0.0)
                                            (>= (uh-missing-hp a) 65.0)
-                                           (< (uh-hp-ratio a) 0.65)))
+                                           (< (uh-hp-ratio a) 0.65)
+                                           (< (spell-unit-claim-count claims 'transfusion (uh-tag a) current-frame)
+                                              (unit-claim-effective-cap 'transfusion 0.0 (uh-missing-hp a) #f #t))))
                                     (lambda ([a : Any])
-                                      (+ (queen-transfuse-priority (uh-type a))
-                                         (* 30.0 (- 1.0 (uh-hp-ratio a)))
-                                         (min 40.0 (* 0.25 (uh-missing-hp a))))))])
+                                      (- (+ (queen-transfuse-priority (uh-type a))
+                                            (* 30.0 (- 1.0 (uh-hp-ratio a)))
+                                            (min 40.0 (* 0.25 (uh-missing-hp a))))
+                                         (* 25.0 (->float (spell-unit-claim-count claims 'transfusion (uh-tag a) current-frame))))))])
                        (and ok?
                             (let ([ttag (uh-tag tgt)])
                               (and (spell-claim-unit?!
@@ -2389,6 +2392,7 @@
                                      ux uy SC2-INFESTOR-NEURAL-CAST-RANGE enemy-units
                                      (lambda ([e : Any])
                                        (and (not (uh-has-buff? e 'neural-parasite))
+                                            (= (spell-unit-claim-count claims 'neural-parasite (uh-tag e) current-frame) 0)
                                             (> (infestor-neural-weight (uh-type e)) 0.0)))
                                      (lambda ([e : Any]) (infestor-neural-weight (uh-type e))))])
                         (and ok?
@@ -2428,6 +2432,7 @@
                                       ux uy SC2-INFESTOR-NEURAL-CAST-RANGE enemy-units
                                       (lambda ([e : Any])
                                         (and (not (uh-has-buff? e 'neural-parasite))
+                                             (= (spell-unit-claim-count claims 'neural-parasite (uh-tag e) current-frame) 0)
                                              (> (infestor-neural-weight (uh-type e)) 0.0)))
                                       (lambda ([e : Any]) (infestor-neural-weight (uh-type e))))])
                          (and ok?
@@ -2505,7 +2510,9 @@
                        (let-values ([(ok? tgt _w)
                                      (best-unit-target
                                       ux uy 9.0 enemy-units
-                                      (lambda ([e : Any]) (> (viper-abduct-weight (uh-type e)) 0.0))
+                                      (lambda ([e : Any])
+                                        (and (> (viper-abduct-weight (uh-type e)) 0.0)
+                                             (= (spell-unit-claim-count claims 'abduct (uh-tag e) current-frame) 0)))
                                       (lambda ([e : Any]) (viper-abduct-weight (uh-type e))))])
                          (and ok?
                               (spell-claim-unit?! claims 'abduct (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
@@ -2746,9 +2753,10 @@
       (case sym
         [(lurker-burrowed lurker-mp-burrowed lurker lurker-mp) 130.0]
         [(viper) 128.0]
-        [(infestor infestor-burrowed) 124.0]
-        [(brood-lord) 120.0]
-        [(ultralisk ultralisk-burrowed) 115.0]
+        [(ultralisk ultralisk-burrowed) 126.0]
+        [(brood-lord) 125.0]
+        [(infestor infestor-burrowed)
+         (if (or (>= (uh-energy e) 50.0) (>= (uh-total-hp e) 110.0)) 122.0 80.0)]
         [(ravager ravager-burrowed) 105.0]
         [(high-templar ghost) 100.0]
         [(queen queen-burrowed) 95.0]
@@ -2832,60 +2840,94 @@
                 [(snipe-channel-locked? claims u current-frame) #f]
                 [(spellcaster-channel-protected? u) #f]
                 [else
+                 ;; W4-TAC-1 + W4-TAC-5: When an unshielded heavy-biological Snipe target
+                 ;; (Ultralisk/BroodLord/Lurker) is in range (<= 10t, safe >= 4.5t) and en < 125.0,
+                 ;; evaluate Snipe before EMP unless EMP hits >= 2 shielded psionic targets or >= 160 shields.
+                 (define heavy-bio-snipe-near?
+                   (and (>= en 50.0)
+                        (< en 125.0)
+                        (not (any-unit-within? all-enemies ux uy 4.499 sc2-enemy-unit-targetable?))
+                        (any-unit-within?
+                         enemy-units ux uy 10.0
+                         (lambda ([e : Any])
+                           (and (not (uh-hallucination? e))
+                                (<= (uh-shields e) 0.0)
+                                (not (eq? (memq (uh-type e)
+                                                '(ultralisk ultralisk-burrowed brood-lord
+                                                  lurker lurker-burrowed lurker-mp lurker-mp-burrowed))
+                                          #f))
+                                (< (spell-unit-claim-count claims 'steady-targeting (uh-tag e) current-frame)
+                                   (unit-claim-effective-cap 'steady-targeting (uh-total-hp e) 0.0 #f #t)))))))
+                 (define (try-ghost-emp [require-heavy-shields? : Boolean]) : (Option spell-directive)
+                   (and (>= en 75.0)
+                        (let-values ([(ok? ex ey _s)
+                                      (best-enemy-cluster
+                                       ux uy 10.0 enemy-units 2.0 0.25
+                                       (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
+                                         (define-values (shield-sum energy-sum score-sum prio? sh-psi-cnt)
+                                           (for/fold ([sh-s : Float 0.0]
+                                                      [en-s : Float 0.0]
+                                                      [sc-s : Float 0.0]
+                                                      [has-p? : Boolean #f]
+                                                      [sp-c : Integer 0])
+                                                     ([e (in-list cl)])
+                                             (define sym (uh-type e))
+                                             (define esh (uh-shields e))
+                                             (define een (uh-energy e))
+                                             (define val (ghost-emp-target-bonus e))
+                                             (define is-psi?
+                                               (or (unit-attr-has-any? sym SC2-UNIT-ATTR-PSIONIC)
+                                                   (not (eq? (memq sym '(high-templar sentry oracle archon infestor infestor-burrowed viper ghost raven queen)) #f))))
+                                             (define p?
+                                               (and (spell-valid-for-target-attrs? 'emp-round sym een esh)
+                                                    is-psi?
+                                                    (>= (+ een esh) 40.0)))
+                                             (values (+ sh-s esh)
+                                                     (+ en-s (if (> een 0.0) een 0.0))
+                                                     (+ sc-s val)
+                                                     (or has-p? p?)
+                                                     (if (and is-psi? (> esh 0.0)) (+ sp-c 1) sp-c))))
+                                         (if (and (> score-sum 0.0)
+                                                  (if require-heavy-shields?
+                                                      (or (>= shield-sum 160.0) (>= sh-psi-cnt 2))
+                                                      (or (>= shield-sum 120.0)
+                                                          (>= energy-sum 100.0)
+                                                          prio?))
+                                                  (not (spell-point-claimed? claims 'emp-round cx cy EMP-CLAIM-RADIUS current-frame)))
+                                             score-sum
+                                             0.0)))])
+                          (and ok?
+                               (spell-claim-point?! claims 'emp-round ex ey EMP-CLAIM-RADIUS current-frame EMP-CLAIM-TTL)
+                               (spell-directive tag 'ghost 'emp-round 'point 0 ex ey 'ghost-emp)))))
+                 (define (try-ghost-snipe) : (Option spell-directive)
+                   (and (>= en 50.0)
+                        (not (any-unit-within? all-enemies ux uy 4.499 sc2-enemy-unit-targetable?))
+                        (let-values ([(ok? tgt _w)
+                                      (best-unit-target
+                                       ux uy 10.0 enemy-units
+                                       (lambda ([e : Any])
+                                         (and (not (uh-hallucination? e))
+                                              (> (ghost-snipe-weight e) 0.0)
+                                              (< (spell-unit-claim-count claims 'steady-targeting (uh-tag e) current-frame)
+                                                 (unit-claim-effective-cap 'steady-targeting (uh-total-hp e) 0.0 #f #t))))
+                                       (lambda ([e : Any])
+                                         (- (ghost-snipe-weight e)
+                                            (* 8.0 (->float (spell-unit-claim-count claims 'steady-targeting (uh-tag e) current-frame))))))])
+                          (and ok?
+                               (spell-claim-unit?!
+                                claims 'steady-targeting (uh-tag tgt) current-frame SNIPE-CHANNEL-LOCKOUT-FRAMES
+                                #:caster-tag tag #:target-hp (uh-total-hp tgt))
+                               (begin
+                                 (lock-ghost-snipe-channel! claims tag current-frame SNIPE-CHANNEL-LOCKOUT-FRAMES)
+                                 (spell-directive tag 'ghost 'steady-targeting 'unit (uh-tag tgt)
+                                                  (uh-x tgt) (uh-y tgt) 'ghost-snipe))))))
                  (or
-                  ;; 1. EMP Round (`energy >= 75`, `r=2.0 ttl=24`, prioritizes 'shielded + 'psionic/energy clusters)
-                  (and (>= en 75.0)
-                       (let-values ([(ok? ex ey _s)
-                                     (best-enemy-cluster
-                                      ux uy 10.0 enemy-units 2.0 0.25
-                                      (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
-                                        (define-values (shield-sum energy-sum score-sum prio?)
-                                          (for/fold ([sh-s : Float 0.0]
-                                                     [en-s : Float 0.0]
-                                                     [sc-s : Float 0.0]
-                                                     [has-p? : Boolean #f])
-                                                    ([e (in-list cl)])
-                                            (define sym (uh-type e))
-                                            (define esh (uh-shields e))
-                                            (define een (uh-energy e))
-                                            (define val (ghost-emp-target-bonus e))
-                                            (define p?
-                                              (and (spell-valid-for-target-attrs? 'emp-round sym een esh)
-                                                   (or (unit-attr-has-any? sym SC2-UNIT-ATTR-PSIONIC)
-                                                       (not (eq? (memq sym '(high-templar sentry oracle archon infestor infestor-burrowed viper ghost raven queen)) #f)))
-                                                   (>= (+ een esh) 40.0)))
-                                            (values (+ sh-s esh)
-                                                    (+ en-s (if (> een 0.0) een 0.0))
-                                                    (+ sc-s val)
-                                                    (or has-p? p?))))
-                                        (if (and (> score-sum 0.0)
-                                                 (or (>= shield-sum 120.0)
-                                                     (>= energy-sum 100.0)
-                                                     prio?)
-                                                 (not (spell-point-claimed? claims 'emp-round cx cy EMP-CLAIM-RADIUS current-frame)))
-                                            score-sum
-                                            0.0)))])
-                         (and ok?
-                              (spell-claim-point?! claims 'emp-round ex ey EMP-CLAIM-RADIUS current-frame EMP-CLAIM-TTL)
-                              (spell-directive tag 'ghost 'emp-round 'point 0 ex ey 'ghost-emp))))
-                  ;; 2. Snipe / Steady Targeting (`energy >= 50`, ZERO enemies `< 4.5` tiles, HP-capped + `34f` lock)
-                  (and (>= en 50.0)
-                       (not (any-unit-within? all-enemies ux uy 4.499 sc2-enemy-unit-targetable?))
-                       (let-values ([(ok? tgt _w)
-                                     (best-unit-target
-                                      ux uy 10.0 enemy-units
-                                      (lambda ([e : Any])
-                                        (and (not (uh-hallucination? e))
-                                             (> (ghost-snipe-weight e) 0.0)))
-                                      (lambda ([e : Any]) (ghost-snipe-weight e)))])
-                         (and ok?
-                              (spell-claim-unit?!
-                               claims 'steady-targeting (uh-tag tgt) current-frame SNIPE-CHANNEL-LOCKOUT-FRAMES
-                               #:caster-tag tag #:target-hp (uh-total-hp tgt))
-                              (begin
-                                (lock-ghost-snipe-channel! claims tag current-frame SNIPE-CHANNEL-LOCKOUT-FRAMES)
-                                (spell-directive tag 'ghost 'steady-targeting 'unit (uh-tag tgt)
-                                                 (uh-x tgt) (uh-y tgt) 'ghost-snipe)))))
+                  (if heavy-bio-snipe-near?
+                      (or (try-ghost-emp #t)
+                          (try-ghost-snipe)
+                          (try-ghost-emp #f))
+                      (or (try-ghost-emp #f)
+                          (try-ghost-snipe)))
                   ;; 3. Ghost Cloak (`energy >= 50`, engaging `< 10.0`, no enemy detector `< 11.0`)
                   (and (>= en 50.0)
                        (not (uh-cloaked? u))
@@ -2907,6 +2949,7 @@
                                    (lambda ([e : Any])
                                      (and (not (uh-hallucination? e))
                                           (not (uh-has-buff? e 'interference-matrix))
+                                          (= (spell-unit-claim-count claims 'interference-matrix (uh-tag e) current-frame) 0)
                                           (> (raven-matrix-weight e) 0.0)))
                                    (lambda ([e : Any]) (raven-matrix-weight e)))])
                       (and ok?
@@ -3470,7 +3513,9 @@
                        (let-values ([(ok? tgt _w)
                                      (best-unit-target
                                       ux uy 10.0 enemy-units
-                                      (lambda ([e : Any]) (> (ht-feedback-priority e) 0.0))
+                                      (lambda ([e : Any])
+                                        (and (> (ht-feedback-priority e) 0.0)
+                                             (= (spell-unit-claim-count claims 'feedback (uh-tag e) current-frame) 0)))
                                       (lambda ([e : Any]) (ht-feedback-priority e)))])
                          (and ok?
                               (spell-claim-unit?! claims 'feedback (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
@@ -3698,7 +3743,14 @@
                                           (values cand d)
                                           (values best bd))))))
                             (cond
-                              [(hash? partner)
+                              [(and (hash? partner)
+                                    (let ([mx (* 0.5 (+ x1 (uh-x partner)))]
+                                          [my (* 0.5 (+ y1 (uh-y partner)))])
+                                      (not (any-unit-within?
+                                            all-enemies mx my 8.5
+                                            (lambda ([e : Any])
+                                              (and (sc2-enemy-unit-targetable? e)
+                                                   (unit-combat-relevant? e)))))))
                                (define t2 (uh-tag partner))
                                (define mx (* 0.5 (+ x1 (uh-x partner))))
                                (define my (* 0.5 (+ y1 (uh-y partner))))

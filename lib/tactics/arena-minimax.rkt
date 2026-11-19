@@ -2763,6 +2763,9 @@
                     (memq (hash-ref eff 'effect-id 0) '(7 11)))))))
   (define our-z (hash-ref obs 'our-terrain-z 10))
   (define enemy-z (hash-ref obs 'enemy-terrain-z 10))
+  (define arena-supply-used
+    (let ([raw (hash-ref obs 'supply-used 0)])
+      (if (exact-integer? raw) raw 0)))
 
   (define brain-cache (hash-ref! ROLLOUT-CACHE-BY-STATE brain make-hasheqv))
   (define ally-id-cache (hash-ref! brain-cache '__ally-id-cache (lambda () (vector #f #f 0 0 #f))))
@@ -3285,17 +3288,21 @@
                              (fl+ wr
                                   (fl+ (tactical-sim-unit-radius su)
                                        (tactical-sim-unit-radius target-su))))))))
+         (define maxed-splash-breakthrough?
+           (and arena-commit-splash?
+                (>= arena-supply-used 185)))
          (define ready-to-shoot-during-splash-commit?
            (and splash-move-pt
                 (not active-spell-dodge?)
-                target-in-weapon-range?
-                (<= w-cd SC2-WEAPON-KITE-COOLDOWN-THRESH)
-                (or arena-commit-splash?
-                    (memq sprole '(commit-run-through-splash-concave
-                                   commit-run-through-disruptor-split
-                                   siege-tank-deadzone-dive
-                                   colossus-radial-split-dive
-                                   avoid-siege-tank-splash-split)))))
+                (or maxed-splash-breakthrough?
+                    (and target-in-weapon-range?
+                         (<= w-cd SC2-WEAPON-KITE-COOLDOWN-THRESH)
+                         (or arena-commit-splash?
+                             (memq sprole '(commit-run-through-splash-concave
+                                            commit-run-through-disruptor-split
+                                            siege-tank-deadzone-dive
+                                            colossus-radial-split-dive
+                                            avoid-siege-tank-splash-split)))))))
          (cond
            [(or in-swing? channel-or-morph-locked?) (void)]
            [(and splash-move-pt (not ready-to-shoot-during-splash-commit?))
@@ -3310,12 +3317,60 @@
               (define ey (tactical-sim-unit-y target-su))
               (case committed-act
                [(DisengageRetreat)
-                (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 base-x base-y frame))
-                  (when (and ledger record-ledger?)
-                    (order-ledger-record-issued! ledger uid 'kite 'move #:target-x base-x #:target-y base-y #:frame frame))
-                  (emit! (list 'kite uid base-x base-y)))]
+                (define wr
+                  (if (and (eq? (tactical-sim-unit-type target-su) 'colossus)
+                           (fl> (tactical-sim-unit-air-range su) 0.0)
+                           (fl<= (tactical-sim-unit-ground-range su) 0.0))
+                      (tactical-sim-unit-air-range su)
+                      (sim-unit-weapon-range-vs su target-su)))
+                (define edist (fast-dist2d ux uy ex ey))
+                (define non-free-t?
+                  (not (memq (tactical-sim-unit-type target-su)
+                             '(locust locust-mp locustmp locust-flying))))
+                (define w-period (flmax 0.16 (exact->inexact (tactical-sim-unit-weapon-period su))))
+                (define kite-cd-min (flmax 0.22 (fl* 0.38 w-period)))
+                (define has-weap? (and (not disruptor?) non-free-t? (fl> wr 0.0)))
+                (define melee-fight? (and has-weap? (fl<= wr 1.5) (fl<= edist 8.5)))
+                ;; W4-TAC-3: Fire when weapon is ready/nearly-ready up to `wr + 2.5` (stops 5.9t Marines
+                ;; from pure-MOVEing at 0 DPS while 6-range Stalkers shoot them for free); when on cooldown,
+                ;; step back <= 2.0t inside threat range instead of a full-map retreat!
+                (define ranged-stutter-fire?
+                  (and has-weap? (fl> wr 1.5)
+                       (fl<= edist (fl+ wr 2.5))
+                       (fl< (exact->inexact w-cd) kite-cd-min)))
+                (if (or melee-fight? ranged-stutter-fire?)
+                    (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'attack-unit eid ex ey frame))
+                      (when (and ledger record-ledger?)
+                        (order-ledger-record-issued! ledger uid 'attack-unit 'attack #:target-id eid #:frame frame))
+                      (emit! (list 'attack-unit uid eid)))
+                    (let-values ([(kx ky)
+                                  (if (and has-weap? (fl> wr 1.5) (fl<= edist (flmax (fl+ wr 3.0) 11.0)))
+                                      (compute-kite-vector ux uy ex ey 2.0)
+                                      (values base-x base-y))])
+                      (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 kx ky frame))
+                        (when (and ledger record-ledger?)
+                          (order-ledger-record-issued! ledger uid 'kite 'move #:target-x kx #:target-y ky #:frame frame))
+                        (emit! (list 'kite uid kx ky)))))]
 
                [(StutterKiteBack CloakHarassWorkers)
+                (define eff-wr
+                  (if (and (eq? (tactical-sim-unit-type target-su) 'colossus)
+                           (fl> (tactical-sim-unit-air-range su) 0.0)
+                           (fl<= (tactical-sim-unit-ground-range su) 0.0))
+                      (tactical-sim-unit-air-range su)
+                      (sim-unit-weapon-range-vs su target-su)))
+                (define w-period (flmax 0.16 (exact->inexact (tactical-sim-unit-weapon-period su))))
+                (define kite-cd-min (flmax 0.22 (fl* 0.38 w-period)))
+                (define shorter-threat-closing?
+                  (and (fl> eff-wr 1.5)
+                       (let* ([close-r (flmax 2.5 (fl- eff-wr 0.75))]
+                              [close-r2 (fl* close-r close-r)])
+                         (for/or ([e (in-list arena-enemy-sims)])
+                           (define e-wr (sim-unit-weapon-range-vs e su))
+                           (and (fl< e-wr eff-wr)
+                                (let ([edx (fl- ux (tactical-sim-unit-x e))]
+                                      [edy (fl- uy (tactical-sim-unit-y e))])
+                                  (fl<= (fl+ (fl* edx edx) (fl* edy edy)) close-r2)))))))
                 (cond
                   [disruptor?
                    (define-values (kx ky) (compute-kite-vector ux uy ex ey SC2-KITE-STEP-DISTANCE))
@@ -3324,8 +3379,11 @@
                        (order-ledger-record-issued! ledger uid 'kite 'move #:target-x kx #:target-y ky #:frame frame))
                      (emit! (list 'kite uid kx ky)))]
                   [(and (not (eq? utype 'baneling))
-                        (> w-cd SC2-WEAPON-KITE-COOLDOWN-THRESH))
-                   (define-values (kx ky) (compute-kite-vector ux uy ex ey SC2-KITE-STEP-DISTANCE))
+                        (fl> eff-wr 1.5)
+                        (fl>= (exact->inexact w-cd) kite-cd-min)
+                        (or (eq? committed-act 'CloakHarassWorkers)
+                            shorter-threat-closing?))
+                   (define-values (kx ky) (compute-kite-vector ux uy ex ey (min 2.0 SC2-KITE-STEP-DISTANCE)))
                    (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 kx ky frame))
                      (when (and ledger record-ledger?)
                        (order-ledger-record-issued! ledger uid 'kite 'move #:target-x kx #:target-y ky #:frame frame))

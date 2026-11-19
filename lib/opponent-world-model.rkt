@@ -346,24 +346,33 @@
 ;; Integrates opponent mineral & gas collection from `0 .. frame` given their
 ;; active/inferred base ready frames, geyser ready frames (+ exact depletion
 ;; overrides when geyser `vespene-contents` was observed!), and worker kills.
+;; Returns 5 values:
+;;   1. `cum-min`         : calibrated cumulative minerals mined (LotV 22.4 loops/sec)
+;;   2. `cum-gas`         : cumulative gas mined from confirmed/implied geysers (+ depletion anchors)
+;;   3. `est-unobs-gas`   : estimated gas mined by baseline unobserved gas workers (conserved for
+;;                          army-value estimation without triggering false hidden-gas-tech-risk!)
+;;   4. `est-workers`     : estimated alive workers
+;;   5. `est-workers-born`: estimated cumulative workers produced
 (define (integrate-opponent-economy enemy-race frame base-ready-frames geyser-entries workers-killed)
   (define f-sec (/ (exact->inexact (max 0 frame)) 22.4))
   (define w-cap-race
     (case enemy-race
-      [(Zerg) 76.0]
-      [(Protoss) 70.0]
-      [else 66.0]))
+      [(Zerg) 68.0]
+      [(Protoss) 66.0]
+      [else 62.0]))
   (define w-rate-mult
     (case enemy-race
-      [(Zerg) 1.18]
-      [(Protoss) 1.10]
-      [else 1.00]))
+      ;; Zerg shares Larva across Drones/Overlords/Army and consumes Drones into structures,
+      ;; so net sustained worker growth is lower than parallel Nexus/CC production.
+      [(Zerg) 0.88]
+      [(Protoss) 0.96]
+      [else 0.90]))
   ;; Separate geysers with exact observed vespene depletion (`2250 - vespene_contents` at `t_seen`)
   ;; from geysers estimated purely by ready-frame integration!
   (define geyser-ready-secs
     (for/list ([ge (in-list geyser-entries)])
       (/ (exact->inexact (car ge)) 22.4)))
-  (let loop ([s 0.0] [w 12.0] [w-born 12.0] [cum-m 50.0] [cum-g-rate 0.0])
+  (let loop ([s 0.0] [w 12.0] [w-born 12.0] [cum-m 50.0] [cum-g-rate 0.0] [cum-g-unobs 0.0])
     (if (>= s f-sec)
         (let* ([eff-w (max 4 (exact-round (- w (min (- w 4.0) (exact->inexact workers-killed)))))]
                ;; Reconcile gas against exact observed geyser depletion anchors when available!
@@ -384,28 +393,50 @@
                [final-gas (max (exact-round cum-g-rate) anchored-gas)])
           (values (exact-round cum-m)
                   final-gas
+                  (exact-round cum-g-unobs)
                   eff-w
                   (exact-round w-born)))
         (let* ([dt (min 5.0 (- f-sec s))]
                [b (max 1 (count (lambda (rf) (<= (/ (exact->inexact rf) 22.4) s)) base-ready-frames))]
                [g (min (* 2 b) (count (lambda (gs) (<= gs s)) geyser-ready-secs))]
-               [sat-cap (min w-cap-race (+ (* 16.0 b) (* 3.0 g) 2.0))]
-               [dw (max 0.0 (min (- sat-cap w) (* dt w-rate-mult (/ (min 3.0 (exact->inexact b)) 12.0))))]
+               ;; Account for realistic baseline gas-worker allocation even before geysers are scouted,
+               ;; conserving their output in `cum-g-unobs` instead of over-crediting mineral income!
+               [baseline-g (if (< s 68.0) 0.0 (min (* 2.0 b) (/ (- s 68.0) 105.0)))]
+               [eff-g (max (exact->inexact g) baseline-g)]
+               [sat-cap (min w-cap-race (+ (* 16.0 b) (* 3.0 eff-g) 2.0))]
+               ;; Opening worker-production efficiency ramp (supply/tech/expand build windows)
+               [ramp-eff (cond [(< s 90.0) 0.82] [(< s 180.0) 0.92] [else 1.00])]
+               [dw (max 0.0 (min (- sat-cap w) (* dt ramp-eff w-rate-mult (/ (min 3.0 (exact->inexact b)) 12.0))))]
                [w-next (+ w dw)]
                [w-mid (max 4.0 (- (* 0.5 (+ w w-next))
                                   (if (>= s (* 0.5 f-sec)) (* 0.5 (exact->inexact workers-killed)) 0.0)))]
-               [wg (max 0.0 (min (* 3.0 g) (- w-mid 8.0)))]
-               [wm (max 0.0 (- w-mid wg))]
+               [wg-tot (max 0.0 (min (* 3.0 eff-g) (- w-mid 10.0)))]
+               [wg-conf (max 0.0 (min (* 3.0 g) (- w-mid 8.0)))]
+               [wg-unobs (max 0.0 (- wg-tot wg-conf))]
+               [wm (max 0.0 (- w-mid wg-tot))]
                [wm-opt (min wm (* 16.0 b))]
                [wm-ovr (max 0.0 (min (- wm wm-opt) (* 6.0 b)))]
-               [mule-bonus (if (and (eq? enemy-race 'Terran) (>= s 115.0))
-                               (* 3.6 (min 3.0 (exact->inexact b)))
-                               0.0)]
-               ;; Empirically calibrated LotV real-time (22.4 loops/sec) rates:
-               ;; 1.05 min/worker-sec optimal, 0.45 oversaturated, 0.64 gas/worker-sec (~1.92/geyser-sec)
-               [dm (* dt (+ (* 1.05 wm-opt) (* 0.45 wm-ovr) mule-bonus))]
-               [dg (* dt 0.64 wg)])
-          (loop (+ s dt) w-next (+ w-born dw) (+ cum-m dm) (+ cum-g-rate dg))))))
+               ;; Terran Orbitals morph ~120s for main and ~30s after extra CCs complete (max 3; ~1.7 M/s net of Scans/delays)
+               [orbital-cnt
+                (if (eq? enemy-race 'Terran)
+                    (min 3 (count (lambda (rf)
+                                    (define rsec (/ (exact->inexact rf) 22.4))
+                                    (<= (if (<= rsec 1.0) 120.0 (+ rsec 30.0)) s))
+                                  base-ready-frames))
+                    0)]
+               [mule-bonus (* 1.7 (exact->inexact orbital-cnt))]
+               ;; Empirically calibrated LotV real-time (22.4 loops/sec) mineral rate:
+               ;; 0 for opening 5s walk; 0.84 min/mineral-worker-sec tapering to 0.76 late (patch depletion/transfers),
+               ;; 0.38 oversaturated, 0.64 gas/worker-sec (~1.92/geyser-sec).
+               [opt-rate
+                (cond
+                  [(< s 5.0) 0.0]
+                  [(<= s 420.0) 0.84]
+                  [else (max 0.76 (- 0.84 (* 0.08 (/ (- s 420.0) 360.0))))])]
+               [dm (* dt (+ (* opt-rate wm-opt) (* 0.38 wm-ovr) mule-bonus))]
+               [dg-conf (* dt 0.64 wg-conf)]
+               [dg-unobs (* dt 0.64 wg-unobs)])
+          (loop (+ s dt) w-next (+ w-born dw) (+ cum-m dm) (+ cum-g-rate dg-conf) (+ cum-g-unobs dg-unobs))))))
 
 ;; -----------------------------------------------------------------------------
 ;; 4. Main Step Update (`step-opponent-world-model!`)
@@ -714,7 +745,7 @@
     (and (< confirmed-bases happy-bases)
          (or overdue-pad-confirmed-empty?
              (>= prod-bldg-cnt (* 3 confirmed-bases))
-             (and (= confirmed-bases 1) (>= confirmed-geyser-cnt 2) (>= frame 2464)))))
+             (and (= confirmed-bases 1) (>= confirmed-geyser-cnt 2) (>= frame 3584)))))
 
   (define unscouted-expansion-ambiguity?
     (and (< confirmed-bases happy-bases)
@@ -727,15 +758,19 @@
                (pad-belief-entry-y next-overdue-pad))))
 
   ;; Effective base timeline for cumulative income integration:
-  ;; If `unscouted-expansion-ambiguity?` is true, include 1 plausible hidden expansion at its happy-path frame
-  ;; so we neither under-estimate a macroing opponent's income NOR assume they skipped army!
+  ;; When `unscouted-expansion-ambiguity?` is true, include plausible hidden expansions up to
+  ;; `happy-bases` for unscouted (not confirmed-empty) pads so deep-fog macro opponents keep
+  ;; realistic worker/base counts rather than freezing at 2 bases through 15:00!
   (define eff-base-ready-frames
     (if (and unscouted-expansion-ambiguity? (< (length confirmed-base-ready-frames) happy-bases))
-        (append confirmed-base-ready-frames
-                (list (case confirmed-bases
-                        [(1) 3100]
-                        [(2) 7600]
-                        [else 12000])))
+        (let* ([cur-cnt (length confirmed-base-ready-frames)]
+               [happy-rfs
+                (for/list ([b-idx (in-range (add1 cur-cnt) (add1 happy-bases))])
+                  (case b-idx
+                    [(2) (case erace [(Zerg) 3340] [(Protoss) 4280] [else 4610])]
+                    [(3) (case erace [(Zerg) 6400] [(Protoss) 9540] [else 9990])]
+                    [else (case erace [(Zerg) 11000] [(Protoss) 13680] [else 14350])]))])
+          (sort (append confirmed-base-ready-frames happy-rfs) <))
         confirmed-base-ready-frames))
 
   (define eff-workers-killed
@@ -743,21 +778,18 @@
          (let ([wk (hash-ref obs 'enemy-workers-killed 0)])
            (if (exact-integer? wk) wk 0))))
 
-  (define-values (cum-min cum-gas est-workers est-workers-born)
+  (define-values (cum-min cum-gas est-unobs-gas est-workers est-workers-born)
     (integrate-opponent-economy erace frame eff-base-ready-frames eff-geysers eff-workers-killed))
 
   ;; Step G: Conservation of Resources (`M_cum = Econ + Tech/Prod + AliveArmy + Dead + Bank + UnseenThreat`)
+  (define f-sec (/ (exact->inexact frame) 22.4))
   (define th-cost (case erace [(Zerg) 300] [else 400]))
   (define geyser-cost (case erace [(Zerg) 25] [else 75]))
-  (define extra-bases-built
-    (max 0 (- (if unscouted-expansion-ambiguity?
-                  (add1 confirmed-bases)
-                  confirmed-bases)
-              1)))
-  (define sunk-econ-min
-    (+ (* 50 (max 0 (- est-workers-born 12)))
-       (* th-cost extra-bases-built)
-       (* geyser-cost confirmed-geyser-cnt)))
+  (define eff-bases
+    (if unscouted-expansion-ambiguity?
+        (max confirmed-bases (length eff-base-ready-frames))
+        confirmed-bases))
+  (define extra-bases-built (max 0 (- eff-bases 1)))
 
   ;; Tech / production / static-defense structures + upgrades sunk cost
   (define-values (sunk-tech-bldg-min sunk-tech-bldg-gas siege-turtle-cnt)
@@ -795,21 +827,29 @@
   (define sunk-upg-min (* 125 upg-levels-sum))
   (define sunk-upg-gas (* 125 upg-levels-sum))
 
-  (define sunk-tech-min (+ sunk-tech-bldg-min imp-min sunk-upg-min))
-  (define sunk-tech-gas (+ sunk-tech-bldg-gas imp-gas sunk-upg-gas))
+  (define obs-sunk-tech-min (+ sunk-tech-bldg-min imp-min sunk-upg-min))
+  (define obs-sunk-tech-gas (+ sunk-tech-bldg-gas imp-gas sunk-upg-gas))
 
   ;; Known alive combat units + reachability cone toward our front (`nat-x, nat-y` / `base-x, base-y`)
+  ;; Separate non-combat support flyers (`overlord`, `overseer`, `observer`, `dropperlord`,
+  ;; `overlord-transport`) from `known-army-val` so scouting Overlords don't add phantom army value.
   (define known-unit-counts-mut (make-hasheq))
-  (define-values (known-army-sup known-army-min known-army-gas imm-known-sup unit-siege-cnt)
-    (for/fold ([asup 0] [amin 0] [agas 0] [isup 0] [usiege 0])
+  (define-values (known-army-sup known-army-min known-army-gas known-support-min known-support-gas imm-known-sup unit-siege-cnt)
+    (for/fold ([asup 0] [amin 0] [agas 0] [smin 0] [sgas 0] [isup 0] [usiege 0])
               ([rec (in-hash-values known-units)])
       (define ut (tracked-enemy-unit-type rec))
       (hash-update! known-unit-counts-mut ut add1 0)
       (cond
         [(hash-has-key? WORKER-SYM-SET ut)
-         (values asup amin agas isup usiege)]
-        [(memq ut '(overlord overseer observer))
-         (values asup (+ amin (tracked-enemy-unit-min-cost rec)) (+ agas (tracked-enemy-unit-gas-cost rec)) isup usiege)]
+         (values asup amin agas smin sgas isup usiege)]
+        [(memq ut '(overlord overlord-transport dropperlord))
+         ;; Overlords are already accounted for in `sunk-supply-min` below
+         (values asup amin agas smin sgas isup usiege)]
+        [(memq ut '(overseer observer))
+         (values asup amin agas
+                 (+ smin (tracked-enemy-unit-min-cost rec))
+                 (+ sgas (tracked-enemy-unit-gas-cost rec))
+                 isup usiege)]
         [else
          (define dt-sec (/ (exact->inexact (max 0 (- frame (tracked-enemy-unit-last-seen-frame rec)))) 22.4))
          ;; Discount stale unobserved unit contribution gently after 65s
@@ -825,8 +865,79 @@
          (values (+ asup usup)
                  (+ amin (tracked-enemy-unit-min-cost rec))
                  (+ agas (tracked-enemy-unit-gas-cost rec))
+                 smin
+                 sgas
                  (+ isup reach-inc)
                  (+ usiege siege-inc))])))
+
+  ;; Unavoidable macro economic overhead:
+  ;;   - Workers built (`50M` each) + extra TownHalls + geysers (observed or baseline)
+  ;;   - Supply providers (`100M` per 8 supply above starting 14/15 for workers + known army + 6 headroom)
+  ;;   - Race macro infrastructure: Terran Orbital morphs (`150M` each once ready) & Zerg macro Queens/morphed Drones
+  (define est-geysers-sunk
+    (max confirmed-geyser-cnt
+         (if (< f-sec 75.0) 0 (min (* 2 eff-bases) (exact-floor (/ (- f-sec 60.0) 110.0))))))
+  (define start-sup (if (eq? erace 'Zerg) 14 15))
+  (define base-sup-needed (max start-sup (+ est-workers known-army-sup 6)))
+  (define sunk-supply-min
+    (* 100 (exact-ceiling (/ (max 0 (- base-sup-needed start-sup)) 8.0))))
+  (define known-queen-cnt (hash-ref known-unit-counts-mut 'queen 0))
+  (define ready-base-cnt-now
+    (max 1 (count (lambda (rf) (<= (/ (exact->inexact rf) 22.4) f-sec)) eff-base-ready-frames)))
+  (define race-macro-min
+    (case erace
+      [(Terran)
+       ;; Orbital morph (`150M`) at ~135s for main and ~30s after extra bases complete (up to 3)
+       (define orb-cnt
+         (min 3 (count (lambda (rf)
+                         (define rsec (/ (exact->inexact rf) 22.4))
+                         (<= (if (<= rsec 1.0) 135.0 (+ rsec 30.0)) f-sec))
+                       eff-base-ready-frames)))
+       (* 150 orb-cnt)]
+      [(Zerg)
+       ;; Macro Queens (`150M` per base once >= 135s, net of already-observed Queens)
+       ;; + consumed Drones (`50M` each) for Hatcheries, Extractors, and core tech structures.
+       (define exp-queens (if (< f-sec 135.0) 0 (min 4 ready-base-cnt-now)))
+       (define consumed-drones
+         (+ extra-bases-built
+            est-geysers-sunk
+            (if (< f-sec 90.0) 0 (min 4 (add1 (exact-floor (/ (- f-sec 90.0) 120.0)))))))
+       (+ (* 150 (max 0 (- exp-queens known-queen-cnt)))
+          (* 50 consumed-drones))]
+      [else 0]))
+  (define sunk-econ-min
+    (+ (* 50 (max 0 (- est-workers-born 12)))
+       (* th-cost extra-bases-built)
+       (* geyser-cost est-geysers-sunk)
+       sunk-supply-min
+       race-macro-min))
+
+  ;; Baseline production / tech / upgrade infrastructure floor scaled by elapsed time & bases.
+  ;; Uses `max` against observed/implied tech so observed buildings are never double-counted!
+  (define baseline-tech-ramp (max 0.0 (min 1.0 (/ (- f-sec 50.0) 65.0))))
+  (define baseline-tech-min
+    (min 2500
+         (exact-round
+          (* baseline-tech-ramp
+             (+ 125.0
+                (* 1.85 (max 0.0 (- f-sec 115.0)))
+                (* 130.0 extra-bases-built))))))
+  (define total-est-gas (+ cum-gas est-unobs-gas))
+  (define baseline-tech-gas-conf
+    (if (or (<= cum-gas 0) (< f-sec 90.0))
+        0
+        (min (quotient (* cum-gas 45) 100)
+             (exact-round (+ (* 0.85 (max 0.0 (- f-sec 90.0)))
+                             (* 70.0 extra-bases-built))))))
+  (define baseline-tech-gas-tot
+    (if (or (<= total-est-gas 0) (< f-sec 90.0))
+        0
+        (min (quotient (* total-est-gas 48) 100)
+             (exact-round (+ (* 1.10 (max 0.0 (- f-sec 90.0)))
+                             (* 85.0 extra-bases-built))))))
+  (define sunk-tech-min (max obs-sunk-tech-min baseline-tech-min))
+  (define sunk-tech-gas (max obs-sunk-tech-gas baseline-tech-gas-conf))
+  (define tot-sunk-tech-gas (max obs-sunk-tech-gas baseline-tech-gas-tot))
 
   (define known-army-val (+ known-army-min (exact-round (* 1.5 known-army-gas))))
   (define tot-destroyed-min (+ (opponent-world-model-confirmed-destroyed-min owm)
@@ -834,24 +945,43 @@
   (define tot-destroyed-gas (+ (opponent-world-model-confirmed-destroyed-gas owm)
                                (opponent-world-model-expired-sunk-gas owm)))
 
-  (define transient-bank-min (min 225 (* 75 confirmed-bases)))
-  (define transient-bank-gas 75)
+  ;; Realistic natural mineral/gas bank + in-progress construction/training queue (~20s cycle).
+  ;; Tighter (`0.60x`) when `stopped-expanding?` is confirmed (all-in spending rather than saving for bases).
+  (define bank-raw-min
+    (+ 125
+       (* 70 ready-base-cnt-now)
+       (exact-round (* 1.50 (max 0.0 (- f-sec 240.0))))))
+  (define transient-bank-min
+    (min 2600
+         (if stopped-expanding?
+             (exact-round (* 0.60 bank-raw-min))
+             bank-raw-min)))
+  (define transient-bank-gas
+    (min 450
+         (exact-round (+ 75
+                         (* 25 ready-base-cnt-now)
+                         (* 0.25 (max 0.0 (- f-sec 240.0)))))))
 
   (define unaccounted-min
-    (max 0 (- cum-min (+ sunk-econ-min sunk-tech-min known-army-min tot-destroyed-min transient-bank-min))))
+    (max 0 (- cum-min (+ sunk-econ-min sunk-tech-min known-army-min known-support-min tot-destroyed-min transient-bank-min))))
   (define unaccounted-gas
-    (max 0 (- cum-gas (+ sunk-tech-gas known-army-gas tot-destroyed-gas transient-bank-gas))))
+    (max 0 (- cum-gas (+ sunk-tech-gas known-army-gas known-support-gas tot-destroyed-gas transient-bank-gas))))
+  ;; Conserved total unaccounted gas (including baseline unobserved gas workers) used ONLY for
+  ;; army-value conservation — `unaccounted-gas` above remains strictly anchored to confirmed/implied geysers!
+  (define unaccounted-tot-gas
+    (max unaccounted-gas
+         (max 0 (- total-est-gas (+ tot-sunk-tech-gas known-army-gas known-support-gas tot-destroyed-gas transient-bank-gas)))))
 
-  ;; Rational-Opponent Threat Weighting:
-  ;;   - If `stopped-expanding?` is confirmed (`B_opp < B*_happy(t)`): 90% of unaccounted M/G is Army/Tech!
-  ;;   - If `unscouted-expansion-ambiguity?`: 75% of unaccounted M/G is treated as potential Army/Tech!
-  ;;   - If opponent bases ARE on/ahead of happy path and scouted: 55% (rest may be queued upgrades/workers/bank).
+  ;; Rational-Opponent Threat Weighting (post macro-overhead deduction):
+  ;;   - If `stopped-expanding?` is confirmed (`B_opp < B*_happy(t)`): 85% of unaccounted M/G is Army!
+  ;;   - If `unscouted-expansion-ambiguity?`: 72% of unaccounted M/G is treated as potential Army!
+  ;;   - If opponent bases ARE on/ahead of happy path and scouted: 65%.
   (define unseen-threat-weight
     (cond
       [(< frame 1568) 0.35] ; before 1:10 opening noise is tiny
-      [stopped-expanding? 0.90]
-      [unscouted-expansion-ambiguity? 0.75]
-      [else 0.55]))
+      [stopped-expanding? 0.85]
+      [unscouted-expansion-ambiguity? 0.72]
+      [else 0.65]))
 
   ;; Also respect production-facility floor: `k` observed production structures past 3:30 imply active army output!
   (define prod-implied-army-val
@@ -859,18 +989,54 @@
         (* 275 (max 0 (- prod-bldg-cnt 1)))
         0))
 
-  (define unseen-army-val
-    (exact-round (* unseen-threat-weight (+ unaccounted-min (* 1.5 unaccounted-gas)))))
-  (define believed-total-army-val
-    (max (+ known-army-val unseen-army-val)
-         prod-implied-army-val))
+  ;; 1) Conservation-based unseen army value (`0.87` factor reflects ~12.5M/supply provider cost for unseen army)
+  (define conservation-unseen-val
+    (exact-round (* unseen-threat-weight
+                    (+ (* 0.87 unaccounted-min)
+                       (* 1.5 unaccounted-tot-gas)))))
 
-  ;; Convert believed unseen value to supply (~85 weighted resource/supply in LotV, capped at `200 - est-workers`)
+  ;; 2) Physical production-throughput & rolling standing-army window cap:
+  ;;    Prevents early opening noise (< 2:00) AND prevents unbounded lifetime cumulative drift (10:00–45:00+)
+  ;;    when off-screen attrition, expansions, or max-out banks occur.
+  (define combat-onset-sec (if stopped-expanding? 55.0 68.0))
+  (define t-combat (max 0.0 (- f-sec combat-onset-sec)))
+  (define eff-prod-window-sec
+    (if (<= t-combat 110.0)
+        (* 0.5 (/ (* t-combat t-combat) 110.0))
+        (+ 55.0 (min (- t-combat 110.0) 190.0))))
+  (define eff-prod-bases
+    (if stopped-expanding?
+        confirmed-bases
+        (max eff-bases happy-bases)))
+  (define prod-rate-per-sec
+    (max (* 4.5 (exact->inexact prod-bldg-cnt))
+         (* (if stopped-expanding? 1.45 1.0)
+            (+ 7.5 (* 9.5 (min 3.5 (exact->inexact (max 0 (- eff-prod-bases 1)))))))))
+  (define prod-window-cap-val
+    (exact-round (* prod-rate-per-sec eff-prod-window-sec)))
+
+  ;; 3) Physical supply-cap headroom (`200 - est-workers` max total army supply)
+  (define max-army-sup (max known-army-sup (max 0 (- 200 est-workers))))
+  (define sup-headroom-val (* (max 0 (- max-army-sup known-army-sup)) 95))
+
+  (define unseen-army-val
+    (min conservation-unseen-val prod-window-cap-val sup-headroom-val))
+
+  ;; Convert believed unseen value to supply (~78 weighted resource/supply in LotV),
+  ;; then strictly enforce `believed-total-army-val <= (* believed-total-army-sup 105)`!
   (define unseen-army-sup
-    (quotient unseen-army-val 85))
+    (exact-round (/ (exact->inexact unseen-army-val) 78.0)))
+  (define prod-implied-sup
+    (exact-round (/ (exact->inexact prod-implied-army-val) 78.0)))
   (define believed-total-army-sup
-    (min (max 0 (- 200 est-workers))
-         (max known-army-sup (+ known-army-sup unseen-army-sup))))
+    (min max-army-sup
+         (max known-army-sup
+              (+ known-army-sup unseen-army-sup)
+              prod-implied-sup)))
+  (define believed-total-army-val
+    (min (* believed-total-army-sup 105)
+         (max (+ known-army-val unseen-army-val)
+              prod-implied-army-val)))
 
   (define confirmed-early-greed?
     (and (not stopped-expanding?)
@@ -895,12 +1061,6 @@
     (min believed-total-army-sup (+ imm-known-sup imm-unseen-sup)))
 
   ;; Narrow unseen gas profile & persistent AA / Detection requirements
-  (define hidden-gas-tech-risk?
-    (and (>= frame 2464)
-         (or (>= unaccounted-gas 175)
-             (and (= confirmed-bases 1) (>= confirmed-geyser-cnt 2)))
-         (< known-army-gas 150)))
-
   (define known-bldg-counts-mut (make-hasheq))
   (for ([rec (in-hash-values known-bldgs)])
     (hash-update! known-bldg-counts-mut (tracked-enemy-bldg-canon-type rec) add1 0))
@@ -909,10 +1069,28 @@
                     (= (hash-ref known-bldg-counts-mut isym 0) 0)))
     (hash-set! known-bldg-counts-mut isym 1))
 
+  (define observed-stealth-prereq-bldg?
+    (not (not (for/or ([bt (in-hash-keys known-bldg-counts-mut)])
+                (memq bt '(twilight-council starport starport-techlab ghost-academy
+                           dark-shrine lurker-den lurker-den-mp))))))
+
+  ;; Tighten `hidden-gas-tech-risk?`: normal 2-gas openings without confirmed stopped-expanding
+  ;; or stealth-prereq tech evidence must NOT falsely force premature static detection at 3:20!
+  (define hidden-gas-tech-risk?
+    (and (>= frame 3360) ; >= 2:30
+         (< known-army-gas 100)
+         (or (and stopped-expanding?
+                  (= confirmed-bases 1)
+                  (>= confirmed-geyser-cnt 2)
+                  (>= unaccounted-gas 350))
+             (and observed-stealth-prereq-bldg?
+                  (>= unaccounted-gas 375)))))
+
   (define pers-req-aa?
     (or (for/or ([ut (in-hash-keys known-unit-counts-mut)])
-          (memq ut '(mutalisk corruptor brood-lord viper oracle phoenix void-ray carrier tempest mothership
-                     banshee liberator battlecruiser viking-fighter colossus)))
+          (memq ut '(mutalisk corruptor brood-lord broodlord viper oracle phoenix void-ray voidray
+                     carrier tempest mothership banshee liberator liberator-ag battlecruiser
+                     viking-fighter colossus)))
         (for/or ([bt (in-hash-keys known-bldg-counts-mut)])
           (memq bt '(spire greater-spire stargate fleet-beacon starport-techlab fusion-core)))))
 
@@ -921,8 +1099,13 @@
           (memq ut '(dark-templar banshee ghost lurker lurker-mp lurker-burrowed widow-mine widow-mine-burrowed
                      roach-burrowed swarm-host-burrowed mothership oracle)))
         (for/or ([bt (in-hash-keys known-bldg-counts-mut)])
-          (memq bt '(dark-shrine lurker-den ghost-academy starport-techlab)))
-        (and hidden-gas-tech-risk? (>= frame 4480))))
+          (memq bt '(dark-shrine lurker-den lurker-den-mp ghost-academy starport-techlab)))
+        ;; Only assert inferred detection at >= 4:00 (5376f) for non-Zerg when high-confidence
+        ;; hidden-gas-tech-risk? holds with >= 400 unaccounted gas (1-base 2-gas rush or cloak prereq tech).
+        (and hidden-gas-tech-risk?
+             (>= frame 5376)
+             (not (eq? erace 'Zerg))
+             (>= unaccounted-gas 400))))
 
   ;; Locust wave (`18s` lifespan while `active-locust-cnt > 0`) vs Swarm-Host vulnerable cooldown
   ;; (`43s - 18s = 25s = 560 frames` immediately after the Locust wave expires!)
