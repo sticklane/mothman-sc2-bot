@@ -191,6 +191,10 @@ def normalize_match(m):
         "prod_placement_stall_ticks": safe_num(m.get("prod_placement_stall_ticks")),
         "prod_placement_stall": bool(m.get("prod_placement_stall") or (m.get("anomalies") or {}).get("prod_placement_stall")),
         "pvp_nat_delay_flag": bool(m.get("pvp_nat_delay_flag") or (m.get("anomalies") or {}).get("pvp_nat_delay")),
+        "map_symmetry_kind": m.get("map_symmetry_kind"),
+        "t3_first_sec": safe_num(m.get("t3_first_sec") if m.get("t3_first_sec") is not None else mt.get("t3_first_sec")),
+        "t3_bases_at_start": safe_num(m.get("t3_bases_at_start")),
+        "t3_premature_starve": bool(m.get("t3_premature_starve") or (m.get("anomalies") or {}).get("t3_premature_starve")),
         "action_rejects": int(m.get("action_rejects") or 0),
         "crashes": m.get("crashes") or [],
         "signatures": m.get("signatures") or [],
@@ -256,6 +260,8 @@ def summarize_slice(rows):
     grms_vals = [r["gas_rich_min_starved_ticks"] for r in rows if r.get("gas_rich_min_starved_ticks") is not None]
     otr_vals = [r["own_territory_retreat_frames"] for r in rows if r.get("own_territory_retreat_frames") is not None]
     pps_vals = [r["prod_placement_stall_ticks"] for r in rows if r.get("prod_placement_stall_ticks") is not None]
+    sym_counts = Counter(r["map_symmetry_kind"] for r in rows if r.get("map_symmetry_kind"))
+    t3_secs = [r["t3_first_sec"] for r in rows if r.get("t3_first_sec") is not None]
 
     pk_army_ratios = [
         r["our_peak_army"] / max(1.0, r["opp_peak_army"])
@@ -360,6 +366,11 @@ def summarize_slice(rows):
         "prod_placement_stall_matches": sum(1 for r in rows if r.get("prod_placement_stall")),
         "total_prod_placement_stall_ticks": int(round(sum(pps_vals))) if pps_vals else None,
         "pvp_nat_delay_matches": sum(1 for r in rows if r.get("pvp_nat_delay_flag")),
+        "map_symmetry_counts": dict(sym_counts) if sym_counts else None,
+        "t3_started_matches": len(t3_secs) if (t3_secs or sym_counts) else None,
+        "t3_first_sec_med": med_opt(t3_secs),
+        "t3_early_2base_matches": sum(1 for r in rows if r.get("t3_first_sec") is not None and (r.get("t3_bases_at_start") or 99) <= 2) if (t3_secs or sym_counts) else None,
+        "t3_premature_starve_matches": sum(1 for r in rows if r.get("t3_premature_starve")),
         "action_rejects": sum(r["action_rejects"] for r in rows),
         "crashes": sum(len(r["crashes"]) for r in rows),
         "anomalies": dict(anom_counts),
@@ -748,6 +759,14 @@ def main():
                     f" | `ProdPlaceStall` = **{cur_all.get('prod_placement_stall_matches', 0)}/{cur_all['n']} ({(cur_all.get('total_prod_placement_stall_ticks') or 0):,}t)**"
                     f" | `PvPNatDelay` = **{cur_all.get('pvp_nat_delay_matches', 0)}**"
                 )
+            if cur_all.get("t3_started_matches") is not None:
+                extra_w8 += (
+                    f" | `T3` = **{cur_all.get('t3_started_matches', 0)}/{cur_all['n']}** "
+                    f"(med `{fmt(cur_all.get('t3_first_sec_med'),'s',0)}`, 2b=`{cur_all.get('t3_early_2base_matches', 0)}`, premStarve=`{cur_all.get('t3_premature_starve_matches', 0)}`)"
+                )
+            if cur_all.get("map_symmetry_counts"):
+                sym_str = ", ".join(f"{k}:{v}" for k, v in sorted(cur_all["map_symmetry_counts"].items()))
+                extra_w8 += f" | `MapSym` = `{sym_str}`"
         print(
             f"\n### Stall, Retreat & Waste Watch (`W7/W8-LOOP-2`): "
             f"`endgame_home_stall >= 90s` = **{cur_all.get('endgame_home_stall_count', 0)}/{cur_all['n']}** "

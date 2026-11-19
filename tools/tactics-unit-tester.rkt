@@ -358,17 +358,47 @@
             0
             0))
 
+(define (mk-walkable-pathing-grid w h #:wall-rects [wall-rects '()])
+  ;; Build an 8-bpp `sc2-image-grid` (1 = walkable, 0 = cliff/wall) for real ground-BFS Voronoi tests.
+  (define data (make-bytes (* w h) 1))
+  (for ([rect (in-list wall-rects)])
+    (define x0 (max 0 (inexact->exact (floor (first rect)))))
+    (define y0 (max 0 (inexact->exact (floor (second rect)))))
+    (define x1 (min w (inexact->exact (ceiling (third rect)))))
+    (define y1 (min h (inexact->exact (ceiling (fourth rect)))))
+    (for* ([y (in-range y0 y1)]
+           [x (in-range x0 x1)])
+      (bytes-set! data (+ x (* y w)) 0)))
+  (sc2-image-grid 8 w h data #f #f))
+
 (define (make-standard-game-info our-race enemy-race
                                  #:enemy-x [enemy-x 160.0]
-                                 #:enemy-y [enemy-y 160.0])
-  (sc2-game-info
-   "TacticsArenaMap"
-   "TacticsArenaMap.SC2Map"
-   (list (hash 'player-id 1 'race-requested our-race 'race-actual our-race)
-         (hash 'player-id 2 'race-requested enemy-race 'race-actual enemy-race))
-   (sc2-point2d 200.0 200.0)
-   (cons (sc2-point2d 16.0 16.0) (sc2-point2d 184.0 184.0))
-   (list (sc2-point2d (exact->inexact enemy-x) (exact->inexact enemy-y)))))
+                                 #:enemy-y [enemy-y 160.0]
+                                 #:map-size [map-size (cons 200 200)]
+                                 #:playable-area [playable-area (hash 'x0 16.0 'y0 16.0 'x1 184.0 'y1 184.0)]
+                                 #:pathing-grid [pathing-grid #f]
+                                 #:terrain-height [terrain-height #f]
+                                 #:placement-grid [placement-grid #f])
+  (if (or pathing-grid terrain-height placement-grid)
+      (sc2-game-info
+       "TacticsArenaMap"
+       "TacticsArenaMap.SC2Map"
+       (list (hash 'player-id 1 'race-requested our-race 'race-actual our-race)
+             (hash 'player-id 2 'race-requested enemy-race 'race-actual enemy-race))
+       map-size
+       playable-area
+       (list (sc2-point2d (exact->inexact enemy-x) (exact->inexact enemy-y)))
+       pathing-grid
+       terrain-height
+       placement-grid)
+      (sc2-game-info
+       "TacticsArenaMap"
+       "TacticsArenaMap.SC2Map"
+       (list (hash 'player-id 1 'race-requested our-race 'race-actual our-race)
+             (hash 'player-id 2 'race-requested enemy-race 'race-actual enemy-race))
+       map-size
+       playable-area
+       (list (sc2-point2d (exact->inexact enemy-x) (exact->inexact enemy-y))))))
 
 (define (default-neutral-minerals)
   (list
@@ -433,7 +463,10 @@
                 #:larva-count [larva-count 3]
                 #:upgrades [upgrades '()]
                 #:effects [effects '()]
-                #:dead-tags [dead-tags '()])
+                #:dead-tags [dead-tags '()]
+                #:neutral-units [neutral-units #f]
+                #:camera-x [camera-x 32.0]
+                #:camera-y [camera-y 32.0])
   (define upg-ids
     (filter (lambda (id) (> id 0))
             (for/list ([u (in-list upgrades)])
@@ -442,10 +475,10 @@
    loop
    (sc2-player-common 1 minerals vespene food-cap food-used food-army food-workers 0
                       (max 0 (quotient food-army 2)) 0 larva-count)
-   (append (default-neutral-minerals) units)
+   (append (or neutral-units (default-neutral-minerals)) units)
    upg-ids
    '()
-   (sc2-point3d 32.0 32.0 8.0)
+   (sc2-point3d (exact->inexact camera-x) (exact->inexact camera-y) 8.0)
    dead-tags
    effects
    '()
@@ -495,15 +528,27 @@
                 rt))
 
 (define (run-pipeline-sequence our-race enemy-race step-specs
+                               #:our-x [our-x 32.0]
+                               #:our-y [our-y 32.0]
                                #:enemy-x [enemy-x 160.0]
-                               #:enemy-y [enemy-y 160.0])
+                               #:enemy-y [enemy-y 160.0]
+                               #:map-size [map-size (cons 200 200)]
+                               #:playable-area [playable-area (hash 'x0 16.0 'y0 16.0 'x1 184.0 'y1 184.0)]
+                               #:pathing-grid [pathing-grid #f]
+                               #:neutral-units [neutral-units #f])
   ;; Step 0: clean frame-0 reset so all sc2-protobuf-ws module caches reset AND l34-ctx-live-obs? -> #t
-  (define gi (make-standard-game-info our-race enemy-race #:enemy-x enemy-x #:enemy-y enemy-y))
+  (define gi (make-standard-game-info our-race enemy-race
+                                      #:enemy-x enemy-x
+                                      #:enemy-y enemy-y
+                                      #:map-size map-size
+                                      #:playable-area playable-area
+                                      #:pathing-grid pathing-grid))
   (define rt (make-live-bot-runtime #:bot-name 'mothman-tactics-test
                                     #:race our-race))
   (define init-obs
-    (mk-obs 0 (mk-home-base-units our-race #:workers 12)
-            #:minerals 50 #:vespene 0 #:food-used 12 #:food-cap 15 #:food-army 0 #:food-workers 12))
+    (mk-obs 0 (mk-home-base-units our-race #:base-x our-x #:base-y our-y #:workers 12)
+            #:minerals 50 #:vespene 0 #:food-used 12 #:food-cap 15 #:food-army 0 #:food-workers 12
+            #:neutral-units neutral-units #:camera-x our-x #:camera-y our-y))
   (run-live-step! rt gi init-obs our-race #:enemy-base (list enemy-x enemy-y))
   ;; Execute each scenario step in sequence and return list of step-outcomes
   (for/list ([sp (in-list step-specs)])
@@ -544,6 +589,21 @@
 (define (wire-count-tags-with-ability wire-cmds tags ab-id)
   (for/sum ([t (in-list tags)])
     (if (memv ab-id (wire-abilities-for-tag wire-cmds t)) 1 0)))
+
+(define (wire-count-tags-heading-deep wire-cmds tags deep-x deep-y
+                                      #:enemy-tags [enemy-tags '()]
+                                      #:radius [radius 35.0])
+  ;; Counts tags issued an offensive ATTACK/MOVE/harass command into deep enemy territory
+  ;; (targeting an enemy unit in `enemy-tags` or a map point within `radius` of `(deep-x, deep-y)`).
+  (for/sum ([t (in-list tags)])
+    (define deep?
+      (for/or ([c (in-list (wire-cmds-for-tag wire-cmds t))])
+        (and (memv (sc2-raw-unit-command-ability-id c) (list AB-ATTACK AB-MOVE AB-PATROL))
+             (let ([tt (sc2-raw-unit-command-target-unit-tag c)]
+                   [tp (sc2-raw-unit-command-target-pos c)])
+               (or (and tt (memv tt enemy-tags))
+                   (and tp (<= (dist2d-xy (sc2-point2d-x tp) (sc2-point2d-y tp) deep-x deep-y) radius)))))))
+    (if deep? 1 0)))
 
 (define (wire-pure-move-only? wire-cmds tag)
   (define abs (wire-abilities-for-tag wire-cmds tag))
@@ -8202,7 +8262,741 @@
               (mk-check "zero-wire-rejects" (= total-rej 0) (format "wire_rejects=~a" total-rej)))))))
 
 ;; -----------------------------------------------------------------------------
-;; Full Scenario Catalog (204 Scenarios)
+;; Round-15 Map-Symmetry, Cliff-BFS Voronoi & Dynamic Fog-Risk Helpers + Shields
+;; -----------------------------------------------------------------------------
+(define (mk-mineral-cluster base-tag cx cy)
+  (list (mk-unit base-tag 'mineral-field 3 (- cx 6.0) (- cy 2.0))
+        (mk-unit (+ base-tag 1) 'mineral-field 3 (- cx 6.0) cy)
+        (mk-unit (+ base-tag 2) 'mineral-field 3 (- cx 6.0) (+ cy 2.0))
+        (mk-unit (+ base-tag 3) 'vespene-geyser 3 (- cx 4.0) (- cy 5.0))))
+
+(define (mk-reflected-mineral-cluster sym-kind base-tag cx cy)
+  ;; Reflect every resource patch cleanly about playable area [16, 184]^2 (center = (100, 100)).
+  (define pts
+    (list (list 'mineral-field (- cx 6.0) (- cy 2.0))
+          (list 'mineral-field (- cx 6.0) cy)
+          (list 'mineral-field (- cx 6.0) (+ cy 2.0))
+          (list 'vespene-geyser (- cx 4.0) (- cy 5.0))))
+  (for/list ([p (in-list pts)] [i (in-naturals)])
+    (define r (sc2-symmetry-reflect-point sym-kind (second p) (third p) 168.0 168.0 #:x0 16.0 #:y0 16.0))
+    (mk-unit (+ base-tag i) (first p) 3 (car r) (cdr r))))
+
+(define (mk-mirror-minerals sym-kind)
+  ;; Construct exact symmetric mineral clusters matching each map symmetry geometry inside [16, 184]^2.
+  (case sym-kind
+    [(rotational-180)
+     (append (mk-mineral-cluster 91000 32.0 32.0)
+             (mk-mineral-cluster 91010 52.0 32.0)
+             (mk-mineral-cluster 91020 76.0 40.0)
+             (mk-reflected-mineral-cluster 'rotational-180 91030 32.0 32.0)
+             (mk-reflected-mineral-cluster 'rotational-180 91040 52.0 32.0)
+             (mk-reflected-mineral-cluster 'rotational-180 91050 76.0 40.0))]
+    [(mirror-horizontal)
+     ;; Left-vs-Right reflection across x = 100 (our=(32,100), enemy=(168,100))
+     (append (mk-mineral-cluster 91100 32.0 100.0)
+             (mk-mineral-cluster 91110 52.0 128.0)
+             (mk-mineral-cluster 91120 72.0 66.0)
+             (mk-reflected-mineral-cluster 'mirror-horizontal 91130 32.0 100.0)
+             (mk-reflected-mineral-cluster 'mirror-horizontal 91140 52.0 128.0)
+             (mk-reflected-mineral-cluster 'mirror-horizontal 91150 72.0 66.0))]
+    [(mirror-vertical)
+     ;; Bottom-vs-Top reflection across y = 100 (our=(100,32), enemy=(100,168))
+     (append (mk-mineral-cluster 91200 100.0 32.0)
+             (mk-mineral-cluster 91210 128.0 52.0)
+             (mk-mineral-cluster 91220 66.0 72.0)
+             (mk-reflected-mineral-cluster 'mirror-vertical 91230 100.0 32.0)
+             (mk-reflected-mineral-cluster 'mirror-vertical 91240 128.0 52.0)
+             (mk-reflected-mineral-cluster 'mirror-vertical 91250 66.0 72.0))]
+    [(mirror-diagonal-main)
+     ;; Reflection across main diagonal y = x (our=(32,168), enemy=(168,32))
+     (append (mk-mineral-cluster 91300 32.0 168.0)
+             (mk-mineral-cluster 91310 56.0 148.0)
+             (mk-mineral-cluster 91320 40.0 118.0)
+             (mk-reflected-mineral-cluster 'mirror-diagonal-main 91330 32.0 168.0)
+             (mk-reflected-mineral-cluster 'mirror-diagonal-main 91340 56.0 148.0)
+             (mk-reflected-mineral-cluster 'mirror-diagonal-main 91350 40.0 118.0))]
+    [(mirror-diagonal-anti)
+     ;; Reflection across anti-diagonal x + y = 200 (our=(32,32), enemy=(168,168))
+     (append (mk-mineral-cluster 91400 32.0 32.0)
+             (mk-mineral-cluster 91410 62.0 40.0)
+             (mk-mineral-cluster 91420 42.0 90.0)
+             (mk-reflected-mineral-cluster 'mirror-diagonal-anti 91430 32.0 32.0)
+             (mk-reflected-mineral-cluster 'mirror-diagonal-anti 91440 62.0 40.0)
+             (mk-reflected-mineral-cluster 'mirror-diagonal-anti 91450 42.0 90.0))]
+    [else
+     ;; Asymmetric pad layout
+     (append (mk-mineral-cluster 91500 32.0 36.0)
+             (mk-mineral-cluster 91510 66.0 44.0)
+             (mk-mineral-cluster 91520 50.0 110.0)
+             (mk-mineral-cluster 91530 166.0 142.0)
+             (mk-mineral-cluster 91540 138.0 92.0))]))
+
+(define scen-novel-131
+  (tactical-scenario
+   "novel-131-air-harass-strikes-over-cliff-chasm-while-ground-defends-home"
+   "novel" "Protoss" "Protoss" "harass-defense"
+   "Across an impassable horizontal cliff chasm (y=95..105), flying Oracles/Mutalisks strike enemy workers over the cliff while ground defenders hold our main base"
+   (lambda ()
+     (define chasm-grid (mk-walkable-pathing-grid 200 200 #:wall-rects '((0 95 170 105))))
+     (define mins (mk-mirror-minerals 'mirror-vertical))
+     (define home (mk-home-base-units 'Protoss #:base-x 100.0 #:base-y 32.0 #:workers 16))
+     (define defenders (for/list ([i (in-range 6)]) (mk-unit (+ 5610 i) 'stalker 1 (+ 97.0 (* i 0.8)) 38.0 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)))
+     (define oracles   (list (mk-unit 5601 'oracle 1 100.0 162.0 #:hp 100.0 #:hp-max 100.0 #:shield 60.0 #:shield-max 60.0 #:energy 120.0)
+                             (mk-unit 5602 'oracle 1 102.0 162.0 #:hp 100.0 #:hp-max 100.0 #:shield 60.0 #:shield-max 60.0 #:energy 120.0)))
+     (define home-raiders (for/list ([i (in-range 4)]) (mk-unit (+ 8610 i) 'zealot 4 (+ 98.0 (* i 0.8)) 42.0 #:hp 100.0 #:hp-max 100.0 #:shield 50.0 #:shield-max 50.0)))
+     (define enemy-line (append (list (mk-unit 8601 'nexus 4 100.0 168.0 #:hp 1000.0 #:hp-max 1000.0 #:shield 1000.0 #:shield-max 1000.0))
+                                (for/list ([i (in-range 6)]) (mk-unit (+ 8620 i) 'probe 4 (+ 96.0 (* i 0.8)) 166.0 #:hp 20.0 #:hp-max 20.0 #:shield 20.0 #:shield-max 20.0))))
+     (define out
+       (last (run-pipeline-sequence 'Protoss 'Protoss
+               (list (hash 'obs (mk-obs 9000 (append home defenders oracles home-raiders enemy-line)
+                                        #:food-used 36 #:food-cap 60 #:food-army 20 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 100.0 #:camera-y 32.0)))
+               #:our-x 100.0 #:our-y 32.0 #:enemy-x 100.0 #:enemy-y 168.0
+               #:pathing-grid chasm-grid #:neutral-units mins)))
+     (define wcmds (step-outcome-wire-cmds out))
+     (define def-atk (wire-count-tags-with-ability wcmds '(5610 5611 5612 5613 5614 5615) AB-ATTACK))
+     (define ora-act? (wire-any-ability? wcmds '(5601 5602) (list AB-PULSAR-BEAM-ON AB-ATTACK AB-ORACLE-REVELATION AB-MOVE)))
+     (values out
+             (list
+              (mk-check "home-stalkers-engage-raiders" (>= def-atk 4)
+                        (format "Home Stalkers ATTACK=~a/6 vs Zealot raiders (expected >=4)" def-atk))
+              (mk-check "oracles-operate-over-chasm-on-enemy-mineral-line" ora-act?
+                        (format "Oracles over cliff chasm active=~a" ora-act?))
+              (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0)
+                        (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
+
+(define scen-novel-132
+  (tactical-scenario
+   "novel-132-horizontal-and-vertical-mirror-natural-defense-zero-abandon"
+   "novel" "Terran" "Protoss" "home-defense"
+   "On both Horizontal-mirror (our=(32,100), enemy=(168,100)) and Vertical-mirror (our=(100,32), enemy=(100,168)) maps, defenders engage threats on our side of the mirror axis without abandoning natural bases"
+   (lambda ()
+     (define grid-open (mk-walkable-pathing-grid 200 200))
+     ;; Part A: Horizontal mirror
+     (define h-mins (mk-mirror-minerals 'mirror-horizontal))
+     (define h-home (mk-home-base-units 'Terran #:base-x 32.0 #:base-y 100.0 #:with-natural? #t #:nat-x 52.0 #:nat-y 128.0 #:workers 16))
+     (define h-tags (for/list ([i (in-range 8)]) (+ 5710 i)))
+     (define h-allies (append h-home (for/list ([i (in-range 8)]) (mk-unit (+ 5710 i) 'marine 1 64.0 (+ 124.0 (* i 0.7)) #:hp 45.0 #:hp-max 45.0))))
+     (define h-enemies (for/list ([i (in-range 4)]) (mk-unit (+ 8710 i) 'stalker 4 71.0 (+ 125.0 (* i 0.9)) #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)))
+     (define o-h
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 9000 (append h-allies h-enemies)
+                                        #:food-used 28 #:food-cap 50 #:food-army 12 #:food-workers 16
+                                        #:neutral-units h-mins #:camera-x 32.0 #:camera-y 100.0)))
+               #:our-x 32.0 #:our-y 100.0 #:enemy-x 168.0 #:enemy-y 100.0
+               #:pathing-grid grid-open #:neutral-units h-mins)))
+     (define h-atk (wire-count-tags-with-ability (step-outcome-wire-cmds o-h) h-tags AB-ATTACK))
+     ;; Part B: Vertical mirror
+     (define v-mins (mk-mirror-minerals 'mirror-vertical))
+     (define v-home (mk-home-base-units 'Terran #:base-x 100.0 #:base-y 32.0 #:with-natural? #t #:nat-x 128.0 #:nat-y 52.0 #:workers 16))
+     (define v-tags (for/list ([i (in-range 8)]) (+ 5720 i)))
+     (define v-allies (append v-home (for/list ([i (in-range 8)]) (mk-unit (+ 5720 i) 'marine 1 (+ 124.0 (* i 0.7)) 64.0 #:hp 45.0 #:hp-max 45.0))))
+     (define v-enemies (for/list ([i (in-range 4)]) (mk-unit (+ 8720 i) 'stalker 4 (+ 125.0 (* i 0.9)) 71.0 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)))
+     (define o-v
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 9000 (append v-allies v-enemies)
+                                        #:food-used 28 #:food-cap 50 #:food-army 12 #:food-workers 16
+                                        #:neutral-units v-mins #:camera-x 100.0 #:camera-y 32.0)))
+               #:our-x 100.0 #:our-y 32.0 #:enemy-x 100.0 #:enemy-y 168.0
+               #:pathing-grid grid-open #:neutral-units v-mins)))
+     (define v-atk (wire-count-tags-with-ability (step-outcome-wire-cmds o-v) v-tags AB-ATTACK))
+     (define total-rej (+ (step-outcome-wire-rejects o-h) (step-outcome-wire-rejects o-v)))
+     (values o-h
+             (list
+              (mk-check "horizontal-mirror-defenders-engage" (>= h-atk 6)
+                        (format "H-mirror Marines ATTACK=~a/8 (expected >=6)" h-atk))
+              (mk-check "vertical-mirror-defenders-engage" (>= v-atk 6)
+                        (format "V-mirror Marines ATTACK=~a/8 (expected >=6)" v-atk))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+;; -----------------------------------------------------------------------------
+;; Tier 14: Wave-15 Symmetry-Agnostic Ground-BFS Voronoi & Dynamic Fog-Risk (6)
+;; -----------------------------------------------------------------------------
+(define scen-w15-tac-1
+  (tactical-scenario
+   "w15-tac-1-map-symmetry-classification-all-geometries-and-dual-bfs"
+   "wave15-repro" "Protoss" "Terran" "map-symmetry"
+   "Wave-15 P0-2 (zero map-name hacks): Live obs-hash classifies rotational-180, horizontal-mirror, vertical-mirror, diagonal-main, diagonal-anti & asymmetric maps and populates dual Ground-BFS Voronoi territory zones"
+   (lambda ()
+     (define open-grid (mk-walkable-pathing-grid 200 200))
+     (define cases
+       (list (list 'rotational-180       32.0  32.0 168.0 168.0  52.0  52.0 100.0 100.0 148.0 148.0)
+             (list 'mirror-horizontal    32.0 100.0 168.0 100.0  60.0 110.0 100.0 100.0 140.0 110.0)
+             (list 'mirror-vertical     100.0  32.0 100.0 168.0 110.0  60.0 100.0 100.0 110.0 140.0)
+             (list 'mirror-diagonal-main 32.0 168.0 168.0  32.0  54.0 146.0 100.0 100.0 146.0  54.0)
+             (list 'mirror-diagonal-anti 32.0  32.0 168.0 168.0  54.0  54.0 100.0 100.0 146.0 146.0)
+             (list 'asymmetric           32.0  36.0 166.0 142.0  50.0  50.0  99.0  89.0 150.0 130.0)))
+     (define results
+       (for/list ([c (in-list cases)])
+         (define exp-sym (first c))
+         (define ox (second c)) (define oy (third c))
+         (define ex (fourth c)) (define ey (fifth c))
+         (define own-x (sixth c)) (define own-y (seventh c))
+         (define mid-x (eighth c)) (define mid-y (ninth c))
+         (define deep-x (tenth c)) (define deep-y (list-ref c 10))
+         (define mins (mk-mirror-minerals exp-sym))
+         (define home (mk-home-base-units 'Protoss #:base-x ox #:base-y oy #:workers 16))
+         (define out
+           (last (run-pipeline-sequence 'Protoss 'Terran
+                   (list (hash 'obs (mk-obs 2000 home
+                                            #:food-used 16 #:food-cap 30 #:food-army 0 #:food-workers 16
+                                            #:neutral-units mins #:camera-x ox #:camera-y oy)))
+                   #:our-x ox #:our-y oy #:enemy-x ex #:enemy-y ey
+                   #:pathing-grid open-grid #:neutral-units mins)))
+         (define oh (step-outcome-obs-hash out))
+         (define got-sym (hash-ref oh 'map-symmetry-kind #f))
+         (define obfs (hash-ref oh 'our-ground-bfs #f))
+         (define ebfs (hash-ref oh 'enemy-ground-bfs #f))
+         (define m-own  (and obfs ebfs (sc2-ground-territory-margin obfs ebfs own-x own-y)))
+         (define m-mid  (and obfs ebfs (sc2-ground-territory-margin obfs ebfs mid-x mid-y)))
+         (define m-deep (and obfs ebfs (sc2-ground-territory-margin obfs ebfs deep-x deep-y)))
+         (define z-own  (bot-runtime-point-territory-zone oh own-x own-y))
+         (define z-mid  (bot-runtime-point-territory-zone oh mid-x mid-y))
+         (define z-deep (bot-runtime-point-territory-zone oh deep-x deep-y))
+         (list exp-sym got-sym (and obfs ebfs #t) m-own m-mid m-deep z-own z-mid z-deep (step-outcome-wire-rejects out) out)))
+     (define all-sym-ok? (for/and ([r (in-list results)]) (eq? (first r) (second r))))
+     (define all-bfs-ok? (for/and ([r (in-list results)]) (third r)))
+     (define all-zones-ok?
+       (for/and ([r (in-list results)])
+         (and (real? (fourth r)) (>= (fourth r) 6.0)
+              (real? (fifth r))  (>= (fifth r) -8.0) (< (fifth r) 6.0)
+              (real? (sixth r))  (< (sixth r) -8.0)
+              (eq? (seventh r) 'own-territory)
+              (eq? (eighth r) 'contested-frontline)
+              (eq? (ninth r) 'deep-enemy-territory))))
+     (define total-rej (for/sum ([r (in-list results)]) (tenth r)))
+     (values (list-ref (first results) 10)
+             (list
+              (mk-check "all-6-symmetry-geometries-classified-cleanly" all-sym-ok?
+                        (format "symmetries=~a" (map (lambda (r) (cons (first r) (second r))) results)))
+              (mk-check "dual-ground-bfs-populated-on-all-maps" all-bfs-ok?
+                        (format "dual-bfs=~a" (map third results)))
+              (mk-check "own-contested-deep-voronoi-zones-accurate" all-zones-ok?
+                        (format "zones=~a" (map (lambda (r) (list (first r) (seventh r) (eighth r) (ninth r))) results)))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-w15-tac-2
+  (tactical-scenario
+   "w15-tac-2-cliff-choke-ground-bfs-voronoi-defense-and-air-separation"
+   "wave15-repro" "Terran" "Protoss" "home-defense"
+   "Wave-15 P0-2 (cliff-choke Voronoi): Defend own-territory point 44.4t outside old 36t Euclidean circle when cliff makes Ground-BFS margin >> +6, while rejecting cliff-blocked points for ground (keeping air margin positive!)"
+   (lambda ()
+     ;; Part A: Vertical cliff at x=76..82, y=0..158 -> P=(68, 58) is 44.4t Euclidean (>36t!) from BOTH main (32,32) and nat (24,52),
+     ;; yet Ground-BFS d_ours ~ 45t <= 48t while d_enemy ~ 200t -> margin >> +80 -> Own Territory defended even under outnumbered suppress!
+     (define cliff-grid-a (mk-walkable-pathing-grid 200 200 #:wall-rects '((76 0 82 158))))
+     (define mins-a
+       (append (mk-mineral-cluster 92000 32.0 32.0)
+               (mk-mineral-cluster 92010 24.0 52.0)
+               (mk-mineral-cluster 92020 168.0 168.0)))
+     (define home-a (mk-home-base-units 'Terran #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define m-tags '(5801 5802 5803 5804 5805))
+     (define defenders-a (for/list ([i (in-range 5)]) (mk-unit (+ 5801 i) 'marine 1 62.5 (+ 56.5 (* i 0.7)) #:hp 45.0 #:hp-max 45.0)))
+     (define enemies-a
+       (append (for/list ([i (in-range 4)]) (mk-unit (+ 8801 i) 'stalker 4 68.0 (+ 56.5 (* i 0.9)) #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0))
+               (list (mk-unit 8810 'immortal 4 69.0 58.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0)
+                     (mk-unit 8811 'immortal 4 69.0 59.5 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0))))
+     (define o-a
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 9000 (append home-a defenders-a enemies-a)
+                                        #:food-used 24 #:food-cap 45 #:food-army 8 #:food-workers 16
+                                        #:neutral-units mins-a #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid cliff-grid-a #:neutral-units mins-a)))
+     (define oh-a (step-outcome-obs-hash o-a))
+     (define m-a (bot-runtime-point-territory-margin oh-a 68.0 58.0 #:air? #f))
+     (define z-a (bot-runtime-point-territory-zone oh-a 68.0 58.0 #:air? #f))
+     (define def-atk-a (wire-count-tags-with-ability (step-outcome-wire-cmds o-a) m-tags AB-ATTACK))
+     ;; Part B: Cliff wall right next to main at x=46..52, y=0..145 -> Q=(56, 32) is only 24t Euclidean from main (32,32),
+     ;; YET Ground-BFS detour > 220t vs enemy ~175t -> ground zone is 'deep-enemy-territory (NOT 'own-territory), while air margin > +100!
+     (define cliff-grid-b (mk-walkable-pathing-grid 200 200 #:wall-rects '((46 0 52 145))))
+     (define o-b
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 9000 home-a
+                                        #:food-used 16 #:food-cap 30 #:food-army 0 #:food-workers 16
+                                        #:neutral-units mins-a #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid cliff-grid-b #:neutral-units mins-a)))
+     (define oh-b (step-outcome-obs-hash o-b))
+     (define m-b-gnd (bot-runtime-point-territory-margin oh-b 56.0 32.0 #:air? #f))
+     (define z-b-gnd (bot-runtime-point-territory-zone oh-b 56.0 32.0 #:air? #f))
+     (define m-b-air (bot-runtime-point-territory-margin oh-b 56.0 32.0 #:air? #t))
+     (define total-rej (+ (step-outcome-wire-rejects o-a) (step-outcome-wire-rejects o-b)))
+     (values o-a
+             (list
+              (mk-check "cliff-voronoi-point-classified-own-territory-outside-36t"
+                        (and (real? m-a) (>= m-a 80.0) (eq? z-a 'own-territory))
+                        (format "P=(68,58) 44.4t Euclidean: margin=~a zone=~a" m-a z-a))
+              (mk-check "defenders-engage-in-cliff-voronoi-territory-under-outnumbered-suppress"
+                        (>= def-atk-a 4)
+                        (format "Marines ATTACK=~a/5 at cliff-Voronoi P=(68,58) (expected >=4)" def-atk-a))
+              (mk-check "cliff-blocked-point-rejected-for-ground-positive-for-air"
+                        (and (real? m-b-gnd) (< m-b-gnd -8.0) (eq? z-b-gnd 'deep-enemy-territory)
+                             (real? m-b-air) (> m-b-air 100.0))
+                        (format "Q=(56,32) behind cliff: gnd_margin=~a gnd_zone=~a air_margin=~a" m-b-gnd z-b-gnd m-b-air))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-w15-tac-3
+  (tactical-scenario
+   "w15-tac-3-mobile-harass-crosses-deep-territory-under-fog-belief"
+   "wave15-repro" "Protoss" "Terran" "harass-defense"
+   "Wave-15 P0-2 (Dynamic Fog-Risk Gate): Mobile/retreatable harass units (Oracle, Blink-Stalker, Reaper, Banshee, Medivac, Mutalisk, small Zergling runby) cross into deep enemy territory under fog belief while slow main-army units stay gated"
+   (lambda ()
+     (define open-grid (mk-walkable-pathing-grid 200 200))
+     (define mins (mk-mirror-minerals 'rotational-180))
+     ;; Classifier sanity across P/T/Z mobile vs slow unit classes
+     (define cls-ok?
+       (and (bot-runtime-mobile-retreatable-unit? 'oracle)
+            (bot-runtime-mobile-retreatable-unit? 'reaper)
+            (bot-runtime-mobile-retreatable-unit? 'banshee)
+            (bot-runtime-mobile-retreatable-unit? 'medivac)
+            (bot-runtime-mobile-retreatable-unit? 'mutalisk)
+            (bot-runtime-mobile-retreatable-unit? 'stalker #:researched-upgrades '(blink))
+            (bot-runtime-mobile-retreatable-unit? 'zergling #:small-ling-runby? #t)
+            (not (bot-runtime-mobile-retreatable-unit? 'stalker #:researched-upgrades '()))
+            (not (bot-runtime-mobile-retreatable-unit? 'immortal))
+            (not (bot-runtime-mobile-retreatable-unit? 'siege-tank))
+            (not (bot-runtime-mobile-retreatable-unit? 'roach))))
+     ;; Part A (Protoss): Dedicated air harass (2 Oracles) crosses out of a mixed slow army (2 Immortals)
+     ;; under fog belief while slow Immortals hold; AND a pure Blink-Stalker squad (`all-mobile-retreatable?`,
+     ;; Blink established >60s earlier at f=7000!) crosses deep cleanly!
+     (define p-home (mk-home-base-units 'Protoss #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define p-oras (list (mk-unit 5901 'oracle 1 70.0 70.0 #:energy 100.0)
+                          (mk-unit 5902 'oracle 1 71.0 71.0 #:energy 100.0)))
+     (define p-slow (list (mk-unit 5911 'immortal 1 68.0 68.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0)
+                          (mk-unit 5912 'immortal 1 69.0 68.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0)))
+     (define p-pure-blink (for/list ([i (in-range 4)]) (mk-unit (+ 5903 i) 'stalker 1 (+ 70.0 (* i 0.7)) 72.0 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)))
+     (define e-cc   (list (mk-unit 8901 'command-center 4 168.0 168.0 #:hp 1500.0 #:hp-max 1500.0)))
+     (define o-p
+       (last (run-pipeline-sequence 'Protoss 'Terran
+               (list (hash 'obs (mk-obs 9000 (append p-home p-oras p-slow e-cc)
+                                        #:food-used 30 #:food-cap 60 #:food-army 14 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units mins)))
+     (define o-p-pure
+       (last (run-pipeline-sequence 'Protoss 'Terran
+               (list (hash 'obs (mk-obs 7000 (append p-home p-pure-blink)
+                                        #:upgrades '(blink) #:food-used 24 #:food-cap 60 #:food-army 8 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0))
+                     (hash 'obs (mk-obs 9000 (append p-home p-pure-blink e-cc)
+                                        #:upgrades '(blink) #:food-used 24 #:food-cap 60 #:food-army 8 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units mins)))
+     (define p-ora-go (wire-count-tags-heading-deep (step-outcome-wire-cmds o-p) '(5901 5902) 168.0 168.0 #:enemy-tags '(8901)))
+     (define p-slow-deep (wire-count-tags-heading-deep (step-outcome-wire-cmds o-p) '(5911 5912) 168.0 168.0 #:enemy-tags '(8901)))
+     (define p-blink-go (wire-count-tags-heading-deep (step-outcome-wire-cmds o-p-pure) '(5903 5904 5905 5906) 168.0 168.0 #:enemy-tags '(8901)))
+     ;; Part B (Terran): 2 Reapers + 1 Banshee (dedicated harass) cross while 2 slow Siege Tanks hold
+     (define t-home (mk-home-base-units 'Terran #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define t-mob  (list (mk-unit 5921 'reaper 1 70.0 70.0 #:hp 60.0 #:hp-max 60.0)
+                          (mk-unit 5922 'reaper 1 71.0 70.0 #:hp 60.0 #:hp-max 60.0)
+                          (mk-unit 5923 'banshee 1 70.0 72.0 #:hp 140.0 #:hp-max 140.0 #:energy 100.0)))
+     (define t-slow (list (mk-unit 5931 'siege-tank 1 68.0 68.0 #:hp 175.0 #:hp-max 175.0)
+                          (mk-unit 5932 'siege-tank 1 69.0 68.0 #:hp 175.0 #:hp-max 175.0)))
+     (define e-nex  (list (mk-unit 8902 'nexus 4 168.0 168.0 #:hp 1000.0 #:hp-max 1000.0 #:shield 1000.0 #:shield-max 1000.0)))
+     (define o-t
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 9000 (append t-home t-mob t-slow e-nex)
+                                        #:food-used 28 #:food-cap 50 #:food-army 12 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units mins)))
+     (define t-mob-go (wire-count-tags-heading-deep (step-outcome-wire-cmds o-t) '(5921 5922 5923) 168.0 168.0 #:enemy-tags '(8902)))
+     (define t-slow-deep (wire-count-tags-heading-deep (step-outcome-wire-cmds o-t) '(5931 5932) 168.0 168.0 #:enemy-tags '(8902)))
+     ;; Part C (Zerg): 2 Mutalisks (dedicated air harass) cross out of mixed slow army (3 Roaches),
+     ;; AND a pure small 6-Zergling runby (`all-mobile-retreatable?`) crosses deep cleanly!
+     (define z-home (mk-home-base-units 'Zerg #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define z-mutas (list (mk-unit 5941 'mutalisk 1 70.0 70.0 #:hp 120.0 #:hp-max 120.0)
+                           (mk-unit 5942 'mutalisk 1 71.0 70.0 #:hp 120.0 #:hp-max 120.0)))
+     (define z-slow (for/list ([i (in-range 3)]) (mk-unit (+ 5951 i) 'roach 1 (+ 67.5 (* i 0.8)) 68.0 #:hp 145.0 #:hp-max 145.0)))
+     (define z-pure-lings (for/list ([i (in-range 6)]) (mk-unit (+ 5943 i) 'zergling 1 (+ 69.5 (* i 0.4)) 72.0 #:hp 35.0 #:hp-max 35.0)))
+     (define o-z
+       (last (run-pipeline-sequence 'Zerg 'Protoss
+               (list (hash 'obs (mk-obs 9000 (append z-home z-mutas z-slow e-nex)
+                                        #:food-used 26 #:food-cap 50 #:food-army 10 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units mins)))
+     (define o-z-pure
+       (last (run-pipeline-sequence 'Zerg 'Protoss
+               (list (hash 'obs (mk-obs 9000 (append z-home z-pure-lings e-nex)
+                                        #:food-used 19 #:food-cap 50 #:food-army 3 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units mins)))
+     (define z-muta-go (wire-count-tags-heading-deep (step-outcome-wire-cmds o-z) '(5941 5942) 168.0 168.0 #:enemy-tags '(8902)))
+     (define z-slow-deep (wire-count-tags-heading-deep (step-outcome-wire-cmds o-z) '(5951 5952 5953) 168.0 168.0 #:enemy-tags '(8902)))
+     (define z-ling-go (wire-count-tags-heading-deep (step-outcome-wire-cmds o-z-pure) '(5943 5944 5945 5946 5947 5948) 168.0 168.0 #:enemy-tags '(8902)))
+     (define total-rej (+ (step-outcome-wire-rejects o-p) (step-outcome-wire-rejects o-p-pure)
+                          (step-outcome-wire-rejects o-t) (step-outcome-wire-rejects o-z) (step-outcome-wire-rejects o-z-pure)))
+     (values o-p
+             (list
+              (mk-check "mobile-retreatable-classifier-exact-across-ptz" cls-ok?
+                        (format "classifier_ok=~a" cls-ok?))
+              (mk-check "protoss-oracles-and-pure-blink-stalkers-cross-while-immortals-hold"
+                        (and (>= p-ora-go 1) (= p-slow-deep 0) (>= p-blink-go 3))
+                        (format "P Oracles deep=~a/2, slow Immortals deep=~a/2, pure Blink-Stalkers deep=~a/4" p-ora-go p-slow-deep p-blink-go))
+              (mk-check "terran-reapers-banshee-cross-while-tanks-hold"
+                        (and (>= t-mob-go 2) (= t-slow-deep 0))
+                        (format "T mobile heading-deep=~a/3, slow Tanks deep=~a/2" t-mob-go t-slow-deep))
+              (mk-check "zerg-mutas-and-pure-ling-runby-cross-while-roaches-hold"
+                        (and (= z-muta-go 2) (= z-slow-deep 0) (>= z-ling-go 4))
+                        (format "Z Mutas deep=~a/2, slow Roaches deep=~a/3, pure Ling runby deep=~a/6" z-muta-go z-slow-deep z-ling-go))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-w15-tac-4
+  (tactical-scenario
+   "w15-tac-4-slow-army-respects-deep-fog-risk-vs-contested-frontline"
+   "wave15-repro" "Terran" "Protoss" "macro-tactics"
+   "Wave-15c P0-2 (Dynamic Fog-Risk Gate): Slow non-retreatable army holds back from Deep Enemy Territory (margin < -8) AND outgunned (0.40x) Contested Frontline marches, while a competitive (>=0.85x) army contests Contested Frontline (-8 <= margin < +6)"
+   (lambda ()
+     (define open-grid (mk-walkable-pathing-grid 200 200))
+     (define mins (mk-mirror-minerals 'rotational-180))
+     (define home (mk-home-base-units 'Terran #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define squad-tags '(6001 6002 6003 6004 6005 6006))
+     ;; Subcase A: Deep Enemy Territory target at (158, 158) (margin << -8) -> slow squad MUST NOT commit across map
+     (define squad-a
+       (append (list (mk-unit 6001 'siege-tank 1 70.0 70.0 #:hp 175.0 #:hp-max 175.0)
+                     (mk-unit 6002 'siege-tank 1 71.5 70.0 #:hp 175.0 #:hp-max 175.0))
+               (for/list ([i (in-range 4)]) (mk-unit (+ 6003 i) 'marine 1 (+ 69.5 (* i 0.7)) 72.0 #:hp 45.0 #:hp-max 45.0))))
+     (define deep-bldg (list (mk-unit 8910 'gateway 4 158.0 158.0 #:hp 500.0 #:hp-max 500.0 #:shield 500.0 #:shield-max 500.0)))
+     (define o-deep
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 9000 (append home squad-a deep-bldg)
+                                        #:food-used 26 #:food-cap 50 #:food-army 10 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units mins)))
+     (define z-deep (bot-runtime-point-territory-zone (step-outcome-obs-hash o-deep) 158.0 158.0))
+     (define deep-atk (wire-count-tags-with-ability (step-outcome-wire-cmds o-deep) squad-tags AB-ATTACK))
+     ;; Subcase B: Outgunned (0.39x) slow squad at 18t (edist2=324 > 225) from Contested Frontline pylon (100,100) stays gated!
+     (define squad-outgunned
+       (append (list (mk-unit 6001 'siege-tank 1 87.0 87.0 #:hp 175.0 #:hp-max 175.0)
+                     (mk-unit 6002 'siege-tank 1 88.0 87.0 #:hp 175.0 #:hp-max 175.0))
+               (for/list ([i (in-range 4)]) (mk-unit (+ 6003 i) 'marine 1 (+ 86.5 (* i 0.6)) 88.0 #:hp 45.0 #:hp-max 45.0))))
+     (define mid-bldg (list (mk-unit 8911 'pylon 4 100.0 100.0 #:hp 200.0 #:hp-max 200.0 #:shield 200.0 #:shield-max 200.0)))
+     (define o-mid-weak
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 9000 (append home squad-outgunned mid-bldg)
+                                        #:food-used 26 #:food-cap 50 #:food-army 10 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units mins)))
+     (define mid-weak-atk (wire-count-tags-with-ability (step-outcome-wire-cmds o-mid-weak) squad-tags AB-ATTACK))
+     ;; Subcase C: Competitive (>=0.85x: 3 Tanks + 3 Marauders + 12 Marines = 2025 val ~0.90x) slow squad at 18t contests Contested Frontline!
+     (define comp-tags (append '(6021 6022 6023 6024 6025 6026) (for/list ([i (in-range 12)]) (+ 6030 i))))
+     (define squad-comp
+       (append (list (mk-unit 6021 'siege-tank 1 87.0 87.0 #:hp 175.0 #:hp-max 175.0)
+                     (mk-unit 6022 'siege-tank 1 88.5 87.0 #:hp 175.0 #:hp-max 175.0)
+                     (mk-unit 6023 'siege-tank 1 87.0 88.5 #:hp 175.0 #:hp-max 175.0)
+                     (mk-unit 6024 'marauder 1 88.5 88.5 #:hp 125.0 #:hp-max 125.0)
+                     (mk-unit 6025 'marauder 1 89.5 88.5 #:hp 125.0 #:hp-max 125.0)
+                     (mk-unit 6026 'marauder 1 88.5 89.5 #:hp 125.0 #:hp-max 125.0))
+               (for/list ([i (in-range 12)])
+                 (mk-unit (+ 6030 i) 'marine 1 (+ 86.0 (* 0.5 (modulo i 6))) (+ 89.0 (* 0.5 (quotient i 6))) #:hp 45.0 #:hp-max 45.0))))
+     (define o-mid-comp
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 9000 (append home squad-comp mid-bldg)
+                                        #:food-used 43 #:food-cap 66 #:food-army 27 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units mins)))
+     (define z-mid (bot-runtime-point-territory-zone (step-outcome-obs-hash o-mid-comp) 100.0 100.0))
+     (define mid-comp-atk (wire-count-tags-with-ability (step-outcome-wire-cmds o-mid-comp) comp-tags AB-ATTACK))
+     (define total-rej (+ (step-outcome-wire-rejects o-deep) (step-outcome-wire-rejects o-mid-weak) (step-outcome-wire-rejects o-mid-comp)))
+     (values o-deep
+             (list
+              (mk-check "slow-army-gated-from-deep-enemy-territory-under-fog-belief"
+                        (and (eq? z-deep 'deep-enemy-territory) (= deep-atk 0))
+                        (format "Deep target zone=~a, slow squad ATTACK=~a/6 (expected 0)" z-deep deep-atk))
+              (mk-check "outgunned-0.40x-slow-army-does-not-march-into-contested-frontline"
+                        (= mid-weak-atk 0)
+                        (format "Outgunned 0.40x squad at 18t from frontline ATTACK=~a/6 (expected 0)" mid-weak-atk))
+              (mk-check "competitive-0.90x-slow-army-contests-frontline-skirmish"
+                        (and (eq? z-mid 'contested-frontline) (>= mid-comp-atk 10))
+                        (format "Competitive 0.90x squad frontline zone=~a, ATTACK=~a/18 (expected >=10)" z-mid mid-comp-atk))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-w15-tac-5
+  (tactical-scenario
+   "w15-tac-5-upgrade-power-spike-overrides-deep-fog-gate"
+   "wave15-repro" "Terran" "Zerg" "macro-tactics"
+   "Wave-15b P0-2 (Dynamic Fog-Risk Gate): Cohesive >=18-sup timing squad (~0.90x believed army) holds under fog belief without a spike, yet commits forward immediately when Stimpack power-spike completes"
+   (lambda ()
+     (define open-grid (mk-walkable-pathing-grid 200 200))
+     (define mins (mk-mirror-minerals 'rotational-180))
+     (define home (mk-home-base-units 'Terran #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     ;; 3 Siege Tanks (1012.5) + 3 Marauders (412.5) + 12 Marines (600) = 2025 val (~0.903x of 2243 owm, 27 sup >= 18)
+     (define squad-tags (append '(6101 6102 6103 6104 6105 6106) (for/list ([i (in-range 12)]) (+ 6110 i))))
+     (define squad
+       (append (list (mk-unit 6101 'siege-tank 1 70.0 70.0 #:hp 175.0 #:hp-max 175.0)
+                     (mk-unit 6102 'siege-tank 1 71.5 70.0 #:hp 175.0 #:hp-max 175.0)
+                     (mk-unit 6103 'siege-tank 1 73.0 70.0 #:hp 175.0 #:hp-max 175.0)
+                     (mk-unit 6104 'marauder 1 72.0 71.0 #:hp 125.0 #:hp-max 125.0)
+                     (mk-unit 6105 'marauder 1 72.0 72.5 #:hp 125.0 #:hp-max 125.0)
+                     (mk-unit 6106 'marauder 1 73.5 72.5 #:hp 125.0 #:hp-max 125.0))
+               (for/list ([i (in-range 12)])
+                 (mk-unit (+ 6110 i) 'marine 1 (+ 70.0 (* 0.5 (modulo i 6))) (+ 73.5 (* 0.6 (quotient i 6))) #:hp 45.0 #:hp-max 45.0))))
+     (define deep-pool (list (mk-unit 8920 'spawning-pool 4 158.0 158.0 #:hp 1000.0 #:hp-max 1000.0)))
+     ;; Subcase A: No upgrade finishes between f=8900 and f=9000 -> deep-fog gate holds slow timing army
+     (define o-no-spike
+       (last (run-pipeline-sequence 'Terran 'Zerg
+               (list (hash 'obs (mk-obs 8900 (append home squad deep-pool)
+                                        #:upgrades '() #:food-used 43 #:food-cap 66 #:food-army 27 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0))
+                     (hash 'obs (mk-obs 9000 (append home squad deep-pool)
+                                        #:upgrades '() #:food-used 43 #:food-cap 66 #:food-army 27 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units mins)))
+     (define atk-no-spike (wire-count-tags-with-ability (step-outcome-wire-cmds o-no-spike) squad-tags AB-ATTACK))
+     ;; Subcase B: Stimpack completes at f=9000 -> active power-spike window exempts timing squad from fog gate!
+     (define o-spike
+       (last (run-pipeline-sequence 'Terran 'Zerg
+               (list (hash 'obs (mk-obs 8900 (append home squad deep-pool)
+                                        #:upgrades '() #:food-used 43 #:food-cap 66 #:food-army 27 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0))
+                     (hash 'obs (mk-obs 9000 (append home squad deep-pool)
+                                        #:upgrades '(stimpack) #:food-used 43 #:food-cap 66 #:food-army 27 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units mins)))
+     (define atk-spike (wire-count-tags-with-ability (step-outcome-wire-cmds o-spike) squad-tags AB-ATTACK))
+     (define total-rej (+ (step-outcome-wire-rejects o-no-spike) (step-outcome-wire-rejects o-spike)))
+     (values o-spike
+             (list
+              (mk-check "without-power-spike-deep-fog-gate-holds" (= atk-no-spike 0)
+                        (format "No-spike slow squad ATTACK=~a/18 (expected 0)" atk-no-spike))
+              (mk-check "with-fresh-stimpack-power-spike-army-commits" (>= atk-spike 10)
+                        (format "Stimpack-spike timing squad ATTACK=~a/18 (expected >=10)" atk-spike))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-w15-tac-6
+  (tactical-scenario
+   "w15-tac-6-exposed-expand-and-behind-in-eco-desperation-override-fog-gate"
+   "wave15-repro" "Protoss" "Zerg" "macro-tactics"
+   "Wave-15b P0-2 (Dynamic Fog-Risk Gate): Cohesive >=18-sup Protoss army breaks deep-fog gate at >=0.90x to deny a truly greedy/exposed 3rd expansion (>26t from enemy main) AND at >=0.85x on a >=2-base behind-in-eco desperation timing"
+   (lambda ()
+     (define open-grid (mk-walkable-pathing-grid 200 200))
+     (define mins (mk-mirror-minerals 'rotational-180))
+     (define home (mk-home-base-units 'Protoss #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     ;; Subcase A: Truly greedy/exposed expansion at (118, 128) (64t > 26t from enemy main (168,168); enemy 2b > our 1b)
+     ;; 4 Immortals (1700) + 5 Zealots (500) = 2200 val (~0.98x of 2243 owm >= 0.90x, 26 sup >= 18)
+     (define tags-a '(6201 6202 6203 6204 6205 6206 6207 6208 6209))
+     (define squad-a
+       (append (list (mk-unit 6201 'immortal 1 70.0 70.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0)
+                     (mk-unit 6202 'immortal 1 71.5 70.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0)
+                     (mk-unit 6203 'immortal 1 73.0 70.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0)
+                     (mk-unit 6204 'immortal 1 74.5 70.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0))
+               (for/list ([i (in-range 5)]) (mk-unit (+ 6205 i) 'zealot 1 (+ 70.0 (* i 0.8)) 72.5 #:hp 100.0 #:hp-max 100.0 #:shield 50.0 #:shield-max 50.0))))
+     (define exposed-hatches
+       (list (mk-unit 8929 'hatchery 4 168.0 168.0 #:hp 1500.0 #:hp-max 1500.0)
+             (mk-unit 8930 'hatchery 4 118.0 128.0 #:hp 900.0 #:hp-max 1500.0 #:build-progress 0.60)))
+     (define o-exp
+       (last (run-pipeline-sequence 'Protoss 'Zerg
+               (list (hash 'obs (mk-obs 9000 (append home squad-a exposed-hatches)
+                                        #:food-used 42 #:food-cap 66 #:food-army 26 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units mins)))
+     (define atk-exp (wire-count-tags-with-ability (step-outcome-wire-cmds o-exp) tags-a AB-ATTACK))
+     ;; Subcase B: Behind-in-eco desperation (1 base vs 3 enemy Hatcheries; 3 Immortals + 7 Zealots = 1975 val ~0.88x in [0.85, 0.90), 26 sup >= 18)
+     (define tags-b (append '(6221 6222 6223) (for/list ([i (in-range 7)]) (+ 6230 i))))
+     (define squad-b
+       (append (list (mk-unit 6221 'immortal 1 70.0 70.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0)
+                     (mk-unit 6222 'immortal 1 71.5 70.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0)
+                     (mk-unit 6223 'immortal 1 73.0 70.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0))
+               (for/list ([i (in-range 7)]) (mk-unit (+ 6230 i) 'zealot 1 (+ 69.5 (* 0.7 (modulo i 4))) (+ 72.0 (* 0.8 (quotient i 4))) #:hp 100.0 #:hp-max 100.0 #:shield 50.0 #:shield-max 50.0))))
+     (define three-hatches
+       (list (mk-unit 8940 'hatchery 4 168.0 168.0 #:hp 1500.0 #:hp-max 1500.0)
+             (mk-unit 8941 'hatchery 4 148.0 168.0 #:hp 1500.0 #:hp-max 1500.0)
+             (mk-unit 8942 'hatchery 4 124.0 160.0 #:hp 1500.0 #:hp-max 1500.0)))
+     (define o-desp
+       (last (run-pipeline-sequence 'Protoss 'Zerg
+               (list (hash 'obs (mk-obs 9000 (append home squad-b three-hatches)
+                                        #:food-used 42 #:food-cap 66 #:food-army 26 #:food-workers 16
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units mins)))
+     (define atk-desp (wire-count-tags-with-ability (step-outcome-wire-cmds o-desp) tags-b AB-ATTACK))
+     (define total-rej (+ (step-outcome-wire-rejects o-exp) (step-outcome-wire-rejects o-desp)))
+     (values o-exp
+             (list
+              (mk-check "exposed-enemy-expand-overrides-fog-gate" (>= atk-exp 7)
+                        (format "Exposed Hatchery denial ATTACK=~a/9 (expected >=7)" atk-exp))
+              (mk-check "behind-in-eco-desperation-timing-overrides-fog-gate" (>= atk-desp 7)
+                        (format "1v3-base desperation timing ATTACK=~a/10 (expected >=7)" atk-desp))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-w15-tac-7
+  (tactical-scenario
+   "w15-tac-7-m5-non-blink-stalkers-never-suicide-into-standard-natural"
+   "wave15-repro" "Protoss" "Terran" "macro-tactics"
+   "Wave-15b Calibration (#18 P v RustyNikolaj & #12 P v puck & Zerg metabolic-boost): Early non-Blink Stalkers/Sentry/Zealot at ~0.65x believed army must NOT suicide into an opponent's standard main-adjacent 2nd natural (2b vs 2b), and basic metabolic-boost must NOT disable slow Zerg fog protection"
+   (lambda ()
+     (define open-grid (mk-walkable-pathing-grid 200 200))
+     ;; Part A (#18 Torches vertical-mirror shape): 2-base vs 2-base, standard main-adjacent enemy natural at (120, 152) (dist=25.6t <= 26t)
+     ;; Our non-Blink squad: 6 Stalkers (1200) + 1 Sentry (200) + 1 Zealot (100) = 1500 val (~0.67x of believed army, 16 sup)
+     (define v-mins (mk-mirror-minerals 'mirror-vertical))
+     (define p-home (mk-home-base-units 'Protoss #:base-x 100.0 #:base-y 32.0 #:with-natural? #t #:nat-x 128.0 #:nat-y 52.0 #:workers 24))
+     (define p-tags '(6301 6302 6303 6304 6305 6306 6307 6308))
+     (define p-squad
+       (append (for/list ([i (in-range 6)])
+                 (mk-unit (+ 6301 i) 'stalker 1 (+ 98.0 (* i 0.8)) 86.0 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0))
+               (list (mk-unit 6307 'sentry 1 99.0 84.5 #:hp 40.0 #:hp-max 40.0 #:shield 40.0 #:shield-max 40.0 #:energy 75.0)
+                     (mk-unit 6308 'zealot 1 101.0 87.5 #:hp 100.0 #:hp-max 100.0 #:shield 50.0 #:shield-max 50.0))))
+     (define enemy-std-2b
+       (list (mk-unit 8950 'command-center 4 100.0 168.0 #:hp 1500.0 #:hp-max 1500.0)
+             (mk-unit 8951 'command-center 4 118.0 154.0 #:hp 1500.0 #:hp-max 1500.0)))
+     (define o-nat
+       (last (run-pipeline-sequence 'Protoss 'Terran
+               (list (hash 'obs (mk-obs 9000 (append p-home p-squad enemy-std-2b)
+                                        #:upgrades '() #:food-used 40 #:food-cap 66 #:food-army 16 #:food-workers 24
+                                        #:neutral-units v-mins #:camera-x 100.0 #:camera-y 32.0)))
+               #:our-x 100.0 #:our-y 32.0 #:enemy-x 100.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units v-mins)))
+     (define p-suicide-atk (wire-count-tags-heading-deep (step-outcome-wire-cmds o-nat) p-tags 118.0 154.0 #:enemy-tags '(8950 8951)))
+     ;; Part B (Zerg metabolic-boost): Basic Ling speed finishing at f=9000 must NOT disable deep-fog protection for slow Roaches/Ravagers at ~0.55x!
+     (define r-mins (mk-mirror-minerals 'rotational-180))
+     (define z-home (mk-home-base-units 'Zerg #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define z-tags '(6321 6322 6323 6324 6325 6326))
+     (define z-squad
+       (append (for/list ([i (in-range 4)]) (mk-unit (+ 6321 i) 'roach 1 (+ 70.0 (* i 0.8)) 70.0 #:hp 145.0 #:hp-max 145.0))
+               (list (mk-unit 6325 'ravager 1 70.5 72.0 #:hp 120.0 #:hp-max 120.0)
+                     (mk-unit 6326 'ravager 1 72.0 72.0 #:hp 120.0 #:hp-max 120.0))))
+     (define deep-gate (list (mk-unit 8955 'gateway 4 158.0 158.0 #:hp 500.0 #:hp-max 500.0 #:shield 500.0 #:shield-max 500.0)))
+     (define o-zling
+       (last (run-pipeline-sequence 'Zerg 'Protoss
+               (list (hash 'obs (mk-obs 8900 (append z-home z-squad deep-gate)
+                                        #:upgrades '() #:food-used 30 #:food-cap 54 #:food-army 14 #:food-workers 16
+                                        #:neutral-units r-mins #:camera-x 32.0 #:camera-y 32.0))
+                     (hash 'obs (mk-obs 9000 (append z-home z-squad deep-gate)
+                                        #:upgrades '(metabolic-boost) #:food-used 30 #:food-cap 54 #:food-army 14 #:food-workers 16
+                                        #:neutral-units r-mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units r-mins)))
+     (define z-suicide-atk (wire-count-tags-with-ability (step-outcome-wire-cmds o-zling) z-tags AB-ATTACK))
+     (define total-rej (+ (step-outcome-wire-rejects o-nat) (step-outcome-wire-rejects o-zling)))
+     (values o-nat
+             (list
+              (mk-check "m5-non-blink-stalkers-never-suicide-into-standard-enemy-natural"
+                        (= p-suicide-atk 0)
+                        (format "Non-Blink Protoss squad heading into standard 2b enemy natural=~a/8 (expected 0)" p-suicide-atk))
+              (mk-check "metabolic-boost-does-not-disable-slow-roach-fog-gate"
+                        (= z-suicide-atk 0)
+                        (format "Slow Roaches/Ravagers ATTACK deep after metabolic-boost=~a/6 (expected 0)" z-suicide-atk))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-w15-tac-8
+  (tactical-scenario
+   "w15-tac-8-main-ramp-cliff-defense-and-no-split-squad-feeding"
+   "wave15-repro" "Terran" "Protoss" "home-defense"
+   "Wave-15c Smoking Guns (#443/#446): (a) High-ground main ramp cliff (eucl=13-16t, ground-BFS d_ours=33-35t, margin>>+6) triggers BOTH enemy-within-14-of-th? AND Own-Territory defense (zero false cliff-blocked?), while true chasm (d_ours>90t) stays rejected; (b) Empty Medivacs & 2 Adepts in mixed slow armies NEVER detach to feed alone under fog-only-suppressed?"
+   (lambda ()
+     ;; Part A1 & A2: Realistic high-ground main plateau cliff x=40..43, y=0..44 (ramp opening at y>=44)
+     ;; Main=(32,32), Enemy=(168,168).
+     ;; P1=(47,27): eucl=15.8t, walking around y=45 -> d_ours ~ 34.8t > 15.8+16 (old cliff-blocked?=#t BUG!), yet <= 38t & margin>>+100!
+     ;; P2=(45,30): eucl=13.15t <= 14t, walking around y=45 -> d_ours ~ 33.5t > 13.15+16 (old cliff-blocked?=#t broke L19955 enemy-within-14-of-th?!)
+     (define ramp-grid (mk-walkable-pathing-grid 200 200 #:wall-rects '((40 0 43 44))))
+     (define ramp-mins
+       (append (mk-mineral-cluster 93000 32.0 32.0)
+               (mk-mineral-cluster 93010 168.0 168.0)))
+     (define home-t (mk-home-base-units 'Terran #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     ;; A1: 5 outnumbered Marines at (45,38) (11.2t > fire-r 7.5t from P1!) vs 4 Stalkers + 2 Immortals at P1=(47,27) (eucl=15.8t > 14t, tests L18683)
+     (define a1-tags '(6401 6402 6403 6404 6405))
+     (define a1-defs (for/list ([i (in-range 5)]) (mk-unit (+ 6401 i) 'marine 1 (+ 45.0 (* i 0.6)) 38.0 #:hp 45.0 #:hp-max 45.0)))
+     (define a1-enms
+       (append (for/list ([i (in-range 4)]) (mk-unit (+ 8960 i) 'stalker 4 (+ 46.0 (* i 0.7)) 27.0 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0))
+               (list (mk-unit 8965 'immortal 4 47.0 26.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0)
+                     (mk-unit 8966 'immortal 4 48.0 26.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0))))
+     (define o-a1
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 9000 (append home-t a1-defs a1-enms)
+                                        #:food-used 21 #:food-cap 45 #:food-army 5 #:food-workers 16
+                                        #:neutral-units ramp-mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid ramp-grid #:neutral-units ramp-mins)))
+     (define a1-atk (wire-count-tags-with-ability (step-outcome-wire-cmds o-a1) a1-tags AB-ATTACK))
+     (define a1-zone (bot-runtime-point-territory-zone (step-outcome-obs-hash o-a1) 47.0 27.0 #:air? #f))
+     ;; A2: Only 3 heavily outnumbered Marines (<4!) at (45,40.5) (10.5t > fire-r 7.5t from P2!) vs 4 Stalkers + 2 Immortals at P2=(45,30) (eucl=13.15t <= 14t, tests L19955!)
+     (define a2-tags '(6411 6412 6413))
+     (define a2-defs (for/list ([i (in-range 3)]) (mk-unit (+ 6411 i) 'marine 1 (+ 44.5 (* i 0.7)) 40.5 #:hp 45.0 #:hp-max 45.0)))
+     (define a2-enms
+       (append (for/list ([i (in-range 4)]) (mk-unit (+ 8970 i) 'stalker 4 (+ 44.5 (* i 0.7)) 30.0 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0))
+               (list (mk-unit 8975 'immortal 4 45.0 29.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0)
+                     (mk-unit 8976 'immortal 4 46.0 29.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0))))
+     (define o-a2
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 9000 (append home-t a2-defs a2-enms)
+                                        #:food-used 19 #:food-cap 45 #:food-army 3 #:food-workers 16
+                                        #:neutral-units ramp-mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid ramp-grid #:neutral-units ramp-mins)))
+     (define a2-atk (wire-count-tags-with-ability (step-outcome-wire-cmds o-a2) a2-tags AB-ATTACK))
+     ;; Part B1: Terran mixed slow army with 2 empty Medivacs + 6 Marines + 2 Tanks under fog-only-suppressed? -> 0 empty Medivacs detach!
+     (define open-grid (mk-walkable-pathing-grid 200 200))
+     (define rot-mins (mk-mirror-minerals 'rotational-180))
+     (define b1-meds (list (mk-unit 6421 'medivac 1 68.0 70.0 #:hp 150.0 #:hp-max 150.0 #:energy 100.0)
+                           (mk-unit 6422 'medivac 1 69.0 70.0 #:hp 150.0 #:hp-max 150.0 #:energy 100.0)))
+     (define b1-gnd  (append (list (mk-unit 6423 'siege-tank 1 70.0 70.0 #:hp 175.0 #:hp-max 175.0)
+                                   (mk-unit 6424 'siege-tank 1 71.5 70.0 #:hp 175.0 #:hp-max 175.0))
+                             (for/list ([i (in-range 6)]) (mk-unit (+ 6425 i) 'marine 1 (+ 69.5 (* i 0.6)) 72.0 #:hp 45.0 #:hp-max 45.0))))
+     (define deep-nex (list (mk-unit 8980 'nexus 4 168.0 168.0 #:hp 1000.0 #:hp-max 1000.0 #:shield 1000.0 #:shield-max 1000.0)))
+     (define o-b1
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 9000 (append home-t b1-meds b1-gnd deep-nex)
+                                        #:food-used 32 #:food-cap 54 #:food-army 16 #:food-workers 16
+                                        #:neutral-units rot-mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units rot-mins)))
+     (define b1-med-deep (wire-count-tags-heading-deep (step-outcome-wire-cmds o-b1) '(6421 6422) 168.0 168.0 #:enemy-tags '(8980)))
+     (define b1-gnd-deep (wire-count-tags-heading-deep (step-outcome-wire-cmds o-b1) '(6423 6424 6425 6426 6427 6428 6429 6430) 168.0 168.0 #:enemy-tags '(8980)))
+     ;; Part B2: Protoss mixed slow army with 2 Adepts + 2 Immortals + 3 non-Blink Stalkers under fog-only-suppressed? -> 0 Adepts detach to feed!
+     (define home-p (mk-home-base-units 'Protoss #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define b2-adepts (list (mk-unit 6441 'adept 1 70.0 70.0 #:hp 70.0 #:hp-max 70.0 #:shield 70.0 #:shield-max 70.0)
+                             (mk-unit 6442 'adept 1 71.0 70.0 #:hp 70.0 #:hp-max 70.0 #:shield 70.0 #:shield-max 70.0)))
+     (define b2-main   (append (list (mk-unit 6443 'immortal 1 68.0 68.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0)
+                                     (mk-unit 6444 'immortal 1 69.5 68.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0))
+                               (for/list ([i (in-range 3)]) (mk-unit (+ 6445 i) 'stalker 1 (+ 68.5 (* i 0.8)) 71.0 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0))))
+     (define deep-cc (list (mk-unit 8981 'command-center 4 168.0 168.0 #:hp 1500.0 #:hp-max 1500.0)))
+     (define o-b2
+       (last (run-pipeline-sequence 'Protoss 'Terran
+               (list (hash 'obs (mk-obs 9000 (append home-p b2-adepts b2-main deep-cc)
+                                        #:food-used 34 #:food-cap 54 #:food-army 18 #:food-workers 16
+                                        #:neutral-units rot-mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units rot-mins)))
+     (define b2-adept-deep (wire-count-tags-heading-deep (step-outcome-wire-cmds o-b2) '(6441 6442) 168.0 168.0 #:enemy-tags '(8981)))
+     (define b2-main-deep  (wire-count-tags-heading-deep (step-outcome-wire-cmds o-b2) '(6443 6444 6445 6446 6447) 168.0 168.0 #:enemy-tags '(8981)))
+     (define total-rej (+ (step-outcome-wire-rejects o-a1) (step-outcome-wire-rejects o-a2)
+                          (step-outcome-wire-rejects o-b1) (step-outcome-wire-rejects o-b2)))
+     (values o-a1
+             (list
+              (mk-check "main-ramp-cliff-point-defended-as-own-territory"
+                        (and (eq? a1-zone 'own-territory) (>= a1-atk 4))
+                        (format "Main-ramp P1=(47,27) [eucl=15.8t, bfs=35t]: zone=~a, Marines ATTACK=~a/5 (expected >=4)" a1-zone a1-atk))
+              (mk-check "main-ramp-foot-within-14t-fires-home-defense-without-false-cliff-block"
+                        (>= a2-atk 2)
+                        (format "Main-ramp foot P2=(45,30) [eucl=13.2t, bfs=33.5t]: 3 Marines ATTACK=~a/3 (expected >=2)" a2-atk))
+              (mk-check "empty-medivacs-never-detach-from-held-back-bio-under-fog-suppress"
+                        (and (= b1-med-deep 0) (= b1-gnd-deep 0))
+                        (format "Empty Medivacs heading deep=~a/2, Bio/Tanks deep=~a/8 (expected 0/0)" b1-med-deep b1-gnd-deep))
+              (mk-check "adepts-in-mixed-slow-army-never-detach-to-feed-alone"
+                        (and (= b2-adept-deep 0) (= b2-main-deep 0))
+                        (format "Adepts heading deep=~a/2, Immortals/Stalkers deep=~a/5 (expected 0/0)" b2-adept-deep b2-main-deep))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+;; -----------------------------------------------------------------------------
+;; Full Scenario Catalog (214 Scenarios)
 ;; -----------------------------------------------------------------------------
 (define ALL-TACTICAL-SCENARIOS
   (list
@@ -8356,6 +9150,8 @@
    scen-novel-128
    scen-novel-129
    scen-novel-130
+   scen-novel-131
+   scen-novel-132
    ;; Tier 4: Wave-3 verified live-pipeline bug reproductions (8)
    scen-w3-p0-1
    scen-novel-21
@@ -8422,7 +9218,16 @@
    scen-w12-tac-2
    scen-w12-tac-3
    scen-w12-tac-4
-   scen-w12-tac-5))
+   scen-w12-tac-5
+   ;; Tier 14: Wave-15 / W15b / W15c symmetry-agnostic ground-BFS Voronoi & dynamic fog-risk (8)
+   scen-w15-tac-1
+   scen-w15-tac-2
+   scen-w15-tac-3
+   scen-w15-tac-4
+   scen-w15-tac-5
+   scen-w15-tac-6
+   scen-w15-tac-7
+   scen-w15-tac-8))
 
 ;; -----------------------------------------------------------------------------
 ;; Runner & Aggregator

@@ -144,6 +144,12 @@
        "Starport" "StarportFlying"
        "HydraliskDen" "Spire" "LurkerDenMP" "InfestationPit"))
 
+;; W15-LOOP-2: T3 tech structures for flexible T3 timing & premature-starve auditing
+(define TECH3-BLDG-SET
+  (set "GhostAcademy" "FusionCore"
+       "TemplarArchive" "DarkShrine" "FleetBeacon" "RoboticsBay"
+       "UltraliskCavern" "GreaterSpire" "Hive"))
+
 (define PROD-FACILITY-SET
   (set "Gateway" "WarpGate" "RoboticsFacility" "Stargate"
        "Barracks" "BarracksFlying" "Factory" "FactoryFlying" "Starport" "StarportFlying"
@@ -874,9 +880,15 @@
           (define prod-bldg-timings (make-hasheqv '((1 . ()) (2 . ()))))
           (define tech1-sec (make-hasheqv))
           (define tech2-sec (make-hasheqv))
+          (define t3-first-sec #f)
+          (define t3-first-bldg #f)
+          (define t3-bases-at-start #f)
           (define orbital1-sec (make-hasheqv))
           (define lair-sec (make-hasheqv))
           (define aa-tech-first-sec (make-hasheqv))
+          ;; W15-LOOP-2: Frame-0 neutral mineral bounds for map_symmetry_kind inference
+          (define min-x0 +inf.0) (define max-x0 -inf.0)
+          (define min-y0 +inf.0) (define max-y0 -inf.0)
           ;; Pro-benchmarking trackers: opening BO, production lifecycles, upgrades, early scout
           (define opening-bo-rev '())
           (define opening-bldg5-rev '())
@@ -1032,6 +1044,14 @@
                    (hash-set! unit-init-sec tag sec))
                  (when (= p opp-pid)
                    (hash-set! alive-opp tag (list ut ux uy)))
+                 ;; Frame-0 neutral mineral bounds for symmetry inference (zero map-name checks)
+                 (when (and (= gl 0) (= eid 1) (string-contains? ut "MineralField"))
+                   (define fx0 (exact->inexact ux))
+                   (define fy0 (exact->inexact uy))
+                   (when (< fx0 min-x0) (set! min-x0 fx0))
+                   (when (> fx0 max-x0) (set! max-x0 fx0))
+                   (when (< fy0 min-y0) (set! min-y0 fy0))
+                   (when (> fy0 max-y0) (set! max-y0 fy0)))
                  ;; Frame-0 main base coordinates & starting townhall lifecycle
                  (when (and (= gl 0) (set-member? TOWNHALL-SET ut))
                    (cond
@@ -1084,6 +1104,10 @@
                      (hash-set! tech1-sec p (round1 sec)))
                    (when (and (set-member? TECH2-BLDG-SET ut) (not (hash-has-key? tech2-sec p)))
                      (hash-set! tech2-sec p (round1 sec)))
+                   (when (and (= p our-pid) (not t3-first-sec) (set-member? TECH3-BLDG-SET ut))
+                     (set! t3-first-sec (round1 sec))
+                     (set! t3-first-bldg ut)
+                     (set! t3-bases-at-start (add1 (length (hash-ref th-timings our-pid '())))))
                    (when (and (set-member? AA-TECH-BLDG-SET ut) (not (hash-has-key? aa-tech-first-sec p)))
                      (hash-set! aa-tech-first-sec p (round1 sec)))
                    ;; Unit & building production counts
@@ -1163,7 +1187,11 @@
                        (unless (hash-has-key? tech1-sec p) (hash-set! tech1-sec p (round1 sec)))
                        (unless (hash-has-key? aa-tech-first-sec p) (hash-set! aa-tech-first-sec p (round1 sec))))
                      (when (and (string=? ut "GreaterSpire") (not (hash-has-key? aa-tech-first-sec p)))
-                       (hash-set! aa-tech-first-sec p (round1 sec)))))]
+                       (hash-set! aa-tech-first-sec p (round1 sec)))
+                     (when (and (= p our-pid) (not t3-first-sec) (set-member? TECH3-BLDG-SET ut))
+                       (set! t3-first-sec (round1 sec))
+                       (set! t3-first-bldg ut)
+                       (set! t3-bases-at-start (add1 (length (hash-ref th-timings our-pid '())))))))]
                 [(8) ; SUnitPositionsEvent — early scout crossing + away-from-home + own-base threat
                  (when our-main-xy
                    (define fidx (hash-ref pl 0 0))
@@ -1470,6 +1498,35 @@
           (define sb-ev (hash-ref sb-steps our-pid 0))
           (define sb-pct (round1 (* 100.0 (/ sb-ev tot-ev))))
 
+          ;; W15-LOOP-2: Infer map_symmetry_kind from frame-0 neutral mineral bounds & main spawns (zero map-name checks)
+          (define map-symmetry-kind
+            (cond
+              [(and our-main-xy opp-main-xy (< min-x0 max-x0) (< min-y0 max-y0))
+               (define cx (* 0.5 (+ min-x0 max-x0)))
+               (define cy (* 0.5 (+ min-y0 max-y0)))
+               (define ox (car our-main-xy)) (define oy (cdr our-main-xy))
+               (define ex (car opp-main-xy)) (define ey (cdr opp-main-xy))
+               (define (d2 a b) (+ (sqr (- a ex)) (sqr (- b ey))))
+               (define cands
+                 (list (cons "rotational-180"       (d2 (- (* 2.0 cx) ox) (- (* 2.0 cy) oy)))
+                       (cons "mirror-horizontal"    (d2 (- (* 2.0 cx) ox) oy))
+                       (cons "mirror-vertical"      (d2 ox (- (* 2.0 cy) oy)))
+                       (cons "mirror-diagonal-main" (d2 (+ cx (- oy cy)) (+ cy (- ox cx))))
+                       (cons "mirror-diagonal-anti" (d2 (- cx (- oy cy)) (- cy (- ox cx))))))
+               (define best (argmin cdr cands))
+               (if (<= (cdr best) 100.0) (car best) "asymmetric")]
+              [else "unknown"]))
+
+          ;; W15-LOOP-2: Premature T3 starvation guard (catches #5132983/#5132984 style <=4:30 low-eco T3 loss)
+          (define t3-premature-starve?
+            (and (real? t3-first-sec)
+                 (<= t3-first-sec 270.0)
+                 (exact-integer? t3-bases-at-start)
+                 (<= t3-bases-at-start 2)
+                 (eq? res 'loss)
+                 (or (<= dur 420.0)
+                     (and (real? our-w4) (< our-w4 24)))))
+
           (define macro-timings
             (hasheq 'nat_sec (and (>= (length our-ths-list) 1) (first our-ths-list))
                     'third_sec (and (>= (length our-ths-list) 2) (second our-ths-list))
@@ -1483,6 +1540,8 @@
                     'prod3_sec (and (>= (length our-prod-list) 3) (third our-prod-list))
                     'tech1_sec (hash-ref tech1-sec our-pid #f)
                     'tech2_sec (hash-ref tech2-sec our-pid #f)
+                    't3_first_sec t3-first-sec
+                    't3_bases_at_start t3-bases-at-start
                     'orbital1_sec (hash-ref orbital1-sec our-pid #f)
                     'lair_sec (hash-ref lair-sec our-pid #f)
                     'w2m our-w2 'w4m our-w4 'w6m our-w6 'w8m our-w8 'w10m our-w10
@@ -2070,6 +2129,11 @@
                   'prod_placement_stall_max_streak prod-placement-stall-max-streak
                   'prod_placement_stall prod-placement-stall?
                   'pvp_nat_delay_flag pvp-nat-delay-flag?
+                  'map_symmetry_kind map-symmetry-kind
+                  't3_first_sec t3-first-sec
+                  't3_first_bldg t3-first-bldg
+                  't3_bases_at_start t3-bases-at-start
+                  't3_premature_starve t3-premature-starve?
                   'hexp_high (hash-ref log-acc 'hexp-high 0)
                   'rush_high (hash-ref log-acc 'rush-high 0)
                   'saving_top (for/list ([p (in-list (top-k-pairs (hash-ref log-acc 'saving-counts) 5))])
@@ -2194,11 +2258,14 @@
           (count (lambda (r) (let ([v (hash-ref r 'step_max #f)]) (and (real? v) (>= v 500.0)))) rows))
         (define scout-unit-ht (make-hash))
         (define open-seq-ht (make-hash))
+        (define map-sym-ht (make-hash))
         (for ([r (in-list rows)])
           (define su (hash-ref r 'first_scout_unit_type #f))
           (when (string? su) (hash-update! scout-unit-ht su add1 0))
           (define oseq (hash-ref r 'opening_seq5 #f))
-          (when (string? oseq) (hash-update! open-seq-ht oseq add1 0)))
+          (when (string? oseq) (hash-update! open-seq-ht oseq add1 0))
+          (define ms (hash-ref r 'map_symmetry_kind #f))
+          (when (string? ms) (hash-update! map-sym-ht ms add1 0)))
         (hasheq 'n n
                 'wins wins 'losses losses 'ties ties
                 'win_rate_pct (round1 (* 100.0 (/ wins n)))
@@ -2241,6 +2308,10 @@
                 'total_prod_placement_stall_ticks (for/sum ([r (in-list rows)]) (hash-ref r 'prod_placement_stall_ticks 0))
                 'prod_placement_stall_matches (count (lambda (r) (eq? (hash-ref r 'prod_placement_stall #f) #t)) rows)
                 'pvp_nat_delay_matches (count (lambda (r) (eq? (hash-ref r 'pvp_nat_delay_flag #f) #t)) rows)
+                't3_started_matches (count (lambda (r) (real? (hash-ref r 't3_first_sec #f))) rows)
+                't3_early_2base_matches (count (lambda (r) (let ([b (hash-ref r 't3_bases_at_start #f)]) (and (exact-integer? b) (<= b 2)))) rows)
+                't3_premature_starve_matches (count (lambda (r) (eq? (hash-ref r 't3_premature_starve #f) #t)) rows)
+                'map_symmetry_counts (for/list ([p (in-list (top-k-pairs map-sym-ht 6))]) (list (car p) (cdr p)))
                 'our_bases (avg-field2 'our_bases)
                 'opp_bases (avg-field2 'opp_bases)
                 'our_w2 (avg-opt 'our_w2) 'opp_w2 (avg-opt 'opp_w2)
@@ -2280,6 +2351,7 @@
                         'prod3_sec (timing-dist 'prod3_sec)
                         'tech1_sec (timing-dist 'tech1_sec)
                         'tech2_sec (timing-dist 'tech2_sec)
+                        't3_first_sec (timing-dist 't3_first_sec)
                         'orbital1_sec (timing-dist 'orbital1_sec)
                         'lair_sec (timing-dist 'lair_sec)
                         'bases_4m (timing-dist 'bases_4m)

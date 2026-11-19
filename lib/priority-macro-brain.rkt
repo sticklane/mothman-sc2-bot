@@ -58,6 +58,13 @@
  macro-escrow-sync-entry!
  macro-escrow-record-decision!
  macro-escrow-in-backoff?
+ T3-TECH-STRUCT-SYMS
+ t3-struct-payoff-syms
+ t3-core-production-ready?
+ t3-authorization-tier
+ t3-tech-authorized?
+ has-started-t3-tech-struct?
+ post-t3-tech-expand-due?
 
  ;; 3. Fast Standalone Macro Simulator & Chaos Monkey Engine
  (struct-out macro-sim-task)
@@ -702,6 +709,272 @@
                (and (memq (normalize-brain-sym req) LATE-TECH-SPECULATIVE-STRUCTS)
                     (= (bldg-count-equivalent total-bldg-counts req) 0)))
              (resolve-missing-prereq-chain nsym ready-bldg-counts total-bldg-counts))))
+
+;; =============================================================================
+;; 1B. W15-P0-1: 3-Tier Flexible T3 Authorization & Post-T3 Expand Coupling
+;; =============================================================================
+;; Replaces the rigid 3-base `t3-foundation-ready?` wall with:
+;;   - Tier A: Explicit plan-intent exemption (active BO / post-bo-goals / strategic
+;;             commitment targeting a T3 rush or its payoff unit) + post-T3 expand coupling
+;;   - Tier B: Continuous opportunity-cost / throughput gate (3-base 44W/22A OR saturated
+;;             2-base 38W, >=3 gas bldgs or >=250G, core prod ready, army >= max(16, 0.70*believed-opp))
+;;   - Tier C: Emergency counter overrides (DAG prereq repair, capital-air, anti-caster Ghost)
+(define T3-TECH-STRUCT-SYMS
+  '(ghost-academy fusion-core templar-archive templar-archives
+    fleet-beacon ultralisk-cavern greater-spire dark-shrine))
+
+(define T3-CANONICAL-STRUCT-SYMS
+  '(ghost-academy fusion-core templar-archive
+    fleet-beacon ultralisk-cavern greater-spire dark-shrine))
+
+(define (t3-struct-payoff-syms sym)
+  (case (normalize-brain-sym sym)
+    [(ghost-academy)    '(ghost-academy ghost personal-cloaking)]
+    [(fusion-core)      '(fusion-core battlecruiser advanced-ballistics weapon-refit)]
+    [(templar-archive)  '(templar-archive templar-archives high-templar archon psi-storm)]
+    [(fleet-beacon)     '(fleet-beacon carrier tempest mothership anion-pulse-crystals)]
+    [(dark-shrine)      '(dark-shrine dark-templar shadow-stride)]
+    [(ultralisk-cavern) '(ultralisk-cavern ultralisk chitinous-plating anabolic-synthesis)]
+    [(greater-spire)    '(greater-spire brood-lord)]
+    [else               '()]))
+
+(define (t3-locked-path->struct path-sym)
+  (case path-sym
+    [(terran-ghost-academy-late)   'ghost-academy]
+    [(terran-fusion-battlecruiser) 'fusion-core]
+    [(protoss-templar-archive-archon) 'templar-archive]
+    [(protoss-dark-shrine-dt)      'dark-shrine]
+    [(protoss-fleet-beacon-carrier) 'fleet-beacon]
+    [(zerg-ultralisk-cavern)       'ultralisk-cavern]
+    [(zerg-greater-spire-broodlord) 'greater-spire]
+    [else #f]))
+
+(define (extract-believed-opp-army-supply raw-mirror-signals)
+  (if (hash? raw-mirror-signals)
+      (max 0.0 (exact->inexact (hash-ref raw-mirror-signals 'believed-enemy-army-supply 0)))
+      0.0))
+
+(define (extract-explicit-t3-target-syms ht)
+  (if (not (hash? ht))
+      '()
+      (for/fold ([acc '()]) ([k (in-list '(strategic-t3-target explicit-t3-targets
+                                           bo-t3-rush-target t3-tech-rush-targets))])
+        (define v (hash-ref ht k #f))
+        (cond
+          [(symbol? v) (cons (normalize-brain-sym v) acc)]
+          [(list? v) (append (map normalize-brain-sym (filter symbol? v)) acc)]
+          [else acc]))))
+
+(define (t3-core-production-ready? race ready-bldg-counts total-bldg-counts)
+  (case race
+    [(Terran)
+     (and (>= (bldg-count-equivalent total-bldg-counts 'barracks) 2)
+          (or (>= (bldg-count-equivalent total-bldg-counts 'factory) 1)
+              (>= (bldg-count-equivalent total-bldg-counts 'starport) 1)))]
+    [(Protoss)
+     (and (>= (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                 (bldg-count-equivalent total-bldg-counts 'warp-gate))
+              3)
+          (or (> (bldg-count-equivalent total-bldg-counts 'robotics-facility) 0)
+              (> (bldg-count-equivalent total-bldg-counts 'twilight-council) 0)
+              (> (bldg-count-equivalent total-bldg-counts 'stargate) 0)))]
+    [(Zerg)
+     (and (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+          (>= (bldg-count-equivalent total-bldg-counts 'hatchery) 2)
+          (or (> (bldg-count-equivalent total-bldg-counts 'lair) 0)
+              (> (bldg-count-equivalent total-bldg-counts 'hive) 0)))]
+    [else #f]))
+
+;; True when an explicit strategic T3 commitment, 2+ base locked T3 path, or early T3 tech-rush BO step
+;; (min-supply <= 50 or target-sec <= 270s) directly targets `sym` or its payoff unit.
+(define (t3-explicit-rush-intent-matches? sym steps-so-far post-bo-goals raw-mirror-signals
+                                          effective-phase-supply workers [active-bases 2])
+  (define nsym (normalize-brain-sym sym))
+  (define payoffs (t3-struct-payoff-syms nsym))
+  (and (pair? payoffs)
+       (>= workers 14)
+       (or
+        ;; 1. Explicit strategic T3 target / commitment in mirror-signals or post-bo-goals (1- or 2-base rush)
+        (ormap (lambda (s) (and (memq s payoffs) #t))
+               (append (extract-explicit-t3-target-syms raw-mirror-signals)
+                       (extract-explicit-t3-target-syms post-bo-goals)))
+        ;; 2. Locked tech-tree strategic path targeting this T3 node (requires >= 2 bases so late-game
+        ;;    macro paths like `terran-ghost-academy-late` never fire unplanned on 1 base — W15c `#26`!)
+        (and (>= active-bases 2)
+             (let ([lp1 (and (hash? post-bo-goals) (hash-ref post-bo-goals 'locked-path #f))]
+                   [lp2 (and (hash? raw-mirror-signals) (hash-ref raw-mirror-signals 'locked-path #f))])
+               (or (eq? (t3-locked-path->struct lp1) nsym)
+                   (eq? (t3-locked-path->struct lp2) nsym))))
+        ;; 3. Explicit 1-/2-base T3 rush BO step (min-sup <= 50 or target-sec <= 270s)
+        (ormap (lambda (g)
+                 (and (pro-bo-goal? g)
+                      (let ([gsym (normalize-brain-sym (pro-bo-goal-target-sym g))]
+                            [msup (pro-bo-goal-min-supply g)]
+                            [tsec (exact->inexact (pro-bo-goal-target-sec g))])
+                        (and (memq gsym payoffs)
+                             (>= effective-phase-supply msup)
+                             (or (<= msup 50) (and (> tsec 0.0) (<= tsec 270.0)))))))
+               steps-so-far))))
+
+(define (t3-plan-intent-matches? sym steps-so-far post-bo-goals raw-mirror-signals
+                                 effective-phase-supply workers active-bases)
+  (define nsym (normalize-brain-sym sym))
+  (define payoffs (t3-struct-payoff-syms nsym))
+  (and (pair? payoffs)
+       (>= workers 14)
+       (or
+        (t3-explicit-rush-intent-matches? nsym steps-so-far post-bo-goals raw-mirror-signals
+                                          effective-phase-supply workers active-bases)
+        ;; Standard late-midgame Pro BO step (min-sup > 50): on-supply, >=34W, >=2 bases
+        ;; (prevents crippled low-supply clock drift from triggering premature T3, while
+        ;;  letting Track 2a schedule it at its natural macro-tech weight below Robo/Colossus!)
+        (ormap (lambda (g)
+                 (and (pro-bo-goal? g)
+                      (let ([gsym (normalize-brain-sym (pro-bo-goal-target-sym g))]
+                            [msup (pro-bo-goal-min-supply g)])
+                        (and (memq gsym payoffs)
+                             (> msup 50)
+                             (>= effective-phase-supply msup)
+                             (>= workers 34)
+                             (>= active-bases 2)))))
+               steps-so-far))))
+
+(define (t3-authorization-tier sym
+                               #:race race
+                               #:enemy-race [enemy-race 'Unknown]
+                               #:active-bases active-bases
+                               #:workers workers
+                               #:army-supply army-supply
+                               #:gas [gas 0]
+                               #:total-gas-bldgs [total-gas-bldgs 0]
+                               #:believed-opp-army [believed-opp-army 0.0]
+                               #:ready-bldg-counts [ready-bldg-counts (hasheq)]
+                               #:total-bldg-counts [total-bldg-counts (hasheq)]
+                               #:enemy-unit-counts [enemy-u-counts (hasheq)]
+                               #:steps-so-far [steps-so-far '()]
+                               #:post-bo-goals [post-bo-goals (hasheq)]
+                               #:mirror-signals [raw-mirror-signals #f]
+                               #:effective-phase-supply [effective-phase-supply 0]
+                               #:under-attack? [under-attack? #f]
+                               #:enemy-threat-supply [enemy-threat-supply 0]
+                               #:under-early-rush-crisis? [under-early-rush-crisis? #f]
+                               #:crisis-defer? [crisis-defer? #f]
+                               #:enemy-cap-air? [enemy-cap-air? #f]
+                               #:opp-cap-air-override? [opp-cap-air-override? #f]
+                               #:repaired-prereq? [repaired-prereq? #f])
+  (define nsym (normalize-brain-sym sym))
+  (cond
+    [(not (memq nsym T3-TECH-STRUCT-SYMS)) 'non-t3]
+    ;; Tier C: Emergency Counter Overrides & Broken-Tech DAG Repair
+    [(or repaired-prereq?
+         (and (memq nsym '(fleet-beacon greater-spire fusion-core))
+              (or enemy-cap-air? opp-cap-air-override?))
+         (and (eq? nsym 'ghost-academy)
+              (eq? race 'Terran)
+              (>= active-bases 2)
+              (>= army-supply 20)
+              (terran-enemy-needs-ghost? enemy-u-counts)))
+     'tier-c-counter-override]
+    ;; Survival / Crisis Guard blocks non-counter T3 tech (Tier A & Tier B)
+    [(or under-early-rush-crisis?
+         crisis-defer?
+         (and under-attack? (< army-supply (+ enemy-threat-supply 4))))
+     #f]
+    ;; Tier A: Explicit Plan-Intent Exemption (1-/2-base BC/DT/Storm/SkyToss timings & active BO steps)
+    [(t3-plan-intent-matches? nsym steps-so-far post-bo-goals raw-mirror-signals
+                              effective-phase-supply workers active-bases)
+     'tier-a-plan-intent]
+    ;; Tier B1: Standard 3-Base Foundation
+    [(and (>= active-bases 3)
+          (>= workers 44)
+          (>= army-supply 22))
+     'tier-b-3base-foundation]
+    ;; Tier B2: Saturated 2-Base Gas-Throughput Opportunity-Cost Gate
+    [(and (>= active-bases 2)
+          (>= workers 38)
+          (or (>= total-gas-bldgs 3) (>= gas 250))
+          (t3-core-production-ready? race ready-bldg-counts total-bldg-counts)
+          (>= (exact->inexact army-supply)
+              (max 16.0 (* 0.70 (exact->inexact believed-opp-army)))))
+     'tier-b-2base-saturated]
+    [else #f]))
+
+(define (t3-tech-authorized? sym
+                             #:race race
+                             #:enemy-race [enemy-race 'Unknown]
+                             #:active-bases active-bases
+                             #:workers workers
+                             #:army-supply army-supply
+                             #:gas [gas 0]
+                             #:total-gas-bldgs [total-gas-bldgs 0]
+                             #:believed-opp-army [believed-opp-army 0.0]
+                             #:ready-bldg-counts [ready-bldg-counts (hasheq)]
+                             #:total-bldg-counts [total-bldg-counts (hasheq)]
+                             #:enemy-unit-counts [enemy-u-counts (hasheq)]
+                             #:steps-so-far [steps-so-far '()]
+                             #:post-bo-goals [post-bo-goals (hasheq)]
+                             #:mirror-signals [raw-mirror-signals #f]
+                             #:effective-phase-supply [effective-phase-supply 0]
+                             #:under-attack? [under-attack? #f]
+                             #:enemy-threat-supply [enemy-threat-supply 0]
+                             #:under-early-rush-crisis? [under-early-rush-crisis? #f]
+                             #:crisis-defer? [crisis-defer? #f]
+                             #:enemy-cap-air? [enemy-cap-air? #f]
+                             #:opp-cap-air-override? [opp-cap-air-override? #f]
+                             #:repaired-prereq? [repaired-prereq? #f])
+  (not (not (t3-authorization-tier
+             sym
+             #:race race #:enemy-race enemy-race
+             #:active-bases active-bases #:workers workers
+             #:army-supply army-supply #:gas gas
+             #:total-gas-bldgs total-gas-bldgs
+             #:believed-opp-army believed-opp-army
+             #:ready-bldg-counts ready-bldg-counts
+             #:total-bldg-counts total-bldg-counts
+             #:enemy-unit-counts enemy-u-counts
+             #:steps-so-far steps-so-far
+             #:post-bo-goals post-bo-goals
+             #:mirror-signals raw-mirror-signals
+             #:effective-phase-supply effective-phase-supply
+             #:under-attack? under-attack?
+             #:enemy-threat-supply enemy-threat-supply
+             #:under-early-rush-crisis? under-early-rush-crisis?
+             #:crisis-defer? crisis-defer?
+             #:enemy-cap-air? enemy-cap-air?
+             #:opp-cap-air-override? opp-cap-air-override?
+             #:repaired-prereq? repaired-prereq?))))
+
+(define (has-started-t3-tech-struct? race total-bldg-counts)
+  (define syms
+    (case race
+      [(Terran)  '(fusion-core ghost-academy)]
+      [(Protoss) '(templar-archive dark-shrine fleet-beacon)]
+      [(Zerg)    '(ultralisk-cavern greater-spire)]
+      [else      '()]))
+  (ormap (lambda (s) (> (bldg-count-equivalent total-bldg-counts s) 0)) syms))
+
+(define (post-t3-tech-expand-due? race active-bases total-townhalls-incl-pending workers
+                                  army-supply enemy-threat-supply total-bldg-counts
+                                  #:under-attack? [under-attack? #f]
+                                  #:under-early-rush-crisis? [under-early-rush-crisis? #f]
+                                  #:early-rush-override? [early-rush-override? #f]
+                                  #:crisis-defer? [crisis-defer? #f]
+                                  #:supply-preempt-now? [supply-preempt-now? #f]
+                                  #:natural-blocked? [ws-natural-blocked? #f])
+  (and (has-started-t3-tech-struct? race total-bldg-counts)
+       (<= active-bases 2)
+       (= total-townhalls-incl-pending active-bases)
+       (< total-townhalls-incl-pending 3)
+       (not under-attack?)
+       (not under-early-rush-crisis?)
+       (not early-rush-override?)
+       (not crisis-defer?)
+       (not supply-preempt-now?)
+       (not ws-natural-blocked?)
+       (<= enemy-threat-supply 0)
+       (or (= active-bases 1)
+           (>= army-supply (if (eq? race 'Terran) 14 12)))
+       (>= workers (if (= active-bases 1) 16 30))))
 
 ;; Scans all existing buildings/units/upgrades AND active build-order goals to find
 ;; any broken tech tree dependencies (e.g., Lair exists or Roach Warren exists, but Spawning Pool
@@ -1827,9 +2100,21 @@
              (<= (bldg-count-equivalent enemy-b-counts 'hatchery) 1)
              (or (< frame 1700)
                  (> (unit-count-equivalent enemy-u-counts 'zergling) 0)))))
-  (define-values (elapsed-sec steps-so-far due-upgs due-units due-timing-goals)
+  (define-values (elapsed-sec raw-steps-so-far due-upgs due-units due-timing-goals)
     (collect-due-bo-context race enemy-race frame effective-phase-supply
                             #:early-pool-or-rush? scouted-early-pool-or-rush?))
+  (define custom-due-bo-steps
+    (if (and (hash? raw-mirror-signals) (list? (hash-ref raw-mirror-signals 'bo-steps #f)))
+        (filter (lambda (g)
+                  (and (pro-bo-goal? g)
+                       (or (>= effective-phase-supply (pro-bo-goal-min-supply g))
+                           (and (> frame 0)
+                                (> (exact->inexact (pro-bo-goal-target-sec g)) 0.0)
+                                (>= elapsed-sec (exact->inexact (pro-bo-goal-target-sec g)))))))
+                (hash-ref raw-mirror-signals 'bo-steps '()))
+        '()))
+  (define steps-so-far (append raw-steps-so-far custom-due-bo-steps))
+  (define plan-believed-opp-army (extract-believed-opp-army-supply raw-mirror-signals))
   (define zerg-t3-on? (zerg-hive-t3-online? race ready-bldg-counts))
   (define filtered-repair-goals
     (if zerg-t3-on?
@@ -2054,29 +2339,35 @@
                  protoss-1base-2nd-gas-capped?
                  (and (> cur-gb 0)
                       (>= gas (if (and (>= cur-gb 2) (>= workers 42)) 450 250)))))))
-    (define t3-foundation-ready?
-      (and (>= active-bases 3)
-           (>= workers 46)
-           (>= army-supply 24)))
     (define late-tech-deferred-by-low-army?
       (and live-slots?
-           (or (and (memq sym '(armory ghost-academy))
+           (or (and (eq? sym 'armory)
                     (< army-supply 18)
                     (not (>= active-bases 3))
-                    (not (and (eq? sym 'armory) (eq? race 'Terran) enemy-cap-air?))
-                    (not (and (eq? sym 'ghost-academy) (eq? race 'Terran) (terran-enemy-needs-ghost? enemy-u-counts) (>= active-bases 2) (>= army-supply 20)))
+                    (not (and (eq? race 'Terran) enemy-cap-air?))
                     (not (ormap (lambda (r) (same-brain-sym? sym r)) repaired-prereqs)))
-               (and (memq sym '(ghost-academy fusion-core templar-archive templar-archives
-                                fleet-beacon ultralisk-cavern greater-spire dark-shrine))
-                    (not t3-foundation-ready?)
-                    (not (and (memq sym '(fleet-beacon greater-spire fusion-core))
-                              (or enemy-cap-air? opp-cap-air-override?)))
-                    (not (and (eq? sym 'ghost-academy)
-                              (eq? race 'Terran)
-                              (>= active-bases 2)
-                              (>= army-supply 20)
-                              (terran-enemy-needs-ghost? enemy-u-counts)))
-                    (not (ormap (lambda (r) (same-brain-sym? sym r)) repaired-prereqs))))))
+               (and (memq sym T3-TECH-STRUCT-SYMS)
+                    (not (t3-tech-authorized?
+                          sym
+                          #:race race #:enemy-race enemy-race
+                          #:active-bases active-bases #:workers workers
+                          #:army-supply army-supply #:gas gas
+                          #:total-gas-bldgs total-gas-bldgs
+                          #:believed-opp-army plan-believed-opp-army
+                          #:ready-bldg-counts ready-bldg-counts
+                          #:total-bldg-counts total-bldg-counts
+                          #:enemy-unit-counts enemy-u-counts
+                          #:steps-so-far steps-so-far
+                          #:post-bo-goals post-bo-goals
+                          #:mirror-signals raw-mirror-signals
+                          #:effective-phase-supply effective-phase-supply
+                          #:under-attack? under-attack?
+                          #:enemy-threat-supply enemy-threat-supply
+                          #:under-early-rush-crisis? under-early-rush-crisis?
+                          #:crisis-defer? crisis-defer?
+                          #:enemy-cap-air? enemy-cap-air?
+                          #:opp-cap-air-override? opp-cap-air-override?
+                          #:repaired-prereq? (and (ormap (lambda (r) (same-brain-sym? sym r)) repaired-prereqs) #t)))))))
     (define zerg-hatch-first-defer?
       (and zerg-hatch-first-opening?
            (memq sym '(extractor spawning-pool))
@@ -2183,6 +2474,30 @@
              [peaceful? 466.0]
              [else 420.0]))
          (add-goal-spec! sym 'army-production 'train eff-tgt-cnt train-w 'army-milestone-plan)])))
+
+  ;; Track 2d (W15-P0-1 Tier A): Explicit Strategic T3 Tech-Rush Goal Injection & Post-T3 Expand Coupling
+  (for ([t3-sym (in-list T3-CANONICAL-STRUCT-SYMS)])
+    (define t3-nd (lookup-sc2-tech-node t3-sym))
+    (when (and t3-nd
+               (eq? (sc2-tech-node-race t3-nd) race)
+               (= (bldg-count-equivalent total-bldg-counts t3-sym) 0)
+               (not under-early-rush-crisis?)
+               (not crisis-defer?)
+               (not (and under-attack? (< army-supply (+ enemy-threat-supply 4))))
+               (t3-explicit-rush-intent-matches?
+                t3-sym steps-so-far post-bo-goals raw-mirror-signals
+                effective-phase-supply workers active-bases))
+      (add-goal-spec! t3-sym 'tech-infrastructure (sc2-tech-node-kind t3-nd) 1 575.0 'explicit-t3-tech-plan)))
+  (when (post-t3-tech-expand-due?
+         race active-bases plan-total-townhalls workers
+         army-supply enemy-threat-supply total-bldg-counts
+         #:under-attack? under-attack?
+         #:under-early-rush-crisis? under-early-rush-crisis?
+         #:crisis-defer? crisis-defer?
+         #:natural-blocked? ws-natural-blocked?)
+    (define plan-expand-sym
+      (case race [(Zerg) 'hatchery] [(Terran) 'command-center] [else 'nexus]))
+    (add-goal-spec! plan-expand-sym 'economy-expansion 'expand (add1 active-bases) 565.0 'post-t3-tech-expand))
 
   ;; Track 2c: Empirical Pro Upgrade & Unit Clock Timings (`frame > 0`)
   (define under-sat-econ?
@@ -3544,9 +3859,43 @@
                       [next-action-sym 'drone])]
         [else base-node])))
 
+  ;; W15c (`#26` T v Thssprtssbt): Filter unauthorized T3 tech nodes (including missing T3 prereqs
+  ;; resolved from strategic unit recommendations like `'ghost -> 'ghost-academy` on 1 base!) BEFORE
+  ;; building `plan-next-actions-ht` / `bo-goal-sym` so unplanned T3 never leaks into `l2-plan-wants-now?`!
+  (define (plan-node-t3-authorized? n)
+    (define (sym-ok? s)
+      (or (not s)
+          (not live-slots?)
+          (let ([ns (normalize-brain-sym s)])
+            (or (not (memq ns T3-TECH-STRUCT-SYMS))
+                (t3-tech-authorized?
+                 ns
+                 #:race race #:enemy-race enemy-race
+                 #:active-bases active-bases #:workers workers
+                 #:army-supply army-supply #:gas gas
+                 #:total-gas-bldgs total-gas-bldgs
+                 #:believed-opp-army plan-believed-opp-army
+                 #:ready-bldg-counts ready-bldg-counts
+                 #:total-bldg-counts total-bldg-counts
+                 #:enemy-unit-counts enemy-u-counts
+                 #:steps-so-far steps-so-far
+                 #:post-bo-goals post-bo-goals
+                 #:mirror-signals raw-mirror-signals
+                 #:effective-phase-supply effective-phase-supply
+                 #:under-attack? under-attack?
+                 #:enemy-threat-supply enemy-threat-supply
+                 #:under-early-rush-crisis? under-early-rush-crisis?
+                 #:crisis-defer? crisis-defer?
+                 #:enemy-cap-air? enemy-cap-air?
+                 #:opp-cap-air-override? opp-cap-air-override?
+                 #:repaired-prereq? (and (ormap (lambda (r) (same-brain-sym? ns r)) repaired-prereqs) #t))))))
+    (and (sym-ok? (plan-goal-node-id n))
+         (sym-ok? (plan-goal-node-next-action-sym n))))
+
   (define active-nodes
     (filter (lambda (n)
               (and (not (eq? (plan-goal-node-status n) 'satisfied))
+                   (plan-node-t3-authorized? n)
                    (not (crisis-deferred-sym?
                          (normalize-brain-sym (plan-goal-node-id n))
                          crisis-defer?
@@ -4675,8 +5024,39 @@
 
   (define race-expand-sym
     (case race [(Zerg) 'hatchery] [(Terran) 'command-center] [else 'nexus]))
+  ;; W15-P0-1: Tier-A 1-base T3 rush holds Natural #2 until the T3 structure starts,
+  ;; then `step-post-t3-tech-expand-due?` immediately prioritizes expanding behind the tech!
+  (define active-1base-t3-rush-pending?
+    (and (= active-bases 1)
+         (<= total-townhalls-incl-pending 1)
+         (not under-early-rush-crisis?)
+         (not crisis-defer?)
+         (not (and under-attack? (< army-supply (+ enemy-threat-supply 4))))
+         (not (has-started-t3-tech-struct? race total-bldg-counts))
+         (ormap (lambda (s)
+                  (define nd (lookup-sc2-tech-node s))
+                  (and nd
+                       (eq? (sc2-tech-node-race nd) race)
+                       (t3-explicit-rush-intent-matches?
+                        s steps-so-far post-bo-goals raw-mirror-signals
+                        effective-phase-supply workers active-bases)))
+                T3-CANONICAL-STRUCT-SYMS)))
+  (define step-post-t3-tech-expand-due?
+    (and (not early-enemy-combat-arrived?)
+         (not terran-early-rush-hold?)
+         (not pvz-early-ling-flood-active?)
+         (post-t3-tech-expand-due?
+          race active-bases total-townhalls-incl-pending workers
+          army-supply enemy-threat-supply total-bldg-counts
+          #:under-attack? under-attack?
+          #:under-early-rush-crisis? under-early-rush-crisis?
+          #:early-rush-override? early-rush-override-active?
+          #:crisis-defer? crisis-defer?
+          #:supply-preempt-now? supply-preempt-now?
+          #:natural-blocked? ws-natural-blocked?)))
   (define natural-exp-window?
     (and (<= total-townhalls-incl-pending 1)
+         (not active-1base-t3-rush-pending?)
          (not early-rush-override-active?)
          (not terran-early-rush-hold?)
          (not pvz-early-ling-flood-active?)
@@ -5455,6 +5835,9 @@
                      (if protoss-3rd-nexus-pro-due?
                          '(nexus)
                          '())
+                     (if step-post-t3-tech-expand-due?
+                         (list race-expand-sym)
+                         '())
                      (if zerg-rebuild-t15-tech-due?
                          '(roach-warren)
                          '())
@@ -5952,29 +6335,39 @@
                     (>= (+ (hash-ref open-facility-slots 'gateway 0)
                            (hash-ref open-facility-slots 'warp-gate 0))
                         2)))))
-    (define step-t3-foundation-ready?
-      (and (>= active-bases 3)
-           (>= workers 46)
-           (>= army-supply 24)))
     (define late-tech-army-ok?
       (or (not (hash? open-facility-slots))
-          (not (memq id '(armory ghost-academy fusion-core ultralisk-cavern
-                          templar-archive templar-archives fleet-beacon greater-spire dark-shrine)))
+          (not (or (eq? id 'armory) (memq id T3-TECH-STRUCT-SYMS)))
           (is-repaired-prereq? id)
-          (and (memq id '(fleet-beacon greater-spire fusion-core))
-               (or enemy-cap-air? opp-cap-air-override?))
           (and (eq? id 'armory)
                (eq? race 'Terran)
                (or (>= army-supply 18)
-                   step-t3-foundation-ready?
+                   (and (>= active-bases 3) (>= workers 44) (>= army-supply 22))
                    (and enemy-cap-air?
                         (or enemy-cap-air-ground-aa?
                             (> (bldg-count-equivalent total-bldg-counts 'factory-techlab) 0)))))
-          (and (eq? id 'ghost-academy)
-               (>= active-bases 2)
-               (>= army-supply 20)
-               terran-need-ghost?)
-          step-t3-foundation-ready?))
+          (and (memq id T3-TECH-STRUCT-SYMS)
+               (t3-tech-authorized?
+                id
+                #:race race #:enemy-race enemy-race
+                #:active-bases active-bases #:workers workers
+                #:army-supply army-supply #:gas gas
+                #:total-gas-bldgs total-gas-bldgs
+                #:believed-opp-army believed-opp-army-sup
+                #:ready-bldg-counts ready-bldg-counts
+                #:total-bldg-counts total-bldg-counts
+                #:enemy-unit-counts enemy-u-counts
+                #:steps-so-far steps-so-far
+                #:post-bo-goals post-bo-goals
+                #:mirror-signals raw-mirror-signals
+                #:effective-phase-supply effective-phase-supply
+                #:under-attack? under-attack?
+                #:enemy-threat-supply enemy-threat-supply
+                #:under-early-rush-crisis? under-early-rush-crisis?
+                #:crisis-defer? crisis-defer?
+                #:enemy-cap-air? enemy-cap-air?
+                #:opp-cap-air-override? opp-cap-air-override?
+                #:repaired-prereq? (is-repaired-prereq? id)))))
     (define zerg-drone-sacrifice-ok?
       (or (not (eq? race 'Zerg))
           (not node)
@@ -6053,6 +6446,7 @@
                protoss-3rd-nexus-pro-due?
                terran-3rd-cc-due?
                zerg-3rd-hatch-pro-due?
+               step-post-t3-tech-expand-due?
                (and (not under-attack?)
                     (<= enemy-threat-supply (* 1.35 (max 10 army-supply)))
                     ;; W4-P0-1a: Gate Protoss 3rd/4th Nexus on mid-tier tech + standing army
@@ -6235,6 +6629,7 @@
            [(and protoss-2base-robo-due? (eq? csym 'robotics-facility)) #t]
            [(and protoss-midgame-gateway-scale-due? (eq? csym 'gateway)) #t]
            [(and protoss-3rd-nexus-pro-due? (eq? csym 'nexus)) #t]
+           [(and step-post-t3-tech-expand-due? (eq? csym race-expand-sym)) #t]
            [(and zerg-rebuild-t15-tech-due? (eq? csym 'roach-warren)) #t]
            [(and early-rush-override-active?
                  (or (and (= (bldg-count-equivalent total-bldg-counts early-rush-root-sym) 0)
@@ -6616,6 +7011,7 @@
          (define premature-3rd-base-starving-army?
            (and (not terran-contained-breakout-cc?)
                 (not depletion-or-mirror-exp?)
+                (not step-post-t3-tech-expand-due?)
                 (hash? open-facility-slots)
                 (>= active-bases 2)
                 (not (eq? race 'Zerg))
@@ -6631,6 +7027,7 @@
            (or terran-contained-breakout-cc?
                depletion-or-mirror-exp?
                slice15-base-loss-expand-now?
+               step-post-t3-tech-expand-due?
                high-bank-exp?
                (<= enemy-threat-supply 0)
                (and zerg-16-hatch-pending? (<= enemy-threat-supply 1.5))
@@ -6679,19 +7076,21 @@
                 (or natural-exp-window?
                     slice15-base-loss-expand-now?
                     overdue-1base-expand?
+                    (and step-post-t3-tech-expand-due? (>= minerals (if (eq? race 'Zerg) 150 200)))
                     (and zerg-3rd-hatch-pro-due? (>= minerals 150))
-                    (and terran-3rd-cc-due? (or (>= minerals 200) (>= workers 38)))
+                    (and terran-3rd-cc-due? (>= minerals 175) (or (>= minerals 200) (>= workers 38)))
                     (can-fund-within-frames?
                      minerals gas (priority-candidate-min-cost c) (priority-candidate-gas-cost c)
                      mineral-harvesters gas-harvesters workers ready-bldg-counts race
                      #:frames (if (>= workers (* 16 active-bases)) 224 90)))
                 (or slice15-base-loss-expand-now?
                     (and (or (not ws-natural-blocked?) (>= minerals 350))
-                         (or blk0 is-bo-goal? is-repaired? natural-exp-window? overdue-1base-expand? protoss-3rd-nexus-due? protoss-4th-nexus-ready? zerg-3rd-hatch-pro-due? terran-3rd-cc-due? terran-contained-breakout-cc? depletion-or-mirror-exp? high-bank-exp?)
+                         (or blk0 is-bo-goal? is-repaired? natural-exp-window? overdue-1base-expand? step-post-t3-tech-expand-due? protoss-3rd-nexus-due? protoss-4th-nexus-ready? zerg-3rd-hatch-pro-due? terran-3rd-cc-due? terran-contained-breakout-cc? depletion-or-mirror-exp? high-bank-exp?)
                          (or terran-contained-breakout-cc? (not under-attack?))
-                         (or natural-exp-window? zerg-3rd-hatch-pro-due? terran-3rd-cc-due? light-expand-threat-ok?)
+                         (or natural-exp-window? step-post-t3-tech-expand-due? zerg-3rd-hatch-pro-due? terran-3rd-cc-due? light-expand-threat-ok?)
                          (not premature-3rd-base-starving-army?)
                          (or overdue-1base-expand?
+                             step-post-t3-tech-expand-due?
                              terran-contained-breakout-cc?
                              (>= workers (if (eq? race 'Zerg) 14 16)))
                          has-mineral-income?))))
@@ -6704,13 +7103,14 @@
                    (or under-attack?
                        terran-early-rush-hold?
                        zerg-4base-hatch-capped?
-                       (and (not natural-exp-window?) (not zerg-3rd-hatch-pro-due?) (not terran-3rd-cc-due?) (not light-expand-threat-ok?))
+                       (and (not natural-exp-window?) (not step-post-t3-tech-expand-due?) (not zerg-3rd-hatch-pro-due?) (not terran-3rd-cc-due?) (not light-expand-threat-ok?))
                        premature-3rd-base-starving-army?
                        (and ws-natural-blocked? (< minerals 350))))
               (min u0 45.0)]
              [is-repaired? (max 520.0 u0)]
              [nat-exp-yield-to-open-worker-slot? 477.0]
              [early-nat-exp-window? (max 620.0 plan-weight u0)]
+             [step-post-t3-tech-expand-due? (max 565.0 plan-weight u0)]
              [mid-nat-exp-window? (max 560.0 plan-weight u0)]
              [zerg-3rd-hatch-pro-due? (max 505.0 plan-weight u0)]
              [terran-3rd-cc-due? (max 505.0 plan-weight u0)]
@@ -8182,6 +8582,8 @@
            [pvz-first-zealot-post? (max u 580.0)]
            [(and terran-3rd-cc-due? (eq? nsym 'command-center))
             (max u (if terran-3rd-cc-urgent-rescue? 920.0 620.0))]
+           [(and step-post-t3-tech-expand-due? (eq? nsym race-expand-sym))
+            (max u 565.0)]
            [protoss-midgame-colossus-post? (max u 566.0)]
            [protoss-root-cyber-post? (max u 565.0)]
            [protoss-midgame-archon-post? (max u 564.0)]
@@ -8385,6 +8787,12 @@
                  (cand-can-escrow? id))
             #t]
            [(and zerg-3rd-hatch-pro-due? (eq? nsym 'hatchery) (>= minerals 150)) #t]
+           [(and step-post-t3-tech-expand-due?
+                 (eq? nsym race-expand-sym)
+                 (>= minerals (if (eq? race 'Zerg) 150 200))
+                 (not protoss-midgame-colossus-due?)
+                 (not protoss-robo-immortal-due?))
+            #t]
            [(and protoss-3rd-nexus-pro-due?
                  (eq? nsym 'nexus)
                  (not protoss-midgame-colossus-due?)
@@ -8399,8 +8807,13 @@
             #f]
            [(and terran-3rd-cc-due?
                  (eq? nsym 'command-center)
-                 (or (>= minerals 175) (>= workers 36) (>= gas 400) (> ws-depleting-bases 0) (>= frame 7392)))
+                 (>= minerals 175)
+                 (or (>= minerals 200) (>= workers 36) (>= gas 400) (> ws-depleting-bases 0) (>= frame 7392)))
             #t]
+           [(and terran-3rd-cc-due?
+                 (eq? nsym 'command-center)
+                 (< minerals 175))
+            #f]
            [terran-orbital-priority-due? #t]
            [(and (or early-nat-exp-window? mid-nat-exp-window?) (eq? nsym race-expand-sym)) #t]
            [else blk?]))
@@ -8931,6 +9344,38 @@
            reserved-cand
            (memq (normalize-brain-sym (priority-candidate-id reserved-cand))
                  '(command-center factory orbital-command barracks bunker))))
+    ;; W15b (#17 TvT): Never let `command-center` escrow (including `post-t3-tech-expand-due?`, `terran-3rd-cc-due?`,
+    ;; or `terran-3rd-cc-urgent-rescue?`) block `marine` or `scv` under pressure (`under-attack?`, `enemy-threat-supply > 0`,
+    ;; or `terran-cloaked-det-crisis?`), when `army-supply < 14`, or when a 3rd+ CC still has `rem-min < 225`.
+    ;; Preserves Supply Depot `<6%` SupBlk, W6 Factory #1, W10 peaceful Natural CC #2 `<95s`, and W12 peaceful 3rd CC `<=385s`.
+    (define terran-marine-scv-ignores-cc-escrow?
+      (and (eq? race 'Terran)
+           reserved-cand
+           (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'command-center)
+           (>= supply-left 2)
+           (not supply-preempt-now?)
+           (not (and terran-first-factory-gas-ready? (>= army-supply 4) (not under-attack?)))
+           (or (and (eq? csym 'marine)
+                    (or under-attack?
+                        (> enemy-threat-supply 0)
+                        (and (>= total-townhalls-incl-pending 2) terran-cloaked-det-crisis?)
+                        (and (< army-supply 14)
+                             (or (>= total-townhalls-incl-pending 2)
+                                 step-post-t3-tech-expand-due?
+                                 (< minerals 325)))
+                        (and (>= total-townhalls-incl-pending 2)
+                             (< rem-min 225))))
+               (and (eq? csym 'scv)
+                    (< workers 48)
+                    (or under-attack?
+                        (> enemy-threat-supply 0)
+                        (and (>= total-townhalls-incl-pending 2) terran-cloaked-det-crisis?)
+                        (and (< army-supply 14)
+                             (or (>= total-townhalls-incl-pending 2)
+                                 step-post-t3-tech-expand-due?
+                                 (< minerals 240)))
+                        (and (>= total-townhalls-incl-pending 2)
+                             (< rem-min 225)))))))
     ;; W9-P0-1-belief (#11/#17): Never let starport/liberator/viking escrow hard-block SCV/Marine/Marauder
     (define terran-bio-scv-ignores-air-escrow?
       (and (eq? race 'Terran)
@@ -8985,6 +9430,7 @@
          0]
         [protoss-aa-stalker-ignores-heavy-escrow? 0]
         [terran-early-marine-ignores-macro-escrow? 0]
+        [terran-marine-scv-ignores-cc-escrow? 0]
         [terran-bio-scv-ignores-air-escrow? 0]
         [protoss-probe-or-immortal-ignores-stalker-escrow? 0]
         [zerg-roach-ignores-hydra-escrow? 0]
@@ -9054,7 +9500,7 @@
               rem-min rem-gas m-cost g-cost
               mineral-harvesters gas-harvesters
               workers ready-bldg-counts race
-              #:frames (if (or terran-3rd-cc-due? protoss-3rd-nexus-pro-due?)
+              #:frames (if (or terran-3rd-cc-due? protoss-3rd-nexus-pro-due? step-post-t3-tech-expand-due?)
                            320
                            120))))
        ;; W4-P0-1c: Never hold a blocking 275M Immortal mineral escrow when workers < 16 or Robo not ready

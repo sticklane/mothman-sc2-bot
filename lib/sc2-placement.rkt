@@ -80,7 +80,13 @@
  pad-already-owned?
  pad-camped-posterior
  pad-camped-by-enemy?
- select-uncamped-expansion-pad)
+ select-uncamped-expansion-pad
+
+ ;; W15-P0-2: Symmetry-Agnostic Map Geometry & O(1) Dual Ground-BFS Voronoi Territory
+ sc2-symmetry-reflect-point
+ sc2-detect-map-symmetry
+ sc2-ground-bfs-dist-at
+ sc2-ground-territory-margin)
 
 (define safe-coord safe-tile-coord)
 
@@ -4164,3 +4170,208 @@
                  (define-values (_ok? mx my) (simcity-record->xy mp))
                  (dist2d mx my ecx ecy))
                candidates)))
+
+;; =============================================================================
+;; W15-P0-2: Map-Symmetry Inference & O(1) Dual Ground-BFS Voronoi Territory
+;; =============================================================================
+;; Pure, zero-map-name geometry & O(1) ground-path territory helpers shared by
+;; `lib/sc2-protobuf-ws.rkt` (match-start computation & obs fields) and
+;; `lib/bot-runtime.rkt` (symmetry-agnostic territory partitioning).
+
+(define (sym-extract-xy pt)
+  (cond
+    [(point2d? pt)
+     (values (exact->inexact (point2d-x pt)) (exact->inexact (point2d-y pt)))]
+    [(and (pair? pt) (real? (car pt)) (real? (cdr pt)))
+     (values (exact->inexact (car pt)) (exact->inexact (cdr pt)))]
+    [(and (list? pt) (>= (length pt) 2) (real? (first pt)) (real? (second pt)))
+     (values (exact->inexact (first pt)) (exact->inexact (second pt)))]
+    [(and (hash? pt) (real? (hash-ref pt 'x #f)) (real? (hash-ref pt 'y #f)))
+     (values (exact->inexact (hash-ref pt 'x)) (exact->inexact (hash-ref pt 'y)))]
+    [(and (vector? pt) (>= (vector-length pt) 2)
+          (real? (vector-ref pt 0)) (real? (vector-ref pt 1)))
+     (values (exact->inexact (vector-ref pt 0)) (exact->inexact (vector-ref pt 1)))]
+    [(struct? pt)
+     (define sv (struct->vector pt))
+     (if (and (>= (vector-length sv) 3)
+              (real? (vector-ref sv 1))
+              (real? (vector-ref sv 2)))
+         (values (exact->inexact (vector-ref sv 1)) (exact->inexact (vector-ref sv 2)))
+         (values #f #f))]
+    [else (values #f #f)]))
+
+(define (sym-reflect-about sym-kind x y cx cy)
+  (case sym-kind
+    [(rotational-180)
+     (values (- (* 2.0 cx) x) (- (* 2.0 cy) y))]
+    [(mirror-horizontal)
+     (values (- (* 2.0 cx) x) y)]
+    [(mirror-vertical)
+     (values x (- (* 2.0 cy) y))]
+    [(mirror-diagonal-main)
+     (values (+ cx (- y cy)) (+ cy (- x cx)))]
+    [(mirror-diagonal-anti)
+     (values (- cx (- y cy)) (- cy (- x cx)))]
+    [else
+     (values (- (* 2.0 cx) x) (- (* 2.0 cy) y))]))
+
+(define (sc2-symmetry-reflect-point sym-kind x y playable-w playable-h
+                                    #:x0 [x0 0.0]
+                                    #:y0 [y0 0.0])
+  (define cx (+ (exact->inexact x0) (* 0.5 (exact->inexact playable-w))))
+  (define cy (+ (exact->inexact y0) (* 0.5 (exact->inexact playable-h))))
+  (define-values (rx ry)
+    (sym-reflect-about sym-kind (exact->inexact x) (exact->inexact y) cx cy))
+  (cons rx ry))
+
+;; Infers map symmetry kind purely from start locations, playable bounds, and
+;; expansion/mineral pads (zero map-name checks!):
+;;   'rotational-180 | 'mirror-horizontal | 'mirror-vertical |
+;;   'mirror-diagonal-main | 'mirror-diagonal-anti | 'asymmetric
+(define (sc2-detect-map-symmetry our-start enemy-start playable-w playable-h [pads '()]
+                                 #:x0 [x0 0.0]
+                                 #:y0 [y0 0.0])
+  (define-values (ox oy) (sym-extract-xy our-start))
+  (define-values (ex ey) (sym-extract-xy enemy-start))
+  (define pw (and (real? playable-w) (exact->inexact playable-w)))
+  (define ph (and (real? playable-h) (exact->inexact playable-h)))
+  (cond
+    [(or (not ox) (not oy) (not ex) (not ey)
+         (not pw) (not ph) (<= pw 4.0) (<= ph 4.0)
+         (< (dist2d ox oy ex ey) 4.0))
+     'asymmetric]
+    [else
+     (define x0-f (exact->inexact x0))
+     (define y0-f (exact->inexact y0))
+     (define nom-cx (+ x0-f (* 0.5 pw)))
+     (define nom-cy (+ y0-f (* 0.5 ph)))
+     (define min-dim (min pw ph))
+     (define start-tol (max 6.0 (* 0.05 min-dim)))
+     (define pad-tol (max 4.5 (* 0.035 min-dim)))
+     (define pad-xys
+       (for/fold ([acc '()] #:result (reverse acc))
+                 ([p (in-list (if (list? pads) pads '()))])
+         (define-values (px py) (sym-extract-xy p))
+         (if (and px py) (cons (cons px py) acc) acc)))
+     (define all-xys
+       (append (list (cons ox oy) (cons ex ey)) pad-xys))
+     (define has-pads? (>= (length pad-xys) 2))
+     ;; Optional bbox center if caller passed playable dims (W, H) without (x0, y0)
+     ;; on a map with symmetric border margins: strictly requires >= 4 pads and tight fit.
+     (define alt-center
+       (and (>= (length pad-xys) 4)
+            (= x0-f 0.0) (= y0-f 0.0)
+            (let* ([xs (map car all-xys)]
+                   [ys (map cdr all-xys)]
+                   [min-x (apply min xs)] [max-x (apply max xs)]
+                   [min-y (apply min ys)] [max-y (apply max ys)]
+                   [bcx (* 0.5 (+ min-x max-x))]
+                   [bcy (* 0.5 (+ min-y max-y))])
+              (and (> (dist2d nom-cx nom-cy bcx bcy) 1.0)
+                   (<= (abs (- bcx nom-cx)) (+ min-x 6.0))
+                   (<= (abs (- bcy nom-cy)) (+ min-y 6.0))
+                   (cons bcx bcy)))))
+     (define horiz-aligned-starts?
+       (and (<= (abs (- oy ey)) 2.5) (> (abs (- ox ex)) 10.0)))
+     (define vert-aligned-starts?
+       (and (<= (abs (- ox ex)) 2.5) (> (abs (- oy ey)) 10.0)))
+     (define (tie-penalty sym-k)
+       (cond
+         [has-pads?
+          (case sym-k
+            [(rotational-180) 0.0]
+            [(mirror-horizontal mirror-vertical) 0.01]
+            [else 0.02])]
+         [horiz-aligned-starts?
+          (case sym-k
+            [(mirror-horizontal) 0.0]
+            [(rotational-180) 0.02]
+            [else 0.04])]
+         [vert-aligned-starts?
+          (case sym-k
+            [(mirror-vertical) 0.0]
+            [(rotational-180) 0.02]
+            [else 0.04])]
+         [else
+          (case sym-k
+            [(rotational-180) 0.0]
+            [(mirror-horizontal mirror-vertical) 0.01]
+            [else 0.02])]))
+     (define (eval-sym-at sym-k cx cy strict-alt?)
+       (define-values (tx ty) (sym-reflect-about sym-k ox oy cx cy))
+       (define s-err (dist2d tx ty ex ey))
+       (define eff-start-tol (if strict-alt? (min 4.0 start-tol) start-tol))
+       (define eff-pad-tol (if strict-alt? (min 3.5 pad-tol) pad-tol))
+       (cond
+         [(> s-err eff-start-tol) #f]
+         [(not has-pads?)
+          (+ s-err (tie-penalty sym-k))]
+         [else
+          (define n-all (length all-xys))
+          (define-values (sum-d matched-cnt)
+            (for/fold ([sd 0.0] [mc 0]) ([pt (in-list all-xys)])
+              (define-values (rx ry) (sym-reflect-about sym-k (car pt) (cdr pt) cx cy))
+              (define best-d
+                (for/fold ([bd +inf.0]) ([q (in-list all-xys)])
+                  (min bd (dist2d rx ry (car q) (cdr q)))))
+              (values (+ sd best-d)
+                      (if (<= best-d eff-pad-tol) (add1 mc) mc))))
+          (define mean-d (/ sum-d (exact->inexact n-all)))
+          (define match-frac (/ (exact->inexact matched-cnt) (exact->inexact n-all)))
+          (define req-frac (if strict-alt? 0.85 0.70))
+          (and (>= match-frac req-frac)
+               (<= mean-d eff-pad-tol)
+               (+ s-err (* 2.0 mean-d) (tie-penalty sym-k)))]))
+     (define candidates
+       '(rotational-180 mirror-horizontal mirror-vertical mirror-diagonal-main mirror-diagonal-anti))
+     (define scored
+       (for/fold ([acc '()]) ([k (in-list candidates)])
+         (define sc-nom (eval-sym-at k nom-cx nom-cy #f))
+         (define sc-alt (and alt-center (eval-sym-at k (car alt-center) (cdr alt-center) #t)))
+         (define best-sc
+           (cond
+             [(and sc-nom sc-alt) (min sc-nom sc-alt)]
+             [sc-nom sc-nom]
+             [sc-alt sc-alt]
+             [else #f]))
+         (if best-sc (cons (cons k best-sc) acc) acc)))
+     (if (null? scored)
+         'asymmetric
+         (car (argmin cdr scored)))]))
+
+;; O(1) ground-BFS distance lookup in tiles (`#f` if missing/OOB/unpathable).
+;; Accepts callable `sc2-ground-bfs` structs, 2-/3-arg procedures, or `(hash 'width w 'height h 'dists vec)`.
+(define (sc2-ground-bfs-dist-at bfs x y [ring-r 0])
+  (cond
+    [(not (and (real? x) (real? y) (rational? x) (rational? y))) #f]
+    [(procedure? bfs)
+     (define d
+       (if (and (exact-integer? ring-r) (> ring-r 0) (procedure-arity-includes? bfs 3))
+           (bfs x y ring-r)
+           (bfs x y)))
+     (and (real? d) (not (infinite? d)) (not (nan? d)) (exact->inexact d))]
+    [(hash? bfs)
+     (define w (hash-ref bfs 'width 0))
+     (define h (hash-ref bfs 'height 0))
+     (define dists (hash-ref bfs 'dists #f))
+     (and (exact-integer? w) (> w 0)
+          (exact-integer? h) (> h 0)
+          (vector? dists)
+          (= (vector-length dists) (* w h))
+          (let ([ix (inexact->exact (floor x))]
+                [iy (inexact->exact (floor y))])
+            (and (>= ix 0) (< ix w) (>= iy 0) (< iy h)
+                 (let ([d0 (vector-ref dists (+ ix (* iy w)))])
+                   (and (real? d0) (< d0 999999999)
+                        (/ (exact->inexact d0) 10.0))))))]
+    [else #f]))
+
+;; O(1) Dual Ground-BFS Voronoi territory margin at `(x, y)`:
+;;   returns `(- d_enemy d_ours)` in walking tiles (`> 0` = Own Territory,
+;;   `< 0` = Enemy Territory, `#f` if either BFS is missing or `(x, y)` is unpathable).
+(define (sc2-ground-territory-margin our-bfs enemy-bfs x y [ring-r 0])
+  (define d-ours (sc2-ground-bfs-dist-at our-bfs x y ring-r))
+  (and d-ours
+       (let ([d-enemy (sc2-ground-bfs-dist-at enemy-bfs x y ring-r)])
+         (and d-enemy
+              (exact->inexact (- d-enemy d-ours))))))

@@ -21,6 +21,11 @@
          net/base64
          "sc2-game-constants.rkt"
          "sc2-typed-commands.rkt"
+         (only-in "sc2-placement.rkt"
+                  sc2-symmetry-reflect-point
+                  sc2-detect-map-symmetry
+                  sc2-ground-bfs-dist-at
+                  sc2-ground-territory-margin)
          (only-in "sc2-common.rkt"
                   SC2-SINGLETON-TECH-BUILDINGS
                   SC2-DUAL-CAP-TECH-BUILDINGS))
@@ -149,6 +154,11 @@
  sc2-townhall-all-resources-legal?
  solve-exact-townhall-pad
  compute-ground-bfs-distances
+ sc2-symmetry-reflect-point
+ sc2-detect-map-symmetry
+ sc2-ground-bfs-dist-at
+ sc2-ground-territory-margin
+ SC2-TERRITORY-FIELD-CACHE
  solve-all-map-expansion-bases
  order-expansions-from-origin
  sc2-weapon-cooldown-loops->seconds
@@ -3498,31 +3508,41 @@
   (width height dists)
   #:transparent
   #:property prop:procedure
-  (lambda (self tx ty [ring-r 0])
-    (define w (sc2-ground-bfs-width self))
-    (define h (sc2-ground-bfs-height self))
-    (define dists (sc2-ground-bfs-dists self))
-    (define ix (if (exact-integer? tx) tx (inexact->exact (floor tx))))
-    (define iy (if (exact-integer? ty) ty (inexact->exact (floor ty))))
-    (define INF 999999999)
-    (cond
-      [(or (< ix 0) (< iy 0) (>= ix w) (>= iy h)) +inf.0]
-      [else
-       (define d0 (vector-ref dists (+ ix (* iy w))))
-       (cond
-         [(< d0 INF) (/ (exact->inexact d0) 10.0)]
-         [(<= ring-r 0) +inf.0]
-         [else
-          (define best INF)
-          (for* ([ox (in-range (- ring-r) (add1 ring-r))]
-                 [oy (in-range (- ring-r) (add1 ring-r))])
-            (define nx (+ ix ox))
-            (define ny (+ iy oy))
-            (when (and (>= nx 0) (>= ny 0) (< nx w) (< ny h))
-              (define dv (vector-ref dists (+ nx (* ny w))))
-              (when (< dv best)
-                (set! best dv))))
-          (if (< best INF) (/ (exact->inexact best) 10.0) +inf.0)])])))
+  (case-lambda
+    [(self tx ty)
+     (define w (sc2-ground-bfs-width self))
+     (define h (sc2-ground-bfs-height self))
+     (define ix (if (exact-integer? tx) tx (inexact->exact (floor tx))))
+     (define iy (if (exact-integer? ty) ty (inexact->exact (floor ty))))
+     (if (or (< ix 0) (< iy 0) (>= ix w) (>= iy h))
+         +inf.0
+         (let ([d0 (vector-ref (sc2-ground-bfs-dists self) (+ ix (* iy w)))])
+           (if (< d0 999999999) (/ (exact->inexact d0) 10.0) +inf.0)))]
+    [(self tx ty ring-r)
+     (define w (sc2-ground-bfs-width self))
+     (define h (sc2-ground-bfs-height self))
+     (define dists (sc2-ground-bfs-dists self))
+     (define ix (if (exact-integer? tx) tx (inexact->exact (floor tx))))
+     (define iy (if (exact-integer? ty) ty (inexact->exact (floor ty))))
+     (define INF 999999999)
+     (cond
+       [(or (< ix 0) (< iy 0) (>= ix w) (>= iy h)) +inf.0]
+       [else
+        (define d0 (vector-ref dists (+ ix (* iy w))))
+        (cond
+          [(< d0 INF) (/ (exact->inexact d0) 10.0)]
+          [(<= ring-r 0) +inf.0]
+          [else
+           (define best INF)
+           (for* ([ox (in-range (- ring-r) (add1 ring-r))]
+                  [oy (in-range (- ring-r) (add1 ring-r))])
+             (define nx (+ ix ox))
+             (define ny (+ iy oy))
+             (when (and (>= nx 0) (>= ny 0) (< nx w) (< ny h))
+               (define dv (vector-ref dists (+ nx (* ny w))))
+               (when (< dv best)
+                 (set! best dv))))
+           (if (< best INF) (/ (exact->inexact best) 10.0) +inf.0)])])]))
 
 (define SC2-PATHING-WALK-CACHE (make-hash))
 (define SC2-GROUND-BFS-CACHE (make-hash))
@@ -4304,6 +4324,7 @@
     kd8-charge))
 
 (define SC2-CACHED-GROUND-BFS (box #f))
+(define SC2-TERRITORY-FIELD-CACHE (box #f))
 
 ;; Weak-key tag table for emergency survival wire commands (e.g. bruised-worker & scout `mineral-walk`
 ;; escapes), elevating them from routine P3 harvest (`3666`) to Tier `P0` in `govern-sc2-wire-actions!`.
@@ -4388,6 +4409,7 @@
     (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE #f)
     (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
     (set-box! SC2-CACHED-GROUND-BFS #f)
+    (set-box! SC2-TERRITORY-FIELD-CACHE #f)
     (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999)
     (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
     (hash-clear! SC2-PLACEMENT-POS-CACHE)
@@ -4472,6 +4494,7 @@
     (set-box! SC2-WIRE-HOLD-POSTURE-STATE #f)
     (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE #f)
     (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
+    (set-box! SC2-TERRITORY-FIELD-CACHE #f)
     (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999))
   (when (not (null? mineral-fields))
     (set-box! SC2-EVER-SAW-MINERALS? #t))
@@ -4601,6 +4624,79 @@
     (if defer-expansions?
         '()
         (order-expansions-from-origin solved-bases enemy-x enemy-y path-grid neutral-all)))
+
+  ;; W15-P0-2-wire: One-time match-start map-symmetry inference + dual Ground-BFS Voronoi territory
+  ;; fields (`our-ground-bfs`, `enemy-ground-bfs`), cached in `SC2-TERRITORY-FIELD-CACHE` (`0ms`/step!).
+  (define-values (map-symmetry-kind our-ground-bfs enemy-ground-bfs)
+    (let* ([grid-sig (and (sc2-image-grid? path-grid) (image-grid-signature path-grid))]
+           [base-key (list grid-sig
+                           (exact-round base-x) (exact-round base-y)
+                           (exact-round enemy-x) (exact-round enemy-y))]
+           [has-pads? (pair? solved-bases)]
+           [cached (unbox SC2-TERRITORY-FIELD-CACHE)])
+      (cond
+        [(and (list? cached)
+              (= (length cached) 5)
+              (equal? (first cached) base-key)
+              (or (second cached) (not has-pads?))
+              (or defer-expansions?
+                  (not (sc2-image-grid? path-grid))
+                  (and (fourth cached) (fifth cached))))
+         (values (third cached) (fourth cached) (fifth cached))]
+        [else
+         (define-values (play-x0 play-y0 play-w play-h)
+           (cond
+             [(sc2-game-info? game-info)
+              (define pa (sc2-game-info-playable-area game-info))
+              (define ms (sc2-game-info-map-size game-info))
+              (cond
+                [(and (hash? pa)
+                      (real? (hash-ref pa 'x0 #f)) (real? (hash-ref pa 'y0 #f))
+                      (real? (hash-ref pa 'x1 #f)) (real? (hash-ref pa 'y1 #f)))
+                 (define px0 (exact->inexact (hash-ref pa 'x0)))
+                 (define py0 (exact->inexact (hash-ref pa 'y0)))
+                 (define px1 (exact->inexact (hash-ref pa 'x1)))
+                 (define py1 (exact->inexact (hash-ref pa 'y1)))
+                 (values px0 py0 (max 1.0 (- px1 px0)) (max 1.0 (- py1 py0)))]
+                [(and (list? pa) (>= (length pa) 4)
+                      (real? (first pa)) (real? (second pa))
+                      (real? (third pa)) (real? (fourth pa)))
+                 (define px0 (exact->inexact (first pa)))
+                 (define py0 (exact->inexact (second pa)))
+                 (define px1 (exact->inexact (third pa)))
+                 (define py1 (exact->inexact (fourth pa)))
+                 (values px0 py0 (max 1.0 (- px1 px0)) (max 1.0 (- py1 py0)))]
+                [(and (pair? ms) (real? (car ms)) (real? (cdr ms)))
+                 (values 0.0 0.0 (exact->inexact (car ms)) (exact->inexact (cdr ms)))]
+                [(sc2-image-grid? path-grid)
+                 (values 0.0 0.0
+                         (exact->inexact (sc2-image-grid-width path-grid))
+                         (exact->inexact (sc2-image-grid-height path-grid)))]
+                [else (values 0.0 0.0 200.0 200.0)])]
+             [(sc2-image-grid? path-grid)
+              (values 0.0 0.0
+                      (exact->inexact (sc2-image-grid-width path-grid))
+                      (exact->inexact (sc2-image-grid-height path-grid)))]
+             [else (values 0.0 0.0 200.0 200.0)]))
+         (define pad-pts
+           (if has-pads?
+               (for/list ([b (in-list solved-bases)])
+                 (cons (hash-ref b 'x) (hash-ref b 'y)))
+               '()))
+         (define sym-k
+           (sc2-detect-map-symmetry (cons base-x base-y) (cons enemy-x enemy-y)
+                                    play-w play-h pad-pts
+                                    #:x0 play-x0 #:y0 play-y0))
+         (cond
+           [(and (not defer-expansions?) (sc2-image-grid? path-grid))
+            (define obfs (compute-ground-bfs-distances path-grid base-x base-y neutral-all))
+            (define ebfs (compute-ground-bfs-distances path-grid enemy-x enemy-y neutral-all))
+            (set-box! SC2-TERRITORY-FIELD-CACHE (list base-key has-pads? sym-k obfs ebfs))
+            (values sym-k obfs ebfs)]
+           [else
+            (when (not (sc2-image-grid? path-grid))
+              (set-box! SC2-TERRITORY-FIELD-CACHE (list base-key has-pads? sym-k #f #f)))
+            (values sym-k #f #f)])])))
   (define expansion-candidates
     (for/list ([b (in-list ordered-home-exps)])
       (cons (hash-ref b 'x) (hash-ref b 'y))))
@@ -5342,6 +5438,9 @@
         'race actual-race
         'opponent-requested-race opponent-requested-race
         'map-grids map-grids
+        'map-symmetry-kind map-symmetry-kind
+        'our-ground-bfs our-ground-bfs
+        'enemy-ground-bfs enemy-ground-bfs
         'minerals clean-minerals
         'gas clean-gas
         'supply-used supply-used
@@ -8957,7 +9056,8 @@
       (set-box! SC2-ENEMY-MAIN-CLEARED-AT #f)
       (set-box! SC2-EVER-SAW-MINERALS? #f)
       (set-box! SC2-WIRE-HOLD-POSTURE-STATE #f)
-      (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE #f))
+      (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE #f)
+      (set-box! SC2-TERRITORY-FIELD-CACHE #f))
     (set-box! SC2-WIRE-LAST-LOOP-BOX cur-loop))
   (when (sc2-observation? obs)
     (when (or (< cur-loop (unbox SC2-ENEMY-POS-LAST-LOOP))
@@ -8992,6 +9092,7 @@
       (set-box! SC2-WIRE-HOLD-POSTURE-STATE #f)
       (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE #f)
       (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
+      (set-box! SC2-TERRITORY-FIELD-CACHE #f)
       (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999))
     (set-box! SC2-ENEMY-POS-LAST-LOOP cur-loop)
     (when (< cur-loop (unbox SC2-WARPGATE-LAST-LOOP))

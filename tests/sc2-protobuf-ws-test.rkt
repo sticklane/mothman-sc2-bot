@@ -3245,6 +3245,132 @@
                    (= (sc2-raw-unit-command-target-unit-tag rpr-cmd) 0)
                    (= (wire-cmd-priority-tier rpr-cmd) 0))))
 
+;; =============================================================================
+;; Wave 15 (`W15-P0-2-wire`): Map-Symmetry Inference & Dual Ground-BFS Voronoi
+;; =============================================================================
+(printf "[Wave 15] Testing W15-P0-2-wire map-symmetry classification & dual ground-BFS Voronoi territory...\n")
+(let ()
+  ;; 1. Zero-map-name symmetry classification across all 6 symmetry kinds
+  (check-eqv "w15-sym-rotational-180"
+             (sc2-detect-map-symmetry
+              (sc2-point2d 30.0 30.0) (sc2-point2d 170.0 170.0) 200.0 200.0
+              (list (cons 30.0 60.0) (cons 170.0 140.0) (cons 75.0 35.0) (cons 125.0 165.0)))
+             'rotational-180)
+  (check-eqv "w15-sym-mirror-horizontal-off-center"
+             (sc2-detect-map-symmetry
+              '(30.0 . 40.0) '(170.0 . 40.0) 200.0 200.0
+              '((30.0 . 80.0) (170.0 . 80.0) (60.0 . 150.0) (140.0 . 150.0)))
+             'mirror-horizontal)
+  (check-eqv "w15-sym-mirror-horizontal-centerline-disambiguated-by-pads"
+             (sc2-detect-map-symmetry
+              '(30.0 . 100.0) '(170.0 . 100.0) 200.0 200.0
+              '((40.0 . 150.0) (160.0 . 150.0) (70.0 . 130.0) (130.0 . 130.0)))
+             'mirror-horizontal)
+  (check-eqv "w15-sym-mirror-vertical"
+             (sc2-detect-map-symmetry
+              '(40.0 . 30.0) '(40.0 . 170.0) 200.0 200.0
+              '((80.0 . 30.0) (80.0 . 170.0) (150.0 . 60.0) (150.0 . 140.0)))
+             'mirror-vertical)
+  (check-eqv "w15-sym-mirror-diagonal-main"
+             (sc2-detect-map-symmetry
+              '(30.0 . 170.0) '(170.0 . 30.0) 200.0 200.0
+              '((30.0 . 110.0) (110.0 . 30.0) (60.0 . 160.0) (160.0 . 60.0)))
+             'mirror-diagonal-main)
+  (check-eqv "w15-sym-mirror-diagonal-anti"
+             (sc2-detect-map-symmetry
+              '(30.0 . 30.0) '(170.0 . 170.0) 200.0 200.0
+              '((30.0 . 90.0) (110.0 . 170.0) (45.0 . 120.0) (80.0 . 155.0)))
+             'mirror-diagonal-anti)
+  (check-eqv "w15-sym-asymmetric-starts"
+             (sc2-detect-map-symmetry
+              '(25.0 . 30.0) '(155.0 . 140.0) 200.0 200.0
+              '((40.0 . 80.0) (90.0 . 150.0) (160.0 . 40.0)))
+             'asymmetric)
+  (check-eqv "w15-sym-asymmetric-pads-despite-symmetric-starts"
+             (sc2-detect-map-symmetry
+              '(30.0 . 30.0) '(170.0 . 170.0) 200.0 200.0
+              '((40.0 . 120.0) (90.0 . 150.0) (130.0 . 40.0) (160.0 . 80.0)))
+             'asymmetric)
+  (check-eqv "w15-sym-shifted-playable-origin-offset"
+             (sc2-detect-map-symmetry
+              '(32.0 . 46.0) '(188.0 . 46.0) 176.0 160.0
+              '((42.0 . 120.0) (178.0 . 120.0) (62.0 . 150.0) (158.0 . 150.0))
+              #:x0 22.0 #:y0 20.0)
+             'mirror-horizontal)
+
+  ;; 2. Cliff/wall ground-path Voronoi divergence from Euclidean midpoint!
+  ;; 64x64 grid: our main=(10,10), enemy main=(54,10).
+  ;; Impassable vertical cliff at x=38..40, y=0..55 (only northern bridge y=56..60 connects sides).
+  ;; Point P=(35,10) is EUCLIDEAN closer to enemy (19t vs 25t), yet GROUND-PATH much closer to US (25t vs >100t)!
+  (define gw 64)
+  (define gh 64)
+  (define cliff-bytes (make-bytes (* gw gh) 1))
+  (for* ([y (in-range 0 56)]
+         [x (in-range 38 41)])
+    (bytes-set! cliff-bytes (+ x (* y gw)) 0))
+  (define cliff-pgrid (sc2-image-grid 8 gw gh cliff-bytes #f #f))
+  (define our-bfs (compute-ground-bfs-distances cliff-pgrid 10.0 10.0 '()))
+  (define enemy-bfs (compute-ground-bfs-distances cliff-pgrid 54.0 10.0 '()))
+  (define m-own-side (sc2-ground-territory-margin our-bfs enemy-bfs 35.0 10.0))
+  (define m-enemy-side (sc2-ground-territory-margin our-bfs enemy-bfs 44.0 10.0))
+  (define m-cliff-wall (sc2-ground-territory-margin our-bfs enemy-bfs 39.0 10.0))
+  (define m-missing (sc2-ground-territory-margin #f enemy-bfs 35.0 10.0))
+  (check-true "w15-voronoi-cliff-diverges-from-euclidean-midpoint-own-side"
+              (and (real? m-own-side) (> m-own-side 65.0)))
+  (check-true "w15-voronoi-cliff-enemy-side-deep-negative-margin"
+              (and (real? m-enemy-side) (< m-enemy-side -65.0)))
+  (check-eqv "w15-voronoi-unpathable-cliff-returns-false" m-cliff-wall #f)
+  (check-eqv "w15-voronoi-missing-bfs-returns-false" m-missing #f)
+
+  ;; 3. Live `sc2-observation->runtime-obs-hash` exposure + O(1) match-start cache + rewind reset
+  (set-box! SC2-TERRITORY-FIELD-CACHE #f)
+  (define cliff-ginfo
+    (sc2-game-info "CliffTest" "CliffTest.SC2Map"
+                   (list (hash 'player-id 1 'race-requested 'Terran)
+                         (hash 'player-id 2 'race-requested 'Zerg))
+                   (cons gw gh)
+                   (hash 'x0 0 'y0 0 'x1 gw 'y1 gh)
+                   (list (sc2-point2d 54.0 10.0))
+                   cliff-pgrid cliff-pgrid cliff-pgrid))
+  (define our-cc
+    (sc2-unit 1 1 9701 18 1 (sc2-point3d 10.0 10.0 8.0) 0.0 2.75 1.0 0 #f #t #f
+              1500.0 1500.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+  (define obs-f0 (make-test-obs 0 50 0 (list our-cc)))
+  (define obs-f4 (make-test-obs 4 50 0 (list our-cc)))
+  (define obs-f8 (make-test-obs 8 50 0 (list our-cc)))
+  (define h-f0 (sc2-observation->runtime-obs-hash obs-f0 #:game-info cliff-ginfo #:defer-expansions? #t))
+  (define h-f4 (sc2-observation->runtime-obs-hash obs-f4 #:game-info cliff-ginfo #:defer-expansions? #f))
+  (define h-f8 (sc2-observation->runtime-obs-hash obs-f8 #:game-info cliff-ginfo #:defer-expansions? #f))
+  (check-true "w15-obs-f0-defers-bfs-while-classifying-symmetry"
+              (and (eq? (hash-ref h-f0 'map-symmetry-kind #f) 'mirror-horizontal)
+                   (eq? (hash-ref h-f0 'our-ground-bfs 'missing) #f)
+                   (eq? (hash-ref h-f0 'enemy-ground-bfs 'missing) #f)))
+  (check-true "w15-obs-f4-populates-dual-ground-bfs-and-voronoi-margin"
+              (let ([ob (hash-ref h-f4 'our-ground-bfs #f)]
+                    [eb (hash-ref h-f4 'enemy-ground-bfs #f)])
+                (and (eq? (hash-ref h-f4 'map-symmetry-kind #f) 'mirror-horizontal)
+                     (procedure? ob) (procedure? eb)
+                     (let ([m (sc2-ground-territory-margin ob eb 35.0 10.0)])
+                       (and (real? m) (> m 65.0))))))
+  (check-true "w15-obs-f8-reuses-exact-cached-ground-bfs-zero-recompute"
+              (and (eq? (hash-ref h-f4 'our-ground-bfs #f)
+                        (hash-ref h-f8 'our-ground-bfs #f))
+                   (eq? (hash-ref h-f4 'enemy-ground-bfs #f)
+                        (hash-ref h-f8 'enemy-ground-bfs #f))))
+  ;; Match rewind to loop 4 on a vertical-mirror map clears cache & re-infers `'mirror-vertical`
+  (define vert-ginfo
+    (sc2-game-info "VertTest" "VertTest.SC2Map"
+                   (list (hash 'player-id 1 'race-requested 'Terran)
+                         (hash 'player-id 2 'race-requested 'Protoss))
+                   (cons gw gh)
+                   (hash 'x0 0 'y0 0 'x1 gw 'y1 gh)
+                   (list (sc2-point2d 10.0 54.0))
+                   cliff-pgrid cliff-pgrid cliff-pgrid))
+  (define h-newmatch (sc2-observation->runtime-obs-hash obs-f4 #:game-info vert-ginfo #:defer-expansions? #f))
+  (check-eqv "w15-obs-match-rewind-resets-territory-cache-and-reclassifies"
+             (hash-ref h-newmatch 'map-symmetry-kind #f)
+             'mirror-vertical))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

@@ -111,7 +111,10 @@
  bayesian-posterior-from-likelihoods
  compute-bayesian-pad-camped-posterior
  worker-carrying-minerals-or-gas?
- select-far-mineral-patch-non-carrying-worker)
+ select-far-mineral-patch-non-carrying-worker
+ bot-runtime-point-territory-margin
+ bot-runtime-point-territory-zone
+ bot-runtime-mobile-retreatable-unit?)
 
 (define-inline (unit-type-sym u)
   (cond
@@ -172,6 +175,7 @@
 (define-rt-weak-state rt-wave-loss-state    (make-hasheq))
 (define-rt-weak-state rt-endgame-sweep-state (make-hasheq))
 (define-rt-weak-state rt-prev-ally-bldgs    (make-hasheqv))
+(define-rt-weak-state rt-upgrade-spike-state (make-hasheq))
 
 (define (pooled-hasheq! scratch key)
   (let ([ht (hash-ref scratch key #f)])
@@ -252,6 +256,7 @@
   (let ([s (rt-l5-scratch rt)]) (when (hash? s) (hash-clear! s)))
   (let ([s (rt-endgame-sweep-state rt)]) (when (hash? s) (hash-clear! s)))
   (let ([s (rt-prev-ally-bldgs rt)]) (when (hash? s) (hash-clear! s)))
+  (let ([s (rt-upgrade-spike-state rt)]) (when (hash? s) (hash-clear! s)))
   (let ([st (rt-splash-state rt)])
     (when (hash? st)
       (for ([k (in-list (hash-keys st))])
@@ -18376,6 +18381,306 @@
                 [dy (fl- (exact->inexact y1) (exact->inexact y2))])
             (fl<= (fl+ (fl* dx dx) (fl* dy dy)) r2))
           (<= (dist2d x1 y1 x2 y2) r))))
+;; W15-P0-2-rt: Symmetry-Agnostic + Dual Ground-BFS Voronoi Territory Partition & Mobile Unit Classifier
+(define SC2-MOBILE-RETREATABLE-BASE-SET
+  (hasheq 'reaper #t 'hellion #t 'banshee #t 'medivac #t
+          'oracle #t 'phoenix #t 'warp-prism #t 'warp-prism-phasing #t
+          'adept #t 'mutalisk #t))
+
+;; W15c: Dedicated solo harass units safe to cross deep under fog suppression even when
+;; our slow main ground army holds at home (NEVER detach empty Medivacs or 1–2 Adepts /
+;; Hellions / Blink-Stalkers out of a mixed slow army to feed alone!).
+(define SC2-DEDICATED-SOLO-HARASS-SET
+  (hasheq 'reaper #t 'banshee #t 'oracle #t 'phoenix #t
+          'warp-prism #t 'warp-prism-phasing #t 'mutalisk #t))
+
+(define (unit-medivac-loaded? u)
+  (and (hash? u)
+       (or (pair? (hash-ref u 'passengers '()))
+           (> (safe-nonneg-int (hash-ref u 'cargo-space-taken 0) 0) 0))))
+
+(define SC2-POWER-SPIKE-UPGRADE-SET
+  (hasheq 'stimpack #t 'combat-shield #t 'combat-shields #t 'shieldwall #t
+          'blink #t 'blink-tech #t 'charge #t
+          'glaives #t 'resonating-glaives #t 'adept-piercing-attack #t
+          'glial-reconstitution #t 'roach-speed #t
+          'centrifical-hooks #t 'centrifugal-hooks #t 'grooved-spines #t
+          'terran-infantry-weapons-1 #t 'terran-infantry-weapons-level1 #t
+          'terran-infantry-armor-1 #t 'terran-infantry-armors-1 #t 'terran-infantry-armors-level1 #t
+          'terran-infantry-weapons-2 #t 'terran-infantry-weapons-level2 #t
+          'terran-infantry-armor-2 #t 'terran-infantry-armors-2 #t
+          'protoss-ground-weapons-1 #t 'protoss-ground-weapons-level1 #t
+          'protoss-ground-armor-1 #t 'protoss-ground-armors-1 #t 'protoss-ground-armors-level1 #t
+          'protoss-ground-weapons-2 #t 'protoss-ground-weapons-level2 #t
+          'zerg-missile-weapons-1 #t 'zerg-missile-weapons-level1 #t
+          'zerg-melee-weapons-1 #t 'zerg-melee-weapons-level1 #t
+          'zerg-ground-armor-1 #t 'zerg-ground-armors-1 #t 'zerg-ground-armors-level1 #t
+          'zerg-missile-weapons-2 #t 'zerg-melee-weapons-2 #t))
+
+(define (bot-runtime-mobile-retreatable-unit? u #:researched-upgrades [researched-upgs '()] #:small-ling-runby? [small-ling-runby? #f])
+  (define ut (fast-canonical-unit-sym (if (symbol? u) u (unit-type-sym u))))
+  (or (and (eq? ut 'medivac)
+           (if (hash? u) (unit-medivac-loaded? u) #t))
+      (and (not (eq? ut 'medivac))
+           (hash-has-key? SC2-MOBILE-RETREATABLE-BASE-SET ut))
+      (and (eq? ut 'stalker)
+           (or (memq 'blink researched-upgs)
+               (memq 'blink-tech researched-upgs)
+               (memv 87 researched-upgs))
+           #t)
+      (and (eq? ut 'zergling) (and small-ling-runby? #t))))
+
+(define (l34-small-ling-runby-ok? ctx)
+  (define sc (l34-ctx-l34-sc ctx))
+  (define cu (l34-ctx-combat-units ctx))
+  (define cached (and sc (hash-ref sc 'w15-ling-count #f)))
+  (define cnt
+    (if (and (pair? cached) (eq? (car cached) cu))
+        (cdr cached)
+        (let ([c (for/sum ([u (in-list cu)])
+                   (if (eq? (fast-canonical-unit-sym (unit-type-sym u)) 'zergling) 1 0))])
+          (when sc (hash-set! sc 'w15-ling-count (cons cu c)))
+          c)))
+  (and (> cnt 0) (<= cnt 8)))
+
+(define (l34-mobile-retreatable-unit? ctx u [small-ling-runby? 'auto])
+  (define ut (fast-canonical-unit-sym (if (symbol? u) u (unit-type-sym u))))
+  (or (and (eq? ut 'medivac)
+           (if (hash? u) (unit-medivac-loaded? u) #t))
+      (and (not (eq? ut 'medivac))
+           (hash-has-key? SC2-MOBILE-RETREATABLE-BASE-SET ut))
+      (and (eq? ut 'stalker)
+           (or (l34-has-upgrade? ctx 'blink)
+               (memq 'blink-tech (l34-ctx-researched-upgs ctx))
+               (memv 87 (l34-ctx-researched-upgs ctx)))
+           #t)
+      (and (eq? ut 'zergling)
+           (if (eq? small-ling-runby? 'auto)
+               (l34-small-ling-runby-ok? ctx)
+               (and small-ling-runby? #t)))))
+
+(define (l34-solo-harass-exempt-unit? ctx u)
+  (define ut (fast-canonical-unit-sym (if (symbol? u) u (unit-type-sym u))))
+  (or (hash-has-key? SC2-DEDICATED-SOLO-HARASS-SET ut)
+      (and (eq? ut 'medivac) (unit-medivac-loaded? u))
+      (and (hash-ref (l34-ctx-l34-sc ctx) 'w15-all-mobile-retreatable? #f)
+           (l34-mobile-retreatable-unit? ctx u))))
+
+(define (l34-eval-bfs-dist bfs x y)
+  (cond
+    [(not bfs) +inf.0]
+    [(procedure? bfs)
+     (define d (if (procedure-arity-includes? bfs 3)
+                   (bfs x y 2)
+                   (bfs x y)))
+     (if (and (real? d) (= (- d d) 0) (< d 1e8))
+         (if (flonum? d) d (exact->inexact d))
+         +inf.0)]
+    [else
+     (define d (placement:sc2-ground-bfs-dist-at bfs x y 2))
+     (if (and (real? d) (= (- d d) 0) (< d 1e8))
+         (if (flonum? d) d (exact->inexact d))
+         +inf.0)]))
+
+(define (build-territory-info obs ally-bldgs enemy-bldgs bx by ex ey)
+  (define fbx (exact->inexact (safe-finite-real bx 32.0)))
+  (define fby (exact->inexact (safe-finite-real by 32.0)))
+  (define fex (exact->inexact (safe-finite-real ex 140.0)))
+  (define fey (exact->inexact (safe-finite-real ey 140.0)))
+  (define our-bfs (and (hash? obs) (hash-ref obs 'our-ground-bfs #f)))
+  (define enemy-bfs (and (hash? obs) (hash-ref obs 'enemy-ground-bfs #f)))
+  (define has-dual-bfs? (and our-bfs enemy-bfs #t))
+  (define raw-sym-kind (and (hash? obs) (hash-ref obs 'map-symmetry-kind #f)))
+  (define sym-kind
+    (or raw-sym-kind
+        (let ([mw (and (hash? obs) (hash-ref obs 'map-width #f))]
+              [mh (and (hash? obs) (hash-ref obs 'map-height #f))])
+          (and (real? mw) (real? mh) (> mw 0) (> mh 0)
+               (placement:sc2-detect-map-symmetry
+                (cons fbx fby) (cons fex fey) mw mh
+                (let ([pads (hash-ref obs 'expansion-candidates '())])
+                  (if (list? pads) pads '())))))))
+  (define raw-ally-ths
+    (for/list ([b (in-list ally-bldgs)]
+               #:when (and (hash? b)
+                           (memq (fast-canonical-structure-sym (unit-type-sym b))
+                                 '(hatchery lair hive nexus command-center orbital-command planetary-fortress))
+                           (real? (hash-ref b 'x #f))
+                           (real? (hash-ref b 'y #f))))
+      (define tx (exact->inexact (safe-finite-real (hash-ref b 'x fbx) fbx)))
+      (define ty (exact->inexact (safe-finite-real (hash-ref b 'y fby) fby)))
+      (vector tx ty (if has-dual-bfs? (l34-eval-bfs-dist our-bfs tx ty) 0.0))))
+  (define live-th-recs
+    (if (pair? raw-ally-ths)
+        raw-ally-ths
+        (list (vector fbx fby 0.0))))
+  (define raw-enemy-ths
+    (for/list ([b (in-list enemy-bldgs)]
+               #:when (and (hash? b)
+                           (memq (fast-canonical-structure-sym (unit-type-sym b))
+                                 '(hatchery lair hive nexus command-center orbital-command planetary-fortress))
+                           (real? (hash-ref b 'x #f))
+                           (real? (hash-ref b 'y #f))))
+      (define tx (exact->inexact (safe-finite-real (hash-ref b 'x fex) fex)))
+      (define ty (exact->inexact (safe-finite-real (hash-ref b 'y fey) fey)))
+      (vector tx ty (if has-dual-bfs? (l34-eval-bfs-dist enemy-bfs tx ty) 0.0))))
+  (define has-enemy-main-rec?
+    (for/or ([r (in-list raw-enemy-ths)])
+      (fl<= (fast-dist2d (vector-ref r 0) (vector-ref r 1) fex fey) 10.0)))
+  (define enemy-th-recs
+    (if has-enemy-main-rec?
+        raw-enemy-ths
+        (cons (vector fex fey 0.0) raw-enemy-ths)))
+  (define mid-x (fl* 0.5 (fl+ fbx fex)))
+  (define mid-y (fl* 0.5 (fl+ fby fey)))
+  (define span-dx (fl- fex fbx))
+  (define span-dy (fl- fey fby))
+  (define span-len (flmax 1.0 (flsqrt (fl+ (fl* span-dx span-dx) (fl* span-dy span-dy)))))
+  (vector our-bfs enemy-bfs has-dual-bfs? sym-kind
+          fbx fby fex fey
+          live-th-recs enemy-th-recs
+          mid-x mid-y (fl/ span-dx span-len) (fl/ span-dy span-len) span-len))
+
+(define (l34-get-territory-info ctx)
+  (define sc (l34-ctx-l34-sc ctx))
+  (define cached (and sc (hash-ref sc 'w15-territory-info #f)))
+  (define obs (l34-ctx-obs ctx))
+  (define ab (l34-ctx-ally-bldgs ctx))
+  (define eb (l34-ctx-enemy-bldgs ctx))
+  (if (and (vector? cached)
+           (eq? (vector-ref cached 0) obs)
+           (eq? (vector-ref cached 1) ab)
+           (eq? (vector-ref cached 2) eb))
+      (vector-ref cached 3)
+      (let ([info (build-territory-info obs ab eb
+                                        (l34-ctx-base-x ctx) (l34-ctx-base-y ctx)
+                                        (l34-ctx-enemy-x ctx) (l34-ctx-enemy-y ctx))])
+        (when sc (hash-set! sc 'w15-territory-info (vector obs ab eb info)))
+        info)))
+
+(define (compute-territory-details/info info x y air?)
+  (define fx (exact->inexact (safe-finite-real x 0.0)))
+  (define fy (exact->inexact (safe-finite-real y 0.0)))
+  (define our-bfs (vector-ref info 0))
+  (define enemy-bfs (vector-ref info 1))
+  (define has-dual-bfs? (vector-ref info 2))
+  (define sym-kind (vector-ref info 3))
+  (define fbx (vector-ref info 4))
+  (define fby (vector-ref info 5))
+  (define fex (vector-ref info 6))
+  (define fey (vector-ref info 7))
+  (define live-th-recs (vector-ref info 8))
+  (define enemy-th-recs (vector-ref info 9))
+  (define mid-x (vector-ref info 10))
+  (define mid-y (vector-ref info 11))
+  (define ax-x (vector-ref info 12))
+  (define ax-y (vector-ref info 13))
+  (define min-eucl-ours
+    (for/fold ([best +inf.0]) ([r (in-list live-th-recs)])
+      (flmin best (fast-dist2d fx fy (vector-ref r 0) (vector-ref r 1)))))
+  (define min-eucl-enemy
+    (for/fold ([best +inf.0]) ([r (in-list enemy-th-recs)])
+      (flmin best (fast-dist2d fx fy (vector-ref r 0) (vector-ref r 1)))))
+  (cond
+    [air?
+     (values (fl- min-eucl-enemy min-eucl-ours) min-eucl-ours #f)]
+    [has-dual-bfs?
+     (define d-o0 (l34-eval-bfs-dist our-bfs fx fy))
+     (define d-e0 (l34-eval-bfs-dist enemy-bfs fx fy))
+     (cond
+       [(and (fl< d-o0 1e8) (fl< d-e0 1e8))
+        ;; Base-anchored expansion offset for claimed 3rd/4th+ bases with exact
+        ;; triangle-inequality cliff guard (`|d_main(p) - d_main(B)| <= dist2d(p, B) + 8.0`)
+        ;; so we never cheat across an impassable cliff/wall!
+        (define d-o-eff
+          (for/fold ([best d-o0]) ([r (in-list live-th-recs)])
+            (define db (vector-ref r 2))
+            (if (fl< db 1e8)
+                (let ([de (fast-dist2d fx fy (vector-ref r 0) (vector-ref r 1))]
+                      [dd (flabs (fl- d-o0 db))])
+                  (if (fl<= dd (fl+ de 8.0))
+                      (flmin best (flmax de dd))
+                      best))
+                best)))
+        (define d-e-eff
+          (for/fold ([best d-e0]) ([r (in-list enemy-th-recs)])
+            (define db (vector-ref r 2))
+            (if (fl< db 1e8)
+                (let ([de (fast-dist2d fx fy (vector-ref r 0) (vector-ref r 1))]
+                      [dd (flabs (fl- d-e0 db))])
+                  (if (fl<= dd (fl+ de 8.0))
+                      (flmin best (flmax de dd))
+                      best))
+                best)))
+        ;; W15c (`#443/#446`): Real SC2 main-ramp detours (`eucl=15t, d-o-eff=33t`) are
+        ;; walkable own territory, NEVER cliff-blocked! Require `d-o-eff > 46` AND `> eucl + 26`
+        ;; so only genuine unpathable cliff chasms (`70-220+` tiles) set `cliff-blocked?`.
+        (define cliff-blocked?
+          (and (fl> d-o-eff 46.0)
+               (fl> d-o-eff (fl+ min-eucl-ours 26.0))))
+        (values (fl- d-e-eff d-o-eff) d-o-eff cliff-blocked?)]
+       [else
+        (compute-territory-details/info
+         (vector #f #f #f sym-kind fbx fby fex fey live-th-recs enemy-th-recs
+                 mid-x mid-y ax-x ax-y (vector-ref info 14))
+         fx fy #f)])]
+    [else
+     (define voronoi-m (fl- min-eucl-enemy min-eucl-ours))
+     (define multi-base-override?
+       (and (or (> (length live-th-recs) 1) (> (length enemy-th-recs) 1))
+            (or (fl<= min-eucl-ours 28.0) (fl<= min-eucl-enemy 28.0))))
+     (define margin
+       (if multi-base-override?
+           voronoi-m
+           (case sym-kind
+             [(mirror-horizontal)
+              (fl* 2.0 (if (fl< fbx fex) (fl- mid-x fx) (fl- fx mid-x)))]
+             [(mirror-vertical)
+              (fl* 2.0 (if (fl< fby fey) (fl- mid-y fy) (fl- fy mid-y)))]
+             [(mirror-diagonal-main mirror-diagonal-anti)
+              (fl* 2.0 (fl+ (fl* (fl- mid-x fx) ax-x) (fl* (fl- mid-y fy) ax-y)))]
+             [else voronoi-m])))
+     (values margin min-eucl-ours #f)]))
+
+(define (classify-territory-zone margin d-o-eff cliff-blocked?)
+  (cond
+    [(or (fl>= margin 6.0)
+         (and (not cliff-blocked?) (fl<= d-o-eff 28.0)))
+     'own-territory]
+    [(fl>= margin -8.0)
+     'contested-frontline]
+    [else
+     'deep-enemy-territory]))
+
+(define (l34-point-territory-details ctx x y #:air? [air? #f])
+  (compute-territory-details/info (l34-get-territory-info ctx) x y air?))
+
+(define (l34-point-territory-margin ctx x y #:air? [air? #f])
+  (define-values (m _do _cb) (l34-point-territory-details ctx x y #:air? air?))
+  m)
+
+(define (l34-point-territory-zone ctx x y #:air? [air? #f])
+  (define-values (m d-o cb) (l34-point-territory-details ctx x y #:air? air?))
+  (classify-territory-zone m d-o cb))
+
+(define (bot-runtime-point-territory-margin obs x y #:air? [air? #f])
+  (define ally-b (let ([v (hash-ref obs 'ally-buildings '())]) (if (list? v) v '())))
+  (define enemy-b (let ([v (hash-ref obs 'enemy-buildings '())]) (if (list? v) v '())))
+  (define info (build-territory-info obs ally-b enemy-b
+                                     (hash-ref obs 'base-x 32.0) (hash-ref obs 'base-y 32.0)
+                                     (hash-ref obs 'enemy-x 140.0) (hash-ref obs 'enemy-y 140.0)))
+  (define-values (m _do _cb) (compute-territory-details/info info x y air?))
+  m)
+
+(define (bot-runtime-point-territory-zone obs x y #:air? [air? #f])
+  (define ally-b (let ([v (hash-ref obs 'ally-buildings '())]) (if (list? v) v '())))
+  (define enemy-b (let ([v (hash-ref obs 'enemy-buildings '())]) (if (list? v) v '())))
+  (define info (build-territory-info obs ally-b enemy-b
+                                     (hash-ref obs 'base-x 32.0) (hash-ref obs 'base-y 32.0)
+                                     (hash-ref obs 'enemy-x 140.0) (hash-ref obs 'enemy-y 140.0)))
+  (define-values (m d-o cb) (compute-territory-details/info info x y air?))
+  (classify-territory-zone m d-o cb))
+
 (define (l34-fast-enemy-near-territory? ctx e ex ey)
   (define enemy-territory-cache (l34-ctx-enemy-territory-cache ctx))
   (define territory-miss (l34-ctx-territory-miss ctx))
@@ -18388,32 +18693,39 @@
   (define combat-th-limit? (l34-ctx-combat-th-limit? ctx))
   (define hit (if enemy-territory-cache (hash-ref enemy-territory-cache e territory-miss) territory-miss))
   (if (eq? hit territory-miss)
-      ;; W12-P0-5-rt (`w12-tac-5` / `own_territory_retreat_frames = 141,676f`): Check ALL actual
-      ;; live friendly Town Halls in `ally-bldgs` (not only geometric `(base/nat/third)` estimates!)
-      ;; so real naturals/3rds/4ths at asymmetric coordinates are NEVER abandoned!
-      (let* ([sc (l34-ctx-l34-sc ctx)]
-             [ab (l34-ctx-ally-bldgs ctx)]
-             [cached-th (and sc (hash-ref sc 'live-th-coords-p5 #f))]
-             [live-th-coords
-              (if (and (pair? cached-th) (eq? (car cached-th) ab))
-                  (cdr cached-th)
-                  (let ([ths
-                         (for/list ([b (in-list ab)]
-                                    #:when (and (hash? b)
-                                                (memq (fast-canonical-structure-sym (unit-type-sym b))
-                                                      '(hatchery lair hive nexus command-center orbital-command planetary-fortress))
-                                                (real? (hash-ref b 'x #f))
-                                                (real? (hash-ref b 'y #f))))
-                           (cons (exact->inexact (hash-ref b 'x fbase-x))
-                                 (exact->inexact (hash-ref b 'y fbase-y))))])
-                    (when sc (hash-set! sc 'live-th-coords-p5 (cons ab ths)))
-                    ths))]
-             [res (or (l34-within-r2? ex ey fbase-x fbase-y 1296.0 36.0)
-                      (l34-within-r2? ex ey fnat-x fnat-y 1296.0 36.0)
-                      (and combat-th-limit?
-                           (l34-within-r2? ex ey fthird-x fthird-y 1296.0 36.0))
-                      (for/or ([tc (in-list live-th-coords)])
-                        (l34-within-r2? ex ey (car tc) (cdr tc) 1296.0 36.0)))])
+      ;; W12-P0-5-rt + W15-P0-2-rt: Symmetry-agnostic + dual ground-BFS Voronoi territory
+      ;; defense (adapting to rotational-180, horizontal/vertical/diagonal mirrors & cliff chokes,
+      ;; while keeping air distance separate for flying harassers!).
+      (let* ([info (l34-get-territory-info ctx)]
+             [has-dual-bfs? (vector-ref info 2)]
+             [sym-kind (vector-ref info 3)]
+             [live-th-recs (vector-ref info 8)]
+             [e-flying? (and (hash? e)
+                             (or (eq? (hash-ref e 'flying #f) #t)
+                                 (eq? (hash-ref e 'flying? #f) #t)
+                                 (eq? (hash-ref e 'is-flying #f) #t)
+                                 (fast-unit-is-flying-sym? (unit-type-sym e))))]
+             [res
+              (cond
+                [(and has-dual-bfs? (not e-flying?))
+                 (define-values (margin d-o-eff _cliff-blocked?)
+                   (compute-territory-details/info info ex ey #f))
+                 (or (fl<= d-o-eff 38.0)
+                     (and (fl>= margin 6.0) (fl<= d-o-eff 52.0)))]
+                [else
+                 (define-values (margin d-o-eff _cb)
+                   (compute-territory-details/info info ex ey e-flying?))
+                 (or (l34-within-r2? ex ey fbase-x fbase-y 1296.0 36.0)
+                     (l34-within-r2? ex ey fnat-x fnat-y 1296.0 36.0)
+                     (and combat-th-limit?
+                          (l34-within-r2? ex ey fthird-x fthird-y 1296.0 36.0))
+                     (for/or ([r (in-list live-th-recs)])
+                       (l34-within-r2? ex ey (vector-ref r 0) (vector-ref r 1) 1296.0 36.0))
+                     (and (not e-flying?)
+                          (memq sym-kind '(mirror-horizontal mirror-vertical
+                                           mirror-diagonal-main mirror-diagonal-anti))
+                          (fl>= margin 20.0)
+                          (fl<= d-o-eff 48.0)))])])
         (when enemy-territory-cache (hash-set! enemy-territory-cache e res))
         res)
       hit))
@@ -19643,29 +19955,52 @@
                                           (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 1444.0)))))))
           (cons (exact->inexact (safe-finite-real (hash-ref b 'x 0.0) 0.0))
                 (exact->inexact (safe-finite-real (hash-ref b 'y 0.0) 0.0))))))
-  ;; W9-P0-2-rt: Add +6.0t siege reach (`<= 30.0t` / `900.0` TH, `<= 16.0t` / `256.0` home
-  ;; buildings) for long-range siege/capital enemies shelling our bases from 12–15t away so
-  ;; `enemy-within-14-of-th?` (`kw-defending-home? = #t`) triggers `CommitFocusFire`!
+  ;; W9-P0-2-rt + W15-P0-2-rt: Add +6.0t siege reach (`<= 30.0t` / `900.0` TH, `<= 16.0t` / `256.0`
+  ;; home buildings) AND respect dual ground-BFS cliff chokes (ignore ground units trapped behind
+  ;; impassable cliffs unless cliff-shelling siege; defend ground Voronoi choke basin `margin >= 18`,
+  ;; `d_ours <= 44`!).
+  (define t-info-eval (l34-get-territory-info ctx))
+  (define has-dual-bfs-eval? (vector-ref t-info-eval 2))
   (define (threat-within-14-of-th? e)
     (define ex0 (hash-ref e 'x #f))
     (define ey0 (hash-ref e 'y #f))
     (and (real? ex0) (real? ey0)
          (= (- ex0 ex0) 0) (= (- ey0 ey0) 0)
          (let* ([esym (fast-canonical-unit-sym (unit-type-sym e))]
+                [e-flying? (or (eq? (hash-ref e 'flying #f) #t)
+                               (eq? (hash-ref e 'flying? #f) #t)
+                               (eq? (hash-ref e 'is-flying #f) #t)
+                               (fast-unit-is-flying-sym? esym))]
                 [siege-cap? (memq esym '(tempest siege-tank-sieged carrier brood-lord broodlord
                                          liberator-ag lurker-burrowed lurker-mp-burrowed colossus))]
                 [th-r2 (if siege-cap? 900.0 576.0)]
                 [bldg-r2 (if siege-cap? 256.0 100.0)]
                 [fex (if (flonum? ex0) ex0 (exact->inexact ex0))]
                 [fey (if (flonum? ey0) ey0 (exact->inexact ey0))])
-           (or (for/or ([tc (in-list th-coords)])
-                 (define dx (fl- fex (car tc)))
-                 (define dy (fl- fey (cdr tc)))
-                 (fl<= (fl+ (fl* dx dx) (fl* dy dy)) th-r2))
-               (for/or ([bc (in-list home-bldg-coords)])
-                 (define dx (fl- fex (car bc)))
-                 (define dy (fl- fey (cdr bc)))
-                 (fl<= (fl+ (fl* dx dx) (fl* dy dy)) bldg-r2))))))
+           (cond
+             [(and has-dual-bfs-eval? (not e-flying?))
+              (define-values (gm d-o cb?) (compute-territory-details/info t-info-eval fex fey #f))
+              (cond
+                [(and cb? (not siege-cap?)) #f]
+                [(and (not cb?) (fl>= gm 18.0) (fl<= d-o 44.0)) #t]
+                [else
+                 (or (for/or ([tc (in-list th-coords)])
+                       (define dx (fl- fex (car tc)))
+                       (define dy (fl- fey (cdr tc)))
+                       (fl<= (fl+ (fl* dx dx) (fl* dy dy)) th-r2))
+                     (for/or ([bc (in-list home-bldg-coords)])
+                       (define dx (fl- fex (car bc)))
+                       (define dy (fl- fey (cdr bc)))
+                       (fl<= (fl+ (fl* dx dx) (fl* dy dy)) bldg-r2)))])]
+             [else
+              (or (for/or ([tc (in-list th-coords)])
+                    (define dx (fl- fex (car tc)))
+                    (define dy (fl- fey (cdr tc)))
+                    (fl<= (fl+ (fl* dx dx) (fl* dy dy)) th-r2))
+                  (for/or ([bc (in-list home-bldg-coords)])
+                    (define dx (fl- fex (car bc)))
+                    (define dy (fl- fey (cdr bc)))
+                    (fl<= (fl+ (fl* dx dx) (fl* dy dy)) bldg-r2)))]))))
   (define enemy-within-14-of-th?
     (and (pair? th-coords)
          (or (for/or ([e (in-list enemy-units)])
@@ -19682,17 +20017,40 @@
     (and (or (l34-ctx-live-obs? ctx) (eq? (hash-ref obs 'enable-opponent-world-model #f) #t))
          rt
          (opponent-world-model-last-summary (rt-opponent-world-model rt))))
-  (define-values (our-combat-val our-combat-sup-eval)
+  (define small-ling-runby-eval? (l34-small-ling-runby-ok? ctx))
+  (define-values (our-combat-val our-combat-sup-eval army-mobility-sum)
     (if owm-tactics
-        (for/fold ([v 0] [sup 0.0]) ([u (in-list combat-units)])
+        (for/fold ([v 0] [sup 0.0] [mob-w 0.0]) ([u (in-list combat-units)])
           (define ut (fast-canonical-unit-sym (unit-type-sym u)))
           (if (free-summon-unit-sym? ut)
-              (values v sup)
-              (values (+ v
-                         (max 0 (sc2-min-cost ut))
-                         (exact-round (* 1.5 (max 0 (sc2-gas-cost ut)))))
-                      (+ sup (max 0.5 (exact->inexact (sc2-supply-cost ut)))))))
-        (values 0 0.0)))
+              (values v sup mob-w)
+              (let* ([usup (max 0.5 (exact->inexact (sc2-supply-cost ut)))]
+                     [u-mob
+                      (cond
+                        [(l34-mobile-retreatable-unit? ctx u small-ling-runby-eval?) 1.0]
+                        [(or (eq? ut 'zergling)
+                             (eq? ut 'stalker)
+                             (eq? ut 'hydralisk)
+                             (eq? ut 'viking-fighter)
+                             (eq? ut 'corruptor)
+                             (eq? ut 'void-ray)
+                             (and (memq ut '(marine marauder)) (l34-has-upgrade? ctx 'stimpack))
+                             (and (eq? ut 'roach) (or (l34-has-upgrade? ctx 'glial-reconstitution)
+                                                      (memq 'roach-speed researched-upgs))))
+                         0.65]
+                        [else 0.15])])
+                (values (+ v
+                           (max 0 (sc2-min-cost ut))
+                           (exact-round (* 1.5 (max 0 (sc2-gas-cost ut)))))
+                        (+ sup usup)
+                        (+ mob-w (* usup u-mob))))))
+        (values 0 0.0 0.0)))
+  (define army-mobility
+    (if (fl> our-combat-sup-eval 0.0)
+        (fl/ army-mobility-sum our-combat-sup-eval)
+        0.5))
+  (define all-mobile-retreatable?
+    (and (pair? combat-units) (fl>= army-mobility 0.95)))
   (define owm-believed-val
     (if owm-tactics (opponent-world-summary-believed-total-army-value owm-tactics) 0))
   (define owm-locust-wave?
@@ -19715,23 +20073,120 @@
   (define enemy-main-cleared-eval?
     (or (hash-ref obs 'enemy-main-cleared #f)
         (and sweep-st-eval (hash-ref sweep-st-eval 'enemy-main-cleared? #f))))
-  ;; `fog-belief-suppress?` ONLY suppresses blind cross-map fog marches when `eval-enemies`
-  ;; is empty — NEVER overrides favorable visible engagements (`pred-ht`), base defense,
-  ;; endgame building cleanup, decisive victory postures, or strong (>= 55 combat sup / >= 155 total) armies!
+  ;; W15-P0-2-rt: Dynamic Commitment-Risk Gate — refine `fog-belief-suppress?` so it ONLY
+  ;; gates slow, non-retreatable main-army commitment into unscouted deep enemy territory
+  ;; (`ground_margin < -8`) via a smooth `[0.95x .. 1.18x]` risk threshold, while NEVER blocking
+  ;; mobile/retreatable harass, active upgrade power-spikes, exposed enemy expansion denial,
+  ;; behind-in-eco desperation timings, or Contested Frontline (`ground_margin >= -8`) skirmishes!
+  (define spike-st (and rt (rt-upgrade-spike-state rt)))
+  (when spike-st
+    (when (<= frame 4)
+      (hash-clear! spike-st))
+    (for ([u (in-list researched-upgs)])
+      (when (and (symbol? u)
+                 (hash-has-key? SC2-POWER-SPIKE-UPGRADE-SET u)
+                 (not (hash-has-key? spike-st u)))
+        (hash-set! spike-st u (if (<= frame 4) -99999 frame)))))
+  (define upgrade-power-spike-active?
+    (and (or (eq? (hash-ref obs 'recent-power-spike-upgrade? #f) #t)
+             (and spike-st
+                  (for/or ([(_u cf) (in-hash spike-st)])
+                    (and (>= cf 0) (<= (- frame cf) 1344)))))
+         (>= our-combat-sup-eval 18.0)
+         (>= our-combat-val (* 0.85 owm-believed-val))))
+  (define eval-enemy-x (exact->inexact (l34-ctx-enemy-x ctx)))
+  (define eval-enemy-y (exact->inexact (l34-ctx-enemy-y ctx)))
+  (define observed-enemy-ths
+    (for/list ([eb (in-list enemy-bldgs)]
+               #:when (and (hash? eb)
+                           (memq (fast-canonical-structure-sym (unit-type-sym eb))
+                                 '(hatchery lair hive nexus command-center orbital-command planetary-fortress))
+                           (real? (hash-ref eb 'x #f))
+                           (real? (hash-ref eb 'y #f))))
+      eb))
+  (define observed-nonmain-enemy-ths
+    (for/list ([eb (in-list observed-enemy-ths)]
+               #:when (> (fast-dist2d (exact->inexact (hash-ref eb 'x eval-enemy-x))
+                                      (exact->inexact (hash-ref eb 'y eval-enemy-y))
+                                      eval-enemy-x eval-enemy-y)
+                         10.0))
+      eb))
+  (define our-bases-eval (max 1 (length th-coords)))
+  (define enemy-bases-eval
+    (max (if owm-tactics (opponent-world-summary-confirmed-bases owm-tactics) 1)
+         (length observed-enemy-ths)))
+  ;; W15b: Require actual greedy/exposed expansion (`enemy-bases > our-bases`, `confirmed-early-greed?`,
+  ;; or `dist(eb, enemy-main) > 26.0` — NEVER standard main-adjacent natural!) plus real army (`>= 18`
+  ;; combat supply and `>= 0.90 * owm-believed-val`) so we snipe greedy 3rd+ bases (`#30 Creepy`)
+  ;; without suiciding `m4–m6` ground squads into fortified opponent naturals (`#12/#17/#18`).
+  (define exposed-enemy-expand-denial?
+    (and (pair? observed-nonmain-enemy-ths)
+         (>= our-combat-sup-eval 18.0)
+         (>= our-combat-val (* 0.90 owm-believed-val))
+         (or (> enemy-bases-eval our-bases-eval)
+             (and owm-tactics (opponent-world-summary-confirmed-early-greed? owm-tactics))
+             (for/or ([eb (in-list observed-nonmain-enemy-ths)])
+               (define ebx (exact->inexact (hash-ref eb 'x eval-enemy-x)))
+               (define eby (exact->inexact (hash-ref eb 'y eval-enemy-y)))
+               (> (fast-dist2d ebx eby eval-enemy-x eval-enemy-y) 26.0)))))
+  (define behind-in-eco-desperation?
+    (and (>= (- enemy-bases-eval our-bases-eval) 2)
+         (>= our-combat-sup-eval 18.0)
+         (>= (length combat-units) 5)
+         (>= our-combat-val (* 0.85 owm-believed-val))))
+  (define-values (army-margin-eval _army-do-eval _army-cb-eval)
+    (if (pair? combat-units)
+        (compute-territory-details/info t-info-eval
+                                        (l34-ctx-prelim-army-cx ctx)
+                                        (l34-ctx-prelim-army-cy ctx)
+                                        #f)
+        (values 20.0 0.0 #f)))
+  (define deep-dist-factor
+    (cond
+      [(fl< army-margin-eval -8.0) 1.0]
+      [(fl< army-margin-eval 6.0)
+       (fl+ 0.45 (fl* 0.55 (fl/ (fl- 6.0 army-margin-eval) 14.0)))]
+      [else 0.35]))
+  ;; Smooth commitment-risk multiplier in `[0.95 .. 1.18]`:
+  ;; - Faster/retreatable armies near midline -> ~0.95x - 1.03x
+  ;; - Slow/non-retreatable siege/immortal/roach armies committing deep -> ~1.12x - 1.18x
+  (define commitment-risk-ratio-req
+    (flmax 0.95
+           (flmin 1.18
+                  (fl+ 0.95
+                       (fl* 0.16 (fl- 1.0 army-mobility))
+                       (fl* 0.07 deep-dist-factor)))))
   (define decisive-victory-posture?
     (and rt
          (memq (live-bot-runtime-posture rt)
                '(SwarmVictory ProtossArmadaVictory MothmanApexVictory))))
+  (define forward-timing-window?
+    (or upgrade-power-spike-active?
+        exposed-enemy-expand-denial?
+        behind-in-eco-desperation?))
+  (define frontline-strength-ok?
+    (or (not owm-tactics)
+        (<= owm-believed-val 550)
+        (>= our-combat-val (* 0.85 owm-believed-val))))
+  (when (hash? (l34-ctx-l34-sc ctx))
+    (hash-set! (l34-ctx-l34-sc ctx) 'w15-forward-window-active? forward-timing-window?)
+    (hash-set! (l34-ctx-l34-sc ctx) 'w15-commitment-risk-req commitment-risk-ratio-req)
+    (hash-set! (l34-ctx-l34-sc ctx) 'w15-army-mobility army-mobility)
+    (hash-set! (l34-ctx-l34-sc ctx) 'w15-all-mobile-retreatable? all-mobile-retreatable?)
+    (hash-set! (l34-ctx-l34-sc ctx) 'w15-frontline-strength-ok? frontline-strength-ok?))
   (define fog-belief-suppress?
     (and owm-tactics
          (not enemy-within-14-of-th?)
          (not owm-sh-cooldown?)
          (not enemy-main-cleared-eval?)
          (not decisive-victory-posture?)
+         (not all-mobile-retreatable?)
+         (not forward-timing-window?)
          (< our-combat-sup-eval 55.0)
          (< (safe-nonneg-int (hash-ref obs 'supply-used 0) 0) 155)
          (> owm-believed-val 550)
-         (< our-combat-val (* 1.12 owm-believed-val))))
+         (< (exact->inexact our-combat-val)
+            (fl* commitment-risk-ratio-req (exact->inexact owm-believed-val)))))
   (define eval-enemies
     (let ([non-summon-enemies
            (if owm-tactics
@@ -22659,9 +23114,11 @@
           (when best-eid
             (set-add! wave3-handled-tags qid)
             (l34-emit! ctx (list 'attack-unit qid best-eid))))))
-    ;; W3-TAC-7: Keep empty frontline Medivacs leashed safely behind Bio (within heal range)
-    ;; so they never fly solo to enemy main via harass OR get pulled into execute-spatial-maneuver ATTACK!
-    (when (and (pair? enemy-units) (pair? combat-units))
+    ;; W3-TAC-7 + W15c: Keep empty Medivacs leashed safely behind Bio (within heal range)
+    ;; both in frontline combat AND under fog-belief suppression so they never fly solo across
+    ;; the map to enemy main via harass/multitask OR get pulled into execute-spatial-maneuver!
+    (define medivac-fog-suppress? (l34-ctx-fog-belief-suppress? ctx))
+    (when (and (or (pair? enemy-units) medivac-fog-suppress?) (pair? combat-units))
       (define bio-sum-x 0.0)
       (define bio-sum-y 0.0)
       (define bio-cnt 0)
@@ -22689,17 +23146,19 @@
           (define my0 (hash-ref mu 'y #f))
           (when (and (exact-integer? mid) (> mid 0)
                      (= cargo 0)
+                     (not (unit-medivac-loaded? mu))
                      (real? mx0) (real? my0)
                      (not (set-member? wave3-handled-tags mid))
                      (not (set-member? splash-evading-tags mid))
                      (<= (fast-dist2d (exact->inexact mx0) (exact->inexact my0) bcx bcy) 16.0)
-                     (for/or ([eu (in-list enemy-units)] #:when (hash? eu))
-                       (and (combat-unit-record? eu)
-                            (real? (hash-ref eu 'x #f)) (real? (hash-ref eu 'y #f))
-                            (<= (fast-dist2d (exact->inexact mx0) (exact->inexact my0)
-                                             (exact->inexact (hash-ref eu 'x 9999.0))
-                                             (exact->inexact (hash-ref eu 'y 9999.0)))
-                                18.0))))
+                     (or medivac-fog-suppress?
+                         (for/or ([eu (in-list enemy-units)] #:when (hash? eu))
+                           (and (combat-unit-record? eu)
+                                (real? (hash-ref eu 'x #f)) (real? (hash-ref eu 'y #f))
+                                (<= (fast-dist2d (exact->inexact mx0) (exact->inexact my0)
+                                                 (exact->inexact (hash-ref eu 'x 9999.0))
+                                                 (exact->inexact (hash-ref eu 'y 9999.0)))
+                                    18.0)))))
             (set-add! wave3-handled-tags mid)
             (l34-emit-preserved! ctx (list 'move mid leash-x leash-y))))))
     (for ([u (in-list combat-units)]
@@ -23838,6 +24297,24 @@
         (define enemy-near-our-territory?
           (l34-fast-enemy-near-territory? ctx target-enemy ex ey))
         (define fog-only-suppressed? (l34-ctx-fog-belief-suppress? ctx))
+        ;; W15c (`#444`): Only exempt dedicated solo harass units (`oracle`, `banshee`, `reaper`,
+        ;; `phoenix`, `mutalisk`, `warp-prism`, loaded `medivac`, or pure `all-mobile-retreatable?`
+        ;; squads) — NEVER detach empty Medivacs or 1–2 Adepts/Hellions/Blink-Stalkers out of a
+        ;; mixed slow main army to feed alone!
+        (define unit-mobile-retreatable? (l34-solo-harass-exempt-unit? ctx u))
+        ;; W15c (`#444`): Own Territory (`margin >= +6`) is always defended; Contested Frontline
+        ;; (`margin in [-8, +6)`) requires `our-combat-val >= 0.85 * owm-believed-val` so an
+        ;; outgunned 0.50x slow army does not march mid-map to die!
+        (define target-not-deep-enemy?
+          (and fog-only-suppressed?
+               (let* ([e-fly? (or (eq? (hash-ref target-enemy 'flying #f) #t)
+                                  (eq? (hash-ref target-enemy 'flying? #f) #t)
+                                  (eq? (hash-ref target-enemy 'is-flying #f) #t)
+                                  (fast-unit-is-flying-sym? etype))]
+                      [tm (l34-point-territory-margin ctx ex ey #:air? e-fly?)])
+                 (or (fl>= tm 6.0)
+                     (and (fl>= tm -8.0)
+                          (hash-ref (l34-ctx-l34-sc ctx) 'w15-frontline-strength-ok? #f))))))
         ;; W11-P0-4-rt (`w11-tac-6` / `#30 P v Creepy` OBRet=7,268f): Tempest weapon range is
         ;; 16.9t (`285.6` sq-dist) > old 15.0t (`225.0`) cutoff! Never rally-retreat at 0 DPS
         ;; while inside <= 18.5t (`342.25` sq-dist) of long-range siege/capital enemies!
@@ -23845,9 +24322,8 @@
           (and (memq (fast-canonical-unit-sym etype)
                      '(tempest carrier brood-lord broodlord battlecruiser siege-tank-sieged))
                #t))
-        ;; W12-P0-5-rt (`w12-tac-5` / `OBRet=140,688f`): Exempt `enemy-near-our-territory?`
-        ;; from `suppress-this-target?` whenever `can-hit-target?` & `>= 4` combat units defend
-        ;; our main/natural/third — NOT only inside `fog-only-suppressed?`!
+        ;; W12-P0-5-rt (`w12-tac-5`) + W15-P0-2-rt: Exempt own-territory defense, mobile/retreatable
+        ;; harass units under fog-only suppression, and Contested Frontline (`margin >= -8`) skirmishes!
         (define suppress-this-target?
           (and combat-suppress-attack?
                (not (and can-hit-target?
@@ -23858,7 +24334,9 @@
                          enemy-near-our-territory?
                          (>= (length combat-units) 4)))
                (not (and fog-only-suppressed?
-                         (or (fl<= edist2 (if target-long-range-siege-cap? 342.25 225.0))
+                         (or unit-mobile-retreatable?
+                             target-not-deep-enemy?
+                             (fl<= edist2 (if target-long-range-siege-cap? 342.25 225.0))
                              enemy-near-our-territory?)))))
         (define unit-should-engage-target?
           (and can-hit-target?
@@ -23874,6 +24352,10 @@
                   (or (not live-obs?)
                       (fl<= edist2 484.0)
                       enemy-near-our-territory?
+                      (and fog-only-suppressed? unit-mobile-retreatable?)
+                      (and (not combat-suppress-attack?)
+                           (or (hash-ref (l34-ctx-l34-sc ctx) 'w15-all-mobile-retreatable? #f)
+                               (hash-ref (l34-ctx-l34-sc ctx) 'w15-forward-window-active? #f)))
                       eff-wave-commit?
                       (and p5-army-dominates?
                            (not p5-owm-locust?)
@@ -24186,6 +24668,10 @@
              [(fl< edist2 72.25)
               (let-values ([(kx ky) (compute-kite-vector ux uy ex ey 3.0)])
                 (l34-emit! ctx (list 'kite uid (l34-quantize-cell-2.5 ctx kx ux) (l34-quantize-cell-2.5 ctx ky uy))))]
+             [(and fog-only-suppressed? (not under-tactics-base-attack?))
+              ;; W15-P0-2-rt: Under fog-only suppression, skip rear-leash so Phase-6
+              ;; `harass-workers` (`MOVE`, never `ATTACK`) lands cleanly on the wire!
+              (void)]
              [else
               (l34-emit-caster-rear-leash! ctx uid ux uy)])]
           [(void-ray voidray)
@@ -24543,10 +25029,17 @@
                        (not (harass-unit-busy-or-engaged? u))))
                 combat-units)
         '()))
+  ;; W15-P0-2-rt: Include ALL mobile/retreatable harass units (`reaper`, `hellion`, `banshee`,
+  ;; `oracle`, `phoenix`, `adept`, `mutalisk`, Blink-researched `stalker`, small `<=8` `zergling`
+  ;; runbys) in `dedicated-harass-units` and NEVER block them with `fog-belief-suppress?`!
+  (define fog-only-suppress-harass? (l34-ctx-fog-belief-suppress? ctx))
   (define dedicated-harass-units
     (if maybe-harass-raid?
         (filter (lambda (u)
-                  (and (memq (unit-type-sym u) '(reaper oracle banshee adept hellion phoenix mutalisk))
+                  (and (not (memq (unit-type-sym u) '(medivac warp-prism warp-prism-phasing)))
+                       (if fog-only-suppress-harass?
+                           (l34-solo-harass-exempt-unit? ctx u)
+                           (l34-mobile-retreatable-unit? ctx u))
                        (not (harass-unit-busy-or-engaged? u))))
                 combat-units)
         '()))
@@ -24565,6 +25058,7 @@
                                                  frame
                                                  336))
                  (and (pair? dedicated-harass-units)
+                      (or (not combat-suppress-attack?) fog-only-suppress-harass?)
                       (not (l34-ctx-enemy-near-home? ctx))
                       (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
                                                  '(live-harass-raid-dedicated)
@@ -24577,22 +25071,30 @@
                                                  '(live-harass-raid)
                                                  frame
                                                  280)))
-             (and (not combat-suppress-attack?)
-                  (or (hash-ref obs 'enable-economic-disruption #f)
-                      (and bo-fork-active? (>= (length cheap-blockers) 2))
-                      (>= cur-intel-staleness 224)
-                      (eq? mm-verdict 'punish-And-Deny-Greedy-Expand)
-                      (>= (length cheap-blockers) 3))))))
+             (or (and (pair? dedicated-harass-units)
+                      (or (not combat-suppress-attack?) fog-only-suppress-harass?)
+                      (not (l34-ctx-enemy-near-home? ctx)))
+                 (and (not combat-suppress-attack?)
+                      (or (hash-ref obs 'enable-economic-disruption #f)
+                          (and bo-fork-active? (>= (length cheap-blockers) 2))
+                          (>= cur-intel-staleness 224)
+                          (eq? mm-verdict 'punish-And-Deny-Greedy-Expand)
+                          (>= (length cheap-blockers) 3)))))))
   (when (and allow-harass-raid?
              (or (pair? cheap-blockers)
-                 (and live-obs? (pair? dedicated-harass-units))))
+                 (pair? dedicated-harass-units)))
     (define hx (if bo-fork-active? bo-sx enemy-x))
     (define hy (if bo-fork-active? bo-sy enemy-y))
     (cond
-      [(and live-obs? (pair? dedicated-harass-units))
+      [(and (pair? dedicated-harass-units)
+            (or live-obs? fog-only-suppress-harass?))
        (define ded-ids
          (map (lambda (u) (hash-ref u 'id 111))
-              (take dedicated-harass-units (min 3 (length dedicated-harass-units)))))
+              (take dedicated-harass-units (min (if fog-only-suppress-harass? 8 3)
+                                                (length dedicated-harass-units)))))
+       (for ([did (in-list ded-ids)])
+         (when (and (exact-integer? did) (> did 0))
+           (set-add! wave3-handled-tags did)))
        (l34-emit! ctx (list 'harass-workers ded-ids hx hy))]
       [else
        (define blocker (car cheap-blockers))
@@ -25345,6 +25847,7 @@
                   (and (>= wx (- eminx 24.0)) (<= wx (+ emaxx 24.0))
                        (>= wy (- eminy 24.0)) (<= wy (+ emaxy 24.0)))))))
       (define has-active-harass-actor? #f)
+      (define p7-fog-suppress? (l34-ctx-fog-belief-suppress? ctx))
       (define filtered-allies
         (for/list ([u (in-list free-allies)]
                    #:when (let ([ut (unit-type-sym u)])
@@ -25352,11 +25855,19 @@
                               [(hash-ref RUNTIME-NON-COMBAT-HARASS-SKIP-SET ut #f)
                                (and (hash-ref RUNTIME-WORKER-SET ut #f)
                                     (or keep-all-workers? (worker-near-any-enemy? u)))]
-                              ;; W3-TAC-7: Do NOT exempt empty frontline Medivacs (cargo == 0) escorting
-                              ;; combat near enemies — only loaded transports are eligible for drop harass!
-                              [(and (or (not (memq ut '(medivac warp-prism warp-prism-phasing overlord-transport)))
-                                        (and (eq? ut 'medivac)
-                                             (= (safe-nonneg-int (hash-ref u 'cargo-space-taken 0) 0) 0)))
+                              ;; W3-TAC-7 + W15c: Never hand empty Medivacs (`cargo == 0`) or non-solo
+                              ;; ground units out of a fog-suppressed mixed slow army to `multitask-harass-and-proxy`!
+                              [(and (eq? ut 'medivac)
+                                    (not (unit-medivac-loaded? u))
+                                    (or p7-fog-suppress?
+                                        (l34-ctx-combat-suppress-attack? ctx)
+                                        (frontline-combat-engaged? u)))
+                               #f]
+                              [(and p7-fog-suppress?
+                                    (not enemy-near-home?)
+                                    (not (l34-solo-harass-exempt-unit? ctx u)))
+                               #f]
+                              [(and (not (memq ut '(medivac warp-prism warp-prism-phasing overlord-transport)))
                                     (frontline-combat-engaged? u))
                                #f]
                               [else
