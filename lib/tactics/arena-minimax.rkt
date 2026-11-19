@@ -3270,11 +3270,19 @@
                  (if (fl< d2 best-d2)
                      (values e d2)
                      (values best-e best-d2))))))
+       ;; W8-TAC-3: Never let fragile High Templars suicide-`attack-unit` directly into an enemy
+       ;; army when non-HT combat allies exist in the arena (matches Disruptor protection, fixes `p05`).
+       (define arena-has-non-ht-ally?
+         (ormap (lambda (a)
+                  (not (memq (tactical-sim-unit-type a) '(high-templar disruptor disruptor-phased))))
+                arena-ally-units))
        (define disengage-committed-pts
          (if (and (eq? committed-act 'DisengageRetreat) (pair? arena-enemy-sims))
              (for/fold ([pts '()]) ([au (in-list arena-ally-units)])
                (define aut (tactical-sim-unit-type au))
-               (if (or (eq? aut 'disruptor) (eq? aut 'disruptor-phased))
+               (if (or (eq? aut 'disruptor)
+                       (eq? aut 'disruptor-phased)
+                       (and (eq? aut 'high-templar) arena-has-non-ht-ally?))
                    pts
                    (let ([ne (nearest-hittable-enemy-for au)])
                      (if (and ne
@@ -3345,6 +3353,9 @@
          (define spy (and splash-move-pt (vector-ref splash-move-pt 1)))
          (define sprole (and splash-move-pt (vector-ref splash-move-pt 2)))
          (define disruptor? (or (eq? utype 'disruptor) (eq? utype 'disruptor-phased)))
+         (define fragile-caster-no-atk?
+           (or disruptor?
+               (and (eq? utype 'high-templar) arena-has-non-ht-ally?)))
          (define active-spell-dodge?
            (and splash-move-pt
                 (or (memq sprole '(dodge-active-disruptor-nova avoid-aoe-splash-effect))
@@ -3387,7 +3398,7 @@
                      [else #f])])))
          (define target-in-weapon-range?
            (and target-su
-                (not disruptor?)
+                (not fragile-caster-no-atk?)
                 (not (eq? committed-act 'DisengageRetreat))
                 (let ([wr (if (and (eq? (tactical-sim-unit-type target-su) 'colossus)
                                    (fl> (tactical-sim-unit-air-range su) 0.0)
@@ -3446,7 +3457,7 @@
                              '(locust locust-mp locustmp locust-flying))))
                 (define w-period (flmax 0.16 (exact->inexact (tactical-sim-unit-weapon-period su))))
                 (define kite-cd-min (flmax 0.22 (fl* 0.38 w-period)))
-                (define has-weap? (and (not disruptor?) non-free-t? (fl> wr 0.0)))
+                (define has-weap? (and (not fragile-caster-no-atk?) non-free-t? (fl> wr 0.0)))
                 (define melee-fight? (and has-weap? (fl<= wr 1.5) (fl<= edist 8.5)))
                 ;; W4-TAC-3 + W7-TAC-2: Fire when weapon is ready/nearly-ready up to `wr + 2.5`
                 ;; (or `wr + 4.5` when protecting a nearby committed ally within `<= 10.0t`, matching
@@ -3496,7 +3507,7 @@
                                       [edy (fl- uy (tactical-sim-unit-y e))])
                                   (fl<= (fl+ (fl* edx edx) (fl* edy edy)) close-r2)))))))
                 (cond
-                  [disruptor?
+                  [fragile-caster-no-atk?
                    (define-values (kx ky) (compute-kite-vector ux uy ex ey SC2-KITE-STEP-DISTANCE))
                    (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 kx ky frame))
                      (when (and ledger record-ledger?)
@@ -3519,7 +3530,7 @@
                      (emit! (list 'attack-unit uid eid)))])]
 
                [(HoldChoke)
-                (unless disruptor?
+                (unless fragile-caster-no-atk?
                   (define dist-to-nat (fast-dist2d ux uy nat-x nat-y))
                   (if (<= dist-to-nat 3.5)
                       (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'hold-position 0 nat-x nat-y frame))
@@ -3532,7 +3543,7 @@
                         (emit! (list 'attack-unit uid eid)))))]
 
                [else ;; CommitFocusFire, KiteForwardChase, FlankSurround
-                (unless disruptor?
+                (unless fragile-caster-no-atk?
                   (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'attack-unit eid ex ey frame))
                     (when (and ledger record-ledger?)
                       (order-ledger-record-issued! ledger uid 'attack-unit 'attack #:target-id eid #:frame frame))

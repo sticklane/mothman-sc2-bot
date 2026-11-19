@@ -9179,6 +9179,26 @@
               (sc2-enemy-unit-targetable? (sc2-id->unit-symbol (sc2-unit-unit-type e))))
             enemy-units))
 
+  ;; W8-P0-4-wire: Identify live enemy units threatening any of our TownHalls (<= 24.0t, 576.0 sq-dist)
+  ;; so own-base defensive `attack-unit` commands are promoted to P0 urgent survival (strictly above
+  ;; P1 macro, P2 worker-scout/harass, and P3 harvest) and home workers aren't sent cross-map mid-rush.
+  (define enemy-near-own-base-tags (mutable-seteqv))
+  (define enemy-combat-near-own-base? #f)
+  (when (and (pair? townhalls) (pair? targetable-enemy-units))
+    (for ([eu (in-list targetable-enemy-units)])
+      (define ep (sc2-unit-pos eu))
+      (define ex (sc2-point3d-x ep))
+      (define ey (sc2-point3d-y ep))
+      (when (for/or ([th (in-list townhalls)])
+              (define tp (sc2-unit-pos th))
+              (define dx (- ex (sc2-point3d-x tp)))
+              (define dy (- ey (sc2-point3d-y tp)))
+              (and (<= (abs dx) 24.0) (<= (abs dy) 24.0)
+                   (<= (+ (* dx dx) (* dy dy)) 576.0)))
+        (set-add! enemy-near-own-base-tags (sc2-unit-tag eu))
+        (when (sc2-unit-targetable-enemy-combat? eu)
+          (set! enemy-combat-near-own-base? #t)))))
+
   (define combat-unit-tags-set
     (for/seteqv ([u (in-list combat-units)])
       (sc2-unit-tag u)))
@@ -10307,17 +10327,22 @@
                '(build build-nydus-worm expand resume-halted-building
                  push-probe-with-building cancel cancel-building salvage salvage-bunker bunker-load
                  baneling-explode
-                 worker-scout overlord-scout periodic-scout scout-sector
-                 mineral-harass worker-harass harass-workers
+                 overlord-scout
+                 mineral-harass worker-harass
                  burrow-block clear-expansion-block
-                 cast-deception-and-scout-spells
                  pull-workers-attack worker-drill-stack-attack mineral-walk))))
   (define (morph-action? a)
     (and (pair? a) (eq? (car a) 'morph)))
-  ;; W6-TAC-4-wire: Expansion patrol runs AFTER standard combat orders (never preempting
-  ;; fighting units via priority-first) and BEFORE routine worker harvest.
-  (define (post-combat-patrol-action? a)
-    (and (pair? a) (eq? (car a) 'patrol-block-expansion)))
+  ;; W6-TAC-4-wire / W8-P0-4-wire: Expansion patrol, cross-map scouting, harass, and deception spells
+  ;; run AFTER standard combat / bunker-load / spell orders (never preempting fighting or defending units)
+  ;; and BEFORE routine worker harvest.
+  (define (post-combat-recon-action? a)
+    (and (pair? a)
+         (memq (car a)
+               '(patrol-block-expansion
+                 worker-scout periodic-scout scout-sector
+                 harass-workers
+                 cast-deception-and-scout-spells))))
   (define (routine-harvest-action? a)
     (and (pair? a)
          (memq (car a) '(harvest-mineral harvest-gas rebalance-gas-to-minerals))))
@@ -10327,10 +10352,10 @@
             (filter (lambda (a)
                       (and (not (priority-first-action? a))
                            (not (morph-action? a))
-                           (not (post-combat-patrol-action? a))
+                           (not (post-combat-recon-action? a))
                            (not (routine-harvest-action? a))))
                     actions)
-            (filter post-combat-patrol-action? actions)
+            (filter post-combat-recon-action? actions)
             (filter routine-harvest-action? actions)))
 
   ;; W5-P0-1a-wire: Reserve 1 safe idle Hatchery (for Lair) or Lair (for Hive) against `(train queen)`
@@ -10390,7 +10415,10 @@
               (set-member? live-visible-enemy-tags target-id))
           (define tag-list (claim-combat-tags-for-order! uid 23 #f target-id))
           (when (not (null? tag-list))
-            (emit! (sc2-raw-unit-command 23 #f target-id tag-list #f)))]
+            (define raw-atk (sc2-raw-unit-command 23 #f target-id tag-list #f))
+            (emit! (if (set-member? enemy-near-own-base-tags target-id)
+                       (mark-urgent-survival-cmd! raw-atk)
+                       raw-atk)))]
          [else
           (define cached-pt (hash-ref SC2-LAST-KNOWN-ENEMY-POS target-id #f))
           (define fallback-pt
@@ -11121,7 +11149,10 @@
               (set-member? live-visible-enemy-tags target-id))
           (define tag-list (claim-combat-tags-for-order! uid 23 #f target-id))
           (when (not (null? tag-list))
-            (emit! (sc2-raw-unit-command 23 #f target-id tag-list #f)))]
+            (define raw-atk (sc2-raw-unit-command 23 #f target-id tag-list #f))
+            (emit! (if (set-member? enemy-near-own-base-tags target-id)
+                       (mark-urgent-survival-cmd! raw-atk)
+                       raw-atk)))]
          [else
           (define cached-pt (hash-ref SC2-LAST-KNOWN-ENEMY-POS target-id #f))
           (define fallback-pt
@@ -11145,7 +11176,10 @@
               (set-member? live-visible-enemy-tags target-id))
           (define tag-list (claim-combat-tags-for-order! uid 23 #f target-id))
           (when (not (null? tag-list))
-            (emit! (sc2-raw-unit-command 23 #f target-id tag-list #f)))]
+            (define raw-atk (sc2-raw-unit-command 23 #f target-id tag-list #f))
+            (emit! (if (set-member? enemy-near-own-base-tags target-id)
+                       (mark-urgent-survival-cmd! raw-atk)
+                       raw-atk)))]
          [else
           (define cached-pt (hash-ref SC2-LAST-KNOWN-ENEMY-POS target-id #f))
           (define fallback-pt
@@ -11359,12 +11393,29 @@
          (unless (unit-already-executing-order? bat-id 4113 #f target-id)
            (emit! (sc2-raw-unit-command 4113 #f target-id (list bat-id) #f))))]
 
-      [(list 'bunker-load bid uid)
-       (when (and (exact-integer? bid) (> bid 0)
-                  (exact-integer? uid) (> uid 0)
-                  (not (= bid uid)))
-         (record-unit-used! uid)
-         (emit! (mark-urgent-survival-cmd! (sc2-raw-unit-command 407 #f uid (list bid) #f))))]
+      [(list 'bunker-load bid raw-uid)
+       (when (and (exact-integer? bid) (> bid 0))
+         (define b-u (hash-ref self-unit-by-tag bid #f))
+         (define bunker-ready-with-room?
+           (or (not b-u)
+               (and (>= (sc2-unit-build-progress b-u) SC2-BUILD-COMPLETE-PROGRESS)
+                    (or (<= (sc2-unit-cargo-space-max b-u) 0)
+                        (< (sc2-unit-cargo-space-taken b-u) (sc2-unit-cargo-space-max b-u))))))
+         (when bunker-ready-with-room?
+           (define pax-tags
+             (if b-u
+                 (for/seteqv ([p (in-list (sc2-unit-passengers b-u))])
+                   (sc2-passenger-unit-tag p))
+                 (seteqv)))
+           (define ulist
+             (filter (lambda (u)
+                       (and (exact-integer? u) (> u 0)
+                            (not (= bid u))
+                            (not (set-member? pax-tags u))))
+                     (if (list? raw-uid) raw-uid (list raw-uid))))
+           (for ([u (in-list ulist)])
+             (record-unit-used! u)
+             (emit! (mark-urgent-survival-cmd! (sc2-raw-unit-command 407 #f u (list bid) #f))))))]
 
       [(list 'bunker-unload bid _ ...)
        (when (and (exact-integer? bid) (> bid 0))
@@ -12047,13 +12098,21 @@
        (when (and (exact-integer? wid) (> wid 0))
          (define u (hash-ref self-unit-by-tag wid #f))
          (define uh (hash-ref hash-ally-by-id wid #f))
-         (unless (or (set-member? used-worker-tags wid)
+         (define tx (scale-bot-coord-to-world raw-x home-x))
+         (define ty (scale-bot-coord-to-world raw-y home-y))
+         (define suppress-rush-cross-map-scout?
+           (and enemy-combat-near-own-base?
+                (> (pt-dist home-x home-y tx ty) 50.0)
+                (or (not u)
+                    (let ([up (sc2-unit-pos u)])
+                      (<= (pt-dist home-x home-y (sc2-point3d-x up) (sc2-point3d-y up)) 24.0)))))
+         (unless (or suppress-rush-cross-map-scout?
+                     (set-member? commanded-combat-tags wid)
+                     (set-member? used-worker-tags wid)
                      (set-member? builder-worker-tags wid)
                      (and u (worker-has-build-order? u cur-loop self-structures))
                      (and uh (hash-ref uh 'has-build-order? #f)))
            (record-worker-used! wid)
-           (define tx (scale-bot-coord-to-world raw-x home-x))
-           (define ty (scale-bot-coord-to-world raw-y home-y))
            (define target-pt (sc2-point2d tx ty))
            (unless (unit-already-executing-order? wid 16 target-pt 0)
              (emit! (sc2-raw-unit-command 16 target-pt 0 (list wid) #f)))))]
@@ -12074,16 +12133,26 @@
          (define is-worker?
            (or (and u (sc2-unit-is-worker? u))
                (and uh (memq (hash-ref uh 'type 'unknown) '(drone probe scv)))))
-         (unless (and is-worker?
-                      (or (set-member? used-worker-tags uid)
-                          (set-member? builder-worker-tags uid)
-                          (and u (worker-has-build-order? u cur-loop self-structures))
-                          (and uh (hash-ref uh 'has-build-order? #f))))
+         (define tx (scale-bot-coord-to-world raw-x home-x))
+         (define ty (scale-bot-coord-to-world raw-y home-y))
+         (define suppress-rush-worker-scout?
+           (and is-worker?
+                enemy-combat-near-own-base?
+                (> (pt-dist home-x home-y tx ty) 50.0)
+                (or (not u)
+                    (let ([up (sc2-unit-pos u)])
+                      (<= (pt-dist home-x home-y (sc2-point3d-x up) (sc2-point3d-y up)) 24.0)))))
+         (unless (or suppress-rush-worker-scout?
+                     (set-member? commanded-combat-tags uid)
+                     (unit-has-protected-order? uid)
+                     (and is-worker?
+                          (or (set-member? used-worker-tags uid)
+                              (set-member? builder-worker-tags uid)
+                              (and u (worker-has-build-order? u cur-loop self-structures))
+                              (and uh (hash-ref uh 'has-build-order? #f)))))
            (if is-worker?
                (record-worker-used! uid)
                (record-unit-used! uid))
-           (define tx (scale-bot-coord-to-world raw-x home-x))
-           (define ty (scale-bot-coord-to-world raw-y home-y))
            (define target-pt (sc2-point2d tx ty))
            (unless (unit-already-executing-order? uid 16 target-pt 0)
              (emit! (sc2-raw-unit-command 16 target-pt 0 (list uid) #f)))))]
@@ -12224,13 +12293,23 @@
                      (exact->inexact (second enemy-base)))
              (values (- SC2-DEFAULT-MAP-WIDTH home-x)
                      (- SC2-DEFAULT-MAP-HEIGHT home-y))))
-       ;; 1. Sentry Hallucination Phoenix (154) when energy >= 75 and no enemies within 12 tiles
+       ;; 1. Sentry Hallucination Phoenix (154) when energy >= 75 and no live enemy combat within 16 tiles (or energy >= 150)
        (define sentry-u
          (for/first ([u (in-list self-units)]
                      #:when (and (= (sc2-unit-unit-type u) 77)
                                  (>= (sc2-unit-energy u) 75.0)
                                  (null? (sc2-unit-orders u))
-                                 (not (set-member? commanded-combat-tags (sc2-unit-tag u)))))
+                                 (not (set-member? commanded-combat-tags (sc2-unit-tag u)))
+                                 (or (>= (sc2-unit-energy u) 150.0)
+                                     (let ([up (sc2-unit-pos u)])
+                                       (not (ormap (lambda (e)
+                                                     (and (sc2-unit-targetable-enemy-combat? e)
+                                                          (let* ([ep (sc2-unit-pos e)]
+                                                                 [dx (- (sc2-point3d-x up) (sc2-point3d-x ep))]
+                                                                 [dy (- (sc2-point3d-y up) (sc2-point3d-y ep))])
+                                                            (and (<= (abs dx) 16.0) (<= (abs dy) 16.0)
+                                                                 (<= (+ (* dx dx) (* dy dy)) 256.0)))))
+                                                   enemy-units))))))
            u))
        (when sentry-u
          (record-unit-used! (sc2-unit-tag sentry-u))
@@ -13248,9 +13327,10 @@
     (cond
       [base-threat
        (define ep (sc2-unit-pos base-threat))
-       (emit! (sc2-raw-unit-command 23
-                                    (sc2-point2d (sc2-point3d-x ep) (sc2-point3d-y ep))
-                                    0 idle-tags #f))]
+       (emit! (mark-urgent-survival-cmd!
+               (sc2-raw-unit-command 23
+                                     (sc2-point2d (sc2-point3d-x ep) (sc2-point3d-y ep))
+                                     0 idle-tags #f)))]
       [tactical-hold-posture?
        ;; Layer 3/4 hold / defend / suppress-attack posture: never scatter or push cross-map;
        ;; cohesively rally any idle combat units (> 8 tiles from defensive hold point) to `(eff-hold-x, eff-hold-y)`.

@@ -2359,6 +2359,136 @@
                                        (> (sc2-point2d-y p) 100.0)))))
                           cmds-explicit-suppress))))
 
+(printf "[Wave 8] Testing W8-P0-4-wire Bunker-Load/own-base defense P0 priority & W8-TAC-1/4 wire guards...\n")
+
+(let ()
+  (define (mk-u tag utype ally x y #:en [en 0.0] #:prog [prog 1.0] #:struct? [struct? #f]
+                #:cargo-taken [ct 0] #:cargo-max [cm 0])
+    (sc2-unit 1 ally tag utype 1 (sc2-point3d x y 8.0) 0.0 (if struct? 1.5 0.5) prog 0 #f struct? #f
+              100.0 100.0 0.0 0.0 en (if (> en 0.0) 200.0 0.0) 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0
+              '() ct cm))
+  (define (mk-min tag x y)
+    (sc2-unit 1 3 tag 341 1 (sc2-point3d x y 8.0) 0.0 1.0 1.0 0 #f #f #f
+              0.0 0.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0))
+
+  ;; 1. Bunker LOAD-BUNKER (407) & own-base defensive attack-unit (<= 24t from TownHall) are BOTH P0 urgent
+  ;;    survival commands, strictly beating P1 macro, P2 worker-scout, and P3 harvest under a drained governor!
+  (define cc-home     (mk-u 1 18 1 32.0 32.0 #:struct? #t))
+  (define bunker-ok   (mk-u 4 24 1 44.0 34.0 #:struct? #t #:cargo-taken 0 #:cargo-max 4))
+  (define scv-50      (mk-u 50 45 1 29.0 31.0))
+  (define scv-51      (mk-u 51 45 1 29.5 31.5))
+  (define marine-4401 (mk-u 4401 48 1 43.0 33.5))
+  (define marine-4402 (mk-u 4402 48 1 43.0 34.5))
+  (define ling-home   (mk-u 8400 105 4 46.0 34.0)) ;; 14.1t from CC (<= 24t own-base threat!)
+  (define marine-far  (mk-u 8500 48 4 125.0 125.0)) ;; > 120t from CC (distant combat)
+  (define min-9001    (mk-min 9001 26.0 32.0))
+
+  (define rush-obs
+    (make-test-obs 2600 120 25 (list cc-home bunker-ok scv-50 scv-51 marine-4401 marine-4402 ling-home marine-far min-9001)))
+  (define rush-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((worker-scout 50 143.5 143.5)
+       (harvest-mineral 51 9001)
+       (bunker-load 4 4401)
+       (attack-unit 4402 8400))
+     rush-obs))
+  (define cmd-bunk407 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 407))) rush-cmds))
+  (define cmd-def-atk (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23) (= (sc2-raw-unit-command-target-unit-tag c) 8400))) rush-cmds))
+  (check-true "w8-p0-4-wire-bunker-load-407-is-p0-urgent"
+              (and cmd-bunk407 (urgent-survival-cmd? cmd-bunk407) (= (wire-cmd-priority-tier cmd-bunk407) 0)))
+  (check-true "w8-p0-4-wire-own-base-defensive-attack-unit-is-p0-urgent"
+              (and cmd-def-atk (urgent-survival-cmd? cmd-def-atk) (= (wire-cmd-priority-tier cmd-def-atk) 0)))
+  (check-true "w8-p0-4-wire-rush-suppresses-home-worker-cross-map-scout"
+              (not (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 16)
+                                 (memv 50 (sc2-raw-unit-command-unit-tags c))))
+                          rush-cmds)))
+
+  ;; Governor token-starved batch: P0 bunker-load (407) & own-base defensive attack-unit (23) MUST emit
+  ;; ahead of P1 macro, P2 worker-scout, and P3 harvest even when tokens are drained to 0.0!
+  (define gov-w8 (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define drain-p1
+    (for/list ([i (in-range 12)])
+      (sc2-raw-unit-command 560 #f 0 (list (+ 7000 i)) #f)))
+  (void (govern-sc2-wire-actions! gov-w8 drain-p1 100)) ;; drains 24.0 burst tokens to 0.0!
+  (define scout-p2 (sc2-raw-unit-command 16 (sc2-point2d 143.5 143.5) 0 '(50) #f))
+  (define harv-p3  (sc2-raw-unit-command 3666 #f 9001 '(51) #f))
+  (define gov-w8-out
+    (govern-sc2-wire-actions! gov-w8 (list harv-p3 scout-p2 cmd-bunk407 cmd-def-atk) 104))
+  (check-true "w8-p0-4-wire-gov-emits-bunker407-and-own-base-atk-over-scout-and-harvest"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 407))) gov-w8-out)
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23))) gov-w8-out)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 16))) gov-w8-out))
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3666))) gov-w8-out))))
+
+  ;; 2. Full (4/4) or incomplete Bunker skips LOAD-BUNKER (407) so Marine stays free to fire attack-unit!
+  (define bunker-full (mk-u 4 24 1 44.0 34.0 #:struct? #t #:cargo-taken 4 #:cargo-max 4))
+  (define full-bunk-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((bunker-load 4 4401) (attack-unit 4401 8400))
+     (make-test-obs 2610 120 25 (list cc-home bunker-full marine-4401 ling-home))))
+  (check-true "w8-p0-4-wire-full-bunker-leaves-marine-free-to-attack"
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 407))) full-bunk-cmds))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23) (memv 4401 (sc2-raw-unit-command-unit-tags c)))) full-bunk-cmds)))
+
+  ;; 3. Distant attack-unit (> 24t from TownHall) stays normal Tier P2 (not falsely promoted to P0)
+  (define far-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((attack-unit 4402 8500))
+     (make-test-obs 2620 120 25 (list cc-home marine-4402 marine-far))))
+  (define far-atk (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23))) far-cmds))
+  (check-true "w8-p0-4-wire-distant-attack-unit-remains-p2"
+              (and far-atk (not (urgent-survival-cmd? far-atk)) (= (wire-cmd-priority-tier far-atk) 2)))
+
+  ;; 4. Peacetime worker-scout (no enemy combat near base) executes and beats trailing harvest-mineral
+  (define peace-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((worker-scout 50 143.5 143.5) (harvest-mineral 50 9001))
+     (make-test-obs 2630 120 25 (list cc-home scv-50 min-9001))))
+  (check-true "w8-p0-4-wire-peacetime-worker-scout-beats-trailing-harvest"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 16) (memv 50 (sc2-raw-unit-command-unit-tags c)))) peace-cmds)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3666) (memv 50 (sc2-raw-unit-command-unit-tags c)))) peace-cmds))))
+
+  ;; 5. W8-TAC-1 wire invariant: harass-workers & periodic-scout NEVER preempt combat attack-unit
+  (define adept-a (mk-u 4270 311 1 75.5 79.0))
+  (define adept-b (mk-u 4271 311 1 75.5 80.0))
+  (define ling-mid (mk-u 8270 105 4 84.0 79.5))
+  (define harass-vs-atk-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((harass-workers (4270 4271) 160.0 160.0)
+       (periodic-scout 4271 160.0 160.0)
+       (attack-unit 4270 8270)
+       (attack-unit 4271 8270))
+     (make-test-obs 17100 100 50 (list cc-home adept-a adept-b ling-mid))))
+  (check-true "w8-tac-1-wire-combat-attack-unit-beats-harass-workers-and-periodic-scout"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23) (= (sc2-raw-unit-command-target-unit-tag c) 8270) (memv 4270 (sc2-raw-unit-command-unit-tags c)))) harass-vs-atk-cmds)
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23) (= (sc2-raw-unit-command-target-unit-tag c) 8270) (memv 4271 (sc2-raw-unit-command-unit-tags c)))) harass-vs-atk-cmds)
+                   (not (ormap (lambda (c)
+                                 (and (sc2-raw-unit-command? c)
+                                      (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                                      (> (sc2-point2d-x (sc2-raw-unit-command-target-pos c)) 140.0)))
+                               harass-vs-atk-cmds))))
+
+  ;; 6. W8-TAC-4 wire invariant: Sentry Hallucination Phoenix (154) never steals Guardian Shield (76)
+  ;;    or fires mid-fight (<= 16t from enemy combat with energy < 150), while peacetime Sentry still casts 154!
+  (define sentry-fight (mk-u 4300 77 1 80.0 80.0 #:en 100.0))
+  (define marine-near  (mk-u 8300 48 4 86.0 80.0))
+  (define sentry-fight-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-deception-and-scout-spells)
+       (cast-spell 4300 guardian-shield))
+     (make-test-obs 17400 100 50 (list cc-home sentry-fight marine-near))))
+  (check-true "w8-tac-4-wire-guardian-shield-beats-deception-hallucination-midfight"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 76) (memv 4300 (sc2-raw-unit-command-unit-tags c)))) sentry-fight-cmds)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 154))) sentry-fight-cmds))))
+  (define sentry-peace-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-deception-and-scout-spells))
+     (make-test-obs 17420 100 50 (list cc-home sentry-fight))))
+  (check-true "w8-tac-4-wire-peacetime-sentry-still-casts-hallucination-154"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 154) (memv 4300 (sc2-raw-unit-command-unit-tags c)))) sentry-peace-cmds)))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

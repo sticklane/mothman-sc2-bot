@@ -2130,8 +2130,8 @@
       [(>= bases 3) (+ bases 3 (if zvp-stargate-threat? 1 0))]
       [(= bases 2)  (+ 4 threat-bonus)]
       [else         (+ 2 (if zvp-stargate-threat? 1 0))]))
-  ;; W7-P0-3-belief (#16): Hard-cap Zerg Queens at min(10, 2*bases + 2, SC2-MAX-QUEENS-CAP)
-  (min 10 (+ (* 2 bases) 2) SC2-MAX-QUEENS-CAP base-target))
+  ;; W7-P0-3-belief + W8-P0-2-belief (#16): Hard-cap Zerg Queens at min(8, bases + 3, SC2-MAX-QUEENS-CAP)
+  (min 8 (+ bases 3) SC2-MAX-QUEENS-CAP base-target))
 
 (define zerg-queen-target desired-zerg-queen-count)
 
@@ -2181,10 +2181,10 @@
 
 (define (desired-zerg-spore-count active-bases enemy-u-counts enemy-b-counts enemy-race requires-aa? requires-det?)
   (define bases (max 1 (safe-nonneg-int active-bases 1)))
+  ;; W8-P0-2-belief (#16): Hard-cap Spore Crawlers at <= active-bases (1 per Hatchery max)
   (cond
-    [(enemy-any-counts-have? enemy-u-counts enemy-b-counts PROTOSS-CAPITAL-AIR-ENEMY-SYMS)
-     (* 2 bases)]
-    [(or (enemy-any-counts-have? enemy-u-counts enemy-b-counts ZERG-HARASS-AIR-ENEMY-SYMS)
+    [(or (enemy-any-counts-have? enemy-u-counts enemy-b-counts PROTOSS-CAPITAL-AIR-ENEMY-SYMS)
+         (enemy-any-counts-have? enemy-u-counts enemy-b-counts ZERG-HARASS-AIR-ENEMY-SYMS)
          (zerg-enemy-stargate-air-threat? enemy-u-counts enemy-b-counts enemy-race requires-aa?))
      bases]
     [(or requires-aa? requires-det?) 1]

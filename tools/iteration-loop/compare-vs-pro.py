@@ -165,6 +165,8 @@ def normalize_match(m):
         "step_max": safe_num(m.get("step_max") if m.get("step_max") is not None else m.get("step_ms_max")),
         "endgame_home_stall_sec": safe_num(m.get("endgame_home_stall_sec")),
         "own_base_retreat_frames": safe_num(m.get("own_base_retreat_frames")),
+        "non_combat_robo_waste_val": safe_num(m.get("non_combat_robo_waste_val")),
+        "zerg_non_ling_army_pct": safe_num(m.get("zerg_non_ling_army_pct")),
         "action_rejects": int(m.get("action_rejects") or 0),
         "crashes": m.get("crashes") or [],
         "signatures": m.get("signatures") or [],
@@ -225,6 +227,8 @@ def summarize_slice(rows):
 
     ehs_vals = [r["endgame_home_stall_sec"] for r in rows if r.get("endgame_home_stall_sec") is not None]
     obr_vals = [r["own_base_retreat_frames"] for r in rows if r.get("own_base_retreat_frames") is not None]
+    robo_waste_vals = [r["non_combat_robo_waste_val"] for r in rows if r.get("non_combat_robo_waste_val") is not None]
+    znl_vals = [r["zerg_non_ling_army_pct"] for r in rows if r.get("zerg_non_ling_army_pct") is not None and r["our_race"] == "Zerg"]
 
     pk_army_ratios = [
         r["our_peak_army"] / max(1.0, r["opp_peak_army"])
@@ -315,6 +319,8 @@ def summarize_slice(rows):
         "endgame_home_stall_max_sec": round(max(ehs_vals), 1) if ehs_vals else None,
         "total_own_base_retreat_frames": int(round(sum(obr_vals))) if obr_vals else None,
         "own_base_retreat_matches": sum(1 for v in obr_vals if v >= 440.0),
+        "total_non_combat_robo_waste_val": int(round(sum(robo_waste_vals))) if robo_waste_vals else None,
+        "avg_zerg_non_ling_army_pct": mean_opt(znl_vals),
         "action_rejects": sum(r["action_rejects"] for r in rows),
         "crashes": sum(len(r["crashes"]) for r in rows),
         "anomalies": dict(anom_counts),
@@ -660,12 +666,18 @@ def main():
             print(f"- `#{o['match_id']}` `{o['our_bot']}` vs `{o['opp_bot']}`: **`{o['step_max']}ms`**")
 
     if cur_all.get("endgame_home_stall_max_sec") is not None or cur_all.get("total_own_base_retreat_frames") is not None:
+        extra_w8 = ""
+        if cur_all.get("total_non_combat_robo_waste_val") is not None or cur_all.get("avg_zerg_non_ling_army_pct") is not None:
+            extra_w8 = (
+                f" | `P RoboWaste` = **{cur_all.get('total_non_combat_robo_waste_val', 0):,}**"
+                f" | `Z NonLing6-10m` = **{fmt(cur_all.get('avg_zerg_non_ling_army_pct'),'%')}**"
+            )
         print(
-            f"\n### Stall & Own-Base Retreat Watch (`W7-LOOP-2`): "
+            f"\n### Stall, Retreat & Waste Watch (`W7/W8-LOOP-2`): "
             f"`endgame_home_stall >= 90s` = **{cur_all.get('endgame_home_stall_count', 0)}/{cur_all['n']}** "
             f"(max `{fmt(cur_all.get('endgame_home_stall_max_sec'),'s')}`) | "
             f"`own_base_retreat >= 440f` = **{cur_all.get('own_base_retreat_matches', 0)}/{cur_all['n']}** "
-            f"(total `{cur_all.get('total_own_base_retreat_frames', 0):,}f`)"
+            f"(total `{cur_all.get('total_own_base_retreat_frames', 0):,}f`){extra_w8}"
         )
 
     if hwm_all:

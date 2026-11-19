@@ -2216,18 +2216,31 @@
 (define PROTOSS-CASTER-SYMS : (Listof Symbol)
   '(sentry high-templar oracle phoenix disruptor))
 
+(: zerg-upgrade-ready? (-> (Listof Any) Symbol Boolean Boolean))
+(define (zerg-upgrade-ready? upgrades target-sym fallback-flag)
+  (if (null? upgrades)
+      fallback-flag
+      (or fallback-flag
+          (for/or : Boolean ([up (in-list upgrades)])
+            (eq? (safe-sym up 'unknown) target-sym)))))
+
 (: run-zerg-spellcaster-micro
-   (-> (Listof Any) (Listof Any) (Listof Any) spell-claims Integer
-       (Listof Any) (Listof Any) (Listof Any) Float Float Float Float
-       (Listof Integer) (Listof Integer)
-       (Listof spell-directive)))
+   (->* ((Listof Any) (Listof Any) (Listof Any) spell-claims Integer
+         (Listof Any) (Listof Any) (Listof Any) Float Float Float Float
+         (Listof Integer) (Listof Integer))
+        ((Listof Any) Boolean)
+        (Listof spell-directive)))
 (define (run-zerg-spellcaster-micro
          caster-units ally-units enemy-units
          claims current-frame ally-buildings enemy-buildings effects
          home-x home-y enemy-base-x enemy-base-y
-         inject-queen-tags exclude-tags)
+         inject-queen-tags exclude-tags
+         [researched-upgrades '()]
+         [neural-parasite-researched? #t])
   (define all-enemies (if (null? enemy-buildings) enemy-units (append enemy-units enemy-buildings)))
   (define all-allies (if (null? ally-buildings) ally-units (append ally-units ally-buildings)))
+  ;; W8-TAC-2: Gate Infestor Neural Parasite (249) on 'neural-parasite upgrade
+  (define neural-ok? (zerg-upgrade-ready? researched-upgrades 'neural-parasite neural-parasite-researched?))
 
   (define-values (dirs-rev _)
     (parameterize ([current-bile-allies all-allies])
@@ -2385,7 +2398,8 @@
                  (define friendly-army-near?
                    (any-unit-within? ally-units ux uy 11.0
                                      (lambda ([a : Any]) (and (not (= (uh-tag a) tag)) (unit-combat-relevant? a)))))
-                 (and (>= en SC2-INFESTOR-NEURAL-ENERGY)
+                 (and neural-ok?
+                      (>= en SC2-INFESTOR-NEURAL-ENERGY)
                       friendly-army-near?
                       (let-values ([(ok? tgt _w)
                                     (best-unit-target
@@ -2424,8 +2438,9 @@
                          (and ok?
                               (spell-claim-point?! claims 'fungal-growth fx fy FUNGAL-CLAIM-RADIUS current-frame FUNGAL-CLAIM-TTL)
                               (spell-directive tag 'infestor 'fungal-growth 'point 0 fx fy 'infestor-fungal))))
-                  ;; 2. Neural Parasite (`energy >= 100`, range `9.0`, friendly army `< 11.0`)
-                  (and (>= en SC2-INFESTOR-NEURAL-ENERGY)
+                  ;; 2. Neural Parasite (W8-TAC-2: requires 'neural-parasite upgrade, `energy >= 100`, range `9.0`, friendly army `< 11.0`)
+                  (and neural-ok?
+                       (>= en SC2-INFESTOR-NEURAL-ENERGY)
                        friendly-army-near?
                        (let-values ([(ok? tgt _w)
                                      (best-unit-target
@@ -2686,6 +2701,8 @@
          #:ally-buildings (Listof Any)
          #:enemy-buildings (Listof Any)
          #:effects (Listof Any)
+         #:researched-upgrades (Listof Any)
+         #:neural-parasite-researched? Boolean
          #:home-x Float
          #:home-y Float
          #:enemy-base-x Float
@@ -2700,6 +2717,8 @@
          #:ally-buildings [ally-buildings '()]
          #:enemy-buildings [enemy-buildings '()]
          #:effects [effects '()]
+         #:researched-upgrades [researched-upgrades '()]
+         #:neural-parasite-researched? [neural-parasite-researched? #t]
          #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
          #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
          #:enemy-base-x [enemy-base-x SC2-DEFAULT-ENEMY-BASE-X]
@@ -2722,7 +2741,8 @@
       (run-zerg-spellcaster-micro
        casters ally-units enemy-units claims current-frame
        ally-buildings enemy-buildings effects home-x home-y
-       enemy-base-x enemy-base-y inject-queen-tags exclude-tags)))
+       enemy-base-x enemy-base-y inject-queen-tags exclude-tags
+       researched-upgrades neural-parasite-researched?)))
 
 ;; -----------------------------------------------------------------------------
 ;; 7. Terran Spellcaster Patterns (Ghost, Raven, Battlecruiser)
@@ -3864,6 +3884,7 @@
          #:psi-storm-researched? Boolean
          #:yamato-researched? Boolean
          #:ghost-cloak-researched? Boolean
+         #:neural-parasite-researched? Boolean
          #:home-x Float
          #:home-y Float
          #:natural-x Float
@@ -3885,6 +3906,7 @@
          #:psi-storm-researched? [psi-storm-researched? #t]
          #:yamato-researched? [yamato-researched? #t]
          #:ghost-cloak-researched? [ghost-cloak-researched? #t]
+         #:neural-parasite-researched? [neural-parasite-researched? #t]
          #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
          #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
          #:natural-x [natural-x SC2-DEFAULT-NATURAL-X]
@@ -3948,7 +3970,8 @@
                 (run-zerg-spellcaster-micro
                  z-casters ally-units enemy-units claims current-frame
                  ally-buildings enemy-buildings effects home-x home-y
-                 enemy-base-x enemy-base-y inject-queen-tags exclude-tags))
+                 enemy-base-x enemy-base-y inject-queen-tags exclude-tags
+                 researched-upgrades neural-parasite-researched?))
             (if (null? eff-t-casters)
                 '()
                 (run-terran-spellcaster-micro
@@ -3980,6 +4003,7 @@
          #:psi-storm-researched? Boolean
          #:yamato-researched? Boolean
          #:ghost-cloak-researched? Boolean
+         #:neural-parasite-researched? Boolean
          #:home-x Float
          #:home-y Float
          #:natural-x Float
@@ -4001,6 +4025,7 @@
          #:psi-storm-researched? [psi-storm-researched? #t]
          #:yamato-researched? [yamato-researched? #t]
          #:ghost-cloak-researched? [ghost-cloak-researched? #t]
+         #:neural-parasite-researched? [neural-parasite-researched? #t]
          #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
          #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
          #:natural-x [natural-x SC2-DEFAULT-NATURAL-X]
@@ -4022,6 +4047,7 @@
         #:psi-storm-researched? psi-storm-researched?
         #:yamato-researched? yamato-researched?
         #:ghost-cloak-researched? ghost-cloak-researched?
+        #:neural-parasite-researched? neural-parasite-researched?
         #:home-x home-x
         #:home-y home-y
         #:natural-x natural-x

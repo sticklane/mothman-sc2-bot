@@ -175,6 +175,25 @@
        "Broodling" "Interceptor" "AdeptPhaseShift" "KD8Charge" "ForceField"
        "MULE" "AutoTurret" "LocustMP" "LocustMPFlying"))
 
+;; Zerg combat unit resource value (min + gas) for `zerg_non_ling_army_pct` (W8-LOOP-2)
+(define ZERG-COMBAT-COST-HT
+  (hash "Zergling" 25
+        "Baneling" 75
+        "Roach" 100
+        "Ravager" 200
+        "Hydralisk" 150
+        "LurkerMP" 300
+        "LurkerMPBurrowed" 300
+        "Mutalisk" 200
+        "Corruptor" 250
+        "Infestor" 250
+        "InfestorBurrowed" 250
+        "SwarmHostMP" 175
+        "SwarmHostBurrowedMP" 175
+        "Viper" 300
+        "Ultralisk" 475
+        "BroodLord" 550))
+
 (define CREEP-TUMOR-SET
   (set "CreepTumor" "CreepTumorBurrowed" "CreepTumorQueen"))
 
@@ -799,6 +818,10 @@
           (define last-away-combat-sec -999.0)
           (define home-stall-streak-sec 0.0)
           (define max-home-stall-sec 0.0)
+          ;; W8-LOOP-2: Zerg non-Ling combat value tracking at 6m-10m
+          (define our-zerg? (string=? our-race "Zerg"))
+          (define zerg-combat-spans '()) ; list of (vector cost is-ling? start-sec died-sec)
+          (define zerg-combat-live (make-hasheqv)) ; tag -> current vector
           (define (near-any-our-th? px py)
             (for/or ([tc (in-list our-th-coords)])
               (define dx (- px (car tc)))
@@ -883,6 +906,12 @@
                    (hash-set! idx->combat-pid u-idx p))
                  (when (and (= p our-pid) (set-member? TOWNHALL-SET ut))
                    (set! our-th-coords (cons (cons (exact->inexact ux) (exact->inexact uy)) our-th-coords)))
+                 (when (and our-zerg? (= p our-pid) (= eid 1) (<= sec 615.0))
+                   (define zc (hash-ref ZERG-COMBAT-COST-HT ut #f))
+                   (when zc
+                     (define v (vector zc (string=? ut "Zergling") sec +inf.0))
+                     (set! zerg-combat-spans (cons v zerg-combat-spans))
+                     (hash-set! zerg-combat-live tag v)))
                  (when (= eid 6)
                    (hash-set! unit-init-sec tag sec))
                  (when (= p opp-pid)
@@ -996,6 +1025,14 @@
                    (hash-set! unit-type tag ut)
                    (when (and (= p our-pid) (not first-scout-cross-sec) (<= sec 360.0))
                      (hash-set! idx->owner-type u-idx ut))
+                   (when (and our-zerg? (= p our-pid) (<= sec 615.0))
+                     (define zc (hash-ref ZERG-COMBAT-COST-HT ut #f))
+                     (when zc
+                       (define old-v (hash-ref zerg-combat-live tag #f))
+                       (when old-v (vector-set! old-v 3 sec))
+                       (define v (vector zc (string=? ut "Zergling") sec +inf.0))
+                       (set! zerg-combat-spans (cons v zerg-combat-spans))
+                       (hash-set! zerg-combat-live tag v)))
                    (when (= p opp-pid)
                      (define xy (hash-ref unit-xy tag '(0 . 0)))
                      (hash-set! alive-opp tag (list ut (car xy) (cdr xy))))
@@ -1058,6 +1095,11 @@
                  (hash-remove! alive-opp tag)
                  (define ls (hash-ref prod-lifespans tag #f))
                  (when ls (vector-set! ls 2 sec))
+                 (when our-zerg?
+                   (define zold (hash-ref zerg-combat-live tag #f))
+                   (when zold
+                     (vector-set! zold 3 sec)
+                     (hash-remove! zerg-combat-live tag)))
                  ;; Mark own-base-under-attack buckets when combat/worker deaths happen near our bases
                  (when (and (> gl 100)
                             (pair? our-th-coords)
@@ -1505,6 +1547,35 @@
                          'ticks own-base-retreat-ticks
                          'sec (round1 (/ own-base-retreat-frames 22.4)))))
 
+          ;; W8-LOOP-2: Protoss non-combat Robo waste (Observer > 2 @ 100, WarpPrism > 1 @ 250)
+          ;; and Zerg non-Ling combat value share at 6m-10m
+          (define obs-built (hash-ref our-units-ht "Observer" 0))
+          (define wp-built (+ (hash-ref our-units-ht "WarpPrism" 0)
+                              (hash-ref our-units-ht "WarpPrismPhasing" 0)))
+          (define non-combat-robo-waste-val
+            (if (string=? our-race "Protoss")
+                (+ (* (max 0 (- obs-built 2)) 100)
+                   (* (max 0 (- wp-built 1)) 250))
+                0))
+          (define non-combat-robo-waste-anomaly
+            (and (>= non-combat-robo-waste-val 500)
+                 (hasheq 'waste_val non-combat-robo-waste-val
+                         'observers obs-built
+                         'warp_prisms wp-built)))
+          (define zerg-non-ling-army-pct
+            (and our-zerg?
+                 (let-values ([(nl-tot all-tot)
+                               (for/fold ([nl 0] [tot 0]) ([t (in-list '(360.0 480.0 600.0))]
+                                                           #:when (>= dur (- t 15.0)))
+                                 (for/fold ([nl2 nl] [tot2 tot]) ([v (in-list zerg-combat-spans)]
+                                                                  #:when (and (<= (vector-ref v 2) t)
+                                                                              (< t (vector-ref v 3))))
+                                   (define c (vector-ref v 0))
+                                   (values (if (vector-ref v 1) nl2 (+ nl2 c))
+                                           (+ tot2 c))))])
+                   (and (> all-tot 0)
+                        (round1 (* 100.0 (/ (exact->inexact nl-tot) all-tot)))))))
+
           (define anomalies
             (hasheq 'zero_fire_retreat zero-fire-retreat-anomaly
                     'escrow_lockouts escrow-lockouts
@@ -1512,6 +1583,7 @@
                     'endgame_stall endgame-stall-anomaly
                     'endgame_home_stall endgame-home-stall-anomaly
                     'own_base_retreat own-base-retreat-anomaly
+                    'non_combat_robo_waste non-combat-robo-waste-anomaly
                     'air_aa_starvation air-aa-starvation))
 
           ;; Classify 0-combat opponent disconnects (e.g., mid-early client drop) separately from real combat wins
@@ -1578,6 +1650,9 @@
             (add-sig! (format "ENDGAME_HOME_STALL(~as)" (r0 endgame-home-stall-sec))))
           (when own-base-retreat-anomaly
             (add-sig! (format "OWN_BASE_RETREAT(~af)" own-base-retreat-frames)))
+          (when non-combat-robo-waste-anomaly
+            (add-sig! (format "ROBO_NONCOMBAT_WASTE(~a,Obs=~a,WP=~a)"
+                              non-combat-robo-waste-val obs-built wp-built)))
           (when zero-fire-retreat-anomaly
             (add-sig! (if (hash-ref zero-fire-retreat-anomaly 'retreat_driven #f)
                           (format "SUICIDE_KITE_RETREAT(~ax,ret=~a%)"
@@ -1690,6 +1765,8 @@
                   'endgame_home_stall_sec endgame-home-stall-sec
                   'own_base_retreat_frames own-base-retreat-frames
                   'own_base_retreat_ticks own-base-retreat-ticks
+                  'non_combat_robo_waste_val non-combat-robo-waste-val
+                  'zerg_non_ling_army_pct zerg-non-ling-army-pct
                   'hexp_high (hash-ref log-acc 'hexp-high 0)
                   'rush_high (hash-ref log-acc 'rush-high 0)
                   'saving_top (for/list ([p (in-list (top-k-pairs (hash-ref log-acc 'saving-counts) 5))])
@@ -1840,6 +1917,9 @@
                 'avg_endgame_home_stall_sec (avg-field 'endgame_home_stall_sec)
                 'total_own_base_retreat_frames (for/sum ([r (in-list rows)]) (hash-ref r 'own_base_retreat_frames 0))
                 'own_base_retreat_matches (count (lambda (r) (>= (hash-ref r 'own_base_retreat_frames 0) 440)) rows)
+                'total_non_combat_robo_waste_val (for/sum ([r (in-list rows)]) (hash-ref r 'non_combat_robo_waste_val 0))
+                'non_combat_robo_waste_matches (count (lambda (r) (>= (hash-ref r 'non_combat_robo_waste_val 0) 500)) rows)
+                'avg_zerg_non_ling_army_pct (avg-opt 'zerg_non_ling_army_pct)
                 'our_bases (avg-field2 'our_bases)
                 'opp_bases (avg-field2 'opp_bases)
                 'our_w2 (avg-opt 'our_w2) 'opp_w2 (avg-opt 'opp_w2)
@@ -1945,6 +2025,7 @@
                         'endgame_stall (anom-cnt (lambda (a) (and (hash? (hash-ref a 'endgame_stall #f)) #t)))
                         'endgame_home_stall (anom-cnt (lambda (a) (and (hash? (hash-ref a 'endgame_home_stall #f)) #t)))
                         'own_base_retreat (anom-cnt (lambda (a) (and (hash? (hash-ref a 'own_base_retreat #f)) #t)))
+                        'non_combat_robo_waste (anom-cnt (lambda (a) (and (hash? (hash-ref a 'non_combat_robo_waste #f)) #t)))
                         'air_aa_starvation (anom-cnt (lambda (a) (and (hash? (hash-ref a 'air_aa_starvation #f)) #t)))
                         'wall_timeout_tie wall-timeout-ties
                         'step_spike_500ms step-spike-500-cnt

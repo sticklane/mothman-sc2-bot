@@ -692,18 +692,100 @@
     },
     {
       "id": "iter8_wave8",
-      "status": "kicked_off",
+      "status": "completed_hwm_checkpoint",
       "loop_self_improvements": [
-        "W8-LOOP-1 (@tactics-tester, AFTER Wave-7 HWM jj commit + jj new): Promote staged Round-8 expansion (tools/tactics-unit-tester.rkt: 112->120+, +4 verified wave8-repro W8-TAC-1..4 + novel shields)",
-        "W8-LOOP-2 (@analyzer, tools/score-replay-batch.rkt): Add non_combat_robo_waste_val (tracks Observer>2 / WarpPrism>1 mineral+gas waste) & zerg_non_ling_army_pct (flags pure-Zergling flood <25% gas combat units at 6-10m) to v2 scorer (<1.0s)"
+        "W8-LOOP-1 (@tactics-tester, DONE #239): Expanded tools/tactics-unit-tester.rkt 112->124 (+7 novel-68..74 shields, +5 verified wave8-repro W8-TAC-1..5 incl. plan-counter-proxy-all-in 2-worker pull bombshell; 124/124 PASS on W8)",
+        "W8-LOOP-2 (@analyzer, DONE #237): Upgraded tools/score-replay-batch.rkt (~0.89s) emitting non_combat_robo_waste_val (5,050->850, -83.2%!) and zerg_non_ling_army_pct (37.5%->79.0%, +41.5 pp!), ingested into compare-vs-pro.py"
       ],
       "spec_summary": [
-        "W8-P0-1 (@runtime-author + @belief-author): Fix Protoss Robo non-combat spam (#18 15 Observers, #33 7 Observers, #30 8 Warp Prisms + 16 Gateways + 141 shield-battery schedules) & anti-capital escrow lock (void-ray/tempest blocking Stalkers across 16 Gates vs 29 Tempests): count pending observers, enforce >=224f observer cooldown even when cloak visible & >=448f after loss, block warp-prism under air superiority/attack, cap gateways<=min(10,2*bases+2) & shield-batteries<=min(4,bases), never let void-ray/tempest/robo-bay escrow block Stalkers when >=3 ready Gates & requires-anti-air?",
-        "W8-P0-2 (@belief-author + @runtime-author): Fix Zerg queen #1 escrow blocker (570 ticks) + naked-Zergling flood (#16 1,086 Lings / 20 Queens / 9 Roaches / 0 Hydras): make queen non-blocking when cur-queens>=active-bases or larva>=3 & army<20 while cleanly training Q#2/#3 at 2:30-3:45 (Q@4m 1->2-3); hard-cap Zerg queens<=min(8,bases+3), hatches<=5, spores<=bases, spines<=2; prioritize gas combat (roach/hydralisk/baneling/corruptor) above naked zergling when gas>=50 & tech ready; enforce mutually exclusive RW/BN before 3rd Hatchery in BOTH PMB & L2 + earlier 3rd Hatch (~28-32W)",
-        "W8-P0-3 (@belief-author + @runtime-author): Fix Terran Rax scaling (1/2/2->2/3/4), 3rd CC stall (#23 1.19x stuck on 2 bases 26.5m -> 3rd CC outranks marine/marauder once bases==2 & workers>=34 & frame>=6048), starport 530M escrow lockout (#29 1.15x), and early-rush Bunker/Marine balance (#35 19 bunker schedules / 1 marine -> pump continuous Marines u>=640 until >=6 before Reactor/2nd Bunker + auto-load ready Bunker under base attack!)",
-        "W8-P0-4 (@runtime-author + @wire-author, W8-TAC-1..4): Fix dedicated-harass-units stealing fighting units (p06, bot-runtime.rkt:23341-23389, w8-tac-1); gate Infestor Neural Parasite (249) on 'neural-parasite upgrade (pro-spellcaster-micro.rkt:2385-2442, w8-tac-2); never order fragile High Templars ATTACK-UNIT (23) into enemy army (arena-minimax.rkt:3450-3539, w8-tac-3); guard Sentry Hallucination Phoenix (154) when enemy combat <=12t so Guardian Shield (76) fires first (bot-runtime.rkt:9439-9448, w8-tac-4); tighten own-base home defense (prevent non-retreat local fights from fleeing in own base)"
+        "W8-P0-1 (@runtime-author + @belief-author): Fixed Protoss Robo non-combat spam (pending Observer count + 224/448f cooldown + WarpPrism air/attack guards; Gate/Battery caps; Stalker anti-capital priority) -> Robo waste 5,050->850 (-83.2%), Protoss 5-6-1 (41.7% WR, 0.86x)!",
+        "W8-P0-2 (@belief-author + @runtime-author): Fixed Zerg queen #1 escrow blocker + naked-Ling flood -> Zerg NonLing6-10m 37.5%->79.0%, tripled wins 1->3 (3-7-2, first wins vs monsterbot & puck!), W@6m 54.0>Pro 52.5, 3rd Hatch -85s, SupBlk 4.0%!",
+        "W8-P0-3 (@belief-author + @runtime-author): Scaled Terran Rax (ProdFac 4m=3/3 Pro, Factory 192->146s, W@4/6m 24.5/35.0, first T win vs oberon), exposed Depot#2 vs Rax#2 SupBlk spike (8.3->13.3%) for W9",
+        "W8-P0-4 (@runtime-author + @wire-author, W8-TAC-1..5): P0 urgent survival for own-base defense & Bunker Load; fixed dedicated-harass stealing combat units (p06 WIN), Infestor Neural Parasite upgrade check, HT leash (p05 WIN), Sentry Hallucination guard (p04 5.0x), and plan-counter-proxy-all-in 2-worker pull!"
       ],
-      "acceptance_target": "First: @verifier commits & pushes iter7_wave7 HWM (112/112) to main/master via jj + jj new. Then Wave 8: 7/7 verifier gates + 100% strict tactics (including W8-TAC-1..4) + 18-duel real-SC2 A/B + iter8_wave8 beats HWM (>=10-12W, TradeAgg >=0.75x) -> leads into Loop 9 54-match full-roster gauntlet!"
+      "rev": "1bbabb5c",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261119_104349_iter8_wave8",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter8_wave8_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter8_wave8.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_wave8.json",
+      "clean_n": 36,
+      "record_clean": "11W-21L-4T",
+      "wr_pct_clean": 30.6,
+      "non_loss_pct": 41.7,
+      "trade_agg": 0.65,
+      "trade_med": 0.24,
+      "sup_blk_avg": 8.6,
+      "endgame_home_stall_count": 0,
+      "own_base_retreat_frames": 151300,
+      "non_combat_robo_waste_val": 850,
+      "zerg_non_ling_army_pct": 79.0,
+      "wall_sec": 726.0,
+      "latency_summary": "NEW ALL-TIME LOW max_step_ms=213.11ms across all 36/36 (0 spikes >=500ms; P<=185ms, Z<=188ms, T<=213ms; avg=10.28ms, p95=18.32ms)",
+      "by_race": {
+        "Protoss": {
+          "record": "5W-6L-1T",
+          "trade_agg": 0.86,
+          "w4_alive_med": 28.0,
+          "w6_alive_med": 39.5,
+          "nat_sec": 91.0,
+          "tech1_sec": 103.0,
+          "prod_cnt_4_6_8m": "3/4/6",
+          "a2w_6m": 30.1,
+          "sup_blk": 8.5
+        },
+        "Terran": {
+          "record": "3W-8L-1T",
+          "trade_agg": 0.66,
+          "w4_alive_med": 24.5,
+          "w6_alive_med": 35.0,
+          "nat_sec": 95.0,
+          "tech1_sec": 146.0,
+          "prod_cnt_4_6_8m": "3/4/4",
+          "a2w_6m": 28.8,
+          "sup_blk": 13.3
+        },
+        "Zerg": {
+          "record": "3W-7L-2T",
+          "trade_agg": 0.47,
+          "w4_alive_med": 32.0,
+          "w6_alive_med": 54.0,
+          "nat_sec": 55.0,
+          "tech1_sec": 211.0,
+          "prod_cnt_4_6_8m": "2/3/2",
+          "queens_4m": 1.0,
+          "a2w_6m": 23.8,
+          "sup_blk": 4.0
+        }
+      },
+      "tactics_summary": {
+        "rev": "kuulyxmr 1bbabb5c (wave8)",
+        "passed": "124/124 (100.0%, wire_rejects=0, wave8-repro 5/5)",
+        "sc2_duel18_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_wave8_18.json",
+        "sc2_duel18_summary": "NEW ALL-TIME HIGH 11W-1L-6T, 1.52x agg trade (+0.17x), ZERG 6/6=100% SWEEP (3.61x, A:M 7.32, z02 FIRST WIN 1.91x, z04 6.90x), Protoss 3/6 1.18x (p06 WIN 1.75x, p04 5.00x, p05 WIN)"
+      },
+      "key_wins": [
+        "SMASHING NEW HWM 11W-21L-4T (30.6% WR, 41.7% non-loss, +4W in one wave!), ALL 3 races >=25% WR, TradeAgg 0.65x (all-time high!), PkArmy 2,266 (all-time high!), W@4/6m 26.2/36.8 (all-time high!)",
+        "PASSED 3rd Promotion Gate (every_race_w4_within_6_of_pro: P -6.0, T -2.5, Z -3.0!) — now 3/9 PASS!",
+        "ZERO EndgameStall, ZERO HomeStall, ZERO SelfCancel, ZERO AirAAStarve, NEW ALL-TIME LOW max_step_ms=213.11ms!",
+        "Two 3-0 sweeps (titania, monsterbot), two undefeated (oberon 2-0-1, RustyNikolaj 1-0-2), FIRST-EVER WIN vs puck (Mothman-Z 10.6m 3.56x)!"
+      ],
+      "promotion_gates_passed": "3/9 (zero_crashes_and_rejects, every_race_w4_within_6_of_pro, tactics_suite_100pct 124/124)"
+    },
+    {
+      "id": "iter9_wave9",
+      "status": "kicked_off",
+      "milestone_full_roster_54": true,
+      "loop_self_improvements": [
+        "W9-LOOP-1 (@tactics-tester, AFTER Wave-8 HWM jj commit + jj new): Promote staged Round-9 expansion (tools/tactics-unit-tester.rkt: 124->139, +10 novel-75..84 shields, +5 verified wave9-repro W9-TAC-1..5)",
+        "W9-LOOP-2 (@analyzer, tools/score-replay-batch.rkt): Add support for clean 54-match full-roster breakdown (core-12 vs unseen-6 generalization split in summary JSON) + siege_range_zero_dps_losses (flags >=15 army units dying at <0.10x trade vs Tempest/Tank/Colossus/Carrier)"
+      ],
+      "spec_summary": [
+        "W9-P0-1 (@belief-author + @runtime-author): Fix Terran SupBlk spike (8.3->13.3%): keep SupplyDepot #2 strictly BEFORE Barracks #2 (restores Pro #1 Dep->Rax->Ref->CC->Dep), tighten Terran midgame Depot headroom (<=6% SupBlk), produce Siege Tanks from Factory TechLab instead of 39 Widow Mines / 0 Tanks (#17), and unblock starport/liberator/viking escrow over SCV/Bio (#11/#17)",
+        "W9-P0-2 (@runtime-author + @wire-author, Own-Base Siege/Tempest Dive + W9-TAC-1..5): Extend threat-within-14-of-th? by +6t (<=30t TH / <=16t home-bldg) for long-range siege/capital units (Tempest/Tank/Carrier/BroodLord/Liberator/Lurker/Colossus) AND in l34-emit-engage-or-rally! dive under firing long-range capitals (<=15.5t when >=6 AA/combat units & can-hit-target?) instead of 0-DPS kiting outside 8.5t (#28 40 Hydras 2 kills / #30 21 Stalkers 2 kills / #31-33 SmoothBrain 0.03x!); PLUS W9-TAC-1 (wire tactical-hold-posture? <=16t combat exclusion fixing t02!), W9-TAC-2 (runtime stimpack/siege-mode drop spurious eid -> full box-select coalescing!), W9-TAC-3/4 (wire same-step OC Scan & Overseer Changeling dedupe), W9-TAC-5 (transport-drop-micro & wire never pick up channeling Ghost Snipe 2714!)",
+        "W9-P0-3 (@belief-author + @runtime-author): Fix Protoss PvP (0-3-1, 0.16x vs PvT/PvZ 5-3-0 1.65x+!): stop stalker escrow from starving Probes & Robo Immortals/Archons/Colossi in PvP, ramp Gateways 3->6+ @ 8m & tighten PvP Pylon headroom (SupBlk 12.9% -> <=6%)",
+        "W9-P0-4 (@belief-author + @runtime-author): Fix Zerg over-droning (W@6m=54 vs ArmyVal@8m=1,175 = 38% Pro!) + Q@4m=1: cap peaceful Zerg drones at ~44-48 until army-supply>=35 (convert 3-base eco into Roach/Hydra/Ravager mass!), don't let hydralisk-den/hydralisk escrow block Roach production (#19/#22), ensure peaceful Queen #2/#3 train cleanly on Hatch #1/#2 before 4m (Q@4m 1->2-3), and enforce hard Hatchery<=5 cap in L2 (#16 built 11 Hatches!)"
+      ],
+      "acceptance_target": "First: @verifier commits & pushes iter8_wave8 HWM (11W-21L-4T, 124/124) to main/master via jj + jj new. Then Milestone Loop 9: 7/7 verifier gates + 139/139 strict tactics + 18-duel SC2_x64 + 54-match FULL-ROSTER gauntlet (--opponents all) validating generalization across all 18 opponents!"
     }
   ],
   "harness_config": {
@@ -719,24 +801,26 @@
   },
   "goal_target_loop": 14,
   "high_water_mark": {
-    "wave_id": "iter7_wave7",
-    "commit": "nzqsykmo (pending @verifier jj push)",
+    "wave_id": "iter8_wave8",
+    "commit": "kuulyxmr (pending @verifier jj push)",
     "clean_n": 36,
-    "record_clean": "7W-23L-6T",
-    "wr_pct_clean": 19.4,
-    "non_loss_pct": 36.1,
-    "trade_agg": 0.44,
-    "trade_med": 0.15,
-    "ties": 6,
-    "pk_army_avg": 2037.0,
-    "sup_blk_avg": 7.6,
+    "record_clean": "11W-21L-4T",
+    "wr_pct_clean": 30.6,
+    "non_loss_pct": 41.7,
+    "trade_agg": 0.65,
+    "trade_med": 0.24,
+    "ties": 4,
+    "pk_army_avg": 2266.0,
+    "sup_blk_avg": 8.6,
     "endgame_home_stall_count": 0,
-    "max_step_ms": 255.6,
-    "protoss_wr_pct": 25.0,
+    "air_aa_starvation": 0,
+    "max_step_ms": 213.1,
+    "protoss_wr_pct": 41.7,
     "terran_wr_pct": 25.0,
-    "zerg_wr_pct": 8.3,
-    "tactics_strict": "112/112 (100.0%, wire_rejects=0)",
-    "sc2_duel18_trade": 1.35,
-    "sc2_duel18_wins": "10W-0L-8T"
+    "zerg_wr_pct": 25.0,
+    "tactics_strict": "124/124 (100.0%, wire_rejects=0)",
+    "sc2_duel18_trade": 1.52,
+    "sc2_duel18_wins": "11W-1L-6T",
+    "promotion_gates_passed": "3/9"
   }
 }
