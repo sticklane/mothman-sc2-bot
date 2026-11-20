@@ -8702,19 +8702,19 @@
      <
      #:key gas-eff-assigned))
 
-  ;; W17-P0-3-wire (`#28` 550s 0G / `#10` 243s 0G): When no ready gas building sits at a combat-safe
-  ;; TownHall and vespene is critically low, fall back to the 1-2 safest ready gas buildings near
-  ;; surviving TownHalls so hovering air units / spread harassment NEVER lock gas at 0G/min and
-  ;; starve anti-air tech (`HydraliskDen`/`Spire`/`Stargate`/`Starport`)! Protect those fallback
-  ;; geysers from `0b` evacuation up to 300G (50G hysteresis above the 250G assignment ceiling).
+  ;; W17-P0-3 / L20-P0-1 (`#28` `GasZeroFreeze` 1 -> 0): When no ready gas building sits at a
+  ;; combat-safe TownHall and vespene is critically low, score ALL live `ready-gas-bldgs` with a
+  ;; unified threat score (`+150.0` mild preference for geysers near a surviving TownHall) so
+  ;; zero-threat live Extractors/Refineries/Assimilators (`150`) ALWAYS beat enemy-camped geysers
+  ;; (`26,000+`), and protect those fallback geysers from `0b` evacuation up to 300G.
+  (define (emergency-gas-score gb)
+    (+ (gas-bldg-threat-score gb)
+       (if (gas-near-any-th? gb ready-townhalls) 0.0 150.0)))
   (define emergency-protected-gas-bldgs
     (if (and (null? safe-ready-gas-bldgs)
              (< cur-gas 300)
              (not (null? ready-gas-bldgs)))
-        (let* ([near-any-th (filter (lambda (u) (gas-near-any-th? u ready-townhalls))
-                                    ready-gas-bldgs)]
-               [pool (if (pair? near-any-th) near-any-th ready-gas-bldgs)]
-               [sorted (sort pool < #:key gas-bldg-threat-score)])
+        (let ([sorted (sort ready-gas-bldgs < #:key emergency-gas-score)])
           (take sorted (min 2 (length sorted))))
         '()))
   (define under-gas
@@ -8728,8 +8728,12 @@
                   (< (gas-eff-assigned u)
                      (max SC2-IDEAL-WORKERS-PER-GEYSER (sc2-unit-ideal-harvesters u))))
                 emergency-protected-gas-bldgs)
-        <
-        #:key gas-eff-assigned)]
+        (lambda (a b)
+          (define sa (emergency-gas-score a))
+          (define sb (emergency-gas-score b))
+          (if (< (abs (- sa sb)) 200.0)
+              (< (gas-eff-assigned a) (gas-eff-assigned b))
+              (< sa sb))))]
       [else '()]))
   (define under-townhalls
     (sort
@@ -9038,12 +9042,21 @@
          (< (length workers) 28)
          (< cur-min 250)
          (>= cur-gas 108)))
+  ;; L20-P0-1 (`#29` crushed worker economy `<= 12w`): when worker count is crushed (`<= 12`)
+  ;; with `>= 150G` banked and `< 120M`, evacuate gas all the way to `0` so every surviving
+  ;; worker rebuilds minerals/economy instead of stranding 20% of workers on unneeded gas!
+  (define worker-crisis-gas-evac?
+    (and (<= (length workers) 12)
+         (>= cur-gas 150)
+         (< cur-min 120)))
   (define gas-over-banked?
     (or worker-rush-evacuate-gas?
+        worker-crisis-gas-evac?
         (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)))
   (define gas-resaturate-blocked?
     (or (and gas-over-banked?
              (or worker-rush-evacuate-gas?
+                 worker-crisis-gas-evac?
                  (>= cur-gas 350)
                  (>= eff-active-gas-workers 1)))
         (and zerg-post-speed-surge-active? (>= eff-active-gas-workers 1))))
@@ -9220,7 +9233,10 @@
   ;;    immediately instead of vanishing back inside gas!
   (define gas-pull-target-floor
     (cond
-      [(or worker-rush-evacuate-gas? (and gas-over-banked? (>= cur-gas 350))) 0]
+      [(or worker-rush-evacuate-gas?
+           worker-crisis-gas-evac?
+           (and gas-over-banked? (>= cur-gas 350)))
+       0]
       [(or gas-over-banked? zerg-post-speed-surge-active?) 1]
       [else eff-active-gas-workers]))
   (define max-gas-pulls-this-step
@@ -9240,7 +9256,8 @@
                  (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
                (sc2-unit-orders w)))
       (define allow-carrying-gas-pull?
-        (and (>= cur-gas 250) (< cur-min 100)))
+        (or (and (>= cur-gas 250) (< cur-min 100))
+            worker-crisis-gas-evac?))
       (define non-carrying-gas-workers
         (filter (lambda (w)
                   (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))

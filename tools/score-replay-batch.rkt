@@ -2062,6 +2062,41 @@
             (and spire-sched-drop?
                  (hasheq 'spire_sched_ticks spire-sched-ticks
                          'spire_built_cnt spire-built-cnt)))
+          ;; L20-LOOP-2: Universal Drip-Feed Collapse & TvT Zero-Tank Diagnostics
+          (define army-mass-ratio
+            (if (> lost-val 0)
+                (round2 (/ (exact->inexact our-pk-army) (exact->inexact lost-val)))
+                #f))
+          (define drip-feed-collapse?
+            (and (>= lost-val 8000)
+                 (< trade-ratio 0.40)
+                 (< (/ (exact->inexact our-pk-army) (exact->inexact (max 1 lost-val))) 0.20)))
+          (define drip-feed-collapse-anomaly
+            (and drip-feed-collapse?
+                 (hasheq 'our_peak_army our-pk-army
+                         'lost_val lost-val
+                         'army_mass_ratio (round2 (/ (exact->inexact our-pk-army) (exact->inexact lost-val)))
+                         'trade_ratio trade-ratio)))
+          (define our-tank-cnt
+            (+ (hash-ref our-units-ht "SiegeTank" 0)
+               (hash-ref our-units-ht "SiegeTankSieged" 0)))
+          (define opp-tank-cnt
+            (+ (hash-ref opp-units-ht "SiegeTank" 0)
+               (hash-ref opp-units-ht "SiegeTankSieged" 0)))
+          (define our-wm-cnt
+            (+ (hash-ref our-units-ht "WidowMine" 0)
+               (hash-ref our-units-ht "WidowMineBurrowed" 0)))
+          (define our-fac-cnt (hash-ref our-bldgs-ht "Factory" 0))
+          (define tvt-zero-tank?
+            (and (string=? matchup "TvT")
+                 (>= dur 360.0)
+                 (<= our-tank-cnt 1)))
+          (define tvt-zero-tank-anomaly
+            (and tvt-zero-tank?
+                 (hasheq 'our_tanks our-tank-cnt
+                         'opp_tanks opp-tank-cnt
+                         'our_widow_mines our-wm-cnt
+                         'our_factories our-fac-cnt)))
 
           (define anomalies
             (hasheq 'zero_fire_retreat zero-fire-retreat-anomaly
@@ -2082,6 +2117,8 @@
                     'pvp_nat_delay pvp-nat-delay-anomaly
                     'one_base_lockout one-base-lockout-anomaly
                     'spire_sched_drop spire-sched-drop-anomaly
+                    'drip_feed_collapse drip-feed-collapse-anomaly
+                    'tvt_zero_tank tvt-zero-tank-anomaly
                     'air_aa_starvation air-aa-starvation))
 
           ;; Classify 0-combat opponent disconnects (e.g., mid-early client drop) separately from real combat wins
@@ -2235,6 +2272,14 @@
           (when spire-sched-drop-anomaly
             (add-sig! (format "SPIRE_SCHED_DROP(sch=~at,built=~a)"
                               spire-sched-ticks spire-built-cnt)))
+          (when drip-feed-collapse-anomaly
+            (add-sig! (format "DRIP_FEED_COLLAPSE(pkA=~a/lost=~a=~a,tr=~ax)"
+                              our-pk-army lost-val
+                              (r2 (/ (exact->inexact our-pk-army) (exact->inexact (max 1 lost-val))))
+                              (r2 trade-ratio))))
+          (when tvt-zero-tank-anomaly
+            (add-sig! (format "TVT_ZERO_TANK(~avs~aT,WM=~a)"
+                              our-tank-cnt opp-tank-cnt our-wm-cnt)))
           (when (and (not (eq? res 'win)) (< trade-ratio 0.50) (>= lost-val 1500))
             (add-sig! "SEVERE_BAD_TRADES(<0.5x)"))
           (when (and (not (eq? res 'win)) (<= dur 330.0)) (add-sig! "EARLY_RUSH_LOSS"))
@@ -2358,6 +2403,10 @@
                   'spire_sched_drop spire-sched-drop?
                   'spire_sched_ticks spire-sched-ticks
                   'spire_built_cnt spire-built-cnt
+                  'army_mass_ratio army-mass-ratio
+                  'drip_feed_collapse drip-feed-collapse?
+                  'tvt_zero_tank tvt-zero-tank?
+                  'our_siege_tank_cnt our-tank-cnt
                   'map_symmetry_kind map-symmetry-kind
                   't3_first_sec t3-first-sec
                   't3_first_bldg t3-first-bldg
@@ -2549,6 +2598,8 @@
                 'pvp_nat_delay_matches (count (lambda (r) (eq? (hash-ref r 'pvp_nat_delay_flag #f) #t)) rows)
                 'one_base_lockout_matches (count (lambda (r) (eq? (hash-ref r 'one_base_lockout #f) #t)) rows)
                 'spire_sched_drop_matches (count (lambda (r) (eq? (hash-ref r 'spire_sched_drop #f) #t)) rows)
+                'drip_feed_collapse_matches (count (lambda (r) (eq? (hash-ref r 'drip_feed_collapse #f) #t)) rows)
+                'tvt_zero_tank_matches (count (lambda (r) (eq? (hash-ref r 'tvt_zero_tank #f) #t)) rows)
                 't3_started_matches (count (lambda (r) (real? (hash-ref r 't3_first_sec #f))) rows)
                 't3_early_2base_matches (count (lambda (r) (let ([b (hash-ref r 't3_bases_at_start #f)]) (and (exact-integer? b) (<= b 2)))) rows)
                 't3_premature_starve_matches (count (lambda (r) (eq? (hash-ref r 't3_premature_starve #f) #t)) rows)
@@ -2673,6 +2724,8 @@
                         'pvp_nat_delay (anom-cnt (lambda (a) (and (hash? (hash-ref a 'pvp_nat_delay #f)) #t)))
                         'one_base_lockout (anom-cnt (lambda (a) (and (hash? (hash-ref a 'one_base_lockout #f)) #t)))
                         'spire_sched_drop (anom-cnt (lambda (a) (and (hash? (hash-ref a 'spire_sched_drop #f)) #t)))
+                        'drip_feed_collapse (anom-cnt (lambda (a) (and (hash? (hash-ref a 'drip_feed_collapse #f)) #t)))
+                        'tvt_zero_tank (anom-cnt (lambda (a) (and (hash? (hash-ref a 'tvt_zero_tank #f)) #t)))
                         'air_aa_starvation (anom-cnt (lambda (a) (and (hash? (hash-ref a 'air_aa_starvation #f)) #t)))
                         'wall_timeout_tie wall-timeout-ties
                         'wall_timeout_winning_tie wall-timeout-winning-ties
@@ -2719,7 +2772,7 @@
                   (hash-ref agg 'wall_timeout_winning_ties 0)
                   (hash-ref agg 'step_spike_500ms_count 0))
           ""))
-    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a | 1BaseLock=~a | SpireDrop=~a~a\n"
+    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a | 1BaseLock=~a | SpireDrop=~a | DripFeed=~a | TvT0Tank=~a~a\n"
             (hash-ref ac 'suicide_kite_retreat 0)
             (hash-ref ac 'zero_fire_retreat 0)
             (hash-ref ac 'escrow_lockout 0)
@@ -2728,6 +2781,8 @@
             (hash-ref ac 'air_aa_starvation 0)
             (hash-ref ac 'one_base_lockout 0)
             (hash-ref ac 'spire_sched_drop 0)
+            (hash-ref ac 'drip_feed_collapse 0)
+            (hash-ref ac 'tvt_zero_tank 0)
             lat-str)))
 
 ;; -----------------------------------------------------------------------------
@@ -2999,7 +3054,33 @@
                      (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
                      (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
                      (hash-ref sd 'spire_sched_ticks 0)
-                     (hash-ref sd 'spire_built_cnt 0)))))
+                     (hash-ref sd 'spire_built_cnt 0))))
+
+  (section "14. Drip-Feed Collapses (lost>=8000 & trade<0.40x & pkA/lost<0.20)"
+           (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'drip_feed_collapse #f))) rows)
+           (lambda (r)
+             (define df (hash-ref (hash-ref r 'anomalies) 'drip_feed_collapse))
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | pkA=~a / lost=~a (mass=~a) | trade=~ax\n"
+                     (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
+                     (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
+                     (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
+                     (hash-ref df 'our_peak_army 0)
+                     (hash-ref df 'lost_val 0)
+                     (r2 (hash-ref df 'army_mass_ratio 0.0))
+                     (r2 (hash-ref df 'trade_ratio 0.0)))))
+
+  (section "15. TvT Zero/Starved-Tank Matches (TvT dur>=360s & our_tanks<=1)"
+           (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'tvt_zero_tank #f))) rows)
+           (lambda (r)
+             (define zt (hash-ref (hash-ref r 'anomalies) 'tvt_zero_tank))
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | ourTanks=~a v oppTanks=~a | ourWM=~a | ourFac=~a\n"
+                     (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
+                     (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
+                     (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
+                     (hash-ref zt 'our_tanks 0)
+                     (hash-ref zt 'opp_tanks 0)
+                     (hash-ref zt 'our_widow_mines 0)
+                     (hash-ref zt 'our_factories 0)))))
 
 ;; -----------------------------------------------------------------------------
 ;; Main CLI Driver

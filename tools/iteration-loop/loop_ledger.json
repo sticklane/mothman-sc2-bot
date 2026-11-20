@@ -1433,6 +1433,68 @@
         "Tactics Arena SHATTERED A:M=3.24 ATH (UNDEFEATED 12W-0L-9T / 1.87x) with ALL 21/21 real-3D WebP+PNGs + Top-6 real-3D replay clips!"
       ],
       "promotion_gates_passed": "4/9 (zero_crashes_and_rejects, ties_le_2 [2T, 0 WallTies!], sup_blk_le_6pct [4.0%!], tactics_suite_100pct [231/231])"
+    },
+    {
+      "id": "iter20_wave20",
+      "status": "completed_first_ever_5_of_9_gates_and_5_anomalies_wiped_to_zero",
+      "campaign": "Loops 19-28 Real-3D Visuals Campaign (Loop 2 of 10)",
+      "loop_self_improvements": [
+        "L20-LOOP-2 (@analyzer #583 + @loop-architect compare-vs-pro.py): Added drip_feed_collapse & universal army_mass_ratio cleanly to score-replay-batch.rkt & compare-vs-pro.py"
+      ],
+      "spec_summary": [
+        "L20-P0-1 (@wire-author sc2-protobuf-ws.rkt): Unified emergency gas threat scoring -> GasZeroFreeze 1 -> 0 (WIPED TO ZERO!), 610/610 wire tests",
+        "L20-P0-2 (@belief-author priority-macro-brain.rkt): Terran FactoryTechLab -> SiegeTank core (suppressed bare-Factory Widow Mine before TechLab) + escrow relief -> TvT0Tank 2 -> 0 (WIPED TO ZERO!), EscrowLock 17 -> 11, Terran ProdFac 3/5/6 vs Pro 3/5/7, 2,295/2,295 unit tests",
+        "L20-P0-3 (@runtime-author bot-runtime.rkt): Anti-drip-feed mass-parity-before-attack staging + home-defense retreat elimination -> OBRet 13 -> 0 (808f total, -98.1%!), OTRet 14 -> 0 (-96.4%!), SuicideKite 4 -> 0 (pos=ret -90.6%!), Mothman-Z PkArmy +47% (2,612 -> 3,852) & Trade +0.22x!"
+      ],
+      "rev": "lznptyzx e21a8737",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261120_090517_iter20_wave20",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter20_wave20_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter20_wave20.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter20.md",
+      "clean_n": 35,
+      "record_raw": "13W-21L-2T (36.1% WR; 1 oppCrash #07 Chance)",
+      "record_clean": "12W-21L-2T (34.3% WR, 40.0% NL)",
+      "record_non_chance": "11W-20L-2T (33.3% WR)",
+      "trade_agg": 0.68,
+      "trade_med": 0.20,
+      "sup_blk_avg": 4.2,
+      "endgame_home_stall_count": 0,
+      "own_base_retreat_frames": 808,
+      "own_territory_retreat_frames": 1552,
+      "non_combat_robo_waste_val": 200,
+      "zerg_non_ling_army_pct": 68.6,
+      "siege_range_zero_dps_losses": 6,
+      "cloaked_unit_damage_losses": 0,
+      "gas_rich_min_starved_matches": 9,
+      "one_base_lockout_matches": 4,
+      "spire_sched_drop_matches": 1,
+      "drip_feed_collapse_matches": 15,
+      "prod_placement_stall_matches": 3,
+      "prod_idle_bank_freeze_matches": 0,
+      "gas_zero_harvest_freeze_matches": 0,
+      "wall_timeout_ties": 1,
+      "army_val_4m_ratio_vs_pro": 0.90,
+      "army_val_8m_ratio_vs_pro": 0.42,
+      "wall_sec": 773.8,
+      "latency_summary": "NEW ALL-TIME LATENCY RECORDS (n=35 clean): avg=7.94ms, p95=13.62ms, tr_p95_worst=6.9ms (ATL!), max=169.74ms (35/35 <=169.7ms, beats L19 175.07ms!)",
+      "by_race": {
+        "Protoss": {"record": "4W-7L-1T (33.3%)", "trade_agg": 0.86, "w4_alive_med": 24.0, "w6_alive_med": 39.0, "nat_sec": 112.0, "sup_blk": 5.0},
+        "Terran": {"record": "4W-8L-0T (33.3%, TvT0Tank=0)", "trade_agg": 0.60, "w4_alive_med": 22.0, "w6_alive_med": 37.5, "nat_sec": 92.0, "sup_blk": 3.2},
+        "Zerg": {"record": "5W-6L-1T raw / 4W-6L-1T clean (36.4% WR!)", "trade_agg": 0.62, "w4_alive_med": 31.0, "w6_alive_med": 48.0, "nat_sec": 55.0, "sup_blk": 4.3}
+      },
+      "tactics_summary": {
+        "rev": "lznptyzx 7e3962e0 (iter20)",
+        "passed": "231/231 (100.0%, wire_rejects=0, novel 131/131)",
+        "sc2_duel21_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter20.json",
+        "sc2_duel21_summary": "11W-1L-9T | 1.54x Agg Trade | NEW ATH A:M=3.28 | FIRST-EVER PERFECT ZERG 7W-0L-0T (100% SWEEP, A:M 13.38 ATH!) | 21/21 real-3D WebP+PNGs in 31.8s!"
+      },
+      "key_wins": [
+        "FIRST-EVER 5/9 PROMOTION GATES PASS (zero_crashes_and_rejects, ties_le_2, sup_blk_le_6pct 4.2%, every_race_wr_ge_33pct [P 33.3%, T 33.3%, Z 36.4%!], tactics_suite_100pct 231/231)!",
+        "5 MAJOR ANOMALIES WIPED TO ZERO: OBRet 13->0 (-98.1% frames!), OTRet 14->0 (-96.4%!), SuicideKite 4->0 (pos=ret -90.6%!), GasZeroFreeze 1->0, TvT0Tank 2->0; plus EscrowLock 17->11, 1BaseLock 5->4, ProdPlaceStall=3 ATL, A4Pro=0.90!",
+        "Mothman-Z BREAKOUT (+47% PkArmy 2,612->3,852, +0.22x Trade, ZvT 2-1 0.82x PkA 7,450, ZvZ 2-2 1.44x W@4m 33/33 Pro!), FIRST-EVER RustyNikolaj 2-1 series win + oberon 2-1 + titania 3-0 + monsterbot 3-0!",
+        "NEW ALL-TIME LATENCY RECORDS (avg=7.94ms, p95=13.62ms, tr_p95_worst=6.9ms, max=169.74ms!) & FIRST-EVER PERFECT ZERG 7W-0L-0T 100% real-SC2 arena sweep (A:M=3.28 ATH)!"
+      ],
+      "promotion_gates_passed": "5/9 NEW ALL-TIME RECORD! (zero_crashes_and_rejects, ties_le_2, sup_blk_le_6pct 4.2%, every_race_wr_ge_33pct, tactics_suite_100pct 231/231)"
     }
   ],
   "final_18_loop_summary": {

@@ -4595,6 +4595,126 @@
                                            (macro-econ-cmd? c)))
                           cmds-latched-0gas))))
 
+(printf "[Loop 20] Testing L20-P0-1 unified emergency gas threat scoring (GasZeroFreeze=0) & <=12w worker-crisis gas evac...\n")
+(let ()
+  (define (mk-l20-u tag utype alliance x y
+                    #:hp [hp 100.0] #:shield [sh 0.0] #:rad [rad 1.0]
+                    #:flying? [fly? #f] #:orders [ords '()] #:buffs [buffs '()]
+                    #:assigned [asgn 0] #:ideal [idl 0] #:mins [mins 0] #:vesp [vesp 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y (if fly? 12.0 8.0)) 0.0 rad 1.0 0 #f #f #f
+              hp hp sh sh 0.0 0.0 mins vesp fly? #f #f #t #f
+              ords 0 buffs asgn idl 0.0 0 0 0 0 '() 0 0))
+
+  ;; L20-P0-1a (`#28` GasZeroFreeze 1 -> 0): Surviving Hatchery (32,32) has Extractor 9502 camped
+  ;; by 6 Tempests (threat > 6,000), while distant live Extractor 9503 at (96,64) (whose Hatchery
+  ;; was destroyed) has 0 threat (`score = 150.0`) -> MUST choose 9503 over 9502!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (define h-camped (mk-l20-u 9501 100 1 32.0 32.0 #:hp 2000.0 #:rad 2.75 #:assigned 14 #:ideal 16))
+  (define ex-camped (mk-l20-u 9502 88 1 28.0 26.0 #:hp 500.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 1800))
+  (define ex-safe-far (mk-l20-u 9503 88 1 96.0 64.0 #:hp 500.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 1800))
+  (define min-h (mk-l20-u 9505 341 3 25.0 32.0 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define drones-20
+    (for/list ([i (in-range 14)])
+      (mk-l20-u (+ 9540 i) 104 1 (+ 27.0 (* 0.3 (modulo i 5))) (+ 31.0 (* 0.4 (quotient i 5)))
+                #:hp 40.0 #:rad 0.375 #:orders (list (sc2-unit-order 298 #f 9505 0.0)))))
+  (define tempests-6
+    (for/list ([i (in-range 6)])
+      (mk-l20-u (+ 9560 i) 496 4 (+ 30.0 (* 0.8 i)) 28.0 #:hp 200.0 #:shield 100.0 #:rad 1.25 #:flying? #t)))
+  (define cmds-far-safe-0
+    (saturate-workers-and-gas-commands
+     (sc2-observation 13000 (sc2-player-common 1 500 19 80 40 4 14 0 0 0 0)
+                      (append (list h-camped ex-camped ex-safe-far min-h) drones-20 tempests-6)
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l20-p0-1a-zero-threat-distant-extractor-beats-tempest-camped-near-th-extractor"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                      (= (sc2-raw-unit-command-ability-id c) 3666)
+                                      (= (sc2-raw-unit-command-target-unit-tag c) 9503)
+                                      (macro-econ-cmd? c)))
+                     cmds-far-safe-0))
+
+  ;; Even when distant zero-threat Extractor 9503 already has 1/3 Drone assigned (while Tempest-camped
+  ;; Extractor 9502 has 0/3!), Drone #2 MUST still go to safe 9503 instead of Tempest-camped 9502!
+  (define ex-safe-far-1 (mk-l20-u 9503 88 1 96.0 64.0 #:hp 500.0 #:rad 1.5 #:assigned 1 #:ideal 3 #:vesp 1800))
+  (define d-on-safe-far (mk-l20-u 9520 104 1 95.5 64.5 #:hp 40.0 #:rad 0.375
+                                  #:orders (list (sc2-unit-order 298 #f 9503 0.0))))
+  (define cmds-far-safe-1
+    (saturate-workers-and-gas-commands
+     (sc2-observation 13004 (sc2-player-common 1 500 19 80 41 4 15 0 0 0 0)
+                      (append (list h-camped ex-camped ex-safe-far-1 min-h d-on-safe-far) drones-20 tempests-6)
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l20-p0-1a-emergency-under-gas-keeps-filling-safe-extractor-over-camped-0-assigned"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-target-unit-tag c) 9503)))
+                          cmds-far-safe-1)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (= (sc2-raw-unit-command-target-unit-tag c) 9502)))
+                               cmds-far-safe-1))))
+
+  ;; Step 0b evacuation MUST protect Drone 9520 mining distant zero-threat Extractor 9503 even when
+  ;; a safe Hatchery 9504 (with 0 geysers) exists elsewhere!
+  (define h-safe-nogas (mk-l20-u 9504 86 1 64.0 32.0 #:hp 1500.0 #:rad 2.75 #:assigned 4 #:ideal 16))
+  (define min-safe (mk-l20-u 9506 341 3 70.0 32.0 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define cmds-far-safe-protect
+    (saturate-workers-and-gas-commands
+     (sc2-observation 13008 (sc2-player-common 1 500 19 80 41 4 15 0 0 0 0)
+                      (append (list h-camped h-safe-nogas ex-camped ex-safe-far-1 min-h min-safe d-on-safe-far)
+                              drones-20 tempests-6)
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l20-p0-1a-evacuation-protects-distant-zero-threat-emergency-extractor"
+              (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (memv 9520 (sc2-raw-unit-command-unit-tags c))))
+                          cmds-far-safe-protect)))
+
+  ;; L20-P0-1b (`#29` crushed worker economy `<= 12w`): 7 SCVs total (6 mineral + 1 carrying gas),
+  ;; 160G / 80M -> pulls last gas worker all the way to 0 (even while carrying gas!) at P1,
+  ;; blocks gas re-saturation while crisis holds, and cleanly resumes once minerals >= 120M!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (define cc-crushed (mk-l20-u 9511 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75 #:assigned 6 #:ideal 16))
+  (define ref-crushed (mk-l20-u 9512 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 1 #:ideal 3 #:vesp 1800))
+  (define min-crushed (mk-l20-u 9513 341 3 22.0 28.5 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define scvs-6
+    (for/list ([i (in-range 6)])
+      (mk-l20-u (+ 9521 i) 45 1 (+ 23.5 (* 0.3 i)) 28.0 #:hp 45.0 #:rad 0.375
+                #:orders (list (sc2-unit-order 295 #f 9513 0.0)))))
+  (define scv-last-gas (mk-l20-u 9530 45 1 26.0 25.5 #:hp 45.0 #:rad 0.375 #:buffs '(273)
+                                 #:orders (list (sc2-unit-order 296 #f 9511 0.0))))
+  (define cmds-crisis-evac
+    (saturate-workers-and-gas-commands
+     (sc2-observation 8000 (sc2-player-common 1 80 160 50 15 8 7 0 0 0 0)
+                      (append (list cc-crushed ref-crushed min-crushed scv-last-gas) scvs-6)
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l20-p0-1b-worker-crisis-12w-160g-80m-evacuates-last-gas-worker-to-0-at-p1"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                      (= (sc2-raw-unit-command-target-unit-tag c) 9513)
+                                      (macro-econ-cmd? c)
+                                      (equal? (sc2-raw-unit-command-unit-tags c) '(9530))))
+                     cmds-crisis-evac))
+  ;; While still crushed at 7 SCVs, 0 gas workers, 160G/80M -> MUST NOT send any worker back to gas!
+  (define ref-crushed-0 (mk-l20-u 9512 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 1800))
+  (define scv-7th-min (mk-l20-u 9530 45 1 24.0 28.5 #:hp 45.0 #:rad 0.375
+                                #:orders (list (sc2-unit-order 295 #f 9513 0.0))))
+  (define cmds-crisis-hold0
+    (saturate-workers-and-gas-commands
+     (sc2-observation 8004 (sc2-player-common 1 80 160 50 15 8 7 0 0 0 0)
+                      (append (list cc-crushed ref-crushed-0 min-crushed scv-7th-min) scvs-6)
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l20-p0-1b-worker-crisis-blocks-gas-resat-at-0-while-crushed"
+              (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-target-unit-tag c) 9512)))
+                          cmds-crisis-hold0)))
+  ;; Once minerals recover to 130M (>= 120M), crisis ends cleanly & gas resaturates at P1 (no lingering latch!)
+  (define cmds-crisis-resume
+    (saturate-workers-and-gas-commands
+     (sc2-observation 8008 (sc2-player-common 1 130 160 50 15 8 7 0 0 0 0)
+                      (append (list cc-crushed ref-crushed-0 min-crushed scv-7th-min) scvs-6)
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l20-p0-1b-worker-crisis-resumes-gas-at-p1-once-minerals-recover"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                      (= (sc2-raw-unit-command-target-unit-tag c) 9512)
+                                      (macro-econ-cmd? c)))
+                     cmds-crisis-resume)))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

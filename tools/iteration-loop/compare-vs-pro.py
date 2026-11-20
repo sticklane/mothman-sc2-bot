@@ -203,6 +203,7 @@ def normalize_match(m):
         "wall_timeout_winning_tie": bool(m.get("wall_timeout_winning_tie") or (m.get("anomalies") or {}).get("wall_timeout_winning_tie")),
         "one_base_lockout": bool(m.get("one_base_lockout") or (m.get("anomalies") or {}).get("one_base_lockout")),
         "spire_sched_drop": bool(m.get("spire_sched_drop") or (m.get("anomalies") or {}).get("spire_sched_drop")),
+        "drip_feed_collapse": bool(m.get("drip_feed_collapse") or (m.get("anomalies") or {}).get("drip_feed_collapse")),
         "action_rejects": int(m.get("action_rejects") or 0),
         "crashes": m.get("crashes") or [],
         "signatures": m.get("signatures") or [],
@@ -387,6 +388,7 @@ def summarize_slice(rows):
         "wall_timeout_winning_ties": sum(1 for r in rows if r.get("wall_timeout_winning_tie")),
         "one_base_lockout_matches": sum(1 for r in rows if r.get("one_base_lockout")),
         "spire_sched_drop_matches": sum(1 for r in rows if r.get("spire_sched_drop")),
+        "drip_feed_collapse_matches": sum(1 for r in rows if r.get("drip_feed_collapse")),
         "action_rejects": sum(r["action_rejects"] for r in rows),
         "crashes": sum(len(r["crashes"]) for r in rows),
         "anomalies": dict(anom_counts),
@@ -797,10 +799,11 @@ def main():
                     f" | `WallTies` = **{cur_all.get('wall_timeout_ties', 0)}** "
                     f"(Win=`{cur_all.get('wall_timeout_winning_ties', 0)}`)"
                 )
-            if cur_all.get("one_base_lockout_matches", 0) > 0 or cur_all.get("spire_sched_drop_matches", 0) > 0 or cur_all.get("tr_p95_worst_ms") is not None:
+            if cur_all.get("one_base_lockout_matches", 0) > 0 or cur_all.get("spire_sched_drop_matches", 0) > 0 or cur_all.get("drip_feed_collapse_matches", 0) > 0 or cur_all.get("tr_p95_worst_ms") is not None:
                 extra_w8 += (
                     f" | `1BaseLock` = **{cur_all.get('one_base_lockout_matches', 0)}**"
                     f" | `SpireDrop` = **{cur_all.get('spire_sched_drop_matches', 0)}**"
+                    f" | `DripFeed` = **{cur_all.get('drip_feed_collapse_matches', 0)}**"
                 )
         print(
             f"\n### Stall, Retreat & Waste Watch (`W7/W8-LOOP-2`): "

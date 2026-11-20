@@ -13297,6 +13297,115 @@
   (assert-true! (and (not (not (memq 'spire (macro-brain-decision-scheduled-ids l19-z-spire-fog-latched))))
                      (not (memq 'hydralisk (macro-brain-decision-scheduled-ids l19-z-spire-fog-latched))))
                 "L19-P0-2 #43 ZvP: Once Tempest observed, Spire@1660 MUST stay latched through fog-of-war & beat Hydralisk")
+
+  ;; 51.8 Loop 20 Macro Core Uncorking (L20-P0-2: TvT FactoryTechLab->SiegeTank + Spire Backoff Immunity +
+  ;;      Zerg Anti-Tank Morphs + Overlord Cap + Static-Def/450M Release + #36 Breach Zealot)
+  ;; (a) #17/#32 TvT: Bare Factory schedules FactoryTechLab@565 > Barracks & suppresses WidowMine
+  (reset-macro-escrow-tracker!)
+  (define l20-t-factl
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 4100
+      #:minerals 160 #:gas 60 #:supply-used 36 #:supply-cap 54 #:workers 26 #:active-bases 2
+      #:mineral-harvesters 20 #:gas-harvesters 6
+      #:army-supply 10 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 4 'barracks 1 'factory 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 4 'barracks 1 'factory 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 26 'marine 10)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1 'factory 1))))
+  (assert-true! (and (not (not (memq 'factory-techlab (macro-brain-decision-scheduled-ids l20-t-factl))))
+                     (not (memq 'widow-mine (macro-brain-decision-scheduled-ids l20-t-factl))))
+                "L20-P0-2 #17/#32 TvT: Bare Factory must attach FactoryTechLab@565 > Barracks & suppress WidowMine")
+
+  ;; (b) #28 ZvP: Spire backoff immunity keeps spire@1660 escrowed against Capital Air
+  (reset-macro-escrow-tracker!)
+  (void (macro-escrow-sync-entry! 'Zerg 'Protoss 8980 300 3 #:workers 50 #:gas 40))
+  (macro-escrow-record-decision! 'Zerg 'Protoss 8980 300 3 'spire '())
+  (void (macro-escrow-sync-entry! 'Zerg 'Protoss 9700 300 3 #:workers 50 #:gas 40))
+  (define l20-z-spire-backoff-immune
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 9720
+      #:minerals 300 #:gas 80 #:supply-used 94 #:supply-cap 122 #:workers 50 #:active-bases 3
+      #:mineral-harvesters 38 #:gas-harvesters 12
+      #:army-supply 44 #:enemy-threat-supply 20 #:under-attack? #f #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'hydralisk-den 1 'extractor 6)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'hydralisk-den 1 'extractor 6)
+      #:unit-counts (hasheq 'drone 50 'queen 4 'hydralisk 10 'overlord 14)
+      #:enemy-unit-counts (hasheq 'tempest 6)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 5))))
+  (assert-true! (eq? (macro-brain-decision-saving-for l20-z-spire-backoff-immune) 'spire)
+                "L20-P0-2 #28 ZvP: Spire must stay immune to escrow backoff while zerg-cap-air-spire-due? is true")
+
+  ;; (c) #13 ZvT: Anti-Tank Ravager/Baneling morphs bypass Hive gas escrow vs 6 Siege Tanks
+  (reset-macro-escrow-tracker!)
+  (define l20-z-anti-tank
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Terran #:frame 12800
+      #:minerals 180 #:gas 85 #:supply-used 118 #:supply-cap 152 #:workers 60 #:active-bases 4
+      #:mineral-harvesters 46 #:gas-harvesters 14
+      #:army-supply 58 #:enemy-threat-supply 32 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 3 'lair 1 'spawning-pool 1 'roach-warren 1 'baneling-nest 1 'infestation-pit 1 'extractor 7)
+      #:total-building-counts (hasheq 'hatchery 3 'lair 1 'spawning-pool 1 'roach-warren 1 'baneling-nest 1 'infestation-pit 1 'extractor 7)
+      #:unit-counts (hasheq 'drone 60 'queen 5 'roach 6 'zergling 24 'overlord 18)
+      #:enemy-unit-counts (hasheq 'siege-tank 6 'marine 20 'medivac 2)
+      #:open-facility-slots (hasheq 'townhall 4 'larva 8))))
+  (assert-true! (or (not (not (memq 'ravager (macro-brain-decision-scheduled-ids l20-z-anti-tank))))
+                    (not (not (memq 'baneling (macro-brain-decision-scheduled-ids l20-z-anti-tank)))))
+                "L20-P0-2 #13 ZvT: Ravager/Baneling must morph past Hive escrow vs 6 Siege Tanks")
+
+  ;; (d) #25 ZvP: Overlord overbuilt suppression at >= 14 headroom & zero-army >= 4:00
+  (reset-macro-escrow-tracker!)
+  (define l20-z-ovl-guard
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 6000
+      #:minerals 100 #:gas 50 #:supply-used 46 #:supply-cap 54 #:workers 46 #:active-bases 3
+      #:mineral-harvesters 38 #:gas-harvesters 8
+      #:army-supply 0 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 3 'spawning-pool 1 'roach-warren 1 'extractor 3)
+      #:total-building-counts (hasheq 'hatchery 3 'spawning-pool 1 'roach-warren 1 'extractor 3)
+      #:unit-counts (hasheq 'drone 46 'overlord 6)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 5))))
+  (assert-true! (and (not (memq 'overlord (macro-brain-decision-scheduled-ids l20-z-ovl-guard)))
+                     (not (eq? (macro-brain-decision-saving-for l20-z-ovl-guard) 'overlord)))
+                "L20-P0-2 #25 ZvP: At >=4:00 with 0 army & 8 free supply, Brain must train combat NOT Overlord")
+
+  ;; (e) #24/#20 Static-defense (>=275M) & 450M non-expansion release
+  (reset-macro-escrow-tracker!)
+  (define l20-p-450-release
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 8400
+      #:minerals 480 #:gas 40 #:supply-used 62 #:supply-cap 94 #:workers 40 #:active-bases 3
+      #:mineral-harvesters 34 #:gas-harvesters 6
+      #:army-supply 22 #:enemy-threat-supply 10 #:under-attack? #f #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'nexus 3 'pylon 10 'gateway 4 'cybernetics-core 1 'forge 1 'robotics-facility 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 3 'pylon 10 'gateway 4 'cybernetics-core 1 'forge 1 'robotics-facility 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 40 'stalker 9 'zealot 2)
+      #:enemy-unit-counts (hasheq 'banshee 2 'marine 10)
+      #:open-facility-slots (hasheq 'townhall 3 'gateway 4 'robotics-facility 0))))
+  (assert-true! (= (macro-brain-decision-reserved-min-floor l20-p-450-release) 0)
+                "L20-P0-2 EscrowLock: At 480M (>=450M) non-expansion/non-supply must release min-floor=0")
+
+  ;; (f) 3D Visual-QA #36 P v 12PoolBot: Active base breach w/ ready Gateway & <3 army trains Zealot > CyberCore
+  (reset-macro-escrow-tracker!)
+  (define l20-p-36-breach
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Zerg #:frame 4124
+      #:minerals 150 #:gas 160 #:supply-used 17 #:supply-cap 31 #:workers 17 #:active-bases 1
+      #:mineral-harvesters 14 #:gas-harvesters 3
+      #:army-supply 0 #:enemy-threat-supply 6 #:under-attack? #t
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 1 'assimilator 1)
+      #:unit-counts (hasheq 'probe 17)
+      #:enemy-unit-counts (hasheq 'zergling 3)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 1))))
+  (assert-true! (and (not (not (memq 'zealot (macro-brain-decision-scheduled-ids l20-p-36-breach))))
+                     (not (memq 'cybernetics-core (macro-brain-decision-scheduled-ids l20-p-36-breach))))
+                "L20-P0-2 #36 Breach: Ready Gateway w/ <3 combat units under attack MUST schedule Zealot > CyberCore")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms
