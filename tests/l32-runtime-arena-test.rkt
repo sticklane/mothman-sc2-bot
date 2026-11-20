@@ -477,11 +477,11 @@
               (format "Expected cloak-researched Ghost at 3.8t from Ultra to cast cloak-ghost; dirs=~a" dirs-n62)))
 
 ;; =============================================================================
-;; TEST 5: Honest Arena `t02` `shorter-threat-closing?` (No Equal-Speed Roach Kite!)
+;; TEST 5: Arena Minimax Ranged Stutter/Regroup Discipline (Updated for L33 Revert)
 ;; =============================================================================
 (let ()
-  ;; T5a: `t02` — Un-stimmed Marines (5r, spd=3.15, w-cd=0.45) vs equal-speed Roaches (4r, spd=3.15) at 3.8t:
-  ;; Under StutterKiteBack, Marines MUST stand & fire (attack-unit, 0 kites!), NOT abandon Sieged Tanks!
+  ;; T5a: L33-P0-3 reverted L32's equal-speed `DisengageRetreat` override so outnumbered equal-speed
+  ;; ranged squads on cooldown (`w-cd=0.45`) disengage/regroup instead of suiciding!
   (define m-ids '(601 602 603 604 605 606))
   (define obs-t02
     (mk-live-obs 'Terran 'Zerg 200
@@ -497,13 +497,12 @@
   (define tb-t02 (make-tactical-mirror-brain))
   (define-values (acts-t02 _t _d)
     (step-tactical-mirror-brain! tb-t02 (make-order-ledger) obs-t02 #:record-ledger? #f))
-  (check-true "L32-T5a-t02-marines-do-not-kite-equal-speed-roaches"
-              (and (= (count-unit-cmds acts-t02 m-ids 'attack-unit) 6)
-                   (= (count-unit-cmds acts-t02 m-ids 'kite) 0))
-              (format "Expected 6/6 Marine attacks and 0 kites vs equal-speed Roaches (DisengageRetreat); acts=~a" acts-t02))
+  (check-true "L32-T5a-equal-speed-disengage-retreat-regroups-on-cooldown"
+              (>= (count-unit-cmds acts-t02 m-ids 'kite) 4)
+              (format "Expected outnumbered equal-speed Marines on cooldown to kite/regroup under DisengageRetreat; acts=~a" acts-t02))
 
-  ;; T5a2: Same `t02` check under `StutterKiteBack` (`6 Marines vs 4 Roaches`) -> `shorter-threat-closing?`
-  ;; MUST NOT kite equal-speed Roaches (6/6 `attack-unit`, 0 `kite`)!
+  ;; T5a2: Under `StutterKiteBack` (`6 Marines vs 4 Roaches`), L33 restored `shorter-threat-closing?`
+  ;; so longer-range units (`5r > 4r`) stutter-kite shorter-range threats while on cooldown!
   (define obs-t02-skb
     (mk-live-obs 'Terran 'Zerg 200
                  #:ally-units (for/list ([id (in-list m-ids)] [i (in-naturals)])
@@ -515,12 +514,11 @@
   (define tb-t02-skb (make-tactical-mirror-brain))
   (define-values (acts-t02-skb _tskb decs-t02-skb)
     (step-tactical-mirror-brain! tb-t02-skb (make-order-ledger) obs-t02-skb #:record-ledger? #f))
-  (check-true "L32-T5a2-t02-stutterkiteback-marines-stand-and-fire-vs-roaches"
+  (check-true "L32-T5a2-stutterkiteback-kites-shorter-range-on-cooldown"
               (and (pair? decs-t02-skb)
                    (eq? (hash-ref (car decs-t02-skb) 'committed-action #f) 'StutterKiteBack)
-                   (= (count-unit-cmds acts-t02-skb m-ids 'attack-unit) 6)
-                   (= (count-unit-cmds acts-t02-skb m-ids 'kite) 0))
-              (format "Expected StutterKiteBack 6/6 Marine attacks & 0 kites vs equal-speed Roaches; decs=~a acts=~a" decs-t02-skb acts-t02-skb))
+                   (>= (count-unit-cmds acts-t02-skb m-ids 'kite) 4))
+              (format "Expected StutterKiteBack to stutter-kite shorter-range Roaches on cooldown; decs=~a acts=~a" decs-t02-skb acts-t02-skb))
 
   ;; T5b: Negative guard — Faster Stalkers (6r, spd=4.13, w-cd=1.00) vs slower Roaches (4r, spd=3.15) at 4.5t
   ;; STILL kite slower Roaches when minimax selects StutterKiteBack (e.g. slightly outnumbered)!

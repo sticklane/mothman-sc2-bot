@@ -6042,23 +6042,23 @@
       (memq canon-bldg '(extractor refinery assimilator extractor-rich refinery-rich assimilator-rich)))
     (define is-static-def?
       (memq canon-bldg '(spore-crawler missile-turret photon-cannon shield-battery spine-crawler bunker)))
-    ;; L32-P0-1 (`#28` GasZeroFreeze -> 0): Keep non-defensive tech structures (`evolution-chamber`,
-    ;; `roach-warren`, etc.) strictly outside the `4.5t` TownHall-to-geyser/gas-building harvest corridor
-    ;; while preserving tight `0.25t` mineral/gas-line static defense (Spores/Cannons/Turrets).
-    (define is-non-def-tech?
+    ;; L32-P0-1 + L33-P0-1 (`#28` GasZeroFreeze=0, zero P/T tight-main choke):
+    ;; Enforce the `4.5t` TownHall-to-geyser/gas-building harvest corridor strictly for Zerg
+    ;; non-defensive tech structures (`evolution-chamber`, `roach-warren`, `baneling-nest`,
+    ;; `spawning-pool`, `hydralisk-den`, `lurker-den`, `infestation-pit`, `spire`, etc.); keep
+    ;; standard `base-lane-clear` for Protoss/Terran structures so narrow mains never choke
+    ;; `barracks`/`gateway`/`cybernetics-core`/`engineering-bay`, while preserving `0.25t` static defense!
+    (define is-zerg-non-def-tech?
       (memq canon-bldg
             '(evolution-chamber roach-warren baneling-nest spawning-pool
               hydralisk-den lurker-den lurker-den-mp infestation-pit
-              spire greater-spire ultralisk-cavern nydus-network
-              engineering-bay armory ghost-academy fusion-core
-              forge cybernetics-core twilight-council templar-archives
-              dark-shrine robotics-bay fleet-beacon)))
+              spire greater-spire ultralisk-cavern nydus-network)))
     (define base-lane-clear
       (+ (max cand-hw cand-hh) (if is-static-def? 0.25 0.95)))
     (or is-gas-bldg?
         (for/and ([seg (in-list mining-segments)])
           (define req-clear
-            (if (and is-non-def-tech? (>= (length seg) 5) (fifth seg))
+            (if (and is-zerg-non-def-tech? (>= (length seg) 5) (fifth seg))
                 (max 4.5 base-lane-clear)
                 base-lane-clear))
           (>= (point-to-segment-dist cx cy (first seg) (second seg) (third seg) (fourth seg))
@@ -7455,9 +7455,9 @@
           ;; Strictly enforces `both-valid-pt` when `require-addon-clear?` is `#t` (add-on relocation).
           (define use-fast-3x3-fallback?
             (and (not require-addon-clear?)
-                 (not first-rax-allow-wall-3x3?)
                  (or prefer-3x3-fallback?
-                     (terran-5x3-miss-active? canon-bldg anchor-x anchor-y neg-cd-cur-loop))))
+                     (and (not first-rax-allow-wall-3x3?)
+                          (terran-5x3-miss-active? canon-bldg anchor-x anchor-y neg-cd-cur-loop)))))
           (cond
             [use-fast-3x3-fallback?
              (define em-raw (near-base-emergency-cands))
@@ -10975,8 +10975,7 @@
                                            (and (not (sc2-unit-is-flying s))
                                                 (eq? (sc2-id->unit-symbol (sc2-unit-unit-type s) 'unknown) bsym)))
                                          self-structures)
-                                  (and (memq bsym '(factory starport))
-                                       (>= (hash-ref SC2-TERRAN-5X3-MISS-STREAK bsym 0) 3)))))
+                                  (>= (hash-ref SC2-TERRAN-5X3-MISS-STREAK bsym 0) 2))))
                        (values (if is-t-bldg? (set-add as bsym) as)
                                (if is-t-core? (set-add cs bsym) cs)
                                (or sp (and is-t-spill? #t)))]
@@ -13271,12 +13270,10 @@
             (define terran-prod-spillover-eligible?
               (and is-terran-prod-bldg?
                    (or (>= cur-terran-prod-count 1)
-                       (>= cur-terran-prod-miss-streak 3))))
+                       (>= cur-terran-prod-miss-streak 2))))
             (define terran-prod-fast-3x3?
               (and is-terran-prod-bldg?
-                   (or (and (>= cur-terran-prod-count 1)
-                            (>= cur-terran-prod-miss-streak 2))
-                       (>= cur-terran-prod-miss-streak 3))))
+                   (>= cur-terran-prod-miss-streak 2)))
             (define terran-5x3-missed?
               (and is-terran-prod-bldg?
                    (or terran-prod-fast-3x3?
@@ -16460,19 +16457,21 @@
 (define (wire-cmd-priority-tier cmd)
   (define (ab-tier ab)
     (cond
-      ;; P0: Life-or-death survival, tactical spells, cancel, mode-switches & depot raise/lower
+      ;; P0: Life-or-death survival, tactical spells, cancel, & combat mode-switches
+      ;;     (L33-P0-1: Supply Depot lower/raise 556/558 moved out of P0 -> P2 so a blocked depot
+      ;;      can NEVER saturate the 485 rolling APM cap and starve P1 macro!)
       [(memv ab '(42 314 349 380 382 383 396 407 408 913 1408 1437 1438 1882 2244
                   2368 2370 2371 2546 2594 2706 3675 1442 3687 74 76 140 249 251 399 401
                   1036 1526 1528 1530 1628 1664 1978 1998 2063 2067 2069 2073 2116 2146
                   2324 2338 2346 2350 2358 2375 2376 2393 2505 2542 2545 2588 2714 3668 3669
                   3747 3751 3753 3755 3757 4107 4113 4126 142 3686 388 390
-                  2095 2097 2108 2110 403 405 2362 2364 556 558))
+                  2095 2097 2108 2110 403 405 2362 2364))
        0]
       ;; P3: Routine harvest, worker rebalance & non-urgent Bunker Salvage (`32`)
       [(memv ab '(32 166 167 295 296 298 299 1183 1184 3666 3667))
        3]
-      ;; P2: Combat attack, move, kite, hold-position, patrol, stop
-      [(memv ab '(4 5 6 7 16 17 18 19 20 23 24 25 2099 3665 3674 3771 3793 3794 3795))
+      ;; P2: Combat attack, move, kite, hold-position, patrol, stop, & Supply Depot raise/lower (`556`/`558`)
+      [(memv ab '(4 5 6 7 16 17 18 19 20 23 24 25 556 558 2099 3665 3674 3771 3793 3794 3795))
        2]
       ;; P1: Macro build, expand, morph, train, warp-in, research, tumor, MULE
       [else 1]))
@@ -16505,6 +16504,9 @@
 (define SC2-GOV-LAST-P1-LOOP (make-weak-hasheq))
 (define SC2-GOV-LAST-P2-LOOP (make-weak-hasheq))
 (define SC2-GOV-LAST-P3-LOOP (make-weak-hasheq))
+(define SC2-GOV-P0-MODE-DEDUP (make-weak-hasheq))
+(define SC2-GOV-P0-MODE-SWITCH-ABILITIES
+  (seteqv 388 390 403 405 556 558 1978 1998 2095 2097 2108 2110 2362 2364 2558 2560))
 
 (define (govern-sc2-wire-actions! gov raw-cmds game-loop [_obs #f])
   (define cur-loop (if (exact-integer? game-loop) (max 0 game-loop) 0))
@@ -16520,7 +16522,13 @@
     (set-box! SC2-GOV-LAST-CAM-Y #f)
     (hash-set! SC2-GOV-LAST-P1-LOOP gov -1000)
     (hash-set! SC2-GOV-LAST-P2-LOOP gov -1000)
-    (hash-set! SC2-GOV-LAST-P3-LOOP gov -1000))
+    (hash-set! SC2-GOV-LAST-P3-LOOP gov -1000)
+    (hash-set! SC2-GOV-P0-MODE-DEDUP gov (make-hash)))
+  (define gov-mode-dedup
+    (or (hash-ref SC2-GOV-P0-MODE-DEDUP gov #f)
+        (let ([ht (make-hash)])
+          (hash-set! SC2-GOV-P0-MODE-DEDUP gov ht)
+          ht)))
 
   ;; 1. Refill token bucket purely from game-loop delta (22.4 loops/sec = 1344 loops/min)
   (define prev-loop (wire-apm-governor-last-loop gov))
@@ -16597,8 +16605,19 @@
         (hash-set! SC2-CMD-FRAMING-CAM cur prev))
       (link-loop (cdr rem) cur)))
 
+  (define (mode-switch-dedup-key c)
+    (and (sc2-raw-unit-command? c)
+         (not (urgent-survival-cmd? c))
+         (set-member? SC2-GOV-P0-MODE-SWITCH-ABILITIES (sc2-raw-unit-command-ability-id c))
+         (cons (sc2-raw-unit-command-ability-id c)
+               (sort (sc2-raw-unit-command-unit-tags c) <))))
+  (define (mode-switch-dedup-drop? c)
+    (define k (mode-switch-dedup-key c))
+    (and k (< (- cur-loop (hash-ref gov-mode-dedup k -1000)) 10)))
+
   (define coalesced
-    (coalesce-sc2-raw-commands filtered0 SC2-WIRE-COALESCABLE-ABILITIES chunk-tag-list))
+    (filter (lambda (c) (not (mode-switch-dedup-drop? c)))
+            (coalesce-sc2-raw-commands filtered0 SC2-WIRE-COALESCABLE-ABILITIES chunk-tag-list)))
 
   ;; 4. Emit by priority tier P0..P4 with tiered QoS reserve floors, selection-affinity grouping,
   ;;    and exact replay event cost accounting:
@@ -16667,11 +16686,15 @@
         (define tok-floor (tok-floor-fn chosen))
         (define hr-floor (hr-floor-fn chosen))
         (define did-emit?
-          (and (or (= ev-cost 0)
+          (and (not (mode-switch-dedup-drop? chosen))
+               (or (= ev-cost 0)
                    (and (>= (- rem-headroom cost-fl) hr-floor)
                         (>= (- (wire-apm-governor-tokens gov) cost-fl) tok-floor)))
                #t))
         (when did-emit?
+          (define ms-key (mode-switch-dedup-key chosen))
+          (when ms-key
+            (hash-set! gov-mode-dedup ms-key cur-loop))
           (when (> ev-cost 0)
             (set! rem-headroom (- rem-headroom cost-fl))
             (set-wire-apm-governor-tokens!
@@ -16699,8 +16722,19 @@
   (define (cmds-for-tier tier)
     (filter (lambda (c) (= (eff-cmd-tier c) tier)) coalesced))
 
-  ;; 1. Run P0 urgent survival/spells first.
-  (run-cmd-list! (cmds-for-tier 0)
+  ;; 1a. Run P0 urgent survival, opening worker splits, and active combat spells first.
+  ;;     Partition out non-urgent P0 mode-switches (388/390/403/405/1978/1998/2095/2097/2108/2110/2362/2364/2558/2560)
+  ;;     so overdue P1 macro rescue runs BEFORE non-urgent P0 mode switches!
+  (define p0-cmds (cmds-for-tier 0))
+  (define-values (p0-mode-switch-cmds p0-urgent-cmds)
+    (partition (lambda (c)
+                 (and (sc2-raw-unit-command? c)
+                      (not (urgent-survival-cmd? c))
+                      (not (opening-worker-split-cmd? c))
+                      (set-member? SC2-GOV-P0-MODE-SWITCH-ABILITIES
+                                   (sc2-raw-unit-command-ability-id c))))
+               p0-cmds))
+  (run-cmd-list! p0-urgent-cmds
                  (lambda (c) (tier-token-floor 0 c))
                  (lambda (_) (tier-headroom-floor 0)))
 
@@ -16721,9 +16755,25 @@
              (>= (- cur-loop (hash-ref SC2-GOV-LAST-P2-LOOP gov -1000)) 8))
     (run-cmd-list! p2-large-cmds (lambda (_) -2.0) (lambda (_) 2.0) #:max-count 4))
 
-  ;; 2. Run P1 macro (`train`, `warp-in`, `build`, `expand`, `morph`, `research`, `MULE`) BEFORE P2/P4 rescue
-  ;;    so continuous P0/P2 combat micro NEVER starves macro production, expansions, or upgrades (#5130439, #5131238)!
+  ;; 1c. L33-P0-1 (`H2H #06` 168s 5,260M freeze -> 0): Run overdue P1 macro rescue
+  ;;     (`>= 8` loops since `SC2-GOV-LAST-P1-LOOP`, `#:max-count 4`) with `hr-floor = 0.0`
+  ;;     (matching P0!) IMMEDIATELY after urgent P0 survival/spells (& overdue large-P2 rescue)
+  ;;     and BEFORE non-urgent P0 mode switches — mathematically guaranteeing MULE/SCV/Train/Build
+  ;;     NEVER starve even when rolling APM headroom hits <= 2.0!
   (define p1-cmds (cmds-for-tier 1))
+  (define p1-macro-all
+    (filter (lambda (c) (not (sc2-raw-camera-move? c))) p1-cmds))
+  (when (and (pair? p1-macro-all)
+             (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-LOOP gov -1000)) 8))
+    (run-cmd-list! p1-macro-all (lambda (_) -3.0) (lambda (_) 0.0) #:max-count 4))
+
+  ;; 1d. Run remaining non-urgent P0 mode switches (`>= 10`-loop deduped above).
+  (run-cmd-list! p0-mode-switch-cmds
+                 (lambda (c) (tier-token-floor 0 c))
+                 (lambda (_) (tier-headroom-floor 0)))
+
+  ;; 2. Run normal P1 macro drain (`train`, `warp-in`, `build`, `expand`, `morph`, `research`, `MULE`)
+  ;;    BEFORE normal P2/P4 drain, with `hr-floor = 0.0` overdue rescue if still stale (`>= 8` loops)!
   (run-cmd-list! p1-cmds
                  (lambda (c) (tier-token-floor 1 c))
                  (lambda (_) (tier-headroom-floor 1)))
@@ -16732,7 +16782,7 @@
             p1-cmds))
   (when (and (pair? p1-macro-rem)
              (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-LOOP gov -1000)) 8))
-    (run-cmd-list! p1-macro-rem (lambda (_) -3.0) (lambda (_) 2.0) #:max-count 4))
+    (run-cmd-list! p1-macro-rem (lambda (_) -3.0) (lambda (_) 0.0) #:max-count 4))
 
   ;; 3. Bounded anti-starvation rescue for overdue P2 combat (>= 12 loops stale), overdue P3 routine
   ;;    worker/transfer (>= 24 loops stale, W18-P0-2-wire), and 1 overdue routine P4 camera (>= 44 loops).

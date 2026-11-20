@@ -7201,6 +7201,261 @@
                      (sc2-raw-unit-command? gw-2816)))
     (cleanup!)))
 
+;; =============================================================================
+;; Loop 33 (`L33-P0-1`): Zero P0 Wire Starvation of P1 Macro + Zerg-Only 4.5t Corridor
+;; =============================================================================
+(printf "[Loop 33] Testing L33-P0-1 depot 556/558 P2 demotion, 10f mode-switch dedup, unstarvable P1 hr-floor=0 rescue, Zerg-only 4.5t corridor, & >=2-miss spillover...\n")
+(let ()
+  (define (mk-l33-u tag utype alliance x y
+                    #:hp [hp 100.0] #:rad [rad 1.0] #:mins [mins 0] #:vesp [vesp 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 3) 0 2))
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 0 #f #f #f
+              hp hp 0.0 0.0 0.0 0.0 mins vesp #f #f #f #t #f
+              '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+
+  (define (l33-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+
+  (define (l33-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59933 "/sc2api" c-in c-out #f 1))
+    (define rpc-cnt (box 0))
+    (define saw-319? (box #f))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define id-p (assoc 97 req-f))
+             (define id-b (if id-p (encode-uint32 97 (third id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (set-box! rpc-cnt (add1 (unbox rpc-cnt)))
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (when (= ab 319) (set-box! saw-319? #t))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws rpc-cnt saw-319? (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+
+  ;; L33-P0-1a: Supply Depot lower/raise (`556`/`558`) moved out of P0 -> P2, and identical
+  ;; non-urgent mode switches `(ab, sorted-tags)` are deduped for >= 10 game loops at the governor!
+  (define cmd-556 (sc2-raw-unit-command 556 #f 0 '(13001) #f))
+  (define cmd-558 (sc2-raw-unit-command 558 #f 0 '(13001) #f))
+  (define gov-33a (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define emit-loops-558
+    (for/list ([gl (in-list '(100 102 104 106 108 110))]
+               #:when (pair? (govern-sc2-wire-actions!
+                              gov-33a
+                              (list (sc2-raw-unit-command 558 #f 0 '(13001) #f))
+                              gl)))
+      gl))
+  (define emit-loops-388
+    (for/list ([gl (in-list '(200 203 206 209 210))]
+               #:when (pair? (govern-sc2-wire-actions!
+                              gov-33a
+                              (list (sc2-raw-unit-command 388 #f 0 '(13002 13003) #f))
+                              gl)))
+      gl))
+  (check-true "l33-p0-1a-depot-556-558-tier-2-and-10-loop-mode-switch-dedup"
+              (and (= (wire-cmd-priority-tier cmd-556) 2)
+                   (= (wire-cmd-priority-tier cmd-558) 2)
+                   (equal? emit-loops-558 '(100 110))
+                   (equal? emit-loops-388 '(200 210))))
+
+  ;; L33-P0-1b: Relentless `558` depot spam + non-urgent P0 mode-switch spam every step over >= 240 loops
+  ;; MUST NEVER starve P1 macro (`171` MULE, `524` SCV, `560` Marine, `321` Build Barracks) AND stays <= 485 APM!
+  (define gov-33b (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define p1-emitted-33b 0)
+  (define mule-emitted-33b 0)
+  (define scv-emitted-33b 0)
+  (define train-emitted-33b 0)
+  (define build-emitted-33b 0)
+  (define max-p1-gap-33b 0)
+  (define last-p1-loop-33b 1000)
+  (define ev-win-33b '())
+  (define peak-60s-ev-33b 0)
+  (define sim-sel-33b #f)
+  (for ([step-i (in-range 0 65)])
+    (define gl (+ 1000 (* step-i 4)))
+    (define spam-558
+      (for/list ([k (in-range 10)])
+        (sc2-raw-unit-command 558 #f 0 (list (+ 13100 k (* step-i 20))) #f)))
+    (define spam-388
+      (for/list ([k (in-range 6)])
+        (sc2-raw-unit-command 388 #f 0 (list (+ 13500 k (* step-i 20))) #f)))
+    (define base-macro
+      (list (sc2-raw-unit-command 171 #f 9001 (list (+ 13900 (modulo step-i 3))) #f)
+            (sc2-raw-unit-command 524 #f 0 (list (+ 13910 (modulo step-i 3))) #f)
+            (sc2-raw-unit-command 560 #f 0 (list (+ 13920 (modulo step-i 4))) #f)
+            (sc2-raw-unit-command 321 (sc2-point2d 34.5 34.5) 0 (list (+ 13930 (modulo step-i 4))) #f)))
+    (define rot (modulo (+ step-i (quotient step-i 2)) 4))
+    (define macro-batch (append (drop base-macro rot) (take base-macro rot)))
+    (define out (govern-sc2-wire-actions! gov-33b (append spam-558 spam-388 macro-batch) gl))
+    (define saw-p1-this-step? #f)
+    (for ([c (in-list out)] #:when (sc2-raw-unit-command? c))
+      (define ab (sc2-raw-unit-command-ability-id c))
+      (define tags (sc2-raw-unit-command-unit-tags c))
+      (define cost (if (and sim-sel-33b (equal? tags sim-sel-33b)) 1 2))
+      (set! sim-sel-33b tags)
+      (set! ev-win-33b (cons (cons gl cost) ev-win-33b))
+      (when (memv ab '(171 524 560 321))
+        (set! saw-p1-this-step? #t)
+        (set! p1-emitted-33b (add1 p1-emitted-33b))
+        (case ab
+          [(171) (set! mule-emitted-33b (add1 mule-emitted-33b))]
+          [(524) (set! scv-emitted-33b (add1 scv-emitted-33b))]
+          [(560) (set! train-emitted-33b (add1 train-emitted-33b))]
+          [(321) (set! build-emitted-33b (add1 build-emitted-33b))])))
+    (set! ev-win-33b (filter (lambda (e) (> (car e) (- gl 1344))) ev-win-33b))
+    (set! peak-60s-ev-33b (max peak-60s-ev-33b (for/sum ([e (in-list ev-win-33b)]) (cdr e))))
+    (if saw-p1-this-step?
+        (begin
+          (set! max-p1-gap-33b (max max-p1-gap-33b (- gl last-p1-loop-33b)))
+          (set! last-p1-loop-33b gl))
+        (set! max-p1-gap-33b (max max-p1-gap-33b (- gl last-p1-loop-33b)))))
+  (check-true (format "l33-p0-1b-558-and-p0-mode-spam-never-starves-p1-macro (p1=~a gap=~a ev=~a)"
+                      p1-emitted-33b max-p1-gap-33b peak-60s-ev-33b)
+              (and (>= p1-emitted-33b 40)
+                   (>= mule-emitted-33b 10)
+                   (>= scv-emitted-33b 10)
+                   (>= train-emitted-33b 10)
+                   (>= build-emitted-33b 10)
+                   (<= max-p1-gap-33b 16)
+                   (<= peak-60s-ev-33b 485)))
+
+  ;; L33-P0-1c: At rolling-window saturation (`rem-headroom = 2.0`), overdue P1 macro (`>= 8` loops)
+  ;; MUST emit with `hr-floor = 0.0` BEFORE non-urgent P0 mode switches (`388`), while `urgent-survival-cmd?`
+  ;; P0 spells STILL take precedence over overdue P1!
+  (define gov-33c (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 12.0))
+  ;; Loop 100: 1 P1 cmd (cost 2, last-p1=100); Loop 102: 4 P0 cmds (cost 8 -> rolling-used=10, headroom=2.0!).
+  (void (govern-sc2-wire-actions! gov-33c (list (sc2-raw-unit-command 524 #f 0 '(13950) #f)) 100))
+  (void (govern-sc2-wire-actions!
+         gov-33c
+         (for/list ([k (in-range 4)])
+           (mark-urgent-survival-cmd! (sc2-raw-unit-command 407 #f 13999 (list (+ 13970 k)) #f)))
+         102))
+  (define mode-388-c (sc2-raw-unit-command 388 #f 0 '(13951) #f))
+  (define bld-321-c  (sc2-raw-unit-command 321 (sc2-point2d 34.5 34.5) 0 '(13952) #f))
+  (define out-33c (govern-sc2-wire-actions! gov-33c (list mode-388-c bld-321-c) 112))
+  ;; Now check urgent P0 beats overdue P1 when only 2.0 headroom remains:
+  (define gov-33d (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 12.0))
+  (void (govern-sc2-wire-actions! gov-33d (list (sc2-raw-unit-command 524 #f 0 '(13960) #f)) 100))
+  (void (govern-sc2-wire-actions!
+         gov-33d
+         (for/list ([k (in-range 4)])
+           (mark-urgent-survival-cmd! (sc2-raw-unit-command 407 #f 13999 (list (+ 13980 k)) #f)))
+         102))
+  (define urg-407-d (mark-urgent-survival-cmd! (sc2-raw-unit-command 407 #f 13969 '(13961) #f)))
+  (define bld-321-d (sc2-raw-unit-command 321 (sc2-point2d 34.5 34.5) 0 '(13962) #f))
+  (define out-33d (govern-sc2-wire-actions! gov-33d (list bld-321-d urg-407-d) 112))
+  (check-true "l33-p0-1c-overdue-p1-runs-at-hr-floor-0-before-p0-mode-switch-after-urgent-p0"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) out-33c)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 388))) out-33c))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 407))) out-33d)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) out-33d))))
+
+  ;; L33-P0-1d: Narrow `4.5t` TownHall-to-geyser harvest corridor to Zerg tech ONLY:
+  ;; Zerg `evolution-chamber`/`roach-warren` stay blocked at `3.4t < 4.5t` (keeping `GasZeroFreeze = 0`),
+  ;; while Protoss `cybernetics-core`/`gateway` and Terran `engineering-bay`/`barracks` PASS at `3.4t`!
+  (define th-pt-33 (mk-l33-u 13201 18 1 185.5 86.5 #:hp 1500.0 #:rad 2.75))
+  (define ref-33   (mk-l33-u 13202 20 1 192.5 89.5 #:hp 500.0 #:rad 1.5 #:vesp 2000))
+  (define pt-units-33 (list th-pt-33 ref-33))
+  (check-true "l33-p0-1d-45t-corridor-zerg-only-allows-pt-tight-main-placement"
+              (and (not (placement-preserves-base-exit-and-spawn? 188.5 91.5 'evolution-chamber pt-units-33
+                                                                  #:base-x 185.5 #:base-y 86.5))
+                   (not (placement-preserves-base-exit-and-spawn? 188.5 91.5 'roach-warren pt-units-33
+                                                                  #:base-x 185.5 #:base-y 86.5))
+                   (placement-preserves-base-exit-and-spawn? 188.5 91.5 'cybernetics-core pt-units-33
+                                                             #:base-x 185.5 #:base-y 86.5)
+                   (placement-preserves-base-exit-and-spawn? 188.5 91.5 'engineering-bay pt-units-33
+                                                             #:base-x 185.5 #:base-y 86.5)
+                   (placement-preserves-base-exit-and-spawn? 188.5 91.5 'barracks pt-units-33
+                                                             #:base-x 185.5 #:base-y 86.5)
+                   (placement-preserves-base-exit-and-spawn? 188.5 91.5 'gateway pt-units-33
+                                                             #:base-x 185.5 #:base-y 86.5)))
+
+  ;; L33-P0-1e: `barracks` with `0` existing Barracks spills over across ALL safe completed TownHalls
+  ;; via `0.5t` pure `3x3` (skipping `319`) after `>= 2` placement misses!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (hash-set! SC2-TERRAN-5X3-MISS-STREAK 'barracks 2)
+  (let-values ([(ws rpc-cnt saw-319? cleanup!)
+                (l33-start-mock-ws
+                 (lambda (ab px py)
+                   (if (and (= ab 321) (<= (l33-dist px py 68.5 30.5) 0.1)) 1 2)))])
+    (define cc-m33 (mk-l33-u 13301 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define cc-n33 (mk-l33-u 13302 18 1 64.5 30.5 #:hp 1500.0 #:rad 2.75))
+    (define scv-33 (mk-l33-u 13303 45 1 63.0 29.0 #:hp 45.0 #:rad 0.375))
+    (define nat-m33
+      (for/list ([y (in-list '(27.5 29.5 31.5 33.5))] [i (in-naturals 0)])
+        (mk-l33-u (+ 13310 i) 341 3 71.0 y #:hp 1000.0 #:rad 1.0 #:mins 1500)))
+    (define g33-rax
+      (sc2-game-info "L33RaxSpillMap" "" '() '(128 128) '(4 4 124 124)
+                     (list (sc2-point2d 100.0 100.0)) w3-full-grid #f w3-full-grid))
+    (define rax33-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build barracks 32.0 30.0))
+       (make-test-obs 22000 500 250 (append (list cc-m33 cc-n33 scv-33) nat-m33))
+       #:ws-conn ws #:game-info g33-rax))
+    (define rax33-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) rax33-cmds))
+    (define rax33-pt (and rax33-cmd (sc2-raw-unit-command-target-pos rax33-cmd)))
+    (check-true "l33-p0-1e-barracks1-spills-over-05t-3x3-across-safe-ths-after-2-misses"
+                (and (not (unbox saw-319?))
+                     (= (unbox rpc-cnt) 2)
+                     (sc2-point2d? rax33-pt)
+                     (<= (l33-dist (sc2-point2d-x rax33-pt) (sc2-point2d-y rax33-pt) 68.5 30.5) 0.1)))
+    (cleanup!))
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

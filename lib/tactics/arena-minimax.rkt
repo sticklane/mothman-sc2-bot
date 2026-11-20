@@ -3586,6 +3586,64 @@
                [(eq? et 'colossus) 132.25]         ;; 11.5t ETL Colossus firing/approach band
                [else 342.25]))                     ;; 18.5t Tempest/Capital siege band
            (vector et (tactical-sim-unit-x e) (tactical-sim-unit-y e) r2)))
+       ;; L33-P0-3 (`t02` Tank-Screen Bio Priority & `p01` Melee-Engaged Ranged Focus-Fire):
+       ;; Precompute once per arena:
+       ;;   1) Friendly `siege-tank-sieged` positions & melee rushers (`range <= 1.5`) within `<= 6.5t`
+       ;;      of a friendly Sieged Tank so allied Bio boosts them `2.5x` while Tanks splash Roaches.
+       ;;   2) Friendly melee allies (`range <= 1.5`) actively engaged (`<= 3.5t`) with enemy ranged
+       ;;      biological units so ranged allies (`Stalker`) in weapon range focus-fire lowest-HP
+       ;;      enemy Bio instead of backward-kiting while their melee screen evaporates!
+       (define arena-ally-sieged-tank-pts
+         (for/list ([a (in-list arena-ally-units)]
+                    #:when (eq? (tactical-sim-unit-type a) 'siege-tank-sieged))
+           (cons (tactical-sim-unit-x a) (tactical-sim-unit-y a))))
+       (define arena-tank-rusher-vecs
+         (if (and (pair? arena-ally-sieged-tank-pts) (pair? ground-vecs))
+             (for/list ([ev (in-list ground-vecs)]
+                        #:when (let ([e (vector-ref ev 0)])
+                                 (and (fl> (tactical-sim-unit-ground-dps e) 0.0)
+                                      (fl<= (tactical-sim-unit-ground-range e) 1.5)
+                                      (let ([ex-r (vector-ref ev 2)]
+                                            [ey-r (vector-ref ev 3)])
+                                        (for/or ([tp (in-list arena-ally-sieged-tank-pts)])
+                                          (define dx (fl- ex-r (car tp)))
+                                          (define dy (fl- ey-r (cdr tp)))
+                                          (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 42.25))))))
+               ev)
+             '()))
+       (define arena-ally-melee-pts
+         (for/list ([a (in-list arena-ally-units)]
+                    #:when (and (fl> (tactical-sim-unit-ground-dps a) 0.0)
+                                (fl<= (tactical-sim-unit-ground-range a) 1.5)
+                                (not (memq (tactical-sim-unit-type a) '(probe scv drone mule)))))
+           (cons (tactical-sim-unit-x a) (tactical-sim-unit-y a))))
+       (define arena-ranged-bio-enemies
+         (if (pair? arena-ally-melee-pts)
+             (for/list ([e (in-list arena-enemy-sims)]
+                        #:when (and (not (enemy-sim-untargetable-cloak? e))
+                                    (fl> (tactical-sim-unit-ground-dps e) 0.0)
+                                    (fl> (tactical-sim-unit-ground-range e) 1.5)
+                                    (not (fx= (fxand (tactical-sim-unit-attr-mask e) SC2-UNIT-ATTR-BIOLOGICAL) 0))))
+               e)
+             '()))
+       (define-values (arena-melee-engaged-ranged-bio? arena-engaged-melee-cx arena-engaged-melee-cy)
+         (if (and (pair? arena-ally-melee-pts) (pair? arena-ranged-bio-enemies))
+             (for/fold ([cnt 0] [sx 0.0] [sy 0.0]
+                        #:result (if (> cnt 0)
+                                     (values #t
+                                             (fl/ sx (exact->inexact cnt))
+                                             (fl/ sy (exact->inexact cnt)))
+                                     (values #f arena-ally-cx arena-ally-cy)))
+                       ([mp (in-list arena-ally-melee-pts)])
+               (define mx (car mp))
+               (define my (cdr mp))
+               (if (for/or ([re (in-list arena-ranged-bio-enemies)])
+                     (define dx (fl- mx (tactical-sim-unit-x re)))
+                     (define dy (fl- my (tactical-sim-unit-y re)))
+                     (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 12.25))
+                   (values (unsafe-fx+ cnt 1) (fl+ sx mx) (fl+ sy my))
+                   (values cnt sx sy)))
+             (values #f arena-ally-cx arena-ally-cy)))
        (for ([su (in-list arena-ally-units)])
          (define uid (tactical-sim-unit-id su))
          (define utype (tactical-sim-unit-type su))
@@ -3644,6 +3702,7 @@
                 (or (memq sprole '(dodge-active-disruptor-nova avoid-aoe-splash-effect))
                     (and (not arena-commit-splash?)
                          (eq? sprole 'avoid-lurker-linear-spine-splash)))))
+         (define melee-screen-engaged-bio-focus? #f)
          (define target-su
            (and (not in-swing?)
                 (not channel-or-morph-locked?)
@@ -3662,24 +3721,92 @@
                     (if enemy-by-id (or (unit-id-table-lookup enemy-by-id enemy-id-gen (hash-ref best-w 'id -1)) best-w) best-w)
                     'enemy)]
                   [else
-                   (define best-hittable
-                     (let ([gdps (tactical-sim-unit-ground-dps su)]
-                           [adps (tactical-sim-unit-air-dps su)])
-                       (define-values (b1 sc1 sc21)
-                         (if (and ground-plan (> gdps 0.0))
-                             (pick-best-target-from-plan ground-plan ux uy #f -inf.0 0.0 su)
-                             (values #f -inf.0 0.0)))
-                       (define-values (b2 _sc2 _sc22)
-                         (if (and air-plan (> adps 0.0))
-                             (pick-best-target-from-plan air-plan ux uy b1 sc1 sc21 su)
-                             (values b1 sc1 sc21)))
-                       b2))
+                   ;; L33-P0-3 (`p01` Melee-Engaged Ranged Bio Focus-Fire): When friendly melee
+                   ;; (`Zealot`, `range <= 1.5`) is actively engaged (`<= 3.5t` from enemy ranged Bio),
+                   ;; ranged allies (`Stalker`) in weapon range focus-fire the shared lowest-HP enemy
+                   ;; ranged Bio (unless an enemy melee diver is in their own face `<= 2.5t`)!
+                   (define p01-focus-bio-tgt
+                     (and arena-melee-engaged-ranged-bio?
+                          (not fragile-caster-no-atk?)
+                          (not (eq? utype 'siege-tank-sieged))
+                          (let ([sgr (tactical-sim-unit-ground-range su)])
+                            (and (fl> sgr 1.5)
+                                 (fl> (tactical-sim-unit-ground-dps su) 0.0)
+                                 (not (for/or ([e (in-list arena-enemy-sims)])
+                                        (and (fl> (tactical-sim-unit-ground-dps e) 0.0)
+                                             (fl<= (tactical-sim-unit-ground-range e) 1.5)
+                                             (let ([edx (fl- ux (tactical-sim-unit-x e))]
+                                                   [edy (fl- uy (tactical-sim-unit-y e))])
+                                               (fl<= (fl+ (fl* edx edx) (fl* edy edy)) 6.25)))))
+                                 (let* ([max-r (fl+ sgr 0.75)]
+                                        [max-r2 (fl* max-r max-r)])
+                                   (for/fold ([best-e #f] [best-hp +inf.0] [best-md2 +inf.0] #:result best-e)
+                                             ([re (in-list arena-ranged-bio-enemies)])
+                                     (define rex (tactical-sim-unit-x re))
+                                     (define rey (tactical-sim-unit-y re))
+                                     (define udx (fl- ux rex))
+                                     (define udy (fl- uy rey))
+                                     (if (fl<= (fl+ (fl* udx udx) (fl* udy udy)) max-r2)
+                                         (let* ([ehp (fl+ (tactical-sim-unit-hp re) (tactical-sim-unit-shield re))]
+                                                [mdx (fl- rex arena-engaged-melee-cx)]
+                                                [mdy (fl- rey arena-engaged-melee-cy)]
+                                                [md2 (fl+ (fl* mdx mdx) (fl* mdy mdy))]
+                                                [better?
+                                                 (or (not best-e)
+                                                     (fl< ehp (fl- best-hp 1.0))
+                                                     (and (fl<= (flabs (fl- ehp best-hp)) 1.0)
+                                                          (fl< md2 best-md2)))])
+                                           (if better?
+                                               (values re ehp md2)
+                                               (values best-e best-hp best-md2)))
+                                         (values best-e best-hp best-md2))))))))
                    (cond
-                     [best-hittable best-hittable]
-                     [(and (eq? committed-act 'DisengageRetreat) first-arena-enemy)
-                      (or (nearest-hittable-enemy-for su)
-                          (and (not (eq? utype 'siege-tank-sieged)) first-arena-enemy))]
-                     [else #f])])))
+                     [p01-focus-bio-tgt
+                      (set! melee-screen-engaged-bio-focus? #t)
+                      p01-focus-bio-tgt]
+                     [else
+                      (define-values (best-hittable best-sc)
+                        (let ([gdps (tactical-sim-unit-ground-dps su)]
+                              [adps (tactical-sim-unit-air-dps su)])
+                          (define-values (b1 sc1 sc21)
+                            (if (and ground-plan (> gdps 0.0))
+                                (pick-best-target-from-plan ground-plan ux uy #f -inf.0 0.0 su)
+                                (values #f -inf.0 0.0)))
+                          (define-values (b2 sc2 _sc22)
+                            (if (and air-plan (> adps 0.0))
+                                (pick-best-target-from-plan air-plan ux uy b1 sc1 sc21 su)
+                                (values b1 sc1 sc21)))
+                          ;; L33-P0-3 (`t02` Tank-Screen Bio Priority): Boost allied Bio target priority
+                          ;; `2.5x` on melee rushers (`range <= 1.5`) within `<= 6.5t` of a friendly
+                          ;; `siege-tank-sieged` (`<= 8.0t` from shooter) so Bio shreds Lings before
+                          ;; they breach Tank `2t` deadzone while Tanks keep splashing Roaches!
+                          (if (and (pair? arena-tank-rusher-vecs)
+                                   (> gdps 0.0)
+                                   (memq utype '(marine marauder hellbat reaper ghost)))
+                              (let* ([atk-prof (fast-atk-focus-profile utype)]
+                                     [atk-row (vector-ref atk-prof 0)]
+                                     [atk-ast (vector-ref atk-prof 1)]
+                                     [atk-bonus (vector-ref atk-prof 2)])
+                                (for/fold ([bb b2] [bsc sc2])
+                                          ([ev (in-list arena-tank-rusher-vecs)])
+                                  (define dx (fl- (vector-ref ev 2) ux))
+                                  (define dy (fl- (vector-ref ev 3) uy))
+                                  (define raw-d2 (fl+ (fl* dx dx) (fl* dy dy)))
+                                  (if (fl<= raw-d2 64.0)
+                                      (let* ([d2 (flmax 1.0 raw-d2)]
+                                             [mult (eval-ev-focus-mult atk-row utype atk-ast atk-bonus ev)]
+                                             [sc (fl/ (fl* (fl* (vector-ref ev 4) mult) 2.5) (flsqrt d2))])
+                                        (if (fl> sc bsc)
+                                            (values (vector-ref ev 0) sc)
+                                            (values bb bsc)))
+                                      (values bb bsc))))
+                              (values b2 sc2))))
+                      (cond
+                        [best-hittable best-hittable]
+                        [(and (eq? committed-act 'DisengageRetreat) first-arena-enemy)
+                         (or (nearest-hittable-enemy-for su)
+                             (and (not (eq? utype 'siege-tank-sieged)) first-arena-enemy))]
+                        [else #f])])])))
          ;; W18-P0-3-rt: Check whether this unit is already inside active Sieged Tank (<=14t),
          ;; Colossus (<=11.5t), or Tempest/Capital (<=18.5t) firing range!
          (define-values (unit-in-tank-or-colossus-fire? unit-in-any-siege-fire?)
@@ -3876,11 +4003,11 @@
                  (define kite-cd-min (flmax 0.22 (fl* (if faster-melee-pursuer-near? 0.62 0.52) w-period)))
                  (define kite-step (if faster-melee-pursuer-near? 1.1 2.0))
                  (define has-weap? (and (not fragile-caster-no-atk?) non-free-t? (fl> wr 0.0)))
-                 ;; L31-P0-3 (`t07` SP `1a/45m` & `p01` `0.42x`) + L32-P0-3 (`t02` Marines+Tanks vs Roaches):
-                 ;; When a fighting squad (`>= 4` allies) is in active close fire (`<= 9.5t`) against
-                 ;; equal/longer-range OR equal/faster (`e-spd >= u-spd - 0.25`) ranged pursuers (e.g.,
-                 ;; un-stimmed Marines vs equal-speed Roaches, Stalkers/Immortals vs Marines), commit-fire
-                 ;; instead of 0-DPS kiting/fleeing that loses volley uptime and abandons Sieged Tanks!
+                 ;; L31-P0-3 (`t07` SP `1a/45m` & `p01` `0.42x`) + L33-P0-3 (revert L32 equal-speed
+                 ;; regression): When a fighting squad (`>= 4` allies) is in active close fire (`<= 9.5t`)
+                 ;; against equal/longer-range OR strictly faster (`e-spd > u-spd`) ranged pursuers,
+                 ;; commit-fire instead of 0-DPS fleeing — while equal-speed shorter-range matchups
+                 ;; retreat cleanly to regroup during `DisengageRetreat`!
                  (define active-close-ranged-pursuer?
                    (and has-weap?
                         (>= arena-ally-cnt 4)
@@ -3892,8 +4019,7 @@
                                  (let ([e-wr (sim-unit-weapon-range-vs e su)])
                                    (and (fl> e-wr 1.5)
                                         (or (fl>= e-wr wr)
-                                            (fl>= (exact->inexact (tactical-sim-unit-speed e))
-                                                  (fl- u-spd 0.25))))))))))
+                                            (fl> (exact->inexact (tactical-sim-unit-speed e)) u-spd)))))))))
                  (define melee-fight?
                    (and has-weap?
                         (fl<= wr 1.5)
@@ -3934,6 +4060,7 @@
                 (define ranged-stutter-fire?
                   (or capital-siege-dive?
                       active-close-ranged-pursuer?
+                      melee-screen-engaged-bio-focus?
                       (and has-weap? (fl> wr 1.5)
                            (or (fl<= edist (fl+ wr (if protect-committed-ally? 4.5 2.5)))
                                (and (>= arena-ally-cnt 4) (fl<= edist 9.5) faster-melee-pursuer-near?))
@@ -3980,19 +4107,12 @@
                            (fl<= (fl+ (fl* edx edx) (fl* edy edy)) 12.25)))))
                 (define kite-cd-min (flmax 0.22 (fl* (if faster-melee-pursuer-near? 0.62 0.52) w-period)))
                 (define kite-step (if faster-melee-pursuer-near? 1.1 (min 2.0 SC2-KITE-STEP-DISTANCE)))
-                ;; L32-P0-3 (`t02` Marines+Tanks vs Roaches): Only backward-kite shorter-range threats
-                ;; that are melee (`e-wr <= 1.5`) OR strictly slower (`e-spd < u-spd - 0.25`), so
-                ;; un-stimmed Marines never abandon Sieged Tanks to kite equal-speed Roaches!
                 (define shorter-threat-closing?
                   (and (fl> eff-wr 1.5)
                        (let* ([close-r (flmax 2.5 (fl- eff-wr 0.75))]
                               [close-r2 (fl* close-r close-r)])
                          (for/or ([e (in-list arena-enemy-sims)])
-                           (define e-wr (sim-unit-weapon-range-vs e su))
-                           (and (fl< e-wr eff-wr)
-                                (or (fl<= e-wr 1.5)
-                                    (fl< (exact->inexact (tactical-sim-unit-speed e))
-                                         (fl- u-spd 0.25)))
+                           (and (fl< (sim-unit-weapon-range-vs e su) eff-wr)
                                 (let ([edx (fl- ux (tactical-sim-unit-x e))]
                                       [edy (fl- uy (tactical-sim-unit-y e))])
                                   (fl<= (fl+ (fl* edx edx) (fl* edy edy)) close-r2)))))))
@@ -4006,6 +4126,7 @@
                      (emit! (list 'kite uid kx ky)))]
                   [(and (not (eq? utype 'baneling))
                         (not (eq? utype 'siege-tank-sieged))
+                        (not melee-screen-engaged-bio-focus?)
                         (fl> eff-wr 1.5)
                         (fl>= (exact->inexact w-cd) kite-cd-min)
                         (or (eq? committed-act 'CloakHarassWorkers)

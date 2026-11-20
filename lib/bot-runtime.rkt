@@ -13629,19 +13629,24 @@
                           '(banshee dark-templar ghost lurker mutalisk void-ray carrier oracle widow-mine))))
               enemy-units))
   (set-l2-ctx-enemy-cloaked-or-air?! ctx enemy-cloaked-or-air?)
-  ;; L32-P0-3 (`#40` `CloakLoss -> 0`): Auto-morph 1 proactive Overseer immediately upon
-  ;; Lair/Hive completion vs Protoss/Terran when `overseers == 0` (`min >= 50 & gas >= 50`),
-  ;; waiving Spire/Corruptor/worker-reserve locks so mobile detection is online before DTs/Banshees!
+  ;; L32-P0-3 (`#40`) + L33-P0-3 (`#73` sole `CloakLoss -> 0`): Auto-morph 1 proactive Overseer
+  ;; immediately upon Lair/Hive completion vs Protoss/Terran when `overseers == 0` (`min >= 50 & gas >= 50`),
+  ;; waiving Spire/Corruptor/worker-reserve locks (except visible Battlecruiser so Suite 34 BC
+  ;; Corruptor stays PASS!) so mobile detection is online before DTs/Banshees!
   (define cur-overseer-total
     (+ (l2-unit-count ctx 'overseer)
        (order-ledger-pending-count-for-type (l2-ctx-oledger ctx) 'overseer frame)))
+  (define enemy-bc-present?
+    (ormap (lambda (e)
+             (and (hash? e)
+                  (eq? (fast-canonical-unit-sym (unit-type-sym e)) 'battlecruiser)))
+           enemy-units))
   (define zerg-proactive-overseer1?
     (and live-game?
          (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
          (memq (l2-ctx-effective-enemy-race ctx) '(Protoss Terran))
          (= cur-overseer-total 0)
-         (not zerg-holding-for-aa-spire?)
-         (not zerg-holding-for-aa-corruptor?)
+         (not enemy-bc-present?)
          (>= (l2-ctx-minerals ctx) 50)
          (>= (l2-ctx-gas ctx) 50)))
   (when (and live-game?
@@ -26845,7 +26850,11 @@
 
 (define (l34-phase5b-engage! ctx)
   (define endgame-hunt-active? (l34-run-endgame-building-hunt! ctx))
-  (when (and (pair? (l34-ctx-engagement-enemies ctx))
+  (when (and (or (pair? (l34-ctx-engagement-enemies ctx))
+                 (and (l34-ctx-live-obs? ctx)
+                      (pair? (l34-ctx-combat-units ctx))
+                      (for/or ([u (in-list (l34-ctx-combat-units ctx))])
+                        (and (hash? u) (memq (unit-type-sym u) '(corruptor phoenix colossus))))))
              (not (and endgame-hunt-active? (l34-ctx-live-obs? ctx))))
     (define ally-has-stealth? (l34-ctx-ally-has-stealth? ctx))
     (define ally-siege-supporters (l34-ctx-ally-siege-supporters ctx))
@@ -27070,11 +27079,12 @@
            (not p5-owm-locust?)
            (not under-tactics-base-attack?)
            p5-only-harmless-or-snapshot-enemies?))
-    ;; L24-P0-3 (`#43` 37 Corruptors = 1 Kill): Anti-Capital-Air Corruptor Volley Staging.
-    ;; Pure air-only rally (`ut == 'corruptor`): when >= 3 visible non-snapshot enemy Capital Air
-    ;; exist and are NOT over our main (<= 16t), stage newly-spawned Corruptors behind main
-    ;; until >= 6 Corruptors form a cohesive volley flock (<= 12t radius), then volley-commit!
-    ;; Zero ground units touched, zero retreat once <= 10t of enemy air, live-obs? only.
+    ;; L24-P0-3 / L28-P0-3 / L33-P0-3 (`#58` fog-flicker Corruptor trickle & `#18` solo Phoenix/Colossus):
+    ;; 1) Latch `p5-corruptor-volley-mode?` using remembered `owm` enemy capital-air count (`>= 3`)
+    ;;    in addition to current-frame visible capital air so fog-of-war flicker never launches
+    ;;    `1-2` solo Corruptors into `10+` Tempests!
+    ;; 2) Precompute local squad cohesion (`>= 4` allies within `12t` or main ground army centroid)
+    ;;    so isolated Phoenixes (vs contested AA) and isolated Colossi regroup before marching!
     (define p5-enemy-cap-air-pts
       (if live-obs?
           (for/list ([e (in-list enemy-units)]
@@ -27087,8 +27097,35 @@
             (cons (exact->inexact (hash-ref e 'x 0.0))
                   (exact->inexact (hash-ref e 'y 0.0))))
           '()))
+    (define p5-owm-cap-air-cnt
+      (if (and live-obs? p5-owm)
+          (let ([kc (opponent-world-summary-known-unit-counts p5-owm)])
+            (if (hash? kc)
+                (+ (hash-ref kc 'tempest 0)
+                   (hash-ref kc 'carrier 0)
+                   (hash-ref kc 'battlecruiser 0)
+                   (hash-ref kc 'mothership 0))
+                0))
+          0))
+    (define p5-vis-cap-air-cnt (length p5-enemy-cap-air-pts))
+    (define p5-rt-cap-air-cnt
+      (if (and live-obs? rt)
+          (let* ([ds (rt-door-state rt)]
+                 [prev-f (hash-ref ds 'l33-last-cap-air-frame -99999)]
+                 [prev-c (hash-ref ds 'l33-last-cap-air-cnt 0)])
+            (cond
+              [(>= p5-vis-cap-air-cnt 3)
+               (hash-set! ds 'l33-last-cap-air-frame frame)
+               (hash-set! ds 'l33-last-cap-air-cnt (max p5-vis-cap-air-cnt p5-owm-cap-air-cnt))
+               (max p5-vis-cap-air-cnt p5-owm-cap-air-cnt)]
+              [(and (>= frame prev-f) (<= (- frame prev-f) 1344) (>= prev-c 3))
+               prev-c]
+              [else 0]))
+          0))
+    (define p5-effective-cap-air-cnt
+      (max p5-vis-cap-air-cnt p5-owm-cap-air-cnt p5-rt-cap-air-cnt))
     (define p5-ally-corruptor-pts
-      (if (and live-obs? (>= (length p5-enemy-cap-air-pts) 3))
+      (if (and live-obs? (>= p5-effective-cap-air-cnt 3))
           (for/list ([u (in-list combat-units)]
                      #:when (and (hash? u)
                                  (eq? (unit-type-sym u) 'corruptor)
@@ -27103,14 +27140,13 @@
              (fl<= (fast-dist2d (car ep) (cdr ep) fbase-x fbase-y) 16.0))))
     (define p5-corruptor-volley-mode?
       (and live-obs?
-           (>= (length p5-enemy-cap-air-pts) 3)
+           (>= p5-effective-cap-air-cnt 3)
            (pair? p5-ally-corruptor-pts)
            (not p5-enemy-cap-air-over-main?)))
-    ;; L28-P0-3 (`#28` ZvP Capital Air Volley): Scale minimum Corruptor volley size to
-    ;; enemy capital count (`min(14, max(6, cap-air + 2))`) so 6 Corruptors never drip-feed
-    ;; into 10..22 Tempests!
+    ;; L28-P0-3 + L33-P0-3: Scale minimum Corruptor volley size to effective (visible + OWM remembered)
+    ;; enemy capital count (`min(14, max(6, cap-air + 2))`) so 1-6 Corruptors never drip-feed into 10+ Tempests!
     (define p5-corr-volley-min-cnt
-      (min 14 (max 6 (+ (length p5-enemy-cap-air-pts) 2))))
+      (min 14 (max 6 (+ p5-effective-cap-air-cnt 2))))
     (define p5-vis-enemy-air-pts
       (if p5-corruptor-volley-mode?
           (for/list ([e (in-list enemy-units)]
@@ -27127,9 +27163,20 @@
           '()))
     (define-values (p5-corr-best-cnt p5-corr-best-x p5-corr-best-y p5-corr-stage-x p5-corr-stage-y)
       (if p5-corruptor-volley-mode?
-          (let* ([cap-n (exact->inexact (length p5-enemy-cap-air-pts))]
-                 [cap-cx (fl/ (for/fold ([s 0.0]) ([p (in-list p5-enemy-cap-air-pts)]) (fl+ s (car p))) cap-n)]
-                 [cap-cy (fl/ (for/fold ([s 0.0]) ([p (in-list p5-enemy-cap-air-pts)]) (fl+ s (cdr p))) cap-n)]
+          (let* ([cap-pt
+                  (cond
+                    [(pair? p5-enemy-cap-air-pts)
+                     (define cap-n (exact->inexact (length p5-enemy-cap-air-pts)))
+                     (define pt
+                       (cons (fl/ (for/fold ([s 0.0]) ([p (in-list p5-enemy-cap-air-pts)]) (fl+ s (car p))) cap-n)
+                             (fl/ (for/fold ([s 0.0]) ([p (in-list p5-enemy-cap-air-pts)]) (fl+ s (cdr p))) cap-n)))
+                     (when rt (hash-set! (rt-door-state rt) 'l33-last-cap-air-pos pt))
+                     pt]
+                    [(and rt (pair? (hash-ref (rt-door-state rt) 'l33-last-cap-air-pos #f)))
+                     (hash-ref (rt-door-state rt) 'l33-last-cap-air-pos)]
+                    [else (cons p5-ex0 p5-ey0)])]
+                 [cap-cx (car cap-pt)]
+                 [cap-cy (cdr cap-pt)]
                  [dx-away (fl- fbase-x cap-cx)]
                  [dy-away (fl- fbase-y cap-cy)]
                  [d-away (flmax 1.0 (flsqrt (fl+ (fl* dx-away dx-away) (fl* dy-away dy-away))))]
@@ -27153,6 +27200,76 @@
                                 (values best-c best-x best-y)))])
               (values bc bx by (safe-coord sx fbase-x) (safe-coord sy fbase-y))))
           (values 0 fbase-x fbase-y fbase-x fbase-y)))
+    ;; L33-P0-3 (`#18` isolated Phoenixes & Colossi regroup): Precompute visible enemy combat pts,
+    ;; contested enemy AA count, and our main ground-army cluster once per step so `< 4` isolated
+    ;; Phoenixes (vs contested AA) or isolated Colossi regroup with main army / staging instead of
+    ;; trickling individually across the map!
+    (define p5-has-phx-or-col?
+      (and live-obs?
+           (not endgame-harmless-only-sweep?)
+           (not under-tactics-base-attack?)
+           (for/or ([u (in-list combat-units)])
+             (and (hash? u) (memq (unit-type-sym u) '(phoenix colossus))))))
+    (define p5-vis-enemy-combat-all-pts
+      (if (or p5-corruptor-volley-mode? p5-has-phx-or-col?)
+          (for/list ([e (in-list enemy-units)]
+                     #:when (and (hash? e)
+                                 (combat-unit-record? e)
+                                 (not (p5-snapshot-entity? e))
+                                 (real? (hash-ref e 'x #f))
+                                 (real? (hash-ref e 'y #f))))
+            (cons (exact->inexact (hash-ref e 'x 0.0))
+                  (exact->inexact (hash-ref e 'y 0.0))))
+          '()))
+    (define p5-enemy-contested-aa-cnt
+      (if p5-has-phx-or-col?
+          (let ([aa-syms '(viking viking-fighter corruptor phoenix void-ray voidray mutalisk
+                           battlecruiser carrier tempest hydralisk thor stalker marine cyclone)]
+                [vis-aa (for/sum ([e (in-list enemy-units)]
+                                  #:when (and (hash? e)
+                                              (not (p5-snapshot-entity? e))
+                                              (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                                    '(viking viking-fighter corruptor phoenix void-ray voidray mutalisk
+                                                      battlecruiser carrier tempest hydralisk thor stalker marine cyclone))))
+                          1)]
+                [owm-aa (if p5-owm
+                            (let ([kc (opponent-world-summary-known-unit-counts p5-owm)])
+                              (if (hash? kc)
+                                  (for/sum ([s (in-list '(viking viking-fighter corruptor phoenix void-ray voidray mutalisk
+                                                          battlecruiser carrier tempest hydralisk thor stalker marine cyclone))])
+                                    (hash-ref kc s 0))
+                                  0))
+                            0)])
+            (max vis-aa owm-aa))
+          0))
+    (define-values (p5-ally-combat-pts p5-iso-regroup-x p5-iso-regroup-y)
+      (if p5-has-phx-or-col?
+          (let-values ([(all-pts gcnt gsx gsy)
+                        (for/fold ([pts '()] [gc 0] [sx 0.0] [sy 0.0]) ([u (in-list combat-units)])
+                          (define ux0 (hash-ref u 'x #f))
+                          (define uy0 (hash-ref u 'y #f))
+                          (if (and (real? ux0) (real? uy0))
+                              (let* ([fux0 (exact->inexact ux0)]
+                                     [fuy0 (exact->inexact uy0)]
+                                     [ut0 (unit-type-sym u)]
+                                     [gnd-main?
+                                      (and (not (eq? ut0 'colossus))
+                                           (not (fast-unit-is-flying-sym? ut0))
+                                           (not (memq ut0 '(observer overseer warp-prism warp-prism-phasing
+                                                            medivac queen high-templar disruptor disruptor-phased))))])
+                                (values (cons (cons fux0 fuy0) pts)
+                                        (if gnd-main? (add1 gc) gc)
+                                        (if gnd-main? (fl+ sx fux0) sx)
+                                        (if gnd-main? (fl+ sy fuy0) sy)))
+                              (values pts gc sx sy)))])
+            (if (>= gcnt 3)
+                (values all-pts
+                        (safe-coord (fl/ gsx (exact->inexact gcnt)) nat-x)
+                        (safe-coord (fl/ gsy (exact->inexact gcnt)) nat-y))
+                (if (>= live-owned-townhalls 3)
+                    (values all-pts third-x third-y)
+                    (values all-pts nat-x nat-y))))
+          (values '() nat-x nat-y)))
     ;; L25-P0-3 (`DRIP_FEED_COLLAPSE 12 -> <= 4`, `clip03`): Defensive Ground Counter-Volley Staging.
     ;; When `enemy-within-14-of-th?` (enemy >= 1400 val camping our Natural/3rd) while Main is
     ;; unbreached and we are severely outgunned (`< 0.60x` latched to `0.78x / 2000 val / 36 sup`),
@@ -27260,8 +27377,74 @@
                                 (select-target-enemy-from-prepped x y prepped-eng-enemies t ally-has-stealth?)])
                     (values x y t te ph?))))))
 
+      ;; L33-P0-3 (`#58` fog-flicker Corruptor volley latch & `#18` isolated Phoenix/Colossus regroup):
+      ;; Evaluate staging BEFORE `(not target-enemy)` so fog-blind frames (empty `engagement-enemies`)
+      ;; still hold lone Corruptors / isolated Phoenixes / isolated Colossi instead of letting
+      ;; Phase 6/7 launch them piecemeal into fog-hidden Tempests/Vikings!
+      (define pre-stage-handled?
+        (and (not skip?)
+             (cond
+               [(and p5-corruptor-volley-mode? (eq? ut 'corruptor))
+                (define fux (exact->inexact ux))
+                (define fuy (exact->inexact uy))
+                (define near-enemy?
+                  (or (for/or ([ep (in-list p5-vis-enemy-air-pts)])
+                        (fl<= (fast-dist2d fux fuy (car ep) (cdr ep)) 10.0))
+                      (for/or ([ep (in-list p5-vis-enemy-combat-all-pts)])
+                        (fl<= (fast-dist2d fux fuy (car ep) (cdr ep)) 12.0))))
+                (define ctarget
+                  (and (not near-enemy?)
+                       (cond
+                         [(< p5-corr-best-cnt p5-corr-volley-min-cnt)
+                          (cons p5-corr-stage-x p5-corr-stage-y)]
+                         [else
+                          (define local-corr-cnt
+                            (for/sum ([cp (in-list p5-ally-corruptor-pts)]
+                                      #:when (fl<= (fast-dist2d fux fuy (car cp) (cdr cp)) 12.0))
+                              1))
+                          (and (< local-corr-cnt 4)
+                               (fl> (fast-dist2d fux fuy p5-corr-best-x p5-corr-best-y) 14.0)
+                               (cons (safe-coord p5-corr-best-x p5-corr-stage-x)
+                                     (safe-coord p5-corr-best-y p5-corr-stage-y)))])))
+                (cond
+                  [ctarget
+                   (set-add! wave3-handled-tags uid)
+                   (let ([tx (car ctarget)] [ty (cdr ctarget)])
+                     (when (fl> (fast-dist2d fux fuy (exact->inexact tx) (exact->inexact ty)) 3.5)
+                       (l34-emit-preserved! ctx (list 'move uid tx ty))))
+                   #t]
+                  [else #f])]
+               [(and p5-has-phx-or-col?
+                     (or (eq? ut 'colossus)
+                         (and (eq? ut 'phoenix)
+                              (or (>= p5-enemy-contested-aa-cnt 4)
+                                  (>= p5-effective-cap-air-cnt 2)
+                                  combat-suppress-attack?))))
+                (define fux (exact->inexact ux))
+                (define fuy (exact->inexact uy))
+                (define near-vis-enemy?
+                  (for/or ([ep (in-list p5-vis-enemy-combat-all-pts)])
+                    (fl<= (fast-dist2d fux fuy (car ep) (cdr ep)) 14.0)))
+                (define local-ally-cnt
+                  (if near-vis-enemy?
+                      99
+                      (for/sum ([ap (in-list p5-ally-combat-pts)]
+                                #:when (fl<= (fast-dist2d fux fuy (car ap) (cdr ap)) 12.0))
+                        1)))
+                (cond
+                  [(and (not near-vis-enemy?) (< local-ally-cnt 4))
+                   (set-add! wave3-handled-tags uid)
+                   (when (fl> (fast-dist2d fux fuy
+                                           (exact->inexact p5-iso-regroup-x)
+                                           (exact->inexact p5-iso-regroup-y))
+                              6.0)
+                     (l34-emit! ctx (list 'attack-pos uid p5-iso-regroup-x p5-iso-regroup-y)))
+                   #t]
+                  [else #f])]
+               [else #f])))
+
       ;; Respect weapon-swing lock, splash evasion, Wave 3 handled/snipe-locked units, Queen casts, and channel/morph orders
-      (unless (or skip? (not target-enemy))
+      (unless (or skip? pre-stage-handled? (not target-enemy))
         (define eid (hash-ref target-enemy 'id 9001))
         (define etype (unit-type-sym target-enemy))
         (define ex (hash-ref target-enemy 'x nat-x))
@@ -27382,30 +27565,8 @@
                (pair? enemy-sieged-tanks-near)
                (not (fast-unit-is-flying-sym? ut))
                (l34-find-nearest-sieged-tank ctx ux uy)))
-        (define corr-stage-target
-          (and p5-corruptor-volley-mode?
-               (eq? ut 'corruptor)
-               (let ([fux (exact->inexact ux)]
-                     [fuy (exact->inexact uy)])
-                 (define near-enemy-air?
-                   (for/or ([ep (in-list p5-vis-enemy-air-pts)])
-                     (fl<= (fast-dist2d fux fuy (car ep) (cdr ep)) 10.0)))
-                 (and (not near-enemy-air?)
-                      (cond
-                        [(< p5-corr-best-cnt p5-corr-volley-min-cnt)
-                         (cons p5-corr-stage-x p5-corr-stage-y)]
-                        [else
-                         (define local-corr-cnt
-                           (for/sum ([cp (in-list p5-ally-corruptor-pts)]
-                                     #:when (fl<= (fast-dist2d fux fuy (car cp) (cdr cp)) 12.0))
-                             1))
-                         (and (< local-corr-cnt 4)
-                              (fl> (fast-dist2d fux fuy p5-corr-best-x p5-corr-best-y) 14.0)
-                              (cons (safe-coord p5-corr-best-x p5-corr-stage-x)
-                                    (safe-coord p5-corr-best-y p5-corr-stage-y)))])))))
         (define ground-counter-volley-stage?
           (and p5-l25-counter-volley-staging?
-               (not corr-stage-target)
                (not nearest-enemy-tank)
                (not (eq? ut 'corruptor))
                (not unit-mobile-retreatable?)
@@ -27419,14 +27580,6 @@
                  (not (for/or ([ep (in-list p5-vis-enemy-combat-pts)])
                         (fl<= (fast-dist2d fux fuy (car ep) (cdr ep)) 14.0))))))
         (cond
-          [corr-stage-target
-           (set-add! wave3-handled-tags uid)
-           (let ([tx (car corr-stage-target)]
-                 [ty (cdr corr-stage-target)])
-             (when (fl> (fast-dist2d (exact->inexact ux) (exact->inexact uy)
-                                     (exact->inexact tx) (exact->inexact ty))
-                        3.5)
-               (l34-emit-preserved! ctx (list 'move uid tx ty))))]
           [ground-counter-volley-stage?
            (set-add! wave3-handled-tags uid)
            (when (fl> (fast-dist2d (exact->inexact ux) (exact->inexact uy)
