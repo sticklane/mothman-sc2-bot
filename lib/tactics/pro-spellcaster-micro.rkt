@@ -2572,54 +2572,74 @@
                          (and ok?
                               (spell-claim-point?! claims 'blinding-cloud cx cy BLINDING-CLOUD-CLAIM-RADIUS current-frame BLINDING-CLOUD-CLAIM-TTL)
                               (spell-directive tag 'viper 'blinding-cloud 'point 0 cx cy 'viper-blinding-cloud))))
-                  ;; 2. L27-P0-3 / L28-P0-3 (`z07`/`z08`/`#16`): Prioritize Parasitic Bomb (`energy >= 125`,
-                  ;;    `r=8.5`, `>= 2` air within `4.5t` — accounts for Capital `1.25t` radii + `3.0t` splash!)
-                  ;;    STRICTLY ABOVE Abduct so Vipers never burn energy on Abduct before bombing air clumps!
-                  (and (>= en 125.0)
-                       (let-values ([(ok? tgt _w)
-                                     (best-unit-target
-                                      ux uy 8.5 enemy-units
-                                      (lambda ([e : Any])
-                                        (and (enemy-air-capital-or-ranged? e)
-                                             (not (uh-has-buff? e 'parasitic-bomb))
-                                             (>= (count-units-within enemy-units (uh-x e) (uh-y e) 4.5 enemy-air-capital-or-ranged?) 2)
-                                             (not (any-unit-within?
-                                                   enemy-units (uh-x e) (uh-y e) 4.0
-                                                   (lambda ([d : Any])
-                                                     (or (eq? (uh-type d) 'parasitic-bomb-dummy)
-                                                         (= (safe-int (dyn-hash-ref d 'unit-type-id 0) 0) 824)
-                                                         (= (safe-int (dyn-hash-ref d 'type 0) 0) 824)
-                                                         (uh-has-buff? d 'parasitic-bomb)))))
-                                             (not (spell-point-claimed? claims 'parasitic-bomb-zone (uh-x e) (uh-y e) 3.5 current-frame))))
-                                      (lambda ([e : Any])
-                                        (define air-cnt (count-units-within enemy-units (uh-x e) (uh-y e) 4.5 enemy-air-capital-or-ranged?))
-                                        (define pack (aoe-radius-packing-multiplier (unit-collision-radius (uh-type e)) 3.0))
-                                        (+ (* 20.0 pack (->float air-cnt))
-                                           (min 100.0 (* 0.2 (uh-total-hp e))))))])
-                         (and ok?
-                              (spell-claim-unit?! claims 'parasitic-bomb (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
-                                                  #:caster-tag tag)
-                              (begin
-                                (spell-claim-point?! claims 'parasitic-bomb-zone (uh-x tgt) (uh-y tgt) 3.5 current-frame 64)
-                                (spell-directive tag 'viper 'parasitic-bomb 'unit (uh-tag tgt)
-                                                 (uh-x tgt) (uh-y tgt) 'viper-parasitic-bomb)))))
-                  ;; 3. Abduct into >= 4 friendly combat units within 7.0 (`energy >= 75`, `range 9.0`)
-                  (and (>= en 75.0)
-                       (>= (count-units-within ally-units ux uy 7.0
-                                               (lambda ([a : Any]) (and (not (= (uh-tag a) tag)) (unit-combat-relevant? a))))
-                           4)
-                       (let-values ([(ok? tgt _w)
-                                     (best-unit-target
-                                      ux uy 9.0 enemy-units
-                                      (lambda ([e : Any])
-                                        (and (> (viper-abduct-weight (uh-type e)) 0.0)
-                                             (= (spell-unit-claim-count claims 'abduct (uh-tag e) current-frame) 0)))
-                                      (lambda ([e : Any]) (viper-abduct-weight (uh-type e))))])
-                         (and ok?
-                              (spell-claim-unit?! claims 'abduct (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
-                                                  #:caster-tag tag)
-                              (spell-directive tag 'viper 'abduct 'unit (uh-tag tgt)
-                                               (uh-x tgt) (uh-y tgt) 'viper-abduct))))
+                  ;; 2. L27-P0-3 / L28-P0-3 / L29-P0-3 (`z07`/`z08`/`#16`): Prioritize Parasitic Bomb
+                  ;;    (`energy >= 125`, `r=8.5`, `>= 2` air within `4.5t`) STRICTLY ABOVE Abduct AND
+                  ;;    HOLD Abduct whenever an unbombed `>= 2` air clump sits inside `13.0t` so Vipers
+                  ;;    step in and drop ParasiticBomb instead of burning 75e (`140 -> 65 < 125`)!
+                  (let ([pbomb-clump-in-13t?
+                         (and (>= en 125.0)
+                              (any-unit-within?
+                               enemy-units ux uy 13.0
+                               (lambda ([e : Any])
+                                 (and (enemy-air-capital-or-ranged? e)
+                                      (not (uh-has-buff? e 'parasitic-bomb))
+                                      (>= (count-units-within enemy-units (uh-x e) (uh-y e) 4.5 enemy-air-capital-or-ranged?) 2)
+                                      (not (any-unit-within?
+                                            enemy-units (uh-x e) (uh-y e) 4.0
+                                            (lambda ([d : Any])
+                                              (or (eq? (uh-type d) 'parasitic-bomb-dummy)
+                                                  (= (safe-int (dyn-hash-ref d 'unit-type-id 0) 0) 824)
+                                                  (= (safe-int (dyn-hash-ref d 'type 0) 0) 824)
+                                                  (uh-has-buff? d 'parasitic-bomb)))))
+                                      (not (spell-point-claimed? claims 'parasitic-bomb-zone (uh-x e) (uh-y e) 3.5 current-frame))))))])
+                    (or
+                     (and (>= en 125.0)
+                          (let-values ([(ok? tgt _w)
+                                        (best-unit-target
+                                         ux uy 8.5 enemy-units
+                                         (lambda ([e : Any])
+                                           (and (enemy-air-capital-or-ranged? e)
+                                                (not (uh-has-buff? e 'parasitic-bomb))
+                                                (>= (count-units-within enemy-units (uh-x e) (uh-y e) 4.5 enemy-air-capital-or-ranged?) 2)
+                                                (not (any-unit-within?
+                                                      enemy-units (uh-x e) (uh-y e) 4.0
+                                                      (lambda ([d : Any])
+                                                        (or (eq? (uh-type d) 'parasitic-bomb-dummy)
+                                                            (= (safe-int (dyn-hash-ref d 'unit-type-id 0) 0) 824)
+                                                            (= (safe-int (dyn-hash-ref d 'type 0) 0) 824)
+                                                            (uh-has-buff? d 'parasitic-bomb)))))
+                                                (not (spell-point-claimed? claims 'parasitic-bomb-zone (uh-x e) (uh-y e) 3.5 current-frame))))
+                                         (lambda ([e : Any])
+                                           (define air-cnt (count-units-within enemy-units (uh-x e) (uh-y e) 4.5 enemy-air-capital-or-ranged?))
+                                           (define pack (aoe-radius-packing-multiplier (unit-collision-radius (uh-type e)) 3.0))
+                                           (+ (* 20.0 pack (->float air-cnt))
+                                              (min 100.0 (* 0.2 (uh-total-hp e))))))])
+                            (and ok?
+                                 (spell-claim-unit?! claims 'parasitic-bomb (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
+                                                     #:caster-tag tag)
+                                 (begin
+                                   (spell-claim-point?! claims 'parasitic-bomb-zone (uh-x tgt) (uh-y tgt) 3.5 current-frame 64)
+                                   (spell-directive tag 'viper 'parasitic-bomb 'unit (uh-tag tgt)
+                                                    (uh-x tgt) (uh-y tgt) 'viper-parasitic-bomb)))))
+                     ;; 3. Abduct into >= 4 friendly combat units within 7.0 (`energy >= 75`, `range 9.0`),
+                     ;;    held when `pbomb-clump-in-13t?` is active so Viper closes for Parasitic Bomb first!
+                     (and (not pbomb-clump-in-13t?)
+                          (>= en 75.0)
+                          (>= (count-units-within ally-units ux uy 7.0
+                                                  (lambda ([a : Any]) (and (not (= (uh-tag a) tag)) (unit-combat-relevant? a))))
+                              4)
+                          (let-values ([(ok? tgt _w)
+                                        (best-unit-target
+                                         ux uy 9.0 enemy-units
+                                         (lambda ([e : Any])
+                                           (and (> (viper-abduct-weight (uh-type e)) 0.0)
+                                                (= (spell-unit-claim-count claims 'abduct (uh-tag e) current-frame) 0)))
+                                         (lambda ([e : Any]) (viper-abduct-weight (uh-type e))))])
+                            (and ok?
+                                 (spell-claim-unit?! claims 'abduct (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
+                                                     #:caster-tag tag)
+                                 (spell-directive tag 'viper 'abduct 'unit (uh-tag tgt)
+                                                  (uh-x tgt) (uh-y tgt) 'viper-abduct))))))
                   ;; 4. Safe Consume (`energy < 60`, `0` enemies within `12.0`, Zerg building `hp > 450`)
                   (and (< en 60.0)
                        (not (any-unit-within? all-enemies ux uy 12.0 sc2-enemy-unit-targetable?))

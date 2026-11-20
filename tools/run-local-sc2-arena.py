@@ -52,6 +52,24 @@ MOTHMAN_VARIANTS: dict[str, dict[str, str]] = {
     "Mothman-X": {"race": "R", "race_full": "Random", "bot_path": "bots/Mothman-R.rkt"},
 }
 
+# Full-game Self-Play schedule covering all 6 canonical SC2 matchups (3 mirrors + 3 cross-race)
+SELFPLAY_MATCHUPS_6: list[tuple[str, str]] = [
+    ("Mothman-Z", "Mothman-Z"),  # ZvZ
+    ("Mothman-T", "Mothman-T"),  # TvT
+    ("Mothman-P", "Mothman-P"),  # PvP
+    ("Mothman-P", "Mothman-T"),  # PvT
+    ("Mothman-P", "Mothman-Z"),  # PvZ
+    ("Mothman-T", "Mothman-Z"),  # TvZ
+]
+SELFPLAY_MATCHUPS_REV: list[tuple[str, str]] = [
+    ("Mothman-Z", "Mothman-Z"),  # ZvZ
+    ("Mothman-T", "Mothman-T"),  # TvT
+    ("Mothman-P", "Mothman-P"),  # PvP
+    ("Mothman-T", "Mothman-P"),  # TvP
+    ("Mothman-Z", "Mothman-P"),  # ZvP
+    ("Mothman-Z", "Mothman-T"),  # ZvT
+]
+
 RACE_NORMALIZE = {
     "P": "P",
     "PROTOSS": "P",
@@ -73,6 +91,8 @@ class BotSpec:
     bot_type: str  # python, cpplinux, dotnetcore, java, nodejs
     source_dir: Path | None = None
     is_mothman: bool = False
+    source_bot_name: str = ""  # underlying Mothman variant when aliased (e.g. Mothman-P-SP -> Mothman-P)
+    bot_mode: str = ""         # zip | elf | source (allows mixed source-vs-zip selfplay baseline!)
     elo: int | float | None = None
     aiarena_id: int | str | None = None
     gauntlet_core: bool = False
@@ -88,6 +108,7 @@ class MatchTask:
     bot2: BotSpec
     map_name: str
     slug: str
+    cohort: str = "core"  # core | unseen | selfplay | custom
 
 
 ACTIVE_CONTAINERS: set[str] = set()
@@ -381,7 +402,7 @@ def clone_bot_dir(src: Path, dst: Path, orig_name: str, alias_name: str, bot_typ
     # Ensure isolated writable data dir
     (dst / "data").mkdir(exist_ok=True)
 
-    # If aliased for a mirror match, rename the expected entry binary so bot_controller finds it
+    # If aliased for a mirror / self-play match, rename the expected entry binary & update BotName metadata
     if alias_name != orig_name:
         ext_map = {
             "cpplinux": "",
@@ -396,6 +417,36 @@ def clone_bot_dir(src: Path, dst: Path, orig_name: str, alias_name: str, bot_typ
             alias_file = dst / f"{alias_name}{ext}"
             if orig_file.is_file() and not alias_file.exists():
                 orig_file.rename(alias_file)
+        # Update config.json BotName & source-mode shell launcher --BotName flag if present
+        cfg_json = dst / "config.json"
+        if cfg_json.is_file():
+            try:
+                cfg_obj = json.loads(cfg_json.read_text(encoding="utf-8"))
+                if isinstance(cfg_obj, dict) and "BotName" in cfg_obj:
+                    cfg_obj["BotName"] = alias_name
+                    cfg_json.write_text(json.dumps(cfg_obj, indent=2) + "\n", encoding="utf-8")
+            except Exception:
+                pass
+        mm_json = dst / "data" / "mirror_mind_opponents.json"
+        if mm_json.is_file():
+            try:
+                mm_obj = json.loads(mm_json.read_text(encoding="utf-8"))
+                if isinstance(mm_obj, dict) and "bot_name" in mm_obj:
+                    mm_obj["bot_name"] = alias_name
+                    mm_json.write_text(json.dumps(mm_obj, indent=2) + "\n", encoding="utf-8")
+            except Exception:
+                pass
+        if bot_type == "cpplinux":
+            exe_script = dst / alias_name
+            if exe_script.is_file():
+                try:
+                    raw_head = exe_script.read_bytes()[:16]
+                    if raw_head.startswith(b"#!/bin/sh"):
+                        txt = exe_script.read_text(encoding="utf-8")
+                        txt = txt.replace(f"--BotName {orig_name} ", f"--BotName {alias_name} ")
+                        exe_script.write_text(txt, encoding="utf-8")
+                except Exception:
+                    pass
 
     if bot_type == "cpplinux":
         exe = dst / alias_name
@@ -508,6 +559,7 @@ def run_single_match(
         return {
             "index": task.index,
             "slug": task.slug,
+            "cohort": task.cohort,
             "bot1": task.bot1.name,
             "bot1_race": task.bot1.race,
             "bot2": task.bot2.name,
@@ -531,10 +583,12 @@ def run_single_match(
 
     bot1_alias = task.bot1.name
     bot2_alias = f"{task.bot2.name}_p2" if task.bot2.name == task.bot1.name else task.bot2.name
+    bot1_orig = task.bot1.source_bot_name or task.bot1.name
+    bot2_orig = task.bot2.source_bot_name or task.bot2.name
 
     assert task.bot1.source_dir is not None and task.bot2.source_dir is not None
-    clone_bot_dir(task.bot1.source_dir, bots_dir / bot1_alias, task.bot1.name, bot1_alias, task.bot1.bot_type)
-    clone_bot_dir(task.bot2.source_dir, bots_dir / bot2_alias, task.bot2.name, bot2_alias, task.bot2.bot_type)
+    clone_bot_dir(task.bot1.source_dir, bots_dir / bot1_alias, bot1_orig, bot1_alias, task.bot1.bot_type)
+    clone_bot_dir(task.bot2.source_dir, bots_dir / bot2_alias, bot2_orig, bot2_alias, task.bot2.bot_type)
 
     cfg_path = workdir / "config.toml"
     write_config_toml(cfg_path, max_game_time, max_frame_time, strikes, realtime)
@@ -580,7 +634,12 @@ def run_single_match(
         f"{proxy_script}:/harness/sc2-match-proxy.py:ro",
     ])
 
-    if mothman_mode == "source" and (task.bot1.is_mothman or task.bot2.is_mothman):
+    need_source_racket = (
+        task.bot1.bot_mode == "source"
+        or task.bot2.bot_mode == "source"
+        or (mothman_mode == "source" and (task.bot1.is_mothman or task.bot2.is_mothman))
+    )
+    if need_source_racket:
         racket_etc = arena_dir / "cache" / "racket-etc"
         portable_racket = repo_dir / "ladder" / ".cache" / "racket_runtime" / "bin" / "racket"
         cmd.extend([
@@ -691,6 +750,7 @@ def run_single_match(
                 pass
 
     our_telemetry = parse_mothman_telemetry(our_log_dest) if our_log_saved else {}
+    opp_telemetry = parse_mothman_telemetry(opp_log_dest) if (opp_log_saved and task.bot2.is_mothman) else {}
     outcome = classify_result(raw_result)
     game_minutes = round(game_steps / (22.4 * 60.0), 2) if game_steps > 0 else 0.0
 
@@ -705,16 +765,18 @@ def run_single_match(
     pw = our_telemetry.get("peak_workers", "-")
     pb = our_telemetry.get("peak_bases", "-")
     pa = our_telemetry.get("peak_army_supply", "-")
+    coh_tag = f"[{task.cohort.upper()}] " if task.cohort == "selfplay" else ""
     log(
-        f"[{task.index:02d}/{total_matches:02d}] {task.bot1.name}({task.bot1.race}) vs "
+        f"[{task.index:02d}/{total_matches:02d}] {coh_tag}{task.bot1.name}({task.bot1.race}) vs "
         f"{task.bot2.name}({task.bot2.race},{task.bot2.bot_type}) on {task.map_name} -> "
         f"{outcome} ({raw_result}) | {game_steps} loops ({game_minutes:.1f}m) | "
         f"{wall_sec:.1f}s | step={step_str} | pkW={pw} pkB={pb} pkA={pa}"
     )
 
-    return {
+    rec: dict[str, Any] = {
         "index": task.index,
         "slug": task.slug,
+        "cohort": task.cohort,
         "bot1": task.bot1.name,
         "bot1_race": task.bot1.race,
         "bot2": task.bot2.name,
@@ -737,6 +799,9 @@ def run_single_match(
         "opp_log_path": opp_log_saved,
         "controller_log_path": str(controller_log_dest),
     }
+    if opp_telemetry:
+        rec["opp_telemetry"] = opp_telemetry
+    return rec
 
 
 def aggregate_records(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -807,13 +872,23 @@ def format_summary_text(summary: dict[str, Any]) -> str:
             f"(err={v['errors']}) WR={v['win_rate_pct']:>5.1f}% | "
             f"clean={v['clean_wins']}W-{v['clean_losses']}L | oppFault={v['opp_crash_or_timeout_wins']}"
         )
+    if summary.get("by_cohort"):
+        lines.append("")
+        lines.append("--- Per Cohort ---")
+        for k, v in sorted(summary["by_cohort"].items()):
+            lines.append(
+                f"  {k:<12} {v['wins']:>2}W-{v['losses']:<2}L-{v['ties']:<2}T "
+                f"(err={v['errors']}) WR={v['win_rate_pct']:>5.1f}% | "
+                f"clean={v['clean_wins']}W-{v['clean_losses']}L | avgGame={v['avg_game_minutes']:.1f}m"
+            )
     lines.append("")
     lines.append("--- Match Details ---")
-    lines.append(f"{'#':>3} {'Bot':<10} {'Opponent':<20} {'Map':<20} {'Outcome':<7} {'RawResult':<16} {'Loops':>6} {'Min':>5} {'Wall':>6} {'Step':>6}")
+    lines.append(f"{'#':>3} {'Cohort':<8} {'Bot':<10} {'Opponent':<20} {'Map':<20} {'Outcome':<7} {'RawResult':<16} {'Loops':>6} {'Min':>5} {'Wall':>6} {'Step':>6}")
     for m in summary["matches"]:
         st = f"{m['bot1_avg_step_ms']:.1f}ms" if m.get("bot1_avg_step_ms") is not None else "n/a"
+        coh = str(m.get("cohort") or "-")[:8]
         lines.append(
-            f"{m['index']:>3} {m['bot1']:<10} {m['bot2']:<20} {m['map']:<20} "
+            f"{m['index']:>3} {coh:<8} {m['bot1']:<10} {m['bot2']:<20} {m['map']:<20} "
             f"{m['outcome']:<7} {m['raw_result']:<16} {m['game_steps']:>6} "
             f"{m['game_minutes']:>5.1f} {m['wall_sec']:>5.1f}s {st:>6}"
         )
@@ -827,17 +902,22 @@ def resolve_bot_spec(
     mothman_mode: str,
     arena_dir: Path,
     repo_dir: Path,
-    mothman_cache: dict[str, Path],
+    mothman_cache: dict[tuple[str, str], Path],
+    alias_name: str = "",
 ) -> BotSpec:
     if name in MOTHMAN_VARIANTS:
-        if name not in mothman_cache:
-            mothman_cache[name] = stage_mothman_cache(name, mothman_mode, arena_dir, repo_dir)
+        ckey = (name, mothman_mode)
+        if ckey not in mothman_cache:
+            mothman_cache[ckey] = stage_mothman_cache(name, mothman_mode, arena_dir, repo_dir)
+        eff_name = alias_name or name
         return BotSpec(
-            name=name,
+            name=eff_name,
             race=MOTHMAN_VARIANTS[name]["race"],
             bot_type="cpplinux",
-            source_dir=mothman_cache[name],
+            source_dir=mothman_cache[ckey],
             is_mothman=True,
+            source_bot_name=name,
+            bot_mode=mothman_mode,
         )
     if name in roster:
         return roster[name]
@@ -847,6 +927,28 @@ def resolve_bot_spec(
     raise ValueError(f"Unknown bot {name!r}. Known Mothman: {sorted(MOTHMAN_VARIANTS)}; Roster: {sorted(roster)}")
 
 
+def _infer_cohort(b2: BotSpec) -> str:
+    if b2.is_mothman:
+        return "selfplay"
+    if b2.gauntlet_core:
+        return "core"
+    return "unseen"
+
+
+def build_selfplay_pairs(n_matches: int) -> list[tuple[str, str]]:
+    """Build `n_matches` Mothman-vs-Mothman pairs covering all 6 SC2 matchups first."""
+    out: list[tuple[str, str]] = []
+    round_idx = 0
+    while len(out) < n_matches:
+        seq = SELFPLAY_MATCHUPS_6 if (round_idx % 2 == 0) else SELFPLAY_MATCHUPS_REV
+        for pair in seq:
+            out.append(pair)
+            if len(out) >= n_matches:
+                break
+        round_idx += 1
+    return out
+
+
 def build_match_tasks(
     args: argparse.Namespace,
     roster: dict[str, BotSpec],
@@ -854,7 +956,7 @@ def build_match_tasks(
     arena_dir: Path,
     repo_dir: Path,
 ) -> list[MatchTask]:
-    mothman_cache: dict[str, Path] = {}
+    mothman_cache: dict[tuple[str, str], Path] = {}
     tasks: list[MatchTask] = []
 
     if args.match_file:
@@ -866,8 +968,9 @@ def build_match_tasks(
             b2 = resolve_bot_spec(item["opponent"], roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache)
             mp = item.get("map") or maps[(idx - 1) % len(maps)]
             mp = mp[:-7] if mp.lower().endswith(".sc2map") else mp
+            coh = str(item.get("cohort") or _infer_cohort(b2))
             slug = f"{idx:03d}_{sanitize_slug(b1.name)}_vs_{sanitize_slug(b2.name)}_{sanitize_slug(mp)}"
-            tasks.append(MatchTask(idx, b1, b2, mp, slug))
+            tasks.append(MatchTask(idx, b1, b2, mp, slug, cohort=coh))
         return tasks
 
     if args.bots.strip().lower() == "all":
@@ -876,44 +979,75 @@ def build_match_tasks(
         bot_names = [x.strip() for x in args.bots.split(",") if x.strip()]
 
     opp_arg = args.opponents.strip()
-    if opp_arg.lower() == "all":
+    opp_low = opp_arg.lower()
+    want_selfplay = bool(getattr(args, "include_selfplay", False)) or (opp_low in ("self_6", "selfplay", "self"))
+    if opp_low in ("self_6", "selfplay", "self", "none", ""):
+        opp_names: list[str] = []
+    elif opp_low == "all":
         opp_names = sorted(roster.keys(), key=lambda n: (roster[n].elo or 0, n))
-    elif opp_arg.lower() == "core":
+    elif opp_low in ("core", "core_12"):
         opp_names = sorted([n for n, s in roster.items() if s.gauntlet_core], key=lambda n: (roster[n].elo or 0, n))
-    elif opp_arg.lower() == "active":
+    elif opp_low == "active":
         opp_names = sorted([n for n, s in roster.items() if s.active_comp38], key=lambda n: (roster[n].elo or 0, n))
     else:
         opp_names = [x.strip() for x in opp_arg.split(",") if x.strip()]
 
-    if not opp_names:
-        raise ValueError("No opponents selected. Specify --opponents <names|all> or --match-file <path>.")
+    if not opp_names and not want_selfplay:
+        raise ValueError("No opponents selected. Specify --opponents <names|core|all|self_6>, --include-selfplay, or --match-file <path>.")
 
-    bot_specs = [resolve_bot_spec(bname, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache) for bname in bot_names]
-    opp_specs = [resolve_bot_spec(oname, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache) for oname in opp_names]
+    if opp_names:
+        bot_specs = [resolve_bot_spec(bname, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache) for bname in bot_names]
+        opp_specs = [resolve_bot_spec(oname, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache) for oname in opp_names]
 
-    # Interleaved ordering spreads each Mothman race (with typically longer Zerg macro games first)
-    # across waves so slow 20-30m matches start early instead of creating a late straggler tail.
-    if getattr(args, "schedule_order", "interleaved") == "interleaved":
-        race_priority = {"Z": 0, "T": 1, "P": 2, "R": 3}
-        ordered_bots = sorted(bot_specs, key=lambda b: (race_priority.get(b.race, 9), b.name))
-        pairs = [
-            (b1, b2, rep)
-            for rep in range(args.matches_per_pair)
-            for b2 in opp_specs
-            for b1 in ordered_bots
-        ]
-    else:
-        pairs = [
-            (b1, b2, rep)
-            for b1 in bot_specs
-            for b2 in opp_specs
-            for rep in range(args.matches_per_pair)
-        ]
+        # Interleaved ordering spreads each Mothman race (with typically longer Zerg macro games first)
+        # across waves so slow 20-30m matches start early instead of creating a late straggler tail.
+        if getattr(args, "schedule_order", "interleaved") == "interleaved":
+            race_priority = {"Z": 0, "T": 1, "P": 2, "R": 3}
+            ordered_bots = sorted(bot_specs, key=lambda b: (race_priority.get(b.race, 9), b.name))
+            pairs = [
+                (b1, b2, rep)
+                for rep in range(args.matches_per_pair)
+                for b2 in opp_specs
+                for b1 in ordered_bots
+            ]
+        else:
+            pairs = [
+                (b1, b2, rep)
+                for b1 in bot_specs
+                for b2 in opp_specs
+                for rep in range(args.matches_per_pair)
+            ]
 
-    for idx, (b1, b2, _rep) in enumerate(pairs, start=1):
-        mp = maps[(idx - 1) % len(maps)]
-        slug = f"{idx:03d}_{sanitize_slug(b1.name)}_vs_{sanitize_slug(b2.name)}_{sanitize_slug(mp)}"
-        tasks.append(MatchTask(idx, b1, b2, mp, slug))
+        for b1, b2, _rep in pairs:
+            idx = len(tasks) + 1
+            mp = maps[(idx - 1) % len(maps)]
+            slug = f"{idx:03d}_{sanitize_slug(b1.name)}_vs_{sanitize_slug(b2.name)}_{sanitize_slug(mp)}"
+            tasks.append(MatchTask(idx, b1, b2, mp, slug, cohort=_infer_cohort(b2)))
+
+    if want_selfplay:
+        sp_n = int(getattr(args, "selfplay_matches", 6) or 6)
+        sp_lim = getattr(args, "selfplay_limit", None)
+        if sp_lim is not None:
+            sp_n = min(sp_n, max(0, int(sp_lim)))
+        use_base = bool(getattr(args, "selfplay_baseline", False))
+        p2_mode = "zip" if use_base else args.mothman_mode
+        p2_suffix = "-Base" if use_base else "-SP"
+        for sp_i, (p1_var, p2_var) in enumerate(build_selfplay_pairs(sp_n)):
+            idx = len(tasks) + 1
+            b1 = resolve_bot_spec(p1_var, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache)
+            b2 = resolve_bot_spec(
+                p2_var,
+                roster,
+                p2_mode,
+                arena_dir,
+                repo_dir,
+                mothman_cache,
+                alias_name=f"{p2_var}{p2_suffix}",
+            )
+            mp = maps[(len(tasks)) % len(maps)]
+            slug = f"{idx:03d}_{sanitize_slug(b1.name)}_vs_{sanitize_slug(b2.name)}_{sanitize_slug(mp)}"
+            tasks.append(MatchTask(idx, b1, b2, mp, slug, cohort="selfplay"))
+
     return tasks
 
 
@@ -922,7 +1056,15 @@ def main() -> int:
     parser.add_argument("--bots", default="Mothman-Z,Mothman-T,Mothman-P",
                         help="Comma-separated Mothman variants (or 'all' for P,T,Z,X)")
     parser.add_argument("--opponents", default="core",
-                        help="Comma-separated opponent names from roster, 'core' (12 gauntlet_core), 'active' (Comp#38), or 'all'")
+                        help="Comma-separated opponent names from roster, 'core'/'core_12' (12 gauntlet_core), 'active' (Comp#38), 'all', 'self_6' (6 full-game self-play matchups), or 'none'")
+    parser.add_argument("--include-selfplay", action="store_true",
+                        help="Append full-game Mothman-vs-Mothman Self-Play matches (default 6: ZvZ, TvT, PvP, PvT, PvZ, TvZ) tagged cohort='selfplay'")
+    parser.add_argument("--selfplay-matches", type=int, default=6,
+                        help="Number of full-game Self-Play matches to run with --include-selfplay or --opponents self_6 (default: 6)")
+    parser.add_argument("--selfplay-limit", type=int, default=None,
+                        help="Optional cap on Self-Play matches appended (e.g. 1 for quick smoke verification)")
+    parser.add_argument("--selfplay-baseline", action="store_true",
+                        help="Pit live P1 Mothman (--mothman-mode) against committed ladder/Mothman-{P,T,Z}.zip as P2 (Mothman-*-Base)")
     parser.add_argument("--maps", default="season",
                         help="Comma-separated map names, 'season' (maps_manifest.json), or 'all'")
     parser.add_argument("--matches-per-pair", type=int, default=1,
@@ -994,8 +1136,8 @@ def main() -> int:
     if args.dry_run:
         print(f"Dry run: {len(tasks)} matches | mode={args.mothman_mode} | j={args.concurrency} | runtime={runtime}")
         for t in tasks:
-            print(f"  [{t.index:03d}] {t.bot1.name}({t.bot1.race},{t.bot1.bot_type}) vs "
-                  f"{t.bot2.name}({t.bot2.race},{t.bot2.bot_type}) on {t.map_name}")
+            print(f"  [{t.index:03d}] [{t.cohort:<8}] {t.bot1.name}({t.bot1.race},{t.bot1.bot_mode or t.bot1.bot_type}) vs "
+                  f"{t.bot2.name}({t.bot2.race},{t.bot2.bot_mode or t.bot2.bot_type}) on {t.map_name}")
         return 0
 
     now_utc = dt.datetime.now(dt.timezone.utc)
@@ -1080,6 +1222,11 @@ def main() -> int:
     for mu in sorted({f"{r['bot1_race']}v{r['bot2_race']}" for r in results}):
         by_matchup[mu] = aggregate_records([r for r in results if f"{r['bot1_race']}v{r['bot2_race']}" == mu])
 
+    by_cohort: dict[str, Any] = {}
+    for c in sorted({str(r.get("cohort") or "unknown") for r in results}):
+        by_cohort[c] = aggregate_records([r for r in results if str(r.get("cohort") or "unknown") == c])
+
+    ext_results = [r for r in results if r.get("cohort") != "selfplay"]
     summary = {
         "run_id": run_id,
         "run_dir": str(run_dir),
@@ -1093,6 +1240,8 @@ def main() -> int:
         "timeout_sec": args.timeout_sec,
         "wall_elapsed_sec": wall_elapsed,
         "totals": aggregate_records(results),
+        "totals_external": aggregate_records(ext_results) if ext_results else None,
+        "by_cohort": by_cohort,
         "by_bot": by_bot,
         "by_opponent": by_opponent,
         "by_matchup": by_matchup,
@@ -1100,8 +1249,11 @@ def main() -> int:
     }
 
     summary_json_path = run_dir / "summary.json"
+    results_json_path = run_dir / "results.json"
     summary_txt_path = run_dir / "summary.txt"
-    summary_json_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    summary_payload = json.dumps(summary, indent=2) + "\n"
+    summary_json_path.write_text(summary_payload, encoding="utf-8")
+    results_json_path.write_text(summary_payload, encoding="utf-8")
     summary_txt = format_summary_text(summary)
     summary_txt_path.write_text(summary_txt, encoding="utf-8")
 

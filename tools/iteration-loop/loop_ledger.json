@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter28_wave28",
+  "active_wave": "iter29_wave29",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -2500,6 +2500,101 @@
         "NEW 54-MATCH HWM (17W-34L-2T clean / 18W-34L-2T raw vs W18 16W-37L-0T clean -> 5/9 Gates PASS), NEW A8Pro=0.52 (score) / 0.49 (clean) ATH, SHATTERED 54-MATCH LATENCY ATH max=163.87ms (-13.2ms vs W18!), 10 SIMULTANEOUS ZEROS ACROSS ALL 54 MATCHES, AND 3RD STRAIGHT ZERO-LOSS 36-SCEN ARENA 2.0 SWEEP (20W-0L-16T 1.72x ATH)!"
       ],
       "promotion_gates_passed": "5/9 PASS on full 53-match clean roster (zero_crashes_and_rejects, ties_le_2 [2T], sup_blk_le_6pct [4.6%], every_race_w4_within_6_of_pro [ALL 3 RACES PASS: P -6.0 / T -1.5 / Z -5.0!], tactics_suite_100pct [Arena 2.0 20W-0L-16T 1.72x ATH!])"
+    },
+    {
+      "id": "iter29_wave29",
+      "status": "COMPLETED_SCORED_42M_CORE12_PLUS_SELF6_HONEST_ARENA2",
+      "campaign": "Loops 29+ Self-Play & Honest Tactics Arena Campaign (Loop 29)",
+      "loop_self_improvements": [
+        "L29-LOOP-1A (Honest Tactics Arena 2.0): Raised max_loops 336->960 (~43s) across all 36 scenarios, added 168-loop no-damage stalemate early-stop, exact SC2 4.10 unarmed/incapable-survivor KO termination (Medivac/Observer/Overseer/WarpPrism/0-energy casters + Air/Ground incapability), and honest KO/Points/Draw adjudication (trade>=1.25 Pts Win, <=0.80 Pts Loss, 0.80..1.25 Draw) + fail-fast crash watcher in tools/sc2-tactics-arena.py.",
+        "L29-LOOP-1B (Full-Match Self-Play in Local Bench): Added --include-selfplay, --opponents self_6/core_12/none, --selfplay-matches 6 (ZvZ/TvT/PvP/PvT/PvZ/TvZ), --selfplay-limit, and --selfplay-baseline (source vs zip Mothman-*-Base) with cohort='selfplay' isolation in tools/run-local-sc2-arena.py.",
+        "L29-LOOP-2 (Self-Play Telemetry & Tooling): Added SELFPLAY cohort scoring in score-replay-batch.rkt, isolated selfplay cohort + honest Arena W-L-D gate in compare-vs-pro.py, FULL-MATCH SELF-PLAY CLASH slot in render-replay-clips.py, and W-L-D KO/Pts tables in build-visual-report.py."
+      ],
+      "spec_summary": "Loop 29 (L29-P0-1..3 + Honest Arena 2.0 + Full-Match self_6): Terran barracks #2/#3 0.5t pure-3x3 spillover, emergency cloaked-threat detection & ScannerSweep (#52/#54 who), Protoss air-dominance ground closure, Viper ParasiticBomb-before-Abduct priority (4/4 KOs!), honest 960-loop Arena KO/Points scoring, and first 42-match core_12 + self_6 batch.",
+      "rev": "vrpyyusr 6daa2fca (iter29 working copy)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261120_171442_iter29_wave29",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter29_wave29_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter29_wave29.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter29.json",
+      "tactics_selfplay_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter29.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter29.md",
+      "clean_n": 36,
+      "record_clean": "12W-18L-6T (36/36 clean core_12; NEW ATL 18L & 50.0% Non-Loss!; 3 StaleTies + 3 WallTies)",
+      "record_non_chance_clean": "9W-18L-6T (27.3% WR, 45.5% NL, 0.58x)",
+      "record_selfplay_6": "P1 4W-1L-1T (66.7% WR, Trade 2.5x, SupBlk 2.3%, PkArmy 6666, 0 crashes/rejects/WallTies; ZvZ W, TvT 30m T, PvP W, PvT L, PvZ W, TvZ W)",
+      "wr_pct_clean": 33.3,
+      "non_loss_pct": 50.0,
+      "trade_agg": 0.6,
+      "trade_med": 0.32,
+      "pk_army_avg": 2926.4,
+      "sup_blk_avg": 4.2,
+      "early_atk_pct_2m_6m_avg": 38.1,
+      "protoss_warpgate_sec_med": 254.5,
+      "zerg_roach_warren_sec_med": 134.5,
+      "combat_death_home_enemy_pct_avg": "59.1%/27.8%",
+      "late_game_stalemate_tie_matches": 3,
+      "worker_econ_eff_4m_6m_avg": "48.5/54.8",
+      "econ_eff_collapse_matches": 5,
+      "endgame_home_stall_count": 0,
+      "own_base_retreat_frames": 2388,
+      "own_territory_retreat_frames": 2388,
+      "non_combat_robo_waste_val": 350,
+      "zerg_non_ling_army_pct": null,
+      "siege_range_zero_dps_losses": 4,
+      "cloaked_unit_damage_losses": 0,
+      "gas_rich_min_starved_matches": 4,
+      "one_base_lockout_matches": 2,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 3,
+      "prod_placement_stall_matches": 3,
+      "zero_kill_collapse_matches": 2,
+      "drip_feed_collapse_matches": 14,
+      "prod_idle_bank_freeze_matches": 1,
+      "gas_zero_harvest_freeze_matches": 0,
+      "spire_sched_drop_matches": 0,
+      "wall_timeout_ties": 3,
+      "army_val_4m_ratio_vs_pro": null,
+      "army_val_8m_ratio_vs_pro": null,
+      "latency_summary": "CORE12 avg=8.56ms, p95=15.21ms, 41/42 <=175.0ms (1 outlier spike 2046.9ms on #12 PvPuck WallTie; self_6 max<=160.8ms, 0 rejects!)",
+      "by_race": {
+        "Protoss": {
+          "record": "4W-6L-2T (33.3% WR, 50.0% NL; #30 PvCreepy W 11.25x, PvZ 2-2 1.36x)",
+          "trade_agg": 0.67,
+          "w4_alive_med": 25.0,
+          "w6_alive_med": 41.5,
+          "nat_sec": 115.2,
+          "sup_blk": 4.9
+        },
+        "Terran": {
+          "record": "4W-8L-0T (33.3% WR, 0.85x Trade, SupBlk 2.4% NEW ATL!, W@4m 24.5/27 PASS, Nat 93s/109s)",
+          "trade_agg": 0.85,
+          "w4_alive_med": 24.5,
+          "w6_alive_med": 37.5,
+          "nat_sec": 93.4,
+          "sup_blk": 2.4
+        },
+        "Zerg": {
+          "record": "4W-4L-4T (33.3% WR, 66.7% NL!; W@4m 29/35 PASS, Z:RW 134s NEW ATH!, SpireDrop=0)",
+          "trade_agg": 0.41,
+          "w4_alive_med": 29.0,
+          "w6_alive_med": 48.0,
+          "nat_sec": 55.2,
+          "sup_blk": 5.3
+        }
+      },
+      "tactics_summary": {
+        "rev": "vrpyyusr 6daa2fca (iter29)",
+        "passed": "Verifier 7/7 + 22/22 FIRST-PASS; Honest 960-loop Arena 2.0 31W-4L-1D (86.1% WR, 1.81x ATH!)",
+        "sc2_duel36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter29.json",
+        "sc2_selfplay36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter29.json",
+        "sc2_duel36_summary": "HONEST 960-LOOP ARENA 2.0: 31W-4L-1D (KO 30/Pts 1 - KO 4/Pts 0 - 1D, NEW 1.81x Trade ATH; Zerg PERFECT 12W-0L-0D 2.35x w/ 4/4 Viper ParasiticBomb KOs!; Terran 10W-2L-0D; Protoss 9W-2L-1D) + Honest Self-Play 27W-9L-0D (0 Draws!, P1 A:M=4.46 ATH, 72/72 clean real-3D clips!)"
+      },
+      "key_wins": [
+        "HONEST 960-LOOP TACTICS ARENA 2.0 PROVEN: Eliminated all 16 fake Timeouts -> 31W-4L-1D (86.1% WR, 1.81x ATH, Zerg 12-0-0 2.35x w/ 4/4 Viper ParasiticBomb KOs!) + Self-Play 27W-9L-0D (0 Draws!, P1 A:M=4.46 ATH), cleanly exposing 4 genuine micro gaps (t04 Ghost Snipe vs Ultra, p03 Stalker over-kite, p11, t06)!",
+        "FIRST-EVER 42-MATCH CORE12 + FULL-MATCH SELF_6 BATCH: All 6 SC2 self-play matchups ran cleanly (4W-1L-1T, SB 2.3%, W@4m 28.2, Bases 4.0, max<=160.8ms, 0 rejects/WallTies) and immediately surfaced #38 TvT 30m GasRich Tie & #40 PvT 18x-gateway stall!",
+        "CORE12 NEW ALL-TIME LOW 18L (50.0% NON-LOSS!), Terran SupBlk 2.4% ATL, Zerg Z:RW 134s ATH, ProdPlaceStall 5->3 (#02/#08/#32/#35 cleared), Siege0DPS 6->4, SpireDrop 1->0, puck 1-0-2 UNDEFEATED, 4/9 Promotion Gates PASS!"
+      ],
+      "promotion_gates_passed": "4/9 PASS on pure core_12 (zero_crashes_and_rejects, sup_blk_le_6pct [4.2%], every_race_wr_ge_33pct [P/T/Z all 33.3%], tactics_suite_100pct [Honest Arena 2.0 31W-4L-1D 86.1%/1.81x ATH!]) \u2014 missed ties_le_2 (6T: 3 StaleTies + 3 WallTies) and every_race_w4_within_6_of_pro only on Protoss (-9.0w; T -2.5 & Z -6.0 BOTH PASS!)"
     }
   ],
   "final_18_loop_summary": {

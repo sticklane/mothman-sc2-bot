@@ -261,7 +261,17 @@ def normalize_match(m):
         "crashes": m.get("crashes") or [],
         "signatures": m.get("signatures") or [],
         "anomalies": m.get("anomalies") or {},
+        "opp_cohort": m.get("opp_cohort") or "",
+        "is_selfplay": bool(
+            m.get("is_selfplay")
+            or (m.get("opp_cohort") == "selfplay")
+            or str(m.get("opp_bot") or "").startswith("Mothman-")
+        ),
     }
+
+
+def is_selfplay_row(row):
+    return bool(row.get("is_selfplay") or row.get("opp_cohort") == "selfplay" or str(row.get("opp_bot") or "").startswith("Mothman-"))
 
 
 def load_score_json(path, exclude_opp_crash=False):
@@ -621,7 +631,12 @@ def evaluate_promotion_gates(overall, by_race, tactics_data=None):
         if passed is not None and total:
             gates["tactics_suite_100pct"] = (passed == total and tsum.get("total_wire_rejects", 0) == 0)
         elif tactics_data.get("mode") == "duel" and total:
-            gates["tactics_suite_100pct"] = (tsum.get("p2_wins", 99) == 0 and tsum.get("mothman_wins", 0) > 0)
+            if "draws" in tsum:
+                # Honest KO/Points/Draw Arena 2.0 scoring: >=80% win rate AND >=1.25x agg trade
+                wr = tsum.get("mothman_wins", 0) / max(1, total)
+                gates["tactics_suite_100pct"] = (wr >= 0.80 and float(tsum.get("agg_trade_ratio", 0.0)) >= 1.25)
+            else:
+                gates["tactics_suite_100pct"] = (tsum.get("p2_wins", 99) == 0 and tsum.get("mothman_wins", 0) > 0)
     return gates
 
 
@@ -639,13 +654,21 @@ def main():
     with open(args.pro_baselines) as f:
         pro = json.load(f)
 
-    cur_raw, cur_rows = load_score_json(args.current, args.exclude_opp_crash)
-    base_raw, base_rows = (None, [])
+    cur_raw, cur_rows_all = load_score_json(args.current, args.exclude_opp_crash)
+    cur_selfplay_rows = [m for m in cur_rows_all if is_selfplay_row(m)]
+    cur_ext_rows = [m for m in cur_rows_all if not is_selfplay_row(m)]
+    # Keep Pro-Corpus / core_12 / unseen_6 / Promotion Gates 100% pure by excluding self-play when external matches exist!
+    cur_rows = cur_ext_rows if cur_ext_rows else cur_rows_all
+
+    base_raw, base_rows_all = (None, [])
     if args.baseline:
-        base_raw, base_rows = load_score_json(args.baseline, args.exclude_opp_crash)
-    hwm_raw, hwm_rows = (None, [])
+        base_raw, base_rows_all = load_score_json(args.baseline, args.exclude_opp_crash)
+    base_rows = [m for m in base_rows_all if not is_selfplay_row(m)] or base_rows_all
+
+    hwm_raw, hwm_rows_all = (None, [])
     if args.hwm:
-        hwm_raw, hwm_rows = load_score_json(args.hwm, args.exclude_opp_crash)
+        hwm_raw, hwm_rows_all = load_score_json(args.hwm, args.exclude_opp_crash)
+    hwm_rows = [m for m in hwm_rows_all if not is_selfplay_row(m)] or hwm_rows_all
 
     tactics_data = None
     if args.tactics and os.path.exists(args.tactics):
@@ -656,9 +679,35 @@ def main():
     base_all = summarize_slice(base_rows) if base_rows else None
     hwm_all = summarize_slice(hwm_rows) if hwm_rows else None
 
+    selfplay_report = None
+    if cur_selfplay_rows:
+        sp_mus = sorted(set(m["matchup"] for m in cur_selfplay_rows))
+        selfplay_report = {
+            "summary": summarize_slice(cur_selfplay_rows),
+            "by_matchup": {
+                mu: summarize_slice([m for m in cur_selfplay_rows if m["matchup"] == mu])
+                for mu in sp_mus
+            },
+            "matches": [
+                {
+                    "id": m["match_id"],
+                    "our_bot": m["our_bot"],
+                    "opp_bot": m["opp_bot"],
+                    "matchup": m["matchup"],
+                    "result": m["result"],
+                    "trade_ratio": m["trade_ratio"],
+                    "duration_sec": m["duration_sec"],
+                    "our_peak_army": m["our_peak_army"],
+                    "opp_peak_army": m["opp_peak_army"],
+                    "supply_block_pct": m["supply_block_pct"],
+                }
+                for m in cur_selfplay_rows
+            ],
+        }
+
     cur_core_rows = [m for m in cur_rows if m["opp_bot"] in CORE_12_OPPONENTS]
     cur_core_nc_rows = [m for m in cur_core_rows if m["opp_bot"] != "Chance"]
-    cur_unseen_rows = [m for m in cur_rows if m["opp_bot"] not in CORE_12_OPPONENTS]
+    cur_unseen_rows = [m for m in cur_rows if m["opp_bot"] not in CORE_12_OPPONENTS and not is_selfplay_row(m)]
     cohorts = None
     if cur_unseen_rows:
         unseen_opps = sorted(set(m["opp_bot"] for m in cur_unseen_rows))
@@ -708,6 +757,7 @@ def main():
         "exclude_opp_crash": args.exclude_opp_crash,
         "overall": {"current": cur_all, "baseline": base_all, "hwm": hwm_all},
         "cohorts": cohorts,
+        "selfplay": selfplay_report,
         "by_race": by_race,
         "by_matchup": by_matchup,
         "paired_diff": paired_diff,
@@ -917,6 +967,24 @@ def main():
                     f"| {fmt(osum['sup_blk_avg'],'%')} | {osum.get('cloaked_unit_damage_losses', 0)} "
                     f"| {osum.get('siege_range_zero_dps_losses', 0)} |"
                 )
+
+    if selfplay_report:
+        sps = selfplay_report["summary"]
+        print(
+            f"\n### Full-Match Self-Play Cohort (`n={sps['n']}`, isolated from Pro-Corpus & core_12/unseen_6): "
+            f"P1 `{sps['wins']}W-{sps['losses']}L-{sps['ties']}T` (`{sps['wr_pct']:.1f}%`, Trade `{fmt(sps['trade_agg'],'x',2)}`, "
+            f"SupBlk `{fmt(sps['sup_blk_avg'],'%')}`, PkArmy `{fmt(sps['pk_army_avg'],'',0)}`, "
+            f"AvgDur `{fmt(sps.get('dur_avg_sec'),'s',0)}`)"
+        )
+        print("| Match | MU | P1 Result | Trade | Dur | PkArmy (P1/P2) | SupBlk% |")
+        print("|---|---|---|---:|---:|---:|---:|")
+        for sm in selfplay_report["matches"]:
+            print(
+                f"| `#{sm['id']}` `{sm['our_bot']}` vs `{sm['opp_bot']}` | **{sm['matchup']}** "
+                f"| {str(sm['result']).upper()} | {fmt(sm['trade_ratio'],'x',2)} "
+                f"| {fmt(sm['duration_sec'],'s',0)} | {sm['our_peak_army']}/{sm['opp_peak_army']} "
+                f"| {fmt(sm['supply_block_pct'],'%')} |"
+            )
 
     if hwm_all:
         cmp_slice = cohorts["core_12"] if (cohorts and hwm_all["n"] <= 36 and cur_all["n"] > 36) else cur_all

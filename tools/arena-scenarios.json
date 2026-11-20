@@ -35,7 +35,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-p02-stalker-immortal-vs-roach-ravager",
@@ -70,7 +70,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-p03-outnumbered-stalkers-vs-lings",
@@ -93,7 +93,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-p04-colossus-sentry-stalker-vs-bio",
@@ -146,7 +146,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-p05-ht-archon-stalker-vs-hydra-infestor",
@@ -196,7 +196,7 @@
       "p1_upgrades": [
         "PsiStorm"
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-p06-early-12pool-zealot-adept-vs-lings",
@@ -231,7 +231,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-p07-stalkers-vs-tempests-voidrays",
@@ -272,7 +272,7 @@
           2.5
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-p08-stalker-phoenix-zealot-vs-bio-tank-cyclone",
@@ -295,7 +295,7 @@
         ["siege-tank-sieged", 2, 6.8, 0.0],
         ["medivac", 1, 6.5, 1.5]
       ],
-      "max_loops": 384
+      "max_loops": 960
     },
     {
       "id": "sc2-real-p09-disruptor-blink-prism-vs-bio-liberator-viking",
@@ -318,7 +318,7 @@
         ["liberator", 2, 6.0, -2.0],
         ["viking-fighter", 2, 6.0, 2.0]
       ],
-      "max_loops": 384
+      "max_loops": 960
     },
     {
       "id": "sc2-real-p10-phoenix-oracle-stalker-vs-muta-ling-harass",
@@ -340,7 +340,7 @@
         ["zergling", 12, 4.8, 1.5],
         ["mutalisk", 7, 5.2, -2.0]
       ],
-      "max_loops": 384
+      "max_loops": 960
     },
     {
       "id": "sc2-real-p11-dt-observer-stalker-vs-banshee-raven-bio",
@@ -364,7 +364,7 @@
         ["banshee", 3, 5.5, -2.0],
         ["raven", 1, 6.0, 1.5]
       ],
-      "max_loops": 384
+      "max_loops": 960
     },
     {
       "id": "sc2-real-p12-12pool-probe-zealot-mineral-hold",
@@ -382,7 +382,7 @@
       "p2_units": [
         ["zergling", 12, 4.8, 0.0]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-t01-bio-medivac-vs-zealot-stalker",
@@ -423,7 +423,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-t02-tank-marine-vs-roach-ling",
@@ -458,7 +458,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-t03-outnumbered-bio-vs-lings",
@@ -487,7 +487,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-t04-ghost-bio-medivac-vs-ultra-infestor",
@@ -540,7 +540,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-t05-bio-medivac-vs-ling-bane",
@@ -581,7 +581,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-t06-early-12pool-marines-reaper-vs-lings",
@@ -610,7 +610,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-t07-bio-cyclones-vs-stalker-immortal",
@@ -651,7 +651,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-t08-tvt-tank-viking-marine-highground-ramp",
@@ -675,7 +675,7 @@
         ["siege-tank", 2, 6.2, 0.0],
         ["viking-fighter", 4, 5.0, -2.5]
       ],
-      "max_loops": 400
+      "max_loops": 960
     },
     {
       "id": "sc2-real-t09-widowmine-hellbat-cyclone-vs-ling-bane",
@@ -698,7 +698,7 @@
         ["zergling", 24, 4.8, 0.0],
         ["baneling", 8, 5.5, 0.0]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-t10-ghost-bio-liberator-vs-ht-archon-chargelot",
@@ -723,7 +723,7 @@
         ["stalker", 4, 5.5, 0.0],
         ["high-templar", 2, 6.2, 0.0]
       ],
-      "max_loops": 384
+      "max_loops": 960
     },
     {
       "id": "sc2-real-t11-thor-viking-hellbat-vs-broodlord-corruptor-viper",
@@ -743,7 +743,7 @@
         ["corruptor", 6, 5.5, -2.0],
         ["viper", 2, 6.5, 2.0]
       ],
-      "max_loops": 420
+      "max_loops": 960
     },
     {
       "id": "sc2-real-t12-banshee-raven-marine-vs-dt-stalker-observer",
@@ -767,7 +767,7 @@
         ["stalker", 4, 5.5, 0.0],
         ["observer", 1, 5.2, 1.8]
       ],
-      "max_loops": 384
+      "max_loops": 960
     },
     {
       "id": "sc2-real-z01-lings-vs-marines-open",
@@ -790,7 +790,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-z02-roach-ravager-vs-tank-bio",
@@ -825,7 +825,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-z03-hydra-roach-vs-stalker-zealot",
@@ -860,7 +860,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-z04-queen-ultra-ling-vs-stalker-immortal",
@@ -907,7 +907,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-z05-hydra-roach-vs-voidray-zealot",
@@ -942,7 +942,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-z06-early-12pool-queen-lings-vs-lings",
@@ -971,7 +971,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-z07-hydras-vipers-vs-carriers-voidrays",
@@ -1006,7 +1006,7 @@
           0.0
         ]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-z08-corruptor-viper-volley-vs-tempest-carrier-cliff",
@@ -1025,7 +1025,7 @@
         ["tempest", 2, 5.5, 2.5],
         ["carrier", 3, 6.8, 0.0]
       ],
-      "max_loops": 420
+      "max_loops": 960
     },
     {
       "id": "sc2-real-z09-roach-burrow-heal-vs-stalker-immortal",
@@ -1045,7 +1045,7 @@
         ["immortal", 2, 4.0, 0.0],
         ["stalker", 6, 5.2, 0.0]
       ],
-      "max_loops": 420
+      "max_loops": 960
     },
     {
       "id": "sc2-real-z10-lurker-hydra-overseer-vs-stalker-immortal-obs-ramp",
@@ -1070,7 +1070,7 @@
         ["stalker", 8, 5.5, 0.0],
         ["observer", 1, 5.2, 2.0]
       ],
-      "max_loops": 400
+      "max_loops": 960
     },
     {
       "id": "sc2-real-z11-ling-bane-flank-surround-vs-bio-tank",
@@ -1093,7 +1093,7 @@
         ["siege-tank-sieged", 2, 0.0, 1.5],
         ["medivac", 1, 0.0, -1.5]
       ],
-      "max_loops": 336
+      "max_loops": 960
     },
     {
       "id": "sc2-real-z12-12pool-queen-ling-drone-mineral-hold",
@@ -1111,7 +1111,7 @@
       "p2_units": [
         ["zergling", 14, 4.8, 0.0]
       ],
-      "max_loops": 336
+      "max_loops": 960
     }
   ]
 }

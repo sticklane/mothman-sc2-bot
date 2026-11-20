@@ -93,6 +93,7 @@ def _enrich_arena_clips(
         if extra:
             for k in (
                 "race", "enemy_race", "terrain", "source", "opponent_mode", "p2_bot",
+                "win_type", "end_reason", "p1_combat_alive_cnt", "p2_combat_alive_cnt",
                 "p2_trade_ratio", "p2_attack_unit_cmds", "p2_move_unit_cmds", "p2_spell_unit_cmds",
                 "applied_p1_upgrade_ids", "applied_p2_upgrade_ids",
             ):
@@ -129,8 +130,10 @@ def _render_arena_section(
             continue
         rw = sum(1 for c in rclips if c.get("winner") in p1_win_tags)
         rl = sum(1 for c in rclips if c.get("winner") in p2_win_tags)
-        rt = len(rclips) - rw - rl
-        lbl = f"`P1={rw}W / P2={rl}W / {rt}T`" if is_selfplay else f"`{rw}W-{rl}L-{rt}T`"
+        rd = len(rclips) - rw - rl
+        has_honest = any(c.get("win_type") for c in rclips)
+        d_ch = "D" if has_honest else "T"
+        lbl = f"`P1={rw}W / P2={rl}W / {rd}{d_ch}`" if is_selfplay else f"`{rw}W-{rl}L-{rd}{d_ch}`"
         lines.append(f"### {race} Duels ({lbl})")
         lines.append("")
         if is_selfplay:
@@ -144,13 +147,15 @@ def _render_arena_section(
             terr = str(c.get("terrain") or "open")
             tr = c.get("trade_ratio")
             tr_s = f"{float(tr):.2f}x" if tr is not None else "—"
+            wt = c.get("win_type")
+            win_lbl = f"**{c.get('winner', '')}** (`{wt}`)" if wt else f"**{c.get('winner', '')}**"
             cmds1 = f"{c.get('mothman_attack_unit_cmds', '—')}/{c.get('mothman_move_unit_cmds', '—')}/{c.get('mothman_spell_unit_cmds', '—')}"
             ctx = c.get("context") or c.get("description") or ""
             if is_selfplay:
                 cmds2 = f"{c.get('p2_attack_unit_cmds', '—')}/{c.get('p2_move_unit_cmds', '—')}/{c.get('p2_spell_unit_cmds', '—')}"
-                lines.append(f"| `{sid}` | `{terr}` | **{c.get('winner', '')}** | `{tr_s}` | `{cmds1}` | `{cmds2}` | {ctx} |")
+                lines.append(f"| `{sid}` | `{terr}` | {win_lbl} | `{tr_s}` | `{cmds1}` | `{cmds2}` | {ctx} |")
             else:
-                lines.append(f"| `{sid}` | `{terr}` | **{c.get('winner', '')}** | `{tr_s}` | `{cmds1}` | {ctx} |")
+                lines.append(f"| `{sid}` | `{terr}` | {win_lbl} | `{tr_s}` | `{cmds1}` | {ctx} |")
         lines.append("")
 
         lines.append("````carousel")
@@ -238,17 +243,21 @@ def build_report(
         if arena_manifest and aclips:
             aw = sum(1 for c in aclips if c.get("winner") == "Mothman")
             al = sum(1 for c in aclips if c.get("winner") == "MicroDummy")
-            at = len(aclips) - aw - al
+            ad = len(aclips) - aw - al
+            rec_s = (arena_json.get("summary") or {}).get("record_str") if arena_json else None
+            lbl_s = rec_s or f"{aw}W-{al}L-{ad}D"
             lines.append(
-                f"- **Real-`SC2_x64` {len(aclips)}-Duel Tactics Arena (`--opponent dummy`):** **`{aw}W-{al}L-{at}T`** — all `{len(aclips)}` duels rendered in "
+                f"- **Real-`SC2_x64` {len(aclips)}-Duel Tactics Arena (`--opponent dummy`):** **`{lbl_s}`** — all `{len(aclips)}` duels rendered in "
                 f"`{arena_manifest.get('wall_sec', 0)}s` (`{_fmt_kb(arena_manifest.get('total_webp_bytes'))}` WebP total)"
             )
         if selfplay_manifest and sclips:
             sp1 = sum(1 for c in sclips if c.get("winner") == "Mothman-P1")
             sp2 = sum(1 for c in sclips if c.get("winner") == "Mothman-P2")
-            spt = len(sclips) - sp1 - sp2
+            spd = len(sclips) - sp1 - sp2
+            rec_sp = (selfplay_json.get("summary") or {}).get("record_str") if selfplay_json else None
+            lbl_sp = rec_sp or f"P1={sp1}W / P2={sp2}W / {spd}D"
             lines.append(
-                f"- **Real-`SC2_x64` {len(sclips)}-Duel Mothman-vs-Mothman Self-Play (`--opponent self`):** **`P1={sp1}W / P2={sp2}W / {spt}T`** — all `{len(sclips)}` duels rendered in "
+                f"- **Real-`SC2_x64` {len(sclips)}-Duel Mothman-vs-Mothman Self-Play (`--opponent self`):** **`{lbl_sp}`** — all `{len(sclips)}` duels rendered in "
                 f"`{selfplay_manifest.get('wall_sec', 0)}s` (`{_fmt_kb(selfplay_manifest.get('total_webp_bytes'))}` WebP total)"
             )
         lines.append("")

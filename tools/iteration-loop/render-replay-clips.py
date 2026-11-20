@@ -320,11 +320,19 @@ def select_critical_clips(
             "Watch Mothman's army positioning, focus-fire discipline, and decisive mid/late-game macro conversion.",
         )
 
-    # 2. Held-Out Unseen Win (generalization proof; falls back to 2nd diverse Core Win)
+    def _is_sp(m: dict[str, Any]) -> bool:
+        return bool(
+            m.get("is_selfplay")
+            or m.get("opp_cohort") == "selfplay"
+            or str(m.get("opp_bot") or "").startswith("Mothman-")
+        )
+
+    # 2. Held-Out Unseen Win (generalization proof; falls back to Full-Match Self-Play Clash or 2nd Core Win)
     unseen_wins = [
         (m, rp) for m, rp in valid
         if m.get("result") == "win"
         and (m.get("opp_bot") not in CORE_12_OPPONENTS)
+        and (not _is_sp(m))
         and (m.get("duration_sec") or 0) >= 200
     ]
     pick = _pick(
@@ -347,6 +355,23 @@ def select_critical_clips(
                 f"Second race-diverse core_12 win ({m.get('our_bot')} vs {m.get('opp_bot')}, Trade {m.get('trade_ratio')}x).",
                 "Watch Mothman's unit composition, engagement geometry, and production follow-through.",
             )
+
+    # 2b. Full-Match Mothman-vs-Mothman Self-Play Clash (when self_6 replays are in the batch!)
+    selfplay_matches = [
+        (m, rp) for m, rp in valid
+        if _is_sp(m) and (m.get("duration_sec") or 0) >= 180
+    ]
+    pick = _pick(
+        selfplay_matches,
+        lambda m: (m.get("our_peak_army") or 0) + (m.get("opp_peak_army") or 0) + (m.get("killed_val") or 0) * 0.6,
+    )
+    if pick:
+        m, rp = pick
+        _add(
+            m, rp, "FULL-MATCH SELF-PLAY CLASH", "peak_clash", (16, 185, 129),
+            f"Full-game Mothman-vs-Mothman battle ({m.get('our_bot')} vs {m.get('opp_bot')}, {str(m.get('result') or '').upper()}, Trade {m.get('trade_ratio')}x, Peak Armies {m.get('our_peak_army')}/{m.get('opp_peak_army')}).",
+            "Watch BOTH Mothman bots execute macro transitions, upgrades, spellcasters, and late-game army control head-to-head.",
+        )
 
     # 3. Worst Siege0DPS / Cloak / Freeze Anomaly Loss
     siege_losses = [

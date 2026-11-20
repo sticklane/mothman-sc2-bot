@@ -247,11 +247,29 @@
 
 (define ACTIVE-CORE-OPP-SET (load-core-opponent-set))
 
-(define (classify-opp-cohort opp-name)
-  (if (and (string? opp-name)
-           (set-member? ACTIVE-CORE-OPP-SET (string-downcase (string-trim opp-name))))
-      "core_12"
-      "unseen_6"))
+(define (is-selfplay-opp? opp-name [bot-prefix "Mothman"])
+  (and (string? opp-name)
+       (let ([low (string-downcase (string-trim opp-name))]
+             [bp  (string-downcase (string-trim bot-prefix))])
+         (and (not (string=? low ""))
+              (or (and (not (string=? bp "")) (string-contains? low bp))
+                  (string-suffix? low "-sp")
+                  (string-suffix? low "-base")
+                  (string-contains? low "-sp_")
+                  (string-contains? low "-base_"))))))
+
+(define (classify-opp-cohort opp-name [meta #f] [bot-prefix "Mothman"])
+  (define mc
+    (and (hash? meta)
+         (let ([c (or (hash-ref meta 'cohort #f) (hash-ref meta 'opp_cohort #f))])
+           (and (string? c) (string-downcase (string-trim c))))))
+  (cond
+    [(or (equal? mc "selfplay") (is-selfplay-opp? opp-name bot-prefix))
+     "selfplay"]
+    [(and (string? opp-name)
+          (set-member? ACTIVE-CORE-OPP-SET (string-downcase (string-trim opp-name))))
+     "core_12"]
+    [else "unseen_6"]))
 
 (define CREEP-TUMOR-SET
   (set "CreepTumor" "CreepTumorBurrowed" "CreepTumorQueen"))
@@ -706,6 +724,16 @@
   (define plains '())
   ;; 1. Explicit `our_log_path` from local runner `summary.json`
   (define meta-our-log (and (hash? meta) (hash-ref meta 'our_log_path #f)))
+  (define meta-opp-log (and (hash? meta) (hash-ref meta 'opp_log_path #f)))
+  (define meta-opp-log-bn
+    (and (string? meta-opp-log) (not (string=? meta-opp-log ""))
+         (string-downcase (path->string (file-name-from-path (string->path meta-opp-log))))))
+  (define (is-sp-p2-log? fbn-low tail-low)
+    (or (and meta-opp-log-bn (string=? fbn-low meta-opp-log-bn))
+        (string-contains? tail-low "-sp.")
+        (string-contains? tail-low "-sp_")
+        (string-contains? tail-low "-base.")
+        (string-contains? tail-low "-base_")))
   (when (and (string? meta-our-log) (not (string=? meta-our-log "")) (file-exists? meta-our-log))
     (set! plains (cons (string->path meta-our-log) plains)))
   ;; 2. Same directory (AI Arena flat caches or per-match subdir)
@@ -740,6 +768,7 @@
               (string-contains? low "log"))
          (set! zips (cons p zips))]
         [(and (not is-controller-or-opp?)
+              (not (is-sp-p2-log? low tail-low))
               (or (string-suffix? low ".log")
                   (string-suffix? low ".stdout")
                   (string-suffix? low ".stderr")
@@ -759,6 +788,7 @@
       (when (string-prefix? fbn stem-pfx)
         (define tail-low (string-downcase (substring fbn (string-length stem-pfx))))
         (when (and (not (string-contains? tail-low "controller"))
+                   (not (is-sp-p2-log? (string-downcase fbn) tail-low))
                    (or (string-contains? tail-low bp-low)
                        (string-contains? tail-low "stderr")
                        (string-contains? tail-low "stdout")))
@@ -876,25 +906,44 @@
     (define bp-low (string-downcase bot-prefix))
     (define m1? (string-contains? (string-downcase n1) bp-low))
     (define m2? (string-contains? (string-downcase n2) bp-low))
+    (define (sp-tagged-name? s)
+      (define low (string-downcase (string-trim s)))
+      (or (string-suffix? low "-sp")
+          (string-suffix? low "-base")
+          (string-contains? low "-sp_")
+          (string-contains? low "-base_")))
+    (define meta-b1
+      (let ([v (or (hash-ref meta 'bot1 #f) (hash-ref meta 'bot #f) (hash-ref meta 'our_bot_name #f))])
+        (and (string? v) (not (string=? v "")) v)))
+    (define meta-b2
+      (let ([v (or (hash-ref meta 'bot2 #f) (hash-ref meta 'opp #f) (hash-ref meta 'opp_bot_name #f))])
+        (and (string? v) (not (string=? v "")) v)))
+    (define meta-cohort-lc
+      (let ([c (or (hash-ref meta 'cohort #f) (hash-ref meta 'opp_cohort #f))])
+        (and (string? c) (string-downcase (string-trim c)))))
+    (define is-selfplay-match?
+      (or (equal? meta-cohort-lc "selfplay")
+          (and m1? m2?)
+          (and meta-b2 (is-selfplay-opp? meta-b2 bot-prefix))))
     (define our-pid
       (cond
         [(and m1? (not m2?)) 1]
         [(and m2? (not m1?)) 2]
-        [(and m1? m2?) 'mirror]
+        [(and m1? m2?)
+         ;; L29-LOOP-2: Score Mothman-vs-Mothman Self-Play instead of skipping as `'mirror`!
+         ;; Keep live non-`-SP`/`-Base` side as P1 (`our-pid = 1` when symmetric).
+         (if (and (sp-tagged-name? n1) (not (sp-tagged-name? n2))) 2 1)]
         [else 1]))
-    (if (eq? our-pid 'mirror)
-        (hasheq 'file bn 'skip 'mirror)
-        (let ()
+    (let ()
           (define opp-pid (if (= our-pid 1) 2 1))
           (define our-p (hash-ref players our-pid (hasheq)))
           (define opp-p (hash-ref players opp-pid (hasheq)))
-          (define our-bot (format "~a" (or (hash-ref meta 'bot1 #f)
-                                           (hash-ref meta 'bot #f)
-                                           (hash-ref meta 'our_bot_name #f)
+          (define swap-sp-meta?
+            (and is-selfplay-match? meta-b1 meta-b2
+                 (sp-tagged-name? meta-b1) (not (sp-tagged-name? meta-b2))))
+          (define our-bot (format "~a" (or (if swap-sp-meta? meta-b2 meta-b1)
                                            (hash-ref our-p 'name "Mothman"))))
-          (define opp-bot (format "~a" (or (hash-ref meta 'bot2 #f)
-                                           (hash-ref meta 'opp #f)
-                                           (hash-ref meta 'opp_bot_name #f)
+          (define opp-bot (format "~a" (or (if swap-sp-meta? meta-b1 meta-b2)
                                            (hash-ref opp-p 'name "Opponent"))))
           (define our-race (format "~a" (hash-ref our-p 'actual_race "?")))
           (define opp-race (format "~a" (hash-ref opp-p 'actual_race "?")))
@@ -2060,7 +2109,10 @@
                          'opp_cloak_types (for/list ([p (in-list (top-k-pairs opp-cloak-types-ht 4))])
                                             (format "~a:~a" (car p) (cdr p)))
                          'trade_ratio trade-ratio)))
-          (define opp-cohort (classify-opp-cohort opp-bot))
+          (define opp-cohort
+            (if is-selfplay-match?
+                "selfplay"
+                (classify-opp-cohort opp-bot meta bot-prefix)))
 
           ;; W11-LOOP-2: Gas-rich / mineral-starved stall detector (>= 30 [SCBOT_PRIORITY] ticks of gas>=200 & min<100)
           (define gas-rich-min-starved-ticks (hash-ref log-acc 'gas-rich-min-starved-ticks 0))
@@ -2512,6 +2564,7 @@
                   'our_bot our-bot
                   'opp_bot opp-bot
                   'opp_cohort opp-cohort
+                  'is_selfplay is-selfplay-match?
                   'our_race our-race
                   'opp_race opp-race
                   'matchup matchup
@@ -2656,7 +2709,7 @@
                   'step_max true-step-max
                   'log_step_max log-step-max
                   'crashes (reverse (hash-ref log-acc 'crashes '()))
-                  'signatures (reverse sigs))))))
+                  'signatures (reverse sigs)))))
 
 ;; -----------------------------------------------------------------------------
 ;; Parallel Worker Place Entrypoint
@@ -3100,7 +3153,7 @@
        (case slice-key
          [(all) ms]
          [(clean) (filter clean-m? ms)]
-         [(core_12 unseen_6)
+         [(core_12 unseen_6 selfplay)
           (define want (symbol->string slice-key))
           (filter (lambda (m)
                     (and (clean-m? m)
@@ -3136,27 +3189,49 @@
             (pad-r "W@4m" 16) (pad-r "dW2->4" 16) (pad-r "W@6m" 16) (pad-r "PkArmy" 18)
             (pad-r "Bases" 18) (pad-r "SupBlk%" 18) (pad-r "Atk2-6%" 18) "Upgs")
     (printf "~a\n" (make-string 186 #\-))
-    (for ([entry (in-list '((all . "ALL") (clean . "CLEAN") (core_12 . "CORE12(cl)") (unseen_6 . "UNSEEN6(cl)") (Protoss . "Protoss(cl)") (Terran . "Terran(cl)") (Zerg . "Zerg(cl)")))])
+    (for ([entry (in-list '((all . "ALL") (clean . "CLEAN") (core_12 . "CORE12(cl)") (unseen_6 . "UNSEEN6(cl)") (selfplay . "SELFPLAY(cl)") (Protoss . "Protoss(cl)") (Terran . "Terran(cl)") (Zerg . "Zerg(cl)")))])
       (define sk (car entry))
       (define lbl (cdr entry))
       (define b (extract-slice-from-json base-js sk))
       (define c (extract-slice-from-json cur-json sk))
-      (when (and (> (hash-ref b 'n 0) 0) (> (hash-ref c 'n 0) 0))
-        (define wlt (format "~a-~a-~a -> ~a-~a-~a"
-                            (hash-ref b 'wins) (hash-ref b 'losses) (hash-ref b 'ties)
-                            (hash-ref c 'wins) (hash-ref c 'losses) (hash-ref c 'ties)))
-        (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
-                (pad-r lbl 12)
-                (pad-r wlt 19)
-                (pad-r (fmt-delta (hash-ref c 'trade_agg) (hash-ref b 'trade_agg) 2 "x") 18)
-                (pad-r (fmt-delta (hash-ref c 'our_w4) (hash-ref b 'our_w4) 1) 16)
-                (pad-r (fmt-delta (slice-dw24 c) (slice-dw24 b) 1) 16)
-                (pad-r (fmt-delta (hash-ref c 'our_w6) (hash-ref b 'our_w6) 1) 16)
-                (pad-r (fmt-delta (hash-ref c 'our_peak_army) (hash-ref b 'our_peak_army) 0) 18)
-                (pad-r (fmt-delta (hash-ref c 'our_bases) (hash-ref b 'our_bases) 2) 18)
-                (pad-r (fmt-delta (hash-ref c 'supply_block_pct) (hash-ref b 'supply_block_pct) 1 "%") 18)
-                (pad-r (fmt-delta (hash-ref c 'early_atk_pct_2m_6m #f) (hash-ref b 'early_atk_pct_2m_6m #f) 1 "%") 18)
-                (fmt-delta (hash-ref c 'upgrades) (hash-ref b 'upgrades) 1))))))
+      (define b-n (hash-ref b 'n 0))
+      (define c-n (hash-ref c 'n 0))
+      (define (fmt-new cur [prec 1] [suffix ""])
+        (if (real? cur)
+            (format "- ->~a~a" (~r cur #:precision prec) suffix)
+            "-"))
+      (cond
+        [(and (> b-n 0) (> c-n 0))
+         (define wlt (format "~a-~a-~a -> ~a-~a-~a"
+                             (hash-ref b 'wins) (hash-ref b 'losses) (hash-ref b 'ties)
+                             (hash-ref c 'wins) (hash-ref c 'losses) (hash-ref c 'ties)))
+         (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
+                 (pad-r lbl 12)
+                 (pad-r wlt 19)
+                 (pad-r (fmt-delta (hash-ref c 'trade_agg) (hash-ref b 'trade_agg) 2 "x") 18)
+                 (pad-r (fmt-delta (hash-ref c 'our_w4) (hash-ref b 'our_w4) 1) 16)
+                 (pad-r (fmt-delta (slice-dw24 c) (slice-dw24 b) 1) 16)
+                 (pad-r (fmt-delta (hash-ref c 'our_w6) (hash-ref b 'our_w6) 1) 16)
+                 (pad-r (fmt-delta (hash-ref c 'our_peak_army) (hash-ref b 'our_peak_army) 0) 18)
+                 (pad-r (fmt-delta (hash-ref c 'our_bases) (hash-ref b 'our_bases) 2) 18)
+                 (pad-r (fmt-delta (hash-ref c 'supply_block_pct) (hash-ref b 'supply_block_pct) 1 "%") 18)
+                 (pad-r (fmt-delta (hash-ref c 'early_atk_pct_2m_6m #f) (hash-ref b 'early_atk_pct_2m_6m #f) 1 "%") 18)
+                 (fmt-delta (hash-ref c 'upgrades) (hash-ref b 'upgrades) 1))]
+        [(and (eq? sk 'selfplay) (= b-n 0) (> c-n 0))
+         (define wlt (format "(new) -> ~a-~a-~a"
+                             (hash-ref c 'wins) (hash-ref c 'losses) (hash-ref c 'ties)))
+         (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
+                 (pad-r lbl 12)
+                 (pad-r wlt 19)
+                 (pad-r (fmt-new (hash-ref c 'trade_agg) 2 "x") 18)
+                 (pad-r (fmt-new (hash-ref c 'our_w4) 1) 16)
+                 (pad-r (fmt-new (slice-dw24 c) 1) 16)
+                 (pad-r (fmt-new (hash-ref c 'our_w6) 1) 16)
+                 (pad-r (fmt-new (hash-ref c 'our_peak_army) 0) 18)
+                 (pad-r (fmt-new (hash-ref c 'our_bases) 2) 18)
+                 (pad-r (fmt-new (hash-ref c 'supply_block_pct) 1 "%") 18)
+                 (pad-r (fmt-new (hash-ref c 'early_atk_pct_2m_6m #f) 1 "%") 18)
+                 (fmt-new (hash-ref c 'upgrades) 1))]))))
 
 ;; -----------------------------------------------------------------------------
 ;; Detailed Automatic Forensic Anomaly Dossier (`--anomalies`)
@@ -3580,13 +3655,59 @@
     (for/hasheq ([rs (in-list '("win" "loss" "tie"))])
       (values (string->symbol rs)
               (aggregate-slice (filter (lambda (r) (string=? (hash-ref r 'result) rs)) clean-scored)))))
-  ;; W9-LOOP-2: 54-match full-roster generalization cohort split (`core_12` vs `unseen_6`)
+  ;; W9-LOOP-2 / L29-LOOP-2: Cohort split (`core_12` vs `unseen_6` vs `selfplay`)
   (define core12-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "core_12")) clean-scored))
   (define unseen6-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "unseen_6")) clean-scored))
   (define unseen6-all-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "unseen_6")) scored))
+  (define selfplay-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "selfplay")) clean-scored))
+  (define selfplay-all-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "selfplay")) scored))
   (define agg-core12 (aggregate-slice core12-rows))
   (define agg-unseen6 (aggregate-slice unseen6-rows))
-  (define by-cohort (hasheq 'core_12 agg-core12 'unseen_6 agg-unseen6))
+  (define agg-selfplay (aggregate-slice selfplay-rows))
+  (define by-cohort (hasheq 'core_12 agg-core12 'unseen_6 agg-unseen6 'selfplay agg-selfplay))
+  ;; L29-LOOP-2: Per-matchup `selfplay_breakdown` (full P1 vs P2 head-to-head metrics)
+  (define selfplay-mus
+    (sort (remove-duplicates (map (lambda (r) (hash-ref r 'matchup "?v?")) selfplay-all-rows))
+          string-ci<?))
+  (define selfplay-breakdown
+    (for/hasheq ([mu (in-list selfplay-mus)])
+      (define all-rs (filter (lambda (r) (equal? (hash-ref r 'matchup "") mu)) selfplay-all-rows))
+      (define cl-rs (filter (lambda (r) (equal? (hash-ref r 'matchup "") mu)) selfplay-rows))
+      (define agg (aggregate-slice cl-rs))
+      (define ac (hash-ref agg 'anomaly_counts (hasheq)))
+      (define faults (- (length all-rs) (length cl-rs)))
+      (values (string->symbol mu)
+              (hasheq 'matchup mu
+                      'n (length cl-rs)
+                      'n_total (length all-rs)
+                      'opp_faults faults
+                      'wins (hash-ref agg 'wins 0)
+                      'losses (hash-ref agg 'losses 0)
+                      'ties (hash-ref agg 'ties 0)
+                      'win_rate_pct (hash-ref agg 'win_rate_pct 0.0)
+                      'non_loss_pct (hash-ref agg 'non_loss_pct 0.0)
+                      'trade_agg (hash-ref agg 'trade_agg 0.0)
+                      'trade_med (hash-ref agg 'trade_med 0.0)
+                      'killed_val (hash-ref agg 'killed_val 0)
+                      'lost_val (hash-ref agg 'lost_val 0)
+                      'our_bases (hash-ref agg 'our_bases 0.0)
+                      'opp_bases (hash-ref agg 'opp_bases 0.0)
+                      'our_w4 (hash-ref agg 'our_w4 #f)
+                      'opp_w4 (hash-ref agg 'opp_w4 #f)
+                      'our_w6 (hash-ref agg 'our_w6 #f)
+                      'opp_w6 (hash-ref agg 'opp_w6 #f)
+                      'our_peak_army (hash-ref agg 'our_peak_army 0.0)
+                      'opp_peak_army (hash-ref agg 'opp_peak_army 0.0)
+                      'supply_block_pct (hash-ref agg 'supply_block_pct 0.0)
+                      'avg_dur_sec (hash-ref agg 'avg_dur_sec 0.0)
+                      'escrow_lock (hash-ref ac 'escrow_lockout 0)
+                      'prod_stall (hash-ref ac 'prod_placement_stall 0)
+                      'drip_feed (hash-ref ac 'drip_feed_collapse 0)
+                      'cloak_loss (hash-ref ac 'cloaked_unit_damage_losses 0)
+                      'tvt_0tank (hash-ref ac 'tvt_zero_tank 0)
+                      'stale_tie (hash-ref ac 'late_game_stalemate_tie 0)
+                      'wall_ties (hash-ref ac 'wall_timeout_tie 0)
+                      'anomaly_counts ac))))
   ;; W14-LOOP-2: Per-opponent `unseen_6_breakdown` for 54-match full-roster ship scorecard
   (define unseen6-opps
     (sort (remove-duplicates (map (lambda (r) (hash-ref r 'opp_bot "Unknown")) unseen6-all-rows))
@@ -3636,8 +3757,9 @@
   (print-agg-line "ALL_MATCHES  " agg-all)
   (when (< (length clean-scored) (length scored))
     (print-agg-line "CLEAN_MATCHES" agg-clean))
+  (when (and (pair? core12-rows) (or (pair? unseen6-all-rows) (pair? selfplay-all-rows)))
+    (print-agg-line "COHORT=CORE12" agg-core12))
   (when (pair? unseen6-all-rows)
-    (print-agg-line "COHORT=CORE12" agg-core12)
     (print-agg-line "COHORT=UNSEEN" agg-unseen6)
     (printf "\n  UNSEEN-6 GENERALIZATION BREAKDOWN (n_clean=~a / n_total=~a):\n"
             (length unseen6-rows) (length unseen6-all-rows))
@@ -3650,6 +3772,26 @@
               (r2 (hash-ref b 'trade_agg)) (hash-ref b 'killed_val) (hash-ref b 'lost_val)
               (hash-ref b 'cloak_loss) (hash-ref b 'siege_0dps)
               (r0 (hash-ref b 'our_peak_army)) (r1 (hash-ref b 'supply_block_pct)))))
+  (when (pair? selfplay-all-rows)
+    (print-agg-line "SELFPLAY(cl) " agg-selfplay)
+    (printf "\n  SELFPLAY HEAD-TO-HEAD BREAKDOWN (P1 vs P2, n_clean=~a / n_total=~a):\n"
+            (length selfplay-rows) (length selfplay-all-rows))
+    (for ([mu (in-list selfplay-mus)])
+      (define b (hash-ref selfplay-breakdown (string->symbol mu)))
+      (printf "    ~a | P1 ~aW-~aL-~aT (n=~a/~a) | TradeAgg=~ax (~a/~a) | Base=~a/~a | W@4m=~a/~a | PkArmy=~a/~a | Dur=~a | SB=~a% | Anom(Esc/Prd/Drp/Clk/Stl)=~a/~a/~a/~a/~a\n"
+              (pad-r mu 6)
+              (hash-ref b 'wins) (hash-ref b 'losses) (hash-ref b 'ties)
+              (hash-ref b 'n) (hash-ref b 'n_total)
+              (r2 (hash-ref b 'trade_agg)) (hash-ref b 'killed_val) (hash-ref b 'lost_val)
+              (r1 (hash-ref b 'our_bases 0.0)) (r1 (hash-ref b 'opp_bases 0.0))
+              (if (real? (hash-ref b 'our_w4 #f)) (r1 (hash-ref b 'our_w4)) "-")
+              (if (real? (hash-ref b 'opp_w4 #f)) (r1 (hash-ref b 'opp_w4)) "-")
+              (r0 (hash-ref b 'our_peak_army)) (r0 (hash-ref b 'opp_peak_army))
+              (fmt-mmss (hash-ref b 'avg_dur_sec 0.0))
+              (r1 (hash-ref b 'supply_block_pct))
+              (hash-ref b 'escrow_lock 0) (hash-ref b 'prod_stall 0)
+              (hash-ref b 'drip_feed 0) (hash-ref b 'cloak_loss 0)
+              (hash-ref b 'stale_tie 0))))
   (for ([rc (in-list '(Protoss Terran Zerg))])
     (print-agg-line (format "RACE=~a" (pad-r rc 8)) (hash-ref by-race rc)))
   (for ([rs (in-list '(win loss tie))])
@@ -3707,9 +3849,11 @@
                             'mirror_skip (length mirrors)
                             'parse_errors (length errors))
             'overall (hasheq 'all agg-all 'clean agg-clean)
-            'summary (hasheq 'core_12 agg-core12 'unseen_6 agg-unseen6 'unseen_6_breakdown unseen6-breakdown)
+            'summary (hasheq 'core_12 agg-core12 'unseen_6 agg-unseen6 'selfplay agg-selfplay
+                             'unseen_6_breakdown unseen6-breakdown 'selfplay_breakdown selfplay-breakdown)
             'by_cohort by-cohort
             'unseen_6_breakdown unseen6-breakdown
+            'selfplay_breakdown selfplay-breakdown
             'by_race by-race
             'by_matchup by-matchup
             'by_result by-result

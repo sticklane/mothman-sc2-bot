@@ -207,6 +207,11 @@ UNIT_VALUES: dict[int, float] = {
     116: 50.0,    # drone-burrowed
 }
 
+DEFAULT_MAX_LOOPS = 960          # ~42.9s real Faster SC2 combat
+STALEMATE_NO_DAMAGE_LOOPS = 168  # 7.5s with zero HP/shield damage or unit deaths -> stalemate stop
+POINTS_WIN_TRADE = 1.25          # trade >= 1.25x on timeout/stalemate -> Points Win
+POINTS_LOSS_TRADE = 0.80         # trade <= 0.80x on timeout/stalemate -> Points Loss
+
 TOWNHALL_IDS = {18, 59, 86, 100, 101, 130, 132}
 WORKER_IDS = {45, 84, 104, 116}
 COMBAT_IDS = set(UNIT_VALUES) - WORKER_IDS
@@ -216,6 +221,91 @@ AIR_UNIT_IDS = {
     108, 112, 499, 114, 129,       # Zerg air
 }
 MINERAL_IDS = {146, 147, 341, 483, 665, 666, 796, 797, 884, 885}
+
+# Exact SC2 4.10 weapon/combat capability tables for unarmed/incapable-survivor termination
+PURE_UNARMED_IDS = {54, 82, 81, 129}  # medivac, observer, warp-prism, overseer
+# Energy-gated spellcasters with no standard auto-attack: uid -> (min_energy, can_hit_ground, can_hit_air)
+ENERGY_CASTER_CAPS: dict[int, tuple[float, bool, bool]] = {
+    56: (50.0, True, True),     # raven (Auto-Turret 50e -> G+A)
+    111: (75.0, True, True),    # infestor (Fungal Growth 75e -> G+A)
+    127: (75.0, True, True),    # infestor-burrowed
+    499: (125.0, False, True),  # viper alone (Parasitic Bomb 125e -> Air; Abduct deals 0 dmg alone)
+    495: (15.0, True, False),   # oracle (Pulsar Beam -> Ground only)
+}
+GROUND_ONLY_WEAPON_IDS = {
+    51, 33, 32, 53, 484, 49, 55, 45,                     # Terran G-only
+    73, 311, 83, 4, 694, 76, 84,                         # Protoss G-only
+    105, 119, 9, 115, 110, 118, 109, 131, 114, 502, 503, 494, 493, 104, 116,  # Zerg G-only
+}
+AIR_ONLY_WEAPON_IDS = {112}  # corruptor (Caustic Spray targets structures only)
+BOTH_WEAPON_IDS = {
+    48, 50, 52, 498, 500, 692, 57,                       # Terran G+A
+    74, 77, 141, 80, 79, 496,                            # Protoss G+A
+    688, 690, 107, 117, 108, 126, 125,                   # Zerg G+A
+}
+MASSIVE_GROUND_IDS = {52, 4, 141, 109, 131}  # thor, colossus, archon, ultralisk (immune to Graviton Beam)
+
+
+def unit_attack_caps(u: Any, allies: list[Any], is_dummy: bool = False) -> tuple[bool, bool]:
+    """Return (can_hit_ground, can_hit_air) for SC2 unit `u` given its current energy & allies."""
+    uid = int(u.unit_type)
+    if uid in PURE_UNARMED_IDS:
+        return (False, False)
+    if uid in ENERGY_CASTER_CAPS:
+        min_e, cg, ca = ENERGY_CASTER_CAPS[uid]
+        if float(getattr(u, "energy", 0.0)) >= min_e:
+            return (cg, ca)
+        return (False, False)
+    if uid == 75:  # high-templar: PsiBlast hits Ground; PsiStorm (75e) hits Ground+Air
+        return (True, float(getattr(u, "energy", 0.0)) >= 75.0)
+    if uid == 78:  # phoenix: Air weapon; Graviton Beam lifts non-massive Ground if >=2 Phoenixes & >=50e
+        can_lift = (
+            sum(1 for a in allies if int(a.unit_type) == 78) >= 2
+            and float(getattr(u, "energy", 0.0)) >= 50.0
+        )
+        return (can_lift, True)
+    if uid in (35, 689):  # viking-fighter, liberator (MicroDummy never morphs)
+        return (False, True) if is_dummy else (True, True)
+    if uid in (34, 734):  # viking-assault, liberator-ag (MicroDummy never morphs)
+        return (True, False) if is_dummy else (True, True)
+    if uid in BOTH_WEAPON_IDS:
+        return (True, True)
+    if uid in GROUND_ONLY_WEAPON_IDS:
+        return (True, False)
+    if uid in AIR_ONLY_WEAPON_IDS:
+        return (False, True)
+    return (True, True)
+
+
+def count_combat_capable(units: list[Any], is_dummy: bool = False) -> int:
+    """Count surviving units that possess an active weapon or damage-dealing spell."""
+    cnt = 0
+    for u in units:
+        cg, ca = unit_attack_caps(u, units, is_dummy=is_dummy)
+        if cg or ca:
+            cnt += 1
+    return cnt
+
+
+def side_can_damage_other(atk_units: list[Any], def_units: list[Any], is_dummy: bool = False) -> bool:
+    """Return True iff at least one unit in `atk_units` can damage at least one unit in `def_units`."""
+    if not atk_units or not def_units:
+        return False
+    for a in atk_units:
+        cg, ca = unit_attack_caps(a, atk_units, is_dummy=is_dummy)
+        if not (cg or ca):
+            continue
+        auid = int(a.unit_type)
+        for d in def_units:
+            duid = int(d.unit_type)
+            is_air = bool(getattr(d, "is_flying", False)) or (duid in AIR_UNIT_IDS)
+            if is_air:
+                if ca:
+                    return True
+            else:
+                if cg and not (auid == 78 and duid in MASSIVE_GROUND_IDS):
+                    return True
+    return False
 
 BURROWED_UNIT_MAP: dict[str, str] = {
     "zergling": "zergling-burrowed",
@@ -348,7 +438,7 @@ class SkirmishSpec:
     description: str
     p1_units: list[tuple[str, int, float, float]]  # (unit_name, count, dx, dy)
     p2_units: list[tuple[str, int, float, float]]
-    max_loops: int = 336  # ~15s Faster SC2 combat
+    max_loops: int = DEFAULT_MAX_LOOPS  # ~42.9s Faster SC2 combat
     terrain: str = "open"
     high_ground_side: str = "p1"
     source: str = "core"
@@ -383,7 +473,7 @@ DEFAULT_SKIRMISHES: list[SkirmishSpec] = [
         description="Real SC2: 4 Zealots + 4 Stalkers vs 12 Marines + 3 Marauders (melee + ranged stutter-step)",
         p1_units=[("zealot", 4, -3.5, 0.0), ("stalker", 4, -5.0, 0.0)],
         p2_units=[("marine", 12, 4.5, 0.0), ("marauder", 3, 5.5, 0.0)],
-        max_loops=336,
+        max_loops=DEFAULT_MAX_LOOPS,
     ),
 ]
 
@@ -463,7 +553,7 @@ def load_scenarios(scenarios_path: str = "", repo_dir: Path | None = None) -> li
             description=str(sc.get("description", sid)),
             p1_units=_parse_unit_entries(sc["p1_units"], sid, "p1_units", p1_pre_b, pre_s),
             p2_units=_parse_unit_entries(sc["p2_units"], sid, "p2_units", p2_pre_b, pre_s),
-            max_loops=int(sc.get("max_loops", 336)),
+            max_loops=int(sc.get("max_loops", DEFAULT_MAX_LOOPS)),
             terrain=terrain,
             high_ground_side=str(sc.get("high_ground_side", "p1")),
             source=str(sc.get("source", "core")),
@@ -674,9 +764,30 @@ def _build_aggregate_report(
     opp_mode: str,
 ) -> dict[str, Any]:
     win_tag = "Mothman-P1" if opp_mode == "self" else "Mothman"
-    wins = sum(1 for s in all_scens if s.get("winner") == win_tag)
-    p2_wins = sum(1 for s in all_scens if s.get("winner") in ("MicroDummy", "Mothman-P2"))
-    timeouts = sum(1 for s in all_scens if s.get("winner") == "Timeout")
+    loss_tags = ("Mothman-P2",) if opp_mode == "self" else ("MicroDummy",)
+
+    def _tally_slice(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        w_rows = [s for s in rows if s.get("winner") == win_tag]
+        l_rows = [s for s in rows if s.get("winner") in loss_tags]
+        d_rows = [s for s in rows if s.get("winner") not in (win_tag, *loss_tags)]
+        ko_w = sum(1 for s in w_rows if s.get("win_type", "ko") == "ko")
+        pts_w = sum(1 for s in w_rows if s.get("win_type") == "points")
+        ko_l = sum(1 for s in l_rows if s.get("win_type", "ko") == "ko")
+        pts_l = sum(1 for s in l_rows if s.get("win_type") == "points")
+        w, l, d = len(w_rows), len(l_rows), len(d_rows)
+        return {
+            "mothman_wins": w,
+            "ko_wins": ko_w,
+            "points_wins": pts_w,
+            "p2_wins": l,
+            "ko_losses": ko_l,
+            "points_losses": pts_l,
+            "draws": d,
+            "timeouts": d,  # backward-compatible alias
+            "record_str": f"{w}W-{l}L-{d}D (KO {ko_w}/Pts {pts_w} - KO {ko_l}/Pts {pts_l} - {d}D)",
+        }
+
+    tot_t = _tally_slice(all_scens)
     tot_p1_lost = sum(float(s.get("p1_lost_val", 0.0)) for s in all_scens)
     tot_p2_lost = sum(float(s.get("p2_lost_val", 0.0)) for s in all_scens)
     agg_trade = round(tot_p2_lost / max(1.0, tot_p1_lost), 2) if tot_p1_lost > 0 else 99.0
@@ -693,11 +804,10 @@ def _build_aggregate_report(
         r_atk = sum(int(s.get("mothman_attack_unit_cmds", 0)) for s in rs)
         r_mov = sum(int(s.get("mothman_move_unit_cmds", 0)) for s in rs)
         r_spl = sum(int(s.get("mothman_spell_unit_cmds", 0)) for s in rs)
+        rt = _tally_slice(rs)
         by_race[r] = {
             "total": len(rs),
-            "mothman_wins": sum(1 for s in rs if s.get("winner") == win_tag),
-            "p2_wins": sum(1 for s in rs if s.get("winner") in ("MicroDummy", "Mothman-P2")),
-            "timeouts": sum(1 for s in rs if s.get("winner") == "Timeout"),
+            **rt,
             "agg_trade_ratio": round(r_p2 / max(1.0, r_p1), 2) if r_p1 > 0 else 99.0,
             "attack_unit_cmds": r_atk,
             "move_unit_cmds": r_mov,
@@ -706,9 +816,7 @@ def _build_aggregate_report(
         }
     summary: dict[str, Any] = {
         "total": len(all_scens),
-        "mothman_wins": wins,
-        "p2_wins": p2_wins,
-        "timeouts": timeouts,
+        **tot_t,
         "agg_trade_ratio": agg_trade,
         "total_p1_lost_val": round(tot_p1_lost, 1),
         "total_p2_lost_val": round(tot_p2_lost, 1),
@@ -901,6 +1009,13 @@ def run_host_driver(args: argparse.Namespace) -> int:
         out_path = Path(out_target)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    rsum = report.get("summary") or {}
+    if rsum.get("record_str"):
+        print(
+            f"[ARENA 2.0 {opp_mode}] {rsum['record_str']} | Trade={rsum.get('agg_trade_ratio')}x | "
+            f"A:M={rsum.get('am_ratio')} | wall={report.get('total_wall_ms')}ms",
+            file=sys.stderr,
+        )
     print(json.dumps(report, indent=2))
     return 0
 
@@ -1443,8 +1558,12 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         "p2_start_val": 0.0,
                         "p1_alive_cnt": 0,
                         "p2_alive_cnt": 0,
+                        "p1_combat_alive_cnt": 0,
+                        "p2_combat_alive_cnt": 0,
                         "p1_rem_val": 0.0,
                         "p2_rem_val": 0.0,
+                        "last_combat_event_loop": 0,
+                        "prev_unit_hp_map": {},
                         "results": [],
                         "errors": [],
                         "p1_joined": asyncio.Event(),
@@ -1613,6 +1732,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 my_u = [
                                     u for u in obs.raw_data.units
                                     if u.display_type == 1 and u.alliance == 1
+                                    and u.unit_type not in PURE_UNARMED_IDS
                                     and (u.unit_type in COMBAT_IDS or (want_workers_p2 and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx_a, u.pos.y - cy_a) < 35.0))
                                 ]
                                 # Ignore undetected cloaked/burrowed units (CloakState.Cloaked == 1) so MicroDummy doesn't freeze!
@@ -1621,20 +1741,28 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                     if u.display_type == 1 and u.alliance == 4 and u.cloak != 1
                                     and (u.unit_type in COMBAT_IDS or (want_workers_p2 and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx_a, u.pos.y - cy_a) < 35.0))
                                 ]
-                                if my_u and en_u:
+                                en_armed = [u for u in en_u if u.unit_type not in PURE_UNARMED_IDS]
+                                en_targets = en_armed if en_armed else en_u
+                                if my_u and en_targets:
                                     cx_my = sum(u.pos.x for u in my_u) / len(my_u)
                                     cy_my = sum(u.pos.y for u in my_u) / len(my_u)
-                                    tgt = min(en_u, key=lambda e: (math.hypot(e.pos.x - cx_my, e.pos.y - cy_my), e.health + e.shield))
-                                    act = sc2api_pb2.Action(
-                                        action_raw=raw_pb2.ActionRaw(
-                                            unit_command=raw_pb2.ActionRawUnitCommand(
-                                                ability_id=23,
-                                                target_unit_tag=tgt.tag,
-                                                unit_tags=[u.tag for u in my_u],
-                                            )
-                                        )
-                                    )
-                                    await rpc(sc2_ws2, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=[act])))
+                                    en_gnd = [e for e in en_targets if not (bool(getattr(e, "is_flying", False)) or e.unit_type in AIR_UNIT_IDS)]
+                                    en_air = [e for e in en_targets if bool(getattr(e, "is_flying", False)) or e.unit_type in AIR_UNIT_IDS]
+                                    acts_p2: list[Any] = []
+                                    g_only_tags = [u.tag for u in my_u if unit_attack_caps(u, my_u, is_dummy=True) == (True, False)]
+                                    a_only_tags = [u.tag for u in my_u if unit_attack_caps(u, my_u, is_dummy=True) == (False, True)]
+                                    both_tags = [u.tag for u in my_u if u.tag not in set(g_only_tags) and u.tag not in set(a_only_tags)]
+                                    if both_tags:
+                                        tgt = min(en_targets, key=lambda e: (math.hypot(e.pos.x - cx_my, e.pos.y - cy_my), e.health + e.shield))
+                                        acts_p2.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=23, target_unit_tag=tgt.tag, unit_tags=both_tags))))
+                                    if g_only_tags and en_gnd:
+                                        tgt_g = min(en_gnd, key=lambda e: (math.hypot(e.pos.x - cx_my, e.pos.y - cy_my), e.health + e.shield))
+                                        acts_p2.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=23, target_unit_tag=tgt_g.tag, unit_tags=g_only_tags))))
+                                    if a_only_tags and en_air:
+                                        tgt_a = min(en_air, key=lambda e: (math.hypot(e.pos.x - cx_my, e.pos.y - cy_my), e.health + e.shield))
+                                        acts_p2.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=23, target_unit_tag=tgt_a.tag, unit_tags=a_only_tags))))
+                                    if acts_p2:
+                                        await rpc(sc2_ws2, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=acts_p2)))
                                 elif my_u:
                                     # Attack-move toward arena center if all remaining enemies are burrowed/cloaked
                                     act = sc2api_pb2.Action(
@@ -1712,22 +1840,33 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             dstate["done"].set()
                         return bot_ws2
 
-                    def finalize_current_round(cur_loop: int) -> None:
+                    def finalize_current_round(
+                        cur_loop: int,
+                        end_reason: str = "max_loops",
+                        ko_winner_side: int = 0,
+                    ) -> None:
                         scen = scenarios[dstate["scen_idx"]]
                         p1_lost = max(0.0, dstate["p1_start_val"] - dstate["p1_rem_val"])
                         p2_lost = max(0.0, dstate["p2_start_val"] - dstate["p2_rem_val"])
                         trade = round(p2_lost / max(1.0, p1_lost), 2) if p1_lost > 0 else (99.0 if p2_lost > 0 else 1.0)
                         p2_trade = round(p1_lost / max(1.0, p2_lost), 2) if p2_lost > 0 else (99.0 if p1_lost > 0 else 1.0)
-                        if opp_mode == "self":
-                            winner = (
-                                "Mothman-P1" if (dstate["p1_alive_cnt"] > 0 and dstate["p2_alive_cnt"] == 0)
-                                else ("Mothman-P2" if (dstate["p2_alive_cnt"] > 0 and dstate["p1_alive_cnt"] == 0) else "Timeout")
-                            )
+                        p1_tag = "Mothman-P1" if opp_mode == "self" else "Mothman"
+                        p2_tag = "Mothman-P2" if opp_mode == "self" else "MicroDummy"
+                        if ko_winner_side == 1:
+                            winner = p1_tag
+                            win_type = "ko"
+                        elif ko_winner_side == 2:
+                            winner = p2_tag
+                            win_type = "ko"
+                        elif trade >= POINTS_WIN_TRADE:
+                            winner = p1_tag
+                            win_type = "points"
+                        elif trade <= POINTS_LOSS_TRADE:
+                            winner = p2_tag
+                            win_type = "points"
                         else:
-                            winner = (
-                                "Mothman" if (dstate["p1_alive_cnt"] > 0 and dstate["p2_alive_cnt"] == 0)
-                                else ("MicroDummy" if (dstate["p2_alive_cnt"] > 0 and dstate["p1_alive_cnt"] == 0) else "Timeout")
-                            )
+                            winner = "Draw"
+                            win_type = "draw"
                         start_loop = int(dstate.get("fight_start_loop") or dstate["phase_start_loop"])
                         p1_lbl = ", ".join(f"{c} {u}" for u, c, _, _ in scen.p1_units)
                         p2_lbl = ", ".join(f"{c} {u}" for u, c, _, _ in scen.p2_units)
@@ -1738,8 +1877,9 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         )
                         context = (
                             f"{scen.description} [{scen.terrain}] | {bname1} ({p1_lbl}) vs {p2_label} ({p2_lbl}) -> "
-                            f"{winner} ({trade:.2f}x trade; alive {dstate['p1_alive_cnt']}/{dstate['p1_start_cnt']} vs "
-                            f"{dstate['p2_alive_cnt']}/{dstate['p2_start_cnt']}; "
+                            f"{winner} ({win_type}/{end_reason}, {trade:.2f}x trade; alive {dstate['p1_alive_cnt']}/{dstate['p1_start_cnt']} "
+                            f"[combat {dstate['p1_combat_alive_cnt']}] vs {dstate['p2_alive_cnt']}/{dstate['p2_start_cnt']} "
+                            f"[combat {dstate['p2_combat_alive_cnt']}]; "
                             f"ATK={dstate['attack_cmds']}, MOV={dstate['move_cmds']}, Spells={dstate['spell_cmds']}{p2_ctx_extra})."
                         )
                         rec: dict[str, Any] = {
@@ -1760,6 +1900,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             "description": scen.description,
                             "context": context,
                             "winner": winner,
+                            "win_type": win_type,
+                            "end_reason": end_reason,
                             "start_loop": start_loop,
                             "end_loop": int(cur_loop),
                             "arena_cx": round(float(dstate["arena_cx"]), 2),
@@ -1772,6 +1914,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             "p2_start_types": dstate["p2_start_types"],
                             "p1_alive_cnt": dstate["p1_alive_cnt"],
                             "p2_alive_cnt": dstate["p2_alive_cnt"],
+                            "p1_combat_alive_cnt": dstate["p1_combat_alive_cnt"],
+                            "p2_combat_alive_cnt": dstate["p2_combat_alive_cnt"],
                             "p1_lost_val": round(p1_lost, 1),
                             "p2_lost_val": round(p2_lost, 1),
                             "trade_ratio": trade,
@@ -2162,6 +2306,10 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         exp_p2 = sum(cnt for _, cnt, _, _ in scen.p2_units)
                                         if dstate["p1_start_cnt"] == 0 and (len(p1u) >= exp_p1 and len(p2u) >= exp_p2 or (gl >= dstate["phase_start_loop"] + 16 and p1u and p2u)):
                                             dstate["fight_start_loop"] = gl
+                                            dstate["last_combat_event_loop"] = gl
+                                            dstate["prev_unit_hp_map"] = {
+                                                u.tag: float(u.health) + float(u.shield) for u in (p1u + p2u)
+                                            }
                                             dstate["p1_start_cnt"] = len(p1u)
                                             dstate["p2_start_cnt"] = len(p2u)
                                             id_to_name = {v: k for k, v in UNIT_IDS.items()}
@@ -2195,13 +2343,59 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             if scen.p2_pre_cloaked:
                                                 dstate["p2_pre_cloak_pending"] = True
                                         if dstate["p1_start_cnt"] > 0:
+                                            p2_is_dummy = (opp_mode != "self")
                                             dstate["p1_alive_cnt"] = len(p1u)
                                             dstate["p2_alive_cnt"] = len(p2u)
+                                            dstate["p1_combat_alive_cnt"] = count_combat_capable(p1u, is_dummy=False)
+                                            dstate["p2_combat_alive_cnt"] = count_combat_capable(p2u, is_dummy=p2_is_dummy)
                                             dstate["p1_rem_val"] = sum(UNIT_VALUES.get(u.unit_type, 100.0) for u in p1u)
                                             dstate["p2_rem_val"] = sum(UNIT_VALUES.get(u.unit_type, 100.0) for u in p2u)
-                                            elapsed_loops = gl - dstate["phase_start_loop"]
-                                            if elapsed_loops >= scen.max_loops or not p1u or not p2u:
-                                                finalize_current_round(gl)
+
+                                            # Track HP/shield damage or unit deaths for smart no-damage stalemate early-stop
+                                            cur_hp = {u.tag: float(u.health) + float(u.shield) for u in (p1u + p2u)}
+                                            prev_hp = dstate["prev_unit_hp_map"]
+                                            dmg_or_death = any(t not in cur_hp for t in prev_hp) or any(
+                                                (t in prev_hp and hp < prev_hp[t] - 0.5) for t, hp in cur_hp.items()
+                                            )
+                                            if dmg_or_death:
+                                                dstate["last_combat_event_loop"] = gl
+                                            dstate["prev_unit_hp_map"] = cur_hp
+
+                                            fight_elapsed = gl - dstate["fight_start_loop"]
+                                            no_dmg_elapsed = gl - dstate["last_combat_event_loop"]
+                                            end_reason: str | None = None
+                                            ko_side = 0
+
+                                            if not p1u and not p2u:
+                                                end_reason = "mutual_eliminated"
+                                            elif not p2u:
+                                                end_reason, ko_side = "ko_eliminated", 1
+                                            elif not p1u:
+                                                end_reason, ko_side = "ko_eliminated", 2
+                                            elif dstate["p1_combat_alive_cnt"] == 0 and dstate["p2_combat_alive_cnt"] == 0:
+                                                end_reason = "mutual_unarmed"
+                                            elif dstate["p2_combat_alive_cnt"] == 0 and dstate["p1_combat_alive_cnt"] > 0:
+                                                end_reason, ko_side = "ko_unarmed_only", 1
+                                            elif dstate["p1_combat_alive_cnt"] == 0 and dstate["p2_combat_alive_cnt"] > 0:
+                                                end_reason, ko_side = "ko_unarmed_only", 2
+                                            elif fight_elapsed >= 24:
+                                                p1_can = side_can_damage_other(p1u, p2u, is_dummy=False)
+                                                p2_can = side_can_damage_other(p2u, p1u, is_dummy=p2_is_dummy)
+                                                if not p1_can and not p2_can:
+                                                    end_reason = "mutual_incapable"
+                                                elif p1_can and not p2_can:
+                                                    end_reason, ko_side = "ko_incapable_survivors", 1
+                                                elif p2_can and not p1_can:
+                                                    end_reason, ko_side = "ko_incapable_survivors", 2
+
+                                            if end_reason is None:
+                                                if fight_elapsed >= STALEMATE_NO_DAMAGE_LOOPS and no_dmg_elapsed >= STALEMATE_NO_DAMAGE_LOOPS:
+                                                    end_reason = "no_damage_stalemate"
+                                                elif fight_elapsed >= scen.max_loops:
+                                                    end_reason = "max_loops"
+
+                                            if end_reason is not None:
+                                                finalize_current_round(gl, end_reason=end_reason, ko_winner_side=ko_side)
                                                 dstate["scen_idx"] += 1
                                                 if dstate["scen_idx"] >= len(scenarios):
                                                     dstate["phase"] = "done"
@@ -2277,8 +2471,31 @@ async def run_in_container(args: argparse.Namespace) -> int:
                     ]
                     bot_log1 = (bot_dir1 / "bot.log").open("wb")
                     bot_proc1 = subprocess.Popen(bot_cmd1, cwd=str(bot_dir1), stdout=bot_log1, stderr=subprocess.STDOUT)
+                    async def _watch_done_or_crash() -> None:
+                        deadline = time.monotonic() + 240.0
+                        while not dstate["done"].is_set():
+                            if time.monotonic() >= deadline:
+                                raise TimeoutError("Arena duel exceeded 240s wall timeout")
+                            if bot_proc1.poll() is not None and not dstate["done"].is_set():
+                                dstate["errors"].append(f"bot_proc1 exited prematurely rc={bot_proc1.returncode}")
+                                dstate["done"].set()
+                                return
+                            if bot_proc2 is not None and bot_proc2.poll() is not None and not dstate["done"].is_set():
+                                dstate["errors"].append(f"bot_proc2 exited prematurely rc={bot_proc2.returncode}")
+                                dstate["done"].set()
+                                return
+                            if p2_task is not None and p2_task.done() and not dstate["done"].is_set():
+                                exc = p2_task.exception() if not p2_task.cancelled() else None
+                                dstate["errors"].append(f"p2_task stopped early: {exc!r}")
+                                dstate["done"].set()
+                                return
+                            try:
+                                await asyncio.wait_for(dstate["done"].wait(), timeout=0.25)
+                            except asyncio.TimeoutError:
+                                pass
+
                     try:
-                        await asyncio.wait_for(dstate["done"].wait(), timeout=240.0)
+                        await _watch_done_or_crash()
                     finally:
                         dstate["done"].set()
                         if p2_task is not None:

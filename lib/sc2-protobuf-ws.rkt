@@ -6447,12 +6447,12 @@
     (cond
       [(not snap-to-grid?) v]
       [snap-x-half? (+ (exact->inexact (floor v)) 0.5)]
-      [else (exact->inexact (round v))]))
+      [else (exact->inexact (floor (+ v 0.5)))]))
   (define (snap-cand-y v)
     (cond
       [(not snap-to-grid?) v]
       [snap-y-half? (+ (exact->inexact (floor v)) 0.5)]
-      [else (exact->inexact (round v))]))
+      [else (exact->inexact (floor (+ v 0.5)))]))
   (define seen-pts (make-hash))
   (define acc '())
   (define acc-len 0)
@@ -7508,8 +7508,20 @@
                    (define unq-3x3
                      (filter-unqueried
                       (merge-priority-batches (list (cons em-raw 48) (cons rel-raw 64)) 64)))
-                   (and (pair? unq-3x3)
-                        (query-single-batch unq-3x3))])]
+                   (define res-unq
+                     (and (pair? unq-3x3)
+                          (query-single-batch unq-3x3)))
+                   ;; L29-P0-1 (`#02/#08/#26/#32/#35` Terran barracks #2/#3): When BOTH 5x3 AND
+                   ;; 2.0t `unq-3x3` fail completely, bump `SC2-TERRAN-5X3-MISS-STREAK` once more
+                   ;; so `rax2-fast-3x3?` locks onto 0.5t pure 3x3 immediately on the next tick
+                   ;; even if a Depot/Refinery completion wipes `SC2-TERRAN-5X3-MISS-CACHE`!
+                   (when (and (not res-unq)
+                              canon-bldg
+                              (not require-addon-clear?)
+                              (not (unbox rpc-deferred-by-budget?)))
+                     (hash-set! SC2-TERRAN-5X3-MISS-STREAK canon-bldg
+                                (add1 (hash-ref SC2-TERRAN-5X3-MISS-STREAK canon-bldg 0))))
+                   res-unq])]
                [else
                 (for/first ([pt (in-list cands-q)]
                             [res (in-list q-results)]
@@ -7527,7 +7539,9 @@
           (define p3 (filter-pylon-powered (near-base-emergency-cands)))
           (define unified-single
             (merge-priority-batches
-             (if (and tight-spacing? requires-pylon-power?)
+             (if (and tight-spacing?
+                      (or requires-pylon-power?
+                          (memq canon-bldg '(photon-cannon spore-crawler missile-turret))))
                  (list (cons p1 16)
                        (cons p2 24)
                        (cons p3 64))
@@ -11358,6 +11372,60 @@
                                   lurker-den lurker-den-mp))))
                enemy-units)))
 
+  ;; L29-P0-1 (`#52/#54` CloakLoss -> 0): Compute mineral-line static-detector anchors
+  ;; (midpoint between each grounded TownHall and its mineral cluster, sorted so TownHalls
+  ;; with active cloaked/burrowed threats within 18.0t come FIRST!).
+  (define (cloaked-detector-mineral-anchors req-x req-y)
+    (define cloak-pts
+      (for/list ([e (in-list enemy-units)]
+                 #:when (let ([esym (sc2-id->unit-symbol (sc2-unit-unit-type e) 'unknown)])
+                          (or (memv (sc2-unit-cloak e) '(1 2))
+                              (sc2-unit-is-burrowed e)
+                              (memq esym '(dark-templar banshee ghost
+                                           widow-mine widow-mine-burrowed
+                                           lurker lurker-mp lurker-burrowed lurker-mp-burrowed)))))
+        (define ep (sc2-unit-pos e))
+        (cons (sc2-point3d-x ep) (sc2-point3d-y ep))))
+    (define th-entries
+      (for/list ([th (in-list townhalls)]
+                 #:when (not (sc2-unit-is-flying th)))
+        (define tp (sc2-unit-pos th))
+        (define tx (sc2-point3d-x tp))
+        (define ty (sc2-point3d-y tp))
+        (define near-mins
+          (for/list ([m (in-list mineral-fields)]
+                     #:when (let ([mp (sc2-unit-pos m)])
+                              (<= (pt-dist tx ty (sc2-point3d-x mp) (sc2-point3d-y mp)) 12.0)))
+            (sc2-unit-pos m)))
+        (define ml-pt
+          (if (pair? near-mins)
+              (let* ([cnt (length near-mins)]
+                     [mx (/ (for/sum ([p (in-list near-mins)]) (sc2-point3d-x p)) cnt)]
+                     [my (/ (for/sum ([p (in-list near-mins)]) (sc2-point3d-y p)) cnt)])
+                (cons (+ (* 0.55 tx) (* 0.45 mx))
+                      (+ (* 0.55 ty) (* 0.45 my))))
+              (cons tx ty)))
+        (define min-cd
+          (if (pair? cloak-pts)
+              (apply min (map (lambda (cp) (pt-dist tx ty (car cp) (cdr cp))) cloak-pts))
+              999.0))
+        (list (if (<= min-cd 18.0) 0 1)
+              min-cd
+              (pt-dist req-x req-y tx ty)
+              ml-pt
+              (cons tx ty))))
+    (define sorted
+      (sort th-entries
+            (lambda (a b)
+              (cond
+                [(not (= (first a) (first b))) (< (first a) (first b))]
+                [(= (first a) 0) (< (second a) (second b))]
+                [else (< (third a) (third b))]))))
+    (remove-duplicates
+     (append (map fourth sorted)
+             (map fifth sorted)
+             (list (cons req-x req-y)))))
+
   (define (maybe-emit-corner-scan! corner-pts)
     (when (and (>= cur-loop 6000)
                (null? enemy-units)
@@ -12255,12 +12323,29 @@
                           (sort cont-p < #:key (lambda (pt) (pt-dist home-x home-y (car pt) (cdr pt))))
                           cont-p))
                     (values ordered-safe (append ordered-safe ordered-cont)))))
+            (define emerg-cloak-cannon?
+              (and (eq? norm 'photon-cannon) cloaked-or-burrowed-threat-present?))
+            (define cloak-cannon-anchors
+              (if (and emerg-cloak-cannon? (pair? raw-pylon-anchors))
+                  (let* ([ml-pts (cloaked-detector-mineral-anchors req-x req-y)]
+                         [ml-head (car ml-pts)]
+                         [sorted-py
+                          (sort raw-pylon-anchors <
+                                #:key (lambda (pt) (pt-dist (car ml-head) (cdr ml-head) (car pt) (cdr pt))))])
+                    (remove-duplicates
+                     (if (point-in-completed-power-field? (car ml-head) (cdr ml-head)
+                                                          power-sources completed-pylons)
+                         (cons ml-head sorted-py)
+                         sorted-py)))
+                  '()))
             (define protoss-tight-fallback-bldg?
-              (memq norm '(gateway cybernetics-core robotics-facility stargate shield-battery
-                           forge twilight-council robotics-bay robotics-support-bay
-                           templar-archive templar-archives dark-shrine fleet-beacon)))
+              (or emerg-cloak-cannon?
+                  (memq norm '(gateway cybernetics-core robotics-facility stargate shield-battery
+                               forge twilight-council robotics-bay robotics-support-bay
+                               templar-archive templar-archives dark-shrine fleet-beacon))))
             (define search-anchors
               (cond
+                [(and emerg-cloak-cannon? (pair? cloak-cannon-anchors)) cloak-cannon-anchors]
                 [(and protoss-tight-fallback-bldg? (pair? uncontested-pylons)) uncontested-pylons]
                 [(pair? pylon-anchors) pylon-anchors]
                 [else (list (cons req-x req-y))]))
@@ -12276,13 +12361,16 @@
                                                         power-sources
                                                         completed-pylons))))
             (define primary-x
-              (if (and req-powered? (not req-contested?) (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?))
+              (if (and req-powered? (not req-contested?) (not emerg-cloak-cannon?)
+                       (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?))
                   req-x px))
             (define primary-y
-              (if (and req-powered? (not req-contested?) (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?))
+              (if (and req-powered? (not req-contested?) (not emerg-cloak-cannon?)
+                       (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?))
                   req-y py))
             (define eff-anchors
-              (if (and req-powered? (not req-contested?) (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?))
+              (if (and req-powered? (not req-contested?) (not emerg-cloak-cannon?)
+                       (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?))
                   (remove-duplicates (cons (cons req-x req-y) search-anchors))
                   (remove-duplicates (append search-anchors (if req-powered? (list (cons req-x req-y)) '())))))
             (define protoss-budget-before (unbox step-placement-rpc-budget))
@@ -12339,6 +12427,7 @@
             (define tight-safe-pylons
               (cond
                 [(or skip-unpowered-cannon? place-pt1 (not protoss-tight-fallback-bldg?)) '()]
+                [(and emerg-cloak-cannon? (pair? cloak-cannon-anchors)) cloak-cannon-anchors]
                 [(pair? uncontested-pylons)
                  (let* ([ordered-u
                          (cond
@@ -12432,14 +12521,21 @@
            [(memq norm '(spawning-pool evolution-chamber roach-warren baneling-nest
                          hydralisk-den lurker-den lurker-den-mp spire infestation-pit ultralisk-cavern
                          nydus-network spine-crawler spore-crawler))
-            (define safe-creep-pts (ordered-zerg-creep-anchors req-x req-y))
+            (define emerg-cloak-spore?
+              (and (eq? norm 'spore-crawler) cloaked-or-burrowed-threat-present?))
+            (define safe-creep-pts
+              (let ([base-pts (ordered-zerg-creep-anchors req-x req-y)])
+                (if emerg-cloak-spore?
+                    (remove-duplicates (append (cloaked-detector-mineral-anchors req-x req-y) base-pts))
+                    base-pts)))
             (define cx (caar safe-creep-pts))
             (define cy (cdar safe-creep-pts))
             (define creep-bud-before (unbox step-placement-rpc-budget))
+            (define creep-ws-open? (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))
             (define place-pt0
               (find-verified-building-placement ws-conn ab-id cx cy units
                                                 #:min-spacing 2.0
-                                                #:max-radius 8.5
+                                                #:max-radius (if emerg-cloak-spore? 8.0 8.5)
                                                 #:step 1.0
                                                 #:extra-reserved-points step-reserved-build-pts
                                                 #:anchor-points safe-creep-pts
@@ -12453,11 +12549,35 @@
             ;; `lurker-den`, `lurker-den-mp`), when default `8.5t` search actively tried and failed,
             ;; expand search radius `8.5 -> 11.5` across ALL completed Hatchery/Lair/Hive creep anchors
             ;; (plus outer `9.5t` creep-ring offsets so crowded inner rings never exhaust candidate limit)!
+            ;; L29-P0-1 (`#52/#54` CloakLoss -> 0): For emergency `spore-crawler` under cloaked/burrowed
+            ;; threat, immediately fall back to `0.5t` tight spacing (`#:reserved-aabbs '()`, `3.45` pad
+            ;; clearance) right next to the attacked mineral line when `2.0t` placement fails!
             (define creep-85-tried?
               (or (< (unbox step-placement-rpc-budget) creep-bud-before)
-                  (not (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))))
+                  (not creep-ws-open?)))
+            (define spore-tight-can-run?
+              (and emerg-cloak-spore?
+                   (not place-pt0)
+                   (or creep-85-tried?
+                       (> creep-bud-before 0)
+                       (not creep-ws-open?))
+                   (or (not creep-ws-open?)
+                       (> (unbox step-placement-rpc-budget) 0))))
             (define place-pt
               (or place-pt0
+                  (and spore-tight-can-run?
+                       (find-verified-building-placement ws-conn ab-id cx cy units
+                                                         #:min-spacing 0.5
+                                                         #:max-radius 8.5
+                                                         #:step 1.0
+                                                         #:extra-reserved-points step-reserved-build-pts
+                                                         #:anchor-points safe-creep-pts
+                                                         #:reserved-aabbs '()
+                                                         #:expansion-pads all-expansion-pads
+                                                         #:bldg-sym norm
+                                                         #:game-info eff-game-info
+                                                         #:rpc-budget step-placement-rpc-budget
+                                                         #:cur-loop cur-loop))
                   (and creep-85-tried?
                        (memq norm '(spire hydralisk-den lurker-den lurker-den-mp))
                        (let* ([completed-th-pts
@@ -12716,12 +12836,11 @@
                                  (let ([ep (sc2-unit-pos e)])
                                    (<= (pt-dist req-x req-y (sc2-point3d-x ep) (sc2-point3d-y ep)) 5.5))))
                           enemy-units)))
-            ;; L25-P0-1 + L27-P0-1 + L28-P0-1 (`#17/#08/#05/#11/#20/#23` ProdPlaceStall -> 0):
-            ;; After 2 consecutive `5x3` Terran misses for `barracks #4+` (`cur-rax-count >= 3`),
-            ;; fall back immediately to pure `3x3` across ALL safe completed TownHalls (immune to
-            ;; Depot-completion `cur-struct-sig` resets); and whenever `barracks #2+` (`cur-rax-count >= 1`)
-            ;; misses `2.0t` placement (`place-pt0 = #f`), immediately run a `0.5t` tight-spacing pure `3x3`
-            ;; overflow across ALL safe completed TownHalls (`#:reserved-aabbs '()`)!
+            ;; L25-P0-1 + L27-P0-1 + L28-P0-1 + L29-P0-1 (`#02/#08/#26/#32/#35` ProdPlaceStall -> 0):
+            ;; After 2 `5x3` misses (or 1 complete `5x3`+`2.0t` miss!) for ANY `barracks #2+` (`cur-rax-count >= 1`),
+            ;; lock `rax2-fast-3x3?` (immune to Depot/Refinery `cur-struct-sig` resets!) to pure `3x3` across
+            ;; ALL safe completed TownHalls, and whenever `barracks #2+` misses `2.0t` placement (`place-pt0 = #f`),
+            ;; immediately spill over to `0.5t` tight-spacing pure `3x3` across ALL safe TownHalls (`#:reserved-aabbs '()`)!
             (define cur-rax-count
               (if (eq? norm 'barracks)
                   (count (lambda (s)
@@ -12730,14 +12849,19 @@
                          self-structures)
                   0))
             (define is-rax2+? (and (eq? norm 'barracks) (>= cur-rax-count 1)))
-            (define is-rax4+? (and (eq? norm 'barracks) (>= cur-rax-count 3)))
-            (define rax4-fast-3x3?
-              (and is-rax4+?
+            (define rax2-fast-3x3?
+              (and is-rax2+?
                    (>= (hash-ref SC2-TERRAN-5X3-MISS-STREAK 'barracks 0) 2)))
             (define terran-5x3-missed?
               (and is-terran-prod-bldg?
-                   (or rax4-fast-3x3?
+                   (or rax2-fast-3x3?
                        (terran-5x3-miss-active? norm req-x req-y cur-loop))))
+            (define emerg-cloak-turret?
+              (and (eq? norm 'missile-turret) cloaked-or-burrowed-threat-present?))
+            (define cloak-turret-anchors
+              (if emerg-cloak-turret?
+                  (cloaked-detector-mineral-anchors req-x req-y)
+                  '()))
             (define safe-completed-th-anchors
               (if is-rax2+?
                   (let* ([comp-ths
@@ -12782,8 +12906,10 @@
                    (pair? inmain-safe-anchors)))
             (define eff-req-x
               (cond
+                [(and emerg-cloak-turret? (pair? cloak-turret-anchors))
+                 (caar cloak-turret-anchors)]
                 [early-rush-1base-inmain? (caar inmain-safe-anchors)]
-                [(and rax4-fast-3x3? (pair? safe-completed-th-anchors))
+                [(and is-rax2+? terran-5x3-missed? (pair? safe-completed-th-anchors))
                  (caar safe-completed-th-anchors)]
                 [(and (or req-contested-by-rush? terran-5x3-missed?)
                       is-terran-prod-bldg?
@@ -12794,8 +12920,10 @@
                 [else req-x]))
             (define eff-req-y
               (cond
+                [(and emerg-cloak-turret? (pair? cloak-turret-anchors))
+                 (cdar cloak-turret-anchors)]
                 [early-rush-1base-inmain? (cdar inmain-safe-anchors)]
-                [(and rax4-fast-3x3? (pair? safe-completed-th-anchors))
+                [(and is-rax2+? terran-5x3-missed? (pair? safe-completed-th-anchors))
                  (cdar safe-completed-th-anchors)]
                 [(and (or req-contested-by-rush? terran-5x3-missed?)
                       is-terran-prod-bldg?
@@ -12807,11 +12935,16 @@
             (define std-anchors
               (remove-duplicates
                (cond
+                 [(and emerg-cloak-turret? (pair? cloak-turret-anchors))
+                  (append cloak-turret-anchors
+                          inmain-safe-anchors
+                          (list (cons home-x home-y) (cons req-x req-y))
+                          th-overflow-anchors)]
                  [early-rush-1base-inmain?
                   (append inmain-safe-anchors
                           th-overflow-anchors
                           (list (cons home-x home-y) (cons req-x req-y)))]
-                 [(and rax4-fast-3x3? (pair? safe-completed-th-anchors))
+                 [(and is-rax2+? terran-5x3-missed? (pair? safe-completed-th-anchors))
                   (append safe-completed-th-anchors
                           th-overflow-anchors
                           inmain-safe-anchors
@@ -12848,7 +12981,7 @@
                                                       #:cur-loop cur-loop))
                   (find-verified-building-placement ws-conn ab-id eff-req-x eff-req-y units
                                                     #:min-spacing 2.0
-                                                    #:max-radius 15.0
+                                                    #:max-radius (if emerg-cloak-turret? 8.0 15.0)
                                                     #:step 1.0
                                                     #:extra-reserved-points step-reserved-build-pts
                                                     #:anchor-points std-anchors
@@ -12884,8 +13017,30 @@
                        (not std-ws-open?))
                    (or (not std-ws-open?)
                        (> (unbox step-placement-rpc-budget) 0))))
+            (define turret-tight-can-run?
+              (and emerg-cloak-turret?
+                   (not place-pt0)
+                   (pair? std-anchors)
+                   (or std-tried-0?
+                       (> std-bud-before 0)
+                       (not std-ws-open?))
+                   (or (not std-ws-open?)
+                       (> (unbox step-placement-rpc-budget) 0))))
             (define place-pt
               (or place-pt0
+                  (and turret-tight-can-run?
+                       (find-verified-building-placement ws-conn ab-id eff-req-x eff-req-y units
+                                                         #:min-spacing 0.5
+                                                         #:max-radius 8.5
+                                                         #:step 1.0
+                                                         #:extra-reserved-points step-reserved-build-pts
+                                                         #:anchor-points std-anchors
+                                                         #:reserved-aabbs '()
+                                                         #:expansion-pads all-expansion-pads
+                                                         #:bldg-sym norm
+                                                         #:game-info eff-game-info
+                                                         #:rpc-budget step-placement-rpc-budget
+                                                         #:cur-loop cur-loop))
                   (and rax4-tight-can-run?
                        (find-verified-building-placement ws-conn ab-id
                                                          (caar rax4-tight-anchors)

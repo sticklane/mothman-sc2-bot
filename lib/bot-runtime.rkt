@@ -4411,6 +4411,16 @@
     (unless (l2-ctx-hard-supply-lockout? ctx)
       (set-l2-ctx-crisis-freeze-expand-or-gas?! ctx #f))))
 
+(define (l2-shimmer-ripples ctx)
+  (define obs0 (l2-ctx-obs ctx))
+  (define raw0 (l2-ctx-raw-obs ctx))
+  (define v1 (and (hash? obs0) (hash-ref obs0 'shimmer-and-burrow-ripples #f)))
+  (define v2 (and (hash? raw0) (hash-ref raw0 'shimmer-and-burrow-ripples #f)))
+  (cond
+    [(and (list? v1) (pair? v1)) (filter hash? v1)]
+    [(and (list? v2) (pair? v2)) (filter hash? v2)]
+    [else '()]))
+
 (define (l2-queue-opp-cost-and-recovery-static-defense! ctx)
   (define opp-ht (l2-ctx-opp-commit-ht ctx))
   (define lr-ht (l2-ctx-loss-recovery-ht ctx))
@@ -4423,24 +4433,53 @@
         (let ([recs (if (hash? opp-ht) (hash-ref opp-ht 'recommended-counter-units '()) '())])
           (and (ormap (lambda (s) (memq s '(spore-crawler missile-turret photon-cannon))) recs) #t))))
   (define tech-obs (l2-ctx-tech-obs ctx))
+  ;; L29-P0-3 (`#52 DT:7`, `#54 Banshee:14`, `CloakLoss -> 0`): Detect live cloaked/burrowed
+  ;; threats directly so emergency static detectors + Forge/EBay unblock IMMEDIATELY at the
+  ;; threatened base's mineral line even without `boost-sd?`/`hard-ov?`!
+  (define active-cloak-threats
+    (let* ([eus (or (l2-ctx-enemy-units ctx) '())]
+           [rips (l2-shimmer-ripples ctx)])
+      (append
+       (filter (lambda (e)
+                 (and (hash? e)
+                      (not (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                 '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
+                      (or (eq? (hash-ref e 'cloaked #f) #t)
+                          (memq (hash-ref e 'cloak 0) '(1 2 cloaked cloaked-detected))
+                          (= (hash-ref e 'display-type 1) 3)
+                          (eq? (hash-ref e 'burrowed #f) #t)
+                          (eq? (hash-ref e 'is-burrowed #f) #t)
+                          (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                '(dark-templar banshee ghost lurker-burrowed lurker-mp-burrowed
+                                  widow-mine-burrowed)))))
+               eus)
+       (filter hash? rips))))
+  (define active-cloak-bldg-seen?
+    (ormap (lambda (eb)
+             (and (hash? eb)
+                  (memq (fast-canonical-structure-sym (unit-type-sym eb))
+                        '(dark-shrine lurker-den lurker-den-mp))))
+           (or (l2-ctx-enemy-bldgs ctx) '())))
+  (define active-cloak-emergency?
+    (or (pair? active-cloak-threats)
+        active-cloak-bldg-seen?))
   (define genuine-air-or-cloak-threat?
-    (or air-or-stealth-opp?
+    (or active-cloak-emergency?
+        air-or-stealth-opp?
         (l2-ctx-enemy-cloaked-or-air? ctx)
         (and tech-obs
-             (or (enemy-tech-observation-requires-anti-air? tech-obs)
-                 (enemy-tech-observation-requires-detection? tech-obs)))
+             (enemy-tech-observation-requires-anti-air? tech-obs))
         (ormap (lambda (e)
                  (and (hash? e)
-                      (or (eq? (hash-ref e 'cloaked #f) #t)
-                          (eq? (hash-ref e 'burrowed #f) #t)
-                          (memq (fast-canonical-unit-sym (unit-type-sym e))
-                                '(banshee dark-templar ghost lurker mutalisk void-ray
-                                  carrier oracle widow-mine phoenix liberator battlecruiser tempest)))))
+                      (memq (fast-canonical-unit-sym (unit-type-sym e))
+                            '(banshee dark-templar ghost lurker mutalisk void-ray
+                              carrier oracle widow-mine phoenix liberator battlecruiser tempest))))
                (l2-ctx-enemy-units ctx))))
-  (when (and (or boost-sd? (and hard-ov? (not (eq? dom-path 'none))))
+  (when (and (or active-cloak-emergency? boost-sd? (and hard-ov? (not (eq? dom-path 'none))))
              (not (l2-ctx-worker-rush-active? ctx))
              (>= (l2-ctx-total-workers ctx) 4)
-             (or (>= (l2-ctx-total-workers ctx) 10)
+             (or active-cloak-emergency?
+                 (>= (l2-ctx-total-workers ctx) 10)
                  (>= (l2-ctx-minerals ctx) 200)))
     (define race (l2-ctx-race ctx))
     (define frame (l2-ctx-frame ctx))
@@ -4460,26 +4499,64 @@
          (order-ledger-pending-count-for-type oledger sym frame)))
     (define zerg-aa-min-res
       (if (and (eq? race 'Zerg)
+               (not active-cloak-emergency?)
                (not boost-sd?)
                (not (memq dom-path '(dark-templar banshee))))
           (l2-ctx-zerg-spire-res-min ctx)
           0))
-    (define sd-ax
-      (if (<= active-bases 1)
-          (safe-coord (+ base-x (* 0.25 (- nat-x base-x))) base-x)
-          nat-x))
-    (define sd-ay
-      (if (<= active-bases 1)
-          (safe-coord (+ base-y (* 0.25 (- nat-y base-y))) base-y)
-          nat-y))
+    ;; Anchor static detectors at the threatened TownHall lacking a detector within 12t
+    ;; during `active-cloak-emergency?`, falling back to Main/Natural mineral line!
+    (define ally-th-pts-sd
+      (for/list ([b (in-list (or (l2-ctx-ally-bldgs ctx) '()))]
+                 #:when (and (hash? b)
+                             (memq (fast-canonical-structure-sym (unit-type-sym b))
+                                   '(hatchery lair hive nexus command-center orbital-command planetary-fortress))
+                             (real? (hash-ref b 'x #f))
+                             (real? (hash-ref b 'y #f))))
+        (cons (exact->inexact (hash-ref b 'x base-x))
+              (exact->inexact (hash-ref b 'y base-y)))))
+    (define (pick-sd-anchor sym)
+      (define existing-sd-pts
+        (for/list ([b (in-list (or (l2-ctx-ally-bldgs ctx) '()))]
+                   #:when (and (hash? b)
+                               (eq? (fast-canonical-structure-sym (unit-type-sym b)) sym)
+                               (real? (hash-ref b 'x #f))
+                               (real? (hash-ref b 'y #f))))
+          (cons (exact->inexact (hash-ref b 'x base-x))
+                (exact->inexact (hash-ref b 'y base-y)))))
+      (define (th-has-sd? th)
+        (for/or ([sp (in-list existing-sd-pts)])
+          (<= (dist2d (car th) (cdr th) (car sp) (cdr sp)) 12.0)))
+      (define undefended-ths (filter (lambda (th) (not (th-has-sd? th))) ally-th-pts-sd))
+      (cond
+        [(and active-cloak-emergency? (pair? undefended-ths) (pair? active-cloak-threats))
+         (define ct0 (car active-cloak-threats))
+         (define cx (exact->inexact (hash-ref ct0 'x base-x)))
+         (define cy (exact->inexact (hash-ref ct0 'y base-y)))
+         (define best-th (argmin (lambda (th) (dist2d (car th) (cdr th) cx cy)) undefended-ths))
+         (values (safe-coord (+ (car best-th) 2.5) (car best-th))
+                 (safe-coord (+ (cdr best-th) 2.5) (cdr best-th)))]
+        [(and active-cloak-emergency? (pair? undefended-ths))
+         (define best-th (car undefended-ths))
+         (values (safe-coord (+ (car best-th) 2.5) (car best-th))
+                 (safe-coord (+ (cdr best-th) 2.5) (cdr best-th)))]
+        [(<= active-bases 1)
+         (values (safe-coord (+ base-x (* 0.25 (- nat-x base-x))) base-x)
+                 (safe-coord (+ base-y (* 0.25 (- nat-y base-y))) base-y))]
+        [else (values nat-x nat-y)]))
     (define (try-sd! sym req-ready? cap)
+      (define cur-cnt (count-sd sym))
+      (define eff-cd
+        (if (and active-cloak-emergency? (= cur-cnt 0))
+            44
+            SC2-STATIC-DETECTOR-COOLDOWN-FRAMES))
       (and (or (not live-game?) req-ready?)
-           (< (count-sd sym) cap)
+           (< cur-cnt cap)
            (l2-save-cancel-rebuild-ready? ctx sym 60)
            (>= (- (l2-ctx-minerals ctx) zerg-aa-min-res) (sc2-min-cost sym))
-           (refractory-allow-action?! cd-tracker (list 'slice15-static-def sym) frame SC2-STATIC-DETECTOR-COOLDOWN-FRAMES)
-           (begin
-             (l2-emit-build-verified! ctx sym sd-ax sd-ay 2.0)
+           (refractory-allow-action?! cd-tracker (list 'slice15-static-def sym) frame eff-cd)
+           (let-values ([(ax ay) (pick-sd-anchor sym)])
+             (l2-emit-build-verified! ctx sym ax ay 2.0)
              #t)))
     (case race
       [(Zerg)
@@ -4498,7 +4575,7 @@
                   (not forge-ready?)
                   (not (l2-building-present-or-pending? ctx 'forge))
                   (l2-building-present-or-pending? ctx 'pylon)
-                  (>= (l2-ctx-minerals ctx) (+ (sc2-min-cost 'forge) 50))
+                  (>= (l2-ctx-minerals ctx) (+ (sc2-min-cost 'forge) (if active-cloak-emergency? 0 50)))
                   (l2-save-cancel-rebuild-ready? ctx 'forge 60))
          (l2-emit-build-verified! ctx 'forge (safe-coord (+ base-x 4.5)) (safe-coord (+ base-y 4.5))))
        (or (and genuine-air-or-cloak-threat?
@@ -4512,7 +4589,7 @@
                   (not ebay-ready?)
                   (not (l2-building-present-or-pending? ctx 'engineering-bay))
                   rax-ready?
-                  (>= (l2-ctx-minerals ctx) (+ (sc2-min-cost 'engineering-bay) 50))
+                  (>= (l2-ctx-minerals ctx) (+ (sc2-min-cost 'engineering-bay) (if active-cloak-emergency? 0 50)))
                   (l2-save-cancel-rebuild-ready? ctx 'engineering-bay 60))
          (l2-emit-build-verified! ctx 'engineering-bay (safe-coord (+ base-x 5.0)) (safe-coord (- base-y 4.0))))
        (or (and genuine-air-or-cloak-threat?
@@ -10268,8 +10345,24 @@
                   (refractory-allow-action?! cd-tracker 'periodic-changeling-scout frame 336))
          (l2-emit! ctx (list 'cast (hash-ref ovs-caster 'id 190) 'spawn-changeling recon-tx recon-ty)))]
       [(Terran)
+       (define live-cloak-or-shimmer-active?
+         (or (pair? (l2-shimmer-ripples ctx))
+             (ormap (lambda (e)
+                      (and (hash? e)
+                           (not (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                      '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
+                           (or (eq? (hash-ref e 'cloaked #f) #t)
+                               (memq (hash-ref e 'cloak 0) '(1 2 cloaked cloaked-detected))
+                               (= (hash-ref e 'display-type 1) 3)
+                               (eq? (hash-ref e 'burrowed #f) #t)
+                               (eq? (hash-ref e 'is-burrowed #f) #t)
+                               (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                     '(dark-templar banshee ghost lurker-burrowed lurker-mp-burrowed
+                                       widow-mine-burrowed)))))
+                    (or (l2-ctx-enemy-units ctx) '()))))
        (define det-reserve?
-         (and tech-obs (enemy-tech-observation-requires-detection? tech-obs)))
+         (or live-cloak-or-shimmer-active?
+             (and tech-obs (enemy-tech-observation-requires-detection? tech-obs))))
        (define scan-oc
          (findf (lambda (b)
                   (and (eq? (unit-type-sym b) 'orbital-command)
@@ -10278,6 +10371,7 @@
                            (if det-reserve? 100 (if (>= frame 3000) 50 75)))))
                 ally-bldgs))
        (when (and scan-oc
+                  (not live-cloak-or-shimmer-active?)
                   (< intel-confidence 0.50)
                   (refractory-allow-action?! cd-tracker 'periodic-scanner-sweep frame 672))
          (l2-emit! ctx (list 'cast-spell (hash-ref scan-oc 'id 301) 'scanner-sweep recon-tx recon-ty)))])
@@ -13933,28 +14027,87 @@
                   (>= (l2-ctx-gas ctx) (sc2-gas-cost 'seismic-spines))
                   (l2-upgrade-needed? ctx 'seismic-spines))
          (l2-emit-research-verified! ctx 'seismic-spines)))
+  (define zerg-shimmer-ripples-present?
+    (pair? (l2-shimmer-ripples ctx)))
   (when (or enemy-cloaked-or-air?
+               zerg-shimmer-ripples-present?
                (enemy-tech-observation-requires-detection? tech-obs)
                (and (not live-game?) (memq 'spire (l2-ctx-bldg-types ctx))))
+       ;; L29-P0-3 (`CloakLoss -> 0`): Allow up to 1 Spore Crawler per base (capped at 3) and
+       ;; waive `zerg-spire-res-min` when active cloaked/detection threat exists so mineral lines
+       ;; get immediate static detection even while saving for Spire!
+       (define zerg-cloak-det-urgent?
+         (or zerg-shimmer-ripples-present?
+             (ormap (lambda (eb)
+                      (and (hash? eb)
+                           (memq (fast-canonical-structure-sym (unit-type-sym eb))
+                                 '(dark-shrine lurker-den lurker-den-mp))))
+                    (or (l2-ctx-enemy-bldgs ctx) '()))
+             (ormap (lambda (e)
+                      (and (hash? e)
+                           (not (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                      '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
+                           (or (eq? (hash-ref e 'cloaked #f) #t)
+                               (memq (hash-ref e 'cloak 0) '(1 2 cloaked cloaked-detected))
+                               (= (hash-ref e 'display-type 1) 3)
+                               (eq? (hash-ref e 'burrowed #f) #t)
+                               (eq? (hash-ref e 'is-burrowed #f) #t)
+                               (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                     '(dark-templar banshee ghost lurker-burrowed lurker-mp-burrowed
+                                       widow-mine-burrowed)))))
+                    enemy-units)))
+       (define cur-spore-cnt
+         (+ (l2-cur-ally-canon-bldg-count ctx 'spore-crawler)
+            (order-ledger-pending-count-for-type (l2-ctx-oledger ctx) 'spore-crawler frame)))
+       (define desired-spore-cnt
+         (if zerg-cloak-det-urgent? (min 3 (max 1 (length hatcheries))) 1))
        (when (and (or (not live-game?)
                       (and (memq 'spawning-pool ready-bldg-types)
-                           (not (l2-building-present-or-pending? ctx 'spore-crawler))
+                           (< cur-spore-cnt desired-spore-cnt)
                            (l2-save-cancel-rebuild-ready? ctx 'spore-crawler 60)
-                           (>= (- (l2-ctx-minerals ctx) zerg-spire-res-min) (sc2-min-cost 'spore-crawler))))
+                           (>= (- (l2-ctx-minerals ctx) (if zerg-cloak-det-urgent? 0 zerg-spire-res-min))
+                               (sc2-min-cost 'spore-crawler))))
                   (refractory-allow-action?! cd-tracker
                                              (list 'static-detector 'spore-crawler)
                                              frame
-                                             SC2-STATIC-DETECTOR-COOLDOWN-FRAMES))
+                                             (if (and zerg-cloak-det-urgent? (= cur-spore-cnt 0))
+                                                 44
+                                                 SC2-STATIC-DETECTOR-COOLDOWN-FRAMES)))
          (if live-game?
-             (let-values ([(spc-ax spc-ay)
-                           (l2-safe-zerg-build-anchor ctx (safe-coord (+ base-x 3.0)) (safe-coord (+ base-y 3.0)))])
-               (l2-emit-build-verified! ctx 'spore-crawler spc-ax spc-ay))
+             (let-values ([(spc-def-x spc-def-y)
+                           (if (and zerg-cloak-det-urgent? (pair? hatcheries))
+                               (let* ([sp-pts
+                                       (for/list ([b (in-list (or (l2-ctx-ally-bldgs ctx) '()))]
+                                                  #:when (and (hash? b)
+                                                              (eq? (fast-canonical-structure-sym (unit-type-sym b)) 'spore-crawler)
+                                                              (real? (hash-ref b 'x #f)) (real? (hash-ref b 'y #f))))
+                                         (cons (exact->inexact (hash-ref b 'x base-x))
+                                               (exact->inexact (hash-ref b 'y base-y))))]
+                                      [undef-hs
+                                       (filter (lambda (h)
+                                                 (and (hash? h)
+                                                      (real? (hash-ref h 'x #f)) (real? (hash-ref h 'y #f))
+                                                      (not (for/or ([sp (in-list sp-pts)])
+                                                             (<= (dist2d (exact->inexact (hash-ref h 'x base-x))
+                                                                         (exact->inexact (hash-ref h 'y base-y))
+                                                                         (car sp) (cdr sp))
+                                                                 12.0)))))
+                                               hatcheries)]
+                                      [picked (and (pair? undef-hs) (car undef-hs))])
+                                 (if picked
+                                     (values (safe-coord (+ (exact->inexact (hash-ref picked 'x base-x)) 3.0) base-x)
+                                             (safe-coord (+ (exact->inexact (hash-ref picked 'y base-y)) 3.0) base-y))
+                                     (values (safe-coord (+ base-x 3.0)) (safe-coord (+ base-y 3.0)))))
+                               (values (safe-coord (+ base-x 3.0)) (safe-coord (+ base-y 3.0))))])
+               (let-values ([(spc-ax spc-ay) (l2-safe-zerg-build-anchor ctx spc-def-x spc-def-y)])
+                 (l2-emit-build-verified! ctx 'spore-crawler spc-ax spc-ay)))
              (l2-emit! ctx (list 'build 'spore-crawler (safe-coord (+ base-x 3.0)) (safe-coord (+ base-y 3.0))))))
        (if live-game?
            (when (and (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
                       (or (and (not zerg-holding-for-aa-spire?)
                                (not zerg-holding-for-aa-corruptor?))
-                          enemy-cloaked-or-air?)
+                          enemy-cloaked-or-air?
+                          zerg-cloak-det-urgent?)
                       (< (l2-unit-count ctx 'overseer) 2))
              (l2-emit-unit-morph-verified! ctx 'overseer 'overlord 0))
            (when (not (memq 'overseer unit-types))
@@ -15084,6 +15237,33 @@
                     (memq (fast-canonical-unit-sym (unit-type-sym e))
                           '(reaper marauder stalker roach ravager adept marine oracle void-ray banshee mutalisk))))
              enemy-units))
+    ;; L29-P0-3 (`CloakLoss -> 0`): Never let breach-defense Stalkers/Adepts burn gas needed for
+    ;; `Observer #1` (75G) or `RoboticsFacility #1` (100G) when cloaked/burrowed threats attack with 0 Observers!
+    (define breach-cloak-threat?
+      (or (pair? (l2-shimmer-ripples ctx))
+          (ormap (lambda (e)
+                   (and (hash? e)
+                        (not (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                   '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
+                        (or (eq? (hash-ref e 'cloaked #f) #t)
+                            (memq (hash-ref e 'cloak 0) '(1 2 cloaked cloaked-detected))
+                            (= (hash-ref e 'display-type 1) 3)
+                            (eq? (hash-ref e 'burrowed #f) #t)
+                            (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                  '(dark-templar banshee ghost lurker-burrowed lurker-mp-burrowed)))))
+                 enemy-units)))
+    (define breach-det-gas-reserve
+      (if (and breach-cloak-threat?
+               (= (l2-unit-count ctx 'observer) 0))
+          (cond
+            [(and (memq 'robotics-facility ready-bldg-types)
+                  (> (hash-ref open-prod-slots 'robotics-facility 0) 0))
+             (sc2-gas-cost 'observer)]
+            [(and (memq 'cybernetics-core ready-bldg-types)
+                  (not (l2-building-present-or-pending? ctx 'robotics-facility)))
+             (sc2-gas-cost 'robotics-facility)]
+            [else 0])
+          0))
     (cond
       [(and protoss-early-ling-rush?
             (< (l2-unit-count ctx 'zealot) 2)
@@ -15092,12 +15272,12 @@
       [(and breach-need-ranged?
             (memq 'cybernetics-core ready-bldg-types)
             (>= (l2-ctx-minerals ctx) (sc2-min-cost 'stalker))
-            (>= (l2-ctx-gas ctx) (sc2-gas-cost 'stalker)))
+            (>= (- (l2-ctx-gas ctx) breach-det-gas-reserve) (sc2-gas-cost 'stalker)))
        (l2-try-train-unit! ctx 'stalker 'gateway 5 #:respect-bo-reserve? #f)]
       [(and (not breach-need-ranged?)
             (memq 'cybernetics-core ready-bldg-types)
             (>= (l2-ctx-minerals ctx) (sc2-min-cost 'adept))
-            (>= (l2-ctx-gas ctx) (sc2-gas-cost 'adept)))
+            (>= (- (l2-ctx-gas ctx) breach-det-gas-reserve) (sc2-gas-cost 'adept)))
        (l2-try-train-unit! ctx 'adept 'gateway 5 #:respect-bo-reserve? #f)])
     (when (and (> (hash-ref open-prod-slots 'gateway 0) 0)
                (>= (l2-ctx-minerals ctx) (sc2-min-cost 'zealot))
@@ -15156,6 +15336,46 @@
                                  SC2-BUILD-SITE-MIN-CLEARANCE
                                  #:exact-wall-slot? #t)
            (l2-emit-build-verified! ctx 'cybernetics-core inmain-cy-x inmain-cy-y))))
+
+;; L29-P0-3 (Air-Dominance Ground Closure): Return (values need-closure? live-enemy-air-cnt)
+;; so Protoss caps anti-air-only Phoenixes and shifts Stargates/Gateways to building-killing
+;; Void Rays / Tempests / Stalkers / Zealots once air dominance is established!
+(define (l2-protoss-air-dom-closure-status ctx)
+  (define live-game? (l2-ctx-live-obs-harvesters? ctx))
+  (define ally-combat-units (or (l2-ctx-ally-combat-units ctx) '()))
+  (define enemy-units (or (l2-ctx-enemy-units ctx) '()))
+  (define enemy-bldgs (or (l2-ctx-enemy-bldgs ctx) '()))
+  (define frame (l2-ctx-frame ctx))
+  (define ground-hitting-sup
+    (for/sum ([u (in-list ally-combat-units)]
+              #:when (not (memq (fast-canonical-unit-sym (unit-type-sym u))
+                                '(phoenix observer warp-prism warp-prism-phasing))))
+      (max 0.5 (exact->inexact (sc2-supply-cost (fast-canonical-unit-sym (unit-type-sym u)))))))
+  (define live-enemy-air-cnt
+    (count (lambda (e)
+             (and (hash? e) (combat-unit-record? e)
+                  (let ([et (fast-canonical-unit-sym (unit-type-sym e))])
+                    (and (not (memq et '(overlord overseer observer warp-prism medivac)))
+                         (or (eq? (hash-ref e 'flying #f) #t)
+                             (eq? (hash-ref e 'is-flying #f) #t)
+                             (fast-unit-is-flying-sym? et))))))
+           enemy-units))
+  (define live-enemy-ground-cnt
+    (count (lambda (e)
+             (and (hash? e) (combat-unit-record? e)
+                  (let ([et (fast-canonical-unit-sym (unit-type-sym e))])
+                    (not (or (eq? (hash-ref e 'flying #f) #t)
+                             (eq? (hash-ref e 'is-flying #f) #t)
+                             (fast-unit-is-flying-sym? et))))))
+           enemy-units))
+  (values (and live-game?
+               (>= (l2-unit-count ctx 'phoenix) 6)
+               (< live-enemy-air-cnt 12)
+               (or (< ground-hitting-sup 10.0)
+                   (and (>= frame 12096) (>= (l2-ctx-minerals ctx) 800))
+                   (and (= live-enemy-ground-cnt 0)
+                        (pair? enemy-bldgs))))
+          live-enemy-air-cnt))
 
 (define (l2-protoss-phase2-tech-expand! ctx)
   (define active-assimilators (l2-ctx-active-assimilators ctx))
@@ -15235,9 +15455,12 @@
                       [(>= supply-used 40) 3]
                       [(or (memq 'cybernetics-core (l2-ctx-bldg-types ctx)) (>= total-workers SC2-MIN-WORKERS-FOR-SECOND-GAS)) 2]
                       [else 1])))))
+  (define-values (protoss-air-dom-need-ground-closure? protoss-live-enemy-air-cnt)
+    (l2-protoss-air-dom-closure-status ctx))
   (define reserve-idle-stargate-aa?
        (and live-game?
             protoss-aa-needed?
+            (not protoss-air-dom-need-ground-closure?)
             (memq 'stargate ready-bldg-types)
             (< (l2-unit-count ctx 'phoenix) 6)
             (> (hash-ref open-prod-slots 'stargate 0) 0)))
@@ -15290,6 +15513,32 @@
                       (memq 'warp-gate-research researched-upgs))
                   (memq 'gateway ready-bldg-types))
          (l2-emit! ctx '(morph warp-gate))))
+  ;; L29-P0-3 (`#52 DT:7`, `#54 Banshee:14`, `CloakLoss -> 0`): Detect live cloaked/burrowed
+  ;; threats or Dark Shrine BEFORE Robotics Facility & Observer gates so `RoboticsFacility #1`
+  ;; and `Observer #1` immediately bypass expand/tech/air-pressure cooldowns when `0` Observers exist!
+  (define protoss-visible-cloaked-or-burrowed?
+    (or (ormap (lambda (eb)
+                 (and (hash? eb)
+                      (memq (fast-canonical-structure-sym (unit-type-sym eb))
+                            '(dark-shrine lurker-den lurker-den-mp))))
+               (or (l2-ctx-enemy-bldgs ctx) '()))
+        (pair? (l2-shimmer-ripples ctx))
+        (for/or ([e (in-list enemy-units)])
+          (and (hash? e)
+               (not (memq (unit-type-sym e)
+                          '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
+               (or (eq? (hash-ref e 'cloaked #f) #t)
+                   (memq (hash-ref e 'cloak 0) '(1 2 cloaked cloaked-detected))
+                   (= (hash-ref e 'display-type 1) 3)
+                   (eq? (hash-ref e 'burrowed #f) #t)
+                   (eq? (hash-ref e 'is-burrowed #f) #t)
+                   (memq (fast-canonical-unit-sym (unit-type-sym e))
+                         '(dark-templar banshee ghost lurker-burrowed lurker-mp-burrowed
+                           widow-mine-burrowed roach-burrowed infestor-burrowed swarm-host-burrowed)))))))
+  (define protoss-cloak-det-emergency?
+    (and live-game?
+         (= (l2-unit-count ctx 'observer) 0)
+         protoss-visible-cloaked-or-burrowed?))
   (define cur-robo-cnt
        (+ (count (lambda (b) (eq? (fast-canonical-structure-sym (unit-type-sym b)) 'robotics-facility))
                  ally-bldgs)
@@ -15303,8 +15552,10 @@
            2
            1))
   (when (and (memq 'cybernetics-core ready-bldg-types)
-                (not early-breach-defer-tech?)
-                (or (not protoss-saving-for-expand?) endgame-corner-hunt?)
+                (or (not early-breach-defer-tech?) (and (= cur-robo-cnt 0) protoss-cloak-det-emergency?))
+                (or (not protoss-saving-for-expand?)
+                    endgame-corner-hunt?
+                    (and (= cur-robo-cnt 0) protoss-cloak-det-emergency?))
                 (l2-save-cancel-rebuild-ready? ctx 'robotics-facility 60)
                 (< cur-robo-cnt desired-robos)
                 (or (= cur-robo-cnt 0)
@@ -15312,15 +15563,20 @@
                          (or (>= (l2-ctx-minerals ctx) 550)
                              (l2-can-spend-by-priority? ctx 'robotics-facility 'production-scaling))))
                 (or (and (= cur-robo-cnt 0)
-                         (not (or enemy-air-raiders?
-                                  (ormap (lambda (e)
-                                           (or (eq? (hash-ref e 'flying? #f) #t)
-                                               (eq? (hash-ref e 'is-flying #f) #t)))
-                                         enemy-units))))
+                         (or protoss-cloak-det-emergency?
+                             (not (or enemy-air-raiders?
+                                      (ormap (lambda (e)
+                                               (or (eq? (hash-ref e 'flying? #f) #t)
+                                                   (eq? (hash-ref e 'is-flying #f) #t)))
+                                             enemy-units)))))
                     (and (aa-stargate-min-ok? (sc2-min-cost 'robotics-facility))
                          (aa-stargate-gas-ok? (sc2-gas-cost 'robotics-facility))))
-                (l2-non-combat-min-ok? ctx (sc2-min-cost 'robotics-facility) 'robotics-facility)
-                (l2-non-combat-gas-ok? ctx (sc2-gas-cost 'robotics-facility) 'robotics-facility))
+                (or (and (= cur-robo-cnt 0)
+                         protoss-cloak-det-emergency?
+                         (>= (l2-ctx-minerals ctx) (sc2-min-cost 'robotics-facility))
+                         (>= (l2-ctx-gas ctx) (sc2-gas-cost 'robotics-facility)))
+                    (and (l2-non-combat-min-ok? ctx (sc2-min-cost 'robotics-facility) 'robotics-facility)
+                         (l2-non-combat-gas-ok? ctx (sc2-gas-cost 'robotics-facility) 'robotics-facility))))
        (l2-emit-build-verified! ctx 'robotics-facility
                              (safe-coord (+ base-x 6.0 (* 4.0 cur-robo-cnt)))
                              (safe-coord (+ base-y 6.0 (* 2.0 cur-robo-cnt))))
@@ -15395,31 +15651,26 @@
   (define wp-trained-cnt
        (if robo-st (hash-ref robo-st 'wp-trained-cnt 0) 0))
   (when (and (or (not protoss-saving-for-expand?)
+                    (and (= cur-obs-total 0) protoss-cloak-det-emergency?)
                     (and endgame-corner-hunt? (< cur-obs-total 1)))
                 (memq 'robotics-facility ready-bldg-types)
                 (l2-can-spend-supply? ctx (sc2-supply-cost 'observer)))
        (define obs-requires-det? (enemy-tech-observation-requires-detection? tech-obs))
-       (define visible-cloaked-or-burrowed-enemy?
-         (for/or ([e (in-list enemy-units)])
-           (and (hash? e)
-                (not (memq (unit-type-sym e)
-                           '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
-                (or (eq? (hash-ref e 'cloaked #f) #t)
-                    (memq (hash-ref e 'cloak 0) '(1 2 cloaked cloaked-detected))
-                    (eq? (hash-ref e 'burrowed #f) #t)
-                    (memq (unit-type-sym e)
-                          '(dark-templar lurker-burrowed lurker-mp-burrowed widow-mine-burrowed
-                            roach-burrowed infestor-burrowed swarm-host-burrowed))))))
+       (define visible-cloaked-or-burrowed-enemy? protoss-visible-cloaked-or-burrowed?)
+       (define obs-urgent-zero-det?
+         (and (= cur-obs-total 0)
+              (or visible-cloaked-or-burrowed-enemy? obs-requires-det?)))
        ;; W10-P0-3-rt: Under enemy air pressure (Vikings/Phoenixes/Banshees), cap at 1 Observer
        ;; even with detection needed so we never bleed 6-11 Observers (#48/#12/#24).
        (define desired-observers
          (cond
            [(and live-game? protoss-enemy-air-pressure?) 1]
-           [(and live-game? (not obs-requires-det?) (< live-army-supply 25)) 1]
-           [obs-requires-det? 2]
+           [(and live-game? (not obs-requires-det?) (not visible-cloaked-or-burrowed-enemy?) (< live-army-supply 25)) 1]
+           [(or obs-requires-det? visible-cloaked-or-burrowed-enemy?) 2]
            [else 1]))
        (define obs-loss-cd-frames
          (cond
+           [obs-urgent-zero-det? 44]
            [(and protoss-enemy-air-pressure? (>= obs-trained-cnt 3)) 1344]
            [protoss-enemy-air-pressure? 896]
            [(and visible-cloaked-or-burrowed-enemy? (= cur-obs-total 0)) 224]
@@ -15429,7 +15680,7 @@
              (>= (- frame last-obs-loss-frame) obs-loss-cd-frames)))
        (define obs-train-cd-frames
          (cond
-           [(and visible-cloaked-or-burrowed-enemy? (= cur-obs-total 0) (not protoss-enemy-air-pressure?)) 224]
+           [obs-urgent-zero-det? 44]
            [(or (>= obs-trained-cnt 3) protoss-enemy-air-pressure?) 1344]
            [visible-cloaked-or-burrowed-enemy? 448]
            [else 672]))
@@ -15439,9 +15690,9 @@
        (define obs-match-cap-ok?
          (or (not live-game?)
              (< obs-trained-cnt 4)
-             (and visible-cloaked-or-burrowed-enemy?
+             (and (or visible-cloaked-or-burrowed-enemy? obs-requires-det?)
                   (= cur-obs-total 0)
-                  (< obs-trained-cnt 6))))
+                  (< obs-trained-cnt 8))))
        ;; W11-P0-3-rt: Defer first Observer until army-supply >= 8 unless cloaked/burrowed threat!
        (define obs-army-ready?
          (or (not live-game?)
@@ -15455,10 +15706,13 @@
                   obs-match-cap-ok?
                   (or (< cur-obs-total 1)
                       obs-requires-det?
+                      visible-cloaked-or-burrowed-enemy?
                       (l2-protoss-colossus-escrow-ok? ctx (sc2-min-cost 'observer) (sc2-gas-cost 'observer)))
                   (or obs-requires-det?
+                      visible-cloaked-or-burrowed-enemy?
                       (aa-stargate-gas-ok? (sc2-gas-cost 'observer))))
-         (when (l2-try-train-unit! ctx 'observer 'robotics-facility 1)
+         (when (l2-try-train-unit! ctx 'observer 'robotics-facility 1
+                                   #:respect-bo-reserve? (not obs-urgent-zero-det?))
            (when live-game?
              (when robo-st
                (hash-set! robo-st 'obs-trained-cnt (add1 obs-trained-cnt)))
@@ -15539,18 +15793,25 @@
   (when (and (or (not protoss-saving-for-expand?)
                     protoss-corner-flyers-needed?
                     protoss-enemy-capital-air?
+                    protoss-air-dom-need-ground-closure?
                     protoss-aa-needed?)
                 (memq 'stargate ready-bldg-types))
-       (when (and (or (not protoss-saving-for-expand?) protoss-enemy-capital-air?)
+       (when (and (or (not protoss-saving-for-expand?)
+                      protoss-enemy-capital-air?
+                      protoss-air-dom-need-ground-closure?)
                   (memq 'fleet-beacon ready-bldg-types)
                   (or protoss-enemy-capital-air?
+                      protoss-air-dom-need-ground-closure?
                       (l2-plan-wants-now? ctx 'tempest)
                       enemy-heavy-ground-siege?)
                   (< (l2-unit-count ctx 'tempest) (if protoss-enemy-capital-air? 12 4))
                   (or protoss-enemy-capital-air?
+                      protoss-air-dom-need-ground-closure?
                       (l2-protoss-colossus-escrow-ok? ctx (sc2-min-cost 'tempest) (sc2-gas-cost 'tempest)))
                   (l2-can-spend-supply? ctx (sc2-supply-cost 'tempest)))
-         (l2-try-train-unit! ctx 'tempest 'stargate 6))
+         (l2-try-train-unit! ctx 'tempest 'stargate 6
+                          #:respect-bo-reserve? (not (or protoss-enemy-capital-air?
+                                                         protoss-air-dom-need-ground-closure?))))
        (when (and (not protoss-saving-for-expand?)
                   (not protoss-enemy-capital-air?)
                   (memq 'fleet-beacon ready-bldg-types)
@@ -15560,10 +15821,15 @@
        (define phoenix-cap
          (cond
            [protoss-enemy-capital-air? 0]
-           [protoss-aa-needed? 10]
+           [protoss-air-dom-need-ground-closure? 6]
+           [(and protoss-aa-needed? (>= protoss-live-enemy-air-cnt 12)) 10]
+           [protoss-aa-needed? 8]
            [else 4]))
-       ;; When facing light air (Mutalisk / Banshee / Phoenix), train fast Phoenixes BEFORE heavy Void Rays!
-       (when (and (or protoss-corner-flyers-needed?
+       ;; When facing light air (Mutalisk / Banshee / Phoenix), train fast Phoenixes BEFORE heavy Void Rays,
+       ;; EXCEPT when `protoss-air-dom-need-ground-closure?` is active (`>= 6` Phoenixes with `< 10` ground-hitting
+       ;; supply or `0` enemy ground units -> shift Stargates to building-killing Void Rays / Tempests!).
+       (when (and (not protoss-air-dom-need-ground-closure?)
+                  (or protoss-corner-flyers-needed?
                       (and protoss-aa-needed? (not protoss-enemy-capital-air?))
                       (l2-plan-wants-now? ctx 'phoenix))
                   (< (l2-unit-count ctx 'phoenix) phoenix-cap)
@@ -15576,18 +15842,22 @@
                           #:respect-bo-reserve? (not (or protoss-corner-flyers-needed? protoss-aa-needed?))))
        (when (and (or protoss-corner-flyers-needed?
                       protoss-enemy-capital-air?
+                      protoss-air-dom-need-ground-closure?
                       protoss-aa-needed?
                       (l2-plan-wants-now? ctx 'void-ray)
                       (>= (l2-ctx-minerals ctx) 250))
                   (< (l2-unit-count ctx 'void-ray) (if protoss-enemy-capital-air? 10 99))
                   (or protoss-corner-flyers-needed?
                       protoss-enemy-capital-air?
+                      protoss-air-dom-need-ground-closure?
                       (and protoss-aa-needed? (< (l2-unit-count ctx 'void-ray) 8))
                       (and (l2-can-spend-by-priority? ctx 'void-ray 'combat-unit)
                            (l2-protoss-colossus-escrow-ok? ctx (sc2-min-cost 'void-ray) (sc2-gas-cost 'void-ray))))
                   (l2-can-spend-supply? ctx (sc2-supply-cost 'void-ray)))
          (l2-try-train-unit! ctx 'void-ray 'stargate 6
-                          #:respect-bo-reserve? (not (or protoss-corner-flyers-needed? protoss-enemy-capital-air?))))
+                          #:respect-bo-reserve? (not (or protoss-corner-flyers-needed?
+                                                         protoss-enemy-capital-air?
+                                                         protoss-air-dom-need-ground-closure?))))
        (when (and (not protoss-saving-for-expand?)
                   (or (not live-game?)
                       (and (not protoss-aa-needed?)
@@ -15771,6 +16041,7 @@
   ;; scale cleanly before Forges drain early midgame minerals (cloak/detection still immediate!).
   (define protoss-forge-timing-ok?
     (or (not live-game?)
+        protoss-cloak-det-emergency?
         (enemy-tech-observation-requires-detection? tech-obs)
         (and (>= (length nexuses) 2)
              (>= live-army-supply 16)
@@ -15784,7 +16055,8 @@
             (not (l2-building-present-or-pending? ctx 'forge))
             (or (eq? bo-goal-sym 'forge)
                 (eq? prio-saving-for-sym 'forge)
-                (and (enemy-tech-observation-requires-detection? tech-obs)
+                (and (or protoss-cloak-det-emergency?
+                         (enemy-tech-observation-requires-detection? tech-obs))
                      (not (l2-building-present-or-pending? ctx 'robotics-facility))))))
   (define p2-early-ling-rush-hold-gate2?
     (and (l2-protoss-early-ling-rush? ctx)
@@ -15916,6 +16188,7 @@
   (when (and protoss-forge-timing-ok?
                 (or (memq 'robotics-facility ready-bldg-types)
                     (memq 'twilight-council ready-bldg-types)
+                    protoss-cloak-det-emergency?
                     (and (memq 'cybernetics-core ready-bldg-types)
                          (or (enemy-tech-observation-requires-detection? tech-obs)
                              (l2-plan-wants-now? ctx 'forge)
@@ -15923,12 +16196,16 @@
                              (eq? prio-saving-for-sym 'forge)
                              (member '(build forge) prio-scheduled-actions)
                              (>= active-bases 2))))
-                (or (enemy-tech-observation-requires-detection? tech-obs)
+                (or protoss-cloak-det-emergency?
+                    (enemy-tech-observation-requires-detection? tech-obs)
                     (not early-survival-crisis?))
-                (not protoss-saving-for-expand?)
-                (or (enemy-tech-observation-requires-detection? tech-obs)
+                (or protoss-cloak-det-emergency?
+                    (not protoss-saving-for-expand?))
+                (or protoss-cloak-det-emergency?
+                    (enemy-tech-observation-requires-detection? tech-obs)
                     (l2-protoss-colossus-escrow-ok? ctx (sc2-min-cost 'forge) 0))
-                (or (enemy-tech-observation-requires-detection? tech-obs)
+                (or protoss-cloak-det-emergency?
+                    (enemy-tech-observation-requires-detection? tech-obs)
                     (l2-plan-wants-now? ctx 'forge)
                     (eq? bo-goal-sym 'forge)
                     (eq? prio-saving-for-sym 'forge)
@@ -15936,13 +16213,15 @@
                     (l2-can-spend-by-priority? ctx 'forge 'tech-upgrade))
                 (< cur-forge-cnt desired-forge-cnt)
                 (l2-save-cancel-rebuild-ready? ctx 'forge 60)
-                (or (enemy-tech-observation-requires-detection? tech-obs)
+                (or protoss-cloak-det-emergency?
+                    (enemy-tech-observation-requires-detection? tech-obs)
                     (l2-plan-wants-now? ctx 'forge)
                     (eq? bo-goal-sym 'forge)
                     (eq? prio-saving-for-sym 'forge)
                     (member '(build forge) prio-scheduled-actions)
                     (>= (length nexuses) SC2-MIN-DESIRED-BASES))
                 (or (not live-game?)
+                    protoss-cloak-det-emergency?
                     (enemy-tech-observation-requires-detection? tech-obs)
                     (l2-plan-wants-now? ctx 'forge)
                     (eq? bo-goal-sym 'forge)
@@ -15950,7 +16229,8 @@
                     (member '(build forge) prio-scheduled-actions)
                     (>= eff-phase-supply 46))
                 (>= (l2-ctx-minerals ctx) (sc2-min-cost 'forge))
-                (l2-non-combat-min-ok? ctx (sc2-min-cost 'forge) 'forge))
+                (or protoss-cloak-det-emergency?
+                    (l2-non-combat-min-ok? ctx (sc2-min-cost 'forge) 'forge)))
        (l2-emit-build-verified! ctx 'forge
                                  (safe-coord (+ base-x (if (= cur-forge-cnt 0) 5.0 8.5)))
                                  (safe-coord (- base-y 4.0))))
@@ -15963,11 +16243,15 @@
              (and (macro-brain-decision? md)
                   (not (not (memq 'photon-cannon (macro-brain-decision-scheduled-ids md))))))))
   (define desired-pc-cnt
-       (if (and live-game? (or enemy-air-raiders? protoss-aa-needed? prio-wants-pc?))
-           (min 2 (max 1 (length nexuses)))
-           1))
+       (cond
+         [(and live-game? protoss-cloak-det-emergency?)
+          (min 3 (max 1 (length nexuses)))]
+         [(and live-game? (or enemy-air-raiders? protoss-aa-needed? prio-wants-pc?))
+          (min 2 (max 1 (length nexuses)))]
+         [else 1]))
   (when (and (memq 'forge ready-bldg-types)
-                (or (enemy-tech-observation-requires-detection? tech-obs)
+                (or protoss-cloak-det-emergency?
+                    (enemy-tech-observation-requires-detection? tech-obs)
                     prio-wants-pc?
                     (l2-plan-wants-now? ctx 'photon-cannon)
                     (and live-game? (or enemy-air-raiders? protoss-aa-needed?)))
@@ -15977,7 +16261,9 @@
                 (refractory-allow-action?! cd-tracker
                                            (list 'static-detector 'photon-cannon)
                                            frame
-                                           SC2-STATIC-DETECTOR-COOLDOWN-FRAMES))
+                                           (if (and protoss-cloak-det-emergency? (= cur-pc-cnt 0))
+                                               44
+                                               SC2-STATIC-DETECTOR-COOLDOWN-FRAMES)))
        (define main-has-pc?
          (ormap (lambda (b)
                   (and (hash? b)
@@ -15992,7 +16278,7 @@
                 ally-bldgs))
        (define-values (pc-x pc-y)
          (if (and live-game?
-                  (or enemy-air-raiders? protoss-aa-needed?)
+                  (or protoss-cloak-det-emergency? enemy-air-raiders? protoss-aa-needed?)
                   (not main-has-pc?)
                   (or (<= (length nexuses) 1) nat-has-pc?))
              (let* ([px (if first-ready-pylon (hash-ref first-ready-pylon 'x (+ base-x 4.5)) (+ base-x 4.5))]
@@ -16252,10 +16538,13 @@
          (not (l2-ctx-early-survival-crisis? ctx))
          (not (l2-ctx-bldg-actively-damaged? ctx))
          (<= (l2-ctx-live-enemy-threat-supply ctx) (l2-ctx-live-army-supply ctx))))
+  (define-values (protoss-p3-air-dom-closure? _p3-live-air-cnt)
+    (l2-protoss-air-dom-closure-status ctx))
   (when (and (or (and crisis-tech-upgrade-deferral?
                       (not protoss-brain-saving-1base-nat?))
                      (l2-ctx-early-survival-crisis? ctx)
                      (l2-enemy-early-pool-detected? ctx)
+                     protoss-p3-air-dom-closure?
                      (not protoss-saving-for-expand?))
                 (l2-can-spend-supply? ctx (sc2-supply-cost 'zealot)))
        ;; W12-P0-3-rt (`#36 P v 12PoolBot` / `#15 P v oberon` / Suite 32.4): Under active
@@ -16462,13 +16751,19 @@
                             (and live-game? (< frame 3000) (< (l2-unit-count ctx 'adept) 1) (= (l2-unit-count ctx 'stalker) 0)))
                         (l2-can-spend-by-priority? ctx 'adept 'combat-unit))
                (l2-try-train-unit! ctx 'adept 'gateway 5 #:respect-bo-reserve? #t))
-             (when (and (gateway-unit-colossus-ok? 'stalker)
+             (when (and (or protoss-p3-air-dom-closure?
+                            (gateway-unit-colossus-ok? 'stalker))
                         (or crisis-tech-upgrade-deferral?
+                            protoss-p3-air-dom-closure?
                             (l2-can-spend-by-priority? ctx 'stalker 'combat-unit)))
-               (l2-try-train-unit! ctx 'stalker 'gateway 5 #:respect-bo-reserve? (not crisis-tech-upgrade-deferral?)))
+               (l2-try-train-unit! ctx 'stalker 'gateway 5
+                                   #:respect-bo-reserve? (not (or crisis-tech-upgrade-deferral?
+                                                                  protoss-p3-air-dom-closure?))))
              (when (and (not protoss-suppress-zealot-for-gas-core?)
-                        (gateway-unit-colossus-ok? 'zealot)
+                        (or protoss-p3-air-dom-closure?
+                            (gateway-unit-colossus-ok? 'zealot))
                         (or crisis-tech-upgrade-deferral?
+                            protoss-p3-air-dom-closure?
                             (and (l2-can-spend-by-priority? ctx 'zealot 'combat-unit)
                                  (or (< (l2-ctx-gas ctx) (sc2-gas-cost 'stalker))
                                      (and (> protoss-pending-robo-gas-reserve 0)
@@ -16478,7 +16773,9 @@
                                      (and (memq 'charge researched-upgs)
                                           (< (l2-ctx-gas ctx) 200)
                                           (<= (l2-unit-count ctx 'zealot) (l2-unit-count ctx 'stalker)))))))
-               (l2-try-train-unit! ctx 'zealot 'gateway 5 #:respect-bo-reserve? (not crisis-tech-upgrade-deferral?)))])]
+               (l2-try-train-unit! ctx 'zealot 'gateway 5
+                                   #:respect-bo-reserve? (not (or crisis-tech-upgrade-deferral?
+                                                                  protoss-p3-air-dom-closure?))))])]
          [(and (or (memq 'gateway ready-bldg-types) (memq 'warp-gate ready-bldg-types))
                (gateway-unit-colossus-ok? 'zealot)
                (or crisis-tech-upgrade-deferral?
@@ -16601,16 +16898,63 @@
   (define enemy-bldgs (or (l2-ctx-enemy-bldgs ctx) '()))
   (define (get-scan-candidates)
     (when (eq? scan-candidates-box RUNTIME-MISSING)
+      (define raw-ripples (l2-shimmer-ripples ctx))
+      (define ally-det-pts
+        (append
+         (for/list ([u (in-list (or (l2-ctx-ally-units ctx) '()))]
+                    #:when (and (hash? u)
+                                (eq? (fast-canonical-unit-sym (unit-type-sym u)) 'raven)
+                                (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f))))
+           (cons (exact->inexact (hash-ref u 'x base-x))
+                 (exact->inexact (hash-ref u 'y base-y))))
+         (for/list ([b (in-list ally-bldgs)]
+                    #:when (and (hash? b)
+                                (eq? (fast-canonical-structure-sym (unit-type-sym b)) 'missile-turret)
+                                (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                                (real? (hash-ref b 'x #f)) (real? (hash-ref b 'y #f))))
+           (cons (exact->inexact (hash-ref b 'x base-x))
+                 (exact->inexact (hash-ref b 'y base-y))))))
+      (define (covered-by-det? ex0 ey0)
+        (for/or ([dp (in-list ally-det-pts)])
+          (define dx (fl- ex0 (car dp)))
+          (define dy (fl- ey0 (cdr dp)))
+          (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 100.0)))
+      (define raw-cands
+        (append
+         (for/list ([e (in-list enemy-units)]
+                    #:when (and (hash? e)
+                                (not (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                           '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
+                                (or (eq? (hash-ref e 'cloaked #f) #t)
+                                    (memq (hash-ref e 'cloak 0) '(1 2 cloaked cloaked-detected))
+                                    (= (hash-ref e 'display-type 1) 3)
+                                    (eq? (hash-ref e 'burrowed #f) #t)
+                                    (eq? (hash-ref e 'is-burrowed #f) #t)
+                                    (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                          '(lurker lurker-mp lurker-burrowed lurker-mp-burrowed
+                                            dark-templar banshee ghost widow-mine widow-mine-burrowed)))))
+           e)
+         raw-ripples))
+      ;; L29-P0-3 (`#52/#54` CloakLoss): Prioritize UNDETECTED (`cloak=1` / shimmer / burrowed) threats
+      ;; NOT already covered by a Raven or Missile Turret, closest to our base/natural!
+      (define (cand-priority-score e)
+        (define ex0 (exact->inexact (hash-ref e 'x nat-x)))
+        (define ey0 (exact->inexact (hash-ref e 'y nat-y)))
+        (define clk (hash-ref e 'cloak 0))
+        (define undet?
+          (or (eqv? clk 1)
+              (eq? clk 'cloaked)
+              (= (hash-ref e 'display-type 1) 3)
+              (eq? (hash-ref e 'burrowed #f) #t)
+              (eq? (hash-ref e 'is-burrowed #f) #t)
+              (not (hash-has-key? e 'type))))
+        (define det-pen (if (covered-by-det? ex0 ey0) 500.0 0.0))
+        (define undet-pen (if undet? 0.0 100.0))
+        (+ det-pen undet-pen
+           (min (dist2d base-x base-y ex0 ey0)
+                (dist2d nat-x nat-y ex0 ey0))))
       (set! scan-candidates-box
-            (for/list ([e (in-list enemy-units)]
-                       #:when (or (eq? (hash-ref e 'cloaked #f) #t)
-                                  (memq (hash-ref e 'cloak 0) '(1 2 cloaked cloaked-detected))
-                                  (eq? (hash-ref e 'burrowed #f) #t)
-                                  (eq? (hash-ref e 'is-burrowed #f) #t)
-                                  (memq (fast-canonical-unit-sym (unit-type-sym e))
-                                        '(lurker lurker-mp lurker-burrowed lurker-mp-burrowed
-                                          dark-templar banshee ghost widow-mine widow-mine-burrowed))))
-              e)))
+            (sort raw-cands < #:key cand-priority-score)))
     scan-candidates-box)
   (define ally-combat-units (l2-ctx-ally-combat-units ctx))
   (define safe-ths-for-mule
@@ -18465,6 +18809,33 @@
                   (not (and (= (length ccs) 1)
                             (>= (l2-ctx-minerals ctx) 350)
                             (<= live-enemy-threat-supply 0)))))))
+  ;; L29-P0-3 (`#52 DT:7`, `#54 Banshee:14`, `CloakLoss -> 0`): Train urgent `Raven #1` FIRST
+  ;; before Barracks/Factory spend minerals/gas whenever a cloaked/burrowed threat is active with 0 Ravens!
+  (define terran-raven-cloak-urgent?
+    (and live-game?
+         (= (l2-unit-count ctx 'raven) 0)
+         (or (pair? (l2-shimmer-ripples ctx))
+             (ormap (lambda (eb)
+                      (and (hash? eb)
+                           (memq (fast-canonical-structure-sym (unit-type-sym eb))
+                                 '(dark-shrine lurker-den lurker-den-mp))))
+                    (or (l2-ctx-enemy-bldgs ctx) '()))
+             (ormap (lambda (e)
+                      (and (hash? e)
+                           (not (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                      '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
+                           (or (eq? (hash-ref e 'cloaked #f) #t)
+                               (memq (hash-ref e 'cloak 0) '(1 2 cloaked cloaked-detected))
+                               (= (hash-ref e 'display-type 1) 3)
+                               (eq? (hash-ref e 'burrowed #f) #t)
+                               (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                     '(dark-templar banshee ghost lurker-burrowed lurker-mp-burrowed)))))
+                    enemy-units))))
+  (when (and terran-raven-cloak-urgent?
+             (memq 'starport ready-bldg-types)
+             (memq 'starport-techlab ready-bldg-types)
+             (l2-can-spend-supply? ctx (sc2-supply-cost 'raven)))
+    (l2-try-train-unit! ctx 'raven 'starport 6 #:respect-bo-reserve? #f))
   (when (and (or (not terran-prod-save-hold?)
                     terran-early-marine-bypass?
                     (l2-ctx-early-survival-crisis? ctx)
@@ -18676,13 +19047,17 @@
            (l2-try-train-unit! ctx 'battlecruiser 'starport 6 #:respect-bo-reserve? (if live-game? terran-bo-escrow-imminent? #t)))
          (when (and (memq 'starport-techlab ready-bldg-types)
                     (< (l2-unit-count ctx 'raven)
-                       (if (or enemy-capital-air? (enemy-tech-observation-requires-detection? tech-obs)) 2 1))
+                       (if (or enemy-capital-air? terran-raven-cloak-urgent? (enemy-tech-observation-requires-detection? tech-obs)) 2 1))
                     (or enemy-capital-air?
+                        terran-raven-cloak-urgent?
                         (enemy-tech-observation-requires-detection? tech-obs)
                         endgame-corner-hunt?
                         (l2-plan-wants-now? ctx 'raven)
                         (and live-game? (>= live-army-supply 30))))
-           (l2-try-train-unit! ctx 'raven 'starport 6 #:respect-bo-reserve? (and (not enemy-capital-air?) (if live-game? terran-bo-escrow-imminent? #t))))
+           (l2-try-train-unit! ctx 'raven 'starport 6
+                               #:respect-bo-reserve? (and (not enemy-capital-air?)
+                                                          (not terran-raven-cloak-urgent?)
+                                                          (if live-game? terran-bo-escrow-imminent? #t))))
          (when (and live-game?
                     (or enemy-capital-air? (enemy-tech-observation-requires-anti-air? tech-obs))
                     (< (l2-unit-count ctx 'viking) (if enemy-capital-air? desired-viking-cap 2)))
@@ -26981,16 +27356,22 @@
                                                        (list 'l23-viper-abduct uid) frame 28))
                        (viper-emit! (list 'cast-spell uid 'abduct (hash-ref abduct-tgt 'id)))]
                       [vtgt
-                       ;; Move to a safe 7.5t cast standoff between high-value target and our combat army
+                       ;; L29-P0-3 (`z07`/`z08`/`#16`): For Parasitic Bomb (`air-clump-tgt`, `en >= 125`),
+                       ;; step cleanly inside `6.8t` cast standoff (up to `14.0t` from `army-fx`) whenever
+                       ;; still `> 8.2t` away so Viper closes and fires ParasiticBomb instead of stalling at 9t!
                        (define vx (exact->inexact (hash-ref vtgt 'x army-fx)))
                        (define vy (exact->inexact (hash-ref vtgt 'y army-fy)))
                        (define dx-a (fl- vx army-fx))
                        (define dy-a (fl- vy army-fy))
                        (define da (flmax 1.0 (flsqrt (fl+ (fl* dx-a dx-a) (fl* dy-a dy-a)))))
-                       (define step-from-army (flmin 10.0 (flmax 0.0 (fl- da 7.5))))
+                       (define standoff (if air-clump-tgt 6.8 7.5))
+                       (define max-reach (if air-clump-tgt 14.0 10.0))
+                       (define step-from-army (flmin max-reach (flmax 0.0 (fl- da standoff))))
                        (define stx (safe-coord (fl+ army-fx (fl* step-from-army (fl/ dx-a da))) army-fx))
                        (define sty (safe-coord (fl+ army-fy (fl* step-from-army (fl/ dy-a da))) army-fy))
-                       (when (not (l34-within-r2? ux uy (exact->inexact stx) (exact->inexact sty) 4.84 2.2))
+                       (when (or (and air-clump-tgt
+                                      (fl> (fast-dist2d (exact->inexact ux) (exact->inexact uy) vx vy) 8.2))
+                                 (not (l34-within-r2? ux uy (exact->inexact stx) (exact->inexact sty) 4.84 2.2)))
                          (viper-emit! (list 'move uid stx sty)))]
                       [else
                        ;; Escort non-caster combat army rear (3t toward home) instead of parking in main

@@ -6071,6 +6071,244 @@
     (cleanup!))
   (hash-clear! SC2-TERRAN-5X3-MISS-STREAK))
 
+(printf "[Loop 29] Testing L29-P0-1 Terran barracks #2/#3 fast-3x3+0.5t spillover & emergency cloak static detectors (Cannon/Spore/Turret) at attacked mineral lines...\n")
+(let ()
+  (define (l29-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define (mk-l29-u tag utype alliance x y
+                    #:hp [hp 100.0] #:shield [sh 0.0] #:rad [rad 1.0]
+                    #:cloak [clk 0] #:flying? [fly? #f] #:orders [ords '()])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y (if fly? 12.0 8.0)) 0.0 rad 1.0 clk #f #f #f
+              hp hp sh sh 0.0 0.0 0 0 fly? #f #f #t #f
+              ords 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define (mk-l29-mins base-tag)
+    (for/list ([y (in-list '(27.5 29.5 31.5 33.5))] [i (in-naturals 0)])
+      (sc2-unit 1 3 (+ base-tag i) 341 0 (sc2-point3d 71.0 y 8.0) 0.0 1.0 1.0 0 #f #f #f
+                1000.0 1000.0 0.0 0.0 0.0 0.0 1500 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0)))
+  (define (l29-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59929 "/sc2api" c-in c-out #f 1))
+    (define rpc-cnt (box 0))
+    (define saw-319? (box #f))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define req-id-p (assoc 97 req-f))
+             (define id-b (if req-id-p (encode-uint32 97 (third req-id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (set-box! rpc-cnt (add1 (unbox rpc-cnt)))
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (when (= ab 319) (set-box! saw-319? #t))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws rpc-cnt saw-319? (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+
+  ;; L29-P0-1a (`#02/#08/#26/#32/#35` Terran barracks #2/#3): After 1 complete `5x3`+`2.0t` miss on
+  ;; `barracks #2` (`cur-rax-count = 1`), even after a Supply Depot finishes (changing `cur-struct-sig`
+  ;; and wiping `SC2-TERRAN-5X3-MISS-CACHE`!), `rax2-fast-3x3?` persists (`streak >= 2`), sends ZERO `319`
+  ;; queries, and IMMEDIATELY places `barracks #2` via `0.5t` pure `3x3` at Natural `(68.5, 30.5)`!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
+  (define allow-r2-321? (box #f))
+  (let-values ([(ws rpc-cnt saw-319? cleanup!)
+                (l29-start-mock-ws
+                 (lambda (ab px py)
+                   (if (and (unbox allow-r2-321?) (= ab 321) (<= (l29-dist px py 68.5 30.5) 0.1)) 1 2)))])
+    (define cc-m (mk-l29-u 9901 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define cc-n (mk-l29-u 9902 18 1 64.5 30.5 #:hp 1500.0 #:rad 2.75))
+    (define rax1 (mk-l29-u 9903 21 1 34.5 28.5 #:hp 1000.0 #:rad 1.5))
+    (define dep1 (mk-l29-u 9904 19 1 24.0 34.0 #:hp 400.0 #:rad 1.0))
+    (define scv1 (mk-l29-u 9905 45 1 63.0 29.0 #:hp 45.0 #:rad 0.375))
+    (define nat-mins (mk-l29-mins 9910))
+    (define g29-t
+      (sc2-game-info "L29TerranRax2Map" "" '() '(128 128) '(4 4 124 124)
+                     (list (sc2-point2d 100.0 100.0)) w3-full-grid #f w3-full-grid))
+    ;; Tick 1 (`4000`): complete `5x3` + `2.0t` `unq-3x3` miss -> streak >= 2
+    (translate-bot-actions->sc2-raw-commands
+     '((build barracks 32.0 30.0))
+     (make-test-obs 4000 450 50 (append (list cc-m rax1 scv1) nat-mins))
+     #:ws-conn ws #:game-info g29-t)
+    ;; Tick 2 (`4020`): Depot + Natural CC change `cur-struct-sig` -> wipes `SC2-TERRAN-5X3-MISS-CACHE`,
+    ;; yet `rax2-fast-3x3?` skips `319` and places `0.5t` pure `3x3` at `(68.5, 30.5)` in 1 step!
+    (set-box! saw-319? #f)
+    (set-box! rpc-cnt 0)
+    (set-box! allow-r2-321? #t)
+    (define r2-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build barracks 32.0 30.0))
+       (make-test-obs 4020 450 50 (append (list cc-m cc-n rax1 dep1 scv1) nat-mins))
+       #:ws-conn ws #:game-info g29-t))
+    (define r2-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) r2-cmds))
+    (define r2-pt (and r2-cmd (sc2-raw-unit-command-target-pos r2-cmd)))
+    (check-true "l29-p0-1a-barracks2-persists-fast-3x3-across-depot-completion-and-places-05t"
+                (and (not (unbox saw-319?))
+                     (= (unbox rpc-cnt) 2)
+                     (sc2-point2d? r2-pt)
+                     (<= (l29-dist (sc2-point2d-x r2-pt) (sc2-point2d-y r2-pt) 68.5 30.5) 0.1)))
+    (cleanup!))
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
+
+  ;; L29-P0-1b (`#52 who` DT): Cloaked Dark Templar attacking Natural mineral line `(64.5, 30.5)`.
+  ;; Even when Brain passes Main `(28.5, 28.5)` and DT stands near Natural Pylon `(66, 34)`,
+  ;; `emerg-cloak-cannon?` redirects to Natural mineral line and places `photon-cannon` (`887`) via
+  ;; `0.5t` tight spacing (`3.45` pad clearance) at `(68.0, 31.0)` in the SAME step!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999)
+  (let-values ([(ws rpc-cnt _saw319 cleanup!)
+                (l29-start-mock-ws
+                 (lambda (ab px py)
+                   (if (and (= ab 887) (<= (l29-dist px py 68.0 31.0) 0.1)) 1 2)))])
+    (define nx-m (mk-l29-u 9921 59 1 28.5 28.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define nx-n (mk-l29-u 9922 59 1 64.5 30.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define py-m (mk-l29-u 9923 60 1 30.0 34.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define py-n (mk-l29-u 9924 60 1 66.0 34.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define prb1 (mk-l29-u 9925 84 1 63.0 29.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define dt-n (mk-l29-u 9926 76 4 66.0 32.5 #:hp 40.0 #:shield 80.0 #:rad 0.375 #:cloak 1))
+    (define nat-mins (mk-l29-mins 9930))
+    (define g29-p
+      (sc2-game-info "L29ProtoCloakMap" "" '() '(128 128) '(4 4 124 124)
+                     (list (sc2-point2d 100.0 100.0)) w3-full-grid #f w3-full-grid))
+    (define obs-pc
+      (sc2-observation 4100 (sc2-player-common 1 400 100 60 36 10 26 0 0 0 0)
+                       (append (list nx-m nx-n py-m py-n prb1 dt-n) nat-mins)
+                       '()
+                       (list (sc2-power-source (sc2-point3d 30.0 34.0 8.0) 6.5 9923)
+                             (sc2-power-source (sc2-point3d 66.0 34.0 8.0) 6.5 9924))
+                       #f '() '() '() '() '() '()))
+    (define pc-cmds
+      (translate-bot-actions->sc2-raw-commands '((build photon-cannon 28.5 28.5))
+                                               obs-pc #:ws-conn ws #:game-info g29-p))
+    (define pc-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 887))) pc-cmds))
+    (define pc-pt (and pc-cmd (sc2-raw-unit-command-target-pos pc-cmd)))
+    (check-true "l29-p0-1b-cloak-photon-cannon-places-05t-at-dt-attacked-natural-mineral-line"
+                (and (= (unbox rpc-cnt) 2)
+                     (sc2-point2d? pc-pt)
+                     (<= (l29-dist (sc2-point2d-x pc-pt) (sc2-point2d-y pc-pt) 68.0 31.0) 0.1)
+                     (= (unbox SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP) -9999)))
+    (cleanup!))
+
+  ;; L29-P0-1c (`#54 who` Banshee vs Zerg): Cloaked Banshee attacking Natural Hatchery `(64.5, 30.5)`.
+  ;; `emerg-cloak-spore?` keeps Spore Crawler anchored AT the attacked Natural mineral line (never
+  ;; redirecting to unattacked Main!) and uses `0.5t` tight spacing (`dist = 2.1 < 2.5` from in-transit
+  ;; Drone build at `(68.0, 32.1)`) to place `spore-crawler` (`1167`) at `(68.0, 30.0)` in the SAME step!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (let-values ([(ws rpc-cnt _saw319 cleanup!)
+                (l29-start-mock-ws
+                 (lambda (ab px py)
+                   (if (and (= ab 1167) (<= (l29-dist px py 68.0 30.0) 0.1)) 1 2)))])
+    (define ht-m (mk-l29-u 9941 86 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define ht-n (mk-l29-u 9942 86 1 64.5 30.5 #:hp 1500.0 #:rad 2.75))
+    (define drn-busy
+      (mk-l29-u 9943 104 1 67.0 32.0 #:hp 40.0 #:rad 0.375
+                #:orders (list (sc2-unit-order 1166 (sc2-point3d 68.0 32.1 8.0) 0 0.0))))
+    (define drn1 (mk-l29-u 9944 104 1 63.0 29.0 #:hp 40.0 #:rad 0.375))
+    (define ban-n (mk-l29-u 9945 55 4 67.5 30.5 #:hp 140.0 #:rad 0.75 #:cloak 1 #:flying? #t))
+    (define nat-mins (mk-l29-mins 9950))
+    (define g29-z
+      (sc2-game-info "L29ZergCloakMap" "" '() '(128 128) '(4 4 124 124)
+                     (list (sc2-point2d 100.0 100.0)) w3-full-grid #f w3-full-grid))
+    (define sp-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build spore-crawler 28.5 28.5))
+       (make-test-obs 4200 300 50 (append (list ht-m ht-n drn-busy drn1 ban-n) nat-mins))
+       #:ws-conn ws #:game-info g29-z))
+    (define sp-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1167))) sp-cmds))
+    (define sp-pt (and sp-cmd (sc2-raw-unit-command-target-pos sp-cmd)))
+    (check-true "l29-p0-1c-cloak-spore-crawler-places-05t-at-banshee-attacked-natural-mineral-line"
+                (and (= (unbox rpc-cnt) 2)
+                     (sc2-point2d? sp-pt)
+                     (<= (l29-dist (sc2-point2d-x sp-pt) (sc2-point2d-y sp-pt) 68.0 30.0) 0.1)))
+    (cleanup!))
+
+  ;; L29-P0-1d (`#54 who` Banshee vs Terran): Cloaked Banshee attacking Natural CC `(64.5, 30.5)`.
+  ;; `emerg-cloak-turret?` redirects from Main `(28.5, 28.5)` to Natural mineral line and places
+  ;; `missile-turret` (`323`) via `0.5t` tight spacing (`3.45` pad clearance) at `(68.0, 30.0)` in 1 step!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (let-values ([(ws rpc-cnt _saw319 cleanup!)
+                (l29-start-mock-ws
+                 (lambda (ab px py)
+                   (if (and (= ab 323) (<= (l29-dist px py 68.0 30.0) 0.1)) 1 2)))])
+    (define cc-m (mk-l29-u 9961 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define cc-n (mk-l29-u 9962 18 1 64.5 30.5 #:hp 1500.0 #:rad 2.75))
+    (define scv1 (mk-l29-u 9963 45 1 63.0 29.0 #:hp 45.0 #:rad 0.375))
+    (define ban-n (mk-l29-u 9964 55 4 67.5 30.5 #:hp 140.0 #:rad 0.75 #:cloak 1 #:flying? #t))
+    (define nat-mins (mk-l29-mins 9970))
+    (define g29-mt
+      (sc2-game-info "L29TerranCloakMap" "" '() '(128 128) '(4 4 124 124)
+                     (list (sc2-point2d 100.0 100.0)) w3-full-grid #f w3-full-grid))
+    (define mt-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build missile-turret 28.5 28.5))
+       (make-test-obs 4300 300 50 (append (list cc-m cc-n scv1 ban-n) nat-mins))
+       #:ws-conn ws #:game-info g29-mt))
+    (define mt-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 323))) mt-cmds))
+    (define mt-pt (and mt-cmd (sc2-raw-unit-command-target-pos mt-cmd)))
+    (check-true "l29-p0-1d-cloak-missile-turret-places-05t-at-banshee-attacked-natural-mineral-line"
+                (and (= (unbox rpc-cnt) 2)
+                     (sc2-point2d? mt-pt)
+                     (<= (l29-dist (sc2-point2d-x mt-pt) (sc2-point2d-y mt-pt) 68.0 30.0) 0.1)))
+    (cleanup!)))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)
