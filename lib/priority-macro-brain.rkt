@@ -1950,11 +1950,17 @@
   (define sg-high-bank-inject? (eq? (hash-ref post-bo-goals 'high-bank-macro-inject? #f) #t))
   (define sg-macro-inject-structs (hash-ref post-bo-goals 'macro-inject-structures '()))
   (define sg-mirror-min-bases (hash-ref post-bo-goals 'mirror-recommended-min-bases 0))
-  (define enemy-heavy-cap-air-plan?
+  (define raw-enemy-heavy-cap-air-plan?
     (or (protoss-enemy-capital-air? enemy-u-counts)
         opp-cap-air-override?
+        (> (unit-count-equivalent enemy-u-counts 'tempest) 0)
+        (> (unit-count-equivalent enemy-u-counts 'carrier) 0)
+        (> (unit-count-equivalent enemy-u-counts 'battlecruiser) 0)
+        (> (unit-count-equivalent enemy-u-counts 'mothership) 0)
         (> (bldg-count-equivalent enemy-b-counts 'fusion-core) 0)
         (> (bldg-count-equivalent enemy-b-counts 'fleet-beacon) 0)))
+  (define enemy-heavy-cap-air-plan?
+    (enemy-cap-air-latch-update! race enemy-race frame raw-enemy-heavy-cap-air-plan?))
   (define (sg-unit-allowed? raw-sym [cur-cnt #f])
     (define nsym (normalize-brain-sym raw-sym))
     (define phoenix-vs-banshee-exempt?
@@ -4678,11 +4684,17 @@
       (and node
            (or supply-sym? (not supply-preempt-now?))
            (or supply-sym?
-               ;; W5-P0-2-belief: Never backoff-block a 1-base natural expansion when minerals >= 250
+               ;; W5-P0-2-belief + L19-P0-2: Never backoff-block a 1-base natural expansion when minerals >= 250
+               ;; OR peaceful 1-base when minerals >= 150!
                (and (eq? nsym race-expand-sym)
                     (= active-bases 1)
                     (<= total-townhalls-incl-pending 1)
-                    (>= minerals 250))
+                    (or (>= minerals 250)
+                        (and (>= minerals 150)
+                             (not under-attack?)
+                             (not under-early-rush-crisis?)
+                             (not early-ling-rush-defense-active?)
+                             (not early-proxy-marauder-rush-active?))))
                ;; W17-P0-2b (`#4 Z v monsterbot`): Never backoff-block mined-out 2-base 3rd Hatchery!
                (and zerg-late-low-min-high-gas-3rd-hatch-due? (eq? nsym 'hatchery))
                (not (macro-escrow-in-backoff? escrow-state-entry frame nsym)))
@@ -5397,7 +5409,8 @@
   (define enemy-armored-air-cnt
     (for/sum ([u (in-list '(void-ray voidray carrier tempest battlecruiser corruptor brood-lord mothership))])
       (unit-count-equivalent enemy-u-counts u)))
-  (define protoss-gateway-hard-cap (min 10 (+ (* 2 (max 1 active-bases)) 2)))
+  ;; L19-P0-2: Scale Protoss Gateway hard cap (5 -> 8 -> 11 -> 12) to close midgame Prod8 (-5 vs Pro) deficit!
+  (define protoss-gateway-hard-cap (min 12 (+ (* 3 (max 1 active-bases)) 2)))
   (define enemy-ground-combat-cnt
     (for/sum ([u (in-list '(zealot stalker adept immortal colossus archon high-templar dark-templar sentry
                             marine marauder siege-tank siege-tank-sieged hellion hellbat cyclone thor ghost
@@ -5407,12 +5420,12 @@
     (or enemy-cap-air?
         (and (>= enemy-air-combat-cnt 4)
              (>= (* 2 enemy-air-combat-cnt) enemy-ground-combat-cnt))))
-  ;; W16-P1-1a (`#5136362`, `#5136357`): Explicit heavy capital-air & Battlecruiser predicates
-  ;; (remembered via `enemy-cap-air?` / `opp-cap-air-override?` or scouted tech buildings even if BCs jump out of vision!)
+  ;; W16-P1-1a + L19-P0-2 (`#5136362`, `#5136357`, `#43 ZvP`): Latched heavy capital-air & Battlecruiser predicates
+  ;; so fog-of-war flicker NEVER drops `enemy-cap-air?` / `zerg-cap-air-spire-due?` mid-match!
   (define enemy-bc-present?
     (or (> (unit-count-equivalent enemy-u-counts 'battlecruiser) 0)
         (> (bldg-count-equivalent enemy-b-counts 'fusion-core) 0)))
-  (define enemy-heavy-cap-air?
+  (define raw-enemy-heavy-cap-air?
     (or enemy-cap-air?
         opp-cap-air-override?
         enemy-bc-present?
@@ -5420,6 +5433,8 @@
         (> (unit-count-equivalent enemy-u-counts 'tempest) 0)
         (> (unit-count-equivalent enemy-u-counts 'mothership) 0)
         (> (bldg-count-equivalent enemy-b-counts 'fleet-beacon) 0)))
+  (define enemy-heavy-cap-air?
+    (enemy-cap-air-latch-update! race enemy-race frame raw-enemy-heavy-cap-air?))
   ;; W16-P1-1b (`#16`, `#5134985`, `#5135912`, `#5136228`): Zerg anti-Siege-Tank counter comp (>= 3 observed Tanks)
   (define enemy-siege-tank-cnt
     (+ (unit-count-equivalent enemy-u-counts 'siege-tank)
@@ -5557,16 +5572,17 @@
          (not pvz-early-ling-zealot-pump?)
          (not pvz-first-zealot-wall-due?)
          (not (and (eq? enemy-race 'Zerg) (< frame 3600) (< army-supply 6)))))
-  ;; W16-P1-1a (`#5136357`): Build Spire IMMEDIATELY against Battlecruisers/Capital Air once HydraDen is started
-  ;; (or immediately vs Battlecruisers when >= 150M/150G) so Hydralisk@990 never starves Spire/Corruptor!
-  ;; Preserves W12 `z-28-hydraden-before-spire` (Tempest/Carrier at 120M/160G with 0 HydraDen).
+  ;; W16-P1-1a + L19-P0-2 (`#5136357`, `#43 ZvP` `Tempest:26`): Lock `spire@1660` once Capital Air is latched
+  ;; whenever HydraDen exists OR Spire is funded/nearly funded (`>=180M & >=180G`, or BC `>=150M/150G`),
+  ;; stopping `hydralisk-den` ping-pong while preserving W12 `z-28-hydraden-before-spire` (120M/160G)!
   (define zerg-cap-air-spire-due?
     (and (eq? race 'Zerg)
          has-lair-or-hive-ready?
-         (or enemy-cap-air? opp-cap-air-override? enemy-bc-present?)
+         (or enemy-cap-air? opp-cap-air-override? enemy-bc-present? enemy-heavy-cap-air?)
          (= (bldg-count-equivalent total-bldg-counts 'spire) 0)
          (= (bldg-count-equivalent total-bldg-counts 'greater-spire) 0)
          (or (> (bldg-count-equivalent total-bldg-counts 'hydralisk-den) 0)
+             (and (>= minerals 180) (>= gas 180))
              (and enemy-bc-present? (>= minerals 150) (>= gas 150)))))
   ;; W12-P0-4-belief (#28): Build HydraliskDen IMMEDIATELY on Lair finish vs Air threats before Spire!
   (define zerg-air-hydraden-before-spire?
@@ -5883,17 +5899,31 @@
              (>= workers 26))
          (let* ([cur-gw (bldg-count-equivalent total-bldg-counts 'gateway)]
                 [open-gw open-gw-slots-live]
+                ;; L19-P0-2: Scale midgame Protoss Gateways 4 (2b/24w) -> 6 (2b/36w or 5:00) -> 8 (3b/48w or 6:30)!
                 [tgt-gw (min protoss-gateway-hard-cap
                              (cond
-                               [(or (>= active-bases 3) (>= frame 8960)) 6]
-                               [(or (>= workers 40) (>= frame 6720)) 5]
-                               [(or (>= workers 24) (>= frame 4480)) 4]
+                               [(or (and (>= active-bases 3) (or (>= workers 48) (>= frame 8736)))
+                                    (>= frame 8736)
+                                    (>= workers 52))
+                                8]
+                               [(or (>= active-bases 3) (>= workers 36) (>= frame 6720))
+                                6]
+                               [(or (>= workers 24) (>= frame 4480))
+                                4]
                                [else 3]))])
            (and (< cur-gw tgt-gw)
+                ;; Preserve W6-P0-2: on 2-base before 5:00 with 5 Gateways already & 0 Forge (unlocked),
+                ;; drop Forge #1 before Gateway #6 (Gateway #6 fires immediately after or at >=5:00 / 3b!).
+                (not (and (>= cur-gw 5)
+                          (< active-bases 3)
+                          (< frame 6720)
+                          (= (bldg-count-equivalent total-bldg-counts 'forge) 0)
+                          (not protoss-forge-gated-off?)))
                 (or (<= open-gw 0)
                     (and (< cur-gw 4) (>= minerals 150))
-                    (and (>= active-bases 3) (< cur-gw 6) (>= minerals 175))
-                    (>= minerals (if (< cur-gw 4) 200 250)))))))
+                    (and (<= open-gw 1) (< cur-gw 6) (>= minerals 175))
+                    (and (<= open-gw 1) (>= active-bases 3) (< cur-gw 8) (>= minerals 200))
+                    (>= minerals (if (< cur-gw 6) 200 250)))))))
   ;; W12-P0-2-belief: Restore Protoss 3rd Nexus by <= 5:30 (3rd_sec 624s -> <= 330s)!
   (define protoss-3rd-nexus-pro-due?
     (and (eq? race 'Protoss)
@@ -6063,15 +6093,19 @@
          (not terran-early-rush-hold?)
          (>= workers 20)
          (let* ([cur-rax (bldg-count-equivalent total-bldg-counts 'barracks)]
+                ;; L19-P0-2: Scale midgame Terran Barracks proportionally (3 -> 5 on 2b -> 6-7 on 3b) to close Prod8 (-3 vs Pro)!
                 [tgt-rax (cond
-                           [(or (>= active-bases 3) (>= frame 10752) (>= workers 44)) 5]
-                           [(or (>= frame 8736) (>= workers 36)) 4]
+                           [(and (>= active-bases 3) (or (>= workers 52) (>= frame 10080))) 7]
+                           [(or (and (>= active-bases 3) (>= workers 44)) (>= frame 8736)) 6]
+                           [(or (>= frame 7392) (>= workers 36)) 5]
                            [(or (>= frame 5800) (>= workers 28)) 3]
                            [else 2])])
            (and (< cur-rax tgt-rax)
                 (or (<= terran-midgame-rax-open-slots 0)
                     ;; W16-P0-2 (`#11`): Match L7843/L8773 `>= 100M` escrow window for Rax #2/#3 so Rax #3 saves instead of stalling on 2 Rax!
                     (and (< cur-rax 3) (>= minerals 100))
+                    (and (<= terran-midgame-rax-open-slots 1) (< cur-rax 5) (>= minerals 175))
+                    (and (<= terran-midgame-rax-open-slots 1) (>= active-bases 3) (< cur-rax 7) (>= minerals 200))
                     (>= minerals 250))))))
   (define terran-3rd-cc-due?
     (and (eq? race 'Terran)
@@ -6809,12 +6843,14 @@
           (not (facility-addon-slot-occupied? id ready-bldg-counts total-bldg-counts #:min-ready-floor 0))))
     (define redundant-scaling-fac-idle?
       (and (hash? open-facility-slots)
-           (< minerals 300)
+           (< minerals 250)
            (or (and (eq? id 'barracks)
-                    (>= (bldg-count-equivalent total-bldg-counts 'barracks) (if (>= active-bases 2) 4 2))
+                    (>= (bldg-count-equivalent total-bldg-counts 'barracks)
+                        (cond [(>= active-bases 3) 7] [(>= active-bases 2) 5] [else 2]))
                     (>= (hash-ref open-facility-slots 'barracks 0) 2))
                (and (eq? id 'gateway)
-                    (>= (bldg-count-equivalent total-bldg-counts 'gateway) (if (>= active-bases 2) 5 2))
+                    (>= (bldg-count-equivalent total-bldg-counts 'gateway)
+                        (cond [(>= active-bases 3) 8] [(>= active-bases 2) 6] [else 2]))
                     (>= (+ (hash-ref open-facility-slots 'gateway 0)
                            (hash-ref open-facility-slots 'warp-gate 0))
                         2)))))
@@ -7575,11 +7611,17 @@
            (and (protoss-4th-nexus-due? race active-bases workers army-supply minerals enemy-cap-air?
                                         #:has-tech? has-protoss-mid-tech?)
                 light-expand-threat-ok?))
-         ;; W5-P0-2-belief: Never backoff-demote a 1-base natural expansion to u=20.0 when minerals >= 250
+         ;; W5-P0-2-belief + L19-P0-2: Never backoff-demote a 1-base natural expansion to u=20.0
+         ;; when minerals >= 250 OR peaceful 1-base when minerals >= 150!
          (define exp-in-backoff?
            (and (not (and (= active-bases 1)
                           (<= total-townhalls-incl-pending 1)
-                          (>= minerals 250)))
+                          (or (>= minerals 250)
+                              (and (>= minerals 150)
+                                   (not under-attack?)
+                                   (not under-early-rush-crisis?)
+                                   (not early-ling-rush-defense-active?)
+                                   (not early-proxy-marauder-rush-active?)))))
                 (macro-escrow-in-backoff? escrow-state-entry frame sym)))
          (define exp-affordable-now?
            (and (>= minerals (priority-candidate-min-cost c))
@@ -8195,15 +8237,24 @@
                          (let ([cur-gw (bldg-count-equivalent total-bldg-counts 'gateway)]
                                [open-gw (+ (hash-ref open-facility-slots 'gateway 0)
                                            (hash-ref open-facility-slots 'warp-gate 0))])
-                           (and (< minerals (if (and (>= active-bases 2) (< cur-gw 4)) 150 275))
+                           (and (< minerals
+                                   (cond
+                                     [(and (>= active-bases 2) (< cur-gw 4)) 150]
+                                     [(and (>= active-bases 2) (< cur-gw (if (>= active-bases 3) 8 6))) 175]
+                                     [else 275]))
                                 (>= cur-gw 1)
                                 (or (>= cur-gw 2)
                                     (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0))
                                 (>= open-gw 1))))
                     (and (eq? sym 'barracks)
-                         (< minerals (if (< (bldg-count-equivalent total-bldg-counts 'barracks) 3) 150 225))
-                         (>= (bldg-count-equivalent total-bldg-counts 'barracks) 1)
-                         (>= (hash-ref open-facility-slots 'barracks 0) 1)))))
+                         (let ([cur-rax (bldg-count-equivalent total-bldg-counts 'barracks)])
+                           (and (< minerals
+                                   (cond
+                                     [(< cur-rax 3) 150]
+                                     [(and (>= active-bases 2) (< cur-rax (if (>= active-bases 3) 7 5))) 175]
+                                     [else 225]))
+                                (>= cur-rax 1)
+                                (>= (hash-ref open-facility-slots 'barracks 0) 1)))))))
          (define worker-recovery-target
            (cond
              [(eq? cat 'tech-upgrade) (min 22 (* 11 active-bases))]
@@ -8384,9 +8435,13 @@
                     (and protoss-aa-stargate-boost? (not protoss-stargate-nonblocking-now?))
                     (and protoss-aa-air-unit-boost? (not protoss-aa-heavy-escrow-unblocked?))
                     (and protoss-midgame-gw-boost?
-                         (or (and (< (bldg-count-equivalent total-bldg-counts 'gateway) 4) (>= minerals 100))
-                             (<= open-gw-slots-live 0)
-                             (>= minerals 150)))
+                         (let ([cur-gw (bldg-count-equivalent total-bldg-counts 'gateway)])
+                           (or (and (< cur-gw 4) (>= minerals 100))
+                               (<= open-gw-slots-live 0)
+                               (and (<= open-gw-slots-live 1)
+                                    (or (and (< cur-gw 6) (>= minerals 175))
+                                        (and (>= active-bases 3) (< cur-gw 8) (>= minerals 200))))
+                               (>= minerals 250))))
                     (and protoss-3rd-nexus-pro-due? (eq? nsym 'nexus)
                          (not protoss-midgame-colossus-due?)
                          (not protoss-robo-immortal-due?)
@@ -8413,9 +8468,13 @@
                     terran-first-factory-boost?
                     (and terran-first-starport-boost? terran-starport-escrow-ok?)
                     (and terran-midgame-rax-boost?
-                         (or (and (< (bldg-count-equivalent total-bldg-counts 'barracks) 3) (>= minerals 100))
-                             (<= terran-midgame-rax-open-slots 0)
-                             (>= minerals 150)))
+                         (let ([cur-rax (bldg-count-equivalent total-bldg-counts 'barracks)])
+                           (or (and (< cur-rax 3) (>= minerals 100))
+                               (<= terran-midgame-rax-open-slots 0)
+                               (and (<= terran-midgame-rax-open-slots 1)
+                                    (or (and (< cur-rax 5) (>= minerals 175))
+                                        (and (>= active-bases 3) (< cur-rax 7) (>= minerals 200))))
+                               (>= minerals 250))))
                     terran-rush-marine-boost?
                     (and w18-ling-boost (cdr w18-ling-boost))
                     (and w17-marauder-boost (cdr w17-marauder-boost))
@@ -8538,6 +8597,8 @@
                    (< (bldg-count-equivalent total-bldg-counts early-rush-def-bldg-sym) 1)
                    (or (>= army-supply 2) (>= minerals 150)))
               (max 680.0 plan-weight u0)]
+             [(and zerg-cap-air-spire-due? (eq? nsym 'hydralisk-den))
+              (min 450.0 u-after-gas-lock)]
              [zerg-cap-air-spire-boost? (max 1660.0 plan-weight u0)]
              [zerg-cloak-air-hydraden-boost? (max 1020.0 plan-weight u0)]
              [zerg-cloak-air-aa-unit-boost?
@@ -8597,19 +8658,33 @@
              [terran-siege-tank-boost?
               (max (if (< (unit-count-equivalent unit-counts 'siege-tank) 6) 544.0 488.0) plan-weight u0)]
              [protoss-midgame-gw-boost?
-              (cond
-                [(< (bldg-count-equivalent total-bldg-counts 'gateway) 4)
-                 (max 542.0 plan-weight u0)]
-                [(and (>= active-bases 3) (< (bldg-count-equivalent total-bldg-counts 'gateway) 6))
-                 (max 538.0 plan-weight u0)]
-                [(> open-gw-slots-live 0) (max 455.0 u0)]
-                [else (max (if (or (>= workers 44) (>= minerals 250)) 492.0 485.0) plan-weight u0)])]
+              (let ([cur-gw (bldg-count-equivalent total-bldg-counts 'gateway)])
+                (cond
+                  [(< cur-gw 4) (max 542.0 plan-weight u0)]
+                  [(and (<= open-gw-slots-live 1)
+                        (>= active-bases 2) (< cur-gw 6)
+                        (or (>= workers 36) (>= frame 6720) (>= active-bases 3)))
+                   (max 538.0 plan-weight u0)]
+                  [(and (<= open-gw-slots-live 1)
+                        (or (>= active-bases 3) (>= workers 52) (>= frame 8736))
+                        (< cur-gw 8))
+                   (max 536.0 plan-weight u0)]
+                  [(> open-gw-slots-live 0) (max 455.0 u0)]
+                  [else (max (if (or (>= workers 44) (>= minerals 250)) 492.0 485.0) plan-weight u0)]))]
              [terran-midgame-rax-boost?
-              (cond
-                [(< (bldg-count-equivalent total-bldg-counts 'barracks) 3)
-                 (max 540.0 plan-weight u0)]
-                [(> terran-midgame-rax-open-slots 0) (max 455.0 u0)]
-                [else (max (if (or (>= workers 44) (>= minerals 250)) 492.0 485.0) plan-weight u0)])]
+              (let ([cur-rax (bldg-count-equivalent total-bldg-counts 'barracks)])
+                (cond
+                  [(< cur-rax 3) (max 540.0 plan-weight u0)]
+                  [(and (<= terran-midgame-rax-open-slots 1)
+                        (>= active-bases 2) (< cur-rax 5)
+                        (or (>= workers 36) (>= frame 7392) (>= active-bases 3)))
+                   (max 536.0 plan-weight u0)]
+                  [(and (<= terran-midgame-rax-open-slots 1)
+                        (>= active-bases 3) (< cur-rax 7)
+                        (or (>= workers 44) (>= frame 8736)))
+                   (max 532.0 plan-weight u0)]
+                  [(> terran-midgame-rax-open-slots 0) (max 455.0 u0)]
+                  [else (max (if (or (>= workers 44) (>= minerals 250)) 492.0 485.0) plan-weight u0)]))]
              [protoss-aa-stargate-boost? (max 535.0 plan-weight u0)]
              [protoss-aa-stalker-boost? (max 530.0 plan-weight u0)]
              [(and (eq? race 'Protoss)
@@ -8757,13 +8832,19 @@
     (define act (priority-candidate-action c))
     (define u (priority-candidate-utility-score c))
     (define blk? (priority-candidate-blocking-allowed? c))
-    ;; W5-P0-2-belief: Never backoff-demote 1-base natural expansion to u=20.0 when minerals >= 250
+    ;; W5-P0-2-belief + L19-P0-2: Never backoff-demote 1-base natural expansion to u=20.0
+    ;; when minerals >= 250 OR peaceful 1-base when minerals >= 150!
     ;; W17-P0-2b: Never backoff-demote mined-out 2-base Zerg 3rd Hatchery rescue!
     (define in-backoff?
       (and (not (and (eq? cat 'expansion)
                      (= active-bases 1)
                      (<= total-townhalls-incl-pending 1)
-                     (>= minerals 250)))
+                     (or (>= minerals 250)
+                         (and (>= minerals 150)
+                              (not under-attack?)
+                              (not under-early-rush-crisis?)
+                              (not early-ling-rush-defense-active?)
+                              (not early-proxy-marauder-rush-active?)))))
            (not (and zerg-late-low-min-high-gas-3rd-hatch-due?
                      (eq? nsym 'hatchery)))
            (macro-escrow-in-backoff? escrow-state-entry frame nsym)))
@@ -9231,6 +9312,7 @@
                      [static-det-repeat-nonblocking-post? 520.0]
                      [enemy-cloaked-threat-active? 1040.0]
                      [else 940.0]))]
+           [(and zerg-cap-air-spire-due? (eq? nsym 'hydralisk-den)) (min u 450.0)]
            [zerg-cap-air-spire-post? (max u 1660.0)]
            [zerg-cloak-air-hydraden-post? (max u 1020.0)]
            [zerg-cloak-air-aa-unit-post?
@@ -9306,19 +9388,33 @@
            [terran-siege-tank-post?
             (max u (if (< (unit-count-equivalent unit-counts 'siege-tank) 6) 544.0 488.0))]
            [protoss-midgame-gw-post?
-            (cond
-              [(< (bldg-count-equivalent total-bldg-counts 'gateway) 4)
-               (max u 542.0)]
-              [(and (>= active-bases 3) (< (bldg-count-equivalent total-bldg-counts 'gateway) 6))
-               (max u 538.0)]
-              [(> open-gw-slots-live 0) (max u 455.0)]
-              [else (max u (if (or (>= workers 44) (>= minerals 250)) 492.0 485.0))])]
+            (let ([cur-gw (bldg-count-equivalent total-bldg-counts 'gateway)])
+              (cond
+                [(< cur-gw 4) (max u 542.0)]
+                [(and (<= open-gw-slots-live 1)
+                      (>= active-bases 2) (< cur-gw 6)
+                      (or (>= workers 36) (>= frame 6720) (>= active-bases 3)))
+                 (max u 538.0)]
+                [(and (<= open-gw-slots-live 1)
+                      (or (>= active-bases 3) (>= workers 52) (>= frame 8736))
+                      (< cur-gw 8))
+                 (max u 536.0)]
+                [(> open-gw-slots-live 0) (max u 455.0)]
+                [else (max u (if (or (>= workers 44) (>= minerals 250)) 492.0 485.0))]))]
            [terran-midgame-rax-post?
-            (cond
-              [(< (bldg-count-equivalent total-bldg-counts 'barracks) 3)
-               (max u 540.0)]
-              [(> terran-midgame-rax-open-slots 0) (max u 455.0)]
-              [else (max u (if (or (>= workers 44) (>= minerals 250)) 492.0 485.0))])]
+            (let ([cur-rax (bldg-count-equivalent total-bldg-counts 'barracks)])
+              (cond
+                [(< cur-rax 3) (max u 540.0)]
+                [(and (<= terran-midgame-rax-open-slots 1)
+                      (>= active-bases 2) (< cur-rax 5)
+                      (or (>= workers 36) (>= frame 7392) (>= active-bases 3)))
+                 (max u 536.0)]
+                [(and (<= terran-midgame-rax-open-slots 1)
+                      (>= active-bases 3) (< cur-rax 7)
+                      (or (>= workers 44) (>= frame 8736)))
+                 (max u 532.0)]
+                [(> terran-midgame-rax-open-slots 0) (max u 455.0)]
+                [else (max u (if (or (>= workers 44) (>= minerals 250)) 492.0 485.0))]))]
            [protoss-aa-stargate-post? (max u 535.0)]
            [protoss-aa-stalker-post? (max u 530.0)]
            [(and (eq? race 'Protoss)
@@ -9439,6 +9535,7 @@
                          (and (eq? nsym 'hellion)
                               (< (unit-count-equivalent enemy-u-counts 'zergling) 16))))
                 (and zerg-air-hydraden-before-spire? (eq? nsym 'spire))
+                (and zerg-cap-air-spire-due? (eq? nsym 'hydralisk-den))
                 (and early-rush-override-active?
                      (or (and (<= total-townhalls-incl-pending 1) (eq? nsym race-expand-sym))
                          (and (< army-supply (max 8 (+ enemy-threat-supply 2)))
@@ -9514,13 +9611,21 @@
                      zerg-midgame-ext-post? terran-factory-gas-ready-post?
                      terran-first-factory-post?
                      (and protoss-midgame-gw-post?
-                          (or (and (< (bldg-count-equivalent total-bldg-counts 'gateway) 4) (>= minerals 100))
-                              (<= open-gw-slots-live 0)
-                              (>= minerals 150)))
+                          (let ([cur-gw (bldg-count-equivalent total-bldg-counts 'gateway)])
+                            (or (and (< cur-gw 4) (>= minerals 100))
+                                (<= open-gw-slots-live 0)
+                                (and (<= open-gw-slots-live 1)
+                                     (or (and (< cur-gw 6) (>= minerals 175))
+                                         (and (>= active-bases 3) (< cur-gw 8) (>= minerals 200))))
+                                (>= minerals 250))))
                      (and terran-midgame-rax-post?
-                          (or (and (< (bldg-count-equivalent total-bldg-counts 'barracks) 3) (>= minerals 100))
-                              (<= terran-midgame-rax-open-slots 0)
-                              (>= minerals 150)))
+                          (let ([cur-rax (bldg-count-equivalent total-bldg-counts 'barracks)])
+                            (or (and (< cur-rax 3) (>= minerals 100))
+                                (<= terran-midgame-rax-open-slots 0)
+                                (and (<= terran-midgame-rax-open-slots 1)
+                                     (or (and (< cur-rax 5) (>= minerals 175))
+                                         (and (>= active-bases 3) (< cur-rax 7) (>= minerals 200))))
+                                (>= minerals 250))))
                      (and zerg-rebuild-t15-tech-due? (eq? nsym 'roach-warren)
                           (or (>= minerals 100) (not under-attack?)))
                      (and early-rush-override-active?
@@ -10572,7 +10677,12 @@
          (or (and (eq? final-bo-goal-norm race-expand-sym)
                   (= active-bases 1)
                   (<= total-townhalls-incl-pending 1)
-                  (>= minerals 250))
+                  (or (>= minerals 250)
+                      (and (>= minerals 150)
+                           (not under-attack?)
+                           (not under-early-rush-crisis?)
+                           (not early-ling-rush-defense-active?)
+                           (not early-proxy-marauder-rush-active?))))
              (not (macro-escrow-in-backoff? escrow-state-entry frame final-bo-goal-sym)))
          (step-prereqs-ready? final-bo-goal-sym)
          ;; W4-P0-1c: Never fallback-escrow Immortal without >=16 workers & ready Robo, nor a unit/tech whose facility slot is busy
@@ -10729,9 +10839,30 @@
 ;; Per-game escrow age & 112-frame re-escrow backoff tracker for Bug 3 Rule 2.
 ;; Keys: (list race enemy-race) -> (hash 'last-frame f 'active-id sym 'start-frame f 'peak-min m 'backoff-ht (hash sym -> until-frame))
 (define *macro-escrow-state-ht* (make-hash))
+;; L19-P0-2 (`#43 ZvP`, `Tempest:26`): Per-game latch for observed Capital Air
+;; (`Tempest`/`Carrier`/`Battlecruiser`/`Mothership` or `Fleet Beacon`/`Fusion Core`) so fog-of-war
+;; flicker NEVER bounces Zerg `spire@1660 <-> 510` or lets `hydralisk@1020` drain gas before Spire starts!
+(define *enemy-cap-air-latch-ht* (make-hash))
+
+(define (enemy-cap-air-latch-update! race enemy-race frame raw-cap-air?)
+  (define key (list race enemy-race))
+  (define prev (hash-ref *enemy-cap-air-latch-ht* key #f))
+  (define last-f (if prev (car prev) -9999))
+  (define new-game?
+    (or (not prev)
+        (< frame last-f)
+        (> (- frame last-f) 450)
+        (and (<= frame 16) (> last-f 32))))
+  (define latched?
+    (if new-game?
+        (not (not raw-cap-air?))
+        (or (cdr prev) (not (not raw-cap-air?)))))
+  (hash-set! *enemy-cap-air-latch-ht* key (cons frame latched?))
+  latched?)
 
 (define (reset-macro-escrow-tracker!)
-  (hash-clear! *macro-escrow-state-ht*))
+  (hash-clear! *macro-escrow-state-ht*)
+  (hash-clear! *enemy-cap-air-latch-ht*))
 
 (define (macro-escrow-sync-entry! race enemy-race frame minerals total-th
                                  #:workers [workers #f] #:gas [gas 0])
@@ -10750,7 +10881,9 @@
               'start-min minerals
               'peak-min minerals
               'last-min minerals
+              'last-gas gas
               'last-gain-frame -9999
+              'last-gas-gain-frame -9999
               'th-count total-th
               'backoff-ht (hash))
         (let* ([aid (hash-ref prev 'active-id #f)]
@@ -10758,11 +10891,19 @@
                [sm (hash-ref prev 'start-min minerals)]
                [pm (hash-ref prev 'peak-min minerals)]
                [last-min (hash-ref prev 'last-min sm)]
+               [last-gas (hash-ref prev 'last-gas gas)]
                [prev-gain-f (hash-ref prev 'last-gain-frame -9999)]
                [cur-gain-f (if (> minerals last-min) frame prev-gain-f)]
+               [prev-gas-gain-f (hash-ref prev 'last-gas-gain-frame -9999)]
+               [cur-gas-gain-f (if (> gas last-gas) frame prev-gas-gain-f)]
                [has-mining-gain? (and (exact-integer? cur-gain-f)
                                       (>= cur-gain-f sf)
                                       (<= (- frame cur-gain-f) 160))]
+               [has-gas-gain? (and (exact-integer? cur-gas-gain-f)
+                                   (>= cur-gas-gain-f sf)
+                                   (<= (- frame cur-gas-gain-f) 160))]
+               [has-tech-gain? (or has-mining-gain?
+                                   (and aid (> (sc2-gas-cost aid 0) 0) has-gas-gain?))]
                [prev-th (hash-ref prev 'th-count total-th)]
                [bht0 (hash-ref prev 'backoff-ht (hash))]
                [bht (for/hash ([(k until) (in-hash bht0)]
@@ -10773,13 +10914,24 @@
                      (memq aid '(hatchery nexus command-center
                                  spawning-pool barracks gateway cybernetics-core
                                  roach-warren baneling-nest lair hive orbital-command
-                                 factory starport robotics-facility stargate))
+                                 factory starport robotics-facility stargate
+                                 spire hydralisk-den twilight-council))
                      (if (exact-integer? workers) (> workers 0) #t)
                      (or (< minerals (sc2-min-cost aid 0))
                          (< gas (sc2-gas-cost aid 0)))
+                     has-tech-gain?)]
+               [nat-1base-saving?
+                (and aid
+                     (memq aid '(hatchery nexus command-center))
+                     (< total-th 2)
+                     (= total-th prev-th)
+                     (if (exact-integer? workers) (> workers 0) #t)
+                     (< minerals (sc2-min-cost aid 0))
                      has-mining-gain?)]
                [nat-age
                 (cond
+                  ;; L19-P0-2: Extend peaceful 1-base natural escrow timeout to 960f while mining is active!
+                  [nat-1base-saving? (max MAX-ESCROW-AGE-FRAMES 960)]
                   [core-or-exp-saving? (max MAX-ESCROW-AGE-FRAMES 672)]
                   [(and aid
                         (memq aid '(hatchery nexus command-center))
@@ -10796,7 +10948,9 @@
                     'start-min minerals
                     'peak-min minerals
                     'last-min minerals
+                    'last-gas gas
                     'last-gain-frame -9999
+                    'last-gas-gain-frame -9999
                     'th-count total-th
                     'backoff-ht (hash-set bht aid (+ frame ESCROW-EXPIRATION-BACKOFF-FRAMES)))
               (hash 'last-frame frame
@@ -10805,7 +10959,9 @@
                     'start-min sm
                     'peak-min (max pm minerals)
                     'last-min minerals
+                    'last-gas gas
                     'last-gain-frame cur-gain-f
+                    'last-gas-gain-frame cur-gas-gain-f
                     'th-count total-th
                     'backoff-ht bht)))))
   (hash-set! *macro-escrow-state-ht* key cur)
@@ -10852,9 +11008,13 @@
                      'start-min next-sm
                      'peak-min next-pm
                      'last-min minerals
+                     'last-gas (hash-ref cur 'last-gas 0)
                      'last-gain-frame (if (and next-aid (eq? next-aid prev-aid))
                                           (hash-ref cur 'last-gain-frame -9999)
                                           -9999)
+                     'last-gas-gain-frame (if (and next-aid (eq? next-aid prev-aid))
+                                              (hash-ref cur 'last-gas-gain-frame -9999)
+                                              -9999)
                      'th-count total-th
                      'backoff-ht bht))))
 

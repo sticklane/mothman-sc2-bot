@@ -303,6 +303,8 @@
 (define RX-PRIO-FULL   #px"f=([0-9]+).*?bank=([0-9]+)M/([0-9]+)G sup=([0-9]+)/([0-9]+).*?saving_for=([a-z0-9-]+)\\(floor=([0-9]+)M/([0-9]+)G\\)")
 (define RX-SAVING-FALL #px"saving_for=([a-z0-9-]+)")
 (define RX-SCHED-PROD  #px"sched=\\([^)]*\\b(barracks|gateway|factory|starport)@")
+(define RX-SCHED-EXP   #px"sched=\\([^)]*\\b(nexus|command-center|hatchery)@")
+(define RX-SCHED-SPIRE #px"sched=\\([^)]*\\bspire@")
 (define RX-BLOCKED     #px"([a-z0-9-]+)\\(blocked-by-escrow")
 (define RX-HEXP        #px"hexp=([0-9]+\\.[0-9]+)")
 (define RX-RUSH        #px"rush=([0-9]+\\.[0-9]+)")
@@ -353,6 +355,9 @@
           'prod-stall-max-streak 0
           'prod-stall-max-bldg ""
           'prod-stall-counts (make-hash)
+          ;; L19-LOOP-2: Expansion scheduled & Spire scheduled counters (for 1BaseLock & SpireDrop forensics)
+          'exp-sched-ticks 0
+          'spire-sched-ticks 0
           'step-ms '()
           'tr-ms '()
           'action-err-total 0
@@ -420,6 +425,8 @@
   (define pstall-max-streak (hash-ref m 'prod-stall-max-streak 0))
   (define pstall-max-bldg (hash-ref m 'prod-stall-max-bldg ""))
   (define pstall-ht (hash-ref m 'prod-stall-counts))
+  (define exp-sched-ticks (hash-ref m 'exp-sched-ticks 0))
+  (define spire-sched-ticks (hash-ref m 'spire-sched-ticks 0))
   (define crashes (hash-ref m 'crashes))
   (define last-prio-f 0)
 
@@ -527,6 +534,12 @@
          [else
           (set! pstall-cur-bldg "")
           (set! pstall-cur-streak 0)])
+       ;; L19-LOOP-2: Track Brain-scheduled expansion ticks (>=300M) & Spire ticks (>=200M/200G)
+       (when (and mp (< su 194) (string-contains? ln "sched=("))
+         (when (and (>= bmin 300) (regexp-match? RX-SCHED-EXP ln))
+           (set! exp-sched-ticks (add1 exp-sched-ticks)))
+         (when (and (>= bmin 200) (>= bgas 200) (regexp-match? RX-SCHED-SPIRE ln))
+           (set! spire-sched-ticks (add1 spire-sched-ticks))))
        ;; Blocked-by-escrow counts
        (when (string-contains? ln "blocked-by-escrow")
          (for ([bm (in-list (regexp-match* RX-BLOCKED ln #:match-select cadr))])
@@ -614,6 +627,8 @@
              'prod-stall-cur-bldg pstall-cur-bldg
              'prod-stall-max-streak pstall-max-streak
              'prod-stall-max-bldg pstall-max-bldg
+             'exp-sched-ticks exp-sched-ticks
+             'spire-sched-ticks spire-sched-ticks
              'crashes crashes))
 
 (define (scan-log-zip! acc zpath)
@@ -2017,6 +2032,36 @@
                          'end_sec gas-zero-freeze-end
                          'ready_gas gas-zero-freeze-ready-gas
                          'gas_mined gas-zero-freeze-mined)))
+          ;; L19-LOOP-2: 1-Base Lockout (our_bases <= 1 && dur >= 400s) & Spire Scheduled Drop
+          (define exp-saving-key
+            (cond [(string=? our-race "Protoss") "nexus"]
+                  [(string=? our-race "Terran") "command-center"]
+                  [else "hatchery"]))
+          (define exp-saving-ticks
+            (hash-ref (hash-ref log-acc 'saving-counts (make-hash)) exp-saving-key 0))
+          (define exp-sched-ticks (hash-ref log-acc 'exp-sched-ticks 0))
+          (define one-base-lockout?
+            (and (<= our-bases 1)
+                 (>= dur 400.0)))
+          (define one-base-lockout-anomaly
+            (and one-base-lockout?
+                 (hasheq 'our_bases our-bases
+                         'opp_bases opp-bases
+                         'duration_sec (round1 dur)
+                         'exp_saving_ticks exp-saving-ticks
+                         'exp_sched_ticks exp-sched-ticks)))
+          (define spire-sched-ticks (hash-ref log-acc 'spire-sched-ticks 0))
+          (define spire-built-cnt
+            (+ (hash-ref our-bldgs-ht "Spire" 0)
+               (hash-ref our-bldgs-ht "GreaterSpire" 0)))
+          (define spire-sched-drop?
+            (and (string=? our-race "Zerg")
+                 (or (and (>= spire-sched-ticks 2) (= spire-built-cnt 0))
+                     (>= spire-sched-ticks 5))))
+          (define spire-sched-drop-anomaly
+            (and spire-sched-drop?
+                 (hasheq 'spire_sched_ticks spire-sched-ticks
+                         'spire_built_cnt spire-built-cnt)))
 
           (define anomalies
             (hasheq 'zero_fire_retreat zero-fire-retreat-anomaly
@@ -2035,6 +2080,8 @@
                     'prod_placement_stall prod-placement-stall-anomaly
                     'prod_idle_bank_freeze prod-idle-bank-freeze-anomaly
                     'pvp_nat_delay pvp-nat-delay-anomaly
+                    'one_base_lockout one-base-lockout-anomaly
+                    'spire_sched_drop spire-sched-drop-anomaly
                     'air_aa_starvation air-aa-starvation))
 
           ;; Classify 0-combat opponent disconnects (e.g., mid-early client drop) separately from real combat wins
@@ -2182,6 +2229,12 @@
           (when pvp-nat-delay-anomaly
             (add-sig! (format "PVP_NAT_DELAY(~as)"
                               (if (real? our-nat-sec-val) (r0 our-nat-sec-val) "NONE"))))
+          (when one-base-lockout-anomaly
+            (add-sig! (format "ONE_BASE_LOCKOUT(B=~a/~a,sav=~at,sch=~at)"
+                              our-bases opp-bases exp-saving-ticks exp-sched-ticks)))
+          (when spire-sched-drop-anomaly
+            (add-sig! (format "SPIRE_SCHED_DROP(sch=~at,built=~a)"
+                              spire-sched-ticks spire-built-cnt)))
           (when (and (not (eq? res 'win)) (< trade-ratio 0.50) (>= lost-val 1500))
             (add-sig! "SEVERE_BAD_TRADES(<0.5x)"))
           (when (and (not (eq? res 'win)) (<= dur 330.0)) (add-sig! "EARLY_RUSH_LOSS"))
@@ -2299,6 +2352,12 @@
                   'gas_zero_harvest_freeze_sec (round1 gas-zero-freeze-max-sec)
                   'gas_zero_harvest_freeze_ready_gas gas-zero-freeze-ready-gas
                   'pvp_nat_delay_flag pvp-nat-delay-flag?
+                  'one_base_lockout one-base-lockout?
+                  'one_base_lockout_exp_saving_ticks exp-saving-ticks
+                  'one_base_lockout_exp_sched_ticks exp-sched-ticks
+                  'spire_sched_drop spire-sched-drop?
+                  'spire_sched_ticks spire-sched-ticks
+                  'spire_built_cnt spire-built-cnt
                   'map_symmetry_kind map-symmetry-kind
                   't3_first_sec t3-first-sec
                   't3_first_bldg t3-first-bldg
@@ -2488,6 +2547,8 @@
                 'prod_idle_bank_freeze_matches (count (lambda (r) (eq? (hash-ref r 'prod_idle_bank_freeze #f) #t)) rows)
                 'gas_zero_harvest_freeze_matches (count (lambda (r) (eq? (hash-ref r 'gas_zero_harvest_freeze #f) #t)) rows)
                 'pvp_nat_delay_matches (count (lambda (r) (eq? (hash-ref r 'pvp_nat_delay_flag #f) #t)) rows)
+                'one_base_lockout_matches (count (lambda (r) (eq? (hash-ref r 'one_base_lockout #f) #t)) rows)
+                'spire_sched_drop_matches (count (lambda (r) (eq? (hash-ref r 'spire_sched_drop #f) #t)) rows)
                 't3_started_matches (count (lambda (r) (real? (hash-ref r 't3_first_sec #f))) rows)
                 't3_early_2base_matches (count (lambda (r) (let ([b (hash-ref r 't3_bases_at_start #f)]) (and (exact-integer? b) (<= b 2)))) rows)
                 't3_premature_starve_matches (count (lambda (r) (eq? (hash-ref r 't3_premature_starve #f) #t)) rows)
@@ -2610,6 +2671,8 @@
                         'prod_placement_stall (anom-cnt (lambda (a) (and (hash? (hash-ref a 'prod_placement_stall #f)) #t)))
                         'prod_idle_bank_freeze (anom-cnt (lambda (a) (and (hash? (hash-ref a 'prod_idle_bank_freeze #f)) #t)))
                         'pvp_nat_delay (anom-cnt (lambda (a) (and (hash? (hash-ref a 'pvp_nat_delay #f)) #t)))
+                        'one_base_lockout (anom-cnt (lambda (a) (and (hash? (hash-ref a 'one_base_lockout #f)) #t)))
+                        'spire_sched_drop (anom-cnt (lambda (a) (and (hash? (hash-ref a 'spire_sched_drop #f)) #t)))
                         'air_aa_starvation (anom-cnt (lambda (a) (and (hash? (hash-ref a 'air_aa_starvation #f)) #t)))
                         'wall_timeout_tie wall-timeout-ties
                         'wall_timeout_winning_tie wall-timeout-winning-ties
@@ -2656,13 +2719,15 @@
                   (hash-ref agg 'wall_timeout_winning_ties 0)
                   (hash-ref agg 'step_spike_500ms_count 0))
           ""))
-    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a~a\n"
+    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a | 1BaseLock=~a | SpireDrop=~a~a\n"
             (hash-ref ac 'suicide_kite_retreat 0)
             (hash-ref ac 'zero_fire_retreat 0)
             (hash-ref ac 'escrow_lockout 0)
             (hash-ref ac 'self_cancel_loop 0)
             (hash-ref ac 'endgame_stall 0)
             (hash-ref ac 'air_aa_starvation 0)
+            (hash-ref ac 'one_base_lockout 0)
+            (hash-ref ac 'spire_sched_drop 0)
             lat-str)))
 
 ;; -----------------------------------------------------------------------------
@@ -2910,7 +2975,31 @@
                      (or (hash-ref gz 'start_sec #f) "?")
                      (or (hash-ref gz 'end_sec #f) "?")
                      (hash-ref gz 'ready_gas 0)
-                     (r1 (hash-ref gz 'gas_mined 0.0))))))
+                     (r1 (hash-ref gz 'gas_mined 0.0)))))
+
+  (section "12. 1-Base Lockouts (our_bases<=1 & dur>=400s)"
+           (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'one_base_lockout #f))) rows)
+           (lambda (r)
+             (define ob (hash-ref (hash-ref r 'anomalies) 'one_base_lockout))
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | Bases=~a/~a | expSav=~at | expSched=~at\n"
+                     (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
+                     (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
+                     (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
+                     (hash-ref ob 'our_bases 1)
+                     (hash-ref ob 'opp_bases 0)
+                     (hash-ref ob 'exp_saving_ticks 0)
+                     (hash-ref ob 'exp_sched_ticks 0))))
+
+  (section "13. Spire Scheduled Drops (Zerg sched=(spire@) >=200M/200G w/ 0 built or >=5 retries)"
+           (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'spire_sched_drop #f))) rows)
+           (lambda (r)
+             (define sd (hash-ref (hash-ref r 'anomalies) 'spire_sched_drop))
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | spireSched=~at | spireBuilt=~a\n"
+                     (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
+                     (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
+                     (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
+                     (hash-ref sd 'spire_sched_ticks 0)
+                     (hash-ref sd 'spire_built_cnt 0)))))
 
 ;; -----------------------------------------------------------------------------
 ;; Main CLI Driver

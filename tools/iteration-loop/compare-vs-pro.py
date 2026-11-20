@@ -201,6 +201,8 @@ def normalize_match(m):
         "tr_p95_ms": safe_num(m.get("tr_p95_ms")),
         "wall_timeout_tie": bool(m.get("wall_timeout_tie") or (m.get("anomalies") or {}).get("wall_timeout_tie")),
         "wall_timeout_winning_tie": bool(m.get("wall_timeout_winning_tie") or (m.get("anomalies") or {}).get("wall_timeout_winning_tie")),
+        "one_base_lockout": bool(m.get("one_base_lockout") or (m.get("anomalies") or {}).get("one_base_lockout")),
+        "spire_sched_drop": bool(m.get("spire_sched_drop") or (m.get("anomalies") or {}).get("spire_sched_drop")),
         "action_rejects": int(m.get("action_rejects") or 0),
         "crashes": m.get("crashes") or [],
         "signatures": m.get("signatures") or [],
@@ -383,6 +385,8 @@ def summarize_slice(rows):
         "tr_p95_worst_ms": round(max(tr_p95_vals), 1) if tr_p95_vals else None,
         "wall_timeout_ties": sum(1 for r in rows if r.get("wall_timeout_tie")),
         "wall_timeout_winning_ties": sum(1 for r in rows if r.get("wall_timeout_winning_tie")),
+        "one_base_lockout_matches": sum(1 for r in rows if r.get("one_base_lockout")),
+        "spire_sched_drop_matches": sum(1 for r in rows if r.get("spire_sched_drop")),
         "action_rejects": sum(r["action_rejects"] for r in rows),
         "crashes": sum(len(r["crashes"]) for r in rows),
         "anomalies": dict(anom_counts),
@@ -792,6 +796,11 @@ def main():
                 extra_w8 += (
                     f" | `WallTies` = **{cur_all.get('wall_timeout_ties', 0)}** "
                     f"(Win=`{cur_all.get('wall_timeout_winning_ties', 0)}`)"
+                )
+            if cur_all.get("one_base_lockout_matches", 0) > 0 or cur_all.get("spire_sched_drop_matches", 0) > 0 or cur_all.get("tr_p95_worst_ms") is not None:
+                extra_w8 += (
+                    f" | `1BaseLock` = **{cur_all.get('one_base_lockout_matches', 0)}**"
+                    f" | `SpireDrop` = **{cur_all.get('spire_sched_drop_matches', 0)}**"
                 )
         print(
             f"\n### Stall, Retreat & Waste Watch (`W7/W8-LOOP-2`): "

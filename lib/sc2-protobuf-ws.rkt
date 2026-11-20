@@ -8746,9 +8746,13 @@
 
   (define commanded-this-frame (mutable-seteqv))
   (define cmds '())
-  (define (issue-gather! w target-tag #:macro-econ? [macro-econ? #f] #:allow-carrying-mineral? [allow-carrying-mineral? #f])
+  (define (issue-gather! w target-tag
+                         #:macro-econ? [macro-econ? #f]
+                         #:allow-carrying-mineral? [allow-carrying-mineral? #f]
+                         #:allow-carrying-gas? [allow-carrying-gas? #f])
     (when (or (not (worker-carrying-cargo? w))
-              (and allow-carrying-mineral? (not (worker-carrying-gas? w))))
+              (and allow-carrying-mineral? (not (worker-carrying-gas? w)))
+              allow-carrying-gas?)
       (set-add! commanded-this-frame (sc2-unit-tag w))
       (define raw-c (sc2-raw-unit-command 3666 #f target-tag (list (sc2-unit-tag w)) #f))
       (set! cmds
@@ -9009,20 +9013,20 @@
 
   (define self-is-zerg?
     (ormap (lambda (u) (memv (sc2-unit-unit-type u) '(86 100 101 104 88))) self-units))
-  ;; W18-P0-2-wire: Hysteresis latch for dynamic gas pulling & unstarvable P1 re-saturation:
-  ;;   Pull ON:  (>= 300G & < 160M & < 66w) OR (>= 350G & < 250M) OR (> 600G & < 450M)
-  ;;   Pull OFF: (< 180G) OR (>= 220M & <= 600G) OR (>= 66w & <= 600G)
-  ;;   Gentle 1-worker pull: (>= 200G & < 100M & < 54w) trims gas down to 1 harvester (never 0!)
-  ;;   so `GasRichMinStarve` clears fast while `GasZeroFreeze` can never latch below 350G!
+  ;; L19-P0-1: Dynamic Gas-to-Mineral Rebalance across ALL worker counts (no 54w/66w cutoff!):
+  ;;   Pull ON:  (>= 200G & < 120M) OR (>= 350G & < 250M) OR (> 600G & < 450M)
+  ;;   Pull OFF: (>= 450M) OR (<= 600G & (< 140G OR >= 280M))
+  ;;   Floor:    keep >= 1 gas harvester below 350G (not worker-rush) so `GasZeroFreeze = 0`
+  ;;             holds strictly with P1 resaturation, while >= 350G pulls all the way to 0!
   (cond
-    [(or (and (>= cur-gas 300) (< cur-min 160) (< (length workers) 66))
+    [(or (and (>= cur-gas 200) (< cur-min 120))
          (and (>= cur-gas SC2-GAS-FLOAT-REBALANCE-THRESH) (< cur-min 250))
          (and (> cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD) (< cur-min 450)))
      (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #t)]
-    [(and (<= cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD)
-          (or (< cur-gas 180)
-              (>= cur-min 220)
-              (>= (length workers) 66)))
+    [(or (>= cur-min 450)
+         (and (<= cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD)
+              (or (< cur-gas 140)
+                  (>= cur-min 280))))
      (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)])
   ;; Zerg Post-Ling-Speed Mineral Surge: below 28 Drones on 2+ bases (< 3:45), once >= 108G is banked
   ;; while minerals < 250M, keep 1 Drone on gas and pull 2 back to minerals; auto-resaturate to 3/3
@@ -9037,24 +9041,22 @@
   (define gas-over-banked?
     (or worker-rush-evacuate-gas?
         (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)))
-  (define gas-mild-mineral-starve?
-    (and (>= cur-gas 200)
-         (< cur-min 100)
-         (< (length workers) 54)))
   (define gas-resaturate-blocked?
     (or (and gas-over-banked?
              (or worker-rush-evacuate-gas?
                  (>= cur-gas 350)
                  (>= eff-active-gas-workers 1)))
-        (and gas-mild-mineral-starve? (>= eff-active-gas-workers 1))
         (and zerg-post-speed-surge-active? (>= eff-active-gas-workers 1))))
+  ;; L19-P0-1: Protect mineral saturation on 1-2 bases using `eff-active-gas-workers`
+  ;; (counting workers currently inside refineries!): 2nd geyser (slots 3..5) requires >= 18
+  ;; mineral workers when < 300M, and 3rd+ geyser (slots 6+) requires >= 28 when < 400M.
   (define min-mineral-workers-for-next-gas
     (cond
-      [(= active-gas-worker-count 0) 6]
-      [(= active-gas-worker-count 1) 8]
-      [(= active-gas-worker-count 2) 10]
-      [(< active-gas-worker-count 6) (if (>= cur-min 300) 10 14)]
-      [else                          (if (>= cur-min 400) 14 22)]))
+      [(= eff-active-gas-workers 0) 6]
+      [(= eff-active-gas-workers 1) 8]
+      [(= eff-active-gas-workers 2) 10]
+      [(< eff-active-gas-workers 6) (if (>= cur-min 300) 10 18)]
+      [else                         (if (>= cur-min 400) 14 28)]))
   (when (and (not (null? under-gas))
              (or (null? owned-base-minerals)
                  (>= (- (length workers) active-gas-worker-count)
@@ -9210,36 +9212,61 @@
         (hash-set! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL (sc2-unit-tag chosen-w) (+ cur-loop 48))
         (issue-gather! chosen-w bmtag))))
 
-  ;; 4. Pull 1 gas worker back to owned minerals when floating gas while mineral-starved
-  ;;    (keeping 1 worker on gas below 350G so gas never zeroes out, or down to 1 gas Drone during
+  ;; 4. Pull up to 2 gas workers/step back to owned minerals when floating gas while mineral-starved
+  ;;    (keeping >= 1 worker on gas below 350G so gas never zeroes out, or down to 1 gas Drone during
   ;;    Zerg post-Ling-Speed mineral surge < 28 Drones); automatically re-saturates at P1 in Step 2!
-  (define should-pull-one-gas-worker?
-    (or (and gas-over-banked?
-             (or worker-rush-evacuate-gas?
-                 (>= cur-gas 350)
-                 (> eff-active-gas-workers 1)))
-        (and gas-mild-mineral-starve? (> eff-active-gas-workers 1))
-        (and zerg-post-speed-surge-active? (> active-gas-worker-count 1))))
-  (when (and should-pull-one-gas-worker? (not (null? owned-base-minerals)) (not (null? ready-gas-bldgs)))
+  ;;    L19-P0-1: Pull non-carrying gas workers first; when severely mineral-starved (`>= 250G & < 100M`),
+  ;;    also allow pulling carrying gas workers (`buff 273/274/275`) so exiting refinery workers rebalance
+  ;;    immediately instead of vanishing back inside gas!
+  (define gas-pull-target-floor
+    (cond
+      [(or worker-rush-evacuate-gas? (and gas-over-banked? (>= cur-gas 350))) 0]
+      [(or gas-over-banked? zerg-post-speed-surge-active?) 1]
+      [else eff-active-gas-workers]))
+  (define max-gas-pulls-this-step
+    (if (or gas-over-banked? zerg-post-speed-surge-active?)
+        (min 2 (max 0 (- eff-active-gas-workers gas-pull-target-floor)))
+        0))
+  (when (and (> max-gas-pulls-this-step 0)
+             (not (null? owned-base-minerals))
+             (not (null? ready-gas-bldgs)))
     (define cand-mins
       (if (not (null? under-townhalls))
           (minerals-near-townhall (first under-townhalls))
           owned-base-minerals))
-    (define gas-worker
-      (for/first ([w (in-list workers)]
-                  #:when (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
-                              (not (worker-carrying-cargo? w))
-                              (not (worker-returning-cargo? w))
-                              (ormap (lambda (o)
-                                       (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
-                                     (sc2-unit-orders w))))
-        w))
-    (when (and gas-worker (not (null? cand-mins)))
-      (define best-min (pick-best-slot-patch gas-worker cand-mins))
-      (define bmtag (sc2-unit-tag best-min))
-      (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
-      (hash-set! SC2-WORKER-PATCH-ASSIGNMENT (sc2-unit-tag gas-worker) bmtag)
-      (issue-gather! gas-worker bmtag #:macro-econ? #t)))
+    (when (not (null? cand-mins))
+      (define (targeting-gas-bldg? w)
+        (ormap (lambda (o)
+                 (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
+               (sc2-unit-orders w)))
+      (define allow-carrying-gas-pull?
+        (and (>= cur-gas 250) (< cur-min 100)))
+      (define non-carrying-gas-workers
+        (filter (lambda (w)
+                  (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
+                       (not (worker-carrying-cargo? w))
+                       (not (worker-returning-cargo? w))
+                       (targeting-gas-bldg? w)))
+                workers))
+      (define carrying-gas-workers
+        (if allow-carrying-gas-pull?
+            (filter (lambda (w)
+                      (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
+                           (or (worker-carrying-gas? w)
+                               (and (or (worker-carrying-cargo? w) (worker-returning-cargo? w))
+                                    (targeting-gas-bldg? w)))))
+                    workers)
+            '()))
+      (define pull-candidates
+        (append non-carrying-gas-workers carrying-gas-workers))
+      (for ([gw (in-list (take pull-candidates (min max-gas-pulls-this-step (length pull-candidates))))])
+        (define best-min (pick-best-slot-patch gw cand-mins))
+        (define bmtag (sc2-unit-tag best-min))
+        (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
+        (hash-set! SC2-WORKER-PATCH-ASSIGNMENT (sc2-unit-tag gw) bmtag)
+        (issue-gather! gw bmtag
+                       #:macro-econ? #t
+                       #:allow-carrying-gas? allow-carrying-gas-pull?))))
 
   ;; 5. Idle MULE Re-Tasking: re-task idle MULEs (268) ONLY onto live mineral patches within 12 tiles
   ;;    of a completed grounded friendly TownHall and within 14 tiles of the MULE (never cross-map!).

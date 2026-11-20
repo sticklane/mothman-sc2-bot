@@ -1077,8 +1077,8 @@
                           (and (sc2-raw-unit-command? c)
                                (= (sc2-raw-unit-command-target-unit-tag c) 2)))
                         hyst-deadband-cmds)))
-(define hyst-resat-cmds (saturate-workers-and-gas-commands (make-hysteresis-gas-obs 6032 180 175)))
-(check-true "gas-auto-resaturates-when-vespene-drops-below-200G"
+(define hyst-resat-cmds (saturate-workers-and-gas-commands (make-hysteresis-gas-obs 6032 180 135)))
+(check-true "gas-auto-resaturates-when-vespene-drops-below-140G"
             (ormap (lambda (c)
                      (and (sc2-raw-unit-command? c)
                           (= (sc2-raw-unit-command-target-unit-tag c) 2)))
@@ -4310,19 +4310,19 @@
                             (= (sc2-raw-unit-command-target-unit-tag c) 9803)
                             (memv 9860 (sc2-raw-unit-command-unit-tags c))))
                      high-pull-1))
-  ;; Latch set from 380G/110M: recovering minerals to 225M (at 240G) clears latch & resaturates!
-  (define latch-clear-min (saturate-workers-and-gas-commands (mk-gas-state-obs 7612 225 240 1)))
-  (check-true "w18-p0-2c-hysteresis-latch-clears-at-225m-and-resaturates-at-p1"
+  ;; Latch set from 380G/110M: recovering minerals to 285M (at 240G) clears latch & resaturates!
+  (define latch-clear-min (saturate-workers-and-gas-commands (mk-gas-state-obs 7612 285 240 1)))
+  (check-true "w18-p0-2c-hysteresis-latch-clears-at-285m-and-resaturates-at-p1"
               (and (not (unbox SC2-GAS-PULL-HYSTERESIS-LATCH))
                    (ormap (lambda (c)
                             (and (sc2-raw-unit-command? c)
                                  (= (sc2-raw-unit-command-target-unit-tag c) 9802)
                                  (macro-econ-cmd? c)))
                           latch-clear-min)))
-  ;; Re-latch at 320G/110M, then drop gas to 170G (at 120M) -> clears latch & resaturates!
+  ;; Re-latch at 320G/110M, then drop gas to 135G (at 120M) -> clears latch & resaturates!
   (void (saturate-workers-and-gas-commands (mk-gas-state-obs 7616 110 320 2)))
-  (define latch-clear-gas (saturate-workers-and-gas-commands (mk-gas-state-obs 7620 120 170 1)))
-  (check-true "w18-p0-2c-hysteresis-latch-clears-at-170g-and-resaturates-at-p1"
+  (define latch-clear-gas (saturate-workers-and-gas-commands (mk-gas-state-obs 7620 120 135 1)))
+  (check-true "w18-p0-2c-hysteresis-latch-clears-at-135g-and-resaturates-at-p1"
               (and (not (unbox SC2-GAS-PULL-HYSTERESIS-LATCH))
                    (ormap (lambda (c)
                             (and (sc2-raw-unit-command? c)
@@ -4407,6 +4407,193 @@
                 (and (sc2-point2d? rax-pt)
                      (> (w18-dist (sc2-point2d-x rax-pt) (sc2-point2d-y rax-pt) 38.0 30.0) 5.5)))
     (cleanup!)))
+
+(printf "[Loop 19] Testing L19-P0-1 dynamic gas-to-mineral rebalance (18/28 floors, all-worker-count hysteresis, 2/step + carrying pull, GasZeroFreeze=0)...\n")
+(let ()
+  (define (mk-l19-u tag utype alliance x y
+                    #:hp [hp 100.0] #:rad [rad 1.0] #:orders [ords '()] #:buffs [buffs '()]
+                    #:assigned [asgn 0] #:ideal [idl 0] #:mins [mins 0] #:vesp [vesp 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 0 #f #f #f
+              hp hp 0.0 0.0 0.0 0.0 mins vesp #f #f #f #t #f
+              ords 0 buffs asgn idl 0.0 0 0 0 0 '() 0 0))
+
+  (define th-1 (mk-l19-u 9601 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75 #:assigned 16 #:ideal 16))
+  (define th-2 (mk-l19-u 9602 18 1 60.5 28.5 #:hp 1500.0 #:rad 2.75 #:assigned 16 #:ideal 16))
+  (define min-1 (mk-l19-u 9603 341 3 22.0 28.5 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define min-2 (mk-l19-u 9604 341 3 67.0 28.5 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define (mk-min-scvs start-tag n base-x min-tag)
+    (for/list ([i (in-range n)])
+      (mk-l19-u (+ start-tag i) 45 1
+                (+ base-x (* 0.25 (modulo i 8)))
+                (+ 27.0 (* 0.35 (quotient i 8)))
+                #:hp 45.0 #:rad 0.375
+                #:orders (list (sc2-unit-order 295 #f min-tag 0.0)))))
+
+  ;; L19-P0-1a: 2nd geyser (slots 3..5) requires >= 18 mineral workers when < 300M (even with 1 worker inside 1st Refinery!),
+  ;;            and immediately allows filling at 18 mineral workers OR >= 300M!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (define ref-1-full (mk-l19-u 9611 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 3 #:ideal 3 #:vesp 1800))
+  (define ref-2-empty (mk-l19-u 9612 20 1 32.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 1800))
+  ;; 2 visible gas workers + 1 inside Refinery 9611 (`assigned = 3` -> `eff-active-gas-workers = 3`)!
+  (define gas-vis-2
+    (list (mk-l19-u 9621 45 1 25.2 24.2 #:hp 45.0 #:rad 0.375 #:orders (list (sc2-unit-order 295 #f 9611 0.0)))
+          (mk-l19-u 9622 45 1 25.6 24.4 #:hp 45.0 #:rad 0.375 #:orders (list (sc2-unit-order 295 #f 9611 0.0)))))
+  (define cmds-2nd-16min
+    (saturate-workers-and-gas-commands
+     (sc2-observation 4000 (sc2-player-common 1 180 60 50 30 19 19 0 0 0 0)
+                      (append (list th-1 min-1 ref-1-full ref-2-empty) gas-vis-2 (mk-min-scvs 9630 16 23.0 9603))
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l19-p0-1a-2nd-geyser-blocked-at-16-mineral-workers-below-300m"
+              (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 9612)))
+                          cmds-2nd-16min)))
+  (define cmds-2nd-18min
+    (saturate-workers-and-gas-commands
+     (sc2-observation 4004 (sc2-player-common 1 180 60 50 32 21 21 0 0 0 0)
+                      (append (list th-1 th-2 min-1 min-2 ref-1-full ref-2-empty) gas-vis-2
+                              (mk-min-scvs 9630 14 23.0 9603) (mk-min-scvs 9650 4 64.0 9604))
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l19-p0-1a-2nd-geyser-fills-at-18-mineral-workers"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                      (= (sc2-raw-unit-command-target-unit-tag c) 9612)
+                                      (macro-econ-cmd? c)))
+                     cmds-2nd-18min))
+  (define cmds-2nd-16min-320m
+    (saturate-workers-and-gas-commands
+     (sc2-observation 4008 (sc2-player-common 1 320 60 50 30 19 19 0 0 0 0)
+                      (append (list th-1 min-1 ref-1-full ref-2-empty) gas-vis-2 (mk-min-scvs 9630 16 23.0 9603))
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l19-p0-1a-2nd-geyser-fills-at-16-min-workers-when-320m-banked"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 9612)))
+                     cmds-2nd-16min-320m))
+
+  ;; L19-P0-1b: 3rd+ geyser (slots 6+) requires >= 28 mineral workers when < 400M!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (define ref-2-full (mk-l19-u 9612 20 1 32.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 3 #:ideal 3 #:vesp 1800))
+  (define ref-3-empty (mk-l19-u 9613 20 1 57.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 1800))
+  (define gas-vis-6
+    (append (for/list ([i (in-range 3)])
+              (mk-l19-u (+ 9621 i) 45 1 (+ 25.0 (* 0.3 i)) 24.2 #:hp 45.0 #:rad 0.375
+                        #:orders (list (sc2-unit-order 295 #f 9611 0.0))))
+            (for/list ([i (in-range 3)])
+              (mk-l19-u (+ 9624 i) 45 1 (+ 32.0 (* 0.3 i)) 24.2 #:hp 45.0 #:rad 0.375
+                        #:orders (list (sc2-unit-order 295 #f 9612 0.0))))))
+  (define cmds-3rd-24min
+    (saturate-workers-and-gas-commands
+     (sc2-observation 6000 (sc2-player-common 1 200 80 80 50 30 30 0 0 0 0)
+                      (append (list th-1 th-2 min-1 min-2 ref-1-full ref-2-full ref-3-empty)
+                              gas-vis-6 (mk-min-scvs 9630 12 23.0 9603) (mk-min-scvs 9650 12 64.0 9604))
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l19-p0-1b-3rd-geyser-blocked-at-24-mineral-workers-below-400m"
+              (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 9613)))
+                          cmds-3rd-24min)))
+  (define cmds-3rd-28min
+    (saturate-workers-and-gas-commands
+     (sc2-observation 6004 (sc2-player-common 1 200 80 80 54 34 34 0 0 0 0)
+                      (append (list th-1 th-2 min-1 min-2 ref-1-full ref-2-full ref-3-empty)
+                              gas-vis-6 (mk-min-scvs 9630 14 23.0 9603) (mk-min-scvs 9650 14 64.0 9604))
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l19-p0-1b-3rd-geyser-fills-at-28-mineral-workers"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 9613)))
+                     cmds-3rd-28min))
+
+  ;; L19-P0-1c: No 54w/66w worker-count cutoff! At 70 workers (64 min + 6 gas) & 210G/100M ->
+  ;;            latches ON and pulls 2 gas workers back to minerals at P1!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (define cmds-70w-pull
+    (saturate-workers-and-gas-commands
+     (sc2-observation 9000 (sc2-player-common 1 100 210 150 120 70 70 0 0 0 0)
+                      (append (list th-1 th-2 min-1 min-2 ref-1-full ref-2-full)
+                              gas-vis-6 (mk-min-scvs 9630 32 23.0 9603) (mk-min-scvs 9700 32 64.0 9604))
+                      '() '() #f '() '() '() '() '() '())))
+  (define pulled-70w
+    (filter (lambda (c) (and (sc2-raw-unit-command? c)
+                             (memv (sc2-raw-unit-command-target-unit-tag c) '(9603 9604))
+                             (macro-econ-cmd? c)
+                             (ormap (lambda (t) (and (>= t 9621) (<= t 9626)))
+                                    (sc2-raw-unit-command-unit-tags c))))
+            cmds-70w-pull))
+  (check-true "l19-p0-1c-70-workers-210g-100m-latches-and-pulls-2-gas-workers-per-step"
+              (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
+                   (= (length pulled-70w) 2)))
+
+  ;; L19-P0-1d: Pulls up to 2/step including carrying gas (`buff 273`, order `296 -> CC`) at `>= 250G & < 100M`
+  ;;            (non-carrying first!), keeps `>= 1` gas worker below `350G`, and skips carrying at `>= 100M`!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (define gw-clean (mk-l19-u 9751 45 1 25.2 24.2 #:hp 45.0 #:rad 0.375
+                             #:orders (list (sc2-unit-order 295 #f 9611 0.0))))
+  (define gw-carry-1 (mk-l19-u 9752 45 1 26.0 25.5 #:hp 45.0 #:rad 0.375 #:buffs '(273)
+                               #:orders (list (sc2-unit-order 296 #f 9601 0.0))))
+  (define gw-carry-2 (mk-l19-u 9753 45 1 26.5 26.0 #:hp 45.0 #:rad 0.375 #:buffs '(273)
+                               #:orders (list (sc2-unit-order 296 #f 9601 0.0))))
+  (define cmds-260g-60m
+    (saturate-workers-and-gas-commands
+     (sc2-observation 9100 (sc2-player-common 1 60 260 80 40 19 19 0 0 0 0)
+                      (append (list th-1 min-1 ref-1-full gw-clean gw-carry-1 gw-carry-2)
+                              (mk-min-scvs 9630 16 23.0 9603))
+                      '() '() #f '() '() '() '() '() '())))
+  (define pulled-tags-60m
+    (apply append (map sc2-raw-unit-command-unit-tags
+                       (filter (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (= (sc2-raw-unit-command-target-unit-tag c) 9603)
+                                                (macro-econ-cmd? c)))
+                               cmds-260g-60m))))
+  (check-true "l19-p0-1d-260g-60m-pulls-2-clean-plus-carrying-leaving-1-gas-worker"
+              (and (= (length pulled-tags-60m) 2)
+                   (memv 9751 pulled-tags-60m)
+                   (memv 9752 pulled-tags-60m)
+                   (not (memv 9753 pulled-tags-60m))))
+  ;; With only 1 gas worker left at 260G/60M (< 350G), MUST pull 0 (`GasZeroFreeze = 0`)!
+  (define ref-1-one (mk-l19-u 9611 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 1 #:ideal 3 #:vesp 1800))
+  (define cmds-260g-60m-floor1
+    (saturate-workers-and-gas-commands
+     (sc2-observation 9104 (sc2-player-common 1 60 260 80 40 17 17 0 0 0 0)
+                      (append (list th-1 min-1 ref-1-one gw-carry-2) (mk-min-scvs 9630 16 23.0 9603))
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l19-p0-1d-260g-60m-keeps-last-1-gas-worker"
+              (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (memv 9753 (sc2-raw-unit-command-unit-tags c))))
+                          cmds-260g-60m-floor1)))
+  ;; At 260G/110M (min >= 100), pulls ONLY the 1 non-carrying worker 9751 (does not pull carrying gas)!
+  (define cmds-260g-110m
+    (saturate-workers-and-gas-commands
+     (sc2-observation 9108 (sc2-player-common 1 110 260 80 40 19 19 0 0 0 0)
+                      (append (list th-1 min-1 ref-1-full gw-clean gw-carry-1 gw-carry-2)
+                              (mk-min-scvs 9630 16 23.0 9603))
+                      '() '() #f '() '() '() '() '() '())))
+  (define pulled-tags-110m
+    (apply append (map sc2-raw-unit-command-unit-tags
+                       (filter (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (= (sc2-raw-unit-command-target-unit-tag c) 9603)))
+                               cmds-260g-110m))))
+  (check-true "l19-p0-1d-260g-110m-pulls-only-non-carrying-worker"
+              (equal? pulled-tags-110m '(9751)))
+
+  ;; L19-P0-1e: Deadband holds at 170G/240M, releases at < 140G or >= 280M, and 0-gas resaturates even while latched < 350G!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #t)
+  (define cmds-deadband
+    (saturate-workers-and-gas-commands
+     (sc2-observation 9200 (sc2-player-common 1 240 170 80 40 17 17 0 0 0 0)
+                      (append (list th-1 min-1 ref-1-one gw-clean) (mk-min-scvs 9630 16 23.0 9603))
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l19-p0-1e-deadband-holds-at-170g-240m"
+              (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (= (sc2-raw-unit-command-target-unit-tag c) 9611)))
+                               cmds-deadband))))
+  ;; Even while latched ON at 210G/110M, 0 active gas workers (< 350G) MUST immediately assign 1 worker at P1!
+  (define ref-1-zero (mk-l19-u 9611 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 1800))
+  (define cmds-latched-0gas
+    (saturate-workers-and-gas-commands
+     (sc2-observation 9204 (sc2-player-common 1 110 210 80 40 16 16 0 0 0 0)
+                      (append (list th-1 min-1 ref-1-zero) (mk-min-scvs 9630 16 23.0 9603))
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l19-p0-1e-latched-below-350g-still-resaturates-from-0-gas-workers-at-p1"
+              (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-target-unit-tag c) 9611)
+                                           (macro-econ-cmd? c)))
+                          cmds-latched-0gas))))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"

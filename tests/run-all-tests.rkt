@@ -13191,7 +13191,113 @@
                      (or (memq 'lurker z-siege-ids)
                          (memq 'brood-lord z-siege-ids)
                          (memq 'viper z-siege-ids)))
-                "Late-game 72-Drone Zerg vs Bunkers/Tanks must suppress 25th+ Zergling and schedule Lurker/BroodLord/Viper (#5131434)"))
+                "Late-game 72-Drone Zerg vs Bunkers/Tanks must suppress 25th+ Zergling and schedule Lurker/BroodLord/Viper (#5131434)")
+
+  ;; 51.7 Loop 19 Macro Engine Uncorking (L19-P0-2: 1-Base Escrow Unstick + Prod8 Scaling + Latched Zerg Capital-Air Spire)
+  ;; (a) 1-Base peaceful natural backoff bypass at 165M (>=150M) + 960f active-mining escrow timeout
+  (reset-macro-escrow-tracker!)
+  (macro-escrow-sync-entry! 'Protoss 'Terran 2000 120 1 #:workers 19)
+  (macro-escrow-record-decision! 'Protoss 'Terran 2000 120 1 'nexus '())
+  (define l19-nat-active-700
+    (macro-escrow-sync-entry! 'Protoss 'Terran 2700 320 1 #:workers 19))
+  (assert-true! (not (macro-escrow-in-backoff? l19-nat-active-700 2700 'nexus))
+                "L19-P0-2: Active-mining 1-base natural Nexus escrow must stay alive past 700f (960f timeout)")
+  (reset-macro-escrow-tracker!)
+  (macro-escrow-sync-entry! 'Protoss 'Terran 3000 165 1 #:workers 19)
+  (macro-escrow-record-decision! 'Protoss 'Terran 3000 165 1 'nexus '())
+  (void (macro-escrow-sync-entry! 'Protoss 'Terran 3900 165 1 #:workers 19))
+  (define l19-p-1base-165m
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 3950
+      #:minerals 165 #:gas 60 #:supply-used 24 #:supply-cap 39 #:workers 20 #:active-bases 1
+      #:mineral-harvesters 17 #:gas-harvesters 3
+      #:army-supply 4 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:unit-counts (hasheq 'probe 20 'stalker 2)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 1))))
+  (assert-true! (eq? (macro-brain-decision-saving-for l19-p-1base-165m) 'nexus)
+                "L19-P0-2: Peaceful 1-base Protoss @ 165M must bypass natural backoff and save for Nexus")
+
+  ;; (b) Midgame Prod8 scaling: Protoss 2b/36w -> 6 Gates, 3b/48w -> 8 Gates; Terran 2b/38w -> 5 Rax, 3b/52w -> 7 Rax
+  (reset-macro-escrow-tracker!)
+  (define l19-p-6gate
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 7000
+      #:minerals 220 #:gas 120 #:supply-used 66 #:supply-cap 94 #:workers 38 #:active-bases 2
+      #:mineral-harvesters 30 #:gas-harvesters 8
+      #:army-supply 28 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 10 'gateway 4 'cybernetics-core 1 'robotics-facility 1 'assimilator 4)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 10 'gateway 4 'cybernetics-core 1 'robotics-facility 1 'assimilator 4)
+      #:unit-counts (hasheq 'probe 38 'stalker 10 'immortal 2)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 0 'robotics-facility 0))))
+  (assert-true! (not (not (memq 'gateway (macro-brain-decision-scheduled-ids l19-p-6gate))))
+                "L19-P0-2: Protoss 2b/38w on 4 Gateways must scale to Gateway #5/#6")
+
+  (reset-macro-escrow-tracker!)
+  (define l19-p-8gate
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 9200
+      #:minerals 240 #:gas 120 #:supply-used 94 #:supply-cap 130 #:workers 52 #:active-bases 3
+      #:mineral-harvesters 40 #:gas-harvesters 12
+      #:army-supply 42 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 3 'pylon 14 'gateway 6 'cybernetics-core 1 'twilight-council 1 'forge 1 'robotics-facility 1 'robotics-bay 1 'assimilator 6)
+      #:total-building-counts (hasheq 'nexus 3 'pylon 14 'gateway 6 'cybernetics-core 1 'twilight-council 1 'forge 1 'robotics-facility 1 'robotics-bay 1 'assimilator 6)
+      #:unit-counts (hasheq 'probe 52 'stalker 15 'immortal 2 'colossus 1)
+      #:open-facility-slots (hasheq 'townhall 3 'gateway 0 'robotics-facility 0))))
+  (assert-true! (not (not (memq 'gateway (macro-brain-decision-scheduled-ids l19-p-8gate))))
+                "L19-P0-2: Protoss 3b/52w on 6 Gateways must scale to Gateway #7/#8")
+
+  (reset-macro-escrow-tracker!)
+  (define l19-t-5rax
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 7600
+      #:minerals 220 #:gas 140 #:supply-used 72 #:supply-cap 102 #:workers 38 #:active-bases 2
+      #:mineral-harvesters 30 #:gas-harvesters 8
+      #:army-supply 34 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'command-center 1 'supply-depot 10 'barracks 3 'barracks-techlab 1 'barracks-reactor 1 'engineering-bay 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 4)
+      #:total-building-counts (hasheq 'orbital-command 2 'command-center 1 'supply-depot 10 'barracks 3 'barracks-techlab 1 'barracks-reactor 1 'engineering-bay 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 4)
+      #:unit-counts (hasheq 'scv 38 'marine 16 'marauder 4 'siege-tank 2 'medivac 2)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 0 'factory 0 'starport 0))))
+  (assert-true! (not (not (memq 'barracks (macro-brain-decision-scheduled-ids l19-t-5rax))))
+                "L19-P0-2: Terran 2b+3rdCC/38w on 3 Barracks must scale to Barracks #4/#5")
+
+  ;; (c) Latched Zerg Capital-Air Spire (#43 ZvP Tempest fog-of-war flicker): stays locked at u>=1600!
+  (reset-macro-escrow-tracker!)
+  (void
+   (step-priority-macro-brain
+    (make-macro-world-state
+     #:race 'Zerg #:enemy-race 'Protoss #:frame 11644
+     #:minerals 205 #:gas 212 #:supply-used 84 #:supply-cap 116 #:workers 54 #:active-bases 3
+     #:mineral-harvesters 42 #:gas-harvesters 12
+     #:army-supply 30 #:enemy-threat-supply 12 #:under-attack? #f
+     #:requires-anti-air? #t
+     #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'hydralisk-den 1 'extractor 6)
+     #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'hydralisk-den 1 'extractor 6)
+     #:unit-counts (hasheq 'drone 54 'queen 4 'hydralisk 8 'overlord 14)
+     #:enemy-unit-counts (hasheq 'tempest 3)
+     #:open-facility-slots (hasheq 'townhall 3 'larva 6))))
+  (define l19-z-spire-fog-latched
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 11872
+      #:minerals 205 #:gas 212 #:supply-used 84 #:supply-cap 116 #:workers 54 #:active-bases 3
+      #:mineral-harvesters 42 #:gas-harvesters 12
+      #:army-supply 30 #:enemy-threat-supply 0 #:under-attack? #f
+      #:requires-anti-air? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'hydralisk-den 1 'extractor 6)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'hydralisk-den 1 'extractor 6)
+      #:unit-counts (hasheq 'drone 54 'queen 4 'hydralisk 8 'overlord 14)
+      #:enemy-unit-counts (hasheq)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 6))))
+  (assert-true! (and (not (not (memq 'spire (macro-brain-decision-scheduled-ids l19-z-spire-fog-latched))))
+                     (not (memq 'hydralisk (macro-brain-decision-scheduled-ids l19-z-spire-fog-latched))))
+                "L19-P0-2 #43 ZvP: Once Tempest observed, Spire@1660 MUST stay latched through fog-of-war & beat Hydralisk")
+  (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

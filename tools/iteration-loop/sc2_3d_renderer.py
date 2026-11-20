@@ -62,7 +62,7 @@ VARIABLES_TXT = (
 WORKER_IDS = {45, 84, 104, 116, 268}  # SCV, Probe, Drone, DroneBurrowed, MULE
 IGNORE_IDS = {
     151, 103, 87, 137, 138, 801,  # Larva, Egg, CreepTumors, AdeptShade
-    106, 129, 893,                # Overlords (avoid pulling camera away from ground fights)
+    106, 129, 893, 82,            # Overlords, Observer (avoid pulling camera away from real army fights)
 }
 STRUCTURE_IDS = {
     18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 36, 37, 38, 39, 40,
@@ -609,12 +609,19 @@ async def render_replay_clip(
                 f"StartReplay failed for {rep_p.name}: err={sr.start_replay.error} {sr.start_replay.error_details}"
             )
 
-        # Fast-forward in one large step to just before the battle window
-        ff_target = max(16, int(start_loop) - 8)
-        if ff_target > 0:
-            await sc2.rpc(sc2api_pb2.Request(step=sc2api_pb2.RequestStep(count=ff_target)), timeout=120.0)
+        # Fast-forward in bounded chunks so 30-minute replays never hit single-RPC timeout
+        ff_rem = max(16, int(start_loop) - 8)
+        while ff_rem > 0:
+            chunk = min(4000, ff_rem)
+            step_r = await sc2.rpc(sc2api_pb2.Request(step=sc2api_pb2.RequestStep(count=chunk)), timeout=180.0)
+            ff_rem -= chunk
+            if step_r.status != sc2api_pb2.in_replay:
+                break
 
-        obs_r = await sc2.rpc(sc2api_pb2.Request(observation=sc2api_pb2.RequestObservation(disable_fog=True)))
+        obs_r = await sc2.rpc(
+            sc2api_pb2.Request(observation=sc2api_pb2.RequestObservation(disable_fog=True)),
+            timeout=180.0,
+        )
         obs = obs_r.observation.observation
         cur_cam, _, prev_combat, _ = _extract_combat_state(obs, {}, focus_hint=focus_hint)
         if cur_cam is not None:

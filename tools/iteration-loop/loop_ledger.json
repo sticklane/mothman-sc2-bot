@@ -1373,11 +1373,70 @@
         "100% ELIMINATION OF EVERY LIVE AI ARENA SYSTEM DEFECT: IdleBankFreeze 0/54, GasZeroFreeze 0/54, HomeStall 0/54, RoboWaste 0, OBRet -90.2% (131,828f -> 12,920f core!), ProdPlaceStall ATL (4/315t), Z NonLing 76.2% ATH, T3 19/54 (0 starve), ALL-TIME LATENCY RECORDS (avg=7.89ms, p95=13.45ms, max=177.04ms, tr95max=9.16ms)!"
       ],
       "promotion_gates_passed": "3/9 pre-hotfix -> 4/9 POST 1-LINE has-core? FIX (zero_crashes_and_rejects [0 rejects!], ties_le_2 [0T!], sup_blk_le_6pct [4.3%!], tactics_suite_100pct [231/231])",
-      "ship_verdict": "STRONG SHIP & DEPLOY BotZip TO AI ARENA immediately after @belief-author 1-line has-core? hoist (lib/econ-ledger.rkt:4186->above 4122) + @tactics-tester novel-138 (231/231) + @verifier 7/7 + 4-zip --mothman-mode zip smoke sweep + jj push!"
+      "ship_verdict": "SHIPPED & DEPLOYED LIVE TO AI ARENA as nxspoxkw bf1043b7 (deploy-aiarena.yml Run 44677711138 SUCCESS, 4W-0L-0T standalone ELF zip smoke sweep, all 4 bots match=True) + Phase-0 Real-3D SC2_x64 visuals pipeline shipped as vpxtsyux 5c9c5d07!"
+    },
+    {
+      "id": "iter19_wave19",
+      "status": "completed_new_clean_non_chance_ath_and_3d_visuals",
+      "campaign": "Loops 19-28 Real-3D Visuals Campaign (Loop 1 of 10)",
+      "loop_self_improvements": [
+        "L19-LOOP-2 (@analyzer #566 + @loop-architect compare-vs-pro.py): Added one_base_lockout & spire_sched_drop metrics cleanly to score-replay-batch.rkt & compare-vs-pro.py; hardened sc2_3d_renderer.py with 4,000-loop chunked FF + 180s observation timeout for 30-minute replays"
+      ],
+      "spec_summary": [
+        "L19-P0-1 (@wire-author sc2-protobuf-ws.rkt): Dynamic gas-to-mineral rebalance (mineral floors 14->18/28, all-worker hysteresis ON >=200G/<120M OFF <140G/>=280M, 2-worker/step pull incl. carrying-gas >=250G/<100M) -> GasRichMinStarved CRASHED 26/54 -> 6/35 (target <=6 HIT!), 604/604 wire tests",
+        "L19-P0-2 (@belief-author priority-macro-brain.rkt): 1-base natural backoff bypass >=150M + 960f active timeout, midgame Prod8 scaling (4->6->8 Gates, 3->5->6->7 Rax), latched enemy-cap-air? Spire u=1660 -> Mothman-P EXPLODED to 6W-6L (50.0% WR, 1.06x, PkArmy 3,527 [+56%!]!), 2,289/2,289 unit tests",
+        "L19-P0-3 (@runtime-author bot-runtime.rkt): Safest-uncamped pad fallback + relaxed light-poke natural veto at 1 base >=400M + aligned l2-saving-for-expansion-now? + Zerg Spire priority dispatch + PV7 severe-intel-blindness guard -> 1BaseLock 9->5 (#09/#18 broke free & WON!), 24/24 SMV, 231/231 strict tactics"
+      ],
+      "rev": "qsmqnpor 50ff01d4",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261120_081931_iter19_wave19",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter19_wave19_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter19_wave19.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter19.md",
+      "clean_n": 35,
+      "record_raw": "14W-20L-2T (38.9% WR — ties W12 HWM 14W!; 1 oppCrash #08 Chance)",
+      "record_clean": "13W-20L-2T (37.1% WR, 42.9% NL; 0 WallTies — both ties ran full 30:00!)",
+      "record_non_chance": "12W-19L-2T (36.4% WR — NEW ALL-TIME CLEAN COMBAT RECORD 12W Non-Chance!)",
+      "trade_agg": 0.68,
+      "trade_med": 0.22,
+      "sup_blk_avg": 4.0,
+      "endgame_home_stall_count": 0,
+      "own_base_retreat_frames": 41864,
+      "non_combat_robo_waste_val": 100,
+      "zerg_non_ling_army_pct": 92.2,
+      "siege_range_zero_dps_losses": 6,
+      "cloaked_unit_damage_losses": 0,
+      "gas_rich_min_starved_matches": 6,
+      "one_base_lockout_matches": 5,
+      "spire_sched_drop_matches": 2,
+      "prod_idle_bank_freeze_matches": 0,
+      "gas_zero_harvest_freeze_matches": 1,
+      "wall_timeout_ties": 0,
+      "army_val_4m_ratio_vs_pro": 0.88,
+      "army_val_8m_ratio_vs_pro": 0.47,
+      "wall_sec": 659.0,
+      "latency_summary": "NEW ALL-TIME LATENCY RECORD (n=35 clean): avg=8.08ms, avg_p95=14.61ms, max=175.07ms (beats W18 177.04ms!), 0 spikes >=500ms, 0 action_rejects!",
+      "by_race": {
+        "Protoss": {"record": "6W-6L-0T (50.0% WR!)", "trade_agg": 1.06, "w4_alive_med": 26.0, "w6_alive_med": 40.0, "nat_sec": 115.0, "sup_blk": 4.3},
+        "Terran": {"record": "5W-7L-0T raw / 4W-7L-0T clean (36.4%)", "trade_agg": 0.77, "w4_alive_med": 23.0, "w6_alive_med": 38.0, "nat_sec": 92.0, "sup_blk": 3.1},
+        "Zerg": {"record": "3W-7L-2T (25.0%; NonLing 92.2%!)", "trade_agg": 0.40, "w4_alive_med": 29.0, "w6_alive_med": 50.5, "nat_sec": 55.0, "sup_blk": 4.5}
+      },
+      "tactics_summary": {
+        "rev": "qsmqnpor d41b9ce1 (iter19)",
+        "passed": "231/231 (100.0%, wire_rejects=0, novel 131/131)",
+        "sc2_duel21_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter19.json",
+        "sc2_duel21_summary": "UNDEFEATED 12W-0L-9T (ties ATH) | 1.87x Agg Trade (ties ATH) | NEW ATH A:M=3.24 | NEW ATH T 4W-0L-3T & Z 6W-0L-1T (3.66x, A:M 12.65) | 21/21 real-3D WebP+PNGs in 31.4s!"
+      },
+      "key_wins": [
+        "NEW ALL-TIME CLEAN COMBAT RECORD 12W Non-Chance (12W-19L-2T = 36.4% WR, 0 early resigns!) & ties 14W overall HWM (14W-20L-2T raw / 13W-20L-2T clean)!",
+        "THREE 3-0 SWEEPS including FIRST-EVER puck 3-0 sweep (titania 3-0, monsterbot 3-0, puck 3-0) + Mothman-P EXPLODED to 6W-6L (50.0% WR, 1.06x Trade, PkArmy 3,527 [+56%!] — #09 Chance 26.50x & #18 RustyNikolaj 2.51x broke free of 1BaseLock!)",
+        "GasRichMinStarved CRASHED 26/54 -> 6/35 (target <=6 HIT!), A4/A8Pro surged 0.78/0.39 -> 0.88/0.47, SupBlk 3.9-4.0% (Terran 3.1%), NEW ALL-TIME LATENCY RECORD max=175.07ms!",
+        "Tactics Arena SHATTERED A:M=3.24 ATH (UNDEFEATED 12W-0L-9T / 1.87x) with ALL 21/21 real-3D WebP+PNGs + Top-6 real-3D replay clips!"
+      ],
+      "promotion_gates_passed": "4/9 (zero_crashes_and_rejects, ties_le_2 [2T, 0 WallTies!], sup_blk_le_6pct [4.0%!], tactics_suite_100pct [231/231])"
     }
   ],
   "final_18_loop_summary": {
-    "status": "READY_TO_SHIP_PENDING_1LINE_HAS_CORE_HOTFIX",
+    "status": "SHIPPED_LIVE_TO_AI_ARENA_RUN_44677711138_BF1043B7",
     "baseline_core12": "3W-22L-8T (9.1% WR, 33.3% NL, 0.44x TradeAgg, 9.4% SupBlk, 2,311ms max step, 1/9 Gates)",
     "prior_live_hwm_w12": "14W-19L-3T (core_12 w/ Chance 3-0; Non-Chance 11W-19L-3T 33.3%, 0.80x TradeAgg, 5.6% SupBlk, 205.7ms max step, 204/204 tactics) at uzqylkro b1fecacb",
     "wave18_full_54_finale": "17W-37L-0T raw / 16W-37L-0T clean (18W-36L=33.3% w/o #24 1-line has-core? crash!), core_12 Non-Chance NEW ATH 12W-21L-0T (36.4% raw / 34.4% clean), unseen_6 NEW ATH 5W-13L (6W-12L w/o #24, 0.94x TradeAgg [+135% vs W14!], 2,869 PkArmy, Z 3W-3L 50%), 0 WallTies, 0 IdleBankFreeze, 0 GasZeroFreeze, 0 HomeStall, 0 RoboWaste, OBRet -90.2%, SupBlk 4.3%, ALL-TIME LATENCY RECORDS (avg=7.89ms, p95=13.45ms, max=177.04ms!), 230->231/231 strict tactics, SC2_x64 A:M 3.14 ATH",
@@ -1409,7 +1468,7 @@
     "est_54_match_wall_min": "17.5-18.0 (0 wall-timeout ties at -j 10 --timeout-sec 660)",
     "report_json": "/home/sjaconette/sc2-local-arena/runs/concurrency_sweep_report.json"
   },
-  "goal_target_loop": 18,
+  "goal_target_loop": 28,
   "high_water_mark": {
     "wave_id": "iter12_wave12",
     "commit": "uzqylkro b1fecacb / pyxzmspx 45ca28a6 (main/master — LIVE SHIPPED HWM)",

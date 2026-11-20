@@ -3278,6 +3278,73 @@
                 (safe-coord (+ (hash-ref safe-h 'y default-y) 3.0)))
         (values default-x default-y)))
 
+;; L19-P0-3 (`#43 ZvP` Spire drop): Creep-ring placement fallback around ready uncontested
+;; Hatcheries/Lairs/Hives (radii 4.5t & 6.5t, 12 rotating angles) avoiding buildings, minerals,
+;; geysers, reserved sites, and enemy combat so Zerg Spire always finds valid creep even under attack.
+(define (l2-zerg-creep-ring-anchor ctx default-x default-y [retry-offset 0])
+  (define ally-bldgs (l2-ctx-ally-bldgs ctx))
+  (define base-x (l2-ctx-base-x ctx))
+  (define base-y (l2-ctx-base-y ctx))
+  (define enemy-units (l2-ctx-enemy-units ctx))
+  (define frame (l2-ctx-frame ctx))
+  (define live-game-obs? (l2-ctx-live-game-obs? ctx))
+  (define oledger (or (l2-ctx-oledger ctx) (l2-ctx-oledger-early ctx)))
+  (define step-mps (l2-ctx-step-mineral-patches ctx))
+  (define step-geysers (l2-ctx-step-geysers ctx))
+  (define ready-hatches
+    (filter (lambda (b)
+              (and (hash? b)
+                   (memq (fast-canonical-structure-sym (unit-type-sym b))
+                         '(hatchery lair hive))
+                   (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
+            ally-bldgs))
+  (define ordered-hatches
+    (sort ready-hatches
+          (lambda (a b)
+            (define ax (hash-ref a 'x base-x))
+            (define ay (hash-ref a 'y base-y))
+            (define bx (hash-ref b 'x base-x))
+            (define by (hash-ref b 'y base-y))
+            (define a-hot? (and live-game-obs? (l2-enemy-hostile-near-point? ctx ax ay 16.0)))
+            (define b-hot? (and live-game-obs? (l2-enemy-hostile-near-point? ctx bx by 16.0)))
+            (cond
+              [(and (not a-hot?) b-hot?) #t]
+              [(and a-hot? (not b-hot?)) #f]
+              [else (< (fast-dist2d base-x base-y ax ay)
+                       (fast-dist2d base-x base-y bx by))]))))
+  (define active-rsites
+    (if oledger
+        (filter (lambda (rs) (<= frame (reserved-build-site-expires-frame rs)))
+                (in-progress-order-ledger-reserved-sites oledger))
+        '()))
+  (define start-idx (modulo (+ (max 0 retry-offset) (quotient (max 0 frame) 28)) 12))
+  (define (cand-clear? cx cy)
+    (and (or (not live-game-obs?)
+             (and (not (l2-active-enemy-combat-within? enemy-units cx cy 12.0))
+                  (not (l2-site-recently-contested? ctx cx cy 10.0))))
+         (for/and ([ab (in-list ally-bldgs)] #:when (hash? ab))
+           (>= (fast-dist2d cx cy (hash-ref ab 'x 9999.0) (hash-ref ab 'y 9999.0)) 3.4))
+         (for/and ([mp (in-list step-mps)] #:when (hash? mp))
+           (>= (fast-dist2d cx cy (hash-ref mp 'x 9999.0) (hash-ref mp 'y 9999.0)) 3.2))
+         (for/and ([gy (in-list step-geysers)] #:when (hash? gy))
+           (>= (fast-dist2d cx cy (hash-ref gy 'x 9999.0) (hash-ref gy 'y 9999.0)) 3.2))
+         (for/and ([rs (in-list active-rsites)])
+           (>= (fast-dist2d cx cy (reserved-build-site-x rs) (reserved-build-site-y rs)) 3.0))))
+  (define found
+    (for*/first ([h (in-list ordered-hatches)]
+                 [rad (in-list '(4.5 6.5))]
+                 [step-i (in-range 12)]
+                 #:do [(define hx (exact->inexact (hash-ref h 'x base-x)))
+                       (define hy (exact->inexact (hash-ref h 'y base-y)))
+                       (define ang (* (modulo (+ start-idx step-i) 12) (/ pi 6.0)))
+                       (define cx (safe-coord (+ hx (* rad (cos ang))) default-x))
+                       (define cy (safe-coord (+ hy (* rad (sin ang))) default-y))]
+                 #:when (cand-clear? cx cy))
+      (cons cx cy)))
+  (if found
+      (values (car found) (cdr found))
+      (l2-safe-zerg-build-anchor ctx default-x default-y)))
+
 ;; Compute SC2 under-construction vitality metrics including shields.
 ;; Unfinished buildings start at 10% vitality and ramp linearly to 100%:
 ;;   expected = 0.10 + 0.90 * build_progress.
@@ -3702,6 +3769,18 @@
     (or (blocker-in-list? enemy-units)
         (blocker-in-list? enemy-bldgs)))
 
+(define (l2-record-expand-pad-issued! ctx px py)
+  (define rt (l2-ctx-rt ctx))
+  (when (and (l2-ctx-live-obs-harvesters? ctx)
+             (real? px)
+             (real? py))
+    (hash-set! (rt-door-state rt)
+               'last-exp-pad-rec
+               (vector (l2-ctx-frame ctx)
+                       (l2-ctx-active-bases ctx)
+                       (exact->inexact px)
+                       (exact->inexact py)))))
+
 (define (l2-select-uncamped-expansion-pad ctx [prefer-natural? #f])
   (define active-bases (l2-ctx-active-bases ctx))
   (define ally-combat-units (l2-ctx-ally-combat-units ctx))
@@ -3714,22 +3793,41 @@
   (define expansion-pads (l2-ctx-expansion-pads ctx))
   (define frame (l2-ctx-frame ctx))
   (define live-obs-harvesters? (l2-ctx-live-obs-harvesters? ctx))
+  (define minerals (l2-ctx-minerals ctx))
   (define mmstate-rush-post (l2-ctx-mmstate-rush-post ctx))
   (define nat-x (l2-ctx-nat-x ctx))
   (define nat-y (l2-ctx-nat-y ctx))
   (define natural-blocked? (l2-ctx-natural-blocked? ctx))
+  (define prio-saving-for-sym (l2-ctx-prio-saving-for-sym ctx))
+  (define race-th-sym (l2-ctx-race-th-sym ctx))
   (define rt (l2-ctx-rt ctx))
   (define third-x (l2-ctx-third-x ctx))
   (define third-y (l2-ctx-third-y ctx))
   (define townhalls (l2-ctx-townhalls ctx))
   (define uncamped-pad-cache (l2-ctx-uncamped-pad-cache ctx))
+  ;; L19-P0-3 (`#009`/`#012` 1BaseLock): Detect when our last emitted `(expand px py)` failed
+  ;; to start a base after >= 96f so we rotate off the blocked/unbuildable pad to a safe 3rd/back pad!
+  (define door-st (rt-door-state rt))
+  (define last-exp-rec (and live-obs-harvesters? (hash-ref door-st 'last-exp-pad-rec #f)))
+  (define oledger (or (l2-ctx-oledger ctx) (l2-ctx-oledger-early ctx)))
+  (define failed-exp-pad
+    (and (vector? last-exp-rec)
+         (= (vector-ref last-exp-rec 1) active-bases)
+         (>= (- frame (vector-ref last-exp-rec 0)) 96)
+         (<= (- frame (vector-ref last-exp-rec 0)) 1600)
+         (or (not oledger)
+             (= (order-ledger-pending-count-for-type oledger race-th-sym frame) 0))
+         (cons (vector-ref last-exp-rec 2) (vector-ref last-exp-rec 3))))
+  (define allow-1base-backpad-fallback?
+    (and (= active-bases 1)
+         (or (>= minerals 400)
+             (and (>= minerals 250) (eq? prio-saving-for-sym race-th-sym)))))
     (define key (and prefer-natural? #t))
     (define step-cached (hash-ref uncamped-pad-cache key #f))
     (cond
       [step-cached
        (values (car step-cached) (cdr step-cached))]
       [else
-       (define door-st (rt-door-state rt))
        (define persist-tbl
          (and live-obs-harvesters?
               (hash-ref! door-st 'uncamped-pad-persist make-hasheq)))
@@ -3754,6 +3852,7 @@
                s)))
        (cond
          [(and (vector? pentry)
+               (>= (vector-length pentry) 23)
                (>= frame (vector-ref pentry 0))
                (< (- frame (vector-ref pentry 0)) ttl-limit)
                (eq? nat-blk? (vector-ref pentry 1))
@@ -3774,6 +3873,8 @@
                (= n-ep (vector-ref pentry 8))
                (equal? mmstate-rush-post (vector-ref pentry 9))
                (fl= (get-xy-csum) (vector-ref pentry 18))
+               (equal? failed-exp-pad (vector-ref pentry 21))
+               (eq? allow-1base-backpad-fallback? (vector-ref pentry 22))
                (let ([cpx (vector-ref pentry 19)]
                      [cpy (vector-ref pentry 20)])
                  (or (not (and cpx cpy))
@@ -3783,21 +3884,43 @@
           (hash-set! uncamped-pad-cache key (cons px py))
           (values px py)]
          [else
+          (define (near-failed-pad? x y)
+            (and failed-exp-pad
+                 (real? x) (real? y)
+                 (<= (fast-dist2d x y (car failed-exp-pad) (cdr failed-exp-pad)) 6.0)))
+          (define (pad-has-enemy-bldg? x y rad)
+            (and (real? x) (real? y)
+                 (for/or ([eb (in-list enemy-bldgs)] #:when (hash? eb))
+                   (<= (fast-dist2d x y
+                                    (hash-ref eb 'x 9999.0)
+                                    (hash-ref eb 'y 9999.0))
+                       rad))))
+          (define failed-nat-pad? (near-failed-pad? nat-x nat-y))
           ;; W11-P0-1-rt (`#28` Hatchery x7 self-cancel loop at (90,94)): Exclude pads within
           ;; 12t of a recently canceled/destroyed contested site when safe alternative pads exist!
-          (define safe-expansion-pads
+          ;; L19-P0-3: Also exclude a recently failed `(expand)` pad or enemy-building-blocked pad.
+          (define non-contested-pads
             (if (and live-obs-harvesters? (pair? expansion-pads))
                 (filter (lambda (p)
                           (not (and (pair? p)
                                     (real? (car p))
                                     (real? (cdr p))
-                                    (l2-site-recently-contested? ctx (car p) (cdr p) 12.0))))
+                                    (or (l2-site-recently-contested? ctx (car p) (cdr p) 12.0)
+                                        (pad-has-enemy-bldg? (car p) (cdr p) 6.5)))))
                         expansion-pads)
                 expansion-pads))
-          (let-values ([(px py)
+          (define safe-expansion-pads
+            (if (and failed-exp-pad (pair? non-contested-pads))
+                (let ([rotated (filter (lambda (p)
+                                         (not (and (pair? p)
+                                                   (near-failed-pad? (car p) (cdr p)))))
+                                       non-contested-pads)])
+                  (if (pair? rotated) rotated non-contested-pads))
+                non-contested-pads))
+          (let-values ([(px0 py0)
                         (placement:select-uncamped-expansion-pad
                          safe-expansion-pads
-                         prefer-natural?
+                         (and prefer-natural? (not failed-nat-pad?) (not natural-blocked?))
                          #:base-x base-x
                          #:base-y base-y
                          #:nat-x nat-x
@@ -3810,11 +3933,77 @@
                          #:enemy-units enemy-units
                          #:enemy-bldgs enemy-bldgs
                          #:ally-combat-units ally-combat-units
-                         #:natural-blocked? natural-blocked?
+                         #:natural-blocked? (or natural-blocked? failed-nat-pad?)
                          #:live-obs? live-obs-harvesters?
                          #:active-bases active-bases
                          #:frame frame
                          #:rush-posterior mmstate-rush-post)])
+            ;; L19-P0-3: When on 1 base with >= 400M (or Brain saving >= 250M) and primary selection
+            ;; returned `#f #f`, repeated the just-failed pad, or hit a blocked pad, pick the safest
+            ;; uncamped 3rd/back pad!
+            (define-values (px py)
+              (if (and allow-1base-backpad-fallback?
+                       (or (not (and px0 py0))
+                           (near-failed-pad? px0 py0)
+                           (pad-has-enemy-bldg? px0 py0 6.5)
+                           (and (or natural-blocked? failed-nat-pad?)
+                                (<= (fast-dist2d px0 py0 nat-x nat-y) 6.0))))
+                  (let* ([raw-cands
+                          (append (if (list? expansion-pads) expansion-pads '())
+                                  (if (and (real? third-x) (real? third-y))
+                                      (list (cons third-x third-y))
+                                      '()))]
+                         [unowned-cands
+                          (filter (lambda (p)
+                                    (and (pair? p) (real? (car p)) (real? (cdr p))
+                                         (for/and ([th (in-list townhalls)] #:when (hash? th))
+                                           (> (fast-dist2d (car p) (cdr p)
+                                                           (hash-ref th 'x 9999.0)
+                                                           (hash-ref th 'y 9999.0))
+                                              8.0))))
+                                  raw-cands)]
+                         [pad-enemy-sup
+                          (lambda (cx cy rad)
+                            (for/sum ([e (in-list enemy-units)]
+                                      #:when (and (hash? e)
+                                                  (combat-unit-record? e)
+                                                  (<= (fast-dist2d cx cy
+                                                                   (hash-ref e 'x 9999.0)
+                                                                   (hash-ref e 'y 9999.0))
+                                                      rad)))
+                              (max 0.5 (exact->inexact (sc2-supply-cost (fast-canonical-unit-sym (unit-type-sym e)))))))]
+                         [uncamped-cands
+                          (filter (lambda (p)
+                                    (and (< (pad-enemy-sup (car p) (cdr p) 12.0) 4.0)
+                                         (not (pad-has-enemy-bldg? (car p) (cdr p) 9.0))))
+                                  unowned-cands)]
+                         [clean-cands
+                          (let ([nc (filter (lambda (p)
+                                              (and (not (near-failed-pad? (car p) (cdr p)))
+                                                   (or (not live-obs-harvesters?)
+                                                       (not (l2-site-recently-contested? ctx (car p) (cdr p) 12.0)))))
+                                            uncamped-cands)])
+                            (cond
+                              [(pair? nc) nc]
+                              [else
+                               (let ([nf (filter (lambda (p) (not (near-failed-pad? (car p) (cdr p))))
+                                                 uncamped-cands)])
+                                 (if (pair? nf) nf uncamped-cands))]))])
+                    (define-values (best-pad _best-score)
+                      (for/fold ([best #f] [best-score +inf.0]) ([p (in-list clean-cands)])
+                        (define cx (exact->inexact (car p)))
+                        (define cy (exact->inexact (cdr p)))
+                        (define esup (pad-enemy-sup cx cy 15.0))
+                        (define d-home (fast-dist2d cx cy base-x base-y))
+                        (define d-enemy (fast-dist2d cx cy enemy-x enemy-y))
+                        (define score (+ (* 100.0 esup) d-home (* -0.45 d-enemy)))
+                        (if (< score best-score)
+                            (values p score)
+                            (values best best-score))))
+                    (if best-pad
+                        (values (car best-pad) (cdr best-pad))
+                        (values px0 py0)))
+                  (values px0 py0)))
             (hash-set! uncamped-pad-cache key (cons px py))
             (when persist-tbl
               (hash-set! persist-tbl
@@ -3822,7 +4011,8 @@
                          (vector frame nat-blk? post-2500? active-bases
                                  n-th n-eu n-eb n-ac n-ep mmstate-rush-post
                                  base-x base-y nat-x nat-y third-x third-y
-                                 enemy-x enemy-y (get-xy-csum) px py)))
+                                 enemy-x enemy-y (get-xy-csum) px py
+                                 failed-exp-pad allow-1base-backpad-fallback?)))
             (values px py))])]))
 
 (define (l2-scout-encounters-early-worker-rush? ctx sw)
@@ -4311,6 +4501,7 @@
                  (not (l2-site-recently-contested? ctx exp-x exp-y 12.0))
                  (refractory-allow-action?! cd-tracker (list 'auto-expand race) frame SC2-EXPANSION-COOLDOWN-FRAMES))
         (l2-emit! ctx (list 'expand exp-x exp-y))
+        (l2-record-expand-pad-issued! ctx exp-x exp-y)
         (l2-record-build-issue-lock! ctx th-sym)
         (order-ledger-record-issued! oledger (+ 812000 (modulo frame 10000)) 'expand th-sym exp-x exp-y frame)
         (l2-spend-resources-and-supply! ctx th-cost 0 0)))))
@@ -4454,6 +4645,12 @@
   (define rec-units (if (hash? opp-ht) (hash-ref opp-ht 'recommended-counter-units '()) '()))
   (define dom-path (if (hash? opp-ht) (hash-ref opp-ht 'dominant-path 'none) 'none))
   (define preempt-lr? (and (hash? lr-ht) (eq? (hash-ref lr-ht 'preempt-greedy-tech? #f) #t)))
+  (define md (l2-ctx-macro-decision ctx))
+  (define brain-sched-spire?
+    (and (eq? csym 'spire)
+         (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'spire)
+             (and (macro-brain-decision? md)
+                  (not (not (memq 'spire (macro-brain-decision-scheduled-ids md))))))))
   (define under-ground-crisis?
     (and (or (l2-ctx-under-base-attack? ctx)
              (l2-ctx-urgent-combat-or-intel-need? ctx))
@@ -4461,6 +4658,7 @@
          (not (memq dom-path '(capital-air-fleet air-harass)))))
     (and (not (and (l2-ctx-zerg-real-anti-air-threat? ctx)
                    (memq csym '(lair hydralisk-den spire))))
+         (not brain-sched-spire?)
          (or crisis-tech-upgrade-deferral? preempt-lr?)
          (or under-ground-crisis?
              (not (and hard-ov? (l2-opp-rec-unit-needs-bldg? csym rec-units))))
@@ -4604,6 +4802,15 @@
                                 (= (l2-cur-ally-canon-bldg-count ctx cs) 0))
                            12]
                           [supply-or-first-core? 56]
+                          [(and (eq? cs 'spire)
+                                (or (l2-ctx-zerg-holding-for-aa-spire? ctx)
+                                    (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
+                                         (memq 'spire (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx))))))
+                           56]
+                          [(and (memq cs '(nexus command-center hatchery))
+                                (<= (l2-ctx-active-bases ctx) 1)
+                                (>= (l2-ctx-minerals ctx) (sc2-min-cost cs)))
+                           84]
                           [(>= fail-streak 3) 336]
                           [(= fail-streak 2) 224]
                           [(= fail-streak 1) 112]
@@ -4702,9 +4909,21 @@
         (and static-def?
              (<= (l2-ctx-active-bases ctx) 1)
              (<= (fast-dist2d raw-x raw-y base-x base-y) 12.0)))
+      ;; L19-P0-3 (`#43 ZvP` Spire): On Zerg Spire retry (fail-streak > 0) or non-main creep-ring
+      ;; anchor, bypass `sc-cache` simcity so rotating creep-ring fallback coordinates are honored!
+      (define zerg-spire-creep-ring-bypass?
+        (and (eq? race 'Zerg)
+             (eq? canon-sym 'spire)
+             (or (> (fast-dist2d raw-x raw-y base-x base-y) 14.0)
+                 (let* ([tbl (and live-game-obs?
+                                  (refractory-cooldown-tracker? cd-tracker)
+                                  (refractory-cooldown-tracker-table cd-tracker))]
+                        [le (and (hash? tbl) (hash-ref tbl (fast-build-issue-lock-key 'spire) #f))])
+                   (and (pair? le) (>= (length le) 3) (> (caddr le) 0))))))
       (define use-simcity?
         (and (not exact-wall-slot?)
              (not keep-1base-inmain-sd?)
+             (not zerg-spire-creep-ring-bypass?)
              (not (memq canon-sym SIMCITY-EXCLUDED-BLDG-SYMS))
              (or static-def?
                  live-game-obs?
@@ -4786,7 +5005,10 @@
                 [(>= retry-i 7)
                  (values sx0 sy0 #f #f)]
                 [else
-                 (define-values (cand-ax cand-ay) (l2-emergency-inmain-supply-anchor ctx retry-i))
+                 (define-values (cand-ax cand-ay)
+                   (if (and (eq? race 'Zerg) (eq? canon-sym 'spire))
+                       (l2-zerg-creep-ring-anchor ctx raw-x raw-y (+ retry-i 1))
+                       (l2-emergency-inmain-supply-anchor ctx retry-i)))
                  (define-values (rx ry)
                    (order-ledger-resolve-build-coords!
                     oledger bldg-sym cand-ax cand-ay ally-bldgs frame clearance
@@ -5614,12 +5836,29 @@
   (define under-base-attack? (l2-ctx-under-base-attack? ctx))
   (define under-early-cheese? (l2-ctx-under-early-cheese? ctx))
   (define urgent-combat-or-intel-need? (l2-ctx-urgent-combat-or-intel-need? ctx))
-    (and (not under-base-attack?)
+  ;; L19-P0-3 (`#018`/`#030`/`#047`/`#048` 1BaseLock): Align L2 expansion escrow with Brain
+  ;; `saving_for` on 1 base once minerals >= 250 and enemy threat <= max(6.0, army) so L2
+  ;; never drains the bank right before 400M!
+  (define brain-saving-1base-nat?
+    (and live-game?
+         (= cur-base-count 1)
+         (eq? (l2-ctx-prio-saving-for-sym ctx) race-th-sym)
+         (>= (l2-ctx-minerals ctx) 250)
+         (<= live-enemy-threat-supply (max 6.0 live-army-supply))
+         (not (and severe-intel-blindness? (null? ally-combat-units)))
+         (not (l2-ctx-worker-rush-active? ctx))
          (not under-early-cheese?)
          (not early-survival-crisis?)
-         (not crisis-freeze-expand-or-gas?)
-         (not blocked-nat-expanded-early?)
-         (not (and live-game? (= cur-base-count 1) natural-blocked?))
+         (not (l2-ctx-bldg-actively-damaged? ctx))
+         (or (not under-base-attack?)
+             (<= live-enemy-threat-supply live-army-supply))))
+    (and (or (not under-base-attack?) brain-saving-1base-nat?)
+         (not under-early-cheese?)
+         (not early-survival-crisis?)
+         (or (not crisis-freeze-expand-or-gas?) brain-saving-1base-nat?)
+         (or (not blocked-nat-expanded-early?) brain-saving-1base-nat?)
+         (or (not (and live-game? (= cur-base-count 1) natural-blocked?))
+             brain-saving-1base-nat?)
          (not (and live-game? (<= cur-base-count 1) forward-proxy-detected?))
          (not (and live-game?
                    (= cur-base-count 1)
@@ -5635,19 +5874,25 @@
                      [else
                       (not (l2-building-present-or-pending? ctx 'spawning-pool))])))
          (<= live-enemy-threat-supply
-             (if (= cur-base-count 1)
-                 4.0
-                 (max 6.0 (* 0.85 live-army-supply))))
-         (not urgent-combat-or-intel-need?)
+             (cond
+               [brain-saving-1base-nat? (max 6.0 live-army-supply)]
+               [(= cur-base-count 1) 4.0]
+               [else (max 6.0 (* 0.85 live-army-supply))]))
+         (or (not urgent-combat-or-intel-need?) brain-saving-1base-nat?)
          (not escrow-suppressed-active?)
          (not (l2-macro-brain-expand-backed-off? ctx))
-         (< cur-escrow-age-frames max-escrow-timeout-frames)
+         (< cur-escrow-age-frames
+            (if brain-saving-1base-nat?
+                (max max-escrow-timeout-frames 960)
+                max-escrow-timeout-frames))
          (or (not live-game?)
+             brain-saving-1base-nat?
              (and (= cur-base-count 1) (< frame (if (eq? race 'Zerg) 2400 3800)))
              (>= live-army-supply 2))
          (or (not live-game?) (not severe-intel-blindness?) (not (null? ally-combat-units)))
          (null? orphaned-prereqs)
-         (< (hash-ref pressure-metrics 'threat-pressure 0.0) 0.85)
+         (< (hash-ref pressure-metrics 'threat-pressure 0.0)
+            (if brain-saving-1base-nat? 1.15 0.85))
          (= (order-ledger-pending-count-for-type oledger race-th-sym frame) 0)
          (< (l2-ctx-minerals ctx) (sc2-min-cost race-th-sym))
          (not (and live-game?
@@ -5659,7 +5904,8 @@
                                     (l2-cur-ally-canon-bldg-count ctx 'warp-gate))
                                  2)
                              (>= (l2-cur-ally-canon-bldg-count ctx 'assimilator) 2)))))
-         (or (and live-game?
+         (or brain-saving-1base-nat?
+             (and live-game?
                   (= cur-base-count 1)
                   (case race
                     [(Zerg) (>= total-workers 15)]
@@ -5710,6 +5956,7 @@
                       (>= (length ally-combat-units) 4))))
          ;; Keep expensive uncamped-pad check last so failed scalar/prereq checks short-circuit cleanly.
          (or (not live-game?)
+             (and (eq? race 'Terran) (= cur-base-count 1) brain-saving-1base-nat?)
              (let-values ([(ux uy) (l2-select-uncamped-expansion-pad ctx (= cur-base-count 1))])
                (and ux uy #t)))))
 
@@ -6521,6 +6768,10 @@
                   (filter cheese-bldg-candidate? enemy-bldgs)))
         '()))
   (set-l2-ctx-proxy-or-cheese-enemies! ctx proxy-or-cheese-enemies)
+  (define proxy-cheese-enemy-supply
+    (if (and live-obs-harvesters? (pair? proxy-or-cheese-enemies))
+        (l2-combat-supply-within? proxy-or-cheese-enemies base-x base-y 999.0 #t)
+        0.0))
   (define under-early-cheese?
     (or worker-rush-active?
         in-base-proxy-detected?
@@ -6530,12 +6781,17 @@
                           (and (<= (dist2d base-x base-y (hash-ref e 'x 9999) (hash-ref e 'y 9999)) cheese-dist-thresh)
                                (memq (unit-type-sym e) '(photon-cannon pylon bunker spine-crawler barracks))))
                         enemy-bldgs)
-                 (>= (length proxy-or-cheese-enemies) 2)))))
+                 (and (>= (length proxy-or-cheese-enemies) 2)
+                      (or (not live-obs-harvesters?)
+                          (< ally-combat-supply-early 4.0)
+                          (> proxy-cheese-enemy-supply (* 0.65 ally-combat-supply-early))))))))
   (set-l2-ctx-under-early-cheese?! ctx under-early-cheese?)
   ;; W12-P0-3-rt (`#34/#35/#36` 12PoolBot 0-3 + `#14/#15` oberon): Pre-3:45 (`< 5040f`)
   ;; under active early rush (enemy combat unit within 24t of main or 18t of natural, OR
   ;; rush/proxy posterior >= 0.50 with enemy combat unit seen): immediately suppress L2
   ;; natural expansion fallback & escrow and force continuous combat units + static D + supply!
+  ;; L19-P0-3: Never let a harmless 1-2 unit scout/poke (`near-sup <= 3.0`, `< 4` lings, and
+  ;; outnumbered >= 1.5x by >= 4.0 ally army supply) trigger a 30s 1BaseLock survival latch!
   (define rush-def-st (rt-rush-defense-state rt))
   (set-l2-ctx-rush-def-st! ctx rush-def-st)
   (when (<= frame 4)
@@ -6554,19 +6810,31 @@
         (max (safe-finite-real (hash-ref prev-tel-early 'rush-posterior 0.0) 0.0)
              (safe-finite-real (hash-ref prev-tel-early 'proxy-all-in-posterior 0.0) 0.0))
         0.0))
+  (define pre-345-near-enemy-supply
+    (for/sum ([e (in-list pre-345-enemy-combat-units)])
+      (define ex (exact->inexact (hash-ref e 'x 9999.0)))
+      (define ey (exact->inexact (hash-ref e 'y 9999.0)))
+      (if (or (<= (+ (sqr (- ex base-x)) (sqr (- ey base-y))) 576.0)
+              (<= (+ (sqr (- ex nat-x)) (sqr (- ey nat-y))) 324.0))
+          (max 0.5 (exact->inexact (sc2-supply-cost (fast-canonical-unit-sym (unit-type-sym e)))))
+          0.0)))
+  (define pre-345-outnumbered-light-poke?
+    (and (>= ally-combat-supply-early 4.0)
+         (<= pre-345-near-enemy-supply 3.0)
+         (<= pre-345-near-enemy-supply (* 0.65 ally-combat-supply-early))
+         (< pre-345-enemy-ling-cnt 4)
+         (not (and (< frame 2800) (>= pre-345-enemy-ling-cnt 2)))
+         (< pre-345-rush-posterior 0.50)))
   (define pre-345-early-rush-raw?
     (and live-obs-harvesters?
          (< frame 5400)
          (< ally-combat-supply-early 12)
          (pair? pre-345-enemy-combat-units)
+         (not pre-345-outnumbered-light-poke?)
          (or (>= pre-345-enemy-ling-cnt 4)
              (and (< frame 2800) (>= pre-345-enemy-ling-cnt 2))
              (>= pre-345-rush-posterior 0.50)
-             (for/or ([e (in-list pre-345-enemy-combat-units)])
-               (define ex (exact->inexact (hash-ref e 'x 9999.0)))
-               (define ey (exact->inexact (hash-ref e 'y 9999.0)))
-               (or (<= (+ (sqr (- ex base-x)) (sqr (- ey base-y))) 576.0)
-                   (<= (+ (sqr (- ex nat-x)) (sqr (- ey nat-y))) 324.0))))))
+             (> pre-345-near-enemy-supply 0.0))))
   ;; W18-P0-1-rt (`#35 T v 12PoolBot` `f=2433` natural CC mid-rush): Latch early-rush survival
   ;; memory for 30s (`672f`, capped at `5400f`) so a 4s fog gap between 12-Pool Ling waves
   ;; NEVER triggers a suicidal 400M expansion!
@@ -9245,6 +9513,7 @@
       (l2-select-uncamped-expansion-pad ctx (< active-bases 2)))
     (when (and exp-x exp-y)
       (l2-emit! ctx (list 'expand exp-x exp-y))
+      (l2-record-expand-pad-issued! ctx exp-x exp-y)
       (l2-record-build-issue-lock! ctx early-race-th-sym)
       (order-ledger-record-issued! oledger-early (+ 815000 (modulo frame 10000)) 'expand early-race-th-sym exp-x exp-y frame)
       (set-l2-ctx-minerals! ctx (max 0 (- (l2-ctx-minerals ctx) (sc2-race-townhall-min-cost race))))))
@@ -12287,11 +12556,21 @@
 ;; cannot consume the expansion bank when the `'expand` action waits on cooldown or pad checks.
 (define (l2-protect-unemitted-scheduled-expansion! ctx race-th-sym)
   (define md (l2-ctx-macro-decision ctx))
+  (define one-base-light-poke-ok?
+    (and (< (l2-ctx-active-bases ctx) 2)
+         (not (l2-ctx-worker-rush-active? ctx))
+         (not (l2-ctx-under-early-cheese? ctx))
+         (not (l2-ctx-bldg-actively-damaged? ctx))
+         (<= (l2-ctx-live-enemy-threat-supply ctx)
+             (max 2.0 (l2-ctx-live-army-supply ctx)))
+         (or (not (l2-ctx-under-base-attack? ctx))
+             (<= (l2-ctx-live-enemy-threat-supply ctx)
+                 (l2-ctx-live-army-supply ctx)))))
   (when (and (l2-ctx-live-obs-harvesters? ctx)
              md
              (= (order-ledger-pending-count-for-type (l2-ctx-oledger ctx) race-th-sym (l2-ctx-frame ctx)) 0)
              (not (l2-ctx-escrow-suppressed-active? ctx))
-             (not (l2-ctx-under-base-attack? ctx))
+             (or (not (l2-ctx-under-base-attack? ctx)) one-base-light-poke-ok?)
              (not (l2-ctx-early-survival-crisis? ctx))
              ;; W5-P0-2-rt: Never let urgent-combat-or-intel-need? strip protection from a
              ;; Brain-scheduled 1-base Natural expansion when enemy threat is tiny (<=2.0)
@@ -12299,9 +12578,9 @@
              (not (l2-ctx-severe-intel-blindness? ctx))
              (or (< (l2-ctx-active-bases ctx) 2)
                  (not (l2-ctx-urgent-combat-or-intel-need? ctx)))
-             (not (l2-ctx-crisis-tech-upgrade-deferral? ctx))
-             (<= (l2-ctx-live-enemy-threat-supply ctx) 2.0)
-             (< (l2-ctx-minerals ctx) 600)
+             (or (not (l2-ctx-crisis-tech-upgrade-deferral? ctx)) one-base-light-poke-ok?)
+             (or (<= (l2-ctx-live-enemy-threat-supply ctx) 2.0) one-base-light-poke-ok?)
+             (or (< (l2-ctx-minerals ctx) 600) (< (l2-ctx-active-bases ctx) 2))
              (memq race-th-sym (macro-brain-decision-scheduled-ids md)))
     (set-l2-ctx-bo-reserved-min! ctx
                                  (max (l2-ctx-bo-reserved-min ctx)
@@ -12399,16 +12678,35 @@
             (not early-survival-crisis?)
             (not bldg-actively-damaged?)
             (<= live-enemy-threat-supply (max 10 (+ live-army-supply 4)))))
+  (define brain-sched-z-nat-hatch?
+    (and live-game?
+         (< (length hatcheries) 2)
+         (>= (l2-ctx-minerals ctx) (sc2-min-cost 'hatchery))
+         (macro-brain-decision? (l2-ctx-macro-decision ctx))
+         (let ([sids (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx))])
+           (and (memq 'hatchery sids)
+                (not (memq 'overlord sids))))
+         (not (and (l2-ctx-severe-intel-blindness? ctx) (null? ally-combat-units)))
+         (not worker-rush-active?)
+         (not under-early-cheese?)
+         (not early-survival-crisis?)
+         (not bldg-actively-damaged?)
+         (or (not under-base-attack?)
+             (<= live-enemy-threat-supply live-army-supply))))
   (define zerg-exp-x #f)
   (define zerg-exp-y #f)
   (when (and (>= (l2-ctx-minerals ctx) (sc2-min-cost 'hatchery))
                 (or zerg-4th-hatch-mineral-overflow?
+                    brain-sched-z-nat-hatch?
                     (l2-non-combat-min-ok? ctx (sc2-min-cost 'hatchery) 'hatchery))
-                (not blocked-nat-expanded-early?)
+                (or brain-sched-z-nat-hatch?
+                    (not blocked-nat-expanded-early?))
                 (not worker-rush-active?)
                 (not under-early-cheese?)
                 (not early-survival-crisis?)
-                (not crisis-freeze-expand-or-gas?)
+                (or (and brain-sched-z-nat-hatch?
+                         (<= live-enemy-threat-supply live-army-supply))
+                    (not crisis-freeze-expand-or-gas?))
                 (or (>= (length hatcheries) 2)
                     (not forward-proxy-detected?)
                     (and (memq 'spawning-pool ready-bldg-types)
@@ -12418,6 +12716,7 @@
                     (not zerg-early-pool-rush?)
                     (memq 'spawning-pool (l2-ctx-bldg-types ctx)))
                 (or (not under-base-attack?)
+                    brain-sched-z-nat-hatch?
                     (and zerg-4th-hatch-mineral-overflow? zerg-only-light-skirmish?))
                 (or (not live-game?)
                     (< (length hatcheries) 2)
@@ -12446,7 +12745,8 @@
                          (or (coupled-macro-plan-should-expand? macro-plan)
                              (>= frame SC2-MACRO-EXPAND-FRAME-THRESHOLD))))
                 (not (l2-build-issue-blocked? ctx 'hatchery))
-                (refractory-ready? cd-tracker '(macro-expand Zerg) frame SC2-EXPANSION-COOLDOWN-FRAMES)
+                (refractory-ready? cd-tracker '(macro-expand Zerg) frame
+                                   (if (and live-game? (< (length hatcheries) 2)) 196 SC2-EXPANSION-COOLDOWN-FRAMES))
                 (let-values ([(cand-ex cand-ey)
                               (l2-select-uncamped-expansion-pad ctx (< (length hatcheries) SC2-MIN-DESIRED-BASES))])
                   (and cand-ex cand-ey
@@ -12459,9 +12759,10 @@
                 (refractory-allow-action?! cd-tracker
                                            '(macro-expand Zerg)
                                            frame
-                                           SC2-EXPANSION-COOLDOWN-FRAMES))
+                                           (if (and live-game? (< (length hatcheries) 2)) 196 SC2-EXPANSION-COOLDOWN-FRAMES)))
        (when (and zerg-exp-x zerg-exp-y)
          (l2-emit! ctx (list 'expand zerg-exp-x zerg-exp-y))
+         (l2-record-expand-pad-issued! ctx zerg-exp-x zerg-exp-y)
          (l2-record-build-issue-lock! ctx 'hatchery)
          (order-ledger-record-issued! oledger (+ 810000 (modulo frame 10000)) 'expand 'hatchery zerg-exp-x zerg-exp-y frame)
          (l2-spend-resources-and-supply! ctx (sc2-min-cost 'hatchery) 0 0)))
@@ -12612,18 +12913,23 @@
             (enemy-tech-observation-requires-anti-air? tech-obs)]
            [else #f])))
   (set-l2-ctx-zerg-real-anti-air-threat?! ctx zerg-real-anti-air-threat?)
+  (define brain-wants-spire-now?
+    (or (eq? prio-saving-for-sym 'spire)
+        (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
+             (not (not (memq 'spire (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx))))))))
   (define zerg-holding-for-aa-spire?
        (and live-game?
-            (not crisis-tech-upgrade-deferral?)
-            (>= (length hatcheries) 3)
-            (or zerg-real-anti-air-threat?
-                (enemy-tech-observation-requires-anti-air? tech-obs)
-                (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
-                     (not (not (memq 'spire (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx)))))))
             (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
             (not (l2-building-present-or-pending? ctx 'spire))
             (not (l2-building-present-or-pending? ctx 'greater-spire))
-            (>= (l2-ctx-gas ctx) (sc2-gas-cost 'spire))))
+            (or (and brain-wants-spire-now?
+                     (>= (l2-ctx-gas ctx) 150)
+                     (>= (l2-ctx-minerals ctx) 125))
+                (and (or zerg-real-anti-air-threat?
+                         (and (not crisis-tech-upgrade-deferral?)
+                              (>= (length hatcheries) 3)
+                              (enemy-tech-observation-requires-anti-air? tech-obs)))
+                     (>= (l2-ctx-gas ctx) (sc2-gas-cost 'spire))))))
   (set-l2-ctx-zerg-holding-for-aa-spire?! ctx zerg-holding-for-aa-spire?)
   (define zerg-holding-for-aa-corruptor?
        (and live-game?
@@ -12710,6 +13016,24 @@
                 (not (memq 'hive (l2-ctx-bldg-types ctx)))
                 (not (l2-building-present-or-pending? ctx 'hive)))
        (l2-emit-building-morph-verified! ctx 'lair '(hatchery) 4))
+  ;; L19-P0-3 (`#43 ZvP` Spire gas-drain drop): Dispatch Brain-scheduled / anti-air Spire
+  ;; with creep-ring placement fallback BEFORE Queen, Overseer, Ravager, upgrades, or
+  ;; Hydralisk/Roach training can drain the 200M/200G bank!
+  (when (and (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
+             (or brain-wants-spire-now?
+                 zerg-holding-for-aa-spire?
+                 zerg-real-anti-air-threat?)
+             (not (l2-building-present-or-pending? ctx 'spire))
+             (not (l2-building-present-or-pending? ctx 'greater-spire))
+             (l2-save-cancel-rebuild-ready? ctx 'spire 60)
+             (>= (l2-ctx-minerals ctx) (sc2-min-cost 'spire))
+             (>= (l2-ctx-gas ctx) (sc2-gas-cost 'spire)))
+    (define-values (sp-ax sp-ay)
+      (l2-zerg-creep-ring-anchor ctx (safe-coord (+ base-x 5.0)) (safe-coord (+ base-y 4.0))))
+    (l2-emit-build-verified! ctx 'spire sp-ax sp-ay)
+    (when (l2-building-present-or-pending? ctx 'spire)
+      (set! zerg-holding-for-aa-spire? #f)
+      (set-l2-ctx-zerg-holding-for-aa-spire?! ctx #f)))
   (define lair-reserving-last-hatchery?
        (and live-game?
             zerg-wants-lair-now?
@@ -12901,6 +13225,8 @@
   (when (and (or (memq 'roach-warren ready-bldg-types)
                     (and crisis-tech-upgrade-deferral? (> (hash-ref open-prod-slots 'roach 0) 0)))
                 (or crisis-tech-upgrade-deferral? (not zerg-saving-for-expand?))
+                (>= (- (l2-ctx-minerals ctx) zerg-spire-res-min) (sc2-min-cost 'ravager))
+                (>= (- (l2-ctx-gas ctx) zerg-spire-res-gas) (sc2-gas-cost 'ravager))
                 (or (not live-game?)
                     (< (l2-unit-count ctx 'ravager)
                        (if crisis-tech-upgrade-deferral?
@@ -12975,6 +13301,7 @@
                                     (safe-coord (- base-y 4.0))))
        (l2-emit-build-verified! ctx 'evolution-chamber evo-ax evo-ay))
   (when (and (memq 'evolution-chamber ready-bldg-types)
+                (not zerg-holding-for-aa-spire?)
                 (or (not live-game?)
                     (and zerg-fog-army-floor-ok?
                          (not under-base-attack?)
@@ -13043,7 +13370,12 @@
   (define zerg-spire-res-min (l2-ctx-zerg-spire-res-min ctx))
   (define zerg-vs-tp-or-fog-floor (l2-ctx-zerg-vs-tp-or-fog-floor ctx))
   (when (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
+       (define p3-brain-wants-spire?
+         (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'spire)
+             (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
+                  (not (not (memq 'spire (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx))))))))
        (when (and (or (not zerg-saving-for-expand?)
+                      p3-brain-wants-spire?
                       zerg-holding-for-aa-spire?
                       zerg-real-anti-air-threat?
                       (and (>= (length hatcheries) 3)
@@ -13052,6 +13384,7 @@
                   (not (l2-building-present-or-pending? ctx 'greater-spire))
                   (l2-save-cancel-rebuild-ready? ctx 'spire 60)
                   (or (not live-game?)
+                      p3-brain-wants-spire?
                       (l2-plan-wants-now? ctx 'spire)
                       zerg-real-anti-air-threat?
                       enemy-heavy-ground-siege?
@@ -13060,7 +13393,7 @@
                   (>= (l2-ctx-minerals ctx) (sc2-min-cost 'spire))
                   (>= (l2-ctx-gas ctx) (sc2-gas-cost 'spire)))
          (define-values (sp-ax sp-ay)
-           (l2-safe-zerg-build-anchor ctx (safe-coord (+ base-x 5.0)) (safe-coord (+ base-y 4.0))))
+           (l2-zerg-creep-ring-anchor ctx (safe-coord (+ base-x 5.0)) (safe-coord (+ base-y 4.0))))
          (l2-emit-build-verified! ctx 'spire sp-ax sp-ay))
        (define zerg-lair-upgs-safe?
          (and (not zerg-holding-for-aa-spire?)
@@ -13541,7 +13874,7 @@
                               (not zerg-aa-tech-ready?)
                               (< (l2-ctx-gas ctx) 150)))
                     (>= (- (l2-ctx-minerals ctx) zerg-spire-res-min) min-floor)
-                    (>= (- (l2-ctx-gas ctx) eff-ultra-gas) (sc2-gas-cost 'roach))
+                    (>= (- (l2-ctx-gas ctx) (+ eff-ultra-gas zerg-spire-res-gas)) (sc2-gas-cost 'roach))
                     (or (not live-game?) (< cur-roaches 24))
                     (or (< cur-roaches 4)
                         (and live-game? (>= (l2-ctx-gas ctx) 50))
@@ -13554,9 +13887,10 @@
                                      (< (l2-ctx-gas ctx) 100))))))
        (when (and crisis-tech-upgrade-deferral?
                   (not zerg-real-anti-air-threat?)
+                  (not zerg-holding-for-aa-spire?)
                   (memq 'roach-warren ready-bldg-types)
-                  (>= (l2-ctx-minerals ctx) (sc2-min-cost 'roach))
-                  (>= (l2-ctx-gas ctx) (sc2-gas-cost 'roach)))
+                  (>= (- (l2-ctx-minerals ctx) zerg-spire-res-min) (sc2-min-cost 'roach))
+                  (>= (- (l2-ctx-gas ctx) zerg-spire-res-gas) (sc2-gas-cost 'roach)))
          (l2-try-train-unit! ctx 'roach 'larva 4 #:respect-bo-reserve? #f))
        (cond
          [(and (or (memq 'spire ready-bldg-types) (memq 'greater-spire ready-bldg-types))
@@ -13600,8 +13934,8 @@
                      (or zerg-mineral-dump? (l2-can-spend-by-priority? ctx 'zergling 'combat-unit)))
             (l2-try-train-unit! ctx 'zergling 'larva (if zerg-mineral-dump? 6 4) #:respect-bo-reserve? (not zerg-mineral-dump?)))]
          [(and (memq 'hydralisk-den ready-bldg-types)
-               (>= (l2-ctx-minerals ctx) (sc2-min-cost 'hydralisk))
-               (>= (- (l2-ctx-gas ctx) zerg-ultra-res-gas) (sc2-gas-cost 'hydralisk)))
+               (>= (- (l2-ctx-minerals ctx) zerg-spire-res-min) (sc2-min-cost 'hydralisk))
+               (>= (- (l2-ctx-gas ctx) (+ zerg-ultra-res-gas zerg-spire-res-gas)) (sc2-gas-cost 'hydralisk)))
           (when (or (not live-game?)
                     (< (l2-unit-count ctx 'hydralisk) 18))
             (l2-try-train-unit! ctx 'hydralisk 'larva 4
@@ -13618,7 +13952,8 @@
                                   (>= (l2-ctx-minerals ctx) 200)
                                   (< (l2-ctx-gas ctx) (sc2-gas-cost 'hydralisk)))
                               (< (l2-unit-count ctx 'roach) 20)))
-                     (>= (- (l2-ctx-gas ctx) (if (< (l2-unit-count ctx 'roach) 4) 0 zerg-ultra-res-gas)) (sc2-gas-cost 'roach))
+                     (>= (- (l2-ctx-minerals ctx) zerg-spire-res-min) (sc2-min-cost 'roach))
+                     (>= (- (l2-ctx-gas ctx) (+ (if (< (l2-unit-count ctx 'roach) 4) 0 zerg-ultra-res-gas) zerg-spire-res-gas)) (sc2-gas-cost 'roach))
                      (or (< (l2-unit-count ctx 'roach) 4)
                          (and live-game? (>= (l2-ctx-gas ctx) 50))
                          (l2-can-spend-by-priority? ctx 'roach 'combat-unit)))
@@ -13638,8 +13973,8 @@
                (not (and zerg-real-anti-air-threat?
                          (not zerg-aa-tech-ready?)
                          (< (l2-ctx-gas ctx) 150)))
-               (>= (l2-ctx-minerals ctx) (sc2-min-cost 'roach))
-               (>= (- (l2-ctx-gas ctx) (if (< (l2-unit-count ctx 'roach) 4) 0 zerg-ultra-res-gas)) (sc2-gas-cost 'roach)))
+               (>= (- (l2-ctx-minerals ctx) zerg-spire-res-min) (sc2-min-cost 'roach))
+               (>= (- (l2-ctx-gas ctx) (+ (if (< (l2-unit-count ctx 'roach) 4) 0 zerg-ultra-res-gas) zerg-spire-res-gas)) (sc2-gas-cost 'roach)))
           (l2-try-train-unit! ctx 'roach 'larva 4
                            #:respect-bo-reserve?
                            (or zerg-saving-for-tech-or-aa?
@@ -13995,32 +14330,48 @@
                (order-ledger-record-issued! oledger gid 'hold-position 'door-seal door-x door-y frame))]))])
   (define protoss-exp-x #f)
   (define protoss-exp-y #f)
-  ;; W5-P0-2-rt: When Brain explicitly scheduled 1-base Natural `nexus` (and NOT `pylon`)
-  ;; during peaceful macro, never let L2's `100M/125M` supply/urgent-combat surcharge veto
-  ;; `(expand nat)` at `400-499M` (fixes #30 PvP `f=3584` `440M` veto -> drained to `0M`!).
+  ;; W5-P0-2-rt / L19-P0-3 (`#009`/`#012` 1BaseLock): When Brain explicitly scheduled 1-base
+  ;; Natural `nexus` (and NOT `pylon`), never let L2 surcharges, blocked-nat flags, or a light
+  ;; poke (`enemy-threat-supply <= army-supply`) silently veto `(expand)`!
+  (define protoss-light-poke-ok?
+    (and (not worker-rush-active?)
+         (not under-early-cheese?)
+         (not early-survival-crisis?)
+         (not (l2-ctx-bldg-actively-damaged? ctx))
+         (<= (l2-ctx-live-enemy-threat-supply ctx) live-army-supply)))
   (define brain-sched-p-nat-nexus?
     (and live-game?
          (< (length nexuses) 2)
+         (>= (l2-ctx-minerals ctx) (sc2-min-cost 'nexus))
          (macro-brain-decision? (l2-ctx-macro-decision ctx))
          (let ([sids (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx))])
            (and (memq 'nexus sids)
                 (not (memq 'pylon sids))))
+         (not (and (l2-ctx-severe-intel-blindness? ctx) (null? (l2-ctx-ally-combat-units ctx))))
          (not worker-rush-active?)
          (not under-early-cheese?)
          (not early-survival-crisis?)
-         (not under-base-attack?)))
+         (not (l2-ctx-bldg-actively-damaged? ctx))
+         (or (not under-base-attack?)
+             protoss-light-poke-ok?)))
   (when (and (>= (l2-ctx-minerals ctx) (sc2-min-cost 'nexus))
                 (or brain-sched-p-nat-nexus?
                     (l2-non-combat-min-ok? ctx (sc2-min-cost 'nexus) 'nexus))
-                (not blocked-nat-expanded-early?)
+                (or brain-sched-p-nat-nexus?
+                    (not blocked-nat-expanded-early?))
                 (not under-early-cheese?)
                 (not early-survival-crisis?)
-                (not crisis-freeze-expand-or-gas?)
-                (not under-base-attack?)
+                (or (and brain-sched-p-nat-nexus? protoss-light-poke-ok?)
+                    (not crisis-freeze-expand-or-gas?))
+                (or brain-sched-p-nat-nexus?
+                    (not under-base-attack?))
                 (or (>= (length nexuses) 2)
                     (not (l2-ctx-forward-proxy-detected? ctx))
                     (>= live-army-supply 10)
-                    (>= (l2-ctx-minerals ctx) 550))
+                    (>= (l2-ctx-minerals ctx) 550)
+                    (and brain-sched-p-nat-nexus?
+                         protoss-light-poke-ok?
+                         (>= live-army-supply 4)))
                 (or (>= (length nexuses) 2)
                     (not (l2-enemy-early-pool-detected? ctx))
                     (and (l2-building-present-or-pending? ctx 'cybernetics-core)
@@ -14068,7 +14419,8 @@
                              (eq? (l2-ctx-prio-saving-for-sym ctx) 'nexus)
                              (>= frame SC2-MACRO-EXPAND-FRAME-THRESHOLD))))
                 (not (l2-build-issue-blocked? ctx 'nexus))
-                (refractory-ready? cd-tracker '(macro-expand Protoss) frame SC2-EXPANSION-COOLDOWN-FRAMES)
+                (refractory-ready? cd-tracker '(macro-expand Protoss) frame
+                                   (if (and live-game? (< (length nexuses) 2)) 196 SC2-EXPANSION-COOLDOWN-FRAMES))
                 (let-values ([(cand-ex cand-ey)
                               (l2-select-uncamped-expansion-pad ctx (< (length nexuses) SC2-MIN-DESIRED-BASES))])
                   (and cand-ex cand-ey
@@ -14078,9 +14430,10 @@
                 (refractory-allow-action?! cd-tracker
                                            '(macro-expand Protoss)
                                            frame
-                                           SC2-EXPANSION-COOLDOWN-FRAMES))
+                                           (if (and live-game? (< (length nexuses) 2)) 196 SC2-EXPANSION-COOLDOWN-FRAMES)))
        (when (and protoss-exp-x protoss-exp-y)
          (l2-emit! ctx (list 'expand protoss-exp-x protoss-exp-y))
+         (l2-record-expand-pad-issued! ctx protoss-exp-x protoss-exp-y)
          (l2-record-build-issue-lock! ctx 'nexus)
          (order-ledger-record-issued! oledger (+ 810000 (modulo frame 10000)) 'expand 'nexus protoss-exp-x protoss-exp-y frame)
          (l2-spend-resources-and-supply! ctx (sc2-min-cost 'nexus) 0 0)))
@@ -15298,7 +15651,19 @@
                     under-base-attack?
                     (and (eq? u-sym 'zealot) (>= (l2-ctx-minerals ctx) 400))
                     (l2-protoss-colossus-escrow-ok? ctx (sc2-min-cost u-sym) (sc2-gas-cost u-sym))))))
-  (when (and (or crisis-tech-upgrade-deferral?
+  (define protoss-brain-saving-1base-nat?
+    (and live-game?
+         (= (length nexuses) 1)
+         protoss-saving-for-expand?
+         (eq? (l2-ctx-prio-saving-for-sym ctx) 'nexus)
+         (>= (l2-ctx-minerals ctx) 250)
+         (not (l2-ctx-worker-rush-active? ctx))
+         (not under-early-cheese?)
+         (not (l2-ctx-early-survival-crisis? ctx))
+         (not (l2-ctx-bldg-actively-damaged? ctx))
+         (<= (l2-ctx-live-enemy-threat-supply ctx) (l2-ctx-live-army-supply ctx))))
+  (when (and (or (and crisis-tech-upgrade-deferral?
+                      (not protoss-brain-saving-1base-nat?))
                      (l2-ctx-early-survival-crisis? ctx)
                      (l2-enemy-early-pool-detected? ctx)
                      (not protoss-saving-for-expand?))
@@ -16011,15 +16376,44 @@
          (not early-survival-crisis?)
          (>= (l2-ctx-minerals ctx) (sc2-min-cost 'command-center))
          (memq (l2-ctx-prio-saving-for-sym ctx) '(cyclone viking viking-fighter none #f))))
+  ;; L19-P0-3 (`#029`/`#047` 1BaseLock): Never let light poke (`enemy-threat <= army`),
+  ;; blocked-nat flags, or L2 surcharges silently veto a Brain-scheduled 1-base Terran CC!
+  (define terran-light-poke-ok?
+    (and (not (l2-ctx-worker-rush-active? ctx))
+         (not under-early-cheese?)
+         (not early-survival-crisis?)
+         (not (l2-ctx-bldg-actively-damaged? ctx))
+         (<= (l2-ctx-live-enemy-threat-supply ctx) live-army-supply)))
+  (define brain-sched-t-nat-cc?
+    (and live-game?
+         (< (length ccs) 2)
+         (>= (l2-ctx-minerals ctx) (sc2-min-cost 'command-center))
+         (macro-brain-decision? (l2-ctx-macro-decision ctx))
+         (let ([sids (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx))])
+           (and (memq 'command-center sids)
+                (not (memq 'supply-depot sids))))
+         (not (and (l2-ctx-severe-intel-blindness? ctx) (null? (l2-ctx-ally-combat-units ctx))))
+         (not (l2-ctx-worker-rush-active? ctx))
+         (not under-early-cheese?)
+         (not early-survival-crisis?)
+         (not (l2-ctx-bldg-actively-damaged? ctx))
+         (or (not under-base-attack?)
+             terran-light-poke-ok?)))
   (when (and (>= (l2-ctx-minerals ctx) (sc2-min-cost 'command-center))
                 (or terran-contained-bank-breakout?
                     terran-3rd-cc-overdue-override?
+                    brain-sched-t-nat-cc?
                     (l2-non-combat-min-ok? ctx (sc2-min-cost 'command-center) 'command-center))
-                (not blocked-nat-expanded-early?)
+                (or brain-sched-t-nat-cc?
+                    (not blocked-nat-expanded-early?))
                 (not under-early-cheese?)
                 (not early-survival-crisis?)
-                (or terran-contained-bank-breakout? (not crisis-freeze-expand-or-gas?))
-                (or terran-contained-bank-breakout? (not under-base-attack?))
+                (or terran-contained-bank-breakout?
+                    (and brain-sched-t-nat-cc? terran-light-poke-ok?)
+                    (not crisis-freeze-expand-or-gas?))
+                (or terran-contained-bank-breakout?
+                    brain-sched-t-nat-cc?
+                    (not under-base-attack?))
                 (< (length ccs) SC2-MAX-ACTIVE-BASES)
                 (= (order-ledger-pending-count-for-type oledger 'command-center frame) 0)
                 (or terran-contained-bank-breakout?
@@ -16055,7 +16449,8 @@
                              (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
                              (>= frame SC2-MACRO-EXPAND-FRAME-THRESHOLD))))
                 (not (l2-build-issue-blocked? ctx 'command-center))
-                (refractory-ready? cd-tracker '(macro-expand Terran) frame SC2-EXPANSION-COOLDOWN-FRAMES)
+                (refractory-ready? cd-tracker '(macro-expand Terran) frame
+                                   (if (and live-game? (< (length ccs) 2)) 196 SC2-EXPANSION-COOLDOWN-FRAMES))
                 (or (and live-game? (= (length ccs) 1) (or natural-blocked? natural-pad-camped?))
                     (let-values ([(cand-ex cand-ey)
                                   (if (and live-game?
@@ -16071,6 +16466,7 @@
                       ;; build the 2nd CC safely on the high ground in-main (morph Orbital + float later)!
                       (or (and cand-ex cand-ey)
                           terran-contained-bank-breakout?
+                          brain-sched-t-nat-cc?
                           (and live-game?
                                (= (length ccs) 1)
                                (not forward-proxy-detected?)
@@ -16080,7 +16476,7 @@
                 (refractory-allow-action?! cd-tracker
                                            '(macro-expand Terran)
                                            frame
-                                           SC2-EXPANSION-COOLDOWN-FRAMES))
+                                           (if (and live-game? (< (length ccs) 2)) 196 SC2-EXPANSION-COOLDOWN-FRAMES)))
        (cond
          [(and live-game?
                (= (length ccs) 1)
@@ -16093,6 +16489,7 @@
                                 (safe-coord base-y))]
          [(and terran-exp-x terran-exp-y)
           (l2-emit! ctx (list 'expand terran-exp-x terran-exp-y))
+          (l2-record-expand-pad-issued! ctx terran-exp-x terran-exp-y)
           (l2-record-build-issue-lock! ctx 'command-center)
           (order-ledger-record-issued! oledger (+ 810000 (modulo frame 10000)) 'expand 'command-center terran-exp-x terran-exp-y frame)
           (l2-spend-resources-and-supply! ctx (sc2-min-cost 'command-center) 0 0)]
@@ -17247,19 +17644,36 @@
        (l2-try-train-unit! ctx 'scv 'townhall 4
                         #:respect-bo-reserve? (l2-worker-respect-bo-reserve? ctx)))
   (set-l2-ctx-brain-scheduled-workers-rem! ctx 0)
+  ;; L19-P0-3 (`#029`/`#047` 1BaseLock): When Brain is saving for 1-base CC #2 and bank >= 250M
+  ;; with threat <= max(6.0, army), hold Barracks/Factory production so the 250..399M bank
+  ;; reaches 400M instead of continuously bleeding back to 0M!
+  (define terran-brain-saving-1base-cc?
+    (and live-game?
+         (= (length ccs) 1)
+         terran-saving-for-cc-expand?
+         (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+         (>= (l2-ctx-minerals ctx) 250)
+         (<= live-enemy-threat-supply (max 6.0 live-army-supply))
+         (not (l2-ctx-worker-rush-active? ctx))
+         (not under-early-cheese?)
+         (not (l2-ctx-early-survival-crisis? ctx))
+         (not (l2-ctx-bldg-actively-damaged? ctx))
+         (or (not under-base-attack?)
+             (<= live-enemy-threat-supply live-army-supply))))
   (define terran-expand-escrow-imminent?
-       (and live-game?
-            (not crisis-tech-upgrade-deferral?)
-            (not urgent-combat-or-intel-need?)
-            (<= live-enemy-threat-supply 6.0)
-            (or (and terran-saving-for-orbital?
-                     (l2-imminent-escrow-needed? ctx (sc2-min-cost 'orbital-command) 0))
-                (and terran-saving-for-expand?
-                     (l2-imminent-escrow-needed?
-                      ctx
-                      (max (l2-ctx-reserved-expansion-minerals ctx)
-                           (sc2-min-cost 'command-center))
-                      0)))))
+       (or terran-brain-saving-1base-cc?
+           (and live-game?
+                (not crisis-tech-upgrade-deferral?)
+                (not urgent-combat-or-intel-need?)
+                (<= live-enemy-threat-supply 6.0)
+                (or (and terran-saving-for-orbital?
+                         (l2-imminent-escrow-needed? ctx (sc2-min-cost 'orbital-command) 0))
+                    (and terran-saving-for-expand?
+                         (l2-imminent-escrow-needed?
+                          ctx
+                          (max (l2-ctx-reserved-expansion-minerals ctx)
+                               (sc2-min-cost 'command-center))
+                          0))))))
   (define terran-prod-save-hold?
        (if live-game? terran-expand-escrow-imminent? terran-saving-for-expand?))
   (define terran-orbital-save-hold?
@@ -17293,8 +17707,8 @@
          (define cur-d-slots (hash-ref open-prod-slots dtype 0))
          (when (> cur-d-slots 0)
            (hash-set! open-prod-slots dtype (sub1 cur-d-slots)))))
-  ;; W11-P0-2-rt / W12-P0-3-rt (`#14`/`#35`): Allow Barracks #1 early Marines (< 8 army supply)
-  ;; during expand escrow, yielding ONLY on the final 350..399M tick of peaceful 1-base CC #2,
+  ;; W11-P0-2-rt / W12-P0-3-rt (`#14`/`#35`) / L19-P0-3: Allow Barracks #1 early Marines (< 8 army supply)
+  ;; during expand escrow, yielding when Brain is saving for 1-base CC #2 at >= 250M (or >= 350M peaceful),
   ;; and ALWAYS bypass holds during active `early-survival-crisis?`!
   (define terran-early-marine-bypass?
     (and live-game?
@@ -17302,13 +17716,16 @@
          (< (l2-unit-count ctx 'marine) 10)
          (memq 'barracks ready-bldg-types)
          (or (l2-ctx-early-survival-crisis? ctx)
-             (not (and (= (length ccs) 1)
-                       (>= (l2-ctx-minerals ctx) 350)
-                       (<= live-enemy-threat-supply 0))))))
+             (and (not terran-brain-saving-1base-cc?)
+                  (not (and (= (length ccs) 1)
+                            (>= (l2-ctx-minerals ctx) 350)
+                            (<= live-enemy-threat-supply 0)))))))
   (when (and (or (not terran-prod-save-hold?)
                     terran-early-marine-bypass?
                     (l2-ctx-early-survival-crisis? ctx)
-                    crisis-tech-upgrade-deferral?
+                    (and crisis-tech-upgrade-deferral?
+                         (not (and terran-brain-saving-1base-cc?
+                                   (<= live-enemy-threat-supply live-army-supply))))
                     enemy-capital-air?
                     (and endgame-corner-hunt? (< (l2-unit-count ctx 'viking) 2)))
                 (or crisis-tech-upgrade-deferral?
