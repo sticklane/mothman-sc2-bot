@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "notes": "Real-SC2_x64 micro skirmish scenarios loaded by tools/sc2-tactics-arena.py. Add or edit via .agents/skills/add-arena-scenario/scripts/add_scenario.py.",
+  "schema_version": 2,
+  "notes": "Real-SC2_x64 micro skirmish scenarios (36 scenarios: 21 core + 15 Tactics Arena 2.0 match-forensics/pro-db/pattern-coverage across 5 terrains & selective upgrades) loaded by tools/sc2-tactics-arena.py. Add or edit via .agents/skills/add-arena-scenario/scripts/add_scenario.py.",
   "scenarios": [
     {
       "id": "sc2-real-p01-zealot-stalker-vs-bio",
@@ -268,6 +268,116 @@
           7.5,
           2.5
         ]
+      ],
+      "max_loops": 336
+    },
+    {
+      "id": "sc2-real-p08-stalker-phoenix-zealot-vs-bio-tank-cyclone",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "source": "match-forensics",
+      "terrain": "open",
+      "patterns": ["siege-dive", "phoenix-graviton-lift", "blink-charge-engage"],
+      "p1_upgrades": ["Blink", "Charge"],
+      "p2_upgrades": ["Stim", "CombatShield"],
+      "description": "Match-forensics (#24/#33): 6 Blink Stalkers + 3 Phoenixes + 4 Chargelots vs 10 Stim Marines + 2 Sieged Tanks + 2 Cyclones + 1 Medivac",
+      "p1_units": [
+        ["zealot", 4, -4.5, 0.0],
+        ["stalker", 6, -5.8, 0.0],
+        ["phoenix", 3, -6.5, -2.5]
+      ],
+      "p2_units": [
+        ["marine", 10, 4.5, 0.0],
+        ["cyclone", 2, 5.2, -1.5],
+        ["siege-tank-sieged", 2, 6.8, 0.0],
+        ["medivac", 1, 6.5, 1.5]
+      ],
+      "max_loops": 384
+    },
+    {
+      "id": "sc2-real-p09-disruptor-blink-prism-vs-bio-liberator-viking",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "source": "pro-db",
+      "terrain": "open",
+      "patterns": ["disruptor-purification-nova", "blink-micro", "warp-prism-support", "liberator-zone-dodge"],
+      "p1_upgrades": ["Blink"],
+      "p2_upgrades": ["Stim", "CombatShield"],
+      "description": "Pro-DB PvT: 2 Disruptors + 8 Blink Stalkers + 1 Warp Prism vs 12 Stim Marines + 4 Marauders + 2 Liberators + 2 Vikings",
+      "p1_units": [
+        ["stalker", 8, -4.8, 0.0],
+        ["disruptor", 2, -6.2, -1.5],
+        ["warp-prism", 1, -6.8, 1.5]
+      ],
+      "p2_units": [
+        ["marauder", 4, 4.2, 0.0],
+        ["marine", 12, 5.0, 0.0],
+        ["liberator", 2, 6.0, -2.0],
+        ["viking-fighter", 2, 6.0, 2.0]
+      ],
+      "max_loops": 384
+    },
+    {
+      "id": "sc2-real-p10-phoenix-oracle-stalker-vs-muta-ling-harass",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "source": "pro-db",
+      "terrain": "mineral-line-harass",
+      "patterns": ["mineral-line-defense", "phoenix-air-kite", "oracle-pulsar-revelation", "worker-protection"],
+      "p1_upgrades": ["Blink"],
+      "p2_upgrades": ["MetabolicBoost"],
+      "description": "Pro-DB PvZ Mineral-Line Harass: 4 Phoenixes + 1 Oracle + 4 Blink Stalkers + 8 Probes defending expansion vs 7 Mutalisks + 12 Speedlings",
+      "p1_units": [
+        ["probe", 8, -2.8, 0.0],
+        ["stalker", 4, -1.5, 1.5],
+        ["phoenix", 4, -1.0, -2.5],
+        ["oracle", 1, -2.0, -1.5]
+      ],
+      "p2_units": [
+        ["zergling", 12, 4.8, 1.5],
+        ["mutalisk", 7, 5.2, -2.0]
+      ],
+      "max_loops": 384
+    },
+    {
+      "id": "sc2-real-p11-dt-observer-stalker-vs-banshee-raven-bio",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": ["cloak-detection-snipe", "detector-focus", "blink-anti-air"],
+      "p1_upgrades": ["Blink"],
+      "p2_upgrades": ["Cloak", "Stim"],
+      "p2_pre_cloaked": true,
+      "description": "Cloak+Detection Duel: 3 Dark Templars + 6 Blink Stalkers + 2 Observers vs 3 Cloaked Banshees + 1 Raven + 8 Marines + 2 Marauders",
+      "p1_units": [
+        ["dark-templar", 3, -3.5, 0.0],
+        ["stalker", 6, -5.0, 0.0],
+        ["observer", 2, -5.5, 1.5]
+      ],
+      "p2_units": [
+        ["marauder", 2, 4.0, 0.0],
+        ["marine", 8, 4.8, 0.0],
+        ["banshee", 3, 5.5, -2.0],
+        ["raven", 1, 6.0, 1.5]
+      ],
+      "max_loops": 384
+    },
+    {
+      "id": "sc2-real-p12-12pool-probe-zealot-mineral-hold",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "source": "match-forensics",
+      "terrain": "mineral-line-harass",
+      "patterns": ["early-rush-mineral-hold", "worker-combat-surround", "zealot-choke"],
+      "description": "Match-forensics (#36): 1 Zealot + 1 Adept + 12 Probes defending expansion mineral line vs 12 early 12-Pool Zerglings",
+      "p1_units": [
+        ["probe", 12, -2.5, 0.0],
+        ["zealot", 1, -0.8, 0.5],
+        ["adept", 1, -1.2, -1.0]
+      ],
+      "p2_units": [
+        ["zergling", 12, 4.8, 0.0]
       ],
       "max_loops": 336
     },
@@ -541,6 +651,122 @@
       "max_loops": 336
     },
     {
+      "id": "sc2-real-t08-tvt-tank-viking-marine-highground-ramp",
+      "our_race": "Terran",
+      "enemy_race": "Terran",
+      "source": "match-forensics",
+      "terrain": "high-ground-ramp",
+      "high_ground_side": "p1",
+      "patterns": ["high-ground-siege", "air-vision-control", "tvt-tank-line"],
+      "p1_upgrades": ["Stim", "CombatShield"],
+      "p2_upgrades": ["Stim", "CombatShield"],
+      "description": "Match-forensics (#17/#41) TvT High-Ground Ramp: 3 Sieged Tanks + 4 Vikings + 10 Marines holding ramp vs 2 Tanks + 4 Vikings + 12 Marines + 2 Marauders",
+      "p1_units": [
+        ["marine", 10, -3.5, 0.0],
+        ["siege-tank-sieged", 3, -5.5, 0.0],
+        ["viking-fighter", 4, -4.5, 2.5]
+      ],
+      "p2_units": [
+        ["marauder", 2, 3.8, 0.0],
+        ["marine", 12, 4.8, 0.0],
+        ["siege-tank", 2, 6.2, 0.0],
+        ["viking-fighter", 4, 5.0, -2.5]
+      ],
+      "max_loops": 400
+    },
+    {
+      "id": "sc2-real-t09-widowmine-hellbat-cyclone-vs-ling-bane",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "source": "pro-db",
+      "terrain": "open",
+      "patterns": ["widow-mine-burrow", "hellbat-frontline", "baneling-split", "cyclone-kite"],
+      "p1_upgrades": ["DrillingClaws"],
+      "p2_upgrades": ["MetabolicBoost", "CentrifugalHooks"],
+      "description": "Pro-DB TvZ Mech-Bio: 2 Burrowed + 2 Unburrowed Widow Mines (DrillingClaws) + 6 Hellbats + 2 Cyclones + 6 Marines vs 24 Speedlings + 8 Speed Banelings",
+      "p1_units": [
+        ["hellbat", 6, -3.2, 0.0],
+        ["widow-mine-burrowed", 2, -2.8, -1.8],
+        ["widow-mine", 2, -4.2, 1.8],
+        ["cyclone", 2, -5.0, 0.0],
+        ["marine", 6, -5.5, 0.0]
+      ],
+      "p2_units": [
+        ["zergling", 24, 4.8, 0.0],
+        ["baneling", 8, 5.5, 0.0]
+      ],
+      "max_loops": 336
+    },
+    {
+      "id": "sc2-real-t10-ghost-bio-liberator-vs-ht-archon-chargelot",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "source": "pro-db",
+      "terrain": "open",
+      "patterns": ["ghost-emp", "liberator-defender-zone", "bio-kite-vs-chargelots"],
+      "p1_upgrades": ["Stim", "CombatShield"],
+      "p2_upgrades": ["Charge", "PsiStorm"],
+      "description": "Pro-DB Late TvP: 3 Ghosts + 2 Liberators + 12 Stim Marines + 4 Marauders + 2 Medivacs vs 2 High Templars + 3 Archons + 8 Chargelots + 4 Stalkers",
+      "p1_units": [
+        ["marauder", 4, -3.8, 0.0],
+        ["marine", 12, -4.8, 0.0],
+        ["ghost", 3, -5.5, -1.5],
+        ["liberator", 2, -5.8, 2.0],
+        ["medivac", 2, -6.5, 0.0]
+      ],
+      "p2_units": [
+        ["zealot", 8, 4.0, 0.0],
+        ["archon", 3, 4.5, 0.0],
+        ["stalker", 4, 5.5, 0.0],
+        ["high-templar", 2, 6.2, 0.0]
+      ],
+      "max_loops": 384
+    },
+    {
+      "id": "sc2-real-t11-thor-viking-hellbat-vs-broodlord-corruptor-viper",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "source": "pattern-coverage",
+      "terrain": "cliff-air-chasm",
+      "patterns": ["anti-capital-air", "thor-high-impact", "viking-focus-fire", "cliff-air-engagement"],
+      "description": "Cliff-Air Late TvZ: 3 Thors + 6 Vikings + 6 Hellbats at cliff edge vs 3 Brood Lords + 6 Corruptors + 2 Vipers hovering over chasm",
+      "p1_units": [
+        ["hellbat", 6, -3.5, 0.0],
+        ["thor", 3, -4.8, 0.0],
+        ["viking-fighter", 6, -5.2, 2.0]
+      ],
+      "p2_units": [
+        ["brood-lord", 3, 4.5, 0.0],
+        ["corruptor", 6, 5.5, -2.0],
+        ["viper", 2, 6.5, 2.0]
+      ],
+      "max_loops": 420
+    },
+    {
+      "id": "sc2-real-t12-banshee-raven-marine-vs-dt-stalker-observer",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "patterns": ["cloak-detection-snipe", "mineral-line-defense", "detector-protection"],
+      "p1_upgrades": ["Cloak", "Stim"],
+      "p1_pre_cloaked": true,
+      "p2_upgrades": ["Blink"],
+      "description": "Cloak+Detection Mineral-Line Defense: 2 Cloaked Banshees + 1 Raven + 8 Marines + 8 SCVs vs 3 Dark Templars + 4 Blink Stalkers + 1 Observer",
+      "p1_units": [
+        ["scv", 8, -2.8, 0.0],
+        ["marine", 8, -1.5, 0.5],
+        ["banshee", 2, -1.5, -2.0],
+        ["raven", 1, -2.2, 1.5]
+      ],
+      "p2_units": [
+        ["dark-templar", 3, 4.2, 0.0],
+        ["stalker", 4, 5.5, 0.0],
+        ["observer", 1, 5.2, 1.8]
+      ],
+      "max_loops": 384
+    },
+    {
       "id": "sc2-real-z01-lings-vs-marines-open",
       "our_race": "Zerg",
       "enemy_race": "Terran",
@@ -776,6 +1002,111 @@
           5.5,
           0.0
         ]
+      ],
+      "max_loops": 336
+    },
+    {
+      "id": "sc2-real-z08-corruptor-viper-volley-vs-tempest-carrier-cliff",
+      "our_race": "Zerg",
+      "enemy_race": "Protoss",
+      "source": "match-forensics",
+      "terrain": "cliff-air-chasm",
+      "patterns": ["capital-air-volley", "viper-abduct-pbomb", "cliff-air-engagement"],
+      "description": "Match-forensics (#28/#43) Cliff-Air Chasm: 12 Corruptors + 2 Vipers volley-engaging 4 Tempests + 3 Carriers hovering over unpathable chasm",
+      "p1_units": [
+        ["corruptor", 12, -5.5, 0.0],
+        ["viper", 2, -7.0, 0.0]
+      ],
+      "p2_units": [
+        ["tempest", 2, 5.5, -2.5],
+        ["tempest", 2, 5.5, 2.5],
+        ["carrier", 3, 6.8, 0.0]
+      ],
+      "max_loops": 420
+    },
+    {
+      "id": "sc2-real-z09-roach-burrow-heal-vs-stalker-immortal",
+      "our_race": "Zerg",
+      "enemy_race": "Protoss",
+      "source": "pro-db",
+      "terrain": "open",
+      "patterns": ["roach-burrow-heal", "tunneling-claws-micro", "focus-fire-dodge"],
+      "p1_upgrades": ["Burrow", "TunnelingClaws", "GlialReconstitution"],
+      "p2_upgrades": ["Blink"],
+      "description": "Pro-DB Burrow Micro: 12 Tunneling-Claws Speed Roaches + 2 Ravagers vs 6 Blink Stalkers + 2 Immortals (no detector — tests low-HP burrow-heal micro)",
+      "p1_units": [
+        ["roach", 12, -4.0, 0.0],
+        ["ravager", 2, -5.2, 0.0]
+      ],
+      "p2_units": [
+        ["immortal", 2, 4.0, 0.0],
+        ["stalker", 6, 5.2, 0.0]
+      ],
+      "max_loops": 420
+    },
+    {
+      "id": "sc2-real-z10-lurker-hydra-overseer-vs-stalker-immortal-obs-ramp",
+      "our_race": "Zerg",
+      "enemy_race": "Protoss",
+      "source": "pro-db",
+      "terrain": "high-ground-ramp",
+      "high_ground_side": "p1",
+      "patterns": ["lurker-burrow-hold", "high-ground-ramp", "detector-snipe"],
+      "p1_upgrades": ["LurkerRange", "AdaptiveTalons", "GroovedSpines"],
+      "p2_upgrades": ["Blink"],
+      "description": "Pro-DB High-Ground Ramp Lurkers: 2 Burrowed + 2 Unburrowed Lurkers (Range+Talons) + 8 Hydralisks + 1 Overseer vs 8 Blink Stalkers + 2 Immortals + 2 Zealots + 1 Observer",
+      "p1_units": [
+        ["lurker-mp-burrowed", 2, -3.2, -1.5],
+        ["lurker-mp", 2, -4.0, 1.5],
+        ["hydralisk", 8, -5.2, 0.0],
+        ["overseer", 1, -5.5, 2.0]
+      ],
+      "p2_units": [
+        ["zealot", 2, 3.8, 0.0],
+        ["immortal", 2, 4.5, 0.0],
+        ["stalker", 8, 5.5, 0.0],
+        ["observer", 1, 5.2, 2.0]
+      ],
+      "max_loops": 400
+    },
+    {
+      "id": "sc2-real-z11-ling-bane-flank-surround-vs-bio-tank",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "source": "pro-db",
+      "terrain": "flank-surround",
+      "patterns": ["two-prong-flank", "baneling-surround", "tank-splash-bait"],
+      "p1_upgrades": ["MetabolicBoost", "CentrifugalHooks"],
+      "p2_upgrades": ["Stim", "CombatShield"],
+      "description": "Pro-DB 2-Prong Flank Surround: 32 Speedlings + 10 Speed Banelings pincer-flanking from two opposite angles onto 14 Stim Marines + 2 Sieged Tanks + 1 Medivac",
+      "p1_units": [
+        ["zergling", 16, -6.5, -4.5],
+        ["baneling", 5, -7.2, -5.2],
+        ["zergling", 16, 6.5, 4.5],
+        ["baneling", 5, 7.2, 5.2]
+      ],
+      "p2_units": [
+        ["marine", 14, 0.0, 0.0],
+        ["siege-tank-sieged", 2, 0.0, 1.5],
+        ["medivac", 1, 0.0, -1.5]
+      ],
+      "max_loops": 336
+    },
+    {
+      "id": "sc2-real-z12-12pool-queen-ling-drone-mineral-hold",
+      "our_race": "Zerg",
+      "enemy_race": "Zerg",
+      "source": "match-forensics",
+      "terrain": "mineral-line-harass",
+      "patterns": ["early-rush-mineral-hold", "queen-transfuse", "worker-combat-surround"],
+      "description": "Match-forensics (#34): 1 Queen + 6 Zerglings + 12 Drones defending expansion mineral line vs 14 early 12-Pool Zerglings",
+      "p1_units": [
+        ["drone", 12, -2.5, 0.0],
+        ["zergling", 6, -1.0, 0.8],
+        ["queen", 1, -2.0, -1.2]
+      ],
+      "p2_units": [
+        ["zergling", 14, 4.8, 0.0]
       ],
       "max_loops": 336
     }

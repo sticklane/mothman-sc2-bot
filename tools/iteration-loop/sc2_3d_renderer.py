@@ -815,7 +815,11 @@ async def _render_single_race_arena_replay(
             winner = str(d.get("winner") or "Timeout")
             trade = d.get("trade_ratio")
             trade_s = f"{float(trade):.2f}x" if trade is not None else "-"
-            accent = (34, 197, 94) if winner == "Mothman" else ((239, 68, 68) if winner == "MicroDummy" else (245, 158, 11))
+            accent = (
+                (34, 197, 94)
+                if winner in ("Mothman", "Mothman-P1")
+                else ((239, 68, 68) if winner in ("MicroDummy", "Mothman-P2") else (245, 158, 11))
+            )
 
             # Fast-forward linearly to s_loop
             if s_loop > cur_loop:
@@ -857,7 +861,7 @@ async def _render_single_race_arena_replay(
             peak_loop = cur_loop
             peak_idx = 0
             frames_captured = 0
-            arena_bounds = (acx, acy, 26.0)
+            arena_bounds = (acx, acy, 32.0)
             fi = 0
 
             while cur_loop <= e_loop and frames_captured < max_frames_per_duel + 4:
@@ -920,11 +924,16 @@ async def _render_single_race_arena_replay(
 
             rendered.append({
                 "id": duel_id,
-                "race": race_spec.get("race") or d.get("race") or "",
+                "race": d.get("race") or str(race_spec.get("race") or "").split("_")[0],
                 "bot": d.get("bot") or "",
+                "p2_bot": d.get("p2_bot") or "",
+                "opponent_mode": d.get("opponent_mode") or "dummy",
                 "enemy_race": d.get("enemy_race") or "",
+                "terrain": d.get("terrain") or "open",
+                "source": d.get("source") or "core",
                 "winner": winner,
                 "trade_ratio": trade,
+                "p2_trade_ratio": d.get("p2_trade_ratio"),
                 "description": d.get("description") or "",
                 "context": d.get("context") or d.get("description") or "",
                 "p1_spec": d.get("p1_spec") or "",
@@ -932,6 +941,11 @@ async def _render_single_race_arena_replay(
                 "mothman_attack_unit_cmds": d.get("mothman_attack_unit_cmds"),
                 "mothman_move_unit_cmds": d.get("mothman_move_unit_cmds"),
                 "mothman_spell_unit_cmds": d.get("mothman_spell_unit_cmds"),
+                "p2_attack_unit_cmds": d.get("p2_attack_unit_cmds"),
+                "p2_move_unit_cmds": d.get("p2_move_unit_cmds"),
+                "p2_spell_unit_cmds": d.get("p2_spell_unit_cmds"),
+                "applied_p1_upgrade_ids": d.get("applied_p1_upgrade_ids") or [],
+                "applied_p2_upgrade_ids": d.get("applied_p2_upgrade_ids") or [],
                 "webp": str(out_webp),
                 "png": str(out_png),
                 "frames": frames_captured,

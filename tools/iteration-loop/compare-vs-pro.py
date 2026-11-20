@@ -228,6 +228,21 @@ def normalize_match(m):
             m.get("econ_eff_collapse")
             or (m.get("anomalies") or {}).get("econ_eff_collapse")
         ),
+        "early_atk_pct_2m_6m": safe_num(
+            m.get("early_atk_pct_2m_6m")
+            if m.get("early_atk_pct_2m_6m") is not None
+            else mt.get("early_atk_pct_2m_6m")
+        ),
+        "protoss_warpgate_sec": safe_num(
+            m.get("protoss_warpgate_sec")
+            if m.get("protoss_warpgate_sec") is not None
+            else mt.get("protoss_warpgate_sec")
+        ),
+        "zerg_roach_warren_sec": safe_num(
+            m.get("zerg_roach_warren_sec")
+            if m.get("zerg_roach_warren_sec") is not None
+            else mt.get("zerg_roach_warren_sec")
+        ),
         "action_rejects": int(m.get("action_rejects") or 0),
         "crashes": m.get("crashes") or [],
         "signatures": m.get("signatures") or [],
@@ -419,6 +434,9 @@ def summarize_slice(rows):
         "worker_econ_eff_4m_6m_avg": mean_opt([r["worker_econ_eff_4m_6m"] for r in rows]),
         "opp_worker_econ_eff_4m_6m_avg": mean_opt([r["opp_worker_econ_eff_4m_6m"] for r in rows]),
         "econ_eff_collapse_matches": sum(1 for r in rows if r.get("econ_eff_collapse")),
+        "early_atk_pct_2m_6m_avg": mean_opt([r["early_atk_pct_2m_6m"] for r in rows]),
+        "protoss_warpgate_sec_med": med_opt([r["protoss_warpgate_sec"] for r in rows if r["our_race"] == "Protoss"]),
+        "zerg_roach_warren_sec_med": med_opt([r["zerg_roach_warren_sec"] for r in rows if r["our_race"] == "Zerg"]),
         "action_rejects": sum(r["action_rejects"] for r in rows),
         "crashes": sum(len(r["crashes"]) for r in rows),
         "anomalies": dict(anom_counts),
@@ -585,6 +603,8 @@ def evaluate_promotion_gates(overall, by_race, tactics_data=None):
         total = tsum.get("total")
         if passed is not None and total:
             gates["tactics_suite_100pct"] = (passed == total and tsum.get("total_wire_rejects", 0) == 0)
+        elif tactics_data.get("mode") == "duel" and total:
+            gates["tactics_suite_100pct"] = (tsum.get("p2_wins", 99) == 0 and tsum.get("mothman_wins", 0) > 0)
     return gates
 
 
@@ -842,6 +862,12 @@ def main():
                 extra_w8 += (
                     f" | `Eff4-6` = **{fmt(cur_all.get('worker_econ_eff_4m_6m_avg'),'/w')}/{fmt(cur_all.get('opp_worker_econ_eff_4m_6m_avg'),'/w')}**"
                     f" | `EconEffCol` = **{cur_all.get('econ_eff_collapse_matches', 0)}**"
+                )
+            if cur_all.get("early_atk_pct_2m_6m_avg") is not None:
+                extra_w8 += (
+                    f" | `Atk2-6` = **{fmt(cur_all.get('early_atk_pct_2m_6m_avg'),'%')}**"
+                    f" | `P:WG` = **{fmt(cur_all.get('protoss_warpgate_sec_med'),'s',0)}**"
+                    f" | `Z:RW` = **{fmt(cur_all.get('zerg_roach_warren_sec_med'),'s',0)}**"
                 )
         print(
             f"\n### Stall, Retreat & Waste Watch (`W7/W8-LOOP-2`): "

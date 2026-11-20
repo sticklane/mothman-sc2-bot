@@ -61,12 +61,147 @@ def _fmt_units(pairs: list[Any] | None) -> str:
     return ", ".join(f"{cnt}× {name}" for name, cnt in pairs)
 
 
+def _norm_race(clip: dict[str, Any]) -> str:
+    raw = str(clip.get("race") or "").split("_")[0]
+    if raw in ("Protoss", "Terran", "Zerg"):
+        return raw
+    sid = str(clip.get("id") or "").replace("sc2-real-", "")
+    if sid.startswith("p"):
+        return "Protoss"
+    if sid.startswith("t"):
+        return "Terran"
+    if sid.startswith("z"):
+        return "Zerg"
+    return raw or "Other"
+
+
+def _enrich_arena_clips(
+    manifest: dict[str, Any] | None,
+    duel_json: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if not manifest or not manifest.get("clips"):
+        return []
+    by_id: dict[str, dict[str, Any]] = {}
+    if duel_json:
+        for s in duel_json.get("scenarios") or []:
+            if s.get("id"):
+                by_id[str(s["id"])] = s
+    out: list[dict[str, Any]] = []
+    for c in manifest["clips"]:
+        merged = dict(c)
+        extra = by_id.get(str(c.get("id") or ""))
+        if extra:
+            for k in (
+                "race", "enemy_race", "terrain", "source", "opponent_mode", "p2_bot",
+                "p2_trade_ratio", "p2_attack_unit_cmds", "p2_move_unit_cmds", "p2_spell_unit_cmds",
+                "applied_p1_upgrade_ids", "applied_p2_upgrade_ids",
+            ):
+                if merged.get(k) in (None, "") or (k == "race" and "_" in str(merged.get(k))):
+                    if extra.get(k) is not None:
+                        merged[k] = extra[k]
+        merged["race"] = _norm_race(merged)
+        out.append(merged)
+    out.sort(key=lambda x: str(x.get("id") or ""))
+    return out
+
+
+def _render_arena_section(
+    lines: list[str],
+    section_num: int,
+    title: str,
+    aclips: list[dict[str, Any]],
+    copy_dir: Path | None,
+    prefix: str,
+    is_selfplay: bool,
+) -> None:
+    lines.append(f"## {section_num}. {title} ({len(aclips)} Micro Duels)")
+    lines.append("")
+    by_race: dict[str, list[dict[str, Any]]] = {"Protoss": [], "Terran": [], "Zerg": []}
+    for c in aclips:
+        by_race.setdefault(_norm_race(c), []).append(c)
+
+    p1_win_tags = ("Mothman-P1",) if is_selfplay else ("Mothman",)
+    p2_win_tags = ("Mothman-P2",) if is_selfplay else ("MicroDummy",)
+
+    for race in ("Protoss", "Terran", "Zerg"):
+        rclips = by_race.get(race) or []
+        if not rclips:
+            continue
+        rw = sum(1 for c in rclips if c.get("winner") in p1_win_tags)
+        rl = sum(1 for c in rclips if c.get("winner") in p2_win_tags)
+        rt = len(rclips) - rw - rl
+        lbl = f"`P1={rw}W / P2={rl}W / {rt}T`" if is_selfplay else f"`{rw}W-{rl}L-{rt}T`"
+        lines.append(f"### {race} Duels ({lbl})")
+        lines.append("")
+        if is_selfplay:
+            lines.append("| Duel | Terrain | Winner | P1 Trade | P1 A/M/S | P2 A/M/S | Matchup Context |")
+            lines.append("|---|---|---|---:|---:|---:|---|")
+        else:
+            lines.append("| Duel | Terrain | Winner | Trade | ATK / MOV / SPL | Matchup Context |")
+            lines.append("|---|---|---|---:|---:|---|")
+        for c in rclips:
+            sid = str(c.get("id", "")).replace("sc2-real-", "")
+            terr = str(c.get("terrain") or "open")
+            tr = c.get("trade_ratio")
+            tr_s = f"{float(tr):.2f}x" if tr is not None else "—"
+            cmds1 = f"{c.get('mothman_attack_unit_cmds', '—')}/{c.get('mothman_move_unit_cmds', '—')}/{c.get('mothman_spell_unit_cmds', '—')}"
+            ctx = c.get("context") or c.get("description") or ""
+            if is_selfplay:
+                cmds2 = f"{c.get('p2_attack_unit_cmds', '—')}/{c.get('p2_move_unit_cmds', '—')}/{c.get('p2_spell_unit_cmds', '—')}"
+                lines.append(f"| `{sid}` | `{terr}` | **{c.get('winner', '')}** | `{tr_s}` | `{cmds1}` | `{cmds2}` | {ctx} |")
+            else:
+                lines.append(f"| `{sid}` | `{terr}` | **{c.get('winner', '')}** | `{tr_s}` | `{cmds1}` | {ctx} |")
+        lines.append("")
+
+        lines.append("````carousel")
+        for idx, c in enumerate(rclips):
+            if idx > 0:
+                lines.append("<!-- slide -->")
+            webp_p = _stage_media(c.get("webp"), copy_dir, prefix=prefix)
+            png_p = _stage_media(c.get("png"), copy_dir, prefix=prefix)
+            sid = str(c.get("id", "")).replace("sc2-real-", "")
+            terr = str(c.get("terrain") or "open")
+            tr = c.get("trade_ratio")
+            tr_s = f"{float(tr):.2f}x" if tr is not None else "—"
+            lines.append(f"#### `{sid}` (`{terr}`) — **{c.get('winner', '')}** (`{tr_s}`)")
+            lines.append("")
+            if webp_p:
+                lines.append(f"![{sid} animated 3D duel]({webp_p})")
+            elif png_p:
+                lines.append(f"![{sid} peak clash]({png_p})")
+            lines.append("")
+            lines.append(f"- **Scenario:** {c.get('context') or c.get('description') or ''} (`terrain={terr}`, `source={c.get('source') or 'core'}`)")
+            if c.get("p1_spec") or c.get("p2_spec"):
+                p2_name = c.get("p2_bot") or ("Mothman-P2" if is_selfplay else "MicroDummy")
+                p1_name = c.get("bot") or ("Mothman-P1" if is_selfplay else "Mothman")
+                lines.append(f"- **Forces:** {p1_name} (`{c.get('p1_spec', '')}`) vs {p2_name} (`{c.get('p2_spec', '')}`)")
+            if is_selfplay:
+                lines.append(
+                    f"- **Wire Telemetry:** P1 `ATK={c.get('mothman_attack_unit_cmds', '—')}` / `MOV={c.get('mothman_move_unit_cmds', '—')}` / `SPL={c.get('mothman_spell_unit_cmds', '—')}` | "
+                    f"P2 `ATK={c.get('p2_attack_unit_cmds', '—')}` / `MOV={c.get('p2_move_unit_cmds', '—')}` / `SPL={c.get('p2_spell_unit_cmds', '—')}` | "
+                    f"Media: `{_fmt_kb(c.get('webp_bytes'))}` WebP (`{c.get('frames', 0)}`f)"
+                )
+            else:
+                lines.append(
+                    f"- **Wire Telemetry:** `ATK={c.get('mothman_attack_unit_cmds', '—')}` | "
+                    f"`MOV={c.get('mothman_move_unit_cmds', '—')}` | `SPL={c.get('mothman_spell_unit_cmds', '—')}` | "
+                    f"Media: `{_fmt_kb(c.get('webp_bytes'))}` WebP (`{c.get('frames', 0)}`f)"
+                )
+            if png_p:
+                lines.append(f"- **Peak-Clash 960×720 Keyframe:** [Peak PNG](file://{png_p})")
+        lines.append("````")
+        lines.append("")
+
+
 def build_report(
     loop_label: str,
     score_data: dict[str, Any] | None,
     replays_manifest: dict[str, Any] | None,
     arena_manifest: dict[str, Any] | None,
     copy_dir: Path | None,
+    selfplay_manifest: dict[str, Any] | None = None,
+    arena_json: dict[str, Any] | None = None,
+    selfplay_json: dict[str, Any] | None = None,
 ) -> str:
     lines: list[str] = []
     lines.append(f"# Mothman SC2 Bot — Real-3D Gameplay Visuals ({loop_label})")
@@ -76,6 +211,9 @@ def build_report(
         "> Every animated WebP (`800×600 @ 16 fps`) and Peak-Clash PNG (`960×720`) below is rendered directly by the real **StarCraft II (`SC2_x64` Base75689)** 3D engine on host AMD Radeon OpenGL/EGL — zero custom 2D drawing. On-clip overlays stay minimal (3D viewport + real SC2 minimap + single-line top-left pill); full tactical context is provided beside each clip."
     )
     lines.append("")
+
+    aclips = _enrich_arena_clips(arena_manifest, arena_json)
+    sclips = _enrich_arena_clips(selfplay_manifest, selfplay_json)
 
     # Top KPI banner if score_json provided
     if score_data:
@@ -97,14 +235,21 @@ def build_report(
                 f"- **Critical Replay Clips:** `{replays_manifest.get('clips_count', 0)}` clips rendered in "
                 f"`{replays_manifest.get('wall_sec', 0)}s` (`{_fmt_kb(replays_manifest.get('total_webp_bytes'))}` WebP total)"
             )
-        if arena_manifest:
-            ac = arena_manifest.get("clips") or []
-            aw = sum(1 for c in ac if c.get("winner") == "Mothman")
-            al = sum(1 for c in ac if c.get("winner") == "MicroDummy")
-            at = len(ac) - aw - al
+        if arena_manifest and aclips:
+            aw = sum(1 for c in aclips if c.get("winner") == "Mothman")
+            al = sum(1 for c in aclips if c.get("winner") == "MicroDummy")
+            at = len(aclips) - aw - al
             lines.append(
-                f"- **Real-`SC2_x64` 21-Duel Tactics Arena:** **`{aw}W-{al}L-{at}T`** — all `{len(ac)}` duels rendered in "
+                f"- **Real-`SC2_x64` {len(aclips)}-Duel Tactics Arena (`--opponent dummy`):** **`{aw}W-{al}L-{at}T`** — all `{len(aclips)}` duels rendered in "
                 f"`{arena_manifest.get('wall_sec', 0)}s` (`{_fmt_kb(arena_manifest.get('total_webp_bytes'))}` WebP total)"
+            )
+        if selfplay_manifest and sclips:
+            sp1 = sum(1 for c in sclips if c.get("winner") == "Mothman-P1")
+            sp2 = sum(1 for c in sclips if c.get("winner") == "Mothman-P2")
+            spt = len(sclips) - sp1 - sp2
+            lines.append(
+                f"- **Real-`SC2_x64` {len(sclips)}-Duel Mothman-vs-Mothman Self-Play (`--opponent self`):** **`P1={sp1}W / P2={sp2}W / {spt}T`** — all `{len(sclips)}` duels rendered in "
+                f"`{selfplay_manifest.get('wall_sec', 0)}s` (`{_fmt_kb(selfplay_manifest.get('total_webp_bytes'))}` WebP total)"
             )
         lines.append("")
 
@@ -166,64 +311,32 @@ def build_report(
         lines.append("")
 
     # -------------------------------------------------------------------------
-    # SECTION 2: ALL 21 REAL-SC2_x64 TACTICS ARENA DUELS
+    # SECTION 2: REAL-SC2_x64 TACTICS ARENA 2.0 (--opponent dummy)
     # -------------------------------------------------------------------------
-    if arena_manifest and arena_manifest.get("clips"):
-        aclips = arena_manifest["clips"]
-        lines.append(f"## 2. Real-`SC2_x64` Tactics Arena — All {len(aclips)} Micro Duels")
-        lines.append("")
-        by_race: dict[str, list[dict[str, Any]]] = {"Protoss": [], "Terran": [], "Zerg": []}
-        for c in aclips:
-            r = str(c.get("race") or "Other")
-            by_race.setdefault(r, []).append(c)
+    if aclips:
+        _render_arena_section(
+            lines,
+            section_num=2,
+            title="Real-`SC2_x64` Tactics Arena 2.0 (`--opponent dummy`)",
+            aclips=aclips,
+            copy_dir=copy_dir,
+            prefix="arena_",
+            is_selfplay=False,
+        )
 
-        for race in ("Protoss", "Terran", "Zerg"):
-            rclips = by_race.get(race) or []
-            if not rclips:
-                continue
-            rw = sum(1 for c in rclips if c.get("winner") == "Mothman")
-            rl = sum(1 for c in rclips if c.get("winner") == "MicroDummy")
-            rt = len(rclips) - rw - rl
-            lines.append(f"### {race} Duels (`{rw}W-{rl}L-{rt}T`)")
-            lines.append("")
-            lines.append("| Duel | Winner | Trade | ATK / MOV / SPL | Matchup Context |")
-            lines.append("|---|---|---:|---:|---|")
-            for c in rclips:
-                sid = str(c.get("id", "")).replace("sc2-real-", "")
-                tr = c.get("trade_ratio")
-                tr_s = f"{float(tr):.2f}x" if tr is not None else "—"
-                cmds_s = f"{c.get('mothman_attack_unit_cmds', '—')}/{c.get('mothman_move_unit_cmds', '—')}/{c.get('mothman_spell_unit_cmds', '—')}"
-                lines.append(f"| `{sid}` | **{c.get('winner', '')}** | `{tr_s}` | `{cmds_s}` | {c.get('context') or c.get('description') or ''} |")
-            lines.append("")
-
-            lines.append("````carousel")
-            for idx, c in enumerate(rclips):
-                if idx > 0:
-                    lines.append("<!-- slide -->")
-                webp_p = _stage_media(c.get("webp"), copy_dir, prefix="arena_")
-                png_p = _stage_media(c.get("png"), copy_dir, prefix="arena_")
-                sid = str(c.get("id", "")).replace("sc2-real-", "")
-                tr = c.get("trade_ratio")
-                tr_s = f"{float(tr):.2f}x" if tr is not None else "—"
-                lines.append(f"#### `{sid}` — **{c.get('winner', '')}** (`{tr_s}`)")
-                lines.append("")
-                if webp_p:
-                    lines.append(f"![{sid} animated 3D duel]({webp_p})")
-                elif png_p:
-                    lines.append(f"![{sid} peak clash]({png_p})")
-                lines.append("")
-                lines.append(f"- **Scenario:** {c.get('context') or c.get('description') or ''}")
-                if c.get("p1_spec") or c.get("p2_spec"):
-                    lines.append(f"- **Forces:** Mothman (`{c.get('p1_spec', '')}`) vs MicroDummy (`{c.get('p2_spec', '')}`)")
-                lines.append(
-                    f"- **Wire Telemetry:** `ATK={c.get('mothman_attack_unit_cmds', '—')}` | "
-                    f"`MOV={c.get('mothman_move_unit_cmds', '—')}` | `SPL={c.get('mothman_spell_unit_cmds', '—')}` | "
-                    f"Media: `{_fmt_kb(c.get('webp_bytes'))}` WebP (`{c.get('frames', 0)}`f)"
-                )
-                if png_p:
-                    lines.append(f"- **Peak-Clash 960×720 Keyframe:** [Peak PNG](file://{png_p})")
-            lines.append("````")
-            lines.append("")
+    # -------------------------------------------------------------------------
+    # SECTION 3: MOTHMAN-VS-MOTHMAN SELF-PLAY (--opponent self)
+    # -------------------------------------------------------------------------
+    if sclips:
+        _render_arena_section(
+            lines,
+            section_num=3,
+            title="Real-`SC2_x64` Mothman-vs-Mothman Self-Play (`--opponent self`)",
+            aclips=sclips,
+            copy_dir=copy_dir,
+            prefix="selfplay_",
+            is_selfplay=True,
+        )
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -234,6 +347,9 @@ def main() -> int:
     ap.add_argument("--score-json", default=None)
     ap.add_argument("--replays-manifest", default=None)
     ap.add_argument("--arena-manifest", default=None)
+    ap.add_argument("--arena-json", default=None, help="Optional Tactics Arena dummy JSON report for terrain/source metadata")
+    ap.add_argument("--selfplay-manifest", default=None, help="Optional Self-Play arena_manifest.json")
+    ap.add_argument("--selfplay-json", default=None, help="Optional Tactics Arena selfplay JSON report for P2 telemetry & terrain")
     ap.add_argument("--copy-media-to", default=None, help="Optional directory to copy WebP/PNG files for artifact embedding")
     ap.add_argument("--out-md", required=True, help="Output Markdown path")
     args = ap.parse_args()
@@ -241,9 +357,21 @@ def main() -> int:
     score_data = json.loads(Path(args.score_json).read_text(encoding="utf-8")) if args.score_json and Path(args.score_json).exists() else None
     rep_man = json.loads(Path(args.replays_manifest).read_text(encoding="utf-8")) if args.replays_manifest and Path(args.replays_manifest).exists() else None
     arena_man = json.loads(Path(args.arena_manifest).read_text(encoding="utf-8")) if args.arena_manifest and Path(args.arena_manifest).exists() else None
+    arena_js = json.loads(Path(args.arena_json).read_text(encoding="utf-8")) if args.arena_json and Path(args.arena_json).exists() else None
+    sp_man = json.loads(Path(args.selfplay_manifest).read_text(encoding="utf-8")) if args.selfplay_manifest and Path(args.selfplay_manifest).exists() else None
+    sp_js = json.loads(Path(args.selfplay_json).read_text(encoding="utf-8")) if args.selfplay_json and Path(args.selfplay_json).exists() else None
     copy_dir = Path(args.copy_media_to) if args.copy_media_to else None
 
-    md = build_report(args.loop_label, score_data, rep_man, arena_man, copy_dir)
+    md = build_report(
+        args.loop_label,
+        score_data,
+        rep_man,
+        arena_man,
+        copy_dir,
+        selfplay_manifest=sp_man,
+        arena_json=arena_js,
+        selfplay_json=sp_js,
+    )
     out_p = Path(args.out_md)
     out_p.parent.mkdir(parents=True, exist_ok=True)
     out_p.write_text(md, encoding="utf-8")

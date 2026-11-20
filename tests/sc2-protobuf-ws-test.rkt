@@ -5449,6 +5449,223 @@
                      (<= (l25-dist (sc2-point2d-x gw4-pt) (sc2-point2d-y gw4-pt) 64.0 30.0) 6.5)))
     (cleanup!)))
 
+(printf "[Loop 26] Testing L26-P0-1 Protoss tight-spacing (0.5t) powered-placement fallback across all uncontested Pylons (#21/#36)...\n")
+(let ()
+  (define (l26-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define (mk-l26-u tag utype alliance x y
+                    #:hp [hp 100.0] #:shield [sh 0.0] #:rad [rad 1.0] #:orders [ords '()])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 0 #f #f #f
+              hp hp sh sh 0.0 0.0 0 0 #f #f #f #t #f
+              ords 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define (l26-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59926 "/sc2api" c-in c-out #f 1))
+    (define rpc-cnt (box 0))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define req-id-p (assoc 97 req-f))
+             (define id-b (if req-id-p (encode-uint32 97 (third req-id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (set-box! rpc-cnt (add1 (unbox rpc-cnt)))
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws rpc-cnt (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+
+  ;; L26-P0-1a: `shield-battery` (`895`, 2x2) flush side-by-side (`d = 2.0`) against Pylon `(32, 32)`:
+  ;; standard `#:min-spacing 2.0` rejects `d = 2.0` (`req-d = 2.0` strict `>`), so RPC #1 misses and
+  ;; tight-spacing `#:min-spacing 0.5` immediately succeeds on RPC #2 in the SAME step!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999)
+  (let-values ([(ws rpc-cnt cleanup!)
+                (l26-start-mock-ws
+                 (lambda (ab px py)
+                   (if (and (= ab 895) (<= (l26-dist px py 32.0 32.0) 2.05)) 1 2)))])
+    (define nx-m (mk-l26-u 9601 59 1 26.5 26.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define py-m (mk-l26-u 9602 60 1 32.0 32.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define prb1 (mk-l26-u 9603 84 1 30.0 31.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define obs-sb
+      (sc2-observation 9500 (sc2-player-common 1 400 100 40 24 6 18 0 0 0 0)
+                       (list nx-m py-m prb1) '()
+                       (list (sc2-power-source (sc2-point3d 32.0 32.0 8.0) 6.5 9602))
+                       #f '() '() '() '() '() '()))
+    (define sb-cmds
+      (translate-bot-actions->sc2-raw-commands '((build shield-battery 32.0 32.0))
+                                               obs-sb #:ws-conn ws #:game-info w3-ginfo))
+    (define sb-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 895))) sb-cmds))
+    (define sb-pt (and sb-cmd (sc2-raw-unit-command-target-pos sb-cmd)))
+    (check-true "l26-p0-1a-shield-battery-tight-05-places-flush-against-pylon-when-20-fails"
+                (and (= (unbox rpc-cnt) 2)
+                     (sc2-point2d? sb-pt)
+                     (<= (l26-dist (sc2-point2d-x sb-pt) (sc2-point2d-y sb-pt) 32.0 32.0) 2.05)
+                     (= (unbox SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP) -9999)))
+    (cleanup!))
+
+  ;; L26-P0-1b (`#21`/`#36` crowded Pylon Gateway): When an in-transit Probe build at `(31.5, 34.0)` blocks
+  ;; the only open Gateway (`883`) spot `(33.5, 33.5)` (`dist = 2.06 < 2.5`) under `#:min-spacing 2.0`,
+  ;; tight-spacing `#:min-spacing 0.5` (`reserved-dist = 1.5`) immediately places Gateway in the SAME step!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999)
+  (let-values ([(ws rpc-cnt cleanup!)
+                (l26-start-mock-ws
+                 (lambda (ab px py)
+                   (if (and (= ab 883) (<= (l26-dist px py 33.5 33.5) 0.1)) 1 2)))])
+    (define nx-m (mk-l26-u 9611 59 1 26.5 26.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define py-m (mk-l26-u 9612 60 1 30.0 34.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define gw1  (mk-l26-u 9613 62 1 26.5 34.5 #:hp 500.0 #:shield 500.0 #:rad 1.5))
+    (define cyb1 (mk-l26-u 9614 72 1 30.5 37.5 #:hp 550.0 #:shield 550.0 #:rad 1.5))
+    (define prb-busy
+      (mk-l26-u 9615 84 1 31.0 33.0 #:hp 20.0 #:shield 20.0 #:rad 0.375
+                #:orders (list (sc2-unit-order 881 (sc2-point3d 31.5 34.0 8.0) 0 0.0))))
+    (define prb-free (mk-l26-u 9616 84 1 29.0 32.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define obs-gw
+      (sc2-observation 9600 (sc2-player-common 1 550 100 40 28 8 20 0 0 0 0)
+                       (list nx-m py-m gw1 cyb1 prb-busy prb-free) '()
+                       (list (sc2-power-source (sc2-point3d 30.0 34.0 8.0) 6.5 9612))
+                       #f '() '() '() '() '() '()))
+    (define gw-cmds
+      (translate-bot-actions->sc2-raw-commands '((build gateway 30.0 34.0))
+                                               obs-gw #:ws-conn ws #:game-info w3-ginfo))
+    (define gw-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 883))) gw-cmds))
+    (define gw-pt (and gw-cmd (sc2-raw-unit-command-target-pos gw-cmd)))
+    (check-true "l26-p0-1b-gateway-tight-05-fallback-places-crowded-pylon-in-same-step"
+                (and (= (unbox rpc-cnt) 2)
+                     (sc2-point2d? gw-pt)
+                     (<= (l26-dist (sc2-point2d-x gw-pt) (sc2-point2d-y gw-pt) 33.5 33.5) 0.1)
+                     (= (unbox SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP) -9999)))
+    (cleanup!))
+
+  ;; L26-P0-1c: `robotics-facility` (`893`) with packed Main Pylon + contested 3rd Pylon (`96, 30` with enemy
+  ;; Zerglings) widens tight-spacing `0.5` fallback cleanly to uncontested Natural Pylon `(64, 30)`!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999)
+  (let-values ([(ws rpc-cnt cleanup!)
+                (l26-start-mock-ws
+                 (lambda (ab px py)
+                   ;; Only tight spot `(66.5, 30.5)` at Natural (`dist = 2.06` from in-transit Probe at `(64.5, 31.0)`)
+                   ;; OR contested 3rd Pylon `(96, 30)` are accepted — MUST pick Natural `(66.5, 30.5)`, NEVER 3rd!
+                   (if (and (= ab 893)
+                            (or (<= (l26-dist px py 66.5 30.5) 0.1)
+                                (>= px 90.0)))
+                       1 2)))])
+    (define nx-m (mk-l26-u 9621 59 1 26.5 26.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define nx-n (mk-l26-u 9622 59 1 64.5 24.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define py-m (mk-l26-u 9623 60 1 30.0 34.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define py-n (mk-l26-u 9624 60 1 64.0 30.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define py-3 (mk-l26-u 9625 60 1 96.0 30.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define prb-busy
+      (mk-l26-u 9626 84 1 63.0 31.0 #:hp 20.0 #:shield 20.0 #:rad 0.375
+                #:orders (list (sc2-unit-order 881 (sc2-point3d 64.5 31.0 8.0) 0 0.0))))
+    (define prb-free (mk-l26-u 9627 84 1 62.0 29.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define ling-3 (mk-l26-u 9628 105 4 95.5 31.0 #:hp 35.0 #:rad 0.375))
+    (define obs-robo
+      (sc2-observation 9700 (sc2-player-common 1 500 200 60 36 10 26 0 0 0 0)
+                       (list nx-m nx-n py-m py-n py-3 prb-busy prb-free ling-3) '()
+                       (list (sc2-power-source (sc2-point3d 30.0 34.0 8.0) 6.5 9623)
+                             (sc2-power-source (sc2-point3d 64.0 30.0 8.0) 6.5 9624)
+                             (sc2-power-source (sc2-point3d 96.0 30.0 8.0) 6.5 9625))
+                       #f '() '() '() '() '() '()))
+    (define robo-cmds
+      (translate-bot-actions->sc2-raw-commands '((build robotics-facility 30.0 34.0))
+                                               obs-robo #:ws-conn ws #:game-info w3-ginfo))
+    (define robo-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 893))) robo-cmds))
+    (define robo-pt (and robo-cmd (sc2-raw-unit-command-target-pos robo-cmd)))
+    (check-true "l26-p0-1c-robotics-facility-tight-05-widens-to-uncontested-natural-skipping-contested"
+                (and (= (unbox rpc-cnt) 2)
+                     (sc2-point2d? robo-pt)
+                     (<= (l26-dist (sc2-point2d-x robo-pt) (sc2-point2d-y robo-pt) 66.5 30.5) 0.1)
+                     (= (unbox SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP) -9999)))
+    (cleanup!))
+
+  ;; L26-P0-1d: When EVERY spot on ALL uncontested Pylons fails BOTH `2.0` AND tight `0.5`, BOTH searches
+  ;; execute (`rpc-cnt = 2`, distinct `'tight` neg-cd key), `SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP` is set
+  ;; to `9800`, and a repeat call 4 frames later (`9804`) hits both neg-cd caches (`0` extra RPCs)!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999)
+  (let-values ([(ws rpc-cnt cleanup!)
+                (l26-start-mock-ws (lambda (_ab _px _py) 2))])
+    (define nx-m (mk-l26-u 9631 59 1 26.5 26.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define py-m (mk-l26-u 9632 60 1 32.0 32.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define prb1 (mk-l26-u 9633 84 1 30.0 31.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define (mk-sg-obs gl)
+      (sc2-observation gl (sc2-player-common 1 500 200 60 36 10 26 0 0 0 0)
+                       (list nx-m py-m prb1) '()
+                       (list (sc2-power-source (sc2-point3d 32.0 32.0 8.0) 6.5 9632))
+                       #f '() '() '() '() '() '()))
+    (define sg-cmds-1
+      (translate-bot-actions->sc2-raw-commands '((build stargate 32.0 32.0))
+                                               (mk-sg-obs 9800) #:ws-conn ws #:game-info w3-ginfo))
+    (define rpcs-after-1 (unbox rpc-cnt))
+    (define fail-loop-1 (unbox SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP))
+    (translate-bot-actions->sc2-raw-commands '((build stargate 32.0 32.0))
+                                             (mk-sg-obs 9804) #:ws-conn ws #:game-info w3-ginfo)
+    (check-true "l26-p0-1d-fail-loop-only-set-after-tight-05-also-fails-and-neg-cd-key-distinct"
+                (and (not (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 889))) sg-cmds-1))
+                     (= rpcs-after-1 2)
+                     (= fail-loop-1 9800)
+                     (= (unbox rpc-cnt) 2)))
+    (cleanup!)))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

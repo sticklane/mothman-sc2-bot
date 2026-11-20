@@ -1,8 +1,25 @@
-# Supported StarCraft II Units for Tactics Arena Scenarios
+# Supported StarCraft II Units, Terrains & Upgrades (Tactics Arena 2.0)
 
-All canonical unit keys below are supported in `tools/arena-scenarios.json`, `scripts/add_scenario.py`, and `tools/sc2-tactics-arena.py` (Blizzard 4.10 `Base75689` `UnitTypeId`s). Value formula = `minerals + 1.5 * gas`.
+All canonical unit keys, terrain modes, and selective upgrades below are supported in `tools/arena-scenarios.json`, `scripts/add_scenario.py`, and `tools/sc2-tactics-arena.py` (Blizzard 4.10 `Base75689`). Value formula = `minerals + 1.5 * gas`.
 
-## Protoss
+## Terrain Modes (`--terrain`)
+
+| Terrain | Real SC2 Map Geometry Used | Best For |
+| --- | --- | --- |
+| `open` | Central flat `16x10` pathable clearing | Standard baseline micro, backward-compatible `01..07` core suite |
+| `high-ground-ramp` | Walkable elevation ramp (`terrain_height` diff `>= 12`, `--high-ground-side p1\|p2`) | TvT Tank/Viking siege lines, Lurker ramp holds, uphill dives |
+| `flank-surround` | Expanded `20x16` open clearing | 2-prong pincer surrounds (`@dx,dy` on opposite flanks) |
+| `cliff-air-chasm` | Pathable ground cliff edge bordering unpathable deadspace/chasm | Capital air (`Tempest`/`Carrier`/`BroodLord`) vs `Corruptor`/`Viper`/`Viking`/`Thor` |
+| `mineral-line-harass` | Unoccupied expansion mineral field cluster | Early 12-Pool worker+army holds, Mutalisk/Oracle/Banshee/DT mineral harass |
+
+## Selective Per-Player Upgrades (`--upgrades`, `--p1-upgrades`, `--p2-upgrades`)
+
+- **Zerg:** `Burrow`, `TunnelingClaws`, `GlialReconstitution`, `MetabolicBoost`, `AdrenalGlands`, `CentrifugalHooks`, `LurkerRange`, `AdaptiveTalons`, `GroovedSpines`, `MuscularAugments`, `ChitinousPlating`, `NeuralParasite`
+- **Protoss:** `Blink`, `Charge`, `ResonatingGlaives`, `ThermalLance`, `PsiStorm`
+- **Terran:** `Stim`, `CombatShield`, `ConcussiveShells`, `DrillingClaws`, `SmartServos`, `InfernalPreigniter`, `BansheeCloak`, `PersonalCloaking`, `AdvancedBallistics`, `Cloak` (shorthand for both `BansheeCloak` + `PersonalCloaking`)
+- **Pre-Cloak Flags:** `p1_pre_cloaked: true` / `p2_pre_cloaked: true` automatically cloak spawned Banshees/Ghosts at fight start.
+
+## Protoss Units
 
 | Key | SC2 ID | Role (Default Formation Layer) | Value |
 | --- | ---: | --- | ---: |
@@ -25,7 +42,7 @@ All canonical unit keys below are supported in `tools/arena-scenarios.json`, `sc
 | `warp-prism` | 81 | air-support (rear) | 250.0 |
 | `probe` | 84 | worker | 50.0 |
 
-## Terran
+## Terran Units
 
 | Key | SC2 ID | Role (Default Formation Layer) | Value |
 | --- | ---: | --- | ---: |
@@ -40,7 +57,7 @@ All canonical unit keys below are supported in `tools/arena-scenarios.json`, `sc
 | `siege-tank` | 33 | siege (rear) | 337.5 |
 | `siege-tank-sieged` | 32 | siege (far-rear) | 337.5 |
 | `widow-mine` | 498 | trap (front-mid) | 112.5 |
-| `widow-mine-burrowed` | 500 | trap (front-mid) | 112.5 |
+| `widow-mine-burrowed` | 500 | trap-burrowed (front-mid) | 112.5 |
 | `medivac` | 54 | air-support (rear) | 250.0 |
 | `viking-fighter` | 35 | air (mid-rear) | 262.5 |
 | `viking-assault` | 34 | ranged (mid) | 262.5 |
@@ -51,33 +68,23 @@ All canonical unit keys below are supported in `tools/arena-scenarios.json`, `sc
 | `battlecruiser` | 57 | air-capital (far-rear) | 850.0 |
 | `scv` | 45 | worker | 50.0 |
 
-## Zerg
+## Zerg Units (Including Burrowed Variants)
 
 | Key | SC2 ID | Role (Default Formation Layer) | Value |
 | --- | ---: | --- | ---: |
-| `zergling` | 105 | melee (front) | 25.0 |
-| `baneling` | 9 | melee-splash (front) | 87.5 |
-| `ultralisk` | 109 | melee-heavy (front) | 575.0 |
-| `roach` | 110 | ranged-front (front-mid) | 112.5 |
-| `ravager` | 688 | ranged-caster (mid) | 250.0 |
-| `hydralisk` | 107 | ranged (mid) | 175.0 |
-| `queen` | 126 | caster (mid-rear) | 150.0 |
-| `lurker-mp` | 502 | siege (mid-rear) | 375.0 |
-| `lurker-mp-burrowed` | 503 | siege (mid-rear) | 375.0 |
-| `infestor` | 111 | caster (rear) | 325.0 |
-| `swarm-host` | 494 | siege (rear) | 212.5 |
+| `zergling` / `zergling-burrowed` | 105 / 119 | melee (front) | 25.0 |
+| `baneling` / `baneling-burrowed` | 9 / 115 | melee-splash (front) | 87.5 |
+| `ultralisk` / `ultralisk-burrowed` | 109 / 131 | melee-heavy (front) | 575.0 |
+| `roach` / `roach-burrowed` | 110 / 118 | ranged-front (front-mid) | 112.5 |
+| `ravager` / `ravager-burrowed` | 688 / 690 | ranged-caster (mid) | 250.0 |
+| `hydralisk` / `hydralisk-burrowed` | 107 / 117 | ranged (mid) | 175.0 |
+| `queen` / `queen-burrowed` | 126 / 125 | caster (mid-rear) | 150.0 |
+| `lurker-mp` / `lurker-mp-burrowed` | 502 / 503 | siege (mid-rear) | 375.0 |
+| `infestor` / `infestor-burrowed` | 111 / 127 | caster (rear) | 325.0 |
+| `swarm-host` / `swarm-host-burrowed` | 494 / 493 | siege (rear) | 212.5 |
 | `mutalisk` | 108 | air (mid-rear) | 250.0 |
 | `corruptor` | 112 | air (mid-rear) | 300.0 |
 | `viper` | 499 | air-caster (rear) | 400.0 |
 | `brood-lord` | 114 | air-capital (far-rear) | 675.0 |
 | `overseer` | 129 | air-detector (rear) | 225.0 |
-| `drone` | 104 | worker | 50.0 |
-
-## Formation Geometry Cheat Sheet
-
-- P1 (Mothman) spawns on the **left** (`dx < 0`), P2 (MicroDummy) spawns on the **right** (`dx > 0`).
-- Typical total separation between front lines:
-  - **7–9 tiles**: standard bio/gateway/roach-ling engagements
-  - **10–12 tiles**: Siege Tank / Colossus / Lurker / Disruptor setups
-  - **13–15 tiles**: Capital air siege (Tempests, Carriers, Brood Lords)
-- Use explicit `@dx,dy` in `add_scenario.py` (e.g. `tempest:1@7.5,-2.5,tempest:1@7.5,0,tempest:1@7.5,2.5`) when you want a concave or anti-splash spread.
+| `drone` / `drone-burrowed` | 104 / 116 | worker | 50.0 |

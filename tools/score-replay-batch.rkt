@@ -917,6 +917,7 @@
           (define t3-bases-at-start #f)
           (define orbital1-sec (make-hasheqv))
           (define lair-sec (make-hasheqv))
+          (define roach-warren-sec (make-hasheqv))
           (define aa-tech-first-sec (make-hasheqv))
           ;; W15-LOOP-2: Frame-0 neutral mineral bounds for map_symmetry_kind inference
           (define min-x0 +inf.0) (define max-x0 -inf.0)
@@ -1215,6 +1216,8 @@
                        (hash-update! prod-bldg-timings p (lambda (lst) (cons (round1 sec) lst)))))
                    (when (and (set-member? TECH1-BLDG-SET ut) (not (hash-has-key? tech1-sec p)))
                      (hash-set! tech1-sec p (round1 sec)))
+                   (when (and (string=? ut "RoachWarren") (not (hash-has-key? roach-warren-sec p)))
+                     (hash-set! roach-warren-sec p (round1 sec)))
                    (when (and (set-member? TECH2-BLDG-SET ut) (not (hash-has-key? tech2-sec p)))
                      (hash-set! tech2-sec p (round1 sec)))
                    (when (and (= p our-pid) (not t3-first-sec) (set-member? TECH3-BLDG-SET ut))
@@ -1685,6 +1688,13 @@
                  (or (<= dur 420.0)
                      (and (real? our-w4) (< our-w4 24)))))
 
+          (define protoss-warpgate-sec
+            (and (string=? our-race "Protoss")
+                 (hash-ref upg-timings 'warpgate_sec #f)))
+          (define zerg-roach-warren-sec
+            (and (string=? our-race "Zerg")
+                 (hash-ref roach-warren-sec our-pid #f)))
+
           (define macro-timings
             (hasheq 'nat_sec (and (>= (length our-ths-list) 1) (first our-ths-list))
                     'third_sec (and (>= (length our-ths-list) 2) (second our-ths-list))
@@ -1702,6 +1712,9 @@
                     't3_bases_at_start t3-bases-at-start
                     'orbital1_sec (hash-ref orbital1-sec our-pid #f)
                     'lair_sec (hash-ref lair-sec our-pid #f)
+                    'roach_warren_sec (hash-ref roach-warren-sec our-pid #f)
+                    'protoss_warpgate_sec protoss-warpgate-sec
+                    'zerg_roach_warren_sec zerg-roach-warren-sec
                     'w2m our-w2 'w4m our-w4 'w6m our-w6 'w8m our-w8 'w10m our-w10
                     'worker_growth_2m_to_4m worker-growth-2m-to-4m
                     'opp_worker_growth_2m_to_4m opp-worker-growth-2m-to-4m
@@ -1762,6 +1775,19 @@
                    [a2 (for/fold ([a a1]) ([f (in-list plains)]) (scan-plain-log-file! a f))])
               a2))
           (define pos-by-min (hash-ref log-acc 'pos-by-min))
+          ;; L26-LOOP-2: Early 2:00..6:00 attack-posture % (`pos=attack` ticks / total `[SCBOT_STATE]` ticks in mins 2..5)
+          (define-values (early-atk-ticks-2m-6m early-tot-ticks-2m-6m)
+            (for/fold ([atk 0] [tot 0]) ([m (in-list '(2 3 4 5))])
+              (define pv (hash-ref pos-by-min m #(0 0 0)))
+              (values (+ atk (vector-ref pv 0))
+                      (+ tot (vector-ref pv 0) (vector-ref pv 1) (vector-ref pv 2)))))
+          (define early-atk-pct-2m-6m
+            (and (hash-ref log-acc 'has-logs? #f)
+                 (> early-tot-ticks-2m-6m 0)
+                 (round1 (* 100.0 (/ (exact->inexact early-atk-ticks-2m-6m)
+                                     (exact->inexact early-tot-ticks-2m-6m))))))
+          (define macro-timings*
+            (hash-set macro-timings 'early_atk_pct_2m_6m early-atk-pct-2m-6m))
 
           ;; -----------------------------------------------------------------
           ;; Automatic Forensic Anomaly Detectors (Single-Pass, Zero Greps!)
@@ -2466,6 +2492,9 @@
                   'opp_worker_growth_2m_to_4m opp-worker-growth-2m-to-4m
                   'worker_econ_eff_4m_6m worker-econ-eff-4m-6m
                   'opp_worker_econ_eff_4m_6m opp-worker-econ-eff-4m-6m
+                  'early_atk_pct_2m_6m early-atk-pct-2m-6m
+                  'protoss_warpgate_sec protoss-warpgate-sec
+                  'zerg_roach_warren_sec zerg-roach-warren-sec
                   'army_to_worker_4m a2w-4m
                   'army_to_worker_6m a2w-6m
                   'army_to_worker_8m a2w-8m
@@ -2491,7 +2520,7 @@
                   'our_peak_gas our-pk-gas
                   'upgrades upgs
                   'supply_block_pct sb-pct
-                  'macro_timings macro-timings
+                  'macro_timings macro-timings*
                   'our_top_units (for/list ([p (in-list (top-k-pairs our-units-ht 6))])
                                    (format "~a:~a" (car p) (cdr p)))
                   'opp_top_units (for/list ([p (in-list (top-k-pairs opp-units-ht 6))])
@@ -2672,6 +2701,8 @@
           (and (pair? vs) (round2 (apply max vs))))
         (define (timing-dist k)
           (num-dist (map (lambda (r) (hash-ref (hash-ref r 'macro_timings (hasheq)) k #f)) rows)))
+        (define wg-dist (timing-dist 'protoss_warpgate_sec))
+        (define rw-dist (timing-dist 'zerg_roach_warren_sec))
         ;; Anomaly counts
         (define (anom-cnt pred)
           (count (lambda (r) (pred (hash-ref r 'anomalies (hasheq)))) rows))
@@ -2765,6 +2796,11 @@
                 'opp_worker_growth_2m_to_4m (avg-opt 'opp_worker_growth_2m_to_4m)
                 'worker_econ_eff_4m_6m (avg-opt 'worker_econ_eff_4m_6m)
                 'opp_worker_econ_eff_4m_6m (avg-opt 'opp_worker_econ_eff_4m_6m)
+                'early_atk_pct_2m_6m (avg-opt 'early_atk_pct_2m_6m)
+                'protoss_warpgate_sec (avg-opt 'protoss_warpgate_sec)
+                'protoss_warpgate_med_sec (hash-ref wg-dist 'median #f)
+                'zerg_roach_warren_sec (avg-opt 'zerg_roach_warren_sec)
+                'zerg_roach_warren_med_sec (hash-ref rw-dist 'median #f)
                 'our_peak_workers (avg-field 'our_peak_workers)
                 'opp_peak_workers (avg-field 'opp_peak_workers)
                 'our_peak_army (round1 (avg-field 'our_peak_army))
@@ -2791,6 +2827,7 @@
                         'opp_worker_growth_2m_to_4m (timing-dist 'opp_worker_growth_2m_to_4m)
                         'worker_econ_eff_4m_6m (timing-dist 'worker_econ_eff_4m_6m)
                         'opp_worker_econ_eff_4m_6m (timing-dist 'opp_worker_econ_eff_4m_6m)
+                        'early_atk_pct_2m_6m (timing-dist 'early_atk_pct_2m_6m)
                         'nat_sec (timing-dist 'nat_sec)
                         'third_sec (timing-dist 'third_sec)
                         'gas1_sec (timing-dist 'gas1_sec)
@@ -2804,6 +2841,9 @@
                         't3_first_sec (timing-dist 't3_first_sec)
                         'orbital1_sec (timing-dist 'orbital1_sec)
                         'lair_sec (timing-dist 'lair_sec)
+                        'roach_warren_sec (timing-dist 'roach_warren_sec)
+                        'protoss_warpgate_sec wg-dist
+                        'zerg_roach_warren_sec rw-dist
                         'bases_4m (timing-dist 'bases_4m)
                         'bases_6m (timing-dist 'bases_6m)
                         'bases_8m (timing-dist 'bases_8m)
@@ -2908,7 +2948,21 @@
             (hash-ref agg 'killed_val) (hash-ref agg 'lost_val))
     (define (fmt-signed1 v)
       (if (real? v) (format "~a~a" (if (>= v 0) "+" "") (r1 v)) "-"))
-    (printf "    Dur=~a | Base=~a/~a | W@4m=~a/~a (dW2->4=~a/~a) W@6m=~a/~a | Eff4-6=~a/~a/w | PkW=~a/~a | PkArmy=~a/~a | Bank=~aM/~aG | SB=~a% | Upg=~a\n"
+    (define atk26 (hash-ref agg 'early_atk_pct_2m_6m #f))
+    (define p-wg-avg (hash-ref agg 'protoss_warpgate_sec #f))
+    (define p-wg-med (hash-ref agg 'protoss_warpgate_med_sec #f))
+    (define z-rw-avg (hash-ref agg 'zerg_roach_warren_sec #f))
+    (define z-rw-med (hash-ref agg 'zerg_roach_warren_med_sec #f))
+    (define timing-tail
+      (string-append
+       (if (real? atk26) (format " | Atk2-6=~a%" (r1 atk26)) "")
+       (if (and (real? p-wg-med) (real? p-wg-avg))
+           (format " | P:WG=~a/~as" (r0 p-wg-med) (r0 p-wg-avg))
+           "")
+       (if (and (real? z-rw-med) (real? z-rw-avg))
+           (format " | Z:RW=~a/~as" (r0 z-rw-med) (r0 z-rw-avg))
+           "")))
+    (printf "    Dur=~a | Base=~a/~a | W@4m=~a/~a (dW2->4=~a/~a) W@6m=~a/~a | Eff4-6=~a/~a/w | PkW=~a/~a | PkArmy=~a/~a | Bank=~aM/~aG | SB=~a% | Upg=~a~a\n"
             (fmt-mmss (hash-ref agg 'avg_dur_sec 0))
             (r2 (hash-ref agg 'our_bases 0)) (r2 (hash-ref agg 'opp_bases 0))
             (if (hash-ref agg 'our_w4 #f) (r1 (hash-ref agg 'our_w4)) "-")
@@ -2922,7 +2976,8 @@
             (r1 (hash-ref agg 'our_peak_workers 0)) (r1 (hash-ref agg 'opp_peak_workers 0))
             (r0 (hash-ref agg 'our_peak_army 0)) (r0 (hash-ref agg 'opp_peak_army 0))
             (r0 (hash-ref agg 'our_avg_min 0)) (r0 (hash-ref agg 'our_avg_gas 0))
-            (r1 (hash-ref agg 'supply_block_pct 0)) (r1 (hash-ref agg 'upgrades 0)))
+            (r1 (hash-ref agg 'supply_block_pct 0)) (r1 (hash-ref agg 'upgrades 0))
+            timing-tail)
     (define rt-ms (hash-ref agg 'avg_runtime_ms #f))
     (define tr-ms (hash-ref agg 'avg_translate_ms #f))
     (define tr95-ms (hash-ref agg 'worst_tr_p95_ms #f))
@@ -3015,11 +3070,11 @@
       (or (hash-ref s 'worker_growth_2m_to_4m #f)
           (let ([w2 (hash-ref s 'our_w2 #f)] [w4 (hash-ref s 'our_w4 #f)])
             (and (real? w2) (real? w4) (round1 (- w4 w2))))))
-    (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
+    (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
             (pad-r "Slice" 12) (pad-r "W-L-T (Base->Cur)" 19) (pad-r "TradeAgg" 18)
             (pad-r "W@4m" 16) (pad-r "dW2->4" 16) (pad-r "W@6m" 16) (pad-r "PkArmy" 18)
-            (pad-r "Bases" 18) (pad-r "SupBlk%" 18) "Upgs")
-    (printf "~a\n" (make-string 165 #\-))
+            (pad-r "Bases" 18) (pad-r "SupBlk%" 18) (pad-r "Atk2-6%" 18) "Upgs")
+    (printf "~a\n" (make-string 186 #\-))
     (for ([entry (in-list '((all . "ALL") (clean . "CLEAN") (core_12 . "CORE12(cl)") (unseen_6 . "UNSEEN6(cl)") (Protoss . "Protoss(cl)") (Terran . "Terran(cl)") (Zerg . "Zerg(cl)")))])
       (define sk (car entry))
       (define lbl (cdr entry))
@@ -3029,7 +3084,7 @@
         (define wlt (format "~a-~a-~a -> ~a-~a-~a"
                             (hash-ref b 'wins) (hash-ref b 'losses) (hash-ref b 'ties)
                             (hash-ref c 'wins) (hash-ref c 'losses) (hash-ref c 'ties)))
-        (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
+        (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
                 (pad-r lbl 12)
                 (pad-r wlt 19)
                 (pad-r (fmt-delta (hash-ref c 'trade_agg) (hash-ref b 'trade_agg) 2 "x") 18)
@@ -3039,6 +3094,7 @@
                 (pad-r (fmt-delta (hash-ref c 'our_peak_army) (hash-ref b 'our_peak_army) 0) 18)
                 (pad-r (fmt-delta (hash-ref c 'our_bases) (hash-ref b 'our_bases) 2) 18)
                 (pad-r (fmt-delta (hash-ref c 'supply_block_pct) (hash-ref b 'supply_block_pct) 1 "%") 18)
+                (pad-r (fmt-delta (hash-ref c 'early_atk_pct_2m_6m #f) (hash-ref b 'early_atk_pct_2m_6m #f) 1 "%") 18)
                 (fmt-delta (hash-ref c 'upgrades) (hash-ref b 'upgrades) 1))))))
 
 ;; -----------------------------------------------------------------------------
@@ -3413,16 +3469,19 @@
             (pad-r sb-str 5) (pad-r rej-str 4) sig-str)
     (when verbose?
       (define mt (hash-ref r 'macro_timings))
-      (printf "    Timings: Sup1@~a Prod1@~a Gas1@~a Tech1@~a Nat@~a 3rd@~a OC1@~a | Units: ~a | Opp: ~a\n"
+      (printf "    Timings: Sup1@~a Prod1@~a Gas1@~a Tech1@~a Nat@~a 3rd@~a OC1@~a WG@~a RW@~a | Units: ~a | Opp: ~a\n"
               (or (hash-ref mt 'supply1_sec) "-") (or (hash-ref mt 'prod1_sec) "-")
               (or (hash-ref mt 'gas1_sec) "-") (or (hash-ref mt 'tech1_sec) "-")
               (or (hash-ref mt 'nat_sec) "-") (or (hash-ref mt 'third_sec) "-")
               (or (hash-ref mt 'orbital1_sec) "-")
+              (or (hash-ref mt 'protoss_warpgate_sec #f) "-")
+              (or (hash-ref mt 'zerg_roach_warren_sec #f) "-")
               (string-join (hash-ref r 'our_top_units) " ")
               (string-join (hash-ref r 'opp_top_units) " "))
       (when (hash-ref r 'has_logs)
-        (printf "    [LOG] pos(atk/hld/ret)=~a/~a/~a step(p50/p95)=~a/~ams saving=~a blocked=~a\n"
+        (printf "    [LOG] pos(atk/hld/ret)=~a/~a/~a atk2-6=~a% step(p50/p95)=~a/~ams saving=~a blocked=~a\n"
                 (hash-ref r 'pos_attack) (hash-ref r 'pos_hold) (hash-ref r 'pos_retreat)
+                (if (real? (hash-ref r 'early_atk_pct_2m_6m #f)) (r1 (hash-ref r 'early_atk_pct_2m_6m)) "-")
                 (or (hash-ref r 'step_p50) "-") (or (hash-ref r 'step_p95) "-")
                 (hash-ref r 'saving_top) (hash-ref r 'blocked_top)))))
 
