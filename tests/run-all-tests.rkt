@@ -13514,6 +13514,114 @@
                      (not (not (memq 'marine (macro-brain-decision-scheduled-ids l21-t-35-tvz-wall))))
                      (not (not (memq 'supply-depot (macro-brain-decision-scheduled-ids l21-t-35-tvz-wall)))))
                 "L21-P0-2 #35 TvZ: <3:00 w/ 0 Marines & 1 Depot must NOT escrow CC; train Marine + wall Depot #2")
+
+  ;; 51.10 Loop 22 (`L22-P0-2`) Regressions: TvT Tank Core vs 1-Base CC + 2nd Factory,
+  ;;       Protoss 16-Gate BEFORE Assimilator #1 (#36), Terran TvZ Wall-Depot #2 (#35)
+  ;; (a) #32 TvT @ 115M (<175M): midgame-1base-natural-due? must NOT stall SCVs/Marines
+  (reset-macro-escrow-tracker!)
+  (define l22-t-32-lowmin
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 5200
+      #:minerals 115 #:gas 120 #:supply-used 38 #:supply-cap 54 #:workers 22 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 6
+      #:army-supply 12 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 5 'barracks 2 'factory 1 'factory-techlab 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 5 'barracks 2 'factory 1 'factory-techlab 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 22 'marine 9 'siege-tank 1)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1 'factory 0))))
+  (assert-true! (or (not (not (memq 'scv (macro-brain-decision-scheduled-ids l22-t-32-lowmin))))
+                    (not (not (memq 'marine (macro-brain-decision-scheduled-ids l22-t-32-lowmin)))))
+                "L22-P0-2 #32 TvT: 1-base CC escrow must gate >=175M and never stall SCVs/Marines at 115M")
+
+  ;; (b) #32 TvT @ 220M/150G w/ 1 Tank & open Factory: SiegeTank beats midgame-1base-natural CC
+  (reset-macro-escrow-tracker!)
+  (define l22-t-32-tank-over-cc
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 5200
+      #:minerals 220 #:gas 150 #:supply-used 38 #:supply-cap 54 #:workers 22 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 6
+      #:army-supply 12 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 5 'barracks 2 'factory 1 'factory-techlab 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 5 'barracks 2 'factory 1 'factory-techlab 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 22 'marine 9 'siege-tank 1)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1 'factory 1))))
+  (assert-true! (not (not (memq 'siege-tank (macro-brain-decision-scheduled-ids l22-t-32-tank-over-cc))))
+                "L22-P0-2 #32 TvT: <2 Siege Tanks on ready Factory must beat midgame-1base-natural CC")
+
+  ;; (c) #17 TvT 2-base w/ ready FactoryTechLab & gas>=150 scales to 2nd Factory + 2nd FactoryTechLab
+  (reset-macro-escrow-tracker!)
+  (define l22-t-17-2nd-fac
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 6500
+      #:minerals 240 #:gas 180 #:supply-used 56 #:supply-cap 78 #:workers 34 #:active-bases 2
+      #:mineral-harvesters 26 #:gas-harvesters 8
+      #:army-supply 22 #:enemy-threat-supply 6 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 8 'barracks 3 'barracks-techlab 1
+                                      'factory 1 'factory-techlab 1 'starport 1 'refinery 4)
+      #:total-building-counts (hasheq 'orbital-command 2 'command-center 1 'supply-depot 8 'barracks 3 'barracks-techlab 1
+                                      'factory 1 'factory-techlab 1 'starport 1 'refinery 4)
+      #:unit-counts (hasheq 'scv 34 'marine 12 'marauder 2 'siege-tank 2 'medivac 1)
+      #:enemy-unit-counts (hasheq 'siege-tank 3 'marine 10)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1 'factory 0 'starport 0))))
+  (assert-true! (not (not (memq 'factory (macro-brain-decision-scheduled-ids l22-t-17-2nd-fac))))
+                "L22-P0-2 #17 TvT: 2-base w/ ready FactoryTechLab & >=150G must scale to 2nd Factory")
+
+  (reset-macro-escrow-tracker!)
+  (define l22-t-17-2nd-factl
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 7200
+      #:minerals 140 #:gas 160 #:supply-used 62 #:supply-cap 86 #:workers 38 #:active-bases 2
+      #:mineral-harvesters 30 #:gas-harvesters 8
+      #:army-supply 24 #:enemy-threat-supply 6 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 9 'barracks 3 'barracks-techlab 1
+                                      'factory 2 'factory-techlab 1 'starport 1 'refinery 4)
+      #:total-building-counts (hasheq 'orbital-command 2 'command-center 1 'supply-depot 9 'barracks 3 'barracks-techlab 1
+                                      'factory 2 'factory-techlab 1 'starport 1 'refinery 4)
+      #:unit-counts (hasheq 'scv 38 'marine 12 'marauder 2 'siege-tank 2 'medivac 1)
+      #:enemy-unit-counts (hasheq 'siege-tank 4 'marine 10)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1 'factory 1 'starport 0))))
+  (assert-true! (and (not (not (memq 'factory-techlab (macro-brain-decision-scheduled-ids l22-t-17-2nd-factl))))
+                     (not (memq 'widow-mine (macro-brain-decision-scheduled-ids l22-t-17-2nd-factl))))
+                "L22-P0-2 #17 TvT: 2nd ready Factory must immediately attach 2nd FactoryTechLab (NO WidowMine)")
+
+  ;; (d) #36/#6 PvZ: Protoss 16-Gateway strictly BEFORE Assimilator #1
+  (reset-macro-escrow-tracker!)
+  (define l22-p-36-gate-before-gas
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Zerg #:frame 900
+      #:minerals 160 #:gas 0 #:supply-used 16 #:supply-cap 23 #:workers 16 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 0
+      #:army-supply 0 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 1)
+      #:unit-counts (hasheq 'probe 16)
+      #:open-facility-slots (hasheq 'townhall 1))))
+  (assert-true! (and (not (not (memq 'gateway (macro-brain-decision-scheduled-ids l22-p-36-gate-before-gas))))
+                     (not (memq 'assimilator (macro-brain-decision-scheduled-ids l22-p-36-gate-before-gas))))
+                "L22-P0-2 #36 PvZ: Protoss 16-Gateway must strictly precede Assimilator #1")
+
+  ;; (e) #35 TvZ: Wall SupplyDepot #2 right after Barracks #1 (sup>=16) strictly BEFORE Refinery & Barracks #2
+  (reset-macro-escrow-tracker!)
+  (define l22-t-35-wall-depot2
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Zerg #:frame 1120
+      #:minerals 135 #:gas 0 #:supply-used 16 #:supply-cap 23 #:workers 16 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 0
+      #:army-supply 0 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'command-center 1 'supply-depot 1)
+      #:total-building-counts (hasheq 'command-center 1 'supply-depot 1 'barracks 1)
+      #:unit-counts (hasheq 'scv 16)
+      #:open-facility-slots (hasheq 'townhall 1))))
+  (assert-true! (and (not (not (memq 'supply-depot (macro-brain-decision-scheduled-ids l22-t-35-wall-depot2))))
+                     (not (memq 'refinery (macro-brain-decision-scheduled-ids l22-t-35-wall-depot2)))
+                     (not (memq 'barracks (macro-brain-decision-scheduled-ids l22-t-35-wall-depot2))))
+                "L22-P0-2 #35 TvZ: Wall SupplyDepot #2 right after Barracks #1 must precede Refinery & Barracks #2")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms

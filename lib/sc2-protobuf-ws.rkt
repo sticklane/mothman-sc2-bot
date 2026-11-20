@@ -9017,11 +9017,11 @@
 
   (define self-is-zerg?
     (ormap (lambda (u) (memv (sc2-unit-unit-type u) '(86 100 101 104 88))) self-units))
-  ;; L21-P0-1: Tighten midgame gas-to-mineral rebalance (`GasRichMinStarved` 8 -> <=2, GasZeroFreeze=0):
-  ;;   Pull ON:  (>= 180G & < 160M) OR (>= 350G & < 250M) OR (> 600G & < 450M)
-  ;;   Pull OFF: (>= 450M) OR (<= 600G & (< 130G OR >= 280M))
-  ;;   Floor:    keep >= 1 gas harvester below 300G (not worker-rush / worker-crisis) so `GasZeroFreeze = 0`
-  ;;             holds strictly with P1 resaturation, while >= 300G pulls all the way to 0!
+  ;; L22-P0-1: Tighten midgame gas-to-mineral rebalance (`GasRichMinStarved` 2 -> 0, GasZeroFreeze=0):
+  ;;   Pull ON:     (>= 180G & < 160M) OR (>= 350G & < 250M) OR (> 600G & < 450M)
+  ;;   Pull OFF:    (>= 450M) OR (<= 600G & (< 130G OR >= 280M))
+  ;;   Zero-Floor:  >= 260G & < 120M (or >= 300G latched, or worker-rush/crisis); strictly preserves
+  ;;                >= 1 gas harvester below 260G (and < 300G when >= 120M) with P1 resaturation!
   (cond
     [(or (and (>= cur-gas 180) (< cur-min 160))
          (and (>= cur-gas SC2-GAS-FLOAT-REBALANCE-THRESH) (< cur-min 250))
@@ -9053,12 +9053,15 @@
     (or worker-rush-evacuate-gas?
         worker-crisis-gas-evac?
         (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)))
+  (define gas-pull-to-zero-now?
+    (or worker-rush-evacuate-gas?
+        worker-crisis-gas-evac?
+        (and gas-over-banked?
+             (or (>= cur-gas 300)
+                 (and (>= cur-gas 260) (< cur-min 120))))))
   (define gas-resaturate-blocked?
-    (or (and gas-over-banked?
-             (or worker-rush-evacuate-gas?
-                 worker-crisis-gas-evac?
-                 (>= cur-gas 300)
-                 (>= eff-active-gas-workers 1)))
+    (or gas-pull-to-zero-now?
+        (and gas-over-banked? (>= eff-active-gas-workers 1))
         (and zerg-post-speed-surge-active? (>= eff-active-gas-workers 1))))
   ;; L19-P0-1: Protect mineral saturation on 1-2 bases using `eff-active-gas-workers`
   ;; (counting workers currently inside refineries!): 2nd geyser (slots 3..5) requires >= 18
@@ -9225,23 +9228,20 @@
         (hash-set! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL (sc2-unit-tag chosen-w) (+ cur-loop 48))
         (issue-gather! chosen-w bmtag))))
 
-  ;; 4. Pull up to 2 gas workers/step back to owned minerals when floating gas while mineral-starved
-  ;;    (keeping >= 1 worker on gas below 350G so gas never zeroes out, or down to 1 gas Drone during
-  ;;    Zerg post-Ling-Speed mineral surge < 28 Drones); automatically re-saturates at P1 in Step 2!
-  ;;    L19-P0-1: Pull non-carrying gas workers first; when severely mineral-starved (`>= 250G & < 100M`),
-  ;;    also allow pulling carrying gas workers (`buff 273/274/275`) so exiting refinery workers rebalance
-  ;;    immediately instead of vanishing back inside gas!
+  ;; 4. Pull up to 2 gas workers/step (up to 3/step when >= 4 active gas workers!) back to owned
+  ;;    minerals when floating gas while mineral-starved, keeping >= 1 harvester strictly below 260G
+  ;;    (and < 300G when >= 120M) so `GasZeroFreeze = 0` holds, and pulling to 0 at >= 260G & < 120M
+  ;;    (or >= 300G latched / worker-crisis); pulls non-carrying gas workers first, and also pulls
+  ;;    carrying gas workers (`buff 273/274/275`) whenever `>= 200G & < 120M` or worker-crisis!
   (define gas-pull-target-floor
     (cond
-      [(or worker-rush-evacuate-gas?
-           worker-crisis-gas-evac?
-           (and gas-over-banked? (>= cur-gas 300)))
-       0]
+      [gas-pull-to-zero-now? 0]
       [(or gas-over-banked? zerg-post-speed-surge-active?) 1]
       [else eff-active-gas-workers]))
   (define max-gas-pulls-this-step
     (if (or gas-over-banked? zerg-post-speed-surge-active?)
-        (min 2 (max 0 (- eff-active-gas-workers gas-pull-target-floor)))
+        (let ([per-step-cap (if (>= eff-active-gas-workers 4) 3 2)])
+          (min per-step-cap (max 0 (- eff-active-gas-workers gas-pull-target-floor))))
         0))
   (when (and (> max-gas-pulls-this-step 0)
              (not (null? owned-base-minerals))
@@ -9256,7 +9256,7 @@
                  (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
                (sc2-unit-orders w)))
       (define allow-carrying-gas-pull?
-        (or (and (>= cur-gas 250) (< cur-min 100))
+        (or (and (>= cur-gas 200) (< cur-min 120))
             worker-crisis-gas-evac?))
       (define non-carrying-gas-workers
         (filter (lambda (w)

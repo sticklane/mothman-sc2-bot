@@ -1555,6 +1555,68 @@
         "ALL Zero-Invariants held (GasZeroFreeze=0, SuicideKite=0, AirAAStarve=0, IdleBankFreeze=0, HomeStall=0, RoboWaste=0, CloakLoss=0, 36/36 <=172.4ms) + NEW ATH A:M=3.62 in 21-duel real-3D arena!"
       ],
       "promotion_gates_passed": "3/9 (zero_crashes_and_rejects, sup_blk_le_6pct 4.3%, tactics_suite_100pct 231/231)"
+    },
+    {
+      "id": "iter22_wave22",
+      "status": "completed_terran_breakout_and_three_new_zeros",
+      "campaign": "Loops 19-28 Real-3D Visuals Campaign (Loop 4 of 10)",
+      "loop_self_improvements": [
+        "L22-LOOP-2 (@analyzer #615 + @loop-architect compare-vs-pro.py): Added early_opening_order_fault (pvz_assim_before_gate, zvz_hatch_before_pool_loss, tvz_late_depot2_loss) cleanly to score-replay-batch.rkt & compare-vs-pro.py"
+      ],
+      "spec_summary": [
+        "L22-P0-1 (@wire-author sc2-protobuf-ws.rkt): Unified gas-pull-to-zero-now? (>=260G/<100M) -> GasRichMinStarved WIPED TO ZERO (0/36, 221t total, 26->6->9->2->0!) while holding GasZeroFreeze=0, 621/621 wire tests",
+        "L22-P0-2 (@belief-author priority-macro-brain.rkt): Gated midgame-1base-natural-due? >=175M + 2nd Factory scaling in TvT + ZvZ Pool-first + TvZ Depot2 wall -> Mothman-T SURGED to 5W-7L (41.7%, 1.08x TradeAgg [+0.46x!], PkA +575, CombatShield 463/463s Pro!), 1BaseLock ATL 2/36 (P=0, Z=0!), 2,307/2,307 unit tests",
+        "L22-P0-3 (@runtime-author bot-runtime.rkt): Reverted non-shooting home-wave-regroup-active? + tightened direct-contact check + removed Barracks surcharge & Spire L2 dispatch -> SpireDrop WIPED TO ZERO (0/36!), DripFeed -39% (18->11), ProdPlaceStall -50% (8->4, 261t ATL!), ALL 3 RACES UNDEFEATED 12W-0L-9T (1.86x) in 21-duel arena!"
+      ],
+      "rev": "tyqmssux 4b372820",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261120_103339_iter22_wave22",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter22_wave22_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter22_wave22.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter22.md",
+      "clean_n": 36,
+      "record_clean": "12W-23L-1T (33.3% WR, 36/36 clean, 0 oppFault, 0 WallTies!)",
+      "record_non_chance": "11W-21L-1T (33.3% WR; 12/12 wins avg 5.30x / med 7.28x Trade!)",
+      "trade_agg": 0.73,
+      "trade_med": 0.23,
+      "sup_blk_avg": 3.9,
+      "endgame_home_stall_count": 0,
+      "own_base_retreat_frames": 2864,
+      "non_combat_robo_waste_val": 100,
+      "zerg_non_ling_army_pct": 90.4,
+      "siege_range_zero_dps_losses": 8,
+      "cloaked_unit_damage_losses": 0,
+      "gas_rich_min_starved_matches": 0,
+      "one_base_lockout_matches": 2,
+      "pvp_nat_delay_matches": 2,
+      "spire_sched_drop_matches": 0,
+      "drip_feed_collapse_matches": 11,
+      "zero_kill_collapse_matches": 9,
+      "early_opening_order_fault_matches": 3,
+      "prod_placement_stall_matches": 4,
+      "prod_idle_bank_freeze_matches": 0,
+      "gas_zero_harvest_freeze_matches": 0,
+      "wall_timeout_ties": 0,
+      "army_val_4m_ratio_vs_pro": 0.88,
+      "army_val_8m_ratio_vs_pro": 0.39,
+      "wall_sec": 619.9,
+      "latency_summary": "36/36 <=175.48ms (avg=7.94ms, p95=13.97ms, tr=2.39ms, tr_p95_worst=8.1ms, 0 action_rejects)",
+      "by_race": {
+        "Protoss": {"record": "4W-8L-0T (33.3%, 1BaseLock=0)", "trade_agg": 0.84, "w4_alive_med": 25.0, "w6_alive_med": 39.5, "nat_sec": 161.0, "sup_blk": 4.0},
+        "Terran": {"record": "5W-7L-0T (41.7% WR!)", "trade_agg": 1.08, "w4_alive_med": 21.5, "w6_alive_med": 34.5, "nat_sec": 95.0, "sup_blk": 3.1},
+        "Zerg": {"record": "3W-8L-1T (25.0%, SpireDrop=0, 1BaseLock=0)", "trade_agg": 0.44, "w4_alive_med": 29.0, "w6_alive_med": 47.0, "nat_sec": 56.0, "sup_blk": 4.5}
+      },
+      "tactics_summary": {
+        "rev": "tyqmssux 49b637cf (iter22)",
+        "passed": "231/231 (100.0%, wire_rejects=0, novel 131/131)",
+        "sc2_duel21_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter22.json",
+        "sc2_duel21_summary": "ALL 3 RACES UNDEFEATED 12W-0L-9T (ties ATH, +4W, flipped_from_win=[]) | 1.86x Agg Trade (+0.28x!) | P A:M=3.26 ATH, T 3W-0L-4T 1.27x, Z 6W-0L-1T 3.34x | 21/21 real-3D WebP+PNGs in 31.7s!"
+      },
+      "key_wins": [
+        "THREE NEW ZEROS WIPED: GasRichMinStarved = 0/36 (26->6->9->2->0!), SpireDrop = 0/36, WallTies = 0/36; PLUS 4 NEW ATLs: 1BaseLock = 2/36 (P=0, Z=0!), EscrowLock = 9/36, DripFeed = 11/36 (-39%), ProdPlaceStall = 4/36 (261t)!",
+        "Mothman-T BREAKOUT to 5W-7L (41.7% WR, 1.08x TradeAgg [+0.46x!], PkA +575, TvP 1.70x, TvZ 1.01x, CombatShield 463/463s Pro, SupBlk 3.1%); TradeAgg +0.19x (0.54->0.73x), SupBlk 3.9%, 4/9 Promotion Gates PASS!",
+        "ALL 3 RACES UNDEFEATED 12W-0L-9T (1.86x, +4W, 0 regressions) in real-3D tactics arena + titania 3-0, monsterbot 3-0, puck 2-1, oberon 2-1!"
+      ],
+      "promotion_gates_passed": "4/9 (zero_crashes_and_rejects, ties_le_2 [1T, 0 WallTies!], sup_blk_le_6pct [3.9%!], tactics_suite_100pct [231/231])"
     }
   ],
   "final_18_loop_summary": {

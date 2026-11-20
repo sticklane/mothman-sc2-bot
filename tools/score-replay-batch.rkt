@@ -2116,6 +2116,34 @@
                                             (hash-ref zero-fire-retreat-anomaly 'deaths 0)
                                             0)
                          'scope (if (and (>= lost-val 3000) (= killed-val 0)) "match" "window"))))
+          ;; L22-LOOP-2: Early Opening Order Fault (PvZ Assim-before-Gate, ZvZ Hatch-before-Pool <5m loss, TvZ <2 Depots in first 4 <5m loss)
+          (define open-b5 (reverse opening-bldg5-rev))
+          (define (first-open-idx lst pred)
+            (let lp ([xs lst] [i 0])
+              (cond [(null? xs) #f]
+                    [(pred (car xs)) i]
+                    [else (lp (cdr xs) (add1 i))])))
+          (define early-opening-order-fault-kind
+            (cond
+              [(string=? matchup "PvZ")
+               (define i-assim (first-open-idx open-b5 (lambda (s) (string=? s "Assimilator"))))
+               (define i-gate  (first-open-idx open-b5 (lambda (s) (or (string=? s "Gateway") (string=? s "WarpGate")))))
+               (and i-assim (or (not i-gate) (< i-assim i-gate)) "pvz_assim_before_gate")]
+              [(and (string=? matchup "ZvZ") (not (eq? res 'win)) (<= dur 300.0))
+               (define i-hatch (first-open-idx open-b5 (lambda (s) (string=? s "Hatchery"))))
+               (define i-pool  (first-open-idx open-b5 (lambda (s) (string=? s "SpawningPool"))))
+               (and i-hatch (or (not i-pool) (< i-hatch i-pool)) "zvz_hatch_before_pool_loss")]
+              [(and (string=? matchup "TvZ") (not (eq? res 'win)) (<= dur 300.0))
+               (define first4 (take open-b5 (min 4 (length open-b5))))
+               (define dep-cnt (count (lambda (s) (or (string=? s "SupplyDepot") (string=? s "SupplyDepotLowered"))) first4))
+               (and (>= (length open-b5) 4) (< dep-cnt 2) "tvz_late_depot2_loss")]
+              [else #f]))
+          (define early-opening-order-fault? (and early-opening-order-fault-kind #t))
+          (define early-opening-order-fault-anomaly
+            (and early-opening-order-fault?
+                 (hasheq 'kind early-opening-order-fault-kind
+                         'opening_seq5 opening-seq5
+                         'duration_sec (round1 dur))))
 
           (define anomalies
             (hasheq 'zero_fire_retreat zero-fire-retreat-anomaly
@@ -2139,6 +2167,7 @@
                     'drip_feed_collapse drip-feed-collapse-anomaly
                     'tvt_zero_tank tvt-zero-tank-anomaly
                     'zero_kill_collapse_loss zero-kill-collapse-loss-anomaly
+                    'early_opening_order_fault early-opening-order-fault-anomaly
                     'air_aa_starvation air-aa-starvation))
 
           ;; Classify 0-combat opponent disconnects (e.g., mid-early client drop) separately from real combat wins
@@ -2304,6 +2333,8 @@
             (add-sig! (format "ZERO_KILL_COLLAPSE(0/~a,~a)"
                               (if (>= zfr-zero-kill-lost 3000) zfr-zero-kill-lost lost-val)
                               (hash-ref zero-kill-collapse-loss-anomaly 'scope))))
+          (when early-opening-order-fault-anomaly
+            (add-sig! (format "EARLY_OPEN_FAULT(~a)" early-opening-order-fault-kind)))
           (when (and (not (eq? res 'win)) (< trade-ratio 0.50) (>= lost-val 1500))
             (add-sig! "SEVERE_BAD_TRADES(<0.5x)"))
           (when (and (not (eq? res 'win)) (<= dur 330.0)) (add-sig! "EARLY_RUSH_LOSS"))
@@ -2432,6 +2463,8 @@
                   'tvt_zero_tank tvt-zero-tank?
                   'our_siege_tank_cnt our-tank-cnt
                   'zero_kill_collapse_loss zero-kill-collapse-loss?
+                  'early_opening_order_fault early-opening-order-fault?
+                  'early_opening_order_fault_kind early-opening-order-fault-kind
                   'map_symmetry_kind map-symmetry-kind
                   't3_first_sec t3-first-sec
                   't3_first_bldg t3-first-bldg
@@ -2626,6 +2659,7 @@
                 'drip_feed_collapse_matches (count (lambda (r) (eq? (hash-ref r 'drip_feed_collapse #f) #t)) rows)
                 'tvt_zero_tank_matches (count (lambda (r) (eq? (hash-ref r 'tvt_zero_tank #f) #t)) rows)
                 'zero_kill_collapse_losses (count (lambda (r) (eq? (hash-ref r 'zero_kill_collapse_loss #f) #t)) rows)
+                'early_opening_order_fault_matches (count (lambda (r) (eq? (hash-ref r 'early_opening_order_fault #f) #t)) rows)
                 't3_started_matches (count (lambda (r) (real? (hash-ref r 't3_first_sec #f))) rows)
                 't3_early_2base_matches (count (lambda (r) (let ([b (hash-ref r 't3_bases_at_start #f)]) (and (exact-integer? b) (<= b 2)))) rows)
                 't3_premature_starve_matches (count (lambda (r) (eq? (hash-ref r 't3_premature_starve #f) #t)) rows)
@@ -2753,6 +2787,7 @@
                         'drip_feed_collapse (anom-cnt (lambda (a) (and (hash? (hash-ref a 'drip_feed_collapse #f)) #t)))
                         'tvt_zero_tank (anom-cnt (lambda (a) (and (hash? (hash-ref a 'tvt_zero_tank #f)) #t)))
                         'zero_kill_collapse_losses (anom-cnt (lambda (a) (and (hash? (hash-ref a 'zero_kill_collapse_loss #f)) #t)))
+                        'early_opening_order_fault (anom-cnt (lambda (a) (and (hash? (hash-ref a 'early_opening_order_fault #f)) #t)))
                         'air_aa_starvation (anom-cnt (lambda (a) (and (hash? (hash-ref a 'air_aa_starvation #f)) #t)))
                         'wall_timeout_tie wall-timeout-ties
                         'wall_timeout_winning_tie wall-timeout-winning-ties
@@ -2799,7 +2834,7 @@
                   (hash-ref agg 'wall_timeout_winning_ties 0)
                   (hash-ref agg 'step_spike_500ms_count 0))
           ""))
-    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a | 1BaseLock=~a | SpireDrop=~a | DripFeed=~a | TvT0Tank=~a | ZeroKill=~a~a\n"
+    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a | 1BaseLock=~a | SpireDrop=~a | DripFeed=~a | TvT0Tank=~a | ZeroKill=~a | OpenFault=~a~a\n"
             (hash-ref ac 'suicide_kite_retreat 0)
             (hash-ref ac 'zero_fire_retreat 0)
             (hash-ref ac 'escrow_lockout 0)
@@ -2811,6 +2846,7 @@
             (hash-ref ac 'drip_feed_collapse 0)
             (hash-ref ac 'tvt_zero_tank 0)
             (hash-ref ac 'zero_kill_collapse_losses 0)
+            (hash-ref ac 'early_opening_order_fault 0)
             lat-str)))
 
 ;; -----------------------------------------------------------------------------
@@ -3122,7 +3158,18 @@
                      (hash-ref zk 'match_killed_val 0)
                      (hash-ref zk 'match_lost_val 0)
                      (hash-ref zk 'window_lost_val 0)
-                     (hash-ref zk 'window_deaths 0)))))
+                     (hash-ref zk 'window_deaths 0))))
+
+  (section "17. Early Opening Order Faults (PvZ Assim<Gate, ZvZ Hatch<Pool <5m L, TvZ <2 Depot in first 4 <5m L)"
+           (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'early_opening_order_fault #f))) rows)
+           (lambda (r)
+             (define of (hash-ref (hash-ref r 'anomalies) 'early_opening_order_fault))
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | kind=~a | open=~a\n"
+                     (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
+                     (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
+                     (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
+                     (hash-ref of 'kind "?")
+                     (or (hash-ref of 'opening_seq5 #f) "-")))))
 
 ;; -----------------------------------------------------------------------------
 ;; Main CLI Driver

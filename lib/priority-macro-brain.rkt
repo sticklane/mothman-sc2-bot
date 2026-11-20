@@ -1725,6 +1725,22 @@
 (define (min-workers-for-next-gas-bldg cur-gas-bldgs [race 'Terran] [enemy-race 'Unknown])
   (pro-min-workers-for-next-gas-bldg race enemy-race cur-gas-bldgs))
 
+;; L22-P0-2 (`#17/#32 TvT`): Scale Terran `desired-factories` to 2 on >=2 bases in TvT
+;; (or vs >=2 enemy Siege Tanks) once FactoryTechLab is ready and gas >= 150 so Terran
+;; produces 2 Siege Tanks at a time.
+(define (terran-effective-desired-factories race enemy-race active-bases effective-phase-supply
+                                            ready-bldg-counts enemy-u-counts gas)
+  (define base-df
+    (terran-desired-factories race enemy-race active-bases effective-phase-supply))
+  (define enemy-tank-cnt (unit-count-equivalent enemy-u-counts 'siege-tank))
+  (if (and (eq? race 'Terran)
+           (>= active-bases 2)
+           (or (eq? enemy-race 'Terran) (>= enemy-tank-cnt 2))
+           (> (bldg-count-equivalent ready-bldg-counts 'factory-techlab) 0)
+           (>= gas 150))
+      (max 2 base-df)
+      base-df))
+
 ;; Filters build-order steps by `effective-phase-supply` and, when `frame > 0`,
 ;; elapsed Faster clock time (`elapsed-sec >= target-sec`), plus due empirical
 ;; unit and upgrade timings (`frame > 0`). Automatically selects reactive
@@ -2350,6 +2366,20 @@
                  (and supply-lockout-active?
                       (< minerals (+ (sc2-min-cost plan-supply-sym 100) (sc2-min-cost sym 75))))
                  protoss-1base-2nd-gas-capped?
+                 ;; L22-P0-2 (`#36/#6 PvZ`): Strictly gate Protoss Assimilator #1 behind Gateway #1
+                 ;; (Pro 14-Pylon -> 16-Gateway -> 17-Assimilator) across ALL Protoss openings!
+                 (and (eq? race 'Protoss)
+                      (eq? sym 'assimilator)
+                      (< (bldg-count-equivalent total-bldg-counts 'gateway) 1))
+                 ;; L22-P0-2 (`#35 TvZ`): Defer Refinery #1 until wall SupplyDepot #2 starts!
+                 (and (eq? race 'Terran)
+                      (eq? enemy-race 'Zerg)
+                      (eq? sym 'refinery)
+                      (= (bldg-count-equivalent total-bldg-counts 'supply-depot) 1)
+                      (>= (bldg-count-equivalent total-bldg-counts 'barracks) 1)
+                      (>= supply-used 16)
+                      (< minerals 400)
+                      (not under-early-rush-crisis?))
                  (and (> cur-gb 0)
                       (>= gas (if (and (>= cur-gb 2) (>= workers 42)) 450 250)))))))
     (define late-tech-deferred-by-low-army?
@@ -2773,9 +2803,7 @@
     (add-goal-spec! 'starport 'tech-infrastructure 'build 1 520.0 'terran-first-starport-timing))
   (when (and (eq? race 'Terran)
              (>= plan-total-townhalls 2)
-             (>= (+ (bldg-count-equivalent total-bldg-counts 'supply-depot)
-                    (bldg-count-equivalent total-bldg-counts 'supply-depot-lowered))
-                 2)
+             (>= (bldg-count-equivalent total-bldg-counts 'supply-depot) 2)
              (> (bldg-count-equivalent total-bldg-counts 'factory) 0)
              (not under-early-rush-crisis?)
              (>= workers 20))
@@ -2974,7 +3002,8 @@
   (define desired-rax-tl
     (terran-desired-barracks-techlabs race enemy-race (bldg-count-equivalent total-bldg-counts 'barracks)))
   (define desired-factories
-    (terran-desired-factories race enemy-race active-bases effective-phase-supply))
+    (terran-effective-desired-factories
+     race enemy-race active-bases effective-phase-supply ready-bldg-counts enemy-u-counts gas))
   (define desired-ghosts
     (terran-desired-ghost-cap active-bases supply-used enemy-race enemy-u-counts))
   (define desired-libs
@@ -3207,13 +3236,15 @@
                (< (bldg-count-equivalent total-bldg-counts 'barracks-techlab) desired-rax-tl)
                (not (facility-addon-slot-occupied? 'barracks-techlab ready-bldg-counts total-bldg-counts #:min-ready-floor 1)))
       (add-goal-spec! 'barracks-techlab 'tech-infrastructure 'addon desired-rax-tl 466.0 'tvt-rax-techlab-scaling))
-    (when (and (eq? enemy-race 'Terran) (>= desired-factories 2))
+    (when (and (or (eq? enemy-race 'Terran)
+                   (>= (unit-count-equivalent enemy-u-counts 'siege-tank) 2))
+               (>= desired-factories 2))
       (when (< (bldg-count-equivalent total-bldg-counts 'factory) desired-factories)
-        (add-goal-spec! 'factory 'tech-infrastructure 'build desired-factories 466.0 'tvt-mech-scaling))
+        (add-goal-spec! 'factory 'tech-infrastructure 'build desired-factories 478.0 'tvt-mech-scaling))
       (when (and (>= (bldg-count-equivalent ready-bldg-counts 'factory) 2)
                  (< (bldg-count-equivalent total-bldg-counts 'factory-techlab) desired-factories)
                  (not (facility-addon-slot-occupied? 'factory-techlab ready-bldg-counts total-bldg-counts #:min-ready-floor 1)))
-        (add-goal-spec! 'factory-techlab 'tech-infrastructure 'addon desired-factories 465.0 'tvt-mech-scaling)))
+        (add-goal-spec! 'factory-techlab 'tech-infrastructure 'addon desired-factories 496.0 'tvt-mech-scaling)))
     (when (and (eq? enemy-race 'Terran) (>= effective-phase-supply 26))
       (when (> (bldg-count-equivalent ready-bldg-counts 'barracks-techlab) 0)
         (add-goal-spec! 'marauder 'army-production 'train (if (>= active-bases 2) 10 4) 462.0 'tvt-bio-tank))
@@ -4708,8 +4739,8 @@
                (and zerg-cap-air-spire-due? (eq? nsym 'spire))
                ;; L21-P0-2 (`#19 ZvP`): Never backoff-block HydraliskDen under mass-air siege!
                (and zerg-mass-air-aa-tech-due? (eq? nsym 'hydralisk-den))
-               ;; L21-P0-2 (`#30 PvP` 1-base): Never backoff-block midgame 1-base Natural at >=100M!
-               (and midgame-1base-natural-due? (eq? nsym race-expand-sym) (>= minerals 100))
+               ;; L21/L22-P0-2 (`#30 PvP` / `#32 TvT` 1-base): Never backoff-block midgame 1-base Natural at >=175M!
+               (and midgame-1base-natural-due? (eq? nsym race-expand-sym) (>= minerals 175))
                (not (macro-escrow-in-backoff? escrow-state-entry frame nsym)))
            (or (not (eq? (sc2-tech-node-kind node) 'research))
                (upgrade-allowed-by-unit-and-order-gates?
@@ -4742,7 +4773,8 @@
   (define desired-rax-tl
     (terran-desired-barracks-techlabs race enemy-race (bldg-count-equivalent total-bldg-counts 'barracks)))
   (define desired-factories
-    (terran-desired-factories race enemy-race active-bases effective-phase-supply))
+    (terran-effective-desired-factories
+     race enemy-race active-bases effective-phase-supply ready-bldg-counts enemy-u-counts gas))
   (define desired-ghosts
     (terran-desired-ghost-cap active-bases supply-used enemy-race enemy-u-counts))
   (define desired-libs
@@ -5041,9 +5073,7 @@
                       (> enemy-threat-supply army-supply))))
          (or (< (unit-count-equivalent unit-counts 'marine) 6)
              (and (< frame 3360)
-                  (< (+ (bldg-count-equivalent total-bldg-counts 'supply-depot)
-                        (bldg-count-equivalent total-bldg-counts 'supply-depot-lowered))
-                     2)))))
+                  (< (bldg-count-equivalent total-bldg-counts 'supply-depot) 2)))))
   ;; W17-P1-1-belief (`#14 T v oberon`, `#15 P v oberon`):
   ;; Detect `< 5:30` (`frame < 7392`) early Marauder / proxy 2-Rax rush -> suppress greedy tech/expand
   ;; (`starport`, `robotics-bay`, `twilight-council`, `forge`, `engineering-bay`, `armory`, `reaper`,
@@ -5521,15 +5551,31 @@
     (and natural-exp-window?
          (< frame 7200)
          (not under-attack?)))
-  ;; L21-P0-2 (`#30 PvP 2.07x B=1/10`, `#27`, `#32`): Unblock midgame 1-base Natural expansion
-  ;; past 3:20 (`4480f`) with >= 10 army supply and no active base attack/rush: boost Nexus/CC
-  ;; to `u = 910.0` (strictly above TwilightCouncil@892, Stargate@880, PhotonCannon@870)!
+  ;; L22-P0-2 (`#32 TvT`): Never let midgame 1-base Natural (`command-center@910`) outrank/block
+  ;; `factory-techlab` or core `siege-tank` (<2 Tanks in TvT) when a ready Factory needs them!
+  (define terran-tvt-1base-tank-core-due?
+    (and (eq? race 'Terran)
+         (eq? enemy-race 'Terran)
+         (> (bldg-count-equivalent ready-bldg-counts 'factory) 0)
+         (or (and (= (bldg-count-equivalent total-bldg-counts 'factory-techlab) 0)
+                  (not (facility-addon-slot-occupied? 'factory-techlab ready-bldg-counts total-bldg-counts #:min-ready-floor 1)))
+             (and (> (bldg-count-equivalent ready-bldg-counts 'factory-techlab) 0)
+                  (< (unit-count-equivalent unit-counts 'siege-tank) 2)
+                  (or (not (hash? open-facility-slots))
+                      (> (hash-ref open-facility-slots 'factory 0) 0))
+                  (>= gas 100)))))
+  ;; L21/L22-P0-2 (`#30 PvP 2.07x B=1/10`, `#27`, `#32`): Unblock midgame 1-base Natural expansion
+  ;; past 3:20 (`4480f`) with >= 10 army supply, >= 175M banked (so it never stalls SCVs/Tanks at 85-145M!),
+  ;; no active base attack/rush, and not blocking urgent TvT FactoryTechLab / first 2 Siege Tanks:
+  ;; boost Nexus/CC to `u = 910.0` (strictly above TwilightCouncil@892, Stargate@880, PhotonCannon@870)!
   (define midgame-1base-natural-due?
     (and (memq race '(Protoss Terran))
          (= active-bases 1)
          (<= total-townhalls-incl-pending 1)
          (>= frame 4480)
+         (>= minerals 175)
          (>= army-supply 10)
+         (not terran-tvt-1base-tank-core-due?)
          (not under-attack?)
          (not under-early-rush-crisis?)
          (not early-ling-rush-defense-active?)
@@ -5817,9 +5863,9 @@
          (> (bldg-count-equivalent ready-bldg-counts 'forge) 0)
          (< (bldg-count-equivalent total-bldg-counts 'photon-cannon)
             (min 3 (max 1 active-bases)))))
-  ;; W10-P0-2-belief: Restore Pro #1 Terran BO `Dep->Rax->Ref->CC->Dep->Rax/Fact`:
-  ;; Keep CommandCenter #2 strictly BEFORE SupplyDepot #2 (unless supply-left <= 1),
-  ;; and keep SupplyDepot #2 strictly BEFORE Barracks #2!
+  ;; W10-P0-2-belief + L22-P0-2 (`#35 TvZ`): Restore Pro #1 Terran BO `Dep->Rax->Ref->CC->Dep->Rax/Fact`
+  ;; in TvT/TvP, and in TvZ force wall SupplyDepot #2 (`u >= 650, blk=#t`) right after Barracks #1 (`sup >= 16`)
+  ;; strictly BEFORE Refinery #1 & Barracks #2 so the ramp wall seals BEFORE early Lings arrive!
   (define terran-suppress-rax2-before-depot2?
     (and (eq? race 'Terran)
          (= terran-total-depots 1)
@@ -5827,19 +5873,51 @@
          (not terran-early-rush-hold?)
          (not early-ling-rush-defense-active?)
          (not under-early-rush-crisis?)))
+  (define terran-tvz-wall-depot2-due?
+    (and terran-suppress-rax2-before-depot2?
+         (eq? enemy-race 'Zerg)
+         (>= supply-used 16)
+         (< minerals 400)))
   (define terran-depot2-before-rax2?
     (and terran-suppress-rax2-before-depot2?
-         (or (>= total-townhalls-incl-pending 2)
-             (<= supply-left 1))
-         (or (<= supply-left 5) (>= supply-used 19))))
-  ;; W9-P0-1-belief (#17): Always pair Factory TechLab + Siege Tanks alongside Bio across ALL Terran matchups
+         (or terran-tvz-wall-depot2-due?
+             (and (or (>= total-townhalls-incl-pending 2)
+                      (<= supply-left 1))
+                  (or (<= supply-left 5) (>= supply-used 19))))))
+  ;; L22-P0-2 (`#36/#6 PvZ`): Textbook Pro 14-Pylon -> 16-Gateway -> 17-Assimilator!
+  ;; Once Pylon #1 is ready and >= 16 workers with 0 Gateways, Gateway #1 (`u=530`, `blk=#t`)
+  ;; strictly outranks Probe #17 (`488`) so Gateway #1 drops immediately at 150M!
+  (define protoss-first-gateway-due?
+    (and (eq? race 'Protoss)
+         (= (bldg-count-equivalent total-bldg-counts 'gateway) 0)
+         (> (bldg-count-equivalent ready-bldg-counts 'pylon) 0)
+         (>= workers 16)))
+  ;; W9-P0-1-belief (#17) + L22-P0-2 (`#17/#32 TvT`): Always pair Factory TechLab + Siege Tanks alongside Bio
+  ;; across ALL Terran matchups, and scale to 2 Factories + 2 TechLabs in TvT (or vs >=2 enemy Tanks) on >=2 bases!
+  (define terran-2nd-factory-due?
+    (and (eq? race 'Terran)
+         (>= desired-factories 2)
+         (= (bldg-count-equivalent total-bldg-counts 'factory) 1)
+         (> (bldg-count-equivalent ready-bldg-counts 'factory-techlab) 0)
+         ;; Never steal minerals/gas from an idle Factory #1 that can train a Siege Tank right now!
+         (or (not (hash? open-facility-slots))
+             (<= (hash-ref open-facility-slots 'factory 0) 0)
+             (and (>= minerals 300) (>= gas 225)))
+         (>= gas 150)
+         (not under-early-rush-crisis?)
+         (not terran-early-rush-hold?)
+         (not early-ling-rush-defense-active?)
+         (not early-proxy-marauder-rush-active?)
+         (not terran-cloaked-det-crisis?)
+         (not enemy-cap-air?)))
   (define terran-factory-techlab-due?
     (and (eq? race 'Terran)
          (> (bldg-count-equivalent ready-bldg-counts 'factory) 0)
-         (= (bldg-count-equivalent total-bldg-counts 'factory-techlab) 0)
+         (< (bldg-count-equivalent total-bldg-counts 'factory-techlab)
+            (min desired-factories (bldg-count-equivalent ready-bldg-counts 'factory)))
          (not (facility-addon-slot-occupied? 'factory-techlab ready-bldg-counts total-bldg-counts #:min-ready-floor 1))
          (or early-proxy-marauder-rush-active?
-             (and (>= workers 22)
+             (and (or (eq? enemy-race 'Terran) (>= workers 22))
                   (not under-early-rush-crisis?)
                   (not terran-early-rush-hold?)))))
   (define terran-siege-tank-core-due?
@@ -6503,13 +6581,14 @@
                      (if (or zerg-cap-air-extractor-boost? zerg-midgame-extractor-due?)
                          '(extractor)
                          '())
-                     (if terran-first-factory-due?
+                     (if protoss-first-gateway-due?
+                         '(gateway)
+                         '())
+                     (if (or terran-first-factory-due? terran-2nd-factory-due?)
                          '(factory)
                          '())
                      (if terran-early-rush-hold?
-                         (append (if (< (+ (bldg-count-equivalent total-bldg-counts 'supply-depot)
-                                           (bldg-count-equivalent total-bldg-counts 'supply-depot-lowered))
-                                        2)
+                         (append (if (< (bldg-count-equivalent total-bldg-counts 'supply-depot) 2)
                                      '(supply-depot)
                                      '())
                                  (if (and (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
@@ -6967,6 +7046,12 @@
           (let ([cur-gas-bldgs (bldg-count-equivalent total-bldg-counts id)])
             (and (not early-ling-rush-defense-active?)
                  (not protoss-1base-2nd-gas-capped?)
+                 ;; L22-P0-2 (`#36/#6 PvZ`): Strictly gate Protoss Assimilator #1 behind Gateway #1
+                 ;; (Pro 14-Pylon -> 16-Gateway -> 17-Assimilator) across ALL Protoss openings!
+                 (or (not (eq? id 'assimilator))
+                     (> (bldg-count-equivalent total-bldg-counts 'gateway) 0))
+                 ;; L22-P0-2 (`#35 TvZ`): Defer Refinery #1 until wall SupplyDepot #2 starts!
+                 (not (and terran-tvz-wall-depot2-due? (eq? id 'refinery)))
                  (or (not supply-lockout-active?)
                      (>= minerals (+ (sc2-min-cost race-supply-sym 100)
                                      (priority-candidate-min-cost c))))
@@ -7323,6 +7408,8 @@
            [(and terran-3rd-cc-due? (eq? csym 'command-center)) #t]
            [(and terran-early-marine-pump-due? (eq? csym 'marine)) #t]
            [(and terran-depot2-before-rax2? (eq? csym 'supply-depot)) #t]
+           [(and protoss-first-gateway-due? (eq? csym 'gateway)) #t]
+           [(and terran-2nd-factory-due? (eq? csym 'factory)) #t]
            [(and terran-factory-techlab-due? (eq? csym 'factory-techlab)) #t]
            [(and terran-siege-tank-core-due? (eq? csym 'siege-tank)) #t]
            [(and protoss-robo-immortal-due? (eq? csym 'immortal)) #t]
@@ -7538,9 +7625,15 @@
               [(eq? id 'factory)
                (< (bldg-count-equivalent total-bldg-counts 'factory)
                   (max desired-factories (goal-target-count-for 'factory)))]
+              [(eq? id 'factory-techlab)
+               (< (bldg-count-equivalent total-bldg-counts 'factory-techlab)
+                  (max desired-factories (goal-target-count-for 'factory-techlab)))]
               [(memq id '(extractor refinery assimilator))
                (define cur-gas-bldgs (bldg-count-equivalent total-bldg-counts id))
                (and (not protoss-1base-2nd-gas-capped?)
+                    (or (not (eq? id 'assimilator))
+                        (> (bldg-count-equivalent total-bldg-counts 'gateway) 0))
+                    (not (and terran-tvz-wall-depot2-due? (eq? id 'refinery)))
                     (gas-building-cap-ok? cur-gas-bldgs active-bases)
                     (or (and zerg-cap-air-extractor-boost? (eq? id 'extractor) (>= workers 14))
                         (>= workers (pro-min-workers-for-next-gas-bldg race enemy-race cur-gas-bldgs)))
@@ -7634,10 +7727,15 @@
                              (>= workers 18))))
                 (eq? (normalize-brain-sym sym) 'supply-depot)
                 (< (bldg-count-equivalent total-bldg-counts 'supply-depot) 2)))
+         (define terran-depot2-supply-boost?
+           (and (or terran-tvz-wall-depot2-due?
+                    (and terran-depot2-before-rax2? (<= supply-left 6)))
+                (eq? (normalize-brain-sym sym) 'supply-depot)))
          (define u-sup
            (cond
              [supply-lockout-active? (max 2200.0 u0)]
              [supply-crisis? (max 1350.0 u0)]
+             [terran-depot2-supply-boost? (max (if terran-tvz-wall-depot2-due? 650.0 605.0) u0)]
              [terran-rush-wall-depot? (max (if terran-early-rush-hold? 640.0 615.0) u0)]
              [zerg-overlord-overbuilt-suppress? (min 180.0 u0)]
              [(or zvz-suppress-nonurgent-overlord? zerg-mass-air-suppress-overlord?
@@ -7652,6 +7750,7 @@
                 (not protoss-cyber-before-pylon2?)
                 (or supply-lockout-active?
                     supply-crisis?
+                    terran-depot2-supply-boost?
                     terran-rush-wall-depot?
                     (and is-bo-goal?
                          (not under-early-rush-crisis?)
@@ -7797,7 +7896,7 @@
            (and (not (and (= active-bases 1)
                           (<= total-townhalls-incl-pending 1)
                           (or (>= minerals 250)
-                              (and midgame-1base-natural-due? (>= minerals 100))
+                              (and midgame-1base-natural-due? (>= minerals 175))
                               (and (>= minerals 150)
                                    (not under-attack?)
                                    (not under-early-rush-crisis?)
@@ -8079,6 +8178,12 @@
          (define terran-factory-techlab-boost?
            (and terran-factory-techlab-due?
                 (eq? (normalize-brain-sym sym) 'factory-techlab)))
+         (define terran-2nd-factory-boost?
+           (and terran-2nd-factory-due?
+                (eq? (normalize-brain-sym sym) 'factory)))
+         (define protoss-first-gateway-boost?
+           (and protoss-first-gateway-due?
+                (eq? (normalize-brain-sym sym) 'gateway)))
          (define terran-siege-tank-boost?
            (and terran-siege-tank-core-due?
                 (eq? (normalize-brain-sym sym) 'siege-tank)))
@@ -8664,6 +8769,8 @@
                     zerg-cap-air-ext-boost?
                     zerg-midgame-ext-boost?
                     terran-depot2-boost?
+                    (and protoss-first-gateway-boost? (>= minerals 125))
+                    (and terran-2nd-factory-boost? (>= minerals 150) (>= gas 100))
                     (and terran-factory-techlab-boost? (>= gas 25))
                     (and terran-siege-tank-boost?
                          (>= gas 125)
@@ -8867,7 +8974,7 @@
              [terran-rush-marine-boost? (max 640.0 plan-weight u0)]
              [(and emergency-rush-def-boost? (eq? cat 'combat-unit))
               (max 620.0 (+ 340.0 u0))]
-             [terran-depot2-boost? (max 605.0 plan-weight u0)]
+             [terran-depot2-boost? (max (if terran-tvz-wall-depot2-due? 650.0 605.0) plan-weight u0)]
              [pvz-ling-gate2-boost? (max 585.0 plan-weight u0)]
              [zerg-macro-lair-boost? (max 585.0 plan-weight u0)]
              [pvz-first-zealot-boost? (max 580.0 plan-weight u0)]
@@ -8884,7 +8991,7 @@
              [(and protoss-3rd-nexus-pro-due? (eq? nsym 'nexus)) (max 555.0 plan-weight u0)]
              [(and terran-midgame-rax-boost? (= (bldg-count-equivalent total-bldg-counts 'barracks) 1))
               (max 556.0 plan-weight u0)]
-             ;; L20-P0-2 (`#17/#32 TvT`): Strictly rank FactoryTechLab (565) & core SiegeTanks (560)
+             ;; L20-P0-2 (`#17/#32 TvT`): Strictly rank FactoryTechLab (565) & core SiegeTanks (560/562)
              ;; ABOVE Barracks scaling (556/540) so bare Factory never stalls without Tanks!
              [terran-factory-techlab-boost?
               (max (if (or (eq? enemy-race 'Terran)
@@ -8894,12 +9001,15 @@
                        565.0
                        496.0)
                    plan-weight u0)]
+             [terran-2nd-factory-boost? (max 585.0 plan-weight u0)]
+             [protoss-first-gateway-boost? (max 530.0 plan-weight u0)]
              [zerg-post-hatch-pool-boost? (max 545.0 plan-weight u0)]
              [terran-factory-gas-ready-boost? (max 545.0 plan-weight u0)]
              [terran-siege-tank-boost?
               (let ([cur-tanks (unit-count-equivalent unit-counts 'siege-tank)]
                     [core-tanks (if (or (eq? enemy-race 'Terran) (>= enemy-siege-tank-cnt 1)) 6 4)])
-                (max (cond [(< cur-tanks core-tanks) 560.0]
+                (max (cond [terran-tvt-1base-tank-core-due? 562.0]
+                           [(< cur-tanks core-tanks) 560.0]
                            [(< cur-tanks 6) 544.0]
                            [else 488.0])
                      plan-weight u0))]
@@ -8993,6 +9103,9 @@
              [(and (memq sym '(extractor refinery assimilator))
                    (= (bldg-count-equivalent total-bldg-counts sym) 0)
                    (>= workers 15)
+                   (or (not (eq? sym 'assimilator))
+                       (> (bldg-count-equivalent total-bldg-counts 'gateway) 0))
+                   (not (and terran-tvz-wall-depot2-due? (eq? sym 'refinery)))
                    (not natural-exp-window?)
                    (not zerg-16-hatch-pending?))
               (max plan-weight 490.0 u0)]
@@ -9086,7 +9199,7 @@
                      (= active-bases 1)
                      (<= total-townhalls-incl-pending 1)
                      (or (>= minerals 250)
-                         (and midgame-1base-natural-due? (>= minerals 100))
+                         (and midgame-1base-natural-due? (>= minerals 175))
                          (and (>= minerals 150)
                               (not under-attack?)
                               (not under-early-rush-crisis?)
@@ -9302,6 +9415,12 @@
        (define terran-factory-techlab-post?
          (and terran-factory-techlab-due?
               (eq? nsym 'factory-techlab)))
+       (define terran-2nd-factory-post?
+         (and terran-2nd-factory-due?
+              (eq? nsym 'factory)))
+       (define protoss-first-gateway-post?
+         (and protoss-first-gateway-due?
+              (eq? nsym 'gateway)))
        (define terran-siege-tank-post?
          (and terran-siege-tank-core-due?
               (eq? nsym 'siege-tank)))
@@ -9622,7 +9741,7 @@
            [zvz-rush-ling-post? (max u 660.0)]
            [zvz-rush-spine-post? (max u 650.0)]
            [terran-rush-marine-post? (max u 640.0)]
-           [terran-depot2-post? (max u 605.0)]
+           [terran-depot2-post? (max u (if terran-tvz-wall-depot2-due? 650.0 605.0))]
            [pvz-ling-gate2-post? (max u 585.0)]
            [zerg-macro-lair-post? (max u 585.0)]
            [pvz-first-zealot-post? (max u 580.0)]
@@ -9660,12 +9779,15 @@
                            (>= gas 125))
                        565.0
                        496.0))]
+           [terran-2nd-factory-post? (max u 585.0)]
+           [protoss-first-gateway-post? (max u 530.0)]
            [zerg-post-hatch-pool-post? (max u 545.0)]
            [terran-factory-gas-ready-post? (max u 545.0)]
            [terran-siege-tank-post?
             (let ([cur-tanks (unit-count-equivalent unit-counts 'siege-tank)]
                   [core-tanks (if (or (eq? enemy-race 'Terran) (>= enemy-siege-tank-cnt 1)) 6 4)])
-              (max u (cond [(< cur-tanks core-tanks) 560.0]
+              (max u (cond [terran-tvt-1base-tank-core-due? 562.0]
+                           [(< cur-tanks core-tanks) 560.0]
                            [(< cur-tanks 6) 544.0]
                            [else 488.0])))]
            [protoss-midgame-gw-post?
@@ -9900,6 +10022,8 @@
                      (and protoss-aa-stargate-post? (not protoss-stargate-nonblocking-post?))
                      (and protoss-aa-air-unit-post? (not protoss-aa-heavy-escrow-unblocked-post?))
                      (and zerg-early-pro-queen-post? zerg-early-peaceful-queen-window?)
+                     (and protoss-first-gateway-post? (>= minerals 125))
+                     (and terran-2nd-factory-post? (>= minerals 150) (>= gas 100))
                      (and terran-factory-techlab-post? (>= gas 25))
                      (and terran-siege-tank-post?
                           (>= gas 125)
@@ -10273,6 +10397,9 @@
         [(eq? csym 'factory)
          (< (+ existing-tech-cnt sched-tech-cnt)
             (max desired-factories (goal-target-count-for 'factory)))]
+        [(eq? csym 'factory-techlab)
+         (< (+ existing-tech-cnt sched-tech-cnt)
+            (max desired-factories (goal-target-count-for 'factory-techlab)))]
         [(eq? csym 'starport)
          (< (+ existing-tech-cnt sched-tech-cnt)
             (max 1 (if (and (eq? race 'Terran) enemy-cap-air?)
@@ -10410,7 +10537,8 @@
          [(widow-mine)
           (let ([wm-cap (cond
                           [(and terran-factory-techlab-due?
-                                (<= (bldg-count-equivalent ready-bldg-counts 'factory) 1))
+                                (or (eq? enemy-race 'Terran)
+                                    (<= (bldg-count-equivalent ready-bldg-counts 'factory) 1)))
                            0]
                           [(and (> (bldg-count-equivalent ready-bldg-counts 'factory-techlab) 0)
                                 (< (unit-count-equivalent unit-counts 'siege-tank) 4))
@@ -11032,7 +11160,7 @@
                   (= active-bases 1)
                   (<= total-townhalls-incl-pending 1)
                   (or (>= minerals 250)
-                      (and midgame-1base-natural-due? (>= minerals 100))
+                      (and midgame-1base-natural-due? (>= minerals 175))
                       (and (>= minerals 150)
                            (not under-attack?)
                            (not under-early-rush-crisis?)
@@ -11041,6 +11169,11 @@
              (and zerg-cap-air-spire-due? (eq? final-bo-goal-norm 'spire))
              (and zerg-mass-air-aa-tech-due? (eq? final-bo-goal-norm 'hydralisk-den))
              (not (macro-escrow-in-backoff? escrow-state-entry frame final-bo-goal-sym)))
+         (not (and (eq? race 'Protoss)
+                   (eq? final-bo-goal-norm 'assimilator)
+                   (< (bldg-count-equivalent total-bldg-counts 'gateway) 1)))
+         (not (and terran-tvz-wall-depot2-due?
+                   (eq? final-bo-goal-norm 'refinery)))
          (not (and (or zerg-overlord-overbuilt-suppress? zerg-mass-air-suppress-overlord?)
                    (eq? final-bo-goal-norm 'overlord)))
          (not (and (eq? final-bo-goal-norm 'spire)

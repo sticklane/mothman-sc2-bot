@@ -4513,12 +4513,12 @@
                              (ormap (lambda (t) (and (>= t 9621) (<= t 9626)))
                                     (sc2-raw-unit-command-unit-tags c))))
             cmds-70w-pull))
-  (check-true "l19-p0-1c-70-workers-210g-100m-latches-and-pulls-2-gas-workers-per-step"
+  (check-true "l19-p0-1c-70-workers-210g-100m-latches-and-pulls-3-gas-workers-per-step"
               (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
-                   (= (length pulled-70w) 2)))
+                   (= (length pulled-70w) 3)))
 
-  ;; L19-P0-1d: Pulls up to 2/step including carrying gas (`buff 273`, order `296 -> CC`) at `>= 250G & < 100M`
-  ;;            (non-carrying first!), keeps `>= 1` gas worker below `350G`, and skips carrying at `>= 100M`!
+  ;; L19-P0-1d: Pulls up to 2/step including carrying gas (`buff 273`, order `296 -> CC`) at `>= 200G & < 120M`
+  ;;            (non-carrying first!), keeps `>= 1` gas worker strictly below `260G`, and skips carrying at `>= 120M`!
   (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
   (define gw-clean (mk-l19-u 9751 45 1 25.2 24.2 #:hp 45.0 #:rad 0.375
                              #:orders (list (sc2-unit-order 295 #f 9611 0.0))))
@@ -4526,9 +4526,9 @@
                                #:orders (list (sc2-unit-order 296 #f 9601 0.0))))
   (define gw-carry-2 (mk-l19-u 9753 45 1 26.5 26.0 #:hp 45.0 #:rad 0.375 #:buffs '(273)
                                #:orders (list (sc2-unit-order 296 #f 9601 0.0))))
-  (define cmds-260g-60m
+  (define cmds-240g-60m
     (saturate-workers-and-gas-commands
-     (sc2-observation 9100 (sc2-player-common 1 60 260 80 40 19 19 0 0 0 0)
+     (sc2-observation 9100 (sc2-player-common 1 60 240 80 40 19 19 0 0 0 0)
                       (append (list th-1 min-1 ref-1-full gw-clean gw-carry-1 gw-carry-2)
                               (mk-min-scvs 9630 16 23.0 9603))
                       '() '() #f '() '() '() '() '() '())))
@@ -4537,37 +4537,37 @@
                        (filter (lambda (c) (and (sc2-raw-unit-command? c)
                                                 (= (sc2-raw-unit-command-target-unit-tag c) 9603)
                                                 (macro-econ-cmd? c)))
-                               cmds-260g-60m))))
-  (check-true "l19-p0-1d-260g-60m-pulls-2-clean-plus-carrying-leaving-1-gas-worker"
+                               cmds-240g-60m))))
+  (check-true "l19-p0-1d-240g-60m-pulls-2-clean-plus-carrying-leaving-1-gas-worker"
               (and (= (length pulled-tags-60m) 2)
                    (memv 9751 pulled-tags-60m)
                    (memv 9752 pulled-tags-60m)
                    (not (memv 9753 pulled-tags-60m))))
-  ;; With only 1 gas worker left at 260G/60M (< 350G), MUST pull 0 (`GasZeroFreeze = 0`)!
+  ;; With only 1 gas worker left at 240G/60M (< 260G), MUST pull 0 (`GasZeroFreeze = 0`)!
   (define ref-1-one (mk-l19-u 9611 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 1 #:ideal 3 #:vesp 1800))
-  (define cmds-260g-60m-floor1
+  (define cmds-240g-60m-floor1
     (saturate-workers-and-gas-commands
-     (sc2-observation 9104 (sc2-player-common 1 60 260 80 40 17 17 0 0 0 0)
+     (sc2-observation 9104 (sc2-player-common 1 60 240 80 40 17 17 0 0 0 0)
                       (append (list th-1 min-1 ref-1-one gw-carry-2) (mk-min-scvs 9630 16 23.0 9603))
                       '() '() #f '() '() '() '() '() '())))
-  (check-true "l19-p0-1d-260g-60m-keeps-last-1-gas-worker"
+  (check-true "l19-p0-1d-240g-60m-keeps-last-1-gas-worker"
               (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
                                            (memv 9753 (sc2-raw-unit-command-unit-tags c))))
-                          cmds-260g-60m-floor1)))
-  ;; At 260G/110M (min >= 100), pulls ONLY the 1 non-carrying worker 9751 (does not pull carrying gas)!
-  (define cmds-260g-110m
+                          cmds-240g-60m-floor1)))
+  ;; At 240G/125M (min >= 120), pulls ONLY the 1 non-carrying worker 9751 (does not pull carrying gas)!
+  (define cmds-240g-125m
     (saturate-workers-and-gas-commands
-     (sc2-observation 9108 (sc2-player-common 1 110 260 80 40 19 19 0 0 0 0)
+     (sc2-observation 9108 (sc2-player-common 1 125 240 80 40 19 19 0 0 0 0)
                       (append (list th-1 min-1 ref-1-full gw-clean gw-carry-1 gw-carry-2)
                               (mk-min-scvs 9630 16 23.0 9603))
                       '() '() #f '() '() '() '() '() '())))
-  (define pulled-tags-110m
+  (define pulled-tags-125m
     (apply append (map sc2-raw-unit-command-unit-tags
                        (filter (lambda (c) (and (sc2-raw-unit-command? c)
                                                 (= (sc2-raw-unit-command-target-unit-tag c) 9603)))
-                               cmds-260g-110m))))
-  (check-true "l19-p0-1d-260g-110m-pulls-only-non-carrying-worker"
-              (equal? pulled-tags-110m '(9751)))
+                               cmds-240g-125m))))
+  (check-true "l19-p0-1d-240g-125m-pulls-only-non-carrying-worker"
+              (equal? pulled-tags-125m '(9751)))
 
   ;; L19-P0-1e: Deadband holds at 170G/240M, releases at < 140G or >= 280M, and 0-gas resaturates even while latched < 350G!
   (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #t)
@@ -4791,15 +4791,102 @@
                                            (macro-econ-cmd? c)))
                           cmds-off-280m)))
 
-  ;; L21-P0-1d: Even while latched ON at 280G/100M (< 300G), 0 active gas workers immediately assigns 1 at P1!
+  ;; L21-P0-1d: Even while latched ON at 250G/100M (< 260G), 0 active gas workers immediately assigns 1 at P1!
   (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #t)
-  (define cmds-0w-280g (saturate-workers-and-gas-commands (mk-l21-obs 8528 100 280 0)))
-  (check-true "l21-p0-1-latched-280g-with-0-gas-workers-resaturates-1-at-p1"
+  (define cmds-0w-250g (saturate-workers-and-gas-commands (mk-l21-obs 8528 100 250 0)))
+  (check-true "l21-p0-1-latched-250g-with-0-gas-workers-resaturates-1-at-p1"
               (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
                    (ormap (lambda (c) (and (sc2-raw-unit-command? c)
                                            (= (sc2-raw-unit-command-target-unit-tag c) 9402)
                                            (macro-econ-cmd? c)))
-                          cmds-0w-280g))))
+                          cmds-0w-250g))))
+
+(printf "[Loop 22] Testing L22-P0-1 >=260G/<120M zero-pull, >=200G/<120M carrying-gas pull, & 3/step pull at >=4 gas workers...\n")
+(let ()
+  (define (mk-l22-u tag utype alliance x y
+                    #:hp [hp 100.0] #:rad [rad 1.0] #:orders [ords '()] #:buffs [buffs '()]
+                    #:assigned [asgn 0] #:ideal [idl 0] #:mins [mins 0] #:vesp [vesp 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 0 #f #f #f
+              hp hp 0.0 0.0 0.0 0.0 mins vesp #f #f #f #t #f
+              ords 0 buffs asgn idl 0.0 0 0 0 0 '() 0 0))
+
+  (define th-22 (mk-l22-u 9301 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75 #:assigned 16 #:ideal 16))
+  (define min-22 (mk-l22-u 9303 341 3 22.0 28.5 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define scvs-min-16
+    (for/list ([i (in-range 16)])
+      (mk-l22-u (+ 9330 i) 45 1 (+ 23.0 (* 0.25 (modulo i 8))) (+ 27.0 (* 0.35 (quotient i 8)))
+                #:hp 45.0 #:rad 0.375 #:orders (list (sc2-unit-order 295 #f 9303 0.0)))))
+
+  ;; L22-P0-1a: At 250G/110M (< 260G) keeps last 1 gas worker (`GasZeroFreeze = 0`), while at
+  ;;            265G/110M (>= 260G & < 120M) pulls the last gas worker all the way to 0 at P1!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (define ref-one (mk-l22-u 9302 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 1 #:ideal 3 #:vesp 1800))
+  (define gw-last-carry (mk-l22-u 9310 45 1 26.0 25.5 #:hp 45.0 #:rad 0.375 #:buffs '(273)
+                                  #:orders (list (sc2-unit-order 296 #f 9301 0.0))))
+  (define cmds-250-110
+    (saturate-workers-and-gas-commands
+     (sc2-observation 9400 (sc2-player-common 1 110 250 80 40 17 17 0 0 0 0)
+                      (append (list th-22 ref-one min-22 gw-last-carry) scvs-min-16)
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l22-p0-1a-250g-110m-keeps-last-1-gas-worker"
+              (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (memv 9310 (sc2-raw-unit-command-unit-tags c))))
+                               cmds-250-110))))
+  (define cmds-265-110
+    (saturate-workers-and-gas-commands
+     (sc2-observation 9404 (sc2-player-common 1 110 265 80 40 17 17 0 0 0 0)
+                      (append (list th-22 ref-one min-22 gw-last-carry) scvs-min-16)
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l22-p0-1a-265g-110m-pulls-last-carrying-gas-worker-to-0-at-p1"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                      (= (sc2-raw-unit-command-target-unit-tag c) 9303)
+                                      (macro-econ-cmd? c)
+                                      (equal? (sc2-raw-unit-command-unit-tags c) '(9310))))
+                     cmds-265-110))
+
+  ;; L22-P0-1b & 1c: With 5 active gas workers (2 clean + 3 carrying gas) at 210G/110M (>=200G & <120M),
+  ;;                 pulls EXACTLY 3 workers in one step (the 2 clean + 1 carrying gas) at P1!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (define ref-a (mk-l22-u 9302 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 3 #:ideal 3 #:vesp 1800))
+  (define ref-b (mk-l22-u 9304 20 1 32.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 2 #:ideal 3 #:vesp 1800))
+  (define gw-c1 (mk-l22-u 9311 45 1 25.2 24.2 #:hp 45.0 #:rad 0.375 #:orders (list (sc2-unit-order 295 #f 9302 0.0))))
+  (define gw-c2 (mk-l22-u 9312 45 1 32.2 24.2 #:hp 45.0 #:rad 0.375 #:orders (list (sc2-unit-order 295 #f 9304 0.0))))
+  (define gw-k1 (mk-l22-u 9313 45 1 26.0 25.5 #:hp 45.0 #:rad 0.375 #:buffs '(273) #:orders (list (sc2-unit-order 296 #f 9301 0.0))))
+  (define gw-k2 (mk-l22-u 9314 45 1 26.4 25.5 #:hp 45.0 #:rad 0.375 #:buffs '(273) #:orders (list (sc2-unit-order 296 #f 9301 0.0))))
+  (define gw-k3 (mk-l22-u 9315 45 1 31.8 25.5 #:hp 45.0 #:rad 0.375 #:buffs '(273) #:orders (list (sc2-unit-order 296 #f 9301 0.0))))
+  (define cmds-5g-210-110
+    (saturate-workers-and-gas-commands
+     (sc2-observation 9408 (sc2-player-common 1 110 210 80 45 21 21 0 0 0 0)
+                      (append (list th-22 ref-a ref-b min-22 gw-c1 gw-c2 gw-k1 gw-k2 gw-k3) scvs-min-16)
+                      '() '() #f '() '() '() '() '() '())))
+  (define pulled-tags-5g
+    (apply append (map sc2-raw-unit-command-unit-tags
+                       (filter (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (= (sc2-raw-unit-command-target-unit-tag c) 9303)
+                                                (macro-econ-cmd? c)))
+                               cmds-5g-210-110))))
+  (check-true "l22-p0-1bc-5-gas-workers-210g-110m-pulls-3-per-step-clean-first-plus-carrying"
+              (and (= (length pulled-tags-5g) 3)
+                   (memv 9311 pulled-tags-5g)
+                   (memv 9312 pulled-tags-5g)
+                   (memv 9313 pulled-tags-5g)))
+  ;; Same 5 gas workers at 210G/125M (min >= 120): pulls ONLY the 2 non-carrying workers (9311, 9312)!
+  (define cmds-5g-210-125
+    (saturate-workers-and-gas-commands
+     (sc2-observation 9412 (sc2-player-common 1 125 210 80 45 21 21 0 0 0 0)
+                      (append (list th-22 ref-a ref-b min-22 gw-c1 gw-c2 gw-k1 gw-k2 gw-k3) scvs-min-16)
+                      '() '() #f '() '() '() '() '() '())))
+  (define pulled-tags-5g-125
+    (apply append (map sc2-raw-unit-command-unit-tags
+                       (filter (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (= (sc2-raw-unit-command-target-unit-tag c) 9303)))
+                               cmds-5g-210-125))))
+  (check-true "l22-p0-1b-210g-125m-skips-carrying-gas-workers"
+              (and (= (length pulled-tags-5g-125) 2)
+                   (memv 9311 pulled-tags-5g-125)
+                   (memv 9312 pulled-tags-5g-125))))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
