@@ -2948,20 +2948,31 @@
                 [(snipe-channel-locked? claims u current-frame) #f]
                 [(spellcaster-channel-protected? u) #f]
                 [else
-                 ;; W4-TAC-1 + W4-TAC-5: When an unshielded heavy-biological Snipe target
-                 ;; (Ultralisk/BroodLord/Lurker) is in range (<= 10t, safe >= 4.5t) and en < 125.0,
-                 ;; evaluate Snipe before EMP unless EMP hits >= 2 shielded psionic targets or >= 160 shields.
+                 ;; W4-TAC-1 + W4-TAC-5 + L30-P0-3 (`t04` Ghost Snipe Priority): When an unshielded
+                 ;; heavy-biological Snipe target (Ultralisk/BroodLord/Lurker) is in range (<= 10t),
+                 ;; evaluate Snipe BEFORE non-shield EMP regardless of energy (remove `< 125` cap so
+                 ;; full-energy Ghosts don't spam EMP into Zerg instead of 170-dmg Snipe!), only
+                 ;; casting EMP first if `>= 160` shields or `>= 2` shielded psionics exist; also relax
+                 ;; Snipe abort radius `4.499t -> 2.75t` when `>= 2` friendly Bio units screen within `4.5t`!
+                 (define ghost-bio-screened?
+                   (>= (count-units-within
+                        ally-units ux uy 4.5
+                        (lambda ([a : Any])
+                          (and (not (= (uh-tag a) tag))
+                               (not (eq? (uh-type a) 'medivac))
+                               (unit-combat-relevant? a))))
+                       2))
+                 (define snipe-danger-r : Float (if ghost-bio-screened? 2.75 4.499))
                  (define heavy-bio-snipe-near?
                    (and (>= en 50.0)
-                        (< en 125.0)
-                        (not (any-unit-within? all-enemies ux uy 4.499 sc2-enemy-unit-targetable?))
+                        (not (any-unit-within? all-enemies ux uy snipe-danger-r sc2-enemy-unit-targetable?))
                         (any-unit-within?
                          enemy-units ux uy 10.0
                          (lambda ([e : Any])
                            (and (not (uh-hallucination? e))
                                 (<= (uh-shields e) 0.0)
                                 (not (eq? (memq (uh-type e)
-                                                '(ultralisk ultralisk-burrowed brood-lord
+                                                '(ultralisk ultralisk-burrowed brood-lord broodlord
                                                   lurker lurker-burrowed lurker-mp lurker-mp-burrowed))
                                           #f))
                                 (< (spell-unit-claim-count claims 'steady-targeting (uh-tag e) current-frame)
@@ -3009,7 +3020,7 @@
                                (spell-directive tag 'ghost 'emp-round 'point 0 ex ey 'ghost-emp)))))
                  (define (try-ghost-snipe) : (Option spell-directive)
                    (and (>= en 50.0)
-                        (not (any-unit-within? all-enemies ux uy 4.499 sc2-enemy-unit-targetable?))
+                        (not (any-unit-within? all-enemies ux uy snipe-danger-r sc2-enemy-unit-targetable?))
                         (let-values ([(ok? tgt _w)
                                       (best-unit-target
                                        ux uy 10.0 enemy-units

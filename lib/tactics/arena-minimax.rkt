@@ -1992,7 +1992,10 @@
       (let* ([det? (fast-detector-sym? etype)]
              [decoy-mult (fast-target-priority-mult etype arena-has-stealth?)]
              [eb-dps (+ 5.0 (tactical-sim-unit-ground-dps su) (tactical-sim-unit-air-dps su))]
-             [eff-dps (if (and det? arena-has-stealth?) (max 22.0 eb-dps) eb-dps)]
+             ;; L30-P0-3 (`p11` Detector Snipe): When our arena has stealth units (`arena-has-stealth?`),
+             ;; enemy detectors (`raven`/`observer`/`overseer`) must strictly outrank frontline Bio
+             ;; so ranged anti-air immediately deletes detection and makes stealth units invincible!
+             [eff-dps (if (and det? arena-has-stealth?) (max 75.0 eb-dps) eb-dps)]
              [v (* decoy-mult eff-dps)])
         (hash-set! ht etype v)
         v)))
@@ -2832,6 +2835,101 @@
   (define base-y (hash-ref obs 'base-y SC2-DEFAULT-HOME-BASE-Y))
   (define nat-x (hash-ref obs 'natural-x SC2-DEFAULT-NATURAL-X))
   (define nat-y (hash-ref obs 'natural-y SC2-DEFAULT-NATURAL-Y))
+  ;; L30-P0-3 (`p03` Edge/Cliff Deflection): Extract O(1) map bounds & pathing accessor once per step
+  ;; so kiting ranged units deflect tangentially toward allied center instead of backing into map/cliff edges!
+  (define kite-mg (let ([g (hash-ref obs 'map-grids #f)]) (and (hash? g) g)))
+  (define kite-map-w
+    (let ([rw (or (and kite-mg (hash-ref kite-mg 'width #f))
+                  (hash-ref obs 'map-width #f))])
+      (and (real? rw) (> rw 8) (exact->inexact rw))))
+  (define kite-map-h
+    (let ([rh (or (and kite-mg (hash-ref kite-mg 'height #f))
+                  (hash-ref obs 'map-height #f))])
+      (and (real? rh) (> rh 8) (exact->inexact rh))))
+  (define kite-pref
+    (let ([p (and kite-mg (or (hash-ref kite-mg 'pathing-ref #f)
+                              (hash-ref kite-mg 'pathing-pred #f)))])
+      (and (procedure? p) (procedure-arity-includes? p 2) p)))
+  (define (kite-point-clear? x y flying?)
+    (and (or (not kite-map-w) (and (fl>= x 4.0) (fl<= x (fl- kite-map-w 4.0))))
+         (or (not kite-map-h) (and (fl>= y 4.0) (fl<= y (fl- kite-map-h 4.0))))
+         (or flying?
+             (not kite-pref)
+             (let* ([ix (inexact->exact (floor x))]
+                    [iy (inexact->exact (floor y))]
+                    [v (and (>= ix 0) (>= iy 0)
+                            (or (not kite-map-w) (< ix (inexact->exact (floor kite-map-w))))
+                            (or (not kite-map-h) (< iy (inexact->exact (floor kite-map-h))))
+                            (kite-pref ix iy))])
+               (if (real? v) (> v 0) (not (not v)))))))
+  (define (compute-edge-safe-kite-vector ux uy ex ey step-dist acx acy flying?)
+    (define fx (fast->fl ux))
+    (define fy (fast->fl uy))
+    (define fex (fast->fl ex))
+    (define fey (fast->fl ey))
+    (define sd (fast->fl step-dist))
+    (define dx (fl- fx fex))
+    (define dy (fl- fy fey))
+    (define mag (flmax 1.0 (flsqrt (fl+ (fl* dx dx) (fl* dy dy)))))
+    (define rx (fl/ dx mag))
+    (define ry (fl/ dy mag))
+    (define kx0 (fl+ fx (fl* sd rx)))
+    (define ky0 (fl+ fy (fl* sd ry)))
+    (define look-d (fl+ sd 2.5))
+    (define px0 (fl+ fx (fl* look-d rx)))
+    (define py0 (fl+ fy (fl* look-d ry)))
+    (if (and (kite-point-clear? kx0 ky0 flying?)
+             (kite-point-clear? px0 py0 flying?))
+        (values (exact-round kx0) (exact-round ky0))
+        (let* ([facx (fast->fl acx)]
+               [facy (fast->fl acy)]
+               ;; Two tangential directions perpendicular to threat vector; prefer one closer to allied center
+               [t1x (fl- 0.0 ry)] [t1y rx]
+               [t2x ry]           [t2y (fl- 0.0 rx)]
+               ;; Prefer tangent closer to allied center; break ties toward map center (away from corners!)
+               [ref-x (if (fl> (fl+ (fl* (fl- facx fx) (fl- facx fx))
+                                    (fl* (fl- facy fy) (fl- facy fy)))
+                               1.0)
+                          facx
+                          (if kite-map-w (fl* 0.5 kite-map-w) facx))]
+               [ref-y (if (fl> (fl+ (fl* (fl- facx fx) (fl- facx fx))
+                                    (fl* (fl- facy fy) (fl- facy fy)))
+                               1.0)
+                          facy
+                          (if kite-map-h (fl* 0.5 kite-map-h) facy))]
+               [d1-ac (let ([ax (fl- (fl+ fx (fl* sd t1x)) ref-x)]
+                            [ay (fl- (fl+ fy (fl* sd t1y)) ref-y)])
+                        (fl+ (fl* ax ax) (fl* ay ay)))]
+               [d2-ac (let ([ax (fl- (fl+ fx (fl* sd t2x)) ref-x)]
+                            [ay (fl- (fl+ fy (fl* sd t2y)) ref-y)])
+                        (fl+ (fl* ax ax) (fl* ay ay)))]
+               [p-tx (if (fl<= d1-ac d2-ac) t1x t2x)]
+               [p-ty (if (fl<= d1-ac d2-ac) t1y t2y)]
+               [s-tx (if (fl<= d1-ac d2-ac) t2x t1x)]
+               [s-ty (if (fl<= d1-ac d2-ac) t2y t1y)]
+               [c-dx (fl- facx fx)]
+               [c-dy (fl- facy fy)]
+               [c-mag (flmax 1.0 (flsqrt (fl+ (fl* c-dx c-dx) (fl* c-dy c-dy))))]
+               [c-rx (fl/ c-dx c-mag)]
+               [c-ry (fl/ c-dy c-mag)]
+               [cands (list (cons (fl+ (fl* 0.85 p-tx) (fl* 0.15 rx)) (fl+ (fl* 0.85 p-ty) (fl* 0.15 ry)))
+                            (cons p-tx p-ty)
+                            (cons (fl+ (fl* 0.85 s-tx) (fl* 0.15 rx)) (fl+ (fl* 0.85 s-ty) (fl* 0.15 ry)))
+                            (cons s-tx s-ty)
+                            (cons c-rx c-ry))])
+          (let loop ([rem cands])
+            (if (null? rem)
+                (let ([cx (if kite-map-w (flmax 4.5 (flmin (fl- kite-map-w 4.5) kx0)) kx0)]
+                      [cy (if kite-map-h (flmax 4.5 (flmin (fl- kite-map-h 4.5) ky0)) ky0)])
+                  (values (exact-round cx) (exact-round cy)))
+                (let* ([dir (car rem)]
+                       [vx (car dir)] [vy (cdr dir)]
+                       [vm (flmax 1e-6 (flsqrt (fl+ (fl* vx vx) (fl* vy vy))))]
+                       [nx (fl+ fx (fl* sd (fl/ vx vm)))]
+                       [ny (fl+ fy (fl* sd (fl/ vy vm)))])
+                  (if (kite-point-clear? nx ny flying?)
+                      (values (exact-round nx) (exact-round ny))
+                      (loop (cdr rem)))))))))
   (define ally-units (hash-ref obs 'ally-units '()))
   (define enemy-units (hash-ref obs 'enemy-units '()))
   (define enemy-bldgs (hash-ref obs 'enemy-buildings '()))
@@ -3061,20 +3159,35 @@
        ;; Translate winning arena micro action into per-unit commands with cooldown & order-equivalence gating
        (define arena-workers (tactical-arena-enemy-workers arena))
        (define arena-ally-units (tactical-arena-ally-units arena))
-       (define need-spatial-targets? (not (eq? committed-act 'DisengageRetreat)))
-       (define-values (arena-has-stealth? any-ally-ground-dps? any-ally-air-dps?)
-         (if need-spatial-targets?
-             (let loop ([rem arena-ally-units] [st? #f] [gd? #f] [ad? #f])
+       (define-values (arena-ally-cx arena-ally-cy)
+         (if (null? arena-ally-units)
+             (values (fast->fl base-x) (fast->fl base-y))
+             (let loop ([rem arena-ally-units] [sx 0.0] [sy 0.0] [n 0])
                (if (null? rem)
-                   (values st? gd? ad?)
+                   (let ([fn (exact->inexact (max 1 n))])
+                     (values (fl/ sx fn) (fl/ sy fn)))
                    (let ([a (car rem)])
+                     (loop (cdr rem)
+                           (fl+ sx (tactical-sim-unit-x a))
+                           (fl+ sy (tactical-sim-unit-y a))
+                           (unsafe-fx+ n 1)))))))
+       (define need-spatial-targets? (not (eq? committed-act 'DisengageRetreat)))
+       (define-values (arena-has-stealth? any-ally-ground-dps? any-ally-air-dps? arena-has-ground-only-allies?)
+         (if need-spatial-targets?
+             (let loop ([rem arena-ally-units] [st? #f] [gd? #f] [ad? #f] [go? #f])
+               (if (null? rem)
+                   (values st? gd? ad? go?)
+                   (let* ([a (car rem)]
+                          [ag (fl> (tactical-sim-unit-ground-dps a) 0.0)]
+                          [aa (fl> (tactical-sim-unit-air-dps a) 0.0)])
                      (loop (cdr rem)
                            (or st?
                                (tactical-sim-unit-cloaked? a)
                                (and (hash-ref STEALTH-SYM-SET (tactical-sim-unit-type a) #f) #t))
-                           (or gd? (fl> (tactical-sim-unit-ground-dps a) 0.0))
-                           (or ad? (fl> (tactical-sim-unit-air-dps a) 0.0))))))
-             (values #f #f #f)))
+                           (or gd? ag)
+                           (or ad? aa)
+                           (or go? (and ag (not aa)))))))
+             (values #f #f #f #f)))
        (define g-plan-key (+ 1000000000 (* aid 4) 1))
        (define a-plan-key (+ 1000000000 (* aid 4) 2))
        (define cached-g (and need-spatial-targets? any-ally-ground-dps? (hash-ref brain-cache g-plan-key #f)))
@@ -3175,7 +3288,21 @@
                                                   (fl* zone-m 1.15)
                                                   zone-m))
                                             1.0)]
-                                       [pconst (fl* (fast-enemy-priority-const etype arena-has-stealth? e) tact-mult)]
+                                       ;; L30-P0-3 (`p11` Air-to-Ground Priority): When our arena includes ground-only
+                                       ;; allies (e.g., Dark Templars/Zealots/Zerglings) that cannot shoot air, boost
+                                       ;; enemy air-to-ground threats (especially cloakable Banshees) so anti-air units
+                                       ;; clear air threats instead of duplicating DPS onto ground targets!
+                                       [air-a2g-mult
+                                        (if (and flying?
+                                                 arena-has-ground-only-allies?
+                                                 (fl> (tactical-sim-unit-ground-dps e) 0.0))
+                                            (if (or (tactical-sim-unit-can-cloak? e)
+                                                    (memq etype '(banshee oracle liberator-ag void-ray battlecruiser carrier brood-lord broodlord)))
+                                                5.5
+                                                3.0)
+                                            1.0)]
+                                       [pconst (fl* (fl* (fast-enemy-priority-const etype arena-has-stealth? e) tact-mult)
+                                                    air-a2g-mult)]
                                        [ehp (flmax 1e-6 (fl+ (tactical-sim-unit-hp e) (tactical-sim-unit-shield e)))]
                                        [tidx (vector-ref (fast-unit-stat-vec etype) 19)]
                                        [eflags (tactical-sim-unit-attr-flags e)]
@@ -3313,9 +3440,10 @@
                  (< (- frame (vector-ref cached 0)) 20)
                  (>= frame (vector-ref cached 0))
                  (eq? arena-has-stealth? (vector-ref cached 1))
-                 (>= (vector-length cached) 6)
+                 (>= (vector-length cached) 7)
                  (eq? mirror-tact-target (vector-ref cached 4))
                  (eq? mirror-pred-unit (vector-ref cached 5))
+                 (eq? arena-has-ground-only-allies? (vector-ref cached 6))
                  (let ([snap (vector-ref cached 2)])
                    (and (= (length vecs) (vector-length snap))
                         (let vloop ([rem vecs] [i 0])
@@ -3338,7 +3466,7 @@
               (define snap
                 (for/vector ([ev (in-list vecs)])
                   (vector-immutable (vector-ref ev 0) (vector-ref ev 2) (vector-ref ev 3) (vector-ref ev 4) (vector-ref ev 6))))
-              (hash-set! brain-cache pkey (vector frame arena-has-stealth? snap plan mirror-tact-target mirror-pred-unit)))
+              (hash-set! brain-cache pkey (vector frame arena-has-stealth? snap plan mirror-tact-target mirror-pred-unit arena-has-ground-only-allies?)))
             plan]))
        (define ground-plan (and need-spatial-targets? any-ally-ground-dps? (pair? ground-vecs)
                                 (resolve-cached-spatial-plan g-plan-key cached-g ground-vecs)))
@@ -3615,7 +3743,8 @@
                      (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
                      (if (fl< d2 bd2) (values ce d2) (values bc bd2))))
                  (define-values (kx ky)
-                   (compute-kite-vector ux uy (tactical-sim-unit-x nearest-clk) (tactical-sim-unit-y nearest-clk) 5.0))
+                   (compute-edge-safe-kite-vector ux uy (tactical-sim-unit-x nearest-clk) (tactical-sim-unit-y nearest-clk)
+                                                  5.0 arena-ally-cx arena-ally-cy (tactical-sim-unit-flying? su)))
                  (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 kx ky frame))
                    (when (and ledger record-ledger?)
                      (order-ledger-record-issued! ledger uid 'kite 'move #:target-x kx #:target-y ky #:frame frame))
@@ -3637,7 +3766,20 @@
                    (not (memq (tactical-sim-unit-type target-su)
                               '(locust locust-mp locustmp locust-flying))))
                  (define w-period (flmax 0.16 (exact->inexact (tactical-sim-unit-weapon-period su))))
-                 (define kite-cd-min (flmax 0.22 (fl* 0.38 w-period)))
+                 ;; L30-P0-3 (`p03`/`t06` Tight Stutter-Step): Raise kite cooldown threshold from `0.38`
+                 ;; -> `0.62` (with `1.1t` micro-step) vs equal/faster melee pursuers within `3.5t` and
+                 ;; `0.52` for general ranged stutter-step so units maximize volley uptime!
+                 (define u-spd (exact->inexact (tactical-sim-unit-speed su)))
+                 (define faster-melee-pursuer-near?
+                   (for/or ([e (in-list arena-enemy-sims)])
+                     (and (fl> (tactical-sim-unit-ground-dps e) 0.0)
+                          (fl<= (tactical-sim-unit-ground-range e) 1.5)
+                          (fl>= (exact->inexact (tactical-sim-unit-speed e)) u-spd)
+                          (let ([edx (fl- ux (tactical-sim-unit-x e))]
+                                [edy (fl- uy (tactical-sim-unit-y e))])
+                            (fl<= (fl+ (fl* edx edx) (fl* edy edy)) 12.25)))))
+                 (define kite-cd-min (flmax 0.22 (fl* (if faster-melee-pursuer-near? 0.62 0.52) w-period)))
+                 (define kite-step (if faster-melee-pursuer-near? 1.1 2.0))
                  (define has-weap? (and (not fragile-caster-no-atk?) non-free-t? (fl> wr 0.0)))
                  (define melee-fight?
                    (and has-weap?
@@ -3696,7 +3838,7 @@
                   [else
                    (let-values ([(kx ky)
                                  (if (and has-weap? (fl> wr 1.5) (fl<= edist (flmax (fl+ wr 3.0) 11.0)))
-                                     (compute-kite-vector ux uy ex ey 2.0)
+                                     (compute-edge-safe-kite-vector ux uy ex ey kite-step arena-ally-cx arena-ally-cy (tactical-sim-unit-flying? su))
                                      (values base-x base-y))])
                      (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 kx ky frame))
                        (when (and ledger record-ledger?)
@@ -3711,7 +3853,17 @@
                       (tactical-sim-unit-air-range su)
                       (sim-unit-weapon-range-vs su target-su)))
                 (define w-period (flmax 0.16 (exact->inexact (tactical-sim-unit-weapon-period su))))
-                (define kite-cd-min (flmax 0.22 (fl* 0.38 w-period)))
+                (define u-spd (exact->inexact (tactical-sim-unit-speed su)))
+                (define faster-melee-pursuer-near?
+                  (for/or ([e (in-list arena-enemy-sims)])
+                    (and (fl> (tactical-sim-unit-ground-dps e) 0.0)
+                         (fl<= (tactical-sim-unit-ground-range e) 1.5)
+                         (fl>= (exact->inexact (tactical-sim-unit-speed e)) u-spd)
+                         (let ([edx (fl- ux (tactical-sim-unit-x e))]
+                               [edy (fl- uy (tactical-sim-unit-y e))])
+                           (fl<= (fl+ (fl* edx edx) (fl* edy edy)) 12.25)))))
+                (define kite-cd-min (flmax 0.22 (fl* (if faster-melee-pursuer-near? 0.62 0.52) w-period)))
+                (define kite-step (if faster-melee-pursuer-near? 1.1 (min 2.0 SC2-KITE-STEP-DISTANCE)))
                 (define shorter-threat-closing?
                   (and (fl> eff-wr 1.5)
                        (let* ([close-r (flmax 2.5 (fl- eff-wr 0.75))]
@@ -3724,7 +3876,8 @@
                                   (fl<= (fl+ (fl* edx edx) (fl* edy edy)) close-r2)))))))
                 (cond
                   [fragile-caster-no-atk?
-                   (define-values (kx ky) (compute-kite-vector ux uy ex ey SC2-KITE-STEP-DISTANCE))
+                   (define-values (kx ky)
+                     (compute-edge-safe-kite-vector ux uy ex ey SC2-KITE-STEP-DISTANCE arena-ally-cx arena-ally-cy (tactical-sim-unit-flying? su)))
                    (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 kx ky frame))
                      (when (and ledger record-ledger?)
                        (order-ledger-record-issued! ledger uid 'kite 'move #:target-x kx #:target-y ky #:frame frame))
@@ -3735,7 +3888,8 @@
                         (fl>= (exact->inexact w-cd) kite-cd-min)
                         (or (eq? committed-act 'CloakHarassWorkers)
                             shorter-threat-closing?))
-                   (define-values (kx ky) (compute-kite-vector ux uy ex ey (min 2.0 SC2-KITE-STEP-DISTANCE)))
+                   (define-values (kx ky)
+                     (compute-edge-safe-kite-vector ux uy ex ey kite-step arena-ally-cx arena-ally-cy (tactical-sim-unit-flying? su)))
                    (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 kx ky frame))
                      (when (and ledger record-ledger?)
                        (order-ledger-record-issued! ledger uid 'kite 'move #:target-x kx #:target-y ky #:frame frame))

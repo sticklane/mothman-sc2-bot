@@ -262,6 +262,8 @@ def normalize_match(m):
         "signatures": m.get("signatures") or [],
         "anomalies": m.get("anomalies") or {},
         "opp_cohort": m.get("opp_cohort") or "",
+        "opp_supply_block_pct": safe_num(m.get("opp_supply_block_pct")),
+        "p2_anomalies": m.get("p2_anomalies") if isinstance(m.get("p2_anomalies"), dict) else {},
         "is_selfplay": bool(
             m.get("is_selfplay")
             or (m.get("opp_cohort") == "selfplay")
@@ -403,6 +405,7 @@ def summarize_slice(rows):
         "pk_workers_avg": mean_opt([r["our_peak_workers"] for r in rows]),
         "pk_army_avg": mean_opt([r["our_peak_army"] for r in rows]),
         "opp_pk_army_avg": mean_opt([r["opp_peak_army"] for r in rows]),
+        "dur_avg_sec": mean_opt([r["duration_sec"] for r in rows]),
         "pk_army_ratio_med": med_opt2(pk_army_ratios),
         "avg_min_bank": mean_opt([r["our_avg_min"] for r in rows]),
         "avg_gas_bank": mean_opt([r["our_avg_gas"] for r in rows]),
@@ -700,6 +703,8 @@ def main():
                     "our_peak_army": m["our_peak_army"],
                     "opp_peak_army": m["opp_peak_army"],
                     "supply_block_pct": m["supply_block_pct"],
+                    "opp_supply_block_pct": m.get("opp_supply_block_pct"),
+                    "p2_anomalies": [k for k, v in (m.get("p2_anomalies") or {}).items() if v],
                 }
                 for m in cur_selfplay_rows
             ],
@@ -976,14 +981,16 @@ def main():
             f"SupBlk `{fmt(sps['sup_blk_avg'],'%')}`, PkArmy `{fmt(sps['pk_army_avg'],'',0)}`, "
             f"AvgDur `{fmt(sps.get('dur_avg_sec'),'s',0)}`)"
         )
-        print("| Match | MU | P1 Result | Trade | Dur | PkArmy (P1/P2) | SupBlk% |")
-        print("|---|---|---|---:|---:|---:|---:|")
+        print("| Match | MU | P1 Result | Trade | Dur | PkArmy (P1/P2) | SB% (P1/P2) | P2 Anomalies |")
+        print("|---|---|---|---:|---:|---:|---:|---|")
         for sm in selfplay_report["matches"]:
+            p2_sb = fmt(sm.get("opp_supply_block_pct"), "%") if sm.get("opp_supply_block_pct") is not None else "-"
+            p2_an = ", ".join(sm.get("p2_anomalies") or []) or "-"
             print(
                 f"| `#{sm['id']}` `{sm['our_bot']}` vs `{sm['opp_bot']}` | **{sm['matchup']}** "
                 f"| {str(sm['result']).upper()} | {fmt(sm['trade_ratio'],'x',2)} "
-                f"| {fmt(sm['duration_sec'],'s',0)} | {sm['our_peak_army']}/{sm['opp_peak_army']} "
-                f"| {fmt(sm['supply_block_pct'],'%')} |"
+                f"| {fmt(sm['duration_sec'],'s',0)} | {fmt(sm['our_peak_army'],'',0)}/{fmt(sm['opp_peak_army'],'',0)} "
+                f"| {fmt(sm['supply_block_pct'],'%')}/{p2_sb} | {p2_an} |"
             )
 
     if hwm_all:

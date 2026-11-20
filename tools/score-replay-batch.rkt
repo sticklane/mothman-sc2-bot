@@ -797,6 +797,61 @@
               (set! plains (cons p plains)))))))
   (values (remove-duplicates zips equal?) (remove-duplicates plains equal?)))
 
+;; L30-LOOP-2: Locate P2 Mothman logs (`opp_log_path` or `-SP`/`-Base` sibling logs) for symmetric Self-Play auditing
+(define (find-associated-p2-logs replay-path meta)
+  (define dir (path-only replay-path))
+  (define bn (path->string (file-name-from-path replay-path)))
+  (define stem (regexp-replace RX-REPLAY-EXT bn ""))
+  (define zips '())
+  (define plains '())
+  (define meta-opp-log (and (hash? meta) (hash-ref meta 'opp_log_path #f)))
+  (define (is-p2-tail? tail-low)
+    (and (not (string-contains? tail-low "controller"))
+         (not (string-suffix? tail-low ".sc2replay"))
+         (not (string-suffix? tail-low ".json"))
+         (or (string-contains? tail-low "-sp.")
+             (string-contains? tail-low "-sp_")
+             (string-contains? tail-low "-base.")
+             (string-contains? tail-low "-base_"))))
+  ;; 1. Explicit `opp_log_path` from local runner `summary.json` / `results.json`
+  (when (and (string? meta-opp-log) (not (string=? meta-opp-log "")) (file-exists? meta-opp-log))
+    (set! plains (cons (string->path meta-opp-log) plains)))
+  ;; 2. Same directory fallback
+  (when (and (null? plains) dir (directory-exists? dir))
+    (for ([p (in-list (directory-list dir #:build? #t))] #:when (file-exists? p))
+      (define fbn (path->string (file-name-from-path p)))
+      (when (string-prefix? fbn stem)
+        (define tail-low
+          (if (> (string-length fbn) (add1 (string-length stem)))
+              (string-downcase (substring fbn (add1 (string-length stem))))
+              (string-downcase fbn)))
+        (when (and (is-p2-tail? tail-low)
+                   (or (string-suffix? tail-low ".log")
+                       (string-suffix? tail-low ".stdout")
+                       (string-suffix? tail-low ".stderr")
+                       (string-suffix? tail-low ".zip")))
+          (if (string-suffix? tail-low ".zip")
+              (set! zips (cons p zips))
+              (set! plains (cons p plains)))))))
+  ;; 3. Sibling `../logs/<stem>_*` fallback
+  (define parent-dir (and dir (simplify-path (build-path dir 'up))))
+  (define sibling-logs (and parent-dir (build-path parent-dir "logs")))
+  (define stem-pfx (string-append stem "_"))
+  (when (and (null? plains) (null? zips) sibling-logs (directory-exists? sibling-logs))
+    (for ([p (in-list (directory-list sibling-logs #:build? #t))] #:when (file-exists? p))
+      (define fbn (path->string (file-name-from-path p)))
+      (when (string-prefix? fbn stem-pfx)
+        (define tail-low (string-downcase (substring fbn (string-length stem-pfx))))
+        (when (and (is-p2-tail? tail-low)
+                   (or (string-suffix? tail-low ".log")
+                       (string-suffix? tail-low ".stdout")
+                       (string-suffix? tail-low ".stderr")
+                       (string-suffix? tail-low ".zip")))
+          (if (string-suffix? tail-low ".zip")
+              (set! zips (cons p zips))
+              (set! plains (cons p plains)))))))
+  (values (remove-duplicates zips equal?) (remove-duplicates plains equal?)))
+
 ;; -----------------------------------------------------------------------------
 ;; True Single-Pass MPQ + Tracker Forensic Extractor
 ;; -----------------------------------------------------------------------------
@@ -1717,12 +1772,17 @@
           (define opp-pk-sup (peak-stat opp-s (lambda (h) (safe-num (hash-ref h 'food_used 0)))))
           (define our-avg-min (round1 (avg-stat our-s (lambda (h) (safe-num (hash-ref h 'min_cur 0))))))
           (define our-avg-gas (round1 (avg-stat our-s (lambda (h) (safe-num (hash-ref h 'gas_cur 0))))))
+          (define opp-avg-min (round1 (avg-stat opp-s (lambda (h) (safe-num (hash-ref h 'min_cur 0))))))
+          (define opp-avg-gas (round1 (avg-stat opp-s (lambda (h) (safe-num (hash-ref h 'gas_cur 0))))))
           (define our-pk-min (peak-stat our-s (lambda (h) (safe-num (hash-ref h 'min_cur 0)))))
           (define our-pk-gas (peak-stat our-s (lambda (h) (safe-num (hash-ref h 'gas_cur 0)))))
           (define upgs (hash-ref upg-cnt our-pid 0))
           (define tot-ev (max 1 (hash-ref total-stat-ev our-pid 1)))
           (define sb-ev (hash-ref sb-steps our-pid 0))
           (define sb-pct (round1 (* 100.0 (/ sb-ev tot-ev))))
+          (define opp-tot-ev (max 1 (hash-ref total-stat-ev opp-pid 1)))
+          (define opp-sb-ev (hash-ref sb-steps opp-pid 0))
+          (define opp-sb-pct (round1 (* 100.0 (/ opp-sb-ev opp-tot-ev))))
 
           ;; W15-LOOP-2: Infer map_symmetry_kind from frame-0 neutral mineral bounds & main spawns (zero map-name checks)
           (define map-symmetry-kind
@@ -2426,6 +2486,117 @@
                      (round2 (max tel-avg-tr-ms (* eff-p95-step-ms (/ tel-avg-tr-ms tel-avg-step-ms)))))
                 tel-avg-tr-ms))
 
+          ;; L30-LOOP-2: Symmetric P2 Self-Play log telemetry & anomaly extraction (ONLY for self-play matches!)
+          (define opp-tel
+            (and is-selfplay-match?
+                 (hash? meta)
+                 (let ([ot (hash-ref meta 'opp_telemetry #f)]) (and (hash? ot) ot))))
+          (define p2-log-acc
+            (if is-selfplay-match?
+                (let-values ([(p2-zips p2-plains) (find-associated-p2-logs replay-path meta)])
+                  (let* ([a0 (make-log-acc)]
+                         [a1 (for/fold ([a a0]) ([z (in-list p2-zips)]) (scan-log-zip! a z))]
+                         [a2 (for/fold ([a a1]) ([f (in-list p2-plains)]) (scan-plain-log-file! a f))])
+                    a2))
+                #f))
+          (define p2-has-logs? (and (hash? p2-log-acc) (hash-ref p2-log-acc 'has-logs? #f)))
+          (define p2-escrow-lockouts
+            (if p2-has-logs?
+                (append (hash-ref p2-log-acc 'hb-windows '())
+                        (hash-ref p2-log-acc 'gs-windows '()))
+                '()))
+          (define p2-grms-ticks (if p2-has-logs? (hash-ref p2-log-acc 'gas-rich-min-starved-ticks 0) 0))
+          (define p2-grms-peak-gas (if p2-has-logs? (hash-ref p2-log-acc 'gas-rich-min-starved-peak-gas 0) 0))
+          (define p2-gas-rich-anomaly
+            (and p2-has-logs?
+                 (>= p2-grms-ticks 30)
+                 (hasheq 'ticks p2-grms-ticks
+                         'peak_gas p2-grms-peak-gas
+                         'avg_min opp-avg-min
+                         'avg_gas opp-avg-gas)))
+          (define p2-pstall-ticks (if p2-has-logs? (hash-ref p2-log-acc 'prod-stall-ticks 0) 0))
+          (define p2-pstall-max-streak (if p2-has-logs? (hash-ref p2-log-acc 'prod-stall-max-streak 0) 0))
+          (define p2-pstall-max-bldg (if p2-has-logs? (hash-ref p2-log-acc 'prod-stall-max-bldg "") ""))
+          (define p2-pstall-counts (if p2-has-logs? (hash-ref p2-log-acc 'prod-stall-counts (make-hash)) (make-hash)))
+          (define p2-prod-stall-anomaly
+            (and p2-has-logs?
+                 (or (>= p2-pstall-ticks 30)
+                     (and (<= dur 300.0) (>= p2-pstall-max-streak 8)))
+                 (hasheq 'ticks p2-pstall-ticks
+                         'max_streak p2-pstall-max-streak
+                         'top_bldg p2-pstall-max-bldg
+                         'by_bldg (for/list ([p (in-list (top-k-pairs p2-pstall-counts 4))])
+                                    (format "~a:~a" (car p) (cdr p))))))
+          (define p2-trade-ratio
+            (round2 (/ (+ lost-val 100.0) (+ killed-val 100.0))))
+          (define p2-drip-feed-anomaly
+            (and is-selfplay-match?
+                 (>= killed-val 8000)
+                 (< p2-trade-ratio 0.40)
+                 (< (/ (exact->inexact opp-pk-army) (exact->inexact (max 1 killed-val))) 0.20)
+                 (hasheq 'opp_peak_army opp-pk-army
+                         'p2_lost_val killed-val
+                         'army_mass_ratio (round2 (/ (exact->inexact opp-pk-army) (exact->inexact killed-val)))
+                         'trade_ratio p2-trade-ratio)))
+          (define p2-one-base-anomaly
+            (and is-selfplay-match?
+                 (<= opp-bases 1)
+                 (>= dur 400.0)
+                 (hasheq 'opp_bases opp-bases
+                         'our_bases our-bases
+                         'duration_sec (round1 dur))))
+          (define p2-tvt-zero-tank-anomaly
+            (and is-selfplay-match?
+                 (string=? matchup "TvT")
+                 (>= dur 360.0)
+                 (<= opp-tank-cnt 1)
+                 (hasheq 'opp_tanks opp-tank-cnt
+                         'our_tanks our-tank-cnt)))
+          (define p2-early-atk-pct-2m-6m
+            (and p2-has-logs?
+                 (let ([p2-pbm (hash-ref p2-log-acc 'pos-by-min)])
+                   (define-values (atk tot)
+                     (for/fold ([a 0] [t 0]) ([m (in-list '(2 3 4 5))])
+                       (define pv (hash-ref p2-pbm m #(0 0 0)))
+                       (values (+ a (vector-ref pv 0))
+                               (+ t (vector-ref pv 0) (vector-ref pv 1) (vector-ref pv 2)))))
+                   (and (> tot 0)
+                        (round1 (* 100.0 (/ (exact->inexact atk) (exact->inexact tot))))))))
+          (define p2-step-sorted (if p2-has-logs? (sort (hash-ref p2-log-acc 'step-ms '()) <) '()))
+          (define p2-step-p50 (percentile-sorted p2-step-sorted 0.50))
+          (define p2-step-p95 (percentile-sorted p2-step-sorted 0.95))
+          (define p2-log-step-max (and (pair? p2-step-sorted) (round2 (last p2-step-sorted))))
+          (define p2-tel-p95 (and opp-tel (real? (hash-ref opp-tel 'p95_step_ms #f))
+                                  (round2 (hash-ref opp-tel 'p95_step_ms))))
+          (define p2-tel-max (and opp-tel (real? (hash-ref opp-tel 'max_step_ms #f))
+                                  (round2 (hash-ref opp-tel 'max_step_ms))))
+          (define p2-eff-p95-step-ms (or p2-tel-p95 (and p2-step-p95 (round2 p2-step-p95))))
+          (define p2-true-step-max
+            (cond
+              [(and p2-tel-max p2-log-step-max) (max p2-tel-max p2-log-step-max)]
+              [p2-tel-max p2-tel-max]
+              [else p2-log-step-max]))
+          (define p2-action-err-total (if p2-has-logs? (hash-ref p2-log-acc 'action-err-total 0) 0))
+          (define p2-crashes (if p2-has-logs? (reverse (hash-ref p2-log-acc 'crashes '())) '()))
+          (define p2-saving-top
+            (if p2-has-logs?
+                (for/list ([p (in-list (top-k-pairs (hash-ref p2-log-acc 'saving-counts) 5))])
+                  (list (car p) (cdr p)))
+                '()))
+          (define p2-blocked-top
+            (if p2-has-logs?
+                (for/list ([p (in-list (top-k-pairs (hash-ref p2-log-acc 'blocked-counts) 5))])
+                  (list (car p) (cdr p)))
+                '()))
+          (define p2-anomalies-ht
+            (and is-selfplay-match?
+                 (hasheq 'escrow_lockouts p2-escrow-lockouts
+                         'gas_rich_min_starved p2-gas-rich-anomaly
+                         'prod_placement_stall p2-prod-stall-anomaly
+                         'drip_feed_collapse p2-drip-feed-anomaly
+                         'one_base_lockout p2-one-base-anomaly
+                         'tvt_zero_tank p2-tvt-zero-tank-anomaly)))
+
           ;; Build crisp signatures list
           (define sigs '())
           (define (add-sig! s) (set! sigs (cons s sigs)))
@@ -2709,6 +2880,17 @@
                   'step_max true-step-max
                   'log_step_max log-step-max
                   'crashes (reverse (hash-ref log-acc 'crashes '()))
+                  'opp_supply_block_pct opp-sb-pct
+                  'p2_has_logs p2-has-logs?
+                  'p2_step_p50 (and p2-step-p50 (round2 p2-step-p50))
+                  'p2_step_p95 p2-eff-p95-step-ms
+                  'p2_step_max p2-true-step-max
+                  'p2_early_atk_pct_2m_6m p2-early-atk-pct-2m-6m
+                  'p2_saving_top p2-saving-top
+                  'p2_blocked_top p2-blocked-top
+                  'p2_action_err_total p2-action-err-total
+                  'p2_crashes p2-crashes
+                  'p2_anomalies p2-anomalies-ht
                   'signatures (reverse sigs)))))
 
 ;; -----------------------------------------------------------------------------
@@ -3663,9 +3845,37 @@
   (define selfplay-all-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "selfplay")) scored))
   (define agg-core12 (aggregate-slice core12-rows))
   (define agg-unseen6 (aggregate-slice unseen6-rows))
-  (define agg-selfplay (aggregate-slice selfplay-rows))
+  ;; L30-LOOP-2: Symmetric P2 Self-Play anomaly & telemetry aggregator
+  (define (aggregate-p2-selfplay rs)
+    (define (p2-anom-cnt pred)
+      (count (lambda (r)
+               (define a (hash-ref r 'p2_anomalies #f))
+               (and (hash? a) (pred a)))
+             rs))
+    (define opp-sbs (filter real? (map (lambda (r) (hash-ref r 'opp_supply_block_pct #f)) rs)))
+    (define p2-maxs (filter real? (map (lambda (r) (hash-ref r 'p2_step_max #f)) rs)))
+    (define p2-p95s (filter real? (map (lambda (r) (hash-ref r 'p2_step_p95 #f)) rs)))
+    (define p2-atks (filter real? (map (lambda (r) (hash-ref r 'p2_early_atk_pct_2m_6m #f)) rs)))
+    (hasheq 'p2_logged (count (lambda (r) (eq? (hash-ref r 'p2_has_logs #f) #t)) rs)
+            'opp_supply_block_pct (if (pair? opp-sbs) (round1 (/ (apply + opp-sbs) (length opp-sbs))) 0.0)
+            'p2_early_atk_pct_2m_6m (if (pair? p2-atks) (round1 (/ (apply + p2-atks) (length p2-atks))) #f)
+            'p2_p95_step_ms (if (pair? p2-p95s) (round2 (/ (apply + p2-p95s) (length p2-p95s))) #f)
+            'p2_max_step_ms (if (pair? p2-maxs) (round2 (apply max p2-maxs)) #f)
+            'p2_action_errs (for/sum ([r (in-list rs)]) (hash-ref r 'p2_action_err_total 0))
+            'p2_crashes (count (lambda (r) (pair? (hash-ref r 'p2_crashes '()))) rs)
+            'p2_escrow_lock (p2-anom-cnt (lambda (a) (pair? (hash-ref a 'escrow_lockouts '()))))
+            'p2_gas_rich (p2-anom-cnt (lambda (a) (hash? (hash-ref a 'gas_rich_min_starved #f))))
+            'p2_prod_stall (p2-anom-cnt (lambda (a) (hash? (hash-ref a 'prod_placement_stall #f))))
+            'p2_drip_feed (p2-anom-cnt (lambda (a) (hash? (hash-ref a 'drip_feed_collapse #f))))
+            'p2_one_base (p2-anom-cnt (lambda (a) (hash? (hash-ref a 'one_base_lockout #f))))
+            'p2_tvt_0tank (p2-anom-cnt (lambda (a) (hash? (hash-ref a 'tvt_zero_tank #f))))))
+  (define p2-selfplay-agg (aggregate-p2-selfplay selfplay-rows))
+  (define agg-selfplay
+    (hash-set* (aggregate-slice selfplay-rows)
+               'opp_supply_block_pct (hash-ref p2-selfplay-agg 'opp_supply_block_pct 0.0)
+               'p2_summary p2-selfplay-agg))
   (define by-cohort (hasheq 'core_12 agg-core12 'unseen_6 agg-unseen6 'selfplay agg-selfplay))
-  ;; L29-LOOP-2: Per-matchup `selfplay_breakdown` (full P1 vs P2 head-to-head metrics)
+  ;; L29-LOOP-2 / L30-LOOP-2: Per-matchup `selfplay_breakdown` (full symmetric P1 vs P2 head-to-head metrics & anomalies)
   (define selfplay-mus
     (sort (remove-duplicates (map (lambda (r) (hash-ref r 'matchup "?v?")) selfplay-all-rows))
           string-ci<?))
@@ -3675,6 +3885,7 @@
       (define cl-rs (filter (lambda (r) (equal? (hash-ref r 'matchup "") mu)) selfplay-rows))
       (define agg (aggregate-slice cl-rs))
       (define ac (hash-ref agg 'anomaly_counts (hasheq)))
+      (define p2a (aggregate-p2-selfplay cl-rs))
       (define faults (- (length all-rs) (length cl-rs)))
       (values (string->symbol mu)
               (hasheq 'matchup mu
@@ -3699,15 +3910,28 @@
                       'our_peak_army (hash-ref agg 'our_peak_army 0.0)
                       'opp_peak_army (hash-ref agg 'opp_peak_army 0.0)
                       'supply_block_pct (hash-ref agg 'supply_block_pct 0.0)
+                      'opp_supply_block_pct (hash-ref p2a 'opp_supply_block_pct 0.0)
                       'avg_dur_sec (hash-ref agg 'avg_dur_sec 0.0)
                       'escrow_lock (hash-ref ac 'escrow_lockout 0)
+                      'gas_rich (hash-ref ac 'gas_rich_min_starved 0)
                       'prod_stall (hash-ref ac 'prod_placement_stall 0)
                       'drip_feed (hash-ref ac 'drip_feed_collapse 0)
                       'cloak_loss (hash-ref ac 'cloaked_unit_damage_losses 0)
                       'tvt_0tank (hash-ref ac 'tvt_zero_tank 0)
                       'stale_tie (hash-ref ac 'late_game_stalemate_tie 0)
                       'wall_ties (hash-ref ac 'wall_timeout_tie 0)
-                      'anomaly_counts ac))))
+                      'anomaly_counts ac
+                      'p2_logged (hash-ref p2a 'p2_logged 0)
+                      'p2_escrow_lock (hash-ref p2a 'p2_escrow_lock 0)
+                      'p2_gas_rich (hash-ref p2a 'p2_gas_rich 0)
+                      'p2_prod_stall (hash-ref p2a 'p2_prod_stall 0)
+                      'p2_drip_feed (hash-ref p2a 'p2_drip_feed 0)
+                      'p2_one_base (hash-ref p2a 'p2_one_base 0)
+                      'p2_tvt_0tank (hash-ref p2a 'p2_tvt_0tank 0)
+                      'p2_crashes (hash-ref p2a 'p2_crashes 0)
+                      'p2_action_errs (hash-ref p2a 'p2_action_errs 0)
+                      'p2_max_step_ms (hash-ref p2a 'p2_max_step_ms #f)
+                      'p2_summary p2a))))
   ;; W14-LOOP-2: Per-opponent `unseen_6_breakdown` for 54-match full-roster ship scorecard
   (define unseen6-opps
     (sort (remove-duplicates (map (lambda (r) (hash-ref r 'opp_bot "Unknown")) unseen6-all-rows))
@@ -3774,11 +3998,31 @@
               (r0 (hash-ref b 'our_peak_army)) (r1 (hash-ref b 'supply_block_pct)))))
   (when (pair? selfplay-all-rows)
     (print-agg-line "SELFPLAY(cl) " agg-selfplay)
+    (printf "    P2 Self-Play Summary (logged=~a/~a): SB=~a% | Atk2-6=~a% | Lat(p95/max)=~a/~ams | P2 Anom: EscrowLock=~a | GasRich=~a | ProdStall=~a | DripFeed=~a | 1Base=~a | TvT0Tank=~a | Crash=~a | Rej=~a\n"
+            (hash-ref p2-selfplay-agg 'p2_logged 0) (length selfplay-rows)
+            (r1 (hash-ref p2-selfplay-agg 'opp_supply_block_pct 0.0))
+            (if (real? (hash-ref p2-selfplay-agg 'p2_early_atk_pct_2m_6m #f))
+                (r1 (hash-ref p2-selfplay-agg 'p2_early_atk_pct_2m_6m))
+                "-")
+            (if (real? (hash-ref p2-selfplay-agg 'p2_p95_step_ms #f))
+                (r1 (hash-ref p2-selfplay-agg 'p2_p95_step_ms))
+                "-")
+            (if (real? (hash-ref p2-selfplay-agg 'p2_max_step_ms #f))
+                (r0 (hash-ref p2-selfplay-agg 'p2_max_step_ms))
+                "-")
+            (hash-ref p2-selfplay-agg 'p2_escrow_lock 0)
+            (hash-ref p2-selfplay-agg 'p2_gas_rich 0)
+            (hash-ref p2-selfplay-agg 'p2_prod_stall 0)
+            (hash-ref p2-selfplay-agg 'p2_drip_feed 0)
+            (hash-ref p2-selfplay-agg 'p2_one_base 0)
+            (hash-ref p2-selfplay-agg 'p2_tvt_0tank 0)
+            (hash-ref p2-selfplay-agg 'p2_crashes 0)
+            (hash-ref p2-selfplay-agg 'p2_action_errs 0))
     (printf "\n  SELFPLAY HEAD-TO-HEAD BREAKDOWN (P1 vs P2, n_clean=~a / n_total=~a):\n"
             (length selfplay-rows) (length selfplay-all-rows))
     (for ([mu (in-list selfplay-mus)])
       (define b (hash-ref selfplay-breakdown (string->symbol mu)))
-      (printf "    ~a | P1 ~aW-~aL-~aT (n=~a/~a) | TradeAgg=~ax (~a/~a) | Base=~a/~a | W@4m=~a/~a | PkArmy=~a/~a | Dur=~a | SB=~a% | Anom(Esc/Prd/Drp/Clk/Stl)=~a/~a/~a/~a/~a\n"
+      (printf "    ~a | P1 ~aW-~aL-~aT (n=~a/~a) | TradeAgg=~ax (~a/~a) | Base=~a/~a | W@4m=~a/~a | PkArmy=~a/~a | Dur=~a | SB=~a/~a% | P1(Esc/Gas/Prd/Drp/Stl)=~a/~a/~a/~a/~a | P2(Esc/Gas/Prd/Drp/1B)=~a/~a/~a/~a/~a\n"
               (pad-r mu 6)
               (hash-ref b 'wins) (hash-ref b 'losses) (hash-ref b 'ties)
               (hash-ref b 'n) (hash-ref b 'n_total)
@@ -3789,9 +4033,13 @@
               (r0 (hash-ref b 'our_peak_army)) (r0 (hash-ref b 'opp_peak_army))
               (fmt-mmss (hash-ref b 'avg_dur_sec 0.0))
               (r1 (hash-ref b 'supply_block_pct))
-              (hash-ref b 'escrow_lock 0) (hash-ref b 'prod_stall 0)
-              (hash-ref b 'drip_feed 0) (hash-ref b 'cloak_loss 0)
-              (hash-ref b 'stale_tie 0))))
+              (r1 (hash-ref b 'opp_supply_block_pct 0.0))
+              (hash-ref b 'escrow_lock 0) (hash-ref b 'gas_rich 0)
+              (hash-ref b 'prod_stall 0) (hash-ref b 'drip_feed 0)
+              (hash-ref b 'stale_tie 0)
+              (hash-ref b 'p2_escrow_lock 0) (hash-ref b 'p2_gas_rich 0)
+              (hash-ref b 'p2_prod_stall 0) (hash-ref b 'p2_drip_feed 0)
+              (hash-ref b 'p2_one_base 0))))
   (for ([rc (in-list '(Protoss Terran Zerg))])
     (print-agg-line (format "RACE=~a" (pad-r rc 8)) (hash-ref by-race rc)))
   (for ([rs (in-list '(win loss tie))])

@@ -1558,7 +1558,8 @@
       (let ([f (bitwise-ior
                 (if (fast-unit-is-detector-sym? bt) 1 0)
                 (if (eq? bt 'armory) 2 0)
-                (if (memq bt '(hatchery lair hive nexus command-center orbital-command planetary-fortress)) 4 0)
+                (if (memq bt '(hatchery lair hive nexus command-center orbital-command planetary-fortress
+                               command-center-flying orbital-command-flying)) 4 0)
                 (if (hash-ref RUNTIME-TUMOR-SET bt #f) 8 0)
                 (if (hash-ref RUNTIME-WALL-BLOCK-BLDG-SET bt #f) 16 0)
                 (if (eq? bt 'supply-depot-lowered) 32 0)
@@ -4584,8 +4585,21 @@
       [(Terran)
        (define rax-ready? (memq 'barracks ready-bldg-types))
        (define ebay-ready? (memq 'engineering-bay ready-bldg-types))
+       ;; L30-P0-3 (`#32` Natural CC Escrow Guard): Do not let non-emergency static-D spends
+       ;; break an active 1-base Natural `command-center` escrow (`sav=command-center`)!
+       (define terran-hold-sd-for-nat-cc?
+         (and live-game?
+              (= active-bases 1)
+              (not active-cloak-emergency?)
+              (l2-ctx-terran-saving-for-cc-expand? ctx)
+              (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+              (not (l2-ctx-early-survival-crisis? ctx))
+              (not (l2-ctx-under-base-attack? ctx))
+              (<= (l2-ctx-live-enemy-threat-supply ctx) (max 6.0 (l2-ctx-live-army-supply ctx)))
+              (< (- (l2-ctx-minerals ctx) 100) (sc2-min-cost 'command-center))))
        ;; Strictly gate EBay & Missile Turrets on genuine air/cloak threat (NOT pure ground `boost-sd?`)!
        (when (and genuine-air-or-cloak-threat?
+                  (not terran-hold-sd-for-nat-cc?)
                   (not ebay-ready?)
                   (not (l2-building-present-or-pending? ctx 'engineering-bay))
                   rax-ready?
@@ -4593,8 +4607,11 @@
                   (l2-save-cancel-rebuild-ready? ctx 'engineering-bay 60))
          (l2-emit-build-verified! ctx 'engineering-bay (safe-coord (+ base-x 5.0)) (safe-coord (- base-y 4.0))))
        (or (and genuine-air-or-cloak-threat?
+                (not terran-hold-sd-for-nat-cc?)
                 (try-sd! 'missile-turret ebay-ready? aa-desire-cap))
-           (and boost-sd? (try-sd! 'bunker rax-ready? ground-desire-cap)))]))
+           (and boost-sd?
+                (not terran-hold-sd-for-nat-cc?)
+                (try-sd! 'bunker rax-ready? ground-desire-cap)))]))
   ;; When base-loss-recovery fires and no expand is pending, reclaim uncamped expansion pad cleanly.
   (when (and boost-exp?
              (not (l2-ctx-worker-rush-active? ctx))
@@ -10878,14 +10895,20 @@
          (not worker-rush-active?)
          (not (l2-ctx-in-base-proxy-detected? ctx))
          (or (and (eq? race 'Terran)
-                  (< supply-cap 31)
-                  (>= (l2-ctx-supply-left ctx) 3)
                   (>= frame 1200)
                   (>= total-workers 16)
                   (memq 'barracks (l2-ctx-bldg-types ctx))
                   (= (order-ledger-pending-count-for-type oledger 'command-center frame) 0)
-                  (>= (l2-ctx-minerals ctx) 250)
-                  (< (- (l2-ctx-minerals ctx) (sc2-min-cost 'supply-depot)) (sc2-min-cost 'command-center)))
+                  (< (- (l2-ctx-minerals ctx) (sc2-min-cost 'supply-depot)) (sc2-min-cost 'command-center))
+                  (or (and (< supply-cap 31)
+                           (>= (l2-ctx-supply-left ctx) 3)
+                           (>= (l2-ctx-minerals ctx) 250))
+                      ;; L30-P0-3 (`#32` Natural CC Escrow Guard): Also hold non-urgent proactive
+                      ;; Supply Depots (`supply-left >= 4`) past 31 cap while Brain is saving for CC #2!
+                      (and (>= frame 1800)
+                           (>= (l2-ctx-supply-left ctx) 4)
+                           (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+                           (>= (l2-ctx-minerals ctx) 200))))
              ;; W5-P0-2-rt: When on 1 base with >=400M and a supply provider is ALREADY in progress
              ;; (e.g., 27/31 with Pylon #3 building -> +8 supply), don't spend 100M on a 2nd overlapping
              ;; proactive Pylon before 2nd Townhall expansion runs (#30 PvP f=3584 fix!).
@@ -17504,6 +17527,16 @@
                     under-base-attack?
                     forward-proxy-detected?
                     (>= live-enemy-threat-supply 6))
+                (not (and live-game?
+                          (= (length ccs) 1)
+                          terran-saving-for-cc-expand?
+                          (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+                          (not early-survival-crisis?)
+                          (not under-early-cheese?)
+                          (not under-base-attack?)
+                          (<= live-enemy-threat-supply live-army-supply)
+                          (>= (l2-ctx-minerals ctx) 150)
+                          (< (- (l2-ctx-minerals ctx) (sc2-min-cost 'bunker)) (sc2-min-cost 'command-center))))
                 (memq 'barracks (l2-ctx-bldg-types ctx))
                 ;; W6-P0-3-rt: Defer Bunker #2+ until Factory #1 drops when 100G is banked
                 (or (= cur-bunker-cnt 0)
@@ -18691,7 +18724,11 @@
                 (and (not terran-orbital-freezes-all-scvs?)
                      (not (not (member '(train scv) prio-scheduled-actions)))
                      (or (>= (length ccs) 2)
-                         (< (l2-ctx-minerals ctx) 225)))
+                         (< (l2-ctx-minerals ctx)
+                            (if (and (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+                                     (>= total-workers 18))
+                                150
+                                225))))
                 (and (not terran-orbital-freezes-all-scvs?) (< total-workers 17) (< (l2-ctx-minerals ctx) 225)))
             (not crisis-freeze-workers?)
             (l2-worker-army-curve-satisfied? ctx)
@@ -18730,9 +18767,9 @@
                         #:respect-bo-reserve? (or brain-saving-oc1-p3?
                                                   (l2-worker-respect-bo-reserve? ctx))))
   (set-l2-ctx-brain-scheduled-workers-rem! ctx 0)
-  ;; L19-P0-3 / L24-P0-3 (`#029`/`#047` 1BaseLock): When Brain is saving for 1-base CC #2 and bank >= 225M
-  ;; with threat <= max(6.0, army), hold Barracks/Factory production so the 225..399M bank
-  ;; reaches 400M instead of continuously bleeding back to 0M!
+  ;; L19-P0-3 / L24-P0-3 / L30-P0-3 (`#32` Natural CC Escrow Guard): When Brain is saving for 1-base
+  ;; CC #2 and bank >= 150M (with >= 4 army or 0 threat; else >= 225M) and threat <= max(6.0, army),
+  ;; hold non-emergency Barracks/Factory spends so the bank climbs cleanly to 400M!
   (define terran-brain-saving-1base-cc?
     (and live-game?
          (= (length ccs) 1)
@@ -18741,7 +18778,12 @@
              (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
                   (memq 'command-center
                         (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx)))))
-         (>= (l2-ctx-minerals ctx) 225)
+         (>= (l2-ctx-minerals ctx)
+             (if (and (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+                      (>= total-workers 16)
+                      (or (>= live-army-supply 4) (<= live-enemy-threat-supply 0)))
+                 150
+                 225))
          (<= live-enemy-threat-supply (max 6.0 live-army-supply))
          (not (l2-ctx-worker-rush-active? ctx))
          (not under-early-cheese?)
@@ -20518,8 +20560,9 @@
   (define raw-ally-ths
     (for/list ([b (in-list ally-bldgs)]
                #:when (and (hash? b)
-                           (memq (fast-canonical-structure-sym (unit-type-sym b))
-                                 '(hatchery lair hive nexus command-center orbital-command planetary-fortress))
+                           (or (bitwise-bit-set? (fast-ally-bldg-flags (unit-type-sym b)) 2)
+                               (memq (fast-canonical-structure-sym (unit-type-sym b))
+                                     '(hatchery lair hive nexus command-center orbital-command planetary-fortress)))
                            (real? (hash-ref b 'x #f))
                            (real? (hash-ref b 'y #f))))
       (define tx (exact->inexact (safe-finite-real (hash-ref b 'x fbx) fbx)))
@@ -22091,30 +22134,38 @@
                #:when (bitwise-bit-set? (fast-ally-bldg-flags (unit-type-sym b)) 2))
       (cons (exact->inexact (safe-finite-real (hash-ref b 'x 0.0) 0.0))
             (exact->inexact (safe-finite-real (hash-ref b 'y 0.0) 0.0)))))
-  ;; W2-P0-1(a): Pro <=24-tile home-territory defense covering main, natural wall,
-  ;; ramps, production, and expansions (any non-proxy ally building <=38 tiles of a TH).
+  (define home-anchor-ths
+    (cond
+      [(pair? th-coords) th-coords]
+      [(pair? ally-bldgs)
+       (list (cons (exact->inexact (safe-finite-real (l34-ctx-base-x ctx) 32.5))
+                   (exact->inexact (safe-finite-real (l34-ctx-base-y ctx) 32.5))))]
+      [else '()]))
+  ;; W2-P0-1(a) / L30-P0-3 (`#14/#23` `OBRet -> 0`): Home-territory defense covering main, natural,
+  ;; ramps, production/tech structures (`<= 24t` of any friendly production/tech/home building or
+  ;; `<= 32t` of any friendly TownHall / base / natural!).
   (define home-bldg-coords
-    (if (null? th-coords)
+    (if (null? home-anchor-ths)
         '()
         (for/list ([b (in-list ally-bldgs)]
                    #:when (and (hash? b)
                                (not (bitwise-bit-set? (fast-ally-bldg-flags (unit-type-sym b)) 2))
+                               (not (bitwise-bit-set? (fast-ally-bldg-flags (unit-type-sym b)) 3))
                                (let ([bx0 (hash-ref b 'x #f)]
                                      [by0 (hash-ref b 'y #f)])
                                  (and (real? bx0) (real? by0)
                                       (= (- bx0 bx0) 0) (= (- by0 by0) 0)
                                       (let ([fbx (if (flonum? bx0) bx0 (exact->inexact bx0))]
                                             [fby (if (flonum? by0) by0 (exact->inexact by0))])
-                                        (for/or ([tc (in-list th-coords)])
+                                        (for/or ([tc (in-list home-anchor-ths)])
                                           (define dx (fl- fbx (car tc)))
                                           (define dy (fl- fby (cdr tc)))
                                           (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 1444.0)))))))
           (cons (exact->inexact (safe-finite-real (hash-ref b 'x 0.0) 0.0))
                 (exact->inexact (safe-finite-real (hash-ref b 'y 0.0) 0.0))))))
-  ;; W9-P0-2-rt + W15-P0-2-rt: Add +6.0t siege reach (`<= 30.0t` / `900.0` TH, `<= 16.0t` / `256.0`
-  ;; home buildings) AND respect dual ground-BFS cliff chokes (ignore ground units trapped behind
-  ;; impassable cliffs unless cliff-shelling siege; defend ground Voronoi choke basin `margin >= 18`,
-  ;; `d_ours <= 44`!).
+  ;; W9-P0-2-rt + W15-P0-2-rt + L30-P0-3: Defend `<= 32.0t` (`1024.0`) of any friendly TH / base /
+  ;; natural and `<= 24.0t` (`576.0`) of any friendly production/tech/home building, while respecting
+  ;; dual ground-BFS cliff chokes (ignore ground units trapped behind impassable cliffs unless siege!).
   (define t-info-eval (l34-get-territory-info ctx))
   (define has-dual-bfs-eval? (vector-ref t-info-eval 2))
   (define (threat-within-14-of-th? e)
@@ -22129,8 +22180,8 @@
                                (fast-unit-is-flying-sym? esym))]
                 [siege-cap? (memq esym '(tempest siege-tank-sieged carrier brood-lord broodlord
                                          liberator-ag lurker-burrowed lurker-mp-burrowed colossus))]
-                [th-r2 (if siege-cap? 900.0 576.0)]
-                [bldg-r2 (if siege-cap? 256.0 196.0)]
+                [th-r2 1024.0]
+                [bldg-r2 576.0]
                 [fex (if (flonum? ex0) ex0 (exact->inexact ex0))]
                 [fey (if (flonum? ey0) ey0 (exact->inexact ey0))])
            (cond
@@ -22139,11 +22190,11 @@
               (cond
                 [(and cb? (not siege-cap?)) #f]
                 [(and (not cb?)
-                      (or (fl<= d-o 20.0)
+                      (or (fl<= d-o 24.0)
                           (and (fl>= gm 18.0) (fl<= d-o 44.0))))
                  #t]
                 [else
-                 (or (for/or ([tc (in-list th-coords)])
+                 (or (for/or ([tc (in-list home-anchor-ths)])
                        (define dx (fl- fex (car tc)))
                        (define dy (fl- fey (cdr tc)))
                        (fl<= (fl+ (fl* dx dx) (fl* dy dy)) th-r2))
@@ -22152,7 +22203,7 @@
                        (define dy (fl- fey (cdr bc)))
                        (fl<= (fl+ (fl* dx dx) (fl* dy dy)) bldg-r2)))])]
              [else
-              (or (for/or ([tc (in-list th-coords)])
+              (or (for/or ([tc (in-list home-anchor-ths)])
                     (define dx (fl- fex (car tc)))
                     (define dy (fl- fey (cdr tc)))
                     (fl<= (fl+ (fl* dx dx) (fl* dy dy)) th-r2))
@@ -22161,7 +22212,7 @@
                     (define dy (fl- fey (cdr bc)))
                     (fl<= (fl+ (fl* dx dx) (fl* dy dy)) bldg-r2)))]))))
   (define enemy-within-14-of-th?
-    (and (pair? th-coords)
+    (and (or (pair? th-coords) (pair? home-bldg-coords))
          (or (for/or ([e (in-list enemy-units)])
                (and (not (memq (unit-type-sym e)
                                '(larva egg overlord overlord-cocoon overseer observer
@@ -22525,24 +22576,21 @@
     (hash-set! (l34-ctx-l34-sc ctx) 'l20-mass-staging-active? mass-parity-before-attack-suppress?)
     (hash-set! (l34-ctx-l34-sc ctx) 'l25-counter-volley-staging? l25-counter-volley-staging?)
     (hash-set! (l34-ctx-l34-sc ctx) 'l25-enemy-within-14-of-main? enemy-within-14-of-main?))
-  ;; L27-P0-3 (`#16` Outer-TH `OBRet -> 0`): Treat army OR active visible threat within `28.0t`
-  ;; (`784.0` sq-dist) of ANY friendly TownHall as home defense / owned territory so outer-base
-  ;; fights never log phantom `'retreat` (`OBRet`)!
+  ;; L27-P0-3 / L30-P0-3 (`#14/#23` `OBRet -> 0`): Treat army OR active visible threat within `32.0t`
+  ;; (`1024.0`) of ANY friendly TownHall (incl. lifted CCs/OCs) / base / natural OR `24.0t` (`576.0`)
+  ;; of ANY friendly production/tech/home building as owned territory so home fights never log `'retreat`!
   (define within-28-of-any-ally-th?
-    (let ([ths (for/list ([b (in-list ally-bldgs)]
-                          #:when (and (hash? b)
-                                      (bitwise-bit-set? (fast-ally-bldg-flags (unit-type-sym b)) 2)
-                                      (real? (hash-ref b 'x #f))
-                                      (real? (hash-ref b 'y #f))))
-                 (cons (exact->inexact (hash-ref b 'x 0.0))
-                       (exact->inexact (hash-ref b 'y 0.0))))]
-          [acx (exact->inexact (l34-ctx-prelim-army-cx ctx))]
+    (let ([acx (exact->inexact (l34-ctx-prelim-army-cx ctx))]
           [acy (exact->inexact (l34-ctx-prelim-army-cy ctx))])
-      (and (pair? ths)
-           (or (for/or ([tc (in-list ths)])
+      (and (or (pair? home-anchor-ths) (pair? home-bldg-coords))
+           (or (for/or ([tc (in-list home-anchor-ths)])
                  (define dx (fl- acx (car tc)))
                  (define dy (fl- acy (cdr tc)))
-                 (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 784.0))
+                 (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 1024.0))
+               (for/or ([bc (in-list home-bldg-coords)])
+                 (define dx (fl- acx (car bc)))
+                 (define dy (fl- acy (cdr bc)))
+                 (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 576.0))
                (for/or ([e (in-list enemy-units)])
                  (and (hash? e)
                       (combat-unit-record? e)
@@ -22552,10 +22600,14 @@
                       (real? (hash-ref e 'y #f))
                       (let ([ex (exact->inexact (hash-ref e 'x 9999.0))]
                             [ey (exact->inexact (hash-ref e 'y 9999.0))])
-                        (for/or ([tc (in-list ths)])
-                          (define dx (fl- ex (car tc)))
-                          (define dy (fl- ey (cdr tc)))
-                          (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 784.0)))))))))
+                        (or (for/or ([tc (in-list home-anchor-ths)])
+                              (define dx (fl- ex (car tc)))
+                              (define dy (fl- ey (cdr tc)))
+                              (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 1024.0))
+                            (for/or ([bc (in-list home-bldg-coords)])
+                              (define dx (fl- ex (car bc)))
+                              (define dy (fl- ey (cdr bc)))
+                              (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 576.0))))))))))
   (define army-at-home-eval?
     (or enemy-within-14-of-th?
         within-28-of-any-ally-th?
@@ -27707,14 +27759,37 @@
                      (l34-emit! ctx (list 'cast-spell uid 'snipe eid))))
                  (l34-emit-engage-or-rally! ctx uid ux uy ex ey eid nearest-enemy-tank zergling-hold-off-pf-siege? tank-supporting-vs-static? unit-should-engage-target? u ut can-hit-target? edist2 target-enemy)))]
           [(marine marauder)
+           ;; L30-P0-3 (`t04` Bio Re-Stim): Re-cast Stimpack immediately once buff expires when
+           ;; healthy (`>= SC2-MARINE-STIM-MIN-HP`) OR while Medivac healing is active nearby (`hp > 50%`)!
            (when (and (l34-has-upgrade? ctx 'stimpack)
-                      (>= (hash-ref u 'hp 100) SC2-MARINE-STIM-MIN-HP)
-                      (or (not live-upgrades-tracked?) (fl<= edist2 90.25)))
-             (let ([u-buffs (hash-ref u 'buffs '())])
-               (when (and (not (memq 'stimpack u-buffs))
-                          (not (memq 'stimpack-marauder u-buffs)))
-                 ;; W9-TAC-2: Omit spurious enemy `eid` so `human-cortex.rkt:1687` coalesces all Stimpack units!
-                 (l34-emit! ctx (list 'cast-spell uid 'stimpack)))))
+                      (or (not live-upgrades-tracked?) (fl<= edist2 100.0)))
+             (define u-hp (exact->inexact (hash-ref u 'hp 100)))
+             (define u-max-hp
+               (exact->inexact
+                (max 1 (hash-ref u 'max-hp (hash-ref u 'health-max (if (eq? ut 'marauder) 125 45))))))
+             (define medivac-healing-near?
+               (and (fl< u-hp (exact->inexact SC2-MARINE-STIM-MIN-HP))
+                    (fl> u-hp (fl* 0.50 u-max-hp))
+                    (fl>= u-hp (if (eq? ut 'marauder) 63.0 23.0))
+                    (for/or ([au (in-list (or (l34-ctx-ally-units ctx) '()))])
+                      (and (hash? au)
+                           (eq? (fast-canonical-unit-sym (unit-type-sym au)) 'medivac)
+                           (>= (hash-ref au 'energy 50) 10)
+                           (let ([mx (hash-ref au 'x #f)]
+                                 [my (hash-ref au 'y #f)])
+                             (and (real? mx) (real? my)
+                                  (let ([dx (fl- (exact->inexact ux) (exact->inexact mx))]
+                                        [dy (fl- (exact->inexact uy) (exact->inexact my))])
+                                    (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 81.0))))))))
+             (when (or (fl>= u-hp (exact->inexact SC2-MARINE-STIM-MIN-HP))
+                       medivac-healing-near?)
+               (let ([u-buffs (hash-ref u 'buffs '())])
+                 (when (and (not (memq 'stimpack u-buffs))
+                            (not (memq 'stimpack-marauder u-buffs))
+                            (not (memv 24 u-buffs))
+                            (not (memv 27 u-buffs)))
+                   ;; W9-TAC-2: Omit spurious enemy `eid` so `human-cortex.rkt:1687` coalesces all Stimpack units!
+                   (l34-emit! ctx (list 'cast-spell uid 'stimpack))))))
            (unless (and live-obs? (set-member? wave3-marauder-target-tags uid))
              (l34-emit-engage-or-rally! ctx uid ux uy ex ey eid nearest-enemy-tank zergling-hold-off-pf-siege? tank-supporting-vs-static? unit-should-engage-target? u ut can-hit-target? edist2 target-enemy))]
           [(mutalisk)

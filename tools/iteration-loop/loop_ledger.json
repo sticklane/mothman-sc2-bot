@@ -2595,6 +2595,109 @@
         "CORE12 NEW ALL-TIME LOW 18L (50.0% NON-LOSS!), Terran SupBlk 2.4% ATL, Zerg Z:RW 134s ATH, ProdPlaceStall 5->3 (#02/#08/#32/#35 cleared), Siege0DPS 6->4, SpireDrop 1->0, puck 1-0-2 UNDEFEATED, 4/9 Promotion Gates PASS!"
       ],
       "promotion_gates_passed": "4/9 PASS on pure core_12 (zero_crashes_and_rejects, sup_blk_le_6pct [4.2%], every_race_wr_ge_33pct [P/T/Z all 33.3%], tactics_suite_100pct [Honest Arena 2.0 31W-4L-1D 86.1%/1.81x ATH!]) \u2014 missed ties_le_2 (6T: 3 StaleTies + 3 WallTies) and every_race_w4_within_6_of_pro only on Protoss (-9.0w; T -2.5 & Z -6.0 BOTH PASS!)"
+    },
+    {
+      "id": "iter30_wave30",
+      "status": "COMPLETED_TIES_HWM_15W_21L_0T_14_ZEROS_ATH_72_OF_72_ZERO_DRAW_ARENA2",
+      "campaign": "Loops 29+ Self-Play, Honest Tactics Arena 2.0 & Expanded Roster Campaign (Loop 30)",
+      "loop_self_improvements": [
+        "L30-LOOP-1 (Honest 960-Loop Arena 2.0 Zero-Draw Proof): Verified 0 Draws across ALL 72/72 real-SC2_x64 duels (31W-5L-0D Dummy + 29W-7L-0D Self-Play; 69/72 clean KOs, Zerg PERFECT 24W-0L-0D!).",
+        "L30-LOOP-2 (Full P2 Self-Play Telemetry & Baseline Elo H2H): Wired @analyzer P2 opp_supply_block_pct & p2_anomalies + avg_dur_sec into compare-vs-pro.py Self-Play cohort table; completed first-ever 6-match source-vs-shipped-ZIP head-to-head Elo check (iter30_baseline_h2h: 3W-3L-0T)."
+      ],
+      "spec_summary": "Loop 30 (L30-P0-1..3 + P2 Self-Play Telemetry + Baseline H2H): Terran TvT Tank & GasRich/30m StaleTie elimination (#38 TvT flipped to 14:45 6-base WIN!), Protoss Stalker/Gateway placement & over-kite cleanup (p03 KO WIN, #27 FIRST Thssprtssbt combat WIN 4.22x!, #15 oberon 7.09x!), Terran early Ling defense & bio-tank push (t06 KO WIN, #17 FIRST RustyNikolaj T WIN 4.74x 0-anom!), and Zerg Viper ParasiticBomb skyball mastery (z08 5.83x KO, Zerg 24-0-0 Arena + 6-6-0 50% core_12!).",
+      "rev": "mmnpzsnl c1a7a3ed (iter30 working copy)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261120_181933_iter30_wave30",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261120_183336_iter30_baseline_h2h",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter30_wave30_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter30_baseline_h2h_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter30_wave30.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter30.json",
+      "tactics_selfplay_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter30.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter30.md",
+      "clean_n": 36,
+      "record_clean": "15W-21L-0T (36/36 clean core_12; TIES ALL-TIME 15W-21L-0T HWM even with Chance 1-2, ZERO TIES -6T vs L29!)",
+      "record_non_chance_clean": "14W-19L-0T (42.4% WR, 0.85x TradeAgg \u2014 +5W Non-Chance vs L29!)",
+      "record_selfplay_6": "P1 3W-3L-0T (50.0% balanced!, Trade 1.22x, SB P1 1.9%/P2 3.8%, PkArmy 5675/5733, AvgDur 872s, 0 ties/crashes/rejects; ZvZ W 3.81x, TvT P2 W 0.67x flipped from 30m tie, PvP W 3.28x, PvT P2 W 0.56x, PvZ P2 Zerg W 0.36x 7-base 9075 army, TvZ W 5.92x)",
+      "record_baseline_h2h": "L30 source vs L28 shipped ZIP: 3W-3L-0T (50.0%, 0.88x; L30 crushed ZvZ 5.83x / PvP 8.44x / PvT 3.29x ALL 0-anom; L28 won TvT 0.35x [L30 SB 14.6%+Siege0DPS], PvZ 0.23x [L30 DripFeed], TvZ 0.41x [L30 ProdPlaceStall 21xrax])",
+      "wr_pct_clean": 41.7,
+      "non_loss_pct": 41.7,
+      "trade_agg": 0.8,
+      "trade_med": 0.33,
+      "pk_army_avg": 3338.2,
+      "sup_blk_avg": 5.8,
+      "early_atk_pct_2m_6m_avg": 43.1,
+      "protoss_warpgate_sec_med": 252.0,
+      "zerg_roach_warren_sec_med": 171.0,
+      "combat_death_home_enemy_pct_avg": "55.5%/34.3%",
+      "late_game_stalemate_tie_matches": 0,
+      "worker_econ_eff_4m_6m_avg": "47.7/53.3",
+      "econ_eff_collapse_matches": 3,
+      "endgame_home_stall_count": 0,
+      "own_base_retreat_frames": 136,
+      "own_territory_retreat_frames": 212,
+      "non_combat_robo_waste_val": 0,
+      "zerg_non_ling_army_pct": 74.6,
+      "siege_range_zero_dps_losses": 7,
+      "cloaked_unit_damage_losses": 0,
+      "gas_rich_min_starved_matches": 3,
+      "one_base_lockout_matches": 3,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 3,
+      "prod_placement_stall_matches": 4,
+      "zero_kill_collapse_matches": 0,
+      "drip_feed_collapse_matches": 13,
+      "prod_idle_bank_freeze_matches": 1,
+      "gas_zero_harvest_freeze_matches": 1,
+      "spire_sched_drop_matches": 1,
+      "wall_timeout_ties": 0,
+      "army_val_4m_ratio_vs_pro": 0.94,
+      "army_val_8m_ratio_vs_pro": 0.38,
+      "latency_summary": "ALL 42/42 <=165.70ms (0 spikes >=500ms!; CORE12 avg=8.58ms, p95=15.53ms, tr=2.66ms; self_6 P1<=154.1ms/P2<=165.7ms; H2H L30<=125.8ms; 0 rejects!)",
+      "by_race": {
+        "Protoss": {
+          "record": "5W-7L-0T (41.7% WR, 0.95x Trade; NC 5-6 45.5% 1.07x!; #27 FIRST Thssprtssbt combat W 4.22x, #15 oberon W 7.09x; PvP W@4m/6m/Nat EXACT PRO!)",
+          "trade_agg": 0.95,
+          "w4_alive_med": 26.0,
+          "w6_alive_med": 42.0,
+          "nat_sec": 124.4,
+          "sup_blk": 5.6
+        },
+        "Terran": {
+          "record": "4W-8L-0T (33.3% WR, 0.89x Trade; NC 4-7 0.95x; #17 FIRST RustyNikolaj T W 4.74x 0-anom!; W@6m 40.0/40.0 EXACT PRO, Top BO MATCH, SB 3.4%!)",
+          "trade_agg": 0.89,
+          "w4_alive_med": 23.0,
+          "w6_alive_med": 40.0,
+          "nat_sec": 116.2,
+          "sup_blk": 3.4
+        },
+        "Zerg": {
+          "record": "6W-6L-0T (50.0% WR!, 0.65x Trade; #28 Creepy W 8.42x, #10 puck W 2.05x; W@6m 54.0/52.5 BEATS PRO, Nat 55s/51s, Tech1 277s/278s!)",
+          "trade_agg": 0.65,
+          "w4_alive_med": 27.5,
+          "w6_alive_med": 54.0,
+          "nat_sec": 55.1,
+          "sup_blk": 8.5
+        }
+      },
+      "tactics_summary": {
+        "rev": "mmnpzsnl c1a7a3ed (iter30)",
+        "passed": "Verifier 7/7 + 23/23 FIRST-PASS; Honest 960-loop Arena 2.0 ZERO DRAWS across ALL 72/72 duels!",
+        "sc2_duel36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter30.json",
+        "sc2_selfplay36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter30.json",
+        "sc2_duel36_summary": "HONEST 960-LOOP ARENA 2.0 (0 DRAWS IN 72/72!): Dummy 31W-5L-0D (KO 31/Pts 0 - KO 4/Pts 1 - 0D, 86.1% WR, 1.63x, p03 & t06 flipped to KO WIN!, Zerg PERFECT 12W-0L-0D 2.94x ATH, z08 5.83x Viper ParasiticBomb KO!) + Self-Play NEW ATH 29W-7L-0D (KO 27/Pts 2 - KO 7/Pts 0 - 0D, 1.56x, Zerg PERFECT 12W-0L-0D -> 24W-0L-0D ZERG SWEEP!)"
+      },
+      "visual_qa_highlights": [
+        "#27 Mothman-P vs Thssprtssbt (12:05 WIN 4.22x): 11-Immortal + Archon + Stalker deathball crushing cliff choke with zero over-kiting.",
+        "#17 Mothman-T vs RustyNikolaj (09:17 WIN 4.74x, 0 anom): Textbook sieged Tank + Stimmed bio + twin Medivacs dismantling natural bunkers & Vikings.",
+        "#37 ZvZ / #39 PvP / #40 PvT / #42 TvZ Self-Play: All 4 full-match self-play battles cleanly framed (5-Ravager bile arc, 5-Immortal natural crush, 6-base Terran bio-tank push, 25-unit Stim+Thor ramp breach).",
+        "Loop 31 Visual Smoking Guns: #36 P vs 12PoolBot (02:48 LOSS 0.06x) built Gateway/Cyber/Pylons behind Nexus with NO ramp wall leaving 16 Probes exposed to 6 Lings; #31 Z vs SmoothBrain (11:04 LOSS 0.05x) arrived at 11m with only 1 Hydra+1 Queen under cliff Tanks/40 Marines (SpireDrop + GasRich)."
+      ],
+      "key_wins": [
+        "TIES ALL-TIME 15W-21L-0T CORE12 HWM EVEN WITH Chance 1-2 (+3W / -6T vs L29, +5W Non-Chance 14W-19L-0T 42.4% 0.85x, Trade 0.60->0.80x, PkArmy +412, 5/9 Promotion Gates PASS!)",
+        "NEW ALL-TIME RECORD 14 SIMULTANEOUS ZEROS ON CORE12 (OBRet=0 [136f], OTRet=0 [212f], SuicideKite=0, AirAAStarve=0, ZeroKill=0, StaleTie=0, WallTies=0, Spikes>=500=0 [ALL 42 <=165.7ms], CloakLoss=0, OpenFault=0, SelfCancel=0, EndgameStall=0, HomeStall=0, RoboWaste=0 + 0 action rejects!)",
+        "FIRST-EVER Thssprtssbt combat WIN (#27 P 4.22x), FIRST-EVER RustyNikolaj Terran WIN (#17 T 4.74x 0-anom), Zerg 6-6-0 50% core_12 + PERFECT 24W-0L-0D Honest Arena 2.0 (72/72 ZERO DRAWS!), PERFECT 3W-3L-0T Full-Match Self-Play balance (#38 TvT flipped from 30m tie to 14:45 WIN!), & first Baseline H2H Elo run (3W-3L-0T)!"
+      ],
+      "promotion_gates_passed": "5/9 PASS on pure core_12 (zero_crashes_and_rejects, ties_le_2 [0T!], sup_blk_le_6pct [5.8%], every_race_wr_ge_33pct [P 41.7% / T 33.3% / Z 50.0%], tactics_suite_100pct [Honest Arena 2.0 31W-5L-0D 86.1% / 1.63x, 0 Draws!]) \u2014 missed overall_wr_ge_50pct (41.7%), trade_agg (0.80x), trade_med (0.33x), and every_race_w4_within_6_of_pro (T -4.0 PASS, P -8.0 & Z -7.5)"
     }
   ],
   "final_18_loop_summary": {
@@ -2630,7 +2733,7 @@
     "est_54_match_wall_min": "17.5-18.0 (0 wall-timeout ties at -j 10 --timeout-sec 660)",
     "report_json": "/home/sjaconette/sc2-local-arena/runs/concurrency_sweep_report.json"
   },
-  "goal_target_loop": 28,
+  "goal_target_loop": 35,
   "high_water_mark": {
     "wave_id": "iter24_wave24",
     "commit": "ypyutsxs 09533a9f (Loop 24 core_12 HWM; prior live shipped HWM nxspoxkw bf1043b7 / iter12 14W-19L-3T)",

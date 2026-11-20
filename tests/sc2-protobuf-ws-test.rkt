@@ -6309,6 +6309,267 @@
                      (<= (l29-dist (sc2-point2d-x mt-pt) (sc2-point2d-y mt-pt) 68.0 30.0) 0.1)))
     (cleanup!)))
 
+(printf "[Loop 30] Testing L30-P0-1 Terran factory/starport 0.5t spillover (#11/#26), Protoss multi-bldg budget=3 + sticky power-fail (#36/#40), & mined-out gas evac (#38)...\n")
+(let ()
+  (define (l30-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define (mk-l30-u tag utype alliance x y
+                    #:hp [hp 100.0] #:shield [sh 0.0] #:rad [rad 1.0]
+                    #:display [disp 1] #:buffs [buffs '()] #:orders [ords '()]
+                    #:assigned [asgn 0] #:ideal [idl 0] #:mins [mins 0] #:vesp [vesp 0])
+    (sc2-unit disp alliance tag utype (if (= alliance 1) 1 (if (= alliance 3) 0 2))
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 0 #f #f #f
+              hp hp sh sh 0.0 0.0 mins vesp #f #f #f #t #f
+              ords 0 buffs asgn idl 0.0 0 0 0 0 '() 0 0))
+  (define (mk-l30-mins base-tag)
+    (for/list ([y (in-list '(27.5 29.5 31.5 33.5))] [i (in-naturals 0)])
+      (mk-l30-u (+ base-tag i) 341 3 71.0 y #:hp 1000.0 #:rad 1.0 #:mins 1500)))
+  (define (l30-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59930 "/sc2api" c-in c-out #f 1))
+    (define rpc-cnt (box 0))
+    (define saw-319? (box #f))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define req-id-p (assoc 97 req-f))
+             (define id-b (if req-id-p (encode-uint32 97 (third req-id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (set-box! rpc-cnt (add1 (unbox rpc-cnt)))
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (when (= ab 319) (set-box! saw-319? #t))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws rpc-cnt saw-319? (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+
+  ;; L30-P0-1a (`#11` Terran factory #2+): After 1 complete `5x3`+`2.0t` miss on `factory #2` (`count = 1`),
+  ;; even after a Supply Depot finishes (wiping `SC2-TERRAN-5X3-MISS-CACHE`), `terran-prod-fast-3x3?`
+  ;; persists, skips `319`, and spills over via `0.5t` pure `3x3` to safe Natural `(68.5, 30.5)` in 1 step!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
+  (define allow-f2-328? (box #f))
+  (let-values ([(ws rpc-cnt saw-319? cleanup!)
+                (l30-start-mock-ws
+                 (lambda (ab px py)
+                   (if (and (unbox allow-f2-328?) (= ab 328) (<= (l30-dist px py 68.5 30.5) 0.1)) 1 2)))])
+    (define cc-m (mk-l30-u 10001 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define cc-n (mk-l30-u 10002 18 1 64.5 30.5 #:hp 1500.0 #:rad 2.75))
+    (define fac1 (mk-l30-u 10003 27 1 34.5 28.5 #:hp 1250.0 #:rad 1.5))
+    (define dep1 (mk-l30-u 10004 19 1 24.0 34.0 #:hp 400.0 #:rad 1.0))
+    (define scv1 (mk-l30-u 10005 45 1 63.0 29.0 #:hp 45.0 #:rad 0.375))
+    (define nat-mins (mk-l30-mins 10010))
+    (define g30-f2
+      (sc2-game-info "L30Factory2Map" "" '() '(128 128) '(4 4 124 124)
+                     (list (sc2-point2d 100.0 100.0)) w3-full-grid #f w3-full-grid))
+    (translate-bot-actions->sc2-raw-commands
+     '((build factory 32.0 30.0))
+     (make-test-obs 4500 500 250 (append (list cc-m fac1 scv1) nat-mins))
+     #:ws-conn ws #:game-info g30-f2)
+    (set-box! saw-319? #f)
+    (set-box! rpc-cnt 0)
+    (set-box! allow-f2-328? #t)
+    (define f2-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build factory 32.0 30.0))
+       (make-test-obs 4520 500 250 (append (list cc-m cc-n fac1 dep1 scv1) nat-mins))
+       #:ws-conn ws #:game-info g30-f2))
+    (define f2-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 328))) f2-cmds))
+    (define f2-pt (and f2-cmd (sc2-raw-unit-command-target-pos f2-cmd)))
+    (check-true "l30-p0-1a-factory2-persists-fast-3x3-across-depot-and-spills-05t-to-natural"
+                (and (not (unbox saw-319?))
+                     (= (unbox rpc-cnt) 2)
+                     (sc2-point2d? f2-pt)
+                     (<= (l30-dist (sc2-point2d-x f2-pt) (sc2-point2d-y f2-pt) 68.5 30.5) 0.1)))
+    (cleanup!))
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
+
+  ;; L30-P0-1b (`#11/#26` Terran starport #1 after >= 3 misses): Even with `0` existing Starports,
+  ;; once `SC2-TERRAN-5X3-MISS-STREAK['starport] >= 3`, skips `319` and spills over via `0.5t` pure
+  ;; `3x3` across ALL safe completed TownHalls (`(68.5, 30.5)`) in 1 step!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (hash-set! SC2-TERRAN-5X3-MISS-STREAK 'starport 3)
+  (let-values ([(ws rpc-cnt saw-319? cleanup!)
+                (l30-start-mock-ws
+                 (lambda (ab px py)
+                   (if (and (= ab 329) (<= (l30-dist px py 68.5 30.5) 0.1)) 1 2)))])
+    (define cc-m (mk-l30-u 10021 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define cc-n (mk-l30-u 10022 18 1 64.5 30.5 #:hp 1500.0 #:rad 2.75))
+    (define scv1 (mk-l30-u 10023 45 1 63.0 29.0 #:hp 45.0 #:rad 0.375))
+    (define nat-mins (mk-l30-mins 10025))
+    (define g30-sp1
+      (sc2-game-info "L30Starport1Map" "" '() '(128 128) '(4 4 124 124)
+                     (list (sc2-point2d 100.0 100.0)) w3-full-grid #f w3-full-grid))
+    (define sp1-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build starport 32.0 30.0))
+       (make-test-obs 4600 500 250 (append (list cc-m cc-n scv1) nat-mins))
+       #:ws-conn ws #:game-info g30-sp1))
+    (define sp1-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 329))) sp1-cmds))
+    (define sp1-pt (and sp1-cmd (sc2-raw-unit-command-target-pos sp1-cmd)))
+    (check-true "l30-p0-1b-starport1-after-3-misses-spills-05t-3x3-across-safe-ths"
+                (and (not (unbox saw-319?))
+                     (= (unbox rpc-cnt) 2)
+                     (sc2-point2d? sp1-pt)
+                     (<= (l30-dist (sc2-point2d-x sp1-pt) (sc2-point2d-y sp1-pt) 68.5 30.5) 0.1)))
+    (cleanup!))
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
+
+  ;; L30-P0-1c (`#36/#40` Protoss multi-bldg budget = 3): When `pylon` AND `gateway` queue in the
+  ;; same step, `step-placement-rpc-budget = 3` so `pylon` takes RPC #1 (`3 -> 2`) and `gateway`
+  ;; STILL gets both `2.0t` (RPC #2) AND `0.5t` tight fallback (RPC #3) without budget deferral!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999)
+  (let-values ([(ws rpc-cnt _saw319 cleanup!)
+                (l30-start-mock-ws
+                 (lambda (ab px py)
+                   (cond
+                     [(= ab 881) 1]
+                     [(and (= ab 883) (<= (l30-dist px py 33.5 33.5) 0.1)) 1]
+                     [else 2])))])
+    (define nx-m (mk-l30-u 10031 59 1 26.5 26.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define py-m (mk-l30-u 10032 60 1 30.0 34.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define prb-busy
+      (mk-l30-u 10033 84 1 31.0 33.0 #:hp 20.0 #:shield 20.0 #:rad 0.375
+                #:orders (list (sc2-unit-order 881 (sc2-point3d 31.5 34.0 8.0) 0 0.0))))
+    (define prb-a (mk-l30-u 10034 84 1 29.0 32.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define prb-b (mk-l30-u 10035 84 1 28.0 32.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define obs-mb
+      (sc2-observation 4700 (sc2-player-common 1 600 100 60 36 10 26 0 0 0 0)
+                       (list nx-m py-m prb-busy prb-a prb-b) '()
+                       (list (sc2-power-source (sc2-point3d 30.0 34.0 8.0) 6.5 10032))
+                       #f '() '() '() '() '() '()))
+    (define mb-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build pylon 24.0 24.0) (build gateway 30.0 34.0))
+       obs-mb #:ws-conn ws #:game-info w3-ginfo))
+    (define py-cmd (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 881))) mb-cmds))
+    (define gw-cmd (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 883))) mb-cmds))
+    (define gw-pt (and gw-cmd (sc2-raw-unit-command-target-pos gw-cmd)))
+    (check-true "l30-p0-1c-protoss-multi-bldg-budget-3-places-gateway-tight-05-after-pylon"
+                (and (= (unbox rpc-cnt) 3)
+                     (sc2-raw-unit-command? py-cmd)
+                     (sc2-point2d? gw-pt)
+                     (<= (l30-dist (sc2-point2d-x gw-pt) (sc2-point2d-y gw-pt) 33.5 33.5) 0.1)))
+    (cleanup!))
+
+  ;; L30-P0-1d (`#40` sticky power-fail): When `gateway` fails both `2.0t` & `0.5t` (setting
+  ;; `SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP = 4800`) and `shield-battery` (`2x2`) succeeds in the
+  ;; same step, `SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP` MUST remain `4800` (not cleared to `-9999`)!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999)
+  (let-values ([(ws rpc-cnt _saw319 cleanup!)
+                (l30-start-mock-ws (lambda (ab _px _py) (if (= ab 895) 1 2)))])
+    (define nx-m  (mk-l30-u 10041 59 1 26.5 26.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define py-m  (mk-l30-u 10042 60 1 32.0 32.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define prb-a (mk-l30-u 10043 84 1 30.0 31.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define prb-b (mk-l30-u 10044 84 1 31.0 31.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define obs-pf
+      (sc2-observation 4800 (sc2-player-common 1 600 100 60 36 10 26 0 0 0 0)
+                       (list nx-m py-m prb-a prb-b) '()
+                       (list (sc2-power-source (sc2-point3d 32.0 32.0 8.0) 6.5 10042))
+                       #f '() '() '() '() '() '()))
+    (define pf-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build gateway 32.0 32.0) (build shield-battery 32.0 32.0))
+       obs-pf #:ws-conn ws #:game-info w3-ginfo))
+    (define sb-cmd (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 895))) pf-cmds))
+    (check-true "l30-p0-1d-protoss-power-fail-loop-stays-sticky-when-battery-succeeds-after-gateway-fails"
+                (and (= (unbox rpc-cnt) 3)
+                     (sc2-raw-unit-command? sb-cmd)
+                     (= (unbox SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP) 4800)))
+    (cleanup!))
+
+  ;; L30-P0-1e (`#38` 2,275G/0M mined-out base gas evac): Owned CC `(28.5, 28.5)` has ZERO local
+  ;; minerals (`owned-base-minerals = '()`), `cur-gas = 900`, `cur-min = 50`. Refinery `10052` has
+  ;; 2/3 SCVs (1 non-carrying + 1 carrying gas `buff 273`) + 1 idle SCV. Two fog-of-war snapshot
+  ;; map minerals exist (`display-type = 2`): safe `10061` at `(64, 30)` and enemy-camped `10062`
+  ;; at `(45, 30)` (with enemy Tank at `(46, 30)`). MUST NOT resaturate Refinery, and MUST evacuate
+  ;; BOTH gas SCVs + idle SCV onto safe map mineral patch `10061` (NEVER `10062`)!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (define cc-mo (mk-l30-u 10051 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75 #:assigned 0 #:ideal 0))
+  (define ref-mo (mk-l30-u 10052 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 2 #:ideal 3 #:vesp 1800))
+  (define scv-g1 (mk-l30-u 10053 45 1 25.5 24.0 #:hp 45.0 #:rad 0.375
+                           #:orders (list (sc2-unit-order 295 #f 10052 0.0))))
+  (define scv-g2 (mk-l30-u 10054 45 1 26.0 24.5 #:hp 45.0 #:rad 0.375
+                           #:buffs '(273) #:orders (list (sc2-unit-order 295 #f 10052 0.0))))
+  (define scv-id (mk-l30-u 10055 45 1 29.0 26.0 #:hp 45.0 #:rad 0.375))
+  (define map-m-safe (mk-l30-u 10061 341 3 64.0 30.0 #:hp 1000.0 #:rad 1.0 #:display 2 #:mins 0))
+  (define map-m-camp (mk-l30-u 10062 341 3 45.0 30.0 #:hp 1000.0 #:rad 1.0 #:display 2 #:mins 0))
+  (define enemy-tnk  (mk-l30-u 10063 32  4 46.0 30.0 #:hp 175.0 #:rad 0.875))
+  (define mo-cmds
+    (saturate-workers-and-gas-commands
+     (sc2-observation 18000 (sc2-player-common 1 50 900 100 40 20 20 0 0 0 0)
+                      (list cc-mo ref-mo scv-g1 scv-g2 scv-id map-m-safe map-m-camp enemy-tnk)
+                      '() '() #f '() '() '() '() '() '())))
+  (define mo-targets
+    (for/list ([c (in-list mo-cmds)] #:when (sc2-raw-unit-command? c))
+      (cons (first (sc2-raw-unit-command-unit-tags c))
+            (sc2-raw-unit-command-target-unit-tag c))))
+  (check-true "l30-p0-1e-mined-out-base-evacuates-gas-to-nearest-safe-map-minerals-and-blocks-resat"
+              (and (not (ormap (lambda (p) (= (cdr p) 10052)) mo-targets))
+                   (not (ormap (lambda (p) (= (cdr p) 10062)) mo-targets))
+                   (equal? (assoc 10053 mo-targets) (cons 10053 10061))
+                   (equal? (assoc 10054 mo-targets) (cons 10054 10061))
+                   (equal? (assoc 10055 mo-targets) (cons 10055 10061)))))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)
