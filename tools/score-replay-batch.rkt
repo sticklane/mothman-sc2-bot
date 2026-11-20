@@ -509,8 +509,8 @@
              (when (< bgas (hash-ref m 'gs-cur-min-g 9999))
                (hash-set! m 'gs-cur-min-g bgas)))
            (flush-gs-window! m fr))
-       ;; W11-LOOP-2: Gas-rich / mineral-starved production stall ticks (vespene >= 200 & minerals < 100)
-       (when (and mp (>= bgas 200) (< bmin 100) (< su 194))
+       ;; W11-LOOP-2 + L21-LOOP-2: Gas-rich / mineral-starved production stall ticks (vespene >= 200 & minerals < 100, live su > 0)
+       (when (and mp (>= bgas 200) (< bmin 100) (> su 0) (< su 194))
          (set! grms-ticks (add1 grms-ticks))
          (when (> bgas grms-peak-gas)
            (set! grms-peak-gas bgas)))
@@ -2097,6 +2097,25 @@
                          'opp_tanks opp-tank-cnt
                          'our_widow_mines our-wm-cnt
                          'our_factories our-fac-cnt)))
+          ;; L21-LOOP-2: Zero-Kill Collapse Losses (non-win w/ match K=0 & L>=3000 OR collapse window K=0 & L>=3000)
+          (define zfr-zero-kill-lost
+            (if (and (hash? zero-fire-retreat-anomaly)
+                     (= (hash-ref zero-fire-retreat-anomaly 'killed_val 1) 0))
+                (hash-ref zero-fire-retreat-anomaly 'lost_val 0)
+                0))
+          (define zero-kill-collapse-loss?
+            (and (not (eq? res 'win))
+                 (or (and (>= lost-val 3000) (= killed-val 0))
+                     (>= zfr-zero-kill-lost 3000))))
+          (define zero-kill-collapse-loss-anomaly
+            (and zero-kill-collapse-loss?
+                 (hasheq 'match_killed_val killed-val
+                         'match_lost_val lost-val
+                         'window_lost_val zfr-zero-kill-lost
+                         'window_deaths (if (hash? zero-fire-retreat-anomaly)
+                                            (hash-ref zero-fire-retreat-anomaly 'deaths 0)
+                                            0)
+                         'scope (if (and (>= lost-val 3000) (= killed-val 0)) "match" "window"))))
 
           (define anomalies
             (hasheq 'zero_fire_retreat zero-fire-retreat-anomaly
@@ -2119,6 +2138,7 @@
                     'spire_sched_drop spire-sched-drop-anomaly
                     'drip_feed_collapse drip-feed-collapse-anomaly
                     'tvt_zero_tank tvt-zero-tank-anomaly
+                    'zero_kill_collapse_loss zero-kill-collapse-loss-anomaly
                     'air_aa_starvation air-aa-starvation))
 
           ;; Classify 0-combat opponent disconnects (e.g., mid-early client drop) separately from real combat wins
@@ -2280,6 +2300,10 @@
           (when tvt-zero-tank-anomaly
             (add-sig! (format "TVT_ZERO_TANK(~avs~aT,WM=~a)"
                               our-tank-cnt opp-tank-cnt our-wm-cnt)))
+          (when zero-kill-collapse-loss-anomaly
+            (add-sig! (format "ZERO_KILL_COLLAPSE(0/~a,~a)"
+                              (if (>= zfr-zero-kill-lost 3000) zfr-zero-kill-lost lost-val)
+                              (hash-ref zero-kill-collapse-loss-anomaly 'scope))))
           (when (and (not (eq? res 'win)) (< trade-ratio 0.50) (>= lost-val 1500))
             (add-sig! "SEVERE_BAD_TRADES(<0.5x)"))
           (when (and (not (eq? res 'win)) (<= dur 330.0)) (add-sig! "EARLY_RUSH_LOSS"))
@@ -2407,6 +2431,7 @@
                   'drip_feed_collapse drip-feed-collapse?
                   'tvt_zero_tank tvt-zero-tank?
                   'our_siege_tank_cnt our-tank-cnt
+                  'zero_kill_collapse_loss zero-kill-collapse-loss?
                   'map_symmetry_kind map-symmetry-kind
                   't3_first_sec t3-first-sec
                   't3_first_bldg t3-first-bldg
@@ -2600,6 +2625,7 @@
                 'spire_sched_drop_matches (count (lambda (r) (eq? (hash-ref r 'spire_sched_drop #f) #t)) rows)
                 'drip_feed_collapse_matches (count (lambda (r) (eq? (hash-ref r 'drip_feed_collapse #f) #t)) rows)
                 'tvt_zero_tank_matches (count (lambda (r) (eq? (hash-ref r 'tvt_zero_tank #f) #t)) rows)
+                'zero_kill_collapse_losses (count (lambda (r) (eq? (hash-ref r 'zero_kill_collapse_loss #f) #t)) rows)
                 't3_started_matches (count (lambda (r) (real? (hash-ref r 't3_first_sec #f))) rows)
                 't3_early_2base_matches (count (lambda (r) (let ([b (hash-ref r 't3_bases_at_start #f)]) (and (exact-integer? b) (<= b 2)))) rows)
                 't3_premature_starve_matches (count (lambda (r) (eq? (hash-ref r 't3_premature_starve #f) #t)) rows)
@@ -2726,6 +2752,7 @@
                         'spire_sched_drop (anom-cnt (lambda (a) (and (hash? (hash-ref a 'spire_sched_drop #f)) #t)))
                         'drip_feed_collapse (anom-cnt (lambda (a) (and (hash? (hash-ref a 'drip_feed_collapse #f)) #t)))
                         'tvt_zero_tank (anom-cnt (lambda (a) (and (hash? (hash-ref a 'tvt_zero_tank #f)) #t)))
+                        'zero_kill_collapse_losses (anom-cnt (lambda (a) (and (hash? (hash-ref a 'zero_kill_collapse_loss #f)) #t)))
                         'air_aa_starvation (anom-cnt (lambda (a) (and (hash? (hash-ref a 'air_aa_starvation #f)) #t)))
                         'wall_timeout_tie wall-timeout-ties
                         'wall_timeout_winning_tie wall-timeout-winning-ties
@@ -2772,7 +2799,7 @@
                   (hash-ref agg 'wall_timeout_winning_ties 0)
                   (hash-ref agg 'step_spike_500ms_count 0))
           ""))
-    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a | 1BaseLock=~a | SpireDrop=~a | DripFeed=~a | TvT0Tank=~a~a\n"
+    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a | 1BaseLock=~a | SpireDrop=~a | DripFeed=~a | TvT0Tank=~a | ZeroKill=~a~a\n"
             (hash-ref ac 'suicide_kite_retreat 0)
             (hash-ref ac 'zero_fire_retreat 0)
             (hash-ref ac 'escrow_lockout 0)
@@ -2783,6 +2810,7 @@
             (hash-ref ac 'spire_sched_drop 0)
             (hash-ref ac 'drip_feed_collapse 0)
             (hash-ref ac 'tvt_zero_tank 0)
+            (hash-ref ac 'zero_kill_collapse_losses 0)
             lat-str)))
 
 ;; -----------------------------------------------------------------------------
@@ -3080,7 +3108,21 @@
                      (hash-ref zt 'our_tanks 0)
                      (hash-ref zt 'opp_tanks 0)
                      (hash-ref zt 'our_widow_mines 0)
-                     (hash-ref zt 'our_factories 0)))))
+                     (hash-ref zt 'our_factories 0))))
+
+  (section "16. Zero-Kill Collapse Losses (non-win w/ K=0 & L>=3000 match or collapse window)"
+           (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'zero_kill_collapse_loss #f))) rows)
+           (lambda (r)
+             (define zk (hash-ref (hash-ref r 'anomalies) 'zero_kill_collapse_loss))
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | scope=~a | matchK/L=~a/~a | winL=~a (deaths=~a)\n"
+                     (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
+                     (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
+                     (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
+                     (hash-ref zk 'scope "?")
+                     (hash-ref zk 'match_killed_val 0)
+                     (hash-ref zk 'match_lost_val 0)
+                     (hash-ref zk 'window_lost_val 0)
+                     (hash-ref zk 'window_deaths 0)))))
 
 ;; -----------------------------------------------------------------------------
 ;; Main CLI Driver

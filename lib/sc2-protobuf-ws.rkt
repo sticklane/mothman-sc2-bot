@@ -9017,19 +9017,19 @@
 
   (define self-is-zerg?
     (ormap (lambda (u) (memv (sc2-unit-unit-type u) '(86 100 101 104 88))) self-units))
-  ;; L19-P0-1: Dynamic Gas-to-Mineral Rebalance across ALL worker counts (no 54w/66w cutoff!):
-  ;;   Pull ON:  (>= 200G & < 120M) OR (>= 350G & < 250M) OR (> 600G & < 450M)
-  ;;   Pull OFF: (>= 450M) OR (<= 600G & (< 140G OR >= 280M))
-  ;;   Floor:    keep >= 1 gas harvester below 350G (not worker-rush) so `GasZeroFreeze = 0`
-  ;;             holds strictly with P1 resaturation, while >= 350G pulls all the way to 0!
+  ;; L21-P0-1: Tighten midgame gas-to-mineral rebalance (`GasRichMinStarved` 8 -> <=2, GasZeroFreeze=0):
+  ;;   Pull ON:  (>= 180G & < 160M) OR (>= 350G & < 250M) OR (> 600G & < 450M)
+  ;;   Pull OFF: (>= 450M) OR (<= 600G & (< 130G OR >= 280M))
+  ;;   Floor:    keep >= 1 gas harvester below 300G (not worker-rush / worker-crisis) so `GasZeroFreeze = 0`
+  ;;             holds strictly with P1 resaturation, while >= 300G pulls all the way to 0!
   (cond
-    [(or (and (>= cur-gas 200) (< cur-min 120))
+    [(or (and (>= cur-gas 180) (< cur-min 160))
          (and (>= cur-gas SC2-GAS-FLOAT-REBALANCE-THRESH) (< cur-min 250))
          (and (> cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD) (< cur-min 450)))
      (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #t)]
     [(or (>= cur-min 450)
          (and (<= cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD)
-              (or (< cur-gas 140)
+              (or (< cur-gas 130)
                   (>= cur-min 280))))
      (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)])
   ;; Zerg Post-Ling-Speed Mineral Surge: below 28 Drones on 2+ bases (< 3:45), once >= 108G is banked
@@ -9057,7 +9057,7 @@
     (or (and gas-over-banked?
              (or worker-rush-evacuate-gas?
                  worker-crisis-gas-evac?
-                 (>= cur-gas 350)
+                 (>= cur-gas 300)
                  (>= eff-active-gas-workers 1)))
         (and zerg-post-speed-surge-active? (>= eff-active-gas-workers 1))))
   ;; L19-P0-1: Protect mineral saturation on 1-2 bases using `eff-active-gas-workers`
@@ -9235,7 +9235,7 @@
     (cond
       [(or worker-rush-evacuate-gas?
            worker-crisis-gas-evac?
-           (and gas-over-banked? (>= cur-gas 350)))
+           (and gas-over-banked? (>= cur-gas 300)))
        0]
       [(or gas-over-banked? zerg-post-speed-surge-active?) 1]
       [else eff-active-gas-workers]))

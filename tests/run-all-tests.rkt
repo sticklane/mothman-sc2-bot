@@ -13406,6 +13406,114 @@
   (assert-true! (and (not (not (memq 'zealot (macro-brain-decision-scheduled-ids l20-p-36-breach))))
                      (not (memq 'cybernetics-core (macro-brain-decision-scheduled-ids l20-p-36-breach))))
                 "L20-P0-2 #36 Breach: Ready Gateway w/ <3 combat units under attack MUST schedule Zealot > CyberCore")
+
+  ;; 51.9 Loop 21 Macro Core Uncorking (L21-P0-2: Midgame 1-Base Natural@910 + #19 Mass-Air AA > Overlord +
+  ;;      #10 Spire<=1 Cap + #34/#35/#36 12-Pool Opening Defenses)
+  ;; (a) #30 PvP: Midgame 1-base Natural@910 strictly beats TwilightCouncil/Stargate/Cannon
+  (reset-macro-escrow-tracker!)
+  (define l21-p-30-nat
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Protoss #:frame 5200
+      #:minerals 180 #:gas 160 #:supply-used 42 #:supply-cap 55 #:workers 22 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 6
+      #:army-supply 14 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 5 'gateway 3 'cybernetics-core 1 'forge 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 5 'gateway 3 'cybernetics-core 1 'forge 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 22 'stalker 7)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 2))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l21-p-30-nat) 'nexus)
+                     (not (memq 'twilight-council (macro-brain-decision-scheduled-ids l21-p-30-nat))))
+                "L21-P0-2 #30 PvP: Midgame 1-base @ f=5200 army=14 MUST save for Nexus@910 above Twilight/Stargate/Cannon")
+
+  ;; (b) #19 ZvP: Mass-air (12 Phoenixes) prioritizes HydraDen@1400 above Overlord spam when supply-left>=2
+  (reset-macro-escrow-tracker!)
+  (define l21-z-19-aa
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 7500
+      #:minerals 145 #:gas 140 #:supply-used 64 #:supply-cap 68 #:workers 48 #:active-bases 3
+      #:mineral-harvesters 36 #:gas-harvesters 12
+      #:army-supply 16 #:enemy-threat-supply 24 #:under-attack? #t #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 6)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 6)
+      #:unit-counts (hasheq 'drone 48 'queen 4 'roach 4 'overlord 8)
+      #:enemy-unit-counts (hasheq 'phoenix 12)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 5))))
+  (assert-true! (and (not (not (memq 'hydralisk-den (macro-brain-decision-scheduled-ids l21-z-19-aa))))
+                     (not (memq 'overlord (macro-brain-decision-scheduled-ids l21-z-19-aa))))
+                "L21-P0-2 #19 ZvP: Under 12 Phoenixes w/ 4 free supply, HydraDen@1400 must beat Overlord spam")
+
+  ;; (c) #10 ZvP: Strict Spire<=1 cap including Greater Spire
+  (reset-macro-escrow-tracker!)
+  (define l21-z-10-spire-cap
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 15000
+      #:minerals 500 #:gas 400 #:supply-used 130 #:supply-cap 166 #:workers 64 #:active-bases 4
+      #:mineral-harvesters 48 #:gas-harvesters 16
+      #:army-supply 66 #:enemy-threat-supply 20 #:under-attack? #f #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'hatchery 3 'hive 1 'spawning-pool 1 'infestation-pit 1 'greater-spire 1 'extractor 8)
+      #:total-building-counts (hasheq 'hatchery 3 'hive 1 'spawning-pool 1 'infestation-pit 1 'greater-spire 1 'extractor 8)
+      #:unit-counts (hasheq 'drone 64 'queen 5 'corruptor 8 'hydralisk 10 'overlord 20)
+      #:enemy-unit-counts (hasheq 'void-ray 4 'zealot 12)
+      #:open-facility-slots (hasheq 'townhall 4 'larva 8))))
+  (assert-true! (and (not (memq 'spire (macro-brain-decision-scheduled-ids l21-z-10-spire-cap)))
+                     (not (eq? (macro-brain-decision-saving-for l21-z-10-spire-cap) 'spire)))
+                "L21-P0-2 #10 ZvP: GreaterSpire=1 must strictly cap Spire count <= 1")
+
+  ;; (d) #36 PvZ: Multi-Gateway warping under Ling breach suppresses non-defense tech (<4 combat units)
+  (reset-macro-escrow-tracker!)
+  (define l21-p-36-notech
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Zerg #:frame 2896
+      #:minerals 325 #:gas 164 #:supply-used 20 #:supply-cap 31 #:workers 20 #:active-bases 1
+      #:mineral-harvesters 17 #:gas-harvesters 3
+      #:army-supply 0 #:enemy-threat-supply 6 #:under-attack? #t
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 3 'assimilator 1)
+      #:unit-counts (hasheq 'probe 20)
+      #:enemy-unit-counts (hasheq 'zergling 6)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 0))))
+  (assert-true! (and (not (memq 'cybernetics-core (macro-brain-decision-scheduled-ids l21-p-36-notech)))
+                     (not (memq 'robotics-facility (macro-brain-decision-scheduled-ids l21-p-36-notech))))
+                "L21-P0-2 #36 PvZ: Multi-Gateway warping w/ 0 army under attack must suppress CyberCore/Robo")
+
+  ;; (e) #34 ZvZ: Safe 16/17-Pool first in ZvZ opening (<1:30)
+  (reset-macro-escrow-tracker!)
+  (define l21-z-34-pool-first
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Zerg #:frame 896
+      #:minerals 215 #:gas 0 #:supply-used 16 #:supply-cap 22 #:workers 16 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 0
+      #:army-supply 0 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 1)
+      #:total-building-counts (hasheq 'hatchery 1)
+      #:unit-counts (hasheq 'drone 16 'overlord 2)
+      #:open-facility-slots (hasheq 'townhall 1 'larva 3))))
+  (assert-true! (and (not (not (memq 'spawning-pool (macro-brain-decision-scheduled-ids l21-z-34-pool-first))))
+                     (not (eq? (macro-brain-decision-saving-for l21-z-34-pool-first) 'hatchery)))
+                "L21-P0-2 #34 ZvZ: Opening (<1:30) must prefer safe 16/17-Pool BEFORE 2nd Hatchery")
+
+  ;; (f) #35 TvZ: Never escrow CommandCenter <3:00 before 2 Marines & 2 SupplyDepots
+  (reset-macro-escrow-tracker!)
+  (define l21-t-35-tvz-wall
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Zerg #:frame 1668
+      #:minerals 260 #:gas 28 #:supply-used 18 #:supply-cap 23 #:workers 18 #:active-bases 1
+      #:mineral-harvesters 15 #:gas-harvesters 3
+      #:army-supply 0 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'command-center 1 'supply-depot 1 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'command-center 1 'supply-depot 1 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 18)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1))))
+  (assert-true! (and (not (eq? (macro-brain-decision-saving-for l21-t-35-tvz-wall) 'command-center))
+                     (not (not (memq 'marine (macro-brain-decision-scheduled-ids l21-t-35-tvz-wall))))
+                     (not (not (memq 'supply-depot (macro-brain-decision-scheduled-ids l21-t-35-tvz-wall)))))
+                "L21-P0-2 #35 TvZ: <3:00 w/ 0 Marines & 1 Depot must NOT escrow CC; train Marine + wall Depot #2")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms

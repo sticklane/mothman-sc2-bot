@@ -1077,8 +1077,8 @@
                           (and (sc2-raw-unit-command? c)
                                (= (sc2-raw-unit-command-target-unit-tag c) 2)))
                         hyst-deadband-cmds)))
-(define hyst-resat-cmds (saturate-workers-and-gas-commands (make-hysteresis-gas-obs 6032 180 135)))
-(check-true "gas-auto-resaturates-when-vespene-drops-below-140G"
+(define hyst-resat-cmds (saturate-workers-and-gas-commands (make-hysteresis-gas-obs 6032 180 125)))
+(check-true "gas-auto-resaturates-when-vespene-drops-below-130G"
             (ormap (lambda (c)
                      (and (sc2-raw-unit-command? c)
                           (= (sc2-raw-unit-command-target-unit-tag c) 2)))
@@ -4319,10 +4319,10 @@
                                  (= (sc2-raw-unit-command-target-unit-tag c) 9802)
                                  (macro-econ-cmd? c)))
                           latch-clear-min)))
-  ;; Re-latch at 320G/110M, then drop gas to 135G (at 120M) -> clears latch & resaturates!
+  ;; Re-latch at 320G/110M, then drop gas to 125G (at 120M) -> clears latch & resaturates!
   (void (saturate-workers-and-gas-commands (mk-gas-state-obs 7616 110 320 2)))
-  (define latch-clear-gas (saturate-workers-and-gas-commands (mk-gas-state-obs 7620 120 135 1)))
-  (check-true "w18-p0-2c-hysteresis-latch-clears-at-135g-and-resaturates-at-p1"
+  (define latch-clear-gas (saturate-workers-and-gas-commands (mk-gas-state-obs 7620 120 125 1)))
+  (check-true "w18-p0-2c-hysteresis-latch-clears-at-125g-and-resaturates-at-p1"
               (and (not (unbox SC2-GAS-PULL-HYSTERESIS-LATCH))
                    (ormap (lambda (c)
                             (and (sc2-raw-unit-command? c)
@@ -4714,6 +4714,92 @@
                                       (= (sc2-raw-unit-command-target-unit-tag c) 9512)
                                       (macro-econ-cmd? c)))
                      cmds-crisis-resume)))
+
+(printf "[Loop 21] Testing L21-P0-1 tightened midgame gas-pull hysteresis (>=180G/<160M, OFF <130G/>=280M, >=1 floor <300G)...\n")
+(let ()
+  (define (mk-l21-u tag utype alliance x y
+                    #:hp [hp 100.0] #:rad [rad 1.0] #:orders [ords '()]
+                    #:assigned [asgn 0] #:ideal [idl 0] #:mins [mins 0] #:vesp [vesp 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 0 #f #f #f
+              hp hp 0.0 0.0 0.0 0.0 mins vesp #f #f #f #t #f
+              ords 0 '() asgn idl 0.0 0 0 0 0 '() 0 0))
+
+  (define th-21 (mk-l21-u 9401 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75 #:assigned 16 #:ideal 16))
+  (define min-21 (mk-l21-u 9403 341 3 22.0 28.5 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define scvs-min-16
+    (for/list ([i (in-range 16)])
+      (mk-l21-u (+ 9430 i) 45 1 (+ 23.0 (* 0.25 (modulo i 8))) (+ 27.0 (* 0.35 (quotient i 8)))
+                #:hp 45.0 #:rad 0.375 #:orders (list (sc2-unit-order 295 #f 9403 0.0)))))
+  (define (mk-l21-obs lp mins vesp n-gas)
+    (define ref-u (mk-l21-u 9402 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned n-gas #:ideal 3 #:vesp 1800))
+    (define gas-ws
+      (for/list ([i (in-range n-gas)])
+        (mk-l21-u (+ 9410 i) 45 1 (+ 25.0 (* 0.25 i)) 24.2 #:hp 45.0 #:rad 0.375
+                  #:orders (list (sc2-unit-order 295 #f 9402 0.0)))))
+    (sc2-observation lp (sc2-player-common 1 mins vesp 80 40 (+ 16 n-gas) (+ 16 n-gas) 0 0 0 0)
+                     (append (list th-21 ref-u min-21) gas-ws scvs-min-16)
+                     '() '() #f '() '() '() '() '() '()))
+
+  ;; L21-P0-1a: Triggers proactively at 185G / 150M (pulling 2 of 3 gas workers to minerals at P1, keeping 1!)
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (define cmds-185g-150m (saturate-workers-and-gas-commands (mk-l21-obs 8500 150 185 3)))
+  (define pulled-185
+    (filter (lambda (c) (and (sc2-raw-unit-command? c)
+                             (= (sc2-raw-unit-command-target-unit-tag c) 9403)
+                             (macro-econ-cmd? c)))
+            cmds-185g-150m))
+  (check-true "l21-p0-1-triggers-early-at-185g-150m-pulling-2-down-to-1-floor"
+              (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
+                   (= (length pulled-185) 2)))
+
+  ;; L21-P0-1b: Keeps >= 1 gas harvester below 300G (290G/150M -> 0 pulls), pulls to 0 at >= 300G (310G/150M)!
+  (define cmds-290g-1w (saturate-workers-and-gas-commands (mk-l21-obs 8504 150 290 1)))
+  (check-true "l21-p0-1-keeps-last-1-gas-worker-at-290g-below-300g"
+              (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (memv 9410 (sc2-raw-unit-command-unit-tags c))))
+                          cmds-290g-1w)))
+  (define cmds-310g-1w (saturate-workers-and-gas-commands (mk-l21-obs 8508 150 310 1)))
+  (check-true "l21-p0-1-pulls-last-gas-worker-to-0-at-310g"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                      (= (sc2-raw-unit-command-target-unit-tag c) 9403)
+                                      (macro-econ-cmd? c)
+                                      (equal? (sc2-raw-unit-command-unit-tags c) '(9410))))
+                     cmds-310g-1w))
+
+  ;; L21-P0-1c: Deadband holds at 135G/240M, clears at 125G (<130G) and at 280M (>=280M)!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #t)
+  (define cmds-db-135 (saturate-workers-and-gas-commands (mk-l21-obs 8512 240 135 1)))
+  (check-true "l21-p0-1-deadband-holds-at-135g-240m"
+              (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (= (sc2-raw-unit-command-target-unit-tag c) 9402)))
+                               cmds-db-135))))
+  (define cmds-off-125 (saturate-workers-and-gas-commands (mk-l21-obs 8516 200 125 1)))
+  (check-true "l21-p0-1-releases-and-resaturates-at-p1-below-130g"
+              (and (not (unbox SC2-GAS-PULL-HYSTERESIS-LATCH))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-target-unit-tag c) 9402)
+                                           (macro-econ-cmd? c)))
+                          cmds-off-125)))
+  (void (saturate-workers-and-gas-commands (mk-l21-obs 8520 150 185 3)))
+  (define cmds-off-280m (saturate-workers-and-gas-commands (mk-l21-obs 8524 280 220 1)))
+  (check-true "l21-p0-1-releases-and-resaturates-at-p1-at-280m"
+              (and (not (unbox SC2-GAS-PULL-HYSTERESIS-LATCH))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-target-unit-tag c) 9402)
+                                           (macro-econ-cmd? c)))
+                          cmds-off-280m)))
+
+  ;; L21-P0-1d: Even while latched ON at 280G/100M (< 300G), 0 active gas workers immediately assigns 1 at P1!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #t)
+  (define cmds-0w-280g (saturate-workers-and-gas-commands (mk-l21-obs 8528 100 280 0)))
+  (check-true "l21-p0-1-latched-280g-with-0-gas-workers-resaturates-1-at-p1"
+              (and (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-target-unit-tag c) 9402)
+                                           (macro-econ-cmd? c)))
+                          cmds-0w-280g))))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"

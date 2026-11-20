@@ -1495,6 +1495,66 @@
         "NEW ALL-TIME LATENCY RECORDS (avg=7.94ms, p95=13.62ms, tr_p95_worst=6.9ms, max=169.74ms!) & FIRST-EVER PERFECT ZERG 7W-0L-0T 100% real-SC2 arena sweep (A:M=3.28 ATH)!"
       ],
       "promotion_gates_passed": "5/9 NEW ALL-TIME RECORD! (zero_crashes_and_rejects, ties_le_2, sup_blk_le_6pct 4.2%, every_race_wr_ge_33pct, tactics_suite_100pct 231/231)"
+    },
+    {
+      "id": "iter21_wave21",
+      "status": "completed_first_oberon_3_0_and_new_atls",
+      "campaign": "Loops 19-28 Real-3D Visuals Campaign (Loop 3 of 10)",
+      "loop_self_improvements": [
+        "L21-LOOP-2 (@analyzer #599 + @loop-architect compare-vs-pro.py): Guarded gas_rich_min_starved with (> su 0) removing post-wipe false positives & added zero_kill_collapse_loss to score-replay-batch.rkt & compare-vs-pro.py"
+      ],
+      "spec_summary": [
+        "L21-P0-1 (@wire-author sc2-protobuf-ws.rkt): Tightened midgame gas-pull hysteresis (>=180G/<160M, OFF <130G/>=280M) -> GasRichMinStarved CRASHED to ALL-TIME LOW 2/36 (26->6->9->2!) while holding GasZeroFreeze=0, 617/617 wire tests",
+        "L21-P0-2 (@belief-author priority-macro-brain.rkt): Midgame 1-base natural priority u=910 & ZvZ safe Pool-first + Zerg AA Overlord-escrow cap -> 1BaseLock ATL 3/36 (9->5->4->3), PvPNatDelay ATL 1/36, AirAAStarve=0, BOTH P & T hit EXACT PRO #1 BO MATCH, 2,301/2,301 unit tests",
+        "L21-P0-3 (@runtime-author bot-runtime.rkt): Replaced global-centroid contact check in mass-parity-before-attack-suppress? with per-unit direct-contact <=18t + locally-winning-fight? bypass -> Mothman-P REBOUNDED 4-7-1 -> 5W-7L-0T (0.91x, #12 puck 12.86x, #15 oberon 4.38x, #30 Creepy 15.00x!), FIRST-EVER oberon 3-0 sweep, NEW ATH A:M=3.62 in tactics arena!"
+      ],
+      "rev": "ttvrlllw 4ea312ff",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261120_094835_iter21_wave21",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter21_wave21_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter21_wave21.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter21.md",
+      "clean_n": 36,
+      "record_raw": "12W-21L-3T (33.3% WR, 41.7% NL; #07 Chance late 19.4m crash)",
+      "record_non_chance": "11W-19L-3T (33.3% WR, 42.4% NL — ties W12/W15c 19L ATL!)",
+      "trade_agg": 0.54,
+      "trade_med": 0.29,
+      "sup_blk_avg": 4.3,
+      "endgame_home_stall_count": 0,
+      "own_base_retreat_frames": 4300,
+      "non_combat_robo_waste_val": 0,
+      "zerg_non_ling_army_pct": 87.9,
+      "siege_range_zero_dps_losses": 6,
+      "cloaked_unit_damage_losses": 0,
+      "gas_rich_min_starved_matches": 2,
+      "one_base_lockout_matches": 3,
+      "pvp_nat_delay_matches": 1,
+      "spire_sched_drop_matches": 1,
+      "drip_feed_collapse_matches": 18,
+      "zero_kill_collapse_matches": 3,
+      "prod_idle_bank_freeze_matches": 0,
+      "gas_zero_harvest_freeze_matches": 0,
+      "wall_timeout_ties": 1,
+      "army_val_4m_ratio_vs_pro": 0.78,
+      "army_val_8m_ratio_vs_pro": 0.42,
+      "wall_sec": 896.6,
+      "latency_summary": "36/36 <=172.39ms (avg=8.04ms, p95=14.16ms, tr=2.48ms, tr_p95_worst=12.7ms, 0 action_rejects)",
+      "by_race": {
+        "Protoss": {"record": "5W-7L-0T (41.7% WR!)", "trade_agg": 0.90, "w4_alive_med": 25.0, "w6_alive_med": 36.5, "nat_sec": 127.0, "sup_blk": 4.7},
+        "Terran": {"record": "3W-9L-0T (25.0%)", "trade_agg": 0.62, "w4_alive_med": 22.0, "w6_alive_med": 36.0, "nat_sec": 92.0, "sup_blk": 3.1},
+        "Zerg": {"record": "4W-5L-3T (58.3% NL!)", "trade_agg": 0.36, "w4_alive_med": 30.0, "w6_alive_med": 47.0, "nat_sec": 55.0, "sup_blk": 5.0}
+      },
+      "tactics_summary": {
+        "rev": "ttvrlllw 5980541f (iter21)",
+        "passed": "231/231 (100.0%, wire_rejects=0, novel 131/131)",
+        "sc2_duel21_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter21.json",
+        "sc2_duel21_summary": "8W-1L-12T | 1.58x Agg Trade (+0.04x) | NEW ATH A:M=3.62 (+0.34!) | P 3W-0L-4T 1.70x A:M=3.17 ATH, T 1.05x (+0.23x, t07 restored 0.35->1.17x, t05 9.25x!), Z 4W-0L-3T A:M=14.81 ATH | 21/21 real-3D WebP+PNGs in 31.4s!"
+      },
+      "key_wins": [
+        "FIRST-EVER oberon 3-0 SWEEP (#13 Z W 14.3m, #14 T W 25.5m, #15 P W 4.38x) + titania 3-0 + monsterbot 3-0; Mothman-P rebounded to 5W-7L (0.90x; #12 puck 12.86x, #30 Creepy 15.00x!); Non-Chance 11W-19L-3T ties 19L ATL!",
+        "THREE NEW ALL-TIME LOWS: GasRichMinStarved = 2/36 (26->6->9->2!), 1BaseLock = 3/36 (9->5->4->3!), PvPNatDelay = 1/36; BOTH Protoss (+1A 475/475s exact Pro!) & Terran hit EXACT PRO #1 BO MATCH simultaneously!",
+        "ALL Zero-Invariants held (GasZeroFreeze=0, SuicideKite=0, AirAAStarve=0, IdleBankFreeze=0, HomeStall=0, RoboWaste=0, CloakLoss=0, 36/36 <=172.4ms) + NEW ATH A:M=3.62 in 21-duel real-3D arena!"
+      ],
+      "promotion_gates_passed": "3/9 (zero_crashes_and_rejects, sup_blk_le_6pct 4.3%, tactics_suite_100pct 231/231)"
     }
   ],
   "final_18_loop_summary": {
