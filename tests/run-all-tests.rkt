@@ -7018,7 +7018,7 @@
   (define res-t-upg
     (step-live-bot-runtime!
      rt-t-upg
-     (hash 'frame 5600 'minerals 200 'gas 200 'supply-used 46 'supply-cap 62 'supply-left 16
+     (hash 'frame 5600 'minerals 375 'gas 200 'supply-used 46 'supply-cap 62 'supply-left 16
            'mineral-harvesters 30 'vespene-harvesters 6 'enemy-race 'Zerg
            'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
            'ally-units (append (for/list ([i (in-range 34)])
@@ -13622,6 +13622,99 @@
                      (not (memq 'refinery (macro-brain-decision-scheduled-ids l22-t-35-wall-depot2)))
                      (not (memq 'barracks (macro-brain-decision-scheduled-ids l22-t-35-wall-depot2))))
                 "L22-P0-2 #35 TvZ: Wall SupplyDepot #2 right after Barracks #1 must precede Refinery & Barracks #2")
+
+  ;; 51.11 Loop 23 (`L23-P0-2`) Regressions: Continuous 2:00-4:00 T/P Worker Engine (W@4m +10!),
+  ;;       Zerg Spore@1040 Escrow Cap (#25/#19), Corruptor > Hydra vs Capital Air (#28), ZvZ Wave-2 Hold (#34)
+  ;; (a) #20/#26 Terran @ 90M/100G escrowing Factory: SCV@575 bypasses non-natural escrow!
+  (reset-macro-escrow-tracker!)
+  (define l23-t-scv-past-escrow
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 3360
+      #:minerals 90 #:gas 100 #:supply-used 24 #:supply-cap 39 #:workers 20 #:active-bases 2
+      #:mineral-harvesters 17 #:gas-harvesters 3
+      #:army-supply 4 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 20 'marine 4)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1))))
+  (assert-true! (not (not (memq 'scv (macro-brain-decision-scheduled-ids l23-t-scv-past-escrow))))
+                "L23-P0-2 #20/#26 Terran: SCV@575 must train past Factory escrow floor at 90M/100G")
+
+  ;; (b) #33/#24 Protoss @ 95M/100G escrowing Gateway#2/Robo: Probe@575 bypasses non-natural escrow!
+  (reset-macro-escrow-tracker!)
+  (define l23-p-probe-past-escrow
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 3600
+      #:minerals 95 #:gas 100 #:supply-used 26 #:supply-cap 46 #:workers 22 #:active-bases 2
+      #:mineral-harvesters 19 #:gas-harvesters 3
+      #:army-supply 4 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:unit-counts (hasheq 'probe 22 'stalker 2)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 1))))
+  (assert-true! (not (not (memq 'probe (macro-brain-decision-scheduled-ids l23-p-probe-past-escrow))))
+                "L23-P0-2 #33/#24 Protoss: Probe@575 must train past Gateway/Robo escrow floor at 95M/100G")
+
+  ;; (c) #25 ZvP: 15 Stalkers + 1 Oracle -> SporeCrawler capped <= 510, blk=#f (train combat!)
+  (reset-macro-escrow-tracker!)
+  (define l23-z-25-spore-cap
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 7000
+      #:minerals 140 #:gas 80 #:supply-used 46 #:supply-cap 66 #:workers 36 #:active-bases 2
+      #:mineral-harvesters 28 #:gas-harvesters 8
+      #:army-supply 10 #:enemy-threat-supply 32 #:under-attack? #t
+      #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 3)
+      #:total-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 3)
+      #:unit-counts (hasheq 'drone 36 'queen 2 'roach 3 'zergling 4 'overlord 7)
+      #:enemy-unit-counts (hasheq 'stalker 15 'oracle 1)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 4))))
+  (assert-true! (and (not (eq? (macro-brain-decision-saving-for l23-z-25-spore-cap) 'spore-crawler))
+                     (or (not (not (memq 'roach (macro-brain-decision-scheduled-ids l23-z-25-spore-cap))))
+                         (not (not (memq 'zergling (macro-brain-decision-scheduled-ids l23-z-25-spore-cap))))
+                         (not (not (memq 'queen (macro-brain-decision-scheduled-ids l23-z-25-spore-cap))))))
+                "L23-P0-2 #25 ZvP: SporeCrawler must yield (<=510, blk=#f) under active ground Stalker attack")
+
+  ;; (d) #28 ZvP: Ready Spire + HydraDen vs 10 Tempests -> Corruptor (>1250) beats Hydralisk up to 16 cap!
+  (reset-macro-escrow-tracker!)
+  (define l23-z-28-corruptor-over-hydra
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 10500
+      #:minerals 180 #:gas 110 #:supply-used 98 #:supply-cap 130 #:workers 54 #:active-bases 3
+      #:mineral-harvesters 42 #:gas-harvesters 12
+      #:army-supply 44 #:enemy-threat-supply 40 #:under-attack? #t
+      #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'hydralisk-den 1 'spire 1 'extractor 6)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'hydralisk-den 1 'spire 1 'extractor 6)
+      #:unit-counts (hasheq 'drone 54 'queen 4 'hydralisk 8 'corruptor 10 'overlord 16)
+      #:enemy-unit-counts (hasheq 'tempest 10)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 6))))
+  (assert-true! (and (not (not (memq 'corruptor (macro-brain-decision-scheduled-ids l23-z-28-corruptor-over-hydra))))
+                     (not (memq 'hydralisk (macro-brain-decision-scheduled-ids l23-z-28-corruptor-over-hydra))))
+                "L23-P0-2 #28 ZvP: Ready Spire vs 10 Tempests must prioritize Corruptor (up to 16) above Hydralisk")
+
+  ;; (e) #34 ZvZ: <4:00 Wave-2 Hold defers Hatchery #2 until >= 10 Zerglings + Queen/Spine
+  (reset-macro-escrow-tracker!)
+  (define l23-z-34-wave2-hold
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Zerg #:frame 4200
+      #:minerals 320 #:gas 0 #:supply-used 18 #:supply-cap 28 #:workers 16 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 0
+      #:army-supply 2 #:enemy-threat-supply 4 #:under-attack? #t
+      #:ready-building-counts (hasheq 'hatchery 1 'spawning-pool 1)
+      #:total-building-counts (hasheq 'hatchery 1 'spawning-pool 1)
+      #:unit-counts (hasheq 'drone 16 'zergling 4 'overlord 3)
+      #:enemy-unit-counts (hasheq 'zergling 8)
+      #:open-facility-slots (hasheq 'townhall 1 'larva 4))))
+  (assert-true! (and (not (memq 'hatchery (macro-brain-decision-scheduled-ids l23-z-34-wave2-hold)))
+                     (not (eq? (macro-brain-decision-saving-for l23-z-34-wave2-hold) 'hatchery))
+                     (not (not (memq 'zergling (macro-brain-decision-scheduled-ids l23-z-34-wave2-hold)))))
+                "L23-P0-2 #34 ZvZ: <4:00 wave-2 Ling defense must defer Hatchery #2 until >=10 Lings + Queen/Spine")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms

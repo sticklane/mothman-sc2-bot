@@ -4888,6 +4888,166 @@
                    (memv 9311 pulled-tags-5g-125)
                    (memv 9312 pulled-tags-5g-125))))
 
+(printf "[Loop 23] Testing L23-P0-1 P1 MULE/ChronoBoost cadence & dedupe, idle-MULE P1, and fast bp>=0.85 early natural transfer...\n")
+(let ()
+  (define (mk-l23-u tag utype alliance x y
+                    #:hp [hp 100.0] #:shield [sh 0.0] #:energy [en 0.0] #:rad [rad 1.0]
+                    #:bp [bp 1.0] #:cloak [cloak 0] #:orders [ords '()] #:buffs [buffs '()]
+                    #:assigned [asgn 0] #:ideal [idl 0] #:mins [mins 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 rad bp cloak #f #f #f
+              hp hp sh sh en (if (> en 0.0) 200.0 0.0) mins 0 #f #f #f #t #f
+              ords 0 buffs asgn idl 0.0 0 0 0 0 '() 0 0))
+
+  ;; L23-P0-1a: Orbital Command MULE (`171`) at P1 (`macro-econ-cmd?`), survives P2 combat micro,
+  ;;            deduped with Layer 2 `calldown-mule` & `scanner-sweep`, and respects cloaked-enemy Scan reserve!
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define oc-23 (mk-l23-u 9201 132 1 28.5 28.5 #:hp 1500.0 #:energy 55.0 #:rad 2.75 #:assigned 14 #:ideal 16))
+  (define min-23 (mk-l23-u 9203 341 3 22.0 28.5 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define obs-mule-23
+    (sc2-observation 3200 (sc2-player-common 1 120 40 50 26 6 20 0 0 0 0)
+                     (list oc-23 min-23) '() '() #f '() '() '() '() '() '()))
+  (define mule-sat-cmds (saturate-workers-and-gas-commands obs-mule-23))
+  (define mule-cmd-23
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 171)))
+           mule-sat-cmds))
+  (check-true "l23-p0-1a-orbital-mule-emitted-at-p1-macro-econ"
+              (and (sc2-raw-unit-command? mule-cmd-23)
+                   (macro-econ-cmd? mule-cmd-23)
+                   (= (wire-cmd-priority-tier mule-cmd-23) 1)
+                   (= (sc2-raw-unit-command-target-unit-tag mule-cmd-23) 9203)
+                   (equal? (sc2-raw-unit-command-unit-tags mule-cmd-23) '(9201))))
+  ;; Under saturated P2 combat micro (governor tokens drained to 4.0), P1 MULE STILL emits immediately!
+  (define gov-23 (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (for ([step (in-range 20)])
+    (define lp (+ 3200 (* 4 step)))
+    (define p2-spam
+      (for/list ([k (in-range 8)])
+        (sc2-raw-unit-command 16 (sc2-point2d (+ 60.0 k) (+ 60.0 (modulo step 4))) 0 (list (+ 8700 k)) #f)))
+    (void (govern-sc2-wire-actions! gov-23 p2-spam lp)))
+  (define gov-mule-out (govern-sc2-wire-actions! gov-23 (list mule-cmd-23) 3284))
+  (check-true "l23-p0-1a-p1-mule-never-starved-by-p2-combat-micro"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 171)))
+                     gov-mule-out))
+  ;; Dedupe: after Layer 2 casts `calldown-mule` on loop 3300, `saturate-workers-and-gas-commands` emits 0 duplicate MULE!
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define obs-mule-dedupe
+    (sc2-observation 3300 (sc2-player-common 1 120 40 50 26 6 20 0 0 0 0)
+                     (list oc-23 min-23) '() '() #f '() '() '() '() '() '()))
+  (define l2-mule-cmds
+    (translate-bot-actions->sc2-raw-commands '((cast-spell 9201 calldown-mule 9203)) obs-mule-dedupe))
+  (define sat-after-l2-mule (saturate-workers-and-gas-commands obs-mule-dedupe))
+  (check-true "l23-p0-1a-l2-mule-tagged-p1-and-deduped-against-sat-safety-net"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 171)
+                                           (macro-econ-cmd? c)))
+                          l2-mule-cmds)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (= (sc2-raw-unit-command-ability-id c) 171)))
+                               sat-after-l2-mule))))
+  ;; Cloak threat: OC at 55 energy reserves Scan (0 MULEs), while OC at 105 energy still drops MULE!
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define dt-cloak (mk-l23-u 9299 76 4 45.0 45.0 #:hp 40.0 #:shield 80.0 #:cloak 1 #:rad 0.375))
+  (define cmds-mule-cloak-55
+    (saturate-workers-and-gas-commands
+     (sc2-observation 3400 (sc2-player-common 1 120 40 50 26 6 20 0 0 0 0)
+                      (list oc-23 min-23 dt-cloak) '() '() #f '() '() '() '() '() '())))
+  (define oc-23-105 (mk-l23-u 9201 132 1 28.5 28.5 #:hp 1500.0 #:energy 105.0 #:rad 2.75 #:assigned 14 #:ideal 16))
+  (define cmds-mule-cloak-105
+    (saturate-workers-and-gas-commands
+     (sc2-observation 3404 (sc2-player-common 1 120 40 50 26 6 20 0 0 0 0)
+                      (list oc-23-105 min-23 dt-cloak) '() '() #f '() '() '() '() '() '())))
+  (check-true "l23-p0-1a-mule-reserves-50-energy-scan-vs-cloak-and-fires-at-105-energy"
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 171)))
+                               cmds-mule-cloak-55))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 171)))
+                          cmds-mule-cloak-105)))
+
+  ;; L23-P0-1b: Early `0:00-5:00` Probe-training Nexus ChronoBoost (`3755`) emitted at P1 (`macro-econ-cmd?`),
+  ;;            skips already-boosted Nexuses (`buff 281`), and dedupes with Layer 2!
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define nx-train (mk-l23-u 9211 59 1 28.5 28.5 #:hp 1000.0 #:shield 1000.0 #:energy 55.0 #:rad 2.75
+                             #:orders (list (sc2-unit-order 1006 #f 0 0.25)) #:assigned 14 #:ideal 16))
+  (define obs-chrono-23
+    (sc2-observation 3500 (sc2-player-common 1 120 40 50 26 6 20 0 0 0 0)
+                     (list nx-train min-23) '() '() #f '() '() '() '() '() '()))
+  (define chrono-sat-cmds (saturate-workers-and-gas-commands obs-chrono-23))
+  (define chrono-cmd-23
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3755)))
+           chrono-sat-cmds))
+  (check-true "l23-p0-1b-early-nexus-probe-chrono-emitted-at-p1-macro-econ"
+              (and (sc2-raw-unit-command? chrono-cmd-23)
+                   (macro-econ-cmd? chrono-cmd-23)
+                   (= (wire-cmd-priority-tier chrono-cmd-23) 1)
+                   (= (sc2-raw-unit-command-target-unit-tag chrono-cmd-23) 9211)
+                   (equal? (sc2-raw-unit-command-unit-tags chrono-cmd-23) '(9211))))
+  ;; Already boosted (`buff 281`) OR deduped after Layer 2 -> emits 0 duplicate ChronoBoost!
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define nx-boosted (mk-l23-u 9211 59 1 28.5 28.5 #:hp 1000.0 #:shield 1000.0 #:energy 55.0 #:rad 2.75
+                               #:orders (list (sc2-unit-order 1006 #f 0 0.25)) #:buffs '(281)))
+  (define chrono-already-cmds
+    (saturate-workers-and-gas-commands
+     (sc2-observation 3520 (sc2-player-common 1 120 40 50 26 6 20 0 0 0 0)
+                      (list nx-boosted min-23) '() '() #f '() '() '() '() '() '())))
+  (define l2-chrono-cmds
+    (translate-bot-actions->sc2-raw-commands '((cast-spell 9211 chrono-boost 9211))
+                                             (sc2-observation 3540 (sc2-player-common 1 120 40 50 26 6 20 0 0 0 0)
+                                                              (list nx-train min-23) '() '() #f '() '() '() '() '() '())))
+  (define sat-after-l2-chrono
+    (saturate-workers-and-gas-commands
+     (sc2-observation 3540 (sc2-player-common 1 120 40 50 26 6 20 0 0 0 0)
+                      (list nx-train min-23) '() '() #f '() '() '() '() '() '())))
+  (check-true "l23-p0-1b-chrono-skips-buffed-and-dedupes-with-l2"
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3755)))
+                               chrono-already-cmds))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3755) (macro-econ-cmd? c)))
+                          l2-chrono-cmds)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3755)))
+                               sat-after-l2-chrono))))
+
+  ;; L23-P0-1c: Early `0:00-4:00` natural split (`bp = 0.88`, `0/16`) transfers 2 workers/step at Tier P1
+  ;;            even when Main is `15/16` (NOT over-saturated, previously blocked by Main sorting first!)
+  (define main-cc-15 (mk-l23-u 9221 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75 #:bp 1.0 #:assigned 15 #:ideal 16))
+  (define nat-cc-88  (mk-l23-u 9222 18 1 60.5 28.5 #:hp 1320.0 #:rad 2.75 #:bp 0.88 #:assigned 0 #:ideal 16))
+  (define main-mins-4
+    (for/list ([i (in-range 4)])
+      (mk-l23-u (+ 9230 i) 341 3 22.0 (+ 25.0 (* 2.0 i)) #:hp 1000.0 #:rad 1.0 #:mins 1500)))
+  (define nat-mins-4
+    (for/list ([i (in-range 4)])
+      (mk-l23-u (+ 9234 i) 341 3 66.5 (+ 25.0 (* 2.0 i)) #:hp 1000.0 #:rad 1.0 #:mins 1500)))
+  (define main-scvs-15
+    (for/list ([i (in-range 15)])
+      (mk-l23-u (+ 9240 i) 45 1 (+ 22.5 (* 0.3 (modulo i 5))) (+ 25.5 (* 1.5 (quotient i 5)))
+                #:hp 45.0 #:rad 0.375
+                #:orders (list (sc2-unit-order 295 #f (+ 9230 (modulo i 4)) 0.0)))))
+  (define xfer-early-cmds
+    (saturate-workers-and-gas-commands
+     (sc2-observation 2800 (sc2-player-common 1 150 20 40 24 4 15 0 0 0 0)
+                      (append (list main-cc-15 nat-cc-88) main-mins-4 nat-mins-4 main-scvs-15)
+                      '() '() #f '() '() '() '() '() '())))
+  (define xfers-to-nat
+    (filter (lambda (c) (and (sc2-raw-unit-command? c)
+                             (= (sc2-raw-unit-command-ability-id c) 3666)
+                             (memv (sc2-raw-unit-command-target-unit-tag c) '(9234 9235 9236 9237))
+                             (macro-econ-cmd? c)))
+            xfer-early-cmds))
+  (check-true "l23-p0-1c-bp88-natural-immediately-splits-2-workers-at-p1-from-15-of-16-main"
+              (= (length xfers-to-nat) 2))
+
+  ;; L23-P0-1d: Idle MULE re-tasking elevated to Tier P1 (`macro-econ-cmd?`)
+  (define idle-mule-23 (mk-l23-u 9280 268 1 25.0 28.5 #:hp 60.0 #:rad 0.375 #:orders '()))
+  (define mule-retask-cmds
+    (saturate-workers-and-gas-commands
+     (sc2-observation 3600 (sc2-player-common 1 150 20 40 24 4 15 0 0 0 0)
+                      (list main-cc-15 min-23 idle-mule-23)
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l23-p0-1d-idle-mule-retask-tagged-macro-econ-p1"
+              (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                      (= (sc2-raw-unit-command-ability-id c) 3666)
+                                      (equal? (sc2-raw-unit-command-unit-tags c) '(9280))
+                                      (macro-econ-cmd? c)))
+                     mule-retask-cmds)))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

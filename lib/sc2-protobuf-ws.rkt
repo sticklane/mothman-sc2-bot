@@ -182,6 +182,7 @@
  SC2-WARPGATE-LAST-LOOP
  SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP
  SC2-GAS-PULL-HYSTERESIS-LATCH
+ SC2-MACRO-ABILITY-LAST-LOOP
  select-producer-tags-for-unit
  frame0-pro-worker-split-commands
  compute-initial-worker-split-commands
@@ -4362,6 +4363,7 @@
 (define SC2-ADDON-SLOT-BLOCKED-CACHE (make-hash))
 (define SC2-TERRAN-5X3-MISS-CACHE (make-hash))
 (define SC2-TUMOR-PLACEMENT-CACHE (make-hash))
+(define SC2-MACRO-ABILITY-LAST-LOOP (make-hash))
 
 (define (terran-5x3-miss-active? canon-bldg ax ay cur-loop)
   (and (memq canon-bldg '(barracks factory starport))
@@ -4553,6 +4555,7 @@
     (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
     (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
     (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
+    (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
     (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
     (set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP #f)
     (set-box! SC2-ENEMY-POS-PURGE-LAST-LOOP -9999)
@@ -8450,6 +8453,7 @@
   (define cur-loop (sc2-observation-game-loop obs))
   (when (or (<= cur-loop 8) (< cur-loop (unbox SC2-WORKER-TRANSFER-LAST-LOOP)))
     (hash-clear! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL)
+    (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
     (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f))
   (set-box! SC2-WORKER-TRANSFER-LAST-LOOP cur-loop)
   (when (< cur-loop (unbox SC2-WORKER-ASSIGN-LAST-LOOP))
@@ -9127,12 +9131,17 @@
                      #:macro-econ? #t
                      #:allow-carrying-mineral? allow-carry?)))
 
-  ;; 3. Transfer 1 far-patch non-carrying worker per step from over-saturated TownHall OR >= 14-worker
-  ;;    donor base to under-saturated/coming-online expansion's Near Patches (`2` per near patch first),
-  ;;    enforcing imbalance deadband + 48-loop per-worker transfer cooldown + in-flight deduplication.
+  ;; 3. L23-P0-1: Transfer up to 2 far-patch non-carrying workers/step from over-saturated TownHall OR
+  ;;    donor base (`>= 12w` during `0:00-4:30` natural ramp, keeping `>= 10` at main; `>= 14w` later)
+  ;;    to the safest MOST-UNDER-SATURATED expansion's Near Patches (`bp >= 0.85` included!) at Tier P1
+  ;;    when ramping early/fresh expansions, enforcing cooldown + in-flight deduplication!
   (when (and (not (null? under-townhalls))
              (not (null? owned-base-minerals)))
-    (define dst-th (first under-townhalls))
+    (define dst-th
+      (argmin (lambda (th)
+                (+ (* 1000.0 (th-safety-score th))
+                   (exact->inexact (th-effective-assigned th))))
+              under-townhalls))
     (define dp (sc2-unit-pos dst-th))
     (define dst-ih (th-effective-ideal dst-th))
     (define dst-deficit (max 0 (- dst-ih (th-effective-assigned dst-th))))
@@ -9152,31 +9161,40 @@
     (define dst-near-slots-needed
       (for/sum ([m (in-list dst-near-mins)])
         (max 0 (- 2 (hash-ref patch-worker-counts (sc2-unit-tag m) 0)))))
+    (define early-natural-split?
+      (and (<= cur-loop 6048)
+           (>= (length dst-mins) 4)
+           (< (th-effective-assigned dst-th) 8)))
+    (define donor-min-workers (if early-natural-split? 12 14))
+    (define donor-keep-workers (if early-natural-split? 10 13))
     (define donor-candidates
       (filter (lambda (th)
                 (and (not (= (sc2-unit-tag th) (sc2-unit-tag dst-th)))
-                     (>= (th-effective-assigned th) 14)))
+                     (>= (th-effective-assigned th) donor-min-workers)))
               online-ready-townhalls))
-    (define-values (src-th src-surplus transfer-eligible?)
+    (define-values (src-th src-surplus transfer-limit transfer-eligible?)
       (cond
         [(not (null? over-townhalls))
          (define sth (first over-townhalls))
          (define sth-surp (max 0 (- (sc2-unit-assigned-harvesters sth) (th-effective-ideal sth))))
+         (define rem-surp (max 0 (- sth-surp in-flight-to-dst)))
+         (define rem-def (max 0 (- dst-deficit in-flight-to-dst)))
+         (define lim (min (if (or early-natural-split? (>= rem-surp 2)) 2 1) rem-surp rem-def))
          (values sth
                  sth-surp
+                 lim
                  (and (not (= (sc2-unit-tag sth) (sc2-unit-tag dst-th)))
                       (>= (+ sth-surp dst-deficit) 2)
-                      (> sth-surp in-flight-to-dst)
-                      (> dst-deficit in-flight-to-dst)))]
+                      (> lim 0)))]
         [(and (pair? donor-candidates) (> dst-near-slots-needed 0))
          (define sth (argmax th-effective-assigned donor-candidates))
-         (define sth-surp (max 0 (- (th-effective-assigned sth) 13)))
-         (values sth
-                 sth-surp
-                 (and (> dst-near-slots-needed in-flight-to-dst)
-                      (> sth-surp in-flight-to-dst)
-                      (> dst-deficit in-flight-to-dst)))]
-        [else (values #f 0 #f)]))
+         (define sth-surp (max 0 (- (th-effective-assigned sth) donor-keep-workers)))
+         (define rem-near (max 0 (- dst-near-slots-needed in-flight-to-dst)))
+         (define rem-surp (max 0 (- sth-surp in-flight-to-dst)))
+         (define rem-def (max 0 (- dst-deficit in-flight-to-dst)))
+         (define lim (min (if (or early-natural-split? (>= rem-surp 2)) 2 1) rem-near rem-surp rem-def))
+         (values sth sth-surp lim (> lim 0))]
+        [else (values #f 0 0 #f)]))
     (when (and src-th transfer-eligible? (not (null? dst-mins)))
       (define sp (sc2-unit-pos src-th))
       (define transferable
@@ -9201,32 +9219,36 @@
                             SC2-GAS-HARVESTER-EXCLUSION-RADIUS))))
                 workers))
       (when (not (null? transferable))
-        (define chosen-w
-          (argmin (lambda (w)
-                    (define wp (sc2-unit-pos w))
-                    (define wtag (sc2-unit-tag w))
-                    (define ord-tgt
-                      (for/first ([o (in-list (sc2-unit-orders w))]
-                                  #:when (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666)))
-                        (sc2-unit-order-target-unit-tag o)))
-                    (define eff-tgt (or ord-tgt (hash-ref SC2-WORKER-PATCH-ASSIGNMENT wtag #f)))
-                    (define patch-far?
-                      (if (and eff-tgt (hash-has-key? min-is-far-ht eff-tgt))
-                          (hash-ref min-is-far-ht eff-tgt #f)
-                          (>= (pt-dist (sc2-point3d-x sp) (sc2-point3d-y sp)
-                                       (sc2-point3d-x wp) (sc2-point3d-y wp))
-                              6.75)))
-                    (+ (if patch-far? -25.0 25.0)
-                       (if (null? (sc2-unit-orders w)) -5.0 0.0)
-                       (* 0.1 (pt-dist (sc2-point3d-x dp) (sc2-point3d-y dp)
-                                       (sc2-point3d-x wp) (sc2-point3d-y wp)))))
-                  transferable))
-        (define best-dst-min (pick-best-slot-patch chosen-w dst-mins))
-        (define bmtag (sc2-unit-tag best-dst-min))
-        (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
-        (hash-set! SC2-WORKER-PATCH-ASSIGNMENT (sc2-unit-tag chosen-w) bmtag)
-        (hash-set! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL (sc2-unit-tag chosen-w) (+ cur-loop 48))
-        (issue-gather! chosen-w bmtag))))
+        (define (xfer-worker-score w)
+          (define wp (sc2-unit-pos w))
+          (define wtag (sc2-unit-tag w))
+          (define ord-tgt
+            (for/first ([o (in-list (sc2-unit-orders w))]
+                        #:when (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666)))
+              (sc2-unit-order-target-unit-tag o)))
+          (define eff-tgt (or ord-tgt (hash-ref SC2-WORKER-PATCH-ASSIGNMENT wtag #f)))
+          (define patch-far?
+            (if (and eff-tgt (hash-has-key? min-is-far-ht eff-tgt))
+                (hash-ref min-is-far-ht eff-tgt #f)
+                (>= (pt-dist (sc2-point3d-x sp) (sc2-point3d-y sp)
+                             (sc2-point3d-x wp) (sc2-point3d-y wp))
+                    6.75)))
+          (+ (if patch-far? -25.0 25.0)
+             (if (null? (sc2-unit-orders w)) -5.0 0.0)
+             (* 0.1 (pt-dist (sc2-point3d-x dp) (sc2-point3d-y dp)
+                             (sc2-point3d-x wp) (sc2-point3d-y wp)))))
+        (define ranked-xfers (sort transferable < #:key xfer-worker-score))
+        (define xfer-macro-econ?
+          (or early-natural-split?
+              (< cur-loop 6720)
+              (< (th-effective-assigned dst-th) 8)))
+        (for ([chosen-w (in-list (take ranked-xfers (min transfer-limit (length ranked-xfers))))])
+          (define best-dst-min (pick-best-slot-patch chosen-w dst-mins))
+          (define bmtag (sc2-unit-tag best-dst-min))
+          (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
+          (hash-set! SC2-WORKER-PATCH-ASSIGNMENT (sc2-unit-tag chosen-w) bmtag)
+          (hash-set! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL (sc2-unit-tag chosen-w) (+ cur-loop 48))
+          (issue-gather! chosen-w bmtag #:macro-econ? xfer-macro-econ?)))))
 
   ;; 4. Pull up to 2 gas workers/step (up to 3/step when >= 4 active gas workers!) back to owned
   ;;    minerals when floating gas while mineral-starved, keeping >= 1 harvester strictly below 260G
@@ -9313,8 +9335,70 @@
                     (pt-dist ux uy (sc2-point3d-x mp) (sc2-point3d-y mp)))
                   near-owned-mins))
         (set! cmds
-              (cons (sc2-raw-unit-command 3666 #f (sc2-unit-tag best-m) (list (sc2-unit-tag u)) #f)
+              (cons (mark-macro-econ-cmd!
+                     (sc2-raw-unit-command 3666 #f (sc2-unit-tag best-m) (list (sc2-unit-tag u)) #f))
                     cmds)))))
+
+  ;; 6. L23-P0-1: Unstarvable Tier-P1 Macro-Energy Safety Net (`Orbital Command MULE` 171 &
+  ;;    `0:00-5:00` Probe-training `Nexus ChronoBoost` 3755). Deduplicated with Layer 2 via
+  ;;    `SC2-MACRO-ABILITY-LAST-LOOP` (`16f` cooldown) so zero duplicate commands or rejects occur!
+  ;; 6a. Orbital Command MULE (`171`): cast at >= 50 energy when no cloaked/burrowed threat exists
+  ;;     (or >= 100 energy to preserve 50-energy Scan reserve under cloak threat).
+  (when (not (null? owned-base-minerals))
+    (define enemy-cloak-threat?
+      (ormap (lambda (e)
+               (or (memv (sc2-unit-cloak e) '(1 2))
+                   (sc2-unit-is-burrowed e)
+                   (memv (sc2-unit-unit-type e) '(50 55 69 76 498 502 503 504))))
+             enemy-units))
+    (define mule-energy-floor (if enemy-cloak-threat? 100.0 50.0))
+    (for ([oc (in-list ready-townhalls)]
+          #:when (and (= (sc2-unit-unit-type oc) 132)
+                      (>= (sc2-unit-energy oc) mule-energy-floor)
+                      (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule (sc2-unit-tag oc)) -1000)) 16)))
+      (define safe-min-tag (pick-safe-mule-mineral-patch oc self-units mineral-fields enemy-units))
+      (when (and (exact-integer? safe-min-tag) (> safe-min-tag 0))
+        (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule (sc2-unit-tag oc)) cur-loop)
+        (set! cmds
+              (cons (mark-macro-econ-cmd!
+                     (sc2-raw-unit-command 171 #f safe-min-tag (list (sc2-unit-tag oc)) #f))
+                    cmds)))))
+  ;; 6b. Early Nexus ChronoBoost (`3755`): `0:00-5:00` (`< 6720f`) & `< 50` Probes — keep active
+  ;;     Probe-training Nexuses boosted at Tier P1 (`+4-5` Probes by `4:00`)!
+  (when (and (< cur-loop 6720)
+             (< (length workers) 50))
+    (define ready-nexuses
+      (filter (lambda (th) (= (sc2-unit-unit-type th) 59)) ready-townhalls))
+    (define probe-training-unboosted-nexuses
+      (filter (lambda (nx)
+                (define ntag (sc2-unit-tag nx))
+                (and (ormap (lambda (o) (= (sc2-unit-order-ability-id o) 1006)) (sc2-unit-orders nx))
+                     (not (memv 281 (sc2-unit-buff-ids nx)))
+                     (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono-tgt ntag) -1000)) 16)))
+              ready-nexuses))
+    (when (pair? probe-training-unboosted-nexuses)
+      (define claimed-chrono-tgts (mutable-seteqv))
+      (for ([caster-nx (in-list ready-nexuses)]
+            #:when (and (>= (sc2-unit-energy caster-nx) 50.0)
+                        (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono (sc2-unit-tag caster-nx)) -1000)) 16)))
+        (define ctag (sc2-unit-tag caster-nx))
+        (define tgt-nx
+          (or (findf (lambda (nx)
+                       (and (= (sc2-unit-tag nx) ctag)
+                            (not (set-member? claimed-chrono-tgts ctag))))
+                     probe-training-unboosted-nexuses)
+              (findf (lambda (nx)
+                       (not (set-member? claimed-chrono-tgts (sc2-unit-tag nx))))
+                     probe-training-unboosted-nexuses)))
+        (when tgt-nx
+          (define ttag (sc2-unit-tag tgt-nx))
+          (set-add! claimed-chrono-tgts ttag)
+          (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono ctag) cur-loop)
+          (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono-tgt ttag) cur-loop)
+          (set! cmds
+                (cons (mark-macro-econ-cmd!
+                       (sc2-raw-unit-command 3755 #f ttag (list ctag) #f))
+                      cmds))))))
 
   (reverse cmds))
 
@@ -9554,6 +9638,7 @@
       (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
       (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
       (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
+      (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
       (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
       (set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP #f)
       (set-box! SC2-ENEMY-POS-PURGE-LAST-LOOP -9999)
@@ -9582,6 +9667,7 @@
       (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
       (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
       (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
+      (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
       (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
       (set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP #f)
       (set-box! SC2-ENEMY-POS-PURGE-LAST-LOOP -9999)
@@ -13312,13 +13398,15 @@
                         (set-add! used-tumors cid)))
                     (emit! (sc2-raw-unit-command ab-id verified-tumor-pt 0 caster-ids #f)))))]
 
-             ;; Case C: Orbital Command Calldown MULE (171) -> resolve ONLY to safe friendly-base mineral field tag
+             ;; Case C: Orbital Command Calldown MULE (171) -> resolve ONLY to safe friendly-base mineral field tag (P1 macro-econ!)
              [(= ab-id 171)
               (cond
                 [(not (null? townhalls))
                  (define safe-min-tag (pick-safe-mule-mineral-patch caster-u self-units mineral-fields enemy-units))
                  (when (and (exact-integer? safe-min-tag) (> safe-min-tag 0))
-                   (emit! (sc2-raw-unit-command ab-id #f safe-min-tag caster-ids #f)))]
+                   (for ([cid (in-list caster-ids)])
+                     (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule cid) cur-loop))
+                   (emit! (mark-macro-econ-cmd! (sc2-raw-unit-command ab-id #f safe-min-tag caster-ids #f))))]
                 [else
                  (define arg-tag (if (pair? rest) (first rest) 0))
                  (define valid-min?
@@ -13336,7 +13424,9 @@
                      [(and (exact-integer? arg-tag) (> arg-tag 0)) arg-tag]
                      [else 0]))
                  (when (> resolved-min-tag 0)
-                   (emit! (sc2-raw-unit-command ab-id #f resolved-min-tag caster-ids #f)))])]
+                   (for ([cid (in-list caster-ids)])
+                     (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule cid) cur-loop))
+                   (emit! (mark-macro-econ-cmd! (sc2-raw-unit-command ab-id #f resolved-min-tag caster-ids #f))))])]
 
              ;; Case C2: Nydus Worm (1768) -> must be cast ONLY by a completed Nydus Network (unit-type = 95), NEVER a worker
              [(= ab-id 1768)
@@ -13373,6 +13463,8 @@
                   [else (values home-x home-y)]))
               (cond
                 [(= ab-id 399)
+                 (for ([cid (in-list caster-ids)])
+                   (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule cid) cur-loop))
                  (emit-scanner-sweep-deduped! caster-ids tx ty)]
                 [(= ab-id 2146)
                  (emit-oracle-revelation-deduped! caster-ids tx ty)]
@@ -13407,7 +13499,17 @@
                                  caster-ids)
                          caster-ids))
                    (when (pair? eff-cids)
-                     (emit! (sc2-raw-unit-command ab-id #f target-id eff-cids #f)))]))]
+                     (define raw-u-cmd (sc2-raw-unit-command ab-id #f target-id eff-cids #f))
+                     (when (memv ab-id '(3755 3686 4107))
+                       (for ([cid (in-list eff-cids)])
+                         (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono cid) cur-loop)))
+                     (when (= ab-id 3755)
+                       (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono-tgt target-id) cur-loop)
+                       (mark-macro-econ-cmd! raw-u-cmd))
+                     (when (= ab-id 257)
+                       (for ([cid (in-list eff-cids)])
+                         (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule cid) cur-loop)))
+                     (emit! raw-u-cmd))]))]
 
              [else (void)])))]
 

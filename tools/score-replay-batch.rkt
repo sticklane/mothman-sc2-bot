@@ -1542,6 +1542,11 @@
           (define our-w6 (w-at our-s 360.0)) (define opp-w6 (w-at opp-s 360.0))
           (define our-w8 (w-at our-s 480.0)) (define opp-w8 (w-at opp-s 480.0))
           (define our-w10 (w-at our-s 600.0)) (define opp-w10 (w-at opp-s 600.0))
+          ;; L23-LOOP-2: 2:00 -> 4:00 worker growth delta (catches early worker-production freezes)
+          (define worker-growth-2m-to-4m
+            (and (real? our-w2) (real? our-w4) (- our-w4 our-w2)))
+          (define opp-worker-growth-2m-to-4m
+            (and (real? opp-w2) (real? opp-w4) (- opp-w4 opp-w2)))
           (define a2 (army-val-at our-s 120.0))
           (define a4 (army-val-at our-s 240.0))
           (define a6 (army-val-at our-s 360.0))
@@ -1674,6 +1679,8 @@
                     'orbital1_sec (hash-ref orbital1-sec our-pid #f)
                     'lair_sec (hash-ref lair-sec our-pid #f)
                     'w2m our-w2 'w4m our-w4 'w6m our-w6 'w8m our-w8 'w10m our-w10
+                    'worker_growth_2m_to_4m worker-growth-2m-to-4m
+                    'opp_worker_growth_2m_to_4m opp-worker-growth-2m-to-4m
                     'bases_4m bases-4m 'bases_6m bases-6m 'bases_8m bases-8m 'bases_10m bases-10m
                     'prod_cnt_4m prod-4m 'prod_cnt_6m prod-6m 'prod_cnt_8m prod-8m 'prod_cnt_10m prod-10m
                     'prod_count_4m prod-4m 'prod_count_6m prod-6m 'prod_count_8m prod-8m 'prod_count_10m prod-10m
@@ -2381,6 +2388,8 @@
                   'our_w6 our-w6 'opp_w6 opp-w6
                   'our_w8 our-w8 'opp_w8 opp-w8
                   'our_w10 our-w10 'opp_w10 opp-w10
+                  'worker_growth_2m_to_4m worker-growth-2m-to-4m
+                  'opp_worker_growth_2m_to_4m opp-worker-growth-2m-to-4m
                   'army_to_worker_4m a2w-4m
                   'army_to_worker_6m a2w-6m
                   'army_to_worker_8m a2w-8m
@@ -2671,6 +2680,8 @@
                 'our_w6 (avg-opt 'our_w6) 'opp_w6 (avg-opt 'opp_w6)
                 'our_w8 (avg-opt 'our_w8) 'opp_w8 (avg-opt 'opp_w8)
                 'our_w10 (avg-opt 'our_w10) 'opp_w10 (avg-opt 'opp_w10)
+                'worker_growth_2m_to_4m (avg-opt 'worker_growth_2m_to_4m)
+                'opp_worker_growth_2m_to_4m (avg-opt 'opp_worker_growth_2m_to_4m)
                 'our_peak_workers (avg-field 'our_peak_workers)
                 'opp_peak_workers (avg-field 'opp_peak_workers)
                 'our_peak_army (round1 (avg-field 'our_peak_army))
@@ -2693,6 +2704,8 @@
                         'w6m (timing-dist 'w6m)
                         'w8m (timing-dist 'w8m)
                         'w10m (timing-dist 'w10m)
+                        'worker_growth_2m_to_4m (timing-dist 'worker_growth_2m_to_4m)
+                        'opp_worker_growth_2m_to_4m (timing-dist 'opp_worker_growth_2m_to_4m)
                         'nat_sec (timing-dist 'nat_sec)
                         'third_sec (timing-dist 'third_sec)
                         'gas1_sec (timing-dist 'gas1_sec)
@@ -2806,11 +2819,15 @@
             (r1 (hash-ref agg 'win_rate_pct)) (r1 (hash-ref agg 'non_loss_pct))
             (r2 (hash-ref agg 'trade_agg)) (r2 (hash-ref agg 'trade_med))
             (hash-ref agg 'killed_val) (hash-ref agg 'lost_val))
-    (printf "    Dur=~a | Base=~a/~a | W@4m=~a/~a W@6m=~a/~a | PkW=~a/~a | PkArmy=~a/~a | Bank=~aM/~aG | SB=~a% | Upg=~a\n"
+    (define (fmt-signed1 v)
+      (if (real? v) (format "~a~a" (if (>= v 0) "+" "") (r1 v)) "-"))
+    (printf "    Dur=~a | Base=~a/~a | W@4m=~a/~a (dW2->4=~a/~a) W@6m=~a/~a | PkW=~a/~a | PkArmy=~a/~a | Bank=~aM/~aG | SB=~a% | Upg=~a\n"
             (fmt-mmss (hash-ref agg 'avg_dur_sec 0))
             (r2 (hash-ref agg 'our_bases 0)) (r2 (hash-ref agg 'opp_bases 0))
             (if (hash-ref agg 'our_w4 #f) (r1 (hash-ref agg 'our_w4)) "-")
             (if (hash-ref agg 'opp_w4 #f) (r1 (hash-ref agg 'opp_w4)) "-")
+            (fmt-signed1 (hash-ref agg 'worker_growth_2m_to_4m #f))
+            (fmt-signed1 (hash-ref agg 'opp_worker_growth_2m_to_4m #f))
             (if (hash-ref agg 'our_w6 #f) (r1 (hash-ref agg 'our_w6)) "-")
             (if (hash-ref agg 'opp_w6 #f) (r1 (hash-ref agg 'opp_w6)) "-")
             (r1 (hash-ref agg 'our_peak_workers 0)) (r1 (hash-ref agg 'opp_peak_workers 0))
@@ -2894,11 +2911,15 @@
     (printf "\n================================================================================================================================\n")
     (printf "  BEFORE -> AFTER COMPARISON vs ~a\n" base-path)
     (printf "================================================================================================================================\n")
-    (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
+    (define (slice-dw24 s)
+      (or (hash-ref s 'worker_growth_2m_to_4m #f)
+          (let ([w2 (hash-ref s 'our_w2 #f)] [w4 (hash-ref s 'our_w4 #f)])
+            (and (real? w2) (real? w4) (round1 (- w4 w2))))))
+    (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
             (pad-r "Slice" 12) (pad-r "W-L-T (Base->Cur)" 19) (pad-r "TradeAgg" 18)
-            (pad-r "W@4m" 16) (pad-r "W@6m" 16) (pad-r "PkArmy" 18)
+            (pad-r "W@4m" 16) (pad-r "dW2->4" 16) (pad-r "W@6m" 16) (pad-r "PkArmy" 18)
             (pad-r "Bases" 18) (pad-r "SupBlk%" 18) "Upgs")
-    (printf "~a\n" (make-string 146 #\-))
+    (printf "~a\n" (make-string 165 #\-))
     (for ([entry (in-list '((all . "ALL") (clean . "CLEAN") (Protoss . "Protoss(cl)") (Terran . "Terran(cl)") (Zerg . "Zerg(cl)")))])
       (define sk (car entry))
       (define lbl (cdr entry))
@@ -2908,11 +2929,12 @@
         (define wlt (format "~a-~a-~a -> ~a-~a-~a"
                             (hash-ref b 'wins) (hash-ref b 'losses) (hash-ref b 'ties)
                             (hash-ref c 'wins) (hash-ref c 'losses) (hash-ref c 'ties)))
-        (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
+        (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
                 (pad-r lbl 12)
                 (pad-r wlt 19)
                 (pad-r (fmt-delta (hash-ref c 'trade_agg) (hash-ref b 'trade_agg) 2 "x") 18)
                 (pad-r (fmt-delta (hash-ref c 'our_w4) (hash-ref b 'our_w4) 1) 16)
+                (pad-r (fmt-delta (slice-dw24 c) (slice-dw24 b) 1) 16)
                 (pad-r (fmt-delta (hash-ref c 'our_w6) (hash-ref b 'our_w6) 1) 16)
                 (pad-r (fmt-delta (hash-ref c 'our_peak_army) (hash-ref b 'our_peak_army) 0) 18)
                 (pad-r (fmt-delta (hash-ref c 'our_bases) (hash-ref b 'our_bases) 2) 18)
