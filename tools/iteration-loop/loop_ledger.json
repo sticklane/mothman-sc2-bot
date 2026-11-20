@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter27_wave27",
+  "active_wave": "iter28_wave28",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -2406,6 +2406,100 @@
         "NEW ALL-TIME LATENCY & SUPBLK RECORDS + ARENA 2.0 ATH: max_step_ms 167.16ms NEW ATH (36/36 <=167.2ms, WorstTrP95 6.9ms ATL!), SupBlk 4.0% ATL (T 3.4%, P 3.8%), Atk2-6% dropped 63.5%->37.1%, DripFeed 15->12, GasRich 5->3; Arena 2.0 36-scen UNDEFEATED 20W-0L-16T (A:M 4.63 ATH) + Self-Play 1.64x (p05 99.00x 6-Storm flawless, z12 1.75x concave WIN)!"
       ],
       "promotion_gates_passed": "5/9 PASS (zero_crashes_and_rejects, ties_le_2 [2T], sup_blk_le_6pct [4.0% ATL], every_race_wr_ge_33pct [P 50.0% / T 33.3% / Z 33.3%], tactics_suite_100pct [Arena 2.0 20W-0L-16T ATH]) \u2014 every_race_w4_within_6_of_pro missed ONLY on Protoss -8.0w (T -3.0 & Z -6.0 BOTH PASS!)"
+    },
+    {
+      "id": "iter28_wave28",
+      "status": "COMPLETED_GRAND_FINALE_54_MATCH_NEW_54M_HWM_AND_UNSEEN6_ATH",
+      "campaign": "Loops 19-28 Real-3D Visuals & Pro-Corpus Campaign (Loop 28 / 10 of 10 \u2014 GRAND FINALE)",
+      "loop_self_improvements": [
+        "L28-FINALE: Full 54-match --opponents all generalization evaluation (core_12 + held-out unseen_6) with 3rd consecutive ZERO-LOSS 36-scenario Tactics Arena 2.0 sweep (20W-0L-16T, 1.72x Trade ATH) + 36-scenario Mothman-vs-Mothman Self-Play ATH (P1=17W, 72/72 clean 3D clips) + Top-8 Grand Finale real-3D replay clips -> 80-clip visual_report_iter28.md."
+      ],
+      "spec_summary": "Loop 28 Grand Finale Polish (L28-P0-1..3): Unblocked Terran siege-tank/OC/Nat CC macro leaks (T111Stall 8->2 core, Terran 8-10 44.4% Flags: OK!), Protoss PvT Probe interleaving (ALL 3 races PASS Pro W@4m!), multi-base barracks #2/#3 + contested-Pylon fallback, Corruptor scaling + Arena micro polish.",
+      "rev": "mlwtpplx 8857a420 (iter28 grand finale)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261120_151447_iter28_wave28",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter28_wave28_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter28_wave28.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter28.json",
+      "tactics_selfplay_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter28.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter28.md",
+      "clean_n": 53,
+      "record_clean": "17W-34L-2T clean (raw 18W-34L-2T = 37.0% NL, NEW 54-match HWM over W18 16W-37L-0T clean!)",
+      "record_core_12": "13W-22L-1T raw / 12W-22L-1T clean (34.3% WR, 37.1% NL, 0.55x TradeAgg, SupBlk 4.9%, T111Stall=2, StaleTie=0, OBRet=0)",
+      "record_unseen_6": "5W-12L-1T (27.8% WR, 33.3% NL \u2014 NEW ALL-TIME RECORD! Trade 0.72x > core_12, PkArmy 2,988 > core_12, SupBlk 4.1%, onlyfans 2-0-1 UNDEFEATED 2.15x, CryptBotRevival 2-1, norman 1-2!)",
+      "wr_pct_clean": 32.1,
+      "non_loss_pct": 35.8,
+      "trade_agg": 0.63,
+      "trade_med": 0.29,
+      "pk_army_avg": 2845.8,
+      "sup_blk_avg": 4.6,
+      "early_atk_pct_2m_6m_avg": 36.5,
+      "protoss_warpgate_sec_med": 250.2,
+      "zerg_roach_warren_sec_med": 154.6,
+      "combat_death_home_enemy_pct_avg": "60.0%/28.5%",
+      "late_game_stalemate_tie_matches": 1,
+      "worker_econ_eff_4m_6m_avg": "48.0/54.2",
+      "econ_eff_collapse_matches": 4,
+      "endgame_home_stall_count": 0,
+      "own_base_retreat_frames": 884,
+      "own_territory_retreat_frames": 1024,
+      "non_combat_robo_waste_val": 100,
+      "zerg_non_ling_army_pct": null,
+      "siege_range_zero_dps_losses": 7,
+      "cloaked_unit_damage_losses": 2,
+      "gas_rich_min_starved_matches": 11,
+      "one_base_lockout_matches": 1,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 4,
+      "prod_placement_stall_matches": 6,
+      "zero_kill_collapse_matches": 1,
+      "drip_feed_collapse_matches": 21,
+      "prod_idle_bank_freeze_matches": 0,
+      "gas_zero_harvest_freeze_matches": 0,
+      "spire_sched_drop_matches": 1,
+      "wall_timeout_ties": 1,
+      "army_val_4m_ratio_vs_pro": null,
+      "army_val_8m_ratio_vs_pro": null,
+      "wall_sec": 1196.1,
+      "latency_summary": "SHATTERED ALL-TIME LATENCY RECORD (n=54): avg=8.28ms, p95=14.29ms, max=163.87ms (54/54 <=163.9ms, -13.2ms vs W18 177.0ms!, 0 spikes >=500ms, 0 action_rejects!)",
+      "by_race": {
+        "Protoss": {
+          "record": "4W-13L-1T (W@4m 28.0/34.0 PASS!, W@6m 44.5/46.0 [-1.5], Nat 91s/93s FASTER THAN PRO!, 1BaseLock=0)",
+          "trade_agg": 0.49,
+          "w4_alive_med": 28.0,
+          "w6_alive_med": 44.5,
+          "nat_sec": 91.3,
+          "sup_blk": 4.6
+        },
+        "Terran": {
+          "record": "8W-10L-0T (44.4% WR NEW 54-MATCH ATH! ZERO PRO FLAGS = OK! core 5-7, unseen 3-3 = 50%!, Trade 0.84x, PkArmy 3,347 [+1,558 vs L23!], SupBlk 3.7%, T111Stall slashed 8->2 core, EconEffCol=0!)",
+          "trade_agg": 0.84,
+          "w4_alive_med": 25.5,
+          "w6_alive_med": 38.0,
+          "nat_sec": 117.4,
+          "sup_blk": 3.7
+        },
+        "Zerg": {
+          "record": "5W-11L-1T clean / 6W-11L-1T raw (W@4m 30.0/35.0 PASS!, Z:RW 155s, 1BaseLock=0, ZeroKill=0, #22 Zvonlyfans W 2.04x PkArmy 11,675!)",
+          "trade_agg": 0.58,
+          "w4_alive_med": 30.0,
+          "w6_alive_med": 42.0,
+          "nat_sec": 57.5,
+          "sup_blk": 5.6
+        }
+      },
+      "tactics_summary": {
+        "rev": "mlwtpplx 8857a420 (iter28 grand finale)",
+        "passed": "Verifier 7/7 + 21/21 FIRST-PASS; Arena 2.0 3rd straight ZERO-LOSS 36-scenario sweep 20W-0L-16T (NEW 1.72x Trade ATH!)",
+        "sc2_duel36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter28.json",
+        "sc2_selfplay36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter28.json",
+        "sc2_duel36_summary": "3RD STRAIGHT ZERO-LOSS 36-SCENARIO SWEEP: 20W-0L-16T, NEW 1.72x Trade ATH (+0.06x vs L27, +0.11x vs L26; Zerg 9-0-3 2.11x ATH, Terran 8-0-4 1.96x ATH, Protoss 3-0-9 1.16x) + NEW Self-Play ATH (P1=17W/P2=2W/17T, P1 A:M=4.26, P2 A:M=3.47, PsiStorm=9 ATH, 1st Feedback=2, 72/72 clean real-3D clips!)"
+      },
+      "key_wins": [
+        "FIRST-EVER ZERO-FLAGS ('OK') PRO-CORPUS RACE (Mothman-T 8W-10L 44.4% NEW 54-MATCH ATH, 50% vs unseen_6, Trade 0.84x, PkArmy 3,347 +1,558 vs L23, SupBlk 3.7%, T111Stall slashed 8->2 core, TvP 3-3 1.07x, TvT 3-3 0.91x) AND ALL 3 RACES PASS PRO W@4M GATE (P 28/34, T 25.5/27, Z 30/35)!",
+        "NEW HELD-OUT UNSEEN_6 GENERALIZATION ATH (5W-12L-1T = 33.3% NL, beats W18 5-13 & L23 4-13-1; Trade 0.72x > core_12 0.55x, PkArmy 2,988 > core_12 2,773, SupBlk 4.1%; onlyfans UNDEFEATED 2-0-1 2.15x incl. 1st-ever #23 T W, CryptBotRevival 2-1, norman 1-2)!",
+        "NEW 54-MATCH HWM (17W-34L-2T clean / 18W-34L-2T raw vs W18 16W-37L-0T clean -> 5/9 Gates PASS), NEW A8Pro=0.52 (score) / 0.49 (clean) ATH, SHATTERED 54-MATCH LATENCY ATH max=163.87ms (-13.2ms vs W18!), 10 SIMULTANEOUS ZEROS ACROSS ALL 54 MATCHES, AND 3RD STRAIGHT ZERO-LOSS 36-SCEN ARENA 2.0 SWEEP (20W-0L-16T 1.72x ATH)!"
+      ],
+      "promotion_gates_passed": "5/9 PASS on full 53-match clean roster (zero_crashes_and_rejects, ties_le_2 [2T], sup_blk_le_6pct [4.6%], every_race_w4_within_6_of_pro [ALL 3 RACES PASS: P -6.0 / T -1.5 / Z -5.0!], tactics_suite_100pct [Arena 2.0 20W-0L-16T 1.72x ATH!])"
     }
   ],
   "final_18_loop_summary": {
@@ -2466,5 +2560,33 @@
     "sc2_duel21_trade": 1.57,
     "sc2_duel21_wins": "10W-2L-9T (Zerg undefeated 6W-0L-1T 2.92x, Protoss undefeated 2W-0L-5T 1.53x, A:M 3.11)",
     "promotion_gates_passed": "5/9 (zero_crashes, ties_le_2 [0T], sup_blk_le_6pct [4.7%], every_race_wr_ge_33pct [P42/T33/Z50%], tactics_100pct 231/231)"
+  },
+  "high_water_mark_54_all": {
+    "wave_id": "iter28_wave28",
+    "commit": "mlwtpplx 8857a420 (Loop 28 Grand Finale 54-Match HWM, beating W18 bf1043b7 16W-37L-0T clean!)",
+    "clean_n": 53,
+    "record_raw": "18W-34L-2T (33.3% WR, 37.0% NL \u2014 ties 20/54 NL ATH & 34L ATL)",
+    "record_clean": "17W-34L-2T (32.1% WR, 35.8% NL)",
+    "unseen_6_record": "5W-12L-1T (27.8% WR, 33.3% NL \u2014 NEW ATH! Trade 0.72x, PkArmy 2,988, onlyfans 2-0-1 UNDEFEATED 2.15x)",
+    "terran_54_record": "8W-10L-0T (44.4% WR \u2014 NEW 54-MATCH ATH, ZERO PRO FLAGS = OK, unseen_6 3-3 = 50%!)",
+    "sup_blk_avg": 4.6,
+    "max_step_ms": 163.87,
+    "army_val_8m_ratio_vs_pro": 0.52,
+    "tactics_arena2_36": "20W-0L-16T (3rd straight 0-loss sweep, 1.72x Trade ATH) + Self-Play P1=17W ATH",
+    "promotion_gates_passed": "5/9 PASS (zero_crashes, ties_le_2, sup_blk_le_6pct, every_race_w4_within_6_of_pro [ALL 3 RACES PASS!], tactics_suite_100pct)"
+  },
+  "final_28_loop_summary": {
+    "status": "LOOP_28_GRAND_FINALE_COMPLETE_READY_FOR_ZIP_REBUILD_AND_SHIP",
+    "campaign_window": "Loops 19-28 Real-3D Visuals, Tactics Arena 2.0 & Pro-Corpus Campaign (10 consecutive full-3D loops!)",
+    "pre_campaign_w18_54m": "17W-37L-0T raw / 16W-37L-0T clean (30.2% WR), unseen_6 5W-13L-0T (27.8% NL), Terran 5-13, max_step 177.04ms, A8Pro 0.35, 21-duel Arena v1",
+    "core_12_campaign_hwm_l24": "iter24_wave24 (ypyutsxs dcae777e): 15W-21L-0T clean (41.7% WR, Non-Chance 15W-18L-0T = 45.5% ATH!), 0.98x TradeAgg ATH, ALL 3 races >=33.3% (Z 6-6 50%, P 5-7 41.7% 1.08x, T 4-8 33.3%), 5/9 Gates",
+    "l27_pre_finale_peak_cleanliness": "iter27_wave27 (vrtuzptk 3cf2bf1e): 14W-20L-2T (44.4% NL), FOUR 3-0 sweeps (titania, monsterbot, Chance, oberon + puck 1-0-2), Mothman-P 6W-6L (50% / 1.02x / WG 242s vs Pro 241s), 13 SIMULTANEOUS ZEROS ATH, SupBlk 4.0% ATL, 5/9 Gates",
+    "l28_grand_finale_54m": "iter28_wave28 (mlwtpplx 8857a420): 18W-34L-2T raw / 17W-34L-2T clean (NEW 54-match HWM over W18, ties 20/54 NL ATH & 34L ATL!), NEW held-out unseen_6 ATH 5W-12L-1T (33.3% NL, Trade 0.72x > core_12, onlyfans 2-0-1 2.15x UNDEFEATED!), NEW Terran 54-match ATH 8W-10L (44.4% WR, ZERO Pro flags = OK!, unseen 3-3 = 50%!), ALL 3 RACES PASS PRO W@4M GATE (P -6.0, T -1.5, Z -5.0), NEW A8Pro=0.52 ATH, SHATTERED 54-match Latency ATH max=163.87ms (-13.2ms vs W18!), 10 simultaneous zeros across all 54 matches, 5/9 Gates!",
+    "tactics_arena_2_0_milestone": "Built & shipped Tactics Arena 2.0 in Loop 26: --opponent self (dual live Mothman Racket bots), 5 real SC2 terrain modes (open, high-ground-ramp, flank-surround, cliff-air-chasm, mineral-line-harass), zero-leakage monotonic upgrade-chain batcher + selective per-player upgrades (26 upgrades), 10 burrowed Zerg IDs + pre-cloaked support, 21->36 scenarios, add-arena-scenario --from-replay extractor. Achieved 3 CONSECUTIVE ZERO-LOSS 36-scenario sweeps (L26 19-0-17 1.61x -> L27 20-0-16 1.66x -> L28 20-0-16 1.72x ATH; Self-Play P1=17W ATH; 72+8=80 real-3D SC2_x64 clips per loop!).",
+    "next_campaign_top3_backlog": [
+      "1. Held-out unseen cloak detection vs who (#52 DT:7, #54 Banshee:14 \u2014 only 2 CloakLoss in all 54 matches) + ramp/cloak detector lead positioning",
+      "2. Protoss mid-game combat conversion on core_12 (combining L27 P 6-6 1.02x lethality with L28 P W@4m 28/34 + Nat 91s Pro macro)",
+      "3. Viper ParasiticBomb-before-Abduct priority when energy >= 125 vs >= 3 air cluster (z07/z08 & RustyNikolaj Viking skyballs) + 12PoolBot early wall/production survival"
+    ]
   }
 }

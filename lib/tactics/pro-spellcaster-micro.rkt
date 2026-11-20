@@ -2572,9 +2572,9 @@
                          (and ok?
                               (spell-claim-point?! claims 'blinding-cloud cx cy BLINDING-CLOUD-CLAIM-RADIUS current-frame BLINDING-CLOUD-CLAIM-TTL)
                               (spell-directive tag 'viper 'blinding-cloud 'point 0 cx cy 'viper-blinding-cloud))))
-                  ;; 2. L27-P0-3 (`z07`/`z08`): Prioritize Parasitic Bomb (`energy >= 125`, `r=8.5`,
-                  ;;    `>= 2` air within `3.5t`) STRICTLY ABOVE Abduct so Vipers never burn energy on
-                  ;;    Abduct before bombing air clumps! Still skips nearby `824` dummy or active bomb.
+                  ;; 2. L27-P0-3 / L28-P0-3 (`z07`/`z08`/`#16`): Prioritize Parasitic Bomb (`energy >= 125`,
+                  ;;    `r=8.5`, `>= 2` air within `4.5t` — accounts for Capital `1.25t` radii + `3.0t` splash!)
+                  ;;    STRICTLY ABOVE Abduct so Vipers never burn energy on Abduct before bombing air clumps!
                   (and (>= en 125.0)
                        (let-values ([(ok? tgt _w)
                                      (best-unit-target
@@ -2582,7 +2582,7 @@
                                       (lambda ([e : Any])
                                         (and (enemy-air-capital-or-ranged? e)
                                              (not (uh-has-buff? e 'parasitic-bomb))
-                                             (>= (count-units-within enemy-units (uh-x e) (uh-y e) 3.5 enemy-air-capital-or-ranged?) 2)
+                                             (>= (count-units-within enemy-units (uh-x e) (uh-y e) 4.5 enemy-air-capital-or-ranged?) 2)
                                              (not (any-unit-within?
                                                    enemy-units (uh-x e) (uh-y e) 4.0
                                                    (lambda ([d : Any])
@@ -2592,7 +2592,7 @@
                                                          (uh-has-buff? d 'parasitic-bomb)))))
                                              (not (spell-point-claimed? claims 'parasitic-bomb-zone (uh-x e) (uh-y e) 3.5 current-frame))))
                                       (lambda ([e : Any])
-                                        (define air-cnt (count-units-within enemy-units (uh-x e) (uh-y e) 3.5 enemy-air-capital-or-ranged?))
+                                        (define air-cnt (count-units-within enemy-units (uh-x e) (uh-y e) 4.5 enemy-air-capital-or-ranged?))
                                         (define pack (aoe-radius-packing-multiplier (unit-collision-radius (uh-type e)) 3.0))
                                         (+ (* 20.0 pack (->float air-cnt))
                                            (min 100.0 (* 0.2 (uh-total-hp e))))))])

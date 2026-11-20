@@ -5880,6 +5880,197 @@
     (cleanup!))
   (hash-clear! SC2-TERRAN-5X3-MISS-STREAK))
 
+(printf "[Loop 28] Testing L28-P0-1 early-rush Main-safe Gateway #2+, last-resort contested tight-05 (#36), & Terran barracks #2+ 0.5t overflow (#11/#20/#23)...\n")
+(let ()
+  (define (l28-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define (mk-l28-u tag utype alliance x y
+                    #:hp [hp 100.0] #:shield [sh 0.0] #:rad [rad 1.0] #:orders [ords '()])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 0 #f #f #f
+              hp hp sh sh 0.0 0.0 0 0 #f #f #f #t #f
+              ords 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define (l28-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59928 "/sc2api" c-in c-out #f 1))
+    (define rpc-cnt (box 0))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define req-id-p (assoc 97 req-f))
+             (define id-b (if req-id-p (encode-uint32 97 (third req-id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (set-box! rpc-cnt (add1 (unbox rpc-cnt)))
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws rpc-cnt (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+
+  ;; L28-P0-1a (`#36` < 4:00 early rush Main-safe Gateway #2+): 4 Zerglings approaching within 35t of Main
+  ;; (still > 6.0t from exposed Natural-wall Pylon `(48, 30)` so `req-contested?` is `#f`!). Brain asks
+  ;; `(build gateway 48.0 30.0)` while Main Pylon `(30, 34)` is safe -> MUST anchor `Gateway #2` inside
+  ;; Main Pylon `(30, 34)` instead of stacking Gateways on the exposed Natural wall Pylon!
+  (let-values ([(ws _rpc-cnt cleanup!)
+                (l28-start-mock-ws (lambda (ab _px _py) (if (= ab 883) 1 2)))])
+    (define nx-m  (mk-l28-u 9801 59 1 28.5 28.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define py-m  (mk-l28-u 9802 60 1 30.0 34.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define py-w  (mk-l28-u 9803 60 1 48.0 30.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define gw1   (mk-l28-u 9804 62 1 50.5 30.5 #:hp 500.0 #:shield 500.0 #:rad 1.5))
+    (define prb1  (mk-l28-u 9805 84 1 31.0 31.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define lings
+      (for/list ([i (in-range 4)])
+        (mk-l28-u (+ 9810 i) 105 4 (+ 57.0 (* 0.5 i)) 30.0 #:hp 35.0 #:rad 0.375)))
+    (define obs-gw2
+      (sc2-observation 3200 (sc2-player-common 1 400 0 31 20 2 18 0 0 0 0)
+                       (append (list nx-m py-m py-w gw1 prb1) lings)
+                       '()
+                       (list (sc2-power-source (sc2-point3d 30.0 34.0 8.0) 6.5 9802)
+                             (sc2-power-source (sc2-point3d 48.0 30.0 8.0) 6.5 9803))
+                       #f '() '() '() '() '() '()))
+    (define gw2-cmds
+      (translate-bot-actions->sc2-raw-commands '((build gateway 48.0 30.0))
+                                               obs-gw2 #:ws-conn ws #:game-info w3-ginfo))
+    (define gw2-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 883))) gw2-cmds))
+    (define gw2-pt (and gw2-cmd (sc2-raw-unit-command-target-pos gw2-cmd)))
+    (check-true "l28-p0-1a-early-rush-gateway2-anchors-on-main-pylon-over-exposed-natural-wall"
+                (and (sc2-point2d? gw2-pt)
+                     (<= (l28-dist (sc2-point2d-x gw2-pt) (sc2-point2d-y gw2-pt) 30.0 34.0) 6.5)
+                     (> (l28-dist (sc2-point2d-x gw2-pt) (sc2-point2d-y gw2-pt) 48.0 30.0) 8.0)))
+    (cleanup!))
+
+  ;; L28-P0-1b (`#36` 11-streak stall at 530M when ALL Pylons are contested): Both Main Pylon `(32, 32)`
+  ;; and outer Pylon `(52, 32)` have Zerglings within `6.5t` (`uncontested-pylons = '()`). Only tight spot
+  ;; `(34.5, 32.5)` (`dist = 2.33` from Main Ling `(32.5, 33.7)` -> `< 2.525` rejected at `2.0`, `> 2.025`
+  ;; accepted at `0.5`!) is accepted -> last-resort `0.5t` runs on RPC #2 and places Gateway at Main Pylon!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999)
+  (let-values ([(ws rpc-cnt cleanup!)
+                (l28-start-mock-ws
+                 (lambda (ab px py)
+                   (if (and (= ab 883) (<= (l28-dist px py 34.5 32.5) 0.1)) 1 2)))])
+    (define nx-m   (mk-l28-u 9821 59 1 28.5 28.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define py-m   (mk-l28-u 9822 60 1 32.0 32.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define py-o   (mk-l28-u 9823 60 1 52.0 32.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define prb1   (mk-l28-u 9824 84 1 30.0 30.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define ling-m (mk-l28-u 9825 105 4 32.5 33.7 #:hp 35.0 #:rad 0.375))
+    (define ling-o (mk-l28-u 9826 105 4 52.0 34.0 #:hp 35.0 #:rad 0.375))
+    (define obs-all-cont
+      (sc2-observation 3400 (sc2-player-common 1 530 0 31 18 0 18 0 0 0 0)
+                       (list nx-m py-m py-o prb1 ling-m ling-o)
+                       '()
+                       (list (sc2-power-source (sc2-point3d 32.0 32.0 8.0) 6.5 9822)
+                             (sc2-power-source (sc2-point3d 52.0 32.0 8.0) 6.5 9823))
+                       #f '() '() '() '() '() '()))
+    (define gw-cmds
+      (translate-bot-actions->sc2-raw-commands '((build gateway 52.0 32.0))
+                                               obs-all-cont #:ws-conn ws #:game-info w3-ginfo))
+    (define gw-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 883))) gw-cmds))
+    (define gw-pt (and gw-cmd (sc2-raw-unit-command-target-pos gw-cmd)))
+    (check-true "l28-p0-1b-all-pylons-contested-last-resort-tight-05-places-closest-to-main"
+                (and (= (unbox rpc-cnt) 2)
+                     (sc2-point2d? gw-pt)
+                     (<= (l28-dist (sc2-point2d-x gw-pt) (sc2-point2d-y gw-pt) 34.5 32.5) 0.1)
+                     (= (unbox SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP) -9999)))
+    (cleanup!))
+
+  ;; L28-P0-1c (`#11/#20/#23` Terran barracks #2+): With ONLY 1 existing Barracks (`cur-rax-count = 1`),
+  ;; after `place-pt0` (`5x3` + `2.0t` `unq-3x3`) misses on tick 1 (`3600`), tick 2 (`3604`) hits `2.0`
+  ;; neg-cd and L28 `is-rax2+?` `0.5t` pure `3x3` overflow IMMEDIATELY places `barracks #2` at `(68.5, 30.5)`
+  ;; (`Chebyshev = 4.0 < 4.5` for `2.0`, `>= 3.95` for `0.5`) instead of stalling 48 frames!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
+  (let-values ([(ws _rpc-cnt cleanup!)
+                (l28-start-mock-ws
+                 (lambda (ab px py)
+                   (if (and (= ab 321) (<= (l28-dist px py 68.5 30.5) 0.1)) 1 2)))])
+    (define cc-m (mk-l28-u 9831 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define cc-n (mk-l28-u 9832 18 1 64.5 30.5 #:hp 1500.0 #:rad 2.75))
+    (define rax1 (mk-l28-u 9833 21 1 34.5 28.5 #:hp 1000.0 #:rad 1.5))
+    (define scv1 (mk-l28-u 9834 45 1 63.0 29.0 #:hp 45.0 #:rad 0.375))
+    (define nat-mins
+      (for/list ([y (in-list '(27.5 29.5 31.5 33.5))] [i (in-naturals 0)])
+        (sc2-unit 1 3 (+ 9840 i) 341 0 (sc2-point3d 71.0 y 8.0) 0.0 1.0 1.0 0 #f #f #f
+                  1000.0 1000.0 0.0 0.0 0.0 0.0 1500 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0)))
+    (define l28-t-ginfo
+      (sc2-game-info "L28TerranMap" "" '() '(128 128) '(4 4 124 124)
+                     (list (sc2-point2d 100.0 100.0))
+                     w3-full-grid #f w3-full-grid))
+    (define units-r2 (append (list cc-m cc-n rax1 scv1) nat-mins))
+    (define r2-cmds-1
+      (translate-bot-actions->sc2-raw-commands
+       '((build barracks 32.0 30.0))
+       (make-test-obs 3600 450 50 units-r2)
+       #:ws-conn ws #:game-info l28-t-ginfo))
+    (define r2-cmds-2
+      (translate-bot-actions->sc2-raw-commands
+       '((build barracks 32.0 30.0))
+       (make-test-obs 3604 450 50 units-r2)
+       #:ws-conn ws #:game-info l28-t-ginfo))
+    (define r2-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321)))
+             (append r2-cmds-1 r2-cmds-2)))
+    (define r2-pt (and r2-cmd (sc2-raw-unit-command-target-pos r2-cmd)))
+    (check-true "l28-p0-1c-barracks2-tight-05-3x3-places-crowded-base-immediately-on-20-miss"
+                (and (sc2-point2d? r2-pt)
+                     (<= (l28-dist (sc2-point2d-x r2-pt) (sc2-point2d-y r2-pt) 68.5 30.5) 0.1)))
+    (cleanup!))
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

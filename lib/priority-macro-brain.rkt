@@ -944,6 +944,31 @@
              #:opp-cap-air-override? opp-cap-air-override?
              #:repaired-prereq? repaired-prereq?))))
 
+;; L28-P0-2 (`#02/#05` TvZ Nat CC 270/423s -> ~105s, `T111Stall 8 -> <=1`):
+;; Live `total-bldg-counts` counts BOTH the source TownHall (`command-center`/`hatchery`/`lair`)
+;; AND the in-progress morph target (`orbital-command`/`planetary-fortress`/`lair`/`hive`), which
+;; double-counted a morphing Orbital Command #1 on 1 base as 2 bases — prematurely dropping
+;; `terran-1base-nat-cc-lock?` & letting `factory@585` steal 150M/100G ahead of CC #2!
+(define (count-effective-townhalls race active-bases ready-bldg-counts total-bldg-counts)
+  (define (rc sym) (if (hash? ready-bldg-counts) (hash-ref ready-bldg-counts sym 0) 0))
+  (define (tc sym) (if (hash? total-bldg-counts) (hash-ref total-bldg-counts sym 0) 0))
+  (case race
+    [(Terran)
+     (define raw (bldg-count-equivalent total-bldg-counts 'command-center))
+     (define morph-oc (max 0 (- (tc 'orbital-command) (rc 'orbital-command))))
+     (define morph-pf (max 0 (- (tc 'planetary-fortress) (rc 'planetary-fortress))))
+     (define cc-src (+ (tc 'command-center) (tc 'command-center-flying)))
+     (max active-bases (- raw (min (+ morph-oc morph-pf) cc-src)))]
+    [(Zerg)
+     (define raw (bldg-count-equivalent total-bldg-counts 'hatchery))
+     (define morph-lair (max 0 (- (tc 'lair) (rc 'lair))))
+     (define morph-hive (max 0 (- (tc 'hive) (rc 'hive))))
+     (define dedup (+ (min morph-lair (tc 'hatchery))
+                      (min morph-hive (tc 'lair))))
+     (max active-bases (- raw dedup))]
+    [else
+     (max active-bases (bldg-count-equivalent total-bldg-counts 'nexus))]))
+
 (define (has-started-t3-tech-struct? race total-bldg-counts)
   (define syms
     (case race
@@ -2083,8 +2108,24 @@
              (>= (unit-count-equivalent enemy-u-counts 'zealot) 1)
              (>= (unit-count-equivalent enemy-u-counts 'marine) 2)
              (>= (unit-count-equivalent enemy-u-counts 'marauder) 1))))
+  (define tvz-sealed-wall-light-lings-ok?
+    (and (eq? race 'Terran)
+         (eq? enemy-race 'Zerg)
+         (>= frame 1680)
+         (not under-attack?)
+         (<= enemy-threat-supply 3.0)
+         (<= (unit-count-equivalent enemy-u-counts 'zergling) 6)
+         (= (unit-count-equivalent enemy-u-counts 'roach) 0)
+         (= (unit-count-equivalent enemy-u-counts 'ravager) 0)
+         (= (unit-count-equivalent enemy-u-counts 'baneling) 0)
+         (>= (bldg-count-equivalent total-bldg-counts 'supply-depot) 2)
+         (>= (bldg-count-equivalent total-bldg-counts 'barracks) 1)
+         (>= (bldg-count-equivalent total-bldg-counts 'refinery) 1)
+         (or (>= (unit-count-equivalent unit-counts 'marine) 1)
+             (>= minerals 200))))
   (define under-early-rush-crisis?
     (and (< frame 3360)
+         (not tvz-sealed-wall-light-lings-ok?)
          (or under-attack?
              (>= enemy-threat-supply 4)
              (>= (unit-count-equivalent enemy-u-counts 'zergling) 4)
@@ -2116,10 +2157,7 @@
   (define supply-lockout-active?
     (or hard-supply-block? zero-supply-provider-lockout?))
   (define plan-total-townhalls
-    (case race
-      [(Zerg) (bldg-count-equivalent total-bldg-counts 'hatchery)]
-      [(Terran) (bldg-count-equivalent total-bldg-counts 'command-center)]
-      [else (bldg-count-equivalent total-bldg-counts 'nexus)]))
+    (count-effective-townhalls race active-bases ready-bldg-counts total-bldg-counts))
 
   (define scouted-early-pool-or-rush?
     (or under-early-rush-crisis?
@@ -4697,8 +4735,7 @@
 
   (define can-escrow-cache (make-hasheq))
   (define eff-th-total-cnt
-    (for/sum ([s (in-list '(hatchery lair hive nexus command-center orbital-command planetary-fortress))])
-      (hash-ref total-bldg-counts s 0)))
+    (count-effective-townhalls race active-bases ready-bldg-counts total-bldg-counts))
   (define escrow-state-entry
     (macro-escrow-sync-entry! race enemy-race frame minerals eff-th-total-cnt
                               #:workers workers #:gas gas))
@@ -4998,10 +5035,35 @@
              (>= (unit-count-equivalent enemy-u-counts 'zealot) 1)
              (>= (unit-count-equivalent enemy-u-counts 'marine) 2)
              (>= (unit-count-equivalent enemy-u-counts 'marauder) 1))))
+  ;; L26/L28-P0-2 (`#02/#05` TvZ Sealed-Wall Natural CC Lock): Once TvZ ramp wall is sealed
+  ;; (`>= 2` Depots + `>= 1` Rax + `>= 1` Ref, `f >= 1680`), keep `terran-1base-nat-cc-lock?`
+  ;; active against `<= 6` enemy Lings (`enemy-threat-supply <= 3.0`, not under-attack, 0 Roaches/Ravagers/Banelings)
+  ;; so `Factory`/`Barracks #2` never steals 150M ahead of Natural CC #2!
+  (define terran-tvz-post-wall-nat-ready?
+    (and (eq? race 'Terran)
+         (eq? enemy-race 'Zerg)
+         (>= frame 1680)
+         (>= (bldg-count-equivalent total-bldg-counts 'supply-depot) 2)
+         (>= (bldg-count-equivalent total-bldg-counts 'barracks) 1)
+         (>= (bldg-count-equivalent total-bldg-counts 'refinery) 1)))
+  (define terran-tvz-sealed-wall-holds-light-lings?
+    (and terran-tvz-post-wall-nat-ready?
+         (= active-bases 1)
+         (<= total-townhalls-incl-pending 1)
+         (not under-attack?)
+         (not under-early-rush-crisis?)
+         (<= (unit-count-equivalent enemy-u-counts 'zergling) 6)
+         (<= enemy-threat-supply 3.0)
+         (= (unit-count-equivalent enemy-u-counts 'roach) 0)
+         (= (unit-count-equivalent enemy-u-counts 'ravager) 0)
+         (= (unit-count-equivalent enemy-u-counts 'baneling) 0)
+         (or (>= (unit-count-equivalent unit-counts 'marine) 1)
+             (>= minerals 200))))
   ;; L27-P0-2 (`T111Stall 5 -> <=1`): Single enemy scout (threat <= 2.0, not under-attack,
   ;; no Zealot/Marauder/2+ Lings/2+ Marines) must NOT cancel Terran's 1-base Natural CC lock!
   (define early-enemy-real-combat-arrived?
     (and (< frame 3360)
+         (not terran-tvz-sealed-wall-holds-light-lings?)
          (or under-attack?
              (> enemy-threat-supply 2.0)
              (>= (unit-count-equivalent enemy-u-counts 'zergling) 2)
@@ -5010,6 +5072,7 @@
              (>= (unit-count-equivalent enemy-u-counts 'marauder) 1))))
   (define early-rush-override-active?
     (and (< frame 5040)
+         (not terran-tvz-sealed-wall-holds-light-lings?)
          (not eff-req-det?)
          (or under-early-rush-crisis?
              (and (or under-attack?
@@ -5092,6 +5155,7 @@
   ;; (u >= 640, strictly above Bunker/Reactor/Factory) until >= 6 Marines!
   (define terran-early-rush-hold?
     (and (eq? race 'Terran)
+         (not terran-tvz-sealed-wall-holds-light-lings?)
          (or under-early-rush-crisis?
              (and (< frame 4000)
                   (or early-enemy-real-combat-arrived?
@@ -5211,6 +5275,7 @@
   (define enemy-zergling-cnt (unit-count-equivalent enemy-u-counts 'zergling))
   (define early-ling-rush-defense-active?
     (and (< frame 4704)
+         (not terran-tvz-sealed-wall-holds-light-lings?)
          (not eff-req-det?)
          (or (>= enemy-zergling-cnt 4)
              (and (< frame 2688)
@@ -6059,13 +6124,6 @@
             eff-req-aa? (> enemy-air-combat-cnt 0))
         (min 3 (max 2 active-bases))
         1))
-  (define terran-tvz-post-wall-nat-ready?
-    (and (eq? race 'Terran)
-         (eq? enemy-race 'Zerg)
-         (>= frame 1680)
-         (>= terran-total-depots 2)
-         (>= (bldg-count-equivalent total-bldg-counts 'barracks) 1)
-         (>= (bldg-count-equivalent total-bldg-counts 'refinery) 1)))
   (define terran-1base-nat-cc-lock?
     (and (eq? race 'Terran)
          (= active-bases 1)
@@ -6087,7 +6145,7 @@
          (not active-1base-t3-rush-pending?)
          (not terran-tvz-wall-depot2-due?)
          (not (and tvz-early-wall-marine-before-cc-escrow? (< minerals 400)))
-         (<= enemy-threat-supply 2.0)))
+         (<= enemy-threat-supply (if terran-tvz-sealed-wall-holds-light-lings? 3.0 2.0))))
   ;; L22-P0-2 (`#36/#6 PvZ`): Textbook Pro 14-Pylon -> 16-Gateway -> 17-Assimilator!
   ;; Once Pylon #1 is ready and >= 16 workers with 0 Gateways, Gateway #1 (`u=530`, `blk=#t`)
   ;; strictly outranks Probe #17 (`488`) so Gateway #1 drops immediately at 150M!
@@ -7356,7 +7414,7 @@
   (define (terran-defer-for-111-sym? nsym)
     (and (eq? race 'Terran)
          (not under-attack?)
-         (<= enemy-threat-supply 2.0)
+         (<= enemy-threat-supply (if terran-tvz-sealed-wall-holds-light-lings? 3.0 2.0))
          (not under-early-rush-crisis?)
          (not terran-early-rush-hold?)
          (not early-ling-rush-defense-active?)
@@ -7376,6 +7434,27 @@
   ;; Terran SCVs and Protoss Probes train from dedicated TownHall slots (never competing with Larva!).
   ;; During happy-path-macro below undersaturation, rank SCV/Probe at `u = 575.0` (`blk = #f`) and
   ;; exempt them from non-supply, non-natural-expand escrow floors so buildings never freeze TownHalls!
+  ;; L28-P0-2 (`#33/#15/#18` PvT W@4m +3w -> 6/9 Gates!): Allow `probe@575` to interleave
+  ;; cleanly whenever `minerals < 260` while saving for Natural Nexus #2 (up to 24 Probes on
+  ;; 1 base), so Nexus #2 only hard-escrows `260M -> 400M` instead of freezing Nexus #1 idle!
+  (define protoss-nat-probe-interleave?
+    (and (eq? race 'Protoss)
+         (eq? macro-regime 'happy-path-macro)
+         (= active-bases 1)
+         (<= total-townhalls-incl-pending 1)
+         (< workers 24)
+         (< minerals 260)
+         (not under-attack?)
+         (not under-early-rush-crisis?)
+         (not early-ling-rush-defense-active?)
+         (not early-proxy-marauder-rush-active?)
+         (not protoss-early-breach-zealot-due?)
+         (not protoss-early-breach-no-tech?)
+         (not supply-preempt-now?)
+         (not supply-lockout-active?)
+         (not midgame-1base-natural-due?)
+         (not (and protoss-first-gateway-due? (< minerals 200)))
+         (not (and protoss-root-cyber-due? (< minerals 200)))))
   (define pt-undersat-bases-thresh
     (min race-max-workers (+ (* 19 active-bases) (* 8 pending-townhalls-cnt))))
   (define pt-continuous-worker-due?
@@ -7390,11 +7469,13 @@
          (not protoss-early-breach-no-tech?)
          (not supply-preempt-now?)
          (not supply-lockout-active?)
-         (< workers (min (if (eq? race 'Protoss) 54 48) pt-undersat-bases-thresh))
+         (or (< workers (min (if (eq? race 'Protoss) 54 48) pt-undersat-bases-thresh))
+             protoss-nat-probe-interleave?)
          (not terran-orbital-1-urgent?)
          (not terran-1base-nat-cc-lock?)
          (not (and terran-111-tvt-tank-due? (< minerals 200)))
-         (not (and natural-exp-window? (= active-bases 1) (<= total-townhalls-incl-pending 1) (>= minerals 250)))
+         (not (and natural-exp-window? (= active-bases 1) (<= total-townhalls-incl-pending 1)
+                   (>= minerals (if (eq? race 'Protoss) 260 250))))
          (not midgame-1base-natural-due?)
          (not (and terran-tvz-wall-depot2-due? (< minerals 150)))
          (not (and protoss-first-gateway-due? (< minerals 200)))
@@ -8297,7 +8378,9 @@
                 ;; band where a core building is immediately affordable, yield to 542..560 buildings so they
                 ;; drop on time; everywhere else (`< 150M` or `>= 200M`), rank SCV/Probe at `575.0` so both
                 ;; Brain and L2's `l2-brain-worker-reserve-min` guarantee continuous TownHall worker production!
-                [(and (>= minerals 150) (< minerals 200)) 488.0]
+                [(and (>= minerals 150) (< minerals 200)
+                      (not (and protoss-nat-probe-interleave? natural-exp-window?)))
+                 488.0]
                 [(and (>= minerals 300) (< minerals 350)
                       bo-goal-sym
                       (>= (sc2-min-cost bo-goal-sym 0) 300))
@@ -11536,8 +11619,15 @@
                  [rid  (normalize-brain-sym (priority-candidate-id reserved-cand))])
              (and (not (eq? rcat 'supply))
                   (not (and (eq? rcat 'expansion)
-                            (<= total-townhalls-incl-pending 1)))
-                  (not (and (eq? rcat 'expansion) (>= rem-min 200)))
+                            (<= total-townhalls-incl-pending 1)
+                            (not (and protoss-nat-probe-interleave?
+                                      (eq? rid 'nexus)
+                                      (< rem-min 260)))))
+                  (not (and (eq? rcat 'expansion)
+                            (>= rem-min (if (and protoss-nat-probe-interleave?
+                                                 (eq? rid 'nexus))
+                                            260
+                                            200))))
                   (not (memq rid '(engineering-bay missile-turret forge photon-cannon
                                    factory-techlab spawning-pool orbital-command warp-gate-research)))
                   (not (and (eq? race 'Terran)

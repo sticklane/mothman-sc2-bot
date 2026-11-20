@@ -16797,8 +16797,14 @@
            [(and idle-ready? (memq ct '(orbital-command planetary-fortress))) (values unm (add1 mor))]
            [else (values unm mor)])))
   (set-l2-ctx-terran-morphed-th-open-slots! ctx morphed-ready-oc-open-cnt)
-  ;; Scope orbital saving ONLY to unmorphed CCs at >= 100M (< 150M) so already-morphed
-  ;; Orbitals keep training SCVs and early CCs at < 100M do not sit idle!
+  ;; Scope orbital saving ONLY to unmorphed CCs at >= 100M (< 150M) — or from >= 50M when
+  ;; Brain is explicitly saving for OC #1 (`0` OCs built yet, `#11/#20` `OC #1` drain fix!) —
+  ;; so already-morphed Orbitals keep training SCVs and OC #1 lands cleanly at ~115s!
+  (define brain-saving-oc1-p1?
+    (and live-game?
+         (eq? (l2-ctx-prio-saving-for-sym ctx) 'orbital-command)
+         (= (l2-cur-ally-canon-bldg-count ctx 'orbital-command) 0)
+         (<= live-enemy-threat-supply 2.0)))
   (define terran-saving-for-orbital?
        (and live-game?
             (> unmorphed-ready-cc-cnt 0)
@@ -16809,7 +16815,7 @@
             (not early-survival-crisis?)
             (not urgent-combat-or-intel-need?)
             (not escrow-suppressed-active?)
-            (>= (l2-ctx-minerals ctx) 100)
+            (>= (l2-ctx-minerals ctx) (if brain-saving-oc1-p1? 50 100))
             (< (l2-ctx-minerals ctx) (sc2-min-cost 'orbital-command))))
   (set-l2-ctx-terran-saving-for-orbital?! ctx terran-saving-for-orbital?)
   ;; Reserve only the unmorphed CC slot(s) for Orbital morph while keeping morphed Orbitals open for SCVs.
@@ -17718,6 +17724,19 @@
                 (or (< cur-rax-total 2)
                     (and brain-sched-rax-now? (>= (l2-ctx-minerals ctx) 300))
                     (l2-starport-escrow-ok? ctx (sc2-min-cost 'barracks) 0))
+                ;; L28-P0-3 (`#17` TvT0Tank & `#11/#20` OC #1): Never let Barracks #2+ drain
+                ;; 150M out from under Brain-scheduled `siege-tank` or `OC #1` saving!
+                (or (not live-game?)
+                    (not (member '(train siege-tank) (l2-ctx-prio-scheduled-actions ctx)))
+                    (not (memq 'factory ready-bldg-types))
+                    (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'barracks)) (sc2-min-cost 'siege-tank)))
+                (or (not live-game?)
+                    (not (and (eq? (l2-ctx-prio-saving-for-sym ctx) 'orbital-command)
+                              (= (l2-cur-ally-canon-bldg-count ctx 'orbital-command) 0)
+                              (memq 'barracks ready-bldg-types)
+                              (not under-base-attack?)
+                              (<= live-enemy-threat-supply 2.0)))
+                    (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'barracks)) (sc2-min-cost 'orbital-command)))
                 (or (not live-game?)
                     (< (length barracks-list) 2)
                     brain-sched-rax-now?
@@ -18300,6 +18319,23 @@
   (define terran-orbital-freezes-all-scvs?
        (and terran-saving-for-orbital?
             (<= (or (l2-ctx-terran-morphed-th-open-slots ctx) 0) 0)))
+  ;; L28-P0-3 (`#17` TvT0Tank & `#11/#20` OC #1 drain): Track when Brain explicitly scheduled
+  ;; `siege-tank` (with ready Factory-TL) or is saving for `OC #1` (`0` OCs built yet) so
+  ;; SCV / Medivac / Marine never bleed `150M` out from under them!
+  (define brain-sched-siege-tank-p3?
+    (and live-game?
+         has-fac-tl?
+         (memq 'factory ready-bldg-types)
+         (not (not (member '(train siege-tank) prio-scheduled-actions)))))
+  (define brain-saving-oc1-p3?
+    (and live-game?
+         (eq? (l2-ctx-prio-saving-for-sym ctx) 'orbital-command)
+         (= (l2-cur-ally-canon-bldg-count ctx 'orbital-command) 0)
+         (memq 'barracks ready-bldg-types)
+         (not under-base-attack?)
+         (not under-early-cheese?)
+         (not (l2-ctx-early-survival-crisis? ctx))
+         (<= live-enemy-threat-supply 2.0)))
   ;; W6-P0-3-rt: Brief (~2.5s) mineral escrow when gas >= 100 & minerals in [100..150) so
   ;; SCVs/Marines/Marauders never continuously drain minerals right before Factory #1 drops.
   (define terran-hold-for-factory1-now?
@@ -18340,10 +18376,15 @@
                        (let-values ([(cm _cg) (l2-scheduled-combat-reserve ctx 'scv)]) cm)
                        0)))
             (l2-can-spend-supply? ctx (sc2-supply-cost 'scv))
+            (or (not brain-sched-siege-tank-p3?)
+                (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'scv)) (sc2-min-cost 'siege-tank)))
+            (or (not brain-saving-oc1-p3?)
+                (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'scv)) (sc2-min-cost 'orbital-command)))
             (not under-early-cheese?)))
   (when terran-scv-priority?
        (l2-try-train-unit! ctx 'scv 'townhall 4
-                        #:respect-bo-reserve? (l2-worker-respect-bo-reserve? ctx)))
+                        #:respect-bo-reserve? (or brain-saving-oc1-p3?
+                                                  (l2-worker-respect-bo-reserve? ctx))))
   (set-l2-ctx-brain-scheduled-workers-rem! ctx 0)
   ;; L19-P0-3 / L24-P0-3 (`#029`/`#047` 1BaseLock): When Brain is saving for 1-base CC #2 and bank >= 225M
   ;; with threat <= max(6.0, army), hold Barracks/Factory production so the 225..399M bank
@@ -18434,7 +18475,7 @@
                     (and endgame-corner-hunt? (< (l2-unit-count ctx 'viking) 2)))
                 (or crisis-tech-upgrade-deferral?
                     (l2-ctx-early-survival-crisis? ctx)
-                    (not terran-orbital-save-hold?)
+                    (and (not terran-orbital-save-hold?) (not brain-saving-oc1-p3?))
                     (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'marine)) (sc2-min-cost 'orbital-command)))
                 (l2-can-spend-supply? ctx (sc2-supply-cost 'marine)))
        (define desired-viking-cap
@@ -18496,11 +18537,15 @@
                   (< (l2-unit-count ctx 'viking) desired-viking-cap))
          (l2-try-train-unit! ctx 'viking 'starport 6 #:respect-bo-reserve? #f))
        ;; Priority bio sustain (#5122349): ensure first 2 Medivacs before Factory drains 125G/tank
-       ;; (vs air, co-produce Medivacs once >= 2 Vikings are active; vs capital air wait until >= 8 Vikings)!
+       ;; (vs air, co-produce Medivacs once >= 2 Vikings are active; vs capital air wait until >= 8 Vikings;
+       ;; L28-P0-3 `#17`: yield to Brain-scheduled `siege-tank` if draining below 150M/125G)!
        (when (and live-game?
                   (not crisis-tech-upgrade-deferral?)
                   (not terran-prod-save-hold?)
                   (memq 'starport ready-bldg-types)
+                  (or (not brain-sched-siege-tank-p3?)
+                      (and (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'medivac)) (sc2-min-cost 'siege-tank))
+                           (>= (- (l2-ctx-gas ctx) (sc2-gas-cost 'medivac)) (sc2-gas-cost 'siege-tank))))
                   (or (not enemy-capital-air?) (>= (l2-unit-count ctx 'viking) 8))
                   (or (not (enemy-tech-observation-requires-anti-air? tech-obs))
                       (>= (l2-unit-count ctx 'viking) 2))
@@ -18573,8 +18618,12 @@
              (when (and (or (not enemy-capital-air?)
                             (>= (l2-unit-count ctx 'viking) 12)
                             (>= (l2-ctx-gas ctx) 250))
+                        ;; L28-P0-3 (`#17` TvT0Tank): Bypass Starport escrow whenever Brain
+                        ;; scheduled `siege-tank` or `tvt-need-tanks?` is active!
                         (or terran-cannon-breakout-mode?
                             crisis-tech-upgrade-deferral?
+                            brain-sched-siege-tank-p3?
+                            tvt-need-tanks?
                             (l2-starport-escrow-ok? ctx (sc2-min-cost 'siege-tank) (sc2-gas-cost 'siege-tank))))
                (l2-try-train-unit! ctx 'siege-tank 'factory 6 #:respect-bo-reserve? #f))
              (when (and (not hold-bare-fac-for-techlab?)
@@ -18599,7 +18648,9 @@
                     (not terran-bo-escrow-imminent?))
            (when (and has-fac-tl?
                       (or (not enemy-capital-air?) (>= (l2-ctx-gas ctx) 250))
-                      (l2-starport-escrow-ok? ctx (sc2-min-cost 'siege-tank) (sc2-gas-cost 'siege-tank)))
+                      (or brain-sched-siege-tank-p3?
+                          tvt-need-tanks?
+                          (l2-starport-escrow-ok? ctx (sc2-min-cost 'siege-tank) (sc2-gas-cost 'siege-tank))))
              (l2-try-train-unit! ctx 'siege-tank 'factory 6 #:respect-bo-reserve? #f))
            (when (and (< cur-widow-mines (if tvt-need-tanks? 1 4))
                       (not hold-fac-tl-for-tank?)
@@ -18831,9 +18882,10 @@
            (when reserve-tl-for-marauder?
              (hash-set! open-prod-slots 'barracks rax-basic-open-now))
            (l2-try-train-unit! ctx 'marine 'barracks 5
-                               #:respect-bo-reserve? (and (not crisis-tech-upgrade-deferral?)
-                                                          (not terran-early-marine-floor?)
-                                                          (if live-game? terran-bo-escrow-imminent? #t)))
+                               #:respect-bo-reserve? (or brain-saving-oc1-p3?
+                                                         (and (not crisis-tech-upgrade-deferral?)
+                                                              (not terran-early-marine-floor?)
+                                                              (if live-game? terran-bo-escrow-imminent? #t))))
            (when reserve-tl-for-marauder?
              (define used-basic (max 0 (- rax-basic-open-now (hash-ref open-prod-slots 'barracks 0))))
              (hash-set! open-prod-slots 'barracks (max 0 (- full-rax-slots used-basic)))))))
@@ -18842,6 +18894,9 @@
                 (l2-worker-army-curve-satisfied? ctx)
                 (not terran-saving-for-cc-expand?)
                 (not terran-orbital-freezes-all-scvs?)
+                (not brain-saving-oc1-p3?)
+                (or (not brain-sched-siege-tank-p3?)
+                    (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'scv)) (sc2-min-cost 'siege-tank)))
                 (not (and terran-hold-for-factory1-now? (>= total-workers 18)))
                 (l2-can-spend-by-priority? ctx 'scv 'worker)
                 (< total-workers
@@ -26334,6 +26389,11 @@
            (>= (length p5-enemy-cap-air-pts) 3)
            (pair? p5-ally-corruptor-pts)
            (not p5-enemy-cap-air-over-main?)))
+    ;; L28-P0-3 (`#28` ZvP Capital Air Volley): Scale minimum Corruptor volley size to
+    ;; enemy capital count (`min(14, max(6, cap-air + 2))`) so 6 Corruptors never drip-feed
+    ;; into 10..22 Tempests!
+    (define p5-corr-volley-min-cnt
+      (min 14 (max 6 (+ (length p5-enemy-cap-air-pts) 2))))
     (define p5-vis-enemy-air-pts
       (if p5-corruptor-volley-mode?
           (for/list ([e (in-list enemy-units)]
@@ -26480,6 +26540,13 @@
                          target-long-range-siege-cap?
                          (>= (length combat-units) 3)
                          (fl<= edist2 342.25)))
+               ;; L28-P0-3 (`#28` ZvP Capital Air Volley): Once Corruptor ball reaches scaled
+               ;; `p5-corr-volley-min-cnt`, release ALL Corruptors simultaneously into focus-fire!
+               (not (and can-hit-target?
+                         p5-corruptor-volley-mode?
+                         (eq? ut 'corruptor)
+                         (>= p5-corr-best-cnt p5-corr-volley-min-cnt)
+                         (fl<= edist2 900.0)))
                (not (and can-hit-target?
                          enemy-near-our-territory?
                          (>= (length combat-units) 4)
@@ -26511,7 +26578,7 @@
                       eff-wave-commit?
                       (and p5-corruptor-volley-mode?
                            (eq? ut 'corruptor)
-                           (>= p5-corr-best-cnt 6)
+                           (>= p5-corr-best-cnt p5-corr-volley-min-cnt)
                            (fl<= edist2 900.0))
                       (and p5-army-dominates?
                            (not p5-owm-locust?)
@@ -26559,7 +26626,7 @@
                      (fl<= (fast-dist2d fux fuy (car ep) (cdr ep)) 10.0)))
                  (and (not near-enemy-air?)
                       (cond
-                        [(< p5-corr-best-cnt 6)
+                        [(< p5-corr-best-cnt p5-corr-volley-min-cnt)
                          (cons p5-corr-stage-x p5-corr-stage-y)]
                         [else
                          (define local-corr-cnt
@@ -26835,7 +26902,7 @@
                                                                                  (not (memq ot0 '(overlord overlord-transport overseer
                                                                                                   overseer-siege-mode observer
                                                                                                   parasitic-bomb-dummy interceptor)))
-                                                                                 (<= (fast-dist2d ex0 ey0 ox0 oy0) 3.5))))
+                                                                                 (<= (fast-dist2d ex0 ey0 ox0 oy0) 4.5))))
                                                            1)
                                                          2))))
                              e)))
@@ -27344,7 +27411,7 @@
                                     (memq ut '(marine marauder hellbat))
                                     (let ([fux (exact->inexact ux)] [fuy (exact->inexact uy)])
                                       (for/or ([au (in-list combat-units)])
-                                        (and (eq? (fast-canonical-unit-sym (unit-type-sym au)) 'siege-tank-sieged)
+                                        (and (memq (fast-canonical-unit-sym (unit-type-sym au)) '(siege-tank siege-tank-sieged))
                                              (let ([ax (hash-ref au 'x #f)] [ay (hash-ref au 'y #f)])
                                                (and (real? ax) (real? ay)
                                                     (let ([dx (fl- fux (exact->inexact ax))]

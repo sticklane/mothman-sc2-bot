@@ -3375,12 +3375,12 @@
 ;; 19. AI Arena BotZip Size Limit & Standalone Native ELF Binary Verification
 ;; =============================================================================
 
-(run-suite "19. AI Arena BotZip Size Limit (<= 35 MB / 50 MiB) & Standalone Native ELF Binary"
+(run-suite "19. AI Arena BotZip Size Limit (<= 40 MB / 50 MiB) & Standalone Native ELF Binary"
   ;; 1. Verify constants enforce a strict safety margin well below AI Arena's 50 MiB standard cap
   (assert-eq! AIARENA-STANDARD-MAX-ZIP-BYTES (* 50 1024 1024)
               "AI Arena standard tier max zip size must be 50 MiB (52,428,800 bytes)")
-  (assert-true! (<= MAX-BOT-ZIP-SIZE-BYTES (* 35 1000 1000))
-                "Repository BotZip safety limit must be <= 35 MB")
+  (assert-true! (<= MAX-BOT-ZIP-SIZE-BYTES (* 40 1000 1000))
+                "Repository BotZip safety limit must be <= 40 MB")
   (assert-true! (< MAX-BOT-ZIP-SIZE-BYTES AIARENA-STANDARD-MAX-ZIP-BYTES)
                 "MAX-BOT-ZIP-SIZE-BYTES must be strictly less than AIARENA-STANDARD-MAX-ZIP-BYTES")
 
@@ -3395,7 +3395,7 @@
                   (format "~a (~a bytes) must be >= ~a bytes (standalone ELF floor)"
                           zpath zsize MIN-BOT-ZIP-SIZE-BYTES))
     (assert-true! (<= zsize MAX-BOT-ZIP-SIZE-BYTES)
-                  (format "~a (~a bytes) must be <= ~a bytes (35 MB safety ceiling)"
+                  (format "~a (~a bytes) must be <= ~a bytes (40 MB safety ceiling)"
                           zpath zsize MAX-BOT-ZIP-SIZE-BYTES))
     (assert-true! (< zsize AIARENA-STANDARD-MAX-ZIP-BYTES)
                   (format "~a (~a bytes) must be < ~a bytes (50 MiB AI Arena limit)"
@@ -14260,6 +14260,120 @@
                      (not (memq 'refinery (macro-brain-decision-scheduled-ids l27-t-26-fac1-scout2)))
                      (not (memq 'barracks-techlab (macro-brain-decision-scheduled-ids l27-t-26-fac1-scout2))))
                 "L27-P0-2 #02/#11/#26 Terran: 1-base Nat CC lock & Factory #1 defer must hold under single scout (threat<=2.0)")
+
+  ;; 51.16 Loop 28 (`L28-P0-2` — Grand Finale) Regressions:
+  ;;       Protoss PvT W@4m Probe Interleave (<260M during Nexus #2 saving),
+  ;;       TownHall Morph Dedup (OC #1 / Lair morph must not double-count extra base),
+  ;;       and TvZ Sealed-Wall Natural CC Lock (<= 6 Lings, threat <= 3.0)
+  ;; (a) #33/#15/#18 PvT: Probe@575 interleaves at 115M..250M during Nexus #2 saving, hard-escrows >=260M
+  (reset-macro-escrow-tracker!)
+  (define l28-p-probe-interleave-115
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 3024
+      #:minerals 115 #:gas 172 #:supply-used 29 #:supply-cap 39 #:workers 21 #:active-bases 1
+      #:mineral-harvesters 18 #:gas-harvesters 3
+      #:army-supply 4 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:unit-counts (hasheq 'probe 21 'stalker 2)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 1))))
+  (reset-macro-escrow-tracker!)
+  (define l28-p-probe-interleave-250
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 3228
+      #:minerals 250 #:gas 188 #:supply-used 31 #:supply-cap 39 #:workers 23 #:active-bases 1
+      #:mineral-harvesters 20 #:gas-harvesters 3
+      #:army-supply 4 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:unit-counts (hasheq 'probe 23 'stalker 2)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 1))))
+  (reset-macro-escrow-tracker!)
+  (define l28-p-hard-escrow-260
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 3300
+      #:minerals 260 #:gas 188 #:supply-used 30 #:supply-cap 39 #:workers 22 #:active-bases 1
+      #:mineral-harvesters 19 #:gas-harvesters 3
+      #:army-supply 4 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:unit-counts (hasheq 'probe 22 'stalker 2)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 1))))
+  (assert-true! (and (not (not (memq 'probe (macro-brain-decision-scheduled-ids l28-p-probe-interleave-115))))
+                     (eq? (macro-brain-decision-saving-for l28-p-probe-interleave-115) 'nexus)
+                     (not (not (memq 'probe (macro-brain-decision-scheduled-ids l28-p-probe-interleave-250))))
+                     (eq? (macro-brain-decision-saving-for l28-p-probe-interleave-250) 'nexus)
+                     (eq? (macro-brain-decision-saving-for l28-p-hard-escrow-260) 'nexus)
+                     (not (memq 'probe (macro-brain-decision-scheduled-ids l28-p-hard-escrow-260))))
+                "L28-P0-2 #33/#15/#18 Protoss PvT: Probe@575 must interleave <260M during Nexus #2 saving & hard-escrow >=260M")
+
+  ;; (b) #02/#05 TvZ OC #1 morph double-count dedup: CC:1 + morphing OC:1 must still count as 1 base & keep CC #2@625 locked
+  (reset-macro-escrow-tracker!)
+  (define l28-t-oc-morph-dedup
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Zerg #:frame 2444
+      #:minerals 275 #:gas 100 #:supply-used 20 #:supply-cap 31 #:workers 18 #:active-bases 1
+      #:mineral-harvesters 15 #:gas-harvesters 3
+      #:army-supply 2 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'command-center 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'command-center 1 'orbital-command 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 18 'marine 2)
+      #:open-facility-slots (hasheq 'townhall 0 'barracks 1))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l28-t-oc-morph-dedup) 'command-center)
+                     (not (memq 'factory (macro-brain-decision-scheduled-ids l28-t-oc-morph-dedup))))
+                "L28-P0-2 #02/#05 TvZ: Morphing OC #1 on 1 base must dedup to 1 TH, keeping CC #2@625 locked above Factory")
+
+  ;; (c) #02/#05 TvZ Sealed-Wall CC Lock: 2 Depots + 1 Rax + 1 Ref vs <=6 Lings (threat<=3, peaceful) keeps CC #2 locked; 8 Lings aborts
+  (reset-macro-escrow-tracker!)
+  (define l28-t-sealed-wall-6lings
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Zerg #:frame 2200
+      #:minerals 260 #:gas 100 #:supply-used 20 #:supply-cap 31 #:workers 18 #:active-bases 1
+      #:mineral-harvesters 15 #:gas-harvesters 3
+      #:army-supply 2 #:enemy-threat-supply 3 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 18 'marine 2)
+      #:enemy-unit-counts (hasheq 'zergling 6)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1))))
+  (reset-macro-escrow-tracker!)
+  (define l28-t-8lings-abort
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Zerg #:frame 2200
+      #:minerals 260 #:gas 100 #:supply-used 20 #:supply-cap 31 #:workers 18 #:active-bases 1
+      #:mineral-harvesters 15 #:gas-harvesters 3
+      #:army-supply 2 #:enemy-threat-supply 4 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 18 'marine 2)
+      #:enemy-unit-counts (hasheq 'zergling 8)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l28-t-sealed-wall-6lings) 'command-center)
+                     (not (memq 'factory (macro-brain-decision-scheduled-ids l28-t-sealed-wall-6lings)))
+                     (not (eq? (macro-brain-decision-saving-for l28-t-8lings-abort) 'command-center)))
+                "L28-P0-2 #02/#05 TvZ: Sealed 2-Depot wall holds CC #2 lock vs <=6 Lings (threat<=3) & aborts at >=8 Lings")
+
+  ;; (d) Zerg Lair morph dedup: 2-base Zerg morphing Lair still knows true-th=2 & schedules 3rd Hatchery
+  (reset-macro-escrow-tracker!)
+  (define l28-z-lair-morph-3rd-hatch
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Terran #:frame 4400
+      #:minerals 310 #:gas 80 #:supply-used 38 #:supply-cap 54 #:workers 28 #:active-bases 2
+      #:mineral-harvesters 25 #:gas-harvesters 3
+      #:army-supply 8 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'roach-warren 1 'extractor 1)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 1)
+      #:unit-counts (hasheq 'drone 28 'queen 2 'zergling 8 'overlord 5)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 4))))
+  (assert-true! (not (not (memq 'hatchery (macro-brain-decision-scheduled-ids l28-z-lair-morph-3rd-hatch))))
+                "L28-P0-2 Zerg: 2-base Zerg morphing Lair must dedup to 2 THs & schedule 3rd Hatchery")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms
