@@ -14970,24 +14970,24 @@
     (step-priority-macro-brain
      (make-macro-world-state
       #:race 'Zerg #:enemy-race 'Zerg #:frame 6400
-      #:minerals 450 #:gas 100 #:supply-used 64 #:supply-cap 94 #:workers 44 #:active-bases 3
-      #:mineral-harvesters 34 #:gas-harvesters 10
-      #:army-supply 20 #:enemy-threat-supply 0 #:under-attack? #f
+      #:minerals 450 #:gas 100 #:supply-used 62 #:supply-cap 94 #:workers 46 #:active-bases 3
+      #:mineral-harvesters 36 #:gas-harvesters 10
+      #:army-supply 16 #:enemy-threat-supply 0 #:under-attack? #f
       #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'evolution-chamber 1 'extractor 4)
       #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'evolution-chamber 1 'extractor 4)
-      #:unit-counts (hasheq 'drone 44 'queen 4 'roach 5 'zergling 4 'overlord 10)
+      #:unit-counts (hasheq 'drone 46 'queen 3 'roach 4 'zergling 4 'overlord 10)
       #:open-facility-slots (hasheq 'townhall 3 'larva 5))))
   (reset-macro-escrow-tracker!)
   (define l33-z-midgame-floor-escrow
     (step-priority-macro-brain
      (make-macro-world-state
       #:race 'Zerg #:enemy-race 'Zerg #:frame 6420
-      #:minerals 65 #:gas 50 #:supply-used 64 #:supply-cap 94 #:workers 44 #:active-bases 3
-      #:mineral-harvesters 34 #:gas-harvesters 10
-      #:army-supply 20 #:enemy-threat-supply 0 #:under-attack? #f
+      #:minerals 65 #:gas 50 #:supply-used 62 #:supply-cap 94 #:workers 46 #:active-bases 3
+      #:mineral-harvesters 36 #:gas-harvesters 10
+      #:army-supply 16 #:enemy-threat-supply 0 #:under-attack? #f
       #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'evolution-chamber 1 'extractor 4)
       #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'evolution-chamber 1 'extractor 4)
-      #:unit-counts (hasheq 'drone 44 'queen 4 'roach 5 'zergling 4 'overlord 10)
+      #:unit-counts (hasheq 'drone 46 'queen 3 'roach 4 'zergling 4 'overlord 10)
       #:open-facility-slots (hasheq 'townhall 3 'larva 5))))
   (assert-true! (and (not (not (memq 'roach-warren (macro-brain-decision-scheduled-ids l33-z-reaper-rw))))
                      (not (not (memq 'roach (macro-brain-decision-scheduled-ids l33-z-midgame-floor))))
@@ -14997,9 +14997,8 @@
                                              'candidate-utilities (hasheq))
                                    'drone 0.0)
                          474.0)
-                     (eq? (macro-brain-decision-saving-for l33-z-midgame-floor-escrow) 'roach)
-                     (not (memq 'drone (macro-brain-decision-scheduled-ids l33-z-midgame-floor-escrow))))
-                "L33-P0-2 Zerg: Early ranged harass must allow RW & >=36W/<28-combat must prioritize Roaches over Drone#45/Hatch#4")
+                     (not (eq? (macro-brain-decision-saving-for l33-z-midgame-floor-escrow) 'roach)))
+                "L33/L34-P0-2 Zerg: Early >=2 Reaper harass must allow RW & >=46W/3b/<28-combat prioritizes Roaches (non-blocking) over Drone/Hatch#4")
 
   ;; (b) Anti-Bio Baneling scaling (u>=560 vs >=12 Marines) & TvT Tank #1 protection over speculative Turret
   (reset-macro-escrow-tracker!)
@@ -15040,6 +15039,138 @@
                      (not (not (memq 'siege-tank (macro-brain-decision-scheduled-ids l33-t-tank1-over-spec-turret))))
                      (not (memq 'missile-turret (macro-brain-decision-scheduled-ids l33-t-tank1-over-spec-turret))))
                 "L33-P0-2: Bio-heavy Terran must elevate Banelings (u>=560) & TvT Tank#1 must beat speculative MissileTurret")
+
+  ;; 51.22 Loop 34 (L34-P0-2): Zerg Economy Repair (1-Scout Guard, 38D/2b Clean Hatch#3+Drones, Non-Blocking >=46D/3b Floor,
+  ;;       Hatch#4 Unlock >=20 Army / >=600M), Proactive ZvP 3:45 Spore Crawler (#73), & Terran Barracks Cap Alignment (#02)
+  ;; (a) Single scout Reaper/Adept does NOT trigger RW@740; >=2 Reapers schedules RW@740; 38W/2b takes Hatch#3 & Drones cleanly
+  (reset-macro-escrow-tracker!)
+  (define l34-z-1-scout-no-rw
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Terran #:frame 3500
+      #:minerals 110 #:gas 40 #:supply-used 28 #:supply-cap 44 #:workers 20 #:active-bases 2
+      #:mineral-harvesters 17 #:gas-harvesters 3
+      #:army-supply 6 #:enemy-threat-supply 1 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'extractor 1)
+      #:total-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'extractor 1)
+      #:unit-counts (hasheq 'drone 20 'queen 2 'zergling 4 'overlord 4)
+      #:enemy-unit-counts (hasheq 'reaper 1)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 4))))
+  (reset-macro-escrow-tracker!)
+  (define l34-z-38d-hatch3
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Zerg #:frame 4600
+      #:minerals 320 #:gas 80 #:supply-used 52 #:supply-cap 78 #:workers 38 #:active-bases 2
+      #:mineral-harvesters 32 #:gas-harvesters 6
+      #:army-supply 14 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 3)
+      #:total-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 3)
+      #:unit-counts (hasheq 'drone 38 'queen 3 'roach 4 'zergling 4 'overlord 9)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 4))))
+  (reset-macro-escrow-tracker!)
+  (define l34-z-38d-drone-65m
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Zerg #:frame 4620
+      #:minerals 65 #:gas 50 #:supply-used 52 #:supply-cap 78 #:workers 38 #:active-bases 2
+      #:mineral-harvesters 32 #:gas-harvesters 6
+      #:army-supply 14 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 3)
+      #:total-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 3)
+      #:unit-counts (hasheq 'drone 38 'queen 3 'roach 4 'zergling 4 'overlord 9)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 4))))
+  (reset-macro-escrow-tracker!)
+  (define l34-z-hatch4-unlock-a20
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Zerg #:frame 7400
+      #:minerals 450 #:gas 20 #:supply-used 68 #:supply-cap 94 #:workers 46 #:active-bases 3
+      #:mineral-harvesters 36 #:gas-harvesters 10
+      #:army-supply 22 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'evolution-chamber 1 'extractor 4)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'evolution-chamber 1 'extractor 4)
+      #:unit-counts (hasheq 'drone 46 'queen 5 'roach 6 'overlord 10)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 5))))
+  (assert-true! (and (not (memq 'roach-warren (macro-brain-decision-scheduled-ids l34-z-1-scout-no-rw)))
+                     (not (eq? (macro-brain-decision-saving-for l34-z-1-scout-no-rw) 'roach-warren))
+                     (not (not (memq 'drone (macro-brain-decision-scheduled-ids l34-z-1-scout-no-rw))))
+                     (not (not (memq 'hatchery (macro-brain-decision-scheduled-ids l34-z-38d-hatch3))))
+                     (not (not (memq 'drone (macro-brain-decision-scheduled-ids l34-z-38d-drone-65m))))
+                     (not (not (memq 'hatchery (macro-brain-decision-scheduled-ids l34-z-hatch4-unlock-a20)))))
+                "L34-P0-2 Zerg Economy: 1 scout must not trigger RW@740; 38D/2b takes Hatch#3 & Drones cleanly; Hatch#4 unlocks at >=20 army")
+
+  ;; (b) Proactive ZvP 3:45 Spore Crawler (#73 DT Rush) — non-blocking, max 2, never forced in ZvT or once Lair ready
+  (reset-macro-escrow-tracker!)
+  (define l34-z-73-zvp-spore
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 5000
+      #:minerals 140 #:gas 40 #:supply-used 46 #:supply-cap 66 #:workers 32 #:active-bases 2
+      #:mineral-harvesters 26 #:gas-harvesters 6
+      #:army-supply 14 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'roach-warren 1 'extractor 2)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 2)
+      #:unit-counts (hasheq 'drone 32 'queen 3 'roach 4 'overlord 7)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 4))))
+  (reset-macro-escrow-tracker!)
+  (define l34-z-73-zvt-no-spore
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Terran #:frame 5000
+      #:minerals 140 #:gas 40 #:supply-used 46 #:supply-cap 66 #:workers 32 #:active-bases 2
+      #:mineral-harvesters 26 #:gas-harvesters 6
+      #:army-supply 14 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'roach-warren 1 'extractor 2)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 2)
+      #:unit-counts (hasheq 'drone 32 'queen 3 'roach 4 'overlord 7)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 4))))
+  (assert-true! (and (not (not (memq 'spore-crawler (macro-brain-decision-scheduled-ids l34-z-73-zvp-spore))))
+                     (not (memq 'spore-crawler (macro-brain-decision-scheduled-ids l34-z-73-zvt-no-spore))))
+                "L34-P0-2 #73 ZvP: Proactive Spore Crawler schedules at f=5000 when Lair not ready & 0 Overseers, not forced in ZvT")
+
+  ;; (c) Brain/Runtime Terran Barracks cap alignment (#02 TvT `barracks:109`)
+  (reset-macro-escrow-tracker!)
+  (define l34-t-02-rax8-cap
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 14000
+      #:minerals 600 #:gas 200 #:supply-used 130 #:supply-cap 170 #:workers 62 #:active-bases 3
+      #:mineral-harvesters 46 #:gas-harvesters 16
+      #:army-supply 68 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 3 'supply-depot 16 'barracks 8 'factory 2 'factory-techlab 2 'starport 1 'engineering-bay 2 'refinery 6)
+      #:total-building-counts (hasheq 'orbital-command 3 'supply-depot 16 'barracks 8 'factory 2 'factory-techlab 2 'starport 1 'engineering-bay 2 'refinery 6)
+      #:unit-counts (hasheq 'scv 62 'marine 30 'marauder 6 'siege-tank 6 'medivac 4)
+      #:open-facility-slots (hasheq 'townhall 3 'barracks 0 'factory 0 'starport 0))))
+  (reset-macro-escrow-tracker!)
+  (define l34-t-02-tvt-rax-cap-320m
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 6400
+      #:minerals 320 #:gas 80 #:supply-used 48 #:supply-cap 70 #:workers 32 #:active-bases 2
+      #:mineral-harvesters 26 #:gas-harvesters 6
+      #:army-supply 16 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 6 'barracks 2 'factory 1 'factory-techlab 1 'starport 1 'engineering-bay 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'command-center 1 'supply-depot 6 'barracks 2 'factory 1 'factory-techlab 1 'starport 1 'engineering-bay 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 32 'marine 13 'siege-tank 1)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 0 'factory 0 'starport 0))))
+  (reset-macro-escrow-tracker!)
+  (define l34-t-02-tvt-rax-unlock-550m
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 6400
+      #:minerals 550 #:gas 80 #:supply-used 48 #:supply-cap 70 #:workers 32 #:active-bases 2
+      #:mineral-harvesters 26 #:gas-harvesters 6
+      #:army-supply 16 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 6 'barracks 2 'factory 1 'factory-techlab 1 'starport 1 'engineering-bay 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'command-center 1 'supply-depot 6 'barracks 2 'factory 1 'factory-techlab 1 'starport 1 'engineering-bay 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 32 'marine 13 'siege-tank 1)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 0 'factory 0 'starport 0))))
+  (assert-true! (and (not (memq 'barracks (macro-brain-decision-scheduled-ids l34-t-02-rax8-cap)))
+                     (not (eq? (macro-brain-decision-saving-for l34-t-02-rax8-cap) 'barracks))
+                     (not (memq 'barracks (macro-brain-decision-scheduled-ids l34-t-02-tvt-rax-cap-320m)))
+                     (not (not (memq 'barracks (macro-brain-decision-scheduled-ids l34-t-02-tvt-rax-unlock-550m)))))
+                "L34-P0-2 #02 TvT: Brain must cap Barracks<=8 (<1000M) & TvT <=2 (<2 Tanks/<2 Facs/<500M), unlocking at >=500M")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms

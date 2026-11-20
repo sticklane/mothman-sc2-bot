@@ -3800,9 +3800,11 @@
           (for/list ([i (in-range n-pads)]
                      #:when (let ([ms (vector-ref mins-vec i)]
                                   [gs (vector-ref geys-vec i)])
-                              (or (>= (length ms) 4)
-                                  (and (pair? ms) (>= (length gs) 1))
-                                  (>= (length gs) 2))))
+                              ;; L34-P0-1: Always require >= 1 eligible mineral (NEVER emit
+                              ;; 0-mineral geyser-only pads!), plus >= 4 minerals or >= 1 geyser.
+                              (and (pair? ms)
+                                   (or (>= (length ms) 4)
+                                       (>= (length gs) 1)))))
             (define pad (vector-ref pad-vec i))
             (hash 'pad pad
                   'x (sc2-point2d-x pad)
@@ -3811,18 +3813,16 @@
                   'geysers (reverse (vector-ref geys-vec i)))))]))
 
 ;; Connected-component resource clustering + exact 5x5 TownHall pad solver:
-;; Filters mineral-wall blockers (`mineral-field-450`, `lab-mineral-field*`) and nubs (< 150 minerals),
-;; builds transitive mineral components (center dist <= 5.2), attaches each geyser within 10.5 tiles
-;; to its single nearest mineral component, and solves the exact 5x5 TownHall pad for each base.
-;; Memoizes solved canonical pads per map (keyed by StartRaw grid signature + fallback synthetic
-;; resource signature when `game-info = #f`) and refreshes live mineral/geyser counts in O(resources).
+;; Filters true mineral-wall blockers (`mineral-field-450` or `< 500` mineral contents) while keeping
+;; full `lab-mineral-field` & `lab-mineral-field-750` main-base patches (`mc == 0` in fog or `>= 500`),
+;; builds transitive mineral components (center dist <= 5.2, requiring >= 4 minerals per base),
+;; attaches each geyser within 12.5 tiles to its nearest mineral component, and solves the exact 5x5 pad.
 (define (solve-all-map-expansion-bases neutral-units [game-info #f])
   (define (base-mineral-eligible? u)
     (and (sc2-unit-is-mineral-field? u)
-         (not (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
-                    '(mineral-field-450 lab-mineral-field lab-mineral-field-750)))
+         (not (eq? (sc2-id->unit-symbol (sc2-unit-unit-type u)) 'mineral-field-450))
          (let ([mc (sc2-unit-mineral-contents u)])
-           (or (= mc 0) (>= mc 150)))))
+           (or (= mc 0) (>= mc 500)))))
   (define base-minerals-rev '())
   (define geysers-rev '())
   (define all-blocking-res-rev '())
@@ -3957,7 +3957,11 @@
              (for ([comp-mins (in-list min-comps)]
                    [idx (in-naturals 0)])
                (define c-geys (vector-ref comp-geysers-vec idx))
-               (when (or (>= (length c-geys) 1) (>= (length comp-mins) 4))
+               ;; L34-P0-1: Always require >= 1 eligible mineral (NEVER emit 0-mineral
+               ;; orphan-geyser fake pads!), plus >= 4 minerals or >= 1 attached geyser.
+               (when (and (pair? comp-mins)
+                          (or (>= (length comp-mins) 4)
+                              (>= (length c-geys) 1)))
                  (define pad
                    (solve-exact-townhall-pad comp-mins c-geys pl-grid th-grid
                                              #:all-resources all-blocking-res))
@@ -3969,38 +3973,6 @@
                                      'minerals comp-mins
                                      'geysers c-geys)
                                bases)))))
-             ;; Also handle geyser-only bases when all minerals were mined out
-             (define attached-geyser-tags
-               (for*/seteqv ([idx (in-range (vector-length comp-geysers-vec))]
-                             [g (in-list (vector-ref comp-geysers-vec idx))])
-                 (sc2-unit-tag g)))
-             (define orphan-geysers
-               (filter (lambda (g) (not (set-member? attached-geyser-tags (sc2-unit-tag g)))) geysers))
-             (when (>= (length orphan-geysers) 2)
-               (define visited-g (mutable-seteqv))
-               (for ([g0 (in-list orphan-geysers)]
-                     #:when (not (set-member? visited-g (sc2-unit-tag g0))))
-                 (define gp0 (sc2-unit-pos g0))
-                 (define grp
-                   (filter (lambda (g)
-                             (define gp (sc2-unit-pos g))
-                             (<= (pt-dist (sc2-point3d-x gp0) (sc2-point3d-y gp0)
-                                          (sc2-point3d-x gp) (sc2-point3d-y gp))
-                                 13.0))
-                           orphan-geysers))
-                 (for ([g (in-list grp)]) (set-add! visited-g (sc2-unit-tag g)))
-                 (when (>= (length grp) 2)
-                   (define pad
-                     (solve-exact-townhall-pad '() grp pl-grid th-grid
-                                               #:all-resources all-blocking-res))
-                   (when pad
-                     (set! bases
-                           (cons (hash 'pad pad
-                                       'x (sc2-point2d-x pad)
-                                       'y (sc2-point2d-y pad)
-                                       'minerals '()
-                                       'geysers grp)
-                                 bases))))))
              (define ordered (reverse bases))
              (when cache-key
                (when (> (hash-count SC2-EXPANSION-BASES-CACHE) 16)
@@ -4421,9 +4393,17 @@
 
 (define (order-expansions-from-origin solved-bases origin-x origin-y pathing-grid neutral-units
                                       #:bfs [pre-bfs #f])
+  ;; L34-P0-1: Use 16.0t non-main exclusion on all real maps (`width >= 96` or solved mineral bases)
+  ;; so no main-adjacent artifact within 16t can ever rank as Natural #1 (preserving 10.0t only on
+  ;; tiny < 96x96 synthetic test grids with bare `(hash 'x 'y)` stubs).
+  (define large-or-solved-map?
+    (or (not (sc2-image-grid? pathing-grid))
+        (>= (sc2-image-grid-width pathing-grid) 96)
+        (ormap (lambda (b) (and (hash? b) (hash-has-key? b 'minerals))) solved-bases)))
+  (define non-main-min-dist (if large-or-solved-map? 16.0 10.0))
   (define non-main
     (filter (lambda (b)
-              (> (pt-dist origin-x origin-y (hash-ref b 'x) (hash-ref b 'y)) 10.0))
+              (> (pt-dist origin-x origin-y (hash-ref b 'x) (hash-ref b 'y)) non-main-min-dist))
             solved-bases))
   (define bfs (or pre-bfs (compute-ground-bfs-distances pathing-grid origin-x origin-y neutral-units)))
   (cond
@@ -8486,8 +8466,9 @@
        (filter (lambda (m)
                  (and (sc2-unit-is-mineral-field? m)
                       (= (sc2-unit-display-type m) 1)
-                      (not (memq (sc2-id->unit-symbol (sc2-unit-unit-type m))
-                                 '(mineral-field-450 lab-mineral-field lab-mineral-field-750)))))
+                      (not (eq? (sc2-id->unit-symbol (sc2-unit-unit-type m)) 'mineral-field-450))
+                      (let ([mc (sc2-unit-mineral-contents m)])
+                        (or (= mc 0) (>= mc 500)))))
                neutral-units))
      (cond
        [(or (null? townhalls) (null? workers) (> (length workers) 16) (null? mineral-fields))
@@ -10453,10 +10434,31 @@
   ;; W8-P0-4-wire: Identify live enemy units threatening any of our TownHalls (<= 24.0t, 576.0 sq-dist)
   ;; so own-base defensive `attack-unit` commands are promoted to P0 urgent survival (strictly above
   ;; P1 macro, P2 worker-scout/harass, and P3 harvest) and home workers aren't sent cross-map mid-rush.
+  ;; L34-P0-1: Harmless non-combat scouts (Overlord, Overseer, Observer, Changeling, Creep Tumor)
+  ;; MUST NEVER trigger urgent-survival `P0` base-defense escalation or freeze ground armies!
+  (define non-combat-base-scout-syms
+    (seteq 'overlord 'overlord-cocoon 'transport-overlord-cocoon 'overlord-transport
+           'overseer 'overseer-siege-mode 'observer 'observer-siege-mode
+           'changeling 'changeling-zealot 'changeling-marine-shield
+           'changeling-marine 'changeling-zergling-wings 'changeling-zergling
+           'creep-tumor 'creep-tumor-burrowed 'creep-tumor-queen
+           'larva 'egg))
+  (define (unit-is-non-combat-base-scout? u)
+    (set-member? non-combat-base-scout-syms
+                 (sc2-id->unit-symbol (sc2-unit-unit-type u) 'unknown)))
+  (define unit-can-attack-air-syms
+    (seteq 'marine 'ghost 'cyclone 'thor 'thor-ap 'viking-fighter 'liberator 'battlecruiser
+           'stalker 'sentry 'archon 'phoenix 'void-ray 'carrier 'tempest 'mothership 'mothership-core 'interceptor
+           'queen 'hydralisk 'mutalisk 'corruptor))
+  (define (unit-can-attack-air? u)
+    (set-member? unit-can-attack-air-syms
+                 (sc2-id->unit-symbol (sc2-unit-unit-type u) 'unknown)))
+
   (define enemy-near-own-base-tags (mutable-seteqv))
   (define enemy-combat-near-own-base? #f)
   (when (and (pair? townhalls) (pair? targetable-enemy-units))
-    (for ([eu (in-list targetable-enemy-units)])
+    (for ([eu (in-list targetable-enemy-units)]
+          #:when (not (unit-is-non-combat-base-scout? eu)))
       (define ep (sc2-unit-pos eu))
       (define ex (sc2-point3d-x ep))
       (define ey (sc2-point3d-y ep))
@@ -16163,16 +16165,40 @@
     (maybe-emit-corner-scan! corner-wps-now))
   (when (not (null? idle-combat-units))
     (define idle-tags (map sc2-unit-tag idle-combat-units))
+    (define aa-idle-combat-units
+      (filter unit-can-attack-air? idle-combat-units))
+    (define path-grid-bt
+      (and (sc2-game-info? eff-game-info)
+           (sc2-game-info-pathing-grid eff-game-info)))
+    (define (flying-over-unpathable-airspace? e)
+      (and (sc2-unit-is-flying e)
+           (sc2-image-grid? path-grid-bt)
+           (let* ([ep (sc2-unit-pos e)]
+                  [ix (inexact->exact (floor (sc2-point3d-x ep)))]
+                  [iy (inexact->exact (floor (sc2-point3d-y ep)))])
+             (= (sc2-grid-ref path-grid-bt ix iy) 0))))
+    ;; L34-P0-1: Exclude harmless non-combat scouts (`overlord`, `overseer`, `observer`,
+    ;; `changeling*`, `creep-tumor*`) from `base-threat`; NEVER select a flying threat when
+    ;; 0 AA-capable idle combat units exist; prefer grounded/pathable threats over flyers
+    ;; hovering in unpathable cliff-edge dead airspace!
+    (define base-threat-cands
+      (filter (lambda (e)
+                (and (not (unit-is-non-combat-base-scout? e))
+                     (or (not (sc2-unit-is-flying e))
+                         (pair? aa-idle-combat-units))
+                     (let ([ep (sc2-unit-pos e)])
+                       (ormap (lambda (th)
+                                (define tp (sc2-unit-pos th))
+                                (<= (pt-dist (sc2-point3d-x ep) (sc2-point3d-y ep)
+                                             (sc2-point3d-x tp) (sc2-point3d-y tp))
+                                    SC2-BASE-DEFENSE-RADIUS))
+                              townhalls))))
+              targetable-enemy-units))
     (define base-threat
-      (for/first ([e (in-list targetable-enemy-units)]
-                  #:when (let ([ep (sc2-unit-pos e)])
-                           (ormap (lambda (th)
-                                    (define tp (sc2-unit-pos th))
-                                    (<= (pt-dist (sc2-point3d-x ep) (sc2-point3d-y ep)
-                                                 (sc2-point3d-x tp) (sc2-point3d-y tp))
-                                        SC2-BASE-DEFENSE-RADIUS))
-                                  townhalls)))
-        e))
+      (and (pair? base-threat-cands)
+           (or (findf (lambda (e) (not (sc2-unit-is-flying e))) base-threat-cands)
+               (findf (lambda (e) (not (flying-over-unpathable-airspace? e))) base-threat-cands)
+               (first base-threat-cands))))
     (define-values (att-x att-y)
       (cond
         [(not (null? targetable-enemy-units))
@@ -16242,10 +16268,36 @@
     (cond
       [base-threat
        (define ep (sc2-unit-pos base-threat))
-       (emit! (mark-urgent-survival-cmd!
-               (sc2-raw-unit-command 23
-                                     (sc2-point2d (sc2-point3d-x ep) (sc2-point3d-y ep))
-                                     0 idle-tags #f)))]
+       (define ex (sc2-point3d-x ep))
+       (define ey (sc2-point3d-y ep))
+       (define flying-bt? (sc2-unit-is-flying base-threat))
+       (define dead-air-bt? (flying-over-unpathable-airspace? base-threat))
+       (define dispatch-units
+         (cond
+           [(not flying-bt?) idle-combat-units]
+           [dead-air-bt?
+            ;; Over unpathable dead airspace: prefer flying AA; only send ground AA if close enough
+            ;; to engage from the cliff edge (<= 10.0t), never paralyzing distant ground armies!
+            (define fly-aa (filter sc2-unit-is-flying aa-idle-combat-units))
+            (if (pair? fly-aa)
+                fly-aa
+                (filter (lambda (u)
+                          (define up (sc2-unit-pos u))
+                          (<= (pt-dist ex ey (sc2-point3d-x up) (sc2-point3d-y up)) 10.0))
+                        aa-idle-combat-units))]
+           [else aa-idle-combat-units]))
+       (define dispatch-tags (map sc2-unit-tag dispatch-units))
+       (when (and (pair? dispatch-tags)
+                  (or (not dead-air-bt?)
+                      (wire-nonstack-allow?!
+                       (list 'base-threat-dead-air
+                             (inexact->exact (round (* 0.5 ex)))
+                             (inexact->exact (round (* 0.5 ey))))
+                       16)))
+         (define raw-bt-cmd (sc2-raw-unit-command 23 (sc2-point2d ex ey) 0 dispatch-tags #f))
+         (emit! (if dead-air-bt?
+                    raw-bt-cmd
+                    (mark-urgent-survival-cmd! raw-bt-cmd))))]
       [tactical-hold-posture?
        ;; Layer 3/4 hold / defend / suppress-attack posture: never scatter or push cross-map;
        ;; cohesively rally any idle combat units (> 8 tiles from defensive hold point) to `(eff-hold-x, eff-hold-y)`.
@@ -16505,6 +16557,7 @@
 (define SC2-GOV-LAST-P2-LOOP (make-weak-hasheq))
 (define SC2-GOV-LAST-P3-LOOP (make-weak-hasheq))
 (define SC2-GOV-P0-MODE-DEDUP (make-weak-hasheq))
+(define SC2-GOV-URGENT-COMBAT-DEDUP (make-weak-hasheq))
 (define SC2-GOV-P0-MODE-SWITCH-ABILITIES
   (seteqv 388 390 403 405 556 558 1978 1998 2095 2097 2108 2110 2362 2364 2558 2560))
 
@@ -16523,11 +16576,17 @@
     (hash-set! SC2-GOV-LAST-P1-LOOP gov -1000)
     (hash-set! SC2-GOV-LAST-P2-LOOP gov -1000)
     (hash-set! SC2-GOV-LAST-P3-LOOP gov -1000)
-    (hash-set! SC2-GOV-P0-MODE-DEDUP gov (make-hash)))
+    (hash-set! SC2-GOV-P0-MODE-DEDUP gov (make-hash))
+    (hash-set! SC2-GOV-URGENT-COMBAT-DEDUP gov (make-hash)))
   (define gov-mode-dedup
     (or (hash-ref SC2-GOV-P0-MODE-DEDUP gov #f)
         (let ([ht (make-hash)])
           (hash-set! SC2-GOV-P0-MODE-DEDUP gov ht)
+          ht)))
+  (define gov-urgent-combat-dedup
+    (or (hash-ref SC2-GOV-URGENT-COMBAT-DEDUP gov #f)
+        (let ([ht (make-hash)])
+          (hash-set! SC2-GOV-URGENT-COMBAT-DEDUP gov ht)
           ht)))
 
   ;; 1. Refill token bucket purely from game-loop delta (22.4 loops/sec = 1344 loops/min)
@@ -16615,8 +16674,32 @@
     (define k (mode-switch-dedup-key c))
     (and k (< (- cur-loop (hash-ref gov-mode-dedup k -1000)) 10)))
 
+  ;; L34-P0-1: 8-loop repeat dedup on identical `(ab, target, tags)` urgent-survival combat
+  ;; `23`/`16` orders so repeated base-defense dispatches can NEVER saturate the 485 rolling APM cap!
+  (define (urgent-combat-dedup-key c)
+    (and (sc2-raw-unit-command? c)
+         (urgent-survival-cmd? c)
+         (memv (sc2-raw-unit-command-ability-id c) '(23 16))
+         (let* ([tp (sc2-raw-unit-command-target-pos c)]
+                [tgt-k
+                 (cond
+                   [(any-point? tp)
+                    (list 'pt
+                          (inexact->exact (round (* 2.0 (any-point-x tp))))
+                          (inexact->exact (round (* 2.0 (any-point-y tp)))))]
+                   [else
+                    (list 'tag (sc2-raw-unit-command-target-unit-tag c))])])
+           (list (sc2-raw-unit-command-ability-id c)
+                 tgt-k
+                 (sort (sc2-raw-unit-command-unit-tags c) <)))))
+  (define (urgent-combat-dedup-drop? c)
+    (define k (urgent-combat-dedup-key c))
+    (and k (< (- cur-loop (hash-ref gov-urgent-combat-dedup k -1000)) 8)))
+
   (define coalesced
-    (filter (lambda (c) (not (mode-switch-dedup-drop? c)))
+    (filter (lambda (c)
+              (and (not (mode-switch-dedup-drop? c))
+                   (not (urgent-combat-dedup-drop? c))))
             (coalesce-sc2-raw-commands filtered0 SC2-WIRE-COALESCABLE-ABILITIES chunk-tag-list)))
 
   ;; 4. Emit by priority tier P0..P4 with tiered QoS reserve floors, selection-affinity grouping,
@@ -16687,6 +16770,7 @@
         (define hr-floor (hr-floor-fn chosen))
         (define did-emit?
           (and (not (mode-switch-dedup-drop? chosen))
+               (not (urgent-combat-dedup-drop? chosen))
                (or (= ev-cost 0)
                    (and (>= (- rem-headroom cost-fl) hr-floor)
                         (>= (- (wire-apm-governor-tokens gov) cost-fl) tok-floor)))
@@ -16694,7 +16778,12 @@
         (when did-emit?
           (define ms-key (mode-switch-dedup-key chosen))
           (when ms-key
+            (when (> (hash-count gov-mode-dedup) 512) (hash-clear! gov-mode-dedup))
             (hash-set! gov-mode-dedup ms-key cur-loop))
+          (define uc-key (urgent-combat-dedup-key chosen))
+          (when uc-key
+            (when (> (hash-count gov-urgent-combat-dedup) 512) (hash-clear! gov-urgent-combat-dedup))
+            (hash-set! gov-urgent-combat-dedup uc-key cur-loop))
           (when (> ev-cost 0)
             (set! rem-headroom (- rem-headroom cost-fl))
             (set-wire-apm-governor-tokens!
@@ -16721,6 +16810,17 @@
 
   (define (cmds-for-tier tier)
     (filter (lambda (c) (= (eff-cmd-tier c) tier)) coalesced))
+
+  ;; 1a-pre. L34-P0-1 (`H2H #06` / `#43` Overlord P0 APM freeze -> 0): Critical overdue P1 macro
+  ;;         rescue (`>= 12` loops since `SC2-GOV-LAST-P1-LOOP`, `#:max-count 3`, `tok-floor = -4.0`,
+  ;;         `hr-floor = 0.0`) runs BEFORE `1a` `p0-urgent-cmds` — mathematically guaranteeing MULE,
+  ;;         SCV, Train, Build, & Expand can NEVER starve even under 100% P0 urgent-survival spam!
+  (define p1-cmds (cmds-for-tier 1))
+  (define p1-macro-all
+    (filter (lambda (c) (not (sc2-raw-camera-move? c))) p1-cmds))
+  (when (and (pair? p1-macro-all)
+             (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-LOOP gov -1000)) 12))
+    (run-cmd-list! p1-macro-all (lambda (_) -4.0) (lambda (_) 0.0) #:max-count 3))
 
   ;; 1a. Run P0 urgent survival, opening worker splits, and active combat spells first.
   ;;     Partition out non-urgent P0 mode-switches (388/390/403/405/1978/1998/2095/2097/2108/2110/2362/2364/2558/2560)
@@ -16755,14 +16855,8 @@
              (>= (- cur-loop (hash-ref SC2-GOV-LAST-P2-LOOP gov -1000)) 8))
     (run-cmd-list! p2-large-cmds (lambda (_) -2.0) (lambda (_) 2.0) #:max-count 4))
 
-  ;; 1c. L33-P0-1 (`H2H #06` 168s 5,260M freeze -> 0): Run overdue P1 macro rescue
-  ;;     (`>= 8` loops since `SC2-GOV-LAST-P1-LOOP`, `#:max-count 4`) with `hr-floor = 0.0`
-  ;;     (matching P0!) IMMEDIATELY after urgent P0 survival/spells (& overdue large-P2 rescue)
-  ;;     and BEFORE non-urgent P0 mode switches — mathematically guaranteeing MULE/SCV/Train/Build
-  ;;     NEVER starve even when rolling APM headroom hits <= 2.0!
-  (define p1-cmds (cmds-for-tier 1))
-  (define p1-macro-all
-    (filter (lambda (c) (not (sc2-raw-camera-move? c))) p1-cmds))
+  ;; 1c. L33-P0-1: Overdue P1 macro rescue (`>= 8` loops since `SC2-GOV-LAST-P1-LOOP`, `#:max-count 4`,
+  ;;     `hr-floor = 0.0`) runs BEFORE non-urgent P0 mode switches (`1d`).
   (when (and (pair? p1-macro-all)
              (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-LOOP gov -1000)) 8))
     (run-cmd-list! p1-macro-all (lambda (_) -3.0) (lambda (_) 0.0) #:max-count 4))

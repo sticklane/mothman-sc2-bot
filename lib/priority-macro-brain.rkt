@@ -6066,8 +6066,25 @@
                                (zergling . 0.5) (baneling . 0.5) (roach . 2) (ravager . 3)
                                (hydralisk . 2) (lurker . 3) (ultralisk . 6)))])
       (* (cdr pair) (unit-count-equivalent enemy-u-counts (car pair)))))
+  ;; L34-P0-2 (`#73 ZvP who` `4:20` DT Rush): Schedule 1 proactive `spore-crawler` per base (max 2)
+  ;; starting at `frame >= 4928` (`3:40`) when Lair is not yet ready & `overseers == 0`, so Spores
+  ;; finish by `~4:01–4:05` BEFORE `4:20` DTs arrive (non-blocking `blk = #f`, never under early rush crisis)!
+  (define zerg-zvp-proactive-spore-due?
+    (and (eq? race 'Zerg)
+         (eq? enemy-race 'Protoss)
+         (>= frame 4928)
+         (not has-lair-or-hive-ready?)
+         (= (unit-count-equivalent unit-counts 'overseer) 0)
+         (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+         (< (bldg-count-equivalent total-bldg-counts 'spore-crawler)
+            (min 2 (max 1 active-bases)))
+         (not under-early-rush-crisis?)
+         (not early-rush-override-active?)
+         (not early-ling-rush-defense-active?)
+         (not (and under-attack? (< army-supply 8) (>= enemy-ground-combat-supply 8.0)))))
   (define zerg-spore-demoted-now?
     (and (eq? race 'Zerg)
+         (not zerg-zvp-proactive-spore-due?)
          (or (>= (bldg-count-equivalent total-bldg-counts 'spore-crawler) (max 1 active-bases))
              (and (>= enemy-ground-combat-supply 4.0)
                   (not (and enemy-cloaked-threat-active?
@@ -6206,16 +6223,21 @@
          (not enemy-air-dominant?)
          (not opp-cap-air-override?)
          (or (>= active-bases 2) (>= frame 6048))))
-  ;; L27-P0-2 + L33-P0-2 (`#10 ZvP`, `#52 zig-reapers`, `#64 Clicadinha`, `#37/#76/#19`):
-  ;; Allow RoachWarren alongside BanelingNest once `frame >= 4032 & workers >= 26` OR under
-  ;; early ranged/harass pressure (`reaper`/`hellion`/`adept`/`stalker`/`marine`/`roach`, `frame >= 3360, workers >= 20`),
-  ;; and NEVER block RW on `under-early-rush-crisis?`/`early-rush-override-active?` during ranged harass
-  ;; (keeping suppression strictly for `< 2:45`/early pure ZvZ ling flood)!
+  ;; L27/L33/L34-P0-2 (`#10 ZvP`, `#52 zig-reapers`, `#64 Clicadinha`, `#01 ZvZ`):
+  ;; Require GENUINE early ranged/harass pressure (`>= 2` Reapers/Hellions OR `>= 3` Adepts/Stalkers/Marines/Roaches)
+  ;; — NEVER trigger on a single 1-unit scout! Escalate RW to `740.0` ONLY under genuine `>= 2` Reaper/Hellion harass;
+  ;; normal 2-base RW stays `525–555` so it NEVER preempts Hatch #2 or starves `< 28` Drones!
+  (define zerg-enemy-fast-harass-pressure?
+    (and (eq? race 'Zerg)
+         (>= (+ (unit-count-equivalent enemy-u-counts 'reaper)
+                (unit-count-equivalent enemy-u-counts 'hellion))
+             2)))
   (define zerg-enemy-early-ranged-harass?
     (and (eq? race 'Zerg)
-         (> (for/sum ([u (in-list '(reaper hellion adept stalker marine roach))])
-              (unit-count-equivalent enemy-u-counts u))
-            0)))
+         (or zerg-enemy-fast-harass-pressure?
+             (>= (for/sum ([u (in-list '(adept stalker marine roach))])
+                   (unit-count-equivalent enemy-u-counts u))
+                 3))))
   (define zerg-2base-rw-allowed-with-bn?
     (and (eq? race 'Zerg)
          (or (and (>= frame 4032) (>= workers 26))
@@ -6232,7 +6254,7 @@
          (>= workers (if zerg-enemy-early-ranged-harass? 20 24))
          (>= frame 3360)
          (or (>= (unit-count-equivalent unit-counts 'queen) (min 2 active-bases))
-             (>= frame 4032)
+             (>= frame 4480)
              zerg-enemy-early-ranged-harass?)
          (or zerg-enemy-early-ranged-harass?
              (and (not under-early-rush-crisis?)
@@ -6240,7 +6262,7 @@
          (not early-ling-rush-defense-active?)
          (not enemy-air-dominant?)
          (not opp-cap-air-override?)
-         (or (>= active-bases 2) (>= frame 4480) zerg-enemy-early-ranged-harass?)))
+         (or (>= active-bases 2) (>= frame 4480) zerg-enemy-fast-harass-pressure?)))
   (define zerg-cloak-air-hydraden-due?
     (or zerg-air-hydraden-before-spire?
         (and zerg-cloaked-air-crisis?
@@ -6348,9 +6370,10 @@
          (> (bldg-count-equivalent ready-bldg-counts 'baneling-nest) 0)
          (< (unit-count-equivalent unit-counts 'baneling) zerg-anti-bio-baneling-target)
          (< (unit-count-equivalent unit-counts 'zergling) 8)))
-  ;; L33-P0-2 (`#64/#37/#76/#19` Midgame Zerg Combat-Army Floor):
-  ;; Once `workers >= 36` (`>= 2` saturated bases), boost Roach/Hydra/Baneling ahead of droning
-  ;; past 44 Drones or taking Hatch #4 until `combat-army-supply >= 28` unless enemy army is confirmed tiny (`< 8`)!
+  ;; L33/L34-P0-2 (`#64/#37/#76/#19/#01` Midgame Zerg Combat-Army Floor):
+  ;; Trigger ONLY after 3-base economy is established (`workers >= 46 & active-bases >= 3`) — NEVER delay
+  ;; 3rd Hatch or `w4`/`w6` Drone saturation, NEVER escrow-lock Roach/Hydra (`blk = #f` when peaceful!),
+  ;; and keep Hatch #4 unlocked once `army-supply >= 20` OR `minerals >= 600`!
   (define zerg-midgame-combat-army-supply
     (if (eq? race 'Zerg)
         (+ (* 0.5 (unit-count-equivalent unit-counts 'zergling))
@@ -6382,8 +6405,8 @@
          (< (+ enemy-ground-combat-supply (* 2.5 enemy-air-combat-cnt)) 8.0)))
   (define zerg-midgame-army-floor-due?
     (and (eq? race 'Zerg)
-         (>= workers 36)
-         (>= active-bases 2)
+         (>= workers 46)
+         (>= active-bases 3)
          (< zerg-midgame-combat-supply-now 28.0)
          (not zerg-enemy-confirmed-tiny?)
          (not under-early-rush-crisis?)
@@ -6392,6 +6415,11 @@
          (or (> (bldg-count-equivalent ready-bldg-counts 'roach-warren) 0)
              (> (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0)
              (> (bldg-count-equivalent ready-bldg-counts 'baneling-nest) 0))))
+  (define zerg-midgame-floor-defer-hatch4?
+    (and zerg-midgame-army-floor-due?
+         (>= total-townhalls-incl-pending 3)
+         (< army-supply 20)
+         (< minerals 600)))
   (define zerg-tech-ready-ling-cap
     (cond
       [(not (eq? race 'Zerg)) 999]
@@ -6635,14 +6663,20 @@
   (define terran-maxed-suppress-extra-prod?
     (and (eq? race 'Terran)
          (>= supply-used 194)))
-  ;; L30/L31-P0-2 (`#17/#38 P1 TvT`): Cap TvT Barracks <= 2 until >= 2 Siege Tanks OR Factory #2 is started!
+  ;; L30/L31/L34-P0-2 (`#17/#38/#02 TvT` `barracks:109`): Align Brain `barracks` caps with Runtime:
+  ;; (a) Cap TvT Barracks `<= 2` until `>= 2` Siege Tanks OR `>= 2` Factories exist (unless `min >= 500`);
+  ;; (b) Cap Terran Barracks `<= 8` whenever `min < 1000` so Brain never repeatedly schedules Rax #9+!
   (define terran-tvt-rax-cap-for-tanks?
     (and (eq? race 'Terran)
          (eq? enemy-race 'Terran)
          (not enemy-air-dominated-now?)
          (< (unit-count-equivalent unit-counts 'siege-tank) 2)
          (< (bldg-count-equivalent total-bldg-counts 'factory) 2)
-         (> (bldg-count-equivalent total-bldg-counts 'factory) 0)))
+         (< minerals 500)))
+  (define terran-rax-hard-cap-reached?
+    (and (eq? race 'Terran)
+         (>= (bldg-count-equivalent total-bldg-counts 'barracks) 8)
+         (< minerals 1000)))
   (define terran-2nd-factory-due?
     (and (eq? race 'Terran)
          (not terran-maxed-suppress-extra-prod?)
@@ -7221,6 +7255,7 @@
         0))
   (define terran-midgame-rax-scale-due?
     (and (eq? race 'Terran)
+         (not terran-rax-hard-cap-reached?)
          (>= total-townhalls-incl-pending 2)
          (>= terran-total-depots 2)
          (> (bldg-count-equivalent total-bldg-counts 'factory) 0)
@@ -7486,8 +7521,9 @@
                               (memq (normalize-brain-sym s) '(factory starport))
                               (>= (bldg-count-equivalent total-bldg-counts (normalize-brain-sym s)) 1)))
                     (not (and (eq? (normalize-brain-sym s) 'barracks)
-                              terran-tvt-rax-cap-for-tanks?
-                              (>= (bldg-count-equivalent total-bldg-counts 'barracks) 2)))
+                              (or terran-rax-hard-cap-reached?
+                                  (and terran-tvt-rax-cap-for-tanks?
+                                       (>= (bldg-count-equivalent total-bldg-counts 'barracks) 2)))))
                     (not (zero-worker-suppressed-bldg?
                           (normalize-brain-sym s)
                           (if (memq (normalize-brain-sym s) '(supply-depot pylon overlord)) 'supply 'other)
@@ -7541,7 +7577,7 @@
                               (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0))
                          '(marine supply-depot)
                          '())
-                     (if zerg-cloak-air-spore-due? '(spore-crawler) '())
+                     (if (or zerg-cloak-air-spore-due? zerg-zvp-proactive-spore-due?) '(spore-crawler) '())
                      (if zerg-cap-air-spire-due? '(spire) '())
                      (if zerg-cloak-air-hydraden-due? '(hydralisk-den) '())
                      (if zerg-cloak-air-aa-unit-due? (list zerg-cloak-air-aa-unit-sym) '())
@@ -8593,8 +8629,9 @@
                  (>= (bldg-count-equivalent total-bldg-counts csym) 1))
             #f]
            [(and (eq? csym 'barracks)
-                 terran-tvt-rax-cap-for-tanks?
-                 (>= (bldg-count-equivalent total-bldg-counts 'barracks) 2))
+                 (or terran-rax-hard-cap-reached?
+                     (and terran-tvt-rax-cap-for-tanks?
+                          (>= (bldg-count-equivalent total-bldg-counts 'barracks) 2))))
             #f]
            [(zero-worker-suppressed-bldg? csym cat act)
             #f]
@@ -8774,7 +8811,7 @@
            [(and protoss-midgame-archon-due? (eq? csym 'archon)) #t]
            [(and protoss-midgame-ht-due? (eq? csym 'high-templar)) #t]
            [(and protoss-midgame-stalker-pump-due? (eq? csym 'stalker)) #t]
-           [(and zerg-cloak-air-spore-due? (eq? csym 'spore-crawler)) #t]
+           [(and (or zerg-cloak-air-spore-due? zerg-zvp-proactive-spore-due?) (eq? csym 'spore-crawler)) #t]
            [(and zerg-cap-air-spire-due? (eq? csym 'spire)) #t]
            [(and zerg-cloak-air-hydraden-due? (eq? csym 'hydralisk-den)) #t]
            [(and zerg-cloak-air-aa-unit-due? (eq? csym zerg-cloak-air-aa-unit-sym)) #t]
@@ -8946,12 +8983,13 @@
                         (not (hash? open-facility-slots))
                         (and bo-goal-sym (same-brain-sym? id bo-goal-sym))))]
               [(eq? id 'spore-crawler)
-               (and (or aa-effective? eff-req-det? enemy-cap-air? keep-spire-aa? zerg-cloaked-air-crisis? enemy-cloaked-threat-active?)
+               (and (or aa-effective? eff-req-det? enemy-cap-air? keep-spire-aa? zerg-cloaked-air-crisis? enemy-cloaked-threat-active? zerg-zvp-proactive-spore-due?)
                     (< (bldg-count-equivalent total-bldg-counts 'spore-crawler)
                        (min (max 1 active-bases)
                             (max 1 desired-spores
-                                 (if (and enemy-cloaked-threat-active?
-                                          (= (unit-count-equivalent unit-counts 'overseer) 0))
+                                 (if (or zerg-zvp-proactive-spore-due?
+                                         (and enemy-cloaked-threat-active?
+                                              (= (unit-count-equivalent unit-counts 'overseer) 0)))
                                      (min 2 (max 1 active-bases))
                                      0)))))]
               [(memq id '(photon-cannon missile-turret))
@@ -8988,7 +9026,7 @@
                    [else ;; barracks
                     (let ([raw-rax-cap
                            (cond
-                             [(>= active-bases 3) 8]
+                             [(>= active-bases 3) (if (>= minerals 1000) 10 8)]
                              [(>= active-bases 2) (if (or (>= workers 34) (>= minerals 400)) 5 3)]
                              [else (if under-early-rush-crisis? 2 1)])])
                       (if terran-tvt-rax-cap-for-tanks? (min 2 raw-rax-cap) raw-rax-cap))]))
@@ -9236,7 +9274,7 @@
                 (< (unit-count-equivalent unit-counts 'zergling) 8)))
          (define zerg-midgame-floor-pause-drones?
            (and zerg-midgame-army-floor-due?
-                (>= workers 44)))
+                (>= workers 46)))
          (struct-copy priority-candidate c
                       [utility-score (cond
                                        [(= workers 0) raw-worker-u]
@@ -9353,7 +9391,7 @@
                 (not terran-early-rush-hold?)
                 (not mid-rush-no-expand?)
                 (not zerg-4base-hatch-capped?)
-                (not (and zerg-midgame-army-floor-due? (>= total-townhalls-incl-pending 3)))
+                (not zerg-midgame-floor-defer-hatch4?)
                 (or natural-exp-window?
                     midgame-1base-natural-due?
                     terran-1base-nat-cc-lock?
@@ -9400,7 +9438,7 @@
                    (or under-attack?
                        terran-early-rush-hold?
                        zerg-4base-hatch-capped?
-                       (and zerg-midgame-army-floor-due? (>= total-townhalls-incl-pending 3))
+                       zerg-midgame-floor-defer-hatch4?
                        (and (not natural-exp-window?) (not terran-1base-nat-cc-lock?) (not step-post-t3-tech-expand-due?) (not zerg-3rd-hatch-pro-due?) (not light-expand-threat-ok?))
                        premature-3rd-base-starving-army?
                        (and ws-natural-blocked? (< minerals 350))))
@@ -10193,6 +10231,17 @@
                     (not (and terran-proactive-ebay-due?
                               (not terran-det-ebay-due?)
                               (eq? nsym 'engineering-bay)))
+                    (not (and zerg-zvp-proactive-spore-due?
+                              (not zerg-cloak-air-spore-due?)
+                              (not l29-cloak-det-boost)
+                              (eq? nsym 'spore-crawler)))
+                    (not (and zerg-midgame-floor-unit-u
+                              (not under-attack?)
+                              (<= enemy-threat-supply 0)
+                              (not zerg-anti-bio-baneling-boost?)
+                              (not zerg-air-dom-hydra-boost?)
+                              (not zerg-cloak-air-aa-unit-boost?)
+                              (not zerg-mass-air-hydra-due?)))
                     (not (and terran-tvt-protect-tank-over-spec-turret?
                               (eq? nsym 'missile-turret)))
                     (not (air-dom-demoted-ground-only? nsym))
@@ -10351,7 +10400,6 @@
                     (and zerg-roach-warren-1-priority-due? (eq? nsym 'roach-warren))
                     (and zerg-anti-bio-baneling-nest-boost? (>= gas 25))
                     (and zerg-anti-bio-baneling-boost? (>= gas 25))
-                    (and zerg-midgame-floor-unit-u (not zerg-3rd-hatch-pro-due?))
                     (and protoss-fast-warpgate-due? (eq? nsym 'warp-gate-research))
                     (and terran-midgame-rax-boost?
                          (let ([cur-rax (bldg-count-equivalent total-bldg-counts 'barracks)])
@@ -10645,13 +10693,16 @@
               (max (if (>= minerals 150) 760.0 560.0) plan-weight u0)]
              [(and zerg-roach-warren-1-priority-due? (eq? nsym 'roach-warren))
               (max (cond
-                     [(and zerg-enemy-early-ranged-harass?
+                     [(and zerg-enemy-fast-harass-pressure?
                            (or (>= army-supply 4) (>= minerals 150)))
                       740.0]
-                     [(and (>= frame 4032) (>= workers 26))
-                      590.0]
+                     [(or zerg-enemy-early-ranged-harass?
+                          (and (>= frame 4032) (>= workers 26)))
+                      555.0]
                      [else 525.0])
                    plan-weight u0)]
+             [(and zerg-zvp-proactive-spore-due? (eq? nsym 'spore-crawler))
+              (max 545.0 plan-weight u0)]
              [zerg-anti-bio-baneling-boost? (max 568.0 plan-weight u0)]
              [zerg-anti-bio-baneling-nest-boost? (max 506.0 plan-weight u0)]
              [(and protoss-3rd-nexus-pro-due? (eq? nsym 'nexus)) (max 555.0 plan-weight u0)]
@@ -11586,12 +11637,15 @@
             (max u (if (>= minerals 150) 760.0 560.0))]
            [(and zerg-roach-warren-1-priority-due? (eq? nsym 'roach-warren))
             (max u (cond
-                     [(and zerg-enemy-early-ranged-harass?
+                     [(and zerg-enemy-fast-harass-pressure?
                            (or (>= army-supply 4) (>= minerals 150)))
                       740.0]
-                     [(and (>= frame 4032) (>= workers 26))
-                      590.0]
+                     [(or zerg-enemy-early-ranged-harass?
+                          (and (>= frame 4032) (>= workers 26)))
+                      555.0]
                      [else 525.0]))]
+           [(and zerg-zvp-proactive-spore-due? (eq? nsym 'spore-crawler))
+            (max u 545.0)]
            [zerg-anti-bio-baneling-post? (max u 568.0)]
            [zerg-anti-bio-baneling-nest-post? (max u 506.0)]
            [(and terran-midgame-rax-post? (= (bldg-count-equivalent total-bldg-counts 'barracks) 1))
@@ -11788,6 +11842,17 @@
             #t]
            [(or supply-preempt-now? in-backoff?
                 (and terran-proactive-ebay-post? (not terran-det-ebay-post?))
+                (and zerg-zvp-proactive-spore-due?
+                     (not zerg-cloak-air-spore-due?)
+                     (not l29-cloak-det-boost-post)
+                     (eq? nsym 'spore-crawler))
+                (and zerg-midgame-floor-unit-u-post
+                     (not under-attack?)
+                     (<= enemy-threat-supply 0)
+                     (not zerg-anti-bio-baneling-post?)
+                     (not zerg-air-dom-hydra-post?)
+                     (not zerg-cloak-air-aa-unit-post?)
+                     (not zerg-mass-air-hydra-due?))
                 (and terran-tvt-protect-tank-over-spec-turret? (eq? nsym 'missile-turret))
                 (air-dom-demoted-ground-only? nsym)
                 (eq? nsym 'sentry)
@@ -11868,7 +11933,6 @@
            [(and zerg-roach-warren-1-priority-due? (eq? nsym 'roach-warren) (cand-can-escrow? id)) #t]
            [(and zerg-anti-bio-baneling-nest-post? (>= gas 25) (cand-can-escrow? id)) #t]
            [(and zerg-anti-bio-baneling-post? (>= gas 25) (cand-can-escrow? id)) #t]
-           [(and zerg-midgame-floor-unit-u-post (not zerg-3rd-hatch-pro-due?) (cand-can-escrow? id)) #t]
            [(and zerg-cap-air-corruptor-priority-due? (eq? nsym 'corruptor) (cand-can-escrow? id)) #t]
            [(and zerg-mass-air-aa-tech-due? (not zerg-cap-air-spire-due?) (not zerg-cap-air-corruptor-priority-due?) (eq? nsym 'hydralisk-den) (cand-can-escrow? id)) #t]
            [(and zerg-mass-air-hydra-due? (not zerg-cap-air-spire-due?) (not zerg-cap-air-corruptor-priority-due?) (eq? nsym 'hydralisk) (>= gas 25) (cand-can-escrow? id)) #t]
@@ -12140,6 +12204,7 @@
                        (not (and (or zerg-cap-air-extractor-boost? zerg-midgame-extractor-due?) (eq? csym 'extractor)))
                        (not (and terran-first-factory-due? (eq? csym 'factory)))
                        (not (and (or terran-det-ebay-due? terran-proactive-ebay-due?) (eq? csym 'engineering-bay)))
+                       (not (and zerg-zvp-proactive-spore-due? (eq? csym 'spore-crawler)))
                        (not (and zerg-cloak-air-hydraden-due? (eq? csym 'hydralisk-den)))
                        (slice15-nonessential-tech-preemptable? c is-rep? is-bo? is-timing-bo? workers lr-boost-static-def?))
                   (values (min u1 140.0) #f)]
@@ -12174,6 +12239,7 @@
                        (not (and (or zerg-cap-air-extractor-boost? zerg-midgame-extractor-due?) (eq? csym 'extractor)))
                        (not (and terran-first-factory-due? (eq? csym 'factory)))
                        (not (and (or terran-det-ebay-due? terran-proactive-ebay-due?) (eq? csym 'engineering-bay)))
+                       (not (and zerg-zvp-proactive-spore-due? (eq? csym 'spore-crawler)))
                        (not (and zerg-cloak-air-hydraden-due? (eq? csym 'hydralisk-den)))
                        (slice15-nonessential-tech-preemptable? c is-rep? #f is-timing-bo? workers #t))
                   (values (min u1 140.0) #f)]
@@ -12330,7 +12396,6 @@
         [(eq? csym 'hatchery)
          (< (+ total-townhalls-incl-pending sched-tech-cnt)
             (cond
-              [zerg-midgame-army-floor-due? 3]
               [(>= army-supply 45) 5]
               [else 4]))]
         [(and zerg-2base-second-t15-tech-blocked?
@@ -12363,6 +12428,8 @@
          (< (+ existing-tech-cnt sched-tech-cnt) desired-rax-tl)]
         [(and (eq? csym 'barracks) terran-tvt-rax-cap-for-tanks?)
          (< (+ existing-tech-cnt sched-tech-cnt) 2)]
+        [(and (eq? csym 'barracks) (< minerals 1000))
+         (< (+ existing-tech-cnt sched-tech-cnt) 8)]
         [(zero-worker-suppressed-bldg? csym cat act)
          #f]
         [(and terran-maxed-suppress-extra-prod?
@@ -12394,8 +12461,9 @@
          (< (+ existing-tech-cnt sched-tech-cnt)
             (min (max 1 active-bases)
                  (max 1 desired-spores
-                      (if (and enemy-cloaked-threat-active?
-                               (= (unit-count-equivalent unit-counts 'overseer) 0))
+                      (if (or zerg-zvp-proactive-spore-due?
+                              (and enemy-cloaked-threat-active?
+                                   (= (unit-count-equivalent unit-counts 'overseer) 0)))
                           (min 2 (max 1 active-bases))
                           0))))]
         [(eq? csym 'spine-crawler)
@@ -13357,6 +13425,10 @@
          (not (and zerg-zvz-rush-suppress-t15-tech? (memq final-bo-goal-norm '(roach-warren baneling-nest))))
          (not (terran-defer-for-111-sym? final-bo-goal-norm))
          (not (terran-tvt-tank-defer-addon? final-bo-goal-norm))
+         (not (and (eq? final-bo-goal-norm 'barracks)
+                   (or terran-rax-hard-cap-reached?
+                       (and terran-tvt-rax-cap-for-tanks?
+                            (>= (bldg-count-equivalent total-bldg-counts 'barracks) 2)))))
          (not (and zerg-4base-hatch-capped? (eq? final-bo-goal-norm 'hatchery)))
          (not (and (memq final-bo-goal-norm '(hatchery nexus command-center))
                    (or under-early-rush-crisis?

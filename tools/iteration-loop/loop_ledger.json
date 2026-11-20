@@ -3013,6 +3013,110 @@
         "FIRST-EVER 2.02x Dummy / 1.72x SP Honest Arena Trade ATHs + A:M 6.24 ATH + Zerg 60W-0L Dummy Streak (3.06x ATH) + p09 FLAWLESS 99.00x + ZERO Draws across all 72/72 Arena duels!"
       ],
       "promotion_gates_passed": "4/9 PASS across full 78-match (core_14 + unseen_12) roster (+1 vs L32! zero_crashes_and_rejects, ties_le_2 [0T!], sup_blk_le_6pct [3.8%], tactics_suite_100pct [31W-5L-0D 86.1% / 2.02x ATH!]) \u2014 missed overall_wr_ge_50pct, trade_agg, trade_med, every_race_wr_ge_33pct (Zerg slumped), every_race_w4_within_6_of_pro (T -2.0 PASS; P -7.0 & Z -7.0 both 1w shy!)"
+    },
+    {
+      "id": "iter34_wave34_full",
+      "status": "SHIP_GATE_GREEN_BASELINE_H2H_5W_1L_1_90X_ATH_BOTZIPS_REBUILT_FOR_LIVE_AI_ARENA",
+      "campaign": "Loops 29+ Self-Play, Honest Tactics Arena 2.0 & Expanded Roster Campaign (Loop 34 LIVE SHIP CANDIDATE)",
+      "loop_self_improvements": [
+        "L34-LOOP-1 (Controlled A/B Baseline H2H Ship-Gate Validation): Verified Loop 34 fixes flipped baseline_h2h from 1W-5L (0.54x, 5/6 DripFeed, 21x/28x rax) straight to a NEW ALL-TIME RECORD 5W-1L-0T (1.90x Trade ATH, 2.79x Med, 0 DripFeed, 0 ProdStall, 4/5 wins 0-anom, 3-0 mirror sweep) \u2014 unlocking live AI Arena Competition #38 BotZip ship!"
+      ],
+      "spec_summary": "Loop 34 (L34-P0-1..3 \u2014 LIVE AI ARENA SHIP CANDIDATE): Eliminated Terran 21x/28x rax ProdPlaceStall (CORE14 PROD_PLACE_STALL = 0/42 ALL-TIME ZERO!, H2H ProdStall = 0!), eliminated 1BaseLock across ALL 84 matches (FIRST-EVER 0/84!), restored Zerg midgame macro & rebound (+2W/-5L/+3T across all 84, FIRST unseen_12 Zerg WIN 11.00x, Zerg Honest Arena 72W-0L 6-loop streak!), achieved FIRST-EVER onlyfans 3-0 clean sweep (2.17x, PkA 9,833), puck & oberon BOTH undefeated 2-0-1, #73 Zvwho & #74 Tvwho BOTH CloakLoss=0, and SHATTERED baseline_h2h record 5W-1L-0T (1.90x ATH, 0 DripFeed)!",
+      "rev": "lmxztpsu b0372710 (iter34 live ship candidate)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261120_225222_iter34_wave34_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261120_232144_iter34_baseline_h2h",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter34_wave34_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter34_baseline_h2h_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter34_wave34_full.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter34.json",
+      "tactics_selfplay_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter34.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter34.md",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "21W-53L-4T (78/78 clean external = 42 core_14 + 36 unseen_12; 26.9% WR, 32.1% NL, 0.47x Trade, SB 4.1%, 1BaseLock=0/84 FIRST-EVER!, WorstTrP95=7.7ms ATL!)",
+      "record_core14": "17W-23L-2T (40.5% WR, 45.2% NL [-2L vs L33!], 0.68x Trade, SB 4.2%, PkArmy 3404, PROD_PLACE_STALL=0/42 ALL-TIME ZERO!, FIRST-EVER onlyfans 3-0 sweep 2.17x, puck 2-0-1 & oberon 2-0-1 UNDEFEATED!)",
+      "record_core12_historical": "14W-20L-2T (38.9% WR, 44.4% NL, 0.58x Trade, SB 4.4%)",
+      "record_unseen12": "4W-30L-2T (11.1% WR, 16.7% NL [+1W/-3L/+2T vs L33!], 0.31x Trade, W@6m 37.6 [+3.9!], SB 3.9% [T 2.1%!], 1BaseLock=0!; [FRESH] PolyMorph 2-1 0.97x, [RET_4] CryptBotRevival 2-1 w/ FIRST unseen_12 Zerg WIN 11.00x!, [FRESH] AxeFighter 0-1-2 66.7% NL!)",
+      "record_selfplay_6": "P1 4W-2L-0T (66.7%, Trade 1.50x, SB P1 2.8%, PkArmy 5358, AvgDur 734s, A8Pro 0.66, P1 TvT0Tank=0, P2 ProdStall=0, P1 & P2 1Base=0!)",
+      "record_baseline_h2h": "NEW ALL-TIME H2H SHIP-GATE RECORD: L34 source vs L28 shipped ZIP 5W-1L-0T (83.3% WR!, Trade 1.90x ATH [+1.36x] / 2.79x Med, PkArmy 6,921 vs 2,346, W@4m 31.5 vs 29.3, SB 3.1% [T 1.5%!], DripFeed=0, ProdPlaceStall=0, 1Base=0, TvT0Tank=0, ALL 3 Mirrors 3-0, 4/5 wins 0-anom: ZvZ 4.15x, TvT 2.21x, PvP 2.79x, PvZ 6.23x, TvZ 8.98x!)",
+      "wr_pct_clean": 26.9,
+      "non_loss_pct": 32.1,
+      "trade_agg": 0.47,
+      "trade_med": 0.21,
+      "pk_army_avg": 2794.6,
+      "sup_blk_avg": 4.1,
+      "early_atk_pct_2m_6m_avg": 39.6,
+      "protoss_warpgate_sec_med": 247.9,
+      "zerg_roach_warren_sec_med": 187.3,
+      "combat_death_home_enemy_pct_avg": "63.1%/24.2%",
+      "late_game_stalemate_tie_matches": 1,
+      "worker_econ_eff_4m_6m_avg": "48.3/54.6",
+      "econ_eff_collapse_matches": 4,
+      "endgame_home_stall_count": 0,
+      "own_base_retreat_frames": 288,
+      "own_territory_retreat_frames": 332,
+      "non_combat_robo_waste_val": 500,
+      "zerg_non_ling_army_pct": 81.0,
+      "siege_range_zero_dps_losses": 19,
+      "cloaked_unit_damage_losses": 2,
+      "gas_rich_min_starved_matches": 9,
+      "one_base_lockout_matches": 0,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 4,
+      "prod_placement_stall_matches": 2,
+      "zero_kill_collapse_matches": 9,
+      "drip_feed_collapse_matches": 38,
+      "prod_idle_bank_freeze_matches": 1,
+      "gas_zero_harvest_freeze_matches": 0,
+      "spire_sched_drop_matches": 1,
+      "wall_timeout_ties": 3,
+      "army_val_4m_ratio_vs_pro": 0.89,
+      "army_val_8m_ratio_vs_pro": 0.47,
+      "latency_summary": "ALL 90/90 clean <=180.99ms (0 spikes >=500ms!; core_14<=176.5ms, H2H<=132.0ms; NEW ALL-TIME LOW WorstTrP95=7.7ms!; 0 rejects!)",
+      "by_race": {
+        "Protoss": {
+          "record": "7W-19L-0T across all 26 (core_14 6-8 42.9%, unseen_12 1-11 w/ PolyMorph 2.58x W; onlyfans W 2.08x 0-anom, puck W 1.31x, oberon W; H2H 2-1 w/ PvP 2.79x & PvZ 6.23x 0-anom!)",
+          "trade_agg": 0.47,
+          "w4_alive_med": 27.0,
+          "w6_alive_med": 40.0,
+          "nat_sec": 102.1,
+          "sup_blk": 4.4
+        },
+        "Terran": {
+          "record": "9W-16L-1T across all 26 (34.6% WR, NEW ATL SB 2.5% [unseen 2.1%!], W@6m 40.0/40.0 EXACT PRO, W@4m 25/27, Top BO MATCH!; core_14 7-7 50%, onlyfans W, puck W 3.59x, oberon W 4.95x, PolyMorph W 4.77x, CryptBot W 10.25x, #74 Tvwho CloakLoss=0!; H2H 2-0 2.87x w/ TvT 2.21x & TvZ 8.98x BOTH 0-anom!)",
+          "trade_agg": 0.62,
+          "w4_alive_med": 25.0,
+          "w6_alive_med": 40.0,
+          "nat_sec": 114.5,
+          "sup_blk": 2.5
+        },
+        "Zerg": {
+          "record": "5W-18L-3T across all 26 (+1W/-4L/+3T vs L33; core_14 4-8-2 42.9% NL w/ onlyfans W 3.98x PkA 11,000 & sludgement2 W 2.15x & #73 Zvwho CloakLoss=0!; unseen_12 1-10-1 FIRST Zerg unseen win CryptBot 11.00x + AxeFighter tie!; H2H ZvZ W 4.15x PkA 9,175!; Honest Arena 72W-0L 6-loop streak!)",
+          "trade_agg": 0.35,
+          "w4_alive_med": 26.5,
+          "w6_alive_med": 43.0,
+          "nat_sec": 56.2,
+          "sup_blk": 5.3
+        }
+      },
+      "tactics_summary": {
+        "rev": "lmxztpsu c3f5bd91 (iter34)",
+        "passed": "Verifier 7/7 + 22/22 L31 + 21/21 L32 + 13/13 L33 + 11/11 L34 + 27/27 Belief + 231/231 Tactics FIRST-PASS; Zerg 72W-0L 6-loop Honest Arena Dummy streak!",
+        "sc2_duel36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter34.json",
+        "sc2_selfplay36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter34.json",
+        "sc2_duel36_summary": "HONEST 960-LOOP ARENA 2.0: Dummy 31W-5L-0D (ALL 36/36 CLEAN KOs, 0 Draws, 1.81x, A:M 5.81; Zerg 6TH STRAIGHT PERFECT 12-0-0 = 72W-0L streak w/ NEW A:M 11.59 ATH!; Terran 10W-2L-0D 1.81x w/ t02 KO WIN flip!) + Self-Play 27W-8L-1D (P1 A:M 6.03, Terran 8W-4L w/ t06 & t07 KO WIN flips!)"
+      },
+      "visual_qa_highlights": [
+        "#21 Mothman-P vs PolyMorph (10:36 HELD-OUT UNSEEN WIN 2.58x): Twin Colossi + Zealots + Stalkers carving straight through fresh PolyMorph natural Hatchery & Drones!",
+        "#25 Z v onlyfans (3.98x, PkA 11,000) & #27 P v onlyfans (2.08x 0-anom): First-ever onlyfans 3-0 clean sweep verified in 3D; Arena t02 (1.17x KO flip!), sp-t07 (1.95x KO flip!), z08 (3.89x KO 72W-0L streak!) all crisp.",
+        "Loop 35 Visual Smoking Guns: #56 T v Mulebot (14:12 LOSS 0.61x) shows 7+ UNSIEGED TANKS clumped on high-ground main + 14 Vikings parked below doing 0 DPS while Mulebot walks 3 sieged Tanks up to our natural Barracks!; #41 T v Thessaloniki (03:24 LOSS 0.03x) shows 3 un-walled Barracks + empty Bunker letting 10 Lings wipe SCVs; #44 T v QueenBot (12:16 LOSS 0.82x) shows 15+ Queens creeping across map while T stalled on prod_idle_bank_freeze. (Note: clip06 #12 Pvpuck peak frame caught mid-map transit; 7/8 replay frames on active combat.)"
+      ],
+      "key_wins": [
+        "SHIP GATE UNLOCKED \u2014 NEW ALL-TIME BASELINE H2H RECORD vs L28 ZIP: 5W-1L-0T (83.3% WR, 1.90x Trade ATH [+1.36x], 2.79x Med, PkArmy 6,921 vs 2,346, SB 3.1% [T 1.5%], DripFeed=0, ProdPlaceStall=0, 1Base=0, TvT0Tank=0, 3-0 mirror sweep, 4/5 wins 0-anom)!",
+        "FIRST-EVER PROD_PLACE_STALL=0/42 ON CORE14 + FIRST-EVER 1BaseLock=0/84 ACROSS ALL 84 MATCHES + NEW WorstTrP95=7.7ms ATL + Terran NEW SB ATL 2.5% & W@6m 40.0/40.0 EXACT PRO!",
+        "FIRST-EVER onlyfans 3-0 CLEAN SWEEP (2.17x, PkA 9,833), puck & oberon BOTH UNDEFEATED 2-0-1, Zerg rebound (+2W/-5L/+3T across 84, FIRST unseen_12 Zerg W 11.00x, 72W-0L 6-loop Honest Arena streak!), [FRESH] PolyMorph 2-1, CryptBotRevival 2-1, AxeFighter 0-1-2!"
+      ],
+      "promotion_gates_passed": "3/9 PASS across full 78-match (core_14 + unseen_12) roster (zero_crashes_and_rejects, sup_blk_le_6pct [4.1%], tactics_suite_100pct [31W-5L-0D 86.1% / 1.81x, Zerg 72-0!]); 5/9 PASS on core_14 alone (zero_crashes, ties_le_2 [2T], sup_blk_le_6pct [4.2%], every_race_wr_ge_33pct [T 50.0% / P 42.9% / Z 42.9% NL], tactics_suite_100pct); LIVE SHIP GATE 5W-1L 1.90x ATH PASS!"
     }
   ],
   "final_18_loop_summary": {

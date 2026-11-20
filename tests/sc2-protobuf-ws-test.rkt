@@ -7384,7 +7384,8 @@
   (define mode-388-c (sc2-raw-unit-command 388 #f 0 '(13951) #f))
   (define bld-321-c  (sc2-raw-unit-command 321 (sc2-point2d 34.5 34.5) 0 '(13952) #f))
   (define out-33c (govern-sc2-wire-actions! gov-33c (list mode-388-c bld-321-c) 112))
-  ;; Now check urgent P0 beats overdue P1 when only 2.0 headroom remains:
+  ;; Now check urgent P0 beats overdue P1 in the 8..11f window when only 2.0 headroom remains
+  ;; (whereas >= 12f critical overdue P1 preempts even urgent P0 — tested in L34-P0-1c!):
   (define gov-33d (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 12.0))
   (void (govern-sc2-wire-actions! gov-33d (list (sc2-raw-unit-command 524 #f 0 '(13960) #f)) 100))
   (void (govern-sc2-wire-actions!
@@ -7394,7 +7395,7 @@
          102))
   (define urg-407-d (mark-urgent-survival-cmd! (sc2-raw-unit-command 407 #f 13969 '(13961) #f)))
   (define bld-321-d (sc2-raw-unit-command 321 (sc2-point2d 34.5 34.5) 0 '(13962) #f))
-  (define out-33d (govern-sc2-wire-actions! gov-33d (list bld-321-d urg-407-d) 112))
+  (define out-33d (govern-sc2-wire-actions! gov-33d (list bld-321-d urg-407-d) 109))
   (check-true "l33-p0-1c-overdue-p1-runs-at-hr-floor-0-before-p0-mode-switch-after-urgent-p0"
               (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) out-33c)
                    (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 388))) out-33c))
@@ -7455,6 +7456,214 @@
                      (<= (l33-dist (sc2-point2d-x rax33-pt) (sc2-point2d-y rax33-pt) 68.5 30.5) 0.1)))
     (cleanup!))
   (hash-clear! SC2-TERRAN-5X3-MISS-STREAK))
+
+;; =============================================================================
+;; Loop 34 (`L34-P0-1`): Overlord Cliff-Edge P0 Freeze Fix + Unstarvable P1 Before
+;; Urgent P0 + LabMineralField Main Clustering (Zero Fake 0-Mineral Expansion Pads)
+;; =============================================================================
+(printf "[Loop 34] Testing L34-P0-1 Overlord dead-airspace non-dispatch, AA-only 16f dead-air limit, >=12f P1-before-urgent-P0 + 8f dedup, & LabMineralField main clustering...\n")
+(let ()
+  (define (mk-l34-u tag utype alliance x y
+                    #:hp [hp 100.0] #:rad [rad 1.0] #:flying? [fly? #f]
+                    #:mins [mins 0] #:vesp [vesp 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 3) 0 2))
+              (sc2-point3d x y (if fly? 12.0 8.0)) 0.0 rad 1.0 0 #f #f #f
+              hp hp 0.0 0.0 0.0 0.0 mins vesp fly? #f #f #t #f
+              '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+
+  (define (l34-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+
+  ;; Build a 128x128 pathing grid with unpathable cliff-edge dead airspace for `x < 22`!
+  (define l34-path-bytes (make-bytes (* 128 128) 1))
+  (for* ([iy (in-range 128)]
+         [ix (in-range 22)])
+    (bytes-set! l34-path-bytes (+ ix (* iy 128)) 0))
+  (define l34-path-grid (sc2-image-grid 8 128 128 l34-path-bytes #f #f))
+  (define l34-gi
+    (sc2-game-info "L34DeadAirMap" "" '() '(128 128) '(4 4 124 124)
+                   (list (sc2-point2d 100.0 100.0)) l34-path-grid #f l34-path-grid))
+
+  ;; L34-P0-1a: Enemy Overlord (106) hovering over unpathable dead airspace `(16.0, 28.5)` behind Main
+  ;; CC `(28.5, 28.5)` MUST NOT dispatch idle Marauders/Medivacs via `base-threat`, AND an explicit
+  ;; `(attack-unit ...)` targeting that Overlord MUST NOT escalate to `urgent-survival-cmd?` (P0)!
+  (define cc-34a  (mk-l34-u 14001 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+  (define mar-34a (mk-l34-u 14002 51 1 31.0 28.5 #:hp 125.0 #:rad 0.5625)) ;; Marauder (ground-only)
+  (define med-34a (mk-l34-u 14003 54 1 31.0 30.0 #:hp 150.0 #:rad 1.0 #:flying? #t)) ;; Medivac (non-AA)
+  (define mrn-34a (mk-l34-u 14010 48 1 30.0 28.5 #:hp 45.0 #:rad 0.375)) ;; Marine (explicit attack-unit)
+  (define ovl-34a (mk-l34-u 14099 106 4 16.0 28.5 #:hp 200.0 #:rad 1.0 #:flying? #t))
+  (define cmds-34a
+    (translate-bot-actions->sc2-raw-commands
+     '((attack-unit 14010 14099))
+     (make-test-obs 23000 500 200 (list cc-34a mar-34a med-34a mrn-34a ovl-34a))
+     #:game-info l34-gi #:suppress-attack? #t))
+  (define dead-air-dispatch-34a
+    (ormap (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 23)
+                  (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                  (<= (l34-dist (sc2-point2d-x (sc2-raw-unit-command-target-pos c))
+                                (sc2-point2d-y (sc2-raw-unit-command-target-pos c))
+                                16.0 28.5)
+                      1.0)))
+           cmds-34a))
+  (define ovl-atk-34a
+    (findf (lambda (c) (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-ability-id c) 23)
+                            (= (sc2-raw-unit-command-target-unit-tag c) 14099)))
+           cmds-34a))
+  (check-true "l34-p0-1a-overlord-dead-airspace-never-dispatches-ground-or-escalates-p0"
+              (and (not dead-air-dispatch-34a)
+                   (sc2-raw-unit-command? ovl-atk-34a)
+                   (not (urgent-survival-cmd? ovl-atk-34a))
+                   (= (wire-cmd-priority-tier ovl-atk-34a) 2)))
+
+  ;; L34-P0-1b: Real flying combat `base-threat` (Banshee 55) over unpathable dead airspace `(20.0, 28.5)`:
+  ;; dispatches ONLY AA-capable `marine (48)` (NEVER `marauder (51)` or `medivac (54)`!), keeps it
+  ;; non-urgent (`P2`), and enforces >= 16f per-tile cooldown (`23100` emits, `23108` skipped, `23116` emits)!
+  (define cc-34b  (mk-l34-u 14101 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+  (define mrn-34b (mk-l34-u 14102 48 1 26.0 28.5 #:hp 45.0 #:rad 0.375))  ;; AA Marine (`6t` from Banshee)
+  (define mar-34b (mk-l34-u 14103 51 1 26.0 29.5 #:hp 125.0 #:rad 0.5625)) ;; Ground-only Marauder
+  (define med-34b (mk-l34-u 14104 54 1 26.0 30.5 #:hp 150.0 #:rad 1.0 #:flying? #t)) ;; Non-AA Medivac
+  (define ban-34b (mk-l34-u 14199 55 4 20.0 28.5 #:hp 140.0 #:rad 0.75 #:flying? #t))
+  (define (run-34b loop)
+    (translate-bot-actions->sc2-raw-commands
+     '()
+     (make-test-obs loop 500 200 (list cc-34b mrn-34b mar-34b med-34b ban-34b))
+     #:game-info l34-gi #:suppress-attack? #t))
+  (define (find-bt-23 cmds)
+    (findf (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 23)
+                  (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                  (<= (l34-dist (sc2-point2d-x (sc2-raw-unit-command-target-pos c))
+                                (sc2-point2d-y (sc2-raw-unit-command-target-pos c))
+                                20.0 28.5)
+                      1.0)))
+           cmds))
+  (define bt-23100 (find-bt-23 (run-34b 23100)))
+  (define bt-23108 (find-bt-23 (run-34b 23108)))
+  (define bt-23116 (find-bt-23 (run-34b 23116)))
+  (check-true "l34-p0-1b-flying-base-threat-aa-only-and-16f-dead-airspace-cooldown"
+              (and (sc2-raw-unit-command? bt-23100)
+                   (equal? (sc2-raw-unit-command-unit-tags bt-23100) '(14102))
+                   (not (urgent-survival-cmd? bt-23100))
+                   (not bt-23108)
+                   (sc2-raw-unit-command? bt-23116)
+                   (equal? (sc2-raw-unit-command-unit-tags bt-23116) '(14102))))
+
+  ;; L34-P0-1c: `8f` repeat dedup on identical `urgent-survival-cmd?` combat `23`/`16`, AND
+  ;; `240`-loop continuous `urgent-survival-cmd?` `P0` spam NEVER starves overdue `P1` macro
+  ;; (`1a-pre` rescues `>= 12` loops stale P1 BEFORE `1a` `p0-urgent-cmds` with `tok=-4.0, hr=0.0`!)!
+  (define gov-34d (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define urg-dedup-loops
+    (for/list ([gl (in-list '(100 102 104 106 108))]
+               #:when (pair? (govern-sc2-wire-actions!
+                              gov-34d
+                              (list (mark-urgent-survival-cmd!
+                                     (sc2-raw-unit-command 23 (sc2-point2d 16.0 152.0) 0 '(14201 14202) #f)))
+                              gl)))
+      gl))
+  (define gov-34s (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define p1-cnt-34s 0)
+  (define p1-kinds-34s (mutable-seteqv))
+  (define max-p1-gap-34s 0)
+  (define last-p1-34s 1000)
+  (define ev-win-34s '())
+  (define peak-ev-34s 0)
+  (define sel-34s #f)
+  (for ([step-i (in-range 0 65)])
+    (define gl (+ 1000 (* step-i 4)))
+    ;; Spam 12 unique urgent-survival P0 commands EVERY step!
+    (define urg-spam
+      (for/list ([k (in-range 12)])
+        (mark-urgent-survival-cmd!
+         (sc2-raw-unit-command 23 (sc2-point2d (+ 20.0 (* 0.5 k)) (+ 20.0 step-i)) 0
+                               (list (+ 14300 (* step-i 16) k)) #f))))
+    (define base-m
+      (list (sc2-raw-unit-command 171 #f 9001 (list (+ 14900 (modulo step-i 3))) #f)
+            (sc2-raw-unit-command 524 #f 0 (list (+ 14910 (modulo step-i 3))) #f)
+            (sc2-raw-unit-command 560 #f 0 (list (+ 14920 (modulo step-i 4))) #f)
+            (sc2-raw-unit-command 321 (sc2-point2d 34.5 34.5) 0 (list (+ 14930 (modulo step-i 4))) #f)))
+    (define rot (modulo (quotient step-i 3) 4))
+    (define m-batch (append (drop base-m rot) (take base-m rot)))
+    (define out (govern-sc2-wire-actions! gov-34s (append urg-spam m-batch) gl))
+    (define saw-p1? #f)
+    (for ([c (in-list out)] #:when (sc2-raw-unit-command? c))
+      (define ab (sc2-raw-unit-command-ability-id c))
+      (define tags (sc2-raw-unit-command-unit-tags c))
+      (define cost (if (and sel-34s (equal? tags sel-34s)) 1 2))
+      (set! sel-34s tags)
+      (set! ev-win-34s (cons (cons gl cost) ev-win-34s))
+      (when (memv ab '(171 524 560 321))
+        (set! saw-p1? #t)
+        (set! p1-cnt-34s (add1 p1-cnt-34s))
+        (set-add! p1-kinds-34s ab)))
+    (set! ev-win-34s (filter (lambda (e) (> (car e) (- gl 1344))) ev-win-34s))
+    (set! peak-ev-34s (max peak-ev-34s (for/sum ([e (in-list ev-win-34s)]) (cdr e))))
+    (if saw-p1?
+        (begin
+          (set! max-p1-gap-34s (max max-p1-gap-34s (- gl last-p1-34s)))
+          (set! last-p1-34s gl))
+        (set! max-p1-gap-34s (max max-p1-gap-34s (- gl last-p1-34s)))))
+  (check-true (format "l34-p0-1c-urgent-p0-spam-never-starves-p1-and-8f-dedups-combat (dedup=~a p1=~a kinds=~a gap=~a ev=~a)"
+                      urg-dedup-loops p1-cnt-34s (set-count p1-kinds-34s) max-p1-gap-34s peak-ev-34s)
+              (and (equal? urg-dedup-loops '(100 108))
+                   (>= p1-cnt-34s 20)
+                   (= (set-count p1-kinds-34s) 4)
+                   (<= max-p1-gap-34s 16)
+                   (<= peak-ev-34s 485)))
+
+  ;; L34-P0-1d: `LabMineralField` (665) / `LabMineralField750` (666) + 2 `SpacePlatformGeyser` (343)
+  ;; main-base clustering produces 0 fake 0-mineral geyser-only pads, clusters Main cleanly, filters
+  ;; `mineral-field-450` (1996) wall blockers, enforces 16.0t non-main distance, and ranks real Natural #1!
+  (define map-w 192)
+  (define map-h 168)
+  (define full-192 (sc2-image-grid 8 map-w map-h (make-bytes (* map-w map-h) 1) #f #f))
+  (define th-192 (sc2-image-grid 8 map-w map-h (make-bytes (* map-w map-h) 160) #f #f))
+  (define gi-lab
+    (sc2-game-info "L34LabMinMainMap" "" '() (cons map-w map-h) (hash 'x0 4 'y0 4 'x1 188 'y1 164)
+                   (list (sc2-point2d 42.5 40.5)) full-192 th-192 full-192))
+  (define (mk-lab-cluster tag0 px py mtype1 mtype2 gtype)
+    (append
+     (for/list ([k (in-range 8)])
+       (define mt (if (even? k) mtype1 mtype2))
+       (define mc (if (even? k) 1800 900))
+       (mk-l34-u (+ tag0 k) mt 3 (+ px 6.5) (+ (- py 3.5) (* 1.0 k)) #:rad 1.125 #:mins mc))
+     (list (mk-l34-u (+ tag0 10) gtype 3 (- px 1.0) (- py 7.0) #:rad 1.5 #:vesp 2250)
+           (mk-l34-u (+ tag0 11) gtype 3 (- px 1.0) (+ py 7.0) #:rad 1.5 #:vesp 2250))))
+  (define lab-neutrals
+    (append
+     ;; Top-Right Main `(155.5, 133.5)`: 8 LabMineralField / LabMineralField750 + 2 SpacePlatformGeysers
+     (mk-lab-cluster 15100 155.5 133.5 665 666 343)
+     ;; MineralField450 blockers (must be excluded!)
+     (list (mk-l34-u 15150 1996 3 140.0 120.0 #:rad 1.125 #:mins 450)
+           (mk-l34-u 15151 1996 3 141.0 120.0 #:rad 1.125 #:mins 450))
+     ;; Two stray orphan geysers (`0` minerals!) at `(144, 143)` (`14.8t` from Main — must produce 0 fake pads!)
+     (list (mk-l34-u 15160 343 3 144.0 140.0 #:rad 1.5 #:vesp 2250)
+           (mk-l34-u 15161 343 3 144.0 146.0 #:rad 1.5 #:vesp 2250))
+     ;; Real Natural at `(157.5, 104.5)` (`29.1t` South of Main)
+     (mk-lab-cluster 15200 157.5 104.5 341 483 343)
+     ;; Third base at `(116.5, 133.5)` (`39.0t` West of Main)
+     (mk-lab-cluster 15300 116.5 133.5 341 483 343)))
+  (define lab-bases (solve-all-map-expansion-bases lab-neutrals gi-lab))
+  (define lab-ordered (order-expansions-from-origin lab-bases 155.5 133.5 full-192 lab-neutrals))
+  (define no-zero-min-pads?
+    (for/and ([b (in-list lab-bases)])
+      (>= (length (hash-ref b 'minerals '())) 4)))
+  (define main-clustered?
+    (ormap (lambda (b)
+             (and (<= (l34-dist (hash-ref b 'x) (hash-ref b 'y) 155.5 133.5) 3.0)
+                  (= (length (hash-ref b 'minerals '())) 8)
+                  (= (length (hash-ref b 'geysers '())) 2)))
+           lab-bases))
+  (define first-nat (and (pair? lab-ordered) (first lab-ordered)))
+  (check-true "l34-p0-1d-lab-mineral-field-main-0-fake-geyser-pads-and-ranks-real-natural-first"
+              (and (= (length lab-bases) 3)
+                   no-zero-min-pads?
+                   main-clustered?
+                   (hash? first-nat)
+                   (<= (l34-dist (hash-ref first-nat 'x) (hash-ref first-nat 'y) 157.5 104.5) 3.0))))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
