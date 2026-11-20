@@ -14693,6 +14693,134 @@
                                    'zealot 0.0)
                          960.0))
                 "L30-P0-2 #36 Pv12Pool: <4:00 Ling rush must prioritize Zealot #1-#2 (u>=960) strictly before CyberCore/Nexus/GW#2")
+
+  ;; 51.19 Loop 31 (L31-P0-2): Deficit-Aware Emergency Supply Replacement (#14/#18/#19/H2H#02),
+  ;;       Terran 1-Base Natural CC Ahead of Starport + Strict TvT Tank-Before-Rax3 (#08/#26/#38),
+  ;;       Zerg Mass-Stargate Hydralisk Scaling (#19) & Zero-Worker Building Guard (#20/#21/H2H#06)
+  ;; (a) Deficit-aware emergency supply replacement (46/39 pend=1 -> u=2200, 53/39 pend=0 @340M -> 3 concurrent)
+  (reset-macro-escrow-tracker!)
+  (define l31-t-deficit-pend1
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 11312
+      #:minerals 135 #:gas 120 #:supply-used 46 #:supply-cap 39 #:supply-left 0 #:pending-supply 1
+      #:workers 24 #:active-bases 2 #:mineral-harvesters 18 #:gas-harvesters 6
+      #:army-supply 22 #:enemy-threat-supply 30 #:under-attack? #t
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 1 'barracks 3 'factory 1 'factory-techlab 1 'refinery 3)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 2 'barracks 3 'factory 1 'factory-techlab 1 'refinery 3)
+      #:unit-counts (hasheq 'scv 24 'marine 14 'siege-tank 2)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 1))))
+  (reset-macro-escrow-tracker!)
+  (define l31-t-deficit-conc3
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 11400
+      #:minerals 340 #:gas 80 #:supply-used 53 #:supply-cap 39 #:supply-left 0 #:pending-supply 0
+      #:workers 24 #:active-bases 2 #:mineral-harvesters 18 #:gas-harvesters 6
+      #:army-supply 29 #:enemy-threat-supply 24 #:under-attack? #t
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 1 'barracks 3 'factory 1 'refinery 3)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 1 'barracks 3 'factory 1 'refinery 3)
+      #:unit-counts (hasheq 'scv 24 'marine 20 'siege-tank 3)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 1))))
+  (assert-true! (and (not (not (memq 'supply-depot (macro-brain-decision-scheduled-ids l31-t-deficit-pend1))))
+                     (>= (hash-ref (hash-ref (priority-schedule-result-category-utilities
+                                              (macro-brain-decision-priority-schedule l31-t-deficit-pend1))
+                                             'candidate-utilities (hasheq))
+                                   'supply-depot 0.0)
+                         2200.0)
+                     (= (for/sum ([s (in-list (macro-brain-decision-scheduled-ids l31-t-deficit-conc3))]
+                                  #:when (eq? s 'supply-depot)) 1)
+                        3))
+                "L31-P0-2 #14/H2H#02: Deficit-aware emergency supply must force u=2200 replacement w/ pend=1 & schedule 3 concurrent for 53/39")
+
+  ;; (b) Terran 1-base Natural CC past 3:15 strictly above Starport@810 + TvT Rax<=2 until >=2 Tanks or Factory #2
+  (reset-macro-escrow-tracker!)
+  (define l31-t-08-nat-cc
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 4864
+      #:minerals 45 #:gas 95 #:supply-used 37 #:supply-cap 47 #:workers 24 #:active-bases 1
+      #:mineral-harvesters 18 #:gas-harvesters 6
+      #:army-supply 13 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 4 'barracks 1 'factory 1 'factory-techlab 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 4 'barracks 1 'factory 1 'factory-techlab 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 24 'marine 7 'siege-tank 2)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1 'factory 1))))
+  (reset-macro-escrow-tracker!)
+  (define l31-t-38-rax2-cap
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 5900
+      #:minerals 300 #:gas 60 #:supply-used 48 #:supply-cap 70 #:workers 32 #:active-bases 2
+      #:mineral-harvesters 26 #:gas-harvesters 6
+      #:army-supply 16 #:enemy-threat-supply 6 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 6 'barracks 2 'barracks-techlab 1
+                                      'factory 1 'factory-techlab 1 'refinery 3)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 6 'barracks 2 'barracks-techlab 1
+                                      'factory 1 'factory-techlab 1 'refinery 3)
+      #:unit-counts (hasheq 'scv 32 'marine 13 'siege-tank 1)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 0 'factory 0))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l31-t-08-nat-cc) 'command-center)
+                     (>= (hash-ref (hash-ref (priority-schedule-result-category-utilities
+                                              (macro-brain-decision-priority-schedule l31-t-08-nat-cc))
+                                             'candidate-utilities (hasheq))
+                                   'command-center 0.0)
+                         830.0)
+                     (not (memq 'barracks (macro-brain-decision-scheduled-ids l31-t-38-rax2-cap)))
+                     (not (eq? (macro-brain-decision-saving-for l31-t-38-rax2-cap) 'barracks)))
+                "L31-P0-2 #08/#38 Terran: 1b CC past 3:15 must outrank Starport (u>=830) & TvT must cap Rax<=2 until >=2 Tanks or Fac#2")
+
+  ;; (c) Zerg Mass-Stargate Hydralisk Scaling (#19: scale past 16 up to 24+ vs 24 Phoenixes & block Roach/Ling mineral steal)
+  (reset-macro-escrow-tracker!)
+  (define l31-z-19-hydra24
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 11800
+      #:minerals 160 #:gas 100 #:supply-used 112 #:supply-cap 154 #:workers 54 #:active-bases 4
+      #:mineral-harvesters 40 #:gas-harvesters 14
+      #:army-supply 58 #:enemy-threat-supply 48 #:under-attack? #t #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'hatchery 3 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'extractor 6)
+      #:total-building-counts (hasheq 'hatchery 3 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'extractor 6)
+      #:unit-counts (hasheq 'drone 54 'queen 6 'hydralisk 16 'roach 4 'zergling 8 'overlord 18)
+      #:enemy-unit-counts (hasheq 'phoenix 24)
+      #:enemy-building-counts (hasheq 'stargate 4)
+      #:open-facility-slots (hasheq 'townhall 4 'larva 6))))
+  (reset-macro-escrow-tracker!)
+  (define l31-z-19-no-steal
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 10580
+      #:minerals 85 #:gas 140 #:supply-used 84 #:supply-cap 118 #:workers 46 #:active-bases 3
+      #:mineral-harvesters 34 #:gas-harvesters 12
+      #:army-supply 38 #:enemy-threat-supply 40 #:under-attack? #t #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'extractor 5)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'extractor 5)
+      #:unit-counts (hasheq 'drone 46 'queen 5 'hydralisk 7 'roach 6 'zergling 8 'overlord 14)
+      #:enemy-unit-counts (hasheq 'phoenix 20)
+      #:enemy-building-counts (hasheq 'stargate 3)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 6))))
+  (assert-true! (and (not (not (memq 'hydralisk (macro-brain-decision-scheduled-ids l31-z-19-hydra24))))
+                     (eq? (macro-brain-decision-saving-for l31-z-19-no-steal) 'hydralisk)
+                     (not (memq 'roach (macro-brain-decision-scheduled-ids l31-z-19-no-steal)))
+                     (not (memq 'zergling (macro-brain-decision-scheduled-ids l31-z-19-no-steal))))
+                "L31-P0-2 #19 Zerg: Mass-Stargate Hydras must scale past 16 up to 28 & block Roach/Ling mineral steal @85M/140G")
+
+  ;; (d) Zero-Worker Building Guard (#20/#21/H2H#06: suppress non-TH/non-supply buildings when alive workers == 0)
+  (reset-macro-escrow-tracker!)
+  (define l31-p-21-zero-alive-workers
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Zerg #:frame 10636
+      #:minerals 975 #:gas 227 #:supply-used 5 #:supply-cap 16 #:workers 1 #:active-bases 1
+      #:mineral-harvesters 0 #:gas-harvesters 0
+      #:army-supply 4 #:enemy-threat-supply 20 #:under-attack? #t
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 2 'cybernetics-core 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 2 'cybernetics-core 1)
+      #:unit-counts (hasheq 'zealot 2)
+      #:open-facility-slots (hasheq 'townhall 0 'gateway 2))))
+  (assert-true! (not (ormap (lambda (b) (memq b (macro-brain-decision-scheduled-ids l31-p-21-zero-alive-workers)))
+                            '(gateway robotics-facility twilight-council shield-battery forge)))
+                "L31-P0-2 #20/#21/H2H#06: Alive workers == 0 must suppress non-TownHall/non-supply building schedules")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms

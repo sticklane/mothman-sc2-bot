@@ -2698,6 +2698,111 @@
         "FIRST-EVER Thssprtssbt combat WIN (#27 P 4.22x), FIRST-EVER RustyNikolaj Terran WIN (#17 T 4.74x 0-anom), Zerg 6-6-0 50% core_12 + PERFECT 24W-0L-0D Honest Arena 2.0 (72/72 ZERO DRAWS!), PERFECT 3W-3L-0T Full-Match Self-Play balance (#38 TvT flipped from 30m tie to 14:45 WIN!), & first Baseline H2H Elo run (3W-3L-0T)!"
       ],
       "promotion_gates_passed": "5/9 PASS on pure core_12 (zero_crashes_and_rejects, ties_le_2 [0T!], sup_blk_le_6pct [5.8%], every_race_wr_ge_33pct [P 41.7% / T 33.3% / Z 50.0%], tactics_suite_100pct [Honest Arena 2.0 31W-5L-0D 86.1% / 1.63x, 0 Draws!]) \u2014 missed overall_wr_ge_50pct (41.7%), trade_agg (0.80x), trade_med (0.33x), and every_race_w4_within_6_of_pro (T -4.0 PASS, P -8.0 & Z -7.5)"
+    },
+    {
+      "id": "iter31_wave31",
+      "status": "COMPLETED_FIRST_CORE14_48M_PLUS_H2H_5W_1L_ELO_LEAP_ARENA_AM_4_93_ATH",
+      "campaign": "Loops 29+ Self-Play, Honest Tactics Arena 2.0 & Expanded Roster Campaign (Loop 31)",
+      "loop_self_improvements": [
+        "L31-LOOP-1 (Expanded 26-Bot Roster Activation): @opponents smoke-tested 8/8 fresh Div 1-6 AI Arena bots clean on first pass and activated core_14 (+who, +onlyfans) + balanced unseen_12 (4P/4T/4Z) in roster.json.",
+        "L31-LOOP-2 (core_14 + unseen_12 + self_6 Tooling Continuity): Added --opponents core_14 / core_12 / unseen aliases in run-local-sc2-arena.py, dual primary core_14 + historical core_12 HWM continuity in compare-vs-pro.py, and balanced 6-ext + 2-SP Top-8 selection in render-replay-clips.py."
+      ],
+      "spec_summary": "Loop 31 (L31-P0-1..3 + First core_14 + self_6 48-match bench + Baseline H2H): Wire 300f GasZeroFreeze rescue + Terran 3-RPC placement budget; Brain deficit-aware emergency supply replacement (SupBlk 5.9%->4.2%, Zerg 8.0%->3.6%!), Terran 1-base Natural CC ahead of Starport + TvT Tank-before-Rax3 (1BaseLock 3->0 across ALL 48!), Zerg mass-Stargate Hydra scaling & zero-worker build guard; Runtime Protoss L2 Gateway alignment, Terran top-2 escrow CC guard, and Honest Arena p11 detector convergence + DisengageRetreat commit + t04 peel.",
+      "rev": "kwlovnmr f01d2253 (iter31 working copy)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261120_191803_iter31_wave31",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261120_193423_iter31_baseline_h2h",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter31_wave31_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter31_baseline_h2h_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter31_wave31.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter31.json",
+      "tactics_selfplay_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter31.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter31.md",
+      "clean_n": 42,
+      "cohort_primary": "core_14",
+      "record_clean": "16W-23L-3T (42/42 clean core_14, 38.1% WR, 45.2% NL, 0.97x TradeAgg / 0.55x Med; onlyfans 2-1 2.48x, who 0-3 0.22x)",
+      "record_non_chance_clean": "16W-20L-3T (41.0% WR, 48.7% NL, 1.04x TradeAgg / 0.58x Med)",
+      "record_core12_historical": "14W-19L-3T (38.9% WR, 47.2% NL, 0.84x TradeAgg / 0.55x Med, SB 4.1%; Non-Chance 14W-16L-3T = 51.5% NL, 0.92x!)",
+      "record_selfplay_6": "P1 4W-2L-0T (66.7%, Trade 1.43x, SB P1 4.2%/P2 4.3%, PkArmy 5454/3525, AvgDur 726s, A8Pro 0.71, ProdStall=0/12, 1Base=0/12, TvT0Tank=0/12!)",
+      "record_baseline_h2h": "MASSIVE ELO LEAP L31 source vs L28 shipped ZIP: 5W-1L-0T (83.3% WR!, Trade 1.72x [+0.84x], PkArmy 7179 vs 2921 [+2488], Bases 4.67 vs 3.33, SB 2.8% [-3.0pp], DripFeed=0; Protoss 3-0 2.29x, Zerg 1-0 3.42x, Terran 1-1 1.05x w/ TvZ 6.36x SB 1.0%!)",
+      "wr_pct_clean": 38.1,
+      "non_loss_pct": 45.2,
+      "trade_agg": 0.97,
+      "trade_med": 0.55,
+      "pk_army_avg": 3269.6,
+      "sup_blk_avg": 4.2,
+      "early_atk_pct_2m_6m_avg": 44.0,
+      "protoss_warpgate_sec_med": 245.8,
+      "zerg_roach_warren_sec_med": 151.6,
+      "combat_death_home_enemy_pct_avg": "60.3%/30.1%",
+      "late_game_stalemate_tie_matches": 0,
+      "worker_econ_eff_4m_6m_avg": "48.6/54.7",
+      "econ_eff_collapse_matches": 5,
+      "endgame_home_stall_count": 0,
+      "own_base_retreat_frames": 300,
+      "own_territory_retreat_frames": 440,
+      "non_combat_robo_waste_val": 0,
+      "zerg_non_ling_army_pct": 71.8,
+      "siege_range_zero_dps_losses": 10,
+      "cloaked_unit_damage_losses": 1,
+      "gas_rich_min_starved_matches": 7,
+      "one_base_lockout_matches": 0,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 1,
+      "prod_placement_stall_matches": 5,
+      "zero_kill_collapse_matches": 1,
+      "drip_feed_collapse_matches": 10,
+      "prod_idle_bank_freeze_matches": 2,
+      "gas_zero_harvest_freeze_matches": 1,
+      "spire_sched_drop_matches": 2,
+      "wall_timeout_ties": 3,
+      "army_val_4m_ratio_vs_pro": 0.85,
+      "army_val_8m_ratio_vs_pro": 0.52,
+      "latency_summary": "ALL 48/48 <=172.06ms (0 spikes >=500ms!; avg=8.74ms, p95=15.16ms, tr=2.65ms, WorstTrP95=8.9ms; H2H L31<=131.7ms; 0 rejects!)",
+      "by_race": {
+        "Protoss": {
+          "record": "5W-9L-0T (35.7% WR, 0.88x Trade, SB 4.3%; #21 onlyfans W 2.90x 0-anom flipped L28 30m tie, #12 puck W 5.14x, PvPNatDelay=0, RoboWaste=0, WG 246s/241s; H2H 3-0 2.29x!)",
+          "trade_agg": 0.88,
+          "w4_alive_med": 27.0,
+          "w6_alive_med": 41.0,
+          "nat_sec": 140.2,
+          "sup_blk": 4.3
+        },
+        "Terran": {
+          "record": "5W-8L-1T (35.7% WR, 42.9% NL, 1.09x TradeAgg!, SB 4.7%, ONLY 1 Pro flag!; #29 1st Thssprtssbt T W 2.34x, #32 Creepy W 7.33x, #14 oberon W 2.45x; H2H TvZ 6.36x SB 1.0%!)",
+          "trade_agg": 1.09,
+          "w4_alive_med": 22.0,
+          "w6_alive_med": 36.0,
+          "nat_sec": 93.2,
+          "sup_blk": 4.7
+        },
+        "Zerg": {
+          "record": "6W-6L-2T (42.9% WR, 57.1% NL, 0.94x TradeAgg / 0.78x Med, SB SLASHED 8.5%->3.6%!; ArmyVal 4m/6m 638/1425 BEATS PRO!, ZvT 3-1 1.03x, #25 1st sludgement2 ZvZ W 1.56x, #16 Rusty 28:35 W, #19 onlyfans W 2.47x!)",
+          "trade_agg": 0.94,
+          "w4_alive_med": 29.0,
+          "w6_alive_med": 42.0,
+          "nat_sec": 55.1,
+          "sup_blk": 3.6
+        }
+      },
+      "tactics_summary": {
+        "rev": "kwlovnmr 337adbf9 (iter31)",
+        "passed": "Verifier 7/7 + 22/22 L31 + 24/24 Belief + 231/231 Tactics FIRST-PASS; Honest Arena A:M 4.93 ATH & Self-Play 30W-6L-0D ATH!",
+        "sc2_duel36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter31.json",
+        "sc2_selfplay36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter31.json",
+        "sc2_duel36_summary": "HONEST 960-LOOP ARENA 2.0: Dummy 30W-5L-1D (KO 30/Pts 0 - KO 4/Pts 1 - 1D, 1.73x [+0.10x], SHATTERED A:M ATH 3.61->4.93!; Zerg 3rd straight PERFECT 12W-0L-0D 36-0 streak A:M=10.53 ATH!, Terran 10W-2L-0D 1.69x w/ t10 2.38x KO flip & t04 0.55->0.91x!) + Self-Play NEW ATH 30W-6L-0D (0 Draws!, 1.69x ATH, P1 A:M=4.47 / P2 A:M=4.76 ATH; Terran +3W surge 6-6->9-3 w/ t07 0.00->2.06x KO, t02 3.00x 1st SP KO, t06 KO; z07 5.48x & z08 5.83x KOs!)"
+      },
+      "visual_qa_highlights": [
+        "#21 Mothman-P vs onlyfans (12:18 WIN 2.90x, 0 anom): Hall-of-fame frame \u2014 7 Phoenixes + Observer revealing cloaked Banshees while 14+ Stalkers storm Terran production (flipped L28 30m skyfleet tie!).",
+        "#19 Mothman-Z vs onlyfans (12:09 WIN 2.47x) & #29 Mothman-T vs Thssprtssbt (13:22 1st T combat WIN 2.34x) & #16 Z vs RustyNikolaj (26:21 7-base comeback WIN): Clean multi-base macro & decisive conversions.",
+        "Arena 2.0 Visual-QA: t10 (2.38x KO), sp-t07 (2.06x Cyclone Lock-On KO), sp-t02 (3.00x Tank+Marine KO), sp-z08 (5.83x Corruptor+Viper volley) verified crisp; t04 (0.91x) shows 2 Ghosts behind Marauder wall ready to win once Snipe beats 35 EMPs on non-shield Zerg; p11 (0.35x) shows Observers parked over Stalkers just shy of cloaked Banshees.",
+        "Loop 32 Replay Visual Smoking Guns: #20 T vs onlyfans (13:52 LOSS 2.30x) shows 12 Vikings shredding Banshees over Orbital yet losing 27m marathon to AirAAStarve (168Air/58AA); #08 T vs Chance (04:53 LOSS 0.16x) shows 3 un-walled Barracks inside main letting 14 Lings flood workers; #34 Z vs SmoothBrain (10:43 LOSS 0.04x) mirrors L30 #31 bio-tank crush on creep."
+      ],
+      "key_wins": [
+        "MASSIVE ELO LEAP vs SHIPPED L28 BOTZIPS (baseline_h2h): 3W-3L (0.88x) -> 5W-1L-0T (83.3% WR!, Trade 1.72x +0.84x, PkArmy 7,179 vs 2,921 [+2,488], SB 2.8%, DripFeed=0, Protoss 3-0 2.29x, Zerg 1-0 3.42x, Terran TvZ 6.36x SB 1.0%!)",
+        "ALL 48 MATCHES OVER 1.00x TRADE ACROSS EVERY RACE (ALL=1.03x: P 1.01x, T 1.03x, Z 1.05x!), core_14 Non-Chance 1.04x (16W-20L-3T 48.7% NL), HIST12 Non-Chance 51.5% NL (14W-16L-3T), SupBlk SLASHED 5.9%->4.2% (Zerg 8.5%->3.6%!), 1BaseLock=0 ACROSS ALL 48, PvPNatDelay=0, A8Pro=0.52 (TIES ATH!), trade_med 0.33->0.55x (+0.22x!)",
+        "SHATTERED HONEST ARENA 2.0 A:M ATH (4.93 Dummy / 4.47 P1 & 4.76 P2 Self-Play!), NEW Self-Play Record 30W-6L-0D (1.69x, Terran +3W 6-6->9-3, t07 0.00->2.06x, t02 3.00x), Zerg 36W-0L Dummy streak (A:M=10.53 ATH!), onlyfans 2-1 (2.48x), 1st Thssprtssbt T combat W & 1st sludgement2 ZvZ W!"
+      ],
+      "promotion_gates_passed": "4/9 PASS on primary core_14 (zero_crashes_and_rejects, sup_blk_le_6pct [4.2%], every_race_wr_ge_33pct [P 35.7% / T 35.7% / Z 42.9%], tactics_suite_100pct [Honest Arena 2.0 30W-5L-1D 83.3%/1.73x, A:M 4.93 ATH!]) \u2014 1 tie from ties_le_2 (3 WallTies, 1 winning 2.69x!), 0.03x from trade_agg_ge_1_0x (0.97x!), and 1.0 worker on Protoss (-7.0 vs -6.0; T -5.0 & Z -6.0 BOTH PASS!) from every_race_w4_within_6_of_pro!"
     }
   ],
   "final_18_loop_summary": {

@@ -53,6 +53,8 @@ CORE_12_OPPONENTS = frozenset({
     "Thssprtssbt", "mini-puck", "monsterbot", "oberon", "puck",
     "sludgement2-revived", "titania",
 })
+CORE_14_PROMOTED = frozenset({"who", "onlyfans"})
+CORE_14_OPPONENTS = CORE_12_OPPONENTS | CORE_14_PROMOTED
 
 # Approximate unit values for s2protocol clash-window scoring (by SC2 internal unit name)
 UNIT_NAME_VALUE: dict[str, float] = {
@@ -301,11 +303,36 @@ def select_critical_clips(
             key=lambda pair: (key_fn(pair[0]) * (1.12 if used_races[str(pair[0].get("our_race") or "")] == 0 else 1.0)),
         )
 
-    # 1. Showcase Core Win (big macro battle win vs core_12)
+    def _is_sp(m: dict[str, Any]) -> bool:
+        return bool(
+            m.get("is_selfplay")
+            or m.get("opp_cohort") == "selfplay"
+            or str(m.get("opp_bot") or "").startswith("Mothman-")
+        )
+
+    def _is_core(m: dict[str, Any]) -> bool:
+        if _is_sp(m):
+            return False
+        coh = str(m.get("opp_cohort") or "").strip().lower()
+        if coh.startswith("core"):
+            return True
+        if coh.startswith("unseen"):
+            return False
+        return m.get("opp_bot") in CORE_14_OPPONENTS
+
+    def _is_unseen(m: dict[str, Any]) -> bool:
+        return (not _is_sp(m)) and (not _is_core(m))
+
+    has_promoted_core = any(_is_core(m) and (m.get("opp_bot") not in CORE_12_OPPONENTS) for m, _rp in valid)
+    core_lbl = "core_14" if has_promoted_core else "core_12"
+    unseen_opp_cnt = len({str(m.get("opp_bot") or "") for m, _rp in valid if _is_unseen(m)})
+    unseen_lbl = f"unseen_{unseen_opp_cnt}" if unseen_opp_cnt > 0 else "unseen"
+
+    # 1. Showcase Core Win (big macro battle win vs core_14 / core_12)
     core_wins = [
         (m, rp) for m, rp in valid
         if m.get("result") == "win"
-        and (m.get("opp_bot") in CORE_12_OPPONENTS)
+        and _is_core(m)
         and (m.get("duration_sec") or 0) >= 240
     ]
     pick = _pick(
@@ -316,24 +343,20 @@ def select_critical_clips(
         m, rp = pick
         _add(
             m, rp, "SHOWCASE CORE WIN", "peak_clash", (34, 197, 94),
-            f"Flagship core_12 victory ({m.get('our_bot')} vs {m.get('opp_bot')}, Trade {m.get('trade_ratio')}x, Peak Army {m.get('our_peak_army')}).",
+            f"Flagship {core_lbl} victory ({m.get('our_bot')} vs {m.get('opp_bot')}, Trade {m.get('trade_ratio')}x, Peak Army {m.get('our_peak_army')}).",
             "Watch Mothman's army positioning, focus-fire discipline, and decisive mid/late-game macro conversion.",
         )
 
-    def _is_sp(m: dict[str, Any]) -> bool:
-        return bool(
-            m.get("is_selfplay")
-            or m.get("opp_cohort") == "selfplay"
-            or str(m.get("opp_bot") or "").startswith("Mothman-")
-        )
-
-    # 2. Held-Out Unseen Win (generalization proof; falls back to Full-Match Self-Play Clash or 2nd Core Win)
+    # 2. Held-Out Unseen Win (unseen_12 / unseen_6; else promoted who/onlyfans core win or 2nd core win)
     unseen_wins = [
         (m, rp) for m, rp in valid
         if m.get("result") == "win"
-        and (m.get("opp_bot") not in CORE_12_OPPONENTS)
-        and (not _is_sp(m))
+        and _is_unseen(m)
         and (m.get("duration_sec") or 0) >= 200
+    ]
+    promoted_wins = [
+        (m, rp) for m, rp in core_wins
+        if m.get("opp_bot") not in CORE_12_OPPONENTS
     ]
     pick = _pick(
         unseen_wins,
@@ -343,18 +366,27 @@ def select_critical_clips(
         m, rp = pick
         _add(
             m, rp, "HELD-OUT UNSEEN WIN", "peak_clash", (56, 189, 248),
-            f"Zero-overfitting held-out unseen_6 win ({m.get('our_bot')} vs {m.get('opp_bot')}, Trade {m.get('trade_ratio')}x, Peak Army {m.get('our_peak_army')}).",
+            f"Zero-overfitting held-out {unseen_lbl} win ({m.get('our_bot')} vs {m.get('opp_bot')}, Trade {m.get('trade_ratio')}x, Peak Army {m.get('our_peak_army')}).",
             "Watch Mothman adapt cleanly to an unseen ladder opponent with strong mid/late army execution.",
         )
     else:
-        pick = _pick(core_wins, lambda m: (m.get("our_peak_army") or 0) + (m.get("killed_val") or 0))
+        pick = _pick(promoted_wins, lambda m: (m.get("our_peak_army") or 0) + (m.get("killed_val") or 0))
         if pick:
             m, rp = pick
             _add(
-                m, rp, "CORE MACRO WIN", "peak_clash", (56, 189, 248),
-                f"Second race-diverse core_12 win ({m.get('our_bot')} vs {m.get('opp_bot')}, Trade {m.get('trade_ratio')}x).",
-                "Watch Mothman's unit composition, engagement geometry, and production follow-through.",
+                m, rp, "PROMOTED CORE WIN", "peak_clash", (56, 189, 248),
+                f"Promoted {core_lbl} win ({m.get('our_bot')} vs {m.get('opp_bot')}, Trade {m.get('trade_ratio')}x, Peak Army {m.get('our_peak_army')}).",
+                "Watch Mothman's adaptation and cloak/mid-game execution against promoted core_14 opponents.",
             )
+        else:
+            pick = _pick(core_wins, lambda m: (m.get("our_peak_army") or 0) + (m.get("killed_val") or 0))
+            if pick:
+                m, rp = pick
+                _add(
+                    m, rp, "CORE MACRO WIN", "peak_clash", (56, 189, 248),
+                    f"Second race-diverse {core_lbl} win ({m.get('our_bot')} vs {m.get('opp_bot')}, Trade {m.get('trade_ratio')}x).",
+                    "Watch Mothman's unit composition, engagement geometry, and production follow-through.",
+                )
 
     # 2b. Full-Match Mothman-vs-Mothman Self-Play Clash (when self_6 replays are in the batch!)
     selfplay_matches = [
@@ -437,17 +469,21 @@ def select_critical_clips(
         )
 
     # 6. Highest-Intensity Late / T3 Clash (fill remaining slots up to max_clips)
+    # Keep at most 2 self-play clips when external core/unseen candidates exist so Top-8 stays balanced.
+    ext_valid = [(m, rp) for m, rp in valid if not _is_sp(m)]
     while len(selected) < max_clips:
+        sp_selected = sum(1 for item in selected if _is_sp(item["match"]))
+        pool = ext_valid if (sp_selected >= 2 and any(str(m.get("id") or rp.stem) not in used_ids for m, rp in ext_valid)) else valid
         pick = _pick(
-            valid,
+            pool,
             lambda m: (m.get("our_peak_army") or 0) + (m.get("opp_peak_army") or 0) + (2000 if m.get("t3_first_sec") else 0) + (m.get("killed_val") or 0) * 0.5,
         )
         if not pick:
             break
         m, rp = pick
-        lbl = "T3 LATE-GAME CLASH" if m.get("t3_first_sec") else "HIGH-INTENSITY CLASH"
+        lbl = "FULL-MATCH SELF-PLAY CLASH" if _is_sp(m) else ("T3 LATE-GAME CLASH" if m.get("t3_first_sec") else "HIGH-INTENSITY CLASH")
         _add(
-            m, rp, lbl, "peak_clash", (234, 179, 8),
+            m, rp, lbl, "peak_clash", (16, 185, 129) if _is_sp(m) else (234, 179, 8),
             f"Massive late-game army clash ({m.get('our_bot')} vs {m.get('opp_bot')}, Peak Armies {m.get('our_peak_army')}/{m.get('opp_peak_army')}, {m.get('result').upper()}).",
             "Watch late-game tech composition, spellcaster usage, and multi-angle army control.",
         )

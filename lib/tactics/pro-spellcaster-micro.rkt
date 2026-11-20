@@ -2948,12 +2948,12 @@
                 [(snipe-channel-locked? claims u current-frame) #f]
                 [(spellcaster-channel-protected? u) #f]
                 [else
-                 ;; W4-TAC-1 + W4-TAC-5 + L30-P0-3 (`t04` Ghost Snipe Priority): When an unshielded
+                 ;; W4-TAC-1 + W4-TAC-5 + L30-P0-3 + L31-P0-3 (`t04` Ghost Snipe Priority): When an unshielded
                  ;; heavy-biological Snipe target (Ultralisk/BroodLord/Lurker) is in range (<= 10t),
-                 ;; evaluate Snipe BEFORE non-shield EMP regardless of energy (remove `< 125` cap so
-                 ;; full-energy Ghosts don't spam EMP into Zerg instead of 170-dmg Snipe!), only
-                 ;; casting EMP first if `>= 160` shields or `>= 2` shielded psionics exist; also relax
-                 ;; Snipe abort radius `4.499t -> 2.75t` when `>= 2` friendly Bio units screen within `4.5t`!
+                 ;; evaluate Snipe BEFORE non-shield EMP regardless of energy, only casting EMP first if
+                 ;; `>= 160` shields or `>= 2` shielded psionics exist; when `>= 2` friendly combat units
+                 ;; screen within `4.5t`, relax Snipe abort radius to `1.8t` (and step `2.2t` behind Marines
+                 ;; ONLY if a melee threat closes `< 1.8t`!) so Ghosts land `6–8` Snipes on Ultras/Infestors.
                  (define ghost-bio-screened?
                    (>= (count-units-within
                         ally-units ux uy 4.5
@@ -2962,7 +2962,57 @@
                                (not (eq? (uh-type a) 'medivac))
                                (unit-combat-relevant? a))))
                        2))
-                 (define snipe-danger-r : Float (if ghost-bio-screened? 2.75 4.499))
+                 (define snipe-danger-r : Float (if ghost-bio-screened? 1.8 4.499))
+                 (define (enemy-melee-threat? [e : Any]) : Boolean
+                   (and (sc2-enemy-unit-targetable? e)
+                        (let ([st (cached-unit-combat-stats (uh-type e))])
+                          (and (> (safe-fl (hash-ref st 'ground-dps (lambda () 0.0)) 0.0) 0.0)
+                               (<= (safe-fl (hash-ref st 'ground-range (lambda () 0.0)) 0.0) 1.5)))))
+                 (define (try-ghost-melee-step-back) : (Option spell-directive)
+                   (and (>= en 50.0)
+                        (let-values ([(m-hit? mx my md)
+                                      (for/fold ([hit? : Boolean #f]
+                                                 [bx : Float 0.0]
+                                                 [by : Float 0.0]
+                                                 [bd : Float 1.8])
+                                                ([e (in-list enemy-units)])
+                                        (if (and (hash? e) (enemy-melee-threat? e))
+                                            (let* ([ex (uh-x e)]
+                                                   [ey (uh-y e)]
+                                                   [d (dist2 ux uy ex ey)])
+                                              (if (< d bd)
+                                                  (values #t ex ey d)
+                                                  (values hit? bx by bd)))
+                                            (values hit? bx by bd)))])
+                          (and m-hit?
+                               (let-values ([(bsx bsy bcnt)
+                                             (for/fold ([sx : Float 0.0]
+                                                        [sy : Float 0.0]
+                                                        [c : Integer 0])
+                                                       ([a (in-list ally-units)])
+                                               (if (and (hash? a)
+                                                        (not (= (uh-tag a) tag))
+                                                        (not (eq? (memq (uh-type a) '(marine marauder)) #f))
+                                                        (<= (dist2 ux uy (uh-x a) (uh-y a)) 8.0))
+                                                   (values (+ sx (uh-x a)) (+ sy (uh-y a)) (+ c 1))
+                                                   (values sx sy c)))])
+                                 (and (> bcnt 0)
+                                      (let* ([bcx (/ bsx (->float bcnt))]
+                                             [bcy (/ bsy (->float bcnt))]
+                                             [use-bio-anchor? (> (dist2 bcx bcy mx my) md)]
+                                             [ax (if use-bio-anchor? bcx ux)]
+                                             [ay (if use-bio-anchor? bcy uy)]
+                                             [dx0 (- ax mx)]
+                                             [dy0 (- ay my)]
+                                             [d0 (flsqrt (+ (* dx0 dx0) (* dy0 dy0)))]
+                                             [dx1 (if (> d0 0.05) dx0 (- home-x ux))]
+                                             [dy1 (if (> d0 0.05) dy0 (- home-y uy))]
+                                             [d1 (flsqrt (+ (* dx1 dx1) (* dy1 dy1)))])
+                                        (and (> d1 0.05)
+                                             (let ([rx (max 2.0 (min 250.0 (+ ax (* 2.2 (/ dx1 d1)))))]
+                                                   [ry (max 2.0 (min 250.0 (+ ay (* 2.2 (/ dy1 d1)))))])
+                                               (spell-directive tag 'ghost 'move 'move 0 rx ry
+                                                                'ghost-melee-step-back))))))))))
                  (define heavy-bio-snipe-near?
                    (and (>= en 50.0)
                         (not (any-unit-within? all-enemies ux uy snipe-danger-r sc2-enemy-unit-targetable?))
@@ -3057,7 +3107,9 @@
                        (not (enemy-detector-within? enemy-units enemy-buildings ux uy 10.999))
                        (begin
                          (hash-set! (spell-claims-ghost-cloak-frame claims) tag current-frame)
-                         (spell-directive tag 'ghost 'cloak-ghost 'none 0 ux uy 'ghost-cloak))))])]
+                         (spell-directive tag 'ghost 'cloak-ghost 'none 0 ux uy 'ghost-cloak)))
+                  ;; 4. L31-P0-3 (`t04`): Step `2.2t` behind Marines ONLY if melee threat closes `< 1.8t`!
+                  (try-ghost-melee-step-back))])]
 
              ;; --- RAVEN ---
              [(raven)

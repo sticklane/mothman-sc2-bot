@@ -3172,6 +3172,25 @@
                            (fl+ sy (tactical-sim-unit-y a))
                            (unsafe-fx+ n 1)))))))
        (define need-spatial-targets? (not (eq? committed-act 'DisengageRetreat)))
+       ;; L31-P0-3 (`p11` Friendly Detector Convergence): Collect live friendly mobile detectors
+       ;; within 32t of the arena centroid so armies with a live Observer/Overseer/Raven NEVER
+       ;; 5.0t flee-kite away from undetected cloaked units!
+       (define arena-local-friendly-detectors
+         (for/list ([a (in-list ally-units)]
+                    #:when (and (hash? a)
+                                (memq (hash-ref a 'type 'unknown)
+                                      '(observer observer-siege-mode overseer overseer-siege-mode raven))
+                                (let ([dx (fl- (fast->fl (hash-ref a 'x -9999.0)) arena-ally-cx)]
+                                      [dy (fl- (fast->fl (hash-ref a 'y -9999.0)) arena-ally-cy)])
+                                  (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 1024.0))))
+           a))
+       (define arena-has-friendly-detector? (pair? arena-local-friendly-detectors))
+       ;; L31-P0-3 (`t04` Bio Peel for Ghosts): Record friendly Ghost positions in this arena so
+       ;; frontline units focus-peel close melee divers (`<= 3.5t` of Ghosts) first!
+       (define arena-ally-ghost-pts
+         (for/list ([a (in-list arena-ally-units)]
+                    #:when (eq? (tactical-sim-unit-type a) 'ghost))
+           (cons (tactical-sim-unit-x a) (tactical-sim-unit-y a))))
        (define-values (arena-has-stealth? any-ally-ground-dps? any-ally-air-dps? arena-has-ground-only-allies?)
          (if need-spatial-targets?
              (let loop ([rem arena-ally-units] [st? #f] [gd? #f] [ad? #f] [go? #f])
@@ -3301,8 +3320,23 @@
                                                 5.5
                                                 3.0)
                                             1.0)]
-                                       [pconst (fl* (fl* (fast-enemy-priority-const etype arena-has-stealth? e) tact-mult)
-                                                    air-a2g-mult)]
+                                       ;; L31-P0-3 (`t04` Ghost Peel): Boost close melee divers (`<= 3.5t` of friendly
+                                       ;; Ghosts) so frontline Bio shreds Zerglings before they cancel Ghost Snipes!
+                                       [ghost-peel-mult
+                                        (if (and (pair? arena-ally-ghost-pts)
+                                                 (fl> (tactical-sim-unit-ground-dps e) 0.0)
+                                                 (fl<= (tactical-sim-unit-ground-range e) 1.5)
+                                                 (let ([ex-g (tactical-sim-unit-x e)]
+                                                       [ey-g (tactical-sim-unit-y e)])
+                                                   (for/or ([gp (in-list arena-ally-ghost-pts)])
+                                                     (define gdx (fl- ex-g (car gp)))
+                                                     (define gdy (fl- ey-g (cdr gp)))
+                                                     (fl<= (fl+ (fl* gdx gdx) (fl* gdy gdy)) 12.25))))
+                                            4.5
+                                            1.0)]
+                                       [pconst (fl* (fl* (fl* (fast-enemy-priority-const etype arena-has-stealth? e) tact-mult)
+                                                         air-a2g-mult)
+                                                    ghost-peel-mult)]
                                        [ehp (flmax 1e-6 (fl+ (tactical-sim-unit-hp e) (tactical-sim-unit-shield e)))]
                                        [tidx (vector-ref (fast-unit-stat-vec etype) 19)]
                                        [eflags (tactical-sim-unit-attr-flags e)]
@@ -3730,25 +3764,86 @@
            [else
             (cond
               [(and (not target-su) (pair? untargetable-cloaked-rev))
-               ;; W11-P0-4-rt (`w11-tac-2`): Only undetected `cloak=1` enemies in arena -> pull back
-               ;; cleanly via MOVE/kite instead of issuing SC2-rejected `ATTACK (23)`!
+               ;; W11-P0-4-rt (`w11-tac-2`) + L31-P0-3 (`p11` Friendly Detector Convergence):
+               ;; Never issue SC2-rejected `ATTACK (23)` on undetected `cloak=1` enemies.
+               ;; When a live friendly mobile detector (`Observer`/`Overseer`/`Raven`) is present
+               ;; locally (`<= 32t`), NEVER 5.0t flee-kite away — advance the detector onto the
+               ;; cloaked cluster (`4.5t` standoff) and converge combat units toward the friendly
+               ;; detector (`<= 6.0t`)! Only 5.0t pull back when NO friendly detector exists.
                (unless (eq? utype 'siege-tank-sieged)
-                 (define nearest-clk
+                 (define-values (nearest-clk clk-sx clk-sy clk-n)
                    (for/fold ([bc (car untargetable-cloaked-rev)]
                               [bd2 +inf.0]
-                              #:result bc)
+                              [sx 0.0]
+                              [sy 0.0]
+                              [n 0]
+                              #:result (values bc sx sy n))
                              ([ce (in-list untargetable-cloaked-rev)])
-                     (define dx (fl- ux (tactical-sim-unit-x ce)))
-                     (define dy (fl- uy (tactical-sim-unit-y ce)))
+                     (define cex (tactical-sim-unit-x ce))
+                     (define cey (tactical-sim-unit-y ce))
+                     (define dx (fl- ux cex))
+                     (define dy (fl- uy cey))
                      (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
-                     (if (fl< d2 bd2) (values ce d2) (values bc bd2))))
-                 (define-values (kx ky)
-                   (compute-edge-safe-kite-vector ux uy (tactical-sim-unit-x nearest-clk) (tactical-sim-unit-y nearest-clk)
-                                                  5.0 arena-ally-cx arena-ally-cy (tactical-sim-unit-flying? su)))
-                 (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 kx ky frame))
-                   (when (and ledger record-ledger?)
-                     (order-ledger-record-issued! ledger uid 'kite 'move #:target-x kx #:target-y ky #:frame frame))
-                   (emit! (list 'kite uid kx ky))))]
+                     (values (if (fl< d2 bd2) ce bc)
+                             (if (fl< d2 bd2) d2 bd2)
+                             (fl+ sx cex)
+                             (fl+ sy cey)
+                             (unsafe-fx+ n 1))))
+                 (define clk-cx (fl/ clk-sx (exact->inexact (max 1 clk-n))))
+                 (define clk-cy (fl/ clk-sy (exact->inexact (max 1 clk-n))))
+                 (define ncx (tactical-sim-unit-x nearest-clk))
+                 (define ncy (tactical-sim-unit-y nearest-clk))
+                 (define su-is-mobile-det?
+                   (and (memq utype '(observer observer-siege-mode overseer overseer-siege-mode raven)) #t))
+                 (cond
+                   [su-is-mobile-det?
+                    ;; Advance mobile detector directly onto the cloaked cluster (`4.5t` standoff inside `11t` reveal)
+                    (define dx (fl- clk-cx ux))
+                    (define dy (fl- clk-cy uy))
+                    (define d (flsqrt (fl+ (fl* dx dx) (fl* dy dy))))
+                    (when (fl> d 5.0)
+                      (define step (flmax 1.0 (fl- d 4.5)))
+                      (define mx (fl+ ux (fl* step (fl/ dx d))))
+                      (define my (fl+ uy (fl* step (fl/ dy d))))
+                      (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'move 0 mx my frame))
+                        (when (and ledger record-ledger?)
+                          (order-ledger-record-issued! ledger uid 'move 'move #:target-x mx #:target-y my #:frame frame))
+                        (emit! (list 'move uid mx my))))]
+                   [arena-has-friendly-detector?
+                    ;; Converge combat units toward nearest friendly detector (`<= 6.0t`), then move
+                    ;; alongside the detector toward safe `4.5t` standoff of the cloaked target!
+                    (define-values (det-x det-y det-d2)
+                      (for/fold ([bx arena-ally-cx] [by arena-ally-cy] [bd2 +inf.0])
+                                ([det (in-list arena-local-friendly-detectors)])
+                        (define dx0 (fast->fl (hash-ref det 'x arena-ally-cx)))
+                        (define dy0 (fast->fl (hash-ref det 'y arena-ally-cy)))
+                        (define ddx (fl- ux dx0))
+                        (define ddy (fl- uy dy0))
+                        (define d2 (fl+ (fl* ddx ddx) (fl* ddy ddy)))
+                        (if (fl< d2 bd2) (values dx0 dy0 d2) (values bx by bd2))))
+                    (define-values (mx my)
+                      (if (fl> det-d2 36.0)
+                          (values det-x det-y)
+                          (let* ([cdx (fl- ncx det-x)]
+                                 [cdy (fl- ncy det-y)]
+                                 [cd (flsqrt (fl+ (fl* cdx cdx) (fl* cdy cdy)))])
+                            (if (fl> cd 5.0)
+                                (let ([step (flmin 4.5 (flmax 0.0 (fl- cd 4.5)))])
+                                  (values (fl+ det-x (fl* step (fl/ cdx cd)))
+                                          (fl+ det-y (fl* step (fl/ cdy cd)))))
+                                (values det-x det-y)))))
+                    (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'move 0 mx my frame))
+                      (when (and ledger record-ledger?)
+                        (order-ledger-record-issued! ledger uid 'move 'move #:target-x mx #:target-y my #:frame frame))
+                      (emit! (list 'move uid mx my)))]
+                   [else
+                    (define-values (kx ky)
+                      (compute-edge-safe-kite-vector ux uy ncx ncy
+                                                     5.0 arena-ally-cx arena-ally-cy (tactical-sim-unit-flying? su)))
+                    (unless (and ledger (order-ledger-order-equivalent? ledger u-hash 'kite 0 kx ky frame))
+                      (when (and ledger record-ledger?)
+                        (order-ledger-record-issued! ledger uid 'kite 'move #:target-x kx #:target-y ky #:frame frame))
+                      (emit! (list 'kite uid kx ky)))]))]
               [target-su
                (define eid (tactical-sim-unit-id target-su))
                (define ex (tactical-sim-unit-x target-su))
@@ -3781,10 +3876,27 @@
                  (define kite-cd-min (flmax 0.22 (fl* (if faster-melee-pursuer-near? 0.62 0.52) w-period)))
                  (define kite-step (if faster-melee-pursuer-near? 1.1 2.0))
                  (define has-weap? (and (not fragile-caster-no-atk?) non-free-t? (fl> wr 0.0)))
+                 ;; L31-P0-3 (`t07` SP `1a/45m` & `p01` `0.42x`): When a fighting squad (`>= 4` allies)
+                 ;; is already in active close fire (`<= 9.5t`) against equal/longer-range OR faster
+                 ;; ranged pursuers (e.g., Stalkers/Immortals vs Marines, Marauders vs Stalkers/Zealots),
+                 ;; commit-fire instead of 0-DPS fleeing to `base-x/y`!
+                 (define active-close-ranged-pursuer?
+                   (and has-weap?
+                        (>= arena-ally-cnt 4)
+                        (fl<= edist 9.5)
+                        (for/or ([e (in-list arena-enemy-sims)])
+                          (let ([edx (fl- ux (tactical-sim-unit-x e))]
+                                [edy (fl- uy (tactical-sim-unit-y e))])
+                            (and (fl<= (fl+ (fl* edx edx) (fl* edy edy)) 90.25)
+                                 (let ([e-wr (sim-unit-weapon-range-vs e su)])
+                                   (and (fl> e-wr 1.5)
+                                        (or (fl>= e-wr wr)
+                                            (fl> (exact->inexact (tactical-sim-unit-speed e)) u-spd)))))))))
                  (define melee-fight?
                    (and has-weap?
                         (fl<= wr 1.5)
                         (or (fl<= edist 8.5)
+                            active-close-ranged-pursuer?
                             (and unit-in-any-siege-fire?
                                  (or kw-defending-home? (>= arena-ally-cnt 4))
                                  (fl<= edist 14.5)))))
@@ -3819,8 +3931,10 @@
                                  (fl<= edist (flmax 14.5 (fl+ wr 6.5)))))))
                 (define ranged-stutter-fire?
                   (or capital-siege-dive?
+                      active-close-ranged-pursuer?
                       (and has-weap? (fl> wr 1.5)
-                           (fl<= edist (fl+ wr (if protect-committed-ally? 4.5 2.5)))
+                           (or (fl<= edist (fl+ wr (if protect-committed-ally? 4.5 2.5)))
+                               (and (>= arena-ally-cnt 4) (fl<= edist 9.5) faster-melee-pursuer-near?))
                            (fl< (exact->inexact w-cd) kite-cd-min))))
                 (cond
                   [(eq? utype 'siege-tank-sieged)

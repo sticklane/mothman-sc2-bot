@@ -927,6 +927,13 @@ def resolve_bot_spec(
     raise ValueError(f"Unknown bot {name!r}. Known Mothman: {sorted(MOTHMAN_VARIANTS)}; Roster: {sorted(roster)}")
 
 
+CORE_12_HISTORICAL = frozenset({
+    "12PoolBot", "Chance", "Creepy_strategies", "RustyNikolaj", "SmoothBrain",
+    "Thssprtssbt", "mini-puck", "monsterbot", "oberon", "puck",
+    "sludgement2-revived", "titania",
+})
+
+
 def _infer_cohort(b2: BotSpec) -> str:
     if b2.is_mothman:
         return "selfplay"
@@ -985,15 +992,19 @@ def build_match_tasks(
         opp_names: list[str] = []
     elif opp_low == "all":
         opp_names = sorted(roster.keys(), key=lambda n: (roster[n].elo or 0, n))
-    elif opp_low in ("core", "core_12"):
+    elif opp_low in ("core", "core_14"):
         opp_names = sorted([n for n, s in roster.items() if s.gauntlet_core], key=lambda n: (roster[n].elo or 0, n))
+    elif opp_low == "core_12":
+        opp_names = sorted([n for n in roster.keys() if n in CORE_12_HISTORICAL], key=lambda n: (roster[n].elo or 0, n))
+    elif opp_low in ("unseen", "unseen_12", "unseen_6"):
+        opp_names = sorted([n for n, s in roster.items() if not s.gauntlet_core], key=lambda n: (roster[n].elo or 0, n))
     elif opp_low == "active":
         opp_names = sorted([n for n, s in roster.items() if s.active_comp38], key=lambda n: (roster[n].elo or 0, n))
     else:
         opp_names = [x.strip() for x in opp_arg.split(",") if x.strip()]
 
     if not opp_names and not want_selfplay:
-        raise ValueError("No opponents selected. Specify --opponents <names|core|all|self_6>, --include-selfplay, or --match-file <path>.")
+        raise ValueError("No opponents selected. Specify --opponents <names|core|core_14|core_12|unseen|all|self_6>, --include-selfplay, or --match-file <path>.")
 
     if opp_names:
         bot_specs = [resolve_bot_spec(bname, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache) for bname in bot_names]
@@ -1056,7 +1067,7 @@ def main() -> int:
     parser.add_argument("--bots", default="Mothman-Z,Mothman-T,Mothman-P",
                         help="Comma-separated Mothman variants (or 'all' for P,T,Z,X)")
     parser.add_argument("--opponents", default="core",
-                        help="Comma-separated opponent names from roster, 'core'/'core_12' (12 gauntlet_core), 'active' (Comp#38), 'all', 'self_6' (6 full-game self-play matchups), or 'none'")
+                        help="Comma-separated opponent names from roster, 'core'/'core_14' (dynamic gauntlet_core), 'core_12' (historical 12-bot core), 'unseen'/'unseen_12' (non-core holdouts), 'active' (Comp#38), 'all', 'self_6' (6 full-game self-play matchups), or 'none'")
     parser.add_argument("--include-selfplay", action="store_true",
                         help="Append full-game Mothman-vs-Mothman Self-Play matches (default 6: ZvZ, TvT, PvP, PvT, PvZ, TvZ) tagged cohort='selfplay'")
     parser.add_argument("--selfplay-matches", type=int, default=6,
@@ -1122,11 +1133,13 @@ def main() -> int:
     maps = discover_maps(maps_dir, args.maps)
 
     if args.list:
+        core_n = sum(1 for s in roster.values() if s.gauntlet_core)
+        unseen_n = len(roster) - core_n
         print(f"Arena dir: {arena_dir}")
         print(f"Maps ({len(maps)}): {', '.join(maps)}")
-        print(f"Opponents ({len(roster)}):")
+        print(f"Opponents ({len(roster)} total: {core_n} CORE, {unseen_n} UNSEEN):")
         for name, spec in sorted(roster.items(), key=lambda kv: (kv[1].elo or 0, kv[0])):
-            core_tag = " [CORE]" if spec.gauntlet_core else ""
+            core_tag = " [CORE]" if spec.gauntlet_core else " [UNSEEN]"
             print(f"  - {name:<22} race={spec.race} type={spec.bot_type:<10} elo={str(spec.elo):<5} id={str(spec.aiarena_id):<5}{core_tag} {spec.archetype}")
         return 0
 

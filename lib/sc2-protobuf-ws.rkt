@@ -183,6 +183,9 @@
  SC2-WARPGATE-LAST-LOOP
  SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP
  SC2-GAS-PULL-HYSTERESIS-LATCH
+ SC2-ZERO-GAS-STREAK-START-LOOP
+ SC2-ZERO-GAS-LAST-VESPENE
+ SC2-ZERO-GAS-RESCUE-LATCH
  SC2-MACRO-ABILITY-LAST-LOOP
  select-producer-tags-for-unit
  frame0-pro-worker-split-commands
@@ -8567,6 +8570,9 @@
 (define SC2-WORKER-TRANSFER-LAST-LOOP (box 0))
 (define SC2-WORKER-TRANSFER-COOLDOWN-UNTIL (make-hasheqv))
 (define SC2-GAS-PULL-HYSTERESIS-LATCH (box #f))
+(define SC2-ZERO-GAS-STREAK-START-LOOP (box #f))
+(define SC2-ZERO-GAS-LAST-VESPENE (box #f))
+(define SC2-ZERO-GAS-RESCUE-LATCH (box #f))
 
 (define (saturate-workers-and-gas-commands obs
                                            #:excluded-worker-tags [excluded-worker-tags (seteqv)]
@@ -8578,7 +8584,10 @@
   (when (or (<= cur-loop 8) (< cur-loop (unbox SC2-WORKER-TRANSFER-LAST-LOOP)))
     (hash-clear! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL)
     (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
-    (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f))
+    (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+    (set-box! SC2-ZERO-GAS-STREAK-START-LOOP #f)
+    (set-box! SC2-ZERO-GAS-LAST-VESPENE #f)
+    (set-box! SC2-ZERO-GAS-RESCUE-LATCH #f))
   (set-box! SC2-WORKER-TRANSFER-LAST-LOOP cur-loop)
   (when (< cur-loop (unbox SC2-WORKER-ASSIGN-LAST-LOOP))
     (hash-clear! SC2-WORKER-PATCH-ASSIGNMENT)
@@ -8631,17 +8640,22 @@
               (and (sc2-unit-is-gas-building? u)
                    (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
             self-units))
-  ;; Exclude depleted Vespene geysers (vespene-contents == 0 && ideal-harvesters == 0 in live SC2, #5129552)
-  ;; so a mined-out main Extractor never pins `(first under-gas)` and starves remaining Extractors at 0G/min!
+  ;; L31-P0-1 (`GasZeroFreeze -> 0`): Strictly filter depleted `vespene-contents == 0` geysers out
+  ;; of `ready-gas-bldgs` (and into `depleted-gas-tags`) whenever ANY ready gas building reports live
+  ;; `vespene-contents > 0` (even if SC2 transiently leaves `ideal-harvesters > 0`), while preserving
+  ;; synthetic fixtures where all geysers omit `vespene-contents` (`has-live-gas-contents? = #f`).
+  (define has-live-gas-contents?
+    (ormap (lambda (u) (> (sc2-unit-vespene-contents u) 0)) all-ready-gas-bldgs))
+  (define (gas-bldg-depleted? u)
+    (if has-live-gas-contents?
+        (<= (sc2-unit-vespene-contents u) 0)
+        (and (<= (sc2-unit-vespene-contents u) 0)
+             (<= (sc2-unit-ideal-harvesters u) 0))))
   (define ready-gas-bldgs
-    (filter (lambda (u)
-              (or (> (sc2-unit-vespene-contents u) 0)
-                  (> (sc2-unit-ideal-harvesters u) 0)))
-            all-ready-gas-bldgs))
+    (filter (lambda (u) (not (gas-bldg-depleted? u))) all-ready-gas-bldgs))
   (define depleted-gas-tags
     (for/seteqv ([u (in-list all-ready-gas-bldgs)]
-                 #:when (and (<= (sc2-unit-vespene-contents u) 0)
-                             (<= (sc2-unit-ideal-harvesters u) 0)))
+                 #:when (gas-bldg-depleted? u))
       (sc2-unit-tag u)))
   (define all-gas-tags (list->seteqv (map sc2-unit-tag ready-gas-bldgs)))
 
@@ -8810,6 +8824,87 @@
                                7.0))
     (+ (* 5000.0 close-gnd-cnt) (* 1000.0 e-cnt) (max 0.0 (- e-hp (* 0.5 a-hp)))))
 
+  (define (gas-bldg-lethal-slaughter? gb)
+    ;; Lethal only when >= 3 ground-damaging enemy combat units sit right on top of the geyser (<= 7.0t)
+    ;; with uncontested HP advantage (> 1.3x nearby ally combat HP). Peripheral enemies (> 7.0t)
+    ;; and flying/non-ground harass units are non-lethal and must not block zero-gas-freeze rescue!
+    (define gnd-killers
+      (filter (lambda (e)
+                (and (not (sc2-unit-is-flying e))
+                     (not (set-member? SC2-NON-GROUND-HARASS-COMBAT-TYPES (sc2-unit-unit-type e)))))
+              enemy-combat-units))
+    (define-values (c-cnt c-hp a-hp)
+      (townhall-combat-metrics gb gnd-killers ally-combat-units 7.0))
+    (and (>= c-cnt 3)
+         (> c-hp (* 1.3 a-hp))))
+
+  ;; During an early worker rush (`>= 5` enemy workers within 22 tiles of TownHall, `food-army < 4`),
+  ;; evacuate gas geysers to minerals so workers never vanish inside Assimilators/Refineries/Extractors!
+  (define worker-rush-evacuate-gas?
+    (and (< cur-loop 3600)
+         (< (sc2-player-common-food-army pc) 4)
+         (not (null? ready-townhalls))
+         (>= (count (lambda (u)
+                      (and (= (sc2-unit-alliance u) 4)
+                           (sc2-unit-is-worker? u)
+                           (let ([up (sc2-unit-pos u)])
+                             (ormap (lambda (th)
+                                      (define tp (sc2-unit-pos th))
+                                      (<= (pt-dist (sc2-point3d-x up) (sc2-point3d-y up)
+                                                   (sc2-point3d-x tp) (sc2-point3d-y tp))
+                                          22.0))
+                                    ready-townhalls))))
+                    units)
+             5)))
+
+  ;; L31-P0-1 (`GasZeroFreeze -> 0`): Track consecutive zero-gas-harvest frames whenever
+  ;; `cur-gas < 150`, `workers >= 16`, and at least one live ready gas building exists.
+  ;; After `>= 300f` (~13.4s) without gas gain, latch rescue until `cur-gas >= 150` so we force-assign
+  ;; 2-3 workers to the lowest-`gas-bldg-threat-score` non-lethal live geyser and exempt them from
+  ;; non-lethal peripheral/air `0b` evacuation until vespene recovers to `>= 150`!
+  (define zero-gas-monitor-active?
+    (and (< cur-gas 150)
+         (>= (length workers) 16)
+         (pair? ready-gas-bldgs)
+         (not worker-rush-evacuate-gas?)))
+  (define prev-zero-gas-vespene (unbox SC2-ZERO-GAS-LAST-VESPENE))
+  (cond
+    [(not zero-gas-monitor-active?)
+     (set-box! SC2-ZERO-GAS-STREAK-START-LOOP #f)
+     (set-box! SC2-ZERO-GAS-RESCUE-LATCH #f)
+     (set-box! SC2-ZERO-GAS-LAST-VESPENE cur-gas)]
+    [(and (real? prev-zero-gas-vespene) (> cur-gas prev-zero-gas-vespene))
+     (set-box! SC2-ZERO-GAS-STREAK-START-LOOP #f)
+     (set-box! SC2-ZERO-GAS-LAST-VESPENE cur-gas)]
+    [else
+     (define start-loop
+       (or (unbox SC2-ZERO-GAS-STREAK-START-LOOP)
+           (begin
+             (set-box! SC2-ZERO-GAS-STREAK-START-LOOP cur-loop)
+             cur-loop)))
+     (when (>= (- cur-loop start-loop) 300)
+       (set-box! SC2-ZERO-GAS-RESCUE-LATCH #t))
+     (set-box! SC2-ZERO-GAS-LAST-VESPENE cur-gas)])
+  (define non-lethal-ready-gas-bldgs
+    (filter (lambda (gb) (not (gas-bldg-lethal-slaughter? gb))) ready-gas-bldgs))
+  (define gas-zero-freeze-rescue-bldg
+    (and (unbox SC2-ZERO-GAS-RESCUE-LATCH)
+         (pair? non-lethal-ready-gas-bldgs)
+         (first
+          (sort non-lethal-ready-gas-bldgs
+                (lambda (a b)
+                  (define sa (gas-bldg-threat-score a))
+                  (define sb (gas-bldg-threat-score b))
+                  (cond
+                    [(not (= sa sb)) (< sa sb)]
+                    [else
+                     (define na (if (gas-near-any-th? a ready-townhalls) 0 1))
+                     (define nb (if (gas-near-any-th? b ready-townhalls) 0 1))
+                     (if (not (= na nb))
+                         (< na nb)
+                         (< (sc2-unit-tag a) (sc2-unit-tag b)))]))))))
+  (define gas-zero-freeze-rescue? (and gas-zero-freeze-rescue-bldg #t))
+
   (define safe-ready-gas-bldgs
     (filter (lambda (u) (gas-near-any-th? u safe-gas-ready-townhalls))
             ready-gas-bldgs))
@@ -8969,6 +9064,52 @@
                      (* 0.1 (pt-dist wx wy (sc2-point3d-x mp) (sc2-point3d-y mp)))))
                 cand-mins)))
 
+  (define online-gas-tags
+    (for/seteqv ([gb (in-list (append safe-ready-gas-bldgs
+                                      emergency-protected-gas-bldgs
+                                      (if gas-zero-freeze-rescue-bldg
+                                          (list gas-zero-freeze-rescue-bldg)
+                                          '())))])
+      (sc2-unit-tag gb)))
+
+  ;; 0a. L31-P0-1 (`GasZeroFreeze -> 0`): After >= 300f without gas gain while `cur-gas < 150`
+  ;;     and `workers >= 16`, immediately force-assign up to 3 workers directly to the lowest-threat
+  ;;     non-lethal live geyser (`gas-zero-freeze-rescue-bldg`) BEFORE `0b` evacuation runs, and keep
+  ;;     that geyser protected in `online-gas-tags` until `cur-gas >= 150`.
+  (define rescue-issued-this-frame? #f)
+  (when gas-zero-freeze-rescue?
+    (define rgb gas-zero-freeze-rescue-bldg)
+    (define rtag (sc2-unit-tag rgb))
+    (define rgp (sc2-unit-pos rgb))
+    (define target-w (min 3 (max SC2-IDEAL-WORKERS-PER-GEYSER (sc2-unit-ideal-harvesters rgb))))
+    (define cur-assigned (gas-eff-assigned rgb))
+    (define need (max 0 (- target-w cur-assigned)))
+    (when (> need 0)
+      (define rescue-cands
+        (filter (lambda (w)
+                  (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
+                       (not (worker-carrying-gas? w))
+                       (not (ormap (lambda (o)
+                                     (set-member? online-gas-tags (sc2-unit-order-target-unit-tag o)))
+                                   (sc2-unit-orders w)))))
+                workers))
+      (define ranked-rescue
+        (sort rescue-cands
+              <
+              #:key (lambda (w)
+                      (define wp (sc2-unit-pos w))
+                      (+ (cond
+                           [(and (not (worker-carrying-cargo? w)) (null? (sc2-unit-orders w))) 0.0]
+                           [(not (worker-carrying-cargo? w)) 100.0]
+                           [else 500.0])
+                         (pt-dist (sc2-point3d-x rgp) (sc2-point3d-y rgp)
+                                  (sc2-point3d-x wp) (sc2-point3d-y wp))))))
+      (for ([rw (in-list (take ranked-rescue (min need (length ranked-rescue))))])
+        (set! rescue-issued-this-frame? #t)
+        (issue-gather! rw rtag
+                       #:macro-econ? #t
+                       #:allow-carrying-mineral? #t))))
+
   ;; 0b. Offline Base Evacuation & Orphaned Worker Recovery:
   ;;     Immediately evacuate mineral workers from combat-offline or mined-out TownHalls
   ;;     and orphaned harvest workers to the safest online under-saturated TownHall's Near Patches.
@@ -8983,9 +9124,6 @@
           (if (hash-has-key? owned-min-by-tag mtag)
               s2
               (set-add s2 mtag)))))
-    (define online-gas-tags
-      (for/seteqv ([gb (in-list (append safe-ready-gas-bldgs emergency-protected-gas-bldgs))])
-        (sc2-unit-tag gb)))
     (define all-owned-ths (append ready-townhalls coming-online-townhalls))
     (when (not (null? evac-cand-mins))
       (for ([w (in-list workers)]
@@ -9138,24 +9276,6 @@
 
   ;; 2. Assign 1 worker per step to under-saturated gas building, unified with 350G/600G float caps
   ;;    and graduated mineral-worker floor (0 gas -> >= 6 min workers, 1 gas -> >= 8, >= 2 gas -> >= 10).
-  ;;    During an early worker rush (`>= 5` enemy workers within 22 tiles of TownHall, `food-army < 4`),
-  ;;    evacuate gas geysers to minerals so workers never vanish inside Assimilators/Refineries/Extractors!
-  (define worker-rush-evacuate-gas?
-    (and (< cur-loop 3600)
-         (< (sc2-player-common-food-army pc) 4)
-         (not (null? ready-townhalls))
-         (>= (count (lambda (u)
-                      (and (= (sc2-unit-alliance u) 4)
-                           (sc2-unit-is-worker? u)
-                           (let ([up (sc2-unit-pos u)])
-                             (ormap (lambda (th)
-                                      (define tp (sc2-unit-pos th))
-                                      (<= (pt-dist (sc2-point3d-x up) (sc2-point3d-y up)
-                                                   (sc2-point3d-x tp) (sc2-point3d-y tp))
-                                          22.0))
-                                    ready-townhalls))))
-                    units)
-             5)))
   (when (and worker-rush-evacuate-gas? (not (null? owned-base-minerals)))
     (for ([w (in-list workers)]
           #:when (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
@@ -9265,7 +9385,8 @@
       [(= eff-active-gas-workers 2) 10]
       [(< eff-active-gas-workers 6) (if (>= cur-min 300) 10 18)]
       [else                         (if (>= cur-min 400) 14 28)]))
-  (when (and (not (null? under-gas))
+  (when (and (not rescue-issued-this-frame?)
+             (not (null? under-gas))
              (or (and (null? owned-base-minerals) (not mined-out-gas-starved?))
                  (>= (- (length workers) active-gas-worker-count)
                      min-mineral-workers-for-next-gas))
@@ -9449,7 +9570,8 @@
       [(or gas-over-banked? zerg-post-speed-surge-active?) 1]
       [else eff-active-gas-workers]))
   (define max-gas-pulls-this-step
-    (if (or gas-over-banked? zerg-post-speed-surge-active?)
+    (if (and (not gas-zero-freeze-rescue?)
+             (or gas-over-banked? zerg-post-speed-surge-active?))
         (let ([per-step-cap (if (>= eff-active-gas-workers 4) 3 2)])
           (min per-step-cap (max 0 (- eff-active-gas-workers gas-pull-target-floor))))
         0))
@@ -10662,9 +10784,15 @@
   (define builder-worker-tags (mutable-seteqv))
   (define used-geyser-tags (mutable-seteqv))
   (define commanded-combat-tags (mutable-seteqv))
-  ;; Per-step placement RPC budget (<= 2 RPCs/step normally; 3 when >= 2 distinct Protoss buildings
-  ;; queue in one step so `#36/#40` `gateway` never starves at `tight-deferred-by-budget? = #t`!)
-  ;; and Creep Tumor throttle (<= 1 fan search/step & <= 1 RPC per 8 loops) to keep late-Zerg tr < 4.5ms.
+  ;; Per-step placement RPC budget (<= 2 RPCs/step normally; 3 when >= 2 distinct Protoss or Terran
+  ;; structures queue in one step so neither Protoss `gateway` nor Terran `0.5t` spillover starves
+  ;; at budget=0!) and Creep Tumor throttle (<= 1 fan search/step & <= 1 RPC per 8 loops).
+  (define self-is-terran-step?
+    (ormap (lambda (u)
+             (memq (sc2-id->unit-symbol (sc2-unit-unit-type u) 'unknown)
+                   '(command-center orbital-command planetary-fortress
+                     command-center-flying orbital-command-flying scv)))
+           self-units))
   (define distinct-protoss-build-count
     (let ([syms
            (for/fold ([s (seteq)])
@@ -10679,7 +10807,51 @@
                  (set-add s bsym)
                  s))])
       (set-count syms)))
-  (define step-placement-rpc-budget (box (if (>= distinct-protoss-build-count 2) 3 2)))
+  (define-values (distinct-terran-build-count distinct-terran-core-build-count terran-has-spillover-queued?)
+    (let-values ([(all-s core-s spill?)
+                  (for/fold ([as (seteq)] [cs (seteq)] [sp #f])
+                            ([act (in-list actions)])
+                    (cond
+                      [(and (pair? act) (eq? (car act) 'build) (pair? (cdr act)))
+                       (define bsym (normalize-sc2-name->symbol (cadr act)))
+                       (define is-t-bldg?
+                         (memq bsym '(command-center supply-depot barracks factory starport
+                                      bunker engineering-bay armory missile-turret
+                                      ghost-academy fusion-core sensor-tower
+                                      tech-lab reactor
+                                      barracks-tech-lab barracks-reactor
+                                      factory-tech-lab factory-reactor
+                                      starport-tech-lab starport-reactor)))
+                       (define is-t-core?
+                         (memq bsym '(command-center supply-depot barracks factory starport
+                                      tech-lab reactor
+                                      barracks-tech-lab barracks-reactor
+                                      factory-tech-lab factory-reactor
+                                      starport-tech-lab starport-reactor)))
+                       (define is-t-spill?
+                         (and (memq bsym '(barracks factory starport))
+                              (or (ormap (lambda (s)
+                                           (and (not (sc2-unit-is-flying s))
+                                                (eq? (sc2-id->unit-symbol (sc2-unit-unit-type s) 'unknown) bsym)))
+                                         self-structures)
+                                  (and (memq bsym '(factory starport))
+                                       (>= (hash-ref SC2-TERRAN-5X3-MISS-STREAK bsym 0) 3)))))
+                       (values (if is-t-bldg? (set-add as bsym) as)
+                               (if is-t-core? (set-add cs bsym) cs)
+                               (or sp (and is-t-spill? #t)))]
+                      [(and (pair? act) (eq? (car act) 'expand) self-is-terran-step?)
+                       (values (set-add as 'command-center)
+                               (set-add cs 'command-center)
+                               sp)]
+                      [else (values as cs sp)]))])
+      (values (set-count all-s) (set-count core-s) spill?)))
+  (define step-multi-bldg-budget-3?
+    (or (>= distinct-protoss-build-count 2)
+        (>= distinct-terran-core-build-count 3)
+        (and (>= distinct-terran-build-count 2)
+             terran-has-spillover-queued?)))
+  (define step-placement-rpc-budget (box (if step-multi-bldg-budget-3? 3 2)))
+  (define step-terran-tight-bonus-used? (box step-multi-bldg-budget-3?))
   (define step-protoss-power-fail? #f)
   (define step-tumor-rpc-count 0)
   (define step-tumor-placement-count 0)
@@ -13111,12 +13283,26 @@
                              inmain-safe-anchors
                              (list (cons home-x home-y) (cons req-x req-y)))))
                   '()))
+            ;; L31-P0-1: When `terran-prod-spillover-eligible?` triggers `0.5t` tight fallback on a
+            ;; step that started with budget=2 (e.g. 2x same-type production or prior RPC), grant a
+            ;; single 3rd step RPC (never exceeding 3 RPCs/step, matching Protoss's budget=3).
+            (define terran-tight-bonus-granted?
+              (and terran-prod-spillover-eligible?
+                   (not place-pt0)
+                   (pair? rax4-tight-anchors)
+                   std-ws-open?
+                   (<= (unbox step-placement-rpc-budget) 0)
+                   (not (unbox step-terran-tight-bonus-used?))))
+            (when terran-tight-bonus-granted?
+              (set-box! step-terran-tight-bonus-used? #t)
+              (set-box! step-placement-rpc-budget 1))
             (define rax4-tight-can-run?
               (and terran-prod-spillover-eligible?
                    (not place-pt0)
                    (pair? rax4-tight-anchors)
                    (or std-tried-0?
                        (> std-bud-before 0)
+                       terran-tight-bonus-granted?
                        (not std-ws-open?))
                    (or (not std-ws-open?)
                        (> (unbox step-placement-rpc-budget) 0))))

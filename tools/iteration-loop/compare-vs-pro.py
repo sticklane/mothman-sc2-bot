@@ -34,6 +34,8 @@ CORE_12_OPPONENTS = frozenset({
     "Thssprtssbt", "mini-puck", "monsterbot", "oberon", "puck",
     "sludgement2-revived", "titania",
 })
+CORE_14_PROMOTED = frozenset({"who", "onlyfans"})
+CORE_14_OPPONENTS = CORE_12_OPPONENTS | CORE_14_PROMOTED
 
 
 def safe_num(v):
@@ -274,6 +276,25 @@ def normalize_match(m):
 
 def is_selfplay_row(row):
     return bool(row.get("is_selfplay") or row.get("opp_cohort") == "selfplay" or str(row.get("opp_bot") or "").startswith("Mothman-"))
+
+
+def is_core_row(row):
+    if is_selfplay_row(row):
+        return False
+    c = str(row.get("opp_cohort") or "").strip().lower()
+    if c.startswith("core"):
+        return True
+    if c.startswith("unseen"):
+        return False
+    return row.get("opp_bot") in CORE_14_OPPONENTS
+
+
+def is_core12_row(row):
+    return (not is_selfplay_row(row)) and (row.get("opp_bot") in CORE_12_OPPONENTS)
+
+
+def is_unseen_row(row):
+    return (not is_selfplay_row(row)) and (not is_core_row(row))
 
 
 def load_score_json(path, exclude_opp_crash=False):
@@ -710,16 +731,33 @@ def main():
             ],
         }
 
-    cur_core_rows = [m for m in cur_rows if m["opp_bot"] in CORE_12_OPPONENTS]
+    cur_core_rows = [m for m in cur_rows if is_core_row(m)]
     cur_core_nc_rows = [m for m in cur_core_rows if m["opp_bot"] != "Chance"]
-    cur_unseen_rows = [m for m in cur_rows if m["opp_bot"] not in CORE_12_OPPONENTS and not is_selfplay_row(m)]
+    cur_core12_rows = [m for m in cur_rows if is_core12_row(m)]
+    cur_core12_nc_rows = [m for m in cur_core12_rows if m["opp_bot"] != "Chance"]
+    cur_promoted_rows = [m for m in cur_core_rows if m["opp_bot"] not in CORE_12_OPPONENTS]
+    cur_unseen_rows = [m for m in cur_rows if is_unseen_row(m)]
     cohorts = None
-    if cur_unseen_rows:
+    if cur_unseen_rows or cur_promoted_rows:
+        core_opps = sorted(set(m["opp_bot"] for m in cur_core_rows))
+        promoted_opps = sorted(set(m["opp_bot"] for m in cur_promoted_rows))
         unseen_opps = sorted(set(m["opp_bot"] for m in cur_unseen_rows))
+        core_label = f"core_{len(core_opps)}" if len(core_opps) > 12 else "core_12"
         cohorts = {
-            "core_12": summarize_slice(cur_core_rows),
-            "core_12_non_chance": summarize_slice(cur_core_nc_rows),
-            "unseen_roster": summarize_slice(cur_unseen_rows),
+            "core_label": core_label,
+            "core_opponents": core_opps,
+            "core_active": summarize_slice(cur_core_rows),
+            "core_active_non_chance": summarize_slice(cur_core_nc_rows),
+            "core_14": summarize_slice(cur_core_rows) if cur_promoted_rows else None,
+            "core_14_non_chance": summarize_slice(cur_core_nc_rows) if cur_promoted_rows else None,
+            "promoted_core_opponents": promoted_opps,
+            "promoted_core_by_opponent": {
+                opp: summarize_slice([m for m in cur_promoted_rows if m["opp_bot"] == opp])
+                for opp in promoted_opps
+            },
+            "core_12": summarize_slice(cur_core12_rows),
+            "core_12_non_chance": summarize_slice(cur_core12_nc_rows),
+            "unseen_roster": summarize_slice(cur_unseen_rows) if cur_unseen_rows else None,
             "unseen_opponents": unseen_opps,
             "unseen_by_opponent": {
                 opp: summarize_slice([m for m in cur_unseen_rows if m["opp_bot"] == opp])
@@ -955,28 +993,55 @@ def main():
         )
 
     if cohorts:
+        c_act = cohorts["core_active"]
+        c_act_nc = cohorts["core_active_non_chance"]
+        c_lbl = cohorts.get("core_label") or "core_12"
         c12 = cohorts["core_12"]
         c12_nc = cohorts["core_12_non_chance"]
-        cu = cohorts["unseen_roster"]
-        print("\n### Full-Roster Generalization Split (`core_12` vs `unseen_roster`)")
-        print(f"- **`core_12` (`n={c12['n']}`):** `{c12['wins']}W-{c12['losses']}L-{c12['ties']}T` (`{c12['wr_pct']:.1f}%` WR, Trade `{fmt(c12['trade_agg'],'x',2)}`/`{fmt(c12['trade_med'],'x',2)}`, SupBlk `{fmt(c12['sup_blk_avg'],'%')}`, PkArmy `{fmt(c12['pk_army_avg'],'',0)}`, WallTies `{c12.get('wall_timeout_ties', 0)}` Win=`{c12.get('wall_timeout_winning_ties', 0)}`)")
-        print(f"- **`core_12 Non-Chance` (`n={c12_nc['n']}`):** `{c12_nc['wins']}W-{c12_nc['losses']}L-{c12_nc['ties']}T` (`{c12_nc['wr_pct']:.1f}%` WR, Trade `{fmt(c12_nc['trade_agg'],'x',2)}`/`{fmt(c12_nc['trade_med'],'x',2)}`, SupBlk `{fmt(c12_nc['sup_blk_avg'],'%')}`, PkArmy `{fmt(c12_nc['pk_army_avg'],'',0)}`)")
-        print(f"- **`unseen_roster` (`n={cu['n']}`, {', '.join(cohorts['unseen_opponents'])}):** `{cu['wins']}W-{cu['losses']}L-{cu['ties']}T` (`{cu['wr_pct']:.1f}%` WR, Trade `{fmt(cu['trade_agg'],'x',2)}`/`{fmt(cu['trade_med'],'x',2)}`, SupBlk `{fmt(cu['sup_blk_avg'],'%')}`, PkArmy `{fmt(cu['pk_army_avg'],'',0)}`)")
-        if cohorts.get("unseen_by_opponent"):
-            print("\n| Unseen Opponent | n | W-L-T | Trade Agg | PkArmy | SupBlk% | CloakLoss | Siege0DPS |")
+        cu = cohorts.get("unseen_roster")
+        has_prom = bool(cohorts.get("promoted_core_opponents"))
+        if cu and has_prom:
+            hdr = f"### Full-Roster Generalization Split (`{c_lbl}` vs historical `core_12` vs `unseen_{len(cohorts['unseen_opponents'])}`)"
+        elif cu:
+            hdr = f"### Full-Roster Generalization Split (`{c_lbl}` vs `unseen_{len(cohorts['unseen_opponents'])}`)"
+        else:
+            hdr = f"### Core Cohort Continuity (`{c_lbl}` Primary vs Historical `core_12`)"
+        print(f"\n{hdr}")
+        if has_prom and c_act["n"] > 0:
+            print(f"- **`{c_lbl}` Primary (`n={c_act['n']}`, incl. {', '.join(cohorts['promoted_core_opponents'])}):** `{c_act['wins']}W-{c_act['losses']}L-{c_act['ties']}T` (`{c_act['wr_pct']:.1f}%` WR, Trade `{fmt(c_act['trade_agg'],'x',2)}`/`{fmt(c_act['trade_med'],'x',2)}`, SupBlk `{fmt(c_act['sup_blk_avg'],'%')}`, PkArmy `{fmt(c_act['pk_army_avg'],'',0)}`, WallTies `{c_act.get('wall_timeout_ties', 0)}` Win=`{c_act.get('wall_timeout_winning_ties', 0)}`)")
+            if c_act_nc["n"] > 0:
+                print(f"- **`{c_lbl}` Non-Chance (`n={c_act_nc['n']}`):** `{c_act_nc['wins']}W-{c_act_nc['losses']}L-{c_act_nc['ties']}T` (`{c_act_nc['wr_pct']:.1f}%` WR, Trade `{fmt(c_act_nc['trade_agg'],'x',2)}`/`{fmt(c_act_nc['trade_med'],'x',2)}`, SupBlk `{fmt(c_act_nc['sup_blk_avg'],'%')}`, PkArmy `{fmt(c_act_nc['pk_army_avg'],'',0)}`)")
+        if c12["n"] > 0:
+            print(f"- **`core_12` Historical (`n={c12['n']}`):** `{c12['wins']}W-{c12['losses']}L-{c12['ties']}T` (`{c12['wr_pct']:.1f}%` WR, Trade `{fmt(c12['trade_agg'],'x',2)}`/`{fmt(c12['trade_med'],'x',2)}`, SupBlk `{fmt(c12['sup_blk_avg'],'%')}`, PkArmy `{fmt(c12['pk_army_avg'],'',0)}`, WallTies `{c12.get('wall_timeout_ties', 0)}` Win=`{c12.get('wall_timeout_winning_ties', 0)}`)")
+        if c12_nc["n"] > 0:
+            print(f"- **`core_12` Non-Chance (`n={c12_nc['n']}`):** `{c12_nc['wins']}W-{c12_nc['losses']}L-{c12_nc['ties']}T` (`{c12_nc['wr_pct']:.1f}%` WR, Trade `{fmt(c12_nc['trade_agg'],'x',2)}`/`{fmt(c12_nc['trade_med'],'x',2)}`, SupBlk `{fmt(c12_nc['sup_blk_avg'],'%')}`, PkArmy `{fmt(c12_nc['pk_army_avg'],'',0)}`)")
+        if cohorts.get("promoted_core_by_opponent"):
+            print("\n| Promoted Core Opponent | n | W-L-T | Trade Agg | PkArmy | SupBlk% | CloakLoss | Siege0DPS |")
             print("|---|---:|---|---:|---:|---:|---:|---:|")
-            for opp, osum in cohorts["unseen_by_opponent"].items():
+            for opp, osum in cohorts["promoted_core_by_opponent"].items():
                 print(
                     f"| `{opp}` | {osum['n']} | {osum['wins']}-{osum['losses']}-{osum['ties']} "
                     f"| {fmt(osum['trade_agg'],'x',2)} | {fmt(osum['pk_army_avg'],'',0)} "
                     f"| {fmt(osum['sup_blk_avg'],'%')} | {osum.get('cloaked_unit_damage_losses', 0)} "
                     f"| {osum.get('siege_range_zero_dps_losses', 0)} |"
                 )
+        if cu and cu["n"] > 0:
+            print(f"\n- **`unseen_{len(cohorts['unseen_opponents'])}` (`n={cu['n']}`, {', '.join(cohorts['unseen_opponents'])}):** `{cu['wins']}W-{cu['losses']}L-{cu['ties']}T` (`{cu['wr_pct']:.1f}%` WR, Trade `{fmt(cu['trade_agg'],'x',2)}`/`{fmt(cu['trade_med'],'x',2)}`, SupBlk `{fmt(cu['sup_blk_avg'],'%')}`, PkArmy `{fmt(cu['pk_army_avg'],'',0)}`)")
+            if cohorts.get("unseen_by_opponent"):
+                print("\n| Unseen Opponent | n | W-L-T | Trade Agg | PkArmy | SupBlk% | CloakLoss | Siege0DPS |")
+                print("|---|---:|---|---:|---:|---:|---:|---:|")
+                for opp, osum in cohorts["unseen_by_opponent"].items():
+                    print(
+                        f"| `{opp}` | {osum['n']} | {osum['wins']}-{osum['losses']}-{osum['ties']} "
+                        f"| {fmt(osum['trade_agg'],'x',2)} | {fmt(osum['pk_army_avg'],'',0)} "
+                        f"| {fmt(osum['sup_blk_avg'],'%')} | {osum.get('cloaked_unit_damage_losses', 0)} "
+                        f"| {osum.get('siege_range_zero_dps_losses', 0)} |"
+                    )
 
     if selfplay_report:
         sps = selfplay_report["summary"]
         print(
-            f"\n### Full-Match Self-Play Cohort (`n={sps['n']}`, isolated from Pro-Corpus & core_12/unseen_6): "
+            f"\n### Full-Match Self-Play Cohort (`n={sps['n']}`, isolated from Pro-Corpus & core/unseen): "
             f"P1 `{sps['wins']}W-{sps['losses']}L-{sps['ties']}T` (`{sps['wr_pct']:.1f}%`, Trade `{fmt(sps['trade_agg'],'x',2)}`, "
             f"SupBlk `{fmt(sps['sup_blk_avg'],'%')}`, PkArmy `{fmt(sps['pk_army_avg'],'',0)}`, "
             f"AvgDur `{fmt(sps.get('dur_avg_sec'),'s',0)}`)"
@@ -994,7 +1059,7 @@ def main():
             )
 
     if hwm_all:
-        cmp_slice = cohorts["core_12"] if (cohorts and hwm_all["n"] <= 36 and cur_all["n"] > 36) else cur_all
+        cmp_slice = cohorts["core_12"] if (cohorts and cohorts["core_12"]["n"] > 0 and hwm_all["n"] <= 36 and cur_all["n"] > 36) else cur_all
         cmp_lbl = "Current core_12" if cmp_slice is not cur_all else "Current"
         hwm_slice = (
             summarize_slice([m for m in hwm_rows if m["opp_bot"] in CORE_12_OPPONENTS])
@@ -1009,6 +1074,13 @@ def main():
             f"(`{hwm_slice['wr_pct']:.1f}%`, Trade `{fmt(hwm_slice['trade_agg'],'x',2)}`/`{fmt(hwm_slice['trade_med'],'x',2)}`, "
             f"SupBlk `{fmt(hwm_slice['sup_blk_avg'],'%')}`) -> **{'NEW HWM!' if (cmp_slice['wins'] > hwm_slice['wins'] or (cmp_slice['wins'] == hwm_slice['wins'] and (cmp_slice['losses'] < hwm_slice['losses'] or (cmp_slice['losses'] == hwm_slice['losses'] and cmp_slice['trade_agg'] >= hwm_slice['trade_agg'])))) else 'BELOW HWM (hold commit)'}**"
         )
+        if cohorts and cohorts.get("core_14") and cohorts["core_14"]["n"] > 0:
+            c14 = cohorts["core_14"]
+            print(
+                f"- **Primary `core_14` (`n={c14['n']}`):** `{c14['wins']}W-{c14['losses']}L-{c14['ties']}T` "
+                f"(`{c14['wr_pct']:.1f}%`, Trade `{fmt(c14['trade_agg'],'x',2)}`/`{fmt(c14['trade_med'],'x',2)}`, "
+                f"SupBlk `{fmt(c14['sup_blk_avg'],'%')}`, PkArmy `{fmt(c14['pk_army_avg'],'',0)}`)"
+            )
 
     passed_gates = sum(1 for k, v in gates.items() if k != "ready_to_promote" and v)
     total_gates = sum(1 for k in gates if k != "ready_to_promote")

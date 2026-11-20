@@ -6570,6 +6570,330 @@
                    (equal? (assoc 10054 mo-targets) (cons 10054 10061))
                    (equal? (assoc 10055 mo-targets) (cons 10055 10061)))))
 
+;; =============================================================================
+;; Loop 31 (`L31-P0-1`): Zero GasZeroFreeze + Terran step-placement-rpc-budget=3
+;; =============================================================================
+(printf "[Loop 31] Testing L31-P0-1 depleted-gas filter, 300f zero-gas-freeze rescue + 0b exemption, & Terran budget=3 spillover...\n")
+(let ()
+  (define (mk-l31-u tag utype alliance x y
+                    #:hp [hp 100.0] #:hp-max [hp-max hp] #:shield [sh 0.0] #:rad [rad 1.0]
+                    #:display [disp 1] #:orders [ords '()] #:buffs [buffs '()]
+                    #:flying? [flying? #f]
+                    #:mins [mins 0] #:vesp [vesp 0]
+                    #:assigned [asgn 0] #:ideal [idl 0])
+    (sc2-unit disp alliance tag utype (if (= alliance 1) 1 (if (= alliance 3) 0 2))
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 0 flying? #f #f
+              hp hp-max sh sh 0.0 0.0 mins vesp #f #f #f #t #f
+              ords 0 buffs asgn idl 0.0 0 0 0 0 '() 0 0))
+
+  (define (l31-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+
+  (define (l31-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59931 "/sc2api" c-in c-out #f 1))
+    (define rpc-cnt (box 0))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define id-p (assoc 97 req-f))
+             (define id-b (if id-p (encode-uint32 97 (third id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (set-box! rpc-cnt (add1 (unbox rpc-cnt)))
+               (define rn (unbox rpc-cnt))
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py rn))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws rpc-cnt (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+
+  ;; L31-P0-1a: Strictly filter depleted `vespene-contents == 0` geyser out of `ready-gas-bldgs`
+  ;; (and into `depleted-gas-tags`) whenever ANY live geyser reports `vespene-contents > 0`, even
+  ;; if SC2 transiently leaves `ideal-harvesters = 3` on the depleted Assimilator!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (set-box! SC2-ZERO-GAS-STREAK-START-LOOP #f)
+  (set-box! SC2-ZERO-GAS-LAST-VESPENE #f)
+  (set-box! SC2-ZERO-GAS-RESCUE-LATCH #f)
+  (define nx-1a (mk-l31-u 11001 59 1 28.5 28.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75 #:assigned 10 #:ideal 16))
+  (define as-dep (mk-l31-u 11002 61 1 24.0 23.0 #:hp 450.0 #:shield 450.0 #:rad 1.5 #:assigned 1 #:ideal 3 #:vesp 0))
+  (define as-liv (mk-l31-u 11003 61 1 33.0 23.0 #:hp 450.0 #:shield 450.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 1800))
+  (define m-1a-1 (mk-l31-u 11004 341 3 23.0 31.0 #:hp 1000.0 #:rad 1.0 #:mins 1200))
+  (define m-1a-2 (mk-l31-u 11005 341 3 25.0 32.5 #:hp 1000.0 #:rad 1.0 #:mins 1200))
+  (define prb-on-dep
+    (mk-l31-u 11010 84 1 24.5 24.0 #:hp 20.0 #:shield 20.0 #:rad 0.375
+              #:orders (list (sc2-unit-order 298 #f 11002 0.0))))
+  (define prbs-1a
+    (cons prb-on-dep
+          (for/list ([i (in-range 1 12)])
+            (mk-l31-u (+ 11010 i) 84 1 (+ 26.0 (* 0.4 i)) 30.5 #:hp 20.0 #:shield 20.0 #:rad 0.375
+                      #:orders (list (sc2-unit-order 298 #f 11004 0.0))))))
+  (define cmds-1a
+    (saturate-workers-and-gas-commands
+     (sc2-observation 18500 (sc2-player-common 1 300 40 60 30 6 12 0 0 0 0)
+                      (append (list nx-1a as-dep as-liv m-1a-1 m-1a-2) prbs-1a)
+                      '() '() #f '() '() '() '() '() '())))
+  (define targets-1a
+    (for/list ([c (in-list cmds-1a)] #:when (sc2-raw-unit-command? c))
+      (cons (first (sc2-raw-unit-command-unit-tags c))
+            (sc2-raw-unit-command-target-unit-tag c))))
+  (check-true "l31-p0-1a-depleted-vespene-zero-geyser-filtered-even-with-ideal-harvesters-3"
+              (and (not (ormap (lambda (p) (= (cdr p) 11002)) targets-1a))
+                   (let ([ev (assoc 11010 targets-1a)])
+                     (and ev (memv (cdr ev) '(11004 11005))))
+                   (ormap (lambda (p) (= (cdr p) 11003)) targets-1a)))
+
+  ;; L31-P0-1b: Zero-gas-freeze rescue after >= 300f of zero gas gain (`cur-gas < 150`, `workers >= 16`,
+  ;; live `ready-gas-bldgs` non-empty): force-assigns 3 workers directly to the lowest-threat non-lethal
+  ;; live geyser (beating a higher-threat geyser) AND keeps them exempt from non-lethal peripheral/air
+  ;; `0b` evacuation as gas resumes (`21 -> 25`) until `cur-gas >= 150`!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (set-box! SC2-ZERO-GAS-STREAK-START-LOOP #f)
+  (set-box! SC2-ZERO-GAS-LAST-VESPENE #f)
+  (set-box! SC2-ZERO-GAS-RESCUE-LATCH #f)
+  ;; Offline Main Nexus (`hp 300/1000` + peripheral Stalker at `13t` -> `th-combat-unsafe? = #t`)
+  ;; with low-threat non-lethal live Assimilator `11102` (1 flying Phoenix `9t` away -> score ~1180).
+  (define nx-main-off (mk-l31-u 11101 59 1 28.5 28.5 #:hp 300.0 #:hp-max 1000.0 #:shield 0.0 #:rad 2.75 #:assigned 0 #:ideal 16))
+  (define as-low-thrt (mk-l31-u 11102 61 1 24.0 23.0 #:hp 450.0 #:shield 450.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 2000))
+  (define m-main-1    (mk-l31-u 11104 341 3 23.0 31.0 #:hp 1000.0 #:rad 1.0 #:mins 1200))
+  (define e-periph-st (mk-l31-u 11105 74 4 41.5 28.5 #:hp 160.0 #:rad 0.625))
+  (define e-air-phx   (mk-l31-u 11106 78 4 24.0 14.0 #:hp 180.0 #:rad 0.75 #:flying? #t))
+  ;; Online Natural Nexus (safe minerals so `0b` runs!) + offline Third with higher-threat live Assimilator `11103`
+  ;; (2 ground Stalkers at `5t` -> threat ~12320, non-lethal `< 3` but far worse than `11102`).
+  (define nx-nat-on   (mk-l31-u 11107 59 1 60.5 28.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75 #:assigned 14 #:ideal 16))
+  (define m-nat-1     (mk-l31-u 11108 341 3 66.0 28.5 #:hp 1000.0 #:rad 1.0 #:mins 1200))
+  (define m-nat-2     (mk-l31-u 11109 341 3 66.0 31.0 #:hp 1000.0 #:rad 1.0 #:mins 1200))
+  (define nx-3rd-off  (mk-l31-u 11110 59 1 60.5 60.5 #:hp 300.0 #:hp-max 1000.0 #:rad 2.75 #:assigned 0 #:ideal 16))
+  (define as-hi-thrt  (mk-l31-u 11103 61 1 56.0 55.0 #:hp 450.0 #:shield 450.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 2000))
+  (define e-camp-st1  (mk-l31-u 11111 74 4 56.0 50.0 #:hp 160.0 #:rad 0.625))
+  (define e-camp-st2  (mk-l31-u 11112 74 4 59.0 52.0 #:hp 160.0 #:rad 0.625))
+  ;; 20 Probes (17 mining Natural minerals, 3 near Main).
+  (define (mk-1b-obs loop gas #:rescued-targeting? [rescued-targeting? #f])
+    (define probes
+      (for/list ([i (in-range 0 20)])
+        (define tag (+ 11120 i))
+        (if (< i 3)
+            (mk-l31-u tag 84 1 (+ 25.0 (* 0.5 i)) 25.0 #:hp 20.0 #:shield 20.0 #:rad 0.375
+                      #:orders (if rescued-targeting?
+                                   (list (sc2-unit-order 298 #f 11102 0.0))
+                                   (list (sc2-unit-order 298 #f 11104 0.0))))
+            (mk-l31-u tag 84 1 (+ 62.0 (* 0.2 i)) 29.0 #:hp 20.0 #:shield 20.0 #:rad 0.375
+                      #:orders (list (sc2-unit-order 298 #f 11108 0.0))))))
+    (sc2-observation loop (sc2-player-common 1 500 gas 80 50 10 20 0 0 0 0)
+                     (append (list nx-main-off as-low-thrt m-main-1 e-periph-st e-air-phx
+                                   nx-nat-on m-nat-1 m-nat-2
+                                   nx-3rd-off as-hi-thrt e-camp-st1 e-camp-st2)
+                             probes)
+                     '() '() #f '() '() '() '() '() '()))
+  ;; Loop 19000: starts zero-gas streak (no rescue yet).
+  (void (saturate-workers-and-gas-commands (mk-1b-obs 19000 21)))
+  (define latch-at-0 (unbox SC2-ZERO-GAS-RESCUE-LATCH))
+  ;; Loop 19250 (250f < 300f): still no rescue latch.
+  (void (saturate-workers-and-gas-commands (mk-1b-obs 19250 21)))
+  (define latch-at-250 (unbox SC2-ZERO-GAS-RESCUE-LATCH))
+  ;; Loop 19300 (300f >= 300f): rescue triggers! Force-assigns 3 workers directly to `11102` (not `11103`).
+  (define cmds-1b-rescue (saturate-workers-and-gas-commands (mk-1b-obs 19300 21)))
+  (define latch-at-300 (unbox SC2-ZERO-GAS-RESCUE-LATCH))
+  (define rescue-11102-cnt
+    (count (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 3666)
+                  (= (sc2-raw-unit-command-target-unit-tag c) 11102)))
+           cmds-1b-rescue))
+  (define rescue-11103-cnt
+    (count (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-target-unit-tag c) 11103)))
+           cmds-1b-rescue))
+  ;; Loop 19340 (`cur-gas = 25`, gas flowing < 150!): latch MUST stay `#t` and `0b` MUST NOT
+  ;; evacuate the 3 Probes (`11120..11122`) harvesting `11102` near offline Main Nexus!
+  (define cmds-1b-keep
+    (saturate-workers-and-gas-commands (mk-1b-obs 19340 25 #:rescued-targeting? #t)))
+  (define latch-at-25g (unbox SC2-ZERO-GAS-RESCUE-LATCH))
+  (define evacuated-rescued?
+    (ormap (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (ormap (lambda (wt) (memv wt '(11120 11121 11122)))
+                         (sc2-raw-unit-command-unit-tags c))))
+           cmds-1b-keep))
+  ;; Loop 19600 (`cur-gas = 155 >= 150`): rescue latch cleanly disengages!
+  (void (saturate-workers-and-gas-commands (mk-1b-obs 19600 155 #:rescued-targeting? #t)))
+  (define latch-at-155g (unbox SC2-ZERO-GAS-RESCUE-LATCH))
+  (check-true "l31-p0-1b-zero-gas-freeze-rescue-300f-assigns-3-to-lowest-threat-and-exempts-0b-until-150g"
+              (and (not latch-at-0)
+                   (not latch-at-250)
+                   latch-at-300
+                   (= rescue-11102-cnt 3)
+                   (= rescue-11103-cnt 0)
+                   latch-at-25g
+                   (not evacuated-rescued?)
+                   (not latch-at-155g)))
+
+  ;; L31-P0-1c: Zero-gas-freeze rescue MUST NOT feed workers into lethal ground slaughter
+  ;; (`>= 3` uncontested ground-damaging enemy units within `7.0t` of the ONLY live geyser)!
+  (set-box! SC2-ZERO-GAS-STREAK-START-LOOP #f)
+  (set-box! SC2-ZERO-GAS-LAST-VESPENE #f)
+  (set-box! SC2-ZERO-GAS-RESCUE-LATCH #f)
+  (define as-lethal (mk-l31-u 11202 61 1 24.0 23.0 #:hp 450.0 #:shield 450.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 2000))
+  (define e-kill-1  (mk-l31-u 11203 74 4 24.0 26.0 #:hp 160.0 #:rad 0.625))
+  (define e-kill-2  (mk-l31-u 11204 74 4 26.0 24.0 #:hp 160.0 #:rad 0.625))
+  (define e-kill-3  (mk-l31-u 11205 74 4 22.0 25.0 #:hp 160.0 #:rad 0.625))
+  (define prbs-1c
+    (for/list ([i (in-range 0 18)])
+      (mk-l31-u (+ 11210 i) 84 1 (+ 62.0 (* 0.2 i)) 29.0 #:hp 20.0 #:shield 20.0 #:rad 0.375
+                #:orders (list (sc2-unit-order 298 #f 11108 0.0)))))
+  (define (mk-1c-obs loop)
+    (sc2-observation loop (sc2-player-common 1 500 20 80 48 0 18 0 0 0 0)
+                     (append (list nx-main-off as-lethal e-kill-1 e-kill-2 e-kill-3
+                                   nx-nat-on m-nat-1 m-nat-2)
+                             prbs-1c)
+                     '() '() #f '() '() '() '() '() '()))
+  (void (saturate-workers-and-gas-commands (mk-1c-obs 19700)))
+  (define cmds-1c (saturate-workers-and-gas-commands (mk-1c-obs 20050)))
+  ;; Note: `emergency-protected-gas-bldgs` still allows at most 1 emergency probe when `safe-ready-gas-bldgs = '()`,
+  ;; while `gas-zero-freeze-rescue?` MUST NOT force-assign 3 workers into `>= 3` close ground killers!
+  (define sent-to-lethal-cnt
+    (count (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-target-unit-tag c) 11202)))
+           cmds-1c))
+  (check-true "l31-p0-1c-zero-gas-freeze-rescue-does-not-force-3-workers-into-lethal-ground-slaughter"
+              (<= sent-to-lethal-cnt 1))
+
+  ;; L31-P0-1d: Terran multi-structure `step-placement-rpc-budget = 3`: when `supply-depot` + `barracks`
+  ;; (`>= 2` distinct Terran structures) queue in ONE step and `barracks #2` (`terran-prod-spillover-eligible?`)
+  ;; fails `2.0t` on RPC #2, RPC #3 MUST execute `0.5t` tight spillover and place BOTH in the same step!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
+  (define l31-gi
+    (sc2-game-info "L31TerranBudgetMap" "" '() '(128 128) '(4 4 124 124)
+                   (list (sc2-point2d 100.0 100.0)) w3-full-grid #f w3-full-grid))
+  (let-values ([(ws rpc-cnt cleanup!)
+                (l31-start-mock-ws
+                 (lambda (ab px py _rn)
+                   (cond
+                     [(= ab 319) 1]
+                     [(and (= ab 321) (<= (l31-dist px py 35.5 29.5) 0.1)) 1]
+                     [else 2])))])
+    (define cc-main (mk-l31-u 11301 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define cc-nat  (mk-l31-u 11302 18 1 56.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define rax-1   (mk-l31-u 11303 21 1 32.5 28.5 #:hp 1000.0 #:rad 1.5))
+    ;; `(35.5, 29.5)` sits `3.16t` from `rax-1 (32.5, 28.5)` -> fails `2.0t` & `em-spacing=1.25`,
+    ;; passing ONLY under `0.5t` tight spillover on RPC #3!
+    (define scv-1   (mk-l31-u 11305 45 1 27.0 26.0 #:hp 45.0 #:rad 0.375))
+    (define scv-2   (mk-l31-u 11306 45 1 55.0 28.0 #:hp 45.0 #:rad 0.375))
+    (define obs-1d
+      (sc2-observation 20200 (sc2-player-common 1 800 200 70 40 16 24 0 0 0 0)
+                       (list cc-main cc-nat rax-1 scv-1 scv-2)
+                       '() '() #f '() '() '() '() '() '()))
+    (define cmds-1d
+      (translate-bot-actions->sc2-raw-commands
+       '((build supply-depot 26.0 24.0) (build barracks 28.5 28.5))
+       obs-1d #:ws-conn ws #:game-info l31-gi))
+    (define dep-cmd (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 319))) cmds-1d))
+    (define rax-cmd (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) cmds-1d))
+    (define rax-pt (and rax-cmd (sc2-raw-unit-command-target-pos rax-cmd)))
+    (check-true "l31-p0-1d-terran-multi-bldg-budget-3-places-barracks-tight-05-after-depot"
+                (and (= (unbox rpc-cnt) 3)
+                     (sc2-raw-unit-command? dep-cmd)
+                     (sc2-point2d? rax-pt)
+                     (<= (l31-dist (sc2-point2d-x rax-pt) (sc2-point2d-y rax-pt) 35.5 29.5) 0.1)))
+    (cleanup!))
+
+  ;; L31-P0-1e: Same-type dual Terran `barracks` (`distinct-terran-build-count = 1`, initial budget=2):
+  ;; 1st `barracks` takes RPC #1, 2nd `barracks` fails `2.0t` on RPC #2 (`budget -> 0`), and
+  ;; `terran-tight-bonus-granted?` grants the single 3rd RPC so 2nd `barracks` lands via `0.5t` tight!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
+  (let-values ([(ws rpc-cnt cleanup!)
+                (l31-start-mock-ws
+                 (lambda (ab px py rn)
+                   (cond
+                     ;; 1st Barracks passes anywhere on RPC #1
+                     [(and (= ab 321) (= rn 1)) 1]
+                     [(and (= ab 319) (= rn 1)) 1]
+                     ;; 2nd Barracks fails `2.0t` on RPC #2 and passes ONLY at tight spot `(35.5, 29.5)` on RPC #3!
+                     [(and (= ab 321) (<= (l31-dist px py 35.5 29.5) 0.1)) 1]
+                     [else 2])))])
+    (define cc-main (mk-l31-u 11401 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define cc-nat  (mk-l31-u 11402 18 1 56.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define rax-1   (mk-l31-u 11403 21 1 32.5 28.5 #:hp 1000.0 #:rad 1.5))
+    (define scv-1   (mk-l31-u 11405 45 1 27.0 26.0 #:hp 45.0 #:rad 0.375))
+    (define scv-2   (mk-l31-u 11406 45 1 55.0 28.0 #:hp 45.0 #:rad 0.375))
+    (define obs-1e
+      (sc2-observation 20300 (sc2-player-common 1 800 200 70 40 16 24 0 0 0 0)
+                       (list cc-main cc-nat rax-1 scv-1 scv-2)
+                       '() '() #f '() '() '() '() '() '()))
+    (define cmds-1e
+      (translate-bot-actions->sc2-raw-commands
+       '((build barracks 28.5 28.5) (build barracks 28.5 28.5))
+       obs-1e #:ws-conn ws #:game-info l31-gi))
+    (define rax-cmds
+      (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) cmds-1e))
+    (define hit-tight?
+      (ormap (lambda (c)
+               (define pt (sc2-raw-unit-command-target-pos c))
+               (and (sc2-point2d? pt)
+                    (<= (l31-dist (sc2-point2d-x pt) (sc2-point2d-y pt) 35.5 29.5) 0.1)))
+             rax-cmds))
+    (check-true "l31-p0-1e-terran-spillover-tight-05-grants-3rd-rpc-for-same-type-dual-barracks"
+                (and (= (unbox rpc-cnt) 3)
+                     (= (length rax-cmds) 2)
+                     hit-tight?))
+    (cleanup!)))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

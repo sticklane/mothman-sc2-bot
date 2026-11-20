@@ -114,7 +114,8 @@
  select-far-mineral-patch-non-carrying-worker
  bot-runtime-point-territory-margin
  bot-runtime-point-territory-zone
- bot-runtime-mobile-retreatable-unit?)
+ bot-runtime-mobile-retreatable-unit?
+ macro-decision-sym-in-escrow-queue-top-n?)
 
 (define-inline (unit-type-sym u)
   (cond
@@ -4585,14 +4586,14 @@
       [(Terran)
        (define rax-ready? (memq 'barracks ready-bldg-types))
        (define ebay-ready? (memq 'engineering-bay ready-bldg-types))
-       ;; L30-P0-3 (`#32` Natural CC Escrow Guard): Do not let non-emergency static-D spends
-       ;; break an active 1-base Natural `command-center` escrow (`sav=command-center`)!
+       ;; L30-P0-3 / L31-P0-3 (`#32`/`#08`/`#26` Natural CC Escrow Guard): Do not let non-emergency static-D
+       ;; spends break an active 1-base Natural `command-center` escrow (`saving_for`, `bo-goal`, or top-2 `escrow_queue`)!
        (define terran-hold-sd-for-nat-cc?
          (and live-game?
               (= active-bases 1)
               (not active-cloak-emergency?)
               (l2-ctx-terran-saving-for-cc-expand? ctx)
-              (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+              (l2-terran-1base-cc-intent? ctx)
               (not (l2-ctx-early-survival-crisis? ctx))
               (not (l2-ctx-under-base-attack? ctx))
               (<= (l2-ctx-live-enemy-threat-supply ctx) (max 6.0 (l2-ctx-live-army-supply ctx)))
@@ -5990,6 +5991,34 @@
                        (not (hash-ref d 'blocking? #t))
                        (pair? (macro-brain-decision-scheduled-ids md))))))))
 
+;; L31-P0-3 (`#08`/`#26`): Check whether `sym` appears in the top-N entries of the Macro Brain's
+;; `escrow_queue` (`blocked-by-escrow` / `escrowed-saving` trace items) so a 1-base Terran CC #2
+;; ranked #2 behind e.g. Starport still activates the 1-base Natural CC mineral hold!
+(define (macro-decision-sym-in-escrow-queue-top-n? md sym [max-n 2])
+  (and (macro-brain-decision? md)
+       (let ([sched (macro-brain-decision-priority-schedule md)])
+         (and (priority-schedule-result? sched)
+              (let loop ([rem (priority-schedule-decision-trace sched)] [seen 0])
+                (cond
+                  [(or (null? rem) (>= seen max-n)) #f]
+                  [else
+                   (define d (car rem))
+                   (if (and (priority-decision-entry? d)
+                            (memq (priority-decision-entry-outcome d)
+                                  '(blocked-by-escrow escrowed-saving)))
+                       (if (eq? (priority-decision-entry-id d) sym)
+                           #t
+                           (loop (cdr rem) (add1 seen)))
+                       (loop (cdr rem) seen))]))))))
+
+(define (l2-sym-in-escrow-queue-top-n? ctx sym [max-n 2])
+  (macro-decision-sym-in-escrow-queue-top-n? (l2-ctx-macro-decision ctx) sym max-n))
+
+(define (l2-terran-1base-cc-intent? ctx)
+  (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+      (eq? (l2-ctx-bo-goal-sym ctx) 'command-center)
+      (l2-sym-in-escrow-queue-top-n? ctx 'command-center 2)))
+
 (define (l2-saving-for-expansion-now? ctx cur-base-count)
   (define ally-combat-units (l2-ctx-ally-combat-units ctx))
   (define blocked-nat-expanded-early? (l2-ctx-blocked-nat-expanded-early? ctx))
@@ -6017,14 +6046,25 @@
   (define under-base-attack? (l2-ctx-under-base-attack? ctx))
   (define under-early-cheese? (l2-ctx-under-early-cheese? ctx))
   (define urgent-combat-or-intel-need? (l2-ctx-urgent-combat-or-intel-need? ctx))
-  ;; L19-P0-3 (`#018`/`#030`/`#047`/`#048` 1BaseLock): Align L2 expansion escrow with Brain
-  ;; `saving_for` on 1 base once minerals >= 250 and enemy threat <= max(6.0, army) so L2
-  ;; never drains the bank right before 400M!
+  ;; L19-P0-3 / L31-P0-3 (`#08`/`#26` 1BaseLock): Align L2 expansion escrow with Brain
+  ;; `saving_for` (and for Terran 1-base also `bo-goal == 'command-center` or top-2 `escrow_queue`!)
+  ;; so L2 never drains the bank right before 400M!
+  (define terran-1base-cc-intent?
+    (and (eq? race 'Terran)
+         (= cur-base-count 1)
+         (>= total-workers 16)
+         (memq 'barracks (l2-ctx-bldg-types ctx))
+         (l2-terran-1base-cc-intent? ctx)))
   (define brain-saving-1base-nat?
     (and live-game?
          (= cur-base-count 1)
-         (eq? (l2-ctx-prio-saving-for-sym ctx) race-th-sym)
-         (>= (l2-ctx-minerals ctx) 250)
+         (or (eq? (l2-ctx-prio-saving-for-sym ctx) race-th-sym)
+             terran-1base-cc-intent?)
+         (>= (l2-ctx-minerals ctx)
+             (if (and terran-1base-cc-intent?
+                      (or (>= live-army-supply 4) (<= live-enemy-threat-supply 0)))
+                 150
+                 250))
          (<= live-enemy-threat-supply (max 6.0 live-army-supply))
          (not (and severe-intel-blindness? (null? ally-combat-units)))
          (not (l2-ctx-worker-rush-active? ctx))
@@ -10903,11 +10943,11 @@
                   (or (and (< supply-cap 31)
                            (>= (l2-ctx-supply-left ctx) 3)
                            (>= (l2-ctx-minerals ctx) 250))
-                      ;; L30-P0-3 (`#32` Natural CC Escrow Guard): Also hold non-urgent proactive
-                      ;; Supply Depots (`supply-left >= 4`) past 31 cap while Brain is saving for CC #2!
+                      ;; L30-P0-3 / L31-P0-3 (`#32`/`#08` Natural CC Escrow Guard): Also hold non-urgent proactive
+                      ;; Supply Depots (`supply-left >= 4`) past 31 cap while Brain/BO targets CC #2!
                       (and (>= frame 1800)
                            (>= (l2-ctx-supply-left ctx) 4)
-                           (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+                           (l2-terran-1base-cc-intent? ctx)
                            (>= (l2-ctx-minerals ctx) 200))))
              ;; W5-P0-2-rt: When on 1 base with >=400M and a supply provider is ALREADY in progress
              ;; (e.g., 27/31 with Pylon #3 building -> +8 supply), don't spend 100M on a 2nd overlapping
@@ -16018,18 +16058,38 @@
                                   urgent-combat-or-intel-need?
                                   (not (null? orphaned-prereqs))))
            0))
-  ;; L23-P0-3 (`ProdFac@8m 4 -> 7+`): Match Macro Brain's 2-base (6 Gates) & 3-base (8 Gates)
-  ;; Gateway scaling in L2, and honor explicit Brain-scheduled `gateway` without stalling on
-  ;; `open-prod-slots < 2` when Warp Gates cycle off cooldown!
+  ;; L23-P0-3 / L31-P0-3 (`#09 33x`, `#12 22x`, `#21 18x` `ProdPlaceStall 4 -> 0`):
+  ;; Align L2 `desired-gateways` with Macro Brain when `brain-sched-gate-now?` is `#t` (`>= 250M`,
+  ;; not `p2-early-ling-rush-hold-gate2?`: `>= 3..4` on 1b, `6..8` on 2b) and allow `gateway`
+  ;; whenever Brain already cleared Nexus escrow (`minerals >= 300` & `saving_for != 'nexus`)!
+  (define p2-early-ling-rush-hold-gate2?
+    (and (l2-protoss-early-ling-rush? ctx)
+         (< (+ (l2-unit-count ctx 'zealot)
+               (l2-unit-count ctx 'adept)
+               (l2-unit-count ctx 'stalker))
+            2)
+         (< (l2-ctx-minerals ctx) 250)))
   (define brain-sched-gate-now?
     (and live-game?
          (or (eq? prio-saving-for-sym 'gateway)
              (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
                   (memq 'gateway (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx)))))))
+  (define gw-ref-minerals
+    (max (l2-ctx-minerals ctx)
+         (safe-nonneg-int (hash-ref (l2-ctx-obs ctx) 'minerals 0) 0)))
+  (define brain-sched-gate-aligned?
+    (and brain-sched-gate-now?
+         (not p2-early-ling-rush-hold-gate2?)
+         (>= gw-ref-minerals 250)))
+  (define brain-sched-gate-cleared-nexus?
+    (and brain-sched-gate-now?
+         (not p2-early-ling-rush-hold-gate2?)
+         (>= gw-ref-minerals 300)
+         (not (eq? prio-saving-for-sym 'nexus))))
   (define desired-gateways
        (min SC2-MAX-PRODUCTION-FACILITIES
             (max (if protoss-early-rush-2nd-gate?
-                     (if (and (>= (l2-ctx-minerals ctx) 300)
+                     (if (and (>= gw-ref-minerals 300)
                               (member '(build gateway) prio-scheduled-actions))
                          3
                          2)
@@ -16039,23 +16099,33 @@
                       (max 8 (* SC2-PROTOSS-FACILITIES-PER-BASE (length nexuses)))]
                      [(= (length nexuses) 2)
                       (cond
-                        [(>= (l2-ctx-minerals ctx) 650) 8]
+                        [(or (>= gw-ref-minerals 650)
+                             (and brain-sched-gate-aligned?
+                                  (or (>= gw-ref-minerals 450)
+                                      (and (>= gw-ref-minerals 300)
+                                           (>= (length gateways) 6)))))
+                         8]
                         [(or (>= total-workers 38)
                              (>= eff-phase-supply 60)
-                             (>= (l2-ctx-minerals ctx) 350)
-                             (and brain-sched-gate-now? (>= (l2-ctx-minerals ctx) 300))) 6]
+                             (>= gw-ref-minerals 350)
+                             brain-sched-gate-aligned?)
+                         6]
                         [(or (>= total-workers 30)
                              (>= eff-phase-supply 46)) 5]
                         [(>= eff-phase-supply 32) 4]
                         [else 3])]
+                     [(and brain-sched-gate-aligned?
+                           (>= gw-ref-minerals 300))
+                      (if (>= gw-ref-minerals 550) 4 3)]
                      [(or (and (memq 'cybernetics-core (l2-ctx-bldg-types ctx))
                                (or (not live-game?)
                                    (<= protoss-nat-reserve 0)
                                    (>= (- (l2-ctx-minerals ctx) protoss-nat-reserve) (sc2-min-cost 'gateway))))
                           pvp-2gate-open?
-                          protoss-early-rush-2nd-gate?)
+                          protoss-early-rush-2nd-gate?
+                          brain-sched-gate-aligned?)
                       (if (and (memq 'cybernetics-core (l2-ctx-bldg-types ctx))
-                               (>= (l2-ctx-minerals ctx) 650))
+                               (>= gw-ref-minerals 650))
                           3
                           2)]
                      [else 1]))))
@@ -16081,16 +16151,11 @@
                 (and (or protoss-cloak-det-emergency?
                          (enemy-tech-observation-requires-detection? tech-obs))
                      (not (l2-building-present-or-pending? ctx 'robotics-facility))))))
-  (define p2-early-ling-rush-hold-gate2?
-    (and (l2-protoss-early-ling-rush? ctx)
-         (< (+ (l2-unit-count ctx 'zealot)
-               (l2-unit-count ctx 'adept)
-               (l2-unit-count ctx 'stalker))
-            2)
-         (< (l2-ctx-minerals ctx) 250)))
   (define brain-sched-gate-high-bank?
-    (and brain-sched-gate-now? (>= (l2-ctx-minerals ctx) 300)))
-  (when (and (or (not protoss-saving-for-expand?) protoss-early-rush-2nd-gate?)
+    (and brain-sched-gate-now? (>= gw-ref-minerals 300)))
+  (when (and (or (not protoss-saving-for-expand?)
+                 protoss-early-rush-2nd-gate?
+                 brain-sched-gate-cleared-nexus?)
                 (not p2-early-ling-rush-hold-gate2?)
                 (l2-save-cancel-rebuild-ready? ctx 'gateway 60)
                 (or (< (length gateways) 1)
@@ -16115,6 +16180,7 @@
                 (or (memq 'cybernetics-core (l2-ctx-bldg-types ctx))
                     pvp-2gate-open?
                     protoss-early-rush-2nd-gate?
+                    brain-sched-gate-cleared-nexus?
                     (>= (l2-ctx-minerals ctx) SC2-SURPLUS-MINERAL-BANK-THRESHOLD))
                 (if protoss-early-rush-2nd-gate?
                     (let ([need-pylon-soon?
@@ -16129,7 +16195,7 @@
                                  (sc2-min-cost 'zealot)
                                  0))))
                     (and (>= (- (l2-ctx-minerals ctx)
-                                protoss-nat-reserve
+                                (if brain-sched-gate-cleared-nexus? 0 protoss-nat-reserve)
                                 (if (and protoss-holding-forge-min? (not brain-sched-gate-high-bank?))
                                     (sc2-min-cost 'forge)
                                     0)
@@ -17530,7 +17596,7 @@
                 (not (and live-game?
                           (= (length ccs) 1)
                           terran-saving-for-cc-expand?
-                          (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+                          (l2-terran-1base-cc-intent? ctx)
                           (not early-survival-crisis?)
                           (not under-early-cheese?)
                           (not under-base-attack?)
@@ -18725,7 +18791,7 @@
                      (not (not (member '(train scv) prio-scheduled-actions)))
                      (or (>= (length ccs) 2)
                          (< (l2-ctx-minerals ctx)
-                            (if (and (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+                            (if (and (l2-terran-1base-cc-intent? ctx)
                                      (>= total-workers 18))
                                 150
                                 225))))
@@ -18767,19 +18833,20 @@
                         #:respect-bo-reserve? (or brain-saving-oc1-p3?
                                                   (l2-worker-respect-bo-reserve? ctx))))
   (set-l2-ctx-brain-scheduled-workers-rem! ctx 0)
-  ;; L19-P0-3 / L24-P0-3 / L30-P0-3 (`#32` Natural CC Escrow Guard): When Brain is saving for 1-base
-  ;; CC #2 and bank >= 150M (with >= 4 army or 0 threat; else >= 225M) and threat <= max(6.0, army),
-  ;; hold non-emergency Barracks/Factory spends so the bank climbs cleanly to 400M!
+  ;; L19-P0-3 / L24-P0-3 / L30-P0-3 / L31-P0-3 (`#32`/`#08`/`#26` Natural CC Escrow Guard):
+  ;; Fire whenever `'command-center` is `saving_for`, `bo-goal`, top-2 of `escrow_queue`, or scheduled,
+  ;; and bank >= 150M (with >= 16 workers and >= 4 army or 0 threat; else >= 225M), holding non-emergency
+  ;; Barracks/Factory/Marine spends so 1-base Terran climbs cleanly to 400M!
   (define terran-brain-saving-1base-cc?
     (and live-game?
          (= (length ccs) 1)
          terran-saving-for-cc-expand?
-         (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+         (or (l2-terran-1base-cc-intent? ctx)
              (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
                   (memq 'command-center
                         (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx)))))
          (>= (l2-ctx-minerals ctx)
-             (if (and (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+             (if (and (l2-terran-1base-cc-intent? ctx)
                       (>= total-workers 16)
                       (or (>= live-army-supply 4) (<= live-enemy-threat-supply 0)))
                  150
@@ -19897,7 +19964,11 @@
                      [adj-stealth
                       (fl+ base-adj
                            (fl+ (if (or mobile-det? static-det?) -180.0 0.0)
-                                (if (and passive? (not mobile-det?)) 250.0 0.0)))]
+                                (fl+ (if (and eflying?
+                                              (memq et '(banshee oracle liberator-ag void-ray battlecruiser carrier brood-lord broodlord)))
+                                         -90.0
+                                         0.0)
+                                     (if (and passive? (not mobile-det?)) 250.0 0.0))))]
                      [bane-light-bonus
                       (if (and include-nearby-light? light-bio?)
                           (let jloop ([j 0] [cnt 0])
@@ -21090,8 +21161,17 @@
                         (eq? (fast-canonical-unit-sym (unit-type-sym target-enemy)) 'siege-tank-sieged))
                    (for/or ([st (in-list (or (l34-ctx-enemy-sieged-tanks-near ctx) '()))])
                      (l34-within-r2? ux uy (hash-ref st 'x 9999.0) (hash-ref st 'y 9999.0) 210.25 14.5)))))
+        (define melee-ranged-pursuer-commit?
+          (and can-hit-target? eid non-free-target?
+               (>= (length (or (l34-ctx-combat-units ctx) '())) 4)
+               (fl<= fedist2 90.25)
+               (hash? target-enemy)
+               (let* ([est (fast-unit-combat-stats (unit-type-sym target-enemy))]
+                      [egr (if (hash? est) (exact->inexact (hash-ref est 'ground-range 0.0)) 0.0)])
+                 (fl> egr 1.5))))
         (cond
           [(or melee-tank-dive?
+               melee-ranged-pursuer-commit?
                (and can-hit-target? eid non-free-target?
                     (fl<= fedist2 (if unit-in-owned-territory? 196.0 72.25))))
            (emit-home-safe-atk! (list 'attack-unit uid eid))]
@@ -21193,7 +21273,50 @@
         (define threat-r2 (fl* threat-r threat-r))
         (define w-period
           (flmax 0.16 (exact->inexact (if (hash? stats) (hash-ref stats 'weapon-period 1.0) 1.0))))
-        (define kite-cd-min (flmax 0.22 (fl* 0.38 w-period)))
+        (define u-spd-sup
+          (exact->inexact (if (hash? stats) (hash-ref stats 'speed 3.15) 3.15)))
+        (define faster-melee-near-sup?
+          (and (real? ux) (real? uy)
+               (let ([fux (exact->inexact ux)] [fuy (exact->inexact uy)])
+                 (for/or ([e (in-list (or (l34-ctx-enemy-units ctx) '()))])
+                   (and (hash? e)
+                        (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                        (let* ([est (fast-unit-combat-stats (unit-type-sym e))]
+                               [egd (if (hash? est) (exact->inexact (hash-ref est 'ground-dps 0.0)) 0.0)]
+                               [egr (if (hash? est) (exact->inexact (hash-ref est 'ground-range 0.0)) 0.0)]
+                               [espd (if (hash? est) (exact->inexact (hash-ref est 'speed 3.15)) 3.15)])
+                          (and (fl> egd 0.0)
+                               (fl<= egr 1.5)
+                               (fl>= espd u-spd-sup)
+                               (let ([dx (fl- fux (exact->inexact (hash-ref e 'x 9999.0)))]
+                                     [dy (fl- fuy (exact->inexact (hash-ref e 'y 9999.0)))])
+                                 (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 12.25)))))))))
+        (define kite-cd-min (flmax 0.22 (fl* (if faster-melee-near-sup? 0.62 0.45) w-period)))
+        ;; L31-P0-3 (`t07` SP `1a/45m` & `p01` `0.42x`): When a fighting squad (`>= 4` combat units)
+        ;; is in active close fire (`<= 9.5t`) against equal/longer-range OR faster ranged pursuers,
+        ;; commit-fire instead of 0-DPS backward kiting!
+        (define active-close-ranged-pursuer-sup?
+          (and can-hit-target? eid non-free-target?
+               (>= (length (or (l34-ctx-combat-units ctx) '())) 4)
+               (fl<= fedist2 90.25)
+               (real? ux) (real? uy)
+               (let ([fux (exact->inexact ux)]
+                     [fuy (exact->inexact uy)]
+                     [u-fly-s? (and u-sym (fast-unit-is-flying-sym? u-sym))])
+                 (for/or ([e (in-list (or (l34-ctx-enemy-units ctx) '()))])
+                   (and (hash? e)
+                        (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                        (let ([dx (fl- fux (exact->inexact (hash-ref e 'x 9999.0)))]
+                              [dy (fl- fuy (exact->inexact (hash-ref e 'y 9999.0)))])
+                          (and (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 90.25)
+                               (let* ([est (fast-unit-combat-stats (unit-type-sym e))]
+                                      [egr (if (hash? est) (exact->inexact (hash-ref est 'ground-range 0.0)) 0.0)]
+                                      [ear (if (hash? est) (exact->inexact (hash-ref est 'air-range 0.0)) 0.0)]
+                                      [ewr (if u-fly-s? ear egr)]
+                                      [espd (if (hash? est) (exact->inexact (hash-ref est 'speed 3.15)) 3.15)])
+                                 (and (fl> ewr 1.5)
+                                      (or (fl>= ewr eff-range)
+                                          (fl> espd u-spd-sup)))))))))))
         ;; W9-P0-2-rt / W10-P0-3-rt / W11-P0-4-rt / W16-P0-1-rt / W18-P0-3-rt (`Siege0DPS`):
         ;; When trapped inside active Sieged Tank (<=14.5t), Colossus (<=11.5t), or Tempest/Capital (<=18.5t)
         ;; firing arcs (including against their Marine/Stalker screeners!), commit-close & attack
@@ -21233,6 +21356,7 @@
                           (fl<= fedist2 210.25))))))
         (cond
           [(or capital-siege-dive?
+               active-close-ranged-pursuer-sup?
                (and can-hit-target? eid non-free-target?
                     (fl<= fedist2 fire-r2)
                     (fl< fw-cd kite-cd-min)))
@@ -21277,16 +21401,52 @@
     [bo-rally-override?
      (when (not (l34-within-r2? ux uy fbo-rally-tx fbo-rally-ty 36.0 6.0))
        (l34-emit! ctx (list 'attack-pos uid bo-rally-tx bo-rally-ty)))]
-    ;; W11-P0-4-rt (`w11-tac-2`): If the target enemy is an undetected `cloak=1` unit
-    ;; (cannot be unit-targeted in SC2!), pull back via `kite` instead of standing frozen!
+    ;; W11-P0-4-rt (`w11-tac-2`) + L31-P0-3 (`p11` Friendly Detector Convergence):
+    ;; If target is an undetected `cloak=1` unit, NEVER 5.0t flee-kite away when a live friendly
+    ;; mobile detector (`observer`/`overseer`/`raven`) is within `<= 32t` — converge combat units
+    ;; toward the friendly detector (`<= 6.0t`) and advance alongside it to `4.5t` standoff!
+    ;; Only pull back via 5.0t `kite` when NO local friendly detector exists (`w11-tac-2`).
     [(and (not can-hit-target?)
           (hash? target-enemy)
           (let ([cv (hash-ref target-enemy 'cloak #f)])
             (or (eqv? cv 1) (eq? cv 'cloaked)))
           (real? ex) (real? ey)
           (not (eq? (or ut (and (hash? u) (unit-type-sym u))) 'siege-tank-sieged)))
-     (define-values (kx ky) (compute-kite-vector ux uy ex ey 5.0))
-     (l34-emit! ctx (list 'kite uid (safe-coord kx ux) (safe-coord ky uy)))]
+     (define fux-c (exact->inexact ux))
+     (define fuy-c (exact->inexact uy))
+     (define fex-c (exact->inexact ex))
+     (define fey-c (exact->inexact ey))
+     (define-values (det-hit? det-x det-y det-d2)
+       (for/fold ([hit? #f] [bx fux-c] [by fuy-c] [bd2 1024.0])
+                 ([au (in-list (or (l34-ctx-ally-units ctx) '()))])
+         (if (and (hash? au)
+                  (memq (unit-type-sym au) '(observer observer-siege-mode overseer overseer-siege-mode raven))
+                  (real? (hash-ref au 'x #f))
+                  (real? (hash-ref au 'y #f)))
+             (let* ([dx0 (exact->inexact (hash-ref au 'x fux-c))]
+                    [dy0 (exact->inexact (hash-ref au 'y fuy-c))]
+                    [ddx (fl- fux-c dx0)]
+                    [ddy (fl- fuy-c dy0)]
+                    [d2 (fl+ (fl* ddx ddx) (fl* ddy ddy))])
+               (if (fl<= d2 bd2)
+                   (values #t dx0 dy0 d2)
+                   (values hit? bx by bd2)))
+             (values hit? bx by bd2))))
+     (if det-hit?
+         (let-values ([(mx my)
+                       (if (fl> det-d2 36.0)
+                           (values det-x det-y)
+                           (let* ([cdx (fl- fex-c det-x)]
+                                  [cdy (fl- fey-c det-y)]
+                                  [cd (flsqrt (fl+ (fl* cdx cdx) (fl* cdy cdy)))])
+                             (if (fl> cd 5.0)
+                                 (let ([step (flmin 4.5 (flmax 0.0 (fl- cd 4.5)))])
+                                   (values (fl+ det-x (fl* step (fl/ cdx cd)))
+                                           (fl+ det-y (fl* step (fl/ cdy cd)))))
+                                 (values det-x det-y))))])
+           (l34-emit! ctx (list 'move uid (safe-coord mx ux) (safe-coord my uy))))
+         (let-values ([(kx ky) (compute-kite-vector ux uy ex ey 5.0)])
+           (l34-emit! ctx (list 'kite uid (safe-coord kx ux) (safe-coord ky uy)))))]
     ;; W9-TAC-1 (runtime): Never yank a frontline unit (e.g. Phoenix shadowing an allied
     ;; Graviton Beam lift or AA unit escorting army within <= 16.0t of live enemy) 40t back
     ;; to regroup-x/regroup-y! Keep Phoenix close to finish the lift; hold other frontline units.
@@ -25146,6 +25306,7 @@
          (define has-zerg-caster? #f)
          (define has-terran-nonscv-caster? #f)
          (define has-ally-raven? #f)
+         (define has-ally-ghost? #f)
          (define has-ally-medivac? #f)
          (define has-jump-ready-bc? #f)
          (define has-protoss-caster? #f)
@@ -25293,6 +25454,7 @@
                  (set! t-casters-rev (cons u t-casters-rev))
                  (cond
                    [(eq? ut 'raven) (set! has-ally-raven? #t)]
+                   [(eq? ut 'ghost) (set! has-ally-ghost? #t)]
                    [(eq? ut 'medivac) (set! has-ally-medivac? #t)]
                    [(eq? ut 'battlecruiser)
                     (unless (eq? (hash-ref u 'tactical-jump-ready? #t) #f)
@@ -25454,7 +25616,7 @@
                       [t-pad (if has-active-scv-caster? 21.0 18.0)]
                       [t-ally-units
                        (cond
-                         [(or has-ally-raven? has-active-scv-caster? (and has-ally-medivac? has-damaged-bio?))
+                         [(or has-ally-raven? has-ally-ghost? has-active-scv-caster? (and has-ally-medivac? has-damaged-bio?))
                           (if use-t-box?
                               (slice-bbox-units ally-units tcminx tcmaxx tcminy tcmaxy t-pad)
                               ally-units)]
@@ -26903,6 +27065,39 @@
                   (values nat-x nat-y)))
           (values nat-x nat-y)))
 
+    ;; L31-P0-3 (`t04` Frontline Bio Peel for Ghosts): Precompute friendly Ghost coords & enemy
+    ;; melee divers (`<= 3.5t` of any friendly Ghost) once per step so Marines/Marauders peel
+    ;; close Zerglings BEFORE they interrupt Ghost Snipes (`2714`)!
+    (define p5-ally-ghost-pts
+      (for/list ([au (in-list combat-units)]
+                 #:when (and (hash? au)
+                             (eq? (unit-type-sym au) 'ghost)
+                             (real? (hash-ref au 'x #f))
+                             (real? (hash-ref au 'y #f))))
+        (cons (exact->inexact (hash-ref au 'x 0.0))
+              (exact->inexact (hash-ref au 'y 0.0)))))
+    (define p5-ghost-peel-enemies
+      (if (null? p5-ally-ghost-pts)
+          '()
+          (for/list ([e (in-list engagement-enemies)]
+                     #:when (and (hash? e)
+                                 (real? (hash-ref e 'x #f))
+                                 (real? (hash-ref e 'y #f))
+                                 (not (eq? (hash-ref e 'hallucination #f) #t))
+                                 (let ([cv (hash-ref e 'cloak #f)])
+                                   (not (or (eqv? cv 1) (eq? cv 'cloaked))))
+                                 (let* ([est (fast-unit-combat-stats (unit-type-sym e))]
+                                        [egd (if (hash? est) (exact->inexact (hash-ref est 'ground-dps 0.0)) 0.0)]
+                                        [egr (if (hash? est) (exact->inexact (hash-ref est 'ground-range 0.0)) 0.0)])
+                                   (and (fl> egd 0.0) (fl<= egr 1.5)))
+                                 (let ([ex0 (exact->inexact (hash-ref e 'x 9999.0))]
+                                       [ey0 (exact->inexact (hash-ref e 'y 9999.0))])
+                                   (for/or ([gp (in-list p5-ally-ghost-pts)])
+                                     (define dx (fl- ex0 (car gp)))
+                                     (define dy (fl- ey0 (cdr gp)))
+                                     (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 12.25)))))
+            e)))
+
     (for ([u (in-list (if endgame-harmless-only-sweep? '() combat-units))])
       (define uid (hash-ref u 'id 101))
       (define u-ab-id (if live-obs? (hash-ref u 'order-ability-id 0) 0))
@@ -26917,9 +27112,25 @@
             (let ([x (hash-ref u 'x base-x)]
                   [y (hash-ref u 'y base-y)]
                   [t (unit-type-sym u)])
-              (define-values (te ph?)
-                (select-target-enemy-from-prepped x y prepped-eng-enemies t ally-has-stealth?))
-              (values x y t te ph?))))
+              (define peel-tgt
+                (and (pair? p5-ghost-peel-enemies)
+                     (memq t '(marine marauder hellbat))
+                     (real? x) (real? y)
+                     (let ([fx (exact->inexact x)] [fy (exact->inexact y)])
+                       (for/fold ([best #f] [best-sc +inf.0] #:result best)
+                                 ([pe (in-list p5-ghost-peel-enemies)])
+                         (define dx (fl- fx (exact->inexact (hash-ref pe 'x 9999.0))))
+                         (define dy (fl- fy (exact->inexact (hash-ref pe 'y 9999.0))))
+                         (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
+                         (if (fl<= d2 81.0)
+                             (let ([sc (fl+ (flsqrt d2) (fl* 0.02 (exact->inexact (hash-ref pe 'hp 100.0))))])
+                               (if (fl< sc best-sc) (values pe sc) (values best best-sc)))
+                             (values best best-sc))))))
+              (if peel-tgt
+                  (values x y t peel-tgt #t)
+                  (let-values ([(te ph?)
+                                (select-target-enemy-from-prepped x y prepped-eng-enemies t ally-has-stealth?)])
+                    (values x y t te ph?))))))
 
       ;; Respect weapon-swing lock, splash evasion, Wave 3 handled/snipe-locked units, Queen casts, and channel/morph orders
       (unless (or skip? (not target-enemy))
@@ -27857,7 +28068,11 @@
                               [outranged-forbid-kite?
                                (and has-weap? can-hit-target? non-free?
                                     (fl> eff-r 1.5)
-                                    (fl> enemy-eff-r eff-r))]
+                                    (or (fl> enemy-eff-r eff-r)
+                                        (and (>= (length combat-units) 4)
+                                             (fl<= fed2 90.25)
+                                             (fl> enemy-eff-r 1.5)
+                                             (fl>= enemy-eff-r eff-r))))]
                               [slow-air-forbid-kite?
                                (and has-weap? can-hit-target? non-free?
                                     (or (memq ut '(brood-lord broodlord))
@@ -28878,10 +29093,50 @@
     (emit-direct-batch! (plan-spread-burrowed-swarm-host-harass obs)))
   (when has-enemy-swarm-host-or-locust?
     (emit-direct-batch! (plan-counter-spread-swarm-host-harass obs)))
-  ;; L27-P0-3 (`z10`/`p11` High-Ground Ramp & Cloak Detection): Also run `plan-counter-burrow-response`
-  ;; whenever we have a live mobile detector (`observer`/`overseer`/`raven`) and visible enemies,
-  ;; so `lead-det` advances `5.5t` ahead of `ally-combat-centroid` up ramps even BEFORE burrowed
-  ;; high-ground Lurkers are revealed!
+  ;; L27-P0-3 / L31-P0-3 (`z10`/`p11` High-Ground Ramp & Cloak Detection):
+  ;; 1) Whenever undetected `cloak=1` enemies exist within `<= 28t` of our live mobile detectors
+  ;;    AND we have live combat units, advance mobile detectors directly to `5.5t` standoff of the
+  ;;    undetected cloaked cluster (well inside `11.0t` reveal radius!) so Stalkers/army never stall!
+  ;; 2) Also run `plan-counter-burrow-response` for burrowed/high-ground ramp lead-detector escort.
+  (define l31-undetected-cloak-enemies
+    (if (and (pair? enemy-units) (pair? (l34-ctx-combat-units ctx)))
+        (for/list ([e (in-list enemy-units)]
+                   #:when (and (hash? e)
+                               (real? (hash-ref e 'x #f))
+                               (real? (hash-ref e 'y #f))
+                               (let ([cv (hash-ref e 'cloak #f)])
+                                 (or (eqv? cv 1) (eq? cv 'cloaked)))))
+          e)
+        '()))
+  (when (pair? l31-undetected-cloak-enemies)
+    (define det-cloak-cmds
+      (for/fold ([acc '()])
+                ([u (in-list ally-units)]
+                 #:when (and (hash? u)
+                             (memq (unit-type-sym u) '(observer observer-siege-mode overseer overseer-siege-mode raven))
+                             (real? (hash-ref u 'x #f))
+                             (real? (hash-ref u 'y #f))))
+        (define did (hash-ref u 'id -1))
+        (define dx0 (exact->inexact (hash-ref u 'x base-x)))
+        (define dy0 (exact->inexact (hash-ref u 'y base-y)))
+        (define-values (cx cy bd2)
+          (for/fold ([bx 0.0] [by 0.0] [bd2 784.0])
+                    ([ce (in-list l31-undetected-cloak-enemies)])
+            (define ex0 (exact->inexact (hash-ref ce 'x 9999.0)))
+            (define ey0 (exact->inexact (hash-ref ce 'y 9999.0)))
+            (define ddx (fl- ex0 dx0))
+            (define ddy (fl- ey0 dy0))
+            (define d2 (fl+ (fl* ddx ddx) (fl* ddy ddy)))
+            (if (fl<= d2 bd2) (values ex0 ey0 d2) (values bx by bd2))))
+        (if (and (exact-integer? did) (> did 0) (fl< bd2 784.0) (fl> bd2 36.0))
+            (let* ([d (flsqrt bd2)]
+                   [step (flmax 1.0 (fl- d 5.5))]
+                   [tx (safe-coord (fl+ dx0 (fl* step (fl/ (fl- cx dx0) d))) dx0)]
+                   [ty (safe-coord (fl+ dy0 (fl* step (fl/ (fl- cy dy0) d))) dy0)])
+              (cons (list 'move did tx ty) acc))
+            acc)))
+    (when (pair? det-cloak-cmds)
+      (emit-direct-batch! det-cloak-cmds)))
   (when (or has-enemy-burrow-or-sh-counter?
             (and (pair? enemy-units)
                  (ormap (lambda (u)
