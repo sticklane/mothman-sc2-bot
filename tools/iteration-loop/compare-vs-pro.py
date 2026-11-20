@@ -195,6 +195,12 @@ def normalize_match(m):
         "t3_first_sec": safe_num(m.get("t3_first_sec") if m.get("t3_first_sec") is not None else mt.get("t3_first_sec")),
         "t3_bases_at_start": safe_num(m.get("t3_bases_at_start")),
         "t3_premature_starve": bool(m.get("t3_premature_starve") or (m.get("anomalies") or {}).get("t3_premature_starve")),
+        "prod_idle_bank_freeze": bool(m.get("prod_idle_bank_freeze") or (m.get("anomalies") or {}).get("prod_idle_bank_freeze")),
+        "prod_idle_bank_freeze_sec": safe_num(m.get("prod_idle_bank_freeze_sec")),
+        "gas_zero_harvest_freeze": bool(m.get("gas_zero_harvest_freeze") or (m.get("anomalies") or {}).get("gas_zero_harvest_freeze")),
+        "tr_p95_ms": safe_num(m.get("tr_p95_ms")),
+        "wall_timeout_tie": bool(m.get("wall_timeout_tie") or (m.get("anomalies") or {}).get("wall_timeout_tie")),
+        "wall_timeout_winning_tie": bool(m.get("wall_timeout_winning_tie") or (m.get("anomalies") or {}).get("wall_timeout_winning_tie")),
         "action_rejects": int(m.get("action_rejects") or 0),
         "crashes": m.get("crashes") or [],
         "signatures": m.get("signatures") or [],
@@ -262,6 +268,7 @@ def summarize_slice(rows):
     pps_vals = [r["prod_placement_stall_ticks"] for r in rows if r.get("prod_placement_stall_ticks") is not None]
     sym_counts = Counter(r["map_symmetry_kind"] for r in rows if r.get("map_symmetry_kind"))
     t3_secs = [r["t3_first_sec"] for r in rows if r.get("t3_first_sec") is not None]
+    tr_p95_vals = [r["tr_p95_ms"] for r in rows if r.get("tr_p95_ms") is not None]
 
     pk_army_ratios = [
         r["our_peak_army"] / max(1.0, r["opp_peak_army"])
@@ -371,6 +378,11 @@ def summarize_slice(rows):
         "t3_first_sec_med": med_opt(t3_secs),
         "t3_early_2base_matches": sum(1 for r in rows if r.get("t3_first_sec") is not None and (r.get("t3_bases_at_start") or 99) <= 2) if (t3_secs or sym_counts) else None,
         "t3_premature_starve_matches": sum(1 for r in rows if r.get("t3_premature_starve")),
+        "prod_idle_bank_freeze_matches": sum(1 for r in rows if r.get("prod_idle_bank_freeze")),
+        "gas_zero_harvest_freeze_matches": sum(1 for r in rows if r.get("gas_zero_harvest_freeze")),
+        "tr_p95_worst_ms": round(max(tr_p95_vals), 1) if tr_p95_vals else None,
+        "wall_timeout_ties": sum(1 for r in rows if r.get("wall_timeout_tie")),
+        "wall_timeout_winning_ties": sum(1 for r in rows if r.get("wall_timeout_winning_tie")),
         "action_rejects": sum(r["action_rejects"] for r in rows),
         "crashes": sum(len(r["crashes"]) for r in rows),
         "anomalies": dict(anom_counts),
@@ -572,12 +584,14 @@ def main():
     hwm_all = summarize_slice(hwm_rows) if hwm_rows else None
 
     cur_core_rows = [m for m in cur_rows if m["opp_bot"] in CORE_12_OPPONENTS]
+    cur_core_nc_rows = [m for m in cur_core_rows if m["opp_bot"] != "Chance"]
     cur_unseen_rows = [m for m in cur_rows if m["opp_bot"] not in CORE_12_OPPONENTS]
     cohorts = None
     if cur_unseen_rows:
         unseen_opps = sorted(set(m["opp_bot"] for m in cur_unseen_rows))
         cohorts = {
             "core_12": summarize_slice(cur_core_rows),
+            "core_12_non_chance": summarize_slice(cur_core_nc_rows),
             "unseen_roster": summarize_slice(cur_unseen_rows),
             "unseen_opponents": unseen_opps,
             "unseen_by_opponent": {
@@ -767,6 +781,18 @@ def main():
             if cur_all.get("map_symmetry_counts"):
                 sym_str = ", ".join(f"{k}:{v}" for k, v in sorted(cur_all["map_symmetry_counts"].items()))
                 extra_w8 += f" | `MapSym` = `{sym_str}`"
+            if cur_all.get("prod_idle_bank_freeze_matches", 0) > 0 or cur_all.get("t3_started_matches") is not None:
+                extra_w8 += f" | `IdleBankFreeze` = **{cur_all.get('prod_idle_bank_freeze_matches', 0)}**"
+            if cur_all.get("gas_zero_harvest_freeze_matches", 0) > 0 or cur_all.get("tr_p95_worst_ms") is not None:
+                extra_w8 += (
+                    f" | `GasZeroFreeze` = **{cur_all.get('gas_zero_harvest_freeze_matches', 0)}**"
+                    f" | `WorstTrP95` = **{fmt(cur_all.get('tr_p95_worst_ms'),'ms')}**"
+                )
+            if cur_all.get("wall_timeout_ties", 0) > 0 or cur_all.get("wall_timeout_winning_ties", 0) > 0:
+                extra_w8 += (
+                    f" | `WallTies` = **{cur_all.get('wall_timeout_ties', 0)}** "
+                    f"(Win=`{cur_all.get('wall_timeout_winning_ties', 0)}`)"
+                )
         print(
             f"\n### Stall, Retreat & Waste Watch (`W7/W8-LOOP-2`): "
             f"`endgame_home_stall >= 90s` = **{cur_all.get('endgame_home_stall_count', 0)}/{cur_all['n']}** "
@@ -777,9 +803,11 @@ def main():
 
     if cohorts:
         c12 = cohorts["core_12"]
+        c12_nc = cohorts["core_12_non_chance"]
         cu = cohorts["unseen_roster"]
         print("\n### Full-Roster Generalization Split (`core_12` vs `unseen_roster`)")
-        print(f"- **`core_12` (`n={c12['n']}`):** `{c12['wins']}W-{c12['losses']}L-{c12['ties']}T` (`{c12['wr_pct']:.1f}%` WR, Trade `{fmt(c12['trade_agg'],'x',2)}`/`{fmt(c12['trade_med'],'x',2)}`, SupBlk `{fmt(c12['sup_blk_avg'],'%')}`, PkArmy `{fmt(c12['pk_army_avg'],'',0)}`)")
+        print(f"- **`core_12` (`n={c12['n']}`):** `{c12['wins']}W-{c12['losses']}L-{c12['ties']}T` (`{c12['wr_pct']:.1f}%` WR, Trade `{fmt(c12['trade_agg'],'x',2)}`/`{fmt(c12['trade_med'],'x',2)}`, SupBlk `{fmt(c12['sup_blk_avg'],'%')}`, PkArmy `{fmt(c12['pk_army_avg'],'',0)}`, WallTies `{c12.get('wall_timeout_ties', 0)}` Win=`{c12.get('wall_timeout_winning_ties', 0)}`)")
+        print(f"- **`core_12 Non-Chance` (`n={c12_nc['n']}`):** `{c12_nc['wins']}W-{c12_nc['losses']}L-{c12_nc['ties']}T` (`{c12_nc['wr_pct']:.1f}%` WR, Trade `{fmt(c12_nc['trade_agg'],'x',2)}`/`{fmt(c12_nc['trade_med'],'x',2)}`, SupBlk `{fmt(c12_nc['sup_blk_avg'],'%')}`, PkArmy `{fmt(c12_nc['pk_army_avg'],'',0)}`)")
         print(f"- **`unseen_roster` (`n={cu['n']}`, {', '.join(cohorts['unseen_opponents'])}):** `{cu['wins']}W-{cu['losses']}L-{cu['ties']}T` (`{cu['wr_pct']:.1f}%` WR, Trade `{fmt(cu['trade_agg'],'x',2)}`/`{fmt(cu['trade_med'],'x',2)}`, SupBlk `{fmt(cu['sup_blk_avg'],'%')}`, PkArmy `{fmt(cu['pk_army_avg'],'',0)}`)")
         if cohorts.get("unseen_by_opponent"):
             print("\n| Unseen Opponent | n | W-L-T | Trade Agg | PkArmy | SupBlk% | CloakLoss | Siege0DPS |")

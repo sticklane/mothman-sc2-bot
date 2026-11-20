@@ -120,6 +120,9 @@
        "OverlordCocoon" "TransportOverlordCocoon" "BanelingCocoon" "RavagerCocoon"
        "LurkerMPEgg" "BroodLordCocoon" "CreepTumorMissile"))
 
+(define WORKER-UNIT-SET
+  (set "Drone" "SCV" "Probe"))
+
 (define WARPABLE-UNIT-SET
   (set "Zealot" "Stalker" "Adept" "Sentry" "HighTemplar" "DarkTemplar"))
 
@@ -295,6 +298,7 @@
 ;; -----------------------------------------------------------------------------
 
 (define RX-STEP-MS     #px"step_ms=([0-9]+(?:\\.[0-9]+)?)")
+(define RX-TR-MS       #px"tr_ms=([0-9]+(?:\\.[0-9]+)?)")
 (define RX-FRAME       #px"f=([0-9]+)")
 (define RX-PRIO-FULL   #px"f=([0-9]+).*?bank=([0-9]+)M/([0-9]+)G sup=([0-9]+)/([0-9]+).*?saving_for=([a-z0-9-]+)\\(floor=([0-9]+)M/([0-9]+)G\\)")
 (define RX-SAVING-FALL #px"saving_for=([a-z0-9-]+)")
@@ -350,6 +354,7 @@
           'prod-stall-max-bldg ""
           'prod-stall-counts (make-hash)
           'step-ms '()
+          'tr-ms '()
           'action-err-total 0
           'action-err-counts (make-hash)
           'crashes '()))
@@ -401,6 +406,7 @@
   (define hexp-hi (hash-ref m 'hexp-high))
   (define rush-hi (hash-ref m 'rush-high))
   (define step-ms (hash-ref m 'step-ms))
+  (define tr-ms (hash-ref m 'tr-ms '()))
   (define err-tot (hash-ref m 'action-err-total))
   (define max-slen (hash-ref m 'max-escrow-streak-len))
   (define max-stgt (hash-ref m 'max-escrow-streak-target))
@@ -426,6 +432,11 @@
          (when mm
            (define v (string->number (cadr mm)))
            (when v (set! step-ms (cons v step-ms)))))
+       (when (string-contains? ln "tr_ms=")
+         (define mt (regexp-match RX-TR-MS ln))
+         (when mt
+           (define v (string->number (cadr mt)))
+           (when v (set! tr-ms (cons v tr-ms)))))
        (define mp (regexp-match RX-PRIO-FULL ln))
        (define-values (fr bmin bgas su tgt fmin fgas)
          (if mp
@@ -527,6 +538,11 @@
          (when mm
            (define v (string->number (cadr mm)))
            (when v (set! step-ms (cons v step-ms)))))
+       (when (string-contains? ln "tr_ms=")
+         (define mt (regexp-match RX-TR-MS ln))
+         (when mt
+           (define v (string->number (cadr mt)))
+           (when v (set! tr-ms (cons v tr-ms)))))
        (define mf (regexp-match RX-FRAME ln))
        (define st-fr (if mf (or (string->number (cadr mf)) 0) 0))
        (define minute (quotient st-fr 1344))
@@ -583,6 +599,7 @@
              'hexp-high hexp-hi
              'rush-high rush-hi
              'step-ms step-ms
+             'tr-ms tr-ms
              'action-err-total err-tot
              'max-escrow-streak-len max-slen
              'max-escrow-streak-target max-stgt
@@ -931,6 +948,29 @@
           (define early-rush-idle-bank-ticks 0)
           (define early-rush-idle-bank-post100-ticks 0)
           (define early-rush-idle-bank-peak-min 0)
+          ;; W16-LOOP-2: Production idle-bank freeze (>=600M, sup_left>=10, <190 sup, 0 units trained >=45s)
+          (define our-prod-alive-tags (make-hasheqv))
+          (define last-our-unit-train-sec 0.0)
+          (define idle-bank-freeze-start-sec #f)
+          (define idle-bank-freeze-cur-peak 0)
+          (define prod-idle-bank-freeze-max-sec 0.0)
+          (define prod-idle-bank-freeze-start #f)
+          (define prod-idle-bank-freeze-end #f)
+          (define prod-idle-bank-freeze-peak-min 0)
+          (define (mark-our-unit-trained! s)
+            (set! last-our-unit-train-sec s)
+            (set! idle-bank-freeze-start-sec #f)
+            (set! idle-bank-freeze-cur-peak 0))
+          ;; W17-LOOP-2: Gas zero-harvest freeze (>=90s w/ gas<50, >=1 ready gas bldg, workers>=20, <16 gas mined)
+          (define our-ready-gas-tags (make-hasheqv))
+          (define prev-our-gas 0)
+          (define gas-zero-cur-start #f)
+          (define gas-zero-cur-mined 0.0)
+          (define gas-zero-freeze-max-sec 0.0)
+          (define gas-zero-freeze-start #f)
+          (define gas-zero-freeze-end #f)
+          (define gas-zero-freeze-ready-gas 0)
+          (define gas-zero-freeze-mined 0.0)
           (define last-opp-asup 0)
           (define prev-our-stat-sec 0.0)
           (define prev-our-killed 0)
@@ -985,6 +1025,59 @@
                             (when (> home-stall-streak-sec max-home-stall-sec)
                               (set! max-home-stall-sec home-stall-streak-sec)))
                           (set! home-stall-streak-sec 0.0))
+                      ;; W16-LOOP-2: Track idle-bank production freeze (>=600M, sup_left>=10, <190 sup, 0 units trained >=45s)
+                      (define mc-now (hash-ref st 0 0))
+                      (if (and (> gl 0)
+                               (>= mc-now 600)
+                               (< fu 190)
+                               (>= (- fm fu) 10)
+                               (> (hash-count our-prod-alive-tags) 0)
+                               (not (and (>= cur-asup 60) (<= last-opp-asup 10))))
+                          (let ()
+                            (unless idle-bank-freeze-start-sec
+                              (set! idle-bank-freeze-start-sec (max last-our-unit-train-sec prev-our-stat-sec)))
+                            (define cur-f-dur (max 0.0 (- sec idle-bank-freeze-start-sec)))
+                            (when (> mc-now idle-bank-freeze-cur-peak)
+                              (set! idle-bank-freeze-cur-peak mc-now))
+                            (when (> cur-f-dur prod-idle-bank-freeze-max-sec)
+                              (set! prod-idle-bank-freeze-max-sec cur-f-dur)
+                              (set! prod-idle-bank-freeze-start (round1 idle-bank-freeze-start-sec))
+                              (set! prod-idle-bank-freeze-end (round1 sec))
+                              (set! prod-idle-bank-freeze-peak-min idle-bank-freeze-cur-peak)))
+                          (begin
+                            (set! idle-bank-freeze-start-sec #f)
+                            (set! idle-bank-freeze-cur-peak 0)))
+                      ;; W17-LOOP-2: Gas zero-harvest freeze (>=90s w/ gas<50, >=1 ready gas bldg, workers>=20, <16 gas mined)
+                      (define gc-now (hash-ref st 1 0))
+                      (define grate-now (hash-ref st 3 0))
+                      (define r-gas-cnt (hash-count our-ready-gas-tags))
+                      (if (and (> gl 0)
+                               (< gc-now 50)
+                               (>= r-gas-cnt 1)
+                               (>= w-cur 20)
+                               (<= grate-now 15))
+                          (let ()
+                            (unless gas-zero-cur-start
+                              (set! gas-zero-cur-start prev-our-stat-sec)
+                              (set! gas-zero-cur-mined 0.0))
+                            (define dm (max (exact->inexact (max 0 (- gc-now prev-our-gas)))
+                                            (* (/ grate-now 60.0) dt)))
+                            (set! gas-zero-cur-mined (+ gas-zero-cur-mined dm))
+                            (if (< gas-zero-cur-mined 16.0)
+                                (let ([gdur (max 0.0 (- sec gas-zero-cur-start))])
+                                  (when (> gdur gas-zero-freeze-max-sec)
+                                    (set! gas-zero-freeze-max-sec gdur)
+                                    (set! gas-zero-freeze-start (round1 gas-zero-cur-start))
+                                    (set! gas-zero-freeze-end (round1 sec))
+                                    (set! gas-zero-freeze-ready-gas r-gas-cnt)
+                                    (set! gas-zero-freeze-mined (round1 gas-zero-cur-mined))))
+                                (begin
+                                  (set! gas-zero-cur-start #f)
+                                  (set! gas-zero-cur-mined 0.0))))
+                          (begin
+                            (set! gas-zero-cur-start #f)
+                            (set! gas-zero-cur-mined 0.0)))
+                      (set! prev-our-gas gc-now)
                       (set! prev-our-stat-sec sec)
                       (set! prev-our-killed kval)
                       ;; W12-LOOP-2: Track pre-3:30 idle bank (min_cur >= 250 while army_sup <= 4)
@@ -995,9 +1088,11 @@
                           (set! early-rush-idle-bank-post100-ticks (add1 early-rush-idle-bank-post100-ticks)))
                         (when (> mc0 early-rush-idle-bank-peak-min)
                           (set! early-rush-idle-bank-peak-min mc0)))])
-                   (hash-update! total-stat-ev p add1 0)
-                   (when (and (>= fu fm) (< fm 200) (> gl 224))
-                     (hash-update! sb-steps p add1 0))
+                   ;; W16-LOOP-2: Exclude post-death `food_made == 0` (`sup=0/0`) ticks from supply_block_pct
+                   (when (> fm 0)
+                     (hash-update! total-stat-ev p add1 0)
+                     (when (and (>= fu fm) (< fm 200) (> gl 224))
+                       (hash-update! sb-steps p add1 0)))
                    (define minute (exact-floor (/ sec 60.0)))
                    (hash-set! (hash-ref stats-by-min p)
                               minute
@@ -1057,7 +1152,8 @@
                    (cond
                      [(= p our-pid)
                       (unless our-main-xy (set! our-main-xy (cons (exact->inexact ux) (exact->inexact uy))))
-                      (hash-set! prod-lifespans tag (vector ut 0.0 +inf.0))]
+                      (hash-set! prod-lifespans tag (vector ut 0.0 +inf.0))
+                      (hash-set! our-prod-alive-tags tag #t)]
                      [(= p opp-pid)
                       (unless opp-main-xy (set! opp-main-xy (cons (exact->inexact ux) (exact->inexact uy))))])
                    (when (and our-main-xy opp-main-xy (not base-dist))
@@ -1116,6 +1212,7 @@
                       (when (= p our-pid)
                         (if (set-member? WARPABLE-UNIT-SET ut)
                             (begin
+                              (mark-our-unit-trained! sec)
                               (hash-update! our-units-ht ut add1 0)
                               (when (set-member? AA-UNIT-SET ut)
                                 (set! our-aa-unit-cnt (add1 our-aa-unit-cnt))))
@@ -1130,6 +1227,11 @@
                              (not (string-contains? ut "Egg"))
                              (not (string-contains? ut "Mineral"))
                              (not (string-contains? ut "Vespene"))))
+                      (when (and (= p our-pid)
+                                 (or (set-member? WORKER-UNIT-SET ut)
+                                     (and keep-unit?
+                                          (not (string-prefix? ut "Changeling")))))
+                        (mark-our-unit-trained! sec))
                       (when keep-unit?
                         (cond
                           [(= p our-pid)
@@ -1145,12 +1247,21 @@
                 [(7) ; SUnitDoneEvent
                  (define tag (bitwise-ior (arithmetic-shift (hash-ref pl 0 0) 18)
                                           (hash-ref pl 1 0)))
-                 (hash-set! unit-done tag #t)]
+                 (hash-set! unit-done tag #t)
+                 (when (= (hash-ref unit-owner tag 0) our-pid)
+                   (define ut (hash-ref unit-type tag ""))
+                   (when (or (set-member? TOWNHALL-SET ut)
+                             (set-member? PROD-FACILITY-SET ut))
+                     (hash-set! our-prod-alive-tags tag #t))
+                   (when (set-member? GAS-BLDG-SET ut)
+                     (hash-set! our-ready-gas-tags tag #t)))]
                 [(3) ; SUnitOwnerChangeEvent
                  (define tag (bitwise-ior (arithmetic-shift (hash-ref pl 0 0) 18)
                                           (hash-ref pl 1 0)))
                  (define p (hash-ref pl 2 0))
                  (hash-set! unit-owner tag p)
+                 (unless (= p our-pid)
+                   (hash-remove! our-ready-gas-tags tag))
                  (if (= p opp-pid)
                      (let ([xy (hash-ref unit-xy tag '(0 . 0))])
                        (hash-set! alive-opp tag (list (hash-ref unit-type tag "?") (car xy) (cdr xy))))
@@ -1240,6 +1351,8 @@
                  (define ut (hash-ref unit-type tag "?"))
                  (define killer-pid (hash-ref pl 2 #f))
                  (hash-remove! alive-opp tag)
+                 (hash-remove! our-prod-alive-tags tag)
+                 (hash-remove! our-ready-gas-tags tag)
                  (define ls (hash-ref prod-lifespans tag #f))
                  (when ls (vector-set! ls 2 sec))
                  (when our-zerg?
@@ -1374,6 +1487,7 @@
           (define tel-avg-obs-ms (tel-ms 'avg_obs_ms))
           (define tel-avg-rt-ms (tel-ms 'avg_runtime_ms))
           (define tel-avg-tr-ms (tel-ms 'avg_translate_ms))
+          (define tel-p95-tr-ms (or (tel-ms 'p95_translate_ms) (tel-ms 'tr_p95_ms)))
           (define tel-avg-step-ms (tel-ms 'avg_step_ms))
           (define tel-p95-step-ms (tel-ms 'p95_step_ms))
           (define tel-max-step-ms (tel-ms 'max_step_ms))
@@ -1884,6 +1998,25 @@
             (and pvp-nat-delay-flag?
                  (hasheq 'nat_sec our-nat-sec-val
                          'duration_sec dur)))
+          ;; W16-LOOP-2: Production idle-bank freeze (>=600M, sup_left>=10, <190 sup, 0 units trained >=45s)
+          (define prod-idle-bank-freeze?
+            (>= prod-idle-bank-freeze-max-sec 45.0))
+          (define prod-idle-bank-freeze-anomaly
+            (and prod-idle-bank-freeze?
+                 (hasheq 'max_sec (round1 prod-idle-bank-freeze-max-sec)
+                         'start_sec prod-idle-bank-freeze-start
+                         'end_sec prod-idle-bank-freeze-end
+                         'peak_min prod-idle-bank-freeze-peak-min)))
+          ;; W17-LOOP-2: Gas zero-harvest freeze (>=90s w/ gas<50, >=1 ready gas bldg, workers>=20, <16 gas mined)
+          (define gas-zero-harvest-freeze?
+            (>= gas-zero-freeze-max-sec 90.0))
+          (define gas-zero-harvest-freeze-anomaly
+            (and gas-zero-harvest-freeze?
+                 (hasheq 'max_sec (round1 gas-zero-freeze-max-sec)
+                         'start_sec gas-zero-freeze-start
+                         'end_sec gas-zero-freeze-end
+                         'ready_gas gas-zero-freeze-ready-gas
+                         'gas_mined gas-zero-freeze-mined)))
 
           (define anomalies
             (hasheq 'zero_fire_retreat zero-fire-retreat-anomaly
@@ -1898,7 +2031,9 @@
                     'siege_range_zero_dps_loss siege-zero-dps-loss-anomaly
                     'cloaked_unit_damage_loss cloaked-unit-damage-loss-anomaly
                     'gas_rich_min_starved gas-rich-min-starved-anomaly
+                    'gas_zero_harvest_freeze gas-zero-harvest-freeze-anomaly
                     'prod_placement_stall prod-placement-stall-anomaly
+                    'prod_idle_bank_freeze prod-idle-bank-freeze-anomaly
                     'pvp_nat_delay pvp-nat-delay-anomaly
                     'air_aa_starvation air-aa-starvation))
 
@@ -1921,6 +2056,12 @@
                  (or runner-timed-out?
                      (and wall-sec
                           (>= wall-sec (if run-timeout-sec (* 0.90 run-timeout-sec) 480.0))))))
+          ;; W18-LOOP-2: Winning ties clipped by CPU wall-timeout (trade >= 1.25x OR pkA >= 1.15x opp)
+          (define wall-timeout-winning-tie?
+            (and wall-timeout-tie?
+                 (or (>= trade-ratio 1.25)
+                     (and (> our-pk-army 0)
+                          (>= our-pk-army (* 1.15 opp-pk-army))))))
           (define tie-cause
             (cond
               [(not (eq? res 'tie)) #f]
@@ -1941,6 +2082,16 @@
               [else log-step-max]))
           (define eff-p95-step-ms
             (or tel-p95-step-ms (and step-p95 (round2 step-p95))))
+          ;; W17-LOOP-2: Wire translator p95 latency (exact if telemetry/logs emit p95_translate_ms/tr_ms,
+          ;; else proportional p95 share from avg_translate_ms / avg_step_ms catching #18-style cache thrash!)
+          (define tr-sorted (sort (hash-ref log-acc 'tr-ms '()) <))
+          (define log-tr-p95 (percentile-sorted tr-sorted 0.95))
+          (define eff-tr-p95-ms
+            (or tel-p95-tr-ms
+                (and log-tr-p95 (round2 log-tr-p95))
+                (and tel-avg-tr-ms eff-p95-step-ms tel-avg-step-ms (> tel-avg-step-ms 0.0)
+                     (round2 (max tel-avg-tr-ms (* eff-p95-step-ms (/ tel-avg-tr-ms tel-avg-step-ms)))))
+                tel-avg-tr-ms))
 
           ;; Build crisp signatures list
           (define sigs '())
@@ -1953,8 +2104,12 @@
                               (if wall-sec (r0 wall-sec) "?")
                               (if tel-avg-rt-ms (r1 tel-avg-rt-ms) "-")
                               (if tel-avg-tr-ms (r1 tel-avg-tr-ms) "-"))))
+          (when wall-timeout-winning-tie?
+            (add-sig! (format "WALL_TIMEOUT_WINNING_TIE(~ax)" (r2 trade-ratio))))
           (when (and true-step-max (>= true-step-max 500.0))
             (add-sig! (format "STEP_SPIKE(~ams)" (r0 true-step-max))))
+          (when (and eff-tr-p95-ms (>= eff-tr-p95-ms 30.0))
+            (add-sig! (format "TR_P95_SPIKE(~ams)" (r1 eff-tr-p95-ms))))
           (when endgame-stall-anomaly
             (add-sig! (if (hash-ref endgame-stall-anomaly 'creep_or_ol_blocked #f)
                           (format "ENDGAME_STALL_CREEP_OL(~am,~ab)"
@@ -2016,6 +2171,14 @@
                               prod-placement-stall-ticks
                               prod-placement-stall-max-streak
                               prod-placement-stall-max-bldg)))
+          (when prod-idle-bank-freeze-anomaly
+            (add-sig! (format "PROD_IDLE_BANK_FREEZE(~as,pk=~aM)"
+                              (r0 prod-idle-bank-freeze-max-sec)
+                              prod-idle-bank-freeze-peak-min)))
+          (when gas-zero-harvest-freeze-anomaly
+            (add-sig! (format "GAS_ZERO_HARVEST_FREEZE(~as,~ag)"
+                              (r0 gas-zero-freeze-max-sec)
+                              gas-zero-freeze-ready-gas)))
           (when pvp-nat-delay-anomaly
             (add-sig! (format "PVP_NAT_DELAY(~as)"
                               (if (real? our-nat-sec-val) (r0 our-nat-sec-val) "NONE"))))
@@ -2052,6 +2215,7 @@
                   'opp_fault opp-fault?
                   'tie_cause tie-cause
                   'wall_timeout_tie wall-timeout-tie?
+                  'wall_timeout_winning_tie wall-timeout-winning-tie?
                   'wall_sec wall-sec
                   'duration_sec dur
                   'killed_val killed-val
@@ -2128,6 +2292,12 @@
                   'prod_placement_stall_ticks prod-placement-stall-ticks
                   'prod_placement_stall_max_streak prod-placement-stall-max-streak
                   'prod_placement_stall prod-placement-stall?
+                  'prod_idle_bank_freeze prod-idle-bank-freeze?
+                  'prod_idle_bank_freeze_sec (round1 prod-idle-bank-freeze-max-sec)
+                  'prod_idle_bank_freeze_peak_min prod-idle-bank-freeze-peak-min
+                  'gas_zero_harvest_freeze gas-zero-harvest-freeze?
+                  'gas_zero_harvest_freeze_sec (round1 gas-zero-freeze-max-sec)
+                  'gas_zero_harvest_freeze_ready_gas gas-zero-freeze-ready-gas
                   'pvp_nat_delay_flag pvp-nat-delay-flag?
                   'map_symmetry_kind map-symmetry-kind
                   't3_first_sec t3-first-sec
@@ -2145,6 +2315,7 @@
                   'avg_obs_ms tel-avg-obs-ms
                   'avg_runtime_ms tel-avg-rt-ms
                   'avg_translate_ms tel-avg-tr-ms
+                  'tr_p95_ms eff-tr-p95-ms
                   'avg_step_ms tel-avg-step-ms
                   'p95_step_ms eff-p95-step-ms
                   'max_step_ms true-step-max
@@ -2242,6 +2413,9 @@
         (define (max-opt k)
           (define vs (filter real? (map (lambda (r) (hash-ref r k #f)) rows)))
           (and (pair? vs) (round1 (apply max vs))))
+        (define (max-opt2 k)
+          (define vs (filter real? (map (lambda (r) (hash-ref r k #f)) rows)))
+          (and (pair? vs) (round2 (apply max vs))))
         (define (timing-dist k)
           (num-dist (map (lambda (r) (hash-ref (hash-ref r 'macro_timings (hasheq)) k #f)) rows)))
         ;; Anomaly counts
@@ -2253,6 +2427,7 @@
             (define base-s (car (string-split s "(")))
             (hash-update! sig-ht base-s add1 0)))
         (define wall-timeout-ties (count (lambda (r) (eq? (hash-ref r 'wall_timeout_tie #f) #t)) rows))
+        (define wall-timeout-winning-ties (count (lambda (r) (eq? (hash-ref r 'wall_timeout_winning_tie #f) #t)) rows))
         (define opp-zero-combat-dcs (count (lambda (r) (eq? (hash-ref r 'opp_zero_combat_dc #f) #t)) rows))
         (define step-spike-500-cnt
           (count (lambda (r) (let ([v (hash-ref r 'step_max #f)]) (and (real? v) (>= v 500.0)))) rows))
@@ -2277,11 +2452,14 @@
                 'avg_obs_ms (avg-opt2 'avg_obs_ms)
                 'avg_runtime_ms (avg-opt2 'avg_runtime_ms)
                 'avg_translate_ms (avg-opt2 'avg_translate_ms)
+                'avg_tr_p95_ms (avg-opt2 'tr_p95_ms)
+                'worst_tr_p95_ms (max-opt2 'tr_p95_ms)
                 'avg_step_ms (avg-opt2 'avg_step_ms)
                 'avg_p95_step_ms (avg-opt2 'p95_step_ms)
                 'max_step_ms (max-opt 'step_max)
                 'step_spike_500ms_count step-spike-500-cnt
                 'wall_timeout_ties wall-timeout-ties
+                'wall_timeout_winning_ties wall-timeout-winning-ties
                 'opp_zero_combat_dcs opp-zero-combat-dcs
                 'endgame_home_stall_count (count (lambda (r) (>= (safe-num (hash-ref r 'endgame_home_stall_sec 0.0) 0.0) 90.0)) rows)
                 'avg_endgame_home_stall_sec (avg-field 'endgame_home_stall_sec)
@@ -2307,6 +2485,8 @@
                 'gas_rich_min_starved_matches (count (lambda (r) (eq? (hash-ref r 'gas_rich_min_starved #f) #t)) rows)
                 'total_prod_placement_stall_ticks (for/sum ([r (in-list rows)]) (hash-ref r 'prod_placement_stall_ticks 0))
                 'prod_placement_stall_matches (count (lambda (r) (eq? (hash-ref r 'prod_placement_stall #f) #t)) rows)
+                'prod_idle_bank_freeze_matches (count (lambda (r) (eq? (hash-ref r 'prod_idle_bank_freeze #f) #t)) rows)
+                'gas_zero_harvest_freeze_matches (count (lambda (r) (eq? (hash-ref r 'gas_zero_harvest_freeze #f) #t)) rows)
                 'pvp_nat_delay_matches (count (lambda (r) (eq? (hash-ref r 'pvp_nat_delay_flag #f) #t)) rows)
                 't3_started_matches (count (lambda (r) (real? (hash-ref r 't3_first_sec #f))) rows)
                 't3_early_2base_matches (count (lambda (r) (let ([b (hash-ref r 't3_bases_at_start #f)]) (and (exact-integer? b) (<= b 2)))) rows)
@@ -2426,11 +2606,15 @@
                         'siege_range_zero_dps_losses (anom-cnt (lambda (a) (and (hash? (hash-ref a 'siege_range_zero_dps_loss #f)) #t)))
                         'cloaked_unit_damage_losses (anom-cnt (lambda (a) (and (hash? (hash-ref a 'cloaked_unit_damage_loss #f)) #t)))
                         'gas_rich_min_starved (anom-cnt (lambda (a) (and (hash? (hash-ref a 'gas_rich_min_starved #f)) #t)))
+                        'gas_zero_harvest_freeze (anom-cnt (lambda (a) (and (hash? (hash-ref a 'gas_zero_harvest_freeze #f)) #t)))
                         'prod_placement_stall (anom-cnt (lambda (a) (and (hash? (hash-ref a 'prod_placement_stall #f)) #t)))
+                        'prod_idle_bank_freeze (anom-cnt (lambda (a) (and (hash? (hash-ref a 'prod_idle_bank_freeze #f)) #t)))
                         'pvp_nat_delay (anom-cnt (lambda (a) (and (hash? (hash-ref a 'pvp_nat_delay #f)) #t)))
                         'air_aa_starvation (anom-cnt (lambda (a) (and (hash? (hash-ref a 'air_aa_starvation #f)) #t)))
                         'wall_timeout_tie wall-timeout-ties
+                        'wall_timeout_winning_tie wall-timeout-winning-ties
                         'step_spike_500ms step-spike-500-cnt
+                        'tr_p95_spike_30ms (count (lambda (r) (let ([v (hash-ref r 'tr_p95_ms #f)]) (and (real? v) (>= v 30.0)))) rows)
                         'opp_zero_combat_dc opp-zero-combat-dcs)
                 'top_signatures (for/list ([p (in-list (top-k-pairs sig-ht 6))])
                                   (list (car p) (cdr p)))))))
@@ -2457,16 +2641,19 @@
             (r1 (hash-ref agg 'supply_block_pct 0)) (r1 (hash-ref agg 'upgrades 0)))
     (define rt-ms (hash-ref agg 'avg_runtime_ms #f))
     (define tr-ms (hash-ref agg 'avg_translate_ms #f))
+    (define tr95-ms (hash-ref agg 'worst_tr_p95_ms #f))
     (define p95-ms (hash-ref agg 'avg_p95_step_ms #f))
     (define mx-ms (hash-ref agg 'max_step_ms #f))
     (define lat-str
       (if (or rt-ms tr-ms mx-ms)
-          (format " | Lat(rt/tr/p95/max)=~a/~a/~a/~ams | WallTies=~a | Spikes>=500=~a"
+          (format " | Lat(rt/tr/tr95max/p95/max)=~a/~a/~a/~a/~ams | WallTies=~a(Win=~a) | Spikes>=500=~a"
                   (if rt-ms (r1 rt-ms) "-")
                   (if tr-ms (r1 tr-ms) "-")
+                  (if tr95-ms (r1 tr95-ms) "-")
                   (if p95-ms (r1 p95-ms) "-")
                   (if mx-ms (r0 mx-ms) "-")
                   (hash-ref agg 'wall_timeout_ties 0)
+                  (hash-ref agg 'wall_timeout_winning_ties 0)
                   (hash-ref agg 'step_spike_500ms_count 0))
           ""))
     (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a~a\n"
@@ -2627,27 +2814,31 @@
                      (or (hash-ref a 'our_aa_tech_sec) "NONE")
                      (or (hash-ref a 'our_lair_sec) "NONE"))))
 
-  (section "6. CPU Wall-Timeout Ties, Step Spikes (>=500ms) & Opp Zero-Combat DCs"
+  (section "6. CPU Wall-Timeout Ties, Step Spikes (>=500ms), Wire tr_p95 (>=30ms) & Opp Zero-Combat DCs"
            (filter (lambda (r)
                      (or (eq? (hash-ref r 'wall_timeout_tie #f) #t)
                          (let ([mx (hash-ref r 'step_max #f)]) (and (real? mx) (>= mx 500.0)))
+                         (let ([tr95 (hash-ref r 'tr_p95_ms #f)]) (and (real? tr95) (>= tr95 30.0)))
                          (eq? (hash-ref r 'opp_zero_combat_dc #f) #t)
                          (eq? (hash-ref r 'opp_early_crash #f) #t)))
                    rows)
            (lambda (r)
-             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | wall=~as | rt/tr/p95/max=~a/~a/~a/~ams | tieCause=~a~a\n"
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | wall=~as | rt/tr/tr95/p95/max=~a/~a/~a/~a/~ams | tieCause=~a~a\n"
                      (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
                      (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
                      (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
                      (or (hash-ref r 'wall_sec) "-")
                      (if (hash-ref r 'avg_runtime_ms #f) (r1 (hash-ref r 'avg_runtime_ms)) "-")
                      (if (hash-ref r 'avg_translate_ms #f) (r1 (hash-ref r 'avg_translate_ms)) "-")
+                     (if (hash-ref r 'tr_p95_ms #f) (r1 (hash-ref r 'tr_p95_ms)) "-")
                      (if (hash-ref r 'p95_step_ms #f) (r1 (hash-ref r 'p95_step_ms)) "-")
                      (if (hash-ref r 'step_max #f) (r0 (hash-ref r 'step_max)) "-")
                      (or (hash-ref r 'tie_cause) "-")
                      (cond
                        [(eq? (hash-ref r 'opp_early_crash #f) #t) " [OPP_EARLY_CRASH]"]
                        [(eq? (hash-ref r 'opp_zero_combat_dc #f) #t) " [OPP_ZERO_COMBAT_DC]"]
+                       [(eq? (hash-ref r 'wall_timeout_winning_tie #f) #t) " [WINNING_TIE]"]
+                       [(let ([tr95 (hash-ref r 'tr_p95_ms #f)]) (and (real? tr95) (>= tr95 30.0))) " [TR_P95_SPIKE]"]
                        [else ""]))))
 
   (section "7. Gas-Rich / Mineral-Starved Production Stalls (>=30 ticks of gas>=200 & min<100)"
@@ -2692,7 +2883,34 @@
                          (format "~aPvPNatDelay=~as"
                                  (if (hash? ps) " | " "")
                                  (or (hash-ref pn 'nat_sec) "NONE"))
-                         "")))))
+                         ""))))
+
+  (section "10. Production Idle-Bank Freezes (>=600M, sup_left>=10, <190 sup, 0 units trained >=45s)"
+           (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'prod_idle_bank_freeze #f))) rows)
+           (lambda (r)
+             (define fz (hash-ref (hash-ref r 'anomalies) 'prod_idle_bank_freeze))
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | freeze=~as (~as-~as) | pkM=~aM\n"
+                     (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
+                     (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
+                     (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
+                     (r1 (hash-ref fz 'max_sec 0.0))
+                     (or (hash-ref fz 'start_sec #f) "?")
+                     (or (hash-ref fz 'end_sec #f) "?")
+                     (hash-ref fz 'peak_min 0))))
+
+  (section "11. Gas Zero-Harvest Freezes (>=90s w/ gas<50, >=1 ready gas bldg, workers>=20, <16 gas mined)"
+           (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'gas_zero_harvest_freeze #f))) rows)
+           (lambda (r)
+             (define gz (hash-ref (hash-ref r 'anomalies) 'gas_zero_harvest_freeze))
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | freeze=~as (~as-~as) | readyGas=~a | mined=~aG\n"
+                     (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
+                     (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
+                     (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
+                     (r1 (hash-ref gz 'max_sec 0.0))
+                     (or (hash-ref gz 'start_sec #f) "?")
+                     (or (hash-ref gz 'end_sec #f) "?")
+                     (hash-ref gz 'ready_gas 0)
+                     (r1 (hash-ref gz 'gas_mined 0.0))))))
 
 ;; -----------------------------------------------------------------------------
 ;; Main CLI Driver

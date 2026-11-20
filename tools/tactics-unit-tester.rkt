@@ -142,6 +142,26 @@
 (define AB-UPROOT-SPINE 1725)
 (define AB-UPROOT-SPORE 1727)
 (define AB-CREEP-TUMOR-TUMOR 1733)
+(define AB-TRAIN-SCV 524)
+(define AB-TRAIN-MARINE 560)
+(define AB-TRAIN-MARAUDER 563)
+(define AB-TRAIN-SIEGE-TANK 591)
+(define AB-TRAIN-MEDIVAC 620)
+(define AB-TRAIN-VIKING 624)
+(define AB-TRAIN-ZERGLING 1343)
+(define AB-TRAIN-HYDRALISK 1345)
+(define AB-TRAIN-MUTALISK 1346)
+(define AB-TRAIN-ROACH 1351)
+(define AB-TRAIN-CORRUPTOR 1353)
+(define AB-MORPH-LAIR 1216)
+(define AB-BUILD-BARRACKS 321)
+(define AB-BUILD-BUNKER 324)
+(define AB-BUILD-STARPORT 329)
+(define AB-TRAIN-REAPER 561)
+(define AB-BUILD-GATEWAY 883)
+(define AB-BUILD-SHIELD-BATTERY 895)
+(define AB-TRAIN-ZEALOT 916)
+(define AB-SALVAGE-BUNKER 32)
 
 ;; Minimal SC2 protobuf wire encoders (for true wire-level decoding regression tests)
 (define (pb-varint n)
@@ -285,7 +305,10 @@
                  #:radius [radius 0.75]
                  #:minerals [minerals 0]
                  #:vespene [vespene 0]
-                 #:display-type [display-type 1])
+                 #:display-type [display-type 1]
+                 #:passengers [passengers '()]
+                 #:cargo-taken [cargo-taken 0]
+                 #:cargo-max [cargo-max 0])
   (define ut-id (sym->uid type-sym))
   (define default-hp
     (case type-sym
@@ -356,7 +379,10 @@
             0
             0
             0
-            0))
+            0
+            passengers
+            cargo-taken
+            cargo-max))
 
 (define (mk-walkable-pathing-grid w h #:wall-rects [wall-rects '()])
   ;; Build an 8-bpp `sc2-image-grid` (1 = walkable, 0 = cliff/wall) for real ground-BFS Voronoi tests.
@@ -535,6 +561,7 @@
                                #:map-size [map-size (cons 200 200)]
                                #:playable-area [playable-area (hash 'x0 16.0 'y0 16.0 'x1 184.0 'y1 184.0)]
                                #:pathing-grid [pathing-grid #f]
+                               #:placement-grid [placement-grid #f]
                                #:neutral-units [neutral-units #f])
   ;; Step 0: clean frame-0 reset so all sc2-protobuf-ws module caches reset AND l34-ctx-live-obs? -> #t
   (define gi (make-standard-game-info our-race enemy-race
@@ -542,7 +569,8 @@
                                       #:enemy-y enemy-y
                                       #:map-size map-size
                                       #:playable-area playable-area
-                                      #:pathing-grid pathing-grid))
+                                      #:pathing-grid pathing-grid
+                                      #:placement-grid placement-grid))
   (define rt (make-live-bot-runtime #:bot-name 'mothman-tactics-test
                                     #:race our-race))
   (define init-obs
@@ -8996,7 +9024,1066 @@
                         (format "wire_rejects=~a" total-rej)))))))
 
 ;; -----------------------------------------------------------------------------
-;; Full Scenario Catalog (214 Scenarios)
+;; Tier 3 additions (Wave-16 regression shields): novel-133..134
+;; -----------------------------------------------------------------------------
+(define scen-novel-133
+  (tactical-scenario
+   "novel-133-clean-disengage-outside-tank-16t-shell-zone-no-yoyo"
+   "novel" "Terran" "Terran" "siege-discipline"
+   "Wave-16 shield: Small outnumbered ground squad safely OUTSIDE Sieged Tank shell range (18.0t > 16.0t, away from home) cleanly disengages/holds with 0 suicide ATTACK dives"
+   (lambda ()
+     (define home (mk-home-base-units 'Terran #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define mar-tags (for/list ([i (in-range 4)]) (+ 6501 i)))
+     (define allies
+       (append home
+               (for/list ([i (in-range 4)])
+                 (mk-unit (+ 6501 i) 'marine 1 72.0 (+ 78.5 (* i 1.0)) #:hp 45.0 #:hp-max 45.0))))
+     (define enemies
+       (append (for/list ([i (in-range 4)])
+                 (mk-unit (+ 9501 i) 'siege-tank-sieged 4 90.0 (+ 77.0 (* i 2.0)) #:hp 175.0 #:hp-max 175.0))
+               (for/list ([i (in-range 4)])
+                 (mk-unit (+ 9511 i) 'marine 4 89.0 (+ 78.0 (* i 1.2)) #:hp 45.0 #:hp-max 45.0))))
+     (define out
+       (last (run-pipeline-sequence 'Terran 'Terran
+               (list (hash 'obs (mk-obs 12000 (append allies enemies)
+                                        #:food-used 20 #:food-cap 50 #:food-army 4 #:food-workers 16))))))
+     (define wcmds (step-outcome-wire-cmds out))
+     (define atk-cnt (wire-count-tags-with-ability wcmds mar-tags AB-ATTACK))
+     (define mov-cnt (wire-count-tags-with-ability wcmds mar-tags AB-MOVE))
+     (values out
+             (list
+              (mk-check "no-suicide-attack-from-18t-outside-tank-shell-zone" (= atk-cnt 0)
+                        (format "4 outnumbered Marines at 18.0t vs 4 Sieged Tanks emitted ATTACK=~a/4 (expected 0)" atk-cnt))
+              (mk-check "clean-disengage-move-outside-16t" (>= mov-cnt 3)
+                        (format "4 outnumbered Marines at 18.0t emitted MOVE=~a/4 (expected >=3)" mov-cnt))
+              (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0)
+                        (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
+
+(define scen-novel-134
+  (tactical-scenario
+   "novel-134-tempest-capital-air-dive-protoss-and-terran-no-0dps-kite"
+   "novel" "Protoss" "Protoss" "capital-siege-dive"
+   "Wave-16 shield (#5136387 P v who / #5136274 T v MetaScoreCritic): Outnumbered Protoss Stalkers and Terran Marine+Viking squads within 14t of enemy Tempests dive/fire (ATTACK) under capital-siege-dive instead of 0-DPS kiting"
+   (lambda ()
+     ;; Part A: Protoss 6 Stalkers at 14.0t vs 4 Tempests (outnumbered 12 vs 20 sup, away from home)
+     (define home-p (mk-home-base-units 'Protoss #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define p-tags (for/list ([i (in-range 6)]) (+ 6521 i)))
+     (define allies-p
+       (append home-p
+               (for/list ([i (in-range 6)])
+                 (mk-unit (+ 6521 i) 'stalker 1 76.0 (+ 77.5 (* i 1.0)) #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0))))
+     (define enemies-p
+       (for/list ([i (in-range 4)])
+         (mk-unit (+ 9521 i) 'tempest 4 90.0 (+ 77.0 (* i 2.0)) #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0 #:flying? #t)))
+     (define out-p
+       (last (run-pipeline-sequence 'Protoss 'Protoss
+               (list (hash 'obs (mk-obs 16000 (append allies-p enemies-p)
+                                        #:food-used 28 #:food-cap 60 #:food-army 12 #:food-workers 16))))))
+     (define p-atk (wire-count-tags-with-ability (step-outcome-wire-cmds out-p) p-tags AB-ATTACK))
+     ;; Part B: Terran 6 Marines + 2 Viking Fighters at 13.5t vs 4 Tempests (outnumbered 10 vs 20 sup)
+     (define home-t (mk-home-base-units 'Terran #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define t-tags (append (for/list ([i (in-range 6)]) (+ 6531 i)) '(6541 6542)))
+     (define allies-t
+       (append home-t
+               (for/list ([i (in-range 6)])
+                 (mk-unit (+ 6531 i) 'marine 1 76.5 (+ 77.5 (* i 0.9)) #:hp 45.0 #:hp-max 45.0))
+               (list (mk-unit 6541 'viking-fighter 1 76.5 79.0 #:hp 135.0 #:hp-max 135.0 #:flying? #t)
+                     (mk-unit 6542 'viking-fighter 1 76.5 81.0 #:hp 135.0 #:hp-max 135.0 #:flying? #t))))
+     (define enemies-t
+       (for/list ([i (in-range 4)])
+         (mk-unit (+ 9531 i) 'tempest 4 90.0 (+ 77.0 (* i 2.0)) #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0 #:flying? #t)))
+     (define out-t
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 16000 (append allies-t enemies-t)
+                                        #:food-used 26 #:food-cap 60 #:food-army 10 #:food-workers 16))))))
+     (define t-atk (wire-count-tags-with-ability (step-outcome-wire-cmds out-t) t-tags AB-ATTACK))
+     (define total-rej (+ (step-outcome-wire-rejects out-p) (step-outcome-wire-rejects out-t)))
+     (values out-p
+             (list
+              (mk-check "protoss-stalkers-dive-tempests-at-14t" (>= p-atk 4)
+                        (format "Stalkers ATTACK=~a/6 vs 4 Tempests at 14.0t (expected >=4)" p-atk))
+              (mk-check "terran-marine-viking-dives-tempests-at-13.5t" (>= t-atk 5)
+                        (format "Marines+Vikings ATTACK=~a/8 vs 4 Tempests at 13.5t (expected >=5)" t-atk))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+;; -----------------------------------------------------------------------------
+;; Tier 15: Wave-16 Siege0 3-Bug Chain, Terran Phantom Deduction & Corner Sweep (4)
+;; -----------------------------------------------------------------------------
+(define scen-w16-tac-1
+  (tactical-scenario
+   "w16-tac-1-zerg-ground-squad-in-siege-tank-shell-zone-commits-zero-yoyo"
+   "wave16-repro" "Zerg" "Terran" "siege-zero-dps"
+   "Wave-16 P0-1 (#16/#5134985/#5135912/#5136228): Zerglings/Roaches/Hydras at 10-12t inside Siege Tank shell zone (both 22t from our Hatchery and mid-map) commit ATTACK instead of 0-DPS backward yo-yo kiting"
+   (lambda ()
+     ;; Part A: 4 Sieged Tanks at 22.0t from our Hatchery (inside 30t home-defense, outside old 15.5t siege-shelling-friendly-structure?)
+     ;; 10 Zerglings + 4 Roaches + 4 Hydralisks at 10-12t (inside 13.0t Tank splash, outside old 9.5t fire-r!)
+     (define home-a (mk-home-base-units 'Zerg #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define ling-a-tags (for/list ([i (in-range 10)]) (+ 6601 i)))
+     (define rng-a-tags  (append (for/list ([i (in-range 4)]) (+ 6611 i))
+                                 (for/list ([i (in-range 4)]) (+ 6621 i))))
+     (define allies-a
+       (append home-a
+               (for/list ([i (in-range 10)])
+                 (mk-unit (+ 6601 i) 'zergling 1 43.0 (+ 29.5 (* i 0.5)) #:hp 35.0 #:hp-max 35.0))
+               (for/list ([i (in-range 4)])
+                 (mk-unit (+ 6611 i) 'roach 1 42.5 (+ 30.5 (* i 1.0)) #:hp 145.0 #:hp-max 145.0))
+               (for/list ([i (in-range 4)])
+                 (mk-unit (+ 6621 i) 'hydralisk 1 42.0 (+ 30.5 (* i 1.0)) #:hp 90.0 #:hp-max 90.0))))
+     (define enemies-a
+       (append (for/list ([i (in-range 4)])
+                 (mk-unit (+ 9601 i) 'siege-tank-sieged 4 54.0 (+ 29.5 (* i 1.5)) #:hp 175.0 #:hp-max 175.0))
+               (for/list ([i (in-range 4)])
+                 (mk-unit (+ 9611 i) 'marine 4 52.5 (+ 30.0 (* i 1.2)) #:hp 45.0 #:hp-max 45.0))))
+     (define out-a
+       (last (run-pipeline-sequence 'Zerg 'Terran
+               (list (hash 'obs (mk-obs 12000 (append allies-a enemies-a)
+                                        #:food-used 37 #:food-cap 66 #:food-army 21 #:food-workers 16))))))
+     (define a-ling-atk (wire-count-tags-with-ability (step-outcome-wire-cmds out-a) ling-a-tags AB-ATTACK))
+     (define a-rng-atk  (wire-count-tags-with-ability (step-outcome-wire-cmds out-a) rng-a-tags AB-ATTACK))
+     ;; Part B: Mid-map inside 13.0t Tank splash (away from home, outnumbered so can-break-siege-line? = #f!):
+     ;; 6 Lings + 4 Roaches + 4 Hydras at 11.5t vs 4 Sieged Tanks + 6 Marines
+     (define home-b (mk-home-base-units 'Zerg #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define b-tags (append (for/list ([i (in-range 6)]) (+ 6641 i))
+                            (for/list ([i (in-range 4)]) (+ 6651 i))
+                            (for/list ([i (in-range 4)]) (+ 6661 i))))
+     (define allies-b
+       (append home-b
+               (for/list ([i (in-range 6)])
+                 (mk-unit (+ 6641 i) 'zergling 1 78.5 (+ 78.0 (* i 0.7)) #:hp 35.0 #:hp-max 35.0))
+               (for/list ([i (in-range 4)])
+                 (mk-unit (+ 6651 i) 'roach 1 78.5 (+ 78.5 (* i 1.0)) #:hp 145.0 #:hp-max 145.0))
+               (for/list ([i (in-range 4)])
+                 (mk-unit (+ 6661 i) 'hydralisk 1 78.5 (+ 78.5 (* i 1.0)) #:hp 90.0 #:hp-max 90.0))))
+     (define enemies-b
+       (append (for/list ([i (in-range 4)])
+                 (mk-unit (+ 9641 i) 'siege-tank-sieged 4 90.0 (+ 77.5 (* i 1.6)) #:hp 175.0 #:hp-max 175.0))
+               (for/list ([i (in-range 6)])
+                 (mk-unit (+ 9651 i) 'marine 4 90.0 (+ 77.5 (* i 1.0)) #:hp 45.0 #:hp-max 45.0))))
+     (define out-b
+       (last (run-pipeline-sequence 'Zerg 'Terran
+               (list (hash 'obs (mk-obs 12400 (append allies-b enemies-b)
+                                        #:food-used 35 #:food-cap 66 #:food-army 19 #:food-workers 16))))))
+     (define b-atk (wire-count-tags-with-ability (step-outcome-wire-cmds out-b) b-tags AB-ATTACK))
+     (define total-rej (+ (step-outcome-wire-rejects out-a) (step-outcome-wire-rejects out-b)))
+     (values out-a
+             (list
+              (mk-check "own-territory-22t-zerglings-commit-against-tanks" (>= a-ling-atk 6)
+                        (format "Own-territory 22t Zerglings ATTACK=~a/10 at 11.0t vs Sieged Tanks (expected >=6)" a-ling-atk))
+              (mk-check "own-territory-22t-roach-hydra-commit-against-tanks" (>= a-rng-atk 5)
+                        (format "Own-territory 22t Roach+Hydra ATTACK=~a/8 at 10-12t vs Sieged Tanks (expected >=5)" a-rng-atk))
+              (mk-check "midmap-11.5t-shell-zone-zerg-commits-zero-yoyo" (>= b-atk 9)
+                        (format "Mid-map 11.5t Zerg squad ATTACK=~a/14 vs 4 Sieged Tanks+6 Marines (expected >=9)" b-atk))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-w16-tac-2
+  (tactical-scenario
+   "w16-tac-2-ranged-squad-under-pullback-suppress-dives-sieged-tanks-not-dead-code"
+   "wave16-repro" "Terran" "Terran" "siege-zero-dps"
+   "Wave-16 P0-1 (#17/#5135913/#5136226/#5136227/#5136343): Outnumbered Terran Bio and Protoss Stalkers trapped at 11t inside Tank shell zone under combat-suppress-attack? dive/fire (ATTACK) instead of L19053 unreachable dead-code retreat"
+   (lambda ()
+     ;; Part A (Terran nearest-enemy-tank + shell zone): 4 Marines + 2 Marauders at 11.0t vs 4 Sieged Tanks (outnumbered 8 vs 12 sup)
+     (define home-t (mk-home-base-units 'Terran #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define t-tags (append (for/list ([i (in-range 4)]) (+ 6701 i)) '(6711 6712)))
+     (define allies-t
+       (append home-t
+               (for/list ([i (in-range 4)])
+                 (mk-unit (+ 6701 i) 'marine 1 79.0 (+ 78.5 (* i 0.9)) #:hp 45.0 #:hp-max 45.0))
+               (list (mk-unit 6711 'marauder 1 79.0 79.5 #:hp 125.0 #:hp-max 125.0)
+                     (mk-unit 6712 'marauder 1 79.0 81.0 #:hp 125.0 #:hp-max 125.0))))
+     (define enemies-t
+       (for/list ([i (in-range 4)])
+         (mk-unit (+ 9701 i) 'siege-tank-sieged 4 90.0 (+ 77.5 (* i 1.5)) #:hp 175.0 #:hp-max 175.0)))
+     (define out-t
+       (last (run-pipeline-sequence 'Terran 'Terran
+               (list (hash 'obs (mk-obs 13000 (append allies-t enemies-t)
+                                        #:food-used 24 #:food-cap 50 #:food-army 8 #:food-workers 16))))))
+     (define t-atk (wire-count-tags-with-ability (step-outcome-wire-cmds out-t) t-tags AB-ATTACK))
+     ;; Part B (Direct L19053 capital-siege-dive? dead-code repro): 6 Stalkers at 11.5t vs 1 Sieged Tank (front) + 12 Marines + 2 Marauders (rear)
+     ;; Only 1 Tank -> bypasses siege-line-hold? (>=2 Tanks), enters combat-suppress-attack? directly with target=siege-tank-sieged at 11.5t!
+     (define home-p (mk-home-base-units 'Protoss #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define p-tags (for/list ([i (in-range 6)]) (+ 6721 i)))
+     (define allies-p
+       (append home-p
+               (for/list ([i (in-range 6)])
+                 (mk-unit (+ 6721 i) 'stalker 1 78.5 (+ 77.5 (* i 1.0)) #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0))))
+     (define enemies-p
+       (append (list (mk-unit 9721 'siege-tank-sieged 4 90.0 80.0 #:hp 175.0 #:hp-max 175.0))
+               (for/list ([i (in-range 12)])
+                 (mk-unit (+ 9730 i) 'marine 4 94.0 (+ 75.5 (* i 0.8)) #:hp 45.0 #:hp-max 45.0))
+               (list (mk-unit 9751 'marauder 4 94.5 79.0 #:hp 125.0 #:hp-max 125.0)
+                     (mk-unit 9752 'marauder 4 94.5 81.0 #:hp 125.0 #:hp-max 125.0))))
+     (define out-p
+       (last (run-pipeline-sequence 'Protoss 'Terran
+               (list (hash 'obs (mk-obs 13000 (append allies-p enemies-p)
+                                        #:food-used 28 #:food-cap 50 #:food-army 12 #:food-workers 16))))))
+     (define p-atk (wire-count-tags-with-ability (step-outcome-wire-cmds out-p) p-tags AB-ATTACK))
+     (define total-rej (+ (step-outcome-wire-rejects out-t) (step-outcome-wire-rejects out-p)))
+     (values out-t
+             (list
+              (mk-check "terran-bio-in-11t-tank-shell-zone-dives-under-suppress" (>= t-atk 4)
+                        (format "Terran 4M+2MR at 11.0t vs 4 Sieged Tanks ATTACK=~a/6 (expected >=4)" t-atk))
+              (mk-check "protoss-stalkers-hit-l19053-tank-dive-under-suppress" (>= p-atk 4)
+                        (format "Protoss 6 Stalkers at 11.5t vs 1 Sieged Tank+Bio (L19053) ATTACK=~a/6 (expected >=4)" p-atk))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-w16-tac-3
+  (tactical-scenario
+   "w16-tac-3-terran-phantom-deduction-never-freezes-scv-marine-tank-training"
+   "wave16-repro" "Terran" "Zerg" "macro-production"
+   "Wave-16 P0-2 (#17 147s Terran production freeze at 1,060M/409G, sup=28/46): Failing Phase 1/2 expand/barracks-techlab/starport-addon retries must NOT phantom-deduct bank or steal open-prod-slots ahead of SCV, Marine, and Siege Tank training"
+   (lambda ()
+     ;; Reconstruct exact #17 f=5712 Terran board state:
+     ;; 2 Orbitals, 22 SCVs, 1 bare Barracks (addon east blocked), 1 Factory+TechLab, 1 bare Starport (addon east blocked),
+     ;; 2 Refineries, 4 Depots, 4 Marines + 1 Tank, bank 1,060M/409G, sup 28/46 across 3 ticks spaced 40f apart (>36f addon refractory).
+     (define pgrid (mk-walkable-pathing-grid 200 200 #:wall-rects '((39 34 44 39) (39 46 44 51))))
+     (define base-units
+       (append
+        (list (mk-unit 1001 'orbital-command 1 32.0 32.0 #:energy 20.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1002 'orbital-command 1 52.0 32.0 #:energy 20.0 #:assigned 6 #:ideal 16)
+              (mk-unit 1201 'supply-depot 1 40.5 35.5)
+              (mk-unit 1202 'supply-depot 1 40.5 47.5)
+              (mk-unit 1203 'supply-depot 1 35.0 28.0)
+              (mk-unit 1204 'supply-depot 1 37.5 28.0)
+              (mk-unit 1301 'barracks 1 38.0 36.0)
+              (mk-unit 1302 'factory 1 38.0 42.0 #:add-on-tag 1303)
+              (mk-unit 1303 'factory-techlab 1 40.5 41.5)
+              (mk-unit 1304 'starport 1 38.0 48.0)
+              (mk-unit 1311 'refinery 1 28.0 26.0 #:assigned 3 #:ideal 3)
+              (mk-unit 1312 'refinery 1 36.0 25.0 #:assigned 3 #:ideal 3))
+        (for/list ([i (in-range 22)])
+          (mk-unit (+ 1100 i) 'scv 1
+                   (+ 27.0 (* 0.35 (modulo i 6)))
+                   (+ 30.0 (* 0.45 (quotient i 6)))
+                   #:orders (list (sc2-unit-order AB-GATHER #f 90001 0.0))))
+        (for/list ([i (in-range 4)])
+          (mk-unit (+ 1401 i) 'marine 1 56.0 (+ 34.0 (* i 0.9)) #:hp 45.0 #:hp-max 45.0))
+        (list (mk-unit 1405 'siege-tank 1 55.0 36.0 #:hp 175.0 #:hp-max 175.0))
+        ;; Distant scouted enemy so match is live mid-game
+        (list (mk-unit 9801 'hatchery 4 160.0 160.0 #:hp 1500.0 #:hp-max 1500.0))))
+     (define steps
+       (for/list ([f (in-list '(5712 5752 5792))])
+         (hash 'obs (mk-obs f base-units
+                            #:minerals 700 #:vespene 350
+                            #:food-used 28 #:food-cap 46 #:food-army 6 #:food-workers 22))))
+     (define outs
+       (run-pipeline-sequence 'Terran 'Zerg steps
+                              #:our-x 32.0 #:our-y 32.0 #:enemy-x 160.0 #:enemy-y 160.0
+                              #:placement-grid pgrid))
+     (define all-wcmds (apply append (map step-outcome-wire-cmds outs)))
+     (define trained-scv?    (wire-has-ability? all-wcmds '(1001 1002) AB-TRAIN-SCV))
+     (define trained-marine? (wire-has-ability? all-wcmds '(1301) AB-TRAIN-MARINE))
+     (define trained-tank?   (wire-has-ability? all-wcmds '(1302) AB-TRAIN-SIEGE-TANK))
+     (define total-rej (for/sum ([o (in-list outs)]) (step-outcome-wire-rejects o)))
+     (values (last outs)
+             (list
+              (mk-check "terran-trains-scv-despite-retrying-phase12-builds" trained-scv?
+                        (format "Orbital 1001/1002 emitted TRAIN_SCV (524)=~a across 3 ticks at 1,060M/409G" trained-scv?))
+              (mk-check "terran-trains-marine-despite-blocked-barracks-addon" trained-marine?
+                        (format "Bare Barracks 1301 emitted TRAIN_MARINE (560)=~a (slot not stolen by blocked TechLab)" trained-marine?))
+              (mk-check "terran-trains-siege-tank-despite-phase12-deductions" trained-tank?
+                        (format "Factory+TL 1302 emitted TRAIN_SIEGE_TANK (591)=~a across 3 ticks at 1,060M/409G" trained-tank?))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-w16-tac-4
+  (tactical-scenario
+   "w16-tac-4-endgame-lifted-building-and-1scv-corner-sweep-zero-stall"
+   "wave16-repro" "Terran" "Terran" "endgame-sweep"
+   "Wave-16 P1-2 (#5135717 T v Carcara): Dominating Terran army with enemy main cleared and only 1 enemy SCV + lifted corner Barracks emits continuous preserved sweep ATTACK orders, rotates after waypoint timeout (zero home stall), and attacks visible flying corner building"
+   (lambda ()
+     (define open-grid (mk-walkable-pathing-grid 200 200))
+     ;; Minimal 2-base minerals so primary-wps has only 3 unvisited targets outside enemy main (168,168):
+     ;; after 3 timeout cycles (>672f each), timed-out waypoints MUST be marked visited to unlock the fallback grid!
+     (define mins (append (mk-mineral-cluster 91101 26.0 32.0)
+                          (mk-mineral-cluster 91111 174.0 168.0)))
+     (define home
+       (append
+        (list (mk-unit 1001 'orbital-command 1 32.0 32.0 #:energy 100.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1002 'orbital-command 1 52.0 32.0 #:energy 100.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1003 'orbital-command 1 72.0 32.0 #:energy 100.0 #:assigned 12 #:ideal 16))
+        (for/list ([i (in-range 20)])
+          (mk-unit (+ 1100 i) 'scv 1 (+ 27.0 (* 0.3 (modulo i 6))) (+ 30.0 (* 0.4 (quotient i 6)))
+                   #:orders (list (sc2-unit-order AB-GATHER #f 91101 0.0))))))
+     (define mar-tags (for/list ([i (in-range 12)]) (+ 6801 i)))
+     (define mrd-tags (for/list ([i (in-range 4)])  (+ 6821 i)))
+     (define vik-tags (for/list ([i (in-range 4)])  (+ 6831 i)))
+     (define army-tags (append mar-tags mrd-tags vik-tags))
+     ;; Place 1 Viking at enemy main (168,168) so enemy-main-cleared? -> #t, rest of army mid-map
+     (define army-units
+       (append
+        (for/list ([i (in-range 12)])
+          (mk-unit (+ 6801 i) 'marine 1 118.0 (+ 114.0 (* i 0.7)) #:hp 45.0 #:hp-max 45.0))
+        (for/list ([i (in-range 4)])
+          (mk-unit (+ 6821 i) 'marauder 1 120.0 (+ 116.0 (* i 1.0)) #:hp 125.0 #:hp-max 125.0))
+        (list (mk-unit 6831 'viking-fighter 1 168.0 168.0 #:hp 135.0 #:hp-max 135.0 #:flying? #t)
+              (mk-unit 6832 'viking-fighter 1 122.0 118.0 #:hp 135.0 #:hp-max 135.0 #:flying? #t)
+              (mk-unit 6833 'viking-fighter 1 122.0 120.0 #:hp 135.0 #:hp-max 135.0 #:flying? #t)
+              (mk-unit 6834 'viking-fighter 1 122.0 122.0 #:hp 135.0 #:hp-max 135.0 #:flying? #t))))
+     (define lone-scv (list (mk-unit 9851 'scv 4 105.0 95.0 #:hp 45.0 #:hp-max 45.0)))
+     ;; Part A: 6 steps (f=24000 initial sweep + scan; f=24016 inside refractory no home recall;
+     ;; f=24720, 25440, 26160, 26880 after >672f timeouts must mark timed-out waypoints visited and unlock >=4 distinct grid targets!)
+     (define outs-a
+       (run-pipeline-sequence 'Terran 'Terran
+         (for/list ([f (in-list '(24000 24016 24720 25440 26160 26880))])
+           (hash 'obs (mk-obs f (append home army-units lone-scv)
+                              #:minerals 2500 #:vespene 1200
+                              #:food-used 170 #:food-cap 200 #:food-army 120 #:food-workers 50
+                              #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0)))
+         #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+         #:pathing-grid open-grid #:neutral-units mins))
+     (define o1 (first outs-a))
+     (define o2 (second outs-a))
+     (define timeout-outs (list o1 (third outs-a) (fourth outs-a) (fifth outs-a) (sixth outs-a)))
+     (define atk1 (wire-count-tags-with-ability (step-outcome-wire-cmds o1) army-tags AB-ATTACK))
+     (define scan1? (wire-has-ability? (step-outcome-wire-cmds o1) '(1001 1002 1003) AB-SCANNER-SWEEP))
+     (define home-mov2
+       (for/sum ([t (in-list army-tags)])
+         (if (ormap (lambda (c)
+                      (and (= (sc2-raw-unit-command-ability-id c) AB-MOVE)
+                           (let ([p (sc2-raw-unit-command-target-pos c)])
+                             (and p (<= (dist2d-xy (sc2-point2d-x p) (sc2-point2d-y p) 32.0 32.0) 30.0)))))
+                    (wire-cmds-for-tag (step-outcome-wire-cmds o2) t))
+             1 0)))
+     (define (first-atk-pt wcmds tag)
+       (for/first ([c (in-list (wire-cmds-for-tag wcmds tag))]
+                   #:when (and (= (sc2-raw-unit-command-ability-id c) AB-ATTACK)
+                               (sc2-raw-unit-command-target-pos c)))
+         (define p (sc2-raw-unit-command-target-pos c))
+         (cons (sc2-point2d-x p) (sc2-point2d-y p))))
+     (define mar-pts (filter values (for/list ([o (in-list timeout-outs)]) (first-atk-pt (step-outcome-wire-cmds o) 6801))))
+     (define distinct-mar-pts
+       (for/fold ([acc '()]) ([p (in-list mar-pts)])
+         (if (ormap (lambda (q) (<= (dist2d-xy (car p) (cdr p) (car q) (cdr q)) 5.0)) acc)
+             acc
+             (cons p acc))))
+     (define atk-last (wire-count-tags-with-ability (step-outcome-wire-cmds (sixth outs-a)) army-tags AB-ATTACK))
+     ;; Part B: Visible lifted barracks-flying in map corner (18, 182) -> Vikings immediately ATTACK it!
+     (define lifted-rax (list (mk-unit 9861 'barracks-flying 4 18.0 182.0 #:hp 1000.0 #:hp-max 1000.0 #:flying? #t)))
+     (define o-b
+       (last (run-pipeline-sequence 'Terran 'Terran
+               (list (hash 'obs (mk-obs 25000 (append home army-units lifted-rax)
+                                        #:minerals 2500 #:vespene 1200
+                                        #:food-used 170 #:food-cap 200 #:food-army 120 #:food-workers 50
+                                        #:neutral-units mins #:camera-x 32.0 #:camera-y 32.0)))
+               #:our-x 32.0 #:our-y 32.0 #:enemy-x 168.0 #:enemy-y 168.0
+               #:pathing-grid open-grid #:neutral-units mins)))
+     (define vik-atk-lifted (wire-count-tags-with-ability (step-outcome-wire-cmds o-b) vik-tags AB-ATTACK))
+     (define total-rej (+ (for/sum ([o (in-list outs-a)]) (step-outcome-wire-rejects o))
+                          (step-outcome-wire-rejects o-b)))
+     (values (sixth outs-a)
+             (list
+              (mk-check "step1-dominating-army-emits-preserved-sweep-and-scan" (and (>= atk1 14) scan1?)
+                        (format "Step1 sweep ATTACK=~a/20 (expected >=14), Orbital Scan=~a" atk1 scan1?))
+              (mk-check "step2-inside-refractory-zero-home-stall-recall" (= home-mov2 0)
+                        (format "Step2 units recalled to home (32,32)=~a/20 (expected 0)" home-mov2))
+              (mk-check "timeout-cycles-mark-visited-and-unlock-fallback-grid"
+                        (and (>= atk-last 14) (>= (length distinct-mar-pts) 4))
+                        (format "Last ATTACK=~a/20, distinct Marine targets across 5 timeout cycles=~a (expected >=4; pts=~a)"
+                                atk-last (length distinct-mar-pts) mar-pts))
+              (mk-check "part-b-vikings-attack-visible-lifted-corner-barracks" (>= vik-atk-lifted 3)
+                        (format "Vikings ATTACK lifted barracks-flying at (18,182)=~a/4 (expected >=3)" vik-atk-lifted))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+;; -----------------------------------------------------------------------------
+;; Tier 3 additions (Wave-17 regression shields): novel-135..136
+;; -----------------------------------------------------------------------------
+(define scen-novel-135
+  (tactical-scenario
+   "novel-135-zerg-larva-spending-with-lair-and-hydraden-never-starves"
+   "novel" "Zerg" "Terran" "macro-production"
+   "Wave-17 shield: Saturated mid-game 5-base Zerg with Lair, RoachWarren, HydraliskDen, BanelingNest, Spire, 5 Queens, 72 Drones, 10 idle Larvae, and 1,500M/700G spends surplus Larvae into combat units cleanly with 0 wire rejects"
+   (lambda ()
+     (define larva-tags (for/list ([i (in-range 10)]) (+ 6901 i)))
+     (define units
+       (append
+        (list (mk-unit 1001 'lair 1 32.0 32.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1002 'hatchery 1 52.0 32.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1003 'hatchery 1 72.0 32.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1004 'hatchery 1 32.0 54.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1005 'hatchery 1 52.0 54.0 #:assigned 8 #:ideal 16)
+              (mk-unit 1301 'spawning-pool 1 36.0 36.0)
+              (mk-unit 1302 'roach-warren 1 38.0 36.0)
+              (mk-unit 1303 'hydralisk-den 1 40.0 36.0)
+              (mk-unit 1304 'baneling-nest 1 42.0 36.0)
+              (mk-unit 1305 'spire 1 44.0 36.0)
+              (mk-unit 1306 'evolution-chamber 1 46.0 36.0)
+              (mk-unit 1307 'infestation-pit 1 48.0 36.0)
+              (mk-unit 1308 'lurker-den-mp 1 50.0 36.0)
+              (mk-unit 1311 'extractor 1 28.0 26.0 #:assigned 3 #:ideal 3)
+              (mk-unit 1312 'extractor 1 36.0 25.0 #:assigned 3 #:ideal 3)
+              (mk-unit 1313 'extractor 1 52.0 25.0 #:assigned 3 #:ideal 3)
+              (mk-unit 1321 'overlord 1 30.0 35.0 #:flying? #t))
+        (for/list ([i (in-range 72)])
+          (mk-unit (+ 1100 i) 'drone 1 (+ 27.0 (* 0.25 (modulo i 10))) (+ 30.0 (* 0.35 (quotient i 10)))
+                   #:orders (list (sc2-unit-order AB-GATHER #f 90001 0.0))))
+        (for/list ([i (in-range 6)])
+          (mk-unit (+ 1250 i) 'queen 1 (+ 34.0 (* i 2.5)) 33.0 #:hp 175.0 #:hp-max 175.0))
+        (for/list ([i (in-range 10)])
+          (mk-unit (+ 6901 i) 'larva 1 (+ 32.0 (* 0.3 (modulo i 5))) (+ 34.5 (* 0.3 (quotient i 5)))))
+        (for/list ([i (in-range 6)])
+          (mk-unit (+ 6921 i) 'roach 1 60.0 (+ 34.0 (* i 0.9)) #:hp 145.0 #:hp-max 145.0))
+        (list (mk-unit 9901 'command-center 4 160.0 160.0 #:hp 1500.0 #:hp-max 1500.0)
+              (mk-unit 9902 'marine 4 150.0 150.0 #:hp 45.0 #:hp-max 45.0)
+              (mk-unit 9903 'siege-tank-sieged 4 152.0 150.0 #:hp 175.0 #:hp-max 175.0))))
+     (define outs
+       (run-pipeline-sequence 'Zerg 'Terran
+         (list (hash 'obs (mk-obs 10500 units
+                                  #:minerals 1800 #:vespene 900
+                                  #:food-used 116 #:food-cap 170 #:food-army 44 #:food-workers 72
+                                  #:larva-count 10 #:upgrades '(metabolic-boost)))
+               (hash 'obs (mk-obs 10540 units
+                                  #:minerals 1800 #:vespene 900
+                                  #:food-used 116 #:food-cap 170 #:food-army 44 #:food-workers 72
+                                  #:larva-count 10 #:upgrades '(metabolic-boost))))))
+     (define out (last outs))
+     (define wcmds (apply append (map step-outcome-wire-cmds outs)))
+     (define combat-train-cnt
+       (for/sum ([t (in-list larva-tags)])
+         (define abs (wire-abilities-for-tag wcmds t))
+         (if (ormap (lambda (ab) (memv ab abs))
+                    (list AB-TRAIN-HYDRALISK AB-TRAIN-ROACH AB-TRAIN-ZERGLING AB-TRAIN-MUTALISK AB-TRAIN-CORRUPTOR))
+             1 0)))
+     (define total-rej (for/sum ([o (in-list outs)]) (step-outcome-wire-rejects o)))
+     (values out
+             (list
+              (mk-check "zerg-spends-larvae-into-combat-units" (>= combat-train-cnt 2)
+                        (format "Larvae trained into Hydra/Roach/Ling/Muta/Corruptor=~a/10 at 1,800M/900G (expected >=2)" combat-train-cnt))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-novel-136
+  (tactical-scenario
+   "novel-136-protoss-and-terran-natural-defense-vs-marauder-bio-push"
+   "novel" "Protoss" "Terran" "home-defense"
+   "Wave-17 shield: Protoss Immortal+Stalker+Zealot natural defenders hold and ATTACK against incoming Marauder+Marine push without backward OBRet flee"
+   (lambda ()
+     (define home (mk-home-base-units 'Protoss #:base-x 32.0 #:base-y 32.0 #:with-natural? #t #:nat-x 52.0 #:nat-y 32.0 #:workers 22))
+     (define def-tags '(6951 6952 6953 6954 6955 6956 6957 6958 6959))
+     (define defenders
+       (list (mk-unit 6951 'immortal 1 56.0 31.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0)
+             (mk-unit 6952 'immortal 1 56.0 33.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0)
+             (mk-unit 6953 'stalker 1 55.5 29.5 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)
+             (mk-unit 6954 'stalker 1 55.5 30.5 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)
+             (mk-unit 6955 'stalker 1 55.5 32.0 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)
+             (mk-unit 6956 'stalker 1 55.5 33.5 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)
+             (mk-unit 6957 'stalker 1 55.5 34.5 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)
+             (mk-unit 6958 'zealot 1 57.5 31.0 #:hp 100.0 #:hp-max 100.0 #:shield 50.0 #:shield-max 50.0)
+             (mk-unit 6959 'zealot 1 57.5 33.0 #:hp 100.0 #:hp-max 100.0 #:shield 50.0 #:shield-max 50.0)))
+     (define enemies
+       (append (for/list ([i (in-range 6)])
+                 (mk-unit (+ 9921 i) 'marauder 4 65.5 (+ 29.5 (* i 1.0)) #:hp 125.0 #:hp-max 125.0))
+               (for/list ([i (in-range 6)])
+                 (mk-unit (+ 9931 i) 'marine 4 66.5 (+ 29.5 (* i 0.9)) #:hp 45.0 #:hp-max 45.0))))
+     (define out
+       (last (run-pipeline-sequence 'Protoss 'Terran
+               (list (hash 'obs (mk-obs 7200 (append home defenders enemies)
+                                        #:food-used 46 #:food-cap 66 #:food-army 24 #:food-workers 22))))))
+     (define atk-cnt (wire-count-tags-with-ability (step-outcome-wire-cmds out) def-tags AB-ATTACK))
+     (values out
+             (list
+              (mk-check "protoss-natural-defenders-engage-marauder-bio" (>= atk-cnt 6)
+                        (format "Protoss natural defenders ATTACK=~a/9 vs 6 Marauders+6 Marines (expected >=6)" atk-cnt))
+              (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0)
+                        (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
+
+;; -----------------------------------------------------------------------------
+;; Tier 16: Wave-17 Peaceful Terran Freeze, Zerg Lair/Larva Freeze, 0G Gas & Proxy Marauder (4)
+;; -----------------------------------------------------------------------------
+(define scen-w17-tac-1
+  (tactical-scenario
+   "w17-tac-1-terran-peaceful-midgame-never-freezes-scv-marine-tank-starport"
+   "wave17-repro" "Terran" "Terran" "macro-production"
+   "Wave-17 P0-1 (#17/#11/#5134986/#5136226 143s peaceful Terran freeze): 2 completed Bunkers (1 loaded, 1 empty) at f>5700 must NOT spam salvage (ab=32) every 4f and starve APM headroom for SCV, Bio, SiegeTank, and Starport"
+   (lambda ()
+     (define units
+       (append
+        (list (mk-unit 1001 'orbital-command 1 32.0 32.0 #:energy 20.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1002 'orbital-command 1 52.0 32.0 #:energy 20.0 #:assigned 6 #:ideal 16)
+              (mk-unit 1201 'supply-depot 1 35.0 27.0)
+              (mk-unit 1202 'supply-depot 1 37.5 27.0)
+              (mk-unit 1203 'supply-depot 1 40.0 27.0)
+              (mk-unit 1204 'supply-depot 1 42.5 27.0)
+              (mk-unit 1205 'supply-depot 1 45.0 27.0)
+              ;; 2 completed Bunkers (1 loaded w/ cargo-taken=4, 1 empty) that triggered 1,344 APM P0 salvage spam in #17/#11!
+              (mk-unit 1211 'bunker 1 56.0 30.0 #:hp 400.0 #:hp-max 400.0 #:cargo-taken 4 #:cargo-max 4)
+              (mk-unit 1212 'bunker 1 56.0 34.0 #:hp 400.0 #:hp-max 400.0 #:cargo-taken 0 #:cargo-max 4)
+              (mk-unit 1301 'barracks 1 38.0 36.0 #:add-on-tag 1302)
+              (mk-unit 1302 'barracks-techlab 1 40.5 35.5)
+              (mk-unit 1303 'factory 1 38.0 42.0 #:add-on-tag 1304)
+              (mk-unit 1304 'factory-techlab 1 40.5 41.5)
+              (mk-unit 1311 'refinery 1 28.0 26.0 #:assigned 3 #:ideal 3)
+              (mk-unit 1312 'refinery 1 36.0 25.0 #:assigned 3 #:ideal 3)
+              (mk-unit 1315 'engineering-bay 1 33.0 39.0))
+        (for/list ([i (in-range 22)])
+          (mk-unit (+ 1100 i) 'scv 1
+                   (+ 27.0 (* 0.35 (modulo i 6)))
+                   (+ 30.0 (* 0.45 (quotient i 6)))
+                   #:orders (list (sc2-unit-order AB-GATHER #f 90001 0.0))))
+        (for/list ([i (in-range 4)])
+          (mk-unit (+ 1401 i) 'marine 1 58.0 (+ 34.0 (* i 0.9)) #:hp 45.0 #:hp-max 45.0))
+        (list (mk-unit 1405 'siege-tank 1 55.0 36.0 #:hp 175.0 #:hp-max 175.0)
+              ;; Distant enemy CC only -> under-base-attack? = #f!
+              (mk-unit 9941 'command-center 4 160.0 160.0 #:hp 1500.0 #:hp-max 1500.0))))
+     (define scv-tags (for/list ([i (in-range 22)]) (+ 1100 i)))
+     ;; 8 consecutive 4f steps (f=5712..5740): pre-W17 emitted 2x salvage/step = 16 salvage cmds starving P1 macro!
+     (define steps
+       (for/list ([i (in-range 8)])
+         (hash 'obs (mk-obs (+ 5712 (* i 4)) units
+                            #:minerals 2000 #:vespene 500
+                            #:food-used 28 #:food-cap 54 #:food-army 6 #:food-workers 22))))
+     (define outs
+       (run-pipeline-sequence 'Terran 'Terran steps
+                              #:our-x 32.0 #:our-y 32.0 #:enemy-x 160.0 #:enemy-y 160.0))
+     (define all-wcmds (apply append (map step-outcome-wire-cmds outs)))
+     (define loaded-salvage-cnt
+       (length (filter (lambda (c) (= (sc2-raw-unit-command-ability-id c) AB-SALVAGE-BUNKER))
+                       (wire-cmds-for-tag all-wcmds 1211))))
+     (define total-salvage-cnt
+       (length (filter (lambda (c) (= (sc2-raw-unit-command-ability-id c) AB-SALVAGE-BUNKER))
+                       (append (wire-cmds-for-tag all-wcmds 1211)
+                               (wire-cmds-for-tag all-wcmds 1212)))))
+     (define trained-scv?      (wire-has-ability? all-wcmds '(1001 1002) AB-TRAIN-SCV))
+     (define trained-bio?      (or (wire-has-ability? all-wcmds '(1301) AB-TRAIN-MARINE)
+                                   (wire-has-ability? all-wcmds '(1301) AB-TRAIN-MARAUDER)))
+     (define trained-tank?     (wire-has-ability? all-wcmds '(1303) AB-TRAIN-SIEGE-TANK))
+     (define built-starport?   (wire-has-ability? all-wcmds scv-tags AB-BUILD-STARPORT))
+     (define total-rej (for/sum ([o (in-list outs)]) (step-outcome-wire-rejects o)))
+     (values (last outs)
+             (list
+              (mk-check "loaded-bunker-never-emits-salvage" (= loaded-salvage-cnt 0)
+                        (format "Loaded Bunker 1211 (cargo=4/4) emitted SALVAGE (32)=~a across 8 steps (expected 0)" loaded-salvage-cnt))
+              (mk-check "bunker-salvage-never-spams-4f-apm-cap" (<= total-salvage-cnt 1)
+                        (format "Total SALVAGE (32) cmds across 8 4f steps=~a (expected <=1; pre-W17 spammed 16)" total-salvage-cnt))
+              (mk-check "peaceful-terran-trains-scv" trained-scv?
+                        (format "Orbitals 1001/1002 emitted TRAIN_SCV (524)=~a at 2,000M/500G" trained-scv?))
+              (mk-check "peaceful-terran-trains-bio" trained-bio?
+                        (format "Barracks+TL 1301 emitted TRAIN_MARINE/MARAUDER (560/563)=~a" trained-bio?))
+              (mk-check "peaceful-terran-trains-siege-tank" trained-tank?
+                        (format "Factory+TL 1303 emitted TRAIN_SIEGE_TANK (591)=~a" trained-tank?))
+              (mk-check "peaceful-terran-builds-starport" built-starport?
+                        (format "SCVs emitted BUILD_STARPORT (329)=~a across 8 steps at 2,000M/500G" built-starport?))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-w17-tac-2
+  (tactical-scenario
+   "w17-tac-2-zerg-15k-bank-5-hatcheries-morphs-lair-and-spends-idle-larvae"
+   "wave17-repro" "Zerg" "Zerg" "macro-production"
+   "Wave-17 P0-2 (#1 Z v titania ZvZ SwarmVictory 15,680M/1,017G, 5 Hatcheries, 0 Lair, 64 Lings, 50 idle Larvae, 0 visible enemy combat units): Zerg MUST morph Lair (1216) AND spend idle Larvae on combat units (Roach/Ling)"
+   (lambda ()
+     (define hatch-tags '(1001 1002 1003 1004 1005))
+     (define larva-tags (for/list ([i (in-range 15)]) (+ 7001 i)))
+     (define units
+       (append
+        (list (mk-unit 1001 'hatchery 1 32.0 32.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1002 'hatchery 1 52.0 32.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1003 'hatchery 1 72.0 32.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1004 'hatchery 1 32.0 54.0 #:assigned 14 #:ideal 16)
+              (mk-unit 1005 'hatchery 1 52.0 54.0 #:assigned 10 #:ideal 16)
+              (mk-unit 1301 'spawning-pool 1 36.0 36.0)
+              (mk-unit 1302 'roach-warren 1 38.0 36.0)
+              (mk-unit 1303 'baneling-nest 1 40.0 36.0)
+              (mk-unit 1311 'extractor 1 28.0 26.0 #:assigned 3 #:ideal 3)
+              (mk-unit 1312 'extractor 1 36.0 25.0 #:assigned 3 #:ideal 3)
+              (mk-unit 1313 'extractor 1 52.0 25.0 #:assigned 3 #:ideal 3))
+        (for/list ([i (in-range 70)])
+          (mk-unit (+ 1100 i) 'drone 1 (+ 27.0 (* 0.2 (modulo i 10))) (+ 30.0 (* 0.3 (quotient i 10)))
+                   #:orders (list (sc2-unit-order AB-GATHER #f 90001 0.0))))
+        (for/list ([i (in-range 7)])
+          (mk-unit (+ 1250 i) 'queen 1 (+ 34.0 (* i 2.5)) 33.0 #:hp 175.0 #:hp-max 175.0 #:energy 50.0))
+        ;; 64 Zerglings (= zergling-standing-cap!) + 5 Roaches + 3 Ravagers, 0 visible enemy combat units (only surviving enemy Hatchery!)
+        (for/list ([i (in-range 64)])
+          (mk-unit (+ 7100 i) 'zergling 1 (+ 70.0 (* 0.4 (modulo i 16))) (+ 60.0 (* 0.4 (quotient i 16))) #:hp 35.0 #:hp-max 35.0))
+        (for/list ([i (in-range 5)])
+          (mk-unit (+ 7200 i) 'roach 1 (+ 72.0 (* i 0.8)) 64.0 #:hp 145.0 #:hp-max 145.0))
+        (for/list ([i (in-range 3)])
+          (mk-unit (+ 7210 i) 'ravager 1 (+ 72.0 (* i 1.0)) 66.0 #:hp 120.0 #:hp-max 120.0))
+        (for/list ([i (in-range 15)])
+          (mk-unit (+ 7001 i) 'larva 1 (+ 32.0 (* 0.3 (modulo i 5))) (+ 34.5 (* 0.3 (quotient i 5)))))
+        ;; 20 active Creep Tumors (Bombshell #2 from #1/#503: uncapped creep spread used to emit 43 cast-spells/step
+        ;; overflowing cortex-filter-actions! and evicting 100% of lair/combat orders!)
+        (for/list ([i (in-range 20)])
+          (mk-unit (+ 1500 i) 'creep-tumor-burrowed 1 (+ 42.0 (* 2.0 (modulo i 10))) (+ 42.0 (* 2.5 (quotient i 10))) #:burrowed? #t))
+        ;; Exact #1 Z v titania state: ONLY surviving enemy Zerg structures, 0 visible enemy combat units!
+        (list (mk-unit 9951 'hatchery 4 160.0 160.0 #:hp 1500.0 #:hp-max 1500.0)
+              (mk-unit 9952 'spawning-pool 4 156.0 156.0 #:hp 1000.0 #:hp-max 1000.0))))
+     (define steps
+       (for/list ([f (in-list '(16000 16064 16128))])
+         (hash 'obs (mk-obs f units
+                            #:minerals 15000 #:vespene 1000
+                            #:food-used 136 #:food-cap 200 #:food-army 66 #:food-workers 70
+                            #:larva-count 15))))
+     (define outs
+       (run-pipeline-sequence 'Zerg 'Zerg steps
+                              #:our-x 32.0 #:our-y 32.0 #:enemy-x 160.0 #:enemy-y 160.0))
+     (define all-wcmds (apply append (map step-outcome-wire-cmds outs)))
+     (define morphed-lair? (wire-has-ability? all-wcmds hatch-tags AB-MORPH-LAIR))
+     (define combat-larvae-trained
+       (for/sum ([t (in-list larva-tags)])
+         (define abs (wire-abilities-for-tag all-wcmds t))
+         (if (or (memv AB-TRAIN-ROACH abs) (memv AB-TRAIN-ZERGLING abs) (memv AB-TRAIN-HYDRALISK abs)) 1 0)))
+     (define max-creep-per-step
+       (apply max (for/list ([o (in-list outs)])
+                    (length (filter (lambda (c)
+                                      (and (sc2-raw-unit-command? c)
+                                           (memv (sc2-raw-unit-command-ability-id c)
+                                                 (list AB-CREEP-TUMOR-TUMOR AB-CREEP-TUMOR-QUEEN))))
+                                    (step-outcome-wire-cmds o))))))
+     (define total-rej (for/sum ([o (in-list outs)]) (step-outcome-wire-rejects o)))
+     (values (last outs)
+             (list
+              (mk-check "zerg-5-hatcheries-morphs-lair-at-15k-bank" morphed-lair?
+                        (format "Hatcheries 1001..1005 emitted MORPH_LAIR (1216)=~a at 15,000M/1,000G despite 20 Creep Tumors" morphed-lair?))
+              (mk-check "zerg-spends-idle-larvae-on-combat-despite-lair-bo" (>= combat-larvae-trained 2)
+                        (format "Larvae trained into Roach/Ling/Hydra=~a/15 at 15,000M/1,000G (expected >=2)" combat-larvae-trained))
+              (mk-check "creep-spread-capped-never-evicts-macro-or-combat" (<= max-creep-per-step 3)
+                        (format "Max creep-tumor casts in any single step=~a (expected <=3; pre-W17 spammed 43)" max-creep-per-step))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-w17-tac-3
+  (tactical-scenario
+   "w17-tac-3-zerg-0g-gas-freeze-under-hovering-tempests-assigns-gas-drones"
+   "wave17-repro" "Zerg" "Protoss" "economy-gas-recovery"
+   "Wave-17 P0-3 (#28 Z v Creepy_strategies 10-min 0G freeze across 7 Extractors): At 19G with 0 gas workers and >=2 Tempests hovering near each base, wire gas saturation MUST fall back to safest ready Extractor instead of locking gas to 0G/min"
+   (lambda ()
+     (define extractor-tags '(1311 1312 1313))
+     (define drone-tags (for/list ([i (in-range 32)]) (+ 1100 i)))
+     (define units
+       (append
+        (list (mk-unit 1001 'lair 1 32.0 32.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1002 'hatchery 1 52.0 32.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1301 'spawning-pool 1 36.0 36.0)
+              (mk-unit 1311 'extractor 1 28.0 26.0 #:assigned 0 #:ideal 3)
+              (mk-unit 1312 'extractor 1 36.0 26.0 #:assigned 0 #:ideal 3)
+              (mk-unit 1313 'extractor 1 52.0 26.0 #:assigned 0 #:ideal 3))
+        (for/list ([i (in-range 32)])
+          (mk-unit (+ 1100 i) 'drone 1
+                   (+ (if (< i 16) 27.0 52.0) (* 0.3 (modulo i 6)))
+                   (+ (if (< i 16) 30.0 28.0) (* 0.4 (quotient (modulo i 16) 6)))
+                   #:orders (list (sc2-unit-order AB-GATHER #f (if (< i 16) 90001 90011) 0.0))))
+        (list (mk-unit 1401 'queen 1 34.0 34.0 #:hp 175.0 #:hp-max 175.0)
+              (mk-unit 1402 'queen 1 54.0 34.0 #:hp 175.0 #:hp-max 175.0)
+              ;; 2 Tempests within 10.5t of EACH TownHall -> both bases flagged th-combat-unsafe? on pre-W17!
+              (mk-unit 9961 'tempest 4 38.0 36.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0 #:flying? #t)
+              (mk-unit 9962 'tempest 4 39.5 36.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0 #:flying? #t)
+              (mk-unit 9963 'tempest 4 58.0 36.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0 #:flying? #t)
+              (mk-unit 9964 'tempest 4 59.5 36.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0 #:flying? #t))))
+     (define obs-w17-3
+       (mk-obs 12000 units
+               #:minerals 800 #:vespene 19
+               #:food-used 40 #:food-cap 66 #:food-army 4 #:food-workers 32))
+     (define out
+       (last (run-pipeline-sequence 'Zerg 'Protoss
+               (list (hash 'obs obs-w17-3)))))
+     ;; Live ladder main invokes `saturate-workers-and-gas-commands` alongside `translate-bot-actions->sc2-raw-commands`!
+     (define sat-cmds (saturate-workers-and-gas-commands obs-w17-3))
+     (define wcmds (append (step-outcome-wire-cmds out) sat-cmds))
+     (define gas-assigned-drones
+       (for/sum ([t (in-list drone-tags)])
+         (if (ormap (lambda (c)
+                      (and (sc2-raw-unit-command? c)
+                           (memv (sc2-raw-unit-command-ability-id c) (list AB-GATHER AB-MINERAL-WALK-GATHER))
+                           (memv (sc2-raw-unit-command-target-unit-tag c) extractor-tags)))
+                    (wire-cmds-for-tag wcmds t))
+             1 0)))
+     (values out
+             (list
+              (mk-check "zerg-assigns-gas-drones-despite-hovering-tempests-at-19g" (>= gas-assigned-drones 1)
+                        (format "Drones assigned to ready Extractors (1311..1313) at 19G=~a/32 (expected >=1)" gas-assigned-drones))
+              (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0)
+                        (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
+
+(define scen-w17-tac-4
+  (tactical-scenario
+   "w17-tac-4-early-proxy-marauder-rush-defends-natural-zero-obret"
+   "wave17-repro" "Terran" "Terran" "early-rush-defense"
+   "Wave-17 P1-1 (#14 T / #15 P v oberon <5:30 proxy 2-Rax TechLab Marauder rush): Early Terran and Protoss natural defenders engage (ATTACK) with 0 backward OBRet while Barracks trains combat units instead of holding for greedy tech"
+   (lambda ()
+     ;; Part A: Terran #14 at f=5600 (4:10 < 5:30): 4 Marines + 2 Marauders at natural (58,32) vs 5 Marauders + 2 Marines + proxy Rax at (68.5,32)
+     (define home-t
+       (append (mk-home-base-units 'Terran #:base-x 32.0 #:base-y 32.0 #:with-natural? #t #:nat-x 52.0 #:nat-y 32.0 #:workers 22)
+               (list (mk-unit 1301 'barracks 1 38.0 36.0)
+                     (mk-unit 1302 'factory 1 38.0 42.0))))
+     (define t-def-tags '(7301 7302 7303 7304 7305 7306))
+     (define t-defs
+       (list (mk-unit 7301 'marine 1 58.0 30.5 #:hp 45.0 #:hp-max 45.0)
+             (mk-unit 7302 'marine 1 58.0 31.5 #:hp 45.0 #:hp-max 45.0)
+             (mk-unit 7303 'marine 1 58.0 32.5 #:hp 45.0 #:hp-max 45.0)
+             (mk-unit 7304 'marine 1 58.0 33.5 #:hp 45.0 #:hp-max 45.0)
+             (mk-unit 7305 'marauder 1 58.5 31.5 #:hp 125.0 #:hp-max 125.0)
+             (mk-unit 7306 'marauder 1 58.5 32.5 #:hp 125.0 #:hp-max 125.0)))
+     (define t-enemies
+       (append (for/list ([i (in-range 5)])
+                 (mk-unit (+ 9971 i) 'marauder 4 68.5 (+ 30.0 (* i 1.0)) #:hp 125.0 #:hp-max 125.0))
+               (list (mk-unit 9978 'marine 4 69.5 31.0 #:hp 45.0 #:hp-max 45.0)
+                     (mk-unit 9979 'marine 4 69.5 33.0 #:hp 45.0 #:hp-max 45.0)
+                     (mk-unit 9980 'barracks 4 78.0 36.0 #:hp 1000.0 #:hp-max 1000.0))))
+     (define out-t
+       (last (run-pipeline-sequence 'Terran 'Terran
+               (list (hash 'obs (mk-obs 5600 (append home-t t-defs t-enemies)
+                                        #:minerals 220 #:vespene 120
+                                        #:food-used 30 #:food-cap 46 #:food-army 8 #:food-workers 22))))))
+     (define t-wcmds (step-outcome-wire-cmds out-t))
+     (define t-atk (wire-count-tags-with-ability t-wcmds t-def-tags AB-ATTACK))
+     (define t-trains-bio? (or (wire-has-ability? t-wcmds '(1301) AB-TRAIN-MARINE)
+                               (wire-has-ability? t-wcmds '(1301) AB-TRAIN-MARAUDER)))
+     ;; Part B: Protoss #15 at f=5800 (4:18 < 5:30): 4 Stalkers + 1 Immortal + 2 Zealots at natural (58,32) vs 6 Marauders + 2 Marines + proxy Rax
+     (define home-p
+       (append (mk-home-base-units 'Protoss #:base-x 32.0 #:base-y 32.0 #:with-natural? #t #:nat-x 52.0 #:nat-y 32.0 #:workers 22)
+               (list (mk-unit 1321 'gateway 1 38.0 36.0)
+                     (mk-unit 1322 'gateway 1 38.0 40.0)
+                     (mk-unit 1323 'robotics-facility 1 38.0 44.0)
+                     (mk-unit 1324 'pylon 1 36.0 38.0))))
+     (define p-def-tags '(7311 7312 7313 7314 7315 7316 7317))
+     (define p-defs
+       (list (mk-unit 7311 'stalker 1 58.0 30.0 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)
+             (mk-unit 7312 'stalker 1 58.0 31.2 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)
+             (mk-unit 7313 'stalker 1 58.0 32.8 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)
+             (mk-unit 7314 'stalker 1 58.0 34.0 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)
+             (mk-unit 7315 'immortal 1 58.5 32.0 #:hp 200.0 #:hp-max 200.0 #:shield 100.0 #:shield-max 100.0)
+             (mk-unit 7316 'zealot 1 59.0 31.0 #:hp 100.0 #:hp-max 100.0 #:shield 50.0 #:shield-max 50.0)
+             (mk-unit 7317 'zealot 1 59.0 33.0 #:hp 100.0 #:hp-max 100.0 #:shield 50.0 #:shield-max 50.0)))
+     (define p-enemies
+       (append (for/list ([i (in-range 6)])
+                 (mk-unit (+ 9981 i) 'marauder 4 68.5 (+ 29.5 (* i 1.0)) #:hp 125.0 #:hp-max 125.0))
+               (list (mk-unit 9988 'marine 4 69.5 31.0 #:hp 45.0 #:hp-max 45.0)
+                     (mk-unit 9989 'marine 4 69.5 33.0 #:hp 45.0 #:hp-max 45.0)
+                     (mk-unit 9990 'barracks 4 78.0 36.0 #:hp 1000.0 #:hp-max 1000.0))))
+     (define out-p
+       (last (run-pipeline-sequence 'Protoss 'Terran
+               (list (hash 'obs (mk-obs 5800 (append home-p p-defs p-enemies)
+                                        #:minerals 280 #:vespene 140
+                                        #:food-used 38 #:food-cap 54 #:food-army 16 #:food-workers 22))))))
+     (define p-atk (wire-count-tags-with-ability (step-outcome-wire-cmds out-p) p-def-tags AB-ATTACK))
+     (define total-rej (+ (step-outcome-wire-rejects out-t) (step-outcome-wire-rejects out-p)))
+     (values out-t
+             (list
+              (mk-check "terran-early-proxy-marauder-defenders-attack-zero-obret" (>= t-atk 4)
+                        (format "Terran <5:30 natural defenders ATTACK=~a/6 vs 5 Marauders+2 Marines (expected >=4)" t-atk))
+              (mk-check "terran-early-proxy-marauder-keeps-training-bio" t-trains-bio?
+                        (format "Barracks 1301 trained Marine/Marauder under <5:30 proxy Marauder rush=~a" t-trains-bio?))
+              (mk-check "protoss-early-proxy-marauder-defenders-attack-zero-obret" (>= p-atk 5)
+                        (format "Protoss <5:30 natural defenders ATTACK=~a/7 vs 6 Marauders+2 Marines (expected >=5)" p-atk))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+;; -----------------------------------------------------------------------------
+;; Tier 3 addition (Wave-18 regression shield): novel-137
+;; -----------------------------------------------------------------------------
+(define scen-novel-137
+  (tactical-scenario
+   "novel-137-terran-bio-viking-engages-colossus-stalker-no-0dps-kite"
+   "novel" "Terran" "Protoss" "siege-zero-dps"
+   "Wave-18 shield (#26 T v Thssprtssbt): Outnumbered Terran Marine+Marauder+Viking squad within 10.5t of enemy Colossi+Stalkers engages (ATTACK) instead of 0-DPS backward kiting"
+   (lambda ()
+     (define home (mk-home-base-units 'Terran #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define bio-tags (append (for/list ([i (in-range 8)]) (+ 7351 i))
+                              (for/list ([i (in-range 4)]) (+ 7361 i))
+                              '(7371 7372)))
+     (define allies
+       (append home
+               (for/list ([i (in-range 8)])
+                 (mk-unit (+ 7351 i) 'marine 1 78.5 (+ 77.0 (* i 0.8)) #:hp 45.0 #:hp-max 45.0))
+               (for/list ([i (in-range 4)])
+                 (mk-unit (+ 7361 i) 'marauder 1 79.0 (+ 78.0 (* i 1.2)) #:hp 125.0 #:hp-max 125.0))
+               (list (mk-unit 7371 'viking-fighter 1 78.0 79.0 #:hp 135.0 #:hp-max 135.0 #:flying? #t)
+                     (mk-unit 7372 'viking-fighter 1 78.0 81.0 #:hp 135.0 #:hp-max 135.0 #:flying? #t))))
+     (define enemies
+       (append (for/list ([i (in-range 3)])
+                 (mk-unit (+ 9991 i) 'colossus 4 89.0 (+ 78.0 (* i 2.0)) #:hp 200.0 #:hp-max 200.0 #:shield 150.0 #:shield-max 150.0))
+               (for/list ([i (in-range 6)])
+                 (mk-unit (+ 9995 i) 'stalker 4 88.5 (+ 77.5 (* i 1.0)) #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0))))
+     (define out
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 15000 (append allies enemies)
+                                        #:food-used 36 #:food-cap 60 #:food-army 20 #:food-workers 16))))))
+     (define atk-cnt (wire-count-tags-with-ability (step-outcome-wire-cmds out) bio-tags AB-ATTACK))
+     (values out
+             (list
+              (mk-check "terran-bio-viking-engages-colossus-stalker-at-10.5t" (>= atk-cnt 8)
+                        (format "Terran Bio+Vikings ATTACK=~a/14 vs 3 Colossi+6 Stalkers at 10.5t (expected >=8)" atk-cnt))
+              (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0)
+                        (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
+
+;; -----------------------------------------------------------------------------
+;; Tier 17: Wave-18 Finale — Gas Resaturation Under P2 Micro, 12-Pool Rush & Reaper/Colossus (3)
+;; -----------------------------------------------------------------------------
+(define scen-w18-tac-1
+  (tactical-scenario
+   "w18-tac-1-post-gas-pull-resaturation-under-p2-combat-micro-zero-starve"
+   "wave18-repro" "Protoss" "Zerg" "economy-gas-recovery"
+   "Wave-18 P0-2 (#514/#009/#003/#028): Under continuous P2 combat micro draining APM tokens, gas resaturation (and carrying-cargo workers) MUST still pass govern-sc2-wire-actions! instead of starving 0/100 for 100-388s"
+   (lambda ()
+     (define assim-tags '(1311 1312))
+     (define probe-tags (for/list ([i (in-range 20)]) (+ 1100 i)))
+     ;; Part A: 20 Probes (half carrying minerals buff=271), 2 empty ready Assimilators (assigned=0), gas=16G,
+     ;; fed through govern-sc2-wire-actions! alongside 8 P2 combat micro commands EVERY 4f step for 30 steps!
+     (define units-a
+       (append
+        (list (mk-unit 1001 'nexus 1 32.0 32.0 #:assigned 20 #:ideal 16)
+              (mk-unit 1311 'assimilator 1 28.0 26.0 #:assigned 0 #:ideal 3)
+              (mk-unit 1312 'assimilator 1 36.0 26.0 #:assigned 0 #:ideal 3))
+        (for/list ([i (in-range 20)])
+          (mk-unit (+ 1100 i) 'probe 1
+                   (+ 27.0 (* 0.3 (modulo i 6)))
+                   (+ 30.0 (* 0.4 (quotient i 6)))
+                   #:buffs (if (< i 10) '(271) '())
+                   #:orders (list (sc2-unit-order AB-GATHER #f 90001 0.0))))
+        (for/list ([i (in-range 8)])
+          (mk-unit (+ 7401 i) 'stalker 1 80.0 (+ 76.0 (* i 0.9)) #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0))))
+     (define gov (make-wire-apm-governor))
+     (define steady-state-gas-emits
+       (for/sum ([step-i (in-range 30)])
+         (define f (+ 5120 (* step-i 4)))
+         (define obs-s (mk-obs f units-a #:minerals 240 #:vespene 16 #:food-used 36 #:food-cap 54 #:food-army 16 #:food-workers 20))
+         (define p2-cmds
+           (for/list ([i (in-range 8)])
+             (sc2-raw-unit-command AB-ATTACK (sc2-point2d (+ 90.0 (* i 0.5)) 80.0) 0 (list (+ 7401 i)) #f)))
+         (define sat-cmds (saturate-workers-and-gas-commands obs-s))
+         (define gov-cmds (govern-sc2-wire-actions! gov (append p2-cmds sat-cmds) f obs-s))
+         (if (and (>= step-i 10)
+                  (ormap (lambda (c)
+                           (and (sc2-raw-unit-command? c)
+                                (memv (sc2-raw-unit-command-ability-id c) (list AB-GATHER AB-MINERAL-WALK-GATHER))
+                                (memv (sc2-raw-unit-command-target-unit-tag c) assim-tags)))
+                         gov-cmds))
+             1 0)))
+     ;; Part B: All 16 Probes carrying minerals (buff=271) at 16G with 2 empty Assimilators -> STILL assigns gas worker!
+     (define units-b
+       (append
+        (list (mk-unit 1001 'nexus 1 32.0 32.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1311 'assimilator 1 28.0 26.0 #:assigned 0 #:ideal 3)
+              (mk-unit 1312 'assimilator 1 36.0 26.0 #:assigned 0 #:ideal 3))
+        (for/list ([i (in-range 16)])
+          (mk-unit (+ 1100 i) 'probe 1
+                   (+ 27.0 (* 0.3 (modulo i 6)))
+                   (+ 30.0 (* 0.4 (quotient i 6)))
+                   #:buffs '(271)
+                   #:orders (list (sc2-unit-order AB-GATHER #f 90001 0.0))))))
+     (define obs-b (mk-obs 5240 units-b #:minerals 240 #:vespene 16 #:food-used 16 #:food-cap 30 #:food-army 0 #:food-workers 16))
+     (define sat-b (saturate-workers-and-gas-commands obs-b))
+     (define carry-gas-assigned
+       (for/sum ([t (in-list (take probe-tags 16))])
+         (if (ormap (lambda (c)
+                      (and (sc2-raw-unit-command? c)
+                           (memv (sc2-raw-unit-command-ability-id c) (list AB-GATHER AB-MINERAL-WALK-GATHER))
+                           (memv (sc2-raw-unit-command-target-unit-tag c) assim-tags)))
+                    (wire-cmds-for-tag sat-b t))
+             1 0)))
+     (define out
+       (last (run-pipeline-sequence 'Protoss 'Zerg
+               (list (hash 'obs (mk-obs 5240 units-a #:minerals 240 #:vespene 16 #:food-used 36 #:food-cap 54 #:food-army 16 #:food-workers 20))))))
+     (values out
+             (list
+              (mk-check "gas-resaturation-passes-apm-governor-under-steady-p2-micro" (>= steady-state-gas-emits 3)
+                        (format "Governed gas-assign steps during steady-state P2 micro (steps 10..29)=~a/20 (expected >=3; pre-W18 was 0/20)" steady-state-gas-emits))
+              (mk-check "carrying-mineral-workers-still-resaturate-empty-gas-at-16g" (>= carry-gas-assigned 1)
+                        (format "Carrying-mineral Probes (buff 271) assigned to empty Assimilators=~a/16 (expected >=1)" carry-gas-assigned))
+              (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0)
+                        (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
+
+(define scen-w18-tac-2
+  (tactical-scenario
+   "w18-tac-2-early-12pool-zergling-rush-fights-at-home-and-adds-2nd-prod"
+   "wave18-repro" "Protoss" "Zerg" "early-rush-defense"
+   "Wave-18 P0-1 (#36 P / #35 T / #8 T v <3:30 12-Pool Zergling rush): Combat units + workers STAND AND FIGHT inside main (0% OBRet) and spend >=300M on 2nd Gateway/Barracks or static defense + continuous Zealot/Marine"
+   (lambda ()
+     ;; Part A: Protoss #36 at f=2600 (1:56 < 3:30), 340M, 1 Gateway, 2 Zealots + 16 Probes vs 12 Zerglings inside main!
+     (define home-p
+       (append (mk-home-base-units 'Protoss #:base-x 32.0 #:base-y 32.0 #:workers 16)
+               (list (mk-unit 1301 'pylon 1 36.0 36.0)
+                     (mk-unit 1302 'gateway 1 38.0 36.0))))
+     (define p-zeal-tags '(7451 7452))
+     (define p-probe-tags (for/list ([i (in-range 16)]) (+ 1100 i)))
+     (define p-zeals
+       (list (mk-unit 7451 'zealot 1 36.0 31.5 #:hp 100.0 #:hp-max 100.0 #:shield 50.0 #:shield-max 50.0)
+             (mk-unit 7452 'zealot 1 36.0 32.5 #:hp 100.0 #:hp-max 100.0 #:shield 50.0 #:shield-max 50.0)))
+     (define p-lings
+       (for/list ([i (in-range 12)])
+         (mk-unit (+ 9910 i) 'zergling 4 41.0 (+ 29.5 (* i 0.5)) #:hp 35.0 #:hp-max 35.0)))
+     (define out-p
+       (last (run-pipeline-sequence 'Protoss 'Zerg
+               (list (hash 'obs (mk-obs 2600 (append home-p p-zeals p-lings)
+                                        #:minerals 340 #:vespene 0
+                                        #:food-used 20 #:food-cap 31 #:food-army 4 #:food-workers 16))))))
+     (define pw (step-outcome-wire-cmds out-p))
+     (define p-zeal-atk (wire-count-tags-with-ability pw p-zeal-tags AB-ATTACK))
+     (define p-probe-atk (wire-count-tags-with-ability pw p-probe-tags AB-ATTACK))
+     (define p-trains-zeal? (wire-has-ability? pw '(1302) AB-TRAIN-ZEALOT))
+     (define p-adds-def-or-gate?
+       (or (wire-has-ability? pw p-probe-tags AB-BUILD-GATEWAY)
+           (wire-has-ability? pw p-probe-tags AB-BUILD-SHIELD-BATTERY)))
+     ;; Part B: Terran #35/#8 at f=2700 (2:00 < 3:30), 320M, 1 Barracks, 3 Marines + 16 SCVs vs 12 Zerglings inside main!
+     (define home-t
+       (append (mk-home-base-units 'Terran #:base-x 32.0 #:base-y 32.0 #:workers 16)
+               (list (mk-unit 1311 'supply-depot 1 35.0 28.0)
+                     (mk-unit 1312 'supply-depot 1 37.5 28.0)
+                     (mk-unit 1313 'barracks 1 38.0 36.0))))
+     (define t-mar-tags '(7461 7462 7463))
+     (define t-scv-tags (for/list ([i (in-range 16)]) (+ 1100 i)))
+     (define t-mars
+       (list (mk-unit 7461 'marine 1 36.0 31.0 #:hp 45.0 #:hp-max 45.0)
+             (mk-unit 7462 'marine 1 36.0 32.0 #:hp 45.0 #:hp-max 45.0)
+             (mk-unit 7463 'marine 1 36.0 33.0 #:hp 45.0 #:hp-max 45.0)))
+     (define t-lings
+       (for/list ([i (in-range 12)])
+         (mk-unit (+ 9930 i) 'zergling 4 41.5 (+ 29.5 (* i 0.5)) #:hp 35.0 #:hp-max 35.0)))
+     (define out-t
+       (last (run-pipeline-sequence 'Terran 'Zerg
+               (list (hash 'obs (mk-obs 2700 (append home-t t-mars t-lings)
+                                        #:minerals 320 #:vespene 0
+                                        #:food-used 19 #:food-cap 31 #:food-army 3 #:food-workers 16))))))
+     (define tw (step-outcome-wire-cmds out-t))
+     (define t-mar-atk (wire-count-tags-with-ability tw t-mar-tags AB-ATTACK))
+     (define t-trains-mar? (wire-has-ability? tw '(1313) AB-TRAIN-MARINE))
+     (define t-adds-rax-or-bunker?
+       (or (wire-has-ability? tw t-scv-tags AB-BUILD-BARRACKS)
+           (wire-has-ability? tw t-scv-tags AB-BUILD-BUNKER)))
+     (define total-rej (+ (step-outcome-wire-rejects out-p) (step-outcome-wire-rejects out-t)))
+     (values out-p
+             (list
+              (mk-check "protoss-12pool-zealots-and-probes-stand-and-fight" (and (>= p-zeal-atk 2) (>= p-probe-atk 2))
+                        (format "Protoss vs 12 Lings in main: Zealots ATTACK=~a/2, Probes ATTACK=~a/16 (expected >=2 & >=2)" p-zeal-atk p-probe-atk))
+              (mk-check "protoss-12pool-spends-340m-on-zealot-and-2nd-gate-or-battery" (and p-trains-zeal? p-adds-def-or-gate?)
+                        (format "Protoss at 340M vs 12 Lings: train_zealot=~a, build_gate/battery=~a" p-trains-zeal? p-adds-def-or-gate?))
+              (mk-check "terran-12pool-marines-fight-zero-obret" (>= t-mar-atk 2)
+                        (format "Terran Marines ATTACK=~a/3 vs 12 Lings in main (expected >=2)" t-mar-atk))
+              (mk-check "terran-12pool-spends-320m-on-marine-and-2nd-rax-or-bunker" (and t-trains-mar? t-adds-rax-or-bunker?)
+                        (format "Terran at 320M vs 12 Lings: train_marine=~a, build_rax/bunker=~a" t-trains-mar? t-adds-rax-or-bunker?))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-w18-tac-3
+  (tactical-scenario
+   "w18-tac-3-no-late-reaper-escrow-under-pressure-and-anti-tank-colossus-engage"
+   "wave18-repro" "Terran" "Protoss" "siege-zero-dps"
+   "Wave-18 P0-3 (#29 T v Creepy f=4368 reaper@1269 escrow + #26/#32 Tank/Colossus Siege0DPS): Terran past 2:30 under Stalker pressure trains Marine (0 Reaper escrow!) and Terran Bio trapped at 11t vs Tanks+Colossi attacks instead of 0-DPS retreat"
+   (lambda ()
+     ;; Part A: #29 T v Creepy at f=4368 (3:15 > 2:30), 140M/45G (<50G!), Barracks+Factory, 6 enemy Stalkers approaching natural
+     (define home-a
+       (append (mk-home-base-units 'Terran #:base-x 32.0 #:base-y 32.0 #:with-natural? #t #:nat-x 52.0 #:nat-y 32.0 #:workers 22)
+               (list (mk-unit 1301 'barracks 1 38.0 36.0)
+                     (mk-unit 1302 'factory 1 38.0 42.0)
+                     (mk-unit 1303 'supply-depot 1 35.0 28.0)
+                     (mk-unit 1304 'supply-depot 1 37.5 28.0)
+                     (mk-unit 1305 'refinery 1 28.0 26.0 #:assigned 3 #:ideal 3))))
+     (define defs-a
+       (for/list ([i (in-range 3)])
+         (mk-unit (+ 7471 i) 'marine 1 56.0 (+ 31.0 (* i 1.0)) #:hp 45.0 #:hp-max 45.0)))
+     (define enemies-a
+       (for/list ([i (in-range 6)])
+         (mk-unit (+ 9950 i) 'stalker 4 66.0 (+ 29.5 (* i 1.0)) #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)))
+     (define out-a
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 4368 (append home-a defs-a enemies-a)
+                                        #:minerals 140 #:vespene 45
+                                        #:food-used 25 #:food-cap 46 #:food-army 3 #:food-workers 22))))))
+     (define wa (step-outcome-wire-cmds out-a))
+     (define trained-mar-a? (wire-has-ability? wa '(1301) AB-TRAIN-MARINE))
+     (define trained-reaper-a? (wire-has-ability? wa '(1301) AB-TRAIN-REAPER))
+     ;; Part B: #26/#32 outnumbered 6 Marines + 3 Marauders at 11.0t vs 2 Colossi + 2 Sieged Tanks + 4 Stalkers (away from home)
+     (define home-b (mk-home-base-units 'Terran #:base-x 32.0 #:base-y 32.0 #:workers 16))
+     (define b-tags (append (for/list ([i (in-range 6)]) (+ 7481 i)) '(7491 7492 7493)))
+     (define allies-b
+       (append home-b
+               (for/list ([i (in-range 6)])
+                 (mk-unit (+ 7481 i) 'marine 1 79.0 (+ 77.5 (* i 0.9)) #:hp 45.0 #:hp-max 45.0))
+               (list (mk-unit 7491 'marauder 1 79.0 78.5 #:hp 125.0 #:hp-max 125.0)
+                     (mk-unit 7492 'marauder 1 79.0 80.0 #:hp 125.0 #:hp-max 125.0)
+                     (mk-unit 7493 'marauder 1 79.0 81.5 #:hp 125.0 #:hp-max 125.0))))
+     (define enemies-b
+       (append (list (mk-unit 9961 'colossus 4 90.0 78.5 #:hp 200.0 #:hp-max 200.0 #:shield 150.0 #:shield-max 150.0)
+                     (mk-unit 9962 'colossus 4 90.0 81.5 #:hp 200.0 #:hp-max 200.0 #:shield 150.0 #:shield-max 150.0)
+                     (mk-unit 9963 'siege-tank-sieged 4 90.0 76.5 #:hp 175.0 #:hp-max 175.0)
+                     (mk-unit 9964 'siege-tank-sieged 4 90.0 83.5 #:hp 175.0 #:hp-max 175.0))
+               (for/list ([i (in-range 4)])
+                 (mk-unit (+ 9970 i) 'stalker 4 91.0 (+ 78.0 (* i 1.2)) #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0))))
+     (define out-b
+       (last (run-pipeline-sequence 'Terran 'Protoss
+               (list (hash 'obs (mk-obs 15000 (append allies-b enemies-b)
+                                        #:food-used 28 #:food-cap 54 #:food-army 12 #:food-workers 16))))))
+     (define b-atk (wire-count-tags-with-ability (step-outcome-wire-cmds out-b) b-tags AB-ATTACK))
+     (define total-rej (+ (step-outcome-wire-rejects out-a) (step-outcome-wire-rejects out-b)))
+     (values out-a
+             (list
+              (mk-check "no-reaper-escrow-past-230-under-stalker-pressure" (and trained-mar-a? (not trained-reaper-a?))
+                        (format "At f=4368 (3:15, 140M/45G) vs 6 Stalkers: train_marine=~a, train_reaper=~a (expected #t/#f)" trained-mar-a? trained-reaper-a?))
+              (mk-check "bio-trapped-at-11t-vs-colossi-and-tanks-attacks-no-0dps-retreat" (>= b-atk 6)
+                        (format "Terran 6M+3MR at 11.0t vs 2 Colossi+2 Sieged Tanks ATTACK=~a/9 (expected >=6)" b-atk))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+(define scen-novel-138
+  (tactical-scenario
+   "novel-138-protoss-double-forge-skytoss-endgame-zero-crash"
+   "novel" "Protoss" "Terran" "runtime-safety"
+   "Wave-18 P0 crash shield (#24 Mothman-P v onlyfans f=20678): Late-game Protoss with >=2 ready Forges, CyberCore, Stargate, FleetBeacon, and sky-toss army (sup=143/165) must execute l2-phase8-macro-escrow! / generate-race-priority-candidates with zero unbound/uninitialized identifier exceptions and zero wire rejects"
+   (lambda ()
+     (define units
+       (append
+        (list (mk-unit 1001 'nexus 1 32.0 32.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1002 'nexus 1 52.0 32.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1003 'nexus 1 72.0 32.0 #:assigned 16 #:ideal 16)
+              (mk-unit 1301 'pylon 1 36.0 36.0)
+              (mk-unit 1302 'pylon 1 42.0 36.0)
+              (mk-unit 1303 'gateway 1 38.0 36.0)
+              (mk-unit 1304 'warp-gate 1 40.0 36.0)
+              (mk-unit 1305 'cybernetics-core 1 36.0 40.0)
+              (mk-unit 1306 'twilight-council 1 38.0 40.0)
+              (mk-unit 1307 'templar-archive 1 40.0 40.0)
+              (mk-unit 1308 'robotics-facility 1 42.0 40.0)
+              (mk-unit 1309 'stargate 1 44.0 36.0)
+              (mk-unit 1310 'stargate 1 46.0 36.0)
+              (mk-unit 1311 'fleet-beacon 1 44.0 40.0)
+              ;; >= 2 ready Forges triggers protoss-second-upg-sym -> protoss-upg-prereq-ok? -> has-core?!
+              (mk-unit 1321 'forge 1 34.0 38.0)
+              (mk-unit 1322 'forge 1 34.0 42.0)
+              (mk-unit 1331 'assimilator 1 28.0 26.0 #:assigned 3 #:ideal 3)
+              (mk-unit 1332 'assimilator 1 36.0 25.0 #:assigned 3 #:ideal 3))
+        (for/list ([i (in-range 50)])
+          (mk-unit (+ 1100 i) 'probe 1 (+ 27.0 (* 0.25 (modulo i 10))) (+ 30.0 (* 0.35 (quotient i 10)))
+                   #:orders (list (sc2-unit-order AB-GATHER #f 90001 0.0))))
+        (for/list ([i (in-range 6)])
+          (mk-unit (+ 7501 i) 'carrier 1 (+ 90.0 (* i 1.5)) 90.0 #:hp 300.0 #:hp-max 300.0 #:shield 150.0 #:shield-max 150.0 #:flying? #t))
+        (for/list ([i (in-range 6)])
+          (mk-unit (+ 7511 i) 'void-ray 1 (+ 90.0 (* i 1.2)) 93.0 #:hp 150.0 #:hp-max 150.0 #:shield 100.0 #:shield-max 100.0 #:flying? #t))
+        (for/list ([i (in-range 10)])
+          (mk-unit (+ 7521 i) 'stalker 1 (+ 88.0 (* i 0.9)) 86.0 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0))
+        (list (mk-unit 9981 'command-center 4 160.0 160.0 #:hp 1500.0 #:hp-max 1500.0)
+              (mk-unit 9982 'viking-fighter 4 152.0 152.0 #:hp 135.0 #:hp-max 135.0 #:flying? #t)
+              (mk-unit 9983 'battlecruiser 4 154.0 154.0 #:hp 550.0 #:hp-max 550.0 #:flying? #t))))
+     ;; Run across 3 upgrade states (including #24's exact 0M/372G bank + >=2 Forges + FleetBeacon + CyberCore)
+     ;; so ALL has-core? branches in protoss-upg-prereq-ok? (warp-gate, air-weapons-1/2, air-armor-1/2) evaluate cleanly!
+     (define outs
+       (run-pipeline-sequence 'Protoss 'Terran
+         (list (hash 'obs (mk-obs 20608 units
+                                  #:minerals 50 #:vespene 372
+                                  #:food-used 143 #:food-cap 165 #:food-army 94 #:food-workers 50
+                                  #:upgrades '(protoss-ground-weapons-1)))
+               (hash 'obs (mk-obs 20636 units
+                                  #:minerals 450 #:vespene 370
+                                  #:food-used 143 #:food-cap 165 #:food-army 94 #:food-workers 50
+                                  #:upgrades '(warp-gate-research protoss-ground-weapons-1 protoss-ground-armor-1 blink charge psi-storm)))
+               (hash 'obs (mk-obs 20678 units
+                                  #:minerals 600 #:vespene 420
+                                  #:food-used 143 #:food-cap 165 #:food-army 94 #:food-workers 50
+                                  #:upgrades '(warp-gate-research protoss-ground-weapons-1 protoss-ground-armor-1 protoss-air-weapons-1))))))
+     (define total-rej (for/sum ([o (in-list outs)]) (step-outcome-wire-rejects o)))
+     (values (last outs)
+             (list
+              (mk-check "double-forge-skytoss-endgame-steps-without-exception" (= (length outs) 3)
+                        (format "Completed ~a/3 Protoss double-forge sky-toss endgame steps cleanly (posture=~a)"
+                                (length outs) (step-outcome-posture (last outs))))
+              (mk-check "zero-wire-rejects" (= total-rej 0)
+                        (format "wire_rejects=~a" total-rej)))))))
+
+;; -----------------------------------------------------------------------------
+;; Full Scenario Catalog (231 Scenarios)
 ;; -----------------------------------------------------------------------------
 (define ALL-TACTICAL-SCENARIOS
   (list
@@ -9152,6 +10239,12 @@
    scen-novel-130
    scen-novel-131
    scen-novel-132
+   scen-novel-133
+   scen-novel-134
+   scen-novel-135
+   scen-novel-136
+   scen-novel-137
+   scen-novel-138
    ;; Tier 4: Wave-3 verified live-pipeline bug reproductions (8)
    scen-w3-p0-1
    scen-novel-21
@@ -9227,7 +10320,21 @@
    scen-w15-tac-5
    scen-w15-tac-6
    scen-w15-tac-7
-   scen-w15-tac-8))
+   scen-w15-tac-8
+   ;; Tier 15: Wave-16 Siege0 3-Bug Chain, Terran Phantom Deduction & Corner Sweep (4)
+   scen-w16-tac-1
+   scen-w16-tac-2
+   scen-w16-tac-3
+   scen-w16-tac-4
+   ;; Tier 16: Wave-17 Peaceful Terran Freeze, Zerg Lair/Larva Freeze, 0G Gas & Proxy Marauder (4)
+   scen-w17-tac-1
+   scen-w17-tac-2
+   scen-w17-tac-3
+   scen-w17-tac-4
+   ;; Tier 17: Wave-18 Finale — Gas Resaturation Under P2 Micro, 12-Pool Rush & Reaper/Colossus (3)
+   scen-w18-tac-1
+   scen-w18-tac-2
+   scen-w18-tac-3))
 
 ;; -----------------------------------------------------------------------------
 ;; Runner & Aggregator

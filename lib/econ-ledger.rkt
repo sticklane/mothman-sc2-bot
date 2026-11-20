@@ -2344,9 +2344,23 @@
                                 oracle liberator liberator-ag phoenix corruptor brood-lord))])
           (safe-nonneg-int (hash-ref enemy-u-counts u 0) 0))
         0))
+  (define enemy-cap-air-cnt
+    (if (hash? enemy-u-counts)
+        (for/sum ([u (in-list PROTOSS-CAPITAL-AIR-ENEMY-SYMS)])
+          (safe-nonneg-int (hash-ref enemy-u-counts u 0) 0))
+        0))
+  (define enemy-tank-cnt
+    (if (hash? enemy-u-counts)
+        (+ (safe-nonneg-int (hash-ref enemy-u-counts 'siege-tank 0) 0)
+           (safe-nonneg-int (hash-ref enemy-u-counts 'siege-tank-sieged 0) 0))
+        0))
   (cond
+    [(>= enemy-cap-air-cnt 1)
+     12]
     [(>= enemy-air-cnt 3)
      16]
+    [(and (>= enemy-tank-cnt 3) (or (>= g-val 75) (>= w-val 40)))
+     12]
     [(or (enemy-counts-have-any? enemy-u-counts ZERG-SIEGE-SPLASH-ENEMY-SYMS)
          (and (hash? enemy-b-counts)
               (enemy-counts-have-any? enemy-b-counts
@@ -4065,6 +4079,8 @@
      (define has-templar-arch?
        (or (ready-bldg-has? 'templar-archive)
            (ready-bldg-has? 'templar-archives)))
+     (define has-core? (ready-bldg-has? 'cybernetics-core))
+     (define has-stargate-ready? (ready-bldg-has? 'stargate))
      (define has-robo-bay?
        (or (ready-bldg-has? 'robotics-bay)
            (ready-bldg-has? 'robotics-support-bay)))
@@ -4169,8 +4185,6 @@
                                        (if pvt-fast-kiter-threat? 250.0 240.0)))))
                 '()))
            '()))
-     (define has-core? (ready-bldg-has? 'cybernetics-core))
-     (define has-stargate-ready? (ready-bldg-has? 'stargate))
      (define cur-adepts (unit-ht-count 'adept))
      (define cur-oracles (unit-ht-count 'oracle))
      (define cur-phoenix (unit-ht-count 'phoenix))
@@ -4831,7 +4845,13 @@
       terran-base-cands
       (lambda (u-sym)
         (case u-sym
+          ;; W18-P0-3-belief (`#29 T v Creepy`): Never generate/escrow benchmark Reaper past 2:30 (3360f)
+          ;; or under attack / enemy threat / once >= 1 Reaper already trained!
           [(reaper) (and (not (sg-suppressed? 'reaper))
+                         (< raw-frame 3360)
+                         (not raw-under-attack?)
+                         (<= raw-enemy-threat-supply 0)
+                         (= (unit-ht-count 'reaper) 0)
                          (facility-slot-open? 'barracks 'barracks)
                          (list 'combat-unit '(train reaper) #t 130.0))]
           [(hellion) (and (facility-slot-open? 'factory 'factory)

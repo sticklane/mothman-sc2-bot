@@ -173,12 +173,15 @@
  interleave-lists
  SC2-PLACEMENT-NEG-COOLDOWN
  SC2-PLACEMENT-POS-CACHE
+ SC2-ADDON-SLOT-BLOCKED-CACHE
+ SC2-TERRAN-5X3-MISS-CACHE
  SC2-TUMOR-PLACEMENT-CACHE
  SC2-PLACEMENT-CACHE-TTL
  SC2-LAST-TUMOR-RPC-LOOP
  SC2-ZERG-TH-MORPH-RESERVE-LOOP
  SC2-WARPGATE-LAST-LOOP
  SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP
+ SC2-GAS-PULL-HYSTERESIS-LATCH
  select-producer-tags-for-unit
  frame0-pro-worker-split-commands
  compute-initial-worker-split-commands
@@ -195,11 +198,14 @@
  reset-typed-command-gate-stats!
  mark-urgent-survival-cmd!
  urgent-survival-cmd?
+ mark-macro-econ-cmd!
+ macro-econ-cmd?
  mark-framing-camera-cmd!
  framing-camera-cmd?
  friendly-unit-on-depot-footprint?
  friendly-unit-requesting-depot-transit?
  wire-cmd-priority-tier
+ coalesce-sc2-raw-commands
  make-wire-apm-governor
  govern-sc2-wire-actions!)
 
@@ -4207,6 +4213,104 @@
             #:when (hash? ae))
         (define ab (hash-ref ae 'ability-id 0))
         (define res (hash-ref ae 'result 0))
+        ;; W17-P0-1-wire: Targeted positive-cache invalidation for ONLY the failed `(bldg, anchor)`
+        ;; entry (NEVER global `hash-clear!` that thrashes unrelated buildings like Gateways/Barracks!);
+        ;; record Terran 5x3 misses for 1-miss 3x3/overflow fallback; mark blocked East add-on slots
+        ;; and release wire nonstack cooldowns on failed add-ons or building morphs!
+        (when (and (not (= res 1))
+                   (let ([ab-sym (sc2-id->ability-symbol ab #f)])
+                     (and ab-sym (string-prefix? (symbol->string ab-sym) "build-"))))
+          (define ab-sym (sc2-id->ability-symbol ab #f))
+          (define utag (hash-ref ae 'unit-tag 0))
+          (define has-utag? (and (exact-integer? utag) (> utag 0)))
+          (define act-u (and has-utag? (findf (lambda (u) (= (sc2-unit-tag u) utag)) units)))
+          (define is-terran-addon-ab? (memv ab '(421 422 454 455 487 488 3682 3683)))
+          (define target-bldgs
+            (cond
+              [(memv ab '(421 422)) '(barracks)]
+              [(memv ab '(454 455)) '(factory)]
+              [(memv ab '(487 488)) '(starport)]
+              [(memv ab '(3682 3683))
+               (if act-u
+                   (list (sc2-id->unit-symbol (sc2-unit-unit-type act-u)))
+                   '(barracks factory starport))]
+              [else
+               (define raw-bldg-str (substring (symbol->string ab-sym) 6))
+               (list (sc2-canonical-structure-sym (string->symbol raw-bldg-str)))]))
+          (define-values (fail-x fail-y)
+            (let ([br (and has-utag? (hash-ref SC2-BUILDER-RESERVATION utag #f))])
+              (cond
+                [(and (list? br) (>= (length br) 4) (real? (third br)) (real? (fourth br)))
+                 (values (exact->inexact (third br)) (exact->inexact (fourth br)))]
+                [act-u
+                 (define ap (sc2-unit-pos act-u))
+                 (values (sc2-point3d-x ap) (sc2-point3d-y ap))]
+                [else (values #f #f)])))
+          (define stale-pos-keys
+            (for/list ([(k v) (in-hash SC2-PLACEMENT-POS-CACHE)]
+                       #:when (and (pair? k)
+                                   (memq (car k) target-bldgs)
+                                   (or (not fail-x)
+                                       (not fail-y)
+                                       (and (pair? v)
+                                            (>= (length v) 2)
+                                            (sc2-point2d? (cadr v))
+                                            (<= (pt-dist fail-x fail-y
+                                                         (sc2-point2d-x (cadr v))
+                                                         (sc2-point2d-y (cadr v)))
+                                                8.0))
+                                       (and (>= (length k) 3)
+                                            (real? (second k))
+                                            (real? (third k))
+                                            (<= (pt-dist fail-x fail-y
+                                                         (exact->inexact (second k))
+                                                         (exact->inexact (third k)))
+                                                (max 16.0
+                                                     (if (and (>= (length k) 4) (real? (fourth k)))
+                                                         (+ (exact->inexact (fourth k)) 2.0)
+                                                         16.0)))))))
+              k))
+          (for ([k (in-list stale-pos-keys)])
+            (hash-remove! SC2-PLACEMENT-POS-CACHE k))
+          (when (memv ab '(321 328 329))
+            (define tb (car target-bldgs))
+            (hash-set! SC2-TERRAN-5X3-MISS-CACHE
+                       (if (and fail-x fail-y)
+                           (list tb (inexact->exact (round fail-x)) (inexact->exact (round fail-y)))
+                           (list tb 'any))
+                       cur-loop))
+          (when is-terran-addon-ab?
+            (when has-utag?
+              (when act-u
+                (define fp (sc2-unit-pos act-u))
+                (hash-set! SC2-ADDON-SLOT-BLOCKED-CACHE
+                           (list utag
+                                 (inexact->exact (round (sc2-point3d-x fp)))
+                                 (inexact->exact (round (sc2-point3d-y fp))))
+                           cur-loop))
+              (for ([k (in-list (for/list ([kk (in-hash-keys SC2-WIRE-NONSTACK-CMD-COOLDOWN)]
+                                           #:when (and (list? kk)
+                                                       (= (length kk) 3)
+                                                       (eq? (first kk) 'wire-addon)
+                                                       (equal? (third kk) utag)))
+                                  kk))])
+                (hash-remove! SC2-WIRE-NONSTACK-CMD-COOLDOWN k)))))
+        ;; W17-P0-2-wire: Failed TownHall/Spire morphs (Lair=1216, Hive=1218, GreaterSpire=1220,
+        ;; Orbital=1516, Planetary=1450) immediately release their wire nonstack cooldown!
+        (when (and (not (= res 1))
+                   (memv ab '(1216 1218 1220 1450 1516)))
+          (define utag (hash-ref ae 'unit-tag 0))
+          (when (and (exact-integer? utag) (> utag 0))
+            (for ([k (in-list (for/list ([kk (in-hash-keys SC2-WIRE-NONSTACK-CMD-COOLDOWN)]
+                                         #:when (and (list? kk)
+                                                     (= (length kk) 3)
+                                                     (or (and (eq? (first kk) 'wire-build-morph)
+                                                              (equal? (third kk) utag))
+                                                         (and (eq? (first kk) 'wire-morph)
+                                                              (list? (third kk))
+                                                              (memv utag (third kk))))))
+                                kk))])
+              (hash-remove! SC2-WIRE-NONSTACK-CMD-COOLDOWN k))))
         (when (and (memv ab SC2-WARP-IN-ABILITY-IDS) (not (= res 1)))
           (define utag (hash-ref ae 'unit-tag 0))
           (cond
@@ -4255,7 +4359,26 @@
 (define SC2-ACTIVE-GAME-INFO (box #f))
 (define SC2-PLACEMENT-NEG-COOLDOWN (make-hash))
 (define SC2-PLACEMENT-POS-CACHE (make-hash))
+(define SC2-ADDON-SLOT-BLOCKED-CACHE (make-hash))
+(define SC2-TERRAN-5X3-MISS-CACHE (make-hash))
 (define SC2-TUMOR-PLACEMENT-CACHE (make-hash))
+
+(define (terran-5x3-miss-active? canon-bldg ax ay cur-loop)
+  (and (memq canon-bldg '(barracks factory starport))
+       (for/or ([(k v) (in-hash SC2-TERRAN-5X3-MISS-CACHE)])
+         (and (pair? k)
+              (eq? (car k) canon-bldg)
+              (exact-integer? v)
+              (>= cur-loop v)
+              (< (- cur-loop v) SC2-PLACEMENT-CACHE-TTL)
+              (or (and (>= (length k) 2) (eq? (second k) 'any))
+                  (and (>= (length k) 3)
+                       (real? (second k))
+                       (real? (third k))
+                       (<= (pt-dist ax ay
+                                    (exact->inexact (second k))
+                                    (exact->inexact (third k)))
+                           16.0)))))))
 (define SC2-LAST-TUMOR-RPC-LOOP (box -9999))
 (define SC2-ZERG-TH-MORPH-RESERVE-LOOP (box #f))
 (define SC2-ENEMY-POS-PURGE-LAST-LOOP (box -9999))
@@ -4285,12 +4408,13 @@
                    dist-score
                    (/ (modulo (sc2-unit-tag u) 1000000) 100000000.0)))))
 
-(define (order-expansions-from-origin solved-bases origin-x origin-y pathing-grid neutral-units)
+(define (order-expansions-from-origin solved-bases origin-x origin-y pathing-grid neutral-units
+                                      #:bfs [pre-bfs #f])
   (define non-main
     (filter (lambda (b)
               (> (pt-dist origin-x origin-y (hash-ref b 'x) (hash-ref b 'y)) 10.0))
             solved-bases))
-  (define bfs (compute-ground-bfs-distances pathing-grid origin-x origin-y neutral-units))
+  (define bfs (or pre-bfs (compute-ground-bfs-distances pathing-grid origin-x origin-y neutral-units)))
   (cond
     [bfs
      (define scored
@@ -4336,6 +4460,19 @@
 (define (urgent-survival-cmd? cmd)
   (and (sc2-raw-unit-command? cmd)
        (eq? (hash-ref SC2-URGENT-SURVIVAL-CMDS cmd #f) #t)))
+
+;; W18-P0-2-wire: Weak-key tag table for critical macro-economy recovery commands (gas saturation/
+;; resaturation, idle-worker recovery, offline-base evacuation, and gas-float mineral rebalance),
+;; elevating them from routine P3 (`3666`) to Tier `P1` in `govern-sc2-wire-actions!` so continuous
+;; `P2` combat micro NEVER starves gas resaturation or worker recovery!
+(define SC2-MACRO-ECON-CMDS (make-weak-hasheq))
+(define (mark-macro-econ-cmd! cmd)
+  (when (sc2-raw-unit-command? cmd)
+    (hash-set! SC2-MACRO-ECON-CMDS cmd #t))
+  cmd)
+(define (macro-econ-cmd? cmd)
+  (and (sc2-raw-unit-command? cmd)
+       (eq? (hash-ref SC2-MACRO-ECON-CMDS cmd #f) #t)))
 
 (define SC2-FRAMING-CAMERA-CMDS (make-weak-hasheq))
 (define (mark-framing-camera-cmd! cmd [jump-dist #f])
@@ -4413,6 +4550,8 @@
     (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999)
     (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
     (hash-clear! SC2-PLACEMENT-POS-CACHE)
+    (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
+    (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
     (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
     (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
     (set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP #f)
@@ -4487,14 +4626,18 @@
              (or (not (unbox SC2-HOME-BASE-ANCHOR))
                  (<= cur-loop 20)))
     (define p0 (sc2-unit-pos (first raw-my-townhalls)))
-    (set-box! SC2-HOME-BASE-ANCHOR (cons (sc2-point3d-x p0) (sc2-point3d-y p0)))
+    (define new-anchor (cons (sc2-point3d-x p0) (sc2-point3d-y p0)))
+    (define old-anchor (unbox SC2-HOME-BASE-ANCHOR))
+    (set-box! SC2-HOME-BASE-ANCHOR new-anchor)
     (set-box! SC2-CLEARED-ENEMY-BASES '())
     (set-box! SC2-ENEMY-MAIN-CLEARED-AT #f)
     (set-box! SC2-EVER-SAW-MINERALS? #f)
     (set-box! SC2-WIRE-HOLD-POSTURE-STATE #f)
     (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE #f)
     (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
-    (set-box! SC2-TERRITORY-FIELD-CACHE #f)
+    (when (or (not old-anchor)
+              (> (pt-dist (car old-anchor) (cdr old-anchor) (car new-anchor) (cdr new-anchor)) 2.0))
+      (set-box! SC2-TERRITORY-FIELD-CACHE #f))
     (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999))
   (when (not (null? mineral-fields))
     (set-box! SC2-EVER-SAW-MINERALS? #t))
@@ -4616,17 +4759,10 @@
   (define ux (/ dx d-norm))
   (define uy (/ dy d-norm))
   (define path-grid (and (sc2-game-info? game-info) (sc2-game-info-pathing-grid game-info)))
-  (define ordered-home-exps
-    (if defer-expansions?
-        '()
-        (order-expansions-from-origin solved-bases base-x base-y path-grid neutral-all)))
-  (define ordered-enemy-exps
-    (if defer-expansions?
-        '()
-        (order-expansions-from-origin solved-bases enemy-x enemy-y path-grid neutral-all)))
 
-  ;; W15-P0-2-wire: One-time match-start map-symmetry inference + dual Ground-BFS Voronoi territory
-  ;; fields (`our-ground-bfs`, `enemy-ground-bfs`), cached in `SC2-TERRITORY-FIELD-CACHE` (`0ms`/step!).
+  ;; W15-P0-2-wire / W16-P1-2-wire: Compute/lookup match-start map-symmetry & dual Ground-BFS
+  ;; BEFORE `order-expansions-from-origin` so expansion ordering reuses the cached match-start BFS
+  ;; in O(1) (`0ms`/step, zero redundant 200x200 Dial BFS runs as mineral patches mine out!).
   (define-values (map-symmetry-kind our-ground-bfs enemy-ground-bfs)
     (let* ([grid-sig (and (sc2-image-grid? path-grid) (image-grid-signature path-grid))]
            [base-key (list grid-sig
@@ -4697,6 +4833,16 @@
             (when (not (sc2-image-grid? path-grid))
               (set-box! SC2-TERRITORY-FIELD-CACHE (list base-key has-pads? sym-k #f #f)))
             (values sym-k #f #f)])])))
+  (define ordered-home-exps
+    (if defer-expansions?
+        '()
+        (order-expansions-from-origin solved-bases base-x base-y path-grid neutral-all
+                                      #:bfs our-ground-bfs)))
+  (define ordered-enemy-exps
+    (if defer-expansions?
+        '()
+        (order-expansions-from-origin solved-bases enemy-x enemy-y path-grid neutral-all
+                                      #:bfs enemy-ground-bfs)))
   (define expansion-candidates
     (for/list ([b (in-list ordered-home-exps)])
       (cons (hash-ref b 'x) (hash-ref b 'y))))
@@ -5503,6 +5649,15 @@
         'power-placement-failed?
         (let ([fl (unbox SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP)])
           (and (>= fl 0) (<= (- cur-loop fl) 96)))
+        'addon-blocked-facility-ids
+        (remove-duplicates
+         (for/list ([(k bloop) (in-hash SC2-ADDON-SLOT-BLOCKED-CACHE)]
+                    #:when (and (list? k)
+                                (= (length k) 3)
+                                (exact-integer? bloop)
+                                (>= cur-loop bloop)
+                                (< (- cur-loop bloop) 48)))
+           (first k)))
         '__sanitized? #t))
 
 (define (sc2-observation->frame-state-sexp obs
@@ -6026,31 +6181,53 @@
   (cond
     [(not (sc2-image-grid? path-grid)) #f]
     [else
-     (define neutrals
-       (filter (lambda (u) (and (sc2-unit? u) (= (sc2-unit-alliance u) 3)))
-               existing-units))
-     (define neutral-sig
-       (for/fold ([h (length neutrals)]) ([u (in-list neutrals)])
-         (define p (sc2-unit-pos u))
-         (bitwise-xor (* h 31)
-                      (sc2-unit-tag u)
-                      (exact-round (* 2.0 (sc2-point3d-x p)))
-                      (exact-round (* 2.0 (sc2-point3d-y p))))))
-     (define subkey (list (exact-round ref-x) (exact-round ref-y) neutral-sig))
-     (define cached (unbox SC2-CACHED-GROUND-BFS))
+     ;; W16-P1-2-wire: Fast O(1) reuse of match-start `our-ground-bfs` when `(ref-x, ref-y)` is
+     ;; within 2.5 tiles of our cached home anchor, AND restrict neutral blocker signature to real
+     ;; pathing blockers only (never busting BFS cache whenever a map critter walks 0.5 tiles!).
+     (define terr-cached (unbox SC2-TERRITORY-FIELD-CACHE))
+     (define terr-bfs-hit
+       (and (list? terr-cached)
+            (= (length terr-cached) 5)
+            (let* ([bk (first terr-cached)]
+                   [obfs (fourth terr-cached)])
+              (and (list? bk)
+                   (= (length bk) 5)
+                   (procedure? obfs)
+                   (equal? (first bk) (image-grid-signature path-grid))
+                   (<= (pt-dist ref-x ref-y (second bk) (third bk)) 2.5)
+                   (< (obfs ref-x ref-y 4) +inf.0)
+                   obfs))))
      (cond
-       [(and (pair? cached)
-             (eq? (car (car cached)) game-info)
-             (equal? (cdr (car cached)) subkey))
-        (cdr cached)]
+       [terr-bfs-hit terr-bfs-hit]
        [else
-        (define bfs0 (compute-ground-bfs-distances path-grid ref-x ref-y neutrals))
-        (define res
-          (and bfs0
-               (< (bfs0 ref-x ref-y 4) +inf.0)
-               bfs0))
-        (set-box! SC2-CACHED-GROUND-BFS (cons (cons game-info subkey) res))
-        res])]))
+        (define neutrals
+          (filter (lambda (u)
+                    (and (sc2-unit? u)
+                         (= (sc2-unit-alliance u) 3)
+                         (neutral-unit-is-pathing-blocker? u)))
+                  existing-units))
+        (define neutral-sig
+          (for/fold ([h (length neutrals)]) ([u (in-list neutrals)])
+            (define p (sc2-unit-pos u))
+            (bitwise-xor (* h 31)
+                         (sc2-unit-tag u)
+                         (exact-round (* 2.0 (sc2-point3d-x p)))
+                         (exact-round (* 2.0 (sc2-point3d-y p))))))
+        (define subkey (list (exact-round ref-x) (exact-round ref-y) neutral-sig))
+        (define cached (unbox SC2-CACHED-GROUND-BFS))
+        (cond
+          [(and (pair? cached)
+                (eq? (car (car cached)) game-info)
+                (equal? (cdr (car cached)) subkey))
+           (cdr cached)]
+          [else
+           (define bfs0 (compute-ground-bfs-distances path-grid ref-x ref-y neutrals))
+           (define res
+             (and bfs0
+                  (< (bfs0 ref-x ref-y 4) +inf.0)
+                  bfs0))
+           (set-box! SC2-CACHED-GROUND-BFS (cons (cons game-info subkey) res))
+           res])])]))
 
 (define (dedup-point2ds pts)
   (define seen (make-hash))
@@ -6080,7 +6257,8 @@
                                    #:bldg-sym [bldg-sym #f]
                                    #:game-info [game-info #f]
                                    #:check-bfs [pre-check-bfs 'auto]
-                                   #:layout-safety-ok? [pre-layout-safety-ok? 'auto])
+                                   #:layout-safety-ok? [pre-layout-safety-ok? 'auto]
+                                   #:skip-terran-addon-reserve? [skip-terran-addon-reserve? #f])
   (define canon-bldg (and bldg-sym (sc2-canonical-structure-sym bldg-sym)))
   (define-values (cand-hw cand-hh)
     (sc2-structure-half-dims (or canon-bldg 'barracks)))
@@ -6139,6 +6317,7 @@
   (define in-transit-terran-addon-pts '())
   (define terran-addon-pts '())
   (define blocking-circles '())
+  (define blocking-aabbs '())
   (define local-blocking-res '())
   (for ([u (in-list existing-units)])
     (define is-struct? (sc2-unit-is-structure? u))
@@ -6170,7 +6349,19 @@
             (max 2.0 (+ 0.85 (max 0.5 (sc2-unit-radius u))))
             (+ min-spacing (max 0.5 (sc2-unit-radius u)))))
       (set! blocking-circles (cons (vector px py (sqr req-d)) blocking-circles))
+      (when (and ws-active-placement? (not (sc2-unit-is-flying u)))
+        (define usym (sc2-id->unit-symbol (sc2-unit-unit-type u) 'unknown))
+        (define-values (u-hw u-hh)
+          (cond
+            [(sc2-unit-is-mineral-field? u) (values 1.0 0.5)]
+            [(sc2-unit-is-vespene-geyser? u) (values 1.5 1.5)]
+            [(memq usym '(creep-tumor creep-tumor-burrowed creep-tumor-queen)) (values 0.5 0.5)]
+            [else (sc2-structure-half-dims usym)]))
+        (set! blocking-aabbs
+              (cons (vector px py (- (+ cand-hw u-hw) 0.05) (- (+ cand-hh u-hh) 0.05))
+                    blocking-aabbs)))
       (when (and is-struct?
+                 (not skip-terran-addon-reserve?)
                  (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
                        '(barracks factory starport)))
         (set! terran-addon-pts
@@ -6187,7 +6378,8 @@
             (set! in-transit-build-pts
                   (cons (sc2-point2d (any-point-x tp) (any-point-y tp))
                         in-transit-build-pts)))
-          (when (memv ab-id '(321 328 329))
+          (when (and (not skip-terran-addon-reserve?)
+                     (memv ab-id '(321 328 329)))
             (set! in-transit-terran-addon-pts
                   (cons (sc2-point2d (+ (any-point-x tp) SC2-TERRAN-ADDON-OFFSET-X)
                                      (+ (any-point-y tp) SC2-TERRAN-ADDON-OFFSET-Y))
@@ -6199,7 +6391,8 @@
                                     terran-addon-pts))]
                #:when (any-point? rp))
       (cons (any-point-x rp) (any-point-y rp))))
-  (define reserved-dist-sq (sqr (max 2.5 min-spacing)))
+  (define reserved-dist-sq
+    (sqr (if (< min-spacing 2.0) (max 1.5 min-spacing) (max 2.5 min-spacing))))
   (define exp-pad-xys
     (if is-townhall-build?
         '()
@@ -6228,7 +6421,10 @@
            (> (+ (sqr (- cx (car rp))) (sqr (- cy (cdr rp)))) reserved-dist-sq))
          (for/and ([bc (in-list blocking-circles)])
            (> (+ (sqr (- cx (vector-ref bc 0))) (sqr (- cy (vector-ref bc 1))))
-              (vector-ref bc 2)))))
+              (vector-ref bc 2)))
+         (for/and ([ba (in-list blocking-aabbs)])
+           (not (and (< (abs (- cx (vector-ref ba 0))) (vector-ref ba 2))
+                     (< (abs (- cy (vector-ref ba 1))) (vector-ref ba 3)))))))
   (define (clear-spot? cx cy)
     (and (or (not check-bfs)
              (< (check-bfs cx cy 4) +inf.0))
@@ -6338,7 +6534,9 @@
                                           #:game-info [game-info #f]
                                           #:power-sources [power-sources '()]
                                           #:rpc-budget [rpc-budget #f]
-                                          #:cur-loop [cur-loop-arg #f])
+                                          #:cur-loop [cur-loop-arg #f]
+                                          #:require-addon-clear? [require-addon-clear? #f]
+                                          #:prefer-3x3-fallback? [prefer-3x3-fallback? #f])
   ;; For Terran production facilities (Barracks=321, Factory=328, Starport=329), also filter out
   ;; candidates whose East (+X) add-on footprint at (cx + 2.5, cy - 0.5) collides with structures or reserved AABBs,
   ;; EXCEPT when sealing the main-ramp wall with the 1st Barracks (`existing-rax == 0`), where an East-facing
@@ -6364,15 +6562,26 @@
         (unbox SC2-WARPGATE-LAST-LOOP)))
   (define neg-cd-key
     (and ws-active? canon-bldg
-         (list canon-bldg
-               (inexact->exact (round anchor-x))
-               (inexact->exact (round anchor-y)))))
+         (if require-addon-clear?
+             (list canon-bldg
+                   (inexact->exact (round anchor-x))
+                   (inexact->exact (round anchor-y))
+                   'addon-req)
+             (list canon-bldg
+                   (inexact->exact (round anchor-x))
+                   (inexact->exact (round anchor-y))))))
   (define step-fail-key
     (and ws-active? canon-bldg
-         (list canon-bldg
-               (inexact->exact (round anchor-x))
-               (inexact->exact (round anchor-y))
-               (inexact->exact (round max-radius)))))
+         (if require-addon-clear?
+             (list canon-bldg
+                   (inexact->exact (round anchor-x))
+                   (inexact->exact (round anchor-y))
+                   (inexact->exact (round max-radius))
+                   'addon-req)
+             (list canon-bldg
+                   (inexact->exact (round anchor-x))
+                   (inexact->exact (round anchor-y))
+                   (inexact->exact (round max-radius))))))
   (define pos-cache-key step-fail-key)
   (define cur-struct-sig
     (and (or ws-active? step-fail-key)
@@ -6394,22 +6603,52 @@
              (not (equal? cur-struct-sig (unbox SC2-PLACEMENT-CACHE-SIG))))
     (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
     (hash-clear! SC2-PLACEMENT-POS-CACHE)
+    (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
+    (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
     (hash-clear! SC2-STEP-PLACEMENT-FAIL-CACHE)
     (set-box! SC2-PLACEMENT-CACHE-SIG cur-struct-sig))
   (when (not (= neg-cd-cur-loop (unbox SC2-STEP-PLACEMENT-FAIL-LOOP)))
     (hash-clear! SC2-STEP-PLACEMENT-FAIL-CACHE)
     (set-box! SC2-STEP-PLACEMENT-FAIL-LOOP neg-cd-cur-loop))
-  (define emergency-rush-bldg?
+  ;; W17-P0-1-wire: Keep fast 12-loop recovery for supply (`pylon`/`supply-depot`) and early-rush
+  ;; static defense (`< 5400f` / `< 4:00`); restore `>= 48`-loop TTL for Terran production
+  ;; (`barracks`/`factory`/`starport`) and `64`-loop TTL for late-game static defense (`photon-cannon`
+  ;; / `bunker` / etc.) so crowded late-game bases never thrash spiral+RPC every 3 steps!
+  (define emergency-supply-bldg?
+    (and canon-bldg (memq canon-bldg '(pylon supply-depot))))
+  (define static-def-bldg?
     (and canon-bldg
-         (memq canon-bldg
-               '(pylon supply-depot bunker shield-battery photon-cannon spine-crawler spore-crawler))))
-  (define neg-cd-ttl (if emergency-rush-bldg? 12 SC2-PLACEMENT-CACHE-TTL))
+         (memq canon-bldg '(bunker shield-battery photon-cannon spine-crawler spore-crawler))))
+  (define emergency-rush-bldg?
+    (or emergency-supply-bldg?
+        (and static-def-bldg? (< neg-cd-cur-loop 5400))))
+  (define terran-prod-bldg?
+    (and canon-bldg (memq canon-bldg '(barracks factory starport))))
+  (define neg-cd-ttl
+    (cond
+      [emergency-rush-bldg? 12]
+      [terran-prod-bldg? 48]
+      [else SC2-PLACEMENT-CACHE-TTL]))
+  (define late-all-pylons-neg-key
+    (and ws-active?
+         canon-bldg
+         static-def-bldg?
+         (>= neg-cd-cur-loop 5400)
+         (memq canon-bldg '(photon-cannon shield-battery))
+         (list? anchor-points)
+         (>= (length anchor-points) 2)
+         (list canon-bldg 'all-pylons)))
   (define neg-cd-hit?
     (or (and step-fail-key
              (hash-has-key? SC2-STEP-PLACEMENT-FAIL-CACHE step-fail-key))
         (and ws-active?
              neg-cd-key
              (let ([exp-loop (hash-ref SC2-PLACEMENT-NEG-COOLDOWN neg-cd-key #f)])
+               (and exp-loop
+                    (>= neg-cd-cur-loop exp-loop)
+                    (< (- neg-cd-cur-loop exp-loop) neg-cd-ttl))))
+        (and late-all-pylons-neg-key
+             (let ([exp-loop (hash-ref SC2-PLACEMENT-NEG-COOLDOWN late-all-pylons-neg-key #f)])
                (and exp-loop
                     (>= neg-cd-cur-loop exp-loop)
                     (< (- neg-cd-cur-loop exp-loop) neg-cd-ttl))))))
@@ -6505,31 +6744,35 @@
                (+ wall-ref-y SC2-TERRAN-ADDON-OFFSET-Y)
                1.0 1.0))))
   (define first-rax-allow-wall-3x3?
-    (and first-rax?
+    (and (not require-addon-clear?)
+         first-rax?
          (or (and matched-wall-slot #t)
              east-addon-overhangs-terrain?
              (> (pt-dist wall-ref-x wall-ref-y
                          (car safe-base-anchor) (cdr safe-base-anchor))
                 6.0))))
 
-  (define (filter-addon-clear c-list)
+  (define (filter-addon-clear c-list #:ignore-reserved-aabbs? [ignore-reserved-aabbs? #f])
+    (define addon-pad-clr (if ignore-reserved-aabbs? tight-pad-clearance 4.0))
     (filter (lambda (pt)
               (define ax (+ (sc2-point2d-x pt) SC2-TERRAN-ADDON-OFFSET-X))
               (define ay (+ (sc2-point2d-y pt) SC2-TERRAN-ADDON-OFFSET-Y))
               (and (<= ax SC2-MAP-PLAYABLE-MAX-COORD)
                    (>= ay SC2-MAP-PLAYABLE-MIN-COORD)
                    (static-footprint-placement-ok? pl-grid ax ay 1.0 1.0)
-                   (for/and ([b (in-list eff-reserved-aabbs)]
-                             #:when (reserved-aabb? b))
-                     (not (aabb-overlaps? ax ay 1.0 1.0 b)))
+                   (or ignore-reserved-aabbs?
+                       (for/and ([b (in-list eff-reserved-aabbs)]
+                                 #:when (reserved-aabb? b))
+                         (not (aabb-overlaps? ax ay 1.0 1.0 b))))
                    (for/and ([ep (in-list expansion-pads)])
                      (define px (if (pair? ep) (car ep) (any-point-x ep)))
                      (define py (if (pair? ep) (cdr ep) (any-point-y ep)))
-                     (>= (max (abs (- ax px)) (abs (- ay py))) 4.0))
+                     (>= (max (abs (- ax px)) (abs (- ay py))) addon-pad-clr))
                    (for/and ([u (in-list existing-units)]
-                             #:when (or (sc2-unit-is-structure? u)
-                                        (sc2-unit-is-mineral-field? u)
-                                        (sc2-unit-is-vespene-geyser? u)))
+                             #:when (and (not (sc2-unit-is-flying u))
+                                         (or (sc2-unit-is-structure? u)
+                                             (sc2-unit-is-mineral-field? u)
+                                             (sc2-unit-is-vespene-geyser? u))))
                      (define p (sc2-unit-pos u))
                      (> (pt-dist ax ay (sc2-point3d-x p) (sc2-point3d-y p))
                         (+ SC2-ADDON-FOOTPRINT-HALF-SIZE (max 0.5 (sc2-unit-radius u)))))))
@@ -6622,9 +6865,10 @@
                            (> (pt-dist cx cy (any-point-x tp) (any-point-y tp)) res-dist)))]
                     [else #t]))
                 (or (not requires-pylon-power?) (pt-in-completed-pylon-power? cx cy))
-                (or (not needs-terran-addon-clearance?)
-                    first-rax-allow-wall-3x3?
-                    (pair? (filter-addon-clear (list cpt))))))))
+                ;; W17-P0-1-wire: Preserve cached `3x3` Terran fallback spots unless `require-addon-clear?`
+                ;; is explicitly required (add-on relocation), eliminating needless cache-miss thrashing!
+                (or (not require-addon-clear?)
+                    (pair? (filter-addon-clear (list cpt) #:ignore-reserved-aabbs? #t)))))))
   (define pos-cache-hit
     (and ws-active?
          pos-cache-key
@@ -6741,9 +6985,14 @@
                                           (car shared-base-ref) (cdr shared-base-ref)
                                           shared-check-bfs)))
 
-  (define spiral-eval-budget (box (if ws-active? 480 600)))
+  ;; W16-P1-2-wire: Cap primary BFS-checked spiral eval budget (`160` vs `480`) and per-anchor limit under
+  ;; `ws-active?` so crowded mains never burn 35-43ms in redundant `still-connected-to-exit?` sweeps while
+  ;; still filling all 48/64 single-RPC slots via fast `relaxed-safety-cands` + `near-base-emergency-cands`.
+  (define spiral-eval-budget (box (if ws-active? 160 600)))
   (define primary-cand-limit
-    (if ws-active? 20 (if (or first-rax-allow-wall-3x3? needs-terran-addon-clearance?) 8 2)))
+    (if ws-active?
+        (min 20 (max 8 (quotient 36 (max 1 (length anchors)))))
+        (if (or first-rax-allow-wall-3x3? needs-terran-addon-clearance?) 8 2)))
   (define spiral-cands
     (let ([all-pts
            (interleave-lists
@@ -6754,7 +7003,7 @@
                                          #:max-radius max-radius
                                          #:step step
                                          #:limit primary-cand-limit
-                                         #:max-evals (if ws-active? 160 450)
+                                         #:max-evals (if ws-active? 64 450)
                                          #:eval-budget spiral-eval-budget
                                          #:extra-reserved-points extra-reserved-points
                                          #:ws-active-placement? ws-active?
@@ -6811,20 +7060,34 @@
     (reverse acc))
 
   ;; Relaxed safety fallback: preserves terrain `placement_grid`, relaxes BFS/layout-safety (and
-  ;; AABBs for Starport/Bunker/MissileTurret/GhostAcademy) when strict checks reject all spots.
+  ;; AABBs for Terran production, Bunker/MissileTurret/GhostAcademy) when strict checks fail;
+  ;; widens Terran production fallback rings to `22.0` so crowded mains never deadlock!
   (define (relaxed-safety-cands)
     (define relax-aabbs?
-      (memq canon-bldg '(starport bunker missile-turret ghost-academy)))
+      (or needs-terran-addon-clearance?
+          (memq canon-bldg '(bunker missile-turret ghost-academy))))
+    (define rel-rad
+      (cond
+        [(and requires-pylon-power? has-completed-pylon?) 6.5]
+        [needs-terran-addon-clearance? (max 22.0 max-radius)]
+        [else (max 18.0 max-radius)]))
+    (define rel-spacing
+      (if (or needs-terran-addon-clearance?
+              (memq canon-bldg '(bunker missile-turret ghost-academy)))
+          (min 1.5 min-spacing)
+          min-spacing))
+    (define rel-pad-clr
+      (if (or is-zerg-creep-bldg? needs-terran-addon-clearance?)
+          tight-pad-clearance
+          4.5))
     (define rel-budget (box 260))
     (define raw-rel
       (interleave-lists
        (for/list ([ap (in-list anchors)]
                   #:break (<= (unbox rel-budget) 0))
          (collect-spiral-candidates (car ap) (cdr ap) existing-units
-                                    #:min-spacing (if (memq canon-bldg '(bunker missile-turret ghost-academy))
-                                                      (min 1.5 min-spacing)
-                                                      min-spacing)
-                                    #:max-radius (max 18.0 max-radius)
+                                    #:min-spacing rel-spacing
+                                    #:max-radius rel-rad
                                     #:step 1.0
                                     #:limit (if ws-active? 16 4)
                                     #:max-evals 140
@@ -6833,7 +7096,7 @@
                                     #:ws-active-placement? ws-active?
                                     #:reserved-aabbs (if relax-aabbs? '() eff-reserved-aabbs)
                                     #:expansion-pads expansion-pads
-                                    #:min-pad-clearance (if is-zerg-creep-bldg? tight-pad-clearance 4.5)
+                                    #:min-pad-clearance rel-pad-clr
                                     #:bldg-sym canon-bldg
                                     #:game-info game-info
                                     #:check-bfs #f
@@ -6886,23 +7149,80 @@
       (if (and emergency-rush-bldg? (not (and requires-pylon-power? has-completed-pylon?)))
           (take (compute-inmain-safe-anchors safe-base-anchor) 3)
           '()))
+    ;; W16-P1-2-wire: Extract ALL grounded friendly TownHalls (main/natural/3rd, uncontested & least-crowded
+    ;; first) so crowded-main Terran Barracks/Factory/Starport ALWAYS have overflow `5x3`/`3x3` anchors!
+    (define th-em-anchors
+      (if needs-terran-addon-clearance?
+          (let* ([ths
+                  (for/list ([u (in-list existing-units)]
+                             #:when (and (= (sc2-unit-alliance u) 1)
+                                         (not (= (sc2-unit-display-type u) 4))
+                                         (sc2-unit-is-townhall? u)
+                                         (not (sc2-unit-is-flying u))
+                                         (>= (sc2-unit-build-progress u) 0.50)))
+                    (define p (sc2-unit-pos u))
+                    (cons (sc2-point3d-x p) (sc2-point3d-y p)))]
+                 [enemy-gnd
+                  (for/list ([u (in-list existing-units)]
+                             #:when (and (= (sc2-unit-alliance u) 4)
+                                         (not (= (sc2-unit-display-type u) 4))
+                                         (not (sc2-unit-is-flying u))
+                                         (not (sc2-unit-is-structure? u))))
+                    (define p (sc2-unit-pos u))
+                    (cons (sc2-point3d-x p) (sc2-point3d-y p)))]
+                 [ally-structs
+                  (for/list ([u (in-list existing-units)]
+                             #:when (and (= (sc2-unit-alliance u) 1)
+                                         (not (= (sc2-unit-display-type u) 4))
+                                         (sc2-unit-is-structure? u)
+                                         (not (sc2-unit-is-flying u))))
+                    (define p (sc2-unit-pos u))
+                    (cons (sc2-point3d-x p) (sc2-point3d-y p)))]
+                 [scored
+                  (for/list ([tp (in-list ths)])
+                    (define cont?
+                      (ormap (lambda (ep) (<= (pt-dist (car tp) (cdr tp) (car ep) (cdr ep)) 10.0))
+                             enemy-gnd))
+                    (define crowd
+                      (count (lambda (sp) (<= (pt-dist (car tp) (cdr tp) (car sp) (cdr sp)) 12.0))
+                             ally-structs))
+                    (list tp (if cont? 1 0) crowd))])
+            (map first
+                 (sort scored
+                       (lambda (a b)
+                         (if (= (second a) (second b))
+                             (< (third a) (third b))
+                             (< (second a) (second b)))))))
+          '()))
     (define em-anchors
-      (remove-duplicates
-       (cond
-         [(null? anchors) (append inmain-em-pts (list safe-base-anchor))]
-         [emergency-rush-bldg? (append inmain-em-pts anchors (list safe-base-anchor))]
-         [else anchors])))
+      (let* ([raw
+              (remove-duplicates
+               (cond
+                 [(null? anchors) (append inmain-em-pts th-em-anchors (list safe-base-anchor))]
+                 [needs-terran-addon-clearance?
+                  (append th-em-anchors anchors (list safe-base-anchor))]
+                 [emergency-rush-bldg?
+                  (append inmain-em-pts anchors (list safe-base-anchor))]
+                 [else anchors]))]
+             [em-cap (if needs-terran-addon-clearance? 5 12)])
+        (if (> (length raw) em-cap) (take raw em-cap) raw)))
     (define em-rad
       (cond
         [(and requires-pylon-power? has-completed-pylon?) 6.5]
         [is-zerg-creep-bldg? 8.5]
+        [needs-terran-addon-clearance? 22.0]
         [else 18.0]))
     (define em-spacing
-      (if is-zerg-creep-bldg?
-          (min 1.15 min-spacing)
-          (min 2.0 min-spacing)))
+      (cond
+        [is-zerg-creep-bldg? (min 1.15 min-spacing)]
+        [needs-terran-addon-clearance? (min 1.25 min-spacing)]
+        [else (min 2.0 min-spacing)]))
+    (define em-pad-clr
+      (if (or is-zerg-creep-bldg? needs-terran-addon-clearance?)
+          tight-pad-clearance
+          4.5))
     (define (collect-em gi)
-      (define em-budget (box 260))
+      (define em-budget (box 300))
       (define raw-em
         (interleave-lists
          (for/list ([ap (in-list em-anchors)]
@@ -6918,12 +7238,14 @@
                                       #:ws-active-placement? ws-active?
                                       #:reserved-aabbs '()
                                       #:expansion-pads expansion-pads
-                                      #:min-pad-clearance (if is-zerg-creep-bldg? tight-pad-clearance 4.5)
+                                      #:min-pad-clearance em-pad-clr
                                       #:bldg-sym canon-bldg
                                       #:game-info gi
                                       #:check-bfs #f
-                                      #:layout-safety-ok? #f))))
-      (dedup-point2ds (take raw-em (min 40 (length raw-em)))))
+                                      #:layout-safety-ok? #f
+                                      #:skip-terran-addon-reserve? (and needs-terran-addon-clearance?
+                                                                        (not require-addon-clear?))))))
+      (dedup-point2ds (take raw-em (min 48 (length raw-em)))))
     ;; W12-P0-3-wire: Preserve `game-info` (`pl-grid`) first so emergency batches only query buildable
     ;; ground (never cliffs/void); only drop `game-info` if `pl-grid` yielded zero spots!
     (define grid-em (if game-info (collect-em game-info) '()))
@@ -7016,60 +7338,98 @@
          [needs-terran-addon-clearance?
           ;; Dual QueryPlacement: verify both the 3x3 facility at (cx, cy) AND a 2x2 Supply Depot (319)
           ;; at the East (+X) add-on slot (cx + 2.5, cy - 0.5) in ONE single batched RPC!
-          (define rel-pts
-            (let* ([r (relaxed-safety-cands)]
-                   [ac (filter-addon-clear r)])
-              (if (pair? ac) (append ac r) r)))
-          (define em-pts
-            (let* ([e (near-base-emergency-cands)]
-                   [ac (filter-addon-clear e)])
-              (if (pair? ac) (append ac e) e)))
-          (define unified-dual
-            (merge-priority-batches
-             (list (cons cands 24)
-                   (cons rel-pts 10)
-                   (cons em-pts 40))
-             40))
-          (define-values (cands-q q-results) (query-dual-batch unified-dual))
+          ;; W17-P0-1-wire: After 1 `5x3` miss (`SC2-TERRAN-5X3-MISS-CACHE`, cleared on structure-sig
+          ;; change), immediately fall back to a 64-slot pure `3x3` single-query batch prioritizing
+          ;; least-crowded overflow bases (`th-em-anchors`) instead of stalling in `5x3` retries!
+          ;; Strictly enforces `both-valid-pt` when `require-addon-clear?` is `#t` (add-on relocation).
+          (define use-fast-3x3-fallback?
+            (and (not require-addon-clear?)
+                 (not first-rax-allow-wall-3x3?)
+                 (or prefer-3x3-fallback?
+                     (terran-5x3-miss-active? canon-bldg anchor-x anchor-y neg-cd-cur-loop))))
           (cond
-            [(null? cands-q) #f]
-            [(null? q-results) (first cands-q)]
-            [(>= (length q-results) (* 2 (length cands-q)))
-             (define wall-seal-pt
-               (and first-rax-allow-wall-3x3?
-                    (let ([valid-wall-pts
-                           (for/list ([pt (in-list cands-q)]
-                                      [idx (in-naturals 0)]
-                                      #:when (and (<= (pt-dist wall-ref-x wall-ref-y
-                                                               (sc2-point2d-x pt) (sc2-point2d-y pt))
-                                                      2.55)
-                                                  (= (list-ref q-results (* 2 idx)) 1)))
-                             (cons pt (= (list-ref q-results (+ (* 2 idx) 1)) 1)))])
-                      (and (not (null? valid-wall-pts))
-                           (car (argmin (lambda (entry)
-                                          (define pt (car entry))
-                                          (define addon-ok? (cdr entry))
-                                          (- (* 10.0 (pt-dist wall-ref-x wall-ref-y
-                                                              (sc2-point2d-x pt) (sc2-point2d-y pt)))
-                                             (if addon-ok? 0.25 0.0)))
-                                        valid-wall-pts))))))
-             (define both-valid-pt
-               (for/first ([pt (in-list cands-q)]
-                           [idx (in-naturals 0)]
-                           #:when (and (= (list-ref q-results (* 2 idx)) 1)
-                                       (= (list-ref q-results (+ (* 2 idx) 1)) 1)))
-                 pt))
-             (define main-valid-pt
-               (for/first ([pt (in-list cands-q)]
-                           [idx (in-naturals 0)]
-                           #:when (= (list-ref q-results (* 2 idx)) 1))
-                 pt))
-             (or wall-seal-pt both-valid-pt main-valid-pt)]
+            [use-fast-3x3-fallback?
+             (define em-raw (near-base-emergency-cands))
+             (define rel-raw (relaxed-safety-cands))
+             (define unified-3x3
+               (merge-priority-batches
+                (list (cons em-raw 36)
+                      (cons rel-raw 16)
+                      (cons raw-cands 64))
+                64))
+             (query-single-batch unified-3x3)]
             [else
-             (for/first ([pt (in-list cands-q)]
-                         [res (in-list q-results)]
-                         #:when (= res 1))
-               pt)])]
+             (define rel-raw (relaxed-safety-cands))
+             (define rel-pts
+               (let ([ac (filter-addon-clear rel-raw #:ignore-reserved-aabbs? #t)])
+                 (if (pair? ac) (append ac rel-raw) rel-raw)))
+             (define em-raw (near-base-emergency-cands))
+             (define em-ac (filter-addon-clear em-raw #:ignore-reserved-aabbs? #t))
+             (define unified-dual
+               (merge-priority-batches
+                (list (cons cands 20)
+                      (cons rel-pts 10)
+                      (cons em-ac 10)
+                      (cons em-raw 48))
+                48))
+             (define-values (cands-q q-results) (query-dual-batch unified-dual))
+             (define (record-5x3-miss!)
+               (when (and canon-bldg (not require-addon-clear?))
+                 (hash-set! SC2-TERRAN-5X3-MISS-CACHE
+                            (list canon-bldg
+                                  (inexact->exact (round anchor-x))
+                                  (inexact->exact (round anchor-y)))
+                            neg-cd-cur-loop)))
+             (cond
+               [(null? cands-q) #f]
+               [(null? q-results) (first cands-q)]
+               [(>= (length q-results) (* 2 (length cands-q)))
+                (define wall-seal-pt
+                  (and first-rax-allow-wall-3x3?
+                       (let ([valid-wall-pts
+                              (for/list ([pt (in-list cands-q)]
+                                         [idx (in-naturals 0)]
+                                         #:when (and (<= (pt-dist wall-ref-x wall-ref-y
+                                                                  (sc2-point2d-x pt) (sc2-point2d-y pt))
+                                                         2.55)
+                                                     (= (list-ref q-results (* 2 idx)) 1)))
+                                (cons pt (= (list-ref q-results (+ (* 2 idx) 1)) 1)))])
+                         (and (not (null? valid-wall-pts))
+                              (car (argmin (lambda (entry)
+                                             (define pt (car entry))
+                                             (define addon-ok? (cdr entry))
+                                             (- (* 10.0 (pt-dist wall-ref-x wall-ref-y
+                                                                 (sc2-point2d-x pt) (sc2-point2d-y pt)))
+                                                (if addon-ok? 0.25 0.0)))
+                                           valid-wall-pts))))))
+                (define both-valid-pt
+                  (for/first ([pt (in-list cands-q)]
+                              [idx (in-naturals 0)]
+                              #:when (and (= (list-ref q-results (* 2 idx)) 1)
+                                          (= (list-ref q-results (+ (* 2 idx) 1)) 1)))
+                    pt))
+                (define main-valid-pt
+                  (for/first ([pt (in-list cands-q)]
+                              [idx (in-naturals 0)]
+                              #:when (= (list-ref q-results (* 2 idx)) 1))
+                    pt))
+                (when (and (not both-valid-pt) (not wall-seal-pt))
+                  (record-5x3-miss!))
+                (cond
+                  [require-addon-clear? both-valid-pt]
+                  [(or wall-seal-pt both-valid-pt main-valid-pt) => values]
+                  [else
+                   ;; 1-miss immediate 3x3 overflow fallback across unqueried emergency/relaxed candidates
+                   (define unq-3x3
+                     (filter-unqueried
+                      (merge-priority-batches (list (cons em-raw 48) (cons rel-raw 64)) 64)))
+                   (and (pair? unq-3x3)
+                        (query-single-batch unq-3x3))])]
+               [else
+                (for/first ([pt (in-list cands-q)]
+                            [res (in-list q-results)]
+                            #:when (= res 1))
+                  pt)])])]
          [else
           (define p1 (filter-pylon-powered cands))
           (define p2
@@ -7087,6 +7447,16 @@
                    (cons p3 64))
              64))
           (query-single-batch unified-single)])]
+      [require-addon-clear?
+       (define ac-primary (filter-addon-clear cands))
+       (cond
+         [(pair? ac-primary) (first ac-primary)]
+         [else
+          (define ac-fallback
+            (filter-addon-clear
+             (dedup-point2ds (append (relaxed-safety-cands) (near-base-emergency-cands)))
+             #:ignore-reserved-aabbs? #t))
+          (and (pair? ac-fallback) (first ac-fallback))])]
       [(null? cands)
        (define em-cands
          (if is-zerg-creep-bldg?
@@ -7114,7 +7484,9 @@
      (when step-fail-key
        (hash-set! SC2-STEP-PLACEMENT-FAIL-CACHE step-fail-key #t))
      (when (and ws-active? neg-cd-key)
-       (hash-set! SC2-PLACEMENT-NEG-COOLDOWN neg-cd-key neg-cd-cur-loop))])
+       (hash-set! SC2-PLACEMENT-NEG-COOLDOWN neg-cd-key neg-cd-cur-loop))
+     (when late-all-pylons-neg-key
+       (hash-set! SC2-PLACEMENT-NEG-COOLDOWN late-all-pylons-neg-key neg-cd-cur-loop))])
   resolved-pt)))))
 
 (define (find-best-expansion-placement ws-conn th-ab home-x home-y units
@@ -7410,6 +7782,13 @@
   (> (sc2-unit-nearest-enemy-combat-dist-sq u enemy-combat)
      SC2-ZERG-COMBAT-MORPH-DANGER-RADIUS-SQ))
 
+;; Instant rally abilities never occupy a facility production or morph queue.
+(define SC2-NON-BLOCKING-RALLY-ABILITIES '(195 211 212 3673 3690 3691))
+(define (unit-blocking-order-count u)
+  (count (lambda (o)
+           (not (memv (sc2-unit-order-ability-id o) SC2-NON-BLOCKING-RALLY-ABILITIES)))
+         (sc2-unit-orders u)))
+
 (define (select-producer-tags-for-unit unit-sym self-units [enemy-units '()]
                                        #:unit-by-tag [pre-unit-by-tag #f]
                                        #:units-by-sym [units-by-sym #f])
@@ -7472,7 +7851,8 @@
         (and (= (sc2-unit-unit-type u) 133)
              (< (unbox SC2-WARPGATE-LAST-LOOP)
                 (hash-ref SC2-WARPGATE-COOLDOWN-UNTIL (sc2-unit-tag u) 0))))
-      (define n-orders (if wg-busy? (max 1 (length (sc2-unit-orders u))) (length (sc2-unit-orders u))))
+      (define raw-blocking-orders (unit-blocking-order-count u))
+      (define n-orders (if wg-busy? (max 1 raw-blocking-orders) raw-blocking-orders))
       (define has-reactor? (and (not needs-techlab?) (facility-has-reactor? u)))
       (define has-tl? (facility-has-techlab? u))
       (define utag (sc2-unit-tag u))
@@ -8279,23 +8659,78 @@
     (max (sc2-unit-assigned-harvesters u)
          (in-flight-workers-targeting-tag (sc2-unit-tag u))))
 
-  (define under-gas
+  (define active-gas-worker-count
+    (count (lambda (w)
+             (or (ormap (lambda (bid) (memv bid '(273 274 275))) (sc2-unit-buff-ids w))
+                 (ormap (lambda (o)
+                          (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
+                        (sc2-unit-orders w))))
+           workers))
+  (define eff-active-gas-workers
+    (max active-gas-worker-count
+         (for/sum ([g (in-list ready-gas-bldgs)]) (gas-eff-assigned g))))
+
+  (define (gas-near-any-th? gb th-list)
+    (or (null? ready-townhalls)
+        (let ([gp (sc2-unit-pos gb)])
+          (ormap (lambda (th)
+                   (define tp (sc2-unit-pos th))
+                   (<= (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
+                                (sc2-point3d-x tp) (sc2-point3d-y tp))
+                       SC2-BASE-RESOURCE-RADIUS))
+                 th-list))))
+
+  (define (gas-bldg-threat-score gb)
+    (define-values (e-cnt e-hp a-hp)
+      (townhall-combat-metrics gb enemy-combat-units ally-combat-units 12.0))
+    (define-values (close-gnd-cnt _cghp _cahp)
+      (townhall-combat-metrics gb
+                               (filter (lambda (e) (not (sc2-unit-is-flying e))) enemy-combat-units)
+                               ally-combat-units
+                               7.0))
+    (+ (* 5000.0 close-gnd-cnt) (* 1000.0 e-cnt) (max 0.0 (- e-hp (* 0.5 a-hp)))))
+
+  (define safe-ready-gas-bldgs
+    (filter (lambda (u) (gas-near-any-th? u safe-gas-ready-townhalls))
+            ready-gas-bldgs))
+  (define safe-under-gas
     (sort
      (filter (lambda (u)
-               (define gp (sc2-unit-pos u))
-               (define eff-assigned (gas-eff-assigned u))
-               (and (< eff-assigned
-                       (max SC2-IDEAL-WORKERS-PER-GEYSER (sc2-unit-ideal-harvesters u)))
-                    (or (null? ready-townhalls)
-                        (ormap (lambda (th)
-                                 (define tp (sc2-unit-pos th))
-                                 (<= (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
-                                              (sc2-point3d-x tp) (sc2-point3d-y tp))
-                                     SC2-BASE-RESOURCE-RADIUS))
-                               safe-gas-ready-townhalls))))
-             ready-gas-bldgs)
+               (< (gas-eff-assigned u)
+                  (max SC2-IDEAL-WORKERS-PER-GEYSER (sc2-unit-ideal-harvesters u))))
+             safe-ready-gas-bldgs)
      <
      #:key gas-eff-assigned))
+
+  ;; W17-P0-3-wire (`#28` 550s 0G / `#10` 243s 0G): When no ready gas building sits at a combat-safe
+  ;; TownHall and vespene is critically low, fall back to the 1-2 safest ready gas buildings near
+  ;; surviving TownHalls so hovering air units / spread harassment NEVER lock gas at 0G/min and
+  ;; starve anti-air tech (`HydraliskDen`/`Spire`/`Stargate`/`Starport`)! Protect those fallback
+  ;; geysers from `0b` evacuation up to 300G (50G hysteresis above the 250G assignment ceiling).
+  (define emergency-protected-gas-bldgs
+    (if (and (null? safe-ready-gas-bldgs)
+             (< cur-gas 300)
+             (not (null? ready-gas-bldgs)))
+        (let* ([near-any-th (filter (lambda (u) (gas-near-any-th? u ready-townhalls))
+                                    ready-gas-bldgs)]
+               [pool (if (pair? near-any-th) near-any-th ready-gas-bldgs)]
+               [sorted (sort pool < #:key gas-bldg-threat-score)])
+          (take sorted (min 2 (length sorted))))
+        '()))
+  (define under-gas
+    (cond
+      [(pair? safe-under-gas) safe-under-gas]
+      [(and (< cur-gas 250)
+            (< eff-active-gas-workers 3)
+            (pair? emergency-protected-gas-bldgs))
+       (sort
+        (filter (lambda (u)
+                  (< (gas-eff-assigned u)
+                     (max SC2-IDEAL-WORKERS-PER-GEYSER (sc2-unit-ideal-harvesters u))))
+                emergency-protected-gas-bldgs)
+        <
+        #:key gas-eff-assigned)]
+      [else '()]))
   (define under-townhalls
     (sort
      (filter (lambda (th)
@@ -8311,11 +8746,13 @@
 
   (define commanded-this-frame (mutable-seteqv))
   (define cmds '())
-  (define (issue-gather! w target-tag)
-    (unless (worker-carrying-cargo? w)
+  (define (issue-gather! w target-tag #:macro-econ? [macro-econ? #f] #:allow-carrying-mineral? [allow-carrying-mineral? #f])
+    (when (or (not (worker-carrying-cargo? w))
+              (and allow-carrying-mineral? (not (worker-carrying-gas? w))))
       (set-add! commanded-this-frame (sc2-unit-tag w))
+      (define raw-c (sc2-raw-unit-command 3666 #f target-tag (list (sc2-unit-tag w)) #f))
       (set! cmds
-            (cons (sc2-raw-unit-command 3666 #f target-tag (list (sc2-unit-tag w)) #f)
+            (cons (if macro-econ? (mark-macro-econ-cmd! raw-c) raw-c)
                   cmds))))
   (define (worker-carrying-gas? w)
     (or (ormap (lambda (bid) (memv bid '(273 274 275)))
@@ -8412,14 +8849,7 @@
               s2
               (set-add s2 mtag)))))
     (define online-gas-tags
-      (for/seteqv ([gb (in-list ready-gas-bldgs)]
-                   #:when (let ([gp (sc2-unit-pos gb)])
-                            (ormap (lambda (th)
-                                     (define tp (sc2-unit-pos th))
-                                     (<= (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
-                                                  (sc2-point3d-x tp) (sc2-point3d-y tp))
-                                         SC2-BASE-RESOURCE-RADIUS))
-                                   safe-gas-ready-townhalls)))
+      (for/seteqv ([gb (in-list (append safe-ready-gas-bldgs emergency-protected-gas-bldgs))])
         (sc2-unit-tag gb)))
     (define all-owned-ths (append ready-townhalls coming-online-townhalls))
     (when (not (null? evac-cand-mins))
@@ -8482,7 +8912,7 @@
         (define bmtag (sc2-unit-tag best-min))
         (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
         (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wtag bmtag)
-        (issue-gather! w bmtag))))
+        (issue-gather! w bmtag #:macro-econ? #t))))
 
   ;; 1. Send idle workers to mineral patches at under-saturated online TownHalls first
   ;;    using capacity-aware per-patch pairing (1st Near -> 1st Far -> 2nd Near -> 2nd Far);
@@ -8503,7 +8933,7 @@
        (define bmtag (sc2-unit-tag best-min))
        (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
        (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wtag bmtag)
-       (issue-gather! w bmtag))]
+       (issue-gather! w bmtag #:macro-econ? #t))]
     [(and (not (null? idle-workers)) (null? owned-base-minerals))
      (for ([w (in-list idle-workers)]
            #:when (worker-build-order-stuck? w cur-loop))
@@ -8575,28 +9005,23 @@
                   (pt-dist (sc2-point3d-x wp) (sc2-point3d-y wp)
                            (sc2-point3d-x mp) (sc2-point3d-y mp)))
                 owned-base-minerals))
-      (issue-gather! w (sc2-unit-tag best-min))))
+      (issue-gather! w (sc2-unit-tag best-min) #:macro-econ? #t)))
 
   (define self-is-zerg?
     (ormap (lambda (u) (memv (sc2-unit-unit-type u) '(86 100 101 104 88))) self-units))
-  (define active-gas-worker-count
-    (count (lambda (w)
-             (or (ormap (lambda (bid) (memv bid '(273 274 275))) (sc2-unit-buff-ids w))
-                 (ormap (lambda (o)
-                          (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
-                        (sc2-unit-orders w))))
-           workers))
-  ;; Hysteresis latch for dynamic gas pulling & automatic re-saturation:
+  ;; W18-P0-2-wire: Hysteresis latch for dynamic gas pulling & unstarvable P1 re-saturation:
   ;;   Pull ON:  (>= 300G & < 160M & < 66w) OR (>= 350G & < 250M) OR (> 600G & < 450M)
-  ;;   Pull OFF: (< 200G) OR (>= 300M & <= 600G) OR (>= 66w & <= 600G)
+  ;;   Pull OFF: (< 180G) OR (>= 220M & <= 600G) OR (>= 66w & <= 600G)
+  ;;   Gentle 1-worker pull: (>= 200G & < 100M & < 54w) trims gas down to 1 harvester (never 0!)
+  ;;   so `GasRichMinStarve` clears fast while `GasZeroFreeze` can never latch below 350G!
   (cond
     [(or (and (>= cur-gas 300) (< cur-min 160) (< (length workers) 66))
          (and (>= cur-gas SC2-GAS-FLOAT-REBALANCE-THRESH) (< cur-min 250))
          (and (> cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD) (< cur-min 450)))
      (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #t)]
     [(and (<= cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD)
-          (or (< cur-gas 200)
-              (>= cur-min 300)
+          (or (< cur-gas 180)
+              (>= cur-min 220)
               (>= (length workers) 66)))
      (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)])
   ;; Zerg Post-Ling-Speed Mineral Surge: below 28 Drones on 2+ bases (< 3:45), once >= 108G is banked
@@ -8612,9 +9037,17 @@
   (define gas-over-banked?
     (or worker-rush-evacuate-gas?
         (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)))
+  (define gas-mild-mineral-starve?
+    (and (>= cur-gas 200)
+         (< cur-min 100)
+         (< (length workers) 54)))
   (define gas-resaturate-blocked?
-    (or gas-over-banked?
-        (and zerg-post-speed-surge-active? (>= active-gas-worker-count 1))))
+    (or (and gas-over-banked?
+             (or worker-rush-evacuate-gas?
+                 (>= cur-gas 350)
+                 (>= eff-active-gas-workers 1)))
+        (and gas-mild-mineral-starve? (>= eff-active-gas-workers 1))
+        (and zerg-post-speed-surge-active? (>= eff-active-gas-workers 1))))
   (define min-mineral-workers-for-next-gas
     (cond
       [(= active-gas-worker-count 0) 6]
@@ -8629,13 +9062,16 @@
              (not gas-resaturate-blocked?))
     (define gb (first under-gas))
     (define gp (sc2-unit-pos gb))
+    (define zero-gas-workers-now? (= eff-active-gas-workers 0))
     (define (eligible-for-gas? w)
       (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
+           (not (worker-carrying-cargo? w))
            (not (worker-returning-cargo? w))
            (not (ormap (lambda (o)
                          (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
                        (sc2-unit-orders w)))
-           (or (null? (sc2-unit-orders w))
+           (or zero-gas-workers-now?
+               (null? (sc2-unit-orders w))
                (for/and ([other-gb (in-list ready-gas-bldgs)])
                  (define ogp (sc2-unit-pos other-gb))
                  (define wp (sc2-unit-pos w))
@@ -8644,8 +9080,24 @@
                     SC2-GAS-HARVESTER-EXCLUSION-RADIUS)))))
     (define eligible-idle (filter eligible-for-gas? idle-workers))
     (define eligible-all (filter eligible-for-gas? workers))
-    (define candidate-workers
-      (if (not (null? eligible-idle)) eligible-idle eligible-all))
+    (define fallback-carrying-min
+      (if (and (null? eligible-idle)
+               (null? eligible-all)
+               zero-gas-workers-now?
+               (< cur-gas 180))
+          (filter (lambda (w)
+                    (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
+                         (not (worker-carrying-gas? w))
+                         (not (ormap (lambda (o)
+                                       (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
+                                     (sc2-unit-orders w)))))
+                  workers)
+          '()))
+    (define-values (candidate-workers allow-carry?)
+      (cond
+        [(not (null? eligible-idle)) (values eligible-idle #f)]
+        [(not (null? eligible-all)) (values eligible-all #f)]
+        [else (values fallback-carrying-min #t)]))
     (when (not (null? candidate-workers))
       (define best-w
         (argmin (lambda (w)
@@ -8653,7 +9105,9 @@
                   (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
                            (sc2-point3d-x wp) (sc2-point3d-y wp)))
                 candidate-workers))
-      (issue-gather! best-w (sc2-unit-tag gb))))
+      (issue-gather! best-w (sc2-unit-tag gb)
+                     #:macro-econ? #t
+                     #:allow-carrying-mineral? allow-carry?)))
 
   ;; 3. Transfer 1 far-patch non-carrying worker per step from over-saturated TownHall OR >= 14-worker
   ;;    donor base to under-saturated/coming-online expansion's Near Patches (`2` per near patch first),
@@ -8757,10 +9211,14 @@
         (issue-gather! chosen-w bmtag))))
 
   ;; 4. Pull 1 gas worker back to owned minerals when floating gas while mineral-starved
-  ;;    (or down to 1 gas Drone during Zerg post-Ling-Speed mineral surge < 28 Drones);
-  ;;    automatically re-saturates in Step 2 once hysteresis clears!
+  ;;    (keeping 1 worker on gas below 350G so gas never zeroes out, or down to 1 gas Drone during
+  ;;    Zerg post-Ling-Speed mineral surge < 28 Drones); automatically re-saturates at P1 in Step 2!
   (define should-pull-one-gas-worker?
-    (or gas-over-banked?
+    (or (and gas-over-banked?
+             (or worker-rush-evacuate-gas?
+                 (>= cur-gas 350)
+                 (> eff-active-gas-workers 1)))
+        (and gas-mild-mineral-starve? (> eff-active-gas-workers 1))
         (and zerg-post-speed-surge-active? (> active-gas-worker-count 1))))
   (when (and should-pull-one-gas-worker? (not (null? owned-base-minerals)) (not (null? ready-gas-bldgs)))
     (define cand-mins
@@ -8770,6 +9228,7 @@
     (define gas-worker
       (for/first ([w (in-list workers)]
                   #:when (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
+                              (not (worker-carrying-cargo? w))
                               (not (worker-returning-cargo? w))
                               (ormap (lambda (o)
                                        (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
@@ -8780,7 +9239,7 @@
       (define bmtag (sc2-unit-tag best-min))
       (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
       (hash-set! SC2-WORKER-PATCH-ASSIGNMENT (sc2-unit-tag gas-worker) bmtag)
-      (issue-gather! gas-worker bmtag)))
+      (issue-gather! gas-worker bmtag #:macro-econ? #t)))
 
   ;; 5. Idle MULE Re-Tasking: re-task idle MULEs (268) ONLY onto live mineral patches within 12 tiles
   ;;    of a completed grounded friendly TownHall and within 14 tiles of the MULE (never cross-map!).
@@ -9048,6 +9507,8 @@
       (hash-clear! SC2-WIRE-NONSTACK-CMD-COOLDOWN)
       (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
       (hash-clear! SC2-PLACEMENT-POS-CACHE)
+      (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
+      (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
       (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
       (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
       (set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP #f)
@@ -9074,6 +9535,8 @@
       (hash-clear! SC2-STEP-PLACEMENT-FAIL-CACHE)
       (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
       (hash-clear! SC2-PLACEMENT-POS-CACHE)
+      (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
+      (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
       (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
       (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
       (set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP #f)
@@ -10769,11 +11232,34 @@
   ;;   2. Worker defense pulls, harass, and priority tactical actions execute second,
   ;;   3. Morphs and standard production, upgrade, micro, and spatial maneuvers execute third,
   ;;   4. Post-combat recon/patrol executes fourth, and routine harvest executes last.
+  ;; W16-P1-2-wire: Sub-order `build-priority-action?` so urgent control (`cancel`/`bunker-load`),
+  ;; supply (`pylon`/`supply-depot`), TownHalls (`expand`), and core production (`barracks`/`gateway`/
+  ;; `factory`/`starport`/`spawning-pool`) ALWAYS claim the 2-RPC/step placement budget ahead of
+  ;; secondary structures (`bunker`/`engineering-bay`/`missile-turret`/addons/tech buildings).
+  (define (build-urgent-control-action? a)
+    (and (pair? a)
+         (memq (car a)
+               '(cancel cancel-building salvage salvage-bunker bunker-load
+                 resume-halted-building push-probe-with-building))))
+  (define (build-core-macro-action? a)
+    (and (pair? a)
+         (or (eq? (car a) 'expand)
+             (and (eq? (car a) 'build)
+                  (pair? (cdr a))
+                  (memq (normalize-sc2-name->symbol (cadr a))
+                        '(pylon supply-depot
+                          command-center nexus hatchery
+                          orbital-command planetary-fortress lair hive
+                          barracks gateway factory starport spawning-pool))))))
   (define (build-priority-action? a)
     (and (pair? a)
          (memq (car a)
                '(build build-nydus-worm expand resume-halted-building
                  push-probe-with-building cancel cancel-building salvage salvage-bunker bunker-load))))
+  (define (build-secondary-action? a)
+    (and (build-priority-action? a)
+         (not (build-urgent-control-action? a))
+         (not (build-core-macro-action? a))))
   (define (priority-first-action? a)
     (and (pair? a)
          (memq (car a)
@@ -10798,7 +11284,9 @@
     (and (pair? a)
          (memq (car a) '(harvest-mineral harvest-gas rebalance-gas-to-minerals))))
   (define ordered-actions
-    (append (filter build-priority-action? actions)
+    (append (filter build-urgent-control-action? actions)
+            (filter build-core-macro-action? actions)
+            (filter build-secondary-action? actions)
             (filter priority-first-action? actions)
             (filter morph-action? actions)
             (filter (lambda (a)
@@ -11148,7 +11636,7 @@
               (for/list ([u (in-list self-units)]
                          #:when (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u)) src-types)
                                      (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
-                                     (null? (sc2-unit-orders u))
+                                     (= (unit-blocking-order-count u) 0)
                                      (not (set-member? used-producer-tags (sc2-unit-tag u)))
                                      (or (<= cur-loop 0)
                                          (>= cur-loop
@@ -11170,7 +11658,12 @@
               (record-step-built-structure! norm)
               (emit! (sc2-raw-unit-command ab-id #f 0 (list (sc2-unit-tag src-u)) #f)))]
 
-           ;; Terran Add-ons (Tech Lab & Reactor) built directly by an idle un-attached facility
+           ;; Terran Add-ons (Tech Lab & Reactor) built directly by an idle un-attached facility.
+           ;; W16-P1-2-wire (`#17` add-on stall & backoff): Verify East add-on slot `(fx+2.5, fy-0.5)`
+           ;; even for a SINGLE facility (`length == 1`); if all candidates have blocked East slots,
+           ;; relocate cleanly via SC2's dual-mode `PointOrNone` (`421/422/454/455/487/488/3682/3683`
+           ;; + verified `5x3` landing point), and if no `5x3` spot exists, apply a 64-loop per-tag
+           ;; backoff so wire NEVER spams doomed addon orders every tick!
            [(memq norm '(barracks-tech-lab barracks-techlab barracks-reactor
                          factory-tech-lab factory-techlab factory-reactor
                          starport-tech-lab starport-techlab starport-reactor
@@ -11186,7 +11679,7 @@
                         (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u)) fac-types)
                              (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
                              (= (sc2-unit-add-on-tag u) 0)
-                             (null? (sc2-unit-orders u))
+                             (= (unit-blocking-order-count u) 0)
                              (not (set-member? used-producer-tags (sc2-unit-tag u)))
                              (or (<= cur-loop 0)
                                  (>= cur-loop
@@ -11194,38 +11687,196 @@
                                                (list 'wire-addon norm (sc2-unit-tag u))
                                                -1)))))
                       self-units))
-            (define fac-u
+            (define (fac-addon-block-key u)
+              (define p (sc2-unit-pos u))
+              (list (sc2-unit-tag u)
+                    (inexact->exact (round (sc2-point3d-x p)))
+                    (inexact->exact (round (sc2-point3d-y p)))))
+            (define (fac-addon-cached-blocked? u)
+              (and (> cur-loop 0)
+                   (let ([bloop (hash-ref SC2-ADDON-SLOT-BLOCKED-CACHE (fac-addon-block-key u) #f)])
+                     (and bloop
+                          (>= cur-loop bloop)
+                          (< (- cur-loop bloop) 48)))))
+            (define (fac-addon-slot-locally-clear? u)
+              (define p (sc2-unit-pos u))
+              (define ax (+ (sc2-point3d-x p) SC2-TERRAN-ADDON-OFFSET-X))
+              (define ay (+ (sc2-point3d-y p) SC2-TERRAN-ADDON-OFFSET-Y))
+              (and (>= ax SC2-MAP-PLAYABLE-MIN-COORD) (<= ax SC2-MAP-PLAYABLE-MAX-COORD)
+                   (>= ay SC2-MAP-PLAYABLE-MIN-COORD) (<= ay SC2-MAP-PLAYABLE-MAX-COORD)
+                   (static-footprint-placement-ok? step-pl-grid ax ay 1.0 1.0)
+                   (for/and ([ou (in-list units)]
+                             #:when (and (not (= (sc2-unit-tag ou) (sc2-unit-tag u)))
+                                         (not (sc2-unit-is-flying ou))
+                                         (or (sc2-unit-is-structure? ou)
+                                             (sc2-unit-is-mineral-field? ou)
+                                             (sc2-unit-is-vespene-geyser? ou))))
+                     (define op (sc2-unit-pos ou))
+                     (define osym (sc2-id->unit-symbol (sc2-unit-unit-type ou) 'unknown))
+                     (define-values (o-hw o-hh)
+                       (cond
+                         [(sc2-unit-is-mineral-field? ou) (values 1.0 0.5)]
+                         [(sc2-unit-is-vespene-geyser? ou) (values 1.5 1.5)]
+                         [else (sc2-structure-half-dims osym)]))
+                     (not (and (< (abs (- ax (sc2-point3d-x op))) (- (+ 1.0 o-hw) 0.05))
+                               (< (abs (- ay (sc2-point3d-y op))) (- (+ 1.0 o-hh) 0.05)))))))
+            (define (fac-base-bldg-ab-and-sym u)
+              (case (sc2-id->unit-symbol (sc2-unit-unit-type u))
+                [(barracks) (values 321 'barracks)]
+                [(factory)  (values 328 'factory)]
+                [(starport) (values 329 'starport)]
+                [else       (values 321 'barracks)]))
+            (define (find-addon-reloc-pt fac0)
+              (define-values (base-fac-ab base-fac-sym) (fac-base-bldg-ab-and-sym fac0))
+              (define fp (sc2-unit-pos fac0))
+              (define fx (sc2-point3d-x fp))
+              (define fy (sc2-point3d-y fp))
+              (define th-anchors
+                (let* ([raw-ths
+                        (for/list ([th (in-list townhalls)]
+                                   #:when (and (>= (sc2-unit-build-progress th) 0.50)
+                                               (not (sc2-unit-is-flying th))))
+                          (define tp (sc2-unit-pos th))
+                          (cons (sc2-point3d-x tp) (sc2-point3d-y tp)))]
+                       [enemy-gnd
+                        (for/list ([e (in-list enemy-units)]
+                                   #:when (and (not (sc2-unit-is-flying e))
+                                               (sc2-unit-targetable-enemy-combat? e)))
+                          (define ep (sc2-unit-pos e))
+                          (cons (sc2-point3d-x ep) (sc2-point3d-y ep)))]
+                       [struct-pts
+                        (for/list ([s (in-list self-structures)]
+                                   #:when (not (sc2-unit-is-flying s)))
+                          (define sp (sc2-unit-pos s))
+                          (cons (sc2-point3d-x sp) (sc2-point3d-y sp)))])
+                  (map first
+                       (sort
+                        (for/list ([tp (in-list raw-ths)])
+                          (define cont?
+                            (ormap (lambda (ep) (<= (pt-dist (car tp) (cdr tp) (car ep) (cdr ep)) 10.0))
+                                   enemy-gnd))
+                          (define crowd
+                            (count (lambda (sp) (<= (pt-dist (car tp) (cdr tp) (car sp) (cdr sp)) 12.0))
+                                   struct-pts))
+                          (list tp (if cont? 1 0) crowd (pt-dist fx fy (car tp) (cdr tp))))
+                        (lambda (a b)
+                          (cond
+                            [(not (= (second a) (second b))) (< (second a) (second b))]
+                            [(not (= (third a) (third b))) (< (third a) (third b))]
+                            [else (< (fourth a) (fourth b))]))))))
+              (define reloc-anchors
+                (remove-duplicates (append (list (cons fx fy)) th-anchors (list (cons home-x home-y)))))
+              (define bud-before (unbox step-placement-rpc-budget))
+              (define pt
+                (find-verified-building-placement ws-conn base-fac-ab fx fy (remq fac0 units)
+                                                  #:min-spacing 2.0
+                                                  #:max-radius 18.0
+                                                  #:step 1.0
+                                                  #:extra-reserved-points step-reserved-build-pts
+                                                  #:anchor-points reloc-anchors
+                                                  #:reserved-aabbs reserved-aabbs
+                                                  #:expansion-pads all-expansion-pads
+                                                  #:bldg-sym base-fac-sym
+                                                  #:game-info eff-game-info
+                                                  #:rpc-budget step-placement-rpc-budget
+                                                  #:cur-loop cur-loop
+                                                  #:require-addon-clear? #t))
+              (values base-fac-ab pt (and (not pt) (<= bud-before 0))))
+            (define (mark-addon-tag-backoff! fac0)
+              (when (> cur-loop 0)
+                (hash-set! SC2-ADDON-SLOT-BLOCKED-CACHE (fac-addon-block-key fac0) cur-loop)
+                (hash-set! SC2-WIRE-NONSTACK-CMD-COOLDOWN
+                           (list 'wire-addon norm (sc2-unit-tag fac0))
+                           (+ cur-loop 64))))
+            (define ws-active-addon?
+              (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))
+            (define locally-clear-facs
+              (filter (lambda (u)
+                        (and (fac-addon-slot-locally-clear? u)
+                             (not (fac-addon-cached-blocked? u))))
+                      cand-facs))
+            (define-values (fac-u addon-target-pt addon-reloc-ab addon-cd)
               (cond
-                [(null? cand-facs) #f]
-                [(and (> (length cand-facs) 1)
-                      (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))
-                      (consume-placement-rpc-budget! step-placement-rpc-budget))
-                 (define q-items
-                   (for/list ([u (in-list cand-facs)])
-                     (define p (sc2-unit-pos u))
-                     (sc2-query-placement 319
-                                          (+ (sc2-point3d-x p) SC2-TERRAN-ADDON-OFFSET-X)
-                                          (+ (sc2-point3d-y p) SC2-TERRAN-ADDON-OFFSET-Y)
-                                          0)))
-                 (define q-resp
-                   (sc2-ws-rpc! ws-conn
-                                (make-request-query-placement q-items
-                                                              #:ignore-resource-requirements? #t)))
-                 (define q-results (sc2-response-query-placements q-resp))
-                 (if (= (length q-results) (length cand-facs))
-                     (or (for/first ([u (in-list cand-facs)]
-                                     [res (in-list q-results)]
-                                     #:when (= res 1))
-                           u)
-                         (first cand-facs))
-                     (first cand-facs))]
-                [else (first cand-facs)]))
-            (when (and fac-u (wire-nonstack-allow?! (list 'wire-addon norm (sc2-unit-tag fac-u)) 24))
+                [(null? cand-facs) (values #f #f 0 24)]
+                [ws-active-addon?
+                 (cond
+                   [(pair? locally-clear-facs)
+                    (if (consume-placement-rpc-budget! step-placement-rpc-budget)
+                        (let* ([q-items
+                                (for/list ([u (in-list locally-clear-facs)])
+                                  (define p (sc2-unit-pos u))
+                                  (sc2-query-placement 319
+                                                       (+ (sc2-point3d-x p) SC2-TERRAN-ADDON-OFFSET-X)
+                                                       (+ (sc2-point3d-y p) SC2-TERRAN-ADDON-OFFSET-Y)
+                                                       0))]
+                               [q-resp
+                                (sc2-ws-rpc! ws-conn
+                                             (make-request-query-placement q-items
+                                                                           #:ignore-resource-requirements? #t))]
+                               [q-results (sc2-response-query-placements q-resp)])
+                          (cond
+                            [(not (= (length q-results) (length locally-clear-facs)))
+                             (values (first locally-clear-facs) #f 0 24)]
+                            [(for/first ([u (in-list locally-clear-facs)]
+                                         [res (in-list q-results)]
+                                         #:when (= res 1))
+                               u)
+                             => (lambda (clear-u) (values clear-u #f 0 24))]
+                            ;; W18-P0-3-wire (`#14` factory-techlab stall): If a locally-clear East slot
+                            ;; failed `QueryPlacement 319` ONLY because a friendly mobile ground unit
+                            ;; (SCV/Marine/Hellion) walked across `(fx+2.5, fy-0.5)`, issue in-place
+                            ;; add-on build directly (SC2 nudges friendly units aside) instead of lifting
+                            ;; off or locking out for 64 loops!
+                            [(for/first ([u (in-list locally-clear-facs)]
+                                         #:when (let* ([p (sc2-unit-pos u)]
+                                                       [ax (+ (sc2-point3d-x p) SC2-TERRAN-ADDON-OFFSET-X)]
+                                                       [ay (+ (sc2-point3d-y p) SC2-TERRAN-ADDON-OFFSET-Y)])
+                                                  (ormap (lambda (fu)
+                                                           (and (not (sc2-unit-is-structure? fu))
+                                                                (not (sc2-unit-is-flying fu))
+                                                                (let ([fp (sc2-unit-pos fu)])
+                                                                  (<= (pt-dist ax ay (sc2-point3d-x fp) (sc2-point3d-y fp))
+                                                                      2.25))))
+                                                         self-units)))
+                               u)
+                             => (lambda (nudgable-u) (values nudgable-u #f 0 16))]
+                            [else
+                             (for ([u (in-list locally-clear-facs)])
+                               (hash-set! SC2-ADDON-SLOT-BLOCKED-CACHE (fac-addon-block-key u) cur-loop))
+                             (define reloc-u (first cand-facs))
+                             (define-values (r-ab r-pt bud-def?) (find-addon-reloc-pt reloc-u))
+                             (cond
+                               [r-pt (values reloc-u r-pt r-ab 48)]
+                               [else
+                                (unless bud-def? (mark-addon-tag-backoff! reloc-u))
+                                (values #f #f 0 24)])]))
+                        (values #f #f 0 24))]
+                   [else
+                    (define reloc-u (first cand-facs))
+                    (define-values (r-ab r-pt bud-def?) (find-addon-reloc-pt reloc-u))
+                    (cond
+                      [r-pt (values reloc-u r-pt r-ab 48)]
+                      [else
+                       (unless bud-def? (mark-addon-tag-backoff! reloc-u))
+                       (values #f #f 0 24)])])]
+                [(pair? locally-clear-facs)
+                 (values (first locally-clear-facs) #f 0 24)]
+                [else
+                 (define reloc-u (first cand-facs))
+                 (define-values (r-ab r-pt _bud-def?) (find-addon-reloc-pt reloc-u))
+                 (cond
+                   [r-pt (values reloc-u r-pt r-ab 48)]
+                   [else
+                    (mark-addon-tag-backoff! reloc-u)
+                    (values #f #f 0 24)])]))
+            (when (and fac-u (wire-nonstack-allow?! (list 'wire-addon norm (sc2-unit-tag fac-u)) addon-cd))
               (set-add! used-producer-tags (sc2-unit-tag fac-u))
               (hash-set! used-producer-counts (sc2-unit-tag fac-u)
                          (add1 (hash-ref used-producer-counts (sc2-unit-tag fac-u) 0)))
+              (when (sc2-point2d? addon-target-pt)
+                (reserve-step-build-pt! addon-target-pt addon-reloc-ab))
               (record-step-built-structure! norm)
-              (emit! (sc2-raw-unit-command ab-id #f 0 (list (sc2-unit-tag fac-u)) #f)))]
+              (emit! (sc2-raw-unit-command ab-id addon-target-pt 0 (list (sc2-unit-tag fac-u)) #f)))]
 
            ;; Vespene gas building targets a neutral geyser unit tag (capped at <= 2 * active TownHalls)
            [(memq norm '(extractor refinery assimilator))
@@ -11258,22 +11909,44 @@
             (define has-power-src? (or (pair? power-sources) (pair? completed-pylons)))
             (define skip-unpowered-cannon?
               (and (eq? norm 'photon-cannon) has-unit-map? (not has-power-src?)))
-            (define pylon-anchors (if skip-unpowered-cannon? '() (pylon-power-anchors req-x req-y)))
+            (define raw-pylon-anchors (if skip-unpowered-cannon? '() (pylon-power-anchors req-x req-y)))
+            ;; W18-P0-1-wire (`<3:30` early Ling rush `#36 P`): Partition uncontested Pylons FIRST
+            ;; (no non-flying enemy combat unit within 6.5t) and extend `req-contested?` to core
+            ;; production (`gateway`/`cybernetics-core`/`robotics-facility`/`stargate`) so a 2nd Gateway
+            ;; builds safely behind an in-main Pylon instead of walking Probes into Zerglings!
+            (define req-contested?
+              (and (memq norm '(gateway cybernetics-core robotics-facility stargate
+                                shield-battery photon-cannon))
+                   (ormap (lambda (e)
+                            (and (not (sc2-unit-is-flying e))
+                                 (sc2-unit-targetable-enemy-combat? e)
+                                 (let ([ep (sc2-unit-pos e)])
+                                   (<= (pt-dist req-x req-y (sc2-point3d-x ep) (sc2-point3d-y ep)) 6.0))))
+                          enemy-units)))
+            (define pylon-anchors
+              (if (or (null? raw-pylon-anchors) (null? enemy-units))
+                  raw-pylon-anchors
+                  (let-values ([(safe-p cont-p)
+                                (partition (lambda (pt)
+                                             (not (ormap (lambda (e)
+                                                           (and (not (sc2-unit-is-flying e))
+                                                                (sc2-unit-targetable-enemy-combat? e)
+                                                                (let ([ep (sc2-unit-pos e)])
+                                                                  (<= (pt-dist (car pt) (cdr pt)
+                                                                               (sc2-point3d-x ep) (sc2-point3d-y ep))
+                                                                      6.5))))
+                                                         enemy-units)))
+                                           raw-pylon-anchors)])
+                    (define ordered-safe
+                      (if (and req-contested? (< cur-loop 5400) (pair? safe-p) (pair? (cdr safe-p)))
+                          (sort safe-p < #:key (lambda (pt) (pt-dist home-x home-y (car pt) (cdr pt))))
+                          safe-p))
+                    (append ordered-safe cont-p))))
             (define search-anchors (if (pair? pylon-anchors) pylon-anchors (list (cons req-x req-y))))
             (define-values (px py)
               (values (caar search-anchors) (cdar search-anchors)))
             (define req-powered?
               (point-in-completed-power-field? req-x req-y power-sources completed-pylons))
-            ;; W12-P0-3-wire: When enemy rush units occupy `(req-x, req-y)` (<= 5.0t), prefer
-            ;; uncontested Pylons for ShieldBattery/PhotonCannon so Probes build safely behind the fight!
-            (define req-contested?
-              (and (memq norm '(shield-battery photon-cannon))
-                   (ormap (lambda (e)
-                            (and (not (sc2-unit-is-flying e))
-                                 (sc2-unit-targetable-enemy-combat? e)
-                                 (let ([ep (sc2-unit-pos e)])
-                                   (<= (pt-dist req-x req-y (sc2-point3d-x ep) (sc2-point3d-y ep)) 5.0))))
-                          enemy-units)))
             (define (powered-place-pt? pt)
               (and pt
                    (or (not (or has-power-src? (and (eq? norm 'photon-cannon) has-unit-map?)))
@@ -11373,18 +12046,59 @@
                 (emit! (sc2-raw-unit-command ab-id place-pt 0 (list wtag) #f))))]
 
            ;; Standard ground building placement (Pylons, Supply Depots, Barracks, Factories, Starports, etc.)
+           ;; W16-P1-2-wire (`#17`): Include all grounded maturing/completed TownHalls (>= 0.50),
+           ;; sorted uncontested-first and (for Terran production) least-crowded-first so crowded mains
+           ;; overflow cleanly to natural/3rd with 5x3 clearance (falling back to 3x3 only when all 5x3 fail)!
            [else
+            (define is-terran-prod-bldg? (memq norm '(barracks factory starport)))
             (define th-overflow-anchors
-              (for/list ([th (in-list townhalls)]
-                         #:when (and (>= (sc2-unit-build-progress th) SC2-BUILD-COMPLETE-PROGRESS)
-                                     (not (sc2-unit-is-flying th))))
-                (define tp (sc2-unit-pos th))
-                (cons (sc2-point3d-x tp) (sc2-point3d-y tp))))
-            ;; W12-P0-3-wire (`#36 P v 12PoolBot` / `#35 T v 12PoolBot`): For emergency supply/defense
-            ;; structures (`pylon`, `supply-depot`, `bunker`), compute guaranteed safe in-main fallback
-            ;; anchors stepped away from the main mineral line; if enemy rush units sit within <= 5.0t
-            ;; of `(req-x, req-y)`, place `pylon`/`supply-depot` safely in-main FIRST without stalling!
-            (define is-rush-supply-or-bunker? (memq norm '(pylon supply-depot bunker)))
+              (let* ([raw-ths
+                      (for/list ([th (in-list townhalls)]
+                                 #:when (and (>= (sc2-unit-build-progress th) 0.50)
+                                             (not (sc2-unit-is-flying th))))
+                        (define tp (sc2-unit-pos th))
+                        (cons (sc2-point3d-x tp) (sc2-point3d-y tp)))]
+                     [enemy-gnd
+                      (for/list ([e (in-list enemy-units)]
+                                 #:when (and (not (sc2-unit-is-flying e))
+                                             (sc2-unit-targetable-enemy-combat? e)))
+                        (define ep (sc2-unit-pos e))
+                        (cons (sc2-point3d-x ep) (sc2-point3d-y ep)))]
+                     [struct-pts
+                      (if is-terran-prod-bldg?
+                          (for/list ([s (in-list self-structures)]
+                                     #:when (not (sc2-unit-is-flying s)))
+                            (define sp (sc2-unit-pos s))
+                            (cons (sc2-point3d-x sp) (sc2-point3d-y sp)))
+                          '())])
+                (if (null? raw-ths)
+                    '()
+                    (map first
+                         (sort
+                          (for/list ([tp (in-list raw-ths)])
+                            (define cont?
+                              (ormap (lambda (ep)
+                                       (<= (pt-dist (car tp) (cdr tp) (car ep) (cdr ep)) 10.0))
+                                     enemy-gnd))
+                            (define crowd
+                              (if is-terran-prod-bldg?
+                                  (count (lambda (sp)
+                                           (<= (pt-dist (car tp) (cdr tp) (car sp) (cdr sp)) 12.0))
+                                         struct-pts)
+                                  0))
+                            (list tp (if cont? 1 0) crowd (pt-dist req-x req-y (car tp) (cdr tp))))
+                          (lambda (a b)
+                            (cond
+                              [(not (= (second a) (second b))) (< (second a) (second b))]
+                              [(and is-terran-prod-bldg? (not (= (third a) (third b))))
+                               (< (third a) (third b))]
+                              [else (< (fourth a) (fourth b))])))))))
+            ;; W12-P0-3-wire / W16-P1-2-wire: For emergency supply/defense/production structures
+            ;; (`pylon`, `supply-depot`, `bunker`, `barracks`, `factory`, `starport`), compute safe
+            ;; in-main fallback anchors stepped away from the mineral line; if enemy ground combat units
+            ;; sit within <= 5.5t of `(req-x, req-y)`, pivot safely without stalling!
+            (define is-rush-supply-or-bunker?
+              (memq norm '(pylon supply-depot bunker barracks factory starport)))
             (define inmain-safe-anchors
               (if is-rush-supply-or-bunker?
                   (let* ([near-mins
@@ -11426,31 +12140,66 @@
                       (append safe-c cont-c)))
                   '()))
             (define req-contested-by-rush?
-              (and (memq norm '(pylon supply-depot))
+              (and (memq norm '(pylon supply-depot barracks factory starport))
                    (ormap (lambda (e)
                             (and (not (sc2-unit-is-flying e))
                                  (sc2-unit-targetable-enemy-combat? e)
                                  (let ([ep (sc2-unit-pos e)])
-                                   (<= (pt-dist req-x req-y (sc2-point3d-x ep) (sc2-point3d-y ep)) 5.0))))
+                                   (<= (pt-dist req-x req-y (sc2-point3d-x ep) (sc2-point3d-y ep)) 5.5))))
                           enemy-units)))
+            (define terran-5x3-missed?
+              (and is-terran-prod-bldg?
+                   (terran-5x3-miss-active? norm req-x req-y cur-loop)))
+            (define early-rush-1base-inmain?
+              (and req-contested-by-rush?
+                   (< cur-loop 5400)
+                   (<= (length th-overflow-anchors) 1)
+                   (pair? inmain-safe-anchors)))
             (define eff-req-x
-              (if (and req-contested-by-rush? (pair? inmain-safe-anchors))
-                  (caar inmain-safe-anchors)
-                  req-x))
+              (cond
+                [early-rush-1base-inmain? (caar inmain-safe-anchors)]
+                [(and (or req-contested-by-rush? terran-5x3-missed?)
+                      is-terran-prod-bldg?
+                      (pair? th-overflow-anchors))
+                 (caar th-overflow-anchors)]
+                [(and req-contested-by-rush? (pair? inmain-safe-anchors))
+                 (caar inmain-safe-anchors)]
+                [else req-x]))
             (define eff-req-y
-              (if (and req-contested-by-rush? (pair? inmain-safe-anchors))
-                  (cdar inmain-safe-anchors)
-                  req-y))
+              (cond
+                [early-rush-1base-inmain? (cdar inmain-safe-anchors)]
+                [(and (or req-contested-by-rush? terran-5x3-missed?)
+                      is-terran-prod-bldg?
+                      (pair? th-overflow-anchors))
+                 (cdar th-overflow-anchors)]
+                [(and req-contested-by-rush? (pair? inmain-safe-anchors))
+                 (cdar inmain-safe-anchors)]
+                [else req-y]))
             (define std-anchors
               (remove-duplicates
-               (if req-contested-by-rush?
-                   (append inmain-safe-anchors
-                           (list (cons home-x home-y) (cons req-x req-y))
-                           th-overflow-anchors)
-                   (append (list (cons req-x req-y))
-                           inmain-safe-anchors
-                           (list (cons home-x home-y))
-                           th-overflow-anchors))))
+               (cond
+                 [early-rush-1base-inmain?
+                  (append inmain-safe-anchors
+                          th-overflow-anchors
+                          (list (cons home-x home-y) (cons req-x req-y)))]
+                 [(and (or req-contested-by-rush? terran-5x3-missed?) is-terran-prod-bldg?)
+                  (append th-overflow-anchors
+                          inmain-safe-anchors
+                          (list (cons home-x home-y) (cons req-x req-y)))]
+                 [req-contested-by-rush?
+                  (append inmain-safe-anchors
+                          (list (cons home-x home-y) (cons req-x req-y))
+                          th-overflow-anchors)]
+                 [is-terran-prod-bldg?
+                  (append (list (cons req-x req-y))
+                          th-overflow-anchors
+                          (list (cons home-x home-y))
+                          (take inmain-safe-anchors (min 2 (length inmain-safe-anchors))))]
+                 [else
+                  (append (list (cons req-x req-y))
+                          inmain-safe-anchors
+                          (list (cons home-x home-y))
+                          th-overflow-anchors)])))
             (define place-pt
               (or (and (memq norm '(command-center nexus hatchery))
                        (> (pt-dist home-x home-y req-x req-y) SC2-BASE-RESOURCE-RADIUS)
@@ -11472,7 +12221,8 @@
                                                     #:bldg-sym norm
                                                     #:game-info eff-game-info
                                                     #:rpc-budget step-placement-rpc-budget
-                                                    #:cur-loop cur-loop)))
+                                                    #:cur-loop cur-loop
+                                                    #:prefer-3x3-fallback? terran-5x3-missed?)))
             (when place-pt
               (reserve-step-build-pt! place-pt ab-id)
               (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
@@ -11673,18 +12423,40 @@
                      (if (not (null? fb)) (list (first fb)) '())))]
               [(and (not (null? self-units))
                     (memq norm-target '(lair hive greater-spire orbital-command planetary-fortress warp-gate warpgate)))
+               (define (morph-tag-cd-ready? t)
+                 (or (<= cur-loop 0)
+                     (and (>= cur-loop
+                              (hash-ref SC2-WIRE-NONSTACK-CMD-COOLDOWN
+                                        (list 'wire-morph norm-target (list t))
+                                        -1))
+                          (>= cur-loop
+                              (hash-ref SC2-WIRE-NONSTACK-CMD-COOLDOWN
+                                        (list 'wire-build-morph norm-target t)
+                                        -1)))))
                (define valid-idle
                  (filter (lambda (t)
                            (define su (hash-ref self-unit-by-tag t #f))
                            (and su
                                 (>= (sc2-unit-build-progress su) SC2-BUILD-COMPLETE-PROGRESS)
                                 (not (sc2-unit-is-flying su))
-                                (null? (sc2-unit-orders su))))
+                                (= (unit-blocking-order-count su) 0)
+                                (morph-tag-cd-ready? t)))
                          raw-uid-list))
                (if (not (null? valid-idle))
                    valid-idle
-                   (let ([fb (filter (lambda (t) (not (set-member? used-producer-tags t)))
-                                     (select-producer-tags-for-unit norm-target self-units enemy-units #:units-by-sym self-units-by-sym))])
+                   (let* ([fb0 (filter (lambda (t)
+                                         (and (not (set-member? used-producer-tags t))
+                                              (morph-tag-cd-ready? t)))
+                                       (select-producer-tags-for-unit norm-target self-units enemy-units #:units-by-sym self-units-by-sym))]
+                          [fb (if (memq norm-target '(lair hive greater-spire orbital-command planetary-fortress))
+                                  (sort fb0 <
+                                        #:key (lambda (t)
+                                                (define su (hash-ref self-unit-by-tag t #f))
+                                                (if su
+                                                    (let ([up (sc2-unit-pos su)])
+                                                      (pt-dist home-x home-y (sc2-point3d-x up) (sc2-point3d-y up)))
+                                                    9999.0)))
+                                  fb0)])
                      (if (not (null? fb)) (list (first fb)) '())))]
               [else raw-uid-list]))
           (when (and ab-id (not (null? uid-list))
@@ -11742,9 +12514,32 @@
             (emit! (sc2-raw-unit-command ab-id #f 0 chosen2 #f)))]
          [else
           (define ab-id (morph-symbol->ability-id norm-target))
-          (define ptags
-            (filter (lambda (t) (not (set-member? used-producer-tags t)))
+          (define is-bldg-morph?
+            (memq norm-target '(lair hive greater-spire orbital-command planetary-fortress)))
+          (define raw-ptags
+            (filter (lambda (t)
+                      (and (not (set-member? used-producer-tags t))
+                           (or (not is-bldg-morph?)
+                               (<= cur-loop 0)
+                               (and (>= cur-loop
+                                        (hash-ref SC2-WIRE-NONSTACK-CMD-COOLDOWN
+                                                  (list 'wire-morph norm-target (list t))
+                                                  -1))
+                                    (>= cur-loop
+                                        (hash-ref SC2-WIRE-NONSTACK-CMD-COOLDOWN
+                                                  (list 'wire-build-morph norm-target t)
+                                                  -1))))))
                     (select-producer-tags-for-unit norm-target self-units enemy-units #:units-by-sym self-units-by-sym)))
+          (define ptags
+            (if (and is-bldg-morph? (pair? raw-ptags) (pair? (cdr raw-ptags)))
+                (sort raw-ptags <
+                      #:key (lambda (t)
+                              (define su (hash-ref self-unit-by-tag t #f))
+                              (if su
+                                  (let ([up (sc2-unit-pos su)])
+                                    (pt-dist home-x home-y (sc2-point3d-x up) (sc2-point3d-y up)))
+                                  9999.0)))
+                raw-ptags))
           (when (and ab-id (not (null? ptags)))
             (define ptag (first ptags))
             (when (wire-nonstack-allow?! (list 'wire-morph norm-target (list ptag)) 24)
@@ -11996,9 +12791,20 @@
          (unless (unit-already-executing-order? uid 2706 target-pt 0)
            (emit! (sc2-raw-unit-command 2706 target-pt 0 (list uid) #f))))]
 
+      ;; W17-P0-2-wire (`#17` 143s & `#11` 55s freeze defense-in-depth): NEVER mark routine Bunker
+      ;; Salvage (`32`) as P0 urgent survival! Require an empty completed Bunker (cargo == 0), skip
+      ;; if already salvaging, and enforce a 112-loop (5s) per-Bunker wire cooldown so repeated
+      ;; `(salvage bid)` intents can NEVER burn APM headroom or starve P1 macro!
       [(list (or 'salvage 'salvage-bunker) bid)
        (when (and (exact-integer? bid) (> bid 0))
-         (emit! (mark-urgent-survival-cmd! (sc2-raw-unit-command 32 #f 0 (list bid) #f))))]
+         (define bu (hash-ref self-unit-by-tag bid #f))
+         (when (and (or (not bu)
+                        (and (= (sc2-unit-unit-type bu) 24)
+                             (>= (sc2-unit-build-progress bu) SC2-BUILD-COMPLETE-PROGRESS)
+                             (= (sc2-unit-cargo-space-taken bu) 0)))
+                    (not (unit-already-executing-order? bid 32 #f 0))
+                    (wire-nonstack-allow?! (list 'wire-salvage bid) 112))
+           (emit! (sc2-raw-unit-command 32 #f 0 (list bid) #f))))]
 
       [(list 'repair scv-id target-id)
        (when (and (exact-integer? scv-id) (> scv-id 0)
@@ -14251,7 +15057,7 @@
              (begin
                (set-add! seen t)
                (cons t acc))))]))
-  (define (emit-cmd ab tp tu tags q? urgent? paired-cam out-rev)
+  (define (emit-cmd ab tp tu tags q? urgent? macro-econ? paired-cam out-rev)
     (define eff-tags
       (if chunk-fn
           (sort (dedup-tags tags) <)
@@ -14261,7 +15067,9 @@
       (define cc (sc2-raw-unit-command ab tp tu ch q?))
       (when paired-cam
         (hash-set! SC2-CMD-FRAMING-CAM cc paired-cam))
-      (cons (if urgent? (mark-urgent-survival-cmd! cc) cc) acc)))
+      (when urgent? (mark-urgent-survival-cmd! cc))
+      (when macro-econ? (mark-macro-econ-cmd! cc))
+      (cons cc acc)))
   (for ([c (in-list cmds)])
     (cond
       [(and (sc2-raw-unit-command? c)
@@ -14275,15 +15083,17 @@
        (define g (hash-ref groups key #f))
        (define c-tags (sc2-raw-unit-command-unit-tags c))
        (define c-urg? (urgent-survival-cmd? c))
+       (define c-econ? (macro-econ-cmd? c))
        (define c-cam (hash-ref SC2-CMD-FRAMING-CAM c #f))
        (cond
          [g
           (vector-set! g 4 (append (reverse c-tags) (vector-ref g 4)))
           (when c-urg? (vector-set! g 5 #t))
+          (when c-econ? (vector-set! g 7 #t))
           (when (and c-cam (not (vector-ref g 6)))
             (vector-set! g 6 c-cam))]
          [else
-          (define ng (vector ab tp tu q? (reverse c-tags) c-urg? c-cam))
+          (define ng (vector ab tp tu q? (reverse c-tags) c-urg? c-cam c-econ?))
           (hash-set! groups key ng)
           (set! rev-slots (cons ng rev-slots))])]
       [else
@@ -14298,6 +15108,7 @@
                   (reverse (vector-ref slot 4))
                   (vector-ref slot 3)
                   (vector-ref slot 5)
+                  (vector-ref slot 7)
                   (vector-ref slot 6)
                   out-rev)]
        [(and chunk-fn (sc2-raw-unit-command? slot))
@@ -14307,6 +15118,7 @@
                   (sc2-raw-unit-command-unit-tags slot)
                   (sc2-raw-unit-command-queue? slot)
                   (urgent-survival-cmd? slot)
+                  (macro-econ-cmd? slot)
                   (hash-ref SC2-CMD-FRAMING-CAM slot #f)
                   out-rev)]
        [else (cons slot out-rev)]))))
@@ -14348,15 +15160,15 @@
   (define (ab-tier ab)
     (cond
       ;; P0: Life-or-death survival, tactical spells, cancel, mode-switches & depot raise/lower
-      [(memv ab '(32 42 314 349 380 382 383 396 407 408 913 1408 1437 1438 1882 2244
+      [(memv ab '(42 314 349 380 382 383 396 407 408 913 1408 1437 1438 1882 2244
                   2368 2370 2371 2546 2594 2706 3675 1442 3687 74 76 140 249 251 399 401
                   1036 1526 1528 1530 1628 1664 1978 1998 2063 2067 2069 2073 2116 2146
                   2324 2338 2346 2350 2358 2375 2376 2393 2505 2542 2545 2588 2714 3668 3669
                   3747 3751 3753 3755 3757 4107 4113 4126 142 3686 388 390
                   2095 2097 2108 2110 403 405 2362 2364 556 558))
        0]
-      ;; P3: Routine harvest / worker rebalance
-      [(memv ab '(166 167 295 296 298 299 1183 1184 3666 3667))
+      ;; P3: Routine harvest, worker rebalance & non-urgent Bunker Salvage (`32`)
+      [(memv ab '(32 166 167 295 296 298 299 1183 1184 3666 3667))
        3]
       ;; P2: Combat attack, move, kite, hold-position, patrol, stop
       [(memv ab '(4 5 6 7 16 17 18 19 20 23 24 25 2099 3665 3674 3771 3793 3794 3795))
@@ -14367,6 +15179,7 @@
     [(framing-camera-cmd? cmd) 1]
     [(or (sc2-raw-camera-move? cmd) (WireCameraMove? cmd)) 4]
     [(urgent-survival-cmd? cmd) 0]
+    [(macro-econ-cmd? cmd) 1]
     [(sc2-raw-unit-command? cmd)
      (define ab (sc2-raw-unit-command-ability-id cmd))
      (if (and (sc2-raw-unit-command-queue? cmd) (memv ab '(3666 3667)))
@@ -14390,6 +15203,7 @@
 
 (define SC2-GOV-LAST-P1-LOOP (make-weak-hasheq))
 (define SC2-GOV-LAST-P2-LOOP (make-weak-hasheq))
+(define SC2-GOV-LAST-P3-LOOP (make-weak-hasheq))
 
 (define (govern-sc2-wire-actions! gov raw-cmds game-loop [_obs #f])
   (define cur-loop (if (exact-integer? game-loop) (max 0 game-loop) 0))
@@ -14404,7 +15218,8 @@
     (set-box! SC2-GOV-LAST-CAM-X #f)
     (set-box! SC2-GOV-LAST-CAM-Y #f)
     (hash-set! SC2-GOV-LAST-P1-LOOP gov -1000)
-    (hash-set! SC2-GOV-LAST-P2-LOOP gov -1000))
+    (hash-set! SC2-GOV-LAST-P2-LOOP gov -1000)
+    (hash-set! SC2-GOV-LAST-P3-LOOP gov -1000))
 
   ;; 1. Refill token bucket purely from game-loop delta (22.4 loops/sec = 1344 loops/min)
   (define prev-loop (wire-apm-governor-last-loop gov))
@@ -14574,6 +15389,8 @@
             (hash-set! SC2-GOV-LAST-P1-LOOP gov cur-loop))
           (when (= (eff-cmd-tier chosen) 2)
             (hash-set! SC2-GOV-LAST-P2-LOOP gov cur-loop))
+          (when (= (eff-cmd-tier chosen) 3)
+            (hash-set! SC2-GOV-LAST-P3-LOOP gov cur-loop))
           (hash-set! emitted-set chosen #t)
           (set! emitted (cons chosen emitted)))
         (tier-loop rest-rem (if did-emit? (add1 emitted-here) emitted-here)))))
@@ -14616,10 +15433,15 @@
              (>= (- cur-loop (hash-ref SC2-GOV-LAST-P1-LOOP gov -1000)) 8))
     (run-cmd-list! p1-macro-rem (lambda (_) -3.0) (lambda (_) 2.0) #:max-count 4))
 
-  ;; 3. Bounded anti-starvation rescue for overdue P2 combat (>= 12 loops stale) and 1 overdue routine P4 camera (>= 44 loops).
+  ;; 3. Bounded anti-starvation rescue for overdue P2 combat (>= 12 loops stale), overdue P3 routine
+  ;;    worker/transfer (>= 24 loops stale, W18-P0-2-wire), and 1 overdue routine P4 camera (>= 44 loops).
   (when (and (pair? p2-cmds)
              (>= (- cur-loop (hash-ref SC2-GOV-LAST-P2-LOOP gov -1000)) 12))
     (run-cmd-list! p2-cmds (lambda (_) 1.5) (lambda (_) 6.0) #:max-count 3))
+  (define p3-cmds (cmds-for-tier 3))
+  (when (and (pair? p3-cmds)
+             (>= (- cur-loop (hash-ref SC2-GOV-LAST-P3-LOOP gov -1000)) 24))
+    (run-cmd-list! p3-cmds (lambda (_) 1.5) (lambda (_) 8.0) #:max-count 1))
   (define p4-cam-cmds
     (filter sc2-raw-camera-move? (cmds-for-tier 4)))
   (when (and (pair? p4-cam-cmds)

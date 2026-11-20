@@ -3020,9 +3020,25 @@
                               (vector #f acx acy (vector rb pe bv cv ro) next-exp
                                       a-cnt e-cnt ra-cnt re-cnt sig-ew)))
                  (values rb pe bv cv ro ca lk?)))))
+       ;; W18-P0-1-rt (`#8/#34/#35/#36` <3:30 Zergling/melee rush inside main/natural):
+       ;; When >= 4 melee rushers are inside our home base before 4:00 (< 5400f), STAND AND FIGHT
+       ;; (`CommitFocusFire`) — never backward-kite (`StutterKiteBack`/`DisengageRetreat`) across the mineral line!
+       (define home-melee-rush-stand?
+         (and kw-defending-home?
+              (< frame 5400)
+              (>= (for/sum ([e (in-list (tactical-arena-enemy-units arena))])
+                    (if (and (fl> (tactical-sim-unit-ground-dps e) 0.0)
+                             (fl<= (tactical-sim-unit-ground-range e) 1.5))
+                        1
+                        0))
+                  4)))
        (define committed-act
          (cond
            [combat-suppress-arena? 'DisengageRetreat]
+           ;; W18-P0-1-rt: Early melee rush inside main/natural -> STAND AND FIGHT (0% OBRet / 0% kite)!
+           [(and home-melee-rush-stand?
+                 (memq raw-committed-act '(DisengageRetreat StutterKiteBack)))
+            'CommitFocusFire]
            ;; W7-P0-2-rt: Never retreat inside our own base when enemies are within 14t of TownHall!
            [(and kw-defending-home? (eq? raw-committed-act 'DisengageRetreat))
             'CommitFocusFire]
@@ -3393,6 +3409,21 @@
                            (if commits? (cons (cons ax ay) pts) pts))
                          pts))))
              '()))
+       ;; W18-P0-3-rt (`Siege0DPS` `#17/#18/#25/#26/#31/#32/#33` — SmoothBrain Tanks, Thssprtssbt Colossi/Tempests):
+       ;; Precompute enemy long-range siege/colossus/capital shellers in this arena once so squads
+       ;; trapped inside their firing arc commit & shoot instead of 0-DPS backward kiting!
+       (define arena-ally-cnt (length arena-ally-units))
+       (define arena-enemy-siege-shellers
+         (for/list ([e (in-list arena-enemy-sims)]
+                    #:when (memq (tactical-sim-unit-type e)
+                                 '(siege-tank-sieged colossus tempest carrier brood-lord broodlord battlecruiser)))
+           (define et (tactical-sim-unit-type e))
+           (define r2
+             (cond
+               [(eq? et 'siege-tank-sieged) 196.0] ;; 14.0t active shell zone
+               [(eq? et 'colossus) 132.25]         ;; 11.5t ETL Colossus firing/approach band
+               [else 342.25]))                     ;; 18.5t Tempest/Capital siege band
+           (vector et (tactical-sim-unit-x e) (tactical-sim-unit-y e) r2)))
        (for ([su (in-list arena-ally-units)])
          (define uid (tactical-sim-unit-id su))
          (define utype (tactical-sim-unit-type su))
@@ -3487,10 +3518,25 @@
                       (or (nearest-hittable-enemy-for su)
                           (and (not (eq? utype 'siege-tank-sieged)) first-arena-enemy))]
                      [else #f])])))
-         ;; W11-P0-4-rt (`w11-tac-1` / `Siege0DPS` + `z02`): Allow ready-weapon units to fire
-         ;; before stepping in `avoid-siege-tank-splash-split` (`DisengageRetreat`) AND allow
-         ;; `commit-run-through-splash-concave` units (`z02` Roaches/Ravagers) to attack-close
-         ;; instead of pure-MOVE walking into Marine+Tank fire at 0 DPS!
+         ;; W18-P0-3-rt: Check whether this unit is already inside active Sieged Tank (<=14t),
+         ;; Colossus (<=11.5t), or Tempest/Capital (<=18.5t) firing range!
+         (define-values (unit-in-tank-or-colossus-fire? unit-in-any-siege-fire?)
+           (if (null? arena-enemy-siege-shellers)
+               (values #f #f)
+               (for/fold ([tc? #f] [any? #f]) ([sv (in-list arena-enemy-siege-shellers)])
+                 (define dx (fl- ux (vector-ref sv 1)))
+                 (define dy (fl- uy (vector-ref sv 2)))
+                 (if (fl<= (fl+ (fl* dx dx) (fl* dy dy)) (vector-ref sv 3))
+                     (let ([st (vector-ref sv 0)])
+                       (values (or tc? (eq? st 'siege-tank-sieged) (eq? st 'colossus)) #t))
+                     (values tc? any?)))))
+         (define trapped-in-siege-zone?
+           (and unit-in-tank-or-colossus-fire?
+                (or kw-defending-home? (>= arena-ally-cnt 4))))
+         ;; W11-P0-4-rt / W18-P0-3-rt (`w11-tac-1` / `novel-137` / `w18-tac-3` / `Siege0DPS`):
+         ;; Allow ready-weapon units to fire before stepping in splash avoidance AND commit-close
+         ;; when already trapped inside active Sieged Tank (<=14t) or Colossus (<=11.5t) fire
+         ;; instead of 0-DPS pure-MOVE backward kiting (`avoid-colossus-sweep-standoff` / `avoid-siege-tank-standoff-edge`)!
          (define target-in-weapon-range?
            (and target-su
                 (not fragile-caster-no-atk?)
@@ -3506,6 +3552,10 @@
                        (not (sieged-tank-in-min-range-deadzone? utype (tactical-sim-unit-radius su) target-su (fl* td td)))
                        (fl<= td
                              (cond
+                               [(and trapped-in-siege-zone?
+                                     splash-move-pt
+                                     (not active-spell-dodge?))
+                                (flmax 14.0 (fl+ wr 6.5))]
                                [(and splash-move-pt
                                      (not active-spell-dodge?)
                                      (eq? sprole 'commit-run-through-splash-concave))
@@ -3523,6 +3573,15 @@
            (and splash-move-pt
                 (not active-spell-dodge?)
                 (or maxed-splash-breakthrough?
+                    (and trapped-in-siege-zone?
+                         target-in-weapon-range?
+                         (memq sprole '(commit-run-through-splash-concave
+                                        commit-run-through-disruptor-split
+                                        siege-tank-deadzone-dive
+                                        colossus-radial-split-dive
+                                        avoid-siege-tank-splash-split
+                                        avoid-siege-tank-standoff-edge
+                                        avoid-colossus-sweep-standoff)))
                     (and target-in-weapon-range?
                          (<= w-cd SC2-WEAPON-KITE-COOLDOWN-THRESH)
                          (or arena-commit-splash?
@@ -3530,7 +3589,9 @@
                                             commit-run-through-disruptor-split
                                             siege-tank-deadzone-dive
                                             colossus-radial-split-dive
-                                            avoid-siege-tank-splash-split)))))))
+                                            avoid-siege-tank-splash-split
+                                            avoid-siege-tank-standoff-edge
+                                            avoid-colossus-sweep-standoff)))))))
          (cond
            [(or in-swing? channel-or-morph-locked?) (void)]
            [(and splash-move-pt (not ready-to-shoot-during-splash-commit?))
@@ -3578,7 +3639,13 @@
                  (define w-period (flmax 0.16 (exact->inexact (tactical-sim-unit-weapon-period su))))
                  (define kite-cd-min (flmax 0.22 (fl* 0.38 w-period)))
                  (define has-weap? (and (not fragile-caster-no-atk?) non-free-t? (fl> wr 0.0)))
-                 (define melee-fight? (and has-weap? (fl<= wr 1.5) (fl<= edist 8.5)))
+                 (define melee-fight?
+                   (and has-weap?
+                        (fl<= wr 1.5)
+                        (or (fl<= edist 8.5)
+                            (and unit-in-any-siege-fire?
+                                 (or kw-defending-home? (>= arena-ally-cnt 4))
+                                 (fl<= edist 14.5)))))
                  ;; W4-TAC-3 + W7-TAC-2: Fire when weapon is ready/nearly-ready up to `wr + 2.5`
                  ;; (or `wr + 4.5` when protecting a nearby committed ally within `<= 10.0t`, matching
                  ;; `W5-TAC-5` so Marines 1t behind committing Marauders fire instead of fleeing!);
@@ -3589,20 +3656,25 @@
                           (define dx (fl- ux (car pt)))
                           (define dy (fl- uy (cdr pt)))
                           (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 100.0))))
-                 ;; W9-P0-2-rt / W10-P0-3-rt / W11-P0-4-rt (`w9-tac-6` / `w11-tac-6` / `#30 P v Creepy`):
-                 ;; When long-range capital/siege units (Tempest 16.9t range, Carrier, BroodLord, BC)
-                 ;; are within <= 18.5t and we have >= 3 combat allies (or Sieged Tank <= 13.5t with
-                 ;; home defense or >= 6 allies), dive in & attack instead of 0-DPS retreat!
+                 ;; W9-P0-2-rt / W10-P0-3-rt / W11-P0-4-rt / W18-P0-3-rt (`Siege0DPS` `#17/#18/#25/#26/#31/#32/#33`):
+                 ;; When trapped inside active Sieged Tank (<=14t), Colossus (<=11.5t), or Tempest/Capital (<=18.5t)
+                 ;; firing arcs (including while targeting their Marine/Stalker screeners!), commit-close & shoot
+                 ;; instead of 0-DPS backward kiting inside enemy range!
                  (define capital-siege-dive?
                    (and has-weap? (fl> wr 1.5)
                         (or (and (memq (tactical-sim-unit-type target-su)
                                        '(tempest carrier brood-lord broodlord battlecruiser))
-                                 (>= (length arena-ally-units) 3)
+                                 (>= arena-ally-cnt 3)
                                  (fl<= edist 18.5))
+                            (and (eq? (tactical-sim-unit-type target-su) 'colossus)
+                                 (>= arena-ally-cnt 3)
+                                 (fl<= edist 12.0))
                             (and (eq? (tactical-sim-unit-type target-su) 'siege-tank-sieged)
-                                 (or (and kw-defending-home? (>= (length arena-ally-units) 3) (fl<= edist 15.5))
-                                     (and (>= (length arena-ally-units) 6) (fl<= edist 13.5)))))
-                        (fl< (exact->inexact w-cd) kite-cd-min)))
+                                 (or (and kw-defending-home? (>= arena-ally-cnt 3) (fl<= edist 15.5))
+                                     (and (>= arena-ally-cnt 4) (fl<= edist 14.5))))
+                            (and unit-in-any-siege-fire?
+                                 (or kw-defending-home? (>= arena-ally-cnt 4))
+                                 (fl<= edist (flmax 14.5 (fl+ wr 6.5)))))))
                 (define ranged-stutter-fire?
                   (or capital-siege-dive?
                       (and has-weap? (fl> wr 1.5)

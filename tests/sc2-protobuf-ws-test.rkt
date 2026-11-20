@@ -3371,6 +3371,1043 @@
              (hash-ref h-newmatch 'map-symmetry-kind #f)
              'mirror-vertical))
 
+;; =============================================================================
+;; Wave 16 (`W16-P1-2-wire`): Terran 5x3 Add-on Clearance, Auto-Relocation,
+;; Per-Tag Backoff, Core-Macro RPC Priority & BFS Critter/Mineout Cache Hygiene
+;; =============================================================================
+(printf "[Wave 16] Testing W16-P1-2-wire Terran 5x3/3x3 clearance, add-on relocation/backoff, RPC priority & BFS cache...\n")
+(let ()
+  (define (mk-w16-u tag utype alliance x y #:hp [hp 100.0] #:rad [rad 0.75] #:prog [prog 1.0])
+    (sc2-unit 1 alliance tag utype alliance (sc2-point3d x y 8.0) 0.0 rad prog
+              0 #f #t #f hp hp 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f
+              '() 0 '() 0 0 0.0 0 0 0 0))
+  (define (w16-start-geom-placement-ws geom-policy-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59916 "/sc2api" c-in c-out #f 1))
+    (define rpc-count (box 0))
+    (define thd
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (set-box! rpc-count (add1 (unbox rpc-count)))
+             (define req-f (decode-protobuf-message payload))
+             (define req-id-p (assoc 97 req-f))
+             (define id-b (if req-id-p (encode-uint32 97 (third req-id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (geom-policy-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws rpc-count
+            (lambda ()
+              (close-output-port c-out)
+              (close-input-port c-in)
+              (thread-wait thd))))
+
+  ;; 1a. Barracks prefers verified 5x3 (even via natural overflow) over 3x3-only in crowded main!
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (let-values ([(ws rpc-cnt cleanup!)
+                ;; Main (x < 54) accepts 3x3 (321) only (East 319 blocked); Natural (x >= 56) accepts full 5x3!
+                (w16-start-geom-placement-ws
+                 (lambda (ab px _py)
+                   (cond
+                     [(= ab 321) 1]
+                     [(= ab 319) (if (>= px 56.0) 1 2)]
+                     [else 2])))])
+    (define main-cc (mk-w16-u 9801 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define nat-cc  (mk-w16-u 9802 18 1 64.5 30.5 #:hp 1500.0 #:rad 2.75))
+    (define main-rax (mk-w16-u 9803 21 1 34.5 28.5 #:hp 1000.0 #:rad 1.5))
+    (define main-scv (mk-w16-u 9804 45 1 30.0 26.0 #:hp 45.0 #:rad 0.375))
+    (define cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build barracks 32.5 30.5))
+       (make-test-obs 5800 400 100 (list main-cc nat-cc main-rax main-scv))
+       #:ws-conn ws #:game-info w3-ginfo))
+    (define rax-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) cmds))
+    (check-true "w16-p1-2-barracks-prefers-5x3-overflow-over-3x3-only-in-1-rpc"
+                (and (sc2-raw-unit-command? rax-cmd)
+                     (sc2-point2d? (sc2-raw-unit-command-target-pos rax-cmd))
+                     (>= (+ (sc2-point2d-x (sc2-raw-unit-command-target-pos rax-cmd)) 2.5) 56.0)
+                     (= (unbox rpc-cnt) 1)))
+    (cleanup!))
+
+  ;; 1b. Barracks falls back cleanly to natural 3x3 when ALL 5x3 slots fail (zero deadlock!)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (let-values ([(ws rpc-cnt cleanup!)
+                (w16-start-geom-placement-ws
+                 (lambda (ab px _py) (if (and (= ab 321) (>= px 56.0)) 1 2)))])
+    (define main-cc (mk-w16-u 9811 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define nat-cc  (mk-w16-u 9812 18 1 64.5 30.5 #:hp 1500.0 #:rad 2.75))
+    (define main-rax1 (mk-w16-u 9813 21 1 34.5 28.5 #:hp 1000.0 #:rad 1.5))
+    (define main-rax2 (mk-w16-u 9814 21 1 34.5 33.5 #:hp 1000.0 #:rad 1.5))
+    (define main-scv (mk-w16-u 9815 45 1 30.0 26.0 #:hp 45.0 #:rad 0.375))
+    (define cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build barracks 32.5 30.5))
+       (make-test-obs 5820 400 100 (list main-cc nat-cc main-rax1 main-rax2 main-scv))
+       #:ws-conn ws #:game-info w3-ginfo))
+    (define rax-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) cmds))
+    (check-true "w16-p1-2-barracks-falls-back-to-natural-3x3-when-no-5x3-exists"
+                (and (sc2-raw-unit-command? rax-cmd)
+                     (sc2-point2d? (sc2-raw-unit-command-target-pos rax-cmd))
+                     (>= (sc2-point2d-x (sc2-raw-unit-command-target-pos rax-cmd)) 56.0)
+                     (= (unbox rpc-cnt) 1)))
+    (cleanup!))
+
+  ;; 2a. `#17` Single Starport blocked East slot -> relocates via PointOrNone (487 + verified 5x3 pt) & encodes cleanly
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
+  (let-values ([(ws rpc-cnt cleanup!)
+                (w16-start-geom-placement-ws
+                 (lambda (ab px _py)
+                   (cond
+                     [(= ab 319) (if (<= px 44.0) 1 2)]
+                     [(= ab 329) (if (<= px 41.5) 1 2)]
+                     [else 2])))])
+    (define cc-u (mk-w16-u 9820 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define sp-u (mk-w16-u 9821 28 1 51.5 49.5 #:hp 1300.0 #:rad 1.5))
+    (define sp-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build starport-techlab 51.5 49.5))
+       (make-test-obs 5940 600 300 (list cc-u sp-u))
+       #:ws-conn ws #:game-info w3-ginfo))
+    (define tl-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 487))) sp-cmds))
+    (check-true "w16-p1-2-starport-blocked-east-slot-relocates-to-verified-5x3-pt"
+                (and (sc2-raw-unit-command? tl-cmd)
+                     (sc2-point2d? (sc2-raw-unit-command-target-pos tl-cmd))
+                     (<= (sc2-point2d-x (sc2-raw-unit-command-target-pos tl-cmd)) 41.5)
+                     (<= (unbox rpc-cnt) 2)))
+    (check-true "w16-p1-2-starport-reloc-487-encodes-valid-wire-point-cmd"
+                (and (sc2-raw-unit-command? tl-cmd)
+                     (> (bytes-length (encode-action-raw-unit-command tl-cmd)) 0)))
+    (cleanup!))
+
+  ;; 2b. Single Starport clear East slot -> fast in-place `#f` (0 flying downtime, 1 RPC)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
+  (let-values ([(ws rpc-cnt cleanup!)
+                (w16-start-geom-placement-ws
+                 (lambda (ab _px _py) (if (memv ab '(319 329)) 1 2)))])
+    (define cc-u (mk-w16-u 9825 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define sp-u (mk-w16-u 9826 28 1 38.5 38.5 #:hp 1300.0 #:rad 1.5))
+    (define sp-ok-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build starport-techlab 38.5 38.5))
+       (make-test-obs 5950 600 300 (list cc-u sp-u))
+       #:ws-conn ws #:game-info w3-ginfo))
+    (define tl-ok-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 487))) sp-ok-cmds))
+    (check-true "w16-p1-2-starport-clear-east-slot-builds-in-place-1-rpc"
+                (and (sc2-raw-unit-command? tl-ok-cmd)
+                     (eq? (sc2-raw-unit-command-target-pos tl-ok-cmd) #f)
+                     (= (unbox rpc-cnt) 1)))
+    (cleanup!))
+
+  ;; 2c. Add-on action-error invalidates ONLY the matching facility pos-cache entry (preserving unrelated
+  ;;     buildings like Barracks!), exposes `addon-blocked-facility-ids`, and relocates in 1 RPC
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (hash-set! SC2-PLACEMENT-POS-CACHE '(barracks 35 31 15) (list 5990 (sc2-point2d 35.5 31.5)))
+  (hash-set! SC2-PLACEMENT-POS-CACHE '(starport 52 50 18 addon-req) (list 5990 (sc2-point2d 51.5 49.5)))
+  (let-values ([(ws rpc-cnt cleanup!)
+                (w16-start-geom-placement-ws
+                 (lambda (ab px _py)
+                   (cond
+                     [(= ab 319) (if (<= px 44.0) 1 2)]
+                     [(= ab 329) (if (<= px 41.5) 1 2)]
+                     [else 2])))])
+    (define cc-u (mk-w16-u 9830 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define sp-u (mk-w16-u 9831 28 1 51.5 49.5 #:hp 1300.0 #:rad 1.5))
+    (define obs-ae
+      (sc2-observation 6000 (sc2-player-common 1 600 300 40 60 20 20 0 0 0 0)
+                       (list cc-u sp-u) '() '() #f '() '() '()
+                       (list (hash 'unit-tag 9831 'ability-id 487 'result 19))
+                       '() '()))
+    (define obs-ae-h (sc2-observation->runtime-obs-hash obs-ae))
+    (check-true "w16-p1-2-build-action-error-targets-only-failed-bldg-pos-cache"
+                (and (not (hash-has-key? SC2-PLACEMENT-POS-CACHE '(starport 52 50 18 addon-req)))
+                     (hash-has-key? SC2-PLACEMENT-POS-CACHE '(barracks 35 31 15))))
+    (check-true "w16-p1-2-addon-action-error-exposes-blocked-facility-id-in-obs"
+                (and (memv 9831 (hash-ref obs-ae-h 'addon-blocked-facility-ids '())) #t))
+    (define sp-ae-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build starport-techlab 51.5 49.5))
+       (make-test-obs 6004 600 300 (list cc-u sp-u))
+       #:ws-conn ws #:game-info w3-ginfo))
+    (define tl-ae-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 487))) sp-ae-cmds))
+    (check-true "w16-p1-2-addon-action-error-skips-recheck-and-relocates-in-1-rpc"
+                (and (sc2-raw-unit-command? tl-ae-cmd)
+                     (sc2-point2d? (sc2-raw-unit-command-target-pos tl-ae-cmd))
+                     (= (unbox rpc-cnt) 1)))
+    (cleanup!))
+
+  ;; 2d. Unrelocatable add-on facility (both East slot & all 5x3 relocation spots rejected) enters 64-loop per-tag backoff (ZERO spam!)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
+  (let-values ([(ws rpc-cnt cleanup!)
+                (w16-start-geom-placement-ws (lambda (_ab _px _py) 2))])
+    (define cc-u (mk-w16-u 9840 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define rax-u (mk-w16-u 9841 21 1 40.5 40.5 #:hp 1000.0 #:rad 1.5))
+    (define c1 (translate-bot-actions->sc2-raw-commands
+                '((build barracks-techlab 40.5 40.5))
+                (make-test-obs 7000 400 200 (list cc-u rax-u))
+                #:ws-conn ws #:game-info w3-ginfo))
+    (define rpcs-after-1 (unbox rpc-cnt))
+    (define c2 (translate-bot-actions->sc2-raw-commands
+                '((build barracks-techlab 40.5 40.5))
+                (make-test-obs 7004 400 200 (list cc-u rax-u))
+                #:ws-conn ws #:game-info w3-ginfo))
+    (define c3 (translate-bot-actions->sc2-raw-commands
+                '((build barracks-techlab 40.5 40.5))
+                (make-test-obs 7040 400 200 (list cc-u rax-u))
+                #:ws-conn ws #:game-info w3-ginfo))
+    (define rpcs-after-3 (unbox rpc-cnt))
+    (void (translate-bot-actions->sc2-raw-commands
+           '((build barracks-techlab 40.5 40.5))
+           (make-test-obs 7068 400 200 (list cc-u rax-u))
+           #:ws-conn ws #:game-info w3-ginfo))
+    (define rpcs-after-retry (unbox rpc-cnt))
+    (check-true "w16-p1-2-unrelocatable-addon-emits-zero-doomed-cmds-and-backs-off-64-loops"
+                (and (null? (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 421))) (append c1 c2 c3)))
+                     (= rpcs-after-1 2)
+                     (= rpcs-after-3 rpcs-after-1)
+                     (> rpcs-after-retry rpcs-after-3)))
+    (cleanup!))
+
+  ;; 3. Core macro (`barracks`, `supply-depot`) preempts secondary (`bunker`, `engineering-bay`) for the 2-RPC/step budget
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (let-values ([(ws rpc-cnt cleanup!)
+                (w16-start-geom-placement-ws (lambda (_ab _px _py) 1))])
+    (define cc-u (mk-w16-u 9850 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define scvs (for/list ([i (in-range 4)])
+                   (mk-w16-u (+ 9851 i) 45 1 (+ 32.0 i) 26.0 #:hp 45.0 #:rad 0.375)))
+    (define prio-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build bunker 36.5 34.5)
+         (build engineering-bay 36.5 39.5)
+         (build barracks 36.5 28.5)
+         (build supply-depot 32.5 35.5))
+       (make-test-obs 7200 1000 300 (cons cc-u scvs))
+       #:ws-conn ws #:game-info w3-ginfo))
+    (define emitted-abs
+      (for/list ([c (in-list prio-cmds)] #:when (sc2-raw-unit-command? c))
+        (sc2-raw-unit-command-ability-id c)))
+    (check-true "w16-p1-2-core-macro-barracks-and-depot-preempt-bunker-and-ebay"
+                (and (<= (unbox rpc-cnt) 2)
+                     (memv 321 emitted-abs)
+                     (memv 319 emitted-abs)
+                     (not (memv 324 emitted-abs))
+                     (not (memv 322 emitted-abs))))
+    (cleanup!))
+
+  ;; 4. Latency hygiene (`#13` Incorporeal AIE): moving map critters & mineral mine-out never bust territory/expansion BFS cache
+  (set-box! SC2-TERRITORY-FIELD-CACHE #f)
+  (define g64 (make-bytes (* 64 64) 1))
+  (define p64 (sc2-image-grid 8 64 64 g64 #f #f))
+  (define gi64
+    (sc2-game-info "CritterTest" "CritterTest.SC2Map"
+                   (list (hash 'player-id 1 'race-requested 'Zerg)
+                         (hash 'player-id 2 'race-requested 'Terran))
+                   (cons 64 64) (hash 'x0 0 'y0 0 'x1 64 'y1 64)
+                   (list (sc2-point2d 52.0 52.0))
+                   p64 p64 p64))
+  (define h-u (mk-w16-u 9860 86 1 12.0 12.0 #:hp 1500.0 #:rad 2.75))
+  (define crit-a (mk-w16-u 9861 335 3 25.0 25.0 #:hp 10.0 #:rad 0.375))
+  (define crit-b (mk-w16-u 9861 335 3 26.5 25.0 #:hp 10.0 #:rad 0.375))
+  (define obs-c1 (sc2-observation 4 (sc2-player-common 1 50 0 12 14 0 12 0 0 0 0)
+                                  (list h-u crit-a) '() '() #f '() '() '() '() '() '()))
+  (define obs-c2 (sc2-observation 8 (sc2-player-common 1 50 0 12 14 0 12 0 0 0 0)
+                                  (list h-u crit-b) '() '() #f '() '() '() '() '() '()))
+  (define hc1 (sc2-observation->runtime-obs-hash obs-c1 #:game-info gi64 #:defer-expansions? #f))
+  (define hc2 (sc2-observation->runtime-obs-hash obs-c2 #:game-info gi64 #:defer-expansions? #f))
+  (define ord1 (order-expansions-from-origin (list (hash 'x 24.0 'y 12.0) (hash 'x 44.0 'y 44.0))
+                                             12.0 12.0 p64 (list crit-b)
+                                             #:bfs (hash-ref hc1 'our-ground-bfs)))
+  (check-true "w16-p1-2-walking-critter-preserves-exact-cached-ground-bfs-and-exp-order"
+              (and (eq? (hash-ref hc1 'our-ground-bfs) (hash-ref hc2 'our-ground-bfs))
+                   (eq? (hash-ref hc1 'enemy-ground-bfs) (hash-ref hc2 'enemy-ground-bfs))
+                   (= (hash-ref (first ord1) 'x) 24.0))))
+
+(printf "[Wave 17] Testing W17-P0-1 targeted pos-cache invalidation + >=48f TTL + 1-miss 5x3->3x3, W17-P0-2 Lair/Terran producers, & W17-P0-3 hovering-air gas fallback...\n")
+(let ()
+  (define (mk-w17-u tag utype alliance x y
+                    #:hp [hp 100.0] #:shield [sh 0.0] #:rad [rad 1.0]
+                    #:bp [bp 1.0] #:flying? [fly? #f] #:powered? [pow? #t]
+                    #:orders [ords '()] #:addon [addon 0]
+                    #:assigned [asgn 0] #:ideal [idl 0] #:vesp [vesp 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y (if fly? 12.0 8.0)) 0.0 rad bp 0 #f #f fly?
+              hp hp sh sh 0.0 0.0 0 0 #f #f #f pow? #f ords addon '() asgn idl 0.0 0 0 0 vesp))
+
+  ;; W17-P0-1a: Targeted pos-cache invalidation: failed `build-photon-cannon` (887) at (30,30) removes
+  ;; ONLY `(photon-cannon, ~30, ~30)` while preserving `gateway` at (30,30) AND `photon-cannon` at (90,90)!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (hash-set! SC2-PLACEMENT-POS-CACHE '(photon-cannon 30 30 6) (list 12000 (sc2-point2d 32.0 30.0)))
+  (hash-set! SC2-PLACEMENT-POS-CACHE '(photon-cannon 90 90 6) (list 12000 (sc2-point2d 92.0 90.0)))
+  (hash-set! SC2-PLACEMENT-POS-CACHE '(gateway 30 30 6) (list 12000 (sc2-point2d 33.5 31.5)))
+  (define probe-u (mk-w17-u 9901 84 1 30.5 30.5 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+  (define obs-pc-err
+    (sc2-observation 12004 (sc2-player-common 1 800 100 100 72 30 42 0 0 0 0)
+                     (list probe-u) '() '() #f '() '() '()
+                     (list (hash 'unit-tag 9901 'ability-id 887 'result 19))
+                     '() '()))
+  (void (sc2-observation->runtime-obs-hash obs-pc-err))
+  (check-true "w17-p0-1a-failed-photon-cannon-preserves-gateway-and-distant-cannon-pos-cache"
+              (and (not (hash-has-key? SC2-PLACEMENT-POS-CACHE '(photon-cannon 30 30 6)))
+                   (hash-has-key? SC2-PLACEMENT-POS-CACHE '(gateway 30 30 6))
+                   (hash-has-key? SC2-PLACEMENT-POS-CACHE '(photon-cannon 90 90 6))))
+
+  ;; W17-P0-1b: `neg-cd-ttl >= 48f` for Terran production (`barracks`) and `64f` for late-game static
+  ;; defense (`photon-cannon` >= 5400f, even when requested coords jitter across Pylons!), while keeping
+  ;; fast `12f` recovery for supply (`pylon`).
+  (define (w17-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59917 "/sc2api" c-in c-out #f 1))
+    (define rpc-cnt (box 0))
+    (define saw-319? (box #f))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (set-box! rpc-cnt (add1 (unbox rpc-cnt)))
+             (define req-f (decode-protobuf-message payload))
+             (define req-id-p (assoc 97 req-f))
+             (define id-b (if req-id-p (encode-uint32 97 (third req-id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (when (= ab 319) (set-box! saw-319? #t))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws rpc-cnt saw-319?
+            (lambda ()
+              (close-output-port c-out)
+              (close-input-port c-in)
+              (thread-wait th))))
+
+  ;; 1b-i: Terran `barracks` neg-cd >= 48 loops
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (let-values ([(ws rpc-cnt _saw319 cleanup!) (w17-start-mock-ws (lambda (_ab _px _py) 2))])
+    (define cc-u (mk-w17-u 9910 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define r1 (find-verified-building-placement ws 321 32.0 30.0 (list cc-u)
+                                                 #:bldg-sym 'barracks #:game-info w3-ginfo #:cur-loop 6000))
+    (define rpcs-1 (unbox rpc-cnt))
+    (define r2 (find-verified-building-placement ws 321 32.0 30.0 (list cc-u)
+                                                 #:bldg-sym 'barracks #:game-info w3-ginfo #:cur-loop 6036))
+    (define rpcs-2 (unbox rpc-cnt))
+    (define r3 (find-verified-building-placement ws 321 32.0 30.0 (list cc-u)
+                                                 #:bldg-sym 'barracks #:game-info w3-ginfo #:cur-loop 6052))
+    (define rpcs-3 (unbox rpc-cnt))
+    (check-true "w17-p0-1b-terran-barracks-neg-cd-ttl-at-least-48-loops"
+                (and (not r1) (not r2) (not r3)
+                     (= rpcs-2 rpcs-1)
+                     (> rpcs-3 rpcs-2)))
+    (cleanup!))
+
+  ;; 1b-ii: Late-game `photon-cannon` (>= 5400f) uses 64-loop TTL & skips jittered-anchor retries across Pylons,
+  ;;        while supply `pylon` retains fast 12-loop recovery!
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (let-values ([(ws rpc-cnt _saw319 cleanup!) (w17-start-mock-ws (lambda (_ab _px _py) 2))])
+    (define py1 (mk-w17-u 9915 60 1 30.0 30.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define py2 (mk-w17-u 9916 60 1 56.0 30.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define p-units (list py1 py2))
+    (void (find-verified-building-placement ws 887 30.0 30.0 p-units
+                                            #:anchor-points '((30.0 . 30.0) (56.0 . 30.0))
+                                            #:bldg-sym 'photon-cannon #:game-info w3-ginfo #:cur-loop 12000))
+    (define pc-rpcs-1 (unbox rpc-cnt))
+    ;; Jittered primary anchor (32, 31) at +40 loops MUST still hit 64f late-game cooldown (0 RPCs)!
+    (void (find-verified-building-placement ws 887 32.0 31.0 p-units
+                                            #:anchor-points '((32.0 . 31.0) (30.0 . 30.0) (56.0 . 30.0))
+                                            #:bldg-sym 'photon-cannon #:game-info w3-ginfo #:cur-loop 12040))
+    (define pc-rpcs-2 (unbox rpc-cnt))
+    (void (find-verified-building-placement ws 887 32.0 31.0 p-units
+                                            #:anchor-points '((32.0 . 31.0) (30.0 . 30.0) (56.0 . 30.0))
+                                            #:bldg-sym 'photon-cannon #:game-info w3-ginfo #:cur-loop 12068))
+    (define pc-rpcs-3 (unbox rpc-cnt))
+    (check-true "w17-p0-1b-late-game-photon-cannon-64f-ttl-blocks-jittered-thrash"
+                (and (= pc-rpcs-1 1)
+                     (= pc-rpcs-2 1)
+                     (= pc-rpcs-3 2)))
+    ;; Early supply `pylon` keeps fast 12-loop recovery
+    (define before-py (unbox rpc-cnt))
+    (void (find-verified-building-placement ws 881 30.0 30.0 p-units
+                                            #:bldg-sym 'pylon #:game-info w3-ginfo #:cur-loop 12080))
+    (void (find-verified-building-placement ws 881 30.0 30.0 p-units
+                                            #:bldg-sym 'pylon #:game-info w3-ginfo #:cur-loop 12096))
+    (check-eqv "w17-p0-1b-supply-pylon-keeps-fast-12f-recovery"
+               (- (unbox rpc-cnt) before-py) 2)
+    (cleanup!))
+
+  ;; W17-P0-1c: Terran 1-miss `5x3 -> 3x3` / less-crowded base fallback & cached 3x3 freshness
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (let-values ([(ws rpc-cnt saw-319? cleanup!)
+                (w17-start-mock-ws
+                 (lambda (ab px _py)
+                   ;; Reject ALL 5x3 East add-on slots (319) and reject crowded main (px < 56.0);
+                   ;; accept 3x3 Starport (329) ONLY at the less-crowded natural (px >= 56.0)!
+                   (if (and (= ab 329) (>= px 56.0)) 1 2)))])
+    (define main-cc (mk-w17-u 9920 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define nat-cc  (mk-w17-u 9921 18 1 64.5 30.5 #:hp 1500.0 #:rad 2.75))
+    (define main-r1 (mk-w17-u 9922 21 1 34.5 28.5 #:hp 1000.0 #:rad 1.5))
+    (define main-r2 (mk-w17-u 9923 21 1 34.5 33.5 #:hp 1000.0 #:rad 1.5))
+    (define main-scv1 (mk-w17-u 9924 45 1 30.0 26.0 #:hp 45.0 #:rad 0.375))
+    (define main-scv2 (mk-w17-u 9925 45 1 31.0 26.0 #:hp 45.0 #:rad 0.375))
+    (define main-scv3 (mk-w17-u 9926 45 1 32.0 26.0 #:hp 45.0 #:rad 0.375))
+    (define t-units (list main-cc nat-cc main-r1 main-r2 main-scv1 main-scv2 main-scv3))
+    ;; 1st attempt: falls back to natural 3x3 AND records 5x3 miss in `SC2-TERRAN-5X3-MISS-CACHE`!
+    (define sp-cmds-1
+      (translate-bot-actions->sc2-raw-commands
+       '((build starport 32.0 30.0))
+       (make-test-obs 6500 500 300 t-units)
+       #:ws-conn ws #:game-info w3-ginfo))
+    (define sp-cmd-1
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 329))) sp-cmds-1))
+    (check-true "w17-p0-1c-starport-1st-miss-places-natural-3x3-and-records-5x3-miss"
+                (and (sc2-raw-unit-command? sp-cmd-1)
+                     (sc2-point2d? (sc2-raw-unit-command-target-pos sp-cmd-1))
+                     (>= (sc2-point2d-x (sc2-raw-unit-command-target-pos sp-cmd-1)) 56.0)
+                     (> (hash-count SC2-TERRAN-5X3-MISS-CACHE) 0)))
+    ;; Clear pos-cache (simulate next Starport build) while keeping `SC2-TERRAN-5X3-MISS-CACHE`:
+    ;; 2nd attempt MUST skip 5x3 dual-query (`saw-319? = #f`) and place directly at natural in 1 single-query RPC!
+    (hash-clear! SC2-PLACEMENT-POS-CACHE)
+    (set-box! rpc-cnt 0)
+    (set-box! saw-319? #f)
+    (define sp-cmds-2
+      (translate-bot-actions->sc2-raw-commands
+       '((build starport 32.0 30.0))
+       (make-test-obs 6504 500 300 t-units)
+       #:ws-conn ws #:game-info w3-ginfo))
+    (define sp-cmd-2
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 329))) sp-cmds-2))
+    (check-true "w17-p0-1c-after-1-miss-starport-uses-pure-3x3-single-rpc-at-less-crowded-base"
+                (and (sc2-raw-unit-command? sp-cmd-2)
+                     (= (unbox rpc-cnt) 1)
+                     (not (unbox saw-319?))
+                     (>= (sc2-point2d-x (sc2-raw-unit-command-target-pos sp-cmd-2)) 56.0)))
+    ;; 3rd call (pos-cache still warm with cached 3x3 point!) MUST hit positive cache (0 RPCs)!
+    (set-box! rpc-cnt 0)
+    (define sp-cmds-3
+      (translate-bot-actions->sc2-raw-commands
+       '((build starport 32.0 30.0))
+       (make-test-obs 6508 500 300 t-units)
+       #:ws-conn ws #:game-info w3-ginfo))
+    (check-true "w17-p0-1c-cached-3x3-fallback-spot-stays-fresh-0-rpcs"
+                (and (pair? (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 329))) sp-cmds-3))
+                     (= (unbox rpc-cnt) 0)))
+    (cleanup!))
+
+  ;; W17-P0-2: `#1 Z` `(morph lair)` skips busy/cooldown Hatcheries & ignores non-blocking Rally orders,
+  ;;           failed `1216` action-error clears cooldown, and `#17 T` trains SCV+Marine+SiegeTank cleanly!
+  (define h1-busy (mk-w17-u 9931 86 1 32.0 32.0 #:hp 1500.0 #:rad 2.75
+                            #:orders (list (sc2-unit-order 1632 #f 0 0.25))))
+  (define h2-cd   (mk-w17-u 9932 86 1 46.0 32.0 #:hp 1500.0 #:rad 2.75))
+  (define h3-rly  (mk-w17-u 9933 86 1 60.0 32.0 #:hp 1500.0 #:rad 2.75
+                            #:orders (list (sc2-unit-order 212 (sc2-point2d 55.0 35.0) 0 0.0))))
+  (define h4-far  (mk-w17-u 9934 86 1 90.0 32.0 #:hp 1500.0 #:rad 2.75))
+  (define h5-far  (mk-w17-u 9935 86 1 110.0 32.0 #:hp 1500.0 #:rad 2.75))
+  (define z-hatch-units (list h1-busy h2-cd h3-rly h4-far h5-far))
+  ;; Step 1 at f=9100: morph lair selects h2-cd (closest idle Hatchery to home 32,32) and puts h2-cd on 24f cooldown
+  (define lair-cmds-1
+    (translate-bot-actions->sc2-raw-commands
+     '((morph lair))
+     (make-test-obs 9100 1500 500 z-hatch-units)))
+  ;; Step 2 at f=9104 (4 frames later, h2-cd on cooldown!): MUST fall through to h3-rly (ignoring Rally order 212!)
+  (define lair-cmds-2
+    (translate-bot-actions->sc2-raw-commands
+     '((morph lair))
+     (make-test-obs 9104 1500 500 z-hatch-units)))
+  (define lair-c1 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1216))) lair-cmds-1))
+  (define lair-c2 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1216))) lair-cmds-2))
+  (check-true "w17-p0-2-morph-lair-skips-busy-and-cooldown-hatcheries-and-ignores-rally-order"
+              (and (sc2-raw-unit-command? lair-c1)
+                   (equal? (sc2-raw-unit-command-unit-tags lair-c1) '(9932))
+                   (sc2-raw-unit-command? lair-c2)
+                   (equal? (sc2-raw-unit-command-unit-tags lair-c2) '(9933))))
+  ;; Failed `1216` action-error on h2-cd (9932) immediately releases its cooldown so it is selectable again at f=9108!
+  (define obs-lair-err
+    (sc2-observation 9108 (sc2-player-common 1 1500 500 100 70 20 50 0 0 0 0)
+                     z-hatch-units '() '() #f '() '() '()
+                     (list (hash 'unit-tag 9932 'ability-id 1216 'result 19))
+                     '() '()))
+  (void (sc2-observation->runtime-obs-hash obs-lair-err))
+  (define lair-cmds-3
+    (translate-bot-actions->sc2-raw-commands '((morph lair)) obs-lair-err))
+  (define lair-c3 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1216))) lair-cmds-3))
+  (check-true "w17-p0-2-lair-action-error-releases-cooldown-for-immediate-retry"
+              (and (sc2-raw-unit-command? lair-c3)
+                   (equal? (sc2-raw-unit-command-unit-tags lair-c3) '(9932))))
+  ;; `#17 T` wire producer check: idle OC (with Rally order 3690), Barracks(TechLab), Factory(TechLab) train all 3!
+  (define oc-u   (mk-w17-u 9940 132 1 30.0 30.0 #:hp 1500.0 #:rad 2.75
+                           #:orders (list (sc2-unit-order 3690 (sc2-point2d 25.0 30.0) 0 0.0))))
+  (define rax-tl (mk-w17-u 9942 37  1 38.5 29.5 #:hp 400.0 #:rad 1.0))
+  (define rax-u  (mk-w17-u 9941 21  1 36.0 30.0 #:hp 1000.0 #:rad 1.5 #:addon 9942))
+  (define fac-tl (mk-w17-u 9944 39  1 44.5 29.5 #:hp 400.0 #:rad 1.0))
+  (define fac-u  (mk-w17-u 9943 27  1 42.0 30.0 #:hp 1250.0 #:rad 1.5 #:addon 9944))
+  (define t17-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((train scv) (train marine) (train siege-tank))
+     (make-test-obs 6200 1800 500 (list oc-u rax-u rax-tl fac-u fac-tl))))
+  (check-true "w17-p0-2-terran-trains-scv-marine-siege-tank-despite-rally-order"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 524))) t17-cmds)
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 560))) t17-cmds)
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 591))) t17-cmds)))
+
+  ;; W17-P0-2b (`#17`/`#11` salvage APM-burn freeze defense-in-depth):
+  ;;   1. Loaded Bunker (cargo > 0) MUST NOT emit salvage (32);
+  ;;   2. Empty completed Bunker emits salvage (32) once as non-urgent P3 (NEVER P0!), then enters >=112f cooldown;
+  ;;   3. Repeated `(salvage ...)` spam NEVER drains APM governor or starves P1 macro `(train scv/marine)`!
+  (define bnk-loaded (sc2-unit 1 1 9945 24 1 (sc2-point3d 48.0 30.0 8.0) 0.0 1.5 1.0 0 #f #t #f
+                               400.0 400.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #f #f '() 0 '() 0 0 0.0 0 0 0 0 '() 2 4))
+  (define bnk-empty  (sc2-unit 1 1 9946 24 1 (sc2-point3d 52.0 30.0 8.0) 0.0 1.5 1.0 0 #f #t #f
+                               400.0 400.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #f #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 4))
+  (define salv-cmds-1
+    (translate-bot-actions->sc2-raw-commands
+     '((salvage 9945) (salvage 9946))
+     (make-test-obs 6300 800 200 (list oc-u bnk-loaded bnk-empty))))
+  (define salv-c1 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 32))) salv-cmds-1))
+  (define salv-cmds-2
+    (translate-bot-actions->sc2-raw-commands
+     '((salvage 9946))
+     (make-test-obs 6304 800 200 (list oc-u bnk-loaded bnk-empty))))
+  (define salv-cmds-3
+    (translate-bot-actions->sc2-raw-commands
+     '((salvage 9946))
+     (make-test-obs 6416 800 200 (list oc-u bnk-loaded bnk-empty))))
+  (check-true "w17-p0-2b-salvage-requires-empty-bunker-p3-non-urgent-and-112f-cooldown"
+              (and (sc2-raw-unit-command? salv-c1)
+                   (equal? (sc2-raw-unit-command-unit-tags salv-c1) '(9946))
+                   (not (urgent-survival-cmd? salv-c1))
+                   (= (wire-cmd-priority-tier salv-c1) 3)
+                   (null? (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 32))) salv-cmds-2))
+                   (pair? (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 32))) salv-cmds-3))))
+  ;; Verify 50 steps of repeated `(salvage 9946)` + `(train scv)` NEVER starves P1 SCV training under APM governor!
+  (define salv-gov (make-wire-apm-governor))
+  (define p1-scv-emitted
+    (for/sum ([k (in-range 50)])
+      (define lp (+ 6500 (* 4 k)))
+      (define raws (translate-bot-actions->sc2-raw-commands
+                    '((salvage 9946) (train scv))
+                    (make-test-obs lp 800 200 (list oc-u bnk-empty))))
+      (define govd (govern-sc2-wire-actions! salv-gov raws lp))
+      (if (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 524))) govd)
+          1 0)))
+  (check-true "w17-p0-2b-repeated-salvage-never-starves-p1-macro-under-apm-governor"
+              (= p1-scv-emitted 50))
+
+  ;; W17-P0-3: `#28 Z` (`550s 0G`) & `#10 Z` (`243s 0G`) emergency gas-harvest fallback under hovering air
+  ;; Case 1: All bases unsafe under hovering Tempests (`19G`, `0` gas workers) -> assigns to SAFEST Extractor
+  ;;         (prefers air-only threatened Extractor 9955 over ground-zealot-camped Extractor 9956!)
+  (define th-m  (mk-w17-u 9951 100 1 32.0 32.0 #:hp 2000.0 #:rad 2.75 #:assigned 16 #:ideal 16))
+  (define th-n  (mk-w17-u 9952 86  1 64.0 32.0 #:hp 1500.0 #:rad 2.75 #:assigned 16 #:ideal 16))
+  (define ex-air-only (mk-w17-u 9955 88 1 28.0 26.0 #:hp 500.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 1800))
+  (define ex-gnd-camp (mk-w17-u 9956 88 1 60.0 26.0 #:hp 500.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 1800))
+  (define min-m (mk-w17-u 9957 341 3 25.0 32.0 #:hp 1000.0 #:rad 1.0))
+  (define min-n (mk-w17-u 9958 341 3 57.0 32.0 #:hp 1000.0 #:rad 1.0))
+  (define z-drones-1
+    (for/list ([i (in-range 20)])
+      (mk-w17-u (+ 9960 i) 104 1
+                (+ (if (< i 10) 27.0 59.0) (* 0.25 (modulo i 5)))
+                (+ 31.0 (* 0.3 (quotient (modulo i 10) 5)))
+                #:hp 40.0 #:rad 0.375
+                #:orders (list (sc2-unit-order 298 #f (if (< i 10) 9957 9958) 0.0)))))
+  (define tempests-both
+    (list (mk-w17-u 9991 496 4 38.0 36.0 #:hp 200.0 #:shield 100.0 #:rad 1.25 #:flying? #t)
+          (mk-w17-u 9992 496 4 39.5 36.0 #:hp 200.0 #:shield 100.0 #:rad 1.25 #:flying? #t)
+          (mk-w17-u 9993 496 4 70.0 36.0 #:hp 200.0 #:shield 100.0 #:rad 1.25 #:flying? #t)
+          (mk-w17-u 9994 496 4 71.5 36.0 #:hp 200.0 #:shield 100.0 #:rad 1.25 #:flying? #t)
+          ;; Close enemy ground Zealot right on top of `ex-gnd-camp` (60, 26)!
+          (mk-w17-u 9995 73  4 61.0 27.0 #:hp 100.0 #:shield 50.0 #:rad 0.5 #:flying? #f)))
+  (define obs-gas-lock
+    (sc2-observation 12500 (sc2-player-common 1 600 19 80 44 4 20 0 0 0 0)
+                     (append (list th-m th-n ex-air-only ex-gnd-camp min-m min-n) z-drones-1 tempests-both)
+                     '() '() #f '() '() '() '() '() '()))
+  (define gas-fb-cmds (saturate-workers-and-gas-commands obs-gas-lock))
+  (check-true "w17-p0-3-hovering-tempests-19g-assigns-drone-to-safest-extractor"
+              (ormap (lambda (c)
+                       (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-ability-id c) 3666)
+                            (= (sc2-raw-unit-command-target-unit-tag c) 9955)))
+                     gas-fb-cmds))
+
+  ;; Case 2: Safe 3rd Hatchery (0 Extractors!) + unsafe Main with 3 Drones ALREADY mining safest Extractor 9955
+  ;;         at 19G: `0b` evacuation MUST NOT pull those 3 emergency gas Drones off 9955 (zero oscillation)!
+  (define th-3rd (mk-w17-u 9953 86 1 96.0 32.0 #:hp 1500.0 #:rad 2.75 #:assigned 6 #:ideal 16))
+  (define min-3  (mk-w17-u 9959 341 3 103.0 32.0 #:hp 1000.0 #:rad 1.0))
+  (define ex-air-full (mk-w17-u 9955 88 1 28.0 26.0 #:hp 500.0 #:rad 1.5 #:assigned 3 #:ideal 3 #:vesp 1800))
+  (define gas-drones-3
+    (for/list ([i (in-range 3)])
+      (mk-w17-u (+ 9980 i) 104 1 (+ 28.5 (* 0.3 i)) 27.5 #:hp 40.0 #:rad 0.375
+                #:orders (list (sc2-unit-order 298 #f 9955 0.0)))))
+  (define obs-gas-hold
+    (sc2-observation 12504 (sc2-player-common 1 600 19 80 47 4 23 0 0 0 0)
+                     (append (list th-m th-n th-3rd ex-air-full ex-gnd-camp min-m min-n min-3)
+                             z-drones-1 gas-drones-3 tempests-both)
+                     '() '() #f '() '() '() '() '() '()))
+  (define gas-hold-cmds (saturate-workers-and-gas-commands obs-gas-hold))
+  (check-true "w17-p0-3-evacuation-protects-emergency-gas-drones-from-pulloff"
+              (not (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (ormap (lambda (gt) (memv gt (sc2-raw-unit-command-unit-tags c)))
+                                        '(9980 9981 9982))))
+                          gas-hold-cmds)))
+
+  ;; Case 3: When gas is already banked (>= 300G) and all Extractor bases are unsafe, do NOT force workers into unsafe gas!
+  (define obs-gas-banked
+    (sc2-observation 12508 (sc2-player-common 1 600 320 80 44 4 20 0 0 0 0)
+                     (append (list th-m th-n th-3rd ex-air-only ex-gnd-camp min-m min-n min-3)
+                             z-drones-1 tempests-both)
+                     '() '() #f '() '() '() '() '() '()))
+  (define gas-banked-cmds (saturate-workers-and-gas-commands obs-gas-banked))
+  (check-true "w17-p0-3-no-unsafe-gas-assignment-when-gas-already-banked"
+              (not (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (memv (sc2-raw-unit-command-target-unit-tag c) '(9955 9956))))
+                          gas-banked-cmds))))
+
+(printf "[Wave 18] Testing P1 macro-econ gas resat & P3 rescue, cargo fallback, gentle 1-worker pull, Factory TechLab nudge, and <3:30 rush placement...\n")
+(let ()
+  (define (mk-w18-u tag utype alliance x y
+                    #:hp [hp 100.0] #:shield [sh 0.0] #:rad [rad 1.0]
+                    #:bp [bp 1.0] #:flying? [fly? #f] #:powered? [pow? #t]
+                    #:orders [ords '()] #:addon [addon 0] #:buffs [buffs '()]
+                    #:assigned [asgn 0] #:ideal [idl 0]
+                    #:mins [mins 0] #:vesp [vesp 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y (if fly? 12.0 8.0)) 0.0 rad bp 0 #f #f #f
+              hp hp sh sh 0.0 0.0 mins vesp fly? #f #f pow? #f
+              ords addon buffs asgn idl 0.0 0 0 0 0 '() 0 0))
+
+  (define (w18-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59918 "/sc2api" c-in c-out #f 1))
+    (define rpc-cnt (box 0))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (set-box! rpc-cnt (add1 (unbox rpc-cnt)))
+             (define req-f (decode-protobuf-message payload))
+             (define req-id-p (assoc 97 req-f))
+             (define id-b (if req-id-p (encode-uint32 97 (third req-id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws rpc-cnt
+            (lambda ()
+              (close-output-port c-out)
+              (close-input-port c-in)
+              (thread-wait th))))
+
+  ;; W18-P0-2a: Gas resat elevated to P1 (`macro-econ-cmd?`, preserved across `coalesce-sc2-raw-commands`)
+  ;;            NEVER starves under continuous 8-cmd/step P2 combat micro (`>= 80/100`, was `0/100`),
+  ;;            AND routine unmarked P3 gather gets rescued via `>= 24f` overdue rescue!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (define cc-18  (mk-w18-u 9801 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75 #:assigned 14 #:ideal 16))
+  (define ref-18 (mk-w18-u 9802 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 1800))
+  (define min-18 (mk-w18-u 9803 341 3 22.0 28.5 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define scvs-18
+    (for/list ([i (in-range 14)])
+      (mk-w18-u (+ 9810 i) 45 1 (+ 24.5 (* 0.3 (modulo i 5))) (+ 27.5 (* 0.4 (quotient i 5)))
+                #:hp 45.0 #:rad 0.375
+                #:orders (list (sc2-unit-order 295 #f 9803 0.0)))))
+  (define obs-resat-18
+    (sc2-observation 7000 (sc2-player-common 1 500 19 80 42 14 14 0 0 0 0)
+                     (append (list cc-18 ref-18 min-18) scvs-18)
+                     '() '() #f '() '() '() '() '() '()))
+  (define resat-cmds-18 (saturate-workers-and-gas-commands obs-resat-18))
+  (define gas-cmd-18
+    (findf (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 3666)
+                  (= (sc2-raw-unit-command-target-unit-tag c) 9802)))
+           resat-cmds-18))
+  (check-true "w18-p0-2a-gas-resat-tagged-macro-econ-tier-1"
+              (and (sc2-raw-unit-command? gas-cmd-18)
+                   (macro-econ-cmd? gas-cmd-18)
+                   (= (wire-cmd-priority-tier gas-cmd-18) 1)))
+  (define coal-18
+    (coalesce-sc2-raw-commands (list gas-cmd-18)
+                               (seteqv 3666)
+                               (lambda (xs _n) (list xs))))
+  (check-true "w18-p0-2a-coalesce-preserves-macro-econ-tag"
+              (and (= (length coal-18) 1)
+                   (macro-econ-cmd? (first coal-18))
+                   (= (wire-cmd-priority-tier (first coal-18)) 1)))
+  (define gov-18 (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define p1-gas-emitted 0)
+  (for ([step (in-range 100)])
+    (define lp (+ 7000 (* 4 step)))
+    (define p2-micro
+      (for/list ([k (in-range 8)])
+        (sc2-raw-unit-command 16 (sc2-point2d (+ 60.0 k) (+ 60.0 (modulo step 5)))
+                              0 (list (+ 8100 k)) #f)))
+    (define fresh-gas-cmds (saturate-workers-and-gas-commands
+                            (sc2-observation lp (sc2-player-common 1 500 19 80 42 14 14 0 0 0 0)
+                                             (append (list cc-18 ref-18 min-18) scvs-18)
+                                             '() '() #f '() '() '() '() '() '())))
+    (define out (govern-sc2-wire-actions! gov-18 (append p2-micro fresh-gas-cmds) lp))
+    (when (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                  (= (sc2-raw-unit-command-target-unit-tag c) 9802)))
+                 out)
+      (set! p1-gas-emitted (add1 p1-gas-emitted))))
+  (check-true "w18-p0-2a-p1-gas-resat-never-starved-under-steady-p2-combat-micro"
+              (>= p1-gas-emitted 80))
+  ;; Separate governor stress test: steady 8-cmd/step P2 combat micro + 1 routine unmarked P3 gather/step
+  ;; -> P3 `>= 24f` overdue rescue emits `>= 10/100` (was `0/100`!) while P2 pins tokens around `4.0..5.22`!
+  (define gov-18-p3 (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define p3-routine-emitted 0)
+  (for ([step (in-range 100)])
+    (define lp (+ 7000 (* 4 step)))
+    (define p2-micro
+      (for/list ([k (in-range 8)])
+        (sc2-raw-unit-command 16 (sc2-point2d (+ 60.0 k) (+ 60.0 (modulo step 5)))
+                              0 (list (+ 8200 k)) #f)))
+    (define routine-p3 (sc2-raw-unit-command 3666 #f 9803 '(9899) #f))
+    (define out (govern-sc2-wire-actions! gov-18-p3 (append p2-micro (list routine-p3)) lp))
+    (when (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                  (equal? (sc2-raw-unit-command-unit-tags c) '(9899))))
+                 out)
+      (set! p3-routine-emitted (add1 p3-routine-emitted))))
+  (check-true "w18-p0-2a-p3-overdue-rescue-fires-under-steady-p2-combat-micro"
+              (>= p3-routine-emitted 10))
+
+  ;; W18-P0-2b: `eligible-for-gas?` skips carrying-cargo workers (picking clean empty worker instead),
+  ;;            and falls back cleanly when ALL workers hold minerals (`buff 271`) at `0` gas workers & `< 180G`!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (define scv-close-carrying
+    (mk-w18-u 9831 45 1 25.5 24.5 #:hp 45.0 #:rad 0.375 #:buffs '(271)
+              #:orders (list (sc2-unit-order 295 #f 9803 0.0))))
+  (define scv-farther-empty
+    (mk-w18-u 9832 45 1 27.5 27.5 #:hp 45.0 #:rad 0.375 #:buffs '()
+              #:orders (list (sc2-unit-order 295 #f 9803 0.0))))
+  (define filler-carrying-scvs
+    (for/list ([i (in-range 10)])
+      (mk-w18-u (+ 9833 i) 45 1 (+ 23.0 (* 0.3 i)) 29.0 #:hp 45.0 #:rad 0.375 #:buffs '(271)
+                #:orders (list (sc2-unit-order 295 #f 9803 0.0)))))
+  (define obs-cargo-mix
+    (sc2-observation 7500 (sc2-player-common 1 500 19 80 30 12 12 0 0 0 0)
+                     (append (list cc-18 ref-18 min-18 scv-close-carrying scv-farther-empty) filler-carrying-scvs)
+                     '() '() #f '() '() '() '() '() '()))
+  (define cargo-mix-cmds (saturate-workers-and-gas-commands obs-cargo-mix))
+  (check-true "w18-p0-2b-prefers-non-carrying-worker-over-closer-mineral-carrier"
+              (ormap (lambda (c)
+                       (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-target-unit-tag c) 9802)
+                            (equal? (sc2-raw-unit-command-unit-tags c) '(9832))))
+                     cargo-mix-cmds))
+  ;; ALL 11 mineral workers carrying mineral (`buff 271`) at 0 active gas workers & 19G:
+  ;; fallback MUST still assign the closest mineral-carrier (`9831`) to Refinery `9802` at P1!
+  (define obs-all-carrying
+    (sc2-observation 7504 (sc2-player-common 1 500 19 80 30 11 11 0 0 0 0)
+                     (append (list cc-18 ref-18 min-18 scv-close-carrying) filler-carrying-scvs)
+                     '() '() #f '() '() '() '() '() '()))
+  (define all-carrying-cmds (saturate-workers-and-gas-commands obs-all-carrying))
+  (check-true "w18-p0-2b-zero-gas-fallback-assigns-mineral-carrier-at-p1"
+              (ormap (lambda (c)
+                       (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-target-unit-tag c) 9802)
+                            (macro-econ-cmd? c)
+                            (equal? (sc2-raw-unit-command-unit-tags c) '(9831))))
+                     all-carrying-cmds))
+
+  ;; W18-P0-2c: Gentle 1-worker pull at `200..349G & < 100M` (never drops to 0 below 350G),
+  ;;            full pull still fires at `>= 350G`, and latch clears cleanly at `>= 220M` OR `< 180G`!
+  (define (mk-gas-state-obs lp mins vesp n-gas)
+    (define ref-g (mk-w18-u 9802 20 1 25.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned n-gas #:ideal 3 #:vesp 1800))
+    (define gas-ws
+      (for/list ([i (in-range n-gas)])
+        (mk-w18-u (+ 9860 i) 45 1 (+ 25.0 (* 0.2 i)) 24.2 #:hp 45.0 #:rad 0.375
+                  #:orders (list (sc2-unit-order 295 #f 9802 0.0)))))
+    (sc2-observation lp (sc2-player-common 1 mins vesp 80 40 (+ 14 n-gas) (+ 14 n-gas) 0 0 0 0)
+                     (append (list cc-18 ref-g min-18) gas-ws scvs-18)
+                     '() '() #f '() '() '() '() '() '()))
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (define mild-pull-2 (saturate-workers-and-gas-commands (mk-gas-state-obs 7600 60 220 2)))
+  (check-true "w18-p0-2c-mild-mineral-starve-trims-2-to-1-at-p1"
+              (ormap (lambda (c)
+                       (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-target-unit-tag c) 9803)
+                            (macro-econ-cmd? c)
+                            (or (memv 9860 (sc2-raw-unit-command-unit-tags c))
+                                (memv 9861 (sc2-raw-unit-command-unit-tags c)))))
+                     mild-pull-2))
+  (define mild-hold-1 (saturate-workers-and-gas-commands (mk-gas-state-obs 7604 60 220 1)))
+  (check-true "w18-p0-2c-mild-mineral-starve-keeps-1-gas-worker-never-zeroes-below-350g"
+              (and (not (ormap (lambda (c)
+                                 (and (sc2-raw-unit-command? c)
+                                      (memv 9860 (sc2-raw-unit-command-unit-tags c))))
+                               mild-hold-1))
+                   (not (ormap (lambda (c)
+                                 (and (sc2-raw-unit-command? c)
+                                      (= (sc2-raw-unit-command-target-unit-tag c) 9802)))
+                               mild-hold-1))))
+  (define high-pull-1 (saturate-workers-and-gas-commands (mk-gas-state-obs 7608 110 380 1)))
+  (check-true "w18-p0-2c-high-gas-380g-still-pulls-down-to-0"
+              (ormap (lambda (c)
+                       (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-target-unit-tag c) 9803)
+                            (memv 9860 (sc2-raw-unit-command-unit-tags c))))
+                     high-pull-1))
+  ;; Latch set from 380G/110M: recovering minerals to 225M (at 240G) clears latch & resaturates!
+  (define latch-clear-min (saturate-workers-and-gas-commands (mk-gas-state-obs 7612 225 240 1)))
+  (check-true "w18-p0-2c-hysteresis-latch-clears-at-225m-and-resaturates-at-p1"
+              (and (not (unbox SC2-GAS-PULL-HYSTERESIS-LATCH))
+                   (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-target-unit-tag c) 9802)
+                                 (macro-econ-cmd? c)))
+                          latch-clear-min)))
+  ;; Re-latch at 320G/110M, then drop gas to 170G (at 120M) -> clears latch & resaturates!
+  (void (saturate-workers-and-gas-commands (mk-gas-state-obs 7616 110 320 2)))
+  (define latch-clear-gas (saturate-workers-and-gas-commands (mk-gas-state-obs 7620 120 170 1)))
+  (check-true "w18-p0-2c-hysteresis-latch-clears-at-170g-and-resaturates-at-p1"
+              (and (not (unbox SC2-GAS-PULL-HYSTERESIS-LATCH))
+                   (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-target-unit-tag c) 9802)
+                                 (macro-econ-cmd? c)))
+                          latch-clear-gas)))
+
+  ;; W18-P0-3: `#14` `factory-techlab` ignores non-blocking Rally order (`3690`) AND issues in-place
+  ;;           add-on build (`454`, `target-pos = #f`) when a locally-clear East slot fails `QueryPlacement 319`
+  ;;           ONLY because a friendly SCV is walking across `(fx+2.5, fy-0.5)`!
+  (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
+  (let-values ([(ws _rpc-cnt cleanup!)
+                (w18-start-mock-ws (lambda (ab _px _py) (if (= ab 319) 2 1)))])
+    (define fac-rly (mk-w18-u 9851 27 1 34.5 30.5 #:hp 1250.0 #:rad 1.5
+                              #:orders (list (sc2-unit-order 3690 (sc2-point2d 44.0 34.0) 0 0.0))))
+    (define scv-on-slot (mk-w18-u 9852 45 1 37.0 30.0 #:hp 45.0 #:rad 0.375))
+    (define addon-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build factory-techlab))
+       (make-test-obs 6200 200 100 (list cc-18 fac-rly scv-on-slot))
+       #:ws-conn ws #:game-info w3-ginfo))
+    (define tl-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 454)))
+             addon-cmds))
+    (check-true "w18-p0-3-factory-techlab-ignores-rally-and-builds-inplace-when-friendly-unit-on-east-slot"
+                (and (sc2-raw-unit-command? tl-cmd)
+                     (equal? (sc2-raw-unit-command-unit-tags tl-cmd) '(9851))
+                     (not (sc2-raw-unit-command-target-pos tl-cmd))))
+    (cleanup!))
+
+  (define (w18-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+
+  ;; W18-P0-1: `<3:30` early-rush 2nd Gateway & 1-base Barracks pivot safely to uncontested in-main spots!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (let-values ([(ws _rpc-cnt cleanup!) (w18-start-mock-ws (lambda (_ab _px _py) 1))])
+    ;; Protoss `<3:30` (`f=2400`): natural Pylon (52,30) surrounded by 6 Zerglings, safe main Pylon at (28,34)
+    (define nex-18 (mk-w18-u 9871 59 1 28.5 28.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define py-main (mk-w18-u 9872 60 1 28.0 34.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define py-nat  (mk-w18-u 9873 60 1 52.0 30.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define prb-18  (mk-w18-u 9874 84 1 29.0 32.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define lings-nat
+      (for/list ([i (in-range 6)])
+        (mk-w18-u (+ 9875 i) 105 4 (+ 51.0 (* 0.5 i)) 30.0 #:hp 35.0 #:rad 0.375)))
+    (define obs-p-rush
+      (sc2-observation 2400 (sc2-player-common 1 250 50 31 20 2 18 0 0 0 0)
+                       (append (list nex-18 py-main py-nat prb-18) lings-nat)
+                       '()
+                       (list (sc2-power-source (sc2-point2d 28.0 34.0) 6.5 9872)
+                             (sc2-power-source (sc2-point2d 52.0 30.0) 6.5 9873))
+                       #f '() '() '() '() '() '()))
+    (define gw-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build gateway 52.0 30.0))
+       obs-p-rush #:ws-conn ws #:game-info w3-ginfo))
+    (define gw-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 883))) gw-cmds))
+    (define gw-pt (and gw-cmd (sc2-raw-unit-command-target-pos gw-cmd)))
+    (check-true "w18-p0-1-early-rush-2nd-gateway-pivots-to-uncontested-inmain-pylon"
+                (and (sc2-point2d? gw-pt)
+                     (< (w18-dist (sc2-point2d-x gw-pt) (sc2-point2d-y gw-pt) 28.0 34.0) 8.0)
+                     (> (w18-dist (sc2-point2d-x gw-pt) (sc2-point2d-y gw-pt) 52.0 30.0) 12.0)))
+
+    ;; Terran 1-base `<3:30` (`f=2400`): Zerglings attacking requested Barracks spot (38,30) -> pivots in-main!
+    (hash-clear! SC2-PLACEMENT-POS-CACHE)
+    (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+    (define scv-t-18 (mk-w18-u 9882 45 1 27.0 29.0 #:hp 45.0 #:rad 0.375))
+    (define lings-front
+      (for/list ([i (in-range 6)])
+        (mk-w18-u (+ 9883 i) 105 4 (+ 37.0 (* 0.4 i)) 30.0 #:hp 35.0 #:rad 0.375)))
+    (define rax-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build barracks 38.0 30.0))
+       (make-test-obs 2400 250 50 (append (list cc-18 min-18 scv-t-18) lings-front))
+       #:ws-conn ws #:game-info w3-ginfo))
+    (define rax-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) rax-cmds))
+    (define rax-pt (and rax-cmd (sc2-raw-unit-command-target-pos rax-cmd)))
+    (check-true "w18-p0-1-early-rush-1base-barracks-pivots-away-from-zerglings-to-inmain-safe-spot"
+                (and (sc2-point2d? rax-pt)
+                     (> (w18-dist (sc2-point2d-x rax-pt) (sc2-point2d-y rax-pt) 38.0 30.0) 5.5)))
+    (cleanup!)))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)
