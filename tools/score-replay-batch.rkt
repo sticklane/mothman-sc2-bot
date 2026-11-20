@@ -2151,6 +2151,30 @@
                  (hasheq 'kind early-opening-order-fault-kind
                          'opening_seq5 opening-seq5
                          'duration_sec (round1 dur))))
+          ;; L24-LOOP-2: Terran 1-1-1 Opening Stall (dur>=300s w/ OC1>180s, Fac1>200s, or Nat NONE/>200s)
+          (define t111-oc1-sec (hash-ref macro-timings 'orbital1_sec #f))
+          (define t111-fac1-sec (hash-ref macro-timings 'tech1_sec #f))
+          (define t111-reasons
+            (if (and (string=? our-race "Terran") (>= dur 300.0))
+                (append
+                 (if (or (not (real? t111-oc1-sec)) (> t111-oc1-sec 180.0))
+                     (list (format "oc1=~a" (if (real? t111-oc1-sec) (format "~as" (r0 t111-oc1-sec)) "NONE")))
+                     '())
+                 (if (or (not (real? t111-fac1-sec)) (> t111-fac1-sec 200.0))
+                     (list (format "fac1=~a" (if (real? t111-fac1-sec) (format "~as" (r0 t111-fac1-sec)) "NONE")))
+                     '())
+                 (if (or (not (real? our-nat-sec-val)) (> our-nat-sec-val 200.0))
+                     (list (format "nat=~a" (if (real? our-nat-sec-val) (format "~as" (r0 our-nat-sec-val)) "NONE")))
+                     '()))
+                '()))
+          (define terran-111-opening-stall? (pair? t111-reasons))
+          (define terran-111-opening-stall-anomaly
+            (and terran-111-opening-stall?
+                 (hasheq 'reasons t111-reasons
+                         'oc1_sec t111-oc1-sec
+                         'fac1_sec t111-fac1-sec
+                         'nat_sec our-nat-sec-val
+                         'duration_sec (round1 dur))))
 
           (define anomalies
             (hasheq 'zero_fire_retreat zero-fire-retreat-anomaly
@@ -2175,6 +2199,7 @@
                     'tvt_zero_tank tvt-zero-tank-anomaly
                     'zero_kill_collapse_loss zero-kill-collapse-loss-anomaly
                     'early_opening_order_fault early-opening-order-fault-anomaly
+                    'terran_111_opening_stall terran-111-opening-stall-anomaly
                     'air_aa_starvation air-aa-starvation))
 
           ;; Classify 0-combat opponent disconnects (e.g., mid-early client drop) separately from real combat wins
@@ -2342,6 +2367,8 @@
                               (hash-ref zero-kill-collapse-loss-anomaly 'scope))))
           (when early-opening-order-fault-anomaly
             (add-sig! (format "EARLY_OPEN_FAULT(~a)" early-opening-order-fault-kind)))
+          (when terran-111-opening-stall-anomaly
+            (add-sig! (format "TERRAN_111_STALL(~a)" (string-join t111-reasons ","))))
           (when (and (not (eq? res 'win)) (< trade-ratio 0.50) (>= lost-val 1500))
             (add-sig! "SEVERE_BAD_TRADES(<0.5x)"))
           (when (and (not (eq? res 'win)) (<= dur 330.0)) (add-sig! "EARLY_RUSH_LOSS"))
@@ -2474,6 +2501,8 @@
                   'zero_kill_collapse_loss zero-kill-collapse-loss?
                   'early_opening_order_fault early-opening-order-fault?
                   'early_opening_order_fault_kind early-opening-order-fault-kind
+                  'terran_111_opening_stall terran-111-opening-stall?
+                  'terran_111_opening_stall_reasons t111-reasons
                   'map_symmetry_kind map-symmetry-kind
                   't3_first_sec t3-first-sec
                   't3_first_bldg t3-first-bldg
@@ -2669,6 +2698,7 @@
                 'tvt_zero_tank_matches (count (lambda (r) (eq? (hash-ref r 'tvt_zero_tank #f) #t)) rows)
                 'zero_kill_collapse_losses (count (lambda (r) (eq? (hash-ref r 'zero_kill_collapse_loss #f) #t)) rows)
                 'early_opening_order_fault_matches (count (lambda (r) (eq? (hash-ref r 'early_opening_order_fault #f) #t)) rows)
+                'terran_111_opening_stall_matches (count (lambda (r) (eq? (hash-ref r 'terran_111_opening_stall #f) #t)) rows)
                 't3_started_matches (count (lambda (r) (real? (hash-ref r 't3_first_sec #f))) rows)
                 't3_early_2base_matches (count (lambda (r) (let ([b (hash-ref r 't3_bases_at_start #f)]) (and (exact-integer? b) (<= b 2)))) rows)
                 't3_premature_starve_matches (count (lambda (r) (eq? (hash-ref r 't3_premature_starve #f) #t)) rows)
@@ -2801,6 +2831,7 @@
                         'tvt_zero_tank (anom-cnt (lambda (a) (and (hash? (hash-ref a 'tvt_zero_tank #f)) #t)))
                         'zero_kill_collapse_losses (anom-cnt (lambda (a) (and (hash? (hash-ref a 'zero_kill_collapse_loss #f)) #t)))
                         'early_opening_order_fault (anom-cnt (lambda (a) (and (hash? (hash-ref a 'early_opening_order_fault #f)) #t)))
+                        'terran_111_opening_stall (anom-cnt (lambda (a) (and (hash? (hash-ref a 'terran_111_opening_stall #f)) #t)))
                         'air_aa_starvation (anom-cnt (lambda (a) (and (hash? (hash-ref a 'air_aa_starvation #f)) #t)))
                         'wall_timeout_tie wall-timeout-ties
                         'wall_timeout_winning_tie wall-timeout-winning-ties
@@ -2851,7 +2882,7 @@
                   (hash-ref agg 'wall_timeout_winning_ties 0)
                   (hash-ref agg 'step_spike_500ms_count 0))
           ""))
-    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a | 1BaseLock=~a | SpireDrop=~a | DripFeed=~a | TvT0Tank=~a | ZeroKill=~a | OpenFault=~a~a\n"
+    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a | 1BaseLock=~a | SpireDrop=~a | DripFeed=~a | TvT0Tank=~a | ZeroKill=~a | OpenFault=~a | T111Stall=~a~a\n"
             (hash-ref ac 'suicide_kite_retreat 0)
             (hash-ref ac 'zero_fire_retreat 0)
             (hash-ref ac 'escrow_lockout 0)
@@ -2864,6 +2895,7 @@
             (hash-ref ac 'tvt_zero_tank 0)
             (hash-ref ac 'zero_kill_collapse_losses 0)
             (hash-ref ac 'early_opening_order_fault 0)
+            (hash-ref ac 'terran_111_opening_stall 0)
             lat-str)))
 
 ;; -----------------------------------------------------------------------------
@@ -2872,27 +2904,36 @@
 
 (define (extract-slice-from-json js slice-key)
   (define ov (hash-ref js 'overall #f))
+  (define bc (hash-ref js 'by_cohort #f))
   (cond
     [(and (hash? ov) (hash-has-key? ov slice-key))
      (hash-ref ov slice-key)]
+    [(and (hash? bc) (hash-has-key? bc slice-key))
+     (hash-ref bc slice-key)]
     [(and (hash? (hash-ref js 'by_race #f)) (hash-has-key? (hash-ref js 'by_race) slice-key))
      (hash-ref (hash-ref js 'by_race) slice-key)]
     [else
-     ;; Fallback for v1 JSONs without precomputed `overall`/`by_race`: aggregate `matches` directly!
+     ;; Fallback for v1 JSONs without precomputed `overall`/`by_cohort`/`by_race`: aggregate `matches` directly!
      (define ms (hash-ref js 'matches '()))
+     (define (clean-m? m)
+       (not (or (eq? (hash-ref m 'opp_fault #f) #t)
+                (eq? (hash-ref m 'opp_early_crash #f) #t)
+                (eq? (hash-ref m 'opp_zero_combat_dc #f) #t)
+                (and (equal? (hash-ref m 'result "") "win")
+                     (<= (safe-num (hash-ref m 'duration_sec 999.0) 999.0) 15.0)))))
      (define filtered
        (case slice-key
          [(all) ms]
-         [(clean) (filter (lambda (m)
-                            (not (or (eq? (hash-ref m 'opp_early_crash #f) #t)
-                                     (and (equal? (hash-ref m 'result "") "win")
-                                          (<= (safe-num (hash-ref m 'duration_sec 999.0) 999.0) 15.0)))))
-                          ms)]
+         [(clean) (filter clean-m? ms)]
+         [(core_12 unseen_6)
+          (define want (symbol->string slice-key))
+          (filter (lambda (m)
+                    (and (clean-m? m)
+                         (equal? (hash-ref m 'opp_cohort "core_12") want)))
+                  ms)]
          [else (filter (lambda (m)
-                         (and (equal? (hash-ref m 'our_race "") (symbol->string slice-key))
-                              (not (or (eq? (hash-ref m 'opp_early_crash #f) #t)
-                                       (and (equal? (hash-ref m 'result "") "win")
-                                            (<= (safe-num (hash-ref m 'duration_sec 999.0) 999.0) 15.0))))))
+                         (and (clean-m? m)
+                              (equal? (hash-ref m 'our_race "") (symbol->string slice-key))))
                        ms)]))
      (aggregate-slice filtered)]))
 
@@ -2920,7 +2961,7 @@
             (pad-r "W@4m" 16) (pad-r "dW2->4" 16) (pad-r "W@6m" 16) (pad-r "PkArmy" 18)
             (pad-r "Bases" 18) (pad-r "SupBlk%" 18) "Upgs")
     (printf "~a\n" (make-string 165 #\-))
-    (for ([entry (in-list '((all . "ALL") (clean . "CLEAN") (Protoss . "Protoss(cl)") (Terran . "Terran(cl)") (Zerg . "Zerg(cl)")))])
+    (for ([entry (in-list '((all . "ALL") (clean . "CLEAN") (core_12 . "CORE12(cl)") (unseen_6 . "UNSEEN6(cl)") (Protoss . "Protoss(cl)") (Terran . "Terran(cl)") (Zerg . "Zerg(cl)")))])
       (define sk (car entry))
       (define lbl (cdr entry))
       (define b (extract-slice-from-json base-js sk))
@@ -3191,7 +3232,17 @@
                      (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
                      (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
                      (hash-ref of 'kind "?")
-                     (or (hash-ref of 'opening_seq5 #f) "-")))))
+                     (or (hash-ref of 'opening_seq5 #f) "-"))))
+
+  (section "18. Terran 1-1-1 Opening Stalls (dur>=5m w/ OC1>180s, Fac1>200s, or Nat NONE/>200s)"
+           (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'terran_111_opening_stall #f))) rows)
+           (lambda (r)
+             (define ts (hash-ref (hash-ref r 'anomalies) 'terran_111_opening_stall))
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | ~a\n"
+                     (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
+                     (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
+                     (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
+                     (string-join (hash-ref ts 'reasons '()) ", ")))))
 
 ;; -----------------------------------------------------------------------------
 ;; Main CLI Driver

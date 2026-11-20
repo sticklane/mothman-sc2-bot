@@ -5048,6 +5048,180 @@
                                       (macro-econ-cmd? c)))
                      mule-retask-cmds)))
 
+(printf "[Loop 24] Testing L24-P0-1 unpowered Protoss production repower guarantee (#51) & Zerg 8.5->11.5 creep tech fallback (#52)...\n")
+(let ()
+  (define (l24-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define (mk-l24-u tag utype alliance x y
+                    #:hp [hp 100.0] #:shield [sh 0.0] #:rad [rad 1.0]
+                    #:bp [bp 1.0] #:powered? [pow? #t] #:mins [mins 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 rad bp 0 #f #f #f
+              hp hp sh sh 0.0 0.0 mins 0 #f #f #f pow? #f
+              '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define (l24-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59924 "/sc2api" c-in c-out #f 1))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define req-id-p (assoc 97 req-f))
+             (define id-b (if req-id-p (encode-uint32 97 (third req-id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+
+  ;; L24-P0-1a (`#51` 3D Visual-QA): Unpowered East Gateway (39.5, 28.5) under 12-Pool Ling rush at (42.5, 28.5)
+  ;; with minerals East/South so `inmain-safe-anchors` pull WEST to ~22.5 -> repower Pylon MUST still land
+  ;; strictly within <= 6.0t of Gateway (39.5, 28.5) on the home-side (`x < 39.5`, away from Zerglings)!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (let-values ([(ws cleanup!) (l24-start-mock-ws (lambda (_ab _px _py) 1))])
+    (define nex-24 (mk-l24-u 9101 59 1 28.5 28.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define min-e  (mk-l24-u 9102 341 3 34.0 23.0 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+    (define gw-unp (mk-l24-u 9103 62 1 39.5 28.5 #:hp 500.0 #:shield 500.0 #:rad 1.5 #:powered? #f))
+    (define fg-unp (mk-l24-u 9104 63 1 24.0 39.0 #:hp 400.0 #:shield 400.0 #:rad 1.5 #:powered? #f))
+    (define prb-24 (mk-l24-u 9105 84 1 32.0 29.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define lings-e
+      (for/list ([i (in-range 6)])
+        (mk-l24-u (+ 9110 i) 105 4 (+ 42.5 (* 0.3 i)) (+ 28.0 (* 0.2 (modulo i 3))) #:hp 35.0 #:rad 0.375)))
+    (define obs-repower-gw
+      (sc2-observation 2400 (sc2-player-common 1 350 0 23 18 0 18 0 0 0 0)
+                       (append (list nex-24 min-e gw-unp fg-unp prb-24) lings-e)
+                       '() '() #f '() '() '() '() '() '()))
+    (define py-cmds-1
+      (translate-bot-actions->sc2-raw-commands '((build pylon 40.0 28.5))
+                                               obs-repower-gw #:ws-conn ws #:game-info w3-ginfo))
+    (define py-cmd-1
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 881))) py-cmds-1))
+    (define py-pt-1 (and py-cmd-1 (sc2-raw-unit-command-target-pos py-cmd-1)))
+    (check-true "l24-p0-1a-repower-pylon-powers-east-gateway-on-homeside-under-ling-rush"
+                (and (sc2-point2d? py-pt-1)
+                     (<= (l24-dist (sc2-point2d-x py-pt-1) (sc2-point2d-y py-pt-1) 39.5 28.5) 6.0)
+                     (< (sc2-point2d-x py-pt-1) 39.5)))
+    ;; Once a warping-in Pylon (`bp = 0.40`) is already covering Gateway (39.5, 28.5), the next Pylon
+    ;; repowers the unpowered Forge at (24.0, 39.0) instead of stacking on the Gateway!
+    (hash-clear! SC2-PLACEMENT-POS-CACHE)
+    (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+    (define py-warping (mk-l24-u 9106 60 1 36.0 28.5 #:hp 100.0 #:shield 100.0 #:rad 1.0 #:bp 0.40))
+    (define obs-repower-fg
+      (sc2-observation 2440 (sc2-player-common 1 350 0 23 18 0 18 0 0 0 0)
+                       (append (list nex-24 min-e gw-unp fg-unp py-warping prb-24) lings-e)
+                       '() '() #f '() '() '() '() '() '()))
+    (define py-cmds-2
+      (translate-bot-actions->sc2-raw-commands '((build pylon 40.0 28.5))
+                                               obs-repower-fg #:ws-conn ws #:game-info w3-ginfo))
+    (define py-cmd-2
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 881))) py-cmds-2))
+    (define py-pt-2 (and py-cmd-2 (sc2-raw-unit-command-target-pos py-cmd-2)))
+    (check-true "l24-p0-1a-repower-skips-gateway-with-warping-pylon-and-repowers-forge"
+                (and (sc2-point2d? py-pt-2)
+                     (<= (l24-dist (sc2-point2d-x py-pt-2) (sc2-point2d-y py-pt-2) 24.0 39.0) 6.0)))
+    (cleanup!))
+
+  ;; L24-P0-1b (`#52` SpireDrop=14t): When default 8.5t creep search fails for `spire`, expands to 11.5t
+  ;; outer creep ring (single Lair) AND across all completed Hatcheries/Lairs (2-base)!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (let-values ([(ws cleanup!)
+                (l24-start-mock-ws
+                 (lambda (ab px py)
+                   ;; Reject ALL Spire placements within <= 8.5t of Main Lair (32.0, 32.0);
+                   ;; accept ONLY outer creep ring (8.8..11.5t from (32.0, 32.0))!
+                   (define d (l24-dist px py 32.0 32.0))
+                   (if (and (= ab 1158) (>= d 8.8) (<= d 11.5)) 1 2)))])
+    (define lair-24 (mk-l24-u 9121 100 1 32.0 32.0 #:hp 2000.0 #:rad 2.75))
+    (define drn-24  (mk-l24-u 9122 104 1 35.0 34.0 #:hp 40.0 #:rad 0.375))
+    (define sp-cmds-ring
+      (translate-bot-actions->sc2-raw-commands
+       '((build spire 32.0 32.0))
+       (make-test-obs 9000 300 250 (list lair-24 drn-24))
+       #:ws-conn ws #:game-info w3-ginfo))
+    (define sp-cmd-ring
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1158))) sp-cmds-ring))
+    (define sp-pt-ring (and sp-cmd-ring (sc2-raw-unit-command-target-pos sp-cmd-ring)))
+    (check-true "l24-p0-1b-spire-expands-to-11-5t-outer-creep-ring-when-8-5t-fails"
+                (and (sc2-point2d? sp-pt-ring)
+                     (>= (l24-dist (sc2-point2d-x sp-pt-ring) (sc2-point2d-y sp-pt-ring) 32.0 32.0) 8.8)
+                     (<= (l24-dist (sc2-point2d-x sp-pt-ring) (sc2-point2d-y sp-pt-ring) 32.0 32.0) 11.5)))
+    (cleanup!))
+
+  ;; Case 2: Main Lair (32,32) completely unbuildable, Natural Hatchery (64,32) open -> expanded fallback places at Natural!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (let-values ([(ws cleanup!)
+                (l24-start-mock-ws
+                 (lambda (ab px py)
+                   (if (and (= ab 1158) (<= (l24-dist px py 64.0 32.0) 11.5) (>= (l24-dist px py 64.0 32.0) 4.0))
+                       1 2)))])
+    (define lair-24 (mk-l24-u 9131 100 1 32.0 32.0 #:hp 2000.0 #:rad 2.75))
+    (define nat-h24 (mk-l24-u 9132 86  1 64.0 32.0 #:hp 1500.0 #:rad 2.75))
+    (define drn-24  (mk-l24-u 9133 104 1 60.0 32.0 #:hp 40.0 #:rad 0.375))
+    (define sp-cmds-nat
+      (translate-bot-actions->sc2-raw-commands
+       '((build spire 32.0 32.0))
+       (make-test-obs 9020 300 250 (list lair-24 nat-h24 drn-24))
+       #:ws-conn ws #:game-info w3-ginfo))
+    (define sp-cmd-nat
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1158))) sp-cmds-nat))
+    (define sp-pt-nat (and sp-cmd-nat (sc2-raw-unit-command-target-pos sp-cmd-nat)))
+    (check-true "l24-p0-1b-spire-expands-to-natural-hatchery-creep-when-main-blocked"
+                (and (sc2-point2d? sp-pt-nat)
+                     (<= (l24-dist (sc2-point2d-x sp-pt-nat) (sc2-point2d-y sp-pt-nat) 64.0 32.0) 11.5)))
+    (cleanup!)))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

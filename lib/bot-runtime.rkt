@@ -5432,7 +5432,12 @@
          (memq target-sym '(drone probe scv overlord pylon supply-depot
                             hatchery nexus command-center orbital-command
                             spawning-pool spire barracks gateway))
-         (and (eq? target-sym 'factory) (l2-terran-need-factory1-now? ctx))
+         ;; L24-P0-3: Exempt Factory #1 whenever gas >= 75G (not just >= 100G) so continuous
+         ;; SCV training never stalls Terran's 1-1-1 core Factory #1 (`#11/#26/#17/#41`).
+         (and (eq? target-sym 'factory)
+              (or (l2-terran-need-factory1-now? ctx)
+                  (and (= (l2-cur-ally-canon-bldg-count ctx 'factory) 0)
+                       (>= (l2-ctx-gas ctx) 75))))
          (and (memq target-sym '(bunker spine-crawler spore-crawler shield-battery
                                  photon-cannon missile-turret))
               (> (or (l2-ctx-live-enemy-threat-supply ctx) 0) 0))
@@ -10462,18 +10467,25 @@
                       (> (length ally-bldgs) 1)
                       (and live-game-obs? (>= (l2-ctx-minerals ctx) 100) (< frame 3000)))))))
   (set-l2-ctx-terran-emergency-depot?! ctx terran-emergency-depot?)
+  ;; L24-P0-3 (`#14` SB=27.3%): When strictly over-cap (`supply-used > supply-cap`, e.g. a
+  ;; Supply Depot / Pylon / Overlord was just sniped leaving 26/23!) and < 2 supply providers
+  ;; pending, immediately build a 2nd replacement even when `max-pending-supply == 1`!
   (define need-supply?
     (and (< supply-cap SC2-MAX-SUPPLY)
-         (< eff-pending-supply max-pending-supply)
-         (or (and (<= eff-pending-supply 0)
-                  (or (<= (l2-ctx-supply-left ctx) 0) (>= supply-used supply-cap)))
-             (and supply-at-risk?
-                  (or (<= eff-pending-supply 0) (hash-ref obs 'supply-at-risk #f))
-                  (<= effective-supply-with-pending-ledger (+ supply-threshold SC2-SUPPLY-PER-PROVIDER)))
-             (and (> (hash-ref pressure-metrics 'supply-hazard 0.0) 0.0)
-                  (<= effective-supply-with-pending-ledger supply-threshold))
-             (and (<= effective-supply-with-pending-ledger supply-threshold)
-                  (>= (l2-ctx-minerals ctx) (sc2-min-cost supply-provider-sym))))))
+         (or (and live-game-obs?
+                  (< eff-pending-supply 2)
+                  (> supply-used supply-cap)
+                  (>= (l2-ctx-minerals ctx) (sc2-min-cost supply-provider-sym)))
+             (and (< eff-pending-supply max-pending-supply)
+                  (or (and (<= eff-pending-supply 0)
+                           (or (<= (l2-ctx-supply-left ctx) 0) (>= supply-used supply-cap)))
+                      (and supply-at-risk?
+                           (or (<= eff-pending-supply 0) (hash-ref obs 'supply-at-risk #f))
+                           (<= effective-supply-with-pending-ledger (+ supply-threshold SC2-SUPPLY-PER-PROVIDER)))
+                      (and (> (hash-ref pressure-metrics 'supply-hazard 0.0) 0.0)
+                           (<= effective-supply-with-pending-ledger supply-threshold))
+                      (and (<= effective-supply-with-pending-ledger supply-threshold)
+                           (>= (l2-ctx-minerals ctx) (sc2-min-cost supply-provider-sym))))))))
   (set-l2-ctx-need-supply?! ctx need-supply?)
   (define defer-f0-wall-solve?
     (and live-game-obs? (= frame 0) (< (l2-ctx-minerals ctx) 100)))
@@ -13083,15 +13095,31 @@
          (l2-record-build-issue-lock! ctx 'hatchery)
          (order-ledger-record-issued! oledger (+ 810000 (modulo frame 10000)) 'expand 'hatchery zerg-exp-x zerg-exp-y frame)
          (l2-spend-resources-and-supply! ctx (sc2-min-cost 'hatchery) 0 0)))
-  (when (and zerg-4th-hatch-mineral-overflow?
-             (not zerg-exp-x)
-             (not under-base-attack?)
-             (>= (l2-ctx-minerals ctx) (+ (sc2-min-cost 'hatchery) 450))
-             (<= (hash-ref (l2-ctx-open-prod-slots ctx) 'larva 0) 2)
-             (< (length hatcheries) 4)
+  ;; L24-P0-3 (`#46` 2,965M Bank): High-bank in-base Macro Hatchery — never deadlock on
+  ;; `(not zerg-exp-x)` or `< 4` Hatcheries or `larva <= 2` when banking `>= 900M` with
+  ;; `<= 5` larvae! Pending-hatchery check (`= 0`) already prevents same-tick double-order.
+  (define zerg-high-bank-macro-hatch?
+    (and live-game?
+         (>= (length hatcheries) 2)
+         (< (length hatcheries) 5)
+         (>= (l2-ctx-minerals ctx) 900)
+         (<= (hash-ref (l2-ctx-open-prod-slots ctx) 'larva 0) 5)
+         (not worker-rush-active?)
+         (not early-survival-crisis?)
+         (not bldg-actively-damaged?)
+         (or (not under-base-attack?) zerg-only-light-skirmish?)))
+  (when (and (or (and zerg-4th-hatch-mineral-overflow?
+                      (not zerg-exp-x)
+                      (not under-base-attack?)
+                      (>= (l2-ctx-minerals ctx) (+ (sc2-min-cost 'hatchery) 450))
+                      (<= (hash-ref (l2-ctx-open-prod-slots ctx) 'larva 0) 2)
+                      (< (length hatcheries) 4))
+                 zerg-high-bank-macro-hatch?)
              (memq 'spawning-pool ready-bldg-types)
              (= (order-ledger-pending-count-for-type oledger 'hatchery frame) 0)
-             (l2-save-cancel-rebuild-ready? ctx 'hatchery 224))
+             (not (l2-build-issue-blocked? ctx 'hatchery))
+             (l2-save-cancel-rebuild-ready? ctx 'hatchery 224)
+             (refractory-allow-action?! cd-tracker '(zerg-inbase-macro-hatch) frame 224))
     (define-values (mh-ax mh-ay)
       (l2-safe-zerg-build-anchor ctx (safe-coord (+ base-x 6.0)) (safe-coord (+ base-y 5.0))))
     (l2-emit-build-verified! ctx 'hatchery mh-ax mh-ay))
@@ -18065,8 +18093,8 @@
                 (and (not terran-orbital-freezes-all-scvs?)
                      (not (not (member '(train scv) prio-scheduled-actions)))
                      (or (>= (length ccs) 2)
-                         (< (l2-ctx-minerals ctx) 240)))
-                (and (not terran-orbital-freezes-all-scvs?) (< total-workers 17) (< (l2-ctx-minerals ctx) 240)))
+                         (< (l2-ctx-minerals ctx) 225)))
+                (and (not terran-orbital-freezes-all-scvs?) (< total-workers 17) (< (l2-ctx-minerals ctx) 225)))
             (not crisis-freeze-workers?)
             (l2-worker-army-curve-satisfied? ctx)
             (not terran-orbital-freezes-all-scvs?)
@@ -18099,15 +18127,18 @@
        (l2-try-train-unit! ctx 'scv 'townhall 4
                         #:respect-bo-reserve? (l2-worker-respect-bo-reserve? ctx)))
   (set-l2-ctx-brain-scheduled-workers-rem! ctx 0)
-  ;; L19-P0-3 (`#029`/`#047` 1BaseLock): When Brain is saving for 1-base CC #2 and bank >= 250M
-  ;; with threat <= max(6.0, army), hold Barracks/Factory production so the 250..399M bank
+  ;; L19-P0-3 / L24-P0-3 (`#029`/`#047` 1BaseLock): When Brain is saving for 1-base CC #2 and bank >= 225M
+  ;; with threat <= max(6.0, army), hold Barracks/Factory production so the 225..399M bank
   ;; reaches 400M instead of continuously bleeding back to 0M!
   (define terran-brain-saving-1base-cc?
     (and live-game?
          (= (length ccs) 1)
          terran-saving-for-cc-expand?
-         (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
-         (>= (l2-ctx-minerals ctx) 250)
+         (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+             (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
+                  (memq 'command-center
+                        (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx)))))
+         (>= (l2-ctx-minerals ctx) 225)
          (<= live-enemy-threat-supply (max 6.0 live-army-supply))
          (not (l2-ctx-worker-rush-active? ctx))
          (not under-early-cheese?)
@@ -18292,12 +18323,19 @@
          (define cur-siege-tanks
            (+ (l2-unit-count ctx 'siege-tank)
               (l2-unit-count ctx 'siege-tank-sieged)))
+         (define cur-factory-cnt (l2-cur-ally-canon-bldg-count ctx 'factory))
+         (define tvt-need-tanks?
+           (and (eq? effective-enemy-race 'Terran) (< cur-siege-tanks 4)))
+         ;; L24-P0-3 (`#47/#17/#41` `TvT0Tank`): Always hold TechLab Factory for Siege Tanks
+         ;; even at 0..49G while `< 4` Tanks in TvT (`< 3` non-TvT) so 25G Widow Mines and
+         ;; 100M Hellions can NEVER infinite-drain gas/slots ahead of Siege Tanks!
          (define hold-fac-tl-for-tank?
            (and live-game?
                 has-fac-tl?
                 (not enemy-capital-air?)
-                (< cur-siege-tanks 6)
-                (>= (l2-ctx-gas ctx) 50)))
+                (or (< cur-siege-tanks (if (eq? effective-enemy-race 'Terran) 4 3))
+                    (and (< cur-siege-tanks 6)
+                         (>= (l2-ctx-gas ctx) 50)))))
          ;; W18-P0-3-rt / L20-P0-3 (`#17/#32 TvT` `TvT0Tank`): Never let bare-Factory WidowMine/Hellion
          ;; clog the sole bare Factory once `total-workers >= 22` (or Brain wants `factory-techlab`)
          ;; while `factory-techlab` is missing so Siege Tanks unlock immediately!
@@ -18322,7 +18360,7 @@
                             (l2-starport-escrow-ok? ctx (sc2-min-cost 'siege-tank) (sc2-gas-cost 'siege-tank))))
                (l2-try-train-unit! ctx 'siege-tank 'factory 6 #:respect-bo-reserve? #f))
              (when (and (not hold-bare-fac-for-techlab?)
-                        (or (not live-game?) (< cur-widow-mines 4))
+                        (or (not live-game?) (< cur-widow-mines (if tvt-need-tanks? 1 4)))
                         (or crisis-tech-upgrade-deferral?
                             (l2-starport-escrow-ok? ctx (sc2-min-cost 'widow-mine) (sc2-gas-cost 'widow-mine))))
                (l2-try-train-unit! ctx 'widow-mine 'factory 6)))
@@ -18345,9 +18383,11 @@
                       (or (not enemy-capital-air?) (>= (l2-ctx-gas ctx) 250))
                       (l2-starport-escrow-ok? ctx (sc2-min-cost 'siege-tank) (sc2-gas-cost 'siege-tank)))
              (l2-try-train-unit! ctx 'siege-tank 'factory 6 #:respect-bo-reserve? #f))
-           (when (and (< cur-widow-mines 4)
+           (when (and (< cur-widow-mines (if tvt-need-tanks? 1 4))
                       (not hold-fac-tl-for-tank?)
                       (not hold-bare-fac-for-techlab?)
+                      (not (and has-fac-tl? (<= cur-factory-cnt 1)))
+                      (not (and has-fac-tl? tvt-need-tanks?))
                       (l2-starport-escrow-ok? ctx (sc2-min-cost 'widow-mine) (sc2-gas-cost 'widow-mine)))
              (l2-try-train-unit! ctx 'widow-mine 'factory 6 #:respect-bo-reserve? #f))
            (when (and (not hold-fac-tl-for-tank?)
@@ -25901,6 +25941,84 @@
            (not p5-owm-locust?)
            (not under-tactics-base-attack?)
            p5-only-harmless-or-snapshot-enemies?))
+    ;; L24-P0-3 (`#43` 37 Corruptors = 1 Kill): Anti-Capital-Air Corruptor Volley Staging.
+    ;; Pure air-only rally (`ut == 'corruptor`): when >= 3 visible non-snapshot enemy Capital Air
+    ;; exist and are NOT over our main (<= 16t), stage newly-spawned Corruptors behind main
+    ;; until >= 6 Corruptors form a cohesive volley flock (<= 12t radius), then volley-commit!
+    ;; Zero ground units touched, zero retreat once <= 10t of enemy air, live-obs? only.
+    (define p5-enemy-cap-air-pts
+      (if live-obs?
+          (for/list ([e (in-list enemy-units)]
+                     #:when (and (hash? e)
+                                 (not (p5-snapshot-entity? e))
+                                 (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                       '(tempest carrier battlecruiser mothership))
+                                 (real? (hash-ref e 'x #f))
+                                 (real? (hash-ref e 'y #f))))
+            (cons (exact->inexact (hash-ref e 'x 0.0))
+                  (exact->inexact (hash-ref e 'y 0.0))))
+          '()))
+    (define p5-ally-corruptor-pts
+      (if (and live-obs? (>= (length p5-enemy-cap-air-pts) 3))
+          (for/list ([u (in-list combat-units)]
+                     #:when (and (hash? u)
+                                 (eq? (unit-type-sym u) 'corruptor)
+                                 (real? (hash-ref u 'x #f))
+                                 (real? (hash-ref u 'y #f))))
+            (cons (exact->inexact (hash-ref u 'x 0.0))
+                  (exact->inexact (hash-ref u 'y 0.0))))
+          '()))
+    (define p5-enemy-cap-air-over-main?
+      (and (pair? p5-ally-corruptor-pts)
+           (for/or ([ep (in-list p5-enemy-cap-air-pts)])
+             (fl<= (fast-dist2d (car ep) (cdr ep) fbase-x fbase-y) 16.0))))
+    (define p5-corruptor-volley-mode?
+      (and live-obs?
+           (>= (length p5-enemy-cap-air-pts) 3)
+           (pair? p5-ally-corruptor-pts)
+           (not p5-enemy-cap-air-over-main?)))
+    (define p5-vis-enemy-air-pts
+      (if p5-corruptor-volley-mode?
+          (for/list ([e (in-list enemy-units)]
+                     #:when (and (hash? e)
+                                 (not (p5-snapshot-entity? e))
+                                 (real? (hash-ref e 'x #f))
+                                 (real? (hash-ref e 'y #f))
+                                 (or (eq? (hash-ref e 'flying #f) #t)
+                                     (eq? (hash-ref e 'flying? #f) #t)
+                                     (eq? (hash-ref e 'is-flying #f) #t)
+                                     (fast-unit-is-flying-sym? (fast-canonical-unit-sym (unit-type-sym e))))))
+            (cons (exact->inexact (hash-ref e 'x 0.0))
+                  (exact->inexact (hash-ref e 'y 0.0))))
+          '()))
+    (define-values (p5-corr-best-cnt p5-corr-best-x p5-corr-best-y p5-corr-stage-x p5-corr-stage-y)
+      (if p5-corruptor-volley-mode?
+          (let* ([cap-n (exact->inexact (length p5-enemy-cap-air-pts))]
+                 [cap-cx (fl/ (for/fold ([s 0.0]) ([p (in-list p5-enemy-cap-air-pts)]) (fl+ s (car p))) cap-n)]
+                 [cap-cy (fl/ (for/fold ([s 0.0]) ([p (in-list p5-enemy-cap-air-pts)]) (fl+ s (cdr p))) cap-n)]
+                 [dx-away (fl- fbase-x cap-cx)]
+                 [dy-away (fl- fbase-y cap-cy)]
+                 [d-away (flmax 1.0 (flsqrt (fl+ (fl* dx-away dx-away) (fl* dy-away dy-away))))]
+                 [map-w (exact->inexact (max 64.0 (safe-finite-real (hash-ref p5-obs 'map-width 200.0) 200.0)))]
+                 [map-h (exact->inexact (max 64.0 (safe-finite-real (hash-ref p5-obs 'map-height 200.0) 200.0)))]
+                 [sx (flmax 6.0 (flmin (fl- map-w 6.0) (fl+ fbase-x (fl* 6.0 (fl/ dx-away d-away)))))]
+                 [sy (flmax 6.0 (flmin (fl- map-h 6.0) (fl+ fbase-y (fl* 6.0 (fl/ dy-away d-away)))))])
+            (let-values ([(bc bx by)
+                          (for/fold ([best-c 0] [best-x fbase-x] [best-y fbase-y])
+                                    ([cp (in-list p5-ally-corruptor-pts)])
+                            (define cx0 (car cp))
+                            (define cy0 (cdr cp))
+                            (define-values (cnt sumx sumy)
+                              (for/fold ([k 0] [ax 0.0] [ay 0.0])
+                                        ([op (in-list p5-ally-corruptor-pts)])
+                                (if (fl<= (fast-dist2d cx0 cy0 (car op) (cdr op)) 12.0)
+                                    (values (add1 k) (fl+ ax (car op)) (fl+ ay (cdr op)))
+                                    (values k ax ay))))
+                            (if (> cnt best-c)
+                                (values cnt (fl/ sumx (exact->inexact cnt)) (fl/ sumy (exact->inexact cnt)))
+                                (values best-c best-x best-y)))])
+              (values bc bx by (safe-coord sx fbase-x) (safe-coord sy fbase-y))))
+          (values 0 fbase-x fbase-y fbase-x fbase-y)))
 
     (for ([u (in-list (if endgame-harmless-only-sweep? '() combat-units))])
       (define uid (hash-ref u 'id 101))
@@ -25993,6 +26111,10 @@
                            (or (hash-ref (l34-ctx-l34-sc ctx) 'w15-all-mobile-retreatable? #f)
                                (hash-ref (l34-ctx-l34-sc ctx) 'w15-forward-window-active? #f)))
                       eff-wave-commit?
+                      (and p5-corruptor-volley-mode?
+                           (eq? ut 'corruptor)
+                           (>= p5-corr-best-cnt 6)
+                           (fl<= edist2 900.0))
                       (and p5-army-dominates?
                            (not p5-owm-locust?)
                            (not under-tactics-base-attack?)))])))
@@ -26029,6 +26151,37 @@
                (pair? enemy-sieged-tanks-near)
                (not (fast-unit-is-flying-sym? ut))
                (l34-find-nearest-sieged-tank ctx ux uy)))
+        (define corr-stage-target
+          (and p5-corruptor-volley-mode?
+               (eq? ut 'corruptor)
+               (let ([fux (exact->inexact ux)]
+                     [fuy (exact->inexact uy)])
+                 (define near-enemy-air?
+                   (for/or ([ep (in-list p5-vis-enemy-air-pts)])
+                     (fl<= (fast-dist2d fux fuy (car ep) (cdr ep)) 10.0)))
+                 (and (not near-enemy-air?)
+                      (cond
+                        [(< p5-corr-best-cnt 6)
+                         (cons p5-corr-stage-x p5-corr-stage-y)]
+                        [else
+                         (define local-corr-cnt
+                           (for/sum ([cp (in-list p5-ally-corruptor-pts)]
+                                     #:when (fl<= (fast-dist2d fux fuy (car cp) (cdr cp)) 12.0))
+                             1))
+                         (and (< local-corr-cnt 4)
+                              (fl> (fast-dist2d fux fuy p5-corr-best-x p5-corr-best-y) 14.0)
+                              (cons (safe-coord p5-corr-best-x p5-corr-stage-x)
+                                    (safe-coord p5-corr-best-y p5-corr-stage-y)))])))))
+        (cond
+          [corr-stage-target
+           (set-add! wave3-handled-tags uid)
+           (let ([tx (car corr-stage-target)]
+                 [ty (cdr corr-stage-target)])
+             (when (fl> (fast-dist2d (exact->inexact ux) (exact->inexact uy)
+                                     (exact->inexact tx) (exact->inexact ty))
+                        3.5)
+               (l34-emit-preserved! ctx (list 'move uid tx ty))))]
+          [else
         (case ut
           [(ravager)
            (if (and (not live-obs?)
@@ -26667,7 +26820,7 @@
                           (memq (car ma) '(attack-unit attack-pos)))
                      (l34-emit-preserved! ctx ma)
                      (l34-emit! ctx ma)))
-               (l34-emit-engage-or-rally! ctx uid ux uy ex ey eid nearest-enemy-tank zergling-hold-off-pf-siege? tank-supporting-vs-static? unit-should-engage-target? u ut can-hit-target? edist2 target-enemy))])))))
+               (l34-emit-engage-or-rally! ctx uid ux uy ex ey eid nearest-enemy-tank zergling-hold-off-pf-siege? tank-supporting-vs-static? unit-should-engage-target? u ut can-hit-target? edist2 target-enemy))])])))))
 
 (define (l34-phase6-raid-concave-reach! ctx)
   (define ally-infestors (l34-ctx-ally-infestors ctx))

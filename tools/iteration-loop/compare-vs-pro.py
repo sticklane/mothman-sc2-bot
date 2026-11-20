@@ -214,6 +214,10 @@ def normalize_match(m):
             m.get("early_opening_order_fault")
             or (m.get("anomalies") or {}).get("early_opening_order_fault")
         ),
+        "terran_111_opening_stall": bool(
+            m.get("terran_111_opening_stall")
+            or (m.get("anomalies") or {}).get("terran_111_opening_stall")
+        ),
         "action_rejects": int(m.get("action_rejects") or 0),
         "crashes": m.get("crashes") or [],
         "signatures": m.get("signatures") or [],
@@ -401,6 +405,7 @@ def summarize_slice(rows):
         "drip_feed_collapse_matches": sum(1 for r in rows if r.get("drip_feed_collapse")),
         "zero_kill_collapse_matches": sum(1 for r in rows if r.get("zero_kill_collapse")),
         "early_opening_order_fault_matches": sum(1 for r in rows if r.get("early_opening_order_fault")),
+        "terran_111_opening_stall_matches": sum(1 for r in rows if r.get("terran_111_opening_stall")),
         "action_rejects": sum(r["action_rejects"] for r in rows),
         "crashes": sum(len(r["crashes"]) for r in rows),
         "anomalies": dict(anom_counts),
@@ -811,13 +816,14 @@ def main():
                     f" | `WallTies` = **{cur_all.get('wall_timeout_ties', 0)}** "
                     f"(Win=`{cur_all.get('wall_timeout_winning_ties', 0)}`)"
                 )
-            if cur_all.get("one_base_lockout_matches", 0) > 0 or cur_all.get("spire_sched_drop_matches", 0) > 0 or cur_all.get("drip_feed_collapse_matches", 0) > 0 or cur_all.get("zero_kill_collapse_matches", 0) > 0 or cur_all.get("early_opening_order_fault_matches", 0) > 0 or cur_all.get("tr_p95_worst_ms") is not None:
+            if cur_all.get("one_base_lockout_matches", 0) > 0 or cur_all.get("spire_sched_drop_matches", 0) > 0 or cur_all.get("drip_feed_collapse_matches", 0) > 0 or cur_all.get("zero_kill_collapse_matches", 0) > 0 or cur_all.get("early_opening_order_fault_matches", 0) > 0 or cur_all.get("terran_111_opening_stall_matches", 0) > 0 or cur_all.get("tr_p95_worst_ms") is not None:
                 extra_w8 += (
                     f" | `1BaseLock` = **{cur_all.get('one_base_lockout_matches', 0)}**"
                     f" | `SpireDrop` = **{cur_all.get('spire_sched_drop_matches', 0)}**"
                     f" | `DripFeed` = **{cur_all.get('drip_feed_collapse_matches', 0)}**"
                     f" | `ZeroKillCol` = **{cur_all.get('zero_kill_collapse_matches', 0)}**"
                     f" | `OpenFault` = **{cur_all.get('early_opening_order_fault_matches', 0)}**"
+                    f" | `T111Stall` = **{cur_all.get('terran_111_opening_stall_matches', 0)}**"
                 )
         print(
             f"\n### Stall, Retreat & Waste Watch (`W7/W8-LOOP-2`): "
@@ -849,12 +855,18 @@ def main():
     if hwm_all:
         cmp_slice = cohorts["core_12"] if (cohorts and hwm_all["n"] <= 36 and cur_all["n"] > 36) else cur_all
         cmp_lbl = "Current core_12" if cmp_slice is not cur_all else "Current"
+        hwm_slice = (
+            summarize_slice([m for m in hwm_rows if m["opp_bot"] in CORE_12_OPPONENTS])
+            if (hwm_all["n"] > 36 and cmp_slice["n"] <= 36)
+            else hwm_all
+        )
+        hwm_lbl = "HWM core_12" if hwm_slice is not hwm_all else "HWM"
         print(
             f"\n### High-Water Mark Check: {cmp_lbl} `{cmp_slice['wins']}W-{cmp_slice['losses']}L-{cmp_slice['ties']}T` "
             f"(`{cmp_slice['wr_pct']:.1f}%`, Trade `{fmt(cmp_slice['trade_agg'],'x',2)}`/`{fmt(cmp_slice['trade_med'],'x',2)}`, "
-            f"SupBlk `{fmt(cmp_slice['sup_blk_avg'],'%')}`) vs HWM `{hwm_all['wins']}W-{hwm_all['losses']}L-{hwm_all['ties']}T` "
-            f"(`{hwm_all['wr_pct']:.1f}%`, Trade `{fmt(hwm_all['trade_agg'],'x',2)}`/`{fmt(hwm_all['trade_med'],'x',2)}`, "
-            f"SupBlk `{fmt(hwm_all['sup_blk_avg'],'%')}`) -> **{'NEW HWM!' if (cmp_slice['wins'] > hwm_all['wins'] or (cmp_slice['wins'] == hwm_all['wins'] and (cmp_slice['losses'] < hwm_all['losses'] or (cmp_slice['losses'] == hwm_all['losses'] and cmp_slice['trade_agg'] >= hwm_all['trade_agg'])))) else 'BELOW HWM (hold commit)'}**"
+            f"SupBlk `{fmt(cmp_slice['sup_blk_avg'],'%')}`) vs {hwm_lbl} `{hwm_slice['wins']}W-{hwm_slice['losses']}L-{hwm_slice['ties']}T` "
+            f"(`{hwm_slice['wr_pct']:.1f}%`, Trade `{fmt(hwm_slice['trade_agg'],'x',2)}`/`{fmt(hwm_slice['trade_med'],'x',2)}`, "
+            f"SupBlk `{fmt(hwm_slice['sup_blk_avg'],'%')}`) -> **{'NEW HWM!' if (cmp_slice['wins'] > hwm_slice['wins'] or (cmp_slice['wins'] == hwm_slice['wins'] and (cmp_slice['losses'] < hwm_slice['losses'] or (cmp_slice['losses'] == hwm_slice['losses'] and cmp_slice['trade_agg'] >= hwm_slice['trade_agg'])))) else 'BELOW HWM (hold commit)'}**"
         )
 
     passed_gates = sum(1 for k, v in gates.items() if k != "ready_to_promote" and v)

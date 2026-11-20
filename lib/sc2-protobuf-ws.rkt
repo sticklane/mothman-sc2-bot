@@ -12154,7 +12154,8 @@
             (define safe-creep-pts (ordered-zerg-creep-anchors req-x req-y))
             (define cx (caar safe-creep-pts))
             (define cy (cdar safe-creep-pts))
-            (define place-pt
+            (define creep-bud-before (unbox step-placement-rpc-budget))
+            (define place-pt0
               (find-verified-building-placement ws-conn ab-id cx cy units
                                                 #:min-spacing 2.0
                                                 #:max-radius 8.5
@@ -12167,6 +12168,59 @@
                                                 #:game-info eff-game-info
                                                 #:rpc-budget step-placement-rpc-budget
                                                 #:cur-loop cur-loop))
+            ;; L24-P0-1 (`#52` SpireDrop=14t): For high-priority Zerg tech (`spire`, `hydralisk-den`,
+            ;; `lurker-den`, `lurker-den-mp`), when default `8.5t` search actively tried and failed,
+            ;; expand search radius `8.5 -> 11.5` across ALL completed Hatchery/Lair/Hive creep anchors
+            ;; (plus outer `9.5t` creep-ring offsets so crowded inner rings never exhaust candidate limit)!
+            (define creep-85-tried?
+              (or (< (unbox step-placement-rpc-budget) creep-bud-before)
+                  (not (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))))
+            (define place-pt
+              (or place-pt0
+                  (and creep-85-tried?
+                       (memq norm '(spire hydralisk-den lurker-den lurker-den-mp))
+                       (let* ([completed-th-pts
+                               (for/list ([u (in-list self-units)]
+                                          #:when (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
+                                                            '(hatchery lair hive))
+                                                      (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
+                                 (define p (sc2-unit-pos u))
+                                 (cons (sc2-point3d-x p) (sc2-point3d-y p)))]
+                              [ordered-th-pts
+                               (remove-duplicates
+                                (append (filter (lambda (pt) (member pt completed-th-pts)) safe-creep-pts)
+                                        completed-th-pts))]
+                              [other-th-pts
+                               (filter (lambda (pt) (> (pt-dist cx cy (car pt) (cdr pt)) 2.0)) ordered-th-pts)]
+                              [outer-ring-pts
+                               (append*
+                                (for/list ([thp (in-list (if (pair? ordered-th-pts) ordered-th-pts (list (cons cx cy))))])
+                                  (for/list ([off (in-list '((9.5 . 0.0) (-9.5 . 0.0) (0.0 . 9.5) (0.0 . -9.5)))])
+                                    (cons (max SC2-MAP-PLAYABLE-MIN-COORD
+                                               (min SC2-MAP-PLAYABLE-MAX-COORD (+ (car thp) (car off))))
+                                          (max SC2-MAP-PLAYABLE-MIN-COORD
+                                               (min SC2-MAP-PLAYABLE-MAX-COORD (+ (cdr thp) (cdr off))))))))]
+                              [expanded-creep-pts
+                               (remove-duplicates
+                                (append other-th-pts outer-ring-pts ordered-th-pts safe-creep-pts))]
+                              [ex-cx (caar expanded-creep-pts)]
+                              [ex-cy (cdar expanded-creep-pts)])
+                         (hash-remove! SC2-PLACEMENT-NEG-COOLDOWN
+                                       (list norm (inexact->exact (round cx)) (inexact->exact (round cy))))
+                         (hash-remove! SC2-PLACEMENT-NEG-COOLDOWN
+                                       (list norm (inexact->exact (round ex-cx)) (inexact->exact (round ex-cy))))
+                         (find-verified-building-placement ws-conn ab-id ex-cx ex-cy units
+                                                           #:min-spacing 2.0
+                                                           #:max-radius 11.5
+                                                           #:step 2.0
+                                                           #:extra-reserved-points step-reserved-build-pts
+                                                           #:anchor-points expanded-creep-pts
+                                                           #:reserved-aabbs reserved-aabbs
+                                                           #:expansion-pads all-expansion-pads
+                                                           #:bldg-sym norm
+                                                           #:game-info eff-game-info
+                                                           #:rpc-budget step-placement-rpc-budget
+                                                           #:cur-loop cur-loop)))))
             (when place-pt
               (reserve-step-build-pt! place-pt ab-id)
               (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
@@ -12269,6 +12323,110 @@
                                              cands)])
                       (append safe-c cont-c)))
                   '()))
+            ;; L24-P0-1 (`#51` 3D Visual-QA Repower Guarantee): When building a `pylon` and ANY owned
+            ;; Protoss production/tech structure (`gateway`, `warp-gate`, `robotics-facility`, `stargate`,
+            ;; `cybernetics-core`, `twilight-council`, `forge`) is unpowered (with no pending Pylon already
+            ;; warping in within <= 6.0t), ALWAYS try safe repower anchors strictly within <= 5.5t (inside
+            ;; 6.5t Pylon radius), preferring home-side & away from enemy ground units, BEFORE
+            ;; `early-rush-1base-inmain?` can displace the Pylon > 6.0t away!
+            (define (unpowered-protoss-prod-prio sym)
+              (case sym
+                [(gateway warp-gate)  1]
+                [(robotics-facility)  2]
+                [(stargate)           3]
+                [(cybernetics-core)   4]
+                [(twilight-council)   5]
+                [(forge)              6]
+                [else                #f]))
+            (define repower-target
+              (and (eq? norm 'pylon)
+                   (let* ([pending-pylons
+                           (filter (lambda (s)
+                                     (and (= (sc2-unit-unit-type s) 60)
+                                          (< (sc2-unit-build-progress s) SC2-BUILD-COMPLETE-PROGRESS)))
+                                   self-structures)]
+                          [unpowered-cands
+                           (for/list ([s (in-list self-structures)]
+                                      #:when (let* ([ssym (sc2-id->unit-symbol (sc2-unit-unit-type s) 'unknown)]
+                                                    [prio (unpowered-protoss-prod-prio ssym)]
+                                                    [sp (sc2-unit-pos s)]
+                                                    [sx (sc2-point3d-x sp)]
+                                                    [sy (sc2-point3d-y sp)])
+                                               (and prio
+                                                    (not (sc2-unit-is-flying s))
+                                                    (not (sc2-unit-is-powered s))
+                                                    (not (point-in-completed-power-field? sx sy power-sources completed-pylons))
+                                                    (not (ormap (lambda (pp)
+                                                                  (define ppp (sc2-unit-pos pp))
+                                                                  (<= (pt-dist sx sy (sc2-point3d-x ppp) (sc2-point3d-y ppp)) 6.0))
+                                                                pending-pylons)))))
+                             (define sp (sc2-unit-pos s))
+                             (define ssym (sc2-id->unit-symbol (sc2-unit-unit-type s) 'unknown))
+                             (list s
+                                   (unpowered-protoss-prod-prio ssym)
+                                   (pt-dist home-x home-y (sc2-point3d-x sp) (sc2-point3d-y sp))))])
+                     (and (pair? unpowered-cands)
+                          (first
+                           (first
+                            (sort unpowered-cands
+                                  (lambda (a b)
+                                    (if (not (= (second a) (second b)))
+                                        (< (second a) (second b))
+                                        (< (third a) (third b)))))))))))
+            (define-values (repower-ux repower-uy repower-anchors)
+              (if repower-target
+                  (let* ([up (sc2-unit-pos repower-target)]
+                         [ux (sc2-point3d-x up)]
+                         [uy (sc2-point3d-y up)]
+                         [hx (- home-x ux)]
+                         [hy (- home-y uy)]
+                         [hd (sqrt (+ (* hx hx) (* hy hy)))]
+                         [dx (if (> hd 0.5) (/ hx hd) -0.7071)]
+                         [dy (if (> hd 0.5) (/ hy hd) -0.7071)]
+                         [raw-ring
+                          (for/list ([ang (in-list '(0.0 0.55 -0.55 1.10 -1.10 1.65 -1.65 2.20 -2.20 3.14159))])
+                            (define ca (cos ang))
+                            (define sa (sin ang))
+                            (define rx (- (* dx ca) (* dy sa)))
+                            (define ry (+ (* dx sa) (* dy ca)))
+                            (cons (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD (+ ux (* 3.5 rx))))
+                                  (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD (+ uy (* 3.5 ry))))))]
+                         [enemy-gnd
+                          (for/list ([e (in-list enemy-units)]
+                                     #:when (and (not (sc2-unit-is-flying e))
+                                                 (sc2-unit-targetable-enemy-combat? e)))
+                            (define ep (sc2-unit-pos e))
+                            (cons (sc2-point3d-x ep) (sc2-point3d-y ep)))])
+                    (define-values (safe-r cont-r)
+                      (partition (lambda (pt)
+                                   (not (ormap (lambda (ep)
+                                                 (<= (pt-dist (car pt) (cdr pt) (car ep) (cdr ep)) 4.5))
+                                               enemy-gnd)))
+                                 raw-ring))
+                    (define ordered-r (remove-duplicates (append safe-r cont-r)))
+                    (values ux uy (take ordered-r (min 8 (length ordered-r)))))
+                  (values 0.0 0.0 '())))
+            (define repower-place-pt
+              (and repower-target
+                   (pair? repower-anchors)
+                   (let ([pt (find-verified-building-placement ws-conn ab-id
+                                                               (caar repower-anchors)
+                                                               (cdar repower-anchors)
+                                                               units
+                                                               #:min-spacing 2.0
+                                                               #:max-radius 2.0
+                                                               #:step 1.0
+                                                               #:extra-reserved-points step-reserved-build-pts
+                                                               #:anchor-points repower-anchors
+                                                               #:reserved-aabbs reserved-aabbs
+                                                               #:expansion-pads all-expansion-pads
+                                                               #:bldg-sym norm
+                                                               #:game-info eff-game-info
+                                                               #:rpc-budget step-placement-rpc-budget
+                                                               #:cur-loop cur-loop)])
+                     (and (sc2-point2d? pt)
+                          (<= (pt-dist (sc2-point2d-x pt) (sc2-point2d-y pt) repower-ux repower-uy) 6.0)
+                          pt))))
             (define req-contested-by-rush?
               (and (memq norm '(pylon supply-depot barracks factory starport))
                    (ormap (lambda (e)
@@ -12331,7 +12489,8 @@
                           (list (cons home-x home-y))
                           th-overflow-anchors)])))
             (define place-pt
-              (or (and (memq norm '(command-center nexus hatchery))
+              (or repower-place-pt
+                  (and (memq norm '(command-center nexus hatchery))
                        (> (pt-dist home-x home-y req-x req-y) SC2-BASE-RESOURCE-RADIUS)
                        (find-best-expansion-placement ws-conn ab-id home-x home-y units
                                                       #:req-x req-x

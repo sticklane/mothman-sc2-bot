@@ -13715,6 +13715,152 @@
                      (not (eq? (macro-brain-decision-saving-for l23-z-34-wave2-hold) 'hatchery))
                      (not (not (memq 'zergling (macro-brain-decision-scheduled-ids l23-z-34-wave2-hold)))))
                 "L23-P0-2 #34 ZvZ: <4:00 wave-2 Ling defense must defer Hatchery #2 until >=10 Lings + Queen/Spine")
+
+  ;; 51.12 Loop 24 (`L24-P0-2`) Regressions: Terran Orbital #1/#2 & 1-1-1 Core Tech Unstarving,
+  ;;       TvT SiegeTank Medivac-Suppression Fix, Peaceful 1-Base Natural CC Lock & Over-Supply Emergency
+  ;; (a) #11/#26 Terran Orbital #1 (>=605, blk=#t) schedules at 160M & escrows past SCV/Marine at 110M
+  (reset-macro-escrow-tracker!)
+  (define l24-t-oc1-afford
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 2600
+      #:minerals 160 #:gas 40 #:supply-used 22 #:supply-cap 31 #:workers 19 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 3
+      #:army-supply 3 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'command-center 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'command-center 2 'supply-depot 2 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 19 'marine 3)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1))))
+  (reset-macro-escrow-tracker!)
+  (define l24-t-oc1-escrow
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 2600
+      #:minerals 110 #:gas 40 #:supply-used 22 #:supply-cap 31 #:workers 19 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 3
+      #:army-supply 3 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'command-center 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'command-center 2 'supply-depot 2 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 19 'marine 3)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1))))
+  (assert-true! (and (not (not (memq 'orbital-command (macro-brain-decision-scheduled-ids l24-t-oc1-afford))))
+                     (eq? (macro-brain-decision-saving-for l24-t-oc1-escrow) 'orbital-command)
+                     (not (memq 'scv (macro-brain-decision-scheduled-ids l24-t-oc1-escrow))))
+                "L24-P0-2 #11/#26 Terran: Orbital Command #1 must rank above SCV and escrow at 110M")
+
+  ;; (b) #11/#20/#26 Terran 1-1-1 Factory #1 & Starport #1 @ 120M/100G must NOT be starved by SCV
+  (reset-macro-escrow-tracker!)
+  (define l24-t-111-factory
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 3360
+      #:minerals 120 #:gas 100 #:supply-used 24 #:supply-cap 39 #:workers 20 #:active-bases 2
+      #:mineral-harvesters 17 #:gas-harvesters 3
+      #:army-supply 4 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 20 'marine 4)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1))))
+  (reset-macro-escrow-tracker!)
+  (define l24-t-111-starport
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 4800
+      #:minerals 120 #:gas 100 #:supply-used 36 #:supply-cap 54 #:workers 26 #:active-bases 2
+      #:mineral-harvesters 20 #:gas-harvesters 6
+      #:army-supply 10 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 4 'barracks 2 'barracks-techlab 1 'factory 1 'factory-techlab 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 4 'barracks 2 'barracks-techlab 1 'factory 1 'factory-techlab 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 26 'marine 8 'siege-tank 1)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 0 'factory 0))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l24-t-111-factory) 'factory)
+                     (not (memq 'scv (macro-brain-decision-scheduled-ids l24-t-111-factory)))
+                     (eq? (macro-brain-decision-saving-for l24-t-111-starport) 'starport)
+                     (not (memq 'scv (macro-brain-decision-scheduled-ids l24-t-111-starport))))
+                "L24-P0-2 #11/#20/#26 Terran: 1-1-1 Factory #1 & Starport #1 @ 120M/100G must not be starved by SCV")
+
+  ;; (c) #17/#41 TvT Siege Tank (<4 Tanks, ready FactoryTechLab + ready Starport w/ 0 Medivacs) @ 120M/125G
+  (reset-macro-escrow-tracker!)
+  (define l24-t-tvt-tank
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 5400
+      #:minerals 120 #:gas 125 #:supply-used 42 #:supply-cap 62 #:workers 30 #:active-bases 2
+      #:mineral-harvesters 22 #:gas-harvesters 8
+      #:army-supply 12 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'barracks-techlab 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 3)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'barracks-techlab 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 3)
+      #:unit-counts (hasheq 'scv 30 'marine 10 'siege-tank 0)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1 'factory 1 'starport 0))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l24-t-tvt-tank) 'siege-tank)
+                     (not (memq 'scv (macro-brain-decision-scheduled-ids l24-t-tvt-tank))))
+                "L24-P0-2 #17/#41 TvT: Siege Tank (<4) @ 120M/125G must escrow past SCV even with 0 Medivacs")
+
+  ;; (d) #02/#29/#32/#35/#47 Peaceful 1-base Terran @ f=2200, 240M/110G locks Natural CC above Factory/SCV/Marine
+  (reset-macro-escrow-tracker!)
+  (define l24-t-1base-nat-cc
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Zerg #:frame 2200
+      #:minerals 240 #:gas 110 #:supply-used 22 #:supply-cap 31 #:workers 20 #:active-bases 1
+      #:mineral-harvesters 17 #:gas-harvesters 3
+      #:army-supply 2 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 20 'marine 2)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l24-t-1base-nat-cc) 'command-center)
+                     (not (memq 'scv (macro-brain-decision-scheduled-ids l24-t-1base-nat-cc)))
+                     (not (memq 'marine (macro-brain-decision-scheduled-ids l24-t-1base-nat-cc)))
+                     (not (memq 'factory (macro-brain-decision-scheduled-ids l24-t-1base-nat-cc))))
+                "L24-P0-2 #02/#29/#35 Terran: Peaceful 1-base @ 240M/110G must lock Natural CC above Factory/SCV/Marine")
+
+  ;; (e) #14 Over-supply emergency replacement (26/23, pending=1) schedules Depot; 15/15 opening does NOT double-Depot
+  (reset-macro-escrow-tracker!)
+  (define l24-t-oversupply
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 3600
+      #:minerals 120 #:gas 60 #:supply-used 26 #:supply-cap 23 #:pending-supply 1
+      #:workers 20 #:active-bases 1
+      #:mineral-harvesters 17 #:gas-harvesters 3
+      #:army-supply 6 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 1 'barracks 2 'refinery 1)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 2 'barracks 2 'refinery 1)
+      #:unit-counts (hasheq 'scv 20 'marine 6)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 2))))
+  (reset-macro-escrow-tracker!)
+  (define l24-t-opening-15
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 600
+      #:minerals 160 #:gas 0 #:supply-used 15 #:supply-cap 15 #:pending-supply 1
+      #:workers 15 #:active-bases 1
+      #:mineral-harvesters 15 #:gas-harvesters 0
+      #:army-supply 0 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'command-center 1)
+      #:total-building-counts (hasheq 'command-center 1 'supply-depot 1)
+      #:unit-counts (hasheq 'scv 15)
+      #:open-facility-slots (hasheq 'townhall 1))))
+  (assert-true! (and (not (not (memq 'supply-depot (macro-brain-decision-scheduled-ids l24-t-oversupply))))
+                     (not (memq 'supply-depot (macro-brain-decision-scheduled-ids l24-t-opening-15))))
+                "L24-P0-2 #14: Over-supply (26/23, pending=1) must emergency-replace Depot while 15/15 opening does not")
+
+  ;; (f) Negative guard: Protoss 115M/100G continuous Probe engine remains 100% untouched!
+  (reset-macro-escrow-tracker!)
+  (define l24-p-probe-untouched
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 3600
+      #:minerals 115 #:gas 100 #:supply-used 26 #:supply-cap 46 #:workers 22 #:active-bases 2
+      #:mineral-harvesters 19 #:gas-harvesters 3
+      #:army-supply 4 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:unit-counts (hasheq 'probe 22 'stalker 2)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 1))))
+  (assert-true! (not (not (memq 'probe (macro-brain-decision-scheduled-ids l24-p-probe-untouched))))
+                "L24-P0-2 Guard: Protoss continuous Probe engine at 115M/100G must remain 100% untouched")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms

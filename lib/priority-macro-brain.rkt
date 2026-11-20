@@ -4741,6 +4741,8 @@
                (and zerg-mass-air-aa-tech-due? (eq? nsym 'hydralisk-den))
                ;; L21/L22-P0-2 (`#30 PvP` / `#32 TvT` 1-base): Never backoff-block midgame 1-base Natural at >=175M!
                (and midgame-1base-natural-due? (eq? nsym race-expand-sym) (>= minerals 175))
+               ;; L24-P0-2 (`#02/#29/#32/#35/#47`): Never backoff-block peaceful 1-base Terran Natural CC lock!
+               (and terran-1base-nat-cc-lock? (eq? nsym 'command-center))
                (not (macro-escrow-in-backoff? escrow-state-entry frame nsym)))
            (or (not (eq? (sc2-tech-node-kind node) 'research))
                (upgrade-allowed-by-unit-and-order-gates?
@@ -5475,7 +5477,14 @@
       [else 2]))
   (define supply-margin (compute-supply-preemption-margin supply-cap))
   (define supply-preempt-now?
-    (or (and early-rush-override-active?
+    (or ;; L24-P0-2 (`#14` `SB=27.3%`): Immediately replace lost/blocked supply whenever over cap
+        ;; (`supply-left < 0`) OR at/over cap past the 14/15 opener (`supply-left <= 0`, `supply-cap >= 20`)
+        ;; with `< 2` pending supply structures (`supply-cap < 200`)!
+        (and (< supply-cap 200)
+             (< pending-supply 2)
+             (or (< supply-left 0)
+                 (and (<= supply-left 0) (>= supply-cap 20))))
+        (and early-rush-override-active?
              (not early-ling-rush-defense-active?)
              (< supply-cap 200)
              (<= pending-supply 0)
@@ -5938,6 +5947,27 @@
              (and (or (>= total-townhalls-incl-pending 2)
                       (<= supply-left 1))
                   (or (<= supply-left 5) (>= supply-used 19))))))
+  ;; L24-P0-2 (`#02/#08/#29/#32/#35/#47`, `TvZ Nat 304s -> ~105s`): During peaceful 1-base natural
+  ;; window once Barracks >= 1 and minerals >= 200 (after TvZ wall Depot #2 if applicable), lock
+  ;; CommandCenter #2 cleanly at `u = 625.0, blk = #t` strictly ABOVE `factory`/`orbital`/`scv@575`!
+  (define terran-1base-nat-cc-lock?
+    (and (eq? race 'Terran)
+         (= active-bases 1)
+         (<= total-townhalls-incl-pending 1)
+         (>= frame 1800)
+         (>= minerals 200)
+         (>= (bldg-count-equivalent total-bldg-counts 'barracks) 1)
+         (not terran-tvt-1base-tank-core-due?)
+         (not under-attack?)
+         (not under-early-rush-crisis?)
+         (not early-ling-rush-defense-active?)
+         (not early-proxy-marauder-rush-active?)
+         (not terran-early-rush-hold?)
+         (not early-enemy-combat-arrived?)
+         (not active-1base-t3-rush-pending?)
+         (not terran-tvz-wall-depot2-due?)
+         (not (and tvz-early-wall-marine-before-cc-escrow? (< minerals 400)))
+         (<= enemy-threat-supply 0)))
   ;; L22-P0-2 (`#36/#6 PvZ`): Textbook Pro 14-Pylon -> 16-Gateway -> 17-Assimilator!
   ;; Once Pylon #1 is ready and >= 16 workers with 0 Gateways, Gateway #1 (`u=530`, `blk=#t`)
   ;; strictly outranks Probe #17 (`488`) so Gateway #1 drops immediately at 150M!
@@ -5979,9 +6009,14 @@
          (> (bldg-count-equivalent ready-bldg-counts 'factory-techlab) 0)
          (or early-proxy-marauder-rush-active?
              (not terran-early-rush-hold?))
-         ;; Preserve #5122349 Medivac #1 priority for Bio (>=6 bio, ready Starport, 0 Medivacs, <225G)
+         ;; Preserve #5122349 Medivac #1 priority for Bio in TvP/TvZ (>=6 bio, open ready Starport, 0 Medivacs, <225G),
+         ;; NEVER starving TvT core Siege Tanks (<4) or firing when Starport slot is busy!
          (not (and (not early-proxy-marauder-rush-active?)
+                   (not (and (eq? enemy-race 'Terran)
+                             (< (unit-count-equivalent unit-counts 'siege-tank) 4)))
                    (> (bldg-count-equivalent ready-bldg-counts 'starport) 0)
+                   (or (not (hash? open-facility-slots))
+                       (> open-starport-slots 0))
                    (= (unit-count-equivalent unit-counts 'medivac) 0)
                    (>= (+ (unit-count-equivalent unit-counts 'marine)
                           (unit-count-equivalent unit-counts 'marauder)) 6)
@@ -6519,7 +6554,9 @@
                                      '()))
                          '())
                      (if protoss-early-breach-zealot-due? '(zealot) '())
-                     (if midgame-1base-natural-due? (list race-expand-sym) '())
+                     (if (or midgame-1base-natural-due? terran-1base-nat-cc-lock?)
+                         (list race-expand-sym)
+                         '())
                      (if zerg-mass-air-aa-tech-due? '(hydralisk-den) '())
                      (if zerg-mass-air-hydra-due? '(hydralisk) '())
                      (if zvz-safe-pool-first-due? '(spawning-pool) '())
@@ -7002,6 +7039,81 @@
          (eq? macro-regime 'happy-path-macro)
          (< workers worker-cap-now)))
 
+  ;; L24-P0-2 (`#11/#26/#17/#41`): Priority Terran Orbital Command #1 (605.0, blk=#t) & #2 (580.0, blk=#t)
+  ;; plus missing Terran 1-1-1 core milestones so continuous SCV@575 never starves Orbital/Factory/Starport/Rax2/Tanks!
+  (define terran-ready-unmorphed-ccs
+    (if (eq? race 'Terran)
+        (+ (hash-ref ready-bldg-counts 'command-center 0)
+           (hash-ref ready-bldg-counts 'command-center-flying 0))
+        0))
+  (define terran-total-orbitals
+    (if (eq? race 'Terran)
+        (bldg-count-equivalent total-bldg-counts 'orbital-command)
+        0))
+  (define terran-orbital-1-urgent?
+    (and (eq? race 'Terran)
+         (= terran-total-orbitals 0)
+         (> terran-ready-unmorphed-ccs 0)
+         (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
+         (>= workers 16)
+         (not under-early-rush-crisis?)
+         (not terran-early-rush-hold?)
+         (not early-ling-rush-defense-active?)
+         (not early-proxy-marauder-rush-active?)
+         (not terran-tvz-wall-depot2-due?)
+         (not (and terran-depot2-before-rax2? (<= supply-left 5)))
+         (not terran-1base-nat-cc-lock?)
+         (not (and natural-exp-window? (= active-bases 1) (<= total-townhalls-incl-pending 1) (>= minerals 200)))
+         (not under-attack?)
+         (<= enemy-threat-supply army-supply)))
+  (define terran-orbital-2-urgent?
+    (and (eq? race 'Terran)
+         (= terran-total-orbitals 1)
+         (> terran-ready-unmorphed-ccs 0)
+         (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
+         (>= active-bases 2)
+         (>= workers 18)
+         (>= minerals 100)
+         (or (> (bldg-count-equivalent total-bldg-counts 'factory) 0)
+             (< gas 75))
+         (not under-early-rush-crisis?)
+         (not terran-early-rush-hold?)
+         (not early-ling-rush-defense-active?)
+         (not under-attack?)
+         (<= enemy-threat-supply army-supply)
+         (or (>= (bldg-count-equivalent total-bldg-counts 'barracks) 2)
+             (>= minerals 300))))
+  (define terran-111-factory-due?
+    (and (eq? race 'Terran)
+         (= (bldg-count-equivalent total-bldg-counts 'factory) 0)
+         (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
+         (>= gas 75)))
+  (define terran-111-starport-due?
+    (and (eq? race 'Terran)
+         (= (bldg-count-equivalent total-bldg-counts 'starport) 0)
+         (> (bldg-count-equivalent ready-bldg-counts 'factory) 0)
+         (>= gas 75)))
+  (define terran-111-rax2-due?
+    (and (eq? race 'Terran)
+         (<= (bldg-count-equivalent total-bldg-counts 'barracks) 1)
+         (>= active-bases 2)
+         (> (bldg-count-equivalent total-bldg-counts 'factory) 0)))
+  (define terran-111-tvt-tank-due?
+    (and (eq? race 'Terran)
+         (eq? enemy-race 'Terran)
+         (> (bldg-count-equivalent ready-bldg-counts 'factory-techlab) 0)
+         (or (not (hash? open-facility-slots))
+             (> (hash-ref open-facility-slots 'factory 0) 0))
+         (< (unit-count-equivalent unit-counts 'siege-tank) 4)
+         (>= gas 100)))
+  (define terran-missing-111-milestone-due?
+    (or terran-orbital-1-urgent?
+        terran-orbital-2-urgent?
+        terran-111-factory-due?
+        terran-111-starport-due?
+        terran-111-rax2-due?
+        terran-111-tvt-tank-due?))
+
   ;; L23-P0-2 (THE BIG UNLOCK — Continuous 2:00-4:00+ Terran/Protoss Worker Production):
   ;; Terran SCVs and Protoss Probes train from dedicated TownHall slots (never competing with Larva!).
   ;; During happy-path-macro below undersaturation, rank SCV/Probe at `u = 575.0` (`blk = #f`) and
@@ -7021,6 +7133,8 @@
          (not supply-preempt-now?)
          (not supply-lockout-active?)
          (< workers (min (if (eq? race 'Protoss) 54 48) pt-undersat-bases-thresh))
+         (not terran-orbital-1-urgent?)
+         (not terran-1base-nat-cc-lock?)
          (not (and natural-exp-window? (= active-bases 1) (<= total-townhalls-incl-pending 1) (>= minerals 250)))
          (not midgame-1base-natural-due?)
          (not (and terran-tvz-wall-depot2-due? (< minerals 150)))
@@ -7472,7 +7586,9 @@
                  (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
                  (memq csym '(zergling spine-crawler queen)))
             #t]
-           [(and midgame-1base-natural-due? (eq? csym race-expand-sym))
+           [(and (or midgame-1base-natural-due? terran-1base-nat-cc-lock?) (eq? csym race-expand-sym))
+            #t]
+           [(and (or terran-orbital-1-urgent? terran-orbital-2-urgent?) (eq? csym 'orbital-command))
             #t]
            [(and zerg-mass-air-aa-tech-due? (not zerg-cap-air-spire-due?) (not zerg-cap-air-corruptor-priority-due?) (eq? csym 'hydralisk-den))
             #t]
@@ -7895,6 +8011,14 @@
                       (or (eq? race 'Terran)
                           (> (bldg-count-equivalent total-bldg-counts 'gateway) 0)))
                  488.0]
+                ;; L24-P0-2 (`#11/#26/#17/#41`): Yield Terran SCV to `488.0` in `100..199M` when any missing
+                ;; Terran 1-1-1 core milestone (Orbital #1/#2, Factory #1, Starport #1, Rax #2, TvT Tank) is due,
+                ;; breaking the 0->50->0M stall while keeping Protoss's 8-10 (44.4%) Probe engine 100% untouched!
+                [(and (eq? race 'Terran)
+                      terran-missing-111-milestone-due?
+                      (>= minerals 100)
+                      (< minerals 200))
+                 488.0]
                 ;; When bank is in the exact `150..199M` (or `300..349M` for a 300M BO tech like FleetBeacon)
                 ;; band where a core building is immediately affordable, yield to 542..560 buildings so they
                 ;; drop on time; everywhere else (`< 150M` or `>= 200M`), rank SCV/Probe at `575.0` so both
@@ -8017,6 +8141,7 @@
            (and (not (and (= active-bases 1)
                           (<= total-townhalls-incl-pending 1)
                           (or (>= minerals 250)
+                              terran-1base-nat-cc-lock?
                               (and midgame-1base-natural-due? (>= minerals 175))
                               (and (>= minerals 150)
                                    (not under-attack?)
@@ -8045,6 +8170,7 @@
                 (not zerg-4base-hatch-capped?)
                 (or natural-exp-window?
                     midgame-1base-natural-due?
+                    terran-1base-nat-cc-lock?
                     slice15-base-loss-expand-now?
                     zerg-late-low-min-high-gas-3rd-hatch-due?
                     overdue-1base-expand?
@@ -8059,11 +8185,12 @@
                     midgame-1base-natural-due?
                     zerg-late-low-min-high-gas-3rd-hatch-due?
                     (and (or (not ws-natural-blocked?) (>= minerals 350))
-                         (or blk0 is-bo-goal? is-repaired? natural-exp-window? overdue-1base-expand? step-post-t3-tech-expand-due? protoss-3rd-nexus-due? protoss-4th-nexus-ready? zerg-3rd-hatch-pro-due? terran-3rd-cc-due? terran-contained-breakout-cc? depletion-or-mirror-exp? high-bank-exp?)
+                         (or blk0 is-bo-goal? is-repaired? natural-exp-window? terran-1base-nat-cc-lock? overdue-1base-expand? step-post-t3-tech-expand-due? protoss-3rd-nexus-due? protoss-4th-nexus-ready? zerg-3rd-hatch-pro-due? terran-3rd-cc-due? terran-contained-breakout-cc? depletion-or-mirror-exp? high-bank-exp?)
                          (or terran-contained-breakout-cc? (not under-attack?))
-                         (or natural-exp-window? step-post-t3-tech-expand-due? zerg-3rd-hatch-pro-due? terran-3rd-cc-due? light-expand-threat-ok?)
+                         (or natural-exp-window? terran-1base-nat-cc-lock? step-post-t3-tech-expand-due? zerg-3rd-hatch-pro-due? terran-3rd-cc-due? light-expand-threat-ok?)
                          (not premature-3rd-base-starving-army?)
                          (or overdue-1base-expand?
+                             terran-1base-nat-cc-lock?
                              step-post-t3-tech-expand-due?
                              terran-contained-breakout-cc?
                              (>= workers (if (eq? race 'Zerg) 14 16)))
@@ -8079,10 +8206,11 @@
                    (or under-attack?
                        terran-early-rush-hold?
                        zerg-4base-hatch-capped?
-                       (and (not natural-exp-window?) (not step-post-t3-tech-expand-due?) (not zerg-3rd-hatch-pro-due?) (not terran-3rd-cc-due?) (not light-expand-threat-ok?))
+                       (and (not natural-exp-window?) (not terran-1base-nat-cc-lock?) (not step-post-t3-tech-expand-due?) (not zerg-3rd-hatch-pro-due?) (not terran-3rd-cc-due?) (not light-expand-threat-ok?))
                        premature-3rd-base-starving-army?
                        (and ws-natural-blocked? (< minerals 350))))
               (min u0 45.0)]
+             [terran-1base-nat-cc-lock? (max 625.0 plan-weight u0)]
              [is-repaired? (max 520.0 u0)]
              [nat-exp-yield-to-open-worker-slot? 477.0]
              [early-nat-exp-window? (max 620.0 plan-weight u0)]
@@ -8899,11 +9027,14 @@
                     (and terran-2nd-factory-boost? (>= minerals 150) (>= gas 100))
                     (and terran-factory-techlab-boost? (>= gas 25))
                     (and terran-siege-tank-boost?
-                         (>= gas 125)
-                         (or (>= minerals 150) under-attack? (> enemy-threat-supply 0)))
+                         (or (and (>= gas 125)
+                                  (or (>= minerals 150) under-attack? (> enemy-threat-supply 0)))
+                             (and terran-111-tvt-tank-due? (>= minerals 100))))
                     terran-factory-gas-ready-boost?
                     terran-first-factory-boost?
                     (and terran-first-starport-boost? terran-starport-escrow-ok?)
+                    (and terran-orbital-1-urgent? (eq? nsym 'orbital-command))
+                    (and terran-orbital-2-urgent? (eq? nsym 'orbital-command))
                     (and terran-midgame-rax-boost?
                          (let ([cur-rax (bldg-count-equivalent total-bldg-counts 'barracks)])
                            (or (and (< cur-rax 3) (>= minerals 100))
@@ -9133,6 +9264,8 @@
              [(and emergency-rush-def-boost? (eq? cat 'combat-unit))
               (max 620.0 (+ 340.0 u0))]
              [terran-depot2-boost? (max (if terran-tvz-wall-depot2-due? 650.0 605.0) plan-weight u0)]
+             [(and terran-orbital-1-urgent? (eq? nsym 'orbital-command)) (max 605.0 plan-weight u0)]
+             [(and terran-orbital-2-urgent? (eq? nsym 'orbital-command)) (max 580.0 plan-weight u0)]
              [pvz-ling-gate2-boost? (max 585.0 plan-weight u0)]
              [zerg-macro-lair-boost? (max 585.0 plan-weight u0)]
              [pvz-first-zealot-boost? (max 580.0 plan-weight u0)]
@@ -9357,6 +9490,7 @@
                      (= active-bases 1)
                      (<= total-townhalls-incl-pending 1)
                      (or (>= minerals 250)
+                         terran-1base-nat-cc-lock?
                          (and midgame-1base-natural-due? (>= minerals 175))
                          (and (>= minerals 150)
                               (not under-attack?)
@@ -9919,6 +10053,9 @@
            [zvz-rush-spine-post? (max u 650.0)]
            [terran-rush-marine-post? (max u 640.0)]
            [terran-depot2-post? (max u (if terran-tvz-wall-depot2-due? 650.0 605.0))]
+           [(and terran-1base-nat-cc-lock? (eq? nsym 'command-center)) (max u 625.0)]
+           [(and terran-orbital-1-urgent? (eq? nsym 'orbital-command)) (max u 605.0)]
+           [(and terran-orbital-2-urgent? (eq? nsym 'orbital-command)) (max u 580.0)]
            [pvz-ling-gate2-post? (max u 585.0)]
            [zerg-macro-lair-post? (max u 585.0)]
            [pvz-first-zealot-post? (max u 580.0)]
@@ -10169,6 +10306,9 @@
             #f]
            [(and zerg-late-low-min-high-gas-3rd-hatch-due? (eq? nsym 'hatchery)) #t]
            [(and midgame-1base-natural-due? (eq? nsym race-expand-sym) (cand-can-escrow? id)) #t]
+           [(and terran-1base-nat-cc-lock? (eq? nsym 'command-center) (cand-can-escrow? id)) #t]
+           [(and terran-orbital-1-urgent? (eq? nsym 'orbital-command) (cand-can-escrow? id)) #t]
+           [(and terran-orbital-2-urgent? (eq? nsym 'orbital-command) (cand-can-escrow? id)) #t]
            [(and zerg-cap-air-corruptor-priority-due? (eq? nsym 'corruptor) (cand-can-escrow? id)) #t]
            [(and zerg-mass-air-aa-tech-due? (not zerg-cap-air-spire-due?) (not zerg-cap-air-corruptor-priority-due?) (eq? nsym 'hydralisk-den) (cand-can-escrow? id)) #t]
            [(and zerg-mass-air-hydra-due? (not zerg-cap-air-spire-due?) (not zerg-cap-air-corruptor-priority-due?) (eq? nsym 'hydralisk) (>= gas 25) (cand-can-escrow? id)) #t]
@@ -10216,8 +10356,9 @@
                      (and terran-2nd-factory-post? (>= minerals 150) (>= gas 100))
                      (and terran-factory-techlab-post? (>= gas 25))
                      (and terran-siege-tank-post?
-                          (>= gas 125)
-                          (or (>= minerals 150) under-attack? (> enemy-threat-supply 0)))
+                          (or (and (>= gas 125)
+                                   (or (>= minerals 150) under-attack? (> enemy-threat-supply 0)))
+                              (and terran-111-tvt-tank-due? (>= minerals 100))))
                      zerg-post-hatch-pool-post? zerg-cap-air-ext-post?
                      zerg-midgame-ext-post? terran-factory-gas-ready-post?
                      terran-first-factory-post?
@@ -10837,7 +10978,7 @@
            (not under-attack?)
            (<= enemy-threat-supply 0)
            slot-ok?
-           (or (< rem-gas 100) (< rem-min 100))
+           (or (< rem-gas 75) (< rem-min 100))
            factory-only-min-escrow?))
 
     ;; W8-P0-1-belief (#18/#30) + W10-P0-3-belief (#45): Never let void-ray/tempest/robotics-bay/stargate escrow
@@ -10865,18 +11006,23 @@
            (or (< minerals 325) under-attack? (> enemy-threat-supply 0))
            (not (and terran-first-factory-gas-ready? (>= army-supply 4) (not under-attack?)))
            reserved-cand
-           (memq (normalize-brain-sym (priority-candidate-id reserved-cand))
-                 '(command-center factory orbital-command barracks bunker))))
-    ;; W15b (#17 TvT): Never let `command-center` escrow (including `post-t3-tech-expand-due?`, `terran-3rd-cc-due?`,
-    ;; or `terran-3rd-cc-urgent-rescue?`) block `marine` or `scv` under pressure (`under-attack?`, `enemy-threat-supply > 0`,
-    ;; or `terran-cloaked-det-crisis?`), when `army-supply < 14`, or when a 3rd+ CC still has `rem-min < 225`.
-    ;; Preserves Supply Depot `<6%` SupBlk, W6 Factory #1, W10 peaceful Natural CC #2 `<95s`, and W12 peaceful 3rd CC `<=385s`.
+           (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
+             (and (memq rid '(command-center factory orbital-command barracks bunker))
+                  (not (and terran-1base-nat-cc-lock?
+                            (eq? rid 'command-center)
+                            (or (>= army-supply 2) (>= minerals 250))))
+                  (not (and terran-orbital-1-urgent? (>= minerals 100) (eq? rid 'orbital-command)))))))
+    ;; W15b (#17 TvT) + L24-P0-2 (`#02/#29/#32/#35/#47`): Never let `command-center` escrow block
+    ;; `marine` or `scv` under pressure, when `army-supply < 14`, or when a 3rd+ CC still has `rem-min < 225`
+    ;; — EXCEPT during peaceful 1-base natural CC lock (`terran-1base-nat-cc-lock?`, `minerals >= 200`),
+    ;; where draining below `250M` stalls Natural CC to `304s`!
     (define terran-marine-scv-ignores-cc-escrow?
       (and (eq? race 'Terran)
            reserved-cand
            (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'command-center)
            (>= supply-left 2)
            (not supply-preempt-now?)
+           (not terran-1base-nat-cc-lock?)
            (not (and terran-first-factory-gas-ready? (>= army-supply 4) (not under-attack?)))
            (or (and (eq? csym 'marine)
                     (or under-attack?
@@ -10899,16 +11045,19 @@
                                  (< minerals 240)))
                         (and (>= total-townhalls-incl-pending 2)
                              (< rem-min 225)))))))
-    ;; W9-P0-1-belief (#11/#17): Never let starport/liberator/viking escrow hard-block SCV/Marine/Marauder
+    ;; W9-P0-1-belief (#11/#17) + L24-P0-2: Never let 2nd Starport/Liberator/Viking escrow hard-block
+    ;; SCV/Marine/Marauder, while protecting Terran's 1st Starport (`terran-111-starport-due?`) at `>= 100M`!
     (define terran-bio-scv-ignores-air-escrow?
       (and (eq? race 'Terran)
            reserved-cand
-           (memq (normalize-brain-sym (priority-candidate-id reserved-cand))
-                 '(starport liberator viking-fighter))
-           (or (and (eq? csym 'scv) (< workers 48))
-               (eq? csym 'marine)
-               (and (eq? csym 'marauder)
-                    (or (not enemy-cap-air?) (>= gas 125) (<= open-starport-slots 0))))))
+           (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
+             (and (memq rid '(starport liberator viking-fighter))
+                  (or (and (eq? csym 'scv)
+                           (< workers 48)
+                           (not (and (eq? rid 'starport) terran-111-starport-due? (>= minerals 100))))
+                      (eq? csym 'marine)
+                      (and (eq? csym 'marauder)
+                           (or (not enemy-cap-air?) (>= gas 125) (<= open-starport-slots 0))))))))
     ;; W9-P0-3-belief + W10-P0-3-belief (PvP/#24/#48): Never let Stalker escrow starve Probes or idle-Robo Immortals/Colossi
     (define protoss-probe-or-immortal-ignores-stalker-escrow?
       (and (eq? race 'Protoss)
@@ -11019,9 +11168,11 @@
            (eq? csym 'factory-techlab)
            reserved-cand
            (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'starport)))
-    ;; L23-P0-2 (THE BIG UNLOCK — Continuous 2:00-4:00+ Terran/Protoss Worker Production):
+    ;; L23-P0-2 + L24-P0-2 (Continuous 2:00-4:00+ Terran/Protoss Worker Production):
     ;; Exempt 50M P/T TownHall workers from non-supply, non-natural-expand escrow floors while
-    ;; TownHall slot is open during happy-path-macro so mid-tier buildings never freeze Nexus/CC!
+    ;; TownHall slot is open during happy-path-macro so mid-tier buildings never freeze Nexus/CC —
+    ;; while excluding Terran's core 1-1-1 milestones (Orbital, Factory #1, Starport #1, Rax #2,
+    ;; TvT Tank < 4) so SCV@575 never starves Terran opening tech (Protoss 100% untouched!).
     (define pt-worker-ignores-non-nat-escrow?
       (and pt-continuous-worker-due?
            (eq? cat 'worker)
@@ -11035,9 +11186,16 @@
                             (<= total-townhalls-incl-pending 1)))
                   (not (and (eq? rcat 'expansion) (>= rem-min 200)))
                   (not (memq rid '(engineering-bay missile-turret forge photon-cannon
-                                   factory-techlab spawning-pool)))))))
+                                   factory-techlab spawning-pool orbital-command)))
+                  (not (and (eq? race 'Terran)
+                            (>= minerals 100)
+                            (or (and (eq? rid 'factory) terran-111-factory-due?)
+                                (and (eq? rid 'starport) terran-111-starport-due?)
+                                (and (eq? rid 'barracks) terran-111-rax2-due?)
+                                (and (eq? rid 'siege-tank) terran-111-tvt-tank-due?))))))))
     ;; Supply candidate ignores non-supply floors (PV4); gas-blocked escrow never blocks 0-gas extractors
-    ;; OR 0-gas combat-units/workers (e.g. SiegeTank gas-escrow at 55G must never starve Marine/SCV #29!).
+    ;; OR 0-gas combat-units/workers (e.g. SiegeTank gas-escrow at 55G must never starve Marine/SCV #29!),
+    ;; except Terran 1-1-1 Factory/Starport/TvT-Tank milestones when nearly funded (`>= 100M`).
     (define app-min-floor
       (cond
         [(eq? cat 'supply) 0]
@@ -11049,8 +11207,13 @@
         [(and reserved-gas-blocked?
               (= (priority-candidate-gas-cost c) 0)
               (memq cat '(combat-unit worker))
-              (not (and (eq? race 'Terran)
-                        (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'factory))))
+              (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
+                (and (not (and (eq? race 'Terran) (eq? rid 'factory)))
+                     (not (and (eq? race 'Terran)
+                               (eq? cat 'worker)
+                               (>= minerals 100)
+                               (or (and (eq? rid 'starport) terran-111-starport-due?)
+                                   (and (eq? rid 'siege-tank) terran-111-tvt-tank-due?)))))))
          0]
         [protoss-aa-stalker-ignores-heavy-escrow? 0]
         [terran-early-marine-ignores-macro-escrow? 0]
@@ -11372,6 +11535,7 @@
                   (= active-bases 1)
                   (<= total-townhalls-incl-pending 1)
                   (or (>= minerals 250)
+                      terran-1base-nat-cc-lock?
                       (and midgame-1base-natural-due? (>= minerals 175))
                       (and (>= minerals 150)
                            (not under-attack?)
