@@ -15171,6 +15171,121 @@
                      (not (memq 'barracks (macro-brain-decision-scheduled-ids l34-t-02-tvt-rax-cap-320m)))
                      (not (not (memq 'barracks (macro-brain-decision-scheduled-ids l34-t-02-tvt-rax-unlock-550m)))))
                 "L34-P0-2 #02 TvT: Brain must cap Barracks<=8 (<1000M) & TvT <=2 (<2 Tanks/<2 Facs/<500M), unlocking at >=500M")
+
+  ;; 51.23 Loop 35 (L35-P0-2): Protoss Urgent AA/Reaper Stalker (#75/#54), PvT Anti-Bio Colossus + Lance + 2nd Robo (H2H #04),
+  ;;       & Terran <5:00 Early Ground-Rush Survival Hellion/Marine/Bunker (#41/#53)
+  ;; (a) Protoss vs Banshees (#75) & Reapers (#54) elevates Stalker (>=660, blk=#t) over Stargate/Zealot/Immortal/Probe#21+
+  (reset-macro-escrow-tracker!)
+  (define l35-p-75-banshee-stalker
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 6200
+      #:minerals 160 #:gas 160 #:supply-used 42 #:supply-cap 62 #:workers 32 #:active-bases 2
+      #:mineral-harvesters 26 #:gas-harvesters 6
+      #:army-supply 10 #:enemy-threat-supply 6 #:under-attack? #t #:requires-anti-air? #t #:requires-detection? #t
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 6 'gateway 3 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 6 'gateway 3 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 32 'zealot 3 'stalker 1 'observer 1)
+      #:enemy-unit-counts (hasheq 'banshee 2)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 3 'robotics-facility 1))))
+  (reset-macro-escrow-tracker!)
+  (define l35-p-54-reaper-stalker-escrow
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 3820
+      #:minerals 95 #:gas 60 #:supply-used 28 #:supply-cap 46 #:workers 22 #:active-bases 2
+      #:mineral-harvesters 16 #:gas-harvesters 6
+      #:army-supply 6 #:enemy-threat-supply 6 #:under-attack? #t
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 4 'gateway 2 'cybernetics-core 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 4 'gateway 2 'cybernetics-core 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 22 'zealot 3)
+      #:enemy-unit-counts (hasheq 'reaper 3)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 2))))
+  (assert-true! (and (not (not (memq 'stalker (macro-brain-decision-scheduled-ids l35-p-75-banshee-stalker))))
+                     (not (memq 'stargate (macro-brain-decision-scheduled-ids l35-p-75-banshee-stalker)))
+                     (not (memq 'zealot (macro-brain-decision-scheduled-ids l35-p-75-banshee-stalker)))
+                     (eq? (macro-brain-decision-saving-for l35-p-54-reaper-stalker-escrow) 'stalker)
+                     (not (memq 'probe (macro-brain-decision-scheduled-ids l35-p-54-reaper-stalker-escrow))))
+                "L35-P0-2 #75/#54: Protoss urgent AA/Reaper Stalker must outrank Stargate/Zealot/Probe#21+ & escrow at 95M/60G")
+
+  ;; (b) H2H #04 PvT Anti-Bio Colossus (>=595) + Extended Thermal Lance + 2nd Robo on >=3 bases (Medivacs never suppress!)
+  (reset-macro-escrow-tracker!)
+  (define l35-p-04-bio-colossus
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 11200
+      #:minerals 320 #:gas 220 #:supply-used 112 #:supply-cap 150 #:workers 54 #:active-bases 3
+      #:mineral-harvesters 40 #:gas-harvesters 14
+      #:army-supply 58 #:enemy-threat-supply 36 #:under-attack? #f #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'nexus 3 'pylon 14 'gateway 6 'cybernetics-core 1 'robotics-facility 1
+                                      'robotics-bay 1 'stargate 1 'forge 1 'assimilator 6)
+      #:total-building-counts (hasheq 'nexus 3 'pylon 14 'gateway 6 'cybernetics-core 1 'robotics-facility 1
+                                      'robotics-bay 1 'stargate 1 'forge 1 'assimilator 6)
+      #:unit-counts (hasheq 'probe 54 'stalker 18 'zealot 6 'colossus 1 'observer 1)
+      #:enemy-unit-counts (hasheq 'marine 20 'marauder 4 'medivac 10 'viking-fighter 4)
+      #:open-facility-slots (hasheq 'townhall 3 'gateway 6 'robotics-facility 1 'stargate 1 'robotics-bay 1))))
+  (reset-macro-escrow-tracker!)
+  (define l35-p-04-lance-robo2
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 11400
+      #:minerals 340 #:gas 280 #:supply-used 116 #:supply-cap 150 #:workers 54 #:active-bases 3
+      #:mineral-harvesters 40 #:gas-harvesters 14
+      #:army-supply 62 #:enemy-threat-supply 24 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 3 'pylon 14 'gateway 6 'cybernetics-core 1 'robotics-facility 1
+                                      'robotics-bay 1 'forge 1 'assimilator 6)
+      #:total-building-counts (hasheq 'nexus 3 'pylon 14 'gateway 6 'cybernetics-core 1 'robotics-facility 1
+                                      'robotics-bay 1 'forge 1 'assimilator 6)
+      #:unit-counts (hasheq 'probe 54 'stalker 18 'zealot 6 'colossus 1 'observer 1)
+      #:enemy-unit-counts (hasheq 'marine 18 'marauder 4 'medivac 6)
+      #:open-facility-slots (hasheq 'townhall 3 'gateway 6 'robotics-facility 0 'robotics-bay 1))))
+  (assert-true! (and (not (not (memq 'colossus (macro-brain-decision-scheduled-ids l35-p-04-bio-colossus))))
+                     (not (memq 'disruptor (macro-brain-decision-scheduled-ids l35-p-04-bio-colossus)))
+                     (>= (hash-ref (hash-ref (priority-schedule-result-category-utilities
+                                              (macro-brain-decision-priority-schedule l35-p-04-bio-colossus))
+                                             'candidate-utilities (hasheq))
+                                   'colossus 0.0)
+                         595.0)
+                     (not (not (memq 'extended-thermal-lance (macro-brain-decision-scheduled-ids l35-p-04-lance-robo2))))
+                     (not (not (memq 'robotics-facility (macro-brain-decision-scheduled-ids l35-p-04-lance-robo2)))))
+                "L35-P0-2 H2H#04 PvT: Bio+Medivacs must prioritize Colossus>=595 over Disruptor/Oracle & unlock Lance + 2nd Robo on 3b")
+
+  ;; (c) Terran <5:00 Early Ground-Rush Survival (#53 Reapers / #41 Zerglings): Hellion>=665 + Marine>=655 beat Tank/Starport/OC
+  (reset-macro-escrow-tracker!)
+  (define l35-t-53-reaper-hellion
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 4200
+      #:minerals 160 #:gas 130 #:supply-used 28 #:supply-cap 46 #:workers 22 #:active-bases 2
+      #:mineral-harvesters 16 #:gas-harvesters 6
+      #:army-supply 6 #:enemy-threat-supply 6 #:under-attack? #t
+      #:ready-building-counts (hasheq 'command-center 1 'orbital-command 1 'supply-depot 4 'barracks 1
+                                      'factory 1 'factory-techlab 1 'refinery 2)
+      #:total-building-counts (hasheq 'command-center 1 'orbital-command 1 'supply-depot 4 'barracks 1
+                                      'factory 1 'factory-techlab 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 22 'marine 3)
+      #:enemy-unit-counts (hasheq 'reaper 4)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1 'factory 1))))
+  (reset-macro-escrow-tracker!)
+  (define l35-t-41-ling-hellion
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Zerg #:frame 4600
+      #:minerals 155 #:gas 125 #:supply-used 28 #:supply-cap 46 #:workers 22 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 6
+      #:army-supply 4 #:enemy-threat-supply 8 #:under-attack? #t
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 4 'barracks 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 4 'barracks 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 22 'marine 4)
+      #:enemy-unit-counts (hasheq 'zergling 16)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1 'factory 1 'starport 1))))
+  (assert-true! (and (not (not (memq 'hellion (macro-brain-decision-scheduled-ids l35-t-53-reaper-hellion))))
+                     (not (not (memq 'marine (macro-brain-decision-scheduled-ids l35-t-53-reaper-hellion))))
+                     (not (memq 'siege-tank (macro-brain-decision-scheduled-ids l35-t-53-reaper-hellion)))
+                     (not (not (memq 'hellion (macro-brain-decision-scheduled-ids l35-t-41-ling-hellion))))
+                     (not (not (memq 'marine (macro-brain-decision-scheduled-ids l35-t-41-ling-hellion))))
+                     (not (memq 'viking-fighter (macro-brain-decision-scheduled-ids l35-t-41-ling-hellion))))
+                "L35-P0-2 #41/#53: Terran <5:00 vs >=3 Reapers or >=12 Lings must train Hellion+Marine without Tank/Starport/Viking lockout")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms

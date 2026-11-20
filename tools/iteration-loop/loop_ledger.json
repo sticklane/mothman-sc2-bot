@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter29_wave29",
+  "active_wave": "iter35_wave35",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -3117,6 +3117,99 @@
         "FIRST-EVER onlyfans 3-0 CLEAN SWEEP (2.17x, PkA 9,833), puck & oberon BOTH UNDEFEATED 2-0-1, Zerg rebound (+2W/-5L/+3T across 84, FIRST unseen_12 Zerg W 11.00x, 72W-0L 6-loop Honest Arena streak!), [FRESH] PolyMorph 2-1, CryptBotRevival 2-1, AxeFighter 0-1-2!"
       ],
       "promotion_gates_passed": "3/9 PASS across full 78-match (core_14 + unseen_12) roster (zero_crashes_and_rejects, sup_blk_le_6pct [4.1%], tactics_suite_100pct [31W-5L-0D 86.1% / 1.81x, Zerg 72-0!]); 5/9 PASS on core_14 alone (zero_crashes, ties_le_2 [2T], sup_blk_le_6pct [4.2%], every_race_wr_ge_33pct [T 50.0% / P 42.9% / Z 42.9% NL], tactics_suite_100pct); LIVE SHIP GATE 5W-1L 1.90x ATH PASS!"
+    },
+    {
+      "id": "iter35_wave35",
+      "status": "NEW_HIST12_AND_CORE14_ALL_TIME_RECORDS_H2H_1W_5L_VS_NEW_L34_ZIP",
+      "campaign": "Loops 29+ Self-Play, Honest Tactics Arena 2.0 & Expanded Roster Campaign (Loop 35 Wire-Perf + SQLite DB + Mirror Audit)",
+      "loop_self_improvements": [
+        "L35-LOOP-1 (Replay SQLite Metadata & Raw-Replay Extraction DB): Shipped tools/replay-db.py + tests/test-replay-db.py (4/4 PASS) backing /home/sjaconette/sc2-local-arena/arena_replays.sqlite (OUTSIDE git, 409 MiB WAL, 2,038 replays 100% raw-tracker + chat-tag extracted across 71 local & prod AI Arena runs with [SCBOT_BUILD], Tag:v_..., and jj-deploy timestamp mapping)!",
+        "L35-LOOP-2 (Read-Only Mirror-Brain Empirical Audit): Audited both Strategic Mirror-Mind (strictly monotonic anti-depth curve d=0>d=1>d=2..5 even in ORACLE; L3414 defend-All-In base-rec bug; L2956 upgrade-advantage wrong-sign bug; 62.5% pure-mirror A/B diffs harmful) and Tactical Mirror-Brain across 30 real replays + 36 Honest Arena scenarios."
+      ],
+      "spec_summary": "Loop 35 (wmxunzkx 7a422b21): SHATTERED HISTORICAL CORE12 ALL-TIME RECORD (16W-17L-3T = 44.4% WR / 52.8% NL \u2014 FIRST TIME EVER BREAKING 15W!) and CORE14 ALL-TIME RECORD (18W-20L-4T = 42.9% WR / 52.4% NL, Trade 0.90x [+0.22x], EVERY race >=50% NL, Protoss NEW ATH 7W-6L-1T 57.1% NL 1.24x, Terran 7W-7L NEW SB ATL 2.3%, 4x 3-0 sweeps incl. FIRST-EVER oberon 3-0!, onlyfans & puck BOTH 2-0-1 undefeated!). Live wire latency speedup verified (-16.8% avg / -22.4% p95 / -49% max in H2H!). Honest Arena 2.0 TIED ALL-TIME 34W-2L-0D (94.4%, 1.97x) Dummy ATH w/ FIRST-EVER Terran 12-0 Perfect Sweep + Zerg 84W-0L 7-loop streak & 24W-0L combined sweep! NOTE: Controlled H2H vs NEW Loop 34 Shipped ZIP went 1W-5L (0.47x; #02 TvT WIN 6.15x 0-anom, but #01/#03/#04/#05/#06 lost \u2014 #04 PvT had 45v41 Probes but only 200 vs 1,500 army at 6m).",
+      "rev": "wmxunzkx 7a422b21 (iter35 wire-perf + replay-db)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261120_235806_iter35_wave35",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_001526_iter35_baseline_h2h",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter35_wave35_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter35_baseline_h2h_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter35_wave35.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter35.json",
+      "tactics_selfplay_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter35.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter35.md",
+      "clean_n": 42,
+      "cohort_primary": "core_14",
+      "record_clean": "18W-20L-4T (42/42 clean core_14 NEW ATH: 42.9% WR, 52.4% NL; HIST12 NEW ATH 16W-17L-3T = 44.4% WR / 52.8% NL!; self_6 3W-3L-0T 1.13x; baseline_h2h vs NEW L34 ZIP 1W-5L-0T 0.47x)",
+      "win_rate_pct": 42.9,
+      "trade_agg": 0.9,
+      "trade_med": 0.44,
+      "sup_blk_pct": 3.6,
+      "w4_alive_med": 26.0,
+      "w6_alive_med": 42.0,
+      "pk_army_avg": 3338.1,
+      "action_rejects": 0,
+      "crashes": 0,
+      "siege_range_zero_dps_losses": 6,
+      "cloaked_unit_damage_losses": 1,
+      "gas_rich_min_starved_matches": 6,
+      "one_base_lockout_matches": 0,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 4,
+      "prod_placement_stall_matches": 1,
+      "zero_kill_collapse_matches": 1,
+      "drip_feed_collapse_matches": 14,
+      "prod_idle_bank_freeze_matches": 0,
+      "gas_zero_harvest_freeze_matches": 0,
+      "spire_sched_drop_matches": 1,
+      "wall_timeout_ties": 3,
+      "army_val_4m_ratio_vs_pro": 0.91,
+      "army_val_8m_ratio_vs_pro": 0.4,
+      "latency_summary": "ALL 54/54 clean <=173.1ms (0 spikes >=500ms!; core_14 avg 8.35ms [-0.49ms], p95 14.24ms [-0.88ms], tr 2.53ms; H2H L35 vs L34-ZIP avg 7.19 vs 8.64ms [-16.8%], p95 12.1 vs 15.6ms [-22.4%], max 131.0 vs 256.7ms [-49%]; WorstTrP95=8.0ms; 0 rejects!)",
+      "by_race": {
+        "Protoss": {
+          "record": "NEW CORE14 ATH 7W-6L-1T (50.0% WR / 57.1% NL, Trade 1.24x / Med 1.31x, PkA 3,982; HIST12 6-5-1 = 58.3% NL 1.23x; Creepy flip L->W 11.79x, onlyfans W, puck W, oberon W; self_6 PvZ W 2.68x; H2H PvP/PvT/PvZ 0-3 vs L34 ZIP)",
+          "trade_agg": 1.24,
+          "w4_alive_med": 26.0,
+          "w6_alive_med": 42.0,
+          "nat_sec": 125.0,
+          "sup_blk": 4.1
+        },
+        "Terran": {
+          "record": "7W-7L-0T (50.0% WR, Trade 0.98x / Med 1.16x, NEW SB ATL 2.3% [TvP 1.1%!], W@6m 39/40, Top BO MATCH!; puck W 3.54x, onlyfans W 1.91x, oberon W, self_6 TvT 2.14x & TvZ 2.45x BOTH 0-anom; H2H #02 TvT WIN 6.15x 0-anom; FIRST-EVER Honest Arena 12W-0L Perfect Sweep!)",
+          "trade_agg": 0.98,
+          "w4_alive_med": 23.5,
+          "w6_alive_med": 39.0,
+          "nat_sec": 114.0,
+          "sup_blk": 2.3
+        },
+        "Zerg": {
+          "record": "4W-7L-3T (50.0% NL, Trade 0.67x [+0.15x]; Chance flip L->W 5.42x, oberon flip T->W 0.80x sealing 3-0 sweep!, onlyfans winning WallTie 2.04x, mini-puck L->T; Zerg Honest Arena 84W-0L 7-loop streak & 24W-0L combined Dummy+SP sweep!)",
+          "trade_agg": 0.67,
+          "w4_alive_med": 28.0,
+          "w6_alive_med": 45.0,
+          "nat_sec": 55.0,
+          "sup_blk": 4.3
+        }
+      },
+      "tactics_summary": {
+        "rev": "wmxunzkx da5ffad5 (iter35)",
+        "passed": "Verifier 7/7 + 83/83 + 28/28 FIRST-PASS; Zerg 84W-0L 7-loop Honest Arena Dummy streak & 24W-0L combined Dummy+SP sweep; FIRST-EVER Terran 12W-0L Perfect Dummy Sweep!",
+        "sc2_duel36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter35.json",
+        "sc2_selfplay36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter35.json",
+        "sc2_duel36_summary": "HONEST 960-LOOP ARENA 2.0: TIES ALL-TIME Dummy ATH 34W-2L-0D (94.4%, 1.97x, A:M 5.84, 0 Draws; FIRST-EVER Terran 12W-0L-0D 1.93x + Zerg 7TH STRAIGHT 12W-0L-0D 2.66x = 84W-0L streak + Protoss 10W-2L-0D 1.53x!) + Self-Play 27W-9L-0D (1.51x, 0 Draws across all 72/72, Zerg 12W-0L-0D 2.34x = 24W-0L combined sweep!)"
+      },
+      "visual_qa_highlights": [
+        "ALL 8/8 3D frames crisp and centered on active combat (0 transit frames!): #11 T v puck (15:05 WIN 3.54x Liberator zone over Nexus + Bio push), #20 T v onlyfans (13:18 WIN 1.91x 9-Viking flank + 3 Tanks killing BC), #48 T v Z-SP (16:35 WIN 2.45x combined-arms Bio+Ghost+Tanks+Thor+10 Vikings), #47 P v Z-SP (13:08 WIN 2.68x 15+ Stalkers/Immortal/Zealots/Phoenixes sweeping Zerg main), #13 Z v oberon (17:34 WIN 0.80x Hydras/Ravagers downing Medivacs over Incorporeal bridges to seal FIRST-EVER oberon 3-0 sweep!).",
+        "Visual Smoking Gun #1 \u2014 #31 Z v Creepy_strategies (10:39 LOSS 0.07x Siege0DPS): 6 Corruptors sit stacked on the low-ground cliff edge eating free 10-range Tempest volleys from 5+ high-ground Tempests instead of diving inside 6-range or pulling back!",
+        "Visual Smoking Gun #2 \u2014 #37 Z v 12PoolBot (02:32 LOSS 0.47x): Defensive Spine Crawler is placed BEHIND the mineral line next to the Roach Warren (completely out of range of the ramp & Hatchery front) while 6 enemy Lings shred Drones carrying minerals in front of the Hatchery!",
+        "Visual Smoking Gun #3 \u2014 #19 Z v onlyfans (24:33 WINNING WallTie 2.04x): 6 Corruptors actively Caustic-Spraying floating Orbital Command directly above a landed Starport, but Zerg lacked ground/BroodLord cleanup for the remaining landed Terran buildings before the 25m wall clock!"
+      ],
+      "key_wins": [
+        "SHATTERED HISTORICAL CORE12 RECORD: 16W-17L-3T (44.4% WR, 52.8% NL \u2014 FIRST TIME EVER BREAKING THE 15W CEILING!) & NEW CORE14 ATH 18W-20L-4T (42.9% WR, 52.4% NL, Trade 0.90x [+0.22x], EVERY SINGLE RACE >= 50.0% NL!)",
+        "Protoss NEW CORE14 ATH 7W-6L-1T (50.0% WR / 57.1% NL, 1.24x Trade), Terran NEW SB ATL 2.3% (TvP 1.1%!), FOUR 3-0 sweeps (titania, monsterbot, Chance, FIRST-EVER oberon 3-0!) + onlyfans & puck BOTH undefeated 2-0-1!",
+        "LIVE WIRE SPEEDUP VERIFIED IN CONTROLLED H2H: avg 7.19 vs 8.64ms (-16.8%), p95 12.1 vs 15.6ms (-22.4%), max 131.0 vs 256.7ms (-49%)! Honest Arena 2.0 TIED ALL-TIME 34W-2L-0D (94.4%, 1.97x) w/ FIRST-EVER Terran 12-0 & Zerg 84W-0L 7-loop streak!",
+        "Replay SQLite DB shipped (tools/replay-db.py, 2,038 replays 100% extracted incl. 330 prod AI Arena matches proving live prod WR surged 0% -> 32.3% -> 52.6% -> 57.4% across shipped builds!)"
+      ],
+      "promotion_gates_passed": "3/9 PASS on core_14 (zero_crashes_and_rejects, sup_blk_le_6pct [3.6%], tactics_suite_100pct [34W-2L-0D 94.4% / 1.97x!]); missed ties_le_2 (4T incl. 1 winning WallTie), overall_trade_agg (0.90x vs 1.0x), overall_wr (42.9% vs 50%), every_race_wr (Z 28.6% WR / 50.0% NL), w4m (P -8, Z -7); H2H vs NEW L34 ZIP 1W-5L (hold ship until H2H regression diagnosed)"
     }
   ],
   "final_18_loop_summary": {

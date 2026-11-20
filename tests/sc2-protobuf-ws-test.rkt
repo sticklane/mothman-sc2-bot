@@ -7665,6 +7665,300 @@
                    (hash? first-nat)
                    (<= (l34-dist (hash-ref first-nat 'x) (hash-ref first-nat 'y) 157.5 104.5) 3.0))))
 
+;; =============================================================================
+;; Loop 35 (`L35-P0-1`): Persistent 224f Addon-Blocked Cache + 2x2 Creep Check +
+;; Unchanged-State Exponential Backoff (`24f->64f->168f` P0 / `24f->96f->224f` P1
+;; Demotion) & Late-Game Wire Micro-Perf
+;; =============================================================================
+(printf "[Loop 35] Testing L35-P0-1 persistent 224f addon cache, 2x2 creep pad guard, unchanged-state P0/P1 backoff & demotion...\n")
+(let ()
+  (define (mk-l35-u tag utype alliance x y
+                    #:hp [hp 500.0] #:rad [rad 1.5] #:flying? [fly? #f]
+                    #:orders [ords '()] #:addon [addon 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 3) 0 2))
+              (sc2-point3d x y (if fly? 12.0 8.0)) 0.0 rad 1.0 0 #f #f #f
+              hp hp 0.0 0.0 0.0 0.0 0 0 fly? #f #f #t #f
+              ords addon '() 0 0 0.0 0 0 0 0 '() 0 0))
+
+  (define map-w 128)
+  (define map-h 128)
+  (define pl-128 (sc2-image-grid 8 map-w map-h (make-bytes (* map-w map-h) 1) #f #f))
+  (define th-128 (sc2-image-grid 8 map-w map-h (make-bytes (* map-w map-h) 160) #f #f))
+  (define gi-128
+    (sc2-game-info "L35TestMap" "" '() (cons map-w map-h) (hash 'x0 4 'y0 4 'x1 124 'y1 124)
+                   (list (sc2-point2d 100.0 100.0)) pl-128 th-128 pl-128))
+
+  (define (l35-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59935 "/sc2api" c-in c-out #f 1))
+    (define rpc-cnt (box 0))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define id-p (assoc 97 req-f))
+             (define id-b (if id-p (encode-uint32 97 (third id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (set-box! rpc-cnt (add1 (unbox rpc-cnt)))
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws rpc-cnt (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+
+  ;; L35-P0-1a: `SC2-ADDON-SLOT-BLOCKED-CACHE` survives unrelated structure completions/deaths
+  ;; for 224f, and clears immediately when that specific facility lifts off!
+  (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
+  (define cc-35a (mk-l35-u 15000 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+  (define sp-35a (mk-l35-u 15001 28 1 40.5 40.5 #:hp 1300.0 #:rad 1.5))
+  (define dp-35a (mk-l35-u 15002 19 1 32.5 34.5 #:hp 400.0 #:rad 1.0))
+  (hash-set! SC2-ADDON-SLOT-BLOCKED-CACHE '(15001 40 40) 24000)
+  (let-values ([(ws _rc cleanup!) (l35-start-mock-ws (lambda (_ab _px _py) 1))])
+    ;; Unrelated structure completion changes `cur-struct-sig`: must NOT clear `SC2-ADDON-SLOT-BLOCKED-CACHE`!
+    (void (find-verified-building-placement ws 319 30.0 30.0 (list cc-35a sp-35a)
+                                            #:game-info gi-128 #:cur-loop 24010))
+    (void (find-verified-building-placement ws 319 30.0 30.0 (list cc-35a sp-35a dp-35a)
+                                            #:game-info gi-128 #:cur-loop 24016))
+    (cleanup!))
+  (define obs-35a-still
+    (make-test-obs 24120 400 200 (list cc-35a sp-35a dp-35a)))
+  (define h-35a-still (sc2-observation->runtime-obs-hash obs-35a-still #:game-info gi-128))
+  (define still-blocked-at-120f?
+    (and (hash-has-key? SC2-ADDON-SLOT-BLOCKED-CACHE '(15001 40 40))
+         (and (memv 15001 (hash-ref h-35a-still 'addon-blocked-facility-ids '())) #t)))
+  ;; Lift Starport `15001` (`is-flying = #t`) -> immediately clears its blocked-slot entry!
+  (define sp-35a-fly (mk-l35-u 15001 44 1 40.5 40.5 #:hp 1300.0 #:rad 1.5 #:flying? #t))
+  (define obs-35a-lift
+    (make-test-obs 24124 400 200 (list cc-35a sp-35a-fly dp-35a)))
+  (define h-35a-lift (sc2-observation->runtime-obs-hash obs-35a-lift #:game-info gi-128))
+  (define cleared-on-lift?
+    (and (not (hash-has-key? SC2-ADDON-SLOT-BLOCKED-CACHE '(15001 40 40)))
+         (not (memv 15001 (hash-ref h-35a-lift 'addon-blocked-facility-ids '())))))
+  (check-true "l35-p0-1a-addon-blocked-cache-persists-224f-across-unrelated-structs-and-clears-on-lift"
+              (and still-blocked-at-120f? cleared-on-lift?))
+
+  ;; L35-P0-1b: `2x2` Terran addon pad `(+2.5, -0.5)` on Zerg Creep NEVER emits an in-place
+  ;; addon order (`target-pos = #f`); it relocates to a creep-free pad or backs off cleanly!
+  (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
+  (define creep-east-bytes (make-bytes (* map-w map-h) 0))
+  (for* ([iy (in-range map-h)]
+         [ix (in-range 42 map-w)])
+    (bytes-set! creep-east-bytes (+ ix (* iy map-w)) 1))
+  (define creep-east-grid (sc2-image-grid 8 map-w map-h creep-east-bytes #f #f))
+  (define creep-all-grid (sc2-image-grid 8 map-w map-h (make-bytes (* map-w map-h) 1) #f #f))
+  (define sp-35b (mk-l35-u 15101 28 1 40.5 40.5 #:hp 1300.0 #:rad 1.5)) ;; addon center `(43.0, 40.0)` ON creep!
+  (define obs-35b-reloc (make-test-obs 24200 400 200 (list cc-35a sp-35b)))
+  (hash-set! SC2-OBS-CREEP-GRIDS obs-35b-reloc creep-east-grid)
+  (define cmds-35b-reloc
+    (translate-bot-actions->sc2-raw-commands
+     '((build starport-techlab 40.5 40.5))
+     obs-35b-reloc #:game-info gi-128))
+  (define cmd-35b-reloc
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 487)))
+           cmds-35b-reloc))
+  (define relocated-off-creep?
+    (and (sc2-raw-unit-command? cmd-35b-reloc)
+         (sc2-point2d? (sc2-raw-unit-command-target-pos cmd-35b-reloc))
+         (< (+ (sc2-point2d-x (sc2-raw-unit-command-target-pos cmd-35b-reloc)) 2.5) 42.0)))
+  ;; When ALL map tiles have creep, emits ZERO doomed in-place `487` commands!
+  (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
+  (define sp-35b2 (mk-l35-u 15102 28 1 40.5 40.5 #:hp 1300.0 #:rad 1.5))
+  (define obs-35b-all (make-test-obs 24210 400 200 (list cc-35a sp-35b2)))
+  (hash-set! SC2-OBS-CREEP-GRIDS obs-35b-all creep-all-grid)
+  (define cmds-35b-all
+    (translate-bot-actions->sc2-raw-commands
+     '((build starport-techlab 40.5 40.5))
+     obs-35b-all #:game-info gi-128))
+  (define no-doomed-inplace-on-creep?
+    (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 487)))
+                cmds-35b-all)))
+  (check-true "l35-p0-1b-terran-addon-2x2-creep-check-blocks-inplace-and-relocates-off-creep"
+              (and relocated-off-creep? no-doomed-inplace-on-creep?))
+
+  ;; L35-P0-1c: Unchanged-state exponential backoff in `govern-sc2-wire-actions!`:
+  ;; (1) Exact standalone schedule: P1 addon `487` (`24f->96f->224f`) & P0 mode `388` (`24f->64f->168f`);
+  ;; (2) Contested 240-loop stream: blocked Starport `487` + SiegeTank `388` NEVER starve real P1 macro
+  ;;     (`171`/`524`/`560`/`321`) or burn `485` APM, AND reset immediately when unit state changes!
+  (define sp-stuck (mk-l35-u 15201 28 1 40.5 40.5 #:hp 1300.0 #:rad 1.5))
+  (define tk-stuck (mk-l35-u 15202 33 1 50.5 50.5 #:hp 175.0 #:rad 0.875))
+  (define gov-35c-sched (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define sched-sp-loops '())
+  (define sched-tk-loops '())
+  (for ([gl (in-range 13000 13360 4)])
+    (define ob (make-test-obs gl 2700 800 (list cc-35a sp-stuck tk-stuck)))
+    (define out (govern-sc2-wire-actions!
+                 gov-35c-sched
+                 (list (sc2-raw-unit-command 487 #f 0 '(15201) #f)
+                       (sc2-raw-unit-command 388 #f 0 '(15202) #f))
+                 gl ob))
+    (for ([c (in-list out)] #:when (sc2-raw-unit-command? c))
+      (when (= (sc2-raw-unit-command-ability-id c) 487) (set! sched-sp-loops (cons gl sched-sp-loops)))
+      (when (= (sc2-raw-unit-command-ability-id c) 388) (set! sched-tk-loops (cons gl sched-tk-loops)))))
+  (define sched-sp-chron (reverse sched-sp-loops))
+  (define sched-tk-chron (reverse sched-tk-loops))
+  (define gov-35c (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define sp-emit-loops '())
+  (define tk-emit-loops '())
+  (define macro-cnt-35c 0)
+  (define macro-kinds-35c (mutable-seteqv))
+  (define max-p1-gap-35c 0)
+  (define last-p1-35c 13000)
+  (define ev-win-35c '())
+  (define peak-ev-35c 0)
+  (define sel-35c #f)
+  (for ([step-i (in-range 0 61)]) ;; 240 loops (`13000..13240`)
+    (define gl (+ 13000 (* step-i 4)))
+    (define obs-st (make-test-obs gl 2700 800 (list cc-35a sp-stuck tk-stuck)))
+    (define sp-cmd (sc2-raw-unit-command 487 #f 0 '(15201) #f))
+    (define tk-cmd (sc2-raw-unit-command 388 #f 0 '(15202) #f))
+    (define base-m
+      (list (sc2-raw-unit-command 171 #f 9001 (list (+ 15900 (modulo step-i 3))) #f)
+            (sc2-raw-unit-command 524 #f 0 (list (+ 15910 (modulo step-i 3))) #f)
+            (sc2-raw-unit-command 560 #f 0 (list (+ 15920 (modulo step-i 4))) #f)
+            (sc2-raw-unit-command 321 (sc2-point2d 34.5 34.5) 0 (list (+ 15930 step-i)) #f)))
+    (define rot (modulo step-i 4))
+    (define m-batch (append (drop base-m rot) (take base-m rot)))
+    (define p2-noise
+      (for/list ([k (in-range 6)])
+        (sc2-raw-unit-command 23 (sc2-point2d (+ 60.0 k) (+ 60.0 (modulo step-i 10))) 0
+                              (list (+ 15500 (* step-i 8) k)) #f)))
+    ;; Place blocked Starport `487` FIRST in input batch — backoff & demotion must prevent starvation!
+    (define out (govern-sc2-wire-actions! gov-35c (append (list sp-cmd tk-cmd) m-batch p2-noise) gl obs-st))
+    (define saw-real-p1? #f)
+    (for ([c (in-list out)] #:when (sc2-raw-unit-command? c))
+      (define ab (sc2-raw-unit-command-ability-id c))
+      (define tags (sc2-raw-unit-command-unit-tags c))
+      (define cost (if (and sel-35c (equal? tags sel-35c)) 1 2))
+      (set! sel-35c tags)
+      (set! ev-win-35c (cons (cons gl cost) ev-win-35c))
+      (when (= ab 487) (set! sp-emit-loops (cons gl sp-emit-loops)))
+      (when (= ab 388) (set! tk-emit-loops (cons gl tk-emit-loops)))
+      (when (memv ab '(171 524 560 321))
+        (set! saw-real-p1? #t)
+        (set! macro-cnt-35c (add1 macro-cnt-35c))
+        (set-add! macro-kinds-35c ab)))
+    (set! ev-win-35c (filter (lambda (e) (> (car e) (- gl 1344))) ev-win-35c))
+    (set! peak-ev-35c (max peak-ev-35c (for/sum ([e (in-list ev-win-35c)]) (cdr e))))
+    (if saw-real-p1?
+        (begin
+          (set! max-p1-gap-35c (max max-p1-gap-35c (- gl last-p1-35c)))
+          (set! last-p1-35c gl))
+        (set! max-p1-gap-35c (max max-p1-gap-35c (- gl last-p1-35c)))))
+  (define sp-loops-chron (reverse sp-emit-loops))
+  (define tk-loops-chron (reverse tk-emit-loops))
+  ;; Once Siege Tank actually changes state (starts order 16 / moves), backoff resets cleanly!
+  (define tk-moved (mk-l35-u 15202 33 1 52.0 52.0 #:hp 175.0 #:rad 0.875
+                             #:orders (list (sc2-unit-order 16 (sc2-point3d 55.0 55.0 8.0) 0 0.0))))
+  (define out-tk-reset
+    (govern-sc2-wire-actions! gov-35c-sched
+                              (list (sc2-raw-unit-command 388 #f 0 '(15202) #f))
+                              13364
+                              (make-test-obs 13364 2700 800 (list cc-35a sp-stuck tk-moved))))
+  (define tk-reset-ok?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 388)))
+           out-tk-reset))
+  (check-true (format "l35-p0-1c-unchanged-p0-p1-backoff-never-starves-macro (sched-sp=~a sched-tk=~a sp=~a tk=~a p1=~a kinds=~a gap=~a ev=~a rst=~a)"
+                      sched-sp-chron sched-tk-chron sp-loops-chron tk-loops-chron
+                      macro-cnt-35c (set-count macro-kinds-35c) max-p1-gap-35c peak-ev-35c tk-reset-ok?)
+              (and (equal? sched-sp-chron '(13000 13024 13120 13344))
+                   (equal? sched-tk-chron '(13000 13024 13088 13256))
+                   (<= (length sp-loops-chron) 3)
+                   (<= (length tk-loops-chron) 3)
+                   (>= macro-cnt-35c 40)
+                   (= (set-count macro-kinds-35c) 4)
+                   (<= max-p1-gap-35c 16)
+                   (<= peak-ev-35c 485)
+                   tk-reset-ok?))
+
+  ;; L35-P0-1d: Even when the blocked Starport is STILL `cur-sel` (selection affinity), its demoted
+  ;; P1 retry yields strictly behind fresh Train/SCV macro in Step `1a-pre`!
+  (define gov-35d (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define sp-sel (mk-l35-u 15301 28 1 40.5 40.5 #:hp 1300.0 #:rad 1.5))
+  (define obs-35d0 (make-test-obs 14000 600 200 (list cc-35a sp-sel)))
+  ;; Emit once at `14000` so streak = 1 (`tokens: 24.0 -> 22.0`).
+  (void (govern-sc2-wire-actions! gov-35d
+                                  (list (sc2-raw-unit-command 487 #f 0 '(15301) #f))
+                                  14000 obs-35d0))
+  ;; At `14016` (`+4.88 -> 26.88`), drain 14 unique cmds (`28 ev -> -1.12`) + 1 cmd on `'(15301)`
+  ;; (`2 ev -> -3.12`, setting `cur-sel = '(15301)`).
+  (void (govern-sc2-wire-actions!
+         gov-35d
+         (append
+          (for/list ([k (in-range 14)])
+            (mark-urgent-survival-cmd!
+             (sc2-raw-unit-command 23 (sc2-point2d (+ 20.0 k) 20.0) 0 (list (+ 15400 k)) #f)))
+          (list (mark-urgent-survival-cmd!
+                 (sc2-raw-unit-command 16 (sc2-point2d 40.5 40.5) 0 '(15301) #f))))
+         14016 obs-35d0))
+  ;; At `14020` (`+1.22 -> -1.90`), emit 1 same-selection urgent cmd on `'(15301)` (`1 ev -> -2.90`).
+  ;; At `14024` (`+1.22 -> -1.68`, `cur-sel = '(15301)`, `24f` retry window!), room for ONLY ONE
+  ;; new-selection 2-event cmd (`-1.68 - 2.0 = -3.68 >= -4.0`): fresh `560` MUST beat demoted `487`!
+  (void (govern-sc2-wire-actions!
+         gov-35d
+         (list (mark-urgent-survival-cmd!
+                (sc2-raw-unit-command 16 (sc2-point2d 42.5 42.5) 0 '(15301) #f)))
+         14020 obs-35d0))
+  (define obs-35d1 (make-test-obs 14024 600 200 (list cc-35a sp-sel)))
+  (define out-35d
+    (govern-sc2-wire-actions!
+     gov-35d
+     (list (sc2-raw-unit-command 487 #f 0 '(15301) #f)
+           (sc2-raw-unit-command 560 #f 0 '(15310) #f))
+     14024 obs-35d1))
+  (check-true "l35-p0-1d-demoted-p1-addon-yields-to-fresh-macro-even-when-selected"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 560)))
+                          out-35d)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 487)))
+                               out-35d)))))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)
