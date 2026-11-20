@@ -14120,6 +14120,146 @@
       #:open-facility-slots (hasheq 'townhall 1 'barracks 2))))
   (assert-true! (not (not (memq 'supply-depot (macro-brain-decision-scheduled-ids l26-t-14-oversupply-p2))))
                 "L26-P0-2 #14: Over-supply (23/15, supply-left=-8) with pending-supply=2 must schedule 3rd Depot")
+
+  ;; 51.15 Loop 27 (`L27-P0-2`) Regressions: TvT Core Tanks@640 & SCV Pause (<200M),
+  ;;       Protoss Early 1-T2-Tech Cap (W@4m 26->28+) & #21 PvP Nat <=195s,
+  ;;       Zerg #10 RW w/ BanelingNest (>=4032f & >=26W), Terran T111Stall (threat<=2.0)
+  ;; (a) #17/#32 TvT0Tank: siege-tank@640.0, blk=#t pauses continuous SCV (<200M), blocks addon/Marine drain,
+  ;;     schedules Tank immediately at 160M/130G, and schedules BOTH Tank + SCV at 210M/130G!
+  (reset-macro-escrow-tracker!)
+  (define l27-t-tvt-tank-escrow-60
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 6352
+      #:minerals 60 #:gas 132 #:supply-used 46 #:supply-cap 62 #:workers 30 #:active-bases 2
+      #:mineral-harvesters 24 #:gas-harvesters 6
+      #:army-supply 16 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2
+                                      'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2
+                                      'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 30 'marine 12 'marauder 2)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 1 'starport 1))))
+  (reset-macro-escrow-tracker!)
+  (define l27-t-tvt-tank-afford-160
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 5900
+      #:minerals 160 #:gas 130 #:supply-used 40 #:supply-cap 54 #:workers 28 #:active-bases 2
+      #:mineral-harvesters 22 #:gas-harvesters 6
+      #:army-supply 12 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2
+                                      'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2
+                                      'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 28 'marine 12)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 1 'starport 1))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l27-t-tvt-tank-escrow-60) 'siege-tank)
+                     (not (memq 'scv (macro-brain-decision-scheduled-ids l27-t-tvt-tank-escrow-60)))
+                     (not (not (memq 'siege-tank (macro-brain-decision-scheduled-ids l27-t-tvt-tank-afford-160)))))
+                "L27-P0-2 #17/#32 TvT: core siege-tank@640 must pause SCV <200M, escrow at 60M/132G, & train above addons at 160M/130G")
+
+  ;; (b) #03/#18/#24/#33 Protoss W@4m: <4:00 & <30 Probes limits to 1 T2 tech building so Probes train continuously
+  (reset-macro-escrow-tracker!)
+  (define l27-p-early-1-t2-cap
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 4400
+      #:minerals 210 #:gas 160 #:supply-used 32 #:supply-cap 54 #:workers 26 #:active-bases 2
+      #:mineral-harvesters 20 #:gas-harvesters 6
+      #:army-supply 6 #:enemy-threat-supply 0 #:under-attack? #f
+      #:pending-upgrades '(warp-gate-research)
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 4 'gateway 2 'cybernetics-core 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 4 'gateway 2 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 26 'stalker 3)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 2))))
+  (assert-true! (and (not (not (memq 'probe (macro-brain-decision-scheduled-ids l27-p-early-1-t2-cap))))
+                     (not (memq 'twilight-council (macro-brain-decision-scheduled-ids l27-p-early-1-t2-cap)))
+                     (not (eq? (macro-brain-decision-saving-for l27-p-early-1-t2-cap) 'twilight-council)))
+                "L27-P0-2 Protoss W@4m: <4:00 & <30 Probes with Robo must defer TwilightCouncil so Probes train")
+
+  ;; (c) #21 PvP Nat <= 195s: normal home Forge/Stargate at f>=3584 allows Nat Nexus; proxy (threat=4) still blocks
+  (reset-macro-escrow-tracker!)
+  (define l27-pvp-home-nat
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Protoss #:frame 3800
+      #:minerals 280 #:gas 140 #:supply-used 28 #:supply-cap 39 #:workers 22 #:active-bases 1
+      #:mineral-harvesters 19 #:gas-harvesters 3
+      #:army-supply 6 #:enemy-threat-supply 0 #:under-attack? #f
+      #:pending-upgrades '(warp-gate-research)
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:unit-counts (hasheq 'probe 22 'stalker 3)
+      #:enemy-building-counts (hasheq 'forge 1 'stargate 1)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 1))))
+  (reset-macro-escrow-tracker!)
+  (define l27-pvp-proxy-block
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Protoss #:frame 3800
+      #:minerals 280 #:gas 140 #:supply-used 28 #:supply-cap 39 #:workers 22 #:active-bases 1
+      #:mineral-harvesters 19 #:gas-harvesters 3
+      #:army-supply 6 #:enemy-threat-supply 4 #:under-attack? #f
+      #:pending-upgrades '(warp-gate-research)
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:unit-counts (hasheq 'probe 22 'stalker 3)
+      #:enemy-building-counts (hasheq 'forge 1)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 1))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l27-pvp-home-nat) 'nexus)
+                     (not (eq? (macro-brain-decision-saving-for l27-pvp-proxy-block) 'nexus)))
+                "L27-P0-2 #21 PvP: normal home Forge/Stargate >=3584f allows Nat Nexus while proxy (threat=4) still blocks")
+
+  ;; (d) #10 ZvP: 2-base Zerg w/ BanelingNest unlocks RoachWarren@525 once f>=4032 & workers>=26
+  (reset-macro-escrow-tracker!)
+  (define l27-z-10-rw-with-bn
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 4200
+      #:minerals 160 #:gas 60 #:supply-used 36 #:supply-cap 52 #:workers 26 #:active-bases 2
+      #:mineral-harvesters 23 #:gas-harvesters 3
+      #:army-supply 6 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'baneling-nest 1 'extractor 1)
+      #:total-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'baneling-nest 1 'extractor 1)
+      #:unit-counts (hasheq 'drone 26 'queen 2 'zergling 8 'overlord 5)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 4))))
+  (assert-true! (not (not (memq 'roach-warren (macro-brain-decision-scheduled-ids l27-z-10-rw-with-bn))))
+                "L27-P0-2 #10 ZvP: 2-base Zerg w/ BanelingNest must schedule RoachWarren once f>=4032 & workers>=26")
+
+  ;; (e) #02/#11/#26 T111Stall: 1-base Nat CC lock & 1-1-1 Factory defer hold under single scout (threat<=2.0)
+  (reset-macro-escrow-tracker!)
+  (define l27-t-02-nat-scout2
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 2200
+      #:minerals 210 #:gas 80 #:supply-used 20 #:supply-cap 31 #:workers 18 #:active-bases 1
+      #:mineral-harvesters 15 #:gas-harvesters 3
+      #:army-supply 2 #:enemy-threat-supply 2 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 18 'marine 2)
+      #:enemy-unit-counts (hasheq 'stalker 1)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1))))
+  (reset-macro-escrow-tracker!)
+  (define l27-t-26-fac1-scout2
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 3100
+      #:minerals 125 #:gas 85 #:supply-used 24 #:supply-cap 39 #:workers 20 #:active-bases 2
+      #:mineral-harvesters 17 #:gas-harvesters 3
+      #:army-supply 4 #:enemy-threat-supply 2 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 20 'marine 4)
+      #:enemy-unit-counts (hasheq 'stalker 1)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l27-t-02-nat-scout2) 'command-center)
+                     (not (memq 'factory (macro-brain-decision-scheduled-ids l27-t-02-nat-scout2)))
+                     (eq? (macro-brain-decision-saving-for l27-t-26-fac1-scout2) 'factory)
+                     (not (memq 'refinery (macro-brain-decision-scheduled-ids l27-t-26-fac1-scout2)))
+                     (not (memq 'barracks-techlab (macro-brain-decision-scheduled-ids l27-t-26-fac1-scout2))))
+                "L27-P0-2 #02/#11/#26 Terran: 1-base Nat CC lock & Factory #1 defer must hold under single scout (threat<=2.0)")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms

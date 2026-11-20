@@ -939,6 +939,10 @@
           (define our-bldgs-ht (make-hash))
           (define our-deaths-by-min (make-hasheqv))
           (define opp-deaths-by-min (make-hasheqv))
+          ;; L27-LOOP-2: Spatial combat death counters (home <=38% vs enemy >=62% of base-dist)
+          (define our-combat-deaths-spatial-tot 0)
+          (define our-combat-deaths-home 0)
+          (define our-combat-deaths-enemy 0)
           ;; Live entity tracking for surviving-at-end & self-cancel detection
           (define unit-owner (make-hasheqv))
           (define unit-type (make-hasheqv))
@@ -1434,7 +1438,7 @@
                                           (fourth prev) (fifth prev)))
                          (hash-set! self-cancel-buckets bkey
                                     (list 1 (round1 sec) (round1 sec) (car xy) (cdr xy))))))
-                 ;; Combat death count by minute
+                 ;; Combat death count by minute + L27-LOOP-2 spatial death breakdown
                  (when (and (> gl 0)
                             (memv p '(1 2))
                             (not (set-member? NON-COMBAT-UNIT-SET ut))
@@ -1442,7 +1446,19 @@
                             (not (is-morph-death? ut killer-pid)))
                    (define m (exact-floor (/ sec 60.0)))
                    (if (= p our-pid)
-                       (hash-update! our-deaths-by-min m add1 0)
+                       (begin
+                         (hash-update! our-deaths-by-min m add1 0)
+                         (when (and our-main-xy opp-main-xy base-dist
+                                    (not (set-member? WIN-BLDG-SET ut))
+                                    (not (set-member? SCOUT-IGNORE-SET ut))
+                                    (not (string-prefix? ut "Changeling")))
+                           (define ddx (- (exact->inexact (hash-ref pl 3 0)) (car our-main-xy)))
+                           (define ddy (- (exact->inexact (hash-ref pl 4 0)) (cdr our-main-xy)))
+                           (define frac (/ (sqrt (+ (* ddx ddx) (* ddy ddy))) base-dist))
+                           (set! our-combat-deaths-spatial-tot (add1 our-combat-deaths-spatial-tot))
+                           (cond
+                             [(<= frac 0.38) (set! our-combat-deaths-home (add1 our-combat-deaths-home))]
+                             [(>= frac 0.62) (set! our-combat-deaths-enemy (add1 our-combat-deaths-enemy))])))
                        (hash-update! opp-deaths-by-min m add1 0)))]
                 [(5) ; SUpgradeEvent
                  (define p (hash-ref pl 0 0))
@@ -1694,6 +1710,15 @@
           (define zerg-roach-warren-sec
             (and (string=? our-race "Zerg")
                  (hash-ref roach-warren-sec our-pid #f)))
+          ;; L27-LOOP-2: Spatial combat death percentages (home <=38% vs enemy half >=62% of base-dist)
+          (define combat-death-home-pct
+            (and (> our-combat-deaths-spatial-tot 0)
+                 (round1 (* 100.0 (/ (exact->inexact our-combat-deaths-home)
+                                     (exact->inexact our-combat-deaths-spatial-tot))))))
+          (define combat-death-enemy-pct
+            (and (> our-combat-deaths-spatial-tot 0)
+                 (round1 (* 100.0 (/ (exact->inexact our-combat-deaths-enemy)
+                                     (exact->inexact our-combat-deaths-spatial-tot))))))
 
           (define macro-timings
             (hasheq 'nat_sec (and (>= (length our-ths-list) 1) (first our-ths-list))
@@ -1715,6 +1740,8 @@
                     'roach_warren_sec (hash-ref roach-warren-sec our-pid #f)
                     'protoss_warpgate_sec protoss-warpgate-sec
                     'zerg_roach_warren_sec zerg-roach-warren-sec
+                    'combat_death_home_pct combat-death-home-pct
+                    'combat_death_enemy_pct combat-death-enemy-pct
                     'w2m our-w2 'w4m our-w4 'w6m our-w6 'w8m our-w8 'w10m our-w10
                     'worker_growth_2m_to_4m worker-growth-2m-to-4m
                     'opp_worker_growth_2m_to_4m opp-worker-growth-2m-to-4m
@@ -2135,7 +2162,9 @@
                  (hasheq 'our_peak_army our-pk-army
                          'lost_val lost-val
                          'army_mass_ratio (round2 (/ (exact->inexact our-pk-army) (exact->inexact lost-val)))
-                         'trade_ratio trade-ratio)))
+                         'trade_ratio trade-ratio
+                         'combat_death_home_pct combat-death-home-pct
+                         'combat_death_enemy_pct combat-death-enemy-pct)))
           (define our-tank-cnt
             (+ (hash-ref our-units-ht "SiegeTank" 0)
                (hash-ref our-units-ht "SiegeTankSieged" 0)))
@@ -2245,6 +2274,22 @@
                                             'min_rate (third s)
                                             'gas_rate (fourth s))))))
 
+          ;; L27-LOOP-2: Detector 20 — Late-Game 30:00 Stalemate Ties (`tie` w/ `dur >= 1780s`)
+          (define late-game-stalemate-tie? (and (eq? res 'tie) (>= dur 1780.0)))
+          (define late-game-stalemate-tie-anomaly
+            (and late-game-stalemate-tie?
+                 (hasheq 'duration_sec (round1 dur)
+                         'our_peak_army our-pk-army
+                         'opp_peak_army opp-pk-army
+                         'our_bases our-bases
+                         'opp_bases opp-bases
+                         'trade_ratio trade-ratio
+                         'surviving_enemy_win_bldgs surv-win-total
+                         'pos_retreat (hash-ref log-acc 'pos-retreat 0)
+                         'own_base_retreat_frames own-base-retreat-frames
+                         'our_last_supply (safe-num (hash-ref our-last 'food_used 0) 0)
+                         'opp_last_supply (safe-num (hash-ref opp-last 'food_used 0) 0))))
+
           (define anomalies
             (hasheq 'zero_fire_retreat zero-fire-retreat-anomaly
                     'escrow_lockouts escrow-lockouts
@@ -2270,6 +2315,7 @@
                     'early_opening_order_fault early-opening-order-fault-anomaly
                     'terran_111_opening_stall terran-111-opening-stall-anomaly
                     'econ_eff_collapse econ-eff-collapse-anomaly
+                    'late_game_stalemate_tie late-game-stalemate-tie-anomaly
                     'air_aa_starvation air-aa-starvation))
 
           ;; Classify 0-combat opponent disconnects (e.g., mid-early client drop) separately from real combat wins
@@ -2284,7 +2330,7 @@
           (define opp-fault? (or opp-early-crash? opp-zero-combat-dc?))
 
           ;; Distinguish CPU wall-timeout ties vs 30m loop-cap ties vs combat stalls
-          (define loop-cap-tie? (and (eq? res 'tie) (>= dur 1780.0)))
+          (define loop-cap-tie? late-game-stalemate-tie?)
           (define wall-timeout-tie?
             (and (eq? res 'tie)
                  (not loop-cap-tie?)
@@ -2495,6 +2541,9 @@
                   'early_atk_pct_2m_6m early-atk-pct-2m-6m
                   'protoss_warpgate_sec protoss-warpgate-sec
                   'zerg_roach_warren_sec zerg-roach-warren-sec
+                  'combat_death_home_pct combat-death-home-pct
+                  'combat_death_enemy_pct combat-death-enemy-pct
+                  'late_game_stalemate_tie late-game-stalemate-tie?
                   'army_to_worker_4m a2w-4m
                   'army_to_worker_6m a2w-6m
                   'army_to_worker_8m a2w-8m
@@ -2781,6 +2830,7 @@
                 'early_opening_order_fault_matches (count (lambda (r) (eq? (hash-ref r 'early_opening_order_fault #f) #t)) rows)
                 'terran_111_opening_stall_matches (count (lambda (r) (eq? (hash-ref r 'terran_111_opening_stall #f) #t)) rows)
                 'econ_eff_collapse_matches (count (lambda (r) (eq? (hash-ref r 'econ_eff_collapse #f) #t)) rows)
+                'late_game_stalemate_tie_matches (count (lambda (r) (eq? (hash-ref r 'late_game_stalemate_tie #f) #t)) rows)
                 't3_started_matches (count (lambda (r) (real? (hash-ref r 't3_first_sec #f))) rows)
                 't3_early_2base_matches (count (lambda (r) (let ([b (hash-ref r 't3_bases_at_start #f)]) (and (exact-integer? b) (<= b 2)))) rows)
                 't3_premature_starve_matches (count (lambda (r) (eq? (hash-ref r 't3_premature_starve #f) #t)) rows)
@@ -2797,6 +2847,8 @@
                 'worker_econ_eff_4m_6m (avg-opt 'worker_econ_eff_4m_6m)
                 'opp_worker_econ_eff_4m_6m (avg-opt 'opp_worker_econ_eff_4m_6m)
                 'early_atk_pct_2m_6m (avg-opt 'early_atk_pct_2m_6m)
+                'combat_death_home_pct (avg-opt 'combat_death_home_pct)
+                'combat_death_enemy_pct (avg-opt 'combat_death_enemy_pct)
                 'protoss_warpgate_sec (avg-opt 'protoss_warpgate_sec)
                 'protoss_warpgate_med_sec (hash-ref wg-dist 'median #f)
                 'zerg_roach_warren_sec (avg-opt 'zerg_roach_warren_sec)
@@ -2828,6 +2880,8 @@
                         'worker_econ_eff_4m_6m (timing-dist 'worker_econ_eff_4m_6m)
                         'opp_worker_econ_eff_4m_6m (timing-dist 'opp_worker_econ_eff_4m_6m)
                         'early_atk_pct_2m_6m (timing-dist 'early_atk_pct_2m_6m)
+                        'combat_death_home_pct (timing-dist 'combat_death_home_pct)
+                        'combat_death_enemy_pct (timing-dist 'combat_death_enemy_pct)
                         'nat_sec (timing-dist 'nat_sec)
                         'third_sec (timing-dist 'third_sec)
                         'gas1_sec (timing-dist 'gas1_sec)
@@ -2928,6 +2982,7 @@
                         'early_opening_order_fault (anom-cnt (lambda (a) (and (hash? (hash-ref a 'early_opening_order_fault #f)) #t)))
                         'terran_111_opening_stall (anom-cnt (lambda (a) (and (hash? (hash-ref a 'terran_111_opening_stall #f)) #t)))
                         'econ_eff_collapse (anom-cnt (lambda (a) (and (hash? (hash-ref a 'econ_eff_collapse #f)) #t)))
+                        'late_game_stalemate_tie (anom-cnt (lambda (a) (and (hash? (hash-ref a 'late_game_stalemate_tie #f)) #t)))
                         'air_aa_starvation (anom-cnt (lambda (a) (and (hash? (hash-ref a 'air_aa_starvation #f)) #t)))
                         'wall_timeout_tie wall-timeout-ties
                         'wall_timeout_winning_tie wall-timeout-winning-ties
@@ -2949,6 +3004,8 @@
     (define (fmt-signed1 v)
       (if (real? v) (format "~a~a" (if (>= v 0) "+" "") (r1 v)) "-"))
     (define atk26 (hash-ref agg 'early_atk_pct_2m_6m #f))
+    (define dth-h (hash-ref agg 'combat_death_home_pct #f))
+    (define dth-e (hash-ref agg 'combat_death_enemy_pct #f))
     (define p-wg-avg (hash-ref agg 'protoss_warpgate_sec #f))
     (define p-wg-med (hash-ref agg 'protoss_warpgate_med_sec #f))
     (define z-rw-avg (hash-ref agg 'zerg_roach_warren_sec #f))
@@ -2956,6 +3013,9 @@
     (define timing-tail
       (string-append
        (if (real? atk26) (format " | Atk2-6=~a%" (r1 atk26)) "")
+       (if (and (real? dth-h) (real? dth-e))
+           (format " | Dth(H/E)=~a/~a%" (r0 dth-h) (r0 dth-e))
+           "")
        (if (and (real? p-wg-med) (real? p-wg-avg))
            (format " | P:WG=~a/~as" (r0 p-wg-med) (r0 p-wg-avg))
            "")
@@ -2995,7 +3055,7 @@
                   (hash-ref agg 'wall_timeout_winning_ties 0)
                   (hash-ref agg 'step_spike_500ms_count 0))
           ""))
-    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a | 1BaseLock=~a | SpireDrop=~a | DripFeed=~a | TvT0Tank=~a | ZeroKill=~a | OpenFault=~a | T111Stall=~a | EconEffCol=~a~a\n"
+    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a | 1BaseLock=~a | SpireDrop=~a | DripFeed=~a | TvT0Tank=~a | ZeroKill=~a | OpenFault=~a | T111Stall=~a | EconEffCol=~a | StaleTie=~a~a\n"
             (hash-ref ac 'suicide_kite_retreat 0)
             (hash-ref ac 'zero_fire_retreat 0)
             (hash-ref ac 'escrow_lockout 0)
@@ -3010,6 +3070,7 @@
             (hash-ref ac 'early_opening_order_fault 0)
             (hash-ref ac 'terran_111_opening_stall 0)
             (hash-ref ac 'econ_eff_collapse 0)
+            (hash-ref ac 'late_game_stalemate_tie 0)
             lat-str)))
 
 ;; -----------------------------------------------------------------------------
@@ -3302,14 +3363,18 @@
            (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'drip_feed_collapse #f))) rows)
            (lambda (r)
              (define df (hash-ref (hash-ref r 'anomalies) 'drip_feed_collapse))
-             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | pkA=~a / lost=~a (mass=~a) | trade=~ax\n"
+             (define hp (hash-ref df 'combat_death_home_pct #f))
+             (define ep (hash-ref df 'combat_death_enemy_pct #f))
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | pkA=~a / lost=~a (mass=~a) | trade=~ax | Dth(H/E)=~a/~a%\n"
                      (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
                      (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
                      (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
                      (hash-ref df 'our_peak_army 0)
                      (hash-ref df 'lost_val 0)
                      (r2 (hash-ref df 'army_mass_ratio 0.0))
-                     (r2 (hash-ref df 'trade_ratio 0.0)))))
+                     (r2 (hash-ref df 'trade_ratio 0.0))
+                     (if (real? hp) (r0 hp) "-")
+                     (if (real? ep) (r0 ep) "-"))))
 
   (section "15. TvT Zero/Starved-Tank Matches (TvT dur>=360s & our_tanks<=1)"
            (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'tvt_zero_tank #f))) rows)
@@ -3369,7 +3434,22 @@
                      (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
                      (r1 (hash-ref ec 'eff_4m_6m 0.0))
                      (if (real? (hash-ref ec 'opp_eff_4m_6m #f)) (r1 (hash-ref ec 'opp_eff_4m_6m)) "-")
-                     (hash-ref ec 'max_workers_4m_6m 0)))))
+                     (hash-ref ec 'max_workers_4m_6m 0))))
+
+  (section "20. Late-Game 30:00 Stalemate Ties (tie w/ dur>=1780s)"
+           (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'late_game_stalemate_tie #f))) rows)
+           (lambda (r)
+             (define st (hash-ref (hash-ref r 'anomalies) 'late_game_stalemate_tie))
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | pkA=~a/~a | B=~a/~a | tr=~ax | survWin=~a | lastSup=~a/~a | ret=~at(OBRet=~af)\n"
+                     (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
+                     (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
+                     (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
+                     (hash-ref st 'our_peak_army 0) (hash-ref st 'opp_peak_army 0)
+                     (hash-ref st 'our_bases 0) (hash-ref st 'opp_bases 0)
+                     (r2 (hash-ref st 'trade_ratio 0.0))
+                     (hash-ref st 'surviving_enemy_win_bldgs 0)
+                     (hash-ref st 'our_last_supply 0) (hash-ref st 'opp_last_supply 0)
+                     (hash-ref st 'pos_retreat 0) (hash-ref st 'own_base_retreat_frames 0)))))
 
 ;; -----------------------------------------------------------------------------
 ;; Main CLI Driver

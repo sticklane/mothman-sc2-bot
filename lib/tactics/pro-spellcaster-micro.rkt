@@ -2287,29 +2287,59 @@
              [(queen)
               (define transfuse-d : (Option spell-directive)
                 (and (>= en SC2-QUEEN-TRANSFUSION-ENERGY)
-                     (let-values ([(ok? tgt _w)
-                                   (best-unit-target
-                                    ux uy 7.0 all-allies
-                                    (lambda ([a : Any])
-                                      (and (not (= (uh-tag a) tag))
-                                           (not (uh-hallucination? a))
-                                           (> (queen-transfuse-priority (uh-type a)) 0.0)
-                                           (>= (uh-missing-hp a) 65.0)
-                                           (< (uh-hp-ratio a) 0.65)
-                                           (< (spell-unit-claim-count claims 'transfusion (uh-tag a) current-frame)
-                                              (unit-claim-effective-cap 'transfusion 0.0 (uh-missing-hp a) #f #t))))
-                                    (lambda ([a : Any])
-                                      (- (+ (queen-transfuse-priority (uh-type a))
-                                            (* 30.0 (- 1.0 (uh-hp-ratio a)))
-                                            (min 40.0 (* 0.25 (uh-missing-hp a))))
-                                         (* 25.0 (->float (spell-unit-claim-count claims 'transfusion (uh-tag a) current-frame))))))])
-                       (and ok?
-                            (let ([ttag (uh-tag tgt)])
-                              (and (spell-claim-unit?!
-                                    claims 'transfusion ttag current-frame UNIT-SPELL-CLAIM-TTL
-                                    #:caster-tag tag #:missing-hp (uh-missing-hp tgt))
-                                   (spell-directive tag 'queen 'transfusion 'unit ttag
-                                                    (uh-x tgt) (uh-y tgt) 'queen-transfuse)))))))
+                     (or
+                      (let-values ([(ok? tgt _w)
+                                    (best-unit-target
+                                     ux uy 7.0 all-allies
+                                     (lambda ([a : Any])
+                                       (and (not (= (uh-tag a) tag))
+                                            (not (uh-hallucination? a))
+                                            (> (queen-transfuse-priority (uh-type a)) 0.0)
+                                            (>= (uh-missing-hp a) 55.0)
+                                            (< (uh-hp-ratio a) 0.65)
+                                            (< (spell-unit-claim-count claims 'transfusion (uh-tag a) current-frame)
+                                               (unit-claim-effective-cap 'transfusion 0.0 (uh-missing-hp a) #f #t))))
+                                     (lambda ([a : Any])
+                                       (- (+ (queen-transfuse-priority (uh-type a))
+                                             (* 30.0 (- 1.0 (uh-hp-ratio a)))
+                                             (min 40.0 (* 0.25 (uh-missing-hp a))))
+                                          (* 25.0 (->float (spell-unit-claim-count claims 'transfusion (uh-tag a) current-frame))))))])
+                        (and ok?
+                             (let ([ttag (uh-tag tgt)])
+                               (and (spell-claim-unit?!
+                                     claims 'transfusion ttag current-frame UNIT-SPELL-CLAIM-TTL
+                                     #:caster-tag tag #:missing-hp (uh-missing-hp tgt))
+                                    (spell-directive tag 'queen 'transfusion 'unit ttag
+                                                     (uh-x tgt) (uh-y tgt) 'queen-transfuse)))))
+                      ;; L27-P0-3 (`z12` mineral-line last-stand): when a lone defending Queen has
+                      ;; NO high-HP ally (`queen-transfuse-priority > 0`) within 14t and >= 4 enemy
+                      ;; rushers are within 8.0t, Transfuse a critically wounded defending Zergling
+                      ;; or Drone (`< 58%` HP) rather than dying with unspent 50+ energy!
+                      (and (not (any-unit-within?
+                                 all-allies ux uy 14.0
+                                 (lambda ([a : Any])
+                                   (and (not (= (uh-tag a) tag))
+                                        (> (queen-transfuse-priority (uh-type a)) 0.0)))))
+                           (>= (count-units-within enemy-units ux uy 8.0 sc2-enemy-unit-targetable?) 4)
+                           (let-values ([(ok? tgt _w)
+                                         (best-unit-target
+                                          ux uy 7.0 ally-units
+                                          (lambda ([a : Any])
+                                            (and (not (= (uh-tag a) tag))
+                                                 (memq (uh-type a) '(zergling drone baneling))
+                                                 (>= (uh-missing-hp a) 15.0)
+                                                 (< (uh-hp-ratio a) 0.58)
+                                                 (= (spell-unit-claim-count claims 'transfusion (uh-tag a) current-frame) 0)))
+                                          (lambda ([a : Any])
+                                            (+ (if (eq? (uh-type a) 'zergling) 40.0 25.0)
+                                               (* 40.0 (- 1.0 (uh-hp-ratio a))))))])
+                             (and ok?
+                                  (let ([ttag (uh-tag tgt)])
+                                    (and (spell-claim-unit?!
+                                          claims 'transfusion ttag current-frame UNIT-SPELL-CLAIM-TTL
+                                          #:caster-tag tag #:missing-hp (uh-missing-hp tgt))
+                                         (spell-directive tag 'queen 'transfusion 'unit ttag
+                                                          (uh-x tgt) (uh-y tgt) 'queen-transfuse)))))))))
               (or transfuse-d
                   ;; 2. Inject Larva for designated inject Queens when energy >= 25.0
                   (and (not (not (memv tag inject-queen-tags)))
@@ -2542,7 +2572,38 @@
                          (and ok?
                               (spell-claim-point?! claims 'blinding-cloud cx cy BLINDING-CLOUD-CLAIM-RADIUS current-frame BLINDING-CLOUD-CLAIM-TTL)
                               (spell-directive tag 'viper 'blinding-cloud 'point 0 cx cy 'viper-blinding-cloud))))
-                  ;; 2. Abduct into >= 4 friendly combat units within 7.0 (`energy >= 75`, `range 9.0`)
+                  ;; 2. L27-P0-3 (`z07`/`z08`): Prioritize Parasitic Bomb (`energy >= 125`, `r=8.5`,
+                  ;;    `>= 2` air within `3.5t`) STRICTLY ABOVE Abduct so Vipers never burn energy on
+                  ;;    Abduct before bombing air clumps! Still skips nearby `824` dummy or active bomb.
+                  (and (>= en 125.0)
+                       (let-values ([(ok? tgt _w)
+                                     (best-unit-target
+                                      ux uy 8.5 enemy-units
+                                      (lambda ([e : Any])
+                                        (and (enemy-air-capital-or-ranged? e)
+                                             (not (uh-has-buff? e 'parasitic-bomb))
+                                             (>= (count-units-within enemy-units (uh-x e) (uh-y e) 3.5 enemy-air-capital-or-ranged?) 2)
+                                             (not (any-unit-within?
+                                                   enemy-units (uh-x e) (uh-y e) 4.0
+                                                   (lambda ([d : Any])
+                                                     (or (eq? (uh-type d) 'parasitic-bomb-dummy)
+                                                         (= (safe-int (dyn-hash-ref d 'unit-type-id 0) 0) 824)
+                                                         (= (safe-int (dyn-hash-ref d 'type 0) 0) 824)
+                                                         (uh-has-buff? d 'parasitic-bomb)))))
+                                             (not (spell-point-claimed? claims 'parasitic-bomb-zone (uh-x e) (uh-y e) 3.5 current-frame))))
+                                      (lambda ([e : Any])
+                                        (define air-cnt (count-units-within enemy-units (uh-x e) (uh-y e) 3.5 enemy-air-capital-or-ranged?))
+                                        (define pack (aoe-radius-packing-multiplier (unit-collision-radius (uh-type e)) 3.0))
+                                        (+ (* 20.0 pack (->float air-cnt))
+                                           (min 100.0 (* 0.2 (uh-total-hp e))))))])
+                         (and ok?
+                              (spell-claim-unit?! claims 'parasitic-bomb (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
+                                                  #:caster-tag tag)
+                              (begin
+                                (spell-claim-point?! claims 'parasitic-bomb-zone (uh-x tgt) (uh-y tgt) 3.5 current-frame 64)
+                                (spell-directive tag 'viper 'parasitic-bomb 'unit (uh-tag tgt)
+                                                 (uh-x tgt) (uh-y tgt) 'viper-parasitic-bomb)))))
+                  ;; 3. Abduct into >= 4 friendly combat units within 7.0 (`energy >= 75`, `range 9.0`)
                   (and (>= en 75.0)
                        (>= (count-units-within ally-units ux uy 7.0
                                                (lambda ([a : Any]) (and (not (= (uh-tag a) tag)) (unit-combat-relevant? a))))
@@ -2559,35 +2620,6 @@
                                                   #:caster-tag tag)
                               (spell-directive tag 'viper 'abduct 'unit (uh-tag tgt)
                                                (uh-x tgt) (uh-y tgt) 'viper-abduct))))
-                  ;; 3. Parasitic Bomb on >= 3 air units without nearby `824` dummy or active bomb
-                  (and (>= en 125.0)
-                       (let-values ([(ok? tgt _w)
-                                     (best-unit-target
-                                      ux uy 8.0 enemy-units
-                                      (lambda ([e : Any])
-                                        (and (enemy-air-capital-or-ranged? e)
-                                             (not (uh-has-buff? e 'parasitic-bomb))
-                                             (>= (count-units-within enemy-units (uh-x e) (uh-y e) 3.0 enemy-air-capital-or-ranged?) 3)
-                                             (not (any-unit-within?
-                                                   enemy-units (uh-x e) (uh-y e) 4.0
-                                                   (lambda ([d : Any])
-                                                     (or (eq? (uh-type d) 'parasitic-bomb-dummy)
-                                                         (= (safe-int (dyn-hash-ref d 'unit-type-id 0) 0) 824)
-                                                         (= (safe-int (dyn-hash-ref d 'type 0) 0) 824)
-                                                         (uh-has-buff? d 'parasitic-bomb)))))
-                                             (not (spell-point-claimed? claims 'parasitic-bomb-zone (uh-x e) (uh-y e) 3.5 current-frame))))
-                                      (lambda ([e : Any])
-                                        (define air-cnt (count-units-within enemy-units (uh-x e) (uh-y e) 3.0 enemy-air-capital-or-ranged?))
-                                        (define pack (aoe-radius-packing-multiplier (unit-collision-radius (uh-type e)) 3.0))
-                                        (+ (* 20.0 pack (->float air-cnt))
-                                           (min 100.0 (* 0.2 (uh-total-hp e))))))])
-                         (and ok?
-                              (spell-claim-unit?! claims 'parasitic-bomb (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
-                                                  #:caster-tag tag)
-                              (begin
-                                (spell-claim-point?! claims 'parasitic-bomb-zone (uh-x tgt) (uh-y tgt) 3.5 current-frame 64)
-                                (spell-directive tag 'viper 'parasitic-bomb 'unit (uh-tag tgt)
-                                                 (uh-x tgt) (uh-y tgt) 'viper-parasitic-bomb)))))
                   ;; 4. Safe Consume (`energy < 60`, `0` enemies within `12.0`, Zerg building `hp > 450`)
                   (and (< en 60.0)
                        (not (any-unit-within? all-enemies ux uy 12.0 sc2-enemy-unit-targetable?))

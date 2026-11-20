@@ -4708,9 +4708,21 @@
       (define nsym (normalize-brain-sym sym))
       (define supply-sym? (memq nsym '(overlord pylon supply-depot)))
       (define nat-exp-sym? (and natural-exp-window? (eq? nsym race-expand-sym)))
+      (define tvt-core-tank-escrow?
+        (and (eq? race 'Terran)
+             (eq? enemy-race 'Terran)
+             (eq? nsym 'siege-tank)
+             (> (bldg-count-equivalent ready-bldg-counts 'factory-techlab) 0)
+             (or (not (hash? open-facility-slots))
+                 (> (hash-ref open-facility-slots 'factory 0) 0))
+             (< (unit-count-equivalent unit-counts 'siege-tank)
+                (if (>= active-bases 2) 4 3))
+             (>= gas 100)
+             (>= supply-left 3)))
       (define core-or-bo-escrow?
         (and node
-             (or (and bo-goal-sym (same-brain-sym? sym bo-goal-sym))
+             (or tvt-core-tank-escrow?
+                 (and bo-goal-sym (same-brain-sym? sym bo-goal-sym))
                  (is-repaired-prereq? sym)
                  (eq? (sc2-tech-node-category node) 'expansion)
                  (and (memq nsym '(hatchery nexus command-center
@@ -4743,6 +4755,8 @@
                (and midgame-1base-natural-due? (eq? nsym race-expand-sym) (>= minerals 175))
                ;; L24-P0-2 (`#02/#29/#32/#35/#47`): Never backoff-block peaceful 1-base Terran Natural CC lock!
                (and terran-1base-nat-cc-lock? (eq? nsym 'command-center))
+               ;; L27-P0-2 (`#17/#32 TvT0Tank`): Never backoff-block core TvT Siege Tanks (<4 on 2b, <3 on 1b)!
+               tvt-core-tank-escrow?
                (not (macro-escrow-in-backoff? escrow-state-entry frame nsym)))
            (or (not (eq? (sc2-tech-node-kind node) 'research))
                (upgrade-allowed-by-unit-and-order-gates?
@@ -4984,6 +4998,16 @@
              (>= (unit-count-equivalent enemy-u-counts 'zealot) 1)
              (>= (unit-count-equivalent enemy-u-counts 'marine) 2)
              (>= (unit-count-equivalent enemy-u-counts 'marauder) 1))))
+  ;; L27-P0-2 (`T111Stall 5 -> <=1`): Single enemy scout (threat <= 2.0, not under-attack,
+  ;; no Zealot/Marauder/2+ Lings/2+ Marines) must NOT cancel Terran's 1-base Natural CC lock!
+  (define early-enemy-real-combat-arrived?
+    (and (< frame 3360)
+         (or under-attack?
+             (> enemy-threat-supply 2.0)
+             (>= (unit-count-equivalent enemy-u-counts 'zergling) 2)
+             (>= (unit-count-equivalent enemy-u-counts 'zealot) 1)
+             (>= (unit-count-equivalent enemy-u-counts 'marine) 2)
+             (>= (unit-count-equivalent enemy-u-counts 'marauder) 1))))
   (define early-rush-override-active?
     (and (< frame 5040)
          (not eff-req-det?)
@@ -5070,7 +5094,7 @@
     (and (eq? race 'Terran)
          (or under-early-rush-crisis?
              (and (< frame 4000)
-                  (or early-enemy-combat-arrived?
+                  (or early-enemy-real-combat-arrived?
                       under-attack?
                       (> enemy-threat-supply army-supply))))
          (or (< (unit-count-equivalent unit-counts 'marine) 6)
@@ -5583,9 +5607,13 @@
          (not eff-req-det?)
          (not requires-detection?)
          (not enemy-cap-air?)
-         (= (bldg-count-equivalent enemy-b-counts 'stargate) 0)
+         ;; L27-P0-2 (`#21 PvP` Nat <= 195s): Normal home enemy Forge/Stargate must NOT delay
+         ;; natural Nexus past 160s (`f >= 3584`, ensuring start < 195s) when peaceful & 0 air units;
+         ;; proxy within 45t still sets `under-attack?` / `enemy-threat-supply >= 4` / `photon-cannon > 0`!
+         (or (>= frame 3584)
+             (and (= (bldg-count-equivalent enemy-b-counts 'stargate) 0)
+                  (= (bldg-count-equivalent enemy-b-counts 'forge) 0)))
          (= (bldg-count-equivalent enemy-b-counts 'photon-cannon) 0)
-         (= (bldg-count-equivalent enemy-b-counts 'forge) 0)
          (= (bldg-count-equivalent enemy-b-counts 'dark-shrine) 0)
          (= enemy-air-combat-cnt 0)
          (<= enemy-threat-supply 0)))
@@ -5891,13 +5919,21 @@
          (not enemy-air-dominant?)
          (not opp-cap-air-override?)
          (or (>= active-bases 2) (>= frame 6048))))
+  ;; L27-P0-2 (`#10 ZvP` RW 429.7s -> <= 195s): Allow RoachWarren alongside BanelingNest
+  ;; on 2 bases once `frame >= 4032` (3:00) & `workers >= 26` (preserving W7-P0-4 @ f=3600!).
+  (define zerg-2base-rw-allowed-with-bn?
+    (and (eq? race 'Zerg)
+         (>= frame 4032)
+         (>= workers 26)
+         (not zerg-zvz-rush-suppress-t15-tech?)))
   (define zerg-roach-warren-1-priority-due?
     (and (eq? race 'Zerg)
          (not zerg-zvz-rush-suppress-t15-tech?)
          (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
          (= (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)
          (or (>= active-bases 3)
-             (= (bldg-count-equivalent total-bldg-counts 'baneling-nest) 0))
+             (= (bldg-count-equivalent total-bldg-counts 'baneling-nest) 0)
+             zerg-2base-rw-allowed-with-bn?)
          (>= workers 24)
          (>= frame 3360)
          (or (>= (unit-count-equivalent unit-counts 'queen) (min 2 active-bases))
@@ -6047,11 +6083,11 @@
          (not early-ling-rush-defense-active?)
          (not early-proxy-marauder-rush-active?)
          (not terran-early-rush-hold?)
-         (not early-enemy-combat-arrived?)
+         (not early-enemy-real-combat-arrived?)
          (not active-1base-t3-rush-pending?)
          (not terran-tvz-wall-depot2-due?)
          (not (and tvz-early-wall-marine-before-cc-escrow? (< minerals 400)))
-         (<= enemy-threat-supply 0)))
+         (<= enemy-threat-supply 2.0)))
   ;; L22-P0-2 (`#36/#6 PvZ`): Textbook Pro 14-Pylon -> 16-Gateway -> 17-Assimilator!
   ;; Once Pylon #1 is ready and >= 16 workers with 0 Gateways, Gateway #1 (`u=530`, `blk=#t`)
   ;; strictly outranks Probe #17 (`488`) so Gateway #1 drops immediately at 150M!
@@ -6256,6 +6292,30 @@
          (not protoss-forge-threat-exception?)
          (or (< protoss-total-gw-cnt protoss-tech-gw-floor)
              (< army-supply 16))))
+  ;; L27-P0-2 (`#03/#18/#21/#24/#33` Protoss W@4m 26 -> 28+): Limit Protoss to at most ONE
+  ;; T2 tech structure (`robotics-facility` OR `twilight-council`, counting existing/pending
+  ;; `stargate` too!) while `< 4:00` (`frame < 5376`) AND `< 30` Probes (on `<= 2` bases,
+  ;; `< 450M`), so `2:00..4:00` Probes train continuously on 2 Nexuses!
+  (define protoss-early-t2-cap-window?
+    (and (eq? race 'Protoss)
+         (<= active-bases 2)
+         (< frame 5376)
+         (< workers 30)
+         (< minerals 450)))
+  (define protoss-existing-t2-tech-cnt
+    (if (eq? race 'Protoss)
+        (+ (bldg-count-equivalent total-bldg-counts 'robotics-facility)
+           (bldg-count-equivalent total-bldg-counts 'twilight-council)
+           (bldg-count-equivalent total-bldg-counts 'stargate))
+        0))
+  (define (protoss-early-2nd-t2-tech-deferred? nsym [extra-t2-cnt 0])
+    (and protoss-early-t2-cap-window?
+         (> (+ protoss-existing-t2-tech-cnt extra-t2-cnt) 0)
+         (or (eq? nsym 'twilight-council)
+             (and (eq? nsym 'robotics-facility)
+                  (not enemy-cloaked-threat-active?)
+                  (not eff-req-det?)
+                  (not early-proxy-marauder-rush-active?)))))
   (define protoss-fast-warpgate-due?
     (and (eq? race 'Protoss)
          (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
@@ -6283,6 +6343,7 @@
                    (>= protoss-total-gw-cnt protoss-tech-gw-floor)))))
   (define protoss-2base-robo-due?
     (and (eq? race 'Protoss)
+         (not (protoss-early-2nd-t2-tech-deferred? 'robotics-facility))
          (or (>= active-bases 2) (>= workers 28))
          (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
          (= (bldg-count-equivalent total-bldg-counts 'robotics-facility) 0)
@@ -6649,7 +6710,8 @@
                                                #:keep-lair-aa? keep-lair-aa?))
                     (not (and protoss-forge-gated-off? (eq? (normalize-brain-sym s) 'forge)))
                     (not (and zerg-2base-second-t15-tech-blocked?
-                              (or (and (eq? (normalize-brain-sym s) 'roach-warren)
+                              (or (and (not zerg-2base-rw-allowed-with-bn?)
+                                       (eq? (normalize-brain-sym s) 'roach-warren)
                                        (> (bldg-count-equivalent total-bldg-counts 'baneling-nest) 0))
                                   (and (eq? (normalize-brain-sym s) 'baneling-nest)
                                        (> (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)))))
@@ -7251,8 +7313,25 @@
          (> (bldg-count-equivalent ready-bldg-counts 'factory-techlab) 0)
          (or (not (hash? open-facility-slots))
              (> (hash-ref open-facility-slots 'factory 0) 0))
-         (< (unit-count-equivalent unit-counts 'siege-tank) 4)
-         (>= gas 100)))
+         (< (unit-count-equivalent unit-counts 'siege-tank)
+            (if (>= active-bases 2) 4 3))
+         (>= gas 100)
+         (>= supply-left 3)
+         (not supply-preempt-now?)
+         (not terran-1base-nat-cc-lock?)
+         (not midgame-1base-natural-due?)
+         ;; Preserve L22-P0-2a(5): once >= 1 Tank exists and a 2nd bare Factory needs its TechLab (< 150M),
+         ;; let factory-techlab (50M/25G) attach first so both Factories pump Tanks together!
+         (not (and terran-factory-techlab-due?
+                   (>= (unit-count-equivalent unit-counts 'siege-tank) 1)
+                   (< minerals 150)))
+         (or early-proxy-marauder-rush-active? (not terran-early-rush-hold?))))
+  ;; L27-P0-2 (`#17/#32 TvT0Tank`): Never let Starport/Barracks addons (50M/25G at u=705..866)
+  ;; drain minerals/gas below Siege Tank (150M/125G) while an idle TvT Factory TechLab needs Tanks!
+  (define (terran-tvt-tank-defer-addon? nsym)
+    (and terran-111-tvt-tank-due?
+         (memq nsym '(starport-techlab starport-reactor barracks-techlab barracks-reactor))
+         (or (< minerals 200) (< gas 150))))
   (define terran-missing-111-milestone-due?
     (or terran-orbital-1-urgent?
         terran-orbital-2-urgent?
@@ -7277,7 +7356,7 @@
   (define (terran-defer-for-111-sym? nsym)
     (and (eq? race 'Terran)
          (not under-attack?)
-         (<= enemy-threat-supply 0)
+         (<= enemy-threat-supply 2.0)
          (not under-early-rush-crisis?)
          (not terran-early-rush-hold?)
          (not early-ling-rush-defense-active?)
@@ -7314,6 +7393,7 @@
          (< workers (min (if (eq? race 'Protoss) 54 48) pt-undersat-bases-thresh))
          (not terran-orbital-1-urgent?)
          (not terran-1base-nat-cc-lock?)
+         (not (and terran-111-tvt-tank-due? (< minerals 200)))
          (not (and natural-exp-window? (= active-bases 1) (<= total-townhalls-incl-pending 1) (>= minerals 250)))
          (not midgame-1base-natural-due?)
          (not (and terran-tvz-wall-depot2-due? (< minerals 150)))
@@ -7569,7 +7649,7 @@
                      (or under-early-rush-crisis?
                          early-ling-rush-defense-active?
                          early-proxy-marauder-rush-active?
-                         early-enemy-combat-arrived?
+                         (and early-enemy-combat-arrived? (not terran-1base-nat-cc-lock?))
                          (and under-attack? (> enemy-threat-supply army-supply)))))
            (or (not (eq? cat 'expansion))
                slice15-base-loss-expand-now?
@@ -7579,7 +7659,7 @@
                     (not under-early-rush-crisis?)
                     (not early-ling-rush-defense-active?)
                     (not early-proxy-marauder-rush-active?)
-                    (not early-enemy-combat-arrived?)
+                    (not (and early-enemy-combat-arrived? (not terran-1base-nat-cc-lock?)))
                     (not (and under-attack? (> enemy-threat-supply army-supply))))
                terran-contained-breakout-cc?
                depletion-or-mirror-expand?
@@ -7674,7 +7754,8 @@
            [(and protoss-forge-gated-off? (eq? csym 'forge))
             #f]
            [(and zerg-2base-second-t15-tech-blocked?
-                 (or (and (eq? csym 'roach-warren)
+                 (or (and (not zerg-2base-rw-allowed-with-bn?)
+                          (eq? csym 'roach-warren)
                           (> (bldg-count-equivalent total-bldg-counts 'baneling-nest) 0))
                      (and (eq? csym 'baneling-nest)
                           (> (bldg-count-equivalent total-bldg-counts 'roach-warren) 0))))
@@ -8349,7 +8430,8 @@
            (or under-early-rush-crisis?
                early-ling-rush-defense-active?
                early-proxy-marauder-rush-active?
-               early-enemy-combat-arrived?
+               (and early-enemy-combat-arrived?
+                    (not terran-1base-nat-cc-lock?))
                zvz-safe-pool-first-due?
                zvz-early-ling-wave2-hold?
                (and tvz-early-wall-marine-before-cc-escrow? (< minerals 400))
@@ -9129,7 +9211,9 @@
                 (not (zerg-quad-tech-deferred-sym? nsym))
                 (not (and zerg-zvz-rush-suppress-t15-tech? (memq nsym '(roach-warren baneling-nest))))
                 (not (terran-defer-for-111-sym? nsym))
+                (not (terran-tvt-tank-defer-addon? nsym))
                 (not (and protoss-defer-forge-robobay? (memq nsym '(forge robotics-bay templar-archive))))
+                (not (protoss-early-2nd-t2-tech-deferred? nsym))
                 (not terran-factory-deferred-item?)
                 (not terran-factory-gas-protect-item?)
                 (not terran-rush-defer-item?)
@@ -9227,7 +9311,8 @@
                     (and terran-siege-tank-boost?
                          (or (and (>= gas 125)
                                   (or (>= minerals 150) under-attack? (> enemy-threat-supply 0)))
-                             (and terran-111-tvt-tank-due? (>= minerals 100))))
+                             terran-111-tvt-tank-due?))
+                    (and terran-111-tvt-tank-due? (eq? nsym 'siege-tank))
                     terran-factory-gas-ready-boost?
                     terran-first-factory-boost?
                     (and terran-first-starport-boost? terran-starport-escrow-ok?)
@@ -9349,8 +9434,10 @@
              [(zerg-quad-tech-deferred-sym? nsym) (min 420.0 u-after-gas-lock)]
              [(and zerg-zvz-rush-suppress-t15-tech? (memq nsym '(roach-warren baneling-nest))) (min 300.0 u-after-gas-lock)]
              [(terran-defer-for-111-sym? nsym) (min 520.0 u-after-gas-lock)]
+             [(terran-tvt-tank-defer-addon? nsym) (min 520.0 u-after-gas-lock)]
              [(and protoss-forge-gated-off? (eq? nsym 'forge)) 0.0]
              [(and protoss-defer-forge-robobay? (memq nsym '(forge robotics-bay templar-archive))) (min 440.0 u-after-gas-lock)]
+             [(protoss-early-2nd-t2-tech-deferred? nsym) (min 420.0 u-after-gas-lock)]
              [protoss-aa-defer-ground-only? (min 340.0 u-after-gas-lock)]
              [(and zerg-cloaked-air-crisis?
                    (eq? nsym 'overseer)
@@ -9469,6 +9556,7 @@
              [(and emergency-rush-def-boost? (eq? cat 'combat-unit))
               (max 620.0 (+ 340.0 u0))]
              [terran-depot2-boost? (max (if terran-tvz-wall-depot2-due? 650.0 605.0) plan-weight u0)]
+             [(and terran-111-tvt-tank-due? (eq? nsym 'siege-tank)) (max 640.0 plan-weight u0)]
              [(and protoss-fast-warpgate-due? (eq? nsym 'warp-gate-research)) (max 620.0 plan-weight u0)]
              [(and terran-orbital-1-urgent? (eq? nsym 'orbital-command)) (max 605.0 plan-weight u0)]
              [(and terran-111-factory-priority-due? (eq? nsym 'factory)) (max 585.0 plan-weight u0)]
@@ -9508,7 +9596,8 @@
              [terran-siege-tank-boost?
               (let ([cur-tanks (unit-count-equivalent unit-counts 'siege-tank)]
                     [core-tanks (if (or (eq? enemy-race 'Terran) (>= enemy-siege-tank-cnt 1)) 6 4)])
-                (max (cond [terran-tvt-1base-tank-core-due? 562.0]
+                (max (cond [terran-111-tvt-tank-due? 640.0]
+                           [terran-tvt-1base-tank-core-due? 562.0]
                            [(< cur-tanks core-tanks) 560.0]
                            [(< cur-tanks 6) 544.0]
                            [else 488.0])
@@ -10098,9 +10187,11 @@
          (cond
            [(and protoss-forge-gated-off? (eq? nsym 'forge)) 0.0]
            [(and protoss-defer-forge-robobay? (memq nsym '(forge robotics-bay templar-archive))) (min u 440.0)]
+           [(protoss-early-2nd-t2-tech-deferred? nsym) (min u 420.0)]
            [(zerg-quad-tech-deferred-sym? nsym) (min u 420.0)]
            [(and zerg-zvz-rush-suppress-t15-tech? (memq nsym '(roach-warren baneling-nest))) (min u 300.0)]
            [(terran-defer-for-111-sym? nsym) (min u 520.0)]
+           [(terran-tvt-tank-defer-addon? nsym) (min u 520.0)]
            [(and terran-suppress-reaper-now? (eq? nsym 'reaper)) (min u 20.0)]
            [(and terran-factory-techlab-due?
                  (<= (bldg-count-equivalent ready-bldg-counts 'factory) 1)
@@ -10266,6 +10357,7 @@
            [zvz-rush-spine-post? (max u 650.0)]
            [terran-rush-marine-post? (max u 640.0)]
            [terran-depot2-post? (max u (if terran-tvz-wall-depot2-due? 650.0 605.0))]
+           [(and terran-111-tvt-tank-due? (eq? nsym 'siege-tank)) (max u 640.0)]
            [(and terran-1base-nat-cc-lock? (eq? nsym 'command-center)) (max u 625.0)]
            [(and protoss-fast-warpgate-due? (eq? nsym 'warp-gate-research)) (max u 620.0)]
            [(and terran-orbital-1-urgent? (eq? nsym 'orbital-command)) (max u 605.0)]
@@ -10317,7 +10409,8 @@
            [terran-siege-tank-post?
             (let ([cur-tanks (unit-count-equivalent unit-counts 'siege-tank)]
                   [core-tanks (if (or (eq? enemy-race 'Terran) (>= enemy-siege-tank-cnt 1)) 6 4)])
-              (max u (cond [terran-tvt-1base-tank-core-due? 562.0]
+              (max u (cond [terran-111-tvt-tank-due? 640.0]
+                           [terran-tvt-1base-tank-core-due? 562.0]
                            [(< cur-tanks core-tanks) 560.0]
                            [(< cur-tanks 6) 544.0]
                            [else 488.0])))]
@@ -10504,9 +10597,11 @@
                 (and (eq? nsym 'starport) (not terran-starport-escrow-ok?) (>= minerals 300) (< gas 95))
                 (and protoss-forge-gated-off? (eq? nsym 'forge))
                 (and protoss-defer-forge-robobay? (memq nsym '(forge robotics-bay templar-archive)))
+                (protoss-early-2nd-t2-tech-deferred? nsym)
                 (zerg-quad-tech-deferred-sym? nsym)
                 (and zerg-zvz-rush-suppress-t15-tech? (memq nsym '(roach-warren baneling-nest)))
                 (terran-defer-for-111-sym? nsym)
+                (terran-tvt-tank-defer-addon? nsym)
                 (and terran-suppress-reaper-now? (eq? nsym 'reaper))
                 w18-fac-tl-nonblk-post?
                 midgame-1base-nat-defer-tech-post?
@@ -10527,6 +10622,7 @@
             #f]
            [(and zerg-late-low-min-high-gas-3rd-hatch-due? (eq? nsym 'hatchery)) #t]
            [(and midgame-1base-natural-due? (eq? nsym race-expand-sym) (cand-can-escrow? id)) #t]
+           [(and terran-111-tvt-tank-due? (eq? nsym 'siege-tank) (cand-can-escrow? id)) #t]
            [(and terran-1base-nat-cc-lock? (eq? nsym 'command-center) (cand-can-escrow? id)) #t]
            [(and protoss-fast-warpgate-due? (eq? nsym 'warp-gate-research) (cand-can-escrow? id)) #t]
            [(and terran-orbital-1-urgent? (eq? nsym 'orbital-command) (cand-can-escrow? id)) #t]
@@ -10582,7 +10678,7 @@
                      (and terran-siege-tank-post?
                           (or (and (>= gas 125)
                                    (or (>= minerals 150) under-attack? (> enemy-threat-supply 0)))
-                              (and terran-111-tvt-tank-due? (>= minerals 100))))
+                              terran-111-tvt-tank-due?))
                      zerg-post-hatch-pool-post? zerg-cap-air-ext-post?
                      zerg-midgame-ext-post? terran-factory-gas-ready-post?
                      terran-first-factory-post?
@@ -10925,6 +11021,18 @@
               (or (and protoss-forge-gated-off? (eq? csym 'forge))
                   (and protoss-defer-forge-robobay? (memq csym '(forge robotics-bay templar-archive)))))
          #f]
+        [(protoss-early-2nd-t2-tech-deferred?
+          csym
+          (+ (hash-ref seen-tech-counts 'robotics-facility 0)
+             (hash-ref seen-tech-counts 'twilight-council 0)
+             (hash-ref seen-tech-counts 'stargate 0)
+             (if (ormap (lambda (ee)
+                          (memq (normalize-brain-sym (cadddr ee))
+                                '(robotics-facility twilight-council stargate)))
+                        escrowed-entries)
+                 1
+                 0)))
+         #f]
         [(zerg-quad-tech-deferred-sym? csym)
          #f]
         [(and zerg-zvz-rush-suppress-t15-tech? (memq csym '(roach-warren baneling-nest)))
@@ -10943,7 +11051,8 @@
          (< (+ total-townhalls-incl-pending sched-tech-cnt)
             (if (>= army-supply 45) 5 4))]
         [(and zerg-2base-second-t15-tech-blocked?
-              (or (and (eq? csym 'roach-warren)
+              (or (and (not zerg-2base-rw-allowed-with-bn?)
+                       (eq? csym 'roach-warren)
                        (> (+ (bldg-count-equivalent total-bldg-counts 'baneling-nest)
                              (hash-ref seen-tech-counts 'baneling-nest 0)) 0))
                   (and (eq? csym 'baneling-nest)
@@ -11455,10 +11564,14 @@
               (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
                 (and (not (and (eq? race 'Terran) (eq? rid 'factory)))
                      (not (and (eq? race 'Terran)
+                               (eq? rid 'siege-tank)
+                               terran-111-tvt-tank-due?
+                               (or (eq? cat 'worker)
+                                   (and (not under-attack?) (>= army-supply 4)))))
+                     (not (and (eq? race 'Terran)
                                (eq? cat 'worker)
                                (>= minerals 100)
-                               (or (and (eq? rid 'starport) terran-111-starport-due?)
-                                   (and (eq? rid 'siege-tank) terran-111-tvt-tank-due?)))))))
+                               (and (eq? rid 'starport) terran-111-starport-due?))))))
          0]
         [protoss-aa-stalker-ignores-heavy-escrow? 0]
         [terran-early-marine-ignores-macro-escrow? 0]
@@ -11508,7 +11621,7 @@
        (set! rem-sup (- rem-sup s-cost))
        (when (or (memq csym SC2-SINGLETON-TECH-BUILDINGS)
                  (memq csym SC2-DUAL-CAP-TECH-BUILDINGS)
-                 (memq csym '(hatchery gateway shield-battery spine-crawler bunker
+                 (memq csym '(hatchery gateway robotics-facility stargate shield-battery spine-crawler bunker
                               extractor refinery assimilator barracks-techlab factory factory-techlab spore-crawler)))
          (hash-update! seen-tech-counts csym add1 0))
        (when (memq csym '(queen observer warp-prism zealot roach ravager cyclone hellion corruptor overseer overlord-transport sentry lurker baneling zergling ghost liberator thor widow-mine))
@@ -11826,15 +11939,17 @@
          ;; duplicate singleton tech, or CyberCore/Assim during PvZ Ling flood
          (not (and protoss-forge-gated-off? (eq? final-bo-goal-norm 'forge)))
          (not (and protoss-defer-forge-robobay? (memq final-bo-goal-norm '(forge robotics-bay templar-archive))))
+         (not (protoss-early-2nd-t2-tech-deferred? final-bo-goal-norm))
          (not (zerg-quad-tech-deferred-sym? final-bo-goal-norm))
          (not (and zerg-zvz-rush-suppress-t15-tech? (memq final-bo-goal-norm '(roach-warren baneling-nest))))
          (not (terran-defer-for-111-sym? final-bo-goal-norm))
+         (not (terran-tvt-tank-defer-addon? final-bo-goal-norm))
          (not (and zerg-4base-hatch-capped? (eq? final-bo-goal-norm 'hatchery)))
          (not (and (memq final-bo-goal-norm '(hatchery nexus command-center))
                    (or under-early-rush-crisis?
                        early-ling-rush-defense-active?
                        early-proxy-marauder-rush-active?
-                       early-enemy-combat-arrived?
+                       (and early-enemy-combat-arrived? (not terran-1base-nat-cc-lock?))
                        (and under-attack? (> enemy-threat-supply army-supply)))))
          ;; W18-P0-1/3-belief + W17-P1-1-belief: Never fallback-escrow suppressed Ling-rush,
          ;; proxy-Marauder, late/combat Reaper, or non-blocking FactoryTechLab BO goals!
@@ -11845,7 +11960,8 @@
                    (eq? final-bo-goal-norm 'factory-techlab)
                    (or under-attack? (> enemy-threat-supply 0) (< army-supply 12) early-proxy-marauder-rush-active?)))
          (not (and zerg-2base-second-t15-tech-blocked?
-                   (or (and (eq? final-bo-goal-norm 'roach-warren)
+                   (or (and (not zerg-2base-rw-allowed-with-bn?)
+                            (eq? final-bo-goal-norm 'roach-warren)
                             (> (bldg-count-equivalent total-bldg-counts 'baneling-nest) 0))
                        (and (eq? final-bo-goal-norm 'baneling-nest)
                             (> (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)))))

@@ -5666,6 +5666,220 @@
                      (= (unbox rpc-cnt) 2)))
     (cleanup!)))
 
+(printf "[Loop 27] Testing L27-P0-1 all-base Protoss tight-05 overflow (#18 25-streak) & Terran barracks4+ 0.5t 3x3 overflow (#05/#20/#23)...\n")
+(let ()
+  (define (l27-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define (mk-l27-u tag utype alliance x y
+                    #:hp [hp 100.0] #:shield [sh 0.0] #:rad [rad 1.0] #:orders [ords '()])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 0 #f #f #f
+              hp hp sh sh 0.0 0.0 0 0 #f #f #f #t #f
+              ords 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define (l27-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59927 "/sc2api" c-in c-out #f 1))
+    (define rpc-cnt (box 0))
+    (define saw-319? (box #f))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define req-id-p (assoc 97 req-f))
+             (define id-b (if req-id-p (encode-uint32 97 (third req-id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (set-box! rpc-cnt (add1 (unbox rpc-cnt)))
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (when (= ab 319) (set-box! saw-319? #t))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws rpc-cnt saw-319? (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+
+  ;; L27-P0-1a (`#18` 25-streak late-game gateway stall): 12 uncontested completed Pylons across 4 bases
+  ;; (9 jammed in Main, 2 jammed in Natural, 1 open at 4th base `(104, 96)` ONLY at tight `0.5t` spot
+  ;; `(106.5, 96.5)`, `dist = 2.06` from in-transit Probe at `(104.5, 97.0)`!). Base-diversified
+  ;; `tight-safe-pylons` + `24`-anchor cap reaches 4th base in the SAME step instead of truncating at 8!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999)
+  (let-values ([(ws rpc-cnt _saw319 cleanup!)
+                (l27-start-mock-ws
+                 (lambda (ab px py)
+                   (if (and (= ab 883) (<= (l27-dist px py 106.5 96.5) 0.1)) 1 2)))])
+    (define nx-m (mk-l27-u 9701 59 1 26.5 26.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define nx-n (mk-l27-u 9702 59 1 64.5 26.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define nx-4 (mk-l27-u 9703 59 1 100.5 90.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define pylon-coords
+      (list (cons 22.0 34.0) (cons 25.0 34.0) (cons 28.0 34.0)
+            (cons 31.0 34.0) (cons 34.0 34.0) (cons 22.0 37.0)
+            (cons 25.0 37.0) (cons 28.0 37.0) (cons 31.0 37.0)
+            (cons 62.0 34.0) (cons 66.0 34.0)
+            (cons 104.0 96.0)))
+    (define pylons
+      (for/list ([pt (in-list pylon-coords)] [i (in-naturals 0)])
+        (mk-l27-u (+ 9710 i) 60 1 (car pt) (cdr pt) #:hp 200.0 #:shield 200.0 #:rad 1.0)))
+    (define psrcs
+      (for/list ([pt (in-list pylon-coords)] [i (in-naturals 0)])
+        (sc2-power-source (sc2-point3d (car pt) (cdr pt) 8.0) 6.5 (+ 9710 i))))
+    (define gws
+      (list (mk-l27-u 9730 62 1 36.5 34.5 #:hp 500.0 #:shield 500.0 #:rad 1.5)
+            (mk-l27-u 9731 62 1 36.5 37.5 #:hp 500.0 #:shield 500.0 #:rad 1.5)
+            (mk-l27-u 9732 62 1 39.5 34.5 #:hp 500.0 #:shield 500.0 #:rad 1.5)
+            (mk-l27-u 9733 62 1 39.5 37.5 #:hp 500.0 #:shield 500.0 #:rad 1.5)))
+    (define prb-busy
+      (mk-l27-u 9734 84 1 103.0 96.0 #:hp 20.0 #:shield 20.0 #:rad 0.375
+                #:orders (list (sc2-unit-order 881 (sc2-point3d 104.5 97.0 8.0) 0 0.0))))
+    (define prb-free (mk-l27-u 9735 84 1 102.0 94.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define obs-12py
+      (sc2-observation 10000 (sc2-player-common 1 1200 300 120 80 40 40 0 0 0 0)
+                       (append (list nx-m nx-n nx-4 prb-busy prb-free) pylons gws)
+                       '() psrcs #f '() '() '() '() '() '()))
+    (define gw-cmds
+      (translate-bot-actions->sc2-raw-commands '((build gateway 30.0 34.0))
+                                               obs-12py #:ws-conn ws #:game-info w3-ginfo))
+    (define gw-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 883))) gw-cmds))
+    (define gw-pt (and gw-cmd (sc2-raw-unit-command-target-pos gw-cmd)))
+    (check-true "l27-p0-1a-protoss-gateway-tight-05-searches-across-all-12-pylons-reaching-4th-base"
+                (and (= (unbox rpc-cnt) 2)
+                     (sc2-point2d? gw-pt)
+                     (<= (l27-dist (sc2-point2d-x gw-pt) (sc2-point2d-y gw-pt) 106.5 96.5) 0.1)
+                     (= (unbox SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP) -9999)))
+    (cleanup!))
+
+  ;; L27-P0-1b: Non-gateway Protoss tech (`twilight-council`, `886`) also uses tight-05 fallback across
+  ;; > 8 Pylons, skipping 9 jammed Main/Natural Pylons to place cleanly at 3rd base Pylon `(98, 32)`!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999)
+  (let-values ([(ws rpc-cnt _saw319 cleanup!)
+                (l27-start-mock-ws
+                 (lambda (ab px py)
+                   (if (and (= ab 886) (<= (l27-dist px py 100.5 32.5) 0.1)) 1 2)))])
+    (define nx-m (mk-l27-u 9741 59 1 26.5 26.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define py-coords
+      (list (cons 22.0 34.0) (cons 25.0 34.0) (cons 28.0 34.0)
+            (cons 31.0 34.0) (cons 34.0 34.0) (cons 22.0 37.0)
+            (cons 25.0 37.0) (cons 28.0 37.0) (cons 31.0 37.0)
+            (cons 98.0 32.0)))
+    (define pylons
+      (for/list ([pt (in-list py-coords)] [i (in-naturals 0)])
+        (mk-l27-u (+ 9750 i) 60 1 (car pt) (cdr pt) #:hp 200.0 #:shield 200.0 #:rad 1.0)))
+    (define psrcs
+      (for/list ([pt (in-list py-coords)] [i (in-naturals 0)])
+        (sc2-power-source (sc2-point3d (car pt) (cdr pt) 8.0) 6.5 (+ 9750 i))))
+    (define prb-busy
+      (mk-l27-u 9765 84 1 97.0 33.0 #:hp 20.0 #:shield 20.0 #:rad 0.375
+                #:orders (list (sc2-unit-order 881 (sc2-point3d 98.5 33.0 8.0) 0 0.0))))
+    (define prb-free (mk-l27-u 9766 84 1 96.0 31.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define obs-tc
+      (sc2-observation 10100 (sc2-player-common 1 800 300 100 60 30 30 0 0 0 0)
+                       (append (list nx-m prb-busy prb-free) pylons)
+                       '() psrcs #f '() '() '() '() '() '()))
+    (define tc-cmds
+      (translate-bot-actions->sc2-raw-commands '((build twilight-council 28.0 34.0))
+                                               obs-tc #:ws-conn ws #:game-info w3-ginfo))
+    (define tc-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 886))) tc-cmds))
+    (define tc-pt (and tc-cmd (sc2-raw-unit-command-target-pos tc-cmd)))
+    (check-true "l27-p0-1b-protoss-late-tech-twilight-council-tight-05-reaches-3rd-base-over-10-pylons"
+                (and (= (unbox rpc-cnt) 2)
+                     (sc2-point2d? tc-pt)
+                     (<= (l27-dist (sc2-point2d-x tc-pt) (sc2-point2d-y tc-pt) 100.5 32.5) 0.1)
+                     (= (unbox SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP) -9999)))
+    (cleanup!))
+
+  ;; L27-P0-1c (`#05/#20/#23` Terran barracks #4+): Natural CC `(64.5, 30.5)` sits on a real mineral-solved
+  ;; expansion pad (`all-expansion-pads` includes `(64.5, 30.5)`), so the only open Barracks spot `(68.5, 30.5)`
+  ;; (`Chebyshev dist = 4.0 < 4.5`) is rejected by `place-pt0` (`#:min-spacing 2.0`, `pad-clr = 4.5`) on RPC #1
+  ;; and IMMEDIATELY placed by L27 `0.5t` pure `3x3` overflow (`tight-pad-clearance = 3.95`) on RPC #2 with ZERO `319`!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (hash-set! SC2-TERRAN-5X3-MISS-STREAK 'barracks 2)
+  (let-values ([(ws rpc-cnt saw-319? cleanup!)
+                (l27-start-mock-ws
+                 (lambda (ab px py)
+                   (if (and (= ab 321) (<= (l27-dist px py 68.5 30.5) 0.1)) 1 2)))])
+    (define cc-m (mk-l27-u 9771 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define cc-n (mk-l27-u 9772 18 1 64.5 30.5 #:hp 1500.0 #:rad 2.75))
+    (define rax1 (mk-l27-u 9773 21 1 34.5 28.5 #:hp 1000.0 #:rad 1.5))
+    (define rax2 (mk-l27-u 9774 21 1 34.5 33.5 #:hp 1000.0 #:rad 1.5))
+    (define rax3 (mk-l27-u 9775 21 1 28.5 35.5 #:hp 1000.0 #:rad 1.5))
+    (define scv-free (mk-l27-u 9777 45 1 63.0 29.0 #:hp 45.0 #:rad 0.375))
+    (define nat-mins
+      (for/list ([y (in-list '(27.5 29.5 31.5 33.5))] [i (in-naturals 0)])
+        (sc2-unit 1 3 (+ 9780 i) 341 0 (sc2-point3d 71.0 y 8.0) 0.0 1.0 1.0 0 #f #f #f
+                  1000.0 1000.0 0.0 0.0 0.0 0.0 1500 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0)))
+    (define l27-t-ginfo
+      (sc2-game-info "L27TerranMap" "" '() '(128 128) '(4 4 124 124)
+                     (list (sc2-point2d 100.0 100.0))
+                     w3-full-grid #f w3-full-grid))
+    (define r4-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build barracks 32.0 30.0))
+       (make-test-obs 10200 600 100 (append (list cc-m cc-n rax1 rax2 rax3 scv-free) nat-mins))
+       #:ws-conn ws #:game-info l27-t-ginfo))
+    (define r4-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) r4-cmds))
+    (define r4-pt (and r4-cmd (sc2-raw-unit-command-target-pos r4-cmd)))
+    (check-true "l27-p0-1c-barracks4-tight-05-3x3-places-crowded-base-in-same-step-without-319"
+                (and (= (unbox rpc-cnt) 2)
+                     (not (unbox saw-319?))
+                     (sc2-point2d? r4-pt)
+                     (<= (l27-dist (sc2-point2d-x r4-pt) (sc2-point2d-y r4-pt) 68.5 30.5) 0.1)))
+    (cleanup!))
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

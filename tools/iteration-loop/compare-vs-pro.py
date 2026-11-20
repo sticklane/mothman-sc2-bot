@@ -243,6 +243,20 @@ def normalize_match(m):
             if m.get("zerg_roach_warren_sec") is not None
             else mt.get("zerg_roach_warren_sec")
         ),
+        "combat_death_home_pct": safe_num(
+            m.get("combat_death_home_pct")
+            if m.get("combat_death_home_pct") is not None
+            else mt.get("combat_death_home_pct")
+        ),
+        "combat_death_enemy_pct": safe_num(
+            m.get("combat_death_enemy_pct")
+            if m.get("combat_death_enemy_pct") is not None
+            else mt.get("combat_death_enemy_pct")
+        ),
+        "late_game_stalemate_tie": bool(
+            m.get("late_game_stalemate_tie")
+            or (m.get("anomalies") or {}).get("late_game_stalemate_tie")
+        ),
         "action_rejects": int(m.get("action_rejects") or 0),
         "crashes": m.get("crashes") or [],
         "signatures": m.get("signatures") or [],
@@ -437,6 +451,9 @@ def summarize_slice(rows):
         "early_atk_pct_2m_6m_avg": mean_opt([r["early_atk_pct_2m_6m"] for r in rows]),
         "protoss_warpgate_sec_med": med_opt([r["protoss_warpgate_sec"] for r in rows if r["our_race"] == "Protoss"]),
         "zerg_roach_warren_sec_med": med_opt([r["zerg_roach_warren_sec"] for r in rows if r["our_race"] == "Zerg"]),
+        "combat_death_home_pct_avg": mean_opt([r["combat_death_home_pct"] for r in rows]),
+        "combat_death_enemy_pct_avg": mean_opt([r["combat_death_enemy_pct"] for r in rows]),
+        "late_game_stalemate_tie_matches": sum(1 for r in rows if r.get("late_game_stalemate_tie")),
         "action_rejects": sum(r["action_rejects"] for r in rows),
         "crashes": sum(len(r["crashes"]) for r in rows),
         "anomalies": dict(anom_counts),
@@ -868,6 +885,11 @@ def main():
                     f" | `Atk2-6` = **{fmt(cur_all.get('early_atk_pct_2m_6m_avg'),'%')}**"
                     f" | `P:WG` = **{fmt(cur_all.get('protoss_warpgate_sec_med'),'s',0)}**"
                     f" | `Z:RW` = **{fmt(cur_all.get('zerg_roach_warren_sec_med'),'s',0)}**"
+                )
+            if cur_all.get("combat_death_home_pct_avg") is not None or cur_all.get("late_game_stalemate_tie_matches", 0) > 0:
+                extra_w8 += (
+                    f" | `Dth(H/E)` = **{fmt(cur_all.get('combat_death_home_pct_avg'),'%',0)}/{fmt(cur_all.get('combat_death_enemy_pct_avg'),'%',0)}**"
+                    f" | `StaleTie` = **{cur_all.get('late_game_stalemate_tie_matches', 0)}**"
                 )
         print(
             f"\n### Stall, Retreat & Waste Watch (`W7/W8-LOOP-2`): "

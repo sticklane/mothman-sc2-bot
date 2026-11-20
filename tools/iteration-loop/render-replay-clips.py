@@ -212,8 +212,20 @@ def locate_critical_window(
     w_start = seg[0][0]
     w_end = seg[-1][0]
     sw = sum(d[3] for d in seg)
-    fx = sum(d[4] * d[3] for d in seg) / max(1.0, sw)
-    fy = sum(d[5] * d[3] for d in seg) / max(1.0, sw)
+    # Weight camera focus toward the densest spatial kill-value cluster (radius=20t)
+    # so simultaneous kills across two distant map locations never average onto empty terrain.
+    best_cluster = seg
+    best_cluster_val = -1.0
+    for anchor in seg:
+        ax, ay = anchor[4], anchor[5]
+        cluster = [d for d in seg if (d[4] - ax) ** 2 + (d[5] - ay) ** 2 <= 400.0]
+        cval = sum(d[3] for d in cluster)
+        if cval > best_cluster_val:
+            best_cluster_val = cval
+            best_cluster = cluster
+    cw = sum(d[3] for d in best_cluster)
+    fx = sum(d[4] * d[3] for d in best_cluster) / max(1.0, cw)
+    fy = sum(d[5] * d[3] for d in best_cluster) / max(1.0, cw)
     p1_l = sum(d[3] for d in seg if d[1] == our_player_id)
     p2_l = sum(d[3] for d in seg if d[1] != our_player_id)
     p1_cnt = Counter(d[2] for d in seg if d[1] == our_player_id)

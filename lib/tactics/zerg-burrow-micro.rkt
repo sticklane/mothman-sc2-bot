@@ -3024,15 +3024,67 @@
      (define sweep-orders : (Listof (Listof Any)) '())
      (define used-det-ids : (Listof Any) '())
 
-     ;; 1. Leash 1 mobile detector <= 3.5 tiles from front-line army centroid
+     ;; 1. Position lead mobile detector (`Observer`/`Overseer`/`Raven`):
+     ;;    L27-P0-3 (`z10` high-ground ramp Lurkers, `p11` cloaked Banshees): when burrowed,
+     ;;    cloaked, shimmer, or nearby combat threats exist within 24.0t of `ally-combat-centroid`,
+     ;;    advance `lead-det` up to `5.5t` AHEAD of the frontline centroid toward the threat
+     ;;    (keeping safe `6.0t` standoff from hidden/burrowed threats and `7.5t` from visible
+     ;;    combat enemies) so `11.0t` detection reveals high-ground Lurkers & cloaked Banshees!
+     ;;    Otherwise leash `<= 3.5t` of `ally-combat-centroid`.
      (when (and has-defender? (not (null? mobile-detectors)))
        (define-values (cx cy) (ally-combat-centroid ally-units base-x base-y))
        (define lead-det (car mobile-detectors))
        (define did (dyn-hash-ref lead-det 'id 0))
        (define dx (safe-real (dyn-hash-ref lead-det 'x base-x) base-x))
        (define dy (safe-real (dyn-hash-ref lead-det 'y base-y) base-y))
-       (when (> (dist2d dx dy cx cy) 3.5)
-         (set! detector-orders (list (list 'move did cx cy)))
+       (define-values (best-hid-x best-hid-y best-hid-d)
+         (for/fold ([bx : Float 0.0] [by : Float 0.0] [bd : Float +inf.0])
+                   ([e (in-list (if (pair? ripples) (append ripples enemy-units) enemy-units))])
+           (if (and (hash? e)
+                    (or (dyn-hash-ref e 'burrowed #f)
+                        (memv (safe-exact-int (dyn-hash-ref e 'cloak 0) 0) '(1 2))
+                        (eq? (dyn-hash-ref e 'cloak #f) 'cloaked)
+                        (= (safe-exact-int (dyn-hash-ref e 'display-type 1) 1)
+                           SC2-SHIMMER-DISPLAY-TYPE-HIDDEN)
+                        (memq (dyn-symbol (dyn-hash-ref e 'type 'unknown) 'unknown)
+                              BURROWED-UNIT-TYPE-SYMS)))
+               (let* ([ex0 (safe-real (dyn-hash-ref e 'x 9999.0) 9999.0)]
+                      [ey0 (safe-real (dyn-hash-ref e 'y 9999.0) 9999.0)]
+                      [d0 (dist2d cx cy ex0 ey0)])
+                 (if (and (<= d0 24.0) (< d0 bd))
+                     (values ex0 ey0 d0)
+                     (values bx by bd)))
+               (values bx by bd))))
+       (define-values (best-vis-x best-vis-y best-vis-d)
+         (if (< best-hid-d +inf.0)
+             (values 0.0 0.0 +inf.0)
+             (for/fold ([bx : Float 0.0] [by : Float 0.0] [bd : Float +inf.0])
+                       ([e (in-list enemy-units)])
+               (if (and (hash? e)
+                        (not (memq (dyn-symbol (dyn-hash-ref e 'type 'unknown) 'unknown)
+                                   '(overlord overseer observer larva egg))))
+                   (let* ([ex0 (safe-real (dyn-hash-ref e 'x 9999.0) 9999.0)]
+                          [ey0 (safe-real (dyn-hash-ref e 'y 9999.0) 9999.0)]
+                          [d0 (dist2d cx cy ex0 ey0)])
+                     (if (and (<= d0 24.0) (< d0 bd))
+                         (values ex0 ey0 d0)
+                         (values bx by bd)))
+                   (values bx by bd)))))
+       (define-values (adv-x adv-y thresh)
+         (cond
+           [(< best-hid-d +inf.0)
+            (define step (if (> best-hid-d 0.5) (min 5.5 (max 0.0 (- best-hid-d 6.0))) 0.0))
+            (define ux (if (> best-hid-d 0.5) (/ (- best-hid-x cx) best-hid-d) 0.0))
+            (define uy (if (> best-hid-d 0.5) (/ (- best-hid-y cy) best-hid-d) 0.0))
+            (values (+ cx (* step ux)) (+ cy (* step uy)) 2.2)]
+           [(< best-vis-d +inf.0)
+            (define step (if (> best-vis-d 0.5) (min 5.5 (max 0.0 (- best-vis-d 7.0))) 0.0))
+            (define ux (if (> best-vis-d 0.5) (/ (- best-vis-x cx) best-vis-d) 0.0))
+            (define uy (if (> best-vis-d 0.5) (/ (- best-vis-y cy) best-vis-d) 0.0))
+            (values (+ cx (* step ux)) (+ cy (* step uy)) 2.5)]
+           [else (values cx cy 3.5)]))
+       (when (> (dist2d dx dy adv-x adv-y) thresh)
+         (set! detector-orders (list (list 'move did adv-x adv-y)))
          (set! used-det-ids (cons did used-det-ids))))
 
      ;; 2. Emit reveal / AoE onto unrevealed burrowed targets

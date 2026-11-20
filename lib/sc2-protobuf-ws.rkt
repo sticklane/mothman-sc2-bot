@@ -6480,14 +6480,21 @@
   (try-add-cand! anchor-x anchor-y)
   (let r-loop ([r step])
     (when (and (<= r max-radius) (budget-ok?))
-      (let d-loop ([dx (- r)])
-        (when (and (<= dx r) (budget-ok?))
-          (let y-loop ([dy (- r)])
-            (when (and (<= dy r) (budget-ok?))
-              (when (or (>= (abs dx) r) (>= (abs dy) r))
-                (try-add-cand! (+ anchor-x dx) (+ anchor-y dy)))
-              (y-loop (+ dy step))))
-          (d-loop (+ dx step))))
+      ;; L27-P0-1: Probe all 4 sides (E/W/N/S) symmetrically on each ring `r` so a blocked
+      ;; West edge (minerals/cliff/units) never consumes the entire per-anchor `limit` before
+      ;; East/North/South buildable tiles around a TownHall or Pylon are even checked!
+      (let k-loop ([k 0.0])
+        (when (and (<= k r) (budget-ok?))
+          (try-add-cand! (+ anchor-x r) (+ anchor-y k))
+          (try-add-cand! (- anchor-x r) (+ anchor-y k))
+          (try-add-cand! (+ anchor-x k) (+ anchor-y r))
+          (try-add-cand! (+ anchor-x k) (- anchor-y r))
+          (when (> k 0.0)
+            (try-add-cand! (+ anchor-x r) (- anchor-y k))
+            (try-add-cand! (- anchor-x r) (- anchor-y k))
+            (try-add-cand! (- anchor-x k) (+ anchor-y r))
+            (try-add-cand! (- anchor-x k) (- anchor-y r)))
+          (k-loop (+ k step))))
       (r-loop (+ r step))))
   (reverse acc))
 
@@ -6985,10 +6992,16 @@
     (if (and requires-pylon-power? has-completed-pylon?)
         anchors0
         (remove-duplicates (append anchors0 (list safe-base-anchor)))))
-  ;; Cap priority-sorted anchors to top 8 so late-game 20-pylon / 25-tumor bases never explode spiral CPU
+  ;; Cap priority-sorted anchors to top 8 normally (24 for tight-spacing Protoss across all bases,
+  ;; 12 for tight-spacing Terran/Zerg) so late-game multi-base overflow searches every base cleanly!
+  (define max-anchors
+    (cond
+      [(and tight-spacing? requires-pylon-power?) 24]
+      [tight-spacing? 12]
+      [else 8]))
   (define anchors
-    (if (> (length anchors-raw) 8)
-        (take anchors-raw 8)
+    (if (> (length anchors-raw) max-anchors)
+        (take anchors-raw max-anchors)
         anchors-raw))
 
   (define is-townhall-target?
@@ -7017,8 +7030,14 @@
   (define spiral-eval-budget (box (if ws-active? 160 600)))
   (define primary-cand-limit
     (if ws-active?
-        (min 20 (max 8 (quotient 36 (max 1 (length anchors)))))
+        (min 20 (max (if tight-spacing? 4 8) (quotient 36 (max 1 (length anchors)))))
         (if (or first-rax-allow-wall-3x3? needs-terran-addon-clearance?) 8 2)))
+  (define primary-max-evals
+    (if ws-active?
+        (if (and tight-spacing? (> (length anchors) 8))
+            (max 16 (quotient 160 (max 1 (length anchors))))
+            64)
+        450))
   (define spiral-cands
     (let ([all-pts
            (interleave-lists
@@ -7029,7 +7048,7 @@
                                          #:max-radius max-radius
                                          #:step step
                                          #:limit primary-cand-limit
-                                         #:max-evals (if ws-active? 64 450)
+                                         #:max-evals primary-max-evals
                                          #:eval-budget spiral-eval-budget
                                          #:extra-reserved-points extra-reserved-points
                                          #:ws-active-placement? ws-active?
@@ -7108,6 +7127,16 @@
           tight-pad-clearance
           4.5))
     (define rel-budget (box 260))
+    (define rel-limit
+      (if ws-active?
+          (if (and tight-spacing? (> (length anchors) 8))
+              (max 8 (quotient 96 (max 1 (length anchors))))
+              16)
+          4))
+    (define rel-max-evals
+      (if (and tight-spacing? (> (length anchors) 8))
+          (max 16 (quotient 260 (max 1 (length anchors))))
+          140))
     (define raw-rel
       (interleave-lists
        (for/list ([ap (in-list anchors)]
@@ -7116,8 +7145,8 @@
                                     #:min-spacing rel-spacing
                                     #:max-radius rel-rad
                                     #:step 1.0
-                                    #:limit (if ws-active? 16 4)
-                                    #:max-evals 140
+                                    #:limit rel-limit
+                                    #:max-evals rel-max-evals
                                     #:eval-budget rel-budget
                                     #:extra-reserved-points extra-reserved-points
                                     #:ws-active-placement? ws-active?
@@ -7128,7 +7157,8 @@
                                     #:game-info game-info
                                     #:check-bfs #f
                                     #:layout-safety-ok? #f))))
-    (dedup-point2ds (take raw-rel (min 36 (length raw-rel)))))
+    (dedup-point2ds (take raw-rel (min (if (and tight-spacing? requires-pylon-power?) 48 36)
+                                       (length raw-rel)))))
 
   (define (compute-inmain-safe-anchors base-pt)
     (define bx (car base-pt))
@@ -7233,7 +7263,12 @@
                  [emergency-rush-bldg?
                   (append inmain-em-pts anchors (list safe-base-anchor))]
                  [else anchors]))]
-             [em-cap (if needs-terran-addon-clearance? 5 12)])
+             [em-cap
+              (cond
+                [(and tight-spacing? requires-pylon-power?) 24]
+                [(and tight-spacing? needs-terran-addon-clearance?) 8]
+                [needs-terran-addon-clearance? 5]
+                [else 12])])
         (if (> (length raw) em-cap) (take raw em-cap) raw)))
     (define em-rad
       (cond
@@ -7252,6 +7287,16 @@
           4.5))
     (define (collect-em gi)
       (define em-budget (box 300))
+      (define em-limit
+        (if ws-active?
+            (if (and tight-spacing? (> (length em-anchors) 8))
+                (max 8 (quotient 96 (max 1 (length em-anchors))))
+                16)
+            4))
+      (define em-max-evals
+        (if (and tight-spacing? (> (length em-anchors) 8))
+            (max 16 (quotient 300 (max 1 (length em-anchors))))
+            140))
       (define raw-em
         (interleave-lists
          (for/list ([ap (in-list em-anchors)]
@@ -7260,8 +7305,8 @@
                                       #:min-spacing em-spacing
                                       #:max-radius em-rad
                                       #:step 1.0
-                                      #:limit (if ws-active? 16 4)
-                                      #:max-evals 140
+                                      #:limit em-limit
+                                      #:max-evals em-max-evals
                                       #:eval-budget em-budget
                                       #:extra-reserved-points extra-reserved-points
                                       #:ws-active-placement? ws-active?
@@ -7274,7 +7319,7 @@
                                       #:layout-safety-ok? #f
                                       #:skip-terran-addon-reserve? (and needs-terran-addon-clearance?
                                                                         (not require-addon-clear?))))))
-      (dedup-point2ds (take raw-em (min 48 (length raw-em)))))
+      (dedup-point2ds (take raw-em (min (if tight-spacing? 64 48) (length raw-em)))))
     ;; W12-P0-3-wire: Preserve `game-info` (`pl-grid`) first so emergency batches only query buildable
     ;; ground (never cliffs/void); only drop `game-info` if `pl-grid` yielded zero spots!
     (define grid-em (if game-info (collect-em game-info) '()))
@@ -7483,7 +7528,7 @@
           (define unified-single
             (merge-priority-batches
              (if (and tight-spacing? requires-pylon-power?)
-                 (list (cons p1 20)
+                 (list (cons p1 16)
                        (cons p2 24)
                        (cons p3 64))
                  (list (cons p1 36)
@@ -12128,6 +12173,19 @@
                   0))
             (define wide-gateway4-fallback?
               (and (eq? norm 'gateway) (>= cur-gw-count 3)))
+            (define (diversify-pylons-across-bases pts [sep 10.0])
+              (let loop ([rem pts] [out '()])
+                (if (null? rem)
+                    (reverse out)
+                    (let-values ([(picked rest)
+                                  (for/fold ([picked '()] [rest '()])
+                                            ([pt (in-list rem)])
+                                    (if (ormap (lambda (pk)
+                                                 (< (pt-dist (car pt) (cdr pt) (car pk) (cdr pk)) sep))
+                                               picked)
+                                        (values picked (cons pt rest))
+                                        (values (cons pt picked) rest)))])
+                      (loop (reverse rest) (append picked out))))))
             (define-values (uncontested-pylons pylon-anchors)
               (if (null? raw-pylon-anchors)
                   (values '() '())
@@ -12148,31 +12206,34 @@
                       (cond
                         [(and req-contested? (< cur-loop 5400) (pair? safe-p) (pair? (cdr safe-p)))
                          (sort safe-p < #:key (lambda (pt) (pt-dist home-x home-y (car pt) (cdr pt))))]
-                        ;; L25-P0-1 (`#33` ProdPlaceStall): For Protoss `gateway #4+`, order ALL uncontested
-                        ;; completed Pylons least-crowded-first (including natural/3rd Pylons!) so crowded
-                        ;; Main Pylons never starve late-game Gateway scaling!
+                        ;; L25-P0-1 + L27-P0-1 (`#33/#18` ProdPlaceStall): For Protoss `gateway #4+`,
+                        ;; order ALL uncontested completed Pylons least-crowded-first AND diversify
+                        ;; across all bases (>= 10t clusters) so crowded Main Pylons never starve scaling!
                         [(and wide-gateway4-fallback? (pair? safe-p) (pair? (cdr safe-p)))
                          (define struct-pts
                            (for/list ([s (in-list self-structures)]
                                       #:when (not (sc2-unit-is-flying s)))
                              (define sp (sc2-unit-pos s))
                              (cons (sc2-point3d-x sp) (sc2-point3d-y sp))))
-                         (map first
-                              (sort
-                               (for/list ([pt (in-list safe-p)])
-                                 (define crowd
-                                   (count (lambda (sp)
-                                            (<= (pt-dist (car pt) (cdr pt) (car sp) (cdr sp)) 6.5))
-                                          struct-pts))
-                                 (list pt crowd (pt-dist req-x req-y (car pt) (cdr pt))))
-                               (lambda (a b)
-                                 (if (not (= (second a) (second b)))
-                                     (< (second a) (second b))
-                                     (< (third a) (third b))))))]
+                         (diversify-pylons-across-bases
+                          (map first
+                               (sort
+                                (for/list ([pt (in-list safe-p)])
+                                  (define crowd
+                                    (count (lambda (sp)
+                                             (<= (pt-dist (car pt) (cdr pt) (car sp) (cdr sp)) 6.5))
+                                           struct-pts))
+                                  (list pt crowd (pt-dist req-x req-y (car pt) (cdr pt))))
+                                (lambda (a b)
+                                  (if (not (= (second a) (second b)))
+                                      (< (second a) (second b))
+                                      (< (third a) (third b)))))))]
                         [else safe-p]))
                     (values ordered-safe (append ordered-safe cont-p)))))
             (define protoss-tight-fallback-bldg?
-              (memq norm '(gateway cybernetics-core robotics-facility stargate shield-battery)))
+              (memq norm '(gateway cybernetics-core robotics-facility stargate shield-battery
+                           forge twilight-council robotics-bay robotics-support-bay
+                           templar-archive templar-archives dark-shrine fleet-beacon)))
             (define search-anchors
               (cond
                 [(and protoss-tight-fallback-bldg? (pair? uncontested-pylons)) uncontested-pylons]
@@ -12237,11 +12298,12 @@
                                                      #:cur-loop cur-loop))
                  (and (powered-place-pt? pt1) pt1)]
                 [else #f]))
-            ;; L26-P0-1 (`#21` 33x gateway, `#36` 12x gateway -> ProdPlaceStall 3 -> 0):
-            ;; When `place-pt0` (`#:min-spacing 2.0`) fails on an active search for core Protoss
-            ;; production/defense (`gateway`/`cybernetics-core`/`robotics-facility`/`stargate`/`shield-battery`),
-            ;; immediately run a tight-spacing (`#:min-spacing 0.5`) fallback across ALL uncontested
-            ;; completed Pylons (preserving early-rush home-first & `gateway #4+` other-base overflow!)
+            ;; L26-P0-1 + L27-P0-1 (`#21/#36/#18` -> ProdPlaceStall 4 -> 0):
+            ;; When `place-pt0` (`#:min-spacing 2.0`) fails on an active search for Protoss
+            ;; production/tech/battery, immediately run a tight-spacing (`#:min-spacing 0.5`)
+            ;; fallback across ALL uncontested completed Pylons across ALL bases (spatially
+            ;; base-diversified least-crowded-first, up to 24 anchors in `find-verified-building-placement`,
+            ;; preserving early-rush home-first & `gateway #4+` other-base overflow!)
             ;; BEFORE setting `SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP`!
             (define tight-safe-pylons
               (if (and (not skip-unpowered-cannon?)
@@ -12249,31 +12311,35 @@
                        protoss-tight-fallback-bldg?
                        (pair? uncontested-pylons))
                   (let* ([ordered-u
-                          (if (or wide-gateway4-fallback?
-                                  (and req-contested? (< cur-loop 5400))
-                                  (null? (cdr uncontested-pylons)))
-                              uncontested-pylons
-                              (let ([struct-pts
-                                     (for/list ([s (in-list self-structures)]
-                                                #:when (not (sc2-unit-is-flying s)))
-                                       (define sp (sc2-unit-pos s))
-                                       (cons (sc2-point3d-x sp) (sc2-point3d-y sp)))])
-                                (map first
-                                     (sort
-                                      (for/list ([pt (in-list uncontested-pylons)])
-                                        (define crowd
-                                          (count (lambda (sp)
-                                                   (<= (pt-dist (car pt) (cdr pt) (car sp) (cdr sp)) 6.5))
-                                                 struct-pts))
-                                        (list pt crowd (pt-dist req-x req-y (car pt) (cdr pt))))
-                                      (lambda (a b)
-                                        (if (not (= (second a) (second b)))
-                                            (< (second a) (second b))
-                                            (< (third a) (third b))))))))]
+                          (cond
+                            [(or wide-gateway4-fallback?
+                                 (and req-contested? (< cur-loop 5400))
+                                 (null? (cdr uncontested-pylons)))
+                             uncontested-pylons]
+                            [else
+                             (define struct-pts
+                               (for/list ([s (in-list self-structures)]
+                                          #:when (not (sc2-unit-is-flying s)))
+                                 (define sp (sc2-unit-pos s))
+                                 (cons (sc2-point3d-x sp) (sc2-point3d-y sp))))
+                             (diversify-pylons-across-bases
+                              (map first
+                                   (sort
+                                    (for/list ([pt (in-list uncontested-pylons)])
+                                      (define crowd
+                                        (count (lambda (sp)
+                                                 (<= (pt-dist (car pt) (cdr pt) (car sp) (cdr sp)) 6.5))
+                                               struct-pts))
+                                      (list pt crowd (pt-dist req-x req-y (car pt) (cdr pt))))
+                                    (lambda (a b)
+                                      (if (not (= (second a) (second b)))
+                                          (< (second a) (second b))
+                                          (< (third a) (third b)))))))])]
                          [rem-u
                           (if wide-gateway4-fallback?
-                              (filter (lambda (pt) (> (pt-dist primary-x primary-y (car pt) (cdr pt)) 4.0))
-                                      ordered-u)
+                              (diversify-pylons-across-bases
+                               (filter (lambda (pt) (> (pt-dist primary-x primary-y (car pt) (cdr pt)) 4.0))
+                                       ordered-u))
                               '())])
                     (remove-duplicates (append rem-u ordered-u)))
                   '()))
@@ -12618,9 +12684,12 @@
                                  (let ([ep (sc2-unit-pos e)])
                                    (<= (pt-dist req-x req-y (sc2-point3d-x ep) (sc2-point3d-y ep)) 5.5))))
                           enemy-units)))
-            ;; L25-P0-1 (`#17/#08` ProdPlaceStall): After 2 consecutive `5x3` Terran misses for
-            ;; `barracks #4+` (`cur-rax-count >= 3`), fall back immediately to pure `3x3` across
-            ;; ALL safe completed TownHalls (immune to Depot-completion `cur-struct-sig` resets)!
+            ;; L25-P0-1 + L27-P0-1 (`#17/#08/#05/#20/#23` ProdPlaceStall -> 0):
+            ;; After 2 consecutive `5x3` Terran misses for `barracks #4+` (`cur-rax-count >= 3`),
+            ;; fall back immediately to pure `3x3` across ALL safe completed TownHalls (immune to
+            ;; Depot-completion `cur-struct-sig` resets); and whenever `barracks #4+` misses `2.0t`
+            ;; placement (`place-pt0 = #f`), immediately run a `0.5t` tight-spacing pure `3x3`
+            ;; overflow across ALL safe completed TownHalls (`#:reserved-aabbs '()`)!
             (define cur-rax-count
               (if (eq? norm 'barracks)
                   (count (lambda (s)
@@ -12628,16 +12697,16 @@
                                 (eq? (sc2-id->unit-symbol (sc2-unit-unit-type s) 'unknown) 'barracks)))
                          self-structures)
                   0))
+            (define is-rax4+? (and (eq? norm 'barracks) (>= cur-rax-count 3)))
             (define rax4-fast-3x3?
-              (and (eq? norm 'barracks)
-                   (>= cur-rax-count 3)
+              (and is-rax4+?
                    (>= (hash-ref SC2-TERRAN-5X3-MISS-STREAK 'barracks 0) 2)))
             (define terran-5x3-missed?
               (and is-terran-prod-bldg?
                    (or rax4-fast-3x3?
                        (terran-5x3-miss-active? norm req-x req-y cur-loop))))
             (define safe-completed-th-anchors
-              (if rax4-fast-3x3?
+              (if is-rax4+?
                   (let* ([comp-ths
                           (for/list ([th (in-list townhalls)]
                                      #:when (and (>= (sc2-unit-build-progress th) SC2-BUILD-COMPLETE-PROGRESS)
@@ -12757,33 +12826,50 @@
                                                     #:rpc-budget step-placement-rpc-budget
                                                     #:cur-loop cur-loop
                                                     #:prefer-3x3-fallback? terran-5x3-missed?)))
+            (define std-ws-open? (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))
             (define std-tried-0?
               (or (< (unbox step-placement-rpc-budget) std-bud-before)
-                  (not (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))))
+                  (not std-ws-open?)))
+            (define rax4-tight-anchors
+              (if (and is-rax4+? (not place-pt0))
+                  (let ([other-safe-ths
+                         (filter (lambda (pt) (> (pt-dist eff-req-x eff-req-y (car pt) (cdr pt)) 4.0))
+                                 safe-completed-th-anchors)])
+                    (remove-duplicates
+                     (append other-safe-ths
+                             safe-completed-th-anchors
+                             th-overflow-anchors
+                             inmain-safe-anchors
+                             (list (cons home-x home-y) (cons req-x req-y)))))
+                  '()))
+            (define rax4-tight-can-run?
+              (and is-rax4+?
+                   (not place-pt0)
+                   (pair? rax4-tight-anchors)
+                   (or std-tried-0?
+                       (> std-bud-before 0)
+                       (not std-ws-open?))
+                   (or (not std-ws-open?)
+                       (> (unbox step-placement-rpc-budget) 0))))
             (define place-pt
               (or place-pt0
-                  (and rax4-fast-3x3?
-                       std-tried-0?
-                       (let ([other-safe-ths
-                              (filter (lambda (pt) (> (pt-dist eff-req-x eff-req-y (car pt) (cdr pt)) 4.0))
-                                      safe-completed-th-anchors)])
-                         (and (pair? other-safe-ths)
-                              (find-verified-building-placement ws-conn ab-id
-                                                                (caar other-safe-ths)
-                                                                (cdar other-safe-ths)
-                                                                units
-                                                                #:min-spacing 2.0
-                                                                #:max-radius 15.0
-                                                                #:step 1.0
-                                                                #:extra-reserved-points step-reserved-build-pts
-                                                                #:anchor-points other-safe-ths
-                                                                #:reserved-aabbs reserved-aabbs
-                                                                #:expansion-pads all-expansion-pads
-                                                                #:bldg-sym norm
-                                                                #:game-info eff-game-info
-                                                                #:rpc-budget step-placement-rpc-budget
-                                                                #:cur-loop cur-loop
-                                                                #:prefer-3x3-fallback? #t))))))
+                  (and rax4-tight-can-run?
+                       (find-verified-building-placement ws-conn ab-id
+                                                         (caar rax4-tight-anchors)
+                                                         (cdar rax4-tight-anchors)
+                                                         units
+                                                         #:min-spacing 0.5
+                                                         #:max-radius 18.0
+                                                         #:step 1.0
+                                                         #:extra-reserved-points step-reserved-build-pts
+                                                         #:anchor-points rax4-tight-anchors
+                                                         #:reserved-aabbs '()
+                                                         #:expansion-pads all-expansion-pads
+                                                         #:bldg-sym norm
+                                                         #:game-info eff-game-info
+                                                         #:rpc-budget step-placement-rpc-budget
+                                                         #:cur-loop cur-loop
+                                                         #:prefer-3x3-fallback? #t))))
             (when place-pt
               (reserve-step-build-pt! place-pt ab-id)
               (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))

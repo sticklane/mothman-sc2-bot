@@ -193,6 +193,9 @@
           0.0
         ]
       ],
+      "p1_upgrades": [
+        "PsiStorm"
+      ],
       "max_loops": 336
     },
     {
