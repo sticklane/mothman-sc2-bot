@@ -1115,6 +1115,8 @@
                                       'loop gl
                                       'min_cur (hash-ref st 0 0)
                                       'gas_cur (hash-ref st 1 0)
+                                      'min_rate (hash-ref st 2 0)
+                                      'gas_rate (hash-ref st 3 0)
                                       'workers w-cur
                                       'food_used fu
                                       'food_made fm
@@ -1547,6 +1549,28 @@
             (and (real? our-w2) (real? our-w4) (- our-w4 our-w2)))
           (define opp-worker-growth-2m-to-4m
             (and (real? opp-w2) (real? opp-w4) (- opp-w4 opp-w2)))
+          ;; L25-LOOP-2: 4:00-6:00+ worker economic efficiency ((min_rate + gas_rate) / workers)
+          ;; Catches half-rate mineral/gas collapses from over-eager base evacuations or threat-blind gas sat (#21/#33)
+          (define (econ-eff-stats-4m-6m sbm-p)
+            (define samples
+              (for/list ([t (in-list '(240.0 300.0 360.0 420.0))]
+                         #:when #t
+                         #:do [(define h (stat-near-sec sbm-p t))]
+                         #:when (and h (>= (safe-num (hash-ref h 'workers 0) 0) 10)))
+                (define w (safe-num (hash-ref h 'workers 0) 0))
+                (define mr (safe-num (hash-ref h 'min_rate 0) 0))
+                (define gr (safe-num (hash-ref h 'gas_rate 0) 0))
+                (list (exact->inexact (/ (+ mr gr) w)) w mr gr (inexact->exact (round (/ t 60.0))))))
+            (if (null? samples)
+                (values #f 0 0 #f)
+                (values (round1 (/ (for/sum ([s (in-list samples)]) (first s)) (length samples)))
+                        (apply max (map second samples))
+                        (count (lambda (s) (and (< (first s) 38.0) (>= (second s) 25))) samples)
+                        samples)))
+          (define-values (worker-econ-eff-4m-6m our-w46-max our-econ-eff-low-cnt our-econ-eff-samples)
+            (econ-eff-stats-4m-6m our-s))
+          (define-values (opp-worker-econ-eff-4m-6m _opp-w46-max _opp-low-cnt _opp-econ-eff-samples)
+            (econ-eff-stats-4m-6m opp-s))
           (define a2 (army-val-at our-s 120.0))
           (define a4 (army-val-at our-s 240.0))
           (define a6 (army-val-at our-s 360.0))
@@ -1681,6 +1705,8 @@
                     'w2m our-w2 'w4m our-w4 'w6m our-w6 'w8m our-w8 'w10m our-w10
                     'worker_growth_2m_to_4m worker-growth-2m-to-4m
                     'opp_worker_growth_2m_to_4m opp-worker-growth-2m-to-4m
+                    'worker_econ_eff_4m_6m worker-econ-eff-4m-6m
+                    'opp_worker_econ_eff_4m_6m opp-worker-econ-eff-4m-6m
                     'bases_4m bases-4m 'bases_6m bases-6m 'bases_8m bases-8m 'bases_10m bases-10m
                     'prod_cnt_4m prod-4m 'prod_cnt_6m prod-6m 'prod_cnt_8m prod-8m 'prod_cnt_10m prod-10m
                     'prod_count_4m prod-4m 'prod_count_6m prod-6m 'prod_count_8m prod-8m 'prod_count_10m prod-10m
@@ -2175,6 +2201,23 @@
                          'fac1_sec t111-fac1-sec
                          'nat_sec our-nat-sec-val
                          'duration_sec (round1 dur))))
+          ;; L25-LOOP-2: Midgame Worker Economic Efficiency Collapse (avg <38/w or >=2 mins <38/w in 4m..7m w/ >=25w)
+          (define econ-eff-collapse?
+            (and (real? worker-econ-eff-4m-6m)
+                 (>= our-w46-max 25)
+                 (or (< worker-econ-eff-4m-6m 38.0)
+                     (>= our-econ-eff-low-cnt 2))))
+          (define econ-eff-collapse-anomaly
+            (and econ-eff-collapse?
+                 (hasheq 'eff_4m_6m worker-econ-eff-4m-6m
+                         'opp_eff_4m_6m opp-worker-econ-eff-4m-6m
+                         'max_workers_4m_6m our-w46-max
+                         'per_min (for/list ([s (in-list (or our-econ-eff-samples '()))])
+                                    (hasheq 'min (fifth s)
+                                            'eff (round1 (first s))
+                                            'workers (second s)
+                                            'min_rate (third s)
+                                            'gas_rate (fourth s))))))
 
           (define anomalies
             (hasheq 'zero_fire_retreat zero-fire-retreat-anomaly
@@ -2200,6 +2243,7 @@
                     'zero_kill_collapse_loss zero-kill-collapse-loss-anomaly
                     'early_opening_order_fault early-opening-order-fault-anomaly
                     'terran_111_opening_stall terran-111-opening-stall-anomaly
+                    'econ_eff_collapse econ-eff-collapse-anomaly
                     'air_aa_starvation air-aa-starvation))
 
           ;; Classify 0-combat opponent disconnects (e.g., mid-early client drop) separately from real combat wins
@@ -2369,6 +2413,9 @@
             (add-sig! (format "EARLY_OPEN_FAULT(~a)" early-opening-order-fault-kind)))
           (when terran-111-opening-stall-anomaly
             (add-sig! (format "TERRAN_111_STALL(~a)" (string-join t111-reasons ","))))
+          (when econ-eff-collapse-anomaly
+            (add-sig! (format "ECON_EFF_COLLAPSE(~a/w,w=~a)"
+                              (r1 worker-econ-eff-4m-6m) our-w46-max)))
           (when (and (not (eq? res 'win)) (< trade-ratio 0.50) (>= lost-val 1500))
             (add-sig! "SEVERE_BAD_TRADES(<0.5x)"))
           (when (and (not (eq? res 'win)) (<= dur 330.0)) (add-sig! "EARLY_RUSH_LOSS"))
@@ -2417,6 +2464,8 @@
                   'our_w10 our-w10 'opp_w10 opp-w10
                   'worker_growth_2m_to_4m worker-growth-2m-to-4m
                   'opp_worker_growth_2m_to_4m opp-worker-growth-2m-to-4m
+                  'worker_econ_eff_4m_6m worker-econ-eff-4m-6m
+                  'opp_worker_econ_eff_4m_6m opp-worker-econ-eff-4m-6m
                   'army_to_worker_4m a2w-4m
                   'army_to_worker_6m a2w-6m
                   'army_to_worker_8m a2w-8m
@@ -2503,6 +2552,7 @@
                   'early_opening_order_fault_kind early-opening-order-fault-kind
                   'terran_111_opening_stall terran-111-opening-stall?
                   'terran_111_opening_stall_reasons t111-reasons
+                  'econ_eff_collapse econ-eff-collapse?
                   'map_symmetry_kind map-symmetry-kind
                   't3_first_sec t3-first-sec
                   't3_first_bldg t3-first-bldg
@@ -2699,6 +2749,7 @@
                 'zero_kill_collapse_losses (count (lambda (r) (eq? (hash-ref r 'zero_kill_collapse_loss #f) #t)) rows)
                 'early_opening_order_fault_matches (count (lambda (r) (eq? (hash-ref r 'early_opening_order_fault #f) #t)) rows)
                 'terran_111_opening_stall_matches (count (lambda (r) (eq? (hash-ref r 'terran_111_opening_stall #f) #t)) rows)
+                'econ_eff_collapse_matches (count (lambda (r) (eq? (hash-ref r 'econ_eff_collapse #f) #t)) rows)
                 't3_started_matches (count (lambda (r) (real? (hash-ref r 't3_first_sec #f))) rows)
                 't3_early_2base_matches (count (lambda (r) (let ([b (hash-ref r 't3_bases_at_start #f)]) (and (exact-integer? b) (<= b 2)))) rows)
                 't3_premature_starve_matches (count (lambda (r) (eq? (hash-ref r 't3_premature_starve #f) #t)) rows)
@@ -2712,6 +2763,8 @@
                 'our_w10 (avg-opt 'our_w10) 'opp_w10 (avg-opt 'opp_w10)
                 'worker_growth_2m_to_4m (avg-opt 'worker_growth_2m_to_4m)
                 'opp_worker_growth_2m_to_4m (avg-opt 'opp_worker_growth_2m_to_4m)
+                'worker_econ_eff_4m_6m (avg-opt 'worker_econ_eff_4m_6m)
+                'opp_worker_econ_eff_4m_6m (avg-opt 'opp_worker_econ_eff_4m_6m)
                 'our_peak_workers (avg-field 'our_peak_workers)
                 'opp_peak_workers (avg-field 'opp_peak_workers)
                 'our_peak_army (round1 (avg-field 'our_peak_army))
@@ -2736,6 +2789,8 @@
                         'w10m (timing-dist 'w10m)
                         'worker_growth_2m_to_4m (timing-dist 'worker_growth_2m_to_4m)
                         'opp_worker_growth_2m_to_4m (timing-dist 'opp_worker_growth_2m_to_4m)
+                        'worker_econ_eff_4m_6m (timing-dist 'worker_econ_eff_4m_6m)
+                        'opp_worker_econ_eff_4m_6m (timing-dist 'opp_worker_econ_eff_4m_6m)
                         'nat_sec (timing-dist 'nat_sec)
                         'third_sec (timing-dist 'third_sec)
                         'gas1_sec (timing-dist 'gas1_sec)
@@ -2832,6 +2887,7 @@
                         'zero_kill_collapse_losses (anom-cnt (lambda (a) (and (hash? (hash-ref a 'zero_kill_collapse_loss #f)) #t)))
                         'early_opening_order_fault (anom-cnt (lambda (a) (and (hash? (hash-ref a 'early_opening_order_fault #f)) #t)))
                         'terran_111_opening_stall (anom-cnt (lambda (a) (and (hash? (hash-ref a 'terran_111_opening_stall #f)) #t)))
+                        'econ_eff_collapse (anom-cnt (lambda (a) (and (hash? (hash-ref a 'econ_eff_collapse #f)) #t)))
                         'air_aa_starvation (anom-cnt (lambda (a) (and (hash? (hash-ref a 'air_aa_starvation #f)) #t)))
                         'wall_timeout_tie wall-timeout-ties
                         'wall_timeout_winning_tie wall-timeout-winning-ties
@@ -2852,7 +2908,7 @@
             (hash-ref agg 'killed_val) (hash-ref agg 'lost_val))
     (define (fmt-signed1 v)
       (if (real? v) (format "~a~a" (if (>= v 0) "+" "") (r1 v)) "-"))
-    (printf "    Dur=~a | Base=~a/~a | W@4m=~a/~a (dW2->4=~a/~a) W@6m=~a/~a | PkW=~a/~a | PkArmy=~a/~a | Bank=~aM/~aG | SB=~a% | Upg=~a\n"
+    (printf "    Dur=~a | Base=~a/~a | W@4m=~a/~a (dW2->4=~a/~a) W@6m=~a/~a | Eff4-6=~a/~a/w | PkW=~a/~a | PkArmy=~a/~a | Bank=~aM/~aG | SB=~a% | Upg=~a\n"
             (fmt-mmss (hash-ref agg 'avg_dur_sec 0))
             (r2 (hash-ref agg 'our_bases 0)) (r2 (hash-ref agg 'opp_bases 0))
             (if (hash-ref agg 'our_w4 #f) (r1 (hash-ref agg 'our_w4)) "-")
@@ -2861,6 +2917,8 @@
             (fmt-signed1 (hash-ref agg 'opp_worker_growth_2m_to_4m #f))
             (if (hash-ref agg 'our_w6 #f) (r1 (hash-ref agg 'our_w6)) "-")
             (if (hash-ref agg 'opp_w6 #f) (r1 (hash-ref agg 'opp_w6)) "-")
+            (if (hash-ref agg 'worker_econ_eff_4m_6m #f) (r1 (hash-ref agg 'worker_econ_eff_4m_6m)) "-")
+            (if (hash-ref agg 'opp_worker_econ_eff_4m_6m #f) (r1 (hash-ref agg 'opp_worker_econ_eff_4m_6m)) "-")
             (r1 (hash-ref agg 'our_peak_workers 0)) (r1 (hash-ref agg 'opp_peak_workers 0))
             (r0 (hash-ref agg 'our_peak_army 0)) (r0 (hash-ref agg 'opp_peak_army 0))
             (r0 (hash-ref agg 'our_avg_min 0)) (r0 (hash-ref agg 'our_avg_gas 0))
@@ -2882,7 +2940,7 @@
                   (hash-ref agg 'wall_timeout_winning_ties 0)
                   (hash-ref agg 'step_spike_500ms_count 0))
           ""))
-    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a | 1BaseLock=~a | SpireDrop=~a | DripFeed=~a | TvT0Tank=~a | ZeroKill=~a | OpenFault=~a | T111Stall=~a~a\n"
+    (printf "    Anomalies: SuicideKite=~a(Collapse=~a) | EscrowLock=~a | SelfCancel=~a | EndgameStall=~a | AirAAStarve=~a | 1BaseLock=~a | SpireDrop=~a | DripFeed=~a | TvT0Tank=~a | ZeroKill=~a | OpenFault=~a | T111Stall=~a | EconEffCol=~a~a\n"
             (hash-ref ac 'suicide_kite_retreat 0)
             (hash-ref ac 'zero_fire_retreat 0)
             (hash-ref ac 'escrow_lockout 0)
@@ -2896,6 +2954,7 @@
             (hash-ref ac 'zero_kill_collapse_losses 0)
             (hash-ref ac 'early_opening_order_fault 0)
             (hash-ref ac 'terran_111_opening_stall 0)
+            (hash-ref ac 'econ_eff_collapse 0)
             lat-str)))
 
 ;; -----------------------------------------------------------------------------
@@ -3242,7 +3301,19 @@
                      (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
                      (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
                      (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
-                     (string-join (hash-ref ts 'reasons '()) ", ")))))
+                     (string-join (hash-ref ts 'reasons '()) ", "))))
+
+  (section "19. Midgame Worker Econ Efficiency Collapses (avg (min+gas)/w <38/w across m4..m6 w/ >=25w)"
+           (filter (lambda (r) (hash? (hash-ref (hash-ref r 'anomalies) 'econ_eff_collapse #f))) rows)
+           (lambda (r)
+             (define ec (hash-ref (hash-ref r 'anomalies) 'econ_eff_collapse))
+             (printf "  #~a ~a(~a) v ~a(~a) ~a(~a) | eff=~a/w (opp=~a/w) | maxW4-6=~a\n"
+                     (hash-ref r 'id) (hash-ref r 'our_bot) (race-initial (hash-ref r 'our_race))
+                     (hash-ref r 'opp_bot) (race-initial (hash-ref r 'opp_race))
+                     (string-upcase (substring (hash-ref r 'result) 0 1)) (fmt-mmss (hash-ref r 'duration_sec))
+                     (r1 (hash-ref ec 'eff_4m_6m 0.0))
+                     (if (real? (hash-ref ec 'opp_eff_4m_6m #f)) (r1 (hash-ref ec 'opp_eff_4m_6m)) "-")
+                     (hash-ref ec 'max_workers_4m_6m 0)))))
 
 ;; -----------------------------------------------------------------------------
 ;; Main CLI Driver

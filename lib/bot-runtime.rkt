@@ -6127,11 +6127,13 @@
 (define (l2-protoss-colossus-escrow-ok? ctx m-cost g-cost #:for-etl? [for-etl? #f])
        (and (or (not (l2-protoss-holding-colossus-now? ctx))
                 (and (>= (- (l2-ctx-minerals ctx) m-cost) (sc2-min-cost 'colossus))
-                     (>= (- (l2-ctx-gas ctx) g-cost) (sc2-gas-cost 'colossus))))
+                     (or (<= g-cost 0)
+                         (>= (- (l2-ctx-gas ctx) g-cost) (sc2-gas-cost 'colossus)))))
             (or for-etl?
                 (not (l2-protoss-holding-etl-now? ctx))
                 (and (>= (- (l2-ctx-minerals ctx) m-cost) (sc2-min-cost 'extended-thermal-lance))
-                     (>= (- (l2-ctx-gas ctx) g-cost) (sc2-gas-cost 'extended-thermal-lance))))))
+                     (or (<= g-cost 0)
+                         (>= (- (l2-ctx-gas ctx) g-cost) (sc2-gas-cost 'extended-thermal-lance)))))))
 
 (define (l2-terran-facility-has-addon? ctx b)
   (define terran-addon-ox (l2-ctx-terran-addon-ox ctx))
@@ -6316,7 +6318,8 @@
 (define (l2-starport-escrow-ok? ctx m-cost g-cost)
        (or (not (l2-holding-for-first-starport? ctx))
            (and (>= (- (l2-ctx-minerals ctx) m-cost) (sc2-min-cost 'starport))
-                (>= (- (l2-ctx-gas ctx) g-cost) (sc2-gas-cost 'starport)))))
+                (or (<= g-cost 0)
+                    (>= (- (l2-ctx-gas ctx) g-cost) (sc2-gas-cost 'starport))))))
 
 (define (l2-phase1-setup! ctx rt raw-obs orig-raw-obs sanitized?)
   (set-l2-ctx-rt! ctx rt)
@@ -6944,13 +6947,22 @@
   (set-l2-ctx-early-survival-crisis?! ctx early-survival-crisis?)
   ;; Cancel in-progress expansion Town Hall ONLY when facing real combat pressure
   ;; (>= 8.0 enemy combat supply within 14 tiles, > 1.5x ally supply within 18 tiles)
-  ;; and below construction-adjusted threshold; single scouts never cancel.
-  (let ([all-ally-units (l2-ctx-ally-units ctx)]
-        [all-enemy-units (l2-ctx-enemy-units ctx)])
+  ;; and below construction-adjusted threshold, OR (L25-P0-3 `#36 PvZ`) when an exposed
+  ;; < 40% Protoss Natural Nexus faces a < 3:00 Zergling rush (>= 6 enemy Zerglings)
+  ;; with < 4.0 friendly defending combat supply; single scouts never cancel.
+  (let* ([all-ally-units (l2-ctx-ally-units ctx)]
+         [all-enemy-units (l2-ctx-enemy-units ctx)]
+         [early-pvz-ling-cnt
+          (if (and live-obs-harvesters? (< frame 4032))
+              (count (lambda (e)
+                       (and (hash? e)
+                            (eq? (fast-canonical-unit-sym (unit-type-sym e)) 'zergling)))
+                     all-enemy-units)
+              0)])
     (for ([b (in-list ally-bldgs)])
-      (when (and (hash? b)
-                 (memq (fast-canonical-structure-sym (unit-type-sym b))
-                       '(hatchery nexus command-center))
+      (define bsym-exp (and (hash? b) (fast-canonical-structure-sym (unit-type-sym b))))
+      (when (and bsym-exp
+                 (memq bsym-exp '(hatchery nexus command-center))
                  (> (dist2d base-x base-y (hash-ref b 'x base-x) (hash-ref b 'y base-y)) 8.0))
         (define-values (exp-prog exp-vitality-pct _exp-expected)
           (l2-bldg-shield-inclusive-vitality-pct b))
@@ -6961,9 +6973,17 @@
             (l2-combat-supply-within? all-enemy-units bx by 14.0 #t))
           (define friendly-combat-supply-within-18
             (l2-combat-supply-within? all-ally-units bx by 18.0 #f))
-          (when (and (>= enemy-combat-supply-within-14 8.0)
-                     (> enemy-combat-supply-within-14 (* 1.5 friendly-combat-supply-within-18))
-                     (< exp-vitality-pct (* 0.55 (+ 0.10 (* 0.90 exp-prog)))))
+          (define early-pvz-exposed-nexus-cancel?
+            (and live-obs-harvesters?
+                 (eq? bsym-exp 'nexus)
+                 (< frame 4032)
+                 (< exp-prog 0.40)
+                 (>= early-pvz-ling-cnt 6)
+                 (< friendly-combat-supply-within-18 4.0)))
+          (when (or early-pvz-exposed-nexus-cancel?
+                    (and (>= enemy-combat-supply-within-14 8.0)
+                         (> enemy-combat-supply-within-14 (* 1.5 friendly-combat-supply-within-18))
+                         (< exp-vitality-pct (* 0.55 (+ 0.10 (* 0.90 exp-prog))))))
             (define exp-bid (hash-ref b 'id 0))
             (when (and (> exp-bid 0)
                        (refractory-allow-action?! cd-tracker
@@ -14294,6 +14314,19 @@
        (l2-try-train-unit! ctx 'drone 'larva zerg-drone-batch
                         #:respect-bo-reserve? (l2-worker-respect-bo-reserve? ctx))))
 
+;; L25-P0-3 (`#36 PvZ` Early Rush Hold): Detect < 3:00 (`< 4032f`) Zergling rush
+;; (`>= 6` visible enemy Zerglings) so Protoss prioritizes Chrono'd Zealot #1/#2
+;; from powered Gateway #1 BEFORE Gateway #2 / CyberCore / Natural Nexus!
+(define (l2-protoss-early-ling-rush? ctx)
+  (and (eq? (l2-ctx-race ctx) 'Protoss)
+       (l2-ctx-live-obs-harvesters? ctx)
+       (< (l2-ctx-frame ctx) 4032)
+       (>= (count (lambda (e)
+                    (and (hash? e)
+                         (eq? (fast-canonical-unit-sym (unit-type-sym e)) 'zergling)))
+                  (l2-ctx-enemy-units ctx))
+           6)))
+
 (define (l2-protoss-phase1-chrono-wall! ctx)
   (define allow-exact-wall-slot? (l2-ctx-allow-exact-wall-slot? ctx))
   (define ally-bldgs (l2-ctx-ally-bldgs ctx))
@@ -14369,14 +14402,24 @@
        (and (hash-ref b 'busy? #f)
             (not (memq 'chrono-boost (hash-ref b 'buffs '())))
             (not (set-member? chrono-claimed-ids (hash-ref b 'id -1)))))
+  (define protoss-early-ling-rush? (l2-protoss-early-ling-rush? ctx))
+  (define protoss-early-gate-defenders
+    (+ (l2-unit-count ctx 'zealot)
+       (l2-unit-count ctx 'adept)
+       (l2-unit-count ctx 'stalker)))
   (define (chrono-prio-score b)
        (define bsym (fast-canonical-structure-sym (unit-type-sym b)))
        (cond
-         [(and (or early-survival-crisis? under-base-attack?)
+         [(and (or early-survival-crisis? under-base-attack? protoss-early-ling-rush?)
                (memq bsym '(gateway warp-gate robotics-facility stargate)))
           1000.0]
+         [(and protoss-early-ling-rush?
+               (eq? bsym 'nexus)
+               (< protoss-early-gate-defenders 2))
+          -1.0]
          [(and (< total-workers 48)
                (not early-survival-crisis?)
+               (not protoss-early-ling-rush?)
                (eq? bsym 'nexus))
           900.0]
          [else
@@ -14639,6 +14682,7 @@
                     (not blocked-nat-expanded-early?))
                 (not under-early-cheese?)
                 (not early-survival-crisis?)
+                (not protoss-early-ling-rush?)
                 (or (and brain-sched-p-nat-nexus? protoss-light-poke-ok?)
                     (not crisis-freeze-expand-or-gas?))
                 (or brain-sched-p-nat-nexus?
@@ -14884,11 +14928,12 @@
              (pick-main-sb-coords)
              (l2-offset-defense-anchor ctx nat-x nat-y 5.5)))
        (l2-emit-build-verified! ctx 'shield-battery sb-x sb-y 2.0))
-  ;; L20-P0-3 / L21-P0-3: During active base breach (`under-base-attack?`
-  ;; / `early-survival-crisis?` / `under-early-cheese?`) with `< 4` combat units and an idle ready
-  ;; Gateway/WarpGate, train Zealot/Adept/Stalker FIRST before CyberCore or Phase 2 buildings spend minerals!
+  ;; L20-P0-3 / L21-P0-3 / L25-P0-3 (`#36 PvZ` Early Rush Hold): During active base breach
+  ;; (`under-base-attack?` / `early-survival-crisis?` / `under-early-cheese?` / `< 3:00 >= 6 Lings`)
+  ;; with `< 4` combat units and an idle ready Gateway/WarpGate, train Zealot #1/#2 FIRST before
+  ;; CyberCore or Gateway #2 spend minerals!
   (when (and live-game?
-             (or under-base-attack? early-survival-crisis? under-early-cheese?)
+             (or under-base-attack? early-survival-crisis? under-early-cheese? protoss-early-ling-rush?)
              (< (length (l2-ctx-ally-combat-units ctx)) 4)
              (or (memq 'gateway ready-bldg-types) (memq 'warp-gate ready-bldg-types))
              (> (hash-ref open-prod-slots 'gateway 0) 0)
@@ -14900,6 +14945,10 @@
                           '(reaper marauder stalker roach ravager adept marine oracle void-ray banshee mutalisk))))
              enemy-units))
     (cond
+      [(and protoss-early-ling-rush?
+            (< (l2-unit-count ctx 'zealot) 2)
+            (>= (l2-ctx-minerals ctx) (sc2-min-cost 'zealot)))
+       (l2-try-train-unit! ctx 'zealot 'gateway 5 #:respect-bo-reserve? #f)]
       [(and breach-need-ranged?
             (memq 'cybernetics-core ready-bldg-types)
             (>= (l2-ctx-minerals ctx) (sc2-min-cost 'stalker))
@@ -14918,9 +14967,12 @@
        (ormap (lambda (e) (eq? (fast-canonical-unit-sym (unit-type-sym e)) 'reaper))
               enemy-units))
   (when (and (or (memq 'gateway ready-bldg-types) (memq 'warp-gate ready-bldg-types))
-                ;; L21-P0-3: During <4:00 (`< 5400f`) active base attack / early survival crisis
-                ;; (without Reapers or AA need), never drain 150M on a first or rebuilt Cybernetics Core
-                ;; until >= 4 combat units are defending (regardless of Gateway count!) or minerals >= 400.
+                ;; L21-P0-3 / L25-P0-3: During <4:00 (`< 5400f`) active base attack / early survival crisis
+                ;; (or < 3:00 >= 6 Zerglings with < 2 Zealots/defenders), never drain 150M on Cybernetics Core
+                ;; before Zealot #1/#2 train from powered Gateway #1!
+                (not (and protoss-early-ling-rush?
+                          (< protoss-early-gate-defenders 2)
+                          (< (l2-ctx-minerals ctx) 250)))
                 (not (and live-game?
                           (< frame 5400)
                           (< (length (l2-ctx-ally-combat-units ctx)) 4)
@@ -15556,7 +15608,8 @@
                         [(>= (l2-ctx-minerals ctx) 650) 8]
                         [(or (>= total-workers 38)
                              (>= eff-phase-supply 60)
-                             (>= (l2-ctx-minerals ctx) 350)) 6]
+                             (>= (l2-ctx-minerals ctx) 350)
+                             (and brain-sched-gate-now? (>= (l2-ctx-minerals ctx) 300))) 6]
                         [(or (>= total-workers 30)
                              (>= eff-phase-supply 46)) 5]
                         [(>= eff-phase-supply 32) 4]
@@ -15572,17 +15625,17 @@
                           3
                           2)]
                      [else 1]))))
-  ;; W6-P0-2-rt: Gate live Protoss Forge on genuine cloak/detection need OR mature 2-base
-  ;; army (>= 16 army supply, >= 4480f or >= 3360f with >= 3 Gateways & >= 46 supply) —
-  ;; eliminates unrequested `1:35` PvT Forge while keeping midgame upgrades & cloak defense intact.
+  ;; W6-P0-2-rt / L25-P0-3 (`#27` 2 Forges on 3 Gates): Gate non-detection live Protoss Forge
+  ;; behind >= 4 Gateways (2-base) / >= 6 Gateways (3-base) + >= 16 army supply so Gateways
+  ;; scale cleanly before Forges drain early midgame minerals (cloak/detection still immediate!).
   (define protoss-forge-timing-ok?
     (or (not live-game?)
         (enemy-tech-observation-requires-detection? tech-obs)
         (and (>= (length nexuses) 2)
              (>= live-army-supply 16)
+             (>= (length gateways) (if (>= (length nexuses) 3) 6 4))
              (or (>= frame 4480)
                  (and (>= frame 3360)
-                      (>= (length gateways) 3)
                       (>= eff-phase-supply 46))))))
   (define protoss-holding-forge-min?
        (and protoss-forge-timing-ok?
@@ -15592,7 +15645,17 @@
                 (eq? prio-saving-for-sym 'forge)
                 (and (enemy-tech-observation-requires-detection? tech-obs)
                      (not (l2-building-present-or-pending? ctx 'robotics-facility))))))
+  (define p2-early-ling-rush-hold-gate2?
+    (and (l2-protoss-early-ling-rush? ctx)
+         (< (+ (l2-unit-count ctx 'zealot)
+               (l2-unit-count ctx 'adept)
+               (l2-unit-count ctx 'stalker))
+            2)
+         (< (l2-ctx-minerals ctx) 250)))
+  (define brain-sched-gate-high-bank?
+    (and brain-sched-gate-now? (>= (l2-ctx-minerals ctx) 300)))
   (when (and (or (not protoss-saving-for-expand?) protoss-early-rush-2nd-gate?)
+                (not p2-early-ling-rush-hold-gate2?)
                 (l2-save-cancel-rebuild-ready? ctx 'gateway 60)
                 (or (< (length gateways) 1)
                     (not live-game?)
@@ -15602,6 +15665,7 @@
                     (l2-can-spend-by-priority? ctx 'gateway 'production-scaling))
                 (or (< (length gateways) 1)
                     protoss-early-rush-2nd-gate?
+                    brain-sched-gate-high-bank?
                     (>= (l2-ctx-minerals ctx) 850)
                     (l2-protoss-colossus-escrow-ok? ctx (sc2-min-cost 'gateway) 0))
                 (>= (length gateways) 1)
@@ -15630,7 +15694,9 @@
                                  0))))
                     (and (>= (- (l2-ctx-minerals ctx)
                                 protoss-nat-reserve
-                                (if protoss-holding-forge-min? (sc2-min-cost 'forge) 0)
+                                (if (and protoss-holding-forge-min? (not brain-sched-gate-high-bank?))
+                                    (sc2-min-cost 'forge)
+                                    0)
                                 (l2-ctx-hard-supply-lockout-reserve-min ctx))
                              (sc2-min-cost 'gateway))
                          (or brain-sched-gate-now?
@@ -15698,6 +15764,7 @@
              (not under-base-attack?)
              (not early-survival-crisis?)
              (>= (length nexuses) 2)
+             (>= (length gateways) 6)
              (>= eff-phase-supply 62)
              (memq 'forge ready-bldg-types)
              (or (memq 'twilight-council ready-bldg-types)
@@ -16926,13 +16993,17 @@
                         (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
                  ally-bldgs)
           (order-ledger-pending-count-for-type oledger 'bunker frame)))
-  ;; W8-P0-3-rt: Cap early Bunker count at 1 while (< frame 4000) and (< Marines 4)
-  ;; so Terran populates Bunker #1 with Marines instead of building 2 empty Bunkers (#35).
+  ;; W8-P0-3-rt / L25-P0-3 (`#20` 5 Bunkers): Cap non-crisis live Bunker count at 1 — only allow
+  ;; a 2nd Bunker during genuine active crisis/base breach (`early-survival-crisis?`,
+  ;; `under-early-cheese?`, or `under-base-attack?` with `threat >= 8`)!
   (define desired-bunker-cnt
        (if (and crisis-tech-upgrade-deferral?
                 (or (not live-game?)
-                    (>= frame 4000)
-                    (>= (l2-unit-count ctx 'marine) 4))
+                    (and (or early-survival-crisis?
+                             under-early-cheese?
+                             (and under-base-attack? (>= live-enemy-threat-supply 8)))
+                         (or (>= frame 4000)
+                             (>= (l2-unit-count ctx 'marine) 4))))
                 (or (>= live-army-supply 4)
                     (>= (l2-ctx-minerals ctx) 200)))
            2
@@ -17466,7 +17537,8 @@
                (not (and (< (length active-refineries) 1) (>= (l2-ctx-minerals ctx) 450))))
           (min 2 raw-desired-barracks)]
          [(and (not (memq 'starport (l2-ctx-bldg-types ctx)))
-               (< (l2-ctx-minerals ctx) 500))
+               (< (l2-ctx-minerals ctx) (if (memq 'factory (l2-ctx-bldg-types ctx)) 350 500))
+               (not (and brain-sched-rax-now? (>= (l2-ctx-minerals ctx) 300))))
           (if (and brain-sched-rax-now?
                    (memq 'factory (l2-ctx-bldg-types ctx))
                    (l2-starport-escrow-ok? ctx (sc2-min-cost 'barracks) 0))
@@ -17496,9 +17568,14 @@
                 (l2-save-cancel-rebuild-ready? ctx 'barracks 60)
                 (or terran-early-rush-2nd-rax?
                     brain-sched-rax-now?
+                    (and live-game?
+                         (memq 'factory (l2-ctx-bldg-types ctx))
+                         (>= (l2-ctx-minerals ctx) 350)
+                         (not (memq (l2-ctx-prio-saving-for-sym ctx) '(command-center orbital-command))))
                     (l2-can-spend-by-priority? ctx 'barracks 'production-scaling))
                 (>= (length barracks-list) 1)
                 (or (< cur-rax-total 2)
+                    (and brain-sched-rax-now? (>= (l2-ctx-minerals ctx) 300))
                     (l2-starport-escrow-ok? ctx (sc2-min-cost 'barracks) 0))
                 (or (not live-game?)
                     (< (length barracks-list) 2)
@@ -21746,8 +21823,55 @@
       (if (and (symbol? r) (not (eq? r 'Unknown)))
           r
           (hash-ref obs 'race 'Unknown))))
+  (define eval-base-x (exact->inexact (l34-ctx-base-x ctx)))
+  (define eval-base-y (exact->inexact (l34-ctx-base-y ctx)))
+  (define enemy-within-14-of-main?
+    (for/or ([e (in-list enemy-units)])
+      (and (hash? e)
+           (combat-unit-record? e)
+           (not (eq? (hash-ref e 'snapshot? #f) #t))
+           (eqv? (hash-ref e 'display-type 1) 1)
+           (real? (hash-ref e 'x #f))
+           (real? (hash-ref e 'y #f))
+           (fl<= (fast-dist2d (exact->inexact (hash-ref e 'x 9999.0))
+                              (exact->inexact (hash-ref e 'y 9999.0))
+                              eval-base-x eval-base-y)
+                 14.0))))
+  ;; L25-P0-3 (`DRIP_FEED_COLLAPSE 12 -> <= 4`, `clip03` Visual-QA):
+  ;; Defensive Ground Counter-Volley Staging with hysteresis.
+  ;; Close `early-midgame-pt-timing-exempt?` (`L21749`) & `all-mobile-retreatable?` (`L21765`)
+  ;; loopholes whenever `known-enemy-army-val >= 1400` and `our-combat-val < 0.60 * enemy`
+  ;; (`not enemy-within-14-of-main?`, `our-combat-sup < 45`); stay staged until cohesive
+  ;; counter-wave reaches `>= 0.78 * enemy` OR `>= 2000` value / `>= 36` combat supply!
+  (define l25-cv-severe-outgunned?
+    (and (l34-ctx-live-obs? ctx)
+         (not enemy-within-14-of-main?)
+         (>= known-enemy-army-val 1400)
+         (< our-combat-sup-eval 45.0)
+         (< (exact->inexact our-combat-val)
+            (fl* 0.60 (exact->inexact known-enemy-army-val)))))
+  (define l25-cv-prev?
+    (and rt (> frame 4)
+         (hash-ref (rt-door-state rt) 'l25-counter-volley-staging? #f)))
+  (define l25-cv-reached-wave?
+    (or (>= (exact->inexact our-combat-val)
+            (fl* 0.78 (exact->inexact known-enemy-army-val)))
+        (>= our-combat-val 2000)
+        (>= our-combat-sup-eval 36.0)))
+  (define l25-counter-volley-staging?
+    (and (l34-ctx-live-obs? ctx)
+         (not enemy-within-14-of-main?)
+         (not enemy-main-cleared-eval?)
+         (not decisive-victory-posture?)
+         (not owm-sh-cooldown?)
+         (>= known-enemy-army-val 1400)
+         (or l25-cv-severe-outgunned?
+             (and l25-cv-prev? (not l25-cv-reached-wave?)))))
+  (when rt
+    (hash-set! (rt-door-state rt) 'l25-counter-volley-staging? l25-counter-volley-staging?))
   (define early-midgame-pt-timing-exempt?
-    (and (memq our-race-eval '(Protoss Terran))
+    (and (not l25-counter-volley-staging?)
+         (memq our-race-eval '(Protoss Terran))
          (< frame 10752)
          (>= (exact->inexact our-combat-val)
              (fl* 0.45 (exact->inexact known-enemy-army-val)))
@@ -21762,15 +21886,18 @@
          (not owm-sh-cooldown?)
          (not forward-timing-window?)
          (not early-midgame-pt-timing-exempt?)
-         (or (not all-mobile-retreatable?) zergling-only-trickle?)
+         (or (not all-mobile-retreatable?) zergling-only-trickle? l25-counter-volley-staging?)
          (not army-in-direct-visible-contact?)
          (< our-combat-sup-eval 65.0)
          (< supply-used-eval 165)
          (> known-enemy-army-val 550)
-         (< (exact->inexact our-combat-val)
-            (fl* 0.65 (exact->inexact known-enemy-army-val)))))
+         (or l25-counter-volley-staging?
+             (< (exact->inexact our-combat-val)
+                (fl* 0.65 (exact->inexact known-enemy-army-val))))))
   (when (hash? (l34-ctx-l34-sc ctx))
-    (hash-set! (l34-ctx-l34-sc ctx) 'l20-mass-staging-active? mass-parity-before-attack-suppress?))
+    (hash-set! (l34-ctx-l34-sc ctx) 'l20-mass-staging-active? mass-parity-before-attack-suppress?)
+    (hash-set! (l34-ctx-l34-sc ctx) 'l25-counter-volley-staging? l25-counter-volley-staging?)
+    (hash-set! (l34-ctx-l34-sc ctx) 'l25-enemy-within-14-of-main? enemy-within-14-of-main?))
   (define army-at-home-eval?
     (or enemy-within-14-of-th?
         (null? combat-units)
@@ -21867,12 +21994,16 @@
      (define hard-suppress?
        (and (or (not engage?) pullback-active? locust-kite-retreat?)
             (not enemy-within-14-of-th?)))
-     ;; L21-P0-3: Bypass cross-map mass-parity staging whenever `locally-winning-fight?` is `#t`!
+     ;; L21-P0-3 / L25-P0-3: Bypass cross-map mass-parity & counter-volley staging whenever `locally-winning-fight?` is `#t`!
      (define eff-mass-parity-suppress?
        (and mass-parity-before-attack-suppress?
             (not locally-winning-fight?)))
+     (define eff-l25-counter-volley-staging?
+       (and l25-counter-volley-staging?
+            (not locally-winning-fight?)))
      (when (hash? (l34-ctx-l34-sc ctx))
-       (hash-set! (l34-ctx-l34-sc ctx) 'l20-mass-staging-active? eff-mass-parity-suppress?))
+       (hash-set! (l34-ctx-l34-sc ctx) 'l20-mass-staging-active? eff-mass-parity-suppress?)
+       (hash-set! (l34-ctx-l34-sc ctx) 'l25-counter-volley-staging? eff-l25-counter-volley-staging?))
      (define suppress?
        (or hard-suppress? eff-mass-parity-suppress?))
      (set-l34-ctx-combat-pred-ht! ctx pred-ht)
@@ -26019,6 +26150,45 @@
                                 (values best-c best-x best-y)))])
               (values bc bx by (safe-coord sx fbase-x) (safe-coord sy fbase-y))))
           (values 0 fbase-x fbase-y fbase-x fbase-y)))
+    ;; L25-P0-3 (`DRIP_FEED_COLLAPSE 12 -> <= 4`, `clip03`): Defensive Ground Counter-Volley Staging.
+    ;; When `enemy-within-14-of-th?` (enemy >= 1400 val camping our Natural/3rd) while Main is
+    ;; unbreached and we are severely outgunned (`< 0.60x` latched to `0.78x / 2000 val / 36 sup`),
+    ;; muster newly-spawned ground/mixed units (> 14t from visible enemy combat) at Main ramp via
+    ;; `attack-pos` ONLY (NEVER passive `move` -> `OBRet = 0`!). When `not enemy-within-14-of-th?`,
+    ;; our tightened `mass-parity-before-attack-suppress?` (L21749 & L21765 closed) handles distant
+    ;; staging through `(case ut ...)` + `l34-emit-engage-or-rally!` + `l20-mass-stage-rally`!
+    (define p5-l25-counter-volley-staging?
+      (and live-obs?
+           (l34-ctx-enemy-within-14-of-th? ctx)
+           (hash? l34-sc)
+           (hash-ref l34-sc 'l25-counter-volley-staging? #f)
+           (not (hash-ref l34-sc 'l25-enemy-within-14-of-main? #f))))
+    (define p5-vis-enemy-combat-pts
+      (if p5-l25-counter-volley-staging?
+          (for/list ([e (in-list enemy-units)]
+                     #:when (and (hash? e)
+                                 (combat-unit-record? e)
+                                 (not (p5-snapshot-entity? e))
+                                 (real? (hash-ref e 'x #f))
+                                 (real? (hash-ref e 'y #f))))
+            (cons (exact->inexact (hash-ref e 'x 0.0))
+                  (exact->inexact (hash-ref e 'y 0.0))))
+          '()))
+    (define-values (p5-ground-muster-x p5-ground-muster-y)
+      (if p5-l25-counter-volley-staging?
+          (if (l34-ctx-enemy-within-14-of-th? ctx)
+              ;; Enemy is camping our Natural/3rd while Main is unbreached: muster at Main ramp (5t toward Natural)!
+              (let* ([dx (fl- fnat-x fbase-x)]
+                     [dy (fl- fnat-y fbase-y)]
+                     [d (flmax 1.0 (flsqrt (fl+ (fl* dx dx) (fl* dy dy))))]
+                     [step (flmin 5.0 (fl* 0.35 d))])
+                (values (safe-coord (fl+ fbase-x (fl* step (fl/ dx d))) base-x)
+                        (safe-coord (fl+ fbase-y (fl* step (fl/ dy d))) base-y)))
+              ;; Enemy is distant/mid-map: muster at 3rd (if >= 3 TH) or Natural!
+              (if (>= live-owned-townhalls 3)
+                  (values third-x third-y)
+                  (values nat-x nat-y)))
+          (values nat-x nat-y)))
 
     (for ([u (in-list (if endgame-harmless-only-sweep? '() combat-units))])
       (define uid (hash-ref u 'id 101))
@@ -26172,6 +26342,21 @@
                               (fl> (fast-dist2d fux fuy p5-corr-best-x p5-corr-best-y) 14.0)
                               (cons (safe-coord p5-corr-best-x p5-corr-stage-x)
                                     (safe-coord p5-corr-best-y p5-corr-stage-y)))])))))
+        (define ground-counter-volley-stage?
+          (and p5-l25-counter-volley-staging?
+               (not corr-stage-target)
+               (not nearest-enemy-tank)
+               (not (eq? ut 'corruptor))
+               (not unit-mobile-retreatable?)
+               (not (memq ut '(carrier swarm-host swarm-host-mp
+                               viper infestor infestor-burrowed high-templar medivac queen
+                               overseer overseer-siege-mode observer warp-prism warp-prism-phasing
+                               siege-tank-sieged widow-mine-burrowed lurker-burrowed liberator-ag)))
+               (not (and target-long-range-siege-cap? (fl<= edist2 342.25)))
+               (let ([fux (exact->inexact ux)]
+                     [fuy (exact->inexact uy)])
+                 (not (for/or ([ep (in-list p5-vis-enemy-combat-pts)])
+                        (fl<= (fast-dist2d fux fuy (car ep) (cdr ep)) 14.0))))))
         (cond
           [corr-stage-target
            (set-add! wave3-handled-tags uid)
@@ -26181,6 +26366,13 @@
                                      (exact->inexact tx) (exact->inexact ty))
                         3.5)
                (l34-emit-preserved! ctx (list 'move uid tx ty))))]
+          [ground-counter-volley-stage?
+           (set-add! wave3-handled-tags uid)
+           (when (fl> (fast-dist2d (exact->inexact ux) (exact->inexact uy)
+                                   (exact->inexact p5-ground-muster-x)
+                                   (exact->inexact p5-ground-muster-y))
+                      6.0)
+             (l34-emit! ctx (list 'attack-pos uid p5-ground-muster-x p5-ground-muster-y)))]
           [else
         (case ut
           [(ravager)
@@ -27092,22 +27284,40 @@
       (for ([u (in-list (take idle-rally-candidates 2))])
         (l34-emit! ctx (list 'attack-pos (hash-ref u 'id 110) nat-x nat-y)))))
 
-  ;; L20-P0-3 (`DripFeed=14`): While staging for cross-map mass parity (and not defending home),
-  ;; rally scattered reinforcements cohesively to our natural/3rd staging point so our army
-  ;; masses together before committing across the map!
+  ;; L20-P0-3 / L25-P0-3 (`DRIP_FEED_COLLAPSE 12 -> <= 4`): While staging for cross-map mass
+  ;; parity OR defensive ground counter-volley (enemy outside Main mineral line), rally scattered
+  ;; reinforcements cohesively via `attack-pos` ONLY (never passive `move` -> `OBRet = 0`!) to
+  ;; our safe defensive muster point (Main ramp when Natural/3rd camped, else Natural/3rd)!
+  (define l25-cv-stage-p6?
+    (and live-obs?
+         (hash? (l34-ctx-l34-sc ctx))
+         (hash-ref (l34-ctx-l34-sc ctx) 'l25-counter-volley-staging? #f)
+         (not (hash-ref (l34-ctx-l34-sc ctx) 'l25-enemy-within-14-of-main? #f))))
   (when (and live-obs?
              (not endgame-hunt-active?)
-             (not (l34-ctx-enemy-within-14-of-th? ctx))
-             (hash? (l34-ctx-l34-sc ctx))
-             (hash-ref (l34-ctx-l34-sc ctx) 'l20-mass-staging-active? #f)
+             (or l25-cv-stage-p6?
+                 (and (not (l34-ctx-enemy-within-14-of-th? ctx))
+                      (hash? (l34-ctx-l34-sc ctx))
+                      (hash-ref (l34-ctx-l34-sc ctx) 'l20-mass-staging-active? #f)))
              (pair? combat-units)
              (refractory-ready? (live-bot-runtime-cooldown-tracker rt)
                                 '(l20-mass-stage-rally)
                                 frame
                                 44))
     (define use-third-stage? (>= (or (l34-ctx-live-owned-townhalls ctx) 1) 3))
-    (define stage-x (if use-third-stage? (l34-ctx-third-x ctx) nat-x))
-    (define stage-y (if use-third-stage? (l34-ctx-third-y ctx) nat-y))
+    (define-values (stage-x stage-y)
+      (if (l34-ctx-enemy-within-14-of-th? ctx)
+          (let* ([fbx (exact->inexact base-x)]
+                 [fby (exact->inexact base-y)]
+                 [dx (fl- (exact->inexact nat-x) fbx)]
+                 [dy (fl- (exact->inexact nat-y) fby)]
+                 [d (flmax 1.0 (flsqrt (fl+ (fl* dx dx) (fl* dy dy))))]
+                 [step (flmin 5.0 (fl* 0.35 d))])
+            (values (safe-coord (fl+ fbx (fl* step (fl/ dx d))) base-x)
+                    (safe-coord (fl+ fby (fl* step (fl/ dy d))) base-y)))
+          (if use-third-stage?
+              (values (l34-ctx-third-x ctx) (l34-ctx-third-y ctx))
+              (values nat-x nat-y))))
     (define fstage-x (exact->inexact stage-x))
     (define fstage-y (exact->inexact stage-y))
     (define stage-cands
@@ -27121,7 +27331,8 @@
                                (not (set-member? splash-evading-tags uid))
                                (not (set-member? disruptor-handled-tags uid))
                                (not (set-member? tbrain-committed-tags uid))
-                               (not (memq ut '(overlord overseer observer warp-prism warp-prism-phasing medivac queen)))
+                               (not (memq ut '(overlord overseer observer warp-prism warp-prism-phasing medivac queen
+                                               siege-tank-sieged widow-mine-burrowed lurker-burrowed liberator-ag)))
                                (not (l34-within-r2? ux uy fstage-x fstage-y 100.0 10.0)))))
         u))
     (when (pair? stage-cands)

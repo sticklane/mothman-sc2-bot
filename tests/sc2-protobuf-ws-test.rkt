@@ -5222,6 +5222,233 @@
                      (<= (l24-dist (sc2-point2d-x sp-pt-nat) (sc2-point2d-y sp-pt-nat) 64.0 32.0) 11.5)))
     (cleanup!)))
 
+(printf "[Loop 25] Testing L25-P0-1 threat-sorted safe-under-gas (#33), anti-harass mineral stability (#21/#33), & multi-base barracks4/gateway4 fallback (#17/#08/#33)...\n")
+(let ()
+  (define (l25-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define (mk-l25-u tag utype alliance x y
+                    #:hp [hp 100.0] #:mhp [mhp #f] #:shield [sh 0.0] #:rad [rad 1.0]
+                    #:bp [bp 1.0] #:flying? [fly? #f] #:orders [ords '()]
+                    #:assigned [asgn 0] #:ideal [idl 0] #:mins [mins 0] #:vesp [vesp 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y (if fly? 12.0 8.0)) 0.0 rad bp 0 #f #f #f
+              hp (or mhp hp) sh sh 0.0 0.0 mins vesp fly? #f #f #t #f
+              ords 0 '() asgn idl 0.0 0 0 0 0 '() 0 0))
+  (define (l25-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59925 "/sc2api" c-in c-out #f 1))
+    (define saw-319? (box #f))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define req-id-p (assoc 97 req-f))
+             (define id-b (if req-id-p (encode-uint32 97 (third req-id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (when (= ab 319) (set-box! saw-319? #t))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws saw-319? (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+
+  ;; L25-P0-1a (`#33` GasZeroFreeze 1 -> 0): Both Main and Natural Nexuses are online (`2` Stalkers at Natural
+  ;; don't knock Natural offline), Natural Assimilator 9012 has 0/3 assigned BUT is camped by the 2 Stalkers
+  ;; while safe Main Assimilator 9011 has 1/3 assigned -> MUST fill safe Main 9011, NEVER camped Natural 9012!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (define nx-m (mk-l25-u 9001 59 1 28.5 28.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75 #:assigned 14 #:ideal 16))
+  (define nx-n (mk-l25-u 9002 59 1 64.5 28.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75 #:assigned 12 #:ideal 16))
+  (define as-m (mk-l25-u 9011 61 1 25.0 23.0 #:hp 450.0 #:shield 450.0 #:rad 1.5 #:assigned 1 #:ideal 3 #:vesp 1800))
+  (define as-n (mk-l25-u 9012 61 1 61.0 23.0 #:hp 450.0 #:shield 450.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 1800))
+  (define mn-m (mk-l25-u 9003 341 3 22.0 28.5 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define mn-n (mk-l25-u 9004 341 3 70.0 28.5 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define prb-gas1 (mk-l25-u 9020 84 1 25.4 24.0 #:hp 20.0 #:shield 20.0 #:rad 0.375
+                             #:orders (list (sc2-unit-order 298 #f 9011 0.0))))
+  (define prbs-m
+    (for/list ([i (in-range 14)])
+      (mk-l25-u (+ 9030 i) 84 1 (+ 23.5 (* 0.3 (modulo i 5))) (+ 27.5 (* 0.4 (quotient i 5)))
+                #:hp 20.0 #:shield 20.0 #:rad 0.375 #:orders (list (sc2-unit-order 298 #f 9003 0.0)))))
+  (define stalkers-nat
+    (list (mk-l25-u 9081 74 4 61.5 24.5 #:hp 80.0 #:shield 80.0 #:rad 0.625)
+          (mk-l25-u 9082 74 4 62.5 24.5 #:hp 80.0 #:shield 80.0 #:rad 0.625)))
+  (define cmds-safe-gas
+    (saturate-workers-and-gas-commands
+     (sc2-observation 7200 (sc2-player-common 1 200 20 80 40 4 20 0 0 0 0)
+                      (append (list nx-m nx-n as-m as-n mn-m mn-n prb-gas1) prbs-m stalkers-nat)
+                      '() '() #f '() '() '() '() '() '())))
+  (check-true "l25-p0-1a-safe-under-gas-prefers-zero-threat-main-over-camped-0-assigned-natural"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-target-unit-tag c) 9011)))
+                          cmds-safe-gas)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (= (sc2-raw-unit-command-target-unit-tag c) 9012)))
+                               cmds-safe-gas))))
+
+  ;; L25-P0-1b (`#21`/`#33` anti-harass mineral-line stability):
+  ;;   - 4 Phoenixes (`78`) over Main -> stays ONLINE (no full worker evac!)
+  ;;   - 2 Adepts (`311`) poking Main -> stays ONLINE (`2 < 3` non-heavy!)
+  ;;   - 2 Oracles (`495`, heavy ground killer) -> goes OFFLINE (`h-cnt = 2`, `e-hp > 1.5*a-hp`)
+  ;;   - 3 Stalkers (`74`) -> goes OFFLINE (`g-cnt = 3`)
+  ;;   - Damaged Nexus (`30% < 35%` HP) under 1 Stalker -> goes OFFLINE
+  (define phoenixes-4
+    (for/list ([i (in-range 4)])
+      (mk-l25-u (+ 9085 i) 78 4 (+ 29.0 (* 0.5 i)) 29.0 #:hp 120.0 #:shield 60.0 #:flying? #t)))
+  (define adepts-2
+    (list (mk-l25-u 9091 311 4 31.0 29.0 #:hp 70.0 #:shield 70.0)
+          (mk-l25-u 9092 311 4 32.0 29.0 #:hp 70.0 #:shield 70.0)))
+  (define oracles-2
+    (list (mk-l25-u 9093 495 4 31.0 29.0 #:hp 100.0 #:shield 60.0 #:flying? #t)
+          (mk-l25-u 9094 495 4 32.0 29.0 #:hp 100.0 #:shield 60.0 #:flying? #t)))
+  (define stalkers-3
+    (for/list ([i (in-range 3)])
+      (mk-l25-u (+ 9095 i) 74 4 (+ 31.0 (* 0.5 i)) 29.0 #:hp 80.0 #:shield 80.0)))
+  (define nx-damaged (mk-l25-u 9001 59 1 28.5 28.5 #:hp 300.0 #:mhp 1000.0 #:shield 0.0 #:rad 2.75))
+  (check-true "l25-p0-1b-4-phoenixes-never-evacuate-mineral-line"
+              (not (townhall-offline? nx-m (list mn-m) phoenixes-4 '())))
+  (check-true "l25-p0-1b-2-adepts-poke-never-evacuates-mineral-line"
+              (not (townhall-offline? nx-m (list mn-m) adepts-2 '())))
+  (check-true "l25-p0-1b-2-heavy-oracles-evacuate-mineral-line"
+              (townhall-offline? nx-m (list mn-m) oracles-2 '()))
+  (check-true "l25-p0-1b-3-ground-stalkers-evacuate-mineral-line"
+              (townhall-offline? nx-m (list mn-m) stalkers-3 '()))
+  (check-true "l25-p0-1b-damaged-th-under-35pct-with-1-attacker-evacuates"
+              (townhall-offline? nx-damaged (list mn-m) (list (first stalkers-3)) '()))
+
+  ;; L25-P0-1c-i (`#17/#08` Terran barracks #4+): Drive 2 real consecutive 5x3 misses across a Depot
+  ;; completion (`cur-struct-sig` change clears `SC2-TERRAN-5X3-MISS-CACHE`), then verify `barracks #4`
+  ;; skips `319` completely (`rax4-fast-3x3?`) and places pure `3x3` at safe completed Natural `(64.5, 30.5)`!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
+  (define allow-nat-321? (box #f))
+  (let-values ([(ws saw-319? cleanup!)
+                (l25-start-mock-ws
+                 (lambda (ab px _py)
+                   (if (and (unbox allow-nat-321?) (= ab 321) (>= px 56.0)) 1 2)))])
+    (define cc-m (mk-l25-u 9041 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define cc-n (mk-l25-u 9042 18 1 64.5 30.5 #:hp 1500.0 #:rad 2.75))
+    (define rax1 (mk-l25-u 9043 21 1 34.5 28.5 #:hp 1000.0 #:rad 1.5))
+    (define rax2 (mk-l25-u 9044 21 1 34.5 33.5 #:hp 1000.0 #:rad 1.5))
+    (define rax3 (mk-l25-u 9045 21 1 28.5 35.5 #:hp 1000.0 #:rad 1.5))
+    (define dep1 (mk-l25-u 9047 19 1 24.0 35.5 #:hp 400.0 #:rad 1.0))
+    (define scv1 (mk-l25-u 9046 45 1 60.0 30.0 #:hp 45.0 #:rad 0.375))
+    ;; Miss #1 at loop 9100 (crowded Main, 3 Barracks) -> streak = 1
+    (translate-bot-actions->sc2-raw-commands
+     '((build barracks 32.0 30.0))
+     (make-test-obs 9100 500 100 (list cc-m rax1 rax2 rax3 scv1))
+     #:ws-conn ws #:game-info w3-ginfo)
+    ;; Miss #2 at loop 9160 after Supply Depot finishes (`cur-struct-sig` changes!) -> streak = 2
+    (translate-bot-actions->sc2-raw-commands
+     '((build barracks 32.0 30.0))
+     (make-test-obs 9160 500 100 (list cc-m rax1 rax2 rax3 dep1 scv1))
+     #:ws-conn ws #:game-info w3-ginfo)
+    ;; Attempt #3 at loop 9220 after Natural CC finishes (`cur-struct-sig` changes again, wiping
+    ;; `SC2-TERRAN-5X3-MISS-CACHE`, while `SC2-TERRAN-5X3-MISS-STREAK` persists at >= 2!):
+    (set-box! saw-319? #f)
+    (set-box! allow-nat-321? #t)
+    (define r4-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build barracks 32.0 30.0))
+       (make-test-obs 9220 500 100 (list cc-m cc-n rax1 rax2 rax3 dep1 scv1))
+       #:ws-conn ws #:game-info w3-ginfo))
+    (define r4-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) r4-cmds))
+    (check-true "l25-p0-1c-barracks4-after-2-misses-skips-5x3-and-places-3x3-at-safe-natural"
+                (and (>= (hash-ref SC2-TERRAN-5X3-MISS-STREAK 'barracks 0) 2)
+                     (sc2-raw-unit-command? r4-cmd)
+                     (not (unbox saw-319?))
+                     (sc2-point2d? (sc2-raw-unit-command-target-pos r4-cmd))
+                     (>= (sc2-point2d-x (sc2-raw-unit-command-target-pos r4-cmd)) 56.0)))
+    (cleanup!))
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
+
+  ;; L25-P0-1c-ii (`#33` Protoss gateway #4+): Crowded Main Pylons rejected (`px < 56.0`) + contested 3rd Pylon
+  ;; at `(96, 30)` with enemy Zealots -> widens fallback cleanly to uncontested Natural Pylon `(64, 30)`!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (let-values ([(ws _saw319 cleanup!)
+                (l25-start-mock-ws
+                 (lambda (ab px _py)
+                   (if (and (= ab 883) (>= px 56.0) (<= px 72.0)) 1 2)))])
+    (define py-m1 (mk-l25-u 9051 60 1 28.0 34.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define py-m2 (mk-l25-u 9052 60 1 34.0 34.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define py-n  (mk-l25-u 9053 60 1 64.0 30.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define py-3  (mk-l25-u 9054 60 1 96.0 30.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define gw1   (mk-l25-u 9055 62 1 30.0 37.0 #:hp 500.0 #:shield 500.0 #:rad 1.5))
+    (define gw2   (mk-l25-u 9056 62 1 34.0 37.0 #:hp 500.0 #:shield 500.0 #:rad 1.5))
+    (define gw3   (mk-l25-u 9057 62 1 38.0 34.0 #:hp 500.0 #:shield 500.0 #:rad 1.5))
+    (define prb1  (mk-l25-u 9058 84 1 60.0 30.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define zlt-3 (mk-l25-u 9059 73 4 95.5 31.0 #:hp 100.0 #:shield 50.0 #:rad 0.5))
+    (define obs-gw4
+      (sc2-observation 9400 (sc2-player-common 1 500 100 80 50 20 30 0 0 0 0)
+                       (list nx-m nx-n py-m1 py-m2 py-n py-3 gw1 gw2 gw3 prb1 zlt-3)
+                       '()
+                       (list (sc2-power-source (sc2-point2d 28.0 34.0) 6.5 9051)
+                             (sc2-power-source (sc2-point2d 34.0 34.0) 6.5 9052)
+                             (sc2-power-source (sc2-point2d 64.0 30.0) 6.5 9053)
+                             (sc2-power-source (sc2-point2d 96.0 30.0) 6.5 9054))
+                       #f '() '() '() '() '() '()))
+    (define gw4-cmds
+      (translate-bot-actions->sc2-raw-commands
+       '((build gateway 30.0 34.0))
+       obs-gw4 #:ws-conn ws #:game-info w3-ginfo))
+    (define gw4-cmd
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 883))) gw4-cmds))
+    (define gw4-pt (and gw4-cmd (sc2-raw-unit-command-target-pos gw4-cmd)))
+    (check-true "l25-p0-1c-gateway4-places-at-uncontested-natural-pylon-when-main-crowded"
+                (and (sc2-point2d? gw4-pt)
+                     (<= (l25-dist (sc2-point2d-x gw4-pt) (sc2-point2d-y gw4-pt) 64.0 30.0) 6.5)))
+    (cleanup!)))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

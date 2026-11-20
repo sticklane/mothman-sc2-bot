@@ -218,6 +218,16 @@ def normalize_match(m):
             m.get("terran_111_opening_stall")
             or (m.get("anomalies") or {}).get("terran_111_opening_stall")
         ),
+        "worker_econ_eff_4m_6m": safe_num(
+            m.get("worker_econ_eff_4m_6m")
+            if m.get("worker_econ_eff_4m_6m") is not None
+            else mt.get("worker_econ_eff_4m_6m")
+        ),
+        "opp_worker_econ_eff_4m_6m": safe_num(m.get("opp_worker_econ_eff_4m_6m")),
+        "econ_eff_collapse": bool(
+            m.get("econ_eff_collapse")
+            or (m.get("anomalies") or {}).get("econ_eff_collapse")
+        ),
         "action_rejects": int(m.get("action_rejects") or 0),
         "crashes": m.get("crashes") or [],
         "signatures": m.get("signatures") or [],
@@ -406,6 +416,9 @@ def summarize_slice(rows):
         "zero_kill_collapse_matches": sum(1 for r in rows if r.get("zero_kill_collapse")),
         "early_opening_order_fault_matches": sum(1 for r in rows if r.get("early_opening_order_fault")),
         "terran_111_opening_stall_matches": sum(1 for r in rows if r.get("terran_111_opening_stall")),
+        "worker_econ_eff_4m_6m_avg": mean_opt([r["worker_econ_eff_4m_6m"] for r in rows]),
+        "opp_worker_econ_eff_4m_6m_avg": mean_opt([r["opp_worker_econ_eff_4m_6m"] for r in rows]),
+        "econ_eff_collapse_matches": sum(1 for r in rows if r.get("econ_eff_collapse")),
         "action_rejects": sum(r["action_rejects"] for r in rows),
         "crashes": sum(len(r["crashes"]) for r in rows),
         "anomalies": dict(anom_counts),
@@ -824,6 +837,11 @@ def main():
                     f" | `ZeroKillCol` = **{cur_all.get('zero_kill_collapse_matches', 0)}**"
                     f" | `OpenFault` = **{cur_all.get('early_opening_order_fault_matches', 0)}**"
                     f" | `T111Stall` = **{cur_all.get('terran_111_opening_stall_matches', 0)}**"
+                )
+            if cur_all.get("worker_econ_eff_4m_6m_avg") is not None or cur_all.get("econ_eff_collapse_matches", 0) > 0:
+                extra_w8 += (
+                    f" | `Eff4-6` = **{fmt(cur_all.get('worker_econ_eff_4m_6m_avg'),'/w')}/{fmt(cur_all.get('opp_worker_econ_eff_4m_6m_avg'),'/w')}**"
+                    f" | `EconEffCol` = **{cur_all.get('econ_eff_collapse_matches', 0)}**"
                 )
         print(
             f"\n### Stall, Retreat & Waste Watch (`W7/W8-LOOP-2`): "

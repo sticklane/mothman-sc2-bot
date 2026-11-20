@@ -175,6 +175,7 @@
  SC2-PLACEMENT-POS-CACHE
  SC2-ADDON-SLOT-BLOCKED-CACHE
  SC2-TERRAN-5X3-MISS-CACHE
+ SC2-TERRAN-5X3-MISS-STREAK
  SC2-TUMOR-PLACEMENT-CACHE
  SC2-PLACEMENT-CACHE-TTL
  SC2-LAST-TUMOR-RPC-LOOP
@@ -4275,6 +4276,8 @@
             (hash-remove! SC2-PLACEMENT-POS-CACHE k))
           (when (memv ab '(321 328 329))
             (define tb (car target-bldgs))
+            (hash-set! SC2-TERRAN-5X3-MISS-STREAK tb
+                       (add1 (hash-ref SC2-TERRAN-5X3-MISS-STREAK tb 0)))
             (hash-set! SC2-TERRAN-5X3-MISS-CACHE
                        (if (and fail-x fail-y)
                            (list tb (inexact->exact (round fail-x)) (inexact->exact (round fail-y)))
@@ -4362,6 +4365,7 @@
 (define SC2-PLACEMENT-POS-CACHE (make-hash))
 (define SC2-ADDON-SLOT-BLOCKED-CACHE (make-hash))
 (define SC2-TERRAN-5X3-MISS-CACHE (make-hash))
+(define SC2-TERRAN-5X3-MISS-STREAK (make-hasheq))
 (define SC2-TUMOR-PLACEMENT-CACHE (make-hash))
 (define SC2-MACRO-ABILITY-LAST-LOOP (make-hash))
 
@@ -4554,6 +4558,7 @@
     (hash-clear! SC2-PLACEMENT-POS-CACHE)
     (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
     (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+    (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
     (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
     (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
     (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
@@ -7202,6 +7207,8 @@
               (remove-duplicates
                (cond
                  [(null? anchors) (append inmain-em-pts th-em-anchors (list safe-base-anchor))]
+                 [(and needs-terran-addon-clearance? prefer-3x3-fallback?)
+                  (append anchors th-em-anchors (list safe-base-anchor))]
                  [needs-terran-addon-clearance?
                   (append th-em-anchors anchors (list safe-base-anchor))]
                  [emergency-rush-bldg?
@@ -7360,7 +7367,14 @@
                       (cons rel-raw 16)
                       (cons raw-cands 64))
                 64))
-             (query-single-batch unified-3x3)]
+             (define res-3x3 (query-single-batch unified-3x3))
+             (when (and (not res-3x3)
+                        canon-bldg
+                        (not require-addon-clear?)
+                        (not (unbox rpc-deferred-by-budget?)))
+               (hash-set! SC2-TERRAN-5X3-MISS-STREAK canon-bldg
+                          (add1 (hash-ref SC2-TERRAN-5X3-MISS-STREAK canon-bldg 0))))
+             res-3x3]
             [else
              (define rel-raw (relaxed-safety-cands))
              (define rel-pts
@@ -7378,6 +7392,8 @@
              (define-values (cands-q q-results) (query-dual-batch unified-dual))
              (define (record-5x3-miss!)
                (when (and canon-bldg (not require-addon-clear?))
+                 (hash-set! SC2-TERRAN-5X3-MISS-STREAK canon-bldg
+                            (add1 (hash-ref SC2-TERRAN-5X3-MISS-STREAK canon-bldg 0)))
                  (hash-set! SC2-TERRAN-5X3-MISS-CACHE
                             (list canon-bldg
                                   (inexact->exact (round anchor-x))
@@ -7416,8 +7432,10 @@
                               [idx (in-naturals 0)]
                               #:when (= (list-ref q-results (* 2 idx)) 1))
                     pt))
-                (when (and (not both-valid-pt) (not wall-seal-pt))
-                  (record-5x3-miss!))
+                (if (and (not both-valid-pt) (not wall-seal-pt))
+                    (record-5x3-miss!)
+                    (when (and canon-bldg both-valid-pt)
+                      (hash-set! SC2-TERRAN-5X3-MISS-STREAK canon-bldg 0)))
                 (cond
                   [require-addon-clear? both-valid-pt]
                   [(or wall-seal-pt both-valid-pt main-valid-pt) => values]
@@ -8272,6 +8290,38 @@
       (set! a-hp (+ a-hp (sc2-unit-health u) (sc2-unit-shield u)))))
   (values e-cnt e-hp a-hp))
 
+;; L25-P0-1 (`#21`/`#33` 30/w -> 55/w): Anti-harass mineral-line threat classification!
+;; Exclude Phoenixes (`78`) and non-ground-damaging air/support units from forcing full
+;; mineral-line evacuations, and distinguish heavy siege/splash/harass killers (`>= 2` w/
+;; `e-hp > 1.5 * a-hp`) from light poke units (`>= 3` ground-damaging enemies required).
+(define SC2-NON-GROUND-HARASS-COMBAT-TYPES
+  (seteqv 12 13 14 15 16 17 35 54 56 78 81 82 106 112 129 136 499))
+(define SC2-HEAVY-GROUND-THREAT-TYPES
+  (seteqv 4 9 32 33 50 52 53 55 57 75 76 79 80 83 108 109 111 114 141
+          484 494 495 496 498 500 502 503 688 691 694 734))
+
+(define (townhall-combat-unsafe-eval? th enemy-combat-units ally-combat-units)
+  (define gnd-dmg-enemies
+    (filter (lambda (u)
+              (not (set-member? SC2-NON-GROUND-HARASS-COMBAT-TYPES (sc2-unit-unit-type u))))
+            enemy-combat-units))
+  (define heavy-gnd-enemies
+    (filter (lambda (u)
+              (set-member? SC2-HEAVY-GROUND-THREAT-TYPES (sc2-unit-unit-type u)))
+            gnd-dmg-enemies))
+  (define-values (g-cnt g-hp a-hp)
+    (townhall-combat-metrics th gnd-dmg-enemies ally-combat-units 10.5))
+  (define-values (h-cnt h-hp _ha)
+    (townhall-combat-metrics th heavy-gnd-enemies ally-combat-units 10.5))
+  (define-values (e-cnt-fire _ef _af)
+    (townhall-combat-metrics th gnd-dmg-enemies ally-combat-units 15.0))
+  (define max-hp (sc2-unit-health-max th))
+  (or (and (>= g-cnt 3) (> g-hp (* 1.3 a-hp)))
+      (and (>= h-cnt 2) (> h-hp (* 1.5 a-hp)))
+      (and (> max-hp 0.0)
+           (< (sc2-unit-health th) (* 0.35 max-hp))
+           (>= e-cnt-fire 1))))
+
 (define (townhall-offline? th mineral-fields enemy-units [ally-units '()])
   (define-values (_near _far local-mins)
     (classify-townhall-mineral-patches th mineral-fields 11.5 8))
@@ -8287,16 +8337,8 @@
                    (not (sc2-unit-is-structure? u))
                    (not (memq sym '(larva egg overlord overseer observer warp-prism mule)))))
             ally-units))
-  (define-values (e-cnt e-hp a-hp)
-    (townhall-combat-metrics th enemy-combat-units ally-combat-units 10.5))
-  (define-values (e-cnt-fire _e-hp-fire _a-hp-fire)
-    (townhall-combat-metrics th enemy-combat-units ally-combat-units 15.0))
-  (define max-hp (sc2-unit-health-max th))
   (or (null? local-mins)
-      (and (>= e-cnt 2) (> e-hp (* 1.3 a-hp)))
-      (and (> max-hp 0.0)
-           (< (sc2-unit-health th) (* 0.30 max-hp))
-           (>= e-cnt-fire 1))))
+      (townhall-combat-unsafe-eval? th enemy-combat-units ally-combat-units)))
 
 (define (frame0-pro-worker-split-commands obs)
   (cond
@@ -8554,15 +8596,7 @@
     sorted)
 
   (define (th-combat-unsafe? th)
-    (define-values (e-cnt e-hp a-hp)
-      (townhall-combat-metrics th enemy-combat-units ally-combat-units 10.5))
-    (define-values (e-cnt-fire _ef _af)
-      (townhall-combat-metrics th enemy-combat-units ally-combat-units 15.0))
-    (define max-hp (sc2-unit-health-max th))
-    (or (and (>= e-cnt 2) (> e-hp (* 1.3 a-hp)))
-        (and (> max-hp 0.0)
-             (< (sc2-unit-health th) (* 0.30 max-hp))
-             (>= e-cnt-fire 1))))
+    (townhall-combat-unsafe-eval? th enemy-combat-units ally-combat-units))
 
   (define (th-local-offline? th)
     (define-values (_near _far local-mins)
@@ -8697,14 +8731,21 @@
   (define safe-ready-gas-bldgs
     (filter (lambda (u) (gas-near-any-th? u safe-gas-ready-townhalls))
             ready-gas-bldgs))
+  ;; L25-P0-1 (`#33` GasZeroFreeze 1 -> 0): Sort `safe-under-gas` by `gas-bldg-threat-score`
+  ;; FIRST (200-pt buckets, matching `emergency-gas-score`!) and tie-break by `gas-eff-assigned`,
+  ;; so a camped Natural geyser NEVER steals gas assignments from a zero-threat Main geyser!
   (define safe-under-gas
     (sort
      (filter (lambda (u)
                (< (gas-eff-assigned u)
                   (max SC2-IDEAL-WORKERS-PER-GEYSER (sc2-unit-ideal-harvesters u))))
              safe-ready-gas-bldgs)
-     <
-     #:key gas-eff-assigned))
+     (lambda (a b)
+       (define sa (gas-bldg-threat-score a))
+       (define sb (gas-bldg-threat-score b))
+       (if (< (abs (- sa sb)) 200.0)
+           (< (gas-eff-assigned a) (gas-eff-assigned b))
+           (< sa sb)))))
 
   ;; W17-P0-3 / L20-P0-1 (`#28` `GasZeroFreeze` 1 -> 0): When no ready gas building sits at a
   ;; combat-safe TownHall and vespene is critically low, score ALL live `ready-gas-bldgs` with a
@@ -9637,6 +9678,7 @@
       (hash-clear! SC2-PLACEMENT-POS-CACHE)
       (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
       (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+      (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
       (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
       (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
       (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
@@ -9666,6 +9708,7 @@
       (hash-clear! SC2-PLACEMENT-POS-CACHE)
       (hash-clear! SC2-ADDON-SLOT-BLOCKED-CACHE)
       (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+      (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
       (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
       (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
       (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
@@ -12053,25 +12096,58 @@
                                  (let ([ep (sc2-unit-pos e)])
                                    (<= (pt-dist req-x req-y (sc2-point3d-x ep) (sc2-point3d-y ep)) 6.0))))
                           enemy-units)))
-            (define pylon-anchors
-              (if (or (null? raw-pylon-anchors) (null? enemy-units))
-                  raw-pylon-anchors
+            (define cur-gw-count
+              (if (eq? norm 'gateway)
+                  (count (lambda (s)
+                           (memq (sc2-id->unit-symbol (sc2-unit-unit-type s) 'unknown)
+                                 '(gateway warp-gate)))
+                         self-structures)
+                  0))
+            (define wide-gateway4-fallback?
+              (and (eq? norm 'gateway) (>= cur-gw-count 3)))
+            (define-values (uncontested-pylons pylon-anchors)
+              (if (null? raw-pylon-anchors)
+                  (values '() '())
                   (let-values ([(safe-p cont-p)
-                                (partition (lambda (pt)
-                                             (not (ormap (lambda (e)
-                                                           (and (not (sc2-unit-is-flying e))
-                                                                (sc2-unit-targetable-enemy-combat? e)
-                                                                (let ([ep (sc2-unit-pos e)])
-                                                                  (<= (pt-dist (car pt) (cdr pt)
-                                                                               (sc2-point3d-x ep) (sc2-point3d-y ep))
-                                                                      6.5))))
-                                                         enemy-units)))
-                                           raw-pylon-anchors)])
+                                (if (null? enemy-units)
+                                    (values raw-pylon-anchors '())
+                                    (partition (lambda (pt)
+                                                 (not (ormap (lambda (e)
+                                                               (and (not (sc2-unit-is-flying e))
+                                                                    (sc2-unit-targetable-enemy-combat? e)
+                                                                    (let ([ep (sc2-unit-pos e)])
+                                                                      (<= (pt-dist (car pt) (cdr pt)
+                                                                                   (sc2-point3d-x ep) (sc2-point3d-y ep))
+                                                                          6.5))))
+                                                             enemy-units)))
+                                               raw-pylon-anchors))])
                     (define ordered-safe
-                      (if (and req-contested? (< cur-loop 5400) (pair? safe-p) (pair? (cdr safe-p)))
-                          (sort safe-p < #:key (lambda (pt) (pt-dist home-x home-y (car pt) (cdr pt))))
-                          safe-p))
-                    (append ordered-safe cont-p))))
+                      (cond
+                        [(and req-contested? (< cur-loop 5400) (pair? safe-p) (pair? (cdr safe-p)))
+                         (sort safe-p < #:key (lambda (pt) (pt-dist home-x home-y (car pt) (cdr pt))))]
+                        ;; L25-P0-1 (`#33` ProdPlaceStall): For Protoss `gateway #4+`, order ALL uncontested
+                        ;; completed Pylons least-crowded-first (including natural/3rd Pylons!) so crowded
+                        ;; Main Pylons never starve late-game Gateway scaling!
+                        [(and wide-gateway4-fallback? (pair? safe-p) (pair? (cdr safe-p)))
+                         (define struct-pts
+                           (for/list ([s (in-list self-structures)]
+                                      #:when (not (sc2-unit-is-flying s)))
+                             (define sp (sc2-unit-pos s))
+                             (cons (sc2-point3d-x sp) (sc2-point3d-y sp))))
+                         (map first
+                              (sort
+                               (for/list ([pt (in-list safe-p)])
+                                 (define crowd
+                                   (count (lambda (sp)
+                                            (<= (pt-dist (car pt) (cdr pt) (car sp) (cdr sp)) 6.5))
+                                          struct-pts))
+                                 (list pt crowd (pt-dist req-x req-y (car pt) (cdr pt))))
+                               (lambda (a b)
+                                 (if (not (= (second a) (second b)))
+                                     (< (second a) (second b))
+                                     (< (third a) (third b))))))]
+                        [else safe-p]))
+                    (values ordered-safe (append ordered-safe cont-p)))))
             (define search-anchors (if (pair? pylon-anchors) pylon-anchors (list (cons req-x req-y))))
             (define-values (px py)
               (values (caar search-anchors) (cdar search-anchors)))
@@ -12084,10 +12160,10 @@
                                                         (sc2-point2d-y pt)
                                                         power-sources
                                                         completed-pylons))))
-            (define primary-x (if (and req-powered? (not req-contested?)) req-x px))
-            (define primary-y (if (and req-powered? (not req-contested?)) req-y py))
+            (define primary-x (if (and req-powered? (not req-contested?) (not wide-gateway4-fallback?)) req-x px))
+            (define primary-y (if (and req-powered? (not req-contested?) (not wide-gateway4-fallback?)) req-y py))
             (define eff-anchors
-              (if (and req-powered? (not req-contested?))
+              (if (and req-powered? (not req-contested?) (not wide-gateway4-fallback?))
                   (remove-duplicates (cons (cons req-x req-y) search-anchors))
                   (remove-duplicates (append search-anchors (if req-powered? (list (cons req-x req-y)) '())))))
             (define protoss-budget-before (unbox step-placement-rpc-budget))
@@ -12106,12 +12182,14 @@
                                                      #:power-sources power-sources
                                                      #:rpc-budget step-placement-rpc-budget
                                                      #:cur-loop cur-loop)))
+            (define protoss-tried-0?
+              (or (< (unbox step-placement-rpc-budget) protoss-budget-before)
+                  (not (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))))
             (define place-pt
               (cond
                 [skip-unpowered-cannon? #f]
                 [(powered-place-pt? place-pt0) place-pt0]
                 ;; Only run secondary anchor search if `place-pt0` returned an unpowered non-#f point;
-                ;; if `place-pt0` was #f, `eff-anchors` already searched all Pylons in one batched RPC!
                 [(and place-pt0 (not (and (= primary-x px) (= primary-y py))))
                  (define pt1
                    (find-verified-building-placement ws-conn ab-id px py units
@@ -12128,6 +12206,29 @@
                                                      #:rpc-budget step-placement-rpc-budget
                                                      #:cur-loop cur-loop))
                  (and (powered-place-pt? pt1) pt1)]
+                ;; L25-P0-1 (`#33` ProdPlaceStall): For `gateway #4+`, if primary Pylon cluster failed
+                ;; on an active search, widen fallback across ALL remaining uncontested completed Pylons!
+                [(and wide-gateway4-fallback? protoss-tried-0?)
+                 (define rem-safe-pylons
+                   (filter (lambda (pt) (> (pt-dist primary-x primary-y (car pt) (cdr pt)) 4.0))
+                           uncontested-pylons))
+                 (and (pair? rem-safe-pylons)
+                      (let* ([rx (caar rem-safe-pylons)]
+                             [ry (cdar rem-safe-pylons)]
+                             [pt2 (find-verified-building-placement ws-conn ab-id rx ry units
+                                                                    #:min-spacing 2.0
+                                                                    #:max-radius 6.5
+                                                                    #:step 1.0
+                                                                    #:extra-reserved-points step-reserved-build-pts
+                                                                    #:anchor-points rem-safe-pylons
+                                                                    #:reserved-aabbs reserved-aabbs
+                                                                    #:expansion-pads all-expansion-pads
+                                                                    #:bldg-sym norm
+                                                                    #:game-info eff-game-info
+                                                                    #:power-sources power-sources
+                                                                    #:rpc-budget step-placement-rpc-budget
+                                                                    #:cur-loop cur-loop)])
+                        (and (powered-place-pt? pt2) pt2)))]
                 [else #f]))
             (cond
               [place-pt
@@ -12435,9 +12536,61 @@
                                  (let ([ep (sc2-unit-pos e)])
                                    (<= (pt-dist req-x req-y (sc2-point3d-x ep) (sc2-point3d-y ep)) 5.5))))
                           enemy-units)))
+            ;; L25-P0-1 (`#17/#08` ProdPlaceStall): After 2 consecutive `5x3` Terran misses for
+            ;; `barracks #4+` (`cur-rax-count >= 3`), fall back immediately to pure `3x3` across
+            ;; ALL safe completed TownHalls (immune to Depot-completion `cur-struct-sig` resets)!
+            (define cur-rax-count
+              (if (eq? norm 'barracks)
+                  (count (lambda (s)
+                           (and (not (sc2-unit-is-flying s))
+                                (eq? (sc2-id->unit-symbol (sc2-unit-unit-type s) 'unknown) 'barracks)))
+                         self-structures)
+                  0))
+            (define rax4-fast-3x3?
+              (and (eq? norm 'barracks)
+                   (>= cur-rax-count 3)
+                   (>= (hash-ref SC2-TERRAN-5X3-MISS-STREAK 'barracks 0) 2)))
             (define terran-5x3-missed?
               (and is-terran-prod-bldg?
-                   (terran-5x3-miss-active? norm req-x req-y cur-loop)))
+                   (or rax4-fast-3x3?
+                       (terran-5x3-miss-active? norm req-x req-y cur-loop))))
+            (define safe-completed-th-anchors
+              (if rax4-fast-3x3?
+                  (let* ([comp-ths
+                          (for/list ([th (in-list townhalls)]
+                                     #:when (and (>= (sc2-unit-build-progress th) SC2-BUILD-COMPLETE-PROGRESS)
+                                                 (not (sc2-unit-is-flying th))))
+                            (define tp (sc2-unit-pos th))
+                            (cons (sc2-point3d-x tp) (sc2-point3d-y tp)))]
+                         [enemy-gnd
+                          (for/list ([e (in-list enemy-units)]
+                                     #:when (and (not (sc2-unit-is-flying e))
+                                                 (sc2-unit-targetable-enemy-combat? e)))
+                            (define ep (sc2-unit-pos e))
+                            (cons (sc2-point3d-x ep) (sc2-point3d-y ep)))]
+                         [safe-ths
+                          (filter (lambda (tp)
+                                    (not (ormap (lambda (ep)
+                                                  (<= (pt-dist (car tp) (cdr tp) (car ep) (cdr ep)) 10.0))
+                                                enemy-gnd)))
+                                  comp-ths)]
+                         [struct-pts
+                          (for/list ([s (in-list self-structures)]
+                                     #:when (not (sc2-unit-is-flying s)))
+                            (define sp (sc2-unit-pos s))
+                            (cons (sc2-point3d-x sp) (sc2-point3d-y sp)))])
+                    (map first
+                         (sort
+                          (for/list ([tp (in-list safe-ths)])
+                            (define crowd
+                              (count (lambda (sp) (<= (pt-dist (car tp) (cdr tp) (car sp) (cdr sp)) 12.0))
+                                     struct-pts))
+                            (list tp crowd (pt-dist req-x req-y (car tp) (cdr tp))))
+                          (lambda (a b)
+                            (if (not (= (second a) (second b)))
+                                (< (second a) (second b))
+                                (< (third a) (third b)))))))
+                  '()))
             (define early-rush-1base-inmain?
               (and req-contested-by-rush?
                    (< cur-loop 5400)
@@ -12446,6 +12599,8 @@
             (define eff-req-x
               (cond
                 [early-rush-1base-inmain? (caar inmain-safe-anchors)]
+                [(and rax4-fast-3x3? (pair? safe-completed-th-anchors))
+                 (caar safe-completed-th-anchors)]
                 [(and (or req-contested-by-rush? terran-5x3-missed?)
                       is-terran-prod-bldg?
                       (pair? th-overflow-anchors))
@@ -12456,6 +12611,8 @@
             (define eff-req-y
               (cond
                 [early-rush-1base-inmain? (cdar inmain-safe-anchors)]
+                [(and rax4-fast-3x3? (pair? safe-completed-th-anchors))
+                 (cdar safe-completed-th-anchors)]
                 [(and (or req-contested-by-rush? terran-5x3-missed?)
                       is-terran-prod-bldg?
                       (pair? th-overflow-anchors))
@@ -12469,6 +12626,11 @@
                  [early-rush-1base-inmain?
                   (append inmain-safe-anchors
                           th-overflow-anchors
+                          (list (cons home-x home-y) (cons req-x req-y)))]
+                 [(and rax4-fast-3x3? (pair? safe-completed-th-anchors))
+                  (append safe-completed-th-anchors
+                          th-overflow-anchors
+                          inmain-safe-anchors
                           (list (cons home-x home-y) (cons req-x req-y)))]
                  [(and (or req-contested-by-rush? terran-5x3-missed?) is-terran-prod-bldg?)
                   (append th-overflow-anchors
@@ -12488,7 +12650,8 @@
                           inmain-safe-anchors
                           (list (cons home-x home-y))
                           th-overflow-anchors)])))
-            (define place-pt
+            (define std-bud-before (unbox step-placement-rpc-budget))
+            (define place-pt0
               (or repower-place-pt
                   (and (memq norm '(command-center nexus hatchery))
                        (> (pt-dist home-x home-y req-x req-y) SC2-BASE-RESOURCE-RADIUS)
@@ -12512,6 +12675,33 @@
                                                     #:rpc-budget step-placement-rpc-budget
                                                     #:cur-loop cur-loop
                                                     #:prefer-3x3-fallback? terran-5x3-missed?)))
+            (define std-tried-0?
+              (or (< (unbox step-placement-rpc-budget) std-bud-before)
+                  (not (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))))
+            (define place-pt
+              (or place-pt0
+                  (and rax4-fast-3x3?
+                       std-tried-0?
+                       (let ([other-safe-ths
+                              (filter (lambda (pt) (> (pt-dist eff-req-x eff-req-y (car pt) (cdr pt)) 4.0))
+                                      safe-completed-th-anchors)])
+                         (and (pair? other-safe-ths)
+                              (find-verified-building-placement ws-conn ab-id
+                                                                (caar other-safe-ths)
+                                                                (cdar other-safe-ths)
+                                                                units
+                                                                #:min-spacing 2.0
+                                                                #:max-radius 15.0
+                                                                #:step 1.0
+                                                                #:extra-reserved-points step-reserved-build-pts
+                                                                #:anchor-points other-safe-ths
+                                                                #:reserved-aabbs reserved-aabbs
+                                                                #:expansion-pads all-expansion-pads
+                                                                #:bldg-sym norm
+                                                                #:game-info eff-game-info
+                                                                #:rpc-budget step-placement-rpc-budget
+                                                                #:cur-loop cur-loop
+                                                                #:prefer-3x3-fallback? #t))))))
             (when place-pt
               (reserve-step-build-pt! place-pt ab-id)
               (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))

@@ -7976,7 +7976,7 @@
                 "Protoss reaching 310M/210G with open RoboticsFacility + RoboticsBay must train Colossus")
   ;; (b) 2-base Protoss at 750M/250G (with 3rd Nexus already warping in) & eff-phase-supply 76 builds extra Gateway AND 2nd RoboticsFacility
   (define rt-p-float (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
-  (define (mk-p-float-obs frm mins gas-amt)
+  (define (mk-p-float-obs frm mins gas-amt [third-warping? #f])
     (hash 'frame frm 'minerals mins 'gas gas-amt 'supply-used 76 'supply-cap 102 'supply-left 26
           'mineral-harvesters 36 'vespene-harvesters 12 'enemy-race 'Terran
           'researched-upgrades '(warp-gate-research extended-thermal-lance)
@@ -7986,38 +7986,42 @@
                               (for/list ([s (in-range 8)])
                                 (hash 'id (+ 8860 s) 'type 'stalker 'x 54.0 'y 32.5 'hp 80 'shield 80))
                               (list (hash 'id 8880 'type 'observer 'x 55.0 'y 32.5 'hp 40 'shield 20)))
-          'ally-buildings (list (hash 'id 8801 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
-                                (hash 'id 8802 'type 'nexus 'x 58.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
-                                (hash 'id 8803 'type 'pylon 'x 36.0 'y 35.0 'hp 200 'shield 200 'build-progress 1.0)
-                                (hash 'id 8804 'type 'assimilator 'x 28.5 'y 35.5 'hp 450 'shield 450 'build-progress 1.0)
-                                (hash 'id 8805 'type 'assimilator 'x 28.5 'y 29.5 'hp 450 'shield 450 'build-progress 1.0)
-                                (hash 'id 8806 'type 'gateway 'x 36.5 'y 32.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
-                                (hash 'id 8807 'type 'gateway 'x 36.5 'y 36.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
-                                (hash 'id 8808 'type 'gateway 'x 36.5 'y 40.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
-                                (hash 'id 8809 'type 'cybernetics-core 'x 40.5 'y 32.5 'hp 550 'shield 550 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
-                                (hash 'id 8810 'type 'robotics-facility 'x 44.5 'y 32.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
-                                (hash 'id 8811 'type 'twilight-council 'x 40.5 'y 36.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 0))
+          'ally-buildings (append
+                           (list (hash 'id 8801 'type 'nexus 'x 32.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                 (hash 'id 8802 'type 'nexus 'x 58.5 'y 32.5 'hp 1000 'shield 1000 'build-progress 1.0)
+                                 (hash 'id 8803 'type 'pylon 'x 36.0 'y 35.0 'hp 200 'shield 200 'build-progress 1.0)
+                                 (hash 'id 8804 'type 'assimilator 'x 28.5 'y 35.5 'hp 450 'shield 450 'build-progress 1.0)
+                                 (hash 'id 8805 'type 'assimilator 'x 28.5 'y 29.5 'hp 450 'shield 450 'build-progress 1.0)
+                                 (hash 'id 8806 'type 'gateway 'x 36.5 'y 32.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
+                                 (hash 'id 8807 'type 'gateway 'x 36.5 'y 36.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
+                                 (hash 'id 8808 'type 'gateway 'x 36.5 'y 40.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
+                                 (hash 'id 8809 'type 'cybernetics-core 'x 40.5 'y 32.5 'hp 550 'shield 550 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
+                                 (hash 'id 8810 'type 'robotics-facility 'x 44.5 'y 32.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
+                                 (hash 'id 8811 'type 'twilight-council 'x 40.5 'y 36.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 0))
+                           (if third-warping?
+                               (list (hash 'id 8812 'type 'nexus 'x 39.5 'y 59.5 'hp 400 'shield 400 'build-progress 0.2))
+                               '()))
           'enemy-units '()))
-  (void (step-live-bot-runtime! rt-p-float (mk-p-float-obs 6580 420 50)))
+  (void (step-live-bot-runtime! rt-p-float (mk-p-float-obs 6580 420 50 #f)))
   (define res-p-float
-    (step-live-bot-runtime! rt-p-float (mk-p-float-obs 6600 750 250)))
+    (step-live-bot-runtime! rt-p-float (mk-p-float-obs 6600 750 250 #t)))
   (define acts-p-float (hash-ref res-p-float 'actions '()))
   (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'gateway))) acts-p-float)
                 "2-base Protoss floating 750M with 3 Gateways must scale extra Gateways toward 8")
   (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'robotics-facility))) acts-p-float)
                 "Protoss floating 750M/250G at >= 72 supply must build 2nd RoboticsFacility")
-  ;; (c) Earlier vs-Terran RoboticsBay at 54 supply & 1 Immortal
+  ;; (c) Earlier vs-Terran RoboticsBay at 58 supply, >= 4 Gateways & 16 army (1 Immortal)
   (define rt-p-bay (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
   (define res-p-bay
     (step-live-bot-runtime!
      rt-p-bay
-     (hash 'frame 5000 'minerals 300 'gas 200 'supply-used 54 'supply-cap 78 'supply-left 24
+     (hash 'frame 5000 'minerals 300 'gas 200 'supply-used 58 'supply-cap 78 'supply-left 20
            'mineral-harvesters 32 'vespene-harvesters 10 'enemy-race 'Terran
            'researched-upgrades '(warp-gate-research)
            'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
            'ally-units (append (for/list ([i (in-range 36)])
                                  (hash 'id (+ 8900 i) 'type 'probe 'x 32.5 'y 32.5 'hp 20 'shield 20))
-                               (for/list ([s (in-range 4)])
+                               (for/list ([s (in-range 6)])
                                  (hash 'id (+ 8950 s) 'type 'stalker 'x 54.0 'y 32.5 'hp 80 'shield 80))
                                (list (hash 'id 8970 'type 'immortal 'x 54.5 'y 32.5 'hp 200 'shield 100)
                                      (hash 'id 8971 'type 'observer 'x 55.0 'y 32.5 'hp 40 'shield 20)))
@@ -8029,6 +8033,7 @@
                                  (hash 'id 8906 'type 'gateway 'x 36.5 'y 32.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
                                  (hash 'id 8907 'type 'gateway 'x 36.5 'y 36.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
                                  (hash 'id 8908 'type 'gateway 'x 36.5 'y 40.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
+                                 (hash 'id 8912 'type 'gateway 'x 36.5 'y 44.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
                                  (hash 'id 8909 'type 'cybernetics-core 'x 40.5 'y 32.5 'hp 550 'shield 550 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
                                  (hash 'id 8910 'type 'robotics-facility 'x 44.5 'y 32.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1))
            'enemy-units '())))
@@ -8237,13 +8242,13 @@
     ;; (a) Protoss RoboticsBay cooldown + cancel unblock
     (define rt-cd-p (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
     (define (mk-p-bay-cd-obs frm)
-      (hash 'frame frm 'minerals 300 'gas 200 'supply-used 54 'supply-cap 78 'supply-left 24
+      (hash 'frame frm 'minerals 300 'gas 200 'supply-used 58 'supply-cap 78 'supply-left 20
             'mineral-harvesters 32 'vespene-harvesters 10 'enemy-race 'Terran
             'researched-upgrades '(warp-gate-research)
             'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
             'ally-units (append (for/list ([i (in-range 36)])
                                   (hash 'id (+ 18500 i) 'type 'probe 'x 32.5 'y 32.5 'hp 20 'shield 20))
-                                (for/list ([s (in-range 4)])
+                                (for/list ([s (in-range 6)])
                                   (hash 'id (+ 18550 s) 'type 'stalker 'x 54.0 'y 32.5 'hp 80 'shield 80))
                                 (list (hash 'id 18570 'type 'immortal 'x 54.5 'y 32.5 'hp 200 'shield 100)
                                       (hash 'id 18571 'type 'observer 'x 55.0 'y 32.5 'hp 40 'shield 20)))
@@ -8255,6 +8260,7 @@
                                   (hash 'id 18586 'type 'gateway 'x 36.5 'y 32.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
                                   (hash 'id 18587 'type 'gateway 'x 36.5 'y 36.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
                                   (hash 'id 18588 'type 'gateway 'x 36.5 'y 40.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
+                                  (hash 'id 18592 'type 'gateway 'x 36.5 'y 44.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
                                   (hash 'id 18589 'type 'cybernetics-core 'x 40.5 'y 32.5 'hp 550 'shield 550 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
                                   (hash 'id 18590 'type 'robotics-facility 'x 44.5 'y 32.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1))
             'enemy-units '()))
@@ -13861,6 +13867,136 @@
       #:open-facility-slots (hasheq 'townhall 2 'gateway 1))))
   (assert-true! (not (not (memq 'probe (macro-brain-decision-scheduled-ids l24-p-probe-untouched))))
                 "L24-P0-2 Guard: Protoss continuous Probe engine at 115M/100G must remain 100% untouched")
+
+  ;; 51.13 Loop 25 (`L25-P0-2`) Regressions: Protoss Fast WarpGate + Forge/RoboBay Deferral + PvP Nat,
+  ;;       Zerg 2-Base Drone Cap (<=40) + Quad-Tech Deferral, Terran Static-Def Cap + 150M 1-Base CC Lock
+  ;; (a) Protoss Fast WarpGate schedules immediately once CyberCore finishes (u >= 620)
+  (reset-macro-escrow-tracker!)
+  (define l25-p-fast-wg
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 2800
+      #:minerals 90 #:gas 60 #:supply-used 24 #:supply-cap 39 #:workers 22 #:active-bases 2
+      #:mineral-harvesters 19 #:gas-harvesters 3
+      #:army-supply 2 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:unit-counts (hasheq 'probe 22 'adept 1)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 1 'cybernetics-core 1))))
+  (assert-true! (not (not (memq 'warp-gate-research (macro-brain-decision-scheduled-ids l25-p-fast-wg))))
+                "L25-P0-2 #21/#24/#27: Protoss must research WarpGate immediately once CyberCore finishes")
+
+  ;; (b) #27 Protoss 3-base with 3 WarpGates (<6 GW) defers Forge & RoboticsBay, scales Gateway instead
+  (reset-macro-escrow-tracker!)
+  (define l25-p-3base-defer
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Zerg #:frame 7200
+      #:minerals 650 #:gas 250 #:supply-used 68 #:supply-cap 94 #:workers 48 #:active-bases 3
+      #:mineral-harvesters 36 #:gas-harvesters 12
+      #:army-supply 20 #:enemy-threat-supply 0 #:under-attack? #f
+      #:researched-upgrades '(warp-gate-research)
+      #:ready-building-counts (hasheq 'nexus 3 'pylon 7 'warp-gate 3 'cybernetics-core 1 'robotics-facility 1 'assimilator 4)
+      #:total-building-counts (hasheq 'nexus 3 'pylon 7 'warp-gate 3 'cybernetics-core 1 'robotics-facility 1 'assimilator 4)
+      #:unit-counts (hasheq 'probe 48 'stalker 6 'immortal 2)
+      #:open-facility-slots (hasheq 'townhall 3 'warp-gate 0 'robotics-facility 0))))
+  (assert-true! (and (not (memq 'forge (macro-brain-decision-scheduled-ids l25-p-3base-defer)))
+                     (not (memq 'robotics-bay (macro-brain-decision-scheduled-ids l25-p-3base-defer)))
+                     (not (not (memq 'gateway (macro-brain-decision-scheduled-ids l25-p-3base-defer)))))
+                "L25-P0-2 #27 Protoss: 3-base (<6 Gateways) must defer Forge/RoboticsBay and scale Gateways")
+
+  ;; (c) Unpressured PvP natural Nexus (< 160s) locks Nexus at f=2600, 260M
+  (reset-macro-escrow-tracker!)
+  (define l25-pvp-nat
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Protoss #:frame 2600
+      #:minerals 260 #:gas 40 #:supply-used 22 #:supply-cap 31 #:workers 20 #:active-bases 1
+      #:mineral-harvesters 17 #:gas-harvesters 3
+      #:army-supply 2 #:enemy-threat-supply 0 #:under-attack? #f
+      #:pending-upgrades '(warp-gate-research)
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:unit-counts (hasheq 'probe 20 'stalker 1)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 1))))
+  (assert-true! (eq? (macro-brain-decision-saving-for l25-pvp-nat) 'nexus)
+                "L25-P0-2 #21 PvP: Unpressured 1-base PvP at f=2600 (260M) must escrow natural Nexus (<160s)")
+
+  ;; (d) #19 Zerg 2-base Drone cap (<= 40 on 2 active Hatches) -> builds 3rd Hatch instead of Drone #41+
+  (reset-macro-escrow-tracker!)
+  (define l25-z-drone-cap
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 5800
+      #:minerals 450 #:gas 150 #:supply-used 58 #:supply-cap 78 #:workers 40 #:active-bases 2
+      #:mineral-harvesters 34 #:gas-harvesters 6
+      #:army-supply 18 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 2)
+      #:total-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 2)
+      #:unit-counts (hasheq 'drone 40 'queen 3 'roach 6 'overlord 9)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 6))))
+  (assert-true! (and (not (memq 'drone (macro-brain-decision-scheduled-ids l25-z-drone-cap)))
+                     (not (not (memq 'hatchery (macro-brain-decision-scheduled-ids l25-z-drone-cap)))))
+                "L25-P0-2 #19 Zerg: On 2 active Hatcheries at 40 Drones must cap Drones and drop 3rd Hatchery")
+
+  ;; (e) #19/#25/#31 Zerg quad-tech deferral (<3 Hatch / <20 army, no Air)
+  (reset-macro-escrow-tracker!)
+  (define l25-z-quad-defer
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 6000
+      #:minerals 260 #:gas 250 #:supply-used 56 #:supply-cap 78 #:workers 38 #:active-bases 2
+      #:mineral-harvesters 30 #:gas-harvesters 8
+      #:army-supply 18 #:enemy-threat-supply 0 #:under-attack? #f
+      #:researched-upgrades '(metabolic-boost)
+      #:ready-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'evolution-chamber 1 'extractor 3)
+      #:total-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'evolution-chamber 1 'extractor 3)
+      #:unit-counts (hasheq 'drone 38 'queen 3 'roach 4 'hydralisk 2 'overlord 9)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 5))))
+  (assert-true! (and (not (memq (macro-brain-decision-saving-for l25-z-quad-defer)
+                                '(lurker-den infestation-pit burrow evolution-chamber spire)))
+                     (not (ormap (lambda (s) (memq s '(lurker-den infestation-pit burrow evolution-chamber spire)))
+                                 (macro-brain-decision-scheduled-ids l25-z-quad-defer))))
+                "L25-P0-2 #19/#25 Zerg: <3 Hatcheries/<20 army (no Air) must defer LurkerDen/InfestPit/Burrow/2ndEvo/Spire")
+
+  ;; (f) #20/#32 Terran non-crisis static-def cap (Bunker <= 1, MissileTurret <= 1)
+  (reset-macro-escrow-tracker!)
+  (define l25-t-static-cap
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 6000
+      #:minerals 420 #:gas 150 #:supply-used 54 #:supply-cap 78 #:workers 38 #:active-bases 2
+      #:mineral-harvesters 30 #:gas-harvesters 8
+      #:army-supply 16 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 7 'barracks 3 'barracks-techlab 1
+                                      'factory 1 'factory-techlab 1 'starport 1 'engineering-bay 1
+                                      'bunker 1 'missile-turret 1 'refinery 3)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 7 'barracks 3 'barracks-techlab 1
+                                      'factory 1 'factory-techlab 1 'starport 1 'engineering-bay 1
+                                      'bunker 1 'missile-turret 1 'refinery 3)
+      #:unit-counts (hasheq 'scv 38 'marine 10 'siege-tank 2)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 1 'starport 1))))
+  (assert-true! (and (not (memq 'bunker (macro-brain-decision-scheduled-ids l25-t-static-cap)))
+                     (not (memq 'missile-turret (macro-brain-decision-scheduled-ids l25-t-static-cap))))
+                "L25-P0-2 #20/#32 Terran: Non-crisis Terran must cap Bunker <= 1 and MissileTurret <= 1")
+
+  ;; (g) #23/#26/#32 Terran 1-base Nat CC lock lowers to 150M once OC #1 started (T111Stall 5 -> <=1)
+  (reset-macro-escrow-tracker!)
+  (define l25-t-150m-nat-cc
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 2000
+      #:minerals 165 #:gas 100 #:supply-used 21 #:supply-cap 31 #:workers 19 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 3
+      #:army-supply 2 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 19 'marine 2)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l25-t-150m-nat-cc) 'command-center)
+                     (not (memq 'factory (macro-brain-decision-scheduled-ids l25-t-150m-nat-cc)))
+                     (not (memq 'scv (macro-brain-decision-scheduled-ids l25-t-150m-nat-cc))))
+                "L25-P0-2 #23/#26/#32 Terran: Peaceful 1-base with OC#1 at 165M/100G must lock Natural CC above Factory/SCV")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms

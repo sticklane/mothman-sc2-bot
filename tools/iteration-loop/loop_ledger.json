@@ -1752,6 +1752,76 @@
         "NEW ALL-TIME LATENCY ATH max=168.41ms (36/36 <=168.4ms!) + NEW ZEROS/ATLs: TvT0Tank=0, 1BaseLock=1 (P=0,Z=0), ZeroKillCol=2 ATL, Siege0DPS=4 ties ATL, OpenFault=0, WallTies=0, AirAAStarve=0, CloakLoss=0!"
       ],
       "promotion_gates_passed": "5/9 PASS (zero_crashes_and_rejects, ties_le_2 [0T], sup_blk_le_6pct [4.7%], every_race_wr_ge_33pct [P42/T33/Z50%!], tactics_suite_100pct [231/231]) — 0.02x from overall_trade_agg_ge_1_0x (0.98x) & 1-3w from every_race_w4_within_6_of_pro (7/9 Gates within reach in L25!)"
+    },
+    {
+      "id": "iter25_wave25",
+      "status": "completed_macro_and_invariants_breakthrough_below_hwm_trade",
+      "campaign": "loops_19_28_real_3d_visuals (7 of 10)",
+      "loop_self_improvements": [
+        "L25-LOOP-2 (@analyzer DONE #664 + @loop-architect compare-vs-pro.py): Added worker_econ_eff_4m_6m, opp_worker_econ_eff_4m_6m & Detector 19 econ_eff_collapse (<38/w with >=25w at m4..m6) to score-replay-batch.rkt & compare-vs-pro.py",
+        "L25-3D-VISUALS (@tactics-tester #670 + @loop-architect): Rendered 21/21 Real-3D SC2_x64 tactics duels + 8/8 Post-Match Real-3D replay clips (incl. #28 ZvCreepy 4.03x Corruptor dive, #11 Tvpuck 4.92x, #12 Pvpuck 5.38x, #30 PvCreepy Tempest DripFeed, #36 Pv12PoolBot Visual-QA, #10 Zvpuck WallTie, #34 Zv12PoolBot 5:17 hold!) + visual_report_iter25.md"
+      ],
+      "spec_summary": [
+        "L25-P0-1 (@wire-author): Threat-sorted safe-under-gas (GasZeroFreeze 1->0!), anti-harass mineral-line stability excl. Phoenix (EconEffCol 4->2, T=0/Z=0!), multi-base ProdPlaceStall fallback (5->3 ties ATL!) -> 641/641 wire tests",
+        "L25-P0-2 (@belief-author): Protoss Fast WarpGate@620 + fixed WarpGate 2x double-count + 4/6 Gateways before Forge/RoboBay + PvP Nat<160s; Zerg 2-base Drone cap<=40 & Quad-Tech deferral (SupBlk 3.8% ATL, SpireDrop 2->0!); Terran non-crisis Bunker/Turret<=1 & 150M 1-base Nat CC -> 18/18 belief suites, 2,325/2,325 run-all-tests, 0/0/0/0 starvation",
+        "L25-P0-3 (@runtime-author): Defensive Ground Counter-Volley Staging via attack-pos only (OBRet 1->0, OTRet 1->0!) + 0G gas-escrow fix for Barracks/Gateway + #36 PvZ Natural Nexus cancel -> A8Pro jumped 0.35->0.47 ATH (Terran ArmyVal@8m QUADRUPLED 338->1,338!), TradeMed +43% (0.23->0.33x), Chance 0-3->2-1, W@6m +2.3 (T +5.7 to 39/40 Pro!)"
+      ],
+      "rev": "usmznxnq 26301643 (parent ypyutsxs dcae777e)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261120_124816_iter25_wave25",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter25_wave25_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter25_wave25.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_wave18_final.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter25.md",
+      "clean_n": 36,
+      "record_clean": "14W-21L-1T (38.9% WR, 41.7% NL; 1 WallTie #10 Zvpuck; ALL 3 races >=33.3%!)",
+      "record_non_chance_clean": "12W-20L-1T (36.4% WR, 39.4% NL)",
+      "wr_pct_clean": 38.9,
+      "non_loss_pct": 41.7,
+      "trade_agg": 0.78,
+      "trade_med": 0.33,
+      "pk_army_avg": 3039.0,
+      "sup_blk_avg": 4.6,
+      "worker_econ_eff_4m_6m_avg": 48.0,
+      "econ_eff_collapse_matches": 2,
+      "endgame_home_stall_count": 0,
+      "own_base_retreat_frames": 884,
+      "own_territory_retreat_frames": 1196,
+      "non_combat_robo_waste_val": 0,
+      "zerg_non_ling_army_pct": 82.0,
+      "siege_range_zero_dps_losses": 6,
+      "cloaked_unit_damage_losses": 0,
+      "gas_rich_min_starved_matches": 3,
+      "one_base_lockout_matches": 1,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 7,
+      "prod_placement_stall_matches": 3,
+      "zero_kill_collapse_matches": 2,
+      "drip_feed_collapse_matches": 13,
+      "prod_idle_bank_freeze_matches": 0,
+      "gas_zero_harvest_freeze_matches": 0,
+      "spire_sched_drop_matches": 0,
+      "wall_timeout_ties": 1,
+      "army_val_4m_ratio_vs_pro": 0.82,
+      "army_val_8m_ratio_vs_pro": 0.47,
+      "wall_sec": 648.0,
+      "latency_summary": "avg=8.01ms (near-ATH), p95=13.80ms, tr_p95_worst=8.5ms, max=175.74ms (36/36 <=175.7ms, 0 spikes >=500ms, 0 action_rejects!)",
+      "by_race": {
+        "Protoss": {"record": "4W-8L-0T (33.3% WR)", "trade_agg": 0.68, "w4_alive_med": 26.0, "w6_alive_med": 43.0, "nat_sec": 129.0, "sup_blk": 4.8},
+        "Terran": {"record": "4W-8L-0T (33.3% WR, ArmyVal8m 4x 338->1,338!)", "trade_agg": 0.72, "w4_alive_med": 24.0, "w6_alive_med": 39.0, "nat_sec": 94.0, "sup_blk": 5.3},
+        "Zerg": {"record": "6W-5L-1T (50.0% WR, 58.3% NL, SupBlk 3.8% ATL!)", "trade_agg": 0.88, "w4_alive_med": 28.5, "w6_alive_med": 48.0, "nat_sec": 55.0, "sup_blk": 3.8}
+      },
+      "tactics_summary": {
+        "rev": "usmznxnq 8e211575 (iter25)",
+        "passed": "231/231 (100.0%, wire_rejects=0, novel 131/131)",
+        "sc2_duel21_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter25.json",
+        "sc2_duel21_summary": "10W-1L-10T (-1L!) | 1.57x Agg Trade | A:M=3.17 (+0.06) | Terran rebound 3W-1L-3T (1.18x, +0.38x, t07 0.00->2.18x W!) | Zerg undefeated 5W-0L-2T (2.25x, A:M 13.74) | Protoss undefeated 2W-0L-5T (1.45x) | 21/21 real-3D WebP+PNGs!"
+      },
+      "key_wins": [
+        "12 SIMULTANEOUS ZERO-INVARIANTS (ALL-TIME RECORD!): GasZeroFreeze=0, OBRet=0 (884f total, -99.5% vs W7!), OTRet=0, SpireDrop=0, RoboWaste=0, OpenFault=0, AirAAStarve=0, SuicideKite=0, IdleBankFreeze=0, HomeStall=0, SelfCancel=0, CloakLoss=0!",
+        "MASSIVE MID-GAME SCALING: A8Pro hit 0.47 ATH (+0.12), Terran ArmyVal@8m QUADRUPLED (338->1,338, W@6m 39/40 Pro, Nat 94s/109s, ONLY 1 Pro flag left!), TradeMed +43% (0.23->0.33x), EconEffCol 4->2 (T=0,Z=0), ProdPlaceStall 5->3 ATL, SupBlk 4.6% (Z 3.8% ATL)!",
+        "ALL 3 RACES >=33.3% WR (Zerg 6W-5L-1T = 50% WR / 58.3% NL, ZvZ 1.56x, ZvT 2-1; Chance flipped 0-3 -> 2-1; #34 Zv12PoolBot held 5:17 closest ever; #11 Tvpuck 4.92x, #12 Pvpuck 5.38x, #18 PvRusty 6.40x, #28 ZvCreepy 4.03x PkA 11,525!)"
+      ],
+      "promotion_gates_passed": "5/9 PASS (zero_crashes_and_rejects, ties_le_2 [1T], sup_blk_le_6pct [4.6%], every_race_wr_ge_33pct [P33/T33/Z50%], tactics_suite_100pct [231/231]) — Zerg W@4m 28.5/35 (-6.5) is 0.5w from every_race_w4_within_6_of_pro!"
     }
   ],
   "final_18_loop_summary": {
