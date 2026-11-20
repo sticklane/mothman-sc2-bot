@@ -14821,6 +14821,132 @@
   (assert-true! (not (ormap (lambda (b) (memq b (macro-brain-decision-scheduled-ids l31-p-21-zero-alive-workers)))
                             '(gateway robotics-facility twilight-council shield-battery forge)))
                 "L31-P0-2 #20/#21/H2H#06: Alive workers == 0 must suppress non-TownHall/non-supply building schedules")
+
+  ;; 51.20 Loop 32 (L32-P0-2): Air-Dominated Enemy Priority Inversion (#20/#22/#40/#42),
+  ;;       Proactive TvP/TvT Engineering Bay by 3:45 (#41), & Midgame Zerg Combat Unblock Past Hive/Hatch#4 Escrow (#10)
+  ;; (a) Air-Dominated Priority Inversion: >=4 enemy air & >= enemy ground demotes ground-only
+  ;;     siege-tank/roach/immortal/baneling <=420 blk=#f strictly below AA (viking-fighter@660+, starport#2+@660+, hydralisk)
+  (reset-macro-escrow-tracker!)
+  (define l32-t-20-banshee-viking
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 7200
+      #:minerals 185 #:gas 125 #:supply-used 52 #:supply-cap 78 #:workers 34 #:active-bases 2
+      #:mineral-harvesters 26 #:gas-harvesters 8
+      #:army-supply 18 #:enemy-threat-supply 18 #:under-attack? #t #:requires-anti-air? #t #:requires-detection? #t
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 7 'barracks 2 'engineering-bay 1
+                                      'missile-turret 2 'factory 1 'factory-techlab 1 'starport 1 'refinery 3)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 7 'barracks 2 'engineering-bay 1
+                                      'missile-turret 2 'factory 1 'factory-techlab 1 'starport 1 'refinery 3)
+      #:unit-counts (hasheq 'scv 34 'marine 12 'viking-fighter 6 'raven 1)
+      #:enemy-unit-counts (hasheq 'banshee 6)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 1 'starport 1))))
+  (reset-macro-escrow-tracker!)
+  (define l32-t-20-banshee-sp2
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 7250
+      #:minerals 185 #:gas 125 #:supply-used 54 #:supply-cap 78 #:workers 34 #:active-bases 2
+      #:mineral-harvesters 26 #:gas-harvesters 8
+      #:army-supply 20 #:enemy-threat-supply 18 #:under-attack? #t #:requires-anti-air? #t #:requires-detection? #t
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 7 'barracks 2 'engineering-bay 1
+                                      'missile-turret 2 'factory 1 'factory-techlab 1 'starport 1 'refinery 3)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 7 'barracks 2 'engineering-bay 1
+                                      'missile-turret 2 'factory 1 'factory-techlab 1 'starport 1 'refinery 3)
+      #:unit-counts (hasheq 'scv 34 'marine 12 'viking-fighter 7 'raven 1)
+      #:enemy-unit-counts (hasheq 'banshee 6)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 1 'starport 0))))
+  (reset-macro-escrow-tracker!)
+  (define l32-z-22-phoenix-hydra
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 8200
+      #:minerals 160 #:gas 100 #:supply-used 74 #:supply-cap 110 #:workers 46 #:active-bases 3
+      #:mineral-harvesters 36 #:gas-harvesters 10
+      #:army-supply 28 #:enemy-threat-supply 20 #:under-attack? #t #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1
+                                      'baneling-nest 1 'hydralisk-den 1 'extractor 5)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1
+                                      'baneling-nest 1 'hydralisk-den 1 'extractor 5)
+      #:unit-counts (hasheq 'drone 46 'queen 4 'roach 4 'zergling 10 'hydralisk 4 'overlord 12)
+      #:enemy-unit-counts (hasheq 'phoenix 8 'zealot 2)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 5))))
+  (assert-true! (and (not (not (memq 'viking-fighter (macro-brain-decision-scheduled-ids l32-t-20-banshee-viking))))
+                     (not (memq 'siege-tank (macro-brain-decision-scheduled-ids l32-t-20-banshee-viking)))
+                     (<= (hash-ref (hash-ref (priority-schedule-result-category-utilities
+                                              (macro-brain-decision-priority-schedule l32-t-20-banshee-viking))
+                                             'candidate-utilities (hasheq))
+                                   'siege-tank 0.0)
+                         420.0)
+                     (not (not (memq 'starport (macro-brain-decision-scheduled-ids l32-t-20-banshee-sp2))))
+                     (not (not (memq 'hydralisk (macro-brain-decision-scheduled-ids l32-z-22-phoenix-hydra))))
+                     (not (memq 'roach (macro-brain-decision-scheduled-ids l32-z-22-phoenix-hydra))))
+                "L32-P0-2 #20/#22/#40: Air-dominated enemy must demote Tank/Roach <=420 & schedule Viking/Starport#2/Hydra")
+
+  ;; (b) Proactive TvP/TvT Engineering Bay by 3:45 (frame>=5040, >=2 bases) — never forced in TvZ or <3:45
+  (reset-macro-escrow-tracker!)
+  (define l32-t-41-tvp-ebay
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 5100
+      #:minerals 180 #:gas 80 #:supply-used 36 #:supply-cap 54 #:workers 26 #:active-bases 2
+      #:mineral-harvesters 20 #:gas-harvesters 6
+      #:army-supply 10 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'factory 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'factory 1 'starport 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 26 'marine 10)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 1))))
+  (reset-macro-escrow-tracker!)
+  (define l32-t-41-tvz-no-ebay
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Zerg #:frame 5100
+      #:minerals 180 #:gas 80 #:supply-used 36 #:supply-cap 54 #:workers 26 #:active-bases 2
+      #:mineral-harvesters 20 #:gas-harvesters 6
+      #:army-supply 10 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'factory 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'factory 1 'starport 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 26 'marine 10)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 1))))
+  (assert-true! (and (not (not (memq 'engineering-bay (macro-brain-decision-scheduled-ids l32-t-41-tvp-ebay))))
+                     (not (memq 'engineering-bay (macro-brain-decision-scheduled-ids l32-t-41-tvz-no-ebay))))
+                "L32-P0-2 #41: Proactive TvP/TvT engineering-bay must schedule by 3:45 (f>=5040, >=2b) & not force in TvZ")
+
+  ;; (c) #10 ZvP: Unblock cheap gas-dumping combat (`ravager`) past `hive` escrow at 32M/520G while keeping Hatch #3 escrow
+  (reset-macro-escrow-tracker!)
+  (define l32-z-10-past-hive
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 27200
+      #:minerals 32 #:gas 520 #:supply-used 76 #:supply-cap 92 #:workers 40 #:active-bases 3
+      #:mineral-harvesters 26 #:gas-harvesters 14
+      #:army-supply 36 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1
+                                      'hydralisk-den 1 'lurker-den 1 'infestation-pit 1
+                                      'evolution-chamber 2 'extractor 6)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1
+                                      'hydralisk-den 1 'lurker-den 1 'infestation-pit 1
+                                      'evolution-chamber 2 'extractor 6)
+      #:unit-counts (hasheq 'drone 40 'queen 4 'roach 8 'hydralisk 4 'overlord 12)
+      #:enemy-unit-counts (hasheq 'stalker 8 'immortal 2 'zealot 6)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 6 'lair 1))))
+  (reset-macro-escrow-tracker!)
+  (define l32-z-10-hatch3-keeps-escrow
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 4100
+      #:minerals 195 #:gas 220 #:supply-used 42 #:supply-cap 58 #:workers 34 #:active-bases 2
+      #:mineral-harvesters 28 #:gas-harvesters 6
+      #:army-supply 8 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 2)
+      #:total-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 2)
+      #:unit-counts (hasheq 'drone 34 'queen 3 'roach 2 'zergling 4 'overlord 6)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 4))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l32-z-10-past-hive) 'hive)
+                     (not (not (memq 'ravager (macro-brain-decision-scheduled-ids l32-z-10-past-hive))))
+                     (eq? (macro-brain-decision-saving-for l32-z-10-hatch3-keeps-escrow) 'hatchery)
+                     (not (memq 'roach (macro-brain-decision-scheduled-ids l32-z-10-hatch3-keeps-escrow))))
+                "L32-P0-2 #10: Zerg combat must bypass hive/hatch#4 escrow at <200M&>=200G while keeping early Hatch#3 escrow")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms

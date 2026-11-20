@@ -3876,10 +3876,11 @@
                  (define kite-cd-min (flmax 0.22 (fl* (if faster-melee-pursuer-near? 0.62 0.52) w-period)))
                  (define kite-step (if faster-melee-pursuer-near? 1.1 2.0))
                  (define has-weap? (and (not fragile-caster-no-atk?) non-free-t? (fl> wr 0.0)))
-                 ;; L31-P0-3 (`t07` SP `1a/45m` & `p01` `0.42x`): When a fighting squad (`>= 4` allies)
-                 ;; is already in active close fire (`<= 9.5t`) against equal/longer-range OR faster
-                 ;; ranged pursuers (e.g., Stalkers/Immortals vs Marines, Marauders vs Stalkers/Zealots),
-                 ;; commit-fire instead of 0-DPS fleeing to `base-x/y`!
+                 ;; L31-P0-3 (`t07` SP `1a/45m` & `p01` `0.42x`) + L32-P0-3 (`t02` Marines+Tanks vs Roaches):
+                 ;; When a fighting squad (`>= 4` allies) is in active close fire (`<= 9.5t`) against
+                 ;; equal/longer-range OR equal/faster (`e-spd >= u-spd - 0.25`) ranged pursuers (e.g.,
+                 ;; un-stimmed Marines vs equal-speed Roaches, Stalkers/Immortals vs Marines), commit-fire
+                 ;; instead of 0-DPS kiting/fleeing that loses volley uptime and abandons Sieged Tanks!
                  (define active-close-ranged-pursuer?
                    (and has-weap?
                         (>= arena-ally-cnt 4)
@@ -3891,7 +3892,8 @@
                                  (let ([e-wr (sim-unit-weapon-range-vs e su)])
                                    (and (fl> e-wr 1.5)
                                         (or (fl>= e-wr wr)
-                                            (fl> (exact->inexact (tactical-sim-unit-speed e)) u-spd)))))))))
+                                            (fl>= (exact->inexact (tactical-sim-unit-speed e))
+                                                  (fl- u-spd 0.25))))))))))
                  (define melee-fight?
                    (and has-weap?
                         (fl<= wr 1.5)
@@ -3978,6 +3980,9 @@
                            (fl<= (fl+ (fl* edx edx) (fl* edy edy)) 12.25)))))
                 (define kite-cd-min (flmax 0.22 (fl* (if faster-melee-pursuer-near? 0.62 0.52) w-period)))
                 (define kite-step (if faster-melee-pursuer-near? 1.1 (min 2.0 SC2-KITE-STEP-DISTANCE)))
+                ;; L32-P0-3 (`t02` Marines+Tanks vs Roaches): Only backward-kite shorter-range threats
+                ;; that are melee (`e-wr <= 1.5`) OR strictly slower (`e-spd < u-spd - 0.25`), so
+                ;; un-stimmed Marines never abandon Sieged Tanks to kite equal-speed Roaches!
                 (define shorter-threat-closing?
                   (and (fl> eff-wr 1.5)
                        (let* ([close-r (flmax 2.5 (fl- eff-wr 0.75))]
@@ -3985,6 +3990,9 @@
                          (for/or ([e (in-list arena-enemy-sims)])
                            (define e-wr (sim-unit-weapon-range-vs e su))
                            (and (fl< e-wr eff-wr)
+                                (or (fl<= e-wr 1.5)
+                                    (fl< (exact->inexact (tactical-sim-unit-speed e))
+                                         (fl- u-spd 0.25)))
                                 (let ([edx (fl- ux (tactical-sim-unit-x e))]
                                       [edy (fl- uy (tactical-sim-unit-y e))])
                                   (fl<= (fl+ (fl* edx edx) (fl* edy edy)) close-r2)))))))

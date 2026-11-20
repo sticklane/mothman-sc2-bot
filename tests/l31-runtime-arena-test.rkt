@@ -548,13 +548,14 @@
               (and (>= (length ghost-step-backs) 1) (null? ghost-snipes-close))
               (format "Expected Ghost step-back behind Marines (<25.0) and 0 snipes at 1.2t melee; dirs=~a" dirs-close))
 
-  ;; T5c: Negative guard — Lone unscreened Ghost with enemy at `3.5t` does NOT cast Snipe (`4.499t` guard),
+  ;; T5c: Negative guard — Lone unscreened Ghost with enemy at `3.5t` and non-heavy-bio target does NOT
+  ;; cast Snipe (`4.499t` guard; heavy-bio solo 2.0t rule is covered by `L32-T4a`),
   ;; AND screened Ghost vs Protoss shielded High Templars (`>= 160` shields) still casts EMP FIRST!
   (define dirs-lone
     (plan-terran-spellcaster-micro
      (list (mk-u 501 'ghost 26.5 32.0 #:hp 100.0 #:energy 100.0))
      (list (mk-u 961 'zergling 30.0 32.0 #:hp 35.0)
-           (mk-u 951 'ultralisk 34.5 32.0 #:hp 500.0))
+           (mk-u 951 'queen 34.5 32.0 #:hp 175.0))
      #:claims (make-spell-claims)
      #:current-frame 240
      #:home-x 10.0 #:home-y 32.0

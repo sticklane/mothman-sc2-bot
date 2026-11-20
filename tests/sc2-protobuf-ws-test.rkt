@@ -6559,16 +6559,25 @@
      (sc2-observation 18000 (sc2-player-common 1 50 900 100 40 20 20 0 0 0 0)
                       (list cc-mo ref-mo scv-g1 scv-g2 scv-id map-m-safe map-m-camp enemy-tnk)
                       '() '() #f '() '() '() '() '() '())))
-  (define mo-targets
-    (for/list ([c (in-list mo-cmds)] #:when (sc2-raw-unit-command? c))
-      (cons (first (sc2-raw-unit-command-unit-tags c))
-            (sc2-raw-unit-command-target-unit-tag c))))
+  (define mo-cmds-by-w
+    (for/hasheqv ([c (in-list mo-cmds)] #:when (sc2-raw-unit-command? c))
+      (values (first (sc2-raw-unit-command-unit-tags c)) c)))
+  (define (mo-sent-to-safe-fog? wtag)
+    (define c (hash-ref mo-cmds-by-w wtag #f))
+    (and (sc2-raw-unit-command? c)
+         (= (sc2-raw-unit-command-ability-id c) 16)
+         (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+         (<= (l30-dist (sc2-point2d-x (sc2-raw-unit-command-target-pos c))
+                       (sc2-point2d-y (sc2-raw-unit-command-target-pos c))
+                       64.0 30.0)
+             0.1)))
   (check-true "l30-p0-1e-mined-out-base-evacuates-gas-to-nearest-safe-map-minerals-and-blocks-resat"
-              (and (not (ormap (lambda (p) (= (cdr p) 10052)) mo-targets))
-                   (not (ormap (lambda (p) (= (cdr p) 10062)) mo-targets))
-                   (equal? (assoc 10053 mo-targets) (cons 10053 10061))
-                   (equal? (assoc 10054 mo-targets) (cons 10054 10061))
-                   (equal? (assoc 10055 mo-targets) (cons 10055 10061)))))
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (memv (sc2-raw-unit-command-target-unit-tag c) '(10052 10062))))
+                               mo-cmds))
+                   (mo-sent-to-safe-fog? 10053)
+                   (mo-sent-to-safe-fog? 10054)
+                   (mo-sent-to-safe-fog? 10055))))
 
 ;; =============================================================================
 ;; Loop 31 (`L31-P0-1`): Zero GasZeroFreeze + Terran step-placement-rpc-budget=3
@@ -6892,6 +6901,304 @@
                 (and (= (unbox rpc-cnt) 3)
                      (= (length rax-cmds) 2)
                      hit-tight?))
+    (cleanup!)))
+
+;; =============================================================================
+;; Loop 32 (`L32-P0-1`): Mined-Out Long-Distance Mining (MOVE 16 / SMART 3666),
+;; Round-Robin Multi-Geyser Gas Rescue + 4.5t Harvest Corridor, & Tight Spillover
+;; =============================================================================
+(printf "[Loop 32] Testing L32-P0-1 mined-out LDM (MOVE16/SMART3666), round-robin 224f multi-geyser rescue + 4.5t corridor, & dual-gateway tight spillover...\n")
+(let ()
+  (define (mk-l32-u tag utype alliance x y
+                    #:hp [hp 100.0] #:hp-max [hp-max hp] #:shield [sh 0.0] #:rad [rad 1.0]
+                    #:display [disp 1] #:orders [ords '()] #:buffs [buffs '()]
+                    #:flying? [flying? #f]
+                    #:mins [mins 0] #:vesp [vesp 0]
+                    #:assigned [asgn 0] #:ideal [idl 0])
+    (sc2-unit disp alliance tag utype (if (= alliance 1) 1 (if (= alliance 3) 0 2))
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 0 flying? #f #f
+              hp hp-max sh sh 0.0 0.0 mins vesp #f #f #f #t #f
+              ords 0 buffs asgn idl 0.0 0 0 0 0 '() 0 0))
+
+  (define (l32-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+
+  (define (l32-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59932 "/sc2api" c-in c-out #f 1))
+    (define rpc-cnt (box 0))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define id-p (assoc 97 req-f))
+             (define id-b (if id-p (encode-uint32 97 (third id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (set-box! rpc-cnt (add1 (unbox rpc-cnt)))
+               (define rn (unbox rpc-cnt))
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py rn))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws rpc-cnt (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+
+  ;; L32-P0-1a: Mined-out long-distance mining works below 500G (`32M/448G`, no `>= 500G` gate!),
+  ;; emits `MOVE (16)` to `(mx, my)` for `display-type = 2` fog-of-war snapshot minerals, ignores
+  ;; enemy-camped patches, and upgrades to `SMART (3666)` once visible (`display-type = 1`) for
+  ;; BOTH idle workers AND moving workers whose move target is revealed!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (define hatch-mo (mk-l32-u 12001 86 1 28.5 28.5 #:hp 1500.0 #:rad 2.75 #:assigned 0 #:ideal 0))
+  (define drn-id1  (mk-l32-u 12002 104 1 30.0 29.0 #:hp 40.0 #:rad 0.375))
+  (define drn-id2  (mk-l32-u 12003 104 1 31.0 29.0 #:hp 40.0 #:rad 0.375))
+  (define m-camp-2 (mk-l32-u 12011 341 3 50.0 28.5 #:hp 1000.0 #:rad 1.0 #:display 2 #:mins 0))
+  (define e-grd-1  (mk-l32-u 12012 74  4 52.0 28.5 #:hp 160.0 #:rad 0.625))
+  (define m-safe-2 (mk-l32-u 12013 341 3 80.0 40.0 #:hp 1000.0 #:rad 1.0 #:display 2 #:mins 0))
+  (define cmds-ldm-fog
+    (saturate-workers-and-gas-commands
+     (sc2-observation 20500 (sc2-player-common 1 32 448 120 70 20 44 0 0 0 0)
+                      (list hatch-mo drn-id1 drn-id2 m-camp-2 e-grd-1 m-safe-2)
+                      '() '() #f '() '() '() '() '() '())))
+  (define fog-ok?
+    (for/and ([wt (in-list '(12002 12003))])
+      (define c (findf (lambda (x) (and (sc2-raw-unit-command? x)
+                                        (memv wt (sc2-raw-unit-command-unit-tags x))))
+                       cmds-ldm-fog))
+      (and (sc2-raw-unit-command? c)
+           (= (sc2-raw-unit-command-ability-id c) 16)
+           (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+           (<= (l32-dist (sc2-point2d-x (sc2-raw-unit-command-target-pos c))
+                         (sc2-point2d-y (sc2-raw-unit-command-target-pos c))
+                         80.0 40.0)
+               0.1))))
+  ;; Once patch `12013` flips to `display-type = 1` visible, BOTH idle `12002` AND moving `12003`
+  ;; (already walking toward `(80.0, 40.0)` within `14t`) immediately get `SMART (3666)` onto `12013`!
+  (define m-safe-1  (mk-l32-u 12013 341 3 80.0 40.0 #:hp 1000.0 #:rad 1.0 #:display 1 #:mins 1400))
+  (define drn-mov   (mk-l32-u 12003 104 1 73.0 40.0 #:hp 40.0 #:rad 0.375
+                              #:orders (list (sc2-unit-order 16 (sc2-point3d 80.0 40.0 8.0) 0 0.0))))
+  (define cmds-ldm-vis
+    (saturate-workers-and-gas-commands
+     (sc2-observation 20540 (sc2-player-common 1 32 448 120 70 20 44 0 0 0 0)
+                      (list hatch-mo drn-id1 drn-mov m-camp-2 e-grd-1 m-safe-1)
+                      '() '() #f '() '() '() '() '() '())))
+  (define vis-ok?
+    (for/and ([wt (in-list '(12002 12003))])
+      (define c (findf (lambda (x) (and (sc2-raw-unit-command? x)
+                                        (memv wt (sc2-raw-unit-command-unit-tags x))))
+                       cmds-ldm-vis))
+      (and (sc2-raw-unit-command? c)
+           (= (sc2-raw-unit-command-ability-id c) 3666)
+           (= (sc2-raw-unit-command-target-unit-tag c) 12013))))
+  (check-true "l32-p0-1a-mined-out-idle-workers-ldm-below-500g-move16-fog-and-smart3666-visible"
+              (and fog-ok? vis-ok?))
+
+  ;; L32-P0-1b: Round-robin multi-geyser `Step 0a` rescue + top-2 protection (`#28` GasZeroFreeze -> 0):
+  ;; Three non-lethal live Extractors `12102`, `12103`, `12104` at offline Hatcheries (plus safe Natural
+  ;; minerals so `0b` runs!). At `t + 300f`, assigns 3 workers to `12102` + 2 to `12103` and protects
+  ;; BOTH in `online-gas-tags`; after `>= 224f` (~10s) of still 0 gas gain, rotates round-robin to
+  ;; rescue & protect `12104`!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (set-box! SC2-ZERO-GAS-STREAK-START-LOOP #f)
+  (set-box! SC2-ZERO-GAS-LAST-VESPENE #f)
+  (set-box! SC2-ZERO-GAS-RESCUE-LATCH #f)
+  (set-box! SC2-ZERO-GAS-RESCUE-ROTATION-IDX 0)
+  (set-box! SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP #f)
+  (define h-off-1 (mk-l32-u 12101 86 1 28.5 28.5 #:hp 400.0 #:hp-max 1500.0 #:rad 2.75 #:assigned 0 #:ideal 16))
+  (define e-per-1 (mk-l32-u 12105 74 4 41.0 28.5 #:hp 160.0 #:rad 0.625))
+  (define h-on-2  (mk-l32-u 12106 86 1 70.5 28.5 #:hp 1500.0 #:rad 2.75 #:assigned 14 #:ideal 16))
+  (define m-on-2a (mk-l32-u 12107 341 3 76.0 28.5 #:hp 1000.0 #:rad 1.0 #:mins 1200))
+  (define m-on-2b (mk-l32-u 12108 341 3 76.0 31.0 #:hp 1000.0 #:rad 1.0 #:mins 1200))
+  (define (mk-1b32-obs loop gas #:a1 [a1 0] #:a2 [a2 0] #:a3 [a3 0] #:e1-e2-active? [e12? #f])
+    (define ex1 (mk-l32-u 12102 88 1 24.0 23.0 #:hp 500.0 #:rad 1.5 #:assigned a1 #:ideal 3 #:vesp 2000))
+    (define ex2 (mk-l32-u 12103 88 1 24.0 34.0 #:hp 500.0 #:rad 1.5 #:assigned a2 #:ideal 3 #:vesp 2000))
+    (define ex3 (mk-l32-u 12104 88 1 28.5 36.5 #:hp 500.0 #:rad 1.5 #:assigned a3 #:ideal 3 #:vesp 2000))
+    (define drns
+      (for/list ([i (in-range 0 20)])
+        (define tag (+ 12120 i))
+        (cond
+          [(and e12? (< i 3))
+           (mk-l32-u tag 104 1 25.0 24.0 #:hp 40.0 #:rad 0.375
+                     #:orders (list (sc2-unit-order 1183 #f 12102 0.0)))]
+          [(and e12? (< i 5))
+           (mk-l32-u tag 104 1 25.0 33.0 #:hp 40.0 #:rad 0.375
+                     #:orders (list (sc2-unit-order 1183 #f 12103 0.0)))]
+          [else
+           (mk-l32-u tag 104 1 (+ 72.0 (* 0.2 i)) 29.0 #:hp 40.0 #:rad 0.375
+                     #:orders (list (sc2-unit-order 1183 #f 12107 0.0)))])))
+    (sc2-observation loop (sc2-player-common 1 400 gas 100 50 10 20 0 0 0 0)
+                     (append (list h-off-1 e-per-1 h-on-2 m-on-2a m-on-2b ex1 ex2 ex3) drns)
+                     '() '() #f '() '() '() '() '() '()))
+  (void (saturate-workers-and-gas-commands (mk-1b32-obs 21000 19)))
+  ;; At +300f: initial rescue activates — assigns 3 workers to E1 (`12102`) + 2 to E2 (`12103`)!
+  (define cmds-rr-0 (saturate-workers-and-gas-commands (mk-1b32-obs 21300 19)))
+  (define rr0-e1 (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 12102))) cmds-rr-0))
+  (define rr0-e2 (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 12103))) cmds-rr-0))
+  ;; At +340f (40f later, still 19G, E1 has 3 & E2 has 2): BOTH E1 and E2 workers stay protected from `0b`!
+  (define cmds-rr-hold (saturate-workers-and-gas-commands (mk-1b32-obs 21340 19 #:a1 3 #:a2 2 #:e1-e2-active? #t)))
+  (define evac-e12?
+    (ormap (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (ormap (lambda (wt) (memv wt '(12120 12121 12122 12123 12124)))
+                         (sc2-raw-unit-command-unit-tags c))))
+           cmds-rr-hold))
+  ;; At +524f (`21300 + 224` with still 0 gas gain!): rotates round-robin (`rot-idx -> 1`) so
+  ;; active = E2 (`12103`, topped up from 2->3) AND backup = E3 (`12104`, assigned 2 workers!)!
+  (define cmds-rr-1 (saturate-workers-and-gas-commands (mk-1b32-obs 21524 19 #:a1 3 #:a2 2 #:e1-e2-active? #t)))
+  (define rot-after-224 (unbox SC2-ZERO-GAS-RESCUE-ROTATION-IDX))
+  (define rr1-e2 (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 12103))) cmds-rr-1))
+  (define rr1-e3 (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 12104))) cmds-rr-1))
+  (check-true "l32-p0-1b-round-robin-step0a-rotates-after-224f-and-protects-2-live-geysers"
+              (and (= rr0-e1 3)
+                   (= rr0-e2 2)
+                   (not evac-e12?)
+                   (= rot-after-224 1)
+                   (= rr1-e2 1)
+                   (= rr1-e3 2)))
+
+  ;; L32-P0-1c: `4.5t` TownHall-to-geyser/gas-building harvest corridor exclusion (`#28`):
+  ;; Even AFTER an Extractor (`88`) is built on the geyser (neutral geyser gone!), non-defensive
+  ;; tech buildings (`evolution-chamber`, `roach-warren`) MUST be rejected inside the `4.5t`
+  ;; Hatch->Extractor corridor (`(178.5, 81.5)` is `3.4t` from `(175.5, 76.5)->(182.5, 79.5)`),
+  ;; while open tiles `> 4.5t` clear (`(175.5, 84.5)`) AND static defense (`spore-crawler`) PASS!
+  (define h-cor   (mk-l32-u 12201 86 1 175.5 76.5 #:hp 1500.0 #:rad 2.75))
+  (define ex-cor  (mk-l32-u 12202 88 1 182.5 79.5 #:hp 500.0 #:rad 1.5 #:vesp 2000))
+  (define cor-units (list h-cor ex-cor))
+  (check-true "l32-p0-1c-harvest-corridor-45t-excludes-evo-and-roach-warren-around-built-extractor"
+              (and (not (placement-preserves-base-exit-and-spawn? 178.5 81.5 'evolution-chamber cor-units
+                                                                  #:base-x 175.5 #:base-y 76.5))
+                   (not (placement-preserves-base-exit-and-spawn? 178.5 81.5 'roach-warren cor-units
+                                                                  #:base-x 175.5 #:base-y 76.5))
+                   (placement-preserves-base-exit-and-spawn? 175.5 84.5 'evolution-chamber cor-units
+                                                             #:base-x 175.5 #:base-y 76.5)
+                   (placement-preserves-base-exit-and-spawn? 178.5 81.5 'spore-crawler cor-units
+                                                             #:base-x 175.5 #:base-y 76.5)))
+
+  ;; L32-P0-1d: Protoss same-type dual `gateway` (`distinct-protoss-build-count = 1`, initial budget=2):
+  ;; 1st `gateway` succeeds on RPC #1, 2nd `gateway` fails `2.0t` on RPC #2 (`budget -> 0`), and
+  ;; `protoss-tight-bonus-granted?` grants the single 3rd RPC so 2nd `gateway` lands at tight `0.5t`!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999)
+  (define l32-gi
+    (sc2-game-info "L32ProtoTightMap" "" '() '(128 128) '(4 4 124 124)
+                   (list (sc2-point2d 100.0 100.0)) w3-full-grid #f w3-full-grid))
+  (let-values ([(ws rpc-cnt cleanup!)
+                (l32-start-mock-ws
+                 (lambda (ab px py rn)
+                   (cond
+                     ;; 1st Gateway succeeds on RPC #1 (far spot `(26.5, 36.5)` or any first query)
+                     [(and (= ab 883) (= rn 1) (<= (l32-dist px py 26.5 34.5) 2.5)) 1]
+                     ;; 2nd Gateway fails `2.0t` on RPC #2 and lands ONLY at tight `0.5t` spot `(33.5, 33.5)` on RPC #3!
+                     [(and (= ab 883) (<= (l32-dist px py 33.5 33.5) 0.1)) 1]
+                     [else 2])))])
+    (define nx-m (mk-l32-u 12301 59 1 26.5 26.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define py-m (mk-l32-u 12302 60 1 30.0 34.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define prb-busy
+      (mk-l32-u 12303 84 1 31.0 33.0 #:hp 20.0 #:shield 20.0 #:rad 0.375
+                #:orders (list (sc2-unit-order 881 (sc2-point3d 31.5 34.0 8.0) 0 0.0))))
+    (define prb-a (mk-l32-u 12304 84 1 29.0 32.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define prb-b (mk-l32-u 12305 84 1 28.0 32.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define obs-2gw
+      (sc2-observation 21800 (sc2-player-common 1 600 100 60 36 10 26 0 0 0 0)
+                       (list nx-m py-m prb-busy prb-a prb-b) '()
+                       (list (sc2-power-source (sc2-point3d 30.0 34.0 8.0) 6.5 12302))
+                       #f '() '() '() '() '() '()))
+    (define cmds-2gw
+      (translate-bot-actions->sc2-raw-commands
+       '((build gateway 30.0 34.0) (build gateway 30.0 34.0))
+       obs-2gw #:ws-conn ws #:game-info l32-gi))
+    (define gw-cmds
+      (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 883))) cmds-2gw))
+    (define hit-gw-tight?
+      (ormap (lambda (c)
+               (define pt (sc2-raw-unit-command-target-pos c))
+               (and (sc2-point2d? pt)
+                    (<= (l32-dist (sc2-point2d-x pt) (sc2-point2d-y pt) 33.5 33.5) 0.1)))
+             gw-cmds))
+    (check-true "l32-p0-1d-protoss-same-type-dual-gateway-grants-3rd-rpc-tight-05-spillover"
+                (and (= (unbox rpc-cnt) 3)
+                     (= (length gw-cmds) 2)
+                     hit-gw-tight?))
+    (cleanup!))
+
+  ;; L32-P0-1e: Early-rush (`< 4:00`) `gateway` negative cooldown TTL is `16f` (NOT `64f`!) so
+  ;; once rush units vacate a build tile, Gateway re-probes and places within 16 game loops!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (define allow-gw-1e? (box #f))
+  (let-values ([(ws rpc-cnt cleanup!)
+                (l32-start-mock-ws
+                 (lambda (ab _px _py _rn)
+                   (if (and (= ab 883) (unbox allow-gw-1e?)) 1 2)))])
+    (define nx-e (mk-l32-u 12401 59 1 26.5 26.5 #:hp 1000.0 #:shield 1000.0 #:rad 2.75))
+    (define py-e (mk-l32-u 12402 60 1 30.0 34.0 #:hp 200.0 #:shield 200.0 #:rad 1.0))
+    (define prb-e (mk-l32-u 12403 84 1 29.0 32.0 #:hp 20.0 #:shield 20.0 #:rad 0.375))
+    (define ling-e (mk-l32-u 12404 105 4 40.0 34.0 #:hp 35.0 #:rad 0.375))
+    (define (mk-1e-obs loop)
+      (sc2-observation loop (sc2-player-common 1 350 50 31 20 2 18 0 0 0 0)
+                       (list nx-e py-e prb-e ling-e) '()
+                       (list (sc2-power-source (sc2-point3d 30.0 34.0 8.0) 6.5 12402))
+                       #f '() '() '() '() '() '()))
+    ;; Loop 2800: Gateway fails (sets 16f neg-cd)
+    (void (translate-bot-actions->sc2-raw-commands '((build gateway 30.0 34.0)) (mk-1e-obs 2800) #:ws-conn ws #:game-info l32-gi))
+    (define rpcs-at-2800 (unbox rpc-cnt))
+    ;; Loop 2816 (+16f < 64f!): tile clears -> MUST re-query and immediately emit Gateway!
+    (set-box! allow-gw-1e? #t)
+    (define cmds-2816
+      (translate-bot-actions->sc2-raw-commands '((build gateway 30.0 34.0)) (mk-1e-obs 2816) #:ws-conn ws #:game-info l32-gi))
+    (define gw-2816
+      (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 883))) cmds-2816))
+    (check-true "l32-p0-1e-early-rush-gateway-neg-cd-ttl-16f-recovers-fast"
+                (and (> rpcs-at-2800 0)
+                     (> (unbox rpc-cnt) rpcs-at-2800)
+                     (sc2-raw-unit-command? gw-2816)))
     (cleanup!)))
 
 (printf "-----------------------------------------------------------------\n")

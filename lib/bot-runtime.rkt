@@ -5911,7 +5911,8 @@
        #t]
       [else #f]))
 
-(define (l2-emit-unit-morph-verified! ctx target-sym source-sym [net-supply-cost 0])
+(define (l2-emit-unit-morph-verified! ctx target-sym source-sym [net-supply-cost 0]
+                                      #:waive-worker-reserve? [waive-worker-reserve? #f])
   (define base-x (l2-ctx-base-x ctx))
   (define base-y (l2-ctx-base-y ctx))
   (define frame (l2-ctx-frame ctx))
@@ -5922,7 +5923,7 @@
     (define m-cost (sc2-min-cost target-sym))
     (define g-cost (sc2-gas-cost target-sym))
     (define avail-src (hash-ref open-prod-slots source-sym 0))
-    (define w-res-min (l2-brain-worker-reserve-min ctx target-sym))
+    (define w-res-min (if waive-worker-reserve? 0 (l2-brain-worker-reserve-min ctx target-sym)))
     (cond
       [(l2-unit-suppressed-by-counter-pivot? ctx target-sym) #f]
       [(and (or (> avail-src 0)
@@ -13628,12 +13629,28 @@
                           '(banshee dark-templar ghost lurker mutalisk void-ray carrier oracle widow-mine))))
               enemy-units))
   (set-l2-ctx-enemy-cloaked-or-air?! ctx enemy-cloaked-or-air?)
+  ;; L32-P0-3 (`#40` `CloakLoss -> 0`): Auto-morph 1 proactive Overseer immediately upon
+  ;; Lair/Hive completion vs Protoss/Terran when `overseers == 0` (`min >= 50 & gas >= 50`),
+  ;; waiving Spire/Corruptor/worker-reserve locks so mobile detection is online before DTs/Banshees!
+  (define cur-overseer-total
+    (+ (l2-unit-count ctx 'overseer)
+       (order-ledger-pending-count-for-type (l2-ctx-oledger ctx) 'overseer frame)))
+  (define zerg-proactive-overseer1?
+    (and live-game?
+         (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
+         (memq (l2-ctx-effective-enemy-race ctx) '(Protoss Terran))
+         (= cur-overseer-total 0)
+         (not zerg-holding-for-aa-spire?)
+         (not zerg-holding-for-aa-corruptor?)
+         (>= (l2-ctx-minerals ctx) 50)
+         (>= (l2-ctx-gas ctx) 50)))
   (when (and live-game?
                 (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
-                (or (and (not zerg-holding-for-aa-spire?)
+                (or zerg-proactive-overseer1?
+                    (and (not zerg-holding-for-aa-spire?)
                          (not zerg-holding-for-aa-corruptor?))
                     enemy-cloaked-or-air?)
-                (< (l2-unit-count ctx 'overseer)
+                (< cur-overseer-total
                    (if (or (>= live-army-supply 40)
                            enemy-cloaked-or-air?
                            (enemy-tech-observation-requires-detection? tech-obs))
@@ -13642,7 +13659,9 @@
        (when (and (= (l2-unit-count ctx 'overlord) 0)
                   (>= (l2-ctx-minerals ctx) (sc2-min-cost 'overlord)))
          (l2-try-train-unit! ctx 'overlord 'larva 4))
-       (l2-emit-unit-morph-verified! ctx 'overseer 'overlord 0))
+       (l2-emit-unit-morph-verified! ctx 'overseer 'overlord 0
+                                     #:waive-worker-reserve? (or zerg-proactive-overseer1?
+                                                                 enemy-cloaked-or-air?)))
   (define zerg-holding-lair-min?
        (and live-game?
             (not crisis-tech-upgrade-deferral?)
@@ -17082,6 +17101,25 @@
         (and (= (l2-unit-count ctx 'raven) 0)
              (or enemy-cloak-tech-bldg-seen?
                  (and tech-obs (enemy-tech-observation-requires-detection? tech-obs))))))
+  ;; L32-P0-3 (`#41` `CloakLoss -> 0`): Past `3:30` (`frame >= 4700`) vs Protoss/Terran with
+  ;; `0` Ravens and `0` ready Missile Turrets, reserve `50e` (`mule-min-energy = 100`) on the
+  ;; highest-energy ready Orbital Command so an instant `ScannerSweep` is always banked!
+  (define terran-proactive-scan-oc-id
+    (and live-game?
+         (>= frame 4700)
+         (memq (l2-ctx-effective-enemy-race ctx) '(Protoss Terran))
+         (= (l2-unit-count ctx 'raven) 0)
+         (not (memq 'missile-turret ready-bldg-types))
+         (let-values ([(best-id _best-e)
+                       (for/fold ([bid #f] [be -1.0]) ([cc (in-list ccs)])
+                         (if (and (eq? (unit-type-sym cc) 'orbital-command)
+                                  (l2-building-grounded-and-powered? ctx cc)
+                                  (>= (hash-ref cc 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS))
+                             (let ([ce (exact->inexact (hash-ref cc 'energy SC2-ORBITAL-MULE-ENERGY))]
+                                   [cid0 (hash-ref cc 'id 301)])
+                               (if (> ce be) (values cid0 ce) (values bid be)))
+                             (values bid be)))])
+           best-id)))
   (for ([cc (in-list ccs)])
        (define raw-ctype (unit-type-sym cc))
        (define cid (hash-ref cc 'id 301))
@@ -17126,10 +17164,12 @@
                                              (define dy (fl- ey0 (exact->inexact (cdr pt))))
                                              (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 144.0)))))
                    e)))
-          ;; W10-TAC-7: Strictly require >= 100 energy (50 MULE + 50 Scan reserve) on ALL OCs
-          ;; while enemy cloaked/burrowed threat or cloak tech is active!
+          ;; W10-TAC-7 + L32-P0-3: Strictly require >= 100 energy (50 MULE + 50 Scan reserve) on ALL OCs
+          ;; while enemy cloaked/burrowed threat/tech is active, AND on the highest-energy ready OC past
+          ;; 3:30 (`frame >= 4700`) vs Protoss/Terran while `0` Ravens & `0` ready Missile Turrets exist!
           (define mule-min-energy
-            (if enemy-cloaked-or-burrowed-active?
+            (if (or enemy-cloaked-or-burrowed-active?
+                    (and terran-proactive-scan-oc-id (eqv? cid terran-proactive-scan-oc-id)))
                 (+ SC2-ORBITAL-MULE-ENERGY SC2-ORBITAL-SCAN-ENERGY)
                 SC2-ORBITAL-MULE-ENERGY))
           (cond
@@ -17833,17 +17873,26 @@
                               ;; W18-P0-3-rt (`#14`): Tighten undamaged addon proximity veto `10t -> 6.5t`
                               ;; (`42.25` sq-dist) so enemies at the natural ramp never block in-main Factory TechLab!
                               (<= (+ (* dx dx) (* dy dy)) 42.25))))))))
-  ;; W3-P0-3a: Prioritize Terran Factory #1 ahead of barracks-techlab & stimpack so
-  ;; 1-1-1 tech starts near Pro ~128s instead of 247s (never let techlab/stim drain gas < 100G).
+  ;; W3-P0-3a / L32-P0-3 (`#35`/`H2H #02` Terran Factory #2 Alignment): Align L2 `desired-factories`
+  ;; with Macro Brain (`brain-sched-fac-now?` OR `>= 2` CCs in TvT/TvP at `eff-phase-supply >= 44` & `gas >= 100`)
+  ;; so Factory #2 never stalls behind `eff-phase-supply >= 68`!
+  (define brain-sched-fac-now?
+    (and live-game?
+         (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'factory)
+             (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
+                  (memq 'factory (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx)))))))
   (define desired-factories
        (cond
          [(not live-game?) 1]
          [(and (memq effective-enemy-race '(Terran Protoss))
                (>= (length ccs) 2)
-               (>= eff-phase-supply 68)
-               (>= (l2-ctx-gas ctx) 100))
+               (or brain-sched-fac-now?
+                   (and (>= eff-phase-supply 44)
+                        (>= (l2-ctx-gas ctx) 100))))
           2]
-         [(and (>= (length ccs) 3) (>= eff-phase-supply 106) (>= (l2-ctx-gas ctx) 200))
+         [(and (>= (length ccs) 3)
+               (or brain-sched-fac-now?
+                   (and (>= eff-phase-supply 106) (>= (l2-ctx-gas ctx) 200))))
           2]
          [else 1]))
   (define rush-factory-vs-proxy-cannon?
@@ -17870,10 +17919,11 @@
                 (< (+ (length factories-list) (order-ledger-pending-count-for-type oledger 'factory frame))
                    desired-factories)
                 (or (null? factories-list)
+                    brain-sched-fac-now?
                     (l2-can-spend-by-priority? ctx 'factory 'production-scaling)
                     (and (memq effective-enemy-race '(Terran Protoss))
                          (>= (length ccs) 2)
-                         (>= eff-phase-supply 68)
+                         (>= eff-phase-supply 44)
                          (>= (l2-ctx-minerals ctx) (sc2-min-cost 'factory))
                          (>= (l2-ctx-gas ctx) (sc2-gas-cost 'factory)))
                     (>= (l2-ctx-minerals ctx) 400))
@@ -17884,7 +17934,7 @@
                 (or rush-factory-vs-proxy-cannon?
                     ;; W6-P0-3-rt: First Factory (150M/100G) emits immediately at 150M/100G
                     ;; without worker/combat surcharges (still respecting hard supply lockout)
-                    (and (l2-terran-need-factory1-now? ctx)
+                    (and (or (l2-terran-need-factory1-now? ctx) brain-sched-fac-now?)
                          (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'factory))
                              (l2-ctx-hard-supply-lockout-reserve-min ctx)))
                     (and (l2-non-combat-min-ok? ctx (sc2-min-cost 'factory) 'factory)
@@ -17984,11 +18034,60 @@
        (when live-game?
          (hash-set! open-prod-slots 'barracks (max 0 (sub1 (hash-ref open-prod-slots 'barracks 0)))))
        (l2-spend-resources-and-supply! ctx (sc2-min-cost 'barracks-techlab) (sc2-gas-cost 'barracks-techlab) 0))
+  (define starports-list
+       (filter (lambda (b)
+                 (and (hash? b)
+                      (eq? (fast-canonical-structure-sym (unit-type-sym b)) 'starport)))
+               ally-bldgs))
+  (define cur-sp-total
+       (+ (length starports-list) (order-ledger-pending-count-for-type oledger 'starport frame)))
+  ;; L32-P0-3 (`#05/#20/#29/#35` Terran Starport Alignment): Scale Starports `2..4` whenever
+  ;; Macro Brain schedules `starport`, enemy fields `>= 4` combat air (incl. Banshee/Phoenix/
+  ;; Mutalisk/Oracle/VoidRay/CapitalAir) or `>= 2` Colossi, or `>= 3` CCs with `min >= 350`!
+  (define brain-sched-sp-now?
+    (and live-game?
+         (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'starport)
+             (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
+                  (memq 'starport (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx)))))))
+  (define-values (terran-enemy-combat-air-cnt terran-enemy-colossus-cnt)
+    (for/fold ([ac 0] [cc 0]) ([e (in-list enemy-units)] #:when (hash? e))
+      (define cu (fast-canonical-unit-sym (unit-type-sym e)))
+      (values (if (memq cu '(banshee phoenix mutalisk oracle void-ray voidray
+                             liberator liberator-ag viking viking-fighter corruptor
+                             battlecruiser carrier tempest brood-lord broodlord mothership))
+                  (add1 ac) ac)
+              (if (eq? cu 'colossus) (add1 cc) cc))))
+  (define terran-heavy-air-or-colossus-sp?
+    (or enemy-capital-air?
+        (>= terran-enemy-combat-air-cnt 4)
+        (>= terran-enemy-colossus-cnt 2)))
+  (define desired-starports
+       (cond
+         [(or enemy-capital-air? (>= terran-enemy-combat-air-cnt 6))
+          (min 4 (max 2 (length ccs)))]
+         [(or (>= terran-enemy-combat-air-cnt 4)
+              (>= terran-enemy-colossus-cnt 2))
+          (min 4 (max 2 (if (>= (length ccs) 3) 3 2)))]
+         [(and live-game? (>= (length ccs) 3) (>= (l2-ctx-minerals ctx) 350))
+          (min 4 (max 2 (if (or brain-sched-sp-now? (>= (l2-ctx-minerals ctx) 600)) 3 2)))]
+         [(and brain-sched-sp-now? (>= (length ccs) 2))
+          (min 4 (max 2 (length ccs)))]
+         [else 1]))
+  (define terran-urgent-starport-gas-guard?
+    (and live-game?
+         (memq 'factory ready-bldg-types)
+         (< cur-sp-total desired-starports)
+         (or terran-heavy-air-or-colossus-sp?
+             brain-sched-sp-now?)))
+  (define (terran-urgent-starport-gas-ok? gas-cost)
+    (or (not terran-urgent-starport-gas-guard?)
+        (>= (- (l2-ctx-gas ctx) gas-cost) (sc2-gas-cost 'starport))))
   (when (and (memq 'barracks-techlab ready-bldg-types)
                 (not urgent-combat-or-intel-need?))
        (cond
          [(l2-upgrade-needed? ctx 'stimpack)
           (when (and (terran-factory1-gas-ok? (sc2-gas-cost 'stimpack))
+                     (terran-urgent-starport-gas-ok? (sc2-gas-cost 'stimpack))
                      (>= (l2-ctx-minerals ctx) (sc2-min-cost 'stimpack))
                      (>= (l2-ctx-gas ctx) (sc2-gas-cost 'stimpack))
                      (or (not live-game?)
@@ -17997,6 +18096,7 @@
             (l2-emit-research-verified! ctx 'stimpack))]
          [(l2-upgrade-needed? ctx 'combat-shield)
           (when (and (terran-factory1-gas-ok? (sc2-gas-cost 'combat-shield))
+                     (terran-urgent-starport-gas-ok? (sc2-gas-cost 'combat-shield))
                      (l2-starport-escrow-ok? ctx (sc2-min-cost 'combat-shield) (sc2-gas-cost 'combat-shield))
                      (>= (l2-ctx-minerals ctx) (sc2-min-cost 'combat-shield))
                      (>= (l2-ctx-gas ctx) (sc2-gas-cost 'combat-shield))
@@ -18006,6 +18106,7 @@
             (l2-emit-research-verified! ctx 'combat-shield))]
          [(and (l2-upgrade-needed? ctx 'concussive-shells)
                (terran-factory1-gas-ok? (sc2-gas-cost 'concussive-shells))
+               (terran-urgent-starport-gas-ok? (sc2-gas-cost 'concussive-shells))
                (l2-starport-escrow-ok? ctx (sc2-min-cost 'concussive-shells) (sc2-gas-cost 'concussive-shells))
                (or (not live-game?)
                    (and (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'concussive-shells)) (l2-ctx-bo-reserved-min ctx))
@@ -18014,19 +18115,9 @@
                (>= (l2-ctx-minerals ctx) (sc2-min-cost 'concussive-shells))
                (>= (l2-ctx-gas ctx) (sc2-gas-cost 'concussive-shells)))
           (l2-emit-research-verified! ctx 'concussive-shells)]))
-  (define starports-list
-       (filter (lambda (b)
-                 (and (hash? b)
-                      (eq? (fast-canonical-structure-sym (unit-type-sym b)) 'starport)))
-               ally-bldgs))
-  (define cur-sp-total
-       (+ (length starports-list) (order-ledger-pending-count-for-type oledger 'starport frame)))
-  (define desired-starports
-       (cond
-         [enemy-capital-air? (min 4 (max 2 (length ccs)))]
-         [(and live-game? (>= (length ccs) 3) (>= (l2-ctx-minerals ctx) 600)) 2]
-         [else 1]))
-  (when (and (or (not terran-saving-for-expand?) endgame-corner-hunt? enemy-capital-air?)
+  (when (and (or (not terran-saving-for-expand?)
+                 endgame-corner-hunt?
+                 terran-heavy-air-or-colossus-sp?)
                 (not (and terran-early-proxy-or-marauder-pressure?
                           (<= (length barracks-list) 1)
                           (< (l2-ctx-minerals ctx) 350)))
@@ -18037,7 +18128,10 @@
                 (>= (l2-ctx-minerals ctx) (sc2-min-cost 'starport))
                 (>= (l2-ctx-gas ctx) (sc2-gas-cost 'starport))
                 (or endgame-corner-hunt?
-                    enemy-capital-air?
+                    terran-heavy-air-or-colossus-sp?
+                    (and brain-sched-sp-now?
+                         (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'starport))
+                             (l2-ctx-hard-supply-lockout-reserve-min ctx)))
                     (and (l2-non-combat-min-ok? ctx (sc2-min-cost 'starport) 'starport)
                          (l2-non-combat-gas-ok? ctx (sc2-gas-cost 'starport) 'starport))))
        (define sp-idx (length starports-list))
@@ -18119,9 +18213,22 @@
          (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'barracks)
              (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
                   (memq 'barracks (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx)))))))
+  ;; L32-P0-3 (`#17` `TvT0Tank -> 0`): Strictly cap TvT Barracks `<= 2` until `>= 2` Siege Tanks
+  ;; OR `>= 2` Factories exist (unless `min >= 500`), matching Macro Brain's Tank-before-Rax3 law!
+  (define cur-fac-total-for-rax
+    (+ (length factories-list) (order-ledger-pending-count-for-type oledger 'factory frame)))
+  (define cur-tank-cnt-for-rax
+    (+ (l2-unit-count ctx 'siege-tank) (l2-unit-count ctx 'siege-tank-sieged)))
+  (define terran-tvt-cap-rax-for-tanks?
+    (and live-game?
+         (eq? effective-enemy-race 'Terran)
+         (< cur-tank-cnt-for-rax 2)
+         (< cur-fac-total-for-rax 2)
+         (< (l2-ctx-minerals ctx) 500)))
   (define desired-barracks
        (cond
          [(not live-game?) raw-desired-barracks]
+         [terran-tvt-cap-rax-for-tanks? (min 2 raw-desired-barracks)]
          [terran-early-rush-2nd-rax? (max 2 raw-desired-barracks)]
          [(and (not (memq 'factory (l2-ctx-bldg-types ctx)))
                (not (and (< (length active-refineries) 1) (>= (l2-ctx-minerals ctx) 450))))
@@ -18395,6 +18502,12 @@
   (define need-emergency-ebay-or-turret?
        (or (enemy-tech-observation-requires-detection? tech-obs)
            (enemy-tech-observation-requires-anti-air? tech-obs)))
+  (define brain-sched-ebay-now?
+    (and live-game?
+         (let ([md (l2-ctx-macro-decision ctx)])
+           (and (macro-brain-decision? md)
+                (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'engineering-bay)
+                    (memq 'engineering-bay (macro-brain-decision-scheduled-ids md)))))))
   (when (and (not terran-saving-for-expand?)
                 (not terran-saving-for-orbital?)
                 (or (not live-game?)
@@ -18404,6 +18517,7 @@
                     (and (l2-non-combat-min-ok? ctx (sc2-min-cost 'engineering-bay) 'engineering-bay)
                          (>= (l2-ctx-minerals ctx) 250)))
                 (or need-emergency-ebay-or-turret?
+                    brain-sched-ebay-now?
                     (l2-plan-wants-now? ctx 'engineering-bay)
                     (l2-plan-wants-now? ctx 'missile-turret)
                     (memq 'starport ready-bldg-types)
@@ -18436,9 +18550,7 @@
                         (cond
                           [need-emergency-ebay-or-turret? 0]
                           [(and (= cur-ebay-cnt 0)
-                                (or (let ([md (l2-ctx-macro-decision ctx)])
-                                      (and (macro-brain-decision? md)
-                                           (memq 'engineering-bay (macro-brain-decision-scheduled-ids md))))
+                                (or brain-sched-ebay-now?
                                     (and (memq 'starport ready-bldg-types)
                                          (>= total-workers 36))))
                            terran-worker-min-floor]
@@ -18958,9 +19070,23 @@
                     (and (not terran-orbital-save-hold?) (not brain-saving-oc1-p3?))
                     (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'marine)) (sc2-min-cost 'orbital-command)))
                 (l2-can-spend-supply? ctx (sc2-supply-cost 'marine)))
+       ;; L32-P0-3 (`#20` 168 Banshees `AirAAStarve` -> continuous Vikings): Detect air-dominated
+       ;; enemy compositions (`>= 4` combat air & `>= enemy ground combat`) so Starports continuously
+       ;; train Vikings (up to 20) ahead of Medivacs/Siege Tanks!
+       (define-values (p3-enemy-air-cnt p3-enemy-gnd-cnt)
+         (for/fold ([ac 0] [gc 0]) ([e (in-list enemy-units)] #:when (and (hash? e) (combat-unit-record? e)))
+           (define cu (fast-canonical-unit-sym (unit-type-sym e)))
+           (if (memq cu '(banshee phoenix mutalisk oracle void-ray voidray
+                          liberator liberator-ag viking viking-fighter corruptor
+                          battlecruiser carrier tempest brood-lord broodlord mothership))
+               (values (add1 ac) gc)
+               (values ac (add1 gc)))))
+       (define enemy-air-dominated-p3?
+         (and (>= p3-enemy-air-cnt 4) (>= p3-enemy-air-cnt p3-enemy-gnd-cnt)))
        (define desired-viking-cap
          (cond
            [enemy-capital-air? 24]
+           [enemy-air-dominated-p3? 20]
            [(or (enemy-tech-observation-requires-anti-air? tech-obs) endgame-corner-hunt?) 12]
            [else 10]))
        (define-values (enemy-stalker-cnt-thor enemy-heavy-cap-air?)
@@ -19011,9 +19137,9 @@
                   (memq 'starport-techlab ready-bldg-types)
                   (< (l2-unit-count ctx 'raven) 2))
          (l2-try-train-unit! ctx 'raven 'starport 6 #:respect-bo-reserve? #f))
-       ;; Priority Capital Air Vikings (up to 24) BEFORE Medivacs/Tanks consume Starport slots or gas!
+       ;; Priority Capital Air / Air-Dominated Vikings (up to 20–24) BEFORE Medivacs/Tanks consume Starport slots or gas!
        (when (and (memq 'starport ready-bldg-types)
-                  enemy-capital-air?
+                  (or enemy-capital-air? enemy-air-dominated-p3?)
                   (< (l2-unit-count ctx 'viking) desired-viking-cap))
          (l2-try-train-unit! ctx 'viking 'starport 6 #:respect-bo-reserve? #f))
        ;; Priority bio sustain (#5122349): ensure first 2 Medivacs before Factory drains 125G/tank
@@ -19027,6 +19153,8 @@
                       (and (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'medivac)) (sc2-min-cost 'siege-tank))
                            (>= (- (l2-ctx-gas ctx) (sc2-gas-cost 'medivac)) (sc2-gas-cost 'siege-tank))))
                   (or (not enemy-capital-air?) (>= (l2-unit-count ctx 'viking) 8))
+                  (or (not enemy-air-dominated-p3?)
+                      (>= (l2-unit-count ctx 'viking) (max 6 (+ 2 p3-enemy-air-cnt))))
                   (or (not (enemy-tech-observation-requires-anti-air? tech-obs))
                       (>= (l2-unit-count ctx 'viking) 2))
                   (>= (+ (l2-unit-count ctx 'marine) (l2-unit-count ctx 'marauder)) 6)
@@ -29105,12 +29233,14 @@
                                (real? (hash-ref e 'x #f))
                                (real? (hash-ref e 'y #f))
                                (let ([cv (hash-ref e 'cloak #f)])
-                                 (or (eqv? cv 1) (eq? cv 'cloaked)))))
+                                 (or (eqv? cv 1) (eqv? cv 2)
+                                     (eq? cv 'cloaked) (eq? cv 'cloaked-detected)))))
           e)
         '()))
+  (define l32-cloak-det-ids '())
   (when (pair? l31-undetected-cloak-enemies)
-    (define det-cloak-cmds
-      (for/fold ([acc '()])
+    (define-values (det-cloak-cmds claimed-det-ids)
+      (for/fold ([acc '()] [cids '()])
                 ([u (in-list ally-units)]
                  #:when (and (hash? u)
                              (memq (unit-type-sym u) '(observer observer-siege-mode overseer overseer-siege-mode raven))
@@ -29128,28 +29258,42 @@
             (define ddy (fl- ey0 dy0))
             (define d2 (fl+ (fl* ddx ddx) (fl* ddy ddy)))
             (if (fl<= d2 bd2) (values ex0 ey0 d2) (values bx by bd2))))
-        (if (and (exact-integer? did) (> did 0) (fl< bd2 784.0) (fl> bd2 36.0))
-            (let* ([d (flsqrt bd2)]
-                   [step (flmax 1.0 (fl- d 5.5))]
-                   [tx (safe-coord (fl+ dx0 (fl* step (fl/ (fl- cx dx0) d))) dx0)]
-                   [ty (safe-coord (fl+ dy0 (fl* step (fl/ (fl- cy dy0) d))) dy0)])
-              (cons (list 'move did tx ty) acc))
-            acc)))
+        (if (and (exact-integer? did) (> did 0) (fl< bd2 784.0))
+            (if (fl> bd2 36.0)
+                (let* ([d (flsqrt bd2)]
+                       [step (flmax 1.0 (fl- d 5.5))]
+                       [tx (safe-coord (fl+ dx0 (fl* step (fl/ (fl- cx dx0) d))) dx0)]
+                       [ty (safe-coord (fl+ dy0 (fl* step (fl/ (fl- cy dy0) d))) dy0)])
+                  (values (cons (list 'move did tx ty) acc) (cons did cids)))
+                (values acc (cons did cids)))
+            (values acc cids))))
+    (set! l32-cloak-det-ids claimed-det-ids)
     (when (pair? det-cloak-cmds)
-      (emit-direct-batch! det-cloak-cmds)))
+      (emit-direct-batch! det-cloak-cmds))
+    ;; L32-P0-3 (`p11` Observer overwrite fix): Also claim stationary illuminating detectors (`<= 6t`)
+    ;; in `direct-claimed-ht` so neither `plan-counter-burrow-response` nor later direct tactics
+    ;; yank them back over the Stalker centroid!
+    (when (pair? claimed-det-ids)
+      (set! unclaimed-allies-cache #f)
+      (for ([did (in-list claimed-det-ids)])
+        (hash-set! direct-claimed-ht did #t))))
   (when (or has-enemy-burrow-or-sh-counter?
             (and (pair? enemy-units)
                  (ormap (lambda (u)
                           (and (hash? u)
-                               (memq (unit-type-sym u) '(observer overseer raven))))
+                               (memq (unit-type-sym u) '(observer overseer raven))
+                               (not (memv (hash-ref u 'id -1) l32-cloak-det-ids))))
                         ally-units))
             (let ([rb (hash-ref obs 'remembered-burrows '())])
               (and (list? rb) (pair? rb))))
     ;; `plan-counter-burrow-response` never reads non-detector workers/eggs/larva or non-detector non-OC buildings.
+    ;; L32-P0-3 (`p11`): Strictly exclude mobile detectors claimed by `det-cloak-cmds` so
+    ;; `plan-counter-burrow-response` never snaps them back over Stalkers away from cloaked Banshees!
     (define cb-ally-units
       (for/list ([u (in-list ally-units)]
                  #:when (and (hash? u)
-                             (not (memq (unit-type-sym u) '(scv probe drone overlord larva egg mule)))))
+                             (not (memq (unit-type-sym u) '(scv probe drone overlord larva egg mule)))
+                             (not (memv (hash-ref u 'id -1) l32-cloak-det-ids))))
         u))
     (define cb-ally-bldgs
       (for/list ([b (in-list ally-bldgs)]

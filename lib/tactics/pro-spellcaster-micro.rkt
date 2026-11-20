@@ -2948,12 +2948,13 @@
                 [(snipe-channel-locked? claims u current-frame) #f]
                 [(spellcaster-channel-protected? u) #f]
                 [else
-                 ;; W4-TAC-1 + W4-TAC-5 + L30-P0-3 + L31-P0-3 (`t04` Ghost Snipe Priority): When an unshielded
+                 ;; W4-TAC-1 + W4-TAC-5 + L30/L31/L32-P0-3 (`t04` Ghost Snipe Priority): When an unshielded
                  ;; heavy-biological Snipe target (Ultralisk/BroodLord/Lurker) is in range (<= 10t),
                  ;; evaluate Snipe BEFORE non-shield EMP regardless of energy, only casting EMP first if
-                 ;; `>= 160` shields or `>= 2` shielded psionics exist; when `>= 2` friendly combat units
-                 ;; screen within `4.5t`, relax Snipe abort radius to `1.8t` (and step `2.2t` behind Marines
-                 ;; ONLY if a melee threat closes `< 1.8t`!) so Ghosts land `6–8` Snipes on Ultras/Infestors.
+                 ;; `>= 160` shields or `>= 2` shielded psionics exist; hold `snipe-danger-r = 1.8t` when
+                 ;; Bio-screened OR `2.0t` when heavy-bio target is in range & Ghost cannot cloak (preserving
+                 ;; `novel-62` cloak-first when Personal Cloaking is ready!), and let solo Ghosts step `2.2t`
+                 ;; away/home when melee closes `< snipe-danger-r` so Ghosts land `6–8` Snipes (`2714`)!
                  (define ghost-bio-screened?
                    (>= (count-units-within
                         ally-units ux uy 4.5
@@ -2962,19 +2963,43 @@
                                (not (eq? (uh-type a) 'medivac))
                                (unit-combat-relevant? a))))
                        2))
-                 (define snipe-danger-r : Float (if ghost-bio-screened? 1.8 4.499))
+                 (define heavy-bio-target-in-10? : Boolean
+                   (and (>= en 50.0)
+                        (any-unit-within?
+                         enemy-units ux uy 10.0
+                         (lambda ([e : Any])
+                           (and (not (uh-hallucination? e))
+                                (<= (uh-shields e) 0.0)
+                                (not (eq? (memq (uh-type e)
+                                                '(ultralisk ultralisk-burrowed brood-lord broodlord
+                                                  lurker lurker-burrowed lurker-mp lurker-mp-burrowed))
+                                          #f))
+                                (< (spell-unit-claim-count claims 'steady-targeting (uh-tag e) current-frame)
+                                   (unit-claim-effective-cap 'steady-targeting (uh-total-hp e) 0.0 #f #t)))))))
+                 (define ghost-can-cloak-now? : Boolean
+                   (and ghost-cloak-ok?
+                        (>= en 50.0)
+                        (not (uh-cloaked? u))
+                        (> (- current-frame (hash-ref (spell-claims-ghost-cloak-frame claims) tag (lambda () -10000))) 20)
+                        (not (enemy-detector-within? enemy-units enemy-buildings ux uy 10.999))))
+                 (define snipe-danger-r : Float
+                   (cond
+                     [ghost-bio-screened? 1.8]
+                     [(and heavy-bio-target-in-10? (not ghost-can-cloak-now?)) 2.0]
+                     [else 4.499]))
                  (define (enemy-melee-threat? [e : Any]) : Boolean
                    (and (sc2-enemy-unit-targetable? e)
                         (let ([st (cached-unit-combat-stats (uh-type e))])
                           (and (> (safe-fl (hash-ref st 'ground-dps (lambda () 0.0)) 0.0) 0.0)
                                (<= (safe-fl (hash-ref st 'ground-range (lambda () 0.0)) 0.0) 1.5)))))
                  (define (try-ghost-melee-step-back) : (Option spell-directive)
+                   (define step-trigger-r : Float (if ghost-bio-screened? 1.8 2.0))
                    (and (>= en 50.0)
                         (let-values ([(m-hit? mx my md)
                                       (for/fold ([hit? : Boolean #f]
                                                  [bx : Float 0.0]
                                                  [by : Float 0.0]
-                                                 [bd : Float 1.8])
+                                                 [bd : Float step-trigger-r])
                                                 ([e (in-list enemy-units)])
                                         (if (and (hash? e) (enemy-melee-threat? e))
                                             (let* ([ex (uh-x e)]
@@ -2996,37 +3021,25 @@
                                                         (<= (dist2 ux uy (uh-x a) (uh-y a)) 8.0))
                                                    (values (+ sx (uh-x a)) (+ sy (uh-y a)) (+ c 1))
                                                    (values sx sy c)))])
-                                 (and (> bcnt 0)
-                                      (let* ([bcx (/ bsx (->float bcnt))]
-                                             [bcy (/ bsy (->float bcnt))]
-                                             [use-bio-anchor? (> (dist2 bcx bcy mx my) md)]
-                                             [ax (if use-bio-anchor? bcx ux)]
-                                             [ay (if use-bio-anchor? bcy uy)]
-                                             [dx0 (- ax mx)]
-                                             [dy0 (- ay my)]
-                                             [d0 (flsqrt (+ (* dx0 dx0) (* dy0 dy0)))]
-                                             [dx1 (if (> d0 0.05) dx0 (- home-x ux))]
-                                             [dy1 (if (> d0 0.05) dy0 (- home-y uy))]
-                                             [d1 (flsqrt (+ (* dx1 dx1) (* dy1 dy1)))])
-                                        (and (> d1 0.05)
-                                             (let ([rx (max 2.0 (min 250.0 (+ ax (* 2.2 (/ dx1 d1)))))]
-                                                   [ry (max 2.0 (min 250.0 (+ ay (* 2.2 (/ dy1 d1)))))])
-                                               (spell-directive tag 'ghost 'move 'move 0 rx ry
-                                                                'ghost-melee-step-back))))))))))
+                                 (let* ([use-bio-anchor?
+                                         (and (> bcnt 0)
+                                              (> (dist2 (/ bsx (->float bcnt)) (/ bsy (->float bcnt)) mx my) md))]
+                                        [ax (if use-bio-anchor? (/ bsx (->float bcnt)) ux)]
+                                        [ay (if use-bio-anchor? (/ bsy (->float bcnt)) uy)]
+                                        [dx0 (- ax mx)]
+                                        [dy0 (- ay my)]
+                                        [d0 (flsqrt (+ (* dx0 dx0) (* dy0 dy0)))]
+                                        [dx1 (if (> d0 0.05) dx0 (- home-x ux))]
+                                        [dy1 (if (> d0 0.05) dy0 (- home-y uy))]
+                                        [d1 (flsqrt (+ (* dx1 dx1) (* dy1 dy1)))])
+                                   (and (> d1 0.05)
+                                        (let ([rx (max 2.0 (min 250.0 (+ ax (* 2.2 (/ dx1 d1)))))]
+                                              [ry (max 2.0 (min 250.0 (+ ay (* 2.2 (/ dy1 d1)))))])
+                                          (spell-directive tag 'ghost 'move 'move 0 rx ry
+                                                           'ghost-melee-step-back)))))))))
                  (define heavy-bio-snipe-near?
-                   (and (>= en 50.0)
-                        (not (any-unit-within? all-enemies ux uy snipe-danger-r sc2-enemy-unit-targetable?))
-                        (any-unit-within?
-                         enemy-units ux uy 10.0
-                         (lambda ([e : Any])
-                           (and (not (uh-hallucination? e))
-                                (<= (uh-shields e) 0.0)
-                                (not (eq? (memq (uh-type e)
-                                                '(ultralisk ultralisk-burrowed brood-lord broodlord
-                                                  lurker lurker-burrowed lurker-mp lurker-mp-burrowed))
-                                          #f))
-                                (< (spell-unit-claim-count claims 'steady-targeting (uh-tag e) current-frame)
-                                   (unit-claim-effective-cap 'steady-targeting (uh-total-hp e) 0.0 #f #t)))))))
+                   (and heavy-bio-target-in-10?
+                        (not (any-unit-within? all-enemies ux uy snipe-danger-r sc2-enemy-unit-targetable?))))
                  (define (try-ghost-emp [require-heavy-shields? : Boolean]) : (Option spell-directive)
                    (and (>= en 75.0)
                         (let-values ([(ok? ex ey _s)
