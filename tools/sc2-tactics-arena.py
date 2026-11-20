@@ -42,10 +42,11 @@ DEFAULT_MAPS_DIR = Path("/home/sjaconette/sc2-local-arena/maps")
 DEFAULT_ARENA_DIR = Path("/home/sjaconette/sc2-local-arena")
 DEFAULT_REPO_DIR = Path("/home/sjaconette/repos/mothman-sc2-bot")
 DEFAULT_MAP = "AcropolisAIE.SC2Map"
+DEFAULT_SCENARIOS_FILE = Path(__file__).resolve().parent / "arena-scenarios.json"
 
-# Canonical SC2 UnitTypeIds (Blizzard 4.10)
+# Canonical SC2 UnitTypeIds (Blizzard 4.10 — synced with add-arena-scenario skill)
 UNIT_IDS: dict[str, int] = {
-    # Terran
+    # Terran (21)
     "marine": 48,
     "reaper": 49,
     "marauder": 51,
@@ -53,30 +54,40 @@ UNIT_IDS: dict[str, int] = {
     "siege-tank": 33,
     "siege-tank-sieged": 32,
     "hellion": 53,
+    "hellbat": 484,
     "ghost": 50,
     "raven": 56,
+    "thor": 52,
     "viking-fighter": 35,
+    "viking-assault": 34,
+    "banshee": 55,
     "widow-mine": 498,
     "widow-mine-burrowed": 500,
     "liberator": 689,
     "liberator-ag": 734,
     "cyclone": 692,
+    "battlecruiser": 57,
     "scv": 45,
-    # Protoss
+    # Protoss (18)
     "zealot": 73,
     "stalker": 74,
     "sentry": 77,
     "adept": 311,
     "immortal": 83,
     "colossus": 4,
+    "disruptor": 694,
     "high-templar": 75,
+    "dark-templar": 76,
     "archon": 141,
+    "phoenix": 78,
     "oracle": 495,
     "void-ray": 80,
     "carrier": 79,
     "tempest": 496,
+    "observer": 82,
+    "warp-prism": 81,
     "probe": 84,
-    # Zerg
+    # Zerg (17)
     "zergling": 105,
     "baneling": 9,
     "roach": 110,
@@ -87,14 +98,18 @@ UNIT_IDS: dict[str, int] = {
     "queen": 126,
     "ultralisk": 109,
     "infestor": 111,
+    "swarm-host": 494,
     "viper": 499,
+    "brood-lord": 114,
     "lurker-mp": 502,
     "lurker-mp-burrowed": 503,
+    "overseer": 129,
     "drone": 104,
 }
 
-# Approximate mineral + 1.5*gas weighted combat value per unit
+# Approximate mineral + 1.5*gas weighted combat value per unit (synced with add-arena-scenario skill)
 UNIT_VALUES: dict[int, float] = {
+    # Terran
     48: 50.0,     # marine
     49: 125.0,    # reaper
     51: 137.5,    # marauder
@@ -102,28 +117,40 @@ UNIT_VALUES: dict[int, float] = {
     33: 337.5,    # siege-tank
     32: 337.5,    # siege-tank-sieged
     53: 100.0,    # hellion
+    484: 100.0,   # hellbat
     50: 337.5,    # ghost
     56: 400.0,    # raven
+    52: 600.0,    # thor
     35: 262.5,    # viking-fighter
+    34: 262.5,    # viking-assault
+    55: 300.0,    # banshee
     498: 112.5,   # widow-mine
     500: 112.5,   # widow-mine-burrowed
     689: 375.0,   # liberator
     734: 375.0,   # liberator-ag
     692: 300.0,   # cyclone
+    57: 850.0,    # battlecruiser
     45: 50.0,     # scv
+    # Protoss
     73: 100.0,    # zealot
     74: 200.0,    # stalker
     77: 200.0,    # sentry
     311: 137.5,   # adept
     83: 425.0,    # immortal
     4: 600.0,     # colossus
+    694: 375.0,   # disruptor
     75: 275.0,    # high-templar
+    76: 312.5,    # dark-templar
     141: 550.0,   # archon
+    78: 300.0,    # phoenix
     495: 375.0,   # oracle
     80: 475.0,    # void-ray
     79: 725.0,    # carrier
     496: 512.5,   # tempest
+    82: 137.5,    # observer
+    81: 250.0,    # warp-prism
     84: 50.0,     # probe
+    # Zerg
     105: 25.0,    # zergling
     9: 87.5,      # baneling
     110: 112.5,   # roach
@@ -134,9 +161,12 @@ UNIT_VALUES: dict[int, float] = {
     126: 150.0,   # queen
     109: 575.0,   # ultralisk
     111: 325.0,   # infestor
+    494: 212.5,   # swarm-host
     499: 400.0,   # viper
-    502: 375.0,   # lurker
-    503: 375.0,   # lurker-burrowed
+    114: 675.0,   # brood-lord
+    502: 375.0,   # lurker-mp
+    503: 375.0,   # lurker-mp-burrowed
+    129: 225.0,   # overseer
     104: 50.0,    # drone
 }
 
@@ -352,7 +382,82 @@ DEFAULT_SKIRMISHES: list[SkirmishSpec] = [
 ]
 
 
-def run_single_container(args: argparse.Namespace, race: str) -> dict[str, Any]:
+def _parse_unit_entries(entries: list[Any], sid: str, side: str) -> list[tuple[str, int, float, float]]:
+    parsed: list[tuple[str, int, float, float]] = []
+    for item in entries:
+        if not isinstance(item, (list, tuple)) or len(item) != 4:
+            raise ValueError(f"Scenario {sid!r} {side} entry must be [unit, count, dx, dy], got {item!r}")
+        uname, cnt, dx, dy = str(item[0]), int(item[1]), float(item[2]), float(item[3])
+        if uname not in UNIT_IDS:
+            raise ValueError(f"Scenario {sid!r} {side} has unknown unit {uname!r}")
+        parsed.append((uname, cnt, dx, dy))
+    return parsed
+
+
+def load_scenarios(scenarios_path: str = "", repo_dir: Path | None = None) -> list[SkirmishSpec]:
+    """Load skirmish scenarios from --scenarios path, tools/arena-scenarios.json, or fallback."""
+    cand: Path | None = None
+    if scenarios_path:
+        cand = Path(scenarios_path).resolve()
+        if not cand.is_file():
+            raise FileNotFoundError(f"Scenarios file not found: {cand}")
+    else:
+        search: list[Path] = []
+        if repo_dir is not None:
+            search.append(repo_dir / "tools" / "arena-scenarios.json")
+        search.append(DEFAULT_SCENARIOS_FILE)
+        for p in search:
+            if p.is_file():
+                cand = p
+                break
+    if cand is None:
+        return list(DEFAULT_SKIRMISHES)
+
+    raw = json.loads(cand.read_text(encoding="utf-8"))
+    items = raw.get("scenarios", []) if isinstance(raw, dict) else raw
+    if not isinstance(items, list) or not items:
+        raise ValueError(f"Scenarios catalog {cand} contains no scenarios")
+    specs: list[SkirmishSpec] = []
+    for idx, sc in enumerate(items):
+        if not isinstance(sc, dict):
+            raise ValueError(f"Scenario #{idx} in {cand} is not an object")
+        sid = str(sc["id"])
+        specs.append(SkirmishSpec(
+            id=sid,
+            our_race=str(sc["our_race"]),
+            enemy_race=str(sc["enemy_race"]),
+            description=str(sc.get("description", sid)),
+            p1_units=_parse_unit_entries(sc["p1_units"], sid, "p1_units"),
+            p2_units=_parse_unit_entries(sc["p2_units"], sid, "p2_units"),
+            max_loops=int(sc.get("max_loops", 336)),
+        ))
+    return specs
+
+
+def filter_scenarios(
+    scenarios: list[SkirmishSpec],
+    race: str,
+    scenario_filter: str = "",
+) -> list[SkirmishSpec]:
+    """Filter scenarios by our_race and optional case-insensitive substring on id."""
+    out = (
+        list(scenarios)
+        if race.lower() == "all"
+        else [s for s in scenarios if s.our_race.lower() == race.lower()]
+    )
+    if scenario_filter:
+        needle = scenario_filter.lower()
+        out = [s for s in out if needle in s.id.lower()]
+        if not out:
+            raise ValueError(
+                f"No scenarios matched --race={race!r} --scenario={scenario_filter!r}"
+            )
+    elif not out:
+        raise ValueError(f"No scenarios matched --race={race!r}")
+    return out
+
+
+def run_single_container(args: argparse.Namespace, race: str, save_replays_dir: Path | None = None) -> dict[str, Any]:
     repo_dir = Path(args.repo_dir).resolve()
     maps_dir = Path(args.maps_dir).resolve()
     arena_dir = Path(args.arena_dir).resolve()
@@ -366,6 +471,19 @@ def run_single_container(args: argparse.Namespace, race: str) -> dict[str, Any]:
         "-v", f"{self_script}:/harness/sc2-tactics-arena.py:ro",
         "-v", f"{map_file}:/root/StarCraftII/Maps/{args.map}:ro",
     ]
+    custom_scenarios_in_container = ""
+    if getattr(args, "scenarios", ""):
+        custom_sc = Path(args.scenarios).resolve()
+        if not custom_sc.is_file():
+            raise FileNotFoundError(f"Scenarios file not found: {custom_sc}")
+        custom_scenarios_in_container = "/harness/custom-scenarios.json"
+        mounts.extend(["-v", f"{custom_sc}:{custom_scenarios_in_container}:ro"])
+    replay_host_path: Path | None = None
+    if save_replays_dir is not None and args.mode == "duel":
+        save_replays_dir.mkdir(parents=True, exist_ok=True)
+        replay_name = f"arena_{race}.SC2Replay"
+        replay_host_path = save_replays_dir.resolve() / replay_name
+        mounts.extend(["-v", f"{save_replays_dir.resolve()}:/out-replays:rw"])
     if args.mode == "duel":
         portable_racket = repo_dir / "ladder" / ".cache" / "racket_runtime" / "bin" / "racket"
         if not portable_racket.is_file():
@@ -391,26 +509,70 @@ def run_single_container(args: argparse.Namespace, race: str) -> dict[str, Any]:
         "--race", race,
         "--step-size", str(args.step_size),
     ]
+    if custom_scenarios_in_container:
+        inner_cmd.extend(["--scenarios", custom_scenarios_in_container])
+    if getattr(args, "scenario", ""):
+        inner_cmd.extend(["--scenario", args.scenario])
+    if replay_host_path is not None:
+        inner_cmd.extend(["--save-replay-path", f"/out-replays/{replay_host_path.name}"])
     cmd = ["podman", "run", "--rm", "--network", "none", *mounts, args.image, *inner_cmd]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"Container failed for race={race} (rc={proc.returncode}):\n{proc.stderr}\n{proc.stdout}")
-    return json.loads(proc.stdout)
+    out = json.loads(proc.stdout)
+    if replay_host_path is not None:
+        out["replay_path"] = str(replay_host_path)
+    return out
+
+
+def _load_3d_renderer(repo_dir: Path) -> Any:
+    loop_dir = repo_dir / "tools" / "iteration-loop"
+    if not (loop_dir / "sc2_3d_renderer.py").is_file():
+        loop_dir = DEFAULT_REPO_DIR / "tools" / "iteration-loop"
+    if not (loop_dir / "sc2_3d_renderer.py").is_file():
+        raise FileNotFoundError(f"3D renderer not found in {loop_dir}")
+    loop_dir_str = str(loop_dir.resolve())
+    if loop_dir_str not in sys.path:
+        sys.path.insert(0, loop_dir_str)
+    import sc2_3d_renderer  # type: ignore[import-not-found]
+    return sc2_3d_renderer
 
 
 def run_host_driver(args: argparse.Namespace) -> int:
     t0 = time.monotonic()
+    repo_dir = Path(args.repo_dir).resolve()
+    all_specs = load_scenarios(getattr(args, "scenarios", ""), repo_dir)
+    matched_specs = filter_scenarios(all_specs, args.race, getattr(args, "scenario", ""))
+
+    render_dir = Path(args.render_dir).resolve() if getattr(args, "render_dir", "") else None
+    save_replays_dir: Path | None = None
+    if getattr(args, "save_replays_dir", ""):
+        save_replays_dir = Path(args.save_replays_dir).resolve()
+    elif render_dir is not None:
+        save_replays_dir = render_dir / "replays"
+    map_host_path = str((Path(args.maps_dir).resolve() / args.map))
+
+    race_reports_for_render: list[dict[str, Any]] = []
     if args.mode == "duel" and args.race.lower() == "all":
-        races = ["Protoss", "Terran", "Zerg"]
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            futs = {pool.submit(run_single_container, args, r): r for r in races}
+        races = [r for r in ["Protoss", "Terran", "Zerg"] if any(s.our_race == r for s in matched_specs)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(races))) as pool:
+            futs = {pool.submit(run_single_container, args, r, save_replays_dir): r for r in races}
             sub_reports: dict[str, dict[str, Any]] = {}
             for fut in concurrent.futures.as_completed(futs):
                 r = futs[fut]
                 sub_reports[r] = fut.result()
         all_scens: list[dict[str, Any]] = []
         for r in races:
-            all_scens.extend(sub_reports[r].get("scenarios", []))
+            sr = sub_reports[r]
+            all_scens.extend(sr.get("scenarios", []))
+            if sr.get("replay_path"):
+                race_reports_for_render.append({
+                    "race": r,
+                    "bot": sr.get("bot", f"Mothman-{r[0]}"),
+                    "map_path": map_host_path,
+                    "replay_path": sr["replay_path"],
+                    "duels": sr.get("scenarios", []),
+                })
         wins = sum(1 for s in all_scens if s.get("winner") == "Mothman")
         tot_p1_lost = sum(float(s.get("p1_lost_val", 0.0)) for s in all_scens)
         tot_p2_lost = sum(float(s.get("p2_lost_val", 0.0)) for s in all_scens)
@@ -435,11 +597,13 @@ def run_host_driver(args: argparse.Namespace) -> int:
                 "spell_unit_cmds": r_spl,
                 "am_ratio": round(r_atk / max(1, r_mov), 2),
             }
+        sc2_wall_ms = round((time.monotonic() - t0) * 1000.0, 1)
         report = {
             "mode": "duel",
             "engine": "SC2_x64_Base75689",
             "map": args.map,
-            "total_wall_ms": round((time.monotonic() - t0) * 1000.0, 1),
+            "sc2_duel_wall_ms": sc2_wall_ms,
+            "total_wall_ms": sc2_wall_ms,
             "summary": {
                 "total": len(all_scens),
                 "mothman_wins": wins,
@@ -455,7 +619,37 @@ def run_host_driver(args: argparse.Namespace) -> int:
             "scenarios": all_scens,
         }
     else:
-        report = run_single_container(args, args.race)
+        target_race = matched_specs[0].our_race if args.race.lower() != "all" else args.race
+        report = run_single_container(args, target_race, save_replays_dir)
+        sc2_wall_ms = round((time.monotonic() - t0) * 1000.0, 1)
+        report["sc2_duel_wall_ms"] = sc2_wall_ms
+        if report.get("replay_path"):
+            race_reports_for_render.append({
+                "race": report.get("race", target_race),
+                "bot": report.get("bot", f"Mothman-{target_race[0]}"),
+                "map_path": map_host_path,
+                "replay_path": report["replay_path"],
+                "duels": report.get("scenarios", []),
+            })
+
+    if render_dir is not None and args.mode == "duel" and race_reports_for_render:
+        t_ren0 = time.monotonic()
+        render_dir.mkdir(parents=True, exist_ok=True)
+        renderer = _load_3d_renderer(Path(args.repo_dir).resolve())
+        render_res = renderer.render_arena_replays_parallel(
+            race_specs=race_reports_for_render,
+            out_dir=render_dir,
+            step=args.render_step,
+            fps=args.render_fps,
+            render_size=(960, 720),
+            minimap_size=(180, 180),
+            webp_size=(800, 600),
+            workers=min(3, len(race_reports_for_render)),
+        )
+        render_wall_ms = round((time.monotonic() - t_ren0) * 1000.0, 1)
+        report["render_3d_wall_ms"] = render_wall_ms
+        report["total_wall_ms"] = round((time.monotonic() - t0) * 1000.0, 1)
+        report["visuals"] = render_res if isinstance(render_res, dict) else {"render_dir": str(render_dir)}
 
     if args.compare:
         base_path = Path(args.compare)
@@ -597,13 +791,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         return float(tx), float(ty)
         return float(cx0), float(cy0)
 
-    scenarios = (
-        DEFAULT_SKIRMISHES
-        if args.race.lower() == "all"
-        else [s for s in DEFAULT_SKIRMISHES if s.our_race.lower() == args.race.lower()]
-    )
-    if not scenarios:
-        scenarios = [DEFAULT_SKIRMISHES[0]]
+    all_specs = load_scenarios(getattr(args, "scenarios", ""), Path("/mothman-repo"))
+    scenarios = filter_scenarios(all_specs, args.race, getattr(args, "scenario", ""))
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -714,8 +903,21 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 else:
                                     dstate["p2_clear_ok"] = True
                             elif dstate["phase"] == "fighting":
-                                my_u = [u for u in obs.raw_data.units if u.display_type == 1 and u.alliance == 1 and u.unit_type in COMBAT_IDS]
-                                en_u = [u for u in obs.raw_data.units if u.display_type == 1 and u.alliance == 4 and u.unit_type in COMBAT_IDS]
+                                scen_p2 = scenarios[min(dstate["scen_idx"], len(scenarios) - 1)]
+                                want_workers_p2 = bool(
+                                    {UNIT_IDS[u] for u, _, _, _ in (scen_p2.p1_units + scen_p2.p2_units)} & WORKER_IDS
+                                )
+                                cx_a, cy_a = dstate["arena_cx"], dstate["arena_cy"]
+                                my_u = [
+                                    u for u in obs.raw_data.units
+                                    if u.display_type == 1 and u.alliance == 1
+                                    and (u.unit_type in COMBAT_IDS or (want_workers_p2 and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx_a, u.pos.y - cy_a) < 35.0))
+                                ]
+                                en_u = [
+                                    u for u in obs.raw_data.units
+                                    if u.display_type == 1 and u.alliance == 4
+                                    and (u.unit_type in COMBAT_IDS or (want_workers_p2 and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx_a, u.pos.y - cy_a) < 35.0))
+                                ]
                                 if my_u and en_u:
                                     cx_my = sum(u.pos.x for u in my_u) / len(my_u)
                                     cy_my = sum(u.pos.y for u in my_u) / len(my_u)
@@ -741,12 +943,29 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             "Mothman" if (dstate["p1_alive_cnt"] > 0 and dstate["p2_alive_cnt"] == 0)
                             else ("MicroDummy" if (dstate["p2_alive_cnt"] > 0 and dstate["p1_alive_cnt"] == 0) else "Timeout")
                         )
+                        start_loop = int(dstate.get("fight_start_loop") or dstate["phase_start_loop"])
+                        p1_lbl = ", ".join(f"{c} {u}" for u, c, _, _ in scen.p1_units)
+                        p2_lbl = ", ".join(f"{c} {u}" for u, c, _, _ in scen.p2_units)
+                        context = (
+                            f"{scen.description} | {bname} ({p1_lbl}) vs MicroDummy ({p2_lbl}) -> "
+                            f"{winner} ({trade:.2f}x trade; alive {dstate['p1_alive_cnt']}/{dstate['p1_start_cnt']} vs "
+                            f"{dstate['p2_alive_cnt']}/{dstate['p2_start_cnt']}; "
+                            f"ATK={dstate['attack_cmds']}, MOV={dstate['move_cmds']}, Spells={dstate['spell_cmds']})."
+                        )
                         dstate["results"].append({
                             "id": scen.id,
                             "bot": bname,
                             "race": scen.our_race,
                             "enemy_race": scen.enemy_race,
+                            "description": scen.description,
+                            "context": context,
                             "winner": winner,
+                            "start_loop": start_loop,
+                            "end_loop": int(cur_loop),
+                            "arena_cx": round(float(dstate["arena_cx"]), 2),
+                            "arena_cy": round(float(dstate["arena_cy"]), 2),
+                            "p1_spec": p1_lbl,
+                            "p2_spec": p2_lbl,
                             "p1_start_cnt": dstate["p1_start_cnt"],
                             "p2_start_cnt": dstate["p2_start_cnt"],
                             "p1_start_types": dstate["p1_start_types"],
@@ -857,6 +1076,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=dbg)))
                                         dstate["phase"] = "fighting"
                                         dstate["phase_start_loop"] = gl
+                                        dstate["fight_start_loop"] = gl
                                         dstate["round_t0"] = time.monotonic()
                                         dstate["attack_cmds"] = 0
                                         dstate["move_cmds"] = 0
@@ -870,11 +1090,23 @@ async def run_in_container(args: argparse.Namespace) -> int:
 
                                     elif dstate["phase"] == "fighting":
                                         scen = scenarios[dstate["scen_idx"]]
-                                        p1u = [u for u in obs.raw_data.units if u.display_type == 1 and u.alliance == 1 and u.unit_type in COMBAT_IDS]
-                                        p2u = [u for u in obs.raw_data.units if u.display_type == 1 and u.alliance == 4 and u.unit_type in COMBAT_IDS]
+                                        want_workers = bool(
+                                            {UNIT_IDS[u] for u, _, _, _ in (scen.p1_units + scen.p2_units)} & WORKER_IDS
+                                        )
+                                        p1u = [
+                                            u for u in obs.raw_data.units
+                                            if u.display_type == 1 and u.alliance == 1
+                                            and (u.unit_type in COMBAT_IDS or (want_workers and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx, u.pos.y - cy) < 35.0))
+                                        ]
+                                        p2u = [
+                                            u for u in obs.raw_data.units
+                                            if u.display_type == 1 and u.alliance == 4
+                                            and (u.unit_type in COMBAT_IDS or (want_workers and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx, u.pos.y - cy) < 35.0))
+                                        ]
                                         exp_p1 = sum(cnt for _, cnt, _, _ in scen.p1_units)
                                         exp_p2 = sum(cnt for _, cnt, _, _ in scen.p2_units)
                                         if dstate["p1_start_cnt"] == 0 and (len(p1u) >= exp_p1 and len(p2u) >= exp_p2 or (gl >= dstate["phase_start_loop"] + 16 and p1u and p2u)):
+                                            dstate["fight_start_loop"] = gl
                                             dstate["p1_start_cnt"] = len(p1u)
                                             dstate["p2_start_cnt"] = len(p2u)
                                             id_to_name = {v: k for k, v in UNIT_IDS.items()}
@@ -968,6 +1200,24 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             bot_proc.kill()
                         bot_log.close()
                         await runner.cleanup()
+                        try:
+                            await p2_task
+                        except (asyncio.CancelledError, Exception):
+                            pass
+
+                    replay_bytes = 0
+                    if getattr(args, "save_replay_path", ""):
+                        save_resp = await rpc(
+                            sc2_ws,
+                            sc2api_pb2.Request(save_replay=sc2api_pb2.RequestSaveReplay()),
+                            timeout=30.0,
+                        )
+                        if not (save_resp.HasField("save_replay") and save_resp.save_replay.data):
+                            raise RuntimeError(f"RequestSaveReplay returned empty data for race={our_race}")
+                        rp = Path(args.save_replay_path)
+                        rp.parent.mkdir(parents=True, exist_ok=True)
+                        rp.write_bytes(save_resp.save_replay.data)
+                        replay_bytes = len(save_resp.save_replay.data)
 
                     res = dstate["results"]
                     wins = sum(1 for s in res if s["winner"] == "Mothman")
@@ -988,6 +1238,9 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         },
                         "scenarios": res,
                     }
+                    if getattr(args, "save_replay_path", ""):
+                        report["replay_path"] = args.save_replay_path
+                        report["replay_bytes"] = replay_bytes
                     print(json.dumps(report, indent=2))
                     return 0
                 finally:
@@ -1105,6 +1358,8 @@ def main() -> int:
     parser.add_argument("--in-container", action="store_true")
     parser.add_argument("--mode", choices=["probe", "duel"], default="duel")
     parser.add_argument("--race", default="all", help="Protoss | Terran | Zerg | all")
+    parser.add_argument("--scenarios", default="", help="Optional path to arena scenarios JSON catalog (defaults to tools/arena-scenarios.json)")
+    parser.add_argument("--scenario", default="", help="Optional case-insensitive substring filter on scenario ID (e.g. 'p04' or 'tank')")
     parser.add_argument("--map", default=DEFAULT_MAP)
     parser.add_argument("--step-size", type=int, default=4)
     parser.add_argument("--image", default=DEFAULT_IMAGE)
@@ -1113,6 +1368,11 @@ def main() -> int:
     parser.add_argument("--arena-dir", default=str(DEFAULT_ARENA_DIR))
     parser.add_argument("--out", default="")
     parser.add_argument("--compare", default="", help="Optional baseline JSON path to emit A/B delta comparison")
+    parser.add_argument("--render-dir", default="", help="Optional output directory to render real-3D SC2_x64 WebP clips + Peak PNGs for all duels")
+    parser.add_argument("--save-replays-dir", default="", help="Optional host directory to save raw .SC2Replay files from duels")
+    parser.add_argument("--render-step", type=int, default=2, help="SC2 game loops per rendered 3D frame (default: 2)")
+    parser.add_argument("--render-fps", type=int, default=16, help="Output animated WebP FPS (default: 16)")
+    parser.add_argument("--save-replay-path", default="", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.in_container:
         return asyncio.run(run_in_container(args))
