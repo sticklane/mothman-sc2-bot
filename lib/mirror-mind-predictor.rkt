@@ -1362,10 +1362,11 @@
                    (memq utype '(lurker lurker-mp widow-mine widowmine roach-burrowed zergling-burrowed)))
            (add-upg! 'burrow-or-subterranean-tech)
            (set! req-det? #t))
-         (unless req-det?
+         (unless (or req-det?
+                     (memq utype '(observer observer-siege-mode)))
            (when (or (hash-ref u 'cloaked? #f)
                      (hash-ref u 'cloaked #f)
-                     (memq utype '(dark-templar banshee ghost mothership lurker lurker-mp widow-mine widowmine observer)))
+                     (memq utype '(dark-templar banshee ghost mothership lurker lurker-mp widow-mine widowmine)))
              (set! req-det? #t))))
 
        ;; Air threat trigger (unit type OR explicit flying? / flying / is-flying flag).
@@ -1481,7 +1482,7 @@
             historical-bldgs))
 
   (for ([b (in-list active-implied-bldgs)])
-    (when (memq b '(dark-shrine ghost-academy lurker-den lurker-den-mp starport-techlab))
+    (when (memq b '(dark-shrine ghost-academy lurker-den lurker-den-mp))
       (set! req-det? #t))
     (when (or (memq b '(spire greater-spire fusion-core stargate fleet-beacon starport-techlab))
               (and (eq? b 'starport) non-transport-starport-evidence?))
@@ -2892,12 +2893,14 @@
                                         #:base-y [raw-base-y 32]
                                         #:observed-effects [observed-effects '()]
                                         #:enemy-workers-killed [raw-enemy-workers-killed 0]
+                                        #:our-upgrade-tier [raw-our-upgrade-tier 0]
                                         #:our-units-lost-value [_our-units-lost-value 0]
                                         #:enemy-units-lost-value [_enemy-units-lost-value 0])
   (define frame (safe-frame raw-frame))
   (define base-x (safe-coord raw-base-x 32))
   (define base-y (safe-coord raw-base-y 32))
   (define enemy-workers-killed (max 0 (safe-int raw-enemy-workers-killed 0)))
+  (define our-upgrade-tier (max 0 (safe-int raw-our-upgrade-tier 0)))
   (define enemy-units (if (list? raw-enemy-units) raw-enemy-units '()))
   (define enemy-bldgs (if (list? raw-enemy-bldgs) raw-enemy-bldgs '()))
   (define unit-costs (mirror-mind-state-seen-enemy-unit-costs mstate))
@@ -2956,6 +2959,7 @@
     (infer-enemy-implied-tech-and-upgrades
      enemy-units
      enemy-bldgs
+     #:our-upgrade-tier our-upgrade-tier
      #:observed-effects (if (list? observed-effects) observed-effects '())
      #:destroyed-enemy-bldgs (mirror-mind-state-destroyed-enemy-bldgs mstate)
      #:pre-destruction-unit-ids (mirror-mind-state-pre-destruction-unit-ids mstate)
@@ -3411,7 +3415,7 @@
     (case verdict
       [(punish-And-Deny-Greedy-Expand)     (max (+ our-bases 1) pred-enemy-bases)]
       [(out-Expand-Passive-Turtle)         (max 3 (+ pred-enemy-bases 2))]
-      [(defend-All-In-Then-Counter-Expand) (max 2 (+ our-bases 1))]
+      [(defend-All-In-Then-Counter-Expand) (max 1 our-bases)]
       [else                                (max 2 (+ pred-enemy-bases 1))]))
 
   (define disrupt-prio
@@ -4591,22 +4595,27 @@
         (apply values pre-enemy-budget)
         (compute-enemy-feasible-tech-and-budget mstate)))
 
-  ;; Project opponent onto Build-Order Tree T_R at horizon matched to depth
+  ;; Project opponent onto Build-Order Tree T_R lazily (only evaluated when needed:
+  ;; depth >= 2, or depth <= 1 with 0 enemy units and >= 1 enemy buildings).
   (define bo-horizon-sec
     (cond
       [(<= depth 0) 15.0]
       [(= depth 1)  30.0]
       [(= depth 2)  60.0]
       [else         105.0]))
-  (define opp-bo-proj
-    (if pre-opp-ctx
-        (evaluate-bo-tree-frame-context pre-opp-ctx bo-horizon-sec)
-        (project-opponent-build-order-tree
-         (hash-set (hash-set obs 'enemy-race enemy-race)
-                   'unaccounted-gas enemy-rem-gas)
-         bo-horizon-sec)))
-  (define bo-tree-tech
-    (let ([reach-bldgs (build-order-tree-projection-horizon-reachable-tech-buildings opp-bo-proj)])
+  (define opp-bo-proj-cache #f)
+  (define (get-opp-bo-proj)
+    (unless opp-bo-proj-cache
+      (set! opp-bo-proj-cache
+            (if pre-opp-ctx
+                (evaluate-bo-tree-frame-context pre-opp-ctx bo-horizon-sec)
+                (project-opponent-build-order-tree
+                 (hash-set (hash-set obs 'enemy-race enemy-race)
+                           'unaccounted-gas enemy-rem-gas)
+                 bo-horizon-sec))))
+    opp-bo-proj-cache)
+  (define (get-bo-tree-tech)
+    (let ([reach-bldgs (build-order-tree-projection-horizon-reachable-tech-buildings (get-opp-bo-proj))])
       (define filtered
         (filter (lambda (b)
                   (and (memq b enemy-feasible-tech)
@@ -4624,7 +4633,7 @@
        (or previewed-unit
            (dominant-observed-enemy-unit enemy-units)
            (if (and (null? enemy-units) (not (null? enemy-bldgs)))
-               (build-order-tree-projection-predicted-primary-unit opp-bo-proj)
+               (build-order-tree-projection-predicted-primary-unit (get-opp-bo-proj))
                (archetype-signature-unit enemy-race obs-enemy-arch))))
      (define our-d0-unit
        (counter-unit-for-race our-race (unit-to-archetype obs-enemy-unit)
@@ -4698,17 +4707,23 @@
                 'banshee]
                [else 'viking-fighter])]
             [else                      (archetype-signature-unit enemy-race obs-enemy-arch)])]
+         ;; L36-P0-2 (`#834`): Never let zero-sum `committed-branch` or `closed-by-opportunity-cost`
+         ;; override a visibly observed combat `dom-obs-unit` in Depth 1! Keep dark-matter hidden
+         ;; air/cloak switch only when no real combat force is visible (or a 1-2 unit poke/feint).
+         [(and ledger
+               (eq? (shadow-ledger-dark-matter-hypothesis ledger)
+                    'hidden-air-or-cloak-tech-switch)
+               (or (not dom-obs-unit)
+                   (and reading (action-lens-reading-feint-or-poke-detected? reading))
+                   (<= (length enemy-units) 2)))
+          (race-hidden-gas-threat enemy-race)]
+         [dom-obs-unit dom-obs-unit]
          [(and zs-reading
                (memq 'closed-by-opportunity-cost
                      (zero-sum-exclusion-reading-excluded-tech-branches zs-reading)))
           (or (hash-ref (zero-sum-exclusion-reading-opportunity-cost-profile zs-reading)
                         'recommended-enemy-unit #f)
-              dom-obs-unit
               (archetype-signature-unit enemy-race obs-enemy-arch))]
-         [(and ledger
-               (eq? (shadow-ledger-dark-matter-hypothesis ledger)
-                    'hidden-air-or-cloak-tech-switch))
-          (race-hidden-gas-threat enemy-race)]
          [(not (eq? committed-branch 'uncommitted))
           (case committed-branch
             [(twilight-templar-ground)
@@ -4787,11 +4802,12 @@
             [(Zerg)    'lurker]
             [else      'siege-tank])]
          [(not (null? enemy-bldgs))
-          (build-order-tree-projection-predicted-primary-unit opp-bo-proj)]
+          (build-order-tree-projection-predicted-primary-unit (get-opp-bo-proj))]
          [else
           (archetype-signature-unit enemy-race obs-enemy-arch)]))
      (define d1-enemy-unit
-       (if bluff?
+       (if (or bluff?
+               (and dom-obs-unit (eq? raw-d1-enemy-unit dom-obs-unit)))
            raw-d1-enemy-unit
            (constrain-enemy-unit-to-feasible-tech
             enemy-race raw-d1-enemy-unit enemy-feasible-tech zs-reading tech-obs)))
@@ -4822,6 +4838,7 @@
     ;;   zero-sum exclusions, OR unmasking a suspected Bayesian tech bluff!")
     ;; -------------------------------------------------------------------------
     [(= depth 2)
+     (define bo-tree-tech (get-bo-tree-tech))
      (define opp-belief-arch
        (infer-opponent-belief-about-us mstate ally-units ally-bldgs))
      (define raw-d2-enemy-unit
@@ -4882,6 +4899,7 @@
     ;;   2-hop reachable build-order tree T_R, crippled buildings, and zero-sum exclusions")
     ;; -------------------------------------------------------------------------
     [else
+     (define bo-tree-tech (get-bo-tree-tech))
      (define prev-node
        (or given-prev-node
            (predict-at-depth mstate (sub1 depth) obs
@@ -4924,9 +4942,11 @@
                  tx
                  ty)]))
 
-;; Build the full hierarchy of depth nodes from 0 up to max-depth (at least 4)
+;; Build the full hierarchy of depth nodes from 0 up to max-depth (or exact max-depth when requested)
 (define (build-mirror-hierarchy mstate raw-obs
                                 #:max-depth [max-depth #f]
+                                #:exact-max-depth? [exact-max-depth? #f]
+                                #:skip-opp-ctx? [skip-opp-ctx? #f]
                                 #:our-tech [our-tech ALL-RATIONAL-TECH]
                                 #:our-minerals [raw-our-minerals 300]
                                 #:our-gas [raw-our-gas 150]
@@ -4938,19 +4958,22 @@
                                 #:enemy-bldgs [pre-enemy-bldgs #f])
   (if (current-halluc-memo)
       (build-mirror-hierarchy-core mstate raw-obs
-                                   max-depth our-tech raw-our-minerals raw-our-gas
+                                   max-depth exact-max-depth? skip-opp-ctx?
+                                   our-tech raw-our-minerals raw-our-gas
                                    sync-obs? pre-opp-ctx
                                    pre-ally-units pre-ally-bldgs
                                    pre-enemy-units pre-enemy-bldgs)
       (parameterize ([current-halluc-memo (make-hasheq)])
         (build-mirror-hierarchy-core mstate raw-obs
-                                     max-depth our-tech raw-our-minerals raw-our-gas
+                                     max-depth exact-max-depth? skip-opp-ctx?
+                                     our-tech raw-our-minerals raw-our-gas
                                      sync-obs? pre-opp-ctx
                                      pre-ally-units pre-ally-bldgs
                                      pre-enemy-units pre-enemy-bldgs))))
 
 (define (build-mirror-hierarchy-core mstate raw-obs
-                                     max-depth our-tech raw-our-minerals raw-our-gas
+                                     max-depth exact-max-depth? skip-opp-ctx?
+                                     our-tech raw-our-minerals raw-our-gas
                                      sync-obs? pre-opp-ctx
                                      pre-ally-units pre-ally-bldgs
                                      pre-enemy-units pre-enemy-bldgs)
@@ -4968,11 +4991,13 @@
                  (hash-has-key? obs 'effects)))
     (define frame (safe-frame (hash-ref obs 'frame 0)))
     (define effs (safe-list (hash-ref obs 'effects '())))
+    (define our-upg-tier (max 0 (safe-int (hash-ref obs 'our-upgrade-tier 0) 0)))
     (define prev-tech (mirror-mind-state-last-tech-observation mstate))
     (define tech-obs
       (infer-enemy-implied-tech-and-upgrades
        eu
        eb
+       #:our-upgrade-tier our-upg-tier
        #:observed-effects effs
        #:destroyed-enemy-bldgs (mirror-mind-state-destroyed-enemy-bldgs mstate)
        #:pre-destruction-unit-ids (mirror-mind-state-pre-destruction-unit-ids mstate)
@@ -4992,19 +5017,27 @@
   (define shared-budget
     (let-values ([(v1 v2 v3 v4 v5 v6) (compute-enemy-feasible-tech-and-budget mstate)])
       (list v1 v2 v3 v4 v5 v6)))
-  (define shared-opp-ctx
-    (or pre-opp-ctx
-        (prepare-opponent-bo-tree-context
-         (hash-set (hash-set obs 'enemy-race (mirror-mind-state-enemy-race mstate))
-                   'unaccounted-gas (caddr shared-budget))
-         #:mstate mstate)))
-
   (define top-d
-    (if (and max-depth (finite-real? max-depth))
-        (max (safe-int max-depth 5) (add1 (mirror-mind-state-inferred-opponent-depth mstate)))
-        (max 5
-             (mirror-mind-state-default-depth mstate)
-             (add1 (mirror-mind-state-inferred-opponent-depth mstate)))))
+    (cond
+      [(and exact-max-depth? max-depth (finite-real? max-depth))
+       (max 0 (safe-int max-depth 1))]
+      [(and max-depth (finite-real? max-depth))
+       (max (safe-int max-depth 5) (add1 (mirror-mind-state-inferred-opponent-depth mstate)))]
+      [else
+       (max 5
+            (mirror-mind-state-default-depth mstate)
+            (add1 (mirror-mind-state-inferred-opponent-depth mstate)))]))
+  (define shared-opp-ctx
+    (cond
+      [pre-opp-ctx pre-opp-ctx]
+      [(or skip-opp-ctx?
+           (and exact-max-depth? (<= top-d 1) (or (not (null? eu)) (null? eb))))
+       #f]
+      [else
+       (prepare-opponent-bo-tree-context
+        (hash-set (hash-set obs 'enemy-race (mirror-mind-state-enemy-race mstate))
+                  'unaccounted-gas (caddr shared-budget))
+        #:mstate mstate)]))
   (define nodes
     (let loop ([d 0]
                [prev #f]
@@ -6493,13 +6526,15 @@
                           'mirror-preemptive-unit (mirror-mind-state-preemptive-counter-unit mstate))))
       (hasheq)))
 
-(define (step-mirror-mind-predictor! mstate raw-obs)
+(define (step-mirror-mind-predictor! mstate raw-obs
+                                     #:our-upgrade-tier [kw-our-upgrade-tier #f]
+                                     #:enemy-workers-killed [kw-enemy-workers-killed #f])
   (if (current-halluc-memo)
-      (step-mirror-mind-predictor-core! mstate raw-obs)
+      (step-mirror-mind-predictor-core! mstate raw-obs kw-our-upgrade-tier kw-enemy-workers-killed)
       (parameterize ([current-halluc-memo (make-hasheq)])
-        (step-mirror-mind-predictor-core! mstate raw-obs))))
+        (step-mirror-mind-predictor-core! mstate raw-obs kw-our-upgrade-tier kw-enemy-workers-killed))))
 
-(define (step-mirror-mind-predictor-core! mstate raw-obs)
+(define (step-mirror-mind-predictor-core! mstate raw-obs kw-our-upgrade-tier kw-enemy-workers-killed)
   (define obs (if (hash? raw-obs) raw-obs (hash)))
   (define frame (safe-frame (hash-ref obs 'frame 0)))
   (define ally-units (safe-hash-list (hash-ref obs 'ally-units '())))
@@ -6517,6 +6552,27 @@
   (define enemy-exp-x (safe-coord (hash-ref obs 'enemy-expand-x 142) 142))
   (define enemy-exp-y (safe-coord (hash-ref obs 'enemy-expand-y 136) 136))
   (define effects (safe-list (hash-ref obs 'effects '())))
+  (define our-upgrade-tier
+    (max 0 (safe-int (if kw-our-upgrade-tier
+                         kw-our-upgrade-tier
+                         (hash-ref obs 'our-upgrade-tier 0))
+                     0)))
+  (define enemy-workers-killed
+    (max 0 (safe-int (if kw-enemy-workers-killed
+                         kw-enemy-workers-killed
+                         (hash-ref obs 'enemy-workers-killed 0))
+                     0)))
+  ;; L36-P0-2 (`#834`): Live game fast-path locks depth selection to d=0..1 and prunes
+  ;; dead `d=2..5`, `self-bo-ctx`, unused `opp-bo-ctx`, and `predict-multi-horizon-snapshots`
+  ;; (~70% L1c CPU cut), while non-live unit-test obs keep full hierarchy + BO/horizon directives.
+  (define live-fast-path?
+    (and (hash? raw-obs)
+         (not (hash-ref raw-obs 'full-hierarchy? #f))
+         (or (hash-has-key? raw-obs 'actual-race)
+             (hash-ref raw-obs 'live-game? #f)
+             (hash-ref raw-obs 'fast-live-path? #f)
+             (hash-has-key? raw-obs 'believed-enemy-army-value)
+             (hash-has-key? raw-obs 'our-upgrade-tier))))
   (define sanitized-obs
     (hash 'frame frame
           'ally-units ally-units
@@ -6549,7 +6605,9 @@
   (define ledger
     (compute-opponent-shadow-ledger mstate frame enemy-units enemy-bldgs
                                     #:base-x base-x #:base-y base-y
-                                    #:observed-effects effects))
+                                    #:observed-effects effects
+                                    #:our-upgrade-tier our-upgrade-tier
+                                    #:enemy-workers-killed enemy-workers-killed))
 
   ;; 3. Interpret Observed Opponent Actions through Rational Lens
   (define reading
@@ -6602,36 +6660,57 @@
   (define alloc
     (compute-mirror-toolbox-allocation mstate ally-units enemy-units #:crisis? crisis-now?))
 
-  ;; 5. Build full recursive k-level hierarchy (d = 0, 1, 2, 3, 4, ...) and select active depth
+  ;; 5. Build recursive k-level hierarchy (`d=0..1` on live fast-path, full `d=0..5` otherwise)
   (define our-tech-syms
     (for/list ([b (in-list ally-bldgs)]) (unit-type-sym b)))
   (define eff-tech (if (null? our-tech-syms) ALL-RATIONAL-TECH our-tech-syms))
-  (define active-d (choose-optimal-mirror-depth mstate))
+  (define raw-active-d (choose-optimal-mirror-depth mstate))
+  (define active-d
+    (if live-fast-path?
+        (let* ([d-acc (mirror-mind-state-depth-accuracies mstate)]
+               [acc-0 (safe-real (hash-ref d-acc 0 0.65) 0.65)]
+               [acc-1 (safe-real (hash-ref d-acc 1 0.65) 0.65)]
+               [picked (cond
+                         [(<= raw-active-d 0) 0]
+                         [(> acc-0 (+ acc-1 0.02)) 0]
+                         [else 1])])
+          (set-mirror-mind-state-active-depth! mstate picked)
+          picked)
+        raw-active-d))
+  (define need-opp-bo-ctx?
+    (or (not live-fast-path?)
+        (and (null? enemy-units) (not (null? enemy-bldgs)))))
   (define bo-obs
-    (hash 'frame frame
-          'ally-units ally-units
-          'ally-buildings ally-bldgs
-          'enemy-units enemy-units
-          'enemy-buildings enemy-bldgs
-          'minerals minerals
-          'gas gas
-          'base-x base-x
-          'base-y base-y
-          'natural-x nat-x
-          'natural-y nat-y
-          'enemy-x enemy-x
-          'enemy-y enemy-y
-          'enemy-expand-x enemy-exp-x
-          'enemy-expand-y enemy-exp-y
-          'effects effects
-          'our-race (mirror-mind-state-our-race mstate)
-          'enemy-race (mirror-mind-state-enemy-race mstate)
-          'unaccounted-gas (shadow-ledger-unaccounted-gas ledger)))
-  (define self-bo-ctx (prepare-self-bo-tree-context bo-obs #:mstate mstate))
-  (define opp-bo-ctx (prepare-opponent-bo-tree-context bo-obs #:mstate mstate))
+    (if (or (not live-fast-path?) need-opp-bo-ctx?)
+        (hash 'frame frame
+              'ally-units ally-units
+              'ally-buildings ally-bldgs
+              'enemy-units enemy-units
+              'enemy-buildings enemy-bldgs
+              'minerals minerals
+              'gas gas
+              'base-x base-x
+              'base-y base-y
+              'natural-x nat-x
+              'natural-y nat-y
+              'enemy-x enemy-x
+              'enemy-y enemy-y
+              'enemy-expand-x enemy-exp-x
+              'enemy-expand-y enemy-exp-y
+              'effects effects
+              'our-race (mirror-mind-state-our-race mstate)
+              'enemy-race (mirror-mind-state-enemy-race mstate)
+              'unaccounted-gas (shadow-ledger-unaccounted-gas ledger))
+        #f))
+  (define self-bo-ctx
+    (if live-fast-path? #f (prepare-self-bo-tree-context bo-obs #:mstate mstate)))
+  (define opp-bo-ctx
+    (if need-opp-bo-ctx? (prepare-opponent-bo-tree-context bo-obs #:mstate mstate) #f))
   (define nodes
     (build-mirror-hierarchy mstate sanitized-obs
-                            #:max-depth (max 5 active-d)
+                            #:max-depth (if live-fast-path? 1 (max 5 active-d))
+                            #:exact-max-depth? live-fast-path?
+                            #:skip-opp-ctx? (not need-opp-bo-ctx?)
                             #:our-tech eff-tech
                             #:our-minerals minerals
                             #:our-gas gas
@@ -6681,25 +6760,31 @@
   (set-mirror-mind-state-tactical-y! mstate ty)
 
   ;; 5b. Project self & opponent onto Build-Order Tree T_R and compute Multi-Horizon Snapshot Curve
-  (define self-bo-proj (evaluate-bo-tree-frame-context self-bo-ctx 60.0))
-  (define opp-bo-proj (evaluate-bo-tree-frame-context opp-bo-ctx 60.0))
+  ;;     (pruned on live-fast-path? where BO-tree / horizon directives are unused log-only outputs)
+  (define self-bo-proj
+    (if live-fast-path? #f (evaluate-bo-tree-frame-context self-bo-ctx 60.0)))
+  (define opp-bo-proj
+    (if live-fast-path? #f (evaluate-bo-tree-frame-context opp-bo-ctx 60.0)))
   (define horizon-snapshots
-    (predict-multi-horizon-snapshots bo-obs mstate MIRROR-HORIZON-SNAPSHOTS-SEC
-                                     #:precomputed-nodes nodes
-                                     #:preprepared-self-ctx self-bo-ctx
-                                     #:preprepared-opp-ctx opp-bo-ctx
-                                     #:ally-units ally-units
-                                     #:ally-bldgs ally-bldgs
-                                     #:enemy-units enemy-units
-                                     #:enemy-bldgs enemy-bldgs))
+    (if live-fast-path?
+        '()
+        (predict-multi-horizon-snapshots bo-obs mstate MIRROR-HORIZON-SNAPSHOTS-SEC
+                                         #:precomputed-nodes nodes
+                                         #:preprepared-self-ctx self-bo-ctx
+                                         #:preprepared-opp-ctx opp-bo-ctx
+                                         #:ally-units ally-units
+                                         #:ally-bldgs ally-bldgs
+                                         #:enemy-units enemy-units
+                                         #:enemy-bldgs enemy-bldgs)))
 
-  ;; 6. Enqueue timestamped forecasts for all depths 0..5 so we can compare
-  ;;    which depth level best predicts this specific opponent!
-  (when (< (length (mirror-mind-state-pending-forecasts mstate)) 18)
+  ;; 6. Enqueue timestamped forecasts (`d=0..1` on live-fast-path?, `d=0..5` otherwise)
+  (define max-fc-depth (if live-fast-path? 1 5))
+  (define max-pending-fcs (if live-fast-path? 8 18))
+  (when (< (length (mirror-mind-state-pending-forecasts mstate)) max-pending-fcs)
     (define new-fcs
       (for/list ([n (in-list nodes)]
                  #:when (and (>= (depth-node-depth n) 0)
-                             (<= (depth-node-depth n) 5)))
+                             (<= (depth-node-depth n) max-fc-depth)))
         (mirror-forecast frame
                          (+ frame 1344)
                          (depth-node-depth n)
@@ -6721,11 +6806,13 @@
   (define tech-obs (mirror-mind-state-last-tech-observation mstate))
 
   (define bo-tree-directive
-    (list 'mirror-bo-tree-prediction
-          (build-order-tree-projection-active-node-id self-bo-proj)
-          (build-order-tree-projection-active-node-id opp-bo-proj)
-          (build-order-tree-projection-predicted-primary-unit opp-bo-proj)
-          (build-order-tree-projection-recommended-next-build-step self-bo-proj)))
+    (if live-fast-path?
+        #f
+        (list 'mirror-bo-tree-prediction
+              (build-order-tree-projection-active-node-id self-bo-proj)
+              (build-order-tree-projection-active-node-id opp-bo-proj)
+              (build-order-tree-projection-predicted-primary-unit opp-bo-proj)
+              (build-order-tree-projection-recommended-next-build-step self-bo-proj))))
   (define opp-profile
     (zero-sum-exclusion-reading-opportunity-cost-profile zs-reading))
   (define opp-committed? (hash-ref opp-profile 'opportunity-cost-commitment #f))
@@ -6772,13 +6859,15 @@
                 (hash-ref opp-profile 'gas-devoted 0)
                 (hash-ref opp-profile 'gas-envelope 150))))
   (define horizon-curve-directive
-    (cons 'mirror-horizon-curve
-          (for/list ([s (in-list horizon-snapshots)])
-            (list (exact-round (horizon-snapshot-forecast-horizon-sec s))
-                  (horizon-snapshot-forecast-optimal-depth s)
-                  (exact-round (* 100.0 (horizon-snapshot-forecast-certainty-level s)))
-                  (horizon-snapshot-forecast-predicted-enemy-unit s)
-                  (horizon-snapshot-forecast-our-counter-unit s)))))
+    (if live-fast-path?
+        #f
+        (cons 'mirror-horizon-curve
+              (for/list ([s (in-list horizon-snapshots)])
+                (list (exact-round (horizon-snapshot-forecast-horizon-sec s))
+                      (horizon-snapshot-forecast-optimal-depth s)
+                      (exact-round (* 100.0 (horizon-snapshot-forecast-certainty-level s)))
+                      (horizon-snapshot-forecast-predicted-enemy-unit s)
+                      (horizon-snapshot-forecast-our-counter-unit s))))))
 
   (define base-actions
     (list (list 'mirror-prediction
@@ -6816,9 +6905,13 @@
                 (enemy-army-reachability-model-unaccounted-army-supply reach-model))))
 
   (define bo-and-horizon-actions
-    (if (emit-top-level-bo-directives? raw-obs)
-        (list bo-tree-directive horizon-curve-directive opp-commitment-log-directive)
-        (list (list 'log bo-tree-directive horizon-curve-directive opp-commitment-log-directive))))
+    (cond
+      [live-fast-path?
+       (list opp-commitment-log-directive)]
+      [(emit-top-level-bo-directives? raw-obs)
+       (list bo-tree-directive horizon-curve-directive opp-commitment-log-directive)]
+      [else
+       (list (list 'log bo-tree-directive horizon-curve-directive opp-commitment-log-directive))]))
 
   (define want-mirror-scout?
     (or (eq? trust-mode 'skeptical-observational-fallback)

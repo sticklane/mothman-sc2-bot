@@ -11,7 +11,9 @@ Database default path lives OUTSIDE git:
 
 Subcommands:
   ingest-runs         Ingest runs/* (summary.json + replays) and scratch/*score*.json
-  ingest-prod-aiarena Ingest downloaded fetch-aiarena-replays.yml prod artifacts
+  ingest-prod-aiarena Ingest downloaded fetch-aiarena-replays.yml prod artifacts (+ --score / --score-json)
+  sync-prod           One-command gh workflow download/trigger -> score -> ingest -> extract -> analyze-prod
+  analyze-prod        Prod AI Arena report: per-build WR/ELO/step, per-bot, opponents, anomalies, top losses
   extract-raw         Parallel (-j 12) incremental raw .SC2Replay tracker/game extraction
   query               Run read-only SQL against the DB (--format table|json|csv)
   stats               Print DB size, row counts, coverage, and source/cohort summary
@@ -45,6 +47,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_ARENA_DIR = Path("/home/sjaconette/sc2-local-arena")
 DEFAULT_DB_PATH = DEFAULT_ARENA_DIR / "arena_replays.sqlite"
 DEFAULT_RUNS_DIR = DEFAULT_ARENA_DIR / "runs"
+DEFAULT_PROD_DIR = DEFAULT_ARENA_DIR / "prod_aiarena"
 DEFAULT_PYLIBS_DIR = DEFAULT_ARENA_DIR / "pylibs"
 DEFAULT_SCORES_DIR = Path(
     "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch"
@@ -1130,6 +1133,9 @@ def _collect_anomalies(an_dict: Any, side: str) -> list[tuple[str, str, str | No
         if isinstance(v, bool):
             if v:
                 out.append((side, str(k), None))
+        elif isinstance(v, dict):
+            if len(v) > 0:
+                out.append((side, str(k), json.dumps(v, separators=(",", ":"))))
         elif isinstance(v, list):
             if len(v) > 0:
                 out.append((side, str(k), json.dumps(v, separators=(",", ":"))))
@@ -1139,6 +1145,85 @@ def _collect_anomalies(an_dict: Any, side: str) -> list[tuple[str, str, str | No
         elif isinstance(v, str) and v.strip():
             out.append((side, str(k), v.strip()))
     return out
+
+
+TOP_LEVEL_SCORE_ANOMALY_FLAGS: tuple[str, ...] = (
+    "wall_timeout_tie", "wall_timeout_winning_tie", "prod_placement_stall",
+    "prod_idle_bank_freeze", "gas_zero_harvest_freeze", "one_base_lockout",
+    "spire_sched_drop", "drip_feed_collapse", "zero_kill_collapse_loss",
+    "early_opening_order_fault", "terran_111_opening_stall", "econ_eff_collapse",
+    "late_game_stalemate_tie", "tvt_zero_tank", "pvp_nat_delay_flag",
+    "siege_range_zero_dps_loss", "cloaked_unit_damage_loss",
+    "gas_rich_min_starved", "early_rush_idle_bank_3m",
+)
+
+SCORE_EXTRA_META_KEYS: tuple[str, ...] = (
+    "opening_bo_sequence", "upgrade_timings", "macro_timings", "tie_cause",
+    "signatures", "map_symmetry_kind", "first_scout_unit", "first_scout_sec",
+    "enemy_first_seen_sec", "army_val_4m_ratio_vs_pro", "army_val_8m_ratio_vs_pro",
+    "wall_sec", "our_top_units", "opp_top_units", "has_logs",
+)
+
+
+def _extract_score_extra_meta(sc: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for k in SCORE_EXTRA_META_KEYS:
+        if k in sc and sc[k] is not None:
+            out[k] = sc[k]
+    return out
+
+
+def _sync_match_anomalies(
+    conn: sqlite3.Connection, replay_id: str, sc: dict[str, Any]
+) -> int:
+    """Sync p1/p2 anomalies from a score-replay-batch.rkt match dict into match_anomalies."""
+    anoms = _collect_anomalies(sc.get("anomalies"), "p1") + _collect_anomalies(
+        sc.get("p2_anomalies"), "p2"
+    )
+    for flag_k in TOP_LEVEL_SCORE_ANOMALY_FLAGS:
+        if sc.get(flag_k):
+            an_name = "pvp_nat_delay" if flag_k == "pvp_nat_delay_flag" else flag_k
+            if not any(a[0] == "p1" and a[1] == an_name for a in anoms):
+                detail = None
+                if flag_k == "prod_placement_stall" and sc.get("prod_placement_stall_ticks"):
+                    detail = f"ticks={sc['prod_placement_stall_ticks']},streak={sc.get('prod_placement_stall_max_streak')}"
+                elif flag_k == "gas_rich_min_starved" and sc.get("gas_rich_min_starved_ticks"):
+                    detail = f"ticks={sc['gas_rich_min_starved_ticks']}"
+                elif flag_k == "gas_zero_harvest_freeze" and sc.get("gas_zero_harvest_freeze_sec"):
+                    detail = f"sec={sc['gas_zero_harvest_freeze_sec']}"
+                anoms.append(("p1", an_name, detail))
+    conn.execute("DELETE FROM match_anomalies WHERE replay_id = ?", (replay_id,))
+    if anoms:
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO match_anomalies (replay_id, player_side, anomaly_name, detail)
+            VALUES (?, ?, ?, ?)
+            """,
+            [(replay_id, s, n, det) for s, n, det in anoms],
+        )
+    return len(anoms)
+
+
+def _run_score_replay_batch(
+    target_dir: Path,
+    out_json: Path,
+    jobs: int = 4,
+    repo_dir: Path = REPO_ROOT,
+) -> Path:
+    """Run `racket tools/score-replay-batch.rkt` on target_dir and return out_json path."""
+    scorer = repo_dir / "tools" / "score-replay-batch.rkt"
+    if not scorer.is_file():
+        raise FileNotFoundError(f"Scorer script not found: {scorer}")
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    eff_jobs = max(1, min(int(jobs), 4))
+    cmd = ["racket", str(scorer), "--json", str(out_json), "-j", str(eff_jobs), str(target_dir)]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0 or not out_json.is_file():
+        raise RuntimeError(
+            f"score-replay-batch.rkt failed (rc={res.returncode}):\n"
+            f"STDOUT:\n{res.stdout[-1500:]}\nSTDERR:\n{res.stderr[-1500:]}"
+        )
+    return out_json
 
 
 def cmd_ingest_runs(args: argparse.Namespace) -> int:
@@ -1351,15 +1436,7 @@ def cmd_ingest_runs(args: argparse.Namespace) -> int:
                 is_clean = 0 if (opp_crash or (isinstance(crashes, list) and len(crashes) > 0)) else 1
                 p2_logged = 1 if sc.get("p2_has_logs") else 0
 
-                extra_meta = {}
-                for k in (
-                    "opening_bo_sequence", "upgrade_timings", "macro_timings", "tie_cause",
-                    "signatures", "map_symmetry_kind", "first_scout_unit", "first_scout_sec",
-                    "enemy_first_seen_sec", "army_val_4m_ratio_vs_pro", "army_val_8m_ratio_vs_pro",
-                    "wall_sec", "our_top_units", "opp_top_units",
-                ):
-                    if k in sc and sc[k] is not None:
-                        extra_meta[k] = sc[k]
+                extra_meta = _extract_score_extra_meta(sc)
                 if sm.get("bot2_elo") is not None:
                     extra_meta["opp_elo"] = sm["bot2_elo"]
                 meta_json = json.dumps(extra_meta, separators=(",", ":")) if extra_meta else None
@@ -1458,40 +1535,7 @@ def cmd_ingest_runs(args: argparse.Namespace) -> int:
 
                 # Sync anomalies if score.json is available for this match
                 if sc:
-                    anoms = _collect_anomalies(sc.get("anomalies"), "p1") + _collect_anomalies(
-                        sc.get("p2_anomalies"), "p2"
-                    )
-                    # Add top-level boolean flags not always duplicated in anomalies dict
-                    for flag_k in (
-                        "wall_timeout_tie", "wall_timeout_winning_tie", "prod_placement_stall",
-                        "prod_idle_bank_freeze", "gas_zero_harvest_freeze", "one_base_lockout",
-                        "spire_sched_drop", "drip_feed_collapse", "zero_kill_collapse_loss",
-                        "early_opening_order_fault", "terran_111_opening_stall", "econ_eff_collapse",
-                        "late_game_stalemate_tie", "tvt_zero_tank", "pvp_nat_delay_flag",
-                        "siege_range_zero_dps_loss", "cloaked_unit_damage_loss",
-                        "gas_rich_min_starved", "early_rush_idle_bank_3m",
-                    ):
-                        if sc.get(flag_k):
-                            an_name = "pvp_nat_delay" if flag_k == "pvp_nat_delay_flag" else flag_k
-                            if not any(a[0] == "p1" and a[1] == an_name for a in anoms):
-                                detail = None
-                                if flag_k == "prod_placement_stall" and sc.get("prod_placement_stall_ticks"):
-                                    detail = f"ticks={sc['prod_placement_stall_ticks']},streak={sc.get('prod_placement_stall_max_streak')}"
-                                elif flag_k == "gas_rich_min_starved" and sc.get("gas_rich_min_starved_ticks"):
-                                    detail = f"ticks={sc['gas_rich_min_starved_ticks']}"
-                                elif flag_k == "gas_zero_harvest_freeze" and sc.get("gas_zero_harvest_freeze_sec"):
-                                    detail = f"sec={sc['gas_zero_harvest_freeze_sec']}"
-                                anoms.append(("p1", an_name, detail))
-                    conn.execute("DELETE FROM match_anomalies WHERE replay_id = ?", (replay_id,))
-                    if anoms:
-                        conn.executemany(
-                            """
-                            INSERT OR REPLACE INTO match_anomalies (replay_id, player_side, anomaly_name, detail)
-                            VALUES (?, ?, ?, ?)
-                            """,
-                            [(replay_id, s, n, det) for s, n, det in anoms],
-                        )
-                        anomalies_upserted += len(anoms)
+                    anomalies_upserted += _sync_match_anomalies(conn, replay_id, sc)
 
     elapsed = time.perf_counter() - t0
     print(
@@ -1565,6 +1609,43 @@ def cmd_ingest_prod_aiarena(args: argparse.Namespace) -> int:
     db_path = Path(args.db)
     repo_dir = Path(args.repo_dir)
     deploy_timeline = _load_deploy_timeline(repo_dir)
+
+    # 0. Optional scorer execution (--score) or explicit --score-json loading
+    score_json_path: Path | None = None
+    if getattr(args, "score", False):
+        out_sj = Path(args.score_out) if getattr(args, "score_out", None) else (target_dir / "prod_score.json")
+        t_sc = time.perf_counter()
+        score_json_path = _run_score_replay_batch(
+            target_dir, out_sj, jobs=min(4, max(1, int(args.jobs))), repo_dir=repo_dir
+        )
+        print(f"  score-replay-batch OK ({time.perf_counter() - t_sc:.2f}s) -> {score_json_path}")
+    elif getattr(args, "score_json", None):
+        score_json_path = Path(args.score_json)
+        if not score_json_path.is_file():
+            print(f"Score JSON not found: {score_json_path}", file=sys.stderr)
+            return 1
+    else:
+        for auto_sj in (target_dir / "prod_score.json", target_dir / "live_score.json"):
+            if auto_sj.is_file():
+                score_json_path = auto_sj
+                break
+
+    score_by_file: dict[str, dict[str, Any]] = {}
+    score_by_mid: dict[int, dict[str, Any]] = {}
+    if score_json_path and score_json_path.is_file():
+        try:
+            sdata = json.loads(score_json_path.read_text())
+            for sc_item in sdata.get("matches") or []:
+                if not isinstance(sc_item, dict):
+                    continue
+                sfn = sc_item.get("file")
+                if sfn:
+                    score_by_file[Path(str(sfn)).name] = sc_item
+                sid = sc_item.get("id")
+                if sid is not None and str(sid).isdigit():
+                    score_by_mid[int(sid)] = sc_item
+        except Exception as exc:
+            print(f"  [WARN] Could not parse score JSON {score_json_path}: {exc}", file=sys.stderr)
 
     # 1. Load per-match metadata from {mid}_meta.json AND any *_summary.json
     meta_by_mid: dict[int, dict[str, Any]] = {}
@@ -1642,6 +1723,8 @@ def cmd_ingest_prod_aiarena(args: argparse.Namespace) -> int:
     started_at = min(ts_candidates) if ts_candidates else now_iso
 
     matches_upserted = 0
+    anomalies_upserted = 0
+    scored_linked = 0
     builds_seen: Counter[str] = Counter()
 
     with conn:
@@ -1654,6 +1737,7 @@ def cmd_ingest_prod_aiarena(args: argparse.Namespace) -> int:
             ON CONFLICT(run_id) DO UPDATE SET
                 tag=COALESCE(excluded.tag, runs.tag),
                 run_dir=COALESCE(excluded.run_dir, runs.run_dir),
+                score_json_path=COALESCE(excluded.score_json_path, runs.score_json_path),
                 mothman_mode=COALESCE(excluded.mothman_mode, runs.mothman_mode),
                 started_at=COALESCE(excluded.started_at, runs.started_at),
                 total_replays=excluded.total_replays,
@@ -1664,7 +1748,7 @@ def cmd_ingest_prod_aiarena(args: argparse.Namespace) -> int:
                 tag,
                 None,
                 str(target_dir),
-                None,
+                str(score_json_path) if score_json_path else None,
                 "prod_aiarena",
                 "aiarena.net",
                 None,
@@ -1691,8 +1775,12 @@ def cmd_ingest_prod_aiarena(args: argparse.Namespace) -> int:
             mid = fp.get("match_id")
             pm = meta_by_mid.get(mid) if mid is not None else None
             sm = summary_by_mid.get(mid) if mid is not None else None
+            sc = score_by_file.get(fn) or (score_by_mid.get(mid) if mid is not None else None)
             pm = pm or {}
             sm = sm or {}
+            sc = sc or {}
+            if sc:
+                scored_linked += 1
 
             # Inspect optional {mid}_match_log.zip
             log_build_ver: str | None = None
@@ -1702,43 +1790,46 @@ def cmd_ingest_prod_aiarena(args: argparse.Namespace) -> int:
                 if log_zip.is_file():
                     log_build_ver, tel = _read_match_log_zip(log_zip)
 
-            bot = pm.get("our_bot_name") or pm.get("our_bot") or sm.get("bot") or tel.get("bot_name") or fp.get("bot")
-            opp = pm.get("opp_bot_name") or pm.get("opp_bot") or sm.get("opp") or fp.get("opponent")
+            bot = pm.get("our_bot_name") or pm.get("our_bot") or sm.get("bot") or sc.get("our_bot") or tel.get("bot_name") or fp.get("bot")
+            opp = pm.get("opp_bot_name") or pm.get("opp_bot") or sm.get("opp") or sc.get("opp_bot") or fp.get("opponent")
             our_race = _norm_race(
-                sm.get("bot_race") or tel.get("configured_race") or _infer_race_from_bot_name(bot)
+                sm.get("bot_race") or sc.get("our_race") or tel.get("configured_race") or _infer_race_from_bot_name(bot)
             )
-            actual_race = _norm_race(tel.get("actual_race_played")) or (
+            actual_race = _norm_race(tel.get("actual_race_played") or sc.get("our_race")) or (
                 our_race if our_race != "Random" else None
             )
-            opp_race = _norm_race(pm.get("opp_race") or sm.get("opp_race") or _infer_race_from_bot_name(opp))
-            matchup = None
-            if actual_race and opp_race and actual_race != "Random" and opp_race != "Random":
+            opp_race = _norm_race(pm.get("opp_race") or sm.get("opp_race") or sc.get("opp_race") or _infer_race_from_bot_name(opp))
+            matchup = sc.get("matchup")
+            if not matchup and actual_race and opp_race and actual_race != "Random" and opp_race != "Random":
                 matchup = f"{actual_race[0]}v{opp_race[0]}"
 
             map_name = (
                 pm.get("map_name")
                 or sm.get("map")
+                or sc.get("map_name")
                 or _extract_map_from_aiarena_url(pm.get("replay_url"))
                 or _extract_map_from_aiarena_url(sm.get("replay_file"))
                 or tel.get("map")
             )
 
             pnum = _safe_int(pm.get("our_participant_number"))
-            our_pid = pnum if pnum in (1, 2) else 1
+            pnum_explicit = pnum if pnum in (1, 2) else None
+            our_pid = pnum_explicit or 1
 
-            result = _norm_result(pm.get("result") or sm.get("result") or tel.get("result"))
+            result = _norm_result(pm.get("result") or sm.get("result") or sc.get("result") or tel.get("result"))
             g_loops = _safe_int(pm.get("game_steps")) or _safe_int(sm.get("game_steps")) or _safe_int(tel.get("game_loops"))
-            dur_sec = _parse_duration_hms(pm.get("game_time_fmt") or sm.get("duration"))
+            dur_sec = _safe_float(sc.get("duration_sec")) or _parse_duration_hms(pm.get("game_time_fmt") or sm.get("duration"))
             if dur_sec is None and g_loops and g_loops > 0:
                 dur_sec = round(g_loops / GAME_LOOPS_PER_SEC, 2)
 
             avg_step = _safe_float(pm.get("avg_step_time_ms") or pm.get("avg_step_ms"))
             if avg_step == 0.0:
                 avg_step = None
-            avg_step = avg_step or _safe_float(sm.get("avg_step_ms")) or _safe_float(tel.get("avg_step_ms"))
-            p95_step = _safe_float(tel.get("p95_step_ms"))
-            max_step = _safe_float(tel.get("max_step_ms"))
-            tr_ms = _safe_float(tel.get("avg_translate_ms"))
+            avg_step = avg_step or _safe_float(sm.get("avg_step_ms")) or _safe_float(sc.get("avg_step_ms")) or _safe_float(tel.get("avg_step_ms"))
+            p95_step = _safe_float(sc.get("p95_step_ms")) or _safe_float(sc.get("step_p95")) or _safe_float(tel.get("p95_step_ms"))
+            max_step = _safe_float(sc.get("max_step_ms")) or _safe_float(sc.get("step_max")) or _safe_float(tel.get("max_step_ms"))
+            tr_ms = _safe_float(sc.get("avg_translate_ms")) or _safe_float(tel.get("avg_translate_ms"))
+            tr_p95 = _safe_float(sc.get("tr_p95_ms"))
 
             bot_elo = _safe_int(pm.get("resultant_elo"))
             if bot_elo is not None and bot_elo <= 0:
@@ -1766,9 +1857,16 @@ def cmd_ingest_prod_aiarena(args: argparse.Namespace) -> int:
             opp_cohort = "selfplay" if is_sp else "prod_aiarena"
 
             cause = (pm.get("result_cause") or sm.get("result_cause") or "").lower()
-            is_clean = 0 if ("crash" in cause or "error" in cause or "timeout" in cause) else 1
+            opp_crash = bool(sc.get("opp_early_crash") or sc.get("opp_fault") or sc.get("opp_zero_combat_dc"))
+            crashes = sc.get("crashes") or []
+            is_clean = 0 if (
+                "crash" in cause or "error" in cause or "timeout" in cause
+                or opp_crash or (isinstance(crashes, list) and len(crashes) > 0)
+            ) else 1
+            p2_logged = 1 if sc.get("p2_has_logs") else 0
 
-            extra_meta: dict[str, Any] = {
+            extra_meta: dict[str, Any] = _extract_score_extra_meta(sc)
+            extra_meta.update({
                 "created": created_iso,
                 "result_cause": pm.get("result_cause") or sm.get("result_cause"),
                 "elo_change": pm.get("elo_change") if "elo_change" in pm else sm.get("elo_change"),
@@ -1776,9 +1874,11 @@ def cmd_ingest_prod_aiarena(args: argparse.Namespace) -> int:
                 "our_bot_id": pm.get("our_bot_id"),
                 "opp_bot_id": pm.get("opp_bot_id") or sm.get("opp_id"),
                 "opp_div": sm.get("opp_div"),
-            }
+            })
             if bot_elo_snapshot:
                 extra_meta["bot_elo_is_snapshot"] = True
+            if sc:
+                extra_meta["scored"] = True
             for tk in ("final_posture", "opponent_id", "commands_sent", "status", "engine"):
                 if tk in tel and tel[tk] is not None:
                     extra_meta[tk] = tel[tk]
@@ -1792,15 +1892,19 @@ def cmd_ingest_prod_aiarena(args: argparse.Namespace) -> int:
                     run_id, match_index, replay_path, replay_filename,
                     bot, our_race, actual_race, opponent, opp_race, opp_cohort, matchup, map_name,
                     our_player_id, result, duration_sec, game_loops,
-                    peak_workers, peak_bases,
-                    avg_step_ms, p95_step_ms, max_step_ms, tr_ms,
-                    is_clean, is_selfplay,
+                    killed_val, lost_val, trade_ratio,
+                    w4m, w6m, peak_workers, peak_army_val, peak_bases,
+                    opp_peak_workers, opp_peak_army_val, opp_bases,
+                    sup_blk_pct, opp_sup_blk_pct,
+                    avg_step_ms, p95_step_ms, max_step_ms, tr_ms, tr_p95_ms,
+                    action_rejects, is_clean, is_selfplay, p2_logged,
                     source_type, bot_build_version,
                     aiarena_match_id, aiarena_bot_elo, aiarena_opp_elo,
                     score_meta_json
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 ON CONFLICT(replay_id) DO UPDATE SET
                     replay_mtime=excluded.replay_mtime,
@@ -1816,20 +1920,34 @@ def cmd_ingest_prod_aiarena(args: argparse.Namespace) -> int:
                     matchup=COALESCE(excluded.matchup, matches.matchup),
                     map_name=COALESCE(excluded.map_name, matches.map_name),
                     our_player_id=CASE
-                        WHEN excluded.our_player_id IN (1, 2) THEN excluded.our_player_id
+                        WHEN ? IN (1, 2) THEN ?
                         ELSE matches.our_player_id
                     END,
                     result=COALESCE(excluded.result, matches.result),
                     duration_sec=COALESCE(excluded.duration_sec, matches.duration_sec),
                     game_loops=COALESCE(excluded.game_loops, matches.game_loops),
+                    killed_val=COALESCE(excluded.killed_val, matches.killed_val),
+                    lost_val=COALESCE(excluded.lost_val, matches.lost_val),
+                    trade_ratio=COALESCE(excluded.trade_ratio, matches.trade_ratio),
+                    w4m=COALESCE(excluded.w4m, matches.w4m),
+                    w6m=COALESCE(excluded.w6m, matches.w6m),
                     peak_workers=COALESCE(excluded.peak_workers, matches.peak_workers),
+                    peak_army_val=COALESCE(excluded.peak_army_val, matches.peak_army_val),
                     peak_bases=COALESCE(excluded.peak_bases, matches.peak_bases),
+                    opp_peak_workers=COALESCE(excluded.opp_peak_workers, matches.opp_peak_workers),
+                    opp_peak_army_val=COALESCE(excluded.opp_peak_army_val, matches.opp_peak_army_val),
+                    opp_bases=COALESCE(excluded.opp_bases, matches.opp_bases),
+                    sup_blk_pct=COALESCE(excluded.sup_blk_pct, matches.sup_blk_pct),
+                    opp_sup_blk_pct=COALESCE(excluded.opp_sup_blk_pct, matches.opp_sup_blk_pct),
                     avg_step_ms=COALESCE(excluded.avg_step_ms, matches.avg_step_ms),
                     p95_step_ms=COALESCE(excluded.p95_step_ms, matches.p95_step_ms),
                     max_step_ms=COALESCE(excluded.max_step_ms, matches.max_step_ms),
                     tr_ms=COALESCE(excluded.tr_ms, matches.tr_ms),
+                    tr_p95_ms=COALESCE(excluded.tr_p95_ms, matches.tr_p95_ms),
+                    action_rejects=COALESCE(excluded.action_rejects, matches.action_rejects),
                     is_clean=excluded.is_clean,
                     is_selfplay=excluded.is_selfplay,
+                    p2_logged=MAX(matches.p2_logged, excluded.p2_logged),
                     source_type='prod_aiarena',
                     bot_build_version=COALESCE(
                         CASE
@@ -1849,22 +1967,38 @@ def cmd_ingest_prod_aiarena(args: argparse.Namespace) -> int:
                     run_id, idx, rp_str, fn,
                     bot, our_race, actual_race, opp, opp_race, opp_cohort, matchup, map_name,
                     our_pid, result, dur_sec, g_loops,
-                    _safe_int(tel.get("peak_workers")),
-                    _safe_int(tel.get("peak_bases")),
-                    avg_step, p95_step, max_step, tr_ms,
-                    is_clean, is_sp,
+                    _safe_float(sc.get("killed_val")),
+                    _safe_float(sc.get("lost_val")),
+                    _safe_float(sc.get("trade_ratio")),
+                    _safe_int(sc.get("our_w4")),
+                    _safe_int(sc.get("our_w6")),
+                    _safe_int(sc.get("our_peak_workers") or tel.get("peak_workers")),
+                    _safe_float(sc.get("our_peak_army")),
+                    _safe_int(sc.get("our_bases") or tel.get("peak_bases")),
+                    _safe_int(sc.get("opp_peak_workers")),
+                    _safe_float(sc.get("opp_peak_army")),
+                    _safe_int(sc.get("opp_bases")),
+                    _safe_float(sc.get("supply_block_pct")),
+                    _safe_float(sc.get("opp_supply_block_pct")),
+                    avg_step, p95_step, max_step, tr_ms, tr_p95,
+                    _safe_int(sc.get("action_rejects")),
+                    is_clean, is_sp, p2_logged,
                     "prod_aiarena", build_ver,
                     mid, bot_elo, opp_elo,
                     meta_json,
+                    pnum_explicit, pnum_explicit,
                 ),
             )
             matches_upserted += 1
+            if sc:
+                anomalies_upserted += _sync_match_anomalies(conn, replay_id, sc)
 
     elapsed = time.perf_counter() - t0
     b_str = ", ".join(f"{k}:{v}" for k, v in builds_seen.most_common(6))
     print(
         f"ingest-prod-aiarena OK: run_id={run_id}, matches={matches_upserted}, "
         f"meta_jsons={len(meta_by_mid)}, summary_entries={len(summary_by_mid)}, "
+        f"scored={scored_linked}, anomalies={anomalies_upserted}, "
         f"hashed_new={len(to_hash)}, builds=[{b_str}], elapsed={elapsed:.2f}s -> {db_path}"
     )
 
@@ -2482,6 +2616,529 @@ def cmd_spawn_bias(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Subcommand: analyze-prod
+# ---------------------------------------------------------------------------
+
+def _fmt_table_str(headers: list[str], rows: list[list[Any]]) -> str:
+    str_rows = [["" if v is None else str(v) for v in r] for r in rows]
+    widths = [len(h) for h in headers]
+    for r in str_rows:
+        for i, cell in enumerate(r):
+            if len(cell) > widths[i]:
+                widths[i] = len(cell)
+    fmt = " | ".join(f"{{:<{w}}}" for w in widths)
+    sep = "-+-".join("-" * w for w in widths)
+    lines = [fmt.format(*headers), sep]
+    for r in str_rows:
+        lines.append(fmt.format(*r))
+    return "\n".join(lines)
+
+
+def _fmt_mmss(sec: float | None) -> str:
+    if sec is None or sec <= 0:
+        return "-"
+    s = int(round(sec))
+    return f"{s // 60}:{s % 60:02d}"
+
+
+def cmd_analyze_prod(args: argparse.Namespace) -> int:
+    db_path = Path(args.db)
+    if not db_path.exists():
+        print(f"DB not found at {db_path}. Run `ingest-prod-aiarena` first.", file=sys.stderr)
+        return 1
+    conn = open_db(db_path, readonly=True)
+
+    clauses = ["m.source_type = 'prod_aiarena'"]
+    params: list[Any] = []
+    if not getattr(args, "include_selfplay", False):
+        clauses.append("m.is_selfplay = 0")
+    if getattr(args, "build", None):
+        clauses.append("(m.bot_build_version = ? OR m.bot_build_version LIKE ?)")
+        params.extend([args.build, f"%{args.build}%"])
+    if getattr(args, "since", None):
+        clauses.append("COALESCE(json_extract(m.score_meta_json, '$.created'), '') >= ?")
+        params.append(args.since)
+    if getattr(args, "bot", None):
+        clauses.append("m.bot = ?")
+        params.append(args.bot)
+    where = " AND ".join(clauses)
+
+    out_lines: list[str] = []
+    p = out_lines.append
+
+    # 1. Overview
+    ov = conn.execute(
+        f"""
+        SELECT COUNT(*) AS n,
+               SUM(CASE WHEN m.result='win' THEN 1 ELSE 0 END) AS w,
+               SUM(CASE WHEN m.result='loss' THEN 1 ELSE 0 END) AS l,
+               SUM(CASE WHEN m.result='tie' THEN 1 ELSE 0 END) AS t,
+               SUM(CASE WHEN m.raw_extracted_at IS NOT NULL THEN 1 ELSE 0 END) AS raw_n,
+               SUM(CASE WHEN json_extract(m.score_meta_json, '$.scored') = 1 OR m.sup_blk_pct IS NOT NULL THEN 1 ELSE 0 END) AS scored_n,
+               ROUND(SUM(COALESCE(m.killed_val,0)) / MAX(1.0, SUM(COALESCE(m.lost_val,0))), 2) AS trade_agg,
+               ROUND(AVG(m.avg_step_ms), 2) AS avg_step,
+               ROUND(AVG(m.sup_blk_pct), 1) AS avg_sb,
+               MIN(json_extract(m.score_meta_json, '$.created')) AS min_ts,
+               MAX(json_extract(m.score_meta_json, '$.created')) AS max_ts,
+               COUNT(DISTINCT m.bot_build_version) AS n_builds
+        FROM matches m
+        WHERE {where}
+        """,
+        params,
+    ).fetchone()
+    sp_cnt = conn.execute(
+        "SELECT COUNT(*) FROM matches WHERE source_type = 'prod_aiarena' AND is_selfplay = 1"
+    ).fetchone()[0]
+
+    n_total = int(ov["n"] or 0)
+    if n_total == 0:
+        print("No prod_aiarena matches found matching filter.")
+        return 0
+    w_tot = int(ov["w"] or 0)
+    l_tot = int(ov["l"] or 0)
+    t_tot = int(ov["t"] or 0)
+    wr_tot = round(100.0 * w_tot / n_total, 1)
+    nl_tot = round(100.0 * (n_total - l_tot) / n_total, 1)
+
+    p("=== PROD AI ARENA FORENSIC ANALYSIS ===")
+    p(
+        f"Scope     : n={n_total} ({'all incl. selfplay' if getattr(args, 'include_selfplay', False) else f'external; +{sp_cnt} selfplay excluded'}) | "
+        f"builds={ov['n_builds']} | span={str(ov['min_ts'] or '-')[:16]} .. {str(ov['max_ts'] or '-')[:16]}"
+    )
+    p(
+        f"Record    : {w_tot}W-{l_tot}L-{t_tot}T ({wr_tot}% WR, {nl_tot}% NL) | "
+        f"TradeAgg={ov['trade_agg']}x | AvgStep={ov['avg_step']}ms | AvgSupBlk={ov['avg_sb']}%"
+    )
+    p(f"Coverage  : raw_tracker={ov['raw_n']}/{n_total}, anomaly_scored={ov['scored_n']}/{n_total}")
+
+    # 2. Per-Build Progression
+    p("\n=== 1. Per-Build Progression (Chronological) ===")
+    b_rows = conn.execute(
+        f"""
+        SELECT COALESCE(m.bot_build_version, '(unknown)') AS build,
+               COUNT(*) AS n,
+               SUM(CASE WHEN m.result='win' THEN 1 ELSE 0 END) AS w,
+               SUM(CASE WHEN m.result='loss' THEN 1 ELSE 0 END) AS l,
+               SUM(CASE WHEN m.result='tie' THEN 1 ELSE 0 END) AS t,
+               ROUND(100.0 * SUM(CASE WHEN m.result='win' THEN 1 ELSE 0 END) / COUNT(*), 1) AS wr_pct,
+               ROUND(100.0 * SUM(CASE WHEN m.result!='loss' THEN 1 ELSE 0 END) / COUNT(*), 1) AS nl_pct,
+               ROUND(AVG(m.aiarena_bot_elo), 0) AS bot_elo,
+               ROUND(AVG(m.aiarena_opp_elo), 0) AS opp_elo,
+               ROUND(AVG(m.avg_step_ms), 2) AS step_ms,
+               ROUND(SUM(COALESCE(m.killed_val,0)) / MAX(1.0, SUM(COALESCE(m.lost_val,0))), 2) AS trade_agg,
+               ROUND(AVG(m.w4m), 1) AS w4m,
+               ROUND(AVG(m.w6m), 1) AS w6m,
+               ROUND(AVG(m.sup_blk_pct), 1) AS sb_pct
+        FROM matches m
+        WHERE {where}
+        GROUP BY build
+        ORDER BY MIN(COALESCE(json_extract(m.score_meta_json, '$.created'), m.run_id)) ASC
+        """,
+        params,
+    ).fetchall()
+    p(_fmt_table_str(
+        ["build", "n", "W", "L", "T", "WR%", "NL%", "BotELO", "OppELO", "StepMs", "Trade", "W@4m", "W@6m", "SB%"],
+        [list(r) for r in b_rows],
+    ))
+
+    # 3. Per-Bot Breakdown
+    p("\n=== 2. Per-Bot Breakdown ===")
+    bot_rows = conn.execute(
+        f"""
+        SELECT COALESCE(m.bot, '(unknown)') AS bot,
+               COUNT(*) AS n,
+               SUM(CASE WHEN m.result='win' THEN 1 ELSE 0 END) AS w,
+               SUM(CASE WHEN m.result='loss' THEN 1 ELSE 0 END) AS l,
+               SUM(CASE WHEN m.result='tie' THEN 1 ELSE 0 END) AS t,
+               ROUND(100.0 * SUM(CASE WHEN m.result='win' THEN 1 ELSE 0 END) / COUNT(*), 1) AS wr_pct,
+               ROUND(100.0 * SUM(CASE WHEN m.result!='loss' THEN 1 ELSE 0 END) / COUNT(*), 1) AS nl_pct,
+               (SELECT m2.aiarena_bot_elo FROM matches m2
+                WHERE m2.source_type='prod_aiarena' AND m2.bot=m.bot AND m2.aiarena_bot_elo IS NOT NULL
+                ORDER BY COALESCE(m2.aiarena_match_id, 0) DESC LIMIT 1) AS last_elo,
+               ROUND(SUM(COALESCE(m.killed_val,0)) / MAX(1.0, SUM(COALESCE(m.lost_val,0))), 2) AS trade_agg,
+               ROUND(AVG(m.avg_step_ms), 2) AS step_ms,
+               ROUND(AVG(m.w4m), 1) AS w4m,
+               ROUND(AVG(m.w6m), 1) AS w6m,
+               ROUND(AVG(m.sup_blk_pct), 1) AS sb_pct
+        FROM matches m
+        WHERE {where}
+        GROUP BY m.bot
+        ORDER BY m.bot
+        """,
+        params,
+    ).fetchall()
+    p(_fmt_table_str(
+        ["bot", "n", "W", "L", "T", "WR%", "NL%", "LastELO", "Trade", "StepMs", "W@4m", "W@6m", "SB%"],
+        [list(r) for r in bot_rows],
+    ))
+
+    # 4. Top Prod Opponents (Hardest & Easiest)
+    min_opp = max(1, int(getattr(args, "min_opp_games", 2)))
+    opp_rows = conn.execute(
+        f"""
+        SELECT COALESCE(m.opponent, '(unknown)') AS opp,
+               MAX(COALESCE(m.opp_race, '?')) AS race,
+               ROUND(AVG(m.aiarena_opp_elo), 0) AS opp_elo,
+               COUNT(*) AS n,
+               SUM(CASE WHEN m.result='win' THEN 1 ELSE 0 END) AS w,
+               SUM(CASE WHEN m.result='loss' THEN 1 ELSE 0 END) AS l,
+               SUM(CASE WHEN m.result='tie' THEN 1 ELSE 0 END) AS t,
+               ROUND(100.0 * SUM(CASE WHEN m.result='win' THEN 1 ELSE 0 END) / COUNT(*), 1) AS wr_pct,
+               ROUND(SUM(COALESCE(m.killed_val,0)) / MAX(1.0, SUM(COALESCE(m.lost_val,0))), 2) AS trade_agg,
+               ROUND(AVG(m.duration_sec), 0) AS avg_dur_s
+        FROM matches m
+        WHERE {where}
+        GROUP BY m.opponent
+        HAVING COUNT(*) >= ?
+        """,
+        params + [min_opp],
+    ).fetchall()
+    if opp_rows:
+        hardest = sorted(opp_rows, key=lambda r: (r["wr_pct"], -r["l"], r["trade_agg"] or 0.0))[:10]
+        easiest = sorted(opp_rows, key=lambda r: (-r["wr_pct"], -r["w"], -(r["trade_agg"] or 0.0)))[:10]
+        p(f"\n=== 3A. Hardest Prod Opponents (n >= {min_opp}) ===")
+        p(_fmt_table_str(
+            ["opponent", "race", "elo", "n", "W", "L", "T", "WR%", "Trade", "AvgDur"],
+            [list(r) for r in hardest],
+        ))
+        p(f"\n=== 3B. Easiest Prod Opponents (n >= {min_opp}) ===")
+        p(_fmt_table_str(
+            ["opponent", "race", "elo", "n", "W", "L", "T", "WR%", "Trade", "AvgDur"],
+            [list(r) for r in easiest],
+        ))
+
+    # 5. Prod Anomaly Rates by Build (among scored matches)
+    scored_builds = conn.execute(
+        f"""
+        SELECT COALESCE(m.bot_build_version, '(unknown)') AS build,
+               COUNT(*) AS scored_n
+        FROM matches m
+        WHERE {where} AND (json_extract(m.score_meta_json, '$.scored') = 1 OR m.sup_blk_pct IS NOT NULL)
+        GROUP BY build
+        ORDER BY MIN(COALESCE(json_extract(m.score_meta_json, '$.created'), m.run_id)) ASC
+        """,
+        params,
+    ).fetchall()
+    if scored_builds:
+        recent_builds = [r["build"] for r in scored_builds[-6:]]
+        build_n = {r["build"]: int(r["scored_n"]) for r in scored_builds}
+        total_scored = sum(build_n.values())
+        anom_counts = conn.execute(
+            f"""
+            SELECT a.anomaly_name,
+                   COALESCE(m.bot_build_version, '(unknown)') AS build,
+                   COUNT(DISTINCT a.replay_id) AS cnt
+            FROM match_anomalies a
+            JOIN matches m ON m.replay_id = a.replay_id
+            WHERE {where} AND a.player_side = 'p1'
+            GROUP BY a.anomaly_name, build
+            """,
+            params,
+        ).fetchall()
+        by_anom: dict[str, dict[str, int]] = defaultdict(dict)
+        anom_totals: Counter[str] = Counter()
+        for r in anom_counts:
+            by_anom[r["anomaly_name"]][r["build"]] = int(r["cnt"])
+            anom_totals[r["anomaly_name"]] += int(r["cnt"])
+        if anom_totals:
+            p(f"\n=== 4. Prod Anomaly Rates by Build (scored n={total_scored}, latest {len(recent_builds)} builds) ===")
+            hdr = ["anomaly", f"ALL(n={total_scored})"] + [
+                f"{b.replace('deploy:', '')}({build_n[b]})" for b in recent_builds
+            ]
+            arows: list[list[Any]] = []
+            for aname, tot in anom_totals.most_common(18):
+                row_vals: list[Any] = [aname, f"{tot} ({100.0 * tot / max(1, total_scored):.0f}%)"]
+                for b in recent_builds:
+                    c = by_anom[aname].get(b, 0)
+                    row_vals.append(f"{c} ({100.0 * c / max(1, build_n[b]):.0f}%)" if c else "0")
+                arows.append(row_vals)
+            p(_fmt_table_str(hdr, arows))
+    else:
+        p("\n=== 4. Prod Anomaly Rates by Build ===")
+        p("(No anomaly-scored prod matches yet — run `ingest-prod-aiarena <dir> --score` to populate!)")
+
+    # 6. Top Prod Losses with Raw Build-Order, Econ & Death Forensics
+    top_k = max(0, int(getattr(args, "top_losses", 10)))
+    if top_k > 0:
+        sort_mode = getattr(args, "sort_losses", "recent")
+        order_sql = (
+            "COALESCE(m.trade_ratio, 999.0) ASC, COALESCE(m.aiarena_match_id, 0) DESC"
+            if sort_mode == "worst-trade"
+            else "COALESCE(json_extract(m.score_meta_json, '$.created'), '') DESC, COALESCE(m.aiarena_match_id, 0) DESC"
+        )
+        losses = conn.execute(
+            f"""
+            SELECT m.*
+            FROM matches m
+            WHERE {where} AND m.result = 'loss'
+            ORDER BY {order_sql}
+            LIMIT ?
+            """,
+            params + [top_k],
+        ).fetchall()
+        if losses:
+            p(f"\n=== 5. Top {len(losses)} Prod Losses — Raw Econ, Unit Deaths & Opening BO (sort={sort_mode}) ===")
+            for idx, m in enumerate(losses, start=1):
+                rid = m["replay_id"]
+                our_pid = m["our_player_id"] or 1
+                opp_pid = 2 if our_pid == 1 else 1
+                mid_s = f"#{m['aiarena_match_id']}" if m["aiarena_match_id"] else rid[:10]
+                elo_s = f"elo={m['aiarena_bot_elo'] or '?'}/{m['aiarena_opp_elo'] or '?'}"
+                p(
+                    f"\n[{idx}] {mid_s} [{m['bot_build_version'] or '?'}] "
+                    f"{m['bot']}({m['actual_race'] or m['our_race']}) vs {m['opponent']}({m['opp_race'] or '?'}) "
+                    f"[{m['matchup'] or '?'}] | {m['map_name'] or '?'} [{m['our_spawn_corner'] or '?'}] | "
+                    f"{_fmt_mmss(m['duration_sec'])} | Trade={m['trade_ratio']}x (K={m['killed_val']}/L={m['lost_val']}) | "
+                    f"{elo_s} | SB={m['sup_blk_pct']}% | step={m['avg_step_ms']}ms"
+                )
+                anoms = [
+                    r["anomaly_name"]
+                    for r in conn.execute(
+                        "SELECT anomaly_name FROM match_anomalies WHERE replay_id = ? AND player_side = 'p1' ORDER BY anomaly_name",
+                        (rid,),
+                    )
+                ]
+                if anoms:
+                    p(f"    anomalies : {', '.join(anoms)}")
+                # Minute econ curve (2, 4, 6, 8, 10)
+                mstats = conn.execute(
+                    """
+                    SELECT a.minute, a.workers_active AS w1, b.workers_active AS w2,
+                           a.army_value_total AS a1, b.army_value_total AS a2,
+                           a.bases_alive AS b1, b.bases_alive AS b2
+                    FROM match_minute_stats a
+                    LEFT JOIN match_minute_stats b
+                      ON b.replay_id = a.replay_id AND b.minute = a.minute AND b.player_id = ?
+                    WHERE a.replay_id = ? AND a.player_id = ? AND a.minute IN (2, 4, 6, 8, 10)
+                    ORDER BY a.minute
+                    """,
+                    (opp_pid, rid, our_pid),
+                ).fetchall()
+                if mstats:
+                    pts = [
+                        f"m{r['minute']}:W({r['w1']}/{r['w2']}) A({r['a1']}/{r['a2']}) B({r['b1']}/{r['b2']})"
+                        for r in mstats
+                    ]
+                    p(f"    econ      : {' | '.join(pts)}")
+                # Top P1 deaths & P2 combat units
+                skip_u = (
+                    "('Larva','Egg','Interceptor','Broodling','CreepTumor','CreepTumorBurrowed',"
+                    "'CreepTumorQueen','MULE','InvisibleTargetDummy','AdeptPhaseShift','KD8Charge',"
+                    "'ForceField','BeaconArmy','OverlordCocoon','TransportOverlordCocoon',"
+                    "'BanelingCocoon','RavagerCocoon','LurkerMPEgg','BroodLordCocoon',"
+                    "'DisruptorPhased','ParasiticBombDummy','ParasiticBombRelayDummy','AutoTurret')"
+                )
+                our_died = conn.execute(
+                    f"""
+                    SELECT unit_type, died, created FROM match_unit_totals
+                    WHERE replay_id = ? AND player_id = ? AND died > 0 AND unit_type NOT IN {skip_u}
+                    ORDER BY died DESC LIMIT 6
+                    """,
+                    (rid, our_pid),
+                ).fetchall()
+                opp_built = conn.execute(
+                    f"""
+                    SELECT unit_type, created, died FROM match_unit_totals
+                    WHERE replay_id = ? AND player_id = ? AND unit_type NOT IN {skip_u}
+                      AND unit_type NOT IN ('Drone','SCV','Probe','Overlord','Pylon','SupplyDepot','SupplyDepotLowered')
+                    ORDER BY created DESC LIMIT 6
+                    """,
+                    (rid, opp_pid),
+                ).fetchall()
+                if our_died or opp_built:
+                    d_str = ", ".join(f"{r['unit_type']}:{r['died']}/{r['created']}" for r in our_died)
+                    o_str = ", ".join(f"{r['unit_type']}:{r['created']}(-{r['died']})" for r in opp_built)
+                    p(f"    our_deaths: {d_str or '-'} || opp_units: {o_str or '-'}")
+                # Opening build events (first 8 init/morph/upgrade)
+                bevs = conn.execute(
+                    """
+                    SELECT sec, unit_type FROM match_build_events
+                    WHERE replay_id = ? AND player_id = ? AND event_type IN ('init', 'morph', 'upgrade')
+                      AND unit_type NOT IN ('Drone','SCV','Probe','Overlord','Zergling','CreepTumor','CreepTumorQueen','CreepTumorBurrowed')
+                    ORDER BY game_loop ASC LIMIT 8
+                    """,
+                    (rid, our_pid),
+                ).fetchall()
+                if bevs:
+                    bo_str = " -> ".join(f"{int(round(r['sec']))}s:{r['unit_type']}" for r in bevs)
+                    p(f"    opening_bo: {bo_str}")
+
+    report_text = "\n".join(out_lines) + "\n"
+    sys.stdout.write(report_text)
+    if getattr(args, "out_md", None):
+        out_p = Path(args.out_md)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_text(report_text)
+        print(f"Wrote prod analysis report -> {out_p}", file=sys.stderr)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: sync-prod (one-command gh fetch -> score -> ingest -> analyze)
+# ---------------------------------------------------------------------------
+
+def _gh_run_cmd(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True)
+
+
+def _gh_latest_workflow_run_id(repo_dir: Path, workflow: str, status: str | None = None) -> int | None:
+    cmd = ["gh", "run", "list", "--workflow", workflow, "--limit", "5", "--json", "databaseId,status,conclusion"]
+    if status:
+        cmd.extend(["--status", status])
+    res = _gh_run_cmd(cmd, repo_dir)
+    if res.returncode != 0 or not res.stdout.strip():
+        return None
+    try:
+        items = json.loads(res.stdout)
+        if items and isinstance(items, list):
+            return int(items[0]["databaseId"])
+    except Exception:
+        return None
+    return None
+
+
+def cmd_sync_prod(args: argparse.Namespace) -> int:
+    db_path = Path(args.db)
+    repo_dir = Path(args.repo_dir)
+    dest_root = Path(args.dest_root)
+    workflow = args.workflow
+    artifact_name = args.artifact_name
+
+    # Collect known match IDs to pass as skip_matches when triggering a new run
+    skip_csv = ""
+    if not args.no_skip_known and db_path.exists():
+        try:
+            conn = open_db(db_path, readonly=True)
+            mids = [
+                str(r[0])
+                for r in conn.execute(
+                    "SELECT DISTINCT aiarena_match_id FROM matches "
+                    "WHERE source_type='prod_aiarena' AND aiarena_match_id IS NOT NULL "
+                    "ORDER BY aiarena_match_id DESC LIMIT 120"
+                ).fetchall()
+            ]
+            conn.close()
+            skip_csv = ",".join(mids)
+        except Exception:
+            skip_csv = ""
+
+    gh_run_id: int | None = int(args.gh_run_id) if args.gh_run_id else None
+    if args.dry_run:
+        plan_lines = ["[sync-prod DRY RUN]"]
+        if gh_run_id:
+            plan_lines.append(f"  1. Download existing gh run_id={gh_run_id} ({artifact_name})")
+        elif args.latest_gh_run:
+            plan_lines.append(f"  1. Lookup latest completed `{workflow}` gh run & download `{artifact_name}`")
+        else:
+            wf_cmd = ["gh", "workflow", "run", workflow, "-f", f"limit={args.limit}"]
+            if args.since_date:
+                wf_cmd.extend(["-f", f"since_date={args.since_date}"])
+            if args.since_match:
+                wf_cmd.extend(["-f", f"since_match={args.since_match}"])
+            if skip_csv:
+                wf_cmd.extend(["-f", f"skip_matches=<{len(skip_csv.split(','))} known IDs>"])
+            plan_lines.append(f"  1. Trigger: {' '.join(wf_cmd)}")
+            plan_lines.append("  2. Watch run to completion & download artifact")
+        plan_lines.append(f"  3. Unpack -> {dest_root}/run_<gh_run_id>/{artifact_name}")
+        plan_lines.append(f"  4. Ingest + raw-extract + score={not args.no_score} -> {db_path}")
+        plan_lines.append(f"  5. Run analyze-prod (enabled={not args.no_analyze})")
+        print("\n".join(plan_lines))
+        return 0
+
+    # Step 1: Resolve or trigger GitHub Actions workflow run
+    if gh_run_id is None and args.latest_gh_run:
+        gh_run_id = _gh_latest_workflow_run_id(repo_dir, workflow, status="completed")
+        if gh_run_id is None:
+            print(f"No completed `{workflow}` runs found via `gh run list`.", file=sys.stderr)
+            return 1
+        print(f"[sync-prod] Using latest completed workflow run_id={gh_run_id}")
+    elif gh_run_id is None:
+        prev_id = _gh_latest_workflow_run_id(repo_dir, workflow) or 0
+        wf_cmd = ["gh", "workflow", "run", workflow, "-f", f"limit={args.limit}"]
+        if args.since_date:
+            wf_cmd.extend(["-f", f"since_date={args.since_date}"])
+        if args.since_match:
+            wf_cmd.extend(["-f", f"since_match={args.since_match}"])
+        if skip_csv:
+            wf_cmd.extend(["-f", f"skip_matches={skip_csv}"])
+        print(f"[sync-prod] Triggering `{workflow}` (limit={args.limit}, skip_known={len(skip_csv.split(',')) if skip_csv else 0})...")
+        trig = _gh_run_cmd(wf_cmd, repo_dir)
+        if trig.returncode != 0:
+            print(f"Failed to trigger workflow:\n{trig.stderr}", file=sys.stderr)
+            return 1
+        # Wait up to 60s for new run ID to register
+        deadline = time.time() + 60.0
+        while time.time() < deadline:
+            cand = _gh_latest_workflow_run_id(repo_dir, workflow)
+            if cand is not None and cand > prev_id:
+                gh_run_id = cand
+                break
+            time.sleep(3.0)
+        if gh_run_id is None:
+            print("Timed out waiting for triggered GitHub Actions run ID to appear.", file=sys.stderr)
+            return 1
+        print(f"[sync-prod] Watching workflow run_id={gh_run_id} until completion...")
+        wres = subprocess.run(
+            ["gh", "run", "watch", str(gh_run_id), "--exit-status"],
+            cwd=str(repo_dir),
+        )
+        if wres.returncode != 0:
+            print(f"Workflow run {gh_run_id} did not succeed (rc={wres.returncode}).", file=sys.stderr)
+            return wres.returncode
+
+    # Step 2: Download artifact to dest_root/run_<id>/<artifact_name>
+    run_dest = dest_root / f"run_{gh_run_id}"
+    artifact_dir = run_dest / artifact_name
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    if not list(artifact_dir.glob("*.SC2Replay")):
+        print(f"[sync-prod] Downloading artifact `{artifact_name}` from run {gh_run_id} -> {artifact_dir}")
+        dres = _gh_run_cmd(
+            ["gh", "run", "download", str(gh_run_id), "-n", artifact_name, "-D", str(artifact_dir)],
+            repo_dir,
+        )
+        if dres.returncode != 0:
+            print(f"Failed to download artifact:\n{dres.stderr}", file=sys.stderr)
+            return 1
+    else:
+        print(f"[sync-prod] Reusing already-downloaded replays in {artifact_dir}")
+
+    # Step 3: Score + Ingest + Raw-Extract
+    ing_ns = argparse.Namespace(
+        db=str(db_path),
+        dir=str(artifact_dir),
+        run_id=f"prod_aiarena_run_{gh_run_id}",
+        tag=f"run_{gh_run_id}",
+        repo_dir=str(repo_dir),
+        score=not args.no_score,
+        score_json=None,
+        score_out=str(run_dest / f"prod_score_run_{gh_run_id}.json"),
+        extract_raw=True,
+        pylibs_dir=str(args.pylibs_dir),
+        jobs=int(args.jobs),
+        verbose=bool(args.verbose),
+    )
+    rc = cmd_ingest_prod_aiarena(ing_ns)
+    if rc != 0:
+        return rc
+
+    # Step 4: Automatic analyze-prod report (never download without analysis!)
+    if not args.no_analyze:
+        an_ns = argparse.Namespace(
+            db=str(db_path),
+            build=args.analyze_build,
+            since=args.since_date,
+            bot=None,
+            include_selfplay=False,
+            min_opp_games=2,
+            top_losses=int(args.top_losses),
+            sort_losses="recent",
+            out_md=args.out_md,
+        )
+        return cmd_analyze_prod(an_ns)
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # CLI entrypoint
 # ---------------------------------------------------------------------------
 
@@ -2506,10 +3163,50 @@ def build_parser() -> argparse.ArgumentParser:
     sp_prod.add_argument("--run-id", default=None, help="Custom run_id (default: prod_aiarena_<dirname>)")
     sp_prod.add_argument("--tag", default=None, help="Custom run tag")
     sp_prod.add_argument("--repo-dir", default=str(REPO_ROOT), help="Repo path for jj/git deploy commit mapping")
+    sp_prod.add_argument("--score", action="store_true", help="Auto-run tools/score-replay-batch.rkt to populate all 20 anomalies")
+    sp_prod.add_argument("--score-json", default=None, help="Link existing score-replay-batch.rkt JSON output")
+    sp_prod.add_argument("--score-out", default=None, help="Output JSON path when --score is enabled")
     sp_prod.add_argument("--extract-raw", action="store_true", help="Also run extract-raw on ingested replays")
     sp_prod.add_argument("--pylibs-dir", default=str(DEFAULT_PYLIBS_DIR))
     sp_prod.add_argument("-j", "--jobs", type=int, default=12)
     sp_prod.add_argument("-v", "--verbose", action="store_true")
+
+    sp_ap = sub.add_parser(
+        "analyze-prod",
+        help="Prod AI Arena report: per-build WR/ELO/step, per-bot, opponents, anomalies by build, top losses",
+    )
+    sp_ap.add_argument("--build", default=None, help="Filter bot_build_version (exact or substring)")
+    sp_ap.add_argument("--since", default=None, help="Filter matches created >= YYYY-MM-DD")
+    sp_ap.add_argument("--bot", default=None, help="Filter bot name (e.g. Mothman-Z)")
+    sp_ap.add_argument("--include-selfplay", action="store_true", help="Include Mothman-vs-Mothman prod selfplay")
+    sp_ap.add_argument("--min-opp-games", type=int, default=2, help="Min matches for opponent hardest/easiest tables")
+    sp_ap.add_argument("--top-losses", type=int, default=10, help="Number of prod losses with raw econ/BO/death forensics")
+    sp_ap.add_argument("--sort-losses", choices=["recent", "worst-trade"], default="recent")
+    sp_ap.add_argument("--out-md", default=None, help="Optional Markdown file to save the analysis report")
+
+    sp_sp = sub.add_parser(
+        "sync-prod",
+        help="One-command gh fetch-aiarena-replays.yml -> score-replay-batch -> ingest -> extract-raw -> analyze-prod",
+    )
+    sp_sp.add_argument("--gh-run-id", type=int, default=None, help="Download existing GitHub Actions run ID (no trigger)")
+    sp_sp.add_argument("--latest-gh-run", action="store_true", help="Download latest completed fetch-aiarena-replays.yml run")
+    sp_sp.add_argument("--limit", type=int, default=30, help="Max matches to fetch when triggering workflow")
+    sp_sp.add_argument("--since-date", default=None, help="Workflow input since_date (YYYY-MM-DD)")
+    sp_sp.add_argument("--since-match", type=int, default=None, help="Workflow input since_match")
+    sp_sp.add_argument("--no-skip-known", action="store_true", help="Do not pass known DB match IDs to skip_matches")
+    sp_sp.add_argument("--workflow", default="fetch-aiarena-replays.yml")
+    sp_sp.add_argument("--artifact-name", default="aiarena-replays")
+    sp_sp.add_argument("--dest-root", default=str(DEFAULT_PROD_DIR))
+    sp_sp.add_argument("--repo-dir", default=str(REPO_ROOT))
+    sp_sp.add_argument("--no-score", action="store_true", help="Skip score-replay-batch.rkt anomaly scoring")
+    sp_sp.add_argument("--no-analyze", action="store_true", help="Skip automatic analyze-prod output")
+    sp_sp.add_argument("--analyze-build", default=None, help="Filter build passed to analyze-prod")
+    sp_sp.add_argument("--top-losses", type=int, default=8, help="Losses shown in automatic analyze-prod")
+    sp_sp.add_argument("--out-md", default=None, help="Optional Markdown file to save analyze-prod output")
+    sp_sp.add_argument("--dry-run", action="store_true", help="Print sync plan without calling gh or modifying DB")
+    sp_sp.add_argument("--pylibs-dir", default=str(DEFAULT_PYLIBS_DIR))
+    sp_sp.add_argument("-j", "--jobs", type=int, default=12)
+    sp_sp.add_argument("-v", "--verbose", action="store_true")
 
     sp_ext = sub.add_parser("extract-raw", help="Extract raw .SC2Replay tracker (and optional game) events in parallel")
     sp_ext.add_argument("--all", action="store_true", help="Extract all unextracted matches")
@@ -2554,6 +3251,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_ingest_runs(args)
     if args.cmd == "ingest-prod-aiarena":
         return cmd_ingest_prod_aiarena(args)
+    if args.cmd == "analyze-prod":
+        return cmd_analyze_prod(args)
+    if args.cmd == "sync-prod":
+        return cmd_sync_prod(args)
     if args.cmd == "extract-raw":
         return cmd_extract_raw(args)
     if args.cmd == "query":

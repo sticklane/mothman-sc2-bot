@@ -290,7 +290,7 @@
                (unsafe-flvector-set! a-fl (unsafe-fx+ ub 16) (unsafe-fl+ uy (unsafe-fl* mdist ny)))])))
         (uloop (unsafe-fx+ ui 1))))))
 
-(define (compute-net-val-buf! a-fl a-fx na e-fl e-fx ne params scratch out-idx)
+(define (compute-net-val-buf! init-a-fl a-fl a-fx na init-e-fl e-fl e-fx ne params scratch out-idx)
   (unsafe-flvector-set! scratch 0 0.0)
   (unsafe-flvector-set! scratch 1 0.0)
   (define hl
@@ -302,12 +302,13 @@
             (if (unsafe-fl> hp 0.0)
                 (let ([c (unsafe-flvector-ref a-fl (unsafe-fx+ b 14))]
                       [sh (unsafe-flvector-ref a-fl (unsafe-fx+ b 2))]
+                      [init-sh (unsafe-flvector-ref init-a-fl (unsafe-fx+ b 2))]
                       [mhp (unsafe-flvector-ref a-fl (unsafe-fx+ b 1))])
                   (unsafe-flvector-set! scratch 0 (unsafe-fl+ (unsafe-flvector-ref scratch 0) c))
                   (unsafe-flvector-set! scratch 1
                     (unsafe-fl+ (unsafe-flvector-ref scratch 1)
                                 (unsafe-fl* c (unsafe-fl/ (unsafe-fl+ hp sh)
-                                                          (unsafe-flmax 1.0 (unsafe-fl+ mhp sh))))))
+                                                          (unsafe-flmax 1.0 (unsafe-fl+ mhp (unsafe-flmax sh init-sh)))))))
                   (loop (unsafe-fx+ i 1) hl))
                 (let ([ib (unsafe-fx* i KERNEL-ISTRIDE)])
                   (loop (unsafe-fx+ i 1)
@@ -324,12 +325,13 @@
             (if (unsafe-fl> hp 0.0)
                 (let ([c (unsafe-flvector-ref e-fl (unsafe-fx+ b 14))]
                       [sh (unsafe-flvector-ref e-fl (unsafe-fx+ b 2))]
+                      [init-sh (unsafe-flvector-ref init-e-fl (unsafe-fx+ b 2))]
                       [mhp (unsafe-flvector-ref e-fl (unsafe-fx+ b 1))])
                   (unsafe-flvector-set! scratch 2 (unsafe-fl+ (unsafe-flvector-ref scratch 2) c))
                   (unsafe-flvector-set! scratch 3
                     (unsafe-fl+ (unsafe-flvector-ref scratch 3)
                                 (unsafe-fl* c (unsafe-fl/ (unsafe-fl+ hp sh)
-                                                          (unsafe-flmax 1.0 (unsafe-fl+ mhp sh))))))
+                                                          (unsafe-flmax 1.0 (unsafe-fl+ mhp (unsafe-flmax sh init-sh)))))))
                   (loop (unsafe-fx+ j 1) wk))
                 (let ([ib (unsafe-fx* j KERNEL-ISTRIDE)])
                   (loop (unsafe-fx+ j 1)
@@ -432,11 +434,11 @@
       (step-side-buf! sim-a-fl sim-a-fx na sim-e-fl sim-e-fx ne our-act enemy-det? 0 1 #t ally-wc scratch params)
       (step-side-buf! sim-e-fl sim-e-fx ne sim-a-fl sim-a-fx na enemy-act ally-det? 1 0 #f ally-wc scratch params)
       (when (unsafe-fx= tick d1t)
-        (compute-net-val-buf! sim-a-fl sim-a-fx na sim-e-fl sim-e-fx ne params scratch 7))
+        (compute-net-val-buf! init-a-fl sim-a-fl sim-a-fx na init-e-fl sim-e-fl sim-e-fx ne params scratch 7))
       (when (unsafe-fx= tick d2t)
-        (compute-net-val-buf! sim-a-fl sim-a-fx na sim-e-fl sim-e-fx ne params scratch 8))
+        (compute-net-val-buf! init-a-fl sim-a-fl sim-a-fx na init-e-fl sim-e-fl sim-e-fx ne params scratch 8))
       (tloop (unsafe-fx+ tick 1))))
-  (compute-net-val-buf! sim-a-fl sim-a-fx na sim-e-fl sim-e-fx ne params scratch 9)
+  (compute-net-val-buf! init-a-fl sim-a-fl sim-a-fx na init-e-fl sim-e-fl sim-e-fx ne params scratch 9)
   (unsafe-flvector-set! scratch out-idx
     (unsafe-fl+ (unsafe-fl+ (unsafe-fl* (unsafe-flvector-ref params 5) (unsafe-flvector-ref scratch 7))
                             (unsafe-fl* (unsafe-flvector-ref params 6) (unsafe-flvector-ref scratch 8)))
@@ -478,12 +480,13 @@
                   (loop (unsafe-fx+ j 1) best-j best-ea nec)))))))
   (unsafe-flvector-set! scratch 11 (unsafe-flvector-ref scratch 10)) ;; bval = sc0 = pred-val0
   (unsafe-flvector-set! scratch 12 (unsafe-flvector-ref scratch 10)) ;; cv
-  ;; W7-TAC-3: Engaged-combat (`ea != 5`) min/mean tie-breaker so enemy `DisengageRetreat`
-  ;; flattening the payoff matrix never hides StutterKiteBack's combat dominance.
+  ;; W7-TAC-3 / L36-P0-3: Engaged-combat (`ea != 5`) minimax tie-breaker (`0.85 * min + 0.15 * mean`)
+  ;; so enemy `DisengageRetreat` flattening never hides worst-case engaged-combat dominance behind
+  ;; irrational enemy actions (like melee Zerglings choosing `StutterKiteBack`).
   (unsafe-flvector-set! scratch 18
     (if (unsafe-fx> eng-cnt0 0)
-        (unsafe-fl+ (unsafe-fl* 0.5 (unsafe-flvector-ref scratch 16))
-                    (unsafe-fl* 0.5 (unsafe-fl/ (unsafe-flvector-ref scratch 17) (unsafe-fx->fl eng-cnt0))))
+        (unsafe-fl+ (unsafe-fl* 0.85 (unsafe-flvector-ref scratch 16))
+                    (unsafe-fl* 0.15 (unsafe-fl/ (unsafe-flvector-ref scratch 17) (unsafe-fx->fl eng-cnt0))))
         (unsafe-flvector-ref scratch 10)))
   (define 1mlam (unsafe-flvector-ref params 8))
   (define lam (unsafe-flvector-ref params 9))
@@ -522,9 +525,9 @@
             (let* ([sc (unsafe-fl+ (unsafe-fl* 1mlam (unsafe-flvector-ref scratch 13))
                                    (unsafe-fl* lam (unsafe-flvector-ref scratch 14)))]
                    [eng-tie (if (unsafe-fx> eng-cnt 0)
-                                (unsafe-fl+ (unsafe-fl* 0.5 (unsafe-flvector-ref scratch 16))
-                                            (unsafe-fl* 0.5 (unsafe-fl/ (unsafe-flvector-ref scratch 17)
-                                                                        (unsafe-fx->fl eng-cnt))))
+                                (unsafe-fl+ (unsafe-fl* 0.85 (unsafe-flvector-ref scratch 16))
+                                            (unsafe-fl* 0.15 (unsafe-fl/ (unsafe-flvector-ref scratch 17)
+                                                                         (unsafe-fx->fl eng-cnt))))
                                 sc)]
                    [bval (unsafe-flvector-ref scratch 11)]
                    [btie (unsafe-flvector-ref scratch 18)]
@@ -563,6 +566,8 @@
  sim-unit-weapon-dps-vs
  cluster-tactical-arenas
  simulate-mirrored-arena-pair
+ compress-arena-sim-units
+ compress-two-arena-sim-lists
  evaluate-arena-minimax-and-regret!
  resolve-committed-micro-action!
  step-tactical-mirror-brain!)
@@ -979,7 +984,31 @@
      (cond
        [(and (null? enemy-vecs) (null? enemy-bldgs)) '()]
        [else
-        (define ally-vecs (list->vector (reverse ally-vec-list)))
+        ;; L36-P0-3 (`#834` #1 ROI): Sort ally & enemy combat vectors deterministically by
+        ;; `(id, x, y)` before clustering so arena seeds, centroids, and IDs are 100% invariant
+        ;; to input unit list ordering!
+        (define (vec-id-lt? a b id-idx x-idx y-idx)
+          (define ia (vector-ref a id-idx))
+          (define ib (vector-ref b id-idx))
+          (cond
+            [(and (exact-integer? ia) (exact-integer? ib) (not (= ia ib))) (< ia ib)]
+            [(not (fl= (vector-ref a x-idx) (vector-ref b x-idx)))
+             (fl< (vector-ref a x-idx) (vector-ref b x-idx))]
+            [else (fl< (vector-ref a y-idx) (vector-ref b y-idx))]))
+        (define sorted-ally-vec-list
+          (sort ally-vec-list (lambda (a b) (vec-id-lt? a b 1 2 3))))
+        (define sorted-enemy-vecs
+          (sort enemy-vecs
+                (lambda (a b)
+                  (define ia (hash-ref (vector-ref a 0) 'id 0))
+                  (define ib (hash-ref (vector-ref b 0) 'id 0))
+                  (cond
+                    [(and (exact-integer? ia) (exact-integer? ib) (not (= ia ib))) (< ia ib)]
+                    [(not (fl= (vector-ref a 1) (vector-ref b 1)))
+                     (fl< (vector-ref a 1) (vector-ref b 1))]
+                    [else (fl< (vector-ref a 2) (vector-ref b 2))]))))
+        (define ally-vecs (list->vector sorted-ally-vec-list))
+        (set! enemy-vecs sorted-enemy-vecs)
         (define n-ca (vector-length ally-vecs))
         (define visited (make-vector n-ca #f))
         (define squads '())
@@ -1463,38 +1492,42 @@
      (or given-init-enemy-cost
          (let loop ([r init-enemies] [s 0.0]) (if (null? r) s (loop (cdr r) (+ s (tactical-sim-unit-cost (car r)))))))))
   (define-values (surv-ally-cost ally-eff-hp-val hero-units-lost)
-    (let loop ([r sim-allies] [sc 0.0] [ev 0.0] [hl 0])
+    (let loop ([r sim-allies] [ir init-allies] [sc 0.0] [ev 0.0] [hl 0])
       (if (null? r)
           (values sc ev hl)
           (let* ([a (car r)]
-                 [hp (tactical-sim-unit-hp a)])
+                 [hp (tactical-sim-unit-hp a)]
+                 [init-sh (if (pair? ir) (tactical-sim-unit-shield (car ir)) 0.0)]
+                 [nir (if (pair? ir) (cdr ir) '())])
             (if (fl> hp 0.0)
                 (let* ([c (tactical-sim-unit-cost a)]
                        [sh (tactical-sim-unit-shield a)]
                        [mhp (tactical-sim-unit-max-hp a)])
-                  (loop (cdr r)
+                  (loop (cdr r) nir
                         (fl+ sc c)
                         (fl+ ev (fl* c (fl/ (fl+ hp sh)
-                                            (flmax 1.0 (fl+ mhp sh)))))
+                                            (flmax 1.0 (fl+ mhp (flmax sh init-sh))))))
                         hl))
-                (loop (cdr r) sc ev
+                (loop (cdr r) nir sc ev
                       (if (not (= (bitwise-and (tactical-sim-unit-attr-flags a) 32) 0)) (add1 hl) hl)))))))
   (define-values (surv-enemy-cost enemy-eff-hp-val workers-killed)
-    (let loop ([r sim-enemies] [sc 0.0] [ev 0.0] [wk 0])
+    (let loop ([r sim-enemies] [ir init-enemies] [sc 0.0] [ev 0.0] [wk 0])
       (if (null? r)
           (values sc ev wk)
           (let* ([e (car r)]
-                 [hp (tactical-sim-unit-hp e)])
+                 [hp (tactical-sim-unit-hp e)]
+                 [init-sh (if (pair? ir) (tactical-sim-unit-shield (car ir)) 0.0)]
+                 [nir (if (pair? ir) (cdr ir) '())])
             (if (fl> hp 0.0)
                 (let* ([c (tactical-sim-unit-cost e)]
                        [sh (tactical-sim-unit-shield e)]
                        [mhp (tactical-sim-unit-max-hp e)])
-                  (loop (cdr r)
+                  (loop (cdr r) nir
                         (fl+ sc c)
                         (fl+ ev (fl* c (fl/ (fl+ hp sh)
-                                            (flmax 1.0 (fl+ mhp sh)))))
+                                            (flmax 1.0 (fl+ mhp (flmax sh init-sh))))))
                         wk))
-                (loop (cdr r) sc ev
+                (loop (cdr r) nir sc ev
                       (if (not (= (bitwise-and (tactical-sim-unit-attr-flags e) 16) 0)) (add1 wk) wk)))))))
   (define trade-delta
     (fl- (fl- init-enemy-cost surv-enemy-cost)
@@ -1525,19 +1558,156 @@
    hero-units-lost
    net-val))
 
+;; L36-P0-3 (`#834` #1 ROI): Deterministic group-by-unit-type compression replacing `(take raw 3)`.
+;; Eliminates 39.8% replay / 58.3% Arena unit-order tactic flips and 51.6% dropped unit types:
+;;   1. Sorts inputs deterministically by `(canonical-type, is-reinforcement?, id, x, y)` so
+;;      every sum/mean is bit-exact invariant to any permutation of ally-units / enemy-units.
+;;   2. Aggregates 1 exact representative per `(unit-type, is-reinforcement?)` group: exact
+;;      summed HP / max-HP / shield / ground-DPS / air-DPS / cost, and mean (x, y, cd, energy, eta).
+;;   3. Sorts representatives deterministically by `(is-reinforcement?, total-cost DESC, type ASC)`
+;;      and preserves up to `(max max-rep 6)` distinct type groups (scaling cleanly only if > cap).
+(define (sim-unit-canonical-order-lt? a b)
+  (define ta (tactical-sim-unit-type a))
+  (define tb (tactical-sim-unit-type b))
+  (cond
+    [(not (eq? ta tb))
+     (string<? (symbol->string ta) (symbol->string tb))]
+    [else
+     (define ra? (fl> (tactical-sim-unit-eta-sec a) 0.0))
+     (define rb? (fl> (tactical-sim-unit-eta-sec b) 0.0))
+     (cond
+       [(not (eq? ra? rb?)) (not ra?)]
+       [(not (fl= (tactical-sim-unit-x a) (tactical-sim-unit-x b)))
+        (fl< (tactical-sim-unit-x a) (tactical-sim-unit-x b))]
+       [(not (fl= (tactical-sim-unit-y a) (tactical-sim-unit-y b)))
+        (fl< (tactical-sim-unit-y a) (tactical-sim-unit-y b))]
+       [else
+        (define ia (tactical-sim-unit-id a))
+        (define ib (tactical-sim-unit-id b))
+        (and (exact-integer? ia) (exact-integer? ib) (< ia ib))])]))
+
+(define (sim-unit-rep-rank-lt? a b)
+  (define ra? (fl> (tactical-sim-unit-eta-sec a) 0.0))
+  (define rb? (fl> (tactical-sim-unit-eta-sec b) 0.0))
+  (cond
+    [(not (eq? ra? rb?)) (not ra?)]
+    [(not (fl= (tactical-sim-unit-cost a) (tactical-sim-unit-cost b)))
+     (fl> (tactical-sim-unit-cost a) (tactical-sim-unit-cost b))]
+    [(not (eq? (tactical-sim-unit-type a) (tactical-sim-unit-type b)))
+     (string<? (symbol->string (tactical-sim-unit-type a))
+               (symbol->string (tactical-sim-unit-type b)))]
+    [else
+     (define ia (tactical-sim-unit-id a))
+     (define ib (tactical-sim-unit-id b))
+     (and (exact-integer? ia) (exact-integer? ib) (< ia ib))]))
+
+(define (aggregate-sim-unit-chunk chunk)
+  (define u0 (car chunk))
+  (if (null? (cdr chunk))
+      u0
+      (let loop ([cur (cdr chunk)]
+                 [cnt 1]
+                 [hp (tactical-sim-unit-hp u0)]
+                 [mhp (tactical-sim-unit-max-hp u0)]
+                 [sh (tactical-sim-unit-shield u0)]
+                 [gdps (tactical-sim-unit-ground-dps u0)]
+                 [adps (tactical-sim-unit-air-dps u0)]
+                 [cost (tactical-sim-unit-cost u0)]
+                 [sx (tactical-sim-unit-x u0)]
+                 [sy (tactical-sim-unit-y u0)]
+                 [scd (tactical-sim-unit-weapon-cooldown u0)]
+                 [sen (tactical-sim-unit-energy u0)]
+                 [seta (tactical-sim-unit-eta-sec u0)]
+                 [clk (if (tactical-sim-unit-cloaked? u0) 1 0)]
+                 [min-id (tactical-sim-unit-id u0)])
+        (if (null? cur)
+            (let ([fcnt (exact->inexact cnt)])
+              (struct-copy tactical-sim-unit u0
+                           [id min-id]
+                           [hp hp]
+                           [max-hp mhp]
+                           [shield sh]
+                           [ground-dps gdps]
+                           [air-dps adps]
+                           [cost cost]
+                           [x (fl/ sx fcnt)]
+                           [y (fl/ sy fcnt)]
+                           [weapon-cooldown (fl/ scd fcnt)]
+                           [energy (fl/ sen fcnt)]
+                           [eta-sec (fl/ seta fcnt)]
+                           [cloaked? (>= (* 2 clk) cnt)]))
+            (let ([u (car cur)]
+                  [uid (tactical-sim-unit-id (car cur))])
+              (loop (cdr cur)
+                    (add1 cnt)
+                    (fl+ hp (tactical-sim-unit-hp u))
+                    (fl+ mhp (tactical-sim-unit-max-hp u))
+                    (fl+ sh (tactical-sim-unit-shield u))
+                    (fl+ gdps (tactical-sim-unit-ground-dps u))
+                    (fl+ adps (tactical-sim-unit-air-dps u))
+                    (fl+ cost (tactical-sim-unit-cost u))
+                    (fl+ sx (tactical-sim-unit-x u))
+                    (fl+ sy (tactical-sim-unit-y u))
+                    (fl+ scd (tactical-sim-unit-weapon-cooldown u))
+                    (fl+ sen (tactical-sim-unit-energy u))
+                    (fl+ seta (tactical-sim-unit-eta-sec u))
+                    (if (tactical-sim-unit-cloaked? u) (add1 clk) clk)
+                    (if (and (exact-integer? uid) (exact-integer? min-id) (< uid min-id))
+                        uid
+                        min-id)))))))
+
+(define (compress-sim-units-by-type prim reinf max-rep)
+  (define raw-all
+    (let loop ([rem prim] [acc '()])
+      (if (null? rem)
+          (let loop2 ([rem2 reinf] [acc2 acc])
+            (if (null? rem2)
+                acc2
+                (loop2 (cdr rem2) (cons (ensure-fl-sim-unit (car rem2)) acc2))))
+          (loop (cdr rem) (cons (ensure-fl-sim-unit (car rem)) acc)))))
+  (define n (length raw-all))
+  (cond
+    [(zero? n) '()]
+    [else
+     (define sorted (sort raw-all sim-unit-canonical-order-lt?))
+     (if (<= n max-rep)
+         sorted
+         (let* ([raw-groups
+                 ;; `sorted` is contiguous by `(type, is-reinf?)` and deterministically ordered!
+                 ;; Aggregate 1 exact representative per distinct `(unit-type, is-reinforcement?)`.
+                 (let gloop ([rem sorted] [acc '()])
+                   (if (null? rem)
+                       acc
+                       (let* ([u0 (car rem)]
+                              [t0 (tactical-sim-unit-type u0)]
+                              [r0? (fl> (tactical-sim-unit-eta-sec u0) 0.0)])
+                         (let iloop ([cur (cdr rem)] [mems (list u0)])
+                           (if (and (pair? cur)
+                                    (eq? (tactical-sim-unit-type (car cur)) t0)
+                                    (eq? (fl> (tactical-sim-unit-eta-sec (car cur)) 0.0) r0?))
+                               (iloop (cdr cur) (cons (car cur) mems))
+                               (gloop cur (cons (aggregate-sim-unit-chunk (reverse mems)) acc)))))))]
+                [reps (sort raw-groups sim-unit-rep-rank-lt?)]
+                [eff-cap (max max-rep 6)])
+           (if (<= (length reps) eff-cap)
+               reps
+               (let* ([kept (take reps eff-cap)]
+                      [tot-cost (for/fold ([s 0.0]) ([u (in-list reps)]) (fl+ s (tactical-sim-unit-cost u)))]
+                      [kept-cost (for/fold ([s 0.0]) ([u (in-list kept)]) (fl+ s (tactical-sim-unit-cost u)))]
+                      [scale (if (fl> kept-cost 1e-6) (fl/ tot-cost kept-cost) 1.0)])
+                 (if (fl<= (flabs (fl- scale 1.0)) 1e-6)
+                     kept
+                     (for/list ([u (in-list kept)])
+                       (struct-copy tactical-sim-unit u
+                                    [hp (fl* scale (tactical-sim-unit-hp u))]
+                                    [max-hp (fl* scale (tactical-sim-unit-max-hp u))]
+                                    [shield (fl* scale (tactical-sim-unit-shield u))]
+                                    [ground-dps (fl* scale (tactical-sim-unit-ground-dps u))]
+                                    [air-dps (fl* scale (tactical-sim-unit-air-dps u))]
+                                    [cost (fl* scale (tactical-sim-unit-cost u))])))))))]))
+
 (define (compress-arena-sim-units units [max-rep 4])
-  (define n (length units))
-  (if (<= n max-rep)
-      units
-      (let ([scale (/ (exact->inexact n) (exact->inexact max-rep))])
-        (for/list ([u (in-list (take units max-rep))])
-          (struct-copy tactical-sim-unit u
-                       [hp (* scale (tactical-sim-unit-hp u))]
-                       [max-hp (* scale (tactical-sim-unit-max-hp u))]
-                       [shield (* scale (tactical-sim-unit-shield u))]
-                       [ground-dps (* scale (tactical-sim-unit-ground-dps u))]
-                       [air-dps (* scale (tactical-sim-unit-air-dps u))]
-                       [cost (* scale (tactical-sim-unit-cost u))])))))
+  (compress-sim-units-by-type units '() max-rep))
 
 (define SIM-PAIR-DT-FL (exact->inexact (* 2.0 SC2-TACTICAL-SIM-DT-SEC)))
 (define SIM-D1-TICKS (max 1 (exact-round (/ SC2-TACTICAL-DEPTH1-SEC (* 2.0 SC2-TACTICAL-SIM-DT-SEC)))))
@@ -1688,46 +1858,7 @@
       (remq 'CloakHarassWorkers TACTICAL-MICRO-ACTION-SPACE)))
 
 (define (compress-two-arena-sim-lists prim reinf max-rep)
-  (define n (+ (length prim) (length reinf)))
-  (cond
-    [(<= n max-rep)
-     (if (null? reinf)
-         (for/list ([u (in-list prim)]) (ensure-fl-sim-unit u))
-         (let loop ([rem prim] [acc '()])
-           (if (null? rem)
-               (let loop2 ([rem2 reinf] [acc2 acc])
-                 (if (null? rem2)
-                     (reverse acc2)
-                     (loop2 (cdr rem2) (cons (ensure-fl-sim-unit (car rem2)) acc2))))
-               (loop (cdr rem) (cons (ensure-fl-sim-unit (car rem)) acc)))))]
-    [else
-     (define scale (fl/ (exact->inexact n) (exact->inexact max-rep)))
-     (let loop ([rem prim] [reinf-rem reinf] [k max-rep] [acc '()])
-       (cond
-         [(<= k 0) (reverse acc)]
-         [(pair? rem)
-          (define u (ensure-fl-sim-unit (car rem)))
-          (loop (cdr rem) reinf-rem (- k 1)
-                (cons (struct-copy tactical-sim-unit u
-                                   [hp (fl* scale (tactical-sim-unit-hp u))]
-                                   [max-hp (fl* scale (tactical-sim-unit-max-hp u))]
-                                   [shield (fl* scale (tactical-sim-unit-shield u))]
-                                   [ground-dps (fl* scale (tactical-sim-unit-ground-dps u))]
-                                   [air-dps (fl* scale (tactical-sim-unit-air-dps u))]
-                                   [cost (fl* scale (tactical-sim-unit-cost u))])
-                      acc))]
-         [(pair? reinf-rem)
-          (define u (ensure-fl-sim-unit (car reinf-rem)))
-          (loop '() (cdr reinf-rem) (- k 1)
-                (cons (struct-copy tactical-sim-unit u
-                                   [hp (fl* scale (tactical-sim-unit-hp u))]
-                                   [max-hp (fl* scale (tactical-sim-unit-max-hp u))]
-                                   [shield (fl* scale (tactical-sim-unit-shield u))]
-                                   [ground-dps (fl* scale (tactical-sim-unit-ground-dps u))]
-                                   [air-dps (fl* scale (tactical-sim-unit-air-dps u))]
-                                   [cost (fl* scale (tactical-sim-unit-cost u))])
-                      acc))]
-         [else (reverse acc)]))]))
+  (compress-sim-units-by-type prim reinf max-rep))
 
 (define ACTION-CODE-HT
   (hasheq 'CommitFocusFire 0 'StutterKiteBack 1 'KiteForwardChase 2

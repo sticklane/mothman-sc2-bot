@@ -6,6 +6,7 @@
 ;; =============================================================================
 
 (require racket/bytes
+         racket/file
          racket/list
          racket/match
          racket/math
@@ -13,11 +14,15 @@
          racket/set
          racket/string
          racket/tcp
+         json
          "../lib/sc2-game-constants.rkt"
          (prefix-in pl: "../lib/sc2-placement.rkt")
          "../lib/plan/situational-counter.rkt"
          "../lib/sc2-protobuf-ws.rkt"
-         "../sim/racket-sc2-ladder-main.rkt")
+         "../sim/racket-sc2-ladder-main.rkt"
+         (only-in "../ladder/build-aiarena-zip.rkt"
+                  detect-build-version-metadata
+                  build-bot-config-json-bytes))
 
 (define total-checks 0)
 (define failed-checks 0)
@@ -7958,6 +7963,150 @@
                           out-35d)
                    (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 487)))
                                out-35d)))))
+
+;; =============================================================================
+;; Loop 36 (`L36-P0-1`): Bot Build Version Stamping (`BuildVersion`/`BuildTimestampUtc`),
+;; `[SCBOT_BUILD]` Banner + `0`-APM Team-Only `Tag:v_<rev>` Chat Emission Once/Match,
+;; & Spawn-Symmetric Front-of-Hatchery Spine Crawler Placement
+;; =============================================================================
+(printf "[Loop 36] Testing L36-P0-1 BuildVersion stamp/load, 0-APM team-only Tag:v_<rev> once/match, & front-of-Hatchery Spine placement...\n")
+(let ()
+  ;; L36-P0-1a: `detect-build-version-metadata`, `build-bot-config-json-bytes`, `load-bot-build-metadata`
+  ;; (`bot_config.json` & `config.json` zip mode + `MOTHMAN_BUILD_VERSION` source fallback) & `[SCBOT_BUILD]` banner!
+  (define-values (det-ver det-ts) (detect-build-version-metadata))
+  (define cfg-bstr
+    (build-bot-config-json-bytes "Mothman-Z" "Zerg" "bots/Mothman-Z.rkt"
+                                 #:build-version "abcd1234_9876fedc"
+                                 #:build-timestamp-utc "2026-11-20T18:35:00Z"))
+  (define cfg-j (bytes->jsexpr cfg-bstr))
+  (define tmp-dir-a (make-temporary-file "mothman-l36-cfg-~a" 'directory))
+  (define tmp-dir-b (make-temporary-file "mothman-l36-src-~a" 'directory))
+  (define prev-env (getenv "MOTHMAN_BUILD_VERSION"))
+  (define meta-zip #f)
+  (define meta-src #f)
+  (define banner-zip "")
+  (dynamic-wind
+    void
+    (lambda ()
+      (call-with-output-file (build-path tmp-dir-a "bot_config.json")
+        #:exists 'replace
+        (lambda (out) (write-bytes cfg-bstr out)))
+      (set! meta-zip (load-bot-build-metadata #:root-dir tmp-dir-a))
+      (set! banner-zip (format-bot-build-banner meta-zip 'Zerg))
+      (putenv "MOTHMAN_BUILD_VERSION" "src12345_cafe9999")
+      (set! meta-src (load-bot-build-metadata #:root-dir tmp-dir-b)))
+    (lambda ()
+      (if prev-env
+          (putenv "MOTHMAN_BUILD_VERSION" prev-env)
+          (putenv "MOTHMAN_BUILD_VERSION" ""))
+      (with-handlers ([exn:fail? void]) (delete-directory/files tmp-dir-a))
+      (with-handlers ([exn:fail? void]) (delete-directory/files tmp-dir-b))))
+  (check-true "l36-p0-1a-build-version-stamp-config-load-and-scbot-build-banner"
+              (and (string? det-ver)
+                   (> (string-length det-ver) 0)
+                   (regexp-match? #px"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" det-ts)
+                   (equal? (hash-ref cfg-j 'BuildVersion #f) "abcd1234_9876fedc")
+                   (equal? (hash-ref cfg-j 'BuildTimestampUtc #f) "2026-11-20T18:35:00Z")
+                   (equal? (hash-ref meta-zip 'version #f) "abcd1234_9876fedc")
+                   (eq? (hash-ref meta-zip 'mode #f) 'zip)
+                   (equal? banner-zip "[SCBOT_BUILD] bot=Mothman-Z race=Zerg version=abcd1234_9876fedc mode=zip")
+                   (equal? (hash-ref meta-src 'version #f) "src12345_cafe9999")
+                   (eq? (hash-ref meta-src 'mode #f) 'source)))
+
+  ;; L36-P0-1b: `0`-APM team-only `(sc2-chat-action 2 "Tag:v_<rev>")` emits ONCE per match at frame `~24`,
+  ;; passes through `govern-sc2-wire-actions!` even at drained `-4.0` tokens with `0` APM cost,
+  ;; encodes cleanly via `encode-sc2-action`, and re-emits once after a match rewind!
+  (define (mk-l36-u tag utype alliance x y #:hp [hp 100.0] #:rad [rad 1.0] #:mins [mins 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 3) 0 2))
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 0 #f #f #f
+              hp hp 0.0 0.0 0.0 0.0 mins 0 #f #f #f #t #f
+              '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define h-36b (mk-l36-u 16001 86 1 32.5 32.5 #:hp 1500.0 #:rad 2.75))
+  (define d-36b (mk-l36-u 16002 104 1 31.0 31.0 #:hp 40.0 #:rad 0.375))
+  (reset-bot-build-version-cache!)
+  (define (chat-cmds-at lp)
+    (filter sc2-chat-action?
+            (translate-bot-actions->sc2-raw-commands
+             '() (make-test-obs lp 50 0 (list h-36b d-36b)))))
+  (define chats-0   (chat-cmds-at 0))
+  (define chats-12  (chat-cmds-at 12))
+  (define chats-24  (chat-cmds-at 24))
+  (define chats-28  (chat-cmds-at 28))
+  (define chats-100 (chat-cmds-at 100))
+  ;; Match rewind to loop 0 -> loop 24 re-emits once for the new match!
+  (define chats-rw0  (chat-cmds-at 0))
+  (define chats-rw24 (chat-cmds-at 24))
+  (define tag-act (and (= (length chats-24) 1) (first chats-24)))
+  ;; Verify 0-APM governor emission even when tokens are drained to `-4.0`
+  (define gov-36b (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (void (govern-sc2-wire-actions!
+         gov-36b
+         (for/list ([k (in-range 16)])
+           (mark-urgent-survival-cmd!
+            (sc2-raw-unit-command 23 (sc2-point2d (+ 20.0 k) 20.0) 0 (list (+ 16100 k)) #f)))
+         20))
+  (define gov-tag-out (govern-sc2-wire-actions! gov-36b (list tag-act) 24))
+  (define drops-before (get-total-wire-action-drop-count))
+  (define enc-tag (and tag-act (encode-sc2-action tag-act)))
+  (define drops-after (get-total-wire-action-drop-count))
+  (check-true "l36-p0-1b-zero-apm-team-only-tag-emits-once-per-match-and-resets-on-rewind"
+              (and (null? chats-0)
+                   (null? chats-12)
+                   (= (length chats-24) 1)
+                   (null? chats-28)
+                   (null? chats-100)
+                   (null? chats-rw0)
+                   (= (length chats-rw24) 1)
+                   (sc2-chat-action? tag-act)
+                   (= (sc2-chat-action-channel tag-act) 2)
+                   (string-prefix? (sc2-chat-action-message tag-act) "Tag:v_")
+                   (= (wire-cmd-priority-tier tag-act) 0)
+                   (equal? gov-tag-out (list tag-act))
+                   (bytes? enc-tag)
+                   (> (bytes-length enc-tag) 4)
+                   (= drops-before drops-after)))
+
+  ;; L36-P0-1c: Front-of-Hatchery Spine Crawler placement (`#37` 12-Pool fix) is 100% spawn-symmetric
+  ;; across SW AND NE spawns — NEVER tucks behind the mineral line even when enemy Lings contest
+  ;; the Hatchery and `req-x/req-y` points at Hatchery center or behind the minerals!
+  (define map-w 192)
+  (define map-h 168)
+  (define full-pl (sc2-image-grid 8 map-w map-h (make-bytes (* map-w map-h) 1) #f #f))
+  (define full-th (sc2-image-grid 8 map-w map-h (make-bytes (* map-w map-h) 160) #f #f))
+  (define gi-36c
+    (sc2-game-info "L36SpineMap" "" '() (cons map-w map-h) (hash 'x0 4 'y0 4 'x1 188 'y1 164)
+                   (list (sc2-point2d 155.5 133.5)) full-pl full-th full-pl))
+  (define (mk-min-line tag0 mx y0)
+    (for/list ([k (in-range 8)])
+      (mk-l36-u (+ tag0 k) 341 3 mx (+ y0 (* 1.0 k)) #:rad 1.125 #:mins 1500)))
+  (define (run-spine-test base-x base-y min-x enemy-x enemy-y req-x req-y loop)
+    (define hatch (mk-l36-u 16201 86 1 base-x base-y #:hp 1500.0 #:rad 2.75))
+    (define drone (mk-l36-u 16202 104 1 (+ base-x 2.0) base-y #:hp 40.0 #:rad 0.375))
+    ;; Active enemy Zerglings attacking the Hatchery (`#37` 12-Pool rush!)
+    (define lings
+      (for/list ([k (in-range 6)])
+        (mk-l36-u (+ 16250 k) 105 4 (+ base-x (* 3.0 (if (< base-x 96.0) 1.0 -1.0))) (+ base-y (- k 2.5)) #:hp 35.0 #:rad 0.375)))
+    (define mins (mk-min-line 16300 min-x (- base-y 3.5)))
+    (define obs-sp (make-test-obs loop 200 0 (append (list hatch drone) lings mins)))
+    (define cmds
+      (translate-bot-actions->sc2-raw-commands
+       (list (list 'build 'spine-crawler req-x req-y))
+       obs-sp #:game-info gi-36c #:enemy-base (list enemy-x enemy-y)))
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1166)))
+           cmds))
+  ;; SW spawn: Hatch `(32.5, 32.5)`, minerals West at `x = 26.0`, enemy NE `(155.5, 133.5)`, bad req behind minerals `(24.0, 32.5)`
+  (define spine-sw (run-spine-test 32.5 32.5 26.0 155.5 133.5 24.0 32.5 25000))
+  ;; NE spawn: Hatch `(155.5, 133.5)`, minerals East at `x = 162.0`, enemy SW `(32.5, 32.5)`, bad req behind minerals `(164.0, 133.5)`
+  (define spine-ne (run-spine-test 155.5 133.5 162.0 32.5 32.5 164.0 133.5 25040))
+  (define sw-pt (and (sc2-raw-unit-command? spine-sw) (sc2-raw-unit-command-target-pos spine-sw)))
+  (define ne-pt (and (sc2-raw-unit-command? spine-ne) (sc2-raw-unit-command-target-pos spine-ne)))
+  (check-true (format "l36-p0-1c-front-of-hatchery-spine-placement-sw-and-ne (sw=~a ne=~a)" sw-pt ne-pt)
+              (and (sc2-point2d? sw-pt)
+                   (> (sc2-point2d-x sw-pt) 34.5)    ;; STRICTLY East (front) of SW Hatchery, away from West minerals!
+                   (<= (sc2-point2d-x sw-pt) 43.0)
+                   (sc2-point2d? ne-pt)
+                   (< (sc2-point2d-x ne-pt) 153.5)   ;; STRICTLY West (front) of NE Hatchery, away from East minerals!
+                   (>= (sc2-point2d-x ne-pt) 145.0))))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"

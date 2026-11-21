@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter35_wave35",
+  "active_wave": "iter36_wave36_full",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -3210,6 +3210,99 @@
         "Replay SQLite DB shipped (tools/replay-db.py, 2,038 replays 100% extracted incl. 330 prod AI Arena matches proving live prod WR surged 0% -> 32.3% -> 52.6% -> 57.4% across shipped builds!)"
       ],
       "promotion_gates_passed": "3/9 PASS on core_14 (zero_crashes_and_rejects, sup_blk_le_6pct [3.6%], tactics_suite_100pct [34W-2L-0D 94.4% / 1.97x!]); missed ties_le_2 (4T incl. 1 winning WallTie), overall_trade_agg (0.90x vs 1.0x), overall_wr (42.9% vs 50%), every_race_wr (Z 28.6% WR / 50.0% NL), w4m (P -8, Z -7); H2H vs NEW L34 ZIP 1W-5L (hold ship until H2H regression diagnosed)"
+    },
+    {
+      "id": "iter36_wave36_full",
+      "status": "SHIP_GATE_GREEN_H2H_4W_2L_1_62X_VS_L34_ZIP_UNSEEN12_ATH_6W_28L_2T_BOTZIPS_SHIPPING_LIVE",
+      "campaign": "Loops 29+ Self-Play, Honest Tactics Arena 2.0 & Expanded Roster Campaign (Loop 36 LIVE AI ARENA SHIP CANDIDATE)",
+      "loop_self_improvements": [
+        "L36-LOOP-1 (Automated Prod AI Arena Forensics & One-Command Sync): Added --score/--score-json to ingest-prod-aiarena (100% 302/302 external prod matches anomaly-scored!), analyze-prod (chronological per-build WR/ELO/step/anomalies + top prod losses with raw econ/BO/death forensics), and sync-prod (one-command gh fetch -> score -> ingest -> extract -> analyze-prod) in tools/replay-db.py + 5/5 tests PASS!",
+        "L36-LOOP-2 (Live Build-Version Stamping & Replay Chat Tag Capture): Verified [SCBOT_BUILD] 96/96 (100%) and live Tag:v_... extraction in arena_replays.sqlite (2,128/2,128 = 100% raw-extracted!). Caught live SC2 nuance: team-only (m_recipient=1) Tag:v_... is stripped from .SC2Replay on 21/24 wins (kept on 41/56 losses + 4/4 ties) \u2014 switching to Broadcast (m_recipient=0) in Loop 37 will achieve 100% replay capture across wins too."
+      ],
+      "spec_summary": "Loop 36 (mqklxqnz \u2014 LIVE AI ARENA SHIP CANDIDATE): Killed arena-minimax (take 3) order-chaos bug, wired tbrain focus-fire into Terran/Protoss core units, fixed Mirror-Mind L3414 defend-All-In base-rec & L2956 upgrade-sign bugs + d=0..1 lock, added front-of-Hatch Spine placement, and added prod anti-DripFeed parity staging + BuildVersion/Tag:v_ stamping! Result: SHIP GATE GREEN \u2014 beat newly shipped Loop 34 BotZips 4W-2L-0T (1.62x agg / 3.21x med, Terran 2-0 3.94x w/ #06 TvZ 6.99x 0-anom, Protoss 2-1 w/ #03 PvP 3.54x 0-anom!), NEW ALL-TIME UNSEEN12 RECORD 6W-28L-2T (16.7% WR / 22.2% NL; 7/12 unseen bots beaten/tied incl. FIRST-EVER QueenBot W 6.37x & FIRST-EVER zig-reapers P W 7.55x!), HISTORIC FIRST-EVER 12PoolBot WIN (#71 T 13.75x 0-anom, #70 Z survived 8:12!), Protoss CORE14 NEW ATH Trade 1.31x (7-7 50%, 3rd who W!), DripFeed -26% (39->29), Siege0DPS -40% (20->12), ZeroKill -60%, NEW 84-match tr_avg ATL 2.36ms, and Honest Arena 2.0 33W-3L-0D (1.90x, Zerg 96W-0L 8-loop streak, Protoss 5.72 / Terran 4.91 / P2 5.15 A:M ATHs)!",
+      "rev": "mqklxqnz e59266a6 (iter36 live ship candidate)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_010423_iter36_wave36_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_013307_iter36_baseline_h2h",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter36_wave36_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter36_baseline_h2h_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter36_wave36_full.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter36.json",
+      "tactics_selfplay_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter36.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter36.md",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "22W-52L-4T (78/78 clean external: core_14 16-24-2 [Non-Chance 16-21-2 46.2% NL, Trade 0.84x] + NEW UNSEEN12 ATH 6-28-2 [22.2% NL, 7/12 bots!]; self_6 2W-4L-0T 0.87x; baseline_h2h vs L34 ZIP 4W-2L-0T 1.62x!)",
+      "win_rate_pct": 28.2,
+      "trade_agg": 0.57,
+      "trade_med": 0.2,
+      "sup_blk_pct": 4.0,
+      "w4_alive_med": 26.0,
+      "w6_alive_med": 39.0,
+      "pk_army_avg": 2880.1,
+      "action_rejects": 0,
+      "crashes": 0,
+      "siege_range_zero_dps_losses": 11,
+      "cloaked_unit_damage_losses": 4,
+      "gas_rich_min_starved_matches": 11,
+      "one_base_lockout_matches": 2,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 7,
+      "prod_placement_stall_matches": 2,
+      "zero_kill_collapse_matches": 4,
+      "drip_feed_collapse_matches": 26,
+      "prod_idle_bank_freeze_matches": 1,
+      "gas_zero_harvest_freeze_matches": 0,
+      "spire_sched_drop_matches": 1,
+      "wall_timeout_ties": 2,
+      "army_val_4m_ratio_vs_pro": 0.88,
+      "army_val_8m_ratio_vs_pro": 0.38,
+      "latency_summary": "ALL 90/90 clean <=209.1ms (0 spikes >=500ms!; NEW 84-match tr_avg ATL 2.36ms [-0.38ms vs L34!], avg 8.66ms, p95 14.98ms; H2H P1 max 147ms vs L34-ZIP P2 244ms; 0 rejects!)",
+      "by_race": {
+        "Protoss": {
+          "record": "9W-17L-0T across all 26 (+2W vs L34!; core_14 7-7 50.0% NEW Trade ATH 1.31x w/ 3rd who W #75 1.67x, Rusty 6.10x, puck 9.25x, Creepy 3.06x; unseen_12 2-10 w/ FIRST zig-reapers P W 7.55x & CryptBot 10.25x; H2H 2-1 1.59x w/ PvP 3.54x 0-anom & PvZ 3.21x!; Arena Dummy A:M ATH 5.72 + SP 11W-1L!)",
+          "trade_agg": 0.66,
+          "w4_alive_med": 27.0,
+          "w6_alive_med": 40.0,
+          "nat_sec": 91.0,
+          "sup_blk": 5.5
+        },
+        "Terran": {
+          "record": "8W-16L-2T across all 26 (SB 2.6%, Top BO MATCH!, TvZ 6-3 66.7% 1.34x!; FIRST-EVER 12PoolBot W #71 13.75x 0-anom!, unseen_12 3-7-2 41.7% NL w/ CryptBot 10.25x, PolyMorph 3.42x, Clicadinha 1.41x; H2H 2-0 3.94x w/ TvT 3.30x & TvZ 6.99x 0-anom!; Arena Dummy 11W-1L A:M ATH 4.91!; watch TvP 0-7-1)",
+          "trade_agg": 0.6,
+          "w4_alive_med": 25.0,
+          "w6_alive_med": 36.5,
+          "nat_sec": 105.0,
+          "sup_blk": 2.6
+        },
+        "Zerg": {
+          "record": "5W-19L-2T across all 26 (core_14 4-8-2 42.9% NL w/ puck 4.23x, sludgement2 2.16x, #70 12PoolBot survived 8:12!; FIRST-EVER QueenBot W #43 6.37x!; self_6 ZvZ W 6.71x; Honest Arena 96W-0L 8-loop Dummy streak!; watch ZvT 0-8-1 & W@6m 40.0 vs 52.5)",
+          "trade_agg": 0.48,
+          "w4_alive_med": 26.0,
+          "w6_alive_med": 40.0,
+          "nat_sec": 55.0,
+          "sup_blk": 4.0
+        }
+      },
+      "tactics_summary": {
+        "rev": "mqklxqnz 08738ad1 (iter36)",
+        "passed": "Verifier 7/7 + 99/99 L31..L36 + 29/29 Belief + 5/5 Replay-DB + 231/231 Tactics + 0/0/0/0 Pro-Starve (P combat +6.3pp, T combat +4.2pp) FIRST-PASS; Zerg 96W-0L 8-loop Honest Arena streak!",
+        "sc2_duel36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter36.json",
+        "sc2_selfplay36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter36.json",
+        "sc2_duel36_summary": "HONEST 960-LOOP ARENA 2.0: Dummy 33W-3L-0D (ALL 36/36 CLEAN KOs, 0 Draws, 1.90x, A:M 5.59; SHATTERED Protoss 5.72 [+1.81] & Terran 4.91 [+0.67] A:M ATHs!; Zerg 8TH STRAIGHT 12W-0L = 96W-0L streak!; p11 flipped 1.63x KO, t04 3.64x KO!) + Self-Play 26W-10L-0D (0 Draws across 72/72, SHATTERED P2 A:M ATH 5.15, Protoss P1 11W-1L-0D!)"
+      },
+      "visual_qa_highlights": [
+        "ALL 8/8 3D frames crisp and centered on active combat (0 transit frames!): #18 P v RustyNikolaj (08:23 WIN 6.10x Stalkers+Phoenixes shredding natural), #43 Z v QueenBot (10:40 FIRST-EVER WIN 6.37x Ravagers+Hydras breaking creep carpet), #79 Z v Z-SP (11:04 WIN 6.71x Hydras+Roaches+Corruptors), #35 T v AxeFighter (14:11 TIE 39-Marine clash).",
+        "Visual Smoking Gun #1 \u2014 #47 T v sludgement2-revived (14:19 LOSS 1.10x): 40+ Bio tightly wedged behind a 3x3 Supply Depot grid on NW main cliff trapping our own Siege Tank inside a Depot box \u2014 directly visualizing the North-spawn +X,-Y Depot offset bug!",
+        "Visual Smoking Gun #2 \u2014 #33 P v sc2ai_protoss (07:48 LOSS 0.13x Siege0DPS): 2 Stalkers + 1 Sentry + 1 HT trickling up center choke into 3 Tempests + 6+ Void Rays.",
+        "Visual Smoking Gun #3 \u2014 #55 Z v Mulebot (20:33 LOSS 0.65x) shows 3 BCs + 2 Ghosts jumping onto our Hatchery with zero Zerg AA nearby; #9 P v Chance (03:59 LOSS 0.05x) shows 18+ Marines (FourRax) inside un-walled natural vs 1 lone Zealot."
+      ],
+      "key_wins": [
+        "SHIP GATE GREEN \u2014 BEATS NEW LOOP 34 SHIPPED BOTZIPS HEAD-TO-HEAD 4W-2L-0T (66.7%, 1.62x agg / 3.21x med, Terran 2-0 3.94x w/ #06 TvZ 6.99x 0-anom, Protoss 2-1 w/ #03 PvP 3.54x 0-anom & #05 PvZ 3.21x, H2H #04 PvT fixed 6m army starvation 200->1,325 vs 975)!",
+        "NEW ALL-TIME UNSEEN12 RECORD 6W-28L-2T (16.7% WR / 22.2% NL; 7/12 unseen bots beaten/tied: FIRST-EVER QueenBot W 6.37x, FIRST-EVER zig-reapers P W 7.55x, Terran 41.7% NL, Siege0DPS -56%)!",
+        "HISTORIC FIRST-EVER 12PoolBot WIN (#71 T 13.75x 0-anom, #70 Z survived 8:12!) + Protoss CORE14 NEW ATH Trade 1.31x (7-7 50%, 3rd who W #75 P 1.67x) + DripFeed -26% (39->29), Siege0DPS -40% (20->12), ZeroKill -60%, NEW tr_avg ATL 2.36ms!",
+        "Honest Arena 2.0 33W-3L-0D (1.90x, Zerg 96W-0L 8-loop streak, Protoss 5.72 / Terran 4.91 / P2 5.15 A:M ATHs, Protoss SP 11W-1L) + SQLite DB 2,128/2,128 replays + automated analyze-prod & sync-prod!"
+      ],
+      "promotion_gates_passed": "3/9 PASS across full 78-match (core_14 + unseen_12) roster (zero_crashes_and_rejects, sup_blk_le_6pct [4.0%], tactics_suite_100pct [33W-3L-0D 91.7% / 1.90x, Zerg 96-0!]); LIVE SHIP GATE PASS 4W-2L (1.62x) over L34 BotZips!"
     }
   ],
   "final_18_loop_summary": {

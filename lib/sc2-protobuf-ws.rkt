@@ -17,6 +17,10 @@
          racket/set
          racket/string
          racket/vector
+         racket/path
+         racket/file
+         racket/system
+         json
          file/sha1
          net/base64
          "sc2-game-constants.rkt"
@@ -215,7 +219,134 @@
  wire-cmd-priority-tier
  coalesce-sc2-raw-commands
  make-wire-apm-governor
- govern-sc2-wire-actions!)
+ govern-sc2-wire-actions!
+ load-bot-build-metadata
+ reset-bot-build-version-cache!
+ format-bot-build-banner
+ make-bot-build-tag-chat-action)
+
+;; =============================================================================
+;; L36-P0-1: Bot Build Version Stamping & 0-APM Team-Only Match Tagging
+;; =============================================================================
+(define SC2-BUILD-META-CACHE (box #f))
+(define SC2-BUILD-BANNER-LOGGED? (box #f))
+(define SC2-BUILD-TAG-EMITTED? (box #f))
+
+(define (reset-bot-build-version-cache!)
+  (set-box! SC2-BUILD-META-CACHE #f)
+  (set-box! SC2-BUILD-BANNER-LOGGED? #f)
+  (set-box! SC2-BUILD-TAG-EMITTED? #f))
+
+(define (sanitize-build-tag-rev s)
+  (define cleaned
+    (if (string? s)
+        (regexp-replace* #rx"[^A-Za-z0-9._-]+" (string-trim s) "_")
+        ""))
+  (define trimmed
+    (regexp-replace #rx"^_+|_+$" cleaned ""))
+  (cond
+    [(zero? (string-length trimmed)) "dev"]
+    [(> (string-length trimmed) 32) (substring trimmed 0 32)]
+    [else trimmed]))
+
+(define (run-build-vcs-short exe args work-dir)
+  (with-handlers ([exn:fail? (lambda (_e) #f)])
+    (define exe-path (find-executable-path exe))
+    (and exe-path
+         (let* ([out-str
+                 (parameterize ([current-directory work-dir])
+                   (with-output-to-string
+                     (lambda ()
+                       (parameterize ([current-error-port (open-output-nowhere)])
+                         (apply system* exe-path args)))))]
+                [trimmed (string-trim out-str)])
+           (and (> (string-length trimmed) 0)
+                (regexp-match? #rx"^[A-Za-z0-9._-]+$" trimmed)
+                trimmed)))))
+
+(define (read-bot-config-json-in-dir dir)
+  (for/or ([fname (in-list '("bot_config.json" "config.json"))])
+    (define p (build-path dir fname))
+    (and (file-exists? p)
+         (with-handlers ([exn:fail? (lambda (_e) #f)])
+           (define j (call-with-input-file p read-json))
+           (and (hash? j) j)))))
+
+(define (load-bot-build-metadata #:root-dir [root-dir #f])
+  (define cached (and (not root-dir) (unbox SC2-BUILD-META-CACHE)))
+  (cond
+    [cached cached]
+    [else
+     (define search-dirs
+       (if root-dir
+           (list root-dir)
+           (let* ([cwd (current-directory)]
+                  [exec-f (with-handlers ([exn:fail? (lambda (_e) #f)])
+                            (find-system-path 'exec-file))]
+                  [exe-dir (and (path? exec-f)
+                                (absolute-path? exec-f)
+                                (file-exists? exec-f)
+                                (path-only exec-f))])
+             (if (and exe-dir (not (equal? (simplify-path exe-dir) (simplify-path cwd))))
+                 (list cwd exe-dir)
+                 (list cwd)))))
+     (define cfg
+       (for/or ([d (in-list search-dirs)])
+         (read-bot-config-json-in-dir d)))
+     (define cfg-ver
+       (let ([v (and (hash? cfg) (hash-ref cfg 'BuildVersion #f))])
+         (and (string? v) (> (string-length (string-trim v)) 0) (string-trim v))))
+     (define cfg-bot-name
+       (let ([v (and (hash? cfg) (hash-ref cfg 'BotName #f))])
+         (and (string? v) (> (string-length (string-trim v)) 0) (string-trim v))))
+     (define cfg-bot-race
+       (let ([v (and (hash? cfg) (hash-ref cfg 'BotRace #f))])
+         (and (string? v) (> (string-length (string-trim v)) 0) (string-trim v))))
+     (define cfg-ts
+       (let ([v (and (hash? cfg) (hash-ref cfg 'BuildTimestampUtc #f))])
+         (if (string? v) (string-trim v) "")))
+     (define env-ver
+       (let ([v (getenv "MOTHMAN_BUILD_VERSION")])
+         (and (string? v) (> (string-length (string-trim v)) 0) (string-trim v))))
+     (define-values (eff-ver eff-mode)
+       (cond
+         [cfg-ver (values cfg-ver 'zip)]
+         [env-ver (values env-ver 'source)]
+         [else
+          (define wd (or root-dir (current-directory)))
+          (define jj-rev (run-build-vcs-short "jj" '("log" "-r" "@" "--no-graph" "-T" "change_id.short(8)") wd))
+          (define git-rev (run-build-vcs-short "git" '("rev-parse" "--short=8" "HEAD") wd))
+          (define vcs-ver
+            (cond
+              [(and jj-rev git-rev) (format "~a_~a" jj-rev git-rev)]
+              [jj-rev jj-rev]
+              [git-rev git-rev]
+              [else "dev"]))
+          (values vcs-ver 'source)]))
+     (define meta
+       (hasheq 'bot-name (or cfg-bot-name "Mothman")
+               'bot-race (or cfg-bot-race "Unknown")
+               'version eff-ver
+               'short-rev (sanitize-build-tag-rev eff-ver)
+               'mode eff-mode
+               'timestamp-utc cfg-ts))
+     (when (not root-dir)
+       (set-box! SC2-BUILD-META-CACHE meta))
+     meta]))
+
+(define (format-bot-build-banner [meta (load-bot-build-metadata)] [race-override #f])
+  (define bname (hash-ref meta 'bot-name "Mothman"))
+  (define brace
+    (cond
+      [(and race-override (not (eq? race-override 'Unknown))) (format "~a" race-override)]
+      [else (hash-ref meta 'bot-race "Unknown")]))
+  (define ver (hash-ref meta 'version "dev"))
+  (define mode (hash-ref meta 'mode 'source))
+  (format "[SCBOT_BUILD] bot=~a race=~a version=~a mode=~a" bname brace ver mode))
+
+(define (make-bot-build-tag-chat-action [meta (load-bot-build-metadata)])
+  ;; Channel 2 = Team-only chat (`0`-APM, recorded in `replay.message.events` & AI Arena Match Tags!)
+  (sc2-chat-action 2 (format "Tag:v_~a" (hash-ref meta 'short-rev "dev"))))
 
 ;; =============================================================================
 ;; 1. RFC 6455 WebSocket Client over `racket/tcp`
@@ -4664,13 +4795,23 @@
     (set-box! SC2-ZERG-TH-MORPH-RESERVE-LOOP #f)
     (set-box! SC2-ENEMY-POS-PURGE-LAST-LOOP -9999)
     (set-box! SC2-PLACEMENT-CACHE-SIG #f)
-    (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999))
+    (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999)
+    (set-box! SC2-BUILD-BANNER-LOGGED? #f))
   (set-box! SC2-WARPGATE-LAST-LOOP cur-loop)
   (define pc (sc2-observation-player-common obs))
   (define units (sc2-observation-units obs))
   (reconcile-warpgate-cooldowns! obs units cur-loop our-player-id)
   (define actual-race
     (detect-actual-race-from-units units game-info our-player-id configured-race))
+  (when (and (not (unbox SC2-BUILD-BANNER-LOGGED?))
+             (<= cur-loop 64)
+             (or (sc2-game-info? game-info)
+                 (file-exists? "bot_config.json")
+                 (file-exists? "config.json")))
+    (set-box! SC2-BUILD-BANNER-LOGGED? #t)
+    (fprintf (current-error-port) "~a\n"
+             (format-bot-build-banner (load-bot-build-metadata) actual-race))
+    (flush-output (current-error-port)))
   (define opponent-requested-race
     (or (and (sc2-game-info? game-info)
              (for/first ([pi (in-list (sc2-game-info-player-info game-info))]
@@ -10294,7 +10435,8 @@
       (set-box! SC2-EVER-SAW-MINERALS? #f)
       (set-box! SC2-WIRE-HOLD-POSTURE-STATE #f)
       (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE #f)
-      (set-box! SC2-TERRITORY-FIELD-CACHE #f))
+      (set-box! SC2-TERRITORY-FIELD-CACHE #f)
+      (set-box! SC2-BUILD-TAG-EMITTED? #f))
     (set-box! SC2-WIRE-LAST-LOOP-BOX cur-loop))
   (when (sc2-observation? obs)
     (when (or (< cur-loop (unbox SC2-ENEMY-POS-LAST-LOOP))
@@ -10325,6 +10467,7 @@
       (set-box! SC2-CONTROL-GROUPED-TAGS (hasheqv))
       (set-box! SC2-GOV-LAST-CAM-X #f)
       (set-box! SC2-GOV-LAST-CAM-Y #f)
+      (set-box! SC2-BUILD-TAG-EMITTED? #f)
       (set-box! SC2-TRANS-LAST-CAM-X #f)
       (set-box! SC2-TRANS-LAST-CAM-Y #f)
       (set-box! SC2-TRANS-LAST-CAM-LOOP -1000)
@@ -11793,6 +11936,15 @@
       (maybe-emit-framing-cam-before! cmd)
       (set! raw-cmds (cons cmd raw-cmds))))
 
+  ;; L36-P0-1: Emit a `0`-APM team-only build-version tag (`Tag:v_<rev>`) once per match at
+  ;; frame `~24` (`[20, 224]`) so every `.SC2Replay` permanently self-identifies its build!
+  (when (and (sc2-observation? obs)
+             (not (unbox SC2-BUILD-TAG-EMITTED?))
+             (>= cur-loop 20)
+             (<= cur-loop 224))
+    (set-box! SC2-BUILD-TAG-EMITTED? #t)
+    (emit! (make-bot-build-tag-chat-action)))
+
   ;; W9-TAC-3 & W9-TAC-4: Per-step deduplication for Orbital Scanner Sweep (399) and Overseer Spawn Changeling (181)
   (define emitted-scan-oc-tags (mutable-seteqv))
   (define emitted-scan-pts '())
@@ -13161,6 +13313,107 @@
                          nydus-network spine-crawler spore-crawler))
             (define emerg-cloak-spore?
               (and (eq? norm 'spore-crawler) cloaked-or-burrowed-threat-present?))
+            ;; L36-P0-1 (`#37` Visual-QA): Place defensive `spine-crawler` STRICTLY on the front/ramp
+            ;; side of the Hatchery (away from minerals, toward Natural/enemy — 100% spawn-symmetric
+            ;; across NW/NE/SW/SE!), NEVER tucked behind the mineral line!
+            (define front-spine-anchors
+              (if (eq? norm 'spine-crawler)
+                  (let* ([comp-hatches
+                          (sort
+                           (filter (lambda (u)
+                                     (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
+                                                '(hatchery lair hive))
+                                          (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
+                                   self-units)
+                           <
+                           #:key (lambda (u)
+                                   (define p (sc2-unit-pos u))
+                                   (pt-dist req-x req-y (sc2-point3d-x p) (sc2-point3d-y p))))]
+                         [clamp-xy
+                          (lambda (x y)
+                            (cons (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD x))
+                                  (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD y))))]
+                         [per-hatch-pts
+                          (append*
+                           (for/list ([th (in-list comp-hatches)])
+                             (define tp (sc2-unit-pos th))
+                             (define hx (sc2-point3d-x tp))
+                             (define hy (sc2-point3d-y tp))
+                             (define near-mins
+                               (filter (lambda (m)
+                                         (define mp (sc2-unit-pos m))
+                                         (<= (pt-dist hx hy (sc2-point3d-x mp) (sc2-point3d-y mp)) 12.5))
+                                       mineral-fields))
+                             (define-values (aux auy has-mins?)
+                               (if (pair? near-mins)
+                                   (let* ([cnt (exact->inexact (length near-mins))]
+                                          [mcx (/ (for/sum ([m (in-list near-mins)]) (sc2-point3d-x (sc2-unit-pos m))) cnt)]
+                                          [mcy (/ (for/sum ([m (in-list near-mins)]) (sc2-point3d-y (sc2-unit-pos m))) cnt)]
+                                          [dx (- hx mcx)]
+                                          [dy (- hy mcy)]
+                                          [d (max 0.5 (sqrt (+ (* dx dx) (* dy dy))))])
+                                     (values (/ dx d) (/ dy d) #t))
+                                   (values 0.0 0.0 #f)))
+                             ;; Direction toward ramp/natural/enemy (or explicit front `req-x/req-y`)
+                             (define req-d (pt-dist hx hy req-x req-y))
+                             (define req-dot
+                               (if (and has-mins? (> req-d 0.5))
+                                   (/ (+ (* (- req-x hx) aux) (* (- req-y hy) auy)) req-d)
+                                   1.0))
+                             (define nearest-nat
+                               (let ([other-pads
+                                      (filter (lambda (ep) (> (pt-dist hx hy (car ep) (cdr ep)) 12.0))
+                                              all-expansion-pads)])
+                                 (and (pair? other-pads)
+                                      (argmin (lambda (ep) (pt-dist hx hy (car ep) (cdr ep)))
+                                              other-pads))))
+                             (define-values (dir-tx dir-ty)
+                               (cond
+                                 [(and (> req-d 2.5) (>= req-dot 0.10))
+                                  (values req-x req-y)]
+                                 [nearest-nat
+                                  (values (car nearest-nat) (cdr nearest-nat))]
+                                 [else
+                                  (values default-eb-x default-eb-y)]))
+                             (define td (max 0.5 (pt-dist hx hy dir-tx dir-ty)))
+                             (define tux (/ (- dir-tx hx) td))
+                             (define tuy (/ (- dir-ty hy) td))
+                             (define-values (fux fuy)
+                               (if has-mins?
+                                   (let* ([bx (+ (* 0.65 aux) (* 0.35 tux))]
+                                          [by (+ (* 0.65 auy) (* 0.35 tuy))]
+                                          [bn (sqrt (+ (* bx bx) (* by by)))])
+                                     (if (and (> bn 0.25)
+                                              (>= (+ (* (/ bx bn) aux) (* (/ by bn) auy)) 0.45))
+                                         (values (/ bx bn) (/ by bn))
+                                         (values aux auy)))
+                                   (values tux tuy)))
+                             (define pux (- fuy))
+                             (define puy fux)
+                             (define req-front-on-creep?
+                               (and (> req-d 2.0)
+                                    (<= req-d 9.5)
+                                    (or (not has-mins?) (>= req-dot 0.20))
+                                    (or (not step-creep-grid)
+                                        (image-grid-pixel-set? step-creep-grid req-x req-y))))
+                             (define base-front
+                               (list (clamp-xy (+ hx (* 5.5 fux)) (+ hy (* 5.5 fuy)))
+                                     (clamp-xy (+ hx (* 5.5 fux) (* 2.5 pux)) (+ hy (* 5.5 fuy) (* 2.5 puy)))
+                                     (clamp-xy (+ hx (* 5.5 fux) (* -2.5 pux)) (+ hy (* 5.5 fuy) (* -2.5 puy)))
+                                     (clamp-xy (+ hx (* 4.2 fux)) (+ hy (* 4.2 fuy)))
+                                     (clamp-xy (+ hx (* 7.0 fux)) (+ hy (* 7.0 fuy)))))
+                             (if req-front-on-creep?
+                                 (cons (clamp-xy req-x req-y) base-front)
+                                 base-front)))]
+                         [dedup-pts (remove-duplicates per-hatch-pts)])
+                    (if (and step-creep-grid (pair? dedup-pts))
+                        (let-values ([(on-c off-c)
+                                      (partition (lambda (pt)
+                                                   (image-grid-pixel-set? step-creep-grid (car pt) (cdr pt)))
+                                                 dedup-pts)])
+                          (append on-c off-c))
+                        dedup-pts))
+                  '()))
             (define safe-creep-pts
               (let ([base-pts (ordered-zerg-creep-anchors req-x req-y)])
                 (if emerg-cloak-spore?
@@ -13170,19 +13423,56 @@
             (define cy (cdar safe-creep-pts))
             (define creep-bud-before (unbox step-placement-rpc-budget))
             (define creep-ws-open? (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))
+            ;; For `spine-crawler`, first search tightly (`max-radius = 4.0`) strictly around
+            ;; front-of-Hatchery anchors so placement NEVER wraps behind the mineral line!
+            (define spine-front-pt
+              (and (eq? norm 'spine-crawler)
+                   (pair? front-spine-anchors)
+                   (or (find-verified-building-placement ws-conn ab-id
+                                                         (caar front-spine-anchors)
+                                                         (cdar front-spine-anchors)
+                                                         units
+                                                         #:min-spacing 1.5
+                                                         #:max-radius 4.0
+                                                         #:step 1.0
+                                                         #:extra-reserved-points step-reserved-build-pts
+                                                         #:anchor-points front-spine-anchors
+                                                         #:reserved-aabbs reserved-aabbs
+                                                         #:expansion-pads all-expansion-pads
+                                                         #:bldg-sym norm
+                                                         #:game-info eff-game-info
+                                                         #:rpc-budget step-placement-rpc-budget
+                                                         #:cur-loop cur-loop)
+                       (and (or (not creep-ws-open?) (> (unbox step-placement-rpc-budget) 0))
+                            (find-verified-building-placement ws-conn ab-id
+                                                              (caar front-spine-anchors)
+                                                              (cdar front-spine-anchors)
+                                                              units
+                                                              #:min-spacing 0.5
+                                                              #:max-radius 4.5
+                                                              #:step 1.0
+                                                              #:extra-reserved-points step-reserved-build-pts
+                                                              #:anchor-points front-spine-anchors
+                                                              #:reserved-aabbs '()
+                                                              #:expansion-pads all-expansion-pads
+                                                              #:bldg-sym norm
+                                                              #:game-info eff-game-info
+                                                              #:rpc-budget step-placement-rpc-budget
+                                                              #:cur-loop cur-loop)))))
             (define place-pt0
-              (find-verified-building-placement ws-conn ab-id cx cy units
-                                                #:min-spacing 2.0
-                                                #:max-radius (if emerg-cloak-spore? 8.0 8.5)
-                                                #:step 1.0
-                                                #:extra-reserved-points step-reserved-build-pts
-                                                #:anchor-points safe-creep-pts
-                                                #:reserved-aabbs reserved-aabbs
-                                                #:expansion-pads all-expansion-pads
-                                                #:bldg-sym norm
-                                                #:game-info eff-game-info
-                                                #:rpc-budget step-placement-rpc-budget
-                                                #:cur-loop cur-loop))
+              (or spine-front-pt
+                  (find-verified-building-placement ws-conn ab-id cx cy units
+                                                    #:min-spacing 2.0
+                                                    #:max-radius (if emerg-cloak-spore? 8.0 8.5)
+                                                    #:step 1.0
+                                                    #:extra-reserved-points step-reserved-build-pts
+                                                    #:anchor-points safe-creep-pts
+                                                    #:reserved-aabbs reserved-aabbs
+                                                    #:expansion-pads all-expansion-pads
+                                                    #:bldg-sym norm
+                                                    #:game-info eff-game-info
+                                                    #:rpc-budget step-placement-rpc-budget
+                                                    #:cur-loop cur-loop)))
             ;; L24-P0-1 (`#52` SpireDrop=14t): For high-priority Zerg tech (`spire`, `hydralisk-den`,
             ;; `lurker-den`, `lurker-den-mp`), when default `8.5t` search actively tried and failed,
             ;; expand search radius `8.5 -> 11.5` across ALL completed Hatchery/Lair/Hive creep anchors
@@ -16749,6 +17039,7 @@
       ;; P1: Macro build, expand, morph, train, warp-in, research, tumor, MULE
       [else 1]))
   (cond
+    [(or (sc2-chat-action? cmd) (WireChat? cmd)) 0]
     [(framing-camera-cmd? cmd) 1]
     [(or (sc2-raw-camera-move? cmd) (WireCameraMove? cmd)) 4]
     [(urgent-survival-cmd? cmd) 0]

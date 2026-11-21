@@ -2680,6 +2680,35 @@
                (loop (cdr rem) acc (or first-tumor item) #t)
                (loop (cdr rem) (cons item acc) first-tumor stripped?))]))))
 
+;; L36-P0-3 (`#834`): Compute our researched combat upgrade tier matching
+;; `infer-enemy-implied-tech-and-upgrades` (`max-atk + max-arm + max-shd`, floor 1 if any upgrade)
+;; so `mirror-enemy-upgrade-advantage` no longer compares enemy tier against hardcoded `0`!
+(define (runtime-compute-our-upgrade-tier researched-upgs)
+  (if (not (list? researched-upgs))
+      0
+      (let-values ([(ma mr ms any?)
+                    (for/fold ([a 0] [r 0] [s 0] [any? #f]) ([u (in-list researched-upgs)])
+                      (define sym (cond [(symbol? u) u] [(string? u) (string->symbol (string-downcase u))] [else #f]))
+                      (if (not sym)
+                          (values a r s any?)
+                          (let* ([st (symbol->string sym)]
+                                 [lvl (cond
+                                        [(or (regexp-match? #rx"(^|-)3$|level-?3$" st)
+                                             (regexp-match? #rx"level3$" st)) 3]
+                                        [(or (regexp-match? #rx"(^|-)2$|level-?2$" st)
+                                             (regexp-match? #rx"level2$" st)) 2]
+                                        [(or (regexp-match? #rx"(^|-)1$|level-?1$" st)
+                                             (regexp-match? #rx"level1$" st)) 1]
+                                        [else 0])]
+                                 [is-shd? (and (> lvl 0) (regexp-match? #rx"shield" st))]
+                                 [is-arm? (and (> lvl 0) (not is-shd?) (regexp-match? #rx"armor|plating|carapace" st))]
+                                 [is-atk? (and (> lvl 0) (not is-shd?) (not is-arm?) (regexp-match? #rx"weapon|attack|missile|melee" st))])
+                            (values (if is-atk? (max a lvl) a)
+                                    (if is-arm? (max r lvl) r)
+                                    (if is-shd? (max s lvl) s)
+                                    #t))))])
+        (max (+ ma mr ms) (if any? 1 0)))))
+
 (define (step-layer1c-mirror-mind! rt obs)
   (define mmstate (live-bot-runtime-mirror-mind rt))
   (define owm-sum
@@ -2698,11 +2727,23 @@
           (if (eq? ab* raw-ab) o2 (hash-set o2 'ally-buildings ab*)))
         obs))
   (define obs*
-    (if (and owm-sum
-             (hash? obs0)
-             (not (hash-has-key? obs0 'believed-enemy-army-value)))
-        (hash-set obs0 'believed-enemy-army-value
-                  (opponent-world-summary-believed-total-army-value owm-sum))
+    (if (hash? obs0)
+        (let* ([o1 (if (and owm-sum (not (hash-has-key? obs0 'believed-enemy-army-value)))
+                       (hash-set obs0 'believed-enemy-army-value
+                                 (opponent-world-summary-believed-total-army-value owm-sum))
+                       obs0)]
+               [owm-wk (if owm-sum (opponent-world-summary-workers-killed owm-sum) 0)]
+               [obs-wk (safe-nonneg-int (hash-ref o1 'enemy-workers-killed 0) 0)]
+               [eff-wk (max owm-wk obs-wk)]
+               [o2 (if (or (> eff-wk obs-wk) (not (hash-has-key? o1 'enemy-workers-killed)))
+                       (hash-set o1 'enemy-workers-killed eff-wk)
+                       o1)]
+               [o3 (if (hash-has-key? o2 'our-upgrade-tier)
+                       o2
+                       (hash-set o2 'our-upgrade-tier
+                                 (runtime-compute-our-upgrade-tier
+                                  (hash-ref o2 'researched-upgrades '()))))])
+          o3)
         obs0))
   (step-mirror-mind-predictor! mmstate obs*))
 
@@ -5028,6 +5069,13 @@
              (> (order-ledger-pending-count-for-type oledger cs frame) 0))
         (l2-build-issue-blocked? ctx cs))))
 
+;; L36-P0-3 (`#5138232`): Detect any friendly worker currently walking to place a building
+;; (e.g. Probe carrying ability 894 `build-cybernetics-core`) even after order-ledger TTL expires!
+(define (l2-worker-carrying-build-ability? ctx ability-id)
+  (for/or ([u (in-list (or (l2-ctx-ally-units ctx) '()))])
+    (and (hash? u)
+         (= (hash-ref u 'order-ability-id 0) ability-id))))
+
 (define (l2-emit-build-verified! ctx bldg-sym raw-x raw-y
                                 [clearance SC2-BUILD-SITE-MIN-CLEARANCE]
                                 #:exact-wall-slot? [exact-wall-slot? #f]
@@ -5053,10 +5101,12 @@
     (define canon-sym (fast-canonical-structure-sym bldg-sym))
     (define w-res-min (l2-brain-worker-reserve-min ctx canon-sym))
     (unless (or (l2-build-issue-blocked? ctx canon-sym)
-                ;; W6-P0-2-rt: Strict singleton Cybernetics Core guard across all callers.
+                ;; W6-P0-2-rt / L36-P0-3 (`#5138232`): Strict singleton Cybernetics Core guard
+                ;; across all callers, including Probes walking with ability 894 after ledger TTL!
                 (and (eq? canon-sym 'cybernetics-core)
                      (or (> (l2-cur-ally-canon-bldg-count ctx 'cybernetics-core) 0)
-                         (l2-building-present-or-pending? ctx 'cybernetics-core)))
+                         (l2-building-present-or-pending? ctx 'cybernetics-core)
+                         (l2-worker-carrying-build-ability? ctx 894)))
                 (l2-crisis-tech-bldg-deferred? ctx canon-sym)
                 (and (not waive-worker-reserve?)
                      (> w-res-min 0)
@@ -15435,6 +15485,7 @@
                 (= (l2-cur-ally-canon-bldg-count ctx 'cybernetics-core) 0)
                 (= (order-ledger-pending-count-for-type oledger 'cybernetics-core frame) 0)
                 (not (l2-building-present-or-pending? ctx 'cybernetics-core))
+                (not (l2-worker-carrying-build-ability? ctx 894))
                 (l2-save-cancel-rebuild-ready? ctx 'cybernetics-core 60)
                 (>= (l2-ctx-minerals ctx) (sc2-min-cost 'cybernetics-core))
                 (l2-non-combat-min-ok? ctx (sc2-min-cost 'cybernetics-core) 'cybernetics-core))
@@ -15578,7 +15629,7 @@
            (and (member '(train stalker) prio-sched) #t)
            (and (macro-brain-decision? mdec)
                 (memq 'stalker (macro-brain-decision-scheduled-ids mdec)))))
-     (define stalker-target (if (>= eff-air 2) 6 4))
+     (define stalker-target (if (or (>= eff-air 1) cloak-present?) 6 4))
      (define urgent?
        (and (< (l2-unit-count ctx 'stalker) stalker-target)
             (>= (l2-ctx-gas ctx) (+ (sc2-gas-cost 'stalker) cloak-det-gas-need))
@@ -15991,7 +16042,16 @@
              (when robo-st
                (hash-set! robo-st 'obs-trained-cnt (add1 obs-trained-cnt)))
              (refractory-allow-action?! cd-tracker '(train-observer) frame obs-train-cd-frames))))
-       (when (or crisis-tech-upgrade-deferral? (not protoss-saving-for-expand?))
+       ;; L36-P0-3 (`#5138232` PvZ 124s idle Robo): Keep Robotics Facility continuously pumping
+       ;; Immortals in PvZ (`< 3` Immortals) even while expanding/saving so Roach-Ling never crushes
+       ;; an idle Robo!
+       (define pvz-continuous-robo-now?
+         (and live-game?
+              (eq? effective-enemy-race 'Zerg)
+              (> (hash-ref open-prod-slots 'robotics-facility 0) 0)
+              (not protoss-enemy-capital-air?)
+              (< (l2-unit-count ctx 'immortal) 3)))
+       (when (or crisis-tech-upgrade-deferral? pvz-continuous-robo-now? (not protoss-saving-for-expand?))
          ;; L35-P0-3 (`H2H #04` PvT Anti-Bio Colossus Priority): When Robotics Bay is ready and
          ;; Colossi < 4, train Colossus strictly FIRST (ahead of Disruptor and ahead of Immortal
          ;; vs Bio-heavy Terran, waiving non-combat-air Stargate reserve on Medivacs!)
@@ -16030,15 +16090,15 @@
                     (aa-stargate-gas-ok? (sc2-gas-cost 'disruptor))
                     (l2-can-spend-supply? ctx (sc2-supply-cost 'disruptor)))
            (l2-try-train-unit! ctx 'disruptor 'robotics-facility 6))
-         ;; W9-P0-3-rt: In PvP, never let BO/Stalker reserve leave an idle Robotics Facility
-         ;; sitting empty when we can train Immortals (PvP had 0 Immortals across 4 games!).
+         ;; W9-P0-3-rt / L36-P0-3 (`#5138232`): In PvP AND PvZ, never let BO/Stalker reserve leave
+         ;; an idle Robotics Facility sitting empty when we can train Immortals!
          (define pvp-idle-robo-immortal-ok?
            (and live-game?
-                (eq? effective-enemy-race 'Protoss)
+                (memq effective-enemy-race '(Protoss Zerg))
                 (> (hash-ref open-prod-slots 'robotics-facility 0) 0)
                 (not protoss-enemy-capital-air?)
                 (or (not (memq 'robotics-bay ready-bldg-types))
-                    (< (l2-unit-count ctx 'immortal) 2))))
+                    (< (l2-unit-count ctx 'immortal) (if (eq? effective-enemy-race 'Zerg) 3 2)))))
          (when (and (p2-urgent-stalker-res-ok? (sc2-min-cost 'immortal) (sc2-gas-cost 'immortal))
                     (or (not bio-colossus-priority-now?)
                         (and (>= (l2-ctx-minerals ctx) (+ (sc2-min-cost 'immortal) (sc2-min-cost 'colossus)))
@@ -16720,6 +16780,11 @@
                     (not (or protoss-aa-needed? (> enemy-muta-cnt-p 0)))
                     (>= (l2-unit-count ctx 'phoenix) 4)
                     (>= (l2-unit-count ctx 'stalker) 10))
+                ;; L36-P0-3 (`H2H #04`): Gate Robotics Bay on safe defense (`army-supply >= 14`
+                ;; or surplus `minerals >= 400`) so PvT never starves on a bare 5:30 Robotics Bay!
+                (or (not live-game?)
+                    (>= live-army-supply 14.0)
+                    (>= (l2-ctx-minerals ctx) 400))
                 (or (not (hash-has-key? raw-obs 'mineral-harvesters))
                     (eq? bo-goal-sym 'robotics-bay)
                     (and (eq? effective-enemy-race 'Terran)
@@ -16811,6 +16876,15 @@
                                     'morph 'archon base-x base-y frame))
   (define-values (p3-urgent-stalker? p3-urgent-reap-cnt p3-urgent-air-cnt p3-urgent-stlk-tgt p3-cloak-det-gas-need)
     (l2-protoss-urgent-aa-reaper-stalker-status ctx))
+  (define p3-pvz-early-stalker-floor?
+    (and live-game?
+         (eq? effective-enemy-race 'Zerg)
+         (< frame 6720)
+         (memq 'cybernetics-core ready-bldg-types)
+         (> (hash-ref open-prod-slots 'gateway 0) 0)
+         (< (l2-unit-count ctx 'stalker) 2)
+         (>= (l2-ctx-gas ctx) (sc2-gas-cost 'stalker))
+         (l2-can-spend-supply? ctx (sc2-supply-cost 'stalker))))
   (define protoss-ideal-worker-cap
        (l2-compute-race-ideal-worker-cap ctx nexuses))
   (define protoss-probe-priority?
@@ -16821,6 +16895,9 @@
                 (and (< total-workers 17) (< (l2-ctx-minerals ctx) 240)))
             (or (not p3-urgent-stalker?)
                 (< total-workers 18)
+                (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'probe)) (sc2-min-cost 'stalker)))
+            (or (not p3-pvz-early-stalker-floor?)
+                (< total-workers 24)
                 (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'probe)) (sc2-min-cost 'stalker)))
             (not crisis-freeze-workers?)
             (l2-worker-army-curve-satisfied? ctx)
@@ -17052,11 +17129,15 @@
                         (l2-can-spend-by-priority? ctx 'stalker 'combat-unit))
                (l2-try-train-unit! ctx 'stalker 'gateway 5 #:respect-bo-reserve? #t))]
             [pvz-anti-ground-mode?
-             ;; In PvZ vs Roach/Ravager/Zergling (`P0-2b`), conserve gas for Immortals/Archons/Colossi,
-             ;; but when floating >= 150G (and not actively saving for Immortal), convert gas into Stalkers!
+             ;; In PvZ vs Roach/Ravager/Zergling (`P0-2b`, `#5138232`), ensure a baseline ranged
+             ;; Stalker core (`>= 4` before 5:00 / `>= 2` later at `>= 50G`) so Protoss never hits
+             ;; 5:13 with 0 Stalkers, while conserving extra gas for Immortals/Archons/Colossi!
              (when (and (gateway-unit-colossus-ok? 'stalker)
-                        (>= (l2-ctx-gas ctx) 150)
-                        (< (l2-unit-count ctx 'stalker) (if (>= (l2-ctx-gas ctx) 300) 10 5))
+                        (or (and (< frame 6720)
+                                 (< (l2-unit-count ctx 'stalker) 4)
+                                 (>= (l2-ctx-gas ctx) (sc2-gas-cost 'stalker)))
+                            (and (>= (l2-ctx-gas ctx) 150)
+                                 (< (l2-unit-count ctx 'stalker) (if (>= (l2-ctx-gas ctx) 300) 10 5))))
                         (not (and (memq 'robotics-facility ready-bldg-types)
                                   (> (hash-ref open-prod-slots 'robotics-facility 0) 0)
                                   (or (eq? bo-goal-sym 'immortal)
@@ -18211,16 +18292,29 @@
          (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'factory)
              (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
                   (memq 'factory (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx)))))))
+  (define tvp-fac2-prereqs-ok?
+    (or (not (eq? effective-enemy-race 'Protoss))
+        (and (>= (+ (length ccs)
+                    (order-ledger-pending-count-for-type oledger 'command-center frame))
+                 2)
+             (l2-building-present-or-pending? ctx 'starport))))
   (define desired-factories
        (cond
          [(not live-game?) 1]
-         [(and (memq effective-enemy-race '(Terran Protoss))
+         [(and (eq? effective-enemy-race 'Terran)
                (>= (length ccs) 2)
                (or brain-sched-fac-now?
                    (and (>= eff-phase-supply 44)
                         (>= (l2-ctx-gas ctx) 100))))
           2]
+         [(and (eq? effective-enemy-race 'Protoss)
+               tvp-fac2-prereqs-ok?
+               (or brain-sched-fac-now?
+                   (and (>= eff-phase-supply 56)
+                        (>= (l2-ctx-gas ctx) 125))))
+          2]
          [(and (>= (length ccs) 3)
+               tvp-fac2-prereqs-ok?
                (or brain-sched-fac-now?
                    (and (>= eff-phase-supply 106) (>= (l2-ctx-gas ctx) 200))))
           2]
@@ -18403,7 +18497,7 @@
          (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'starport)
              (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
                   (memq 'starport (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx)))))))
-  (define-values (terran-enemy-combat-air-cnt terran-enemy-colossus-cnt
+  (define-values (terran-vis-combat-air-cnt terran-vis-colossus-cnt
                   terran-enemy-tank-cnt terran-enemy-ground-bio-cnt)
     (for/fold ([ac 0] [cc 0] [tc 0] [bc 0]) ([e (in-list enemy-units)] #:when (hash? e))
       (define cu (fast-canonical-unit-sym (unit-type-sym e)))
@@ -18414,6 +18508,22 @@
               (if (eq? cu 'colossus) (add1 cc) cc)
               (if (memq cu '(siege-tank siege-tank-sieged)) (add1 tc) tc)
               (if (memq cu '(marine marauder)) (add1 bc) bc))))
+  (define p2-owm-sum-t (and rt (opponent-world-model-last-summary (rt-opponent-world-model rt))))
+  (define p2-owm-kc-t (and p2-owm-sum-t (opponent-world-summary-known-unit-counts p2-owm-sum-t)))
+  (define p2-owm-bc-t (and p2-owm-sum-t (opponent-world-summary-known-bldg-counts p2-owm-sum-t)))
+  (define terran-enemy-combat-air-cnt terran-vis-combat-air-cnt)
+  (define terran-enemy-colossus-cnt
+    (max terran-vis-colossus-cnt
+         (if (hash? p2-owm-kc-t) (hash-ref p2-owm-kc-t 'colossus 0) 0)))
+  (define terran-enemy-robo-bay-p2?
+    (or (ormap (lambda (eb)
+                 (and (hash? eb)
+                      (eq? (fast-canonical-structure-sym (unit-type-sym eb)) 'robotics-bay)))
+               (or (l2-ctx-enemy-bldgs ctx) '()))
+        (and (hash? p2-owm-bc-t)
+             (> (+ (hash-ref p2-owm-bc-t 'robotics-bay 0)
+                   (hash-ref p2-owm-bc-t 'robotics-support-bay 0))
+                0))))
   ;; L34-P0-3 (`#02` TvT 4 vs 9 Tanks): In TvT when enemy fields a grounded Tank+Bio core
   ;; (`>= 4` Tanks & `>= 4` Bio, no capital air), cap Starports `<= 2` so Terran doesn't
   ;; over-build `3..4` Starports and `24` Vikings at the expense of Siege Tanks!
@@ -18425,7 +18535,8 @@
   (define terran-heavy-air-or-colossus-sp?
     (or enemy-capital-air?
         (and (>= terran-enemy-combat-air-cnt (if tvt-enemy-tank-ground-core? 8 4)))
-        (>= terran-enemy-colossus-cnt 2)))
+        (>= terran-enemy-colossus-cnt 1)
+        terran-enemy-robo-bay-p2?))
   (define raw-desired-starports
        (cond
          [(or enemy-capital-air? (>= terran-enemy-combat-air-cnt 6))
@@ -19532,17 +19643,40 @@
        ;; Detect air-dominated enemy compositions (`>= 4` combat air & `>= enemy ground combat`),
        ;; while capping TvT Viking scaling (`<= 8`) when enemy fields a grounded Tank+Bio core
        ;; (`>= 4` Siege Tanks & `>= 4` ground Bio, no capital air) so Tanks never get starved!
-       (define-values (p3-enemy-air-cnt p3-enemy-gnd-cnt p3-enemy-tank-cnt p3-enemy-bio-cnt)
-         (for/fold ([ac 0] [gc 0] [tc 0] [bc 0]) ([e (in-list enemy-units)] #:when (and (hash? e) (combat-unit-record? e)))
+       (define-values (p3-enemy-air-cnt p3-enemy-gnd-cnt p3-enemy-tank-cnt p3-enemy-bio-cnt p3-vis-colossus-cnt)
+         (for/fold ([ac 0] [gc 0] [tc 0] [bc 0] [cc 0]) ([e (in-list enemy-units)] #:when (and (hash? e) (combat-unit-record? e)))
            (define cu (fast-canonical-unit-sym (unit-type-sym e)))
            (if (memq cu '(banshee phoenix mutalisk oracle void-ray voidray
                           liberator liberator-ag viking viking-fighter corruptor
                           battlecruiser carrier tempest brood-lord broodlord mothership))
-               (values (add1 ac) gc tc bc)
+               (values (add1 ac) gc tc bc cc)
                (values ac
                        (add1 gc)
                        (if (memq cu '(siege-tank siege-tank-sieged)) (add1 tc) tc)
-                       (if (memq cu '(marine marauder)) (add1 bc) bc)))))
+                       (if (memq cu '(marine marauder)) (add1 bc) bc)
+                       (if (eq? cu 'colossus) (add1 cc) cc)))))
+       ;; L36-P0-3 (`#5138231` TvP 0 Vikings vs 3 Colossi): Detect visible or OWM-remembered
+       ;; enemy Colossi / Robotics Bay and lock `>= 3` Vikings per Colossus (min 3, cap 16)
+       ;; BEFORE Medivacs/Tanks drain Starport slots or gas!
+       (define p3-owm-sum-t (and rt (opponent-world-model-last-summary (rt-opponent-world-model rt))))
+       (define p3-owm-kc-t (and p3-owm-sum-t (opponent-world-summary-known-unit-counts p3-owm-sum-t)))
+       (define p3-owm-bc-t (and p3-owm-sum-t (opponent-world-summary-known-bldg-counts p3-owm-sum-t)))
+       (define p3-enemy-colossus-cnt
+         (max p3-vis-colossus-cnt
+              (if (hash? p3-owm-kc-t) (hash-ref p3-owm-kc-t 'colossus 0) 0)))
+       (define p3-enemy-robo-bay?
+         (or (ormap (lambda (eb)
+                      (and (hash? eb)
+                           (eq? (fast-canonical-structure-sym (unit-type-sym eb)) 'robotics-bay)))
+                    (or (l2-ctx-enemy-bldgs ctx) '()))
+             (and (hash? p3-owm-bc-t)
+                  (> (+ (hash-ref p3-owm-bc-t 'robotics-bay 0)
+                        (hash-ref p3-owm-bc-t 'robotics-support-bay 0))
+                     0))))
+       (define tvp-colossus-viking-target
+         (if (or (> p3-enemy-colossus-cnt 0) p3-enemy-robo-bay?)
+             (min 16 (max 3 (* 3 (max 1 p3-enemy-colossus-cnt))))
+             0))
        (define p3-tvt-enemy-tank-ground-core?
          (and (eq? effective-enemy-race 'Terran)
               (not enemy-capital-air?)
@@ -19553,12 +19687,13 @@
               (>= p3-enemy-air-cnt 4)
               (>= p3-enemy-air-cnt p3-enemy-gnd-cnt)))
        (define desired-viking-cap
-         (cond
-           [enemy-capital-air? 24]
-           [p3-tvt-enemy-tank-ground-core? 8]
-           [enemy-air-dominated-p3? 20]
-           [(or (enemy-tech-observation-requires-anti-air? tech-obs) endgame-corner-hunt?) 12]
-           [else 10]))
+         (max tvp-colossus-viking-target
+              (cond
+                [enemy-capital-air? 24]
+                [p3-tvt-enemy-tank-ground-core? 8]
+                [enemy-air-dominated-p3? 20]
+                [(or (enemy-tech-observation-requires-anti-air? tech-obs) endgame-corner-hunt?) 12]
+                [else 10])))
        (define-values (enemy-stalker-cnt-thor enemy-heavy-cap-air?)
          (if (and has-fac-tl?
                   (memq 'factory ready-bldg-types)
@@ -19586,13 +19721,16 @@
                   (memq 'starport ready-bldg-types)
                   (< (l2-unit-count ctx 'viking) 2))
          (l2-try-train-unit! ctx 'viking 'starport 6 #:respect-bo-reserve? #f))
-       ;; Priority vs-Air Vikings: ensure >= 2 Vikings BEFORE Thors/Medivacs/tanks consume gas!
+       ;; Priority vs-Air & Anti-Colossus Vikings (`#5138231`): ensure >= 2 Vikings vs Air AND
+       ;; >= 3 Vikings per observed Colossus (or Robotics Bay) BEFORE Medivacs/Tanks consume gas!
        (when (and live-game?
                   (not endgame-corner-hunt?)
-                  (or (not terran-prod-save-hold?) crisis-tech-upgrade-deferral?)
+                  (or (not terran-prod-save-hold?) crisis-tech-upgrade-deferral? (> tvp-colossus-viking-target 0))
                   (memq 'starport ready-bldg-types)
-                  (enemy-tech-observation-requires-anti-air? tech-obs)
-                  (< (l2-unit-count ctx 'viking) 2))
+                  (or (and (> tvp-colossus-viking-target 0)
+                           (< (l2-unit-count ctx 'viking) tvp-colossus-viking-target))
+                      (and (enemy-tech-observation-requires-anti-air? tech-obs)
+                           (< (l2-unit-count ctx 'viking) 2))))
          (l2-try-train-unit! ctx 'viking 'starport 6 #:respect-bo-reserve? #f))
        ;; Facing Capital Air: start ready Factory-TL Thor before uncapped Reactor Starport Vikings drain minerals!
        (when (and enemy-capital-air?
@@ -19614,7 +19752,8 @@
          (l2-try-train-unit! ctx 'viking 'starport 6 #:respect-bo-reserve? #f))
        ;; Priority bio sustain (#5122349): ensure first 2 Medivacs before Factory drains 125G/tank
        ;; (vs air, co-produce Medivacs once >= 2 Vikings are active; vs capital air wait until >= 8 Vikings;
-       ;; L28-P0-3 `#17`: yield to Brain-scheduled `siege-tank` if draining below 150M/125G)!
+       ;; L28-P0-3 `#17`: yield to Brain-scheduled `siege-tank` if draining below 150M/125G;
+       ;; L36-P0-3 `#5138231`: yield to anti-Colossus Vikings until min(6, 3*Colossi) Vikings active!)
        (when (and live-game?
                   (not crisis-tech-upgrade-deferral?)
                   (not terran-prod-save-hold?)
@@ -19625,6 +19764,8 @@
                   (or (not enemy-capital-air?) (>= (l2-unit-count ctx 'viking) 8))
                   (or (not enemy-air-dominated-p3?)
                       (>= (l2-unit-count ctx 'viking) (max 6 (+ 2 p3-enemy-air-cnt))))
+                  (or (= tvp-colossus-viking-target 0)
+                      (>= (l2-unit-count ctx 'viking) (min 6 tvp-colossus-viking-target)))
                   (or (not (enemy-tech-observation-requires-anti-air? tech-obs))
                       (>= (l2-unit-count ctx 'viking) 2))
                   (>= (+ (l2-unit-count ctx 'marine) (l2-unit-count ctx 'marauder)) 6)
@@ -19656,17 +19797,25 @@
                         (not terran-bo-escrow-imminent?)
                         (l2-can-spend-by-priority? ctx 'thor 'combat-unit)))
            (l2-try-train-unit! ctx 'thor 'factory 6 #:respect-bo-reserve? (and (not enemy-capital-air?) terran-bo-escrow-imminent?)))
-         ;; W9-P0-1-rt / W11-P0-2-rt: Train Siege Tanks on idle Factory TechLab and cap
-         ;; Widow Mines <= 4 (`#14/#17` had 0 Tanks + 7 Mines + 8 Hellions vs 10 Tanks!).
+         ;; W9-P0-1-rt / W11-P0-2-rt / L36-P0-3 (`#5138233` TvP 14 Widow Mines): Count pending
+         ;; Widow Mines and strictly cap TvP Widow Mines `<= 2` early (`< 5:30` / `< 2` CCs)
+         ;; and `<= 3` midgame so bare Factories never spam 14 Mines while starving Starport/Bio!
          (define cur-widow-mines
            (+ (l2-unit-count ctx 'widow-mine)
-              (l2-unit-count ctx 'widow-mine-burrowed)))
+              (l2-unit-count ctx 'widow-mine-burrowed)
+              (order-ledger-pending-count-for-type oledger 'widow-mine frame)))
          (define cur-siege-tanks
            (+ (l2-unit-count ctx 'siege-tank)
               (l2-unit-count ctx 'siege-tank-sieged)))
          (define cur-factory-cnt (l2-cur-ally-canon-bldg-count ctx 'factory))
          (define tvt-need-tanks?
            (and (eq? effective-enemy-race 'Terran) (< cur-siege-tanks 4)))
+         (define max-widow-mine-cap
+           (cond
+             [tvt-need-tanks? 1]
+             [(eq? effective-enemy-race 'Protoss)
+              (if (or (< frame 7392) (< (length ccs) 2)) 2 3)]
+             [else 4]))
          ;; L24-P0-3 (`#47/#17/#41` `TvT0Tank`): Always hold TechLab Factory for Siege Tanks
          ;; even at 0..49G while `< 4` Tanks in TvT (`< 3` non-TvT) so 25G Widow Mines and
          ;; 100M Hellions can NEVER infinite-drain gas/slots ahead of Siege Tanks!
@@ -19707,7 +19856,7 @@
                             (l2-starport-escrow-ok? ctx (sc2-min-cost 'siege-tank) (sc2-gas-cost 'siege-tank))))
                (l2-try-train-unit! ctx 'siege-tank 'factory 6 #:respect-bo-reserve? #f))
              (when (and (not hold-bare-fac-for-techlab?)
-                        (or (not live-game?) (< cur-widow-mines (if tvt-need-tanks? 1 4)))
+                        (or (not live-game?) (< cur-widow-mines max-widow-mine-cap))
                         (or crisis-tech-upgrade-deferral?
                             (l2-starport-escrow-ok? ctx (sc2-min-cost 'widow-mine) (sc2-gas-cost 'widow-mine))))
                (l2-try-train-unit! ctx 'widow-mine 'factory 6)))
@@ -19732,7 +19881,7 @@
                           tvt-need-tanks?
                           (l2-starport-escrow-ok? ctx (sc2-min-cost 'siege-tank) (sc2-gas-cost 'siege-tank))))
              (l2-try-train-unit! ctx 'siege-tank 'factory 6 #:respect-bo-reserve? #f))
-           (when (and (< cur-widow-mines (if tvt-need-tanks? 1 4))
+           (when (and (< cur-widow-mines max-widow-mine-cap)
                       (not hold-fac-tl-for-tank?)
                       (not hold-bare-fac-for-techlab?)
                       (not (and has-fac-tl? (<= cur-factory-cnt 1)))
@@ -23305,20 +23454,24 @@
          (not forward-timing-window?)
          (or (< our-combat-sup-eval 18.0)
              (< our-combat-val 1200))))
-  ;; L35-P0-3 (`Siege0DPS 21 -> <= 10`, `CORE14 DripFeed 17 -> <= 10`, `#16/#17/#18`, `#32/#33`, `#68/#69`, `H2H #04`):
-  ;; Anti-Siege / Anti-Tempest Mass-Breakout Staging. When facing `>= 4` visible/remembered
-  ;; enemy Siege Tanks OR `>= 3` visible/remembered enemy Tempests (and enemy is NOT inside our
-  ;; bases and our army is NOT already in active close contact), raise offensive push staging
-  ;; threshold from 16 supply to `min(60, max(36, 0.70 * remembered-enemy-army-supply))` so we
-  ;; never trickle 1,200-value waves into 10..26 Sieged Tanks or 13 Tempests!
-  (define-values (l35-vis-tank-cnt l35-vis-tempest-cnt l35-vis-enemy-sup)
-    (for/fold ([tc 0] [tmp 0] [esup 0.0])
+  ;; L35-P0-3 + L36-P0-3 (`Siege0DPS`, `CORE14 DripFeed`, Prod `#840` `51.5%` of L+T):
+  ;; Anti-Siege / Anti-Tempest / Anti-Gateway-Robo Mass-Breakout & Value-Parity Staging.
+  ;;   - `l35-siege-tempest-mass-hold?`: >= 3 visible/OWM Siege Tanks OR >= 3 Tempests
+  ;;     raises offensive supply floor to `min(60, max(36, 0.70 * rem-enemy-sup))`.
+  ;;   - `l36-prod-parity-mass-hold?`: >= 10 visible/OWM Protoss Gateway-Robo units
+  ;;     (`stalker`/`immortal`/`colossus`/`archon`) OR >= 3 Siege Tanks holds offensive
+  ;;     pushes until `our-combat-val >= 0.85 * rem-enemy-val` (capped at `<= 65` supply),
+  ;;     strictly outside home defense & active close contact!
+  (define-values (l35-vis-tank-cnt l35-vis-tempest-cnt l36-vis-gw-robo-cnt l35-vis-enemy-sup l36-vis-enemy-val)
+    (for/fold ([tc 0] [tmp 0] [gwr 0] [esup 0.0] [eval-v 0])
               ([e (in-list enemy-units)]
                #:when (and (hash? e) (combat-unit-record? e)))
       (define cu (fast-canonical-unit-sym (unit-type-sym e)))
       (values (if (memq cu '(siege-tank siege-tank-sieged)) (add1 tc) tc)
               (if (eq? cu 'tempest) (add1 tmp) tmp)
-              (fl+ esup (exact->inexact (max 0.5 (sc2-supply-cost cu 1)))))))
+              (if (memq cu '(stalker immortal colossus archon)) (add1 gwr) gwr)
+              (fl+ esup (exact->inexact (max 0.5 (sc2-supply-cost cu 1))))
+              (+ eval-v (fast-res-cost-50 cu)))))
   (define l35-owm-kc
     (and owm-tactics (opponent-world-summary-known-unit-counts owm-tactics)))
   (define l35-owm-tank-cnt
@@ -23330,16 +23483,26 @@
     (if (hash? l35-owm-kc)
         (hash-ref l35-owm-kc 'tempest 0)
         0))
+  (define l36-owm-gw-robo-cnt
+    (if (hash? l35-owm-kc)
+        (+ (hash-ref l35-owm-kc 'stalker 0)
+           (hash-ref l35-owm-kc 'immortal 0)
+           (hash-ref l35-owm-kc 'colossus 0)
+           (hash-ref l35-owm-kc 'archon 0))
+        0))
   (define l35-enemy-siege-tank-cnt (max l35-vis-tank-cnt l35-owm-tank-cnt))
   (define l35-enemy-tempest-cnt (max l35-vis-tempest-cnt l35-owm-tempest-cnt))
+  (define l36-enemy-gw-robo-cnt (max l36-vis-gw-robo-cnt l36-owm-gw-robo-cnt))
   (define l35-enemy-rem-sup
     (flmax l35-vis-enemy-sup
            (if owm-tactics
                (flmax (exact->inexact (opponent-world-summary-believed-total-army-supply owm-tactics))
                       (exact->inexact (opponent-world-summary-known-army-supply owm-tactics)))
                0.0)))
+  (define l36-enemy-rem-val
+    (max known-enemy-army-val owm-believed-val l36-vis-enemy-val))
   (define l35-siege-or-tempest-wall?
-    (or (>= l35-enemy-siege-tank-cnt 4)
+    (or (>= l35-enemy-siege-tank-cnt 3)
         (>= l35-enemy-tempest-cnt 3)))
   (define l35-siege-breakout-sup-req
     (flmin 60.0 (flmax 36.0 (fl* 0.70 l35-enemy-rem-sup))))
@@ -23354,9 +23517,25 @@
          (not army-in-direct-visible-contact?)
          (< supply-used-eval 165)
          (< our-combat-sup-eval l35-siege-breakout-sup-req)))
+  (define l36-prod-parity-mass-hold?
+    (and (l34-ctx-live-obs? ctx)
+         (or (>= l35-enemy-siege-tank-cnt 3)
+             (>= l36-enemy-gw-robo-cnt 10))
+         (not enemy-within-14-of-th?)
+         (not enemy-within-14-of-main?)
+         (not enemy-main-cleared-eval?)
+         (not decisive-victory-posture?)
+         (not owm-sh-cooldown?)
+         (not army-in-direct-visible-contact?)
+         (< supply-used-eval 165)
+         (< our-combat-sup-eval 65.0)
+         (>= l36-enemy-rem-val 1200)
+         (< (exact->inexact our-combat-val)
+            (fl* 0.85 (exact->inexact l36-enemy-rem-val)))))
   (define early-midgame-pt-timing-exempt?
     (and (not l25-counter-volley-staging?)
          (not l35-siege-tempest-mass-hold?)
+         (not l36-prod-parity-mass-hold?)
          (memq our-race-eval '(Protoss Terran))
          (< frame 10752)
          (>= (exact->inexact our-combat-val)
@@ -23368,6 +23547,7 @@
     (and (l34-ctx-live-obs? ctx)
          (or early-fog-min-push-mass-hold?
              l35-siege-tempest-mass-hold?
+             l36-prod-parity-mass-hold?
              (and (or (not enemy-within-14-of-th?) l25-counter-volley-staging?)
                   (not enemy-within-14-of-main?)
                   (not enemy-main-cleared-eval?)
@@ -23388,10 +23568,12 @@
     (hash-set! (l34-ctx-l34-sc ctx) 'l25-counter-volley-staging? l25-counter-volley-staging?)
     (hash-set! (l34-ctx-l34-sc ctx) 'l25-enemy-within-14-of-main? enemy-within-14-of-main?)
     (hash-set! (l34-ctx-l34-sc ctx) 'l35-siege-tempest-mass-hold? l35-siege-tempest-mass-hold?)
-    (hash-set! (l34-ctx-l34-sc ctx) 'l35-siege-breakout-sup-req l35-siege-breakout-sup-req))
+    (hash-set! (l34-ctx-l34-sc ctx) 'l35-siege-breakout-sup-req l35-siege-breakout-sup-req)
+    (hash-set! (l34-ctx-l34-sc ctx) 'l36-prod-parity-mass-hold? l36-prod-parity-mass-hold?))
   (when rt
     (hash-set! (rt-door-state rt) 'l35-siege-tempest-mass-hold? l35-siege-tempest-mass-hold?)
-    (hash-set! (rt-door-state rt) 'l35-siege-breakout-sup-req l35-siege-breakout-sup-req))
+    (hash-set! (rt-door-state rt) 'l35-siege-breakout-sup-req l35-siege-breakout-sup-req)
+    (hash-set! (rt-door-state rt) 'l36-prod-parity-mass-hold? l36-prod-parity-mass-hold?))
   ;; L27-P0-3 / L30-P0-3 (`#14/#23` `OBRet -> 0`): Treat army OR active visible threat within `32.0t`
   ;; (`1024.0`) of ANY friendly TownHall (incl. lifted CCs/OCs) / base / natural OR `24.0t` (`576.0`)
   ;; of ANY friendly production/tech/home building as owned territory so home fights never log `'retreat`!
@@ -23521,6 +23703,7 @@
      ;; into marching across the map into 10..26 remembered Sieged Tanks or 13 Tempests!
      (define eff-mass-parity-suppress?
        (or l35-siege-tempest-mass-hold?
+           l36-prod-parity-mass-hold?
            (and mass-parity-before-attack-suppress?
                 (not locally-winning-fight?))))
      (define eff-l25-counter-volley-staging?
@@ -27513,6 +27696,17 @@
     (set-l34-ctx-fcaster-leash-x! ctx fcaster-leash-x)
     (set-l34-ctx-fcaster-leash-y! ctx fcaster-leash-y)
     (define has-tbrain-acts? (> (hash-count tbrain-unit-actions) 0))
+    ;; L36-P0-3 (`#834` #3 ROI): O(1) lookup table for `tbrain` focus-fire target wiring into
+    ;; Terran & Protoss core combat units (`marine`/`marauder`/`stalker`/`adept`/`viking`/`void-ray`).
+    (define eng-enemy-by-id
+      (and has-tbrain-acts?
+           (pair? engagement-enemies)
+           (let ([ht (pooled-hasheqv! l34-sc 'l36-eng-enemy-by-id)])
+             (for ([e (in-list engagement-enemies)] #:when (hash? e))
+               (define id0 (hash-ref e 'id #f))
+               (when (and (exact-integer? id0) (> id0 0))
+                 (hash-set! ht id0 e)))
+             ht)))
     (define p5-obs (l34-ctx-obs ctx))
     (define p5-supply-used (safe-nonneg-int (hash-ref p5-obs 'supply-used 0) 0))
     (define p5-combat-sup
@@ -27618,7 +27812,7 @@
     ;;    `1-2` solo Corruptors into `10+` Tempests!
     ;; 2) Precompute local squad cohesion (`>= 4` allies within `12t` or main ground army centroid)
     ;;    so isolated Phoenixes (vs contested AA) and isolated Colossi regroup before marching!
-    (define p5-enemy-cap-air-pts
+    (define p5-enemy-cap-air-units
       (if live-obs?
           (for/list ([e (in-list enemy-units)]
                      #:when (and (hash? e)
@@ -27627,9 +27821,12 @@
                                        '(tempest carrier battlecruiser mothership))
                                  (real? (hash-ref e 'x #f))
                                  (real? (hash-ref e 'y #f))))
-            (cons (exact->inexact (hash-ref e 'x 0.0))
-                  (exact->inexact (hash-ref e 'y 0.0))))
+            e)
           '()))
+    (define p5-enemy-cap-air-pts
+      (for/list ([e (in-list p5-enemy-cap-air-units)])
+        (cons (exact->inexact (hash-ref e 'x 0.0))
+              (exact->inexact (hash-ref e 'y 0.0)))))
     (define p5-owm-cap-air-cnt
       (if (and live-obs? p5-owm)
           (let ([kc (opponent-world-summary-known-unit-counts p5-owm)])
@@ -27884,9 +28081,9 @@
         (or (and has-combat-skip-tags? (hash-has-key? combat-skip-tags uid))
             (and live-obs? (memq protected-class '(morph channel cast-walk)))
             (order-ledger-unit-in-attack-swing? oledger u)))
-      (define-values (ux uy ut target-enemy prepped-hit?)
+      (define-values (ux uy ut target-enemy prepped-hit? used-peel-tgt?)
         (if skip?
-            (values 0.0 0.0 'marine #f #f)
+            (values 0.0 0.0 'marine #f #f #f)
             (let ([x (hash-ref u 'x base-x)]
                   [y (hash-ref u 'y base-y)]
                   [t (unit-type-sym u)])
@@ -27905,18 +28102,49 @@
                                (if (fl< sc best-sc) (values pe sc) (values best best-sc)))
                              (values best best-sc))))))
               (if peel-tgt
-                  (values x y t peel-tgt #t)
+                  (values x y t peel-tgt #t #t)
                   (let-values ([(te ph?)
                                 (select-target-enemy-from-prepped x y prepped-eng-enemies t ally-has-stealth?)])
-                    (values x y t te ph?))))))
+                    (values x y t te ph? #f))))))
 
-      ;; L33-P0-3 (`#58` fog-flicker Corruptor volley latch & `#18` isolated Phoenix/Colossus regroup):
-      ;; Evaluate staging BEFORE `(not target-enemy)` so fog-blind frames (empty `engagement-enemies`)
-      ;; still hold lone Corruptors / isolated Phoenixes / isolated Colossi instead of letting
-      ;; Phase 6/7 launch them piecemeal into fog-hidden Tempests/Vikings!
+      ;; L33-P0-3 (`#58` fog-flicker Corruptor volley latch & `#18` isolated Phoenix/Colossus regroup)
+      ;; + L36-P0-3 (`#31` Visual-QA Corruptor Dive vs Tempests):
+      ;; Evaluate staging BEFORE `(not target-enemy)` so fog-blind frames still hold lone Corruptors,
+      ;; while ANY Corruptor group (`>= 4` Corruptors) caught inside Tempest fire range (`<= 16.5t`)
+      ;; IMMEDIATELY DIVES inside `6t` weapon range via `(attack-unit uid cap-id)` instead of parking
+      ;; passively at `10..15t` on the cliff edge eating free Tempest shots!
       (define pre-stage-handled?
         (and (not skip?)
              (cond
+               [(and (eq? ut 'corruptor)
+                     (pair? p5-enemy-cap-air-units)
+                     (>= (max p5-corr-best-cnt (length p5-ally-corruptor-pts)
+                              (if live-obs?
+                                  (count (lambda (cu) (and (hash? cu) (eq? (unit-type-sym cu) 'corruptor))) combat-units)
+                                  0))
+                         4)
+                     (let* ([fux (exact->inexact ux)]
+                            [fuy (exact->inexact uy)]
+                            [dive-tgt
+                             (for/fold ([best #f] [best-sc +inf.0] #:result best)
+                                       ([ce (in-list p5-enemy-cap-air-units)])
+                               (define cid (hash-ref ce 'id #f))
+                               (define cex (exact->inexact (hash-ref ce 'x 9999.0)))
+                               (define cey (exact->inexact (hash-ref ce 'y 9999.0)))
+                               (define d (fast-dist2d fux fuy cex cey))
+                               (if (and (exact-integer? cid) (> cid 0) (fl<= d 16.5))
+                                   (let* ([cty (fast-canonical-unit-sym (unit-type-sym ce))]
+                                          [hp (exact->inexact (+ (hash-ref ce 'hp 200.0) (hash-ref ce 'shield 0.0)))]
+                                          [pri (if (eq? cty 'tempest) 0.0 1.5)]
+                                          [sc (fl+ d (fl+ pri (fl* 0.006 hp)))])
+                                     (if (fl< sc best-sc) (values ce sc) (values best best-sc)))
+                                   (values best best-sc)))])
+                       (and dive-tgt
+                            (begin
+                              (set-add! wave3-handled-tags uid)
+                              (l34-emit-preserved! ctx (list 'attack-unit uid (hash-ref dive-tgt 'id)))
+                              #t))))
+                #t]
                [(and p5-corruptor-volley-mode? (eq? ut 'corruptor))
                 (define fux (exact->inexact ux))
                 (define fuy (exact->inexact uy))
@@ -28129,6 +28357,82 @@
                       6.0)
              (l34-emit! ctx (list 'attack-pos uid p5-ground-muster-x p5-ground-muster-y)))]
           [else
+        ;; L36-P0-3 (`#834` #3 ROI): Wire `tbrain` priority focus-fire `(attack-unit uid eid)`
+        ;; target selection into previously bypassed Terran (`95%`) & Protoss (`64.5%`) core
+        ;; combat units (`marine`, `marauder`, `stalker`, `adept`, `viking`/`viking-fighter`,
+        ;; `void-ray`) while preserving ALL existing stim/blink/shade/prismatic/tether/forbid-kite
+        ;; handlers and `w11-tac-2` / Ghost-peel safety invariants!
+        (define-values (ff-target-enemy ff-eid ff-etype ff-ex ff-ey ff-edist2 ff-can-hit?)
+          (if (and has-tbrain-acts?
+                   eng-enemy-by-id
+                   (not used-peel-tgt?)
+                   (not nearest-enemy-tank)
+                   (not tank-supporting-vs-static?)
+                   (not zergling-hold-off-pf-siege?)
+                   unit-should-engage-target?
+                   (memq ut '(marine marauder stalker adept viking viking-fighter void-ray voidray))
+                   (not (and live-obs? (eq? ut 'marauder) (set-member? wave3-marauder-target-tags uid))))
+              (let ([tb-eid
+                     (for/or ([ma (in-list (hash-ref tbrain-unit-actions uid '()))])
+                       (and (pair? ma)
+                            (eq? (car ma) 'attack-unit)
+                            (>= (length ma) 3)
+                            (let ([tid (caddr ma)])
+                              (and (exact-integer? tid) (> tid 0) tid))))])
+                (define tb-e (and tb-eid (hash-ref eng-enemy-by-id tb-eid #f)))
+                (cond
+                  [(and (hash? tb-e)
+                        (not (eqv? tb-eid eid))
+                        (not (eq? (hash-ref tb-e 'hallucination #f) #t))
+                        (not (p5-snapshot-entity? tb-e))
+                        (let ([cv (hash-ref tb-e 'cloak #f)])
+                          (not (or (eqv? cv 1) (eq? cv 'cloaked))))
+                        (let ([tb-ty (unit-type-sym tb-e)])
+                          (or (not (free-summon-unit-sym? tb-ty))
+                              (free-summon-unit-sym? etype))))
+                   (define tb-ty (unit-type-sym tb-e))
+                   (define tb-canon (fast-canonical-unit-sym tb-ty))
+                   (define tb-fly?
+                     (or (eq? (hash-ref tb-e 'flying #f) #t)
+                         (eq? (hash-ref tb-e 'flying? #f) #t)
+                         (eq? (hash-ref tb-e 'is-flying #f) #t)
+                         (fast-unit-is-flying-sym? tb-ty)))
+                   (define ust (fast-unit-combat-stats ut))
+                   (define u-adps (if (hash? ust) (exact->inexact (hash-ref ust 'air-dps 0.0)) 0.0))
+                   (define u-gdps (if (hash? ust) (exact->inexact (hash-ref ust 'ground-dps 0.0)) 0.0))
+                   (define can-hit-tb?
+                     (cond
+                       [(memq ut '(viking viking-fighter))
+                        (or tb-fly? (eq? tb-canon 'colossus))]
+                       [tb-fly? (fl> u-adps 0.0)]
+                       [else (fl> u-gdps 0.0)]))
+                   (define tb-x (hash-ref tb-e 'x nat-x))
+                   (define tb-y (hash-ref tb-e 'y nat-y))
+                   (define tb-d2 (l34-safe-coord-dist2 ux uy tb-x tb-y))
+                   (define u-r
+                     (exact->inexact
+                      (if (hash? ust)
+                          (if tb-fly?
+                              (hash-ref ust 'air-range 0.0)
+                              (or (hash-ref u 'ground-range #f) (hash-ref ust 'ground-range 0.0)))
+                          0.0)))
+                   (define reach-lim (fl+ u-r 3.5))
+                   (define fed2-cur (if (flonum? edist2) edist2 (exact->inexact edist2)))
+                   (if (and can-hit-tb?
+                            (or (fl<= tb-d2 (fl* reach-lim reach-lim))
+                                (fl<= tb-d2 (fl+ fed2-cur 16.0))))
+                       (values tb-e tb-eid tb-ty tb-x tb-y tb-d2 #t)
+                       (values target-enemy eid etype ex ey edist2 can-hit-target?))]
+                  [else
+                   (values target-enemy eid etype ex ey edist2 can-hit-target?)]))
+              (values target-enemy eid etype ex ey edist2 can-hit-target?)))
+        (let ([target-enemy ff-target-enemy]
+              [eid ff-eid]
+              [etype ff-etype]
+              [ex ff-ex]
+              [ey ff-ey]
+              [edist2 ff-edist2]
+              [can-hit-target? ff-can-hit?])
         (case ut
           [(ravager)
            (if (and (not live-obs?)
@@ -28964,7 +29268,7 @@
                           (memq (car ma) '(attack-unit attack-pos)))
                      (l34-emit-preserved! ctx ma)
                      (l34-emit! ctx ma)))
-               (l34-emit-engage-or-rally! ctx uid ux uy ex ey eid nearest-enemy-tank zergling-hold-off-pf-siege? tank-supporting-vs-static? unit-should-engage-target? u ut can-hit-target? edist2 target-enemy))])])))))
+               (l34-emit-engage-or-rally! ctx uid ux uy ex ey eid nearest-enemy-tank zergling-hold-off-pf-siege? tank-supporting-vs-static? unit-should-engage-target? u ut can-hit-target? edist2 target-enemy))]))])))))
 
 (define (l34-phase6-raid-concave-reach! ctx)
   (define ally-infestors (l34-ctx-ally-infestors ctx))

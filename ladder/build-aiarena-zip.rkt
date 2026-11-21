@@ -24,6 +24,7 @@
 
 (require racket/bytes
          racket/cmdline
+         racket/date
          racket/file
          racket/list
          racket/path
@@ -47,6 +48,8 @@
          MIN-BOT-ZIP-SIZE-BYTES
          MIN-STANDALONE-ELF-BYTES
          VARIANTS
+         detect-build-version-metadata
+         build-bot-config-json-bytes
          ensure-portable-racket-815-runtime!
          verify-standalone-elf-headless-init!
          validate-bot-zip-archive!
@@ -81,6 +84,63 @@
     ("Mothman-Z" "Zerg"    "bots/Mothman-Z.rkt")
     ("Mothman-T" "Terran"  "bots/Mothman-T.rkt")
     ("Mothman-P" "Protoss" "bots/Mothman-P.rkt")))
+
+;; L36-P0-1: Stamp `<jj_change>_<git_sha>` short build version & ISO-8601 UTC timestamp into
+;; every BotZip's `config.json` and `bot_config.json` so every replay self-identifies its build!
+(define (run-short-vcs-cmd exe args [work-dir ROOT-DIR])
+  (with-handlers ([exn:fail? (lambda (_e) #f)])
+    (define exe-path (find-executable-path exe))
+    (and exe-path
+         (let* ([out-str
+                 (parameterize ([current-directory work-dir])
+                   (with-output-to-string
+                     (lambda ()
+                       (parameterize ([current-error-port (open-output-nowhere)])
+                         (apply system* exe-path args)))))]
+                [trimmed (string-trim out-str)])
+           (and (> (string-length trimmed) 0)
+                (regexp-match? #rx"^[A-Za-z0-9._-]+$" trimmed)
+                trimmed)))))
+
+(define (format-utc-iso8601 [secs (current-seconds)])
+  (define d (seconds->date secs #f))
+  (define (pad2 n)
+    (define s (number->string n))
+    (if (< (string-length s) 2) (string-append "0" s) s))
+  (format "~a-~a-~aT~a:~a:~aZ"
+          (date-year d)
+          (pad2 (date-month d))
+          (pad2 (date-day d))
+          (pad2 (date-hour d))
+          (pad2 (date-minute d))
+          (pad2 (date-second d))))
+
+(define (detect-build-version-metadata [work-dir ROOT-DIR])
+  (define env-ver
+    (let ([v (getenv "MOTHMAN_BUILD_VERSION")])
+      (and (string? v) (> (string-length (string-trim v)) 0) (string-trim v))))
+  (define ver
+    (or env-ver
+        (let ([jj-rev (run-short-vcs-cmd "jj" '("log" "-r" "@" "--no-graph" "-T" "change_id.short(8)") work-dir)]
+              [git-rev (run-short-vcs-cmd "git" '("rev-parse" "--short=8" "HEAD") work-dir)])
+          (cond
+            [(and jj-rev git-rev) (format "~a_~a" jj-rev git-rev)]
+            [jj-rev jj-rev]
+            [git-rev git-rev]
+            [else "unknown"]))))
+  (values ver (format-utc-iso8601)))
+
+(define (build-bot-config-json-bytes bot-name bot-race bot-path
+                                     #:build-version [build-version #f]
+                                     #:build-timestamp-utc [build-ts #f])
+  (define-values (eff-ver eff-ts)
+    (if (and build-version build-ts)
+        (values build-version build-ts)
+        (let-values ([(dv dt) (detect-build-version-metadata)])
+          (values (or build-version dv) (or build-ts dt)))))
+  (string->bytes/utf-8
+   (format "{\n  \"BotName\": ~s,\n  \"BotRace\": ~s,\n  \"BotPath\": ~s,\n  \"BuildVersion\": ~s,\n  \"BuildTimestampUtc\": ~s\n}\n"
+           bot-name bot-race bot-path eff-ver eff-ts)))
 
 ;; -----------------------------------------------------------------------------
 ;; 1. IEEE 802.3 CRC-32 & Pure-Racket PKZIP Archive Writer
@@ -451,11 +511,16 @@
       (make-directory* (build-path probe-dir "data"))
       (copy-file elf-path probe-bin #t)
       (file-or-directory-permissions probe-bin #o755)
+      (define probe-cfg-bstr
+        (build-bot-config-json-bytes "Mothman-Z" "Zerg" "bots/Mothman-Z.rkt"))
       (call-with-output-file probe-cfg
         #:exists 'replace
         (lambda (out)
-          (display "{\n  \"BotName\": \"Mothman-Z\",\n  \"BotRace\": \"Zerg\",\n  \"BotPath\": \"bots/Mothman-Z.rkt\"\n}\n"
-                   out)))
+          (write-bytes probe-cfg-bstr out)))
+      (call-with-output-file (build-path probe-dir "bot_config.json")
+        #:exists 'replace
+        (lambda (out)
+          (write-bytes probe-cfg-bstr out)))
       (call-with-output-file (build-path probe-dir "data" "mirror_mind_opponents.json")
         #:exists 'replace
         (lambda (out)
@@ -621,18 +686,26 @@
 
   (reverse specs))
 
-(define (build-variant-zip! bot-name bot-race bot-path elf-bstr shared-entries)
+(define (build-variant-zip! bot-name bot-race bot-path elf-bstr shared-entries
+                            #:build-version [build-version #f]
+                            #:build-timestamp-utc [build-ts #f])
   (define zip-path (build-path LADDER-DIR (format "~a.zip" bot-name)))
+  (define-values (eff-ver eff-ts)
+    (if (and build-version build-ts)
+        (values build-version build-ts)
+        (let-values ([(dv dt) (detect-build-version-metadata)])
+          (values (or build-version dv) (or build-ts dt)))))
   (define config-bstr
-    (string->bytes/utf-8
-      (format "{\n  \"BotName\": ~s,\n  \"BotRace\": ~s,\n  \"BotPath\": ~s\n}\n"
-              bot-name bot-race bot-path)))
+    (build-bot-config-json-bytes bot-name bot-race bot-path
+                                 #:build-version eff-ver
+                                 #:build-timestamp-utc eff-ts))
   (define seed-data-bstr
     (string->bytes/utf-8
       (format "{\n  \"bot_name\": ~s,\n  \"opponents\": {}\n}\n"
               bot-name)))
   (define header-entries
     (list (make-zip-entry-spec "config.json" config-bstr #f #o100644)
+          (make-zip-entry-spec "bot_config.json" config-bstr #f #o100644)
           (make-zip-entry-spec bot-name elf-bstr #f #o100755)
           (make-zip-entry-spec "data/mirror_mind_opponents.json" seed-data-bstr #f #o100644)))
   (define all-entries (append header-entries shared-entries))
@@ -643,14 +716,17 @@
                              #:entry-names (map zip-entry-spec-name all-entries))
   (define sz (file-size zip-path))
   (define sz-mb (/ (round (* 100.0 (/ sz (* 1024.0 1024.0)))) 100.0))
-  (printf "  -> Built ~a (~a MB, ~a files, standalone ELF=~a MB)\n"
+  (printf "  -> Built ~a (~a MB, ~a files, standalone ELF=~a MB, ver=~a)\n"
           (path->string zip-path)
           sz-mb
           (length all-entries)
-          (/ (round (* 100.0 (/ (bytes-length elf-bstr) (* 1024.0 1024.0)))) 100.0))
+          (/ (round (* 100.0 (/ (bytes-length elf-bstr) (* 1024.0 1024.0)))) 100.0)
+          eff-ver)
   (hash 'bot_name bot-name
         'race bot-race
         'bot_path bot-path
+        'build_version eff-ver
+        'build_timestamp_utc eff-ts
         'zip_path (path->string zip-path)
         'files_added (length all-entries)
         'size_bytes sz
@@ -712,9 +788,12 @@
      (printf "[4/5] Building AI Arena BotZip archives in pure Racket...\n")
      (define elf-bstr (file->bytes elf-path))
      (define shared-entries (collect-shared-tree-entries))
+     (define-values (stamp-ver stamp-ts) (detect-build-version-metadata))
      (define results
        (for/list ([row (in-list selected-variants)])
-         (build-variant-zip! (first row) (second row) (third row) elf-bstr shared-entries)))
+         (build-variant-zip! (first row) (second row) (third row) elf-bstr shared-entries
+                             #:build-version stamp-ver
+                             #:build-timestamp-utc stamp-ts)))
      (printf "[5/5] Verified ~a AI Arena BotZip archives (all <= ~a MB limit) + headless init OK.\n"
              (length results)
              (/ MAX-BOT-ZIP-SIZE-BYTES 1000000.0))

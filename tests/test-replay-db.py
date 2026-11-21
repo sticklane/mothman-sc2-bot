@@ -358,6 +358,98 @@ class ReplayDbTests(unittest.TestCase):
         self.assertIn("prod_aiarena", st.stdout)
         self.assertIn("Top Build Versions:", st.stdout)
 
+    def test_05_prod_scoring_analyze_prod_and_sync_prod(self) -> None:
+        post_fix_dir = SCORES_DIR / "post_fix_replays"
+        if not post_fix_dir.is_dir():
+            self.skipTest("Local post_fix_replays prod fixture not found")
+
+        # 1. Stage a 2-match prod directory with *_meta.json + *_match_log.zip + *.SC2Replay
+        staged = self.tmp_dir / "prod_scored_subset"
+        staged.mkdir()
+        for mid in ("5129548", "5129550"):
+            for p in post_fix_dir.glob(f"{mid}_*"):
+                shutil.copy2(p, staged / p.name)
+
+        score_out = self.tmp_dir / "staged_prod_score.json"
+        r_ing = self._run_cli(
+            "ingest-prod-aiarena",
+            str(staged),
+            "--score",
+            "--score-out",
+            str(score_out),
+            "--extract-raw",
+            "-j",
+            "2",
+        )
+        self.assertIn("score-replay-batch OK", r_ing.stdout)
+        self.assertIn("scored=2,", r_ing.stdout)
+        self.assertTrue(score_out.is_file())
+
+        conn = sqlite3.connect(str(self.db_path))
+        conn.row_factory = sqlite3.Row
+        m548 = conn.execute("SELECT * FROM matches WHERE aiarena_match_id = 5129548").fetchone()
+        self.assertIsNotNone(m548)
+        self.assertIsNotNone(m548["sup_blk_pct"])
+        self.assertGreater(m548["sup_blk_pct"], 0.0)
+        anoms = {
+            r["anomaly_name"]
+            for r in conn.execute(
+                "SELECT anomaly_name FROM match_anomalies WHERE replay_id = ? AND player_side = 'p1'",
+                (m548["replay_id"],),
+            )
+        }
+        self.assertIn("own_base_retreat", anoms)
+        conn.close()
+
+        # 2. Verify analyze-prod renders all 5 sections + writes --out-md
+        md_out = self.tmp_dir / "prod_analysis.md"
+        r_ap = self._run_cli(
+            "analyze-prod",
+            "--min-opp-games",
+            "1",
+            "--top-losses",
+            "2",
+            "--out-md",
+            str(md_out),
+        )
+        self.assertIn("=== PROD AI ARENA FORENSIC ANALYSIS ===", r_ap.stdout)
+        self.assertIn("=== 1. Per-Build Progression", r_ap.stdout)
+        self.assertIn("=== 2. Per-Bot Breakdown ===", r_ap.stdout)
+        self.assertIn("=== 3A. Hardest Prod Opponents", r_ap.stdout)
+        self.assertIn("=== 4. Prod Anomaly Rates by Build", r_ap.stdout)
+        self.assertIn("own_base_retreat", r_ap.stdout)
+        self.assertIn("=== 5. Top 2 Prod Losses", r_ap.stdout)
+        self.assertIn("opening_bo:", r_ap.stdout)
+        self.assertTrue(md_out.is_file())
+
+        # 3. Verify sync-prod --dry-run detects known match IDs for skip_matches
+        r_dry = self._run_cli("sync-prod", "--dry-run", "--limit", "15")
+        self.assertIn("[sync-prod DRY RUN]", r_dry.stdout)
+        self.assertIn("2 known IDs", r_dry.stdout)
+        self.assertIn("score=True", r_dry.stdout)
+
+        # 4. Verify sync-prod end-to-end orchestration using pre-staged run_<id>/aiarena-replays
+        dest_root = self.tmp_dir / "sync_dest"
+        pre = dest_root / "run_999999" / "aiarena-replays"
+        pre.mkdir(parents=True)
+        for p in post_fix_dir.glob("5129553_*"):
+            shutil.copy2(p, pre / p.name)
+        r_sync = self._run_cli(
+            "sync-prod",
+            "--gh-run-id",
+            "999999",
+            "--dest-root",
+            str(dest_root),
+            "--top-losses",
+            "3",
+            "-j",
+            "2",
+        )
+        self.assertIn("Reusing already-downloaded replays", r_sync.stdout)
+        self.assertIn("ingest-prod-aiarena OK: run_id=prod_aiarena_run_999999", r_sync.stdout)
+        self.assertIn("=== PROD AI ARENA FORENSIC ANALYSIS ===", r_sync.stdout)
+        self.assertIn("#5129553", r_sync.stdout)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

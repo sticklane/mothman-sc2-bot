@@ -15286,6 +15286,133 @@
                      (not (not (memq 'marine (macro-brain-decision-scheduled-ids l35-t-41-ling-hellion))))
                      (not (memq 'viking-fighter (macro-brain-decision-scheduled-ids l35-t-41-ling-hellion))))
                 "L35-P0-2 #41/#53: Terran <5:00 vs >=3 Reapers or >=12 Lings must train Hellion+Marine without Tank/Starport/Viking lockout")
+
+  ;; 51.24 L36-P0-2: Mirror-Mind Audit Fixes & Live d=0..1 Pruning (#834) + Prod AI Arena TvP/PvZ/PvT Macro Fixes (#840)
+  ;; (a) Mirror-Mind: defend-All-In min-bases == our-bases, live fast-path locks d<=1 & keeps visible dom-obs-unit,
+  ;;     our-upgrade-tier + enemy-workers-killed propagate cleanly, and Observer / bare starport-techlab drop false req-det?
+  (define l36-mm-allin (make-mirror-mind-state #:our-race 'Zerg #:enemy-race 'Terran #:depth 2))
+  (step-mirror-mind-predictor!
+   l36-mm-allin
+   (hash 'frame 2400 'actual-race 'Zerg 'our-upgrade-tier 0 'enemy-workers-killed 0
+         'minerals 200 'gas 50 'base-x 32.5 'base-y 32.5 'natural-x 50.5 'natural-y 56.5
+         'enemy-x 160.0 'enemy-y 160.0
+         'ally-units (list (hash 'id 1 'type 'zergling 'x 44.0 'y 48.0 'hp 35))
+         'ally-buildings (list (hash 'id 10 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500)
+                               (hash 'id 11 'type 'hatchery 'x 50.5 'y 56.5 'hp 1500)
+                               (hash 'id 12 'type 'spawning-pool 'x 35.0 'y 35.0 'hp 1000))
+         'enemy-units (for/list ([i (in-range 6)])
+                        (hash 'id (+ 500 i) 'type 'marine 'x 52.0 'y 54.0 'hp 45))
+         'enemy-buildings (list (hash 'id 900 'type 'command-center 'x 160.0 'y 160.0 'hp 1500))))
+  (define l36-mm-live (make-mirror-mind-state #:our-race 'Zerg #:enemy-race 'Terran #:depth 2))
+  (step-mirror-mind-predictor!
+   l36-mm-live
+   (hash 'frame 5400 'actual-race 'Zerg 'our-upgrade-tier 2 'enemy-workers-killed 5
+         'minerals 350 'gas 180 'base-x 32.5 'base-y 32.5 'natural-x 52.5 'natural-y 36.5
+         'enemy-x 150.0 'enemy-y 150.0
+         'ally-units (for/list ([i (in-range 12)]) (hash 'id (+ 100 i) 'type 'roach 'x 48.0 'y 38.0 'hp 145))
+         'ally-buildings (list (hash 'id 1 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500)
+                               (hash 'id 2 'type 'hatchery 'x 52.5 'y 36.5 'hp 1500)
+                               (hash 'id 3 'type 'spawning-pool 'x 35.0 'y 35.0 'hp 1000)
+                               (hash 'id 4 'type 'roach-warren 'x 37.0 'y 35.0 'hp 850))
+         'enemy-units (for/list ([i (in-range 14)]) (hash 'id (+ 500 i) 'type 'marine 'x 120.0 'y 120.0 'hp 45 'atk-upg 1))
+         'enemy-buildings (list (hash 'id 901 'type 'orbital-command 'x 150.0 'y 150.0 'hp 1500)
+                                (hash 'id 902 'type 'barracks 'x 144.0 'y 146.0 'hp 1000)
+                                (hash 'id 903 'type 'starport-techlab 'x 142.0 'y 148.0 'hp 400))))
+  (define l36-obs-tech
+    (infer-enemy-implied-tech-and-upgrades
+     (list (hash 'id 701 'type 'observer 'x 60.0 'y 60.0 'hp 40 'cloaked? #t))
+     '()))
+  (assert-true! (and (eq? (mirror-mind-state-mirror-macro-verdict l36-mm-allin) 'defend-All-In-Then-Counter-Expand)
+                     (= (mirror-mind-state-recommended-min-bases l36-mm-allin) 2)
+                     (<= (mirror-mind-state-active-depth l36-mm-live) 1)
+                     (= (length (mirror-mind-state-last-hierarchy l36-mm-live)) 2)
+                     (eq? (mirror-mind-state-predicted-enemy-unit l36-mm-live) 'marine)
+                     (= (enemy-tech-observation-enemy-upgrade-advantage (mirror-mind-state-last-tech-observation l36-mm-live)) -1)
+                     (eq? (enemy-tech-observation-requires-detection? (mirror-mind-state-last-tech-observation l36-mm-live)) #f)
+                     (eq? (enemy-tech-observation-requires-anti-air? (mirror-mind-state-last-tech-observation l36-mm-live)) #t)
+                     (eq? (enemy-tech-observation-requires-detection? l36-obs-tech) #f))
+                "L36-P0-2 #834: Mirror-Mind must fix defend-All-In min-bases, lock live d<=1, preserve visible dom-obs-unit, honor our-upgrade-tier, and drop Observer/starport-techlab false req-det?")
+
+  ;; (b) TvP #5138231/#5138233: WidowMine cap <=2 early, block Factory #2 before Starport #1 + Nat CC,
+  ;;     3:30 Starport #1 / Medivac #1 gas protection, & >=3 Vikings/Colossus
+  (reset-macro-escrow-tracker!)
+  (define l36-t-tvp-sp
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 4800
+      #:minerals 220 #:gas 120 #:supply-used 38 #:supply-cap 54 #:workers 26 #:active-bases 2
+      #:mineral-harvesters 20 #:gas-harvesters 6
+      #:army-supply 12 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'factory 1 'factory-techlab 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'factory 1 'factory-techlab 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 26 'marine 8 'marauder 2 'widow-mine 2)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 1))))
+  (reset-macro-escrow-tracker!)
+  (define l36-t-tvp-colossus-vik
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 8200
+      #:minerals 220 #:gas 100 #:supply-used 74 #:supply-cap 100 #:workers 42 #:active-bases 2
+      #:mineral-harvesters 34 #:gas-harvesters 8
+      #:army-supply 32 #:enemy-threat-supply 18 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 10 'barracks 4 'factory 1 'starport 1 'refinery 4)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 10 'barracks 4 'factory 1 'starport 1 'refinery 4)
+      #:unit-counts (hasheq 'scv 42 'marine 18 'marauder 4 'medivac 2 'viking-fighter 2)
+      #:enemy-unit-counts (hasheq 'stalker 8 'colossus 2)
+      #:enemy-building-counts (hasheq 'nexus 2 'robotics-facility 1 'robotics-bay 1)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 1 'starport 1))))
+  (assert-true! (and (not (not (memq 'starport (macro-brain-decision-scheduled-ids l36-t-tvp-sp))))
+                     (not (memq 'factory (macro-brain-decision-scheduled-ids l36-t-tvp-sp)))
+                     (not (memq 'widow-mine (macro-brain-decision-scheduled-ids l36-t-tvp-sp)))
+                     (not (not (memq 'viking-fighter (macro-brain-decision-scheduled-ids l36-t-tvp-colossus-vik)))))
+                "L36-P0-2 #5138231/#5138233 TvP: Must block Factory #2/WM#3 before Starport #1 and lock >=3 Vikings/Colossus")
+
+  ;; (c) Protoss #5138232 / H2H #04 / #5138236: CyberCore == 1, PvZ Robo+Stalker <5:00, RoboBay defense gate, & 1 Banshee -> >=6 Stalkers
+  (reset-macro-escrow-tracker!)
+  (define l36-p-cyber-cap
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Zerg #:frame 2200
+      #:minerals 300 #:gas 60 #:supply-used 22 #:supply-cap 31 #:workers 20 #:active-bases 2
+      #:mineral-harvesters 17 #:gas-harvesters 3
+      #:army-supply 2 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 2 'gateway 1 'cybernetics-core 1 'assimilator 1)
+      #:unit-counts (hasheq 'probe 20 'zealot 1)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 1))))
+  (reset-macro-escrow-tracker!)
+  (define l36-p-robobay-gate
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 6000
+      #:minerals 280 #:gas 180 #:supply-used 54 #:supply-cap 70 #:workers 44 #:active-bases 2
+      #:mineral-harvesters 36 #:gas-harvesters 8
+      #:army-supply 8 #:enemy-threat-supply 0 #:under-attack? #f #:requires-detection? #t
+      #:researched-upgrades '(warp-gate-research)
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 7 'warp-gate 4 'cybernetics-core 1 'robotics-facility 1 'assimilator 4)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 7 'warp-gate 4 'cybernetics-core 1 'robotics-facility 1 'assimilator 4)
+      #:unit-counts (hasheq 'probe 44 'stalker 2 'immortal 1)
+      #:enemy-unit-counts (hasheq 'widow-mine 1 'marine 10)
+      #:open-facility-slots (hasheq 'townhall 2 'warp-gate 4 'robotics-facility 1))))
+  (reset-macro-escrow-tracker!)
+  (define l36-p-1banshee
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 5400
+      #:minerals 160 #:gas 100 #:supply-used 42 #:supply-cap 54 #:workers 32 #:active-bases 2
+      #:mineral-harvesters 26 #:gas-harvesters 6
+      #:army-supply 10 #:enemy-threat-supply 3 #:under-attack? #t #:requires-anti-air? #t #:requires-detection? #t
+      #:researched-upgrades '(warp-gate-research)
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 5 'warp-gate 3 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 5 'warp-gate 3 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 32 'stalker 4 'observer 1)
+      #:enemy-unit-counts (hasheq 'banshee 1)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 2 'robotics-facility 1))))
+  (assert-true! (and (not (memq 'cybernetics-core (macro-brain-decision-scheduled-ids l36-p-cyber-cap)))
+                     (not (memq 'robotics-bay (macro-brain-decision-scheduled-ids l36-p-robobay-gate)))
+                     (not (eq? (macro-brain-decision-saving-for l36-p-robobay-gate) 'robotics-bay))
+                     (not (not (memq 'stalker (macro-brain-decision-scheduled-ids l36-p-1banshee)))))
+                "L36-P0-2 #5138232/H2H#04/#5138236: CyberCore==1, RoboticsBay gated on army>=14/min>=400, and 1 Banshee enforces >=6 Stalkers")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms
