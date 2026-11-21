@@ -411,16 +411,16 @@
                       (length dis-moves) (length arm38-sac-pull) (length arm38-nb-moves)
                       (length arm38-nb-mws) (length tight-nb-moves) (length tight-nb-mws)))
 
-  ;; T3b (`r02`/`r05`/`r06` `rush_probe` pre-contact `10f` stack):
-  ;; Spread `16` defenders (`spread > 4t`) vs `12` approaching enemy Probes at `6.0t` -> stacks on
-  ;; front mineral patch for `10f` (`900`, `906`), then releases into `pull-workers-attack` at `910`!
+  ;; T3b (10-Probe non-allin pre-contact `4f` stack — L48-W3 disables pre-stack on >=11 static all-ins):
+  ;; Spread `16` defenders (`spread > 4t`) vs `10` approaching enemy Probes at `6.0t` -> stacks on
+  ;; front mineral patch for `4f` (`900`, `904`), then releases into `pull-workers-attack` at `910`!
   (define rt-r05 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
   (define cc-home (mk-u 4001 'command-center 32.5 32.5 #:hp 1500.0 #:structure? #t))
   (define spread-scvs-16
     (for/list ([i (in-range 16)])
       (mk-u (+ 4101 i) 'scv (+ 25.0 (* 0.2 (modulo i 3))) (+ 27.0 (* 0.75 i)) #:hp 45.0)))
   (define approach-probes-12
-    (for/list ([i (in-range 12)])
+    (for/list ([i (in-range 10)])
       (mk-u (+ 8901 i) 'probe (+ 32.5 (* 0.25 (modulo i 4))) (+ 31.5 (* 0.35 (quotient i 4))) #:hp 20.0 #:shield 20.0)))
   (define base-mps
     (list (hash 'id 99301 'x 26.0 'y 28.0)
@@ -432,19 +432,19 @@
                  #:ally-units spread-scvs-16 #:ally-buildings (list cc-home)
                  #:enemy-units approach-probes-12 #:mineral-patches base-mps))
   (define acts-r05-900 (step-layer2-economy! rt-r05 (r05-obs 900)))
-  (define acts-r05-906 (step-layer2-economy! rt-r05 (r05-obs 906)))
+  (define acts-r05-904 (step-layer2-economy! rt-r05 (r05-obs 904)))
   (define acts-r05-910 (step-layer2-economy! rt-r05 (r05-obs 910)))
   (define mw-900 (filter (lambda (a) (and (pair? a) (eq? (car a) 'mineral-walk))) acts-r05-900))
   (define atk-900 (filter (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack))) acts-r05-900))
-  (define mw-906 (filter (lambda (a) (and (pair? a) (eq? (car a) 'mineral-walk))) acts-r05-906))
+  (define mw-904 (filter (lambda (a) (and (pair? a) (eq? (car a) 'mineral-walk))) acts-r05-904))
   (define atk-910 (filter (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack))) acts-r05-910))
-  (check-true "L44-T3b-r05-pre-contact-10f-mineral-stack-then-simultaneous-pull-attack-release"
+  (check-true "L44-T3b-r05-pre-contact-4f-mineral-stack-then-simultaneous-pull-attack-release"
               (and (>= (length mw-900) 10)
                    (null? atk-900)
-                   (>= (length mw-906) 10)
+                   (>= (length mw-904) 10)
                    (pair? atk-910))
-              (format "f900 mw=~a atk=~a | f906 mw=~a | f910 atk=~a"
-                      (length mw-900) (length atk-900) (length mw-906) (length atk-910)))
+              (format "f900 mw=~a atk=~a | f904 mw=~a | f910 atk=~a"
+                      (length mw-900) (length atk-900) (length mw-904) (length atk-910)))
 
   ;; T3c (`#53 zig-reapers` Counter-Wave Split):
   ;; `5` Sieged Tanks + `25` Marines (`40` supply -> add 10 Marauders = `60` supply!) at home vs

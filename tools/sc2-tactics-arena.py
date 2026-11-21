@@ -81,6 +81,7 @@ VALID_CATEGORIES = (
     "regression",
 )
 VALID_RACES = ("Protoss", "Terran", "Zerg")
+VALID_P2_WORKER_MICROS = ("brawl", "cooldown-weave-kite")
 MINING_ORDER_ABILITY_IDS = {295, 296, 298, 299, 1183, 1184, 3666}
 CARRYING_MINERAL_BUFF_IDS = {271, 272}
 
@@ -194,6 +195,7 @@ UNIT_VALUES: dict[int, float] = {
     50: 337.5,    # ghost
     56: 400.0,    # raven
     52: 600.0,    # thor
+    691: 600.0,   # thor-ap (high-impact payload)
     35: 262.5,    # viking-fighter
     34: 262.5,    # viking-assault
     55: 300.0,    # banshee
@@ -297,6 +299,43 @@ AIR_UNIT_IDS = {
     108, 112, 499, 114, 129, 106, 893,  # Zerg air
 }
 MINERAL_IDS = {146, 147, 341, 483, 665, 666, 796, 797, 884, 885}
+GEYSER_IDS = {342, 343, 344, 345, 608, 880, 881}
+RACE_WORKER_IDS: dict[str, int] = {"Terran": 45, "Protoss": 84, "Zerg": 104}
+STARTER_BUILDING_SPECS: dict[str, dict[str, Any]] = {
+    "spawning-pool": {
+        "unit_id": 89, "race": "Zerg", "footprint": 3, "build_ability": 1155,
+        "builder_uid": 104, "build_loops": 1030, "on_geyser": False, "needs_pylon": False, "needs_creep": True,
+    },
+    "supply-depot": {
+        "unit_id": 19, "race": "Terran", "footprint": 2, "build_ability": 319,
+        "builder_uid": 45, "build_loops": 470, "on_geyser": False, "needs_pylon": False, "needs_creep": False,
+    },
+    "barracks": {
+        "unit_id": 21, "race": "Terran", "footprint": 3, "build_ability": 321,
+        "builder_uid": 45, "build_loops": 1030, "on_geyser": False, "needs_pylon": False, "needs_creep": False,
+    },
+    "pylon": {
+        "unit_id": 60, "race": "Protoss", "footprint": 2, "build_ability": 881,
+        "builder_uid": 84, "build_loops": 403, "on_geyser": False, "needs_pylon": False, "needs_creep": False,
+    },
+    "gateway": {
+        "unit_id": 62, "race": "Protoss", "footprint": 3, "build_ability": 883,
+        "builder_uid": 84, "build_loops": 1030, "on_geyser": False, "needs_pylon": True, "needs_creep": False,
+    },
+    "assimilator": {
+        "unit_id": 61, "race": "Protoss", "footprint": 3, "build_ability": 882,
+        "builder_uid": 84, "build_loops": 470, "on_geyser": True, "needs_pylon": False, "needs_creep": False,
+    },
+    "refinery": {
+        "unit_id": 20, "race": "Terran", "footprint": 3, "build_ability": 320,
+        "builder_uid": 45, "build_loops": 470, "on_geyser": True, "needs_pylon": False, "needs_creep": False,
+    },
+    "extractor": {
+        "unit_id": 88, "race": "Zerg", "footprint": 3, "build_ability": 1154,
+        "builder_uid": 104, "build_loops": 470, "on_geyser": True, "needs_pylon": False, "needs_creep": False,
+    },
+}
+STARTER_BUILDING_UIDS: set[int] = {int(v["unit_id"]) for v in STARTER_BUILDING_SPECS.values()}
 
 # Exact SC2 4.10 weapon/combat capability tables for unarmed/incapable-survivor termination
 PURE_UNARMED_IDS = {
@@ -319,10 +358,11 @@ GROUND_ONLY_WEAPON_IDS = {
 }
 AIR_ONLY_WEAPON_IDS = {112, 23, 99}  # corruptor, missile-turret, spore-crawler
 BOTH_WEAPON_IDS = {
-    48, 50, 52, 498, 500, 692, 57,                       # Terran G+A
+    48, 50, 52, 691, 498, 500, 692, 57,                  # Terran G+A (incl. thor-ap)
     74, 77, 141, 80, 79, 496, 66,                        # Protoss G+A (incl. photon-cannon)
     688, 690, 107, 117, 108, 126, 125,                   # Zerg G+A
 }
+MASSIVE_ARMORED_AIR_IDS = {57, 79, 496, 114, 112}  # battlecruiser, carrier, tempest, brood-lord, corruptor
 MASSIVE_GROUND_IDS = {52, 4, 141, 109, 131}  # thor, colossus, archon, ultralisk (immune to Graviton Beam)
 
 
@@ -669,6 +709,9 @@ class SkirmishSpec:
     pre_sieged: bool = False
     p1_loaded_transports: list[dict[str, Any]] = field(default_factory=list)
     p2_loaded_transports: list[dict[str, Any]] = field(default_factory=list)
+    p2_worker_micro: str = "brawl"       # brawl | cooldown-weave-kite
+    p1_minerals: int = 0                 # optional target starting mineral bank for P1 (0 = default 50M)
+    p1_starter_buildings: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -682,6 +725,120 @@ class ArenaSite:
     py: float = 1.0
     high_height: int | None = None
     low_height: int | None = None
+
+
+def extract_main_mineral_info(
+    units: list[Any],
+    th_pos: tuple[float, float],
+    max_dist: float = 12.0,
+) -> tuple[list[int], list[tuple[float, float]]]:
+    """Extract deterministically arc-sorted mineral patch (tags, positions) around `th_pos`
+    from the owning player's own SC2 observation namespace."""
+    th_x, th_y = float(th_pos[0]), float(th_pos[1])
+    near = [
+        u for u in units
+        if int(getattr(u, "unit_type", 0)) in MINERAL_IDS
+        and math.hypot(float(u.pos.x) - th_x, float(u.pos.y) - th_y) <= max_dist
+    ]
+    near.sort(key=lambda u: math.atan2(float(u.pos.y) - th_y, float(u.pos.x) - th_x))
+    return (
+        [int(u.tag) for u in near],
+        [(float(u.pos.x), float(u.pos.y)) for u in near],
+    )
+
+
+def build_site_from_mineral_positions(
+    th_pos: tuple[float, float],
+    mineral_positions: list[tuple[float, float]],
+    map_center: tuple[float, float] = (88.0, 88.0),
+) -> ArenaSite:
+    """Build a main-base ArenaSite centered on `th_pos` with +u pointing away from minerals."""
+    th_x, th_y = float(th_pos[0]), float(th_pos[1])
+    if mineral_positions:
+        mx = sum(p[0] for p in mineral_positions) / len(mineral_positions)
+        my = sum(p[1] for p in mineral_positions) / len(mineral_positions)
+        vx, vy = th_x - mx, th_y - my
+    else:
+        vx, vy = float(map_center[0]) - th_x, float(map_center[1]) - th_y
+    vlen = math.hypot(vx, vy)
+    ux, uy = (vx / vlen, vy / vlen) if vlen > 0.2 else (1.0, 0.0)
+    return ArenaSite(
+        terrain="mineral-line-harass",
+        cx=th_x,
+        cy=th_y,
+        ux=ux,
+        uy=uy,
+        px=-uy,
+        py=ux,
+    )
+
+
+def compute_per_patch_worker_positions(
+    mineral_positions: list[tuple[float, float]],
+    th_pos: tuple[float, float],
+    count: int,
+    shift_toward_th: float = 1.35,
+) -> list[tuple[float, float]]:
+    """Distribute `count` workers cleanly 2-per-mineral-patch along a TownHall's live mineral arc."""
+    if count <= 0:
+        return []
+    th_x, th_y = float(th_pos[0]), float(th_pos[1])
+    if not mineral_positions:
+        return [(th_x - 3.0, th_y) for _ in range(count)]
+    n_p = len(mineral_positions)
+    out: list[tuple[float, float]] = []
+    for i in range(count):
+        mx, my = mineral_positions[(i // 2) % n_p]
+        vx, vy = th_x - mx, th_y - my
+        vlen = max(0.1, math.hypot(vx, vy))
+        ux, uy = vx / vlen, vy / vlen
+        px, py = -uy, ux
+        lat = -0.35 if (i % 2 == 0) else 0.35
+        out.append((mx + shift_toward_th * ux + lat * px, my + shift_toward_th * uy + lat * py))
+    return out
+
+
+def evaluate_combat_verdict(
+    scen: SkirmishSpec,
+    p1_tag: str,
+    p2_tag: str,
+    trade: float,
+    p1_lost: float,
+    p2_lost: float,
+    end_reason: str,
+    ko_winner_side: int,
+    p1_bc_start: int = 0,
+    p1_bc_alive: int = 0,
+    p1_jump_cmds: int = 0,
+) -> tuple[str, str]:
+    """Evaluate combat-mode `(winner, win_type)` with principled BC escape-jump & spellcaster trade rules."""
+    # BC tactical-jump hull preservation (`y07`, `t15`): don't penalize a successful escape-jump as a stall Draw/Loss!
+    if (
+        end_reason == "no_damage_stalemate"
+        and p1_bc_start > 0
+        and p1_bc_alive >= p1_bc_start
+        and p1_jump_cmds > 0
+    ):
+        if "bc-tactical-jump-escape" in scen.patterns and p2_lost >= 350.0:
+            return p1_tag, "escape_jump_pass"
+        if "bc-tactical-jump" in scen.patterns and trade >= 1.0:
+            return p1_tag, "points"
+
+    # Positive-trade spellcaster/support survivor (`z14`, `n01`): don't award P2 an artificial KO loss
+    # when P1 already traded ahead (`trade >= 1.05`) and only energy casters / transports survived!
+    eff_ko = ko_winner_side
+    if end_reason in ("ko_unarmed_only", "ko_incapable_survivors") and ko_winner_side == 2 and trade >= 1.05:
+        eff_ko = 0
+
+    if eff_ko == 1:
+        return p1_tag, "ko"
+    if eff_ko == 2:
+        return p2_tag, "ko"
+    if trade >= POINTS_WIN_TRADE:
+        return p1_tag, "points"
+    if trade <= POINTS_LOSS_TRADE:
+        return p2_tag, "points"
+    return "Draw", "draw"
 
 
 def is_p2_worker_rush_spec(scen: SkirmishSpec) -> bool:
@@ -701,22 +858,102 @@ def plan_worker_rush_orders(
     en_gnd: list[Any],
     site: ArenaSite,
     use_main_base: bool,
+    worker_micro: str = "brawl",
+    p2_mineral_tags: list[int] | None = None,
+    p2_home_pos: tuple[float, float] | None = None,
 ) -> list[tuple[int, int | None, tuple[float, float] | None, list[int]]]:
-    """Compute aggressive per-worker rush orders for pure worker-rush P2 forces.
+    """Compute per-worker rush orders for pure worker-rush P2 forces.
 
     Returns `(ability_id, target_unit_tag_or_None, target_pos_or_None, unit_tags)`:
-    - When P1 ground targets (workers/defenders) are visible, assign each P2 worker
-      directly to its nearest visible ground target (`ability_id=23, target_unit_tag`) so
-      all rush workers surround/fight immediately without clumping on 1 target or
-      getting distracted by P1's starting TownHall.
-    - When P1 units are momentarily out of 8-tile worker sight (e.g. frame 0 across
-      the TownHall), `Move (16)` past the TownHall toward the mineral pocket while far
-      (`> 4.5t`), then `Attack-Move (23)` toward `(site.cx, site.cy)` once inside.
+    - `"brawl"` (default): aggressive surround (`ability_id=23, target_unit_tag`) on nearest
+      visible ground target; moves past TownHall into mineral pocket when no enemy is in sight.
+    - `"cooldown-weave-kite"`: realistic cooldown-weaving + home-mineral-walk (`3666`) kiting:
+      * When `weapon_cooldown > 0` (within 18t of P1 base) OR wounded (`hp+shield < 70%` with
+        unfinished shields or enemy within 4t, inside a 13.5t–18.5t leash): mineral-walk (`3666`)
+        toward P2's home mineral patch (phasing through unit collision & pulling naive chasers).
+      * When wounded outside the 13.5t leash & safe (`d_en > 4.5t`) while shields regen: `Stop (4)`
+        so Probes recharge shields right outside P1's main and re-dive once healthy.
+      * When off-cooldown & healthy: focus-fire nearest (lowest-HP tie-broken) P1 worker/defender.
     """
     if not my_workers:
         return []
     if en_gnd:
-        by_tgt: dict[int, list[int]] = {}
+        if worker_micro == "cooldown-weave-kite":
+            kite_tags: list[int] = []
+            hold_tags: list[int] = []
+            by_tgt: dict[int, list[int]] = {}
+            en_workers = [e for e in en_gnd if int(getattr(e, "unit_type", 0)) in WORKER_IDS]
+            for w in my_workers:
+                wx, wy = float(w.pos.x), float(w.pos.y)
+                w_hp = float(getattr(w, "health", 0.0))
+                w_hp_max = float(getattr(w, "health_max", 0.0))
+                w_sh = float(getattr(w, "shield", 0.0))
+                w_sh_max = float(getattr(w, "shield_max", 0.0))
+                w_cd = float(getattr(w, "weapon_cooldown", 0.0))
+                tot_max = max(1.0, w_hp_max + w_sh_max)
+                hp_ratio = (w_hp + w_sh) / tot_max
+                dist_site = math.hypot(wx - site.cx, wy - site.cy)
+                nearest_any = min(
+                    en_gnd,
+                    key=lambda e: math.hypot(float(e.pos.x) - wx, float(e.pos.y) - wy),
+                )
+                d_en = math.hypot(float(nearest_any.pos.x) - wx, float(nearest_any.pos.y) - wy)
+                shields_depleted = (w_sh_max > 0.0 and w_sh < w_sh_max - 0.5)
+                wounded = (hp_ratio < 0.70) and (shields_depleted or d_en <= 4.0)
+
+                if w_cd > 0.0 and dist_site < 18.0:
+                    kite_tags.append(int(w.tag))
+                elif wounded:
+                    if dist_site < 13.5 or (dist_site < 18.5 and d_en <= 4.5):
+                        kite_tags.append(int(w.tag))
+                    elif shields_depleted and d_en > 4.5:
+                        hold_tags.append(int(w.tag))
+                    else:
+                        # Outside leash, safe, non-shielded or shields already full -> re-engage
+                        pool = en_workers if (en_workers and d_en > 2.2) else en_gnd
+                        tgt = min(
+                            pool,
+                            key=lambda e: (
+                                math.hypot(float(e.pos.x) - wx, float(e.pos.y) - wy)
+                                + 0.06 * (float(e.health) + float(getattr(e, "shield", 0.0))),
+                                float(e.health) + float(getattr(e, "shield", 0.0)),
+                            ),
+                        )
+                        by_tgt.setdefault(int(tgt.tag), []).append(int(w.tag))
+                else:
+                    # Off-cooldown & healthy: dive nearest/weakest P1 worker (or point-blank combat threat)
+                    near_workers = [
+                        e for e in en_workers
+                        if math.hypot(float(e.pos.x) - wx, float(e.pos.y) - wy) <= 9.0
+                    ]
+                    if d_en <= 2.2 and int(getattr(nearest_any, "unit_type", 0)) not in WORKER_IDS:
+                        tgt = nearest_any
+                    else:
+                        pool = near_workers if near_workers else (en_workers if en_workers else en_gnd)
+                        tgt = min(
+                            pool,
+                            key=lambda e: (
+                                math.hypot(float(e.pos.x) - wx, float(e.pos.y) - wy)
+                                + 0.06 * (float(e.health) + float(getattr(e, "shield", 0.0))),
+                                float(e.health) + float(getattr(e, "shield", 0.0)),
+                            ),
+                        )
+                    by_tgt.setdefault(int(tgt.tag), []).append(int(w.tag))
+
+            out_orders: list[tuple[int, int | None, tuple[float, float] | None, list[int]]] = []
+            if kite_tags:
+                if p2_mineral_tags:
+                    out_orders.append((3666, int(p2_mineral_tags[0]), None, kite_tags))
+                else:
+                    ret_pos = p2_home_pos or (site.cx + 12.0 * site.ux, site.cy + 12.0 * site.uy)
+                    out_orders.append((16, None, ret_pos, kite_tags))
+            if hold_tags:
+                out_orders.append((4, None, None, hold_tags))
+            for tid, tags in by_tgt.items():
+                out_orders.append((23, tid, None, tags))
+            return out_orders
+
+        by_tgt_b: dict[int, list[int]] = {}
         for w in my_workers:
             tgt = min(
                 en_gnd,
@@ -725,8 +962,8 @@ def plan_worker_rush_orders(
                     float(e.health) + float(getattr(e, "shield", 0.0)),
                 ),
             )
-            by_tgt.setdefault(int(tgt.tag), []).append(int(w.tag))
-        return [(23, tid, None, tags) for tid, tags in by_tgt.items()]
+            by_tgt_b.setdefault(int(tgt.tag), []).append(int(w.tag))
+        return [(23, tid, None, tags) for tid, tags in by_tgt_b.items()]
 
     if use_main_base:
         rx = site.cx - 3.0 * site.ux
@@ -809,6 +1046,38 @@ def _parse_loaded_transports(
     return parsed
 
 
+def _parse_starter_buildings(
+    entries: list[Any] | None,
+    sid: str,
+) -> list[dict[str, Any]]:
+    """Parse & validate P1 starter production/econ buildings: {unit, dx, dy, progress, halted, on_geyser}."""
+    parsed: list[dict[str, Any]] = []
+    for idx, item in enumerate(entries or []):
+        if not isinstance(item, dict):
+            raise ValueError(f"Scenario {sid!r} p1_starter_buildings[{idx}] must be an object, got {item!r}")
+        uname = str(item.get("unit", "")).strip()
+        if uname not in STARTER_BUILDING_SPECS:
+            raise ValueError(
+                f"Scenario {sid!r} p1_starter_buildings[{idx}] invalid building {uname!r} "
+                f"(valid: {sorted(STARTER_BUILDING_SPECS)})"
+            )
+        spec = STARTER_BUILDING_SPECS[uname]
+        dx = float(item.get("dx", 4.0))
+        dy = float(item.get("dy", 4.0))
+        progress = float(item.get("progress", 1.0))
+        halted = bool(item.get("halted", False))
+        on_geyser = bool(item.get("on_geyser", spec["on_geyser"]))
+        parsed.append({
+            "unit": uname,
+            "dx": dx,
+            "dy": dy,
+            "progress": progress,
+            "halted": halted,
+            "on_geyser": on_geyser,
+        })
+    return parsed
+
+
 def load_scenarios(scenarios_path: str = "", repo_dir: Path | None = None) -> list[SkirmishSpec]:
     """Load skirmish scenarios from --scenarios path, tools/arena-scenarios.json, or fallback."""
     cand: Path | None = None
@@ -871,6 +1140,13 @@ def load_scenarios(scenarios_path: str = "", repo_dir: Path | None = None) -> li
         p2_u = _parse_unit_entries(sc.get("p2_units") or [], sid, "p2_units", p2_pre_b, pre_s)
         p1_lt = _parse_loaded_transports(sc.get("p1_loaded_transports"), sid, "p1_loaded_transports")
         p2_lt = _parse_loaded_transports(sc.get("p2_loaded_transports"), sid, "p2_loaded_transports")
+        p1_sb = _parse_starter_buildings(sc.get("p1_starter_buildings"), sid)
+        p2_wm = str(sc.get("p2_worker_micro", "brawl")).strip() or "brawl"
+        if p2_wm not in VALID_P2_WORKER_MICROS:
+            raise ValueError(
+                f"Scenario {sid!r} has invalid p2_worker_micro {p2_wm!r} (valid: {VALID_P2_WORKER_MICROS})"
+            )
+        p1_mins = int(sc.get("p1_minerals", 0) or 0)
         if not p1_u and not p1_lt:
             raise ValueError(f"Scenario {sid!r} must have at least one p1_units or p1_loaded_transports entry")
         if not p2_u and not p2_lt:
@@ -905,6 +1181,9 @@ def load_scenarios(scenarios_path: str = "", repo_dir: Path | None = None) -> li
             pre_sieged=pre_s,
             p1_loaded_transports=p1_lt,
             p2_loaded_transports=p2_lt,
+            p2_worker_micro=p2_wm,
+            p1_minerals=p1_mins,
+            p1_starter_buildings=p1_sb,
         ))
     return specs
 
@@ -935,6 +1214,31 @@ def validate_scenarios(specs: list[SkirmishSpec]) -> list[str]:
             ur = UPGRADE_SPECS[u][0]
             if ur != s.enemy_race:
                 errs.append(f"{s.id}: p2_upgrade {u!r} ({ur}) mismatches enemy_race={s.enemy_race!r}")
+        if s.p2_worker_micro not in VALID_P2_WORKER_MICROS:
+            errs.append(f"{s.id}: invalid p2_worker_micro={s.p2_worker_micro!r}")
+        if s.p2_worker_micro != "brawl" and not is_p2_worker_rush_spec(s):
+            errs.append(f"{s.id}: p2_worker_micro={s.p2_worker_micro!r} requires a pure P2 worker rush")
+        if s.p1_minerals < 0 or s.p1_minerals > 2000:
+            errs.append(f"{s.id}: p1_minerals={s.p1_minerals} out of [0, 2000]")
+        if (s.p1_minerals > 0 or s.p1_starter_buildings) and not s.use_main_base:
+            errs.append(f"{s.id}: p1_minerals/p1_starter_buildings requires use_main_base=true")
+        for sb_idx, sb in enumerate(s.p1_starter_buildings):
+            bname = sb["unit"]
+            bspec = STARTER_BUILDING_SPECS.get(bname)
+            if bspec is None:
+                errs.append(f"{s.id}: p1_starter_buildings[{sb_idx}] unknown building {bname!r}")
+                continue
+            if bspec["race"] != s.our_race:
+                errs.append(f"{s.id}: p1_starter_buildings[{sb_idx}] {bname!r} ({bspec['race']}) mismatches our_race={s.our_race!r}")
+            prog = float(sb.get("progress", 1.0))
+            if prog <= 0.0 or prog > 1.0:
+                errs.append(f"{s.id}: p1_starter_buildings[{sb_idx}] {bname!r} progress={prog} out of (0, 1]")
+            if sb.get("halted") and prog >= 0.99:
+                errs.append(f"{s.id}: p1_starter_buildings[{sb_idx}] {bname!r} halted=true requires progress < 1.0")
+            if sb.get("halted") and s.our_race != "Terran":
+                errs.append(f"{s.id}: p1_starter_buildings[{sb_idx}] {bname!r} halted=true is only valid for Terran")
+            if abs(float(sb.get("dx", 0.0))) > 25.0 or abs(float(sb.get("dy", 0.0))) > 25.0:
+                errs.append(f"{s.id}: p1_starter_buildings[{sb_idx}] {bname!r} offset out of bounds")
         if s.scoring_mode == "mineral-defense":
             if not s.use_main_base:
                 errs.append(f"{s.id}: mineral-defense should enable use_main_base")
@@ -987,7 +1291,13 @@ def print_scenario_listing(specs: list[SkirmishSpec], validated: bool = False) -
         fc_mk = "*" if s.fast_core else " "
         lt_tag = ""
         if s.p1_loaded_transports or s.p2_loaded_transports:
-            lt_tag = f" [loaded:{len(s.p1_loaded_transports)}/{len(s.p2_loaded_transports)}]"
+            lt_tag += f" [loaded:{len(s.p1_loaded_transports)}/{len(s.p2_loaded_transports)}]"
+        if s.p2_worker_micro != "brawl":
+            lt_tag += f" [{s.p2_worker_micro}]"
+        if s.p1_starter_buildings:
+            lt_tag += f" [bldgs:{len(s.p1_starter_buildings)}]"
+        if s.p1_minerals > 0:
+            lt_tag += f" [{s.p1_minerals}M]"
         print(
             f"{idx:3d}. [{fc_mk}] {s.id:<58s} {s.our_race[0]}v{s.enemy_race[0]} "
             f"| {s.category:<18s} | {s.scoring_mode:<15s} | {s.terrain:<19s}{lt_tag}"
@@ -1043,8 +1353,9 @@ def filter_scenarios(
         want_cats = {c.strip().lower() for c in category_filter.split(",") if c.strip()}
         out = [s for s in out if s.category.lower() in want_cats]
     if scenario_filter:
-        needle = scenario_filter.lower()
-        out = [s for s in out if needle in s.id.lower()]
+        needles = [tok.strip().lower() for tok in scenario_filter.split(",") if tok.strip()]
+        if needles:
+            out = [s for s in out if any(n in s.id.lower() for n in needles)]
     if not out:
         raise ValueError(
             f"No scenarios matched suite={suite_filter!r} race={race!r} enemy_race={enemy_race!r} "
@@ -1052,6 +1363,11 @@ def filter_scenarios(
             f"category={category_filter!r} scenario={scenario_filter!r}"
         )
     return out
+
+
+def _needs_isolated_batch(s: SkirmishSpec) -> bool:
+    """Return True when a scenario requires a clean fresh match (exact 50M bank & fresh game_loop)."""
+    return bool(s.p1_minerals > 0 or s.p1_starter_buildings or s.p2_worker_micro != "brawl")
 
 
 def partition_duel_batches(
@@ -1064,6 +1380,9 @@ def partition_duel_batches(
     p1_upgrades(s_i) <= p1_upgrades(s_{i+1}) and p2_upgrades(s_i) <= p2_upgrades(s_{i+1}),
     ensuring 100% exact per-scenario upgrades with zero cross-duel leakage. Chains longer
     than `max_batch_size` are split into bounded sub-batches for fast parallel execution.
+    Full-lifecycle econ/kiting drills (`p1_minerals`, `p1_starter_buildings`, or
+    `p2_worker_micro != "brawl"`) always get their own isolated fresh match container so
+    P1 starts at exact 50M and fresh early game_loop with zero prior-round carryover.
     """
     by_pair: dict[tuple[str, str], list[tuple[int, SkirmishSpec]]] = {}
     pair_order: list[tuple[str, str]] = []
@@ -1085,7 +1404,11 @@ def partition_duel_batches(
             ),
         )
         chains: list[list[SkirmishSpec]] = []
+        isolated: list[list[SkirmishSpec]] = []
         for _orig_idx, s in items:
+            if _needs_isolated_batch(s):
+                isolated.append([s])
+                continue
             s_p1 = set(s.p1_upgrades)
             s_p2 = set(s.p2_upgrades)
             best_ci: int | None = None
@@ -1105,7 +1428,7 @@ def partition_duel_batches(
                 chains[best_ci].append(s)
             else:
                 chains.append([s])
-        for b_idx, ch in enumerate(chains):
+        for b_idx, ch in enumerate(chains + isolated):
             batches.append((r1, r2, b_idx, ch))
     return batches
 
@@ -1237,7 +1560,7 @@ def _build_aggregate_report(
         l_rows = [s for s in rows if s.get("winner") in loss_tags]
         d_rows = [s for s in rows if s.get("winner") not in (win_tag, *loss_tags)]
         ko_w = sum(1 for s in w_rows if s.get("win_type", "ko") == "ko")
-        pts_w = sum(1 for s in w_rows if s.get("win_type") == "points")
+        pts_w = sum(1 for s in w_rows if s.get("win_type") in ("points", "escape_jump_pass"))
         econ_w = sum(1 for s in w_rows if s.get("win_type") == "econ_pass")
         runby_w = sum(1 for s in w_rows if s.get("win_type") == "runby_pass")
         ko_l = sum(1 for s in l_rows if s.get("win_type", "ko") == "ko")
@@ -1440,6 +1763,43 @@ def build_render_race_spec(
     }
 
 
+def extract_sc2_early_game_end(
+    resp_status: int,
+    player_results: Any,
+    ended_status: int = 4,
+) -> tuple[bool, str | None, int]:
+    """Detect early SC2 match termination (`Defeat`/`Victory`/`Tie` or `status == ended`).
+
+    Returns `(ended_now, end_reason, ko_winner_side)` where `ko_winner_side` is `1` (P1 win),
+    `2` (P2 win), or `0` (tie/unknown). Ensures early-ended batch duels (e.g., home TownHall
+    destroyed mid-duel) are always finalized & recorded in output JSON instead of dropped.
+    """
+    p1_res = None
+    p2_res = None
+    for pr in (player_results or ()):
+        pid = int(getattr(pr, "player_id", 0))
+        rcode = int(getattr(pr, "result", 0))
+        if pid == 1:
+            p1_res = rcode
+        elif pid == 2:
+            p2_res = rcode
+    if p1_res == 1:
+        return True, "sc2_game_victory", 1
+    if p1_res == 2:
+        return True, "sc2_game_defeat", 2
+    if p1_res == 3:
+        return True, "sc2_game_tie", 0
+    if p2_res == 1:
+        return True, "sc2_game_defeat", 2
+    if p2_res == 2:
+        return True, "sc2_game_victory", 1
+    if p2_res == 3:
+        return True, "sc2_game_tie", 0
+    if int(resp_status or 0) == int(ended_status):
+        return True, "sc2_game_ended", 0
+    return False, None, 0
+
+
 def run_host_driver(args: argparse.Namespace) -> int:
     t0 = time.monotonic()
     repo_dir = Path(args.repo_dir).resolve()
@@ -1552,6 +1912,61 @@ def run_host_driver(args: argparse.Namespace) -> int:
                         p2_color=DEFAULT_P2_COLOR,
                     )
                 )
+
+        # L46-P0-3a: If an early SC2 Defeat/Victory ended a multi-scenario container mid-batch,
+        # automatically run a single clean recovery wave for any unrun trailing scenarios so
+        # every requested scenario (`66/66`) is always recorded & rendered!
+        missing_specs = [s for s in matched_specs if s.id not in by_id_res]
+        if missing_specs:
+            retry_batches = partition_duel_batches(missing_specs)
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=min(max_workers, max(1, len(retry_batches)))
+            ) as retry_pool:
+                retry_futs = {}
+                for r1, r2, b_idx, b_specs in retry_batches:
+                    btag = f"{r1}_vs_{r2}_retry_b{b_idx}"
+                    fut = retry_pool.submit(
+                        run_single_container,
+                        args,
+                        r1,
+                        save_replays_dir,
+                        r2,
+                        [s.id for s in b_specs],
+                        btag,
+                    )
+                    retry_futs[fut] = (r1, r2, b_idx, btag)
+                retry_reports: dict[str, dict[str, Any]] = {}
+                for fut in concurrent.futures.as_completed(retry_futs):
+                    r1, r2, b_idx, btag = retry_futs[fut]
+                    retry_reports[btag] = fut.result()
+            for r1, r2, b_idx, _b_specs in retry_batches:
+                btag = f"{r1}_vs_{r2}_retry_b{b_idx}"
+                sr = retry_reports[btag]
+                for sc_res in sr.get("scenarios", []):
+                    sid = sc_res.get("id")
+                    if sid and sid not in by_id_res:
+                        by_id_res[sid] = sc_res
+                if sr.get("debug_errors") or sr.get("bot1_log_tail") or sr.get("bot2_log_tail"):
+                    print(
+                        f"[DEBUG {opp_mode} {btag}] phase={sr.get('debug_phase')} errors={sr.get('debug_errors')}\n"
+                        f"  bot1_tail={sr.get('bot1_log_tail', '')[-400:]}\n"
+                        f"  bot2_tail={sr.get('bot2_log_tail', '')[-400:]}",
+                        file=sys.stderr,
+                    )
+                if sr.get("replay_path"):
+                    race_reports_for_render.append(
+                        build_render_race_spec(
+                            r1=r1,
+                            r2=r2,
+                            btag=btag,
+                            opp_mode=opp_mode,
+                            map_host_path=map_host_path,
+                            replay_path=sr["replay_path"],
+                            duels=sr.get("scenarios", []),
+                            p1_color=DEFAULT_P1_COLOR,
+                            p2_color=DEFAULT_P2_COLOR,
+                        )
+                    )
 
         all_scens = [by_id_res[s.id] for s in matched_specs if s.id in by_id_res] + extra_res
         sc2_wall_ms = round((time.monotonic() - t0) * 1000.0, 1)
@@ -1817,6 +2232,7 @@ class MapTerrainAnalyzer:
         footprint_size: int = 2,
         avoid: list[tuple[float, float, float]] | None = None,
         max_rad: int = 12,
+        creep_img: Any = None,
     ) -> tuple[float, float]:
         """Find closest buildable grid center for an NxN structure (5x5 uses .5 center, 2x2 uses integer center)."""
         half_off = 0.5 if (footprint_size % 2 == 1) else 0.0
@@ -1825,7 +2241,20 @@ class MapTerrainAnalyzer:
         ix, iy = int(round(x - half_off)), int(round(y - half_off))
         avoid_list = avoid or []
 
-        def ok(cx_i: int, cy_i: int) -> bool:
+        def _is_creep(cx_t: int, cy_t: int) -> bool:
+            if creep_img is None or not getattr(creep_img, "data", None):
+                return True
+            cw = int(creep_img.size.x)
+            ch = int(creep_img.size.y)
+            if cx_t < 0 or cy_t < 0 or cx_t >= cw or cy_t >= ch:
+                return False
+            idx = cy_t * cw + cx_t
+            bpp = int(creep_img.bits_per_pixel)
+            if bpp == 1:
+                return bool((creep_img.data[idx // 8] >> (7 - (idx % 8))) & 1)
+            return creep_img.data[idx] != 0
+
+        def ok(cx_i: int, cy_i: int, check_creep: bool) -> bool:
             cx_f, cy_f = cx_i + half_off, cy_i + half_off
             if any(math.hypot(cx_f - ax, cy_f - ay) < ar for ax, ay, ar in avoid_list):
                 return False
@@ -1833,25 +2262,37 @@ class MapTerrainAnalyzer:
                 for oy in range(lo, hi):
                     if not self.is_buildable(cx_i + ox, cy_i + oy, margin=8):
                         return False
+                    if check_creep and not _is_creep(cx_i + ox, cy_i + oy):
+                        return False
             return True
 
-        if ok(ix, iy):
-            return float(ix) + half_off, float(iy) + half_off
-        for rad in range(1, max_rad + 1):
-            best: tuple[float, float, float] | None = None
-            for dx in range(-rad, rad + 1):
-                for dy in range(-rad, rad + 1):
-                    if max(abs(dx), abs(dy)) != rad:
-                        continue
-                    tx, ty = ix + dx, iy + dy
-                    if ok(tx, ty):
-                        cx_f, cy_f = tx + half_off, ty + half_off
-                        d2 = (cx_f - x) ** 2 + (cy_f - y) ** 2
-                        if best is None or d2 < best[0]:
-                            best = (d2, cx_f, cy_f)
-            if best is not None:
-                return best[1], best[2]
+        passes = (True, False) if (creep_img is not None and getattr(creep_img, "data", None)) else (False,)
+        for check_creep in passes:
+            if ok(ix, iy, check_creep):
+                return float(ix) + half_off, float(iy) + half_off
+            for rad in range(1, max_rad + 1):
+                best: tuple[float, float, float] | None = None
+                for dx in range(-rad, rad + 1):
+                    for dy in range(-rad, rad + 1):
+                        if max(abs(dx), abs(dy)) != rad:
+                            continue
+                        tx, ty = ix + dx, iy + dy
+                        if ok(tx, ty, check_creep):
+                            cx_f, cy_f = tx + half_off, ty + half_off
+                            d2 = (cx_f - x) ** 2 + (cy_f - y) ** 2
+                            if best is None or d2 < best[0]:
+                                best = (d2, cx_f, cy_f)
+                if best is not None:
+                    return best[1], best[2]
         return float(ix) + half_off, float(iy) + half_off
+
+    def site_offset_world(self, site: ArenaSite, dx: float, dy: float) -> tuple[float, float]:
+        """Project local (dx, dy) in `site` frame into clamped world coordinates."""
+        wx = site.cx + dx * site.ux + dy * site.px
+        wy = site.cy + dx * site.uy + dy * site.py
+        wx = max(8.0, min(float(self.w - 8), wx))
+        wy = max(8.0, min(float(self.h - 8), wy))
+        return wx, wy
 
     def snap_pathable(
         self,
@@ -1888,19 +2329,29 @@ class MapTerrainAnalyzer:
             return self.snap_pathable(x, y, max_rad=max_rad + 2, target_height=None)
         return float(x), float(y)
 
-    def _find_open_site(self, rx: int, ry: int, fallback: ArenaSite | None = None) -> ArenaSite:
+    def _find_open_site(
+        self,
+        rx: int,
+        ry: int,
+        fallback: ArenaSite | None = None,
+        min_start_dist: float = 28.0,
+    ) -> ArenaSite:
         cx0, cy0 = self.w // 2, self.h // 2
-        for rad in range(0, 50, 2):
-            for dx in range(-rad, rad + 1, 2):
-                for dy in (-rad, rad) if abs(dx) < rad else range(-rad, rad + 1, 2):
-                    tx, ty = cx0 + dx, cy0 + dy
-                    if all(
-                        self.is_pathable(tx + ox, ty + oy, margin=14)
-                        for ox in range(-rx, rx + 1, 2)
-                        for oy in range(-ry, ry + 1, 2)
-                    ):
-                        return ArenaSite(terrain="open" if rx <= 8 else "flank-surround", cx=float(tx), cy=float(ty))
-        return fallback or ArenaSite(terrain="open", cx=float(cx0), cy=float(cy0))
+        site_kind = "open" if rx <= 8 else "flank-surround"
+        for req_dist in ((min_start_dist, 0.0) if min_start_dist > 0.0 else (0.0,)):
+            for rad in range(0, 56, 2):
+                for dx in range(-rad, rad + 1, 2):
+                    for dy in (-rad, rad) if abs(dx) < rad else range(-rad, rad + 1, 2):
+                        tx, ty = cx0 + dx, cy0 + dy
+                        if req_dist > 0.0 and self.near_start(float(tx), float(ty), min_dist=req_dist):
+                            continue
+                        if all(
+                            self.is_pathable(tx + ox, ty + oy, margin=14)
+                            for ox in range(-rx, rx + 1, 2)
+                            for oy in range(-ry, ry + 1, 2)
+                        ):
+                            return ArenaSite(terrain=site_kind, cx=float(tx), cy=float(ty))
+        return fallback or ArenaSite(terrain=site_kind, cx=float(cx0), cy=float(cy0))
 
     def _find_ramp_site(self, fallback: ArenaSite) -> ArenaSite:
         """Locate a walkable ramp transitioning between two distinct SC2 elevation plateaus."""
@@ -2012,7 +2463,17 @@ class MapTerrainAnalyzer:
         return best[1] if best is not None else fallback
 
     def refine_mineral_site(self, obs: Any, th_positions: list[tuple[float, float]]) -> None:
-        """Find an unoccupied expansion mineral line directly from SC2 mineral field units."""
+        """Find an unoccupied expansion mineral line directly from SC2 mineral field units
+        and ensure open/flank-surround sites stay >= 28t clear of ALL starting TownHalls."""
+        for tx, ty in th_positions:
+            if not any(math.hypot(tx - sx, ty - sy) < 4.0 for sx, sy in self.start_locs):
+                self.start_locs.append((float(tx), float(ty)))
+        for s_key, rx, ry in (("open", 8, 5), ("flank-surround", 10, 8)):
+            cur_s = self.sites.get(s_key)
+            if cur_s is not None and self.near_start(cur_s.cx, cur_s.cy, min_dist=28.0):
+                self.sites[s_key] = self._find_open_site(
+                    rx=rx, ry=ry, fallback=self.sites.get("open"), min_start_dist=28.0,
+                )
         mins = [
             (float(u.pos.x), float(u.pos.y))
             for u in obs.raw_data.units
@@ -2095,38 +2556,17 @@ class MapTerrainAnalyzer:
         self,
         obs: Any,
         th_pos: tuple[float, float],
-    ) -> tuple[ArenaSite, list[int]]:
-        """Build a spawn-symmetric site centered on P1's actual starting main TownHall & mineral line.
+    ) -> tuple[ArenaSite, list[int], list[tuple[float, float]]]:
+        """Build a spawn-symmetric site centered on a player's actual starting main TownHall & mineral line.
 
         Axis +u points FROM the mineral centroid THROUGH the TownHall into the open base front, so:
           - dx < 0 sits directly between the TownHall and real starting mineral patches (mining workers)
           - dx ~ +1.5..+2.5 sits on the front side of the TownHall (home defenders)
-          - dx ~ +8.5..+9.5 sits right outside P1's starting main (harass entry vector)
+          - dx ~ +8.5..+9.5 sits right outside the starting main (harass entry vector)
         """
-        th_x, th_y = float(th_pos[0]), float(th_pos[1])
-        near_mins = [
-            u for u in obs.raw_data.units
-            if u.unit_type in MINERAL_IDS and math.hypot(float(u.pos.x) - th_x, float(u.pos.y) - th_y) <= 12.0
-        ]
-        if near_mins:
-            mx = sum(float(u.pos.x) for u in near_mins) / len(near_mins)
-            my = sum(float(u.pos.y) for u in near_mins) / len(near_mins)
-            vx, vy = th_x - mx, th_y - my
-        else:
-            vx, vy = (self.w / 2.0) - th_x, (self.h / 2.0) - th_y
-        vlen = math.hypot(vx, vy)
-        ux, uy = (vx / vlen, vy / vlen) if vlen > 0.2 else (1.0, 0.0)
-        px, py = -uy, ux
-        site = ArenaSite(
-            terrain="mineral-line-harass",
-            cx=th_x,
-            cy=th_y,
-            ux=ux,
-            uy=uy,
-            px=px,
-            py=py,
-        )
-        return site, [int(u.tag) for u in near_mins]
+        mtags, mpos = extract_main_mineral_info(obs.raw_data.units, th_pos, max_dist=12.0)
+        site = build_site_from_mineral_positions(th_pos, mpos, map_center=(self.w / 2.0, self.h / 2.0))
+        return site, mtags, mpos
 
     def resolve_spawn_point(
         self,
@@ -2306,8 +2746,22 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         "p2_orig_th_pos": None,
                         "p1_main_mineral_site": None,
                         "p1_main_mineral_tags": [],
+                        "p1_main_mineral_positions": [],
                         "p2_main_mineral_site": None,
                         "p2_main_mineral_tags": [],
+                        "p2_main_mineral_positions": [],
+                        "warmup_spawned_p1_workers": False,
+                        "warmup_spawned_p2_workers": False,
+                        "warmup_spawned_creep_tumors": False,
+                        "warmup_p1_mine_issued": False,
+                        "warmup_p2_mine_issued": False,
+                        "carrier_fill_cheats_on": False,
+                        "carrier_fill_issued_p1": False,
+                        "carrier_fill_issued_p2": False,
+                        "p2_disruptor_cd": {},
+                        "p2_disruptor_next_global": 0,
+                        "p1_bc_start_cnt": 0,
+                        "p1_bc_alive_cnt": 0,
                         "orig_th_positions": [],
                         "mineral_refined": False,
                         "scen_idx": 0,
@@ -2330,6 +2784,17 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         "p2_w_alive_cnt": 0,
                         "cheats_enabled_p1": False,
                         "cheats_enabled_p2": False,
+                        "pre_setup_free_on": False,
+                        "p1_starter_bldg_tags": set(),
+                        "pre_setup_placed": [],
+                        "pre_setup_instant_positions": {},
+                        "pre_setup_inprog": [],
+                        "pre_setup_temp_worker_tags": set(),
+                        "pre_setup_claimed_geysers": set(),
+                        "pre_setup_info": [],
+                        "pre_setup_max_loops": 0,
+                        "pre_bank_mine_issued": False,
+                        "p1_fight_start_minerals": 0,
                         "p2_repair_bank_granted": False,
                         "p2_own_units": None,
                         "p2_own_units_loop": -1,
@@ -2385,6 +2850,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         "prev_unit_hp_map": {},
                         "results": [],
                         "errors": [],
+                        "sc2_ended_reason": None,
+                        "sc2_ended_ko_side": 0,
                         "p1_joined": asyncio.Event(),
                         "done": asyncio.Event(),
                     }
@@ -2539,6 +3006,18 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                     dstate["orig_th_tags"].add(u.tag)
                                     dstate["orig_th_positions"].append((float(u.pos.x), float(u.pos.y)))
                                     break
+                        # Populate `p2_main_mineral_tags` strictly from P2's OWN `sc2_ws2` observation namespace!
+                        # (SC2 assigns distinct neutral unit tags per client; P1's mineral tags are silently rejected on sc2_ws2!)
+                        if dstate["p2_orig_th_pos"] is not None and not dstate["p2_main_mineral_tags"]:
+                            mtags2, mpos2 = extract_main_mineral_info(obs.raw_data.units, dstate["p2_orig_th_pos"], max_dist=12.0)
+                            if mtags2:
+                                an2: MapTerrainAnalyzer | None = dstate["analyzer"]
+                                ctr2 = (an2.w / 2.0, an2.h / 2.0) if an2 is not None else (88.0, 88.0)
+                                dstate["p2_main_mineral_tags"] = mtags2
+                                dstate["p2_main_mineral_positions"] = mpos2
+                                dstate["p2_main_mineral_site"] = build_site_from_mineral_positions(
+                                    dstate["p2_orig_th_pos"], mpos2, map_center=ctr2,
+                                )
                         phase = dstate["phase"]
                         if phase == "clearing":
                             p2_kill = [
@@ -2600,6 +3079,49 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 u.alliance == 1 and u.unit_type in p2_uids and len(u.orders) > 0
                                 for u in obs.raw_data.units
                             )
+                        elif phase == "mine_warmup_wait":
+                            if dstate["warmup_spawned_p2_workers"] and not dstate["warmup_p2_mine_issued"]:
+                                mtags2 = list(dstate["p2_main_mineral_tags"])
+                                p2_ws_wu = [
+                                    u for u in obs.raw_data.units
+                                    if u.display_type == 1 and u.alliance == 1
+                                    and u.tag not in dstate["orig_th_tags"]
+                                    and u.unit_type in WORKER_IDS
+                                ]
+                                if p2_ws_wu and mtags2:
+                                    # Sort workers along the mineral arc around P2's TownHall for exact 2-per-patch saturation!
+                                    th2_x, th2_y = dstate["p2_orig_th_pos"] or (dstate["arena_cx"], dstate["arena_cy"])
+                                    p2_ws_wu.sort(key=lambda wu: math.atan2(float(wu.pos.y) - th2_y, float(wu.pos.x) - th2_x))
+                                    g_wu = [
+                                        sc2api_pb2.Action(
+                                            action_raw=raw_pb2.ActionRaw(
+                                                unit_command=raw_pb2.ActionRawUnitCommand(
+                                                    ability_id=3666,
+                                                    target_unit_tag=mtags2[(i_w // 2) % len(mtags2)],
+                                                    unit_tags=[wu.tag],
+                                                )
+                                            )
+                                        )
+                                        for i_w, wu in enumerate(p2_ws_wu)
+                                    ]
+                                    await rpc(sc2_ws2, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=g_wu)))
+                                    dstate["warmup_p2_mine_issued"] = True
+                        elif phase == "carrier_fill" and dstate["carrier_fill_cheats_on"] and not dstate["carrier_fill_issued_p2"]:
+                            p2_carriers = [u.tag for u in obs.raw_data.units if u.alliance == 1 and u.unit_type == 79]
+                            if p2_carriers:
+                                acts_ic2 = [
+                                    sc2api_pb2.Action(
+                                        action_raw=raw_pb2.ActionRaw(
+                                            unit_command=raw_pb2.ActionRawUnitCommand(
+                                                ability_id=1042,
+                                                unit_tags=p2_carriers,
+                                            )
+                                        )
+                                    )
+                                    for _ in range(4)
+                                ]
+                                await rpc(sc2_ws2, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=acts_ic2)))
+                            dstate["carrier_fill_issued_p2"] = True
                         elif phase == "preload_wait":
                             scen_pl = scenarios[min(dstate["scen_idx"], len(scenarios) - 1)]
                             if not scen_pl.p2_loaded_transports:
@@ -2612,12 +3134,20 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             want_w_hk = bool(
                                 {UNIT_IDS[u] for u, _, _, _ in (scen_hk.p1_units + scen_hk.p2_units)} & WORKER_IDS
                             )
+                            p2_wr_hk = is_p2_worker_rush_spec(scen_hk)
                             cx_hk, cy_hk = dstate["arena_cx"], dstate["arena_cy"]
                             dstate["p2_own_units"] = [
                                 u for u in obs.raw_data.units
                                 if u.display_type == 1 and u.alliance == 1
                                 and u.tag not in dstate["orig_th_tags"]
-                                and (u.unit_type in COMBAT_IDS or (want_w_hk and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx_hk, u.pos.y - cy_hk) < 35.0))
+                                and (
+                                    u.unit_type in COMBAT_IDS
+                                    or (
+                                        want_w_hk
+                                        and u.unit_type in WORKER_IDS
+                                        and (p2_wr_hk or math.hypot(u.pos.x - cx_hk, u.pos.y - cy_hk) < 35.0)
+                                    )
+                                )
                             ]
                             dstate["p2_own_units_loop"] = int(obs.game_loop)
                             if obs.HasField("score"):
@@ -2626,7 +3156,11 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                     dstate["p2_econ_start_minerals"] = cur_p2_cm
                                 dstate["p2_econ_cur_minerals"] = cur_p2_cm
                             if scen_hk.use_p2_main_base and not dstate["p2_runby_mine_issued"]:
-                                p2_ws = [u for u in dstate["p2_own_units"] if u.unit_type in WORKER_IDS]
+                                p2_ws = [
+                                    u for u in dstate["p2_own_units"]
+                                    if u.unit_type in WORKER_IDS
+                                    and not any(o.ability_id in MINING_ORDER_ABILITY_IDS for o in u.orders)
+                                ]
                                 mtags2 = list(dstate["p2_main_mineral_tags"])
                                 if p2_ws and mtags2:
                                     g_acts2 = [
@@ -2634,7 +3168,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             action_raw=raw_pb2.ActionRaw(
                                                 unit_command=raw_pb2.ActionRawUnitCommand(
                                                     ability_id=3666,
-                                                    target_unit_tag=mtags2[i % len(mtags2)],
+                                                    target_unit_tag=mtags2[(i // 2) % len(mtags2)],
                                                     unit_tags=[wu.tag],
                                                 )
                                             )
@@ -2642,7 +3176,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         for i, wu in enumerate(p2_ws)
                                     ]
                                     await rpc(sc2_ws2, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=g_acts2)))
-                                    dstate["p2_runby_mine_issued"] = True
+                                dstate["p2_runby_mine_issued"] = True
                             if dstate["p2_pre_cloak_pending"]:
                                 await _issue_pre_cloak(sc2_ws2, obs)
                                 dstate["p2_pre_cloak_pending"] = False
@@ -2653,7 +3187,15 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         scen_p2: SkirmishSpec,
                     ) -> list[Any]:
                         site_p2 = _site_for_scen(scen_p2)
-                        plan = plan_worker_rush_orders(my_workers, en_gnd, site_p2, scen_p2.use_main_base)
+                        plan = plan_worker_rush_orders(
+                            my_workers,
+                            en_gnd,
+                            site_p2,
+                            scen_p2.use_main_base,
+                            worker_micro=scen_p2.p2_worker_micro,
+                            p2_mineral_tags=list(dstate["p2_main_mineral_tags"]),
+                            p2_home_pos=dstate["p2_orig_th_pos"],
+                        )
                         out: list[Any] = []
                         for ab_id, tid, pos, tags in plan:
                             if tid is not None:
@@ -2662,8 +3204,20 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                     target_unit_tag=tid,
                                     unit_tags=tags,
                                 )
+                            elif pos is not None:
+                                px, py = pos
+                                ucmd = raw_pb2.ActionRawUnitCommand(
+                                    ability_id=ab_id,
+                                    target_world_space_pos=common_pb2.Point2D(x=px, y=py),
+                                    unit_tags=tags,
+                                )
+                            elif ab_id == 4:
+                                ucmd = raw_pb2.ActionRawUnitCommand(
+                                    ability_id=ab_id,
+                                    unit_tags=tags,
+                                )
                             else:
-                                px, py = pos if pos is not None else (site_p2.cx, site_p2.cy)
+                                px, py = (site_p2.cx, site_p2.cy)
                                 ucmd = raw_pb2.ActionRawUnitCommand(
                                     ability_id=ab_id,
                                     target_world_space_pos=common_pb2.Point2D(x=px, y=py),
@@ -2673,14 +3227,13 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         return out
 
                     async def _drive_p2_worker_rush(obs: Any, scen_p2: SkirmishSpec) -> None:
-                        """Keep P2 rush workers attacking P1 in `--opponent self` instead of mining."""
+                        """Keep P2 rush workers attacking/kiting P1 in `--opponent self` instead of mining."""
                         cx_a, cy_a = dstate["arena_cx"], dstate["arena_cy"]
                         my_w = [
                             u for u in obs.raw_data.units
                             if u.display_type == 1 and u.alliance == 1
                             and u.tag not in dstate["orig_th_tags"]
                             and u.unit_type in WORKER_IDS
-                            and math.hypot(u.pos.x - cx_a, u.pos.y - cy_a) < 40.0
                         ]
                         if not my_w:
                             return
@@ -2688,6 +3241,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             u for u in obs.raw_data.units
                             if u.display_type == 1 and u.alliance == 4 and u.cloak != 1
                             and u.tag not in dstate["orig_th_tags"]
+                            and u.tag not in dstate["p1_starter_bldg_tags"]
                             and not (bool(getattr(u, "is_flying", False)) or u.unit_type in AIR_UNIT_IDS)
                             and (u.unit_type in COMBAT_IDS or (u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx_a, u.pos.y - cy_a) < 35.0))
                         ]
@@ -2700,7 +3254,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 dstate["p2_ability_counts"][str(ab)] = dstate["p2_ability_counts"].get(str(ab), 0) + n_tags
                                 if ab == 23:
                                     dstate["p2_attack_cmds"] += n_tags
-                                elif ab == 16:
+                                elif ab in (16, 3666):
                                     dstate["p2_move_cmds"] += n_tags
                             await rpc(sc2_ws2, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=acts)))
 
@@ -2711,30 +3265,47 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         while not dstate["done"].is_set():
                             obs_r = await rpc(sc2_ws2, sc2api_pb2.Request(observation=sc2api_pb2.RequestObservation()))
                             obs = obs_r.observation.observation
+                            p2_ended_now, p2_end_reason, p2_ko_side = extract_sc2_early_game_end(
+                                obs_r.status,
+                                obs_r.observation.player_result,
+                                sc2api_pb2.ended,
+                            )
+                            if p2_ended_now and not dstate["sc2_ended_reason"]:
+                                dstate["sc2_ended_reason"] = p2_end_reason
+                                dstate["sc2_ended_ko_side"] = p2_ko_side
                             await _p2_housekeeping(obs)
                             if dstate["phase"] == "fighting":
                                 scen_p2 = scenarios[min(dstate["scen_idx"], len(scenarios) - 1)]
                                 want_workers_p2 = bool(
                                     {UNIT_IDS[u] for u, _, _, _ in (scen_p2.p1_units + scen_p2.p2_units)} & WORKER_IDS
                                 )
+                                p2_wr_spec = is_p2_worker_rush_spec(scen_p2)
                                 cx_a, cy_a = dstate["arena_cx"], dstate["arena_cy"]
                                 my_u = [
                                     u for u in obs.raw_data.units
                                     if u.display_type == 1 and u.alliance == 1
                                     and u.tag not in dstate["orig_th_tags"]
                                     and u.unit_type not in PURE_UNARMED_IDS
-                                    and (u.unit_type in COMBAT_IDS or (want_workers_p2 and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx_a, u.pos.y - cy_a) < 35.0))
+                                    and (
+                                        u.unit_type in COMBAT_IDS
+                                        or (
+                                            want_workers_p2
+                                            and u.unit_type in WORKER_IDS
+                                            and (p2_wr_spec or math.hypot(u.pos.x - cx_a, u.pos.y - cy_a) < 35.0)
+                                        )
+                                    )
                                 ]
                                 # Ignore undetected cloaked/burrowed units (CloakState.Cloaked == 1) so MicroDummy doesn't freeze!
                                 en_u = [
                                     u for u in obs.raw_data.units
                                     if u.display_type == 1 and u.alliance == 4 and u.cloak != 1
                                     and u.tag not in dstate["orig_th_tags"]
+                                    and u.tag not in dstate["p1_starter_bldg_tags"]
                                     and (u.unit_type in COMBAT_IDS or (want_workers_p2 and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx_a, u.pos.y - cy_a) < 35.0))
                                 ]
                                 en_armed = [u for u in en_u if u.unit_type not in PURE_UNARMED_IDS]
                                 en_targets = en_armed if en_armed else en_u
-                                if scen_p2.scoring_mode == "mineral-defense" or is_p2_worker_rush_spec(scen_p2):
+                                if (scen_p2.scoring_mode == "mineral-defense" or p2_wr_spec) and scen_p2.p2_worker_micro != "cooldown-weave-kite":
                                     en_workers = [u for u in en_targets if u.unit_type in WORKER_IDS]
                                     if en_workers:
                                         en_targets = en_workers
@@ -2775,9 +3346,10 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         )
                                     ))
 
-                                # In `worker-runby`, P2's mining workers stay on minerals while P2's combat defenders fight!
+                                # In any `use_p2_main_base` scenario (`worker-runby`, `s01`, `y06`, `n05`), keep P2's base workers
+                                # realistically mining minerals (2-per-patch) while P2's combat defenders fight!
                                 p2_mining_worker_tags: set[int] = set()
-                                if scen_p2.scoring_mode == "worker-runby":
+                                if scen_p2.use_p2_main_base:
                                     mtags_rb = list(dstate["p2_main_mineral_tags"])
                                     for i_w, wu in enumerate(my_u):
                                         if wu.unit_type in WORKER_IDS:
@@ -2787,7 +3359,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                     action_raw=raw_pb2.ActionRaw(
                                                         unit_command=raw_pb2.ActionRawUnitCommand(
                                                             ability_id=3666,
-                                                            target_unit_tag=mtags_rb[i_w % len(mtags_rb)],
+                                                            target_unit_tag=mtags_rb[(i_w // 2) % len(mtags_rb)],
                                                             unit_tags=[wu.tag],
                                                         )
                                                     )
@@ -2870,6 +3442,72 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                             )
                                                         )
                                                     ))
+
+                                    # MicroDummy Disruptor Purification Nova (`2346`, staggered waves) + Nova ball (`733`) steer (`u07`!)
+                                    en_gnd_sp = [e for e in en_targets if not (bool(getattr(e, "is_flying", False)) or e.unit_type in AIR_UNIT_IDS)]
+                                    if en_gnd_sp:
+                                        p2_novas = [
+                                            u for u in obs.raw_data.units
+                                            if u.display_type == 1 and u.alliance == 1 and u.unit_type == 733
+                                        ]
+                                        for nb in p2_novas:
+                                            tgt_nb = max(
+                                                en_gnd_sp,
+                                                key=lambda e: (
+                                                    sum(1 for e2 in en_gnd_sp if math.hypot(e2.pos.x - e.pos.x, e2.pos.y - e.pos.y) <= 1.8),
+                                                    -math.hypot(e.pos.x - nb.pos.x, e.pos.y - nb.pos.y),
+                                                ),
+                                            )
+                                            acts_p2.append(sc2api_pb2.Action(
+                                                action_raw=raw_pb2.ActionRaw(
+                                                    unit_command=raw_pb2.ActionRawUnitCommand(
+                                                        ability_id=16,
+                                                        target_world_space_pos=common_pb2.Point2D(x=float(tgt_nb.pos.x), y=float(tgt_nb.pos.y)),
+                                                        unit_tags=[nb.tag],
+                                                    )
+                                                )
+                                            ))
+                                        gl_p2 = int(obs.game_loop)
+                                        if gl_p2 >= int(dstate["p2_disruptor_next_global"]):
+                                            cd_map = dstate["p2_disruptor_cd"]
+                                            for du in my_u:
+                                                if du.unit_type == 694 and gl_p2 >= int(cd_map.get(du.tag, 0)):
+                                                    in_rng_d = [e for e in en_gnd_sp if math.hypot(e.pos.x - du.pos.x, e.pos.y - du.pos.y) <= 12.5]
+                                                    if in_rng_d:
+                                                        tgt_d = max(
+                                                            in_rng_d,
+                                                            key=lambda e: (
+                                                                sum(1 for e2 in in_rng_d if math.hypot(e2.pos.x - e.pos.x, e2.pos.y - e.pos.y) <= 1.8),
+                                                                1 if e.unit_type in (502, 503) else 0,
+                                                                -math.hypot(e.pos.x - du.pos.x, e.pos.y - du.pos.y),
+                                                            ),
+                                                        )
+                                                        special_p2_tags.add(du.tag)
+                                                        cd_map[du.tag] = gl_p2 + 480
+                                                        dstate["p2_disruptor_next_global"] = gl_p2 + 36
+                                                        acts_p2.append(sc2api_pb2.Action(
+                                                            action_raw=raw_pb2.ActionRaw(
+                                                                unit_command=raw_pb2.ActionRawUnitCommand(
+                                                                    ability_id=2346,
+                                                                    target_world_space_pos=common_pb2.Point2D(x=float(tgt_d.pos.x), y=float(tgt_d.pos.y)),
+                                                                    unit_tags=[du.tag],
+                                                                )
+                                                            )
+                                                        ))
+                                                        break
+                                    # MicroDummy Thor High-Impact Payload (`2362`) vs Massive/Armored Air (keep Explosive vs Mutalisks!)
+                                    if any(e.unit_type in MASSIVE_ARMORED_AIR_IDS for e in en_targets):
+                                        thor_tags = [u.tag for u in my_u if u.unit_type == 52]
+                                        if thor_tags:
+                                            special_p2_tags.update(thor_tags)
+                                            acts_p2.append(sc2api_pb2.Action(
+                                                action_raw=raw_pb2.ActionRaw(
+                                                    unit_command=raw_pb2.ActionRawUnitCommand(
+                                                        ability_id=2362,
+                                                        unit_tags=thor_tags,
+                                                    )
+                                                )
+                                            ))
 
                                 mobile_my_u = [
                                     u for u in my_u
@@ -3014,6 +3652,14 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 else:
                                     resp = await rpc(sc2_ws2, req)
                                 if req.HasField("observation") and resp.HasField("observation"):
+                                    p2_ended_now, p2_end_reason, p2_ko_side = extract_sc2_early_game_end(
+                                        resp.status,
+                                        resp.observation.player_result,
+                                        sc2api_pb2.ended,
+                                    )
+                                    if p2_ended_now and not dstate["sc2_ended_reason"]:
+                                        dstate["sc2_ended_reason"] = p2_end_reason
+                                        dstate["sc2_ended_ko_side"] = p2_ko_side
                                     await _p2_housekeeping(resp.observation.observation)
                                     if dstate["phase"] == "fighting":
                                         scen_p2_cur = scenarios[min(dstate["scen_idx"], len(scenarios) - 1)]
@@ -3034,7 +3680,11 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         end_reason: str = "max_loops",
                         ko_winner_side: int = 0,
                     ) -> None:
+                        if dstate["scen_idx"] >= len(scenarios):
+                            return
                         scen = scenarios[dstate["scen_idx"]]
+                        if any(r.get("id") == scen.id for r in dstate["results"]):
+                            return
                         p1_lost = max(0.0, dstate["p1_start_val"] - dstate["p1_rem_val"])
                         p2_lost = max(0.0, dstate["p2_start_val"] - dstate["p2_rem_val"])
                         trade = round(p2_lost / max(1.0, p1_lost), 2) if p1_lost > 0 else (99.0 if p2_lost > 0 else 1.0)
@@ -3061,7 +3711,17 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             w_lost = len(dstate["econ_seen_worker_tags"] - dstate["econ_cur_worker_tags"])
                             en_killed = round(p2_lost, 1)
                             net_econ = round(mins_gath + en_killed - 50.0 * w_lost, 1)
-                            passed_econ = (net_econ >= scen.pass_net_econ_min) and (len(dstate["econ_cur_worker_tags"]) > 0) and (ko_winner_side != 2)
+                            kite_wipe_ok = True
+                            kite_req_kills = 0
+                            if scen.p2_worker_micro == "cooldown-weave-kite" and en_w_start > 0:
+                                kite_req_kills = max(1, en_w_start - 3)
+                                kite_wipe_ok = (enemy_workers_killed >= kite_req_kills)
+                            passed_econ = (
+                                (net_econ >= scen.pass_net_econ_min)
+                                and (len(dstate["econ_cur_worker_tags"]) > 0)
+                                and (ko_winner_side != 2)
+                                and kite_wipe_ok
+                            )
                             winner = p1_tag if passed_econ else p2_tag
                             win_type = "econ_pass" if passed_econ else "econ_fail"
                             econ_extra = {
@@ -3072,9 +3732,13 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 "net_econ_score": net_econ,
                                 "pass_net_econ_min": scen.pass_net_econ_min,
                             }
+                            if kite_req_kills > 0:
+                                econ_extra["pass_kite_kills_min"] = kite_req_kills
                             econ_ctx = (
                                 f" | ECON net={net_econ:.1f}/{scen.pass_net_econ_min:.0f}M "
-                                f"(mined={mins_gath:.0f}M, up={up_pct:.1f}%, wlost={w_lost}, kill={en_killed:.0f})"
+                                f"(mined={mins_gath:.0f}M, up={up_pct:.1f}%, wlost={w_lost}, kill={en_killed:.0f}"
+                                + (f", wkills={enemy_workers_killed}/{en_w_start}" if kite_req_kills > 0 else "")
+                                + ")"
                             )
                         elif scen.scoring_mode == "worker-runby":
                             p2_mins_gath = round(max(0.0, float(dstate["p2_econ_cur_minerals"]) - float(dstate["p2_econ_start_minerals"])), 1)
@@ -3104,21 +3768,20 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 f"score={runby_score:.1f} denied={enemy_minerals_denied:.0f}M "
                                 f"lost={our_units_lost_val:.0f} ckill={enemy_combat_killed_val:.0f}"
                             )
-                        elif ko_winner_side == 1:
-                            winner = p1_tag
-                            win_type = "ko"
-                        elif ko_winner_side == 2:
-                            winner = p2_tag
-                            win_type = "ko"
-                        elif trade >= POINTS_WIN_TRADE:
-                            winner = p1_tag
-                            win_type = "points"
-                        elif trade <= POINTS_LOSS_TRADE:
-                            winner = p2_tag
-                            win_type = "points"
                         else:
-                            winner = "Draw"
-                            win_type = "draw"
+                            winner, win_type = evaluate_combat_verdict(
+                                scen=scen,
+                                p1_tag=p1_tag,
+                                p2_tag=p2_tag,
+                                trade=trade,
+                                p1_lost=p1_lost,
+                                p2_lost=p2_lost,
+                                end_reason=end_reason,
+                                ko_winner_side=ko_winner_side,
+                                p1_bc_start=int(dstate.get("p1_bc_start_cnt", 0)),
+                                p1_bc_alive=int(dstate.get("p1_bc_alive_cnt", 0)),
+                                p1_jump_cmds=int(dstate["ability_counts"].get("2358", 0)),
+                            )
                         p1_lbl_parts = [f"{c} {u}" for u, c, _, _ in scen.p1_units]
                         for lt in scen.p1_loaded_transports:
                             c_str = "+".join(f"{cc} {cu}" for cu, cc in lt["cargo"])
@@ -3202,6 +3865,13 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         }
                         if scen.origin_match_id:
                             rec["origin_match_id"] = scen.origin_match_id
+                        if scen.p2_worker_micro != "brawl":
+                            rec["p2_worker_micro"] = scen.p2_worker_micro
+                        if scen.p1_minerals > 0:
+                            rec["p1_minerals_target"] = scen.p1_minerals
+                            rec["p1_fight_start_minerals"] = int(dstate.get("p1_fight_start_minerals", 0))
+                        if scen.p1_starter_buildings:
+                            rec["p1_starter_buildings_actual"] = list(dstate.get("pre_setup_info", []))
                         if econ_extra:
                             rec.update(econ_extra)
                         if opp_mode == "self":
@@ -3214,6 +3884,19 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             )
                         dstate["results"].append(rec)
 
+                    def _ensure_active_round_finalized(fallback_reason: str = "early_match_end") -> None:
+                        if (
+                            dstate["phase"] == "fighting"
+                            and dstate["scen_idx"] < len(scenarios)
+                            and dstate["p1_start_cnt"] > 0
+                        ):
+                            reason = dstate.get("sc2_ended_reason") or fallback_reason
+                            ko_side = int(dstate.get("sc2_ended_ko_side") or 0)
+                            end_gl = int(dstate.get("last_obs_loop") or dstate["phase_start_loop"])
+                            finalize_current_round(end_gl, end_reason=reason, ko_winner_side=ko_side)
+                            dstate["scen_idx"] += 1
+                            dstate["phase"] = "done"
+
                     async def duel_ws_handler(http_req: web.Request) -> web.WebSocketResponse:
                         bot_ws = web.WebSocketResponse(max_msg_size=128 * 1024 * 1024)
                         await bot_ws.prepare(http_req)
@@ -3225,11 +3908,10 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 req.ParseFromString(msg.data)
 
                                 if req.HasField("action"):
-                                    # Suppress bot1 actions during upgrade research so Mothman never cancels research;
-                                    # in self-play also suppress during clearing/spawning so both start clean.
-                                    if dstate["phase"] in ("upgrade_spawn", "upgrade_addons", "upgrade_issue", "upgrade_wait", "preload_spawn", "preload_wait") or (
-                                        opp_mode == "self" and dstate["phase"] != "fighting"
-                                    ):
+                                    # Suppress ALL bot1 actions until `phase == "fighting"` (matching P2 symmetry!)
+                                    # so Mothman never queues premature workers (-50M / 17th SCV) during wait_init/clearing/
+                                    # upgrade/pre_setup/pre_bank/mine_warmup/preload/spawning/carrier_fill!
+                                    if dstate["phase"] != "fighting":
                                         dummy_resp = sc2api_pb2.Response(
                                             action=sc2api_pb2.ResponseAction(),
                                             status=sc2api_pb2.in_game,
@@ -3280,24 +3962,92 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 dstate["orig_th_positions"].append((float(u.pos.x), float(u.pos.y)))
                                                 break
                                     if dstate["p1_main_mineral_site"] is None and dstate["p1_orig_th_pos"] is not None and dstate["analyzer"] is not None:
-                                        msite, mtags = dstate["analyzer"].compute_main_mineral_site(obs, dstate["p1_orig_th_pos"])
+                                        msite, mtags, mpos = dstate["analyzer"].compute_main_mineral_site(obs, dstate["p1_orig_th_pos"])
                                         if mtags:
                                             dstate["p1_main_mineral_site"] = msite
                                             dstate["p1_main_mineral_tags"] = mtags
-                                    if dstate["p2_main_mineral_site"] is None and dstate["p2_orig_th_pos"] is not None and dstate["analyzer"] is not None:
-                                        msite2, mtags2 = dstate["analyzer"].compute_main_mineral_site(obs, dstate["p2_orig_th_pos"])
-                                        if mtags2:
-                                            dstate["p2_main_mineral_site"] = msite2
-                                            dstate["p2_main_mineral_tags"] = mtags2
+                                            dstate["p1_main_mineral_positions"] = mpos
+                                    # Note: `p2_main_mineral_tags` & `p2_main_mineral_site` are populated strictly from
+                                    # P2's OWN `sc2_ws2` observation in `_p2_housekeeping` (never P1's tag namespace!).
                                     if not dstate["mineral_refined"] and dstate["analyzer"] is not None and len(dstate["orig_th_positions"]) >= 2:
                                         dstate["analyzer"].refine_mineral_site(obs, dstate["orig_th_positions"])
                                         dstate["mineral_refined"] = True
 
+                                    def _needs_warmup(sc_w: SkirmishSpec) -> bool:
+                                        p1_has_w = sc_w.use_main_base and any(UNIT_IDS[u] in WORKER_IDS for u, _, _, _ in sc_w.p1_units)
+                                        p2_has_w = sc_w.use_p2_main_base and any(UNIT_IDS[u] in WORKER_IDS for u, _, _, _ in sc_w.p2_units)
+                                        has_tumor = any(u == "creep-tumor-burrowed" for u, _, _, _ in (sc_w.p1_units + sc_w.p2_units))
+                                        return bool(p1_has_w or p2_has_w or has_tumor)
+
+                                    def _advance_pipeline(after_stage: str, sc_n: SkirmishSpec, cur_gl: int, obs_n: Any) -> None:
+                                        """Uniform phase router: clearing -> upgrade -> pre_setup -> pre_bank -> mine_warmup -> preload -> spawning."""
+                                        order = ("clearing", "upgrade", "pre_setup", "pre_bank", "mine_warmup", "preload", "spawning")
+                                        start_i = order.index(after_stage) + 1
+                                        cur_m_n = int(getattr(obs_n.player_common, "minerals", 50))
+                                        for stg in order[start_i:]:
+                                            if stg == "upgrade":
+                                                need_p1_n = [u for u in sc_n.p1_upgrades if u not in dstate["p1_done_upgrades"]]
+                                                need_p2_n = [u for u in sc_n.p2_upgrades if u not in dstate["p2_done_upgrades"]]
+                                                if need_p1_n or need_p2_n:
+                                                    dstate["phase"] = "upgrade_spawn"
+                                                    dstate["phase_start_loop"] = cur_gl
+                                                    dstate["p1_addons_issued"] = False
+                                                    dstate["p2_addons_issued"] = False
+                                                    dstate["p1_addons_ready"] = False
+                                                    dstate["p2_addons_ready"] = False
+                                                    dstate["p1_upg_issued"] = False
+                                                    dstate["p2_upg_issued"] = False
+                                                    dstate["p1_upg_busy"] = True
+                                                    dstate["p2_upg_busy"] = True
+                                                    dstate["p1_pending_upgrades"] = []
+                                                    dstate["p2_pending_upgrades"] = []
+                                                    dstate["p1_accepted_upgrades"] = set()
+                                                    dstate["p2_accepted_upgrades"] = set()
+                                                    dstate["p1_pending_addons"] = []
+                                                    dstate["p2_pending_addons"] = []
+                                                    return
+                                            elif stg == "pre_setup":
+                                                if sc_n.p1_starter_buildings:
+                                                    dstate["phase"] = "pre_setup_spawn"
+                                                    dstate["phase_start_loop"] = cur_gl
+                                                    return
+                                            elif stg == "pre_bank":
+                                                if sc_n.p1_minerals > cur_m_n:
+                                                    dstate["phase"] = "pre_bank_spawn"
+                                                    dstate["phase_start_loop"] = cur_gl
+                                                    return
+                                            elif stg == "mine_warmup":
+                                                if _needs_warmup(sc_n):
+                                                    dstate["phase"] = "mine_warmup_spawn"
+                                                    dstate["phase_start_loop"] = cur_gl
+                                                    return
+                                            elif stg == "preload":
+                                                if sc_n.p1_loaded_transports or sc_n.p2_loaded_transports:
+                                                    dstate["phase"] = "preload_spawn"
+                                                    dstate["phase_start_loop"] = cur_gl
+                                                    dstate["p1_preload_ready"] = not bool(sc_n.p1_loaded_transports)
+                                                    dstate["p2_preload_ready"] = not bool(sc_n.p2_loaded_transports)
+                                                    dstate["p1_preload_last_loop"] = -100
+                                                    dstate["p2_preload_last_loop"] = -100
+                                                    return
+                                            elif stg == "spawning":
+                                                dstate["phase"] = "spawning"
+                                                dstate["phase_start_loop"] = cur_gl
+                                                return
+
                                     if dstate["phase"] == "wait_init" and gl >= 4:
+                                        first_sc = scenarios[0] if scenarios else None
+                                        keep_p1_larva = bool(
+                                            first_sc is not None
+                                            and first_sc.our_race == "Zerg"
+                                            and first_sc.use_main_base
+                                            and (first_sc.p1_starter_buildings or first_sc.p1_minerals > 0)
+                                        )
                                         kill_tags = [
                                             u.tag for u in obs.raw_data.units
                                             if u.alliance in (1, 4) and u.tag not in dstate["orig_th_tags"]
                                             and u.unit_type not in TOWNHALL_IDS
+                                            and not (keep_p1_larva and u.alliance == 1 and u.unit_type == 151)
                                         ]
                                         dbg = [debug_pb2.DebugCommand(game_state=debug_pb2.show_map)]
                                         if kill_tags:
@@ -3308,11 +4058,19 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         dstate["phase_start_loop"] = gl
 
                                     elif dstate["phase"] == "clearing":
+                                        next_sc = scenarios[dstate["scen_idx"]] if dstate["scen_idx"] < len(scenarios) else None
+                                        keep_p1_larva = bool(
+                                            next_sc is not None
+                                            and next_sc.our_race == "Zerg"
+                                            and next_sc.use_main_base
+                                            and (next_sc.p1_starter_buildings or next_sc.p1_minerals > 0)
+                                        )
                                         rem_u = [
                                             u for u in obs.raw_data.units
                                             if u.display_type == 1 and u.alliance == 1
                                             and u.tag not in dstate["orig_th_tags"]
                                             and not (dstate["p1_orig_th_tag"] is None and u.unit_type in TOWNHALL_IDS)
+                                            and not (keep_p1_larva and u.unit_type == 151)
                                         ]
                                         # Only kill non-original units (incl. temp upgrade buildings & workers)
                                         if rem_u:
@@ -3322,58 +4080,61 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 )
                                             ))
                                         elif dstate["p2_clear_ok"] and gl >= dstate["phase_start_loop"] + 4:
-                                            # Restore starting TownHall HP/Shields if any prior main-base round chipped it
-                                            heal_th: list[Any] = []
-                                            for u in obs.raw_data.units:
-                                                if u.tag in dstate["orig_th_tags"]:
-                                                    if float(u.health) < float(u.health_max) - 1.0:
-                                                        heal_th.append(debug_pb2.DebugCommand(
-                                                            unit_value=debug_pb2.DebugSetUnitValue(
-                                                                unit_value=debug_pb2.DebugSetUnitValue.Life,
-                                                                value=float(u.health_max),
-                                                                unit_tag=u.tag,
-                                                            )
-                                                        ))
-                                                    if float(getattr(u, "shield_max", 0.0)) > 0.0 and float(u.shield) < float(u.shield_max) - 1.0:
-                                                        heal_th.append(debug_pb2.DebugCommand(
-                                                            unit_value=debug_pb2.DebugSetUnitValue(
-                                                                unit_value=debug_pb2.DebugSetUnitValue.Shields,
-                                                                value=float(u.shield_max),
-                                                                unit_tag=u.tag,
-                                                            )
-                                                        ))
-                                            if heal_th:
-                                                await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=heal_th)))
                                             scen = scenarios[dstate["scen_idx"]]
-                                            need_p1 = [u for u in scen.p1_upgrades if u not in dstate["p1_done_upgrades"]]
-                                            need_p2 = [u for u in scen.p2_upgrades if u not in dstate["p2_done_upgrades"]]
-                                            if need_p1 or need_p2:
-                                                dstate["phase"] = "upgrade_spawn"
-                                                dstate["phase_start_loop"] = gl
-                                                dstate["p1_addons_issued"] = False
-                                                dstate["p2_addons_issued"] = False
-                                                dstate["p1_addons_ready"] = False
-                                                dstate["p2_addons_ready"] = False
-                                                dstate["p1_upg_issued"] = False
-                                                dstate["p2_upg_issued"] = False
-                                                dstate["p1_upg_busy"] = True
-                                                dstate["p2_upg_busy"] = True
-                                                dstate["p1_pending_upgrades"] = []
-                                                dstate["p2_pending_upgrades"] = []
-                                                dstate["p1_accepted_upgrades"] = set()
-                                                dstate["p2_accepted_upgrades"] = set()
-                                                dstate["p1_pending_addons"] = []
-                                                dstate["p2_pending_addons"] = []
-                                            elif scen.p1_loaded_transports or scen.p2_loaded_transports:
-                                                dstate["phase"] = "preload_spawn"
-                                                dstate["phase_start_loop"] = gl
-                                                dstate["p1_preload_ready"] = not bool(scen.p1_loaded_transports)
-                                                dstate["p2_preload_ready"] = not bool(scen.p2_loaded_transports)
-                                                dstate["p1_preload_last_loop"] = -100
-                                                dstate["p2_preload_last_loop"] = -100
+                                            need_p2_mtags = bool(scen.use_p2_main_base or scen.p2_worker_micro != "brawl")
+                                            if need_p2_mtags and not dstate["p2_main_mineral_tags"] and gl < dstate["phase_start_loop"] + 28:
+                                                # Wait for P2's own observation to populate `p2_main_mineral_tags`
+                                                pass
                                             else:
-                                                dstate["phase"] = "spawning"
-                                                dstate["phase_start_loop"] = gl
+                                                dstate["p1_starter_bldg_tags"] = set()
+                                                dstate["pre_setup_info"] = []
+                                                dstate["warmup_spawned_p1_workers"] = False
+                                                dstate["warmup_spawned_p2_workers"] = False
+                                                dstate["warmup_spawned_creep_tumors"] = False
+                                                dstate["warmup_p1_mine_issued"] = False
+                                                dstate["warmup_p2_mine_issued"] = False
+                                                dstate["carrier_fill_issued_p1"] = False
+                                                dstate["carrier_fill_issued_p2"] = False
+                                                dstate["p2_disruptor_cd"] = {}
+                                                dstate["p2_disruptor_next_global"] = 0
+                                                dstate["p1_bc_start_cnt"] = 0
+                                                dstate["p1_bc_alive_cnt"] = 0
+                                                if dstate["pre_setup_free_on"]:
+                                                    await rpc(sc2_ws, sc2api_pb2.Request(
+                                                        debug=sc2api_pb2.RequestDebug(debug=[debug_pb2.DebugCommand(game_state=debug_pb2.free)])
+                                                    ))
+                                                    dstate["pre_setup_free_on"] = False
+                                                if dstate["carrier_fill_cheats_on"]:
+                                                    await rpc(sc2_ws, sc2api_pb2.Request(
+                                                        debug=sc2api_pb2.RequestDebug(debug=[
+                                                            debug_pb2.DebugCommand(game_state=debug_pb2.fast_build),
+                                                            debug_pb2.DebugCommand(game_state=debug_pb2.free),
+                                                        ])
+                                                    ))
+                                                    dstate["carrier_fill_cheats_on"] = False
+                                                # Restore starting TownHall HP/Shields if any prior main-base round chipped it
+                                                heal_th: list[Any] = []
+                                                for u in obs.raw_data.units:
+                                                    if u.tag in dstate["orig_th_tags"]:
+                                                        if float(u.health) < float(u.health_max) - 1.0:
+                                                            heal_th.append(debug_pb2.DebugCommand(
+                                                                unit_value=debug_pb2.DebugSetUnitValue(
+                                                                    unit_value=debug_pb2.DebugSetUnitValue.Life,
+                                                                    value=float(u.health_max),
+                                                                    unit_tag=u.tag,
+                                                                )
+                                                            ))
+                                                        if float(getattr(u, "shield_max", 0.0)) > 0.0 and float(u.shield) < float(u.shield_max) - 1.0:
+                                                            heal_th.append(debug_pb2.DebugCommand(
+                                                                unit_value=debug_pb2.DebugSetUnitValue(
+                                                                    unit_value=debug_pb2.DebugSetUnitValue.Shields,
+                                                                    value=float(u.shield_max),
+                                                                    unit_tag=u.tag,
+                                                                )
+                                                            ))
+                                                if heal_th:
+                                                    await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=heal_th)))
+                                                _advance_pipeline("clearing", scen, gl, obs)
 
                                     elif dstate["phase"] == "upgrade_spawn":
                                         scen = scenarios[dstate["scen_idx"]]
@@ -3667,15 +4428,475 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             dstate["p1_preload_last_loop"] = int(gl)
                                             dstate["p1_preload_ready"] = await _issue_preload_cmds(sc2_ws, obs, scen.p1_loaded_transports)
                                         if (dstate["p1_preload_ready"] and dstate["p2_preload_ready"]) or gl >= dstate["phase_start_loop"] + 48:
-                                            dstate["phase"] = "spawning"
+                                            _advance_pipeline("preload", scen, gl, obs)
+
+                                    elif dstate["phase"] == "pre_setup_spawn" and gl >= dstate["phase_start_loop"] + 2:
+                                        scen = scenarios[dstate["scen_idx"]]
+                                        an = dstate["analyzer"]
+                                        site = _site_for_scen(scen)
+                                        dstate["arena_cx"], dstate["arena_cy"] = site.cx, site.cy
+                                        dstate["p1_starter_bldg_tags"] = set()
+                                        dstate["pre_setup_instant_positions"] = {}
+                                        dstate["pre_setup_temp_worker_tags"] = set()
+                                        dstate["pre_setup_claimed_geysers"] = set()
+                                        dstate["pre_setup_info"] = []
+                                        placed_ps: list[tuple[float, float, float]] = [(site.cx, site.cy, 3.6)]
+                                        for u_env in obs.raw_data.units:
+                                            if u_env.unit_type in MINERAL_IDS or u_env.unit_type in GEYSER_IDS:
+                                                if math.hypot(float(u_env.pos.x) - site.cx, float(u_env.pos.y) - site.cy) <= 13.0:
+                                                    placed_ps.append((float(u_env.pos.x), float(u_env.pos.y), 2.5))
+
+                                        dbg_ps: list[Any] = []
+                                        inprog_list: list[dict[str, Any]] = []
+                                        for sb in scen.p1_starter_buildings:
+                                            bname = sb["unit"]
+                                            bspec = STARTER_BUILDING_SPECS[bname]
+                                            prog = float(sb.get("progress", 1.0))
+                                            halted = bool(sb.get("halted", False))
+                                            on_geyser = bool(sb.get("on_geyser", bspec["on_geyser"]))
+                                            if prog >= 0.99 and not on_geyser:
+                                                fp = int(bspec["footprint"])
+                                                if bspec["needs_pylon"] and "pylon" in dstate["pre_setup_instant_positions"]:
+                                                    py_x, py_y = dstate["pre_setup_instant_positions"]["pylon"]
+                                                    sx0, sy0 = py_x + 3.0 * site.ux, py_y + 3.0 * site.uy
+                                                else:
+                                                    sx0, sy0 = (
+                                                        an.site_offset_world(site, float(sb["dx"]), float(sb["dy"]))
+                                                        if an is not None else (site.cx + float(sb["dx"]), site.cy + float(sb["dy"]))
+                                                    )
+                                                creep_im = getattr(getattr(obs.raw_data, "map_state", None), "creep", None) if bspec["needs_creep"] else None
+                                                sx, sy = (
+                                                    an.snap_buildable_footprint(sx0, sy0, fp, avoid=placed_ps, creep_img=creep_im)
+                                                    if an is not None else (sx0, sy0)
+                                                )
+                                                placed_ps.append((sx, sy, 3.0 if fp >= 3 else 2.4))
+                                                dstate["pre_setup_instant_positions"][bname] = (sx, sy)
+                                                dbg_ps.append(debug_pb2.DebugCommand(
+                                                    create_unit=debug_pb2.DebugCreateUnit(
+                                                        unit_type=int(bspec["unit_id"]),
+                                                        owner=1,
+                                                        pos=common_pb2.Point2D(x=sx, y=sy),
+                                                        quantity=1,
+                                                    )
+                                                ))
+                                                dstate["pre_setup_info"].append({
+                                                    "unit": bname, "mode": "instant", "target_progress": 1.0,
+                                                    "actual_progress": 1.0, "halted": False,
+                                                })
+                                            else:
+                                                b_loops = int(bspec["build_loops"])
+                                                est_bank = 65 if (scen.p1_minerals > 50 and not halted) else 0
+                                                adj_loops = max(24, int(round(b_loops * prog)) - est_bank)
+                                                adj_prog = max(0.04, min(0.95, adj_loops / float(b_loops)))
+                                                inprog_list.append({
+                                                    "unit": bname,
+                                                    "unit_id": int(bspec["unit_id"]),
+                                                    "footprint": int(bspec["footprint"]),
+                                                    "build_ability": int(bspec["build_ability"]),
+                                                    "builder_uid": int(bspec["builder_uid"]),
+                                                    "needs_pylon": bool(bspec["needs_pylon"]),
+                                                    "needs_creep": bool(bspec["needs_creep"]),
+                                                    "on_geyser": on_geyser,
+                                                    "dx": float(sb["dx"]),
+                                                    "dy": float(sb["dy"]),
+                                                    "target_progress": prog,
+                                                    "adj_target_loops": adj_loops,
+                                                    "adj_target_prog": adj_prog,
+                                                    "halted": halted,
+                                                    "state": "pending",
+                                                    "target_pos": None,
+                                                    "target_tag": None,
+                                                    "bldg_tag": None,
+                                                    "spawn_loop": -1,
+                                                    "last_cmd_loop": -100,
+                                                    "actual_progress": 0.0,
+                                                })
+                                        max_adj = max((it["adj_target_loops"] for it in inprog_list), default=0)
+                                        for it in inprog_list:
+                                            it["start_offset"] = max(0, max_adj - it["adj_target_loops"])
+                                        dstate["pre_setup_placed"] = placed_ps
+                                        dstate["pre_setup_inprog"] = inprog_list
+                                        dstate["pre_setup_max_loops"] = max_adj
+                                        if dbg_ps:
+                                            await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=dbg_ps)))
+                                        dstate["phase"] = "pre_setup_wait"
+                                        dstate["phase_start_loop"] = gl
+
+                                    elif dstate["phase"] == "pre_setup_wait" and gl >= dstate["phase_start_loop"] + 6:
+                                        scen = scenarios[dstate["scen_idx"]]
+                                        an = dstate["analyzer"]
+                                        site = _site_for_scen(scen)
+                                        for u_st in obs.raw_data.units:
+                                            if u_st.alliance == 1 and u_st.tag not in dstate["orig_th_tags"] and u_st.unit_type in STARTER_BUILDING_UIDS:
+                                                dstate["p1_starter_bldg_tags"].add(u_st.tag)
+                                        inprog = dstate["pre_setup_inprog"]
+                                        if not inprog:
+                                            _advance_pipeline("pre_setup", scen, gl, obs)
+                                        else:
+                                            any_need_free = any(it["state"] in ("pending", "worker_spawned") for it in inprog)
+                                            if any_need_free and not dstate["pre_setup_free_on"]:
+                                                await rpc(sc2_ws, sc2api_pb2.Request(
+                                                    debug=sc2api_pb2.RequestDebug(debug=[debug_pb2.DebugCommand(game_state=debug_pb2.free)])
+                                                ))
+                                                dstate["pre_setup_free_on"] = True
+                                            elif not any_need_free and dstate["pre_setup_free_on"]:
+                                                await rpc(sc2_ws, sc2api_pb2.Request(
+                                                    debug=sc2api_pb2.RequestDebug(debug=[debug_pb2.DebugCommand(game_state=debug_pb2.free)])
+                                                ))
+                                                dstate["pre_setup_free_on"] = False
+
+                                            elapsed_ps = gl - (dstate["phase_start_loop"] + 6)
+                                            dbg_step: list[Any] = []
+                                            acts_step: list[Any] = []
+                                            kill_w_step: list[int] = []
+
+                                            for it in inprog:
+                                                st = it["state"]
+                                                if st == "pending" and elapsed_ps >= it["start_offset"]:
+                                                    if it["on_geyser"]:
+                                                        g_cands = [
+                                                            u_g for u_g in obs.raw_data.units
+                                                            if u_g.unit_type in GEYSER_IDS and u_g.alliance == 3
+                                                            and u_g.tag not in dstate["pre_setup_claimed_geysers"]
+                                                            and math.hypot(float(u_g.pos.x) - site.cx, float(u_g.pos.y) - site.cy) <= 14.0
+                                                        ]
+                                                        if not g_cands:
+                                                            it["state"] = "fallback"
+                                                            continue
+                                                        g_best = min(g_cands, key=lambda u_g: math.hypot(float(u_g.pos.x) - site.cx, float(u_g.pos.y) - site.cy))
+                                                        dstate["pre_setup_claimed_geysers"].add(g_best.tag)
+                                                        it["target_tag"] = int(g_best.tag)
+                                                        tx, ty = float(g_best.pos.x), float(g_best.pos.y)
+                                                        it["target_pos"] = (tx, ty)
+                                                    else:
+                                                        fp = int(it["footprint"])
+                                                        if it["needs_pylon"] and "pylon" in dstate["pre_setup_instant_positions"]:
+                                                            py_x, py_y = dstate["pre_setup_instant_positions"]["pylon"]
+                                                            sx0, sy0 = py_x + 3.0 * site.ux, py_y + 3.0 * site.uy
+                                                            tx, ty = (
+                                                                an.snap_buildable_footprint(sx0, sy0, fp, avoid=dstate["pre_setup_placed"], max_rad=5)
+                                                                if an is not None else (sx0, sy0)
+                                                            )
+                                                        else:
+                                                            sx0, sy0 = (
+                                                                an.site_offset_world(site, it["dx"], it["dy"])
+                                                                if an is not None else (site.cx + it["dx"], site.cy + it["dy"])
+                                                            )
+                                                            creep_im = getattr(getattr(obs.raw_data, "map_state", None), "creep", None) if it["needs_creep"] else None
+                                                            tx, ty = (
+                                                                an.snap_buildable_footprint(sx0, sy0, fp, avoid=dstate["pre_setup_placed"], max_rad=10, creep_img=creep_im)
+                                                                if an is not None else (sx0, sy0)
+                                                            )
+                                                        dstate["pre_setup_placed"].append((tx, ty, 3.0 if fp >= 3 else 2.4))
+                                                        it["target_pos"] = (tx, ty)
+                                                    wx0, wy0 = (
+                                                        an.snap_pathable(tx - 2.2 * site.ux, ty - 2.2 * site.uy, max_rad=4)
+                                                        if an is not None else (tx - 2.2, ty)
+                                                    )
+                                                    dbg_step.append(debug_pb2.DebugCommand(
+                                                        create_unit=debug_pb2.DebugCreateUnit(
+                                                            unit_type=int(it["builder_uid"]),
+                                                            owner=1,
+                                                            pos=common_pb2.Point2D(x=wx0, y=wy0),
+                                                            quantity=1,
+                                                        )
+                                                    ))
+                                                    it["state"] = "worker_spawned"
+                                                    it["spawn_loop"] = int(gl)
+
+                                                elif st == "worker_spawned":
+                                                    tx, ty = it["target_pos"]
+                                                    found_b = [
+                                                        u_b for u_b in obs.raw_data.units
+                                                        if u_b.alliance == 1 and u_b.unit_type == it["unit_id"]
+                                                        and u_b.tag not in dstate["p1_starter_bldg_tags"]
+                                                        and math.hypot(float(u_b.pos.x) - tx, float(u_b.pos.y) - ty) <= 4.5
+                                                    ]
+                                                    if found_b:
+                                                        b_u = min(found_b, key=lambda u_b: math.hypot(float(u_b.pos.x) - tx, float(u_b.pos.y) - ty))
+                                                        it["state"] = "building"
+                                                        it["bldg_tag"] = int(b_u.tag)
+                                                        dstate["p1_starter_bldg_tags"].add(int(b_u.tag))
+                                                    elif gl >= it["spawn_loop"] + 88:
+                                                        it["state"] = "fallback"
+                                                    elif gl >= it["last_cmd_loop"] + 8:
+                                                        w_cands = [
+                                                            u_w for u_w in obs.raw_data.units
+                                                            if u_w.alliance == 1 and u_w.unit_type == it["builder_uid"]
+                                                            and math.hypot(float(u_w.pos.x) - tx, float(u_w.pos.y) - ty) <= 10.0
+                                                        ]
+                                                        if w_cands:
+                                                            bw = min(w_cands, key=lambda u_w: math.hypot(float(u_w.pos.x) - tx, float(u_w.pos.y) - ty))
+                                                            dstate["pre_setup_temp_worker_tags"].add(int(bw.tag))
+                                                            if it["target_tag"] is not None:
+                                                                ucmd = raw_pb2.ActionRawUnitCommand(
+                                                                    ability_id=int(it["build_ability"]),
+                                                                    target_unit_tag=int(it["target_tag"]),
+                                                                    unit_tags=[bw.tag],
+                                                                )
+                                                            else:
+                                                                ucmd = raw_pb2.ActionRawUnitCommand(
+                                                                    ability_id=int(it["build_ability"]),
+                                                                    target_world_space_pos=common_pb2.Point2D(x=tx, y=ty),
+                                                                    unit_tags=[bw.tag],
+                                                                )
+                                                            acts_step.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=ucmd)))
+                                                            it["last_cmd_loop"] = int(gl)
+
+                                                elif st == "building":
+                                                    b_tag = it["bldg_tag"]
+                                                    b_matches = [u_b for u_b in obs.raw_data.units if u_b.tag == b_tag]
+                                                    if not b_matches:
+                                                        it["state"] = "fallback"
+                                                    else:
+                                                        b_u = b_matches[0]
+                                                        it["actual_progress"] = round(float(b_u.build_progress), 3)
+                                                        if float(b_u.build_progress) >= float(it["adj_target_prog"]) - 0.015:
+                                                            it["state"] = "ready"
+                                                            if it["halted"]:
+                                                                # Kill the building SCV right at target progress -> genuine halted Terran building!
+                                                                for u_w in obs.raw_data.units:
+                                                                    if u_w.alliance == 1 and u_w.unit_type == it["builder_uid"] and math.hypot(float(u_w.pos.x) - float(b_u.pos.x), float(u_w.pos.y) - float(b_u.pos.y)) <= 5.5:
+                                                                        kill_w_step.append(int(u_w.tag))
+
+                                            if kill_w_step:
+                                                dbg_step.append(debug_pb2.DebugCommand(kill_unit=debug_pb2.DebugKillUnit(tag=sorted(set(kill_w_step)))))
+                                            if dbg_step:
+                                                await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=dbg_step)))
+                                            if acts_step:
+                                                await rpc(sc2_ws, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=acts_step)))
+
+                                            all_done_ps = all(it["state"] in ("ready", "fallback") for it in inprog)
+                                            timed_out_ps = elapsed_ps >= int(dstate["pre_setup_max_loops"]) + 160
+                                            if all_done_ps or timed_out_ps:
+                                                dbg_fin: list[Any] = []
+                                                stray_ws = [
+                                                    u_w.tag for u_w in obs.raw_data.units
+                                                    if u_w.alliance == 1 and u_w.unit_type in WORKER_IDS
+                                                ]
+                                                if stray_ws:
+                                                    dbg_fin.append(debug_pb2.DebugCommand(kill_unit=debug_pb2.DebugKillUnit(tag=stray_ws)))
+                                                if dstate["pre_setup_free_on"]:
+                                                    dbg_fin.append(debug_pb2.DebugCommand(game_state=debug_pb2.free))
+                                                    dstate["pre_setup_free_on"] = False
+                                                for it in inprog:
+                                                    mode_lbl = it["state"]
+                                                    if it["state"] != "ready" and not it["on_geyser"] and it["bldg_tag"] is None:
+                                                        tx, ty = it["target_pos"] or (site.cx + it["dx"], site.cy + it["dy"])
+                                                        dbg_fin.append(debug_pb2.DebugCommand(
+                                                            create_unit=debug_pb2.DebugCreateUnit(
+                                                                unit_type=int(it["unit_id"]),
+                                                                owner=1,
+                                                                pos=common_pb2.Point2D(x=tx, y=ty),
+                                                                quantity=1,
+                                                            )
+                                                        ))
+                                                        mode_lbl = "fallback_debug_create"
+                                                        it["actual_progress"] = 1.0
+                                                    dstate["pre_setup_info"].append({
+                                                        "unit": it["unit"],
+                                                        "mode": mode_lbl,
+                                                        "target_progress": it["target_progress"],
+                                                        "actual_progress": it["actual_progress"],
+                                                        "halted": it["halted"],
+                                                    })
+                                                if dbg_fin:
+                                                    await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=dbg_fin)))
+                                                _advance_pipeline("pre_setup", scen, gl, obs)
+
+                                    elif dstate["phase"] == "pre_bank_spawn" and gl >= dstate["phase_start_loop"] + 4:
+                                        scen = scenarios[dstate["scen_idx"]]
+                                        an = dstate["analyzer"]
+                                        site = _site_for_scen(scen)
+                                        dstate["arena_cx"], dstate["arena_cy"] = site.cx, site.cy
+                                        cur_m = int(getattr(obs.player_common, "minerals", 50))
+                                        need_m = max(0, int(scen.p1_minerals) - cur_m)
+                                        if need_m <= 0:
+                                            _advance_pipeline("pre_bank", scen, gl, obs)
+                                        else:
+                                            n_miners = min(8, max(1, (need_m + 4) // 5))
+                                            w_uid = RACE_WORKER_IDS.get(scen.our_race, 45)
+                                            mx0, my0 = (
+                                                an.site_offset_world(site, -3.0, 0.0)
+                                                if an is not None else (site.cx - 3.0, site.cy)
+                                            )
+                                            if an is not None:
+                                                mx0, my0 = an.snap_pathable(mx0, my0, max_rad=4)
+                                            await rpc(sc2_ws, sc2api_pb2.Request(
+                                                debug=sc2api_pb2.RequestDebug(debug=[
+                                                    debug_pb2.DebugCommand(
+                                                        create_unit=debug_pb2.DebugCreateUnit(
+                                                            unit_type=w_uid,
+                                                            owner=1,
+                                                            pos=common_pb2.Point2D(x=mx0, y=my0),
+                                                            quantity=n_miners,
+                                                        )
+                                                    )
+                                                ])
+                                            ))
+                                            dstate["pre_bank_mine_issued"] = False
+                                            dstate["phase"] = "pre_bank_wait"
                                             dstate["phase_start_loop"] = gl
 
-                                    elif dstate["phase"] == "spawning" and gl >= dstate["phase_start_loop"] + 2:
+                                    elif dstate["phase"] == "pre_bank_wait" and gl >= dstate["phase_start_loop"] + 2:
+                                        scen = scenarios[dstate["scen_idx"]]
+                                        cur_m = int(getattr(obs.player_common, "minerals", 50))
+                                        bank_ws = [
+                                            u_w for u_w in obs.raw_data.units
+                                            if u_w.alliance == 1 and u_w.unit_type in WORKER_IDS
+                                        ]
+                                        if not dstate["pre_bank_mine_issued"] and bank_ws and dstate["p1_main_mineral_tags"]:
+                                            mtags_b = list(dstate["p1_main_mineral_tags"])
+                                            # Prefer closest mineral patches so 1 trip completes in ~60 loops
+                                            m_pos_map = {
+                                                int(u_m.tag): (float(u_m.pos.x), float(u_m.pos.y))
+                                                for u_m in obs.raw_data.units
+                                                if int(u_m.tag) in set(mtags_b)
+                                            }
+                                            mtags_sorted = sorted(
+                                                mtags_b,
+                                                key=lambda mt: math.hypot(
+                                                    m_pos_map.get(mt, (0.0, 0.0))[0] - dstate["arena_cx"],
+                                                    m_pos_map.get(mt, (0.0, 0.0))[1] - dstate["arena_cy"],
+                                                ),
+                                            )
+                                            g_b_acts = [
+                                                sc2api_pb2.Action(
+                                                    action_raw=raw_pb2.ActionRaw(
+                                                        unit_command=raw_pb2.ActionRawUnitCommand(
+                                                            ability_id=3666,
+                                                            target_unit_tag=mtags_sorted[i % len(mtags_sorted)],
+                                                            unit_tags=[wu.tag],
+                                                        )
+                                                    )
+                                                )
+                                                for i, wu in enumerate(bank_ws)
+                                            ]
+                                            await rpc(sc2_ws, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=g_b_acts)))
+                                            dstate["pre_bank_mine_issued"] = True
+                                        if cur_m >= int(scen.p1_minerals) or gl >= dstate["phase_start_loop"] + 160:
+                                            if bank_ws:
+                                                await rpc(sc2_ws, sc2api_pb2.Request(
+                                                    debug=sc2api_pb2.RequestDebug(debug=[
+                                                        debug_pb2.DebugCommand(kill_unit=debug_pb2.DebugKillUnit(tag=[u_w.tag for u_w in bank_ws]))
+                                                    ])
+                                                ))
+                                            _advance_pipeline("pre_bank", scen, gl, obs)
+
+                                    elif dstate["phase"] == "mine_warmup_spawn" and gl >= dstate["phase_start_loop"] + 4:
+                                        scen = scenarios[dstate["scen_idx"]]
+                                        an = dstate["analyzer"]
+                                        site = _site_for_scen(scen)
+                                        dstate["arena_cx"], dstate["arena_cy"] = site.cx, site.cy
+                                        site_ov = site if (scen.use_main_base or scen.use_p2_main_base) else None
+                                        dbg_wu: list[Any] = []
+                                        if scen.use_main_base and dstate["p1_orig_th_pos"] is not None:
+                                            for uname, cnt, _dx, _dy in scen.p1_units:
+                                                if UNIT_IDS[uname] in WORKER_IDS:
+                                                    w_pts = compute_per_patch_worker_positions(
+                                                        dstate["p1_main_mineral_positions"],
+                                                        dstate["p1_orig_th_pos"],
+                                                        cnt,
+                                                    )
+                                                    for wx, wy in w_pts:
+                                                        if an is not None:
+                                                            wx, wy = an.snap_pathable(wx, wy, max_rad=3)
+                                                        dbg_wu.append(debug_pb2.DebugCommand(
+                                                            create_unit=debug_pb2.DebugCreateUnit(
+                                                                unit_type=UNIT_IDS[uname], owner=1,
+                                                                pos=common_pb2.Point2D(x=wx, y=wy), quantity=1,
+                                                            )
+                                                        ))
+                                                    dstate["warmup_spawned_p1_workers"] = True
+                                        if scen.use_p2_main_base and dstate["p2_orig_th_pos"] is not None:
+                                            for uname, cnt, _dx, _dy in scen.p2_units:
+                                                if UNIT_IDS[uname] in WORKER_IDS:
+                                                    w_pts2 = compute_per_patch_worker_positions(
+                                                        dstate["p2_main_mineral_positions"],
+                                                        dstate["p2_orig_th_pos"],
+                                                        cnt,
+                                                    )
+                                                    for wx, wy in w_pts2:
+                                                        if an is not None:
+                                                            wx, wy = an.snap_pathable(wx, wy, max_rad=3)
+                                                        dbg_wu.append(debug_pb2.DebugCommand(
+                                                            create_unit=debug_pb2.DebugCreateUnit(
+                                                                unit_type=UNIT_IDS[uname], owner=2,
+                                                                pos=common_pb2.Point2D(x=wx, y=wy), quantity=1,
+                                                            )
+                                                        ))
+                                                    dstate["warmup_spawned_p2_workers"] = True
+                                        for owner_ct, entries_ct in ((1, scen.p1_units), (2, scen.p2_units)):
+                                            for uname, cnt, dx, dy in entries_ct:
+                                                if uname == "creep-tumor-burrowed":
+                                                    tx, ty = (
+                                                        an.resolve_spawn_point(scen, uname, dx, dy, site_override=site_ov)
+                                                        if an is not None else (site.cx + dx, site.cy + dy)
+                                                    )
+                                                    dbg_wu.append(debug_pb2.DebugCommand(
+                                                        create_unit=debug_pb2.DebugCreateUnit(
+                                                            unit_type=UNIT_IDS[uname], owner=owner_ct,
+                                                            pos=common_pb2.Point2D(x=tx, y=ty), quantity=cnt,
+                                                        )
+                                                    ))
+                                                    dstate["warmup_spawned_creep_tumors"] = True
+                                        if dbg_wu:
+                                            await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=dbg_wu)))
+                                            dstate["warmup_p1_mine_issued"] = False
+                                            dstate["warmup_p2_mine_issued"] = False
+                                            dstate["phase"] = "mine_warmup_wait"
+                                            dstate["phase_start_loop"] = gl
+                                        else:
+                                            _advance_pipeline("mine_warmup", scen, gl, obs)
+
+                                    elif dstate["phase"] == "mine_warmup_wait" and gl >= dstate["phase_start_loop"] + 2:
+                                        scen = scenarios[dstate["scen_idx"]]
+                                        if dstate["warmup_spawned_p1_workers"] and not dstate["warmup_p1_mine_issued"]:
+                                            mtags1 = list(dstate["p1_main_mineral_tags"])
+                                            mpos1 = list(dstate["p1_main_mineral_positions"])
+                                            p1_ws_wu = [
+                                                u for u in obs.raw_data.units
+                                                if u.display_type == 1 and u.alliance == 1
+                                                and u.tag not in dstate["orig_th_tags"]
+                                                and u.unit_type in WORKER_IDS
+                                            ]
+                                            if p1_ws_wu and mtags1:
+                                                th1_x, th1_y = dstate["p1_orig_th_pos"] or (dstate["arena_cx"], dstate["arena_cy"])
+                                                p1_ws_wu.sort(key=lambda wu: math.atan2(float(wu.pos.y) - th1_y, float(wu.pos.x) - th1_x))
+                                                g_wu1 = [
+                                                    sc2api_pb2.Action(
+                                                        action_raw=raw_pb2.ActionRaw(
+                                                            unit_command=raw_pb2.ActionRawUnitCommand(
+                                                                ability_id=3666,
+                                                                target_unit_tag=mtags1[(i_w // 2) % len(mtags1)],
+                                                                unit_tags=[wu.tag],
+                                                            )
+                                                        )
+                                                    )
+                                                    for i_w, wu in enumerate(p1_ws_wu)
+                                                ]
+                                                await rpc(sc2_ws, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=g_wu1)))
+                                                dstate["warmup_p1_mine_issued"] = True
+                                        # 40f when exact p1_minerals bank requested (< 1 return trip so bank stays exact!), 48f otherwise
+                                        wu_loops = 40 if scen.p1_minerals > 0 else 48
+                                        if gl >= dstate["phase_start_loop"] + wu_loops:
+                                            _advance_pipeline("mine_warmup", scen, gl, obs)
+
+                                    elif dstate["phase"] == "spawning" and gl >= dstate["phase_start_loop"] + (4 if (scenarios[dstate["scen_idx"]].p1_starter_buildings or scenarios[dstate["scen_idx"]].p1_minerals > 0) else 2):
                                         scen = scenarios[dstate["scen_idx"]]
                                         an = dstate["analyzer"]
                                         site = _site_for_scen(scen)
                                         dstate["arena_cx"], dstate["arena_cy"] = site.cx, site.cy
                                         dstate["upg_wave_attempts"] = 0
+                                        if dstate["pre_setup_free_on"]:
+                                            await rpc(sc2_ws, sc2api_pb2.Request(
+                                                debug=sc2api_pb2.RequestDebug(debug=[debug_pb2.DebugCommand(game_state=debug_pb2.free)])
+                                            ))
+                                            dstate["pre_setup_free_on"] = False
+                                        if scen.p1_starter_buildings:
+                                            for u_sb in obs.raw_data.units:
+                                                if u_sb.alliance == 1 and u_sb.tag not in dstate["orig_th_tags"] and u_sb.unit_type in STARTER_BUILDING_UIDS:
+                                                    dstate["p1_starter_bldg_tags"].add(u_sb.tag)
                                         site_ov = site if (scen.use_main_base or scen.use_p2_main_base) else None
                                         dbg = []
                                         placed_structs: list[tuple[float, float, float]] = (
@@ -3686,7 +4907,16 @@ async def run_in_container(args: argparse.Namespace) -> int:
 
                                         def _spawn_side_entries(entries: list[tuple[str, int, float, float]], owner: int) -> None:
                                             # Ensure any Photon Cannon (`66`) has a powering Pylon (`60`) on that side!
-                                            eff_entries = list(entries)
+                                            eff_entries = []
+                                            for item in entries:
+                                                uname_i = item[0]
+                                                if owner == 1 and dstate["warmup_spawned_p1_workers"] and UNIT_IDS[uname_i] in WORKER_IDS:
+                                                    continue
+                                                if owner == 2 and dstate["warmup_spawned_p2_workers"] and UNIT_IDS[uname_i] in WORKER_IDS:
+                                                    continue
+                                                if dstate["warmup_spawned_creep_tumors"] and uname_i == "creep-tumor-burrowed":
+                                                    continue
+                                                eff_entries.append(item)
                                             has_cannon = [it for it in eff_entries if UNIT_IDS[it[0]] == 66]
                                             has_pylon = any(UNIT_IDS[it[0]] == 60 for it in eff_entries)
                                             if has_cannon and not has_pylon:
@@ -3737,7 +4967,14 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         _spawn_side_entries(scen.p2_units, 2)
                                         if dbg:
                                             await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=dbg)))
-                                        dstate["phase"] = "fighting"
+                                        has_carriers = any(u == "carrier" for u, _, _, _ in (scen.p1_units + scen.p2_units))
+                                        if has_carriers:
+                                            dstate["carrier_fill_cheats_on"] = False
+                                            dstate["carrier_fill_issued_p1"] = False
+                                            dstate["carrier_fill_issued_p2"] = False
+                                            dstate["phase"] = "carrier_fill"
+                                        else:
+                                            dstate["phase"] = "fighting"
                                         dstate["phase_start_loop"] = gl
                                         dstate["fight_start_loop"] = gl
                                         dstate["round_t0"] = time.monotonic()
@@ -3754,6 +4991,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         dstate["p2_start_cnt"] = 0
                                         dstate["p1_start_val"] = 0.0
                                         dstate["p2_start_val"] = 0.0
+                                        dstate["p1_bc_start_cnt"] = 0
+                                        dstate["p1_bc_alive_cnt"] = 0
                                         dstate["p2_pf_start_cnt"] = 0
                                         dstate["p2_pf_alive_cnt"] = 0
                                         dstate["p2_det_start_cnt"] = 0
@@ -3774,16 +5013,62 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         dstate["econ_worker_mining_ticks"] = 0
                                         dstate["econ_worker_total_ticks"] = 0
 
+                                    elif dstate["phase"] == "carrier_fill" and gl >= dstate["phase_start_loop"] + 2:
+                                        # Top off debug-spawned Carriers from SC2's default 4/8 -> full 8/8 Interceptors (`1042`)!
+                                        if not dstate["carrier_fill_cheats_on"]:
+                                            await rpc(sc2_ws, sc2api_pb2.Request(
+                                                debug=sc2api_pb2.RequestDebug(debug=[
+                                                    debug_pb2.DebugCommand(game_state=debug_pb2.fast_build),
+                                                    debug_pb2.DebugCommand(game_state=debug_pb2.free),
+                                                ])
+                                            ))
+                                            dstate["carrier_fill_cheats_on"] = True
+                                        elif not dstate["carrier_fill_issued_p1"]:
+                                            p1_carriers = [u.tag for u in obs.raw_data.units if u.alliance == 1 and u.unit_type == 79]
+                                            if p1_carriers:
+                                                acts_ic1 = [
+                                                    sc2api_pb2.Action(
+                                                        action_raw=raw_pb2.ActionRaw(
+                                                            unit_command=raw_pb2.ActionRawUnitCommand(
+                                                                ability_id=1042,
+                                                                unit_tags=p1_carriers,
+                                                            )
+                                                        )
+                                                    )
+                                                    for _ in range(4)
+                                                ]
+                                                await rpc(sc2_ws, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=acts_ic1)))
+                                            dstate["carrier_fill_issued_p1"] = True
+                                        elif gl >= dstate["phase_start_loop"] + 16:
+                                            if dstate["carrier_fill_cheats_on"]:
+                                                await rpc(sc2_ws, sc2api_pb2.Request(
+                                                    debug=sc2api_pb2.RequestDebug(debug=[
+                                                        debug_pb2.DebugCommand(game_state=debug_pb2.fast_build),
+                                                        debug_pb2.DebugCommand(game_state=debug_pb2.free),
+                                                    ])
+                                                ))
+                                                dstate["carrier_fill_cheats_on"] = False
+                                            dstate["phase"] = "fighting"
+                                            dstate["phase_start_loop"] = gl
+                                            dstate["fight_start_loop"] = gl
+                                            dstate["round_t0"] = time.monotonic()
+
                                     elif dstate["phase"] == "fighting":
                                         scen = scenarios[dstate["scen_idx"]]
                                         cx, cy = dstate["arena_cx"], dstate["arena_cy"]
                                         want_workers = bool(
                                             {UNIT_IDS[u] for u, _, _, _ in (scen.p1_units + scen.p2_units)} & WORKER_IDS
                                         )
+                                        p2_wr_f = is_p2_worker_rush_spec(scen)
+                                        if dstate["p1_start_cnt"] == 0 and scen.p1_starter_buildings:
+                                            for u_sb in obs.raw_data.units:
+                                                if u_sb.alliance == 1 and u_sb.tag not in dstate["orig_th_tags"] and u_sb.unit_type in STARTER_BUILDING_UIDS:
+                                                    dstate["p1_starter_bldg_tags"].add(u_sb.tag)
                                         p1u = [
                                             u for u in obs.raw_data.units
                                             if u.display_type == 1 and u.alliance == 1
                                             and u.tag not in dstate["orig_th_tags"]
+                                            and u.tag not in dstate["p1_starter_bldg_tags"]
                                             and (u.unit_type in COMBAT_IDS or (want_workers and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx, u.pos.y - cy) < 35.0))
                                         ]
                                         # Fog-immune P2 unit view from P2's own `sc2_ws2` observation (`alliance == 1`),
@@ -3799,7 +5084,14 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 u for u in obs.raw_data.units
                                                 if u.display_type == 1 and u.alliance == 4
                                                 and u.tag not in dstate["orig_th_tags"]
-                                                and (u.unit_type in COMBAT_IDS or (want_workers and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx, u.pos.y - cy) < 35.0))
+                                                and (
+                                                    u.unit_type in COMBAT_IDS
+                                                    or (
+                                                        want_workers
+                                                        and u.unit_type in WORKER_IDS
+                                                        and (p2_wr_f or math.hypot(u.pos.x - cx, u.pos.y - cy) < 35.0)
+                                                    )
+                                                )
                                             ]
                                         exp_p1 = sum(cnt for _, cnt, _, _ in scen.p1_units) + sum(
                                             1 + sum(cc for _, cc in lt["cargo"]) for lt in scen.p1_loaded_transports
@@ -3812,6 +5104,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         if dstate["p1_start_cnt"] == 0 and (p1_tot_c >= exp_p1 and p2_tot_c >= exp_p2 or (gl >= dstate["phase_start_loop"] + 16 and p1u and p2u)):
                                             dstate["fight_start_loop"] = gl
                                             dstate["last_combat_event_loop"] = gl
+                                            dstate["p1_fight_start_minerals"] = int(getattr(obs.player_common, "minerals", 0))
                                             dstate["prev_unit_hp_map"] = {
                                                 u.tag: float(u.health) + float(u.shield) for u in (p1u + p2u)
                                             }
@@ -3821,6 +5114,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             dstate["p2_start_types"] = units_type_counts(p2u)
                                             dstate["p1_start_val"] = units_total_value(p1u)
                                             dstate["p2_start_val"] = units_total_value(p2u)
+                                            dstate["p1_bc_start_cnt"] = count_matching_unit_ids(p1u, {57})
+                                            dstate["p1_bc_alive_cnt"] = dstate["p1_bc_start_cnt"]
                                             dstate["p2_pf_start_cnt"] = count_matching_unit_ids(p2u, {130})
                                             dstate["p2_pf_alive_cnt"] = dstate["p2_pf_start_cnt"]
                                             dstate["p2_det_start_cnt"] = count_matching_unit_ids(p2u, DETECTOR_IDS)
@@ -3851,8 +5146,12 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 dstate["econ_worker_mining_ticks"] = 0
                                                 dstate["econ_worker_total_ticks"] = 0
                                             if scen.use_main_base:
-                                                # Start all P1 main workers actively mining round-robin across real main mineral patches on frame 0
-                                                w_units_mb = [u for u in p1u if u.unit_type in WORKER_IDS]
+                                                # Only assign idle P1 workers (preserve active 2-per-patch warmup miners!)
+                                                w_units_mb = [
+                                                    u for u in p1u
+                                                    if u.unit_type in WORKER_IDS
+                                                    and not any(o.ability_id in MINING_ORDER_ABILITY_IDS for o in u.orders)
+                                                ]
                                                 mtags = list(dstate["p1_main_mineral_tags"])
                                                 if w_units_mb and mtags:
                                                     g_acts = [
@@ -3860,7 +5159,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                             action_raw=raw_pb2.ActionRaw(
                                                                 unit_command=raw_pb2.ActionRawUnitCommand(
                                                                     ability_id=3666,
-                                                                    target_unit_tag=mtags[i % len(mtags)],
+                                                                    target_unit_tag=mtags[(i // 2) % len(mtags)],
                                                                     unit_tags=[wu.tag],
                                                                 )
                                                             )
@@ -3880,6 +5179,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             dstate["p2_combat_alive_cnt"] = count_combat_capable(p2u, is_dummy=p2_is_dummy)
                                             dstate["p1_rem_val"] = units_total_value(p1u)
                                             dstate["p2_rem_val"] = units_total_value(p2u)
+                                            dstate["p1_bc_alive_cnt"] = count_matching_unit_ids(p1u, {57})
                                             dstate["p2_pf_alive_cnt"] = count_matching_unit_ids(p2u, {130})
                                             dstate["p2_det_alive_cnt"] = count_matching_unit_ids(p2u, DETECTOR_IDS)
                                             dstate["p2_w_alive_cnt"] = count_matching_unit_ids(p2u, WORKER_IDS)
@@ -3916,9 +5216,11 @@ async def run_in_container(args: argparse.Namespace) -> int:
 
                                             if scen.scoring_mode == "mineral-defense":
                                                 # Run full duration so gathered minerals reflect real mining uptime;
-                                                # stop early ONLY if all P1 units/workers are wiped out!
-                                                if not p1u:
+                                                # stop early if all P1 workers/combat are eliminated OR all P2 worker-rush units are wiped!
+                                                if not p1u or (len(dstate["econ_cur_worker_tags"]) == 0 and dstate["p1_combat_alive_cnt"] == 0):
                                                     end_reason, ko_side = "ko_eliminated", 2
+                                                elif p2_wr_f and not p2u and dstate["p2_start_cnt"] > 0:
+                                                    end_reason, ko_side = "worker_rush_wiped", 1
                                                 elif fight_elapsed >= scen.max_loops:
                                                     end_reason = "mineral_defense_complete"
                                             elif scen.scoring_mode == "worker-runby":
@@ -3958,10 +5260,22 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 elif fight_elapsed >= scen.max_loops:
                                                     end_reason = "max_loops"
 
+                                            ended_now, sc2_end_reason, sc2_ko_side = extract_sc2_early_game_end(
+                                                resp.status,
+                                                resp.observation.player_result,
+                                                sc2api_pb2.ended,
+                                            )
+                                            if ended_now:
+                                                dstate["sc2_ended_reason"] = sc2_end_reason
+                                                dstate["sc2_ended_ko_side"] = sc2_ko_side
+                                                if end_reason is None:
+                                                    end_reason = sc2_end_reason
+                                                    ko_side = sc2_ko_side
+
                                             if end_reason is not None:
                                                 finalize_current_round(gl, end_reason=end_reason, ko_winner_side=ko_side)
                                                 dstate["scen_idx"] += 1
-                                                if dstate["scen_idx"] >= len(scenarios):
+                                                if ended_now or dstate["scen_idx"] >= len(scenarios):
                                                     dstate["phase"] = "done"
                                                     dstate["done"].set()
                                                 else:
@@ -3985,6 +5299,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         except Exception as exc:
                             dstate["errors"].append(f"p1_ws: {type(exc).__name__}: {exc}")
                         finally:
+                            _ensure_active_round_finalized("early_match_end")
                             dstate["done"].set()
                         return bot_ws
 
@@ -4042,11 +5357,13 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             if time.monotonic() >= deadline:
                                 raise TimeoutError(f"Arena duel exceeded {wall_budget:.0f}s wall timeout ({len(scenarios)} scenarios)")
                             if bot_proc1.poll() is not None and not dstate["done"].is_set():
-                                dstate["errors"].append(f"bot_proc1 exited prematurely rc={bot_proc1.returncode}")
+                                if not (bot_proc1.returncode == 0 and dstate.get("sc2_ended_reason")):
+                                    dstate["errors"].append(f"bot_proc1 exited prematurely rc={bot_proc1.returncode}")
                                 dstate["done"].set()
                                 return
                             if bot_proc2 is not None and bot_proc2.poll() is not None and not dstate["done"].is_set():
-                                dstate["errors"].append(f"bot_proc2 exited prematurely rc={bot_proc2.returncode}")
+                                if not (bot_proc2.returncode == 0 and dstate.get("sc2_ended_reason")):
+                                    dstate["errors"].append(f"bot_proc2 exited prematurely rc={bot_proc2.returncode}")
                                 dstate["done"].set()
                                 return
                             if p2_task is not None and p2_task.done() and not dstate["done"].is_set():
@@ -4084,6 +5401,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             except (asyncio.CancelledError, Exception):
                                 pass
 
+                    _ensure_active_round_finalized("early_match_end")
                     replay_bytes = 0
                     if getattr(args, "save_replay_path", ""):
                         save_resp = await rpc(

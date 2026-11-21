@@ -1929,6 +1929,90 @@
        (> (bldg-count-equivalent ready-bldg-counts 'robotics-facility) 0)
        (= (bldg-count-equivalent total-bldg-counts 'robotics-bay) 0)))
 
+;; L48-WR: First-class early worker-rush detector & race-specific suppression helpers.
+;; Purely physical: `enemy-worker-cnt >= 4`, `frame < 3360` (or explicit/OWM latched active),
+;; `enemy-combat-cnt == 0`, `army-supply < 6`, AND active local threat/attack/stopped-expanding
+;; (so peaceful opening scouts viewing enemy workers mining at the enemy main NEVER false-trigger!).
+(define (compute-early-worker-rush-active? frame army-supply enemy-u-counts
+                                           under-attack? enemy-threat-supply
+                                           raw-mirror-signals)
+  (define explicit-wr?
+    (and (hash? raw-mirror-signals)
+         (not (not (hash-ref raw-mirror-signals 'worker-rush-active? #f)))))
+  (define opp-stopped-exp?
+    (and (hash? raw-mirror-signals)
+         (not (not (hash-ref raw-mirror-signals 'opp-stopped-expanding? #f)))))
+  (define owm-wr-near
+    (if (hash? raw-mirror-signals)
+        (let ([v (hash-ref raw-mirror-signals 'enemy-workers-near-us 0)])
+          (if (exact-integer? v) v 0))
+        0))
+  (define enemy-worker-cnt
+    (+ (unit-count-equivalent enemy-u-counts 'probe)
+       (unit-count-equivalent enemy-u-counts 'scv)
+       (unit-count-equivalent enemy-u-counts 'drone)))
+  (define enemy-combat-cnt
+    (for/sum ([u (in-list '(zealot stalker adept immortal colossus disruptor high-templar dark-templar
+                            archon sentry phoenix void-ray oracle tempest carrier mothership
+                            marine marauder reaper siege-tank siege-tank-sieged hellion hellbat
+                            cyclone widow-mine thor ghost viking-fighter banshee liberator battlecruiser
+                            zergling baneling roach ravager hydralisk lurker lurker-burrowed
+                            ultralisk mutalisk corruptor brood-lord))])
+      (unit-count-equivalent enemy-u-counts u)))
+  (and (= enemy-combat-cnt 0)
+       (< army-supply 6)
+       (or (and (< frame 5376)
+                (or explicit-wr? (>= owm-wr-near 4)))
+           (and (< frame 3360)
+                (>= enemy-worker-cnt 4)
+                (or under-attack?
+                    (> enemy-threat-supply 0)
+                    opp-stopped-exp?)))))
+
+(define (early-worker-rush-suppressed-sym? race sym unit-counts army-supply [total-bldg-counts #f])
+  (define nsym (normalize-brain-sym sym))
+  (case race
+    [(Terran)
+     (or (not (not (memq nsym '(refinery command-center orbital-command factory
+                                starport barracks-reactor barracks-techlab
+                                engineering-bay armory reaper))))
+         (and (hash? total-bldg-counts)
+              (eq? nsym 'barracks)
+              (>= (bldg-count-equivalent total-bldg-counts 'barracks) 1)
+              (< (unit-count-equivalent unit-counts 'marine) 4)))]
+    [(Zerg)
+     (or (not (not (memq nsym '(hatchery extractor queen roach-warren baneling-nest
+                                lair evolution-chamber spore-crawler))))
+         ;; L48-W3B (`r14` Zerg): First 6 fast (17s) Zerglings BEFORE 36s SpineCrawler #1!
+         (and (eq? nsym 'spine-crawler)
+              (< (unit-count-equivalent unit-counts 'zergling) 6)))]
+    [(Protoss)
+     (or (and (< (unit-count-equivalent unit-counts 'zealot) 2)
+              (not (not (memq nsym '(assimilator cybernetics-core nexus
+                                     forge stargate twilight-council robotics-facility
+                                     warp-gate-research)))))
+         (and (hash? total-bldg-counts)
+              (eq? nsym 'gateway)
+              (>= (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                     (bldg-count-equivalent total-bldg-counts 'warp-gate)) 1)
+              (< (unit-count-equivalent unit-counts 'zealot) 3)))]
+    [else #f]))
+
+;; L48-W2 (`H2H #04 PvT`): CyberneticsCore air upgrades (`protoss-air-weapons-1..3` / `protoss-air-armor-1..3`)
+;; MUST require BOTH `stargate > 0` AND `protoss-air-combat-cnt >= 3` so CyberCore never burns 100M/100G with 0 Stargate!
+(define (protoss-air-upgrade-gate-ok? sym total-bldg-counts unit-counts)
+  (define nsym (normalize-brain-sym sym))
+  (if (memq nsym '(protoss-air-weapons-1 protoss-air-weapons-2 protoss-air-weapons-3
+                   protoss-air-armor-1 protoss-air-armor-2 protoss-air-armor-3))
+      (and (> (bldg-count-equivalent total-bldg-counts 'stargate) 0)
+           (>= (+ (unit-count-equivalent unit-counts 'void-ray)
+                  (unit-count-equivalent unit-counts 'carrier)
+                  (unit-count-equivalent unit-counts 'tempest)
+                  (unit-count-equivalent unit-counts 'phoenix)
+                  (unit-count-equivalent unit-counts 'oracle))
+               3))
+      #t))
+
 (struct dyn-plan-ctx
   (all-upgs benchmark-targets
    has-robo? has-ready-armory? enemy-cap-air? enemy-cap-air-ground-aa?
@@ -1937,7 +2021,7 @@
    desired-spores has-lair-or-hive-ready? desired-overseers desired-droppers
    gas-bldg-sym total-gas-bldgs suppress-tvp-extra-rax?
    crisis-defer? severe-crisis-static-def? defer-stargate?
-   early-zero-army-attack? root-combat-facility-ready? under-early-rush-crisis?
+   early-zero-army-attack? root-combat-facility-ready? early-worker-rush-active? under-early-rush-crisis?
    supply-sym hard-supply-block? zero-supply-provider-lockout? supply-lockout-active?
    total-townhalls steps-so-far due-timing-goals repaired-prereqs
    post-bo-goals post-bo-deviation))
@@ -2222,14 +2306,18 @@
          (>= (bldg-count-equivalent total-bldg-counts 'refinery) 1)
          (or (>= (unit-count-equivalent unit-counts 'marine) 1)
              (>= minerals 200))))
+  (define early-worker-rush-active?
+    (compute-early-worker-rush-active?
+     frame army-supply enemy-u-counts under-attack? enemy-threat-supply raw-mirror-signals))
   (define under-early-rush-crisis?
-    (and (< frame 3360)
-         (not tvz-sealed-wall-light-lings-ok?)
-         (or under-attack?
-             (>= enemy-threat-supply 4)
-             (>= (unit-count-equivalent enemy-u-counts 'zergling) 4)
-             (and (>= (unit-count-equivalent enemy-u-counts 'zergling) 2)
-                  (< army-supply 4)))))
+    (or early-worker-rush-active?
+        (and (< frame 3360)
+             (not tvz-sealed-wall-light-lings-ok?)
+             (or under-attack?
+                 (>= enemy-threat-supply 4)
+                 (>= (unit-count-equivalent enemy-u-counts 'zergling) 4)
+                 (and (>= (unit-count-equivalent enemy-u-counts 'zergling) 2)
+                      (< army-supply 4))))))
   (define plan-supply-sym
     (case race [(Zerg) 'overlord] [(Terran) 'supply-depot] [else 'pylon]))
   (define plan-cur-supply-cnt
@@ -2315,7 +2403,7 @@
      desired-spores has-lair-or-hive-ready? desired-overseers desired-droppers
      gas-bldg-sym total-gas-bldgs suppress-tvp-extra-rax?
      crisis-defer? severe-crisis-static-def? defer-stargate?
-     early-zero-army-attack? root-combat-facility-ready? under-early-rush-crisis?
+     early-zero-army-attack? root-combat-facility-ready? early-worker-rush-active? under-early-rush-crisis?
      plan-supply-sym hard-supply-block? zero-supply-provider-lockout? supply-lockout-active?
      plan-total-townhalls steps-so-far due-timing-goals repaired-prereqs
      post-bo-goals post-bo-deviation))
@@ -2330,10 +2418,11 @@
                                  #:keep-spire-aa? keep-spire-aa?)))
     (define upg-gate-ok?
       (or (not (eq? kind 'research))
-          (upgrade-allowed-by-unit-and-order-gates?
-           race nsym frame workers
-           ready-bldg-counts total-bldg-counts unit-counts
-           researched-upgrades pending-upgrades)))
+          (and (upgrade-allowed-by-unit-and-order-gates?
+                race nsym frame workers
+                ready-bldg-counts total-bldg-counts unit-counts
+                researched-upgrades pending-upgrades)
+               (protoss-air-upgrade-gate-ok? nsym total-bldg-counts unit-counts))))
     (cond
       [(and (lookup-sc2-tech-node id) upg-gate-ok? not-crisis-def?)
        (set! raw-goal-specs
@@ -2410,14 +2499,27 @@
       [(< army-supply (max 8 (+ enemy-threat-supply 4)))
        (case race
          [(Zerg)
-          (add-goal-spec! 'zergling 'survival-supply 'train 8 540.0 'emergency-rush-defense)
-          (add-goal-spec! 'spine-crawler 'survival-supply 'build 1 515.0 'emergency-rush-defense)]
+          (define zerg-wr-lings-first?
+            (and early-worker-rush-active?
+                 (< (unit-count-equivalent unit-counts 'zergling) 6)))
+          (add-goal-spec! 'zergling 'survival-supply 'train 8
+                          (if zerg-wr-lings-first? 680.0 (if early-worker-rush-active? 660.0 540.0))
+                          'emergency-rush-defense)
+          (add-goal-spec! 'spine-crawler 'survival-supply 'build 1
+                          (if (and early-worker-rush-active?
+                                   (not zerg-wr-lings-first?)
+                                   (= (bldg-count-equivalent total-bldg-counts 'spine-crawler) 0))
+                              680.0
+                              515.0)
+                          'emergency-rush-defense)]
          [(Terran)
-          (add-goal-spec! 'marine 'survival-supply 'train 6 540.0 'emergency-rush-defense)
-          (add-goal-spec! 'bunker 'survival-supply 'build 1 515.0 'emergency-rush-defense)]
+          (add-goal-spec! 'marine 'survival-supply 'train 6 (if early-worker-rush-active? 660.0 540.0) 'emergency-rush-defense)
+          (unless early-worker-rush-active?
+            (add-goal-spec! 'bunker 'survival-supply 'build 1 515.0 'emergency-rush-defense))]
          [else
           (define pvz-early-ling-flood-rush?
             (and (eq? enemy-race 'Zerg)
+                 (not early-worker-rush-active?)
                  (< frame 4200)
                  (not pvt-fast-kiter-threat?)
                  (or (and (< frame 2688)
@@ -2427,6 +2529,9 @@
                      early-enemy-combat-arrived?
                      under-early-rush-crisis?)))
           (cond
+            [(and early-worker-rush-active?
+                  (< (unit-count-equivalent unit-counts 'zealot) 2))
+             (add-goal-spec! 'zealot 'survival-supply 'train 2 660.0 'early-worker-rush-defense)]
             [(and pvz-early-ling-flood-rush?
                   (< (unit-count-equivalent unit-counts 'zealot) 4))
              (add-goal-spec! 'zealot 'survival-supply 'train 4 660.0 'pvz-ling-flood-zealots)]
@@ -2587,6 +2692,8 @@
     (unless (or redundant-scaling-fac-with-idle-slots?
                 extra-geyser-deferred-by-gas-bank?
                 late-tech-deferred-by-low-army?
+                (and early-worker-rush-active?
+                     (early-worker-rush-suppressed-sym? race sym unit-counts army-supply total-bldg-counts))
                 (and zerg-t3-on? (zerg-t3-obsolete-unbuilt? sym total-bldg-counts))
                 zerg-hatch-first-defer?
                 suppressed-extra-tvp-rax?
@@ -3949,6 +4056,7 @@
                  race (normalize-brain-sym usym) frame workers
                  ready-bldg-counts total-bldg-counts unit-counts
                  researched-upgrades pending-upgrades)
+                (protoss-air-upgrade-gate-ok? usym total-bldg-counts unit-counts)
                 (not (and zerg-t3-on? (zerg-t3-obsolete-unbuilt? usym total-bldg-counts)))
                 (not (sc2-tech-already-satisfied? usym total-bldg-counts researched-upgrades pending-upgrades 1))
                 (or sg-upg-escalation?
@@ -4407,10 +4515,11 @@
        (let* ([gsym (normalize-brain-sym (pro-bo-goal-target-sym raw-goal))]
               [ready? (sc2-tech-prereqs-ready? gsym ready-bldg-counts unit-counts)])
          (and ready?
-              (not (upgrade-allowed-by-unit-and-order-gates?
-                    race gsym frame workers
-                    ready-bldg-counts total-bldg-counts unit-counts
-                    researched-upgrades pending-upgrades))
+              (not (and (upgrade-allowed-by-unit-and-order-gates?
+                         race gsym frame workers
+                         ready-bldg-counts total-bldg-counts unit-counts
+                         researched-upgrades pending-upgrades)
+                        (protoss-air-upgrade-gate-ok? gsym total-bldg-counts unit-counts)))
               (let ([sub (bug5-gated-upgrade-prereq-spec
                           race gsym ready-bldg-counts researched-upgrades pending-upgrades)])
                 (and sub
@@ -4547,6 +4656,7 @@
     (define defer-stargate? (dyn-plan-ctx-defer-stargate? dp-ctx))
     (define early-zero-army-attack? (dyn-plan-ctx-early-zero-army-attack? dp-ctx))
     (define root-combat-facility-ready? (dyn-plan-ctx-root-combat-facility-ready? dp-ctx))
+    (define early-worker-rush-active? (dyn-plan-ctx-early-worker-rush-active? dp-ctx))
     (define under-early-rush-crisis? (dyn-plan-ctx-under-early-rush-crisis? dp-ctx))
     (define race-supply-sym (dyn-plan-ctx-supply-sym dp-ctx))
     (define hard-supply-block? (dyn-plan-ctx-hard-supply-block? dp-ctx))
@@ -4858,6 +4968,8 @@
                                            #:defer-stargate? defer-stargate?
                                            #:keep-ship-weapons? ship-weap-due?
                                            #:keep-spire-aa? keep-spire-aa?))
+                (not (and early-worker-rush-active?
+                          (early-worker-rush-suppressed-sym? race gsym unit-counts army-supply total-bldg-counts)))
                 (not (and supply-lockout-active?
                           (memq gsym '(extractor refinery assimilator
                                        hatchery nexus command-center))))
@@ -5157,6 +5269,10 @@
                  (and protoss-banshee-gate3-due? (eq? nsym 'gateway))
                  (and protoss-anti-tempest-stargate-due? (eq? nsym 'stargate))
                  (and protoss-anti-tempest-blink-due? (eq? nsym 'blink))
+                 (and zerg-zvp-dt-lair-due? (eq? nsym 'lair))
+                 (and zerg-zvp-dt-overseer-due? (eq? nsym 'overseer))
+                 (and zerg-zvp-dt-rw-due? (eq? nsym 'roach-warren))
+                 (and zerg-zvp-dt-roach-due? (eq? nsym 'roach))
                  (and bo-goal-sym (same-brain-sym? sym bo-goal-sym))
                  (is-repaired-prereq? sym)
                  (eq? (sc2-tech-node-category node) 'expansion)
@@ -5213,12 +5329,18 @@
                     (or (> ws-depleting-bases 0) (>= minerals 200)))
                (not (macro-escrow-in-backoff? escrow-state-entry frame nsym)))
            (or (not (eq? (sc2-tech-node-kind node) 'research))
-               (upgrade-allowed-by-unit-and-order-gates?
-                race nsym frame workers ready-bldg-counts total-bldg-counts
-                unit-counts researched-upgrades pending-upgrades))
+               (and (upgrade-allowed-by-unit-and-order-gates?
+                     race nsym frame workers ready-bldg-counts total-bldg-counts
+                     unit-counts researched-upgrades pending-upgrades)
+                    (protoss-air-upgrade-gate-ok? nsym total-bldg-counts unit-counts)))
            (or (>= workers 6)
                zero-townhall-rebuild-due?
                emergency-cloak-escrow?
+               (and early-worker-rush-active?
+                    (>= workers 2)
+                    (memq nsym '(spawning-pool spine-crawler zergling
+                                 supply-depot barracks marine
+                                 pylon gateway zealot)))
                (and emergency-army-before-workers?
                     (eq? (sc2-tech-node-category node) 'combat-unit)))
            (or (>= minerals (sc2-tech-node-min-cost node))
@@ -5439,12 +5561,13 @@
   ;; General pre-3:45 (<5040f) early-rush override across P/T/Z: suppresses natural expand & greedy tech escrow,
   ;; boosts continuous core defenders + defensive structure + supply buffer!
   (define mirror-rush-prob
-    (if (hash? raw-mirror-signals)
-        (let ([v (or (hash-ref raw-mirror-signals 'rush-prob #f)
-                     (hash-ref raw-mirror-signals 'bayesian-rush #f)
-                     0.0)])
-          (if (real? v) (exact->inexact v) 0.0))
-        0.0))
+    (max (if early-worker-rush-active? 0.91 0.0)
+         (if (hash? raw-mirror-signals)
+             (let ([v (or (hash-ref raw-mirror-signals 'rush-prob #f)
+                          (hash-ref raw-mirror-signals 'bayesian-rush #f)
+                          0.0)])
+               (if (real? v) (exact->inexact v) 0.0))
+             0.0)))
   (define early-enemy-combat-seen?
     (or (> (unit-count-equivalent enemy-u-counts 'zergling) 0)
         (> (unit-count-equivalent enemy-u-counts 'zealot) 0)
@@ -5532,20 +5655,22 @@
                   (>= frame 2400)
                   (<= enemy-threat-supply 6.0)))))
   (define early-rush-override-active?
-    (and (< frame 5040)
-         (not terran-tvz-sealed-wall-holds-light-lings?)
-         (not protoss-post-worker-rush-release-cyber?)
-         (not eff-req-det?)
-         (or under-early-rush-crisis?
-             (and (or under-attack?
-                      (>= enemy-threat-supply 4)
-                      (and (>= mirror-rush-prob 0.50) early-enemy-combat-seen?)
-                      (and (< frame 3360)
-                           (or (>= (unit-count-equivalent enemy-u-counts 'zergling) 2)
-                               (>= (unit-count-equivalent enemy-u-counts 'zealot) 1)
-                               (>= (unit-count-equivalent enemy-u-counts 'marauder) 1)
-                               (>= (unit-count-equivalent enemy-u-counts 'reaper) 2))))
-                  (< army-supply (max 10 (+ enemy-threat-supply 4)))))))
+    (or (and early-worker-rush-active?
+             (not protoss-post-worker-rush-release-cyber?))
+        (and (< frame 5040)
+             (not terran-tvz-sealed-wall-holds-light-lings?)
+             (not protoss-post-worker-rush-release-cyber?)
+             (not eff-req-det?)
+             (or under-early-rush-crisis?
+                 (and (or under-attack?
+                          (>= enemy-threat-supply 4)
+                          (and (>= mirror-rush-prob 0.50) early-enemy-combat-seen?)
+                          (and (< frame 3360)
+                               (or (>= (unit-count-equivalent enemy-u-counts 'zergling) 2)
+                                   (>= (unit-count-equivalent enemy-u-counts 'zealot) 1)
+                                   (>= (unit-count-equivalent enemy-u-counts 'marauder) 1)
+                                   (>= (unit-count-equivalent enemy-u-counts 'reaper) 2))))
+                      (< army-supply (max 10 (+ enemy-threat-supply 4))))))))
   (define early-rush-root-sym
     (case race [(Zerg) 'spawning-pool] [(Terran) 'barracks] [else 'gateway]))
   (define protoss-pure-ling-swarm-rush?
@@ -5569,6 +5694,9 @@
       [(Terran) 'marine]
       [else
        (cond
+         [(and early-worker-rush-active?
+               (< (unit-count-equivalent unit-counts 'zealot) 2))
+          'zealot]
          [protoss-pure-ling-swarm-rush?
           (if (and (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
                    (>= gas 25))
@@ -5583,8 +5711,43 @@
          [else 'zealot])]))
   (define early-rush-def-bldg-sym
     (case race [(Zerg) 'spine-crawler] [(Terran) 'bunker] [else 'shield-battery]))
+  ;; L48-W3B/W3C (`#1116`/`#1121` `r16` Probe leak): Pause worker training (`probe`/`scv`/`drone`)
+  ;; during `early-worker-rush-active?` while we have a breakout prod building (`spawning-pool`/
+  ;; `barracks`/`gateway`), `< 3` breakout combat units (`< 6` Zerglings = 3 pairs for Zerg),
+  ;; and `workers >= 5` so 100% of minerals feed Zealots/Marines/Zerglings (preserving `#5140055`
+  ;; 0..4 worker anti-deadlock Probe!).
+  (define early-worker-rush-has-breakout-prod?
+    (case race
+      [(Zerg)    (> (bldg-count-equivalent total-bldg-counts 'spawning-pool) 0)]
+      [(Terran)  (> (bldg-count-equivalent total-bldg-counts 'barracks) 0)]
+      [(Protoss) (> (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                       (bldg-count-equivalent total-bldg-counts 'warp-gate)) 0)]
+      [else #f]))
+  (define early-worker-rush-combat-unit-cnt
+    (case race
+      [(Zerg)
+       (+ (quotient (unit-count-equivalent unit-counts 'zergling) 2)
+          (unit-count-equivalent unit-counts 'roach)
+          (unit-count-equivalent unit-counts 'baneling)
+          (unit-count-equivalent unit-counts 'queen))]
+      [(Terran)
+       (+ (unit-count-equivalent unit-counts 'marine)
+          (unit-count-equivalent unit-counts 'marauder)
+          (unit-count-equivalent unit-counts 'reaper)
+          (unit-count-equivalent unit-counts 'hellion))]
+      [(Protoss)
+       (+ (unit-count-equivalent unit-counts 'zealot)
+          (unit-count-equivalent unit-counts 'stalker)
+          (unit-count-equivalent unit-counts 'adept))]
+      [else 0]))
+  (define early-worker-rush-pause-workers?
+    (and early-worker-rush-active?
+         early-worker-rush-has-breakout-prod?
+         (< early-worker-rush-combat-unit-cnt 3)
+         (>= workers 5)))
   (define zvz-early-ling-defense-due?
     (and (eq? race 'Zerg)
+         (not early-worker-rush-active?)
          (< frame 3360)
          (or (>= (unit-count-equivalent enemy-u-counts 'zergling) 2)
              (and (eq? enemy-race 'Zerg)
@@ -5640,13 +5803,14 @@
          (not eff-req-det?)
          (not opp-cap-air-override?)
          (not (protoss-enemy-capital-air? enemy-u-counts))
-         ;; L39-P0-2c (`#04 PvT`): Do not misclassify standard peaceful 2-base marine-heavy Bio
-         ;; (`marines >= 2*marauders`, `>=36` workers, `>=16` army, not under attack) as proxy Marauders!
+         ;; L39-P0-2c + L48-P0-2a (`H2H #04 PvT`): Do not misclassify standard unbreached 2-base
+         ;; marine-heavy Bio (`marines >= 2*marauders`, `>=36` workers, `>=16` army, not under attack,
+         ;; `enemy-threat-supply <= army-supply`) as proxy Marauders!
          (not (and (>= active-bases 2)
                    (>= workers 36)
                    (>= army-supply 16)
                    (not under-attack?)
-                   (<= enemy-threat-supply 0)
+                   (<= enemy-threat-supply army-supply)
                    (>= (unit-count-equivalent enemy-u-counts 'marine)
                        (* 2 (max 1 enemy-marauder-cnt)))))
          (or (>= enemy-marauder-cnt 3)
@@ -5767,11 +5931,12 @@
                   (> (bldg-count-equivalent enemy-b-counts 'spawning-pool) 0)
                   (<= (bldg-count-equivalent enemy-b-counts 'hatchery) 1)))))
   (define early-ling-rush-defense-active?
-    (or protoss-pvz-12pool-block-nexus2?
-        (and (or (< frame 4704)
-                 (and (eq? race 'Protoss) (< frame 5376)))
-             (not terran-tvz-sealed-wall-holds-light-lings?)
-             (not eff-req-det?)
+    (and (not early-worker-rush-active?)
+         (or protoss-pvz-12pool-block-nexus2?
+             (and (or (< frame 4704)
+                      (and (eq? race 'Protoss) (< frame 5376)))
+                  (not terran-tvz-sealed-wall-holds-light-lings?)
+                  (not eff-req-det?)
              ;; L36-P0-2 (`#5138232` PvZ Roach-Ling): Do NOT lock Protoss into pure-Ling Zealot/Adept spam
              ;; once Zerg has Roaches/Ravagers — let Immortal + Stalker lead instead!
              (not (and (eq? race 'Protoss)
@@ -5796,7 +5961,7 @@
                           (and under-attack? (>= enemy-zergling-cnt 1))
                           (and (>= mirror-rush-prob 0.65)
                                (or (>= enemy-zergling-cnt 1) (> enemy-threat-supply 0))))))
-             (< army-supply (max 16 (+ enemy-threat-supply 6))))))
+             (< army-supply (max 16 (+ enemy-threat-supply 6)))))))
   ;; L30-P0-2 (`#36 Pv12Pool`): Under < 4:00 (`5376f`) Ling/pool rush, strictly prioritize Zealot #1-#2
   ;; (`u >= 960, blk = #t`) BEFORE CyberneticsCore, Natural Nexus, or Gateway #2!
   (define protoss-early-rush-zealot-first?
@@ -5820,6 +5985,7 @@
   (define zvz-early-ling-wave2-hold?
     (and (eq? race 'Zerg)
          (eq? enemy-race 'Zerg)
+         (not early-worker-rush-active?)
          (< frame 5376)
          (<= total-townhalls-incl-pending 1)
          (or zvz-early-ling-defense-due?
@@ -5845,14 +6011,16 @@
          (not (and (>= (unit-count-equivalent unit-counts 'queen) 1)
                    (>= (bldg-count-equivalent total-bldg-counts 'spine-crawler) 1)
                    (>= (unit-count-equivalent unit-counts 'zergling) 12)))))
-  ;; L43-P0-2b (`#72` 12PoolBot): On >= 6 Zerglings before 150s (`frame < 3360`), strictly cap
-  ;; Gateways at 2 while Zealot <= 2 so 150M never burns on Gateway #3 instead of Zealot + 1 wall ShieldBattery + CyberCore!
+  ;; L43-P0-2b + L47-P0-2b (`#72` 12PoolBot): On >= 6 Zerglings before 150s (`frame < 3360`), cap
+  ;; Gateways at 2 while Zealot <= 2 & minerals < 275 so 150M-260M never starves Zealot + ShieldBattery + CyberCore,
+  ;; while lifting at >= 275M (e.g. post-Nexus-cancel 330M-375M float) so Gateway #3 deploys ahead of CyberCore!
   (define protoss-12pool-2gate-cap-active?
     (and (eq? race 'Protoss)
          (eq? enemy-race 'Zerg)
          (< frame 3360)
          (>= enemy-zergling-cnt 6)
-         (<= (unit-count-equivalent unit-counts 'zealot) 2)))
+         (<= (unit-count-equivalent unit-counts 'zealot) 2)
+         (< minerals 275)))
   (define (early-ling-rush-suppressed-sym? nsym)
     (and early-ling-rush-defense-active?
          (or (eq? nsym race-expand-sym)
@@ -5977,10 +6145,14 @@
                         (and (not protoss-12pool-2gate-cap-active?)
                              (= (+ (bldg-count-equivalent total-bldg-counts 'gateway)
                                    (bldg-count-equivalent total-bldg-counts 'warp-gate)) 2)
-                             (>= minerals 350))))
+                             (>= minerals 275))))
                (cons 925.0 #t)]
               [(and (eq? nsym 'cybernetics-core)
-                    protoss-12pool-2gate-cap-active?
+                    (or protoss-12pool-2gate-cap-active?
+                        (and (eq? enemy-race 'Zerg)
+                             (< frame 3360)
+                             (>= enemy-zergling-cnt 6)
+                             (<= (unit-count-equivalent unit-counts 'zealot) 2)))
                     (= (bldg-count-equivalent total-bldg-counts 'cybernetics-core) 0)
                     (>= (+ (bldg-count-equivalent total-bldg-counts 'gateway)
                            (bldg-count-equivalent total-bldg-counts 'warp-gate)) 2)
@@ -6024,6 +6196,7 @@
   (define pvz-early-ling-flood-active?
     (and (eq? race 'Protoss)
          (eq? enemy-race 'Zerg)
+         (not early-worker-rush-active?)
          (< frame 4200)
          (not pvt-fast-kiter-threat?)
          (or (and (< frame 2688)
@@ -6199,7 +6372,7 @@
     (and (eq? race 'Protoss)
          (not protoss-post-worker-rush-release-cyber?)
          (not pvp-benign-opening-scout?)
-         (or under-attack? (> enemy-threat-supply 0))
+         (or early-worker-rush-active? under-attack? (> enemy-threat-supply 0))
          (> (+ (bldg-count-equivalent ready-bldg-counts 'gateway)
                (bldg-count-equivalent ready-bldg-counts 'warp-gate))
             0)
@@ -6222,7 +6395,9 @@
          (not pvp-benign-opening-scout?)
          (< protoss-early-breach-combat-cnt 4)
          (not early-proxy-marauder-rush-active?)
-         (or early-ling-rush-defense-active?
+         (or (and early-worker-rush-active?
+                  (< (unit-count-equivalent unit-counts 'zealot) 2))
+             early-ling-rush-defense-active?
              (and (< frame 5376)
                   (or under-attack? (> enemy-threat-supply 0))
                   (not eff-req-aa?)
@@ -6255,6 +6430,8 @@
          (or pvz-ling-allow-cyber-now?
              (and (not protoss-early-breach-zealot-due?)
                   (not protoss-early-breach-no-tech?)))
+         (not (and early-worker-rush-active?
+                   (< (unit-count-equivalent unit-counts 'zealot) 2)))
          (or protoss-post-worker-rush-release-cyber?
              (not (and under-early-rush-crisis?
                        (< (unit-count-equivalent unit-counts 'zealot) 1))))))
@@ -6285,9 +6462,14 @@
                       (and (<= raw-supply-left 0) (>= supply-cap 20) (< pending-supply 2))))
              (and early-rush-override-active?
                   (not early-ling-rush-defense-active?)
+                  (not early-worker-rush-active?)
                   (< supply-cap 200)
                   (<= pending-supply 0)
                   (<= supply-left 3))
+             (and early-worker-rush-active?
+                  (< supply-cap 200)
+                  (<= pending-supply 0)
+                  (<= supply-left 1))
              (and early-ling-rush-defense-active?
                   (< supply-cap 200)
                   (<= pending-supply 0)
@@ -6297,6 +6479,7 @@
                   (not zerg-overlord-overbuilt-suppress?)
                   (not pvz-suppress-nonurgent-pylon?)
                   (not early-ling-rush-defense-active?)
+                  (not early-worker-rush-active?)
                   (not protoss-cyber-before-pylon2?)
                   (supply-preemption-needed? supply-used supply-cap pending-supply #:race race)))))
   (define supply-crisis?
@@ -6307,6 +6490,7 @@
                   (not zerg-mass-air-suppress-overlord?)
                   (not zerg-overlord-overbuilt-suppress?)
                   (not pvz-suppress-nonurgent-pylon?)
+                  (not early-worker-rush-active?)
                   (not protoss-cyber-before-pylon2?)
                   (< supply-cap 200)
                   (< (+ supply-cap (* 8 pending-supply)) 200)
@@ -6390,9 +6574,62 @@
              (if (= (bldg-count-equivalent enemy-b-counts 'forge) 0)
                  (max 2.0 army-supply)
                  0))))
+  ;; L46-P0-2a + L47/L48-P0-2b (`#12`/`#39`/`#51`/`H2H #03` PvPNatDelay): While still on 1 base
+  ;; in unpressured PvP (`< 6720f`), defer Gateway #3+, PhotonCannon #2+, TwilightCouncil, Forge,
+  ;; and >= 300M units strictly behind Natural Nexus #2!
+  (define pvp-nat-defer-gate3-cannon2?
+    (and (eq? race 'Protoss)
+         (eq? enemy-race 'Protoss)
+         (= active-bases 1)
+         (<= total-townhalls-incl-pending 1)
+         (>= frame 2240)
+         (< frame 6720)
+         (>= (bldg-count-equivalent total-bldg-counts 'cybernetics-core) 1)
+         (not under-attack?)
+         (not under-early-rush-crisis?)
+         (= (bldg-count-equivalent enemy-b-counts 'photon-cannon) 0)
+         (= (unit-count-equivalent enemy-u-counts 'dark-templar) 0)
+         (<= enemy-threat-supply
+             (if (= (bldg-count-equivalent enemy-b-counts 'forge) 0)
+                 (max 2.0 army-supply)
+                 0))))
+  ;; L47/L48-P0-2b (`#53 zig-reapers`): Defer `orbital-command` and `command-center #2` against:
+  ;; (a) >= 2 pre-5:00 Reapers until >= 6 Marines OR >= 1 Bunker/Hellion exist;
+  ;; (b) >= 1 threatening pre-4:00 (`< 5376f`) TvT Reaper until >= 4 Marines OR >= 1 Bunker/Hellion exist!
+  (define terran-early-reaper2-defer-oc-cc?
+    (and (eq? race 'Terran)
+         (< frame 6720)
+         (= (bldg-count-equivalent total-bldg-counts 'bunker) 0)
+         (= (unit-count-equivalent unit-counts 'hellion) 0)
+         (or (and (>= (unit-count-equivalent enemy-u-counts 'reaper) 2)
+                  (< (unit-count-equivalent unit-counts 'marine) 6))
+             (and (eq? enemy-race 'Terran)
+                  (< frame 5376)
+                  (>= (unit-count-equivalent enemy-u-counts 'reaper) 1)
+                  (or under-attack?
+                      (> enemy-threat-supply 0)
+                      early-enemy-combat-arrived?)
+                  (< (unit-count-equivalent unit-counts 'marine) 4)))))
+  (define (terran-early-reaper2-deferred-sym? nsym)
+    (and terran-early-reaper2-defer-oc-cc?
+         (or (eq? nsym 'orbital-command)
+             (and (eq? nsym 'command-center)
+                  (>= total-townhalls-incl-pending 1)))))
+  ;; L48-P0-2b (`H2H #01 ZvZ` `SB 5.6%`, `escrow=7:hatchery` blocking Hydralisk/Roach/Ling/Overlord):
+  ;; In ZvZ (>= 1 Hatchery exists), NEVER hold blocking `hatchery` escrow when `supply-left <= 2`
+  ;; OR when actively threatened and outnumbered (`enemy-threat-supply > 0 && army-supply < enemy-threat-supply + 4`)!
+  (define zvz-hatchery-nonblocking-now?
+    (and (eq? race 'Zerg)
+         (eq? enemy-race 'Zerg)
+         (> total-townhalls-incl-pending 0)
+         (not zero-townhall-rebuild-due?)
+         (or (<= supply-left 2)
+             (and (> enemy-threat-supply 0)
+                  (< army-supply (+ enemy-threat-supply 4))))))
   (define natural-exp-window?
     (and (<= total-townhalls-incl-pending 1)
          (not terran-1base-cc-lock-broken?)
+         (not terran-early-reaper2-defer-oc-cc?)
          (not active-1base-t3-rush-pending?)
          (not early-rush-override-active?)
          (not early-ling-rush-defense-active?)
@@ -6450,6 +6687,7 @@
          (>= frame 4368)
          (>= workers 20)
          (not terran-1base-cc-lock-broken?)
+         (not terran-early-reaper2-defer-oc-cc?)
          (not terran-tvt-1base-tank-core-due?)
          (not under-attack?)
          (not under-early-rush-crisis?)
@@ -6468,7 +6706,9 @@
          (>= frame 6048)
          (>= workers 16)
          (not zero-townhall-rebuild-due?)
+         (not zvz-hatchery-nonblocking-now?)
          (not terran-1base-cc-lock-broken?)
+         (not terran-early-reaper2-defer-oc-cc?)
          (not (and ws-natural-blocked? (< minerals 350)))
          (not terran-tvt-1base-tank-core-due?)
          (not under-attack?)
@@ -6521,15 +6761,16 @@
                             zergling baneling roach ravager hydralisk lurker lurker-burrowed ultralisk))])
       (unit-count-equivalent enemy-u-counts u)))
   (define enemy-reaper-cnt (unit-count-equivalent enemy-u-counts 'reaper))
+  ;; L48-W2 (`H2H #02 TvT`): Exclude air-to-air mirror `viking-fighter` from TvT ground-threatening air!
+  (define enemy-tvt-ground-attack-air-cnt
+    (+ (unit-count-equivalent enemy-u-counts 'banshee)
+       (unit-count-equivalent enemy-u-counts 'liberator)
+       (unit-count-equivalent enemy-u-counts 'liberator-ag)
+       (unit-count-equivalent enemy-u-counts 'battlecruiser)))
   (define enemy-air-dominant?
     (or enemy-cap-air?
         (and (>= enemy-air-combat-cnt 4)
              (>= (* 2 enemy-air-combat-cnt) enemy-ground-combat-cnt))))
-  ;; L32-P0-2 (`#20` 168 Banshees 2.30x L, `#22` 30 Phoenixes, `#40/#42` Tempests):
-  ;; Strict air-dominated enemy predicate (`combat-air >= 4` & `combat-air >= combat-ground`).
-  (define enemy-air-dominated-now?
-    (and (>= enemy-air-combat-cnt 4)
-         (>= enemy-air-combat-cnt enemy-ground-combat-cnt)))
   ;; W16-P1-1a + L19-P0-2 (`#5136362`, `#5136357`, `#43 ZvP`): Latched heavy capital-air & Battlecruiser predicates
   ;; so fog-of-war flicker NEVER drops `enemy-cap-air?` / `zerg-cap-air-spire-due?` mid-match!
   (define enemy-bc-present?
@@ -6545,6 +6786,16 @@
         (> (bldg-count-equivalent enemy-b-counts 'fleet-beacon) 0)))
   (define enemy-heavy-cap-air?
     (enemy-cap-air-latch-update! race enemy-race frame raw-enemy-heavy-cap-air?))
+  ;; L32-P0-2 + L48-W2 (`#20` 168 Banshees, `#22` 30 Phoenixes, `H2H #02 TvT` mirror Vikings):
+  ;; In TvT, mirror air-to-air `viking-fighter` MUST NOT trigger `enemy-air-dominated-now?`
+  ;; (require >= 4 ground-attacking air Banshee/Liberator/BC or `enemy-heavy-cap-air?`).
+  (define enemy-air-dominated-now?
+    (if (and (eq? race 'Terran) (eq? enemy-race 'Terran))
+        (or enemy-heavy-cap-air?
+            (and (>= enemy-tvt-ground-attack-air-cnt 4)
+                 (>= enemy-tvt-ground-attack-air-cnt enemy-ground-combat-cnt)))
+        (and (>= enemy-air-combat-cnt 4)
+             (>= enemy-air-combat-cnt enemy-ground-combat-cnt))))
   ;; W16-P1-1b (`#16`, `#5134985`, `#5135912`, `#5136228`): Zerg anti-Siege-Tank counter comp (>= 3 observed Tanks)
   (define enemy-siege-tank-cnt
     (+ (unit-count-equivalent enemy-u-counts 'siege-tank)
@@ -6595,6 +6846,17 @@
          (or (>= enemy-banshee-cnt 1)
              (>= enemy-starport-tl-cnt 2)
              (and (>= enemy-starport-tl-cnt 1) (<= frame 8064)))))
+  ;; L47-P0-2b (`#73 Z v who` 11 Cloaked Banshees): Lock >= 1 Spore/base + >= 5 Queens
+  ;; ahead of Lair escrow / HydraDen / Zergling drain once Banshees or <= 6m StarportTL are scouted!
+  (define zerg-banshee-spore-floor-needed?
+    (and zerg-zvt-banshee-aa-rush?
+         (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+         (< (bldg-count-equivalent total-bldg-counts 'spore-crawler)
+            (min 3 (max 1 active-bases)))))
+  (define zerg-banshee-queen5-floor-needed?
+    (and zerg-zvt-banshee-aa-rush?
+         (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+         (< (unit-count-equivalent unit-counts 'queen) 5)))
   (define zerg-has-lair-aa-struct-started?
     (> (+ (bldg-count-equivalent total-bldg-counts 'hydralisk-den)
           (bldg-count-equivalent total-bldg-counts 'spire)
@@ -6718,6 +6980,49 @@
     (if (hash? open-facility-slots)
         (hash-ref open-facility-slots 'larva 0)
         0))
+  ;; L46-P0-2b (`#73` ZvP DT CloakLoss -> 0): On scouted DarkShrine or DarkTemplar,
+  ;; lock Lair -> Overseer (protecting gas from non-detector drains) + >= 8 Roaches!
+  (define zerg-zvp-dt-threat?
+    (and (eq? race 'Zerg)
+         (or (> (unit-count-equivalent enemy-u-counts 'dark-templar) 0)
+             (> (bldg-count-equivalent enemy-b-counts 'dark-shrine) 0))))
+  (define zerg-zvp-dt-lair-due?
+    (and zerg-zvp-dt-threat?
+         (= (bldg-count-equivalent total-bldg-counts 'lair) 0)
+         (= (bldg-count-equivalent total-bldg-counts 'hive) 0)
+         (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+         (> (bldg-count-equivalent ready-bldg-counts 'hatchery) 0)))
+  (define zerg-zvp-dt-overseer-due?
+    (and zerg-zvp-dt-threat?
+         has-lair-or-hive-ready?
+         (< (unit-count-equivalent unit-counts 'overseer) 2)
+         (> (unit-count-equivalent unit-counts 'overlord) 0)))
+  (define zerg-zvp-dt-rw-due?
+    (and zerg-zvp-dt-threat?
+         (not zerg-zvp-dt-lair-due?)
+         (= (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)
+         (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+         (> (bldg-count-equivalent total-bldg-counts 'spore-crawler) 0)
+         (not supply-preempt-now?)))
+  (define zerg-zvp-dt-roach-due?
+    (and zerg-zvp-dt-threat?
+         (not zerg-zvp-dt-lair-due?)
+         (not (and has-lair-or-hive-ready?
+                   (= (unit-count-equivalent unit-counts 'overseer) 0)))
+         (> (bldg-count-equivalent ready-bldg-counts 'roach-warren) 0)
+         (< (unit-count-equivalent unit-counts 'roach) 8)
+         (or (not (hash? open-facility-slots)) (> open-larva-cnt 0))
+         (>= gas 25)
+         (not supply-preempt-now?)))
+  (define (zerg-zvp-dt-defer-gas-sym? nsym)
+    (and zerg-zvp-dt-threat?
+         (or (and zerg-zvp-dt-lair-due? (< gas 125))
+             (and has-lair-or-hive-ready?
+                  (= (unit-count-equivalent unit-counts 'overseer) 0)
+                  (< gas 75)))
+         (memq nsym '(baneling roach ravager hydralisk evolution-chamber
+                      metabolic-boost zerg-melee-weapons-1 zerg-missile-weapons-1
+                      zerg-ground-armor-1 glial-reconstitution centrifugical-hooks))))
   (define ready-protoss-gateways
     (if (eq? race 'Protoss)
         (bldg-count-equivalent ready-bldg-counts 'gateway)
@@ -6769,14 +7074,14 @@
                 4))
          (>= supply-left 2)))
   (define terran-rush-survival-marine-due?
-    (and terran-early-ground-rush-survival-due?
+    (and (or terran-early-ground-rush-survival-due? terran-early-reaper2-defer-oc-cc?)
          (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
          (or (not (hash? open-facility-slots))
              (> (hash-ref open-facility-slots 'barracks 0) 0))
          (< (unit-count-equivalent unit-counts 'marine) 10)
          (>= supply-left 1)))
   (define terran-rush-survival-bunker-due?
-    (and terran-early-ground-rush-survival-due?
+    (and (or terran-early-ground-rush-survival-due? terran-early-reaper2-defer-oc-cc?)
          (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
          (< (bldg-count-equivalent total-bldg-counts 'bunker)
             (if (>= (unit-count-equivalent unit-counts 'marine) 4) 2 1))
@@ -6906,13 +7211,23 @@
              (> (unit-count-equivalent enemy-u-counts 'warp-prism) 0)
              (> enemy-ground-combat-cnt 0)
              (not eff-req-aa?))))
-  ;; L45-P0-2b (Live Prod `#5138613` ZvT vs 92 Vikings / 0 BCs):
-  ;; Hard-cap ZvT Corruptors at <= 12 unless enemy has >= 2 Battlecruisers OR >= 4 Liberators!
+  ;; L45/L46-P0-2b (Live Prod `#5138613` ZvT vs 92 Vikings & `#5138315` ZvP vs 45 Stalkers / 8 Observers):
+  ;; Hard-cap ZvT Corruptors <= 12 unless enemy has >= 2 Battlecruisers OR >= 4 Liberators,
+  ;; AND hard-cap ZvP Corruptors <= 12 unless enemy has >= 2 Carriers/Tempests/VoidRays/Mothership!
   (define zerg-zvt-heavy-air-present?
     (and (eq? race 'Zerg)
          (eq? enemy-race 'Terran)
          (or (>= (unit-count-equivalent enemy-u-counts 'battlecruiser) 2)
              (>= (unit-count-equivalent enemy-u-counts 'liberator) 4))))
+  (define zerg-zvp-cap-air-present?
+    (and (eq? race 'Zerg)
+         (eq? enemy-race 'Protoss)
+         (>= (+ (unit-count-equivalent enemy-u-counts 'carrier)
+                (unit-count-equivalent enemy-u-counts 'tempest)
+                (unit-count-equivalent enemy-u-counts 'void-ray)
+                (unit-count-equivalent enemy-u-counts 'voidray)
+                (unit-count-equivalent enemy-u-counts 'mothership))
+             2)))
   (define zerg-corruptor-hard-cap
     (let ([raw-cap
            (cond
@@ -6928,11 +7243,16 @@
               (max 6 (inexact->exact (ceiling (* 1.2 enemy-corruptor-target-cnt))))]
              [(or eff-req-aa? keep-spire-aa?) 6]
              [else 0])])
-      (if (and (eq? race 'Zerg)
-               (eq? enemy-race 'Terran)
-               (not zerg-zvt-heavy-air-present?))
-          (min 12 raw-cap)
-          raw-cap)))
+      (cond
+        [(and (eq? race 'Zerg)
+              (eq? enemy-race 'Terran)
+              (not zerg-zvt-heavy-air-present?))
+         (min 12 raw-cap)]
+        [(and (eq? race 'Zerg)
+              (eq? enemy-race 'Protoss)
+              (not zerg-zvp-cap-air-present?))
+         (min 12 raw-cap)]
+        [else raw-cap])))
   (define zerg-corruptor-capped?
     (and (eq? race 'Zerg)
          (>= (unit-count-equivalent unit-counts 'corruptor) zerg-corruptor-hard-cap)))
@@ -6964,7 +7284,9 @@
          (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
          (< (bldg-count-equivalent total-bldg-counts 'spore-crawler)
             (min (max 1 active-bases)
-                 (if has-lair-or-hive-ready? active-bases (min active-bases 2))))))
+                 (if (or has-lair-or-hive-ready? zerg-zvt-banshee-aa-rush?)
+                     active-bases
+                     (min active-bases 2))))))
   ;; W11-P0-2-belief (#8/#14): Keep Barracks #1 pumping continuous Marines when army-supply < 8!
   ;; Never starve an imminent Supply Depot when supply-left <= 3 & pending-supply == 0 (preserves <6% SupBlk ATH!).
   (define terran-early-marine-pump-due?
@@ -7610,6 +7932,7 @@
          (>= (bldg-count-equivalent total-bldg-counts 'barracks) 1)
          (not terran-early-rush-hold?)
          (not early-ling-rush-defense-active?)
+         (not early-worker-rush-active?)
          (not under-early-rush-crisis?)))
   (define terran-tvz-wall-depot2-due?
     (and terran-suppress-rax2-before-depot2?
@@ -7650,6 +7973,7 @@
                           200))
          (>= (bldg-count-equivalent total-bldg-counts 'barracks) 1)
          (not terran-1base-cc-lock-broken?)
+         (not terran-early-reaper2-defer-oc-cc?)
          (not terran-tvt-1base-tank-core-due?)
          (not under-attack?)
          (not under-early-rush-crisis?)
@@ -7685,10 +8009,62 @@
          (< (unit-count-equivalent unit-counts 'siege-tank) 2)
          (< (bldg-count-equivalent total-bldg-counts 'factory) 2)
          (< minerals 500)))
-  (define terran-rax-hard-cap-reached?
+  ;; L46-P0-2b (`#29`/`#65` ProdStall -> 0, `#62` 3x EBay, `#56` TvT0Tank):
+  ;; - Hard-cap true 2-base Terran (`active-bases <= 2` & `total-townhalls-incl-pending <= 2`, `< 800M`) at <= 4 Barracks;
+  ;; - Hard-cap Engineering Bay <= 1 on <= 2 bases (<= 2 max ever);
+  ;; - Hard-cap TvT Medivacs <= 2 while Siege Tanks < 4!
+  (define terran-2base-rax4-capped?
     (and (eq? race 'Terran)
-         (>= (bldg-count-equivalent total-bldg-counts 'barracks) 8)
-         (< minerals 1000)))
+         (<= active-bases 2)
+         (<= total-townhalls-incl-pending 2)
+         (>= (bldg-count-equivalent total-bldg-counts 'barracks) 4)
+         (< minerals 800)))
+  (define terran-rax-hard-cap-reached?
+    (or (and (eq? race 'Terran)
+             (>= (bldg-count-equivalent total-bldg-counts 'barracks) 8)
+             (< minerals 1000))
+        terran-2base-rax4-capped?))
+  (define terran-ebay-cap
+    (if (>= active-bases 3) 2 1))
+  (define terran-ebay-capped?
+    (and (eq? race 'Terran)
+         (>= (max (bldg-count-equivalent total-bldg-counts 'engineering-bay)
+                  (bldg-count-equivalent ready-bldg-counts 'engineering-bay))
+             terran-ebay-cap)))
+  (define terran-tvt-medivac-tank4-capped?
+    (and (eq? race 'Terran)
+         (eq? enemy-race 'Terran)
+         (< (unit-count-equivalent unit-counts 'siege-tank) 4)
+         (>= (unit-count-equivalent unit-counts 'medivac) 2)))
+  ;; L47-P0-2b (`#60 Creepy` 4x CyberCore wasted 600M): Explicitly cap Cybernetics Core <= 1
+  ;; (<= 2 ONLY on >= 3 bases with confirmed capital air & >= 1 Stargate + >= 400M)!
+  (define protoss-cyber-core-cap
+    (if (and (eq? race 'Protoss)
+             (>= active-bases 3)
+             (or enemy-cap-air? enemy-heavy-cap-air?)
+             (> (bldg-count-equivalent total-bldg-counts 'stargate) 0)
+             (>= minerals 400))
+        2
+        1))
+  (define protoss-cyber-core-capped?
+    (and (eq? race 'Protoss)
+         (>= (max (bldg-count-equivalent total-bldg-counts 'cybernetics-core)
+                  (bldg-count-equivalent ready-bldg-counts 'cybernetics-core))
+             protoss-cyber-core-cap)))
+  ;; L48-P0-2b (`#12`/`#39`/`#51` PvPNatDelay): Defer Gateway #3+, PhotonCannon #2+,
+  ;; TwilightCouncil, and non-detection Forge strictly behind Natural Nexus #2!
+  (define (pvp-nat-deferred-bldg-sym? nsym)
+    (and pvp-nat-defer-gate3-cannon2?
+         (not (emergency-cloak-det-boost-info nsym))
+         (or (and (eq? nsym 'gateway)
+                  (>= (bldg-count-equivalent total-bldg-counts 'gateway) 2))
+             (and (eq? nsym 'photon-cannon)
+                  (>= (bldg-count-equivalent total-bldg-counts 'photon-cannon) 1))
+             (eq? nsym 'twilight-council)
+             (and (eq? nsym 'forge)
+                  (not enemy-cloaked-threat-active?)
+                  (not requires-detection?)
+                  (not eff-req-det?)))))
   ;; L36-P0-2 (`#840`, `#5138233` TvP 14 Widow Mines + `#5138231` Factory #2@175s -> Starport@342s):
   ;; 1. Hard-cap TvP Widow Mines at <= 2 early (< 5:00 [6720f] or < 3 bases) and <= 3 midgame.
   ;; 2. Block TvP Factory #2+ until Starport #1 AND Natural CC (>= 2 CCs) are started (unless >= 600M & >= 300G).
@@ -7863,10 +8239,25 @@
          (= enemy-air-combat-cnt 0)
          (= (bldg-count-equivalent enemy-b-counts 'stargate) 0)
          (= (bldg-count-equivalent enemy-b-counts 'fleet-beacon) 0)))
+  ;; L48-P0-2a (Live `#5138327`/`#5138328` `Phoenix:16..22` vs Tempests + Local `#82`/`#57` `Phoenix:12`):
+  ;; - Cap Phoenix <= 0 against ANY capital air (`enemy-cap-air?` / `protoss-anti-tempest-pvp-due?` / Tempest / Carrier / BC / Mothership);
+  ;; - Cap Phoenix <= 4 in PvT Bio / non-BC when `0` Banshees & `enemy-ground-combat-supply >= 10`!
   (define protoss-phoenix-cap
     (cond
-      [enemy-heavy-cap-air? 0]
+      [(or enemy-heavy-cap-air?
+           enemy-cap-air?
+           (> (+ (unit-count-equivalent enemy-u-counts 'tempest)
+                 (unit-count-equivalent enemy-u-counts 'carrier)
+                 (unit-count-equivalent enemy-u-counts 'battlecruiser)
+                 (unit-count-equivalent enemy-u-counts 'mothership)
+                 (bldg-count-equivalent enemy-b-counts 'fleet-beacon))
+              0))
+       0]
       [protoss-pvp-mass-stalker-no-air? 2]
+      [(and (eq? enemy-race 'Terran)
+            (= enemy-banshee-cnt 0)
+            (>= enemy-ground-combat-supply 10))
+       4]
       [protoss-phoenix-closure-needed? 6]
       [(>= enemy-air-combat-cnt 12) 12]
       [else 8]))
@@ -8237,6 +8628,7 @@
   (define queen-non-blocking-now?
     (and (eq? race 'Zerg)
          (not zerg-early-peaceful-queen-window?)
+         (not zerg-banshee-queen5-floor-needed?)
          (or (>= (unit-count-equivalent unit-counts 'queen) (max 1 active-bases))
              (and (hash? open-facility-slots)
                   (>= open-larva-cnt 3)
@@ -8319,33 +8711,49 @@
     (and (eq? race 'Protoss)
          (< army-supply 14)
          (< minerals 400)))
-  ;; L39-P0-2c + L41-P0-2a (`#04 PvT` H2H Sole Loss -> 0 Colossi, `#05 PvZ` 23 Zealots):
-  ;; Reserve 150G for RoboticsBay on 2-base PvT once army >= 16 & >= 1 Immortal (starting at 75G
-  ;; so Stalkers/Immortals stop draining gas at 90-102G, while 0-gas Gateways still scale below 125G!),
-  ;; and NEVER let a Bio Medivac Starport (0 enemy combat air / 0 Banshees) disable RoboticsBay!
+  ;; L39-P0-2c + L41-P0-2a + L47-P0-2a (`#04 PvT`, `#18`, `#21`, `PvP 0-7` Tier-3 Unlock):
+  ;; Reserve 150G for RoboticsBay on >=2-base PvT (at >=75G, >=1 Immortal) AND PvP (at >=100G, >=2 Immortals,
+  ;; >=4 Gateways, not mass-Stalker/Tempest), tolerate <=2 Terran combat air / >=12 ground supply instead of 0 air!
   (define protoss-pvt-robo-bay-gas-reserve-due?
     (and (eq? race 'Protoss)
-         (eq? enemy-race 'Terran)
          (>= active-bases 2)
          (> (bldg-count-equivalent ready-bldg-counts 'robotics-facility) 0)
          (= (bldg-count-equivalent total-bldg-counts 'robotics-bay) 0)
          (>= army-supply 16)
-         (>= (unit-count-equivalent unit-counts 'immortal) 1)
-         (>= gas 75)))
+         (or (and (eq? enemy-race 'Terran)
+                  (>= (unit-count-equivalent unit-counts 'immortal) 1)
+                  (>= gas 75))
+             (and (eq? enemy-race 'Protoss)
+                  (not protoss-pvp-mass-stalker-no-air?)
+                  (not protoss-anti-tempest-pvp-due?)
+                  (or (>= (unit-count-equivalent unit-counts 'immortal) 3)
+                      (and (>= (unit-count-equivalent unit-counts 'immortal) 2)
+                           (or (and (hash? open-facility-slots) (<= open-robo-slots 0))
+                               (>= effective-phase-supply 72))))
+                  (>= protoss-total-gw-cnt 4)
+                  (>= gas 100)))))
   (define protoss-midgame-robo-bay-due?
     (and (eq? race 'Protoss)
-         (memq enemy-race '(Terran Zerg))
+         (memq enemy-race '(Terran Zerg Protoss))
          (>= active-bases 2)
          (> (bldg-count-equivalent ready-bldg-counts 'robotics-facility) 0)
          (= (bldg-count-equivalent total-bldg-counts 'robotics-bay) 0)
          (not enemy-air-dominated-now?)
          (not enemy-heavy-cap-air?)
          (not protoss-cloaked-air-crisis?)
+         (not protoss-anti-tempest-pvp-due?)
          (or protoss-enemy-heavy-bio?
              (not protoss-aa-priority-active?)
              (and (eq? enemy-race 'Terran)
-                  (= enemy-air-combat-cnt 0)
-                  (= enemy-banshee-cnt 0)))
+                  (not enemy-cap-air?)
+                  (= enemy-banshee-cnt 0)
+                  (or (<= enemy-air-combat-cnt 2)
+                      (>= enemy-ground-combat-supply 12)))
+             (and (eq? enemy-race 'Protoss)
+                  (not enemy-cap-air?)
+                  (= (unit-count-equivalent enemy-u-counts 'void-ray) 0)
+                  (= (unit-count-equivalent enemy-u-counts 'oracle) 0)
+                  (<= enemy-air-combat-cnt 2)))
          (not protoss-defer-forge-robobay?)
          (not protoss-robo-bay-unsafe-defer?)
          (not early-proxy-marauder-rush-active?)
@@ -8354,9 +8762,19 @@
          (or (>= army-supply 14) (>= minerals 400))
          (or (>= gas 125)
              protoss-pvt-robo-bay-gas-reserve-due?)
-         (or (eq? enemy-race 'Terran)
-             (>= (unit-count-equivalent unit-counts 'immortal) 3)
-             (>= effective-phase-supply 72))))
+         (cond
+           [(eq? enemy-race 'Terran) #t]
+           [(eq? enemy-race 'Protoss)
+            (and (not protoss-pvp-mass-stalker-no-air?)
+                 (or (>= (unit-count-equivalent unit-counts 'immortal) 3)
+                     (and (>= (unit-count-equivalent unit-counts 'immortal) 2)
+                          (or (and (hash? open-facility-slots) (<= open-robo-slots 0))
+                              (>= effective-phase-supply 72))))
+                 (>= protoss-total-gw-cnt 4)
+                 (>= army-supply 16))]
+           [else
+            (or (>= (unit-count-equivalent unit-counts 'immortal) 3)
+                (>= effective-phase-supply 72))])))
   (define (protoss-pvt-robo-bay-defer-forge? nsym)
     (and protoss-midgame-robo-bay-due?
          protoss-pvt-robo-bay-gas-reserve-due?
@@ -8364,21 +8782,33 @@
          (not enemy-cloaked-threat-active?)
          (>= gas 100)
          (< minerals 300)))
-  ;; L42-P0-2c (`H2H #04 PvT` Colossus #1/#2 300M/200G escrow lock):
-  ;; Once RoboticsBay is ready and Colossus < 2, reserve 300M/200G for Colossus (`u >= 655.0, blk = #t`)
-  ;; strictly ahead of Stargate, Stalker, Immortal, Nexus #3 (when Robo open), Forge, and ExtendedThermalLance!
+  ;; L42-P0-2c + L47-P0-2a (`H2H #04 PvT` / `#21` / `PvP 0-7` Colossus #1/#2 300M/200G escrow lock):
+  ;; Once RoboticsBay is ready and Colossus < 2 across PvT/PvZ/PvP, reserve 300M/200G for Colossus (`u >= 760.0, blk = #t`)
+  ;; strictly ahead of Stargate, Stalker, Immortal (when Colossus==0 & Immortal>=2), Nexus #3, Forge, and Lance!
   (define protoss-colossus-core2-gas-guard?
     (and (eq? race 'Protoss)
-         (memq enemy-race '(Terran Zerg))
+         (memq enemy-race '(Terran Zerg Protoss))
          (> (bldg-count-equivalent ready-bldg-counts 'robotics-facility) 0)
          (> (bldg-count-equivalent ready-bldg-counts 'robotics-bay) 0)
+         (not protoss-anti-tempest-pvp-due?)
          (or protoss-enemy-heavy-bio?
              (and (not enemy-air-dominant?)
                   (not protoss-cloaked-air-crisis?)
                   (not protoss-aa-priority-active?))
-             (and (eq? enemy-race 'Terran)
-                  (= enemy-air-combat-cnt 0)
-                  (= enemy-banshee-cnt 0)))
+             (and (memq enemy-race '(Terran Zerg Protoss))
+                  (not enemy-cap-air?)
+                  (not enemy-air-dominated-now?)
+                  (not protoss-cloaked-air-crisis?)
+                  (= enemy-banshee-cnt 0)
+                  (cond
+                    [(eq? enemy-race 'Terran)
+                     (or (<= enemy-air-combat-cnt 2)
+                         (>= enemy-ground-combat-supply 12))]
+                    [(eq? enemy-race 'Protoss)
+                     (and (= (unit-count-equivalent enemy-u-counts 'void-ray) 0)
+                          (= (unit-count-equivalent enemy-u-counts 'oracle) 0)
+                          (<= enemy-air-combat-cnt 2))]
+                    [else (= enemy-air-combat-cnt 0)])))
          (not early-proxy-marauder-rush-active?)
          (not supply-preempt-now?)
          (< (unit-count-equivalent unit-counts 'colossus) 2)
@@ -8392,31 +8822,58 @@
   (define protoss-colossus-core2-due?
     (and protoss-midgame-colossus-due?
          protoss-colossus-core2-gas-guard?))
+  ;; L46-P0-2a + L47-P0-2a (`H2H #04 PvT` / `#05 PvZ` / `#21 PolyMorph` / `PvP` 0-Colossus bug):
+  ;; Hard-block Disruptor, WarpPrism, Immortal (when Colossus==0 & Immortal>=2), and extra Observer
+  ;; while RoboticsBay is ready & Colossus < 2 (NO <250G loophole!), and defer Gateway #5+ (<450M)!
+  (define (protoss-colossus-core2-robo-block-sym? nsym)
+    (and protoss-colossus-core2-gas-guard?
+         (or (eq? nsym 'disruptor)
+             (eq? nsym 'warp-prism)
+             (and (eq? nsym 'immortal)
+                  (= (unit-count-equivalent unit-counts 'colossus) 0)
+                  (>= (unit-count-equivalent unit-counts 'immortal) 2))
+             (and (eq? nsym 'observer)
+                  (>= (unit-count-equivalent unit-counts 'observer)
+                      (if enemy-cloaked-threat-active? 2 1))))))
   (define (protoss-colossus-core2-defer-sym? nsym)
     (and protoss-colossus-core2-gas-guard?
          (not (and protoss-anti-tempest-pvp-due?
                    (memq nsym '(stargate stalker blink void-ray tempest gateway twilight-council))))
-         (< gas 250)
-         (or (and (memq nsym '(stargate stalker immortal sentry adept
-                               templar-archive dark-shrine twilight-council charge blink))
-                  (or (< gas 200) (< minerals 300)))
-             (and (eq? nsym 'gateway)
-                  (< active-bases 3)
-                  (>= (bldg-count-equivalent total-bldg-counts 'gateway) 4)
-                  (< minerals 350))
-             (and (eq? nsym 'forge)
-                  (not (emergency-cloak-det-boost-info 'forge))
-                  (or (< gas 200) (< minerals 450)))
-             (and (eq? nsym 'observer)
-                  (not enemy-cloaked-threat-active?)
-                  (< gas 250))
+         (or (protoss-colossus-core2-robo-block-sym? nsym)
+             ;; L48-P0-2a (`#82`/`#57` Phoenix:12 drained gas while Colossus sat in escrow 53 ticks!):
+             ;; Defer Phoenix and VoidRay strictly behind core Colossi #1/#2 when no air emergency exists!
+             (and (memq nsym '(phoenix void-ray))
+                  (not enemy-cap-air?)
+                  (not enemy-heavy-cap-air?)
+                  (not enemy-air-dominated-now?)
+                  (not protoss-cloaked-air-crisis?))
              (and protoss-colossus-core2-due?
-                  (eq? nsym 'nexus)
-                  (>= total-townhalls-incl-pending 2)
-                  (< minerals 450))
-             (and (eq? nsym 'extended-thermal-lance)
+                  (eq? nsym 'gateway)
+                  (>= (bldg-count-equivalent total-bldg-counts 'gateway) 4)
+                  (< minerals 450)
                   (or (= (unit-count-equivalent unit-counts 'colossus) 0)
-                      (and protoss-colossus-core2-due? (< gas 200)))))))
+                      (< active-bases 3)))
+             (and (< gas 250)
+                  (or (and (memq nsym '(stargate stalker immortal sentry adept
+                                        templar-archive dark-shrine twilight-council charge blink))
+                           (or (< gas 200) (< minerals 300)))
+                      (and (eq? nsym 'gateway)
+                           (< active-bases 3)
+                           (>= (bldg-count-equivalent total-bldg-counts 'gateway) 4)
+                           (< minerals 450))
+                      (and (eq? nsym 'forge)
+                           (not (emergency-cloak-det-boost-info 'forge))
+                           (or (< gas 200) (< minerals 450)))
+                      (and (eq? nsym 'observer)
+                           (not enemy-cloaked-threat-active?)
+                           (< gas 250))
+                      (and protoss-colossus-core2-due?
+                           (eq? nsym 'nexus)
+                           (>= total-townhalls-incl-pending 2)
+                           (< minerals 450))
+                      (and (eq? nsym 'extended-thermal-lance)
+                           (or (= (unit-count-equivalent unit-counts 'colossus) 0)
+                               (and protoss-colossus-core2-due? (< gas 200)))))))))
   ;; L42-P0-2c (`H2H #03 PvP` Immortal cadence >= 6 against GasRich drains):
   ;; In PvP with ready RoboticsFacility & open slot and < 6 Immortals (>= 3 Gateways, workers >= 24, gas >= 75),
   ;; keep Immortal (`u = 585.0, blk = #t`) pumping ahead of Charge/Forge/Sentry/Twilight/3rd Nexus (<4 Immortals)!
@@ -8436,6 +8893,8 @@
          (not early-ling-rush-defense-active?)
          (not under-early-rush-crisis?)
          (not supply-preempt-now?)
+         (not natural-exp-window?)
+         (not (and pvp-nat-defer-gate3-cannon2? (>= minerals 300)))
          (not midgame-1base-natural-due?)))
   (define (protoss-pvp-immortal-defer-sym? nsym)
     (and protoss-pvp-immortal-cadence-due?
@@ -8934,7 +9393,7 @@
   ;; OR turrets stabilized needing Tank #1–2!), lock SiegeTank (`u >= 660, blk = #t`, 125G gas-floor)!
   (define terran-tvt-tank4-air-override?
     (and (not terran-tvt-turrets-tank2-needed?)
-         (or (>= enemy-air-combat-cnt 2)
+         (or (>= enemy-tvt-ground-attack-air-cnt 2)
              terran-cloaked-det-crisis?
              terran-enemy-banshee-starport-tl?
              enemy-air-dominated-now?
@@ -8967,7 +9426,7 @@
                    (eq? nsym 'viking-fighter)
                    (< (unit-count-equivalent unit-counts 'viking-fighter)
                       (max 1 enemy-banshee-cnt))))
-         (or (and (memq nsym '(viking-fighter liberator medivac raven banshee battlecruiser))
+         (or (and (memq nsym '(viking-fighter liberator medivac raven banshee battlecruiser cyclone))
                   (or (< gas 250)
                       (and (eq? nsym 'medivac)
                            (>= (unit-count-equivalent unit-counts 'medivac) 1))))
@@ -9053,11 +9512,14 @@
          (not terran-early-rush-hold?)
          (>= workers 20)
          (let* ([cur-rax (bldg-count-equivalent total-bldg-counts 'barracks)]
-                ;; L19/L30/L31-P0-2: Scale midgame Terran Barracks proportionally (3 -> 5 on 2b -> 6-7 on 3b),
+                ;; L19/L30/L31/L46-P0-2: Scale midgame Terran Barracks proportionally (3 -> 4 on true 2b -> 5 w/ 3rd CC -> 6-7 on 3b),
                 ;; while strictly capping TvT Barracks <= 2 until >= 2 Siege Tanks or Factory #2 is started (`#17/#38`)!
                 [raw-tgt-rax (cond
                                [(and (>= active-bases 3) (or (>= workers 52) (>= frame 10080))) 7]
-                               [(or (and (>= active-bases 3) (>= workers 44)) (>= frame 8736)) 6]
+                               [(and (>= active-bases 3) (or (>= workers 44) (>= frame 8736))) 6]
+                               [(and (<= active-bases 2) (<= total-townhalls-incl-pending 2)
+                                     (or (>= frame 7392) (>= workers 36)))
+                                4]
                                [(or (>= frame 7392) (>= workers 36)) 5]
                                [(or (>= frame 5800) (>= workers 28)) 3]
                                [else 2])]
@@ -9098,10 +9560,26 @@
          (<= enemy-threat-supply (* 1.35 (max 10 army-supply)))))
   ;; L30-P0-2 (`#38 TvT SP` 30m mineral depletion): Guarantee Terran 4th (and late 5th) CC
   ;; expansion past 7:00 on depleting bases or past 8:30 so Terran never mines out on 3 bases!
+  ;; L48-W2 (`H2H #02 TvT`): Defer TvT GhostAcademy/Ghost when under-attack, SiegeTank < 2, or
+  ;; without real enemy Ghost/BC threat; also defer TvT 4th CC when under-attack or SiegeTank < 2!
+  (define terran-tvt-defer-ghost?
+    (and (eq? race 'Terran)
+         (eq? enemy-race 'Terran)
+         (not enemy-heavy-cap-air?)
+         (or under-attack?
+             (< (unit-count-equivalent unit-counts 'siege-tank) 2)
+             (not terran-need-ghost?))))
+  (define terran-tvt-defer-4th-cc?
+    (and (eq? race 'Terran)
+         (eq? enemy-race 'Terran)
+         (>= total-townhalls-incl-pending 3)
+         (or under-attack?
+             (< (unit-count-equivalent unit-counts 'siege-tank) 2))))
   (define terran-4th-cc-due?
     (and (eq? race 'Terran)
          (>= active-bases 3)
          (< total-townhalls-incl-pending (if (or (>= frame 16128) (>= ws-depleting-bases 2)) 5 4))
+         (not terran-tvt-defer-4th-cc?)
          (not under-early-rush-crisis?)
          (not early-rush-override-active?)
          (not early-proxy-marauder-rush-active?)
@@ -9130,9 +9608,12 @@
                  (not protoss-phoenix-closure-needed?))]
            [else #f])))
   (define terran-air-dom-starport-target
-    (if (and (eq? race 'Terran) (or enemy-cap-air? enemy-air-dominated-now?))
-        (if (>= active-bases 3) 3 2)
-        1))
+    (cond
+      [(and (eq? race 'Terran) (eq? enemy-race 'Terran) (not enemy-heavy-cap-air?))
+       (if (or enemy-cap-air? enemy-air-dominated-now?) 2 1)]
+      [(and (eq? race 'Terran) (or enemy-cap-air? enemy-air-dominated-now?))
+       (if (>= active-bases 3) 3 2)]
+      [else 1]))
   (define terran-air-dom-starport-scale-due?
     (and (eq? race 'Terran)
          enemy-air-dominated-now?
@@ -9413,7 +9894,10 @@
                      (if terran-anti-ht-archon-ghost-academy-due? '(ghost-academy) '())
                      (if terran-anti-ht-archon-rax-tl-due? '(barracks-techlab) '())
                      (if terran-anti-ht-archon-ghost-due? '(ghost) '())
-                     (if zerg-banshee-lair-rush-due? '(lair) '())
+                     (if (or zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due?) '(lair) '())
+                     (if zerg-zvp-dt-overseer-due? '(overseer) '())
+                     (if zerg-zvp-dt-rw-due? '(roach-warren) '())
+                     (if zerg-zvp-dt-roach-due? '(roach) '())
                      (if terran-air-dom-starport-scale-due? '(starport) '())
                      (if terran-air-dom-marine-due? '(marine) '())
                      (if zerg-air-dom-corruptor-due? '(corruptor) '())
@@ -9534,13 +10018,45 @@
                          '(factory)
                          '())
                      (if terran-early-rush-hold?
-                         (append (if (< (bldg-count-equivalent total-bldg-counts 'supply-depot) 2)
+                         (append (if (and (not early-worker-rush-active?)
+                                          (< (bldg-count-equivalent total-bldg-counts 'supply-depot) 2))
                                      '(supply-depot)
                                      '())
                                  (if (and (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
                                           (< (unit-count-equivalent unit-counts 'marine) 6))
                                      '(marine)
                                      '()))
+                         '())
+                     (if early-worker-rush-active?
+                         (case race
+                           [(Zerg)
+                            (append (if (= (bldg-count-equivalent total-bldg-counts 'spawning-pool) 0)
+                                        '(spawning-pool) '())
+                                    (if (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+                                        (append '(zergling)
+                                                (if (< (bldg-count-equivalent total-bldg-counts 'spine-crawler) 1)
+                                                    '(spine-crawler) '()))
+                                        '()))]
+                           [(Terran)
+                            (append (if (= (bldg-count-equivalent total-bldg-counts 'supply-depot) 0)
+                                        '(supply-depot) '())
+                                    (if (and (= (bldg-count-equivalent total-bldg-counts 'barracks) 0)
+                                             (> (+ (bldg-count-equivalent ready-bldg-counts 'supply-depot)
+                                                   (bldg-count-equivalent ready-bldg-counts 'supply-depot-lowered)) 0))
+                                        '(barracks) '())
+                                    (if (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
+                                        '(marine) '()))]
+                           [(Protoss)
+                            (append (if (= (bldg-count-equivalent total-bldg-counts 'pylon) 0)
+                                        '(pylon) '())
+                                    (if (and (= (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                                                   (bldg-count-equivalent total-bldg-counts 'warp-gate)) 0)
+                                             (> (bldg-count-equivalent ready-bldg-counts 'pylon) 0))
+                                        '(gateway) '())
+                                    (if (> (+ (bldg-count-equivalent ready-bldg-counts 'gateway)
+                                              (bldg-count-equivalent ready-bldg-counts 'warp-gate)) 0)
+                                        '(zealot) '()))]
+                           [else '()])
                          '())
                      (if zerg-cap-air-corruptor-priority-due?
                          '(corruptor)
@@ -9615,6 +10131,8 @@
                      (if (and (eq? race 'Protoss)
                               under-early-rush-crisis?
                               (not pvz-early-ling-zealot-pump?)
+                              (not (and early-worker-rush-active?
+                                        (< (unit-count-equivalent unit-counts 'zealot) 2)))
                               root-combat-facility-ready?
                               (= (bldg-count-equivalent total-bldg-counts 'cybernetics-core) 0))
                          '(cybernetics-core)
@@ -9809,6 +10327,8 @@
                                  (hash-keys wipe-counter-boost-table)))]
                        [else '()])
                      (if (and (not early-ling-rush-defense-active?)
+                              (not (and early-worker-rush-active?
+                                        (early-worker-rush-suppressed-sym? race gas-bldg-sym unit-counts army-supply total-bldg-counts)))
                               (or (= total-gas-bldgs 0)
                                   (and (eq? race 'Protoss)
                                        (memq enemy-race '(Protoss Random))
@@ -9920,6 +10440,7 @@
   (define terran-orbital-1-urgent?
     (and (eq? race 'Terran)
          (not terran-early-ground-rush-survival-due?)
+         (not terran-early-reaper2-defer-oc-cc?)
          (= terran-total-orbitals 0)
          (> terran-ready-unmorphed-ccs 0)
          (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
@@ -9937,6 +10458,7 @@
   (define terran-orbital-2-urgent?
     (and (eq? race 'Terran)
          (not terran-early-ground-rush-survival-due?)
+         (not terran-early-reaper2-defer-oc-cc?)
          (= terran-total-orbitals 1)
          (> terran-ready-unmorphed-ccs 0)
          (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
@@ -10169,9 +10691,10 @@
     (define blk0 (priority-candidate-blocking-allowed? c))
     (define research-allowed?
       (or (not (and (pair? act) (eq? (car act) 'research)))
-          (upgrade-allowed-by-unit-and-order-gates?
-           race c-norm frame workers ready-bldg-counts total-bldg-counts
-           unit-counts researched-upgrades pending-upgrades)))
+          (and (upgrade-allowed-by-unit-and-order-gates?
+                race c-norm frame workers ready-bldg-counts total-bldg-counts
+                unit-counts researched-upgrades pending-upgrades)
+               (protoss-air-upgrade-gate-ok? c-norm total-bldg-counts unit-counts))))
     (define nat-exp-defers-cand?
       (and early-nat-exp-window?
            (not (emergency-cloak-det-boost-info c-norm))
@@ -10185,7 +10708,9 @@
                          (memq c-norm '(roach-warren extractor queen zergling)))]
              [(Protoss) (or (and (eq? c-norm 'gateway)
                                  (>= (bldg-count-equivalent total-bldg-counts 'gateway) 1))
-                            ;; L44-P0-2a (`PvPNatDelay 0->3` `#30/#51/#60`): Never let T2 tech, Forge,
+                            (and (eq? c-norm 'photon-cannon)
+                                 (>= (bldg-count-equivalent total-bldg-counts 'photon-cannon) 1))
+                            ;; L44/L46-P0-2a (`PvPNatDelay`): Never let T2 tech, Forge, Cannon #2+,
                             ;; ShieldBattery, or extra Assimilator drain the 400M 1-base Natural Nexus bank!
                             (memq c-norm '(robotics-facility twilight-council forge stargate shield-battery))
                             (and (eq? c-norm 'assimilator)
@@ -10195,7 +10720,7 @@
                                  (pair? act)
                                  (eq? (car act) 'research))
                             (and (eq? cat 'combat-unit)
-                                 (memq c-norm '(zealot stalker adept sentry))
+                                 (memq c-norm '(zealot stalker adept sentry immortal))
                                  (>= army-supply 2)))]
              [(Terran) (or (and (eq? c-norm 'barracks)
                                 (>= (bldg-count-equivalent total-bldg-counts 'barracks) 1))
@@ -10203,7 +10728,36 @@
                            (and (eq? c-norm 'marine)
                                 (>= (unit-count-equivalent unit-counts 'marine) 1)))]
              [else #f])))
-    (if (or (not research-allowed?) nat-exp-defers-cand?)
+    ;; L47-P0-2b (`H2H #03 PvP` f=5092 `immortal@585` blew 275M while natural Probe walked):
+    ;; At >= 300M during unpressured 1-base natural expansion window (or PvP natural hold < 5600f),
+    ;; defer non-urgent combat units so natural Nexus/CC/Hatchery NEVER loses its 400M bank mid-walk!
+    (define unpressured-nat-300m-unit-defer?
+      (and (= active-bases 1)
+           (<= total-townhalls-incl-pending 1)
+           (>= minerals 300)
+           (not under-attack?)
+           (not under-early-rush-crisis?)
+           (not early-ling-rush-defense-active?)
+           (not early-proxy-marauder-rush-active?)
+           (not terran-early-rush-hold?)
+           (not terran-early-reaper2-defer-oc-cc?)
+           (not (emergency-cloak-det-boost-info c-norm))
+           (not (eq? c-norm race-expand-sym))
+           (not (memq c-norm '(overlord pylon supply-depot drone probe scv)))
+           (<= enemy-threat-supply (max 2.0 army-supply))
+           (>= army-supply 4)
+           (or natural-exp-window?
+               pvp-nat-defer-gate3-cannon2?
+               midgame-1base-natural-due?)
+           (case race
+             [(Protoss) (memq c-norm '(immortal stalker zealot adept sentry))]
+             [(Terran) (and natural-exp-window?
+                            (not terran-tvt-1base-tank-core-due?)
+                            (memq c-norm '(marine marauder reaper)))]
+             [(Zerg) (and natural-exp-window?
+                          (memq c-norm '(zergling roach)))]
+             [else #f])))
+    (if (or (not research-allowed?) nat-exp-defers-cand? unpressured-nat-300m-unit-defer?)
         #f
         (let ()
           (define node (lookup-sc2-tech-node id))
@@ -10506,10 +11060,25 @@
                        (bldg-count-equivalent total-bldg-counts 'greater-spire))
                     0))
             #f]
+           [(and (eq? csym 'cybernetics-core) protoss-cyber-core-capped?)
+            #f]
            [(and (memq csym SC2-SINGLETON-TECH-BUILDINGS)
+                 (not (eq? csym 'cybernetics-core))
                  (> (max (bldg-count-equivalent total-bldg-counts csym)
                          (bldg-count-equivalent ready-bldg-counts csym))
                     0))
+            #f]
+           [(and (eq? csym 'engineering-bay) terran-ebay-capped?)
+            #f]
+           [(terran-early-reaper2-deferred-sym? csym)
+            #f]
+           [(and (eq? csym 'medivac) terran-tvt-medivac-tank4-capped?)
+            #f]
+           [(protoss-colossus-core2-robo-block-sym? csym)
+            #f]
+           [(zerg-zvp-dt-defer-gas-sym? csym)
+            #f]
+           [(pvp-nat-deferred-bldg-sym? csym)
             #f]
            [(and (memq csym SC2-DUAL-CAP-TECH-BUILDINGS)
                  (>= (bldg-count-equivalent total-bldg-counts csym) 2))
@@ -10651,10 +11220,50 @@
             #f]
            [(zerg-late-3rd-hatch-suppressed? csym act)
             #f]
+           [(and early-worker-rush-active?
+                 (early-worker-rush-suppressed-sym? race csym unit-counts army-supply total-bldg-counts))
+            #f]
+           [(and early-worker-rush-pause-workers? (eq? cat 'worker))
+            #f]
+           [(and terran-tvt-defer-ghost? (memq csym '(ghost-academy ghost)))
+            #f]
+           [(and terran-tvt-defer-4th-cc? (eq? csym 'command-center))
+            #f]
            [(early-ling-rush-suppressed-sym? csym)
             #f]
            [(protoss-early-breach-suppressed-sym? csym)
             #f]
+           [(and early-worker-rush-active?
+                 (case race
+                   [(Zerg)
+                    (or (and (= (bldg-count-equivalent total-bldg-counts 'spawning-pool) 0)
+                             (eq? csym 'spawning-pool))
+                        (and (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+                             (or (eq? csym 'zergling)
+                                 (and (eq? csym 'spine-crawler)
+                                      (>= (unit-count-equivalent unit-counts 'zergling) 6)
+                                      (< (bldg-count-equivalent total-bldg-counts 'spine-crawler) 1)))))]
+                   [(Terran)
+                    (or (and (= (bldg-count-equivalent total-bldg-counts 'supply-depot) 0)
+                             (eq? csym 'supply-depot))
+                        (and (= (bldg-count-equivalent total-bldg-counts 'barracks) 0)
+                             (> (+ (bldg-count-equivalent ready-bldg-counts 'supply-depot)
+                                   (bldg-count-equivalent ready-bldg-counts 'supply-depot-lowered)) 0)
+                             (eq? csym 'barracks))
+                        (and (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
+                             (eq? csym 'marine)))]
+                   [(Protoss)
+                    (or (and (= (bldg-count-equivalent total-bldg-counts 'pylon) 0)
+                             (eq? csym 'pylon))
+                        (and (= (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                                   (bldg-count-equivalent total-bldg-counts 'warp-gate)) 0)
+                             (> (bldg-count-equivalent ready-bldg-counts 'pylon) 0)
+                             (eq? csym 'gateway))
+                        (and (> (+ (bldg-count-equivalent ready-bldg-counts 'gateway)
+                                   (bldg-count-equivalent ready-bldg-counts 'warp-gate)) 0)
+                             (eq? csym 'zealot)))]
+                   [else #f]))
+            #t]
            [(and early-ling-rush-defense-active? (early-ling-rush-boost-info csym))
             #t]
            [(and protoss-early-breach-zealot-due? (eq? csym 'zealot))
@@ -10755,7 +11364,10 @@
            [(and terran-anti-ht-archon-ghost-academy-due? (eq? csym 'ghost-academy)) #t]
            [(and terran-anti-ht-archon-rax-tl-due? (eq? csym 'barracks-techlab)) #t]
            [(and terran-anti-ht-archon-ghost-due? (eq? csym 'ghost)) #t]
-           [(and zerg-banshee-lair-rush-due? (eq? csym 'lair)) #t]
+           [(and (or zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due?) (eq? csym 'lair)) #t]
+           [(and zerg-zvp-dt-overseer-due? (eq? csym 'overseer)) #t]
+           [(and zerg-zvp-dt-rw-due? (eq? csym 'roach-warren)) #t]
+           [(and zerg-zvp-dt-roach-due? (eq? csym 'roach)) #t]
            [(and terran-air-dom-starport-scale-due? (eq? csym 'starport)) #t]
            [(and terran-air-dom-marine-due? (eq? csym 'marine)) #t]
            [(and zerg-air-dom-corruptor-due? (eq? csym 'corruptor)) #t]
@@ -10811,7 +11423,12 @@
            [(and terran-first-factory-due? (eq? csym 'factory)) #t]
            [(and terran-first-starport-due? (eq? csym 'starport)) #t]
            [(and terran-midgame-rax-scale-due? (eq? csym 'barracks)) #t]
-           [(and terran-early-rush-hold? (memq csym '(supply-depot marine))) #t]
+           [(and terran-early-rush-hold?
+                 (or (eq? csym 'marine)
+                     (and (eq? csym 'supply-depot)
+                          (not early-worker-rush-active?)
+                          (<= supply-left 4))))
+            #t]
            [(and zvz-early-ling-defense-due? (memq csym '(spawning-pool zergling spine-crawler))) #t]
            [(and (eq? race 'Zerg)
                  (eq? csym 'infestation-pit)
@@ -10863,6 +11480,7 @@
             #t]
            [(eq? cat 'worker)
             (and (not protoss-12pool-pause-probe-for-zealot?)
+                 (not early-worker-rush-pause-workers?)
                  (or (<= workers 0)
                      tvp-worker-recovery?
                      (if (hash? open-facility-slots)
@@ -10930,6 +11548,9 @@
                     (< (bldg-count-equivalent total-bldg-counts 'spore-crawler)
                        (min (max 1 active-bases)
                             (max 1 desired-spores
+                                 (if zerg-zvt-banshee-aa-rush?
+                                     (min 3 (max 1 active-bases))
+                                     0)
                                  (if (or zerg-zvp-proactive-spore-due?
                                          zerg-reactive-cloak-spore-due?
                                          (and enemy-cloaked-threat-active?
@@ -11107,8 +11728,18 @@
         ;; Never let a non-crisis supply item (`u=280`, e.g. at 15/22 during worker rush or 10/38 during Reaper harass)
         ;; escrow-block combat units when plenty of free supply (`> 6`) already exists (#5131248, #5131254)!
         [(eq? cat 'supply)
+         (define worker-rush-prereq-supply1?
+           (and early-worker-rush-active?
+                (or (and (eq? race 'Terran)
+                         (eq? (normalize-brain-sym sym) 'supply-depot)
+                         (= (bldg-count-equivalent total-bldg-counts 'supply-depot) 0))
+                    (and (eq? race 'Protoss)
+                         (eq? (normalize-brain-sym sym) 'pylon)
+                         (= (bldg-count-equivalent total-bldg-counts 'pylon) 0)))))
          (define terran-rush-wall-depot?
-           (and (or terran-early-rush-hold?
+           (and (not early-worker-rush-active?)
+                (<= supply-left 4)
+                (or terran-early-rush-hold?
                     (and tvz-early-wall-marine-before-cc-escrow?
                          (< minerals 400)
                          (or (> (bldg-count-equivalent ready-bldg-counts 'barracks) 0)
@@ -11116,14 +11747,16 @@
                 (eq? (normalize-brain-sym sym) 'supply-depot)
                 (< (bldg-count-equivalent total-bldg-counts 'supply-depot) 2)))
          (define terran-depot2-supply-boost?
-           (and (or terran-tvz-wall-depot2-due?
-                    (and terran-depot2-before-rax2? (<= supply-left 6)))
+           (and (not early-worker-rush-active?)
+                (or terran-tvz-wall-depot2-due?
+                    (and terran-depot2-before-rax2? (<= supply-left 4)))
                 (eq? (normalize-brain-sym sym) 'supply-depot)))
          (define u-sup
            (cond
              [zero-townhall-rebuild-due? (min 20.0 u0)]
              [(or supply-lockout-active? emergency-supply-deficit-active?) (max 2200.0 u0)]
              [supply-crisis? (max 1350.0 u0)]
+             [worker-rush-prereq-supply1? (max 760.0 u0)]
              [terran-depot2-supply-boost? (max (if terran-tvz-wall-depot2-due? 650.0 605.0) u0)]
              [terran-rush-wall-depot? (max (if terran-early-rush-hold? 640.0 615.0) u0)]
              [zerg-overlord-overbuilt-suppress? (min 180.0 u0)]
@@ -11135,6 +11768,7 @@
            (and (not zero-townhall-rebuild-due?)
                 (or emergency-supply-deficit-active?
                     supply-lockout-active?
+                    worker-rush-prereq-supply1?
                     (and (not zvz-suppress-nonurgent-overlord?)
                          (not zerg-mass-air-suppress-overlord?)
                          (not zerg-overlord-overbuilt-suppress?)
@@ -11143,6 +11777,7 @@
                 (or supply-lockout-active?
                     emergency-supply-deficit-active?
                     supply-crisis?
+                    worker-rush-prereq-supply1?
                     terran-depot2-supply-boost?
                     terran-rush-wall-depot?
                     (and is-bo-goal?
@@ -11242,6 +11877,7 @@
          (struct-copy priority-candidate c
                       [utility-score (cond
                                        [(= workers 0) raw-worker-u]
+                                       [early-worker-rush-pause-workers? 0.0]
                                        [(>= workers sat-target) 25.0]
                                        [zvz-rush-pause-drones? (min 155.0 raw-worker-u)]
                                        [zerg-midgame-floor-pause-drones? (min 474.0 raw-worker-u)]
@@ -11249,7 +11885,8 @@
                                        [(eq? macro-regime 'zerg-army-wave) (min 140.0 raw-worker-u)]
                                        [(not worker-army-curve-ok?) (min 310.0 raw-worker-u)]
                                        [else raw-worker-u])]
-                      [blocking-allowed? (and (not (eq? macro-regime 'survival-defense))
+                      [blocking-allowed? (and (not early-worker-rush-pause-workers?)
+                                              (not (eq? macro-regime 'survival-defense))
                                               (not zvz-rush-pause-drones?)
                                               (not zerg-midgame-floor-pause-drones?)
                                               (or (< workers 8)
@@ -11356,6 +11993,7 @@
          (define exp-ok?
            (or zero-townhall-rebuild-due?
                (and (not supply-preempt-now?)
+                (not zvz-hatchery-nonblocking-now?)
                 (not terran-1base-cc-lock-broken?)
                 (or (not exp-in-backoff?)
                     zerg-late-low-min-high-gas-3rd-hatch-due?)
@@ -11517,6 +12155,8 @@
          (define static-det-repeat-nonblocking?
            (and (memq (normalize-brain-sym sym) '(spore-crawler photon-cannon missile-turret))
                 (not (emergency-cloak-det-boost-info (normalize-brain-sym sym)))
+                (not (and (eq? (normalize-brain-sym sym) 'spore-crawler)
+                          zerg-banshee-spore-floor-needed?))
                 (>= (bldg-count-equivalent total-bldg-counts (normalize-brain-sym sym)) 1)))
          (define emergency-rush-root-boost?
            (and (or (and under-early-rush-crisis?
@@ -11528,6 +12168,8 @@
                     (and under-early-rush-crisis?
                          (eq? race 'Protoss)
                          (not pvz-early-ling-zealot-pump?)
+                         (not (and early-worker-rush-active?
+                                   (< (unit-count-equivalent unit-counts 'zealot) 2)))
                          root-combat-facility-ready?
                          (eq? sym 'cybernetics-core)
                          (= (bldg-count-equivalent total-bldg-counts 'cybernetics-core) 0))
@@ -11577,6 +12219,7 @@
                   (or (and (memq s '(void-ray tempest))
                            (or (>= minerals 250) (<= open-stargate-slots 0)))
                       (and (eq? s 'robotics-bay)
+                           (not protoss-midgame-robo-bay-due?)
                            (or (>= minerals 250) (< gas 150) (< army-supply 20) (>= enemy-air-combat-cnt 4)))))))
          (define protoss-aa-defer-ground-only?
            (and protoss-aa-priority-active?
@@ -12272,6 +12915,11 @@
                     (not (protoss-banshee-defer-non-aa-sym? nsym))
                     (not (and protoss-gw-scale-defer-for-core-tech? (eq? nsym 'gateway)))
                     (not (protoss-colossus-core2-defer-sym? nsym))
+                    (not (zerg-zvp-dt-defer-gas-sym? nsym))
+                    (not (and (eq? nsym 'engineering-bay) terran-ebay-capped?))
+                    (not (and (eq? nsym 'medivac) terran-tvt-medivac-tank4-capped?))
+                    (not (terran-early-reaper2-deferred-sym? nsym))
+                    (not (pvp-nat-deferred-bldg-sym? nsym))
                     (not (protoss-pvp-immortal-defer-sym? nsym))
                     (not (terran-tvp-starport-medivac-defer-sym? nsym))
                     (not (terran-defer-extra-rax-tl-for-factl1? nsym))
@@ -12322,6 +12970,10 @@
                           (>= cur-queens (if zerg-banshee-queen-surge-step? 7 4))))
                 (not (and (eq? nsym 'sentry) #t))
                 (not (and zerg-air-hydraden-before-spire? (eq? nsym 'spire)))
+                (not (and early-worker-rush-active?
+                          (early-worker-rush-suppressed-sym? race nsym unit-counts army-supply total-bldg-counts)))
+                (not (and terran-tvt-defer-ghost? (memq nsym '(ghost-academy ghost))))
+                (not (and terran-tvt-defer-4th-cc? (eq? nsym 'command-center)))
                 (not (and early-rush-override-active?
                           (not (and protoss-pvz-mass-roach-robo-due? (eq? nsym 'robotics-facility)))
                           (or (and (<= total-townhalls-incl-pending 1) (eq? nsym race-expand-sym))
@@ -12355,6 +13007,7 @@
                     (and zerg-cloak-air-queen-boost?
                          (< cur-queens (if zerg-banshee-queen-surge-step? 7 4))
                          (or (< cur-queens (max 1 active-bases))
+                             zerg-banshee-queen5-floor-needed?
                              (and zerg-banshee-queen-surge-step? (>= minerals 100))
                              (>= minerals 150)))
                     (and zerg-banshee-lair-rush-due? (eq? nsym 'lair))
@@ -12420,6 +13073,10 @@
                     (and protoss-banshee-gate3-due? (eq? nsym 'gateway))
                     (and protoss-anti-tempest-stargate-due? (eq? nsym 'stargate))
                     (and protoss-anti-tempest-blink-due? (eq? nsym 'blink))
+                    (and zerg-zvp-dt-lair-due? (eq? nsym 'lair))
+                    (and zerg-zvp-dt-overseer-due? (eq? nsym 'overseer))
+                    (and zerg-zvp-dt-rw-due? (eq? nsym 'roach-warren))
+                    (and zerg-zvp-dt-roach-due? (eq? nsym 'roach))
                     (and terran-rush-survival-hellion-due? (eq? nsym 'hellion))
                     (and terran-rush-survival-rax-reactor-due? (eq? nsym 'barracks-reactor))
                     (and terran-rush-survival-marine-due? (eq? nsym 'marine))
@@ -12445,12 +13102,24 @@
                          (or (>= minerals 275) (and (>= frame 8064) (>= minerals 200))))
                     (and zerg-rebuild-t15-tech-due? (eq? nsym 'roach-warren)
                          (or (>= minerals 100) (not under-attack?)))
+                    (and early-worker-rush-active?
+                         (or (and (= (bldg-count-equivalent total-bldg-counts early-rush-root-sym) 0)
+                                  (eq? nsym early-rush-root-sym))
+                             (and root-combat-facility-ready?
+                                  (or (eq? nsym early-rush-core-unit-sym)
+                                      (and (eq? race 'Zerg)
+                                           (eq? nsym 'spine-crawler)
+                                           (>= (unit-count-equivalent unit-counts 'zergling) 6)
+                                           (< (bldg-count-equivalent total-bldg-counts 'spine-crawler) 1))))))
                     (and early-rush-override-active?
                          (or (and (= (bldg-count-equivalent total-bldg-counts early-rush-root-sym) 0)
                                   (eq? nsym early-rush-root-sym))
                              (and root-combat-facility-ready?
                                   (or (eq? nsym early-rush-core-unit-sym)
                                       (and (eq? nsym early-rush-def-bldg-sym)
+                                           (not (and early-worker-rush-active?
+                                                     (eq? race 'Zerg)
+                                                     (< (unit-count-equivalent unit-counts 'zergling) 6)))
                                            (< (bldg-count-equivalent total-bldg-counts early-rush-def-bldg-sym) 1)
                                            (or (>= army-supply 2) (>= minerals 150)))))))
                     zerg-post-hatch-pool-boost?
@@ -12524,6 +13193,10 @@
                 (not secondary-starving-primary-slots?)
                 (not scaling-fac-starving-open-slots?)
                 (not (and (memq sym '(spine-crawler bunker shield-battery))
+                          (not (and early-worker-rush-active?
+                                    (eq? race 'Zerg)
+                                    (eq? sym 'spine-crawler)
+                                    (>= (unit-count-equivalent unit-counts 'zergling) 6)))
                           (not zvz-rush-spine-boost?)
                           (not w18-ling-boost)
                           (not w17-marauder-boost)
@@ -12577,6 +13250,16 @@
               (min 440.0 u-after-gas-lock)]
              [(protoss-colossus-core2-defer-sym? nsym)
               (min 420.0 u-after-gas-lock)]
+             [(zerg-zvp-dt-defer-gas-sym? nsym)
+              (min 380.0 u-after-gas-lock)]
+             [(and (eq? nsym 'engineering-bay) terran-ebay-capped?)
+              (min 40.0 u-after-gas-lock)]
+             [(and (eq? nsym 'medivac) terran-tvt-medivac-tank4-capped?)
+              (min 40.0 u-after-gas-lock)]
+             [(terran-early-reaper2-deferred-sym? nsym)
+              (min 360.0 u-after-gas-lock)]
+             [(pvp-nat-deferred-bldg-sym? nsym)
+              (min 420.0 u-after-gas-lock)]
              [(protoss-pvp-immortal-defer-sym? nsym)
               (min 440.0 u-after-gas-lock)]
              [(terran-tvp-starport-medivac-defer-sym? nsym)
@@ -12594,6 +13277,32 @@
              [(and zvz-safe-pool-first-due? (eq? nsym 'extractor) (< minerals 225))
               (min 250.0 u-after-gas-lock)]
              [(zerg-late-3rd-hatch-suppressed? nsym act) (min 200.0 u-after-gas-lock)]
+             [(and early-worker-rush-active?
+                   (early-worker-rush-suppressed-sym? race nsym unit-counts army-supply total-bldg-counts))
+              (min 150.0 u-after-gas-lock)]
+             [(and terran-tvt-defer-ghost? (memq nsym '(ghost-academy ghost)))
+              (min 150.0 u-after-gas-lock)]
+             [(and early-worker-rush-active?
+                   (= (bldg-count-equivalent total-bldg-counts early-rush-root-sym) 0)
+                   (eq? nsym early-rush-root-sym))
+              (max 750.0 plan-weight u0)]
+             [(and early-worker-rush-active?
+                   (eq? race 'Zerg)
+                   root-combat-facility-ready?
+                   (eq? nsym 'zergling)
+                   (< (unit-count-equivalent unit-counts 'zergling) 6))
+              (max 780.0 plan-weight u0)]
+             [(and early-worker-rush-active?
+                   (eq? race 'Zerg)
+                   root-combat-facility-ready?
+                   (eq? nsym 'spine-crawler)
+                   (>= (unit-count-equivalent unit-counts 'zergling) 6)
+                   (< (bldg-count-equivalent total-bldg-counts 'spine-crawler) 1))
+              (max 760.0 plan-weight u0)]
+             [(and early-worker-rush-active?
+                   root-combat-facility-ready?
+                   (eq? nsym early-rush-core-unit-sym))
+              (max (if (eq? nsym 'zealot) 940.0 740.0) plan-weight u0)]
              [(early-ling-rush-suppressed-sym? nsym) (min 160.0 u-after-gas-lock)]
              [(protoss-early-breach-suppressed-sym? nsym) (min 160.0 u-after-gas-lock)]
              [(and (eq? nsym 'spore-crawler) zerg-spore-demoted-now?)
@@ -12708,6 +13417,11 @@
                    plan-weight u0)]
              [zerg-cloak-air-spore-boost?
               (max (cond
+                     [(and zerg-banshee-spore-floor-needed?
+                           (or has-lair-or-hive-ready?
+                               (> (bldg-count-equivalent total-bldg-counts 'lair) 0)
+                               (< gas 100)))
+                      1640.0]
                      [static-det-repeat-nonblocking? 520.0]
                      [enemy-cloaked-threat-active? 1040.0]
                      [else 940.0])
@@ -12807,6 +13521,12 @@
              [zerg-cloak-air-queen-boost?
               (cond
                 [(>= cur-queens (if zerg-banshee-queen-surge-step? 7 4)) (min u0 485.0)]
+                [(and zerg-banshee-queen5-floor-needed?
+                      (= (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0)
+                      (or has-lair-or-hive-ready?
+                          (> (bldg-count-equivalent total-bldg-counts 'lair) 0)
+                          (< gas 100)))
+                 (max 1630.0 plan-weight u0)]
                 [(and zerg-rebuild-t15-tech-due? (>= cur-queens (max 1 active-bases)))
                  (min u0 520.0)]
                 [else (max 960.0 plan-weight u0)])]
@@ -12871,7 +13591,15 @@
              [(and terran-tvp-medivac1-priority-due? (eq? nsym 'medivac))
               (max 590.0 plan-weight u0)]
              [(and protoss-colossus-core2-due? (eq? nsym 'colossus))
-              (max 655.0 plan-weight u0)]
+              (max 880.0 plan-weight u0)]
+             [(and zerg-zvp-dt-overseer-due? (eq? nsym 'overseer))
+              (max (if (= (unit-count-equivalent unit-counts 'overseer) 0) 1240.0 910.0) plan-weight u0)]
+             [(and zerg-zvp-dt-lair-due? (eq? nsym 'lair))
+              (max 1210.0 plan-weight u0)]
+             [(and zerg-zvp-dt-roach-due? (eq? nsym 'roach))
+              (max 660.0 plan-weight u0)]
+             [(and zerg-zvp-dt-rw-due? (eq? nsym 'roach-warren))
+              (max 640.0 plan-weight u0)]
              [(and protoss-midgame-robo-bay-due? (eq? nsym 'robotics-bay))
               (max (if pvt-robo-bay-boost? (max 960.0 (+ 400.0 u0)) 590.0) plan-weight u0)]
              [(and protoss-pvz-fast-robo-due? (eq? nsym 'robotics-facility))
@@ -13222,6 +13950,16 @@
           (struct-copy priority-candidate c
                        [utility-score (max u 1350.0)]
                        [blocking-allowed? #t])]
+         [(and early-worker-rush-active?
+               (or (and (eq? race 'Terran)
+                        (eq? nsym 'supply-depot)
+                        (= (bldg-count-equivalent total-bldg-counts 'supply-depot) 0))
+                   (and (eq? race 'Protoss)
+                        (eq? nsym 'pylon)
+                        (= (bldg-count-equivalent total-bldg-counts 'pylon) 0))))
+          (struct-copy priority-candidate c
+                       [utility-score (max u 760.0)]
+                       [blocking-allowed? #t])]
          [else c])]
       [(and in-backoff? (not affordable-now?))
        (struct-copy priority-candidate c
@@ -13232,6 +13970,7 @@
             (or (not (upgrade-allowed-by-unit-and-order-gates?
                       race nsym frame workers ready-bldg-counts total-bldg-counts
                       unit-counts researched-upgrades pending-upgrades))
+                (not (protoss-air-upgrade-gate-ok? nsym total-bldg-counts unit-counts))
                 ;; Never let opening stimpack/+1 drain 100G out from under an unbuilt BO Factory!
                 (and (eq? race 'Terran)
                      (memq nsym '(stimpack terran-infantry-weapons-1 terran-infantry-armor-1))
@@ -13247,6 +13986,7 @@
          (and (eq? race 'Terran)
               (eq? nsym 'orbital-command)
               (>= workers 16)
+              (not terran-early-reaper2-defer-oc-cc?)
               (not under-early-rush-crisis?)
               (not terran-early-rush-hold?)
               (not under-attack?)
@@ -13310,6 +14050,7 @@
               (or (and (memq nsym '(void-ray tempest))
                        (or (>= minerals 250) (<= open-stargate-slots 0)))
                   (and (eq? nsym 'robotics-bay)
+                       (not protoss-midgame-robo-bay-due?)
                        (or (>= minerals 250) (< gas 150) (< army-supply 20) (>= enemy-air-combat-cnt 4))))))
        (define protoss-aa-defer-ground-post?
          (and protoss-aa-priority-active?
@@ -13454,6 +14195,8 @@
        (define static-det-repeat-nonblocking-post?
          (and (memq nsym '(spore-crawler photon-cannon missile-turret))
               (not l29-cloak-det-boost-post)
+              (not (and (eq? nsym 'spore-crawler)
+                        zerg-banshee-spore-floor-needed?))
               (>= (bldg-count-equivalent total-bldg-counts nsym) 1)))
        (define terran-depot2-post?
          (and terran-depot2-before-rax2?
@@ -13730,6 +14473,18 @@
             (min u 440.0)]
            [(protoss-colossus-core2-defer-sym? nsym)
             (min u 420.0)]
+           [(zerg-zvp-dt-defer-gas-sym? nsym)
+            (min u 380.0)]
+           [(and (eq? nsym 'engineering-bay) terran-ebay-capped?)
+            (min u 40.0)]
+           [(and (eq? nsym 'medivac) terran-tvt-medivac-tank4-capped?)
+            (min u 40.0)]
+           [(terran-early-reaper2-deferred-sym? nsym)
+            (min u 360.0)]
+           [(pvp-nat-deferred-bldg-sym? nsym)
+            (min u 420.0)]
+           [(and zvz-hatchery-nonblocking-now? (eq? nsym 'hatchery))
+            (min u 450.0)]
            [(and terran-zero-air-suppress-viking? (eq? nsym 'viking-fighter))
             (min u 30.0)]
            [(protoss-pvz-mass-roach-defer-sym? nsym)
@@ -13755,6 +14510,34 @@
            [(and zerg-mass-air-hydra-due? (not zerg-cap-air-spire-due?) (not zerg-cap-air-corruptor-priority-due?) (eq? nsym 'hydralisk)) (max u 1220.0)]
            [(zerg-late-3rd-hatch-suppressed? nsym act) (min u 200.0)]
            [(and zerg-late-low-min-high-gas-3rd-hatch-due? (eq? nsym 'hatchery)) (max u 1280.0)]
+           [(and early-worker-rush-active?
+                 (early-worker-rush-suppressed-sym? race nsym unit-counts army-supply total-bldg-counts))
+            (min u 150.0)]
+           [(and early-worker-rush-pause-workers? (eq? cat 'worker))
+            0.0]
+           [(and terran-tvt-defer-ghost? (memq nsym '(ghost-academy ghost)))
+            (min u 150.0)]
+           [(and early-worker-rush-active?
+                 (= (bldg-count-equivalent total-bldg-counts early-rush-root-sym) 0)
+                 (eq? nsym early-rush-root-sym))
+            (max u 750.0)]
+           [(and early-worker-rush-active?
+                 (eq? race 'Zerg)
+                 root-combat-facility-ready?
+                 (eq? nsym 'zergling)
+                 (< (unit-count-equivalent unit-counts 'zergling) 6))
+            (max u 780.0)]
+           [(and early-worker-rush-active?
+                 (eq? race 'Zerg)
+                 root-combat-facility-ready?
+                 (eq? nsym 'spine-crawler)
+                 (>= (unit-count-equivalent unit-counts 'zergling) 6)
+                 (< (bldg-count-equivalent total-bldg-counts 'spine-crawler) 1))
+            (max u 760.0)]
+           [(and early-worker-rush-active?
+                 root-combat-facility-ready?
+                 (eq? nsym early-rush-core-unit-sym))
+            (max u (if (eq? nsym 'zealot) 940.0 740.0))]
            [(early-ling-rush-suppressed-sym? nsym) (min u 160.0)]
            [(protoss-early-breach-suppressed-sym? nsym) (min u 160.0)]
            [(and protoss-early-rush-zealot-first?
@@ -13922,6 +14705,11 @@
                      [else 1060.0]))]
            [zerg-cloak-air-spore-post?
             (max u (cond
+                     [(and zerg-banshee-spore-floor-needed?
+                           (or has-lair-or-hive-ready?
+                               (> (bldg-count-equivalent total-bldg-counts 'lair) 0)
+                               (< gas 100)))
+                      1640.0]
                      [static-det-repeat-nonblocking-post? 520.0]
                      [enemy-cloaked-threat-active? 1040.0]
                      [else 940.0]))]
@@ -13936,6 +14724,12 @@
             (cond
               [(>= (unit-count-equivalent unit-counts 'queen) (if zerg-banshee-queen-surge-step? 7 4))
                (min u 485.0)]
+              [(and zerg-banshee-queen5-floor-needed?
+                    (= (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0)
+                    (or has-lair-or-hive-ready?
+                        (> (bldg-count-equivalent total-bldg-counts 'lair) 0)
+                        (< gas 100)))
+               (max u 1630.0)]
               [(and zerg-rebuild-t15-tech-due?
                     (>= (unit-count-equivalent unit-counts 'queen) (max 1 active-bases)))
                (min u 520.0)]
@@ -13980,8 +14774,14 @@
            [(and terran-anti-ht-archon-rax-tl-due? (eq? nsym 'barracks-techlab)) (max u 595.0)]
            [(and terran-tvp-starport-priority-due? (eq? nsym 'starport)) (max u 595.0)]
            [(and terran-tvp-medivac1-priority-due? (eq? nsym 'medivac)) (max u 590.0)]
-           [(and protoss-colossus-core2-due? (eq? nsym 'colossus)) (max u 655.0)]
-           [(and protoss-midgame-robo-bay-due? (eq? nsym 'robotics-bay)) (max u 590.0)]
+           [(and protoss-colossus-core2-due? (eq? nsym 'colossus)) (max u 880.0)]
+           [(and zerg-zvp-dt-overseer-due? (eq? nsym 'overseer))
+            (max u (if (= (unit-count-equivalent unit-counts 'overseer) 0) 1240.0 910.0))]
+           [(and zerg-zvp-dt-lair-due? (eq? nsym 'lair)) (max u 1210.0)]
+           [(and zerg-zvp-dt-roach-due? (eq? nsym 'roach)) (max u 660.0)]
+           [(and zerg-zvp-dt-rw-due? (eq? nsym 'roach-warren)) (max u 640.0)]
+           [(and protoss-midgame-robo-bay-due? (eq? nsym 'robotics-bay))
+            (max u (if (and (eq? enemy-race 'Terran) (not under-attack?) (>= army-supply 16)) 960.0 590.0))]
            [(and protoss-pvz-fast-robo-due? (eq? nsym 'robotics-facility)) (max u 588.0)]
            [(and protoss-pvz-robo-immortal-priority-due? (eq? nsym 'immortal)) (max u 588.0)]
            [(and protoss-pvz-ranged-stalker-core-due?
@@ -14356,6 +15156,12 @@
                 (protoss-banshee-defer-non-aa-sym? nsym)
                 (and protoss-gw-scale-defer-for-core-tech? (eq? nsym 'gateway))
                 (protoss-colossus-core2-defer-sym? nsym)
+                (zerg-zvp-dt-defer-gas-sym? nsym)
+                (and (eq? nsym 'engineering-bay) terran-ebay-capped?)
+                (and (eq? nsym 'medivac) terran-tvt-medivac-tank4-capped?)
+                (terran-early-reaper2-deferred-sym? nsym)
+                (pvp-nat-deferred-bldg-sym? nsym)
+                (and zvz-hatchery-nonblocking-now? (eq? nsym 'hatchery))
                 (protoss-pvp-immortal-defer-sym? nsym)
                 (terran-tvp-starport-medivac-defer-sym? nsym)
                 (terran-defer-extra-rax-tl-for-factl1? nsym)
@@ -14368,6 +15174,11 @@
                      (not l29-cloak-det-boost-post)
                      (>= minerals 275))
                 (zerg-late-3rd-hatch-suppressed? nsym act)
+                (and early-worker-rush-active?
+                     (early-worker-rush-suppressed-sym? race nsym unit-counts army-supply total-bldg-counts))
+                (and early-worker-rush-pause-workers? (eq? cat 'worker))
+                (and terran-tvt-defer-ghost? (memq nsym '(ghost-academy ghost)))
+                (and terran-tvt-defer-4th-cc? (eq? nsym 'command-center))
                 (early-ling-rush-suppressed-sym? nsym)
                 (protoss-early-breach-suppressed-sym? nsym)
                 (and w18-ling-boost-post (not (cdr w18-ling-boost-post)))
@@ -14427,6 +15238,7 @@
                      (and zerg-cloak-air-queen-post?
                           (< (unit-count-equivalent unit-counts 'queen) (if zerg-banshee-queen-surge-step? 7 4))
                           (or (< (unit-count-equivalent unit-counts 'queen) (max 1 active-bases))
+                              zerg-banshee-queen5-floor-needed?
                               (and zerg-banshee-queen-surge-step? (>= minerals 100))
                               (>= minerals 150)))
                      (and zerg-banshee-lair-rush-due? (eq? nsym 'lair))
@@ -14476,6 +15288,10 @@
                      (and protoss-banshee-gate3-due? (eq? nsym 'gateway))
                      (and protoss-anti-tempest-stargate-due? (eq? nsym 'stargate))
                      (and protoss-anti-tempest-blink-due? (eq? nsym 'blink))
+                     (and zerg-zvp-dt-lair-due? (eq? nsym 'lair))
+                     (and zerg-zvp-dt-overseer-due? (eq? nsym 'overseer))
+                     (and zerg-zvp-dt-rw-due? (eq? nsym 'roach-warren))
+                     (and zerg-zvp-dt-roach-due? (eq? nsym 'roach))
                      (and terran-rush-survival-hellion-due? (eq? nsym 'hellion))
                      (and terran-rush-survival-rax-reactor-due? (eq? nsym 'barracks-reactor))
                      (and terran-rush-survival-marine-due? (eq? nsym 'marine))
@@ -14522,12 +15338,24 @@
                                 (>= minerals 250))))
                      (and zerg-rebuild-t15-tech-due? (eq? nsym 'roach-warren)
                           (or (>= minerals 100) (not under-attack?)))
+                     (and early-worker-rush-active?
+                          (or (and (= (bldg-count-equivalent total-bldg-counts early-rush-root-sym) 0)
+                                   (eq? nsym early-rush-root-sym))
+                              (and root-combat-facility-ready?
+                                   (or (eq? nsym early-rush-core-unit-sym)
+                                       (and (eq? race 'Zerg)
+                                            (eq? nsym 'spine-crawler)
+                                            (>= (unit-count-equivalent unit-counts 'zergling) 6)
+                                            (< (bldg-count-equivalent total-bldg-counts 'spine-crawler) 1))))))
                      (and early-rush-override-active?
                           (or (and (= (bldg-count-equivalent total-bldg-counts early-rush-root-sym) 0)
                                    (eq? nsym early-rush-root-sym))
                               (and root-combat-facility-ready?
                                    (or (eq? nsym early-rush-core-unit-sym)
                                        (and (eq? nsym early-rush-def-bldg-sym)
+                                            (not (and early-worker-rush-active?
+                                                      (eq? race 'Zerg)
+                                                      (< (unit-count-equivalent unit-counts 'zergling) 6)))
                                             (< (bldg-count-equivalent total-bldg-counts early-rush-def-bldg-sym) 1)
                                             (or (>= army-supply 2) (>= minerals 150)))))))
                      (and terran-first-starport-post? terran-starport-escrow-ok?))
@@ -14703,7 +15531,7 @@
                        (not opp-cap-air-override?)
                        (not (early-ling-rush-boost-info csym))
                        (not (early-proxy-marauder-boost-info csym))
-                       (not (and (or keep-lair-aa? zerg-macro-lair-due? zerg-banshee-lair-rush-due?) (eq? csym 'lair)))
+                       (not (and (or keep-lair-aa? zerg-macro-lair-due? zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due?) (eq? csym 'lair)))
                        (not (and terran-anti-ht-archon-ghost-academy-due? (eq? csym 'ghost-academy)))
                        (not (and protoss-root-cyber-due? (eq? csym 'cybernetics-core)))
                        (not (and zerg-post-hatch-pool-due? (eq? csym 'spawning-pool)))
@@ -14739,7 +15567,7 @@
                        (not opp-cap-air-override?)
                        (not (early-ling-rush-boost-info csym))
                        (not (early-proxy-marauder-boost-info csym))
-                       (not (and (or keep-lair-aa? zerg-macro-lair-due? zerg-banshee-lair-rush-due?) (eq? csym 'lair)))
+                       (not (and (or keep-lair-aa? zerg-macro-lair-due? zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due?) (eq? csym 'lair)))
                        (not (and terran-anti-ht-archon-ghost-academy-due? (eq? csym 'ghost-academy)))
                        (not (and protoss-root-cyber-due? (eq? csym 'cybernetics-core)))
                        (not (and zerg-post-hatch-pool-due? (eq? csym 'spawning-pool)))
@@ -14785,7 +15613,7 @@
                        (not w-counter-u)
                        (not (early-ling-rush-boost-info csym))
                        (not (early-proxy-marauder-boost-info csym))
-                       (not (and (or keep-lair-aa? zerg-macro-lair-due? zerg-banshee-lair-rush-due?) (eq? csym 'lair)))
+                       (not (and (or keep-lair-aa? zerg-macro-lair-due? zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due?) (eq? csym 'lair)))
                        (not (and terran-anti-ht-archon-ghost-academy-due? (eq? csym 'ghost-academy)))
                        (not (and protoss-root-cyber-due? (eq? csym 'cybernetics-core)))
                        (not (and zerg-post-hatch-pool-due? (eq? csym 'spawning-pool)))
@@ -14813,6 +15641,18 @@
                (values (min u2 440.0) #f)]
               [(protoss-colossus-core2-defer-sym? csym)
                (values (min u2 420.0) #f)]
+              [(zerg-zvp-dt-defer-gas-sym? csym)
+               (values (min u2 380.0) #f)]
+              [(and (eq? csym 'engineering-bay) terran-ebay-capped?)
+               (values (min u2 40.0) #f)]
+              [(and (eq? csym 'medivac) terran-tvt-medivac-tank4-capped?)
+               (values (min u2 40.0) #f)]
+              [(terran-early-reaper2-deferred-sym? csym)
+               (values (min u2 360.0) #f)]
+              [(pvp-nat-deferred-bldg-sym? csym)
+               (values (min u2 420.0) #f)]
+              [(and zvz-hatchery-nonblocking-now? (eq? csym 'hatchery))
+               (values (min u2 450.0) #f)]
               [(protoss-pvp-immortal-defer-sym? csym)
                (values (min u2 440.0) #f)]
               [(protoss-colossus-defer-zealot-spam? csym)
@@ -14940,9 +15780,19 @@
               (>= enemy-reaper-cnt 3)
               (memq csym '(engineering-bay barracks-techlab armory)))
          #f]
+        ;; L47-P0-2b (`#53 zig-reapers`): Block OC & CC #2 vs >= 2 pre-5:00 Reapers until >= 6 Marines or Bunker/Hellion!
+        [(terran-early-reaper2-deferred-sym? csym)
+         #f]
+        ;; L48-P0-2b (`#12`/`#39`/`#51` PvPNatDelay): Defer GW#3+, Cannon#2+, Twilight, non-det Forge before Nexus #2!
+        [(pvp-nat-deferred-bldg-sym? csym)
+         #f]
         ;; L43-P0-2b (`Clicadinha P`): Block TwilightCouncil / Forge / RoboBay while locking < 4 Immortals vs >= 6 Roaches!
         [(and protoss-pvz-mass-roach-immortal-lock?
               (memq csym '(twilight-council forge robotics-bay)))
+         #f]
+        [(and terran-tvt-defer-ghost? (eq? csym 'ghost-academy))
+         #f]
+        [(and terran-tvt-defer-4th-cc? (eq? csym 'command-center))
          #f]
         [(and (memq csym '(nexus command-center))
               (>= total-townhalls-incl-pending 3)
@@ -14974,6 +15824,10 @@
                (bldg-count-equivalent total-bldg-counts 'greater-spire)
                sched-tech-cnt)
             0)]
+        [(eq? csym 'cybernetics-core)
+         (< (+ (max existing-tech-cnt (bldg-count-equivalent ready-bldg-counts 'cybernetics-core))
+               sched-tech-cnt)
+            protoss-cyber-core-cap)]
         [(memq csym SC2-SINGLETON-TECH-BUILDINGS)
          (= (+ (max existing-tech-cnt (bldg-count-equivalent ready-bldg-counts csym))
                sched-tech-cnt)
@@ -14981,6 +15835,10 @@
         [(eq? csym 'forge)
          (< (+ existing-tech-cnt sched-tech-cnt)
             (if (or (< active-bases 3) enemy-air-dominant? (< army-supply 30)) 1 2))]
+        [(eq? csym 'engineering-bay)
+         (< (+ (max existing-tech-cnt (bldg-count-equivalent ready-bldg-counts 'engineering-bay))
+               sched-tech-cnt)
+            terran-ebay-cap)]
         [(memq csym SC2-DUAL-CAP-TECH-BUILDINGS)
          (< (+ existing-tech-cnt sched-tech-cnt) 2)]
         [(and protoss-5th-plus-nexus-capped? (eq? csym 'nexus))
@@ -14990,7 +15848,11 @@
         [(eq? csym 'gateway)
          (< (+ existing-tech-cnt sched-tech-cnt)
             (cond
+              [(and early-worker-rush-active?
+                    (< (unit-count-equivalent unit-counts 'zealot) 3))
+               1]
               [protoss-12pool-2gate-cap-active? 2]
+              [pvp-nat-defer-gate3-cannon2? 2]
               [protoss-gw-core-tech-hold-active? 4]
               [else protoss-gateway-hard-cap]))]
         [(memq csym '(extractor refinery assimilator))
@@ -15002,8 +15864,17 @@
                 (gas-building-cap active-bases)))]
         [(eq? csym 'barracks-techlab)
          (< (+ existing-tech-cnt sched-tech-cnt) desired-rax-tl)]
+        [(and (eq? csym 'barracks)
+              early-worker-rush-active?
+              (< (unit-count-equivalent unit-counts 'marine) 4))
+         (< (+ existing-tech-cnt sched-tech-cnt) 1)]
         [(and (eq? csym 'barracks) terran-tvt-rax-cap-for-tanks?)
          (< (+ existing-tech-cnt sched-tech-cnt) 2)]
+        [(and (eq? csym 'barracks)
+              (<= active-bases 2)
+              (<= total-townhalls-incl-pending 2)
+              (< minerals 800))
+         (< (+ existing-tech-cnt sched-tech-cnt) 4)]
         [(and (eq? csym 'barracks) (< minerals 1000))
          (< (+ existing-tech-cnt sched-tech-cnt) 8)]
         [(zero-worker-suppressed-bldg? csym cat act)
@@ -15022,9 +15893,13 @@
             (max terran-tvt-factl-target (goal-target-count-for 'factory-techlab)))]
         [(eq? csym 'starport)
          (< (+ existing-tech-cnt sched-tech-cnt)
-            (max 1 (if (and (eq? race 'Terran) (or enemy-cap-air? enemy-air-dominated-now?))
-                       (if (>= active-bases 3) 3 2)
-                       (goal-target-count-for 'starport))))]
+            (let ([raw-sp-cap
+                   (max 1 (if (and (eq? race 'Terran) (or enemy-cap-air? enemy-air-dominated-now?))
+                              (if (>= active-bases 3) 3 2)
+                              (goal-target-count-for 'starport)))])
+              (if (and (eq? race 'Terran) (eq? enemy-race 'Terran) (not enemy-heavy-cap-air?))
+                  (min 2 raw-sp-cap)
+                  raw-sp-cap)))]
         [(eq? csym 'starport-reactor)
          (< (+ existing-tech-cnt sched-tech-cnt)
             (max 1 (if (and (eq? race 'Terran) (or enemy-cap-air? enemy-air-dominated-now?))
@@ -15046,6 +15921,9 @@
          (< (+ existing-tech-cnt sched-tech-cnt)
             (min (max 1 active-bases)
                  (max 1 desired-spores
+                      (if zerg-zvt-banshee-aa-rush?
+                          (min 3 (max 1 active-bases))
+                          0)
                       (if (or zerg-zvp-proactive-spore-due?
                               zerg-reactive-cloak-spore-due?
                               (and enemy-cloaked-threat-active?
@@ -15054,6 +15932,9 @@
                           0))))]
         [(eq? csym 'spine-crawler)
          (and (not zerg-suppress-spine-vs-air?)
+              (not (and early-worker-rush-active?
+                        (eq? race 'Zerg)
+                        (< (unit-count-equivalent unit-counts 'zergling) 6)))
               (< (+ existing-tech-cnt sched-tech-cnt)
                  (if (and zerg-zvt-banshee-aa-rush?
                           (< (unit-count-equivalent unit-counts 'hydralisk) zerg-banshee-hydra-target)
@@ -15070,15 +15951,18 @@
          (< (+ existing-tech-cnt sched-tech-cnt) terran-bunker-cap)]
         [(eq? csym 'photon-cannon)
          (< (+ existing-tech-cnt sched-tech-cnt)
-            (if (or eff-req-aa? eff-req-det? enemy-cap-air? enemy-cloaked-threat-active?)
-                (min 3 (max 1 active-bases))
-                1))]
+            (cond
+              [pvp-nat-defer-gate3-cannon2? 1]
+              [(or eff-req-aa? eff-req-det? enemy-cap-air? enemy-cloaked-threat-active?)
+               (min 3 (max 1 active-bases))]
+              [else 1]))]
         [(eq? csym 'missile-turret)
          (< (+ existing-tech-cnt sched-tech-cnt) terran-missile-turret-cap)]
         [else #t]))
     (define unit-cap-ok?
       (and
        (not (protoss-banshee-hard-block-sym? csym))
+       (not (protoss-colossus-core2-robo-block-sym? csym))
        (not (and late-1base-commit-pause-units?
                  (memq csym '(marine scv zealot stalker probe))))
        (sg-unit-allowed? csym #f (hash-ref seen-unit-counts csym 0))
@@ -15134,6 +16018,9 @@
           (let ([med-cap
                  (cond
                    [terran-tvt-tank4-gas-lock? (if (>= gas 250) 1 0)]
+                   [(and (eq? enemy-race 'Terran)
+                         (< (unit-count-equivalent unit-counts 'siege-tank) 4))
+                    2]
                    [(eq? enemy-race 'Terran)
                     (if (and (or (>= enemy-tvt-viking-cnt 4) (>= enemy-siege-tank-cnt 3))
                              (or (< (unit-count-equivalent unit-counts 'viking-fighter) (+ enemy-tvt-viking-cnt 2))
@@ -15254,9 +16141,10 @@
                            (hash-ref seen-unit-counts 'zergling 0))
                         ling-cap))))]
          [(ghost)
-          (< (+ (unit-count-equivalent unit-counts 'ghost)
-                (hash-ref seen-unit-counts 'ghost 0))
-             (max desired-ghosts terran-anti-ht-archon-ghost-target))]
+          (and (not terran-tvt-defer-ghost?)
+               (< (+ (unit-count-equivalent unit-counts 'ghost)
+                     (hash-ref seen-unit-counts 'ghost 0))
+                  (max desired-ghosts terran-anti-ht-archon-ghost-target)))]
          [(liberator)
           (< (+ (unit-count-equivalent unit-counts 'liberator)
                 (hash-ref seen-unit-counts 'liberator 0))
@@ -15270,6 +16158,7 @@
     ;; Check tech prerequisite readiness & open producer slot
     (define prereq-ok?
       (and (step-prereqs-ready? id)
+           (protoss-air-upgrade-gate-ok? csym total-bldg-counts unit-counts)
            (or (not (eq? csym 'extended-thermal-lance))
                (>= (unit-count-equivalent unit-counts 'colossus) 1))))
     (define slot-ok?
@@ -15283,6 +16172,8 @@
     (define worker-cap-ok?
       (and (not (and late-1base-commit-pause-units?
                      (memq csym '(scv probe))))
+           (not (and early-worker-rush-pause-workers?
+                     (eq? cat 'worker)))
            (or (not (eq? cat 'worker))
                (<= workers 0)
                (if (hash? open-facility-slots)
@@ -15333,14 +16224,16 @@
            (or (< rem-gas 75) (< rem-min 100))
            factory-only-min-escrow?))
 
-    ;; W8-P0-1-belief (#18/#30) + W10-P0-3-belief (#45): Never let void-ray/tempest/robotics-bay/stargate escrow
-    ;; lock out Stalkers from 3+ Gateways when minerals >= 250 or Stargate slots are busy/absent!
+    ;; W8-P0-1-belief (#18/#30) + W10-P0-3-belief (#45) + L47-P0-2a (`H2H #04 PvT` 0-RoboBay fix):
+    ;; Never let void-ray/tempest/stargate (or non-due robotics-bay) escrow lock out Stalkers from 3+ Gateways,
+    ;; while NEVER bypassing `robotics-bay` escrow when `protoss-midgame-robo-bay-due?` is active!
     (define protoss-aa-stalker-ignores-heavy-escrow?
       (and protoss-aa-stalker-over-heavy-escrow?
            (eq? csym 'stalker)
            reserved-cand
            (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
              (or (and (memq rid '(void-ray tempest robotics-bay))
+                      (not (and (eq? rid 'robotics-bay) protoss-midgame-robo-bay-due?))
                       (or (>= minerals 250)
                           (<= open-stargate-slots 0)
                           (eq? rid 'robotics-bay)))
@@ -15489,7 +16382,7 @@
            (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
              (and (memq rid '(lair spore-crawler))
                   (not (and (eq? rid 'lair)
-                            (or zerg-banshee-lair-rush-due? zerg-air-lair-remorph-due?)
+                            (or zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due? zerg-air-lair-remorph-due?)
                             (> g-cost 0)))
                   (not (emergency-cloak-det-boost-info rid))))))
     ;; W17-P0-2b-belief (`#4 Z v monsterbot`): When Zerg has `gas >= 600`, let excess-gas combat
@@ -15593,6 +16486,7 @@
     (define pt-worker-ignores-non-nat-escrow?
       (and pt-continuous-worker-due?
            (not zero-townhall-rebuild-due?)
+           (not early-worker-rush-pause-workers?)
            (eq? cat 'worker)
            (or (not (hash? open-facility-slots))
                (> (hash-ref open-facility-slots 'townhall 0) 0))
@@ -15659,6 +16553,37 @@
                                               (or (and terran-air-dom-viking-due? (>= gas 75))
                                                   (and terran-det-viking-due? terran-enemy-banshee-starport-tl? (>= gas 25))))
                                          (and (eq? rid 'barracks) terran-111-rax2-due?))))))))))
+    ;; L48-WR: During an active early worker rush, never let any non-supply, non-root-building
+    ;; escrow block core defenders (`zergling`/`spine-crawler`/`marine`/`zealot`), AND allow
+    ;; Protoss 1 anti-deadlock Probe (`50M`) when `workers <= 8` & `50 <= minerals < 100`
+    ;; so the bank never freezes permanently at `80M` (#5140055)!
+    (define early-worker-rush-defense-ignores-escrow?
+      (and early-worker-rush-active?
+           (memq csym '(zergling spine-crawler marine zealot))
+           reserved-cand
+           (let ([rcat (priority-candidate-category reserved-cand)]
+                 [rid  (normalize-brain-sym (priority-candidate-id reserved-cand))])
+             (and (not (eq? rcat 'supply))
+                  (not (and (eq? race 'Zerg)
+                            (eq? csym 'zergling)
+                            (eq? rid 'spine-crawler)
+                            (>= (unit-count-equivalent unit-counts 'zergling) 6)
+                            (= (bldg-count-equivalent total-bldg-counts 'spine-crawler) 0)))
+                  (not (and (= (bldg-count-equivalent total-bldg-counts early-rush-root-sym) 0)
+                            (eq? rid early-rush-root-sym)))))))
+    (define worker-rush-anti-deadlock-probe?
+      (and early-worker-rush-active?
+           (not early-worker-rush-pause-workers?)
+           (eq? race 'Protoss)
+           (eq? csym 'probe)
+           (<= workers 4)
+           (>= minerals 50)
+           (< minerals 100)
+           (>= supply-left 1)
+           (not (ormap (lambda (sc) (eq? (normalize-brain-sym (priority-candidate-id sc)) 'probe))
+                       scheduled-cands))
+           (or (not reserved-cand)
+               (not (eq? (priority-candidate-category reserved-cand) 'supply)))))
     ;; L35-P0-2 Pillar 3 (`#41`/`#53`): Under Terran `< 5:00` ground-rush survival, never let any non-supply
     ;; non-rush-survival escrow block `hellion` / `marine` / `bunker`!
     (define terran-rush-survival-ignores-other-escrow?
@@ -15678,6 +16603,8 @@
               (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) race-expand-sym))
          min-floor]
         [(eq? cat 'supply) 0]
+        [worker-rush-anti-deadlock-probe? 0]
+        [early-worker-rush-defense-ignores-escrow? 0]
         [pt-worker-ignores-non-nat-escrow? 0]
         [(and reserved-gas-blocked?
               (memq csym '(extractor refinery assimilator))
@@ -16305,6 +17232,7 @@
           race final-bo-goal-sym frame workers
           ready-bldg-counts total-bldg-counts unit-counts
           researched-upgrades pending-upgrades)
+         (protoss-air-upgrade-gate-ok? final-bo-goal-sym total-bldg-counts unit-counts)
          (or (< minerals (sc2-min-cost final-bo-goal-sym 0))
              (< gas (sc2-gas-cost final-bo-goal-sym 0)))
          (or final-bo-is-supply?

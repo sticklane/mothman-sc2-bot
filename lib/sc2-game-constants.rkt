@@ -250,6 +250,7 @@
 (define SC2-STATIC-DETECTOR-COOLDOWN-FRAMES 160)  ;; ~7.1s
 (define SC2-CREEP-TUMOR-COOLDOWN-FRAMES     224)  ;; 10.0s
 (define SC2-RESUME-BLDG-COOLDOWN-FRAMES     224)  ;; 10.0s
+(define SC2-RESUME-BLDG-RUSH-COOLDOWN-FRAMES 24)  ;; ~1.1s fast resume under worker rush / early crisis
 (define SC2-EXPANSION-COOLDOWN-FRAMES       336)  ;; 15.0s
 (define SC2-MAX-TUMOR-SPREADS-PER-FRAME     2)
 

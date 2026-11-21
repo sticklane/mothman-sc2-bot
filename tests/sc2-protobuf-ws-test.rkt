@@ -9565,6 +9565,723 @@
   (hash-clear! SC2-LAST-KNOWN-ENEMY-POS)
   (hash-clear! SC2-LAST-KNOWN-ENEMY-META))
 
+;; =============================================================================
+;; [Loop 46] Stream 3 Wire Regressions (`L46-P0-3a`: Incomplete `Nexus #2`
+;;           Cancel-Building under 12-Pool Rush — `314` / `3659` P0 & Governor)
+;; =============================================================================
+(let ()
+  (define (mk-l46-u tag utype alliance x y #:hp [hp 100.0] #:sh [sh 0.0] #:rad [rad 0.75] #:bp [bp 1.0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 4) 2 0))
+              (sc2-point3d x y 8.0) 0.0 rad bp 0 #f #t #f
+              hp hp sh sh 50.0 200.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define nex1 (mk-l46-u 96301 59 1 32.0 32.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:bp 1.0))
+  (define nex2 (mk-l46-u 96302 59 1 56.0 34.0 #:hp 350.0  #:sh 350.0  #:rad 2.75 #:bp 0.35))
+  (define lings-12p
+    (for/list ([i (in-range 6)])
+      (mk-l46-u (+ 96310 i) 105 4 (+ 52.0 (* 0.5 i)) 34.0 #:hp 35.0 #:rad 0.375)))
+  (define obs-12p (make-test-obs 2200 100 0 (append (list nex1 nex2) lings-12p)))
+  (define gov-l46 (make-wire-apm-governor #:target-apm 420.0 #:hard-cap-apm 485.0))
+  ;; Test BOTH `(cancel 96302)` AND `(cancel-building 96302)` on incomplete Nexus #2 under 12-Pool:
+  ;; must pass typed validation with 0 rejects, emit P0 `CANCEL_BUILDINPROGRESS (314)` (and `3659`
+  ;; `CANCEL` is also P0 in `wire-cmd-priority-tier`), claim `used-producer-tags` so no same-tick
+  ;; order targets `96302`, and pass cleanly through `govern-sc2-wire-actions!`!
+  (define cmds-c1
+    (translate-bot-actions->sc2-raw-commands
+     '((cancel-building 96302) (cast 96302 chrono-boost 96301))
+     obs-12p))
+  (define rej-c1 (get-last-bot-action-rejects))
+  (define gov-c1 (govern-sc2-wire-actions! gov-l46 cmds-c1 2200))
+  (define cmds-c2
+    (translate-bot-actions->sc2-raw-commands
+     '((cancel 96302))
+     (make-test-obs 2204 100 0 (append (list nex1 nex2) lings-12p))))
+  (define rej-c2 (get-last-bot-action-rejects))
+  (define gov-c2 (govern-sc2-wire-actions! gov-l46 cmds-c2 2204))
+  (define c314-a (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 314))) gov-c1))
+  (define c314-b (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 314))) gov-c2))
+  (check-true "l46-p0-3a-nexus2-cancel-building-wire-314-3659-p0-under-12pool"
+              (and (null? rej-c1)
+                   (null? rej-c2)
+                   (sc2-raw-unit-command? c314-a)
+                   (equal? (sc2-raw-unit-command-unit-tags c314-a) '(96302))
+                   (= (wire-cmd-priority-tier c314-a) 0)
+                   (sc2-raw-unit-command? c314-b)
+                   (equal? (sc2-raw-unit-command-unit-tags c314-b) '(96302))
+                   (= (wire-cmd-priority-tier c314-b) 0)
+                   (= (wire-cmd-priority-tier (sc2-raw-unit-command 3659 #f 0 '(96302) #f)) 0))))
+
+;; =============================================================================
+;; [Loop 47] Stream 3 Wire Regressions (`L47-P0-3a`: First CyberCore / RoboBay
+;;           Core-Macro Priority, Natural/3rd CC Perimeter Starport & Barracks
+;;           Fallback, and `expand` Walk/Arrival Reservation & Retry Resilience)
+;; =============================================================================
+(let ()
+  (define (mk-l47-u tag utype alliance x y
+                    #:hp [hp 100.0] #:sh [sh 0.0] #:rad [rad 0.75]
+                    #:bp [bp 1.0] #:mins [mins 0] #:orders [orders '()])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 4) 2 0))
+              (sc2-point3d x y 8.0) 0.0 rad bp 0 #f #t #f
+              hp hp sh sh 50.0 200.0 mins 0 #f #f #f #t #f orders 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define (mk-l47-mins base-tag cx cy dx-off)
+    (for/list ([i (in-range 8)])
+      (mk-l47-u (+ base-tag i) 341 3 (+ cx dx-off) (+ cy (- (* 1.5 i) 5.25)) #:hp 1000.0 #:rad 1.0 #:mins 1500)))
+  (define gi-l47
+    (sc2-game-info "L47WireTestMap" "" '() '(128 128) '(4 4 124 124)
+                   (list (sc2-point2d 100.0 30.0)) w3-full-grid #f w3-full-grid))
+
+  ;; 1. L47-P0-3a1: First `cybernetics-core` (`cnt=0`) and first `robotics-bay` (`cnt=0`) are
+  ;;    promoted into `build-core-macro-action?` ahead of secondary structures (`forge`/`shield-battery`)
+  ;;    and worker-pull combat actions, while duplicate `cybernetics-core` (`cnt>=1`) yields to `gateway`!
+  (define p-nex  (mk-l47-u 97101 59 1 32.0 32.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75))
+  (define p-pyl  (mk-l47-u 97102 60 1 38.0 32.0 #:hp 200.0  #:sh 200.0  #:rad 1.0))
+  (define p-gw   (mk-l47-u 97103 62 1 36.0 36.0 #:hp 500.0  #:sh 500.0  #:rad 1.5))
+  (define p-prb  (mk-l47-u 97104 84 1 37.0 32.0 #:hp 20.0   #:sh 20.0   #:rad 0.375))
+  (define p-ling (mk-l47-u 97190 105 4 46.0 32.0 #:hp 35.0))
+  (define p-psrc (list (sc2-power-source (sc2-point2d 38.0 32.0) 6.5 97102)))
+  (define (mk-p-obs gl us)
+    (sc2-observation gl (sc2-player-common 1 500 300 40 20 8 12 0 0 0 0)
+                     us '() p-psrc #f '() '() '() '() '() '()))
+  ;; Part A: 1 free Probe + pull-workers-attack + forge + first cybernetics-core -> cybernetics-core (894) wins!
+  (define cmds-cc0
+    (translate-bot-actions->sc2-raw-commands
+     '((pull-workers-attack (97104) 97190 46.0 32.0)
+       (build forge 38.0 32.0)
+       (build cybernetics-core 38.0 32.0))
+     (mk-p-obs 100 (list p-nex p-pyl p-gw p-prb p-ling))
+     #:game-info gi-l47))
+  (define has-cc-894?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 894))) cmds-cc0))
+  ;; Part B: 1 free Probe + forge + shield-battery + first robotics-bay -> robotics-bay (892) wins!
+  (define p-robo (mk-l47-u 97105 71 1 40.0 36.0 #:hp 450.0 #:sh 450.0 #:rad 1.5))
+  (define cmds-rb0
+    (translate-bot-actions->sc2-raw-commands
+     '((build forge 38.0 32.0)
+       (build shield-battery 38.0 32.0)
+       (build robotics-bay 38.0 32.0))
+     (mk-p-obs 400 (list p-nex p-pyl p-gw p-robo p-prb))
+     #:game-info gi-l47))
+  (define has-rb-892?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 892))) cmds-rb0))
+  ;; Part C: Negative guard — when 1 CyberCore already exists, duplicate cybernetics-core yields to gateway (883)!
+  (define p-cyb1 (mk-l47-u 97106 72 1 35.0 29.0 #:hp 550.0 #:sh 550.0 #:rad 1.5))
+  (define cmds-cc1
+    (translate-bot-actions->sc2-raw-commands
+     '((build cybernetics-core 38.0 32.0)
+       (build gateway 38.0 32.0))
+     (mk-p-obs 700 (list p-nex p-pyl p-gw p-cyb1 p-prb))
+     #:game-info gi-l47))
+  (define has-gw-883-not-dup-cc?
+    (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 883))) cmds-cc1)
+         (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 894))) cmds-cc1))))
+  (check-true "l47-p0-3a1-first-cybercore-and-robobay-promoted-to-core-macro-priority"
+              (and has-cc-894? has-rb-892? has-gw-883-not-dup-cc?))
+
+  ;; 2. L47-P0-3a2: Terran Starport `#1` (`cur-terran-prod-count = 0`, `streak = 1`) and Barracks `#3`
+  ;;    (`cur-terran-prod-count = 2`, `streak = 1`) cleanly spill onto the open non-mineral perimeter
+  ;;    (`~7.5t` west of Natural CC & 3rd CC, strictly outside CC footprint) under live mock-WS `RequestQuery`!
+  (define (l47-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 0 "/sc2api" c-in c-out #f (box 1)))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define id-p (assoc 97 req-f))
+             (define id-b (if id-p (encode-uint32 97 (third id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+  (define cc-m47 (mk-l47-u 97201 18 1 28.0 60.0 #:hp 1500.0 #:rad 2.75))
+  (define cc-n47 (mk-l47-u 97202 18 1 68.0 60.0 #:hp 1500.0 #:rad 2.75))
+  (define cc-347 (mk-l47-u 97203 18 1 68.0 96.0 #:hp 1500.0 #:rad 2.75))
+  (define rx-a47 (mk-l47-u 97204 21 1 32.0 64.0 #:hp 1000.0 #:rad 1.5))
+  (define rx-b47 (mk-l47-u 97205 21 1 32.0 56.0 #:hp 1000.0 #:rad 1.5))
+  (define scv-47 (mk-l47-u 97206 45 1 64.0 60.0 #:hp 45.0 #:rad 0.375))
+  (define t-units-47
+    (append (list cc-m47 cc-n47 cc-347 rx-a47 rx-b47 scv-47)
+            (mk-l47-mins 97210 28.0 60.0 -6.5)
+            (mk-l47-mins 97220 68.0 60.0 6.5)
+            (mk-l47-mins 97230 68.0 96.0 6.5)))
+  ;; Part A: Starport #1 (cnt=0, streak=1) -> ONLY Natural CC west courtyard perimeter [58.5..62.5, 58..62] valid!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK 'starport 1)
+  (define sp-perim-pt
+    (let-values ([(ws cleanup!)
+                  (l47-start-mock-ws
+                   (lambda (ab px py)
+                     (if (and (= ab 329) (>= px 58.5) (<= px 62.5) (>= py 58.0) (<= py 62.0)) 1 2)))])
+      (define cs (translate-bot-actions->sc2-raw-commands
+                  '((build starport 28.0 60.0))
+                  (make-test-obs 6000 500 300 t-units-47)
+                  #:ws-conn ws #:game-info gi-l47))
+      (cleanup!)
+      (define c329 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 329))) cs))
+      (and c329 (sc2-raw-unit-command-target-pos c329))))
+  (define sp-streak-cleared? (= (hash-ref SC2-PROD-PLACEMENT-MISS-STREAK 'starport -1) 0))
+  ;; Part B: Barracks #3 (cnt=2, streak=1) -> ONLY 3rd CC west courtyard perimeter [58.5..62.5, 94..98] valid!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK 'barracks 1)
+  (define rx-3rd-perim-pt
+    (let-values ([(ws cleanup!)
+                  (l47-start-mock-ws
+                   (lambda (ab px py)
+                     (if (and (= ab 321) (>= px 58.5) (<= px 62.5) (>= py 94.0) (<= py 98.0)) 1 2)))])
+      (define cs (translate-bot-actions->sc2-raw-commands
+                  '((build barracks 28.0 60.0))
+                  (make-test-obs 6200 500 300 t-units-47)
+                  #:ws-conn ws #:game-info gi-l47))
+      (cleanup!)
+      (define c321 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) cs))
+      (and c321 (sc2-raw-unit-command-target-pos c321))))
+  (define rx-streak-cleared? (= (hash-ref SC2-PROD-PLACEMENT-MISS-STREAK 'barracks -1) 0))
+  (check-true "l47-p0-3a2-starport-and-barracks-natural-3rd-cc-perimeter-fallback"
+              (and (sc2-point2d? sp-perim-pt)
+                   (>= (sc2-point2d-x sp-perim-pt) 58.5) (<= (sc2-point2d-x sp-perim-pt) 62.5)
+                   (>= (sc2-point2d-y sp-perim-pt) 58.0) (<= (sc2-point2d-y sp-perim-pt) 62.0)
+                   sp-streak-cleared?
+                   (sc2-point2d? rx-3rd-perim-pt)
+                   (>= (sc2-point2d-x rx-3rd-perim-pt) 58.5) (<= (sc2-point2d-x rx-3rd-perim-pt) 62.5)
+                   (>= (sc2-point2d-y rx-3rd-perim-pt) 94.0) (<= (sc2-point2d-y rx-3rd-perim-pt) 98.0)
+                   rx-streak-cleared?))
+
+  ;; 3. L47-P0-3a3: `expand` walk/command-arrival reservation (`H2H #03` `f=5088 -> 5092`) reserves
+  ;;    `400M` in `clean-minerals` and exposes an in-transit `'nexus` while the Probe acquires its
+  ;;    SC2 `880` order (`<= 16f`), then releases cleanly and retries `(expand ...)` if the order drops!
+  (define ex-nex (mk-l47-u 97301 59 1 30.0 95.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75))
+  (define ex-prb (mk-l47-u 97302 84 1 34.0 95.0 #:hp 20.0   #:sh 20.0   #:rad 0.375))
+  (define ex-units
+    (append (list ex-nex ex-prb)
+            (mk-l47-mins 97310 30.0 95.0 -6.5)
+            (mk-l47-mins 97320 60.0 98.0 6.5)))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 420 0 ex-units) #:game-info gi-l47))
+  (define cmds-ex1
+    (translate-bot-actions->sc2-raw-commands
+     '((expand 60.0 98.0))
+     (make-test-obs 5088 420 0 ex-units)
+     #:game-info gi-l47))
+  (define ex1-880?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 880))) cmds-ex1))
+  ;; 4 loops later (`f=5092`): Probe `w.orders` does NOT yet reflect `880` -> reservation STILL deducts `400M`!
+  (define obs-h-5092
+    (sc2-observation->runtime-obs-hash (make-test-obs 5092 420 0 ex-units) #:game-info gi-l47 #:configured-race 'Protoss))
+  (define mins-reserved-5092 (hash-ref obs-h-5092 'minerals -1))
+  (define in-transit-nex-5092?
+    (ormap (lambda (b) (and (eq? (hash-ref b 'type #f) 'nexus) (eq? (hash-ref b 'in-transit? #f) #t)))
+           (hash-ref obs-h-5092 'ally-buildings '())))
+  ;; 24 loops later (`f=5112 > 5088+16`): order still missing -> `420M` released cleanly (no lock)!
+  (define obs-h-5112
+    (sc2-observation->runtime-obs-hash (make-test-obs 5112 420 0 ex-units) #:game-info gi-l47 #:configured-race 'Protoss))
+  (define mins-released-5112 (hash-ref obs-h-5112 'minerals -1))
+  ;; 36 loops later (`f=5124 > 5088+32`): Probe free again -> retry `(expand 60.0 98.0)` emits `880` cleanly!
+  (define cmds-ex-retry
+    (translate-bot-actions->sc2-raw-commands
+     '((expand 60.0 98.0))
+     (make-test-obs 5124 420 0 ex-units)
+     #:game-info gi-l47))
+  (define ex-retry-880?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 880))) cmds-ex-retry))
+  (check-true "l47-p0-3a3-expand-walk-arrival-reservation-minerals-and-clean-retry"
+              (and ex1-880?
+                   (<= mins-reserved-5092 20)
+                   in-transit-nex-5092?
+                   (= mins-released-5112 420)
+                   ex-retry-880?))
+  (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK))
+
+;; ---------------------------------------------------------------------------
+;; [Loop 48] L48-P0-3a: First Spire Core-Macro Priority + Multi-Hatchery Creep-Ring
+;; Fallback (`SpireDrop 2 -> 0`), `#12` Blocked Natural Expansion `>= 2` Pad Fallback
+;; (`SC2-EXPANSION-PAD-BLOCK-STREAK`), & `#72` Early-Rush First Cybernetics Core
+;; Tight Main-Pylon Emergency Placement!
+;; ---------------------------------------------------------------------------
+(let ()
+  (define (hypot dx dy) (sqrt (+ (* dx dx) (* dy dy))))
+  (define (mk-l48-u tag utype alliance x y
+                    #:hp [hp 100.0] #:sh [sh 0.0] #:rad [rad 0.75]
+                    #:bp [bp 1.0] #:mins [mins 0] #:orders [orders '()])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 4) 2 0))
+              (sc2-point3d x y 8.0) 0.0 rad bp 0 #f #t #f
+              hp hp sh sh 50.0 200.0 mins 0 #f #f #f #t #f orders 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define (mk-l48-mins base-tag cx cy dx-off)
+    (for/list ([i (in-range 8)])
+      (mk-l48-u (+ base-tag i) 341 3 (+ cx dx-off) (+ cy (- (* 1.5 i) 5.25)) #:hp 1000.0 #:rad 1.0 #:mins 1500)))
+  (define gi-l48
+    (sc2-game-info "L48WireTestMap" "" '() '(128 128) '(4 4 124 124)
+                   (list (sc2-point2d 100.0 30.0)) w3-full-grid #f w3-full-grid))
+  (define (l48-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define rpc-count (box 0))
+    (define ws (sc2-ws-conn "127.0.0.1" 0 "/sc2api" c-in c-out #f (box 1)))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define id-p (assoc 97 req-f))
+             (define id-b (if id-p (encode-uint32 97 (third id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (set-box! rpc-count (add1 (unbox rpc-count)))
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws rpc-count (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+
+  ;; 1. L48-P0-3a1: First `spire` (`cnt = 0`) is promoted to core-macro priority (claiming the sole
+  ;;    free Drone ahead of `pull-workers-attack` and `evolution-chamber`, while duplicate Spire #2 yields
+  ;;    to `hatchery`), AND when Main/Natural inner rings fail, Spire lands on the 3rd Hatchery's `9.5t`
+  ;;    outer creep-ring fallback even after prior core-macro builds spend placement RPC budget!
+  (define z-lair (mk-l48-u 98101 100 1 28.0 60.0 #:hp 2000.0 #:rad 2.75))
+  (define z-pool (mk-l48-u 98102 89  1 33.0 60.0 #:hp 1000.0 #:rad 1.5))
+  (define z-drn1 (mk-l48-u 98103 104 1 34.0 58.0 #:hp 40.0   #:rad 0.375))
+  (define z-ling (mk-l48-u 98104 105 4 45.0 60.0 #:hp 35.0   #:rad 0.375))
+  ;; Reset match state cleanly before Part A
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 600 400 (list z-lair z-pool z-drn1)) #:game-info gi-l48))
+  (define cmds-sp0
+    (translate-bot-actions->sc2-raw-commands
+     '((pull-workers-attack (98103) 98104 45.0 60.0)
+       (build evolution-chamber 32.0 56.0)
+       (build spire 32.0 56.0))
+     (make-test-obs 1200 600 400 (list z-lair z-pool z-drn1 z-ling))
+     #:game-info gi-l48))
+  (define sp0-won-drone?
+    (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1158))) cmds-sp0)
+         (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1156))) cmds-sp0))))
+  ;; Negative guard: when 1 Spire already exists, duplicate Spire yields to `hatchery` (1152)!
+  (define z-sp1 (mk-l48-u 98105 92 1 32.0 64.0 #:hp 850.0 #:rad 1.0))
+  (define cmds-sp1
+    (translate-bot-actions->sc2-raw-commands
+     '((build spire 32.0 56.0)
+       (build hatchery 68.0 60.0))
+     (make-test-obs 1500 600 400 (list z-lair z-pool z-sp1 z-drn1))
+     #:game-info gi-l48))
+  (define hatch-beat-dup-spire?
+    (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1152))) cmds-sp1)
+         (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1158))) cmds-sp1))))
+  ;; Part B: Multi-Hatchery creep-ring fallback across Main (28,60), Natural (68,60), 3rd (68,96):
+  ;; Mock WS ONLY accepts Spire (1158) in 3rd Hatchery's outer 9.5t east creep ring [76.0..79.0, 94.5..97.5]
+  ;; (strictly outside default 8.5t inner radius from all 3 Hatcheries!).
+  (define z-nat  (mk-l48-u 98111 86  1 68.0 60.0 #:hp 1500.0 #:rad 2.75))
+  (define z-3rd  (mk-l48-u 98112 86  1 68.0 96.0 #:hp 1500.0 #:rad 2.75))
+  (define z-drn2 (mk-l48-u 98113 104 1 70.0 96.0 #:hp 40.0   #:rad 0.375))
+  (define z-units-b
+    (append (list z-lair z-nat z-3rd z-pool z-drn1 z-drn2)
+            (mk-l48-mins 98120 28.0 60.0 -6.5)
+            (mk-l48-mins 98130 68.0 60.0 -6.5)
+            (mk-l48-mins 98140 68.0 96.0 -6.5)))
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (define spire-3rd-ring-pt
+    (let-values ([(ws _rc cleanup!)
+                  (l48-start-mock-ws
+                   (lambda (ab px py)
+                     (if (and (= ab 1158) (>= px 76.0) (<= px 79.0) (>= py 94.5) (<= py 97.5)) 1 2)))])
+      (define cs (translate-bot-actions->sc2-raw-commands
+                  '((build spawning-pool 28.0 60.0)
+                    (build spire 28.0 60.0))
+                  (make-test-obs 5200 600 400 z-units-b)
+                  #:ws-conn ws #:game-info gi-l48))
+      (cleanup!)
+      (define c1158 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1158))) cs))
+      (and c1158 (sc2-raw-unit-command-target-pos c1158))))
+  (check-true "l48-p0-3a1-first-spire-core-macro-priority-and-multi-hatch-creep-ring-fallback"
+              (and sp0-won-drone?
+                   hatch-beat-dup-spire?
+                   (sc2-point2d? spire-3rd-ring-pt)
+                   (>= (sc2-point2d-x spire-3rd-ring-pt) 76.0)
+                   (<= (sc2-point2d-x spire-3rd-ring-pt) 79.0)
+                   (>= (sc2-point2d-y spire-3rd-ring-pt) 94.5)
+                   (<= (sc2-point2d-y spire-3rd-ring-pt) 97.5)))
+
+  ;; 2. L48-P0-3a2 (`#12`): Blocked Natural pad tracking (`SC2-EXPANSION-PAD-BLOCK-STREAK`):
+  ;;    After >= 2 consecutive blocked `RequestQuery` responses on Natural `(60, 98)`,
+  ;;    `find-best-expansion-placement` automatically demotes Natural behind the unblocked 3rd
+  ;;    pad `(58, 56)` even when Natural is explicitly requested, then reclaims Natural cleanly
+  ;;    after the `224f` decay window once clear (and clears on new match reset)!
+  (define e-nex  (mk-l48-u 98201 59 1 30.0 95.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75))
+  (define e-prb  (mk-l48-u 98202 84 1 34.0 95.0 #:hp 20.0   #:sh 20.0   #:rad 0.375))
+  (define e-units
+    (append (list e-nex e-prb)
+            (mk-l48-mins 98210 30.0 95.0 -6.5)
+            (mk-l48-mins 98220 60.0 98.0  6.5)
+            (mk-l48-mins 98230 58.0 56.0  6.5)))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 400 0 e-units) #:game-info gi-l48))
+  (hash-clear! SC2-EXPANSION-PAD-BLOCK-STREAK)
+  (define-values (exp-q1 exp-q2 exp-streak-after-2)
+    (let-values ([(ws _rc cleanup!)
+                  (l48-start-mock-ws
+                   (lambda (ab px py)
+                     ;; Block ALL placements near Natural (60, 98); allow 3rd (58, 56)
+                     (if (and (= ab 880) (<= (hypot (- px 58.0) (- py 56.0)) 6.0)) 1 2)))])
+      (define p1 (find-best-expansion-placement ws 880 30.0 95.0 e-units
+                                                #:req-x 60.0 #:req-y 98.0
+                                                #:game-info gi-l48 #:cur-loop 1000))
+      (define p2 (find-best-expansion-placement ws 880 30.0 95.0 e-units
+                                                #:req-x 60.0 #:req-y 98.0
+                                                #:game-info gi-l48 #:cur-loop 1040))
+      (cleanup!)
+      (define st
+        (for/first ([(_k v) (in-hash SC2-EXPANSION-PAD-BLOCK-STREAK)] #:when (pair? v))
+          (car v)))
+      (values p1 p2 (or st 0))))
+  ;; Query 3 (offline / explicit Natural request within 224f): streak >= 2 demotes Natural -> picks 3rd (58, 56)!
+  (define exp-q3-demoted
+    (find-best-expansion-placement #f 880 30.0 95.0 e-units
+                                   #:req-x 60.0 #:req-y 98.0
+                                   #:game-info gi-l48 #:cur-loop 1080))
+  ;; Query 4 (+360f past 224f decay, Natural clear again): Natural is reclaimed and streak removed!
+  (define-values (exp-q4-reclaimed exp-streak-cleared?)
+    (let-values ([(ws _rc cleanup!)
+                  (l48-start-mock-ws (lambda (ab _px _py) (if (= ab 880) 1 2)))])
+      (define p4 (find-best-expansion-placement ws 880 30.0 95.0 e-units
+                                                #:req-x 60.0 #:req-y 98.0
+                                                #:game-info gi-l48 #:cur-loop 1400))
+      (cleanup!)
+      (values p4 (= (hash-count SC2-EXPANSION-PAD-BLOCK-STREAK) 0))))
+  ;; Verify match reset (`cur-loop = 1400 -> 4`) clears SC2-EXPANSION-PAD-BLOCK-STREAK
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 1400 400 0 e-units) #:game-info gi-l48))
+  (hash-set! SC2-EXPANSION-PAD-BLOCK-STREAK '(60 . 98) '(3 . 1400))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 400 0 e-units) #:game-info gi-l48))
+  (define exp-streak-reset-ok? (= (hash-count SC2-EXPANSION-PAD-BLOCK-STREAK) 0))
+  (check-true "l48-p0-3a2-blocked-natural-expansion-2plus-fallback-to-3rd-pad"
+              (and (sc2-point2d? exp-q1)
+                   (<= (hypot (- (sc2-point2d-x exp-q1) 58.0) (- (sc2-point2d-y exp-q1) 56.0)) 5.0)
+                   (sc2-point2d? exp-q2)
+                   (<= (hypot (- (sc2-point2d-x exp-q2) 58.0) (- (sc2-point2d-y exp-q2) 56.0)) 5.0)
+                   (>= exp-streak-after-2 2)
+                   (sc2-point2d? exp-q3-demoted)
+                   (<= (hypot (- (sc2-point2d-x exp-q3-demoted) 58.0) (- (sc2-point2d-y exp-q3-demoted) 56.0)) 5.0)
+                   (sc2-point2d? exp-q4-reclaimed)
+                   (<= (hypot (- (sc2-point2d-x exp-q4-reclaimed) 60.0) (- (sc2-point2d-y exp-q4-reclaimed) 98.0)) 5.0)
+                   exp-streak-cleared?
+                   exp-streak-reset-ok?))
+
+  ;; 3. L48-P0-3a3 (`#72`): Under `< 4:00` early ground rush (`>= 3` enemy Zerglings within `35t`),
+  ;;    first `cybernetics-core` (`cnt = 0`) ignores the contested Natural Pylon `(56, 34)` and anchors
+  ;;    directly on the safe Main Pylon `(36, 32)` with tight (`< 1.0t`) emergency spacing in ONE RPC!
+  (define p48-nex  (mk-l48-u 98301 59 1 30.0 32.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75))
+  (define p48-pym  (mk-l48-u 98302 60 1 36.0 32.0 #:hp 200.0  #:sh 200.0  #:rad 1.0))
+  (define p48-pyn  (mk-l48-u 98303 60 1 56.0 34.0 #:hp 200.0  #:sh 200.0  #:rad 1.0))
+  (define p48-gw1  (mk-l48-u 98304 62 1 39.0 35.0 #:hp 500.0  #:sh 500.0  #:rad 1.5))
+  (define p48-prb  (mk-l48-u 98305 84 1 36.0 35.0 #:hp 20.0   #:sh 20.0   #:rad 0.375))
+  (define p48-lings
+    (for/list ([i (in-range 4)])
+      (mk-l48-u (+ 98310 i) 105 4 (+ 54.0 (* i 0.6)) 34.0 #:hp 35.0 #:rad 0.375)))
+  (define p48-obs
+    (sc2-observation 2800 (sc2-player-common 1 300 50 31 20 8 12 0 0 0 0)
+                     (append (list p48-nex p48-pym p48-pyn p48-gw1 p48-prb) p48-lings)
+                     '()
+                     (list (sc2-power-source (sc2-point2d 36.0 32.0) 6.5 98302)
+                           (sc2-power-source (sc2-point2d 56.0 34.0) 6.5 98303))
+                     #f '() '() '() '() '() '()))
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (define-values (cyb-rush-pt cyb-rush-rpcs)
+    (let-values ([(ws rpc-cnt cleanup!)
+                  (l48-start-mock-ws
+                   (lambda (ab px py)
+                     ;; Only accept CyberCore (894) in a tight 1t-adjacent pocket right south of Main Pylon (36, 32):
+                     ;; center (36.5, 29.5) is dist 2.55 from Main Pylon (36,32) — passes tight (<1.0t) spacing
+                     ;; and AABB clearance (2.45), while rejected by normal 2.0t spacing (req-d = 2.0/2.85)!
+                     (if (and (= ab 894)
+                              (>= px 34.0) (<= px 38.0)
+                              (>= py 28.0) (<= py 30.0))
+                         1
+                         2)))])
+      (define cs (translate-bot-actions->sc2-raw-commands
+                  '((build cybernetics-core 56.0 34.0))
+                  p48-obs
+                  #:ws-conn ws #:game-info gi-l48))
+      (cleanup!)
+      (define c894 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 894))) cs))
+      (values (and c894 (sc2-raw-unit-command-target-pos c894)) (unbox rpc-cnt))))
+  (check-true "l48-p0-3a3-early-rush-cybernetics-core-1t-main-pylon-emergency-fallback"
+              (and (sc2-point2d? cyb-rush-pt)
+                   (<= (hypot (- (sc2-point2d-x cyb-rush-pt) 36.0) (- (sc2-point2d-y cyb-rush-pt) 32.0)) 6.5)
+                   (> (hypot (- (sc2-point2d-x cyb-rush-pt) 56.0) (- (sc2-point2d-y cyb-rush-pt) 34.0)) 12.0)
+                   (= cyb-rush-rpcs 1)))
+
+  ;; 4. L48-W3: `pull-workers-attack` (both 4-arg unit-target & 3-arg point-target forms) is elevated
+  ;;    to P0 urgent survival (`urgent-survival-cmd? = #t`, `wire-cmd-priority-tier = 0`) and survives
+  ;;    governor throttling ahead of routine P2/P3 orders!
+  (define t48-cc   (mk-l48-u 98400 18 1 30.0 32.0 #:hp 1500.0 #:rad 2.75))
+  (define t48-scv1 (mk-l48-u 98401 45 1 32.0 32.0 #:hp 45.0   #:rad 0.375))
+  (define t48-scv2 (mk-l48-u 98402 45 1 32.5 32.5 #:hp 45.0   #:rad 0.375))
+  (define t48-scv3 (mk-l48-u 98403 45 1 33.0 32.0 #:hp 45.0   #:rad 0.375))
+  (define t48-scv4 (mk-l48-u 98404 45 1 33.5 32.5 #:hp 45.0   #:rad 0.375))
+  (define t48-ep   (mk-l48-u 98490 84 4 36.0 32.0 #:hp 20.0   #:sh 20.0 #:rad 0.375))
+  (define t48-obs-p0
+    (make-test-obs 1200 150 0 (list t48-cc t48-scv1 t48-scv2 t48-scv3 t48-scv4 t48-ep)))
+  (define pwa-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((pull-workers-attack (98401 98402) 98490 36.0 32.0)
+       (pull-workers-attack (98403 98404) 36.0 32.0))
+     t48-obs-p0
+     #:game-info gi-l48))
+  (define pwa-u-cmd
+    (findf (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 23)
+                  (= (sc2-raw-unit-command-target-unit-tag c) 98490)))
+           pwa-cmds))
+  (define pwa-pt-cmd
+    (findf (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 23)
+                  (= (sc2-raw-unit-command-target-unit-tag c) 0)))
+           pwa-cmds))
+  (define gov-l48 (make-wire-apm-governor #:target-apm 250.0 #:hard-cap-apm 480.0))
+  (define gov-p0-out
+    (govern-sc2-wire-actions!
+     gov-l48
+     (list (sc2-raw-unit-command 23 (sc2-point2d 60.0 60.0) 0 '(99901) #f)
+           pwa-u-cmd
+           pwa-pt-cmd)
+     1200
+     t48-obs-p0))
+  (check-true "l48-w3-pull-workers-attack-p0-urgent-survival-priority"
+              (and (sc2-raw-unit-command? pwa-u-cmd)
+                   (urgent-survival-cmd? pwa-u-cmd)
+                   (= (wire-cmd-priority-tier pwa-u-cmd) 0)
+                   (sc2-raw-unit-command? pwa-pt-cmd)
+                   (urgent-survival-cmd? pwa-pt-cmd)
+                   (= (wire-cmd-priority-tier pwa-pt-cmd) 0)
+                   (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 23)
+                                 (= (sc2-raw-unit-command-target-unit-tag c) 98490)
+                                 (urgent-survival-cmd? c)))
+                          gov-p0-out)
+                   (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 23)
+                                 (= (sc2-raw-unit-command-target-unit-tag c) 0)
+                                 (urgent-survival-cmd? c)))
+                          gov-p0-out)))
+
+  ;; 5. L48-W3: `resume-halted-building` runs ahead of & protects its resuming SCV via
+  ;;    `builder-worker-tags` + `commanded-combat-tags` + P0 urgent survival so same-frame
+  ;;    `pull-workers-attack` / `mineral-walk` / `worker-drill-stack-attack` NEVER clobber it!
+  (define r48-cc   (mk-l48-u 98500 18 1 30.0 32.0 #:hp 1500.0 #:rad 2.75))
+  (define r48-rax  (mk-l48-u 98510 21 1 34.0 35.0 #:hp 500.0  #:rad 1.5 #:bp 0.5))
+  (define r48-scv1 (mk-l48-u 98501 45 1 32.0 34.0 #:hp 45.0   #:rad 0.375))
+  (define r48-scv2 (mk-l48-u 98502 45 1 31.5 31.5 #:hp 45.0   #:rad 0.375))
+  (define r48-scv3 (mk-l48-u 98503 45 1 32.5 31.5 #:hp 45.0   #:rad 0.375))
+  (define r48-min  (mk-l48-u 98520 341 3 23.5 32.0 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define r48-ep   (mk-l48-u 98590 84 4 33.5 32.0 #:hp 20.0   #:sh 20.0 #:rad 0.375))
+  (define r48-obs
+    (make-test-obs 1240 150 0 (list r48-cc r48-rax r48-scv1 r48-scv2 r48-scv3 r48-min r48-ep)))
+  (define resume-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((pull-workers-attack (98501 98502 98503) 98590 33.5 32.0)
+       (mineral-walk (98501) 98520 23.5 32.0)
+       (worker-drill-stack-attack (98501 98502) 98520 98590 33.5 32.0)
+       (resume-halted-building 98501 98510))
+     r48-obs
+     #:game-info gi-l48))
+  (define c-resume
+    (findf (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 1)
+                  (= (sc2-raw-unit-command-target-unit-tag c) 98510)))
+           resume-cmds))
+  (define c-pull
+    (findf (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 23)))
+           resume-cmds))
+  (define scv1-clobbered-by-other?
+    (ormap (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (not (= (sc2-raw-unit-command-ability-id c) 1))
+                  (memv 98501 (sc2-raw-unit-command-unit-tags c))))
+           resume-cmds))
+  (check-true "l48-w3-resume-halted-building-p0-and-no-same-frame-pull-clobber"
+              (and (sc2-raw-unit-command? c-resume)
+                   (equal? (sc2-raw-unit-command-unit-tags c-resume) '(98501))
+                   (urgent-survival-cmd? c-resume)
+                   (= (wire-cmd-priority-tier c-resume) 0)
+                   (sc2-raw-unit-command? c-pull)
+                   (equal? (sort (sc2-raw-unit-command-unit-tags c-pull) <) '(98502 98503))
+                   (urgent-survival-cmd? c-pull)
+                   (= (wire-cmd-priority-tier c-pull) 0)
+                   (not scv1-clobbered-by-other?)))
+
+  ;; 6. L48-W2 (`#1095`/`#1096`): Safe Rear-Side Secondary-TH Perimeter Fallback:
+  ;;    (a) At `cur-prod-miss-streak = 0`, Barracks #3+ prefers safe Main interior spots
+  ;;        ahead of secondary-TH perimeter (never skipping open Main interior!).
+  ;;    (b) At `cur-prod-miss-streak = 1`, when Main & Natural interior are blocked and
+  ;;        the 3rd CC's minerals sit on its rear/NE side (so away-from-minerals points SW
+  ;;        toward Enemy Main `(20, 20)`!), exposed forward/enemy-facing perimeter spots
+  ;;        (`dot(pt - th, enemy_dir) > 0`) are REJECTED and ONLY rear-side spots (`dot <= 0`) win!
+  (define gi-l48-ne
+    (sc2-game-info "L48RearPerimMap" "" '() '(128 128) '(4 4 124 124)
+                   (list (sc2-point2d 20.0 20.0)) w3-full-grid #f w3-full-grid))
+  (define p2-cc-main (mk-l48-u 98601 18 1 104.0 104.0 #:hp 1500.0 #:rad 2.75))
+  (define p2-cc-3rd  (mk-l48-u 98602 18 1  76.0  76.0 #:hp 1500.0 #:rad 2.75))
+  (define p2-rx1     (mk-l48-u 98603 21 1  98.0 108.0 #:hp 1000.0 #:rad 1.5))
+  (define p2-rx2     (mk-l48-u 98604 21 1  98.0 100.0 #:hp 1000.0 #:rad 1.5))
+  (define p2-scv     (mk-l48-u 98605 45 1  96.0 104.0 #:hp 45.0   #:rad 0.375))
+  ;; Place 3rd CC minerals on its East/NE rear side (+6.5 x) so away-from-minerals points West/SW toward enemy (20,20)!
+  (define p2-units
+    (append (list p2-cc-main p2-cc-3rd p2-rx1 p2-rx2 p2-scv)
+            (mk-l48-mins 98610 104.0 104.0  6.5)
+            (mk-l48-mins 98620  76.0  76.0  6.5)))
+  ;; Part A (`miss-streak = 0`): Both Main interior [90..112, 90..112] AND 3rd CC perimeter open -> picks Main interior!
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 500 200 p2-units) #:game-info gi-l48-ne))
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK 'barracks 0)
+  (define rx3-streak0-pt
+    (let-values ([(ws _rc cleanup!)
+                  (l48-start-mock-ws
+                   (lambda (ab px py)
+                     (if (and (= ab 321)
+                              (or (and (>= px 92.0) (<= px 112.0) (>= py 92.0) (<= py 112.0))
+                                  (and (>= px 64.0) (<= px 88.0) (>= py 64.0) (<= py 88.0))))
+                         1 2)))])
+      (define cs (translate-bot-actions->sc2-raw-commands
+                  '((build barracks 104.0 104.0))
+                  (make-test-obs 6000 500 200 p2-units)
+                  #:ws-conn ws #:game-info gi-l48-ne))
+      (cleanup!)
+      (define c321 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) cs))
+      (and c321 (sc2-raw-unit-command-target-pos c321))))
+  ;; Part B (`miss-streak = 1`): Main blocked; on 3rd CC (76,76), BOTH exposed forward SW pocket [66..71, 66..71]
+  ;; AND safe rear NW/NE flank [68..84, 80..87] (where dot((pt - (76,76)), (-1,-1)) <= 0 -> (px-76)+(py-76) >= 0!)
+  ;; are open on mock-WS -> secondary-th-perimeter-anchors MUST pick the safe rear half-plane (NEVER exposed SW)!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK 'barracks 1)
+  (define rx3-streak1-pt
+    (let-values ([(ws _rc cleanup!)
+                  (l48-start-mock-ws
+                   (lambda (ab px py)
+                     (if (and (= ab 321)
+                              (or (and (>= px 66.0) (<= px 71.0) (>= py 66.0) (<= py 71.0))
+                                  (and (>= px 68.0) (<= px 84.0) (>= py 81.0) (<= py 87.0))))
+                         1 2)))])
+      (define cs (translate-bot-actions->sc2-raw-commands
+                  '((build barracks 104.0 104.0))
+                  (make-test-obs 6200 500 200 p2-units)
+                  #:ws-conn ws #:game-info gi-l48-ne))
+      (cleanup!)
+      (define c321 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) cs))
+      (and c321 (sc2-raw-unit-command-target-pos c321))))
+  (check-true "l48-w2-secondary-th-perimeter-rear-halfplane-and-miss-streak-fallback"
+              (and (sc2-point2d? rx3-streak0-pt)
+                   (>= (sc2-point2d-x rx3-streak0-pt) 90.0)
+                   (>= (sc2-point2d-y rx3-streak0-pt) 90.0)
+                   (sc2-point2d? rx3-streak1-pt)
+                   ;; Strictly in rear half-plane relative to 3rd CC (76,76) away from enemy (20,20):
+                   ;; enemy_dir = (-0.707, -0.707), so rear half-plane is (px - 76) + (py - 76) >= 0!
+                   (>= (+ (- (sc2-point2d-x rx3-streak1-pt) 76.0)
+                          (- (sc2-point2d-y rx3-streak1-pt) 76.0))
+                       0.0)))
+  (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
+  (hash-clear! SC2-EXPANSION-PAD-BLOCK-STREAK))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

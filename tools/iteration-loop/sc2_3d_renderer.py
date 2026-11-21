@@ -702,6 +702,8 @@ class MP4StreamEncoder:
             cmd += ["-vf", f"scale={out_w}:{out_h}:flags=lanczos"]
         cmd += [
             "-c:v", "libx264",
+            "-profile:v", "main",
+            "-level:v", "3.1",
             "-preset", str(preset),
             "-crf", str(crf),
             "-pix_fmt", "yuv420p",

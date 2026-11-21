@@ -8237,7 +8237,10 @@
                        'ally-units (list (hash 'id 18401 'type 'drone 'x 32.5 'y 32.5 'hp 40)
                                          (hash 'id 18402 'type 'larva 'x 33.5 'y 31.0 'hp 25))
                        'ally-buildings (list (hash 'id 18410 'type 'hatchery 'x 32.5 'y 32.5 'hp 1500 'build-progress 1.0)
-                                             (hash 'id 18411 'type 'spawning-pool 'x 36.5 'y 32.5 'hp 1000 'build-progress 1.0))
+                                             (hash 'id 18411 'type 'spawning-pool 'x 36.5 'y 32.5 'hp 1000 'build-progress 1.0)
+                                             ;; L48-W2: Spine Crawler #1 already building (`r14` Spine #1 priority),
+                                             ;; isolating the 100M Overlord floor exemption for Zerglings at 75M/1 supply-left!
+                                             (hash 'id 18412 'type 'spine-crawler 'x 35.0 'y 32.5 'hp 300 'build-progress 0.5))
                        'enemy-units rush-probes))
                 'actions '()))
     (assert-true! (member '(train zergling) acts-z-rush-lings-only)
@@ -12876,7 +12879,9 @@
       #:unit-counts (hasheq 'drone 12 'overlord 2 'zergling 2)
       #:enemy-unit-counts (hasheq 'probe 12)
       #:ready-building-counts (hasheq 'hatchery 1 'spawning-pool 1)
-      #:total-building-counts (hasheq 'hatchery 1 'spawning-pool 1)
+      ;; L48-W2: Spine Crawler #1 already building (`r14` Spine #1 priority),
+      ;; isolating that Zerg schedules zergling immediately at 75M rather than escrowing queen/overlord/drone!
+      #:total-building-counts (hasheq 'hatchery 1 'spawning-pool 1 'spine-crawler 1)
       #:open-facility-slots (hasheq 'larva 2 'townhall 1))))
   (assert-true! (not (memq (macro-brain-decision-saving-for md-5131248) '(queen overlord drone)))
                 "Match #5131248: During 12-Probe worker rush at 15/22 supply with 2 lings, Zerg must NOT escrow-save queen/overlord/drone")
@@ -16788,6 +16793,344 @@
                      (not (not (memq 'hydralisk (macro-brain-decision-scheduled-ids l45-z-zvt-cap12))))
                      (not (not (memq 'corruptor (macro-brain-decision-scheduled-ids l45-z-zvt-bc-unlock)))))
                 "L45-P0-2b(2) Live #5138613 ZvT caps Corruptors<=12 vs Vikings/0 BCs & unlocks vs >=2 BCs")
+  (reset-macro-escrow-tracker!))
+
+;; ============================================================================
+;; 51.34 Loop 46 Track 2 (L46-P0-2a..2b): 0-Colossus Fix (Block Disruptor/WP/Obs) +
+;;       PvPNatDelay Over GW#3/Cannon#2 + #62 EBay Cap + #56 TvT Medivac<=2 +
+;;       #29/#65 2b Rax<=4 + #73 ZvP DT Lair->Overseer+Roach8 + #5138315 ZvP Corruptor<=12
+;; ============================================================================
+(run-suite "51.34 Loop 46 0-Colossus Fix, PvP Nat, #62 EBay/#56 Medivac/#29 Rax4, #73 DT, ZvP Corruptor<=12"
+  ;; L46-P0-2a: 0-Colossus hard-blocks Disruptor/WarpPrism/Obs#2+ & PvP <195s locks Nat over GW#3/Cannon#2
+  (reset-macro-escrow-tracker!)
+  (define l46-p-04-colossus
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 8600
+      #:minerals 240 #:gas 260 #:supply-used 90 #:supply-cap 130 #:workers 48 #:active-bases 3
+      #:mineral-harvesters 36 #:gas-harvesters 12
+      #:army-supply 42 #:enemy-threat-supply 18 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 3 'pylon 14 'gateway 5 'cybernetics-core 1
+                                      'robotics-facility 1 'robotics-bay 1 'twilight-council 1 'assimilator 6)
+      #:total-building-counts (hasheq 'nexus 3 'pylon 14 'gateway 5 'cybernetics-core 1
+                                      'robotics-facility 1 'robotics-bay 1 'twilight-council 1 'assimilator 6)
+      #:unit-counts (hasheq 'probe 48 'stalker 14 'immortal 3 'observer 1)
+      #:enemy-unit-counts (hasheq 'marine 20 'marauder 6 'medivac 2)
+      #:open-facility-slots (hasheq 'townhall 3 'gateway 2 'robotics-facility 1))))
+  (reset-macro-escrow-tracker!)
+  (define l46-p-12-nat
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Protoss #:frame 3500
+      #:minerals 290 #:gas 100 #:supply-used 30 #:supply-cap 47 #:workers 22 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 6
+      #:army-supply 8 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 4 'gateway 2 'cybernetics-core 1 'forge 1 'photon-cannon 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 4 'gateway 2 'cybernetics-core 1 'forge 1 'photon-cannon 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 22 'stalker 4)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 0))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l46-p-04-colossus) 'colossus)
+                     (not (memq 'disruptor (macro-brain-decision-scheduled-ids l46-p-04-colossus)))
+                     (not (memq 'warp-prism (macro-brain-decision-scheduled-ids l46-p-04-colossus)))
+                     (eq? (macro-brain-decision-saving-for l46-p-12-nat) 'nexus)
+                     (not (memq 'gateway (macro-brain-decision-scheduled-ids l46-p-12-nat)))
+                     (not (memq 'photon-cannon (macro-brain-decision-scheduled-ids l46-p-12-nat))))
+                "L46-P0-2a 0-Colossus escrows Colossus over Disruptor/WP & PvP<195s locks Nat over GW#3/Cannon#2")
+
+  ;; L46-P0-2b(1): #62 EBay<=1 on 2b, #56 TvT Medivac<=2 while Tank<4, #29/#65 true 2b Rax<=4
+  (reset-macro-escrow-tracker!)
+  (define l46-t-62-ebay
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 8600
+      #:minerals 500 #:gas 300 #:supply-used 76 #:supply-cap 110 #:workers 42 #:active-bases 2
+      #:mineral-harvesters 32 #:gas-harvesters 10
+      #:army-supply 34 #:enemy-threat-supply 12 #:under-attack? #f #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 11 'barracks 4 'factory 1 'factory-techlab 1
+                                      'starport 1 'engineering-bay 1 'refinery 4)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 11 'barracks 4 'factory 1 'factory-techlab 1
+                                      'starport 1 'engineering-bay 1 'refinery 4)
+      #:unit-counts (hasheq 'scv 42 'marine 18 'siege-tank 2 'medivac 2 'viking-fighter 2)
+      #:enemy-unit-counts (hasheq 'viking-fighter 3 'marine 12 'siege-tank 2)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 0 'factory 0 'starport 1))))
+  (assert-true! (and (not (memq 'engineering-bay (macro-brain-decision-scheduled-ids l46-t-62-ebay)))
+                     (not (memq 'medivac (macro-brain-decision-scheduled-ids l46-t-62-ebay)))
+                     (not (memq 'barracks (macro-brain-decision-scheduled-ids l46-t-62-ebay))))
+                "L46-P0-2b(1) #62/#56/#29 hard-cap 2b EBay<=1, TvT Medivac<=2 (<4 Tanks), & true 2b Rax<=4")
+
+  ;; L46-P0-2b(2): #73 ZvP DT locks Lair->Overseer+Roach8 & #5138315 caps ZvP Corruptor<=12 without >=2 cap air
+  (reset-macro-escrow-tracker!)
+  (define l46-z-73-dt-lair
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 5400
+      #:minerals 200 #:gas 85 #:supply-used 48 #:supply-cap 70 #:workers 32 #:active-bases 2
+      #:mineral-harvesters 26 #:gas-harvesters 6
+      #:army-supply 16 #:enemy-threat-supply 6 #:under-attack? #f #:requires-detection? #t
+      #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'roach-warren 1 'baneling-nest 1 'spore-crawler 2 'extractor 2)
+      #:total-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'roach-warren 1 'baneling-nest 1 'spore-crawler 2 'extractor 2)
+      #:unit-counts (hasheq 'drone 32 'queen 3 'zergling 14 'roach 2 'overlord 7)
+      #:enemy-building-counts (hasheq 'dark-shrine 1 'twilight-council 1)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 6))))
+  (reset-macro-escrow-tracker!)
+  (define l46-z-zvp-cap12
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 14500
+      #:minerals 600 #:gas 600 #:supply-used 130 #:supply-cap 170 #:workers 62 #:active-bases 4
+      #:mineral-harvesters 46 #:gas-harvesters 16
+      #:army-supply 68 #:enemy-threat-supply 60 #:under-attack? #f #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'hatchery 3 'hive 1 'spawning-pool 1 'hydralisk-den 1 'spire 1 'extractor 6)
+      #:total-building-counts (hasheq 'hatchery 3 'hive 1 'spawning-pool 1 'hydralisk-den 1 'spire 1 'extractor 6)
+      #:unit-counts (hasheq 'drone 62 'queen 5 'corruptor 12 'hydralisk 10 'overlord 18)
+      #:enemy-unit-counts (hasheq 'phoenix 10 'colossus 3 'stalker 20)
+      #:enemy-building-counts (hasheq 'stargate 2 'robotics-bay 1)
+      #:open-facility-slots (hasheq 'townhall 4 'larva 8))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l46-z-73-dt-lair) 'lair)
+                     (not (memq 'baneling (macro-brain-decision-scheduled-ids l46-z-73-dt-lair)))
+                     (not (memq 'corruptor (macro-brain-decision-scheduled-ids l46-z-zvp-cap12))))
+                "L46-P0-2b(2) #73 ZvP DarkShrine locks Lair over gas drain & #5138315 caps ZvP Corruptor<=12")
+  (reset-macro-escrow-tracker!))
+
+;; ============================================================================
+;; 51.35 Loop 47 Track 1 (L47-P0-2a..2b): RoboBay AA Escrow Protection + Terran <=2 Air +
+;;       PvP Tier-3 RoboBay/Colossus + #21 Colossus@760 > Immortal@745 + H2H #03 PvP Nat<5600 +
+;;       #60 CyberCore Cap + #72 >=275M 2-Gate Lift + #53 Pre-5m >=2 Reapers OC/CC Defer +
+;;       #73 ZvT Banshee Spore 1/Base & >=5 Queens Lock
+;; ============================================================================
+(run-suite "51.35 Loop 47 RoboBay AA Lock, PvP T3 Colossus@760, #03 Nat<5600, #60 CyberCap, #72/#53/#73"
+  ;; L47-P0-2a(1): H2H #04 PvT RoboBay AA escrow protection & #21 PolyMorph Colossus@760 > Immortal@745
+  (reset-macro-escrow-tracker!)
+  (define l47-p-04-robobay
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 9204
+      #:minerals 185 #:gas 103 #:supply-used 74 #:supply-cap 102 #:workers 42 #:active-bases 2
+      #:mineral-harvesters 30 #:gas-harvesters 12
+      #:army-supply 32 #:enemy-threat-supply 16 #:under-attack? #f #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 10 'gateway 5 'cybernetics-core 1
+                                      'robotics-facility 1 'assimilator 4)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 10 'gateway 5 'cybernetics-core 1
+                                      'robotics-facility 1 'assimilator 4)
+      #:unit-counts (hasheq 'probe 42 'stalker 10 'immortal 2 'zealot 2)
+      #:enemy-unit-counts (hasheq 'marine 18 'marauder 4 'medivac 2 'viking-fighter 1)
+      #:enemy-building-counts (hasheq 'starport 1)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 4 'robotics-facility 1))))
+  (reset-macro-escrow-tracker!)
+  (define l47-p-21-colossus
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Zerg #:frame 11948
+      #:minerals 405 #:gas 231 #:supply-used 96 #:supply-cap 134 #:workers 50 #:active-bases 3
+      #:mineral-harvesters 38 #:gas-harvesters 12
+      #:army-supply 46 #:enemy-threat-supply 30 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 3 'pylon 14 'gateway 6 'cybernetics-core 1
+                                      'robotics-facility 1 'robotics-bay 1 'assimilator 5)
+      #:total-building-counts (hasheq 'nexus 3 'pylon 14 'gateway 6 'cybernetics-core 1
+                                      'robotics-facility 1 'robotics-bay 1 'assimilator 5)
+      #:unit-counts (hasheq 'probe 50 'stalker 12 'immortal 3 'zealot 4 'observer 1)
+      #:enemy-unit-counts (hasheq 'roach 12 'ravager 4 'zergling 14)
+      #:enemy-building-counts (hasheq 'hatchery 3 'roach-warren 1)
+      #:open-facility-slots (hasheq 'townhall 3 'gateway 3 'robotics-facility 1))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l47-p-04-robobay) 'robotics-bay)
+                     (not (memq 'stalker (macro-brain-decision-scheduled-ids l47-p-04-robobay)))
+                     (not (not (memq 'colossus (macro-brain-decision-scheduled-ids l47-p-21-colossus))))
+                     (not (memq 'immortal (macro-brain-decision-scheduled-ids l47-p-21-colossus))))
+                "L47-P0-2a(1) H2H #04 PvT protects RoboBay escrow from AA Stalker & #21 trains Colossus over Immortal")
+
+  ;; L47-P0-2a(2): PvP Tier-3 RoboBay + Colossus unlock & H2H #03 PvP f=5092 Natural defers Immortal
+  (reset-macro-escrow-tracker!)
+  (define l47-p-pvp-colossus
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Protoss #:frame 8700
+      #:minerals 320 #:gas 220 #:supply-used 78 #:supply-cap 110 #:workers 42 #:active-bases 2
+      #:mineral-harvesters 30 #:gas-harvesters 12
+      #:army-supply 36 #:enemy-threat-supply 16 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 11 'gateway 5 'cybernetics-core 1
+                                      'robotics-facility 1 'robotics-bay 1 'assimilator 4)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 11 'gateway 5 'cybernetics-core 1
+                                      'robotics-facility 1 'robotics-bay 1 'assimilator 4)
+      #:unit-counts (hasheq 'probe 42 'stalker 10 'immortal 3 'observer 1)
+      #:enemy-unit-counts (hasheq 'stalker 10 'immortal 2 'zealot 4)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 4 'robotics-facility 1))))
+  (reset-macro-escrow-tracker!)
+  (define l47-p-03-nat5092
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Protoss #:frame 5092
+      #:minerals 350 #:gas 140 #:supply-used 42 #:supply-cap 55 #:workers 22 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 6
+      #:army-supply 20 #:enemy-threat-supply 2 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 6 'gateway 2 'cybernetics-core 1
+                                      'robotics-facility 1 'forge 1 'photon-cannon 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 6 'gateway 2 'cybernetics-core 1
+                                      'robotics-facility 1 'forge 1 'photon-cannon 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 22 'stalker 6 'zealot 2 'immortal 1)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 2 'robotics-facility 1))))
+  (assert-true! (and (not (not (memq 'colossus (macro-brain-decision-scheduled-ids l47-p-pvp-colossus))))
+                     (not (memq 'immortal (macro-brain-decision-scheduled-ids l47-p-pvp-colossus)))
+                     (eq? (macro-brain-decision-saving-for l47-p-03-nat5092) 'nexus)
+                     (not (memq 'immortal (macro-brain-decision-scheduled-ids l47-p-03-nat5092))))
+                "L47-P0-2a/2b PvP trains Colossus over Immortal & H2H #03 f=5092 defers Immortal for Nexus#2")
+
+  ;; L47-P0-2b: #72 >=275M lifts 2-Gate cap, #53 >=2 Reapers defers OC/CC, #73 ZvT Banshees lock Queen/Spore
+  (reset-macro-escrow-tracker!)
+  (define l47-p-72-345m
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Zerg #:frame 2800
+      #:minerals 345 #:gas 120 #:supply-used 19 #:supply-cap 31 #:workers 17 #:active-bases 1
+      #:mineral-harvesters 14 #:gas-harvesters 3
+      #:army-supply 2 #:enemy-threat-supply 8 #:under-attack? #t
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 2 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 2 'assimilator 1)
+      #:unit-counts (hasheq 'probe 17 'zealot 1)
+      #:enemy-unit-counts (hasheq 'zergling 8)
+      #:enemy-building-counts (hasheq 'spawning-pool 1 'hatchery 1)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 0))))
+  (reset-macro-escrow-tracker!)
+  (define l47-t-53-reaper2
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 2236
+      #:minerals 155 #:gas 84 #:supply-used 19 #:supply-cap 23 #:workers 17 #:active-bases 1
+      #:mineral-harvesters 14 #:gas-harvesters 3
+      #:army-supply 2 #:enemy-threat-supply 2 #:under-attack? #f
+      #:ready-building-counts (hasheq 'command-center 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'command-center 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 17 'marine 2)
+      #:enemy-unit-counts (hasheq 'reaper 2)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1))))
+  (reset-macro-escrow-tracker!)
+  (define l47-z-73-banshee-q55
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Terran #:frame 5284
+      #:minerals 55 #:gas 62 #:supply-used 38 #:supply-cap 52 #:workers 28 #:active-bases 2
+      #:mineral-harvesters 22 #:gas-harvesters 6
+      #:army-supply 10 #:enemy-threat-supply 6 #:under-attack? #t #:requires-anti-air? #t #:requires-detection? #t
+      #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'spore-crawler 2 'extractor 2)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'spore-crawler 2 'extractor 2)
+      #:unit-counts (hasheq 'drone 28 'queen 3 'zergling 6 'overlord 6)
+      #:enemy-unit-counts (hasheq 'banshee 2)
+      #:enemy-building-counts (hasheq 'starport 1 'starport-techlab 1)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 4))))
+  (assert-true! (and (not (not (memq 'gateway (macro-brain-decision-scheduled-ids l47-p-72-345m))))
+                     (not (memq 'orbital-command (macro-brain-decision-scheduled-ids l47-t-53-reaper2)))
+                     (not (not (memq 'marine (macro-brain-decision-scheduled-ids l47-t-53-reaper2))))
+                     (eq? (macro-brain-decision-saving-for l47-z-73-banshee-q55) 'queen)
+                     (not (memq 'zergling (macro-brain-decision-scheduled-ids l47-z-73-banshee-q55))))
+                "L47-P0-2b #72 lifts 2-Gate@345M, #53 defers OC for Marine/Bunker vs 2 Reapers, #73 locks Queen@55M")
+  (reset-macro-escrow-tracker!))
+
+;; ============================================================================
+;; 51.36 Loop 48 Track 2 (L48-P0-2a..2b): Live/Local Phoenix Cap (<=0 CapAir, <=4 PvT Bio) +
+;;       Colossus@880 > Phoenix@860 + H2H #04 Early RoboBay + H2H #01 ZvZ Non-Blocking Hatchery +
+;;       #53 Pre-4m >=1 TvT Reaper + #12 PvPNatDelay Twilight/Forge Defer
+;; ============================================================================
+(run-suite "51.36 Loop 48 Phoenix Cap0/4, Colossus@880, #04 RoboBay, #01 ZvZ Hatch, #53 Reaper1, #12 Nat"
+  ;; L48-P0-2a: CapAir Phoenix<=0, PvT Bio Phoenix<=4, Colossus@880>Phoenix@860, #04 Unbreached Bio RoboBay>=960
+  (reset-macro-escrow-tracker!)
+  (define l48-p-tempest-phx0
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Protoss #:frame 12400
+      #:minerals 600 #:gas 400 #:supply-used 110 #:supply-cap 150 #:workers 54 #:active-bases 3
+      #:mineral-harvesters 40 #:gas-harvesters 14
+      #:army-supply 56 #:enemy-threat-supply 44 #:under-attack? #f #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'nexus 3 'pylon 16 'gateway 6 'cybernetics-core 1
+                                      'stargate 2 'fleet-beacon 1 'twilight-council 1 'assimilator 6)
+      #:total-building-counts (hasheq 'nexus 3 'pylon 16 'gateway 6 'cybernetics-core 1
+                                      'stargate 2 'fleet-beacon 1 'twilight-council 1 'assimilator 6)
+      #:unit-counts (hasheq 'probe 54 'stalker 14 'void-ray 4)
+      #:enemy-unit-counts (hasheq 'tempest 6 'stalker 24)
+      #:enemy-building-counts (hasheq 'stargate 2 'fleet-beacon 1)
+      #:open-facility-slots (hasheq 'townhall 3 'gateway 2 'stargate 2))))
+  (reset-macro-escrow-tracker!)
+  (define l48-p-82-col-vs-phx
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 11288
+      #:minerals 200 #:gas 140 #:supply-used 92 #:supply-cap 134 #:workers 48 #:active-bases 3
+      #:mineral-harvesters 36 #:gas-harvesters 12
+      #:army-supply 44 #:enemy-threat-supply 20 #:under-attack? #f #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'nexus 3 'pylon 14 'gateway 5 'cybernetics-core 1
+                                      'robotics-facility 1 'robotics-bay 1 'stargate 1 'assimilator 6)
+      #:total-building-counts (hasheq 'nexus 3 'pylon 14 'gateway 5 'cybernetics-core 1
+                                      'robotics-facility 1 'robotics-bay 1 'stargate 1 'assimilator 6)
+      #:unit-counts (hasheq 'probe 48 'stalker 12 'immortal 3 'phoenix 2 'observer 1)
+      #:enemy-unit-counts (hasheq 'marine 18 'marauder 4 'siege-tank 4 'medivac 2 'viking-fighter 2)
+      #:enemy-building-counts (hasheq 'starport 1)
+      #:open-facility-slots (hasheq 'townhall 3 'gateway 3 'robotics-facility 1 'stargate 1))))
+  (reset-macro-escrow-tracker!)
+  (define l48-p-04-robobay
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 7280
+      #:minerals 180 #:gas 160 #:supply-used 64 #:supply-cap 78 #:workers 42 #:active-bases 2
+      #:mineral-harvesters 30 #:gas-harvesters 12
+      #:army-supply 22 #:enemy-threat-supply 12 #:under-attack? #f #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 9 'gateway 4 'cybernetics-core 1
+                                      'robotics-facility 1 'assimilator 4)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 9 'gateway 4 'cybernetics-core 1
+                                      'robotics-facility 1 'assimilator 4)
+      #:unit-counts (hasheq 'probe 42 'stalker 7 'immortal 2)
+      #:enemy-unit-counts (hasheq 'marine 14 'marauder 3 'medivac 2)
+      #:enemy-building-counts (hasheq 'starport 1)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 3 'robotics-facility 1))))
+  (assert-true! (and (not (memq 'phoenix (macro-brain-decision-scheduled-ids l48-p-tempest-phx0)))
+                     (eq? (macro-brain-decision-saving-for l48-p-82-col-vs-phx) 'colossus)
+                     (not (memq 'phoenix (macro-brain-decision-scheduled-ids l48-p-82-col-vs-phx)))
+                     (not (not (memq 'robotics-bay (macro-brain-decision-scheduled-ids l48-p-04-robobay)))))
+                "L48-P0-2a CapAir caps Phoenix<=0, Colossus@880 locks over Phoenix, & H2H #04 builds RoboBay")
+
+  ;; L48-P0-2b: H2H #01 ZvZ non-blocking Hatchery, #53 TvT Reaper#1 OC defer, & #12 PvP f=5820 Twilight/Forge defer
+  (reset-macro-escrow-tracker!)
+  (define l48-z-01-outnumbered
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Zerg #:frame 12544
+      #:minerals 134 #:gas 197 #:supply-used 58 #:supply-cap 102 #:workers 40 #:active-bases 1
+      #:mineral-harvesters 28 #:gas-harvesters 12
+      #:army-supply 18 #:enemy-threat-supply 20 #:under-attack? #f
+      #:ready-building-counts (hasheq 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'extractor 3)
+      #:total-building-counts (hasheq 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'extractor 3)
+      #:unit-counts (hasheq 'drone 40 'queen 2 'roach 6 'zergling 4 'overlord 12)
+      #:enemy-unit-counts (hasheq 'roach 10 'zergling 20)
+      #:open-facility-slots (hasheq 'townhall 1 'larva 5))))
+  (reset-macro-escrow-tracker!)
+  (define l48-t-53-reaper1
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 2236
+      #:minerals 155 #:gas 60 #:supply-used 19 #:supply-cap 23 #:workers 17 #:active-bases 1
+      #:mineral-harvesters 14 #:gas-harvesters 3
+      #:army-supply 2 #:enemy-threat-supply 1 #:under-attack? #f
+      #:ready-building-counts (hasheq 'command-center 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'command-center 1 'supply-depot 2 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 17 'marine 2)
+      #:enemy-unit-counts (hasheq 'reaper 1)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1))))
+  (reset-macro-escrow-tracker!)
+  (define l48-p-12-nat5820
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Protoss #:frame 5820
+      #:minerals 320 #:gas 140 #:supply-used 40 #:supply-cap 55 #:workers 22 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 6
+      #:army-supply 18 #:enemy-threat-supply 2 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 6 'gateway 2 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 6 'gateway 2 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 22 'stalker 6 'zealot 2 'immortal 1)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 2 'robotics-facility 1))))
+  (assert-true! (and (not (eq? (macro-brain-decision-saving-for l48-z-01-outnumbered) 'hatchery))
+                     (not (memq 'orbital-command (macro-brain-decision-scheduled-ids l48-t-53-reaper1)))
+                     (not (not (memq 'marine (macro-brain-decision-scheduled-ids l48-t-53-reaper1))))
+                     (eq? (macro-brain-decision-saving-for l48-p-12-nat5820) 'nexus)
+                     (not (memq 'twilight-council (macro-brain-decision-scheduled-ids l48-p-12-nat5820)))
+                     (not (memq 'forge (macro-brain-decision-scheduled-ids l48-p-12-nat5820))))
+                "L48-P0-2b #01 ZvZ non-blocking Hatch, #53 TvT Reaper#1 OC defer, & #12 f=5820 Twilight/Forge defer")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms

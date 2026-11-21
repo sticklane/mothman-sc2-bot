@@ -34,10 +34,14 @@
          (struct-out pad-belief-entry)
          (struct-out opponent-world-summary)
          (struct-out opponent-world-model)
+         opponent-world-summary-enemy-workers-near-us
+         opponent-world-summary-early-worker-rush-active?
+         opponent-world-summary-rush-posterior-floor
          make-opponent-world-model
          reset-opponent-world-model!
          free-summon-unit-sym?
          happy-path-expected-bases
+         apply-worker-rush-posterior-floor
          step-opponent-world-model!)
 
 ;; -----------------------------------------------------------------------------
@@ -124,6 +128,24 @@
    known-bldg-counts)            ; immutable hasheq: canon-sym -> count
   #:transparent)
 
+;; L48-WR: ABI-preserving weak side-tables for early worker-rush tracking
+;; (keeps `opponent-world-summary` at 35 fields and `opponent-world-model` unchanged
+;; so existing compiled `.zo` dependents never suffer struct-arity linklet mismatches!).
+(define owm-summary-worker-rush-table (make-weak-hasheq))
+(define owm-last-worker-rush-frame-table (make-weak-hasheq))
+
+(define (opponent-world-summary-enemy-workers-near-us s)
+  (define rec (and (opponent-world-summary? s) (hash-ref owm-summary-worker-rush-table s #f)))
+  (if (vector? rec) (vector-ref rec 0) 0))
+
+(define (opponent-world-summary-early-worker-rush-active? s)
+  (define rec (and (opponent-world-summary? s) (hash-ref owm-summary-worker-rush-table s #f)))
+  (and (vector? rec) (vector-ref rec 1) #t))
+
+(define (opponent-world-summary-rush-posterior-floor s)
+  (define rec (and (opponent-world-summary? s) (hash-ref owm-summary-worker-rush-table s #f)))
+  (if (vector? rec) (vector-ref rec 2) 0.0))
+
 (struct opponent-world-model
   (enemy-race
    known-units                   ; mutable hasheqv: tag -> tracked-enemy-unit
@@ -149,23 +171,26 @@
   #:transparent)
 
 (define (make-opponent-world-model [enemy-race 'Unknown])
-  (opponent-world-model
-   enemy-race
-   (make-hasheqv)
-   (make-hasheqv)
-   (mutable-seteqv)
-   (mutable-seteq)
-   (mutable-seteq)
-   (mutable-seteq)
-   0 0 0
-   0 0
-   0 0
-   0
-   '()
-   #f
-   -9999
-   -1
-   #f))
+  (define owm
+    (opponent-world-model
+     enemy-race
+     (make-hasheqv)
+     (make-hasheqv)
+     (mutable-seteqv)
+     (mutable-seteq)
+     (mutable-seteq)
+     (mutable-seteq)
+     0 0 0
+     0 0
+     0 0
+     0
+     '()
+     #f
+     -9999
+     -1
+     #f))
+  (hash-set! owm-last-worker-rush-frame-table owm -9999)
+  owm)
 
 (define (reset-opponent-world-model! owm [enemy-race 'Unknown])
   (set-opponent-world-model-enemy-race! owm enemy-race)
@@ -188,7 +213,17 @@
   (set-opponent-world-model-last-locust-wave-frame! owm -9999)
   (set-opponent-world-model-last-frame! owm -1)
   (set-opponent-world-model-last-summary! owm #f)
+  (hash-set! owm-last-worker-rush-frame-table owm -9999)
   owm)
+
+;; Prevents premature rush-posterior decay (e.g. 0.91 -> 0.45 at 137.5s) while >= 4
+;; enemy workers remain actively attacking/threatening our base during an early worker rush.
+(define (apply-worker-rush-posterior-floor raw-rush-prob owm-sum)
+  (define base-p (if (real? raw-rush-prob) (exact->inexact raw-rush-prob) 0.0))
+  (if (and (opponent-world-summary? owm-sum)
+           (opponent-world-summary-early-worker-rush-active? owm-sum))
+      (max base-p (opponent-world-summary-rush-posterior-floor owm-sum))
+      base-p))
 
 ;; -----------------------------------------------------------------------------
 ;; 2. Domain Constants: Summons, Speeds, Build Times, DAG Prereqs & Happy Path
@@ -664,6 +699,87 @@
       (set-opponent-world-model-expired-sunk-gas!
        owm (+ (opponent-world-model-expired-sunk-gas owm) (tracked-enemy-unit-gas-cost rec)))))
 
+  ;; L48-WR: First-class purely physical early worker-rush detector:
+  ;; Count recently observed (<= 5s = 112f) enemy workers within 32t of our main/natural
+  ;; and outside the enemy's own base (`> 20t` from enemy main on normal maps).
+  ;; When >= 4 enemy workers attack/approach before 2:30 (`< 3360f`) with 0 enemy combat
+  ;; units and < 6 ally combat supply, latch `early-worker-rush-active?` so `stopped-expanding?`
+  ;; flips immediately AND the rush posterior stays floored at 0.91 (no 137.5s decay!).
+  (define map-wide-wr? (> (dist2 base-x base-y enemy-x enemy-y) 1600.0))
+  (define (worker-near-our-base? ux uy)
+    (define d2-our (min (dist2 ux uy base-x base-y)
+                        (dist2 ux uy nat-x nat-y)))
+    (define d2-en (dist2 ux uy enemy-x enemy-y))
+    (if map-wide-wr?
+        (and (<= d2-our 1024.0) (> d2-en 400.0))
+        (and (<= d2-our 400.0) (<= d2-our d2-en))))
+  (define untagged-workers-near-us
+    (for/sum ([u (in-list enemy-units)] #:when (hash? u))
+      (define tag (hash-ref u 'id 0))
+      (define ut (unit-type-sym u))
+      (if (and (or (not (exact-integer? tag)) (<= tag 0))
+               (hash-has-key? WORKER-SYM-SET ut)
+               (worker-near-our-base? (exact->inexact (hash-ref u 'x enemy-x))
+                                      (exact->inexact (hash-ref u 'y enemy-y))))
+          1
+          0)))
+  (define tracked-workers-near-us
+    (for/sum ([rec (in-hash-values known-units)])
+      (if (and (hash-has-key? WORKER-SYM-SET (tracked-enemy-unit-type rec))
+               (<= (- frame (tracked-enemy-unit-last-seen-frame rec)) 112)
+               (worker-near-our-base? (tracked-enemy-unit-x rec)
+                                      (tracked-enemy-unit-y rec)))
+          1
+          0)))
+  (define enemy-workers-near-us (+ tracked-workers-near-us untagged-workers-near-us))
+  (define untagged-enemy-combat-cnt
+    (for/sum ([u (in-list enemy-units)] #:when (hash? u))
+      (define tag (hash-ref u 'id 0))
+      (define ut (unit-type-sym u))
+      (define halluc? (or (hash-ref u 'is-hallucination #f) (hash-ref u 'hallucination #f)))
+      (if (and (or (not (exact-integer? tag)) (<= tag 0))
+               (not halluc?)
+               (not (free-summon-unit-sym? ut))
+               (not (hash-has-key? WORKER-SYM-SET ut))
+               (not (hash-has-key? NONCOMBAT-UNIT-SET ut)))
+          1
+          0)))
+  (define tracked-enemy-combat-cnt
+    (for/sum ([rec (in-hash-values known-units)])
+      (define ut (tracked-enemy-unit-type rec))
+      (if (and (not (hash-has-key? WORKER-SYM-SET ut))
+               (not (hash-has-key? NONCOMBAT-UNIT-SET ut))
+               (not (free-summon-unit-sym? ut)))
+          1
+          0)))
+  (define enemy-combat-cnt-now (+ tracked-enemy-combat-cnt untagged-enemy-combat-cnt))
+  (define ally-combat-sup-now
+    (let ([explicit-sup (hash-ref obs 'army-supply #f)])
+      (if (real? explicit-sup)
+          (max 0.0 (exact->inexact explicit-sup))
+          (for/sum ([u (in-list ally-units)] #:when (hash? u))
+            (define ut (unit-type-sym u))
+            (if (or (hash-has-key? WORKER-SYM-SET ut)
+                    (hash-has-key? NONCOMBAT-UNIT-SET ut)
+                    (free-summon-unit-sym? ut)
+                    (hash-has-key? TOWNHALL-SYM-SET ut)
+                    (hash-has-key? GEYSER-BLDG-SYM-SET ut)
+                    (hash-has-key? PROD-FACILITY-SYM-SET ut))
+                0.0
+                (max 0.0 (exact->inexact (sc2-supply-cost ut))))))))
+  (define prev-wr-f (hash-ref owm-last-worker-rush-frame-table owm -9999))
+  (define early-worker-rush-active?
+    (and (>= enemy-workers-near-us 4)
+         (= enemy-combat-cnt-now 0)
+         (< ally-combat-sup-now 6.0)
+         (or (< frame 3360)
+             (and (>= prev-wr-f 0)
+                  (<= (- frame prev-wr-f) 672)
+                  (< frame 5376)))))
+  (when early-worker-rush-active?
+    (hash-set! owm-last-worker-rush-frame-table owm frame))
+  (define rush-posterior-floor (if early-worker-rush-active? 0.91 0.0))
+
   ;; Step E: Update 3-State Expansion Pad Belief (`Confirmed-Base` | `Confirmed-Empty` | `Unscouted`)
   (define th-bldgs
     (for/list ([rec (in-hash-values known-bldgs)]
@@ -746,10 +862,11 @@
          (<= (- frame (pad-belief-entry-last-cleared-frame next-overdue-pad)) 1680))) ; cleared within 75s
 
   (define stopped-expanding?
-    (and (< confirmed-bases happy-bases)
-         (or overdue-pad-confirmed-empty?
-             (>= prod-bldg-cnt (* 3 confirmed-bases))
-             (and (= confirmed-bases 1) (>= confirmed-geyser-cnt 2) (>= frame 3584)))))
+    (or early-worker-rush-active?
+        (and (< confirmed-bases happy-bases)
+             (or overdue-pad-confirmed-empty?
+                 (>= prod-bldg-cnt (* 3 confirmed-bases))
+                 (and (= confirmed-bases 1) (>= confirmed-geyser-cnt 2) (>= frame 3584))))))
 
   (define unscouted-expansion-ambiguity?
     (and (< confirmed-bases happy-bases)
@@ -1062,7 +1179,8 @@
        (exact-round (* 0.30 unseen-army-sup))]
       [else 0]))
   (define imminent-reachable-sup
-    (min believed-total-army-sup (+ imm-known-sup imm-unseen-sup)))
+    (max (min believed-total-army-sup (+ imm-known-sup imm-unseen-sup))
+         (if early-worker-rush-active? enemy-workers-near-us 0)))
 
   ;; Narrow unseen gas profile & persistent AA / Detection requirements
   (define known-bldg-counts-mut (make-hasheq))
@@ -1163,5 +1281,10 @@
      (+ siege-turtle-cnt unit-siege-cnt)
      (for/hasheq ([(k v) (in-hash known-unit-counts-mut)]) (values k v))
      (for/hasheq ([(k v) (in-hash known-bldg-counts-mut)]) (values k v))))
+  (hash-set! owm-summary-worker-rush-table
+             summary
+             (vector enemy-workers-near-us
+                     (not (not early-worker-rush-active?))
+                     rush-posterior-floor))
   (set-opponent-world-model-last-summary! owm summary)
   summary)

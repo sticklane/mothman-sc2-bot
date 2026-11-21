@@ -30,6 +30,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+_TOOLS_DIR = str(Path(__file__).resolve().parent)
+if _TOOLS_DIR not in sys.path:
+    sys.path.insert(0, _TOOLS_DIR)
+
+from site_report_sections import (  # noqa: E402
+    INTERACTIVE_SECTIONS_CSS,
+    INTERACTIVE_SECTIONS_JS,
+    load_rich_report_telemetry,
+    render_architecture_section,
+    render_issues_fixed_section,
+    render_loop_diagram_section,
+    render_matchup_evaluation_section,
+    render_tactics_explorer_section,
+    render_video_element,
+    stage_ios_playable_mp4s,
+)
+
 DEFAULT_REPO_SLUG = "sticklane/mothman-sc2-bot"
 DEFAULT_REPO_DIR = Path("/home/sjaconette/repos/mothman-sc2-bot")
 DEFAULT_BRAIN_DIR = Path(
@@ -62,10 +79,10 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
         ReportSpec(
             slug="loops-29-plus",
             out_file="loops-29-plus.html",
-            title="Recent Updates (Loops 29–41)",
+            title="Campaign Updates (Loops 29–47)",
             short_title="Updates",
-            section="Write-ups",
-            summary="Notes, scores, and match clips from our recent test runs and live releases.",
+            section="Progress & Replays",
+            summary="Iteration scores, live releases, and playable 3D match clips from recent test runs.",
             source_candidates=(brain_dir / "loops_29_plus_visual_campaign_report.md",),
             required=True,
         ),
@@ -74,10 +91,46 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             out_file="loops-19-28.html",
             title="Earlier Updates (Loops 19–28)",
             short_title="Earlier Updates",
-            section="Write-ups",
+            section="Progress & Replays",
             summary="Earlier test runs leading up to our first solid AI Arena release.",
             source_candidates=(brain_dir / "loops_19_28_visual_campaign_report.md",),
             required=True,
+        ),
+        ReportSpec(
+            slug="loop-flywheel-retro",
+            out_file="loop-flywheel-retro.html",
+            title="Self-Improving Loop Trajectory Audit",
+            short_title="Loop Flywheel",
+            section="Technical Notes",
+            summary="Empirical analysis of 29 loop trajectories (Loops 19–47): H2H-first gating, flip-flop clusters, and 1.44× ship throughput gains.",
+            source_candidates=(brain_dir / "scratch/loop/loop_flywheel_retro.md",),
+            required=False,
+        ),
+        ReportSpec(
+            slug="loop47-forensics",
+            out_file="loop47-forensics.html",
+            title="Loop 47 & Live Build 45 Notes",
+            short_title="Loop 47 Notes",
+            section="Technical Notes",
+            summary="Zero-anomaly benchmark sweep, Tactics Arena 3.0 all-time high (1.17×), and live Build 45 ladder audit (56.5% WR).",
+            source_candidates=(
+                analyzer_dir / "loop47_forensics_prod_l45_audit.md",
+                brain_dir / "loop47_forensics_prod_l45_audit.md",
+            ),
+            required=False,
+        ),
+        ReportSpec(
+            slug="loop45-forensics",
+            out_file="loop45-forensics.html",
+            title="Loop 45 Release #6 Notes",
+            short_title="Loop 45 Notes",
+            section="Technical Notes",
+            summary="Combined Loops 43–45 signoff: 25 external wins, 50% clean win rate on core benchmarks, and 3–0 same-race H2H sweep.",
+            source_candidates=(
+                analyzer_dir / "loop45_ship6_signoff_prod_l42_audit.md",
+                brain_dir / "loop45_ship6_signoff_prod_l42_audit.md",
+            ),
+            required=False,
         ),
         ReportSpec(
             slug="loop42-forensics",
@@ -850,13 +903,20 @@ class MarkdownRenderer:
         "CAUTION": ("caution", "Caution"),
     }
 
-    def __init__(self, poster_lookup: Optional[Dict[str, str]] = None) -> None:
+    def __init__(
+        self,
+        poster_lookup: Optional[Dict[str, str]] = None,
+        staged_mp4_map: Optional[Dict[str, str]] = None,
+        staged_poster_map: Optional[Dict[str, str]] = None,
+    ) -> None:
         self.toc: List[Tuple[int, str, str]] = []
         self._slug_counts: Dict[str, int] = {}
         self.has_mermaid: bool = False
         self.img_count: int = 0
         self.video_count: int = 0
         self.poster_lookup: Dict[str, str] = poster_lookup or {}
+        self.staged_mp4_map: Dict[str, str] = staged_mp4_map or {}
+        self.staged_poster_map: Dict[str, str] = staged_poster_map or {}
 
     def _make_slug(self, raw_text: str) -> str:
         plain = re.sub(r"<[^>]+>", "", raw_text)
@@ -868,6 +928,8 @@ class MarkdownRenderer:
         return slug if n == 0 else f"{slug}-{n}"
 
     def _infer_poster_url(self, mp4_url: str) -> Optional[str]:
+        if mp4_url in self.staged_poster_map:
+            return self.staged_poster_map[mp4_url]
         if mp4_url in self.poster_lookup:
             return self.poster_lookup[mp4_url]
         cand = re.sub(r"\.mp4$", ".png", mp4_url, flags=re.I)
@@ -875,45 +937,32 @@ class MarkdownRenderer:
             return cand
         return None
 
+    def _resolve_video_urls(self, src_url: str, poster_url: str) -> Tuple[str, str, str, bool]:
+        """Return (play_src, poster_src, download_url, is_ios_playable)."""
+        if src_url.startswith("./media/"):
+            p = self.staged_poster_map.get(src_url) or poster_url
+            return src_url, p, src_url, True
+        staged = self.staged_mp4_map.get(src_url)
+        staged_p = self.staged_poster_map.get(src_url) or poster_url or self._infer_poster_url(src_url) or ""
+        if staged:
+            return staged, staged_p, src_url, True
+        return src_url, staged_p, src_url, False
+
     def _wrap_raw_video(self, video_html: str) -> str:
         self.video_count += 1
         src_m = re.search(r'\bsrc\s*=\s*["\']([^"\']+)["\']', video_html, re.I)
         poster_m = re.search(r'\bposter\s*=\s*["\']([^"\']+)["\']', video_html, re.I)
         src_url = src_m.group(1) if src_m else ""
         poster_url = poster_m.group(1) if poster_m else ""
-        # Ensure clean responsive attributes
-        if 'class="' not in video_html and "class='" not in video_html:
-            video_html = re.sub(
-                r"^<video\b", '<video class="clip-video"', video_html, count=1, flags=re.I
-            )
-        if "preload=" not in video_html.lower():
-            video_html = re.sub(
-                r"^<video\b", '<video preload="none"', video_html, count=1, flags=re.I
-            )
-        if "playsinline" not in video_html.lower():
-            video_html = re.sub(
-                r"^<video\b", "<video playsinline", video_html, count=1, flags=re.I
-            )
-        if "controls" not in video_html.lower():
-            video_html = re.sub(
-                r"^<video\b", "<video controls", video_html, count=1, flags=re.I
-            )
-        esc_src = html.escape(src_url, quote=True)
-        esc_poster = html.escape(poster_url, quote=True)
-        btn = (
-            f'<div class="video-bar">'
-            f'<button type="button" class="text-btn video-theater-btn" '
-            f'data-video-src="{esc_src}" data-video-poster="{esc_poster}" data-video-title="Match replay">'
-            f"Expand video</button>"
-            f'<a class="text-btn" href="{esc_src}" target="_blank" rel="noopener noreferrer">Download MP4</a>'
-            f"</div>"
-            if src_url
-            else ""
+        play_src, final_poster, dl_url, playable = self._resolve_video_urls(src_url, poster_url)
+        inner = render_video_element(
+            src=play_src,
+            poster=final_poster,
+            title="Match replay",
+            download_url=dl_url,
+            playable_mp4=playable,
         )
-        return (
-            f'<figure class="clip-figure clip-video-figure">'
-            f'<div class="clip-video-wrap">{video_html}</div>{btn}</figure>'
-        )
+        return f'<figure class="clip-figure clip-video-figure">{inner}</figure>'
 
     def render_inline(self, text: str) -> str:
         code_slots: List[str] = []
@@ -946,22 +995,17 @@ class MarkdownRenderer:
             esc_url = html.escape(url, quote=True)
             if url.lower().endswith(".mp4"):
                 self.video_count += 1
-                poster_url = self._infer_poster_url(url)
-                poster_attr = (
-                    f' poster="{html.escape(poster_url, quote=True)}"' if poster_url else ""
+                play_src, final_poster, dl_url, playable = self._resolve_video_urls(url, "")
+                inner = render_video_element(
+                    src=play_src,
+                    poster=final_poster,
+                    title=raw_alt or "Match replay",
+                    download_url=dl_url,
+                    playable_mp4=playable,
                 )
-                esc_poster = html.escape(poster_url or "", quote=True)
                 img_slots.append(
                     f'<figure class="clip-figure clip-video-figure">'
-                    f'<div class="clip-video-wrap">'
-                    f'<video class="clip-video" controls preload="none" playsinline{poster_attr} src="{esc_url}"></video>'
-                    f"</div>"
-                    f'<div class="video-bar">'
-                    f'<button type="button" class="text-btn video-theater-btn" '
-                    f'data-video-src="{esc_url}" data-video-poster="{esc_poster}" data-video-title="{alt}">'
-                    f"Expand video</button>"
-                    f'<a class="text-btn" href="{esc_url}" target="_blank" rel="noopener noreferrer">Download MP4</a>'
-                    f"</div>"
+                    f"{inner}"
                     f"<figcaption>{alt}</figcaption>"
                     f"</figure>"
                 )
@@ -1358,21 +1402,23 @@ DEPLOY_LABELS: Dict[str, str] = {
 BOT_META: Dict[str, Dict[str, str]] = {
     "Mothman-P": {
         "race": "Protoss",
-        "highlight": "Beat 1441-rated FastBC without losing a unit (43.5× trade).",
+        "highlight": "Broke 1300 Elo (1310 ATH); beat Hubert (2.57×) with Disruptors and FastBC without losing a unit.",
     },
     "Mothman-T": {
         "race": "Terran",
-        "highlight": "First win over 1631-rated Thssprtssbt (7.35× trade) after twelve prior losses.",
+        "highlight": "66.7% live WR on Build 45 (1.64× trade); beat Slowpoke (5.41×, 18 Tanks, 0 lost) and Thssprtssbt (7.35×).",
     },
     "Mothman-Z": {
         "race": "Zerg",
-        "highlight": "Five-base Roach, Hydra, and Lurker games beat Kazham (1.65×) and Myztery (3.16×).",
+        "highlight": "Undefeated in live ZvZ (9–0, 2.78×); beat oberon (2.61×) with 32 Lurkers and 5-base economy.",
     },
     "Mothman-X": {
         "race": "Random",
-        "highlight": "Rolled Terran vs. MetaScoreCritic (2.86×) and Zerg with Brood Lords vs. Cortex.",
+        "highlight": "Reached 1298 Elo ATH; beat CosmicSiege (2.34×) and MetaScoreCritic (2.86×) across all 3 races.",
     },
 }
+
+DEPLOY_ORDER: Dict[str, int] = {k: idx for idx, k in enumerate(DEPLOY_LABELS.keys())}
 
 
 def load_dashboard_telemetry(sqlite_path: Path) -> Dict[str, Any]:
@@ -1430,6 +1476,8 @@ def load_dashboard_telemetry(sqlite_path: Path) -> Dict[str, Any]:
             data["total_replays"] = int(total_replays)
 
         # Build chronological prod series (only builds with >= 8 matches)
+        # NOTE: AI Arena match IDs reflect queue creation, NOT chronological play order,
+        # so sort explicitly by DEPLOY_ORDER first and MAX(aiarena_match_id) for new builds.
         rows = cur.execute(
             """
             SELECT COALESCE(bot_build_version, 'unknown') AS bv,
@@ -1437,14 +1485,14 @@ def load_dashboard_telemetry(sqlite_path: Path) -> Dict[str, Any]:
                    SUM(CASE WHEN LOWER(result)='win' THEN 1 ELSE 0 END) AS w,
                    SUM(CASE WHEN LOWER(result)='loss' THEN 1 ELSE 0 END) AS l,
                    ROUND(SUM(killed_val)*1.0 / NULLIF(SUM(lost_val),0), 2) AS tr,
-                   MIN(COALESCE(aiarena_match_id, replay_id)) AS first_id
+                   MAX(COALESCE(aiarena_match_id, replay_id)) AS last_id
             FROM matches
             WHERE source_type='prod_aiarena' AND COALESCE(is_selfplay,0)=0
             GROUP BY bv
             HAVING COUNT(*) >= 8
-            ORDER BY first_id ASC
             """
         ).fetchall()
+        rows.sort(key=lambda r: (DEPLOY_ORDER.get(r[0], 10_000), int(r[5] or 0)))
         if len(rows) >= 4:
             # Keep major milestones (up to 10 points for clean SVG readability)
             keep_rows = [r for r in rows if r[0] in DEPLOY_LABELS or not r[0].startswith("deploy:")]
@@ -1684,13 +1732,10 @@ def render_live_progress_svg(series: List[Dict[str, Any]]) -> str:
         lx = x_at(n - 1)
         ly_tr = y_tr(last["trade"])
         ly_wr = y_wr(last["wr"])
-        # Always place latest trade label cleanly away from the incoming slope
-        if ly_tr >= ly_wr - 4.0:
-            tr_y = min(h - pb - 5.0, ly_tr + 15.0)
-        else:
-            tr_y = max(pt + 10.0, ly_tr - 9.0)
+        # Always place latest trade label cleanly below the blue dot away from the incoming slope
+        tr_y = min(h - pb - 4.0, ly_tr + 17.0)
         parts.append(
-            f'<text x="{lx - 2.0:.1f}" y="{tr_y:.1f}" '
+            f'<text x="{lx + 2.0:.1f}" y="{tr_y:.1f}" '
             f'text-anchor="end" fill="#4A6B82" font-size="10.5" font-weight="600">'
             f'{last["trade"]:.2f}×</text>'
         )
@@ -1848,8 +1893,16 @@ def discover_gallery_items(
         for entry in data.get("matches", data.get("clips", [])):
             if not isinstance(entry, dict):
                 continue
-            mp4_url = resolve_cdn(entry.get("mp4") or entry.get("video"), mpath.parent)
-            if not mp4_url:
+            raw_mp4_val = entry.get("mp4") or entry.get("video")
+            mp4_local_p = None
+            if raw_mp4_val and isinstance(raw_mp4_val, str):
+                cand_p = Path(raw_mp4_val)
+                if not cand_p.is_absolute():
+                    cand_p = (mpath.parent / cand_p).resolve()
+                if cand_p.is_file():
+                    mp4_local_p = cand_p
+            mp4_url = resolve_cdn(raw_mp4_val, mpath.parent)
+            if not mp4_url and not mp4_local_p:
                 continue
             png_url = resolve_cdn(entry.get("png"), mpath.parent) or ""
             our_bot = str(entry.get("our_bot") or "Mothman")
@@ -1879,6 +1932,7 @@ def discover_gallery_items(
             items.append(
                 {
                     "loop": f"Loop {loop_num}",
+                    "loop_num": loop_num,
                     "category": "Full Matches",
                     "cohort": cohort,
                     "race": _race_full(str(entry.get("our_race") or our_bot)),
@@ -1887,8 +1941,12 @@ def discover_gallery_items(
                     "title": f"#{mid} {our_bot} vs. {opp_bot}" if mid != "" else f"{our_bot} vs. {opp_bot}",
                     "subtitle": " · ".join(meta_bits),
                     "media_type": "mp4",
-                    "src": mp4_url,
+                    "playable_mp4": False,
+                    "src": mp4_url or "",
+                    "download_url": mp4_url or "",
                     "poster": png_url,
+                    "_local_mp4": str(mp4_local_p) if mp4_local_p else "",
+                    "_safe_name": f"l{loop_num}_match_{mp4_local_p.name}" if mp4_local_p else "",
                     "search": f"loop {loop_num} {mid} {our_bot} {opp_bot} {mu} {map_name} {cohort} {result_raw}".lower(),
                 }
             )
@@ -1919,8 +1977,15 @@ def discover_gallery_items(
             mp4_raw = clip.get("mp4") or (
                 clip.get("video") if str(clip.get("video", "")).lower().endswith(".mp4") else None
             )
+            mp4_local_p = None
+            if mp4_raw and isinstance(mp4_raw, str):
+                cand_p = Path(mp4_raw)
+                if not cand_p.is_absolute():
+                    cand_p = (mpath.parent / cand_p).resolve()
+                if cand_p.is_file():
+                    mp4_local_p = cand_p
             mp4_url = resolve_cdn(mp4_raw, mpath.parent)
-            if not mp4_url:
+            if not mp4_url and not mp4_local_p:
                 continue
             png_url = resolve_cdn(clip.get("png"), mpath.parent) or ""
             sid = str(clip.get("scenario_id") or clip.get("id") or Path(str(mp4_raw)).stem)
@@ -1950,7 +2015,7 @@ def discover_gallery_items(
                 res_label = res_raw.replace("_", " ").title() if res_raw else "Drill"
             tr = clip.get("trade_ratio") if clip.get("trade_ratio") is not None else tinfo.get("trade_ratio")
             tier_val = clip.get("tier") or tinfo.get("tier")
-            clean_name = re.sub(r"^sc2-(?:real|econ|reg)-", "", sid).replace("-", " ")
+            clean_name = re.sub(r"^sc2-(?:real|econ|reg|det|blk|runby|def|sta|ymt|trp|brw|spl|kcc|flk|hgr|air|ers|cap)-", "", sid).replace("-", " ")
             bits = [cat_label]
             if isinstance(tr, (int, float)):
                 bits.append(f"{tr:.2f}× trade")
@@ -1959,6 +2024,7 @@ def discover_gallery_items(
             items.append(
                 {
                     "loop": f"Loop {loop_num}",
+                    "loop_num": loop_num,
                     "category": cat_label,
                     "cohort": str(tier_val or mode),
                     "race": _race_full(race_guess),
@@ -1967,8 +2033,12 @@ def discover_gallery_items(
                     "title": clean_name.title(),
                     "subtitle": " · ".join(bits),
                     "media_type": "mp4",
-                    "src": mp4_url,
+                    "playable_mp4": False,
+                    "src": mp4_url or "",
+                    "download_url": mp4_url or "",
                     "poster": png_url,
+                    "_local_mp4": str(mp4_local_p) if mp4_local_p else "",
+                    "_safe_name": f"l{loop_num}_{mode}_{mp4_local_p.name}" if mp4_local_p else "",
                     "search": f"loop {loop_num} {sid} {clean_name} {cat_label} {race_guess} {res_label} {tier_val or ''}".lower(),
                 }
             )
@@ -2781,7 +2851,7 @@ INTERACTIVE_JS = """
       '<a class="modal-btn" id="vm-raw" target="_blank" rel="noopener noreferrer">Download MP4</a>' +
       '<button class="modal-btn" id="vm-close">Close</button>' +
     '</div>' +
-    '<video id="vm-video" controls playsinline preload="metadata"></video>' +
+    '<video id="vm-video" controls playsinline webkit-playsinline preload="metadata"></video>' +
     '<div class="modal-caption" id="vm-cap"></div>';
   document.body.appendChild(vm);
   const vmVideo = document.getElementById('vm-video');
@@ -2789,6 +2859,7 @@ INTERACTIVE_JS = """
   const vmRaw = document.getElementById('vm-raw');
   function closeVm() {
     vmVideo.pause();
+    vmVideo.innerHTML = '';
     vmVideo.removeAttribute('src');
     vmVideo.load();
     vm.classList.remove('open');
@@ -2801,8 +2872,13 @@ INTERACTIVE_JS = """
     const title = btn.getAttribute('data-video-title') || '';
     if (!src) return;
     document.querySelectorAll('video').forEach(function(v) { if (!v.paused) v.pause(); });
-    vmVideo.src = src;
+    vmVideo.innerHTML = '';
+    const sourceEl = document.createElement('source');
+    sourceEl.src = src;
+    sourceEl.type = 'video/mp4';
+    vmVideo.appendChild(sourceEl);
     if (poster) vmVideo.poster = poster; else vmVideo.removeAttribute('poster');
+    vmVideo.load();
     vmRaw.href = src;
     vmCap.textContent = title;
     vm.classList.add('open');
@@ -2878,6 +2954,9 @@ _CALM_LOOP_TITLES: Dict[int, str] = {
     43: "Tactics Arena 3.0 (held)",
     44: "Detection & drop fixes (held)",
     45: "Live release #6",
+    46: "Zerg core high & p15 KO (held)",
+    47: "Zero-anomaly sweep & Arena ATH (held)",
+    48: "Live release #7",
 }
 
 
@@ -2954,7 +3033,7 @@ def render_page_shell(
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{html.escape(page_title)}</title>
-  <style>{SITE_CSS}</style>
+  <style>{SITE_CSS}{INTERACTIVE_SECTIONS_CSS}</style>
 </head>
 <body>
 {header}
@@ -2978,6 +3057,7 @@ def build_video_gallery_page(
     built_utc: str,
 ) -> str:
     mp4_count = sum(1 for it in gallery_items if it["media_type"] == "mp4")
+    playable_count = sum(1 for it in gallery_items if it.get("playable_mp4"))
     webp_count = sum(1 for it in gallery_items if it["media_type"] != "mp4")
     loops = sorted({it["loop"] for it in gallery_items}, reverse=True)
     categories = ["Full Matches", "Tactics Drills", "Self-Play Drills", "Featured Clips"]
@@ -2992,9 +3072,10 @@ def build_video_gallery_page(
 
     if mp4_count > 0:
         intro_note = (
-            f"{mp4_count} full match and combat recordings"
-            + (f", plus {webp_count} short highlights" if webp_count else "")
-            + ". Videos only load when you press play."
+            f"{playable_count} in-browser MP4 recordings (H.264 Main Profile, mobile-ready)"
+            + (f", plus {mp4_count - playable_count} archived downloads" if mp4_count > playable_count else "")
+            + (f" and {webp_count} short highlights" if webp_count else "")
+            + ". Filter by loop, race, opponent, or outcome below."
         )
     else:
         intro_note = (
@@ -3072,16 +3153,29 @@ def build_video_gallery_page(
 
   function cardHtml(it) {{
     const resCls = it.outcome === 'win' ? 't-win' : (it.outcome === 'loss' ? 't-loss' : 't-muted');
+    const dlUrl = it.download_url || it.src;
     let media = '';
-    if (it.media_type === 'mp4') {{
+    if (it.media_type === 'mp4' && it.playable_mp4) {{
       const pAttr = it.poster ? ' poster="' + esc(it.poster) + '"' : '';
       media =
         '<div class="clip-video-wrap">' +
-          '<video class="clip-video" controls preload="none" playsinline' + pAttr + ' src="' + esc(it.src) + '"></video>' +
+          '<video class="clip-video" controls playsinline webkit-playsinline preload="metadata"' + pAttr + '>' +
+            '<source src="' + esc(it.src) + '" type="video/mp4" />' +
+          '</video>' +
         '</div>' +
         '<div class="video-bar">' +
-          '<button type="button" class="text-btn video-theater-btn" data-video-src="' + esc(it.src) + '" data-video-poster="' + esc(it.poster) + '" data-video-title="' + esc(it.title) + '">Expand video</button>' +
-          '<a class="text-btn" href="' + esc(it.src) + '" target="_blank" rel="noopener noreferrer">Download MP4</a>' +
+          '<button type="button" class="text-btn video-theater-btn" data-video-src="' + esc(it.src) + '" data-video-poster="' + esc(it.poster) + '" data-video-title="' + esc(it.title) + '">Expand</button>' +
+          '<a class="text-btn" href="' + esc(dlUrl) + '" target="_blank" rel="noopener noreferrer">Download MP4</a>' +
+        '</div>';
+    }} else if (it.media_type === 'mp4') {{
+      media =
+        (it.poster
+          ? '<a href="' + esc(dlUrl) + '" target="_blank" rel="noopener noreferrer">' +
+              '<img class="clip-img" loading="lazy" decoding="async" src="' + esc(it.poster) + '" alt="' + esc(it.title) + '" />' +
+            '</a>'
+          : '') +
+        '<div class="video-bar">' +
+          '<a class="text-btn" href="' + esc(dlUrl) + '" target="_blank" rel="noopener noreferrer">Download archived MP4</a>' +
           (it.poster ? '<a class="text-btn" href="' + esc(it.poster) + '" target="_blank" rel="noopener noreferrer">Still frame</a>' : '') +
         '</div>';
     }} else {{
@@ -3147,17 +3241,49 @@ def build_video_gallery_page(
     )
 
 
+def _build_showcase_card(
+    *,
+    meta_left: str,
+    title: str,
+    caption: str,
+    src: str,
+    poster: str,
+    download_url: str,
+    playable_mp4: bool,
+) -> str:
+    media_html = render_video_element(
+        src=src,
+        poster=poster,
+        title=title,
+        download_url=download_url,
+        playable_mp4=playable_mp4,
+    )
+    return (
+        f'<article class="clip-card">'
+        f'<div class="gallery-meta-row"><span>{html.escape(meta_left)}</span></div>'
+        f"<h4>{html.escape(title)}</h4>"
+        f'<figure class="clip-figure">{media_html}<figcaption>{html.escape(caption)}</figcaption></figure>'
+        f"</article>"
+    )
+
+
 def build_index_page(
     *,
     repo_slug: str,
     repo_dir: Path,
+    brain_dir: Path,
     sqlite_path: Path,
     published_specs: List[ReportSpec],
     gallery_items: List[Dict[str, Any]],
     media_by_tag: Dict[str, Dict[str, str]],
+    staged_mp4_map: Dict[str, str],
+    staged_poster_map: Dict[str, str],
     built_utc: str,
 ) -> str:
     dash = load_dashboard_telemetry(sqlite_path)
+    rich = load_rich_report_telemetry(
+        sqlite_path=sqlite_path, repo_dir=repo_dir, brain_dir=brain_dir
+    )
     bots = dash["bots"]
     latest_lbl = dash["latest_build_label"]
     latest_w = dash["latest_build_w"]
@@ -3208,46 +3334,133 @@ def build_index_page(
     chart_live_svg = render_live_progress_svg(dash["prod_series"])
     chart_sym_svg = render_symmetry_svg(sym)
 
-    # 3. Featured Clips (4 items — prefers MP4 if available, otherwise curated highlights)
-    mp4_items = [it for it in gallery_items if it["media_type"] == "mp4"]
-    featured = (mp4_items[:4] if len(mp4_items) >= 4 else gallery_items[:4])
-    featured_cards = []
-    for it in featured:
-        esc_title = html.escape(it["title"])
-        esc_sub = html.escape(it["subtitle"])
-        esc_src = html.escape(it["src"], quote=True)
-        esc_poster = html.escape(it["poster"], quote=True)
-        if it["media_type"] == "mp4":
-            p_attr = f' poster="{esc_poster}"' if esc_poster else ""
-            media_html = (
-                f'<div class="clip-video-wrap">'
-                f'<video class="clip-video" controls preload="none" playsinline{p_attr} src="{esc_src}"></video>'
-                f"</div>"
-                f'<div class="video-bar">'
-                f'<button type="button" class="text-btn video-theater-btn" '
-                f'data-video-src="{esc_src}" data-video-poster="{esc_poster}" data-video-title="{esc_title}">Expand</button>'
-                f'<a class="text-btn" href="{esc_src}" target="_blank" rel="noopener noreferrer">Download MP4</a>'
-                f"</div>"
-            )
-        else:
-            media_html = (
-                f'<img class="clip-img" loading="lazy" decoding="async" '
-                f'src="{esc_src}" alt="{esc_title}" '
-                f'data-lightbox-src="{esc_src}" data-lightbox-alt="{esc_title}" />'
-            )
-        featured_cards.append(
-            f'<article class="clip-card">'
-            f'<div class="gallery-meta-row"><span>{html.escape(it["loop"])} · {html.escape(it["race"])}</span></div>'
-            f"<h4>{esc_title}</h4>"
-            f'<figure class="clip-figure">{media_html}<figcaption>{esc_sub}</figcaption></figure>'
-            f"</article>"
+    # 3A. Build Per-Category Playable Tactics Arena 3.0 Video Clips (all 16 categories!)
+    clips_by_cat: Dict[str, List[Dict[str, Any]]] = {}
+    scen_meta_by_id: Dict[str, Dict[str, Any]] = {}
+    scen_json_p = repo_dir / "tools/arena-scenarios.json"
+    if scen_json_p.is_file():
+        try:
+            for sc in json.loads(scen_json_p.read_text(encoding="utf-8")).get("scenarios", []):
+                if sc.get("id"):
+                    scen_meta_by_id[str(sc["id"])] = sc
+        except Exception:
+            pass
+    # Map latest Loop Arena results so each clip shows real outcome & trade ratio
+    arena_loop_num = int(rich["arena3"].get("loop_num") or 47)
+    arena_res_by_id: Dict[str, Dict[str, Any]] = {}
+    duel_json_p = brain_dir / "scratch" / "loop" / f"tactics_sc2_duel_iter{arena_loop_num}.json"
+    if duel_json_p.is_file():
+        try:
+            for sc in json.loads(duel_json_p.read_text(encoding="utf-8")).get("scenarios", []):
+                if sc.get("id"):
+                    arena_res_by_id[str(sc["id"])] = sc
+        except Exception:
+            pass
+    # Match staged playable Tactics Drills from gallery_items (preferring latest loop)
+    arena_gallery = [
+        it for it in gallery_items
+        if it.get("playable_mp4") and it.get("category") == "Tactics Drills"
+    ]
+    arena_gallery.sort(
+        key=lambda x: (
+            -int(x.get("loop_num") or 0),
+            0 if x.get("outcome") == "win" else 1,
         )
+    )
+    seen_clip_sid: set[str] = set()
+    for it in arena_gallery:
+        # Recover scenario id from staged filename or search string
+        src_name = Path(str(it.get("src") or "")).stem
+        m_sid = re.search(r"(sc2-[a-z0-9-]+)$", src_name)
+        sid = m_sid.group(1) if m_sid else ""
+        if not sid or sid in seen_clip_sid or sid not in scen_meta_by_id:
+            continue
+        seen_clip_sid.add(sid)
+        smeta = scen_meta_by_id[sid]
+        cat = str(smeta.get("category") or "other")
+        sres = arena_res_by_id.get(sid, {})
+        desc = str(smeta.get("description") or it.get("subtitle") or "")
+        desc = re.sub(r"^(?:Real SC2|Pro-DB|Match-forensics|Replay Regression|Econ-Harass)[^:]*:\s*", "", desc)
+        if len(desc) > 135:
+            desc = desc[:132].rsplit(" ", 1)[0].rstrip(" ,;:-(") + "…"
+        tr = sres.get("trade_ratio")
+        tr_str = f" · {float(tr):.2f}× trade" if isinstance(tr, (int, float)) else ""
+        clips_by_cat.setdefault(cat, []).append(
+            {
+                "id": sid,
+                "meta": f"{it.get('loop', f'Loop {arena_loop_num}')} · {it.get('race', '')}{tr_str}",
+                "outcome": it.get("outcome", "win"),
+                "result_label": it.get("result_label", "Drill"),
+                "title": it.get("title", sid),
+                "caption": desc,
+                "src": it["src"],
+                "poster": it.get("poster", ""),
+                "download_url": it.get("download_url") or it["src"],
+                "playable_mp4": True,
+            }
+        )
+
+    # 3B. Flagship Full-Match Playable MP4 Replays (same-origin iOS H.264 Main L3.1)
+    match_flagships = [
+        (
+            "showcase:h2h003",
+            "Loop 45 · Protoss · H2H Gate",
+            "Mothman-P vs. Live Build #5 (PvP · 3.40×)",
+            "Clean Protoss mirror sweep against the prior live ladder build with Blink Stalkers, Immortals, and Colossi.",
+        ),
+        (
+            "showcase:h2h006",
+            "Loop 45 · Terran · H2H Gate",
+            "Mothman-T vs. Live Build #5 (TvZ · 6.32×)",
+            "Bio-Tank-Medivac push crushes Zerg macro after fixing the false Greater Spire anti-air panic bug.",
+        ),
+        (
+            "showcase:m074",
+            "Loop 45 · Terran · Unseen Holdout",
+            "Mothman-T vs. who (TvT · 23.75×)",
+            "First Terran victory against held-out opponent who—crisp tank positioning and 1.8% supply-block discipline.",
+        ),
+        (
+            "showcase:h2h002",
+            "Loop 45 · Terran · H2H Gate",
+            "Mothman-T vs. Live Build #5 (TvT · 2.18×)",
+            "Same-race Terran mirror sweep driven by faster Tank production and unified expansion timing.",
+        ),
+    ]
+    featured_cards: List[str] = []
+    for key, meta_l, title, cap in match_flagships:
+        if key in staged_mp4_map:
+            featured_cards.append(
+                _build_showcase_card(
+                    meta_left=meta_l,
+                    title=title,
+                    caption=cap,
+                    src=staged_mp4_map[key],
+                    poster=staged_poster_map.get(key, ""),
+                    download_url=staged_mp4_map[key],
+                    playable_mp4=True,
+                )
+            )
+    if len(featured_cards) < 4:
+        fallback_items = [it for it in gallery_items if it.get("playable_mp4")][: 4 - len(featured_cards)]
+        for it in fallback_items:
+            featured_cards.append(
+                _build_showcase_card(
+                    meta_left=f"{it['loop']} · {it['race']}",
+                    title=it["title"],
+                    caption=it["subtitle"],
+                    src=it["src"],
+                    poster=it.get("poster", ""),
+                    download_url=it.get("download_url") or it["src"],
+                    playable_mp4=bool(it.get("playable_mp4")),
+                )
+            )
 
     # 4. Reading Lists (Updates & Technical Notes)
     progress_items = [
         '<li class="doc-item">'
         '<a class="doc-item-title" href="./video-gallery.html">Replay library</a>'
-        '<p class="doc-item-desc">Filterable recordings of full matches and combat drills by race, opponent, and outcome.</p>'
+        '<p class="doc-item-desc">Filterable recordings of full matches and combat drills by loop, race, opponent, and outcome.</p>'
         "</li>"
     ]
     tech_items = []
@@ -3258,7 +3471,7 @@ def build_index_page(
             f'<p class="doc-item-desc">{html.escape(sp.summary)}</p>'
             f"</li>"
         )
-        if sp.section == "Progress & Replays":
+        if sp.section in ("Progress & Replays", "Write-ups"):
             progress_items.append(li)
         else:
             tech_items.append(li)
@@ -3310,28 +3523,45 @@ def build_index_page(
         except Exception:
             ledger_section = ""
 
-    # Dynamic live-ladder prose caption (always matches current SQLite counts)
+    # Dynamic live-ladder caption
     latest_ties = max(0, latest_n - latest_w - latest_l)
     latest_rec_str = f"{latest_w}–{latest_l}" + (f"–{latest_ties}" if latest_ties else "")
+    latest_pct = round(100.0 * latest_w / max(1, latest_n), 1)
     live_caption = (
-        f"Live ladder win rate rose from 0% on our earliest deployment to {prev_pct:.1f}% on "
-        f"{html.escape(prev_lbl)} ({prev_w}–{prev_l}, {prev_tr:.2f}× trade). "
-        f"{html.escape(latest_lbl)} sits at {latest_rec_str} ({latest_tr:.2f}× trade across {latest_n} games so far), "
-        f"giving the two most recent live builds a combined {comb_w}–{comb_l} ({comb_pct:.0f}%) record."
+        f"Live ladder win rate rose from 0% on our earliest deployment to {latest_pct:.1f}% on "
+        f"{html.escape(latest_lbl)} ({latest_rec_str}, {latest_tr:.2f}× trade across {latest_n} games), "
+        f"following {prev_pct:.1f}% on {html.escape(prev_lbl)} ({prev_w}–{prev_l}). "
+        f"Combined recent live record: {comb_w}–{comb_l} ({comb_pct:.0f}%)."
     )
 
+    sec_loop = render_loop_diagram_section(rich)
+    sec_arch = render_architecture_section(rich)
+    sec_tactics = render_tactics_explorer_section(rich, clips_by_cat)
+    sec_matchups = render_matchup_evaluation_section(rich)
+    sec_issues = render_issues_fixed_section(chart_sym_svg, sym, rich)
+
     body = f"""
-<header class="masthead prose-col">
-  <p class="eyebrow">AI Arena · Live build: {html.escape(latest_lbl)}</p>
-  <h1>Mothman plays StarCraft II</h1>
-  <p class="lead">
-    Four bots (Protoss, Terran, Zerg, and Random) competing on the public AI Arena ladder,
-    with local practice matches and short combat drills guiding each release.
+<header class="masthead wide-col">
+  <p class="eyebrow">AI Arena · Live Build: {html.escape(latest_lbl)} · {rich['live_perf']['total_replays']:,} Analyzed Replays</p>
+  <h1>Mothman StarCraft II Bots</h1>
+  <p class="lead" style="max-width:720px;">
+    Four autonomous bots (Protoss, Terran, Zerg, and Random) written in Racket competing live on AI Arena,
+    guided by 213 engine combat drills, 90-match local benchmarks, and a self-auditing trajectory loop.
   </p>
+  <nav class="jump-bar" aria-label="Report sections">
+    <a href="#standings-heading">Standings</a>
+    <a href="#loop-section">1. Loop &amp; Flywheel</a>
+    <a href="#architecture-section">2. Architecture</a>
+    <a href="#tactics-section">3. Tactics Arena 3.0</a>
+    <a href="#matchups-section">4. Matchups (PvP–ZvZ)</a>
+    <a href="#issues-section">5. Issues Fixed</a>
+    <a href="#replays-heading">6. Match Replays</a>
+    <a href="#technical-notes">Notes</a>
+  </nav>
 </header>
 
 <section class="wide-col" aria-labelledby="standings-heading">
-  <h2 id="standings-heading" class="section-kicker">Live standings</h2>
+  <h2 id="standings-heading" class="section-kicker">Live Ladder Standings</h2>
   <div class="table-wrap standings-desktop">
     <table>
       <thead>
@@ -3352,105 +3582,41 @@ def build_index_page(
   </div>
   <p class="table-note">
     Recent records combine our last two live releases ({html.escape(prev_lbl)} and {html.escape(latest_lbl)}:
-    {comb_w}–{comb_l} overall). Rating is each bot’s current AI Arena Elo.
+    {comb_w}–{comb_l} overall). Trade ratio = enemy resource value destroyed ÷ value lost (&gt;1.0× = positive trades).
   </p>
-</section>
-
-<section class="section-rule">
-  <div class="prose-col">
-    <h2 class="section-kicker">How we measure progress</h2>
-    <p>
-      Over a stretch of ten or twenty ladder games, raw win rate can swing wildly on a single
-      bad matchup or an early rush. To see whether the bots are genuinely fighting better,
-      we track win rate alongside <strong>trade ratio</strong>—the total mineral and gas value
-      of enemy units our bot destroys divided by what it loses. Above 1.0× means the bot comes
-      out ahead in the average fight, even in games it ultimately loses.
-    </p>
-  </div>
-  <figure class="figure-block">
-    <div class="figure-label">Figure 1</div>
-    <div class="figure-title">Live AI Arena win rate and trade ratio across releases</div>
+  <figure class="figure-block" style="margin-top:1.35rem;">
+    <div class="figure-label">Figure 1 · Live Ladder Trajectory</div>
+    <div class="figure-title">Win rate and trade ratio across live AI Arena builds</div>
     {chart_live_svg}
     <figcaption class="figure-caption">{live_caption}</figcaption>
   </figure>
 </section>
 
-<section class="section-rule">
-  <div class="prose-col">
-    <h2 class="section-kicker">Fixing a blind spot on half the map</h2>
-    <p>
-      Early practice logs turned up a puzzling gap: the bots won far less often whenever they
-      spawned in the northern half of a map, especially on Ley Lines. Watching the replays
-      made the cause obvious. Several building-placement rules quietly assumed the enemy lay
-      roughly up and to the right, so northern spawns occasionally walled off their own
-      expansion or misrouted early scouts.
-    </p>
-    <p>
-      Replacing those directional assumptions with coordinate-free pathing erased the deficit.
-      Across {sym["post_n"]} follow-up practice matches, northern spawns went from trailing
-      by nearly five points overall—and sixteen points on Ley Lines—to playing evenly with
-      southern spawns.
-    </p>
-  </div>
-  <figure class="figure-block">
-    <div class="figure-label">Figure 2</div>
-    <div class="figure-title">North vs. South win rate before and after the map-orientation fix</div>
-    {chart_sym_svg}
-    <figcaption class="figure-caption">
-      On Ley Lines, northern spawns climbed from {sym["ley_before_ne"]:.1f}% to {sym["ley_after_ne"]:.1f}%.
-      Across all seven ladder maps, northern spawns now win {sym["all_after_n"]:.1f}% vs. {sym["all_after_s"]:.1f}%
-      from the south ({sym["post_n"]} practice matches).
-    </figcaption>
-  </figure>
-</section>
-
-<section class="section-rule">
-  <div class="prose-col">
-    <h2 class="section-kicker">Inside the latest practice runs</h2>
-    <p>
-      Before shipping a new build to AI Arena, we test it across 90 local games: 14 regular
-      practice opponents, 12 held-out bots we avoid tuning against directly (much like a
-      machine-learning test set), self-play mirrors, and a six-game head-to-head match against
-      whatever build is currently live. Our latest release (Loop 45) set a new high of 25 wins
-      against external practice opponents—including Terran’s first overall positive trade ratio
-      (1.02×) and a 50% clean win rate on our original 12-bot benchmark—while sweeping all three
-      same-race mirrors against the live Loop 42 build (4–2 overall, 1.43× trade).
-    </p>
-    <p>
-      Alongside full matches, we expanded our Tactics Arena to 213 isolated drills inside the
-      StarCraft II engine covering 16 categories: sniping building and unit detectors before
-      engaging with cloaked or burrowed units, Stalker blink-back and blink-forward snipes,
-      Widow Mine and Baneling drops, mineral-line runbys and defenses, Stasis Ward harass and
-      defusing, Battlecruiser Yamato jumps, Nydus/transport juggles, and burrow micro.
-    </p>
-    <p>
-      Plenty of holes remain. On the live ladder, first-minute all-in worker rushes from
-      <em>Creepy_strategies</em> still catch our bots off guard. Locally, Protoss still has
-      room to tighten its 12-Pool hold and mid-game transitions against Terran and Zerg, and
-      in our Planetary Fortress drill the home Nexus still occasionally recalls cloaked Dark
-      Templars after they clear both turrets.
-    </p>
-  </div>
-</section>
+{sec_loop}
+{sec_arch}
+{sec_tactics}
+{sec_matchups}
+{sec_issues}
 
 <section class="section-rule wide-col" aria-labelledby="replays-heading">
-  <div class="prose-col" style="margin-bottom:1.25rem;">
-    <h2 id="replays-heading" class="section-kicker">Selected replays</h2>
-    <p style="margin-bottom:0;">
-      A few recent matches and drills showing what works today—and where we are focusing next.
-      <a href="./video-gallery.html">Browse the full replay library →</a>
+  <div class="section-head">
+    <p class="section-num">Section 6</p>
+    <h2 id="replays-heading" class="section-kicker">Featured Full-Match Replays</h2>
+    <p class="section-intro">
+      Key full-length matches from Live Release #6 (Loop 45), playable directly in mobile and desktop browsers.
+      <a href="./video-gallery.html">Browse all {len(gallery_items)} replays &amp; drills →</a>
     </p>
   </div>
   <div class="featured-grid">{"".join(featured_cards)}</div>
 </section>
 
 <section class="section-rule prose-col">
-  <h2 class="section-kicker">Updates &amp; logs</h2>
+  <h2 class="section-kicker">Campaign Updates</h2>
   <ul class="doc-list">{"".join(progress_items)}</ul>
 
-  <h2 id="technical-notes" class="section-kicker" style="margin-top:2.4rem;">Technical notes</h2>
-  <p>
-    Architecture documents and deeper engineering write-ups for anyone working on the bot code.
+  <h2 id="technical-notes" class="section-kicker" style="margin-top:2.4rem;">Technical Notes &amp; Audits</h2>
+  <p class="prose-tight">
+    Detailed loop forensics, empirical subsystem audits, and the automated trajectory flywheel report.
   </p>
   <ul class="doc-list">{"".join(tech_items)}</ul>
 
@@ -3459,11 +3625,12 @@ def build_index_page(
 """
     return render_page_shell(
         repo_slug=repo_slug,
-        title="Mothman plays StarCraft II",
+        title="Mothman — StarCraft II Bots",
         active_slug="index",
         body_html=body,
         toc=None,
         include_mermaid=False,
+        extra_scripts=INTERACTIVE_SECTIONS_JS,
         built_utc=built_utc,
     )
 
@@ -3508,6 +3675,39 @@ def build_static_site(
                 if png_name in amap:
                     poster_lookup[u] = amap[png_name]
 
+    # Build prioritized same-origin iOS-playable MP4 staging list (H.264 Main L3.1 + JPG posters)
+    # Priority order:
+    #   1. Homepage flagship Arena drills (4) + flagship Ship #6 full matches (4)
+    #   2. Any local MP4 referenced inside markdown reports (loops-29-plus.md, etc.)
+    #   3. Latest-loop Arena & Self-Play drill MP4s + latest-loop H2H & full-match MP4s
+    gallery_items = discover_gallery_items(brain_dir, media_by_tag, abs_to_asset)
+    priority_entries: List[Tuple[str, Path, str]] = []
+
+    loop_root = brain_dir / "scratch" / "loop"
+    flagship_specs = [
+        ("showcase:p15", loop_root / "visuals_iter47/arena/sc2-real-p15-dt-blink-snipe-planetary.mp4", "feat_p15_dt_pf.mp4"),
+        ("showcase:d10", loop_root / "visuals_iter47/arena/sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker.mp4", "feat_d10_banshee_obs.mp4"),
+        ("showcase:ro01", loop_root / "visuals_iter47/arena/sc2-runby-ro01-tvz-widow-mine-drop-drones.mp4", "feat_ro01_widow_mine.mp4"),
+        ("showcase:ro04", loop_root / "visuals_iter47/arena/sc2-runby-ro04-tvz-blueflame-hellion-runby-drones.mp4", "feat_ro04_hellion.mp4"),
+        ("showcase:h2h003", loop_root / "visuals_iter45/full_matches/full_h2h003_Mothman-P_vs_Mothman-P-Base.mp4", "feat_l45_h2h003_pvp.mp4"),
+        ("showcase:h2h006", loop_root / "visuals_iter45/full_matches/full_h2h006_Mothman-T_vs_Mothman-Z-Base.mp4", "feat_l45_h2h006_tvz.mp4"),
+        ("showcase:m074", loop_root / "visuals_iter45/full_matches/full_m074_Mothman-T_vs_who.mp4", "feat_l45_m074_tvt_who.mp4"),
+        ("showcase:h2h002", loop_root / "visuals_iter45/full_matches/full_h2h002_Mothman-T_vs_Mothman-T-Base.mp4", "feat_l45_h2h002_tvt.mp4"),
+    ]
+    for fkey, fp, fname in flagship_specs:
+        if fp.is_file():
+            priority_entries.append((fkey, fp, fname))
+
+    # Map CDN URL -> local Path for every discovered MP4 so report embeds & gallery items can stage cleanly
+    cdn_to_local_mp4: Dict[str, Path] = {}
+    for abs_s, (tag, aname) in abs_to_asset.items():
+        if abs_s.lower().endswith(".mp4"):
+            u = media_by_tag.get(tag, {}).get(aname)
+            lp = Path(abs_s)
+            if u and lp.is_file():
+                cdn_to_local_mp4[u] = lp
+
+    # Scan markdown reports for embedded MP4 URLs (highest priority after homepage flagships)
     rewrite_md = make_path_rewriter(
         repo_slug=repo_slug,
         repo_dir=repo_dir,
@@ -3517,12 +3717,87 @@ def build_static_site(
         abs_to_asset=abs_to_asset,
         report_filename_to_html=report_filename_to_html,
     )
-
-    page_stats: Dict[str, Dict[str, object]] = {}
+    rewritten_reports: List[Tuple[ReportSpec, str]] = []
     for sp, src_path in resolved_reports:
         raw_md = src_path.read_text(encoding="utf-8")
-        rewritten_md = rewrite_md(raw_md)
-        renderer = MarkdownRenderer(poster_lookup=poster_lookup)
+        rew = rewrite_md(raw_md)
+        rewritten_reports.append((sp, rew))
+        for m_url in re.findall(r"https://[^\s\"'<>)]+\.mp4", rew, flags=re.I):
+            lp = cdn_to_local_mp4.get(m_url)
+            if lp and lp.is_file():
+                tag, aname = classify_media_path(lp)
+                priority_entries.append((m_url, lp, f"{tag}_{aname}"))
+
+    # Add gallery items ordered by: newest Arena drills -> newest H2H/wins -> remaining newest matches
+    def _gal_stage_key(it: Dict[str, Any]) -> Tuple[int, int, int]:
+        lnum = int(it.get("loop_num") or 0)
+        cat = str(it.get("category") or "")
+        is_h2h = 0 if "h2h" in str(it.get("cohort") or "").lower() or "h2h" in str(it.get("title") or "").lower() else 1
+        cat_rank = 0 if cat == "Tactics Drills" else (1 if cat == "Self-Play Drills" else 2)
+        out_rank = 0 if it.get("outcome") == "win" else 1
+        return (-lnum, cat_rank, is_h2h * 2 + out_rank)
+
+    for it in sorted(gallery_items, key=_gal_stage_key):
+        if it.get("media_type") != "mp4":
+            continue
+        lp_s = it.get("_local_mp4") or ""
+        lp = Path(lp_s) if lp_s else cdn_to_local_mp4.get(it.get("src", ""))
+        if lp and lp.is_file():
+            key = it.get("src") or f"gal:{it.get('_safe_name') or lp.name}"
+            sname = it.get("_safe_name") or lp.name
+            priority_entries.append((key, lp, sname))
+
+    staged_mp4_map, staged_poster_map = stage_ios_playable_mp4s(
+        brain_dir=brain_dir,
+        out_dir=out_dir,
+        priority_entries=priority_entries,
+        max_total_mb=220.0,
+        max_workers=4,
+    )
+
+    # Also copy rendered 3D Base & Ramp-Wall Layout photos (~740 KB) + Pro vs Mothman Blueprints (~730 KB) into out_dir/media/
+    base_layout_src = brain_dir / "scratch" / "base_layouts"
+    if base_layout_src.is_dir():
+        (out_dir / "media").mkdir(parents=True, exist_ok=True)
+        for bf in sorted(base_layout_src.glob("base_layout_*.jpg")):
+            shutil.copy2(bf, out_dir / "media" / bf.name)
+        for pf in sorted(base_layout_src.glob("pro_vs_mothman_*.png")):
+            shutil.copy2(pf, out_dir / "media" / pf.name)
+
+    # Rewrite gallery items to use same-origin playable MP4s & JPG posters, stripping private local keys
+    clean_gallery_items: List[Dict[str, Any]] = []
+    for it in gallery_items:
+        item = {k: v for k, v in it.items() if not k.startswith("_")}
+        if item.get("media_type") == "mp4":
+            orig_src = item.get("src", "")
+            key = orig_src or f"gal:{it.get('_safe_name', '')}"
+            if key in staged_mp4_map:
+                item["src"] = staged_mp4_map[key]
+                item["playable_mp4"] = True
+                if not item.get("download_url"):
+                    item["download_url"] = staged_mp4_map[key]
+            else:
+                item["playable_mp4"] = False
+            if key in staged_poster_map:
+                item["poster"] = staged_poster_map[key]
+        clean_gallery_items.append(item)
+
+    # Sort gallery so playable in-browser videos surface cleanly first within each loop
+    clean_gallery_items.sort(
+        key=lambda x: (
+            -int(x.get("loop_num") or 0),
+            0 if x.get("playable_mp4") else 1,
+            0 if x.get("outcome") == "win" else 1,
+        )
+    )
+
+    page_stats: Dict[str, Dict[str, object]] = {}
+    for sp, rewritten_md in rewritten_reports:
+        renderer = MarkdownRenderer(
+            poster_lookup=poster_lookup,
+            staged_mp4_map=staged_mp4_map,
+            staged_poster_map=staged_poster_map,
+        )
         body_html = renderer.render_blocks(rewritten_md, record_toc=True)
         full_html = render_page_shell(
             repo_slug=repo_slug,
@@ -3547,10 +3822,9 @@ def build_static_site(
         )
 
     # Build interactive video-gallery.html
-    gallery_items = discover_gallery_items(brain_dir, media_by_tag, abs_to_asset)
     gallery_html = build_video_gallery_page(
         repo_slug=repo_slug,
-        gallery_items=gallery_items,
+        gallery_items=clean_gallery_items,
         built_utc=built_utc,
     )
     _assert_no_local_leaks(gallery_html, "video-gallery.html")
@@ -3558,17 +3832,21 @@ def build_static_site(
     print(
         f"  ✓ Built {'video-gallery.html':28s} "
         f"({(out_dir / 'video-gallery.html').stat().st_size / 1024.0:6.1f} KB, "
-        f"{len(gallery_items)} gallery items)"
+        f"{len(clean_gallery_items)} gallery items, "
+        f"{sum(1 for x in clean_gallery_items if x.get('playable_mp4'))} iOS-playable MP4s)"
     )
 
-    # Build calm editorial index.html
+    # Build interactive editorial index.html
     index_html = build_index_page(
         repo_slug=repo_slug,
         repo_dir=repo_dir,
+        brain_dir=brain_dir,
         sqlite_path=sqlite_path,
         published_specs=published_specs,
-        gallery_items=gallery_items,
+        gallery_items=clean_gallery_items,
         media_by_tag=media_by_tag,
+        staged_mp4_map=staged_mp4_map,
+        staged_poster_map=staged_poster_map,
         built_utc=built_utc,
     )
     _assert_no_local_leaks(index_html, "index.html")
@@ -3577,7 +3855,7 @@ def build_static_site(
     site_bytes = sum(p.stat().st_size for p in out_dir.rglob("*") if p.is_file())
     print(
         f"[Step B] Static site built in {out_dir} "
-        f"({len(published_specs) + 2} HTML pages, {site_bytes / 1024:.1f} KB total, 0 path leaks)."
+        f"({len(published_specs) + 2} HTML pages, {site_bytes / (1024 * 1024):.1f} MB total, 0 path leaks)."
     )
     return page_stats
 
@@ -3609,7 +3887,7 @@ def push_gh_pages_and_enable(repo_slug: str, out_dir: Path) -> str:
     )
     pushed_sha = run_cmd(["git", "rev-parse", "HEAD"], cwd=out_dir, env=env).stdout.strip()
     run_cmd(
-        ["git", "push", "--force", remote_url, "HEAD:gh-pages"],
+        ["git", "-c", "http.postBuffer=524288000", "push", "--force", remote_url, "HEAD:gh-pages"],
         cwd=out_dir,
         env=env,
     )
@@ -3697,6 +3975,7 @@ def verify_live_site(
     site_url: str,
     media_by_tag: Dict[str, Dict[str, str]],
     published_specs: List[ReportSpec],
+    out_dir: Optional[Path] = None,
 ) -> None:
     check_urls = [
         site_url,
@@ -3706,26 +3985,31 @@ def verify_live_site(
         site_url + "prod-audit.html",
         site_url + "mirror-brain-audit.html",
     ]
-    if any(sp.slug == "loop41-forensics" for sp in published_specs):
-        check_urls.append(site_url + "loop41-forensics.html")
+    if any(sp.slug == "loop-flywheel-retro" for sp in published_specs):
+        check_urls.append(site_url + "loop-flywheel-retro.html")
 
-    sample_mp4 = None
+    # Verify same-origin iOS-playable MP4 serves as Content-Type: video/mp4 (NOT attachment/octet-stream!)
+    staged_mp4_url = None
+    if out_dir and (out_dir / "media").is_dir():
+        mp4s = sorted((out_dir / "media").glob("*.mp4"))
+        if mp4s:
+            staged_mp4_url = site_url + "media/" + mp4s[0].name
+            check_urls.append(staged_mp4_url)
+
     sample_webp = None
     sample_png = None
     for tag in sorted(media_by_tag.keys(), reverse=True):
         for fname, u in media_by_tag[tag].items():
             low = fname.lower()
-            if not sample_mp4 and low.endswith(".mp4"):
-                sample_mp4 = u
             if not sample_webp and low.endswith(".webp"):
                 sample_webp = u
             if not sample_png and low.endswith(".png"):
                 sample_png = u
-            if sample_mp4 and sample_webp and sample_png:
+            if sample_webp and sample_png:
                 break
-        if sample_mp4 and sample_webp and sample_png:
+        if sample_webp and sample_png:
             break
-    for u in (sample_mp4, sample_webp, sample_png):
+    for u in (sample_webp, sample_png):
         if u:
             check_urls.append(u)
 
@@ -3738,6 +4022,21 @@ def verify_live_site(
         print(f"  {mark} HTTP {status} — {u}")
         if not ok:
             failures.append((status, u))
+
+    if staged_mp4_url:
+        req = urllib.request.Request(
+            staged_mp4_url, method="HEAD", headers={"User-Agent": "mothman-pages-check/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            ct = (resp.headers.get("Content-Type") or "").lower()
+            cd = (resp.headers.get("Content-Disposition") or "").lower()
+            ar = (resp.headers.get("Accept-Ranges") or "").lower()
+            print(
+                f"  ✓ iOS MP4 Headers — Content-Type={ct!r}, Accept-Ranges={ar!r}, Content-Disposition={cd!r}"
+            )
+            if "video/mp4" not in ct or "attachment" in cd:
+                failures.append((f"bad-mp4-headers:{ct}/{cd}", staged_mp4_url))
+
     if failures:
         raise RuntimeError(f"Live verification failed for {len(failures)} URL(s): {failures}")
 
@@ -3800,7 +4099,7 @@ def main() -> int:
         return 0
 
     site_url = push_gh_pages_and_enable(args.repo_slug, args.out_dir)
-    verify_live_site(site_url, media_by_tag, [sp for sp, _ in resolved])
+    verify_live_site(site_url, media_by_tag, [sp for sp, _ in resolved], out_dir=args.out_dir)
     print(f"\nLIVE SITE VERIFIED: {site_url}")
     return 0
 

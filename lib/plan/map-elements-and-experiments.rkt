@@ -2283,7 +2283,8 @@
          #:home-y Real
          #:enemy-x Real
          #:enemy-y Real
-         #:warp-unit-type (Option Symbol))
+         #:warp-unit-type (Option Symbol)
+         #:enemy-buildings (Listof Any))
         (Listof MapElementDirective)))
 (define (plan-warp-prism-and-recall-tactics
          ally-units ally-buildings enemy-units
@@ -2295,7 +2296,8 @@
          #:home-y [home-y 32.5]
          #:enemy-x [enemy-x 160.5]
          #:enemy-y [enemy-y 160.5]
-         #:warp-unit-type [warp-pref #f])
+         #:warp-unit-type [warp-pref #f]
+         #:enemy-buildings [enemy-buildings '()])
   (define-values (ready-warpgates nexuses any-warpgate-warping?)
     (let loop : (Values (Listof Any) (Listof Any) Boolean)
               ([bs : (Listof Any) ally-buildings]
@@ -2449,7 +2451,46 @@
                        (list 'cast-spell (u-tag nx-b) 'mass-recall rx ry))))))
 
          ;; (b) Offensive squad save recall when overwhelmed >1.5x far from any Nexus
+         ;; L46-P0-1a (`p15` Mass Recall 3757 fix): Exclude permanently-cloaked `dark-templar`
+         ;; (and undetected cloaked units) from `exp-rev` whenever ZERO enemy detectors exist
+         ;; within `<= 24t` — invincible undetected DTs must finish wiping the blind enemy army
+         ;; instead of being recalled home!
          (unless recalled-already?
+           (define enemy-detectors-recall : (Listof Any)
+             (append
+              (for/list : (Listof Any) ([e (in-list enemy-units)]
+                                        #:when (and (hash? e)
+                                                    (not (eq? (dyn-hash-ref e 'snapshot? #f) #t))
+                                                    (memq (u-sym e)
+                                                          '(observer observer-siege-mode raven
+                                                            overseer overseer-siege-mode
+                                                            missile-turret photon-cannon spore-crawler))))
+                e)
+              (for/list : (Listof Any) ([eb (in-list enemy-buildings)]
+                                        #:when (and (hash? eb)
+                                                    (not (eq? (dyn-hash-ref eb 'snapshot? #f) #t))
+                                                    (memq (u-sym eb)
+                                                          '(missile-turret photon-cannon spore-crawler))))
+                eb)))
+           (define (ally-invincible-cloaked-at? [a : Any] [ax : Float] [ay : Float]) : Boolean
+             (define asym (u-sym a))
+             (define cloak-v (dyn-hash-ref a 'cloak 0))
+             (define is-cloaked-type?
+               (or (eq? asym 'dark-templar)
+                   (eq? (dyn-hash-ref a 'cloaked #f) #t)
+                   (eqv? cloak-v 1)
+                   (eq? cloak-v 'cloaked)))
+             (define detected-now?
+               (or (eqv? cloak-v 2)
+                   (eq? cloak-v 'cloaked-detected)
+                   (let ([bfs (dyn-hash-ref a 'buffs '())])
+                     (and (list? bfs)
+                          (for/or : Boolean ([b (in-list bfs)])
+                            (or (eqv? b 49) (eq? b 'oracle-revelation) (eq? b 'revelation)))))))
+             (and is-cloaked-type?
+                  (not detected-now?)
+                  (for/and : Boolean ([det (in-list enemy-detectors-recall)])
+                    (> (dist-2d-sq ax ay (u-x det) (u-y det)) 576.0))))
            (define exp-rev : (Listof Any) '())
            (define exp-cnt : Exact-Nonnegative-Integer 0)
            (define exp-pow : Float 0.0)
@@ -2458,8 +2499,9 @@
            (for ([a (in-list ally-combat)])
              (define ax (u-x a))
              (define ay (u-y a))
-             (when (for/and : Boolean ([nb (in-list nexuses)])
-                     (> (dist-2d-sq ax ay (u-x nb) (u-y nb)) 900.0))
+             (when (and (not (ally-invincible-cloaked-at? a ax ay))
+                        (for/and : Boolean ([nb (in-list nexuses)])
+                          (> (dist-2d-sq ax ay (u-x nb) (u-y nb)) 900.0)))
                (set! exp-rev (cons a exp-rev))
                (set! exp-cnt (add1 exp-cnt))
                (set! exp-pow (+ exp-pow (u-power a)))
@@ -2736,7 +2778,8 @@
          #:enemy-y Real
          #:expansion-pads (Listof Any)
          #:tracker (Option MapElementTracker)
-         #:validated-only? Boolean)
+         #:validated-only? Boolean
+         #:enemy-buildings (Listof Any))
         (Immutable-HashTable Symbol Any)))
 (define (step-map-elements-tactical-micro!
          ally-units ally-buildings enemy-units neutral-units
@@ -2752,7 +2795,8 @@
          #:enemy-y [enemy-y 160.5]
          #:expansion-pads [expansion-pads '()]
          #:tracker [tr #f]
-         #:validated-only? [validated? #t])
+         #:validated-only? [validated? #t]
+         #:enemy-buildings [enemy-buildings '()])
   (define-values (workers combat)
     (let loop : (Values (Listof Any) (Listof Any))
               ([us : (Listof Any) ally-units]
@@ -2811,7 +2855,8 @@
     (plan-warp-prism-and-recall-tactics
      ally-units ally-buildings enemy-units
      #:frame frame #:minerals minerals #:gas gas #:supply-left supply-left
-     #:home-x home-x #:home-y home-y #:enemy-x enemy-x #:enemy-y enemy-y))
+     #:home-x home-x #:home-y home-y #:enemy-x enemy-x #:enemy-y enemy-y
+     #:enemy-buildings enemy-buildings))
   (define counter-prism-dirs
     (plan-counter-warp-prism-and-recall
      ally-units enemy-units #:frame frame #:home-x home-x #:home-y home-y))

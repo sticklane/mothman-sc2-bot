@@ -459,12 +459,17 @@
                   #:enemy-units probes-15 #:mineral-patches main-mps)))
   (define r05-drills (filter (lambda (a) (and (pair? a) (eq? (car a) 'worker-drill-stack-attack))) acts-r05))
   (define r05-4901-grp (findf (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack) (= (third a) 4901))) acts-r05))
-  (check-true "L43-T4a-r05-zero-converge-drill-overkill-buffer-and-pass1-wounded-finish"
+  (define r05-4902-grp (findf (lambda (a) (and (pair? a) (eq? (car a) 'pull-workers-attack) (= (third a) 4902))) acts-r05))
+  ;; L48-W3 (Fix W3-R1): Zero converge drill; frontline #4101 swings immediately at adjacent #4902
+  ;; (`0.8t <= 1.35t`, never walking 2.1t past it!) while `2..3` nearby SCVs finish 10-HP #4901!
+  (check-true "L43-T4a-r05-zero-converge-drill-cap3-direct-contact-and-wounded-finish"
               (and (null? r05-drills)
                    r05-4901-grp
-                   (memv 4101 (second r05-4901-grp))
-                   (>= (length (second r05-4901-grp)) 4))
-              (format "drills=~a grp4901=~a" (length r05-drills) r05-4901-grp))
+                   (>= (length (second r05-4901-grp)) 2)
+                   (<= (length (second r05-4901-grp)) 3)
+                   r05-4902-grp
+                   (memv 4101 (second r05-4902-grp)))
+              (format "drills=~a grp4901=~a grp4902=~a" (length r05-drills) r05-4901-grp r05-4902-grp))
 
   ;; T4b (`e03` Marine EHP focus + outrange stutter-step + SCV `16f` evac throttle):
   (define e03-scvs

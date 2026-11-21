@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter44_wave44_full",
+  "active_wave": "iter47_wave47_full",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -4445,6 +4445,538 @@
         "Tactics Arena 3.0 breakthrough: Dummy crossed 1.08x (+0.09x) with p15 wiping 56/60 Terran (1.14x, 10 DTs alive, 1766=0) and ro26 Dropperlord Baneling Drop passing 7/6 Probes; Self-Play set econ-harass records (5P-2F defense +662.1M / 92.4% uptime / 7 wlost; 4P-3F runby 66 wkills incl. ro04 16/16 Drones 4.00x)."
       ],
       "promotion_gates_passed": "2/9 PASS across full 76-match clean roster (zero_crashes_and_rejects, sup_blk_le_6pct [3.5% ATL]); HOLD-ZIP (Protoss rebounded & Arena 3.0 jumped to 1.08x, held for Loop 45 Terran TvP 0-8 / 1BaseLock=4 fix -> All-3-Race Ship #6)"
+    },
+    {
+      "id": "iter45_wave45_full",
+      "status": "UNCONDITIONAL_LIVE_SHIP_6_4W_2L_1_43X_H2H_3_0_MIRRORS_NEW_EXT78_25W_ATH_FIRST_50PCT_HIST12_TERRAN_1_02X_ATH",
+      "campaign": "Loops 29+ Self-Play, Honest 3-Tier Tactics Arena 3.0 & Expanded Roster Campaign (Loop 45 Unconditional Combined L43+L44+L45 Live AI Arena Ship #6 + First Full 90/90 Match & 131 Arena 3.0 H.264 MP4 Video Library!)",
+      "loop_self_improvements": [
+        "L45-LOOP-1 (Tactics Arena 3.0 Ship #6 Milestone & Live Replay-DB 3,000+ Index): Shipped Tactics Arena 3.0 (213 scenarios / 16 categories, worker-runby & loaded-transport scoring) into Live AI Arena Ship #6 (qpqqolmk_3b21fe7a), achieving ro01 Widow Mine Medivac Drop 2/2 sweep (16/16 Drones 99.0x), burrow-micro 5-0, stasis-ward 4-0 SP, and crossing 3,062/3,062 (100.0% raw_tracker, 100 runs) indexed replays in SQLite with exact post-L37 North=103W-227L vs South=103W-227L (n=699) longitudinal parity.",
+        "L45-LOOP-2 (Full Ship #6 229-Video Live-HUD MP4 Library): Rendered 90/90 full-length 00:00->GG match H.264 MP4s + Top-8 extended 21s live-HUD showcase highlights (10.09 MB) + 131 Arena 3.0 core drill MP4s (229 videos staged in campaign_media/iter45) and built visual_report_iter45.md."
+      ],
+      "spec_summary": "Loop 45 (qpqqolmk dc3a33b6, BuildVersion=qpqqolmk_3b21fe7a \u2014 Unconditional Combined L43+L44+L45 Live AI Arena Ship #6!): 90/90 matches 100% clean (0 own crashes, 0 opp crashes, 0 action rejects, 0 spikes >=500ms, sub-200ms ALL_84 max_step_ms=199.0ms!). Baseline H2H beat Live Ship #5 ZIPs (womqlpsp_6917245e) 4W-2L-0T (66.7%, 1.43x agg / 2.18x med, PkA 6,750 vs 4,233 [+59%], 3-0 same-race mirror sweep: #03 PvP 3.40x 0-sigs, #02 TvT 2.18x 0-sigs, #01 ZvZ 3.33x, #06 TvZ 6.32x 0-sigs; 4W-0L ZIP smoke 7.23x/10.04x SB 2.7% ATL 4/4 Tag:v_qpqqolmk_3b21fe7a!). Full 84-match roster: NEW EXT_78 clean external wins ATH 25W-49L-4T (32.1% WR / 37.2% NL, 0.62x) beating L42 (24W) & L43 (24W); FIRST-EVER 50.0% HIST12 clean WR (18W-18L-0T, 1.01x trade!); CORE14 19W-23L-0T (45.2% WR, 0.95x; CORE14_NC 18-21 0.97x); UNSEEN12 6W-26L-4T (27.8% NL ties ATH); ALL_84 28W-52L-4T (33.3% WR / 38.1% NL, 0.65x, SB 4.1%); 4x 3-0 sweeps (oberon, titania, monsterbot, CryptBotRevival) & zig-reapers 1-0-2 unbeaten. Terran hit FIRST-EVER >1.00x overall trade (1.02x ALL_84; CORE14 7-7 1.66x; EXT78 9-16-1 0.92x SB 2.3%; TvP rebounded 0-8->3-5 incl. first-ever #74 T v who 23.75x 8.7m 0-sigs, #11 puck 4.09x, #20 PolyMorph 6.08x). Protoss hit EXT78 9-16-1 (34.6% WR, PvT 4W-3L-1T 62.5% NL incl. #54 zig-reapers 17.93x, #15 oberon, #18 RustyNikolaj, #27 onlyfans). 1BaseLock-on-losses 4->0, SelfCancel 2->0, GasZero 0, #75 P v who CloakLoss fixed. Tactics Arena 3.0 (--suite core, 131 MP4s): Dummy 30W-34L-2D (0.94x; runby 775.0 / 58 wkills ATH), Self-Play 28W-32L-5D (0.86x ATH; runby 5P-2F 66 wkills ATH, ro01 2/2 16/16 Drones 99.0x, burrow-micro 5-0, stasis-ward 4-0).",
+      "rev": "qpqqolmk dc3a33b6 (iter45 UNCONDITIONAL LIVE SHIP #6 \u2014 BuildVersion qpqqolmk_3b21fe7a)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_145354_iter45_wave45_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_152318_iter45_baseline_h2h",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter45_wave45_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter45_baseline_h2h_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter45_wave45_full.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter45.json",
+      "tactics_selfplay_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter45.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter45.md",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "25W-49L-4T (NEW EXT_78 clean wins ATH 32.1% WR / 37.2% NL, 0.62x, SB 4.2%, 84/84 100% clean; FIRST-EVER 50.0% HIST12 WR 18W-18L 1.01x; CORE14 19W-23L 0.95x; UNSEEN12 6W-26L-4T 27.8% NL ties ATH; ALL_84 28W-52L-4T 0.65x; SHIP #6 H2H 4W-2L 1.43x/2.18x med 3-0 mirrors vs live L42 ZIPs + 4W-0L ZIP smoke 7.23x/10.04x SB 2.7%!)",
+      "win_rate_pct": 32.1,
+      "trade_agg": 0.62,
+      "trade_med": 0.24,
+      "sup_blk_pct": 4.2,
+      "w4_alive_med": 26.0,
+      "w6_alive_med": 39.0,
+      "pk_army_avg": 2856.7,
+      "action_rejects": 0,
+      "crashes": 0,
+      "siege_range_zero_dps_losses": 12,
+      "cloaked_unit_damage_losses": 1,
+      "gas_rich_min_starved_matches": 12,
+      "one_base_lockout_matches": 2,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 7,
+      "prod_placement_stall_matches": 2,
+      "zero_kill_collapse_matches": 7,
+      "drip_feed_collapse_matches": 33,
+      "prod_idle_bank_freeze_matches": 0,
+      "gas_zero_harvest_freeze_matches": 0,
+      "spire_sched_drop_matches": 1,
+      "wall_timeout_ties": 2,
+      "army_val_4m_ratio_vs_pro": 0.9,
+      "army_val_8m_ratio_vs_pro": 0.42,
+      "latency_summary": "All 90/90 clean <=199.0ms (ALL_84 max_step_ms=199.0ms sub-200ms!, 0 spikes >=500ms; tr95max=8.32ms, rt=6.15ms, tr=2.59ms, avg=9.55ms, p95=16.48ms; H2H max=169.9ms vs P2 293.0ms; ZIP smoke max=184.6ms; 0 action rejects)",
+      "by_race": {
+        "Protoss": {
+          "record": "EXT78 9W-16L-1T (34.6% WR / 38.5% NL, 0.62x, PvT 4W-3L-1T 62.5% NL incl. #54 zig-reapers 17.93x 0-sigs, #15 oberon, #18 RustyNikolaj, #27 onlyfans, #21 PolyMorph, #60 Creepy, #75 who CloakLoss fixed); CORE14 6W-8L (42.9%, 0.79x); H2H #03 PvP flipped to 3.40x 0-sigs blowout (PkA 10,225/2,150)",
+          "trade_agg": 0.62,
+          "w4_alive_med": 26.5,
+          "w6_alive_med": 39.0,
+          "nat_sec": 89.6,
+          "sup_blk": 5.1
+        },
+        "Terran": {
+          "record": "First-ever >1.00x overall Terran trade (1.02x ALL_84 11W-16L-1T); CORE14 7W-7L (50.0% WR, 1.66x trade, SB 2.4%); EXT78 9W-16L-1T (38.5% NL, 0.92x, SB 2.3%, TvP rebounded 0-8->3-5 incl. first-ever #74 who 23.75x 8.7m 0-sigs, #11 puck 4.09x 0-sigs, #59 Creepy 6.16x, #20 PolyMorph 6.08x 0-sigs); H2H 2-0 (3.05x 0-sigs: #02 TvT 2.18x, #06 TvZ 6.32x); Arena ro01 2/2 16/16 Drones 99.0x",
+          "trade_agg": 0.92,
+          "w4_alive_med": 24.0,
+          "w6_alive_med": 33.5,
+          "nat_sec": 103.4,
+          "sup_blk": 2.3
+        },
+        "Zerg": {
+          "record": "CORE14 6W-8L (42.9% WR: #01 titania, #04 monsterbot, #07 Chance, #10 puck, #13 oberon, #46 sludgement2); EXT78 7W-17L-2T (34.6% NL, 0.39x); H2H 1-0 (#01 ZvZ 3.33x, PkA 8,825/2,300); Arena burrow-micro 5-0, stasis-ward 4-0 SP",
+          "trade_agg": 0.39,
+          "w4_alive_med": 29.5,
+          "w6_alive_med": 41.5,
+          "nat_sec": 55.4,
+          "sup_blk": 5.1
+        }
+      },
+      "tactics_summary": {
+        "rev": "qpqqolmk dc3a33b6 (iter45 \u2014 Live Ship #6 Arena 3.0 Core: Self-Play 0.86x ATH, ro01 2/2 16/16 Drones 99.0x, burrow 5-0, stasis 4-0 SP)",
+        "passed": "Verifier 10/10 FIRST-PASS + raco make 102/102 + run-all-tests 2,397/2,397 + WS 717/717 + TypedCmd 273/273 + L31..L45 (249/249) + 38/38 Belief (548/548) + 213/213 Arena 3.0 Dual-Validated + 6/6 Replay-DB + 231/231 Tactics + 24/24 SM + 0/0/0/0 Pro-Starve + 4W-0L ZIP Smoke",
+        "sc2_duel36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter45.json",
+        "sc2_selfplay36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter45.json",
+        "sc2_duel36_summary": "Arena 3.0 --suite core (131 full-length MP4s = 163.06 MB, 0 crashes/glitches): Dummy 30W-34L-2D (0.94x; canonical 23-22-2 0.93x, econ-def 3P-4F +270.0M, runby 3P-4F 775.0 / 58 wkills ATH, reg 1-4 0.56x) + Self-Play 28W-32L-5D (0.86x ATH; canonical 19-22-5 0.82x, econ-def 3P-4F +488.6M, runby 5P-2F 899.1 / 66 wkills ATH, reg 1-4 0.58x r03 KO). Spotlights: ro01 Widow Mine Medivac Drop 2/2 sweep (16/16 Drones 99.0x), burrow-micro 5-0, stasis-ward 4-0 SP.",
+        "by_tier_duel": {
+          "canonical": {
+            "total": 47,
+            "wins": 23,
+            "losses": 22,
+            "draws": 2,
+            "trade_agg": 0.93,
+            "am_ratio": 3.54
+          },
+          "econ-harass": {
+            "total": 14,
+            "passes": 6,
+            "fails": 8,
+            "econ_passes": 3,
+            "econ_fails": 4,
+            "avg_net_econ_score": 270.0,
+            "avg_minerals_gathered": 323.6,
+            "avg_mining_uptime_pct": 73.6,
+            "total_workers_lost": 45,
+            "runby_passes": 3,
+            "runby_fails": 4,
+            "avg_runby_score": 775.0,
+            "total_enemy_workers_killed": 58,
+            "avg_enemy_minerals_denied": 258.2
+          },
+          "regression": {
+            "total": 5,
+            "wins": 1,
+            "losses": 4,
+            "draws": 0,
+            "trade_agg": 0.56,
+            "am_ratio": 4.89
+          }
+        },
+        "by_tier_selfplay": {
+          "canonical": {
+            "total": 46,
+            "p1_wins": 19,
+            "p2_wins": 22,
+            "draws": 5,
+            "trade_agg": 0.82,
+            "am_ratio": 3.57
+          },
+          "econ-harass": {
+            "total": 14,
+            "passes": 8,
+            "fails": 6,
+            "econ_passes": 3,
+            "econ_fails": 4,
+            "avg_net_econ_score": 488.6,
+            "avg_minerals_gathered": 377.9,
+            "avg_mining_uptime_pct": 83.2,
+            "total_workers_lost": 22,
+            "runby_passes": 5,
+            "runby_fails": 2,
+            "avg_runby_score": 899.1,
+            "total_enemy_workers_killed": 66,
+            "avg_enemy_minerals_denied": 253.8
+          },
+          "regression": {
+            "total": 5,
+            "p1_wins": 1,
+            "p2_wins": 4,
+            "draws": 0,
+            "trade_agg": 0.58,
+            "am_ratio": 6.38
+          }
+        }
+      },
+      "visual_qa_highlights": [
+        "All 8/8 Ship #6 Top-8 extended 21s (8s lead-in, 160f, 10.09 MB MP4 total) live-HUD showcase posters inspected cleanly with crisp team colors, exact Worker/Supply counters, and zero overlap.",
+        "H2H 3-0 mirror sweep & TvZ showcase frames: H2H #03 PvP (08:55 WIN 3.40x, 96/117 vs 94/125) shows a 9-Stalker concave shredding live L42 Protoss outside the 3rd Nexus; H2H #06 TvZ (08:31 WIN 6.32x, 102/141 vs 60/100) catches a live Sieged Tank cannon flash + Liberator breaking L42 Zerg's SE base; H2H #02 TvT (09:58 WIN 2.18x, 110/165 vs 85/142, 66 vs 35 workers) contains trapped 2-base L42 Terran; H2H #01 ZvZ (09:59 WIN 3.33x, 152/198 vs 110/146) overwhelms SE Hatchery with Ravager-Hydra-Roach.",
+        "External milestone frames: #74 T v who (07:26 first-ever WIN 23.75x, 102/118 vs 21/31) marches Bio + Sieged Tank up who's SE ramp; #20 T v PolyMorph (07:53 WIN 6.08x, 94/118 vs 69/98) shells SE Hatchery cleanly; #11 T v puck (12:00 WIN 4.09x, 64/110 vs 56/109) tears down puck's NE Robo/Pylon under Liberator circle; #54 P v zig-reapers (08:27 WIN 17.93x, 106/133 vs 24/55) storms NW natural."
+      ],
+      "key_wins": [
+        "Unconditional Combined L43+L44+L45 Live AI Arena Ship #6 (qpqqolmk_3b21fe7a): beat Live Ship #5 ZIPs 4W-2L H2H (1.43x agg / 2.18x med, PkA +59%, 3-0 mirror sweep: PvP 3.40x, TvT 2.18x, ZvZ 3.33x + TvZ 6.32x) & 4W-0L ZIP smoke (7.23x/10.04x, SB 2.7% ATL, 4/4 Tag:v_qpqqolmk_3b21fe7a).",
+        "New external & matchup records across 84/84 100% clean matches: NEW EXT_78 clean wins ATH 25W-49L-4T (32.1% WR / 37.2% NL), FIRST-EVER 50.0% HIST12 clean WR (18W-18L 1.01x), FIRST-EVER >1.00x overall Terran trade (1.02x ALL_84; CORE14 7-7 1.66x; first-ever #74 T v who 23.75x!), Protoss PvT 4W-3L-1T (62.5% NL), 4x 3-0 sweeps (oberon, titania, monsterbot, CryptBotRevival).",
+        "Zero runtime defects & sub-200ms latency: ALL_84 max_step_ms=199.0ms, 0 crashes/rejects/spikes, 1BaseLock-on-losses 4->0, SelfCancel 2->0, GasZero 0, #75 P v who CloakLoss fixed, and SQLite Replay-DB crossed 3,062/3,062 indexed matches (100% raw_tracker, post-L37 North 103W-227L vs South 103W-227L exact parity!).",
+        "Complete 229-video Live-HUD H.264 MP4 Ship #6 library: 90/90 full-length 00:00->GG matches + Top-8 extended 21s highlights + 131 Tactics Arena 3.0 core drills (Self-Play 0.86x ATH, ro01 2/2 16/16 Drones 99.0x, burrow 5-0, stasis 4-0 SP)."
+      ],
+      "promotion_gates_passed": "2/9 PASS across full 78-match roster (zero_crashes_and_rejects, sup_blk_le_6pct [4.2%]); UNCONDITIONAL LIVE AI ARENA SHIP #6 PASS (4W-2L 1.43x/2.18x med 3-0 mirrors H2H vs live Ship #5 + 4W-0L 7.23x ZIP smoke + NEW EXT_78 25W ATH, FIRST-EVER 50% HIST12 WR & 1.02x Terran trade!)"
+    },
+    {
+      "id": "iter46_wave46_full",
+      "status": "HOLD_ZIP_ZERG_CORE14_8W_ATH_ARENA_3_0_FIRST_WINNING_34W_1_09X_P15_KO_WIN_PROTOSS_PVP_DIP",
+      "campaign": "Loops 29+ Self-Play, Honest 3-Tier Tactics Arena 3.0 & Expanded Roster Campaign (Loop 46 Hold-ZIP: First Winning Arena 3.0 Record 34-29-3 1.09x & First p15 Permanent-Cloak KO Win, Zerg Core14 8-5-1 Record, Holding Ship #7 for Loop 47 Protoss PvP & Terran TvP Recovery)",
+      "loop_self_improvements": [
+        "L46-LOOP-1 (Tactics Arena 3.0 Zero-Drop Batch Recording & First-Ever Winning Core Record): Hardened tools/sc2-tactics-arena.py early Victory/Defeat batch finalization & automatic single-wave host recovery (132/132 full-length MP4s = 166.34 MB with zero drops across all 16 categories), achieving Arena 3.0's first-ever winning Dummy core record (34W-29L-3D, 1.09x ATH, A:M 3.82 ATH, runby-offense 5P-2F 983.0 / 69 wkills ATH) and first-ever p15 Detection-First permanent-cloak KO WIN (1.14x, 3757=0, 1766=0, det=2/2, pf_dead=True)!",
+        "L46-LOOP-2 (Loop 46 Top-8 Live-HUD Showcase & Diagnostic Clips): Rendered 8 extended 21s (8s lead-in, 160f, 11.21 MB MP4) live-HUD highlights showcasing #57 first-ever real Protoss win vs Mulebot (10.00x), #36 Protoss vs AxeFighter (16.71x), Zerg Core14 record wins (#58 Creepy, #25 onlyfans), H2H PvZ/TvZ wins, and H2H #03/#04 Protoss diagnostic frames."
+      ],
+      "spec_summary": "Loop 46 (oyzplryr f6bab9f1 \u2014 Hold-ZIP -> fix Protoss PvP 0-7 & Terran TvP in Loop 47 for Ship #7): 90/90 matches 100% clean (0 own crashes, 0 opp crashes, 0 action rejects, 0 spikes >=500ms, max_step_ms=225.4ms). Baseline H2H vs Live Ship #6 ZIPs (qpqqolmk_3b21fe7a) finished 2W-4L-0T (33.3%, 0.66x agg / 0.39x med, SB 3.0% vs 3.9%, max_step 171.5ms): #05 PvZ flipped 0.35x->2.60x W, #06 TvZ 6.00x W 0-sigs, while #01/#02/#03/#04 lost (catching Protoss PvP dip & 0-Colossus PvT). Full 84-match roster (84/84 clean): ALL_84 25W-56L-3T (29.8% WR / 33.3% NL, 0.54x, SB 4.0%) | EXT_78 21W-54L-3T (26.9% WR / 30.8% NL, 0.48x, SB 3.9%) | CORE14 16W-25L-1T (38.1% WR, 0.72x) | UNSEEN12 5W-29L-2T (13.9% WR, 0.28x) | SELF_6 4W-2L-0T (66.7%, 1.25x, Protoss 2-1). Zerg hit a NEW ALL-TIME CORE14 RECORD: 8W-5L-1T (57.1% WR / 64.3% NL, 0.97x, SB 3.5%, PkA 4,504; #58 Creepy 2.89x 0-sigs, #25 onlyfans 2.09x, #28 mini-puck TIE) and EXT78 9W-14L-3T (46.2% NL). Protoss scored first-ever real clean win vs Mulebot (#57 10.00x 11.8m 0-sigs) & #36 AxeFighter (16.71x 0-sigs), but dipped to PvP 0-7 (0.13x) and Terran dipped to EXT78 6W-20L (TvP 1-7). Targeted anomaly wins: TvT0Tank 4->1, PvPNatDelay 4->2, EscrowLock 17->12, GasRich 13->9, T111Stall 7->4, EarlyRushIdleBank 4->2, EndgameStall 1->0, SelfCancel 0. Tactics Arena 3.0 (--suite core, 132/132 zero drops): FIRST-EVER WINNING RECORD Dummy 34W-29L-3D (1.09x ATH; runby 5P-2F 983.0 / 69 wkills ATH; first-ever p15 KO WIN 1.14x 3757=0 det=2/2 pf=True; ro04 2/2 12/6 & 15/6; ro01 2/2 16/16 & 10/4; d10 1.32x KO; r01 2/2 KO) + Self-Play 28W-34L-4D (0.81x, 17 KOs SP ATH, b06 first-ever SP KO!).",
+      "rev": "oyzplryr f6bab9f1 (iter46 Hold-ZIP -> fix Protoss PvP & Terran TvP in Loop 47 for Ship #7)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_160326_iter46_wave46_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_163308_iter46_baseline_h2h",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter46_wave46_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter46_baseline_h2h_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter46_wave46_full.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter46.json",
+      "tactics_selfplay_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter46.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter46.md",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "21W-54L-3T (26.9% WR / 30.8% NL, 0.48x, SB 3.9%, 84/84 clean; Zerg NEW CORE14 ATH 8W-5L-1T 64.3% NL 0.97x & EXT78 9W-14L-3T 46.2% NL; Protoss 1st real Mulebot W 10.00x & AxeFighter 16.71x offset by PvP 0-7; Terran dipped 6W-20L; ALL_84 25W-56L-3T 0.54x, SELF_6 4W-2L 1.25x; H2H 2W-4L 0.66x vs Live Ship #6 -> Hold-ZIP)",
+      "win_rate_pct": 26.9,
+      "trade_agg": 0.48,
+      "trade_med": 0.21,
+      "sup_blk_pct": 3.9,
+      "w4_alive_med": 26.0,
+      "w6_alive_med": 39.5,
+      "pk_army_avg": 2753.8,
+      "action_rejects": 0,
+      "crashes": 0,
+      "siege_range_zero_dps_losses": 12,
+      "cloaked_unit_damage_losses": 1,
+      "gas_rich_min_starved_matches": 9,
+      "one_base_lockout_matches": 2,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 4,
+      "prod_placement_stall_matches": 3,
+      "zero_kill_collapse_matches": 6,
+      "drip_feed_collapse_matches": 36,
+      "prod_idle_bank_freeze_matches": 0,
+      "gas_zero_harvest_freeze_matches": 1,
+      "spire_sched_drop_matches": 1,
+      "wall_timeout_ties": 2,
+      "army_val_4m_ratio_vs_pro": 0.78,
+      "army_val_8m_ratio_vs_pro": 0.46,
+      "latency_summary": "All 90/90 clean <=225.4ms (ALL_84 max_step_ms=225.4ms, CORE14 max_step_ms=196.4ms, 0 spikes >=500ms; tr95max=8.32ms, rt=6.24ms, tr=2.55ms, avg=9.59ms, p95=16.54ms; H2H max=171.5ms vs P2 284.3ms; 0 action rejects)",
+      "by_race": {
+        "Protoss": {
+          "record": "Mixed: scored first-ever real clean win vs Mulebot (#57 10.00x 11.8m 0-sigs) & #36 AxeFighter (16.71x 0-sigs), H2H #05 PvZ flipped 0.35x->2.60x W, SELF_6 2-1, Arena p15 FIRST-EVER KO WIN (1.14x, 3757=0, det=2/2, pf=True) & b06 first SP KO! Offset by PvP 0W-7L (0.13x, H2H #03 0.21x) & H2H #04 0-Colossus (0.39x); CORE14 3-11 (0.47x), EXT78 6-20 (0.41x)",
+          "trade_agg": 0.41,
+          "w4_alive_med": 28.0,
+          "w6_alive_med": 39.0,
+          "nat_sec": 94.1,
+          "sup_blk": 5.1
+        },
+        "Terran": {
+          "record": "Dipped from L45 ATH: CORE14 5W-9L (0.76x), EXT78 6W-20L (0.56x, SB 2.2%, TvP 1-7, TvT 2-6, TvZ 3-7); H2H 1-1 (#06 TvZ 6.00x 0-sigs, #02 TvT 0.53x); TvT0Tank cut 4->1 (#56/#62 fixed); Arena Terran 12W-4L-1D (1.40x!, ro04 2/2 12/6 & 15/6, ro01 2/2 16/16 & 10/4, d10 1.32x KO)",
+          "trade_agg": 0.56,
+          "w4_alive_med": 25.0,
+          "w6_alive_med": 38.5,
+          "nat_sec": 102.2,
+          "sup_blk": 2.2
+        },
+        "Zerg": {
+          "record": "NEW ALL-TIME CORE14 RECORD: 8W-5L-1T (57.1% WR / 64.3% NL, 0.97x, SB 3.5%, PkA 4,504: #58 Creepy 2.89x 0-sigs, #25 onlyfans 2.09x, #28 mini-puck TIE, titania/monsterbot/Chance/puck/oberon/sludgement2); EXT78 9W-14L-3T (34.6% WR / 46.2% NL, 0.47x, ZvP 3-4-1 50% NL); Arena Zerg 13W-8L-1D (1.31x, ro26 9/6 PASS, rd03 2/2 PASS)",
+          "trade_agg": 0.47,
+          "w4_alive_med": 25.5,
+          "w6_alive_med": 42.0,
+          "nat_sec": 56.2,
+          "sup_blk": 4.6
+        }
+      },
+      "tactics_summary": {
+        "rev": "oyzplryr f6bab9f1 (iter46 \u2014 FIRST-EVER WINNING ARENA 3.0 RECORD 34W-29L-3D 1.09x ATH & FIRST p15 KO WIN!)",
+        "passed": "Verifier 10/10 FIRST-PASS + raco make 104/104 + run-all-tests 2,400/2,400 + WS 718/718 + TypedCmd 273/273 + L31..L46 (259/259) + 39/39 Belief (560/560) + 213/213 Arena 3.0 Dual-Validated + 6/6 Replay-DB + 231/231 Tactics + 24/24 SM + 0/0/0/0 Pro-Starve",
+        "sc2_duel36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter46.json",
+        "sc2_selfplay36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter46.json",
+        "sc2_duel36_summary": "Arena 3.0 --suite core (132/132 zero drops = 166.34 MB, 0 crashes/glitches): FIRST-EVER WINNING DUMMY CORE RECORD 34W-29L-3D (1.09x ATH +0.15x, A:M 3.82 ATH; canonical 24-20-3 1.05x, econ-def 3P-4F +373.6M, runby 5P-2F 983.0 / 69 wkills ATH, reg 2-3 0.80x ATH) + Self-Play 28W-34L-4D (0.81x, 17 KOs SP ATH; canonical 19-24-4 0.78x, econ-def 4P-3F +452.1M, runby 4P-3F 49 wkills, reg 1-4 0.75x SP ATH). Spotlights: FIRST-EVER p15 permanent-cloak KO WIN (1.14x, 3757=0, det=2/2, pf=True!), ro04 2/2 (12/6 & 15/6), ro01 2/2 (16/16 & 10/4), d10 1.32x KO, r01 2/2 KO, b06 first SP KO!",
+        "by_tier_duel": {
+          "canonical": {
+            "total": 47,
+            "wins": 24,
+            "losses": 20,
+            "draws": 3,
+            "trade_agg": 1.05,
+            "am_ratio": 4.07
+          },
+          "econ-harass": {
+            "total": 14,
+            "passes": 8,
+            "fails": 6,
+            "econ_passes": 3,
+            "econ_fails": 4,
+            "avg_net_econ_score": 373.6,
+            "avg_minerals_gathered": 348.6,
+            "avg_mining_uptime_pct": 79.5,
+            "total_workers_lost": 34,
+            "runby_passes": 5,
+            "runby_fails": 2,
+            "avg_runby_score": 983.0,
+            "total_enemy_workers_killed": 69,
+            "avg_enemy_minerals_denied": 290.8
+          },
+          "regression": {
+            "total": 5,
+            "wins": 2,
+            "losses": 3,
+            "draws": 0,
+            "trade_agg": 0.8,
+            "am_ratio": 5.91
+          }
+        },
+        "by_tier_selfplay": {
+          "canonical": {
+            "total": 47,
+            "p1_wins": 19,
+            "p2_wins": 24,
+            "draws": 4,
+            "trade_agg": 0.78,
+            "am_ratio": 3.34
+          },
+          "econ-harass": {
+            "total": 14,
+            "passes": 8,
+            "fails": 6,
+            "econ_passes": 4,
+            "econ_fails": 3,
+            "avg_net_econ_score": 452.1,
+            "avg_minerals_gathered": 387.9,
+            "avg_mining_uptime_pct": 81.3,
+            "total_workers_lost": 26,
+            "runby_passes": 4,
+            "runby_fails": 3,
+            "avg_runby_score": 664.3,
+            "total_enemy_workers_killed": 49,
+            "avg_enemy_minerals_denied": 268.4
+          },
+          "regression": {
+            "total": 5,
+            "p1_wins": 1,
+            "p2_wins": 4,
+            "draws": 0,
+            "trade_agg": 0.75,
+            "am_ratio": 6.27
+          }
+        }
+      },
+      "visual_qa_highlights": [
+        "All 8/8 Loop 46 Top-8 extended 21s (8s lead-in, 160f, 11.21 MB MP4 total) live-HUD highlight posters verified cleanly with exact team colors, live Worker/Supply counters, and zero overlap.",
+        "Loop 46 showcase frames: #57 P v Mulebot (09:19 first-ever clean WIN 10.00x, 90/133 vs 38/85) marches Stalkers + Immortal into NW Orbital; #36 P v AxeFighter (06:03 WIN 16.71x, 71/86 vs 32/86) forces Barracks liftoff; #58 Z v Creepy (06:56 WIN 2.89x, 74/100 vs 37/100) floods SW main; #25 Z v onlyfans (11:10 WIN 2.09x, 84/100 vs 61/118) shreds Banshees with Corruptors+Overseer; H2H #05 PvZ (11:08 WIN 2.60x, 125/150 vs 36/92) storms NW Lair; H2H #06 TvZ (09:24 WIN 6.00x, 135/150 vs 24/64) captures live Tank range ring & shell flash deleting SE Hatchery.",
+        "Loop 47 diagnostic frames: H2H #03 PvP (07:11 LOSS 0.21x, 60/94 vs 79/94) catches only 18 army supply (1 Zealot, 1 Stalker, 1 Immortal) wandering mid-map; H2H #04 PvT (08:58 LOSS 0.39x, 73/102 vs 92/118) catches Robotics Facility + Robotics Bay sitting behind the natural with ZERO Colossi while only 2 Stalkers + 1 Immortal + 1 Phoenix face Blue's Tank + Bio."
+      ],
+      "key_wins": [
+        "First-ever winning Tactics Arena 3.0 core record (132/132 zero drops!): Dummy 34W-29L-3D (1.09x ATH, A:M 3.82 ATH, runby-offense 5P-2F 983.0 / 69 wkills ATH) + FIRST-EVER p15 permanent-cloak KO WIN (1.14x, 3757=0, det=2/2, pf=True!), ro04 2/2, ro01 2/2, d10 1.32x KO, r01 2/2 KO, b06 first SP KO.",
+        "Zerg new all-time CORE14 record: 8W-5L-1T (57.1% WR / 64.3% NL, 0.97x, SB 3.5%, PkA 4,504; #58 Creepy 2.89x 0-sigs, #25 onlyfans 2.09x, #28 mini-puck TIE) & EXT78 9W-14L-3T (46.2% NL).",
+        "Protoss held-out breakthroughs: first-ever real full-length Protoss win vs Mulebot (#57 10.00x 11.8m 0-sigs), #36 AxeFighter (16.71x 0-sigs), H2H #05 PvZ flipped 0.35x->2.60x W, SELF_6 4W-2L (1.25x).",
+        "Anomaly drops across 84/84 clean matches: TvT0Tank 4->1 (#56/#62 fixed), PvPNatDelay 4->2, EscrowLock 17->12, GasRich 13->9, T111Stall 7->4, EarlyRushIdleBank 4->2, EndgameStall 1->0, SelfCancel 0."
+      ],
+      "promotion_gates_passed": "2/9 PASS across full 78-match roster (zero_crashes_and_rejects, sup_blk_le_6pct [3.9%]); HOLD-ZIP (Zerg CORE14 8-5-1 ATH & Arena 3.0 34-29-3 1.09x + p15 KO WIN offset by Protoss PvP 0-7 / H2H 2W-4L -> fix in Loop 47 for Ship #7)"
+    },
+    {
+      "id": "iter47_wave47_full",
+      "status": "HOLD_ZIP_7_WAY_ZERO_ANOMALIES_CLOAKLOSS_0_T111STALL_2_ATL_UNSEEN12_7W_ATH_ARENA_3_0_1_17X_P15_1_58X_ATH",
+      "campaign": "Loops 29+ Self-Play, Honest 3-Tier Tactics Arena 3.0 & Expanded Roster Campaign (Loop 47 Hold-ZIP: 7-Way Zero Anomalies, UNSEEN12 7W ATH, Arena 3.0 34W-25L-7D 1.17x & p15 1.58x ATH, Combined with Loop 48 for Ship #7)",
+      "loop_self_improvements": [
+        "L47-LOOP-1 (Tactics Arena 3.0 All-Time High Core Benchmarks \u2014 1.17x Trade, +9 Margin, p15 1.58x KO): Validated 132/132 zero-drop full-length MP4 core duels (164.79 MB), reaching Arena 3.0 all-time highs: Dummy 34W-25L-7D (+9 margin, 25 KOs ATH, 1.17x Trade ATH, Terran 1.60x ATH, Zerg 1.52x ATH), p15 shattered ATH at 1.58x KO (14/27 DTs alive, 116 loops faster!), z16 restored 2/2 KO sweep, d10 first-ever 2/2 KO sweep, and d12 SP 2.41x KO \u2014 while immediately flagging Loop 48's r02/r05/r06 3666 regression.",
+        "L47-LOOP-2 (Loop 47 Top-8 Live-HUD Showcase & Diagnostic Clips): Rendered 8 extended 21s (8s lead-in, 160f, 11.28 MB MP4) live-HUD highlights showcasing H2H #06 TvZ (9.20x), H2H #05 PvZ (4.38x), H2H #03 PvP reversal (2.43x), #56 26m Mulebot Tank-line win (2.97x), #65 Clicadinha (8.94x), #21 PolyMorph 3-Colossus/3-Disruptor win (2.67x), and H2H #02/#04 Loop 48 diagnostic frames."
+      ],
+      "spec_summary": "Loop 47 (oyzplryr 229b89e0 \u2014 Hold-ZIP -> combine with Loop 48 r02/r05/r06 + H2H #02/#04 fixes for Ship #7): 90/90 matches 100% clean (0 own crashes, 0 opp crashes, 0 action rejects, 0 spikes >=500ms, max_step_ms=210.0ms). Baseline H2H vs Live Ship #6 ZIPs (qpqqolmk_3b21fe7a) finished 3W-3L-0T (50.0%, 0.98x agg / 2.43x med, SB 3.8%, max_step 148.6ms): #06 TvZ 9.20x 0-sigs, #05 PvZ 4.38x 0-sigs, #03 PvP flipped 0.21x->2.43x W (pvp_nat_delay=0), while #01 ZvZ (EscrowLock), #02 TvT (ProdStall), #04 PvT (0 Colossi, SB 9.1%) lost. Full 84-match roster (84/84 clean): ALL_84 27W-55L-2T (32.1% WR / 34.5% NL, 0.64x, SB 3.6%) | EXT_78 24W-52L-2T (30.8% WR, 0.60x, SB 3.7%, 3/9 promotion gates PASS!) | CORE14 17W-24L-1T (40.5% WR, 0.81x, SB 3.5%) | HIST12 17W-18L-1T (50.0% NL, 0.94x, SB 3.3%) | UNSEEN12 7W-28L-1T (19.4% WR \u2014 TIES ATH!, 0.43x +0.09x vs Ship #6!) | SELF_6 3W-3L (1.10x, SB 2.3% ATL). Both Protoss (+3W vs L46: CORE14 6-8 0.83x, #21 PolyMorph 2.67x w/ 3 Colossi + 3 Disruptors, #18 RustyNikolaj 2.88x, #60 Creepy 5.20x) and Terran (+2W/+0.28x vs L46: EXT78 9-17 0.87x SB 1.8% Flags=OK, W@6m 40.0/40.0 exact Pro parity!, TvZ 6W-5L 1.11x, #56 Mulebot 2.97x 13 Tanks 0-sigs, #65 Clicadinha 8.94x 0-sigs) rebounded strongly. 7-way ZERO anomalies (CloakLoss=0 [#73 Zvwho fixed!], GasZero=0, SelfCancel=0, EndgameStall=0, EndgameHomeStall=0, StaleTie=0, OpenFault=0) + T111Stall=2 NEW ATL! Tactics Arena 3.0 (132/132): Dummy 34W-25L-7D (+9 margin, 25 KOs ATH, 1.17x Trade ATH; p15 1.58x KO ATH w/ 14 DTs alive, z16 2/2 KO restored, d10 2/2 KO sweep, d12 SP 2.41x KO), Self-Play 27W-38L-1D (0.83x, 17 KOs tied ATH, Terran 1.54x & Zerg 1.01x SP ATHs).",
+      "rev": "oyzplryr 229b89e0 (iter47 Hold-ZIP -> combine with Loop 48 for Ship #7)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_171830_iter47_wave47_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_175015_iter47_baseline_h2h",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter47_wave47_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter47_baseline_h2h_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter47_wave47_full.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter47.json",
+      "tactics_selfplay_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter47.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter47.md",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "24W-52L-2T (30.8% WR / 33.3% NL, 0.60x, SB 3.7%, 84/84 clean, 3/9 gates PASS; 7-way ZERO anomalies incl. CloakLoss=0 & T111Stall=2 ATL; UNSEEN12 7W-28L-1T ties ATH; CORE14 17W-24L-1T 0.81x, HIST12 17W-18L-1T 50.0% NL 0.94x; ALL_84 27W-55L-2T 0.64x SB 3.6%; H2H 3W-3L 0.98x/2.43x med vs Live Ship #6 -> Hold-ZIP for Loop 48)",
+      "win_rate_pct": 30.8,
+      "trade_agg": 0.6,
+      "trade_med": 0.24,
+      "sup_blk_pct": 3.7,
+      "w4_alive_med": 27.0,
+      "w6_alive_med": 40.0,
+      "pk_army_avg": 2949.4,
+      "action_rejects": 0,
+      "crashes": 0,
+      "siege_range_zero_dps_losses": 11,
+      "cloaked_unit_damage_losses": 0,
+      "gas_rich_min_starved_matches": 8,
+      "one_base_lockout_matches": 2,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 2,
+      "prod_placement_stall_matches": 2,
+      "zero_kill_collapse_matches": 4,
+      "drip_feed_collapse_matches": 34,
+      "prod_idle_bank_freeze_matches": 0,
+      "gas_zero_harvest_freeze_matches": 0,
+      "spire_sched_drop_matches": 2,
+      "wall_timeout_ties": 2,
+      "army_val_4m_ratio_vs_pro": 0.88,
+      "army_val_8m_ratio_vs_pro": 0.48,
+      "latency_summary": "All 90/90 clean <=210.0ms (ALL_84 max_step_ms=210.0ms, 0 spikes >=500ms; tr95max=7.84ms, rt=6.34ms, tr=2.62ms, avg=9.79ms, p95=17.01ms; H2H max=148.6ms vs P2 271.1ms; 0 action rejects)",
+      "by_race": {
+        "Protoss": {
+          "record": "Rebounded +3W vs L46: CORE14 6W-8L (42.9%, 0.83x), EXT78 8W-17L-1T (34.6% NL, 0.58x, SB 4.8%; #21 PolyMorph 2.67x 0-sigs w/ 3 Colossi+3 Disruptors, #18 RustyNikolaj 2.88x 0-sigs, #60 Creepy 5.20x, #15 oberon); H2H 2-1 (#05 PvZ 4.38x 0-sigs, #03 PvP flipped 0.21x->2.43x pvp_nat_delay=0, #04 PvT L 0.28x 0-Colossi); Arena p15 shattered ATH 1.58x KO (14/27 DTs alive!)",
+          "trade_agg": 0.58,
+          "w4_alive_med": 26.0,
+          "w6_alive_med": 39.0,
+          "nat_sec": 91.9,
+          "sup_blk": 4.8
+        },
+        "Terran": {
+          "record": "Rebounded +2W/+0.28x vs L46 (Flags=OK!, W@6m 40.0/40.0 exact Pro parity!): EXT78 9W-17L (34.6% WR, 0.87x, SB 1.8%, TvZ 6W-5L 1.11x, #56 Mulebot 2.97x 26.2m 13 Tanks 0-sigs, #65 Clicadinha 8.94x 0-sigs, #11 puck, #20 PolyMorph); CORE14 5W-9L (1.00x, SB 2.0%); H2H 1-1 (#06 TvZ 9.20x 0-sigs, #02 TvT L 0.35x ProdStall); Arena Terran 1.60x Dummy / 1.54x SP ATHs, d10 2/2 KO, d12 SP 2.41x KO",
+          "trade_agg": 0.87,
+          "w4_alive_med": 26.0,
+          "w6_alive_med": 40.0,
+          "nat_sec": 114.5,
+          "sup_blk": 1.8
+        },
+        "Zerg": {
+          "record": "CORE14 6W-7L-1T (50.0% NL, 0.64x, SB 3.5%); EXT78 7W-18L-1T (30.8% NL, 0.40x, #73 who CloakLoss FIXED -> 0!, #25 onlyfans 3.33x 0-sigs); H2H #01 ZvZ L (EscrowLock); Arena Zerg 1.52x Dummy / 1.01x SP ATHs, z16 restored 2/2 KO sweep, ro26 SP 7/6 PASS",
+          "trade_agg": 0.4,
+          "w4_alive_med": 29.5,
+          "w6_alive_med": 43.0,
+          "nat_sec": 56.0,
+          "sup_blk": 4.6
+        }
+      },
+      "tactics_summary": {
+        "rev": "oyzplryr 229b89e0 (iter47 \u2014 NEW ARENA 3.0 ATH: Dummy 34W-25L-7D 1.17x, 25 KOs, p15 1.58x KO, z16 & d10 2/2 KO sweeps!)",
+        "passed": "Verifier 10/10 FIRST-PASS + raco make 106/106 + run-all-tests 2,403/2,403 + WS 721/721 + TypedCmd 273/273 + L31..L47 (268/268) + 40/40 Belief (572/572) + 213/213 Arena 3.0 Dual-Validated + 6/6 Replay-DB + 231/231 Tactics + 24/24 SM + 0/0/0/0 Pro-Starve",
+        "sc2_duel36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter47.json",
+        "sc2_selfplay36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter47.json",
+        "sc2_duel36_summary": "Arena 3.0 --suite core (132/132 zero drops = 164.79 MB, 0 crashes/glitches): NEW DUMMY ATH 34W-25L-7D (+9 margin, 25 KOs ATH, 1.17x Trade ATH +0.08x; canonical 25-15-7 1.17x ATH, econ-def 3P-4F +317.1M, runby 4P-3F 899.1 / 64 wkills, reg 2-3 0.63x) + Self-Play 27W-38L-1D (0.83x +0.02x, 17 KOs tied ATH, det=12 ATH; Terran 1.54x & Zerg 1.01x SP ATHs). Spotlights: p15 1.58x KO ATH (14/27 DTs alive!), z16 2/2 KO restored, d10 2/2 KO sweep, d12 SP 2.41x KO, ro01/ro04/ro13 2/2 sweeps; caught r02/r05/r06 3666 regression for L48.",
+        "by_tier_duel": {
+          "canonical": {
+            "total": 47,
+            "wins": 25,
+            "losses": 15,
+            "draws": 7,
+            "trade_agg": 1.17,
+            "am_ratio": 3.9
+          },
+          "econ-harass": {
+            "total": 14,
+            "passes": 7,
+            "fails": 7,
+            "econ_passes": 3,
+            "econ_fails": 4,
+            "avg_net_econ_score": 317.1,
+            "avg_minerals_gathered": 327.9,
+            "avg_mining_uptime_pct": 78.1,
+            "total_workers_lost": 39,
+            "runby_passes": 4,
+            "runby_fails": 3,
+            "avg_runby_score": 899.1,
+            "total_enemy_workers_killed": 64,
+            "avg_enemy_minerals_denied": 276.1
+          },
+          "regression": {
+            "total": 5,
+            "wins": 2,
+            "losses": 3,
+            "draws": 0,
+            "trade_agg": 0.63,
+            "am_ratio": 4.59
+          }
+        },
+        "by_tier_selfplay": {
+          "canonical": {
+            "total": 47,
+            "p1_wins": 20,
+            "p2_wins": 26,
+            "draws": 1,
+            "trade_agg": 0.81,
+            "am_ratio": 2.71
+          },
+          "econ-harass": {
+            "total": 14,
+            "passes": 7,
+            "fails": 7,
+            "econ_passes": 3,
+            "econ_fails": 4,
+            "avg_net_econ_score": 408.6,
+            "avg_minerals_gathered": 337.1,
+            "avg_mining_uptime_pct": 78.6,
+            "total_workers_lost": 30,
+            "runby_passes": 4,
+            "runby_fails": 3,
+            "avg_runby_score": 721.4,
+            "total_enemy_workers_killed": 51,
+            "avg_enemy_minerals_denied": 234.2
+          },
+          "regression": {
+            "total": 5,
+            "p1_wins": 0,
+            "p2_wins": 5,
+            "draws": 0,
+            "trade_agg": 0.44,
+            "am_ratio": 3.01
+          }
+        }
+      },
+      "visual_qa_highlights": [
+        "All 8/8 Loop 47 Top-8 extended 21s (8s lead-in, 160f, 11.28 MB MP4 total) live-HUD highlight posters inspected cleanly with exact team colors, live Worker/Supply counters, and zero overlap.",
+        "Loop 47 showcase frames: H2H #06 TvZ (07:40 WIN 9.20x, 100/126 vs 50/60) pushes Bio+Tank+Liberator into SE Zerg tech; H2H #05 PvZ (10:09 WIN 4.38x, 117/142 vs 51/86) crushes SW Hatchery; H2H #03 PvP (12:05 WIN 2.43x, 146/181 vs 65/79) storms SW main ramp with 18+ Blink Stalkers + 2 Immortals + Phoenix; #56 T v Mulebot (16:23 WIN 2.97x, 191/200 maxed Terran vs 101/139) smashes Mulebot Thors on Pylon; #65 T v Clicadinha (07:09 WIN 8.94x, 94/118 vs 45/68); #21 P v PolyMorph (11:40 WIN 2.67x, 134/149 vs 94/122) marches Disruptor+Immortal+Stalkers into SE Zerg.",
+        "Loop 48 diagnostic frames: H2H #02 TvT (08:51 LOSS 0.35x, 48/86 vs 89/156) catches Red stalled at 10 army supply (2 Marauders + 1 Tank) under ProdStall/EscrowLock while Blue shells the natural; H2H #04 PvT (09:13 LOSS 0.28x, 62/94 vs 94/126) catches Red at 17 army supply (1 Immortal + 1 Zealot, 0 Colossi) outside natural Gateways."
+      ],
+      "key_wins": [
+        "New Tactics Arena 3.0 all-time highs (132/132 zero drops): Dummy 34W-25L-7D (+9 margin, 25 KOs ATH, 1.17x Trade ATH, Terran 1.60x & Zerg 1.52x ATHs), p15 shattered ATH at 1.58x KO (14/27 DTs alive!), z16 restored 2/2 KO sweep, d10 first-ever 2/2 KO sweep, d12 SP 2.41x KO.",
+        "7-way ZERO anomalies across 84/84 clean matches: CloakLoss=0 (#73 Zvwho fixed!), GasZero=0, SelfCancel=0, EndgameStall=0, EndgameHomeStall=0, StaleTie=0, OpenFault=0, plus T111Stall=2 NEW ATL and 3/9 promotion gates PASS (ties_le_2, sup_blk_le_6pct [3.7%], zero_crashes).",
+        "UNSEEN12 tied all-time win record (7W-28L-1T, 19.4% WR, 0.43x +0.09x vs Ship #6) with Terran Flags=OK (W@6m 40.0/40.0 exact Pro parity, SB 1.8%, TvZ 6W-5L 1.11x, #56 Mulebot 2.97x 13 Tanks 0-sigs, #65 Clicadinha 8.94x 0-sigs) and Protoss +3W rebound (#21 PolyMorph 2.67x w/ 3 Colossi + 3 Disruptors, H2H 2-1)."
+      ],
+      "promotion_gates_passed": "3/9 PASS across full 78-match roster (zero_crashes_and_rejects, ties_le_2 [2T], sup_blk_le_6pct [3.7%]); HOLD-ZIP (7-way zero anomalies, UNSEEN12 7W ATH & Arena 3.0 1.17x ATH held for Loop 48 r02/r05/r06 & H2H #02/#04 fixes -> Ship #7)"
+    },
+    {
+      "id": "iter48_wave48_full",
+      "status": "SHIPPED_LIVE_AI_ARENA_SHIP_7_CORE14_50PCT_FIRST_EVER_HIST12_55_6PCT_ATH_ALL3_RACES_50PCT_CORE14_CREEPY_CHANCE_THSS_SERIES_WINS",
+      "campaign": "Loops 29+ Self-Play, Honest 3-Tier Tactics Arena 3.1 & Expanded Roster Campaign (Loop 48 LIVE AI ARENA SHIP #7: Combined L46+L47+L48, BuildVersion oyzplryr_dc3a33b6)",
+      "loop_self_improvements": [
+        "L48-LOOP-1 (Self-Improving Loop Trajectory Flywheel v2.0): Landed log-loop-trajectory.py, analyze-loop-flywheel.py, loop_trajectory_log.jsonl (30 loops, 31,701+ agent steps), SWARM_PLAYBOOK.md v2.0 H2H-First + Solo Gate 1 + Targeted Probe fast-fail gates, saving 30+ minutes of wasted GPU time by catching 3 H2H losses in 153s.",
+        "L48-LOOP-2 (Tactics Arena 3.1 Realism & 3 Full-Lifecycle Kiting Worker-Rush Drills): Audited all 66/66 core clips (198 frames), fixed p2_main_mineral_tags cross-client bug so ro01/ro04/runbys hit real actively mining bases (200-315M gathered!), added r14/r15/r16 15-kiting-Probe full-lifecycle drills (216 validated scenarios / 69 fast_core / 16 categories), fixed orphan TownHall/Creep/Carrier/Disruptor setups.",
+        "L48-LOOP-3 (Website Interactive Report + Pro Blueprints + 519-Match Stall Audit): Overhauled live GitHub Pages with iOS-native same-origin H.264 Main L3.1 MP4s (435 clips + 435 posters), interactive Dual-Loop Flywheel & 6-Stream Architecture diagrams, 9 real 3D base/wall captures + Grandmaster Pro vs Mothman 4:10 architectural blueprints (182 Pro vs 326 Mothman games), and 519-match stall audit feeding Loop 49's 4-Law Stall Watchdog."
+      ],
+      "spec_summary": "Loop 48 (LIVE AI ARENA SHIP #7 \u2014 Combined L46+L47+L48, BuildVersion oyzplryr_dc3a33b6): 90/90 matches 100% clean (0 crashes, 0 faults, 0 wire rejects). FIRST-EVER >=50% winning record on CORE14: 21W-19L-2T (50.0% WR / 54.8% NL, 0.97x Trade, PkA 3,763 +492) with ALL THREE RACES hitting 50.0% WR simultaneously (P 7-7 1.29x, T 7-6-1 1.03x SB 2.0%, Z 7-6-1)! SHATTERED HIST12 ATH 20W-14L-2T (55.6% WR / 61.1% NL, 1.01x Trade, +5.6pp over Ship #6)! NEW EXT_78 Non-Loss ATH 24W-48L-6T (38.5% NL, fewest external losses 48L ever, 0.65x Trade, N vs S parity 0.8pp). Series wins vs Creepy_strategies (2-1: T 5.67x vs canon_rush, P 3.04x vs 2gate-tempest), Chance (2-1: T 22.50x vs ProxyZealotRush, Z 5.11x), FIRST-EVER Thssprtssbt 2-1 (T 7.13x 0-sigs), oberon 2-1, CryptBotRevival 2-1, unbeaten vs puck (1-0-2) & AxeFighter (0-0-3), 3-0 sweeps vs titania/monsterbot/onlyfans. Anomalies crushed: T111Stall 7->1 (0 on losses!), TvT0Tank 4->1, ProdStall 2->1, 1BaseLock 2->1, EarlyRushIdleBank 4->1, ZeroKill 7->4, DripFeed 36->30, GasRich 13->10, EscrowLock 17->15, EndgameStall=0, HomeStall=0, SelfCancel=0. H2H vs Ship #6: Wave 2 H2H-First 4W-2L (1.31x agg / 1.30x med; ZvZ 6.12x, TvT 1.30x, TvZ 12.10x, PvZ 2.71x), combined L48 H2H n=12: Terran 4W-0L (100%, 0 sigs!), Zerg 1-1, Protoss verified 0 regressions (ALL84 trade +0.31x 0.55->0.86x!). Worker-rush Arena drills: static r02/r05/r06 surged 0.12-0.25x -> 0.75x ALL 3 races (12/15 kills Dummy, r05 SP up to 3.50x), kiting r14/r15/r16 zero macro waste (524=0/3685=0/1006=0, r15 up to 15/15 wipeout, r14 up to 9/15 1.20x full 100s). Mandatory 4-race ELF ZIP smoke PASS: 4W-0L (7.32x agg / 13.60x med, SB 3.6%, max_step 207.6ms, 4/4 Tag:v_oyzplryr_dc3a33b6).",
+      "rev": "oyzplryr_dc3a33b6 (LIVE AI ARENA SHIP #7)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_211438_iter48_ship7_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_201204_iter48b_h2h_first",
+      "zip_smoke_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_215819_iter48_ship7_zip_smoke",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter48_ship7_full_score.json",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "24W-48L-6T (30.8% WR / 38.5% NL NEW ATH, 48L fewest external losses ever, 0.65x; CORE14 21W-19L-2T 50.0% WR / 54.8% NL FIRST-EVER!, HIST12 20W-14L-2T 55.6% WR / 61.1% NL ATH!; ALL_84 26W-52L-6T 0.66x SB 4.0%; ZIP Smoke 4W-0L 7.32x 4/4 Tag:v_oyzplryr_dc3a33b6)",
+      "win_rate_pct": 30.8,
+      "non_loss_pct": 38.5,
+      "core14_wr_pct": 50.0,
+      "hist12_wr_pct": 55.6,
+      "trade_agg": 0.65,
+      "sup_blk_pct": 4.0,
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 1,
+      "prod_placement_stall_matches": 1,
+      "one_base_lockout_matches": 1,
+      "tvt_zero_tank_matches": 1,
+      "early_rush_idle_bank_3m_matches": 1,
+      "by_race": {
+        "Protoss": {
+          "record": "CORE14 7W-7L-0T (50.0% WR, 1.29x Trade!), EXT78 8W-17L-1T (34.6% NL, 0.89x; ALL84 +0.31x trade jump 0.55->0.86x!; PvT 4-4-1 1.33x, Creepy 3.04x, Mulebot 3.87x 10,950 PkA 0-sigs)",
+          "trade_agg": 0.89,
+          "sup_blk": 4.8
+        },
+        "Terran": {
+          "record": "CORE14 7W-6L-1T (50.0% WR / 57.1% NL, 1.03x, SB 2.0%), EXT78 8W-15L-3T (42.3% NL, 0.68x, SB 1.8%), H2H 4W-0L (100%, 0 sigs!, TvT 5.57x, TvZ 12.10x/3.18x), Creepy 5.67x, Chance 22.50x, Thssprtssbt 7.13x, who W",
+          "trade_agg": 0.68,
+          "sup_blk": 1.8
+        },
+        "Zerg": {
+          "record": "CORE14 7W-6L-1T (50.0% WR / 57.1% NL, 0.72x, PkA 4,154), EXT78 8W-16L-2T (38.5% NL, PkA +404), H2H ZvZ 6.12x W (19 Hydras), Chance 5.11x, Thssprtssbt 2.5m W",
+          "trade_agg": 0.48,
+          "sup_blk": 5.3
+        }
+      },
+      "tactics_summary": {
+        "rev": "oyzplryr_dc3a33b6 (Ship #7 \u2014 216 Arena 3.1 scenarios / 69 fast_core / 16 categories)",
+        "passed": "Verifier 10/10 FIRST-PASS + raco make 109/109 + run-all-tests 2,405/2,405 + WS 727/727 + TypedCmd 273/273 + L31..L48 (19/19 suites: 287/287 + 26/26 WR-Macro) + 41/41 scratch Belief + 6/6 repo Belief (W48 16/16) + 231/231 Tactics + 24/24 SMV + 0/0/0/0 Pro-Starve + 216/216 Arena 3.1 Dual-Validated + 5/5 Flywheel + 6/6 Replay-DB"
+      }
     }
   ],
   "final_18_loop_summary": {

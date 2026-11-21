@@ -116,8 +116,8 @@
       (mk-u (+ 1901 i) 'probe (+ 30.6 (* 0.15 (modulo i 5))) (+ 31.2 (* 0.15 (quotient i 5)))
             #:hp (if (= i 0) 20.0 20.0) #:shield (if (= i 0) 15.0 20.0))))
 
-  ;; T1a: 16 SCVs (4 at 8 HP!) vs 15 Probes (`16 <= 15 + 2`) -> ZERO `mineral-walk` disengages,
-  ;; ZERO `worker-drill-stack-attack`, ALL 16 SCVs commit directly via `pull-workers-attack` (`tid > 0`)!
+  ;; T1a: 16 SCVs (4 at 8 HP!) vs 15 Probes (`16 <= 15 + 2`, restored `L48-P0-1b` zero-disengage):
+  ;; ZERO `mineral-walk` disengages, ZERO `worker-drill-stack-attack`, ALL 16 SCVs commit directly via `pull-workers-attack` (`tid > 0`)!
   (define rt-r05 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
   (define acts-r05
     (step-layer2-economy!
@@ -131,18 +131,21 @@
   (define r05-pulled (remove-duplicates (append* (map second r05-pulls))))
   (define r05-primary-grp
     (findf (lambda (a) (and (>= (length a) 5) (= (third a) 1901))) r05-pulls))
-  (check-true "L42-T1a-r05-15probe-allin-zero-disengage-all-16-commit-and-up-to-8-focus"
+  ;; L48-W3 (Fix W3-R1): Static 15-Probe melee cap tightened to `<= 3` per target (`2..3` attackers
+  ;; on primary focus #1901) to maximize melee surface-area uptime & eliminate 6-8 body-blocking!
+  (check-true "L42-T1a-r05-15probe-allin-zero-disengage-all-16-commit-and-cap3-surface-focus"
               (and (null? r05-mws)
                    (null? r05-drills)
                    (= (length r05-pulled) 16)
                    r05-primary-grp
-                   (>= (length (second r05-primary-grp)) 4))
+                   (>= (length (second r05-primary-grp)) 2)
+                   (<= (length (second r05-primary-grp)) 3))
               (format "mws=~a drills=~a pulled=~a primary-grp=~a"
                       (length r05-mws) (length r05-drills) (length r05-pulled) r05-primary-grp))
 
   ;; T1b (`r06` PvP 16 Probes vs 15 Probes): Front-row Probe #1201 directly touching full-HP enemy
   ;; Probe #1960 (`0.8t` away) attacks #1960 (`<= 1.65t` contact!) instead of body-blocking to walk
-  ;; `3.0t` back for wounded Probe #1951, with ZERO disengages!
+  ;; `3.1t` back for wounded Probe #1951, with ZERO disengages!
   (define main-nex (mk-u 1050 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0 #:assigned-harvesters 16 #:ideal-harvesters 16))
   (define ally-probes-16
     (cons (mk-u 1201 'probe 30.0 32.5 #:hp 8.0 #:max-hp 20.0 #:shield 0.0 #:max-shield 20.0)

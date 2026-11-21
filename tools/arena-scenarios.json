@@ -583,39 +583,40 @@
         "worker-combat-surround",
         "zealot-choke"
       ],
-      "description": "Match-forensics (#36): 1 Zealot + 1 Adept + 12 Probes defending expansion mineral line vs 12 early 12-Pool Zerglings",
+      "description": "Match-forensics (#36): 1 Zealot + 1 Adept + 12 mining Probes at main Nexus defending vs 12 early 12-Pool Zerglings",
       "p1_units": [
         [
           "probe",
           12,
-          -2.5,
+          -3.2,
           0.0
         ],
         [
           "zealot",
           1,
-          -0.8,
-          0.5
+          2.4,
+          0.6
         ],
         [
           "adept",
           1,
-          -1.2,
-          -1.0
+          2.4,
+          -0.8
         ]
       ],
       "p2_units": [
         [
           "zergling",
           12,
-          4.8,
+          7.5,
           0.0
         ]
       ],
       "max_loops": 960,
       "tier": "canonical",
       "category": "early-rush-defense",
-      "fast_core": true
+      "fast_core": true,
+      "use_main_base": true
     },
     {
       "id": "sc2-real-p13-obs-colossus-stalker-vs-bio-widowmines",
@@ -2977,38 +2978,39 @@
         "Cloak"
       ],
       "p2_pre_cloaked": true,
-      "description": "Replay Regression (PvT): 1 Observer + 9 Stalkers + 12 Probes defending expansion mineral line vs 6 Cloaked Banshees",
+      "description": "Replay Regression (PvT): 1 Observer + 9 Stalkers + 12 mining Probes at main Nexus defending vs 6 Cloaked Banshees",
       "p1_units": [
         [
           "probe",
           12,
-          -3.0,
+          -3.2,
           0.0
         ],
         [
           "stalker",
           9,
-          -1.5,
+          2.8,
           0.0
         ],
         [
           "observer",
           1,
-          -2.2,
-          1.5
+          2.0,
+          1.8
         ]
       ],
       "p2_units": [
         [
           "banshee",
           6,
-          5.5,
+          8.8,
           0.0
         ]
       ],
       "max_loops": 960,
       "category": "regression",
-      "fast_core": true
+      "fast_core": true,
+      "use_main_base": true
     },
     {
       "id": "sc2-reg-r02-prod5138248-zvp-drone-hold-vs-15probe-rush",
@@ -3954,6 +3956,18 @@
           8,
           5.2,
           0.0
+        ],
+        [
+          "creep-tumor-burrowed",
+          1,
+          4.2,
+          -2.4
+        ],
+        [
+          "creep-tumor-burrowed",
+          1,
+          4.2,
+          2.4
         ]
       ],
       "max_loops": 960
@@ -5288,7 +5302,7 @@
         "BansheeCloak"
       ],
       "p1_pre_cloaked": true,
-      "description": "Worker-Runby TvZ (Cloaked Banshees): 2 Cloaked Banshees harvesting 16 mining Drones + 2 Queens (no Spore)",
+      "description": "Worker-Runby TvZ (Cloaked Banshees): 2 Cloaked Banshees harvesting 16 mining Drones + 2 Queens + 1 corner Spore Crawler (raid safe mineral wing)",
       "p1_units": [
         [
           "banshee",
@@ -5309,6 +5323,12 @@
           2,
           2.8,
           0.0
+        ],
+        [
+          "spore-crawler",
+          1,
+          -2.0,
+          -2.8
         ]
       ],
       "max_loops": 960
@@ -7186,18 +7206,18 @@
         "oracle-pulsar-beam",
         "mineral-line-disruption"
       ],
-      "description": "Stasis Ward Harass (PvT): 2 Oracles + 4 Stalkers planting Stasis Ward in enemy mineral line & picking off 12 SCVs + 6 Marines",
+      "description": "Stasis Ward Harass (PvT): 2 Oracles + 4 Stalkers planting Stasis Ward in P2 active CC mineral line & picking off 12 mining SCVs + 6 Marines",
       "p1_units": [
         [
           "oracle",
           2,
-          -4.5,
+          9.0,
           -1.8
         ],
         [
           "stalker",
           4,
-          -5.2,
+          9.5,
           1.2
         ]
       ],
@@ -7205,17 +7225,20 @@
         [
           "scv",
           12,
-          3.2,
+          -3.2,
           0.0
         ],
         [
           "marine",
           6,
-          4.5,
+          3.0,
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "use_p2_main_base": true,
+      "scoring_mode": "worker-runby",
+      "pass_workers_killed_min": 4
     },
     {
       "id": "sc2-sta-s02-pvz-oracle-stasis-mineral-harass",
@@ -7920,12 +7943,12 @@
       "p1_upgrades": [
         "WeaponRefit"
       ],
-      "description": "BC Mineral-Line Jump Raid (TvZ): 2 Battlecruisers jumping onto 16 Drones + 3 Queens + 2 Spore Crawlers (Yamato Queen/Spore + farm Drones)",
+      "description": "BC Mineral-Line Jump Raid (TvZ): 2 Battlecruisers jumping into P2 active Hatchery mineral line vs 16 mining Drones + 2 on-creep Spore Crawlers + 3 Queens",
       "p1_units": [
         [
           "battlecruiser",
           2,
-          -6.5,
+          9.5,
           0.0
         ]
       ],
@@ -7933,29 +7956,32 @@
         [
           "drone",
           16,
-          3.2,
+          -3.2,
           0.0
         ],
         [
           "spore-crawler",
           1,
-          2.2,
-          -2.2
+          -2.2,
+          -3.2
         ],
         [
           "spore-crawler",
           1,
-          2.2,
-          2.2
+          -2.2,
+          3.2
         ],
         [
           "queen",
           3,
-          4.5,
+          3.0,
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "use_p2_main_base": true,
+      "scoring_mode": "worker-runby",
+      "pass_workers_killed_min": 6
     },
     {
       "id": "sc2-yam-y07-tvp-bc-lowhp-escape-jump-vs-blink-stalkers",
@@ -8385,32 +8411,38 @@
         "GlialReconstitution",
         "MetabolicBoost"
       ],
-      "description": "Warp Prism Archon Drop (PvZ): Loaded Speed Warp Prism juggling 2 Archons vs 12 Speed Roaches + 2 Queens + 8 Speedlings",
+      "description": "Warp Prism Archon Drop (PvZ): Loaded Speed Warp Prism juggling 2 Archons at P2 active Hatchery mineral line vs 16 mining Drones + 2 Queens + 6 Roaches + 8 Speedlings",
       "p1_units": [],
       "p2_units": [
         [
-          "zergling",
-          8,
-          3.6,
-          0.0
-        ],
-        [
-          "roach",
-          12,
-          4.6,
+          "drone",
+          16,
+          -3.2,
           0.0
         ],
         [
           "queen",
           2,
-          5.4,
+          2.8,
           0.0
+        ],
+        [
+          "roach",
+          6,
+          3.8,
+          -1.2
+        ],
+        [
+          "zergling",
+          8,
+          3.8,
+          1.2
         ]
       ],
       "p1_loaded_transports": [
         {
           "transport": "warp-prism",
-          "dx": -5.5,
+          "dx": 9.2,
           "dy": 0.0,
           "cargo": [
             [
@@ -8420,7 +8452,10 @@
           ]
         }
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "use_p2_main_base": true,
+      "scoring_mode": "worker-runby",
+      "pass_workers_killed_min": 5
     },
     {
       "id": "sc2-trn-n06-pvt-warp-prism-ht-storm-drop",
@@ -8642,7 +8677,7 @@
         [
           "zergling",
           6,
-          -3.2,
+          -4.0,
           0.0
         ]
       ],
@@ -8650,26 +8685,26 @@
         [
           "zealot",
           4,
-          4.2,
+          4.4,
           0.0
         ],
         [
           "immortal",
           2,
-          5.0,
+          5.4,
           0.0
         ],
         [
           "stalker",
           6,
-          6.0,
+          6.4,
           0.0
         ]
       ],
       "p1_loaded_transports": [
         {
           "transport": "nydus-canal",
-          "dx": -5.2,
+          "dx": -6.2,
           "dy": 0.0,
           "cargo": [
             [
@@ -9242,24 +9277,24 @@
         "Stim",
         "CombatShield"
       ],
-      "description": "Burrowed Infestor Ambush (ZvT): 3 Burrowed Infestors + 18 Speedlings + 6 Speed Banelings unburrowing for Fungal + Neural vs 16 Stim Marines + 3 Sieged Tanks + 2 Medivacs",
+      "description": "Burrowed Infestor Ambush (ZvT): 3 Burrowed Infestors + 18 Speedlings + 6 Speed Banelings unburrowing for Fungal + Neural vs 16 Stim Marines + 3 Sieged Tanks + 2 Medivacs + 1 Raven (detector)",
       "p1_units": [
         [
           "infestor-burrowed",
           3,
-          -2.5,
+          -4.5,
           0.0
         ],
         [
           "zergling",
           18,
-          -4.6,
+          -6.2,
           0.0
         ],
         [
           "baneling",
           6,
-          -5.4,
+          -7.0,
           0.0
         ]
       ],
@@ -9267,20 +9302,26 @@
         [
           "marine",
           16,
-          4.0,
+          4.2,
           0.0
         ],
         [
           "siege-tank-sieged",
           3,
-          5.8,
+          6.2,
           0.0
         ],
         [
           "medivac",
           2,
-          6.6,
+          7.0,
           0.0
+        ],
+        [
+          "raven",
+          1,
+          5.8,
+          2.2
         ]
       ],
       "max_loops": 960
@@ -12041,6 +12082,162 @@
         ]
       ],
       "max_loops": 960
+    },
+    {
+      "id": "sc2-reg-r14-zvp-full-lifecycle-vs-15-kiting-probes",
+      "our_race": "Zerg",
+      "enemy_race": "Protoss",
+      "tier": "regression",
+      "category": "regression",
+      "fast_core": true,
+      "source": "match-forensics",
+      "terrain": "mineral-line-harass",
+      "scoring_mode": "mineral-defense",
+      "pass_net_econ_min": 250.0,
+      "use_main_base": true,
+      "p2_worker_micro": "cooldown-weave-kite",
+      "p1_minerals": 75,
+      "p1_starter_buildings": [
+        {
+          "unit": "spawning-pool",
+          "dx": 3.5,
+          "dy": 4.0,
+          "progress": 1.0
+        }
+      ],
+      "patterns": [
+        "worker-rush-kiting-defense",
+        "keep-mining-breakout",
+        "zerg-spine-batched-lings"
+      ],
+      "description": "Full-Lifecycle Worker-Rush Regression (ZvP): 16 Drones + Hatchery + Spawning Pool + 75M mining through & wiping 15 cooldown-weaving kiting Probes",
+      "p1_units": [
+        [
+          "drone",
+          16,
+          -3.2,
+          0.0
+        ],
+        [
+          "overlord",
+          2,
+          -5.0,
+          4.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "probe",
+          15,
+          6.2,
+          0.0
+        ]
+      ],
+      "max_loops": 2240
+    },
+    {
+      "id": "sc2-reg-r15-tvp-full-lifecycle-vs-15-kiting-probes",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "tier": "regression",
+      "category": "regression",
+      "fast_core": true,
+      "source": "match-forensics",
+      "terrain": "mineral-line-harass",
+      "scoring_mode": "mineral-defense",
+      "pass_net_econ_min": 250.0,
+      "use_main_base": true,
+      "p2_worker_micro": "cooldown-weave-kite",
+      "p1_minerals": 75,
+      "p1_starter_buildings": [
+        {
+          "unit": "supply-depot",
+          "dx": 3.5,
+          "dy": -4.5,
+          "progress": 1.0
+        },
+        {
+          "unit": "barracks",
+          "dx": 4.5,
+          "dy": 4.5,
+          "progress": 1.0
+        }
+      ],
+      "patterns": [
+        "worker-rush-kiting-defense",
+        "resume-halted-barracks",
+        "terran-skip-depot2-kiting-marines"
+      ],
+      "description": "Full-Lifecycle Worker-Rush Regression (TvP): 16 SCVs + CC + Depot + Barracks + 75M skipping Rax#2/Depot#2, mining through & wiping 15 cooldown-weaving kiting Probes",
+      "p1_units": [
+        [
+          "scv",
+          16,
+          -3.2,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "probe",
+          15,
+          6.2,
+          0.0
+        ]
+      ],
+      "max_loops": 2240
+    },
+    {
+      "id": "sc2-reg-r16-pvp-full-lifecycle-vs-15-kiting-probes",
+      "our_race": "Protoss",
+      "enemy_race": "Protoss",
+      "tier": "regression",
+      "category": "regression",
+      "fast_core": true,
+      "source": "match-forensics",
+      "terrain": "mineral-line-harass",
+      "scoring_mode": "mineral-defense",
+      "pass_net_econ_min": 250.0,
+      "use_main_base": true,
+      "p2_worker_micro": "cooldown-weave-kite",
+      "p1_minerals": 75,
+      "p1_starter_buildings": [
+        {
+          "unit": "pylon",
+          "dx": 3.8,
+          "dy": 4.2,
+          "progress": 1.0
+        },
+        {
+          "unit": "gateway",
+          "dx": 5.5,
+          "dy": 5.5,
+          "progress": 1.0
+        }
+      ],
+      "patterns": [
+        "worker-rush-kiting-defense",
+        "cancel-incomplete-gas",
+        "protoss-chrono-zealot-breakout"
+      ],
+      "description": "Full-Lifecycle Worker-Rush Regression (PvP): 16 Probes + Nexus + Pylon + Gateway + 75M mining & Chrono-boosting Zealots (skipping Gate#2) to wipe 15 kiting Probes",
+      "p1_units": [
+        [
+          "probe",
+          16,
+          -3.2,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "probe",
+          15,
+          6.2,
+          0.0
+        ]
+      ],
+      "max_loops": 2240
     }
   ]
 }

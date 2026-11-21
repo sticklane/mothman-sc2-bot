@@ -3366,14 +3366,51 @@
                           (try-ghost-emp #f))
                       (or (try-ghost-emp #f)
                           (try-ghost-snipe)))
-                  ;; 3. Ghost Cloak (W6-TAC-1: requires 'personal-cloaking upgrade, `energy >= 50`,
-                  ;;    engaging `< 10.0`, no enemy detector `< 11.0`)
+                  ;; 3. Ghost Cloak (W6-TAC-1 + L46-P0-1b `d12`: requires 'personal-cloaking upgrade,
+                  ;;    `energy >= 50`, engaging `<= 11.0t`, no mobile enemy detector `< 11.0t`, and no
+                  ;;    static enemy detector `< 11.0t` unless backed by `>= 6` combat allies actively
+                  ;;    clearing outer-rim static detectors `>= 8.0t` away!)
                   (and ghost-cloak-ok?
                        (>= en 50.0)
                        (not (uh-cloaked? u))
                        (> (- current-frame (hash-ref (spell-claims-ghost-cloak-frame claims) tag (lambda () -10000))) 20)
-                       (any-unit-within? enemy-units ux uy 10.0 sc2-enemy-unit-targetable?)
-                       (not (enemy-detector-within? enemy-units enemy-buildings ux uy 10.999))
+                       (any-unit-within? enemy-units ux uy 11.0 sc2-enemy-unit-targetable?)
+                       (let* ([mobile-det-near?
+                               (any-unit-within?
+                                enemy-units ux uy 10.999
+                                (lambda ([e : Any])
+                                  (and (memq (uh-type e) '(observer observer-siege-mode overseer overseer-siege-mode raven)) #t)))]
+                              [static-det-11?
+                               (or (any-unit-within?
+                                    enemy-units ux uy 10.999
+                                    (lambda ([e : Any])
+                                      (and (memq (uh-type e) '(missile-turret photon-cannon spore-crawler)) #t)))
+                                   (any-unit-within?
+                                    enemy-buildings ux uy 10.999
+                                    (lambda ([e : Any])
+                                      (and (memq (uh-type e) '(missile-turret photon-cannon spore-crawler)) #t))))]
+                              [static-det-8?
+                               (or (any-unit-within?
+                                    enemy-units ux uy 8.0
+                                    (lambda ([e : Any])
+                                      (and (memq (uh-type e) '(missile-turret photon-cannon spore-crawler)) #t)))
+                                   (any-unit-within?
+                                    enemy-buildings ux uy 8.0
+                                    (lambda ([e : Any])
+                                      (and (memq (uh-type e) '(missile-turret photon-cannon spore-crawler)) #t))))]
+                              [friendly-squad-clearing?
+                               (and static-det-11?
+                                    (not static-det-8?)
+                                    (>= (count-units-within
+                                         ally-units ux uy 12.0
+                                         (lambda ([a : Any])
+                                           (and (not (= (uh-tag a) tag))
+                                                (not (memq (uh-type a) '(scv probe drone mule medivac raven)))
+                                                (unit-combat-relevant? a))))
+                                        6))])
+                         (and (not mobile-det-near?)
+                              (or (not static-det-11?)
+                                  friendly-squad-clearing?)))
                        (begin
                          (hash-set! (spell-claims-ghost-cloak-frame claims) tag current-frame)
                          (spell-directive tag 'ghost 'cloak-ghost 'none 0 ux uy 'ghost-cloak)))
@@ -3706,35 +3743,63 @@
                                            (define asym (uh-type a))
                                            (define ax (uh-x a))
                                            (define ay (uh-y a))
-                                           ;; L39-P0-1a / 1f + L41-P0-1b (`#5140013` / `r05` / `e03`): Never pull SCVs to repair
-                                           ;; another SCV under active enemy combat harass (`<= 6.5t`, e.g. Adepts/Lings)
-                                           ;; or enemy worker rush (`>= 6` workers, OR `>= 3` pure workers w/ 0 enemy combat
-                                           ;; units!) — preserves Mech/Tank/Bunker/PF/CC combat repair!
+                                           ;; L39-P0-1a / 1f + L41-P0-1b + L48-W2 (`#5140013` / `r05` / `r15` / `e03`):
+                                           ;; - Never pull SCVs to repair another SCV under active enemy combat harass (`<= 6.5t`,
+                                           ;;   e.g. Adepts/Lings) or enemy worker rush (`>= 6` workers, OR `>= 3` pure workers w/ 0
+                                           ;;   enemy combat units).
+                                           ;; - Under a `>= 6`-worker pure worker rush (0 enemy combat units within `24t`, e.g. `r15`),
+                                           ;;   ALSO suppress SCV `3685` repair of non-fortification buildings (CC/Barracks/Depot/etc.)
+                                           ;;   so SCVs fight/mine instead of burning 38-47 ticks on repair — while strictly preserving
+                                           ;;   combat Mech/Siege Tank/Bunker/Planetary Fortress/Missile Turret repair (`L39-T1b`)!
+                                           (define near-ew-cnt-24
+                                             (count-units-within
+                                              enemy-units ax ay 24.0
+                                              (lambda ([e : Any])
+                                                (and (memq (uh-type e) '(scv probe drone)) #t))))
+                                           (define any-enemy-combat-24?
+                                             (any-unit-within?
+                                              enemy-units ax ay 24.0
+                                              (lambda ([e : Any])
+                                                (and (sc2-enemy-unit-targetable? e)
+                                                     (not (memq (uh-type e) '(scv probe drone)))
+                                                     (unit-combat-relevant? e)))))
+                                           (define pure-worker-rush-noncombat-bldg-repair?
+                                             (and (>= near-ew-cnt-24 6)
+                                                  (not any-enemy-combat-24?)
+                                                  (memq asym '(scv command-center orbital-command
+                                                               barracks supply-depot supply-depot-lowered
+                                                               refinery engineering-bay factory starport
+                                                               armory ghost-academy fusion-core
+                                                               tech-lab reactor
+                                                               barracks-techlab barracks-reactor
+                                                               factory-techlab factory-reactor
+                                                               starport-techlab starport-reactor))))
                                            (define unsafe-scv-on-scv?
-                                             (and (eq? asym 'scv)
-                                                  (let ([near-combat?
-                                                         (any-unit-within?
-                                                          enemy-units ax ay 6.5
-                                                          (lambda ([e : Any])
-                                                            (and (sc2-enemy-unit-targetable? e)
-                                                                 (not (memq (uh-type e) '(scv probe drone)))
-                                                                 (unit-combat-relevant? e))))]
-                                                        [near-ew-cnt
-                                                         (count-units-within
-                                                          enemy-units ax ay 14.0
-                                                          (lambda ([e : Any])
-                                                            (and (memq (uh-type e) '(scv probe drone)) #t)))]
-                                                        [any-enemy-combat-14?
-                                                         (any-unit-within?
-                                                          enemy-units ax ay 14.0
-                                                          (lambda ([e : Any])
-                                                            (and (sc2-enemy-unit-targetable? e)
-                                                                 (not (memq (uh-type e) '(scv probe drone)))
-                                                                 (unit-combat-relevant? e))))])
-                                                    (or near-combat?
-                                                        (>= near-ew-cnt 6)
-                                                        (and (>= near-ew-cnt 3)
-                                                             (not any-enemy-combat-14?))))))
+                                             (or pure-worker-rush-noncombat-bldg-repair?
+                                                 (and (eq? asym 'scv)
+                                                      (let ([near-combat?
+                                                             (any-unit-within?
+                                                              enemy-units ax ay 6.5
+                                                              (lambda ([e : Any])
+                                                                (and (sc2-enemy-unit-targetable? e)
+                                                                     (not (memq (uh-type e) '(scv probe drone)))
+                                                                     (unit-combat-relevant? e))))]
+                                                            [near-ew-cnt
+                                                             (count-units-within
+                                                              enemy-units ax ay 14.0
+                                                              (lambda ([e : Any])
+                                                                (and (memq (uh-type e) '(scv probe drone)) #t)))]
+                                                            [any-enemy-combat-14?
+                                                             (any-unit-within?
+                                                              enemy-units ax ay 14.0
+                                                              (lambda ([e : Any])
+                                                                (and (sc2-enemy-unit-targetable? e)
+                                                                     (not (memq (uh-type e) '(scv probe drone)))
+                                                                     (unit-combat-relevant? e))))])
+                                                        (or near-combat?
+                                                            (>= near-ew-cnt 6)
+                                                            (and (>= near-ew-cnt 3)
+                                                                 (not any-enemy-combat-14?)))))))
                                            (and (not (= (uh-tag a) tag))
                                                 (not unsafe-scv-on-scv?)
                                                 (or precomputed-repair-targets
@@ -4056,16 +4121,20 @@
               (define-values (beam-on? dwell) (oracle-pulsar-beam-active? claims u current-frame))
               (cond
                 ;; When Pulsar Beam is ON: ONLY permit OFF after >= 60f minimum dwell
-                ;; L45-P0-1b (`ro09`): When raiding a mineral line (`>= 4` enemy workers within `<= 9.0t`),
-                ;; hold Pulsar Beam ON down to `sh < 10.0` (and `en < 10.0`) so Oracles finish shredding
-                ;; SCVs/Drones/Probes instead of toggling OFF at `sh = 24` after 2 Marine volleys!
+                ;; L45-P0-1b + L46-P0-1a (`ro09`): When raiding a mineral line (`>= 4` enemy workers
+                ;; within `<= 14.0t` or `>= 4` light pulsar victims within `<= 9.5t`), hold Pulsar Beam
+                ;; ON down to `sh < 10.0` (and `en < 10.0`) so Oracles finish crossing front Marines and
+                ;; shredding SCVs/Drones/Probes instead of toggling OFF at `sh = 24`!
                 [beam-on?
                  (define near-raid-workers
-                   (count-units-within enemy-units ux uy 9.0
+                   (count-units-within enemy-units ux uy 14.0
                                        (lambda ([e : Any])
                                          (and (memq (uh-type e) '(scv probe drone mule)) #t))))
-                 (define min-sh-off (if (>= near-raid-workers 4) 10.0 25.0))
-                 (define min-en-off (if (>= near-raid-workers 4) 10.0 15.0))
+                 (define near-light-victims
+                   (count-units-within enemy-units ux uy 9.5 oracle-pulsar-victim?))
+                 (define worker-raid-hold? (or (>= near-raid-workers 4) (>= near-light-victims 4)))
+                 (define min-sh-off (if worker-raid-hold? 10.0 25.0))
+                 (define min-en-off (if worker-raid-hold? 10.0 15.0))
                  (and (>= dwell ORACLE-PULSAR-BEAM-MIN-DWELL-FRAMES)
                       (or (< en min-en-off)
                           (< sh min-sh-off)
@@ -4123,33 +4192,53 @@
                                                  'oracle-revelation-army))))))
                  (or rev-dir
                      ;; Branch (b): Pulsar Beam ON (`energy >= 40`, `shields >= 35`, `>= 2` light/workers in `7.5t`,
-                     ;; or `>= 4` workers in `9.0t` with `energy >= 35` & `shields >= 25`)
-                     ;; L44-P0-1b + L45-P0-1b (`ro09`): Pop Pulsar Beam (`2375`) cleanly on approach
-                     ;; instead of stopping to drop Stasis Ward (while `sh < 25` preserves `L43-T3d`!).
-                     (and (or (and (>= en 40.0)
-                                   (>= sh 35.0)
-                                   (>= (count-units-within enemy-units ux uy 7.5 oracle-pulsar-victim?) 2))
-                              (and (>= en 35.0)
-                                   (>= sh 25.0)
-                                   (>= (count-units-within enemy-units ux uy 9.0
+                     ;; or `>= 4` workers in `9.0t` with `energy >= 35` & `shields >= 25`, or full mineral line
+                     ;; `>= 8` workers in `10.0t` / active AA-contested worker raid down to `shields >= 15`)
+                     ;; L44-P0-1b + L45-P0-1b + L46-P0-1a (`ro09`): Pop Pulsar Beam (`2375`) cleanly on approach
+                     ;; instead of stopping to drop Stasis Ward (while uncontested low-shield `sh=20` near 5-6
+                     ;; workers preserves `L43-T3d`!).
+                     (and (let* ([ew-10 (count-units-within enemy-units ux uy 10.0
+                                                            (lambda ([e : Any])
+                                                              (and (memq (uh-type e) '(scv probe drone mule)) #t)))]
+                                 [ew-9 (count-units-within enemy-units ux uy 9.0
                                                            (lambda ([e : Any])
-                                                             (and (memq (uh-type e) '(scv probe drone mule)) #t)))
-                                       4)))
+                                                             (and (memq (uh-type e) '(scv probe drone mule)) #t)))]
+                                 [aa-near? (any-unit-within? all-enemies ux uy 10.5 enemy-anti-air-or-air-threat?)])
+                            (or (and (>= en 40.0)
+                                     (>= sh 35.0)
+                                     (>= (count-units-within enemy-units ux uy 7.5 oracle-pulsar-victim?) 2))
+                                (and (>= en 35.0)
+                                     (>= sh 25.0)
+                                     (>= ew-9 4))
+                                (and (>= en 35.0)
+                                     (>= sh 15.0)
+                                     (or (>= ew-10 8)
+                                         (and (>= ew-9 4) aa-near?)))))
                           (begin
                             (hash-set! (spell-claims-oracle-beam-start claims) tag current-frame)
                             (spell-directive tag 'oracle 'pulsar-beam-on 'none 0 ux uy
                                              'oracle-pulsar-beam-on)))
                      ;; Branch (c): Stasis Ward (`beam OFF` & `energy >= 50` at enemy mineral line
                      ;; or `>= 55` at choke/approach).
-                     ;; L44-P0-1b + L45-P0-1b (`ro09`): When `shields >= 25` with `energy < 90` near enemy
-                     ;; workers/light victims (`<= 14t`), SAVE energy for Pulsar Beam instead of burning
-                     ;; `50E` on Stasis Ward (while low-shield `shields < 25` like `sh=20` in `L43-T3d`,
-                     ;; or `energy >= 90`, still plants mineral-line Stasis Traps cleanly!).
+                     ;; L44-P0-1b + L45-P0-1b + L46-P0-1a + L47-P0-1a (`ro09` Dummy & SP `2505` suppress):
+                     ;; Remove the `(< en 90.0)` ceiling on Stasis Ward suppression during a worker raid
+                     ;; (`>= 4` enemy workers `<= 14t` with `>= 8` workers OR active AA `<= 10.5t` OR `sh >= 25.0`)
+                     ;; because Oracles starting/recharging to `en >= 90` bypassed `(< en 90.0)` and burned `2505`
+                     ;; in open space instead of activating Pulsar Beam on 16 SCVs! Uncontested low-shield `sh=20`
+                     ;; near `5-6` workers (`L43-T3d`/`L44-T2b`/`L45-T2b`/`L46-T1b`) STILL plants Stasis Ward!
                      (and (>= en 50.0)
-                          (let* ([save-for-pulsar-raid?
-                                  (and (< en 90.0)
-                                       (>= sh 25.0)
-                                       (>= (count-units-within enemy-units ux uy 14.0 oracle-pulsar-victim?) 2))]
+                          (let* ([ew-14 (count-units-within enemy-units ux uy 14.0
+                                                            (lambda ([e : Any])
+                                                              (and (memq (uh-type e) '(scv probe drone mule)) #t)))]
+                                 [aa-near-10? (any-unit-within? all-enemies ux uy 10.5 enemy-anti-air-or-air-threat?)]
+                                 [save-for-pulsar-raid?
+                                  (or (and (< en 90.0)
+                                           (>= sh 25.0)
+                                           (>= (count-units-within enemy-units ux uy 14.0 oracle-pulsar-victim?) 2))
+                                      (and (>= ew-14 4)
+                                           (or (>= ew-14 8)
+                                               aa-near-10?
+                                               (>= sh 25.0))))]
                                  [safe-site?
                                   (lambda ([wx : Float] [wy : Float])
                                     (and (<= (dist2 ux uy wx wy) 8.0)
@@ -5316,13 +5405,14 @@
               (if (= (uh-tag other) tag)
                   m
                   (min m (dist2 ux uy (uh-x other) (uh-y other))))))
-          (define crowded? (< min-ally-sep 1.10))
-          ;; L42-P0-1c + L43-P0-1d (`z16` moving-Thor HOLD tolerance): Any spread Muta within
-          ;; `<= 3.95t` of `best-thor` (well inside Mutalisk `4.0t` center-to-center firing range!)
-          ;; with `>= 1.30t` ally separation holds position (`18`) continuously even when SP Thors move!
+          ;; L42-P0-1c + L43-P0-1d + L47-P0-1a (`z16` Muta Magic-Box Dummy `1.47x` recovery):
+          ;; Strictly require `>= 1.35t` pairwise nearest-ally clearance (strictly outside Thor
+          ;; Javelin AA splash diameter!) BEFORE emitting `HOLD_POSITION (18)` so clumped Mutas
+          ;; finish spreading out via `MOVE (16)` instead of hovering inside splash!
           (define ready-to-hold?
-            (or (and (<= d-thor 3.95) (>= min-ally-sep 1.30))
-                (and (<= d-slot 1.05) (<= d-thor 4.10) (not crowded?))))
+            (and (>= min-ally-sep 1.35)
+                 (or (<= d-thor 3.95)
+                     (and (<= d-slot 1.05) (<= d-thor 4.10)))))
           (cond
             [(and (< (uh-total-hp u) 32.0) (>= healthy-cnt 4))
              (define dx (- ux tx0))
