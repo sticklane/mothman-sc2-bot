@@ -1983,10 +1983,28 @@
                  (hash 'type 'supply-depot     'x d1-x    'y d1-y    'w 2 'h 2 'gap 12)
                  (hash 'type 'bunker           'x d2-x    'y d2-y    'w 3 'h 3 'gap 12)))]
       [else
-       (list (hash 'type 'pylon         'x (+ choke-x 2) 'y (+ choke-y 1) 'w 2 'h 2 'gap 0)
-             (hash 'type 'forge         'x choke-x       'y (+ choke-y 4) 'w 3 'h 3 'gap 4)
-             (hash 'type 'gateway       'x (+ choke-x 3) 'y (+ choke-y 4) 'w 3 'h 3 'gap 11)
-             (hash 'type 'photon-cannon 'x (+ choke-x 7) 'y (+ choke-y 4) 'w 2 'h 2 'gap 13))]))
+       ;; L37-P0-2 (`#846`): Project Protoss choke wall along spawn-symmetric ramp vector `(ramp-dx, ramp-dy)`
+       ;; instead of hardcoded `+2/+3/+7, +1/+4` (SW-only) offsets!
+       (define rlen (max 1e-6 (sqrt (+ (* (exact->inexact ramp-dx) (exact->inexact ramp-dx))
+                                       (* (exact->inexact ramp-dy) (exact->inexact ramp-dy))))))
+       (define rux (/ (exact->inexact ramp-dx) rlen))
+       (define ruy (/ (exact->inexact ramp-dy) rlen))
+       (define rpx (- ruy))
+       (define rpy rux)
+       (define (proj-2x2 fwd lat)
+         (values (snap-2x2-coord (+ choke-x (* fwd rux) (* lat rpx)))
+                 (snap-2x2-coord (+ choke-y (* fwd ruy) (* lat rpy)))))
+       (define (proj-3x3 fwd lat)
+         (values (snap-3x3-coord (+ choke-x (* fwd rux) (* lat rpx)))
+                 (snap-3x3-coord (+ choke-y (* fwd ruy) (* lat rpy)))))
+       (define-values (px0 py0) (proj-2x2 -4.0 -0.5))
+       (define-values (fx0 fy0) (proj-3x3 -1.5 -3.0))
+       (define-values (gx0 gy0) (proj-3x3 -1.5 0.0))
+       (define-values (cx0 cy0) (proj-2x2 -1.5 3.5))
+       (list (hash 'type 'pylon         'x px0 'y py0 'w 2 'h 2 'gap 0)
+             (hash 'type 'forge         'x fx0 'y fy0 'w 3 'h 3 'gap 4)
+             (hash 'type 'gateway       'x gx0 'y gy0 'w 3 'h 3 'gap 11)
+             (hash 'type 'photon-cannon 'x cx0 'y cy0 'w 2 'h 2 'gap 13))]))
 
   (define max-gap
     (if (null? placements)
@@ -2431,36 +2449,51 @@
          (hash? wall)
          (hash-ref wall 'pylon #f)))
   (define use-exact-pylon? (pair? wall-pylon-pt))
+  ;; L37-P0-2 (`#846`): Spawn-symmetric Pylon anchor selection — zero hardcoded `+X,+Y` NE drift!
   (define-values (em-px em-py)
     (emergency-inmain-supply-anchor
      base-x base-y nat-x nat-y
-     (+ retry-idx (if failed? (+ pylon-cnt 1) 0))
+     (+ retry-idx (if failed? (+ pylon-cnt 1) pylon-cnt))
      mineral-patches))
   (define use-nat-anchor?
     (and live-game?
          (>= active-bases 2)
          (>= pylon-cnt 2)
          (if failed? (even? retry-idx) (odd? pylon-cnt))))
-  (define raw-px
+  (define-values (raw-px raw-py)
     (cond
-      [use-exact-pylon? (safe-coord (car wall-pylon-pt) em-px)]
+      [use-exact-pylon?
+       (values (safe-coord (car wall-pylon-pt) em-px)
+               (safe-coord (cdr wall-pylon-pt) em-py))]
       [has-unpowered?
-       (safe-coord (+ (hash-ref unpowered-bldg 'x (+ base-x 4.0)) 2.5) em-px)]
-      [bypass-wall? em-px]
+       (define ux0 (exact->inexact (hash-ref unpowered-bldg 'x em-px)))
+       (define uy0 (exact->inexact (hash-ref unpowered-bldg 'y em-py)))
+       (define dx (- (exact->inexact base-x) ux0))
+       (define dy (- (exact->inexact base-y) uy0))
+       (define d (sqrt (+ (* dx dx) (* dy dy))))
+       (define-values (ix iy)
+         (if (> d 0.5)
+             (values (/ dx d) (/ dy d))
+             (let* ([ndx (- (exact->inexact nat-x) (exact->inexact base-x))]
+                    [ndy (- (exact->inexact nat-y) (exact->inexact base-y))]
+                    [nd (max 1.0 (sqrt (+ (* ndx ndx) (* ndy ndy))))])
+               (values (/ ndx nd) (/ ndy nd)))))
+       (values (safe-coord (+ ux0 (* 2.5 ix)) em-px)
+               (safe-coord (+ uy0 (* 2.5 iy)) em-py))]
+      [bypass-wall? (values em-px em-py)]
       [use-nat-anchor?
-       (safe-coord (+ nat-x 4.5 (* 2.0 (modulo (quotient pylon-cnt 2) 3))) (+ base-x 4.0))]
-      [failed? em-px]
-      [else (safe-coord (+ base-x 4.0 (* 2.5 (modulo pylon-cnt 4))))]))
-  (define raw-py
-    (cond
-      [use-exact-pylon? (safe-coord (cdr wall-pylon-pt) em-py)]
-      [has-unpowered?
-       (safe-coord (+ (hash-ref unpowered-bldg 'y (+ base-y 4.0)) 0.5) em-py)]
-      [bypass-wall? em-py]
-      [use-nat-anchor?
-       (safe-coord (+ nat-y 4.5 (* 2.0 (quotient pylon-cnt 6))) (+ base-y 4.0))]
-      [failed? em-py]
-      [else (safe-coord (+ base-y 4.0 (* 2.5 (quotient pylon-cnt 4))))]))
+       (define ndx (- (exact->inexact base-x) (exact->inexact nat-x)))
+       (define ndy (- (exact->inexact base-y) (exact->inexact nat-y)))
+       (define nd (max 1.0 (sqrt (+ (* ndx ndx) (* ndy ndy)))))
+       (define nux (/ ndx nd))
+       (define nuy (/ ndy nd))
+       (define npx (- nuy))
+       (define npy nux)
+       (define lat-step (list-ref '(0.0 2.5 -2.5 5.0 -5.0) (modulo (quotient pylon-cnt 2) 5)))
+       (define back-step (+ 4.0 (* 1.5 (modulo (quotient pylon-cnt 6) 2))))
+       (values (safe-coord (+ nat-x (* back-step nux) (* lat-step npx)) em-px)
+               (safe-coord (+ nat-y (* back-step nuy) (* lat-step npy)) em-py))]
+      [else (values em-px em-py)]))
   (values raw-px raw-py use-exact-pylon?))
 
 ;; =============================================================================
@@ -3465,11 +3498,12 @@
        (or (first-valid wall-depots main-h (list matrix-aabb))
            (let ()
              (define existing-depots (filter-ally-structures-by-syms ally-bldgs '(supply-depot)))
+             (define base-ang (atan away-uy away-ux))
              (define ring-cands
                (sort
-                (for*/list ([rad (in-list '(13.0 15.0 11.5 17.5))]
+                (for*/list ([rad (in-list '(13.0 15.0 11.5 17.5 9.5))]
                             [k (in-range 0 16)])
-                  (define ang (* k (/ (* 2.0 pi) 16.0)))
+                  (define ang (+ base-ang (* k (/ (* 2.0 pi) 16.0))))
                   (define rx (snap-2x2-coord (+ bx-f (* rad (cos ang)))))
                   (define ry (snap-2x2-coord (+ by-f (* rad (sin ang)))))
                   (define valid?
@@ -3638,15 +3672,19 @@
            pylons))
   (define spine-x (if existing-main-pylon (snap-2x2-coord (hash-ref existing-main-pylon 'x raw-hub-x)) raw-hub-x))
   (define spine-y (if existing-main-pylon (snap-2x2-coord (hash-ref existing-main-pylon 'y raw-hub-y)) raw-hub-y))
+  ;; L37-P0-2 (`#846`): Align Dual-Pylon spine & flanking 3x3 columns along spawn-symmetric
+  ;; `(away-ux, away-uy)` / `(perp-ux, perp-uy)` basis so NW/NE/SW/SE corners are 100% rotation-symmetric!
   (define spine-pylon-cands
     (for*/list ([col (in-list '(0.0 13.0 -13.0))]
                 [dy (in-list '(0.0 4.0 -4.0 8.0 -8.0))])
-      (cons (+ spine-x col) (+ spine-y dy))))
+      (cons (+ spine-x (* col perp-ux) (* dy away-ux))
+            (+ spine-y (* col perp-uy) (* dy away-uy)))))
   (define matrix-3x3-slots
     (for*/list ([col (in-list '(0.0 13.0 -13.0))]
                 [pair-dy (in-list '(2.5 -2.5 7.5 -7.5 12.5))]
                 [side (in-list '(-4.5 4.5))])
-      (cons (+ spine-x col side) (+ spine-y pair-dy))))
+      (cons (+ spine-x (* (+ col side) perp-ux) (* pair-dy away-ux))
+            (+ spine-y (* (+ col side) perp-uy) (* pair-dy away-uy)))))
   (define snap-fn (if (sc2-odd-footprint-structure? canon) snap-3x3-coord snap-2x2-coord))
   (define (first-valid cands [tgt-h main-h] [req-terr? #t])
     (for/first ([pt (in-list cands)]
@@ -3725,8 +3763,10 @@
          [unpowered-b
           (define ux (exact->inexact (hash-ref unpowered-b 'x bx-f)))
           (define uy (exact->inexact (hash-ref unpowered-b 'y by-f)))
-          (define cands (list (cons (+ ux 3.5) (+ uy 0.5)) (cons (- ux 3.5) (+ uy 0.5))
-                              (cons (+ ux 0.5) (+ uy 3.5)) (cons (+ ux 0.5) (- uy 3.5))))
+          (define cands
+            (sort (list (cons (+ ux 3.5) (+ uy 0.5)) (cons (- ux 3.5) (+ uy 0.5))
+                        (cons (+ ux 0.5) (+ uy 3.5)) (cons (+ ux 0.5) (- uy 3.5)))
+                  < #:key (lambda (pt) (dist2d (car pt) (cdr pt) bx-f by-f))))
           (or (first-valid cands main-h) (first-valid spine-pylon-cands main-h))]
          [lone-artosis-pair
           (define p (car lone-artosis-pair))

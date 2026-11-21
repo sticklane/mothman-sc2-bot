@@ -15,7 +15,7 @@ All canonical unit keys, terrain modes, and selective upgrades below are support
 ## Selective Per-Player Upgrades (`--upgrades`, `--p1-upgrades`, `--p2-upgrades`)
 
 - **Zerg:** `Burrow`, `TunnelingClaws`, `GlialReconstitution`, `MetabolicBoost`, `AdrenalGlands`, `CentrifugalHooks`, `LurkerRange`, `AdaptiveTalons`, `GroovedSpines`, `MuscularAugments`, `ChitinousPlating`, `NeuralParasite`
-- **Protoss:** `Blink`, `Charge`, `ResonatingGlaives`, `ThermalLance`, `PsiStorm`
+- **Protoss:** `Blink`, `Charge`, `ResonatingGlaives`, `ThermalLance`, `PsiStorm`, `ShadowStride`, `ProtossGroundWeapons1`, `ProtossGroundWeapons2`, `ProtossGroundWeapons3`
 - **Terran:** `Stim`, `CombatShield`, `ConcussiveShells`, `DrillingClaws`, `SmartServos`, `InfernalPreigniter`, `BansheeCloak`, `PersonalCloaking`, `AdvancedBallistics`, `Cloak` (shorthand for both `BansheeCloak` + `PersonalCloaking`)
 - **Pre-Cloak Flags:** `p1_pre_cloaked: true` / `p2_pre_cloaked: true` automatically cloak spawned Banshees/Ghosts at fight start.
 
@@ -67,6 +67,8 @@ All canonical unit keys, terrain modes, and selective upgrades below are support
 | `liberator-ag` | 734 | air-siege (rear) | 375.0 |
 | `battlecruiser` | 57 | air-capital (far-rear) | 850.0 |
 | `scv` | 45 | worker | 50.0 |
+| `planetary-fortress` | 130 | static-fortress (5x5 ground splash) | 775.0 |
+| `missile-turret` | 23 | static-detector (2x2 air-only) | 100.0 |
 
 ## Zerg Units (Including Burrowed Variants)
 

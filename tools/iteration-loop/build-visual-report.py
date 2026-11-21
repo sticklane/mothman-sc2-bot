@@ -26,9 +26,164 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import re
 import shutil
+import sqlite3
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+DEFAULT_REPLAY_DB = Path("/home/sjaconette/sc2-local-arena/arena_replays.sqlite")
+
+
+def _canon_map(raw: str | None) -> str:
+    s = str(raw or "").strip()
+    if not s:
+        return "Unknown"
+    s = re.sub(r"\.SC2Map$", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"[\s_-]*AIE(?:_?v\d+)?$", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"(?:[\s_-]+(?:LE|TE)|[\s_-]*v\d+)$", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"[\s_]+", "", s)
+    return s or "Unknown"
+
+
+def _two_prop_z(w1: int, n1: int, w2: int, n2: int) -> float:
+    if n1 <= 0 or n2 <= 0:
+        return 0.0
+    p_pool = (w1 + w2) / (n1 + n2)
+    if p_pool <= 0.0 or p_pool >= 1.0:
+        return 0.0
+    return ((w1 / n1) - (w2 / n2)) / math.sqrt(max(1e-12, p_pool * (1.0 - p_pool) * (1.0 / n1 + 1.0 / n2)))
+
+
+def _query_longitudinal_spawn_outliers(db_path: Path | None, limit: int = 8) -> list[dict[str, Any]]:
+    if not db_path or not db_path.is_file():
+        return []
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=10.0)
+        conn.row_factory = sqlite3.Row
+        conn.create_function("canon_map", 1, _canon_map)
+        out: list[dict[str, Any]] = []
+        for scope, grp_expr in (
+            ("map", "canon_map(map_name)"),
+            ("matchup_map", "COALESCE(matchup, '?v?') || '|' || canon_map(map_name)"),
+        ):
+            rows = conn.execute(
+                f"""
+                SELECT {grp_expr} AS grp_key,
+                       our_spawn_corner AS corner,
+                       COUNT(*) AS n,
+                       SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) AS w,
+                       ROUND(100.0 * SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) / COUNT(*), 1) AS wr_pct,
+                       ROUND(AVG(sup_blk_pct), 1) AS sb_pct,
+                       ROUND(SUM(COALESCE(killed_val,0)) / MAX(1.0, SUM(COALESCE(lost_val,0))), 2) AS trade_agg
+                FROM matches
+                WHERE our_spawn_corner IS NOT NULL AND result IN ('win','loss','tie')
+                  AND is_selfplay = 0 AND is_clean = 1
+                GROUP BY grp_key, our_spawn_corner
+                """
+            ).fetchall()
+            by_g: dict[str, list[sqlite3.Row]] = defaultdict(list)
+            for r in rows:
+                by_g[str(r["grp_key"])].append(r)
+            for grp_key, items in by_g.items():
+                items.sort(key=lambda x: str(x["corner"]))
+                for i in range(len(items)):
+                    for j in range(i + 1, len(items)):
+                        a, b = items[i], items[j]
+                        na, nb = int(a["n"]), int(b["n"])
+                        if min(na, nb) < 5:
+                            continue
+                        wra, wrb = float(a["wr_pct"] or 0.0), float(b["wr_pct"] or 0.0)
+                        dw = round(wra - wrb, 1)
+                        z = round(_two_prop_z(int(a["w"]), na, int(b["w"]), nb), 2)
+                        sba, sbb = a["sb_pct"], b["sb_pct"]
+                        sb_ratio = 1.0
+                        max_sb = 0.0
+                        if sba is not None and sbb is not None:
+                            max_sb = max(float(sba), float(sbb))
+                            sb_ratio = round(max_sb / max(0.5, min(float(sba), float(sbb))), 2) if max_sb > 0 else 1.0
+                        reasons: list[str] = []
+                        if abs(z) >= 1.65 or abs(dw) >= 15.0:
+                            reasons.append(f"WR_GAP({dw:+.1f}pp, z={z:+.2f})")
+                        if max_sb >= 6.0 and sb_ratio >= 1.8:
+                            reasons.append(f"SB_RATIO({sb_ratio:.2f}x)")
+                        if reasons:
+                            out.append({
+                                "scope": scope,
+                                "key": grp_key,
+                                "corners": f"{a['corner']} vs {b['corner']}",
+                                "ns": f"{na}/{nb}",
+                                "wrs": f"{wra}% / {wrb}%",
+                                "dw": dw,
+                                "z": z,
+                                "sbs": f"{sba if sba is not None else '-'}% / {sbb if sbb is not None else '-'}%",
+                                "trades": f"{a['trade_agg']}x / {b['trade_agg']}x",
+                                "reason": ", ".join(reasons),
+                            })
+        conn.close()
+        out.sort(key=lambda o: abs(o["z"]) * 12.0 + abs(o["dw"]), reverse=True)
+        return out[:limit]
+    except Exception:
+        return []
+
+
+def _render_spawn_watch_section(
+    lines: list[str],
+    score_data: dict[str, Any] | None,
+    replay_db_path: Path | None,
+) -> None:
+    by_ms = (score_data or {}).get("by_map_spawn") or {}
+    run_outliers = (score_data or {}).get("spawn_outliers") or []
+    long_outliers = _query_longitudinal_spawn_outliers(replay_db_path, limit=8)
+    if not by_ms and not run_outliers and not long_outliers:
+        return
+
+    lines.append("## Map × Spawn-Position × Matchup & Outlier Watch")
+    lines.append("")
+    if by_ms:
+        lines.append("### Current Run Map × Spawn-Corner Breakdown (Clean External)")
+        lines.append("")
+        lines.append("| Map | Corner | n | W-L-T | WR% | NL% | Trade | SB% |")
+        lines.append("|---|---|---:|---|---:|---:|---:|---:|")
+        for k in sorted(by_ms.keys()):
+            b = by_ms[k]
+            lines.append(
+                f"| `{b.get('map_canon', k)}` | `{b.get('corner', '?')}` | {b.get('n', 0)} "
+                f"| `{b.get('wins', 0)}-{b.get('losses', 0)}-{b.get('ties', 0)}` "
+                f"| {b.get('wr_pct', 0.0):.1f}% | {b.get('nl_pct', 0.0):.1f}% "
+                f"| `{b.get('trade_agg', 0.0):.2f}x` | {b.get('avg_sb_pct', 0.0):.1f}% |"
+            )
+        lines.append("")
+
+    if run_outliers:
+        lines.append("### Current Run Spawn-Position Outliers")
+        lines.append("")
+        lines.append("| Scope | Key | A vs B | nA/nB | WR (A / B) | ΔWR | SB% (A / B) | Trade (A / B) | Flag |")
+        lines.append("|---|---|---|---|---|---:|---|---|---|")
+        for o in run_outliers[:10]:
+            lines.append(
+                f"| `{o.get('scope')}` | `{o.get('key')}` | `{o.get('corner_a')} vs {o.get('corner_b')}` "
+                f"| `{o.get('n_a')}/{o.get('n_b')}` | `{o.get('wr_a')}% / {o.get('wr_b')}%` "
+                f"| `{float(o.get('wr_delta_pp') or 0):+.1f}pp` "
+                f"| `{o.get('sb_a')}% / {o.get('sb_b')}%` "
+                f"| `{o.get('trade_a')}x / {o.get('trade_b')}x` | `{o.get('reason')}` |"
+            )
+        lines.append("")
+
+    if long_outliers:
+        lines.append("### Longitudinal SQLite Spawn-Corner Outliers (All Clean Local+Prod, min_pair_n=5)")
+        lines.append("")
+        lines.append("| Scope | Key | A vs B | nA/nB | WR (A / B) | ΔWR | z | SB% (A / B) | Trade (A / B) | Flag |")
+        lines.append("|---|---|---|---|---|---:|---:|---|---|---|")
+        for o in long_outliers:
+            lines.append(
+                f"| `{o['scope']}` | `{o['key']}` | `{o['corners']}` | `{o['ns']}` "
+                f"| `{o['wrs']}` | `{o['dw']:+.1f}pp` | `{o['z']:+.2f}` "
+                f"| `{o['sbs']}` | `{o['trades']}` | `{o['reason']}` |"
+            )
+        lines.append("")
 
 
 def _fmt_kb(n_bytes: int | None) -> str:
@@ -207,6 +362,7 @@ def build_report(
     selfplay_manifest: dict[str, Any] | None = None,
     arena_json: dict[str, Any] | None = None,
     selfplay_json: dict[str, Any] | None = None,
+    replay_db_path: Path | None = DEFAULT_REPLAY_DB,
 ) -> str:
     lines: list[str] = []
     lines.append(f"# Mothman SC2 Bot — Real-3D Gameplay Visuals ({loop_label})")
@@ -261,6 +417,8 @@ def build_report(
                 f"`{selfplay_manifest.get('wall_sec', 0)}s` (`{_fmt_kb(selfplay_manifest.get('total_webp_bytes'))}` WebP total)"
             )
         lines.append("")
+
+    _render_spawn_watch_section(lines, score_data, replay_db_path)
 
     # -------------------------------------------------------------------------
     # SECTION 1: CRITICAL REPLAY MOMENTS
@@ -360,6 +518,7 @@ def main() -> int:
     ap.add_argument("--selfplay-manifest", default=None, help="Optional Self-Play arena_manifest.json")
     ap.add_argument("--selfplay-json", default=None, help="Optional Tactics Arena selfplay JSON report for P2 telemetry & terrain")
     ap.add_argument("--copy-media-to", default=None, help="Optional directory to copy WebP/PNG files for artifact embedding")
+    ap.add_argument("--replay-db", default=str(DEFAULT_REPLAY_DB), help="SQLite replay DB for longitudinal spawn outlier table")
     ap.add_argument("--out-md", required=True, help="Output Markdown path")
     args = ap.parse_args()
 
@@ -370,6 +529,7 @@ def main() -> int:
     sp_man = json.loads(Path(args.selfplay_manifest).read_text(encoding="utf-8")) if args.selfplay_manifest and Path(args.selfplay_manifest).exists() else None
     sp_js = json.loads(Path(args.selfplay_json).read_text(encoding="utf-8")) if args.selfplay_json and Path(args.selfplay_json).exists() else None
     copy_dir = Path(args.copy_media_to) if args.copy_media_to else None
+    rdb_path = Path(args.replay_db) if args.replay_db else None
 
     md = build_report(
         args.loop_label,
@@ -380,6 +540,7 @@ def main() -> int:
         selfplay_manifest=sp_man,
         arena_json=arena_js,
         selfplay_json=sp_js,
+        replay_db_path=rdb_path,
     )
     out_p = Path(args.out_md)
     out_p.parent.mkdir(parents=True, exist_ok=True)

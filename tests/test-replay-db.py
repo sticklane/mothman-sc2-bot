@@ -206,10 +206,14 @@ class ReplayDbTests(unittest.TestCase):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
-        # [SCBOT_BUILD] parsing
+        # [SCBOT_BUILD] parsing (strips leading v_ so log & chat tags merge into one build row)
         self.assertEqual(
             mod._parse_scbot_build_from_text("[SCBOT_BUILD] version=v_1d211c83 race=Zerg\n"),
-            "v_1d211c83",
+            "1d211c83",
+        )
+        self.assertEqual(
+            mod._parse_scbot_build_from_text("[SCBOT_BUILD] version=mqklxqnz_1cd044c1 mode=zip\n"),
+            "mqklxqnz_1cd044c1",
         )
         self.assertEqual(
             mod._parse_scbot_build_from_text("hello\n[SCBOT_BUILD] rev=73c70041\n"),
@@ -217,14 +221,18 @@ class ReplayDbTests(unittest.TestCase):
         )
         self.assertEqual(
             mod._parse_scbot_build_from_text("[SCBOT_BUILD] v_loop35_test\n"),
-            "v_loop35_test",
+            "loop35_test",
         )
         self.assertIsNone(mod._parse_scbot_build_from_text("[SCBOT_STATE] f=0\n"))
 
-        # Chat tag build version parsing (must ignore opponent's Tag:v_...)
+        # Chat tag build version parsing (must ignore opponent's Tag:v_... and strip v_ prefix)
         self.assertEqual(
-            mod._parse_version_from_chat_tags([(2, "Tag:v_opp"), (1, "Tag:v_1d211c83")], our_pid=1),
-            "v_1d211c83",
+            mod._parse_version_from_chat_tags([(2, "Tag:v_opp"), (1, "Tag:v_mqklxqnz_1cd044c1")], our_pid=1),
+            "mqklxqnz_1cd044c1",
+        )
+        self.assertEqual(
+            mod._parse_version_from_chat_tags([(1, "Tag:v_1d211c83")], our_pid=1),
+            "1d211c83",
         )
         self.assertIsNone(
             mod._parse_version_from_chat_tags([(2, "Tag:v_opp"), (2, "Tag: rush_probe")], our_pid=1),
@@ -449,6 +457,87 @@ class ReplayDbTests(unittest.TestCase):
         self.assertIn("ingest-prod-aiarena OK: run_id=prod_aiarena_run_999999", r_sync.stdout)
         self.assertIn("=== PROD AI ARENA FORENSIC ANALYSIS ===", r_sync.stdout)
         self.assertIn("#5129553", r_sync.stdout)
+
+    def test_06_canonical_map_matchup_spawn_bias_and_outliers(self) -> None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("replay_db_mod3", str(REPLAY_DB))
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        # Canonical map unification across local & prod variants
+        self.assertEqual(mod._canonical_map_name("Ley Lines AIE"), "LeyLines")
+        self.assertEqual(mod._canonical_map_name("LeyLinesAIE_v3"), "LeyLines")
+        self.assertEqual(mod._canonical_map_name("Incorporeal AIE"), "Incorporeal")
+        self.assertEqual(mod._canonical_map_name("IncorporealAIE_v4.SC2Map"), "Incorporeal")
+        self.assertEqual(mod._canonical_map_name("MagannathaAIE_v2"), "Magannatha")
+
+        # Populate synthetic DB with canonical map variants + severe NE vs SW TvT outlier + SB ratio outlier
+        conn = mod.open_db(self.db_path)
+        with conn:
+            conn.execute("INSERT INTO runs (run_id, tag, started_at) VALUES ('20261120_100000_r1', 'r1', '2026-11-20T10:00:00Z')")
+            conn.execute("INSERT INTO runs (run_id, tag, started_at) VALUES ('20261120_200000_r2', 'r2', '2026-11-20T20:00:00Z')")
+            idx = 0
+            # LeyLines NE: 1W-5L, high SB 9.0% (mixed 'Ley Lines AIE' and 'LeyLinesAIE_v3' names!)
+            for i in range(6):
+                idx += 1
+                mname = "Ley Lines AIE" if i % 2 == 0 else "LeyLinesAIE_v3"
+                res = "win" if i == 0 else "loss"
+                conn.execute(
+                    """
+                    INSERT INTO matches (
+                        replay_id, replay_sha256, run_id, replay_path, bot, our_race, actual_race,
+                        opponent, opp_race, matchup, map_name, our_spawn_corner, our_start_x, our_start_y,
+                        result, duration_sec, killed_val, lost_val, sup_blk_pct, is_clean, is_selfplay,
+                        source_type, bot_build_version
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        f"id_{idx}", f"id_{idx}", "20261120_200000_r2", f"/tmp/m{idx}.SC2Replay",
+                        "Mothman-T", "Terran", "Terran", "oppA", "Terran", "TvT", mname,
+                        "NE", 155.0, 133.0, res, 600.0, 2000.0, 5000.0, 9.0, 1, 0,
+                        "prod_aiarena", "deploy:test1",
+                    ),
+                )
+            # LeyLines SW: 5W-1L, low SB 2.0%
+            for i in range(6):
+                idx += 1
+                mname = "Ley Lines AIE" if i % 2 == 0 else "LeyLinesAIE_v3"
+                res = "loss" if i == 0 else "win"
+                conn.execute(
+                    """
+                    INSERT INTO matches (
+                        replay_id, replay_sha256, run_id, replay_path, bot, our_race, actual_race,
+                        opponent, opp_race, matchup, map_name, our_spawn_corner, our_start_x, our_start_y,
+                        result, duration_sec, killed_val, lost_val, sup_blk_pct, is_clean, is_selfplay,
+                        source_type, bot_build_version
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        f"id_{idx}", f"id_{idx}", "20261120_200000_r2", f"/tmp/m{idx}.SC2Replay",
+                        "Mothman-T", "Terran", "Terran", "oppA", "Terran", "TvT", mname,
+                        "SW", 42.0, 40.0, res, 600.0, 6000.0, 2000.0, 2.0, 1, 0,
+                        "prod_aiarena", "deploy:test1",
+                    ),
+                )
+        conn.close()
+
+        # Verify spawn-bias merges both LeyLines variants, prints SB%, supports --by-matchup & --recent-runs, and flags both WR_GAP & SB_RATIO!
+        rsb = self._run_cli("spawn-bias", "--by-matchup", "--matchup", "TvT", "--recent-runs", "1", "--min-games", "1", "--min-pair-n", "5")
+        self.assertIn("SB%", rsb.stdout)
+        self.assertIn("LeyLines", rsb.stdout)
+        self.assertNotIn("LeyLinesAIE_v3", rsb.stdout)
+        self.assertIn("=== Map x Matchup x Spawn-Corner Breakdown ===", rsb.stdout)
+        self.assertIn("=== Automatic Spawn-Position Outliers", rsb.stdout)
+        self.assertIn("WR_GAP(", rsb.stdout)
+        self.assertIn("SB_RATIO(", rsb.stdout)
+        self.assertIn("TvT|LeyLines", rsb.stdout)
+
+        # Verify analyze-prod includes section 4B Map x Spawn-Corner Outliers
+        rap = self._run_cli("analyze-prod", "--min-opp-games", "1", "--top-losses", "1")
+        self.assertIn("=== 4B. Map x Spawn-Corner Outliers (Prod", rap.stdout)
+        self.assertIn("LeyLines", rap.stdout)
 
 
 if __name__ == "__main__":

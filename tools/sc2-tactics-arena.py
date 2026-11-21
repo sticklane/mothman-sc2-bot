@@ -85,6 +85,8 @@ UNIT_IDS: dict[str, int] = {
     "cyclone": 692,
     "battlecruiser": 57,
     "scv": 45,
+    "planetary-fortress": 130,
+    "missile-turret": 23,
     # Protoss (18)
     "zealot": 73,
     "stalker": 74,
@@ -158,6 +160,8 @@ UNIT_VALUES: dict[int, float] = {
     692: 300.0,   # cyclone
     57: 850.0,    # battlecruiser
     45: 50.0,     # scv
+    130: 775.0,   # planetary-fortress (550M + 1.5*150G)
+    23: 100.0,    # missile-turret
     # Protoss
     73: 100.0,    # zealot
     74: 200.0,    # stalker
@@ -213,6 +217,8 @@ POINTS_WIN_TRADE = 1.25          # trade >= 1.25x on timeout/stalemate -> Points
 POINTS_LOSS_TRADE = 0.80         # trade <= 0.80x on timeout/stalemate -> Points Loss
 
 TOWNHALL_IDS = {18, 59, 86, 100, 101, 130, 132}
+STRUCTURE_IDS = {130, 23}
+STRUCTURE_FOOTPRINTS: dict[int, int] = {130: 5, 23: 2}
 WORKER_IDS = {45, 84, 104, 116}
 COMBAT_IDS = set(UNIT_VALUES) - WORKER_IDS
 AIR_UNIT_IDS = {
@@ -233,11 +239,11 @@ ENERGY_CASTER_CAPS: dict[int, tuple[float, bool, bool]] = {
     495: (15.0, True, False),   # oracle (Pulsar Beam -> Ground only)
 }
 GROUND_ONLY_WEAPON_IDS = {
-    51, 33, 32, 53, 484, 49, 55, 45,                     # Terran G-only
+    51, 33, 32, 53, 484, 49, 55, 45, 130,                # Terran G-only (incl. planetary-fortress)
     73, 311, 83, 4, 694, 76, 84,                         # Protoss G-only
     105, 119, 9, 115, 110, 118, 109, 131, 114, 502, 503, 494, 493, 104, 116,  # Zerg G-only
 }
-AIR_ONLY_WEAPON_IDS = {112}  # corruptor (Caustic Spray targets structures only)
+AIR_ONLY_WEAPON_IDS = {112, 23}  # corruptor, missile-turret (air-only weapon + detection)
 BOTH_WEAPON_IDS = {
     48, 50, 52, 498, 500, 692, 57,                       # Terran G+A
     74, 77, 141, 80, 79, 496,                            # Protoss G+A
@@ -348,6 +354,10 @@ UPGRADE_SPECS: dict[str, tuple[str, int, int, bool, tuple[int, int] | None, int 
     "ResonatingGlaives": ("Protoss", 65, 1594, True, None, None),
     "ThermalLance": ("Protoss", 70, 1097, True, None, None),
     "PsiStorm": ("Protoss", 68, 1126, True, None, None),
+    "ShadowStride": ("Protoss", 69, 2720, True, None, None),
+    "ProtossGroundWeapons1": ("Protoss", 63, 1062, True, None, None),
+    "ProtossGroundWeapons2": ("Protoss", 63, 1063, True, None, 65),
+    "ProtossGroundWeapons3": ("Protoss", 63, 1064, True, None, 65),
     # Terran (TechLab addons built in-place on parent Barracks/Factory/Starport via 421/454/487)
     "Stim": ("Terran", 37, 730, False, (21, 421), None),
     "CombatShield": ("Terran", 37, 731, False, (21, 421), None),
@@ -392,6 +402,22 @@ UPGRADE_ALIASES: dict[str, list[str]] = {
     "extendedthermallance": ["ThermalLance"],
     "psistorm": ["PsiStorm"],
     "psi-storm": ["PsiStorm"],
+    "shadowstride": ["ShadowStride"],
+    "shadow-stride": ["ShadowStride"],
+    "shadowstrike": ["ShadowStride"],
+    "shadow-strike": ["ShadowStride"],
+    "dtblink": ["ShadowStride"],
+    "dt-blink": ["ShadowStride"],
+    "protossgroundweapons1": ["ProtossGroundWeapons1"],
+    "protoss-ground-weapons-1": ["ProtossGroundWeapons1"],
+    "groundweapons1": ["ProtossGroundWeapons1"],
+    "protossgroundweapons2": ["ProtossGroundWeapons2"],
+    "protoss-ground-weapons-2": ["ProtossGroundWeapons2"],
+    "groundweapons2": ["ProtossGroundWeapons2"],
+    "protossgroundweapons3": ["ProtossGroundWeapons3"],
+    "protoss-ground-weapons-3": ["ProtossGroundWeapons3"],
+    "groundweapons3": ["ProtossGroundWeapons3"],
+    "protossgroundweapons+3": ["ProtossGroundWeapons1", "ProtossGroundWeapons2", "ProtossGroundWeapons3"],
     "stim": ["Stim"],
     "stimpack": ["Stim"],
     "combatshield": ["CombatShield"],
@@ -410,8 +436,23 @@ UPGRADE_ALIASES: dict[str, list[str]] = {
 }
 
 
+# Sequential upgrade prerequisites (e.g., +2 requires +1 completed first; +3 requires +2)
+UPGRADE_PREREQ_UPGRADES: dict[str, str] = {
+    "ProtossGroundWeapons2": "ProtossGroundWeapons1",
+    "ProtossGroundWeapons3": "ProtossGroundWeapons2",
+}
+
+
 def normalize_upgrades(raw_list: list[str] | None) -> list[str]:
     out: list[str] = []
+
+    def _add_with_prereqs(name: str) -> None:
+        req = UPGRADE_PREREQ_UPGRADES.get(name)
+        if req is not None:
+            _add_with_prereqs(req)
+        if name not in out:
+            out.append(name)
+
     for raw in raw_list or []:
         key = str(raw).strip()
         if not key:
@@ -425,8 +466,7 @@ def normalize_upgrades(raw_list: list[str] | None) -> list[str]:
             if not items:
                 raise ValueError(f"Unknown upgrade {raw!r}. Supported: {sorted(UPGRADE_SPECS)}")
         for item in items:
-            if item not in out:
-                out.append(item)
+            _add_with_prereqs(item)
     return out
 
 
@@ -1111,6 +1151,49 @@ class MapTerrainAnalyzer:
     def near_start(self, x: float, y: float, min_dist: float = 24.0) -> bool:
         return any(math.hypot(x - sx, y - sy) < min_dist for sx, sy in self.start_locs)
 
+    def snap_buildable_footprint(
+        self,
+        x: float,
+        y: float,
+        footprint_size: int = 2,
+        avoid: list[tuple[float, float, float]] | None = None,
+        max_rad: int = 12,
+    ) -> tuple[float, float]:
+        """Find closest buildable grid center for an NxN structure (5x5 uses .5 center, 2x2 uses integer center)."""
+        half_off = 0.5 if (footprint_size % 2 == 1) else 0.0
+        lo = -(footprint_size // 2)
+        hi = lo + footprint_size
+        ix, iy = int(round(x - half_off)), int(round(y - half_off))
+        avoid_list = avoid or []
+
+        def ok(cx_i: int, cy_i: int) -> bool:
+            cx_f, cy_f = cx_i + half_off, cy_i + half_off
+            if any(math.hypot(cx_f - ax, cy_f - ay) < ar for ax, ay, ar in avoid_list):
+                return False
+            for ox in range(lo, hi):
+                for oy in range(lo, hi):
+                    if not self.is_buildable(cx_i + ox, cy_i + oy, margin=8):
+                        return False
+            return True
+
+        if ok(ix, iy):
+            return float(ix) + half_off, float(iy) + half_off
+        for rad in range(1, max_rad + 1):
+            best: tuple[float, float, float] | None = None
+            for dx in range(-rad, rad + 1):
+                for dy in range(-rad, rad + 1):
+                    if max(abs(dx), abs(dy)) != rad:
+                        continue
+                    tx, ty = ix + dx, iy + dy
+                    if ok(tx, ty):
+                        cx_f, cy_f = tx + half_off, ty + half_off
+                        d2 = (cx_f - x) ** 2 + (cy_f - y) ** 2
+                        if best is None or d2 < best[0]:
+                            best = (d2, cx_f, cy_f)
+            if best is not None:
+                return best[1], best[2]
+        return float(ix) + half_off, float(iy) + half_off
+
     def snap_pathable(
         self,
         x: float,
@@ -1524,6 +1607,9 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         "p2_clear_ok": False,
                         "cheats_enabled_p1": False,
                         "cheats_enabled_p2": False,
+                        "p2_repair_bank_granted": False,
+                        "p2_own_units": None,
+                        "p2_own_units_loop": -1,
                         "p1_done_upgrades": set(),
                         "p2_done_upgrades": set(),
                         "p1_pending_upgrades": [],  # list[(upg_name, bldg_uid, research_ab, x, y)]
@@ -1622,7 +1708,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             bad = [r for r in aresp.action.result if r != 1]
                             if bad:
                                 dstate["errors"].append(f"upgrade_action_results={bad} pending={[(u, b, a) for u, b, a, _, _ in pending]}")
-                            return True
+                            return len(acts) >= len(pending)
                         return False
 
                     async def _issue_pre_cloak(ws: aiohttp.ClientWebSocketResponse, obs: Any) -> None:
@@ -1671,7 +1757,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 ))
                             else:
                                 dstate["p2_clear_ok"] = True
-                        elif phase == "upgrade_addons":
+                        elif phase == "upgrade_addons" and obs.game_loop >= dstate["phase_start_loop"] + 4:
                             if not dstate["p2_addons_issued"]:
                                 if not dstate["p2_pending_addons"]:
                                     dstate["p2_addons_issued"] = True
@@ -1685,7 +1771,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             b = min(cands, key=lambda u: math.hypot(u.pos.x - bx, u.pos.y - by))
                                             used_a.add(b.tag)
                                             acts_a.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=a_ab, unit_tags=[b.tag]))))
-                                    if acts_a:
+                                    if acts_a and (len(acts_a) >= len(dstate["p2_pending_addons"]) or obs.game_loop >= dstate["phase_start_loop"] + 20):
                                         await rpc(sc2_ws2, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=acts_a)))
                                         dstate["p2_addons_issued"] = True
                             if dstate["p2_addons_issued"] and not dstate["p2_addons_ready"]:
@@ -1698,22 +1784,35 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 )
                                 if ready_ok:
                                     dstate["p2_addons_ready"] = True
-                        elif phase == "upgrade_issue" and not dstate["p2_upg_issued"]:
+                        elif phase == "upgrade_issue" and not dstate["p2_upg_issued"] and obs.game_loop >= dstate["phase_start_loop"] + 4:
                             if not dstate["p2_pending_upgrades"]:
                                 dstate["p2_upg_issued"] = True
                             else:
                                 ok = await _issue_owner_upgrades(sc2_ws2, obs, dstate["p2_pending_upgrades"])
-                                if ok:
+                                if ok or obs.game_loop >= dstate["phase_start_loop"] + 20:
                                     dstate["p2_upg_issued"] = True
                         elif phase == "upgrade_wait":
                             p2_uids = {b for _, b, _, _, _ in dstate["p2_pending_upgrades"]}
-                            dstate["p2_upg_busy"] = any(
+                            dstate["p2_upg_busy"] = bool(p2_uids) and any(
                                 u.alliance == 1 and u.unit_type in p2_uids and len(u.orders) > 0
                                 for u in obs.raw_data.units
                             )
-                        elif phase == "fighting" and dstate["p2_pre_cloak_pending"]:
-                            await _issue_pre_cloak(sc2_ws2, obs)
-                            dstate["p2_pre_cloak_pending"] = False
+                        elif phase == "fighting":
+                            scen_hk = scenarios[min(dstate["scen_idx"], len(scenarios) - 1)]
+                            want_w_hk = bool(
+                                {UNIT_IDS[u] for u, _, _, _ in (scen_hk.p1_units + scen_hk.p2_units)} & WORKER_IDS
+                            )
+                            cx_hk, cy_hk = dstate["arena_cx"], dstate["arena_cy"]
+                            dstate["p2_own_units"] = [
+                                u for u in obs.raw_data.units
+                                if u.display_type == 1 and u.alliance == 1
+                                and u.tag not in dstate["orig_th_tags"]
+                                and (u.unit_type in COMBAT_IDS or (want_w_hk and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx_hk, u.pos.y - cy_hk) < 35.0))
+                            ]
+                            dstate["p2_own_units_loop"] = int(obs.game_loop)
+                            if dstate["p2_pre_cloak_pending"]:
+                                await _issue_pre_cloak(sc2_ws2, obs)
+                                dstate["p2_pre_cloak_pending"] = False
 
                     async def p2_aggressive_micro_loop() -> None:
                         await dstate["p1_joined"].wait()
@@ -1732,6 +1831,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 my_u = [
                                     u for u in obs.raw_data.units
                                     if u.display_type == 1 and u.alliance == 1
+                                    and u.tag not in dstate["orig_th_tags"]
                                     and u.unit_type not in PURE_UNARMED_IDS
                                     and (u.unit_type in COMBAT_IDS or (want_workers_p2 and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx_a, u.pos.y - cy_a) < 35.0))
                                 ]
@@ -1739,42 +1839,97 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 en_u = [
                                     u for u in obs.raw_data.units
                                     if u.display_type == 1 and u.alliance == 4 and u.cloak != 1
+                                    and u.tag not in dstate["orig_th_tags"]
                                     and (u.unit_type in COMBAT_IDS or (want_workers_p2 and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx_a, u.pos.y - cy_a) < 35.0))
                                 ]
                                 en_armed = [u for u in en_u if u.unit_type not in PURE_UNARMED_IDS]
                                 en_targets = en_armed if en_armed else en_u
-                                if my_u and en_targets:
-                                    cx_my = sum(u.pos.x for u in my_u) / len(my_u)
-                                    cy_my = sum(u.pos.y for u in my_u) / len(my_u)
+                                acts_p2: list[Any] = []
+                                # Planetary Fortress (`130`) SCV Repair (`316`) & structure handling:
+                                # never issue Move/point-attack-move to static structures (`130`/`23`);
+                                # keep SCVs near a live PF ready to repair (`316`) immediately once damaged!
+                                pfs_alive = [u for u in my_u if u.unit_type == 130]
+                                pfs_damaged = [u for u in pfs_alive if float(u.health) < float(u.health_max) - 1.0]
+                                repair_scv_tags: set[int] = set()
+                                if pfs_alive:
+                                    for u in my_u:
+                                        if u.unit_type == 45:
+                                            nearest_pf = min(pfs_alive, key=lambda pf: math.hypot(u.pos.x - pf.pos.x, u.pos.y - pf.pos.y))
+                                            if math.hypot(u.pos.x - nearest_pf.pos.x, u.pos.y - nearest_pf.pos.y) <= 14.0:
+                                                repair_scv_tags.add(u.tag)
+                                    if repair_scv_tags and not dstate["p2_repair_bank_granted"]:
+                                        dstate["p2_repair_bank_granted"] = True
+                                        try:
+                                            # Grant ONLY gas (NOT minerals, which is global in SC2 and would let P1 build at its home Nexus);
+                                            # P2's starting 50M + gas bank supports ~545 HP of SCV Planetary Fortress repair (`316`).
+                                            await rpc(sc2_ws2, sc2api_pb2.Request(
+                                                debug=sc2api_pb2.RequestDebug(debug=[
+                                                    debug_pb2.DebugCommand(game_state=debug_pb2.gas),
+                                                ])
+                                            ))
+                                        except Exception:
+                                            pass
+                                if pfs_damaged and repair_scv_tags:
+                                    dmg_pf = min(pfs_damaged, key=lambda pf: float(pf.health))
+                                    acts_p2.append(sc2api_pb2.Action(
+                                        action_raw=raw_pb2.ActionRaw(
+                                            unit_command=raw_pb2.ActionRawUnitCommand(
+                                                ability_id=316,
+                                                target_unit_tag=dmg_pf.tag,
+                                                unit_tags=sorted(repair_scv_tags),
+                                            )
+                                        )
+                                    ))
+
+                                mobile_my_u = [
+                                    u for u in my_u
+                                    if u.unit_type not in STRUCTURE_IDS and u.tag not in repair_scv_tags
+                                ]
+                                struct_my_u = [u for u in my_u if u.unit_type in STRUCTURE_IDS]
+
+                                if en_targets:
                                     en_gnd = [e for e in en_targets if not (bool(getattr(e, "is_flying", False)) or e.unit_type in AIR_UNIT_IDS)]
                                     en_air = [e for e in en_targets if bool(getattr(e, "is_flying", False)) or e.unit_type in AIR_UNIT_IDS]
-                                    acts_p2: list[Any] = []
-                                    g_only_tags = [u.tag for u in my_u if unit_attack_caps(u, my_u, is_dummy=True) == (True, False)]
-                                    a_only_tags = [u.tag for u in my_u if unit_attack_caps(u, my_u, is_dummy=True) == (False, True)]
-                                    both_tags = [u.tag for u in my_u if u.tag not in set(g_only_tags) and u.tag not in set(a_only_tags)]
-                                    if both_tags:
-                                        tgt = min(en_targets, key=lambda e: (math.hypot(e.pos.x - cx_my, e.pos.y - cy_my), e.health + e.shield))
-                                        acts_p2.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=23, target_unit_tag=tgt.tag, unit_tags=both_tags))))
-                                    if g_only_tags and en_gnd:
-                                        tgt_g = min(en_gnd, key=lambda e: (math.hypot(e.pos.x - cx_my, e.pos.y - cy_my), e.health + e.shield))
-                                        acts_p2.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=23, target_unit_tag=tgt_g.tag, unit_tags=g_only_tags))))
-                                    if a_only_tags and en_air:
-                                        tgt_a = min(en_air, key=lambda e: (math.hypot(e.pos.x - cx_my, e.pos.y - cy_my), e.health + e.shield))
-                                        acts_p2.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=23, target_unit_tag=tgt_a.tag, unit_tags=a_only_tags))))
-                                    if acts_p2:
-                                        await rpc(sc2_ws2, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=acts_p2)))
-                                elif my_u:
-                                    # Attack-move toward arena center if all remaining enemies are burrowed/cloaked
-                                    act = sc2api_pb2.Action(
+                                    if mobile_my_u:
+                                        cx_my = sum(u.pos.x for u in mobile_my_u) / len(mobile_my_u)
+                                        cy_my = sum(u.pos.y for u in mobile_my_u) / len(mobile_my_u)
+                                        g_only_tags = [u.tag for u in mobile_my_u if unit_attack_caps(u, mobile_my_u, is_dummy=True) == (True, False)]
+                                        a_only_tags = [u.tag for u in mobile_my_u if unit_attack_caps(u, mobile_my_u, is_dummy=True) == (False, True)]
+                                        both_tags = [u.tag for u in mobile_my_u if u.tag not in set(g_only_tags) and u.tag not in set(a_only_tags)]
+                                        if both_tags:
+                                            tgt = min(en_targets, key=lambda e: (math.hypot(e.pos.x - cx_my, e.pos.y - cy_my), e.health + e.shield))
+                                            acts_p2.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=23, target_unit_tag=tgt.tag, unit_tags=both_tags))))
+                                        if g_only_tags and en_gnd:
+                                            tgt_g = min(en_gnd, key=lambda e: (math.hypot(e.pos.x - cx_my, e.pos.y - cy_my), e.health + e.shield))
+                                            acts_p2.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=23, target_unit_tag=tgt_g.tag, unit_tags=g_only_tags))))
+                                        if a_only_tags and en_air:
+                                            tgt_a = min(en_air, key=lambda e: (math.hypot(e.pos.x - cx_my, e.pos.y - cy_my), e.health + e.shield))
+                                            acts_p2.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=23, target_unit_tag=tgt_a.tag, unit_tags=a_only_tags))))
+                                    # Static structures focus-fire nearest valid in-range enemy only (never Move!)
+                                    for st in struct_my_u:
+                                        if st.unit_type == 130 and en_gnd:
+                                            in_rng = [e for e in en_gnd if math.hypot(e.pos.x - st.pos.x, e.pos.y - st.pos.y) <= 8.8]
+                                            if in_rng:
+                                                tgt_pf = min(in_rng, key=lambda e: (math.hypot(e.pos.x - st.pos.x, e.pos.y - st.pos.y), e.health + e.shield))
+                                                acts_p2.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=23, target_unit_tag=tgt_pf.tag, unit_tags=[st.tag]))))
+                                        elif st.unit_type == 23 and en_air:
+                                            in_rng = [e for e in en_air if math.hypot(e.pos.x - st.pos.x, e.pos.y - st.pos.y) <= 8.5]
+                                            if in_rng:
+                                                tgt_mt = min(in_rng, key=lambda e: (math.hypot(e.pos.x - st.pos.x, e.pos.y - st.pos.y), e.health + e.shield))
+                                                acts_p2.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=23, target_unit_tag=tgt_mt.tag, unit_tags=[st.tag]))))
+                                elif mobile_my_u:
+                                    # Attack-move mobile defenders toward arena center if all remaining enemies are burrowed/cloaked
+                                    acts_p2.append(sc2api_pb2.Action(
                                         action_raw=raw_pb2.ActionRaw(
                                             unit_command=raw_pb2.ActionRawUnitCommand(
                                                 ability_id=23,
                                                 target_world_space_pos=common_pb2.Point2D(x=cx_a, y=cy_a),
-                                                unit_tags=[u.tag for u in my_u],
+                                                unit_tags=[u.tag for u in mobile_my_u],
                                             )
                                         )
-                                    )
-                                    await rpc(sc2_ws2, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=[act])))
+                                    ))
+                                if acts_p2:
+                                    await rpc(sc2_ws2, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=acts_p2)))
                             await rpc(sc2_ws2, sc2api_pb2.Request(step=sc2api_pb2.RequestStep(count=step_n)))
 
                     async def duel_ws_handler_p2(http_req: web.Request) -> web.WebSocketResponse:
@@ -2063,8 +2218,20 @@ async def run_in_container(args: argparse.Namespace) -> int:
 
                                     elif dstate["phase"] == "upgrade_spawn":
                                         scen = scenarios[dstate["scen_idx"]]
-                                        need_p1 = [u for u in scen.p1_upgrades if u not in dstate["p1_done_upgrades"]]
-                                        need_p2 = [u for u in scen.p2_upgrades if u not in dstate["p2_done_upgrades"]]
+                                        all_need_p1 = [u for u in scen.p1_upgrades if u not in dstate["p1_done_upgrades"]]
+                                        all_need_p2 = [u for u in scen.p2_upgrades if u not in dstate["p2_done_upgrades"]]
+
+                                        def _ready_upgrade_wave(need: list[str], done: set[str]) -> list[str]:
+                                            wave: list[str] = []
+                                            for u in need:
+                                                req_u = UPGRADE_PREREQ_UPGRADES.get(u)
+                                                if req_u is not None and req_u not in done:
+                                                    continue
+                                                wave.append(u)
+                                            return wave or need[:1]
+
+                                        need_p1 = _ready_upgrade_wave(all_need_p1, dstate["p1_done_upgrades"]) if all_need_p1 else []
+                                        need_p2 = _ready_upgrade_wave(all_need_p2, dstate["p2_done_upgrades"]) if all_need_p2 else []
                                         an: MapTerrainAnalyzer | None = dstate["analyzer"]
                                         open_site = an.sites["open"] if an is not None else ArenaSite("open", 88.0, 88.0)
                                         dbg_u: list[Any] = []
@@ -2106,13 +2273,24 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             )
                                             avoid_pts2 = avoid_pts + addon_spots
                                             plain_spots = (
-                                                an.find_buildable_spots(base_pos[0], base_pos[1], need_plain_cnt, avoid=avoid_pts2, with_addon=False, min_spacing=5.0)
+                                                an.find_buildable_spots(base_pos[0], base_pos[1], need_plain_cnt, avoid=avoid_pts2, with_addon=False, min_spacing=5.5)
                                                 if (an is not None and need_plain_cnt > 0) else []
                                             )
                                             ai, pi = 0, 0
                                             for pr_uid in prereqs:
                                                 px, py = plain_spots[pi] if pi < len(plain_spots) else (base_pos[0] + 6.0, base_pos[1])
                                                 pi += 1
+                                                if any(UPGRADE_SPECS[u][3] for u in upgs if UPGRADE_SPECS[u][5] == pr_uid):
+                                                    py_x, py_y = (
+                                                        an.snap_buildable_footprint(px, py - 3.0, 2, avoid=[(px, py, 2.6)])
+                                                        if an is not None else (px, py - 3.0)
+                                                    )
+                                                    dbg_u.append(debug_pb2.DebugCommand(
+                                                        create_unit=debug_pb2.DebugCreateUnit(
+                                                            unit_type=60, owner=owner,
+                                                            pos=common_pb2.Point2D(x=py_x, y=py_y), quantity=1,
+                                                        )
+                                                    ))
                                                 dbg_u.append(debug_pb2.DebugCommand(
                                                     create_unit=debug_pb2.DebugCreateUnit(
                                                         unit_type=pr_uid, owner=owner,
@@ -2140,7 +2318,10 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                     bx, by = plain_spots[pi] if pi < len(plain_spots) else (base_pos[0] + 8.0, base_pos[1])
                                                     pi += 1
                                                     if needs_pyl:
-                                                        py_x, py_y = (an.snap_pathable(bx, by - 3.0, max_rad=4) if an is not None else (bx, by - 3.0))
+                                                        py_x, py_y = (
+                                                            an.snap_buildable_footprint(bx, by - 3.0, 2, avoid=[(bx, by, 2.6)])
+                                                            if an is not None else (bx, by - 3.0)
+                                                        )
                                                         dbg_u.append(debug_pb2.DebugCommand(
                                                             create_unit=debug_pb2.DebugCreateUnit(
                                                                 unit_type=60, owner=owner,
@@ -2162,6 +2343,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         dstate["p2_pending_upgrades"] = p2_u
                                         dstate["p1_pending_addons"] = p1_a
                                         dstate["p2_pending_addons"] = p2_a
+                                        dstate["p1_upg_busy"] = bool(p1_u)
+                                        dstate["p2_upg_busy"] = bool(p2_u)
                                         if dbg_u:
                                             await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=dbg_u)))
                                         dstate["phase"] = "upgrade_addons" if (p1_a or p2_a) else "upgrade_issue"
@@ -2181,7 +2364,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                         b = min(cands, key=lambda u: math.hypot(u.pos.x - bx, u.pos.y - by))
                                                         used_a1.add(b.tag)
                                                         acts_a1.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=a_ab, unit_tags=[b.tag]))))
-                                                if acts_a1:
+                                                if acts_a1 and (len(acts_a1) >= len(dstate["p1_pending_addons"]) or gl >= dstate["phase_start_loop"] + 20):
                                                     await rpc(sc2_ws, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=acts_a1)))
                                                     dstate["p1_addons_issued"] = True
                                         if dstate["p1_addons_issued"] and not dstate["p1_addons_ready"]:
@@ -2211,11 +2394,11 @@ async def run_in_container(args: argparse.Namespace) -> int:
 
                                     elif dstate["phase"] == "upgrade_wait" and gl >= dstate["phase_start_loop"] + 12:
                                         p1_uids = {b for _, b, _, _, _ in dstate["p1_pending_upgrades"]}
-                                        dstate["p1_upg_busy"] = any(
+                                        dstate["p1_upg_busy"] = bool(p1_uids) and any(
                                             u.alliance == 1 and u.unit_type in p1_uids and len(u.orders) > 0
                                             for u in obs.raw_data.units
                                         )
-                                        if (not dstate["p1_upg_busy"] and not dstate["p2_upg_busy"]) or gl >= dstate["phase_start_loop"] + 180:
+                                        if (not dstate["p1_upg_busy"] and not dstate["p2_upg_busy"]) or gl >= dstate["phase_start_loop"] + 360:
                                             for unm, _, _, _, _ in dstate["p1_pending_upgrades"]:
                                                 dstate["p1_done_upgrades"].add(unm)
                                             for unm, _, _, _, _ in dstate["p2_pending_upgrades"]:
@@ -2250,22 +2433,52 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         site = _site_for_scen(scen)
                                         dstate["arena_cx"], dstate["arena_cy"] = site.cx, site.cy
                                         dbg = []
-                                        for uname, cnt, dx, dy in scen.p1_units:
-                                            sx, sy = an.resolve_spawn_point(scen, uname, dx, dy) if an is not None else (site.cx + dx, site.cy + dy)
-                                            dbg.append(debug_pb2.DebugCommand(
-                                                create_unit=debug_pb2.DebugCreateUnit(
-                                                    unit_type=UNIT_IDS[uname], owner=1,
-                                                    pos=common_pb2.Point2D(x=sx, y=sy), quantity=cnt,
-                                                )
-                                            ))
-                                        for uname, cnt, dx, dy in scen.p2_units:
-                                            sx, sy = an.resolve_spawn_point(scen, uname, dx, dy) if an is not None else (site.cx + dx, site.cy + dy)
-                                            dbg.append(debug_pb2.DebugCommand(
-                                                create_unit=debug_pb2.DebugCreateUnit(
-                                                    unit_type=UNIT_IDS[uname], owner=2,
-                                                    pos=common_pb2.Point2D(x=sx, y=sy), quantity=cnt,
-                                                )
-                                            ))
+                                        placed_structs: list[tuple[float, float, float]] = []
+
+                                        def _spawn_side_entries(entries: list[tuple[str, int, float, float]], owner: int) -> None:
+                                            # Spawn static structures FIRST on exact buildable grid centers, then mobile units cleanly outside footprints!
+                                            struct_items = [(u, c, dx, dy) for u, c, dx, dy in entries if UNIT_IDS[u] in STRUCTURE_IDS]
+                                            mobile_items = [(u, c, dx, dy) for u, c, dx, dy in entries if UNIT_IDS[u] not in STRUCTURE_IDS]
+                                            for uname, cnt, dx, dy in struct_items:
+                                                uid = UNIT_IDS[uname]
+                                                fp = STRUCTURE_FOOTPRINTS.get(uid, 2)
+                                                sx0, sy0 = an.resolve_spawn_point(scen, uname, dx, dy) if an is not None else (site.cx + dx, site.cy + dy)
+                                                for _k in range(cnt):
+                                                    sx, sy = (
+                                                        an.snap_buildable_footprint(sx0, sy0, fp, avoid=placed_structs)
+                                                        if an is not None else (sx0, sy0)
+                                                    )
+                                                    placed_structs.append((sx, sy, 3.8 if fp >= 5 else 2.4))
+                                                    dbg.append(debug_pb2.DebugCommand(
+                                                        create_unit=debug_pb2.DebugCreateUnit(
+                                                            unit_type=uid, owner=owner,
+                                                            pos=common_pb2.Point2D(x=sx, y=sy), quantity=1,
+                                                        )
+                                                    ))
+                                            for uname, cnt, dx, dy in mobile_items:
+                                                uid = UNIT_IDS[uname]
+                                                sx, sy = an.resolve_spawn_point(scen, uname, dx, dy) if an is not None else (site.cx + dx, site.cy + dy)
+                                                if uid not in AIR_UNIT_IDS and placed_structs:
+                                                    for stx, sty, st_rad in placed_structs:
+                                                        min_clr = st_rad - 0.5
+                                                        d_st = math.hypot(sx - stx, sy - sty)
+                                                        if d_st < min_clr:
+                                                            vx = (sx - stx) if d_st > 0.05 else (1.0 if dx >= 0 else -1.0)
+                                                            vy = (sy - sty) if d_st > 0.05 else 0.0
+                                                            vn = max(0.05, math.hypot(vx, vy))
+                                                            sx = stx + (vx / vn) * (min_clr + 0.4)
+                                                            sy = sty + (vy / vn) * (min_clr + 0.4)
+                                                            if an is not None:
+                                                                sx, sy = an.snap_pathable(sx, sy, max_rad=4)
+                                                dbg.append(debug_pb2.DebugCommand(
+                                                    create_unit=debug_pb2.DebugCreateUnit(
+                                                        unit_type=uid, owner=owner,
+                                                        pos=common_pb2.Point2D(x=sx, y=sy), quantity=cnt,
+                                                    )
+                                                ))
+
+                                        _spawn_side_entries(scen.p1_units, 1)
+                                        _spawn_side_entries(scen.p2_units, 2)
                                         await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=dbg)))
                                         dstate["phase"] = "fighting"
                                         dstate["phase_start_loop"] = gl
@@ -2284,6 +2497,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         dstate["p2_start_cnt"] = 0
                                         dstate["p1_start_val"] = 0.0
                                         dstate["p2_start_val"] = 0.0
+                                        dstate["p2_own_units"] = None
+                                        dstate["p2_own_units_loop"] = -1
                                         dstate["p2_pre_cloak_pending"] = False
 
                                     elif dstate["phase"] == "fighting":
@@ -2295,13 +2510,24 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         p1u = [
                                             u for u in obs.raw_data.units
                                             if u.display_type == 1 and u.alliance == 1
+                                            and u.tag not in dstate["orig_th_tags"]
                                             and (u.unit_type in COMBAT_IDS or (want_workers and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx, u.pos.y - cy) < 35.0))
                                         ]
-                                        p2u = [
-                                            u for u in obs.raw_data.units
-                                            if u.display_type == 1 and u.alliance == 4
-                                            and (u.unit_type in COMBAT_IDS or (want_workers and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx, u.pos.y - cy) < 35.0))
-                                        ]
+                                        # Fog-immune P2 unit view from P2's own `sc2_ws2` observation (`alliance == 1`),
+                                        # preventing backline SCVs/Medivacs/Tanks/burrowed units from being missed in P1's sight!
+                                        p2_obs_fresh = (
+                                            dstate["p2_own_units"] is not None
+                                            and dstate["p2_own_units_loop"] >= dstate["phase_start_loop"]
+                                        )
+                                        if p2_obs_fresh:
+                                            p2u = list(dstate["p2_own_units"])
+                                        else:
+                                            p2u = [
+                                                u for u in obs.raw_data.units
+                                                if u.display_type == 1 and u.alliance == 4
+                                                and u.tag not in dstate["orig_th_tags"]
+                                                and (u.unit_type in COMBAT_IDS or (want_workers and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx, u.pos.y - cy) < 35.0))
+                                            ]
                                         exp_p1 = sum(cnt for _, cnt, _, _ in scen.p1_units)
                                         exp_p2 = sum(cnt for _, cnt, _, _ in scen.p2_units)
                                         if dstate["p1_start_cnt"] == 0 and (len(p1u) >= exp_p1 and len(p2u) >= exp_p2 or (gl >= dstate["phase_start_loop"] + 16 and p1u and p2u)):

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "notes": "Real-SC2_x64 micro skirmish scenarios (36 scenarios: 21 core + 15 Tactics Arena 2.0 match-forensics/pro-db/pattern-coverage across 5 terrains & selective upgrades) loaded by tools/sc2-tactics-arena.py. Add or edit via .agents/skills/add-arena-scenario/scripts/add_scenario.py.",
+  "notes": "Real-SC2_x64 micro skirmish scenarios (41 scenarios: 21 core + 20 Tactics Arena 2.0 match-forensics/pro-db/pattern-coverage/custom across 5 terrains & selective upgrades) loaded by tools/sc2-tactics-arena.py. Add or edit via .agents/skills/add-arena-scenario/scripts/add_scenario.py.",
   "scenarios": [
     {
       "id": "sc2-real-p01-zealot-stalker-vs-bio",
@@ -381,6 +381,83 @@
       ],
       "p2_units": [
         ["zergling", 12, 4.8, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-real-p13-obs-colossus-stalker-vs-bio-widowmines",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "source": "match-forensics",
+      "terrain": "open",
+      "patterns": ["widow-mine-detection", "colossus-bio-splash", "blink-micro", "observer-protection"],
+      "p1_upgrades": ["Blink", "ThermalLance"],
+      "p2_upgrades": ["DrillingClaws", "Stim", "CombatShield"],
+      "description": "PvT Widow Mine Sweep: 2 Observers + 2 Colossi + 8 Blink Stalkers + 4 Zealots vs 6 Burrowed Widow Mines (DrillingClaws) + 6 Marauders + 14 Stim Marines + 2 Medivacs",
+      "p1_units": [
+        ["zealot", 4, -3.5, 0.0],
+        ["stalker", 8, -5.0, 0.0],
+        ["colossus", 2, -6.2, 0.0],
+        ["observer", 2, -5.2, 1.8]
+      ],
+      "p2_units": [
+        ["widow-mine-burrowed", 3, 2.8, -2.0],
+        ["widow-mine-burrowed", 3, 2.8, 2.0],
+        ["marauder", 6, 4.0, 0.0],
+        ["marine", 14, 5.0, 0.0],
+        ["medivac", 2, 6.4, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-real-p14-pvp-stalker-chargelot-immortal-mirror",
+      "our_race": "Protoss",
+      "enemy_race": "Protoss",
+      "source": "match-forensics",
+      "terrain": "open",
+      "patterns": ["pvp-mirror-concave", "guardian-shield", "blink-focus-fire", "chargelot-frontline"],
+      "p1_upgrades": ["Blink", "Charge"],
+      "p2_upgrades": ["Blink", "Charge"],
+      "description": "PvP Macro Mirror: 3 Immortals + 10 Blink Stalkers + 8 Chargelots + 1 Sentry vs 3 Immortals + 10 Blink Stalkers + 8 Chargelots",
+      "p1_units": [
+        ["zealot", 8, -3.5, 0.0],
+        ["immortal", 3, -4.5, 0.0],
+        ["stalker", 10, -5.5, 0.0],
+        ["sentry", 1, -5.0, 1.5]
+      ],
+      "p2_units": [
+        ["zealot", 8, 3.5, 0.0],
+        ["immortal", 3, 4.5, 0.0],
+        ["stalker", 10, 5.5, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-real-p15-dt-blink-snipe-planetary",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "source": "custom",
+      "terrain": "open",
+      "patterns": ["dt-shadow-stride", "planetary-fortress-snipe", "blink-over-screen", "scv-repair-counter"],
+      "p1_upgrades": ["ShadowStride", "ProtossGroundWeapons1", "ProtossGroundWeapons2", "ProtossGroundWeapons3"],
+      "p2_upgrades": ["Stim", "CombatShield", "ConcussiveShells"],
+      "description": "DT Blink vs Naive Attack PF Snipe: 27 +3 Shadow-Stride Dark Templars vs Planetary Fortress + 2 Missile Turrets + 10 Repair SCVs + 6 Sieged Tanks + 24 Marines + 8 Marauders + 6 Hellbats + 3 Medivacs",
+      "p1_units": [
+        ["dark-templar", 14, -7.2, -1.5],
+        ["dark-templar", 13, -7.2, 1.5]
+      ],
+      "p2_units": [
+        ["planetary-fortress", 1, 3.5, 0.0],
+        ["missile-turret", 1, 6.5, -2.8],
+        ["missile-turret", 1, 6.5, 2.8],
+        ["hellbat", 6, -1.2, 0.0],
+        ["marauder", 8, -0.5, 0.0],
+        ["marine", 12, 0.2, -2.2],
+        ["marine", 12, 0.2, 2.2],
+        ["scv", 10, 6.8, 0.0],
+        ["siege-tank-sieged", 3, 5.0, -4.5],
+        ["siege-tank-sieged", 3, 5.0, 4.5],
+        ["medivac", 3, 4.5, -2.5]
       ],
       "max_loops": 960
     },
@@ -770,6 +847,31 @@
       "max_loops": 960
     },
     {
+      "id": "sc2-real-t13-bio-tank-viking-vs-blink-colossus",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "source": "match-forensics",
+      "terrain": "open",
+      "patterns": ["viking-colossus-snipe", "bio-tank-concave", "stim-marauder-kite", "anti-colossus-focus"],
+      "p1_upgrades": ["Stim", "CombatShield", "ConcussiveShells"],
+      "p2_upgrades": ["Blink", "ThermalLance"],
+      "description": "TvP Mid-Late Clash: 6 Vikings + 2 Sieged Tanks + 14 Stim Marines + 6 Marauders + 2 Medivacs vs 2 Colossi + 12 Blink Stalkers + 4 Zealots + 1 Sentry",
+      "p1_units": [
+        ["marauder", 6, -3.8, 0.0],
+        ["marine", 14, -4.8, 0.0],
+        ["siege-tank-sieged", 2, -6.2, 0.0],
+        ["viking-fighter", 6, -5.2, 2.2],
+        ["medivac", 2, -6.2, -1.5]
+      ],
+      "p2_units": [
+        ["zealot", 4, 3.6, 0.0],
+        ["stalker", 12, 4.8, 0.0],
+        ["sentry", 1, 5.2, -1.5],
+        ["colossus", 2, 6.2, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
       "id": "sc2-real-z01-lings-vs-marines-open",
       "our_race": "Zerg",
       "enemy_race": "Terran",
@@ -1110,6 +1212,35 @@
       ],
       "p2_units": [
         ["zergling", 14, 4.8, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-real-z13-ravager-hydra-ling-vs-heavy-tank-line",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "source": "match-forensics",
+      "terrain": "flank-surround",
+      "patterns": ["two-prong-flank", "corrosive-bile-tank-line", "tank-surround-collapse", "hydra-ling-concave"],
+      "p1_upgrades": ["MetabolicBoost", "GlialReconstitution", "GroovedSpines", "MuscularAugments"],
+      "p2_upgrades": ["Stim", "CombatShield"],
+      "description": "ZvT 2-Prong Tank-Line Flank: 32 Speedlings + 6 Roaches + 6 Ravagers + 8 Hydralisks flanking from opposite angles onto 5 Sieged Tanks + 16 Stim Marines + 4 Marauders + 2 Medivacs",
+      "p1_units": [
+        ["zergling", 16, -6.2, -4.2],
+        ["roach", 3, -7.0, -4.8],
+        ["ravager", 3, -7.8, -5.2],
+        ["hydralisk", 4, -8.2, -5.8],
+        ["zergling", 16, 6.2, 4.2],
+        ["roach", 3, 7.0, 4.8],
+        ["ravager", 3, 7.8, 5.2],
+        ["hydralisk", 4, 8.2, 5.8]
+      ],
+      "p2_units": [
+        ["marine", 16, 0.0, 0.0],
+        ["marauder", 4, 0.0, -1.2],
+        ["siege-tank-sieged", 3, -1.2, 1.5],
+        ["siege-tank-sieged", 2, 1.2, -1.8],
+        ["medivac", 2, 0.0, 2.2]
       ],
       "max_loops": 960
     }

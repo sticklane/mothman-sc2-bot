@@ -410,6 +410,18 @@ def _classify_spawn_corner(
     return ns + ew
 
 
+def _canonical_map_name(map_name: str | None) -> str:
+    """Unify local (`LeyLinesAIE_v3`) & prod (`Ley Lines AIE`) map names -> `LeyLines`."""
+    s = str(map_name or "").strip()
+    if not s:
+        return "Unknown"
+    s = re.sub(r"\.SC2Map$", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"[\s_-]*AIE(?:_?v\d+)?$", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"(?:[\s_-]+(?:LE|TE)|[\s_-]*v\d+)$", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"[\s_]+", "", s)
+    return s or "Unknown"
+
+
 def _is_selfplay_opp(opp: str | None, cohort: str | None = None) -> bool:
     c = (cohort or "").strip().lower()
     if c == "selfplay":
@@ -449,6 +461,18 @@ def _infer_race_from_bot_name(bot_name: str | None) -> str | None:
     return None
 
 
+def _normalize_build_version(ver: str | None) -> str | None:
+    """Normalize build version strings by stripping leading `v_` so log & chat tags merge cleanly."""
+    if not ver:
+        return None
+    s = str(ver).strip()
+    if not s or s.lower() in ("unknown", "none", "n/a"):
+        return None
+    if re.match(r"^v_", s, re.IGNORECASE) and len(s) > 2:
+        s = s[2:]
+    return s or None
+
+
 def _parse_scbot_build_from_text(text: str | None) -> str | None:
     """Extract build/version identifier from a `[SCBOT_BUILD]` log line."""
     if not text:
@@ -465,12 +489,14 @@ def _parse_scbot_build_from_text(text: str | None) -> str | None:
         ):
             m = re.search(pat, after, re.IGNORECASE)
             if m:
-                val = m.group(1).strip()
-                if val and val.lower() not in ("unknown", "none", "n/a"):
+                val = _normalize_build_version(m.group(1))
+                if val:
                     return val
         first_tok = after.split()[0].strip(",;")
-        if first_tok and "=" not in first_tok and first_tok.lower() not in ("unknown", "none", "n/a"):
-            return first_tok
+        if first_tok and "=" not in first_tok:
+            val = _normalize_build_version(first_tok)
+            if val:
+                return val
     return None
 
 
@@ -497,14 +523,14 @@ def _parse_version_from_chat_tags(
             continue
         m = re.match(r"^Tag:\s*(v_[A-Za-z0-9._-]+)", msg, re.IGNORECASE)
         if m:
-            return m.group(1)
+            return _normalize_build_version(m.group(1))
         m2 = re.match(
             r"^Tag:\s*(?:build|version|ver|rev)[=:]\s*([A-Za-z0-9._-]+)",
             msg,
             re.IGNORECASE,
         )
         if m2:
-            return m2.group(1)
+            return _normalize_build_version(m2.group(1))
     return None
 
 
@@ -634,6 +660,11 @@ def ensure_schema_migrations(conn: sqlite3.Connection) -> None:
                 added_source = True
     if added_source:
         conn.execute("UPDATE matches SET source_type = 'local_arena' WHERE source_type IS NULL")
+    # Merge `v_<rev>` chat-tag versions with `<rev>` [SCBOT_BUILD] log versions cleanly
+    conn.execute(
+        "UPDATE matches SET bot_build_version = SUBSTR(bot_build_version, 3) "
+        "WHERE (bot_build_version LIKE 'v_%' OR bot_build_version LIKE 'V_%') AND LENGTH(bot_build_version) > 2"
+    )
 
 
 def open_db(db_path: Path, readonly: bool = False) -> sqlite3.Connection:
@@ -651,6 +682,7 @@ def open_db(db_path: Path, readonly: bool = False) -> sqlite3.Connection:
         conn.executescript(TABLES_SQL)
         ensure_schema_migrations(conn)
         conn.executescript(INDEXES_SQL)
+    conn.create_function("canon_map", 1, _canonical_map_name)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -2539,8 +2571,118 @@ def cmd_replay_dump(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Subcommand: spawn-bias
+# Subcommand: spawn-bias (+ canonical map x matchup x corner outlier detection)
 # ---------------------------------------------------------------------------
+
+def _two_prop_z(w1: int, n1: int, w2: int, n2: int) -> float:
+    if n1 <= 0 or n2 <= 0:
+        return 0.0
+    p1 = w1 / n1
+    p2 = w2 / n2
+    p_pool = (w1 + w2) / (n1 + n2)
+    denom = math.sqrt(max(1e-12, p_pool * (1.0 - p_pool) * (1.0 / n1 + 1.0 / n2)))
+    if p_pool <= 0.0 or p_pool >= 1.0:
+        return 0.0
+    return (p1 - p2) / denom
+
+
+def _compute_spawn_outliers(
+    conn: sqlite3.Connection,
+    where_sql: str,
+    params: list[Any],
+    min_pair_n: int = 5,
+    single_run_mode: bool = False,
+) -> list[dict[str, Any]]:
+    """Detect statistically & practically significant paired corner outliers per map and (map, matchup)."""
+    outliers: list[dict[str, Any]] = []
+
+    def _scan(scope: str, group_expr: str) -> None:
+        rows = conn.execute(
+            f"""
+            SELECT {group_expr} AS grp_key,
+                   canon_map(map_name) AS map_canon,
+                   matchup,
+                   our_spawn_corner AS corner,
+                   COUNT(*) AS n,
+                   SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) AS w,
+                   SUM(CASE WHEN result='loss' THEN 1 ELSE 0 END) AS l,
+                   SUM(CASE WHEN result='tie' THEN 1 ELSE 0 END) AS t,
+                   ROUND(100.0 * SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) / COUNT(*), 1) AS wr_pct,
+                   ROUND(AVG(sup_blk_pct), 1) AS sb_pct,
+                   ROUND(SUM(COALESCE(killed_val,0)) / MAX(1.0, SUM(COALESCE(lost_val,0))), 2) AS trade_agg
+            FROM matches
+            WHERE {where_sql}
+            GROUP BY grp_key, our_spawn_corner
+            ORDER BY grp_key, corner
+            """,
+            params,
+        ).fetchall()
+        by_grp: dict[str, list[sqlite3.Row]] = defaultdict(list)
+        for r in rows:
+            by_grp[str(r["grp_key"])].append(r)
+
+        for grp_key, items in by_grp.items():
+            items.sort(key=lambda x: str(x["corner"]))
+            for i in range(len(items)):
+                for j in range(i + 1, len(items)):
+                    a, b = items[i], items[j]
+                    na, nb = int(a["n"]), int(b["n"])
+                    wa, wb = int(a["w"]), int(b["w"])
+                    wra, wrb = float(a["wr_pct"] or 0.0), float(b["wr_pct"] or 0.0)
+                    dw = round(wra - wrb, 1)
+                    z = round(_two_prop_z(wa, na, wb, nb), 2)
+                    sba = float(a["sb_pct"]) if a["sb_pct"] is not None else None
+                    sbb = float(b["sb_pct"]) if b["sb_pct"] is not None else None
+                    sb_ratio = 1.0
+                    max_sb = 0.0
+                    if sba is not None and sbb is not None:
+                        max_sb = max(sba, sbb)
+                        sb_ratio = round(max_sb / max(0.5, min(sba, sbb)), 2) if max_sb > 0 else 1.0
+                    tra, trb = float(a["trade_agg"] or 0.0), float(b["trade_agg"] or 0.0)
+                    dt = round(tra - trb, 2)
+
+                    reasons: list[str] = []
+                    min_n = min(na, nb)
+                    if min_n >= min_pair_n and (abs(z) >= 1.65 or abs(dw) >= 15.0):
+                        reasons.append(f"WR_GAP({dw:+.1f}pp,z={z:+.2f})")
+                    elif single_run_mode and min_n >= 1 and (na + nb) >= 3 and abs(dw) >= 50.0:
+                        reasons.append(f"WR_GAP({dw:+.1f}pp)")
+                    if min_n >= max(2, min(min_pair_n, 2)) and max_sb >= 6.0 and sb_ratio >= 1.8:
+                        reasons.append(f"SB_RATIO({sb_ratio:.2f}x)")
+                    elif single_run_mode and min_n >= 1 and max_sb >= 5.0 and sb_ratio >= 2.0:
+                        reasons.append(f"SB_RATIO({sb_ratio:.2f}x)")
+
+                    if reasons:
+                        outliers.append({
+                            "scope": scope,
+                            "key": grp_key,
+                            "map_canon": str(a["map_canon"]),
+                            "matchup": str(a["matchup"]) if scope == "matchup_map" else None,
+                            "corner_a": str(a["corner"]),
+                            "corner_b": str(b["corner"]),
+                            "n_a": na,
+                            "n_b": nb,
+                            "wr_a": wra,
+                            "wr_b": wrb,
+                            "wr_delta_pp": dw,
+                            "z_score": z,
+                            "sb_a": sba,
+                            "sb_b": sbb,
+                            "sb_ratio": sb_ratio,
+                            "trade_a": tra,
+                            "trade_b": trb,
+                            "trade_diff": dt,
+                            "reason": ", ".join(reasons),
+                        })
+
+    _scan("map", "canon_map(map_name)")
+    _scan("matchup_map", "COALESCE(matchup, '?v?') || '|' || canon_map(map_name)")
+    outliers.sort(
+        key=lambda o: (abs(o["z_score"]) * 12.0 + abs(o["wr_delta_pp"]) + max(0.0, o["sb_ratio"] - 1.0) * 15.0),
+        reverse=True,
+    )
+    return outliers
+
 
 def cmd_spawn_bias(args: argparse.Namespace) -> int:
     conn = open_db(Path(args.db), readonly=True)
@@ -2559,12 +2701,46 @@ def cmd_spawn_bias(args: argparse.Namespace) -> int:
     if args.race:
         clauses.append("COALESCE(actual_race, our_race) = ?")
         params.append(_norm_race(args.race))
+    if getattr(args, "matchup", None):
+        clauses.append("UPPER(matchup) = UPPER(?)")
+        params.append(args.matchup)
     if args.bot:
         clauses.append("bot = ?")
         params.append(args.bot)
+    if getattr(args, "build", None):
+        clauses.append("(bot_build_version = ? OR bot_build_version LIKE ?)")
+        params.extend([args.build, f"%{args.build}%"])
     if args.run:
         clauses.append("run_id LIKE ?")
         params.append(f"%{args.run}%")
+    if getattr(args, "since_run", None):
+        clauses.append("run_id >= ?")
+        params.append(args.since_run)
+    if getattr(args, "recent_runs", None):
+        n_rec = max(1, int(args.recent_runs))
+        src_filter = "AND m.source_type = ?" if args.source else ""
+        src_params = [args.source] if args.source else []
+        top_rids = [
+            r[0]
+            for r in conn.execute(
+                f"""
+                SELECT DISTINCT r.run_id
+                FROM runs r
+                JOIN matches m ON m.run_id = r.run_id
+                WHERE 1=1 {src_filter}
+                ORDER BY COALESCE(r.started_at, r.run_id) DESC
+                LIMIT ?
+                """,
+                src_params + [n_rec],
+            ).fetchall()
+        ]
+        if not top_rids:
+            print("No matching recent runs found.")
+            return 0
+        ph = ",".join("?" for _ in top_rids)
+        clauses.append(f"run_id IN ({ph})")
+        params.extend(top_rids)
+
     where = " AND ".join(clauses)
 
     print("=== Overall Spawn-Corner Bias ===")
@@ -2578,6 +2754,7 @@ def cmd_spawn_bias(args: argparse.Namespace) -> int:
                ROUND(100.0 * SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) / COUNT(*), 1) AS wr_pct,
                ROUND(100.0 * SUM(CASE WHEN result!='loss' THEN 1 ELSE 0 END) / COUNT(*), 1) AS nl_pct,
                ROUND(SUM(COALESCE(killed_val,0)) / MAX(1.0, SUM(COALESCE(lost_val,0))), 2) AS trade_agg,
+               ROUND(AVG(sup_blk_pct), 1) AS sb_pct,
                ROUND(AVG(duration_sec), 0) AS avg_dur_s
         FROM matches
         WHERE {where}
@@ -2586,12 +2763,15 @@ def cmd_spawn_bias(args: argparse.Namespace) -> int:
         """,
         params,
     ).fetchall()
-    _print_table(["corner", "n", "W", "L", "T", "WR%", "NL%", "TradeAgg", "AvgDur"], [list(r) for r in overall])
+    _print_table(
+        ["corner", "n", "W", "L", "T", "WR%", "NL%", "TradeAgg", "SB%", "AvgDur"],
+        [list(r) for r in overall],
+    )
 
     print("\n=== Map x Spawn-Corner Breakdown ===")
     by_map = conn.execute(
         f"""
-        SELECT map_name,
+        SELECT canon_map(map_name) AS map_canon,
                our_spawn_corner AS corner,
                COUNT(*) AS n,
                SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) AS w,
@@ -2599,19 +2779,77 @@ def cmd_spawn_bias(args: argparse.Namespace) -> int:
                SUM(CASE WHEN result='tie' THEN 1 ELSE 0 END) AS t,
                ROUND(100.0 * SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) / COUNT(*), 1) AS wr_pct,
                ROUND(SUM(COALESCE(killed_val,0)) / MAX(1.0, SUM(COALESCE(lost_val,0))), 2) AS trade_agg,
+               ROUND(AVG(sup_blk_pct), 1) AS sb_pct,
                ROUND(AVG(our_start_x), 1) || ',' || ROUND(AVG(our_start_y), 1) AS avg_start_xy
         FROM matches
         WHERE {where}
-        GROUP BY map_name, our_spawn_corner
+        GROUP BY map_canon, our_spawn_corner
         HAVING COUNT(*) >= ?
-        ORDER BY map_name, corner
+        ORDER BY map_canon, corner
         """,
         params + [int(args.min_games)],
     ).fetchall()
     _print_table(
-        ["map_name", "corner", "n", "W", "L", "T", "WR%", "TradeAgg", "avg_start_xy"],
+        ["map_canon", "corner", "n", "W", "L", "T", "WR%", "TradeAgg", "SB%", "avg_start_xy"],
         [list(r) for r in by_map],
     )
+
+    if getattr(args, "by_matchup", False) or getattr(args, "matchup", None):
+        print("\n=== Map x Matchup x Spawn-Corner Breakdown ===")
+        by_mu = conn.execute(
+            f"""
+            SELECT canon_map(map_name) AS map_canon,
+                   COALESCE(matchup, '?v?') AS mu,
+                   our_spawn_corner AS corner,
+                   COUNT(*) AS n,
+                   SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) AS w,
+                   SUM(CASE WHEN result='loss' THEN 1 ELSE 0 END) AS l,
+                   SUM(CASE WHEN result='tie' THEN 1 ELSE 0 END) AS t,
+                   ROUND(100.0 * SUM(CASE WHEN result='win' THEN 1 ELSE 0 END) / COUNT(*), 1) AS wr_pct,
+                   ROUND(SUM(COALESCE(killed_val,0)) / MAX(1.0, SUM(COALESCE(lost_val,0))), 2) AS trade_agg,
+                   ROUND(AVG(sup_blk_pct), 1) AS sb_pct
+            FROM matches
+            WHERE {where}
+            GROUP BY map_canon, mu, our_spawn_corner
+            HAVING COUNT(*) >= ?
+            ORDER BY map_canon, mu, corner
+            """,
+            params + [int(args.min_games)],
+        ).fetchall()
+        _print_table(
+            ["map_canon", "mu", "corner", "n", "W", "L", "T", "WR%", "TradeAgg", "SB%"],
+            [list(r) for r in by_mu],
+        )
+
+    single_mode = bool(args.run or (getattr(args, "recent_runs", None) == 1))
+    eff_min_pair = (
+        int(args.min_pair_n)
+        if getattr(args, "min_pair_n", None) is not None
+        else (2 if single_mode else 5)
+    )
+    outliers = _compute_spawn_outliers(conn, where, params, min_pair_n=eff_min_pair, single_run_mode=single_mode)
+    print(f"\n=== Automatic Spawn-Position Outliers (min_pair_n={eff_min_pair}, found={len(outliers)}) ===")
+    if outliers:
+        _print_table(
+            ["scope", "key", "A vs B", "nA/nB", "WR_A/B", "dWR", "z", "SB_A/B", "Tr_A/B", "reason"],
+            [
+                [
+                    o["scope"],
+                    o["key"],
+                    f"{o['corner_a']} vs {o['corner_b']}",
+                    f"{o['n_a']}/{o['n_b']}",
+                    f"{o['wr_a']}%/{o['wr_b']}%",
+                    f"{o['wr_delta_pp']:+.1f}pp",
+                    f"{o['z_score']:+.2f}",
+                    f"{o['sb_a'] if o['sb_a'] is not None else '-'}%/{o['sb_b'] if o['sb_b'] is not None else '-'}%",
+                    f"{o['trade_a']}x/{o['trade_b']}x",
+                    o["reason"],
+                ]
+                for o in outliers[:20]
+            ],
+        )
+    else:
+        print("(No significant spawn-corner outliers detected under current filter.)")
     return 0
 
 
@@ -2856,6 +3094,33 @@ def cmd_analyze_prod(args: argparse.Namespace) -> int:
     else:
         p("\n=== 4. Prod Anomaly Rates by Build ===")
         p("(No anomaly-scored prod matches yet — run `ingest-prod-aiarena <dir> --score` to populate!)")
+
+    # 5B. Map x Spawn-Corner Outliers (Prod)
+    # Note: _compute_spawn_outliers queries `FROM matches` (no `m.` alias), so strip `m.` prefix cleanly
+    plain_where = re.sub(r"\bm\.", "", where) + " AND our_spawn_corner IS NOT NULL AND result IN ('win','loss','tie')"
+    prod_outliers = _compute_spawn_outliers(conn, plain_where, params, min_pair_n=3, single_run_mode=False)
+    p(f"\n=== 4B. Map x Spawn-Corner Outliers (Prod, min_pair_n=3, found={len(prod_outliers)}) ===")
+    if prod_outliers:
+        p(_fmt_table_str(
+            ["scope", "key", "A vs B", "nA/nB", "WR_A/B", "dWR", "z", "SB_A/B", "Tr_A/B", "reason"],
+            [
+                [
+                    o["scope"],
+                    o["key"],
+                    f"{o['corner_a']} vs {o['corner_b']}",
+                    f"{o['n_a']}/{o['n_b']}",
+                    f"{o['wr_a']}%/{o['wr_b']}%",
+                    f"{o['wr_delta_pp']:+.1f}pp",
+                    f"{o['z_score']:+.2f}",
+                    f"{o['sb_a'] if o['sb_a'] is not None else '-'}%/{o['sb_b'] if o['sb_b'] is not None else '-'}%",
+                    f"{o['trade_a']}x/{o['trade_b']}x",
+                    o["reason"],
+                ]
+                for o in prod_outliers[:10]
+            ],
+        ))
+    else:
+        p("(No significant prod spawn-corner outliers detected under current filter.)")
 
     # 6. Top Prod Losses with Raw Build-Order, Econ & Death Forensics
     top_k = max(0, int(getattr(args, "top_losses", 10)))
@@ -3231,13 +3496,19 @@ def build_parser() -> argparse.ArgumentParser:
     sp_dump.add_argument("target", help="replay_id (or prefix), aiarena_match_id, filename, or path")
     sp_dump.add_argument("--build-limit", type=int, default=40)
 
-    sp_sb = sub.add_parser("spawn-bias", help="Map + spawn-corner (NW/NE/SW/SE) win-rate table")
+    sp_sb = sub.add_parser("spawn-bias", help="Map x Matchup x Spawn-Corner (NW/NE/SW/SE) win-rate & outlier detector")
     sp_sb.add_argument("--cohort", default=None)
     sp_sb.add_argument("--source", default=None, help="Filter source_type (local_arena|prod_aiarena|pro_corpus)")
     sp_sb.add_argument("--race", default=None)
+    sp_sb.add_argument("--matchup", default=None, help="Filter matchup (e.g. TvT, TvP, ZvP)")
+    sp_sb.add_argument("--by-matchup", action="store_true", help="Also print Map x Matchup x Spawn-Corner breakdown")
     sp_sb.add_argument("--bot", default=None)
+    sp_sb.add_argument("--build", default=None, help="Filter bot_build_version (exact or substring)")
     sp_sb.add_argument("--run", default=None)
+    sp_sb.add_argument("--since-run", default=None, help="Include only runs with run_id >= value")
+    sp_sb.add_argument("--recent-runs", type=int, default=None, help="Include only the most recent N runs")
     sp_sb.add_argument("--min-games", type=int, default=3)
+    sp_sb.add_argument("--min-pair-n", type=int, default=None, help="Min games per corner for outlier detection (default 5, or 2 for single run)")
     sp_sb.add_argument("--include-selfplay", action="store_true")
     sp_sb.add_argument("--include-dirty", action="store_true")
 

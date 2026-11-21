@@ -53,6 +53,7 @@ VALID_UPGRADES = {
     "CentrifugalHooks", "LurkerRange", "AdaptiveTalons", "GroovedSpines", "MuscularAugments",
     "ChitinousPlating", "NeuralParasite",
     "Blink", "Charge", "ResonatingGlaives", "ThermalLance", "PsiStorm",
+    "ShadowStride", "ProtossGroundWeapons1", "ProtossGroundWeapons2", "ProtossGroundWeapons3",
     "Stim", "CombatShield", "ConcussiveShells", "DrillingClaws", "SmartServos",
     "InfernalPreigniter", "BansheeCloak", "PersonalCloaking", "AdvancedBallistics", "Cloak",
 }
@@ -100,6 +101,8 @@ UNITS: dict[str, tuple[int, float, float]] = {
     "liberator-ag": (734, 375.0, 2.2),
     "battlecruiser": (57, 850.0, 2.8),
     "scv": (45, 50.0, 0.5),
+    "planetary-fortress": (130, 775.0, 2.0),
+    "missile-turret": (23, 100.0, 1.5),
     # Zerg
     "zergling": (105, 25.0, 0.0),
     "zergling-burrowed": (119, 25.0, 0.0),
@@ -151,6 +154,8 @@ ALIASES: dict[str, str] = {
     "viking": "viking-fighter", "vikings": "viking-fighter", "vikingfighter": "viking-fighter", "vikingassault": "viking-assault",
     "bc": "battlecruiser", "battlecruisers": "battlecruiser",
     "mine": "widow-mine", "mines": "widow-mine", "widowmine": "widow-mine", "widowmineburrowed": "widow-mine-burrowed",
+    "pf": "planetary-fortress", "planetary": "planetary-fortress", "planetaryfortress": "planetary-fortress",
+    "turret": "missile-turret", "turrets": "missile-turret", "missileturret": "missile-turret",
     "zealots": "zealot", "stalkers": "stalker", "adepts": "adept", "sentries": "sentry",
     "immortals": "immortal", "archons": "archon", "colossi": "colossus", "colossuses": "colossus",
     "ht": "high-templar", "hts": "high-templar", "hightemplar": "high-templar",
@@ -166,7 +171,7 @@ UNIT_TO_RACE: dict[str, str] = {}
 for _k, (_uid, _, _) in UNITS.items():
     if _k in ("zealot", "adept", "stalker", "sentry", "immortal", "archon", "dark-templar", "high-templar", "colossus", "disruptor", "phoenix", "oracle", "void-ray", "tempest", "carrier", "observer", "warp-prism", "probe"):
         UNIT_TO_RACE[_k] = "Protoss"
-    elif _k in ("hellbat", "hellion", "marauder", "marine", "reaper", "cyclone", "thor", "ghost", "siege-tank", "siege-tank-sieged", "widow-mine", "widow-mine-burrowed", "medivac", "viking-fighter", "viking-assault", "banshee", "raven", "liberator", "liberator-ag", "battlecruiser", "scv"):
+    elif _k in ("hellbat", "hellion", "marauder", "marine", "reaper", "cyclone", "thor", "ghost", "siege-tank", "siege-tank-sieged", "widow-mine", "widow-mine-burrowed", "medivac", "viking-fighter", "viking-assault", "banshee", "raven", "liberator", "liberator-ag", "battlecruiser", "scv", "planetary-fortress", "missile-turret"):
         UNIT_TO_RACE[_k] = "Terran"
     else:
         UNIT_TO_RACE[_k] = "Zerg"

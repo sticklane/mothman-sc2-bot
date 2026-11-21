@@ -314,7 +314,7 @@
          [env-ver (values env-ver 'source)]
          [else
           (define wd (or root-dir (current-directory)))
-          (define jj-rev (run-build-vcs-short "jj" '("log" "-r" "@" "--no-graph" "-T" "change_id.short(8)") wd))
+          (define jj-rev (run-build-vcs-short "jj" '("log" "--ignore-working-copy" "-r" "@" "--no-graph" "-T" "change_id.short(8)") wd))
           (define git-rev (run-build-vcs-short "git" '("rev-parse" "--short=8" "HEAD") wd))
           (define vcs-ver
             (cond
@@ -345,8 +345,9 @@
   (format "[SCBOT_BUILD] bot=~a race=~a version=~a mode=~a" bname brace ver mode))
 
 (define (make-bot-build-tag-chat-action [meta (load-bot-build-metadata)])
-  ;; Channel 2 = Team-only chat (`0`-APM, recorded in `replay.message.events` & AI Arena Match Tags!)
-  (sc2-chat-action 2 (format "Tag:v_~a" (hash-ref meta 'short-rev "dev"))))
+  ;; Channel 1 = Broadcast chat (`m_recipient = 0`, `0`-APM, recorded in `replay.message.events`
+  ;; on 100% of wins AND losses & parsed by AI Arena Match Tags!)
+  (sc2-chat-action 1 (format "Tag:v_~a" (hash-ref meta 'short-rev "dev"))))
 
 ;; =============================================================================
 ;; 1. RFC 6455 WebSocket Client over `racket/tcp`
@@ -8072,9 +8073,100 @@
         (cons exact-pt nearby-legal)
         (if (not (null? nearby-legal)) nearby-legal (list exact-pt))))
 
+  ;; L37-P0-3: Spawn-symmetric expansion fallback anchor directed from `(home-x, home-y)`
+  ;; toward map center / opponent start locations (eliminates SW-only `+20/+20` off-map drift on NW/NE/SE spawns).
+  (define-values (exp-min-x exp-min-y exp-max-x exp-max-y exp-cx exp-cy)
+    (cond
+      [(sc2-game-info? game-info)
+       (define pa (sc2-game-info-playable-area game-info))
+       (define ms (sc2-game-info-map-size game-info))
+       (cond
+         [(and (hash? pa)
+               (real? (hash-ref pa 'x0 #f)) (real? (hash-ref pa 'y0 #f))
+               (real? (hash-ref pa 'x1 #f)) (real? (hash-ref pa 'y1 #f)))
+          (define x0 (exact->inexact (hash-ref pa 'x0)))
+          (define y0 (exact->inexact (hash-ref pa 'y0)))
+          (define x1 (exact->inexact (hash-ref pa 'x1)))
+          (define y1 (exact->inexact (hash-ref pa 'y1)))
+          (values (max SC2-MAP-PLAYABLE-MIN-COORD (+ x0 2.5))
+                  (max SC2-MAP-PLAYABLE-MIN-COORD (+ y0 2.5))
+                  (min SC2-MAP-PLAYABLE-MAX-COORD (- x1 2.5))
+                  (min SC2-MAP-PLAYABLE-MAX-COORD (- y1 2.5))
+                  (* 0.5 (+ x0 x1))
+                  (* 0.5 (+ y0 y1)))]
+         [(and (list? pa) (>= (length pa) 4)
+               (real? (first pa)) (real? (second pa))
+               (real? (third pa)) (real? (fourth pa)))
+          (define x0 (exact->inexact (first pa)))
+          (define y0 (exact->inexact (second pa)))
+          (define x1 (exact->inexact (third pa)))
+          (define y1 (exact->inexact (fourth pa)))
+          (values (max SC2-MAP-PLAYABLE-MIN-COORD (+ x0 2.5))
+                  (max SC2-MAP-PLAYABLE-MIN-COORD (+ y0 2.5))
+                  (min SC2-MAP-PLAYABLE-MAX-COORD (- x1 2.5))
+                  (min SC2-MAP-PLAYABLE-MAX-COORD (- y1 2.5))
+                  (* 0.5 (+ x0 x1))
+                  (* 0.5 (+ y0 y1)))]
+         [(and (pair? ms) (real? (car ms)) (real? (cdr ms)))
+          (define mw (exact->inexact (car ms)))
+          (define mh (exact->inexact (cdr ms)))
+          (values SC2-MAP-PLAYABLE-MIN-COORD SC2-MAP-PLAYABLE-MIN-COORD
+                  (min SC2-MAP-PLAYABLE-MAX-COORD (max 16.0 (- mw 4.0)))
+                  (min SC2-MAP-PLAYABLE-MAX-COORD (max 16.0 (- mh 4.0)))
+                  (* 0.5 mw) (* 0.5 mh))]
+         [(sc2-image-grid? pl-grid)
+          (define mw (exact->inexact (sc2-image-grid-width pl-grid)))
+          (define mh (exact->inexact (sc2-image-grid-height pl-grid)))
+          (values SC2-MAP-PLAYABLE-MIN-COORD SC2-MAP-PLAYABLE-MIN-COORD
+                  (min SC2-MAP-PLAYABLE-MAX-COORD (max 16.0 (- mw 4.0)))
+                  (min SC2-MAP-PLAYABLE-MAX-COORD (max 16.0 (- mh 4.0)))
+                  (* 0.5 mw) (* 0.5 mh))]
+         [else
+          (values SC2-MAP-PLAYABLE-MIN-COORD SC2-MAP-PLAYABLE-MIN-COORD
+                  SC2-MAP-PLAYABLE-MAX-COORD SC2-MAP-PLAYABLE-MAX-COORD
+                  SC2-DEFAULT-MAP-CENTER-X SC2-DEFAULT-MAP-CENTER-Y)])]
+      [else
+       (values SC2-MAP-PLAYABLE-MIN-COORD SC2-MAP-PLAYABLE-MIN-COORD
+               SC2-MAP-PLAYABLE-MAX-COORD SC2-MAP-PLAYABLE-MAX-COORD
+               SC2-DEFAULT-MAP-CENTER-X SC2-DEFAULT-MAP-CENTER-Y)]))
+  (define-values (fallback-exp-x fallback-exp-y)
+    (let* ([remote-starts
+            (if (sc2-game-info? game-info)
+                (filter (lambda (p)
+                          (and (any-point? p)
+                               (> (pt-dist home-x home-y (any-point-x p) (any-point-y p)) 20.0)))
+                        (sc2-game-info-start-locations game-info))
+                '())]
+           [ref-pt
+            (cond
+              [(> (pt-dist home-x home-y exp-cx exp-cy) 6.0)
+               (cons exp-cx exp-cy)]
+              [(pair? remote-starts)
+               (define n (exact->inexact (length remote-starts)))
+               (cons (/ (for/sum ([p (in-list remote-starts)]) (any-point-x p)) n)
+                     (/ (for/sum ([p (in-list remote-starts)]) (any-point-y p)) n))]
+              [(pair? enemy-units)
+               (define n (exact->inexact (length enemy-units)))
+               (cons (/ (for/sum ([e (in-list enemy-units)]) (sc2-point3d-x (sc2-unit-pos e))) n)
+                     (/ (for/sum ([e (in-list enemy-units)]) (sc2-point3d-y (sc2-unit-pos e))) n))]
+              [else
+               (cons exp-cx exp-cy)])]
+           [dx (- (car ref-pt) home-x)]
+           [dy (- (cdr ref-pt) home-y)]
+           [d (sqrt (+ (* dx dx) (* dy dy)))]
+           [ux (if (> d 1.0) (/ dx d) 0.7071067811865475)]
+           [uy (if (> d 1.0) (/ dy d) 0.7071067811865475)]
+           [step-d 28.284271247461902]
+           [lo-x (min exp-min-x exp-max-x)]
+           [hi-x (max exp-min-x exp-max-x)]
+           [lo-y (min exp-min-y exp-max-y)]
+           [hi-y (max exp-min-y exp-max-y)])
+      (values (max lo-x (min hi-x (+ home-x (* step-d ux))))
+              (max lo-y (min hi-y (+ home-y (* step-d uy)))))))
+
   (cond
     [(null? candidate-bases)
-     (find-verified-building-placement ws-conn th-ab (+ home-x 20.0) (+ home-y 20.0) units
+     (find-verified-building-placement ws-conn th-ab fallback-exp-x fallback-exp-y units
                                        #:min-spacing 4.5 #:max-radius 12.0 #:step 1.0
                                        #:bldg-sym 'hatchery #:game-info game-info
                                        #:rpc-budget rpc-budget #:cur-loop cur-loop-arg)]
@@ -8106,7 +8198,7 @@
      (define batch (reverse rev-batch))
      (cond
        [(null? batch)
-        (or fallback-pt (sc2-point2d (+ home-x 20.0) (+ home-y 20.0)))]
+        (or fallback-pt (sc2-point2d fallback-exp-x fallback-exp-y))]
        [(not (consume-placement-rpc-budget! rpc-budget))
         #f]
        [else
@@ -8123,7 +8215,7 @@
                         #:when (= res 1))
               pt)
             fallback-pt
-            (sc2-point2d (+ home-x 20.0) (+ home-y 20.0)))])]
+            (sc2-point2d fallback-exp-x fallback-exp-y))])]
     [else
      (first (pad-candidates-for-base (first candidate-bases)))]))
 
@@ -12626,12 +12718,25 @@
                            [wy (in-value (+ ay (* r (sin ang))))]
                            #:when (valid-warp-spot? wx wy ax ay arad require-pl?))
                 (sc2-point2d wx wy)))
+            (define-values (warp-ux warp-uy)
+              (let* ([dx (- default-eb-x px)]
+                     [dy (- default-eb-y py)]
+                     [d (sqrt (+ (* dx dx) (* dy dy)))])
+                (if (> d 1.0)
+                    (values (/ dx d) (/ dy d))
+                    (let* ([hx (- home-x px)]
+                           [hy (- home-y py)]
+                           [hd (sqrt (+ (* hx hx) (* hy hy)))])
+                      (if (> hd 1.0)
+                          (values (/ hx hd) (/ hy hd))
+                          (values 0.7071067811865475 0.7071067811865475))))))
+            (define warp-base-ang (atan warp-uy warp-ux))
             (define warp-pt
               (or (search-warp-spot #t)
                   (search-warp-spot #f)
                   ;; Non-overlapping fallback around anchor so multi-gate batches never collide on one tile
                   (for*/first ([k (in-range 16)]
-                               [ang (in-value (* k (/ (* 2.0 pi) 16.0)))]
+                               [ang (in-value (+ warp-base-ang (* k (/ (* 2.0 pi) 16.0))))]
                                [wx (in-value (max SC2-MAP-PLAYABLE-MIN-COORD
                                                   (min SC2-MAP-PLAYABLE-MAX-COORD (+ px (* 2.5 (cos ang))))))]
                                [wy (in-value (max SC2-MAP-PLAYABLE-MIN-COORD
@@ -12640,7 +12745,11 @@
                                                 #:when (any-point? rp))
                                         (> (pt-dist wx wy (any-point-x rp) (any-point-y rp)) 1.5)))
                     (sc2-point2d wx wy))
-                  (sc2-point2d (+ px 2.5) (+ py 2.5))))
+                  (sc2-point2d
+                   (max SC2-MAP-PLAYABLE-MIN-COORD
+                        (min SC2-MAP-PLAYABLE-MAX-COORD (+ px (* 2.5 warp-ux))))
+                   (max SC2-MAP-PLAYABLE-MIN-COORD
+                        (min SC2-MAP-PLAYABLE-MAX-COORD (+ py (* 2.5 warp-uy)))))))
             (reserve-step-build-pt! warp-pt warp-ab)
             (emit! (sc2-raw-unit-command warp-ab warp-pt 0 (list ptag) #f))]
            [else

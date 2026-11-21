@@ -179,6 +179,15 @@
     [(member ut '("Hatchery" "Lair" "Hive")) "Hatchery"]
     [else ut]))
 
+;; L37-LOOP-2: Canonical map name unifying local (`LeyLinesAIE_v3`) & prod (`Ley Lines AIE`) -> `LeyLines`
+(define (canonical-map-name raw)
+  (define s0 (string-trim (if (string? raw) raw "")))
+  (define s1 (regexp-replace #px"(?i:\\.SC2Map)$" s0 ""))
+  (define s2 (regexp-replace #px"(?i:[\\s_-]*AIE(?:_?v[0-9]+)?)$" s1 ""))
+  (define s3 (regexp-replace #px"(?i:(?:[\\s_-]+(?:LE|TE)|[\\s_-]*v[0-9]+))$" s2 ""))
+  (define s4 (regexp-replace* #px"[\\s_]+" s3 ""))
+  (if (string=? s4 "") "Unknown" s4))
+
 (define SCOUT-IGNORE-SET
   (set "Larva" "Egg" "CreepTumor" "CreepTumorBurrowed" "CreepTumorQueen"
        "Broodling" "Interceptor" "AdeptPhaseShift" "KD8Charge" "ForceField"
@@ -1803,6 +1812,24 @@
                (if (<= (cdr best) 100.0) (car best) "asymmetric")]
               [else "unknown"]))
 
+          ;; L37-LOOP-2: Permanent spawn corner (NE/NW/SE/SW/?) + canonical map name
+          (define our-start-x (and our-main-xy (round1 (car our-main-xy))))
+          (define our-start-y (and our-main-xy (round1 (cdr our-main-xy))))
+          (define our-spawn-corner
+            (cond
+              [(and our-main-xy (< min-x0 max-x0) (< min-y0 max-y0))
+               (define cx (* 0.5 (+ min-x0 max-x0)))
+               (define cy (* 0.5 (+ min-y0 max-y0)))
+               (string-append (if (>= (cdr our-main-xy) cy) "N" "S")
+                              (if (>= (car our-main-xy) cx) "E" "W"))]
+              [(and our-main-xy opp-main-xy)
+               (define cx (* 0.5 (+ (car our-main-xy) (car opp-main-xy))))
+               (define cy (* 0.5 (+ (cdr our-main-xy) (cdr opp-main-xy))))
+               (string-append (if (>= (cdr our-main-xy) cy) "N" "S")
+                              (if (>= (car our-main-xy) cx) "E" "W"))]
+              [else "?"]))
+          (define map-canon (canonical-map-name map-name))
+
           ;; W15-LOOP-2: Premature T3 starvation guard (catches #5132983/#5132984 style <=4:30 low-eco T3 loss)
           (define t3-premature-starve?
             (and (real? t3-first-sec)
@@ -2732,6 +2759,10 @@
           (hasheq 'id match-label
                   'file bn
                   'map_name map-name
+                  'map_canon map-canon
+                  'our_spawn_corner our-spawn-corner
+                  'our_start_x our-start-x
+                  'our_start_y our-start-y
                   'our_bot our-bot
                   'opp_bot opp-bot
                   'opp_cohort opp-cohort
@@ -3837,6 +3868,136 @@
     (for/hasheq ([rs (in-list '("win" "loss" "tie"))])
       (values (string->symbol rs)
               (aggregate-slice (filter (lambda (r) (string=? (hash-ref r 'result) rs)) clean-scored)))))
+
+  ;; L37-LOOP-2: Permanent Map x Spawn-Position & Matchup x Map x Spawn-Position + Outlier Detection
+  (define ext-clean-spawn-rows
+    (filter (lambda (r)
+              (and (not (eq? (hash-ref r 'is_selfplay #f) #t))
+                   (not (equal? (hash-ref r 'opp_cohort "") "selfplay"))
+                   (member (hash-ref r 'our_spawn_corner "?") '("NE" "NW" "SE" "SW"))))
+            clean-scored))
+  (define (summarize-spawn-bucket rs extra-kvs)
+    (define n (length rs))
+    (define w (count (lambda (r) (equal? (hash-ref r 'result "") "win")) rs))
+    (define l (count (lambda (r) (equal? (hash-ref r 'result "") "loss")) rs))
+    (define t (count (lambda (r) (equal? (hash-ref r 'result "") "tie")) rs))
+    (define kv (for/sum ([r (in-list rs)]) (safe-num (hash-ref r 'killed_val 0) 0)))
+    (define lv (for/sum ([r (in-list rs)]) (safe-num (hash-ref r 'lost_val 0) 0)))
+    (define sbs (filter real? (map (lambda (r) (hash-ref r 'supply_block_pct #f)) rs)))
+    (define base
+      (hasheq 'n n
+              'wins w
+              'losses l
+              'ties t
+              'wr_pct (if (> n 0) (round1 (* 100.0 (/ w n))) 0.0)
+              'nl_pct (if (> n 0) (round1 (* 100.0 (/ (+ w t) n))) 0.0)
+              'trade_agg (if (> n 0) (round2 (/ kv (max 100.0 lv))) 0.0)
+              'avg_sb_pct (if (pair? sbs) (round1 (/ (apply + sbs) (length sbs))) 0.0)))
+    (for/fold ([h base]) ([kv-p (in-list extra-kvs)])
+      (hash-set h (car kv-p) (cdr kv-p))))
+
+  (define map-spawn-groups (make-hash))
+  (define mu-map-spawn-groups (make-hash))
+  (for ([r (in-list ext-clean-spawn-rows)])
+    (define mc (hash-ref r 'map_canon (canonical-map-name (hash-ref r 'map_name ""))))
+    (define crn (hash-ref r 'our_spawn_corner "?"))
+    (define mu (hash-ref r 'matchup "?v?"))
+    (hash-update! map-spawn-groups (list mc crn) (lambda (xs) (cons r xs)) '())
+    (hash-update! mu-map-spawn-groups (list mu mc crn) (lambda (xs) (cons r xs)) '()))
+
+  (define by-map-spawn
+    (for/hasheq ([k (in-list (sort (hash-keys map-spawn-groups)
+                                   (lambda (a b)
+                                     (or (string-ci<? (first a) (first b))
+                                         (and (string-ci=? (first a) (first b))
+                                              (string<? (second a) (second b)))))))])
+      (define mc (first k)) (define crn (second k))
+      (define rs (hash-ref map-spawn-groups k))
+      (values (string->symbol (format "~a|~a" mc crn))
+              (summarize-spawn-bucket rs (list (cons 'map_canon mc) (cons 'corner crn))))))
+
+  (define by-matchup-map-spawn
+    (for/hasheq ([k (in-list (sort (hash-keys mu-map-spawn-groups)
+                                   (lambda (a b)
+                                     (string-ci<? (format "~a|~a|~a" (first a) (second a) (third a))
+                                                  (format "~a|~a|~a" (first b) (second b) (third b))))))])
+      (define mu (first k)) (define mc (second k)) (define crn (third k))
+      (define rs (hash-ref mu-map-spawn-groups k))
+      (values (string->symbol (format "~a|~a|~a" mu mc crn))
+              (summarize-spawn-bucket rs (list (cons 'matchup mu) (cons 'map_canon mc) (cons 'corner crn))))))
+
+  (define (detect-spawn-outliers-for-groups scope group-ht key->prefix-and-corner)
+    ;; Group corner summaries by prefix (map_canon OR (mu, map_canon))
+    (define by-pref (make-hash))
+    (for ([(k rs) (in-hash group-ht)])
+      (define-values (pref-key mc mu crn) (key->prefix-and-corner k))
+      (hash-update! by-pref pref-key
+                    (lambda (xs) (cons (list crn (summarize-spawn-bucket rs '()) mc mu) xs))
+                    '()))
+    (define out '())
+    (for ([(pref-key items) (in-hash by-pref)])
+      (define sorted-items (sort items string<? #:key first))
+      (define len (length sorted-items))
+      (for* ([i (in-range len)]
+             [j (in-range (add1 i) len)])
+        (define it-a (list-ref sorted-items i))
+        (define it-b (list-ref sorted-items j))
+        (define ca (first it-a)) (define sa (second it-a))
+        (define cb (first it-b)) (define sb (second it-b))
+        (define mc (third it-a)) (define mu (fourth it-a))
+        (define na (hash-ref sa 'n 0)) (define nb (hash-ref sb 'n 0))
+        (define wra (hash-ref sa 'wr_pct 0.0)) (define wrb (hash-ref sb 'wr_pct 0.0))
+        (define dw (round1 (- wra wrb)))
+        (define sba (hash-ref sa 'avg_sb_pct 0.0)) (define sbb (hash-ref sb 'avg_sb_pct 0.0))
+        (define max-sb (max sba sbb))
+        (define min-sb (max 0.5 (min sba sbb)))
+        (define sb-ratio (if (> max-sb 0.0) (round2 (/ max-sb min-sb)) 1.0))
+        (define tra (hash-ref sa 'trade_agg 0.0)) (define trb (hash-ref sb 'trade_agg 0.0))
+        (define dt (round2 (- tra trb)))
+        (define reasons '())
+        (when (or (and (>= na 2) (>= nb 2) (>= (abs dw) 25.0))
+                  (and (>= na 1) (>= nb 1) (>= (+ na nb) 3) (>= (abs dw) 50.0)))
+          (set! reasons (cons (format "WR_GAP(~a~app)" (if (>= dw 0) "+" "") dw) reasons)))
+        (when (and (>= na 1) (>= nb 1) (>= sb-ratio 2.0) (>= max-sb 5.0))
+          (set! reasons (cons (format "SB_RATIO(~ax)" sb-ratio) reasons)))
+        (when (and (>= na 2) (>= nb 2) (>= (abs dt) 0.50))
+          (set! reasons (cons (format "TRADE_GAP(~a~ax)" (if (>= dt 0) "+" "") dt) reasons)))
+        (when (pair? reasons)
+          (set! out
+                (cons (hasheq 'scope scope
+                              'key pref-key
+                              'map_canon mc
+                              'matchup mu
+                              'corner_a ca
+                              'corner_b cb
+                              'n_a na
+                              'n_b nb
+                              'wr_a wra
+                              'wr_b wrb
+                              'wr_delta_pp dw
+                              'sb_a sba
+                              'sb_b sbb
+                              'sb_ratio sb-ratio
+                              'trade_a tra
+                              'trade_b trb
+                              'trade_ratio_diff dt
+                              'reason (string-join (reverse reasons) ", "))
+                      out)))))
+    out)
+
+  (define spawn-outliers
+    (sort
+     (append
+      (detect-spawn-outliers-for-groups
+       "map" map-spawn-groups
+       (lambda (k) (values (first k) (first k) #f (second k))))
+      (detect-spawn-outliers-for-groups
+       "matchup_map" mu-map-spawn-groups
+       (lambda (k) (values (format "~a|~a" (first k) (second k)) (second k) (first k) (third k)))))
+     >
+     #:key (lambda (o)
+             (+ (abs (hash-ref o 'wr_delta_pp 0.0))
+                (* 15.0 (max 0.0 (- (hash-ref o 'sb_ratio 1.0) 1.0)))))))
   ;; W9-LOOP-2 / L29-LOOP-2: Cohort split (`core_12` vs `unseen_6` vs `selfplay`)
   (define core12-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "core_12")) clean-scored))
   (define unseen6-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "unseen_6")) clean-scored))
@@ -4045,6 +4206,29 @@
   (for ([rs (in-list '(win loss tie))])
     (print-agg-line (format "RES=~a" (pad-r (string-upcase (symbol->string rs)) 9)) (hash-ref by-result rs)))
 
+  (when (> (hash-count by-map-spawn) 0)
+    (printf "\n  MAP x SPAWN POSITION (clean external n=~a):\n" (length ext-clean-spawn-rows))
+    (for ([sym (in-list (sort (hash-keys by-map-spawn)
+                              (lambda (a b) (string-ci<? (symbol->string a) (symbol->string b)))))])
+      (define b (hash-ref by-map-spawn sym))
+      (printf "    ~a | ~a | n=~a (~aW-~aL-~aT, WR=~a%, NL=~a%) | Trade=~ax | SB=~a%\n"
+              (pad-r (hash-ref b 'map_canon) 13)
+              (pad-r (hash-ref b 'corner) 2)
+              (pad-r (hash-ref b 'n) 2)
+              (hash-ref b 'wins) (hash-ref b 'losses) (hash-ref b 'ties)
+              (r1 (hash-ref b 'wr_pct)) (r1 (hash-ref b 'nl_pct))
+              (r2 (hash-ref b 'trade_agg)) (r1 (hash-ref b 'avg_sb_pct))))
+    (when (pair? spawn-outliers)
+      (printf "\n  SPAWN-POSITION OUTLIERS (top ~a of ~a):\n"
+              (min 10 (length spawn-outliers)) (length spawn-outliers))
+      (for ([o (in-list (take spawn-outliers (min 10 (length spawn-outliers))))])
+        (printf "    [~a] ~a | ~a(n=~a,WR=~a%,SB=~a%,Tr=~ax) vs ~a(n=~a,WR=~a%,SB=~a%,Tr=~ax) -> ~a\n"
+                (pad-r (hash-ref o 'scope) 11)
+                (pad-r (hash-ref o 'key) 18)
+                (hash-ref o 'corner_a) (hash-ref o 'n_a) (r1 (hash-ref o 'wr_a)) (r1 (hash-ref o 'sb_a)) (r2 (hash-ref o 'trade_a))
+                (hash-ref o 'corner_b) (hash-ref o 'n_b) (r1 (hash-ref o 'wr_b)) (r1 (hash-ref o 'sb_b)) (r2 (hash-ref o 'trade_b))
+                (hash-ref o 'reason)))))
+
   ;; Aggregate log telemetry
   (define logged-rows (filter (lambda (r) (hash-ref r 'has_logs #f)) scored))
   (define log-telemetry
@@ -4104,6 +4288,9 @@
             'selfplay_breakdown selfplay-breakdown
             'by_race by-race
             'by_matchup by-matchup
+            'by_map_spawn by-map-spawn
+            'by_matchup_map_spawn by-matchup-map-spawn
+            'spawn_outliers spawn-outliers
             'by_result by-result
             'log_telemetry log-telemetry
             'matches scored))

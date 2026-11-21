@@ -455,6 +455,20 @@
       (values (clamp-coord (+ x1 (* dist (/ dx d))))
               (clamp-coord (+ y1 (* dist (/ dy d)))))))
 
+;; L37-P0-1 (`#846`): Spawn-symmetric front direction target from home `(bx, by)`:
+;; prefers Natural `(nx, ny)`, falls back to Enemy `(ex, ey)`, then map center `(100, 100)`.
+(define (sd-front-target-xy idx)
+  (define bx (sd-index-bx idx))
+  (define by (sd-index-by idx))
+  (define nx (sd-index-nx idx))
+  (define ny (sd-index-ny idx))
+  (define ex (sd-index-ex idx))
+  (define ey (sd-index-ey idx))
+  (cond
+    [(>= (fast-dist2 bx by nx ny) 4.0) (values nx ny)]
+    [(>= (fast-dist2 bx by ex ey) 4.0) (values ex ey)]
+    [else (values 100.0 100.0)]))
+
 (define (unit-is-worker? u)
   (and (memq (u-sym u) '(scv probe drone)) #t))
 
@@ -837,15 +851,19 @@
              [addons (bucket-pos-ids eb-ht '(barracks-techlab factory-techlab starport-techlab
                                              barracks-reactor factory-reactor starport-reactor))]
              [base-targets
-              (append
-               (list (list 'main-mineral-line (clamp-coord (+ ex 3.0)) (clamp-coord (+ ey 3.0)))
-                     (list 'natural-mineral-line (clamp-coord eex) (clamp-coord eey)))
-               (for/list ([th (in-list ths)])
-                 (list 'enemy-base (clamp-coord (u-x th ex)) (clamp-coord (u-y th ey))))
-               (for/list ([tc (in-list techs)])
-                 (list 'tech-cluster (clamp-coord (u-x tc ex)) (clamp-coord (u-y tc ey))))
-               (for/list ([ad (in-list addons)])
-                 (list 'addon-cluster (clamp-coord (u-x ad ex)) (clamp-coord (u-y ad ey)))))]
+              (let-values ([(emx emy)
+                            (if (>= (fast-dist2 ex ey eex eey) 4.0)
+                                (step-from-to ex ey eex eey -4.2)
+                                (step-from-to ex ey (sd-index-bx idx) (sd-index-by idx) -4.2))])
+                (append
+                 (list (list 'main-mineral-line emx emy)
+                       (list 'natural-mineral-line (clamp-coord eex) (clamp-coord eey)))
+                 (for/list ([th (in-list ths)])
+                   (list 'enemy-base (clamp-coord (u-x th ex)) (clamp-coord (u-y th ey))))
+                 (for/list ([tc (in-list techs)])
+                   (list 'tech-cluster (clamp-coord (u-x tc ex)) (clamp-coord (u-y tc ey))))
+                 (for/list ([ad (in-list addons)])
+                   (list 'addon-cluster (clamp-coord (u-x ad ex)) (clamp-coord (u-y ad ey))))))]
              [res (remove-duplicates base-targets equal?)])
         (set-sd-index-subtargets! idx res)
         res)))
@@ -1634,11 +1652,12 @@
                      (for ([w (in-list squad)]) (hash-set! used-ht (u-id w) #t))
                      (set! avail-workers (strip-used-workers avail-workers used-ht))
                      (emit! (list 'pull-workers-attack (map u-id squad) (u-id c) cx cy)))
-                   (define blocker (nearest-entity-to (+ cx 2.0) cy avail-workers))
+                   (define-values (blx bly) (step-from-to cx cy bx by 2.0))
+                   (define blocker (nearest-entity-to blx bly avail-workers))
                    (when blocker
                      (hash-set! used-ht (u-id blocker) #t)
                      (set! avail-workers (strip-used-workers avail-workers used-ht))
-                     (emit! (list 'hold-position (u-id blocker) (clamp-coord (+ cx 2.0)) (clamp-coord cy))))]))
+                     (emit! (list 'hold-position (u-id blocker) blx bly)))]))
 
               ;; When walled/complete cannon abort triggers, return spare workers to mineral mining
               (when (and aborted-walled-cannon? (pair? avail-workers))
@@ -1742,7 +1761,9 @@
   (define ab-ht (sd-index-ally-b-by-type idx))
   (when (or (hash-has-key? au-ht 'drone) (hash-has-key? ab-ht 'hatchery)
             (hash-has-key? ab-ht 'lair) (hash-has-key? ab-ht 'hive))
-    (emit! (list 'build 'spine-crawler (clamp-coord (+ bx 5.0)) (clamp-coord (+ by 5.0))))))
+    (define-values (fx fy) (sd-front-target-xy idx))
+    (define-values (spx spy) (step-from-to bx by fx fy 6.5))
+    (emit! (list 'build 'spine-crawler spx spy))))
 
 (define (plan-counter-cannon-rush-tactics raw-obs)
   (define obs (ensure-obs raw-obs))
@@ -1752,8 +1773,10 @@
   (if (and (eq? (obs-ref obs 'race 'Unknown) 'Zerg)
            (pair? acts)
            (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build))) acts)))
-      (let-values ([(bx by) (home-xy obs)])
-        (append acts (list (list 'build 'spine-crawler (clamp-coord (+ bx 5.0)) (clamp-coord (+ by 5.0))))))
+      (let-values ([(bx by) (home-xy obs)]
+                   [(fx fy) (sd-front-target-xy idx)])
+        (define-values (spx spy) (step-from-to bx by fx fy 6.5))
+        (append acts (list (list 'build 'spine-crawler spx spy))))
       acts))
 
 ;; -----------------------------------------------------------------------------
@@ -1978,7 +2001,9 @@
         (when (and (pair? combat-air-threats)
                    (< (length turrets) max-turrets)
                    (not (any-entity-within? bx by 12.0 turrets)))
-          (emit! (list 'build 'missile-turret (clamp-coord (- bx 4.0)) (clamp-coord (- by 4.0)))))
+          (define-values (fx fy) (sd-front-target-xy idx))
+          (define-values (mtx mty) (step-from-to bx by fx fy -5.5))
+          (emit! (list 'build 'missile-turret mtx mty)))
         (when (and (pair? combat-air-threats)
                    (pair? tanks)
                    (< (length turrets) max-turrets))
@@ -1989,7 +2014,8 @@
           (when (and (or (<= (fast-dist2 tx ty bx by) 484.0)
                          (<= (fast-dist2 tx ty nx ny) 484.0))
                      (not (any-entity-within? tx ty 12.0 turrets)))
-            (emit! (list 'build 'missile-turret (clamp-coord (- tx 3.0)) (clamp-coord (+ ty 3.0))))))
+            (define-values (ttx tty) (step-from-to tx ty bx by 4.0))
+            (emit! (list 'build 'missile-turret ttx tty))))
 
         (for ([mt (in-list turrets)]
               #:when (< (u-hp-frac mt) 0.95))
@@ -2028,7 +2054,18 @@
           (define final-safe
             (if (> (fast-dist2 safe-x safe-y tx ty) 56.25)
                 (cons safe-x safe-y)
-                (cons (clamp-coord (- ex 11.0)) (clamp-coord (+ ey 11.0)))))
+                (let* ([dx (- ex (sd-index-bx idx))]
+                       [dy (- ey (sd-index-by idx))]
+                       [d (sqrt (+ (* dx dx) (* dy dy)))]
+                       [px (if (< d 0.001) -1.0 (/ (- dy) d))]
+                       [py (if (< d 0.001)  0.0 (/ dx d))]
+                       [ax (clamp-coord (+ ex (* 11.0 px)))]
+                       [ay (clamp-coord (+ ey (* 11.0 py)))]
+                       [bx2 (clamp-coord (- ex (* 11.0 px)))]
+                       [by2 (clamp-coord (- ey (* 11.0 py)))])
+                  (if (>= (fast-dist2 ax ay tx ty) (fast-dist2 bx2 by2 tx ty))
+                      (cons ax ay)
+                      (cons bx2 by2)))))
           (emit! (list 'air-route-blind-spot-bypass (car final-safe) (cdr final-safe)))
           (for ([au (in-list air-units)])
             (when (<= (fast-dist2 (u-x au ex) (u-y au ey) tx ty) 72.25)

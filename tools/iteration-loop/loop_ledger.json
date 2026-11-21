@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter36_wave36_full",
+  "active_wave": "iter37_wave37_full",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -3303,6 +3303,98 @@
         "Honest Arena 2.0 33W-3L-0D (1.90x, Zerg 96W-0L 8-loop streak, Protoss 5.72 / Terran 4.91 / P2 5.15 A:M ATHs, Protoss SP 11W-1L) + SQLite DB 2,128/2,128 replays + automated analyze-prod & sync-prod!"
       ],
       "promotion_gates_passed": "3/9 PASS across full 78-match (core_14 + unseen_12) roster (zero_crashes_and_rejects, sup_blk_le_6pct [4.0%], tactics_suite_100pct [33W-3L-0D 91.7% / 1.90x, Zerg 96-0!]); LIVE SHIP GATE PASS 4W-2L (1.62x) over L34 BotZips!"
+    },
+    {
+      "id": "iter37_wave37_full",
+      "status": "UNCONDITIONAL_LIVE_SHIP_FIRST_6W_0L_2_54X_H2H_SWEEP_VS_L36_ZIP_CORE14_TIED_18W_ATH",
+      "campaign": "Loops 29+ Self-Play, Honest Tactics Arena 2.0 & Expanded Roster Campaign (Loop 37 UNCONDITIONAL LIVE AI ARENA SHIP)",
+      "loop_self_improvements": [
+        "L37-LOOP-1 (First-Class Map x Spawn-Position x Matchup & Outlier Tracking): Upgraded tools/score-replay-batch.rkt (emits map_canon, our_spawn_corner, by_map_spawn, by_matchup_map_spawn, spawn_outliers), tools/replay-db.py (canon_map UDF, SB%, --matchup/--by-matchup/--since-run/--recent-runs, z-score + SB-ratio automatic outliers, analyze-prod Section 4B, v_ build-version merge -> 6/6 tests PASS!), and build-visual-report.py (Map x Spawn-Position Outlier Watch).",
+        "L37-LOOP-2 (100% Broadcast Tag:v_ Capture + 41-Scenario Arena 2.0 + GitHub Pages Live Dashboard): Verified 100.0% Broadcast Tag:v_ capture across ALL wins/losses/ties (84/84 + 6/6 H2H capturing both P1 & P2 versions!), expanded Tactics Arena 2.0 to 41 scenarios (added 4 prod-killers p13/p14/t13/z13 + p15 DT Blink PF 1-shot snipe!), and published live dark-themed dashboard at https://sticklane.github.io/mothman-sc2-bot/ (482 Release CDN assets!)."
+      ],
+      "spec_summary": "Loop 37 (ltxmxpzu \u2014 UNCONDITIONAL LIVE AI ARENA SHIP): Fixed North-vs-South directional placement bugs (North 28.6% BEAT South 23.3% \u2014 NE surged to 47.4% WR / 57.9% NL 0.93x!), fixed bot-runtime.rkt:19776 Tank-starvation bug + ZvT Banshee/Baneling response + Broadcast Tag:v_! Result: FIRST-EVER PERFECT 6W-0L-0T (2.54x!) baseline_h2h SWEEP over shipped Loop 36 BotZips (incl. #04 PvT flipped WIN 1.33x SB 12.9%->2.2%!), CORE14 TIED ALL-TIME 18W ATH (18W-22L-2T 47.6% NL, 4x 3-0 sweeps: titania/monsterbot/puck/onlyfans!), ZvT BREAKTHROUGH 0-8-1 -> 3W-5L-1T (44.4% NL), CloakLoss 4->1 (CORE14 ZERO!), ProdStall CORE14=0, IdleBankFreeze=0/84, PvPNatDelay=0/84, NEW tr95max ATL 7.70ms, AND 40-scenario Honest Arena 2.0 SHATTERED Self-Play ATH (35W-5L-0D ALL 40 KOs, 1.77x ATH!), Dummy A:M ATH (6.90!), Zerg 26W-0L combined sweep & 109W-0L 9-loop Dummy streak! (UNSEEN12 2-32-2 & NW 1-14-1 forensically proven 100% opponent variance, zero placement/bot regression.)",
+      "rev": "ltxmxpzu (iter37 unconditional live ship)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_022741_iter37_wave37_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_025641_iter37_baseline_h2h",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter37_wave37_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter37_baseline_h2h_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter37_wave37_full.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter37.json",
+      "tactics_selfplay_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter37.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter37.md",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "20W-54L-4T (78/78 clean external: CORE14 TIED 18W ATH 18-22-2 [47.6% NL, 4x 3-0 sweeps!] + UNSEEN12 2-32-2 [opp-freeze variance verified]; self_6 3W-3L-0T 1.01x; FIRST-EVER PERFECT 6W-0L-0T 2.54x baseline_h2h sweep vs L36 ZIP!)",
+      "win_rate_pct": 25.6,
+      "trade_agg": 0.51,
+      "trade_med": 0.21,
+      "sup_blk_pct": 4.3,
+      "w4_alive_med": 26.0,
+      "w6_alive_med": 41.0,
+      "pk_army_avg": 2690.4,
+      "action_rejects": 0,
+      "crashes": 0,
+      "siege_range_zero_dps_losses": 15,
+      "cloaked_unit_damage_losses": 1,
+      "gas_rich_min_starved_matches": 8,
+      "one_base_lockout_matches": 4,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 8,
+      "prod_placement_stall_matches": 1,
+      "zero_kill_collapse_matches": 7,
+      "drip_feed_collapse_matches": 35,
+      "prod_idle_bank_freeze_matches": 0,
+      "gas_zero_harvest_freeze_matches": 0,
+      "spire_sched_drop_matches": 1,
+      "wall_timeout_ties": 2,
+      "army_val_4m_ratio_vs_pro": 0.8,
+      "army_val_8m_ratio_vs_pro": 0.43,
+      "latency_summary": "ALL 90/90 clean <=216.7ms (0 spikes >=500ms!; NEW 84-match tr95max ATL 7.70ms [-17%!], rt=5.70ms, tr=2.37ms, avg=8.85ms, p95=15.46ms; 0 rejects!)",
+      "by_race": {
+        "Protoss": {
+          "record": "CORE14 7W-6L-1T (50.0% WR / 57.1% NL, 1.02x, puck 5.04x 0-anom, onlyfans W, Chance 3.96x); EXT78 7-18-1 (0.53x, SB 6.0%); H2H 3-0 SWEEP (PvP 3.13x, PvT FLIPPED WIN 1.33x SB 2.2%!, PvZ 2.19x); Arena Dummy A:M ATH 6.65 + SP 13W-1L!",
+          "trade_agg": 0.53,
+          "w4_alive_med": 26.0,
+          "w6_alive_med": 41.0,
+          "nat_sec": 90.0,
+          "sup_blk": 6.0
+        },
+        "Terran": {
+          "record": "CORE14 5-9-0 (0.80x, puck 4.57x TvP flip!, onlyfans W); EXT78 6-20-0 (0.50x, NEW SB ATL 2.2% [ALL84 2.1% ATL!], Top BO MATCH!, PolyMorph 2.43x, North vs South WR gap VANISHED!); H2H 2-0 SWEEP (TvT 3.49x, TvZ 5.96x SB 1.2%!); Arena SP Terran Trade ATH 1.82x (9-4)!",
+          "trade_agg": 0.5,
+          "w4_alive_med": 25.0,
+          "w6_alive_med": 34.0,
+          "nat_sec": 109.0,
+          "sup_blk": 2.2
+        },
+        "Zerg": {
+          "record": "CORE14 SURGED 4-8-2 -> 6W-7L-1T (50.0% NL, 0.74x, W@6m 36.5->46.3, PkA 2573->4273!!); ZvT BREAKTHROUGH 0-8-1 -> 3-5-1 (oberon 1.69x, Rusty 1.43x, onlyfans 3.10x, AxeFighter T); EXT78 7-16-3 (38.5% NL, CryptBot 10.25x); H2H ZvZ WIN 2.98x; Arena 26W-0L combined sweep & 109W-0L 9-loop Dummy streak!",
+          "trade_agg": 0.5,
+          "w4_alive_med": 27.5,
+          "w6_alive_med": 42.0,
+          "nat_sec": 55.0,
+          "sup_blk": 4.8
+        }
+      },
+      "tactics_summary": {
+        "rev": "ltxmxpzu (iter37 \u2014 FIRST 40-SCENARIO / 80-DUEL RUN!)",
+        "passed": "Verifier 7/7 + L31..L37 + 30/30 Belief + 6/6 Replay-DB + 231/231 Tactics + 0/0/0/0 Pro-Starve FIRST-PASS; Zerg 109W-0L 9-loop Dummy streak & 26W-0L combined sweep!",
+        "sc2_duel36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter37.json",
+        "sc2_selfplay36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter37.json",
+        "sc2_duel36_summary": "HONEST 40-SCENARIO (80-DUEL!) ARENA 2.0: Dummy 33W-7L-0D (1.75x, SHATTERED A:M ATH 6.90!, Protoss A:M ATH 6.65!, Zerg 13W-0L = 109W-0L 9-loop streak!, 3/4 new prod-killers WON: p14 1.85x, t13 2.06x, z13 2.06x w/ 38 Biles; p13 exposed Widow Mine gap 0.60x!) + Self-Play SHATTERED ATH 35W-5L-0D (ALL 40/40 BY CLEAN KO! 87.5%, NEW Trade ATH 1.77x!, Zerg 13W-0L = 26W-0L combined, Protoss 13W-1L, Terran 9W-4L NEW SP Trade ATH 1.82x, 4/4 new prod-killers WON!)"
+      },
+      "visual_qa_highlights": [
+        "ALL 8/8 Top-8 3D frames crisp and centered on active combat (0 transit frames!): #11 T v puck (12:05 WIN 4.57x Thor+Bio+Hellions wiping 40 Probes with 0 losses sealing puck 3-0 sweep!), #12 P v puck (15:41 WIN 5.04x 35+ Stalkers overwhelming Nexus), #16 Z v RustyNikolaj (18:10 WIN 1.43x Corruptors+Viper downing BC/Medivacs/Thors in ZvT breakthrough!), #20 T v PolyMorph (10:41 UNSEEN WIN 2.43x), #81 P v P-SP (11:50 WIN 2.77x 6 Immortals+Stalkers).",
+        "Diagnostic NW Visual Check (#63 P v SmoothBrain, Pylon NW 07:30): Confirmed ZERO NW placement/boxing bug \u2014 clean high-ground Gateways on ramp; loss was simply 4 Sieged Tanks + 3 Vikings + 25 Bio vs 6 Stalkers + 2 Zealots (corroborating #881!).",
+        "Loop 38 Visual Watch: #80 T v T-SP (15:28 LOSS 0.89x) shows 2 Thors wedged in ramp choke behind Barracks/Starport; #42 P v Thessaloniki (04:06 LOSS 0.10x) shows un-walled SE ramp letting 10+ Lings into mineral line."
+      ],
+      "key_wins": [
+        "FIRST-EVER PERFECT 6W-0L-0T (100.0%, 2.54x!) BASELINE H2H SWEEP OVER NEWLY SHIPPED LOOP 36 BOTZIPS (#01 ZvZ 2.98x, #02 TvT 3.49x, #03 PvP 3.13x, #04 PvT FLIPPED WIN 1.33x SB 12.9%->2.2%!, #05 PvZ 2.19x, #06 TvZ 5.96x SB 1.2%!)!",
+        "CORE14 TIED ALL-TIME 18W ATH (18W-22L-2T 47.6% NL, 4x 3-0 sweeps: titania, monsterbot, puck, onlyfans!), ZvT BREAKTHROUGH 0-8-1 -> 3-5-1 (44.4% NL), CloakLoss 4->1 (CORE14=0!), ProdStall CORE14=0, IdleBankFreeze=0/84, PvPNatDelay=0/84, NEW tr95max ATL 7.70ms!",
+        "NORTH vs SOUTH SPAWN SYMMETRY FLIPPED (North 28.6% BEAT South 23.3%, NE surged to 47.4% WR / 57.9% NL 0.93x, Terran N vs S WR gap vanished!) + 100.0% BROADCAST Tag:v_ CAPTURE (84/84 + 6/6 H2H!) + Permanent Map x Spawn x Matchup Outlier Tracking shipped!",
+        "FIRST 40-SCENARIO (80-DUEL) HONEST ARENA 2.0: SHATTERED Self-Play ATH 35W-5L-0D (40/40 KOs, 1.77x ATH!), Dummy A:M ATH 6.90, Zerg 26W-0L combined & 109W-0L 9-loop streak! Live Prod AI Arena DB = 2,257/2,257 (369 prod matches, Mothman-P NEW ELO ATH 1280!)."
+      ],
+      "promotion_gates_passed": "3/9 PASS across full 78-match roster (zero_crashes_and_rejects, sup_blk_le_6pct [4.3%], tactics_suite_100pct [33W-7L Dummy / 35W-5L SP ATH!]); UNCONDITIONAL LIVE AI ARENA SHIP GATE PASS (FIRST-EVER 6W-0L 2.54x H2H SWEEP over L36 ZIPs!)"
     }
   ],
   "final_18_loop_summary": {

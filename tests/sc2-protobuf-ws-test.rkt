@@ -20,6 +20,23 @@
          "../lib/plan/situational-counter.rkt"
          "../lib/sc2-protobuf-ws.rkt"
          "../sim/racket-sc2-ladder-main.rkt"
+         (only-in "../lib/sc2-typed-commands.rkt"
+                  decode-typed-sc2-action
+                  WireChat?
+                  WireChat-team?
+                  WireChat-message)
+         (only-in "../lib/plan/wall-and-block.rkt"
+                  classify-enemy-wall-state
+                  EnemyWallAssessment-entry-x
+                  EnemyWallAssessment-entry-y
+                  plan-own-wall-integrity-defense
+                  plan-expansion-and-gas-blocks
+                  plan-counter-expansion-and-gas-blocks)
+         (only-in "../lib/plan/creep-and-changeling.rkt"
+                  make-creep-spread-tracker
+                  plan-multi-highway-creep-spread
+                  plan-changeling-free-unit-tactics
+                  plan-dropperlord-queen-creep-expedition)
          (only-in "../ladder/build-aiarena-zip.rkt"
                   detect-build-version-metadata
                   build-bot-config-json-bytes))
@@ -8013,9 +8030,10 @@
                    (equal? (hash-ref meta-src 'version #f) "src12345_cafe9999")
                    (eq? (hash-ref meta-src 'mode #f) 'source)))
 
-  ;; L36-P0-1b: `0`-APM team-only `(sc2-chat-action 2 "Tag:v_<rev>")` emits ONCE per match at frame `~24`,
-  ;; passes through `govern-sc2-wire-actions!` even at drained `-4.0` tokens with `0` APM cost,
-  ;; encodes cleanly via `encode-sc2-action`, and re-emits once after a match rewind!
+  ;; L36-P0-1b / L37-P0-3: `0`-APM Broadcast `(sc2-chat-action 1 "Tag:v_<rev>")` emits ONCE per match
+  ;; at frame `~24` (captured in `.SC2Replay` on 100% of wins AND losses!), passes through
+  ;; `govern-sc2-wire-actions!` even at drained `-4.0` tokens with `0` APM cost, encodes cleanly via
+  ;; `encode-sc2-action` with `team? = #f` (Broadcast channel 1), and re-emits once after a match rewind!
   (define (mk-l36-u tag utype alliance x y #:hp [hp 100.0] #:rad [rad 1.0] #:mins [mins 0])
     (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 3) 0 2))
               (sc2-point3d x y 8.0) 0.0 rad 1.0 0 #f #f #f
@@ -8048,8 +8066,9 @@
   (define gov-tag-out (govern-sc2-wire-actions! gov-36b (list tag-act) 24))
   (define drops-before (get-total-wire-action-drop-count))
   (define enc-tag (and tag-act (encode-sc2-action tag-act)))
+  (define dec-tag (and (bytes? enc-tag) (decode-typed-sc2-action enc-tag)))
   (define drops-after (get-total-wire-action-drop-count))
-  (check-true "l36-p0-1b-zero-apm-team-only-tag-emits-once-per-match-and-resets-on-rewind"
+  (check-true "l36-p0-1b-zero-apm-broadcast-tag-emits-once-per-match-and-resets-on-rewind"
               (and (null? chats-0)
                    (null? chats-12)
                    (= (length chats-24) 1)
@@ -8058,12 +8077,15 @@
                    (null? chats-rw0)
                    (= (length chats-rw24) 1)
                    (sc2-chat-action? tag-act)
-                   (= (sc2-chat-action-channel tag-act) 2)
+                   (= (sc2-chat-action-channel tag-act) 1)
                    (string-prefix? (sc2-chat-action-message tag-act) "Tag:v_")
                    (= (wire-cmd-priority-tier tag-act) 0)
                    (equal? gov-tag-out (list tag-act))
                    (bytes? enc-tag)
                    (> (bytes-length enc-tag) 4)
+                   (WireChat? dec-tag)
+                   (not (WireChat-team? dec-tag))
+                   (equal? (WireChat-message dec-tag) (sc2-chat-action-message tag-act))
                    (= drops-before drops-after)))
 
   ;; L36-P0-1c: Front-of-Hatchery Spine Crawler placement (`#37` 12-Pool fix) is 100% spawn-symmetric
@@ -8107,6 +8129,250 @@
                    (sc2-point2d? ne-pt)
                    (< (sc2-point2d-x ne-pt) 153.5)   ;; STRICTLY West (front) of NE Hatchery, away from East minerals!
                    (>= (sc2-point2d-x ne-pt) 145.0))))
+
+;; =============================================================================
+;; Loop 37 (`L37-P0-3`): Broadcast `Tag:v_<rev>` (`channel=1`) + `jj --ignore-working-copy`,
+;; 4-Corner (`SW/SE/NW/NE`) Spawn-Symmetry for Wire/Wall/Creep Directional Fallbacks,
+;; & Honest Arena 2.0 40-Scenario Prod-Killer Catalog Validation
+;; =============================================================================
+(printf "[Loop 37] Testing L37-P0-3 Broadcast Tag:v_<rev>, 4-corner spawn-symmetric fallbacks (wire/wall/creep), & 40-scenario Arena 2.0 catalog...\n")
+(let ()
+  (define (mk-l37-u tag utype alliance x y #:hp [hp 100.0] #:rad [rad 1.0] #:bp [bp 1.0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 3) 0 2))
+              (sc2-point3d x y 8.0) 0.0 rad bp 0 #f #f #f
+              hp hp 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f
+              '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+
+  ;; L37-P0-3a: `make-bot-build-tag-chat-action` uses Broadcast (`channel=1`, `team?=#f`)
+  ;; and source metadata loads cleanly via `jj --ignore-working-copy` without failing!
+  (define l37-tag (make-bot-build-tag-chat-action (hasheq 'short-rev "ltxmxpzu_e45b61eb")))
+  (define l37-dec (decode-typed-sc2-action (encode-sc2-action l37-tag)))
+  (define l37-prev-env (getenv "MOTHMAN_BUILD_VERSION"))
+  (define l37-src-meta #f)
+  (dynamic-wind
+    void
+    (lambda ()
+      (putenv "MOTHMAN_BUILD_VERSION" "")
+      (set! l37-src-meta (load-bot-build-metadata #:root-dir (current-directory))))
+    (lambda ()
+      (if l37-prev-env
+          (putenv "MOTHMAN_BUILD_VERSION" l37-prev-env)
+          (putenv "MOTHMAN_BUILD_VERSION" ""))))
+  (check-true "l37-p0-3a-broadcast-channel-1-and-jj-ignore-working-copy-metadata"
+              (and (sc2-chat-action? l37-tag)
+                   (= (sc2-chat-action-channel l37-tag) 1)
+                   (equal? (sc2-chat-action-message l37-tag) "Tag:v_ltxmxpzu_e45b61eb")
+                   (WireChat? l37-dec)
+                   (not (WireChat-team? l37-dec))
+                   (hash? l37-src-meta)
+                   (> (string-length (hash-ref l37-src-meta 'version "")) 0)))
+
+  ;; L37-P0-3b: `find-best-expansion-placement` empty-resource fallback steps INWARD toward map center
+  ;; across ALL 4 corners (`SW/SE/NW/NE`) — NEVER drifts `+20/+20` off-map on `NE`/`NW`/`SE`!
+  (define mw37 192)
+  (define mh37 168)
+  (define cx37 96.0)
+  (define cy37 84.0)
+  (define full-pl37 (sc2-image-grid 8 mw37 mh37 (make-bytes (* mw37 mh37) 1) #f #f))
+  (define full-th37 (sc2-image-grid 8 mw37 mh37 (make-bytes (* mw37 mh37) 160) #f #f))
+  (define gi-37
+    (sc2-game-info "L37SymMap" "" '() (cons mw37 mh37) (hash 'x0 4 'y0 4 'x1 188 'y1 164)
+                   (list (sc2-point2d 32.0 32.0) (sc2-point2d 160.0 136.0))
+                   full-pl37 full-th37 full-pl37))
+  (define corners-37
+    (list (list 'sw 32.0 32.0 160.0 136.0)
+          (list 'se 160.0 32.0 32.0 136.0)
+          (list 'nw 32.0 136.0 160.0 32.0)
+          (list 'ne 160.0 136.0 32.0 32.0)))
+  (define exp-4corner-ok?
+    (for/and ([c (in-list corners-37)])
+      (match-define (list _lbl hx hy _ex _ey) c)
+      (define th (mk-l37-u 17001 86 1 hx hy #:hp 1500.0 #:rad 2.75))
+      (define pt (find-best-expansion-placement #f 1152 hx hy (list th) #:game-info gi-37))
+      (and (sc2-point2d? pt)
+           (let ([px (sc2-point2d-x pt)]
+                 [py (sc2-point2d-y pt)])
+             ;; Strictly closer to map center than `(hx, hy)` and inside playable bounds!
+             (and (>= px 8.0) (<= px 184.0) (>= py 8.0) (<= py 160.0)
+                  (< (sqrt (+ (sqr (- px cx37)) (sqr (- py cy37))))
+                     (sqrt (+ (sqr (- hx cx37)) (sqr (- hy cy37))))))))))
+  (check-true "l37-p0-3b-find-best-expansion-placement-4corner-inward-symmetry"
+              exp-4corner-ok?)
+
+  ;; L37-P0-3c: WarpGate warp-in fallback moves strictly INWARD toward opponent across ALL 4 corners
+  ;; when the grid around a corner Pylon fails primary search (no `+2.5/+2.5` NE off-map bias)!
+  (define zero-pl37 (sc2-image-grid 8 mw37 mh37 (make-bytes (* mw37 mh37) 0) #f #f))
+  (define gi-37-unpath
+    (sc2-game-info "L37WarpMap" "" '() (cons mw37 mh37) (hash 'x0 4 'y0 4 'x1 188 'y1 164)
+                   '() zero-pl37 full-th37 zero-pl37))
+  (define warp-4corner-ok?
+    (for/and ([c (in-list corners-37)]
+              [ci (in-naturals)])
+      (match-define (list _lbl hx hy ex ey) c)
+      (define nex (mk-l37-u (+ 17100 (* ci 10)) 59 1 hx hy #:hp 1000.0 #:rad 2.75))
+      (define pyl (mk-l37-u (+ 17101 (* ci 10)) 60 1 hx hy #:hp 200.0 #:rad 1.0))
+      (define wg  (mk-l37-u (+ 17102 (* ci 10)) 133 1 hx hy #:hp 500.0 #:rad 1.5))
+      (define obs-w
+        (sc2-observation (+ 30000 (* ci 600))
+                         (sc2-player-common 1 500 500 50 30 20 10 0 1 0 0)
+                         (list nex pyl wg) '()
+                         (list (sc2-power-source (sc2-point2d hx hy) 6.5 (+ 17101 (* ci 10))))
+                         #f '() '() '() '() '() '()))
+      (define cmds
+        (translate-bot-actions->sc2-raw-commands
+         '((train stalker)) obs-w #:game-info gi-37-unpath #:enemy-base (list ex ey)))
+      (define wcmd (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 1414))) cmds))
+      (define wpt (and wcmd (sc2-raw-unit-command-target-pos wcmd)))
+      (and (sc2-point2d? wpt)
+           (let ([wx (sc2-point2d-x wpt)]
+                 [wy (sc2-point2d-y wpt)])
+             (< (sqrt (+ (sqr (- wx ex)) (sqr (- wy ey))))
+                (sqrt (+ (sqr (- hx ex)) (sqr (- hy ey)))))))))
+  (check-true "l37-p0-3c-warpgate-fallback-4corner-inward-symmetry"
+              warp-4corner-ok?)
+
+  ;; L37-P0-3d: `lib/plan/wall-and-block.rkt` 4-corner (`SW/SE/NW/NE`) symmetry across
+  ;; `classify-enemy-wall-state`, `plan-own-wall-integrity-defense`, `plan-expansion-and-gas-blocks`,
+  ;; and `plan-counter-expansion-and-gas-blocks` when natural/enemy-natural keys are omitted!
+  (define wall-4corner-ok?
+    (for/and ([c (in-list corners-37)])
+      (match-define (list _lbl hx hy ex ey) c)
+      (define dx (- ex hx))
+      (define dy (- ey hy))
+      (define len (sqrt (+ (* dx dx) (* dy dy))))
+      (define ux (/ dx len))
+      (define uy (/ dy len))
+      (define exp-own-nat-x (+ hx (* 22.627416997969522 ux)))
+      (define exp-own-nat-y (+ hy (* 22.627416997969522 uy)))
+      (define exp-en-nat-x  (- ex (* 22.627416997969522 ux)))
+      (define exp-en-nat-y  (- ey (* 22.627416997969522 uy)))
+      ;; 1. Enemy natural & entry point strictly between enemy main and our base
+      (define wa
+        (classify-enemy-wall-state
+         (hasheq 'frame 2000 'base-x hx 'base-y hy 'enemy-x ex 'enemy-y ey
+                 'enemy-buildings (list (hasheq 'type 'hatchery 'x exp-en-nat-x 'y exp-en-nat-y)))))
+      (define wa-ok?
+        (< (sqrt (+ (sqr (- (EnemyWallAssessment-entry-x wa) hx))
+                    (sqr (- (EnemyWallAssessment-entry-y wa) hy))))
+           (sqrt (+ (sqr (- ex hx)) (sqr (- ey hy))))))
+      ;; 2. Own wall integrity defense raises lowered depot at spawn-symmetric natural door
+      (define door-x (+ exp-own-nat-x (* 8.0 ux)))
+      (define door-y (+ exp-own-nat-y (* 8.0 uy)))
+      (define wall-cmds
+        (plan-own-wall-integrity-defense
+         (hasheq 'base-x hx 'base-y hy 'enemy-x ex 'enemy-y ey
+                 'ally-buildings (list (hasheq 'id 501 'type 'supply-depot-lowered 'x door-x 'y door-y))
+                 'enemy-units (list (hasheq 'id 601 'type 'zergling 'x (+ door-x (* 4.0 ux)) 'y (+ door-y (* 4.0 uy)))))))
+      (define wall-ok?
+        (ormap (lambda (a) (and (pair? a) (eq? (first a) 'cast-spell) (eq? (third a) 'morph-supply-depot-raise)))
+               wall-cmds))
+      ;; 3. Offensive natural block targets enemy natural strictly between enemy main and our base
+      (define blk-cmds
+        (plan-expansion-and-gas-blocks
+         (hasheq 'frame 1200 'minerals 200 'our-race 'Protoss
+                 'base-x hx 'base-y hy 'enemy-x ex 'enemy-y ey
+                 'ally-units (list (hasheq 'id 701 'type 'probe 'x exp-en-nat-x 'y exp-en-nat-y)))))
+      (define blk-cmd (findf (lambda (a) (and (pair? a) (eq? (first a) 'build) (eq? (second a) 'pylon))) blk-cmds))
+      (define blk-ok?
+        (and blk-cmd
+             (<= (sqrt (+ (sqr (- (third blk-cmd) exp-en-nat-x))
+                          (sqr (- (fourth blk-cmd) exp-en-nat-y))))
+                 0.5)))
+      ;; 4. Counter-expansion patrol targets our spawn-symmetric natural pad (strictly toward enemy!)
+      (define ctr-cmds
+        (plan-counter-expansion-and-gas-blocks
+         (hasheq 'minerals 200 'base-x hx 'base-y hy 'enemy-x ex 'enemy-y ey
+                 'ally-units (list (hasheq 'id 801 'type 'zergling 'x exp-own-nat-x 'y exp-own-nat-y)))))
+      (define ctr-cmd (findf (lambda (a) (and (pair? a) (eq? (first a) 'patrol-block-expansion))) ctr-cmds))
+      (define ctr-ok?
+        (and ctr-cmd
+             (<= (sqrt (+ (sqr (- (third ctr-cmd) exp-own-nat-x))
+                          (sqr (- (fourth ctr-cmd) exp-own-nat-y))))
+                 0.5)))
+      (and wa-ok? wall-ok? blk-ok? ctr-ok?)))
+  (check-true "l37-p0-3d-wall-and-block-4corner-spawn-symmetry"
+              wall-4corner-ok?)
+
+  ;; L37-P0-3e: `lib/plan/creep-and-changeling.rkt` 4-corner (`SW/SE/NW/NE`) symmetry across
+  ;; `plan-multi-highway-creep-spread`, `plan-changeling-free-unit-tactics`, and
+  ;; `plan-dropperlord-queen-creep-expedition` when natural/third/enemy-natural keys are omitted!
+  (define creep-4corner-ok?
+    (for/and ([c (in-list corners-37)])
+      (match-define (list _lbl hx hy ex ey) c)
+      (define dx (- ex hx))
+      (define dy (- ey hy))
+      (define len (sqrt (+ (* dx dx) (* dy dy))))
+      (define ux (/ dx len))
+      (define uy (/ dy len))
+      (define tr (make-creep-spread-tracker))
+      ;; 1. Creep spread Queen near main plants tumor strictly toward enemy/interior (NOT off-map!)
+      (define qx (+ hx (* 4.0 ux)))
+      (define qy (+ hy (* 4.0 uy)))
+      (define cr-cmds
+        (plan-multi-highway-creep-spread
+         (hasheq 'frame 2500 'base-x hx 'base-y hy 'enemy-x ex 'enemy-y ey
+                 'ally-units (list (hasheq 'id 901 'type 'queen 'x qx 'y qy 'energy 50.0)))
+         #:tracker tr))
+      (define cr-cmd (findf (lambda (a) (and (pair? a) (eq? (first a) 'cast-spell) (eq? (third a) 'spawn-creep-tumor))) cr-cmds))
+      (define cr-ok?
+        (and cr-cmd
+             (< (sqrt (+ (sqr (- (fourth cr-cmd) ex)) (sqr (- (fifth cr-cmd) ey))))
+                (sqrt (+ (sqr (- qx ex)) (sqr (- qy ey)))))))
+      ;; 2. Changeling ramp body-block targets midpoint between enemy main & spawn-symmetric enemy natural
+      (define ch-cmds
+        (plan-changeling-free-unit-tactics
+         (hasheq 'base-x hx 'base-y hy 'enemy-x ex 'enemy-y ey
+                 'ally-units (list (hasheq 'id 902 'type 'changeling 'x hx 'y hy)))))
+      (define ch-cmd (findf (lambda (a) (and (pair? a) (eq? (first a) 'move) (= (second a) 902))) ch-cmds))
+      (define ch-ok?
+        (and ch-cmd
+             (< (sqrt (+ (sqr (- (third ch-cmd) hx)) (sqr (- (fourth ch-cmd) hy))))
+                (sqrt (+ (sqr (- ex hx)) (sqr (- ey hy)))))))
+      ;; 3. Dropperlord expedition selects flank anchor strictly inside playable bounds
+      (define exp-cmds
+        (plan-dropperlord-queen-creep-expedition
+         (hasheq 'frame 4500 'base-x hx 'base-y hy 'enemy-x ex 'enemy-y ey
+                 'ally-units (list (hasheq 'id 903 'type 'overlord-transport 'x hx 'y hy 'cargo-tags '())
+                                   (hasheq 'id 904 'type 'queen 'x hx 'y hy 'energy 50.0)))
+         #:tracker (make-creep-spread-tracker)))
+      (define exp-cmd (findf (lambda (a) (and (pair? a) (eq? (first a) 'transport-juggle))) exp-cmds))
+      (define exp-ok?
+        (and exp-cmd
+             (>= (fourth exp-cmd) SC2-MAP-PLAYABLE-MIN-COORD)
+             (<= (fourth exp-cmd) SC2-MAP-PLAYABLE-MAX-COORD)
+             (>= (fifth exp-cmd) SC2-MAP-PLAYABLE-MIN-COORD)
+             (<= (fifth exp-cmd) SC2-MAP-PLAYABLE-MAX-COORD)))
+      (and cr-ok? ch-ok? exp-ok?)))
+  (check-true "l37-p0-3e-creep-and-changeling-4corner-spawn-symmetry"
+              creep-4corner-ok?)
+
+  ;; L37-P0-3f: Honest Arena 2.0 catalog expanded `36 -> 41` with 4 prod-killer scenarios + DT Blink PF snipe!
+  (define cat-path (build-path (current-directory) "tools" "arena-scenarios.json"))
+  (define cat-j (and (file-exists? cat-path) (call-with-input-file cat-path read-json)))
+  (define cat-scens (if (hash? cat-j) (hash-ref cat-j 'scenarios '()) '()))
+  (define cat-ids (for/list ([s (in-list cat-scens)]) (hash-ref s 'id "")))
+  (define cat-by-id (for/hash ([s (in-list cat-scens)]) (values (hash-ref s 'id "") s)))
+  (define req-ids
+    '("sc2-real-p13-obs-colossus-stalker-vs-bio-widowmines"
+      "sc2-real-p14-pvp-stalker-chargelot-immortal-mirror"
+      "sc2-real-p15-dt-blink-snipe-planetary"
+      "sc2-real-t13-bio-tank-viking-vs-blink-colossus"
+      "sc2-real-z13-ravager-hydra-ling-vs-heavy-tank-line"))
+  (define p15-s (hash-ref cat-by-id "sc2-real-p15-dt-blink-snipe-planetary" #f))
+  (check-true (format "l37-p0-3f-arena-scenarios-41-catalog (n=~a)" (length cat-scens))
+              (and (hash? cat-j)
+                   (= (hash-ref cat-j 'schema_version 0) 2)
+                   (= (length cat-scens) 41)
+                   (= (length (remove-duplicates cat-ids)) 41)
+                   (for/and ([rid (in-list req-ids)]) (hash-has-key? cat-by-id rid))
+                   (equal? (hash-ref (hash-ref cat-by-id "sc2-real-p13-obs-colossus-stalker-vs-bio-widowmines") 'terrain "") "open")
+                   (equal? (hash-ref (hash-ref cat-by-id "sc2-real-p14-pvp-stalker-chargelot-immortal-mirror") 'enemy_race "") "Protoss")
+                   (hash? p15-s)
+                   (equal? (hash-ref p15-s 'terrain "") "open")
+                   (member "ShadowStride" (hash-ref p15-s 'p1_upgrades '()))
+                   (member "ProtossGroundWeapons3" (hash-ref p15-s 'p1_upgrades '()))
+                   (equal? (hash-ref (hash-ref cat-by-id "sc2-real-t13-bio-tank-viking-vs-blink-colossus") 'our_race "") "Terran")
+                   (equal? (hash-ref (hash-ref cat-by-id "sc2-real-z13-ravager-hydra-ling-vs-heavy-tank-line") 'terrain "") "flank-surround"))))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"

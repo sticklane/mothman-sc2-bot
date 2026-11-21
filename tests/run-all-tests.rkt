@@ -729,7 +729,15 @@
            'enemy-buildings (list (hash 'id 8901 'type 'pylon 'x 50.5 'y 56.5 'hp 200)))))
   (define acts-b-terran (hash-ref res-b-terran 'actions))
   (assert-true! (member '(clear-expansion-block 50.5 56.5) acts-b-terran))
-  (assert-true! (member '(build command-center 36.5 32.5) acts-b-terran)
+  (assert-true! (ormap (lambda (a)
+                         (and (list? a) (= (length a) 4)
+                              (eq? (car a) 'build) (eq? (second a) 'command-center)
+                              (real? (third a)) (real? (fourth a))
+                              (<= (+ (sqr (- (third a) 32.5)) (sqr (- (fourth a) 32.5))) 64.0)
+                              (> (+ (* (- (third a) 32.5) (- 50.5 32.5))
+                                    (* (- (fourth a) 32.5) (- 56.5 32.5)))
+                                 0.0)))
+                       acts-b-terran)
                 "Scenario B (Terran): Expected in-base high-ground Command Center when natural is blocked")
 
   (define rt-b-zerg (make-zerg-overmind-runtime))
@@ -6423,8 +6431,9 @@
               (mk-s28-unit (+ 930 z) 105 (+ 40.0 (* 0.5 z)) 40.0 #:hp 35.0 #:hp-max 35.0))
             (list (mk-s28-unit 9901 48 120.0 120.0 #:alliance 4 #:hp 45.0 #:hp-max 45.0))
             bases-16-neutrals))
-  ;; Warm per-map cache on step 0
+  ;; Warm per-map cache & one-time translate/build-metadata cache on step 0
   (void (sc2-observation->runtime-obs-hash (mk-s28-obs 400 units-16-base) #:game-info g200-info))
+  (void (translate-bot-actions->sc2-raw-commands '() (mk-s28-obs 0 units-16-base) #:game-info g200-info))
   (define lat-t0 (current-inexact-monotonic-milliseconds))
   (for ([step-k (in-range 1 9)])
     (define obs-k (mk-s28-obs (* step-k 8) units-16-base))
@@ -15413,6 +15422,117 @@
                      (not (eq? (macro-brain-decision-saving-for l36-p-robobay-gate) 'robotics-bay))
                      (not (not (memq 'stalker (macro-brain-decision-scheduled-ids l36-p-1banshee)))))
                 "L36-P0-2 #5138232/H2H#04/#5138236: CyberCore==1, RoboticsBay gated on army>=14/min>=400, and 1 Banshee enforces >=6 Stalkers")
+
+  ;; 51.25 L37-P0-1: Terran Tank Floor + Anti-DT Turret Lock + Anti-HT Ghost + ZvT Banshee AA Rush & Heavy-Marine Banelings + 4-Corner Symmetry (#846/#860)
+  ;; (a) Terran Tank mineral floor (<4 TvT / <3 TvP), confirmed DT MissileTurret >=1250 lock (#74), & >=4 HT/Archon Ghost trigger (#50)
+  (reset-macro-escrow-tracker!)
+  (define l37-t-tvp-tank-floor
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 6200
+      #:minerals 115 #:gas 140 #:supply-used 52 #:supply-cap 70 #:workers 34 #:active-bases 2
+      #:mineral-harvesters 28 #:gas-harvesters 6
+      #:army-supply 18 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 7 'barracks 3 'barracks-techlab 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 3)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 7 'barracks 3 'barracks-techlab 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 3)
+      #:unit-counts (hasheq 'scv 34 'marine 12 'marauder 2 'medivac 1 'siege-tank 1)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 3 'factory 1 'starport 1))))
+  (reset-macro-escrow-tracker!)
+  (define l37-t-74-dt-turret
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 6250
+      #:minerals 160 #:gas 110 #:supply-used 46 #:supply-cap 62 #:workers 29 #:active-bases 2
+      #:mineral-harvesters 23 #:gas-harvesters 6
+      #:army-supply 17 #:enemy-threat-supply 6 #:under-attack? #t #:requires-detection? #t
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 6 'barracks 2 'factory 1 'engineering-bay 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 6 'barracks 2 'factory 1 'engineering-bay 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 29 'marine 13 'marauder 2)
+      #:enemy-unit-counts (hasheq 'dark-templar 2 'warp-prism 1)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 1))))
+  (reset-macro-escrow-tracker!)
+  (define l37-t-50-ghost-acad
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 10800
+      #:minerals 220 #:gas 140 #:supply-used 98 #:supply-cap 126 #:workers 52 #:active-bases 3
+      #:mineral-harvesters 40 #:gas-harvesters 12
+      #:army-supply 46 #:enemy-threat-supply 24 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 3 'supply-depot 12 'barracks 5 'barracks-techlab 2 'factory 1 'factory-techlab 1 'starport 1 'engineering-bay 1 'refinery 4)
+      #:total-building-counts (hasheq 'orbital-command 3 'supply-depot 12 'barracks 5 'barracks-techlab 2 'factory 1 'factory-techlab 1 'starport 1 'engineering-bay 1 'refinery 4)
+      #:unit-counts (hasheq 'scv 52 'marine 24 'marauder 6 'siege-tank 3 'medivac 3)
+      #:enemy-unit-counts (hasheq 'high-templar 4 'archon 2 'zealot 8)
+      #:open-facility-slots (hasheq 'townhall 3 'barracks 3 'factory 0 'starport 0))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l37-t-tvp-tank-floor) 'siege-tank)
+                     (not (memq 'marine (macro-brain-decision-scheduled-ids l37-t-tvp-tank-floor)))
+                     (not (not (memq 'missile-turret (macro-brain-decision-scheduled-ids l37-t-74-dt-turret))))
+                     (not (memq 'starport (macro-brain-decision-scheduled-ids l37-t-74-dt-turret)))
+                     (not (not (memq 'ghost-academy (macro-brain-decision-scheduled-ids l37-t-50-ghost-acad)))))
+                "L37-P0-1 #74/#50: Terran must protect SiegeTank 150M floor, lock MissileTurret ahead of Starport on DTs, and trigger GhostAcademy vs >=4 HT/Archons")
+
+  ;; (b) ZvT Banshee AA rush (Lair->HydraDen + >=7 Queens ahead of RW/BN, #25/#73) & Heavy-Marine Banelings (#34)
+  (reset-macro-escrow-tracker!)
+  (define l37-z-25-banshee
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Terran #:frame 6600
+      #:minerals 340 #:gas 140 #:supply-used 58 #:supply-cap 78 #:workers 38 #:active-bases 2
+      #:mineral-harvesters 32 #:gas-harvesters 6
+      #:army-supply 20 #:enemy-threat-supply 12 #:under-attack? #t #:requires-anti-air? #t #:requires-detection? #t
+      #:ready-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'spore-crawler 2 'extractor 3)
+      #:total-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'spore-crawler 2 'extractor 3)
+      #:unit-counts (hasheq 'drone 38 'queen 5 'overseer 1 'zergling 10 'overlord 8)
+      #:enemy-unit-counts (hasheq 'banshee 4)
+      #:enemy-building-counts (hasheq 'starport 2 'starport-techlab 2)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 5))))
+  (reset-macro-escrow-tracker!)
+  (define l37-z-34-banes
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Terran #:frame 9400
+      #:minerals 300 #:gas 150 #:supply-used 98 #:supply-cap 130 #:workers 62 #:active-bases 3
+      #:mineral-harvesters 50 #:gas-harvesters 12
+      #:army-supply 36 #:enemy-threat-supply 26 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'baneling-nest 1 'roach-warren 1 'hydralisk-den 1 'extractor 5)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'baneling-nest 1 'roach-warren 1 'hydralisk-den 1 'extractor 5)
+      #:unit-counts (hasheq 'drone 62 'queen 4 'zergling 14 'roach 8 'hydralisk 4 'baneling 0 'overlord 14)
+      #:enemy-unit-counts (hasheq 'marine 26 'medivac 3)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 6))))
+  (assert-true! (and (not (not (memq 'hydralisk-den (macro-brain-decision-scheduled-ids l37-z-25-banshee))))
+                     (not (not (memq 'queen (macro-brain-decision-scheduled-ids l37-z-25-banshee))))
+                     (not (memq 'roach-warren (macro-brain-decision-scheduled-ids l37-z-25-banshee)))
+                     (not (memq 'baneling-nest (macro-brain-decision-scheduled-ids l37-z-25-banshee)))
+                     (not (not (memq 'baneling (macro-brain-decision-scheduled-ids l37-z-34-banes)))))
+                "L37-P0-1 #25/#73/#34 ZvT: Must rush HydraDen+Queen#6/#7 suppressing RW/BN vs Banshees, and morph Banelings vs >=18 Marines")
+
+  ;; (c) Spawn-symmetric 4-corner static-defense SpineCrawler & priority-macro-brain tech-node->action (#846)
+  (define l37-ne-spine-acts
+    (plan-counter-cannon-rush-tactics
+     (hash 'frame 2000 'race 'Zerg 'base-x 167.5 'base-y 167.5 'natural-x 147.5 'natural-y 147.5
+           'enemy-x 32.5 'enemy-y 32.5 'enemy-expand-x 52.5 'enemy-expand-y 52.5
+           'ally-units (list (hash 'id 1 'type 'drone 'x 167.5 'y 167.5 'hp 40))
+           'ally-buildings (list (hash 'id 10 'type 'hatchery 'x 167.5 'y 167.5 'hp 1500 'build-progress 1.0))
+           'enemy-buildings (list (hash 'id 90 'type 'pylon 'x 159.5 'y 159.5 'hp 200 'build-progress 1.0)
+                                  (hash 'id 91 'type 'photon-cannon 'x 158.5 'y 158.5 'hp 150 'build-progress 0.5)))))
+  (define l37-ne-spine
+    (findf (lambda (a) (and (list? a) (eq? (car a) 'build) (eq? (second a) 'spine-crawler))) l37-ne-spine-acts))
+  (define l37-ne-brain-dec
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 1800
+      #:minerals 200 #:gas 0 #:supply-used 16 #:supply-cap 23 #:workers 16 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 0
+      #:base-x 167.5 #:base-y 167.5 #:nat-x 147.5 #:nat-y 147.5
+      #:ready-building-counts (hasheq 'command-center 1 'supply-depot 1)
+      #:total-building-counts (hasheq 'command-center 1 'supply-depot 1)
+      #:unit-counts (hasheq 'scv 16)
+      #:open-facility-slots (hasheq 'townhall 1))))
+  (define l37-ne-brain-bld
+    (findf (lambda (a) (and (list? a) (eq? (car a) 'build) (= (length a) 4)))
+           (macro-brain-decision-scheduled-actions l37-ne-brain-dec)))
+  (assert-true! (and l37-ne-spine (< (third l37-ne-spine) 167.5) (< (fourth l37-ne-spine) 167.5)
+                     l37-ne-brain-bld (< (third l37-ne-brain-bld) 167.5) (< (fourth l37-ne-brain-bld) 167.5))
+                "L37-P0-1 #846: NE spawn SpineCrawler & priority-macro-brain build coords must project forward toward Natural (<167.5, <167.5), NEVER behind main (+X,+Y)")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms
