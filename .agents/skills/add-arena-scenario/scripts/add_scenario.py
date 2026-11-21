@@ -443,6 +443,8 @@ def validate_catalog(scenarios: list[dict[str, Any]]) -> list[str]:
             errs.append(f"{sid}: invalid scoring_mode={scoring_mode!r}")
         if scoring_mode == "mineral-defense" and float(s.get("pass_net_econ_min", 0.0)) <= 0.0:
             errs.append(f"{sid}: mineral-defense scenario requires pass_net_econ_min > 0")
+        if "use_main_base" in s and not isinstance(s["use_main_base"], bool):
+            errs.append(f"{sid}: use_main_base must be a boolean")
         for ukey in ("upgrades", "p1_upgrades", "p2_upgrades"):
             for u in s.get(ukey) or []:
                 if u not in VALID_UPGRADES:
@@ -486,6 +488,7 @@ def main() -> int:
     ap.add_argument("--scoring-mode", choices=list(VALID_SCORING_MODES), default="combat", help="Scoring mode (combat | mineral-defense)")
     ap.add_argument("--pass-net-econ-min", type=float, default=0.0, help="Net econ pass threshold for mineral-defense scenarios")
     ap.add_argument("--origin-match-id", default="", help="Optional replay provenance tag for regression scenarios")
+    ap.add_argument("--use-main-base", action="store_true", help="Spawn at P1's live starting TownHall + main minerals (auto-enabled for mineral-defense)")
     ap.add_argument("--patterns", default="", help="Comma-separated tactical pattern tags")
     ap.add_argument("--upgrades", default="", help="Comma-separated shared upgrades (auto-routed by race)")
     ap.add_argument("--p1-upgrades", default="", help="Comma-separated P1 upgrades (e.g. 'Burrow,TunnelingClaws')")
@@ -601,6 +604,8 @@ def main() -> int:
         entry["pass_net_econ_min"] = float(args.pass_net_econ_min)
     if args.origin_match_id.strip():
         entry["origin_match_id"] = args.origin_match_id.strip()
+    if args.use_main_base:
+        entry["use_main_base"] = True
     if args.terrain == "high-ground-ramp":
         entry["high_ground_side"] = args.high_ground_side
     pats = parse_csv_list(args.patterns)

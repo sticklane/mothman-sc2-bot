@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "notes": "Real-SC2_x64 micro skirmish scenarios (55 scenarios across 3 tiers: 48 canonical + 4 econ-harass mineral-defense + 3 replay-extracted regression across 5 terrains & selective upgrades) loaded by tools/sc2-tactics-arena.py. Add or edit via .agents/skills/add-arena-scenario/scripts/add_scenario.py.",
+  "notes": "Real-SC2_x64 micro skirmish scenarios (57 scenarios across 3 tiers: 49 canonical + 4 econ-harass mineral-defense + 4 replay-extracted regression across 5 terrains & selective upgrades) loaded by tools/sc2-tactics-arena.py. Add or edit via .agents/skills/add-arena-scenario/scripts/add_scenario.py.",
   "scenarios": [
     {
       "id": "sc2-real-p01-zealot-stalker-vs-bio",
@@ -503,6 +503,29 @@
         ["infestor", 2, 1.5, 0.0],
         ["corruptor", 14, 5.2, 0.0],
         ["viper", 3, 6.4, 2.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-real-p18-glaive-adept-oracle-revelation-vs-lurker-hydra",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": ["oracle-revelation-detection", "oracle-pulsar-beam", "glaive-adept-psionic-transfer", "immortal-anti-lurker"],
+      "p1_upgrades": ["ResonatingGlaives"],
+      "p2_upgrades": ["Burrow", "LurkerRange"],
+      "p2_pre_burrowed": ["lurker-mp"],
+      "description": "PvZ Oracle Revelation + Glaive Adepts: 2 Oracles + 8 Glaive Adepts + 3 Immortals vs 4 Burrowed Range-Lurkers + 8 Hydralisks",
+      "p1_units": [
+        ["adept", 8, -4.0, 0.0],
+        ["immortal", 3, -5.0, 0.0],
+        ["oracle", 2, -5.8, 2.0]
+      ],
+      "p2_units": [
+        ["lurker-mp", 4, 4.0, 0.0],
+        ["hydralisk", 8, 5.5, 0.0]
       ],
       "max_loops": 960
     },
@@ -1512,13 +1535,14 @@
       "source": "replay-extract",
       "origin_match_id": "prod-5138248",
       "terrain": "mineral-line-harass",
+      "use_main_base": true,
       "patterns": ["worker-rush-defense", "drone-mineral-stack", "worker-combat-surround"],
-      "description": "Replay Regression (ZvP): 16 Drones defending mineral line vs 15-Probe all-in worker rush",
+      "description": "Replay Regression (ZvP): 16 Drones at main Hatchery defending vs 15-Probe all-in worker rush",
       "p1_units": [
-        ["drone", 16, -2.5, 0.0]
+        ["drone", 16, -3.2, 0.0]
       ],
       "p2_units": [
-        ["probe", 15, 4.8, 0.0]
+        ["probe", 15, 6.2, 0.0]
       ],
       "max_loops": 960
     },
@@ -1541,6 +1565,25 @@
       ],
       "p2_units": [
         ["zergling", 24, 4.8, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-reg-r05-prod5140013-tvp-scv-hold-vs-15probe-rush",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "tier": "regression",
+      "source": "replay-extract",
+      "origin_match_id": "prod-5140013",
+      "terrain": "mineral-line-harass",
+      "use_main_base": true,
+      "patterns": ["worker-rush-defense", "scv-no-repair-vs-worker-rush", "worker-combat-surround"],
+      "description": "Replay Regression (TvP): 16 SCVs at main Command Center defending vs 15-Probe all-in worker rush",
+      "p1_units": [
+        ["scv", 16, -3.2, 0.0]
+      ],
+      "p2_units": [
+        ["probe", 15, 6.2, 0.0]
       ],
       "max_loops": 960
     }

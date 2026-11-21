@@ -58,14 +58,14 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
         ReportSpec(
             slug="loops-29-plus",
             out_file="loops-29-plus.html",
-            title="Loops 29–36+ Real-3D Visual Campaign Report (Phase 2)",
-            short_title="Loops 29–36+",
+            title="Loops 29+ Real-3D Visual Campaign Report (Phase 2)",
+            short_title="Loops 29+",
             category="Visual Campaign Reports",
             badge="LIVE PHASE 2",
             summary=(
-                "Living real-SC2 3D visual campaign report covering Honest 960-Loop Arena 2.1, "
+                "Living real-SC2 3D visual campaign report covering Honest 960-Loop 3-Tier Arena 2.0, "
                 "Full-Match Self-Play, Ship-Gate H2H vs Shipped BotZips, Unseen-12 Anti-Overfitting, "
-                "and Live AI Arena Competition #38 deployments (Loops 29–36+)."
+                "North-vs-South Spawn Parity, and Live AI Arena Competition #38 deployments (Loops 29+)."
             ),
             source_candidates=(brain_dir / "loops_29_plus_visual_campaign_report.md",),
             required=True,
@@ -149,6 +149,24 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             source_candidates=(
                 analyzer_dir / "north_vs_south_spawn_audit.md",
                 brain_dir / "north_vs_south_spawn_audit.md",
+            ),
+            required=False,
+        ),
+        ReportSpec(
+            slug="loop38-forensics",
+            out_file="loop38-forensics.html",
+            title="Loop 38 Forensics & Live Prod Loop 37 Audit (0.88x ATH Trade / 2.9% SB)",
+            short_title="L38 + Prod L37",
+            category="Forensic & Empirical Audits",
+            badge="L38 + PROD L37",
+            summary=(
+                "Live AI Arena audit of deployed Loop 37 (ltxmxpzu_e45b61eb: 45.5% WR, 0.88x ATH Trade, "
+                "2.9% ATL SB, 13/13 Broadcast Tag:v_), Loop 38 90-match & 55-scenario 3-Tier Arena forensics, "
+                "HOLD-ZIP verdict (combining L38+L39 for Ship #4), and Loop 39 blueprint."
+            ),
+            source_candidates=(
+                analyzer_dir / "loop38_forensics_prod_l37_audit.md",
+                brain_dir / "loop38_forensics_prod_l37_audit.md",
             ),
             required=False,
         ),
@@ -1663,7 +1681,7 @@ def build_index_page(
     lazy-loaded 3D WebP/PNG clips served from GitHub Releases CDN.
   </p>
   <div style="display:flex;gap:0.6rem;flex-wrap:wrap;">
-    <a class="png-btn" href="./loops-29-plus.html" style="padding:0.42rem 0.9rem;font-weight:700;">▶ Open Phase 2 Visual Report (Loops 29–36+)</a>
+    <a class="png-btn" href="./loops-29-plus.html" style="padding:0.42rem 0.9rem;font-weight:700;">▶ Open Phase 2 Visual Report (Loops 29+)</a>
     <a class="png-btn" href="./prod-audit.html" style="padding:0.42rem 0.9rem;">Live AI Arena Prod Audit</a>
     <a class="png-btn" href="./mirror-brain-audit.html" style="padding:0.42rem 0.9rem;">Mirror-Brain Empirical Audit</a>
     <a class="png-btn" href="https://github.com/{repo_slug}/releases" target="_blank" rel="noopener noreferrer" style="padding:0.42rem 0.9rem;">Browse All {total_releases} 3D Media Releases ↗</a>

@@ -5,9 +5,9 @@ All canonical unit keys, terrain modes, and selective upgrades below are support
 ## 3-Tier Scenario Architecture (`--tier`) & Scoring Modes (`--scoring-mode`)
 
 - **Tiers (`tier`):**
-  - `canonical` (default): Core apples-to-apples micro suite (`48` scenarios) tracked across loops.
+  - `canonical` (default): Core apples-to-apples micro suite (`49` scenarios) tracked across loops.
   - `econ-harass`: Active main mineral-line harass defense (`scoring_mode: "mineral-defense"`, `4` scenarios `e01..e04`). Spawns enemy harass outside P1's actual starting main TownHall + mineral patches with `12–16` actively mining workers and grades `net_econ_score = minerals_gathered + enemy_killed_val - 50 * workers_lost >= pass_net_econ_min` over `960` loops.
-  - `regression`: Replay-extracted production/benchmark failure scenarios (`source: "replay-extract"`, `origin_match_id`, `3` scenarios `r01..r03`).
+  - `regression`: Replay-extracted production/benchmark failure scenarios (`source: "replay-extract"`, `origin_match_id`, `4` scenarios `r01..r03, r05`; set `use_main_base: true` for live main-base worker rushes).
 
 ## Terrain Modes (`--terrain`)
 

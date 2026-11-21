@@ -8346,7 +8346,7 @@
   (check-true "l37-p0-3e-creep-and-changeling-4corner-spawn-symmetry"
               creep-4corner-ok?)
 
-  ;; L37-P0-3f / L38-P0-4: Honest Arena 2.0 3-tier catalog (`55` scenarios: `48` canonical + `4` econ-harass + `3` regression)!
+  ;; L37-P0-3f / L38-P0-4 / L39-P0-4: Honest Arena 2.0 3-tier catalog (`57` scenarios: `49` canonical + `4` econ-harass + `4` regression)!
   (define cat-path (build-path (current-directory) "tools" "arena-scenarios.json"))
   (define cat-j (and (file-exists? cat-path) (call-with-input-file cat-path read-json)))
   (define cat-scens (if (hash? cat-j) (hash-ref cat-j 'scenarios '()) '()))
@@ -8361,6 +8361,7 @@
       "sc2-real-p15-dt-blink-snipe-planetary"
       "sc2-real-p16-warpprism-immortal-juggle-vs-roach-ravager"
       "sc2-real-p17-skytoss-ht-feedback-vs-corruptor-viper"
+      "sc2-real-p18-glaive-adept-oracle-revelation-vs-lurker-hydra"
       "sc2-real-t13-bio-tank-viking-vs-blink-colossus"
       "sc2-real-t14-raven-imatrix-aam-bio-vs-colossus"
       "sc2-real-t15-bc-yamato-jump-vs-corruptor-viper"
@@ -8374,29 +8375,128 @@
       "sc2-econ-e04-6ling-runby-mineral-defense"
       "sc2-reg-r01-prod5138254-pvt-obs-stalker-vs-cloaked-banshees"
       "sc2-reg-r02-prod5138248-zvp-drone-hold-vs-15probe-rush"
-      "sc2-reg-r03-iter37-m42-pvz-ramp-hold-vs-ling-flood"))
+      "sc2-reg-r03-iter37-m42-pvz-ramp-hold-vs-ling-flood"
+      "sc2-reg-r05-prod5140013-tvp-scv-hold-vs-15probe-rush"))
   (define p15-s (hash-ref cat-by-id "sc2-real-p15-dt-blink-snipe-planetary" #f))
+  (define p18-s (hash-ref cat-by-id "sc2-real-p18-glaive-adept-oracle-revelation-vs-lurker-hydra" #f))
   (define e03-s (hash-ref cat-by-id "sc2-econ-e03-3adept-scv-mineral-defense" #f))
   (define r01-s (hash-ref cat-by-id "sc2-reg-r01-prod5138254-pvt-obs-stalker-vs-cloaked-banshees" #f))
-  (check-true (format "l37-p0-3f-l38-arena-scenarios-55-3tier-catalog (n=~a c=~a e=~a r=~a)"
+  (define r02-s (hash-ref cat-by-id "sc2-reg-r02-prod5138248-zvp-drone-hold-vs-15probe-rush" #f))
+  (define r05-s (hash-ref cat-by-id "sc2-reg-r05-prod5140013-tvp-scv-hold-vs-15probe-rush" #f))
+  (check-true (format "l37-p0-3f-l39-arena-scenarios-57-3tier-catalog (n=~a c=~a e=~a r=~a)"
                       (length cat-scens) tier-canon tier-econ tier-reg)
               (and (hash? cat-j)
                    (= (hash-ref cat-j 'schema_version 0) 2)
-                   (= (length cat-scens) 55)
-                   (= (length (remove-duplicates cat-ids)) 55)
-                   (= tier-canon 48)
+                   (= (length cat-scens) 57)
+                   (= (length (remove-duplicates cat-ids)) 57)
+                   (= tier-canon 49)
                    (= tier-econ 4)
-                   (= tier-reg 3)
+                   (= tier-reg 4)
                    (for/and ([rid (in-list req-ids)]) (hash-has-key? cat-by-id rid))
                    (hash? p15-s)
                    (member "ShadowStride" (hash-ref p15-s 'p1_upgrades '()))
                    (member "ProtossGroundWeapons3" (hash-ref p15-s 'p1_upgrades '()))
+                   (hash? p18-s)
+                   (member "ResonatingGlaives" (hash-ref p18-s 'p1_upgrades '()))
+                   (member "LurkerRange" (hash-ref p18-s 'p2_upgrades '()))
                    (hash? e03-s)
                    (equal? (hash-ref e03-s 'scoring_mode "") "mineral-defense")
                    (> (hash-ref e03-s 'pass_net_econ_min 0) 0)
                    (hash? r01-s)
                    (equal? (hash-ref r01-s 'source "") "replay-extract")
-                   (equal? (hash-ref r01-s 'origin_match_id "") "prod-5138254"))))
+                   (equal? (hash-ref r01-s 'origin_match_id "") "prod-5138254")
+                   (hash? r02-s)
+                   (equal? (hash-ref r02-s 'use_main_base #f) #t)
+                   (hash? r05-s)
+                   (equal? (hash-ref r05-s 'source "") "replay-extract")
+                   (equal? (hash-ref r05-s 'origin_match_id "") "prod-5140013")
+                   (equal? (hash-ref r05-s 'use_main_base #f) #t))))
+
+(printf "[Loop 39] Testing L39-P0-4 wire translation for ShadowStride (2700), Yamato (401), NeuralParasite (249), & worker-drill 3666+23...\n")
+(let ()
+  (define (mk-l39-u tag utype alliance x y #:hp [hp 100.0] #:sh [sh 0.0] #:en [en 100.0] #:rad [rad 0.5] #:mins [mins 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 0 #f #f #f
+              hp hp sh sh en (max en 100.0) mins 0 #f #f #f #t #f
+              '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+
+  ;; 1. ShadowStride (2700) point-target wire translation (`p15` DT Blink PF snipe)
+  (define dt-u (mk-l39-u 99001 76 1 76.0 80.0 #:hp 40.0 #:sh 80.0 #:en 0.0))
+  (define pf-u (mk-l39-u 99101 130 4 85.0 80.0 #:hp 1500.0 #:rad 2.75))
+  (define obs-dt (make-test-obs 4200 100 0 (list dt-u pf-u)))
+  (define cmds-dt (translate-bot-actions->sc2-raw-commands '((cast 99001 shadow-stride 82.0 80.0)) obs-dt))
+  (define c-2700 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2700))) cmds-dt))
+  (check-true "l39-p0-4a-shadow-stride-2700-point-target-wire-translation"
+              (and (sc2-raw-unit-command? c-2700)
+                   (sc2-point2d? (sc2-raw-unit-command-target-pos c-2700))
+                   (= (sc2-raw-unit-command-target-unit-tag c-2700) 0)
+                   (equal? (sc2-raw-unit-command-unit-tags c-2700) '(99001))))
+
+  ;; 2. Battlecruiser Yamato Cannon (401) unit-target wire translation & P0 tier (`t15`)
+  (define bc-u (mk-l39-u 99002 57 1 70.0 70.0 #:hp 550.0 #:en 0.0 #:rad 1.25))
+  (define corr-u (mk-l39-u 99102 112 4 78.0 70.0 #:hp 200.0 #:en 0.0))
+  (define obs-bc (make-test-obs 4210 100 0 (list bc-u corr-u)))
+  (define cmds-bc (translate-bot-actions->sc2-raw-commands '((cast 99002 yamato-cannon 99102)) obs-bc))
+  (define c-401 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 401))) cmds-bc))
+  (check-true "l39-p0-4b-yamato-cannon-401-unit-target-wire-translation-and-p0"
+              (and (sc2-raw-unit-command? c-401)
+                   (not (sc2-raw-unit-command-target-pos c-401))
+                   (= (sc2-raw-unit-command-target-unit-tag c-401) 99102)
+                   (equal? (sc2-raw-unit-command-unit-tags c-401) '(99002))
+                   (= (wire-cmd-priority-tier c-401) 0)))
+
+  ;; 3. Infestor Neural Parasite (249) unit-target wire translation (`cast` + `infestor-burrow-cast`) & P0 tier (`z14`)
+  (define inf-u (mk-l39-u 99003 111 1 72.0 72.0 #:hp 90.0 #:en 120.0))
+  (define tank-u (mk-l39-u 99103 32 4 80.0 72.0 #:hp 175.0 #:en 0.0))
+  (define obs-inf (make-test-obs 4220 100 0 (list inf-u tank-u)))
+  (define cmds-np1 (translate-bot-actions->sc2-raw-commands '((cast 99003 neural-parasite 99103)) obs-inf))
+  (define cmds-np2 (translate-bot-actions->sc2-raw-commands '((infestor-burrow-cast 99003 neural-parasite 99103)) obs-inf))
+  (define c-249a (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 249))) cmds-np1))
+  (define c-249b (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 249))) cmds-np2))
+  (check-true "l39-p0-4c-neural-parasite-249-unit-target-wire-translation-and-p0"
+              (and (sc2-raw-unit-command? c-249a)
+                   (= (sc2-raw-unit-command-target-unit-tag c-249a) 99103)
+                   (= (wire-cmd-priority-tier c-249a) 0)
+                   (sc2-raw-unit-command? c-249b)
+                   (= (sc2-raw-unit-command-target-unit-tag c-249b) 99103)
+                   (= (wire-cmd-priority-tier c-249b) 0)))
+
+  ;; 4. Worker-rush defense `3666+23` wire translation (`worker-drill-stack-attack` + urgent `mineral-walk` + `pull-workers-attack`)
+  (define cc-u   (mk-l39-u 99009 18 1 28.5 28.5 #:hp 1500.0 #:en 0.0 #:rad 2.75))
+  (define min-u  (mk-l39-u 99501 341 3 23.0 28.5 #:hp 1000.0 #:en 0.0 #:rad 1.0 #:mins 1500))
+  (define scv-far (mk-l39-u 99010 45 1 28.5 28.5 #:hp 45.0 #:en 0.0 #:rad 0.375))
+  (define scv-near (mk-l39-u 99011 45 1 25.5 28.5 #:hp 45.0 #:en 0.0 #:rad 0.375))
+  (define scv-hurt (mk-l39-u 99012 45 1 26.5 29.0 #:hp 15.0 #:en 0.0 #:rad 0.375))
+  (define prb-e   (mk-l39-u 99201 84 4 24.5 28.5 #:hp 20.0 #:sh 20.0 #:en 0.0 #:rad 0.375))
+  (define obs-wr (make-test-obs 1400 50 0 (list cc-u min-u scv-far scv-near scv-hurt prb-e)))
+  (define cmds-drill
+    (translate-bot-actions->sc2-raw-commands
+     '((worker-drill-stack-attack (99010 99011) 99501 99201 24.5 28.5)
+       (mineral-walk 99012 99501 23.0 28.5))
+     obs-wr))
+  (define c-3666-drill
+    (findf (lambda (c) (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-ability-id c) 3666)
+                            (= (sc2-raw-unit-command-target-unit-tag c) 99501)
+                            (member 99010 (sc2-raw-unit-command-unit-tags c))))
+           cmds-drill))
+  (define c-23-drill
+    (findf (lambda (c) (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-ability-id c) 23)
+                            (= (sc2-raw-unit-command-target-unit-tag c) 99201)
+                            (member 99011 (sc2-raw-unit-command-unit-tags c))))
+           cmds-drill))
+  (define c-3666-mw
+    (findf (lambda (c) (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-ability-id c) 3666)
+                            (= (sc2-raw-unit-command-target-unit-tag c) 99501)
+                            (member 99012 (sc2-raw-unit-command-unit-tags c))))
+           cmds-drill))
+  (check-true "l39-p0-4d-worker-rush-3666-plus-23-wire-translation-and-urgent-mineral-walk-p0"
+              (and (sc2-raw-unit-command? c-3666-drill)
+                   (sc2-raw-unit-command? c-23-drill)
+                   (sc2-raw-unit-command? c-3666-mw)
+                   (= (wire-cmd-priority-tier c-3666-mw) 0))))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"

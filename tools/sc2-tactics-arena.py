@@ -490,6 +490,7 @@ class SkirmishSpec:
     scoring_mode: str = "combat"         # combat | mineral-defense
     pass_net_econ_min: float = 0.0       # mineral-defense net econ pass threshold
     origin_match_id: str = ""            # replay-extract provenance tag for regression tier
+    use_main_base: bool = False          # spawn at P1's live starting TownHall + main minerals
     patterns: list[str] = field(default_factory=list)
     p1_upgrades: list[str] = field(default_factory=list)
     p2_upgrades: list[str] = field(default_factory=list)
@@ -511,6 +512,60 @@ class ArenaSite:
     py: float = 1.0
     high_height: int | None = None
     low_height: int | None = None
+
+
+def is_p2_worker_rush_spec(scen: SkirmishSpec) -> bool:
+    """Return True when P2's entire spawned force is a pure worker rush (>= 4 workers, 0 combat units)."""
+    if not scen.p2_units:
+        return False
+    total_w = 0
+    for uname, cnt, _dx, _dy in scen.p2_units:
+        if UNIT_IDS.get(uname, 0) not in WORKER_IDS:
+            return False
+        total_w += int(cnt)
+    return total_w >= 4
+
+
+def plan_worker_rush_orders(
+    my_workers: list[Any],
+    en_gnd: list[Any],
+    site: ArenaSite,
+    use_main_base: bool,
+) -> list[tuple[int, int | None, tuple[float, float] | None, list[int]]]:
+    """Compute aggressive per-worker rush orders for pure worker-rush P2 forces.
+
+    Returns `(ability_id, target_unit_tag_or_None, target_pos_or_None, unit_tags)`:
+    - When P1 ground targets (workers/defenders) are visible, assign each P2 worker
+      directly to its nearest visible ground target (`ability_id=23, target_unit_tag`) so
+      all rush workers surround/fight immediately without clumping on 1 target or
+      getting distracted by P1's starting TownHall.
+    - When P1 units are momentarily out of 8-tile worker sight (e.g. frame 0 across
+      the TownHall), `Move (16)` past the TownHall toward the mineral pocket while far
+      (`> 4.5t`), then `Attack-Move (23)` toward `(site.cx, site.cy)` once inside.
+    """
+    if not my_workers:
+        return []
+    if en_gnd:
+        by_tgt: dict[int, list[int]] = {}
+        for w in my_workers:
+            tgt = min(
+                en_gnd,
+                key=lambda e: (
+                    math.hypot(float(e.pos.x) - float(w.pos.x), float(e.pos.y) - float(w.pos.y)),
+                    float(e.health) + float(getattr(e, "shield", 0.0)),
+                ),
+            )
+            by_tgt.setdefault(int(tgt.tag), []).append(int(w.tag))
+        return [(23, tid, None, tags) for tid, tags in by_tgt.items()]
+
+    if use_main_base:
+        rx = site.cx - 3.0 * site.ux
+        ry = site.cy - 3.0 * site.uy
+        avg_d = sum(math.hypot(float(w.pos.x) - rx, float(w.pos.y) - ry) for w in my_workers) / len(my_workers)
+        if avg_d > 4.5:
+            return [(16, None, (rx, ry), [int(w.tag) for w in my_workers])]
+        return [(23, None, (site.cx, site.cy), [int(w.tag) for w in my_workers])]
+    return [(23, None, (site.cx, site.cy), [int(w.tag) for w in my_workers])]
 
 
 DEFAULT_SKIRMISHES: list[SkirmishSpec] = [
@@ -615,6 +670,7 @@ def load_scenarios(scenarios_path: str = "", repo_dir: Path | None = None) -> li
             scoring_mode=scoring_mode,
             pass_net_econ_min=float(sc.get("pass_net_econ_min", 0.0)),
             origin_match_id=str(sc.get("origin_match_id", "")),
+            use_main_base=bool(sc.get("use_main_base", scoring_mode == "mineral-defense")),
             patterns=[str(p) for p in (sc.get("patterns") or [])],
             p1_upgrades=p1_upgs,
             p2_upgrades=p2_upgs,
@@ -686,7 +742,11 @@ def partition_duel_batches(
     for r1, r2 in pair_order:
         items = sorted(
             by_pair[(r1, r2)],
-            key=lambda it: (len(it[1].p1_upgrades) + len(it[1].p2_upgrades), it[0]),
+            key=lambda it: (
+                len(it[1].p1_upgrades) + len(it[1].p2_upgrades),
+                1 if it[1].scoring_mode == "mineral-defense" else 0,
+                it[0],
+            ),
         )
         chains: list[list[SkirmishSpec]] = []
         for _orig_idx, s in items:
@@ -1814,7 +1874,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         return sc2api_pb2.Request(join_game=jg)
 
                     def _site_for_scen(scen: SkirmishSpec) -> ArenaSite:
-                        if scen.scoring_mode == "mineral-defense" and dstate["p1_main_mineral_site"] is not None:
+                        if scen.use_main_base and dstate["p1_main_mineral_site"] is not None:
                             return dstate["p1_main_mineral_site"]
                         an: MapTerrainAnalyzer | None = dstate["analyzer"]
                         if an is None:
@@ -1971,6 +2031,63 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 await _issue_pre_cloak(sc2_ws2, obs)
                                 dstate["p2_pre_cloak_pending"] = False
 
+                    def _encode_worker_rush_actions(
+                        my_workers: list[Any],
+                        en_gnd: list[Any],
+                        scen_p2: SkirmishSpec,
+                    ) -> list[Any]:
+                        site_p2 = _site_for_scen(scen_p2)
+                        plan = plan_worker_rush_orders(my_workers, en_gnd, site_p2, scen_p2.use_main_base)
+                        out: list[Any] = []
+                        for ab_id, tid, pos, tags in plan:
+                            if tid is not None:
+                                ucmd = raw_pb2.ActionRawUnitCommand(
+                                    ability_id=ab_id,
+                                    target_unit_tag=tid,
+                                    unit_tags=tags,
+                                )
+                            else:
+                                px, py = pos if pos is not None else (site_p2.cx, site_p2.cy)
+                                ucmd = raw_pb2.ActionRawUnitCommand(
+                                    ability_id=ab_id,
+                                    target_world_space_pos=common_pb2.Point2D(x=px, y=py),
+                                    unit_tags=tags,
+                                )
+                            out.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=ucmd)))
+                        return out
+
+                    async def _drive_p2_worker_rush(obs: Any, scen_p2: SkirmishSpec) -> None:
+                        """Keep P2 rush workers attacking P1 in `--opponent self` instead of mining."""
+                        cx_a, cy_a = dstate["arena_cx"], dstate["arena_cy"]
+                        my_w = [
+                            u for u in obs.raw_data.units
+                            if u.display_type == 1 and u.alliance == 1
+                            and u.tag not in dstate["orig_th_tags"]
+                            and u.unit_type in WORKER_IDS
+                            and math.hypot(u.pos.x - cx_a, u.pos.y - cy_a) < 40.0
+                        ]
+                        if not my_w:
+                            return
+                        en_gnd = [
+                            u for u in obs.raw_data.units
+                            if u.display_type == 1 and u.alliance == 4 and u.cloak != 1
+                            and u.tag not in dstate["orig_th_tags"]
+                            and not (bool(getattr(u, "is_flying", False)) or u.unit_type in AIR_UNIT_IDS)
+                            and (u.unit_type in COMBAT_IDS or (u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx_a, u.pos.y - cy_a) < 35.0))
+                        ]
+                        acts = _encode_worker_rush_actions(my_w, en_gnd, scen_p2)
+                        if acts:
+                            for a in acts:
+                                uc = a.action_raw.unit_command
+                                ab = uc.ability_id
+                                n_tags = len(uc.unit_tags)
+                                dstate["p2_ability_counts"][str(ab)] = dstate["p2_ability_counts"].get(str(ab), 0) + n_tags
+                                if ab == 23:
+                                    dstate["p2_attack_cmds"] += n_tags
+                                elif ab == 16:
+                                    dstate["p2_move_cmds"] += n_tags
+                            await rpc(sc2_ws2, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=acts)))
+
                     async def p2_aggressive_micro_loop() -> None:
                         await dstate["p1_joined"].wait()
                         await rpc(sc2_ws2, make_mp_join(RACE_ENUM.get(enemy_race, common_pb2.Terran), "MicroDummy"))
@@ -2001,7 +2118,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 ]
                                 en_armed = [u for u in en_u if u.unit_type not in PURE_UNARMED_IDS]
                                 en_targets = en_armed if en_armed else en_u
-                                if scen_p2.scoring_mode == "mineral-defense":
+                                if scen_p2.scoring_mode == "mineral-defense" or is_p2_worker_rush_spec(scen_p2):
                                     en_workers = [u for u in en_targets if u.unit_type in WORKER_IDS]
                                     if en_workers:
                                         en_targets = en_workers
@@ -2048,7 +2165,17 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 ]
                                 struct_my_u = [u for u in my_u if u.unit_type in STRUCTURE_IDS]
 
-                                if en_targets:
+                                p2_is_worker_rush = bool(mobile_my_u) and (
+                                    is_p2_worker_rush_spec(scen_p2)
+                                    or (len(mobile_my_u) >= 4 and all(u.unit_type in WORKER_IDS for u in mobile_my_u))
+                                )
+                                if p2_is_worker_rush:
+                                    en_gnd_wr = [
+                                        e for e in en_targets
+                                        if not (bool(getattr(e, "is_flying", False)) or e.unit_type in AIR_UNIT_IDS)
+                                    ]
+                                    acts_p2.extend(_encode_worker_rush_actions(mobile_my_u, en_gnd_wr, scen_p2))
+                                elif en_targets:
                                     en_gnd = [e for e in en_targets if not (bool(getattr(e, "is_flying", False)) or e.unit_type in AIR_UNIT_IDS)]
                                     en_air = [e for e in en_targets if bool(getattr(e, "is_flying", False)) or e.unit_type in AIR_UNIT_IDS]
                                     if mobile_my_u:
@@ -2119,6 +2246,22 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         )
                                         await bot_ws2.send_bytes(dummy_resp.SerializeToString())
                                         continue
+                                    scen_p2_cur = scenarios[min(dstate["scen_idx"], len(scenarios) - 1)]
+                                    if is_p2_worker_rush_spec(scen_p2_cur):
+                                        # Keep P2 worker-rush attackers focused on P1 instead of mining/retreating home
+                                        kept_actions = [
+                                            a for a in req.action.actions
+                                            if a.HasField("action_raw") and a.action_raw.HasField("unit_command")
+                                            and a.action_raw.unit_command.ability_id == 23
+                                        ]
+                                        if not kept_actions:
+                                            dummy_resp = sc2api_pb2.Response(
+                                                action=sc2api_pb2.ResponseAction(),
+                                                status=sc2api_pb2.in_game,
+                                            )
+                                            await bot_ws2.send_bytes(dummy_resp.SerializeToString())
+                                            continue
+                                        req = sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=kept_actions))
                                     for a in req.action.actions:
                                         if a.HasField("action_raw") and a.action_raw.HasField("unit_command"):
                                             ab = a.action_raw.unit_command.ability_id
@@ -2146,6 +2289,10 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                     resp = await rpc(sc2_ws2, req)
                                 if req.HasField("observation") and resp.HasField("observation"):
                                     await _p2_housekeeping(resp.observation.observation)
+                                    if dstate["phase"] == "fighting":
+                                        scen_p2_cur = scenarios[min(dstate["scen_idx"], len(scenarios) - 1)]
+                                        if is_p2_worker_rush_spec(scen_p2_cur):
+                                            await _drive_p2_worker_rush(resp.observation.observation, scen_p2_cur)
 
                                 await bot_ws2.send_bytes(resp.SerializeToString())
                                 if dstate["done"].is_set():
@@ -2389,6 +2536,28 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 )
                                             ))
                                         elif dstate["p2_clear_ok"] and gl >= dstate["phase_start_loop"] + 4:
+                                            # Restore starting TownHall HP/Shields if any prior main-base round chipped it
+                                            heal_th: list[Any] = []
+                                            for u in obs.raw_data.units:
+                                                if u.tag in dstate["orig_th_tags"]:
+                                                    if float(u.health) < float(u.health_max) - 1.0:
+                                                        heal_th.append(debug_pb2.DebugCommand(
+                                                            unit_value=debug_pb2.DebugSetUnitValue(
+                                                                unit_value=debug_pb2.DebugSetUnitValue.Life,
+                                                                value=float(u.health_max),
+                                                                unit_tag=u.tag,
+                                                            )
+                                                        ))
+                                                    if float(getattr(u, "shield_max", 0.0)) > 0.0 and float(u.shield) < float(u.shield_max) - 1.0:
+                                                        heal_th.append(debug_pb2.DebugCommand(
+                                                            unit_value=debug_pb2.DebugSetUnitValue(
+                                                                unit_value=debug_pb2.DebugSetUnitValue.Shields,
+                                                                value=float(u.shield_max),
+                                                                unit_tag=u.tag,
+                                                            )
+                                                        ))
+                                            if heal_th:
+                                                await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=heal_th)))
                                             scen = scenarios[dstate["scen_idx"]]
                                             need_p1 = [u for u in scen.p1_upgrades if u not in dstate["p1_done_upgrades"]]
                                             need_p2 = [u for u in scen.p2_upgrades if u not in dstate["p2_done_upgrades"]]
@@ -2651,11 +2820,11 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         site = _site_for_scen(scen)
                                         dstate["arena_cx"], dstate["arena_cy"] = site.cx, site.cy
                                         dstate["upg_wave_attempts"] = 0
-                                        site_ov = site if scen.scoring_mode == "mineral-defense" else None
+                                        site_ov = site if scen.use_main_base else None
                                         dbg = []
                                         placed_structs: list[tuple[float, float, float]] = (
                                             [(site.cx, site.cy, 3.2)]
-                                            if scen.scoring_mode == "mineral-defense"
+                                            if scen.use_main_base
                                             else []
                                         )
 
@@ -2805,9 +2974,11 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 dstate["econ_cur_worker_tags"] = {u.tag for u in w_units}
                                                 dstate["econ_worker_mining_ticks"] = 0
                                                 dstate["econ_worker_total_ticks"] = 0
+                                            if scen.use_main_base:
                                                 # Start all P1 main workers actively mining round-robin across real main mineral patches on frame 0
+                                                w_units_mb = [u for u in p1u if u.unit_type in WORKER_IDS]
                                                 mtags = list(dstate["p1_main_mineral_tags"])
-                                                if w_units and mtags:
+                                                if w_units_mb and mtags:
                                                     g_acts = [
                                                         sc2api_pb2.Action(
                                                             action_raw=raw_pb2.ActionRaw(
@@ -2818,7 +2989,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                                 )
                                                             )
                                                         )
-                                                        for i, wu in enumerate(w_units)
+                                                        for i, wu in enumerate(w_units_mb)
                                                     ]
                                                     await rpc(sc2_ws, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=g_acts)))
                                             if scen.p1_pre_cloaked:

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter38_wave38_full",
+  "active_wave": "iter39_wave39_full",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -3541,6 +3541,152 @@
         "FIRST 3-TIER 55-SCENARIO (110-DUEL) HONEST ARENA 2.0 BASELINE + 3W-3L-0T (1.19x agg) baseline_h2h parity against newly shipped Loop 37 (6-0) BotZips!"
       ],
       "promotion_gates_passed": "2/9 PASS across full 78-match roster (zero_crashes_and_rejects, sup_blk_le_6pct [4.5%]; tactics_suite_100pct reported FAIL solely on 3-tier aggregate 34/55=61.8%<65% while Tier-1 canonical is 33W-14L-1D=68.8% and Orig-40 is 30/40=75.0%!); baseline_h2h 3W-3L (1.19x) vs shipped L37 ZIPs -> NO-SHIP / keep sharpening for Loop 39!"
+    },
+    {
+      "id": "iter39_wave39_full",
+      "status": "HOLD_ZIP_H2H_REGRESSION_1W_5L_UNSEEN12_TIED_6W_ATH_3_FIRST_EVER_WINS_57_ARENA_SURGE",
+      "campaign": "Loops 29+ Self-Play, Honest 3-Tier Tactics Arena 2.0 & Expanded Roster Campaign (Loop 39 UNSEEN12 Tied ATH & 57-Scenario Arena Surge \u2014 HOLD-ZIP on H2H Regression)",
+      "loop_self_improvements": [
+        "L39-LOOP-1 (57-Scenario / 114-Duel 3-Tier Honest Arena 2.0 + Active Worker-Rush MicroDummy): Fixed MicroDummy 15-Probe attack in r02 (0 passive draws!), added r05 (prod #5140013 16 SCVs vs 15 Probes) and p18 (Glaive Adepts + Oracles vs Burrowed Lurkers + Hydras) -> 57/57 catalog (49 canonical + 4 econ-harass + 4 regression).",
+        "L39-LOOP-2 (Ship-Gate H2H Protection Proven): baseline_h2h vs shipped Loop 37 BotZips caught a genuine full-match regression (1W-5L, 0.52x, 5/6 TRADE_COLLAPSE, +13.4pp Atk2-6 from L39-P0-1g mid-fight stalemate guard preventing outnumbered full-match regrouping) despite strong roster wins, automatically enforcing HOLD-ZIP prior to Loop 40 surgical fix."
+      ],
+      "spec_summary": "Loop 39 (pqvruvun b9eed41e \u2014 HOLD-ZIP on baseline_h2h 1W-5L 0.52x regression vs L37 ZIPs): Zero-crash/fault/reject/spike 90/90 run. Tied UNSEEN12 ATH (6W-28L-2T 16.7% WR / 22.2% NL, 0.35x, CryptBotRevival 3-0 sweep!), scored 3 HISTORIC FIRST-EVER WINS (#58 Z v Creepy_strategies 6.45x PkA 12,125 0-sigs, #74 T v who 3.57x SB 1.2% 0-sigs, #55 Z v Mulebot 3.88x) + #17 T v RustyNikolaj 6.36x, NEW Protoss CORE14 Trade ATH (1.34x), fixed #28 ZvP 0-Hatch Overlord deadlock (SB 74.6%->1.5%!), slashed EscrowLock 22->14 (-36%), WallTies 4->1 (-75%), ZeroKill 8->4 (-50%), AND surged 57-scenario Honest Arena 2.0 (Dummy 39W-16L-2D 1.36x [canonical 37-10-2 all 37 KOs!, Orig-40 34W-5L-1D 2.02x TIES TRADE ATH & NEW A:M 7.00 ATH!, z16 Muta Magic-Box FLIPPED KO WIN 0.88x!, t15 Yamato 0->22/24 casts, stalemates 13->3!] + SP 31W-24L-2D 0.94x). However, baseline_h2h fell 3-3 (1.19x) -> 1W-5L (0.52x) and CloakLoss bounced 0->4 / TvT0Tank 0->3 -> HOLD-ZIP for Loop 40 surgical fix!",
+      "rev": "pqvruvun b9eed41e (iter39 HOLD-ZIP \u2014 H2H 1-5 regression; UNSEEN12 tied 6W ATH; 57-Arena surge)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_054646_iter39_wave39_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_061528_iter39_baseline_h2h",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter39_wave39_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter39_baseline_h2h_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter39_wave39_full.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter39.json",
+      "tactics_selfplay_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter39.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter39.md",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "23W-52L-3T (29.5% WR / 33.3% NL, Trade 0.57x/0.24x, SB 4.0%, PkA 2,984! CORE14 17W-24L-1T [0.91x Trade +0.15x, SB 3.8%!] + UNSEEN12 TIED 6W ATH 6W-28L-2T [22.2% NL, 0.35x, 1st Mulebot W!]; ALL84 26W-55L-3T [0.59x, self_6 3-3]; baseline_h2h REGRESSED 1W-5L 0.52x vs L37 ZIP -> HOLD-ZIP!)",
+      "win_rate_pct": 29.5,
+      "trade_agg": 0.57,
+      "trade_med": 0.24,
+      "sup_blk_pct": 4.0,
+      "w4_alive_med": 25.0,
+      "w6_alive_med": 40.0,
+      "pk_army_avg": 2984.3,
+      "action_rejects": 0,
+      "crashes": 0,
+      "siege_range_zero_dps_losses": 12,
+      "cloaked_unit_damage_losses": 4,
+      "gas_rich_min_starved_matches": 12,
+      "one_base_lockout_matches": 2,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 6,
+      "prod_placement_stall_matches": 1,
+      "zero_kill_collapse_matches": 4,
+      "drip_feed_collapse_matches": 32,
+      "prod_idle_bank_freeze_matches": 0,
+      "gas_zero_harvest_freeze_matches": 0,
+      "spire_sched_drop_matches": 3,
+      "wall_timeout_ties": 1,
+      "army_val_4m_ratio_vs_pro": 0.83,
+      "army_val_8m_ratio_vs_pro": 0.47,
+      "latency_summary": "ALL 90/90 clean <=212.05ms (0 spikes >=500ms!; tr95max=6.79ms, rt=5.90ms, tr=2.41ms, obs=0.76ms, avg=9.07ms, p95=15.67ms; 0 rejects!)",
+      "by_race": {
+        "Protoss": {
+          "record": "CORE14 7W-7L-0T (NEW Trade ATH 1.34x!, PkA 4,186); EXT78 9W-17L-0T (34.6% WR, 0.72x, SB 5.3%, back-to-back sc2ai_protoss WIN #33 3.00x!); H2H 0-3 (PvP 0.44x, PvT 0.18x, PvZ 0.50x); Arena canonical 11-5-2 Dummy / 11-6-1 SP (p13 2/2 KO W, p18 SP KO W)",
+          "trade_agg": 0.72,
+          "w4_alive_med": 25.0,
+          "w6_alive_med": 40.5,
+          "nat_sec": 92.2,
+          "sup_blk": 5.3
+        },
+        "Terran": {
+          "record": "CORE14 5W-9L-0T (0.85x, SB 2.4%, FIRST-EVER who WIN #74 3.57x SB 1.2% 0-sigs!, RustyNikolaj #17 6.36x 0-sigs!); EXT78 7W-18L-1T (0.52x, SB 2.3%, Clicadinha #65 5.53x!); H2H 1-1 (TvZ 1.45x 0-sigs, TvT 0.61x); Arena canonical 12-3-0 (1.61x, t15 Yamato 0->22/24 casts!)",
+          "trade_agg": 0.52,
+          "w4_alive_med": 24.5,
+          "w6_alive_med": 37.0,
+          "nat_sec": 111.7,
+          "sup_blk": 2.3
+        },
+        "Zerg": {
+          "record": "CORE14 5W-8L-1T (0.70x, SB 8.9%->3.9%!, FIRST-EVER Creepy_strategies WIN #58 6.45x PkA 12,125 0-sigs!, #28 0-Hatch SB 74.6%->1.5%!); EXT78 7W-17L-2T (0.50x, SB 4.3%, FIRST-EVER Mulebot WIN #55 3.88x!); H2H 0-1 (ZvZ 0.31x); Arena canonical 14-2-0 (2.01x!, z16 Muta Magic-Box FLIPPED KO WIN 0.88x!)",
+          "trade_agg": 0.5,
+          "w4_alive_med": 25.5,
+          "w6_alive_med": 42.0,
+          "nat_sec": 55.1,
+          "sup_blk": 4.3
+        }
+      },
+      "tactics_summary": {
+        "rev": "pqvruvun b9eed41e (iter39 \u2014 FIRST 57-SCENARIO / 114-DUEL 3-TIER HONEST RUN!)",
+        "passed": "Verifier 7/7 + L31..L39 (162/162) + 32/32 Belief + 57/57 Catalog + 6/6 Replay-DB + 231/231 Tactics + 0/0/0/0 Pro-Starve FIRST-PASS!",
+        "sc2_duel36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter39.json",
+        "sc2_selfplay36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter39.json",
+        "sc2_duel36_summary": "HONEST 3-TIER 57-SCENARIO (114-DUEL!) ARENA 2.0 SURGE: Dummy 39W-16L-2D (1.36x, A:M 4.82) [canonical 49: 37W-10L-2D ALL 37 KOs! 1.42x; econ-harass 4: 0P-4F net=-48.8M mined=238.8M up=78.0% wlost=27; regression 4: 2W-2L-0D 0.85x (r01+r03 KO Ws, r02/r05 real active combat!); Orig-40: 34W-5L-1D 2.02x TIES TRADE ATH & NEW A:M 7.00 ATH!; z16 Muta Magic-Box FLIPPED KO WIN 0.88x!; stalemates 13->3!] + Self-Play 31W-24L-2D (0.94x, P1 A:M 3.06) [canonical 49: 27W-20L-2D 0.96x; econ-harass 4: 2P-2F net=+201.2M (+69M!) wlost=17 (e03 wlost 6->1, net +20->+340M!); regression 4: 2W-2L-0D 0.69x; p18 SP KO W!]",
+        "by_tier_duel": {
+          "canonical": {
+            "total": 49,
+            "wins": 37,
+            "losses": 10,
+            "draws": 2,
+            "trade_agg": 1.42,
+            "am_ratio": 4.68
+          },
+          "econ-harass": {
+            "total": 4,
+            "passes": 0,
+            "fails": 4,
+            "avg_net_econ_score": -48.8,
+            "avg_minerals_gathered": 238.8,
+            "avg_mining_uptime_pct": 78.0,
+            "total_workers_lost": 27
+          },
+          "regression": {
+            "total": 4,
+            "wins": 2,
+            "losses": 2,
+            "draws": 0,
+            "trade_agg": 0.85,
+            "am_ratio": 10.81
+          }
+        },
+        "by_tier_selfplay": {
+          "canonical": {
+            "total": 49,
+            "p1_wins": 27,
+            "p2_wins": 20,
+            "draws": 2,
+            "trade_agg": 0.96,
+            "am_ratio": 2.92
+          },
+          "econ-harass": {
+            "total": 4,
+            "passes": 2,
+            "fails": 2,
+            "avg_net_econ_score": 201.2,
+            "avg_minerals_gathered": 351.2,
+            "avg_mining_uptime_pct": 82.2,
+            "total_workers_lost": 17
+          },
+          "regression": {
+            "total": 4,
+            "p1_wins": 2,
+            "p2_wins": 2,
+            "draws": 0,
+            "trade_agg": 0.69,
+            "am_ratio": 5.72
+          }
+        }
+      },
+      "visual_qa_highlights": [
+        "HISTORIC 3-FIRST-EVER-WIN REDEMPTION: #58 Z v Creepy_strategies (07:53 FIRST-EVER WIN 6.45x vs L38 0.08x!) literally shows 7 Red Corruptors already airborne at 07:53 intercepting Creepy's Skytoss BEFORE Tempests can snowball; #74 T v who (08:33 FIRST-EVER WIN 3.57x, SB 1.2%) shows Red Bio+4 Medivacs+Viking inside who's SE main with active scan killing DT; #55 Z v Mulebot (15:59 FIRST-EVER WIN 3.88x) shows Hydras+Ravagers+Corruptors+Lings crashing Mulebot's 3-Factory Mech over creep.",
+        "FLAGSHIP CORE & UNSEEN WINS: #17 T v RustyNikolaj (09:24 WIN 6.36x, 0-sigs) textbook 2-Tank + Bio/Viking shelling NE Orbital & exploding Missile Turret; #65 T v Clicadinha (08:48 WIN 5.53x) crisp Bio+2-Tank+3-Medivac concave into SW Hive; #33 P v sc2ai_protoss (10:57 WIN 3.00x) 4 Blink Stalkers clearing expansion cleanly.",
+        "H2H REGRESSION SMOKING-GUN VISUALS: H2H #03 PvP (11:32 LOSS 0.44x, PkA 2,200/8,900) catches a lone Red Zealot charging straight into 7 Blue Stalkers + Immortal outside SW natural while Robo/Stargate sit undefended; H2H #04 PvT (08:37 LOSS 0.18x, PkA 1,750/7,225) confirms Colossus+Stalker+Battery ARE on high ground, yet a lone Zealot charges down-ramp into Blue Sieged Tank + Marauders + 3 Medivacs \u2014 visually proving L39 mid-fight stalemate guard prevented outnumbered squads from retreating/regrouping!"
+      ],
+      "key_wins": [
+        "TIED UNSEEN12 ATH (6W-28L-2T, 16.7% WR / 22.2% NL, 0.35x, CryptBotRevival 3-0 sweep!) + 3 HISTORIC FIRST-EVER WINS (#58 Z v Creepy_strategies 6.45x PkA 12,125 0-sigs, #74 T v who 3.57x SB 1.2% 0-sigs, #55 Z v Mulebot 3.88x) + #17 T v RustyNikolaj 6.36x!",
+        "NEW PROTOSS CORE14 TRADE ATH (1.34x), CORE14 Trade +0.15x (0.76x->0.91x) & SB 5.0%->3.8%, #28 ZvP 0-Hatch Overlord deadlock FIXED (SB 74.6%->1.5%!), EscrowLock -36% (22->14), WallTies -75% (4->1), ZeroKill -50% (8->4)!",
+        "57-SCENARIO (114-DUEL) HONEST ARENA 2.0 SURGE: Dummy 39W-16L-2D (1.36x; canonical 37W-10L-2D ALL 37 KOs!), Orig-40 34W-5L-1D (2.02x TIES TRADE ATH & NEW A:M 7.00 ATH!), z16 Muta Magic-Box FLIPPED KO WIN (0.88x!), t15 Yamato 0->22/24 casts, stalemates 13->3, e03 SP wlost 6->1 (net +20->+340M)!",
+        "SHIP-GATE SAFETY PROVEN: baseline_h2h vs L37 ZIPs caught 1W-5L (0.52x) regression immediately -> HOLD-ZIP until Loop 40 surgically fixes outnumbered full-match retreat!"
+      ],
+      "promotion_gates_passed": "2/9 PASS across full 78-match roster (zero_crashes_and_rejects, sup_blk_le_6pct [4.0%]); UNCONDITIONAL HOLD-ZIP (baseline_h2h regressed 1W-5L 0.52x vs shipped L37 ZIPs -> fix in Loop 40!)"
     }
   ],
   "final_18_loop_summary": {
