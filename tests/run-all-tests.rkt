@@ -15803,6 +15803,176 @@
                 "L39-P0-2d #31/#58 ZvP: Must block gas drains & lock >=100G floor on 0-Larva frames vs Tempests and scale Corruptors up to 24")
   (reset-macro-escrow-tracker!))
 
+(run-suite "51.28 Loop 40 Belief/Macro Fixes (CloakLoss Spore/AA, #31 Spire Floor, H2H Escrow/GasRich & 12Pool)"
+  ;; L40-P0-2a: #73 ZvRandom proactive/reactive Spore, #25 ZvT Banshee HydraDen gas protect, #75 PvT Stalker 25G AA floor
+  (reset-macro-escrow-tracker!)
+  (define l40-z-73-rand-spore
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Random #:frame 5000
+      #:minerals 140 #:gas 40 #:supply-used 42 #:supply-cap 52 #:workers 32 #:active-bases 2
+      #:mineral-harvesters 26 #:gas-harvesters 6
+      #:army-supply 10 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'extractor 2)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'extractor 2)
+      #:unit-counts (hasheq 'drone 32 'queen 3 'zergling 8 'overlord 5)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 3))))
+  (reset-macro-escrow-tracker!)
+  (define l40-z-25-banshee-gas
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Terran #:frame 6400
+      #:minerals 160 #:gas 70 #:supply-used 56 #:supply-cap 74 #:workers 36 #:active-bases 2
+      #:mineral-harvesters 28 #:gas-harvesters 8
+      #:army-supply 20 #:enemy-threat-supply 9 #:under-attack? #t #:requires-anti-air? #t #:requires-detection? #t
+      #:ready-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'roach-warren 1 'baneling-nest 1 'extractor 3 'spore-crawler 2)
+      #:total-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'roach-warren 1 'baneling-nest 1 'hydralisk-den 1 'extractor 3 'spore-crawler 2)
+      #:unit-counts (hasheq 'drone 36 'queen 4 'zergling 14 'roach 4 'overseer 1 'overlord 7)
+      #:enemy-unit-counts (hasheq 'banshee 3)
+      #:enemy-building-counts (hasheq 'starport-techlab 2)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 5))))
+  (reset-macro-escrow-tracker!)
+  (define l40-p-75-stalker-40g
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 5700
+      #:minerals 60 #:gas 40 #:supply-used 42 #:supply-cap 54 #:workers 24 #:active-bases 2
+      #:mineral-harvesters 18 #:gas-harvesters 6
+      #:army-supply 12 #:enemy-threat-supply 9 #:under-attack? #t #:requires-anti-air? #t #:requires-detection? #t
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 5 'gateway 2 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 5 'gateway 2 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 24 'stalker 3 'observer 1 'zealot 1)
+      #:enemy-unit-counts (hasheq 'banshee 3)
+      #:enemy-building-counts (hasheq 'starport-techlab 1)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 2 'robotics-facility 1))))
+  (assert-true! (and (not (not (memq 'spore-crawler (macro-brain-decision-scheduled-ids l40-z-73-rand-spore))))
+                     (not (not (memq 'queen (macro-brain-decision-scheduled-ids l40-z-25-banshee-gas))))
+                     (not (ormap (lambda (s) (memq s '(baneling roach ravager evolution-chamber)))
+                                 (macro-brain-decision-scheduled-ids l40-z-25-banshee-gas)))
+                     (eq? (macro-brain-decision-saving-for l40-p-75-stalker-40g) 'stalker)
+                     (not (memq 'probe (macro-brain-decision-scheduled-ids l40-p-75-stalker-40g))))
+                "L40-P0-2a CloakLoss: ZvRandom@5000 builds Spore, ZvT Banshee protects HydraDen gas, PvT@60M/40G escrows Stalker ahead of Probe")
+
+  ;; L40-P0-2b: #31 ZvP immediate Spire lock on >=1 Tempest (90M/166G & 220M/164G mineral floor protection; W12 120M/160G preserved)
+  (reset-macro-escrow-tracker!)
+  (define l40-z-31-spire-90m
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 6600
+      #:minerals 90 #:gas 166 #:supply-used 62 #:supply-cap 78 #:workers 42 #:active-bases 3
+      #:mineral-harvesters 32 #:gas-harvesters 10
+      #:army-supply 20 #:enemy-threat-supply 12 #:under-attack? #f #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 4)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'extractor 4)
+      #:unit-counts (hasheq 'drone 42 'queen 4 'roach 8 'overlord 9)
+      #:enemy-unit-counts (hasheq 'tempest 1)
+      #:enemy-building-counts (hasheq 'stargate 2 'fleet-beacon 1)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 4))))
+  (reset-macro-escrow-tracker!)
+  (define l40-z-31-spire-220m
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 7400
+      #:minerals 220 #:gas 164 #:supply-used 68 #:supply-cap 86 #:workers 44 #:active-bases 3
+      #:mineral-harvesters 34 #:gas-harvesters 10
+      #:army-supply 24 #:enemy-threat-supply 16 #:under-attack? #f #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'hydralisk-den 1 'extractor 4)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'hydralisk-den 1 'extractor 4)
+      #:unit-counts (hasheq 'drone 44 'queen 3 'roach 6 'hydralisk 4 'overlord 10)
+      #:enemy-unit-counts (hasheq 'tempest 2)
+      #:enemy-building-counts (hasheq 'stargate 2 'fleet-beacon 1)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 5))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l40-z-31-spire-90m) 'spire)
+                     (eq? (macro-brain-decision-saving-for l40-z-31-spire-220m) 'spire)
+                     (>= (priority-schedule-result-remaining-minerals
+                          (macro-brain-decision-priority-schedule l40-z-31-spire-220m))
+                         200))
+                "L40-P0-2b #31 ZvP: Must lock Spire immediately on Tempest & protect 200M floor at >=140G")
+
+  ;; L40-P0-2c(1): #01 ZvZ OverlordTransport <=2 + #01 LurkerDen / #02 Viking high-bank EscrowLock cleared
+  (reset-macro-escrow-tracker!)
+  (define l40-z-01-dropper-cap
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Zerg #:frame 11000
+      #:minerals 400 #:gas 300 #:supply-used 140 #:supply-cap 170 #:workers 58 #:active-bases 3
+      #:mineral-harvesters 44 #:gas-harvesters 14
+      #:army-supply 82 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'extractor 6)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'extractor 6)
+      #:unit-counts (hasheq 'drone 58 'queen 4 'roach 20 'hydralisk 16 'overlord 18
+                            'overlord-transport 1 'transport-overlord-cocoon 1)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 6))))
+  (reset-macro-escrow-tracker!)
+  (define l40-z-01-lurker-clear
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Zerg #:frame 11800
+      #:minerals 572 #:gas 70 #:supply-used 118 #:supply-cap 156 #:workers 56 #:active-bases 3
+      #:mineral-harvesters 44 #:gas-harvesters 12
+      #:army-supply 62 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'extractor 6)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'extractor 6)
+      #:unit-counts (hasheq 'drone 56 'queen 4 'roach 16 'hydralisk 10 'overlord 18)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 6))))
+  (reset-macro-escrow-tracker!)
+  (define l40-t-02-viking-clear
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 10400
+      #:minerals 494 #:gas 115 #:supply-used 98 #:supply-cap 126 #:workers 50 #:active-bases 2
+      #:mineral-harvesters 38 #:gas-harvesters 12
+      #:army-supply 48 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 12
+                                      'barracks 4 'barracks-techlab 1 'barracks-reactor 2
+                                      'factory 2 'factory-techlab 2 'starport 1 'refinery 4)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 12
+                                      'barracks 4 'barracks-techlab 1 'barracks-reactor 2
+                                      'factory 2 'factory-techlab 2 'starport 1 'refinery 4)
+      #:unit-counts (hasheq 'scv 50 'marine 20 'marauder 4 'siege-tank 6 'medivac 2 'viking-fighter 2)
+      #:enemy-unit-counts (hasheq 'marine 16 'siege-tank 5 'medivac 2)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 0 'starport 1))))
+  (assert-true! (and (not (memq 'overlord-transport (macro-brain-decision-scheduled-ids l40-z-01-dropper-cap)))
+                     (not (eq? (macro-brain-decision-saving-for l40-z-01-lurker-clear) 'lurker-den))
+                     (not (eq? (macro-brain-decision-saving-for l40-t-02-viking-clear) 'viking-fighter)))
+                "L40-P0-2c(1) #01/#02: Cap ZvZ OverlordTransport <=2 & clear stale LurkerDen/Viking high-bank EscrowLocks")
+
+  ;; L40-P0-2c(2): #04/#05 Protoss GasRich Assimilator#3 cap + HT sink, AND #72 12PoolBot 1b Gateway#2
+  (reset-macro-escrow-tracker!)
+  (define l40-p-04-gas-rich
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 9400
+      #:minerals 80 #:gas 220 #:supply-used 96 #:supply-cap 130 #:workers 48 #:active-bases 3
+      #:mineral-harvesters 40 #:gas-harvesters 8
+      #:army-supply 48 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 3 'pylon 11 'gateway 6 'cybernetics-core 1 'forge 1
+                                      'twilight-council 1 'templar-archive 1 'robotics-facility 1 'robotics-bay 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 3 'pylon 11 'gateway 6 'cybernetics-core 1 'forge 1
+                                      'twilight-council 1 'templar-archive 1 'robotics-facility 1 'robotics-bay 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 48 'stalker 10 'zealot 8 'immortal 3 'high-templar 0)
+      #:enemy-unit-counts (hasheq 'marine 18 'marauder 6 'medivac 2)
+      #:open-facility-slots (hasheq 'townhall 3 'gateway 3 'robotics-facility 0))))
+  (reset-macro-escrow-tracker!)
+  (define l40-p-72-12pool-gw2
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Zerg #:frame 2500
+      #:minerals 255 #:gas 124 #:supply-used 21 #:supply-cap 31 #:workers 19 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 3
+      #:army-supply 0 #:enemy-threat-supply 6 #:under-attack? #t
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 1 'assimilator 1)
+      #:unit-counts (hasheq 'probe 19 'zealot 0)
+      #:enemy-unit-counts (hasheq 'zergling 8)
+      #:enemy-building-counts (hasheq 'spawning-pool 1 'hatchery 1)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 0))))
+  (assert-true! (and (not (memq 'assimilator (macro-brain-decision-scheduled-ids l40-p-04-gas-rich)))
+                     (not (not (memq 'high-templar (macro-brain-decision-scheduled-ids l40-p-04-gas-rich))))
+                     (not (not (memq 'gateway (macro-brain-decision-scheduled-ids l40-p-72-12pool-gw2)))))
+                "L40-P0-2c(2) #04/#05/#72: Protoss GasRich blocks Assim#3 & dumps HT; 12Pool 1b busy GW@255M builds GW#2")
+  (reset-macro-escrow-tracker!))
+
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
 (printf "\n============================================================================\n")

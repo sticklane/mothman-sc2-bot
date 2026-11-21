@@ -120,17 +120,20 @@
   ;; Exact p15 geometry shifted onto playable coordinates (center 64.0, 64.0)
   (define cx 64.0)
   (define cy 64.0)
+  ;; L40-P0-1c (`#922`): From spawn (`x = cx - 7.2`) behind the WEST Hellbat/Marine screen, DTs
+  ;; first cloaked-flank (`move`), then from the N/S flank launch arcs (`x = cx - 3.6, y = cy +- 3.0`,
+  ;; `<= 7.65t` of N/S/E PF slots), ALL 27 cast ShadowStride onto the N/S/E PF perimeter!
   (define dts-27
     (append
      (for/list ([i (in-range 14)])
        (mk-u (+ 1001 i) 'dark-templar
-             (+ (- cx 7.2) (* 0.15 (modulo i 4)))
-             (+ (- cy 1.5) (* 0.18 (quotient i 4)))
+             (+ (- cx 3.1) (* 0.15 (modulo i 4)))
+             (+ (- cy 3.0) (* 0.18 (quotient i 4)))
              #:hp 40.0 #:shield 80.0))
      (for/list ([i (in-range 13)])
        (mk-u (+ 1020 i) 'dark-templar
-             (+ (- cx 7.2) (* 0.15 (modulo i 4)))
-             (+ (+ cy 1.5) (* 0.18 (quotient i 4)))
+             (+ (- cx 3.1) (* 0.15 (modulo i 4)))
+             (+ (+ cy 3.0) (* 0.18 (quotient i 4)))
              #:hp 40.0 #:shield 80.0))))
   (define pf-bldg (mk-u 9001 'planetary-fortress (+ cx 3.5) cy #:hp 1500.0))
   (define turrets (list (mk-u 9002 'missile-turret (+ cx 6.5) (- cy 2.8) #:hp 250.0)
@@ -533,11 +536,12 @@
                         #:when (and (pair? a) (eq? (car a) 'pull-workers-attack)))
                (second a))))
   (define total-engaged-drones (length (remove-duplicates (append drill-wids pull-wids))))
+  ;; L40-P0-1b (`#922`): Suppress `worker-drill-stack-attack` (`3666`) inside `<= 6.0t` during
+  ;; `>= 10`-worker pure all-ins so ALL 16 Drones commit directly via `pull-workers-attack` (`23`)!
   (check-true "L38-T5a-5138248-all-16-drones-commit-and-drill-stack-precedes-pull"
               (and (= total-engaged-drones 16)
-                   (number? drill-idx)
-                   (or (not pull-idx) (< drill-idx pull-idx))
-                   (null? (filter (lambda (w) (memv w pull-wids)) drill-wids)))
+                   (null? drill-wids)
+                   (= (length (remove-duplicates pull-wids)) 16))
               (format "engaged=~a drill-idx=~a pull-idx=~a drill-cnt=~a pull-cnt=~a"
                       total-engaged-drones drill-idx pull-idx (length drill-wids) (length pull-wids)))
 

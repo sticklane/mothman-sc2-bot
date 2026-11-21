@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter39_wave39_full",
+  "active_wave": "iter40_wave40_full",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -3687,6 +3687,152 @@
         "SHIP-GATE SAFETY PROVEN: baseline_h2h vs L37 ZIPs caught 1W-5L (0.52x) regression immediately -> HOLD-ZIP until Loop 40 surgically fixes outnumbered full-match retreat!"
       ],
       "promotion_gates_passed": "2/9 PASS across full 78-match roster (zero_crashes_and_rejects, sup_blk_le_6pct [4.0%]); UNCONDITIONAL HOLD-ZIP (baseline_h2h regressed 1W-5L 0.52x vs shipped L37 ZIPs -> fix in Loop 40!)"
+    },
+    {
+      "id": "iter40_wave40_full",
+      "status": "UNCONDITIONAL_LIVE_SHIP_4_5W_1L_2_23X_H2H_NEW_84M_40_5_NL_50L_0_64X_ATH_NEW_78M_HWM",
+      "campaign": "Loops 29+ Self-Play, Honest 3-Tier Tactics Arena 2.0 & Expanded Roster Campaign (Loop 40 UNCONDITIONAL COMBINED L38+L39+L40 LIVE AI ARENA SHIP #4!)",
+      "loop_self_improvements": [
+        "L40-LOOP-1 (Ship-Gate Outnumbered Regroup Restoration + Arena Parity Preservation): Gated L39 mid-fight stalemate guard strictly on Arena/parity force ratios (bot-runtime.rkt:23006), flipping baseline_h2h from 1W-5L (0.52x) -> 5W-1L (2.23x/2.90x med!) while preserving 39W 57-scenario Arena 2.0 strength!",
+        "L40-LOOP-2 (WeaponRefit [76] Wire + Infestor Self-Claim Fix + Live Ship #4 Readiness): Wired Battlecruiser WeaponRefit upgrade (t15 SP flipped 0.72x -> 1.26x WIN w/ clean 3-4 full-channel Yamatos!), fixed Infestor neural-approach self-blocking claim (z14 flipped KO WIN 1.04x!), and pushed e01 Probe-Harass Mineral-Defense to 2/2 PASS!"
+      ],
+      "spec_summary": "Loop 40 (mwskxoml ffb8aaf1 \u2014 UNCONDITIONAL COMBINED L38+L39+L40 LIVE AI ARENA SHIP #4!): Zero-crash/fault/reject/spike 90/90 run. CRUSHED SHIP-GATE baseline_h2h 5W-1L-0T (2.23x agg / 2.90x med, SB 3.4% vs 5.9%, Atk2-6 27.3% vs 25.4%: #06 TvZ 10.62x 0-sigs, #05 PvZ 6.15x, #03 PvP 2.97x 0-sigs, #02 TvT 2.90x SB 1.0% 0-sigs, #01 ZvZ 1.88x; sole L #04 PvT 0.14x)! SHATTERED ALL_84 ATHs (26W-50L-8T: 40.5% NL NEW ATH, 50L FEWEST LOSSES EVER, 0.64x Trade NEW ATH, SB 3.8%) AND NEW EXT78 HWM (23W-47L-8T: 39.7% NL NEW ATH, 47L ATL, 0.61x/0.28x Trade NEW ATH, SB 3.9%, PkA 2,996)! SHATTERED UNSEEN12 ATHs (6W-26L-4T: 27.8% NL NEW ATH, 0.48x Trade NEW ATH, PkA 2,763 NEW ATH \u2014 7/12 unseen bots beaten/tied incl. #43 Z v QueenBot 11.16x & #20 T v PolyMorph 7.41x!). FOUR 3-0 CORE14 SWEEPS incl. FIRST-EVER Creepy_strategies 3-0 (#59 T 3.57x first Terran W!), oberon 3-0, titania 3-0, monsterbot 3-0 + onlyfans 2-0-1! CloakLoss 4->1 (ZERO Zerg/Terran!), 1BaseLock=0/84, ProdStall=0/78 external, EscrowLock 14->10, EarlyRushIdleBank 4->1, PERFECT North 40.0% = South 39.5% NL parity, NEW 84-match max_step_ms ATL 196.64ms! 57-Scenario Arena 2.0: Dummy 39W-17L-1D (1.29x; Zerg canonical 15W-1L 1.83x!, z14 Neural KO WIN 1.04x!, e01 2/2 PASS!) + SP 30W-26L-1D (0.93x; t15 BC Yamato FLIPPED WIN 1.26x!).",
+      "rev": "mwskxoml ffb8aaf1 (iter40 UNCONDITIONAL LIVE SHIP #4!)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_072503_iter40_wave40_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_075631_iter40_baseline_h2h",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter40_wave40_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter40_baseline_h2h_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter40_wave40_full.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter40.json",
+      "tactics_selfplay_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter40.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter40.md",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "23W-47L-8T (NEW 78-MATCH HWM: 29.5% WR / 39.7% NL ATH, 47L ATL, Trade 0.61x/0.28x ATH, SB 3.9%! CORE14 17W-21L-4T [50.0% NL, 4x 3-0 sweeps incl. 1st Creepy_strategies 3-0!] + UNSEEN12 SHATTERED ATH 6W-26L-4T [27.8% NL / 0.48x / PkA 2,763]; ALL84 ATH 26W-50L-8T [40.5% NL, 50L ATL, 0.64x]; SHIP-GATE baseline_h2h 5W-1L-0T 2.23x vs L37 ZIPs!)",
+      "win_rate_pct": 29.5,
+      "trade_agg": 0.61,
+      "trade_med": 0.28,
+      "sup_blk_pct": 3.9,
+      "w4_alive_med": 26.0,
+      "w6_alive_med": 40.5,
+      "pk_army_avg": 2995.8,
+      "action_rejects": 0,
+      "crashes": 0,
+      "siege_range_zero_dps_losses": 14,
+      "cloaked_unit_damage_losses": 1,
+      "gas_rich_min_starved_matches": 15,
+      "one_base_lockout_matches": 0,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 7,
+      "prod_placement_stall_matches": 0,
+      "zero_kill_collapse_matches": 3,
+      "drip_feed_collapse_matches": 33,
+      "prod_idle_bank_freeze_matches": 0,
+      "gas_zero_harvest_freeze_matches": 0,
+      "spire_sched_drop_matches": 4,
+      "wall_timeout_ties": 5,
+      "army_val_4m_ratio_vs_pro": 0.89,
+      "army_val_8m_ratio_vs_pro": 0.51,
+      "latency_summary": "ALL 90/90 clean <=196.64ms (NEW 84-match max_step_ms ATL beating L38 199.0ms!; 0 spikes >=500ms!; rt=5.88ms, tr=2.42ms, obs=0.77ms, avg=9.07ms, p95=15.72ms; H2H max=146.73ms; 0 rejects!)",
+      "by_race": {
+        "Protoss": {
+          "record": "CORE14 6W-8L-0T (0.81x, SB 4.9%, Creepy #60 6.57x!); EXT78 7W-18L-1T (0.52x, SB 5.1%, sc2ai_protoss #33 1.39x); H2H 2-1 (PvZ 6.15x, PvP 2.97x 0-sigs, sole L PvT 0.14x); Arena e01 2/2 PASS (+445M/+495M)!",
+          "trade_agg": 0.52,
+          "w4_alive_med": 27.0,
+          "w6_alive_med": 41.0,
+          "nat_sec": 138.9,
+          "sup_blk": 5.1
+        },
+        "Terran": {
+          "record": "CORE14 6W-6L-2T (57.1% NL, 0.83x, SB 2.2%, FIRST-EVER Creepy Terran W #59 3.57x!, titania #2 22.00x!); EXT78 SURGED 9W-14L-3T (46.2% NL, 0.78x, PkA 3,449, SB 2.0%, PolyMorph #20 7.41x!, Clicadinha #65 1.61x!); H2H 2-0 SWEEP (TvZ 10.62x 0-sigs, TvT 2.90x SB 1.0% 0-sigs); Arena SP t15 BC Yamato FLIPPED WIN 1.26x!",
+          "trade_agg": 0.78,
+          "w4_alive_med": 25.0,
+          "w6_alive_med": 36.0,
+          "nat_sec": 114.3,
+          "sup_blk": 2.0
+        },
+        "Zerg": {
+          "record": "CORE14 5W-7L-2T (50.0% NL, 0.64x, W4 28.5, Creepy #58 5.65x, titania #1 15.05x); EXT78 7W-15L-4T (42.3% NL, 0.53x, PkA 3,090, ZvZ 5W-4L 1.21x!, QueenBot #43 11.16x!); H2H 1-0 WIN (ZvZ 1.88x); Arena canonical 15W-1L-0D (1.83x!, z14 Infestor Neural FLIPPED KO WIN 1.04x!)",
+          "trade_agg": 0.53,
+          "w4_alive_med": 28.5,
+          "w6_alive_med": 42.0,
+          "nat_sec": 55.9,
+          "sup_blk": 4.4
+        }
+      },
+      "tactics_summary": {
+        "rev": "mwskxoml ffb8aaf1 (iter40 \u2014 57-SCENARIO / 114-DUEL 3-TIER HONEST ARENA 2.0!)",
+        "passed": "Verifier 7/7 + L31..L40 (180/180) + 33/33 Belief + 57/57 Catalog + 6/6 Replay-DB + 231/231 Tactics + 0/0/0/0 Pro-Starve FIRST-PASS!",
+        "sc2_duel36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter40.json",
+        "sc2_selfplay36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter40.json",
+        "sc2_duel36_summary": "HONEST 3-TIER 57-SCENARIO (114-DUEL!) ARENA 2.0: Dummy 39W-17L-1D (1.29x, A:M 3.41; ties 39W!) [canonical 49: 36W-12L-1D ALL 36 KOs! 1.35x, Zerg 15W-1L 1.83x!, z14 Infestor Neural FLIPPED KO WIN 1.04x!; econ-harass 4: 1P-3F e01 PASS +445M, up 78.0%->81.6%, e04 +25->+215M; regression 4: 2W-2L-0D 0.76x] + Self-Play 30W-26L-1D (0.93x) [canonical 49: 27W-21L-1D 0.95x, Terran +2W 1.04x, t15 BC Yamato w/ WeaponRefit[76] FLIPPED WIN 1.26x!; econ-harass 4: 2P-2F e01+e02 PASS, up 82.2%->84.8%, mined 365M!; regression 4: 1W-3L-0D 0.69x]",
+        "by_tier_duel": {
+          "canonical": {
+            "total": 49,
+            "wins": 36,
+            "losses": 12,
+            "draws": 1,
+            "trade_agg": 1.35,
+            "am_ratio": 3.19
+          },
+          "econ-harass": {
+            "total": 4,
+            "passes": 1,
+            "fails": 3,
+            "avg_net_econ_score": -10.0,
+            "avg_minerals_gathered": 265.0,
+            "avg_mining_uptime_pct": 81.6,
+            "total_workers_lost": 27
+          },
+          "regression": {
+            "total": 4,
+            "wins": 2,
+            "losses": 2,
+            "draws": 0,
+            "trade_agg": 0.76,
+            "am_ratio": 13.23
+          }
+        },
+        "by_tier_selfplay": {
+          "canonical": {
+            "total": 49,
+            "p1_wins": 27,
+            "p2_wins": 21,
+            "draws": 1,
+            "trade_agg": 0.95,
+            "am_ratio": 2.84
+          },
+          "econ-harass": {
+            "total": 4,
+            "passes": 2,
+            "fails": 2,
+            "avg_net_econ_score": 196.2,
+            "avg_minerals_gathered": 365.0,
+            "avg_mining_uptime_pct": 84.8,
+            "total_workers_lost": 19
+          },
+          "regression": {
+            "total": 4,
+            "p1_wins": 1,
+            "p2_wins": 3,
+            "draws": 0,
+            "trade_agg": 0.69,
+            "am_ratio": 4.08
+          }
+        }
+      },
+      "visual_qa_highlights": [
+        "SHIP #4 SHOWCASE WINS: #59 T v Creepy_strategies (14:54 FIRST TERRAN WIN 3.57x sealing 3-0 sweep!) surgical Bio+4-Medivac push into NE Nexus+Probes; #43 Z v QueenBot (10:09 WIN 11.16x) 5+ Ravagers+Roaches+Lings shredding QueenBot across 50+ Creep Tumors; #20 T v PolyMorph (06:48 WIN 7.41x) crisp Siege Tank+Bio timing into NW natural.",
+        "H2H 5W-1L SHIP-GATE CRUSHES: H2H #06 TvZ (07:26 WIN 10.62x 0-sigs) dense Marine/Marauder+Tank marching up L37 Zerg ramp; H2H #05 PvZ (07:08 WIN 6.15x) clean Blink Stalkers+Sentry+Zealot picking off Queens outside Spine wall; H2H #02 TvT (06:29 WIN 2.90x SB 1.0% 0-sigs) textbook 2-Tank high-ground ramp siege + Vikings crushing L37 Bio.",
+        "LOOP 41 DIAGNOSTIC SMOKING GUNS: H2H #04 PvT (06:25 SOLE H2H LOSS 0.14x) shows 4 Stalkers+Adept+Phoenix walking straight into L37 Terran's 12-Marine concave + Sieged Tank in open ground 2s before friendly Immortal arrives from south; #75 P v who (04:36 SOLE CloakLoss 0.13x) catches 3 Blue DTs slashing SW natural Gateway/Forge while Red's Robo Facility is ALREADY built yet 0 Observer / 0 Photon Cannon is out by 04:35!"
+      ],
+      "key_wins": [
+        "UNCONDITIONAL COMBINED L38+L39+L40 LIVE AI ARENA SHIP #4 PASS: baseline_h2h CRUSHED shipped L37 BotZips 5W-1L-0T (2.23x agg / 2.90x med, SB 3.4% vs 5.9% \u2014 #06 TvZ 10.62x, #05 PvZ 6.15x, #03 PvP 2.97x, #02 TvT 2.90x, #01 ZvZ 1.88x)!",
+        "SHATTERED ALL_84 ATHs (26W-50L-8T: 40.5% NL NEW ATH, 50L ATL, 0.64x Trade ATH, SB 3.8%) & NEW 78-MATCH HWM (23W-47L-8T: 39.7% NL ATH, 47L ATL, 0.61x/0.28x Trade ATH, SB 3.9%)!",
+        "SHATTERED UNSEEN12 ATHs (6W-26L-4T: 27.8% NL ATH, 0.48x Trade ATH, PkA 2,763 ATH; 7/12 unseen bots beaten/tied) + FOUR 3-0 CORE14 SWEEPS (FIRST-EVER Creepy_strategies 3-0, oberon 3-0, titania 3-0, monsterbot 3-0) + PERFECT North 40.0% = South 39.5% NL parity + NEW max_step_ms 196.64ms ATL!",
+        "CloakLoss 4->1 (ZERO Zerg/Terran!), 1BaseLock=0/84, ProdStall=0/78 external, EscrowLock 14->10, EarlyRushIdleBank 4->1; 57-Scenario Arena 2.0: t15 BC Yamato SP FLIPPED WIN 1.26x, z14 Infestor Neural FLIPPED KO WIN 1.04x, e01 2/2 PASS!"
+      ],
+      "promotion_gates_passed": "2/9 PASS across full 78-match roster (zero_crashes_and_rejects, sup_blk_le_6pct [3.9%]); UNCONDITIONAL LIVE AI ARENA SHIP #4 PASS (5W-1L 2.23x/2.90x med baseline_h2h crush vs L37 ZIPs + NEW 78-match HWM & ALL_84 40.5% NL / 50L / 0.64x ATH!)"
     }
   ],
   "final_18_loop_summary": {

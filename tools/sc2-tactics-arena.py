@@ -372,6 +372,7 @@ UPGRADE_SPECS: dict[str, tuple[str, int, int, bool, tuple[int, int] | None, int 
     "BansheeCloak": ("Terran", 41, 790, False, (28, 487), None),
     "AdvancedBallistics": ("Terran", 41, 805, False, (28, 487), 30),
     "PersonalCloaking": ("Terran", 26, 820, False, None, None),
+    "WeaponRefit": ("Terran", 30, 1532, False, None, None),
 }
 
 UPGRADE_ALIASES: dict[str, list[str]] = {
@@ -436,6 +437,10 @@ UPGRADE_ALIASES: dict[str, list[str]] = {
     "personalcloaking": ["PersonalCloaking"],
     "personal-cloaking": ["PersonalCloaking"],
     "advancedballistics": ["AdvancedBallistics"],
+    "weaponrefit": ["WeaponRefit"],
+    "weapon-refit": ["WeaponRefit"],
+    "yamato": ["WeaponRefit"],
+    "yamato-cannon": ["WeaponRefit"],
     "cloak": ["BansheeCloak", "PersonalCloaking"],
 }
 

@@ -290,6 +290,7 @@
  lock-ghost-snipe-channel!
  snipe-channel-locked?
  can-ghost-move-or-kite?
+ bc-yamato-channel-locked?
  spellcaster-channel-protected?
  oracle-pulsar-beam-active?
  spell-directive->sexp
@@ -1439,6 +1440,45 @@
         1
         0)))
 
+;; L40-P0-1e (`z14`): Distinguish ANOTHER caster's claim vs THIS caster's own active claim so
+;; an approaching Infestor never self-blocks on tick 2 of its own `neural-approach` reservation!
+(: spell-unit-claimed-by-other? (-> spell-claims Symbol Integer Integer Integer Boolean))
+(define (spell-unit-claimed-by-other? claims ability target-tag caster-tag current-frame)
+  (define ab (canonical-spell-key ability))
+  (for/or : Boolean ([c (in-list (spell-claims-unit-claims claims))])
+    (and (eq? (unit-claim-ability c) ab)
+         (= (unit-claim-target-tag c) target-tag)
+         (> (unit-claim-expires-frame c) current-frame)
+         (not (= (unit-claim-caster-tag c) caster-tag)))))
+
+(: spell-unit-claimed-by-self? (-> spell-claims Symbol Integer Integer Integer Boolean))
+(define (spell-unit-claimed-by-self? claims ability target-tag caster-tag current-frame)
+  (define ab (canonical-spell-key ability))
+  (for/or : Boolean ([c (in-list (spell-claims-unit-claims claims))])
+    (and (eq? (unit-claim-ability c) ab)
+         (= (unit-claim-target-tag c) target-tag)
+         (> (unit-claim-expires-frame c) current-frame)
+         (= (unit-claim-caster-tag c) caster-tag))))
+
+(: spell-renew-unit-claim! (-> spell-claims Symbol Integer Integer Integer Integer Boolean))
+(define (spell-renew-unit-claim! claims ability target-tag caster-tag current-frame ttl)
+  (define ab (canonical-spell-key ability))
+  (define renewed? : Boolean #f)
+  (define updated
+    (for/list : (Listof unit-claim)
+              ([c (in-list (spell-claims-unit-claims claims))]
+               #:when (> (unit-claim-expires-frame c) current-frame))
+      (if (and (eq? (unit-claim-ability c) ab)
+               (= (unit-claim-target-tag c) target-tag)
+               (= (unit-claim-caster-tag c) caster-tag))
+          (begin
+            (set! renewed? #t)
+            (unit-claim ab target-tag caster-tag (unit-claim-frame c) (+ current-frame (max 1 ttl))))
+          c)))
+  (when renewed?
+    (set-spell-claims-unit-claims! claims updated))
+  renewed?)
+
 ;; Determine effective concurrent caster cap on `target-tag` per #115/#117 rules.
 (: unit-claim-effective-cap (-> Symbol Real Real (Option Positive-Integer) Boolean Positive-Integer))
 (define (unit-claim-effective-cap ab target-hp missing-hp explicit-max allow-multi?)
@@ -1566,6 +1606,32 @@
 (: can-ghost-move-or-kite? (-> spell-claims Any Integer Boolean))
 (define (can-ghost-move-or-kite? claims caster-or-tag current-frame)
   (not (snipe-channel-locked? claims caster-or-tag current-frame)))
+
+;; L40-P0-1d (`t15`): Returns `#t` if Battlecruiser (`tag` or unit hash) is actively channeling
+;; Yamato Cannon (`order == 401` / `2358` Tactical Jump) OR inside its `52f` (`48`-loop channel +
+;; `4f` margin) Yamato cast lock with `yamato-cooldown <= 0` so NO `attack-unit`/`move`/`401`
+;; overwrites can cancel the beam mid-channel!
+(: bc-yamato-channel-locked? (-> spell-claims Any Integer Boolean))
+(define (bc-yamato-channel-locked? claims caster-or-tag current-frame)
+  (define tag : Integer
+    (if (exact-integer? caster-or-tag)
+        caster-or-tag
+        (uh-tag caster-or-tag)))
+  (define obs-cd : Integer
+    (if (hash? caster-or-tag)
+        (safe-int (dyn-hash-ref caster-or-tag 'yamato-cooldown 0) 0)
+        0))
+  (define ord-chan? : Boolean
+    (and (hash? caster-or-tag)
+         (for/or : Boolean ([ab (in-list (uh-order-ids caster-or-tag))])
+           (or (= ab 401) (= ab 2358)))))
+  (define f0 : (Option Integer)
+    (hash-ref (spell-claims-bc-yamato-issue-frame claims) tag (lambda () #f)))
+  (or ord-chan?
+      (and (integer? f0)
+           (<= obs-cd 0)
+           (>= current-frame f0)
+           (< (- current-frame f0) 52))))
 
 ;; Returns `(values active? dwell-frames)` for an Oracle's Pulsar Beam mutex tracker.
 (: oracle-pulsar-beam-active? (-> spell-claims Any Integer (Values Boolean Integer)))
@@ -2561,21 +2627,41 @@
                  (define friendly-army-near?
                    (any-unit-within? ally-units ux uy 11.0
                                      (lambda ([a : Any]) (and (not (= (uh-tag a) tag)) (unit-combat-relevant? a)))))
-                 ;; L39-P0-1d (`z14` + `novel-116`): If another Infestor already claimed a Neural
-                 ;; (or Neural-approach) on this tick AND no Fungal has been claimed yet AND a
+                 ;; L39-P0-1d + L40-P0-1e (`z14` + `novel-116`): If ANOTHER Infestor already claimed a
+                 ;; Neural (or Neural-approach) on this tick AND THIS Infestor does NOT already hold an
+                 ;; active `neural-approach` reservation AND no Fungal has been claimed yet AND a
                  ;; `>= 3`-unit un-fungaled enemy cluster is in Fungal range, let THIS Infestor open
                  ;; with Fungal Growth first so mixed packs get BOTH Neural + Fungal simultaneously
-                 ;; (and a 3rd Infestor still takes Neural #2 on the next Sieged Tank/Capital)!
+                 ;; while approaching Infestors keep walking uninterrupted to fire NeuralParasite!
+                 (when (< en SC2-INFESTOR-NEURAL-ENERGY)
+                   ;; Release stale `neural-approach` reservation if THIS Infestor dropped < 100e
+                   ;; (e.g. EMP or Fungal) so another loaded Infestor immediately takes over!
+                   (set-spell-claims-unit-claims!
+                    claims
+                    (for/list : (Listof unit-claim)
+                              ([c (in-list (spell-claims-unit-claims claims))]
+                               #:unless (and (eq? (unit-claim-ability c) 'neural-approach)
+                                             (= (unit-claim-caster-tag c) tag)))
+                      c)))
+                 (define self-has-neural-approach?
+                   (for/or : Boolean ([c (in-list (spell-claims-unit-claims claims))])
+                     (and (eq? (unit-claim-ability c) 'neural-approach)
+                          (= (unit-claim-caster-tag c) tag)
+                          (> (unit-claim-expires-frame c) current-frame))))
                  (define neural-already-claimed-now?
                    (for/or : Boolean ([c (in-list (spell-claims-unit-claims claims))])
                      (and (memq (unit-claim-ability c) '(neural-parasite neural-approach))
-                          (= (unit-claim-frame c) current-frame))))
+                          (not (= (unit-claim-caster-tag c) tag))
+                          (> (unit-claim-expires-frame c) current-frame)
+                          (or (= (unit-claim-frame c) current-frame)
+                              (eq? (unit-claim-ability c) 'neural-approach)))))
                  (define fungal-already-claimed-now?
                    (for/or : Boolean ([c (in-list (spell-claims-point-claims claims))])
                      (and (eq? (point-claim-ability c) 'fungal-growth)
                           (> (point-claim-expires-frame c) current-frame))))
                  (define defer-second-neural-for-opening-fungal?
-                   (and neural-already-claimed-now?
+                   (and (not self-has-neural-approach?)
+                        neural-already-claimed-now?
                         (not fungal-already-claimed-now?)
                         (>= en SC2-INFESTOR-FUNGAL-ENERGY)
                         (let-values ([(ok? _fx _fy _s)
@@ -2609,28 +2695,33 @@
                                                   #:caster-tag tag)
                               (spell-directive tag 'infestor 'neural-parasite 'unit (uh-tag tgt)
                                                (uh-x tgt) (uh-y tgt) 'infestor-neural))))
-                  ;; 1b. L39-P0-1d (`z14`): When an unclaimed high-value Neural target (`>= 102.0`:
-                  ;;     SiegeTankSieged/Thor/Colossus/Carrier/BC/Tempest/Archon/Immortal) sits
-                  ;;     just outside cast range (`9.0..13.0t`) and no enemy is within `<= 4.5t`,
-                  ;;     reserve 1 approaching Infestor per target (`neural-approach` 12f claim) to
-                  ;;     step into `8.2t` Neural range while extra Infestors cast Fungal!
+                  ;; 1b. L39-P0-1d + L40-P0-1e (`z14`): When an unclaimed (or self-claimed!) high-value
+                  ;;     Neural target (`>= 102.0`: SiegeTankSieged/Thor/Colossus/Carrier/BC/Tempest/Archon/Immortal)
+                  ;;     sits just outside cast range (`9.0..14.0t`), reserve 1 approaching Infestor per target
+                  ;;     and ALLOW the same `caster-tag` to renew and continue its own `neural-approach` claim
+                  ;;     on tick 2..N instead of self-blocking and falling through to Fungal!
                   (and neural-ok?
                        (not defer-second-neural-for-opening-fungal?)
                        (>= en SC2-INFESTOR-NEURAL-ENERGY)
                        friendly-army-near?
-                       (not (any-unit-within? enemy-units ux uy 4.5 sc2-enemy-unit-targetable?))
+                       (not (any-unit-within? enemy-units ux uy (if (< (uh-hp-ratio u) 0.60) 4.5 3.5) sc2-enemy-unit-targetable?))
                        (let-values ([(ok? tgt _w)
                                      (best-unit-target
-                                      ux uy 13.0 enemy-units
+                                      ux uy 14.0 enemy-units
                                       (lambda ([e : Any])
                                         (and (not (uh-has-buff? e 'neural-parasite))
                                              (= (spell-unit-claim-count claims 'neural-parasite (uh-tag e) current-frame) 0)
-                                             (= (spell-unit-claim-count claims 'neural-approach (uh-tag e) current-frame) 0)
+                                             (not (spell-unit-claimed-by-other? claims 'neural-approach (uh-tag e) tag current-frame))
                                              (>= (infestor-neural-weight (uh-type e)) 102.0)))
-                                      (lambda ([e : Any]) (infestor-neural-weight (uh-type e))))])
+                                      (lambda ([e : Any])
+                                        (+ (infestor-neural-weight (uh-type e))
+                                           (if (spell-unit-claimed-by-self? claims 'neural-approach (uh-tag e) tag current-frame)
+                                               50.0
+                                               0.0))))])
                          (and ok?
-                              (spell-claim-unit?! claims 'neural-approach (uh-tag tgt) current-frame 12
-                                                  #:caster-tag tag #:max-casters 1)
+                              (or (spell-renew-unit-claim! claims 'neural-approach (uh-tag tgt) tag current-frame 12)
+                                  (spell-claim-unit?! claims 'neural-approach (uh-tag tgt) current-frame 12
+                                                      #:caster-tag tag #:max-casters 1))
                               (let* ([ex (uh-x tgt)]
                                      [ey (uh-y tgt)]
                                      [dx (- ex ux)]
@@ -3074,9 +3165,13 @@
          [precomputed-repair-targets #f]
          [ghost-cloak-researched? #t])
   (define all-enemies (if (null? enemy-buildings) enemy-units (append enemy-units enemy-buildings)))
-  ;; L39-P0-1c (`t15`): SC2 LotV Patch 4.7+ removed the Weapon Refit upgrade — Battlecruisers
-  ;; ALWAYS have Yamato Cannon (`401`) baseline! Never gate on obsolete `'weapon-refit`.
-  (define yamato-ok? yamato-researched?)
+  ;; L40-P0-1d (`#918/#919`, `t15`): SC2 4.10/5.0 still requires Fusion Core `WeaponRefit`
+  ;; (upgrade ID `76`, `'weapon-refit`) to unlock Battlecruiser Yamato Cannon (`401`).
+  (define yamato-ok?
+    (or yamato-researched?
+        (for/or : Boolean ([up (in-list researched-upgrades)])
+          (or (eq? (safe-sym up 'unknown) 'weapon-refit)
+              (and (exact-integer? up) (= up 76))))))
   (define ghost-cloak-ok? (terran-upgrade-ready? researched-upgrades 'personal-cloaking ghost-cloak-researched?))
 
   (define-values (dirs-rev _)
@@ -3424,7 +3519,8 @@
                 (define f0 (hash-ref yam-issue-ht tag (lambda () current-frame)))
                 (hash-set! yam-ready-ht tag (max (hash-ref yam-ready-ht tag (lambda () -1))
                                                  (+ f0 BC-YAMATO-COOLDOWN-FRAMES)))
-                (hash-remove! yam-issue-ht tag))
+                (when (> yam-obs-cd 0)
+                  (hash-remove! yam-issue-ht tag)))
               (cond
                 [(spellcaster-channel-protected? u) #f]
                 [else
@@ -3450,13 +3546,13 @@
                                     (+ current-frame BC-TACTICAL-JUMP-COOLDOWN-FRAMES))
                          (spell-directive tag 'battlecruiser 'tactical-jump 'point 0 home-x home-y
                                           'bc-emergency-tactical-jump)))
-                  ;; 2. Yamato Cannon (`ceil(hp/240)` claim cap; W5-TAC-4 claim filter & spread;
-                  ;;    L39-P0-1c: baseline LotV 4.7+ ability, 12.5t acquire range so BCs never
-                  ;;    stall at 10.1t shooting ground units, + execution-confirmed 16f -> 1590f CD!)
+                  ;; 2. L40-P0-1d (`t15`): Single-emitter Yamato Cannon (`401`, `ceil(hp/240)` claim cap,
+                  ;;    strictly `<= 10.0t` cast range so BCs never cast-walk/cancel, + `52f` channel lock
+                  ;;    promoted to `1590f` on observed order `401` / `yamato-cooldown > 0`!)
                   (and yam-ready?
                        (let-values ([(ok? tgt _w)
                                      (best-unit-target
-                                      ux uy 12.5 enemy-units
+                                      ux uy 10.0 enemy-units
                                       (lambda ([e : Any])
                                         (and (not (uh-hallucination? e))
                                              (< (spell-unit-claim-count claims 'yamato-cannon (uh-tag e) current-frame)
@@ -3466,11 +3562,11 @@
                                         (define cc (spell-unit-claim-count claims 'yamato-cannon (uh-tag e) current-frame))
                                         (- (bc-yamato-weight e) (* 15.0 (->float cc)))))])
                          (and ok?
-                              (spell-claim-unit?! claims 'yamato-cannon (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
+                              (spell-claim-unit?! claims 'yamato-cannon (uh-tag tgt) current-frame 52
                                                   #:caster-tag tag #:target-hp (uh-total-hp tgt))
                               (begin
                                 (hash-set! yam-issue-ht tag current-frame)
-                                (hash-set! yam-ready-ht tag (+ current-frame 16))
+                                (hash-set! yam-ready-ht tag (+ current-frame 52))
                                 (spell-directive tag 'battlecruiser 'yamato-cannon 'unit (uh-tag tgt)
                                                  (uh-x tgt) (uh-y tgt) 'bc-yamato-snipe)))))
                   ;; 3. Offensive Tactical Jump onto undefended remote worker line when healthy (>=85% HP, no threat <16)
@@ -3614,7 +3710,7 @@
                                                               (not (memq (uh-type e) '(scv probe drone)))
                                                               (unit-combat-relevant? e))))
                                                       (>= (count-units-within
-                                                           enemy-units ax ay 10.0
+                                                           enemy-units ax ay 14.0
                                                            (lambda ([e : Any])
                                                              (and (memq (uh-type e) '(scv probe drone)) #t)))
                                                           6))))
@@ -4557,15 +4653,19 @@
     [else
      (dt-clamp-blink-target ux uy rx0 ry0 tx0 ty0 min-center-r)]))
 
-;; L38-P0-1a + L39-P0-1b: Coordinated Dark Templar `ShadowStride` (`2700`, upg `141`) Planetary
-;; Fortress 1-shot perimeter-ring snipe + immediate PF focus-fire, followed by post-PF static
-;; detector snipe (`missile-turret`/`photon-cannon`/`spore-crawler`) so surviving DTs go dark!
-;; L39-P0-1b upgrades:
-;;   1. DTs beyond `PF-BLINK-MAX-APPROACH-DIST` (`10.95t`) cloaked-walk (`move`) toward the PF
-;;      perimeter ring BEFORE blinking — never burning Blink short into Hellbats/Bio!
-;;   2. Exact PF-perimeter circle intersection lands every blink on the `3.0..3.5t` PF melee ring.
-;;   3. Execution-confirmed cooldown (`12f` pending -> promoted to `314f` once displacement >= 3.0t
-;;      or order `2700` is observed) recovers cleanly from dropped/interrupted casts (fixes `p15` SP!).
+;; L38-P0-1a + L39-P0-1b + L40-P0-1c: Coordinated Dark Templar `ShadowStride` (`2700`, upg `141`)
+;; Planetary Fortress 1-shot perimeter-ring snipe + immediate PF focus-fire, followed by post-PF
+;; static detector snipe (`missile-turret`/`photon-cannon`/`spore-crawler`) so surviving DTs go dark!
+;; L40-P0-1c upgrades:
+;;   1. Compute enemy ground-combat screen centroid near the PF (`<= 12.0t`); when a Bio/Hellbat
+;;      screen blocks the direct approach side, bias PF perimeter slots onto the N/S/E flanking arcs
+;;      STRICTLY away from the screen (`safe-th = threat-th + pi`, wings `[-2.00,-1.15]` & `[+1.15,+2.00]`)
+;;      so DTs never blink straight onto the front edge into Hellbat/Bio splash!
+;;   2. Whenever `dist(DT, assigned-slot) > SHADOW-STRIDE-MAX-RANGE (7.65t)`, emit cloaked flanking
+;;      `move (16)` toward the lateral blink-launch point (bypassing the front screen cloaked!)
+;;      rather than letting DTs blink short or fall through to `23` Attack-Move into Hellbats!
+;;   3. Once `dist(DT, assigned-slot) <= 7.65t`, synchronized `ShadowStride (2700)` lands directly
+;;      on the `3.0..3.45t` PF melee ring, with execution-confirmed `12f -> 314f` cooldown promotion.
 (: plan-dt-blink-pf-snipe
    (->* ((Listof Any) (Listof Any) (Listof Any) spell-claims Integer)
         (#:researched-upgrades (Listof Any)
@@ -4651,13 +4751,63 @@
                    [acx (/ (for/fold ([s : Float 0.0]) ([u (in-list active-dts)]) (+ s (uh-x u))) an)]
                    [acy (/ (for/fold ([s : Float 0.0]) ([u (in-list active-dts)]) (+ s (uh-y u))) an)]
                    [theta0 (real->double-flonum (atan (- acy ty0) (- acx tx0)))]
+                   ;; Detect screening ground-combat wall in front of the PF (`<= 12.0t` of PF
+                   ;; and not behind the PF relative to the approaching DT centroid)
+                   [d-ac-pf (dist2 acx acy tx0 ty0)]
+                   [screen-enemies
+                    (if is-pf?
+                        (for/list : (Listof Any)
+                                  ([e (in-list enemy-units)]
+                                   #:when (and (hash? e)
+                                               (not (dyn-u-snapshot-flag e))
+                                               (not (uh-hallucination? e))
+                                               (not (uh-flying? e))
+                                               (not (memq (uh-type e) '(scv probe drone)))
+                                               (unit-combat-relevant? e)
+                                               (<= (dist2 tx0 ty0 (uh-x e) (uh-y e)) 12.0)
+                                               (<= (dist2 acx acy (uh-x e) (uh-y e)) (+ d-ac-pf 1.0))))
+                          e)
+                        '())]
+                   [n-screen (length screen-enemies)]
+                   [screen-cx
+                    (if (>= n-screen 3)
+                        (/ (for/fold ([s : Float 0.0]) ([e (in-list screen-enemies)]) (+ s (uh-x e)))
+                           (exact->inexact n-screen))
+                        acx)]
+                   [screen-cy
+                    (if (>= n-screen 3)
+                        (/ (for/fold ([s : Float 0.0]) ([e (in-list screen-enemies)]) (+ s (uh-y e)))
+                           (exact->inexact n-screen))
+                        acy)]
+                   [threat-th (real->double-flonum (atan (- screen-cy ty0) (- screen-cx tx0)))]
+                   [screen-blocks-approach?
+                    (and is-pf?
+                         (>= n-screen 3)
+                         (> (flcos (dt-angle-diff threat-th theta0)) 0.20))]
+                   [safe-th
+                    (if screen-blocks-approach?
+                        (+ threat-th (exact->inexact pi))
+                        theta0)]
+                   [safe-dx (flcos safe-th)]
+                   [safe-dy (flsin safe-th)]
+                   [perp-dx (- safe-dy)]
+                   [perp-dy safe-dx]
                    [sorted-dts
                     (sort active-dts
                           (lambda ([a : Any] [b : Any])
-                            (define aa (dt-angle-diff (real->double-flonum (atan (- (uh-y a) ty0) (- (uh-x a) tx0))) theta0))
-                            (define ab (dt-angle-diff (real->double-flonum (atan (- (uh-y b) ty0) (- (uh-x b) tx0))) theta0))
-                            (if (= aa ab) (< (uh-tag a) (uh-tag b)) (< aa ab))))]
+                            (define pa (+ (* (- (uh-x a) tx0) perp-dx) (* (- (uh-y a) ty0) perp-dy)))
+                            (define pb (+ (* (- (uh-x b) tx0) perp-dx) (* (- (uh-y b) ty0) perp-dy)))
+                            (if (= pa pb) (< (uh-tag a) (uh-tag b)) (< pa pb))))]
                    [n-act (length sorted-dts)]
+                   ;; Split flanking wings strictly by each DT's geometric side (`pa < 0` vs `pa >= 0`)
+                   ;; when both sides are populated so a 14/13 split NEVER sends the 14th DT across the screen!
+                   [neg-side-cnt
+                    (for/sum : Integer ([u (in-list sorted-dts)])
+                      (if (< (+ (* (- (uh-x u) tx0) perp-dx) (* (- (uh-y u) ty0) perp-dy)) 0.0) 1 0))]
+                   [half-n
+                    (if (and (> neg-side-cnt 0) (< neg-side-cnt n-act))
+                        neg-side-cnt
+                        (quotient n-act 2))]
                    [in-melee-r (if is-pf? 4.2 2.4)]
                    [inner-r (if is-pf? PF-PERIMETER-BLINK-INNER-RADIUS 1.65)]
                    [outer-r (if is-pf? PF-PERIMETER-BLINK-OUTER-RADIUS 2.15)]
@@ -4687,25 +4837,42 @@
                     [(>= current-frame (+ f0 12))
                      (hash-remove! dt-issue-ht tag)]))
                 (define ready-f (hash-ref dt-blink-ht tag (lambda () -10000)))
-                (define frac
-                  (if (<= n-act 1)
-                      0.0
-                      (/ (exact->inexact i) (exact->inexact (- n-act 1)))))
-                (define ang-off (+ -1.20 (* 2.40 frac)))
+                (define-values (ang-off wing-sign)
+                  (cond
+                    [screen-blocks-approach?
+                     (if (< i half-n)
+                         (let ([wf (/ (exact->inexact i) (exact->inexact (max 1 (- half-n 1))))])
+                           (values (+ -2.05 (* 0.73 wf)) -1.0))
+                         (let* ([hi-n (max 1 (- n-act half-n))]
+                                [wf (/ (exact->inexact (- i half-n)) (exact->inexact (max 1 (- hi-n 1))))])
+                           (values (+ 1.32 (* 0.73 wf)) 1.0)))]
+                    [else
+                     (let ([frac (if (<= n-act 1)
+                                     0.0
+                                     (/ (exact->inexact i) (exact->inexact (- n-act 1))))])
+                       (values (+ -1.20 (* 2.40 frac)) (if (< frac 0.5) -1.0 1.0)))]))
                 (define ring-r (if (even? i) inner-r outer-r))
-                (define th (+ theta0 ang-off))
+                (define th (+ safe-th ang-off))
+                (define slot-x (clamp-coord (+ tx0 (* ring-r (flcos th)))))
+                (define slot-y (clamp-coord (+ ty0 (* ring-r (flsin th)))))
+                (define d-slot (dist2 ux uy slot-x slot-y))
                 (cond
                   [in-flight?
                    (spell-directive tag 'dark-templar 'shadow-stride 'hold 0 ux uy 'dt-blink-in-flight)]
                   [(and ss-ok?
                         is-pf?
-                        (> d-tgt PF-BLINK-MAX-APPROACH-DIST)
+                        (> d-tgt in-melee-r)
+                        (> d-slot SHADOW-STRIDE-MAX-RANGE)
                         (>= current-frame ready-f))
-                   ;; Cloaked-walk approach directly toward assigned PF perimeter slot until
-                   ;; within `<= 10.95t` so ShadowStride lands directly on the PF melee ring!
-                   (define ax (clamp-coord (+ tx0 (* ring-r (flcos th)))))
-                   (define ay (clamp-coord (+ ty0 (* ring-r (flsin th)))))
-                   (spell-directive tag 'dark-templar 'move 'move 0 ax ay 'dt-pf-cloaked-approach)]
+                   ;; L40-P0-1c: Cloaked flanking `move (16)` to the lateral blink-launch point
+                   ;; (`7.0t` back from the N/S/E PF rim slot) so DTs stay cloaked around the
+                   ;; Hellbat/Bio screen until `dist(DT, slot) <= 7.65t`!
+                   (define-values (wp-x wp-y)
+                     (if screen-blocks-approach?
+                         (values (clamp-coord (+ slot-x (* -7.0 safe-dx) (* 0.4 wing-sign perp-dx)))
+                                 (clamp-coord (+ slot-y (* -7.0 safe-dy) (* 0.4 wing-sign perp-dy))))
+                         (values slot-x slot-y)))
+                   (spell-directive tag 'dark-templar 'move 'move 0 wp-x wp-y 'dt-pf-cloaked-approach)]
                   [(and ss-ok?
                         (> d-tgt in-melee-r)
                         (>= current-frame ready-f))

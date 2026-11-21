@@ -23,7 +23,7 @@ All canonical unit keys, terrain modes, and selective upgrades below are support
 
 - **Zerg:** `Burrow`, `TunnelingClaws`, `GlialReconstitution`, `MetabolicBoost`, `AdrenalGlands`, `CentrifugalHooks`, `LurkerRange`, `AdaptiveTalons`, `GroovedSpines`, `MuscularAugments`, `ChitinousPlating`, `NeuralParasite`
 - **Protoss:** `Blink`, `Charge`, `ResonatingGlaives`, `ThermalLance`, `PsiStorm`, `ShadowStride`, `ProtossGroundWeapons1`, `ProtossGroundWeapons2`, `ProtossGroundWeapons3`
-- **Terran:** `Stim`, `CombatShield`, `ConcussiveShells`, `DrillingClaws`, `SmartServos`, `InfernalPreigniter`, `BansheeCloak`, `PersonalCloaking`, `AdvancedBallistics`, `Cloak` (shorthand for both `BansheeCloak` + `PersonalCloaking`)
+- **Terran:** `Stim`, `CombatShield`, `ConcussiveShells`, `DrillingClaws`, `SmartServos`, `InfernalPreigniter`, `BansheeCloak`, `PersonalCloaking`, `AdvancedBallistics`, `WeaponRefit`, `Cloak` (shorthand for both `BansheeCloak` + `PersonalCloaking`)
 - **Pre-Cloak Flags:** `p1_pre_cloaked: true` / `p2_pre_cloaked: true` automatically cloak spawned Banshees/Ghosts at fight start.
 
 ## Protoss Units

@@ -213,13 +213,14 @@
               (format "Expected 0 early blinks & 27 cloaked moves, got blinks=~a moves=~a"
                       (length far-blinks) (length far-moves)))
 
-  ;; T2b: Once in blink range (d_pf ~ 10.2t <= 10.95t) against FULL 76-supply p15 + 6 Sieged Tanks,
-  ;; ALL 27/27 DTs cast shadow-stride directly onto PF perimeter (0 stolen by Tank splash evasion!)
+  ;; T2b (`L40-P0-1c`, `#922`): Once on the N/S cloaked launch flanks (`x = cx - 3.6, y = cy +- 3.0`,
+  ;; `<= 7.65t` of N/S/E PF perimeter slots) against FULL 76-supply p15 + 6 Sieged Tanks,
+  ;; ALL 27/27 DTs cast shadow-stride directly onto N/S/E PF perimeter (0 stolen by Tank splash!)
   (define ready-dts-27
     (for/list ([i (in-range 27)])
       (mk-u (+ 2001 i) 'dark-templar
-            (+ (- cx 6.7) (* 0.12 (modulo i 4)))
-            (+ cy (if (< i 14) -1.4 1.4))
+            (+ (- cx 3.1) (* 0.12 (modulo i 4)))
+            (+ cy (if (< i 14) -3.0 3.0))
             #:hp 40.0 #:shield 80.0)))
   (define acts-ready
     (run-l34 rt-p15-far
@@ -278,17 +279,17 @@
               (format "Expected 0 duplicate blinks during confirmed 314f CD, got ~a" (length cd-blinks))))
 
 ;; =============================================================================
-;; 3. L39-P0-1c: `t15` Battlecruiser Yamato Cannon Baseline (Zero 'weapon-refit)
+;; 3. L39-P0-1c + L40-P0-1d (`#919/#922`): `t15` Battlecruiser Yamato (`weapon-refit`, `<= 10.0t`)
 ;; =============================================================================
 (let ()
   (define cx 80.0)
   (define cy 80.0)
   (define bcs-3
     (for/list ([i (in-range 3)])
-      (mk-u (+ 3001 i) 'battlecruiser (- cx 5.0) (+ cy (* 1.2 (- i 1))) #:hp 550.0 #:flying? #t)))
+      (mk-u (+ 3001 i) 'battlecruiser (- cx 3.0) (+ cy (* 1.2 (- i 1))) #:hp 550.0 #:flying? #t)))
   (define vikings-4
     (for/list ([i (in-range 4)])
-      (mk-u (+ 3011 i) 'viking-fighter (- cx 6.2) (+ cy 2.0 (* 0.6 i)) #:hp 135.0 #:flying? #t)))
+      (mk-u (+ 3011 i) 'viking-fighter (- cx 4.2) (+ cy 2.0 (* 0.6 i)) #:hp 135.0 #:flying? #t)))
   (define t15-enemies
     (append
      (for/list ([i (in-range 6)]) (mk-u (+ 3801 i) 'hydralisk (+ cx 1.5) (+ cy (* 0.5 (- i 2.5))) #:hp 90.0))
@@ -301,18 +302,18 @@
                           #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                           #:ally-units (append bcs-3 vikings-4)
                           #:enemy-units t15-enemies
-                          #:researched-upgrades '())))
+                          #:researched-upgrades '(weapon-refit))))
   (define yam-casts
     (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'yamato-cannon))) acts-t15))
   (define yam-targets (remove-duplicates (map fourth yam-casts)))
-  (check-true "L39-T3a-t15-all-3-bcs-cast-distinct-yamato-without-weapon-refit"
+  (check-true "L39-T3a-t15-all-3-bcs-cast-distinct-yamato-with-weapon-refit"
               (and (= (length yam-casts) 3)
                    (= (length yam-targets) 3)
                    (memv 3851 yam-targets)
                    (memv 3852 yam-targets))
-              (format "Expected 3 distinct Yamatos prioritizing Vipers 3851/3852 w/ 0 upgrades, got ~a" yam-casts))
+              (format "Expected 3 distinct Yamatos prioritizing Vipers 3851/3852 w/ weapon-refit, got ~a" yam-casts))
 
-  ;; T3b: Confirmed order 401 promotes full 1590f cooldown (0 dup Yamato at frame 540!)
+  ;; T3b: Confirmed order 401 promotes full 1590f cooldown (0 dup Yamato at frame 560!)
   (define bcs-channelling
     (for/list ([u (in-list bcs-3)]) (hash-set u 'order-ability-id 401)))
   (void (run-l34 rt-t15
@@ -320,14 +321,14 @@
                               #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                               #:ally-units (append bcs-channelling vikings-4)
                               #:enemy-units t15-enemies
-                              #:researched-upgrades '())))
+                              #:researched-upgrades '(weapon-refit))))
   (define acts-t15-cd
     (run-l34 rt-t15
              (mk-live-obs 'Terran 'Zerg 560
                           #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                           #:ally-units (append bcs-3 vikings-4)
                           #:enemy-units t15-enemies
-                          #:researched-upgrades '())))
+                          #:researched-upgrades '(weapon-refit))))
   (define cd-yams (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'yamato-cannon))) acts-t15-cd))
   (check-true "L39-T3b-t15-confirmed-401-channel-locks-yamato-1590f-cd"
               (null? cd-yams)

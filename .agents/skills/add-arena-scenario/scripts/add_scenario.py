@@ -57,7 +57,7 @@ VALID_UPGRADES = {
     "Blink", "Charge", "ResonatingGlaives", "ThermalLance", "PsiStorm",
     "ShadowStride", "ProtossGroundWeapons1", "ProtossGroundWeapons2", "ProtossGroundWeapons3",
     "Stim", "CombatShield", "ConcussiveShells", "DrillingClaws", "SmartServos",
-    "InfernalPreigniter", "BansheeCloak", "PersonalCloaking", "AdvancedBallistics", "Cloak",
+    "InfernalPreigniter", "BansheeCloak", "PersonalCloaking", "AdvancedBallistics", "WeaponRefit", "Cloak",
 }
 
 # Canonical Blizzard 4.10 SC2 UnitTypeIds, (id, value, role_offset_from_front)

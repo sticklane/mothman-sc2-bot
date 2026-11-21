@@ -972,6 +972,7 @@
       "source": "pattern-coverage",
       "terrain": "cliff-air-chasm",
       "patterns": ["bc-yamato-focus", "bc-tactical-jump", "anti-corruptor-viking", "cliff-air-engagement"],
+      "p1_upgrades": ["WeaponRefit"],
       "description": "Cliff-Air Late TvZ: 3 Battlecruisers + 4 Vikings (Yamato + Tactical Jump) vs 12 Corruptors + 2 Vipers + 6 Hydralisks",
       "p1_units": [
         ["battlecruiser", 3, -5.0, 0.0],

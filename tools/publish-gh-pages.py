@@ -153,6 +153,24 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             required=False,
         ),
         ReportSpec(
+            slug="loop39-forensics",
+            out_file="loop39-forensics.html",
+            title="Loop 39 Forensics & Live Prod L37 Record (56.0% WR ATH / 50%=50% N=S)",
+            short_title="L39 + Prod L37",
+            category="Forensic & Empirical Audits",
+            badge="PROD 56% ATH",
+            summary=(
+                "Live AI Arena audit of Loop 37 hitting an all-time prod record (14W-11L = 56.0% WR, "
+                "2.89% ATL SB, exact 50%=50% North/South parity, 1st-ever FastBC 1441 win, all 4 ELOs rising), "
+                "root-cause of Loop 39's H2H L23006 anti-retreat regression (HOLD-ZIP), and Loop 40 Ship #4 blueprint."
+            ),
+            source_candidates=(
+                analyzer_dir / "loop39_forensics_prod_l37_audit.md",
+                brain_dir / "loop39_forensics_prod_l37_audit.md",
+            ),
+            required=False,
+        ),
+        ReportSpec(
             slug="loop38-forensics",
             out_file="loop38-forensics.html",
             title="Loop 38 Forensics & Live Prod Loop 37 Audit (0.88x ATH Trade / 2.9% SB)",
