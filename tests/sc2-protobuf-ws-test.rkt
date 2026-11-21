@@ -8501,6 +8501,113 @@
                    (sc2-raw-unit-command? c-3666-mw)
                    (= (wire-cmd-priority-tier c-3666-mw) 0))))
 
+(printf "[Loop 41] Testing L41-P0-3a r02/r05 heavy-worker-rush 3666 auto-saturate suppression, latch lifecycle, & combat-worker exclusion...\n")
+(let ()
+  (define (mk-l41-u tag utype alliance x y #:hp [hp 45.0] #:rad [rad 0.375] #:mins [mins 0] #:orders [ords '()])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 0 #f #f #f
+              hp hp 0.0 0.0 0.0 0.0 mins 0 #f #f #f #t #f
+              ords 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define (mk-l41-obs gl food-army units)
+    (sc2-observation gl (sc2-player-common 1 100 0 23 (+ 16 food-army) food-army 16 0 0 0 0)
+                     units '() '() #f '() '() '() '() '() '()))
+  (define cc-41 (mk-l41-u 99300 18 1 33.5 138.5 #:hp 1500.0 #:rad 2.75))
+  (define mins-41
+    (for/list ([i (in-range 8)])
+      (mk-l41-u (+ 99350 i) 341 3 (+ 27.5 (* 0.5 i)) (+ 142.0 (* 0.4 (modulo i 3))) #:hp 1000.0 #:rad 1.0 #:mins 1500)))
+  (define idle-scvs-41
+    (for/list ([i (in-range 16)])
+      (mk-l41-u (+ 99310 i) 45 1 (+ 31.0 (* 0.25 (modulo i 4))) (+ 139.0 (* 0.25 (quotient i 4))))))
+  (define (mk-eprobes n [dx 4.0])
+    (for/list ([i (in-range n)])
+      (mk-l41-u (+ 99400 i) 84 4 (+ 33.5 dx (* 0.25 (modulo i 5))) (+ 138.5 (* 0.25 (quotient i 5))) #:hp 20.0)))
+  (define (gather-cmds cmds)
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3666))) cmds))
+
+  ;; 1. >= 6 enemy Probes within <= 14t of ready CC with food-army=0 suppresses ALL idle-worker 3666 gathers!
+  (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f)
+  (define cmds-rush-15
+    (saturate-workers-and-gas-commands
+     (mk-l41-obs 1000 0 (append (list cc-41) mins-41 idle-scvs-41 (mk-eprobes 15 4.0)))))
+  (check-true "l41-p0-3a-heavy-worker-rush-15-probes-suppresses-idle-3666"
+              (and (null? (gather-cmds cmds-rush-15))
+                   (eq? (unbox SC2-HEAVY-WORKER-RUSH-LATCH) #t)))
+
+  ;; 2. Stays latched at 4 remaining Probes (cleanup) and clears immediately when < 3 Probes remain!
+  (define cmds-rush-4
+    (saturate-workers-and-gas-commands
+     (mk-l41-obs 1004 0 (append (list cc-41) mins-41 idle-scvs-41 (mk-eprobes 4 5.0)))))
+  (define latch-at-4 (unbox SC2-HEAVY-WORKER-RUSH-LATCH))
+  (define cmds-rush-2
+    (saturate-workers-and-gas-commands
+     (mk-l41-obs 1008 0 (append (list cc-41) mins-41 idle-scvs-41 (mk-eprobes 2 5.0)))))
+  (check-true "l41-p0-3b-heavy-worker-rush-latched-at-4-and-resumes-mining-below-3"
+              (and (null? (gather-cmds cmds-rush-4))
+                   (eq? latch-at-4 #t)
+                   (not (null? (gather-cmds cmds-rush-2)))
+                   (eq? (unbox SC2-HEAVY-WORKER-RUSH-LATCH) #f)))
+
+  ;; 3. Negative guards: 2-Probe harass (`e01`) and `food-army >= 4` BOTH keep normal 3666 saturation active!
+  (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f)
+  (define cmds-2probe
+    (saturate-workers-and-gas-commands
+     (mk-l41-obs 1200 0 (append (list cc-41) mins-41 idle-scvs-41 (mk-eprobes 2 4.0)))))
+  (define latch-2probe (unbox SC2-HEAVY-WORKER-RUSH-LATCH))
+  (define cmds-army4
+    (saturate-workers-and-gas-commands
+     (mk-l41-obs 1204 4 (append (list cc-41) mins-41 idle-scvs-41 (mk-eprobes 10 4.0)))))
+  (check-true "l41-p0-3c-negative-guards-2probe-harass-and-food-army-4-keep-3666-active"
+              (and (not (null? (gather-cmds cmds-2probe)))
+                   (eq? latch-2probe #f)
+                   (not (null? (gather-cmds cmds-army4)))
+                   (eq? (unbox SC2-HEAVY-WORKER-RUSH-LATCH) #f)))
+
+  ;; 4. Opening anti-bounce (`cur-loop <= 336`) is ALSO suppressed during heavy worker rush (yet fires normally w/o rush)!
+  (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f)
+  (define scv-f0 (mk-l41-u 99310 45 1 31.0 139.0))
+  (void (frame0-pro-worker-split-commands (mk-l41-obs 0 0 (append (list cc-41 scv-f0) mins-41))))
+  (define far-min-tag (sc2-unit-tag (first mins-41)))
+  (define scv-bounced
+    (mk-l41-u 99310 45 1 31.0 139.0 #:orders (list (sc2-unit-order 298 #f far-min-tag 0.0))))
+  (define cmds-ab-rush
+    (saturate-workers-and-gas-commands
+     (mk-l41-obs 200 0 (append (list cc-41 scv-bounced) mins-41 (mk-eprobes 12 4.0)))))
+  (define latch-ab-rush (unbox SC2-HEAVY-WORKER-RUSH-LATCH))
+  (define cmds-ab-peace
+    (saturate-workers-and-gas-commands
+     (mk-l41-obs 204 0 (append (list cc-41 scv-bounced) mins-41))))
+  (check-true "l41-p0-3d-opening-antibounce-suppressed-under-heavy-worker-rush"
+              (and (null? (gather-cmds cmds-ab-rush))
+                   (eq? latch-ab-rush #t)
+                   (not (null? (gather-cmds cmds-ab-peace)))
+                   (eq? (unbox SC2-HEAVY-WORKER-RUSH-LATCH) #f)))
+
+  ;; 5. `attack-unit` on a fighting worker records it in `commanded-workers` so same-tick `saturate-workers-and-gas-commands`
+  ;;    NEVER overwrites its Attack (23) with 3666 (even against 2-Probe harass where heavy-worker-rush is #f)!
+  (define cw-41 (mutable-seteqv))
+  (define w-fighter (mk-l41-u 99310 45 1 31.0 139.0))
+  (define w-idle    (mk-l41-u 99311 45 1 30.5 139.5))
+  (define obs-same-tick (mk-l41-obs 1500 0 (append (list cc-41 w-fighter w-idle) mins-41 (mk-eprobes 2 4.0))))
+  (define act-41
+    (translate-bot-actions->sc2-raw-commands '((attack-unit 99310 99400))
+                                             obs-same-tick
+                                             #:commanded-workers cw-41))
+  (define sat-41
+    (saturate-workers-and-gas-commands obs-same-tick #:excluded-worker-tags cw-41))
+  (check-true "l41-p0-3e-attack-unit-worker-excluded-from-same-tick-3666-saturation"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 23)
+                                           (member 99310 (sc2-raw-unit-command-unit-tags c))))
+                          act-41)
+                   (set-member? cw-41 99310)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (member 99310 (sc2-raw-unit-command-unit-tags c))))
+                               sat-41))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 3666)
+                                           (member 99311 (sc2-raw-unit-command-unit-tags c))))
+                          sat-41))))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

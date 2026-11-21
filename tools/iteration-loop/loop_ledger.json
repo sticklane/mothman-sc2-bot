@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter40_wave40_full",
+  "active_wave": "iter41_wave41_full",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -3833,6 +3833,152 @@
         "CloakLoss 4->1 (ZERO Zerg/Terran!), 1BaseLock=0/84, ProdStall=0/78 external, EscrowLock 14->10, EarlyRushIdleBank 4->1; 57-Scenario Arena 2.0: t15 BC Yamato SP FLIPPED WIN 1.26x, z14 Infestor Neural FLIPPED KO WIN 1.04x, e01 2/2 PASS!"
       ],
       "promotion_gates_passed": "2/9 PASS across full 78-match roster (zero_crashes_and_rejects, sup_blk_le_6pct [3.9%]); UNCONDITIONAL LIVE AI ARENA SHIP #4 PASS (5W-1L 2.23x/2.90x med baseline_h2h crush vs L37 ZIPs + NEW 78-match HWM & ALL_84 40.5% NL / 50L / 0.64x ATH!)"
+    },
+    {
+      "id": "iter41_wave41_full",
+      "status": "HOLD_ZIP_H2H_2W_4L_UNSEEN12_NEW_7W_ATH_ALL84_0_68X_TRADE_ATH_P15_PF_VAPORIZED",
+      "campaign": "Loops 29+ Self-Play, Honest 3-Tier Tactics Arena 2.0 & Expanded Roster Campaign (Loop 41 SHATTERED UNSEEN12 7W ATH & ALL_84 0.68x Trade ATH \u2014 HOLD-ZIP on H2H 2-4 vs L40 ZIPs)",
+      "loop_self_improvements": [
+        "L41-LOOP-1 (Synchronized DT Squad Blink + Worker-Rush Latch + Wire Auto-Saturate Guard): Held flanking cloaked DT move(16) until >=70% ready DTs reached N/S/E PF rim slots -> LITERALLY VAPORIZED THE PLANETARY FORTRESS in p15 Dummy! Added heavy-pure-worker-allin? latch + wire auto-saturate 3666 guard (5/5 wire tests, 701/701 sc2-protobuf-ws-test).",
+        "L41-LOOP-2 (Tier-2 Econ-Harass Mineral-Defense ATHs in Both Modes): Reached 2P-2F NEW ATH in BOTH Dummy (net +165.0M vs -10.0M!, e02 +785M 5.0x!) and Self-Play (net +225.0M, up 85.7%, e01+e02 BOTH 2/2 PASS!)."
+      ],
+      "spec_summary": "Loop 41 (ukptktor fedf7268 \u2014 HOLD-ZIP vs newly shipped Live Ship #4 L40 BotZips): Zero-crash/fault/reject/spike 90/90 run. SHATTERED UNSEEN12 WIN RECORD (7W-26L-3T: 19.4% WR NEW ATH, 27.8% NL tied ATH, SB 3.6% ATL \u2014 THREE 2-1 unseen series: Mulebot 2-1 [#57 P 9.61x 1st-EVER!, #55 Z 7.80x], PolyMorph 2-1 [#21 P 2.48x 1st-EVER!, #20 T 3.74x], CryptBotRevival 2-1 [#24 P 10.25x, #23 T 11.00x] + 1st Protoss Clicadinha W #66 4.90x!). SHATTERED ALL_84 TRADE ATH (0.68x; EXT78 0.65x/0.29x ATH, CORE14 0.96x / CORE14_NC 0.98x, Zerg CORE14 1.05x, Terran CORE14 1.00x!), Protoss UNSEEN12 erupted 1-10-1 -> 4W-6L-2T (50% NL, PvT 55.6% NL, PvZ 55.6% WR 1.38x!), CORE14 Siege0DPS slashed 8->2 (-75%), WallTies 5->2 (-60%), NEW CORE14 max_step_ms ATL 185.9ms (ALL84 197.35ms, 2nd straight sub-200ms run!), AND 57-scenario Arena 2.0 VAPORIZED the Planetary Fortress in p15 Dummy + SHATTERED econ-harass ATHs in BOTH Dummy (+165M) & SP (+225M, e01+e02 2/2 PASS!). However, baseline_h2h scored 2W-4L (0.67x) vs brand-new Ship #4 L40 BotZips (Protoss Atk2-6 +25.9pp, ProdStall 1->5, 1BaseLock 0->4, CloakLoss 1->3 vs who Banshees) -> HOLD-ZIP for Loop 42!",
+      "rev": "ukptktor fedf7268 (iter41 HOLD-ZIP \u2014 UNSEEN12 7W ATH, ALL84 0.68x Trade ATH, p15 PF vaporized!)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_083552_iter41_wave41_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_090519_iter41_baseline_h2h",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter41_wave41_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter41_baseline_h2h_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter41_wave41_full.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter41.json",
+      "tactics_selfplay_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter41.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter41.md",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "23W-50L-5T (EXT78 NEW Trade ATH 0.65x/0.29x, SB 3.8%, PkA 3,009! UNSEEN12 SHATTERED WIN RECORD 7W-26L-3T [19.4% WR ATH, 3.6% SB ATL, 3x 2-1 series!] + CORE14 16W-24L-2T [Trade 0.96x / NC 0.98x, Siege0DPS 8->2]; ALL84 NEW Trade ATH 0.68x [26W-53L-5T]; baseline_h2h 2W-4L 0.67x vs L40 ZIPs -> HOLD-ZIP!)",
+      "win_rate_pct": 29.5,
+      "trade_agg": 0.65,
+      "trade_med": 0.29,
+      "sup_blk_pct": 3.8,
+      "w4_alive_med": 26.5,
+      "w6_alive_med": 40.0,
+      "pk_army_avg": 3008.7,
+      "action_rejects": 0,
+      "crashes": 0,
+      "siege_range_zero_dps_losses": 9,
+      "cloaked_unit_damage_losses": 3,
+      "gas_rich_min_starved_matches": 11,
+      "one_base_lockout_matches": 4,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 7,
+      "prod_placement_stall_matches": 5,
+      "zero_kill_collapse_matches": 6,
+      "drip_feed_collapse_matches": 29,
+      "prod_idle_bank_freeze_matches": 1,
+      "gas_zero_harvest_freeze_matches": 0,
+      "spire_sched_drop_matches": 4,
+      "wall_timeout_ties": 2,
+      "army_val_4m_ratio_vs_pro": 0.78,
+      "army_val_8m_ratio_vs_pro": 0.5,
+      "latency_summary": "ALL 90/90 clean <=197.35ms (2nd straight sub-200ms run! NEW CORE14 max_step_ms ATL 185.9ms!; 0 spikes >=500ms!; rt=5.98ms, tr=2.52ms, obs=0.77ms, avg=9.26ms, p95=16.11ms; H2H max=162.88ms; 0 rejects!)",
+      "by_race": {
+        "Protoss": {
+          "record": "UNSEEN12 BREAKTHROUGH 1-10-1 -> 4W-6L-2T (50.0% NL!, 1st Mulebot #57 9.61x, 1st PolyMorph #21 2.48x, 1st Clicadinha #66 4.90x, CryptBot #24 10.25x!); EXT78 10W-14L-2T (46.2% NL, 0.70x, PvT 55.6% NL, PvZ 55.6% WR 1.38x!, SB 4.6%); CORE14 6W-8L-0T (0.81x); H2H 1-2 (PvZ 4.52x 0-sigs, PvP 0.36x, PvT 0.25x 0-Siege0DPS); Arena p15 PF VAPORIZED!",
+          "trade_agg": 0.7,
+          "w4_alive_med": 28.0,
+          "w6_alive_med": 41.0,
+          "nat_sec": 91.9,
+          "sup_blk": 4.6
+        },
+        "Terran": {
+          "record": "CORE14 4W-9L-1T (Trade 1.00x!); EXT78 6W-19L-1T (0.64x, SB 2.5%, CryptBot #23 11.00x!, PolyMorph #20 3.74x); H2H 1-1 (TvZ 4.24x 0-sigs, TvT 0.50x SB 0.7%); Arena canonical 10-3-2 (1.47x)",
+          "trade_agg": 0.64,
+          "w4_alive_med": 25.0,
+          "w6_alive_med": 39.0,
+          "nat_sec": 94.3,
+          "sup_blk": 2.5
+        },
+        "Zerg": {
+          "record": "CORE14 6W-7L-1T (50.0% NL, Trade 1.05x!, PkA 4,262); EXT78 7W-17L-2T (0.61x, SB 4.3%, Mulebot #55 7.80x SCV-rush hold!); H2H 0-1 (ZvZ 0.14x); Arena e02 PASS BOTH (+785M 5.0x Dummy / +645M 2.5x SP!)",
+          "trade_agg": 0.61,
+          "w4_alive_med": 25.0,
+          "w6_alive_med": 40.0,
+          "nat_sec": 55.2,
+          "sup_blk": 4.3
+        }
+      },
+      "tactics_summary": {
+        "rev": "ukptktor fedf7268 (iter41 \u2014 p15 PF VAPORIZED + econ-harass ATHs in BOTH modes!)",
+        "passed": "Verifier 7/7 + L31..L41 (193/193) + 34/34 Belief + 57/57 Catalog + 6/6 Replay-DB + 701/701 WS + 231/231 Tactics + 0/0/0/0 Pro-Starve FIRST-PASS!",
+        "sc2_duel36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter41.json",
+        "sc2_selfplay36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter41.json",
+        "sc2_duel36_summary": "HONEST 3-TIER 57-SCENARIO (114-DUEL!) ARENA 2.0: Dummy 38W-14L-5D (-3L fewer losses!, 1.24x) [canonical 49: 34W-10L-5D 1.28x, p15 PLANETARY FORTRESS LITERALLY VAPORIZED + South Turret exploding!; econ-harass 4: NEW ATH 2P-2F net=+165.0M vs -10.0M!, e01 +440M + e02 +785M 5.0x BOTH PASS!; regression 4: 2W-2L-0D 0.74x] + Self-Play 26W-29L-2D (0.83x) [canonical 49: 23W-24L-2D 0.84x; econ-harass 4: NEW ATH 2P-2F net=+225.0M up=85.7% e01+e02 BOTH PASS!; regression 4: 1W-3L-0D 0.70x]",
+        "by_tier_duel": {
+          "canonical": {
+            "total": 49,
+            "wins": 34,
+            "losses": 10,
+            "draws": 5,
+            "trade_agg": 1.28,
+            "am_ratio": 3.19
+          },
+          "econ-harass": {
+            "total": 4,
+            "passes": 2,
+            "fails": 2,
+            "avg_net_econ_score": 165.0,
+            "avg_minerals_gathered": 327.5,
+            "avg_mining_uptime_pct": 82.4,
+            "total_workers_lost": 23
+          },
+          "regression": {
+            "total": 4,
+            "wins": 2,
+            "losses": 2,
+            "draws": 0,
+            "trade_agg": 0.74,
+            "am_ratio": 6.86
+          }
+        },
+        "by_tier_selfplay": {
+          "canonical": {
+            "total": 49,
+            "p1_wins": 23,
+            "p2_wins": 24,
+            "draws": 2,
+            "trade_agg": 0.84,
+            "am_ratio": 2.79
+          },
+          "econ-harass": {
+            "total": 4,
+            "passes": 2,
+            "fails": 2,
+            "avg_net_econ_score": 225.0,
+            "avg_minerals_gathered": 362.5,
+            "avg_mining_uptime_pct": 85.7,
+            "total_workers_lost": 17
+          },
+          "regression": {
+            "total": 4,
+            "p1_wins": 1,
+            "p2_wins": 3,
+            "draws": 0,
+            "trade_agg": 0.7,
+            "am_ratio": 4.44
+          }
+        }
+      },
+      "visual_qa_highlights": [
+        "UNSEEN12 7W ATH BREAKTHROUGH: #57 P v Mulebot (09:39 1st-EVER WIN 9.61x) Mulebot lifting Orbital in panic as Red Stalkers+Immortal+Sentry+Zealot wreck 3-Factory main; #55 Z v Mulebot (01:58 WIN 7.80x) Drones+2 Lings cleanly surrounding & wiping Mulebot's 10+ SCV rush at NW ramp!; #21 P v PolyMorph (11:04 1st-EVER 2.48x) 3 Immortals+5 Stalkers focus-firing Queens/Hatch; #66 P v Clicadinha (13:00 1st-EVER 4.90x) Charge Zealots+Disruptor+Colossus sweeping SW mineral line; #23 T v CryptBotRevival (06:42 11.00x) enemy CC burning empty!",
+        "H2H SHOWCASE & DIAGNOSTIC: H2H #05 PvZ (10:24 WIN 4.52x 0-sigs) Colossus+3 Immortals+Stalkers dismantling L40 Zerg SW Hive (PkA 7,550/1,175); H2H #03 PvP (10:30 LOSS 0.36x) shows thin Red natural defense (2 Stalkers+2 Immortals+Battery vs L40 ball, PkA 1,650/7,975) after early GasRich+DripFeed.",
+        "LOOP 42 SMOKING-GUN VISUAL (#62 T v SmoothBrain, 07:57 TvT0Tank LOSS 0.14x): Literally shows Red's Factory sitting in the middle of NW main with ZERO addon while BOTH Barracks (top) and Starport (left) HAVE Tech Labs and a Bunker sits next to Orbital \u2014 proving Factory TechLab was starved/out-prioritized by Barracks/Starport TechLabs & Bio while SmoothBrain sieged Tanks on the ramp!"
+      ],
+      "key_wins": [
+        "SHATTERED UNSEEN12 WIN RECORD (7W-26L-3T: 19.4% WR NEW ATH, 27.8% NL tied ATH, SB 3.6% ATL!) \u2014 THREE 2-1 unseen series (Mulebot 2-1, PolyMorph 2-1, CryptBotRevival 2-1) + Protoss UNSEEN12 erupted 1-10-1 -> 4W-6L-2T (50% NL, 1st Mulebot/PolyMorph/Clicadinha wins!)!",
+        "SHATTERED ALL_84 TRADE ATH (0.68x) & EXT78 TRADE ATH (0.65x/0.29x), CORE14 Trade 0.96x (NC 0.98x, Zerg 1.05x, Terran 1.00x), CORE14 Siege0DPS slashed 8->2 (-75%), WallTies 5->2 (-60%), NEW CORE14 max_step_ms ATL 185.9ms (2nd straight sub-200ms ALL84 run!)!",
+        "57-SCENARIO ARENA 2.0 MILESTONES: p15 LITERALLY VAPORIZED THE PLANETARY FORTRESS in Dummy (+ South Turret exploding!) AND Tier-2 econ-harass SHATTERED ATHs in BOTH Dummy (2P-2F +165M, e02 +785M 5.0x!) & Self-Play (2P-2F +225M, up 85.7%, e01+e02 2/2 PASS!)!",
+        "SHIP-GATE DISCIPLINE: baseline_h2h 2W-4L (0.67x) vs newly shipped Live Ship #4 L40 BotZips -> clean HOLD-ZIP to fix Protoss Atk2-6/DripFeed, ProdStall, 1BaseLock, TvT0Tank & who Banshee CloakLoss in Loop 42!"
+      ],
+      "promotion_gates_passed": "2/9 PASS across full 78-match roster (zero_crashes_and_rejects, sup_blk_le_6pct [3.8%]); HOLD-ZIP (baseline_h2h 2W-4L 0.67x vs newly shipped Live Ship #4 L40 BotZips -> fix in Loop 42!)"
     }
   ],
   "final_18_loop_summary": {

@@ -153,6 +153,24 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             required=False,
         ),
         ReportSpec(
+            slug="loop40-forensics",
+            out_file="loop40-forensics.html",
+            title="Loop 40 Ship #4 Sign-Off & Live Prod L37 Record (66.7% WR ATH / 8W-0L Sweep)",
+            short_title="L40 Ship #4 + Prod",
+            category="Forensic & Empirical Audits",
+            badge="SHIP #4 + 66.7% ATH",
+            summary=(
+                "Unconditional Live AI Arena Ship #4 sign-off (mwskxoml_ffb8aaf1: 5W-1L 2.23x H2H crush, "
+                "ALL_84 40.5% NL / 50L / 0.64x ATH, UNSEEN12 27.8% NL ATH), live prod L37 8W-0L sweep "
+                "(22W-11L = 66.7% ATH, all 4 ELOs surging), and Loop 41 blueprint."
+            ),
+            source_candidates=(
+                analyzer_dir / "loop40_ship4_signoff_prod_l37_audit.md",
+                brain_dir / "loop40_ship4_signoff_prod_l37_audit.md",
+            ),
+            required=False,
+        ),
+        ReportSpec(
             slug="loop39-forensics",
             out_file="loop39-forensics.html",
             title="Loop 39 Forensics & Live Prod L37 Record (56.0% WR ATH / 50%=50% N=S)",

@@ -3697,23 +3697,35 @@
                                            (define asym (uh-type a))
                                            (define ax (uh-x a))
                                            (define ay (uh-y a))
-                                           ;; L39-P0-1a / 1f (`#5140013` / `e03`): Never pull SCVs to repair
-                                           ;; another SCV under active enemy combat harass (`<= 6.5t`, e.g.
-                                           ;; Adepts/Lings) or a heavy `>= 6`-worker rush (`<= 10.0t`) —
-                                           ;; preserves Mech/Bunker/PF/CC combat repair!
+                                           ;; L39-P0-1a / 1f + L41-P0-1b (`#5140013` / `r05` / `e03`): Never pull SCVs to repair
+                                           ;; another SCV under active enemy combat harass (`<= 6.5t`, e.g. Adepts/Lings)
+                                           ;; or enemy worker rush (`>= 6` workers, OR `>= 3` pure workers w/ 0 enemy combat
+                                           ;; units!) — preserves Mech/Tank/Bunker/PF/CC combat repair!
                                            (define unsafe-scv-on-scv?
                                              (and (eq? asym 'scv)
-                                                  (or (any-unit-within?
-                                                       enemy-units ax ay 6.5
-                                                       (lambda ([e : Any])
-                                                         (and (sc2-enemy-unit-targetable? e)
-                                                              (not (memq (uh-type e) '(scv probe drone)))
-                                                              (unit-combat-relevant? e))))
-                                                      (>= (count-units-within
-                                                           enemy-units ax ay 14.0
-                                                           (lambda ([e : Any])
-                                                             (and (memq (uh-type e) '(scv probe drone)) #t)))
-                                                          6))))
+                                                  (let ([near-combat?
+                                                         (any-unit-within?
+                                                          enemy-units ax ay 6.5
+                                                          (lambda ([e : Any])
+                                                            (and (sc2-enemy-unit-targetable? e)
+                                                                 (not (memq (uh-type e) '(scv probe drone)))
+                                                                 (unit-combat-relevant? e))))]
+                                                        [near-ew-cnt
+                                                         (count-units-within
+                                                          enemy-units ax ay 14.0
+                                                          (lambda ([e : Any])
+                                                            (and (memq (uh-type e) '(scv probe drone)) #t)))]
+                                                        [any-enemy-combat-14?
+                                                         (any-unit-within?
+                                                          enemy-units ax ay 14.0
+                                                          (lambda ([e : Any])
+                                                            (and (sc2-enemy-unit-targetable? e)
+                                                                 (not (memq (uh-type e) '(scv probe drone)))
+                                                                 (unit-combat-relevant? e))))])
+                                                    (or near-combat?
+                                                        (>= near-ew-cnt 6)
+                                                        (and (>= near-ew-cnt 3)
+                                                             (not any-enemy-combat-14?))))))
                                            (and (not (= (uh-tag a) tag))
                                                 (not unsafe-scv-on-scv?)
                                                 (or precomputed-repair-targets
@@ -4814,68 +4826,110 @@
                    [min-center-r (if is-pf? 2.9 1.35)]
                    [blink-pat (if is-pf? 'dt-blink-pf-snipe 'dt-blink-detector-snipe)]
                    [focus-pat (if is-pf? 'dt-pf-focus-fire 'dt-detector-focus-fire)]
-                   [pf-flag (if is-pf? 1.0 0.0)])
+                   [pf-flag (if is-pf? 1.0 0.0)]
+                   ;; L41-P0-1a (`p15` Synchronized 20+-DT Alpha Strike):
+                   ;; Pass 1 pre-computes every DT's assigned N/S/E PF rim slot, blink readiness,
+                   ;; and range status so lead DTs HOLD on the wide cloaked staging arc (outside
+                   ;; Hellbat/Marine agro!) until >= 70% of ready DTs are simultaneously <= 7.65t
+                   ;; of their N/S/E PF rim slots — then fire ONE synchronized 20+-DT ShadowStride!
+                   [dt-plans
+                    (for/list : (Listof (Vector Any Integer Float Float Float Boolean Integer Float Float Float Float Float Float Boolean Boolean Boolean))
+                              ([u (in-list sorted-dts)]
+                               [i (in-naturals)])
+                      (define tag (uh-tag u))
+                      (define ux (uh-x u))
+                      (define uy (uh-y u))
+                      (define d-tgt (flsqrt (+ (* (- ux tx0) (- ux tx0))
+                                               (* (- uy ty0) (- uy ty0)))))
+                      (define in-flight? (dyn-u-has-order-ability? u 2700))
+                      ;; Execution-confirmed cooldown promotion (`12f` pending -> `314f` confirmed)
+                      (define prev-iss (hash-ref dt-issue-ht tag (lambda () #f)))
+                      (when (and prev-iss (> current-frame (vector-ref prev-iss 0)))
+                        (define f0 (vector-ref prev-iss 0))
+                        (define disp (dist2 ux uy (vector-ref prev-iss 1) (vector-ref prev-iss 2)))
+                        (cond
+                          [(or in-flight? (>= disp 3.0))
+                           (hash-set! dt-blink-ht tag (max (hash-ref dt-blink-ht tag (lambda () -10000))
+                                                           (+ f0 SHADOW-STRIDE-COOLDOWN-FRAMES)))
+                           (hash-remove! dt-issue-ht tag)]
+                          [(>= current-frame (+ f0 12))
+                           (hash-remove! dt-issue-ht tag)]))
+                      (define ready-f (hash-ref dt-blink-ht tag (lambda () -10000)))
+                      (define-values (ang-off wing-sign)
+                        (cond
+                          [screen-blocks-approach?
+                           (if (< i half-n)
+                               (let ([wf (/ (exact->inexact i) (exact->inexact (max 1 (- half-n 1))))])
+                                 (values (+ -2.05 (* 0.73 wf)) -1.0))
+                               (let* ([hi-n (max 1 (- n-act half-n))]
+                                      [wf (/ (exact->inexact (- i half-n)) (exact->inexact (max 1 (- hi-n 1))))])
+                                 (values (+ 1.32 (* 0.73 wf)) 1.0)))]
+                          [else
+                           (let ([frac (if (<= n-act 1)
+                                           0.0
+                                           (/ (exact->inexact i) (exact->inexact (- n-act 1))))])
+                             (values (+ -1.20 (* 2.40 frac)) (if (< frac 0.5) -1.0 1.0)))]))
+                      (define ring-r (if (even? i) inner-r outer-r))
+                      (define th (+ safe-th ang-off))
+                      (define slot-x (clamp-coord (+ tx0 (* ring-r (flcos th)))))
+                      (define slot-y (clamp-coord (+ ty0 (* ring-r (flsin th)))))
+                      (define d-slot (dist2 ux uy slot-x slot-y))
+                      (define can-blink? (and ss-ok? (not in-flight?) (> d-tgt in-melee-r) (>= current-frame ready-f)))
+                      (define in-range? (and can-blink? (or (not is-pf?) (<= d-slot SHADOW-STRIDE-MAX-RANGE))))
+                      (define damaged? (< (uh-hp-ratio u) 0.88))
+                      (vector u tag ux uy d-tgt in-flight? ready-f wing-sign ring-r th slot-x slot-y d-slot can-blink? in-range? damaged?))]
+                   [ready-tot
+                    (for/sum : Integer ([p (in-list dt-plans)])
+                      (if (vector-ref p 13) 1 0))]
+                   [ready-in-range-cnt
+                    (for/sum : Integer ([p (in-list dt-plans)])
+                      (if (vector-ref p 14) 1 0))]
+                   [damaged-ready-cnt
+                    (for/sum : Integer ([p (in-list dt-plans)])
+                      (if (and (vector-ref p 13) (vector-ref p 15)) 1 0))]
+                   [any-already-on-pf?
+                    (for/or : Boolean ([p (in-list dt-plans)])
+                      (<= (vector-ref p 4) in-melee-r))]
+                   [sync-thresh (max 4 (exact-floor (* 0.70 (exact->inexact ready-tot))))]
+                   [squad-blink-go?
+                    (or (not is-pf?)
+                        (not screen-blocks-approach?)
+                        any-already-on-pf?
+                        (< ready-tot 4)
+                        (>= ready-in-range-cnt sync-thresh)
+                        (and (>= ready-in-range-cnt (max 4 (quotient ready-tot 2)))
+                             (>= damaged-ready-cnt 4)))])
               (for/list : (Listof spell-directive)
-                        ([u (in-list sorted-dts)]
-                         [i (in-naturals)])
-                (define tag (uh-tag u))
-                (define ux (uh-x u))
-                (define uy (uh-y u))
-                (define d-tgt (flsqrt (+ (* (- ux tx0) (- ux tx0))
-                                         (* (- uy ty0) (- uy ty0)))))
-                (define in-flight? (dyn-u-has-order-ability? u 2700))
-                ;; Execution-confirmed cooldown promotion (`12f` pending -> `314f` confirmed)
-                (define prev-iss (hash-ref dt-issue-ht tag (lambda () #f)))
-                (when (and prev-iss (> current-frame (vector-ref prev-iss 0)))
-                  (define f0 (vector-ref prev-iss 0))
-                  (define disp (dist2 ux uy (vector-ref prev-iss 1) (vector-ref prev-iss 2)))
-                  (cond
-                    [(or in-flight? (>= disp 3.0))
-                     (hash-set! dt-blink-ht tag (max (hash-ref dt-blink-ht tag (lambda () -10000))
-                                                     (+ f0 SHADOW-STRIDE-COOLDOWN-FRAMES)))
-                     (hash-remove! dt-issue-ht tag)]
-                    [(>= current-frame (+ f0 12))
-                     (hash-remove! dt-issue-ht tag)]))
-                (define ready-f (hash-ref dt-blink-ht tag (lambda () -10000)))
-                (define-values (ang-off wing-sign)
-                  (cond
-                    [screen-blocks-approach?
-                     (if (< i half-n)
-                         (let ([wf (/ (exact->inexact i) (exact->inexact (max 1 (- half-n 1))))])
-                           (values (+ -2.05 (* 0.73 wf)) -1.0))
-                         (let* ([hi-n (max 1 (- n-act half-n))]
-                                [wf (/ (exact->inexact (- i half-n)) (exact->inexact (max 1 (- hi-n 1))))])
-                           (values (+ 1.32 (* 0.73 wf)) 1.0)))]
-                    [else
-                     (let ([frac (if (<= n-act 1)
-                                     0.0
-                                     (/ (exact->inexact i) (exact->inexact (- n-act 1))))])
-                       (values (+ -1.20 (* 2.40 frac)) (if (< frac 0.5) -1.0 1.0)))]))
-                (define ring-r (if (even? i) inner-r outer-r))
-                (define th (+ safe-th ang-off))
-                (define slot-x (clamp-coord (+ tx0 (* ring-r (flcos th)))))
-                (define slot-y (clamp-coord (+ ty0 (* ring-r (flsin th)))))
-                (define d-slot (dist2 ux uy slot-x slot-y))
+                        ([p (in-list dt-plans)])
+                (define tag (vector-ref p 1))
+                (define ux (vector-ref p 2))
+                (define uy (vector-ref p 3))
+                (define d-tgt (vector-ref p 4))
+                (define in-flight? (vector-ref p 5))
+                (define wing-sign (vector-ref p 7))
+                (define ring-r (vector-ref p 8))
+                (define th (vector-ref p 9))
+                (define slot-x (vector-ref p 10))
+                (define slot-y (vector-ref p 11))
+                (define can-blink? (vector-ref p 13))
+                (define in-range? (vector-ref p 14))
+                ;; Wide cloaked staging arc (`6.4t` back along -safe + `2.6t` wide along wing*perp
+                ;; => `6.91t <= 7.65t` from PF rim slot, staying clear of Hellbat/Marine screen!)
+                (define-values (wp-x wp-y)
+                  (if screen-blocks-approach?
+                      (values (clamp-coord (+ slot-x (* -6.4 safe-dx) (* 2.6 wing-sign perp-dx)))
+                              (clamp-coord (+ slot-y (* -6.4 safe-dy) (* 2.6 wing-sign perp-dy))))
+                      (values slot-x slot-y)))
                 (cond
                   [in-flight?
                    (spell-directive tag 'dark-templar 'shadow-stride 'hold 0 ux uy 'dt-blink-in-flight)]
-                  [(and ss-ok?
-                        is-pf?
-                        (> d-tgt in-melee-r)
-                        (> d-slot SHADOW-STRIDE-MAX-RANGE)
-                        (>= current-frame ready-f))
-                   ;; L40-P0-1c: Cloaked flanking `move (16)` to the lateral blink-launch point
-                   ;; (`7.0t` back from the N/S/E PF rim slot) so DTs stay cloaked around the
-                   ;; Hellbat/Bio screen until `dist(DT, slot) <= 7.65t`!
-                   (define-values (wp-x wp-y)
-                     (if screen-blocks-approach?
-                         (values (clamp-coord (+ slot-x (* -7.0 safe-dx) (* 0.4 wing-sign perp-dx)))
-                                 (clamp-coord (+ slot-y (* -7.0 safe-dy) (* 0.4 wing-sign perp-dy))))
-                         (values slot-x slot-y)))
+                  [(and can-blink? is-pf? (not in-range?))
                    (spell-directive tag 'dark-templar 'move 'move 0 wp-x wp-y 'dt-pf-cloaked-approach)]
-                  [(and ss-ok?
-                        (> d-tgt in-melee-r)
-                        (>= current-frame ready-f))
+                  [(and can-blink? is-pf? (not squad-blink-go?))
+                   ;; Hold already-in-range lead DTs on the wide cloaked staging arc until >= 70%
+                   ;; of the squad is simultaneously ready to alpha-strike the N/S/E PF rim!
+                   (spell-directive tag 'dark-templar 'move 'move 0 wp-x wp-y 'dt-pf-sync-stage)]
+                  [can-blink?
                    (define-values (bx by)
                      (dt-pf-ring-blink-target ux uy tx0 ty0 th ring-r outer-r min-center-r d-tgt pf-flag))
                    (hash-set! dt-blink-ht tag (+ current-frame 12))

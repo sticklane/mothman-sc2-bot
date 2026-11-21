@@ -188,6 +188,7 @@
  SC2-WARPGATE-LAST-LOOP
  SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP
  SC2-GAS-PULL-HYSTERESIS-LATCH
+ SC2-HEAVY-WORKER-RUSH-LATCH
  SC2-ZERO-GAS-STREAK-START-LOOP
  SC2-ZERO-GAS-LAST-VESPENE
  SC2-ZERO-GAS-RESCUE-LATCH
@@ -9019,6 +9020,7 @@
 (define SC2-WORKER-TRANSFER-LAST-LOOP (box 0))
 (define SC2-WORKER-TRANSFER-COOLDOWN-UNTIL (make-hasheqv))
 (define SC2-GAS-PULL-HYSTERESIS-LATCH (box #f))
+(define SC2-HEAVY-WORKER-RUSH-LATCH (box #f))
 (define SC2-ZERO-GAS-STREAK-START-LOOP (box #f))
 (define SC2-ZERO-GAS-LAST-VESPENE (box #f))
 (define SC2-ZERO-GAS-RESCUE-LATCH (box #f))
@@ -9032,15 +9034,19 @@
                                            #:game-info [game-info #f])
   (void reserved-aabbs game-info)
   (define cur-loop (sc2-observation-game-loop obs))
-  (when (or (<= cur-loop 8) (< cur-loop (unbox SC2-WORKER-TRANSFER-LAST-LOOP)))
+  (define prev-sat-loop (unbox SC2-WORKER-TRANSFER-LAST-LOOP))
+  (when (or (<= cur-loop 8) (< cur-loop prev-sat-loop))
     (hash-clear! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL)
     (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
     (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+    (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f)
     (set-box! SC2-ZERO-GAS-STREAK-START-LOOP #f)
     (set-box! SC2-ZERO-GAS-LAST-VESPENE #f)
     (set-box! SC2-ZERO-GAS-RESCUE-LATCH #f)
     (set-box! SC2-ZERO-GAS-RESCUE-ROTATION-IDX 0)
     (set-box! SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP #f))
+  (when (> (- cur-loop prev-sat-loop) 64)
+    (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f))
   (set-box! SC2-WORKER-TRANSFER-LAST-LOOP cur-loop)
   (when (< cur-loop (unbox SC2-WORKER-ASSIGN-LAST-LOOP))
     (hash-clear! SC2-WORKER-PATCH-ASSIGNMENT)
@@ -9323,6 +9329,36 @@
                                     ready-townhalls))))
                     units)
              5)))
+
+  ;; L41-P0-3a (`r02`/`r05` 3666 auto-saturate leak): When >= 6 enemy workers invade within <= 14t of a
+  ;; ready TownHall while `food-army < 4`, suppress idle-worker / anti-bounce / expansion / gas-resat
+  ;; `HARVEST_GATHER (3666)` emission (and latch until < 3 enemy workers remain within <= 16t or
+  ;; `food-army >= 4`), stopping 1-frame kill-transition gathers from yanking fighting workers off combat!
+  (define-values (enemy-workers-near-th-14 enemy-workers-near-th-16)
+    (if (null? ready-townhalls)
+        (values 0 0)
+        (for/fold ([c14 0] [c16 0]) ([u (in-list enemy-units)]
+                                     #:when (sc2-unit-is-worker? u))
+          (define up (sc2-unit-pos u))
+          (define ux (sc2-point3d-x up))
+          (define uy (sc2-point3d-y up))
+          (define min-d
+            (for/fold ([best 9999.0]) ([th (in-list ready-townhalls)])
+              (define tp (sc2-unit-pos th))
+              (min best (pt-dist ux uy (sc2-point3d-x tp) (sc2-point3d-y tp)))))
+          (values (if (<= min-d 14.0) (add1 c14) c14)
+                  (if (<= min-d 16.0) (add1 c16) c16)))))
+  (define cur-food-army (sc2-player-common-food-army pc))
+  (cond
+    [(and (< cur-food-army 4)
+          (pair? ready-townhalls)
+          (>= enemy-workers-near-th-14 6))
+     (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #t)]
+    [(or (>= cur-food-army 4)
+         (null? ready-townhalls)
+         (< enemy-workers-near-th-16 3))
+     (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f)])
+  (define heavy-worker-rush-at-base? (unbox SC2-HEAVY-WORKER-RUSH-LATCH))
 
   ;; L31-P0-1 + L32-P0-1 (`#12/#28` GasZeroFreeze -> 0): Track consecutive zero-gas-harvest frames
   ;; whenever `cur-gas < 150`, `workers >= 16`, and at least one live ready gas building exists.
@@ -9624,7 +9660,9 @@
   ;; 0b. Offline Base Evacuation & Orphaned Worker Recovery:
   ;;     Immediately evacuate mineral workers from combat-offline or mined-out TownHalls
   ;;     and orphaned harvest workers to the safest online under-saturated TownHall's Near Patches.
-  (when (and (not (null? owned-base-minerals)) (not (null? safe-online-townhalls)))
+  (when (and (not heavy-worker-rush-at-base?)
+             (not (null? owned-base-minerals))
+             (not (null? safe-online-townhalls)))
     (define evac-dst-th
       (if (not (null? under-townhalls)) (first under-townhalls) (first safe-online-townhalls)))
     (define evac-cand-mins (minerals-near-townhall evac-dst-th))
@@ -9763,7 +9801,7 @@
   ;;    and long-distance mine the nearest safe map mineral patch (MOVE 16 for fog snapshots,
   ;;    SMART 3666 once visible!).
   (cond
-    [(and (not (null? idle-workers)) (not (null? owned-base-minerals)))
+    [(and (not heavy-worker-rush-at-base?) (not (null? idle-workers)) (not (null? owned-base-minerals)))
      (define candidate-mins
        (if (not (null? under-townhalls))
            (minerals-near-townhall (first under-townhalls))
@@ -9779,7 +9817,7 @@
        (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
        (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wtag bmtag)
        (issue-gather! w bmtag #:macro-econ? #t))]
-    [(null? owned-base-minerals)
+    [(and (not heavy-worker-rush-at-base?) (null? owned-base-minerals))
      (for ([w (in-list idle-workers)])
        (cond
          [(worker-build-order-stuck? w cur-loop)
@@ -9822,7 +9860,7 @@
 
   ;; 1b. Opening Anti-Bounce Close-Patch Lock (`cur-loop <= 336`):
   ;;     Prevent SC2 auto-bounce from kicking Frame-0 workers off their assigned close patch.
-  (when (and (> cur-loop 4) (<= cur-loop 336) (not (null? owned-base-minerals)))
+  (when (and (not heavy-worker-rush-at-base?) (> cur-loop 4) (<= cur-loop 336) (not (null? owned-base-minerals)))
     (for ([w (in-list workers)]
           #:when (let ([wtag (sc2-unit-tag w)])
                    (and (not (set-member? commanded-this-frame wtag))
@@ -9929,6 +9967,7 @@
                  (and (>= cur-gas 260) (< cur-min 120))))))
   (define gas-resaturate-blocked?
     (or gas-pull-to-zero-now?
+        heavy-worker-rush-at-base?
         (and gas-over-banked? (>= eff-active-gas-workers 1))
         (and zerg-post-speed-surge-active? (>= eff-active-gas-workers 1))))
   ;; L19-P0-1: Protect mineral saturation on 1-2 bases using `eff-active-gas-workers`
@@ -10000,7 +10039,8 @@
   ;;    donor base (`>= 12w` during `0:00-4:30` natural ramp, keeping `>= 10` at main; `>= 14w` later)
   ;;    to the safest MOST-UNDER-SATURATED expansion's Near Patches (`bp >= 0.85` included!) at Tier P1
   ;;    when ramping early/fresh expansions, enforcing cooldown + in-flight deduplication!
-  (when (and (not (null? under-townhalls))
+  (when (and (not heavy-worker-rush-at-base?)
+             (not (null? under-townhalls))
              (not (null? owned-base-minerals)))
     (define dst-th
       (argmin (lambda (th)
@@ -11915,6 +11955,9 @@
     (for/list ([t (in-list candidates)]
                #:when (begin
                         (set-add! commanded-combat-tags t)
+                        (let ([u (hash-ref self-unit-by-tag t #f)])
+                          (when (and u (sc2-unit-is-worker? u))
+                            (record-worker-used! t)))
                         (not (unit-already-executing-order? t ab-id target-pt target-unit-id))))
       t))
 
