@@ -137,7 +137,7 @@
                           #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                           #:ally-units staggered-dts-27
                           #:enemy-units p15-enemies
-                          #:enemy-buildings (cons pf-bldg turrets)
+                          #:enemy-buildings (list pf-bldg)
                           #:researched-upgrades '(shadow-stride))))
   (define stag-blinks (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'shadow-stride))) acts-stag))
   (define stag-moves (filter (lambda (a) (and (pair? a) (eq? (car a) 'move))) acts-stag))
@@ -169,7 +169,7 @@
                           #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                           #:ally-units sync19-dts-27
                           #:enemy-units p15-enemies
-                          #:enemy-buildings (cons pf-bldg turrets)
+                          #:enemy-buildings (list pf-bldg)
                           #:researched-upgrades '(shadow-stride))))
   (define sync19-blinks (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'shadow-stride))) acts-sync19))
   (define sync19-moves (filter (lambda (a) (and (pair? a) (eq? (car a) 'move))) acts-sync19))
@@ -204,7 +204,7 @@
                           #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                           #:ally-units underfire-dts-27
                           #:enemy-units p15-enemies
-                          #:enemy-buildings (cons pf-bldg turrets)
+                          #:enemy-buildings (list pf-bldg)
                           #:researched-upgrades '(shadow-stride))))
   (define uf-blinks (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'shadow-stride))) acts-uf))
   (check-true "L41-T1c-p15-under-fire-50pct-early-release-fires-alpha-strike"

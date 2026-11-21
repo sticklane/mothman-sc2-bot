@@ -48,16 +48,39 @@ VALID_TERRAINS = (
 )
 VALID_SOURCES = ("core", "match-forensics", "pro-db", "pattern-coverage", "replay-extract", "custom")
 VALID_TIERS = ("canonical", "regression", "econ-harass")
-VALID_SCORING_MODES = ("combat", "mineral-defense")
+VALID_SCORING_MODES = ("combat", "mineral-defense", "worker-runby")
+VALID_CATEGORIES = (
+    "detection-snipe",
+    "stalker-blink",
+    "runby-offense",
+    "runby-defense",
+    "stasis-ward",
+    "yamato-jump",
+    "transport-nydus",
+    "burrow-micro",
+    "spellcasters",
+    "kiting-concave",
+    "flank-surround",
+    "high-ground-ramp",
+    "air-superiority",
+    "early-rush-defense",
+    "capital-endgame",
+    "regression",
+)
 
 VALID_UPGRADES = {
     "Burrow", "TunnelingClaws", "GlialReconstitution", "MetabolicBoost", "AdrenalGlands",
     "CentrifugalHooks", "LurkerRange", "AdaptiveTalons", "GroovedSpines", "MuscularAugments",
-    "ChitinousPlating", "NeuralParasite",
-    "Blink", "Charge", "ResonatingGlaives", "ThermalLance", "PsiStorm",
+    "ChitinousPlating", "AnabolicSynthesis", "NeuralParasite", "OverlordSpeed", "PneumatizedCarapace", "VentralSacks",
+    "Blink", "Charge", "ResonatingGlaives", "ThermalLance", "GraviticDrive", "GraviticBoosters", "PsiStorm",
     "ShadowStride", "ProtossGroundWeapons1", "ProtossGroundWeapons2", "ProtossGroundWeapons3",
     "Stim", "CombatShield", "ConcussiveShells", "DrillingClaws", "SmartServos",
-    "InfernalPreigniter", "BansheeCloak", "PersonalCloaking", "AdvancedBallistics", "WeaponRefit", "Cloak",
+    "InfernalPreigniter", "BansheeCloak", "HyperflightRotors", "PersonalCloaking", "AdvancedBallistics", "WeaponRefit", "Cloak",
+}
+
+TRANSPORT_UNITS = {
+    "medivac", "warp-prism", "overlord-transport", "dropperlord",
+    "nydus-canal", "nydus-worm", "nydus-network", "bunker",
 }
 
 # Canonical Blizzard 4.10 SC2 UnitTypeIds, (id, value, role_offset_from_front)
@@ -81,6 +104,11 @@ UNITS: dict[str, tuple[int, float, float]] = {
     "observer": (82, 137.5, 2.2),
     "warp-prism": (81, 250.0, 2.5),
     "probe": (84, 50.0, 0.5),
+    "photon-cannon": (66, 150.0, 1.5),
+    "pylon": (60, 100.0, 2.2),
+    "shield-battery": (1910, 100.0, 2.0),
+    "oracle-stasis-trap": (732, 50.0, 0.0),
+    "stasis-trap": (732, 50.0, 0.0),
     # Terran
     "hellbat": (484, 100.0, 0.0),
     "hellion": (53, 100.0, 0.5),
@@ -105,6 +133,7 @@ UNITS: dict[str, tuple[int, float, float]] = {
     "scv": (45, 50.0, 0.5),
     "planetary-fortress": (130, 775.0, 2.0),
     "missile-turret": (23, 100.0, 1.5),
+    "bunker": (24, 100.0, 1.5),
     # Zerg
     "zergling": (105, 25.0, 0.0),
     "zergling-burrowed": (119, 25.0, 0.0),
@@ -131,6 +160,15 @@ UNITS: dict[str, tuple[int, float, float]] = {
     "viper": (499, 400.0, 2.4),
     "brood-lord": (114, 675.0, 3.0),
     "overseer": (129, 225.0, 2.2),
+    "overlord": (106, 100.0, 2.4),
+    "overlord-transport": (893, 150.0, 2.4),
+    "dropperlord": (893, 150.0, 2.4),
+    "spore-crawler": (99, 125.0, 1.5),
+    "spine-crawler": (98, 150.0, 1.2),
+    "nydus-canal": (142, 100.0, 2.2),
+    "nydus-worm": (142, 100.0, 2.2),
+    "nydus-network": (95, 450.0, 2.6),
+    "creep-tumor-burrowed": (137, 0.0, 0.0),
     "drone": (104, 50.0, 0.5),
     "drone-burrowed": (116, 50.0, 0.5),
 }
@@ -147,6 +185,10 @@ ALIASES: dict[str, str] = {
     "roaches": "roach", "roachburrowed": "roach-burrowed", "burrowed-roach": "roach-burrowed",
     "ravagers": "ravager", "queens": "queen", "infestors": "infestor",
     "vipers": "viper", "corruptors": "corruptor", "swarmhostmp": "swarm-host",
+    "spore": "spore-crawler", "spores": "spore-crawler", "sporecrawler": "spore-crawler",
+    "spine": "spine-crawler", "spines": "spine-crawler", "spinecrawler": "spine-crawler",
+    "nydus": "nydus-canal", "nyduscanal": "nydus-canal", "nydusworm": "nydus-canal", "nydusnetwork": "nydus-network",
+    "overlordtransport": "overlord-transport", "dropperlords": "overlord-transport",
     "marines": "marine", "marauders": "marauder", "medivacs": "medivac",
     "reapers": "reaper", "hellions": "hellion", "hellbats": "hellbat", "helliontank": "hellbat",
     "cyclones": "cyclone", "ghosts": "ghost", "ravens": "raven", "thors": "thor", "thorap": "thor",
@@ -165,15 +207,17 @@ ALIASES: dict[str, str] = {
     "disruptors": "disruptor", "oracles": "oracle", "phoenixes": "phoenix",
     "voidray": "void-ray", "voidrays": "void-ray", "void-rays": "void-ray",
     "tempests": "tempest", "carriers": "carrier", "warpprism": "warp-prism", "warpprismphasing": "warp-prism",
+    "cannon": "photon-cannon", "cannons": "photon-cannon", "photoncannon": "photon-cannon",
+    "stasis": "oracle-stasis-trap", "stasisward": "oracle-stasis-trap", "oraclestasistrap": "oracle-stasis-trap",
 }
 
 RACE_PREFIX = {"Protoss": "p", "Terran": "t", "Zerg": "z"}
 RACE_ORDER = {"Protoss": 0, "Terran": 1, "Zerg": 2}
 UNIT_TO_RACE: dict[str, str] = {}
 for _k, (_uid, _, _) in UNITS.items():
-    if _k in ("zealot", "adept", "stalker", "sentry", "immortal", "archon", "dark-templar", "high-templar", "colossus", "disruptor", "phoenix", "oracle", "void-ray", "tempest", "carrier", "observer", "warp-prism", "probe"):
+    if _k in ("zealot", "adept", "stalker", "sentry", "immortal", "archon", "dark-templar", "high-templar", "colossus", "disruptor", "phoenix", "oracle", "void-ray", "tempest", "carrier", "observer", "warp-prism", "probe", "photon-cannon", "pylon", "shield-battery", "oracle-stasis-trap", "stasis-trap"):
         UNIT_TO_RACE[_k] = "Protoss"
-    elif _k in ("hellbat", "hellion", "marauder", "marine", "reaper", "cyclone", "thor", "ghost", "siege-tank", "siege-tank-sieged", "widow-mine", "widow-mine-burrowed", "medivac", "viking-fighter", "viking-assault", "banshee", "raven", "liberator", "liberator-ag", "battlecruiser", "scv", "planetary-fortress", "missile-turret"):
+    elif _k in ("hellbat", "hellion", "marauder", "marine", "reaper", "cyclone", "thor", "ghost", "siege-tank", "siege-tank-sieged", "widow-mine", "widow-mine-burrowed", "medivac", "viking-fighter", "viking-assault", "banshee", "raven", "liberator", "liberator-ag", "battlecruiser", "scv", "planetary-fortress", "missile-turret", "bunker"):
         UNIT_TO_RACE[_k] = "Terran"
     else:
         UNIT_TO_RACE[_k] = "Zerg"
@@ -370,8 +414,16 @@ def extract_peak_clash_from_replay(
     }
 
 
-def army_value(units: list[list[Any]]) -> float:
-    return sum(UNITS[u[0]][1] * int(u[1]) for u in units)
+def army_value(units: list[list[Any]], loaded_transports: list[dict[str, Any]] | None = None) -> float:
+    total = sum(UNITS[u[0]][1] * int(u[1]) for u in (units or []))
+    for lt in loaded_transports or []:
+        t_name = str(lt.get("transport", ""))
+        if t_name in UNITS:
+            total += UNITS[t_name][1]
+        for c_item in lt.get("cargo") or []:
+            if isinstance(c_item, (list, tuple)) and len(c_item) == 2 and c_item[0] in UNITS:
+                total += UNITS[c_item[0]][1] * int(c_item[1])
+    return total
 
 
 def army_summary(units: list[list[Any]]) -> str:
@@ -398,8 +450,12 @@ def save_catalog(path: Path, scenarios: list[dict[str, Any]]) -> None:
         key=lambda s: (RACE_ORDER.get(s.get("our_race", ""), 9), s.get("id", "")),
     )
     payload = {
-        "schema_version": 2,
-        "notes": "Real-SC2_x64 micro skirmish scenarios loaded by tools/sc2-tactics-arena.py. Add or edit via .agents/skills/add-arena-scenario/scripts/add_scenario.py.",
+        "schema_version": 3,
+        "notes": (
+            f"Real-SC2_x64 Tactics Arena 3.0 catalog ({len(scenarios_sorted)} scenarios across 16 categories, "
+            "3 tiers, 3 scoring modes, 5 terrains, selective upgrades, and pre-loaded transports) "
+            "loaded by tools/sc2-tactics-arena.py."
+        ),
         "scenarios": scenarios_sorted,
     }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -422,6 +478,8 @@ def next_id(scenarios: list[dict[str, Any]], race: str, slug: str) -> str:
 def validate_catalog(scenarios: list[dict[str, Any]]) -> list[str]:
     errs: list[str] = []
     seen: set[str] = set()
+    cats_present: set[str] = set()
+    fast_core_cats: set[str] = set()
     for i, s in enumerate(scenarios):
         sid = s.get("id", "")
         if not sid:
@@ -441,18 +499,41 @@ def validate_catalog(scenarios: list[dict[str, Any]]) -> list[str]:
         scoring_mode = s.get("scoring_mode", "combat")
         if scoring_mode not in VALID_SCORING_MODES:
             errs.append(f"{sid}: invalid scoring_mode={scoring_mode!r}")
+        if "category" in s:
+            cat = s["category"]
+            if cat not in VALID_CATEGORIES:
+                errs.append(f"{sid}: invalid category={cat!r}")
+            else:
+                cats_present.add(cat)
+                if s.get("fast_core"):
+                    fast_core_cats.add(cat)
+        if "fast_core" in s and not isinstance(s["fast_core"], bool):
+            errs.append(f"{sid}: fast_core must be a boolean")
         if scoring_mode == "mineral-defense" and float(s.get("pass_net_econ_min", 0.0)) <= 0.0:
             errs.append(f"{sid}: mineral-defense scenario requires pass_net_econ_min > 0")
+        if scoring_mode == "worker-runby" and int(s.get("pass_workers_killed_min", 0)) <= 0:
+            errs.append(f"{sid}: worker-runby scenario requires pass_workers_killed_min > 0")
         if "use_main_base" in s and not isinstance(s["use_main_base"], bool):
             errs.append(f"{sid}: use_main_base must be a boolean")
+        if "use_p2_main_base" in s and not isinstance(s["use_p2_main_base"], bool):
+            errs.append(f"{sid}: use_p2_main_base must be a boolean")
+        if s.get("use_main_base") and s.get("use_p2_main_base"):
+            errs.append(f"{sid}: cannot set both use_main_base and use_p2_main_base")
         for ukey in ("upgrades", "p1_upgrades", "p2_upgrades"):
             for u in s.get(ukey) or []:
                 if u not in VALID_UPGRADES:
                     errs.append(f"{sid}: unknown upgrade {u!r} in {ukey}")
-        for side_key in ("p1_units", "p2_units"):
+        for side_key, lt_key in (("p1_units", "p1_loaded_transports"), ("p2_units", "p2_loaded_transports")):
             ulist = s.get(side_key)
-            if not isinstance(ulist, list) or not ulist:
-                errs.append(f"{sid}: {side_key} must be a non-empty list")
+            lt_list = s.get(lt_key) or []
+            if not isinstance(ulist, list):
+                errs.append(f"{sid}: {side_key} must be a list")
+                continue
+            if not isinstance(lt_list, list):
+                errs.append(f"{sid}: {lt_key} must be a list")
+                continue
+            if not ulist and not lt_list:
+                errs.append(f"{sid}: must specify non-empty {side_key} or {lt_key}")
                 continue
             for item in ulist:
                 if not isinstance(item, list) or len(item) != 4:
@@ -463,13 +544,36 @@ def validate_catalog(scenarios: list[dict[str, Any]]) -> list[str]:
                         errs.append(f"{sid}: unknown unit {uname!r} in {side_key}")
                     if not isinstance(cnt, int) or cnt <= 0:
                         errs.append(f"{sid}: invalid count {cnt!r} in {side_key}")
+            for idx_lt, lt in enumerate(lt_list):
+                if not isinstance(lt, dict):
+                    errs.append(f"{sid}: {lt_key}[{idx_lt}] must be an object")
+                    continue
+                t_name = str(lt.get("transport", ""))
+                if t_name not in TRANSPORT_UNITS:
+                    errs.append(f"{sid}: {lt_key}[{idx_lt}] invalid transport {t_name!r}")
+                cargo = lt.get("cargo")
+                if not isinstance(cargo, list) or not cargo:
+                    errs.append(f"{sid}: {lt_key}[{idx_lt}] requires non-empty cargo list")
+                    continue
+                for c_item in cargo:
+                    if not isinstance(c_item, list) or len(c_item) != 2:
+                        errs.append(f"{sid}: bad {lt_key}[{idx_lt}] cargo item {c_item!r}")
+                    else:
+                        cu, cc = c_item
+                        if cu not in UNITS:
+                            errs.append(f"{sid}: unknown cargo unit {cu!r} in {lt_key}[{idx_lt}]")
+                        if not isinstance(cc, int) or cc <= 0:
+                            errs.append(f"{sid}: invalid cargo count {cc!r} in {lt_key}[{idx_lt}]")
+    missing_fc = sorted(cats_present - fast_core_cats)
+    if missing_fc and fast_core_cats:
+        errs.append(f"Categories missing fast_core coverage: {missing_fc}")
     return errs
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Manage Mothman real-SC2 tactics arena 2.0 scenarios")
+    ap = argparse.ArgumentParser(description="Manage Mothman real-SC2 tactics arena 3.0 scenarios")
     ap.add_argument("--catalog", default=str(DEFAULT_CATALOG))
-    ap.add_argument("--list", action="store_true", help="List all scenarios with balance, terrain, source & upgrades")
+    ap.add_argument("--list", action="store_true", help="List all scenarios with balance, category, terrain, source & upgrades")
     ap.add_argument("--list-units", action="store_true", help="List all supported SC2 unit names and upgrade keys")
     ap.add_argument("--validate", action="store_true", help="Validate the scenario catalog")
     ap.add_argument("--remove", default="", help="Remove scenario with exact id")
@@ -485,10 +589,14 @@ def main() -> int:
     ap.add_argument("--high-ground-side", choices=["p1", "p2"], default="p1", help="Which side holds high ground on high-ground-ramp")
     ap.add_argument("--source", choices=list(VALID_SOURCES), default="custom", help="Scenario provenance tag")
     ap.add_argument("--tier", choices=list(VALID_TIERS), default="canonical", help="Scenario tier (canonical | regression | econ-harass)")
-    ap.add_argument("--scoring-mode", choices=list(VALID_SCORING_MODES), default="combat", help="Scoring mode (combat | mineral-defense)")
+    ap.add_argument("--category", choices=list(VALID_CATEGORIES), default="kiting-concave", help="Tactical category")
+    ap.add_argument("--fast-core", action="store_true", help="Include scenario in --suite core flagship sweep")
+    ap.add_argument("--scoring-mode", choices=list(VALID_SCORING_MODES), default="combat", help="Scoring mode (combat | mineral-defense | worker-runby)")
     ap.add_argument("--pass-net-econ-min", type=float, default=0.0, help="Net econ pass threshold for mineral-defense scenarios")
+    ap.add_argument("--pass-workers-killed-min", type=int, default=4, help="Minimum enemy workers killed to pass worker-runby scenarios")
     ap.add_argument("--origin-match-id", default="", help="Optional replay provenance tag for regression scenarios")
     ap.add_argument("--use-main-base", action="store_true", help="Spawn at P1's live starting TownHall + main minerals (auto-enabled for mineral-defense)")
+    ap.add_argument("--use-p2-main-base", action="store_true", help="Spawn at P2's live starting TownHall + main minerals (auto-enabled for worker-runby)")
     ap.add_argument("--patterns", default="", help="Comma-separated tactical pattern tags")
     ap.add_argument("--upgrades", default="", help="Comma-separated shared upgrades (auto-routed by race)")
     ap.add_argument("--p1-upgrades", default="", help="Comma-separated P1 upgrades (e.g. 'Burrow,TunnelingClaws')")
@@ -497,7 +605,7 @@ def main() -> int:
     ap.add_argument("--p2-pre-cloaked", action="store_true", help="Cloak P2 Banshees/Ghosts at fight start")
     ap.add_argument("--opponent", choices=["dummy", "self"], default="dummy", help="Opponent mode for printed preview command")
     ap.add_argument("--separation", type=float, default=9.0, help="Front-line separation in tiles (default 9.0)")
-    ap.add_argument("--max-loops", type=int, default=336, help="Max combat loops (~22.4 loops/sec, default 336)")
+    ap.add_argument("--max-loops", type=int, default=960, help="Max combat loops (~22.4 loops/sec, default 960)")
     ap.add_argument("--description", default="", help="Human-readable description for reports & 3D clip context")
     ap.add_argument("--dry-run", action="store_true", help="Preview scenario without modifying catalog")
     args = ap.parse_args()
@@ -509,6 +617,8 @@ def main() -> int:
             uid, val, layer = UNITS[k]
             print(f"{k:22s} {uid:6d} {val:7.1f} {layer:6.1f}")
         print("\nSupported Terrains:", ", ".join(VALID_TERRAINS))
+        print("Supported Categories:", ", ".join(VALID_CATEGORIES))
+        print("Supported Scoring Modes:", ", ".join(VALID_SCORING_MODES))
         print("Supported Upgrades:", ", ".join(sorted(VALID_UPGRADES)))
         return 0
 
@@ -521,24 +631,28 @@ def main() -> int:
             for e in errs:
                 print(f"ERROR: {e}", file=sys.stderr)
             return 1
-        print(f"OK: {len(scenarios)} scenarios validated cleanly in {cat_path}")
+        fc_cnt = sum(1 for s in scenarios if s.get("fast_core"))
+        cat_cnt = len({s.get("category", "") for s in scenarios if s.get("category")})
+        print(f"OK: {len(scenarios)} scenarios ({fc_cnt} fast_core, {cat_cnt} categories) validated cleanly in {cat_path}")
         return 0
 
     if args.list:
-        print(f"{'ID':58s} {'MU':4s} {'Tier':11s} {'Terrain':19s} {'Source':16s} {'P1/P2':>11s}")
-        print("-" * 126)
+        print(f"{'ID':58s} {'MU':4s} {'FC':2s} {'Category':18s} {'Tier':11s} {'Terrain':19s} {'P1/P2':>11s}")
+        print("-" * 130)
         tier_counts: Counter[str] = Counter()
         for s in scenarios:
-            v1 = army_value(s["p1_units"])
-            v2 = army_value(s["p2_units"])
+            v1 = army_value(s.get("p1_units", []), s.get("p1_loaded_transports"))
+            v2 = army_value(s.get("p2_units", []), s.get("p2_loaded_transports"))
             mu = f"{s['our_race'][0]}v{s['enemy_race'][0]}"
+            fc_mk = "*" if s.get("fast_core") else " "
+            cat = s.get("category", "-")
             tier = s.get("tier", "canonical")
             tier_counts[tier] += 1
             terr = s.get("terrain", "open")
-            src = s.get("source", "core")
-            print(f"{s['id']:58s} {mu:4s} {tier:11s} {terr:19s} {src:16s} {v1:5.0f}/{v2:5.0f}")
+            print(f"{s['id']:58s} {mu:4s} {fc_mk:2s} {cat:18s} {tier:11s} {terr:19s} {v1:5.0f}/{v2:5.0f}")
         t_summary = ", ".join(f"{t}={tier_counts.get(t, 0)}" for t in VALID_TIERS)
-        print(f"\nTotal: {len(scenarios)} scenarios ({t_summary}) ({cat_path})")
+        fc_cnt = sum(1 for s in scenarios if s.get("fast_core"))
+        print(f"\nTotal: {len(scenarios)} scenarios ({fc_cnt} fast_core; {t_summary}) ({cat_path})")
         return 0
 
     if args.remove:
@@ -591,6 +705,8 @@ def main() -> int:
         "our_race": args.race,
         "enemy_race": args.enemy_race,
         "tier": args.tier,
+        "category": args.category,
+        "fast_core": bool(args.fast_core),
         "source": args.source,
         "terrain": args.terrain,
         "description": desc,
@@ -602,10 +718,14 @@ def main() -> int:
         entry["scoring_mode"] = args.scoring_mode
     if args.pass_net_econ_min > 0.0:
         entry["pass_net_econ_min"] = float(args.pass_net_econ_min)
+    if args.scoring_mode == "worker-runby":
+        entry["pass_workers_killed_min"] = int(args.pass_workers_killed_min)
     if args.origin_match_id.strip():
         entry["origin_match_id"] = args.origin_match_id.strip()
-    if args.use_main_base:
+    if args.use_main_base or args.scoring_mode == "mineral-defense":
         entry["use_main_base"] = True
+    if args.use_p2_main_base or args.scoring_mode == "worker-runby":
+        entry["use_p2_main_base"] = True
     if args.terrain == "high-ground-ramp":
         entry["high_ground_side"] = args.high_ground_side
     pats = parse_csv_list(args.patterns)

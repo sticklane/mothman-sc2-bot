@@ -245,7 +245,7 @@
                           #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                           #:ally-units sp-2dmg-dts-27
                           #:enemy-units p15-enemies
-                          #:enemy-buildings (list pf-bldg north-turret)
+                          #:enemy-buildings (list pf-bldg)
                           #:researched-upgrades '(shadow-stride))))
   (define sp2-blinks (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'shadow-stride))) acts-sp2))
   (check-true "L42-T2b-p15-sp-2-damaged-dts-and-10-in-range-triggers-early-alpha-strike"
@@ -262,7 +262,7 @@
                           #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                           #:ally-units sp-0dmg-dts-27
                           #:enemy-units p15-enemies
-                          #:enemy-buildings (list pf-bldg north-turret)
+                          #:enemy-buildings (list pf-bldg)
                           #:researched-upgrades '(shadow-stride))))
   (define sp0-blinks (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'shadow-stride))) acts-sp0))
   (define sp0-moves (filter (lambda (a) (and (pair? a) (eq? (car a) 'move))) acts-sp0))

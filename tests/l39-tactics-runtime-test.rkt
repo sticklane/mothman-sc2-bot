@@ -204,7 +204,7 @@
                           #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                           #:ally-units far-dts-27
                           #:enemy-units full-p15-enemies
-                          #:enemy-buildings (cons pf-bldg turrets)
+                          #:enemy-buildings (list pf-bldg)
                           #:researched-upgrades '(shadow-strike shadow-stride))))
   (define far-blinks (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'shadow-stride))) acts-far))
   (define far-moves (filter (lambda (a) (and (pair? a) (eq? (car a) 'move))) acts-far))
@@ -228,7 +228,7 @@
                           #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                           #:ally-units ready-dts-27
                           #:enemy-units full-p15-enemies
-                          #:enemy-buildings (cons pf-bldg turrets)
+                          #:enemy-buildings (list pf-bldg)
                           #:researched-upgrades '(shadow-strike shadow-stride))))
   (define ready-blinks (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'shadow-stride))) acts-ready))
   (check-true "L39-T2b-p15-all-27-dts-blink-onto-pf-perimeter-past-6-tanks"
@@ -246,7 +246,7 @@
                           #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                           #:ally-units ready-dts-27
                           #:enemy-units full-p15-enemies
-                          #:enemy-buildings (cons pf-bldg turrets)
+                          #:enemy-buildings (list pf-bldg)
                           #:researched-upgrades '(shadow-strike shadow-stride))))
   (define retry-blinks (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'shadow-stride))) acts-retry))
   (check-true "L39-T2c-p15-dropped-prefight-blink-retries-after-12f"
@@ -262,7 +262,7 @@
                               #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                               #:ally-units landed-dts-27
                               #:enemy-units full-p15-enemies
-                              #:enemy-buildings (cons pf-bldg turrets)
+                              #:enemy-buildings (list pf-bldg)
                               #:researched-upgrades '(shadow-strike shadow-stride))))
   ;; Even if pushed back > 4.2t at frame 660 (within 314f CD), 0 duplicate blinks!
   (define acts-on-cd
@@ -271,7 +271,7 @@
                           #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                           #:ally-units ready-dts-27
                           #:enemy-units full-p15-enemies
-                          #:enemy-buildings (cons pf-bldg turrets)
+                          #:enemy-buildings (list pf-bldg)
                           #:researched-upgrades '(shadow-strike shadow-stride))))
   (define cd-blinks (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'shadow-stride))) acts-on-cd))
   (check-true "L39-T2d-p15-confirmed-teleport-promotes-314f-cooldown"

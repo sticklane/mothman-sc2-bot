@@ -108,6 +108,7 @@
  ;; 8. Typed FAP Evaluator, Focus-Fire Scoring & Tactical Vectors
  (struct-out fap-unit)
  make-fap-unit
+ ally-squad-has-stealth-unit?
  sc2-target-priority-multiplier
  score-focus-fire-priority
  score-arena-focus-target
@@ -902,6 +903,37 @@
               (values (reverse next-van) (cdr rest))
               (loop (cdr rest) next-dps next-van))]))]))
 
+;; L43-P0-1a: Detect whether an allied combat squad contains cloaked or burrowed combat units
+;; (Dark Templar, cloaked Banshee/Ghost, burrowed Lurker/Roach/WidowMine/Infestor/Baneling).
+(: ally-squad-has-stealth-unit? (-> (Listof Any) Boolean))
+(define (ally-squad-has-stealth-unit? ally-units)
+  (for/or : Boolean ([u (in-list ally-units)])
+    (and (hash? u)
+         (let ([ut (symbol-or-default (dyn-hash-ref u 'type 'unknown) 'unknown)]
+               [clk (dyn-hash-ref u 'cloak #f)])
+           (not (not (or (eq? ut 'dark-templar)
+                         (memq ut '(lurker-burrowed lurker-mp-burrowed roach-burrowed
+                                    widow-mine-burrowed baneling-burrowed infestor-burrowed
+                                    zergling-burrowed))
+                         (and (memq ut '(banshee ghost lurker lurker-mp roach widow-mine))
+                              (or (eq? (dyn-hash-ref u 'cloaked #f) #t)
+                                  (eq? (dyn-hash-ref u 'burrowed #f) #t)
+                                  (eq? (dyn-hash-ref u 'is-burrowed #f) #t)
+                                  (eq? (dyn-hash-ref u 'burrowed? #f) #t)
+                                  (eqv? clk 1) (eqv? clk 2)
+                                  (eq? clk 'cloaked) (eq? clk 'cloaked-detected)))
+                         (eq? (dyn-hash-ref u 'cloaked #f) #t)
+                         (eq? (dyn-hash-ref u 'burrowed #f) #t)
+                         (eq? (dyn-hash-ref u 'is-burrowed #f) #t)
+                         (eq? (dyn-hash-ref u 'burrowed? #f) #t))))))))
+
+(: RUNBY-WORKER-RAIDER-SYMS (Listof Symbol))
+(define RUNBY-WORKER-RAIDER-SYMS
+  '(hellion adept oracle banshee mutalisk zergling reaper dark-templar zealot))
+
+(: WORKER-TARGET-SYMS (Listof Symbol))
+(define WORKER-TARGET-SYMS '(scv probe drone mule))
+
 ;; Shared detector/changeling/decoy target multiplier across FAP & Arena Minimax.
 (: sc2-target-priority-multiplier (->* (Any Any) (Any) Flonum))
 (define (sc2-target-priority-multiplier etype stealth-active? [explicit-changeling? #f])
@@ -913,7 +945,8 @@
                   explicit-changeling?))))
   (cond
     [changeling-target? 4.0]
-    [(and detector-target? stealth-active?) (->float SC2-DETECTOR-SNIPE-PRIORITY-BONUS)]
+    [(and detector-target? stealth-active?)
+     (max 8.0 (->float SC2-DETECTOR-SNIPE-PRIORITY-BONUS))]
     [(memq etype SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS) 0.05]
     [else 1.0]))
 
@@ -964,8 +997,12 @@
               (values hull sh (max 1.0 (+ hull sh)))))])]))
 
 ;; Shared target scoring used by `select-focus-fire-target` (live/FAP combat).
-(: score-focus-fire-priority (-> Any Any Real Boolean Boolean Flonum Flonum Flonum Flonum))
-(define (score-focus-fire-priority attacker e arange stealth-active? has-attacker-pos? ax ay default-dps)
+;; L44-P0-1a: Gate `4.5x` `raider-worker-mult` strictly to mineral-line runby context
+;; (`runby-worker-context?` = enemy workers present AND nearby enemy combat threat is light),
+;; NEVER pulling Zealots/Adepts/Zerglings off a real frontal army clash!
+(: score-focus-fire-priority (->* (Any Any Real Boolean Boolean Flonum Flonum Flonum) (Boolean) Flonum))
+(define (score-focus-fire-priority attacker e arange stealth-active? has-attacker-pos? ax ay default-dps
+                                   [runby-worker-context? #f])
   (define etype : Symbol
     (if (fap-unit? e)
         'unknown
@@ -1003,15 +1040,31 @@
   (define raw-dps : Flonum
     (cond
       [(and detector-target? stealth-active?)
-       (max 18.0
+       (max 30.0
             (if (fap-unit? e)
-                (safe-real (fap-unit-dps e) 18.0)
-                (safe-real (dyn-hash-ref e 'dps 18.0) 18.0)))]
+                (safe-real (fap-unit-dps e) 30.0)
+                (safe-real (dyn-hash-ref e 'dps 30.0) 30.0)))]
       [changeling-target? 20.0]
+      [(and runby-worker-context?
+            (memq attacker-type RUNBY-WORKER-RAIDER-SYMS)
+            (memq etype WORKER-TARGET-SYMS))
+       (max 16.0
+            (if (fap-unit? e)
+                (safe-real (fap-unit-dps e) 16.0)
+                (safe-real (dyn-hash-ref e 'dps 16.0) 16.0)))]
       [(fap-unit? e) (safe-real (fap-unit-dps e) default-dps)]
       [else (safe-real (dyn-hash-ref e 'dps 12.0) 12.0)]))
+  (define raider-worker-mult : Flonum
+    (cond
+      [(and detector-target? stealth-active?) 1.0]
+      [(not runby-worker-context?)
+       (if (memq etype WORKER-TARGET-SYMS) 0.35 1.0)]
+      [(not (memq attacker-type RUNBY-WORKER-RAIDER-SYMS)) 1.0]
+      [(memq etype WORKER-TARGET-SYMS) 4.5]
+      [(not (fx= (fxand (unit-attribute-mask etype) SC2-UNIT-ATTR-STRUCTURE) 0)) 0.15]
+      [else 1.0]))
   (define dps : Flonum (max 1.0 raw-dps))
-  (define base-priority : Flonum (* decoy-mult attr-bonus-mult (/ dps hp)))
+  (define base-priority : Flonum (* decoy-mult attr-bonus-mult raider-worker-mult (/ dps hp)))
   (define reach-weight : Flonum
     (if has-attacker-pos?
         (let* ([ex (if (fap-unit? e)
@@ -1040,10 +1093,11 @@
 ;; spatial proximity / weapon range reachability when unit coordinates are present.
 ;; Supports both `(select-focus-fire-target enemies)` and `(select-focus-fire-target attacker enemies)`.
 (: select-focus-fire-target
-   (->* (Any) (Any #:max-range (U Real False) #:ally-has-stealth? Boolean) Any))
+   (->* (Any) (Any #:max-range (U Real False) #:ally-has-stealth? Boolean #:ally-units (Listof Any)) Any))
 (define (select-focus-fire-target arg1 [arg2 #f]
                                   #:max-range [max-range #f]
-                                  #:ally-has-stealth? [ally-has-stealth? #f])
+                                  #:ally-has-stealth? [ally-has-stealth? #f]
+                                  #:ally-units [ally-units '()])
   (define attacker : Any (if (list? arg1) arg2 arg1))
   (define enemies : (Listof Any)
     (cond
@@ -1054,8 +1108,21 @@
     (and (hash? attacker)
          (let ([t (dyn-hash-ref attacker 'type #f)])
            (and (symbol? t) t))))
+  (define squad-stealth? : Boolean
+    (or ally-has-stealth?
+        (and (pair? ally-units) (ally-squad-has-stealth-unit? ally-units))))
+  (define live-detector-cnt : Integer
+    (if squad-stealth?
+        (for/sum : Integer ([e (in-list enemies)]
+                            #:when (and (hash? e)
+                                        (let ([et (symbol-or-default (dyn-hash-ref e 'type 'unknown) 'unknown)])
+                                          (or (memq et SC2-MOBILE-DETECTOR-SYMS)
+                                              (memq et SC2-STATIC-DETECTOR-SYMS)))))
+          1)
+        0))
   (define stealth-active? : Boolean
-    (not (not (or ally-has-stealth?
+    (not (not (or (and ally-has-stealth? (or (null? ally-units) (<= live-detector-cnt 3)))
+                  (and (pair? ally-units) squad-stealth? (>= live-detector-cnt 1) (<= live-detector-cnt 3))
                   (and attacker-type (memq attacker-type SC2-CLOAKED-OR-BURROW-STEALTH-SYMS))
                   (and (hash? attacker)
                        (or (dyn-hash-ref attacker 'cloaked #f)
@@ -1099,11 +1166,42 @@
            (cond [(fap-unit? attacker) (fap-unit-range attacker)]
                  [(hash? attacker) (safe-real (dyn-hash-ref attacker 'range 6.0) 6.0)]
                  [else 6.0])))
+     ;; L44-P0-1a: Compute `runby-worker-context?` strictly when a raider faces enemy workers
+     ;; with light nearby enemy combat defense (`<= 2` ground melee/skirmisher, `<= 3` dedicated
+     ;; mineral-line harassers within `<= 8.0t`) — NEVER pulling Zealots/Adepts/Lings off a real
+     ;; frontal army clash to chase 1 repairing SCV!
+     (define runby-worker-context? : Boolean
+       (and (symbol? attacker-type)
+            (not (not (memq attacker-type RUNBY-WORKER-RAIDER-SYMS)))
+            (let-values ([(has-worker? combat-cnt)
+                          (for/fold ([hw? : Boolean #f] [cc : Integer 0])
+                                    ([e (in-list alive-enemies)])
+                            (if (fap-unit? e)
+                                (values hw? (add1 cc))
+                                (let ([et (symbol-or-default (dyn-hash-ref e 'type 'unknown) 'unknown)])
+                                  (cond
+                                    [(memq et WORKER-TARGET-SYMS)
+                                     (values #t cc)]
+                                    [(or (memq et SC2-PASSIVE-SCOUT-OR-DECOY-UNIT-SYMS)
+                                         (memq et SC2-CHANGELING-UNIT-SYMS)
+                                         (not (fx= (fxand (unit-attribute-mask et) SC2-UNIT-ATTR-STRUCTURE) 0)))
+                                     (values hw? cc)]
+                                    [(or (not has-attacker-pos?)
+                                         (<= (dist2d ax ay
+                                                     (safe-real (dyn-hash-ref e 'x ax) ax)
+                                                     (safe-real (dyn-hash-ref e 'y ay) ay))
+                                             8.0))
+                                     (values hw? (add1 cc))]
+                                    [else (values hw? cc)]))))])
+              (define max-combat : Integer
+                (if (memq attacker-type '(hellion adept oracle banshee mutalisk)) 3 2))
+              (and has-worker? (<= combat-cnt max-combat)))))
      (define best-target : Any (car alive-enemies))
      (define best-score : Flonum -inf.0)
      (for ([e (in-list alive-enemies)])
        (define score
-         (score-focus-fire-priority attacker e arange stealth-active? has-attacker-pos? ax ay 12.0))
+         (score-focus-fire-priority attacker e arange stealth-active? has-attacker-pos? ax ay 12.0
+                                    runby-worker-context?))
        (when (> score best-score)
          (set! best-score score)
          (set! best-target e)))

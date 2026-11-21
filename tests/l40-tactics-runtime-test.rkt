@@ -311,7 +311,7 @@
                           #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                           #:ally-units spawn-dts-27
                           #:enemy-units p15-enemies
-                          #:enemy-buildings (cons pf-bldg turrets)
+                          #:enemy-buildings (list pf-bldg)
                           #:researched-upgrades '(shadow-stride))))
   (define sp-moves (filter (lambda (a) (and (pair? a) (eq? (car a) 'move))) acts-spawn))
   (define sp-blinks (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'shadow-stride))) acts-spawn))
@@ -335,7 +335,7 @@
                           #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                           #:ally-units flank-dts-27
                           #:enemy-units p15-enemies
-                          #:enemy-buildings (cons pf-bldg turrets)
+                          #:enemy-buildings (list pf-bldg)
                           #:researched-upgrades '(shadow-stride))))
   (define fl-blinks (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'shadow-stride))) acts-flank))
   (define all-nse-clear-of-hellbats?

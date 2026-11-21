@@ -194,6 +194,7 @@
  SIEGE-TANK-SPLASH-RADIUS
  evaluate-widow-mine-mode
  plan-widow-mine-modes
+ select-widow-mine-cluster-target
  siege-tank-target-safe?
  plan-siege-tank-targets
 
@@ -2744,6 +2745,80 @@
   (if (null? wms)
       '()
       (plan-widow-mine-modes/list wms ally-units enemy-units tr current-frame anchors)))
+
+;; L43-P0-1c (Widow Mine Optimal Worker-Cluster Target Fire):
+;; For a burrowed Widow Mine, select the targetable enemy within `<= 5.25t` whose `1.75t` splash
+;; envelope maximizes weighted splash kills (workers `+3.0`, light/shielded combat `+2.5`, other
+;; combat `+2.0`, structures `+0.1`), breaking ties toward the densest enemy worker cluster centroid!
+(: widow-mine-splash-target-weight (-> Any Symbol Float))
+(define (widow-mine-splash-target-weight e et)
+  (cond
+    [(memq et '(scv probe drone mule)) 3.0]
+    [(or (u-structure? e)
+         (memq et '(nexus command-center orbital-command planetary-fortress hatchery lair hive
+                    pylon supply-depot supply-depot-lowered refinery assimilator extractor)))
+     0.1]
+    [(memq et '(zergling baneling marine zealot adept stalker oracle mutalisk phoenix hydralisk high-templar dark-templar))
+     2.5]
+    [else 2.0]))
+
+(: select-widow-mine-cluster-target (->* (Any (Listof Any)) (#:max-range Float) (Option Any)))
+(define (select-widow-mine-cluster-target wm-u enemy-units #:max-range [max-range 5.25])
+  (define wx (u-x wm-u))
+  (define wy (u-y wm-u))
+  (define max-r2 (* max-range max-range))
+  (define splash-r2 (* 1.75 1.75))
+  (define valid-enemies
+    (for/list : (Listof Any)
+              ([e (in-list enemy-units)]
+               #:when (and (hash? e)
+                           (u-alive? e)
+                           (not (eq? (dyn-hash-ref e 'is-hallucination? #f) #t))
+                           (not (eq? (dyn-hash-ref e 'hallucination #f) #t))
+                           (not (eqv? (dyn-hash-ref e 'cloak 0) 1))
+                           (not (eq? (dyn-hash-ref e 'cloak #f) 'cloaked))))
+      e))
+  (define in-range-enemies
+    (for/list : (Listof Any)
+              ([e (in-list valid-enemies)]
+               #:when (let ([dx (- (u-x e) wx)]
+                            [dy (- (u-y e) wy)])
+                        (<= (+ (* dx dx) (* dy dy)) max-r2)))
+      e))
+  (cond
+    [(null? in-range-enemies) #f]
+    [else
+     ;; Compute centroid of all in-range enemy workers for crisp worker-cluster tie-breaking
+     (define-values (w-sx w-sy w-cnt)
+       (for/fold ([sx : Float 0.0] [sy : Float 0.0] [cnt : Integer 0])
+                 ([e (in-list in-range-enemies)]
+                  #:when (memq (exact-unit-type e) '(scv probe drone mule)))
+         (values (+ sx (u-x e)) (+ sy (u-y e)) (add1 cnt))))
+     (define has-workers? (> w-cnt 0))
+     (define wcx (if has-workers? (/ w-sx (->float w-cnt)) wx))
+     (define wcy (if has-workers? (/ w-sy (->float w-cnt)) wy))
+     (for/fold ([best-e : (Option Any) #f] [best-sc : Float -1.0] #:result best-e)
+               ([cand (in-list in-range-enemies)])
+       (define cx (u-x cand))
+       (define cy (u-y cand))
+       (define ct (exact-unit-type cand))
+       (define is-worker? (and (memq ct '(scv probe drone mule)) #t))
+       (define cluster-val
+         (for/fold ([s : Float 0.0]) ([other (in-list valid-enemies)])
+           (define dx (- cx (u-x other)))
+           (define dy (- cy (u-y other)))
+           (if (<= (+ (* dx dx) (* dy dy)) splash-r2)
+               (+ s (widow-mine-splash-target-weight other (exact-unit-type other)))
+               s)))
+       ;; Bonus for directly targeting a worker near the worker-cluster centroid (avoids edge misses)
+       (define centroid-bonus
+         (if (and has-workers? is-worker?)
+             (max 0.0 (- 1.5 (* 0.35 (dist-2d cx cy wcx wcy))))
+             0.0))
+       (define total-sc (+ cluster-val centroid-bonus (if is-worker? 0.5 0.0)))
+       (if (> total-sc best-sc)
+           (values cand total-sc)
+           (values best-e best-sc)))]))
 
 ;; =============================================================================
 ;; 6c. SiegeTank (`32`) Friendly-Fire Splash Target Guard (`Bug 9`)

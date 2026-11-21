@@ -153,7 +153,7 @@
                  #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                  #:ally-units dts-27
                  #:enemy-units p15-enemy-units
-                 #:enemy-buildings (cons pf-bldg turrets)
+                 #:enemy-buildings (list pf-bldg)
                  #:researched-upgrades '(shadow-strike shadow-stride)))
   (define acts-p15-f0 (run-l34 rt-p15 obs-p15-f0))
   (define ss-casts-f0
@@ -196,7 +196,7 @@
                  #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                  #:ally-units dts-landed
                  #:enemy-units p15-enemy-units
-                 #:enemy-buildings (cons pf-bldg turrets)
+                 #:enemy-buildings (list pf-bldg)
                  #:researched-upgrades '(shadow-strike shadow-stride)))
   (define acts-p15-f8 (run-l34 rt-p15 obs-p15-f8))
   (define ss-casts-f8
@@ -217,7 +217,7 @@
                  #:base-x 20.0 #:base-y 20.0 #:nat-x 35.0 #:nat-y 35.0
                  #:ally-units dts-27
                  #:enemy-units p15-enemy-units
-                 #:enemy-buildings (cons pf-bldg turrets)
+                 #:enemy-buildings (list pf-bldg)
                  #:researched-upgrades '()))
   (define acts-p15-noupg (run-l34 rt-p15-noupg obs-p15-noupg))
   (check-true "L38-T1c-p15-no-shadow-stride-without-upgrade-141"

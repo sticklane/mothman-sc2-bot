@@ -1748,7 +1748,11 @@
      (morph-liberator-ag . (morph-liberator-ag . 2558))
      (nuke-calldown . (nuke-calldown . 1622))
      (tac-nuke-strike . (nuke-calldown . 1622))
-     (land . (land . 3678)))))
+     (land . (land . 3678))
+     (unload-all-at . (unload-all-at . 3669))
+     (medivac-unload-all-at . (medivac-unload-all-at . 396))
+     (warp-prism-unload-all-at . (warp-prism-unload-all-at . 913))
+     (overlord-unload-all-at . (overlord-unload-all-at . 1408)))))
 
 (define UNIT-SPELL-TABLE : (Immutable-HashTable Symbol (Pairof Symbol Positive-Integer))
   (make-immutable-hasheq
@@ -2365,7 +2369,30 @@
              [(not pass) (BotActionReject 'invalid-actor-tags raw)]
              [else (BotTransportAction head tr-id pass #f)])])]
 
-       [(memq head '(bunker-unload nydus-unload unload-unit transport-drop-moving))
+       [(memq head '(unload-all-at unload-unit))
+        (cond
+          [(= nargs 1)
+           (define tr-id (extract-unit-tag (car args)))
+           (if tr-id
+               (BotTransportAction head tr-id #f #f)
+               (BotActionReject 'invalid-transport-tag raw))]
+          [(= nargs 2)
+           (define tr-id (extract-unit-tag (car args)))
+           (define opt-pass (extract-actor-tags (cadr args)))
+           (cond
+             [(not tr-id) (BotActionReject 'invalid-transport-tag raw)]
+             [(not opt-pass) (BotActionReject 'invalid-actor-tags raw)]
+             [else (BotTransportAction head tr-id opt-pass #f)])]
+          [(= nargs 3)
+           (define tr-id (extract-unit-tag (car args)))
+           (define pt (extract-world-point2d (cadr args) (caddr args)))
+           (cond
+             [(not tr-id) (BotActionReject 'invalid-transport-tag raw)]
+             [(not pt) (BotActionReject 'invalid-world-point raw)]
+             [else (BotTransportAction head tr-id #f pt)])]
+          [else (BotActionReject 'invalid-transport-arity raw)])]
+
+       [(memq head '(bunker-unload nydus-unload transport-drop-moving))
         (cond
           [(or (< nargs 1) (> nargs 2)) (BotActionReject 'invalid-transport-arity raw)]
           [else

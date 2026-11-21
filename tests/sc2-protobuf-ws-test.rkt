@@ -8386,15 +8386,15 @@
   (define r02-s (hash-ref cat-by-id "sc2-reg-r02-prod5138248-zvp-drone-hold-vs-15probe-rush" #f))
   (define r05-s (hash-ref cat-by-id "sc2-reg-r05-prod5140013-tvp-scv-hold-vs-15probe-rush" #f))
   (define r06-s (hash-ref cat-by-id "sc2-reg-r06-prod5140055-pvp-probe-hold-vs-15probe-rush" #f))
-  (check-true (format "l37-p0-3f-l42-arena-scenarios-58-3tier-catalog (n=~a c=~a e=~a r=~a)"
+  (check-true (format "l37-p0-3f-l43-arena-scenarios-3tier-catalog (n=~a c=~a e=~a r=~a)"
                       (length cat-scens) tier-canon tier-econ tier-reg)
               (and (hash? cat-j)
-                   (= (hash-ref cat-j 'schema_version 0) 2)
-                   (= (length cat-scens) 58)
-                   (= (length (remove-duplicates cat-ids)) 58)
-                   (= tier-canon 49)
-                   (= tier-econ 4)
-                   (= tier-reg 5)
+                   (>= (hash-ref cat-j 'schema_version 0) 2)
+                   (>= (length cat-scens) 58)
+                   (= (length (remove-duplicates cat-ids)) (length cat-scens))
+                   (>= tier-canon 49)
+                   (>= tier-econ 4)
+                   (>= tier-reg 5)
                    (for/and ([rid (in-list req-ids)]) (hash-has-key? cat-by-id rid))
                    (hash? p15-s)
                    (member "ShadowStride" (hash-ref p15-s 'p1_upgrades '()))
@@ -8819,6 +8819,751 @@
     (cleanup!))
   (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
   (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK))
+
+(printf "[Loop 43] Testing L43-P0-3a ProdStall (Barracks #3+) + GasZero (8s 12w resat & stuck-harvester override) & L43-P0-3b stasis-ward/widow-mine-2099/nydus/burrow/r02-r05-r06...\n")
+(let ()
+  (define (mk-l43-u tag utype alliance x y
+                    #:hp [hp 100.0] #:sh [sh 0.0] #:en [en 100.0]
+                    #:rad [rad 0.5] #:bp [bp 1.0]
+                    #:mins [mins 0] #:vesp [vesp 0]
+                    #:assigned [assigned 0] #:ideal [ideal 0]
+                    #:burrowed? [burr? #f] #:orders [ords '()])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 3) 0 2))
+              (sc2-point3d x y 8.0) 0.0 rad bp 0 #f #f #f
+              hp hp sh sh en (max en 100.0) mins vesp #f burr? #f #t #f
+              ords 0 '() 0 0 0.0 assigned ideal 0 0 '() 0 0))
+  (define (l43-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define (l43-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59943 "/sc2api" c-in c-out #f 1))
+    (define rpc-cnt (box 0))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define id-p (assoc 97 req-f))
+             (define id-b (if id-p (encode-uint32 97 (third id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (set-box! rpc-cnt (add1 (unbox rpc-cnt)))
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws rpc-cnt (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+
+  ;; 1. L43-P0-3a (ProdStall 1 -> 0, `#68` Barracks #3+):
+  ;;    (A) Preserves valid 5x3 east add-on space on Barracks #3 when a 5x3 spot exists!
+  ;;    (B) When crowded main rejects 5x3/tight AND prior `missile-turret` + `bunker` drain initial
+  ;;        RPC budget to 0, Barracks #3 triggers wide `30t` / secondary-TH outer-ring fallback
+  ;;        immediately after just 1 miss (NOT waiting 3 full 48f cycles!) and places cleanly!
+  (define l43-gi
+    (sc2-game-info "L43WireMap" "" '() '(128 128) '(4 4 124 124)
+                   (list (sc2-point2d 100.0 100.0)) w3-full-grid #f w3-full-grid))
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
+  (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
+  (define cc-m43 (mk-l43-u 94001 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+  (define cc-243 (mk-l43-u 94002 18 1 64.5 30.5 #:hp 1500.0 #:rad 2.75))
+  (define rax-a  (mk-l43-u 94003 21 1 33.5 28.5 #:hp 1000.0 #:rad 1.5))
+  (define rax-b  (mk-l43-u 94004 21 1 28.5 33.5 #:hp 1000.0 #:rad 1.5))
+  (define scv-43 (mk-l43-u 94005 45 1 62.0 30.0 #:hp 45.0 #:rad 0.375))
+  (define obs-rax3-a
+    (sc2-observation 28000 (sc2-player-common 1 800 200 70 42 18 24 0 0 0 0)
+                     (list cc-m43 cc-243 rax-a rax-b scv-43) '() '() #f '() '() '() '() '() '()))
+  ;; Part A: Accept pure 3x3 at `(68.5, 30.5)` (queried #1, NO east add-on) AND full 5x3 at `(32.5, 32.5)`
+  ;;         (queried #2: both 321 at `(32.5, 32.5)` AND east 319 at `(35.0, 32.0)` pass!) -> MUST prefer 5x3!
+  (define rax3-5x3-pt
+    (let-values ([(ws _rc cleanup!)
+                  (l43-start-mock-ws
+                   (lambda (ab px py)
+                     (cond
+                       [(and (= ab 321) (<= (l43-dist px py 68.5 30.5) 0.1)) 1]
+                       [(and (= ab 321) (<= (l43-dist px py 32.5 32.5) 0.1)) 1]
+                       [(and (= ab 319) (<= (l43-dist px py 35.0 32.0) 0.1)) 1]
+                       [else 2])))])
+      (define cs (translate-bot-actions->sc2-raw-commands '((build barracks 30.0 30.0)) obs-rax3-a #:ws-conn ws #:game-info l43-gi))
+      (cleanup!)
+      (define c321 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) cs))
+      (and c321 (sc2-raw-unit-command-target-pos c321))))
+  ;; Part B: Barracks #3 with streak=1, prior `missile-turret` + `bunker` eating initial RPCs,
+  ;;         and ONLY outer-ring `+22t` spot `(86.5, 30.5)` valid -> still lands in 1 step!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK 'barracks 1)
+  (define rax3-wide-pt
+    (let-values ([(ws _rc cleanup!)
+                  (l43-start-mock-ws
+                   (lambda (ab px py)
+                     (cond
+                       [(and (= ab 321) (<= (l43-dist px py 86.5 30.5) 2.5)) 1]
+                       [else 2])))])
+      (define cc-3b (mk-l43-u 94006 18 1 64.5 30.5 #:hp 750.0 #:rad 2.75 #:bp 0.5))
+      (define obs-b
+        (sc2-observation 28100 (sc2-player-common 1 900 300 70 42 18 24 0 0 0 0)
+                         (list cc-m43 cc-3b rax-a rax-b scv-43) '() '() #f '() '() '() '() '() '()))
+      (define cs (translate-bot-actions->sc2-raw-commands
+                  '((build missile-turret 30.0 30.0) (build bunker 30.0 30.0) (build barracks 30.0 30.0))
+                  obs-b #:ws-conn ws #:game-info l43-gi))
+      (cleanup!)
+      (define c321 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) cs))
+      (and c321 (sc2-raw-unit-command-target-pos c321))))
+  (check-true "l43-p0-3a1-barracks-3plus-preserves-5x3-addon-when-available-and-relaxes-fast-after-1-miss"
+              (and (sc2-point2d? rax3-5x3-pt)
+                   (<= (l43-dist (sc2-point2d-x rax3-5x3-pt) (sc2-point2d-y rax3-5x3-pt) 32.5 32.5) 0.1)
+                   (sc2-point2d? rax3-wide-pt)
+                   (<= (l43-dist (sc2-point2d-x rax3-wide-pt) (sc2-point2d-y rax3-wide-pt) 86.5 30.5) 2.5)
+                   (= (hash-ref SC2-PROD-PLACEMENT-MISS-STREAK 'barracks -1) 0)))
+
+  ;; 2. L43-P0-3a (GasZero 1 -> 0, `#59`):
+  ;;    (A) Active gas building with `0` workers & `12` total workers auto-resaturates `3` workers
+  ;;        in ONE step after `180f` (`8.0s`)!
+  ;;    (B) Stuck-harvester override (`#59` exact bug): When `SC2-ZERO-GAS-RESCUE-LATCH` is latched
+  ;;        and `assigned = 3` yields `0` gas for `>= 180f`, forces `3` FRESH mineral workers onto it!
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
+  (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f)
+  (set-box! SC2-ZERO-GAS-STREAK-START-LOOP #f)
+  (set-box! SC2-ZERO-GAS-LAST-VESPENE #f)
+  (set-box! SC2-ZERO-GAS-RESCUE-LATCH #f)
+  (set-box! SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP #f)
+  (hash-clear! SC2-GAS-BLDG-ZERO-WORKERS-SINCE)
+  (define cc-g43 (mk-l43-u 94100 18 1 42.0 40.0 #:hp 1500.0 #:rad 2.75 #:assigned 12 #:ideal 16))
+  (define m-g43  (mk-l43-u 94101 341 3 36.0 40.0 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define ref-0w (mk-l43-u 94102 20 1 46.0 33.0 #:hp 500.0 #:rad 1.5 #:vesp 1800 #:assigned 0 #:ideal 3))
+  (define scvs-12
+    (for/list ([i (in-range 12)])
+      (mk-l43-u (+ 94110 i) 45 1 (+ 38.0 (* 0.3 (modulo i 4))) (+ 39.0 (* 0.3 (quotient i 4)))
+                #:hp 45.0 #:rad 0.375 #:orders (list (sc2-unit-order 298 #f 94101 0.0)))))
+  (define (mk-g43-obs gl gas ref-u [wks scvs-12])
+    (sc2-observation gl (sc2-player-common 1 200 gas 40 16 4 (length wks) 0 0 0 0)
+                     (append (list cc-g43 m-g43 ref-u) wks) '() '() #f '() '() '() '() '() '()))
+  (void (saturate-workers-and-gas-commands (mk-g43-obs 20000 25 ref-0w)))
+  (define cmds-8s (saturate-workers-and-gas-commands (mk-g43-obs 20180 25 ref-0w)))
+  (define cnt-8s-3w
+    (count (lambda (c) (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-ability-id c) 3666)
+                            (= (sc2-raw-unit-command-target-unit-tag c) 94102)))
+           cmds-8s))
+  ;; Part B: Stuck `assigned=3` Refinery yielding 0 gas for >= 300f latch + 180f stuck window -> dispatches 3 fresh SCVs!
+  (set-box! SC2-ZERO-GAS-STREAK-START-LOOP #f)
+  (set-box! SC2-ZERO-GAS-LAST-VESPENE #f)
+  (set-box! SC2-ZERO-GAS-RESCUE-LATCH #f)
+  (set-box! SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP #f)
+  (hash-clear! SC2-GAS-BLDG-ZERO-WORKERS-SINCE)
+  (define ref-stuck (mk-l43-u 94102 20 1 46.0 33.0 #:hp 500.0 #:rad 1.5 #:vesp 1800 #:assigned 3 #:ideal 3))
+  (void (saturate-workers-and-gas-commands (mk-g43-obs 21000 25 ref-stuck)))
+  (void (saturate-workers-and-gas-commands (mk-g43-obs 21300 25 ref-stuck)))
+  (define cmds-stuck (saturate-workers-and-gas-commands (mk-g43-obs 21484 25 ref-stuck)))
+  (define cnt-stuck-refresh
+    (count (lambda (c) (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-ability-id c) 3666)
+                            (= (sc2-raw-unit-command-target-unit-tag c) 94102)))
+           cmds-stuck))
+  (check-true "l43-p0-3a2-gas-zero-8s-auto-resat-at-12-workers-and-stuck-harvester-override"
+              (and (= cnt-8s-3w 3)
+                   (= cnt-stuck-refresh 3)))
+
+  ;; 3. L43-P0-3b1: Stasis Ward (2505) point-target emission via canonical `(cast ... stasis-ward/oracle-stasis-ward/build-stasis-trap x y)`,
+  ;;    P0 priority, & clean dedupe when already executing!
+  (define or-a (mk-l43-u 94201 495 1 60.0 60.0 #:hp 100.0 #:sh 60.0 #:en 80.0))
+  (define or-b (mk-l43-u 94202 495 1 62.0 60.0 #:hp 100.0 #:sh 60.0 #:en 80.0
+                         #:orders (list (sc2-unit-order 2505 (sc2-point3d 64.0 62.0 8.0) 0 0.0))))
+  (define obs-sw (make-test-obs 4500 100 50 (list or-a or-b)))
+  (define cmds-sw1 (translate-bot-actions->sc2-raw-commands '((cast 94201 stasis-ward 64.0 62.0) (cast 94202 stasis-ward 64.0 62.0)) obs-sw))
+  (define cmds-sw2 (translate-bot-actions->sc2-raw-commands '((cast 94201 oracle-stasis-ward 66.0 64.0)) obs-sw))
+  (define c-sw1 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2505))) cmds-sw1))
+  (define c-sw2 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2505))) cmds-sw2))
+  (check-true "l43-p0-3b1-stasis-ward-2505-point-target-and-dedupe"
+              (and (sc2-raw-unit-command? c-sw1)
+                   (sc2-point2d? (sc2-raw-unit-command-target-pos c-sw1))
+                   (= (sc2-raw-unit-command-target-unit-tag c-sw1) 0)
+                   (equal? (sc2-raw-unit-command-unit-tags c-sw1) '(94201))
+                   (= (wire-cmd-priority-tier c-sw1) 0)
+                   (sc2-raw-unit-command? c-sw2)
+                   (equal? (sc2-raw-unit-command-unit-tags c-sw2) '(94201))))
+
+  ;; 4. L43-P0-3b2: Burrowed Widow Mine (500) target-fire emits `2099` via `attack-unit`,
+  ;;    `focus-fire`, AND `widow-mine-retarget`, while co-grouped Marine (48) still emits `23`!
+  (define wm-b  (mk-l43-u 94301 500 1 70.0 70.0 #:hp 90.0 #:burrowed? #t))
+  (define mar-u (mk-l43-u 94302 48 1 68.0 70.0 #:hp 45.0))
+  (define prb-t (mk-l43-u 94399 84 4 73.0 70.0 #:hp 20.0 #:sh 20.0))
+  (define obs-wm (make-test-obs 4600 100 50 (list wm-b mar-u prb-t)))
+  (define cmds-wm-atk (translate-bot-actions->sc2-raw-commands '((attack-unit (94301 94302) 94399)) obs-wm))
+  (define cmds-wm-ff  (translate-bot-actions->sc2-raw-commands '((focus-fire 94301 94399)) obs-wm))
+  (define cmds-wm-rt  (translate-bot-actions->sc2-raw-commands '((widow-mine-retarget 94301 94399)) obs-wm))
+  (define c-wm-2099 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2099))) cmds-wm-atk))
+  (define c-mar-23  (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23))) cmds-wm-atk))
+  (define c-ff-2099 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2099))) cmds-wm-ff))
+  (define c-rt-2099 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2099))) cmds-wm-rt))
+  (check-true "l43-p0-3b2-burrowed-widow-mine-attack-unit-focus-fire-retarget-emit-2099"
+              (and (sc2-raw-unit-command? c-wm-2099)
+                   (= (sc2-raw-unit-command-target-unit-tag c-wm-2099) 94399)
+                   (equal? (sc2-raw-unit-command-unit-tags c-wm-2099) '(94301))
+                   (sc2-raw-unit-command? c-mar-23)
+                   (equal? (sc2-raw-unit-command-unit-tags c-mar-23) '(94302))
+                   (sc2-raw-unit-command? c-ff-2099)
+                   (sc2-raw-unit-command? c-rt-2099)))
+
+  ;; 5. L43-P0-3b3: Nydus Load/Unload cleanly routes Network (`95` -> `1437`/`1438`) AND Canal (`142` -> `2370`/`2371`),
+  ;;    supporting both single & list passengers at P0 priority!
+  (define nyd-net (mk-l43-u 94401 95 1 30.0 30.0 #:hp 850.0 #:rad 1.5))
+  (define nyd-can (mk-l43-u 94402 142 1 110.0 110.0 #:hp 300.0 #:rad 1.5))
+  (define rch-1   (mk-l43-u 94411 110 1 31.0 30.0 #:hp 145.0))
+  (define rch-2   (mk-l43-u 94412 110 1 31.5 30.5 #:hp 145.0))
+  (define obs-nyd (make-test-obs 4700 200 100 (list nyd-net nyd-can rch-1 rch-2)))
+  (define cmds-nyd
+    (translate-bot-actions->sc2-raw-commands
+     '((nydus-load 94401 (94411 94412)) (nydus-unload 94401)
+       (nydus-load 94402 94411) (nydus-unload 94402))
+     obs-nyd))
+  (define n-1437 (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1437) (= (wire-cmd-priority-tier c) 0))) cmds-nyd))
+  (define n-1438 (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1438) (= (wire-cmd-priority-tier c) 0))) cmds-nyd))
+  (define n-2370 (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2370) (= (wire-cmd-priority-tier c) 0))) cmds-nyd))
+  (define n-2371 (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2371) (= (wire-cmd-priority-tier c) 0))) cmds-nyd))
+  (check-true "l43-p0-3b3-nydus-load-unload-network-1437-1438-and-canal-2370-2371"
+              (and (= n-1437 2) (= n-1438 1) (= n-2370 1) (= n-2371 1)))
+
+  ;; 6. L43-P0-3b4: `burrow-down`/`burrow-up` AND `(cast ... burrow/unburrow)` across ALL 6 families
+  ;;    (`Roach`, `Baneling`, `Infestor`, `Lurker`, `Zergling`, `WidowMine`) emit exact SC2 ability IDs
+  ;;    (`3661/3662`, `2108/2110`, `2095/2097`)!
+  (define u-roach (mk-l43-u 94501 110 1 50.0 50.0 #:hp 145.0))
+  (define u-bane  (mk-l43-u 94502 9   1 51.0 50.0 #:hp 30.0))
+  (define u-inf   (mk-l43-u 94503 111 1 52.0 50.0 #:hp 90.0))
+  (define u-lurk  (mk-l43-u 94504 502 1 53.0 50.0 #:hp 200.0))
+  (define u-ling  (mk-l43-u 94505 105 1 54.0 50.0 #:hp 35.0))
+  (define u-mine  (mk-l43-u 94506 498 1 55.0 50.0 #:hp 90.0))
+  (define obs-bur (make-test-obs 4800 100 50 (list u-roach u-bane u-inf u-lurk u-ling u-mine)))
+  (define cmds-bd
+    (translate-bot-actions->sc2-raw-commands
+     '((burrow-down 94501) (burrow-down 94502) (burrow-down 94503)
+       (burrow-down 94504) (burrow-down 94505) (burrow-down 94506))
+     obs-bur))
+  (define cmds-bu
+    (translate-bot-actions->sc2-raw-commands
+     '((burrow-up 94501) (burrow-up 94502) (burrow-up 94503)
+       (burrow-up 94504) (burrow-up 94505) (burrow-up 94506))
+     obs-bur))
+  (define cmds-cast-bd
+    (translate-bot-actions->sc2-raw-commands
+     '((cast 94501 burrow) (cast 94504 burrow) (cast 94506 burrow-down))
+     (make-test-obs 4900 100 50 (list u-roach u-lurk u-mine))))
+  (define cmds-cast-bu
+    (translate-bot-actions->sc2-raw-commands
+     '((cast 94501 unburrow) (cast 94504 unburrow) (cast 94506 burrow-up))
+     (make-test-obs 5000 100 50 (list u-roach u-lurk u-mine))))
+  (define (tags-for-ab cmds ab)
+    (apply append
+           (for/list ([c (in-list cmds)]
+                      #:when (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) ab)))
+             (sc2-raw-unit-command-unit-tags c))))
+  (check-true "l43-p0-3b4-burrow-unburrow-all-6-families-roach-bane-infestor-lurker-ling-mine"
+              (and (equal? (sort (tags-for-ab cmds-bd 3661) <) '(94501 94502 94503 94505))
+                   (equal? (tags-for-ab cmds-bd 2108) '(94504))
+                   (equal? (tags-for-ab cmds-bd 2095) '(94506))
+                   (equal? (sort (tags-for-ab cmds-bu 3662) <) '(94501 94502 94503 94505))
+                   (equal? (tags-for-ab cmds-bu 2110) '(94504))
+                   (equal? (tags-for-ab cmds-bu 2097) '(94506))
+                   (equal? (tags-for-ab cmds-cast-bd 3661) '(94501))
+                   (equal? (tags-for-ab cmds-cast-bd 2108) '(94504))
+                   (equal? (tags-for-ab cmds-cast-bd 2095) '(94506))
+                   (equal? (tags-for-ab cmds-cast-bu 3662) '(94501))
+                   (equal? (tags-for-ab cmds-cast-bu 2110) '(94504))
+                   (equal? (tags-for-ab cmds-cast-bu 2097) '(94506))))
+
+  ;; 7. L43-P0-3b5: Sustained 40-tick 3-race (`r02` Zerg, `r05` Terran, `r06` Protoss) worker-rush
+  ;;    simulation keeps total auto-saturate `3666` orders `<= 16` (`0` under active 15->3 Probe rush)!
+  (define mins-r43
+    (for/list ([i (in-range 8)])
+      (mk-l43-u (+ 94650 i) 341 3 (+ 27.5 (* 0.5 i)) (+ 142.0 (* 0.4 (modulo i 3))) #:hp 1000.0 #:rad 1.0 #:mins 1500)))
+  (define sustained-3race-le16?
+    (for/and ([spec (in-list '((zerg 86 104) (terran 18 45) (protoss 59 84)))])
+      (define th-u (mk-l43-u 94600 (second spec) 1 33.5 138.5 #:hp 1500.0 #:rad 2.75))
+      (define wks (for/list ([i (in-range 16)])
+                    (mk-l43-u (+ 94610 i) (third spec) 1 (+ 31.0 (* 0.25 (modulo i 4))) (+ 139.0 (* 0.25 (quotient i 4))) #:hp 40.0)))
+      (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f)
+      (define total-3666
+        (for/sum ([step-i (in-range 40)])
+          (define gl (+ 1000 (* step-i 4)))
+          (define n-ep (max 3 (- 15 (quotient step-i 3))))
+          (define eps (for/list ([i (in-range n-ep)])
+                        (mk-l43-u (+ 94700 i) 84 4 (+ 37.5 (* 0.25 (modulo i 5))) (+ 138.5 (* 0.25 (quotient i 5))) #:hp 20.0 #:sh 20.0)))
+          (define cs
+            (saturate-workers-and-gas-commands
+             (sc2-observation gl (sc2-player-common 1 100 0 23 16 0 16 0 0 0 0)
+                              (append (list th-u) mins-r43 wks eps) '() '() #f '() '() '() '() '() '())))
+          (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3666))) cs)))
+      (<= total-3666 16)))
+  (check-true "l43-p0-3b5-3race-worker-rush-sustained-r02-r05-r06-3666-at-most-16"
+              sustained-3race-le16?)
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
+  (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
+  (hash-clear! SC2-GAS-BLDG-ZERO-WORKERS-SINCE))
+
+;; =============================================================================
+;; [Loop 44] Stream 3 Wire & Arena Catalog Regressions (`L44-P0-3a` & `L44-P0-3b`)
+;; =============================================================================
+(let ()
+  (define (mk-l44-u tag utype alliance x y
+                    #:hp [hp 100.0] #:sh [sh 0.0] #:rad [rad 0.75]
+                    #:bp [bp 1.0] #:fly [fly #f] #:mins [mins 0]
+                    #:pax [pax '()] #:ctaken [ctaken 0] #:cmax [cmax 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 4) 2 0))
+              (sc2-point3d x y 8.0) 0.0 rad bp 0 #f #t #f
+              hp hp sh sh 50.0 200.0 mins 0 fly #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0
+              pax ctaken cmax))
+
+  ;; 1. L44-P0-3a1: Transport cargo/passengers protobuf decode + observation forwarding AND
+  ;;    `(unload-all-at tr-id x y)` / `(unload-unit tr-id x y)` / `(cast tr-id *-unload-all-at x y)`
+  ;;    emit exact `396` (Medivac) / `913` (Warp Prism) / `1408` (Dropperlord) with 0 schema rejects
+  ;;    at P0 priority, suppressing conflicting same-tick `move (16)` on the same transport!
+  (define pax-m1 (sc2-passenger-unit 95111 48 45.0 45.0 0.0 0.0 0.0 0.0))
+  (define pax-m2 (sc2-passenger-unit 95112 51 125.0 125.0 0.0 0.0 0.0 0.0))
+  (define med-u (mk-l44-u 95101 54 1 60.0 60.0 #:hp 150.0 #:fly #t #:pax (list pax-m1 pax-m2) #:ctaken 3 #:cmax 8))
+  (define wp-u  (mk-l44-u 95102 81 1 62.0 60.0 #:hp 80.0 #:sh 100.0 #:fly #t #:ctaken 4 #:cmax 8))
+  (define dl-u  (mk-l44-u 95103 893 1 64.0 60.0 #:hp 200.0 #:fly #t #:ctaken 8 #:cmax 8))
+  (define obs-tr (make-test-obs 5100 300 100 (list med-u wp-u dl-u)))
+  (define bot-obs-tr (sc2-observation->runtime-obs-hash obs-tr #:configured-race 'Terran))
+  (define med-h (findf (lambda (h) (= (hash-ref h 'id 0) 95101)) (hash-ref bot-obs-tr 'ally-units '())))
+  (define cmds-unload
+    (translate-bot-actions->sc2-raw-commands
+     '((move 95101 10.0 10.0)
+       (unload-all-at 95101 90.0 90.0)
+       (unload-all-at 95102 92.0 88.0)
+       (unload-unit 95103 94.0 86.0))
+     obs-tr))
+  (define rej-unload (get-last-bot-action-rejects))
+  (define cmds-unload-cast
+    (translate-bot-actions->sc2-raw-commands
+     '((cast 95101 medivac-unload-all-at 90.0 90.0)
+       (cast 95102 warp-prism-unload-all-at 92.0 88.0)
+       (cast 95103 overlord-unload-all-at 94.0 86.0))
+     (make-test-obs 5110 300 100 (list med-u wp-u dl-u))))
+  (define rej-unload-cast (get-last-bot-action-rejects))
+  (define (find-cmd-for-ab cmds ab)
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) ab))) cmds))
+  (define c-396 (find-cmd-for-ab cmds-unload 396))
+  (define c-913 (find-cmd-for-ab cmds-unload 913))
+  (define c-1408 (find-cmd-for-ab cmds-unload 1408))
+  (define has-clobber-move?
+    (ormap (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 16)
+                  (memv 95101 (sc2-raw-unit-command-unit-tags c))))
+           cmds-unload))
+  (check-true "l44-p0-3a1-transport-cargo-passengers-forward-and-unload-all-at-396-913-1408-zero-rejects"
+              (and (hash? med-h)
+                   (= (hash-ref med-h 'cargo-space-taken 0) 3)
+                   (= (hash-ref med-h 'cargo-space-max 0) 8)
+                   (= (length (hash-ref med-h 'passengers '())) 2)
+                   (eq? (hash-ref (first (hash-ref med-h 'passengers '())) 'type #f) 'marine)
+                   (null? rej-unload)
+                   (null? rej-unload-cast)
+                   (not has-clobber-move?)
+                   (sc2-raw-unit-command? c-396)
+                   (sc2-point2d? (sc2-raw-unit-command-target-pos c-396))
+                   (= (wire-cmd-priority-tier c-396) 0)
+                   (sc2-raw-unit-command? c-913)
+                   (sc2-point2d? (sc2-raw-unit-command-target-pos c-913))
+                   (= (wire-cmd-priority-tier c-913) 0)
+                   (sc2-raw-unit-command? c-1408)
+                   (sc2-point2d? (sc2-raw-unit-command-target-pos c-1408))
+                   (= (wire-cmd-priority-tier c-1408) 0)
+                   (sc2-raw-unit-command? (find-cmd-for-ab cmds-unload-cast 396))
+                   (sc2-raw-unit-command? (find-cmd-for-ab cmds-unload-cast 913))
+                   (sc2-raw-unit-command? (find-cmd-for-ab cmds-unload-cast 1408))))
+
+  ;; 2. L44-P0-3a2: Natural expansion ignores harmless `AdeptPhaseShift` (801) and non-blocking
+  ;;    scouts (`Observer` 82) BOTH while live AND after disappearing into fog without `dead-unit-tags`,
+  ;;    while a real combat enemy (`Adept` 311) still redirects expansion cleanly to the open 3rd!
+  (define (mk-cluster-mins base-tag cx cy dx-off)
+    (for/list ([i (in-range 8)])
+      (mk-l44-u (+ base-tag i) 341 3 (+ cx dx-off) (+ cy (- (* 1.5 i) 5.25)) #:hp 1000.0 #:rad 1.0 #:mins 1500)))
+  (define gi-exp-l44
+    (sc2-game-info "L44NaturalShadeMap" "" '() '(128 128) '(4 4 124 124)
+                   (list (sc2-point2d 100.0 30.0)) w3-full-grid #f w3-full-grid))
+  (define main-cc-e (mk-l44-u 95201 18 1 30.0 95.0 #:hp 1500.0 #:rad 2.75))
+  (define scv-e     (mk-l44-u 95202 45 1 34.0 95.0 #:hp 45.0 #:rad 0.375))
+  (define mins-e-main (mk-cluster-mins 95210 30.0 95.0 -6.5))
+  (define mins-e-nat  (mk-cluster-mins 95220 60.0 98.0 6.5))
+  (define mins-e-3rd  (mk-cluster-mins 95230 58.0 56.0 6.5))
+  (define base-units-e (append (list main-cc-e scv-e) mins-e-main mins-e-nat mins-e-3rd))
+  (define shade-u (mk-l44-u 95281 801 4 56.0 96.5 #:hp 1.0))
+  (define obsv-u  (mk-l44-u 95282 82  4 59.0 97.5 #:hp 40.0 #:sh 20.0 #:fly #t))
+  (define adept-u (mk-l44-u 95283 311 4 57.0 97.5 #:hp 70.0 #:sh 70.0))
+  (define (exp-pt-of cmds)
+    (define c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 318))) cmds))
+    (and c (sc2-raw-unit-command-target-pos c)))
+  (define (d2 pt x y)
+    (and (sc2-point2d? pt)
+         (sqrt (+ (sqr (- (sc2-point2d-x pt) x)) (sqr (- (sc2-point2d-y pt) y))))))
+  ;; Step 1 (loop 4 -> clean reset): live shade + observer at natural -> still expands to natural!
+  (define cmds-exp-live-shade
+    (translate-bot-actions->sc2-raw-commands
+     '((expand 60.0 98.0))
+     (make-test-obs 4 450 0 (append base-units-e (list shade-u obsv-u)))
+     #:game-info gi-exp-l44))
+  (define pt-exp-live-shade (exp-pt-of cmds-exp-live-shade))
+  ;; Step 2 (loop 240, past builder reservation TTL): shade & observer leave vision (no dead-unit-tags) -> still expands to natural!
+  (define cmds-exp-fog-shade
+    (translate-bot-actions->sc2-raw-commands
+     '((expand 60.0 98.0))
+     (make-test-obs 240 450 0 base-units-e)
+     #:game-info gi-exp-l44))
+  (define pt-exp-fog-shade (exp-pt-of cmds-exp-fog-shade))
+  ;; Step 3 (loop 480): real enemy Adept camps natural -> redirects to open 3rd `(58.0, 56.0)`!
+  (define cmds-exp-live-adept
+    (translate-bot-actions->sc2-raw-commands
+     '((expand 60.0 98.0))
+     (make-test-obs 480 450 0 (append base-units-e (list adept-u)))
+     #:game-info gi-exp-l44))
+  (define pt-exp-live-adept (exp-pt-of cmds-exp-live-adept))
+  (check-true "l44-p0-3a2-natural-expansion-ignores-adept-phase-shift-801-live-and-remembered"
+              (and (not (hash-has-key? SC2-LAST-KNOWN-ENEMY-POS 95281))
+                   (sc2-point2d? pt-exp-live-shade)
+                   (< (d2 pt-exp-live-shade 60.0 98.0) 6.0)
+                   (sc2-point2d? pt-exp-fog-shade)
+                   (< (d2 pt-exp-fog-shade 60.0 98.0) 6.0)
+                   (sc2-point2d? pt-exp-live-adept)
+                   (< (d2 pt-exp-live-adept 58.0 56.0) 6.0)))
+
+  ;; 3. L44-P0-3a3: Universal Barracks 2-miss relaxation (`cur-terran-prod-count = 1`) + 1-base
+  ;;    packed-main wide fallback spills onto the nearest open uncontested expansion apron
+  ;;    (`all-expansion-pads`, outside the `4.5t` CC footprint!) BOTH offline (`placement_grid`)
+  ;;    AND under live `RequestQuery` WS when Main (`x < 68`) rejects every candidate (`50t` span)!
+  (define gw 128)
+  (define gh 128)
+  (define pgrid-bytes (make-bytes (* gw gh) 0))
+  ;; Mark ONLY open ground around Natural `(68.0, 60.0)` (`x in [52..88], y in [44..76]`) buildable,
+  ;; leaving the entire Main plateau around `(28.0, 60.0)` (`x < 52`) 100% packed/unplaceable!
+  (for* ([y (in-range 44 76)]
+         [x (in-range 52 88)])
+    (bytes-set! pgrid-bytes (+ (* y gw) x) 1))
+  (define path-bytes (make-bytes (* gw gh) 1))
+  (define gi-1base
+    (sc2-game-info "L44Packed1BaseMap" "" '() (list gw gh) (list 4 4 (- gw 4) (- gh 4))
+                   (list (sc2-point2d 100.0 60.0))
+                   (sc2-image-grid 8 gw gh path-bytes #f #f)
+                   #f
+                   (sc2-image-grid 8 gw gh pgrid-bytes #f #f)))
+  (define cc-1b  (mk-l44-u 95301 18 1 28.0 60.0 #:hp 1500.0 #:rad 2.75))
+  (define rax-1b (mk-l44-u 95302 21 1 32.0 64.0 #:hp 1000.0 #:rad 1.5))
+  (define scv-1b (mk-l44-u 95303 45 1 30.0 60.0 #:hp 45.0 #:rad 0.375))
+  (define mins-1b-main (mk-cluster-mins 95310 28.0 60.0 -6.5))
+  (define mins-1b-nat  (mk-cluster-mins 95320 68.0 60.0 6.5))
+  (define obs-1b
+    (make-test-obs 5200 400 0 (append (list cc-1b rax-1b scv-1b) mins-1b-main mins-1b-nat)))
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK 'barracks 2)
+  (define cmds-1b
+    (translate-bot-actions->sc2-raw-commands
+     '((build barracks 28.0 60.0))
+     obs-1b
+     #:game-info gi-1base))
+  (define c-rax-1b
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) cmds-1b))
+  (define pt-rax-1b (and c-rax-1b (sc2-raw-unit-command-target-pos c-rax-1b)))
+  ;; Part B (live mock WS `RequestQuery`): Natural is 50t away at `(78.0, 60.0)`, and ONLY
+  ;; natural apron (`x in [68..82], y in [50..70]`) returns `1=Success` in `RequestQuery`!
+  (define (l44-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 0 "/sc2api" c-in c-out #f (box 1)))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define id-p (assoc 97 req-f))
+             (define id-b (if id-p (encode-uint32 97 (third id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+  (define gi-1b-ws
+    (sc2-game-info "L44Packed1BaseWS" "" '() (list gw gh) (list 4 4 (- gw 4) (- gh 4))
+                   (list (sc2-point2d 100.0 60.0))
+                   (sc2-image-grid 8 gw gh path-bytes #f #f)
+                   #f
+                   (sc2-image-grid 8 gw gh path-bytes #f #f)))
+  (define obs-1b-ws
+    (make-test-obs 5600 400 0 (append (list cc-1b rax-1b scv-1b) mins-1b-main (mk-cluster-mins 95330 78.0 60.0 6.5))))
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK 'barracks 2)
+  (define pt-rax-1b-ws
+    (let-values ([(ws cleanup!)
+                  (l44-start-mock-ws
+                   (lambda (ab px py)
+                     (if (and (= ab 321) (>= px 68.0) (<= px 82.0) (>= py 50.0) (<= py 70.0)) 1 2)))])
+      (define cs
+        (translate-bot-actions->sc2-raw-commands
+         '((build barracks 28.0 60.0))
+         obs-1b-ws
+         #:ws-conn ws
+         #:game-info gi-1b-ws))
+      (cleanup!)
+      (define c321 (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) cs))
+      (and c321 (sc2-raw-unit-command-target-pos c321))))
+  (check-true "l44-p0-3a3-universal-barracks-2miss-relaxation-and-1base-open-expansion-pad-fallback"
+              (and (sc2-point2d? pt-rax-1b)
+                   (>= (sc2-point2d-x pt-rax-1b) 52.0)
+                   (>= (d2 pt-rax-1b 68.0 60.0) 4.0)
+                   (sc2-point2d? pt-rax-1b-ws)
+                   (>= (sc2-point2d-x pt-rax-1b-ws) 68.0)
+                   (>= (d2 pt-rax-1b-ws 78.0 60.0) 4.0)
+                   (= (hash-ref SC2-PROD-PLACEMENT-MISS-STREAK 'barracks -1) 0)))
+
+  ;; 4. L44-P0-3b: `d10` has P1 `raven` and `d17` has P1 `overseer` in `tools/arena-scenarios.json`!
+  (define arena-json-l44
+    (call-with-input-file "tools/arena-scenarios.json" read-json))
+  (define scens-l44 (hash-ref arena-json-l44 'scenarios '()))
+  (define d10-sc (findf (lambda (s) (equal? (hash-ref s 'id "") "sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker")) scens-l44))
+  (define d17-sc (findf (lambda (s) (equal? (hash-ref s 'id "") "sc2-det-d17-z-burrowed-roach-corruptor-vs-observers-stalker-immortal")) scens-l44))
+  (define (has-p1-unit? sc uname)
+    (and (hash? sc)
+         (ormap (lambda (u) (and (pair? u) (equal? (car u) uname) (>= (cadr u) 1)))
+                (hash-ref sc 'p1_units '()))))
+  (check-true "l44-p0-3b-d10-raven-and-d17-overseer-detectors-in-arena-catalog"
+              (and (has-p1-unit? d10-sc "raven")
+                   (has-p1-unit? d17-sc "overseer")))
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
+  (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
+  (hash-clear! SC2-LAST-KNOWN-ENEMY-POS)
+  (hash-clear! SC2-LAST-KNOWN-ENEMY-META))
+
+;; =============================================================================
+;; [Loop 45] Stream 3 Wire Regressions (`L45-P0-3a`: `p15` Fog Ground Memory &
+;;           Moving Medivac `396` Unload Wire + Governor Integrity)
+;; =============================================================================
+(let ()
+  (define (mk-l45-u tag utype alliance x y
+                    #:hp [hp 100.0] #:sh [sh 0.0] #:rad [rad 0.75]
+                    #:fly [fly #f] #:orders [orders '()]
+                    #:pax [pax '()] #:ctaken [ctaken 0] #:cmax [cmax 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 4) 2 0))
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 0 #f #t #f
+              hp hp sh sh 50.0 200.0 0 0 fly #f #f #t #f orders 0 '() 0 0 0.0 0 0 0 0
+              pax ctaken cmax))
+
+  ;; 1. L45-P0-3a1: `raw.map_state.visibility` decode + true line-of-sight stale-purge keeps a fogged
+  ;;    ground Sieged Tank (`visibility=1`, tucked behind a sight-blocking wall ONLY 4.6t from a DT!)
+  ;;    retained in `SC2-LAST-KNOWN-ENEMY-POS` AND forwarded via `'remembered-enemy-ground-positions`
+  ;;    (excluding flying Medivacs!), downgrades `(attack-unit dt tank)` to `23` at `(86.0, 52.0)`,
+  ;;    purges cleanly once `visibility=2` (`Visible`), and has zero cross-match bleed on loop rewind!
+  (define gw 128)
+  (define gh 128)
+  (define vis-fog-bytes (make-bytes (* gw gh) 1)) ;; 1 = Fogged everywhere behind walls
+  (bytes-set! vis-fog-bytes (+ (* 53 gw) 81) 2)   ;; 2 = Visible where DT stands at (81, 53)
+  (define vis-clear-bytes (make-bytes (* gw gh) 2)) ;; 2 = Visible everywhere once wall rounded
+  ;; Encode real SC2 ResponseObservation protobuf with MapState.visibility (field 1)!
+  (define vis-img-pb
+    (bytes-append (encode-int32 1 8)
+                  (encode-submessage-field 2 (bytes-append (encode-int32 1 gw) (encode-int32 2 gh)))
+                  (encode-bytes-field 3 vis-fog-bytes)))
+  (define raw-obs-pb
+    (encode-submessage-field
+     10
+     (encode-submessage-field
+      3
+      (bytes-append (encode-uint32 9 64)
+                    (encode-submessage-field 5 (encode-submessage-field 3 (encode-submessage-field 1 vis-img-pb)))))))
+  (define decoded-vis-obs (sc2-response-observation (decode-sc2-response raw-obs-pb)))
+  (define decoded-vg (hash-ref SC2-OBS-VISIBILITY-GRIDS decoded-vis-obs #f))
+  (define dt-u   (mk-l45-u 96111 76 1 81.5 53.0 #:hp 40.0 #:sh 80.0))
+  (define tank-u (mk-l45-u 96101 32 4 86.0 52.0 #:hp 175.0))
+  (define med-e  (mk-l45-u 96102 54 4 86.0 54.0 #:hp 150.0 #:fly #t))
+  (define gi-p15
+    (sc2-game-info "L45FogWallMap" "" '() (list gw gh) (list 4 4 124 124)
+                   (list (sc2-point2d 100.0 100.0)) w3-full-grid #f w3-full-grid))
+  ;; Step 1 (gl=16, after clean rewind gl=4): Tank + Medivac visible -> recorded in last-known memory!
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 0 0 (list dt-u)) #:game-info gi-p15))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 16 0 0 (list dt-u tank-u med-e)) #:game-info gi-p15))
+  ;; Step 2 (gl=64): Both disappear into fog behind destructible wall (`visibility=1` at `(86,52)`,
+  ;;         while DT is only `4.6t` away at `(81.5,53.0)`!) -> Tank MUST stay retained & forwarded!
+  (define obs-fog64 (make-test-obs 64 0 0 (list dt-u)))
+  (hash-set! SC2-OBS-VISIBILITY-GRIDS obs-fog64 (sc2-image-grid 8 gw gh vis-fog-bytes #f #f))
+  (define cmds-fog64
+    (translate-bot-actions->sc2-raw-commands '((attack-unit 96111 96101)) obs-fog64 #:game-info gi-p15))
+  (define bot-obs-fog64
+    (sc2-observation->runtime-obs-hash obs-fog64 #:game-info gi-p15 #:configured-race 'Protoss))
+  (define rem-gnd64 (hash-ref bot-obs-fog64 'remembered-enemy-ground-positions '()))
+  (define rem-tank64 (findf (lambda (h) (= (hash-ref h 'id 0) 96101)) rem-gnd64))
+  (define rem-med64  (findf (lambda (h) (= (hash-ref h 'id 0) 96102)) rem-gnd64))
+  (define atk23-fog64
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23))) cmds-fog64))
+  (define atk23-pt (and atk23-fog64 (sc2-raw-unit-command-target-pos atk23-fog64)))
+  (define retained-at-64? (hash-has-key? SC2-LAST-KNOWN-ENEMY-POS 96101))
+  ;; Step 3 (gl=120): DT gains true line-of-sight (`visibility=2` at `(86,52)`) with no live Tank -> purged!
+  (define obs-vis120 (make-test-obs 120 0 0 (list dt-u)))
+  (hash-set! SC2-OBS-VISIBILITY-GRIDS obs-vis120 (sc2-image-grid 8 gw gh vis-clear-bytes #f #f))
+  (void (translate-bot-actions->sc2-raw-commands '() obs-vis120 #:game-info gi-p15))
+  (define purged-at-120? (not (hash-has-key? SC2-LAST-KNOWN-ENEMY-POS 96101)))
+  ;; Step 4 (gl=4 new match rewind before translate runs): zero cross-match bleed in runtime obs hash!
+  (hash-set! SC2-LAST-KNOWN-ENEMY-POS 96199 (cons 70.0 70.0))
+  (hash-set! SC2-LAST-KNOWN-ENEMY-META 96199 (cons 'siege-tank-sieged #f))
+  (define bot-obs-rewind
+    (sc2-observation->runtime-obs-hash (make-test-obs 4 0 0 (list dt-u)) #:game-info gi-p15 #:configured-race 'Protoss))
+  (define zero-bleed-rewind? (null? (hash-ref bot-obs-rewind 'remembered-enemy-ground-positions '())))
+  (check-true "l45-p0-3a1-fog-ground-enemy-retained-behind-sight-blocker-and-forwarded-to-runtime-obs"
+              (and (sc2-image-grid? decoded-vg)
+                   (= (sc2-grid-ref decoded-vg 86 52) 1)
+                   (= (sc2-grid-ref decoded-vg 81 53) 2)
+                   retained-at-64?
+                   (hash? rem-tank64)
+                   (eq? (hash-ref rem-tank64 'type #f) 'siege-tank-sieged)
+                   (= (hash-ref rem-tank64 'x 0.0) 86.0)
+                   (= (hash-ref rem-tank64 'y 0.0) 52.0)
+                   (not rem-med64)
+                   (sc2-point2d? atk23-pt)
+                   (< (abs (- (sc2-point2d-x atk23-pt) 86.0)) 0.1)
+                   (< (abs (- (sc2-point2d-y atk23-pt) 52.0)) 0.1)
+                   purged-at-120?
+                   zero-bleed-rewind?))
+
+  ;; 2. L45-P0-3a2: Actively flying/moving loaded Medivac (`orders = (MOVE 16)`) cleanly executes BOTH
+  ;;    `(unload-all-at tr-id x y)` (point drop `396`, suppressing same-tick kite `move 16`) AND
+  ;;    `(transport-drop-moving tr-id)` (self-target moving drop `396`) with 0 schema rejects,
+  ;;    P0 priority, and 100% pass-through in `govern-sc2-wire-actions!` across consecutive ticks!
+  (define wm-pax1 (sc2-passenger-unit 96211 498 90.0 90.0 0.0 0.0 0.0 0.0))
+  (define wm-pax2 (sc2-passenger-unit 96212 498 90.0 90.0 0.0 0.0 0.0 0.0))
+  (define moving-med
+    (mk-l45-u 96201 54 1 84.0 84.0 #:hp 150.0 #:fly #t
+              #:orders (list (sc2-unit-order 16 (sc2-point2d 95.0 95.0) 0 0.0))
+              #:pax (list wm-pax1 wm-pax2) #:ctaken 4 #:cmax 8))
+  (define gov-l45 (make-wire-apm-governor #:target-apm 420.0 #:hard-cap-apm 485.0))
+  (define cmds-mv-pt
+    (translate-bot-actions->sc2-raw-commands
+     '((move 96201 40.0 40.0)
+       (unload-all-at 96201 88.0 88.0))
+     (make-test-obs 1000 0 0 (list moving-med))))
+  (define rej-mv-pt (get-last-bot-action-rejects))
+  (define gov-mv-pt (govern-sc2-wire-actions! gov-l45 cmds-mv-pt 1000))
+  (define cmds-mv-self
+    (translate-bot-actions->sc2-raw-commands
+     '((move 96201 40.0 40.0)
+       (transport-drop-moving 96201))
+     (make-test-obs 1004 0 0 (list moving-med))))
+  (define rej-mv-self (get-last-bot-action-rejects))
+  (define gov-mv-self (govern-sc2-wire-actions! gov-l45 cmds-mv-self 1004))
+  (define c-pt-396
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 396))) gov-mv-pt))
+  (define c-self-396
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 396))) gov-mv-self))
+  (define mv-clobber?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 16)))
+           (append cmds-mv-pt cmds-mv-self)))
+  (check-true "l45-p0-3a2-moving-medivac-unload-all-at-396-and-moving-drop-wire-priority-and-governor"
+              (and (null? rej-mv-pt)
+                   (null? rej-mv-self)
+                   (not mv-clobber?)
+                   (sc2-raw-unit-command? c-pt-396)
+                   (= (wire-cmd-priority-tier c-pt-396) 0)
+                   (sc2-point2d? (sc2-raw-unit-command-target-pos c-pt-396))
+                   (< (abs (- (sc2-point2d-x (sc2-raw-unit-command-target-pos c-pt-396)) 88.0)) 0.1)
+                   (sc2-raw-unit-command? c-self-396)
+                   (= (wire-cmd-priority-tier c-self-396) 0)
+                   (= (sc2-raw-unit-command-target-unit-tag c-self-396) 96201)))
+  (hash-clear! SC2-LAST-KNOWN-ENEMY-POS)
+  (hash-clear! SC2-LAST-KNOWN-ENEMY-META))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"

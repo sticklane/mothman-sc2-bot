@@ -61,13 +61,32 @@ VALID_TERRAINS = (
     "mineral-line-harass",
 )
 VALID_TIERS = ("canonical", "regression", "econ-harass")
-VALID_SCORING_MODES = ("combat", "mineral-defense")
+VALID_SCORING_MODES = ("combat", "mineral-defense", "worker-runby")
+VALID_CATEGORIES = (
+    "detection-snipe",
+    "stalker-blink",
+    "runby-offense",
+    "runby-defense",
+    "stasis-ward",
+    "yamato-jump",
+    "transport-nydus",
+    "burrow-micro",
+    "spellcasters",
+    "kiting-concave",
+    "flank-surround",
+    "high-ground-ramp",
+    "air-superiority",
+    "early-rush-defense",
+    "capital-endgame",
+    "regression",
+)
+VALID_RACES = ("Protoss", "Terran", "Zerg")
 MINING_ORDER_ABILITY_IDS = {295, 296, 298, 299, 1183, 1184, 3666}
 CARRYING_MINERAL_BUFF_IDS = {271, 272}
 
-# Canonical SC2 UnitTypeIds (Blizzard 4.10 — synced with add-arena-scenario skill)
+# Canonical SC2 UnitTypeIds (Blizzard 4.10 Base75689 — synced with add-arena-scenario skill)
 UNIT_IDS: dict[str, int] = {
-    # Terran (21)
+    # Terran (24)
     "marine": 48,
     "reaper": 49,
     "marauder": 51,
@@ -91,7 +110,8 @@ UNIT_IDS: dict[str, int] = {
     "scv": 45,
     "planetary-fortress": 130,
     "missile-turret": 23,
-    # Protoss (18)
+    "bunker": 24,
+    # Protoss (23)
     "zealot": 73,
     "stalker": 74,
     "sentry": 77,
@@ -110,7 +130,12 @@ UNIT_IDS: dict[str, int] = {
     "observer": 82,
     "warp-prism": 81,
     "probe": 84,
-    # Zerg (27 — incl. burrowed variants for burrow micro / ambushes)
+    "photon-cannon": 66,
+    "pylon": 60,
+    "shield-battery": 1910,
+    "oracle-stasis-trap": 732,
+    "stasis-trap": 732,
+    # Zerg (35 — incl. burrowed variants, static detectors, Dropperlord & Nydus)
     "zergling": 105,
     "zergling-burrowed": 119,
     "baneling": 9,
@@ -136,9 +161,24 @@ UNIT_IDS: dict[str, int] = {
     "lurker-mp": 502,
     "lurker-mp-burrowed": 503,
     "overseer": 129,
+    "overlord": 106,
+    "overlord-transport": 893,
+    "dropperlord": 893,
+    "spore-crawler": 99,
+    "spine-crawler": 98,
+    "nydus-canal": 142,
+    "nydus-worm": 142,
+    "nydus-network": 95,
+    "creep-tumor-burrowed": 137,
     "drone": 104,
     "drone-burrowed": 116,
 }
+
+# Canonical primary display name per UnitTypeId (avoids alias collisions)
+CANONICAL_UNIT_NAMES: dict[int, str] = {}
+for _uname, _uid in UNIT_IDS.items():
+    if _uid not in CANONICAL_UNIT_NAMES:
+        CANONICAL_UNIT_NAMES[_uid] = _uname
 
 # Approximate mineral + 1.5*gas weighted combat value per unit (synced with add-arena-scenario skill)
 UNIT_VALUES: dict[int, float] = {
@@ -166,6 +206,7 @@ UNIT_VALUES: dict[int, float] = {
     45: 50.0,     # scv
     130: 775.0,   # planetary-fortress (550M + 1.5*150G)
     23: 100.0,    # missile-turret
+    24: 100.0,    # bunker
     # Protoss
     73: 100.0,    # zealot
     74: 200.0,    # stalker
@@ -185,6 +226,10 @@ UNIT_VALUES: dict[int, float] = {
     82: 137.5,    # observer
     81: 250.0,    # warp-prism
     84: 50.0,     # probe
+    66: 150.0,    # photon-cannon
+    60: 100.0,    # pylon
+    1910: 100.0,  # shield-battery
+    732: 50.0,    # oracle-stasis-trap
     # Zerg
     105: 25.0,    # zergling
     119: 25.0,    # zergling-burrowed
@@ -211,6 +256,13 @@ UNIT_VALUES: dict[int, float] = {
     502: 375.0,   # lurker-mp
     503: 375.0,   # lurker-mp-burrowed
     129: 225.0,   # overseer
+    106: 100.0,   # overlord
+    893: 150.0,   # overlord-transport (Dropperlord)
+    99: 125.0,    # spore-crawler
+    98: 150.0,    # spine-crawler
+    142: 100.0,   # nydus-canal / nydus-worm
+    95: 450.0,    # nydus-network
+    137: 0.0,     # creep-tumor-burrowed
     104: 50.0,    # drone
     116: 50.0,    # drone-burrowed
 }
@@ -219,21 +271,39 @@ DEFAULT_MAX_LOOPS = 960          # ~42.9s real Faster SC2 combat
 STALEMATE_NO_DAMAGE_LOOPS = 168  # 7.5s with zero HP/shield damage or unit deaths -> stalemate stop
 POINTS_WIN_TRADE = 1.25          # trade >= 1.25x on timeout/stalemate -> Points Win
 POINTS_LOSS_TRADE = 0.80         # trade <= 0.80x on timeout/stalemate -> Points Loss
+MAX_SCENARIOS_PER_BATCH = 10     # cap monotonic upgrade chain batch length to keep containers crisp
 
 TOWNHALL_IDS = {18, 59, 86, 100, 101, 130, 132}
-STRUCTURE_IDS = {130, 23}
-STRUCTURE_FOOTPRINTS: dict[int, int] = {130: 5, 23: 2}
+STRUCTURE_IDS = {130, 23, 66, 99, 98, 60, 1910, 24, 142, 95}
+STATIC_TRAP_IDS = {732, 137}  # oracle-stasis-trap, creep-tumor-burrowed (pathable spawn, unarmed)
+STRUCTURE_FOOTPRINTS: dict[int, int] = {
+    130: 5, 23: 2, 66: 2, 99: 2, 98: 2, 60: 2, 1910: 2, 24: 3, 142: 3, 95: 3,
+}
+DETECTOR_IDS = {23, 66, 99, 82, 56, 129}  # missile-turret, photon-cannon, spore-crawler, observer, raven, overseer
+TRANSPORT_IDS = {54, 81, 893, 142, 95, 24}  # medivac, warp-prism, overlord-transport, nydus-canal, nydus-network, bunker
+TRANSPORT_LOAD_ABILITIES: dict[int, int] = {
+    54: 394,    # LOAD_MEDIVAC
+    81: 911,    # LOAD_WARPPRISM
+    893: 1406,  # LOAD_OVERLORD
+    142: 2370,  # LOAD_NYDUSWORM
+    95: 1437,   # LOAD_NYDUSNETWORK
+    24: 407,    # LOAD_BUNKER
+}
 WORKER_IDS = {45, 84, 104, 116}
 COMBAT_IDS = set(UNIT_VALUES) - WORKER_IDS
 AIR_UNIT_IDS = {
-    54, 35, 55, 56, 689, 734, 57,  # Terran air
-    78, 495, 80, 79, 496, 82, 81,  # Protoss air
-    108, 112, 499, 114, 129,       # Zerg air
+    54, 35, 55, 56, 689, 734, 57,       # Terran air
+    78, 495, 80, 79, 496, 82, 81,       # Protoss air
+    108, 112, 499, 114, 129, 106, 893,  # Zerg air
 }
 MINERAL_IDS = {146, 147, 341, 483, 665, 666, 796, 797, 884, 885}
 
 # Exact SC2 4.10 weapon/combat capability tables for unarmed/incapable-survivor termination
-PURE_UNARMED_IDS = {54, 82, 81, 129}  # medivac, observer, warp-prism, overseer
+PURE_UNARMED_IDS = {
+    54, 82, 81, 129,             # medivac, observer, warp-prism, overseer
+    60, 1910, 24, 732,           # pylon, shield-battery, bunker (unless loaded), oracle-stasis-trap
+    142, 95, 106, 893, 137,      # nydus-canal, nydus-network, overlord, overlord-transport, creep-tumor-burrowed
+}
 # Energy-gated spellcasters with no standard auto-attack: uid -> (min_energy, can_hit_ground, can_hit_air)
 ENERGY_CASTER_CAPS: dict[int, tuple[float, bool, bool]] = {
     56: (50.0, True, True),     # raven (Auto-Turret 50e -> G+A)
@@ -243,35 +313,33 @@ ENERGY_CASTER_CAPS: dict[int, tuple[float, bool, bool]] = {
     495: (15.0, True, False),   # oracle (Pulsar Beam -> Ground only)
 }
 GROUND_ONLY_WEAPON_IDS = {
-    51, 33, 32, 53, 484, 49, 55, 45, 130,                # Terran G-only (incl. planetary-fortress)
-    73, 311, 83, 4, 694, 76, 84,                         # Protoss G-only
-    105, 119, 9, 115, 110, 118, 109, 131, 114, 502, 503, 494, 493, 104, 116,  # Zerg G-only
+    51, 33, 32, 53, 484, 49, 55, 45, 130,                                        # Terran G-only (incl. planetary-fortress)
+    73, 311, 83, 4, 694, 76, 84,                                                 # Protoss G-only
+    105, 119, 9, 115, 110, 118, 109, 131, 114, 502, 503, 494, 493, 98, 104, 116, # Zerg G-only (incl. spine-crawler)
 }
-AIR_ONLY_WEAPON_IDS = {112, 23}  # corruptor, missile-turret (air-only weapon + detection)
+AIR_ONLY_WEAPON_IDS = {112, 23, 99}  # corruptor, missile-turret, spore-crawler
 BOTH_WEAPON_IDS = {
     48, 50, 52, 498, 500, 692, 57,                       # Terran G+A
-    74, 77, 141, 80, 79, 496,                            # Protoss G+A
+    74, 77, 141, 80, 79, 496, 66,                        # Protoss G+A (incl. photon-cannon)
     688, 690, 107, 117, 108, 126, 125,                   # Zerg G+A
 }
 MASSIVE_GROUND_IDS = {52, 4, 141, 109, 131}  # thor, colossus, archon, ultralisk (immune to Graviton Beam)
 
 
-def unit_attack_caps(u: Any, allies: list[Any], is_dummy: bool = False) -> tuple[bool, bool]:
-    """Return (can_hit_ground, can_hit_air) for SC2 unit `u` given its current energy & allies."""
-    uid = int(u.unit_type)
+def _uid_attack_caps_basic(uid: int, energy: float, allies: list[Any], is_dummy: bool = False) -> tuple[bool, bool]:
     if uid in PURE_UNARMED_IDS:
         return (False, False)
     if uid in ENERGY_CASTER_CAPS:
         min_e, cg, ca = ENERGY_CASTER_CAPS[uid]
-        if float(getattr(u, "energy", 0.0)) >= min_e:
+        if energy >= min_e:
             return (cg, ca)
         return (False, False)
     if uid == 75:  # high-templar: PsiBlast hits Ground; PsiStorm (75e) hits Ground+Air
-        return (True, float(getattr(u, "energy", 0.0)) >= 75.0)
+        return (True, energy >= 75.0)
     if uid == 78:  # phoenix: Air weapon; Graviton Beam lifts non-massive Ground if >=2 Phoenixes & >=50e
         can_lift = (
             sum(1 for a in allies if int(a.unit_type) == 78) >= 2
-            and float(getattr(u, "energy", 0.0)) >= 50.0
+            and energy >= 50.0
         )
         return (can_lift, True)
     if uid in (35, 689):  # viking-fighter, liberator (MicroDummy never morphs)
@@ -285,6 +353,61 @@ def unit_attack_caps(u: Any, allies: list[Any], is_dummy: bool = False) -> tuple
     if uid in AIR_ONLY_WEAPON_IDS:
         return (False, True)
     return (True, True)
+
+
+def unit_attack_caps(u: Any, allies: list[Any], is_dummy: bool = False) -> tuple[bool, bool]:
+    """Return (can_hit_ground, can_hit_air) for SC2 unit `u` (including any loaded passengers)."""
+    uid = int(u.unit_type)
+    cg, ca = _uid_attack_caps_basic(uid, float(getattr(u, "energy", 0.0)), allies, is_dummy=is_dummy)
+    passengers = getattr(u, "passengers", None) or ()
+    if passengers:
+        for p in passengers:
+            pcg, pca = _uid_attack_caps_basic(int(p.unit_type), float(getattr(p, "energy", 0.0)), allies, is_dummy=is_dummy)
+            cg = cg or pcg
+            ca = ca or pca
+    return (cg, ca)
+
+
+def units_total_value(units: list[Any]) -> float:
+    """Sum resource value of visible units PLUS any passengers inside transports/bunkers/nydus."""
+    total = 0.0
+    for u in units:
+        total += UNIT_VALUES.get(int(u.unit_type), 100.0)
+        for p in getattr(u, "passengers", None) or ():
+            total += UNIT_VALUES.get(int(p.unit_type), 100.0)
+    return total
+
+
+def units_total_count(units: list[Any]) -> int:
+    """Count visible units PLUS any passengers inside transports/bunkers/nydus."""
+    total = 0
+    for u in units:
+        total += 1 + len(getattr(u, "passengers", None) or ())
+    return total
+
+
+def units_type_counts(units: list[Any]) -> dict[str, int]:
+    """Aggregate canonical unit name counts including loaded passengers."""
+    counts: dict[str, int] = {}
+    for u in units:
+        nm = CANONICAL_UNIT_NAMES.get(int(u.unit_type), str(u.unit_type))
+        counts[nm] = counts.get(nm, 0) + 1
+        for p in getattr(u, "passengers", None) or ():
+            pnm = CANONICAL_UNIT_NAMES.get(int(p.unit_type), str(p.unit_type))
+            counts[pnm] = counts.get(pnm, 0) + 1
+    return counts
+
+
+def count_matching_unit_ids(units: list[Any], id_set: set[int]) -> int:
+    """Count units (including passengers) whose unit_type is in `id_set`."""
+    cnt = 0
+    for u in units:
+        if int(u.unit_type) in id_set:
+            cnt += 1
+        for p in getattr(u, "passengers", None) or ():
+            if int(p.unit_type) in id_set:
+                cnt += 1
+    return cnt
 
 
 def count_combat_capable(units: list[Any], is_dummy: bool = False) -> int:
@@ -351,12 +474,16 @@ UPGRADE_SPECS: dict[str, tuple[str, int, int, bool, tuple[int, int] | None, int 
     "GroovedSpines": ("Zerg", 91, 1282, False, None, 101),
     "MuscularAugments": ("Zerg", 91, 1283, False, None, 101),
     "ChitinousPlating": ("Zerg", 93, 265, False, None, 101),
+    "AnabolicSynthesis": ("Zerg", 93, 263, False, None, 101),
     "NeuralParasite": ("Zerg", 94, 1455, False, None, 101),
+    "OverlordSpeed": ("Zerg", 86, 1223, False, None, None),
     # Protoss
     "Blink": ("Protoss", 65, 1593, True, None, None),
     "Charge": ("Protoss", 65, 1592, True, None, None),
     "ResonatingGlaives": ("Protoss", 65, 1594, True, None, None),
     "ThermalLance": ("Protoss", 70, 1097, True, None, None),
+    "GraviticDrive": ("Protoss", 70, 1094, True, None, None),
+    "GraviticBoosters": ("Protoss", 70, 1093, True, None, None),
     "PsiStorm": ("Protoss", 68, 1126, True, None, None),
     "ShadowStride": ("Protoss", 69, 2720, True, None, None),
     "ProtossGroundWeapons1": ("Protoss", 63, 1062, True, None, None),
@@ -370,6 +497,7 @@ UPGRADE_SPECS: dict[str, tuple[str, int, int, bool, tuple[int, int] | None, int 
     "SmartServos": ("Terran", 39, 766, False, (27, 454), 29),
     "InfernalPreigniter": ("Terran", 39, 761, False, (27, 454), None),
     "BansheeCloak": ("Terran", 41, 790, False, (28, 487), None),
+    "HyperflightRotors": ("Terran", 41, 799, False, (28, 487), 30),
     "AdvancedBallistics": ("Terran", 41, 805, False, (28, 487), 30),
     "PersonalCloaking": ("Terran", 26, 820, False, None, None),
     "WeaponRefit": ("Terran", 30, 1532, False, None, None),
@@ -386,6 +514,7 @@ UPGRADE_ALIASES: dict[str, list[str]] = {
     "metabolic-boost": ["MetabolicBoost"],
     "lingspeed": ["MetabolicBoost"],
     "adrenalglands": ["AdrenalGlands"],
+    "adrenal-glands": ["AdrenalGlands"],
     "centrifugalhooks": ["CentrifugalHooks"],
     "centrifugal-hooks": ["CentrifugalHooks"],
     "banespeed": ["CentrifugalHooks"],
@@ -398,13 +527,34 @@ UPGRADE_ALIASES: dict[str, list[str]] = {
     "grooved-spines": ["GroovedSpines"],
     "muscularaugments": ["MuscularAugments"],
     "muscular-augments": ["MuscularAugments"],
+    "chitinousplating": ["ChitinousPlating"],
+    "chitinous-plating": ["ChitinousPlating"],
+    "anabolicsynthesis": ["AnabolicSynthesis"],
+    "anabolic-synthesis": ["AnabolicSynthesis"],
+    "ultraspeed": ["AnabolicSynthesis"],
     "neuralparasite": ["NeuralParasite"],
+    "neural-parasite": ["NeuralParasite"],
+    "overlordspeed": ["OverlordSpeed"],
+    "overlord-speed": ["OverlordSpeed"],
+    "pneumatizedcarapace": ["OverlordSpeed"],
+    "pneumatized-carapace": ["OverlordSpeed"],
+    # In LotV 4.10 Dropperlord (`overlord-transport` 893) is morphed individually rather than a global upgrade;
+    # alias VentralSacks -> OverlordSpeed so upgrade specs stay valid alongside spawned `overlord-transport` units.
+    "ventralsacks": ["OverlordSpeed"],
+    "ventral-sacks": ["OverlordSpeed"],
     "blink": ["Blink"],
     "charge": ["Charge"],
     "resonatingglaives": ["ResonatingGlaives"],
+    "resonating-glaives": ["ResonatingGlaives"],
     "thermallance": ["ThermalLance"],
     "thermal-lance": ["ThermalLance"],
     "extendedthermallance": ["ThermalLance"],
+    "graviticdrive": ["GraviticDrive"],
+    "gravitic-drive": ["GraviticDrive"],
+    "prismspeed": ["GraviticDrive"],
+    "graviticboosters": ["GraviticBoosters"],
+    "gravitic-boosters": ["GraviticBoosters"],
+    "obsspeed": ["GraviticBoosters"],
     "psistorm": ["PsiStorm"],
     "psi-storm": ["PsiStorm"],
     "shadowstride": ["ShadowStride"],
@@ -428,15 +578,24 @@ UPGRADE_ALIASES: dict[str, list[str]] = {
     "combatshield": ["CombatShield"],
     "combat-shield": ["CombatShield"],
     "concussiveshells": ["ConcussiveShells"],
+    "concussive-shells": ["ConcussiveShells"],
     "drillingclaws": ["DrillingClaws"],
     "drilling-claws": ["DrillingClaws"],
     "smartservos": ["SmartServos"],
+    "smart-servos": ["SmartServos"],
     "infernalpreigniter": ["InfernalPreigniter"],
+    "infernal-preigniter": ["InfernalPreigniter"],
+    "blueflame": ["InfernalPreigniter"],
+    "blue-flame": ["InfernalPreigniter"],
     "bansheecloak": ["BansheeCloak"],
     "banshee-cloak": ["BansheeCloak"],
+    "hyperflightrotors": ["HyperflightRotors"],
+    "hyperflight-rotors": ["HyperflightRotors"],
+    "bansheespeed": ["HyperflightRotors"],
     "personalcloaking": ["PersonalCloaking"],
     "personal-cloaking": ["PersonalCloaking"],
     "advancedballistics": ["AdvancedBallistics"],
+    "advanced-ballistics": ["AdvancedBallistics"],
     "weaponrefit": ["WeaponRefit"],
     "weapon-refit": ["WeaponRefit"],
     "yamato": ["WeaponRefit"],
@@ -492,10 +651,14 @@ class SkirmishSpec:
     high_ground_side: str = "p1"
     source: str = "core"
     tier: str = "canonical"              # canonical | regression | econ-harass
-    scoring_mode: str = "combat"         # combat | mineral-defense
+    category: str = "kiting-concave"     # tactical category (16 categories)
+    fast_core: bool = False              # True -> included in `--suite core` (~65 flagships)
+    scoring_mode: str = "combat"         # combat | mineral-defense | worker-runby
     pass_net_econ_min: float = 0.0       # mineral-defense net econ pass threshold
+    pass_workers_killed_min: int = 4     # worker-runby minimum enemy workers killed to pass
     origin_match_id: str = ""            # replay-extract provenance tag for regression tier
     use_main_base: bool = False          # spawn at P1's live starting TownHall + main minerals
+    use_p2_main_base: bool = False       # spawn at P2's live starting TownHall + main minerals (worker-runby)
     patterns: list[str] = field(default_factory=list)
     p1_upgrades: list[str] = field(default_factory=list)
     p2_upgrades: list[str] = field(default_factory=list)
@@ -504,6 +667,8 @@ class SkirmishSpec:
     p1_pre_cloaked: bool = False
     p2_pre_cloaked: bool = False
     pre_sieged: bool = False
+    p1_loaded_transports: list[dict[str, Any]] = field(default_factory=list)
+    p2_loaded_transports: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -521,7 +686,7 @@ class ArenaSite:
 
 def is_p2_worker_rush_spec(scen: SkirmishSpec) -> bool:
     """Return True when P2's entire spawned force is a pure worker rush (>= 4 workers, 0 combat units)."""
-    if not scen.p2_units:
+    if not scen.p2_units or scen.p2_loaded_transports or scen.scoring_mode == "worker-runby":
         return False
     total_w = 0
     for uname, cnt, _dx, _dy in scen.p2_units:
@@ -609,6 +774,41 @@ def _parse_unit_entries(
     return parsed
 
 
+def _parse_loaded_transports(
+    entries: list[Any] | None,
+    sid: str,
+    side: str,
+) -> list[dict[str, Any]]:
+    """Parse & validate pre-loaded transport specs: {transport, dx, dy, cargo: [[unit, cnt], ...]}."""
+    parsed: list[dict[str, Any]] = []
+    for idx, item in enumerate(entries or []):
+        if not isinstance(item, dict):
+            raise ValueError(f"Scenario {sid!r} {side}[{idx}] must be an object, got {item!r}")
+        t_name = str(item.get("transport", "")).strip()
+        if t_name not in UNIT_IDS or UNIT_IDS[t_name] not in TRANSPORT_IDS:
+            raise ValueError(
+                f"Scenario {sid!r} {side}[{idx}] invalid transport {t_name!r} "
+                f"(valid: {[k for k, v in UNIT_IDS.items() if v in TRANSPORT_IDS]})"
+            )
+        dx = float(item.get("dx", -5.0 if side.startswith("p1") else 5.0))
+        dy = float(item.get("dy", 0.0))
+        raw_cargo = item.get("cargo") or []
+        if not isinstance(raw_cargo, list) or not raw_cargo:
+            raise ValueError(f"Scenario {sid!r} {side}[{idx}] must specify non-empty cargo list")
+        cargo: list[tuple[str, int]] = []
+        for c_item in raw_cargo:
+            if not isinstance(c_item, (list, tuple)) or len(c_item) != 2:
+                raise ValueError(f"Scenario {sid!r} {side}[{idx}] cargo item must be [unit, count], got {c_item!r}")
+            cu, cc = str(c_item[0]), int(c_item[1])
+            if cu not in UNIT_IDS:
+                raise ValueError(f"Scenario {sid!r} {side}[{idx}] unknown cargo unit {cu!r}")
+            if cc <= 0:
+                raise ValueError(f"Scenario {sid!r} {side}[{idx}] cargo count must be > 0, got {cc}")
+            cargo.append((cu, cc))
+        parsed.append({"transport": t_name, "dx": dx, "dy": dy, "cargo": cargo})
+    return parsed
+
+
 def load_scenarios(scenarios_path: str = "", repo_dir: Path | None = None) -> list[SkirmishSpec]:
     """Load skirmish scenarios from --scenarios path, tools/arena-scenarios.json, or fallback."""
     cand: Path | None = None
@@ -639,6 +839,10 @@ def load_scenarios(scenarios_path: str = "", repo_dir: Path | None = None) -> li
         sid = str(sc["id"])
         our_race = str(sc["our_race"])
         enemy_race = str(sc["enemy_race"])
+        if our_race not in VALID_RACES:
+            raise ValueError(f"Scenario {sid!r} has invalid our_race {our_race!r}")
+        if enemy_race not in VALID_RACES:
+            raise ValueError(f"Scenario {sid!r} has invalid enemy_race {enemy_race!r}")
         terrain = str(sc.get("terrain", "open"))
         if terrain not in VALID_TERRAINS:
             raise ValueError(f"Scenario {sid!r} has invalid terrain {terrain!r} (valid: {VALID_TERRAINS})")
@@ -648,6 +852,9 @@ def load_scenarios(scenarios_path: str = "", repo_dir: Path | None = None) -> li
         scoring_mode = str(sc.get("scoring_mode", "combat"))
         if scoring_mode not in VALID_SCORING_MODES:
             raise ValueError(f"Scenario {sid!r} has invalid scoring_mode {scoring_mode!r} (valid: {VALID_SCORING_MODES})")
+        category = str(sc.get("category", "regression" if tier == "regression" else ("runby-offense" if scoring_mode == "worker-runby" else ("runby-defense" if scoring_mode == "mineral-defense" else "kiting-concave"))))
+        if category not in VALID_CATEGORIES:
+            raise ValueError(f"Scenario {sid!r} has invalid category {category!r} (valid: {VALID_CATEGORIES})")
         shared_upgs = normalize_upgrades(sc.get("upgrades"))
         p1_upgs = normalize_upgrades(sc.get("p1_upgrades"))
         p2_upgs = normalize_upgrades(sc.get("p2_upgrades"))
@@ -660,22 +867,34 @@ def load_scenarios(scenarios_path: str = "", repo_dir: Path | None = None) -> li
         p1_pre_b = [str(x) for x in (sc.get("p1_pre_burrowed") or [])]
         p2_pre_b = [str(x) for x in (sc.get("p2_pre_burrowed") or [])]
         pre_s = bool(sc.get("pre_sieged", False))
+        p1_u = _parse_unit_entries(sc.get("p1_units") or [], sid, "p1_units", p1_pre_b, pre_s)
+        p2_u = _parse_unit_entries(sc.get("p2_units") or [], sid, "p2_units", p2_pre_b, pre_s)
+        p1_lt = _parse_loaded_transports(sc.get("p1_loaded_transports"), sid, "p1_loaded_transports")
+        p2_lt = _parse_loaded_transports(sc.get("p2_loaded_transports"), sid, "p2_loaded_transports")
+        if not p1_u and not p1_lt:
+            raise ValueError(f"Scenario {sid!r} must have at least one p1_units or p1_loaded_transports entry")
+        if not p2_u and not p2_lt:
+            raise ValueError(f"Scenario {sid!r} must have at least one p2_units or p2_loaded_transports entry")
         specs.append(SkirmishSpec(
             id=sid,
             our_race=our_race,
             enemy_race=enemy_race,
             description=str(sc.get("description", sid)),
-            p1_units=_parse_unit_entries(sc["p1_units"], sid, "p1_units", p1_pre_b, pre_s),
-            p2_units=_parse_unit_entries(sc["p2_units"], sid, "p2_units", p2_pre_b, pre_s),
+            p1_units=p1_u,
+            p2_units=p2_u,
             max_loops=int(sc.get("max_loops", DEFAULT_MAX_LOOPS)),
             terrain=terrain,
             high_ground_side=str(sc.get("high_ground_side", "p1")),
             source=str(sc.get("source", "core")),
             tier=tier,
+            category=category,
+            fast_core=bool(sc.get("fast_core", False)),
             scoring_mode=scoring_mode,
             pass_net_econ_min=float(sc.get("pass_net_econ_min", 0.0)),
+            pass_workers_killed_min=int(sc.get("pass_workers_killed_min", 4)),
             origin_match_id=str(sc.get("origin_match_id", "")),
             use_main_base=bool(sc.get("use_main_base", scoring_mode == "mineral-defense")),
+            use_p2_main_base=bool(sc.get("use_p2_main_base", scoring_mode == "worker-runby")),
             patterns=[str(p) for p in (sc.get("patterns") or [])],
             p1_upgrades=p1_upgs,
             p2_upgrades=p2_upgs,
@@ -684,8 +903,110 @@ def load_scenarios(scenarios_path: str = "", repo_dir: Path | None = None) -> li
             p1_pre_cloaked=bool(sc.get("p1_pre_cloaked", False)),
             p2_pre_cloaked=bool(sc.get("p2_pre_cloaked", False)),
             pre_sieged=pre_s,
+            p1_loaded_transports=p1_lt,
+            p2_loaded_transports=p2_lt,
         ))
     return specs
+
+
+def validate_scenarios(specs: list[SkirmishSpec]) -> list[str]:
+    """Run deep structural, uniqueness, race/upgrade, and category coverage checks."""
+    errs: list[str] = []
+    seen_ids: set[str] = set()
+    cats_present: set[str] = set()
+    fast_core_cats: set[str] = set()
+    for s in specs:
+        if s.id in seen_ids:
+            errs.append(f"Duplicate scenario id: {s.id!r}")
+        seen_ids.add(s.id)
+        if s.max_loops < 120 or s.max_loops > 3600:
+            errs.append(f"{s.id}: unreasonable max_loops={s.max_loops}")
+        for side_lbl, entries in (("p1", s.p1_units), ("p2", s.p2_units)):
+            for uname, cnt, dx, dy in entries:
+                if cnt <= 0:
+                    errs.append(f"{s.id}: {side_lbl} unit {uname!r} has non-positive count {cnt}")
+                if abs(dx) > 25.0 or abs(dy) > 25.0:
+                    errs.append(f"{s.id}: {side_lbl} unit {uname!r} offset ({dx}, {dy}) out of bounds")
+        for u in s.p1_upgrades:
+            ur = UPGRADE_SPECS[u][0]
+            if ur != s.our_race:
+                errs.append(f"{s.id}: p1_upgrade {u!r} ({ur}) mismatches our_race={s.our_race!r}")
+        for u in s.p2_upgrades:
+            ur = UPGRADE_SPECS[u][0]
+            if ur != s.enemy_race:
+                errs.append(f"{s.id}: p2_upgrade {u!r} ({ur}) mismatches enemy_race={s.enemy_race!r}")
+        if s.scoring_mode == "mineral-defense":
+            if not s.use_main_base:
+                errs.append(f"{s.id}: mineral-defense should enable use_main_base")
+            if not any(UNIT_IDS[u] in WORKER_IDS for u, _, _, _ in s.p1_units):
+                errs.append(f"{s.id}: mineral-defense requires P1 mining workers")
+        if s.scoring_mode == "worker-runby":
+            if not s.use_p2_main_base:
+                errs.append(f"{s.id}: worker-runby should enable use_p2_main_base")
+            if not any(UNIT_IDS[u] in WORKER_IDS for u, _, _, _ in s.p2_units):
+                errs.append(f"{s.id}: worker-runby requires P2 mining workers")
+            if s.pass_workers_killed_min <= 0:
+                errs.append(f"{s.id}: worker-runby requires pass_workers_killed_min > 0")
+        if s.use_main_base and s.use_p2_main_base:
+            errs.append(f"{s.id}: cannot set both use_main_base and use_p2_main_base")
+        cats_present.add(s.category)
+        if s.fast_core:
+            fast_core_cats.add(s.category)
+    missing_fc = sorted(cats_present - fast_core_cats)
+    if missing_fc and fast_core_cats:
+        errs.append(f"Categories missing from fast_core (--suite core): {missing_fc}")
+    return errs
+
+
+def print_scenario_listing(specs: list[SkirmishSpec], validated: bool = False) -> None:
+    """Print human-readable Tactics Arena 3.0 catalog summary and per-scenario rows."""
+    by_cat: dict[str, int] = {}
+    by_cat_fc: dict[str, int] = {}
+    by_tier: dict[str, int] = {}
+    by_race: dict[str, int] = {}
+    by_mode: dict[str, int] = {}
+    for s in specs:
+        by_cat[s.category] = by_cat.get(s.category, 0) + 1
+        if s.fast_core:
+            by_cat_fc[s.category] = by_cat_fc.get(s.category, 0) + 1
+        by_tier[s.tier] = by_tier.get(s.tier, 0) + 1
+        by_race[s.our_race] = by_race.get(s.our_race, 0) + 1
+        by_mode[s.scoring_mode] = by_mode.get(s.scoring_mode, 0) + 1
+    fc_total = sum(1 for s in specs if s.fast_core)
+    status_tag = " [VALIDATED OK]" if validated else ""
+    print(f"Mothman Real-SC2 Tactics Arena 3.0 Catalog{status_tag}: {len(specs)} scenarios ({fc_total} fast_core)")
+    print(f"  By tier   : " + ", ".join(f"{k}={by_tier.get(k, 0)}" for k in VALID_TIERS if by_tier.get(k, 0)))
+    print(f"  By race   : " + ", ".join(f"{k}={by_race.get(k, 0)}" for k in VALID_RACES if by_race.get(k, 0)))
+    print(f"  By scoring: " + ", ".join(f"{k}={by_mode.get(k, 0)}" for k in VALID_SCORING_MODES if by_mode.get(k, 0)))
+    print("  By category (total / fast_core):")
+    for cat in VALID_CATEGORIES:
+        if by_cat.get(cat, 0):
+            print(f"    - {cat:<20s}: {by_cat[cat]:3d} total ({by_cat_fc.get(cat, 0):2d} core)")
+    print("")
+    for idx, s in enumerate(specs, 1):
+        fc_mk = "*" if s.fast_core else " "
+        lt_tag = ""
+        if s.p1_loaded_transports or s.p2_loaded_transports:
+            lt_tag = f" [loaded:{len(s.p1_loaded_transports)}/{len(s.p2_loaded_transports)}]"
+        print(
+            f"{idx:3d}. [{fc_mk}] {s.id:<58s} {s.our_race[0]}v{s.enemy_race[0]} "
+            f"| {s.category:<18s} | {s.scoring_mode:<15s} | {s.terrain:<19s}{lt_tag}"
+        )
+
+
+def resolve_effective_suite(
+    suite_arg: str,
+    scenario_filter: str = "",
+    category_filter: str = "",
+    scenario_ids: str = "",
+) -> str:
+    """Default to `core` (~65 flagship scenarios) unless narrowed by --scenario/--category/--scenario-ids."""
+    s = (suite_arg or "").strip().lower()
+    if s in ("core", "all"):
+        return s
+    if scenario_filter or category_filter or scenario_ids:
+        return "all"
+    return "core"
 
 
 def filter_scenarios(
@@ -696,13 +1017,17 @@ def filter_scenarios(
     terrain_filter: str = "",
     source_filter: str = "",
     tier_filter: str = "",
+    category_filter: str = "",
+    suite_filter: str = "all",
 ) -> list[SkirmishSpec]:
-    """Filter scenarios by our_race, enemy_race, terrain, source, tier, and substring on id."""
-    out = (
-        list(scenarios)
-        if race.lower() == "all"
-        else [s for s in scenarios if s.our_race.lower() == race.lower()]
-    )
+    """Filter scenarios by suite, our_race, enemy_race, terrain, source, tier, category, and id substring."""
+    out = list(scenarios)
+    if suite_filter and suite_filter.lower() == "core":
+        fc = [s for s in out if s.fast_core]
+        if fc:
+            out = fc
+    if race.lower() != "all":
+        out = [s for s in out if s.our_race.lower() == race.lower()]
     if enemy_race and enemy_race.lower() != "all":
         out = [s for s in out if s.enemy_race.lower() == enemy_race.lower()]
     if terrain_filter:
@@ -714,25 +1039,31 @@ def filter_scenarios(
     if tier_filter and tier_filter.lower() != "all":
         trf = tier_filter.lower()
         out = [s for s in out if s.tier.lower() == trf]
+    if category_filter and category_filter.lower() != "all":
+        want_cats = {c.strip().lower() for c in category_filter.split(",") if c.strip()}
+        out = [s for s in out if s.category.lower() in want_cats]
     if scenario_filter:
         needle = scenario_filter.lower()
         out = [s for s in out if needle in s.id.lower()]
     if not out:
         raise ValueError(
-            f"No scenarios matched race={race!r} enemy_race={enemy_race!r} "
-            f"terrain={terrain_filter!r} source={source_filter!r} tier={tier_filter!r} scenario={scenario_filter!r}"
+            f"No scenarios matched suite={suite_filter!r} race={race!r} enemy_race={enemy_race!r} "
+            f"terrain={terrain_filter!r} source={source_filter!r} tier={tier_filter!r} "
+            f"category={category_filter!r} scenario={scenario_filter!r}"
         )
     return out
 
 
 def partition_duel_batches(
     matched_specs: list[SkirmishSpec],
+    max_batch_size: int = MAX_SCENARIOS_PER_BATCH,
 ) -> list[tuple[str, str, int, list[SkirmishSpec]]]:
     """Partition scenarios by (our_race, enemy_race) into minimal monotonic upgrade chains.
 
     Because SC2 upgrades persist for the entire match, every batch guarantees
     p1_upgrades(s_i) <= p1_upgrades(s_{i+1}) and p2_upgrades(s_i) <= p2_upgrades(s_{i+1}),
-    ensuring 100% exact per-scenario upgrades with zero cross-duel leakage.
+    ensuring 100% exact per-scenario upgrades with zero cross-duel leakage. Chains longer
+    than `max_batch_size` are split into bounded sub-batches for fast parallel execution.
     """
     by_pair: dict[tuple[str, str], list[tuple[int, SkirmishSpec]]] = {}
     pair_order: list[tuple[str, str]] = []
@@ -749,7 +1080,7 @@ def partition_duel_batches(
             by_pair[(r1, r2)],
             key=lambda it: (
                 len(it[1].p1_upgrades) + len(it[1].p2_upgrades),
-                1 if it[1].scoring_mode == "mineral-defense" else 0,
+                1 if it[1].scoring_mode in ("mineral-defense", "worker-runby") else 0,
                 it[0],
             ),
         )
@@ -760,6 +1091,8 @@ def partition_duel_batches(
             best_ci: int | None = None
             best_len = -1
             for ci, ch in enumerate(chains):
+                if len(ch) >= max_batch_size:
+                    continue
                 tail = ch[-1]
                 t_p1 = set(tail.p1_upgrades)
                 t_p2 = set(tail.p2_upgrades)
@@ -858,6 +1191,10 @@ def run_single_container(
             inner_cmd.extend(["--source", args.source])
         if getattr(args, "tier", "") and getattr(args, "tier", "") != "all":
             inner_cmd.extend(["--tier", args.tier])
+        if getattr(args, "category", ""):
+            inner_cmd.extend(["--category", args.category])
+        if getattr(args, "suite", ""):
+            inner_cmd.extend(["--suite", args.suite])
     if replay_host_path is not None:
         inner_cmd.extend(["--save-replay-path", f"/out-replays/{replay_host_path.name}"])
     cmd = ["podman", "run", "--rm", "--network", "none", *mounts, args.image, *inner_cmd]
@@ -902,12 +1239,17 @@ def _build_aggregate_report(
         ko_w = sum(1 for s in w_rows if s.get("win_type", "ko") == "ko")
         pts_w = sum(1 for s in w_rows if s.get("win_type") == "points")
         econ_w = sum(1 for s in w_rows if s.get("win_type") == "econ_pass")
+        runby_w = sum(1 for s in w_rows if s.get("win_type") == "runby_pass")
         ko_l = sum(1 for s in l_rows if s.get("win_type", "ko") == "ko")
         pts_l = sum(1 for s in l_rows if s.get("win_type") == "points")
         econ_l = sum(1 for s in l_rows if s.get("win_type") == "econ_fail")
+        runby_l = sum(1 for s in l_rows if s.get("win_type") == "runby_fail")
         w, l, d = len(w_rows), len(l_rows), len(d_rows)
-        if econ_w or econ_l:
-            rec_str = f"{w}W-{l}L-{d}D (KO {ko_w}/Pts {pts_w}/Econ {econ_w} - KO {ko_l}/Pts {pts_l}/Econ {econ_l} - {d}D)"
+        if econ_w or econ_l or runby_w or runby_l:
+            rec_str = (
+                f"{w}W-{l}L-{d}D (KO {ko_w}/Pts {pts_w}/Econ {econ_w}/Runby {runby_w} "
+                f"- KO {ko_l}/Pts {pts_l}/Econ {econ_l}/Runby {runby_l} - {d}D)"
+            )
         else:
             rec_str = f"{w}W-{l}L-{d}D (KO {ko_w}/Pts {pts_w} - KO {ko_l}/Pts {pts_l} - {d}D)"
         return {
@@ -915,10 +1257,12 @@ def _build_aggregate_report(
             "ko_wins": ko_w,
             "points_wins": pts_w,
             "econ_wins": econ_w,
+            "runby_wins": runby_w,
             "p2_wins": l,
             "ko_losses": ko_l,
             "points_losses": pts_l,
             "econ_losses": econ_l,
+            "runby_losses": runby_l,
             "draws": d,
             "timeouts": d,  # backward-compatible alias
             "record_str": rec_str,
@@ -979,7 +1323,31 @@ def _build_aggregate_report(
             t_entry["avg_minerals_gathered"] = round(sum(float(s.get("minerals_gathered", 0.0)) for s in econ_rows) / len(econ_rows), 1)
             t_entry["avg_mining_uptime_pct"] = round(sum(float(s.get("mining_uptime_pct", 0.0)) for s in econ_rows) / len(econ_rows), 1)
             t_entry["total_workers_lost"] = sum(int(s.get("workers_lost", 0)) for s in econ_rows)
+        runby_rows = [s for s in ts if s.get("scoring_mode") == "worker-runby"]
+        if runby_rows:
+            t_entry["runby_passes"] = sum(1 for s in runby_rows if s.get("win_type") == "runby_pass")
+            t_entry["runby_fails"] = sum(1 for s in runby_rows if s.get("win_type") != "runby_pass")
+            t_entry["avg_runby_score"] = round(sum(float(s.get("runby_score", 0.0)) for s in runby_rows) / len(runby_rows), 1)
+            t_entry["total_enemy_workers_killed"] = sum(int(s.get("enemy_workers_killed", 0)) for s in runby_rows)
+            t_entry["avg_enemy_minerals_denied"] = round(sum(float(s.get("enemy_minerals_denied", 0.0)) for s in runby_rows) / len(runby_rows), 1)
         by_tier[tname] = t_entry
+
+    by_category: dict[str, Any] = {}
+    for cname in VALID_CATEGORIES:
+        cs = [s for s in all_scens if s.get("category") == cname]
+        if not cs:
+            continue
+        c_p1 = sum(float(s.get("p1_lost_val", 0.0)) for s in cs)
+        c_p2 = sum(float(s.get("p2_lost_val", 0.0)) for s in cs)
+        ct = _tally_slice(cs)
+        c_entry: dict[str, Any] = {
+            "total": len(cs),
+            **ct,
+            "agg_trade_ratio": round(c_p2 / max(1.0, c_p1), 2) if c_p1 > 0 else 99.0,
+            "detectors_destroyed": sum(int(s.get("detectors_destroyed", 0)) for s in cs),
+            "enemy_workers_killed": sum(int(s.get("enemy_workers_killed", 0)) for s in cs),
+        }
+        by_category[cname] = c_entry
 
     summary: dict[str, Any] = {
         "total": len(all_scens),
@@ -991,8 +1359,11 @@ def _build_aggregate_report(
         "total_move_unit_cmds": tot_mov,
         "total_spell_unit_cmds": tot_spl,
         "am_ratio": round(tot_atk / max(1, tot_mov), 2),
+        "total_detectors_destroyed": sum(int(s.get("detectors_destroyed", 0)) for s in all_scens),
+        "total_enemy_workers_killed": sum(int(s.get("enemy_workers_killed", 0)) for s in all_scens),
         "by_race": by_race,
         "by_tier": by_tier,
+        "by_category": by_category,
     }
     if opp_mode == "self":
         tot_p2_atk = sum(int(s.get("p2_attack_unit_cmds", 0)) for s in all_scens)
@@ -1074,6 +1445,37 @@ def run_host_driver(args: argparse.Namespace) -> int:
     repo_dir = Path(args.repo_dir).resolve()
     opp_mode = getattr(args, "opponent", "dummy")
     all_specs = load_scenarios(getattr(args, "scenarios", ""), repo_dir)
+    if getattr(args, "validate", False):
+        errs = validate_scenarios(all_specs)
+        if errs:
+            for e in errs:
+                print(f"VALIDATION ERROR: {e}", file=sys.stderr)
+            return 1
+        if not getattr(args, "list", False):
+            fc_n = sum(1 for s in all_specs if s.fast_core)
+            print(f"VALIDATED OK: {len(all_specs)} scenarios ({fc_n} fast_core) across {len({s.category for s in all_specs})} categories.")
+            return 0
+    eff_suite = resolve_effective_suite(
+        getattr(args, "suite", ""),
+        getattr(args, "scenario", ""),
+        getattr(args, "category", ""),
+        getattr(args, "scenario_ids", ""),
+    )
+    if getattr(args, "list", False):
+        list_suite = getattr(args, "suite", "") or "all"
+        listed_specs = filter_scenarios(
+            all_specs,
+            args.race,
+            getattr(args, "scenario", ""),
+            getattr(args, "enemy_race", ""),
+            getattr(args, "terrain", ""),
+            getattr(args, "source", ""),
+            getattr(args, "tier", "all"),
+            getattr(args, "category", ""),
+            list_suite,
+        )
+        print_scenario_listing(listed_specs, validated=bool(getattr(args, "validate", False)))
+        return 0
     matched_specs = filter_scenarios(
         all_specs,
         args.race,
@@ -1082,6 +1484,8 @@ def run_host_driver(args: argparse.Namespace) -> int:
         getattr(args, "terrain", ""),
         getattr(args, "source", ""),
         getattr(args, "tier", "all"),
+        getattr(args, "category", ""),
+        eff_suite,
     )
 
     render_dir = Path(args.render_dir).resolve() if getattr(args, "render_dir", "") else None
@@ -1260,7 +1664,7 @@ def run_host_driver(args: argparse.Namespace) -> int:
     rsum = report.get("summary") or {}
     if rsum.get("record_str"):
         print(
-            f"[ARENA 2.0 {opp_mode}] {rsum['record_str']} | Trade={rsum.get('agg_trade_ratio')}x | "
+            f"[ARENA 3.0 {opp_mode}] {rsum['record_str']} | Trade={rsum.get('agg_trade_ratio')}x | "
             f"A:M={rsum.get('am_ratio')} | wall={report.get('total_wall_ms')}ms",
             file=sys.stderr,
         )
@@ -1270,22 +1674,31 @@ def run_host_driver(args: argparse.Namespace) -> int:
             for tn in VALID_TIERS:
                 if tn in bt:
                     te = bt[tn]
+                    sub: list[str] = []
                     if "econ_passes" in te:
-                        parts.append(
-                            f"{tn}: {te['econ_passes']}P-{te['econ_fails']}F "
+                        sub.append(
+                            f"def={te['econ_passes']}P-{te['econ_fails']}F "
                             f"(net={te['avg_net_econ_score']}M, mined={te['avg_minerals_gathered']}M, "
                             f"up={te['avg_mining_uptime_pct']}%, wlost={te['total_workers_lost']})"
                         )
+                    if "runby_passes" in te:
+                        sub.append(
+                            f"runby={te['runby_passes']}P-{te['runby_fails']}F "
+                            f"(score={te['avg_runby_score']}, wkills={te['total_enemy_workers_killed']}, "
+                            f"denied={te['avg_enemy_minerals_denied']}M)"
+                        )
+                    if sub:
+                        parts.append(f"{tn}: {'; '.join(sub)}")
                     else:
                         parts.append(f"{tn}: {te['mothman_wins']}W-{te['p2_wins']}L-{te['draws']}D ({te['agg_trade_ratio']}x)")
             if parts:
-                print(f"[ARENA 2.0 by_tier] {' | '.join(parts)}", file=sys.stderr)
+                print(f"[ARENA 3.0 by_tier] {' | '.join(parts)}", file=sys.stderr)
         vis = report.get("visuals") or {}
         if isinstance(vis, dict) and vis.get("clips_count") is not None:
             vfmt_out = vis.get("video_format") or "mp4"
             vbytes = int(vis.get("total_video_bytes") or vis.get("total_mp4_bytes") or vis.get("total_webp_bytes") or 0)
             print(
-                f"[ARENA 2.0 3d] fmt={vfmt_out} clips={vis.get('clips_count')} "
+                f"[ARENA 3.0 3d] fmt={vfmt_out} clips={vis.get('clips_count')} "
                 f"max_frames={vis.get('max_frames_per_duel')} bytes={vbytes} "
                 f"wall={report.get('render_3d_wall_ms')}ms",
                 file=sys.stderr,
@@ -1812,6 +2225,12 @@ async def run_in_container(args: argparse.Namespace) -> int:
         if not scenarios:
             raise ValueError(f"No scenarios matched --scenario-ids={args.scenario_ids!r}")
     else:
+        eff_suite_in = resolve_effective_suite(
+            getattr(args, "suite", ""),
+            getattr(args, "scenario", ""),
+            getattr(args, "category", ""),
+            getattr(args, "scenario_ids", ""),
+        )
         scenarios = filter_scenarios(
             all_specs,
             args.race,
@@ -1820,6 +2239,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
             getattr(args, "terrain", ""),
             getattr(args, "source", ""),
             getattr(args, "tier", "all"),
+            getattr(args, "category", ""),
+            eff_suite_in,
         )
 
     opp_mode = getattr(args, "opponent", "dummy")
@@ -1885,13 +2306,28 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         "p2_orig_th_pos": None,
                         "p1_main_mineral_site": None,
                         "p1_main_mineral_tags": [],
+                        "p2_main_mineral_site": None,
+                        "p2_main_mineral_tags": [],
                         "orig_th_positions": [],
                         "mineral_refined": False,
                         "scen_idx": 0,
-                        # wait_init -> clearing -> upgrade_spawn -> upgrade_issue -> upgrade_wait -> spawning -> fighting -> done
+                        # wait_init -> clearing -> upgrade_* -> preload_* -> spawning -> fighting -> done
                         "phase": "wait_init",
                         "phase_start_loop": 0,
                         "p2_clear_ok": False,
+                        "p1_preload_ready": True,
+                        "p2_preload_ready": True,
+                        "p1_preload_last_loop": -100,
+                        "p2_preload_last_loop": -100,
+                        "p2_runby_mine_issued": False,
+                        "p2_econ_start_minerals": 0.0,
+                        "p2_econ_cur_minerals": 0.0,
+                        "p2_pf_start_cnt": 0,
+                        "p2_pf_alive_cnt": 0,
+                        "p2_det_start_cnt": 0,
+                        "p2_det_alive_cnt": 0,
+                        "p2_w_start_cnt": 0,
+                        "p2_w_alive_cnt": 0,
                         "cheats_enabled_p1": False,
                         "cheats_enabled_p2": False,
                         "p2_repair_bank_granted": False,
@@ -1968,12 +2404,68 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         return sc2api_pb2.Request(join_game=jg)
 
                     def _site_for_scen(scen: SkirmishSpec) -> ArenaSite:
+                        if scen.use_p2_main_base and dstate["p2_main_mineral_site"] is not None:
+                            return dstate["p2_main_mineral_site"]
                         if scen.use_main_base and dstate["p1_main_mineral_site"] is not None:
                             return dstate["p1_main_mineral_site"]
                         an: MapTerrainAnalyzer | None = dstate["analyzer"]
                         if an is None:
                             return ArenaSite(terrain="open", cx=88.0, cy=88.0)
                         return an.sites.get(scen.terrain) or an.sites["open"]
+
+                    async def _issue_preload_cmds(
+                        ws: aiohttp.ClientWebSocketResponse,
+                        obs: Any,
+                        lt_specs: list[dict[str, Any]],
+                    ) -> bool:
+                        """Issue SC2 Load + Smart commands to pack pre-loaded transports; returns True when loaded."""
+                        if not lt_specs:
+                            return True
+                        t_uids = {UNIT_IDS[lt["transport"]] for lt in lt_specs}
+                        c_uids = {UNIT_IDS[cu] for lt in lt_specs for cu, _ in lt["cargo"]}
+                        transports = [
+                            u for u in obs.raw_data.units
+                            if u.alliance == 1 and u.unit_type in t_uids and u.tag not in dstate["orig_th_tags"]
+                        ]
+                        cargo_loose = [
+                            u for u in obs.raw_data.units
+                            if u.alliance == 1 and u.unit_type in c_uids and u.tag not in dstate["orig_th_tags"]
+                        ]
+                        if not transports:
+                            return False
+                        if not cargo_loose:
+                            return True
+                        acts_l: list[Any] = []
+                        for cu in cargo_loose:
+                            tr = min(
+                                transports,
+                                key=lambda t: (
+                                    getattr(t, "cargo_space_taken", 0),
+                                    math.hypot(t.pos.x - cu.pos.x, t.pos.y - cu.pos.y),
+                                ),
+                            )
+                            load_ab = TRANSPORT_LOAD_ABILITIES.get(int(tr.unit_type), 3668)
+                            acts_l.append(sc2api_pb2.Action(
+                                action_raw=raw_pb2.ActionRaw(
+                                    unit_command=raw_pb2.ActionRawUnitCommand(
+                                        ability_id=load_ab,
+                                        target_unit_tag=cu.tag,
+                                        unit_tags=[tr.tag],
+                                    )
+                                )
+                            ))
+                            acts_l.append(sc2api_pb2.Action(
+                                action_raw=raw_pb2.ActionRaw(
+                                    unit_command=raw_pb2.ActionRawUnitCommand(
+                                        ability_id=1,
+                                        target_unit_tag=tr.tag,
+                                        unit_tags=[cu.tag],
+                                    )
+                                )
+                            ))
+                        if acts_l:
+                            await rpc(ws, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=acts_l)))
+                        return False
 
                     async def _issue_owner_upgrades(
                         ws: aiohttp.ClientWebSocketResponse,
@@ -2108,6 +2600,13 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 u.alliance == 1 and u.unit_type in p2_uids and len(u.orders) > 0
                                 for u in obs.raw_data.units
                             )
+                        elif phase == "preload_wait":
+                            scen_pl = scenarios[min(dstate["scen_idx"], len(scenarios) - 1)]
+                            if not scen_pl.p2_loaded_transports:
+                                dstate["p2_preload_ready"] = True
+                            elif not dstate["p2_preload_ready"] and obs.game_loop >= dstate["p2_preload_last_loop"] + 4:
+                                dstate["p2_preload_last_loop"] = int(obs.game_loop)
+                                dstate["p2_preload_ready"] = await _issue_preload_cmds(sc2_ws2, obs, scen_pl.p2_loaded_transports)
                         elif phase == "fighting":
                             scen_hk = scenarios[min(dstate["scen_idx"], len(scenarios) - 1)]
                             want_w_hk = bool(
@@ -2121,6 +2620,29 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 and (u.unit_type in COMBAT_IDS or (want_w_hk and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx_hk, u.pos.y - cy_hk) < 35.0))
                             ]
                             dstate["p2_own_units_loop"] = int(obs.game_loop)
+                            if obs.HasField("score"):
+                                cur_p2_cm = float(getattr(obs.score.score_details, "collected_minerals", 0.0))
+                                if not dstate["p2_runby_mine_issued"] and scen_hk.scoring_mode == "worker-runby":
+                                    dstate["p2_econ_start_minerals"] = cur_p2_cm
+                                dstate["p2_econ_cur_minerals"] = cur_p2_cm
+                            if scen_hk.use_p2_main_base and not dstate["p2_runby_mine_issued"]:
+                                p2_ws = [u for u in dstate["p2_own_units"] if u.unit_type in WORKER_IDS]
+                                mtags2 = list(dstate["p2_main_mineral_tags"])
+                                if p2_ws and mtags2:
+                                    g_acts2 = [
+                                        sc2api_pb2.Action(
+                                            action_raw=raw_pb2.ActionRaw(
+                                                unit_command=raw_pb2.ActionRawUnitCommand(
+                                                    ability_id=3666,
+                                                    target_unit_tag=mtags2[i % len(mtags2)],
+                                                    unit_tags=[wu.tag],
+                                                )
+                                            )
+                                        )
+                                        for i, wu in enumerate(p2_ws)
+                                    ]
+                                    await rpc(sc2_ws2, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=g_acts2)))
+                                    dstate["p2_runby_mine_issued"] = True
                             if dstate["p2_pre_cloak_pending"]:
                                 await _issue_pre_cloak(sc2_ws2, obs)
                                 dstate["p2_pre_cloak_pending"] = False
@@ -2253,9 +2775,109 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         )
                                     ))
 
+                                # In `worker-runby`, P2's mining workers stay on minerals while P2's combat defenders fight!
+                                p2_mining_worker_tags: set[int] = set()
+                                if scen_p2.scoring_mode == "worker-runby":
+                                    mtags_rb = list(dstate["p2_main_mineral_tags"])
+                                    for i_w, wu in enumerate(my_u):
+                                        if wu.unit_type in WORKER_IDS:
+                                            p2_mining_worker_tags.add(wu.tag)
+                                            if mtags_rb and not any(o.ability_id in MINING_ORDER_ABILITY_IDS for o in wu.orders):
+                                                acts_p2.append(sc2api_pb2.Action(
+                                                    action_raw=raw_pb2.ActionRaw(
+                                                        unit_command=raw_pb2.ActionRawUnitCommand(
+                                                            ability_id=3666,
+                                                            target_unit_tag=mtags_rb[i_w % len(mtags_rb)],
+                                                            unit_tags=[wu.tag],
+                                                        )
+                                                    )
+                                                ))
+
+                                # MicroDummy loaded air transport drop (`396` Medivac / `913` WarpPrism / `1408` Dropperlord)
+                                loaded_p2_air = [
+                                    u for u in obs.raw_data.units
+                                    if u.display_type == 1 and u.alliance == 1
+                                    and u.unit_type in (54, 81, 893)
+                                    and len(getattr(u, "passengers", ())) > 0
+                                ]
+                                if loaded_p2_air:
+                                    drop_targets = [e for e in en_targets if e.unit_type in WORKER_IDS] if scen_p2.scoring_mode == "mineral-defense" else en_targets
+                                    if drop_targets:
+                                        dx_t = sum(float(e.pos.x) for e in drop_targets) / len(drop_targets)
+                                        dy_t = sum(float(e.pos.y) for e in drop_targets) / len(drop_targets)
+                                    else:
+                                        site_d = _site_for_scen(scen_p2)
+                                        dx_t = site_d.cx - 2.5 * site_d.ux
+                                        dy_t = site_d.cy - 2.5 * site_d.uy
+                                    unload_ab_map = {54: 396, 81: 913, 893: 1408}
+                                    for lt_u in loaded_p2_air:
+                                        acts_p2.append(sc2api_pb2.Action(
+                                            action_raw=raw_pb2.ActionRaw(
+                                                unit_command=raw_pb2.ActionRawUnitCommand(
+                                                    ability_id=unload_ab_map[int(lt_u.unit_type)],
+                                                    target_world_space_pos=common_pb2.Point2D(x=dx_t, y=dy_t),
+                                                    unit_tags=[lt_u.tag],
+                                                )
+                                            )
+                                        ))
+
+                                # MicroDummy Widow Mine burrow (`2095`), Oracle Pulsar Beam (`2375`), Liberator AG (`2558`)
+                                special_p2_tags: set[int] = set()
+                                if en_targets:
+                                    wm_burrow_tags = [
+                                        u.tag for u in my_u
+                                        if u.unit_type == 498
+                                        and any(math.hypot(e.pos.x - u.pos.x, e.pos.y - u.pos.y) <= 7.5 for e in en_targets)
+                                    ]
+                                    if wm_burrow_tags:
+                                        special_p2_tags.update(wm_burrow_tags)
+                                        acts_p2.append(sc2api_pb2.Action(
+                                            action_raw=raw_pb2.ActionRaw(
+                                                unit_command=raw_pb2.ActionRawUnitCommand(
+                                                    ability_id=2095,
+                                                    unit_tags=wm_burrow_tags,
+                                                )
+                                            )
+                                        ))
+                                    orc_beam_tags = [
+                                        u.tag for u in my_u
+                                        if u.unit_type == 495 and 56 not in list(u.buff_ids) and float(getattr(u, "energy", 0.0)) >= 25.0
+                                        and any(math.hypot(e.pos.x - u.pos.x, e.pos.y - u.pos.y) <= 9.0 for e in en_targets)
+                                    ]
+                                    if orc_beam_tags:
+                                        acts_p2.append(sc2api_pb2.Action(
+                                            action_raw=raw_pb2.ActionRaw(
+                                                unit_command=raw_pb2.ActionRawUnitCommand(
+                                                    ability_id=2375,
+                                                    unit_tags=orc_beam_tags,
+                                                )
+                                            )
+                                        ))
+                                    if scen_p2.scoring_mode == "mineral-defense":
+                                        en_gnd_lib = [e for e in en_targets if not (bool(getattr(e, "is_flying", False)) or e.unit_type in AIR_UNIT_IDS)]
+                                        if en_gnd_lib:
+                                            lx_t = sum(float(e.pos.x) for e in en_gnd_lib) / len(en_gnd_lib)
+                                            ly_t = sum(float(e.pos.y) for e in en_gnd_lib) / len(en_gnd_lib)
+                                            for lu in my_u:
+                                                if lu.unit_type == 689 and math.hypot(lu.pos.x - lx_t, lu.pos.y - ly_t) <= 10.5:
+                                                    special_p2_tags.add(lu.tag)
+                                                    acts_p2.append(sc2api_pb2.Action(
+                                                        action_raw=raw_pb2.ActionRaw(
+                                                            unit_command=raw_pb2.ActionRawUnitCommand(
+                                                                ability_id=2558,
+                                                                target_world_space_pos=common_pb2.Point2D(x=lx_t, y=ly_t),
+                                                                unit_tags=[lu.tag],
+                                                            )
+                                                        )
+                                                    ))
+
                                 mobile_my_u = [
                                     u for u in my_u
-                                    if u.unit_type not in STRUCTURE_IDS and u.tag not in repair_scv_tags
+                                    if u.unit_type not in STRUCTURE_IDS
+                                    and u.unit_type not in STATIC_TRAP_IDS
+                                    and u.tag not in repair_scv_tags
+                                    and u.tag not in p2_mining_worker_tags
+                                    and u.tag not in special_p2_tags
                                 ]
                                 struct_my_u = [u for u in my_u if u.unit_type in STRUCTURE_IDS]
 
@@ -2294,11 +2916,21 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             if in_rng:
                                                 tgt_pf = min(in_rng, key=lambda e: (math.hypot(e.pos.x - st.pos.x, e.pos.y - st.pos.y), e.health + e.shield))
                                                 acts_p2.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=23, target_unit_tag=tgt_pf.tag, unit_tags=[st.tag]))))
-                                        elif st.unit_type == 23 and en_air:
+                                        elif st.unit_type in (23, 99) and en_air:
                                             in_rng = [e for e in en_air if math.hypot(e.pos.x - st.pos.x, e.pos.y - st.pos.y) <= 8.5]
                                             if in_rng:
                                                 tgt_mt = min(in_rng, key=lambda e: (math.hypot(e.pos.x - st.pos.x, e.pos.y - st.pos.y), e.health + e.shield))
                                                 acts_p2.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=23, target_unit_tag=tgt_mt.tag, unit_tags=[st.tag]))))
+                                        elif st.unit_type == 66 and en_targets:
+                                            in_rng = [e for e in en_targets if math.hypot(e.pos.x - st.pos.x, e.pos.y - st.pos.y) <= 8.5]
+                                            if in_rng:
+                                                tgt_pc = min(in_rng, key=lambda e: (math.hypot(e.pos.x - st.pos.x, e.pos.y - st.pos.y), e.health + e.shield))
+                                                acts_p2.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=23, target_unit_tag=tgt_pc.tag, unit_tags=[st.tag]))))
+                                        elif st.unit_type == 98 and en_gnd:
+                                            in_rng = [e for e in en_gnd if math.hypot(e.pos.x - st.pos.x, e.pos.y - st.pos.y) <= 8.0]
+                                            if in_rng:
+                                                tgt_sc = min(in_rng, key=lambda e: (math.hypot(e.pos.x - st.pos.x, e.pos.y - st.pos.y), e.health + e.shield))
+                                                acts_p2.append(sc2api_pb2.Action(action_raw=raw_pb2.ActionRaw(unit_command=raw_pb2.ActionRawUnitCommand(ability_id=23, target_unit_tag=tgt_sc.tag, unit_tags=[st.tag]))))
                                 elif mobile_my_u:
                                     # Attack-move mobile defenders toward arena center if all remaining enemies are burrowed/cloaked
                                     acts_p2.append(sc2api_pb2.Action(
@@ -2409,6 +3041,18 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         p2_trade = round(p1_lost / max(1.0, p2_lost), 2) if p2_lost > 0 else (99.0 if p1_lost > 0 else 1.0)
                         p1_tag = "Mothman-P1" if opp_mode == "self" else "Mothman"
                         p2_tag = "Mothman-P2" if opp_mode == "self" else "MicroDummy"
+                        pf_start = int(dstate.get("p2_pf_start_cnt", 0))
+                        pf_alive = int(dstate.get("p2_pf_alive_cnt", 0))
+                        pf_destroyed = bool(pf_start > 0 and pf_alive == 0)
+                        pf_destroyed_cnt = max(0, pf_start - pf_alive)
+                        det_start = int(dstate.get("p2_det_start_cnt", 0))
+                        det_alive = int(dstate.get("p2_det_alive_cnt", 0))
+                        detectors_destroyed = max(0, det_start - det_alive)
+                        en_w_start = int(dstate.get("p2_w_start_cnt", 0))
+                        en_w_alive = int(dstate.get("p2_w_alive_cnt", 0))
+                        enemy_workers_killed = max(0, en_w_start - en_w_alive)
+                        start_loop = int(dstate.get("fight_start_loop") or dstate["phase_start_loop"])
+                        fight_loops = max(1, int(cur_loop) - start_loop)
                         econ_extra: dict[str, Any] = {}
                         econ_ctx = ""
                         if scen.scoring_mode == "mineral-defense":
@@ -2432,6 +3076,34 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 f" | ECON net={net_econ:.1f}/{scen.pass_net_econ_min:.0f}M "
                                 f"(mined={mins_gath:.0f}M, up={up_pct:.1f}%, wlost={w_lost}, kill={en_killed:.0f})"
                             )
+                        elif scen.scoring_mode == "worker-runby":
+                            p2_mins_gath = round(max(0.0, float(dstate["p2_econ_cur_minerals"]) - float(dstate["p2_econ_start_minerals"])), 1)
+                            expected_p2_mins = 0.95 * (fight_loops / 22.4) * min(max(1, en_w_start), 16)
+                            enemy_minerals_denied = round(max(0.0, expected_p2_mins - p2_mins_gath), 1)
+                            our_units_lost_val = round(p1_lost, 1)
+                            enemy_combat_killed_val = round(max(0.0, p2_lost - 50.0 * enemy_workers_killed), 1)
+                            runby_score = round(
+                                enemy_workers_killed * 100.0
+                                - 0.5 * our_units_lost_val
+                                + 0.5 * enemy_combat_killed_val,
+                                1,
+                            )
+                            passed_runby = (enemy_workers_killed >= scen.pass_workers_killed_min) and (runby_score > 0.0)
+                            winner = p1_tag if passed_runby else p2_tag
+                            win_type = "runby_pass" if passed_runby else "runby_fail"
+                            econ_extra = {
+                                "enemy_minerals_gathered": p2_mins_gath,
+                                "enemy_minerals_denied": enemy_minerals_denied,
+                                "our_units_lost_val": our_units_lost_val,
+                                "enemy_combat_killed_val": enemy_combat_killed_val,
+                                "runby_score": runby_score,
+                                "pass_workers_killed_min": scen.pass_workers_killed_min,
+                            }
+                            econ_ctx = (
+                                f" | RUNBY wkills={enemy_workers_killed}/{scen.pass_workers_killed_min} "
+                                f"score={runby_score:.1f} denied={enemy_minerals_denied:.0f}M "
+                                f"lost={our_units_lost_val:.0f} ckill={enemy_combat_killed_val:.0f}"
+                            )
                         elif ko_winner_side == 1:
                             winner = p1_tag
                             win_type = "ko"
@@ -2447,9 +3119,16 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         else:
                             winner = "Draw"
                             win_type = "draw"
-                        start_loop = int(dstate.get("fight_start_loop") or dstate["phase_start_loop"])
-                        p1_lbl = ", ".join(f"{c} {u}" for u, c, _, _ in scen.p1_units)
-                        p2_lbl = ", ".join(f"{c} {u}" for u, c, _, _ in scen.p2_units)
+                        p1_lbl_parts = [f"{c} {u}" for u, c, _, _ in scen.p1_units]
+                        for lt in scen.p1_loaded_transports:
+                            c_str = "+".join(f"{cc} {cu}" for cu, cc in lt["cargo"])
+                            p1_lbl_parts.append(f"1 {lt['transport']}({c_str})")
+                        p2_lbl_parts = [f"{c} {u}" for u, c, _, _ in scen.p2_units]
+                        for lt in scen.p2_loaded_transports:
+                            c_str = "+".join(f"{cc} {cu}" for cu, cc in lt["cargo"])
+                            p2_lbl_parts.append(f"1 {lt['transport']}({c_str})")
+                        p1_lbl = ", ".join(p1_lbl_parts)
+                        p2_lbl = ", ".join(p2_lbl_parts)
                         p2_ctx_extra = (
                             f" | P2 ATK={dstate['p2_attack_cmds']}, MOV={dstate['p2_move_cmds']}, Spells={dstate['p2_spell_cmds']}"
                             if opp_mode == "self"
@@ -2465,6 +3144,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         rec: dict[str, Any] = {
                             "id": scen.id,
                             "tier": scen.tier,
+                            "category": scen.category,
+                            "fast_core": scen.fast_core,
                             "scoring_mode": scen.scoring_mode,
                             "opponent_mode": opp_mode,
                             "bot": bname1,
@@ -2503,6 +3184,12 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             "trade_ratio": trade,
                             "p1_trade_ratio": trade,
                             "p2_trade_ratio": p2_trade,
+                            "pf_destroyed": pf_destroyed,
+                            "pf_destroyed_cnt": pf_destroyed_cnt,
+                            "detectors_start_cnt": det_start,
+                            "detectors_destroyed": detectors_destroyed,
+                            "enemy_workers_start_cnt": en_w_start,
+                            "enemy_workers_killed": enemy_workers_killed,
                             "mothman_attack_unit_cmds": dstate["attack_cmds"],
                             "mothman_move_unit_cmds": dstate["move_cmds"],
                             "mothman_spell_unit_cmds": dstate["spell_cmds"],
@@ -2540,7 +3227,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 if req.HasField("action"):
                                     # Suppress bot1 actions during upgrade research so Mothman never cancels research;
                                     # in self-play also suppress during clearing/spawning so both start clean.
-                                    if dstate["phase"] in ("upgrade_spawn", "upgrade_addons", "upgrade_issue", "upgrade_wait") or (
+                                    if dstate["phase"] in ("upgrade_spawn", "upgrade_addons", "upgrade_issue", "upgrade_wait", "preload_spawn", "preload_wait") or (
                                         opp_mode == "self" and dstate["phase"] != "fighting"
                                     ):
                                         dummy_resp = sc2api_pb2.Response(
@@ -2597,6 +3284,11 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         if mtags:
                                             dstate["p1_main_mineral_site"] = msite
                                             dstate["p1_main_mineral_tags"] = mtags
+                                    if dstate["p2_main_mineral_site"] is None and dstate["p2_orig_th_pos"] is not None and dstate["analyzer"] is not None:
+                                        msite2, mtags2 = dstate["analyzer"].compute_main_mineral_site(obs, dstate["p2_orig_th_pos"])
+                                        if mtags2:
+                                            dstate["p2_main_mineral_site"] = msite2
+                                            dstate["p2_main_mineral_tags"] = mtags2
                                     if not dstate["mineral_refined"] and dstate["analyzer"] is not None and len(dstate["orig_th_positions"]) >= 2:
                                         dstate["analyzer"].refine_mineral_site(obs, dstate["orig_th_positions"])
                                         dstate["mineral_refined"] = True
@@ -2672,6 +3364,13 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 dstate["p2_accepted_upgrades"] = set()
                                                 dstate["p1_pending_addons"] = []
                                                 dstate["p2_pending_addons"] = []
+                                            elif scen.p1_loaded_transports or scen.p2_loaded_transports:
+                                                dstate["phase"] = "preload_spawn"
+                                                dstate["phase_start_loop"] = gl
+                                                dstate["p1_preload_ready"] = not bool(scen.p1_loaded_transports)
+                                                dstate["p2_preload_ready"] = not bool(scen.p2_loaded_transports)
+                                                dstate["p1_preload_last_loop"] = -100
+                                                dstate["p2_preload_last_loop"] = -100
                                             else:
                                                 dstate["phase"] = "spawning"
                                                 dstate["phase_start_loop"] = gl
@@ -2908,24 +3607,94 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             dstate["phase"] = "clearing"
                                             dstate["phase_start_loop"] = gl
 
+                                    elif dstate["phase"] == "preload_spawn" and gl >= dstate["phase_start_loop"] + 2:
+                                        scen = scenarios[dstate["scen_idx"]]
+                                        an = dstate["analyzer"]
+                                        site = _site_for_scen(scen)
+                                        dstate["arena_cx"], dstate["arena_cy"] = site.cx, site.cy
+                                        site_ov = site if (scen.use_main_base or scen.use_p2_main_base) else None
+                                        dbg_pl: list[Any] = []
+                                        pl_structs: list[tuple[float, float, float]] = (
+                                            [(site.cx, site.cy, 3.2)]
+                                            if (scen.use_main_base or scen.use_p2_main_base)
+                                            else []
+                                        )
+                                        for owner_pl, lt_list in ((1, scen.p1_loaded_transports), (2, scen.p2_loaded_transports)):
+                                            for lt in lt_list:
+                                                t_name = lt["transport"]
+                                                t_uid = UNIT_IDS[t_name]
+                                                tx0, ty0 = (
+                                                    an.resolve_spawn_point(scen, t_name, lt["dx"], lt["dy"], site_override=site_ov)
+                                                    if an is not None else (site.cx + lt["dx"], site.cy + lt["dy"])
+                                                )
+                                                if t_uid in STRUCTURE_IDS:
+                                                    fp = STRUCTURE_FOOTPRINTS.get(t_uid, 3)
+                                                    tx, ty = (
+                                                        an.snap_buildable_footprint(tx0, ty0, fp, avoid=pl_structs)
+                                                        if an is not None else (tx0, ty0)
+                                                    )
+                                                    pl_structs.append((tx, ty, 3.0))
+                                                else:
+                                                    tx, ty = tx0, ty0
+                                                dbg_pl.append(debug_pb2.DebugCommand(
+                                                    create_unit=debug_pb2.DebugCreateUnit(
+                                                        unit_type=t_uid, owner=owner_pl,
+                                                        pos=common_pb2.Point2D(x=tx, y=ty), quantity=1,
+                                                    )
+                                                ))
+                                                # Spawn cargo directly beneath/adjacent to transport on pathable ground
+                                                c_gx, c_gy = (
+                                                    an.snap_pathable(tx + (2.4 if t_uid in STRUCTURE_IDS else 0.0), ty, max_rad=5)
+                                                    if an is not None else (tx, ty)
+                                                )
+                                                for cu_name, cu_cnt in lt["cargo"]:
+                                                    dbg_pl.append(debug_pb2.DebugCommand(
+                                                        create_unit=debug_pb2.DebugCreateUnit(
+                                                            unit_type=UNIT_IDS[cu_name], owner=owner_pl,
+                                                            pos=common_pb2.Point2D(x=c_gx, y=c_gy), quantity=cu_cnt,
+                                                        )
+                                                    ))
+                                        if dbg_pl:
+                                            await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=dbg_pl)))
+                                        dstate["phase"] = "preload_wait"
+                                        dstate["phase_start_loop"] = gl
+
+                                    elif dstate["phase"] == "preload_wait" and gl >= dstate["phase_start_loop"] + 2:
+                                        scen = scenarios[dstate["scen_idx"]]
+                                        if not scen.p1_loaded_transports:
+                                            dstate["p1_preload_ready"] = True
+                                        elif not dstate["p1_preload_ready"] and gl >= dstate["p1_preload_last_loop"] + 4:
+                                            dstate["p1_preload_last_loop"] = int(gl)
+                                            dstate["p1_preload_ready"] = await _issue_preload_cmds(sc2_ws, obs, scen.p1_loaded_transports)
+                                        if (dstate["p1_preload_ready"] and dstate["p2_preload_ready"]) or gl >= dstate["phase_start_loop"] + 48:
+                                            dstate["phase"] = "spawning"
+                                            dstate["phase_start_loop"] = gl
+
                                     elif dstate["phase"] == "spawning" and gl >= dstate["phase_start_loop"] + 2:
                                         scen = scenarios[dstate["scen_idx"]]
                                         an = dstate["analyzer"]
                                         site = _site_for_scen(scen)
                                         dstate["arena_cx"], dstate["arena_cy"] = site.cx, site.cy
                                         dstate["upg_wave_attempts"] = 0
-                                        site_ov = site if scen.use_main_base else None
+                                        site_ov = site if (scen.use_main_base or scen.use_p2_main_base) else None
                                         dbg = []
                                         placed_structs: list[tuple[float, float, float]] = (
                                             [(site.cx, site.cy, 3.2)]
-                                            if scen.use_main_base
+                                            if (scen.use_main_base or scen.use_p2_main_base)
                                             else []
                                         )
 
                                         def _spawn_side_entries(entries: list[tuple[str, int, float, float]], owner: int) -> None:
+                                            # Ensure any Photon Cannon (`66`) has a powering Pylon (`60`) on that side!
+                                            eff_entries = list(entries)
+                                            has_cannon = [it for it in eff_entries if UNIT_IDS[it[0]] == 66]
+                                            has_pylon = any(UNIT_IDS[it[0]] == 60 for it in eff_entries)
+                                            if has_cannon and not has_pylon:
+                                                c_dx, c_dy = has_cannon[0][2], has_cannon[0][3]
+                                                eff_entries.append(("pylon", 1, c_dx + (1.5 if c_dx >= 0 else -1.5), c_dy))
                                             # Spawn static structures FIRST on exact buildable grid centers, then mobile units cleanly outside footprints!
-                                            struct_items = [(u, c, dx, dy) for u, c, dx, dy in entries if UNIT_IDS[u] in STRUCTURE_IDS]
-                                            mobile_items = [(u, c, dx, dy) for u, c, dx, dy in entries if UNIT_IDS[u] not in STRUCTURE_IDS]
+                                            struct_items = [(u, c, dx, dy) for u, c, dx, dy in eff_entries if UNIT_IDS[u] in STRUCTURE_IDS]
+                                            mobile_items = [(u, c, dx, dy) for u, c, dx, dy in eff_entries if UNIT_IDS[u] not in STRUCTURE_IDS]
                                             for uname, cnt, dx, dy in struct_items:
                                                 uid = UNIT_IDS[uname]
                                                 fp = STRUCTURE_FOOTPRINTS.get(uid, 2)
@@ -2966,7 +3735,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
 
                                         _spawn_side_entries(scen.p1_units, 1)
                                         _spawn_side_entries(scen.p2_units, 2)
-                                        await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=dbg)))
+                                        if dbg:
+                                            await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=dbg)))
                                         dstate["phase"] = "fighting"
                                         dstate["phase_start_loop"] = gl
                                         dstate["fight_start_loop"] = gl
@@ -2984,9 +3754,18 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         dstate["p2_start_cnt"] = 0
                                         dstate["p1_start_val"] = 0.0
                                         dstate["p2_start_val"] = 0.0
+                                        dstate["p2_pf_start_cnt"] = 0
+                                        dstate["p2_pf_alive_cnt"] = 0
+                                        dstate["p2_det_start_cnt"] = 0
+                                        dstate["p2_det_alive_cnt"] = 0
+                                        dstate["p2_w_start_cnt"] = 0
+                                        dstate["p2_w_alive_cnt"] = 0
                                         dstate["p2_own_units"] = None
                                         dstate["p2_own_units_loop"] = -1
                                         dstate["p2_pre_cloak_pending"] = False
+                                        dstate["p2_runby_mine_issued"] = False
+                                        dstate["p2_econ_start_minerals"] = 0.0
+                                        dstate["p2_econ_cur_minerals"] = 0.0
                                         dstate["econ_start_minerals"] = 0.0
                                         dstate["econ_cur_minerals"] = 0.0
                                         dstate["econ_start_workers"] = 0
@@ -3022,29 +3801,32 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 and u.tag not in dstate["orig_th_tags"]
                                                 and (u.unit_type in COMBAT_IDS or (want_workers and u.unit_type in WORKER_IDS and math.hypot(u.pos.x - cx, u.pos.y - cy) < 35.0))
                                             ]
-                                        exp_p1 = sum(cnt for _, cnt, _, _ in scen.p1_units)
-                                        exp_p2 = sum(cnt for _, cnt, _, _ in scen.p2_units)
-                                        if dstate["p1_start_cnt"] == 0 and (len(p1u) >= exp_p1 and len(p2u) >= exp_p2 or (gl >= dstate["phase_start_loop"] + 16 and p1u and p2u)):
+                                        exp_p1 = sum(cnt for _, cnt, _, _ in scen.p1_units) + sum(
+                                            1 + sum(cc for _, cc in lt["cargo"]) for lt in scen.p1_loaded_transports
+                                        )
+                                        exp_p2 = sum(cnt for _, cnt, _, _ in scen.p2_units) + sum(
+                                            1 + sum(cc for _, cc in lt["cargo"]) for lt in scen.p2_loaded_transports
+                                        )
+                                        p1_tot_c = units_total_count(p1u)
+                                        p2_tot_c = units_total_count(p2u)
+                                        if dstate["p1_start_cnt"] == 0 and (p1_tot_c >= exp_p1 and p2_tot_c >= exp_p2 or (gl >= dstate["phase_start_loop"] + 16 and p1u and p2u)):
                                             dstate["fight_start_loop"] = gl
                                             dstate["last_combat_event_loop"] = gl
                                             dstate["prev_unit_hp_map"] = {
                                                 u.tag: float(u.health) + float(u.shield) for u in (p1u + p2u)
                                             }
-                                            dstate["p1_start_cnt"] = len(p1u)
-                                            dstate["p2_start_cnt"] = len(p2u)
-                                            id_to_name = {v: k for k, v in UNIT_IDS.items()}
-                                            t1: dict[str, int] = {}
-                                            for u in p1u:
-                                                nm = id_to_name.get(u.unit_type, str(u.unit_type))
-                                                t1[nm] = t1.get(nm, 0) + 1
-                                            t2: dict[str, int] = {}
-                                            for u in p2u:
-                                                nm = id_to_name.get(u.unit_type, str(u.unit_type))
-                                                t2[nm] = t2.get(nm, 0) + 1
-                                            dstate["p1_start_types"] = t1
-                                            dstate["p2_start_types"] = t2
-                                            dstate["p1_start_val"] = sum(UNIT_VALUES.get(u.unit_type, 100.0) for u in p1u)
-                                            dstate["p2_start_val"] = sum(UNIT_VALUES.get(u.unit_type, 100.0) for u in p2u)
+                                            dstate["p1_start_cnt"] = p1_tot_c
+                                            dstate["p2_start_cnt"] = p2_tot_c
+                                            dstate["p1_start_types"] = units_type_counts(p1u)
+                                            dstate["p2_start_types"] = units_type_counts(p2u)
+                                            dstate["p1_start_val"] = units_total_value(p1u)
+                                            dstate["p2_start_val"] = units_total_value(p2u)
+                                            dstate["p2_pf_start_cnt"] = count_matching_unit_ids(p2u, {130})
+                                            dstate["p2_pf_alive_cnt"] = dstate["p2_pf_start_cnt"]
+                                            dstate["p2_det_start_cnt"] = count_matching_unit_ids(p2u, DETECTOR_IDS)
+                                            dstate["p2_det_alive_cnt"] = dstate["p2_det_start_cnt"]
+                                            dstate["p2_w_start_cnt"] = count_matching_unit_ids(p2u, WORKER_IDS)
+                                            dstate["p2_w_alive_cnt"] = dstate["p2_w_start_cnt"]
                                             energy_cmds = [
                                                 debug_pb2.DebugCommand(
                                                     unit_value=debug_pb2.DebugSetUnitValue(
@@ -3092,12 +3874,15 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 dstate["p2_pre_cloak_pending"] = True
                                         if dstate["p1_start_cnt"] > 0:
                                             p2_is_dummy = (opp_mode != "self")
-                                            dstate["p1_alive_cnt"] = len(p1u)
-                                            dstate["p2_alive_cnt"] = len(p2u)
+                                            dstate["p1_alive_cnt"] = p1_tot_c
+                                            dstate["p2_alive_cnt"] = p2_tot_c
                                             dstate["p1_combat_alive_cnt"] = count_combat_capable(p1u, is_dummy=False)
                                             dstate["p2_combat_alive_cnt"] = count_combat_capable(p2u, is_dummy=p2_is_dummy)
-                                            dstate["p1_rem_val"] = sum(UNIT_VALUES.get(u.unit_type, 100.0) for u in p1u)
-                                            dstate["p2_rem_val"] = sum(UNIT_VALUES.get(u.unit_type, 100.0) for u in p2u)
+                                            dstate["p1_rem_val"] = units_total_value(p1u)
+                                            dstate["p2_rem_val"] = units_total_value(p2u)
+                                            dstate["p2_pf_alive_cnt"] = count_matching_unit_ids(p2u, {130})
+                                            dstate["p2_det_alive_cnt"] = count_matching_unit_ids(p2u, DETECTOR_IDS)
+                                            dstate["p2_w_alive_cnt"] = count_matching_unit_ids(p2u, WORKER_IDS)
 
                                             if scen.scoring_mode == "mineral-defense":
                                                 if obs.HasField("score"):
@@ -3136,6 +3921,15 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                     end_reason, ko_side = "ko_eliminated", 2
                                                 elif fight_elapsed >= scen.max_loops:
                                                     end_reason = "mineral_defense_complete"
+                                            elif scen.scoring_mode == "worker-runby":
+                                                if dstate["p2_w_alive_cnt"] == 0 and dstate["p2_w_start_cnt"] > 0:
+                                                    end_reason, ko_side = "runby_workers_wiped", 1
+                                                elif not p1u or dstate["p1_combat_alive_cnt"] == 0:
+                                                    end_reason = "runby_raiders_spent"
+                                                elif fight_elapsed >= STALEMATE_NO_DAMAGE_LOOPS and no_dmg_elapsed >= STALEMATE_NO_DAMAGE_LOOPS:
+                                                    end_reason = "no_damage_stalemate"
+                                                elif fight_elapsed >= scen.max_loops:
+                                                    end_reason = "runby_complete"
                                             elif not p1u and not p2u:
                                                 end_reason = "mutual_eliminated"
                                             elif not p2u:
@@ -3158,7 +3952,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 elif p2_can and not p1_can:
                                                     end_reason, ko_side = "ko_incapable_survivors", 2
 
-                                            if end_reason is None and scen.scoring_mode != "mineral-defense":
+                                            if end_reason is None and scen.scoring_mode not in ("mineral-defense", "worker-runby"):
                                                 if fight_elapsed >= STALEMATE_NO_DAMAGE_LOOPS and no_dmg_elapsed >= STALEMATE_NO_DAMAGE_LOOPS:
                                                     end_reason = "no_damage_stalemate"
                                                 elif fight_elapsed >= scen.max_loops:
@@ -3242,10 +4036,11 @@ async def run_in_container(args: argparse.Namespace) -> int:
                     bot_log1 = (bot_dir1 / "bot.log").open("wb")
                     bot_proc1 = subprocess.Popen(bot_cmd1, cwd=str(bot_dir1), stdout=bot_log1, stderr=subprocess.STDOUT)
                     async def _watch_done_or_crash() -> None:
-                        deadline = time.monotonic() + 240.0
+                        wall_budget = max(240.0, 35.0 * max(1, len(scenarios)))
+                        deadline = time.monotonic() + wall_budget
                         while not dstate["done"].is_set():
                             if time.monotonic() >= deadline:
-                                raise TimeoutError("Arena duel exceeded 240s wall timeout")
+                                raise TimeoutError(f"Arena duel exceeded {wall_budget:.0f}s wall timeout ({len(scenarios)} scenarios)")
                             if bot_proc1.poll() is not None and not dstate["done"].is_set():
                                 dstate["errors"].append(f"bot_proc1 exited prematurely rc={bot_proc1.returncode}")
                                 dstate["done"].set()
@@ -3459,10 +4254,14 @@ async def run_in_container(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Real-SC2_x64 RequestDebug Micro Skirmish Arena 2.0")
+    parser = argparse.ArgumentParser(description="Real-SC2_x64 RequestDebug Micro Skirmish Arena 3.0")
     parser.add_argument("--in-container", action="store_true")
+    parser.add_argument("--list", action="store_true", help="List matching scenarios & category/tier/race counts and exit")
+    parser.add_argument("--validate", action="store_true", help="Validate entire scenario catalog (IDs, units, upgrades, transports, categories) and exit")
     parser.add_argument("--mode", choices=["probe", "duel"], default="duel")
     parser.add_argument("--opponent", choices=["dummy", "self"], default="dummy", help="P2 opponent: dummy (MicroDummy, default) or self (live Mothman-vs-Mothman)")
+    parser.add_argument("--suite", choices=["core", "all", ""], default="", help="Scenario suite: core (~65 flagships across all categories, default for unfiltered runs) or all (all 200+ scenarios)")
+    parser.add_argument("--category", default="", help=f"Optional comma-separated filter on scenario category ({', '.join(VALID_CATEGORIES)})")
     parser.add_argument("--race", default="all", help="Protoss | Terran | Zerg | all")
     parser.add_argument("--enemy-race", default="", help="Optional filter on scenario enemy_race")
     parser.add_argument("--scenarios", default="", help="Optional path to arena scenarios JSON catalog (defaults to tools/arena-scenarios.json)")

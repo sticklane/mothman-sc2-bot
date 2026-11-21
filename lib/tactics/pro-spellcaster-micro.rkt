@@ -314,7 +314,12 @@
  shadow-stride-researched?
  plan-dt-blink-pf-snipe
  plan-mutalisk-magic-box
- widow-mine-detected-targetable?)
+ widow-mine-detected-targetable?
+ ;; L43-P0-1b: Stalker Blink-Back & Coordinated Blink-Forward High-Value Snipe
+ STALKER-BLINK-COOLDOWN-FRAMES
+ STALKER-BLINK-MAX-RANGE
+ stalker-blink-researched?
+ plan-stalker-blink-micro)
 
 ;; -----------------------------------------------------------------------------
 ;; 1. Calibrated Constants (#115 Pro Corpus)
@@ -447,7 +452,8 @@
    [corruptor-spray-ready-frame : (HashTable Integer Integer)]
    [dt-blink-ready-frame : (HashTable Integer Integer)]
    [dt-blink-issue-state : (HashTable Integer (Vector Integer Float Float))]
-   [bc-yamato-issue-frame : (HashTable Integer Integer)])
+   [bc-yamato-issue-frame : (HashTable Integer Integer)]
+   [stalker-blink-ready-frame : (HashTable Integer Integer)])
   #:mutable
   #:transparent)
 
@@ -473,6 +479,7 @@
    (make-hasheqv)
    (make-hasheqv)
    ((inst make-hasheqv Integer (Vector Integer Float Float)))
+   (make-hasheqv)
    (make-hasheqv)))
 
 ;; Explicit pro-replay-calibrated tactical mode entry for each caster and spell ability.
@@ -1357,6 +1364,7 @@
   (prune-hash-below! (spell-claims-corruptor-spray-ready-frame claims) current-frame)
   (prune-hash-below! (spell-claims-dt-blink-ready-frame claims) current-frame)
   (prune-hash-below! (spell-claims-bc-yamato-issue-frame claims) (- current-frame 64))
+  (prune-hash-below! (spell-claims-stalker-blink-ready-frame claims) current-frame)
   (let ([st (spell-claims-dt-blink-issue-state claims)])
     (define stale-dt
       (for/fold ([ks : (Listof Integer) '()])
@@ -4048,10 +4056,19 @@
               (define-values (beam-on? dwell) (oracle-pulsar-beam-active? claims u current-frame))
               (cond
                 ;; When Pulsar Beam is ON: ONLY permit OFF after >= 60f minimum dwell
+                ;; L45-P0-1b (`ro09`): When raiding a mineral line (`>= 4` enemy workers within `<= 9.0t`),
+                ;; hold Pulsar Beam ON down to `sh < 10.0` (and `en < 10.0`) so Oracles finish shredding
+                ;; SCVs/Drones/Probes instead of toggling OFF at `sh = 24` after 2 Marine volleys!
                 [beam-on?
+                 (define near-raid-workers
+                   (count-units-within enemy-units ux uy 9.0
+                                       (lambda ([e : Any])
+                                         (and (memq (uh-type e) '(scv probe drone mule)) #t))))
+                 (define min-sh-off (if (>= near-raid-workers 4) 10.0 25.0))
+                 (define min-en-off (if (>= near-raid-workers 4) 10.0 15.0))
                  (and (>= dwell ORACLE-PULSAR-BEAM-MIN-DWELL-FRAMES)
-                      (or (< en 15.0)
-                          (< sh 25.0)
+                      (or (< en min-en-off)
+                          (< sh min-sh-off)
                           (and (>= dwell ORACLE-PULSAR-BEAM-ZERO-TARGET-DWELL-FRAMES)
                                (= (count-units-within all-enemies ux uy 8.0 sc2-enemy-unit-targetable?) 0)))
                       (begin
@@ -4105,17 +4122,35 @@
                                 (spell-directive tag 'oracle 'oracle-revelation 'point 0 rx ry
                                                  'oracle-revelation-army))))))
                  (or rev-dir
-                     ;; Branch (b): Pulsar Beam ON (`energy >= 40`, `shields >= 35`, `>= 2` light/workers in `5.0`)
-                     (and (>= en 40.0)
-                          (>= sh 35.0)
-                          (>= (count-units-within enemy-units ux uy 5.0 oracle-pulsar-victim?) 2)
+                     ;; Branch (b): Pulsar Beam ON (`energy >= 40`, `shields >= 35`, `>= 2` light/workers in `7.5t`,
+                     ;; or `>= 4` workers in `9.0t` with `energy >= 35` & `shields >= 25`)
+                     ;; L44-P0-1b + L45-P0-1b (`ro09`): Pop Pulsar Beam (`2375`) cleanly on approach
+                     ;; instead of stopping to drop Stasis Ward (while `sh < 25` preserves `L43-T3d`!).
+                     (and (or (and (>= en 40.0)
+                                   (>= sh 35.0)
+                                   (>= (count-units-within enemy-units ux uy 7.5 oracle-pulsar-victim?) 2))
+                              (and (>= en 35.0)
+                                   (>= sh 25.0)
+                                   (>= (count-units-within enemy-units ux uy 9.0
+                                                           (lambda ([e : Any])
+                                                             (and (memq (uh-type e) '(scv probe drone mule)) #t)))
+                                       4)))
                           (begin
                             (hash-set! (spell-claims-oracle-beam-start claims) tag current-frame)
                             (spell-directive tag 'oracle 'pulsar-beam-on 'none 0 ux uy
                                              'oracle-pulsar-beam-on)))
-                     ;; Branch (c): Stasis Ward (`beam OFF` & `energy >= 55`) at choke or approach
-                     (and (>= en 55.0)
-                          (let* ([safe-site?
+                     ;; Branch (c): Stasis Ward (`beam OFF` & `energy >= 50` at enemy mineral line
+                     ;; or `>= 55` at choke/approach).
+                     ;; L44-P0-1b + L45-P0-1b (`ro09`): When `shields >= 25` with `energy < 90` near enemy
+                     ;; workers/light victims (`<= 14t`), SAVE energy for Pulsar Beam instead of burning
+                     ;; `50E` on Stasis Ward (while low-shield `shields < 25` like `sh=20` in `L43-T3d`,
+                     ;; or `energy >= 90`, still plants mineral-line Stasis Traps cleanly!).
+                     (and (>= en 50.0)
+                          (let* ([save-for-pulsar-raid?
+                                  (and (< en 90.0)
+                                       (>= sh 25.0)
+                                       (>= (count-units-within enemy-units ux uy 14.0 oracle-pulsar-victim?) 2))]
+                                 [safe-site?
                                   (lambda ([wx : Float] [wy : Float])
                                     (and (<= (dist2 ux uy wx wy) 8.0)
                                          (not (any-unit-within? all-enemies wx wy 4.5 sc2-enemy-unit-targetable?))
@@ -4123,25 +4158,54 @@
                                                all-allies wx wy 4.5
                                                (lambda ([a : Any]) (and (memq (uh-type a) '(oracle-stasis-trap stasis-ward)) #t))))
                                          (not (spell-point-claimed? claims 'stasis-ward wx wy STASIS-WARD-CLAIM-RADIUS current-frame))))]
+                                 ;; L43-P0-1c + L44-P0-1b: Plant Stasis Ward at enemy mineral-line worker cluster
+                                 ;; ONLY when not saving energy for a healthy Pulsar Beam worker shred!
+                                 [mineral-trap-pt : (Option (Pairof Float Float))
+                                  (if save-for-pulsar-raid?
+                                      #f
+                                      (let* ([near-ew
+                                              (for/list : (Listof Any) ([e (in-list enemy-units)]
+                                                                        #:when (and (memq (uh-type e) '(scv probe drone mule))
+                                                                                    (<= (dist2 ux uy (uh-x e) (uh-y e)) 11.0)))
+                                                e)]
+                                             [n-ew (length near-ew)])
+                                        (if (>= n-ew 3)
+                                            (let* ([wcx (/ (for/fold ([s : Float 0.0]) ([e (in-list near-ew)]) (+ s (uh-x e)))
+                                                           (exact->inexact n-ew))]
+                                                   [wcy (/ (for/fold ([s : Float 0.0]) ([e (in-list near-ew)]) (+ s (uh-y e)))
+                                                           (exact->inexact n-ew))]
+                                                   [d-wc (dist2 ux uy wcx wcy)]
+                                                   [tx (if (<= d-wc 8.0) wcx (clamp-coord (+ ux (* 7.2 (/ (- wcx ux) (max 0.01 d-wc))))))]
+                                                   [ty (if (<= d-wc 8.0) wcy (clamp-coord (+ uy (* 7.2 (/ (- wcy uy) (max 0.01 d-wc))))))])
+                                              (and (not (any-unit-within?
+                                                         all-allies tx ty 4.5
+                                                         (lambda ([a : Any]) (and (memq (uh-type a) '(oracle-stasis-trap stasis-ward)) #t))))
+                                                   (not (spell-point-claimed? claims 'stasis-ward tx ty STASIS-WARD-CLAIM-RADIUS current-frame))
+                                                   (cons tx ty)))
+                                            #f)))]
                                  [choke-pt : (Option (Pairof Float Float))
-                                  (for/or : (Option (Pairof Float Float)) ([cp (in-list choke-points)])
-                                    (define cx (safe-fl (car cp) 0.0))
-                                    (define cy (safe-fl (cdr cp) 0.0))
-                                    (and (safe-site? cx cy) (cons cx cy)))]
+                                  (and (not save-for-pulsar-raid?)
+                                       (>= en 55.0)
+                                       (for/or : (Option (Pairof Float Float)) ([cp (in-list choke-points)])
+                                         (define cx (safe-fl (car cp) 0.0))
+                                         (define cy (safe-fl (cdr cp) 0.0))
+                                         (and (safe-site? cx cy) (cons cx cy))))]
                                  [default-pt : (Option (Pairof Float Float))
-                                  (let* ([dx (- enemy-base-x ux)]
-                                         [dy (- enemy-base-y uy)]
-                                         [d (max 0.01 (flsqrt (+ (* dx dx) (* dy dy))))]
-                                         [wx (clamp-coord (if (<= (dist2 ux uy natural-x natural-y) 8.0)
-                                                              (+ natural-x (* 2.5 (/ (- enemy-base-x natural-x)
-                                                                                     (max 0.01 (dist2 natural-x natural-y enemy-base-x enemy-base-y)))))
-                                                              (+ ux (* 2.5 (/ dx d)))))]
-                                         [wy (clamp-coord (if (<= (dist2 ux uy natural-x natural-y) 8.0)
-                                                              (+ natural-y (* 2.5 (/ (- enemy-base-y natural-y)
-                                                                                     (max 0.01 (dist2 natural-x natural-y enemy-base-x enemy-base-y)))))
-                                                              (+ uy (* 2.5 (/ dy d)))))])
-                                    (and (safe-site? wx wy) (cons wx wy)))]
-                                 [chosen (or choke-pt default-pt)])
+                                  (and (not save-for-pulsar-raid?)
+                                       (>= en 55.0)
+                                       (let* ([dx (- enemy-base-x ux)]
+                                              [dy (- enemy-base-y uy)]
+                                              [d (max 0.01 (flsqrt (+ (* dx dx) (* dy dy))))]
+                                              [wx (clamp-coord (if (<= (dist2 ux uy natural-x natural-y) 8.0)
+                                                                   (+ natural-x (* 2.5 (/ (- enemy-base-x natural-x)
+                                                                                          (max 0.01 (dist2 natural-x natural-y enemy-base-x enemy-base-y)))))
+                                                                   (+ ux (* 2.5 (/ dx d)))))]
+                                              [wy (clamp-coord (if (<= (dist2 ux uy natural-x natural-y) 8.0)
+                                                                   (+ natural-y (* 2.5 (/ (- enemy-base-y natural-y)
+                                                                                          (max 0.01 (dist2 natural-x natural-y enemy-base-x enemy-base-y)))))
+                                                                   (+ uy (* 2.5 (/ dy d)))))])
+                                         (and (safe-site? wx wy) (cons wx wy))))]
+                                 [chosen (or mineral-trap-pt choke-pt default-pt)])
                             (and chosen
                                  (spell-claim-point?! claims 'stasis-ward (car chosen) (cdr chosen)
                                                       STASIS-WARD-CLAIM-RADIUS current-frame STASIS-WARD-CLAIM-TTL)
@@ -4682,13 +4746,13 @@
 (: plan-dt-blink-pf-snipe
    (->* ((Listof Any) (Listof Any) (Listof Any) spell-claims Integer)
         (#:researched-upgrades (Listof Any)
-         #:shadow-stride-ok? (Option Boolean)
+         #:shadow-stride-ok? (U Boolean 'auto)
          #:exclude-tags (Listof Integer))
         (Listof spell-directive)))
 (define (plan-dt-blink-pf-snipe
          ally-units enemy-units enemy-buildings claims current-frame
          #:researched-upgrades [researched-upgrades '()]
-         #:shadow-stride-ok? [shadow-stride-override #f]
+         #:shadow-stride-ok? [shadow-stride-override 'auto]
          #:exclude-tags [exclude-tags '()])
   (define dts
     (for/list : (Listof Any) ([u (in-list ally-units)]
@@ -4714,45 +4778,241 @@
        (/ (for/fold ([s : Float 0.0]) ([u (in-list dts)]) (+ s (uh-x u))) n-dts))
      (define dt-cy
        (/ (for/fold ([s : Float 0.0]) ([u (in-list dts)]) (+ s (uh-y u))) n-dts))
-     ;; Priority 1: Live visible enemy Planetary Fortress within <= 19.0t of DT squad
+     ;; L43-P0-1a (`p15` Detection-First Priority Inversion + Simultaneous Multi-Detector Blitz!):
+     ;; Priority 1: ALL live visible enemy static detectors (`missile-turret`, `photon-cannon`,
+     ;; `spore-crawler`) within `<= 20.0t` of the DT squad — EVEN WHEN a Planetary Fortress is
+     ;; present! When `>= 2` static detectors exist (like `p15`'s North & South Turrets), split the
+     ;; North & South DT wings to blink onto BOTH turrets simultaneously so both evaporate in
+     ;; `< 0.25s`, blinding the PF + 6 Sieged Tanks + Bio; once `0` detectors remain, Priority 2
+     ;; sweeps the Planetary Fortress -> Tanks -> SCVs -> Bio while permanently cloaked!
+     (define live-detectors
+       (let ([raw
+              (for/list : (Listof Any)
+                        ([e (in-list all-enemies)]
+                         #:when (and (hash? e)
+                                     (memq (uh-raw-type e) '(missile-turret photon-cannon spore-crawler))
+                                     (not (dyn-u-snapshot-flag e))
+                                     (> (uh-tag e) 0)
+                                     (<= (dist2 (uh-x e) (uh-y e) dt-cx dt-cy) 20.01)))
+                e)])
+         (sort raw
+               (lambda ([a : Any] [b : Any])
+                 (define da (dist2 (uh-x a) (uh-y a) dt-cx dt-cy))
+                 (define db (dist2 (uh-x b) (uh-y b) dt-cx dt-cy))
+                 (if (= da db) (< (uh-tag a) (uh-tag b)) (< da db))))))
+     ;; Priority 2 (when 0 static detectors remain): Live visible enemy Planetary Fortress `<= 19.0t`
      (define-values (best-pf best-pf-d)
-       (for/fold ([bp : Any #f] [bd : Float 19.01])
-                 ([e (in-list all-enemies)]
-                  #:when (and (hash? e)
-                              (eq? (uh-raw-type e) 'planetary-fortress)
-                              (not (dyn-u-snapshot-flag e))
-                              (> (uh-tag e) 0)))
-         (define ex (uh-x e))
-         (define ey (uh-y e))
-         (define d (flsqrt (+ (* (- ex dt-cx) (- ex dt-cx))
-                              (* (- ey dt-cy) (- ey dt-cy)))))
-         (if (< d bd) (values e d) (values bp bd))))
-     ;; Priority 2 (when no PF nearby): Nearby enemy ground static detector revealing DTs
-     ;; L42-P0-1b (`p15` North Turret cleanup): Widen detector scan `11 -> 16t` and allow even
-     ;; `>= 1` surviving DT to blitz the last Turret so DTs go permanently invisible vs 0-scan Terran!
-     (define-values (best-det best-det-d)
-       (if best-pf
+       (if (pair? live-detectors)
            (values #f 999.0)
-           (for/fold ([bt : Any #f] [bd : Float 16.01])
+           (for/fold ([bp : Any #f] [bd : Float 19.01])
                      ([e (in-list all-enemies)]
                       #:when (and (hash? e)
-                                  (memq (uh-raw-type e) '(missile-turret photon-cannon spore-crawler))
+                                  (eq? (uh-raw-type e) 'planetary-fortress)
                                   (not (dyn-u-snapshot-flag e))
                                   (> (uh-tag e) 0)))
              (define ex (uh-x e))
              (define ey (uh-y e))
              (define d (flsqrt (+ (* (- ex dt-cx) (- ex dt-cx))
                                   (* (- ey dt-cy) (- ey dt-cy)))))
-             (if (< d bd) (values e d) (values bt bd)))))
-     (define primary-tgt (or best-pf best-det))
-     (define is-pf? (and best-pf #t))
+             (if (< d bd) (values e d) (values bp bd)))))
+     (define primary-tgt (if (pair? live-detectors) (car live-detectors) best-pf))
+     (define is-pf? (and (null? live-detectors) best-pf #t))
      (cond
        [(not primary-tgt) '()]
+       [(not is-pf?)
+        ;; Priority 1: Static Detector Blitz (supports 1 detector OR simultaneous 2-wing dual-turret split!)
+        (define det-pair : (Listof Any)
+          (if (>= (length live-detectors) 2)
+              (list (car live-detectors) (cadr live-detectors))
+              (list (car live-detectors))))
+        (define det-a (car det-pair))
+        (define det-b (if (>= (length det-pair) 2) (cadr det-pair) #f))
+        (define mx (if det-b (* 0.5 (+ (uh-x det-a) (uh-x det-b))) (uh-x det-a)))
+        (define my (if det-b (* 0.5 (+ (uh-y det-a) (uh-y det-b))) (uh-y det-a)))
+        (define max-part-dist 20.5)
+        (define active-dts
+          (for/list : (Listof Any)
+                    ([u (in-list dts)]
+                     #:when (for/or : Boolean ([det (in-list det-pair)])
+                              (<= (dist2 (uh-x u) (uh-y u) (uh-x det) (uh-y det)) max-part-dist)))
+            u))
+        (if (null? active-dts)
+            '()
+            (let* ([an (exact->inexact (length active-dts))]
+                   [acx (/ (for/fold ([s : Float 0.0]) ([u (in-list active-dts)]) (+ s (uh-x u))) an)]
+                   [acy (/ (for/fold ([s : Float 0.0]) ([u (in-list active-dts)]) (+ s (uh-y u))) an)]
+                   [theta0 (real->double-flonum (atan (- acy my) (- acx mx)))]
+                   [d-ac-m (dist2 acx acy mx my)]
+                   [screen-enemies
+                    (for/list : (Listof Any)
+                              ([e (in-list enemy-units)]
+                               #:when (and (hash? e)
+                                           (not (dyn-u-snapshot-flag e))
+                                           (not (uh-hallucination? e))
+                                           (not (uh-flying? e))
+                                           (not (memq (uh-type e) '(scv probe drone)))
+                                           (unit-combat-relevant? e)
+                                           (<= (dist2 mx my (uh-x e) (uh-y e)) 14.5)
+                                           (<= (dist2 acx acy (uh-x e) (uh-y e)) (+ d-ac-m 1.0))))
+                      e)]
+                   [n-screen (length screen-enemies)]
+                   [screen-cx
+                    (if (>= n-screen 3)
+                        (/ (for/fold ([s : Float 0.0]) ([e (in-list screen-enemies)]) (+ s (uh-x e)))
+                           (exact->inexact n-screen))
+                        acx)]
+                   [screen-cy
+                    (if (>= n-screen 3)
+                        (/ (for/fold ([s : Float 0.0]) ([e (in-list screen-enemies)]) (+ s (uh-y e)))
+                           (exact->inexact n-screen))
+                        acy)]
+                   [threat-th (real->double-flonum (atan (- screen-cy my) (- screen-cx mx)))]
+                   [screen-blocks-approach?
+                    (and (>= (length active-dts) 4)
+                         (>= n-screen 3)
+                         (> (flcos (dt-angle-diff threat-th theta0)) 0.20))]
+                   [safe-th (if screen-blocks-approach? (+ threat-th (exact->inexact pi)) theta0)]
+                   [safe-dx (flcos safe-th)]
+                   [safe-dy (flsin safe-th)]
+                   [perp-dx (- safe-dy)]
+                   [perp-dy safe-dx]
+                   ;; Order dual detectors cleanly onto negative (`-1`) vs positive (`+1`) perp wing
+                   [det-neg : Any
+                    (if det-b
+                        (let ([pa (+ (* (- (uh-x det-a) mx) perp-dx) (* (- (uh-y det-a) my) perp-dy))]
+                              [pb (+ (* (- (uh-x det-b) mx) perp-dx) (* (- (uh-y det-b) my) perp-dy))])
+                          (if (<= pa pb) det-a det-b))
+                        det-a)]
+                   [det-pos : Any
+                    (if det-b
+                        (if (eq? det-neg det-a) det-b det-a)
+                        det-a)]
+                   [sorted-dts
+                    (sort active-dts
+                          (lambda ([a : Any] [b : Any])
+                            (define pa (+ (* (- (uh-x a) mx) perp-dx) (* (- (uh-y a) my) perp-dy)))
+                            (define pb (+ (* (- (uh-x b) mx) perp-dx) (* (- (uh-y b) my) perp-dy)))
+                            (if (= pa pb) (< (uh-tag a) (uh-tag b)) (< pa pb))))]
+                   [n-act (length sorted-dts)]
+                   [neg-side-cnt
+                    (for/sum : Integer ([u (in-list sorted-dts)])
+                      (if (< (+ (* (- (uh-x u) mx) perp-dx) (* (- (uh-y u) my) perp-dy)) 0.0) 1 0))]
+                   [half-n
+                    (if (and det-b (> neg-side-cnt 0) (< neg-side-cnt n-act))
+                        neg-side-cnt
+                        (quotient n-act 2))]
+                   [in-melee-r 2.4]
+                   [inner-r 1.45]
+                   [outer-r 1.75]
+                   [min-center-r 1.30]
+                   [dt-plans
+                    (for/list : (Listof (Vector Any Integer Float Float Float Boolean Integer Float Float Float Float Float Float Boolean Boolean Boolean Integer Float Float))
+                              ([u (in-list sorted-dts)]
+                               [i (in-naturals)])
+                      (define tag (uh-tag u))
+                      (define ux (uh-x u))
+                      (define uy (uh-y u))
+                      (define wing-neg? (or (not det-b) (< i half-n)))
+                      (define my-det (if wing-neg? det-neg det-pos))
+                      (define my-tid (uh-tag my-det))
+                      (define dtx (uh-x my-det))
+                      (define dty (uh-y my-det))
+                      (define d-tgt (dist2 ux uy dtx dty))
+                      (define in-flight? (dyn-u-has-order-ability? u 2700))
+                      (define prev-iss (hash-ref dt-issue-ht tag (lambda () #f)))
+                      (when (and prev-iss (> current-frame (vector-ref prev-iss 0)))
+                        (define f0 (vector-ref prev-iss 0))
+                        (define disp (dist2 ux uy (vector-ref prev-iss 1) (vector-ref prev-iss 2)))
+                        (cond
+                          [(or in-flight? (>= disp 3.0))
+                           (hash-set! dt-blink-ht tag (max (hash-ref dt-blink-ht tag (lambda () -10000))
+                                                           (+ f0 SHADOW-STRIDE-COOLDOWN-FRAMES)))
+                           (hash-remove! dt-issue-ht tag)]
+                          [(>= current-frame (+ f0 12))
+                           (hash-remove! dt-issue-ht tag)]))
+                      (define ready-f (hash-ref dt-blink-ht tag (lambda () -10000)))
+                      (define wing-sign
+                        (cond
+                          [det-b (if wing-neg? -1.0 1.0)]
+                          [(< (+ (* (- ux dtx) perp-dx) (* (- uy dty) perp-dy)) 0.0) -1.0]
+                          [else 1.0]))
+                      (define wf
+                        (if wing-neg?
+                            (/ (exact->inexact i) (exact->inexact (max 1 (- (if det-b half-n n-act) 1))))
+                            (let ([hi-n (max 1 (- n-act half-n))])
+                              (/ (exact->inexact (- i half-n)) (exact->inexact (max 1 (- hi-n 1)))))))
+                      ;; Safe flank rim slot (`1.55..1.95t`) around each detector, slightly biased toward
+                      ;; the outer N/S flank so DTs reach `<= 7.65t` blink range BEFORE Bio intercepts!
+                      (define ang-off
+                        (if screen-blocks-approach?
+                            (* wing-sign (+ 1.60 (* 0.65 wf)))
+                            (+ -1.20 (* 2.40 wf))))
+                      (define ring-r (if (even? i) inner-r outer-r))
+                      (define th (+ safe-th ang-off))
+                      (define slot-x (clamp-coord (+ dtx (* ring-r (flcos th)))))
+                      (define slot-y (clamp-coord (+ dty (* ring-r (flsin th)))))
+                      (define d-slot (dist2 ux uy slot-x slot-y))
+                      (define can-blink? (and ss-ok? (not in-flight?) (> d-tgt in-melee-r) (>= current-frame ready-f)))
+                      (define in-range? (and can-blink? (or (not screen-blocks-approach?) (<= d-slot SHADOW-STRIDE-MAX-RANGE))))
+                      (define damaged? (< (uh-hp-ratio u) 0.88))
+                      (vector u tag ux uy d-tgt in-flight? ready-f wing-sign ring-r th slot-x slot-y d-slot
+                              can-blink? in-range? damaged? my-tid dtx dty))]
+                   [ready-tot (for/sum : Integer ([p (in-list dt-plans)]) (if (vector-ref p 13) 1 0))]
+                   [ready-in-range-cnt (for/sum : Integer ([p (in-list dt-plans)]) (if (vector-ref p 14) 1 0))]
+                   [damaged-ready-cnt (for/sum : Integer ([p (in-list dt-plans)])
+                                        (if (and (vector-ref p 13) (vector-ref p 15)) 1 0))]
+                   [any-already-on-det? (for/or : Boolean ([p (in-list dt-plans)]) (<= (vector-ref p 4) in-melee-r))]
+                   [sync-thresh (max 2 (exact-floor (* 0.65 (exact->inexact ready-tot))))]
+                   [squad-blink-go?
+                    (or (not screen-blocks-approach?)
+                        any-already-on-det?
+                        (< ready-tot 4)
+                        (>= ready-in-range-cnt sync-thresh)
+                        (and (>= ready-in-range-cnt (max 2 (exact-floor (* 0.30 (exact->inexact ready-tot)))))
+                             (>= damaged-ready-cnt 1)))])
+              (for/list : (Listof spell-directive) ([p (in-list dt-plans)])
+                (define tag (vector-ref p 1))
+                (define ux (vector-ref p 2))
+                (define uy (vector-ref p 3))
+                (define d-tgt (vector-ref p 4))
+                (define in-flight? (vector-ref p 5))
+                (define wing-sign (vector-ref p 7))
+                (define ring-r (vector-ref p 8))
+                (define th (vector-ref p 9))
+                (define slot-x (vector-ref p 10))
+                (define slot-y (vector-ref p 11))
+                (define can-blink? (vector-ref p 13))
+                (define in-range? (vector-ref p 14))
+                (define my-tid (vector-ref p 16))
+                (define dtx (vector-ref p 17))
+                (define dty (vector-ref p 18))
+                ;; Cloaked outer-flank staging waypoint (`6.0t` back + `2.2t` wide => `6.39t <= 7.65t`!)
+                (define-values (wp-x wp-y)
+                  (if screen-blocks-approach?
+                      (values (clamp-coord (+ slot-x (* -6.0 safe-dx) (* 2.2 wing-sign perp-dx)))
+                              (clamp-coord (+ slot-y (* -6.0 safe-dy) (* 2.2 wing-sign perp-dy))))
+                      (values slot-x slot-y)))
+                (cond
+                  [in-flight?
+                   (spell-directive tag 'dark-templar 'shadow-stride 'hold 0 ux uy 'dt-blink-in-flight)]
+                  [(and can-blink? screen-blocks-approach? (not in-range?))
+                   (spell-directive tag 'dark-templar 'move 'move 0 wp-x wp-y 'dt-detector-cloaked-approach)]
+                  [(and can-blink? screen-blocks-approach? (not squad-blink-go?))
+                   (spell-directive tag 'dark-templar 'move 'move 0 wp-x wp-y 'dt-detector-sync-stage)]
+                  [can-blink?
+                   (define-values (bx by)
+                     (dt-pf-ring-blink-target ux uy dtx dty th ring-r outer-r min-center-r d-tgt 0.0))
+                   (hash-set! dt-blink-ht tag (+ current-frame 12))
+                   (hash-set! dt-issue-ht tag (vector current-frame ux uy))
+                   (spell-directive tag 'dark-templar 'shadow-stride 'point 0 bx by 'dt-blink-detector-snipe)]
+                  [else
+                   (spell-directive tag 'dark-templar 'attack-unit 'attack-unit my-tid dtx dty 'dt-detector-focus-fire)]))))]
        [else
+        ;; Priority 2 (0 live static detectors): Synchronized Planetary Fortress Rim Alpha Strike!
         (define tgt-id (uh-tag primary-tgt))
         (define tx0 (uh-x primary-tgt))
         (define ty0 (uh-y primary-tgt))
-        (define max-part-dist (if is-pf? 19.5 16.5))
+        (define max-part-dist 19.5)
         (define active-dts
           (for/list : (Listof Any) ([u (in-list dts)]
                                     #:when (let ([dx (- (uh-x u) tx0)]
@@ -4760,7 +5020,7 @@
                                              (<= (+ (* dx dx) (* dy dy))
                                                  (* max-part-dist max-part-dist))))
             u))
-        (if (< (length active-dts) (if is-pf? 4 1))
+        (if (< (length active-dts) 4)
             '()
             (let* ([an (exact->inexact (length active-dts))]
                    [acx (/ (for/fold ([s : Float 0.0]) ([u (in-list active-dts)]) (+ s (uh-x u))) an)]
@@ -4900,11 +5160,11 @@
                         any-already-on-pf?
                         (< ready-tot 4)
                         (>= ready-in-range-cnt sync-thresh)
-                        ;; L42-P0-1b (`p15` SP Bio rush): Lower under-fire early blink release
-                        ;; `>= 4 -> >= 2` damaged DTs (at >= 35% ready in range) so DTs blink
-                        ;; OVER rushing Bio onto the PF before getting intercepted!
+                        ;; L42-P0-1b + L43-P0-1a (`p15` SP Bio rush): Trigger under-fire early blink
+                        ;; release on the VERY FIRST damaged ready DT (`>= 1` damaged, `>= 35%` ready
+                        ;; in range) so DTs blink OVER rushing Bio onto the PF before getting intercepted!
                         (and (>= ready-in-range-cnt (max 4 (exact-floor (* 0.35 (exact->inexact ready-tot)))))
-                             (>= damaged-ready-cnt 2)))])
+                             (>= damaged-ready-cnt 1)))])
               (for/list : (Listof spell-directive)
                         ([p (in-list dt-plans)])
                 (define tag (vector-ref p 1))
@@ -5005,7 +5265,10 @@
             (cons (clamp-coord (+ tx0 (* 4.35 (flcos ang))))
                   (clamp-coord (+ ty0 (* 4.35 (flsin ang)))))))
         ;; Split by distance to Thor (inner ring = closest m1, middle ring = next m2, outer = rest)
-        ;; and sort each ring independently by angle around Thor -> 100% fixed-point stable, ZERO ring-swap jitter!
+        ;; and sort each ring independently by signed angle relative to squad approach axis `app-th`
+        ;; (`dt-angle-diff` in `[-pi, +pi]` -> eliminates West-axis `+-pi` wrap crossing so Mutas
+        ;; fan out cleanly `>= 1.50t` from tick 0 without crossing paths in `z16` SP!).
+        (define app-th (real->double-flonum (atan (- mcy ty0) (- mcx tx0))))
         (define by-thor-dist
           (sort mutas
                 (lambda ([a : Any] [b : Any])
@@ -5016,15 +5279,15 @@
         (define (sort-ring-mutas ring)
           (sort ring
                 (lambda ([a : Any] [b : Any])
-                  (define aa (real->double-flonum (atan (- (uh-y a) ty0) (- (uh-x a) tx0))))
-                  (define ab (real->double-flonum (atan (- (uh-y b) ty0) (- (uh-x b) tx0))))
+                  (define aa (dt-angle-diff (real->double-flonum (atan (- (uh-y a) ty0) (- (uh-x a) tx0))) app-th))
+                  (define ab (dt-angle-diff (real->double-flonum (atan (- (uh-y b) ty0) (- (uh-x b) tx0))) app-th))
                   (if (= aa ab) (< (uh-tag a) (uh-tag b)) (< aa ab)))))
         (: sort-ring-slots (-> (Listof (Pairof Float Float)) (Listof (Pairof Float Float))))
         (define (sort-ring-slots ring)
           (sort ring
                 (lambda ([a : (Pairof Float Float)] [b : (Pairof Float Float)])
-                  (define aa (real->double-flonum (atan (- (cdr a) ty0) (- (car a) tx0))))
-                  (define ab (real->double-flonum (atan (- (cdr b) ty0) (- (car b) tx0))))
+                  (define aa (dt-angle-diff (real->double-flonum (atan (- (cdr a) ty0) (- (car a) tx0))) app-th))
+                  (define ab (dt-angle-diff (real->double-flonum (atan (- (cdr b) ty0) (- (car b) tx0))) app-th))
                   (< aa ab))))
         (define r1-mutas (sort-ring-mutas (take by-thor-dist m1)))
         (define after-r1 (drop by-thor-dist m1))
@@ -5054,12 +5317,12 @@
                   m
                   (min m (dist2 ux uy (uh-x other) (uh-y other))))))
           (define crowded? (< min-ally-sep 1.10))
-          ;; L42-P0-1c (`z16` moving-Thor HOLD jitter fix): Any Muta already within <= 3.3t of
-          ;; `best-thor` with >= 1.35t ally separation holds position (`18`) immediately and fires
-          ;; continuously even if the Thor shifts slightly!
+          ;; L42-P0-1c + L43-P0-1d (`z16` moving-Thor HOLD tolerance): Any spread Muta within
+          ;; `<= 3.95t` of `best-thor` (well inside Mutalisk `4.0t` center-to-center firing range!)
+          ;; with `>= 1.30t` ally separation holds position (`18`) continuously even when SP Thors move!
           (define ready-to-hold?
-            (or (and (<= d-thor 3.3) (>= min-ally-sep 1.35))
-                (and (<= d-slot 1.05) (<= d-thor 3.85) (not crowded?))))
+            (or (and (<= d-thor 3.95) (>= min-ally-sep 1.30))
+                (and (<= d-slot 1.05) (<= d-thor 4.10) (not crowded?))))
           (cond
             [(and (< (uh-total-hp u) 32.0) (>= healthy-cnt 4))
              (define dx (- ux tx0))
@@ -5072,3 +5335,235 @@
              (spell-directive tag 'mutalisk 'hold-position 'hold-position 0 sx sy 'muta-magicbox-hold-fire)]
             [else
              (spell-directive tag 'mutalisk 'move 'move 0 sx sy 'muta-magicbox-spread-move)]))])]))
+
+;; =============================================================================
+;; L43-P0-1b: Stalker Blink-Back & Coordinated Blink-Forward High-Value Snipe
+;;   1. Blink-Back: Injured Stalker (`shields < 25.0` OR `hp < 55% max-hp`) under fire
+;;      (`enemy ground-shooter <= 11.5t`) blinks `5.5t` (`4.5–6.5t`) back behind healthy
+;;      friendly Stalkers (or away from nearest enemy threat) to drop aggro & preserve DPS!
+;;   2. Blink-Forward Snipe: `>= 5` Blink-ready healthy Stalkers (`shields >= 40`, `hp >= 60`)
+;;      within `<= 13.5t` of a high-value siege/splash/capital target (`siege-tank-sieged`,
+;;      `colossus`, `liberator-ag`, `brood-lord`, `high-templar`, `disruptor`, `tempest`)
+;;      coordinate a spread forward blink into Tank `1.75t` dead-zone / `2.8t` under Colossi &
+;;      Liberators (clamped `<= 7.5t` cast range!) to focus-fire snipe them!
+;; =============================================================================
+
+(define STALKER-BLINK-COOLDOWN-FRAMES : Integer 157)
+(define STALKER-BLINK-MAX-RANGE : Float 7.6)
+
+(: stalker-blink-researched? (-> (Listof Any) Boolean))
+(define (stalker-blink-researched? upgrades)
+  (for/or : Boolean ([u (in-list upgrades)])
+    (or (eq? u 'blink)
+        (eq? u 'blink-tech)
+        (eq? u 'stalker-blink)
+        (eqv? u 87)
+        (and (string? u)
+             (or (string=? u "blink")
+                 (string=? u "BlinkTech")
+                 (string=? u "87"))))))
+
+(: stalker-snipe-hv-priority (-> Symbol Float))
+(define (stalker-snipe-hv-priority et)
+  (case et
+    [(siege-tank-sieged) 140.0]
+    [(colossus) 135.0]
+    [(liberator-ag) 130.0]
+    [(disruptor) 125.0]
+    [(high-templar) 120.0]
+    [(brood-lord broodlord) 118.0]
+    [(tempest) 115.0]
+    [else 0.0]))
+
+(: plan-stalker-blink-micro
+   (->* ((Listof Any) (Listof Any) spell-claims Integer)
+        (#:researched-upgrades (Listof Any)
+         #:blink-ok? (U Boolean 'auto)
+         #:allow-forward? Boolean
+         #:exclude-tags (Listof Integer))
+        (Listof spell-directive)))
+(define (plan-stalker-blink-micro
+         ally-units enemy-units claims current-frame
+         #:researched-upgrades [researched-upgrades '()]
+         #:blink-ok? [blink-override 'auto]
+         #:allow-forward? [allow-forward? #t]
+         #:exclude-tags [exclude-tags '()])
+  (define blink-ok?
+    (if (boolean? blink-override)
+        blink-override
+        (stalker-blink-researched? researched-upgrades)))
+  (cond
+    [(not blink-ok?) '()]
+    [else
+     (define stalkers
+       (for/list : (Listof Any)
+                 ([u (in-list ally-units)]
+                  #:when (and (hash? u)
+                              (eq? (uh-type u) 'stalker)
+                              (not (uh-hallucination? u))
+                              (> (uh-tag u) 0)
+                              (not (memv (uh-tag u) exclude-tags))))
+         u))
+     (define vis-enemies
+       (for/list : (Listof Any)
+                 ([e (in-list enemy-units)]
+                  #:when (and (hash? e)
+                              (not (dyn-u-snapshot-flag e))
+                              (not (uh-hallucination? e))
+                              (sc2-enemy-unit-targetable? e)
+                              (unit-combat-relevant? e)
+                              (> (uh-tag e) 0)))
+         e))
+     (cond
+       [(or (null? stalkers) (null? vis-enemies)) '()]
+       [else
+        (define blink-ht (spell-claims-stalker-blink-ready-frame claims))
+        ;; Partition into healthy vs injured Stalkers
+        (define healthy-stalkers
+          (for/list : (Listof Any)
+                    ([s (in-list stalkers)]
+                     #:when (and (>= (uh-shields s) 35.0)
+                                 (>= (- (uh-total-hp s) (uh-shields s)) 55.0)))
+            s))
+        (define out : (Listof spell-directive) '())
+        (define handled-tags : (HashTable Integer Boolean) (make-hasheqv))
+        ;; Pass 1: Injured Stalker Blink-Back (`shields < 25.0` OR `hull-hp < 55%` OR `total-hp-ratio < 0.55`)
+        ;; Blinks `5.5t` back behind healthy friendly Stalkers (or away from nearest enemy threat)
+        (for ([s (in-list stalkers)])
+          (define tag (uh-tag s))
+          (define ready-f (hash-ref blink-ht tag (lambda () -10000)))
+          (when (>= current-frame ready-f)
+            (define sh (uh-shields s))
+            (define hull-hp (max 0.0 (- (uh-total-hp s) sh)))
+            (define injured? (or (< sh 25.0) (< hull-hp 44.0) (< (uh-hp-ratio s) 0.55)))
+            (when injured?
+              (define ux (uh-x s))
+              (define uy (uh-y s))
+              (define-values (near-e near-d)
+                (for/fold ([be : Any #f] [bd : Float 11.51]) ([e (in-list vis-enemies)])
+                  (define d (dist2 ux uy (uh-x e) (uh-y e)))
+                  (if (< d bd) (values e d) (values be bd))))
+              (when near-e
+                (define ex (uh-x near-e))
+                (define ey (uh-y near-e))
+                ;; Compute retreat vector away from threat, biased toward healthy friendly Stalkers behind us
+                (define raw-dx (- ux ex))
+                (define raw-dy (- uy ey))
+                (define raw-d (max 0.01 (flsqrt (+ (* raw-dx raw-dx) (* raw-dy raw-dy)))))
+                (define away-x (/ raw-dx raw-d))
+                (define away-y (/ raw-dy raw-d))
+                (define-values (h-sx h-sy h-cnt)
+                  (for/fold ([sx : Float 0.0] [sy : Float 0.0] [cnt : Integer 0])
+                            ([hs (in-list healthy-stalkers)]
+                             #:when (and (not (= (uh-tag hs) tag))
+                                         (<= (dist2 ux uy (uh-x hs) (uh-y hs)) 10.0)
+                                         ;; Healthy ally is farther from enemy than we are (behind us!)
+                                         (>= (dist2 (uh-x hs) (uh-y hs) ex ey) (- near-d 0.5))))
+                    (values (+ sx (uh-x hs)) (+ sy (uh-y hs)) (add1 cnt))))
+                (define-values (dir-x dir-y)
+                  (if (> h-cnt 0)
+                      (let* ([hcx (/ h-sx (exact->inexact h-cnt))]
+                             [hcy (/ h-sy (exact->inexact h-cnt))]
+                             ;; Aim 2.0t behind healthy Stalker cluster centroid along away vector
+                             [tx (+ hcx (* 2.0 away-x))]
+                             [ty (+ hcy (* 2.0 away-y))]
+                             [vx (- tx ux)]
+                             [vy (- ty uy)]
+                             [vd (max 0.01 (flsqrt (+ (* vx vx) (* vy vy))))])
+                        ;; Ensure we actually move away from the threat (`dot > 0.25`)
+                        (if (> (+ (* (/ vx vd) away-x) (* (/ vy vd) away-y)) 0.25)
+                            (values (/ vx vd) (/ vy vd))
+                            (values away-x away-y)))
+                      (values away-x away-y)))
+                (define bx (clamp-coord (+ ux (* 5.5 dir-x))))
+                (define by (clamp-coord (+ uy (* 5.5 dir-y))))
+                (hash-set! blink-ht tag (+ current-frame STALKER-BLINK-COOLDOWN-FRAMES))
+                (hash-set! handled-tags tag #t)
+                (set! out (cons (spell-directive tag 'stalker 'blink 'point 0 bx by 'stalker-blink-back) out))))))
+        ;; Pass 2: Coordinated Blink-Forward Snipe (`>= 5` Blink-ready healthy Stalkers vs HV target)
+        (define ready-healthy
+          (for/list : (Listof Any)
+                    ([s (in-list healthy-stalkers)]
+                     #:when (and (not (hash-has-key? handled-tags (uh-tag s)))
+                                 (>= (uh-shields s) 40.0)
+                                 (>= (- (uh-total-hp s) (uh-shields s)) 60.0)
+                                 (>= current-frame (hash-ref blink-ht (uh-tag s) (lambda () -10000)))))
+            s))
+        (when (and allow-forward? (>= (length ready-healthy) 5))
+          (define rn (exact->inexact (length ready-healthy)))
+          (define scx (/ (for/fold ([s : Float 0.0]) ([u (in-list ready-healthy)]) (+ s (uh-x u))) rn))
+          (define scy (/ (for/fold ([s : Float 0.0]) ([u (in-list ready-healthy)]) (+ s (uh-y u))) rn))
+          ;; Find highest-priority high-value siege/splash/capital target within `<= 13.5t`
+          ;; (use `uh-raw-type` first so `'siege-tank-sieged` and `'liberator-ag` aren't canonicalized!)
+          (define best-hv : Any
+            (for/fold ([bt : Any #f] [bsc : Float 0.0] #:result bt)
+                      ([e (in-list vis-enemies)])
+              (define raw-et (uh-raw-type e))
+              (define pri0 (stalker-snipe-hv-priority raw-et))
+              (define pri (if (> pri0 0.0) pri0 (stalker-snipe-hv-priority (uh-type e))))
+              (if (> pri 0.0)
+                  (let ([d (dist2 scx scy (uh-x e) (uh-y e))])
+                    (if (<= d 13.5)
+                        (let ([sc (- pri (* 4.0 d) (* 0.05 (uh-total-hp e)))])
+                          (if (> sc bsc) (values e sc) (values bt bsc)))
+                        (values bt bsc)))
+                  (values bt bsc))))
+          (when best-hv
+            (define hv-x (uh-x best-hv))
+            (define hv-y (uh-y best-hv))
+            (define hv-tag (uh-tag best-hv))
+            (define hv-type (uh-raw-type best-hv))
+            ;; Require >= 5 ready healthy Stalkers within `<= 11.5t` (1 blink + immediate range-6 volley!)
+            ;; L44-P0-1a (`#04 PvT` / `#82 PvT` / `b06` / `b07`): NEVER bypass local combat parity
+            ;; for Siege Tanks / Colossi / Liberators / Disruptors / High Templars! Count local enemy
+            ;; combat units (`<= 10.0t` of HV target) AND overlapping OTHER Sieged Tanks (`<= 13.0t`
+            ;; of `best-hv`) so Stalkers NEVER suicide-blink into 3-6 Sieged Tanks + Bio!
+            (define strike-stalkers
+              (for/list : (Listof Any)
+                        ([s (in-list ready-healthy)]
+                         #:when (<= (dist2 (uh-x s) (uh-y s) hv-x hv-y) 11.5))
+                s))
+            (define local-enemy-cnt
+              (for/sum : Integer ([e (in-list vis-enemies)]
+                                  #:when (and (not (memq (uh-type e) '(scv probe drone mule overlord overseer observer larva egg)))
+                                              (<= (dist2 hv-x hv-y (uh-x e) (uh-y e)) 10.0)))
+                1))
+            (define other-sieged-tanks-in-range
+              (for/sum : Integer ([e (in-list vis-enemies)]
+                                  #:when (and (not (= (uh-tag e) hv-tag))
+                                              (eq? (uh-raw-type e) 'siege-tank-sieged)
+                                              (<= (dist2 hv-x hv-y (uh-x e) (uh-y e)) 13.0)))
+                1))
+            (define n-strike (length strike-stalkers))
+            (define tank-overlap-safe?
+              (or (< other-sieged-tanks-in-range 2)
+                  (and (>= n-strike 10)
+                       (<= local-enemy-cnt (+ n-strike 4)))))
+            (when (and (>= n-strike 5)
+                       (<= local-enemy-cnt (* n-strike 2))
+                       tank-overlap-safe?)
+              ;; Land inside Tank `1.75t` dead-zone (`<= 2.0t` min range!) or `2.8t` arc under Colossus/Lib
+              (define land-r (if (eq? hv-type 'siege-tank-sieged) 1.75 2.8))
+              (define base-th (real->double-flonum (atan (- scy hv-y) (- scx hv-x))))
+              (for ([s (in-list strike-stalkers)]
+                    [idx (in-naturals)])
+                (define tag (uh-tag s))
+                (define ux (uh-x s))
+                (define uy (uh-y s))
+                (define frac (if (<= n-strike 1) 0.0 (/ (exact->inexact idx) (exact->inexact (- n-strike 1)))))
+                (define ang (+ base-th (* (- frac 0.5) 1.1)))
+                (define goal-x (clamp-coord (+ hv-x (* land-r (flcos ang)))))
+                (define goal-y (clamp-coord (+ hv-y (* land-r (flsin ang)))))
+                (define d-goal (dist2 ux uy goal-x goal-y))
+                ;; Only blink forward if not already inside landing ring (`d > land-r + 1.5`)
+                (when (> (dist2 ux uy hv-x hv-y) (+ land-r 1.5))
+                  (define-values (bx by)
+                    (if (<= d-goal STALKER-BLINK-MAX-RANGE)
+                        (values goal-x goal-y)
+                        (let ([ratio (/ STALKER-BLINK-MAX-RANGE (max 0.01 d-goal))])
+                          (values (clamp-coord (+ ux (* (- goal-x ux) ratio)))
+                                  (clamp-coord (+ uy (* (- goal-y uy) ratio)))))))
+                  (hash-set! blink-ht tag (+ current-frame STALKER-BLINK-COOLDOWN-FRAMES))
+                  (hash-set! handled-tags tag #t)
+                  (set! out (cons (spell-directive tag 'stalker 'blink 'point hv-tag bx by 'stalker-blink-forward-snipe) out)))))))
+        (reverse out)])]))

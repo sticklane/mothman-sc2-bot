@@ -80,6 +80,19 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             required=True,
         ),
         ReportSpec(
+            slug="loop42-forensics",
+            out_file="loop42-forensics.html",
+            title="Loop 42 Release & Live Build 40 Notes",
+            short_title="Loop 42 Notes",
+            section="Technical Notes",
+            summary="Head-to-head results before shipping build 42, live build 40 ladder update, and the Loop 43 plan.",
+            source_candidates=(
+                analyzer_dir / "loop42_ship5_signoff_prod_l40_audit.md",
+                brain_dir / "loop42_ship5_signoff_prod_l40_audit.md",
+            ),
+            required=False,
+        ),
+        ReportSpec(
             slug="loop41-forensics",
             out_file="loop41-forensics.html",
             title="Loop 41 & Live Build 40 Notes",
@@ -335,6 +348,7 @@ def _iter_manifest_files(brain_dir: Path) -> Tuple[List[Tuple[int, Path]], List[
             continue
         loop_num = int(m.group(1))
         for cand in (
+            vis_dir / "full_matches" / "full_matches_manifest.json",
             vis_dir / "replays" / "full_matches_manifest.json",
             vis_dir / "full_matches_manifest.json",
         ):
@@ -342,9 +356,11 @@ def _iter_manifest_files(brain_dir: Path) -> Tuple[List[Tuple[int, Path]], List[
                 full_match_manifests.append((loop_num, cand))
                 break
         for mode in ("arena", "selfplay"):
-            am = vis_dir / mode / "manifest.json"
-            if am.is_file():
-                arena_manifests.append((loop_num, mode, am))
+            for am_name in ("arena_manifest.json", "manifest.json"):
+                am = vis_dir / mode / am_name
+                if am.is_file():
+                    arena_manifests.append((loop_num, mode, am))
+                    break
     return full_match_manifests, arena_manifests
 
 
@@ -1336,6 +1352,7 @@ DEPLOY_LABELS: Dict[str, str] = {
     "ltxmxpzu_e45b61eb": "Loop 37",
     "mwskxoml_ffb8aaf1": "Loop 40",
     "womqlpsp_6917245e": "Loop 42",
+    "qpqqolmk_3b21fe7a": "Loop 45",
 }
 
 BOT_META: Dict[str, Dict[str, str]] = {
@@ -1838,7 +1855,8 @@ def discover_gallery_items(
             our_bot = str(entry.get("our_bot") or "Mothman")
             opp_bot = str(entry.get("opp_bot") or "Opponent")
             mu = str(entry.get("matchup") or "")
-            map_name = str(entry.get("map") or "").replace("AIE_v4", "").replace("AIE_v3", "").replace("AIE_v2", "")
+            map_raw = str(entry.get("map_canon") or entry.get("map") or "")
+            map_name = re.sub(r"(?:AIE_v\d+)?(?:\.SC2Map)?$", "", map_raw)
             result_raw = str(entry.get("result") or "")
             outcome = _outcome_norm(result_raw)
             tr = entry.get("trade_ratio")
@@ -1915,29 +1933,43 @@ def discover_gallery_items(
                     race_guess = "Terran"
                 elif "-z" in sid or "_z" in sid:
                     race_guess = "Zerg"
-            res_raw = str(tinfo.get("outcome") or tinfo.get("result") or clip.get("result") or "")
-            outcome = _outcome_norm(res_raw) if res_raw else "win"
-            tr = tinfo.get("trade_ratio")
+            winner_raw = str(clip.get("winner") or tinfo.get("winner") or "").strip().lower()
+            win_type = str(clip.get("win_type") or tinfo.get("win_type") or "").strip().lower()
+            if winner_raw in ("mothman", "mothman-p1", "p1"):
+                outcome = "win"
+                res_label = "Pass" if "econ" in win_type else "Win"
+            elif winner_raw in ("microdummy", "mothman-p2", "p2"):
+                outcome = "loss"
+                res_label = "Fail" if "econ" in win_type else "Loss"
+            elif winner_raw in ("draw", "tie"):
+                outcome = "tie"
+                res_label = "Draw"
+            else:
+                res_raw = str(tinfo.get("outcome") or tinfo.get("result") or clip.get("result") or "")
+                outcome = _outcome_norm(res_raw) if res_raw else "win"
+                res_label = res_raw.replace("_", " ").title() if res_raw else "Drill"
+            tr = clip.get("trade_ratio") if clip.get("trade_ratio") is not None else tinfo.get("trade_ratio")
+            tier_val = clip.get("tier") or tinfo.get("tier")
             clean_name = re.sub(r"^sc2-(?:real|econ|reg)-", "", sid).replace("-", " ")
             bits = [cat_label]
             if isinstance(tr, (int, float)):
                 bits.append(f"{tr:.2f}× trade")
-            if tinfo.get("tier"):
-                bits.append(str(tinfo["tier"]))
+            if tier_val:
+                bits.append(str(tier_val))
             items.append(
                 {
                     "loop": f"Loop {loop_num}",
                     "category": cat_label,
-                    "cohort": str(tinfo.get("tier") or mode),
+                    "cohort": str(tier_val or mode),
                     "race": _race_full(race_guess),
                     "outcome": outcome,
-                    "result_label": res_raw.replace("_", " ").title() if res_raw else "Drill",
+                    "result_label": res_label,
                     "title": clean_name.title(),
                     "subtitle": " · ".join(bits),
                     "media_type": "mp4",
                     "src": mp4_url,
                     "poster": png_url,
-                    "search": f"loop {loop_num} {sid} {clean_name} {cat_label} {race_guess} {res_raw}".lower(),
+                    "search": f"loop {loop_num} {sid} {clean_name} {cat_label} {race_guess} {res_label} {tier_val or ''}".lower(),
                 }
             )
 
@@ -2843,6 +2875,9 @@ _CALM_LOOP_TITLES: Dict[int, str] = {
     40: "Live release #4",
     41: "Unseen-bot high & DT blink",
     42: "Live release #5",
+    43: "Tactics Arena 3.0 (held)",
+    44: "Detection & drop fixes (held)",
+    45: "Live release #6",
 }
 
 
@@ -3376,22 +3411,24 @@ def build_index_page(
       Before shipping a new build to AI Arena, we test it across 90 local games: 14 regular
       practice opponents, 12 held-out bots we avoid tuning against directly (much like a
       machine-learning test set), self-play mirrors, and a six-game head-to-head match against
-      whatever build is currently live. Our newest candidate (Loop 42) just reached 20–21
-      with a 1.00× average trade ratio against the 14 core opponents—the first time the core
-      suite broke even on combat value—while beating the live Loop 40 build 5–1 head-to-head.
+      whatever build is currently live. Our latest release (Loop 45) set a new high of 25 wins
+      against external practice opponents—including Terran’s first overall positive trade ratio
+      (1.02×) and a 50% clean win rate on our original 12-bot benchmark—while sweeping all three
+      same-race mirrors against the live Loop 42 build (4–2 overall, 1.43× trade).
     </p>
     <p>
-      Alongside full matches, we run short, repeatable combat drills inside the StarCraft II
-      engine to isolate one skill at a time. Recent drills cover Zerg Queens defending mining
-      Drones against early Reaper raids (holding 97% mining uptime), Terran SCVs weathering
-      three-Adept raids, and Mutalisks spreading out to avoid Thor splash damage.
+      Alongside full matches, we expanded our Tactics Arena to 213 isolated drills inside the
+      StarCraft II engine covering 16 categories: sniping building and unit detectors before
+      engaging with cloaked or burrowed units, Stalker blink-back and blink-forward snipes,
+      Widow Mine and Baneling drops, mineral-line runbys and defenses, Stasis Ward harass and
+      defusing, Battlecruiser Yamato jumps, Nydus/transport juggles, and burrow micro.
     </p>
     <p>
-      Plenty of holes remain. On the live ladder, all-in first-minute worker rushes from
-      <em>Creepy_strategies</em> still catch our bots off guard. In local mirrors, Terran can
-      still fall behind on Siege Tanks if it overbuilds transports, and we are reworking our
-      Dark Templar raids to snipe detection turrets first rather than blinking straight onto
-      a defended fortress.
+      Plenty of holes remain. On the live ladder, first-minute all-in worker rushes from
+      <em>Creepy_strategies</em> still catch our bots off guard. Locally, Protoss still has
+      room to tighten its 12-Pool hold and mid-game transitions against Terran and Zerg, and
+      in our Planetary Fortress drill the home Nexus still occasionally recalls cloaked Dark
+      Templars after they clear both turrets.
     </p>
   </div>
 </section>

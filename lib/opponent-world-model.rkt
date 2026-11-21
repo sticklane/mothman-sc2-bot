@@ -295,7 +295,9 @@
     [(hydralisk hydralisk-den) '(spawning-pool lair hydralisk-den extractor)]
     [(lurker lurker-mp lurker-burrowed lurker-den lurker-den-mp) '(spawning-pool lair hydralisk-den lurker-den extractor)]
     [(mutalisk corruptor spire) '(spawning-pool lair spire extractor)]
-    [(brood-lord broodlord broodling greater-spire) '(spawning-pool lair infestation-pit hive spire greater-spire extractor)]
+    ;; L43-P0-2a (`PolyMorph T` 141-tick Viking leak): NEVER infer `greater-spire` from `broodling` —
+    ;; every destroyed Zerg structure spawns death Broodlings in SC2!
+    [(brood-lord broodlord greater-spire) '(spawning-pool lair infestation-pit hive spire greater-spire extractor)]
     [(swarm-host swarm-host-burrowed locust locust-mp locust-flying infestor) '(spawning-pool lair infestation-pit extractor)]
     [(viper) '(spawning-pool lair infestation-pit hive extractor)]
     [(ultralisk ultralisk-cavern) '(spawning-pool lair infestation-pit hive ultralisk-cavern extractor)]
@@ -623,10 +625,12 @@
     (cond
       [(or halluc? (free-summon-unit-sym? utype))
        (set! active-summon-cnt (add1 active-summon-cnt))
-       (when (hash-has-key? LOCUST-SUMMON-SET utype)
-         (set! active-locust-cnt (add1 active-locust-cnt)))
-       (for ([p (in-list (implied-tech-prereqs utype))])
-         (set-add! implied-set p))]
+       ;; L43-P0-2a: Hallucinations NEVER imply real enemy tech or locust waves!
+       (unless halluc?
+         (when (hash-has-key? LOCUST-SUMMON-SET utype)
+           (set! active-locust-cnt (add1 active-locust-cnt)))
+         (for ([p (in-list (implied-tech-prereqs utype))])
+           (set-add! implied-set p)))]
       [else
        (define tag (hash-ref u 'id 0))
        (for ([p (in-list (implied-tech-prereqs utype))])
