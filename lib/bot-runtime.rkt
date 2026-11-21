@@ -7532,12 +7532,16 @@
     (define mixed-worker-combat-rush?
       (and (not (null? enemy-combat-near-main))
            (not (null? enemy-rush-workers))))
-    ;; L39-P0-1a + L40-P0-1b + L41-P0-1b (`#5138248`/`#5140013` / `r02`/`r05` Pure Worker All-In):
+    ;; L39-P0-1a + L40-P0-1b + L41-P0-1b + L42-P0-1a (`r02`/`r05`/`r06` 3-Race Pure Worker All-In):
     ;; Latch `heavy-pure-worker-allin?` once triggered (`>= 10` pure enemy workers) until `< 3`
-    ;; remain (or non-worker enemy combat enters), eliminating `r05` SP's mid-fight `3685` repair
-    ;; relapse once enemy Probes drop below 10!
+    ;; remain (or non-worker enemy combat enters), AND track `heavy-pure-worker-allin-12plus?`
+    ;; (`>= 11` pure enemy workers latched down to `>= 3`) so full `15`-Probe all-ins commit with
+    ;; ZERO mid-fight `3666` disengage pulls (`max-total-dis-heavy-rush = 0` when `hw <= ew + 2`)
+    ;; while preserving 10-Probe early-warning `10 HP` disengage!
     (define prev-heavy-allin?
       (eq? (hash-ref rush-def-st 'heavy-pure-worker-allin-latched? #f) #t))
+    (define prev-heavy-allin-12plus?
+      (eq? (hash-ref rush-def-st 'heavy-pure-worker-allin-12plus? #f) #t))
     (define pure-worker-rush-now?
       (and (not mixed-worker-combat-rush?)
            (null? enemy-combat-near-main)))
@@ -7546,7 +7550,13 @@
            (or (>= (length enemy-rush-workers) 10)
                (and prev-heavy-allin?
                     (>= (length enemy-rush-workers) 3)))))
+    (define heavy-pure-worker-allin-12plus?
+      (and pure-worker-rush-now?
+           (or (>= (length enemy-rush-workers) 11)
+               (and prev-heavy-allin-12plus?
+                    (>= (length enemy-rush-workers) 3)))))
     (hash-set! rush-def-st 'heavy-pure-worker-allin-latched? heavy-pure-worker-allin?)
+    (hash-set! rush-def-st 'heavy-pure-worker-allin-12plus? heavy-pure-worker-allin-12plus?)
     (define safe-evac-mp
       (if (and (not (null? enemy-combat-near-main))
                (not (null? base-mineral-patches)))
@@ -7645,11 +7655,18 @@
         [(>= (length enemy-rush-workers) 6)
          (max 1 (min 2 (- (length non-builder-defense-workers) (length enemy-rush-workers) -2)))]
         [else 999]))
-    ;; L38-P0-1c + L40-P0-1b (`#5138248`/`#5140013` / `r02`/`r05`): During a >= 10-worker pure
-    ;; worker all-in, cap simultaneous disengage at 1 strictly `< 10` HP worker so 15+ defenders
-    ;; sustain continuous Lanchester focus-fire DPS!
+    ;; L38-P0-1c + L40-P0-1b + L42-P0-1a (`r02`/`r05`/`r06` 3-race `rush_probe` killer):
+    ;; When defending an even/outnumbered pure `>= 11`-worker all-in (`hw <= ew + 2`), set
+    ;; `max-total-dis-heavy-rush = 0` so ZERO `3666` mineral-walk disengages interrupt melee DPS
+    ;; (while keeping `1` disengage for `10`-worker rushes or surplus-worker defenses!).
     (define max-total-dis-heavy-rush
-      (if heavy-pure-worker-allin? 1 999))
+      (cond
+        [(and heavy-pure-worker-allin-12plus?
+              (<= (length non-builder-defense-workers)
+                  (+ (length enemy-rush-workers) 2)))
+         0]
+        [heavy-pure-worker-allin? 1]
+        [else 999]))
     (define sorted-disengage-cands
       (sort (reverse raw-disengage-cands) < #:key fourth))
     (define-values (kept-disengage-entries capped-stay-fighting-wids)
@@ -8039,13 +8056,21 @@
         (define (effective-melee-cap ew)
           (define ehp (max 1.0 (exact->inexact (unit-total-hp-and-shield ew))))
           (define swings-needed (inexact->exact (ceiling (/ ehp 5.0))))
-          (define cap (if (mineral-line-stacked-enemy? ew) 8 3))
+          (define is-primary?
+            (and primary-focus-id (equal? (hash-ref ew 'id -1) primary-focus-id)))
+          (define cap
+            (cond
+              [(and heavy-pure-worker-allin-12plus? is-primary?) 8]
+              [(mineral-line-stacked-enemy? ew) 8]
+              [heavy-pure-worker-allin-12plus? 6]
+              [else 3]))
           (min cap (max 2 swings-needed)))
         (define (effective-chaser-cap ew)
           (min (if (and (>= e-cnt 6)
-                        (mineral-line-stacked-enemy? ew)
                         primary-focus-id
-                        (equal? (hash-ref ew 'id -1) primary-focus-id))
+                        (equal? (hash-ref ew 'id -1) primary-focus-id)
+                        (or heavy-pure-worker-allin-12plus?
+                            (mineral-line-stacked-enemy? ew)))
                    6
                    3)
                (effective-melee-cap ew)))
@@ -8086,33 +8111,50 @@
                                 4.5)))
                      ally-bldgs)))
 
-        ;; Pass 1: Immediate melee swing (<= 2.5 tiles normally, <= 3.2 tiles on primary mineral-line focus target in live games), lowest (hp + shield)
+        ;; Pass 1: Immediate melee swing — under `heavy-pure-worker-allin-12plus?`, check direct
+        ;; melee contact (`<= 1.6t`) FIRST so engaged front-row workers NEVER turn away to walk
+        ;; through body-blocking bodies for a wounded target 3t back!
         (for ([w (in-list frontline-first)])
           (define wid (hash-ref w 'id 10))
           (define wx (hash-ref w 'x base-x))
           (define wy (hash-ref w 'y base-y))
+          (define direct-contact-cands
+            (if heavy-pure-worker-allin-12plus?
+                (filter (lambda (ew)
+                          (define eid (hash-ref ew 'id 0))
+                          (and (> eid 0)
+                               (< (hash-ref assigned-target-counts eid 0) (effective-melee-cap ew))
+                               (<= (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)) 1.65)))
+                        safe-engage-workers)
+                '()))
           (define melee-cands
-            (filter (lambda (ew)
-                      (define eid (hash-ref ew 'id 0))
-                      (define reach
-                        (if (and (>= e-cnt 6)
-                                 primary-focus-id
-                                 (equal? eid primary-focus-id)
-                                 (or (and th-focus-stack-trigger?
-                                          (<= (dist-to-owned-townhall (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)) 4.2))
-                                     (and live-obs-harvesters?
-                                          (<= (dist-to-mineral-line (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)) 5.5))))
-                            3.2
-                            2.5))
-                      (and (> eid 0)
-                           (< (hash-ref assigned-target-counts eid 0) (effective-melee-cap ew))
-                           (<= (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)) reach)))
-                    safe-engage-workers))
+            (if (pair? direct-contact-cands)
+                direct-contact-cands
+                (filter (lambda (ew)
+                          (define eid (hash-ref ew 'id 0))
+                          (define reach
+                            (if (and (>= e-cnt 6)
+                                     primary-focus-id
+                                     (equal? eid primary-focus-id)
+                                     (or (and th-focus-stack-trigger?
+                                              (<= (dist-to-owned-townhall (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)) 4.2))
+                                         (and live-obs-harvesters?
+                                              (<= (dist-to-mineral-line (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)) 5.5))))
+                                3.2
+                                2.5))
+                          (and (> eid 0)
+                               (< (hash-ref assigned-target-counts eid 0) (effective-melee-cap ew))
+                               (<= (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)) reach)))
+                        safe-engage-workers)))
           (unless (null? melee-cands)
             (define chosen
               (argmin (lambda (ew)
-                        (+ (* 100.0 (unit-total-hp-and-shield ew))
-                           (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y))))
+                        (+ (* (if (and heavy-pure-worker-allin-12plus? (null? direct-contact-cands))
+                                  5.0
+                                  100.0)
+                              (unit-total-hp-and-shield ew))
+                           (* (if heavy-pure-worker-allin-12plus? 8.0 1.0)
+                              (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)))))
                       melee-cands))
             (define cid (hash-ref chosen 'id 0))
             (hash-update! assigned-target-counts cid add1 0)
@@ -8122,7 +8164,8 @@
                              (safe-coord (hash-ref chosen 'y cl-y) cl-y)))))
 
         ;; Pass 2: Targeted focus-fire within 4.5-6.0 tiles (7.0 for < 6 workers, 10.0 for heavy pure
-        ;; worker all-in!) onto the lowest (hp + shield) non-retreating enemy worker.
+        ;; worker all-in!) onto the nearest/lowest-EHP non-retreating enemy worker (proximity-weighted
+        ;; in `heavy-pure-worker-allin-12plus?` so outer workers wrap smoothly without body-blocking!).
         (define pass2-reach (cond [heavy-pure-worker-allin? 10.0] [(>= e-cnt 6) 6.0] [else 7.0]))
         (for ([w (in-list frontline-first)]
               #:unless (hash-has-key? worker-assignments (hash-ref w 'id 10)))
@@ -8143,8 +8186,11 @@
             [(not (null? local-cands))
              (define chosen
                (argmin (lambda (ew)
-                         (+ (* (if heavy-pure-worker-allin? 25.0 5.0) (unit-total-hp-and-shield ew))
-                            (* 2.5 (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y)))))
+                         (if heavy-pure-worker-allin-12plus?
+                             (+ (* 3.0 (unit-total-hp-and-shield ew))
+                                (* 8.0 (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y))))
+                             (+ (* (if heavy-pure-worker-allin? 25.0 5.0) (unit-total-hp-and-shield ew))
+                                (* 2.5 (dist2d wx wy (hash-ref ew 'x cl-x) (hash-ref ew 'y cl-y))))))
                        local-cands))
              (define cid (hash-ref chosen 'id 0))
              (hash-update! assigned-target-counts cid add1 0)
@@ -8596,7 +8642,10 @@
                      [ecy (/ (for/sum ([e (in-list cand-enemies)]) (exact->inexact (hash-ref e 'y base-y))) en-n)]
                      [enemy-near-sup
                       (for/sum ([e (in-list cand-enemies)])
-                        (max 0.5 (exact->inexact (sc2-supply-cost (fast-canonical-unit-sym (unit-type-sym e))))))]
+                        (let ([cs (fast-canonical-unit-sym (unit-type-sym e))])
+                          (if (eq? cs 'zergling)
+                              0.5
+                              (max 0.5 (exact->inexact (sc2-supply-cost cs))))))]
                      [local-allies
                       (filter (lambda (u)
                                 (<= (dist2d (exact->inexact (hash-ref u 'x 9999.0))
@@ -8606,7 +8655,10 @@
                               ally-combat-units)]
                      [local-ally-sup
                       (for/sum ([u (in-list local-allies)])
-                        (max 0.5 (exact->inexact (sc2-supply-cost (fast-canonical-unit-sym (unit-type-sym u))))))]
+                        (let ([cs (fast-canonical-unit-sym (unit-type-sym u))])
+                          (if (eq? cs 'zergling)
+                              0.5
+                              (max 0.5 (exact->inexact (sc2-supply-cost cs))))))]
                      [min-ally-ehp
                       (if (null? local-allies)
                           0.0
@@ -8616,8 +8668,8 @@
                       (and (< local-ally-sup 12.0)
                            (or (< local-ally-sup (* 1.15 enemy-near-sup))
                                (and prev-ling-breach-latched?
-                                    (<= local-ally-sup 2.5)
-                                    (>= cand-cnt 1))))])
+                                    (or (and (< local-ally-sup 1.5) (>= cand-cnt 1))
+                                        (and (<= local-ally-sup 2.5) (>= cand-cnt 3))))))])
                 (hash-set! rush-def-st 'ling-breach-latched? outnumbered?)
                 (if outnumbered?
                     (values cand-enemies local-ally-sup min-ally-ehp)
@@ -8740,7 +8792,7 @@
               (min m (dist2d wx wy
                              (exact->inexact (hash-ref e 'x 9999.0))
                              (exact->inexact (hash-ref e 'y 9999.0))))))
-          (when (and (<= w-ehp 22.0) (<= near-breach-d 6.5))
+          (when (and (<= w-ehp 18.0) (<= near-breach-d 6.5))
             (set-l2-ctx-cur-rush-disengaging-wids!
              ctx
              (cons wid (or (l2-ctx-cur-rush-disengaging-wids ctx) '())))
@@ -9370,11 +9422,12 @@
                     (if (eq? near-h-sym 'reaper)
                         (and (<= w-ehp 28.0) (<= near-h-dist 6.5))
                         (and (<= w-ehp 24.0) (<= near-h-dist 6.0)))]
-                   ;; L39-P0-1f + L40-P0-1f (`e03` 45-HP SCV vs 22-dmg Adept): Slide any worker at `<= 24` EHP
-                   ;; OR within `<= 6.5t` of Adepts BEFORE they close into 2-shot glaive range!
+                   ;; L39-P0-1f + L40-P0-1f + L42-P0-1d (`e03` 45-HP SCV vs 22-dmg Adept): Slide any worker
+                   ;; at `<= 24` EHP (`<= 7.5t`) OR healthy SCVs within `<= 5.9t` (Adept range is 4.0t!) so
+                   ;; far-end SCVs keep mining (`+uptime`) while close SCVs escape 2-shot glaive range!
                    [(eq? near-h-sym 'adept)
                     (or (and (<= w-ehp 24.0) (<= near-h-dist 7.5))
-                        (<= near-h-dist 6.5))]
+                        (<= near-h-dist 5.9))]
                    [(or best-safe-mp near-h-flying?) #t]
                    [else
                     (or (<= near-h-dist 3.5)
@@ -9391,10 +9444,10 @@
                     (refractory-allow-action?! cd-tracker (list 'harass-evac wid) frame evac-cd-frames))
                (define hx (hash-ref near-harasser 'x base-x))
                (define hy (hash-ref near-harasser 'y base-y))
-               ;; L39-P0-1f + L40-P0-1f + L41-P0-1d (`e03`/`e04`): For Adepts, scatter evacuating
-               ;; SCVs across 2-3 SPATIALLY SEPARATED safe patches (max-min spread from top-5 farthest
-               ;; patches, preferring paths clear of Adepts!) instead of clumping on 3 adjacent corner
-               ;; patches — prevents bounce-vector traps & preserves collision-free mineral walk!
+               ;; L39-P0-1f + L40-P0-1f + L41-P0-1d + L42-P0-1d (`e03`/`e04`): For Adepts, scatter
+               ;; evacuating SCVs across 2-3 SPATIALLY SEPARATED safe patches strictly farther from
+               ;; Adepts than current worker position (preferring paths clear of Adepts!) instead
+               ;; of clumping on 1 corner or running toward an Adept!
                (define far-local-mp
                  (and (not best-safe-mp)
                       (not near-h-flying?)
@@ -9417,10 +9470,14 @@
                                         (and (>= (car p) 4.5)
                                              (>= (- (car p) near-h-dist) 1.5)))
                                       scored)]
-                             [eff-cands
+                             [farther-cands
                               (if (and (null? cands) (eq? near-h-sym 'adept))
-                                  scored
+                                  (filter (lambda (p) (>= (- (car p) near-h-dist) 0.8)) scored)
                                   cands)]
+                             [eff-cands
+                              (if (and (null? farther-cands) (eq? near-h-sym 'adept))
+                                  scored
+                                  farther-cands)]
                              [top-k
                               (if (and (eq? near-h-sym 'adept) (>= (length eff-cands) 3))
                                   (let* ([pool (take eff-cands (min 5 (length eff-cands)))]
@@ -25006,10 +25063,47 @@
          (>= l36-enemy-rem-val 1200)
          (< (exact->inexact our-combat-val)
             (fl* 0.85 (exact->inexact l36-enemy-rem-val)))))
+  ;; L42-P0-1d (`#04 PvT` 2-6m Attack Guard while Colossus #1 queued/teching):
+  ;; Stop 2-base PvT Gateway armies (14-28 supply, 0 Colossi) from marching across the map into
+  ;; Terran Bio+Medivac+Tank concaves (`Atk2-6 60.6% -> ~30%`) right before Colossus #1 finishes!
+  ;; Releases immediately once Colossus #1 pops, under home attack, or in visible combat contact.
+  (define l42-our-colossus-cnt
+    (for/sum ([u (in-list combat-units)]
+              #:when (and (hash? u) (eq? (fast-canonical-unit-sym (unit-type-sym u)) 'colossus)))
+      1))
+  (define l42-our-robo-bay-present?
+    (for/or ([b (in-list (or (l34-ctx-ally-bldgs ctx) '()))])
+      (and (hash? b)
+           (eq? (fast-canonical-structure-sym (unit-type-sym b)) 'robotics-bay))))
+  (define l42-colossus-pending?
+    (let ([ol (l34-ctx-oledger ctx)])
+      (and ol (> (order-ledger-pending-count-for-type ol 'colossus frame) 0))))
+  (define l42-pvt-awaiting-colossus-hold?
+    (and (l34-ctx-live-obs? ctx)
+         (eq? our-race-eval 'Protoss)
+         (eq? (hash-ref (l34-ctx-obs ctx) 'enemy-race 'Unknown) 'Terran)
+         (< frame 9600)
+         (not enemy-within-14-of-th?)
+         (not enemy-within-14-of-main?)
+         (not enemy-main-cleared-eval?)
+         (not decisive-victory-posture?)
+         (not owm-sh-cooldown?)
+         (not army-in-direct-visible-contact?)
+         (< our-combat-sup-eval 42.0)
+         (= l42-our-colossus-cnt 0)
+         (or l42-our-robo-bay-present?
+             l42-colossus-pending?
+             (and (>= frame 3360)
+                  (<= our-bases-eval 2)
+                  (< our-combat-sup-eval 28.0)
+                  (>= known-enemy-army-val 450)
+                  (< (exact->inexact our-combat-val)
+                     (fl* 1.15 (exact->inexact known-enemy-army-val)))))))
   (define early-midgame-pt-timing-exempt?
     (and (not l25-counter-volley-staging?)
          (not l35-siege-tempest-mass-hold?)
          (not l36-prod-parity-mass-hold?)
+         (not l42-pvt-awaiting-colossus-hold?)
          (memq our-race-eval '(Protoss Terran))
          (< frame 10752)
          (>= (exact->inexact our-combat-val)
@@ -25022,6 +25116,7 @@
          (or early-fog-min-push-mass-hold?
              l35-siege-tempest-mass-hold?
              l36-prod-parity-mass-hold?
+             l42-pvt-awaiting-colossus-hold?
              (and (or (not enemy-within-14-of-th?) l25-counter-volley-staging?)
                   (not enemy-within-14-of-main?)
                   (not enemy-main-cleared-eval?)
@@ -25043,11 +25138,13 @@
     (hash-set! (l34-ctx-l34-sc ctx) 'l25-enemy-within-14-of-main? enemy-within-14-of-main?)
     (hash-set! (l34-ctx-l34-sc ctx) 'l35-siege-tempest-mass-hold? l35-siege-tempest-mass-hold?)
     (hash-set! (l34-ctx-l34-sc ctx) 'l35-siege-breakout-sup-req l35-siege-breakout-sup-req)
-    (hash-set! (l34-ctx-l34-sc ctx) 'l36-prod-parity-mass-hold? l36-prod-parity-mass-hold?))
+    (hash-set! (l34-ctx-l34-sc ctx) 'l36-prod-parity-mass-hold? l36-prod-parity-mass-hold?)
+    (hash-set! (l34-ctx-l34-sc ctx) 'l42-pvt-awaiting-colossus-hold? l42-pvt-awaiting-colossus-hold?))
   (when rt
     (hash-set! (rt-door-state rt) 'l35-siege-tempest-mass-hold? l35-siege-tempest-mass-hold?)
     (hash-set! (rt-door-state rt) 'l35-siege-breakout-sup-req l35-siege-breakout-sup-req)
-    (hash-set! (rt-door-state rt) 'l36-prod-parity-mass-hold? l36-prod-parity-mass-hold?))
+    (hash-set! (rt-door-state rt) 'l36-prod-parity-mass-hold? l36-prod-parity-mass-hold?)
+    (hash-set! (rt-door-state rt) 'l42-pvt-awaiting-colossus-hold? l42-pvt-awaiting-colossus-hold?))
   ;; L27-P0-3 / L30-P0-3 (`#14/#23` `OBRet -> 0`): Treat army OR active visible threat within `32.0t`
   ;; (`1024.0`) of ANY friendly TownHall (incl. lifted CCs/OCs) / base / natural OR `24.0t` (`576.0`)
   ;; of ANY friendly production/tech/home building as owned territory so home fights never log `'retreat`!
@@ -25178,6 +25275,7 @@
      (define eff-mass-parity-suppress?
        (or l35-siege-tempest-mass-hold?
            l36-prod-parity-mass-hold?
+           l42-pvt-awaiting-colossus-hold?
            (and mass-parity-before-attack-suppress?
                 (not locally-winning-fight?))))
      (define eff-l25-counter-volley-staging?

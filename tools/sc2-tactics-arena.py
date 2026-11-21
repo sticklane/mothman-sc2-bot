@@ -1014,6 +1014,61 @@ def _build_aggregate_report(
     }
 
 
+DEFAULT_P1_COLOR: tuple[int, int, int] = (225, 55, 55)
+DEFAULT_P2_COLOR: tuple[int, int, int] = (55, 145, 255)
+DEFAULT_MAX_RENDER_FRAMES: int = 480
+DEFAULT_VIDEO_FORMAT: str = "mp4"
+
+
+def format_arena_player_names(r1: str, r2: str, opp_mode: str) -> tuple[str, str]:
+    r1_s = (r1 or "P").strip()[:1].upper() or "P"
+    r2_s = (r2 or "T").strip()[:1].upper() or "T"
+    p1_name = f"Mothman-{r1_s}"
+    p2_name = f"Mothman-{r2_s}-SP" if opp_mode == "self" else "MicroDummy"
+    return p1_name, p2_name
+
+
+def build_render_race_spec(
+    r1: str,
+    r2: str,
+    btag: str,
+    opp_mode: str,
+    map_host_path: str,
+    replay_path: str,
+    duels: list[dict[str, Any]],
+    p1_color: tuple[int, int, int] = DEFAULT_P1_COLOR,
+    p2_color: tuple[int, int, int] = DEFAULT_P2_COLOR,
+) -> dict[str, Any]:
+    p1_name, p2_name = format_arena_player_names(r1, r2, opp_mode)
+    enriched_duels = []
+    for d in duels:
+        ed = dict(d)
+        ed.setdefault("race", r1)
+        ed.setdefault("enemy_race", r2)
+        ed.setdefault("opponent_mode", opp_mode)
+        ed["p1_name"] = ed.get("p1_name") or p1_name
+        ed["p2_name"] = ed.get("p2_name") or p2_name
+        ed["bot"] = ed.get("bot") or ed["p1_name"]
+        ed["p2_bot"] = ed.get("p2_bot") or ed["p2_name"]
+        ed["p1_color"] = tuple(ed.get("p1_color") or p1_color)
+        ed["p2_color"] = tuple(ed.get("p2_color") or p2_color)
+        enriched_duels.append(ed)
+    return {
+        "race": btag,
+        "our_race": r1,
+        "enemy_race": r2,
+        "opponent_mode": opp_mode,
+        "bot": f"{p1_name} vs {p2_name}" if opp_mode == "self" else p1_name,
+        "p1_name": p1_name,
+        "p2_name": p2_name,
+        "p1_color": tuple(p1_color),
+        "p2_color": tuple(p2_color),
+        "map_path": map_host_path,
+        "replay_path": replay_path,
+        "duels": enriched_duels,
+    }
+
+
 def run_host_driver(args: argparse.Namespace) -> int:
     t0 = time.monotonic()
     repo_dir = Path(args.repo_dir).resolve()
@@ -1080,13 +1135,19 @@ def run_host_driver(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
             if sr.get("replay_path"):
-                race_reports_for_render.append({
-                    "race": btag,
-                    "bot": f"Mothman-{r1[0]} vs Mothman-{r2[0]}" if opp_mode == "self" else f"Mothman-{r1[0]}",
-                    "map_path": map_host_path,
-                    "replay_path": sr["replay_path"],
-                    "duels": sr.get("scenarios", []),
-                })
+                race_reports_for_render.append(
+                    build_render_race_spec(
+                        r1=r1,
+                        r2=r2,
+                        btag=btag,
+                        opp_mode=opp_mode,
+                        map_host_path=map_host_path,
+                        replay_path=sr["replay_path"],
+                        duels=sr.get("scenarios", []),
+                        p1_color=DEFAULT_P1_COLOR,
+                        p2_color=DEFAULT_P2_COLOR,
+                    )
+                )
 
         all_scens = [by_id_res[s.id] for s in matched_specs if s.id in by_id_res] + extra_res
         sc2_wall_ms = round((time.monotonic() - t0) * 1000.0, 1)
@@ -1102,6 +1163,18 @@ def run_host_driver(args: argparse.Namespace) -> int:
         t_ren0 = time.monotonic()
         render_dir.mkdir(parents=True, exist_ok=True)
         renderer = _load_3d_renderer(Path(args.repo_dir).resolve())
+        video_fmt = str(getattr(args, "video_format", DEFAULT_VIDEO_FORMAT) or DEFAULT_VIDEO_FORMAT).strip().lower()
+        max_render_frames = max(1, int(getattr(args, "max_render_frames", DEFAULT_MAX_RENDER_FRAMES)))
+        global_p1_name = (
+            race_reports_for_render[0]["p1_name"]
+            if len(race_reports_for_render) == 1
+            else "Mothman"
+        )
+        global_p2_name = (
+            race_reports_for_render[0]["p2_name"]
+            if len(race_reports_for_render) == 1
+            else ("Mothman-SP" if opp_mode == "self" else "MicroDummy")
+        )
         render_res = renderer.render_arena_replays_parallel(
             race_specs=race_reports_for_render,
             out_dir=render_dir,
@@ -1110,7 +1183,13 @@ def run_host_driver(args: argparse.Namespace) -> int:
             render_size=(960, 720),
             minimap_size=(180, 180),
             webp_size=(800, 600),
+            max_frames_per_duel=max_render_frames,
             workers=min(max_workers, len(race_reports_for_render)),
+            video_format=video_fmt,
+            p1_name=global_p1_name,
+            p2_name=global_p2_name,
+            p1_color=DEFAULT_P1_COLOR,
+            p2_color=DEFAULT_P2_COLOR,
         )
         render_wall_ms = round((time.monotonic() - t_ren0) * 1000.0, 1)
         report["render_3d_wall_ms"] = render_wall_ms
@@ -1201,6 +1280,16 @@ def run_host_driver(args: argparse.Namespace) -> int:
                         parts.append(f"{tn}: {te['mothman_wins']}W-{te['p2_wins']}L-{te['draws']}D ({te['agg_trade_ratio']}x)")
             if parts:
                 print(f"[ARENA 2.0 by_tier] {' | '.join(parts)}", file=sys.stderr)
+        vis = report.get("visuals") or {}
+        if isinstance(vis, dict) and vis.get("clips_count") is not None:
+            vfmt_out = vis.get("video_format") or "mp4"
+            vbytes = int(vis.get("total_video_bytes") or vis.get("total_mp4_bytes") or vis.get("total_webp_bytes") or 0)
+            print(
+                f"[ARENA 2.0 3d] fmt={vfmt_out} clips={vis.get('clips_count')} "
+                f"max_frames={vis.get('max_frames_per_duel')} bytes={vbytes} "
+                f"wall={report.get('render_3d_wall_ms')}ms",
+                file=sys.stderr,
+            )
     print(json.dumps(report, indent=2))
     return 0
 
@@ -3390,10 +3479,12 @@ def main() -> int:
     parser.add_argument("--arena-dir", default=str(DEFAULT_ARENA_DIR))
     parser.add_argument("--out", "--json-out", dest="out", default="", help="Output JSON report path")
     parser.add_argument("--compare", default="", help="Optional baseline JSON path to emit A/B delta comparison")
-    parser.add_argument("--render-dir", default="", help="Optional output directory to render real-3D SC2_x64 WebP clips + Peak PNGs for all duels")
+    parser.add_argument("--render-dir", default="", help="Optional output directory to render real-3D SC2_x64 full-length MP4/WebP clips + Peak PNGs for all duels")
     parser.add_argument("--save-replays-dir", default="", help="Optional host directory to save raw .SC2Replay files from duels")
     parser.add_argument("--render-step", type=int, default=2, help="SC2 game loops per rendered 3D frame (default: 2)")
-    parser.add_argument("--render-fps", type=int, default=16, help="Output animated WebP FPS (default: 16)")
+    parser.add_argument("--render-fps", type=int, default=16, help="Output 3D video FPS (default: 16)")
+    parser.add_argument("--video-format", choices=["mp4", "webp"], default=DEFAULT_VIDEO_FORMAT, help="Output 3D video container/codec: mp4 (default H.264) or webp")
+    parser.add_argument("--max-render-frames", type=int, default=DEFAULT_MAX_RENDER_FRAMES, help="Max rendered 3D frames per duel (default: 480 = full 960 loops @ step=2)")
     parser.add_argument("--scenario-ids", default="", help=argparse.SUPPRESS)
     parser.add_argument("--save-replay-path", default="", help=argparse.SUPPRESS)
     args = parser.parse_args()

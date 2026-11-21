@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "notes": "Real-SC2_x64 micro skirmish scenarios (57 scenarios across 3 tiers: 49 canonical + 4 econ-harass mineral-defense + 4 replay-extracted regression across 5 terrains & selective upgrades) loaded by tools/sc2-tactics-arena.py. Add or edit via .agents/skills/add-arena-scenario/scripts/add_scenario.py.",
+  "notes": "Real-SC2_x64 micro skirmish scenarios (58 scenarios across 3 tiers: 49 canonical + 4 econ-harass mineral-defense + 5 replay-extracted regression across 5 terrains & selective upgrades) loaded by tools/sc2-tactics-arena.py. Add or edit via .agents/skills/add-arena-scenario/scripts/add_scenario.py.",
   "scenarios": [
     {
       "id": "sc2-real-p01-zealot-stalker-vs-bio",
@@ -1582,6 +1582,25 @@
       "description": "Replay Regression (TvP): 16 SCVs at main Command Center defending vs 15-Probe all-in worker rush",
       "p1_units": [
         ["scv", 16, -3.2, 0.0]
+      ],
+      "p2_units": [
+        ["probe", 15, 6.2, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-reg-r06-prod5140055-pvp-probe-hold-vs-15probe-rush",
+      "our_race": "Protoss",
+      "enemy_race": "Protoss",
+      "tier": "regression",
+      "source": "replay-extract",
+      "origin_match_id": "prod-5140055",
+      "terrain": "mineral-line-harass",
+      "use_main_base": true,
+      "patterns": ["worker-rush-defense", "probe-shield-micro", "worker-combat-surround"],
+      "description": "Replay Regression (PvP): 16 Probes at main Nexus defending vs 15-Probe all-in worker rush",
+      "p1_units": [
+        ["probe", 16, -3.2, 0.0]
       ],
       "p2_units": [
         ["probe", 15, 6.2, 0.0]

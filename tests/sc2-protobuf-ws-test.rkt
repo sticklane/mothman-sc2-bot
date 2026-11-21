@@ -8346,7 +8346,7 @@
   (check-true "l37-p0-3e-creep-and-changeling-4corner-spawn-symmetry"
               creep-4corner-ok?)
 
-  ;; L37-P0-3f / L38-P0-4 / L39-P0-4: Honest Arena 2.0 3-tier catalog (`57` scenarios: `49` canonical + `4` econ-harass + `4` regression)!
+  ;; L37-P0-3f / L38-P0-4 / L39-P0-4 / L42-P0-3a: Honest Arena 2.0 3-tier catalog (`58` scenarios: `49` canonical + `4` econ-harass + `5` regression)!
   (define cat-path (build-path (current-directory) "tools" "arena-scenarios.json"))
   (define cat-j (and (file-exists? cat-path) (call-with-input-file cat-path read-json)))
   (define cat-scens (if (hash? cat-j) (hash-ref cat-j 'scenarios '()) '()))
@@ -8376,7 +8376,8 @@
       "sc2-reg-r01-prod5138254-pvt-obs-stalker-vs-cloaked-banshees"
       "sc2-reg-r02-prod5138248-zvp-drone-hold-vs-15probe-rush"
       "sc2-reg-r03-iter37-m42-pvz-ramp-hold-vs-ling-flood"
-      "sc2-reg-r05-prod5140013-tvp-scv-hold-vs-15probe-rush"))
+      "sc2-reg-r05-prod5140013-tvp-scv-hold-vs-15probe-rush"
+      "sc2-reg-r06-prod5140055-pvp-probe-hold-vs-15probe-rush"))
   (define p15-s (hash-ref cat-by-id "sc2-real-p15-dt-blink-snipe-planetary" #f))
   (define p18-s (hash-ref cat-by-id "sc2-real-p18-glaive-adept-oracle-revelation-vs-lurker-hydra" #f))
   (define t15-s (hash-ref cat-by-id "sc2-real-t15-bc-yamato-jump-vs-corruptor-viper" #f))
@@ -8384,15 +8385,16 @@
   (define r01-s (hash-ref cat-by-id "sc2-reg-r01-prod5138254-pvt-obs-stalker-vs-cloaked-banshees" #f))
   (define r02-s (hash-ref cat-by-id "sc2-reg-r02-prod5138248-zvp-drone-hold-vs-15probe-rush" #f))
   (define r05-s (hash-ref cat-by-id "sc2-reg-r05-prod5140013-tvp-scv-hold-vs-15probe-rush" #f))
-  (check-true (format "l37-p0-3f-l39-arena-scenarios-57-3tier-catalog (n=~a c=~a e=~a r=~a)"
+  (define r06-s (hash-ref cat-by-id "sc2-reg-r06-prod5140055-pvp-probe-hold-vs-15probe-rush" #f))
+  (check-true (format "l37-p0-3f-l42-arena-scenarios-58-3tier-catalog (n=~a c=~a e=~a r=~a)"
                       (length cat-scens) tier-canon tier-econ tier-reg)
               (and (hash? cat-j)
                    (= (hash-ref cat-j 'schema_version 0) 2)
-                   (= (length cat-scens) 57)
-                   (= (length (remove-duplicates cat-ids)) 57)
+                   (= (length cat-scens) 58)
+                   (= (length (remove-duplicates cat-ids)) 58)
                    (= tier-canon 49)
                    (= tier-econ 4)
-                   (= tier-reg 4)
+                   (= tier-reg 5)
                    (for/and ([rid (in-list req-ids)]) (hash-has-key? cat-by-id rid))
                    (hash? p15-s)
                    (member "ShadowStride" (hash-ref p15-s 'p1_upgrades '()))
@@ -8413,7 +8415,13 @@
                    (hash? r05-s)
                    (equal? (hash-ref r05-s 'source "") "replay-extract")
                    (equal? (hash-ref r05-s 'origin_match_id "") "prod-5140013")
-                   (equal? (hash-ref r05-s 'use_main_base #f) #t))))
+                   (equal? (hash-ref r05-s 'use_main_base #f) #t)
+                   (hash? r06-s)
+                   (equal? (hash-ref r06-s 'our_race "") "Protoss")
+                   (equal? (hash-ref r06-s 'enemy_race "") "Protoss")
+                   (equal? (hash-ref r06-s 'source "") "replay-extract")
+                   (equal? (hash-ref r06-s 'origin_match_id "") "prod-5140055")
+                   (equal? (hash-ref r06-s 'use_main_base #f) #t))))
 
 (printf "[Loop 39] Testing L39-P0-4 wire translation for ShadowStride (2700), Yamato (401), NeuralParasite (249), & worker-drill 3666+23...\n")
 (let ()
@@ -8607,6 +8615,210 @@
                                            (= (sc2-raw-unit-command-ability-id c) 3666)
                                            (member 99311 (sc2-raw-unit-command-unit-tags c))))
                           sat-41))))
+
+(printf "[Loop 42] Testing L42-P0-3a 3-race (P/T/Z) heavy-worker-rush 3666 suppression & L42-P0-3b Terran/Protoss >=3-miss wide placement + relief Pylon...\n")
+(let ()
+  (define (mk-l42-u tag utype alliance x y
+                    #:hp [hp 45.0] #:sh [sh 0.0] #:rad [rad 0.375] #:bp [bp 1.0] #:mins [mins 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 3) 0 2))
+              (sc2-point3d x y 8.0) 0.0 rad bp 0 #f #f #f
+              hp hp sh sh 0.0 0.0 mins 0 #f #f #f #t #f
+              '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define (l42-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define (l42-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 59942 "/sc2api" c-in c-out #f 1))
+    (define rpc-cnt (box 0))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define id-p (assoc 97 req-f))
+             (define id-b (if id-p (encode-uint32 97 (third id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (set-box! rpc-cnt (add1 (unbox rpc-cnt)))
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws rpc-cnt (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+
+  ;; 1. L42-P0-3a: All 3 races (Protoss Probe+Nexus `r06`, Terran SCV+CC `r05`, Zerg Drone+Hatch `r02`)
+  ;;    suppress 100% of idle-worker 3666 gathers under 15-Probe rush (food-army=0), stay latched at 4,
+  ;;    and immediately resume mining below 3!
+  (define mins-42
+    (for/list ([i (in-range 8)])
+      (mk-l42-u (+ 99650 i) 341 3 (+ 27.5 (* 0.5 i)) (+ 142.0 (* 0.4 (modulo i 3))) #:hp 1000.0 #:rad 1.0 #:mins 1500)))
+  (define (mk-eprobes-42 n)
+    (for/list ([i (in-range n)])
+      (mk-l42-u (+ 99700 i) 84 4 (+ 37.5 (* 0.25 (modulo i 5))) (+ 138.5 (* 0.25 (quotient i 5))) #:hp 20.0 #:sh 20.0)))
+  (define (gather-3666 cmds)
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3666))) cmds))
+  (define three-race-3666-ok?
+    (for/and ([spec (in-list '((protoss 59 84 20.0 20.0)
+                               (terran  18 45 45.0  0.0)
+                               (zerg    86 104 40.0 0.0)))])
+      (define th-id (second spec))
+      (define wk-id (third spec))
+      (define wk-hp (fourth spec))
+      (define wk-sh (fifth spec))
+      (define th-u (mk-l42-u 99600 th-id 1 33.5 138.5 #:hp 1500.0 #:rad 2.75))
+      (define wks
+        (for/list ([i (in-range 16)])
+          (mk-l42-u (+ 99610 i) wk-id 1 (+ 31.0 (* 0.25 (modulo i 4))) (+ 139.0 (* 0.25 (quotient i 4)))
+                    #:hp wk-hp #:sh wk-sh)))
+      (define (obs-with-n gl n)
+        (sc2-observation gl (sc2-player-common 1 100 0 23 16 0 16 0 0 0 0)
+                         (append (list th-u) mins-42 wks (mk-eprobes-42 n))
+                         '() '() #f '() '() '() '() '() '()))
+      (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f)
+      (define c15 (saturate-workers-and-gas-commands (obs-with-n 1000 15)))
+      (define l15 (unbox SC2-HEAVY-WORKER-RUSH-LATCH))
+      (define c4  (saturate-workers-and-gas-commands (obs-with-n 1004 4)))
+      (define l4  (unbox SC2-HEAVY-WORKER-RUSH-LATCH))
+      (define c2  (saturate-workers-and-gas-commands (obs-with-n 1008 2)))
+      (define l2  (unbox SC2-HEAVY-WORKER-RUSH-LATCH))
+      (and (null? (gather-3666 c15)) (eq? l15 #t)
+           (null? (gather-3666 c4))  (eq? l4 #t)
+           (not (null? (gather-3666 c2))) (eq? l2 #f))))
+  (check-true "l42-p0-3a-3race-protoss-terran-zerg-heavy-worker-rush-3666-suppression"
+              three-race-3666-ok?)
+
+  ;; 2. L42-P0-3b (Terran): After >= 3 consecutive `barracks` misses, wide `30t` + secondary-TH
+  ;;    (even incomplete `bp=0.5`!) + `+/-14` outer-ring fallback grid breaks out of a crowded main,
+  ;;    places `barracks (321)` at `(76.5, 30.5)` (`14t` East of secondary CC), and resets miss streak to 0!
+  (define l42-gi
+    (sc2-game-info "L42ProdStallMap" "" '() '(128 128) '(4 4 124 124)
+                   (list (sc2-point2d 100.0 100.0)) w3-full-grid #f w3-full-grid))
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-TERRAN-5X3-MISS-CACHE)
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
+  (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
+  (let-values ([(ws rpc-cnt cleanup!)
+                (l42-start-mock-ws
+                 (lambda (ab px py)
+                   ;; Reject everything within 20t of main `(28.5, 28.5)` and near secondary CC `(62.5, 30.5)`;
+                   ;; accept ONLY the wide outer-ring grid spot `(76.5, 30.5)` (`+14t` East of secondary CC)!
+                   (if (and (= ab 321) (<= (l42-dist px py 76.5 30.5) 2.5)) 1 2)))])
+    (define cc-m (mk-l42-u 99801 18 1 28.5 28.5 #:hp 1500.0 #:rad 2.75))
+    (define cc-2 (mk-l42-u 99802 18 1 62.5 30.5 #:hp 750.0 #:rad 2.75 #:bp 0.5))
+    (define rax1 (mk-l42-u 99803 21 1 32.5 28.5 #:hp 1000.0 #:rad 1.5))
+    (define scv1 (mk-l42-u 99804 45 1 60.0 30.0 #:hp 45.0 #:rad 0.375))
+    (define u-list (list cc-m cc-2 rax1 scv1))
+    ;; Simulate 3 failed attempts -> streak reaches 3
+    (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK 'barracks 3)
+    (define cmds-t
+      (translate-bot-actions->sc2-raw-commands
+       '((build barracks 30.0 30.0))
+       (sc2-observation 24000 (sc2-player-common 1 800 200 70 42 18 24 0 0 0 0)
+                        u-list '() '() #f '() '() '() '() '() '())
+       #:ws-conn ws #:game-info l42-gi))
+    (define rax-cmd (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 321))) cmds-t))
+    (define rax-pt (and rax-cmd (sc2-raw-unit-command-target-pos rax-cmd)))
+    (check-true "l42-p0-3b1-terran-barracks-3miss-wide-30t-secondary-th-outer-grid-places-and-resets-streak"
+                (and (sc2-point2d? rax-pt)
+                     (<= (l42-dist (sc2-point2d-x rax-pt) (sc2-point2d-y rax-pt) 76.5 30.5) 2.5)
+                     (= (hash-ref SC2-PROD-PLACEMENT-MISS-STREAK 'barracks -1) 0)))
+    (cleanup!))
+
+  ;; 3. L42-P0-3b (Protoss `#33` deadlock): When ALL existing Pylons reject `gateway (883)` after
+  ;;    >= 3 consecutive misses while `minerals >= 100` and 0 Pylons are warping in (even when NOT
+  ;;    supply-blocked!), emit a relief `Pylon (881)` at the uncontested secondary Nexus and reset streak to 0!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
+  (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP -9999)
+  (let-values ([(ws rpc-cnt cleanup!)
+                (l42-start-mock-ws
+                 (lambda (ab px py)
+                   (cond
+                     ;; Every Gateway (883) query fails (boxed-in Main Pylon)!
+                     [(= ab 883) 2]
+                     ;; Relief Pylon (881) near secondary Nexus `(72.5, 32.5)` succeeds!
+                     [(and (= ab 881) (<= (l42-dist px py 72.5 32.5) 18.0)) 1]
+                     [else 2])))])
+    (define nx-1 (mk-l42-u 99851 59 1 28.5 28.5 #:hp 1000.0 #:sh 1000.0 #:rad 2.75))
+    (define nx-2 (mk-l42-u 99852 59 1 72.5 32.5 #:hp 1000.0 #:sh 1000.0 #:rad 2.75))
+    (define py-1 (mk-l42-u 99853 60 1 32.0 34.0 #:hp 200.0 #:sh 200.0 #:rad 1.0))
+    (define prb1 (mk-l42-u 99854 84 1 70.0 32.0 #:hp 20.0 #:sh 20.0 #:rad 0.375))
+    (define obs-p33
+      (sc2-observation 26000 (sc2-player-common 1 4800 500 91 61 25 36 0 0 0 0)
+                       (list nx-1 nx-2 py-1 prb1) '()
+                       (list (sc2-power-source (sc2-point3d 32.0 34.0 8.0) 6.5 99853))
+                       #f '() '() '() '() '() '()))
+    ;; First 3 attempts increment streak 0 -> 1 -> 2 -> 3 (use distinct loops > 64 apart to bypass neg-cd)
+    (for ([gl (in-list '(26000 26080 26160))])
+      (translate-bot-actions->sc2-raw-commands
+       '((build gateway 32.0 34.0))
+       (struct-copy sc2-observation obs-p33 [game-loop gl])
+       #:ws-conn ws #:game-info l42-gi))
+    (define streak-after-3 (hash-ref SC2-PROD-PLACEMENT-MISS-STREAK 'gateway 0))
+    ;; Attempt #4 (streak = 3) emits relief Pylon (881) near secondary Nexus `(72.5, 32.5)` and resets streak to 0!
+    (define cmds-p4
+      (translate-bot-actions->sc2-raw-commands
+       '((build gateway 32.0 34.0))
+       (struct-copy sc2-observation obs-p33 [game-loop 26240])
+       #:ws-conn ws #:game-info l42-gi))
+    (define py-cmd (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 881))) cmds-p4))
+    (define py-pt (and py-cmd (sc2-raw-unit-command-target-pos py-cmd)))
+    (check-true "l42-p0-3b2-protoss-gateway-3miss-boxed-in-emits-relief-pylon-881-at-secondary-nexus"
+                (and (= streak-after-3 3)
+                     (sc2-point2d? py-pt)
+                     (<= (l42-dist (sc2-point2d-x py-pt) (sc2-point2d-y py-pt) 72.5 32.5) 18.0)
+                     (= (hash-ref SC2-PROD-PLACEMENT-MISS-STREAK 'gateway -1) 0)))
+    (cleanup!))
+  (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
+  (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"

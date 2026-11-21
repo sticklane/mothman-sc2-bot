@@ -46,7 +46,11 @@ if str(SCRIPT_DIR) not in sys.path:
 if str(DEFAULT_PYLIBS_DIR) not in sys.path and DEFAULT_PYLIBS_DIR.is_dir():
     sys.path.append(str(DEFAULT_PYLIBS_DIR))
 
-from sc2_3d_renderer import fmt_clock, render_replay_clip_sync  # noqa: E402
+from sc2_3d_renderer import (  # noqa: E402
+    fmt_clock,
+    render_full_match_video_sync,
+    render_replay_clip_sync,
+)
 
 CORE_12_OPPONENTS = frozenset({
     "12PoolBot", "Chance", "Creepy_strategies", "RustyNikolaj", "SmoothBrain",
@@ -114,8 +118,8 @@ def _clean_unit_name(raw: Any) -> str:
 def locate_critical_window(
     replay_path: Path,
     focus_mode: str = "peak_clash",
-    window_loops: int = 160,
-    lead_in_loops: int = 36,
+    window_loops: int = 448,
+    lead_in_loops: int = 180,
     our_player_id: int = 1,
 ) -> dict[str, Any]:
     """
@@ -495,14 +499,18 @@ def _render_job_entry(job: dict[str, Any]) -> dict[str, Any]:
     loc = locate_critical_window(
         Path(job["replay_path"]),
         focus_mode=job["focus_mode"],
-        window_loops=max(120, job["frames"] * job["step"]),
+        window_loops=max(448, job["frames"] * job["step"]),
+        lead_in_loops=int(job.get("lead_in_loops", 180)),
     )
     start_loop = job["override_start_loop"] if job.get("override_start_loop") is not None else loc["start_loop"]
     focus_hint = (loc["focus_x"], loc["focus_y"]) if (loc["focus_x"] is not None and loc["focus_y"] is not None) else None
+    vfmt = str(job.get("video_format") or "mp4").strip().lower()
+    out_vid = job.get("out_video") or job.get("out_webp")
+    m = job.get("match") or {}
 
     res = render_replay_clip_sync(
         replay_path=job["replay_path"],
-        out_webp=job["out_webp"],
+        out_video=out_vid,
         out_png=job["out_png"],
         start_loop=start_loop,
         num_frames=job["frames"],
@@ -514,9 +522,13 @@ def _render_job_entry(job: dict[str, Any]) -> dict[str, Any]:
         subtitle_metric=job["pill_metric"],
         focus_hint=focus_hint,
         accent_rgb=tuple(job["accent_rgb"]),
+        video_format=vfmt,
+        p1_name=m.get("our_bot") or None,
+        p2_name=m.get("opp_bot") or None,
+        p1_race=m.get("our_race") or None,
+        p2_race=m.get("opp_race") or None,
     )
 
-    m = job.get("match") or {}
     clash_summary = (
         f"During {res['clock_window']} around ({loc['focus_x']}, {loc['focus_y']}), "
         f"Mothman lost ~{int(loc['p1_lost_window']):,} res ({_fmt_units_list(loc['p1_lost_units'])}) "
@@ -539,6 +551,7 @@ def _render_job_entry(job: dict[str, Any]) -> dict[str, Any]:
         "our_peak_army": m.get("our_peak_army"),
         "opp_peak_army": m.get("opp_peak_army"),
         "map_symmetry_kind": m.get("map_symmetry_kind"),
+        "our_spawn_corner": m.get("our_spawn_corner"),
         "category": job["category"],
         "why_selected": job["why_selected"],
         "what_to_watch": job["what_to_watch"],
@@ -556,22 +569,184 @@ def _render_job_entry(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _infer_cohort(m: dict[str, Any], is_h2h: bool = False) -> str:
+    if is_h2h:
+        return "baseline_h2h"
+    if m.get("is_selfplay") or str(m.get("opp_bot") or "").startswith("Mothman-"):
+        return "selfplay"
+    coh = str(m.get("opp_cohort") or "").strip().lower()
+    if coh:
+        return coh
+    return "core_14" if m.get("opp_bot") in CORE_14_OPPONENTS else "unseen_12"
+
+
+def _render_full_match_job(job: dict[str, Any]) -> dict[str, Any]:
+    m = job["match"]
+    out_mp4 = Path(job["out_mp4"])
+    out_png = Path(job["out_png"])
+    if job.get("skip_existing") and out_mp4.exists() and out_mp4.stat().st_size > 10_000 and out_png.exists() and out_png.stat().st_size > 5_000:
+        mp4_b = out_mp4.stat().st_size
+        png_b = out_png.stat().st_size
+        return {
+            "clip_slug": job["clip_slug"],
+            "replay": job["replay_path"],
+            "map": Path(job["replay_path"]).name,
+            "video": str(out_mp4),
+            "video_format": "mp4",
+            "mp4": str(out_mp4),
+            "webp": None,
+            "png": str(out_png),
+            "video_bytes": mp4_b,
+            "mp4_bytes": mp4_b,
+            "webp_bytes": 0,
+            "png_bytes": png_b,
+            "frames": 0,
+            "fps": job["fps"],
+            "step": job["step"],
+            "clock_window": f"00:00–{fmt_clock(int(round(float(m.get('duration_sec') or 0) * 22.4)))}",
+            "wall_sec": 0.0,
+            "skipped_existing": True,
+            **job["meta"],
+        }
+
+    res = render_full_match_video_sync(
+        replay_path=job["replay_path"],
+        out_mp4=out_mp4,
+        out_png=out_png,
+        step=job["step"],
+        fps=job["fps"],
+        video_size=(job["webp_width"], job["webp_height"]),
+        maps_dir=job["maps_dir"],
+        title=job["pill_title"],
+        subtitle_metric=job["pill_metric"],
+        accent_rgb=tuple(job["accent_rgb"]),
+        max_frames=job["max_frames"],
+        crf=job["crf"],
+        p1_name=m.get("our_bot") or None,
+        p2_name=m.get("opp_bot") or None,
+        p1_race=m.get("our_race") or None,
+        p2_race=m.get("opp_race") or None,
+    )
+    return {
+        **res,
+        "clip_slug": job["clip_slug"],
+        **job["meta"],
+    }
+
+
+def _collect_full_match_jobs(
+    score_json_path: str | None,
+    replays_dir_path: str | None,
+    out_dir: Path,
+    maps_dir: Path,
+    is_h2h: bool,
+    step: int,
+    fps: int,
+    webp_width: int,
+    webp_height: int,
+    max_frames: int,
+    crf: int,
+    skip_existing: bool,
+) -> list[dict[str, Any]]:
+    if not score_json_path or not replays_dir_path:
+        return []
+    sp = Path(score_json_path)
+    rd = Path(replays_dir_path)
+    if not sp.exists() or not rd.exists():
+        return []
+    data = json.loads(sp.read_text(encoding="utf-8"))
+    jobs: list[dict[str, Any]] = []
+    for idx, m in enumerate(data.get("matches") or [], start=1):
+        fname = m.get("file") or ""
+        rp = rd / fname
+        if not fname or not rp.exists():
+            continue
+        mid = str(m.get("id") or idx)
+        pfx = "h2h" if is_h2h else "m"
+        slug = _slug(f"full_{pfx}{int(mid) if mid.isdigit() else idx:03d}_{m.get('our_bot', 'M')}_vs_{m.get('opp_bot', 'Opp')}")
+        res_l = str(m.get("result") or "").lower()
+        res_u = res_l.upper()
+        tr = m.get("trade_ratio")
+        pill_metric = f"{res_u} {float(tr):.2f}x" if tr is not None else res_u
+        accent = (34, 197, 94) if res_l == "win" else ((239, 68, 68) if res_l == "loss" else (245, 158, 11))
+        cohort = _infer_cohort(m, is_h2h=is_h2h)
+        title_pfx = f"H2H #{mid}" if is_h2h else f"#{mid}"
+        jobs.append({
+            "clip_slug": slug,
+            "replay_path": str(rp),
+            "maps_dir": str(maps_dir),
+            "out_mp4": str(out_dir / f"{slug}.mp4"),
+            "out_png": str(out_dir / f"{slug}.png"),
+            "step": step,
+            "fps": fps,
+            "webp_width": webp_width,
+            "webp_height": webp_height,
+            "max_frames": max_frames,
+            "crf": crf,
+            "skip_existing": skip_existing,
+            "pill_title": title_pfx,
+            "pill_metric": pill_metric,
+            "accent_rgb": accent,
+            "match": m,
+            "meta": {
+                "match_id": f"H2H-{mid}" if is_h2h else mid,
+                "raw_match_id": mid,
+                "is_h2h": is_h2h,
+                "cohort": cohort,
+                "our_bot": m.get("our_bot") or "",
+                "opp_bot": m.get("opp_bot") or "",
+                "our_race": m.get("our_race") or "",
+                "opp_race": m.get("opp_race") or "",
+                "matchup": m.get("matchup") or "",
+                "result": res_l,
+                "duration_sec": m.get("duration_sec"),
+                "trade_ratio": tr,
+                "killed_val": m.get("killed_val"),
+                "lost_val": m.get("lost_val"),
+                "our_peak_army": m.get("our_peak_army"),
+                "opp_peak_army": m.get("opp_peak_army"),
+                "supply_blocked_pct": (
+                    m.get("supply_block_pct")
+                    if m.get("supply_block_pct") is not None
+                    else m.get("supply_blocked_pct")
+                ),
+                "map_canon": m.get("map_canon") or "",
+                "our_spawn_corner": m.get("our_spawn_corner") or "",
+                "map_symmetry_kind": m.get("map_symmetry_kind") or "",
+                "anomalies": [k for k, v in (m.get("anomalies") or {}).items() if v],
+            },
+        })
+    return jobs
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Render Top-N real-3D SC2_x64 replay critical moments to animated WebP + Peak PNG.")
+    ap = argparse.ArgumentParser(
+        description="Render real-3D SC2_x64 replay highlights or full 00:00->GG match videos to H.264 MP4 (or WebP) + Peak PNG."
+    )
     ap.add_argument("--score-json", default=None, help="Score JSON from score-replay-batch.rkt")
     ap.add_argument("--replays-dir", default=None, help="Directory with .SC2Replay files")
+    ap.add_argument("--h2h-score-json", default=None, help="Optional baseline_h2h score JSON (for --render-all-full-matches 90/90)")
+    ap.add_argument("--h2h-replays-dir", default=None, help="Optional baseline_h2h replays dir (for --render-all-full-matches 90/90)")
     ap.add_argument("--replay", default=None, help="Ad-hoc single .SC2Replay file")
     ap.add_argument("--start-loop", type=int, default=None, help="Optional explicit start_loop for ad-hoc single replay")
     ap.add_argument("--title", default=None, help="Optional title for ad-hoc single replay")
     ap.add_argument("--maps-dir", default=str(DEFAULT_MAPS_DIR), help="Directory with .SC2Map files")
-    ap.add_argument("--out-dir", required=True, help="Output directory for .webp, .png, and manifest.json")
-    ap.add_argument("--max-clips", type=int, default=6)
-    ap.add_argument("--jobs", type=int, default=4, help="Parallel host SC2_x64 3D renderer workers")
-    ap.add_argument("--step", type=int, default=2, help="Game loops per rendered frame")
-    ap.add_argument("--fps", type=int, default=16, help="Output animated WebP FPS")
-    ap.add_argument("--frames", type=int, default=72, help="Frames per clip (72 @ step=2 = 144 loops / 4.5s @ 16fps)")
+    ap.add_argument("--out-dir", required=True, help="Output directory for .mp4/.webp, .png, and manifest JSON")
+    ap.add_argument("--max-clips", type=int, default=8)
+    ap.add_argument("--jobs", type=int, default=None, help="Parallel host SC2_x64 3D renderer workers (default: 6 full / 4 highlights)")
+    ap.add_argument("--step", type=int, default=3, help="Game loops per rendered frame (highlights; default 3)")
+    ap.add_argument("--fps", type=int, default=16, help="Output video FPS")
+    ap.add_argument("--frames", type=int, default=160, help="Frames per highlight clip (160 @ step=3 = 480 loops / 21.4s game time -> 10.0s video)")
+    ap.add_argument("--lead-in-loops", type=int, default=180, help="Pre-clash lead-in loops before first death (default 180 = 8.0s!)")
+    ap.add_argument("--format", dest="video_format", choices=("mp4", "webp"), default="mp4", help="Output video format (default: mp4)")
     ap.add_argument("--webp-width", type=int, default=800)
     ap.add_argument("--webp-height", type=int, default=600)
+    ap.add_argument("--render-all-full-matches", action="store_true", help="Render ALL matches from 00:00->GG as H.264 MP4 + Peak PNG posters")
+    ap.add_argument("--full-step", type=int, default=20, help="Game loops per frame in full-match mode (default 20 = ~14.3x speed @ 16fps)")
+    ap.add_argument("--full-fps", type=int, default=16, help="FPS for full-match MP4 videos")
+    ap.add_argument("--full-max-frames", type=int, default=2400, help="Safety max frames per full-match video")
+    ap.add_argument("--full-crf", type=int, default=24, help="H.264 CRF quality for full-match MP4 (default 24)")
+    ap.add_argument("--skip-existing", action="store_true", help="Skip already rendered MP4+PNG files when resuming a batch")
     args = ap.parse_args()
 
     t0 = time.monotonic()
@@ -579,6 +754,69 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     maps_dir = Path(args.maps_dir)
 
+    # -------------------------------------------------------------------------
+    # MODE A: ALL FULL-LENGTH 00:00 -> GG MATCH VIDEOS (e.g. 84 + 6 = 90/90)
+    # -------------------------------------------------------------------------
+    if args.render_all_full_matches:
+        if not args.score_json or not args.replays_dir:
+            ap.error("--render-all-full-matches requires --score-json and --replays-dir")
+        full_jobs = _collect_full_match_jobs(
+            args.score_json, args.replays_dir, out_dir, maps_dir,
+            is_h2h=False, step=args.full_step, fps=args.full_fps,
+            webp_width=args.webp_width, webp_height=args.webp_height,
+            max_frames=args.full_max_frames, crf=args.full_crf,
+            skip_existing=args.skip_existing,
+        )
+        if args.h2h_score_json and args.h2h_replays_dir:
+            full_jobs.extend(_collect_full_match_jobs(
+                args.h2h_score_json, args.h2h_replays_dir, out_dir, maps_dir,
+                is_h2h=True, step=args.full_step, fps=args.full_fps,
+                webp_width=args.webp_width, webp_height=args.webp_height,
+                max_frames=args.full_max_frames, crf=args.full_crf,
+                skip_existing=args.skip_existing,
+            ))
+        n_workers = max(1, min(args.jobs if args.jobs is not None else 6, len(full_jobs) or 1))
+        results: list[dict[str, Any]] = []
+        if n_workers == 1:
+            for j in full_jobs:
+                results.append(_render_full_match_job(j))
+        else:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as ex:
+                futs = [ex.submit(_render_full_match_job, j) for j in full_jobs]
+                for f in futs:
+                    results.append(f.result())
+
+        manifest = {
+            "kind": "full_match_3d_videos",
+            "video_format": "mp4",
+            "score_json": os.path.abspath(args.score_json),
+            "replays_dir": os.path.abspath(args.replays_dir),
+            "h2h_score_json": os.path.abspath(args.h2h_score_json) if args.h2h_score_json else None,
+            "h2h_replays_dir": os.path.abspath(args.h2h_replays_dir) if args.h2h_replays_dir else None,
+            "render_size": [960, 720],
+            "video_size": [args.webp_width, args.webp_height],
+            "fps": args.full_fps,
+            "step": args.full_step,
+            "clips_count": len(results),
+            "total_video_bytes": sum(r.get("video_bytes", 0) for r in results),
+            "total_mp4_bytes": sum(r.get("mp4_bytes", 0) for r in results),
+            "total_png_bytes": sum(r.get("png_bytes", 0) for r in results),
+            "wall_sec": round(time.monotonic() - t0, 2),
+            "clips": results,
+        }
+        manifest_path = out_dir / "full_matches_manifest.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        print(
+            f"FULL_MATCH_RENDER_OK: {len(results)} videos in {manifest['wall_sec']}s "
+            f"({manifest['total_mp4_bytes'] / (1024*1024):.1f} MB MP4, {manifest['total_png_bytes'] / (1024*1024):.1f} MB PNG) "
+            f"-> {manifest_path}"
+        )
+        return 0
+
+    # -------------------------------------------------------------------------
+    # MODE B: KEY-MOMENT HIGHLIGHT CLIPS (Top-N or Ad-Hoc Single Replay)
+    # -------------------------------------------------------------------------
+    ext = ".webp" if args.video_format == "webp" else ".mp4"
     jobs: list[dict[str, Any]] = []
     if args.replay:
         rp = Path(args.replay)
@@ -587,11 +825,13 @@ def main() -> int:
             "clip_slug": slug,
             "replay_path": str(rp),
             "maps_dir": str(maps_dir),
-            "out_webp": str(out_dir / f"{slug}.webp"),
+            "out_video": str(out_dir / f"{slug}{ext}"),
             "out_png": str(out_dir / f"{slug}.png"),
+            "video_format": args.video_format,
             "frames": args.frames,
             "step": args.step,
             "fps": args.fps,
+            "lead_in_loops": args.lead_in_loops,
             "webp_width": args.webp_width,
             "webp_height": args.webp_height,
             "focus_mode": "peak_clash",
@@ -621,16 +861,18 @@ def main() -> int:
                 "clip_slug": slug,
                 "replay_path": str(rp),
                 "maps_dir": str(maps_dir),
-                "out_webp": str(out_dir / f"{slug}.webp"),
+                "out_video": str(out_dir / f"{slug}{ext}"),
                 "out_png": str(out_dir / f"{slug}.png"),
+                "video_format": args.video_format,
                 "frames": args.frames,
                 "step": args.step,
                 "fps": args.fps,
+                "lead_in_loops": args.lead_in_loops,
                 "webp_width": args.webp_width,
                 "webp_height": args.webp_height,
                 "focus_mode": p["focus_mode"],
                 "override_start_loop": None,
-                "pill_title": f"#{mid} {m.get('our_bot')} vs {m.get('opp_bot')}",
+                "pill_title": f"#{mid}",
                 "pill_metric": pill_metric,
                 "accent_rgb": p["accent_rgb"],
                 "category": p["category"],
@@ -639,8 +881,8 @@ def main() -> int:
                 "match": m,
             })
 
-    results: list[dict[str, Any]] = []
-    max_w = max(1, min(args.jobs, len(jobs)))
+    results = []
+    max_w = max(1, min(args.jobs if args.jobs is not None else 4, len(jobs) or 1))
     if max_w == 1:
         for j in jobs:
             results.append(_render_job_entry(j))
@@ -652,13 +894,18 @@ def main() -> int:
 
     manifest = {
         "kind": "replay_3d_visuals",
+        "video_format": args.video_format,
         "score_json": os.path.abspath(args.score_json) if args.score_json else None,
         "replays_dir": os.path.abspath(args.replays_dir) if args.replays_dir else None,
         "render_size": [960, 720],
+        "video_size": [args.webp_width, args.webp_height],
         "webp_size": [args.webp_width, args.webp_height],
         "fps": args.fps,
         "step": args.step,
+        "lead_in_loops": args.lead_in_loops,
         "clips_count": len(results),
+        "total_video_bytes": sum(r.get("video_bytes", 0) for r in results),
+        "total_mp4_bytes": sum(r.get("mp4_bytes", 0) for r in results),
         "total_webp_bytes": sum(r.get("webp_bytes", 0) for r in results),
         "total_png_bytes": sum(r.get("png_bytes", 0) for r in results),
         "wall_sec": round(time.monotonic() - t0, 2),

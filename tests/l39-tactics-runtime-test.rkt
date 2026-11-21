@@ -444,10 +444,10 @@
               (and (>= (length mb-holds) 12) (= (length mb-kites) 1))
               (format "holds=~a kites=~a" (length mb-holds) (length mb-kites)))
 
-  ;; T5c: < 6 Mutalisks does NOT trigger Magic-Box
+  ;; T5c (`L42-P0-1c` #952): `< 2` Mutalisks (solo Muta) does NOT trigger Magic-Box
   (check-true "L39-T5c-small-muta-pack-skips-magic-box"
-              (null? (plan-mutalisk-magic-box (take mutas-16 4) thors-3))
-              "Fewer than 6 Mutalisks must not trigger Magic-Box"))
+              (null? (plan-mutalisk-magic-box (take mutas-16 1) thors-3))
+              "Fewer than 2 Mutalisks must not trigger Magic-Box"))
 
 ;; =============================================================================
 ;; 6. L39-P0-1f: `e03`/`e04` Mineral-Defense Evac + `#72` Anti-Decoy Home Tether

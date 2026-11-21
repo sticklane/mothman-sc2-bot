@@ -362,8 +362,9 @@
 ;; (`3.0 + 7.65 = 10.65`, with `0.30t` tolerance for spawn-arc spread -> `10.95t`); DTs farther
 ;; than `10.95t` cloaked-walk (`move`) into range before blinking so zero DTs land short in Bio!
 (define PF-BLINK-MAX-APPROACH-DIST : Float 10.95)
-;; L39-P0-1e: Minimum Mutalisk squad size for Magic-Box spread over splash AA Thors
-(define MUTA-MAGIC-BOX-MIN-COUNT : Integer 6)
+;; L39-P0-1e + L42-P0-1c: Minimum Mutalisk squad size for Magic-Box spread over splash AA Thors
+;; (lowered 6 -> 2 so surviving 2-5 Mutalisks stay spread-locked on HOLD 18 vs last Thor!)
+(define MUTA-MAGIC-BOX-MIN-COUNT : Integer 2)
 (define WIDOW-MINE-TRIGGER-RADIUS : Float 5.0)
 (define WIDOW-MINE-MELEE-SAFE-RADIUS : Float 6.0)
 
@@ -4698,7 +4699,7 @@
                                           (not (memv (uh-tag u) exclude-tags))))
       u))
   (cond
-    [(< (length dts) 4) '()]
+    [(null? dts) '()]
     [else
      (define ss-ok?
        (if (boolean? shadow-stride-override)
@@ -4727,10 +4728,12 @@
                               (* (- ey dt-cy) (- ey dt-cy)))))
          (if (< d bd) (values e d) (values bp bd))))
      ;; Priority 2 (when no PF nearby): Nearby enemy ground static detector revealing DTs
+     ;; L42-P0-1b (`p15` North Turret cleanup): Widen detector scan `11 -> 16t` and allow even
+     ;; `>= 1` surviving DT to blitz the last Turret so DTs go permanently invisible vs 0-scan Terran!
      (define-values (best-det best-det-d)
        (if best-pf
            (values #f 999.0)
-           (for/fold ([bt : Any #f] [bd : Float 11.01])
+           (for/fold ([bt : Any #f] [bd : Float 16.01])
                      ([e (in-list all-enemies)]
                       #:when (and (hash? e)
                                   (memq (uh-raw-type e) '(missile-turret photon-cannon spore-crawler))
@@ -4749,7 +4752,7 @@
         (define tgt-id (uh-tag primary-tgt))
         (define tx0 (uh-x primary-tgt))
         (define ty0 (uh-y primary-tgt))
-        (define max-part-dist (if is-pf? 19.5 11.5))
+        (define max-part-dist (if is-pf? 19.5 16.5))
         (define active-dts
           (for/list : (Listof Any) ([u (in-list dts)]
                                     #:when (let ([dx (- (uh-x u) tx0)]
@@ -4757,7 +4760,7 @@
                                              (<= (+ (* dx dx) (* dy dy))
                                                  (* max-part-dist max-part-dist))))
             u))
-        (if (< (length active-dts) 4)
+        (if (< (length active-dts) (if is-pf? 4 1))
             '()
             (let* ([an (exact->inexact (length active-dts))]
                    [acx (/ (for/fold ([s : Float 0.0]) ([u (in-list active-dts)]) (+ s (uh-x u))) an)]
@@ -4897,8 +4900,11 @@
                         any-already-on-pf?
                         (< ready-tot 4)
                         (>= ready-in-range-cnt sync-thresh)
-                        (and (>= ready-in-range-cnt (max 4 (quotient ready-tot 2)))
-                             (>= damaged-ready-cnt 4)))])
+                        ;; L42-P0-1b (`p15` SP Bio rush): Lower under-fire early blink release
+                        ;; `>= 4 -> >= 2` damaged DTs (at >= 35% ready in range) so DTs blink
+                        ;; OVER rushing Bio onto the PF before getting intercepted!
+                        (and (>= ready-in-range-cnt (max 4 (exact-floor (* 0.35 (exact->inexact ready-tot)))))
+                             (>= damaged-ready-cnt 2)))])
               (for/list : (Listof spell-directive)
                         ([p (in-list dt-plans)])
                 (define tag (vector-ref p 1))
@@ -4913,12 +4919,12 @@
                 (define slot-y (vector-ref p 11))
                 (define can-blink? (vector-ref p 13))
                 (define in-range? (vector-ref p 14))
-                ;; Wide cloaked staging arc (`6.4t` back along -safe + `2.6t` wide along wing*perp
-                ;; => `6.91t <= 7.65t` from PF rim slot, staying clear of Hellbat/Marine screen!)
+                ;; Wide cloaked staging arc (`6.2t` back along -safe + `2.8t` wide along wing*perp
+                ;; => `6.80t <= 7.65t` from PF rim slot, staying clear of Hellbat/Marine corners!)
                 (define-values (wp-x wp-y)
                   (if screen-blocks-approach?
-                      (values (clamp-coord (+ slot-x (* -6.4 safe-dx) (* 2.6 wing-sign perp-dx)))
-                              (clamp-coord (+ slot-y (* -6.4 safe-dy) (* 2.6 wing-sign perp-dy))))
+                      (values (clamp-coord (+ slot-x (* -6.2 safe-dx) (* 2.8 wing-sign perp-dx)))
+                              (clamp-coord (+ slot-y (* -6.2 safe-dy) (* 2.8 wing-sign perp-dy))))
                       (values slot-x slot-y)))
                 (cond
                   [in-flight?
@@ -4980,24 +4986,24 @@
         (define ty0 (uh-y best-thor))
         (define n (length mutas))
         (define two-pi (* 2.0 (exact->inexact pi)))
-        (define m1 (min n 6))
-        (define m2 (min (max 0 (- n 6)) 12))
-        (define m3 (max 0 (- n 18)))
+        (define m1 (min n 5))
+        (define m2 (min (max 0 (- n 5)) 12))
+        (define m3 (max 0 (- n 17)))
         (define slots-r1 : (Listof (Pairof Float Float))
           (for/list : (Listof (Pairof Float Float)) ([k (in-range m1)])
             (define ang (* two-pi (/ (exact->inexact k) (exact->inexact (max 1 m1)))))
-            (cons (clamp-coord (+ tx0 (* 1.65 (flcos ang))))
-                  (clamp-coord (+ ty0 (* 1.65 (flsin ang)))))))
+            (cons (clamp-coord (+ tx0 (* 1.40 (flcos ang))))
+                  (clamp-coord (+ ty0 (* 1.40 (flsin ang)))))))
         (define slots-r2 : (Listof (Pairof Float Float))
           (for/list : (Listof (Pairof Float Float)) ([k (in-range m2)])
             (define ang (+ 0.26 (* two-pi (/ (exact->inexact k) (exact->inexact (max 1 m2))))))
-            (cons (clamp-coord (+ tx0 (* 3.05 (flcos ang))))
-                  (clamp-coord (+ ty0 (* 3.05 (flsin ang)))))))
+            (cons (clamp-coord (+ tx0 (* 2.90 (flcos ang))))
+                  (clamp-coord (+ ty0 (* 2.90 (flsin ang)))))))
         (define slots-r3 : (Listof (Pairof Float Float))
           (for/list : (Listof (Pairof Float Float)) ([k (in-range m3)])
             (define ang (+ 0.52 (* two-pi (/ (exact->inexact k) (exact->inexact (max 1 m3))))))
-            (cons (clamp-coord (+ tx0 (* 4.05 (flcos ang))))
-                  (clamp-coord (+ ty0 (* 4.05 (flsin ang)))))))
+            (cons (clamp-coord (+ tx0 (* 4.35 (flcos ang))))
+                  (clamp-coord (+ ty0 (* 4.35 (flsin ang)))))))
         ;; Split by distance to Thor (inner ring = closest m1, middle ring = next m2, outer = rest)
         ;; and sort each ring independently by angle around Thor -> 100% fixed-point stable, ZERO ring-swap jitter!
         (define by-thor-dist
@@ -5042,10 +5048,18 @@
           (define sy (cdr slot))
           (define d-slot (dist2 ux uy sx sy))
           (define d-thor (dist2 ux uy tx0 ty0))
-          (define crowded?
-            (for/or : Boolean ([other (in-list sorted-mutas)])
-              (and (not (= (uh-tag other) tag))
-                   (< (dist2 ux uy (uh-x other) (uh-y other)) 1.10))))
+          (define min-ally-sep
+            (for/fold ([m : Float 999.0]) ([other (in-list sorted-mutas)])
+              (if (= (uh-tag other) tag)
+                  m
+                  (min m (dist2 ux uy (uh-x other) (uh-y other))))))
+          (define crowded? (< min-ally-sep 1.10))
+          ;; L42-P0-1c (`z16` moving-Thor HOLD jitter fix): Any Muta already within <= 3.3t of
+          ;; `best-thor` with >= 1.35t ally separation holds position (`18`) immediately and fires
+          ;; continuously even if the Thor shifts slightly!
+          (define ready-to-hold?
+            (or (and (<= d-thor 3.3) (>= min-ally-sep 1.35))
+                (and (<= d-slot 1.05) (<= d-thor 3.85) (not crowded?))))
           (cond
             [(and (< (uh-total-hp u) 32.0) (>= healthy-cnt 4))
              (define dx (- ux tx0))
@@ -5054,7 +5068,7 @@
              (define kx (clamp-coord (+ ux (* 5.5 (/ dx d)))))
              (define ky (clamp-coord (+ uy (* 5.5 (/ dy d)))))
              (spell-directive tag 'mutalisk 'move 'kite 0 kx ky 'muta-magicbox-wounded-pull)]
-            [(or (> d-slot 1.05) (> d-thor 3.85) crowded?)
-             (spell-directive tag 'mutalisk 'move 'move 0 sx sy 'muta-magicbox-spread-move)]
+            [ready-to-hold?
+             (spell-directive tag 'mutalisk 'hold-position 'hold-position 0 sx sy 'muta-magicbox-hold-fire)]
             [else
-             (spell-directive tag 'mutalisk 'hold-position 'hold-position 0 sx sy 'muta-magicbox-hold-fire)]))])]))
+             (spell-directive tag 'mutalisk 'move 'move 0 sx sy 'muta-magicbox-spread-move)]))])]))
