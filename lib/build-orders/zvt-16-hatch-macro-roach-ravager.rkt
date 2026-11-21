@@ -29,16 +29,17 @@
     (pro-bo-goal 'train    'queen                  2 20 'spawning-pool     124.8) ;; 2:05
     (pro-bo-goal 'train    'zergling               4 20 'spawning-pool     125.2) ;; 2:05
     (pro-bo-goal 'research 'metabolic-boost        1 22 'spawning-pool     140.8) ;; 2:21
-    ;; 30-44 Third Hatchery, 3rd Queen, Pro Geyser #2 (@32w), Roach Warren & Baneling Nest
+    ;; 30-50 Third Hatchery (~2:44), Queens #3-#4, Pro Geyser #2, Roach Warren, then Lair/BaneNest/Evo
     (pro-bo-goal 'expand   'hatchery               3 30 'spawning-pool     164.4) ;; 2:44
     (pro-bo-goal 'train    'queen                  3 32 'spawning-pool     172.8) ;; 2:53
     (pro-bo-goal 'build    'extractor              2 34 'spawning-pool     225.0) ;; 3:45 (Pro Gas #2 @ ~30w)
+    (pro-bo-goal 'train    'queen                  4 36 'spawning-pool     215.7) ;; 3:36 (Pro Queen #4!)
     (pro-bo-goal 'build    'roach-warren           1 36 'spawning-pool     249.7) ;; 4:10
-    (pro-bo-goal 'morph    'lair                   1 42 'spawning-pool     255.0) ;; 4:15
-    (pro-bo-goal 'build    'baneling-nest          1 38 'spawning-pool     268.0) ;; 4:28
-    (pro-bo-goal 'build    'extractor              3 48 'spawning-pool     275.0) ;; 4:35 (Pro Gas #3 @ ~40w)
-    ;; 50-90 4th Hatchery, Upgrades, Hydra/Lurker Den & Hive 5th-Base Macro
-    (pro-bo-goal 'build    'evolution-chamber      1 50 'spawning-pool     295.0) ;; 4:55
+    (pro-bo-goal 'build    'baneling-nest          1 38 'spawning-pool     275.0) ;; 4:35 (deferred <4:30 unless Bio/pressure)
+    (pro-bo-goal 'morph    'lair                   1 44 'spawning-pool     270.0) ;; 4:30 (strictly after 3rd Hatch!)
+    (pro-bo-goal 'build    'extractor              3 48 'spawning-pool     278.0) ;; 4:38 (Pro Gas #3 @ ~40w)
+    ;; 52-90 4th Hatchery, Upgrades, Hydra/Lurker Den & Hive 5th-Base Macro
+    (pro-bo-goal 'build    'evolution-chamber      1 52 'spawning-pool     305.0) ;; 5:05 (Pro Evo ~5:04)
     (pro-bo-goal 'build    'extractor              4 58 'lair              317.4) ;; 5:17 (Pro Gas #4 @ ~48w)
     (pro-bo-goal 'expand   'hatchery               4 62 'lair              330.0) ;; 5:30 (4th Base Macro!)
     (pro-bo-goal 'research 'glial-reconstitution   1 64 'lair              345.3) ;; 5:45

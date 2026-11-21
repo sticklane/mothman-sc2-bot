@@ -3805,11 +3805,21 @@
                  (values uh isw? lock?))))
 
          ;; Trigger Banshee cloak when researched (or in synthetic test without researched-upgrades key),
-         ;; facing anti-air without detection, and energy >= 25
+         ;; facing anti-air without detection, and energy >= 25.
+         ;; L49-W1: Also check raw `uh` `cloak` (`1` Cloaked, `2` CloakedDetected, `4` CloakedAllied)
+         ;; and `'cloaked` so an already-cloaked Banshee inside detector aura never spams `cloak-banshee`!
+         (define already-cloaked-raw?
+           (and (hash? u-hash)
+                (let ([cv (hash-ref u-hash 'cloak #f)])
+                  (or (memv cv '(1 2 4))
+                      (memq cv '(cloaked cloaked-detected cloaked-allied))
+                      (eq? (hash-ref u-hash 'cloaked #f) #t)
+                      (eq? (hash-ref u-hash 'cloaked? #f) #t)))))
          (when (and (eq? utype 'banshee)
                     (not channel-or-morph-locked?)
                     has-banshee-cloak?
                     (not (tactical-sim-unit-cloaked? su))
+                    (not already-cloaked-raw?)
                     (>= (tactical-sim-unit-energy su) SC2-BANSHEE-CLOAK-MIN-ENERGY)
                     (or (eq? committed-act 'CloakHarassWorkers)
                         (and enemy-has-aa? (not (tactical-arena-enemy-has-detection? arena)))))

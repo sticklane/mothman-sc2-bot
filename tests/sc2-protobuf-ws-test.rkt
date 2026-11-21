@@ -25,6 +25,10 @@
                   WireChat?
                   WireChat-team?
                   WireChat-message)
+         (only-in "../lib/sc2-proto-wire-verifier.rkt"
+                  verify-sc2-action-bytes)
+         (only-in "../lib/plan/multitask-harass-and-proxy.rkt"
+                  AUTO-TURRET-ABILITY-ID)
          (only-in "../lib/plan/wall-and-block.rkt"
                   classify-enemy-wall-state
                   EnemyWallAssessment-entry-x
@@ -992,12 +996,12 @@
                           (equal? (sc2-raw-unit-command-unit-tags c) '(911 912 913 914))))
                    uu-cmds))
 
-;; 10. Oracle Stasis Ward (2505), Pulsar Beam (2375/2376), Stasis-Frozen Worker Accounting (buff 57),
+;; 10. Oracle Stasis Ward (2505), Pulsar Beam (2375/2376), Stasis-Frozen Worker Accounting (buff 129),
 ;;     Mineral-Walk HARVEST_GATHER (3666), and Worker-Drill Stack Attack
 (check-eqv "ability-id-pulsar-beam" (ability-symbol->sc2-id 'pulsar-beam) 2375)
 (check-eqv "ability-id-pulsar-beam-off" (ability-symbol->sc2-id 'pulsar-beam-off) 2376)
 (check-eqv "ability-id-stasis-ward" (ability-symbol->sc2-id 'stasis-ward) 2505)
-(check-eqv "buff-id-oracle-stasis-trap-target" (buff-id->symbol 57) 'oracle-stasis-trap-target)
+(check-eqv "buff-id-oracle-stasis-trap-target" (buff-id->symbol 129) 'oracle-stasis-trap-target)
 
 (define stasis-drill-obs
   (make-test-obs
@@ -1008,8 +1012,8 @@
          (make-test-unit 951 84 1 34.0 32.0)
          ;; Probe #952 (84) at (59.5, 60.0) - already within 1.5 tiles of drill target (60, 60)
          (make-test-unit 952 84 1 59.5 60.0)
-         ;; Probe #953 (84) at (35, 32) - frozen by Oracle Stasis Trap (buff 57)
-         (make-test-unit 953 84 1 35.0 32.0 #:buffs '(57))
+         ;; Probe #953 (84) at (35, 32) - frozen by Oracle Stasis Trap (buff 129)
+         (make-test-unit 953 84 1 35.0 32.0 #:buffs '(129))
          ;; Friendly Oracle #960 (495) at (50, 50)
          (make-test-unit 960 495 1 50.0 50.0 #:flying? #t #:energy 75.0)
          ;; Neutral Mineral Field #9500 (341) at (36, 40)
@@ -2092,7 +2096,7 @@
   (check-true "w6-tac-2-wire-emits-zero-midfight-cocoon-morphs"
               (not (ormap (lambda (c)
                             (and (sc2-raw-unit-command? c)
-                                 (memv (sc2-raw-unit-command-ability-id c) '(80 2330 2332 1372))))
+                                 (memv (sc2-raw-unit-command-ability-id c) '(80 4121 2330 2332 1372))))
                           front-cmds)))
   ;; Rear units (> 10.0t) ARE allowed, sorted farthest-first, and explicit frontline morph falls back to rear unit!
   (define mid-roach  (mk-u 9905 110 1 68.0 80.0))      ;; 16.0t from Marine
@@ -10281,6 +10285,610 @@
                        0.0)))
   (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
   (hash-clear! SC2-EXPANSION-PAD-BLOCK-STREAK))
+
+;; ---------------------------------------------------------------------------
+;; [Loop 49] Wave 1 Track 2: Pro-Grade Base & Wall Placement Upgrades + Law 1
+;; Stage-2 Expanded Placement Ring Fallback (100% North/South Spawn Symmetric)
+;; ---------------------------------------------------------------------------
+(let ()
+  (define (hypot dx dy) (sqrt (+ (* dx dx) (* dy dy))))
+  (define (mk-l49-u tag utype alliance x y
+                    #:hp [hp 100.0] #:sh [sh 0.0] #:rad [rad 0.75]
+                    #:bp [bp 1.0] #:mins [mins 0] #:orders [orders '()])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 4) 2 0))
+              (sc2-point3d x y 8.0) 0.0 rad bp 0 #f #t #f
+              hp hp sh sh 50.0 200.0 mins 0 #f #f #f #t #f orders 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define (mk-l49-mins-x base-tag cx cy dx-off)
+    (for/list ([i (in-range 8)])
+      (mk-l49-u (+ base-tag i) 341 3 (+ cx dx-off) (+ cy (- (* 1.5 i) 5.25)) #:hp 1000.0 #:rad 1.0 #:mins 1500)))
+  (define (mk-l49-mins-y base-tag cx cy dy-off)
+    (for/list ([i (in-range 8)])
+      (mk-l49-u (+ base-tag i) 341 3 (+ cx (- (* 1.5 i) 5.25)) (+ cy dy-off) #:hp 1000.0 #:rad 1.0 #:mins 1500)))
+  (define (mk-l49-gi enemy-sx enemy-sy [enemy-race 'Random])
+    (sc2-game-info "L49LayoutMap" ""
+                   (list (hash 'player-id 1 'race-requested 'Protoss)
+                         (hash 'player-id 2 'race-requested enemy-race))
+                   '(128 128) '(4 4 124 124)
+                   (list (sc2-point2d enemy-sx enemy-sy)) w3-full-grid #f w3-full-grid))
+  (define (l49-start-mock-ws decide-fn)
+    (define-values (c-in s-out) (make-pipe))
+    (define-values (s-in c-out) (make-pipe))
+    (define ws (sc2-ws-conn "127.0.0.1" 0 "/sc2api" c-in c-out #f (box 1)))
+    (define th
+      (thread
+       (lambda ()
+         (let lp ()
+           (define b0 (read-byte s-in))
+           (unless (eof-object? b0)
+             (define b1 (read-byte s-in))
+             (define masked? (not (zero? (bitwise-and b1 #x80))))
+             (define len0 (bitwise-and b1 #x7F))
+             (define plen
+               (cond [(< len0 126) len0]
+                     [(= len0 126) (integer-bytes->integer (read-bytes 2 s-in) #f #t)]
+                     [else (integer-bytes->integer (read-bytes 8 s-in) #f #t)]))
+             (define mkey (if masked? (read-bytes 4 s-in) #f))
+             (define raw (read-bytes plen s-in))
+             (define payload
+               (if masked?
+                   (let ([out (make-bytes plen)])
+                     (for ([i (in-range plen)])
+                       (bytes-set! out i (bitwise-xor (bytes-ref raw i) (bytes-ref mkey (modulo i 4)))))
+                     out)
+                   raw))
+             (define req-f (decode-protobuf-message payload))
+             (define id-p (assoc 97 req-f))
+             (define id-b (if id-p (encode-uint32 97 (third id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([it (in-list p-items)])
+                          (define itf (decode-protobuf-message (third it)))
+                          (define ab (let ([p (assoc 1 itf)]) (if p (third p) 0)))
+                          (define tp-e (assoc 2 itf))
+                          (define-values (px py)
+                            (if tp-e
+                                (let ([ptf (decode-protobuf-message (third tp-e))])
+                                  (values (let ([xp (assoc 1 ptf)])
+                                            (if (and xp (bytes? (third xp)))
+                                                (floating-point-bytes->real (third xp) #f)
+                                                0.0))
+                                          (let ([yp (assoc 2 ptf)])
+                                            (if (and yp (bytes? (third yp)))
+                                                (floating-point-bytes->real (third yp) #f)
+                                                0.0))))
+                                (values 0.0 0.0)))
+                          (encode-submessage-field 3 (encode-int32 1 (decide-fn ab px py))))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s-out)
+               (write-bytes resp s-out)
+               (flush-output s-out))
+             (lp))))))
+    (values ws (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
+
+  ;; 1. L49-2a1: Protoss Anti-"Pylon Soup" (`>= 9.0t` spacing) + Natural Pylon Coverage
+  ;;    verified in BOTH South and North spawns (100% spawn-symmetric)!
+  (define gi-sw (mk-l49-gi 98.0 96.0 'Terran))
+  (define gi-ne (mk-l49-gi 30.0 32.0 'Terran))
+  ;; Part A: 2 existing Main Pylons at (36, 32) and (36, 42) -> 3rd non-wall Pylon stays >= 9.0t from both!
+  (define p49-nex  (mk-l49-u 99101 59 1 30.0 32.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75))
+  (define p49-py1  (mk-l49-u 99102 60 1 36.0 32.0 #:hp 200.0  #:sh 200.0  #:rad 1.0))
+  (define p49-py2  (mk-l49-u 99103 60 1 36.0 42.0 #:hp 200.0  #:sh 200.0  #:rad 1.0))
+  (define p49-prb  (mk-l49-u 99104 84 1 34.0 36.0 #:hp 20.0   #:sh 20.0   #:rad 0.375))
+  (define p49-u-a  (append (list p49-nex p49-py1 p49-py2 p49-prb) (mk-l49-mins-x 99110 30.0 32.0 -6.5)))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 300 0 p49-u-a) #:game-info gi-sw))
+  (define py3-cmds
+    (translate-bot-actions->sc2-raw-commands '((build pylon 36.0 36.0))
+                                             (make-test-obs 2000 300 0 p49-u-a) #:game-info gi-sw))
+  (define py3-pt
+    (let ([c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 881))) py3-cmds)])
+      (and c (sc2-raw-unit-command-target-pos c))))
+  ;; Part B (South): Natural Nexus (60, 32) starts (`bp = 0.20`) with 0 Natural Pylons -> next Pylon goes to Natural!
+  (define p49-nat-s (mk-l49-u 99120 59 1 60.0 32.0 #:hp 500.0 #:sh 500.0 #:rad 2.75 #:bp 0.20))
+  (define p49-u-s   (append (list p49-nex p49-nat-s p49-py1 p49-prb)
+                            (mk-l49-mins-x 99110 30.0 32.0 -6.5)
+                            (mk-l49-mins-y 99130 60.0 32.0 -6.5)))
+  (define py-nat-s-cmds
+    (translate-bot-actions->sc2-raw-commands '((build pylon 36.0 36.0))
+                                             (make-test-obs 2400 300 0 p49-u-s) #:game-info gi-sw))
+  (define py-nat-s-pt
+    (let ([c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 881))) py-nat-s-cmds)])
+      (and c (sc2-raw-unit-command-target-pos c))))
+  ;; Part C (North mirror): Main (98, 96), Natural (68, 96) (`bp = 0.20`) -> next Pylon goes to North Natural!
+  (define p49-nex-n (mk-l49-u 99141 59 1 98.0 96.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75))
+  (define p49-nat-n (mk-l49-u 99142 59 1 68.0 96.0 #:hp 500.0  #:sh 500.0  #:rad 2.75 #:bp 0.20))
+  (define p49-py1-n (mk-l49-u 99143 60 1 92.0 96.0 #:hp 200.0  #:sh 200.0  #:rad 1.0))
+  (define p49-prb-n (mk-l49-u 99144 84 1 90.0 94.0 #:hp 20.0   #:sh 20.0   #:rad 0.375))
+  (define p49-u-n   (append (list p49-nex-n p49-nat-n p49-py1-n p49-prb-n)
+                            (mk-l49-mins-x 99150 98.0 96.0  6.5)
+                            (mk-l49-mins-y 99160 68.0 96.0  6.5)))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 300 0 p49-u-n) #:game-info gi-ne))
+  (define py-nat-n-cmds
+    (translate-bot-actions->sc2-raw-commands '((build pylon 92.0 92.0))
+                                             (make-test-obs 2400 300 0 p49-u-n) #:game-info gi-ne))
+  (define py-nat-n-pt
+    (let ([c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 881))) py-nat-n-cmds)])
+      (and c (sc2-raw-unit-command-target-pos c))))
+  (check-true "l49-2a1-protoss-anti-pylon-soup-9t-spacing-and-natural-pylon-coverage"
+              (and (sc2-point2d? py3-pt)
+                   (>= (hypot (- (sc2-point2d-x py3-pt) 36.0) (- (sc2-point2d-y py3-pt) 32.0)) 8.95)
+                   (>= (hypot (- (sc2-point2d-x py3-pt) 36.0) (- (sc2-point2d-y py3-pt) 42.0)) 8.95)
+                   (sc2-point2d? py-nat-s-pt)
+                   (<= (hypot (- (sc2-point2d-x py-nat-s-pt) 60.0) (- (sc2-point2d-y py-nat-s-pt) 32.0)) 9.5)
+                   (sc2-point2d? py-nat-n-pt)
+                   (<= (hypot (- (sc2-point2d-x py-nat-n-pt) 68.0) (- (sc2-point2d-y py-nat-n-pt) 96.0)) 9.5)))
+
+  ;; 2. L49-2a2: Protoss Protected Tech — Fragile tech (`RoboticsFacility`/`Stargate`) NEVER claims
+  ;;    front `PvZ` natural `'wall-slot` and tucks inside Main, while sturdy `Gateway` still walls!
+  (define gi-pvz (mk-l49-gi 98.0 96.0 'Zerg))
+  (define pvz-nex  (mk-l49-u 99201 59 1 30.0 32.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75))
+  (define pvz-pym  (mk-l49-u 99202 60 1 34.0 30.0 #:hp 200.0  #:sh 200.0  #:rad 1.0))
+  (define pvz-pyn  (mk-l49-u 99203 60 1 56.0 36.0 #:hp 200.0  #:sh 200.0  #:rad 1.0))
+  (define pvz-prb  (mk-l49-u 99204 84 1 36.0 32.0 #:hp 20.0   #:sh 20.0   #:rad 0.375))
+  (define pvz-wall (list (reserved-aabb 58.5 36.5 1.5 1.5 'wall-slot #f 99999)))
+  (define pvz-obs
+    (sc2-observation 3200 (sc2-player-common 1 500 300 40 24 8 16 0 0 0 0)
+                     (list pvz-nex pvz-pym pvz-pyn pvz-prb) '()
+                     (list (sc2-power-source (sc2-point2d 34.0 30.0) 6.5 99202)
+                           (sc2-power-source (sc2-point2d 56.0 36.0) 6.5 99203))
+                     #f '() '() '() '() '() '()))
+  (define robo-cmds-49
+    (translate-bot-actions->sc2-raw-commands '((build robotics-facility 58.5 36.5))
+                                             pvz-obs #:game-info gi-pvz #:reserved-aabbs pvz-wall))
+  (define robo-pt-49
+    (let ([c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 893))) robo-cmds-49)])
+      (and c (sc2-raw-unit-command-target-pos c))))
+  (define sg-cmds-49
+    (translate-bot-actions->sc2-raw-commands '((build stargate 58.5 36.5))
+                                             pvz-obs #:game-info gi-pvz #:reserved-aabbs pvz-wall))
+  (define sg-pt-49
+    (let ([c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 889))) sg-cmds-49)])
+      (and c (sc2-raw-unit-command-target-pos c))))
+  (define gw-wall-cmds-49
+    (translate-bot-actions->sc2-raw-commands '((build gateway 58.5 36.5))
+                                             pvz-obs #:game-info gi-pvz #:reserved-aabbs pvz-wall))
+  (define gw-wall-pt-49
+    (let ([c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 883))) gw-wall-cmds-49)])
+      (and c (sc2-raw-unit-command-target-pos c))))
+  (check-true "l49-2a2-protoss-protected-tech-out-of-pvz-wall-slot-and-tucked-in-main"
+              (and (sc2-point2d? robo-pt-49)
+                   (<= (hypot (- (sc2-point2d-x robo-pt-49) 34.0) (- (sc2-point2d-y robo-pt-49) 30.0)) 6.5)
+                   (> (hypot (- (sc2-point2d-x robo-pt-49) 58.5) (- (sc2-point2d-y robo-pt-49) 36.5)) 12.0)
+                   (sc2-point2d? sg-pt-49)
+                   (<= (hypot (- (sc2-point2d-x sg-pt-49) 34.0) (- (sc2-point2d-y sg-pt-49) 30.0)) 6.5)
+                   (sc2-point2d? gw-wall-pt-49)
+                   (<= (hypot (- (sc2-point2d-x gw-wall-pt-49) 58.5) (- (sc2-point2d-y gw-wall-pt-49) 36.5)) 3.0)))
+
+  ;; 3. L49-2b1: Terran Natural Depot Wall (`#3/#4`) + Back-Edge Drop-Vision Depot (`#5`),
+  ;;    verified in BOTH South and North spawns (100% N/S symmetry)!
+  ;; South spawn: Main CC (30, 32), Nat CC (60, 32) (minerals South at 60, 25.5), 2 Main Depots -> Depot #3 at Nat front!
+  (define t49-ccm-s (mk-l49-u 99301 18 1 30.0 32.0 #:hp 1500.0 #:rad 2.75))
+  (define t49-ccn-s (mk-l49-u 99302 18 1 60.0 32.0 #:hp 1000.0 #:rad 2.75 #:bp 0.25))
+  (define t49-dp1-s (mk-l49-u 99303 19 1 39.0 36.0 #:hp 400.0  #:rad 1.0))
+  (define t49-dp2-s (mk-l49-u 99304 19 1 41.0 34.0 #:hp 400.0  #:rad 1.0))
+  (define t49-scv-s (mk-l49-u 99305 45 1 34.0 34.0 #:hp 45.0   #:rad 0.375))
+  (define t49-u-s   (append (list t49-ccm-s t49-ccn-s t49-dp1-s t49-dp2-s t49-scv-s)
+                            (mk-l49-mins-x 99310 30.0 32.0 -6.5)
+                            (mk-l49-mins-y 99320 60.0 32.0 -6.5)))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 300 0 t49-u-s) #:game-info gi-sw))
+  (define dp3-s-pt
+    (let* ([cs (translate-bot-actions->sc2-raw-commands '((build supply-depot 32.0 38.0))
+                                                        (make-test-obs 2800 300 0 t49-u-s) #:game-info gi-sw)]
+           [c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 319))) cs)])
+      (and c (sc2-raw-unit-command-target-pos c))))
+  ;; North spawn mirror: Main CC (98, 96), Nat CC (68, 96) (minerals North at 68, 102.5) -> Depot #3 at North Nat front!
+  (define t49-ccm-n (mk-l49-u 99331 18 1 98.0 96.0 #:hp 1500.0 #:rad 2.75))
+  (define t49-ccn-n (mk-l49-u 99332 18 1 68.0 96.0 #:hp 1000.0 #:rad 2.75 #:bp 0.25))
+  (define t49-dp1-n (mk-l49-u 99333 19 1 89.0 92.0 #:hp 400.0  #:rad 1.0))
+  (define t49-dp2-n (mk-l49-u 99334 19 1 87.0 94.0 #:hp 400.0  #:rad 1.0))
+  (define t49-scv-n (mk-l49-u 99335 45 1 94.0 94.0 #:hp 45.0   #:rad 0.375))
+  (define t49-u-n   (append (list t49-ccm-n t49-ccn-n t49-dp1-n t49-dp2-n t49-scv-n)
+                            (mk-l49-mins-x 99340 98.0 96.0 6.5)
+                            (mk-l49-mins-y 99350 68.0 96.0 6.5)))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 300 0 t49-u-n) #:game-info gi-ne))
+  (define dp3-n-pt
+    (let* ([cs (translate-bot-actions->sc2-raw-commands '((build supply-depot 96.0 90.0))
+                                                        (make-test-obs 2800 300 0 t49-u-n) #:game-info gi-ne)]
+           [c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 319))) cs)])
+      (and c (sc2-raw-unit-command-target-pos c))))
+  ;; Back-edge drop-vision Depot (#5 once 2 Main + 2 Nat Depots exist): lands behind Main CC away from enemy (98, 96)!
+  (define t49-dp3-s (mk-l49-u 99306 19 1 64.0 38.0 #:hp 400.0 #:rad 1.0))
+  (define t49-dp4-s (mk-l49-u 99307 19 1 66.0 36.0 #:hp 400.0 #:rad 1.0))
+  (define t49-u-s5  (append (list t49-ccm-s t49-ccn-s t49-dp1-s t49-dp2-s t49-dp3-s t49-dp4-s t49-scv-s)
+                            (mk-l49-mins-x 99310 30.0 32.0 -6.5)
+                            (mk-l49-mins-y 99320 60.0 32.0 -6.5)))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 300 0 t49-u-s5) #:game-info gi-sw))
+  (define dp5-back-pt
+    (let* ([cs (translate-bot-actions->sc2-raw-commands '((build supply-depot 36.0 36.0))
+                                                        (make-test-obs 3600 300 0 t49-u-s5) #:game-info gi-sw)]
+           [c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 319))) cs)])
+      (and c (sc2-raw-unit-command-target-pos c))))
+  (check-true "l49-2b1-terran-natural-depot-wall-and-back-edge-vision-north-south-symmetric"
+              (and (sc2-point2d? dp3-s-pt)
+                   (<= (hypot (- (sc2-point2d-x dp3-s-pt) 60.0) (- (sc2-point2d-y dp3-s-pt) 32.0)) 11.0)
+                   (> (sc2-point2d-y dp3-s-pt) 32.0) ;; away from South minerals (25.5) toward front!
+                   (sc2-point2d? dp3-n-pt)
+                   (<= (hypot (- (sc2-point2d-x dp3-n-pt) 68.0) (- (sc2-point2d-y dp3-n-pt) 96.0)) 11.0)
+                   (< (sc2-point2d-y dp3-n-pt) 96.0) ;; away from North minerals (102.5) toward front!
+                   (sc2-point2d? dp5-back-pt)
+                   (>= (hypot (- (sc2-point2d-x dp5-back-pt) 30.0) (- (sc2-point2d-y dp5-back-pt) 32.0)) 6.5)
+                   ;; Behind Main CC (30,32) away from Enemy (98,96): (x-30)+(y-32) < 0!
+                   (< (+ (- (sc2-point2d-x dp5-back-pt) 30.0) (- (sc2-point2d-y dp5-back-pt) 32.0)) 0.0)))
+
+  ;; 4. L49-2b2: Terran Compact Main Addon-Swap Cluster (`miss-streak = 0`):
+  ;;    Factory clusters tightly beside existing Main Barracks (`<= 13.5t` from Main CC, east `+2.5x` addon clear!)
+  (define sw-cc  (mk-l49-u 99401 18 1 30.0 60.0 #:hp 1500.0 #:rad 2.75))
+  (define sw-rax (mk-l49-u 99402 21 1 38.0 60.0 #:hp 1000.0 #:rad 1.5))
+  (define sw-scv (mk-l49-u 99403 45 1 35.0 62.0 #:hp 45.0   #:rad 0.375))
+  (define sw-us  (append (list sw-cc sw-rax sw-scv) (mk-l49-mins-x 99410 30.0 60.0 -6.5)))
+  (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 400 200 sw-us) #:game-info gi-sw))
+  (define fac-swap-pt
+    (let* ([cs (translate-bot-actions->sc2-raw-commands '((build factory 46.0 78.0))
+                                                        (make-test-obs 3200 400 200 sw-us) #:game-info gi-sw)]
+           [c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 328))) cs)])
+      (and c (sc2-raw-unit-command-target-pos c))))
+  (check-true "l49-2b2-terran-compact-main-addon-swap-cluster"
+              (and (sc2-point2d? fac-swap-pt)
+                   (<= (hypot (- (sc2-point2d-x fac-swap-pt) 30.0) (- (sc2-point2d-y fac-swap-pt) 60.0)) 13.5)
+                   (<= (hypot (- (sc2-point2d-x fac-swap-pt) 38.0) (- (sc2-point2d-y fac-swap-pt) 60.0)) 7.5)))
+
+  ;; 5. L49-2c: Zerg Pro-Style Layout — Rear/Mineral-Arc SpawningPool (North & South symmetric),
+  ;;    Mineral-Line Routine SporeCrawler (~3.5t toward minerals), & ZvZ Natural Front Choke RoachWarren!
+  (define gi-zvz-s (mk-l49-gi 98.0 68.0 'Zerg))
+  (define gi-zvz-n (mk-l49-gi 30.0 60.0 'Zerg))
+  ;; Part A1 (South): Main Hatch (30, 60), minerals West (23.5, 60) -> SpawningPool tucks on rear/mineral arc (x < 30)!
+  (define z49-hs  (mk-l49-u 99501 86  1 30.0 60.0 #:hp 1500.0 #:rad 2.75))
+  (define z49-ds  (mk-l49-u 99502 104 1 28.0 58.0 #:hp 40.0   #:rad 0.375))
+  (define z49-us  (append (list z49-hs z49-ds) (mk-l49-mins-x 99510 30.0 60.0 -6.5)))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 400 100 z49-us) #:game-info gi-zvz-s))
+  (define pool-s-pt
+    (let* ([cs (translate-bot-actions->sc2-raw-commands '((build spawning-pool 36.0 60.0))
+                                                        (make-test-obs 1200 400 100 z49-us) #:game-info gi-zvz-s)]
+           [c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 1155))) cs)])
+      (and c (sc2-raw-unit-command-target-pos c))))
+  ;; Part A2 (North mirror): Main Hatch (98, 68), minerals East (104.5, 68) -> SpawningPool tucks East (x > 98)!
+  (define z49-hn  (mk-l49-u 99521 86  1 98.0 68.0 #:hp 1500.0 #:rad 2.75))
+  (define z49-dn  (mk-l49-u 99522 104 1 100.0 66.0 #:hp 40.0  #:rad 0.375))
+  (define z49-un  (append (list z49-hn z49-dn) (mk-l49-mins-x 99530 98.0 68.0 6.5)))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 400 100 z49-un) #:game-info gi-zvz-n))
+  (define pool-n-pt
+    (let* ([cs (translate-bot-actions->sc2-raw-commands '((build spawning-pool 92.0 68.0))
+                                                        (make-test-obs 1200 400 100 z49-un) #:game-info gi-zvz-n)]
+           [c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 1155))) cs)])
+      (and c (sc2-raw-unit-command-target-pos c))))
+  ;; Part B: Routine SporeCrawler (NO cloak threat!) -> lands inside/behind mineral line (~3.5t toward 23.5, 60)!
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 400 100 z49-us) #:game-info gi-zvz-s))
+  (define spore-ml-pt
+    (let* ([cs (translate-bot-actions->sc2-raw-commands '((build spore-crawler 36.0 60.0))
+                                                        (make-test-obs 2400 400 100 z49-us) #:game-info gi-zvz-s)]
+           [c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 1167))) cs)])
+      (and c (sc2-raw-unit-command-target-pos c))))
+  ;; Part C: ZvZ Natural front choke partial wall (`RoachWarren`) once Natural Hatchery completes!
+  (define z49-hnat (mk-l49-u 99541 86 1 60.0 60.0 #:hp 1500.0 #:rad 2.75 #:bp 1.0))
+  (define z49-uzvz (append (list z49-hs z49-hnat z49-ds)
+                           (mk-l49-mins-x 99510 30.0 60.0 -6.5)
+                           (mk-l49-mins-y 99550 60.0 60.0 -6.5)))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 400 100 z49-uzvz) #:game-info gi-zvz-s))
+  (define rw-zvz-pt
+    (let* ([cs (translate-bot-actions->sc2-raw-commands '((build roach-warren 32.0 60.0))
+                                                        (make-test-obs 3600 400 100 z49-uzvz) #:game-info gi-zvz-s)]
+           [c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 1165))) cs)])
+      (and c (sc2-raw-unit-command-target-pos c))))
+  (check-true "l49-2c-zerg-pro-layout-rear-pool-mineral-spore-and-zvz-nat-choke-wall"
+              (and (sc2-point2d? pool-s-pt) (< (sc2-point2d-x pool-s-pt) 30.0)
+                   (sc2-point2d? pool-n-pt) (> (sc2-point2d-x pool-n-pt) 98.0)
+                   (sc2-point2d? spore-ml-pt)
+                   (< (sc2-point2d-x spore-ml-pt) 30.0)
+                   (<= (hypot (- (sc2-point2d-x spore-ml-pt) 23.5) (- (sc2-point2d-y spore-ml-pt) 60.0)) 6.5)
+                   (sc2-point2d? rw-zvz-pt)
+                   (<= (hypot (- (sc2-point2d-x rw-zvz-pt) 60.0) (- (sc2-point2d-y rw-zvz-pt) 60.0)) 9.5)
+                   (> (sc2-point2d-y rw-zvz-pt) 59.0)))
+
+  ;; 6. L49-2d: Law 1 Stage-2 Expanded Placement Ring Fallback across ALL 3 races via
+  ;;    `#:watchdog-expand-ring-syms` / `sc2-request-ring-expand!` / `miss-streak >= 2`!
+  ;; (a) Terran non-prod (`engineering-bay`): Main blocked; watchdog ring-expand lands on 22t outer ring!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
+  (hash-clear! SC2-WATCHDOG-RING-EXPAND-SYMS)
+  (define ebay-stage2-pt
+    (let-values ([(ws cleanup!)
+                  (l49-start-mock-ws
+                   (lambda (ab px py)
+                     (if (and (= ab 322) (>= px 50.0) (<= px 56.0) (>= py 58.0) (<= py 64.0)) 1 2)))])
+      (define cs (translate-bot-actions->sc2-raw-commands
+                  '((build engineering-bay 30.0 60.0))
+                  (make-test-obs 5000 400 100 sw-us)
+                  #:ws-conn ws #:game-info gi-sw
+                  #:watchdog-expand-ring-syms '(engineering-bay)))
+      (cleanup!)
+      (let ([c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 322))) cs)])
+        (and c (sc2-raw-unit-command-target-pos c)))))
+  ;; (b) Protoss non-gateway (`robotics-facility`): All Pylons boxed out; `sc2-request-ring-expand!`
+  ;;     triggers Stage-2 relief Pylon (881) cleanly!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (sc2-request-ring-expand! 'robotics-facility 5100)
+  (define robo-relief-pylon?
+    (let-values ([(ws cleanup!)
+                  (l49-start-mock-ws
+                   (lambda (ab _px _py) (if (= ab 881) 1 2)))])
+      (define obs-p-box
+        (sc2-observation 5100 (sc2-player-common 1 300 200 40 24 8 16 0 0 0 0)
+                         (list p49-nex p49-py1 p49-prb) '()
+                         (list (sc2-power-source (sc2-point2d 36.0 32.0) 6.5 99102))
+                         #f '() '() '() '() '() '()))
+      (define cs (translate-bot-actions->sc2-raw-commands
+                  '((build robotics-facility 36.0 32.0))
+                  obs-p-box #:ws-conn ws #:game-info gi-sw))
+      (cleanup!)
+      (and (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 881))) cs) #t)))
+  ;; (c) Zerg non-spire (`roach-warren`): Main blocked; `miss-streak = 2` triggers Stage-2 multi-Hatchery
+  ;;     creep-ring fallback onto Natural's outer 9.5t ring [68..71, 58..62]!
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK 'roach-warren 2)
+  (define rw-stage2-pt
+    (let-values ([(ws cleanup!)
+                  (l49-start-mock-ws
+                   (lambda (ab px py)
+                     (if (and (= ab 1165) (>= px 68.0) (<= px 71.0) (>= py 58.0) (<= py 62.0)) 1 2)))])
+      (define cs (translate-bot-actions->sc2-raw-commands
+                  '((build roach-warren 30.0 60.0))
+                  (make-test-obs 5200 400 100 z49-uzvz)
+                  #:ws-conn ws #:game-info gi-sw))
+      (cleanup!)
+      (let ([c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 1165))) cs)])
+        (and c (sc2-raw-unit-command-target-pos c)))))
+  (check-true "l49-2d-law1-stage2-expanded-placement-ring-fallback-all-races"
+              (and (sc2-point2d? ebay-stage2-pt)
+                   (>= (sc2-point2d-x ebay-stage2-pt) 50.0) (<= (sc2-point2d-x ebay-stage2-pt) 56.0)
+                   robo-relief-pylon?
+                   (sc2-point2d? rw-stage2-pt)
+                   (>= (sc2-point2d-x rw-stage2-pt) 68.0) (<= (sc2-point2d-x rw-stage2-pt) 71.0)))
+
+  ;; 7. L49-1B (`#1156`/`#1157`): Baneling Morph Ability ID `80 -> 4121` (`MORPHTOBANELING_BANELING`)
+  ;;    + non-primary inbound decode alias `80 -> 'morph-baneling` + order protection `'morph`
+  ;;    + Suite 34.1 tight Hatchery-adjacent SpawningPool (`has-mins? = #f`) recovery!
+  (define b49-hatch (mk-l49-u 99701 86  1 30.0 60.0 #:hp 1500.0 #:rad 2.75))
+  (define b49-bnest (mk-l49-u 99702 96  1 27.0 65.0 #:hp 850.0  #:rad 1.5))
+  (define b49-ling1 (mk-l49-u 99703 105 1 32.0 62.0 #:hp 35.0   #:rad 0.375))
+  (define b49-ling2 (mk-l49-u 99704 105 1 33.0 62.0 #:hp 35.0   #:rad 0.375))
+  (define b49-obs   (make-test-obs 4200 400 200 (list b49-hatch b49-bnest b49-ling1 b49-ling2)))
+  (define b49-train-cmds
+    (translate-bot-actions->sc2-raw-commands '((train baneling)) b49-obs #:game-info gi-sw))
+  (define b49-morph-cmds
+    (translate-bot-actions->sc2-raw-commands '((morph baneling)) b49-obs #:game-info gi-sw))
+  (define b49-c-train
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 4121))) b49-train-cmds))
+  (define b49-c-morph
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 4121))) b49-morph-cmds))
+  (define b49-any-legacy-80?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 80)))
+           (append b49-train-cmds b49-morph-cmds)))
+  ;; Tight Hatchery-adjacent SpawningPool recovery (`has-mins? = #f`, Chebyshev 3.95..4.5 only!)
+  (hash-clear! SC2-PLACEMENT-POS-CACHE)
+  (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
+  (define tight-pool-pt
+    (let-values ([(ws cleanup!)
+                  (l49-start-mock-ws
+                   (lambda (ab px py)
+                     (define ch (max (abs (- px 141.5)) (abs (- py 38.5))))
+                     (if (and (= ab 1155) (>= ch 3.95) (< ch 4.5)) 1 2)))])
+      (define th-z (mk-l49-u 99711 86  1 141.5 38.5 #:hp 1500.0 #:rad 2.75))
+      (define dr-z (mk-l49-u 99712 104 1 139.5 38.5 #:hp 40.0   #:rad 0.375))
+      (define cs (translate-bot-actions->sc2-raw-commands
+                  '((build spawning-pool 137.5 38.5))
+                  (make-test-obs 1200 300 0 (list th-z dr-z))
+                  #:ws-conn ws))
+      (cleanup!)
+      (let ([c (findf (lambda (x) (and (sc2-raw-unit-command? x) (= (sc2-raw-unit-command-ability-id x) 1155))) cs)])
+        (and c (sc2-raw-unit-command-target-pos c)))))
+  (check-true "l49-1b-baneling-morph-4121-and-tight-hatchery-adjacent-spawning-pool"
+              (and (= (ability-symbol->sc2-id 'morph-baneling) 4121)
+                   (= (ability-symbol->sc2-id 'train-baneling) 4121)
+                   (= (train-symbol->ability-id 'baneling) 4121)
+                   (= (morph-symbol->ability-id 'baneling) 4121)
+                   (eq? (sc2-id->ability-symbol 4121) 'morph-baneling)
+                   (eq? (sc2-id->ability-symbol 80) 'morph-baneling)
+                   (eq? (sc2-order-protection-class 4121) 'morph)
+                   (eq? (sc2-canonical-order-ability 4121) 'morph-baneling)
+                   (eq? (sc2-canonical-order-ability 80) 'morph-baneling)
+                   (sc2-raw-unit-command? b49-c-train)
+                   (sc2-raw-unit-command? b49-c-morph)
+                   (not b49-any-legacy-80?)
+                   (sc2-point2d? tight-pool-pt)
+                   (>= (max (abs (- (sc2-point2d-x tight-pool-pt) 141.5))
+                            (abs (- (sc2-point2d-y tight-pool-pt) 38.5)))
+                       3.95)
+                   (< (max (abs (- (sc2-point2d-x tight-pool-pt) 141.5))
+                           (abs (- (sc2-point2d-y tight-pool-pt) 38.5)))
+                      4.5)))
+
+  ;; 8. L50 (`#1218`): SC2 4.10 outbound ability IDs for Auto-Turret (`349 -> 1764`),
+  ;;    Viper Consume (`2069 -> 2073`), Swarm Host Spawn Locusts (`1990 -> 2704`), and
+  ;;    Overlord Generate Creep (`1882 -> 1692`) while preserving inbound legacy decoding!
+  (define l50-raven (mk-l49-u 99801 56  1 40.0 60.0 #:hp 140.0 #:rad 0.75))
+  (define l50-viper (mk-l49-u 99802 499 1 42.0 60.0 #:hp 150.0 #:rad 1.0))
+  (define l50-hatch (mk-l49-u 99803 86  1 38.0 60.0 #:hp 1500.0 #:rad 2.75))
+  (define l50-shost (mk-l49-u 99804 494 1 44.0 60.0 #:hp 160.0 #:rad 0.875))
+  (define l50-ovl   (mk-l49-u 99805 106 1 46.0 60.0 #:hp 200.0 #:rad 1.0))
+  (define l50-obs   (make-test-obs 4500 400 200 (list l50-raven l50-viper l50-hatch l50-shost l50-ovl)))
+  (define l50-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 99801 auto-turret 45.0 62.0)
+       (cast-spell 99802 viper-consume 99803)
+       (cast-spell 99804 spawn-locusts 50.0 62.0)
+       (cast-spell 99805 overlord-generate-creep))
+     l50-obs #:game-info gi-sw))
+  (define (l50-find-ab id)
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) id))) l50-cmds))
+  (define l50-c-1764 (l50-find-ab 1764))
+  (define l50-c-2073 (l50-find-ab 2073))
+  (define l50-c-2704 (l50-find-ab 2704))
+  (define l50-c-1692 (l50-find-ab 1692))
+  (define l50-any-legacy?
+    (ormap (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (memv (sc2-raw-unit-command-ability-id c) '(349 2069 1990 1882))))
+           l50-cmds))
+  (define (l50-wire-ok? cmd)
+    (and cmd
+         (let-values ([(ok? _info) (verify-sc2-action-bytes (encode-sc2-action cmd))])
+           ok?)))
+  (define (l50-catalog-id sym)
+    (let ([e (findf (lambda (x) (eq? (ability-catalog-entry-sym x) sym)) COMPLETE-LOTV-ABILITY-LIST)])
+      (and e (ability-catalog-entry-ability-id e))))
+  (check-true "l50-sc2-410-outbound-ability-ids-auto-turret-viper-locust-creep"
+              (and (= (ability-symbol->sc2-id 'auto-turret) 1764)
+                   (= (ability-symbol->sc2-id 'build-auto-turret) 1764)
+                   (= (spell-symbol->ability-id 'auto-turret) 1764)
+                   (= (hash-ref SC2-SPELL-ABILITY-IDS 'auto-turret 0) 1764)
+                   (= AUTO-TURRET-ABILITY-ID 1764)
+                   (= (l50-catalog-id 'auto-turret) 1764)
+                   (= (ability-symbol->sc2-id 'viper-consume) 2073)
+                   (= (ability-symbol->sc2-id 'consume) 2073)
+                   (= (ability-symbol->sc2-id 'viper-consume-structure) 2073)
+                   (= (spell-symbol->ability-id 'viper-consume) 2073)
+                   (= (l50-catalog-id 'viper-consume) 2073)
+                   (= (l50-catalog-id 'viper-consume-structure) 2073)
+                   (= (ability-symbol->sc2-id 'spawn-locusts) 2704)
+                   (= (ability-symbol->sc2-id 'spawn-locusts-flying) 2704)
+                   (= (ability-symbol->sc2-id 'swarm-host-spawn-locusts) 2704)
+                   (= (spell-symbol->ability-id 'spawn-locusts) 2704)
+                   (= (hash-ref SC2-SPELL-ABILITY-IDS 'spawn-locusts 0) 2704)
+                   (= (l50-catalog-id 'spawn-locusts) 2704)
+                   (= (ability-symbol->sc2-id 'overlord-generate-creep) 1692)
+                   (= (ability-symbol->sc2-id 'generate-creep) 1692)
+                   (= (spell-symbol->ability-id 'overlord-generate-creep) 1692)
+                   (= (hash-ref SC2-SPELL-ABILITY-IDS 'overlord-generate-creep 0) 1692)
+                   ;; Inbound decoder accepts BOTH SC2 4.10 and legacy IDs
+                   (eq? (sc2-id->ability-symbol 1764) 'auto-turret)
+                   (eq? (sc2-id->ability-symbol 349) 'auto-turret)
+                   (eq? (sc2-id->ability-symbol 379) 'auto-turret)
+                   (eq? (sc2-id->ability-symbol 2073) 'viper-consume)
+                   (eq? (sc2-id->ability-symbol 2069) 'viper-consume)
+                   (eq? (sc2-id->ability-symbol 2704) 'spawn-locusts)
+                   (eq? (sc2-id->ability-symbol 1990) 'spawn-locusts)
+                   (eq? (sc2-id->ability-symbol 1692) 'overlord-generate-creep)
+                   (eq? (sc2-id->ability-symbol 1882) 'overlord-generate-creep)
+                   ;; Canonical order & protection consistency
+                   (eq? (sc2-canonical-order-ability 1764) 'auto-turret)
+                   (eq? (sc2-canonical-order-ability 349) 'auto-turret)
+                   (eq? (sc2-canonical-order-ability 2073) 'viper-consume)
+                   (eq? (sc2-canonical-order-ability 2069) 'viper-consume)
+                   (eq? (sc2-canonical-order-ability 2704) 'spawn-locusts)
+                   (eq? (sc2-canonical-order-ability 1990) 'spawn-locusts)
+                   (eq? (sc2-canonical-order-ability 1692) 'overlord-generate-creep)
+                   (eq? (sc2-canonical-order-ability 1882) 'overlord-generate-creep)
+                   (eq? (sc2-order-protection-class 1764) 'cast-walk)
+                   (eq? (sc2-order-protection-class 2704) 'cast-walk)
+                   (eq? (sc2-order-protection-class 2073) 'channel)
+                   ;; Translation emits 4.10 IDs with P0 tier and passes wire verifier
+                   (not l50-any-legacy?)
+                   (l50-wire-ok? l50-c-1764) (= (wire-cmd-priority-tier l50-c-1764) 0)
+                   (l50-wire-ok? l50-c-2073) (= (wire-cmd-priority-tier l50-c-2073) 0)
+                   (l50-wire-ok? l50-c-2704) (= (wire-cmd-priority-tier l50-c-2704) 0)
+                   (l50-wire-ok? l50-c-1692) (= (wire-cmd-priority-tier l50-c-1692) 0)))
+
+  ;; 9. L50 (`#1222`): Exhaustive SC2 4.10 Buff, Ability, Research-Building & Upgrade ID Audit
+  (define l50-fc   (mk-l49-u 99811 30  1 30.0 60.0 #:hp 750.0 #:rad 1.5)) ;; Fusion Core
+  (define l50-stl  (mk-l49-u 99812 41  1 35.0 60.0 #:hp 400.0 #:rad 1.0)) ;; Starport TechLab
+  (define l50-fb   (mk-l49-u 99813 64  1 40.0 60.0 #:hp 500.0 #:rad 1.5)) ;; Fleet Beacon
+  (define l50-loc  (mk-l49-u 99814 693 1 45.0 60.0 #:hp 50.0  #:rad 0.375)) ;; Locust Flying
+  (define l50-shd  (mk-l49-u 99815 801 1 48.0 60.0 #:hp 1.0   #:rad 0.5)) ;; Adept Phase Shift
+  (define l50-obs2 (make-test-obs 4600 600 600 (list l50-fc l50-stl l50-fb l50-loc l50-shd)))
+  (define l50-ab-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((research advanced-ballistics)
+       (research anion-pulse-crystals)
+       (locust-swoop 99814 55.0 62.0)
+       (cast-spell 99815 cancel-adept-shade))
+     l50-obs2 #:game-info gi-sw))
+  (define l50-cr-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((research caduceus-reactor))
+     l50-obs2 #:game-info gi-sw))
+  (define (l50-find2 cs id)
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) id))) cs))
+  (define l50-c-1533 (l50-find2 l50-ab-cmds 1533))
+  (define l50-c-1535 (l50-find2 l50-cr-cmds 1535))
+  (define l50-c-46   (l50-find2 l50-ab-cmds 46))
+  (define l50-c-2387 (l50-find2 l50-ab-cmds 2387))
+  (define l50-c-2596 (l50-find2 l50-ab-cmds 2596))
+  (define (l50-upg-entry sym)
+    (findf (lambda (x) (eq? (upgrade-catalog-entry-sym x) sym)) COMPLETE-LOTV-UPGRADE-LIST))
+  (define l50-u-hr  (l50-upg-entry 'hyperflight-rotors))
+  (define l50-u-ab  (l50-upg-entry 'advanced-ballistics))
+  (define l50-u-apc (l50-upg-entry 'anion-pulse-crystals))
+  (check-true "l50-exhaustive-sc2-410-buff-ability-research-upgrade-ids"
+              (and ;; 1. Corrected & added Buff IDs
+                   (eq? (buff-id->symbol 99)  'oracle-weapon)
+                   (eq? (buff-id->symbol 56)  'oracle-cloak-field-effect)
+                   (eq? (buff-id->symbol 129) 'oracle-stasis-trap-target)
+                   (eq? (buff-id->symbol 6)   'ghost-cloak)
+                   (eq? (buff-id->symbol 288) 'transfusion)
+                   (eq? (buff-id->symbol 28)  'psi-storm)
+                   (eq? (buff-id->symbol 280) 'anti-armor-missile)
+                   (eq? (buff-id->symbol 277) 'interference-matrix)
+                   (eq? (buff-id->symbol 5)   'graviton-beam)
+                   (eq? (buff-id->symbol 36)  'contaminate)
+                   (eq? (buff-id->symbol 72)  'stasis)
+                   (eq? (buff-id->symbol 122) 'void-ray-prismatic-alignment)
+                   (eq? (buff-id->symbol 276) 'permanently-cloaked)
+                   ;; 2. Outbound Ability IDs + inbound legacy decoding
+                   (= (ability-symbol->sc2-id 'cancel-adept-shade) 2596)
+                   (eq? (sc2-id->ability-symbol 2596) 'cancel-adept-shade)
+                   (= (ability-symbol->sc2-id 'spawn-creep-tumor-queen) 1694)
+                   (= (ability-symbol->sc2-id 'build-creep-tumor-queen) 1694)
+                   (eq? (sc2-id->ability-symbol 1662) 'spawn-creep-tumor-queen)
+                   (= (ability-symbol->sc2-id 'morph-lurker-den) 1163)
+                   (= (ability-symbol->sc2-id 'build-lurker-den) 1163)
+                   (eq? (sc2-id->ability-symbol 1163) 'build-lurker-den)
+                   (eq? (sc2-id->ability-symbol 2112) 'morph-lurker-den)
+                   (= (research-symbol->ability-id 'advanced-ballistics) 1533)
+                   (eq? (sc2-id->ability-symbol 1533) 'research-advanced-ballistics)
+                   (eq? (sc2-id->ability-symbol 805)  'research-advanced-ballistics)
+                   (= (research-symbol->ability-id 'caduceus-reactor) 1535)
+                   (= (research-symbol->ability-id 'medivac-caduceus-reactor) 1535)
+                   (= (research-symbol->ability-id 'anion-pulse-crystals) 46)
+                   (= (ability-symbol->sc2-id 'locust-swoop) 2387)
+                   (= (hash-ref SC2-SPELL-ABILITY-IDS 'locust-swoop 0) 2387)
+                   (= LOCUST-SWOOP-ABILITY-ID 2387)
+                   (= (l50-catalog-id 'locust-swoop) 2387)
+                   (eq? (sc2-id->ability-symbol 2387) 'locust-swoop)
+                   (eq? (sc2-id->ability-symbol 2706) 'locust-swoop)
+                   (eq? (sc2-canonical-order-ability 2387) 'locust-swoop)
+                   (eq? (sc2-canonical-order-ability 2706) 'locust-swoop)
+                   ;; 3. Upgrade IDs + catalog sync
+                   (= (upgrade-symbol->sc2-id 'hyperflight-rotors) 136)
+                   (eq? (sc2-id->upgrade-symbol 136) 'hyperflight-rotors)
+                   (= (upgrade-symbol->sc2-id 'anion-pulse-crystals) 99)
+                   (eq? (sc2-id->upgrade-symbol 99) 'anion-pulse-crystals)
+                   (and l50-u-hr  (= (upgrade-catalog-entry-upgrade-id l50-u-hr) 136))
+                   (and l50-u-ab  (= (upgrade-catalog-entry-research-id l50-u-ab) 1533))
+                   (and l50-u-apc (= (upgrade-catalog-entry-research-id l50-u-apc) 46)
+                                  (= (upgrade-catalog-entry-upgrade-id l50-u-apc) 99))
+                   ;; 4. Live translation routes advanced-ballistics & caduceus-reactor to Fusion Core (99811, NOT Starport TechLab 99812!)
+                   (l50-wire-ok? l50-c-1533)
+                   (equal? (sc2-raw-unit-command-unit-tags l50-c-1533) '(99811))
+                   (l50-wire-ok? l50-c-1535)
+                   (equal? (sc2-raw-unit-command-unit-tags l50-c-1535) '(99811))
+                   (l50-wire-ok? l50-c-46)
+                   (equal? (sc2-raw-unit-command-unit-tags l50-c-46) '(99813))
+                   (l50-wire-ok? l50-c-2387) (= (wire-cmd-priority-tier l50-c-2387) 0)
+                   (l50-wire-ok? l50-c-2596) (= (wire-cmd-priority-tier l50-c-2596) 0)))
+  (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
+  (hash-clear! SC2-WATCHDOG-RING-EXPAND-SYMS))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"

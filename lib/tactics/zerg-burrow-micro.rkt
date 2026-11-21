@@ -2527,20 +2527,23 @@
     (hash-clear! (burrow-dodge-tracker-remembered-rings tr)))
   (set-burrow-dodge-tracker-last-frame! tr frame))
 
-;; Reactive Burrow Attack-Dodging for all burrowable Zerg ground units:
-;; When Burrow is researched and 0 enemy detectors are within 11.0 tiles, tracks
-;; per-unit `(prev-hp, last-burrow-frame, last-unburrow-frame)` and emits
-;; `(burrow-down uid 'reactive-attack-dodge)` (3661) on active damage (`<= 0.75`)
-;; or low-HP pressure under ranged fire (`<= 0.65` within 8.5 tiles), then unburrows
-;; `(burrow-up uid 'reactive-dodge-pop-up)` (3662) after 18-28 frames (or `>= 0.80`
-;; for Tunneling Claws Roaches, or when melee contact `<= 2.0`).
+;; L49-W1b (Zerg Root Cause #2 — Reactive Burrow Perma-Stun Fix):
+;; Restrict reactive burrow dodge strictly to Roaches (`'(roach roach-burrowed)`):
+;; non-Roach units (`hydralisk`, `ravager`, `zergling`, `baneling`, `queen`, `lurker-mp`, `drone`)
+;; do NOT gain accelerated burrow regeneration and suffered 2.1s burrow/unburrow animation locks.
+;; For Roaches: require `(or has-tunneling? (<= hp-pct 0.40))`, `>= 112f` (5s) re-burrow cooldown,
+;; and stay burrowed until HP regenerates to `>= 0.80` (or an enemy detector arrives / danger clears).
+(: REACTIVE-BURROW-DODGE-SYMS (Listof Symbol))
+(define REACTIVE-BURROW-DODGE-SYMS
+  '(roach roach-burrowed))
+
 (: execute-zerg-reactive-burrow-dodge-micro
    (->* (Any) (#:tracker (Option burrow-dodge-tracker)) (Listof (Listof Any))))
 (define (execute-zerg-reactive-burrow-dodge-micro obs #:tracker [opt-tr #f])
   (define sanitized-obs : Any (if (hash? obs) obs (hash)))
   (define ally-units (dyn-list (dyn-hash-ref sanitized-obs 'ally-units '())))
   (cond
-    [(not (obs-has-unit-type? sanitized-obs 'ally-by-type ally-units BURROWABLE-ZERG-SYMS))
+    [(not (obs-has-unit-type? sanitized-obs 'ally-by-type ally-units REACTIVE-BURROW-DODGE-SYMS))
      '()]
     [else
      (define tr : burrow-dodge-tracker (or opt-tr DEFAULT-BURROW-DODGE-TRACKER))
@@ -2551,7 +2554,7 @@
                               (->float SC2-DEFAULT-HOME-BASE-Y)))
      (sync-burrow-dodge-tracker! tr frame)
      (define ally-recs
-       (fast-extract-burrow-allies ally-units BURROWABLE-ZERG-SYMS BURROWED-UNIT-TYPE-SYMS base-x base-y))
+       (fast-extract-burrow-allies ally-units REACTIVE-BURROW-DODGE-SYMS BURROWED-UNIT-TYPE-SYMS base-x base-y))
      (cond
        [(null? ally-recs) '()]
        [else
@@ -2631,8 +2634,10 @@
             [(not burrowed?)
              (define ab-id (zerg-unit-type->burrow-ability-id utype))
              (when (and ab-id
+                        (memq utype REACTIVE-BURROW-DODGE-SYMS)
                         (zerg-unit-burrow-allowed? utype has-burrow?)
-                        (>= (- frame last-unburrow) 24)
+                        (>= (- frame last-unburrow) 112)
+                        (or has-tunneling? (<= hp-pct 0.40))
                         (<= hp-pct 0.75)
                         (or took-damage?
                             (and (<= hp-pct 0.65)
@@ -2642,13 +2647,18 @@
                (emit! (list 'burrow-down raw-uid 'reactive-attack-dodge ab-id)))]
             [else
              (define dwell (- frame last-burrow))
-             (define roach? (memq utype '(roach roach-burrowed)))
              (define should-pop-up? : Boolean
                (cond
-                 [(melee-within? ux uy 2.0) #t]
-                 [(and roach? has-tunneling?) (>= hp-pct 0.80)]
-                 [(>= dwell 24) #t]
-                 [(>= dwell 18) (not (ranged-within? ux uy 8.5))]
+                 [(det-within? u ux uy 11.0) #t]
+                 [(>= hp-pct 0.80) #t]
+                 [(and (>= dwell 48)
+                       (>= hp-pct 0.65)
+                       (not (ranged-within? ux uy 10.5))
+                       (not (melee-within? ux uy 5.0)))
+                  #t]
+                 [(and (>= dwell 336)
+                       (not (ranged-within? ux uy 10.5)))
+                  #t]
                  [else #f]))
              (when should-pop-up?
                (set! new-last-unburrow frame)
@@ -2669,11 +2679,13 @@
 ;; `11.8-13.0` tile ring outside stationary detection. Once the defending army
 ;; moves out (`> 13.5` tiles from base or `local-enemy-power <= 0.65 * raider-power`),
 ;; unburrow `(burrow-up uid 'base-trap-pounce)` and attack `(attack-pos uid bx by)`.
+;; L50-W1 (`#1192`/`#1201`): Strictly exclude `hydralisk`/`ravager` from `RING-AMBUSH-RAIDER-SYMS`
+;; so ranged core DPS units never self-stun underground near stationary detectors (`0` Hydra/Ravager Burrow).
 (: RING-AMBUSH-RAIDER-SYMS (Listof Symbol))
 (define RING-AMBUSH-RAIDER-SYMS
-  '(zergling roach hydralisk baneling ravager lurker lurker-mp infestor
-    zergling-burrowed roach-burrowed hydralisk-burrowed baneling-burrowed
-    ravager-burrowed lurker-burrowed lurker-mp-burrowed infestor-burrowed))
+  '(zergling roach baneling lurker lurker-mp infestor
+    zergling-burrowed roach-burrowed baneling-burrowed
+    lurker-burrowed lurker-mp-burrowed infestor-burrowed))
 
 (: execute-stationary-detection-ring-ambush-micro (-> Any (Listof (Listof Any))))
 (define (execute-stationary-detection-ring-ambush-micro obs)

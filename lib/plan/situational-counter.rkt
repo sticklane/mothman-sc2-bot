@@ -308,8 +308,8 @@
 (define NYDUS-WORM-UNLOAD-ALL-ABILITY-ID      : Positive-Integer 2371) ;; UNLOADALL_NYDUSWORM
 (define CANCEL-BUILD-IN-PROGRESS-ID           : Positive-Integer 314)  ;; CANCEL_BUILDINPROGRESS
 (define CANCEL-ADEPT-PHASE-SHIFT-ID           : Positive-Integer 2594) ;; CANCEL_ADEPTPHASESHIFT (2546 is PurificationNovaMorph)
-(define LOCUST-SWOOP-ABILITY-ID               : Positive-Integer 2706) ;; LOCUSTMPFLYINGSWOOPATTACK_LOCUSTMPFLYINGSWOOP
-(define EFFECT-SPAWN-LOCUSTS-LEGACY-ID        : Positive-Integer 2704) ;; EFFECT_SPAWNLOCUSTS legacy alias for 1990
+(define LOCUST-SWOOP-ABILITY-ID               : Positive-Integer 2387) ;; EFFECT_LOCUSTSWOOP (SC2 4.10; legacy alias 2706)
+(define EFFECT-SPAWN-LOCUSTS-LEGACY-ID        : Positive-Integer 2704) ;; EFFECT_SPAWNLOCUSTS (SC2 4.10 canonical; legacy alias 1990)
 (define HOLD-POSITION-ABILITY-ID              : Positive-Integer 18)   ;; HOLDPOSITION_HOLD
 (define SCV-REPAIR-ABILITY-ID                 : Positive-Integer 316)  ;; EFFECT_REPAIR_SCV
 (define SPINE-CRAWLER-UPROOT-ID               : Positive-Integer 1725) ;; SPINECRAWLERUPROOT
@@ -412,9 +412,9 @@
    (ab 'blinding-cloud          2063 'Zerg 'viper               'point 100  0  11.0 '(enemy-siege-or-lurker-contain enemy-cannon-or-bunker-contain late-game-spellcaster-standoff) "Reduce ground weapon & PF/Tank/SCV range to melee")
    (ab 'parasitic-bomb          2542 'Zerg 'viper               'unit  125  0   8.0 '(enemy-turtle-skytoss-or-mech enemy-air-harass-transition late-game-spellcaster-standoff) "AoE air-to-air DoT vs Void Ray/Viking/Muta/Phoenix")
    (ab 'viper-consume           2073 'Zerg 'viper               'unit  0    0   1.0 '(late-game-spellcaster-standoff) "Drain friendly structure HP for +50 Viper energy")
-   (ab 'viper-consume-structure 2069 'Zerg 'viper               'unit  0    0   1.0 '(late-game-spellcaster-standoff) "Alternative structure energy siphon ability ID")
-   (ab 'spawn-locusts           1990 'Zerg 'swarm-host          'point 0   963 25.0 '(our-eco-deficit-comeback-harass enemy-turtle-skytoss-or-mech enemy-fast-3cc-or-nexus-greed) "Canonical SWARMHOSTSPAWNLOCUSTS_LOCUSTMP (legacy alias 2704)")
-   (ab 'locust-swoop            2706 'Zerg 'locust-flying       'point 0    0   4.0 '(our-eco-deficit-comeback-harass base-trade-race) "LOCUSTMPFLYINGSWOOPATTACK swoop on mineral/tech cluster")
+   (ab 'viper-consume-structure 2073 'Zerg 'viper               'unit  0    0   1.0 '(late-game-spellcaster-standoff) "Canonical SC2 4.10 structure energy siphon ability ID")
+   (ab 'spawn-locusts           2704 'Zerg 'swarm-host          'point 0   963 25.0 '(our-eco-deficit-comeback-harass enemy-turtle-skytoss-or-mech enemy-fast-3cc-or-nexus-greed) "Canonical SC2 4.10 EFFECT_SPAWNLOCUSTS (legacy alias 1990)")
+   (ab 'locust-swoop            2387 'Zerg 'locust-flying       'point 0    0   4.0 '(our-eco-deficit-comeback-harass base-trade-race) "Canonical SC2 4.10 EFFECT_LOCUSTSWOOP (legacy alias 2706)")
    (ab 'spawn-changeling        181  'Zerg 'overseer            'none  50   0   0.0 '(enemy-fast-3cc-or-nexus-greed opponent-proxy-all-in-defense) "Scout production, ramp wall, and tech branches")
    (ab 'contaminate             1825 'Zerg 'overseer            'unit  125  0   7.0 '(enemy-fast-3cc-or-nexus-greed opponent-proxy-all-in-defense enemy-turtle-skytoss-or-mech) "Halt production/upgrade structure for 21s")
    (ab 'morph-oversight-mode    3745 'Zerg 'overseer            'none  0    0   0.0 '(enemy-cloaked-or-burrowed-threat enemy-multi-prong-drop-or-runby) "Expand detector/vision radius while stationary")
@@ -467,7 +467,7 @@
    (ab 'morph-viking-fighter    405  'Terran 'viking-assault     'none  0    0   0.0 '(enemy-air-harass-transition enemy-turtle-skytoss-or-mech) "Liftoff Viking vs air")
    (ab 'morph-liberator-ag      2558 'Terran 'liberator          'point 0    0   5.0 '(enemy-siege-or-lurker-contain enemy-cannon-or-bunker-contain our-eco-deficit-comeback-harass) "Defender Mode Freedom Zone")
    (ab 'morph-liberator-aa      2560 'Terran 'liberator-ag       'none  0    0   0.0 '(our-snowball-finish-window base-trade-race) "Reposition Liberator")
-   (ab 'auto-turret             349  'Terran 'raven              'point 50   0   2.0 '(our-eco-deficit-comeback-harass enemy-multi-prong-drop-or-runby) "Drop Raven Auto-Turret in mineral line")
+   (ab 'auto-turret             1764 'Terran 'raven              'point 50   0   2.0 '(our-eco-deficit-comeback-harass enemy-multi-prong-drop-or-runby) "Drop Raven Auto-Turret in mineral line")
    (ab 'interference-matrix     3747 'Terran 'raven              'unit  75   0   9.0 '(enemy-siege-or-lurker-contain enemy-turtle-skytoss-or-mech late-game-spellcaster-standoff) "Disable Mech/Psionic weapons & spells for 11s")
    (ab 'anti-armor-missile      3753 'Terran 'raven              'unit  75   0  10.0 '(enemy-turtle-skytoss-or-mech our-snowball-finish-window late-game-spellcaster-standoff) "-2 armor AoE shred before engage")
    (ab 'cloak-banshee           392  'Terran 'banshee            'none  25   0   0.0 '(our-eco-deficit-comeback-harass enemy-cannon-or-bunker-contain) "Banshee Cloak harass")
@@ -586,8 +586,8 @@
    (upg 'smart-servos              766  289 'Terran 'factory-techlab  100 100 2 #f '(enemy-air-harass-transition enemy-multi-prong-drop-or-runby enemy-cannon-or-bunker-contain) '(mutalisk zergling zealot void-ray tempest))
    (upg 'cyclone-lock-on-damage    769  144 'Terran 'factory-techlab  100 100 2 #f '(enemy-cannon-or-bunker-contain enemy-air-harass-transition enemy-turtle-skytoss-or-mech) '(void-ray oracle roach stalker ravager warp-prism tempest))
    (upg 'banshee-cloak             790  20  'Terran 'starport-techlab 100 100 1 #f '(our-eco-deficit-comeback-harass enemy-fast-3cc-or-nexus-greed) '(roach siege-tank immortal zealot))
-   (upg 'hyperflight-rotors        799  138 'Terran 'starport-techlab 100 100 2 #f '(our-eco-deficit-comeback-harass enemy-multi-prong-drop-or-runby) '(stalker hydralisk phoenix mutalisk))
-   (upg 'advanced-ballistics       805  140 'Terran 'fusion-core      150 150 3 #f '(enemy-siege-or-lurker-contain enemy-turtle-skytoss-or-mech) '(lurker immortal stalker hydralisk queen))
+   (upg 'hyperflight-rotors        799  136 'Terran 'starport-techlab 100 100 2 #f '(our-eco-deficit-comeback-harass enemy-multi-prong-drop-or-runby) '(stalker hydralisk phoenix mutalisk))
+   (upg 'advanced-ballistics       1533 140 'Terran 'fusion-core      150 150 3 #f '(enemy-siege-or-lurker-contain enemy-turtle-skytoss-or-mech) '(lurker immortal stalker hydralisk queen))
    (upg 'personal-cloaking         820  25  'Terran 'ghost-academy    150 150 2 #f '(late-game-spellcaster-standoff enemy-turtle-skytoss-or-mech) '(high-templar infestor viper ultralisk))
    (upg 'weapon-refit              1532 76  'Terran 'fusion-core      150 150 3 #f '(enemy-turtle-skytoss-or-mech base-trade-race) '(carrier tempest corruptor thor battlecruiser))
    (upg 'terran-infantry-weapons-1 652  7   'Terran 'engineering-bay  100 100 1 #f '(opponent-unwalled-punish our-snowball-finish-window) '(zergling roach zealot stalker))
@@ -616,7 +616,7 @@
    (upg 'extended-thermal-lance   1097 50  'Protoss 'robotics-bay      150 150 2 #f '(enemy-siege-or-lurker-contain our-snowball-finish-window) '(marine hydralisk zergling lurker))
    (upg 'gravitic-booster         1093 48  'Protoss 'robotics-bay      100 100 2 #f '(enemy-cloaked-or-burrowed-threat enemy-multi-prong-drop-or-runby) '(banshee ghost dark-templar widow-mine lurker))
    (upg 'gravitic-drive           1094 49  'Protoss 'robotics-bay      100 100 2 #f '(our-eco-deficit-comeback-harass our-army-trapped-or-out-of-position enemy-cannon-or-bunker-contain) '(siege-tank immortal stalker))
-   (upg 'anion-pulse-crystals     44   112 'Protoss 'fleet-beacon      150 150 2 #f '(enemy-air-harass-transition enemy-turtle-skytoss-or-mech) '(mutalisk corruptor medivac liberator void-ray))
+   (upg 'anion-pulse-crystals     46   99  'Protoss 'fleet-beacon      150 150 2 #f '(enemy-air-harass-transition enemy-turtle-skytoss-or-mech) '(mutalisk corruptor medivac liberator void-ray))
    (upg 'flux-vanes               48   288 'Protoss 'fleet-beacon      150 150 3 #f '(enemy-turtle-skytoss-or-mech base-trade-race) '(corruptor viking stalker))
    (upg 'protoss-ground-weapons-1 1062 39  'Protoss 'forge             100 100 1 #f '(opponent-unwalled-punish our-snowball-finish-window) '(zergling roach marine zealot))
    (upg 'protoss-ground-weapons-2 1063 40  'Protoss 'forge             150 150 2 'protoss-ground-weapons-1 '(our-snowball-finish-window enemy-siege-or-lurker-contain) '(roach marauder stalker ravager))

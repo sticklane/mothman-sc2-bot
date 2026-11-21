@@ -12227,13 +12227,13 @@
             (translate-bot-actions->sc2-raw-commands
              (list '(morph baneling) (list 'attack-pos '(101) 80.0 80.0))
              morph-wire-obs)))
-  (assert-true! (and (ormap (lambda (c) (and (= (sc2-raw-unit-command-ability-id c) 80)
+  (assert-true! (and (ormap (lambda (c) (and (= (sc2-raw-unit-command-ability-id c) 4121)
                                              (member 101 (sc2-raw-unit-command-unit-tags c))))
                             morph-cmds)
                      (not (ormap (lambda (c) (and (= (sc2-raw-unit-command-ability-id c) 23)
                                                   (member 101 (sc2-raw-unit-command-unit-tags c))))
                                  morph-cmds)))
-                "[BUG-2] Wire translation must preserve morph-baneling (80) without Phase 6 attack-pos (23) overwrite")
+                "[BUG-2] Wire translation must preserve morph-baneling (4121) without Phase 6 attack-pos (23) overwrite")
 
   (define rt-zmorph (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
   (define zm-acts
@@ -12244,7 +12244,7 @@
             'mineral-harvesters 16 'vespene-harvesters 0
             'enemy-race 'Terran 'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
             'enemy-x 140.0 'enemy-y 140.0
-            'ally-units (list (hash 'id 101 'type 'zergling 'x 36.0 'y 48.5 'hp 35 'order-ability-id 80)
+            'ally-units (list (hash 'id 101 'type 'zergling 'x 36.0 'y 48.5 'hp 35 'order-ability-id 4121)
                               (hash 'id 102 'type 'zergling 'x 36.5 'y 48.5 'hp 35))
             'ally-buildings (list (hash 'id 301 'type 'hatchery 'x 24.5 'y 48.5 'hp 1500 'build-progress 1.0)
                                   (hash 'id 302 'type 'baneling-nest 'x 22.0 'y 46.0 'hp 850 'build-progress 1.0))
@@ -12256,7 +12256,7 @@
                                    (memq (car a) '(attack-pos attack-unit))
                                    (s48-cmd-targets-uid? a 101)))
                             zm-acts))
-                "[BUG-2] step-live-bot-runtime! must not overwrite active morph-baneling (80) Zergling with attack-pos/attack-unit")
+                "[BUG-2] step-live-bot-runtime! must not overwrite active morph-baneling (4121) Zergling with attack-pos/attack-unit")
 
   ;; [BUG-3 / NOTE-R4-C] TownHall-stack 12-Probe rush emits ATTACK 23 instead of HARVEST_GATHER 3666
   (define r4c-allies

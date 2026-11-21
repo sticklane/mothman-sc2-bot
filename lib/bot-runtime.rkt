@@ -28,12 +28,14 @@
          "mirror-mind-predictor.rkt"
          "opponent-world-model.rkt"
          "priority-macro-brain.rkt"
+         "stall-watchdog.rkt"
          (only-in "tactics/unit-mode-micro.rkt"
                   mode-unit-input
                   MARAUDER-ACQUIRE-MAX-RANGE
                   select-widow-mine-cluster-target)
          (only-in "tactics/pro-spellcaster-micro.rkt"
                   spell-claims-cyclone-lock-on-ready-frame
+                  spell-claims-stalker-blink-ready-frame
                   shadow-stride-researched?
                   plan-dt-blink-pf-snipe
                   plan-mutalisk-magic-box
@@ -185,6 +187,7 @@
 (define-rt-weak-state rt-prev-ally-bldgs    (make-hasheqv))
 (define-rt-weak-state rt-upgrade-spike-state (make-hasheq))
 (define-rt-weak-state rt-l2-addon-fail-state (make-hash))
+(define-rt-weak-state rt-stall-watchdog-state (make-stall-watchdog-state))
 
 (define (pooled-hasheq! scratch key)
   (let ([ht (hash-ref scratch key #f)])
@@ -267,6 +270,7 @@
   (let ([s (rt-prev-ally-bldgs rt)]) (when (hash? s) (hash-clear! s)))
   (let ([s (rt-upgrade-spike-state rt)]) (when (hash? s) (hash-clear! s)))
   (let ([s (rt-l2-addon-fail-state rt)]) (when (hash? s) (hash-clear! s)))
+  (reset-stall-watchdog-state! (rt-stall-watchdog-state rt))
   (let ([st (rt-splash-state rt)])
     (when (hash? st)
       (for ([k (in-list (hash-keys st))])
@@ -443,7 +447,8 @@
       'idle
       (let ([v (hash-ref ORDER-PROT-CACHE ab-id #f)])
         (or v
-            (let ([c (sc2-order-protection-class ab-id)])
+            (let ([c (or (sc2-order-protection-class ab-id)
+                         (and (or (= ab-id 1764) (= ab-id 349)) 'cast-walk))])
               (hash-set! ORDER-PROT-CACHE ab-id c)
               c)))))
 
@@ -3040,6 +3045,7 @@
    zerg-holding-for-aa-spire?
    zerg-larva-mineral-surplus-ok?
    zerg-real-anti-air-threat?
+   zerg-heavy-cap-air-threat?
    zerg-saving-for-expand?
    zerg-spire-res-gas
    zerg-spire-res-min
@@ -4662,8 +4668,16 @@
        (or (and genuine-air-or-cloak-threat?
                 (not terran-hold-sd-for-nat-cc?)
                 (try-sd! 'missile-turret ebay-ready? aa-desire-cap))
+           ;; L49-W1: Trim unpressured Terran early Bunker spam — only auto-build Bunkers when
+           ;; under genuine rush/cheese/base-attack OR enemy threat outnumbers our army!
            (and boost-sd?
                 (not terran-hold-sd-for-nat-cc?)
+                (or (not live-game?)
+                    (l2-ctx-early-survival-crisis? ctx)
+                    (l2-ctx-under-early-cheese? ctx)
+                    (l2-ctx-under-base-attack? ctx)
+                    (> (l2-ctx-live-enemy-threat-supply ctx)
+                       (* 1.15 (l2-ctx-live-army-supply ctx))))
                 (try-sd! 'bunker rax-ready? ground-desire-cap)))]))
   ;; When base-loss-recovery fires and no expand is pending, reclaim uncamped expansion pad cleanly.
   (when (and boost-exp?
@@ -5480,6 +5494,7 @@
     (case csym
       [(gateway warp-gate) 'gateway]
       [(hatchery lair hive nexus command-center orbital-command planetary-fortress) 'townhall]
+      [(spire greater-spire) 'spire]
       [else csym]))
 
 (define (l2-barracks-addon-kind ctx b)
@@ -5560,7 +5575,8 @@
            [(lurker-range seismic-spines adaptive-talons) 'lurker-den]
            [(neural-parasite pathogen-glands) 'infestation-pit]
            [(chitinous-plating anabolic-synthesis) 'ultralisk-cavern]
-           [(zerg-flyer-weapons-1 zerg-flyer-armor-1) 'spire]
+           [(zerg-flyer-weapons-1 zerg-flyer-weapons-2 zerg-flyer-weapons-3
+             zerg-flyer-armor-1 zerg-flyer-armor-2 zerg-flyer-armor-3) 'spire]
            [else #f])]))
     (and raw-slot (l2-normalize-facility-slot-sym ctx raw-slot)))
 
@@ -5575,7 +5591,7 @@
   (define rt (l2-ctx-rt ctx))
     (define r-slot (l2-upgrade-researcher-slot ctx upg-sym))
     (define essential-combat-upg?
-      (memq upg-sym '(stimpack metabolic-boost warp-gate)))
+      (memq upg-sym '(stimpack metabolic-boost warp-gate zerg-flyer-armor-1 zerg-flyer-armor-2)))
     (define w-res-min (l2-brain-worker-reserve-min ctx upg-sym))
     (when (and (or (not crisis-tech-upgrade-deferral?)
                    essential-combat-upg?
@@ -6472,17 +6488,35 @@
   (define protoss-saving-for-expand? (l2-ctx-protoss-saving-for-expand? ctx))
   (define ready-bldg-types (l2-ctx-ready-bldg-types ctx))
   (define under-base-attack? (l2-ctx-under-base-attack? ctx))
+  (define cur-col-cnt (l2-unit-count ctx 'colossus))
+  (define enemy-cap-air?
+    (ormap (lambda (e)
+             (and (hash? e)
+                  (let ([cs (fast-canonical-unit-sym (unit-type-sym e))])
+                    (or (memq cs THOR-CAPITAL-AIR-SYMS)
+                        (eq? cs 'mothership)))))
+           (or (l2-ctx-enemy-units ctx) '())))
+  ;; L50-W2 (`#04 PvT` Robo-Busy Colossus #1 Guard): When `colossus == 0` with both
+  ;; `robotics-bay` & `robotics-facility` ready (and no enemy Capital Air), hold Colossus #1
+  ;; gas/mineral escrow even while Robo #1 is busy training an Observer/WarpPrism
+  ;; (`open-prod-slots 'robotics-facility == 0`) AND even during `under-base-attack?`!
+  (define colossus1-robo-busy-guard?
+    (and (= cur-col-cnt 0)
+         (> colossus-goal-cap 0)
+         (not enemy-cap-air?)
+         (memq 'robotics-bay ready-bldg-types)
+         (memq 'robotics-facility ready-bldg-types)))
        (and live-game?
             (not protoss-saving-for-expand?)
             (not early-survival-crisis?)
-            (not under-base-attack?)
-            (not escrow-suppressed-active?)
-            (< cur-escrow-age-frames max-escrow-timeout-frames)
+            (or colossus1-robo-busy-guard? (not under-base-attack?))
+            (or colossus1-robo-busy-guard? (not escrow-suppressed-active?))
+            (or colossus1-robo-busy-guard? (< cur-escrow-age-frames max-escrow-timeout-frames))
             (memq 'robotics-bay ready-bldg-types)
             (memq 'robotics-facility ready-bldg-types)
-            (> (hash-ref open-prod-slots 'robotics-facility 0) 0)
-            (< (l2-unit-count ctx 'colossus) colossus-goal-cap)
-            (l2-can-spend-supply? ctx (sc2-supply-cost 'colossus))))
+            (or colossus1-robo-busy-guard? (> (hash-ref open-prod-slots 'robotics-facility 0) 0))
+            (< cur-col-cnt colossus-goal-cap)
+            (or colossus1-robo-busy-guard? (l2-can-spend-supply? ctx (sc2-supply-cost 'colossus)))))
 
 (define (l2-protoss-holding-etl-now? ctx)
   (define cur-escrow-age-frames (l2-ctx-cur-escrow-age-frames ctx))
@@ -7399,14 +7433,33 @@
           (let ([nh (make-hasheqv)])
             (hash-set! rush-def-st 'resume-scv-until-ht nh)
             nh))))
+  ;; L48-W2 + L49-W1 (Watchdog Law 4 — Halted Terran Construction Recovery):
+  ;; Track incomplete Terran structures via `wd-update-halted-buildings!`; any structure whose
+  ;; `build-progress < 1.0` stays unchanged for `>= 24f` (or reports `halted`/`has-builder #f`)
+  ;; immediately gets P0 SCV resume (`24f` rush/watchdog cooldown) & builder pull exclusion!
+  (define wd-st (rt-stall-watchdog-state rt))
+  (define incomplete-terran-bldgs
+    (if (eq? race 'Terran)
+        (for/list ([b (in-list ally-bldgs)]
+                   #:when (and (hash? b)
+                               (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
+          b)
+        '()))
+  (define wd-halted-tags
+    (if (eq? race 'Terran)
+        (wd-update-halted-buildings! wd-st incomplete-terran-bldgs frame)
+        '()))
+  (define wd-halted-set (list->seteqv wd-halted-tags))
   (define halted-terran-bldgs
     (if (eq? race 'Terran)
         (sort
          (for/list ([b (in-list ally-bldgs)]
                     #:when (and (hash? b)
-                                (let ([prog (hash-ref b 'build-progress 1.0)])
+                                (let ([prog (hash-ref b 'build-progress 1.0)]
+                                      [bid (hash-ref b 'id -1)])
                                   (or (hash-ref b 'halted #f)
-                                      (and (< prog 1.0) (not (hash-ref b 'has-builder #t)))))))
+                                      (and (< prog 1.0) (not (hash-ref b 'has-builder #t)))
+                                      (and (< prog 1.0) (set-member? wd-halted-set bid))))))
            b)
          <
          #:key (lambda (b)
@@ -7418,12 +7471,12 @@
     (hash-clear! resume-scv-until-ht))
   (when (and (eq? race 'Terran) (pair? halted-terran-bldgs))
     (define resume-rush-mode? (or worker-rush-active? early-survival-crisis?))
-    (define resume-cd
-      (if resume-rush-mode?
-          SC2-RESUME-BLDG-RUSH-COOLDOWN-FRAMES
-          SC2-RESUME-BLDG-COOLDOWN-FRAMES))
     (for ([b (in-list halted-terran-bldgs)])
       (define bid (hash-ref b 'id 902))
+      (define resume-cd
+        (if (or resume-rush-mode? (set-member? wd-halted-set bid))
+            SC2-RESUME-BLDG-RUSH-COOLDOWN-FRAMES
+            SC2-RESUME-BLDG-COOLDOWN-FRAMES))
       (define bx (exact->inexact (hash-ref b 'x base-x)))
       (define by (exact->inexact (hash-ref b 'y base-y)))
       (define raw-scvs
@@ -7680,30 +7733,104 @@
     (define heavy-worker-allin-no-army?
       (and (>= (length enemy-rush-workers) 8)
            (null? ally-combat-units)))
-    ;; L48-W3c (`r15` Terran 15/15 recovery): Keep Wave 2's winning `7.0t` pull / `8.5t` leash
-    ;; radii (no `6.5t` pocket truncation!) so defending SCVs/Probes/Drones screen cleanly!
-    (define rush-th-pull-rad (if heavy-worker-allin-no-army? 7.0 9.0))
-    (define rush-bldg-th-rad (if heavy-worker-allin-no-army? 6.8 9.5))
-    (define rush-chase-leash-rad (if heavy-worker-allin-no-army? 8.5 10.5))
+    ;; L50-W1 (`#08 TvP vs Chance` / `r15` Owned-Structure Defense): Never filter out or leash
+    ;; workers away from enemy rushers within `<= 5.5t` of ANY owned early structure in main!
+    (define protected-rush-bldgs
+      (filter (lambda (b)
+                (and (hash? b)
+                     (memq (fast-canonical-structure-sym (unit-type-sym b))
+                           '(barracks gateway supply-depot pylon spawning-pool))
+                     (real? (hash-ref b 'x #f))
+                     (real? (hash-ref b 'y #f))
+                     (<= (dist-to-owned-townhall (hash-ref b 'x base-x)
+                                                 (hash-ref b 'y base-y))
+                         22.0)))
+              ally-bldgs))
+    (define (near-protected-rush-bldg? px py [rad 5.5])
+      (ormap (lambda (b)
+               (<= (dist2d px py
+                           (exact->inexact (hash-ref b 'x base-x))
+                           (exact->inexact (hash-ref b 'y base-y)))
+                   rad))
+             protected-rush-bldgs))
+    (define protected-bldg-under-attack?
+      (ormap (lambda (b)
+               (define bx (exact->inexact (hash-ref b 'x base-x)))
+               (define by (exact->inexact (hash-ref b 'y base-y)))
+               (define outer-or-damaged?
+                 (or (> (dist-to-owned-townhall bx by) 6.5)
+                     (let ([mhp (hash-ref b 'max-hp #f)])
+                       (and (real? mhp) (> mhp 0)
+                            (< (+ (exact->inexact (hash-ref b 'hp mhp))
+                                  (exact->inexact (hash-ref b 'shield (hash-ref b 'shields 0.0))))
+                               (* 0.99 (+ (exact->inexact mhp)
+                                          (exact->inexact (hash-ref b 'max-shield 0.0)))))))))
+               (and outer-or-damaged?
+                    (or (ormap (lambda (ew)
+                                 (<= (dist2d (exact->inexact (hash-ref ew 'x 9999.0))
+                                             (exact->inexact (hash-ref ew 'y 9999.0))
+                                             bx by)
+                                     5.5))
+                               enemy-rush-workers)
+                        (ormap (lambda (eb)
+                                 (<= (dist2d (exact->inexact (hash-ref eb 'x 9999.0))
+                                             (exact->inexact (hash-ref eb 'y 9999.0))
+                                             bx by)
+                                     5.5))
+                               (or (l2-ctx-in-base-proxy-structures ctx) '())))))
+             protected-rush-bldgs))
+    ;; L49-W2 + L50-W1 (`r16` Protoss Anti-Kiting Leash; `#08 Chance` / `r15` Structure Guard):
+    ;; Restrict the tight `8.5t` mineral-walk pullback strictly to Protoss while Gateway trains
+    ;; Zealot #1 AND no outer/damaged owned structure is under attack!
+    (define prod-training-first-defender?
+      (and worker-rush-active?
+           has-owned-townhall?
+           has-breakout-prod-bldg?
+           (< (l2-ctx-ally-combat-supply-early ctx) 4.0)
+           (ormap (lambda (b)
+                    (and (hash? b)
+                         (let ([bs (fast-canonical-structure-sym (unit-type-sym b))])
+                           (or (and (memq bs '(gateway barracks))
+                                    (<= (dist-to-owned-townhall (hash-ref b 'x base-x)
+                                                                (hash-ref b 'y base-y))
+                                        16.0)
+                                    (or (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                                        (> (hash-ref b 'order-ability-id 0) 0)
+                                        (and (eq? race 'Protoss) (null? ally-combat-units))
+                                        (and (eq? race 'Terran) (null? ally-combat-units))))
+                               (and (eq? bs 'spawning-pool)
+                                    (<= (dist-to-owned-townhall (hash-ref b 'x base-x)
+                                                                (hash-ref b 'y base-y))
+                                        16.0)
+                                    (null? ally-combat-units))))))
+                  ally-bldgs)))
+    (define tight-protoss-first-def-leash?
+      (and (eq? race 'Protoss)
+           prod-training-first-defender?
+           (not protected-bldg-under-attack?)))
+    (define rush-th-pull-rad (if (or heavy-worker-allin-no-army? tight-protoss-first-def-leash?) 7.0 9.0))
+    (define rush-bldg-th-rad (if (or heavy-worker-allin-no-army? tight-protoss-first-def-leash?) 6.8 9.5))
+    (define rush-chase-leash-rad (if (or heavy-worker-allin-no-army? tight-protoss-first-def-leash?) 8.5 10.5))
     (define primary-engage-enemies
       (if worker-rush-active?
           (filter (lambda (ew)
                     (define ex (hash-ref ew 'x 9999.0))
                     (define ey (hash-ref ew 'y 9999.0))
-                    (and (<= (dist-to-owned-townhall ex ey) rush-chase-leash-rad)
-                         (or (<= (dist-to-owned-townhall ex ey) rush-th-pull-rad)
-                             (<= (dist-to-mineral-line ex ey) 6.5)
-                             (ormap (lambda (b)
-                                      (and (hash? b)
-                                           (<= (dist-to-owned-townhall
-                                                (hash-ref b 'x base-x)
-                                                (hash-ref b 'y base-y))
-                                               rush-bldg-th-rad)
-                                           (<= (dist2d ex ey
-                                                       (hash-ref b 'x base-x)
-                                                       (hash-ref b 'y base-y))
-                                               4.5)))
-                                    ally-bldgs))))
+                    (or (near-protected-rush-bldg? ex ey 5.5)
+                        (and (<= (dist-to-owned-townhall ex ey) rush-chase-leash-rad)
+                             (or (<= (dist-to-owned-townhall ex ey) rush-th-pull-rad)
+                                 (<= (dist-to-mineral-line ex ey) 6.5)
+                                 (ormap (lambda (b)
+                                          (and (hash? b)
+                                               (<= (dist-to-owned-townhall
+                                                    (hash-ref b 'x base-x)
+                                                    (hash-ref b 'y base-y))
+                                                   rush-bldg-th-rad)
+                                               (<= (dist2d ex ey
+                                                           (hash-ref b 'x base-x)
+                                                           (hash-ref b 'y base-y))
+                                                   4.5)))
+                                        ally-bldgs)))))
                   enemy-rush-workers)
           '()))
     (unless (null? primary-engage-enemies)
@@ -7735,10 +7862,10 @@
         [(not (null? primary-engage-enemies)) primary-engage-enemies]
         [in-engage-hysteresis?
          (filter (lambda (ew)
-                   (<= (dist-to-owned-townhall
-                        (hash-ref ew 'x 9999.0)
-                        (hash-ref ew 'y 9999.0))
-                       rush-chase-leash-rad))
+                   (define ex (hash-ref ew 'x 9999.0))
+                   (define ey (hash-ref ew 'y 9999.0))
+                   (or (near-protected-rush-bldg? ex ey 5.5)
+                       (<= (dist-to-owned-townhall ex ey) rush-chase-leash-rad)))
                  enemy-rush-workers)]
         [else '()]))
 
@@ -8060,12 +8187,30 @@
             (l2-emit! ctx (list 'mineral-walk wid evac-patch-id evac-px evac-py))
             (l2-emit! ctx (list 'mineral-walk wid evac-px evac-py)))))
 
+    ;; L49-W2 + L50-W1 (`r16` Protoss `<= 8.5t` Leash Recall; `#08 Chance` / `r15` Safe):
+    ;; Strictly Protoss-only when no outer/damaged owned structure is under attack, and never
+    ;; recalls workers defending within `<= 5.5t` of an owned early structure!
+    (when (and tight-protoss-first-def-leash? pure-worker-rush-now?)
+      (for ([w (in-list non-builder-defense-workers)])
+        (define wid (hash-ref w 'id 0))
+        (define wx (hash-ref w 'x base-x))
+        (define wy (hash-ref w 'y base-y))
+        (when (and (> wid 0)
+                   (not (memv wid (l2-ctx-cur-rush-disengaging-wids ctx)))
+                   (> (dist-to-owned-townhall wx wy) 8.5)
+                   (> (dist-to-mineral-line wx wy) 5.5)
+                   (not (near-protected-rush-bldg? wx wy 5.5)))
+          (set-l2-ctx-cur-rush-disengaging-wids! ctx (cons wid (l2-ctx-cur-rush-disengaging-wids ctx)))
+          (if (> far-patch-id 0)
+              (l2-emit! ctx (list 'mineral-walk wid far-patch-id far-px far-py))
+              (l2-emit! ctx (list 'move wid far-px far-py))))))
+
     (unless (null? worker-rush-engage-enemies)
       (define (dist-to-nearest-engage-enemy wx wy)
         (for/fold ([best +inf.0]) ([ew (in-list worker-rush-engage-enemies)])
           (min best (dist2d wx wy (hash-ref ew 'x ew-cx) (hash-ref ew 'y ew-cy)))))
 
-      ;; Only workers inside `rush-chase-leash-rad` and not disengaging are eligible to fight
+      ;; Only workers inside `rush-chase-leash-rad` (or defending an attacked structure) and not disengaging fight
       (define healthy-rush-workers
         (filter (lambda (w)
                   (define wid (hash-ref w 'id 10))
@@ -8077,7 +8222,9 @@
                     (and (pair? entry) (>= frame (car entry)) (< frame (cdr entry))))
                   (and (not (memv wid (l2-ctx-cur-rush-disengaging-wids ctx)))
                        (or (<= (dist-to-owned-townhall wx wy) rush-chase-leash-rad)
-                           (<= (dist-to-mineral-line wx wy) 2.5))
+                           (<= (dist-to-mineral-line wx wy) 2.5)
+                           (and protected-bldg-under-attack?
+                                (near-protected-rush-bldg? wx wy 5.5)))
                        (cond
                          ;; L48-W2 (`r02`/`r05`/`r06` static 16v15 zero-3666 fix): When static
                          ;; zero-disengage mode is active (`max-total-dis-heavy-rush = 0`), keep
@@ -8194,16 +8341,16 @@
                  (not (l2-building-present-or-pending? ctx 'spawning-pool)))
             200
             150))
-      ;; L48-W2 + L48-W3b (Pinned Breakout Miners — `r14`/`r15`/`r16`, Preserving `12..13`-Worker Screen):
-      ;; Pin `3` (`4` when `h-cnt >= 14`) persistent zero-churn miners in `rush-def-st` (refreshed ONLY
-      ;; on death or `< 15` EHP, NEVER pulling any `carrying-minerals?` worker off return-cargo!) so
-      ;; `12..13` active defenders hold the screen (`r15` `15/15` wipeout!) while `3..4` pinned miners
-      ;; continuously feed `Zealot #1..#3`, `Marine #1..#3`, and `6` Zerglings!
+      ;; L48-W2 + L48-W3b + L49-W1 (Pinned Breakout Miners — Preserving Screen & Zealot #2 Timing):
+      ;; Pin `3..4` persistent zero-churn miners in `rush-def-st` (refreshed ONLY on death or
+      ;; `< 15` EHP, NEVER pulling any `carrying-minerals?` worker off return-cargo!). Keep Protoss
+      ;; / combat-assisted pinned miners active down to `h-cnt >= 4` (`4/3/2`) so wounded-Probe
+      ;; mineral-walk slides (`kiting-breakout-max-dis = 5`) never unpin harvesters before Zealot #2!
       (define need-pinned-breakout-miners?
         (and has-owned-townhall?
              has-breakout-prod-bldg?
              (< (l2-ctx-ally-combat-supply-early ctx) 6.0)
-             (>= h-cnt 8)
+             (>= h-cnt (if (eq? race 'Protoss) 4 8))
              (or enemy-kiting-rush-detected?
                  (and (eq? race 'Protoss) (< minerals 100))
                  (and (eq? race 'Zerg)
@@ -8221,7 +8368,10 @@
       (define min-breakout-miners
         (cond
           [need-pinned-breakout-miners?
-           (if (>= h-cnt 14) 4 3)]
+           (cond [(>= h-cnt 14) 4]
+                 [(and (eq? race 'Protoss) (>= h-cnt 10)) 4]
+                 [(>= h-cnt 6) 3]
+                 [else 2])]
           [(and has-owned-townhall?
                 (< (l2-ctx-ally-combat-supply-early ctx) 4.0)
                 (>= h-cnt 6)
@@ -8505,8 +8655,18 @@
                           (> (dist2d ex ey (hash-ref ec 'x 9999.0) (hash-ref ec 'y 9999.0)) 2.5))
                         enemy-combat-near-main))))
         (define safe-engage-workers
-          (let ([safe (filter enemy-worker-safe-from-combat? worker-rush-engage-enemies)])
-            (if (null? safe) worker-rush-engage-enemies safe)))
+          (let* ([base-ews
+                  (if (and tight-protoss-first-def-leash? pure-worker-rush-now?)
+                      (filter (lambda (ew)
+                                (define ex (hash-ref ew 'x cl-x))
+                                (define ey (hash-ref ew 'y cl-y))
+                                (or (<= (dist-to-owned-townhall ex ey) 8.5)
+                                    (<= (dist-to-mineral-line ex ey) 6.5)
+                                    (near-protected-rush-bldg? ex ey 5.5)))
+                              worker-rush-engage-enemies)
+                      worker-rush-engage-enemies)]
+                 [safe (filter enemy-worker-safe-from-combat? base-ews)])
+            (if (null? safe) base-ews safe)))
         ;; L48-W2: Exclude `fleeing-away?` enemy workers outside `<= 1.6t` immediate melee range
         ;; so defenders NEVER chase uncatchable `3.94`-speed mineral-walking Probes!
         (define (targetable-ew-for-worker? ew wx wy)
@@ -8518,6 +8678,7 @@
           (and (not (ew-fleeing-away? ew))
                (or (<= (dist-to-owned-townhall ex ey) rush-th-pull-rad)
                    (<= (dist-to-mineral-line ex ey) 6.5)
+                   (near-protected-rush-bldg? ex ey 5.5)
                    (ormap (lambda (b)
                             (and (hash? b)
                                  (<= (dist-to-owned-townhall
@@ -8989,13 +9150,14 @@
                [else
                 (l2-emit! ctx (list 'move cid far-px far-py))])]
             [(and hold-solo-zealot-in-pocket? (eq? csym 'zealot))
+             ;; L49-W1: Guard the ENTIRE mineral-line pocket (`<= 7.5t` of Nexus) so Zealot #1
+             ;; actively defends pinned Probes across the whole line until Chrono'd Zealot #2 pops!
              (define near-pocket-probes
                (filter (lambda (ew)
                          (define ex (exact->inexact (hash-ref ew 'x cl-x)))
                          (define ey (exact->inexact (hash-ref ew 'y cl-y)))
                          (and (> (hash-ref ew 'id 0) 0)
-                              (<= (dist2d cx cy ex ey) 2.5)
-                              (<= (dist-to-owned-townhall ex ey) 6.5)))
+                              (<= (dist-to-owned-townhall ex ey) 7.5)))
                        worker-rush-engage-enemies))
              (cond
                [(pair? near-pocket-probes)
@@ -9114,7 +9276,9 @@
                  (or (memv wid prev-rush-fighting-wids)
                      (and worker-rush-active?
                           (> (dist-to-owned-townhall wx wy) rush-chase-leash-rad)
-                          (> (dist-to-mineral-line wx wy) 2.5))))
+                          (> (dist-to-mineral-line wx wy) 2.5)
+                          (not (and protected-bldg-under-attack?
+                                    (near-protected-rush-bldg? wx wy 5.5))))))
         (if (> far-patch-id 0)
             (l2-emit! ctx (list 'harvest-mineral wid far-patch-id))
             (l2-emit! ctx (list 'mineral-walk wid far-px far-py)))))))
@@ -9187,30 +9351,63 @@
                          (safe-coord (hash-ref safe-mp 'x base-x) base-x)
                          (safe-coord (hash-ref safe-mp 'y base-y) base-y)))
             (l2-emit! ctx (list 'mineral-walk wid base-x base-y)))))
-    ;; Once >= 1 completed powered Photon Cannon exists, stop pulling SCVs onto proxy pylons/cannons
-    ;; (and never pull into 8.5-tile cannon range); switch to Bunker + Tank breakout instead (`#89` [UNCOVERED-T2]).
+    ;; Once >= 1 completed powered Photon Cannon exists, never pull SCVs into `<= 7.8t` cannon range
+    ;; (`#89` [UNCOVERED-T2], `#5129549`), BUT keep pulling against any safe (`> 7.8t` from completed
+    ;; Cannons) proxy Pylon or warping Photon Cannon inside Main (`<= 22t`, `#59` `REG #1`)!
     (define pullable-proxy-structures
       (if (> completed-powered-cannons 0)
-          '()
+          (filter (lambda (eb)
+                    (define canon (fast-canonical-structure-sym (unit-type-sym eb)))
+                    (define prog (hash-ref eb 'build-progress 1.0))
+                    (define ebx (hash-ref eb 'x 9999.0))
+                    (define eby (hash-ref eb 'y 9999.0))
+                    (and (or (eq? canon 'pylon)
+                             (and (eq? canon 'photon-cannon)
+                                  (< prog SC2-BUILD-COMPLETE-PROGRESS)))
+                         (<= (dist2d base-x base-y ebx eby) 22.0)
+                         (andmap (lambda (cc)
+                                   (> (dist2d ebx eby
+                                              (hash-ref cc 'x 9999.0)
+                                              (hash-ref cc 'y 9999.0))
+                                      7.8))
+                                 in-base-proxy-completed-cannons)))
+                  in-base-proxy-structures)
           in-base-proxy-structures))
-    (when (and (= completed-powered-cannons 0)
-               (not (null? pullable-proxy-structures)))
+    (when (not (null? pullable-proxy-structures))
       (define healthy-proxy-workers
         (filter (lambda (w) (> (unit-total-hp-and-shield w) SC2-FIGHTING-WORKER-DISENGAGE-HP))
                 non-builder-defense-workers))
-      ;; Keep >= 8 workers mining in live games once >= 12 healthy workers exist (4 otherwise)
-      ;; so multi-pylon/cannon rushes (#5132982, #5132989) never collapse mineral income!
+      (define in-main-cannon-rush-now?
+        (or (ormap (lambda (eb)
+                     (and (eq? (fast-canonical-structure-sym (unit-type-sym eb)) 'photon-cannon)
+                          (< (hash-ref eb 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                          (<= (dist2d base-x base-y (hash-ref eb 'x 9999.0) (hash-ref eb 'y 9999.0)) 22.0)))
+                   pullable-proxy-structures)
+            (>= (count (lambda (eb)
+                         (and (memq (fast-canonical-structure-sym (unit-type-sym eb)) '(pylon photon-cannon))
+                              (<= (dist2d base-x base-y (hash-ref eb 'x 9999.0) (hash-ref eb 'y 9999.0)) 22.0)))
+                       pullable-proxy-structures)
+                2)))
+      ;; Keep >= 8 workers mining for lone proxy Pylons, or >= 5 (up to 12 fighters!) when a warping
+      ;; Cannon or multi-Pylon cannon rush is active inside Main (`<= 22t`, `#59` `REG #1`)!
       (define min-mining-floor
-        (if (and live-obs-harvesters? (>= (length healthy-proxy-workers) 12))
-            8
-            4))
+        (cond
+          [(and live-obs-harvesters? in-main-cannon-rush-now? (>= (length healthy-proxy-workers) 10)) 5]
+          [(and live-obs-harvesters? (>= (length healthy-proxy-workers) 12)) 8]
+          [else 4]))
       (define surplus-cnt
-        (min (if live-obs-harvesters? 8 99)
+        (min (if live-obs-harvesters? (if in-main-cannon-rush-now? 12 8) 99)
              (max 0 (- (length healthy-proxy-workers) min-mining-floor))))
       (when (> surplus-cnt 0)
         (define proxy-pylon-cnt
           (count (lambda (eb)
                    (eq? (fast-canonical-structure-sym (unit-type-sym eb)) 'pylon))
+                 pullable-proxy-structures))
+        (define has-in-main-warping-cannon?
+          (ormap (lambda (eb)
+                   (and (eq? (fast-canonical-structure-sym (unit-type-sym eb)) 'photon-cannon)
+                        (< (hash-ref eb 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                        (<= (dist2d base-x base-y (hash-ref eb 'x 9999.0) (hash-ref eb 'y 9999.0)) 22.0)))
                  pullable-proxy-structures))
         (define sorted-proxies
           (sort pullable-proxy-structures
@@ -9218,15 +9415,17 @@
                 #:key (lambda (eb)
                         (define canon (fast-canonical-structure-sym (unit-type-sym eb)))
                         (define prog (hash-ref eb 'build-progress 1.0))
-                        ;; Single Artosis Pylon: snipe the Pylon (0.0); >= 2 Pylons (#5129549):
-                        ;; kill warping Photon Cannons first (0.0) so backup Pylons can't re-power completed Cannons!
+                        ;; L50-W1 (`#59`): Crush in-main warping Photon Cannons FIRST (`6` SCVs) so
+                        ;; Cannon #1 never completes, then snipe powering Pylons!
                         (define prio-rank
                           (cond
-                            [(and (>= proxy-pylon-cnt 2)
-                                  (memq canon '(photon-cannon bunker spine-crawler))
-                                  (< prog SC2-BUILD-COMPLETE-PROGRESS))
+                            [(and (memq canon '(photon-cannon bunker spine-crawler))
+                                  (< prog SC2-BUILD-COMPLETE-PROGRESS)
+                                  (or (>= proxy-pylon-cnt 2)
+                                      (<= (dist2d base-x base-y (hash-ref eb 'x 9999.0) (hash-ref eb 'y 9999.0)) 22.0)))
                              0.0]
-                            [(eq? canon 'pylon) (if (>= proxy-pylon-cnt 2) 100.0 0.0)]
+                            [(eq? canon 'pylon)
+                             (if (or (>= proxy-pylon-cnt 2) has-in-main-warping-cannon?) 50.0 0.0)]
                             [(and (memq canon '(photon-cannon bunker spine-crawler))
                                   (< prog SC2-BUILD-COMPLETE-PROGRESS))
                              100.0]
@@ -9265,6 +9464,9 @@
                  (map (lambda (w) (hash-ref w 'id 10))
                       (take rem-workers (min 2 (length rem-workers)))))
                (set-l2-ctx-worker-pull-emitted-1ab?! ctx #t)
+               (set-l2-ctx-cur-rush-fighting-wids!
+                ctx
+                (append hunter-wids (or (l2-ctx-cur-rush-fighting-wids ctx) '())))
                (l2-emit! ctx (list 'pull-workers-attack
                             hunter-wids
                             (hash-ref proxy-builder 'id 0)
@@ -9272,10 +9474,16 @@
                             (safe-coord (hash-ref proxy-builder 'y p0y) base-y))))]
             [else
              (define eb (car rem-proxies))
-             (define take-n (min 4 (length rem-workers)))
+             (define eb-warping-cannon?
+               (and (eq? (fast-canonical-structure-sym (unit-type-sym eb)) 'photon-cannon)
+                    (< (hash-ref eb 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
+             (define take-n (min (if eb-warping-cannon? 6 4) (length rem-workers)))
              (define assigned (take rem-workers take-n))
              (define assigned-ids (map (lambda (w) (hash-ref w 'id 10)) assigned))
              (set-l2-ctx-worker-pull-emitted-1ab?! ctx #t)
+             (set-l2-ctx-cur-rush-fighting-wids!
+              ctx
+              (append assigned-ids (or (l2-ctx-cur-rush-fighting-wids ctx) '())))
              (l2-emit! ctx (list 'pull-workers-attack
                           assigned-ids
                           (hash-ref eb 'id 0)
@@ -11290,22 +11498,112 @@
                 #:when (let ([cs (fast-canonical-structure-sym (unit-type-sym b))])
                          (or (eq? cs 'extractor) (eq? cs 'assimilator) (eq? cs 'refinery))))
       b))
+  ;; L49-W1 (Watchdog Law 2 — Dynamic Gas Valve & Zero-Income Recovery):
+  (define wd-st-l2 (rt-stall-watchdog-state rt))
+  (define ready-gas-bldgs-wd
+    (filter (lambda (b)
+              (and (hash? b)
+                   (>= (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                   (> (hash-ref b 'vespene-contents 2000) 0)))
+            gas-bldgs))
+  (define wd-vesp-rate
+    (let ([raw (hash-ref obs 'collection-rate-vespene
+                         (hash-ref obs 'vespene-rate
+                                   (hash-ref obs 'vesp-rate #f)))])
+      (cond
+        [(real? raw) raw]
+        [(l2-ctx-has-gas-harvesters? ctx)
+         (* 55 (or (l2-ctx-live-gas-harvesters ctx) 0))]
+        [else
+         (* 55 (for/sum ([gb (in-list ready-gas-bldgs-wd)])
+                 (safe-nonneg-int (hash-ref gb 'assigned-harvesters 3) 3)))])))
+  (define wd-gas-mode
+    (wd-gas-valve-mode (l2-ctx-minerals ctx)
+                       (l2-ctx-gas ctx)
+                       wd-vesp-rate
+                       total-workers
+                       (length ready-gas-bldgs-wd)
+                       supply-used
+                       (/ (exact->inexact frame) 22.4)))
+  (define wd-gas-bldg-tags
+    (for/seteqv ([gb (in-list ready-gas-bldgs-wd)])
+      (hash-ref gb 'id -1)))
   (when (and (not live-obs-harvesters?)
              gas-bldg
              (not (null? harvest-workers-pool))
              (not gas-float-starved?)
+             (not (eq? wd-gas-mode 'pull-to-minerals))
              (> (gas-worker-allocation-desired-gas-workers gas-alloc) 0))
     (l2-emit! ctx (list 'harvest-gas (hash-ref (car harvest-workers-pool) 'id 10) (hash-ref gas-bldg 'id 103))))
   (when (not (null? harvest-workers-pool))
     (define patch-id (hash-ref obs 'mineral-patch-id SC2-SYNTHETIC-MINERAL-PATCH-ID))
-    (when (and (not live-obs-harvesters?) gas-float-starved?)
-      (define pull-workers
-        (take harvest-workers-pool
-              (min (if (>= (l2-ctx-gas ctx) SC2-GAS-FLOAT-CRITICAL-THRESH) 4 2)
-                   (length harvest-workers-pool))))
-      (l2-emit! ctx (list 'rebalance-gas-to-minerals
-                   (for/list ([w (in-list pull-workers)]) (hash-ref w 'id 10))
-                   patch-id)))
+    (define wd-live-min-patch
+      (findf (lambda (mp)
+               (and (hash? mp)
+                    (> (hash-ref mp 'id 0) 0)
+                    (> (hash-ref mp 'mineral-contents 1000) 0)))
+             (if (pair? step-mineral-patches) step-mineral-patches '())))
+    (define wd-live-min-patch-id
+      (if wd-live-min-patch (hash-ref wd-live-min-patch 'id patch-id) patch-id))
+    (define wd-gas-targeted-ws
+      (if (and (eq? wd-gas-mode 'pull-to-minerals) (pair? ready-gas-bldgs-wd))
+          (filter (lambda (w)
+                    (and (not (worker-carrying-minerals-or-gas? w))
+                         (set-member? wd-gas-bldg-tags (hash-ref w 'order-target-id -1))))
+                  harvest-workers-pool)
+          '()))
+    (cond
+      [(and (not live-obs-harvesters?) gas-float-starved?)
+       (define pull-workers
+         (take harvest-workers-pool
+               (min (if (>= (l2-ctx-gas ctx) SC2-GAS-FLOAT-CRITICAL-THRESH) 4 2)
+                    (length harvest-workers-pool))))
+       (l2-emit! ctx (list 'rebalance-gas-to-minerals
+                     (for/list ([w (in-list pull-workers)]) (hash-ref w 'id 10))
+                     patch-id))]
+      [(and (eq? wd-gas-mode 'pull-to-minerals)
+            (pair? ready-gas-bldgs-wd)
+            (not worker-rush-active?)
+            (or (not live-obs-harvesters?)
+                (and (pair? wd-gas-targeted-ws) wd-live-min-patch))
+            (refractory-allow-action?! cd-tracker '(wd-gas-valve-pull) frame 48))
+       (define pull-cands
+         (if (pair? wd-gas-targeted-ws) wd-gas-targeted-ws harvest-workers-pool))
+       (define pull-ws
+         (take pull-cands (min (if (>= (l2-ctx-gas ctx) 650) 4 2) (length pull-cands))))
+       (when (pair? pull-ws)
+         (l2-emit! ctx (list 'rebalance-gas-to-minerals
+                             (for/list ([w (in-list pull-ws)]) (hash-ref w 'id 10))
+                             wd-live-min-patch-id)))]
+      [(and (eq? wd-gas-mode 'force-saturate-gas)
+            (pair? ready-gas-bldgs-wd)
+            (not worker-rush-active?)
+            (refractory-allow-action?! cd-tracker '(wd-gas-valve-fill) frame 48))
+       (define empty-gb
+         (findf (lambda (gb) (< (safe-nonneg-int (hash-ref gb 'assigned-harvesters 0) 0) 3))
+                ready-gas-bldgs-wd))
+       (when empty-gb
+         (define gb-id (hash-ref empty-gb 'id 103))
+         (define gb-x (exact->inexact (hash-ref empty-gb 'x base-x)))
+         (define gb-y (exact->inexact (hash-ref empty-gb 'y base-y)))
+         (define need-cnt (max 1 (- 3 (safe-nonneg-int (hash-ref empty-gb 'assigned-harvesters 0) 0))))
+         (define non-carry-ws
+           (filter (lambda (w) (not (worker-carrying-minerals-or-gas? w))) harvest-workers-pool))
+         (define sorted-ws
+           (sort (if (pair? non-carry-ws) non-carry-ws harvest-workers-pool)
+                 <
+                 #:key (lambda (w)
+                         (define ords (hash-ref w 'orders SANITIZE-MISSING))
+                         (define idle-bonus (if (or (null? ords) (equal? ords '(idle))) -100.0 0.0))
+                         (+ idle-bonus
+                            (fast-dist2d gb-x gb-y
+                                         (exact->inexact (hash-ref w 'x base-x))
+                                         (exact->inexact (hash-ref w 'y base-y)))))))
+         (define fill-ws (take sorted-ws (min need-cnt (length sorted-ws))))
+         (when (pair? fill-ws)
+           (l2-emit! ctx (list 'harvest-gas
+                               (for/list ([w (in-list fill-ws)]) (hash-ref w 'id 10))
+                               gb-id))))])
     (unless live-obs-harvesters?
       (l2-emit! ctx (list 'harvest-mineral (hash-ref (car harvest-workers-pool) 'id 10) patch-id)))
     ;; Lazy per-frame coordinate extraction so idle workers don't repeat hash-ref x/y lookups.
@@ -11480,7 +11778,69 @@
       (for ([wid (in-list idle-ids)]
             #:unless (and (not live-obs-harvesters?)
                           (equal? wid (hash-ref (car harvest-workers-pool) 'id 10))))
-        (l2-emit! ctx (list 'harvest-mineral wid safe-idle-patch-id)))))
+        (l2-emit! ctx (list 'harvest-mineral wid safe-idle-patch-id))))
+    ;; L49-W1 (Watchdog Law 2 — Zero-Income Recovery): If `workers >= 5` and `min-rate <= 0` for
+    ;; `>= 48f` (not under worker rush), redistribute idle/stalled non-building workers to the
+    ;; nearest live non-depleted mineral patch (eliminating multi-minute zero-income freezes!).
+    (define wd-min-rate
+      (let ([raw (hash-ref obs 'collection-rate-minerals
+                           (hash-ref obs 'min-rate
+                                     (hash-ref obs 'mineral-rate #f)))])
+        (cond
+          [(real? raw) raw]
+          [(and has-th-harvesters? (= (or live-min-harvesters 0) 0)) 0]
+          [(and (>= total-workers 5)
+                (for/or ([w (in-list workers)]) (hash-has-key? w 'orders))
+                (zero? (count (lambda (w)
+                                (and (hash? w)
+                                     (let ([ab (hash-ref w 'order-ability-id 0)])
+                                       (or (memv ab '(295 296 298 299 3666 3667))
+                                           (worker-carrying-minerals-or-gas? w)))))
+                              workers)))
+           0]
+          [else 100])))
+    (define wd-zero-inc-active?
+      (wd-zero-income-recovery?
+       wd-st-l2
+       total-workers
+       wd-min-rate
+       frame
+       (or worker-rush-active? (pair? cur-rush-fight-ids))))
+    (when (and wd-zero-inc-active?
+               (refractory-allow-action?! cd-tracker '(wd-zero-income-recovery) frame 48))
+      (define nondepleted-mps
+        (filter (lambda (mp)
+                  (and (hash? mp)
+                       (> (hash-ref mp 'id 0) 0)
+                       (> (hash-ref mp 'mineral-contents 1000) 0)))
+                (if (pair? step-mineral-patches) step-mineral-patches '())))
+      (define wd-rec-cands
+        (filter (lambda (w)
+                  (define wid (hash-ref w 'id 0))
+                  (and (> wid 0)
+                       (not (memv wid cur-rush-fight-ids))
+                       (not (memv wid cur-rush-dis-ids))
+                       (not (worker-has-engine-build-order? w))
+                       (not (worker-carrying-minerals-or-gas? w))))
+                harvest-workers-pool))
+      (define wd-rec-ws
+        (take wd-rec-cands (min 12 (length wd-rec-cands))))
+      (when (pair? wd-rec-ws)
+        (define wd-rec-ids (map (lambda (w) (hash-ref w 'id 10)) wd-rec-ws))
+        (l2-emit! ctx (list 'return-workers-to-gather wd-rec-ids))
+        (for ([w (in-list wd-rec-ws)])
+          (define wid (hash-ref w 'id 10))
+          (define wx (exact->inexact (hash-ref w 'x base-x)))
+          (define wy (exact->inexact (hash-ref w 'y base-y)))
+          (define best-mp
+            (and (pair? nondepleted-mps)
+                 (argmin (lambda (mp)
+                           (fast-dist2d wx wy
+                                        (exact->inexact (hash-ref mp 'x base-x))
+                                        (exact->inexact (hash-ref mp 'y base-y))))
+                         nondepleted-mps)))
+          (define best-pid (if best-mp (hash-ref best-mp 'id patch-id) patch-id))
+          (l2-emit! ctx (list 'harvest-mineral wid best-pid))))))
   (when rush-retreating-scout-id
     (l2-emit! ctx (list 'mineral-walk rush-retreating-scout-id base-x base-y)))
   (when (and force-synth-harass?
@@ -15303,6 +15663,7 @@
              [else #f]))
          (values real-aa? banshee-threat? heavy-cap-threat?)))
   (set-l2-ctx-zerg-real-anti-air-threat?! ctx zerg-real-anti-air-threat?)
+  (set-l2-ctx-zerg-heavy-cap-air-threat?! ctx zerg-heavy-cap-air-threat?)
   (define brain-wants-spire-now?
     (or (eq? prio-saving-for-sym 'spire)
         (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
@@ -15347,13 +15708,20 @@
     (or (eq? prio-saving-for-sym 'corruptor)
         (and (macro-brain-decision? (l2-ctx-macro-decision ctx))
              (not (not (memq 'corruptor (macro-brain-decision-scheduled-ids (l2-ctx-macro-decision ctx))))))))
+  (define zerg-corr-hold-cap
+    (cond
+      [zerg-heavy-cap-air-threat? 12]
+      [(or (memq 'greater-spire ready-bldg-types)
+           (l2-building-present-or-pending? ctx 'greater-spire))
+       6]
+      [else 4]))
   (define zerg-holding-for-aa-corruptor?
        (and live-game?
             (or (memq 'spire ready-bldg-types) (memq 'greater-spire ready-bldg-types))
             (or (and brain-wants-corruptor-now?
-                     (< (l2-unit-count ctx 'corruptor) 16))
+                     (< (l2-unit-count ctx 'corruptor) (if zerg-heavy-cap-air-threat? 16 zerg-corr-hold-cap)))
                 (and zerg-real-anti-air-threat?
-                     (< (l2-unit-count ctx 'corruptor) 12)))
+                     (< (l2-unit-count ctx 'corruptor) zerg-corr-hold-cap)))
             (>= (l2-ctx-gas ctx) 50)))
   (set-l2-ctx-zerg-holding-for-aa-corruptor?! ctx zerg-holding-for-aa-corruptor?)
   (when (and (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
@@ -15854,13 +16222,42 @@
                           '(banshee dark-templar ghost lurker mutalisk void-ray carrier oracle widow-mine))))
               enemy-units))
   (set-l2-ctx-enemy-cloaked-or-air?! ctx enemy-cloaked-or-air?)
-  ;; L32-P0-3 (`#40`) + L33-P0-3 (`#73` sole `CloakLoss -> 0`): Auto-morph 1 proactive Overseer
-  ;; immediately upon Lair/Hive completion vs Protoss/Terran when `overseers == 0` (`min >= 50 & gas >= 50`),
-  ;; waiving Spire/Corruptor/worker-reserve locks (except visible Battlecruiser so Suite 34 BC
-  ;; Corruptor stays PASS!) so mobile detection is online before DTs/Banshees!
+  ;; L32-P0-3 (`#40`) + L33-P0-3 (`#73` `CloakLoss -> 0`) + L50-W1 (`#37` Routine Overseer Cap <= 3):
+  ;; Auto-morph 1 proactive Overseer upon Lair/Hive completion vs P/T, and strictly cap routine
+  ;; Overseers at `<= 3` per match (unless enemy cloak/burrow is active) with a 448f replacement
+  ;; cooldown after Overseer #1 so Phoenixes (`#37`) can never farm `13` Overseers (`650M/650G`)!
   (define cur-overseer-total
     (+ (l2-unit-count ctx 'overseer)
        (order-ledger-pending-count-for-type (l2-ctx-oledger ctx) 'overseer frame)))
+  (define zerg-p2-cloak-or-burrow-active?
+    (or (ormap (lambda (eb)
+                 (and (hash? eb)
+                      (memq (fast-canonical-structure-sym (unit-type-sym eb))
+                            '(dark-shrine lurker-den lurker-den-mp))))
+               (or enemy-bldgs '()))
+        (ormap (lambda (e)
+                 (and (hash? e)
+                      (not (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                 '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
+                      (or (eq? (hash-ref e 'cloaked #f) #t)
+                          (memq (hash-ref e 'cloak 0) '(1 2 cloaked cloaked-detected))
+                          (= (hash-ref e 'display-type 1) 3)
+                          (eq? (hash-ref e 'burrowed #f) #t)
+                          (eq? (hash-ref e 'is-burrowed #f) #t)
+                          (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                '(dark-templar banshee ghost lurker lurker-burrowed
+                                  lurker-mp lurker-mp-burrowed widow-mine widow-mine-burrowed)))))
+               enemy-units)))
+  (define zerg-ov-scout-st (and (l2-ctx-rt ctx) (rt-scout-state (l2-ctx-rt ctx))))
+  (define routine-overseers-morphed
+    (if (hash? zerg-ov-scout-st)
+        (hash-ref zerg-ov-scout-st 'routine-overseer-morphs 0)
+        0))
+  (define routine-overseer-cap-ok?
+    (or zerg-p2-cloak-or-burrow-active?
+        (and (< routine-overseers-morphed 3)
+             (or (= routine-overseers-morphed 0)
+                 (>= (- (l2-ctx-supply-cap ctx) supply-used) 2)))))
   (define enemy-bc-present?
     (ormap (lambda (e)
              (and (hash? e)
@@ -15871,27 +16268,40 @@
          (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
          (memq (l2-ctx-effective-enemy-race ctx) '(Protoss Terran))
          (= cur-overseer-total 0)
+         routine-overseer-cap-ok?
          (not enemy-bc-present?)
          (>= (l2-ctx-minerals ctx) 50)
          (>= (l2-ctx-gas ctx) 50)))
   (when (and live-game?
                 (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
+                routine-overseer-cap-ok?
                 (or zerg-proactive-overseer1?
                     (and (not zerg-holding-for-aa-spire?)
                          (not zerg-holding-for-aa-corruptor?))
+                    zerg-p2-cloak-or-burrow-active?
                     enemy-cloaked-or-air?)
                 (< cur-overseer-total
-                   (if (or (>= live-army-supply 40)
-                           enemy-cloaked-or-air?
-                           (enemy-tech-observation-requires-detection? tech-obs))
+                   (if (or zerg-p2-cloak-or-burrow-active?
+                           (enemy-tech-observation-requires-detection? tech-obs)
+                           (and (>= live-army-supply 40)
+                                (not (ormap (lambda (e)
+                                              (and (hash? e)
+                                                   (eq? (fast-canonical-unit-sym (unit-type-sym e)) 'phoenix)))
+                                            enemy-units))))
                        2
-                       1)))
+                       1))
+                (or zerg-p2-cloak-or-burrow-active?
+                    (= routine-overseers-morphed 0)
+                    (refractory-allow-action?! cd-tracker 'zerg-routine-overseer-replace frame 448)))
        (when (and (= (l2-unit-count ctx 'overlord) 0)
                   (>= (l2-ctx-minerals ctx) (sc2-min-cost 'overlord)))
          (l2-try-train-unit! ctx 'overlord 'larva 4))
-       (l2-emit-unit-morph-verified! ctx 'overseer 'overlord 0
-                                     #:waive-worker-reserve? (or zerg-proactive-overseer1?
-                                                                 enemy-cloaked-or-air?)))
+       (when (l2-emit-unit-morph-verified! ctx 'overseer 'overlord 0
+                                           #:waive-worker-reserve? (or zerg-proactive-overseer1?
+                                                                       zerg-p2-cloak-or-burrow-active?
+                                                                       enemy-cloaked-or-air?))
+         (when (and (not zerg-p2-cloak-or-burrow-active?) (hash? zerg-ov-scout-st))
+           (hash-set! zerg-ov-scout-st 'routine-overseer-morphs (add1 routine-overseers-morphed)))))
   (define zerg-holding-lair-min?
        (and live-game?
             (not crisis-tech-upgrade-deferral?)
@@ -16055,19 +16465,31 @@
        (define-values (bn-ax bn-ay)
          (l2-safe-zerg-build-anchor ctx bn-def-x bn-def-y))
        (l2-emit-build-verified! ctx 'baneling-nest bn-ax bn-ay))
+  ;; L50-W2 (`#01 ZvZ` Ravager Gas-Drain Cap): Cap live-game Ravagers at `<= 6` (`<= 4` while
+  ;; `hydralisk-den` is ready, `< 12` Hydralisks, and `< 200G`) and gate the `roach >= 3`
+  ;; priority bypass to `< 4` Ravagers so Ravagers never drain `1,500G` ahead of Hydras/Banes!
+  (define zerg-live-ravager-cap
+    (let ([base-cap
+           (if (and (memq 'hydralisk-den ready-bldg-types)
+                    (< (l2-unit-count ctx 'hydralisk) 12)
+                    (< (l2-ctx-gas ctx) 200))
+               4
+               6)])
+      (min base-cap
+           (if crisis-tech-upgrade-deferral?
+               (max 3 (l2-unit-count ctx 'roach))
+               (max 3 (quotient (max 1 (l2-unit-count ctx 'roach)) 2))))))
   (when (and (or (memq 'roach-warren ready-bldg-types)
                     (and crisis-tech-upgrade-deferral? (> (hash-ref open-prod-slots 'roach 0) 0)))
                 (or crisis-tech-upgrade-deferral? (not zerg-saving-for-expand?))
                 (>= (- (l2-ctx-minerals ctx) zerg-spire-res-min) (sc2-min-cost 'ravager))
                 (>= (- (l2-ctx-gas ctx) zerg-spire-res-gas) (sc2-gas-cost 'ravager))
                 (or (not live-game?)
-                    (< (l2-unit-count ctx 'ravager)
-                       (if crisis-tech-upgrade-deferral?
-                           (max 3 (l2-unit-count ctx 'roach))
-                           (max 3 (quotient (max 1 (l2-unit-count ctx 'roach)) 2)))))
+                    (< (l2-unit-count ctx 'ravager) zerg-live-ravager-cap))
                 (or crisis-tech-upgrade-deferral?
                     (l2-can-spend-by-priority? ctx 'ravager 'combat-unit)
-                    (>= (l2-unit-count ctx 'roach) 3)))
+                    (and (< (l2-unit-count ctx 'ravager) 4)
+                         (>= (l2-unit-count ctx 'roach) 3))))
        (l2-emit-unit-morph-verified! ctx 'ravager 'roach 1))
   (define cur-spine-cnt
        (l2-building-present-or-pending-count ctx 'spine-crawler))
@@ -16202,6 +16624,7 @@
   (define zerg-holding-for-aa-spire? (l2-ctx-zerg-holding-for-aa-spire? ctx))
   (define zerg-larva-mineral-surplus-ok? (l2-ctx-zerg-larva-mineral-surplus-ok? ctx))
   (define zerg-real-anti-air-threat? (l2-ctx-zerg-real-anti-air-threat? ctx))
+  (define zerg-heavy-cap-air-threat? (l2-ctx-zerg-heavy-cap-air-threat? ctx))
   (define zerg-saving-for-expand? (l2-ctx-zerg-saving-for-expand? ctx))
   (define zerg-spire-res-gas (l2-ctx-zerg-spire-res-gas ctx))
   (define zerg-spire-res-min (l2-ctx-zerg-spire-res-min ctx))
@@ -16240,12 +16663,24 @@
                   (and zerg-fog-army-floor-ok?
                        (not under-base-attack?)
                        (not early-survival-crisis?)))))
+       (define zerg-core-upg-started?
+         (or (memq 'zerg-missile-weapons-1 researched-upgs)
+             (memq 'zerg-missile-weapons-1 (l2-ctx-pending-upgs ctx))
+             (memq 'zerg-ground-armor-1 researched-upgs)
+             (memq 'zerg-ground-armor-1 (l2-ctx-pending-upgs ctx))
+             (memq 'grooved-spines researched-upgs)
+             (memq 'grooved-spines (l2-ctx-pending-upgs ctx))
+             (memq 'muscular-augments researched-upgs)
+             (memq 'muscular-augments (l2-ctx-pending-upgs ctx))
+             (memq 'glial-reconstitution researched-upgs)
+             (memq 'glial-reconstitution (l2-ctx-pending-upgs ctx))))
        (when (and zerg-lair-upgs-safe?
                   (l2-upgrade-needed? ctx 'burrow)
                   (or (not live-game?)
                       (l2-plan-wants-now? ctx 'burrow)
-                      (and (>= (l2-unit-count ctx 'roach) 4)
-                           (memq 'hydralisk-den (l2-ctx-bldg-types ctx))))
+                      (and (>= (length hatcheries) 3)
+                           (>= (l2-unit-count ctx 'roach) 8)
+                           zerg-core-upg-started?))
                   (>= (- (l2-ctx-minerals ctx) zerg-spire-res-min) (sc2-min-cost 'burrow))
                   (>= (- (l2-ctx-gas ctx) zerg-spire-res-gas) (sc2-gas-cost 'burrow)))
          (l2-emit-research-verified! ctx 'burrow))
@@ -16329,6 +16764,39 @@
                   (not zerg-holding-for-aa-corruptor?)
                   (not zerg-saving-for-expand?))
          (l2-emit-building-morph-verified! ctx 'hive '(lair) 4))
+       ;; L49-W1b (Zerg Root Cause #3): Research Flyer Carapace +1/+2 vs >= 4 enemy Capital Air
+       ;; (Carrier/Tempest/Battlecruiser/BroodLord/Mothership) BEFORE Greater Spire morph consumes the Spire slot!
+       (when (and live-game?
+                  (or (memq 'spire ready-bldg-types)
+                      (memq 'greater-spire ready-bldg-types)))
+         (define vis-cap-air-p3
+           (count (lambda (e)
+                    (and (hash? e)
+                         (memq (fast-canonical-unit-sym (unit-type-sym e))
+                               '(carrier tempest battlecruiser brood-lord broodlord mothership))))
+                  enemy-units))
+         (define owm-sum-cap-p3
+           (let ([rt3 (l2-ctx-rt ctx)])
+             (and rt3 (opponent-world-model-last-summary (rt-opponent-world-model rt3)))))
+         (define owm-kc-cap-p3
+           (and owm-sum-cap-p3 (opponent-world-summary-known-unit-counts owm-sum-cap-p3)))
+         (define owm-cap-air-p3
+           (if (hash? owm-kc-cap-p3)
+               (+ (hash-ref owm-kc-cap-p3 'carrier 0)
+                  (hash-ref owm-kc-cap-p3 'tempest 0)
+                  (hash-ref owm-kc-cap-p3 'battlecruiser 0)
+                  (hash-ref owm-kc-cap-p3 'brood-lord 0)
+                  (hash-ref owm-kc-cap-p3 'broodlord 0)
+                  (hash-ref owm-kc-cap-p3 'mothership 0))
+               0))
+         (when (>= (max vis-cap-air-p3 owm-cap-air-p3) 4)
+           (cond
+             [(l2-upgrade-needed? ctx 'zerg-flyer-armor-1)
+              (l2-emit-research-verified! ctx 'zerg-flyer-armor-1)]
+             [(and (memq 'zerg-flyer-armor-1 researched-upgs)
+                   (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
+                   (l2-upgrade-needed? ctx 'zerg-flyer-armor-2))
+              (l2-emit-research-verified! ctx 'zerg-flyer-armor-2)])))
        (when (and (memq 'hive ready-bldg-types)
                   (memq 'spire ready-bldg-types)
                   (not zerg-saving-for-expand?)
@@ -16516,13 +16984,26 @@
              (let-values ([(spc-x spc-y) (l2-mineral-line-offset ctx base-x base-y 3.0)])
                (l2-emit! ctx (list 'build 'spore-crawler spc-x spc-y)))))
        (if live-game?
-           (when (and (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
-                      (or (and (not zerg-holding-for-aa-spire?)
-                               (not zerg-holding-for-aa-corruptor?))
-                          enemy-cloaked-or-air?
-                          zerg-cloak-det-urgent?)
-                      (< (l2-unit-count ctx 'overseer) 2))
-             (l2-emit-unit-morph-verified! ctx 'overseer 'overlord 0))
+           (let* ([p3-ov-scout-st (and (l2-ctx-rt ctx) (rt-scout-state (l2-ctx-rt ctx)))]
+                  [p3-routine-ov (if (hash? p3-ov-scout-st)
+                                     (hash-ref p3-ov-scout-st 'routine-overseer-morphs 0)
+                                     0)]
+                  [p3-cur-ov-total
+                   (+ (l2-unit-count ctx 'overseer)
+                      (order-ledger-pending-count-for-type (l2-ctx-oledger ctx) 'overseer frame))])
+             (when (and (or (memq 'lair ready-bldg-types) (memq 'hive ready-bldg-types))
+                        (or zerg-cloak-det-urgent?
+                            (and (< p3-routine-ov 3)
+                                 (or (= p3-routine-ov 0)
+                                     (refractory-allow-action?! cd-tracker 'zerg-routine-overseer-replace frame 448))))
+                        (or (and (not zerg-holding-for-aa-spire?)
+                                 (not zerg-holding-for-aa-corruptor?))
+                            zerg-cloak-det-urgent?
+                            enemy-cloaked-or-air?)
+                        (< p3-cur-ov-total (if zerg-cloak-det-urgent? 2 1)))
+               (when (l2-emit-unit-morph-verified! ctx 'overseer 'overlord 0)
+                 (when (and (not zerg-cloak-det-urgent?) (hash? p3-ov-scout-st))
+                   (hash-set! p3-ov-scout-st 'routine-overseer-morphs (add1 p3-routine-ov))))))
            (when (not (memq 'overseer unit-types))
              (l2-emit! ctx '(morph overseer)))))
   (define-values (overseers active-changelings)
@@ -16623,8 +17104,35 @@
       (and rt3 (opponent-world-model-last-summary (rt-opponent-world-model rt3)))))
   (define zerg-p3-owm-kc (and zerg-p3-owm-sum (opponent-world-summary-known-unit-counts zerg-p3-owm-sum)))
   (define zerg-vis-marine-cnt
-    (count (lambda (e) (and (hash? e) (eq? (fast-canonical-unit-sym (unit-type-sym e)) 'marine))) enemy-units))
-  (define zerg-owm-marine-cnt (if (hash? zerg-p3-owm-kc) (hash-ref zerg-p3-owm-kc 'marine 0) 0))
+    (count (lambda (e)
+             (and (hash? e)
+                  (memq (fast-canonical-unit-sym (unit-type-sym e)) '(marine zealot))))
+           enemy-units))
+  (define zerg-owm-marine-cnt
+    (if (hash? zerg-p3-owm-kc)
+        (+ (hash-ref zerg-p3-owm-kc 'marine 0)
+           (hash-ref zerg-p3-owm-kc 'zealot 0))
+        0))
+  ;; L50-W1 (`#1192`/`#1201`): Gate Baneling morphs on enemy Light ground presence (`>= 4`
+  ;; Marines/Zealots/Zerglings/Hydralisks/Adepts) so Zerg never over-morphs 11-27 Banelings
+  ;; into pure Roaches (`#64`), Immortals+Stalkers (`#10`), or Phoenixes (`#28`)!
+  (define zerg-vis-light-gnd-cnt
+    (count (lambda (e)
+             (and (hash? e)
+                  (memq (fast-canonical-unit-sym (unit-type-sym e))
+                        '(marine zealot zergling hydralisk adept))))
+           enemy-units))
+  (define zerg-owm-light-gnd-cnt
+    (if (hash? zerg-p3-owm-kc)
+        (+ (hash-ref zerg-p3-owm-kc 'marine 0)
+           (hash-ref zerg-p3-owm-kc 'zealot 0)
+           (hash-ref zerg-p3-owm-kc 'zergling 0)
+           (hash-ref zerg-p3-owm-kc 'hydralisk 0)
+           (hash-ref zerg-p3-owm-kc 'adept 0))
+        0))
+  (define zerg-enemy-light-ground-present?
+    (or (>= zerg-vis-light-gnd-cnt 4)
+        (>= zerg-owm-light-gnd-cnt 4)))
   (define brain-sched-baneling-p3?
     (or (eq? (l2-ctx-prio-saving-for-sym ctx) 'baneling)
         (and (member '(morph baneling) prio-scheduled-actions) #t)
@@ -16633,10 +17141,13 @@
   (define zerg-vs-heavy-bio?
     (and live-game?
          (not zerg-holding-for-aa-spire?)
-         (not zerg-holding-for-aa-corruptor?)
+         (not (and zerg-holding-for-aa-corruptor? zerg-heavy-cap-air-threat?))
          (or (>= zerg-vis-marine-cnt 10)
              (>= zerg-owm-marine-cnt 18)
-             brain-sched-baneling-p3?)))
+             (>= zerg-vis-light-gnd-cnt 12)
+             (>= zerg-owm-light-gnd-cnt 18)
+             (and brain-sched-baneling-p3?
+                  zerg-enemy-light-ground-present?))))
   (when (and zerg-vs-heavy-bio?
              (memq 'baneling-nest ready-bldg-types))
     (define desired-banes-urgent
@@ -16644,19 +17155,28 @@
     (let bloop ([k 0])
       (when (and (< k 4)
                  (< (l2-unit-count ctx 'baneling) desired-banes-urgent)
-                 (>= (hash-ref (l2-ctx-open-prod-slots ctx) 'zergling 0) 5))
+                 (>= (hash-ref (l2-ctx-open-prod-slots ctx) 'zergling 0) 2))
         (when (l2-emit-unit-morph-verified! ctx 'baneling 'zergling 0 #:waive-worker-reserve? #t)
           (bloop (add1 k))))))
+  (define zerg-has-combat-tech-ready?
+    (or (memq 'spawning-pool ready-bldg-types)
+        (memq 'roach-warren ready-bldg-types)
+        (memq 'hydralisk-den ready-bldg-types)))
+  ;; L48-W2 + L49-W1b (Zerg Root Cause #4): Also yield Larvae to combat once `frame >= 6720`
+  ;; (5:00), `total-workers >= 38`, and `live-army-supply < 24.0` to prevent 24-Drone waves
+  ;; freezing Zerg army right before m=6-7 enemy timings!
   (define zerg-yield-larva-to-combat?
        (and live-game?
-            (>= total-workers 52)
-            (or (and (< live-army-supply 30.0)
-                     (or (memq 'spawning-pool ready-bldg-types)
-                         (memq 'roach-warren ready-bldg-types)
-                         (memq 'hydralisk-den ready-bldg-types)))
-                (and (>= (l2-ctx-minerals ctx) 500)
-                     (or (memq 'hydralisk-den ready-bldg-types)
-                         (memq 'roach-warren ready-bldg-types))))))
+            (or (and (>= total-workers 38)
+                     (>= frame 6720)
+                     (< live-army-supply 24.0)
+                     zerg-has-combat-tech-ready?)
+                (and (>= total-workers 52)
+                     (or (and (< live-army-supply 30.0)
+                              zerg-has-combat-tech-ready?)
+                         (and (>= (l2-ctx-minerals ctx) 500)
+                              (or (memq 'hydralisk-den ready-bldg-types)
+                                  (memq 'roach-warren ready-bldg-types))))))))
   (define zerg-drone-priority?
        (and (not crisis-freeze-workers?)
             (not zerg-holding-for-aa-spire?)
@@ -16720,15 +17240,26 @@
                                  (< total-workers 16)
                                  (enemy-tech-observation-requires-anti-air? tech-obs)))))
   (set-l2-ctx-brain-scheduled-workers-rem! ctx 0)
-  ;; W11-P0-1-rt (`#28` 592 Lings / 0 Hydras vs 26 Tempests): Whenever real air threat exists
-  ;; (or requires-anti-air?) and Spire/Hydralisk Den is ready, ALWAYS train Corruptors &
-  ;; Hydralisks before Zerglings or expansion escrow can drain minerals/larvae!
+  ;; W11-P0-1-rt + L49-W1b (Zerg Root Cause #3): Gate the 16-Corruptor emergency loop strictly
+  ;; on `zerg-heavy-cap-air-threat?` (Carrier/Tempest/BC/BroodLord/VoidRay/Mutalisk/Colossus);
+  ;; vs non-capital air (Viking/Banshee/Medivac/StarportTechLab), cap Corruptors at <= 4
+  ;; (<= 6 when Greater Spire is ready/pending for Brood Lords) so gas flows to Hive/Viper/BL!
+  (define zerg-emerg-corr-cap
+    (cond
+      [zerg-heavy-cap-air-threat? 16]
+      [(or (memq 'greater-spire ready-bldg-types)
+           (l2-building-present-or-pending? ctx 'greater-spire))
+       6]
+      [else 4]))
   (when (and live-game?
              (or zerg-real-anti-air-threat?
                  (enemy-tech-observation-requires-anti-air? tech-obs)))
     (when (and (or (memq 'spire ready-bldg-types) (memq 'greater-spire ready-bldg-types))
-               (< (l2-unit-count ctx 'corruptor) 16))
-      (l2-try-train-unit! ctx 'corruptor 'larva 4 #:respect-bo-reserve? #f))
+               (< (l2-unit-count ctx 'corruptor) zerg-emerg-corr-cap))
+      (l2-try-train-unit! ctx 'corruptor 'larva 4
+                          #:respect-bo-reserve?
+                          (and (not zerg-heavy-cap-air-threat?)
+                               (>= (l2-unit-count ctx 'corruptor) 2))))
     (when (and (memq 'hydralisk-den ready-bldg-types)
                (not zerg-holding-for-aa-spire?)
                (or (not zerg-holding-for-aa-corruptor?)
@@ -16738,6 +17269,7 @@
   (when (and (not zerg-vs-heavy-bio?)
              (not zerg-saving-for-expand?)
              (memq 'baneling-nest ready-bldg-types)
+             (or (not live-game?) zerg-enemy-light-ground-present?)
              (< (l2-unit-count ctx 'baneling)
                 (max 4 (quotient (max 1 (l2-unit-count ctx 'zergling)) 2)))
              (l2-can-spend-by-priority? ctx 'baneling 'combat-unit))
@@ -16936,22 +17468,28 @@
           (define zerg-anti-air-now?
             (or zerg-real-anti-air-threat?
                 (l2-ctx-zerg-holding-for-aa-corruptor? ctx)))
+          (define zerg-spire-corr-cap
+            (cond
+              [zerg-heavy-cap-air-threat? 16]
+              [(or (memq 'greater-spire ready-bldg-types)
+                   (l2-building-present-or-pending? ctx 'greater-spire))
+               6]
+              [else 4]))
           (define hold-mutalisk-for-corruptor?
             (and live-game?
                  zerg-anti-air-now?
-                 (< (l2-unit-count ctx 'corruptor) 12)
+                 (< (l2-unit-count ctx 'corruptor) (if zerg-heavy-cap-air-threat? 12 zerg-spire-corr-cap))
                  (or (< (l2-ctx-minerals ctx) 250) (< (l2-ctx-gas ctx) 200))))
           (when (and (>= (l2-ctx-minerals ctx) (sc2-min-cost 'corruptor))
-                     (>= (- (l2-ctx-gas ctx) (if zerg-anti-air-now? 0 zerg-ultra-res-gas)) (sc2-gas-cost 'corruptor))
+                     (>= (- (l2-ctx-gas ctx) (if (and zerg-anti-air-now? zerg-heavy-cap-air-threat?) 0 zerg-ultra-res-gas))
+                         (sc2-gas-cost 'corruptor))
                      (or (not live-game?)
-                         (and zerg-anti-air-now? (< (l2-unit-count ctx 'corruptor) 16))
+                         (and zerg-anti-air-now? (< (l2-unit-count ctx 'corruptor) zerg-spire-corr-cap))
                          (and (or (memq 'greater-spire ready-bldg-types)
                                   (l2-building-present-or-pending? ctx 'greater-spire))
-                              (or (not live-game?) (< (l2-unit-count ctx 'corruptor) 6)))
-                         (and zerg-anti-air-now?
-                              (< (l2-unit-count ctx 'corruptor) 16)
-                              (l2-plan-wants-now? ctx 'corruptor))))
-            (l2-try-train-unit! ctx 'corruptor 'larva 4 #:respect-bo-reserve? (not zerg-anti-air-now?)))
+                              (< (l2-unit-count ctx 'corruptor) 6))))
+            (l2-try-train-unit! ctx 'corruptor 'larva 4
+                                #:respect-bo-reserve? (not (and zerg-anti-air-now? zerg-heavy-cap-air-threat?))))
           (when (and (not hold-mutalisk-for-corruptor?)
                      (< (l2-unit-count ctx 'mutalisk) 10)
                      (>= (- (l2-ctx-gas ctx) zerg-ultra-res-gas) (sc2-gas-cost 'mutalisk))
@@ -18619,7 +19157,7 @@
                     (and live-game? (>= (length nexuses) 3) (>= eff-phase-supply 80)))
                 (or (and endgame-corner-hunt? (not (l2-protoss-holding-etl-now? ctx)))
                     protoss-enemy-capital-air?
-                    protoss-aa-needed?
+                    (>= protoss-live-enemy-air-cnt 4)
                     (l2-protoss-colossus-escrow-ok? ctx (sc2-min-cost 'stargate) (sc2-gas-cost 'stargate)))
                 (>= (l2-ctx-minerals ctx) (sc2-min-cost 'stargate))
                 (>= (l2-ctx-gas ctx) (sc2-gas-cost 'stargate))
@@ -19230,7 +19768,7 @@
   (define dt-enemy-bldgs
     (let ([eb (and (hash? raw-obs) (hash-ref raw-obs 'enemy-buildings '()))])
       (if (list? eb) eb '())))
-  (define enemy-has-live-detector?
+  (define dt-live-det-cnt
     (let ([det-entity?
            (lambda (e)
              (and (hash? e)
@@ -19241,16 +19779,36 @@
                         '(missile-turret photon-cannon spore-crawler
                           observer observer-siege-mode raven
                           overseer overseer-siege-mode))))])
-      (or (for/or ([e (in-list enemy-units)]) (det-entity? e))
-          (for/or ([eb (in-list dt-enemy-bldgs)]) (det-entity? eb)))))
-  (define keep-dts-cloaked-no-det?
+      (+ (count det-entity? enemy-units)
+         (count det-entity? dt-enemy-bldgs))))
+  (define enemy-has-live-detector? (> dt-live-det-cnt 0))
+  (define dt-ranged-anti-det-allies?
+    (for/or ([u (in-list ally-units)])
+      (and (hash? u)
+           (memq (fast-canonical-unit-sym (unit-type-sym u))
+                 '(stalker phoenix immortal tempest void-ray colossus adept)))))
+  (define dt-active-skirmish-hold?
     (and live-game?
-         (not enemy-has-live-detector?)
-         (or (pair? enemy-units) (pair? dt-enemy-bldgs))))
-  (define avail-dt-slots
-    (if keep-dts-cloaked-no-det?
-        0
+         (or (pair? enemy-units) (pair? dt-enemy-bldgs))
+         (or (not enemy-has-live-detector?)
+             (and (<= dt-live-det-cnt 3)
+                  dt-ranged-anti-det-allies?))))
+  (define wounded-dt-merge-cnt
+    (if dt-active-skirmish-hold?
+        (count (lambda (u)
+                 (and (hash? u)
+                      (eq? (fast-canonical-unit-sym (unit-type-sym u)) 'dark-templar)
+                      (let* ([cur (exact->inexact (unit-total-hp-and-shield u))]
+                             [mhp (exact->inexact (+ (hash-ref u 'max-hp 40.0)
+                                                     (hash-ref u 'max-shield 80.0)))])
+                        (< (/ cur (max 1.0 mhp)) 0.45))))
+               ally-units)
         (hash-ref open-prod-slots 'dark-templar 0)))
+  (define avail-dt-slots
+    (cond
+      [(not dt-active-skirmish-hold?) (hash-ref open-prod-slots 'dark-templar 0)]
+      [(not enemy-has-live-detector?) 0]
+      [else (min (hash-ref open-prod-slots 'dark-templar 0) wounded-dt-merge-cnt)]))
   (when (if live-game?
                (>= (+ avail-ht-slots avail-dt-slots) 2)
                (>= (count (lambda (u) (memq (unit-type-sym u) '(high-templar dark-templar))) ally-units) 2))
@@ -20043,11 +20601,42 @@
                 (< (l2-unit-count ctx 'viking) 2)
                 (l2-can-spend-supply? ctx (sc2-supply-cost 'viking)))
        (l2-try-train-unit! ctx 'viking 'starport 6 #:respect-bo-reserve? #f))
+  ;; L49-W2 + L50-W1 (`#02 TvT` / `#50 TvP` Phase-1 Starport Gas Yield for Siege Tank #1..#3):
+  ;; Require an OPEN Factory slot (`open-prod-slots 'factory > 0`) so busy FactoryTechLabs NEVER
+  ;; hold `125G` idle for `32s` starving Starport Medivacs, and exempt the first `2` Medivacs in
+  ;; non-TvT matchups (`#50`/`#68`) while keeping `TvT` Siege Tank #1..#3 priority intact!
+  (define p1-enemy-cap-air?
+    (ormap (lambda (e)
+             (and (hash? e)
+                  (memq (fast-canonical-unit-sym (unit-type-sym e)) THOR-CAPITAL-AIR-SYMS)))
+           enemy-units))
+  (define p1-fac-open-now?
+    (> (hash-ref (l2-ctx-open-prod-slots ctx) 'factory 0) 0))
+  (define p1-tvt-need-tanks?
+    (and (eq? (l2-ctx-effective-enemy-race ctx) 'Terran)
+         (< (l2-unit-count ctx 'siege-tank) 3)))
+  (define p1-yield-gas-for-tank?
+    (and live-game?
+         (not p1-enemy-cap-air?)
+         (memq 'factory ready-bldg-types)
+         (memq 'factory-techlab ready-bldg-types)
+         p1-fac-open-now?
+         (or p1-tvt-need-tanks?
+             (eq? (l2-ctx-prio-saving-for-sym ctx) 'siege-tank)
+             (member '(train siege-tank) (l2-ctx-prio-scheduled-actions ctx)))))
+  (define (p1-tank-gas-ok? unit-sym)
+    (or (not p1-yield-gas-for-tank?)
+        (and (eq? unit-sym 'medivac)
+             (not p1-tvt-need-tanks?)
+             (< (l2-unit-count ctx 'medivac) 2))
+        (>= (- (l2-ctx-gas ctx) (sc2-gas-cost unit-sym))
+            (sc2-gas-cost 'siege-tank))))
   (when (and live-game?
                 (not endgame-corner-hunt?)
                 (memq 'starport ready-bldg-types)
                 (enemy-tech-observation-requires-anti-air? tech-obs)
                 (< (l2-unit-count ctx 'viking) 2)
+                (p1-tank-gas-ok? 'viking)
                 ;; L37-P0-2 (`TvT0Tank`): Do not let speculative Phase-1 Viking (no visible air
                 ;; unit yet) spend 150M ahead of ready Factory-TL Tank #1 in TvT!
                 (not (and (eq? (l2-ctx-effective-enemy-race ctx) 'Terran)
@@ -20065,6 +20654,7 @@
                 (memq 'starport ready-bldg-types)
                 (or (not (enemy-tech-observation-requires-anti-air? tech-obs))
                     (>= (l2-unit-count ctx 'viking) 2))
+                (p1-tank-gas-ok? 'medivac)
                 ;; L37-P0-2 (`TvT0Tank` & `#5122349` TvP Medivac #1): Never let Phase-1 Medivac drain
                 ;; 100M/100G ahead of ready Factory-TL Siege Tank #1 in TvT (or when Brain scheduled
                 ;; `siege-tank`), while preserving TvP Medivac #1 priority (`#5122349`)!
@@ -20074,6 +20664,7 @@
                                        (member '(train siege-tank) (l2-ctx-prio-scheduled-actions ctx)))))
                           (memq 'factory ready-bldg-types)
                           (memq 'factory-techlab ready-bldg-types)
+                          p1-fac-open-now?
                           (= (l2-unit-count ctx 'siege-tank) 0)
                           (>= (l2-ctx-gas ctx) (sc2-gas-cost 'siege-tank))))
                 (>= (+ (l2-unit-count ctx 'marine) (l2-unit-count ctx 'marauder)) 6)
@@ -20084,6 +20675,7 @@
                 (not endgame-corner-hunt?)
                 (memq 'starport ready-bldg-types)
                 (enemy-tech-observation-requires-anti-air? tech-obs)
+                (p1-tank-gas-ok? 'viking)
                 (>= (l2-unit-count ctx 'medivac) 2)
                 (< (l2-unit-count ctx 'viking) 8)
                 (l2-can-spend-supply? ctx (sc2-supply-cost 'viking)))
@@ -20445,15 +21037,18 @@
                         (< (hash-ref b 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
                  ally-bldgs)
           (order-ledger-pending-count-for-type oledger 'bunker frame)))
-  ;; W8-P0-3-rt / L25-P0-3 (`#20` 5 Bunkers): Cap non-crisis live Bunker count at 1 — only allow
-  ;; a 2nd Bunker during genuine active crisis/base breach (`early-survival-crisis?`,
-  ;; `under-early-cheese?`, or `under-base-attack?` with `threat >= 8`)!
+  ;; W8-P0-3-rt / L25-P0-3 / L49-W1: Trim unpressured Terran early Bunker spam — cap non-crisis
+  ;; Bunker count at 1 (and require genuine rush/cheese/base-attack/proxy OR outnumbered threat
+  ;; `live-enemy-threat-supply > 1.15 * live-army-supply` in live games; only allow Bunker #2
+  ;; during severe early-survival-crisis / cheese / outnumbered base breach!).
   (define desired-bunker-cnt
        (if (and crisis-tech-upgrade-deferral?
                 (or (not live-game?)
                     (and (or early-survival-crisis?
                              under-early-cheese?
-                             (and under-base-attack? (>= live-enemy-threat-supply 8)))
+                             (and under-base-attack?
+                                  (>= live-enemy-threat-supply 8)
+                                  (> live-enemy-threat-supply live-army-supply)))
                          (or (>= frame 4000)
                              (>= (l2-unit-count ctx 'marine) 4))))
                 (or (>= live-army-supply 4)
@@ -20464,7 +21059,9 @@
                     under-early-cheese?
                     under-base-attack?
                     forward-proxy-detected?
-                    (>= live-enemy-threat-supply 6))
+                    (and (>= live-enemy-threat-supply 6)
+                         (or (not live-game?)
+                             (> live-enemy-threat-supply (* 1.15 live-army-supply)))))
                 (not (and live-game?
                           (= (length ccs) 1)
                           terran-saving-for-cc-expand?
@@ -22377,6 +22974,8 @@
          (l2-try-train-unit! ctx 'viking 'starport 6 #:respect-bo-reserve? #f))
        ;; Priority vs-Air & Anti-Colossus Vikings (`#5138231`): ensure >= 2 Vikings vs Air AND
        ;; >= 3 Vikings per observed Colossus (or Robotics Bay) BEFORE Medivacs/Tanks consume gas!
+       ;; L49-W2 (`#02 TvT`): In the non-Colossus `requires-anti-air?` branch, yield gas to ready
+       ;; `FactoryTechLab` Siege Tank #1..#3 (`125G`) when no enemy Capital Air exists!
        (when (and live-game?
                   (not endgame-corner-hunt?)
                   (or (not terran-prod-save-hold?) crisis-tech-upgrade-deferral? (> tvp-colossus-viking-target 0))
@@ -22384,7 +22983,14 @@
                   (or (and (> tvp-colossus-viking-target 0)
                            (< (l2-unit-count ctx 'viking) tvp-colossus-viking-target))
                       (and (enemy-tech-observation-requires-anti-air? tech-obs)
-                           (< (l2-unit-count ctx 'viking) 2))))
+                           (< (l2-unit-count ctx 'viking) 2)
+                           (or (not (and has-fac-tl?
+                                         (> (hash-ref open-prod-slots 'factory 0) 0)
+                                         (not enemy-capital-air?)
+                                         (or brain-sched-siege-tank-p3?
+                                             (and tvt-need-tanks-p3? (< cur-siege-tanks-p3 3)))))
+                               (>= (- (l2-ctx-gas ctx) (sc2-gas-cost 'viking))
+                                   (sc2-gas-cost 'siege-tank))))))
          (l2-try-train-unit! ctx 'viking 'starport 6 #:respect-bo-reserve? #f))
        ;; Facing Capital Air: start ready Factory-TL Thor before uncapped Reactor Starport Vikings drain minerals!
        (when (and enemy-capital-air?
@@ -22412,8 +23018,9 @@
                   (not crisis-tech-upgrade-deferral?)
                   (not terran-prod-save-hold?)
                   (memq 'starport ready-bldg-types)
-                  (or (not (or brain-sched-siege-tank-p3?
-                               (and tvt-need-tanks-p3? (< cur-siege-tanks-p3 2))))
+                  (or (not (and (> (hash-ref open-prod-slots 'factory 0) 0)
+                                (or brain-sched-siege-tank-p3?
+                                    (and tvt-need-tanks-p3? (< cur-siege-tanks-p3 2)))))
                       (and (>= (- (l2-ctx-minerals ctx) (sc2-min-cost 'medivac)) (sc2-min-cost 'siege-tank))
                            (>= (- (l2-ctx-gas ctx) (sc2-gas-cost 'medivac)) (sc2-gas-cost 'siege-tank))))
                   (or (not enemy-capital-air?) (>= (l2-unit-count ctx 'viking) 8))
@@ -22573,8 +23180,27 @@
                                #:respect-bo-reserve? (and (not enemy-capital-air?)
                                                           (not terran-raven-cloak-urgent?)
                                                           (if live-game? terran-bo-escrow-imminent? #t))))
+         ;; L49-W2 + L50-W1 (`#1174` / `#1201` `#02 TvT` & `#50 TvP` Starport Gas Yield):
+         ;; Require an OPEN Factory slot (`open-prod-slots 'factory > 0`) so busy FactoryTechLabs
+         ;; never hold `125G` idle for `32s` starving Medivacs, AND exempt the first `2` Medivacs
+         ;; when `(not tvt-need-tanks-p3?)`!
+         (define sp-yield-gas-for-tank?
+           (and live-game?
+                has-fac-tl?
+                (> (hash-ref open-prod-slots 'factory 0) 0)
+                (not enemy-capital-air?)
+                (or brain-sched-siege-tank-p3?
+                    (and tvt-need-tanks-p3? (< cur-siege-tanks-p3 3)))))
+         (define (sp-tank-gas-ok? unit-sym)
+           (or (not sp-yield-gas-for-tank?)
+               (and (eq? unit-sym 'medivac)
+                    (not tvt-need-tanks-p3?)
+                    (< (l2-unit-count ctx 'medivac) 2))
+               (>= (- (l2-ctx-gas ctx) (sc2-gas-cost unit-sym))
+                   (sc2-gas-cost 'siege-tank))))
          (when (and live-game?
                     (or enemy-capital-air? (enemy-tech-observation-requires-anti-air? tech-obs))
+                    (sp-tank-gas-ok? 'viking)
                     (< (l2-unit-count ctx 'viking) (if enemy-capital-air? desired-viking-cap 2)))
            (l2-try-train-unit! ctx 'viking 'starport 6 #:respect-bo-reserve? #f))
          (define desired-medivac-cap
@@ -22588,6 +23214,7 @@
                     (or (not live-game?)
                         (not (enemy-tech-observation-requires-anti-air? tech-obs))
                         (>= (l2-unit-count ctx 'viking) 2))
+                    (sp-tank-gas-ok? 'medivac)
                     (or (not live-game?)
                         (and (< (l2-unit-count ctx 'medivac) desired-medivac-cap)
                              (or (< (l2-unit-count ctx 'medivac)
@@ -22597,6 +23224,7 @@
            (l2-try-train-unit! ctx 'medivac 'starport 6 #:respect-bo-reserve? (if live-game? terran-bo-escrow-imminent? #t)))
          (when (and live-game?
                     (or enemy-capital-air? (enemy-tech-observation-requires-anti-air? tech-obs))
+                    (sp-tank-gas-ok? 'viking)
                     (< (l2-unit-count ctx 'viking) (if enemy-capital-air? desired-viking-cap 8)))
            (l2-try-train-unit! ctx 'viking 'starport 6 #:respect-bo-reserve? #f))
          (define enemy-ground-siege-for-lib?
@@ -22609,20 +23237,22 @@
              [(>= (length ccs) 4) 8]
              [enemy-ground-siege-for-lib? 6]
              [else 4]))
-         (when (or (not live-game?)
-                   (and (or enemy-capital-air? (enemy-tech-observation-requires-anti-air? tech-obs))
-                        (< (l2-unit-count ctx 'viking) desired-viking-cap))
-                   (and endgame-corner-hunt?
-                        (< (l2-unit-count ctx 'viking) 10))
-                   (and (< (l2-unit-count ctx 'viking) desired-viking-cap)
-                        (>= (l2-unit-count ctx 'medivac) 2)
-                        (or (l2-plan-wants-now? ctx 'viking)
-                            (not terran-bo-escrow-imminent?)
-                            (>= (l2-unit-count ctx 'liberator) desired-liberator-cap))
-                        (or (not terran-bo-escrow-imminent?)
-                            (l2-can-spend-by-priority? ctx 'viking 'combat-unit))))
+         (when (and (sp-tank-gas-ok? 'viking)
+                    (or (not live-game?)
+                        (and (or enemy-capital-air? (enemy-tech-observation-requires-anti-air? tech-obs))
+                             (< (l2-unit-count ctx 'viking) desired-viking-cap))
+                        (and endgame-corner-hunt?
+                             (< (l2-unit-count ctx 'viking) 10))
+                        (and (< (l2-unit-count ctx 'viking) desired-viking-cap)
+                             (>= (l2-unit-count ctx 'medivac) 2)
+                             (or (l2-plan-wants-now? ctx 'viking)
+                                 (not terran-bo-escrow-imminent?)
+                                 (>= (l2-unit-count ctx 'liberator) desired-liberator-cap))
+                             (or (not terran-bo-escrow-imminent?)
+                                 (l2-can-spend-by-priority? ctx 'viking 'combat-unit)))))
            (l2-try-train-unit! ctx 'viking 'starport 6 #:respect-bo-reserve? (and (not enemy-capital-air?) (if live-game? terran-bo-escrow-imminent? #t))))
          (when (and (< (l2-unit-count ctx 'liberator) desired-liberator-cap)
+                    (sp-tank-gas-ok? 'liberator)
                     (or (l2-plan-wants-now? ctx 'liberator)
                         (and live-game?
                              (>= eff-phase-supply 80)
@@ -22635,11 +23265,14 @@
                     (> (hash-ref open-prod-slots 'starport 0) 0)
                     (not terran-prod-save-hold?)
                     (not terran-bo-escrow-imminent?))
-           (when (< (l2-unit-count ctx 'medivac) (if enemy-capital-air? 2 6))
+           (when (and (< (l2-unit-count ctx 'medivac) (if enemy-capital-air? 2 6))
+                      (sp-tank-gas-ok? 'medivac))
              (l2-try-train-unit! ctx 'medivac 'starport 6 #:respect-bo-reserve? #f))
-           (when (> (hash-ref open-prod-slots 'starport 0) 0)
+           (when (and (> (hash-ref open-prod-slots 'starport 0) 0)
+                      (sp-tank-gas-ok? 'viking))
              (l2-try-train-unit! ctx 'viking 'starport 6 #:respect-bo-reserve? #f))
-           (when (> (hash-ref open-prod-slots 'starport 0) 0)
+           (when (and (> (hash-ref open-prod-slots 'starport 0) 0)
+                      (sp-tank-gas-ok? 'liberator))
              (l2-try-train-unit! ctx 'liberator 'starport 6 #:respect-bo-reserve? #f))))
        ;; Barracks production (Group 5)
        (when (memq 'barracks ready-bldg-types)
@@ -23443,6 +24076,93 @@
                       SC2-ENGAGEMENT-FOCUS-FIRE-RADIUS
                       (exact->inexact SC2-ENGAGEMENT-FOCUS-FIRE-RADIUS)))
   (define focus-r2 (fl* focus-r focus-r))
+  ;; L49-W1 + L49-W2 (Unified Squad-Wide Detector Snipe Focus + Sole Powering Pylon Disable):
+  ;; When our squad has cloaked/burrowed allies (`stealth-active?`), if a single live enemy `pylon`
+  ;; (within `<= 22t`) is the SOLE power source (`<= 6.5t`) of `>= 2` live `photon-cannon`s, target
+  ;; that `400`-EHP Pylon FIRST (`-520.0` bonus) to disable all powered Cannons simultaneously!
+  ;; Otherwise deterministically pick ONE primary live enemy detector (lowest EHP, lowest tag ID).
+  (define sole-power-pylon-id
+    (and stealth-active?
+         can-gnd?
+         (let* ([live-pylons
+                 (for/list ([v (in-list prepped)]
+                            #:when (let ([e0 (vector-ref v 0)])
+                                     (and (hash? e0)
+                                          (not (eq? (hash-ref e0 'snapshot? #f) #t))
+                                          (eq? (fast-canonical-structure-sym (unit-type-sym e0)) 'pylon))))
+                   v)]
+                [live-cannons
+                 (for/list ([v (in-list prepped)]
+                            #:when (let ([e0 (vector-ref v 0)])
+                                     (and (hash? e0)
+                                          (not (eq? (hash-ref e0 'snapshot? #f) #t))
+                                          (eq? (fast-canonical-structure-sym (unit-type-sym e0)) 'photon-cannon))))
+                   v)])
+           (and (pair? live-pylons)
+                (>= (length live-cannons) 2)
+                (for/fold ([best-id #f] [best-ehp +inf.0] #:result best-id)
+                          ([pv (in-list live-pylons)])
+                  (define pe (vector-ref pv 0))
+                  (define px (vector-ref pv 1))
+                  (define py (vector-ref pv 2))
+                  (define dx (fl- px fx))
+                  (define dy (fl- py fy))
+                  (define d2 (fl+ (fl* dx dx) (fl* dy dy)))
+                  (if (fl<= d2 484.0)
+                      (let ([sole-cnt
+                             (for/sum ([cv (in-list live-cannons)])
+                               (define cx (vector-ref cv 1))
+                               (define cy (vector-ref cv 2))
+                               (define cdx (fl- cx px))
+                               (define cdy (fl- cy py))
+                               (if (fl<= (fl+ (fl* cdx cdx) (fl* cdy cdy)) 42.25)
+                                   (let ([other-p?
+                                          (for/or ([opv (in-list live-pylons)])
+                                            (and (not (eq? opv pv))
+                                                 (let ([odx (fl- cx (vector-ref opv 1))]
+                                                       [ody (fl- cy (vector-ref opv 2))])
+                                                   (fl<= (fl+ (fl* odx odx) (fl* ody ody)) 42.25))))])
+                                     (if other-p? 0 1))
+                                   0))])
+                        (if (>= sole-cnt 2)
+                            (let* ([tid (hash-ref pe 'id 0)]
+                                   [ehp (exact->inexact (unit-total-hp-and-shield pe))]
+                                   [better? (or (not best-id)
+                                                (fl< ehp (fl- best-ehp 1.0))
+                                                (and (fl<= (flabs (fl- ehp best-ehp)) 1.0)
+                                                     (< tid best-id)))])
+                              (if better? (values tid ehp) (values best-id best-ehp)))
+                            (values best-id best-ehp)))
+                      (values best-id best-ehp)))))))
+  (define primary-det-id
+    (or sole-power-pylon-id
+        (and stealth-active?
+             (let loop-d ([rem prepped] [best-id #f] [best-ehp +inf.0])
+               (if (null? rem)
+                   best-id
+                   (let* ([v (car rem)]
+                          [edet? (vector-ref v 10)])
+                     (if (not edet?)
+                         (loop-d (cdr rem) best-id best-ehp)
+                         (let* ([e0 (vector-ref v 0)]
+                                [efly? (vector-ref v 3)]
+                                [cv (and (hash? e0) (hash-ref e0 'cloak #f))]
+                                [undet? (or (eqv? cv 1) (eq? cv 'cloaked))]
+                                [hit? (and (not undet?) (if efly? can-air? can-gnd?))]
+                                [dx (fl- (vector-ref v 1) fx)]
+                                [dy (fl- (vector-ref v 2) fy)]
+                                [d2 (fl+ (fl* dx dx) (fl* dy dy))])
+                           (if (and hit? (fl<= d2 484.0) (hash? e0))
+                               (let* ([tid (hash-ref e0 'id 0)]
+                                      [ehp (exact->inexact (unit-total-hp-and-shield e0))]
+                                      [better? (or (not best-id)
+                                                   (fl< ehp (fl- best-ehp 1.0))
+                                                   (and (fl<= (flabs (fl- ehp best-ehp)) 1.0)
+                                                        (< tid best-id)))])
+                                 (if better?
+                                     (loop-d (cdr rem) tid ehp)
+                                     (loop-d (cdr rem) best-id best-ehp)))
+                               (loop-d (cdr rem) best-id best-ehp))))))))))
   (let loop ([rem prepped]
              [best-valid #f]
              [best-valid-sc +inf.0]
@@ -23506,11 +24226,20 @@
                                   (fl- base-w-adj (fl* 18.0 (->fl aligned-cnt)))]
                                  [else base-w-adj])]
                               [else 0.0])]
-                           [adj (fl+ (if baneling-attacker? (fl+ adj-base (vector-ref v 7)) adj-base)
-                                     raider-adj)]
+                           [is-primary-det?
+                            (and primary-det-id (hash? e0) (eqv? (hash-ref e0 'id -1) primary-det-id))]
+                           [primary-det-adj
+                            (cond
+                              [(and is-primary-det? edet?) -140.0]
+                              [is-primary-det? -520.0]
+                              [else 0.0])]
+                           [adj (fl+ (fl+ (if baneling-attacker? (fl+ adj-base (vector-ref v 7)) adj-base)
+                                          raider-adj)
+                                     primary-det-adj)]
                            [cur-best (if valid? best-valid-sc best-any-sc)]
                            [pruned?
                             (and (not (and stealth-active? edet?))
+                                 (not is-primary-det?)
                                  (fl< cur-best +inf.0)
                                  (if (fl> d2 focus-r2)
                                      (let ([margin (fl- cur-best (fl+ adj (fl+ 100.0 (fl* 0.02 hp))))])
@@ -27274,7 +28003,54 @@
            [(eq? act-kind 'transport-drop-moving)
             (list 'transport-juggle ttag (list ttag) sx sy)]
            [(and (eq? act-kind 'cast-spell) (eq? ab-sym 'morph-overlord-transport))
-            (list 'morph ttag 'overlord-transport)]
+            ;; L50-W1 (`#49 ZvP` 5x `TransportOverlordCocoon` leak): Strictly gate `OverlordTransport`
+            ;; morphs on an active drop plan (`l34-bo-fork-coords`, `'active-drop-plan?`, or an
+            ;; actively loaded DropperLord in flight), zero pending/morphing cocoons, capped total
+            ;; DropperLords (`< 1`, or `< 2` with an active loaded drop), `>= 20` combat supply,
+            ;; and no enemy combat attacking home (`<= 28t`)!
+            (define-values (dl-fork-on? _dfx _dfy) (l34-bo-fork-coords ctx))
+            (define has-loaded-dropperlord?
+              (ormap (lambda (u)
+                       (and (hash? u)
+                            (eq? (unit-type-sym u) 'overlord-transport)
+                            (or (> (safe-nonneg-int (hash-ref u 'cargo-space-taken 0) 0) 0)
+                                (pair? (hash-ref u 'passengers '())))))
+                     ally-units))
+            (define dl-drop-active?
+              (or dl-fork-on?
+                  (eq? (hash-ref obs 'active-drop-plan? #f) #t)
+                  has-loaded-dropperlord?))
+            (define dl-cocoon-pending-cnt
+              (+ (count (lambda (u)
+                          (and (hash? u) (eq? (unit-type-sym u) 'transport-overlord-cocoon)))
+                        ally-units)
+                 (order-ledger-pending-count-for-type (live-bot-runtime-order-ledger rt) 'overlord-transport frame)))
+            (define existing-dl-cnt
+              (+ dl-cocoon-pending-cnt
+                 (count (lambda (u)
+                          (and (hash? u) (eq? (unit-type-sym u) 'overlord-transport)))
+                        ally-units)))
+            (define dl-home-threat?
+              (ormap (lambda (e)
+                       (and (hash? e)
+                            (combat-unit-record? e)
+                            (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                            (<= (fast-dist2d (exact->inexact base-x) (exact->inexact base-y)
+                                             (exact->inexact (hash-ref e 'x 9999.0))
+                                             (exact->inexact (hash-ref e 'y 9999.0)))
+                                28.0)))
+                     enemy-units))
+            (define dl-combat-sup
+              (for/sum ([u (in-list combat-units)]) (unit-supply-cost (unit-type-sym u))))
+            (and dl-drop-active?
+                 (= dl-cocoon-pending-cnt 0)
+                 (< existing-dl-cnt (if has-loaded-dropperlord? 2 1))
+                 (not dl-home-threat?)
+                 (>= dl-combat-sup 20.0)
+                 (begin
+                   (order-ledger-record-issued! (live-bot-runtime-order-ledger rt)
+                                                ttag 'morph 'overlord-transport base-x base-y frame)
+                   (list 'morph ttag 'overlord-transport)))]
            [(eq? act-kind 'load-unit)
             (define ptags
               (filter (lambda (p) (and (exact-integer? p) (> p 0) (not (= p ttag))))
@@ -27294,7 +28070,13 @@
          (set-add! wave3-handled-tags ttag)
          (l34-emit-preserved! ctx translated))))
      (for ([tr (in-list transports)]
-           #:when (not (set-member? transport-acted-tags (hash-ref tr 'id 706))))
+           #:when (and (not (set-member? transport-acted-tags (hash-ref tr 'id 706)))
+                       ;; L50-W1 (`#50` Medivac Solo Over-Fly Guard): Empty Medivacs are handled
+                       ;; by the bio-rear AA-aware safe tether in Phase 4 — never issue raw
+                       ;; `attack-pos` toward `prelim-army-cx` (Tanks/Vikings) here!
+                       (not (and (eq? (unit-type-sym tr) 'medivac)
+                                 (= (safe-nonneg-int (hash-ref tr 'cargo-space-taken 0) 0) 0)
+                                 (not (unit-medivac-loaded? tr))))))
        (define tr-id (hash-ref tr 'id 706))
        (define tx (hash-ref tr 'x base-x))
        (define ty (hash-ref tr 'y base-y))
@@ -27836,9 +28618,16 @@
                   (eq? (hash-ref u 'burrowed #f) #t)
                   (eq? (hash-ref u 'is-burrowed #f) #t)
                   (eq? (hash-ref u 'burrowed? #f) #t)
+                  ;; L49-W1: Recognize Tunneling-Claws Roaches & Cloak Banshees from tick 0 so
+                  ;; Corruptors/Hydralisks/Vikings snipe Observers/Overseers BEFORE burrow/cloak!
+                  (and (eq? ut 'roach)
+                       (l34-has-upgrade? ctx 'burrow)
+                       (l34-has-upgrade? ctx 'tunneling-claws))
+                  (and (eq? ut 'banshee)
+                       (l34-has-upgrade? ctx 'banshee-cloak))
                   (and (memq ut '(banshee ghost lurker lurker-mp roach widow-mine))
-                       (or (eqv? clk 1) (eqv? clk 2)
-                           (eq? clk 'cloaked) (eq? clk 'cloaked-detected)))))
+                       (or (eqv? clk 1) (eqv? clk 2) (eqv? clk 4)
+                           (eq? clk 'cloaked) (eq? clk 'cloaked-detected) (eq? clk 'cloaked-allied)))))
         (set! ally-has-stealth? #t)))
     (unless any-ally-baneling?
       (when (eq? ut 'baneling) (set! any-ally-baneling? #t))))
@@ -28395,12 +29184,29 @@
             (shadow-stride-researched? researched-upgs-dt)))
       (define excl-ids
         (for/list ([id (in-set splash-evading-tags)]) id))
+      ;; L49-W1: When non-Blink DTs (`not ss-ok?`) are paired with `>= 2` ranged/air anti-detector
+      ;; allies (`stalker`/`phoenix`/etc.), skip `plan-dt-blink-pf-snipe`'s walk-in so Phase 5
+      ;; `[(dark-templar)]` stages DTs safely outside `12.2t` until allies snipe the detectors!
+      (define dt-has-ranged-snipers?
+        (and (not ss-ok?)
+             (>= (count (lambda (au)
+                          (and (hash? au)
+                               (let ([aut (fast-canonical-unit-sym (unit-type-sym au))])
+                                 (and (not (eq? aut 'dark-templar))
+                                      (or (fast-can-attack-air? aut)
+                                          (and (fast-can-attack-ground? aut)
+                                               (let ([st (fast-unit-combat-stats aut)])
+                                                 (and (hash? st) (>= (hash-ref st 'ground-range 0.0) 4.0)))))))))
+                        combat-units)
+                 2)))
       (define dt-dirs
-        (plan-dt-blink-pf-snipe
-         combat-units enemy-units enemy-bldgs-dt spell-claims-rt frame
-         #:researched-upgrades researched-upgs-dt
-         #:shadow-stride-ok? ss-ok?
-         #:exclude-tags excl-ids))
+        (if dt-has-ranged-snipers?
+            '()
+            (plan-dt-blink-pf-snipe
+             combat-units enemy-units enemy-bldgs-dt spell-claims-rt frame
+             #:researched-upgrades researched-upgs-dt
+             #:shadow-stride-ok? ss-ok?
+             #:exclude-tags excl-ids)))
       (for ([sd (in-list dt-dirs)])
         (define cid (spell-directive-caster-tag sd))
         (define mode (spell-directive-target-mode sd))
@@ -28669,12 +29475,75 @@
         (when (and (eq? (spell-directive-pattern-name sd) 'stalker-blink-forward-snipe)
                    (exact-integer? hv-tid)
                    (> hv-tid 0))
-          (hash-set! blink-hv-focus-ht cid (cons hv-tid (+ frame 40))))
+          (hash-set! blink-hv-focus-ht cid (cons hv-tid (+ frame 112))))
         (l34-emit-preserved!
          ctx
          (list 'cast-spell cid 'blink
                (safe-coord (spell-directive-target-x sd) base-x)
-               (safe-coord (spell-directive-target-y sd) base-y))))))
+               (safe-coord (spell-directive-target-y sd) base-y))))
+      ;; L49-W1 + L49-W2 (Stalker Forward-Blink Close-In): When `>= 6` Blink-ready Stalkers
+      ;; (`total-hp >= 85.0`) have an approved `siege-tank-sieged` or `colossus` target just outside
+      ;; single-Blink reach (`10.45t..14.5t` Tank / `10.0t..14.5t` Colossus), close directly toward
+      ;; it instead of letting Tank splash-evasion push them backward out of Blink range!
+      (when (and (null? sb-dirs) (null? enemy-widow-mines))
+        (define blink-cd-ht (spell-claims-stalker-blink-ready-frame spell-claims-rt))
+        (define ready-st
+          (for/list ([u (in-list combat-units)]
+                     #:when (and (hash? u)
+                                 (eq? (unit-type-sym u) 'stalker)
+                                 (not (eq? (hash-ref u 'hallucination #f) #t))
+                                 (not (set-member? splash-evading-tags (hash-ref u 'id -1)))
+                                 (>= (exact->inexact (unit-total-hp-and-shield u)) 85.0)
+                                 (>= frame (hash-ref blink-cd-ht (hash-ref u 'id -1) -10000))))
+            u))
+        (when (>= (length ready-st) 6)
+          (define rn (exact->inexact (length ready-st)))
+          (define scx (/ (for/sum ([u (in-list ready-st)]) (exact->inexact (hash-ref u 'x base-x))) rn))
+          (define scy (/ (for/sum ([u (in-list ready-st)]) (exact->inexact (hash-ref u 'y base-y))) rn))
+          (define close-hv
+            (for/fold ([best #f] [best-d +inf.0] #:result best)
+                      ([e (in-list enemy-units)]
+                       #:when (and (hash? e)
+                                   (not (eq? (hash-ref e 'snapshot? #f) #t))
+                                   (memq (unit-type-sym e) '(siege-tank-sieged colossus))
+                                   (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))))
+              (define d (fast-dist2d scx scy (exact->inexact (hash-ref e 'x 9999.0))
+                                     (exact->inexact (hash-ref e 'y 9999.0))))
+              (define min-close-d (if (eq? (unit-type-sym e) 'siege-tank-sieged) 10.45 10.0))
+              (if (and (fl> d min-close-d) (fl<= d 14.5) (fl< d best-d))
+                  (values e d)
+                  (values best best-d))))
+          (when close-hv
+            (define hvx (exact->inexact (hash-ref close-hv 'x base-x)))
+            (define hvy (exact->inexact (hash-ref close-hv 'y base-y)))
+            (define hv-id (hash-ref close-hv 'id 0))
+            (define local-ec
+              (count (lambda (e)
+                       (and (hash? e) (not (eq? (hash-ref e 'snapshot? #f) #t)) (combat-unit-record? e)
+                            (not (memq (unit-type-sym e) '(medivac warp-prism warp-prism-phasing)))
+                            (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                            (fl<= (fast-dist2d hvx hvy (exact->inexact (hash-ref e 'x 9999.0))
+                                               (exact->inexact (hash-ref e 'y 9999.0)))
+                                  10.0)))
+                     enemy-units))
+            (define other-tanks
+              (count (lambda (e)
+                       (and (hash? e) (not (eq? (hash-ref e 'snapshot? #f) #t))
+                            (not (eqv? (hash-ref e 'id -1) hv-id))
+                            (eq? (unit-type-sym e) 'siege-tank-sieged)
+                            (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                            (fl<= (fast-dist2d hvx hvy (exact->inexact (hash-ref e 'x 9999.0))
+                                               (exact->inexact (hash-ref e 'y 9999.0)))
+                                  13.0)))
+                     enemy-units))
+            (define n-st (length ready-st))
+            (when (and (<= local-ec (* n-st 2))
+                       (or (< other-tanks 2)
+                           (and (>= n-st 7) (<= local-ec (* n-st 2)))))
+              (for ([su (in-list ready-st)])
+                (define suid (hash-ref su 'id 0))
+                (set-add! splash-evading-tags suid)
+                (l34-emit-preserved! ctx (list 'move suid (safe-coord hvx base-x) (safe-coord hvy base-y))))))))))
 
   (when (or (pair? eff-tank-lurker-hazards) (pair? lurker-spine-effects))
     (define ground-splash-cands
@@ -30392,11 +31261,26 @@
                (define qty (safe-coord (fl+ fqy (fl* step (fl/ (fl- wmy fqy) wd))) fqy))
                (set-add! wave3-handled-tags qid)
                (l34-emit-preserved! ctx (list 'move qid qtx qty)))]))))
-    ;; W3-TAC-7 + W15c: Keep empty Medivacs leashed safely behind Bio (within heal range)
-    ;; both in frontline combat AND under fog-belief suppression so they never fly solo across
-    ;; the map to enemy main via harass/multitask OR get pulled into execute-spatial-maneuver!
+    ;; W3-TAC-7 + W15c + L50-W1 (`#50` `REG #3` Medivac Solo Over-Fly Guard):
+    ;; Keep empty/healing Medivacs tethered `<= 6.0t` behind friendly bio centroid away from
+    ;; enemy AA (`photon-cannon`/`missile-turret`/`spore-crawler`/`stalker`/`viking`/etc.),
+    ;; and pull lone empty Medivacs away from enemy AA so they NEVER fly solo over Cannons!
     (define medivac-fog-suppress? (l34-ctx-fog-belief-suppress? ctx))
-    (when (and (or (pair? enemy-units) medivac-fog-suppress?) (pair? combat-units))
+    (define empty-medivacs-p4
+      (for/list ([mu (in-list ally-units)]
+                 #:when (and (hash? mu)
+                             (eq? (unit-type-sym mu) 'medivac)
+                             (let ([mid (hash-ref mu 'id -1)])
+                               (and (exact-integer? mid) (> mid 0)
+                                    (= (safe-nonneg-int (hash-ref mu 'cargo-space-taken 0) 0) 0)
+                                    (not (unit-medivac-loaded? mu))
+                                    (real? (hash-ref mu 'x #f))
+                                    (real? (hash-ref mu 'y #f))
+                                    (not (set-member? wave3-handled-tags mid))
+                                    (not (set-member? splash-evading-tags mid))))))
+        mu))
+    (when (and (pair? empty-medivacs-p4)
+               (or (pair? enemy-units) (pair? enemy-bldgs) medivac-fog-suppress? (pair? combat-units)))
       (define bio-sum-x 0.0)
       (define bio-sum-y 0.0)
       (define bio-cnt 0)
@@ -30408,37 +31292,105 @@
             (set! bio-sum-x (fl+ bio-sum-x (exact->inexact bx0)))
             (set! bio-sum-y (fl+ bio-sum-y (exact->inexact by0)))
             (set! bio-cnt (add1 bio-cnt)))))
-      (when (> bio-cnt 0)
-        (define bcx (fl/ bio-sum-x (->fl bio-cnt)))
-        (define bcy (fl/ bio-sum-y (->fl bio-cnt)))
-        (define hdx (fl- (exact->inexact base-x) bcx))
-        (define hdy (fl- (exact->inexact base-y) bcy))
-        (define hd (flmax 1.0 (flsqrt (fl+ (fl* hdx hdx) (fl* hdy hdy)))))
-        (define leash-x (safe-coord (fl+ bcx (fl* 2.5 (fl/ hdx hd))) bcx))
-        (define leash-y (safe-coord (fl+ bcy (fl* 2.5 (fl/ hdy hd))) bcy))
-        (for ([mu (in-list ally-units)]
-              #:when (and (hash? mu) (eq? (unit-type-sym mu) 'medivac)))
-          (define mid (hash-ref mu 'id -1))
-          (define cargo (safe-nonneg-int (hash-ref mu 'cargo-space-taken 0) 0))
-          (define mx0 (hash-ref mu 'x #f))
-          (define my0 (hash-ref mu 'y #f))
-          (when (and (exact-integer? mid) (> mid 0)
-                     (= cargo 0)
-                     (not (unit-medivac-loaded? mu))
-                     (real? mx0) (real? my0)
-                     (not (set-member? wave3-handled-tags mid))
-                     (not (set-member? splash-evading-tags mid))
-                     (<= (fast-dist2d (exact->inexact mx0) (exact->inexact my0) bcx bcy) 16.0)
-                     (or medivac-fog-suppress?
-                         (for/or ([eu (in-list enemy-units)] #:when (hash? eu))
-                           (and (combat-unit-record? eu)
-                                (real? (hash-ref eu 'x #f)) (real? (hash-ref eu 'y #f))
-                                (<= (fast-dist2d (exact->inexact mx0) (exact->inexact my0)
-                                                 (exact->inexact (hash-ref eu 'x 9999.0))
-                                                 (exact->inexact (hash-ref eu 'y 9999.0)))
-                                    18.0)))))
-            (set-add! wave3-handled-tags mid)
-            (l34-emit-preserved! ctx (list 'move mid leash-x leash-y))))))
+      (define aa-threat-pts
+        (append
+         (for/list ([eu (in-list enemy-units)]
+                    #:when (and (hash? eu)
+                                (not (eq? (hash-ref eu 'snapshot? #f) #t))
+                                (eqv? (hash-ref eu 'display-type 1) 1)
+                                (fast-can-attack-air? (unit-type-sym eu))
+                                (real? (hash-ref eu 'x #f)) (real? (hash-ref eu 'y #f))))
+           (cons (exact->inexact (hash-ref eu 'x 0.0))
+                 (exact->inexact (hash-ref eu 'y 0.0))))
+         (for/list ([eb (in-list enemy-bldgs)]
+                    #:when (and (hash? eb)
+                                (not (eq? (hash-ref eb 'snapshot? #f) #t))
+                                (memq (fast-canonical-structure-sym (unit-type-sym eb))
+                                      '(photon-cannon missile-turret spore-crawler bunker))
+                                (>= (hash-ref eb 'build-progress 1.0) 0.85)
+                                (real? (hash-ref eb 'x #f)) (real? (hash-ref eb 'y #f))))
+           (cons (exact->inexact (hash-ref eb 'x 0.0))
+                 (exact->inexact (hash-ref eb 'y 0.0))))))
+      (define (nearest-aa-pt px py)
+        (for/fold ([bx #f] [by #f] [bd +inf.0]) ([pt (in-list aa-threat-pts)])
+          (define d (fast-dist2d px py (car pt) (cdr pt)))
+          (if (fl< d bd) (values (car pt) (cdr pt) d) (values bx by bd))))
+      (cond
+        [(> bio-cnt 0)
+         (define bcx (fl/ bio-sum-x (->fl bio-cnt)))
+         (define bcy (fl/ bio-sum-y (->fl bio-cnt)))
+         (define-values (baa-x baa-y baa-d) (nearest-aa-pt bcx bcy))
+         (define hdx (fl- (exact->inexact base-x) bcx))
+         (define hdy (fl- (exact->inexact base-y) bcy))
+         (define hd (flmax 1.0 (flsqrt (fl+ (fl* hdx hdx) (fl* hdy hdy)))))
+         (define home-ux (fl/ hdx hd))
+         (define home-uy (fl/ hdy hd))
+         (for ([mu (in-list empty-medivacs-p4)])
+           (define mid (hash-ref mu 'id -1))
+           (define mx (exact->inexact (hash-ref mu 'x base-x)))
+           (define my (exact->inexact (hash-ref mu 'y base-y)))
+           (define d-bio (fast-dist2d mx my bcx bcy))
+           (define-values (naa-x naa-y naa-d) (nearest-aa-pt mx my))
+           (define any-near-enemy?
+             (or (fl<= naa-d 18.0)
+                 (for/or ([eu (in-list enemy-units)] #:when (hash? eu))
+                   (and (combat-unit-record? eu)
+                        (real? (hash-ref eu 'x #f)) (real? (hash-ref eu 'y #f))
+                        (<= (fast-dist2d mx my
+                                         (exact->inexact (hash-ref eu 'x 9999.0))
+                                         (exact->inexact (hash-ref eu 'y 9999.0)))
+                            18.0)))))
+           (when (or medivac-fog-suppress?
+                     (fl> d-bio 6.0)
+                     (fl<= naa-d 12.0)
+                     (and baa-x (fl<= baa-d 24.0) (fl< naa-d (fl- baa-d 1.0)))
+                     any-near-enemy?)
+             (define-values (away-ux away-uy)
+               (cond
+                 [(and baa-x (fl<= baa-d 22.0))
+                  (define dx (fl- bcx baa-x))
+                  (define dy (fl- bcy baa-y))
+                  (define d (flmax 0.5 (flsqrt (fl+ (fl* dx dx) (fl* dy dy)))))
+                  (values (fl/ dx d) (fl/ dy d))]
+                 [(and naa-x (fl<= naa-d 22.0))
+                  (define dx (fl- bcx naa-x))
+                  (define dy (fl- bcy naa-y))
+                  (define d (flmax 0.5 (flsqrt (fl+ (fl* dx dx) (fl* dy dy)))))
+                  (values (fl/ dx d) (fl/ dy d))]
+                 [else (values home-ux home-uy)]))
+             (define t1x (safe-coord (fl+ bcx (fl* 3.2 away-ux)) bcx))
+             (define t1y (safe-coord (fl+ bcy (fl* 3.2 away-uy)) bcy))
+             (define-values (_tx1 _ty1 t1-aa-d) (nearest-aa-pt t1x t1y))
+             (define leash-x
+               (if (fl< t1-aa-d 9.5)
+                   (safe-coord (fl+ bcx (fl* 5.2 away-ux)) bcx)
+                   t1x))
+             (define leash-y
+               (if (fl< t1-aa-d 9.5)
+                   (safe-coord (fl+ bcy (fl* 5.2 away-uy)) bcy)
+                   t1y))
+             (set-add! wave3-handled-tags mid)
+             (l34-emit-preserved! ctx (list 'move mid leash-x leash-y))))]
+        [else
+         (for ([mu (in-list empty-medivacs-p4)])
+           (define mid (hash-ref mu 'id -1))
+           (define mx (exact->inexact (hash-ref mu 'x base-x)))
+           (define my (exact->inexact (hash-ref mu 'y base-y)))
+           (define-values (naa-x naa-y naa-d) (nearest-aa-pt mx my))
+           (when (and naa-x (fl<= naa-d 12.0))
+             (define adx (fl- mx naa-x))
+             (define ady (fl- my naa-y))
+             (define ad (flmax 0.5 (flsqrt (fl+ (fl* adx adx) (fl* ady ady)))))
+             (define hdx (fl- (exact->inexact base-x) mx))
+             (define hdy (fl- (exact->inexact base-y) my))
+             (define hd (flmax 1.0 (flsqrt (fl+ (fl* hdx hdx) (fl* hdy hdy)))))
+             (define bx (fl+ (fl/ adx ad) (fl/ hdx hd)))
+             (define by (fl+ (fl/ ady ad) (fl/ hdy hd)))
+             (define bd (flmax 0.5 (flsqrt (fl+ (fl* bx bx) (fl* by by)))))
+             (define ret-x (safe-coord (fl+ mx (fl* 7.5 (fl/ bx bd))) (exact->inexact base-x)))
+             (define ret-y (safe-coord (fl+ my (fl* 7.5 (fl/ by bd))) (exact->inexact base-y)))
+             (set-add! wave3-handled-tags mid)
+             (l34-emit-preserved! ctx (list 'move mid ret-x ret-y))))]))
     ;; Lock channeling Ghosts (Snipe `2714` / `34f`) AND channeling Battlecruisers (Yamato `401`
     ;; / Jump `2358` / `52f`) in BOTH `snipe-locked-tags` & `wave3-handled-tags` so `l34-phase5b`
     ;; never overwrites an active channel with `attack-unit` or `move`!
@@ -30518,10 +31470,11 @@
                  (let ([uid (hash-ref u 'id -1)]
                        [chp (hash-ref u 'hp RUNTIME-MISSING)]
                        [mhp (hash-ref u 'max-hp RUNTIME-MISSING)])
-                   (when (and (>= (unit-mode-tracker-viking-dwell-elapsed unit-mode-tr uid frame) 135)
+                   (when (and (>= (unit-mode-tracker-viking-dwell-elapsed unit-mode-tr uid frame)
+                                  VIKING-GROUND-DWELL-FRAMES)
                               (or (eq? chp RUNTIME-MISSING) (eq? mhp RUNTIME-MISSING)
                                   (not (real? chp)) (not (real? mhp)) (<= mhp 0)
-                                  (>= chp (* 0.70 mhp))))
+                                  (>= chp (* VIKING-LAND-MIN-HP-RATIO mhp))))
                      (set! viking-needs-eval? #t)))))]
           [(eq? ut 'cyclone)
            (set! has-cyclone? #t)
@@ -30534,6 +31487,17 @@
           [(or has-thor? has-cyclone?)
            (reverse eligible-mode-rev)]
           [else '()]))
+      ;; L50-W3-1 (`d10`): Keep ALL living non-Viking allies (e.g. Cloaked Banshees handled in Wave 3)
+      ;; visible to `plan-viking-modes` for `ally-pwr` & `ally-has-stealth?` while still skipping
+      ;; ineligible Vikings!
+      (define viking-um-allies
+        (if (and has-viking? viking-needs-eval?)
+            (for/list ([u (in-list ally-units)]
+                       #:when (and (hash? u)
+                                   (or (not (memq (unit-type-sym u) '(viking viking-fighter viking-assault)))
+                                       (um-eligible? u))))
+              u)
+            '()))
       (when has-thor?
         (for ([td (in-list (plan-thor-modes um-allies enemy-units #:tracker unit-mode-tr #:current-frame frame))])
           (define uid (unit-mode-directive-unit-tag td))
@@ -30549,7 +31513,7 @@
           (set-add! wave3-handled-tags (unit-mode-directive-unit-tag hd))
           (l34-emit-preserved! ctx (unit-mode-directive->sexp hd))))
       (when (and has-viking? viking-needs-eval?)
-        (for ([vd (in-list (plan-viking-modes um-allies enemy-units
+        (for ([vd (in-list (plan-viking-modes viking-um-allies enemy-units
                                               #:tracker unit-mode-tr
                                               #:current-frame frame
                                               #:home-x (exact->inexact base-x)
@@ -31744,19 +32708,16 @@
             (cons (exact->inexact (hash-ref u 'x 0.0))
                   (exact->inexact (hash-ref u 'y 0.0))))
           '()))
-    (define p5-enemy-cap-air-over-main?
-      (and (pair? p5-ally-corruptor-pts)
-           (for/or ([ep (in-list p5-enemy-cap-air-pts)])
-             (fl<= (fast-dist2d (car ep) (cdr ep) fbase-x fbase-y) 16.0))))
+    ;; L49-W1b (Zerg Root Cause #3): Keep Corruptor volley staging/retreat ACTIVE regardless of
+    ;; enemy proximity to Main so newly hatched Corruptors never suicide 1-by-1 into 14-range
+    ;; Tempests poking Main/Natural!
     (define p5-corruptor-volley-mode?
       (and live-obs?
            (>= p5-effective-cap-air-cnt 3)
-           (pair? p5-ally-corruptor-pts)
-           (not p5-enemy-cap-air-over-main?)))
-    ;; L28-P0-3 + L33-P0-3: Scale minimum Corruptor volley size to effective (visible + OWM remembered)
-    ;; enemy capital count (`min(14, max(6, cap-air + 2))`) so 1-6 Corruptors never drip-feed into 10+ Tempests!
+           (pair? p5-ally-corruptor-pts)))
+    ;; Scale minimum Corruptor volley size to `min(18, max(8, cap-air + 3))`.
     (define p5-corr-volley-min-cnt
-      (min 14 (max 6 (+ p5-effective-cap-air-cnt 2))))
+      (min 18 (max 8 (+ p5-effective-cap-air-cnt 3))))
     (define p5-vis-enemy-air-pts
       (if p5-corruptor-volley-mode?
           (for/list ([e (in-list enemy-units)]
@@ -31771,6 +32732,10 @@
             (cons (exact->inexact (hash-ref e 'x 0.0))
                   (exact->inexact (hash-ref e 'y 0.0))))
           '()))
+    (define p5-corr-map-w
+      (exact->inexact (max 64.0 (safe-finite-real (hash-ref p5-obs 'map-width 200.0) 200.0))))
+    (define p5-corr-map-h
+      (exact->inexact (max 64.0 (safe-finite-real (hash-ref p5-obs 'map-height 200.0) 200.0))))
     (define-values (p5-corr-best-cnt p5-corr-best-x p5-corr-best-y p5-corr-stage-x p5-corr-stage-y)
       (if p5-corruptor-volley-mode?
           (let* ([cap-pt
@@ -31787,13 +32752,32 @@
                     [else (cons p5-ex0 p5-ey0)])]
                  [cap-cx (car cap-pt)]
                  [cap-cy (cdr cap-pt)]
-                 [dx-away (fl- fbase-x cap-cx)]
-                 [dy-away (fl- fbase-y cap-cy)]
+                 ;; Pick safest rear Hatchery/Lair/Hive (farthest from enemy capital air),
+                 ;; then step 17.0 tiles behind it (outside 14-range Tempest fire!).
+                 [safe-anchor
+                  (for/fold ([best-pt (cons fbase-x fbase-y)]
+                             [best-d (fast-dist2d fbase-x fbase-y cap-cx cap-cy)]
+                             #:result best-pt)
+                            ([b (in-list (let ([v (hash-ref p5-obs 'ally-buildings '())]) (if (list? v) v '())))])
+                    (if (and (hash? b)
+                             (memq (fast-canonical-structure-sym (unit-type-sym b))
+                                   '(hatchery lair hive))
+                             (real? (hash-ref b 'x #f))
+                             (real? (hash-ref b 'y #f)))
+                        (let* ([bx0 (exact->inexact (hash-ref b 'x fbase-x))]
+                               [by0 (exact->inexact (hash-ref b 'y fbase-y))]
+                               [bd (fast-dist2d bx0 by0 cap-cx cap-cy)])
+                          (if (fl> bd best-d)
+                              (values (cons bx0 by0) bd)
+                              (values best-pt best-d)))
+                        (values best-pt best-d)))]
+                 [ax0 (car safe-anchor)]
+                 [ay0 (cdr safe-anchor)]
+                 [dx-away (fl- ax0 cap-cx)]
+                 [dy-away (fl- ay0 cap-cy)]
                  [d-away (flmax 1.0 (flsqrt (fl+ (fl* dx-away dx-away) (fl* dy-away dy-away))))]
-                 [map-w (exact->inexact (max 64.0 (safe-finite-real (hash-ref p5-obs 'map-width 200.0) 200.0)))]
-                 [map-h (exact->inexact (max 64.0 (safe-finite-real (hash-ref p5-obs 'map-height 200.0) 200.0)))]
-                 [sx (flmax 6.0 (flmin (fl- map-w 6.0) (fl+ fbase-x (fl* 6.0 (fl/ dx-away d-away)))))]
-                 [sy (flmax 6.0 (flmin (fl- map-h 6.0) (fl+ fbase-y (fl* 6.0 (fl/ dy-away d-away)))))])
+                 [sx (flmax 6.0 (flmin (fl- p5-corr-map-w 6.0) (fl+ ax0 (fl* 17.0 (fl/ dx-away d-away)))))]
+                 [sy (flmax 6.0 (flmin (fl- p5-corr-map-h 6.0) (fl+ ay0 (fl* 17.0 (fl/ dy-away d-away)))))])
             (let-values ([(bc bx by)
                           (for/fold ([best-c 0] [best-x fbase-x] [best-y fbase-y])
                                     ([cp (in-list p5-ally-corruptor-pts)])
@@ -32152,23 +33136,46 @@
             (let ([x (hash-ref u 'x base-x)]
                   [y (hash-ref u 'y base-y)]
                   [t (unit-type-sym u)])
-              ;; L44-P0-1a: Stalker post-blink HV focus-fire lock (`40f` after `stalker-blink-forward-snipe`)
+              ;; L44-P0-1a + L49-W1: Stalker post-blink HV focus-fire lock (`40f` after `stalker-blink-forward-snipe`);
+              ;; once the initial HV target dies, automatically chain-focus the nearest living Sieged Tank /
+              ;; Colossus / Liberator-AG / Disruptor / HT within `<= 8.5t` so Stalkers finish ALL Tanks/Colossi!
               (define blink-hv-tgt
                 (and (eq? t 'stalker)
                      p5-blink-hv-focus-ht
                      p5-all-eng-by-id
+                     (real? x) (real? y)
                      (let ([bf-rec (hash-ref p5-blink-hv-focus-ht uid #f)])
                        (and (pair? bf-rec)
                             (<= frame (cdr bf-rec))
-                            (let ([he (hash-ref p5-all-eng-by-id (car bf-rec) #f)])
-                              (and (hash? he)
-                                   (real? x) (real? y)
-                                   (real? (hash-ref he 'x #f)) (real? (hash-ref he 'y #f))
-                                   (<= (fast-dist2d (exact->inexact x) (exact->inexact y)
-                                                    (exact->inexact (hash-ref he 'x 9999.0))
-                                                    (exact->inexact (hash-ref he 'y 9999.0)))
-                                       8.5)
-                                   he))))))
+                            (let ([fx0 (exact->inexact x)] [fy0 (exact->inexact y)])
+                              (or (let ([he (hash-ref p5-all-eng-by-id (car bf-rec) #f)])
+                                    (and (hash? he)
+                                         (real? (hash-ref he 'x #f)) (real? (hash-ref he 'y #f))
+                                         (<= (fast-dist2d fx0 fy0
+                                                          (exact->inexact (hash-ref he 'x 9999.0))
+                                                          (exact->inexact (hash-ref he 'y 9999.0)))
+                                             8.5)
+                                         he))
+                                  (let ([chained
+                                         (for/fold ([best #f] [best-sc +inf.0] #:result best)
+                                                   ([he (in-list engagement-enemies)]
+                                                    #:when (and (hash? he)
+                                                                (memq (unit-type-sym he)
+                                                                      '(siege-tank-sieged colossus liberator-ag disruptor high-templar))
+                                                                (real? (hash-ref he 'x #f)) (real? (hash-ref he 'y #f))))
+                                           (define d (fast-dist2d fx0 fy0
+                                                                  (exact->inexact (hash-ref he 'x 9999.0))
+                                                                  (exact->inexact (hash-ref he 'y 9999.0))))
+                                           (if (fl<= d 8.5)
+                                               (let ([sc (fl+ d (fl* 0.03 (exact->inexact (unit-total-hp-and-shield he))))])
+                                                 (if (fl< sc best-sc) (values he sc) (values best best-sc)))
+                                               (values best best-sc)))])
+                                    (when chained
+                                      (define ctid (hash-ref chained 'id 0))
+                                      (when (and (exact-integer? ctid) (> ctid 0))
+                                        (hash-set! p5-blink-hv-focus-ht uid
+                                                   (cons ctid (max (cdr bf-rec) (+ frame 45))))))
+                                    chained)))))))
               (define peel-tgt
                 (and (not blink-hv-tgt)
                      (pair? p5-ghost-peel-enemies)
@@ -32274,15 +33281,18 @@
                 #t]
                [(and (eq? ut 'corruptor)
                      (pair? p5-enemy-cap-air-units)
-                     (>= (max p5-corr-best-cnt (length p5-ally-corruptor-pts)
-                              (if live-obs?
-                                  (count (lambda (cu) (and (hash? cu) (eq? (unit-type-sym cu) 'corruptor))) combat-units)
-                                  0))
-                         4)
                      (let* ([fux (exact->inexact ux)]
                             [fuy (exact->inexact uy)]
+                            [local-corr-dive-cnt
+                             (if p5-corruptor-volley-mode?
+                                 (for/sum ([cp (in-list p5-ally-corruptor-pts)]
+                                           #:when (fl<= (fast-dist2d fux fuy (car cp) (cdr cp)) 12.0))
+                                   1)
+                                 (if live-obs?
+                                     (count (lambda (cu) (and (hash? cu) (eq? (unit-type-sym cu) 'corruptor))) combat-units)
+                                     0))]
                             [dive-tgt
-                             (for/fold ([best #f] [best-sc +inf.0] #:result best)
+                             (for/fold ([best #f] [best-sc +inf.0] [best-d +inf.0] #:result (cons best best-d))
                                        ([ce (in-list p5-enemy-cap-air-units)])
                                (define cid (hash-ref ce 'id #f))
                                (define cex (exact->inexact (hash-ref ce 'x 9999.0)))
@@ -32293,42 +33303,69 @@
                                           [hp (exact->inexact (+ (hash-ref ce 'hp 200.0) (hash-ref ce 'shield 0.0)))]
                                           [pri (if (eq? cty 'tempest) 0.0 1.5)]
                                           [sc (fl+ d (fl+ pri (fl* 0.006 hp)))])
-                                     (if (fl< sc best-sc) (values ce sc) (values best best-sc)))
-                                   (values best best-sc)))])
-                       (and dive-tgt
+                                     (if (fl< sc best-sc) (values ce sc d) (values best best-sc best-d)))
+                                   (values best best-sc best-d)))]
+                            [dive-ok?
+                             (and (car dive-tgt)
+                                  (if p5-corruptor-volley-mode?
+                                      (or (>= local-corr-dive-cnt p5-corr-volley-min-cnt)
+                                          (and (>= local-corr-dive-cnt 6)
+                                               (<= p5-effective-cap-air-cnt 8)
+                                               (fl<= (cdr dive-tgt) 14.0)))
+                                      (>= local-corr-dive-cnt 4)))])
+                       (and dive-ok?
                             (begin
                               (set-add! wave3-handled-tags uid)
-                              (l34-emit-preserved! ctx (list 'attack-unit uid (hash-ref dive-tgt 'id)))
+                              (l34-emit-preserved! ctx (list 'attack-unit uid (hash-ref (car dive-tgt) 'id)))
                               #t))))
                 #t]
                [(and p5-corruptor-volley-mode? (eq? ut 'corruptor))
                 (define fux (exact->inexact ux))
                 (define fuy (exact->inexact uy))
-                (define near-enemy?
-                  (or (for/or ([ep (in-list p5-vis-enemy-air-pts)])
-                        (fl<= (fast-dist2d fux fuy (car ep) (cdr ep)) 10.0))
-                      (for/or ([ep (in-list p5-vis-enemy-combat-all-pts)])
-                        (fl<= (fast-dist2d fux fuy (car ep) (cdr ep)) 12.0))))
-                (define ctarget
-                  (and (not near-enemy?)
-                       (cond
-                         [(< p5-corr-best-cnt p5-corr-volley-min-cnt)
-                          (cons p5-corr-stage-x p5-corr-stage-y)]
-                         [else
-                          (define local-corr-cnt
-                            (for/sum ([cp (in-list p5-ally-corruptor-pts)]
-                                      #:when (fl<= (fast-dist2d fux fuy (car cp) (cdr cp)) 12.0))
-                              1))
-                          (and (< local-corr-cnt 4)
-                               (fl> (fast-dist2d fux fuy p5-corr-best-x p5-corr-best-y) 14.0)
-                               (cons (safe-coord p5-corr-best-x p5-corr-stage-x)
-                                     (safe-coord p5-corr-best-y p5-corr-stage-y)))])))
+                (define local-corr-cnt
+                  (for/sum ([cp (in-list p5-ally-corruptor-pts)]
+                            #:when (fl<= (fast-dist2d fux fuy (car cp) (cdr cp)) 12.0))
+                    1))
+                (define-values (near-air-pt near-air-d)
+                  (for/fold ([bp #f] [bd +inf.0])
+                            ([ep (in-list p5-vis-enemy-air-pts)])
+                    (define d (fast-dist2d fux fuy (car ep) (cdr ep)))
+                    (if (fl< d bd) (values ep d) (values bp bd))))
+                (define under-strength?
+                  (or (< p5-corr-best-cnt p5-corr-volley-min-cnt)
+                      (< local-corr-cnt p5-corr-volley-min-cnt)))
                 (cond
-                  [ctarget
+                  [(and under-strength? near-air-pt (fl<= near-air-d 15.5))
+                   ;; L49-W1b: Actively retreat isolated/under-strength Corruptors out of 14-range
+                   ;; Tempest fire (15.5t buffer) toward safe rear staging instead of suiciding!
+                   (define ex-air (car near-air-pt))
+                   (define ey-air (cdr near-air-pt))
+                   (define adx (fl- fux ex-air))
+                   (define ady (fl- fuy ey-air))
+                   (define ad (flmax 1.0 (flsqrt (fl+ (fl* adx adx) (fl* ady ady)))))
+                   (define sdx (fl- p5-corr-stage-x fux))
+                   (define sdy (fl- p5-corr-stage-y fuy))
+                   (define sd (flmax 1.0 (flsqrt (fl+ (fl* sdx sdx) (fl* sdy sdy)))))
+                   (define vx (fl+ (fl* 0.65 (fl/ adx ad)) (fl* 0.35 (fl/ sdx sd))))
+                   (define vy (fl+ (fl* 0.65 (fl/ ady ad)) (fl* 0.35 (fl/ sdy sd))))
+                   (define vn (flmax 0.01 (flsqrt (fl+ (fl* vx vx) (fl* vy vy)))))
+                   (define rx (flmax 5.0 (flmin (fl- p5-corr-map-w 5.0) (fl+ fux (fl* 8.0 (fl/ vx vn))))))
+                   (define ry (flmax 5.0 (flmin (fl- p5-corr-map-h 5.0) (fl+ fuy (fl* 8.0 (fl/ vy vn))))))
                    (set-add! wave3-handled-tags uid)
-                   (let ([tx (car ctarget)] [ty (cdr ctarget)])
-                     (when (fl> (fast-dist2d fux fuy (exact->inexact tx) (exact->inexact ty)) 3.5)
-                       (l34-emit-preserved! ctx (list 'move uid tx ty))))
+                   (l34-emit-preserved! ctx (list 'move uid (safe-coord rx p5-corr-stage-x) (safe-coord ry p5-corr-stage-y)))
+                   #t]
+                  [(< p5-corr-best-cnt p5-corr-volley-min-cnt)
+                   (set-add! wave3-handled-tags uid)
+                   (when (fl> (fast-dist2d fux fuy p5-corr-stage-x p5-corr-stage-y) 3.5)
+                     (l34-emit-preserved! ctx (list 'move uid p5-corr-stage-x p5-corr-stage-y)))
+                   #t]
+                  [(and (< local-corr-cnt p5-corr-volley-min-cnt)
+                        (fl> (fast-dist2d fux fuy p5-corr-best-x p5-corr-best-y) 8.0))
+                   (set-add! wave3-handled-tags uid)
+                   (l34-emit-preserved! ctx
+                                        (list 'move uid
+                                              (safe-coord p5-corr-best-x p5-corr-stage-x)
+                                              (safe-coord p5-corr-best-y p5-corr-stage-y)))
                    #t]
                   [else #f])]
                [(and p5-has-phx-or-col?
@@ -32398,15 +33435,27 @@
           (and (memq (fast-canonical-unit-sym etype)
                      '(tempest carrier brood-lord broodlord battlecruiser siege-tank-sieged))
                #t))
-        ;; L44-P0-1c (`d01`/`d02` Detector Snipe): When paired with cloaked/burrowed allies,
-        ;; NEVER suppress or hold ranged units off an enemy detector (`missile-turret`,
-        ;; `photon-cannon`, `spore-crawler`, `observer`, `raven`, `overseer`) within `<= 22t`!
+        ;; L44-P0-1c + L49-W2 (`d01`/`d02` Detector Snipe + Sole Powering Pylon Disable):
+        ;; When paired with cloaked/burrowed allies, NEVER suppress or hold ranged units off
+        ;; an enemy detector OR a single powering Pylon (`>= 2` Cannons within `6.5t`) within `<= 22t`!
         (define detector-snipe-override?
           (and ally-has-stealth?
                can-hit-target?
-               (memq (fast-canonical-unit-sym etype)
-                     '(missile-turret photon-cannon spore-crawler
-                       observer observer-siege-mode raven overseer overseer-siege-mode))
+               (or (memq (fast-canonical-unit-sym etype)
+                         '(missile-turret photon-cannon spore-crawler
+                           observer observer-siege-mode raven overseer overseer-siege-mode))
+                   (and (eq? (fast-canonical-structure-sym etype) 'pylon)
+                        (>= (count (lambda (ce)
+                                     (and (hash? ce)
+                                          (not (p5-snapshot-entity? ce))
+                                          (eq? (fast-canonical-structure-sym (unit-type-sym ce)) 'photon-cannon)
+                                          (real? (hash-ref ce 'x #f)) (real? (hash-ref ce 'y #f))
+                                          (fl<= (fast-dist2d (exact->inexact ex) (exact->inexact ey)
+                                                             (exact->inexact (hash-ref ce 'x 9999.0))
+                                                             (exact->inexact (hash-ref ce 'y 9999.0)))
+                                                6.5)))
+                                   engagement-enemies)
+                            2)))
                (fl<= edist2 484.0)))
         ;; W12-P0-5-rt (`w12-tac-5`) + W15-P0-2-rt: Exempt own-territory defense, mobile/retreatable
         ;; harass units under fog-only suppression, and Contested Frontline (`margin >= -8`) skirmishes!
@@ -32542,12 +33591,9 @@
                    (not nearest-enemy-tank)
                    (not tank-supporting-vs-static?)
                    (not zergling-hold-off-pf-siege?)
-                   ;; L43-P0-1a + L43-P0-1c: Never let `tbrain` override Detector-First sniping
-                   ;; when our squad has stealth/burrow OR pull raiding Adepts off mineral-line workers!
-                   (not (and ally-has-stealth?
-                             (memq (fast-canonical-unit-sym etype)
-                                   '(missile-turret photon-cannon spore-crawler
-                                     observer observer-siege-mode raven overseer overseer-siege-mode))))
+                   ;; L43-P0-1a + L43-P0-1c + L49-W2: Never let `tbrain` override Detector-First
+                   ;; sniping (including sole powering Pylon!) OR pull raiding Adepts off workers!
+                   (not detector-snipe-override?)
                    (not (and (eq? ut 'adept)
                              (memq (fast-canonical-unit-sym etype) '(scv probe drone mule))))
                    unit-should-engage-target?
@@ -32752,6 +33798,8 @@
                     (fl< edist2 (* da da)))
                   (>= (l34-viking-screen-aa-count ctx ux uy ex ey) 3)))
            (cond
+             [(and (exact-integer? u-ab-id) (memv u-ab-id '(403 405)))
+              (void)]
              [(and (not live-obs?) is-assault? (not (null? enemy-air-or-colossus)))
               (hash-set! splash-vik-dwell-ht uid frame)
               (l34-emit! ctx (list 'cast-spell uid 'morph-viking-fighter))]
@@ -33193,17 +34241,28 @@
                                            (exact->inexact (hash-ref eb 'x 9999.0))
                                            (exact->inexact (hash-ref eb 'y 9999.0)))
                               10.5)))))
-           ;; L48-P0-1b (`ro09` Oracle `+4.5t` Lateral Flank Around Marines + `0.25` Beam-ON Floor):
+           ;; L48-P0-1b + L49-W2 (`ro09` Oracle `+7.0t` Lateral Flank Outside Marine 5.0t Range):
            ;; Hold `o-raid-safe?` down to `o-hp-rat >= 0.25` while `oracle-beam-on?`, AND whenever
-           ;; `1..4` Marines/light AA sit between the Oracle and the SCV/worker line (`> 5.0t` away),
-           ;; arc `+4.5t` laterally away from the Marine centroid around the CC straight onto the
-           ;; workers instead of flying dead-center over the Marines!
+           ;; `1..4` Marines/light AA sit between the Oracle and the SCV/worker line, arc `+7.0t`
+           ;; laterally (outside Marine `5.0t` range!) wrapping toward the TownHall mineral-line
+           ;; backside rather than flying straight through Marines or into empty space!
            (define o-raid-safe?
              (and (not o-heavy-bldg-aa?)
                   (<= o-light-aa-cnt 4)
                   (fl>= o-hp-rat (cond [oracle-beam-on? 0.25]
                                        [(<= o-light-aa-cnt 1) 0.35]
                                        [else 0.45]))))
+           (define o-any-th-near
+             (for/first ([eb (in-list (l34-ctx-enemy-bldgs ctx))]
+                         #:when (and (hash? eb)
+                                     (memq (fast-canonical-structure-sym (unit-type-sym eb))
+                                           '(command-center orbital-command planetary-fortress hatchery lair hive nexus))
+                                     (real? (hash-ref eb 'x #f)) (real? (hash-ref eb 'y #f))
+                                     (fl<= (fast-dist2d fux-o fuy-o
+                                                        (exact->inexact (hash-ref eb 'x 9999.0))
+                                                        (exact->inexact (hash-ref eb 'y 9999.0)))
+                                           26.0)))
+               eb))
            (define (oracle-flank-around-aa tx0 ty0)
              (if (= o-light-aa-cnt 0)
                  (values (safe-coord tx0 ux) (safe-coord ty0 uy) #f)
@@ -33219,23 +34278,28 @@
                         [cx (fl+ fux-o (fl* t vx))]
                         [cy (fl+ fuy-o (fl* t vy))]
                         [perp-d (fast-dist2d acx acy cx cy)]
-                        [aa-blocking? (and (fl> vlen 5.0)
-                                           (fl>= t 0.05)
-                                           (fl<= t 0.90)
-                                           (fl<= perp-d 4.2))])
+                        [aa-blocking? (and (fl> vlen 4.0)
+                                           (fl>= t -0.05)
+                                           (fl<= t 0.95)
+                                           (fl<= perp-d 6.2))])
                    (if (not aa-blocking?)
                        (values (safe-coord tx0 ux) (safe-coord ty0 uy) #f)
                        (let* ([fx-hat (fl/ vx vlen)]
                               [fy-hat (fl/ vy vlen)]
                               [nx (fl/ (fl- vy) vlen)]
                               [ny (fl/ vx vlen)]
-                              ;; Pick the `+4.5t` perpendicular side away from the Marine centroid offset
-                              ;; (defaulting to consistent north/CC-backside arc when collinear).
+                              ;; Pick the `+7.0t` perpendicular side (outside Marine `5.0t` range!)
+                              ;; wrapping toward the TownHall mineral-line backside (away from Marines).
+                              [th-ref-x (if o-any-th-near (exact->inexact (hash-ref o-any-th-near 'x tx0)) tx0)]
+                              [th-ref-y (if o-any-th-near (exact->inexact (hash-ref o-any-th-near 'y ty0)) ty0)]
+                              [th-dot (fl+ (fl* (fl- th-ref-x acx) nx) (fl* (fl- th-ref-y acy) ny))]
                               [side-dot (fl+ (fl* (fl- fux-o acx) nx) (fl* (fl- fuy-o acy) ny))]
-                              [s (cond [(fl> side-dot 0.25) 4.5]
-                                       [(fl< side-dot -0.25) -4.5]
-                                       [else 4.5])]
-                              [fwd-step (flmin 4.5 (flmax 0.0 (fl- (fast-dist2d acx acy tx0 ty0) 0.2)))])
+                              [s (cond [(fl> th-dot 0.35) 7.0]
+                                       [(fl< th-dot -0.35) -7.0]
+                                       [(fl> side-dot 0.25) 7.0]
+                                       [(fl< side-dot -0.25) -7.0]
+                                       [else 7.0])]
+                              [fwd-step (flmin 5.5 (flmax 0.0 (fl- (fast-dist2d acx acy tx0 ty0) 0.2)))])
                          (values (safe-coord (fl+ acx (fl+ (fl* fwd-step fx-hat) (fl* s nx))) tx0)
                                  (safe-coord (fl+ acy (fl+ (fl* fwd-step fy-hat) (fl* s ny))) ty0)
                                  #t))))))
@@ -33244,21 +34308,17 @@
                   o-raid-safe?
                   (< (length o-workers) 4)
                   (<= (length combat-units) 4)
-                  (for/first ([eb (in-list (l34-ctx-enemy-bldgs ctx))]
-                              #:when (and (hash? eb)
-                                          (memq (fast-canonical-structure-sym (unit-type-sym eb))
-                                                '(command-center orbital-command planetary-fortress hatchery lair hive nexus))
-                                          (real? (hash-ref eb 'x #f)) (real? (hash-ref eb 'y #f))
-                                          (fl<= (fast-dist2d fux-o fuy-o
-                                                             (exact->inexact (hash-ref eb 'x 9999.0))
-                                                             (exact->inexact (hash-ref eb 'y 9999.0)))
-                                                22.0)))
-                    eb)))
+                  o-any-th-near
+                  (fl<= (fast-dist2d fux-o fuy-o
+                                     (exact->inexact (hash-ref o-any-th-near 'x 9999.0))
+                                     (exact->inexact (hash-ref o-any-th-near 'y 9999.0)))
+                        22.0)
+                  o-any-th-near))
            (define o-fog-tx (if o-fog-th-near (exact->inexact (hash-ref o-fog-th-near 'x p5-ex0)) p5-ex0))
            (define o-fog-ty (if o-fog-th-near (exact->inexact (hash-ref o-fog-th-near 'y p5-ey0)) p5-ey0))
            (define o-fog-d (fast-dist2d fux-o fuy-o o-fog-tx o-fog-ty))
            (cond
-             [(and o-raid-safe? (>= (length o-workers) 4) oracle-beam-on?)
+             [(and o-raid-safe? (pair? o-workers) oracle-beam-on?)
               (define best-ow
                 (argmin (lambda (ew)
                           (define d (fast-dist2d fux-o fuy-o
@@ -33268,8 +34328,19 @@
                         o-workers))
               (define bwx (exact->inexact (hash-ref best-ow 'x ux)))
               (define bwy (exact->inexact (hash-ref best-ow 'y uy)))
+              (define d-ow (fast-dist2d fux-o fuy-o bwx bwy))
+              ;; L49-W1 + L49-W2: Flank laterally outside Marine `5.0t` range while `d-ow > 5.5`
+              ;; and light AA sits strictly closer to the Oracle than the workers do; once past/near
+              ;; workers, IMMEDIATELY shred via `(attack-unit ...)`!
+              (define aa-between-closer?
+                (and (>= o-light-aa-cnt 1)
+                     (fl> d-ow 5.5)
+                     (fl< (fast-dist2d fux-o fuy-o
+                                       (fl/ o-aa-sx (exact->inexact o-light-aa-cnt))
+                                       (fl/ o-aa-sy (exact->inexact o-light-aa-cnt)))
+                          d-ow)))
               (define-values (fx-wp fy-wp needs-flank?)
-                (if (and (>= o-light-aa-cnt 2) (fl> (fast-dist2d fux-o fuy-o bwx bwy) 5.5))
+                (if aa-between-closer?
                     (oracle-flank-around-aa bwx bwy)
                     (values bwx bwy #f)))
               (set-add! wave3-handled-tags uid)
@@ -33297,9 +34368,15 @@
                    (<= (length combat-units) 4)
                    (or oracle-beam-on? (and (fl>= o-en 35.0) (fl>= o-sh 35.0)))
                    (fl<= o-fog-d 22.0)
-                   (fl> o-fog-d 4.0))
-              ;; Fly `+4.5t` laterally around `<= 4` front Marines past the CC into the Fog mineral line!
-              (define-values (ox-wp oy-wp _flk?) (oracle-flank-around-aa o-fog-tx o-fog-ty))
+                   (fl> o-fog-d 2.5))
+              ;; L49-W1 + L49-W2: Push past front Marines AND `+6.5t` past the enemy TownHall into
+              ;; the mineral-line backside so workers in Fog behind the CC are revealed immediately!
+              (define ovx (fl- o-fog-tx fux-o))
+              (define ovy (fl- o-fog-ty fuy-o))
+              (define ovl (flmax 0.1 (flsqrt (fl+ (fl* ovx ovx) (fl* ovy ovy)))))
+              (define o-back-tx (safe-coord (fl+ o-fog-tx (fl* 6.5 (fl/ ovx ovl))) o-fog-tx))
+              (define o-back-ty (safe-coord (fl+ o-fog-ty (fl* 6.5 (fl/ ovy ovl))) o-fog-ty))
+              (define-values (ox-wp oy-wp _flk?) (oracle-flank-around-aa o-back-tx o-back-ty))
               (set-add! wave3-handled-tags uid)
               (l34-emit-preserved! ctx (list 'move uid ox-wp oy-wp))]
              [oracle-beam-on?
@@ -33314,50 +34391,228 @@
              [else
               (l34-emit-caster-rear-leash! ctx uid ux uy)])]
           [(raven)
-           ;; L46-P0-1b (`d10` Cloaked Banshee+Viking+Raven vs Observers): Keep Raven tethered
-           ;; `<= 4.0t` (`2.2t`) behind our friendly Viking-Fighter / air-combat centroid away
-           ;; from enemy AA threats so Raven's `11.0t` detection always illuminates cloaked
-           ;; Observers (`det 0 -> 2/2`) within Viking `9.0t` range while staying safe!
-           (define r-hp-rat (/ (exact->inexact (unit-total-hp-and-shield u))
-                               (max 1.0 (exact->inexact (hash-ref u 'max-hp 140.0)))))
-           (define fux-r (exact->inexact ux))
-           (define fuy-r (exact->inexact uy))
-           (define-values (vsx vsy vcnt asx asy acnt)
-             (for/fold ([vx 0.0] [vy 0.0] [vc 0] [ax 0.0] [ay 0.0] [ac 0])
-                       ([au (in-list combat-units)]
-                        #:when (and (hash? au)
-                                    (not (eqv? (hash-ref au 'id -1) uid))
-                                    (real? (hash-ref au 'x #f)) (real? (hash-ref au 'y #f))))
-               (define aut (fast-canonical-unit-sym (unit-type-sym au)))
-               (define aux (exact->inexact (hash-ref au 'x ux)))
-               (define auy (exact->inexact (hash-ref au 'y uy)))
-               (cond
-                 [(memq aut '(viking viking-fighter))
-                  (values (fl+ vx aux) (fl+ vy auy) (add1 vc) (fl+ ax aux) (fl+ ay auy) (add1 ac))]
-                 [(memq aut '(banshee battlecruiser liberator liberator-ag))
-                  (values vx vy vc (fl+ ax aux) (fl+ ay auy) (add1 ac))]
-                 [else (values vx vy vc ax ay ac)])))
-           (define has-vikings? (> vcnt 0))
-           (define has-air-squad? (> acnt 0))
-           (cond
-             [(and (< r-hp-rat 0.35) (fl< edist2 64.0))
-              (let-values ([(kx ky) (compute-kite-vector ux uy ex ey 3.5)])
+           ;; L46-P0-1b + L50-W3-2 (`d10` Raven Casting & Safety):
+           ;; 1. NEVER overwrite an active `pro-spellcaster-micro` cast (`interference-matrix` 3747,
+           ;;    `anti-armor-missile` 3753, `auto-turret` 1764/349) or `wave3-handled-tags` entry!
+           ;; 2. Kite away from enemy AA (`<= 8.0t`) whenever Raven HP `< 0.75` (was `< 0.35`!).
+           ;; 3. Whenever Raven has `< 50` energy (no castable spell) AND zero live enemy cloaked/
+           ;;    burrowed threats require detection, retreat Raven safely outside enemy AA
+           ;;    (`>= 9.5t` away / behind friendly army) instead of hovering `2.2t` behind Banshees
+           ;;    taking Stalker fire!
+           ;; 4. Otherwise (either cloaked/burrowed enemies need detection OR Raven has `>= 50` energy
+           ;;    while healthy `>= 0.75` HP), tether behind our Viking/air centroid so Raven's `11.0t`
+           ;;    detection illuminates Observers cleanly.
+           (define r-ab-id (hash-ref u 'order-ability-id 0))
+           (unless (or (set-member? wave3-handled-tags uid)
+                       (and (exact-integer? r-ab-id)
+                            (memv r-ab-id '(3747 3753 1764 349))))
+             (define r-hp-rat (/ (exact->inexact (unit-total-hp-and-shield u))
+                                 (max 1.0 (exact->inexact (hash-ref u 'max-hp 140.0)))))
+             (define r-en (exact->inexact (hash-ref u 'energy 0.0)))
+             (define fux-r (exact->inexact ux))
+             (define fuy-r (exact->inexact uy))
+             (define-values (near-aa-x near-aa-y near-aa-d any-enemy-cloak-or-burrow?)
+               (let-values ([(ux-aa uy-aa ud-aa clk?)
+                             (for/fold ([bx #f] [by #f] [bd +inf.0] [clk? #f])
+                                       ([e (in-list enemy-units)]
+                                        #:when (and (hash? e)
+                                                    (not (p5-snapshot-entity? e))
+                                                    (real? (hash-ref e 'x #f))
+                                                    (real? (hash-ref e 'y #f))))
+                               (define esym (fast-canonical-unit-sym (unit-type-sym e)))
+                               (define cv (hash-ref e 'cloak #f))
+                               (define e-clk?
+                                 (or clk?
+                                     (eqv? cv 1) (eqv? cv 2)
+                                     (eq? cv 'cloaked) (eq? cv 'cloaked-detected)
+                                     (eq? (hash-ref e 'cloaked #f) #t)
+                                     (eq? (hash-ref e 'burrowed #f) #t)
+                                     (and (memq esym '(observer observer-siege-mode dark-templar banshee ghost
+                                                       widow-mine widow-mine-burrowed
+                                                       lurker lurker-mp lurker-burrowed lurker-mp-burrowed
+                                                       roach-burrowed infestor-burrowed swarm-host-burrowed
+                                                       zergling-burrowed baneling-burrowed hydralisk-burrowed
+                                                       ultralisk-burrowed queen-burrowed))
+                                          #t)))
+                               (if (fast-can-attack-air? esym)
+                                   (let* ([ex0 (exact->inexact (hash-ref e 'x 9999.0))]
+                                          [ey0 (exact->inexact (hash-ref e 'y 9999.0))]
+                                          [d (fast-dist2d fux-r fuy-r ex0 ey0)])
+                                     (if (fl< d bd)
+                                         (values ex0 ey0 d e-clk?)
+                                         (values bx by bd e-clk?)))
+                                   (values bx by bd e-clk?)))])
+                 (for/fold ([bx ux-aa] [by uy-aa] [bd ud-aa] [clk? clk?])
+                           ([eb (in-list (or (l34-ctx-enemy-bldgs ctx) '()))]
+                            #:when (and (hash? eb)
+                                        (not (p5-snapshot-entity? eb))
+                                        (real? (hash-ref eb 'x #f))
+                                        (real? (hash-ref eb 'y #f))))
+                   (define ebsym (fast-canonical-structure-sym (unit-type-sym eb)))
+                   (if (memq ebsym '(missile-turret photon-cannon spore-crawler bunker))
+                       (let* ([ebx (exact->inexact (hash-ref eb 'x 9999.0))]
+                              [eby (exact->inexact (hash-ref eb 'y 9999.0))]
+                              [d (fast-dist2d fux-r fuy-r ebx eby)])
+                         (if (fl< d bd)
+                             (values ebx eby d clk?)
+                             (values bx by bd clk?)))
+                       (values bx by bd clk?)))))
+             (define-values (vsx vsy vcnt asx asy acnt)
+               (for/fold ([vx 0.0] [vy 0.0] [vc 0] [ax 0.0] [ay 0.0] [ac 0])
+                         ([au (in-list combat-units)]
+                          #:when (and (hash? au)
+                                      (not (eqv? (hash-ref au 'id -1) uid))
+                                      (real? (hash-ref au 'x #f)) (real? (hash-ref au 'y #f))))
+                 (define aut (fast-canonical-unit-sym (unit-type-sym au)))
+                 (define aux (exact->inexact (hash-ref au 'x ux)))
+                 (define auy (exact->inexact (hash-ref au 'y uy)))
+                 (cond
+                   [(memq aut '(viking viking-fighter))
+                    (values (fl+ vx aux) (fl+ vy auy) (add1 vc) (fl+ ax aux) (fl+ ay auy) (add1 ac))]
+                   [(memq aut '(banshee battlecruiser liberator liberator-ag))
+                    (values vx vy vc (fl+ ax aux) (fl+ ay auy) (add1 ac))]
+                   [else (values vx vy vc ax ay ac)])))
+             (define has-vikings? (> vcnt 0))
+             (define has-air-squad? (> acnt 0))
+             (define no-spell-no-det? (and (fl< r-en 50.0) (not any-enemy-cloak-or-burrow?)))
+             (cond
+               ;; Priority 1: Injured Raven (`HP < 0.75`) inside enemy AA (`<= 8.0t`) -> kite away!
+               [(and (fl< r-hp-rat 0.75) near-aa-x (fl<= near-aa-d 8.0))
+                (let-values ([(kx ky) (compute-kite-vector ux uy near-aa-x near-aa-y 4.5)])
+                  (set-add! wave3-handled-tags uid)
+                  (l34-emit-preserved! ctx (list 'kite uid (safe-coord kx ux) (safe-coord ky uy))))]
+               ;; Priority 2: Low-energy (`< 50`) Raven with ZERO cloaked/burrowed threats needing
+               ;; detection -> retreat safely outside enemy AA (`>= 9.5t` standoff)!
+               [(and no-spell-no-det? near-aa-x (fl< near-aa-d 9.5))
+                (define adx (fl- fux-r near-aa-x))
+                (define ady (fl- fuy-r near-aa-y))
+                (define ad (flmax 0.1 (flsqrt (fl+ (fl* adx adx) (fl* ady ady)))))
+                (define anx (fl/ adx ad))
+                (define any (fl/ ady ad))
+                (define hdx (fl- fbase-x fux-r))
+                (define hdy (fl- fbase-y fuy-r))
+                (define hd (flmax 1.0 (flsqrt (fl+ (fl* hdx hdx) (fl* hdy hdy)))))
+                (define hnx (fl/ hdx hd))
+                (define hny (fl/ hdy hd))
+                (define blend-home? (fl> (fl+ (fl* anx hnx) (fl* any hny)) -0.2))
+                (define bx (if blend-home? (fl+ (fl* 0.75 anx) (fl* 0.25 hnx)) anx))
+                (define by (if blend-home? (fl+ (fl* 0.75 any) (fl* 0.25 hny)) any))
+                (define bd (flmax 0.1 (flsqrt (fl+ (fl* bx bx) (fl* by by)))))
+                (define step (flmax 4.0 (fl- 10.5 near-aa-d)))
+                (define ret-x (safe-coord (fl+ fux-r (fl* step (fl/ bx bd))) fbase-x))
+                (define ret-y (safe-coord (fl+ fuy-r (fl* step (fl/ by bd))) fbase-y))
                 (set-add! wave3-handled-tags uid)
-                (l34-emit-preserved! ctx (list 'kite uid (safe-coord kx ux) (safe-coord ky uy))))]
-             [(or has-vikings? has-air-squad?)
-              (define anchor-x (if has-vikings? (fl/ vsx (exact->inexact vcnt)) (fl/ asx (exact->inexact acnt))))
-              (define anchor-y (if has-vikings? (fl/ vsy (exact->inexact vcnt)) (fl/ asy (exact->inexact acnt))))
-              ;; Direction from nearest enemy threat back through our Viking/air centroid (`2.2t` rear tether!)
-              (define bdx (fl- anchor-x (exact->inexact ex)))
-              (define bdy (fl- anchor-y (exact->inexact ey)))
-              (define bd (flmax 0.1 (flsqrt (fl+ (fl* bdx bdx) (fl* bdy bdy)))))
-              (define tether-x (safe-coord (fl+ anchor-x (fl* 2.2 (fl/ bdx bd))) anchor-x))
-              (define tether-y (safe-coord (fl+ anchor-y (fl* 2.2 (fl/ bdy bd))) anchor-y))
+                (l34-emit-preserved! ctx (list 'kite uid ret-x ret-y))]
+               ;; Priority 3: Low-energy (`< 50`) Raven with ZERO cloak threats already `>= 9.5t`
+               ;; outside enemy AA -> hold safe rear behind army (never walk back inside `< 9.5t` AA!).
+               [no-spell-no-det?
+                (when (or (not near-aa-x)
+                          (fl>= (fast-dist2d fcaster-leash-x fcaster-leash-y near-aa-x near-aa-y) 9.5))
+                  (l34-emit-caster-rear-leash! ctx uid ux uy))]
+               ;; Priority 4: Active detector OR spell-ready healthy Raven -> tether behind air squad!
+               [(or has-vikings? has-air-squad?)
+                (define anchor-x (if has-vikings? (fl/ vsx (exact->inexact vcnt)) (fl/ asx (exact->inexact acnt))))
+                (define anchor-y (if has-vikings? (fl/ vsy (exact->inexact vcnt)) (fl/ asy (exact->inexact acnt))))
+                (define ref-ex (or near-aa-x (exact->inexact ex)))
+                (define ref-ey (or near-aa-y (exact->inexact ey)))
+                (define bdx (fl- anchor-x ref-ex))
+                (define bdy (fl- anchor-y ref-ey))
+                (define bd (flmax 0.1 (flsqrt (fl+ (fl* bdx bdx) (fl* bdy bdy)))))
+                (define rear-off (if has-vikings? 2.2 3.5))
+                (define tether-x (safe-coord (fl+ anchor-x (fl* rear-off (fl/ bdx bd))) anchor-x))
+                (define tether-y (safe-coord (fl+ anchor-y (fl* rear-off (fl/ bdy bd))) anchor-y))
+                (set-add! wave3-handled-tags uid)
+                (when (fl> (fast-dist2d fux-r fuy-r tether-x tether-y) 1.2)
+                  (l34-emit-preserved! ctx (list 'move uid tether-x tether-y)))]
+               [else
+                (l34-emit-caster-rear-leash! ctx uid ux uy)]))]
+          [(dark-templar)
+           ;; L49-W1 (Cloaked DT Detector-Snipe Staging): When non-Blink DTs are paired with `>= 2`
+           ;; living ranged/air anti-detector allies (`stalker`/`phoenix`/`viking`/`corruptor`/etc.)
+           ;; and live enemy detectors exist within `<= 18.0t` guarded by `>= 3` enemy combat units,
+           ;; stage safely outside `12.2t` of the nearest live enemy detector (`11.0t` detection aura)
+           ;; while allies snipe the detectors FIRST — then sweep 100% undetected once detectors die!
+           (define fux-dt (exact->inexact ux))
+           (define fuy-dt (exact->inexact uy))
+           (define dt-has-blink? (shadow-stride-researched? (l34-ctx-researched-upgs ctx)))
+           (define live-enemy-dets
+             (append
+              (for/list ([e (in-list enemy-units)]
+                         #:when (and (hash? e) (not (p5-snapshot-entity? e))
+                                     (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                           '(observer observer-siege-mode overseer overseer-siege-mode raven))
+                                     (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                                     (fl<= (fast-dist2d fux-dt fuy-dt
+                                                        (exact->inexact (hash-ref e 'x 9999.0))
+                                                        (exact->inexact (hash-ref e 'y 9999.0)))
+                                           18.0)))
+                e)
+              (for/list ([eb (in-list (l34-ctx-enemy-bldgs ctx))]
+                         #:when (and (hash? eb) (not (p5-snapshot-entity? eb))
+                                     (memq (fast-canonical-structure-sym (unit-type-sym eb))
+                                           '(missile-turret photon-cannon spore-crawler))
+                                     (real? (hash-ref eb 'x #f)) (real? (hash-ref eb 'y #f))
+                                     (fl<= (fast-dist2d fux-dt fuy-dt
+                                                        (exact->inexact (hash-ref eb 'x 9999.0))
+                                                        (exact->inexact (hash-ref eb 'y 9999.0)))
+                                           18.0)))
+                eb)))
+           (define any-air-det?
+             (ormap (lambda (d)
+                      (memq (fast-canonical-unit-sym (unit-type-sym d))
+                            '(observer observer-siege-mode overseer overseer-siege-mode raven)))
+                    live-enemy-dets))
+           (define anti-det-allies-cnt
+             (if (null? live-enemy-dets)
+                 0
+                 (count (lambda (au)
+                          (and (hash? au)
+                               (let ([aut (fast-canonical-unit-sym (unit-type-sym au))])
+                                 (and (not (eq? aut 'dark-templar))
+                                      (if any-air-det?
+                                          (fast-can-attack-air? aut)
+                                          (and (fast-can-attack-ground? aut)
+                                               (let ([st (fast-unit-combat-stats aut)])
+                                                 (and (hash? st) (>= (hash-ref st 'ground-range 0.0) 4.0)))))))))
+                        combat-units)))
+           (define enemy-guard-cnt
+             (if (null? live-enemy-dets)
+                 0
+                 (count (lambda (e)
+                          (and (hash? e) (not (p5-snapshot-entity? e)) (combat-unit-record? e)
+                               (not (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                          '(observer observer-siege-mode overseer overseer-siege-mode raven
+                                            missile-turret photon-cannon spore-crawler)))
+                               (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                               (fl<= (fast-dist2d fux-dt fuy-dt
+                                                  (exact->inexact (hash-ref e 'x 9999.0))
+                                                  (exact->inexact (hash-ref e 'y 9999.0)))
+                                     16.0)))
+                        enemy-units)))
+           (cond
+             [(and (not dt-has-blink?)
+                   (pair? live-enemy-dets)
+                   (>= anti-det-allies-cnt 2)
+                   (>= enemy-guard-cnt 3))
+              (define near-det
+                (argmin (lambda (d)
+                          (fast-dist2d fux-dt fuy-dt
+                                       (exact->inexact (hash-ref d 'x ex))
+                                       (exact->inexact (hash-ref d 'y ey))))
+                        live-enemy-dets))
+              (define dtx (exact->inexact (hash-ref near-det 'x ex)))
+              (define dty (exact->inexact (hash-ref near-det 'y ey)))
+              (define d-det (fast-dist2d fux-dt fuy-dt dtx dty))
               (set-add! wave3-handled-tags uid)
-              (when (fl> (fast-dist2d fux-r fuy-r tether-x tether-y) 1.2)
-                (l34-emit-preserved! ctx (list 'move uid tether-x tether-y)))]
+              (when (fl< d-det 12.2)
+                (define vx (fl- fux-dt dtx))
+                (define vy (fl- fuy-dt dty))
+                (define vl (flmax 0.1 (flsqrt (fl+ (fl* vx vx) (fl* vy vy)))))
+                (define stg-x (safe-coord (fl+ dtx (fl* 12.6 (fl/ vx vl))) ux))
+                (define stg-y (safe-coord (fl+ dty (fl* 12.6 (fl/ vy vl))) uy))
+                (l34-emit-preserved! ctx (list 'move uid stg-x stg-y)))]
              [else
-              (l34-emit-caster-rear-leash! ctx uid ux uy)])]
+              (l34-emit-engage-or-rally! ctx uid ux uy ex ey eid nearest-enemy-tank zergling-hold-off-pf-siege? tank-supporting-vs-static? unit-should-engage-target? u ut can-hit-target? edist2 target-enemy)])]
           [(void-ray voidray)
            ;; W12-P0-4-rt (`w12-tac-4`): Activate Prismatic Alignment (`2393`, off-GCD, 960f CD)
            ;; when engaging an Armored enemy within 8.5t (+50% DPS vs Armored; never vs Light!).
@@ -33428,11 +34683,23 @@
            (define st-sh (exact->inexact (hash-ref u 'shields (hash-ref u 'shield 80.0))))
            (define st-ehp (exact->inexact (unit-total-hp-and-shield u)))
            (define st-hull (max 0.0 (- st-ehp st-sh)))
+           (define st-blink-hv-active?
+             (and used-peel-tgt?
+                  eid
+                  p5-blink-hv-focus-ht
+                  (let ([bf-rec (hash-ref p5-blink-hv-focus-ht uid #f)])
+                    (and (pair? bf-rec) (<= frame (cdr bf-rec))))
+                  (> st-ehp 45.0)))
            (define st-injured?
              (or (< st-sh 25.0)
                  (< st-hull 44.0)
                  (< (hash-ref u 'hp 100) SC2-STALKER-BLINK-HP-THRESH)))
            (cond
+             ;; L49-W2 (`b07` Post-Blink Colossus/Tank Chain Commit): While post-blink HV lock is
+             ;; active and Stalker has `> 45` EHP, suppress backward Zealot-kite / premature Blink-Back
+             ;; and keep focus-firing the living Sieged Tank / Colossus until it dies!
+             [st-blink-hv-active?
+              (l34-emit-preserved! ctx (list 'attack-unit uid eid))]
              [(and (l34-has-upgrade? ctx 'blink)
                    st-injured?
                    (or (not live-obs?)
@@ -33446,7 +34713,7 @@
                   (l34-emit-engage-or-rally! ctx uid ux uy ex ey eid nearest-enemy-tank zergling-hold-off-pf-siege? tank-supporting-vs-static? unit-should-engage-target? u ut can-hit-target? edist2 target-enemy)))]
              ;; L44-P0-1a (Post-Blink HV Focus-Fire) & L44-P0-1c (`d01`/`d02` Detector Snipe):
              ;; Immediately issue preserved `(attack-unit uid eid)` after Blink-Forward onto `best-hv`
-             ;; OR when paired with DTs/stealth units sniping an enemy Missile Turret / Photon Cannon!
+             ;; OR when paired with DTs/stealth units sniping an enemy Missile Turret / Photon Cannon / sole Pylon!
              [(and eid
                    (or used-peel-tgt?
                        (and detector-snipe-override? (fl<= edist2 256.0))))
@@ -33626,43 +34893,106 @@
                  (l34-emit! ctx (list 'kite uid (l34-quantize-cell-2.5 ctx kx ux) (l34-quantize-cell-2.5 ctx ky uy))))
                (l34-emit-engage-or-rally! ctx uid ux uy ex ey eid nearest-enemy-tank zergling-hold-off-pf-siege? tank-supporting-vs-static? unit-should-engage-target? u ut can-hit-target? edist2 target-enemy))]
           [(banshee)
-           ;; L47-P0-1b (`ro11` SP Cloaked Banshee Harass `0/16 -> 16/16`):
-           ;; When a cloaked Banshee has ZERO enemy detectors within `<= 12.5t` (undetected!),
-           ;; NEVER sit SE of a Hatchery/CC shooting a 1500-HP TownHall while enemy workers mine
-           ;; or evacuate `<= 14.0t` away! Actively chase & focus-fire visible enemy workers within
-           ;; `<= 14.0t` (or fly past the enemy TownHall into Fog mineral lines when `<= 4` raiders
-           ;; see 0 workers yet), while yielding cleanly whenever detectors exist (`d10`, `p06`)!
+           ;; L47-P0-1b + L48-P0-1b + L49-W1 (Cloaked Banshee Harass & Static-Detector Wing Avoidance):
+           ;; 1. Recognize ALL cloak states (`cloak=1/2/4`, `'cloaked`, `'cloaked-detected`, `'cloaked-allied`,
+           ;;    `'cloak-banshee` buff).
+           ;; 2. When NO mobile detector (`observer`/`overseer`/`raven`) is within `12.5t`:
+           ;;    - If NO static detector (`spore-crawler`/`missile-turret`/`photon-cannon`) is within `12.5t`,
+           ;;      actively chase & shred visible workers within `24.0t` (or push past TownHall into Fog!).
+           ;;    - If static detector(s) exist within `22.0t` (e.g., corner Spore Crawler!), compute the exact
+           ;;      safe stand-off radius (`11.2t` when enemy AA combat units like Queens guard the detector;
+           ;;      `7.8t` once AA guards are dead — safely outside `7.0t` Spore weapon range!) and arc around
+           ;;      the static detector to shred safe-wing workers (`dist(w, det) >= safe-det-r - 5.5`) from
+           ;;      `<= 6.0t` range without ever flying into detector fire!
            (define fux-b (exact->inexact ux))
            (define fuy-b (exact->inexact uy))
            (define b-buffs (hash-ref u 'buffs '()))
+           (define b-cloak-v (hash-ref u 'cloak #f))
            (define b-cloaked?
              (or (eq? (hash-ref u 'cloaked? #f) #t)
-                 (eqv? (hash-ref u 'cloak 0) 1)
+                 (eq? (hash-ref u 'cloaked #f) #t)
+                 (memv b-cloak-v '(1 2 4))
+                 (memq b-cloak-v '(cloaked cloaked-detected cloaked-allied))
                  (and (list? b-buffs)
                       (for/or ([bf (in-list b-buffs)])
                         (or (eq? bf 'cloak-banshee) (eq? bf 'cloaked) (eqv? bf 5))))))
-           (define b-detector-near?
-             (or (for/or ([e (in-list enemy-units)])
-                   (and (hash? e)
-                        (not (p5-snapshot-entity? e))
-                        (memq (fast-canonical-unit-sym (unit-type-sym e))
-                              '(observer overseer raven))
-                        (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
-                        (fl<= (fast-dist2d fux-b fuy-b
-                                           (exact->inexact (hash-ref e 'x 9999.0))
-                                           (exact->inexact (hash-ref e 'y 9999.0)))
-                              12.5)))
-                 (for/or ([eb (in-list (l34-ctx-enemy-bldgs ctx))])
-                   (and (hash? eb)
-                        (not (p5-snapshot-entity? eb))
-                        (memq (fast-canonical-structure-sym (unit-type-sym eb))
-                              '(missile-turret spore-crawler photon-cannon))
-                        (real? (hash-ref eb 'x #f)) (real? (hash-ref eb 'y #f))
-                        (fl<= (fast-dist2d fux-b fuy-b
-                                           (exact->inexact (hash-ref eb 'x 9999.0))
-                                           (exact->inexact (hash-ref eb 'y 9999.0)))
-                              12.5)))))
+           (define b-mobile-det-near?
+             (for/or ([e (in-list enemy-units)])
+               (and (hash? e)
+                    (not (p5-snapshot-entity? e))
+                    (memq (fast-canonical-unit-sym (unit-type-sym e))
+                          '(observer observer-siege-mode overseer overseer-siege-mode raven))
+                    (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                    (fl<= (fast-dist2d fux-b fuy-b
+                                       (exact->inexact (hash-ref e 'x 9999.0))
+                                       (exact->inexact (hash-ref e 'y 9999.0)))
+                          12.5))))
+           (define b-static-dets
+             (for/list ([eb (in-list (l34-ctx-enemy-bldgs ctx))]
+                        #:when (and (hash? eb)
+                                    (not (p5-snapshot-entity? eb))
+                                    (memq (fast-canonical-structure-sym (unit-type-sym eb))
+                                          '(missile-turret spore-crawler photon-cannon))
+                                    (real? (hash-ref eb 'x #f)) (real? (hash-ref eb 'y #f))
+                                    (fl<= (fast-dist2d fux-b fuy-b
+                                                       (exact->inexact (hash-ref eb 'x 9999.0))
+                                                       (exact->inexact (hash-ref eb 'y 9999.0)))
+                                          22.0)))
+               eb))
+           (define b-static-det-close?
+             (ormap (lambda (sd)
+                      (fl<= (fast-dist2d fux-b fuy-b
+                                         (exact->inexact (hash-ref sd 'x 9999.0))
+                                         (exact->inexact (hash-ref sd 'y 9999.0)))
+                            12.5))
+                    b-static-dets))
+           (define b-detector-near? (or b-mobile-det-near? b-static-det-close?))
            (define b-undetected-cloak? (and b-cloaked? (not b-detector-near?)))
+           (define b-static-det-wing-mode?
+             (and b-cloaked? (not b-mobile-det-near?) (pair? b-static-dets)))
+           (define b-aa-near-det?
+             (and b-static-det-wing-mode?
+                  (for/or ([e (in-list enemy-units)])
+                    (and (hash? e) (not (p5-snapshot-entity? e))
+                         (memq (fast-canonical-unit-sym (unit-type-sym e))
+                               '(queen marine stalker hydralisk viking-fighter phoenix corruptor mutalisk cyclone thor thor-ap))
+                         (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                         (let ([ex0 (exact->inexact (hash-ref e 'x 9999.0))]
+                               [ey0 (exact->inexact (hash-ref e 'y 9999.0))])
+                           (ormap (lambda (sd)
+                                    (fl<= (fast-dist2d ex0 ey0
+                                                       (exact->inexact (hash-ref sd 'x 9999.0))
+                                                       (exact->inexact (hash-ref sd 'y 9999.0)))
+                                          12.0))
+                                  b-static-dets))))))
+           (define b-safe-det-r (if b-aa-near-det? 11.2 7.8))
+           (define b-pt-safe-from-dets?
+             (lambda (px py)
+               (for/and ([sd (in-list b-static-dets)])
+                 (fl>= (fast-dist2d px py
+                                    (exact->inexact (hash-ref sd 'x 9999.0))
+                                    (exact->inexact (hash-ref sd 'y 9999.0)))
+                       b-safe-det-r))))
+           (define b-in-det-danger?
+             (and b-static-det-wing-mode? (not (b-pt-safe-from-dets? fux-b fuy-b))))
+           (define b-safe-wing-workers
+             (if b-static-det-wing-mode?
+                 (for/list ([e (in-list enemy-units)]
+                            #:when (and (hash? e)
+                                        (not (p5-snapshot-entity? e))
+                                        (not (eq? (hash-ref e 'hallucination #f) #t))
+                                        (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                              '(scv probe drone mule))
+                                        (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                                        (let ([ewx (exact->inexact (hash-ref e 'x 9999.0))]
+                                              [ewy (exact->inexact (hash-ref e 'y 9999.0))])
+                                          (for/and ([sd (in-list b-static-dets)])
+                                            (fl>= (fast-dist2d ewx ewy
+                                                               (exact->inexact (hash-ref sd 'x 9999.0))
+                                                               (exact->inexact (hash-ref sd 'y 9999.0)))
+                                                  (fl- b-safe-det-r 5.5))))))
+                   e)
+                 '()))
            (define b-enemy-th
              (and b-undetected-cloak?
                   (for/first ([eb (in-list (l34-ctx-enemy-bldgs ctx))]
@@ -33688,7 +35018,7 @@
                                         (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
                                         (let ([ewx (exact->inexact (hash-ref e 'x 9999.0))]
                                               [ewy (exact->inexact (hash-ref e 'y 9999.0))])
-                                          ;; L48-P0-1b (`ro11` SP): Widen undetected-cloak Banshee worker-chase
+                                          ;; L48-P0-1b: Widen undetected-cloak Banshee worker-chase
                                           ;; radius `14.0t -> 24.0t` so evacuated Drones can never outrun them!
                                           (or (fl<= (fast-dist2d fux-b fuy-b ewx ewy) 24.0)
                                               (and (fl<= (fast-dist2d fux-b fuy-b b-anchor-x b-anchor-y) 28.0)
@@ -33697,6 +35027,74 @@
                  '()))
            (define b-fog-d (fast-dist2d fux-b fuy-b b-anchor-x b-anchor-y))
            (cond
+             [b-in-det-danger?
+              ;; Step radially outside the static detector's safe stand-off radius (`safe-det-r + 0.7`)!
+              (define near-sd
+                (argmin (lambda (sd)
+                          (fast-dist2d fux-b fuy-b
+                                       (exact->inexact (hash-ref sd 'x ex))
+                                       (exact->inexact (hash-ref sd 'y ey))))
+                        b-static-dets))
+              (define sdx (exact->inexact (hash-ref near-sd 'x ex)))
+              (define sdy (exact->inexact (hash-ref near-sd 'y ey)))
+              (define vx (fl- fux-b sdx))
+              (define vy (fl- fuy-b sdy))
+              (define vl (flmax 0.1 (flsqrt (fl+ (fl* vx vx) (fl* vy vy)))))
+              (define out-x (safe-coord (fl+ sdx (fl* (fl+ b-safe-det-r 0.7) (fl/ vx vl))) ux))
+              (define out-y (safe-coord (fl+ sdy (fl* (fl+ b-safe-det-r 0.7) (fl/ vy vl))) uy))
+              (set-add! wave3-handled-tags uid)
+              (l34-emit-preserved! ctx (list 'move uid out-x out-y))]
+             [(and b-static-det-wing-mode? (pair? b-safe-wing-workers))
+              (define best-sw
+                (argmin (lambda (ew)
+                          (define ewx (exact->inexact (hash-ref ew 'x ux)))
+                          (define ewy (exact->inexact (hash-ref ew 'y uy)))
+                          (define d-u (fast-dist2d fux-b fuy-b ewx ewy))
+                          (define min-sd-d
+                            (for/fold ([md +inf.0]) ([sd (in-list b-static-dets)])
+                              (flmin md (fast-dist2d ewx ewy
+                                                     (exact->inexact (hash-ref sd 'x 9999.0))
+                                                     (exact->inexact (hash-ref sd 'y 9999.0))))))
+                          ;; Prefer workers farthest from the static detector and closest to our weapon range!
+                          (fl- (fl+ d-u (fl* 0.25 (exact->inexact (unit-total-hp-and-shield ew))))
+                               (fl* 1.4 min-sd-d)))
+                        b-safe-wing-workers))
+              (define swx (exact->inexact (hash-ref best-sw 'x ux)))
+              (define swy (exact->inexact (hash-ref best-sw 'y uy)))
+              (define d-sw (fast-dist2d fux-b fuy-b swx swy))
+              (set-add! wave3-handled-tags uid)
+              (cond
+                [(fl<= d-sw 5.9)
+                 (l34-emit-preserved! ctx (list 'attack-unit uid (hash-ref best-sw 'id eid)))]
+                [else
+                 ;; Compute safe firing anchor opposite the nearest static detector (`>= safe-det-r` from sd,
+                 ;; `<= 5.4t` from `best-sw`) and arc around the detector if the direct chord crosses inside!
+                 (define near-sd
+                   (argmin (lambda (sd)
+                             (fast-dist2d swx swy
+                                          (exact->inexact (hash-ref sd 'x ex))
+                                          (exact->inexact (hash-ref sd 'y ey))))
+                           b-static-dets))
+                 (define sdx (exact->inexact (hash-ref near-sd 'x ex)))
+                 (define sdy (exact->inexact (hash-ref near-sd 'y ey)))
+                 (define ox (fl- swx sdx))
+                 (define oy (fl- swy sdy))
+                 (define ol (flmax 0.1 (flsqrt (fl+ (fl* ox ox) (fl* oy oy)))))
+                 (define need-r (flmax 0.5 (fl- (fl+ b-safe-det-r 0.6) ol)))
+                 (define fire-x (safe-coord (fl+ swx (fl* (flmin 5.2 need-r) (fl/ ox ol))) swx))
+                 (define fire-y (safe-coord (fl+ swy (fl* (flmin 5.2 need-r) (fl/ oy ol))) swy))
+                 ;; Check if midpoint from Banshee to `fire-pt` dips inside `b-safe-det-r` of `near-sd`:
+                 (define mid-x (fl* 0.5 (fl+ fux-b fire-x)))
+                 (define mid-y (fl* 0.5 (fl+ fuy-b fire-y)))
+                 (define-values (wp-x wp-y)
+                   (if (fl< (fast-dist2d mid-x mid-y sdx sdy) b-safe-det-r)
+                       (let* ([mx (fl- mid-x sdx)]
+                              [my (fl- mid-y sdy)]
+                              [ml (flmax 0.1 (flsqrt (fl+ (fl* mx mx) (fl* my my))))])
+                         (values (safe-coord (fl+ sdx (fl* (fl+ b-safe-det-r 1.2) (fl/ mx ml))) fire-x)
+                                 (safe-coord (fl+ sdy (fl* (fl+ b-safe-det-r 1.2) (fl/ my ml))) fire-y)))
+                       (values fire-x fire-y)))
+                 (l34-emit-preserved! ctx (list 'move uid wp-x wp-y))])]
              [(and b-undetected-cloak? (pair? b-chase-workers))
               (define best-bw
                 (argmin (lambda (ew)
@@ -33995,6 +35393,8 @@
                     (and (>= ew-cnt 6) (= ec-cnt 0)))))
            (cond
              [(or z-pocket-latched? z-pocket-local?)
+              ;; L49-W1: Match Phase 2 — defend ANY enemy worker inside `<= 7.5t` of our Nexus so
+              ;; Zealot #1 guards pinned Probes across the whole mineral line until Zealot #2 pops!
               (define-values (best-ew _bd)
                 (for/fold ([best #f] [best-d +inf.0]) ([e (in-list enemy-units)])
                   (if (and (hash? e)
@@ -34005,7 +35405,7 @@
                              [eey (exact->inexact (hash-ref e 'y 9999.0))]
                              [d-u (fast-dist2d (exact->inexact ux) (exact->inexact uy) eex eey)]
                              [d-b (fast-dist2d fbase-x fbase-y eex eey)])
-                        (if (and (<= d-u 2.5) (<= d-b 6.5) (< d-u best-d))
+                        (if (and (<= d-b 7.5) (< d-u best-d))
                             (values e d-u)
                             (values best best-d)))
                       (values best best-d))))
@@ -34674,6 +36074,53 @@
                 '()))))
     (for ([sa (in-list resolved-shimmer-acts)])
       (l34-emit! ctx sa)))
+
+  ;; L49-W1 (Overseer Anti-Cloak Combat Escort): When paired with friendly anti-air / burrow-stealth
+  ;; squads (`corruptor`/`hydralisk`/`mutalisk`) engaging enemy units within `<= 22t` (and not already
+  ;; handled by shimmer/Widow-Mine response!), keep Overseer tethered `1.5t` behind our anti-air
+  ;; centroid (unmorphing Oversight if morphed) so its `11.0t` detection illuminates cloaked Observers!
+  (when (and (pair? ally-overseers) (pair? combat-units) (pair? enemy-units))
+    (define-values (aasx aasy aacnt)
+      (for/fold ([sx 0.0] [sy 0.0] [cnt 0]) ([au (in-list combat-units)])
+        (if (and (hash? au)
+                 (memq (fast-canonical-unit-sym (unit-type-sym au))
+                       '(corruptor hydralisk mutalisk))
+                 (real? (hash-ref au 'x #f)) (real? (hash-ref au 'y #f)))
+            (values (fl+ sx (exact->inexact (hash-ref au 'x base-x)))
+                    (fl+ sy (exact->inexact (hash-ref au 'y base-y)))
+                    (add1 cnt))
+            (values sx sy cnt))))
+    (when (> aacnt 0)
+      (define aax (fl/ aasx (exact->inexact aacnt)))
+      (define aay (fl/ aasy (exact->inexact aacnt)))
+      (define near-e
+        (for/fold ([best #f] [bd 22.01] #:result best) ([e (in-list enemy-units)])
+          (if (and (hash? e) (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f)))
+              (let ([d (fast-dist2d aax aay
+                                    (exact->inexact (hash-ref e 'x 9999.0))
+                                    (exact->inexact (hash-ref e 'y 9999.0)))])
+                (if (fl< d bd) (values e d) (values best bd)))
+              (values best bd))))
+      (when near-e
+        (define nex (exact->inexact (hash-ref near-e 'x aax)))
+        (define ney (exact->inexact (hash-ref near-e 'y aay)))
+        (define bdx (fl- aax nex))
+        (define bdy (fl- aay ney))
+        (define bd (flmax 0.1 (flsqrt (fl+ (fl* bdx bdx) (fl* bdy bdy)))))
+        (define ov-tx (safe-coord (fl+ aax (fl* 1.5 (fl/ bdx bd))) aax))
+        (define ov-ty (safe-coord (fl+ aay (fl* 1.5 (fl/ bdy bd))) aay))
+        (for ([ov (in-list ally-overseers)])
+          (define ovid (hash-ref ov 'id 0))
+          (when (and (> ovid 0) (not (set-member? wave3-handled-tags ovid)))
+            (define ovx (exact->inexact (hash-ref ov 'x base-x)))
+            (define ovy (exact->inexact (hash-ref ov 'y base-y)))
+            (cond
+              [(eq? (unit-type-sym ov) 'overseer-siege-mode)
+               (set-add! wave3-handled-tags ovid)
+               (l34-emit-preserved! ctx (list 'cast-spell ovid 'morph-overseer-mode))]
+              [(fl> (fast-dist2d ovx ovy ov-tx ov-ty) 1.5)
+               (set-add! wave3-handled-tags ovid)
+               (l34-emit-preserved! ctx (list 'move ovid ov-tx ov-ty))]))))))
 
   (when (and (or (hash-ref obs 'enable-deception-and-buffs #f)
                  (not (null? ally-sentries))
@@ -35639,6 +37086,17 @@
                        (>= wy (- eminy 24.0)) (<= wy (+ emaxy 24.0)))))))
       (define has-active-harass-actor? #f)
       (define p7-fog-suppress? (l34-ctx-fog-belief-suppress? ctx))
+      (define p7-combat-units (or (l34-ctx-combat-units ctx) '()))
+      (define p7-has-bio?
+        (ormap (lambda (cu)
+                 (and (hash? cu)
+                      (memq (unit-type-sym cu) '(marine marauder ghost reaper hellbat))))
+               p7-combat-units))
+      (define p7-has-widow-mine?
+        (ormap (lambda (cu)
+                 (and (hash? cu)
+                      (eq? (unit-type-sym cu) 'widow-mine)))
+               p7-combat-units))
       (define filtered-allies
         (for/list ([u (in-list free-allies)]
                    #:when (let ([ut (unit-type-sym u)])
@@ -35646,13 +37104,17 @@
                               [(hash-ref RUNTIME-NON-COMBAT-HARASS-SKIP-SET ut #f)
                                (and (hash-ref RUNTIME-WORKER-SET ut #f)
                                     (or keep-all-workers? (worker-near-any-enemy? u)))]
-                              ;; W3-TAC-7 + W15c: Never hand empty Medivacs (`cargo == 0`) or non-solo
-                              ;; ground units out of a fog-suppressed mixed slow army to `multitask-harass-and-proxy`!
+                              ;; W3-TAC-7 + W15c + L50-W1 (`#50` Medivac Over-Fly Guard): Never hand
+                              ;; empty Medivacs (`cargo == 0`) to `multitask-harass-and-proxy` when
+                              ;; friendly bio exists OR no Widow Mine exists (prevents empty Medivacs
+                              ;; flying solo across enemy Photon Cannons/AA)!
                               [(and (eq? ut 'medivac)
                                     (not (unit-medivac-loaded? u))
                                     (or p7-fog-suppress?
                                         (l34-ctx-combat-suppress-attack? ctx)
-                                        (frontline-combat-engaged? u)))
+                                        (frontline-combat-engaged? u)
+                                        p7-has-bio?
+                                        (not p7-has-widow-mine?)))
                                #f]
                               [(and p7-fog-suppress?
                                     (not enemy-near-home?)

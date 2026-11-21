@@ -2513,16 +2513,76 @@
              (define gy : Float (/ exp-sy fcnt))
              (define any-local-ally? : Boolean #f)
              (define a-pow : Float 0.0)
+             (define local-ally-cnt : Exact-Nonnegative-Integer 0)
+             (define ehp-ratio-sum : Float 0.0)
              (for ([a (in-list exp-rev)])
                (when (<= (dist-2d-sq gx gy (u-x a) (u-y a)) 144.0)
                  (set! any-local-ally? #t)
-                 (set! a-pow (+ a-pow (u-power a)))))
+                 (set! a-pow (+ a-pow (u-power a)))
+                 (set! local-ally-cnt (add1 local-ally-cnt))
+                 (define st (u-combat-stats a))
+                 (define cur-ehp (u-ehp a))
+                 (define mhp-raw (u-max-hp a))
+                 (define mhp (if (> mhp-raw 0.0)
+                                 mhp-raw
+                                 (safe-finite-real (hash-ref st 'max-hp (lambda () 0.0)) 0.0)))
+                 (define msh-raw (safe-finite-real
+                                  (or (dyn-hash-ref a 'max-shields #f)
+                                      (dyn-hash-ref a 'max-shield #f)
+                                      0.0)
+                                  0.0))
+                 (define msh (if (> msh-raw 0.0)
+                                 msh-raw
+                                 (safe-finite-real (hash-ref st 'max-shield (lambda () 0.0)) 0.0)))
+                 (define max-ehp (max cur-ehp (+ mhp msh)))
+                 (set! ehp-ratio-sum
+                       (+ ehp-ratio-sum (if (> max-ehp 0.0) (/ cur-ehp max-ehp) 1.0)))))
              (when any-local-ally?
                (define e-pow : Float 0.0)
                (for ([e (in-list enemy-units)])
                  (when (<= (dist-2d-sq gx gy (u-x e) (u-y e)) 256.0)
                    (set! e-pow (+ e-pow (u-power e)))))
-               (when (> e-pow (* 1.5 a-pow))
+               ;; L49-W2 (`#1169`/`#1171` `d04` premature Mass Recall guard):
+               ;; 1) Never recall a fresh, unhurt squad (`avg hp+shield ratio >= 0.78`)
+               ;;    unless facing a catastrophic `>= 2.8x` ambush (`L46-T1a` preserved).
+               ;; 2) Never recall a stealth-snipe squad (`>= 2` DTs + `>= 2` anti-detector
+               ;;    allies like Phoenix/Stalker) facing `<= 3` snipeable mobile detectors
+               ;;    (`overseer`/`observer`/`raven`) with 0 static detectors nearby.
+               (define avg-ehp-ratio : Float
+                 (if (> local-ally-cnt 0)
+                     (/ ehp-ratio-sum (real->double-flonum local-ally-cnt))
+                     1.0))
+               (define fresh-unhurt-squad? : Boolean (>= avg-ehp-ratio 0.78))
+               (define snipe-dt-cnt : Exact-Nonnegative-Integer 0)
+               (define snipe-anti-det-cnt : Exact-Nonnegative-Integer 0)
+               (for ([a (in-list ally-combat)])
+                 (when (<= (dist-2d-sq gx gy (u-x a) (u-y a)) 484.0)
+                   (define asym (u-sym a))
+                   (cond
+                     [(eq? asym 'dark-templar)
+                      (set! snipe-dt-cnt (add1 snipe-dt-cnt))]
+                     [(or (memq asym '(phoenix stalker void-ray tempest carrier archon sentry))
+                          (> (u-air-dps a) 0.0))
+                      (set! snipe-anti-det-cnt (add1 snipe-anti-det-cnt))])))
+               (define local-mobile-det-cnt : Exact-Nonnegative-Integer 0)
+               (define local-static-det-cnt : Exact-Nonnegative-Integer 0)
+               (for ([det (in-list enemy-detectors-recall)])
+                 (when (<= (dist-2d-sq gx gy (u-x det) (u-y det)) 576.0)
+                   (define dsym (u-sym det))
+                   (cond
+                     [(memq dsym '(overseer overseer-siege-mode observer observer-siege-mode raven))
+                      (set! local-mobile-det-cnt (add1 local-mobile-det-cnt))]
+                     [(memq dsym '(missile-turret photon-cannon spore-crawler))
+                      (set! local-static-det-cnt (add1 local-static-det-cnt))])))
+               (define stealth-snipe-squad-active? : Boolean
+                 (and (>= snipe-dt-cnt 2)
+                      (>= snipe-anti-det-cnt 2)
+                      (= local-static-det-cnt 0)
+                      (<= local-mobile-det-cnt 3)))
+               (when (and (> e-pow (* 1.5 a-pow))
+                          (not stealth-snipe-squad-active?)
+                          (or (not fresh-unhurt-squad?)
+                              (>= e-pow (* 2.8 a-pow))))
                  (define best-nx : Any (car recall-ready-nexuses))
                  (define best-d2 : Float (dist-2d-sq (u-x best-nx) (u-y best-nx) gx gy))
                  (for ([nb (in-list (cdr recall-ready-nexuses))])

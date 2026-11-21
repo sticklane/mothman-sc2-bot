@@ -460,6 +460,7 @@ def find_loop_windows(
         for pat in (
             r"LAUNCHING LOOP\s+(\d+)\b",
             r"Kick(?:ing)? off (?:Loop|Wave)\s+(\d+)\b",
+            r"Loop\s+(\d+)(?:\s+Wave\s+\d+)?\s+Kickoff\b",
             r"Wave[- ](\d+)\s+Spec\b",
             r"Loop\s+(\d+)\s+Implementation\b",
             r"Loop\s+(\d+)\s+Disjoint",
@@ -536,12 +537,13 @@ def find_loop_windows(
                 if 60 <= d_nl <= 14400 and nl > start:
                     next_launch = nl
             if next_launch is None and nxt["r1_start"] is not None:
-                # Find last archival/forensics post between our run1 end and next run1 start
-                bench_end = (
-                    (it["r2_start"] + timedelta(seconds=it["r2_wall"] or 120))
-                    if it["r2_start"]
-                    else (r1_start + timedelta(seconds=it["r1_wall"] or 900) if r1_start else start + timedelta(minutes=30))
-                )
+                # Find last archival/forensics post between benchmark end and next run1 start
+                end_cands = []
+                if r1_start:
+                    end_cands.append(r1_start + timedelta(seconds=it["r1_wall"] or 900))
+                if it["r2_start"]:
+                    end_cands.append(it["r2_start"] + timedelta(seconds=it["r2_wall"] or 120))
+                bench_end = max(end_cands) if end_cands else (start + timedelta(minutes=30))
                 # Look for analyzer/loop-architect/reporter completion post after bench_end
                 cand_ends = [
                     ev["ts"]
@@ -564,16 +566,17 @@ def find_loop_windows(
             if l_next is not None and l_next > start:
                 next_launch = l_next
             else:
-                bench_end = (
-                    (it["r2_start"] + timedelta(seconds=it["r2_wall"] or 120))
-                    if it["r2_start"]
-                    else (r1_start + timedelta(seconds=it["r1_wall"] or 1800) if r1_start else start + timedelta(minutes=45))
-                )
+                end_cands = []
+                if r1_start:
+                    end_cands.append(r1_start + timedelta(seconds=it["r1_wall"] or 1800))
+                if it["r2_start"]:
+                    end_cands.append(it["r2_start"] + timedelta(seconds=it["r2_wall"] or 120))
+                bench_end = max(end_cands) if end_cands else (start + timedelta(minutes=45))
                 cand_ends = [
                     ev["ts"]
                     for ev in board_events
                     if bench_end <= ev["ts"] <= bench_end + timedelta(minutes=45)
-                    and ev["agent"] in ("loop-architect", "analyzer", "reporter")
+                    and ev["agent"] in ("loop-architect", "analyzer", "reporter", "coordinator")
                 ]
                 next_launch = (max(cand_ends) + timedelta(seconds=5)) if cand_ends else (bench_end + timedelta(minutes=10))
 

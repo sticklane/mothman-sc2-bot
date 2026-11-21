@@ -79,10 +79,10 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
         ReportSpec(
             slug="loops-29-plus",
             out_file="loops-29-plus.html",
-            title="Campaign Updates (Loops 29–47)",
+            title="Campaign Updates (Loops 29–48)",
             short_title="Updates",
             section="Progress & Replays",
-            summary="Iteration scores, live releases, and playable 3D match clips from recent test runs.",
+            summary="Build summaries, live releases, and playable 3D match clips from recent test runs.",
             source_candidates=(brain_dir / "loops_29_plus_visual_campaign_report.md",),
             required=True,
         ),
@@ -99,10 +99,10 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
         ReportSpec(
             slug="loop-flywheel-retro",
             out_file="loop-flywheel-retro.html",
-            title="Self-Improving Loop Trajectory Audit",
-            short_title="Loop Flywheel",
+            title="Speeding Up the Test & Release Cycle",
+            short_title="Timing Review",
             section="Technical Notes",
-            summary="Empirical analysis of 29 loop trajectories (Loops 19–47): H2H-first gating, flip-flop clusters, and 1.44× ship throughput gains.",
+            summary="Where time went across 30 runs, why we moved the 2-minute head-to-head check first, and which rules kept flip-flopping.",
             source_candidates=(brain_dir / "scratch/loop/loop_flywheel_retro.md",),
             required=False,
         ),
@@ -112,7 +112,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="Loop 47 & Live Build 45 Notes",
             short_title="Loop 47 Notes",
             section="Technical Notes",
-            summary="Zero-anomaly benchmark sweep, Tactics Arena 3.0 all-time high (1.17×), and live Build 45 ladder audit (56.5% WR).",
+            summary="Build 45 ladder check (13–10), combat drill results (34–25–7), and the Barracks-cap bug that held Loop 47 back.",
             source_candidates=(
                 analyzer_dir / "loop47_forensics_prod_l45_audit.md",
                 brain_dir / "loop47_forensics_prod_l45_audit.md",
@@ -125,7 +125,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="Loop 45 Release #6 Notes",
             short_title="Loop 45 Notes",
             section="Technical Notes",
-            summary="Combined Loops 43–45 signoff: 25 external wins, 50% clean win rate on core benchmarks, and 3–0 same-race H2H sweep.",
+            summary="Loops 43–45 release check: 25 external wins, 50% on historical 12-bot set, and 3–0 mirror head-to-head sweep.",
             source_candidates=(
                 analyzer_dir / "loop45_ship6_signoff_prod_l42_audit.md",
                 brain_dir / "loop45_ship6_signoff_prod_l42_audit.md",
@@ -138,7 +138,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="Loop 42 Release & Live Build 40 Notes",
             short_title="Loop 42 Notes",
             section="Technical Notes",
-            summary="Head-to-head results before shipping build 42, live build 40 ladder update, and the Loop 43 plan.",
+            summary="Head-to-head results before shipping Build 42, live Build 40 ladder update, and the Loop 43 plan.",
             source_candidates=(
                 analyzer_dir / "loop42_ship5_signoff_prod_l40_audit.md",
                 brain_dir / "loop42_ship5_signoff_prod_l40_audit.md",
@@ -151,7 +151,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="Loop 41 & Live Build 40 Notes",
             short_title="Loop 41 Notes",
             section="Technical Notes",
-            summary="First live ladder games for build 40, local holdout gains, and what went into Loop 42.",
+            summary="First live ladder games for Build 40, local holdout gains, and what went into Loop 42.",
             source_candidates=(
                 analyzer_dir / "loop41_forensics_prod_l40_audit.md",
                 brain_dir / "loop41_forensics_prod_l40_audit.md",
@@ -164,7 +164,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="Loop 40 Release Notes",
             short_title="Loop 40 Notes",
             section="Technical Notes",
-            summary="Head-to-head results before shipping build 40, plus build 37's final ladder tally.",
+            summary="Head-to-head results before shipping Build 40, plus Build 37's final ladder tally.",
             source_candidates=(
                 analyzer_dir / "loop40_ship4_signoff_prod_l37_audit.md",
                 brain_dir / "loop40_ship4_signoff_prod_l37_audit.md",
@@ -177,7 +177,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="Loop 39 Notes",
             short_title="Loop 39 Notes",
             section="Technical Notes",
-            summary="Why we held build 39 back after head-to-head tests caught an over-aggressive army bug.",
+            summary="Why we held Build 39 back after head-to-head tests caught an over-aggressive army bug.",
             source_candidates=(
                 analyzer_dir / "loop39_forensics_prod_l37_audit.md",
                 brain_dir / "loop39_forensics_prod_l37_audit.md",
@@ -190,7 +190,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="Loop 38 Notes",
             short_title="Loop 38 Notes",
             section="Technical Notes",
-            summary="First run of the expanded combat and worker-defense tests, plus early build 37 ladder games.",
+            summary="First run of the expanded combat and worker-defense tests, plus early Build 37 ladder games.",
             source_candidates=(
                 analyzer_dir / "loop38_forensics_prod_l37_audit.md",
                 brain_dir / "loop38_forensics_prod_l37_audit.md",
@@ -203,7 +203,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="Loop 37 Notes",
             short_title="Loop 37 Notes",
             section="Technical Notes",
-            summary="Checking our four-corner building placement fixes before shipping build 37.",
+            summary="Checking our four-corner building placement fixes before shipping Build 37.",
             source_candidates=(
                 analyzer_dir / "loop37_forensics_prod_l36_audit.md",
                 brain_dir / "loop37_forensics_prod_l36_audit.md",
@@ -229,7 +229,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="First 80 AI Arena Matches",
             short_title="First 80 Matches",
             section="Technical Notes",
-            summary="Which ladder opponents gave us the most trouble early on and what we changed.",
+            summary="Which ladder opponents beat our early builds and what they exposed.",
             source_candidates=(
                 brain_dir / "prod_aiarena_run44840087005_audit.md",
                 analyzer_dir / "prod_aiarena_run44840087005_audit.md",
@@ -239,10 +239,10 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
         ReportSpec(
             slug="mirror-brain-audit",
             out_file="mirror-brain-audit.html",
-            title="Testing Our Opponent-Prediction Logic",
-            short_title="Mirror-Brain Check",
+            title="Testing Our Opponent-Prediction Code",
+            short_title="Scouting Check",
             section="Technical Notes",
-            summary="Checking whether lookahead and opponent-prediction code actually helped in real games.",
+            summary="Replay check showing simple observation beat multi-step lookahead, and which scouting signals actually helped.",
             source_candidates=(
                 brain_dir / "mirror_brain_empirical_audit.md",
                 analyzer_dir / "mirror_brain_empirical_audit.md",
@@ -255,7 +255,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="Why North Spawns Lost More Often",
             short_title="Spawn Bias Study",
             section="Technical Notes",
-            summary="Finding the hardcoded building offsets that hurt top-half spawns, especially on Ley Lines.",
+            summary="Tracking a 16-point win-rate drop on Ley Lines back to directional building and scouting offsets.",
             source_candidates=(
                 analyzer_dir / "north_vs_south_spawn_audit.md",
                 brain_dir / "north_vs_south_spawn_audit.md",
@@ -265,10 +265,10 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
         ReportSpec(
             slug="belief-engine-plan",
             out_file="belief-engine-plan.html",
-            title="Scouting & Strategy Inference",
+            title="Scouting & Hidden-Tech Clues",
             short_title="Scouting Model",
             section="Technical Notes",
-            summary="How the bots guess hidden enemy builds from early scouts and pick counters.",
+            summary="How early scouting sightings trigger detection and rush defense.",
             source_candidates=(
                 brain_dir / "post_deploy_loss_forensics_and_belief_engine_plan.md",
             ),
@@ -280,7 +280,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="Economy & Build Priorities",
             short_title="Economy Design",
             section="Technical Notes",
-            summary="How the bots balance workers, bases, and army spending against pro benchmarks.",
+            summary="How the bot balances workers, bases, and army spending against Grandmaster replay curves.",
             source_candidates=(
                 brain_dir / "pro_macro_prioritization_analysis_and_design.md",
             ),
@@ -289,10 +289,10 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
         ReportSpec(
             slug="3d-rendering-proof",
             out_file="3d-rendering-proof.html",
-            title="Video Capture Setup",
-            short_title="Capture Setup",
+            title="Recording Match & Drill Videos",
+            short_title="Video Capture",
             section="Technical Notes",
-            summary="Notes on how we record clips directly from the StarCraft II engine.",
+            summary="How we capture H.264 MP4 clips directly from the StarCraft II engine.",
             source_candidates=(brain_dir / "real_sc2_3d_rendering_proof.md",),
             required=True,
         ),
@@ -716,13 +716,16 @@ def sync_release_media(
             cached_tag = cache_data.get(tag, {})
             if any(name not in cached_tag for name in files_by_name):
                 fetched = fetch_release_assets(repo_slug, tag)
-                if fetched:
-                    mapped = {}
-                    for name in files_by_name:
-                        u = fetched.get(name) or fetched.get(gh_asset_normalized_name(name))
-                        if u:
-                            mapped[name] = u
-                    cache_data.setdefault(tag, {}).update(mapped)
+                mapped = {}
+                for name in files_by_name:
+                    norm = gh_asset_normalized_name(name)
+                    u = (fetched.get(name) or fetched.get(norm)) if fetched else None
+                    if not u and name not in cached_tag:
+                        # Local preview fallback when release has not been uploaded yet
+                        u = f"https://github.com/{repo_slug}/releases/download/{tag}/{norm}"
+                    if u:
+                        mapped[name] = u
+                cache_data.setdefault(tag, {}).update(mapped)
         return cache_data
 
     total_files = sum(len(v) for v in tag_files.values())
@@ -1111,7 +1114,7 @@ class MarkdownRenderer:
             return None
         aligns: List[str] = []
         for c in cells:
-            if not re.fullmatch(r":?-{2,}:?", c):
+            if not re.fullmatch(r":?-{1,}:?", c):
                 return None
             if c.startswith(":") and c.endswith(":"):
                 aligns.append("center")
@@ -1191,9 +1194,17 @@ class MarkdownRenderer:
                 lvl = len(h_m.group(1))
                 raw_h = h_m.group(2).strip()
                 rendered_h = self.render_inline(raw_h)
+                plain_label = html.unescape(re.sub(r"<[^>]+>", "", rendered_h))
+                # Apply calm loop titles to body <h2> headings too (not just sidebar TOC)
+                if lvl == 2:
+                    m_lp_h = re.match(r"^Loop\s+(\d+)\b", plain_label)
+                    if m_lp_h and int(m_lp_h.group(1)) in _CALM_LOOP_TITLES:
+                        lnum_h = int(m_lp_h.group(1))
+                        calm_txt = f"Loop {lnum_h}: {_CALM_LOOP_TITLES[lnum_h]}"
+                        rendered_h = html.escape(calm_txt)
+                        plain_label = calm_txt
                 slug = self._make_slug(rendered_h)
                 if record_toc and lvl == 2:
-                    plain_label = html.unescape(re.sub(r"<[^>]+>", "", rendered_h))
                     self.toc.append((lvl, slug, plain_label))
                 out.append(
                     f'<h{lvl} id="{slug}">{rendered_h}'
@@ -1397,24 +1408,25 @@ DEPLOY_LABELS: Dict[str, str] = {
     "mwskxoml_ffb8aaf1": "Loop 40",
     "womqlpsp_6917245e": "Loop 42",
     "qpqqolmk_3b21fe7a": "Loop 45",
+    "oyzplryr_dc3a33b6": "Loop 48",
 }
 
 BOT_META: Dict[str, Dict[str, str]] = {
     "Mothman-P": {
         "race": "Protoss",
-        "highlight": "Broke 1300 Elo (1310 ATH); beat Hubert (2.57×) with Disruptors and FastBC without losing a unit.",
+        "highlight": "Reached 1310 rating; beat Hubert (2.57× trade) with Disruptors and shut out FastBC with zero losses.",
     },
     "Mothman-T": {
         "race": "Terran",
-        "highlight": "66.7% live WR on Build 45 (1.64× trade); beat Slowpoke (5.41×, 18 Tanks, 0 lost) and Thssprtssbt (7.35×).",
+        "highlight": "Went 6–3 on Build 45 (1.64× trade); beat Slowpoke (5.41×, 18 Siege Tanks, 0 lost) and Thssprtssbt (7.35×).",
     },
     "Mothman-Z": {
         "race": "Zerg",
-        "highlight": "Undefeated in live ZvZ (9–0, 2.78×); beat oberon (2.61×) with 32 Lurkers and 5-base economy.",
+        "highlight": "9–0 in live ZvZ mirrors (2.78× trade); beat oberon (2.61×) on five bases with 32 Lurkers, though weak vs. Protoss.",
     },
     "Mothman-X": {
         "race": "Random",
-        "highlight": "Reached 1298 Elo ATH; beat CosmicSiege (2.34×) and MetaScoreCritic (2.86×) across all 3 races.",
+        "highlight": "Reached 1298 rating playing random races; beat CosmicSiege (2.34×) and MetaScoreCritic (2.86×).",
     },
 }
 
@@ -1557,7 +1569,7 @@ def load_dashboard_telemetry(sqlite_path: Path) -> Dict[str, Any]:
                                 {
                                     "bot": bname,
                                     "race": meta["race"],
-                                    "elo": int(belo) if belo else 1200,
+                                    "elo": int(belo) if belo else 1600,
                                     "w": int(bw or 0),
                                     "l": int(bl or 0),
                                     "trade": float(btr or 0.0),
@@ -1858,6 +1870,152 @@ def _outcome_norm(res: str) -> str:
     return "tie"
 
 
+_DRILL_WORD_MAP: Dict[str, str] = {
+    "vs": "vs.",
+    "dt": "DT",
+    "dts": "DTs",
+    "pf": "PF",
+    "bc": "BC",
+    "bcs": "BCs",
+    "scv": "SCV",
+    "scvs": "SCVs",
+    "hp": "HP",
+    "aa": "AA",
+    "emp": "EMP",
+    "aam": "AAM",
+    "ht": "HT",
+    "hts": "HTs",
+    "obs": "Observer",
+    "pvp": "PvP",
+    "pvt": "PvT",
+    "pvz": "PvZ",
+    "tvp": "TvP",
+    "tvt": "TvT",
+    "tvz": "TvZ",
+    "zvp": "ZvP",
+    "zvt": "ZvT",
+    "zvz": "ZvZ",
+    "bio": "Bio",
+    "muta": "Mutalisks",
+    "mutas": "Mutalisks",
+    "ling": "Zerglings",
+    "lings": "Zerglings",
+    "lingbane": "Ling/Bane",
+    "blueflame": "Blue-Flame",
+    "magicbox": "Magic-Box",
+    "planetary": "Planetary Fortress",
+    "dropperlord": "Dropperlord",
+    "widowmines": "Widow Mines",
+    "voidray": "Void Ray",
+    "voidrays": "Void Rays",
+    "sac": "Sacrifice",
+    "15probe": "15-Probe",
+    "12pool": "12-Pool",
+    "3adept": "3-Adept",
+    "nonblink": "Non-Blink",
+    "lowhp": "Low-HP",
+    "warpprism": "Warp Prism",
+    "widowmine": "Widow Mine",
+    "highground": "High-Ground",
+}
+
+_DRILL_TITLE_OVERRIDES: Dict[str, str] = {
+    "sc2-reg-r03-iter37-m42-pvz-ramp-hold-vs-ling-flood": "High-Ground Ramp Hold vs. Zergling Flood",
+}
+
+
+def _format_drill_title(sid: str) -> str:
+    """Turn scenario IDs like sc2-det-d10-t-cloaked-banshee-... into clean English titles."""
+    sid_clean = sid.strip()
+    if sid_clean in _DRILL_TITLE_OVERRIDES:
+        return _DRILL_TITLE_OVERRIDES[sid_clean]
+    s = re.sub(
+        r"^sc2-(?:air|blk|brw|cap|def|det|econ|flk|kit|real|reg|rmp|rsh|runby|spl|sta|trn|yam)-",
+        "",
+        sid_clean,
+        flags=re.I,
+    )
+    # Strip short scenario code prefix (e.g. d10-, p15-, ro01-, rd03-, r14-, b01-, y01-, prod5140013-)
+    s = re.sub(r"^(?:[a-z]{1,3}\d{1,2})-", "", s, flags=re.I)
+    s = re.sub(r"^prod\d+-", "", s, flags=re.I)
+    s = re.sub(r"^iter\d+-m\d+-", "", s, flags=re.I)
+    # Strip leading single race letter or matchup token when followed by descriptive words
+    s = re.sub(r"^(?:p|t|z|pvp|pvt|pvz|tvp|tvt|tvz|zvp|zvt|zvz)-", "", s, flags=re.I)
+    tokens = [tok for tok in re.split(r"[-_\s]+", s) if tok]
+    out: List[str] = []
+    for idx, tok in enumerate(tokens):
+        low = tok.lower()
+        if low in _DRILL_WORD_MAP:
+            out.append(_DRILL_WORD_MAP[low])
+        elif idx > 0 and low in ("and", "or", "in", "on", "to", "of", "the", "with", "into", "from", "then", "for"):
+            out.append(low)
+        else:
+            out.append(tok.capitalize())
+    return " ".join(out) if out else sid
+
+
+def _format_trade_label(tr: Any, outcome: str) -> str:
+    """Format trade ratio cleanly, hiding the 99.00x zero-death sentinel on losses."""
+    if not isinstance(tr, (int, float)):
+        return ""
+    val = float(tr)
+    if val >= 90.0:
+        return "0 units lost" if outcome == "win" else ""
+    return f"{val:.2f}× trade"
+
+
+def _clean_drill_caption(desc: str) -> str:
+    """Strip scenario metadata prefixes and internal tags without mid-phrase slicing."""
+    s = str(desc or "").strip()
+    if ":" in s:
+        head, tail = s.split(":", 1)
+        if len(head.strip()) <= 56 and len(tail.strip()) >= 24:
+            s = tail.strip()
+    s = re.sub(r"\bW\d+-(?:TAC|EARLY)-\d+[a-z]?(?:/\d+)?\s*", "", s)
+    s = re.sub(r"\bP2\s+active\b", "enemy", s)
+    s = re.sub(r"\bBOTH\b", "both", s)
+    s = re.sub(r"\bFIRST\b", "first", s)
+    s = s.replace("DrillingClaws", "Drilling Claws")
+    s = s.replace(
+        "measures mined minerals + kills - 50*workers_lost over 960 loops",
+        "measures mined minerals and kills minus worker losses",
+    )
+    s = s.replace(" — ", ": ")
+    s = re.sub(r"\(\s*\)", "", s)
+    s = re.sub(r"\(\s+", "(", s)
+    s = re.sub(r"\s+\)", ")", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    if len(s) <= 280:
+        return s
+    m_sent = re.match(r"^(.{60,280}?[.!?])(?:\s|$)", s)
+    if m_sent:
+        return m_sent.group(1)
+    m_paren = re.match(r"^(.{60,280}?)\s*\(", s)
+    if m_paren:
+        return m_paren.group(1).rstrip(" ,;:-") + "."
+    return s
+
+
+def _format_ledger_record(rec_raw: str) -> str:
+    """Extract concise W-L-T (WR% win, NL% win+tie) from raw loop_ledger record strings."""
+    s = str(rec_raw or "").strip()
+    m = re.search(r"(\d+)\s*W\s*[-–]\s*(\d+)\s*L(?:\s*[-–]\s*(\d+)\s*T)?", s, flags=re.I)
+    if not m:
+        return s if len(s) <= 44 else s[:41].rsplit(" ", 1)[0] + "…"
+    w = int(m.group(1))
+    l = int(m.group(2))
+    t = int(m.group(3) or 0)
+    tot = w + l + t
+    rec = f"{w}–{l}–{t}" if t else f"{w}–{l}"
+    if tot <= 0:
+        return rec
+    wr = 100.0 * w / tot
+    nl = 100.0 * (w + t) / tot
+    if t:
+        return f"{rec} ({wr:.1f}% win, {nl:.1f}% win+tie)"
+    return f"{rec} ({wr:.1f}% win)"
+
+
 def discover_gallery_items(
     brain_dir: Path,
     media_by_tag: Dict[str, Dict[str, str]],
@@ -1925,8 +2083,9 @@ def discover_gallery_items(
             if isinstance(dur, (int, float)) and dur > 0:
                 mins, secs = divmod(int(dur), 60)
                 meta_bits.append(f"{mins}:{secs:02d}")
-            if isinstance(tr, (int, float)):
-                meta_bits.append(f"{tr:.2f}× trade")
+            tr_lbl = _format_trade_label(tr, outcome)
+            if tr_lbl:
+                meta_bits.append(tr_lbl)
             if isinstance(sb, (int, float)):
                 meta_bits.append(f"{sb:.1f}% supply-blocked")
             items.append(
@@ -2015,10 +2174,11 @@ def discover_gallery_items(
                 res_label = res_raw.replace("_", " ").title() if res_raw else "Drill"
             tr = clip.get("trade_ratio") if clip.get("trade_ratio") is not None else tinfo.get("trade_ratio")
             tier_val = clip.get("tier") or tinfo.get("tier")
-            clean_name = re.sub(r"^sc2-(?:real|econ|reg|det|blk|runby|def|sta|ymt|trp|brw|spl|kcc|flk|hgr|air|ers|cap)-", "", sid).replace("-", " ")
+            clean_title = _format_drill_title(sid)
             bits = [cat_label]
-            if isinstance(tr, (int, float)):
-                bits.append(f"{tr:.2f}× trade")
+            tr_lbl = _format_trade_label(tr, outcome)
+            if tr_lbl:
+                bits.append(tr_lbl)
             if tier_val:
                 bits.append(str(tier_val))
             items.append(
@@ -2030,7 +2190,7 @@ def discover_gallery_items(
                     "race": _race_full(race_guess),
                     "outcome": outcome,
                     "result_label": res_label,
-                    "title": clean_name.title(),
+                    "title": clean_title,
                     "subtitle": " · ".join(bits),
                     "media_type": "mp4",
                     "playable_mp4": False,
@@ -2039,14 +2199,14 @@ def discover_gallery_items(
                     "poster": png_url,
                     "_local_mp4": str(mp4_local_p) if mp4_local_p else "",
                     "_safe_name": f"l{loop_num}_{mode}_{mp4_local_p.name}" if mp4_local_p else "",
-                    "search": f"loop {loop_num} {sid} {clean_name} {cat_label} {race_guess} {res_label} {tier_val or ''}".lower(),
+                    "search": f"loop {loop_num} {sid} {clean_title} {cat_label} {race_guess} {res_label} {tier_val or ''}".lower(),
                 }
             )
 
     # 3. Curated Recent Highlights (with clear plain-English captions for what to watch)
     curated_specs = [
         ("media-iter41", "arena_sc2-econ-e02-reaper-harass-mineral-defense.webp", "Loop 41", "Tactics Drills", "Zerg", "win", "Queen and Drones stop an early Reaper raid", "The Queen intercepts both raiding Reapers while the Drones keep mining at 97% uptime (+785 minerals net)."),
-        ("media-iter41", "rep_clip01_m57_Mothman-P_vs_Mulebot_first-ever.webp", "Loop 41", "Featured Clips", "Protoss", "win", "Protoss breaks through against Mulebot (9.6× trade)", "First Protoss win against held-out opponent Mulebot—Stalkers and Immortals clear the front and force a lifted base."),
+        ("media-iter41", "rep_clip01_m57_Mothman-P_vs_Mulebot_first-ever.webp", "Loop 41", "Featured Clips", "Protoss", "win", "Protoss breaks through against Mulebot (9.6× trade)", "First Protoss win against held-out opponent Mulebot: Stalkers and Immortals clear the front and force a lifted base."),
         ("media-iter41", "rep_clip06_h2h5_Mothman-P_vs_Mothman-Z-Base_h2h.webp", "Loop 41", "Featured Clips", "Protoss", "win", "Colossus and Immortals clear a Zerg base (4.5×)", "Head-to-head test against our live build: Colossus splash clears 27 Drones in six seconds with zero Protoss losses."),
         ("media-iter41", "rep_clip02_m55_Mothman-Z_vs_Mulebot_showcase.webp", "Loop 41", "Featured Clips", "Zerg", "win", "Drones and early Zerglings turn back an SCV rush (7.8×)", "When Mulebot pulls its workers across the map, Zerg pulls just enough Drones to trap them at the ramp."),
         ("media-iter41", "arena_sc2-real-p15-dt-blink-snipe-planetary.webp", "Loop 41", "Tactics Drills", "Protoss", "win", "Dark Templars blink into a Planetary Fortress", "Group blink destroys the Planetary Fortress; next we are changing this tactic to clear Missile Turrets first so the Dark Templars stay cloaked."),
@@ -2370,6 +2530,11 @@ code {
   border-radius: 3px;
   color: var(--ink);
 }
+.callout code, .clip-card code, details code {
+  background: #EAE6DA;
+  padding: 0.08rem 0.3rem;
+  box-shadow: inset 0 0 0 1px rgba(38, 37, 34, 0.11);
+}
 .code-block {
   position: relative;
   background: var(--surface);
@@ -2379,7 +2544,7 @@ code {
   overflow-x: auto;
 }
 .code-block pre { margin: 0; padding: 0.95rem 1.1rem; }
-.code-block code { background: none; padding: 0; font-size: 0.84rem; }
+.code-block code { background: none; padding: 0; box-shadow: none; font-size: 0.84rem; }
 .code-lang {
   position: absolute; top: 6px; right: 10px;
   font-size: 0.7rem; text-transform: uppercase; color: var(--muted);
@@ -2889,6 +3054,24 @@ INTERACTIVE_JS = """
   document.addEventListener('keydown', function(e) {
     if (vm.classList.contains('open') && e.key === 'Escape') closeVm();
   });
+
+  // 5. Open ancestor <details> when jumping to an in-page hash anchor (e.g. archived Loops 29-40)
+  function openDetailsForHash(hash) {
+    if (!hash || hash.length < 2) return;
+    const el = document.getElementById(decodeURIComponent(hash.slice(1)));
+    if (!el) return;
+    let p = el.parentElement;
+    while (p) {
+      if (p.tagName === 'DETAILS') p.open = true;
+      p = p.parentElement;
+    }
+  }
+  window.addEventListener('hashchange', function() { openDetailsForHash(window.location.hash); });
+  if (window.location.hash) openDetailsForHash(window.location.hash);
+  document.addEventListener('click', function(e) {
+    const a = e.target.closest('a[href^="#"]');
+    if (a) openDetailsForHash(a.getAttribute('href'));
+  });
 })();
 </script>
 """
@@ -2903,7 +3086,7 @@ MERMAID_JS = """
 
 def build_header(repo_slug: str, active_slug: str) -> str:
     nav_items = [
-        ("index", "Ladder", "./index.html", False),
+        ("index", "Overview", "./index.html", False),
         ("video-gallery", "Replays", "./video-gallery.html", False),
         ("loops-29-plus", "Updates", "./loops-29-plus.html", False),
         ("technical", "Notes", "./index.html#technical-notes", False),
@@ -2937,26 +3120,26 @@ def build_header(repo_slug: str, active_slug: str) -> str:
 
 
 _CALM_LOOP_TITLES: Dict[int, str] = {
-    29: "Arena 2.1 & self-play",
+    29: "Longer combat drills & self-play",
     30: "Zero-tie benchmark",
     31: "Head-to-head milestone",
-    32: "Unseen holdout bots",
+    32: "Held-out practice bots",
     33: "Terran macro gains",
     34: "Live release #1",
-    35: "Core benchmark breakthrough",
+    35: "Core benchmark milestone",
     36: "Live release #2",
     37: "Live release #3 (map symmetry)",
     38: "Expanded drills & parity",
     39: "Retreat check (held)",
     40: "Live release #4",
-    41: "Unseen-bot high & DT blink",
+    41: "Held-out gains & DT blink",
     42: "Live release #5",
-    43: "Tactics Arena 3.0 (held)",
+    43: "213 combat drills & Terran fixes (held)",
     44: "Detection & drop fixes (held)",
     45: "Live release #6",
-    46: "Zerg core high & p15 KO (held)",
-    47: "Zero-anomaly sweep & Arena ATH (held)",
-    48: "Live release #7",
+    46: "Zerg core high & p15 win (held)",
+    47: "Zero cloak losses & drill peak (held)",
+    48: "Live release #7 (50% core benchmark)",
 }
 
 
@@ -2999,11 +3182,11 @@ def render_page_shell(
             if m_lp:
                 lnum = int(m_lp.group(1))
                 if lnum in _CALM_LOOP_TITLES:
-                    display_lbl = f"Loop {lnum} — {_CALM_LOOP_TITLES[lnum]}"
+                    display_lbl = f"Loop {lnum}: {_CALM_LOOP_TITLES[lnum]}"
                 else:
                     rest = re.sub(r"[^\w\s.,×%/#&()-]+", "", m_lp.group(2) or "").strip()
                     short_rest = rest if len(rest) <= 28 else rest[:25].rstrip(" ,;:-") + "…"
-                    display_lbl = f"Loop {lnum} — {short_rest}" if short_rest else f"Loop {lnum}"
+                    display_lbl = f"Loop {lnum}: {short_rest}" if short_rest else f"Loop {lnum}"
             else:
                 clean_lbl = re.sub(r"[^\w\s.,×%/#&()'–—-]+", "", lbl).strip()
                 display_lbl = clean_lbl if len(clean_lbl) <= 40 else clean_lbl[:37].rstrip(" ,;:-") + "…"
@@ -3250,6 +3433,8 @@ def _build_showcase_card(
     poster: str,
     download_url: str,
     playable_mp4: bool,
+    title_html: Optional[str] = None,
+    caption_html: Optional[str] = None,
 ) -> str:
     media_html = render_video_element(
         src=src,
@@ -3258,11 +3443,13 @@ def _build_showcase_card(
         download_url=download_url,
         playable_mp4=playable_mp4,
     )
+    t_out = title_html if title_html is not None else html.escape(title)
+    c_out = caption_html if caption_html is not None else html.escape(caption)
     return (
         f'<article class="clip-card">'
         f'<div class="gallery-meta-row"><span>{html.escape(meta_left)}</span></div>'
-        f"<h4>{html.escape(title)}</h4>"
-        f'<figure class="clip-figure">{media_html}<figcaption>{html.escape(caption)}</figcaption></figure>'
+        f"<h4>{t_out}</h4>"
+        f'<figure class="clip-figure">{media_html}<figcaption>{c_out}</figcaption></figure>'
         f"</article>"
     )
 
@@ -3379,19 +3566,18 @@ def build_index_page(
         smeta = scen_meta_by_id[sid]
         cat = str(smeta.get("category") or "other")
         sres = arena_res_by_id.get(sid, {})
-        desc = str(smeta.get("description") or it.get("subtitle") or "")
-        desc = re.sub(r"^(?:Real SC2|Pro-DB|Match-forensics|Replay Regression|Econ-Harass)[^:]*:\s*", "", desc)
-        if len(desc) > 135:
-            desc = desc[:132].rsplit(" ", 1)[0].rstrip(" ,;:-(") + "…"
+        desc = _clean_drill_caption(str(smeta.get("description") or it.get("subtitle") or ""))
+        outcome_val = str(it.get("outcome") or "win")
         tr = sres.get("trade_ratio")
-        tr_str = f" · {float(tr):.2f}× trade" if isinstance(tr, (int, float)) else ""
+        tr_lbl = _format_trade_label(tr, outcome_val)
+        tr_str = f" · {tr_lbl}" if tr_lbl else ""
         clips_by_cat.setdefault(cat, []).append(
             {
                 "id": sid,
                 "meta": f"{it.get('loop', f'Loop {arena_loop_num}')} · {it.get('race', '')}{tr_str}",
-                "outcome": it.get("outcome", "win"),
+                "outcome": outcome_val,
                 "result_label": it.get("result_label", "Drill"),
-                "title": it.get("title", sid),
+                "title": it.get("title", _format_drill_title(sid)),
                 "caption": desc,
                 "src": it["src"],
                 "poster": it.get("poster", ""),
@@ -3404,31 +3590,39 @@ def build_index_page(
     match_flagships = [
         (
             "showcase:h2h003",
-            "Loop 45 · Protoss · H2H Gate",
-            "Mothman-P vs. Live Build #5 (PvP · 3.40×)",
-            "Clean Protoss mirror sweep against the prior live ladder build with Blink Stalkers, Immortals, and Colossi.",
+            "Loop 45 · Protoss · Head-to-Head",
+            "Mothman-P vs. Build 42 (PvP · 3.40×)",
+            "Protoss mirror win over the previous ladder build with Blink Stalkers, Immortals, and Colossi.",
+            None,
+            None,
         ),
         (
             "showcase:h2h006",
-            "Loop 45 · Terran · H2H Gate",
-            "Mothman-T vs. Live Build #5 (TvZ · 6.32×)",
-            "Bio-Tank-Medivac push crushes Zerg macro after fixing the false Greater Spire anti-air panic bug.",
+            "Loop 45 · Terran · Head-to-Head",
+            "Mothman-T vs. Build 42 (TvZ · 6.32×)",
+            "Infantry, Siege Tank, and Medivac push breaks Zerg's expansions after fixing the dead-Broodling anti-air bug.",
+            None,
+            None,
         ),
         (
             "showcase:m074",
-            "Loop 45 · Terran · Unseen Holdout",
-            "Mothman-T vs. who (TvT · 23.75×)",
-            "First Terran victory against held-out opponent who—crisp tank positioning and 1.8% supply-block discipline.",
+            "Loop 45 · Terran · Held-Out Bot",
+            "Mothman-T vs. who (TvP · 23.75×)",
+            "First Terran win against held-out bot who, finished under nine minutes with 1.8% supply-blocked time.",
+            "Mothman-T vs. <code>who</code> (TvP · 23.75×)",
+            "First Terran win against held-out bot <code>who</code>, finished under nine minutes with 1.8% supply-blocked time.",
         ),
         (
             "showcase:h2h002",
-            "Loop 45 · Terran · H2H Gate",
-            "Mothman-T vs. Live Build #5 (TvT · 2.18×)",
-            "Same-race Terran mirror sweep driven by faster Tank production and unified expansion timing.",
+            "Loop 45 · Terran · Head-to-Head",
+            "Mothman-T vs. Build 42 (TvT · 2.18×)",
+            "Terran mirror win over Build 42 behind earlier Siege Tanks and faster second-base timing.",
+            None,
+            None,
         ),
     ]
     featured_cards: List[str] = []
-    for key, meta_l, title, cap in match_flagships:
+    for key, meta_l, title, cap, title_h, cap_h in match_flagships:
         if key in staged_mp4_map:
             featured_cards.append(
                 _build_showcase_card(
@@ -3439,6 +3633,8 @@ def build_index_page(
                     poster=staged_poster_map.get(key, ""),
                     download_url=staged_mp4_map[key],
                     playable_mp4=True,
+                    title_html=title_h,
+                    caption_html=cap_h,
                 )
             )
     if len(featured_cards) < 4:
@@ -3456,14 +3652,24 @@ def build_index_page(
                 )
             )
 
-    # 4. Reading Lists (Updates & Technical Notes)
+    # 4. Reading Lists (Updates & Technical Notes — 7 evergreen visible + collapsible per-loop archive)
     progress_items = [
         '<li class="doc-item">'
         '<a class="doc-item-title" href="./video-gallery.html">Replay library</a>'
         '<p class="doc-item-desc">Filterable recordings of full matches and combat drills by loop, race, opponent, and outcome.</p>'
         "</li>"
     ]
-    tech_items = []
+    evergreen_order = (
+        "loop-flywheel-retro",
+        "north-vs-south-audit",
+        "mirror-brain-audit",
+        "pro-macro-design",
+        "belief-engine-plan",
+        "prod-audit",
+        "3d-rendering-proof",
+    )
+    evergreen_by_slug: Dict[str, str] = {}
+    per_loop_items: List[str] = []
     for sp in published_specs:
         li = (
             f'<li class="doc-item">'
@@ -3473,8 +3679,20 @@ def build_index_page(
         )
         if sp.section in ("Progress & Replays", "Write-ups"):
             progress_items.append(li)
+        elif sp.slug in evergreen_order:
+            evergreen_by_slug[sp.slug] = li
         else:
-            tech_items.append(li)
+            per_loop_items.append(li)
+
+    evergreen_items = [evergreen_by_slug[sl] for sl in evergreen_order if sl in evergreen_by_slug]
+    per_loop_archive_html = (
+        "<details style=\"margin-top:0.85rem;\">"
+        "<summary>Per-loop forensic notes &amp; raw run log (Loops 36–47)</summary>"
+        f'<ul class="doc-list" style="margin-top:0.65rem;">{"".join(per_loop_items)}</ul>'
+        "</details>"
+        if per_loop_items
+        else ""
+    )
 
     # 5. Collapsible Engineering Ledger (for developers)
     ledger_path = repo_dir / "tools/iteration-loop/loop_ledger.json"
@@ -3488,8 +3706,7 @@ def build_index_page(
             for it in recent:
                 it_id = html.escape(str(it.get("id", "")))
                 clean_n = html.escape(str(it.get("clean_n", "")))
-                rec_raw = str(it.get("record_clean", ""))
-                rec_short = rec_raw if len(rec_raw) <= 68 else rec_raw[:65] + "…"
+                rec_short = _format_ledger_record(str(it.get("record_clean", "")))
                 tr = it.get("trade_agg")
                 tr_s = f"{tr:.2f}×" if isinstance(tr, (int, float)) else "—"
                 sb = it.get("sup_blk_pct")
@@ -3523,15 +3740,27 @@ def build_index_page(
         except Exception:
             ledger_section = ""
 
-    # Dynamic live-ladder caption
+    # Dynamic live-ladder eyebrow & caption (distinguish live deployed build vs. latest build with >=8 ladder games)
     latest_ties = max(0, latest_n - latest_w - latest_l)
     latest_rec_str = f"{latest_w}–{latest_l}" + (f"–{latest_ties}" if latest_ties else "")
-    latest_pct = round(100.0 * latest_w / max(1, latest_n), 1)
+    prev_n_val = dash.get("prev_build_n", prev_w + prev_l)
+    prev_ties = max(0, prev_n_val - prev_w - prev_l)
+    prev_rec_str = f"{prev_w}–{prev_l}" + (f"–{prev_ties}" if prev_ties else "")
+    deployed_build_num = 48
+    latest_num_m = re.search(r"(\d+)", latest_lbl)
+    prev_num_m = re.search(r"(\d+)", prev_lbl)
+    latest_b_num = int(latest_num_m.group(1)) if latest_num_m else 45
+    prev_b_num = int(prev_num_m.group(1)) if prev_num_m else 42
+    if latest_b_num >= deployed_build_num:
+        eyebrow_txt = f"AI Arena Ladder · Live Build {latest_b_num}"
+        recent_note_builds = f"Builds {prev_b_num} and {latest_b_num} ({comb_w} wins, {comb_l} losses across completed ladder games)"
+    else:
+        eyebrow_txt = f"AI Arena Ladder · Live Build {deployed_build_num} (Stats: Builds {prev_b_num} & {latest_b_num})"
+        recent_note_builds = f"Builds {prev_b_num} and {latest_b_num} ({comb_w} wins, {comb_l} losses across completed ladder games; Build {deployed_build_num} just deployed)"
+
     live_caption = (
-        f"Live ladder win rate rose from 0% on our earliest deployment to {latest_pct:.1f}% on "
-        f"{html.escape(latest_lbl)} ({latest_rec_str}, {latest_tr:.2f}× trade across {latest_n} games), "
-        f"following {prev_pct:.1f}% on {html.escape(prev_lbl)} ({prev_w}–{prev_l}). "
-        f"Combined recent live record: {comb_w}–{comb_l} ({comb_pct:.0f}%)."
+        f"Our first deployed build went 0–10 on the ladder. Recent builds win roughly 55–60% of their matches: "
+        f"Build {prev_b_num} went {prev_rec_str} and Build {latest_b_num} is {latest_rec_str} with a {latest_tr:.2f}× trade ratio."
     )
 
     sec_loop = render_loop_diagram_section(rich)
@@ -3542,20 +3771,21 @@ def build_index_page(
 
     body = f"""
 <header class="masthead wide-col">
-  <p class="eyebrow">AI Arena · Live Build: {html.escape(latest_lbl)} · {rich['live_perf']['total_replays']:,} Analyzed Replays</p>
+  <p class="eyebrow">{html.escape(eyebrow_txt)}</p>
   <h1>Mothman StarCraft II Bots</h1>
   <p class="lead" style="max-width:720px;">
-    Four autonomous bots (Protoss, Terran, Zerg, and Random) written in Racket competing live on AI Arena,
-    guided by 213 engine combat drills, 90-match local benchmarks, and a self-auditing trajectory loop.
+    Four StarCraft II bots written in Racket play Protoss, Terran, Zerg, and Random on the public AI Arena ladder.
+    New builds are tested in short combat drills, a head-to-head match against the current live bot,
+    and an 84-game local practice set before going live.
   </p>
   <nav class="jump-bar" aria-label="Report sections">
     <a href="#standings-heading">Standings</a>
-    <a href="#loop-section">1. Loop &amp; Flywheel</a>
-    <a href="#architecture-section">2. Architecture</a>
-    <a href="#tactics-section">3. Tactics Arena 3.0</a>
-    <a href="#matchups-section">4. Matchups (PvP–ZvZ)</a>
-    <a href="#issues-section">5. Issues Fixed</a>
-    <a href="#replays-heading">6. Match Replays</a>
+    <a href="#loop-section">1. Testing &amp; Releases</a>
+    <a href="#architecture-section">2. How the Bot Plays</a>
+    <a href="#tactics-section">3. Combat Drills</a>
+    <a href="#matchups-section">4. Matchup Results</a>
+    <a href="#issues-section">5. Bugs Fixed</a>
+    <a href="#replays-heading">6. Replays</a>
     <a href="#technical-notes">Notes</a>
   </nav>
 </header>
@@ -3571,7 +3801,7 @@ def build_index_page(
           <th style="text-align:right">Rating</th>
           <th style="text-align:right">Recent</th>
           <th style="text-align:right">Trade</th>
-          <th>Recent highlight</th>
+          <th>Recent games</th>
         </tr>
       </thead>
       <tbody>{"".join(bot_rows)}</tbody>
@@ -3581,11 +3811,20 @@ def build_index_page(
     {"".join(mobile_standing_rows)}
   </div>
   <p class="table-note">
-    Recent records combine our last two live releases ({html.escape(prev_lbl)} and {html.escape(latest_lbl)}:
-    {comb_w}–{comb_l} overall). Trade ratio = enemy resource value destroyed ÷ value lost (&gt;1.0× = positive trades).
+    AI Arena ratings start at 1600. Recent records combine {html.escape(recent_note_builds)}.
+    Trade ratio divides enemy army and worker value destroyed by our own value lost, so 1.0× is an even trade.
   </p>
+  <details style="margin-top:0.75rem;">
+    <summary>StarCraft II and benchmark terms used on this page</summary>
+    <ul class="compact-list" style="margin-top:0.5rem;">
+      <li><strong>Supply-blocked:</strong> Share of match time the bot could not train units because it hit its current supply cap (Pylons, Supply Depots, or Overlords). Lower is better; under 4% is solid.</li>
+      <li><strong>Natural expansion:</strong> The second base site just outside a player's starting main base.</li>
+      <li><strong>Bio / 1-1-1 / 12-Pool:</strong> <em>Bio</em> is Terran infantry (Marines, Marauders, Medivacs). <em>1-1-1</em> is opening one Barracks, one Factory, and one Starport. <em>12-Pool</em> is an immediate Zergling rush started at 12 workers.</li>
+      <li><strong>14 Core Bots vs. All 26 Local Bots:</strong> Locally we test against 14 regular practice bots (<em>Core-14</em>) plus 12 held-out bots (<em>Unseen-12</em>) that we never tune against directly, so we can tell whether a change generalizes. Matches hitting the 30-minute time limit count as ties.</li>
+    </ul>
+  </details>
   <figure class="figure-block" style="margin-top:1.35rem;">
-    <div class="figure-label">Figure 1 · Live Ladder Trajectory</div>
+    <div class="figure-label">Figure 1 · Ladder History</div>
     <div class="figure-title">Win rate and trade ratio across live AI Arena builds</div>
     {chart_live_svg}
     <figcaption class="figure-caption">{live_caption}</figcaption>
@@ -3601,10 +3840,10 @@ def build_index_page(
 <section class="section-rule wide-col" aria-labelledby="replays-heading">
   <div class="section-head">
     <p class="section-num">Section 6</p>
-    <h2 id="replays-heading" class="section-kicker">Featured Full-Match Replays</h2>
+    <h2 id="replays-heading" class="section-kicker">Full-Match Replays</h2>
     <p class="section-intro">
-      Key full-length matches from Live Release #6 (Loop 45), playable directly in mobile and desktop browsers.
-      <a href="./video-gallery.html">Browse all {len(gallery_items)} replays &amp; drills →</a>
+      Full-length games from Build 45 playable directly in your browser.
+      <a href="./video-gallery.html">Browse all {len(gallery_items):,} match replays and combat drills →</a>
     </p>
   </div>
   <div class="featured-grid">{"".join(featured_cards)}</div>
@@ -3614,11 +3853,12 @@ def build_index_page(
   <h2 class="section-kicker">Campaign Updates</h2>
   <ul class="doc-list">{"".join(progress_items)}</ul>
 
-  <h2 id="technical-notes" class="section-kicker" style="margin-top:2.4rem;">Technical Notes &amp; Audits</h2>
+  <h2 id="technical-notes" class="section-kicker" style="margin-top:2.4rem;">Technical Notes</h2>
   <p class="prose-tight">
-    Detailed loop forensics, empirical subsystem audits, and the automated trajectory flywheel report.
+    Deep dives into map symmetry, scouting accuracy, economy priorities, and testing speed, followed by per-loop notes.
   </p>
-  <ul class="doc-list">{"".join(tech_items)}</ul>
+  <ul class="doc-list">{"".join(evergreen_items)}</ul>
+  {per_loop_archive_html}
 
   {ledger_section}
 </section>
@@ -3685,10 +3925,10 @@ def build_static_site(
 
     loop_root = brain_dir / "scratch" / "loop"
     flagship_specs = [
-        ("showcase:p15", loop_root / "visuals_iter47/arena/sc2-real-p15-dt-blink-snipe-planetary.mp4", "feat_p15_dt_pf.mp4"),
-        ("showcase:d10", loop_root / "visuals_iter47/arena/sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker.mp4", "feat_d10_banshee_obs.mp4"),
-        ("showcase:ro01", loop_root / "visuals_iter47/arena/sc2-runby-ro01-tvz-widow-mine-drop-drones.mp4", "feat_ro01_widow_mine.mp4"),
-        ("showcase:ro04", loop_root / "visuals_iter47/arena/sc2-runby-ro04-tvz-blueflame-hellion-runby-drones.mp4", "feat_ro04_hellion.mp4"),
+        ("showcase:p15", loop_root / "visuals_iter48/arena/sc2-real-p15-dt-blink-snipe-planetary.mp4", "feat_p15_dt_pf.mp4"),
+        ("showcase:d10", loop_root / "visuals_iter48/arena/sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker.mp4", "feat_d10_banshee_obs.mp4"),
+        ("showcase:ro01", loop_root / "visuals_iter48/arena/sc2-runby-ro01-tvz-widow-mine-drop-drones.mp4", "feat_ro01_widow_mine.mp4"),
+        ("showcase:ro04", loop_root / "visuals_iter48/arena/sc2-runby-ro04-tvz-blueflame-hellion-runby-drones.mp4", "feat_ro04_hellion.mp4"),
         ("showcase:h2h003", loop_root / "visuals_iter45/full_matches/full_h2h003_Mothman-P_vs_Mothman-P-Base.mp4", "feat_l45_h2h003_pvp.mp4"),
         ("showcase:h2h006", loop_root / "visuals_iter45/full_matches/full_h2h006_Mothman-T_vs_Mothman-Z-Base.mp4", "feat_l45_h2h006_tvz.mp4"),
         ("showcase:m074", loop_root / "visuals_iter45/full_matches/full_m074_Mothman-T_vs_who.mp4", "feat_l45_m074_tvt_who.mp4"),
@@ -3799,6 +4039,42 @@ def build_static_site(
             staged_poster_map=staged_poster_map,
         )
         body_html = renderer.render_blocks(rewritten_md, record_toc=True)
+        _EVERGREEN_NOTE_BANNERS: Dict[str, str] = {
+            "north-vs-south-audit": "Historical engineering note recorded during Loop 37 while investigating map spawn symmetry.",
+            "mirror-brain-audit": "Historical engineering note recorded during Loop 34 evaluating replay prediction accuracy.",
+            "pro-macro-design": "Historical design note recorded during early economy tuning against Grandmaster replay curves.",
+            "belief-engine-plan": "Historical design note recorded after our first live ladder runs, detailing how scouting sightings trigger detection and defense.",
+            "prod-audit": "Historical match review recorded during Loop 36 covering our first 80 public AI Arena games.",
+            "3d-rendering-proof": "Engineering note documenting how we capture H.264 MP4 match and combat drill videos directly from the StarCraft II engine.",
+        }
+        m_foren = re.match(r"^loop(\d+)-forensics$", sp.slug)
+        if m_foren:
+            lnum_f = m_foren.group(1)
+            banner = (
+                '<div class="callout callout-note">'
+                '<div class="callout-label">Note</div>'
+                f'<div class="callout-body"><p>Internal engineering notes and task breakdown recorded during Loop {lnum_f}.</p></div>'
+                "</div>\n"
+            )
+            body_html = banner + body_html
+        elif sp.slug in _EVERGREEN_NOTE_BANNERS:
+            calm_h1 = f"<h1>{html.escape(sp.title)}</h1>"
+            note_banner = (
+                '\n<div class="callout callout-note">'
+                '<div class="callout-label">Note</div>'
+                f'<div class="callout-body"><p>{html.escape(_EVERGREEN_NOTE_BANNERS[sp.slug])}</p></div>'
+                "</div>\n"
+            )
+            if re.search(r"<h1\b[^>]*>.*?</h1>", body_html, flags=re.S):
+                body_html = re.sub(
+                    r"<h1\b[^>]*>.*?</h1>",
+                    lambda _m: calm_h1 + note_banner,
+                    body_html,
+                    count=1,
+                    flags=re.S,
+                )
+            else:
+                body_html = calm_h1 + note_banner + body_html
         full_html = render_page_shell(
             repo_slug=repo_slug,
             title=sp.title,

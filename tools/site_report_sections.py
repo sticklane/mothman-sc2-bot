@@ -11,6 +11,7 @@ from __future__ import annotations
 import concurrent.futures
 import html
 import json
+import math
 import os
 import re
 import shutil
@@ -26,60 +27,60 @@ MATCHUPS_ORDER = ("PvP", "PvT", "PvZ", "TvP", "TvT", "TvZ", "ZvP", "ZvT", "ZvZ")
 
 MATCHUP_NOTES: Dict[str, Dict[str, str]] = {
     "PvP": {
-        "working": "Blink Stalker mirror micro (b01 4.0×), Immortal/Colossus mid-game, and H2H mirror sweep (3.40×).",
-        "gaps": "Early natural Nexus delays (pvp_nat_delay) when scouts or extra tech slip ahead of Nexus #2, plus occasional over-investment in Phoenixes against Stalkers/Tempests.",
+        "working": "Blink Stalker mirror control (4.0× in drills), mid-game Immortal/Colossus fights, and head-to-head mirror wins over prior builds.",
+        "gaps": "Nearly half of games delay the second Nexus past 3:00 when scouts, early Twilight tech, or enemy units block the natural, and Stargates still overbuild Phoenixes against Stalkers and Tempests.",
     },
     "PvT": {
-        "working": "Strongest live Protoss matchup (6–2, 1.18× trade), Disruptor Novas vs. Bio (2.57× vs. Hubert), and Detection-First Blink DT raids (p15 1.58× KO).",
-        "gaps": "Protecting Robotics Bay and Colossus #1–2 gas escrow against Stalker/Phoenix demand so Siege Tank lines cannot freeze mid-game pushes.",
+        "working": "Strongest Protoss ladder matchup (6–2, 1.18× trade), backed by Disruptor shots against infantry (2.57× vs. Hubert) and Dark Templar raids that snipe Missile Turrets first.",
+        "gaps": "Stalker and Phoenix spending sometimes drains gas needed for Robotics Bay and the first two Colossi, leaving Gateway armies pinned by Siege Tanks.",
     },
     "PvZ": {
-        "working": "Colossus/Immortal/Disruptor mid-game (4.38× H2H, 2.67× vs. PolyMorph) and Oracle/Glaive Adept pressure.",
-        "gaps": "12-Pool early holds (recently improved with incomplete Nexus cancel + reserved builder Probe) and high-supply Roach/Ravager transitions.",
+        "working": "Colossus, Immortal, and Disruptor mid-game pushes (2.67× vs. PolyMorph) and early Oracle or Adept harassment.",
+        "gaps": "Early 12-Pool Zergling rushes (improved by canceling unfinished expansions) and defending high-supply Roach/Ravager pushes.",
     },
     "TvP": {
-        "working": "Fast Bio + Tank + Viking mid-game (3.5–4.0× vs. puck/Creepy), Widow Mine drops, and 1.6% live supply-block discipline.",
-        "gaps": "Avoiding parity army splits on minor Adept/Oracle harass and keeping natural expansion on schedule when probed or cannon-rushed.",
+        "working": "Marine/Marauder/Tank/Viking mid-game pushes (3.5–4.0× vs. puck and Creepy_strategies), Widow Mine drops, and 1.6% live supply-blocked time.",
+        "gaps": "Pulling too much of the main army home against small Adept or Oracle raids, and late natural expansions when harassed early or cannon-rushed.",
     },
     "TvT": {
-        "working": "90% live win rate (9–1, 1.04×, including 5.41× vs. Slowpoke with 18 Tanks and zero lost) and crisp 1.8% supply-block control.",
-        "gaps": "Keeping early Reaper openings (1–4 Reapers) from delaying Marines/Bunkers and preserving Tank #1–4 ahead of excess Medivacs.",
+        "working": "81.8% live ladder win rate (9–1–1, 1.04× trade, including an 18-Tank zero-loss win over Slowpoke at 5.41×) and 1.7% local supply-blocked time.",
+        "gaps": "Early enemy Reapers delaying our first Marines and Bunkers, and building extra Medivacs ahead of the first four Siege Tanks.",
     },
     "TvZ": {
-        "working": "Dominant live (7–1, 2.31×, 4.85× vs. titania, 5.07× vs. Carcara) and local (6–5, 1.11× in Loop 47), backed by 16/16 Widow Mine & Blue-Flame Hellion drops.",
-        "gaps": "Eliminating false capital-air overreactions (fixed via death-Broodling bug) and smooth 3rd-base Barracks scaling.",
+        "working": "77.8% on the live ladder (7–1–1, 2.31× trade, including wins over titania and Carcara), backed by Widow Mine drops and Blue-Flame Hellion raids.",
+        "gaps": "Scaling smoothly onto third-base Barracks after fixing the bug where dead Zerg buildings triggered false anti-air panics.",
     },
     "ZvP": {
-        "working": "Burrowed Lurker & Ravager pushes, rapid 3.5+ base economy, and strong Queen/Drone mineral-line holds.",
-        "gaps": "Preventing Corruptor overproduction vs. non-air Protoss (<= 12 cap added from live ladder) and defending early 15-Probe worker rushes.",
+        "working": "Fast 3.5-base economy, Queen/Drone mineral-line defense, and late-game Lurker/Ravager pushes when Zerg reaches Hive tech.",
+        "gaps": "Weakest ladder matchup (3–8–1, 0.26× trade): third Hatcheries landed nearly three minutes later than pros (5:41 vs. 2:43), Hydralisks and Ravagers repeatedly burrowed mid-fight, and an outdated command ID prevented any Banelings from morphing (all targeted in Loop 49).",
     },
     "ZvT": {
-        "working": "Five-base Roach/Hydra/Lurker/Brood Lord late games (2.61× live vs. oberon with 32 Lurkers), 97% mining uptime vs. early Reapers, and Mutalisk Magic-Box (2/2 KO).",
-        "gaps": "Early Banshee Spore+Queen lock (CloakLoss now 0 in Loop 47) and capping Corruptors vs. pure Viking/Mine armies.",
+        "working": "Five-base Roach/Hydra/Lurker/Brood Lord late games (2.61× live vs. oberon with 32 Lurkers), Reaper defense at 97% mining uptime, and Mutalisk spread against Thors.",
+        "gaps": "Zero Banelings morphed across 1,070 games due to an outdated SC2 ability ID (fixed in Loop 49), late third Hatcheries (5:07 vs. 2:59 pro median), and extra Corruptors starving Hive tech against Terran Bio-Tank.",
     },
     "ZvZ": {
-        "working": "Undefeated on recent live ladder (9–0, 2.78× trade, 10.63× vs. Carcara) with rapid 3.8-base scaling and decisive Ling/Roach transitions.",
-        "gaps": "Keeping Hatchery escrow non-blocking whenever supply is tight (<= 2 left) or an early Ling/Roach push arrives.",
+        "working": "9–0 on the recent live ladder (2.78× trade, including 10.63× vs. Carcara) with 3.8-base scaling and fast Zergling-to-Roach transitions.",
+        "gaps": "Saving 300 minerals for a new Hatchery when supply is tight (2 or less free) or when an enemy Roach/Zergling push is already crossing the map.",
     },
 }
 
 CATEGORY_META: Dict[str, Tuple[str, str]] = {
-    "detection-snipe": ("Detection Sniping", "Clear static (Turret, Cannon, Spore) or mobile (Observer, Raven, Overseer) detectors first so cloaked/burrowed armies sweep safely."),
-    "stalker-blink": ("Stalker Blink Micro", "Both shield-cycling Blink-Back under focus fire and coordinated Blink-Forward snipes onto Tanks, Colossi, and Liberators."),
-    "runby-offense": ("Runby Offense", "Worker-elimination efficiency across every Mothman raid type: Widow Mine drop, Blue-Flame Hellion, Adept, Oracle, Banshee, Muta, Ling, Baneling drop."),
-    "runby-defense": ("Runby Defense", "Symmetric mineral-line defense: pulling targeted workers away from Widow Mines, splitting vs. Hellions, and keeping mining uptime high."),
-    "stasis-ward": ("Stasis Ward", "Oracle Stasis Ward placement in mineral pockets/chokes versus single-unit sacrifice defusing and detected sniping."),
-    "yamato-jump": ("Yamato & Tactical Jump", "Battlecruiser Yamato focus-fire and low-HP Tactical Jump escapes across air and mech clashes."),
-    "transport-nydus": ("Dropships & Nydus", "Medivac pickup-drop juggles, Warp Prism Archon/Immortal drops, Dropperlord Baneling rains, and Nydus Worm unloads."),
-    "burrow-micro": ("Burrow & Unburrow", "Roach Tunneling Claws burrow-heal, Baneling landmine traps, burrowed Infestor ambushes, Lurker leapfrogs, and Widow Mine positioning."),
-    "spellcasters": ("Spellcasters", "High Templar Storm/Feedback, Ghost EMP/Snipe, Raven Interference Matrix/AAM, Viper Abduct/Blinding Cloud, Infestor Fungal/Neural."),
-    "kiting-concave": ("Kiting & Concaves", "Stutter-step Bio, Immortal/Stalker focus-fire, Hydra/Roach arcs, and melee-ranged mixed micro."),
-    "flank-surround": ("Flank Surrounds", "Two-prong Ling/Bane and Ravager/Hydra pincer collapses onto sieged Tank lines."),
-    "high-ground-ramp": ("High-Ground Ramps", "Ramp vision, tank-line defense, Lurker choke holds, and uphill breaks."),
-    "air-superiority": ("Air Superiority", "Mutalisk Magic-Box vs. Thors, Phoenix Graviton lifts, and Viking/Corruptor air focus."),
-    "early-rush-defense": ("Early Rush Defense", "12-Pool mineral-line holds, Reaper defense, and early proxy survival."),
-    "capital-endgame": ("Capital Endgame", "Cliff-air clashes with Carriers, Tempests, Brood Lords, Thors, and Vipers."),
-    "regression": ("Replay Regressions", "Exact skirmishes extracted from real ladder losses (Cloaked Banshees, 15-Probe worker rushes, 24-Ling ramp floods)."),
+    "detection-snipe": ("Sniping Detectors", "Kill Turrets, Cannons, Spores, Observers, Ravens, or Overseers first so cloaked and burrowed units can fight unrevealed."),
+    "stalker-blink": ("Stalker Blink", "Blink wounded Stalkers to the back of the fight and blink forward together onto Siege Tanks, Colossi, or Liberators."),
+    "runby-offense": ("Mineral-Line Raids", "Harass enemy workers with Widow Mine drops, Hellions, Adepts, Oracles, Banshees, Mutalisks, Zerglings, and Baneling drops."),
+    "runby-defense": ("Defending Worker Harass", "Pull targeted workers away from Widow Mines, split against Hellions, and return to mining once the raid is cleared."),
+    "stasis-ward": ("Oracle Stasis Traps", "Place Stasis Wards in mineral lines and chokes, or trigger enemy traps with a single cheap unit instead of the whole army."),
+    "yamato-jump": ("Battlecruiser Yamato & Jump", "Focus Yamato Cannon on heavy targets and Tactical Jump damaged Battlecruisers home before they die."),
+    "transport-nydus": ("Dropships & Nydus Worms", "Load and unload Medivacs, Warp Prisms, Baneling overlords, and Nydus Worms under fire."),
+    "burrow-micro": ("Burrow & Ambush", "Heal burrowed Roaches, detonate Baneling traps, cast from burrowed Infestors, and leapfrog Lurkers and Widow Mines."),
+    "spellcasters": ("Spellcasters", "Cast High Templar Storm/Feedback, Ghost EMP/Snipe, Raven Matrix/Missile, Viper Abduct/Cloud, and Infestor Fungal/Neural."),
+    "kiting-concave": ("Kiting & Firing Arcs", "Stutter-step ranged units away from melee units and spread armies into wide arcs instead of clumping."),
+    "flank-surround": ("Flanking Siege Lines", "Collapse on sieged Tanks from two angles at once instead of marching single-file down a choke."),
+    "high-ground-ramp": ("Ramp & High-Ground Fights", "Hold top-of-ramp chokes and secure high-ground vision before pushing uphill."),
+    "air-superiority": ("Air-to-Air Fights", "Spread Mutalisks (\"magic-box\") over Thors, lift ground threats with Phoenixes, and focus fire in Viking/Corruptor fights."),
+    "early-rush-defense": ("Holding Early Rushes", "Survive 12-Pool Zerglings, early Reapers, and proxy builds without losing the mineral line."),
+    "capital-endgame": ("Late-Game Fleets", "Fight across cliffs and open air with Carriers, Tempests, Brood Lords, Thors, and Vipers."),
+    "regression": ("Past Ladder Losses", "Exact fights pulled from real ladder defeats, including 15-Probe worker rushes, cloaked Banshees, and early Zergling floods."),
 }
 
 
@@ -308,7 +309,11 @@ def load_rich_report_telemetry(
         "pro_matchups": {},
         "apm_by_race": {"Protoss": (222.8, 493.0), "Terran": (206.3, 481.0), "Zerg": (255.0, 718.0)},
         "live_perf": {"avg_step_ms": 3.51, "wire_rejects": 0, "total_replays": 3265, "prod_replays": 477},
-        "arena3": {"total": 213, "fast_core": 66, "categories": [], "dummy_rec": "34W–25L–7D", "dummy_trade": 1.17, "sp_rec": "27W–38L–1D", "sp_trade": 0.83, "loop_num": 47},
+        "arena3": {
+            "total": 216, "fast_core": 69, "categories": [],
+            "dummy_rec": "32–33–4", "dummy_trade": 1.04, "sp_rec": "29–35–5", "sp_trade": 0.78, "loop_num": 48,
+            "peak_loop_num": 47, "peak_dummy_rec": "34–25–7", "peak_dummy_trade": 1.17,
+        },
         "flywheel": {
             "transcript_steps": 68378,
             "recent_loops": 11,
@@ -366,20 +371,42 @@ def load_rich_report_telemetry(
         except Exception:
             pass
 
-    # Find latest iter* arena JSONs
+    # Find latest iter* arena JSONs AND track best recent dummy run honestly (loops >= 43 = 66-69 core suite)
     loop_scratch = brain_dir / "scratch" / "loop"
     latest_d_json: Optional[Path] = None
     latest_sp_json: Optional[Path] = None
     latest_loop_num = 0
+    best_loop_num = 0
+    best_dummy_trade = -1.0
+    best_dummy_rec = ""
     if loop_scratch.is_dir():
         for p in loop_scratch.glob("tactics_sc2_duel_iter*.json"):
             m = re.search(r"iter(\d+)\.json$", p.name)
-            if m and int(m.group(1)) > latest_loop_num:
-                sp_cand = loop_scratch / f"tactics_sc2_selfplay_iter{m.group(1)}.json"
-                if sp_cand.is_file():
-                    latest_loop_num = int(m.group(1))
-                    latest_d_json = p
-                    latest_sp_json = sp_cand
+            if not m:
+                continue
+            lnum = int(m.group(1))
+            sp_cand = loop_scratch / f"tactics_sc2_selfplay_iter{lnum}.json"
+            if sp_cand.is_file() and lnum > latest_loop_num:
+                latest_loop_num = lnum
+                latest_d_json = p
+                latest_sp_json = sp_cand
+            if lnum >= 43:
+                try:
+                    ds_c = json.loads(p.read_text(encoding="utf-8")).get("summary", {})
+                    tr_c = float(ds_c.get("agg_trade_ratio", ds_c.get("trade_ratio", ds_c.get("agg_trade", 0.0))) or 0.0)
+                    if tr_c > best_dummy_trade:
+                        best_dummy_trade = tr_c
+                        best_loop_num = lnum
+                        dw_c = int(ds_c.get("mothman_wins", ds_c.get("wins", 0)) or 0)
+                        dl_c = int(ds_c.get("p2_wins", ds_c.get("losses", 0)) or 0)
+                        dd_c = int(ds_c.get("draws", 0) or 0)
+                        best_dummy_rec = f"{dw_c}–{dl_c}–{dd_c}"
+                except Exception:
+                    pass
+    if best_loop_num:
+        out["arena3"]["peak_loop_num"] = best_loop_num
+        out["arena3"]["peak_dummy_rec"] = best_dummy_rec
+        out["arena3"]["peak_dummy_trade"] = best_dummy_trade
 
     d_by_cat: Dict[str, Dict[str, Any]] = {}
     sp_by_cat: Dict[str, Dict[str, Any]] = {}
@@ -394,7 +421,7 @@ def load_rich_report_telemetry(
                 dw_t = int(ds.get("mothman_wins", ds.get("wins", 0)) or 0)
                 dl_t = int(ds.get("p2_wins", ds.get("losses", 0)) or 0)
                 dd_t = int(ds.get("draws", 0) or 0)
-                out["arena3"]["dummy_rec"] = f"{dw_t}W–{dl_t}L–{dd_t}D"
+                out["arena3"]["dummy_rec"] = f"{dw_t}–{dl_t}–{dd_t}"
                 out["arena3"]["dummy_trade"] = float(
                     ds.get("agg_trade_ratio", ds.get("trade_ratio", ds.get("agg_trade", 0.0))) or 0.0
                 )
@@ -402,7 +429,7 @@ def load_rich_report_telemetry(
                 sw_t = int(ss.get("mothman_wins", ss.get("wins", 0)) or 0)
                 sl_t = int(ss.get("p2_wins", ss.get("losses", 0)) or 0)
                 sd_t = int(ss.get("draws", 0) or 0)
-                out["arena3"]["sp_rec"] = f"{sw_t}W–{sl_t}L–{sd_t}D"
+                out["arena3"]["sp_rec"] = f"{sw_t}–{sl_t}–{sd_t}"
                 out["arena3"]["sp_trade"] = float(
                     ss.get("agg_trade_ratio", ss.get("trade_ratio", ss.get("agg_trade", 0.0))) or 0.0
                 )
@@ -516,12 +543,13 @@ def load_rich_report_telemetry(
 
         recent_local_where = """
             m.source_type='local_arena' AND COALESCE(m.is_selfplay,0)=0
-            AND m.run_id NOT LIKE '%h2h%' AND m.run_id NOT LIKE '%smoke%'
+            AND m.run_id NOT LIKE '%h2h%' AND m.run_id NOT LIKE '%smoke%' AND m.run_id NOT LIKE '%gauntlet%'
             AND (m.run_id LIKE '%iter42%' OR m.run_id LIKE '%iter43%' OR m.run_id LIKE '%iter44%'
-                 OR m.run_id LIKE '%iter45%' OR m.run_id LIKE '%iter46%' OR m.run_id LIKE '%iter47%')
+                 OR m.run_id LIKE '%iter45%' OR m.run_id LIKE '%iter46%' OR m.run_id LIKE '%iter47%'
+                 OR m.run_id LIKE '%iter48%')
         """
 
-        # Per-matchup Local stats
+        # Per-matchup Local stats (All 26 external opponents)
         local_mu: Dict[str, Dict[str, Any]] = {}
         for r in cur.execute(
             f"""
@@ -544,11 +572,17 @@ def load_rich_report_telemetry(
             """
         ).fetchall():
             mu = r[0]
+            n_m = int(r[1])
+            w_m = int(r[2] or 0)
+            l_m = int(r[3] or 0)
+            t_m = max(0, n_m - w_m - l_m)
             local_mu[mu] = {
-                "n": int(r[1]),
-                "w": int(r[2] or 0),
-                "l": int(r[3] or 0),
-                "t": max(0, int(r[1]) - int(r[2] or 0) - int(r[3] or 0)),
+                "n": n_m,
+                "w": w_m,
+                "l": l_m,
+                "t": t_m,
+                "wr": round(100.0 * w_m / n_m, 1) if n_m else 0.0,
+                "nl": round(100.0 * (w_m + t_m) / n_m, 1) if n_m else 0.0,
                 "tr": float(r[4] or 0.0),
                 "sb": float(r[5] or 0.0),
                 "w4m": float(r[6] or 0.0),
@@ -560,7 +594,36 @@ def load_rich_report_telemetry(
                 "dur_m": float(r[12] or 0.0),
             }
 
-        # Per-matchup Prod stats (recent 4 live builds: L37/L40/L42/L45)
+        # Per-matchup Local CORE14 stats (Benchmark core cohort, L42-L48)
+        core_mu: Dict[str, Dict[str, Any]] = {}
+        for r in cur.execute(
+            f"""
+            SELECT m.matchup, COUNT(*),
+                   SUM(CASE WHEN LOWER(m.result)='win' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN LOWER(m.result)='loss' THEN 1 ELSE 0 END),
+                   ROUND(SUM(m.killed_val)*1.0/NULLIF(SUM(m.lost_val),0), 2)
+            FROM matches m
+            WHERE {recent_local_where}
+              AND m.opp_cohort='core_12'
+              AND m.matchup IN ('PvP','PvT','PvZ','TvP','TvT','TvZ','ZvP','ZvT','ZvZ')
+            GROUP BY m.matchup
+            """
+        ).fetchall():
+            n_m = int(r[1])
+            w_m = int(r[2] or 0)
+            l_m = int(r[3] or 0)
+            t_m = max(0, n_m - w_m - l_m)
+            core_mu[r[0]] = {
+                "n": n_m,
+                "w": w_m,
+                "l": l_m,
+                "t": t_m,
+                "wr": round(100.0 * w_m / n_m, 1) if n_m else 0.0,
+                "nl": round(100.0 * (w_m + t_m) / n_m, 1) if n_m else 0.0,
+                "tr": float(r[4] or 0.0),
+            }
+
+        # Per-matchup Prod stats (recent live builds: L37/L40/L42/L45/L48)
         prod_mu: Dict[str, Dict[str, Any]] = {}
         for r in cur.execute(
             """
@@ -571,16 +634,21 @@ def load_rich_report_telemetry(
                    ROUND(AVG(sup_blk_pct), 1)
             FROM matches
             WHERE source_type='prod_aiarena' AND COALESCE(is_selfplay,0)=0
-              AND bot_build_version IN ('ltxmxpzu_e45b61eb','mwskxoml_ffb8aaf1','womqlpsp_6917245e','qpqqolmk_3b21fe7a')
+              AND bot_build_version IN ('ltxmxpzu_e45b61eb','mwskxoml_ffb8aaf1','womqlpsp_6917245e','qpqqolmk_3b21fe7a','oyzplryr_dc3a33b6')
               AND matchup IN ('PvP','PvT','PvZ','TvP','TvT','TvZ','ZvP','ZvT','ZvZ')
             GROUP BY matchup
             """
         ).fetchall():
+            n_m = int(r[1])
+            w_m = int(r[2] or 0)
+            l_m = int(r[3] or 0)
+            t_m = max(0, n_m - w_m - l_m)
             prod_mu[r[0]] = {
-                "n": int(r[1]),
-                "w": int(r[2] or 0),
-                "l": int(r[3] or 0),
-                "t": max(0, int(r[1]) - int(r[2] or 0) - int(r[3] or 0)),
+                "n": n_m,
+                "w": w_m,
+                "l": l_m,
+                "t": t_m,
+                "wr": round(100.0 * w_m / n_m, 1) if n_m else 0.0,
                 "tr": float(r[4] or 0.0),
                 "sb": float(r[5] or 0.0),
             }
@@ -723,8 +791,9 @@ def load_rich_report_telemetry(
             out["pro_base_metrics"] = {}
 
         for mu in MATCHUPS_ORDER:
-            loc = local_mu.get(mu, {"n": 0, "w": 0, "l": 0, "t": 0, "tr": 0.0, "sb": 0.0, "w4m": 0.0, "w6m": 0.0, "pkw": 0.0, "pka": 0, "opka": 0, "bases": 0.0, "dur_m": 0.0})
-            prd = prod_mu.get(mu, {"n": 0, "w": 0, "l": 0, "t": 0, "tr": 0.0, "sb": 0.0})
+            loc = local_mu.get(mu, {"n": 0, "w": 0, "l": 0, "t": 0, "wr": 0.0, "nl": 0.0, "tr": 0.0, "sb": 0.0, "w4m": 0.0, "w6m": 0.0, "pkw": 0.0, "pka": 0, "opka": 0, "bases": 0.0, "dur_m": 0.0})
+            cor = core_mu.get(mu, {"n": 0, "w": 0, "l": 0, "t": 0, "wr": 0.0, "nl": 0.0, "tr": 0.0})
+            prd = prod_mu.get(mu, {"n": 0, "w": 0, "l": 0, "t": 0, "wr": 0.0, "tr": 0.0, "sb": 0.0})
             an = anom_mu.get(mu, {})
             pm = out["pro_matchups"].get(mu, {})
             n_games = max(1, loc["n"])
@@ -807,9 +876,14 @@ def load_rich_report_telemetry(
                 fac = sum(1 for rd in rmaps.values() if "Factory" in rd)
                 styles.append(f"1-1-1 Factory {round(100*fac/n_open)}%")
             else:
-                fe = sum(1 for rd in rmaps.values() if rd.get("Nat Nexus", 999) <= 130)
-                styles.append(f"Gate Fast-Expand {round(100*fe/n_open)}%")
-                styles.append(f"Delayed / 1-Base {round(100*(len(rmaps)-fe)/n_open)}%")
+                if mu == "PvP":
+                    fe = sum(1 for rd in rmaps.values() if rd.get("Nat Nexus", 999) <= 210)
+                    styles.append(f"2-Gate Expand (≤3:30) {round(100*fe/n_open)}%")
+                    styles.append(f"Delayed / 1-Base (>3:30) {round(100*(len(rmaps)-fe)/n_open)}%")
+                else:
+                    fe = sum(1 for rd in rmaps.values() if rd.get("Nat Nexus", 999) <= 130)
+                    styles.append(f"Gate Fast-Expand {round(100*fe/n_open)}%")
+                    styles.append(f"Delayed / 1-Base {round(100*(len(rmaps)-fe)/n_open)}%")
                 rb = sum(1 for rd in rmaps.values() if "Robotics" in rd)
                 tw = sum(1 for rd in rmaps.values() if "Twilight" in rd)
                 if rb >= 0.25 * n_open:
@@ -820,9 +894,9 @@ def load_rich_report_telemetry(
             bm_info = base_manifest_by_mu.get(mu, {})
             base_img = f"./media/base_layout_{mu}.jpg" if bm_info else ""
             base_cap = (
-                f"Real 3D SC2 capture from {bm_info.get('bot', 'Mothman')} vs. {bm_info.get('opp', 'opponent')} "
+                f"In-game 3D capture from {bm_info.get('bot', 'Mothman')} vs. {bm_info.get('opp', 'opponent')} "
                 f"on {bm_info.get('map', '')} ({bm_info.get('corner', '')} spawn, 4:10 game time): "
-                f"main base & ramp wall (left) and natural expansion & choke wall (right)."
+                f"main base and ramp wall on the left, second base and choke wall on the right."
                 if bm_info
                 else ""
             )
@@ -831,6 +905,7 @@ def load_rich_report_telemetry(
                 "matchup": mu,
                 "race": {"P": "Protoss", "T": "Terran", "Z": "Zerg"}[mu[0]],
                 "local": loc,
+                "core": cor,
                 "prod": prd,
                 "anomalies": an,
                 "gas1_sec": _median_or_none(gas_lists[mu][0]),
@@ -972,7 +1047,8 @@ def render_army_curves_svg(
     pl, pr, pt, pb = 48, 24, 34, 38
     cw, ch = w - pl - pr, h - pt - pb
     peak = max([3500.0] + [max(p["our"], p["opp"]) for p in pts])
-    max_a = float(((int(peak) // 1000) + 1) * 1000)
+    step = 1000 if peak <= 5000.0 else (2000 if peak <= 12000.0 else 5000)
+    max_a = float(math.ceil(peak / step) * step)
 
     def x_m(m: float) -> float:
         return pl + ((m - 1.0) / 11.0) * cw
@@ -984,7 +1060,6 @@ def render_army_curves_svg(
         f'<svg viewBox="0 0 {w} {h}" class="chart-svg" role="img" '
         f'aria-label="{race} army value over minutes 1 to 12 compared with opponents">'
     ]
-    step = max(1000, int(max_a // 4))
     for yv in range(0, int(max_a) + 1, step):
         yy = y_a(yv)
         lbl = f"{yv//1000}k" if yv else "0"
@@ -1105,127 +1180,135 @@ def render_video_element(
 
 
 def render_loop_diagram_section(rich: Dict[str, Any]) -> str:
-    fw = rich["flywheel"]
     lp = rich["live_perf"]
     a3 = rich["arena3"]
+    peak_note = (
+        f" · Loop {a3['peak_loop_num']} peak: {a3['peak_dummy_rec']} ({a3['peak_dummy_trade']:.2f}×)"
+        if a3.get("peak_loop_num") and a3["peak_loop_num"] != a3["loop_num"]
+        else ""
+    )
     nodes = [
         {
             "id": "live",
             "title": "1. Live & Practice Games",
-            "badge": "Outer Loop · Data",
+            "badge": "Step 1 · Replays",
             "what": (
-                f"Four Mothman bots play continuously on the public AI Arena ladder ({lp['prod_replays']} live games) "
-                f"and across 90-game local practice batches ({lp['total_replays']:,} replays total). "
-                "Every replay is parsed automatically into minute-by-minute worker counts, army values, gas timings, and error flags."
+                "Four Mothman bots play continuously on AI Arena and across local practice batches. "
+                "Every replay is parsed into minute-by-minute worker counts, army values, expansion timings, and fault flags."
             ),
             "why": (
-                "Raw win rate bounces around over ten games, so logging every economy curve and anomaly "
-                "lets us spot silent regressions—like a build accidentally stalling production—even in games we win."
+                "Win rate bounces around over ten-game samples. Recording economy curves and fault flags "
+                "catches silent bugs, such as production stalling mid-game, even in matches Mothman wins."
             ),
-            "metric": f"{lp['total_replays']:,} replays analyzed · 100% build-tagged · 0 crashes on Live Build 45",
+            "metric": f"{lp['prod_replays']} public AI Arena matches · 0 crashes on Live Build 45",
         },
         {
             "id": "forensics",
-            "title": "2. Diagnose Why Games Were Lost",
-            "badge": "Outer Loop · Analysis",
+            "title": "2. Review Why Games Were Lost",
+            "badge": "Step 2 · Diagnosis",
             "what": (
-                "An analysis agent inspects the worst live and local losses, watching exact timelines to separate "
-                "one-off bad luck from repeatable bot bugs (for example: expanding late, building the wrong unit, or chasing kiting workers)."
+                "We inspect the worst live and local losses along their match timelines to separate bad luck "
+                "from repeatable bot mistakes, such as expanding late, building the wrong counter unit, or chasing kiting workers."
             ),
             "why": (
-                "Instead of guessing what to tweak, every code change starts from replay proof. "
-                "That is how we found that dead Zerg buildings spawned Broodlings that tricked Terran into building 13 unnecessary Vikings."
+                "Starting from specific replays keeps us from guessing. Replay logs showed that dead Zerg buildings "
+                "spawned Broodlings that tricked Terran into building 13 Vikings against a ground army."
             ),
-            "metric": "Every fix traces to a specific replay cause · Zero opponent-specific hacks",
+            "metric": "Every code change targets a general bug seen in replays, never a hardcoded opponent name",
         },
         {
             "id": "code",
-            "title": "3. Parallel Engineering Fixes",
-            "badge": "Outer Loop · Build",
+            "title": "3. Code Fixes",
+            "badge": "Step 3 · Implementation",
             "what": (
-                "Three specialist coding agents edit separate parts of the bot at the same time: "
-                "one updates macro & Mirror Mind, one updates combat micro, and one updates building placement & the APM governor."
+                "Separate coding passes update three non-overlapping parts of the codebase: economy and enemy-tech rules, "
+                "squad control in fights, and building placement plus command filtering."
             ),
             "why": (
-                "Splitting the codebase into non-overlapping tracks cuts coding time to ~12–25 minutes per loop "
-                "and keeps macro logic from getting tangled up with low-level unit control."
+                "Keeping economy scoring, unit control, and map geometry in separate files prevents merge conflicts "
+                "and keeps spending logic untangled from low-level movement code."
             ),
-            "metric": "3 parallel tracks · Zero file conflicts · Every fix ships with new unit tests",
+            "metric": "Economy & scouting · Squad control · Building placement & command filter",
         },
         {
             "id": "verify",
-            "title": "4. Automated Safety Checks",
-            "badge": "Outer Loop · ~2.5 min",
+            "title": "4. Fast Unit Tests",
+            "badge": "Step 4 · 2 min",
             "what": (
-                "Before launching StarCraft II, a dedicated verifier compiles the entire bot and runs over 3,400 fast unit tests, "
-                "231 isolated micro checks, a state-machine audit, and a pro-replay check confirming the bot never deadlocks on workers or bases."
+                "Before launching StarCraft II, the build compiles and runs fast unit tests covering build-order math, "
+                "unit control edge cases, command encoding, and whether spending rules ever deadlock on pro replay states."
             ),
             "why": (
-                "Catching broken logic in two minutes of CPU tests prevents wasting half an hour running full StarCraft II games on a broken build."
+                "Catching a broken limit or crash in two minutes of CPU tests avoids wasting half an hour "
+                "running full StarCraft II games on a broken build."
             ),
-            "metric": "3,400+ tests passing · 0 pro-replay deadlocks · 0 invalid game commands",
+            "metric": "Runs in 2 minutes on CPU · Blocks invalid game commands and spending deadlocks",
         },
         {
             "id": "arena",
-            "title": "5. Tactics Arena 3.0 Drills",
-            "badge": "Outer Loop · 213 Drills",
+            "title": "5. Combat Drills",
+            "badge": "Step 5 · 25 sec per drill",
             "what": (
-                f"The bot fights {a3['fast_core']} core micro scenarios inside the real StarCraft II engine "
-                f"(out of {a3['total']} total across 16 categories)—testing detector sniping, Blink micro, "
-                "Widow Mine drops, worker-rush holds, and spellcasters against both a baseline AI and itself."
+                f"The bot plays {a3['fast_core']} short combat and harassment scenarios inside the StarCraft II engine, "
+                "testing detector sniping, Stalker Blink, Widow Mine drops, worker-rush defense, and spellcasters "
+                "against a scripted AI and against itself."
             ),
             "why": (
-                "Full matches take minutes to reach one key fight. Isolated 20-second engine drills let us test "
-                "and visually inspect a micro fix in 25 seconds."
+                "Full ladder games take ten minutes to reach one fight. Twenty-second scenarios let us test "
+                "a combat change and watch the video clip right away."
             ),
-            "metric": f"Loop {a3['loop_num']}: {a3['dummy_rec']} ({a3['dummy_trade']:.2f}× trade) vs. Dummy · {a3['sp_rec']} Self-Play",
+            "metric": (
+                f"Loop {a3['loop_num']} core drills: {a3['dummy_rec']} ({a3['dummy_trade']:.2f}× trade) vs. scripted AI"
+                f"{peak_note}"
+            ),
         },
         {
             "id": "bench",
-            "title": "6. 2-Min Head-to-Head & 84-Game Bench",
-            "badge": "Outer Loop · Release Gate",
+            "title": "6. Head-to-Head Gate & 84-Game Benchmark",
+            "badge": "Step 6 · Release Gate",
             "what": (
-                "Every candidate first plays a 6-game head-to-head match (~2 minutes) against the build currently live on AI Arena. "
-                "Only builds that beat the live bot proceed to the full 84-game benchmark (14 practice bots, 12 unseen test bots, and self-play)."
+                "Every candidate first plays a 6-game head-to-head set (about 2 minutes) against the build currently live on AI Arena. "
+                "Only builds that beat or clear the live bot run the 30-minute, 84-game benchmark against 14 regular practice bots, "
+                "12 held-out bots, and self-play."
             ),
             "why": (
-                "The 2-minute head-to-head caught all 8 bad builds before they could hurt our live ladder rating—and running it first "
-                "saves ~30 minutes of GPU time whenever a build regresses."
+                "That 2-minute head-to-head match caught all 8 regressed builds before they reached the ladder, "
+                "and running it first spares 30 minutes of simulation whenever a candidate regresses."
             ),
-            "metric": "Blocked 8 regressions from shipping · 12 unseen holdout bots guard against overfitting",
+            "metric": "8 bad builds held back before shipping · 12 held-out bots check for overfitting",
         },
         {
             "id": "ship",
-            "title": "7. Package & Deploy Live",
-            "badge": "Outer Loop · Ship",
+            "title": "7. Package & Deploy to AI Arena",
+            "badge": "Step 7 · Release",
             "what": (
-                "Builds that beat the live baseline are compiled into 4 standalone Linux bots, smoke-tested in real SC2 games "
-                "to verify their build version tag, and pushed live to AI Arena—where their new ladder games immediately start the next cycle."
+                "Builds that beat the live bot and hold up across the 84-game benchmark compile into four standalone Linux bot packages, "
+                "run a 4-game smoke check in StarCraft II, and upload to AI Arena."
             ),
             "why": (
-                "Each release only goes live after beating the previous live bot head-to-head and proving healthy macro and trade ratios."
+                "A new version only replaces the ladder bot after beating it directly and clearing the full practice pool without crashes."
             ),
-            "metric": "6 live ships deployed · Live Build 45 at 56.5% WR · Mothman-P 1310 Elo",
+            "metric": "7 live releases shipped · Mothman-P at 1310 rating",
         },
         {
             "id": "flywheel",
-            "title": "Meta-Flywheel: Auditing the Loop Itself",
-            "badge": "Inner Loop · Process",
+            "title": "Reviewing Build & Test Logs",
+            "badge": "Process Check",
             "what": (
-                f"After every loop, a trajectory script reads the execution logs of all 12 agents ({fw['transcript_steps']:,} recorded steps), "
-                "measures where time was spent, flags rules that flip-flopped across consecutive loops, and recommends process upgrades."
+                "After each pass, a script summarizes how long coding, testing, and benchmarking took "
+                "and flags subsystems that were edited repeatedly across back-to-back runs."
             ),
             "why": (
-                "Auditing Loops 19–47 revealed we were spending 30 minutes on full benchmarks before running the 2-minute head-to-head check "
-                "that caught 8/8 bad builds. Flipping the gate order boosts shipping speed by 1.44×."
+                "Checking Loops 34–47 showed we had been running the 30-minute benchmark before the 2-minute head-to-head check "
+                "that caught every bad build, wasting over three hours of simulation time."
             ),
-            "metric": "29 loops logged · 358 min recoverable savings · 1.44× projected ship throughput",
+            "metric": "Swapped the 2-minute head-to-head check ahead of the 30-minute benchmark in Loop 48",
         },
     ]
     nodes_json = json.dumps(nodes, ensure_ascii=False).replace("</", "<\\/")
 
     loop_svg = f"""
-<svg viewBox="0 0 760 445" class="diagram-svg" id="loop-svg" role="img" aria-label="Self-improvement loop and meta-flywheel diagram">
+<svg viewBox="0 0 760 445" class="diagram-svg" id="loop-svg" role="img" aria-label="Seven-step testing and release cycle diagram">
   <defs>
     <marker id="arr-outer" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
       <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#8C877A" />
@@ -1247,69 +1330,69 @@ def render_loop_diagram_section(rich: Dict[str, Any]) -> str:
   <path d="M 152 332 Q 116 286 112 228" fill="none" stroke="#8C877A" stroke-width="2" marker-end="url(#arr-outer)" />
   <path d="M 156 144 Q 204 82 282 60" fill="none" stroke="#8C877A" stroke-width="2" marker-end="url(#arr-outer)" />
 
-  <!-- Meta-Flywheel dashed feedback arrows -->
+  <!-- Process check dashed arrows -->
   <path d="M 380 348 L 380 288" fill="none" stroke="#C4633E" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arr-fw)" />
-  <text x="388" y="324" fill="#A34E2E" font-size="10.5" font-weight="600">Logs &amp; timings</text>
+  <text x="388" y="324" fill="#A34E2E" font-size="10.5" font-weight="600">Run timings</text>
   <path d="M 462 184 Q 504 162 532 146" fill="none" stroke="#C4633E" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arr-fw)" />
   <path d="M 298 258 Q 252 292 224 326" fill="none" stroke="#C4633E" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#arr-fw)" />
-  <text x="200" y="286" fill="#A34E2E" font-size="10.5" font-weight="600">Faster gates</text>
+  <text x="200" y="286" fill="#A34E2E" font-size="10.5" font-weight="600">Gate order</text>
 
   <!-- Node 0: Top Center (Live Games) -->
   <g class="svg-node is-active" data-loop-idx="0" tabindex="0" role="button" aria-label="1. Live and Practice Games">
     <rect x="288" y="20" width="184" height="62" rx="10" class="node-bg" />
     <text x="380" y="44" text-anchor="middle" class="node-title">1. Live &amp; Practice Games</text>
-    <text x="380" y="63" text-anchor="middle" class="node-sub">{lp['total_replays']:,} replays · AI Arena</text>
+    <text x="380" y="63" text-anchor="middle" class="node-sub">AI Arena + local matches</text>
   </g>
 
-  <!-- Node 1: Top Right (Diagnose Losses) -->
-  <g class="svg-node" data-loop-idx="1" tabindex="0" role="button" aria-label="2. Diagnose Losses">
+  <!-- Node 1: Top Right (Review Losses) -->
+  <g class="svg-node" data-loop-idx="1" tabindex="0" role="button" aria-label="2. Review Losses">
     <rect x="536" y="84" width="182" height="62" rx="10" class="node-bg" />
-    <text x="627" y="108" text-anchor="middle" class="node-title">2. Diagnose Losses</text>
-    <text x="627" y="127" text-anchor="middle" class="node-sub">Replay forensics &amp; leaks</text>
+    <text x="627" y="108" text-anchor="middle" class="node-title">2. Review Losses</text>
+    <text x="627" y="127" text-anchor="middle" class="node-sub">Find repeatable bugs</text>
   </g>
 
-  <!-- Node 2: Mid Right (Parallel Code Fixes) -->
-  <g class="svg-node" data-loop-idx="2" tabindex="0" role="button" aria-label="3. Parallel Code Fixes">
+  <!-- Node 2: Mid Right (Code Fixes) -->
+  <g class="svg-node" data-loop-idx="2" tabindex="0" role="button" aria-label="3. Code Fixes">
     <rect x="562" y="210" width="182" height="62" rx="10" class="node-bg" />
-    <text x="653" y="234" text-anchor="middle" class="node-title">3. Parallel Code Fixes</text>
-    <text x="653" y="253" text-anchor="middle" class="node-sub">Macro · Micro · Placement</text>
+    <text x="653" y="234" text-anchor="middle" class="node-title">3. Code Fixes</text>
+    <text x="653" y="253" text-anchor="middle" class="node-sub">Economy · Combat · Walls</text>
   </g>
 
-  <!-- Node 3: Bottom Right (Safety Checks) -->
-  <g class="svg-node" data-loop-idx="3" tabindex="0" role="button" aria-label="4. Automated Safety Checks">
+  <!-- Node 3: Bottom Right (Fast Unit Tests) -->
+  <g class="svg-node" data-loop-idx="3" tabindex="0" role="button" aria-label="4. Fast Unit Tests">
     <rect x="484" y="336" width="182" height="62" rx="10" class="node-bg" />
-    <text x="575" y="360" text-anchor="middle" class="node-title">4. Safety Checks</text>
-    <text x="575" y="379" text-anchor="middle" class="node-sub">3,400+ tests · ~2.5 min</text>
+    <text x="575" y="360" text-anchor="middle" class="node-title">4. Fast Unit Tests</text>
+    <text x="575" y="379" text-anchor="middle" class="node-sub">Compile &amp; logic checks (2m)</text>
   </g>
 
-  <!-- Node 4: Bottom Center (Tactics Arena) -->
-  <g class="svg-node" data-loop-idx="4" tabindex="0" role="button" aria-label="5. Tactics Arena 3.0">
+  <!-- Node 4: Bottom Center (Combat Drills) -->
+  <g class="svg-node" data-loop-idx="4" tabindex="0" role="button" aria-label="5. Combat Drills">
     <rect x="298" y="354" width="164" height="62" rx="10" class="node-bg" />
-    <text x="380" y="378" text-anchor="middle" class="node-title">5. Tactics Arena</text>
-    <text x="380" y="397" text-anchor="middle" class="node-sub">{a3['total']} real SC2 drills</text>
+    <text x="380" y="378" text-anchor="middle" class="node-title">5. Combat Drills</text>
+    <text x="380" y="397" text-anchor="middle" class="node-sub">{a3['fast_core']} fast SC2 scenarios</text>
   </g>
 
-  <!-- Node 5: Bottom Left (H2H & Bench) -->
-  <g class="svg-node" data-loop-idx="5" tabindex="0" role="button" aria-label="6. 2-Min H2H and 84-Game Bench">
-    <rect x="86" y="336" width="188" height="62" rx="10" class="node-bg" />
-    <text x="180" y="360" text-anchor="middle" class="node-title">6. 2m H2H → 84 Games</text>
-    <text x="180" y="379" text-anchor="middle" class="node-sub">Must beat live bot to ship</text>
+  <!-- Node 5: Bottom Left (Beat Live Bot -> 84 Games) -->
+  <g class="svg-node" data-loop-idx="5" tabindex="0" role="button" aria-label="6. Beat Live Bot then 84 Games">
+    <rect x="76" y="336" width="204" height="62" rx="10" class="node-bg" />
+    <text x="178" y="360" text-anchor="middle" class="node-title">6. Beat Live Bot → 84 Games</text>
+    <text x="178" y="379" text-anchor="middle" class="node-sub">2m gate before 30m bench</text>
   </g>
 
-  <!-- Node 6: Top Left (Ship Live) -->
-  <g class="svg-node" data-loop-idx="6" tabindex="0" role="button" aria-label="7. Ship New Build Live">
+  <!-- Node 6: Top Left (Deploy to Ladder) -->
+  <g class="svg-node" data-loop-idx="6" tabindex="0" role="button" aria-label="7. Deploy to Ladder">
     <rect x="34" y="150" width="176" height="68" rx="10" class="node-bg" />
-    <text x="122" y="177" text-anchor="middle" class="node-title">7. Ship Live Build</text>
-    <text x="122" y="196" text-anchor="middle" class="node-sub">4 binaries → AI Arena</text>
+    <text x="122" y="177" text-anchor="middle" class="node-title">7. Deploy to Ladder</text>
+    <text x="122" y="196" text-anchor="middle" class="node-sub">4 bots → AI Arena</text>
   </g>
 
-  <!-- Node 7: CENTER HUB (Meta-Flywheel) -->
-  <g class="svg-node node-flywheel" data-loop-idx="7" tabindex="0" role="button" aria-label="Meta-Flywheel auditing the loop itself">
-    <rect x="266" y="176" width="228" height="106" rx="14" class="node-bg-fw" />
-    <text x="380" y="201" text-anchor="middle" class="node-kicker-fw">INNER META-FLYWHEEL</text>
-    <text x="380" y="223" text-anchor="middle" class="node-title">Audits the Loop Itself</text>
-    <text x="380" y="243" text-anchor="middle" class="node-sub">Reads all 12 agent transcripts</text>
-    <text x="380" y="261" text-anchor="middle" class="node-sub">Cuts wasted GPU time · 1.44× ships</text>
+  <!-- Node 7: CENTER HUB (Process Check) -->
+  <g class="svg-node node-flywheel" data-loop-idx="7" tabindex="0" role="button" aria-label="Review build and test logs">
+    <rect x="260" y="176" width="240" height="106" rx="14" class="node-bg-fw" />
+    <text x="380" y="201" text-anchor="middle" class="node-kicker-fw">PROCESS CHECK</text>
+    <text x="380" y="223" text-anchor="middle" class="node-title">Review Build &amp; Test Logs</text>
+    <text x="380" y="243" text-anchor="middle" class="node-sub">Tracks slow steps &amp; repeat edits</text>
+    <text x="380" y="261" text-anchor="middle" class="node-sub">Moved 2m gate ahead of 30m bench</text>
   </g>
 </svg>
 """
@@ -1319,11 +1402,11 @@ def render_loop_diagram_section(rich: Dict[str, Any]) -> str:
 <section class="section-rule wide-col" id="loop-section">
   <div class="section-head">
     <p class="section-num">Section 1</p>
-    <h2 class="section-kicker">How Mothman Improves Every Loop</h2>
+    <h2 class="section-kicker">How We Test and Ship Changes</h2>
     <p class="section-intro">
-      Improvement runs on two linked cycles: the <strong>outer cycle</strong> tests and ships stronger StarCraft II
-      bots, while the <strong>inner meta-flywheel</strong> inspects our agents’ own run logs to remove bottlenecks
-      and stop repeat mistakes. Tap any node on the diagram to inspect it.
+      Every update goes through the same seven-step check before reaching the live ladder.
+      After each pass, a script also checks our build and test logs to see where time was wasted
+      or which rules kept getting edited back and forth.
     </p>
   </div>
   <div class="interactive-panel">
@@ -1352,120 +1435,120 @@ def render_loop_diagram_section(rich: Dict[str, Any]) -> str:
 
 
 def render_architecture_section(rich: Dict[str, Any]) -> str:
-    apm = rich["apm_by_race"]
     lp = rich["live_perf"]
+    a3 = rich["arena3"]
 
     pieces = {
         "sc2": {
-            "title": "StarCraft II Game Engine (22.4 Ticks / Sec)",
-            "badge": "Game World",
-            "what": "Every 45 milliseconds, StarCraft II sends Mothman a snapshot of everything currently visible on the map—our units, our money, enemy units outside the fog of war, and building progress.",
-            "connects": "Broadcasts the raw game state in parallel to all six perception streams, then executes the clean commands returned by the APM Governor.",
-            "perf": f"Average bot response time: {lp['avg_step_ms']:.2f} ms per step (well under the 200 ms tournament limit), with 0 crashes on Live Build 45.",
+            "title": "StarCraft II Engine (22.4 Steps / Sec)",
+            "badge": "Game State",
+            "what": "Every 45 milliseconds, StarCraft II sends everything visible on the map: our units, resources, building progress, and enemy units outside the fog of war.",
+            "connects": "Feeds the six state readers and executes the filtered command batch returned at the end of the step.",
+            "perf": f"{lp['avg_step_ms']:.2f} ms average bot step time (200 ms tournament limit) · 0 crashes on Build 45",
         },
         "econ": {
-            "title": "Stream 1 · Economy & Supply",
-            "badge": "Input Stream → Prioritization",
-            "what": "Tracks exact minerals, gas, active workers per base, free supply, and money already promised to workers walking toward a build site.",
-            "connects": "Feeds live spending capacity into the Prioritization Engine so it knows whether we can afford an expansion, need a Pylon/Depot/Overlord immediately, or have idle gas geysers.",
-            "perf": "Auto-resaturating empty gas geysers within 8 seconds drove zero-gas freezes to 0 in Loops 45 and 47; Terran averages just 1.8% time supply-blocked.",
+            "title": "Economy & Supply",
+            "badge": "State Reader → Spending Queue",
+            "what": "Tracks minerals, gas, active workers per base, free supply, and resources already promised to workers walking to build sites.",
+            "connects": "Tells the spending queue what Mothman can afford right now, when supply is tight, and when a gas geyser has idle slots.",
+            "perf": "Re-assigns empty gas geysers within 8 seconds · Terran supply-blocked 1.8% of match time",
         },
         "scout": {
-            "title": "Stream 2 · Scouting & Enemy Memory",
-            "badge": "Input Stream → Mirror Mind & Micro",
-            "what": "Remembers every enemy unit and building Mothman has seen—even after they disappear back into the fog of war—and tracks how long ago each spot was scouted.",
-            "connects": "Hands raw sightings to Mirror Mind to infer hidden tech, and tells Tactical Micro where hidden enemies or bases are likely sitting.",
-            "perf": "Visibility-grid verification fixed dark-fog blind spots so cloaked Dark Templars now hunt down the final hidden Siege Tank cleanly.",
+            "title": "Scouting & Memory",
+            "badge": "State Reader → Tech Inference & Combat",
+            "what": "Remembers enemy units and buildings after they duck back into the fog of war, along with how long each base location has gone unscouted.",
+            "connects": "Feeds sightings into enemy tech inference and tells combat squads where hidden bases or siege lines sit.",
+            "perf": "Tracks fog-of-war tile visibility so raiders clear hidden corners instead of stalling",
         },
         "mirror": {
-            "title": "Stream 3 · Mirror Mind (Opponent Predictor)",
-            "badge": "Inference Stream → Prioritization & Micro",
-            "what": "Acts like a human player reading their opponent: if it sees early gas and a Starport with Tech Lab, it anticipates cloaked Banshees before they arrive; if it sees 12 enemy workers crossing the map, it flags an emergency rush.",
-            "connects": "Outputs concrete counter-signals—like 'need detection now' or 'enemy is all-in, cancel greedy bases'—into both the Prioritization Engine and Tactical Micro.",
-            "perf": "Cloak losses dropped to 0 across all 84 matches in Loop 47. Removing dead-building Broodlings eliminated false anti-air panics; Loop 48 adds dedicated kiting worker-rush detection.",
+            "title": "Enemy Tech & Rush Inference",
+            "badge": "Inference → Spending & Combat",
+            "what": "Infers hidden tech and rushes from partial clues: an early Starport with a Tech Lab warns of cloaked Banshees, and 12 enemy workers crossing the map flags an all-in worker rush.",
+            "connects": "Sends counter requests (such as rushing detection or canceling a greedy expansion) to both the spending queue and squad control.",
+            "perf": "Ignores hallucinations and dead-building Broodlings that previously caused false air panics",
         },
         "prodb": {
-            "title": "Stream 4 · Pro Replay Benchmarks",
-            "badge": "Input Stream → Prioritization",
-            "what": "Holds Grandmaster median curves for worker count, expansion timings, and gas timings in all nine matchups so the bot knows what healthy growth looks like at minute 2, 5, or 8.",
-            "connects": "Nudges the Prioritization Engine upward whenever worker production or base count falls behind Grandmaster pace.",
-            "perf": "Verified across 5,575 pro-replay checkpoints with 0 worker-starvation, 0 expansion-starvation, and 0 resource-hoarding deadlocks.",
+            "title": "Pro Timing Targets",
+            "badge": "Benchmarks → Spending Queue",
+            "what": "Compares Mothman's worker count, base count, and gas timings against Grandmaster medians for the current matchup.",
+            "connects": "Raises the priority of workers or expansions whenever economy growth falls behind normal ladder pace.",
+            "perf": "Benchmarked per matchup from Grandmaster replays",
         },
         "fap": {
-            "title": "Stream 5 · Battle Simulator (FAP)",
-            "badge": "Input Stream → Prioritization & Micro",
-            "what": "Runs a fast local fight simulation comparing nearby friendly and enemy armies—accounting for unit types, splash damage, high ground, and siege range.",
-            "connects": "Tells Tactical Micro whether to engage, kite back, or retreat, and tells the Prioritization Engine when to pause greed and pump combat units.",
-            "perf": "Stopped reckless Stalker blink-ins against Siege Tank lines and lifted Terran to its first >1.00× overall local trade ratio (1.02× in Loop 45; 1.64× live).",
+            "title": "Fight Simulator",
+            "badge": "Simulation → Spending & Combat",
+            "what": "Runs a fast local check on nearby friendly and enemy squads, accounting for unit types, splash damage, high ground, and siege range.",
+            "connects": "Tells squads whether to press an attack, kite back, or retreat, and tells the spending queue when to stop droning and build army.",
+            "perf": "Stops outnumbered Stalkers from blinking onto sieged Tank lines",
         },
         "map": {
-            "title": "Stream 6 · Map & Base Placement",
-            "badge": "Input Stream → Prioritization & Micro",
-            "what": "Maps every ramp, choke, expansion pad, and mineral pocket using pathing distances rather than compass directions—so every base layout works identically whether spawning north or south.",
-            "connects": "Supplies safe building coordinates (including natural and third-base spillover space) to Macro, and safe retreat / flank paths to Tactical Micro.",
-            "perf": "Eliminated our 16-point northern-spawn deficit on Ley Lines; North vs. South live win rate gap is now 0.0 percentage points on Live Build 45.",
+            "title": "Map & Base Layout",
+            "badge": "Geometry → Spending & Combat",
+            "what": "Computes ramps, chokes, expansion pads, and mineral pockets from actual walking distances rather than compass directions, so layouts behave identically from north or south spawns.",
+            "connects": "Gives safe wall and building spots to the build queue and flank or retreat paths to combat squads.",
+            "perf": "Closed our 16-point north-spawn deficit on Ley Lines (53.3% North vs. 53.8% South live)",
         },
         "prio": {
-            "title": "Prioritization Engine (Macro — What to Build)",
-            "badge": "Decision Engine → APM Governor",
-            "what": "Instead of following a brittle script, every possible spending choice—workers, supply, expansions, tech, upgrades, and army units—submits a live priority score each tick. When a high-value item like a second Nexus (400 minerals) or Robotics Bay is almost affordable, it sets money aside ('escrow') so cheaper units cannot spend it first.",
-            "connects": "Combines all six input streams into ranked build and train orders, then sends them to the APM Governor.",
-            "perf": "0/0/0/0 pro-replay starvation audit; Escrow lockouts cut 17→12; Loop 48 aligns Brain & Runtime Barracks/Phoenix limits to remove late-game production stalls.",
+            "title": "Build & Spending Queue (What to Build)",
+            "badge": "Decision → Command Filter",
+            "what": "Every tick, workers, supply buildings, expansions, tech, upgrades, and army units compete on one priority list. When an expensive item like a second Nexus (400 minerals) or Robotics Bay is almost affordable, it sets cash aside (\"escrow\") so cheaper units do not drain the bank first.",
+            "connects": "Turns all six state readers into ranked build and train orders, then hands them to the command filter.",
+            "perf": "Matches build-queue and executor facility caps so late-game production does not stall",
         },
         "micro": {
-            "title": "Tactical Micro Engine (Combat — How to Fight)",
-            "badge": "Decision Engine → APM Governor",
-            "what": "Controls individual squads and workers in real time: sniping detectors before engaging with cloaked units, blinking injured Stalkers back, dropping Widow Mines behind mineral lines, casting spells, and pulling workers against rushes.",
-            "connects": "Reads Scouting, Mirror Mind, Battle Simulator, and Map Geometry, then sends urgent unit orders to the APM Governor.",
-            "perf": "Tactics Arena 3.0 hit a new high of 34W–25L–7D (1.17× trade, 25 KOs) in Loop 47, including a 1.58× permanent-cloak Planetary Fortress win and 16/16 Widow Mine drops.",
+            "title": "Squad & Worker Control (How to Fight)",
+            "badge": "Decision → Command Filter",
+            "what": "Controls squads and workers in fights: sniping enemy detectors before cloaked units engage, blinking hurt Stalkers back, dropping Widow Mines into mineral lines, casting spells, and pulling workers against early rushes.",
+            "connects": "Uses scouting memory, enemy tech clues, fight simulations, and map geometry to issue unit orders to the command filter.",
+            "perf": f"Tested across {a3['total']} isolated combat, drop, spellcaster, and rush-defense scenarios",
         },
         "apm": {
-            "title": "APM Governor (Priority Traffic Controller)",
-            "badge": "Actuation → StarCraft II",
-            "what": "Every tick, both Macro and Micro want to command units. The APM Governor sorts all orders into four strict urgency lanes—P0 Survive & Spells, P1 Combat Micro, P2 Macro Builds, P3 Routine Mining—removes redundant clicks, and guarantees a lower-priority rule never overwrites an urgent command on the same unit.",
-            "connects": "Takes orders from both Decision Engines and sends one clean, conflict-free action batch back to StarCraft II.",
-            "perf": f"{lp['wire_rejects']} rejected game commands · {lp['avg_step_ms']:.2f} ms avg step · Balanced human-like APM (Protoss {apm['Protoss'][0]:.0f} / Terran {apm['Terran'][0]:.0f} / Zerg {apm['Zerg'][0]:.0f}).",
+            "title": "Command Priority Filter",
+            "badge": "Output → StarCraft II",
+            "what": "Both the build queue and combat control try to move units every tick. The filter sorts orders into four priority levels (1. Survival & Spells, 2. Combat, 3. Building & Training, 4. Routine Mining), drops duplicate clicks, and blocks lower-priority rules from overwriting urgent commands on the same unit.",
+            "connects": "Merges orders from both decision modules into one conflict-free batch per game step.",
+            "perf": f"{lp['wire_rejects']} rejected game commands · {lp['avg_step_ms']:.2f} ms average step time",
         },
     }
 
     walkthroughs = {
         "explore": {
-            "label": "Explore Pieces",
+            "label": "Inspect Parts",
             "active": ["prio"],
-            "title": "Click any piece on the diagram to see what it does",
+            "title": "Click any block on the diagram to see what it does",
             "steps": [],
         },
         "macro": {
-            "label": "Walkthrough: Normal Expansion",
+            "label": "Example: Taking a 2nd Base",
             "active": ["sc2", "econ", "prodb", "map", "prio", "apm"],
-            "title": "How Mothman saves for a 2nd Nexus at 1:30 without Stalkers stealing the cash",
+            "title": "How Mothman saves 400 minerals for a second Nexus at 1:30 without Stalkers spending the cash",
             "steps": [
-                "1. Economy & Supply sees 350 minerals and 20 healthy Probes; Pro Replay Curves show Grandmasters expand around 1:33.",
-                "2. Prioritization Engine scores Natural Nexus (920) higher than a Stalker (620) and locks 350 minerals into escrow so Gateways pause for 4 seconds.",
-                "3. Map & Placement selects the safe natural expansion pad (working identically from north or south spawns).",
-                "4. APM Governor sends the Build Nexus command in lane P2 and locks that builder Probe so routine mining (P3) cannot call it back to minerals.",
+                "1. Economy & Supply sees 350 minerals and 20 Probes; Pro Timing Targets show Grandmasters take a second base around 1:33.",
+                "2. Build & Spending Queue ranks the second Nexus ahead of training another Stalker and holds 350 minerals aside so Gateways pause for four seconds.",
+                "3. Map & Base Layout picks the natural expansion pad using walking distance (identical from north or south spawns).",
+                "4. Command Priority Filter sends the Build Nexus order at Priority 3 and locks that builder Probe so routine mining (Priority 4) cannot pull it back to minerals.",
             ],
         },
         "rush": {
-            "label": "Walkthrough: 15-Probe Worker Rush",
+            "label": "Example: 15-Probe Rush",
             "active": ["sc2", "scout", "mirror", "fap", "prio", "micro", "apm"],
-            "title": "How all pieces coordinate when 15 enemy Probes rush the base at 1:00",
+            "title": "How the bot responds when 15 enemy Probes rush the main base at 1:00",
             "steps": [
-                "1. Scouting & Memory spots 12+ enemy workers crossing the map; Battle Simulator flags immediate home-base danger.",
-                "2. Mirror Mind locks 'Worker Rush' mode—suppressing greedy expansions, extra Depots, and gas buildings.",
-                "3. Prioritization Engine cancels unfinished gas/expands for a 75% refund and prioritizes the first Zealot, Marine, or Spine + Zerglings.",
-                "4. Tactical Micro pulls defenders against advancing Probes while keeping 3–4 workers safely mining so income never freezes, and the APM Governor promotes those pulls to lane P0 so nothing overrides them.",
+                "1. Scouting & Memory counts 12+ enemy workers crossing the map, and Fight Simulator flags immediate danger at home.",
+                "2. Enemy Tech Inference flags an all-in worker rush, turning off expansions, extra Supply Depots, and gas mining.",
+                "3. Build & Spending Queue cancels unfinished expansions or gas buildings for a 75% refund and rushes out the first Zealot, Marine, or Spine Crawler and Zerglings.",
+                "4. Squad & Worker Control pulls workers to fight while keeping 3 to 4 workers mining so income never hits zero, and Command Priority Filter locks those defenders at Priority 1.",
             ],
         },
         "cloak": {
-            "label": "Walkthrough: Cloaked Banshee",
+            "label": "Example: Cloaked Banshee",
             "active": ["sc2", "scout", "mirror", "prio", "micro", "apm"],
-            "title": "How Mothman stops invisible units before they wipe a mineral line",
+            "title": "How the bot handles cloaked Banshees before they wipe a mineral line",
             "steps": [
-                "1. Scouting spots a Starport with a Tech Lab—or invisible damage hitting our workers.",
-                "2. Mirror Mind immediately latches 'Cloaked Threat' (while ignoring false alarms like hallucinations or death Broodlings).",
-                "3. Prioritization Engine overrides normal army production to rush detection (Observer, Spore Crawler, or Missile Turret).",
-                "4. Tactical Micro pulls workers away from the Banshee until detection arrives, then focus-fires the revealed threat at P1—driving cloak losses to 0 across all 84 matches in Loop 47.",
+                "1. Scouting & Memory spots a Starport with a Tech Lab (or workers taking invisible damage).",
+                "2. Enemy Tech Inference flags a cloaked threat while ignoring false alarms like Sentry hallucinations.",
+                "3. Build & Spending Queue bumps detection (Observer, Spore Crawler, or Missile Turret) ahead of normal army production.",
+                "4. Squad & Worker Control pulls workers away from the Banshee until detection arrives, then focus-fires the revealed Banshee at Priority 2.",
             ],
         },
     }
@@ -1474,7 +1557,7 @@ def render_architecture_section(rich: Dict[str, Any]) -> str:
     walks_json = json.dumps(walkthroughs, ensure_ascii=False).replace("</", "<\\/")
 
     arch_svg = """
-<svg viewBox="0 0 760 568" class="diagram-svg" id="arch-svg" role="img" aria-label="Mothman real-time decision architecture showing six parallel streams feeding Macro Prioritization and Tactical Micro into the APM Governor">
+<svg viewBox="0 0 760 568" class="diagram-svg" id="arch-svg" role="img" aria-label="How the bot plays each frame: six game-state readers feeding build queue and squad control into a command priority filter">
   <defs>
     <marker id="arr-arch" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#8C877A" />
@@ -1484,63 +1567,63 @@ def render_architecture_section(rich: Dict[str, Any]) -> str:
     </marker>
   </defs>
 
-  <!-- Right-side feedback loop arrow: APM Governor -> StarCraft II -->
+  <!-- Right-side feedback loop arrow: Command Priority Filter -> StarCraft II -->
   <path d="M 684 504 L 730 504 L 730 42 L 690 42" fill="none" stroke="#4A6B82" stroke-width="2.2" marker-end="url(#arr-ret)" />
-  <text x="742" y="276" text-anchor="middle" fill="#4A6B82" font-size="11" font-weight="600" transform="rotate(-90 742 276)">Clean orders sent 22×/sec → next frame</text>
+  <text x="742" y="276" text-anchor="middle" fill="#4A6B82" font-size="11" font-weight="600" transform="rotate(-90 742 276)">Filtered commands sent 22×/sec</text>
 
   <!-- TOP BAND: StarCraft II Game State -->
   <g class="svg-node arch-svg-node" data-arch-id="sc2" tabindex="0" role="button" aria-label="StarCraft II Game State">
     <rect x="30" y="14" width="654" height="56" rx="10" class="node-bg-dark" />
     <text x="357" y="37" text-anchor="middle" fill="#FAF9F5" font-size="14" font-weight="600">StarCraft II Game State (every 45 ms)</text>
-    <text x="357" y="55" text-anchor="middle" fill="#D4D0C5" font-size="11.5">Broadcasts visible units, money, supply, and map state to all six streams in parallel</text>
+    <text x="357" y="55" text-anchor="middle" fill="#D4D0C5" font-size="11.5">Visible units, resources, supply, and terrain</text>
   </g>
 
-  <!-- Fan-out arrows from SC2 to Streams -->
+  <!-- Fan-out arrows from SC2 to Readers -->
   <line x1="133" y1="70" x2="133" y2="106" stroke="#8C877A" stroke-width="1.8" marker-end="url(#arr-arch)" />
   <line x1="357" y1="70" x2="357" y2="106" stroke="#8C877A" stroke-width="1.8" marker-end="url(#arr-arch)" />
   <line x1="581" y1="70" x2="581" y2="106" stroke="#8C877A" stroke-width="1.8" marker-end="url(#arr-arch)" />
 
-  <!-- Subtle grouping box around the 6 Independent Streams -->
+  <!-- Subtle grouping box around the 6 Game-State Readers -->
   <rect x="20" y="92" width="674" height="176" rx="12" fill="#F4F2EA" stroke="#E0DCD0" stroke-width="1.2" />
-  <text x="34" y="108" fill="#7A7870" font-size="10.5" font-weight="600" letter-spacing="0.06em">SIX INDEPENDENT INPUT STREAMS (RUN IN PARALLEL)</text>
+  <text x="34" y="108" fill="#7A7870" font-size="10.5" font-weight="600" letter-spacing="0.06em">SIX PARALLEL GAME-STATE READERS</text>
 
-  <!-- Row 1 of Streams -->
-  <g class="svg-node arch-svg-node" data-arch-id="econ" tabindex="0" role="button" aria-label="Economy and Supply stream">
+  <!-- Row 1 of Readers -->
+  <g class="svg-node arch-svg-node" data-arch-id="econ" tabindex="0" role="button" aria-label="Economy and Supply reader">
     <rect x="32" y="116" width="204" height="64" rx="8" class="node-bg" />
     <text x="134" y="140" text-anchor="middle" class="node-title">Economy &amp; Supply</text>
-    <text x="134" y="159" text-anchor="middle" class="node-sub">Cash, income, workers, free supply</text>
+    <text x="134" y="159" text-anchor="middle" class="node-sub">Minerals, gas, workers, free supply</text>
   </g>
-  <g class="svg-node arch-svg-node" data-arch-id="scout" tabindex="0" role="button" aria-label="Scouting and Memory stream">
+  <g class="svg-node arch-svg-node" data-arch-id="scout" tabindex="0" role="button" aria-label="Scouting and Memory reader">
     <rect x="255" y="116" width="204" height="64" rx="8" class="node-bg" />
     <text x="357" y="140" text-anchor="middle" class="node-title">Scouting &amp; Memory</text>
-    <text x="357" y="159" text-anchor="middle" class="node-sub">Seen enemies &amp; fog-of-war recall</text>
+    <text x="357" y="159" text-anchor="middle" class="node-sub">Seen enemies &amp; last-known positions</text>
   </g>
-  <g class="svg-node arch-svg-node" data-arch-id="mirror" tabindex="0" role="button" aria-label="Mirror Mind opponent predictor">
+  <g class="svg-node arch-svg-node" data-arch-id="mirror" tabindex="0" role="button" aria-label="Enemy Tech Inference">
     <rect x="478" y="116" width="204" height="64" rx="8" class="node-bg-accent" />
-    <text x="580" y="140" text-anchor="middle" class="node-title">Mirror Mind</text>
-    <text x="580" y="159" text-anchor="middle" class="node-sub">Guesses hidden tech &amp; rush threats</text>
+    <text x="580" y="140" text-anchor="middle" class="node-title">Enemy Tech Inference</text>
+    <text x="580" y="159" text-anchor="middle" class="node-sub">Guesses hidden tech &amp; early rushes</text>
   </g>
-  <!-- Horizontal arrow: Scouting -> Mirror Mind -->
+  <!-- Horizontal arrow: Scouting -> Enemy Tech Inference -->
   <line x1="459" y1="148" x2="476" y2="148" stroke="#C4633E" stroke-width="1.8" marker-end="url(#arr-fw)" />
 
-  <!-- Row 2 of Streams -->
-  <g class="svg-node arch-svg-node" data-arch-id="prodb" tabindex="0" role="button" aria-label="Pro Replay Benchmarks stream">
+  <!-- Row 2 of Readers -->
+  <g class="svg-node arch-svg-node" data-arch-id="prodb" tabindex="0" role="button" aria-label="Pro Timing Targets">
     <rect x="32" y="192" width="204" height="64" rx="8" class="node-bg" />
-    <text x="134" y="216" text-anchor="middle" class="node-title">Pro Replay Curves</text>
-    <text x="134" y="235" text-anchor="middle" class="node-sub">GM worker, base &amp; gas targets</text>
+    <text x="134" y="216" text-anchor="middle" class="node-title">Pro Timing Targets</text>
+    <text x="134" y="235" text-anchor="middle" class="node-sub">Grandmaster worker, base &amp; gas curves</text>
   </g>
-  <g class="svg-node arch-svg-node" data-arch-id="fap" tabindex="0" role="button" aria-label="Battle Simulator stream">
+  <g class="svg-node arch-svg-node" data-arch-id="fap" tabindex="0" role="button" aria-label="Fight Simulator">
     <rect x="255" y="192" width="204" height="64" rx="8" class="node-bg" />
-    <text x="357" y="216" text-anchor="middle" class="node-title">Battle Simulator (FAP)</text>
-    <text x="357" y="235" text-anchor="middle" class="node-sub">Predicts who wins nearby fights</text>
+    <text x="357" y="216" text-anchor="middle" class="node-title">Fight Simulator</text>
+    <text x="357" y="235" text-anchor="middle" class="node-sub">Estimates whether nearby units win</text>
   </g>
-  <g class="svg-node arch-svg-node" data-arch-id="map" tabindex="0" role="button" aria-label="Map and Base Placement stream">
+  <g class="svg-node arch-svg-node" data-arch-id="map" tabindex="0" role="button" aria-label="Map and Base Layout">
     <rect x="478" y="192" width="204" height="64" rx="8" class="node-bg" />
-    <text x="580" y="216" text-anchor="middle" class="node-title">Map &amp; Base Geometry</text>
-    <text x="580" y="235" text-anchor="middle" class="node-sub">Ramps, paths &amp; safe build spots</text>
+    <text x="580" y="216" text-anchor="middle" class="node-title">Map &amp; Base Layout</text>
+    <text x="580" y="235" text-anchor="middle" class="node-sub">Ramps, chokes &amp; safe building spots</text>
   </g>
 
-  <!-- Converging arrows from Streams into Macro & Micro Engines -->
+  <!-- Converging arrows from Readers into Decision Modules -->
   <path d="M 160 268 L 160 314" fill="none" stroke="#8C877A" stroke-width="2" marker-end="url(#arr-arch)" />
   <path d="M 320 268 L 265 314" fill="none" stroke="#8C877A" stroke-width="2" marker-end="url(#arr-arch)" />
   <path d="M 394 268 L 450 314" fill="none" stroke="#8C877A" stroke-width="2" marker-end="url(#arr-arch)" />
@@ -1548,46 +1631,46 @@ def render_architecture_section(rich: Dict[str, Any]) -> str:
   <text x="150" y="297" text-anchor="end" fill="#7A7870" font-size="10.5">Spending &amp; counter signals</text>
   <text x="566" y="297" fill="#7A7870" font-size="10.5">Threat &amp; target map</text>
 
-  <!-- ROW 3: Two Parallel Decision Engines -->
-  <g class="svg-node arch-svg-node is-active" data-arch-id="prio" tabindex="0" role="button" aria-label="Prioritization Engine for Macro">
+  <!-- ROW 3: Two Parallel Decision Modules -->
+  <g class="svg-node arch-svg-node is-active" data-arch-id="prio" tabindex="0" role="button" aria-label="Build and Spending Queue">
     <rect x="30" y="318" width="318" height="94" rx="10" class="node-bg" />
-    <text x="189" y="340" text-anchor="middle" class="node-kicker-fw">MACRO · WHAT TO BUILD</text>
-    <text x="189" y="361" text-anchor="middle" class="node-title">Prioritization Engine</text>
-    <text x="189" y="381" text-anchor="middle" class="node-sub">Scores workers, bases, tech &amp; army every tick;</text>
-    <text x="189" y="397" text-anchor="middle" class="node-sub">locks money aside ("escrow") for big purchases</text>
+    <text x="189" y="340" text-anchor="middle" class="node-kicker-fw">ECONOMY · WHAT TO BUILD</text>
+    <text x="189" y="361" text-anchor="middle" class="node-title">Build &amp; Spending Queue</text>
+    <text x="189" y="381" text-anchor="middle" class="node-sub">Scores workers, bases, tech &amp; units each tick;</text>
+    <text x="189" y="397" text-anchor="middle" class="node-sub">holds cash aside ("escrow") for big purchases</text>
   </g>
 
-  <g class="svg-node arch-svg-node" data-arch-id="micro" tabindex="0" role="button" aria-label="Tactical Micro Engine for Combat">
+  <g class="svg-node arch-svg-node" data-arch-id="micro" tabindex="0" role="button" aria-label="Squad and Worker Control">
     <rect x="366" y="318" width="318" height="94" rx="10" class="node-bg" />
     <text x="525" y="340" text-anchor="middle" class="node-kicker-fw">COMBAT · HOW TO FIGHT</text>
-    <text x="525" y="361" text-anchor="middle" class="node-title">Tactical Micro Engine</text>
-    <text x="525" y="381" text-anchor="middle" class="node-sub">Blink, kiting, spells, drops, detector snipes,</text>
-    <text x="525" y="397" text-anchor="middle" class="node-sub">and pulling workers against early rushes</text>
+    <text x="525" y="361" text-anchor="middle" class="node-title">Squad &amp; Worker Control</text>
+    <text x="525" y="381" text-anchor="middle" class="node-sub">Kiting, Blink, spells, drops, detector sniping,</text>
+    <text x="525" y="397" text-anchor="middle" class="node-sub">and pulling workers against rushes</text>
   </g>
 
-  <!-- Converging arrows into APM Governor -->
+  <!-- Converging arrows into Command Priority Filter -->
   <line x1="189" y1="412" x2="189" y2="454" stroke="#8C877A" stroke-width="2" marker-end="url(#arr-arch)" />
   <line x1="525" y1="412" x2="525" y2="454" stroke="#8C877A" stroke-width="2" marker-end="url(#arr-arch)" />
   <text x="200" y="439" fill="#7A7870" font-size="10.5">Build &amp; train orders</text>
   <text x="536" y="439" fill="#7A7870" font-size="10.5">Combat &amp; spell orders</text>
 
-  <!-- ROW 4: APM Governor (Priority Traffic Controller) -->
-  <g class="svg-node arch-svg-node" data-arch-id="apm" tabindex="0" role="button" aria-label="APM Governor priority traffic controller">
+  <!-- ROW 4: Command Priority Filter -->
+  <g class="svg-node arch-svg-node" data-arch-id="apm" tabindex="0" role="button" aria-label="Command Priority Filter">
     <rect x="30" y="458" width="654" height="94" rx="10" class="node-bg" />
-    <text x="357" y="481" text-anchor="middle" class="node-title">APM Governor · Priority Traffic Controller</text>
-    <text x="357" y="499" text-anchor="middle" class="node-sub">Removes duplicate clicks and ensures routine orders never overwrite urgent survival actions</text>
-    <!-- Visual P0..P3 priority lanes -->
+    <text x="357" y="481" text-anchor="middle" class="node-title">Command Priority Filter</text>
+    <text x="357" y="499" text-anchor="middle" class="node-sub">Drops duplicate clicks so routine mining never overwrites urgent combat or survival orders</text>
+    <!-- Visual 1..4 priority levels -->
     <rect x="50" y="512" width="144" height="28" rx="5" fill="#FCECE6" stroke="#C4633E" stroke-width="1" />
-    <text x="122" y="530" text-anchor="middle" fill="#A34E2E" font-size="10.5" font-weight="600">P0 · Survive &amp; Spells</text>
+    <text x="122" y="530" text-anchor="middle" fill="#A34E2E" font-size="10.5" font-weight="600">1 · Survival &amp; Spells</text>
 
     <rect x="206" y="512" width="144" height="28" rx="5" fill="#EEF3F6" stroke="#4A6B82" stroke-width="1" />
-    <text x="278" y="530" text-anchor="middle" fill="#355166" font-size="10.5" font-weight="600">P1 · Combat Micro</text>
+    <text x="278" y="530" text-anchor="middle" fill="#355166" font-size="10.5" font-weight="600">2 · Combat Control</text>
 
     <rect x="362" y="512" width="144" height="28" rx="5" fill="#F4F2EA" stroke="#B5B0A3" stroke-width="1" />
-    <text x="434" y="530" text-anchor="middle" fill="#4A4945" font-size="10.5" font-weight="600">P2 · Macro Builds</text>
+    <text x="434" y="530" text-anchor="middle" fill="#4A4945" font-size="10.5" font-weight="600">3 · Building &amp; Training</text>
 
     <rect x="518" y="512" width="144" height="28" rx="5" fill="#FAF9F5" stroke="#D5D1C5" stroke-width="1" />
-    <text x="590" y="530" text-anchor="middle" fill="#7A7870" font-size="10.5" font-weight="600">P3 · Routine Mining</text>
+    <text x="590" y="530" text-anchor="middle" fill="#7A7870" font-size="10.5" font-weight="600">4 · Routine Mining</text>
   </g>
 </svg>
 """
@@ -1597,20 +1680,22 @@ def render_architecture_section(rich: Dict[str, Any]) -> str:
 <section class="section-rule wide-col" id="architecture-section">
   <div class="section-head">
     <p class="section-num">Section 2</p>
-    <h2 class="section-kicker">How Mothman Makes a Decision Every Frame</h2>
+    <h2 class="section-kicker">How the Bot Plays Each Frame</h2>
     <p class="section-intro">
-      Instead of a rigid if-then script, six independent perception streams read the game in parallel and feed
-      two decision engines—one for economy (<strong>what to build</strong>) and one for combat (<strong>how to fight</strong>)—before
-      the <strong>APM Governor</strong> sorts every order by urgency. Tap any walkthrough or diagram block below.
+      Every 45 milliseconds, StarCraft II sends the current map state. Six independent readers digest economy,
+      scouting, enemy tech clues, pro timing targets, local fight odds, and map geometry, then feed two modules:
+      one scores <strong>what to build</strong>, and the other controls <strong>how units fight</strong>.
+      At the bottom, a <strong>command filter</strong> drops duplicate clicks and stops routine mining orders
+      from overwriting urgent combat actions.
     </p>
   </div>
 
   <div class="interactive-panel">
-    <div class="walk-bar" role="tablist" aria-label="Architecture walkthrough examples">
-      <button type="button" class="cat-pill is-active" data-walk-id="explore">Explore Pieces</button>
-      <button type="button" class="cat-pill" data-walk-id="macro">Walkthrough: Normal Expansion</button>
-      <button type="button" class="cat-pill" data-walk-id="rush">Walkthrough: 15-Probe Rush</button>
-      <button type="button" class="cat-pill" data-walk-id="cloak">Walkthrough: Cloaked Banshee</button>
+    <div class="walk-bar" role="tablist" aria-label="Frame decision examples">
+      <button type="button" class="cat-pill is-active" data-walk-id="explore">Inspect Parts</button>
+      <button type="button" class="cat-pill" data-walk-id="macro">Example: Taking a 2nd Base</button>
+      <button type="button" class="cat-pill" data-walk-id="rush">Example: 15-Probe Rush</button>
+      <button type="button" class="cat-pill" data-walk-id="cloak">Example: Cloaked Banshee</button>
     </div>
 
     <div class="diagram-stage">{arch_svg}</div>
@@ -1637,76 +1722,35 @@ def render_architecture_section(rich: Dict[str, Any]) -> str:
     </div>
   </div>
 
-  <div class="subsys-grid">
-    <article class="subsys-card">
-      <h3>2.1 Six Independent Input Streams</h3>
-      <p>Economy, Scouting, Mirror Mind, Pro Curves, Battle Simulation, and Map Geometry each read the frame independently—preventing spaghetti logic and keeping north/south spawns completely symmetric.</p>
-      <div class="mini-stat">North vs. South live win gap: <strong>0.0pp</strong> on Build 45</div>
-    </article>
-    <article class="subsys-card">
-      <h3>2.2 Mirror Mind (Opponent Prediction)</h3>
-      <p>Infers hidden enemy tech and rush timings from partial scouting. Fixing a bug where dead Zerg buildings spawned Broodlings that triggered false anti-air panics immediately lifted Terran trades above 1.0×.</p>
-      <div class="mini-stat">Cloak losses: <strong>0</strong> in Loop 47 · Worker-rush defense upgrading in Loop 48</div>
-    </article>
-    <article class="subsys-card">
-      <h3>2.3 Prioritization Engine</h3>
-      <p>Every build choice competes on one priority scale, with money locked aside ("escrow") when high-priority bases or tech are nearly affordable so cheaper units cannot drain the bank.</p>
-      <div class="mini-stat">Pro-replay deadlocks: <strong>0 / 5,575</strong> · Terran supply-blocked only <strong>1.8%</strong></div>
-    </article>
-    <article class="subsys-card">
-      <h3>2.4 APM Governor</h3>
-      <p>Enforces P0–P3 urgency lanes and deduplicates commands so routine mining or rallies can never cancel a spell, transport drop, building resume, or emergency worker pull.</p>
-      <div class="mini-stat"><strong>{lp['wire_rejects']}</strong> rejected commands · <strong>{lp['avg_step_ms']:.2f} ms</strong>/step · P {apm['Protoss'][0]:.0f} / T {apm['Terran'][0]:.0f} / Z {apm['Zerg'][0]:.0f} APM</div>
-    </article>
-  </div>
-
-  <div class="eval-subsection" style="margin-top:1.75rem;">
-    <h3>2.5 Generalized Stall Watchdog (519-Match Audit → Loop 49)</h3>
-    <p class="prose-tight">
-      Mining all <strong>519 recent matches</strong> (Loops 42–48 + Live Ships #5/#6) showed that nearly every macro
-      failure we had been patching one-by-one comes from just four root stall patterns. Rather than stacking more
-      special-case rules, Loop 49 adds a single <strong>4-Law Stall Watchdog</strong> pass inside the Prioritization Engine.
+  <details style="margin-top:1.1rem;">
+    <summary>Economy stalls targeted next (Loop 49)</summary>
+    <p class="prose-tight" style="margin-top:0.65rem;">
+      Across Loops 42–48 and our last two ladder builds, most macro losses still trace to seven recurring economy stalls.
+      Instead of adding more one-off matchup patches, Loop 49 adds four general fallback checks to unstick blocked builds,
+      rebalance mineral and gas workers, build supply ahead of production spikes, and resume halted structures.
     </p>
-    <div class="table-wrap" style="margin-bottom:1.1rem;">
+    <div class="table-wrap" style="margin-bottom:0.5rem;">
       <table>
         <thead>
           <tr>
-            <th>Empirically Observed Stall (519 Matches)</th>
+            <th>Economy Stall</th>
             <th style="text-align:right">Matches</th>
             <th style="text-align:right">Loss Rate</th>
-            <th>Generalized Watchdog Law</th>
+            <th>Loop 49 Fallback</th>
           </tr>
         </thead>
         <tbody>
-          <tr><td><strong>Supply capped at minute mark</strong> (&lt;195 sup)</td><td style="text-align:right">168 (32.4%)</td><td style="text-align:right"><strong>81.1%</strong></td><td>Law 3 · Pre-emptive supply headroom</td></tr>
-          <tr><td><strong>Worker plateau</strong> (&le;36 @8m / &le;24 @5m)</td><td style="text-align:right">123 (23.7%)</td><td style="text-align:right"><strong>87.8%</strong></td><td>Law 2 · Income &amp; saturation conservation</td></tr>
-          <tr><td><strong>Escrow lockouts</strong> (stuck saving for unplaceable goal)</td><td style="text-align:right">95 (18.3%)</td><td style="text-align:right">50.5%</td><td>Law 1 · 3-stage intent-to-action escalation</td></tr>
-          <tr><td><strong>Gas-rich / mineral-starved</strong> &amp; <strong>zero-gas</strong> (&ge;5m)</td><td style="text-align:right">72 / 63</td><td style="text-align:right"><strong>66.7%</strong> / 42.7%</td><td>Law 2 · Dynamic gas valve &amp; re-saturation</td></tr>
-          <tr><td><strong>Zero-mineral-income stall</strong> (&ge;5 workers, &ge;2m)</td><td style="text-align:right">49 (9.4%)</td><td style="text-align:right"><strong>63.9%</strong></td><td>Law 2 · Force mine transfer / urgent expand</td></tr>
-          <tr><td><strong>Terran 1-1-1 opening stall</strong></td><td style="text-align:right">32 (6.2%)</td><td style="text-align:right"><strong>90.6%</strong></td><td>Law 1 &amp; 4 · Resume halted SCV / unlock prereq</td></tr>
-          <tr><td><strong>Early-rush idle bank (3m)</strong> / <strong>Prod placement stall</strong></td><td style="text-align:right">15 / 10</td><td style="text-align:right"><strong>100.0%</strong></td><td>Law 1 &amp; 3 · Ring expansion + flush idle bank</td></tr>
+          <tr><td><strong>Supply-blocked on the minute</strong> (&lt;195 supply)</td><td style="text-align:right">168 (32.4%)</td><td style="text-align:right">81.1%</td><td>Queue supply based on active production rate</td></tr>
+          <tr><td><strong>Worker count stalls early</strong> (&le;24 at 5m or &le;36 at 8m)</td><td style="text-align:right">123 (23.7%)</td><td style="text-align:right">87.8%</td><td>Enforce worker floors &amp; transfer off mined-out bases</td></tr>
+          <tr><td><strong>Stuck saving cash for an unplaceable building</strong></td><td style="text-align:right">95 (18.3%)</td><td style="text-align:right">50.5%</td><td>Retry builder, widen placement search, then release cash</td></tr>
+          <tr><td><strong>Too much gas with no minerals</strong> (or 0 gas workers at 5m+)</td><td style="text-align:right">72 / 63</td><td style="text-align:right">66.7% / 42.7%</td><td>Move workers from gas to minerals at 450G / &lt;200M</td></tr>
+          <tr><td><strong>Zero mineral income for a full cycle</strong> (&ge;5 workers, 2m+)</td><td style="text-align:right">49 (9.4%)</td><td style="text-align:right">63.9%</td><td>Force workers back to open mineral patches or expand</td></tr>
+          <tr><td><strong>Terran opening stalls before Factory/Starport finish</strong></td><td style="text-align:right">32 (6.2%)</td><td style="text-align:right">90.6%</td><td>Send replacement SCV to finish halted Terran buildings</td></tr>
+          <tr><td><strong>Unspent cash during early rushes or blocked build spots</strong></td><td style="text-align:right">15 / 10</td><td style="text-align:right">100.0%</td><td>Widen build-spot search &amp; spend idle minerals on units</td></tr>
         </tbody>
       </table>
     </div>
-    <div class="subsys-grid">
-      <article class="subsys-card">
-        <h3>Law 1 · Goal Progress</h3>
-        <p>If an affordable top goal fails to advance for 1.4s / 2.9s / 5.0s, escalate uniformly: resume halted builder → expand placement ring → release stuck escrow with cooldown.</p>
-      </article>
-      <article class="subsys-card">
-        <h3>Law 2 · Flow Conservation</h3>
-        <p>Every non-fighting worker must produce income: auto-transfer off depleted bases, pull excess gas workers back to minerals when gas &ge; 450 &amp; minerals &lt; 200, and enforce worker floors.</p>
-      </article>
-      <article class="subsys-card">
-        <h3>Law 3 · Capacity &amp; Spend</h3>
-        <p>Pre-empt supply caps based on live production burn rate, and flush floating banks (&ge;500M normal / &ge;150M under rush) whenever production or Larvae sit idle.</p>
-      </article>
-      <article class="subsys-card">
-        <h3>Law 4 · Stuck Entities</h3>
-        <p>Auto-resume Terran buildings frozen &ge;24 frames, cancel doomed greedy structures under base breach, and force winning armies out of endgame home stalls.</p>
-      </article>
-    </div>
-  </div>
+  </details>
   <script>
     window.__ARCH_PIECES__ = {pieces_json};
     window.__ARCH_WALKS__ = {walks_json};
@@ -1780,34 +1824,42 @@ def render_tactics_explorer_section(
             )
         return "".join(cards)
 
+    peak_clause = ""
+    if a3.get("peak_loop_num") and a3["peak_loop_num"] != a3["loop_num"] and a3.get("peak_dummy_trade", 0) > a3["dummy_trade"]:
+        peak_clause = (
+            f" (down slightly from Loop {a3['peak_loop_num']}'s {html.escape(a3['peak_dummy_rec'])} "
+            f"at {a3['peak_dummy_trade']:.2f}× trade after upgrading raid drills to active mining bases)"
+        )
+
     return f"""
 <section class="section-rule wide-col" id="tactics-section">
   <div class="section-head">
     <p class="section-num">Section 3</p>
-    <h2 class="section-kicker">Tactics Arena 3.0 ({a3['total']} Scenarios · {len(enriched_cats)} Categories)</h2>
+    <h2 class="section-kicker">Combat and Harassment Drills</h2>
     <p class="section-intro">
-      Isolated combat, worker-defense, and mineral-runby drills executed inside the real StarCraft II engine.
-      Loop {a3['loop_num']} reached a new high of <strong>{html.escape(a3['dummy_rec'])} ({a3['dummy_trade']:.2f}× trade)</strong>
-      against the micro dummy and <strong>{html.escape(a3['sp_rec'])} ({a3['sp_trade']:.2f}×)</strong> in self-play.
-      Select any category below to inspect its drills and watch real recorded video clips.
+      Short, isolated fights and worker-defense scenarios run inside StarCraft II so we can test unit control
+      without waiting ten minutes for a full match. On the {a3['fast_core']}-scenario fast check in Loop {a3['loop_num']},
+      Mothman went <strong>{html.escape(a3['dummy_rec'])} ({a3['dummy_trade']:.2f}× trade)</strong> against the
+      scripted attack-move AI and <strong>{html.escape(a3['sp_rec'])} ({a3['sp_trade']:.2f}× trade)</strong>
+      against a copy of itself{peak_clause}.
     </p>
   </div>
 
   <div class="interactive-panel">
-    <div class="cat-pills" role="tablist" aria-label="Tactical scenario categories">
+    <div class="cat-pills" role="tablist" aria-label="Combat drill categories">
       {"".join(pills)}
     </div>
     <div class="detail-drawer" id="cat-detail">
       <div class="detail-top-row">
         <div class="detail-title" id="cat-detail-title">{html.escape(first["label"])}</div>
-        <span class="detail-badge" id="cat-detail-counts">{first["total"]} drills · {first["core"]} core flagships</span>
+        <span class="detail-badge" id="cat-detail-counts">{first["total"]} scenarios ({first["core"]} run every build)</span>
       </div>
       <p class="detail-body" id="cat-detail-desc">{html.escape(first["desc"])}</p>
-      <div class="metric-strip" id="cat-detail-metrics">
-        <div class="m-chip"><span class="m-lbl">vs. Micro Dummy</span><strong>{first["d_w"]}W–{first["d_l"]}L{f"–{first['d_d']}D" if first["d_d"] else ""} ({first["d_tr"]:.2f}×)</strong></div>
-        <div class="m-chip"><span class="m-lbl">vs. Mothman Self-Play</span><strong>{first["sp_w"]}W–{first["sp_l"]}L{f"–{first['sp_d']}D" if first["sp_d"] else ""} ({first["sp_tr"]:.2f}×)</strong></div>
+      <div class="metric-strip metric-strip-2" id="cat-detail-metrics">
+        <div class="m-chip"><span class="m-lbl">vs. Scripted AI</span><strong>{first["d_w"]}–{first["d_l"]}{f"–{first['d_d']}" if first["d_d"] else ""} ({first["d_tr"]:.2f}×)</strong></div>
+        <div class="m-chip"><span class="m-lbl">vs. Mothman Copy</span><strong>{first["sp_w"]}–{first["sp_l"]}{f"–{first['sp_d']}" if first["sp_d"] else ""} ({first["sp_tr"]:.2f}×)</strong></div>
       </div>
-      <div class="mini-kicker" style="margin-top:0.85rem;">Recorded Video Clips for This Category</div>
+      <div class="mini-kicker" style="margin-top:0.85rem;">Recorded Clips</div>
       <div class="featured-grid" id="cat-detail-clips" style="margin-top:0.5rem;">
         {_initial_clip_cards(first.get("clips", []))}
       </div>
@@ -1856,21 +1908,114 @@ def _render_hist_svg(bins: List[Dict[str, Any]], color: str, aria_label: str) ->
     return "".join(parts)
 
 
+def _render_matchup_wr_svg(mu_list: List[Dict[str, Any]]) -> str:
+    """Grouped bar chart of per-matchup win rate (%) exposing spread behind the overall average."""
+    w, h = 720, 260
+    pl, pr, pt, pb = 42, 18, 44, 42
+    cw = w - pl - pr
+    ch = h - pt - pb
+    n = max(1, len(mu_list))
+    slot_w = cw / n
+    bw = min(20.0, slot_w * 0.30)
+    gap = 4.0
+
+    def _y(pct: float) -> float:
+        return pt + ch * (1.0 - max(0.0, min(100.0, pct)) / 100.0)
+
+    parts = [
+        f'<svg viewBox="0 0 {w} {h}" class="chart-svg" role="img" aria-label="Win rate by matchup across Live AI Arena, Core14, and Local 26-bot roster">',
+        # Legend at top
+        f'<rect x="{pl}" y="8" width="11" height="11" rx="2" fill="#C4633E" />'
+        f'<text x="{pl+16}" y="17.5" fill="#141413" font-size="11" font-weight="600">Live AI Arena (Builds 37–48)</text>'
+        f'<rect x="{pl+204}" y="8" width="11" height="11" rx="2" fill="#4A6B82" />'
+        f'<text x="{pl+220}" y="17.5" fill="#141413" font-size="11" font-weight="600">14 Core Bots (L42–48)</text>'
+        f'<rect x="{pl+376}" y="8" width="11" height="11" rx="2" fill="#C5C0B4" />'
+        f'<text x="{pl+392}" y="17.5" fill="#5E5D59" font-size="11">All 26 Local Bots</text>',
+    ]
+    # Horizontal gridlines (0, 25, 50, 75, 100)
+    for gv in (0, 25, 50, 75, 100):
+        yy = _y(gv)
+        dash = ' stroke-dasharray="4 3"' if gv == 50 else ""
+        col = "#9E9A8E" if gv == 50 else "#E7E3D8"
+        parts.append(f'<line x1="{pl}" y1="{yy:.1f}" x2="{w-pr}" y2="{yy:.1f}" stroke="{col}" stroke-width="{1.2 if gv==50 else 1}"{dash} />')
+        parts.append(f'<text x="{pl-6}" y="{yy+3.5:.1f}" text-anchor="end" fill="#7A7870" font-size="10">{gv}%</text>')
+
+    # Group separators between Protoss / Terran / Zerg
+    for sep_idx in (3, 6):
+        sx = pl + sep_idx * slot_w
+        parts.append(f'<line x1="{sx:.1f}" y1="{pt}" x2="{sx:.1f}" y2="{h-pb}" stroke="#E3DFD3" stroke-width="1" stroke-dasharray="2 3" />')
+
+    for idx, m in enumerate(mu_list):
+        cx = pl + (idx + 0.5) * slot_w
+        prd = m.get("prod") or {}
+        cor = m.get("core") or {}
+        loc = m.get("local") or {}
+        p_wr = float(prd.get("wr") or 0.0)
+        c_wr = float(cor.get("wr") or 0.0)
+        l_wr = float(loc.get("wr") or 0.0)
+        bars = [
+            (cx - bw * 1.5 - gap, p_wr, "#C4633E", f"{m['matchup']} Live AI Arena: {p_wr:.1f}% ({prd.get('w',0)}W-{prd.get('l',0)}L)"),
+            (cx - bw * 0.5,       c_wr, "#4A6B82", f"{m['matchup']} Core-14: {c_wr:.1f}% ({cor.get('w',0)}W-{cor.get('l',0)}L)"),
+            (cx + bw * 0.5 + gap, l_wr, "#C5C0B4", f"{m['matchup']} All 26 Local: {l_wr:.1f}% ({loc.get('w',0)}W-{loc.get('l',0)}L)"),
+        ]
+        for bx, val, fill, tip in bars:
+            by = _y(val)
+            bh = max(1.5, (h - pb) - by) if val > 0 else 0.0
+            if bh > 0:
+                parts.append(f'<rect x="{bx:.1f}" y="{by:.1f}" width="{bw:.1f}" height="{bh:.1f}" rx="2.5" fill="{fill}"><title>{html.escape(tip)}</title></rect>')
+        # Label live WR% cleanly above terracotta bar so discrepancies jump out immediately
+        py_lbl = _y(p_wr) - 5
+        parts.append(
+            f'<text x="{cx - bw - gap:.1f}" y="{py_lbl:.1f}" text-anchor="middle" fill="#A34E2E" font-size="9.5" font-weight="700">{p_wr:.0f}%</text>'
+        )
+        # Matchup label & n below axis
+        parts.append(f'<text x="{cx:.1f}" y="{h-pb+16}" text-anchor="middle" fill="#141413" font-size="11.5" font-weight="600">{m["matchup"]}</text>')
+        parts.append(f'<text x="{cx:.1f}" y="{h-pb+29}" text-anchor="middle" fill="#7A7870" font-size="9.2">{prd.get("w",0)}–{prd.get("l",0)} live</text>')
+
+    parts.append("</svg>")
+    return "".join(parts)
+
+
 def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
     mus = rich["matchups"]
     mu_list = [mus[m] for m in MATCHUPS_ORDER if m in mus]
     mu_json = json.dumps(mu_list, ensure_ascii=False).replace("</", "<\\/")
 
-    # Interactive 9-matchup pills (top overview & 4.1 Base & Wall selector)
+    # Interactive 9-matchup pills (top overview shows Live WR% right on each pill!)
     mu_pills = []
     base_pills = []
     for idx, m in enumerate(mu_list):
         cls = "cat-pill is-active" if idx == 0 else "cat-pill"
+        p_wr = (m.get("prod") or {}).get("wr", 0.0)
         mu_pills.append(
-            f'<button type="button" class="{cls}" data-mu-idx="{idx}">{m["matchup"]}</button>'
+            f'<button type="button" class="{cls}" data-mu-idx="{idx}">{m["matchup"]} · {p_wr:.0f}%</button>'
         )
         base_pills.append(
             f'<button type="button" class="{cls}" data-base-idx="{idx}">{m["matchup"]}</button>'
+        )
+
+    # Complete 9-matchup Win-Rate & Discrepancy summary table
+    wr_svg = _render_matchup_wr_svg(mu_list)
+    wr_rows = []
+    for m in mu_list:
+        prd = m.get("prod") or {}
+        cor = m.get("core") or {}
+        loc = m.get("local") or {}
+        p_rec = f"{prd.get('w',0)}–{prd.get('l',0)}" + (f"–{prd['t']}" if prd.get("t") else "")
+        c_rec = f"{cor.get('w',0)}–{cor.get('l',0)}" + (f"–{cor['t']}" if cor.get("t") else "")
+        l_rec = f"{loc.get('w',0)}–{loc.get('l',0)}" + (f"–{loc['t']}" if loc.get("t") else "")
+        p_wr = float(prd.get("wr") or 0.0)
+        wr_cls = ' style="color:#1F6E43;font-weight:700;"' if p_wr >= 60.0 else (' style="color:#B43C2E;font-weight:700;"' if p_wr <= 40.0 else ' style="font-weight:600;"')
+        wr_rows.append(
+            f"<tr>"
+            f"<td><strong>{m['matchup']}</strong></td>"
+            f'<td style="text-align:right"><span{wr_cls}>{p_wr:.1f}%</span> <span class="t-muted">({p_rec})</span></td>'
+            f'<td style="text-align:right">{float(prd.get("tr") or 0.0):.2f}×</td>'
+            f'<td style="text-align:right"><strong>{float(cor.get("wr") or 0.0):.1f}%</strong> <span class="t-muted">({c_rec})</span></td>'
+            f'<td style="text-align:right">{float(loc.get("wr") or 0.0):.1f}% <span class="t-muted">({l_rec})</span></td>'
+            f'<td style="text-align:right">{float(loc.get("nl") or 0.0):.1f}%</td>'
+            f'<td style="text-align:right">{float(loc.get("tr") or 0.0):.2f}×</td>'
+            f"</tr>"
         )
 
     def _render_open_steps(steps: List[Dict[str, Any]]) -> str:
@@ -1894,9 +2039,11 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
     first_html = ""
     if first:
         loc = first["local"]
+        cor = first.get("core") or {}
         prd = first["prod"]
-        prd_s = f"{prd['w']}–{prd['l']}" + (f"–{prd['t']}" if prd["t"] else "") + f" ({prd['tr']:.2f}×)" if prd["n"] else "—"
-        loc_s = f"{loc['w']}–{loc['l']}" + (f"–{loc['t']}" if loc["t"] else "") + f" ({loc['tr']:.2f}×)" if loc["n"] else "—"
+        prd_s = f"{prd.get('wr',0):.1f}% · {prd['w']}–{prd['l']}" + (f"–{prd['t']}" if prd["t"] else "") + f" ({prd['tr']:.2f}× trade)" if prd["n"] else "—"
+        cor_s = f"{cor.get('wr',0):.1f}% · {cor.get('w',0)}–{cor.get('l',0)}" + (f"–{cor['t']}" if cor.get("t") else "") + f" ({cor.get('tr',0):.2f}× trade)" if cor.get("n") else "—"
+        loc_s = f"{loc.get('wr',0):.1f}% · {loc['w']}–{loc['l']}" + (f"–{loc['t']}" if loc["t"] else "") + f" ({loc['tr']:.2f}× trade)" if loc["n"] else "—"
         sc = first.get("supply_curve", {})
         sc_txt = f"2m: {sc.get('2', 0):.0f} · 3m: {sc.get('3', 0):.0f} · 4m: {sc.get('4', 0):.0f} · 5m: {sc.get('5', 0):.0f} median supply"
         sup_svg = _render_hist_svg(first.get("supply_hist", []), "#C4633E", f"{first['matchup']} minute 4 supply histogram")
@@ -1907,12 +2054,12 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
         <span class="detail-file" id="mu-detail-meta">Avg duration {loc['dur_m']:.1f}m · {loc['bases']:.1f} peak bases</span>
       </div>
       <div class="metric-strip" id="mu-detail-metrics">
-        <div class="m-chip"><span class="m-lbl">Live AI Arena</span><strong>{prd_s}</strong></div>
-        <div class="m-chip"><span class="m-lbl">Local (L42–47)</span><strong>{loc_s}</strong></div>
-        <div class="m-chip"><span class="m-lbl">Supply-Blocked</span><strong>{loc['sb']:.1f}%</strong></div>
-        <div class="m-chip"><span class="m-lbl">Workers (4m / 6m / Pk)</span><strong>{loc['w4m']:.0f} / {loc['w6m']:.0f} / {loc['pkw']:.0f}</strong></div>
-        <div class="m-chip"><span class="m-lbl">Peak Army (Us / Opp)</span><strong>{loc['pka']:,} / {loc['opka']:,}</strong></div>
-        <div class="m-chip"><span class="m-lbl">Gas #1 / Nat Timing</span><strong>{_fmt_mmss(first['gas1_sec'])} / {_fmt_mmss(first['nat_sec'])}</strong></div>
+        <div class="m-chip"><span class="m-lbl">Live Ladder</span><strong>{prd_s}</strong></div>
+        <div class="m-chip"><span class="m-lbl">14 Core Bots (L42–48)</span><strong>{cor_s}</strong></div>
+        <div class="m-chip"><span class="m-lbl">All 26 Local (L42–48)</span><strong>{loc_s}</strong></div>
+        <div class="m-chip"><span class="m-lbl">Time Supply-Blocked</span><strong>{loc['sb']:.1f}%</strong></div>
+        <div class="m-chip"><span class="m-lbl">Workers (4m / 6m / Peak)</span><strong>{loc['w4m']:.0f} / {loc['w6m']:.0f} / {loc['pkw']:.0f}</strong></div>
+        <div class="m-chip"><span class="m-lbl">Peak Army Value (Us / Opp)</span><strong>{loc['pka']:,} / {loc['opka']:,}</strong></div>
       </div>
 
       <div class="bo-box">
@@ -1948,10 +2095,15 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
       </div>
 """
 
-    # Build 9-row Base Layout & Placement table
+    # Build 9-row fault tables (collapsed inside one developer <details>)
     layout_rows = []
     gas_rows = []
     mm_rows = []
+    pvp_nat_delay_cnt = 0
+    pvp_total_n = 0
+    tvt_zero_tank_cnt = 0
+    tvt_total_n = 0
+    total_cloak_losses = 0
     for m in mu_list:
         mu = m["matchup"]
         loc = m["local"]
@@ -1959,7 +2111,9 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
         n = max(1, loc["n"])
         prod_st = an.get("prod_placement_stall", 0)
         one_b = an.get("one_base_lockout", 0)
-        nat_d = an.get("pvp_nat_delay", 0)
+        if mu == "PvP":
+            pvp_nat_delay_cnt = an.get("pvp_nat_delay", 0)
+            pvp_total_n = loc["n"]
         layout_rows.append(
             f"<tr>"
             f"<td><strong>{mu}</strong></td>"
@@ -1967,7 +2121,6 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
             f'<td style="text-align:right">{_fmt_mmss(m["nat_sec"])} <span class="t-muted">(Pro {_fmt_mmss(m["pro_nat_sec"])})</span></td>'
             f'<td style="text-align:right">{prod_st}</td>'
             f'<td style="text-align:right">{one_b}</td>'
-            f'<td style="text-align:right">{nat_d if mu == "PvP" else "—"}</td>'
             f"</tr>"
         )
         gas_rich = an.get("gas_rich_min_starved", 0)
@@ -1982,16 +2135,18 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
             f"</tr>"
         )
         cloak_l = an.get("cloaked_unit_damage_loss", 0)
+        total_cloak_losses += cloak_l
         aa_s = an.get("air_aa_starvation", 0)
         escr = an.get("escrow_lockouts", 0)
-        t0 = an.get("tvt_zero_tank", 0)
+        if mu == "TvT":
+            tvt_zero_tank_cnt = an.get("tvt_zero_tank", 0)
+            tvt_total_n = loc["n"]
         mm_rows.append(
             f"<tr>"
             f"<td><strong>{mu}</strong></td>"
             f'<td style="text-align:right">{cloak_l}</td>'
             f'<td style="text-align:right">{aa_s}</td>'
             f'<td style="text-align:right">{escr}</td>'
-            f'<td style="text-align:right">{t0 if mu == "TvT" else "—"}</td>'
             f"</tr>"
         )
 
@@ -2027,11 +2182,11 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
         pro_bp_rows.append(
             f"<tr>"
             f"<td><strong>{mu}</strong> <span class=\"t-muted\">({pm_d.get('n',0)}/{mm_d.get('n',0)})</span></td>"
-            f'<td style="text-align:right"><strong>{p_snn}</strong> / {m_snn}</td>'
-            f'<td style="text-align:right"><strong>{p_cl}</strong> / {m_cl}</td>'
-            f'<td style="text-align:right">{p_mw} / <strong>{m_mw}</strong></td>'
-            f'<td style="text-align:right"><strong>{p_nw}</strong> / {m_nw}</td>'
-            f'<td style="text-align:right"><strong>{p_ns}</strong> / {m_ns}</td>'
+            f'<td style="text-align:right">{p_snn} / {m_snn}</td>'
+            f'<td style="text-align:right">{p_cl} / {m_cl}</td>'
+            f'<td style="text-align:right">{p_mw} / {m_mw}</td>'
+            f'<td style="text-align:right">{p_nw} / {m_nw}</td>'
+            f'<td style="text-align:right">{p_ns} / {m_ns}</td>'
             f'<td style="text-align:right">{p_nd} / {m_nd}</td>'
             f"</tr>"
         )
@@ -2041,45 +2196,43 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
         pro_bp_block = f"""
     <div style="margin-top:1.65rem;">
       <h4 style="margin:0 0 0.45rem;font-family:var(--serif);font-size:1.15rem;font-weight:600;color:var(--ink);">
-        Visual Blueprint Comparison vs. Grandmaster Pros (4:10)
+        Building Placement vs. Grandmaster Pros (4:10)
       </h4>
       <p class="prose-tight">
-        Normalized 4:10 architectural blueprints comparing <strong>182 Grandmaster ladder games</strong>
-        (<code>herO</code>, <code>Stats</code>, <code>Maru</code>, <code>HeroMarine</code>, <code>Serral</code>)
-        against <strong>326 recent Mothman games</strong> (Main TownHall at <code>(0,0)</code>, Natural Expansion along <code>+X</code>).
-        Switch races below and click any blueprint to zoom full-screen.
+        Top-down building maps at 4:10 comparing Grandmaster games (herO, Stats, Maru, HeroMarine, Serral) on the left
+        with Mothman on the right, rotated so the main base sits at the origin and the second base points right.
       </p>
       <div class="interactive-panel" style="margin-bottom:1.15rem;">
         <div class="race-toggle" role="tablist" aria-label="Select Pro vs Mothman blueprint race" style="margin-bottom:0.85rem;">
-          <button type="button" class="cat-pill is-active" data-pro-bp-race="Protoss">Protoss (vs. NULL · herO · Stats)</button>
-          <button type="button" class="cat-pill" data-pro-bp-race="Terran">Terran (vs. Maru · Peggies · HeroMarine)</button>
-          <button type="button" class="cat-pill" data-pro-bp-race="Zerg">Zerg (vs. Serral)</button>
+          <button type="button" class="cat-pill is-active" data-pro-bp-race="Protoss">Protoss</button>
+          <button type="button" class="cat-pill" data-pro-bp-race="Terran">Terran</button>
+          <button type="button" class="cat-pill" data-pro-bp-race="Zerg">Zerg</button>
         </div>
         <div class="pro-bp-slot" data-pro-bp-panel="Protoss">
           <figure class="clip-figure" style="margin:0;">
             <img class="clip-img base-layout-photo" src="./media/pro_vs_mothman_protoss.png"
-                 alt="Protoss base layouts at 4:10 — Grandmaster Pros vs Mothman"
+                 alt="Protoss base layouts at 4:10 comparing Grandmaster pros and Mothman"
                  data-lightbox-src="./media/pro_vs_mothman_protoss.png"
-                 data-lightbox-alt="Protoss Base Layouts at 4:10 — Grandmaster Pros (NULL, herO, Stats) vs. Mothman" />
-            <figcaption><strong>Protoss Biggest Gap ("Pylon Soup" + Naked Naturals):</strong> Pros spread Pylons 14.5–19.5 tiles apart (only 2–13% clumped) and place Natural Pylons + Batteries in 73–100% of games. Mothman clumps 42–75% of Pylons in one brick inside the Main, leaves PvP Naturals naked (18% Nat Pylon), and occasionally exposes its Robotics Facility in the PvZ front wall.</figcaption>
+                 data-lightbox-alt="Protoss base layouts at 4:10 comparing Grandmaster pros and Mothman" />
+            <figcaption>Pros spread Pylons 14.5 to 19.5 tiles apart for vision and place Pylons and Shield Batteries at their second base in 73–100% of games. Mothman clumps 39–75% of its Pylons inside the main base, leaves PvP second bases unpowered (17% Natural Pylon), and occasionally puts its fragile Robotics Facility in the PvZ front wall.</figcaption>
           </figure>
         </div>
         <div class="pro-bp-slot" data-pro-bp-panel="Terran" style="display:none;">
           <figure class="clip-figure" style="margin:0;">
             <img class="clip-img base-layout-photo" src="./media/pro_vs_mothman_terran.png"
-                 alt="Terran base layouts at 4:10 — Grandmaster Pros vs Mothman"
+                 alt="Terran base layouts at 4:10 comparing Grandmaster pros and Mothman"
                  data-lightbox-src="./media/pro_vs_mothman_terran.png"
-                 data-lightbox-alt="Terran Base Layouts at 4:10 — Grandmaster Pros (Maru, Peggies, HeroMarine) vs. Mothman" />
-            <figcaption><strong>Terran (Pro-Grade Main Wall, Wrong Natural Wall):</strong> Mothman’s Depot–Barracks–Depot main ramp wall hits 97–100%, matching Maru and HeroMarine. However, Mothman builds Natural Supply Depot walls in only 21–42% of games (vs. Pro 60–100%), over-building 1.1–1.4 early Bunkers instead and spacing production vertically rather than in a tight addon-swap cluster.</figcaption>
+                 data-lightbox-alt="Terran base layouts at 4:10 comparing Grandmaster pros and Mothman" />
+            <figcaption>Mothman's Depot-Barracks-Depot main ramp wall forms in 98–100% of games, matching Maru and HeroMarine. At the second base, though, Mothman walls with Supply Depots in only 28–41% of games (vs. 60–100% for pros), building 1.1–1.4 early Bunkers instead and stringing production buildings out vertically rather than in a tight add-on swap block.</figcaption>
           </figure>
         </div>
         <div class="pro-bp-slot" data-pro-bp-panel="Zerg" style="display:none;">
           <figure class="clip-figure" style="margin:0;">
             <img class="clip-img base-layout-photo" src="./media/pro_vs_mothman_zerg.png"
-                 alt="Zerg base layouts at 4:10 — Grandmaster Pros vs Mothman"
+                 alt="Zerg base layouts at 4:10 comparing Grandmaster pros and Mothman"
                  data-lightbox-src="./media/pro_vs_mothman_zerg.png"
-                 data-lightbox-alt="Zerg Base Layouts at 4:10 — Grandmaster Pro (Serral) vs. Mothman" />
-            <figcaption><strong>Zerg (Main Front Clutter + Missing Serral ZvZ Wall):</strong> Serral tucks Spawning Pool behind the Main Hatchery and places Spores inside both mineral lines; Mothman clusters tech &amp; Spines right in front of the Main Hatchery. In ZvZ, Pros build a curved Natural partial wall (Evo/Bane/Roach Warren + Queen plug) in 48% of games vs. Mothman’s 20%.</figcaption>
+                 data-lightbox-alt="Zerg base layouts at 4:10 comparing Grandmaster pros and Mothman" />
+            <figcaption>Serral tucks his Spawning Pool behind the Main Hatchery and puts Spore Crawlers inside each mineral line; Mothman places tech buildings and Spine Crawlers right in front of the Main Hatchery, blocking unit traffic. In ZvZ, pros wall their natural choke with Evolution Chambers and a Roach Warren in 48% of games vs. Mothman's 21%.</figcaption>
           </figure>
         </div>
       </div>
@@ -2087,19 +2240,19 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
         <table>
           <thead>
             <tr>
-              <th>Matchup <span class="t-muted">(Pro/Us)</span></th>
+              <th>Matchup <span class="t-muted">(Pro / Us)</span></th>
               <th style="text-align:right">Spacing</th>
-              <th style="text-align:right">Clump &lt;5t</th>
+              <th style="text-align:right">Clumped (&lt;5)</th>
               <th style="text-align:right">Main Wall</th>
-              <th style="text-align:right">Nat Wall</th>
-              <th style="text-align:right">Nat Supply</th>
-              <th style="text-align:right">Nat Def</th>
+              <th style="text-align:right">2nd Wall</th>
+              <th style="text-align:right">2nd Power</th>
+              <th style="text-align:right">2nd Defense</th>
             </tr>
           </thead>
           <tbody>{"".join(pro_bp_rows)}</tbody>
         </table>
       </div>
-      <p class="table-note" style="margin-top:0.45rem;">All columns show <strong>Grandmaster Pro / Mothman</strong> at 4:10 (Supply Spacing in tiles; Wall/Clump/Nat Supply in % of games; Nat Def = avg static defense structures).</p>
+      <p class="table-note" style="margin-top:0.45rem;">All columns show Grandmaster Pro / Mothman at 4:10 (Main base at origin, second base along +X; spacing in tiles, walls and power in % of games, static defense in avg structures). Across our broader 398-game pro timing check, Mothman's third expansion also lands 109–178 seconds later than pro medians across all three races, Protoss exposes fragile tech in 68% of PvZ walls (vs. 31% for pros), and Terran production sits in a tight addon cluster in 50–58% of games (vs. 79–100% for pros).</p>
     </div>
 """
 
@@ -2118,11 +2271,54 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
 <section class="section-rule wide-col" id="matchups-section">
   <div class="section-head">
     <p class="section-num">Section 4</p>
-    <h2 class="section-kicker">Matchup-by-Matchup Evaluation</h2>
+    <h2 class="section-kicker">Results by Matchup</h2>
     <p class="section-intro">
-      Aggregated across recent local benchmarks (Loops 42–47, ~50 games per matchup) and recent live
-      AI Arena releases (Loops 37–45). Pick any matchup to inspect outcomes, macro curves, and open gaps.
+      Overall averages hide a <strong>75-percentage-point spread across the nine matchups</strong>.
+      On the live ladder, Mothman wins reliably in <strong>ZvZ (9–0, 100%)</strong>, <strong>TvT (9–1–1, 82%)</strong>,
+      <strong>TvZ (7–1–1, 78%)</strong>, and <strong>PvT (6–2, 75%)</strong>, while all three losing matchups are
+      against Protoss (<strong>ZvP 25%</strong>, <strong>TvP 33%</strong>, <strong>PvP 40%</strong>).
     </p>
+    <p class="section-intro" style="margin-top:0.65rem;">
+      Two patterns explain both the anti-Protoss slump and why Zerg trails our other bots by more than 50 rating points.
+      Against Protoss, mid-game Gateway/Immortal/Colossus pushes and late-game Tempest fleets punish Mothman whenever
+      counter-tech (Terran Vikings, Zerg Lurkers and Vipers, or PvP second bases) comes out late. For Zerg specifically,
+      checking 1,070 clean replays uncovered three concrete bugs now targeted in Loop 49: Mothman built Baneling Nests in
+      82% of longer games yet morphed <strong>zero Banelings</strong> because it sent an outdated command ID (80 instead of 4121);
+      a defensive Burrow rule kept locking Hydralisks and Ravagers underground mid-fight; and third Hatcheries landed two to
+      three minutes behind pro timings (5:41 vs. 2:43 in ZvP; 5:07 vs. 2:59 in ZvT), leaving Zerg outnumbered two-to-one in
+      army value by Minute 10.
+    </p>
+  </div>
+
+  <figure class="figure-block" style="margin-bottom:1.15rem;">
+    <div class="figure-label">Figure 2 · Win Rate by Matchup</div>
+    <div class="figure-title">Win rate (%) by matchup across live ladder and local sparring pools</div>
+    {wr_svg}
+    <figcaption class="figure-caption">
+      Live AI Arena win rates (terracotta, Builds 37–48) alongside our 14 regular local sparring bots (slate, Loops 42–48)
+      and all 26 local bots including 12 held-out opponents (gray). Local win rates run lower than ladder win rates because
+      the 12 held-out bots include specialist cheese and stronger benchmark bots we do not tune against directly.
+    </figcaption>
+  </figure>
+
+  <p class="table-note" style="margin:0 0 0.5rem;">
+    Live records cover Builds 37–48 on AI Arena; local records cover Loops 42–48, where matches hitting the 30-minute limit count as ties (Win + Tie %).
+  </p>
+  <div class="table-wrap" style="margin-bottom:1.5rem;">
+    <table>
+      <thead>
+        <tr>
+          <th>Matchup</th>
+          <th style="text-align:right">Live Ladder</th>
+          <th style="text-align:right">Live Trade</th>
+          <th style="text-align:right">14 Core Bots</th>
+          <th style="text-align:right">All 26 Local</th>
+          <th style="text-align:right">Win + Tie %</th>
+          <th style="text-align:right">Local Trade</th>
+        </tr>
+      </thead>
+      <tbody>{"".join(wr_rows)}</tbody>
+    </table>
   </div>
 
   <div class="interactive-panel">
@@ -2135,11 +2331,10 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
   </div>
 
   <div class="eval-subsection">
-    <h3>4.1 Base Layout, Walls &amp; Building Placement</h3>
+    <h3>4.1 Base Layouts and Walls (at 4:10)</h3>
     <p class="prose-tight">
-      Real StarCraft II 3D captures of Mothman’s main base, ramp wall, and natural choke layout at 4:10 across
-      all nine matchups—paired with natural timing, placement stall (<code>ProdStall</code>), and one-base lockout counts.
-      Select any matchup below (or click an image to zoom full-screen).
+      In-game 3D captures of Mothman's main base, ramp wall, and second-base choke at 4:10 across all nine matchups,
+      compared below against Grandmaster pro layouts.
     </p>
     <div class="interactive-panel" style="margin-bottom:1.15rem;">
       <div class="cat-pills" role="tablist" aria-label="Select base layout matchup" style="margin-bottom:0.8rem;">
@@ -2154,34 +2349,18 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
         <figcaption id="base-layout-cap">{html.escape(first.get('base_cap', '') if first else '')}</figcaption>
       </figure>
     </div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Matchup</th>
-            <th style="text-align:right">Peak Bases</th>
-            <th style="text-align:right">Median Natural (vs. Pro)</th>
-            <th style="text-align:right">ProdStall</th>
-            <th style="text-align:right">1BaseLock</th>
-            <th style="text-align:right">PvP Nat Delay</th>
-          </tr>
-        </thead>
-        <tbody>{"".join(layout_rows)}</tbody>
-      </table>
-    </div>
     {pro_bp_block}
   </div>
 
   <div class="eval-subsection">
-    <h3>4.2 Production Utilization &amp; Supply Discipline</h3>
+    <h3>4.2 Time Spent Supply-Blocked</h3>
     <p class="prose-tight">
-      Terran maintains pro-level supply discipline (<strong>1.8%–2.1%</strong> supply-blocked across all three matchups),
-      while Protoss and Zerg sit closer to 4–6% under early aggression. Aligning macro-brain and runtime
-      Barracks/Gateway caps in Loops 45–48 removes the primary remaining production bottleneck.
+      Terran spends just 1.7%–2.1% of match time supply-blocked across all three matchups, while Protoss and Zerg sit
+      between 3.8% and 5.9% when early pressure kills Pylons or Overlords.
     </p>
     <figure class="figure-block">
       <div class="figure-label">Figure 3</div>
-      <div class="figure-title">Average time supply-blocked by matchup (Loops 42–47, lower is better)</div>
+      <div class="figure-title">Average time supply-blocked by matchup (Loops 42–48, lower is better)</div>
       {sb_svg}
       <figcaption class="figure-caption">
         Percentage of match time unable to train units due to hitting supply cap (Pylon, Depot, or Overlord).
@@ -2190,10 +2369,11 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
   </div>
 
   <div class="eval-subsection">
-    <h3>4.3 Worker Building &amp; 4.4 Army Value Curves</h3>
+    <h3>4.3 Worker Count and Army Value Over Time</h3>
     <p class="prose-tight">
-      Minute-by-minute active workers (plotted against Grandmaster medians from <code>pro_baselines.json</code>)
-      and army value trajectories (Mothman vs. practice opponents). Switch races below to compare all three.
+      Average active workers over the first 10 minutes (compared with Grandmaster medians) and total army resource value
+      over the first 12 minutes (compared with local practice opponents). Notice how all three races fall behind opponent
+      army value after Minute 8, steepest of all on Zerg (2.0k vs. 5.9k at Minute 12).
     </p>
     <div class="race-toggle" role="tablist" aria-label="Select race curves">
       <button type="button" class="cat-pill is-active" data-race-curve="Protoss">Protoss</button>
@@ -2218,51 +2398,65 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
     </div>
   </div>
 
-  <div class="eval-subsection">
-    <h3>4.5 Gas Timings &amp; Resource Balance</h3>
-    <p class="prose-tight">
-      Median build-start timings for first and second gas structures compared with Grandmaster medians,
-      alongside gas-heavy/mineral-starved (<code>GasRich</code>) and zero-worker gas freeze (<code>GasZero</code>) counts.
-      Auto-resaturating empty gas buildings within 8 seconds drove <code>GasZero</code> to zero in Loops 45 and 47.
-    </p>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Matchup</th>
-            <th style="text-align:right">Gas #1 Median (vs. Pro)</th>
-            <th style="text-align:right">Gas #2 Median (vs. Pro)</th>
-            <th style="text-align:right">GasRich Matches</th>
-            <th style="text-align:right">GasZero</th>
-          </tr>
-        </thead>
-        <tbody>{"".join(gas_rows)}</tbody>
-      </table>
-    </div>
-  </div>
+  <details style="margin-top:1.5rem;">
+    <summary>Detailed expansion, gas, and tech-response fault counts by matchup (Loops 42–48)</summary>
 
-  <div class="eval-subsection">
-    <h3>4.6 Mirror Mind Evaluation by Matchup</h3>
-    <p class="prose-tight">
-      Tracks how reliably Mirror Mind detects cloaked units, triggers anti-air and Siege Tank responses,
-      and avoids blocking-escrow deadlocks across Loops 42–47. Loop 47 reached <strong>zero CloakLoss</strong>
-      across all 84 matches; open work targets early 15-Probe worker rushes and Phoenix-vs-Tempest caps.
-    </p>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Matchup</th>
-            <th style="text-align:right">CloakLoss</th>
-            <th style="text-align:right">Air/AA Starve</th>
-            <th style="text-align:right">Escrow Locks</th>
-            <th style="text-align:right">TvT 0-Tank</th>
-          </tr>
-        </thead>
-        <tbody>{"".join(mm_rows)}</tbody>
-      </table>
+    <div class="eval-subsection" style="margin-top:0.85rem;">
+      <h4 style="margin:0 0 0.45rem;font-family:var(--serif);font-size:1.05rem;">Expansions &amp; Placement Stalls</h4>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Matchup</th>
+              <th style="text-align:right">Peak Bases</th>
+              <th style="text-align:right">Median 2nd Base (vs. Pro)</th>
+              <th style="text-align:right">Placement Stalls</th>
+              <th style="text-align:right">Stuck on 1 Base</th>
+            </tr>
+          </thead>
+          <tbody>{"".join(layout_rows)}</tbody>
+        </table>
+      </div>
+      <p class="table-note" style="margin-top:0.35rem;">PvP delayed second Nexus (&gt;3:00): {pvp_nat_delay_cnt} of {pvp_total_n} games.</p>
     </div>
-  </div>
+
+    <div class="eval-subsection" style="margin-top:1.15rem;">
+      <h4 style="margin:0 0 0.45rem;font-family:var(--serif);font-size:1.05rem;">Gas Timings &amp; Imbalances</h4>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Matchup</th>
+              <th style="text-align:right">Gas #1 Median (vs. Pro)</th>
+              <th style="text-align:right">Gas #2 Median (vs. Pro)</th>
+              <th style="text-align:right">High Gas / Low Minerals</th>
+              <th style="text-align:right">Empty Gas Geyser</th>
+            </tr>
+          </thead>
+          <tbody>{"".join(gas_rows)}</tbody>
+        </table>
+      </div>
+      <p class="table-note" style="margin-top:0.35rem;">Re-assigning idle gas geysers within 8 seconds eliminated empty-gas freezes in Loops 45, 47, and 48.</p>
+    </div>
+
+    <div class="eval-subsection" style="margin-top:1.15rem;">
+      <h4 style="margin:0 0 0.45rem;font-family:var(--serif);font-size:1.05rem;">Detection, Anti-Air &amp; Spending Faults</h4>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Matchup</th>
+              <th style="text-align:right">Cloak Wipeouts</th>
+              <th style="text-align:right">Missing Anti-Air</th>
+              <th style="text-align:right">Stuck Saving Cash</th>
+            </tr>
+          </thead>
+          <tbody>{"".join(mm_rows)}</tbody>
+        </table>
+      </div>
+      <p class="table-note" style="margin-top:0.35rem;">Cumulative fault counts across Loops 42–48 ({total_cloak_losses} cloak wipeouts total across earlier runs, dropping to 0 across all 84 games in Loop 47). TvT zero-Tank games: {tvt_zero_tank_cnt} of {tvt_total_n} games (down from 4 in Loop 45 to 1 in Loops 46–48).</p>
+    </div>
+  </details>
   <script>window.__MATCHUP_DATA__ = {mu_json};</script>
 </section>
 """
@@ -2274,22 +2468,21 @@ def render_issues_fixed_section(chart_sym_svg: str, sym: Dict[str, Any], rich: D
 <section class="section-rule wide-col" id="issues-section">
   <div class="section-head">
     <p class="section-num">Section 5</p>
-    <h2 class="section-kicker">Major Issues Found &amp; Fixed</h2>
+    <h2 class="section-kicker">Notable Bugs Found and Fixed</h2>
     <p class="section-intro">
-      Key systemic bugs uncovered by replay forensics and Tactics Arena drills—each traced from
-      symptom to root cause to verified fix.
+      Five bugs we caught in replays and combat drills, what caused them in the code, and what changed after fixing them.
     </p>
   </div>
 
   <div class="case-grid">
     <article class="case-card case-wide">
       <div class="case-tag">Geometry &amp; Placement · Fixed in Loop 37</div>
-      <h3>5.1 North vs. South Spawn Asymmetry</h3>
+      <h3>5.1 Losing More Often from Top-Half Spawns</h3>
       <div class="case-split">
         <div>
-          <p><strong>Symptom:</strong> Bots won 16 points less often when spawning north-east on Ley Lines (21.7% vs. 37.8%) and trailed nearly 5 points overall across northern spawns.</p>
-          <p><strong>Root cause:</strong> Building placement and early scout heuristics assumed the enemy lay roughly up-and-right, causing northern spawns to wall off their own natural expansion.</p>
-          <p><strong>Fix &amp; result:</strong> Replaced directional assumptions with coordinate-free BFS pathing. Across {sym["post_n"]} follow-up matches, North vs. South equalized ({sym["all_after_n"]:.1f}% vs. {sym["all_after_s"]:.1f}%), with a 0.0pp gap on live Ship #6.</p>
+          <p><strong>Symptom:</strong> Bots won 16 percentage points less often when spawning north-east on Ley Lines (21.7% vs. 37.8%) and trailed by nearly 5 points across all northern spawns.</p>
+          <p><strong>Root cause:</strong> Building placement and early scout offsets assumed the enemy sat roughly up and to the right, causing top-half spawns to wall off their own second base.</p>
+          <p><strong>Fix &amp; result:</strong> Replaced compass-direction offsets with actual ground walking distances. Across {sym["post_n"]} local matches since Loop 37, north and south win rates leveled out ({sym["all_after_n"]:.1f}% vs. {sym["all_after_s"]:.1f}%), and Build 42 split 53.3% North vs. 53.8% South on the live ladder.</p>
         </div>
         <figure class="figure-block" style="margin:0;">
           <div class="figure-title" style="font-size:0.98rem;">North vs. South win rate before and after fix</div>
@@ -2299,33 +2492,33 @@ def render_issues_fixed_section(chart_sym_svg: str, sym: Dict[str, Any], rich: D
     </article>
 
     <article class="case-card">
-      <div class="case-tag">Mirror Mind · Fixed in Loop 43</div>
-      <h3>5.2 Death Broodlings Latching False Greater Spire</h3>
-      <p><strong>Symptom:</strong> Against pure ground Zerg (Roach/Hydra), Terran abruptly built 4 Starports and 13 Vikings mid-game.</p>
-      <p><strong>Root cause:</strong> Killing any Zerg structure spawns death Broodlings, and <code>implied-tech-prereqs</code> mapped <code>broodling → greater-spire</code>, permanently latching capital-air panic.</p>
-      <p><strong>Fix &amp; result:</strong> Removed death Broodlings and hallucinations from tech inference. Phantom Viking ticks dropped from 141 to 0, lifting Terran to its first &gt;1.00× overall trade (1.02×).</p>
+      <div class="case-tag">Enemy Tech Inference · Fixed in Loop 43</div>
+      <h3>5.2 Dead Zerg Buildings Triggering Anti-Air Panic</h3>
+      <p><strong>Symptom:</strong> Against pure ground Zerg (Roaches and Hydralisks), Terran suddenly built 4 Starports and 13 Vikings mid-game.</p>
+      <p><strong>Root cause:</strong> Destroying any Zerg building spawns short-lived Broodlings. Our tech-prerequisite table mapped Broodlings to Brood Lords and a Greater Spire, tricking Terran into panicking against non-existent air units.</p>
+      <p><strong>Fix &amp; result:</strong> Ignored Broodlings and Sentry hallucinations in tech inference. Unnecessary Viking builds dropped to zero and lifted Terran above a 1.0× overall trade ratio (1.02× locally, 1.64× live).</p>
     </article>
 
     <article class="case-card">
-      <div class="case-tag">Tactical Micro · Fixed in Loops 43–46</div>
-      <h3>5.3 Detection-First Dark Templar Doctrine (p15)</h3>
-      <p><strong>Symptom:</strong> Blinking Dark Templars directly onto a Planetary Fortress left both Missile Turrets alive, exposing DTs to PF and Tank splash; later, surviving DTs morphed into visible Archons or got recalled home by their own Nexus.</p>
-      <p><strong>Fix &amp; result:</strong> Split wings to snipe both Missile Turrets first, blocked Archon morph and Nexus Mass Recall on undetected cloaked DTs, and added visibility-grid fog sweeping—turning a 0.33× loss into a 1.58× permanent-cloak KO win (14/27 DTs alive).</p>
+      <div class="case-tag">Unit Control · Fixed in Loops 43–46</div>
+      <h3>5.3 Dark Templars Attacking Before Clearing Detectors</h3>
+      <p><strong>Symptom:</strong> In drill p15, Dark Templars blinked straight onto a Terran Planetary Fortress while both Missile Turrets were still standing, dying to splash damage. Even when they killed the turrets, surviving Dark Templars merged into visible Archons or got recalled home by their own Nexus.</p>
+      <p><strong>Fix &amp; result:</strong> Dark Templars now split into two groups to destroy nearby detectors first, stay cloaked instead of merging into Archons or taking Mass Recall when no enemy detection remains, and sweep unexplored fog tiles. Drill p15 flipped from a 0.33× loss to a 1.58× win with 14 of 27 Dark Templars surviving.</p>
     </article>
 
     <article class="case-card">
-      <div class="case-tag">Prioritization ↔ Runtime · Fixed in Loop 48</div>
-      <h3>5.4 Split-Brain Barracks Cap Deadlock</h3>
-      <p><strong>Symptom:</strong> In H2H TvT and 3 roster games, Terran stalled production for 54–132 consecutive ticks while banking minerals.</p>
-      <p><strong>Root cause:</strong> The macro brain scheduled Barracks #5/#7 while runtime silently enforced a lower <code>2 × CCs</code> cap, refusing to emit the build command.</p>
-      <p><strong>Fix &amp; result:</strong> Unified runtime production ceilings with brain scheduling up to 8 facilities and added a Brain↔Runtime contract check to Gate 1.</p>
+      <div class="case-tag">Spending &amp; Production · Fixed in Loop 48</div>
+      <h3>5.4 Conflicting Barracks Limits Freezing Terran Production</h3>
+      <p><strong>Symptom:</strong> In Terran mirrors and three benchmark games, Terran stopped building units for several seconds at a time while sitting on unspent minerals.</p>
+      <p><strong>Root cause:</strong> The spending queue scheduled a 5th or 7th Barracks on three bases, while the build executor enforced an older cap of two Barracks per Command Center and quietly dropped the order every frame.</p>
+      <p><strong>Fix &amp; result:</strong> Matched the executor's facility cap (up to 8) to the spending queue and added a unit test verifying that both modules agree on every building limit.</p>
     </article>
 
     <article class="case-card">
-      <div class="case-tag">Loop Engineering · Shipped in Loop 48</div>
-      <h3>5.5 Un-Gated Heuristics &amp; Trajectory Flywheel</h3>
-      <p><strong>Symptom:</strong> 6 of 7 recent held builds failed the 2-minute H2H gate—yet ran the 31-minute 84-match roster first (~{fw['total_wasted_min']} GPU minutes burned).</p>
-      <p><strong>Fix &amp; result:</strong> Built automated transcript trajectory logging across all 12 agents, inverted testing to run 2-minute H2H and 25-second targeted Arena checks first, and added flip-flop guardrails.</p>
+      <div class="case-tag">Testing Workflow · Shipped in Loop 48</div>
+      <h3>5.5 Running a 2-Minute Check Before the 30-Minute Benchmark</h3>
+      <p><strong>Symptom:</strong> Six of seven held builds lost their 2-minute head-to-head match against the live bot, yet our test script ran the 31-minute, 84-game benchmark first, wasting {fw['total_wasted_min']} minutes of simulation.</p>
+      <p><strong>Fix &amp; result:</strong> Moved the 2-minute head-to-head gate and 25-second targeted combat drills ahead of the full 84-game benchmark, and added a warning whenever the same rule gets tweaked repeatedly across consecutive runs.</p>
     </article>
   </div>
 </section>
@@ -2533,9 +2726,12 @@ INTERACTIVE_SECTIONS_CSS = """
 
 .metric-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.55rem;
   margin: 0.55rem 0 0.85rem;
+}
+.metric-strip-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .m-chip {
   background: var(--surface);
@@ -2673,6 +2869,7 @@ INTERACTIVE_SECTIONS_CSS = """
   .interactive-panel { padding: 0.9rem 0.75rem; }
   .detail-drawer { padding: 0.85rem; }
   .diagram-stage { padding: 0.5rem 0.35rem; }
+  .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 """
 
@@ -2774,7 +2971,7 @@ INTERACTIVE_SECTIONS_JS = """
     btn.addEventListener('click', function() { selectArchWalk(btn.getAttribute('data-walk-id')); });
   });
 
-  // 3. Tactics Arena 3.0 Category Explorer WITH Per-Category Playable Video Clips
+  // 3. Combat Drills Category Explorer WITH Per-Category Playable Video Clips
   const arenaCats = window.__ARENA_CATS__ || [];
   const catBtns = document.querySelectorAll('[data-cat-idx]');
   function renderArenaClipCard(cl) {
@@ -2809,13 +3006,13 @@ INTERACTIVE_SECTIONS_JS = """
       if (!c) return;
       catBtns.forEach(function(b) { b.classList.toggle('is-active', b === btn); });
       document.getElementById('cat-detail-title').textContent = c.label;
-      document.getElementById('cat-detail-counts').textContent = c.total + ' drills · ' + c.core + ' core flagships';
+      document.getElementById('cat-detail-counts').textContent = c.total + ' scenarios (' + c.core + ' run every build)';
       document.getElementById('cat-detail-desc').textContent = c.desc;
-      const dRec = c.d_w + 'W–' + c.d_l + 'L' + (c.d_d ? '–' + c.d_d + 'D' : '') + ' (' + Number(c.d_tr).toFixed(2) + '×)';
-      const sRec = c.sp_w + 'W–' + c.sp_l + 'L' + (c.sp_d ? '–' + c.sp_d + 'D' : '') + ' (' + Number(c.sp_tr).toFixed(2) + '×)';
+      const dRec = c.d_w + '–' + c.d_l + (c.d_d ? '–' + c.d_d : '') + ' (' + Number(c.d_tr).toFixed(2) + '×)';
+      const sRec = c.sp_w + '–' + c.sp_l + (c.sp_d ? '–' + c.sp_d : '') + ' (' + Number(c.sp_tr).toFixed(2) + '×)';
       document.getElementById('cat-detail-metrics').innerHTML =
-        '<div class="m-chip"><span class="m-lbl">vs. Micro Dummy</span><strong>' + esc(dRec) + '</strong></div>' +
-        '<div class="m-chip"><span class="m-lbl">vs. Mothman Self-Play</span><strong>' + esc(sRec) + '</strong></div>';
+        '<div class="m-chip"><span class="m-lbl">vs. Scripted AI</span><strong>' + esc(dRec) + '</strong></div>' +
+        '<div class="m-chip"><span class="m-lbl">vs. Mothman Copy</span><strong>' + esc(sRec) + '</strong></div>';
       const clipsEl = document.getElementById('cat-detail-clips');
       if (clipsEl) {
         const cls = c.clips || [];
@@ -2878,18 +3075,20 @@ INTERACTIVE_SECTIONS_JS = """
       if (!m) return;
       muBtns.forEach(function(b) { b.classList.toggle('is-active', b === btn); });
       const loc = m.local || {};
+      const cor = m.core || {};
       const prd = m.prod || {};
-      const prdS = prd.n ? (prd.w + '–' + prd.l + (prd.t ? '–' + prd.t : '') + ' (' + Number(prd.tr).toFixed(2) + '×)') : '—';
-      const locS = loc.n ? (loc.w + '–' + loc.l + (loc.t ? '–' + loc.t : '') + ' (' + Number(loc.tr).toFixed(2) + '×)') : '—';
+      const prdS = prd.n ? (Number(prd.wr || 0).toFixed(1) + '% · ' + prd.w + '–' + prd.l + (prd.t ? '–' + prd.t : '') + ' (' + Number(prd.tr).toFixed(2) + '× trade)') : '—';
+      const corS = cor.n ? (Number(cor.wr || 0).toFixed(1) + '% · ' + cor.w + '–' + cor.l + (cor.t ? '–' + cor.t : '') + ' (' + Number(cor.tr).toFixed(2) + '× trade)') : '—';
+      const locS = loc.n ? (Number(loc.wr || 0).toFixed(1) + '% · ' + loc.w + '–' + loc.l + (loc.t ? '–' + loc.t : '') + ' (' + Number(loc.tr).toFixed(2) + '× trade)') : '—';
       document.getElementById('mu-detail-title').textContent = m.matchup + ' (' + m.race + ')';
       document.getElementById('mu-detail-meta').textContent = 'Avg duration ' + Number(loc.dur_m || 0).toFixed(1) + 'm · ' + Number(loc.bases || 0).toFixed(1) + ' peak bases';
       document.getElementById('mu-detail-metrics').innerHTML =
-        '<div class="m-chip"><span class="m-lbl">Live AI Arena</span><strong>' + esc(prdS) + '</strong></div>' +
-        '<div class="m-chip"><span class="m-lbl">Local (L42–47)</span><strong>' + esc(locS) + '</strong></div>' +
-        '<div class="m-chip"><span class="m-lbl">Supply-Blocked</span><strong>' + Number(loc.sb || 0).toFixed(1) + '%</strong></div>' +
-        '<div class="m-chip"><span class="m-lbl">Workers (4m / 6m / Pk)</span><strong>' + Math.round(loc.w4m || 0) + ' / ' + Math.round(loc.w6m || 0) + ' / ' + Math.round(loc.pkw || 0) + '</strong></div>' +
-        '<div class="m-chip"><span class="m-lbl">Peak Army (Us / Opp)</span><strong>' + Number(loc.pka || 0).toLocaleString() + ' / ' + Number(loc.opka || 0).toLocaleString() + '</strong></div>' +
-        '<div class="m-chip"><span class="m-lbl">Gas #1 / Nat Timing</span><strong>' + fmtMmss(m.gas1_sec) + ' / ' + fmtMmss(m.nat_sec) + '</strong></div>';
+        '<div class="m-chip"><span class="m-lbl">Live Ladder</span><strong>' + esc(prdS) + '</strong></div>' +
+        '<div class="m-chip"><span class="m-lbl">14 Core Bots (L42–48)</span><strong>' + esc(corS) + '</strong></div>' +
+        '<div class="m-chip"><span class="m-lbl">All 26 Local (L42–48)</span><strong>' + esc(locS) + '</strong></div>' +
+        '<div class="m-chip"><span class="m-lbl">Time Supply-Blocked</span><strong>' + Number(loc.sb || 0).toFixed(1) + '%</strong></div>' +
+        '<div class="m-chip"><span class="m-lbl">Workers (4m / 6m / Peak)</span><strong>' + Math.round(loc.w4m || 0) + ' / ' + Math.round(loc.w6m || 0) + ' / ' + Math.round(loc.pkw || 0) + '</strong></div>' +
+        '<div class="m-chip"><span class="m-lbl">Peak Army Value (Us / Opp)</span><strong>' + Number(loc.pka || 0).toLocaleString() + ' / ' + Number(loc.opka || 0).toLocaleString() + '</strong></div>';
       const stEl = document.getElementById('mu-open-styles');
       if (stEl) {
         stEl.innerHTML = (m.opening_styles || []).map(function(s) { return '<span class="style-chip">' + esc(s) + '</span>'; }).join('');

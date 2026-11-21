@@ -594,7 +594,7 @@
                       "Deploy protective Shroud when <70 energy Infestor retreats out of air threat"
                       "fallback when en<70 & threat<=12.0")
 
-   ;; ZERG: Viper (Blinding Cloud 2063, Abduct 2067, Parasitic Bomb 2542 + Consume 2069)
+   ;; ZERG: Viper (Blinding Cloud 2063, Abduct 2067, Parasitic Bomb 2542 + Consume 2073)
    (spell-tactic-mode 'viper 'blinding-cloud 2063 'viper-cloud-ranged-ball
                       "Blind >=2 unclouded ground ranged attackers within 11.0 tiles"
                       "en>=100 & >=2 ranged enemies r=2.0")
@@ -619,11 +619,11 @@
    (spell-tactic-mode 'viper 'parasitic-bomb 2542 'viper-pbomb-medivac-drop
                       "Punish bunched Medivacs, Vikings, Void Rays, or Phoenixes"
                       "en>=125 & air flock<=8.0")
-   (spell-tactic-mode 'viper 'viper-consume 2069 'viper-safe-consume-regen
+   (spell-tactic-mode 'viper 'viper-consume 2073 'viper-safe-consume-regen
                       "Retreat outside 12.0 enemy threat when energy<60 and Consume >450 HP Zerg building"
                       "en<60 & 0 enemies<=12.0 & bldg hp>450")
 
-   ;; ZERG: Corruptor (2324), SwarmHost (1990), Lurker (2108/2110)
+   ;; ZERG: Corruptor (2324), SwarmHost (2704), Lurker (2108/2110)
    (spell-tactic-mode 'corruptor 'caustic-spray 2324 'corruptor-spray-exposed-townhall
                       "Channel Caustic Spray on unguarded CommandCenter/Nexus/Hatchery (0 AA <=11.0)"
                       "0 AA/air threat<=11.0 & townhall<=6.0")
@@ -633,13 +633,13 @@
    (spell-tactic-mode 'corruptor 'caustic-spray 2324 'corruptor-spray-hit-and-abort
                       "Refuse or abort Spray immediately whenever enemy AA/air enters <=11.0 tiles"
                       "enemy AA/air threat<=11.0 -> abort")
-   (spell-tactic-mode 'swarm-host-mp 'spawn-locusts 1990 'swarm-host-locust-wave-base
+   (spell-tactic-mode 'swarm-host-mp 'spawn-locusts 2704 'swarm-host-locust-wave-base
                       "Launch off-cooldown Locust wave onto enemy mineral line or 3rd from 16-24 tiles"
                       "locusts ready & target<=24.0 unclaimed")
-   (spell-tactic-mode 'swarm-host-mp 'spawn-locusts 1990 'swarm-host-locust-tank-breaker
+   (spell-tactic-mode 'swarm-host-mp 'spawn-locusts 2704 'swarm-host-locust-tank-breaker
                       "Drop Locusts onto sieged Tanks/Immortals/Colossi before main ground engage"
                       "locusts ready & high-value mech/robo clump")
-   (spell-tactic-mode 'swarm-host-mp 'spawn-locusts 1990 'swarm-host-nydus-kite-cycle
+   (spell-tactic-mode 'swarm-host-mp 'spawn-locusts 2704 'swarm-host-nydus-kite-cycle
                       "Stagger Swarm Host casts across r=4.0 zones and retreat on cooldown"
                       "locust claim radius=4.0")
    (spell-tactic-mode 'lurker-mp 'burrow-lurker 2108 'lurker-burrow-choke-siege
@@ -681,7 +681,7 @@
                       "Withhold Cloak when enemy Observer/Overseer/Raven/Turret is within 11.0 tiles"
                       "detector<11.0 -> skip cloak")
 
-   ;; TERRAN: Raven (Interference Matrix 3747, Anti-Armor Missile 3753, Auto-Turret 349)
+   ;; TERRAN: Raven (Interference Matrix 3747, Anti-Armor Missile 3753, Auto-Turret 1764)
    (spell-tactic-mode 'raven 'interference-matrix 3747 'raven-matrix-siege-colossus
                       "Disable SiegeTank/Colossus/Thor/Carrier/Immortal/Tempest/Raven/Infestor 1/target"
                       "en>=75 & high-value unit<=9.0")
@@ -700,13 +700,13 @@
    (spell-tactic-mode 'raven 'anti-armor-missile 3753 'raven-aam-hold-vs-skirmish
                       "Conserve 75 energy for Matrix/Turret when <5 targets or <6 firing allies"
                       "insufficient clump or firing allies")
-   (spell-tactic-mode 'raven 'auto-turret 349 'raven-turret-worker-harass
+   (spell-tactic-mode 'raven 'auto-turret 1764 'raven-turret-worker-harass
                       "Drop Auto-Turret into enemy mineral line prioritizing SCV/Probe/Drone targets"
                       "en>=50 & worker/light<=8.0")
-   (spell-tactic-mode 'raven 'auto-turret 349 'raven-turret-melee-zone
+   (spell-tactic-mode 'raven 'auto-turret 1764 'raven-turret-melee-zone
                       "Place Auto-Turret to block charging Zerglings/Zealots/Adepts"
                       "en>=50 & >=2 enemies r=3.5")
-   (spell-tactic-mode 'raven 'auto-turret 349 'raven-turret-vision-tank
+   (spell-tactic-mode 'raven 'auto-turret 1764 'raven-turret-vision-tank
                       "Deploy Auto-Turret forward as disposable high-DPS decoy during skirmish"
                       "en>=50 & point claim free")
 
@@ -2975,13 +2975,20 @@
                   (and (>= en 50.0)
                        (spell-claim-unit?! claims 'spawn-changeling tag current-frame 16 #:caster-tag tag)
                        (spell-directive tag sym 'spawn-changeling 'none 0 ux uy 'overseer-changeling-ramp-block))
-                  ;; 3. Oversight static vision anchor when `< 50` energy and safe from AA
+                  ;; 3. Oversight static vision anchor when `< 50` energy, safe from AA, AND no active
+                  ;; nearby combat/enemy engagement (`<= 22t`) so Overseer stays mobile to detect
+                  ;; cloaked Observers/DTs/Banshees during fights instead of spamming Oversight!
                   (and (eq? sym 'overseer)
                        (not aa-near?)
+                       (not (any-unit-within? all-enemies ux uy 22.0 unit-combat-relevant?))
+                       (not (any-unit-within? all-enemies ux uy 22.0
+                                              (lambda ([e : Any])
+                                                (and (memq (uh-type e) '(observer observer-siege-mode dark-templar banshee ghost)) #t))))
                        (> (dist2 ux uy home-x home-y) 8.0)
+                       (spell-claim-unit?! claims 'morph-oversight-mode tag current-frame 160 #:caster-tag tag)
                        (spell-directive tag sym 'morph-oversight-mode 'none 0 ux uy 'overseer-oversight-ring-watch)))])]
 
-             ;; --- SWARM HOST (Spawn Locusts 1990) ---
+             ;; --- SWARM HOST (Spawn Locusts 2704) ---
              [(swarm-host swarm-host-mp)
               (define ready?
                 (and (not (spellcaster-channel-protected? u))
@@ -3549,7 +3556,7 @@
                            (let* ([dx (- (uh-x tgt) ux)]
                                   [dy (- (uh-y tgt) uy)]
                                   [d (max 0.01 (flsqrt (+ (* dx dx) (* dy dy))))]
-                                  [cast-d (min 2.5 (max 0.5 (- d 0.75)))]
+                                  [cast-d (min 2.0 (max 0.5 (- d 0.75)))]
                                   [tx (clamp-coord (+ ux (* cast-d (/ dx d))))]
                                   [ty (clamp-coord (+ uy (* cast-d (/ dy d))))])
                              (and (spell-claim-point?! claims 'auto-turret tx ty 2.5 current-frame 64)
@@ -4132,7 +4139,15 @@
                                          (and (memq (uh-type e) '(scv probe drone mule)) #t))))
                  (define near-light-victims
                    (count-units-within enemy-units ux uy 9.5 oracle-pulsar-victim?))
-                 (define worker-raid-hold? (or (>= near-raid-workers 4) (>= near-light-victims 4)))
+                 (define beam-enemy-th-near-22?
+                   (any-unit-within?
+                    enemy-buildings ux uy 22.0
+                    (lambda ([b : Any])
+                      (and (memq (uh-type b) SC2-TOWNHALL-STRUCTURE-SYMS) #t))))
+                 (define worker-raid-hold?
+                   (or (>= near-raid-workers 4)
+                       (>= near-light-victims 4)
+                       beam-enemy-th-near-22?))
                  (define min-sh-off (if worker-raid-hold? 10.0 25.0))
                  (define min-en-off (if worker-raid-hold? 10.0 15.0))
                  (and (>= dwell ORACLE-PULSAR-BEAM-MIN-DWELL-FRAMES)
@@ -4231,10 +4246,20 @@
                                                             (lambda ([e : Any])
                                                               (and (memq (uh-type e) '(scv probe drone mule)) #t)))]
                                  [aa-near-10? (any-unit-within? all-enemies ux uy 10.5 enemy-anti-air-or-air-threat?)]
+                                 [enemy-th-near-22?
+                                  (any-unit-within?
+                                   enemy-buildings ux uy 22.0
+                                   (lambda ([b : Any])
+                                     (and (memq (uh-type b) SC2-TOWNHALL-STRUCTURE-SYMS) #t)))]
+                                 ;; L49-W1: Suppress Stasis Ward whenever a healthy Oracle (`sh >= 25`)
+                                 ;; is actively raiding an enemy base / mineral line (`<= 22t` of enemy
+                                 ;; TownHall or `>= 2` light victims `<= 14t`), regardless of `en >= 90`,
+                                 ;; so energy stays reserved for Pulsar Beam worker shred! Low-shield
+                                 ;; (`sh < 25`) uncontested mineral-line visits still plant Stasis Ward.
                                  [save-for-pulsar-raid?
-                                  (or (and (< en 90.0)
-                                           (>= sh 25.0)
-                                           (>= (count-units-within enemy-units ux uy 14.0 oracle-pulsar-victim?) 2))
+                                  (or (and (>= sh 25.0)
+                                           (or enemy-th-near-22?
+                                               (>= (count-units-within enemy-units ux uy 14.0 oracle-pulsar-victim?) 2)))
                                       (and (>= ew-14 4)
                                            (or (>= ew-14 8)
                                                aa-near-10?
@@ -4272,8 +4297,13 @@
                                                    (not (spell-point-claimed? claims 'stasis-ward tx ty STASIS-WARD-CLAIM-RADIUS current-frame))
                                                    (cons tx ty)))
                                             #f)))]
+                                 [under-fire-low-sh?
+                                  (and (< sh 35.0)
+                                       (any-unit-within? all-enemies ux uy 12.0 unit-combat-relevant?))]
                                  [choke-pt : (Option (Pairof Float Float))
                                   (and (not save-for-pulsar-raid?)
+                                       (not aa-near-10?)
+                                       (not under-fire-low-sh?)
                                        (>= en 55.0)
                                        (for/or : (Option (Pairof Float Float)) ([cp (in-list choke-points)])
                                          (define cx (safe-fl (car cp) 0.0))
@@ -4281,6 +4311,8 @@
                                          (and (safe-site? cx cy) (cons cx cy))))]
                                  [default-pt : (Option (Pairof Float Float))
                                   (and (not save-for-pulsar-raid?)
+                                       (not aa-near-10?)
+                                       (not under-fire-low-sh?)
                                        (>= en 55.0)
                                        (let* ([dx (- enemy-base-x ux)]
                                               [dy (- enemy-base-y uy)]
@@ -5439,7 +5471,7 @@
 ;; =============================================================================
 
 (define STALKER-BLINK-COOLDOWN-FRAMES : Integer 157)
-(define STALKER-BLINK-MAX-RANGE : Float 7.6)
+(define STALKER-BLINK-MAX-RANGE : Float 7.95)
 
 (: stalker-blink-researched? (-> (Listof Any) Boolean))
 (define (stalker-blink-researched? upgrades)
@@ -5517,7 +5549,23 @@
             s))
         (define out : (Listof spell-directive) '())
         (define handled-tags : (HashTable Integer Boolean) (make-hasheqv))
-        ;; Pass 1: Injured Stalker Blink-Back (`shields < 25.0` OR `hull-hp < 55%` OR `total-hp-ratio < 0.55`)
+        ;; L49-W2 (`b06` 1-Shot Tank Abort Fix): Check if a coordinated forward-blink strike squad
+        ;; (`>= 7` ready Stalkers with `total-hp >= 85.0`) is within strike reach (`<= 11.6t`) of
+        ;; a Sieged Tank or Colossus so Pass 1 Blink-Back does not peel a `90`-EHP Stalker (hit once
+        ;; by Tank splash: `80 -> 10` shields, `80` hull) backward before Pass 2 blinks forward!
+        (define forward-strike-imminent? : Boolean
+          (and allow-forward?
+               (for/or : Boolean ([e (in-list vis-enemies)])
+                 (and (memq (uh-raw-type e) '(siege-tank-sieged colossus))
+                      (let ([ex (uh-x e)] [ey (uh-y e)])
+                        (>= (for/sum : Integer
+                                     ([s (in-list stalkers)]
+                                      #:when (and (>= (uh-total-hp s) 85.0)
+                                                  (>= current-frame (hash-ref blink-ht (uh-tag s) (lambda () -10000)))
+                                                  (<= (dist2 (uh-x s) (uh-y s) ex ey) 11.6)))
+                              1)
+                            7))))))
+        ;; Pass 1: Injured Stalker Blink-Back (`shields < 25.0` OR `hull-hp < 44.0` OR `total-hp-ratio < 0.55`)
         ;; Blinks `5.5t` back behind healthy friendly Stalkers (or away from nearest enemy threat)
         (for ([s (in-list stalkers)])
           (define tag (uh-tag s))
@@ -5525,7 +5573,9 @@
           (when (>= current-frame ready-f)
             (define sh (uh-shields s))
             (define hull-hp (max 0.0 (- (uh-total-hp s) sh)))
-            (define injured? (or (< sh 25.0) (< hull-hp 44.0) (< (uh-hp-ratio s) 0.55)))
+            (define injured?
+              (and (not (and forward-strike-imminent? (>= (uh-total-hp s) 85.0)))
+                   (or (< sh 25.0) (< hull-hp 44.0) (< (uh-hp-ratio s) 0.55))))
             (when injured?
               (define ux (uh-x s))
               (define uy (uh-y s))
@@ -5570,13 +5620,12 @@
                 (hash-set! blink-ht tag (+ current-frame STALKER-BLINK-COOLDOWN-FRAMES))
                 (hash-set! handled-tags tag #t)
                 (set! out (cons (spell-directive tag 'stalker 'blink 'point 0 bx by 'stalker-blink-back) out))))))
-        ;; Pass 2: Coordinated Blink-Forward Snipe (`>= 5` Blink-ready healthy Stalkers vs HV target)
+        ;; Pass 2: Coordinated Blink-Forward Snipe (`>= 5` Blink-ready Stalkers with `total-hp >= 85.0` vs HV target)
         (define ready-healthy
           (for/list : (Listof Any)
-                    ([s (in-list healthy-stalkers)]
+                    ([s (in-list stalkers)]
                      #:when (and (not (hash-has-key? handled-tags (uh-tag s)))
-                                 (>= (uh-shields s) 40.0)
-                                 (>= (- (uh-total-hp s) (uh-shields s)) 60.0)
+                                 (>= (uh-total-hp s) 85.0)
                                  (>= current-frame (hash-ref blink-ht (uh-tag s) (lambda () -10000)))))
             s))
         (when (and allow-forward? (>= (length ready-healthy) 5))
@@ -5603,19 +5652,30 @@
             (define hv-y (uh-y best-hv))
             (define hv-tag (uh-tag best-hv))
             (define hv-type (uh-raw-type best-hv))
-            ;; Require >= 5 ready healthy Stalkers within `<= 11.5t` (1 blink + immediate range-6 volley!)
-            ;; L44-P0-1a (`#04 PvT` / `#82 PvT` / `b06` / `b07`): NEVER bypass local combat parity
-            ;; for Siege Tanks / Colossi / Liberators / Disruptors / High Templars! Count local enemy
-            ;; combat units (`<= 10.0t` of HV target) AND overlapping OTHER Sieged Tanks (`<= 13.0t`
-            ;; of `best-hv`) so Stalkers NEVER suicide-blink into 3-6 Sieged Tanks + Bio!
+            ;; L44-P0-1a + L49-W1 + L49-W2: Trigger `siege-tank-sieged` forward Blink at
+            ;; `hv-centroid-d <= 10.6` (`strike-max-d <= 11.6`) BEFORE Tank splash lands, with
+            ;; `total-hp >= 85.0` and `tank-overlap-safe?` `n-strike >= 7` (`local-enemy-cnt <= 2 * n-strike`)!
+            (define hv-centroid-d (dist2 scx scy hv-x hv-y))
+            (define centroid-in-range?
+              (cond [(eq? hv-type 'siege-tank-sieged) (<= hv-centroid-d 10.6)]
+                    [(eq? hv-type 'colossus) (<= hv-centroid-d 10.15)]
+                    [else (<= hv-centroid-d 11.5)]))
+            (define strike-max-d : Float
+              (cond [(eq? hv-type 'siege-tank-sieged) 11.6]
+                    [(eq? hv-type 'colossus) 11.2]
+                    [else 11.5]))
             (define strike-stalkers
-              (for/list : (Listof Any)
-                        ([s (in-list ready-healthy)]
-                         #:when (<= (dist2 (uh-x s) (uh-y s) hv-x hv-y) 11.5))
-                s))
+              (if centroid-in-range?
+                  (for/list : (Listof Any)
+                            ([s (in-list ready-healthy)]
+                             #:when (<= (dist2 (uh-x s) (uh-y s) hv-x hv-y) strike-max-d))
+                    s)
+                  '()))
             (define local-enemy-cnt
               (for/sum : Integer ([e (in-list vis-enemies)]
-                                  #:when (and (not (memq (uh-type e) '(scv probe drone mule overlord overseer observer larva egg)))
+                                  #:when (and (not (memq (uh-type e)
+                                                         '(scv probe drone mule overlord overseer observer
+                                                           larva egg medivac warp-prism warp-prism-phasing)))
                                               (<= (dist2 hv-x hv-y (uh-x e) (uh-y e)) 10.0)))
                 1))
             (define other-sieged-tanks-in-range
@@ -5627,21 +5687,25 @@
             (define n-strike (length strike-stalkers))
             (define tank-overlap-safe?
               (or (< other-sieged-tanks-in-range 2)
-                  (and (>= n-strike 10)
-                       (<= local-enemy-cnt (+ n-strike 4)))))
+                  (and (>= n-strike 7)
+                       (<= local-enemy-cnt (* n-strike 2)))))
             (when (and (>= n-strike 5)
                        (<= local-enemy-cnt (* n-strike 2))
                        tank-overlap-safe?)
-              ;; Land inside Tank `1.75t` dead-zone (`<= 2.0t` min range!) or `2.8t` arc under Colossus/Lib
-              (define land-r (if (eq? hv-type 'siege-tank-sieged) 1.75 2.8))
-              (define base-th (real->double-flonum (atan (- scy hv-y) (- scx hv-x))))
+              ;; Land inside Tank `1.25t` dead-zone (`<= 2.0t` min range!) or `1.75t` arc under Colossus,
+              ;; blinking straight along each Stalker's own near-side ray so wing Stalkers never cross paths!
+              (define land-r
+                (cond [(eq? hv-type 'siege-tank-sieged) 1.25]
+                      [(eq? hv-type 'colossus) 1.75]
+                      [else 2.8]))
               (for ([s (in-list strike-stalkers)]
                     [idx (in-naturals)])
                 (define tag (uh-tag s))
                 (define ux (uh-x s))
                 (define uy (uh-y s))
-                (define frac (if (<= n-strike 1) 0.0 (/ (exact->inexact idx) (exact->inexact (- n-strike 1)))))
-                (define ang (+ base-th (* (- frac 0.5) 1.1)))
+                (define ray-th (real->double-flonum (atan (- uy hv-y) (- ux hv-x))))
+                (define jitter (* (exact->inexact (- (modulo idx 3) 1)) 0.08))
+                (define ang (+ ray-th jitter))
                 (define goal-x (clamp-coord (+ hv-x (* land-r (flcos ang)))))
                 (define goal-y (clamp-coord (+ hv-y (* land-r (flsin ang)))))
                 (define d-goal (dist2 ux uy goal-x goal-y))

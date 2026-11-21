@@ -147,6 +147,8 @@
  VIKING-LAND-GROUND-SPLASH-RADIUS
  VIKING-LAND-GROUND-TARGET-RADIUS
  VIKING-LAND-POWER-RATIO
+ VIKING-LAND-MECH-POWER-RATIO
+ VIKING-AIR-MEMORY-TTL-FRAMES
  VIKING-LAND-STANDOFF-MIN
  VIKING-LAND-STANDOFF-MAX
  CYCLONE-LOCK-ON-COOLDOWN-FRAMES
@@ -372,31 +374,37 @@
 (define VIKING-EMERGENCY-LIFTOFF-DWELL-FRAMES 64)
 
 (: VIKING-LIFTOFF-HP-RATIO Float)
-(define VIKING-LIFTOFF-HP-RATIO 0.55)
+(define VIKING-LIFTOFF-HP-RATIO 0.45)
 
 (: VIKING-LIFTOFF-GROUND-SPLASH-RADIUS Float)
-(define VIKING-LIFTOFF-GROUND-SPLASH-RADIUS 9.5)
+(define VIKING-LIFTOFF-GROUND-SPLASH-RADIUS 7.0)
 
 (: VIKING-LIFTOFF-POWER-THRESHOLD Float)
-(define VIKING-LIFTOFF-POWER-THRESHOLD 0.85)
+(define VIKING-LIFTOFF-POWER-THRESHOLD 2.20)
 
 (: VIKING-LAND-SAFE-AIR-RADIUS Float)
 (define VIKING-LAND-SAFE-AIR-RADIUS 22.0)
 
 (: VIKING-LAND-MIN-HP-RATIO Float)
-(define VIKING-LAND-MIN-HP-RATIO 0.70)
+(define VIKING-LAND-MIN-HP-RATIO 0.50)
 
 (: VIKING-GROUND-DWELL-FRAMES Integer)
-(define VIKING-GROUND-DWELL-FRAMES 135)
+(define VIKING-GROUND-DWELL-FRAMES 64)
 
 (: VIKING-LAND-GROUND-SPLASH-RADIUS Float)
-(define VIKING-LAND-GROUND-SPLASH-RADIUS 11.0)
+(define VIKING-LAND-GROUND-SPLASH-RADIUS 7.5)
 
 (: VIKING-LAND-GROUND-TARGET-RADIUS Float)
-(define VIKING-LAND-GROUND-TARGET-RADIUS 10.0)
+(define VIKING-LAND-GROUND-TARGET-RADIUS 14.0)
 
 (: VIKING-LAND-POWER-RATIO Float)
-(define VIKING-LAND-POWER-RATIO 1.35)
+(define VIKING-LAND-POWER-RATIO 0.70)
+
+(: VIKING-LAND-MECH-POWER-RATIO Float)
+(define VIKING-LAND-MECH-POWER-RATIO 0.55)
+
+(: VIKING-AIR-MEMORY-TTL-FRAMES Integer)
+(define VIKING-AIR-MEMORY-TTL-FRAMES 336)
 
 (: VIKING-LAND-STANDOFF-MIN Float)
 (define VIKING-LAND-STANDOFF-MIN 4.5)
@@ -950,6 +958,22 @@
   (when (pair? dead-tags)
     (unit-mode-tracker-prune-dead! tr dead-tags))
 
+  ;; Prune expired (`> VIKING-AIR-MEMORY-TTL-FRAMES`) or non-combat entries from remembered air
+  (when (> current-frame 0)
+    (define air-mem (unit-mode-tracker-remembered-enemy-air tr))
+    (unless (hash-empty? air-mem)
+      (define stale-tags
+        (for/fold ([acc : (Listof Integer) '()])
+                  ([(k rec) (in-hash air-mem)])
+          (define seen-f (remembered-air-rec-last-seen-frame rec))
+          (if (or (not (viking-combat-air-or-colossus-sym? (remembered-air-rec-type rec)))
+                  (and (> seen-f 0)
+                       (> (- current-frame seen-f) VIKING-AIR-MEMORY-TTL-FRAMES)))
+              (cons k acc)
+              acc)))
+      (for ([k (in-list stale-tags)])
+        (hash-remove! air-mem k))))
+
   ;; Expire Cyclones' completed channels (`>= 315f`) or broken tethers (`dead` / `> 15.0` tiles)
   (define cy-tbl (unit-mode-tracker-cyclone-locks tr))
   (define has-active-lock?
@@ -1363,6 +1387,24 @@
   '(siege-tank-sieged lurker-burrowed lurker-mp-burrowed
     baneling immortal archon ultralisk disruptor disruptor-phased))
 
+;; Mechanical ground units where Viking Assault deals `+8 vs Mechanical` bonus damage.
+(define VIKING-MECHANICAL-GROUND-SYMS : (Listof Symbol)
+  '(stalker probe scv mule hellion hellbat cyclone widow-mine widow-mine-burrowed
+    siege-tank siege-tank-sieged thor thor-ap viking-assault
+    sentry immortal disruptor colossus auto-turret))
+
+;; Friendly air-to-ground units whose ground DPS contributes to local ground power balance.
+(define VIKING-ALLY-AIR-TO-GROUND-SYMS : (Listof Symbol)
+  '(viking viking-fighter banshee liberator-ag battlecruiser
+    void-ray voidray oracle mutalisk brood-lord broodlord carrier))
+
+;; Friendly cloaked/burrowed units that require Fighter Vikings to snipe live enemy air detectors first.
+(define VIKING-ALLY-STEALTH-SYMS : (Listof Symbol)
+  '(banshee dark-templar ghost widow-mine-burrowed lurker-burrowed lurker-mp-burrowed))
+
+(define VIKING-ENEMY-AIR-DETECTOR-SYMS : (Listof Symbol)
+  '(observer observer-siege-mode overseer overseer-siege-mode raven))
+
 ;; True if `sym` is enemy combat air or Colossus (allows non-combat `'observer`/`'overlord`).
 (: viking-combat-air-or-colossus-sym? (-> Symbol Boolean))
 (define (viking-combat-air-or-colossus-sym? sym)
@@ -1420,6 +1462,7 @@
    [cap? : Boolean]
    [sp? : Boolean]
    [ground-tgt? : Boolean]
+   [mech-ground? : Boolean]
    [ground-pwr? : Boolean]
    [gstr : Float]))
 
@@ -1445,7 +1488,7 @@
                (<= (+ (* dx dx) (* dy dy)) local-r2))
           (let ([at (exact-unit-type a)])
             (if (and (or (not (u-flying? a))
-                         (memq at '(viking viking-fighter)))
+                         (memq at VIKING-ALLY-AIR-TO-GROUND-SYMS))
                      (not (u-structure? a)))
                 (+ acc (local-ground-unit-strength a at))
                 acc))
@@ -1469,8 +1512,8 @@
           acc)))
   (values ally-pwr enemy-pwr))
 
-(: enemy-air-memory-has-threat? (-> (Option unit-mode-tracker) (Listof Any) Boolean))
-(define (enemy-air-memory-has-threat? tr explicit-mem)
+(: enemy-air-memory-has-threat? (-> (Option unit-mode-tracker) (Listof Any) Integer Boolean))
+(define (enemy-air-memory-has-threat? tr explicit-mem current-frame)
   (define explicit-threat?
     (for/or : Boolean ([item (in-list explicit-mem)])
       (and (if (or (hash? item) (mode-unit-input? item)) (u-alive? item) #t)
@@ -1478,7 +1521,11 @@
   (define tracker-threat?
     (and tr
          (for/or : Boolean ([(_ rec) (in-hash (unit-mode-tracker-remembered-enemy-air tr))])
-           (viking-combat-air-or-colossus-sym? (remembered-air-rec-type rec)))))
+           (define seen-f (remembered-air-rec-last-seen-frame rec))
+           (and (viking-combat-air-or-colossus-sym? (remembered-air-rec-type rec))
+                (or (<= current-frame 0)
+                    (<= seen-f 0)
+                    (<= (- current-frame seen-f) VIKING-AIR-MEMORY-TTL-FRAMES))))))
   (or explicit-threat? tracker-threat?))
 
 (: evaluate-viking-mode/pre
@@ -1575,14 +1622,15 @@
         #f]
        [else
         (define scan-r (max safe-air-r (max sp-land-r (max g-tgt-r local-r))))
-        (define-values (unsafe? best-g _best-gd2 enemy-pwr)
-          (let loop : (Values Boolean Any Float Float)
+        (define-values (unsafe? best-g _best-gd2 enemy-pwr has-mech-tgt?)
+          (let loop : (Values Boolean Any Float Float Boolean)
             ([rem : (Listof v-enemy-rec) e-recs]
              [bg : Any #f]
              [bgd2 : Float +inf.0]
-             [epwr : Float 0.0])
+             [epwr : Float 0.0]
+             [mech? : Boolean #f])
             (cond
-              [(null? rem) (values #f bg bgd2 epwr)]
+              [(null? rem) (values #f bg bgd2 epwr mech?)]
               [else
                (define r (car rem))
                (define dx (- vx (v-enemy-rec-x r)))
@@ -1593,7 +1641,7 @@
                    (let ([d2 (+ (* dx dx) (* dy dy))])
                      (if (or (and (v-enemy-rec-ca? r) (<= adx safe-air-r) (<= ady safe-air-r) (<= d2 safe-air-r2))
                              (and (v-enemy-rec-sp? r) (<= adx sp-land-r) (<= ady sp-land-r) (<= d2 sp-land-r2)))
-                         (values #t #f +inf.0 0.0)
+                         (values #t #f +inf.0 0.0 #f)
                          (let-values ([(nbg nbgd2)
                                        (if (and (v-enemy-rec-ground-tgt? r)
                                                 (<= adx g-tgt-r)
@@ -1602,13 +1650,19 @@
                                                 (< d2 bgd2))
                                            (values (v-enemy-rec-u r) d2)
                                            (values bg bgd2))])
+                           (define n-mech?
+                             (or mech?
+                                 (and (v-enemy-rec-mech-ground? r)
+                                      (<= adx g-tgt-r)
+                                      (<= ady g-tgt-r)
+                                      (<= d2 g-tgt-r2))))
                            (define n-epwr
                              (if (and (v-enemy-rec-ground-pwr? r)
                                       (<= adx local-r) (<= ady local-r) (<= d2 local-r2))
                                  (+ epwr (v-enemy-rec-gstr r))
                                  epwr))
-                           (loop (cdr rem) nbg nbgd2 n-epwr))))
-                   (loop (cdr rem) bg bgd2 epwr))])))
+                           (loop (cdr rem) nbg nbgd2 n-epwr n-mech?))))
+                   (loop (cdr rem) bg bgd2 epwr mech?))])))
         (if (or unsafe? (not best-g))
             #f
             (let ([ally-pwr
@@ -1619,8 +1673,11 @@
                               (<= (abs dy) local-r)
                               (<= (+ (* dx dx) (* dy dy)) local-r2))
                          (+ acc (v-ally-pwr-str a))
-                         acc))])
-              (if (>= ally-pwr (* VIKING-LAND-POWER-RATIO (max 1.0 enemy-pwr)))
+                         acc))]
+                  [req-ratio (if has-mech-tgt?
+                                 VIKING-LAND-MECH-POWER-RATIO
+                                 VIKING-LAND-POWER-RATIO)])
+              (if (>= ally-pwr (* req-ratio (max 1.0 enemy-pwr)))
                   (let ([land-pt (compute-viking-land-standoff
                                   (u-x best-g)
                                   (u-y best-g)
@@ -1665,7 +1722,7 @@
            (unit-mode-tracker-viking-dwell-elapsed tr tag current-frame)
            10000))
      (define air-mem-threat?
-       (if is-assault? #f (enemy-air-memory-has-threat? tr enemy-air-memory)))
+       (if is-assault? #f (enemy-air-memory-has-threat? tr enemy-air-memory current-frame)))
      (cond
        [(and (not is-assault?)
              (or air-mem-threat?
@@ -1678,6 +1735,10 @@
         (unit-mode-directive tag ut 'cast-spell 'morph-viking-fighter
                              MORPH-VIKING-FIGHTER-ABILITY-ID tag vx vy 'viking-liftoff-low-hp)]
        [else
+        (define ally-has-stealth?
+          (for/or : Boolean ([a (in-list ally-units)])
+            (and (u-alive? a)
+                 (not (not (memq (exact-unit-type a) VIKING-ALLY-STEALTH-SYMS))))))
         (define max-scan (if is-assault?
                              VIKING-LIFTOFF-AIR-RADIUS
                              (max VIKING-LAND-SAFE-AIR-RADIUS
@@ -1693,10 +1754,13 @@
             (define fly? (u-flying? e))
             (define ground-pwr? (and (not fly?) (not (memq et '(larva egg changeling)))))
             (v-enemy-rec e (u-x e) (u-y e)
-                         (viking-combat-air-or-colossus-sym? et)
+                         (or (viking-combat-air-or-colossus-sym? et)
+                             (and ally-has-stealth?
+                                  (not (not (memq et VIKING-ENEMY-AIR-DETECTOR-SYMS)))))
                          (viking-capital-air-sym? et)
                          (and (not fly?) (viking-ground-splash-sym? et))
                          (and (not fly?) (not (memq et '(larva egg))))
+                         (and (not fly?) (not (not (memq et VIKING-MECHANICAL-GROUND-SYMS))))
                          ground-pwr?
                          (if ground-pwr? (local-ground-unit-strength e et) 0.0))))
         (define a-pwrs
@@ -1707,7 +1771,7 @@
                                  (<= (abs (- vy (u-y a))) 12.0)
                                  (let ([at (exact-unit-type a)])
                                    (and (or (not (u-flying? a))
-                                            (memq at '(viking viking-fighter)))
+                                            (memq at VIKING-ALLY-AIR-TO-GROUND-SYMS))
                                         (not (u-structure? a))))))
             (v-ally-pwr (u-x a) (u-y a) (local-ground-unit-strength a (exact-unit-type a)))))
         (evaluate-viking-mode/pre unit ut tag vx vy is-assault? hp-rat dwell
@@ -1722,7 +1786,7 @@
   (cond
     [(null? vikings) '()]
     [else
-     (define air-mem-threat? (enemy-air-memory-has-threat? tr enemy-air-memory))
+     (define air-mem-threat? (enemy-air-memory-has-threat? tr enemy-air-memory current-frame))
      ;; Precheck if any Viking can possibly act before building full enemy/ally tables
      (define need-tables?
        (for/or : Boolean ([v (in-list vikings)])
@@ -1735,6 +1799,10 @@
      (cond
        [(not need-tables?) '()]
        [else
+        (define ally-has-stealth?
+          (for/or : Boolean ([a (in-list ally-units)])
+            (and (u-alive? a)
+                 (not (not (memq (exact-unit-type a) VIKING-ALLY-STEALTH-SYMS))))))
         (define e-recs
           (for/list : (Listof v-enemy-rec)
                     ([e (in-list enemy-units)]
@@ -1743,10 +1811,13 @@
             (define fly? (u-flying? e))
             (define ground-pwr? (and (not fly?) (not (memq et '(larva egg changeling)))))
             (v-enemy-rec e (u-x e) (u-y e)
-                         (viking-combat-air-or-colossus-sym? et)
+                         (or (viking-combat-air-or-colossus-sym? et)
+                             (and ally-has-stealth?
+                                  (not (not (memq et VIKING-ENEMY-AIR-DETECTOR-SYMS)))))
                          (viking-capital-air-sym? et)
                          (and (not fly?) (viking-ground-splash-sym? et))
                          (and (not fly?) (not (memq et '(larva egg))))
+                         (and (not fly?) (not (not (memq et VIKING-MECHANICAL-GROUND-SYMS))))
                          ground-pwr?
                          (if ground-pwr? (local-ground-unit-strength e et) 0.0))))
         (define a-pwrs
@@ -1755,7 +1826,7 @@
                      #:when (and (u-alive? a)
                                  (let ([at (exact-unit-type a)])
                                    (and (or (not (u-flying? a))
-                                            (memq at '(viking viking-fighter)))
+                                            (memq at VIKING-ALLY-AIR-TO-GROUND-SYMS))
                                         (not (u-structure? a))))))
             (v-ally-pwr (u-x a) (u-y a) (local-ground-unit-strength a (exact-unit-type a)))))
         (for/fold ([acc : (Listof unit-mode-directive) '()] #:result (reverse acc))

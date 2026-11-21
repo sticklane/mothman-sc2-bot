@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Unit & integration tests for the Mothman SC2 Loop Trajectory Flywheel:
+Unit & integration tests for the Mothman SC2 Loop Trajectory Flywheel & Pro Comparator:
   - tools/iteration-loop/log-loop-trajectory.py
   - tools/iteration-loop/analyze-loop-flywheel.py
+  - tools/iteration-loop/compare-vs-pro.py (read-only SQLite Stall Watchdog & Base Geometry KPIs)
   - tools/iteration-loop/loop_trajectory_log.jsonl (live backfill integrity)
 
 Runs completely offline in <1s with zero GPU, zero Podman, and zero writes to
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 import sqlite3
 import subprocess
 import sys
@@ -24,6 +26,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 LOGGER_PATH = REPO_ROOT / "tools/iteration-loop/log-loop-trajectory.py"
 ANALYZER_PATH = REPO_ROOT / "tools/iteration-loop/analyze-loop-flywheel.py"
+COMPARE_PATH = REPO_ROOT / "tools/iteration-loop/compare-vs-pro.py"
 LIVE_JSONL = REPO_ROOT / "tools/iteration-loop/loop_trajectory_log.jsonl"
 
 
@@ -38,6 +41,7 @@ def _load_mod(name: str, path: Path):
 
 LOG_MOD = _load_mod("log_loop_trajectory_testmod", LOGGER_PATH)
 ANA_MOD = _load_mod("analyze_loop_flywheel_testmod", ANALYZER_PATH)
+CMP_MOD = _load_mod("compare_vs_pro_testmod", COMPARE_PATH)
 
 
 def _write_jsonl(path: Path, objs):
@@ -441,6 +445,381 @@ class TestLoopFlywheel(unittest.TestCase):
             for a in (r.get("agent_trajectories") or {}).values():
                 for ef in a.get("edited_files") or []:
                     self.assertFalse(ef.startswith("/home/"), f"Home path leaked in edited_files: {ef}")
+
+
+def _init_synthetic_arena_sqlite(db_path: Path):
+    """Create a synthetic SQLite DB matching arena_replays.sqlite schema for unit tests."""
+    con = sqlite3.connect(db_path)
+    con.executescript(
+        """
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY,
+            tag TEXT,
+            score_json_path TEXT,
+            total_replays INTEGER DEFAULT 0,
+            ingested_at TEXT
+        );
+        CREATE TABLE matches (
+            replay_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            replay_filename TEXT,
+            replay_mtime REAL,
+            our_race TEXT,
+            actual_race TEXT,
+            opp_race TEXT,
+            matchup TEXT,
+            our_player_id INTEGER DEFAULT 1,
+            our_start_x REAL,
+            our_start_y REAL,
+            result TEXT,
+            duration_sec REAL,
+            is_clean INTEGER DEFAULT 1,
+            is_selfplay INTEGER DEFAULT 0
+        );
+        CREATE TABLE match_minute_stats (
+            replay_id TEXT NOT NULL,
+            player_id INTEGER NOT NULL,
+            minute INTEGER NOT NULL,
+            minerals_current REAL,
+            vespene_current REAL,
+            minerals_rate REAL,
+            vespene_rate REAL,
+            workers_active REAL,
+            food_used REAL,
+            food_made REAL
+        );
+        CREATE TABLE match_build_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            replay_id TEXT NOT NULL,
+            player_id INTEGER NOT NULL,
+            sec REAL,
+            event_type TEXT,
+            unit_type TEXT,
+            x REAL,
+            y REAL
+        );
+        """
+    )
+    return con
+
+
+class CompareVsProSqliteKpiTests(unittest.TestCase):
+    def test_stall_watchdog_kpis_exact_math_and_edge_cases(self):
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "arena.sqlite"
+            con = _init_synthetic_arena_sqlite(db_path)
+            con.execute(
+                "INSERT INTO runs VALUES ('run_sw', 'sw', '/tmp/sw_score.json', 4, '2026-11-21T20:00:00Z')"
+            )
+            con.executemany(
+                "INSERT INTO matches VALUES (?, 'run_sw', ?, 1000.0, ?, ?, ?, ?, 1, 30.0, 30.0, 'win', ?, 1, 0)",
+                [
+                    ("r1", "001_P.SC2Replay", "Protoss", "Protoss", "Protoss", "PvP", 600.0),
+                    ("r2", "002_T.SC2Replay", "Terran", "Terran", "Zerg", "TvZ", 600.0),
+                    ("r3", "003_Z.SC2Replay", "Zerg", "Zerg", "Zerg", "ZvZ", 360.0),
+                    ("r4", "004_P.SC2Replay", "Protoss", "Protoss", "Terran", "PvT", 540.0),
+                ],
+            )
+            # Minute stats: (replay_id, player_id, minute, min_cur, gas_cur, min_rate, gas_rate, wk, fu, fm)
+            con.executemany(
+                "INSERT INTO match_minute_stats VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    # r1 (Protoss, 8m): supply capped at min 3 (<195), worker plateau @8m (32 <= 36)
+                    ("r1", 3, 200, 50, 900, 150, 22, 46, 46),
+                    ("r1", 5, 300, 100, 1100, 200, 28, 60, 70),
+                    ("r1", 8, 350, 150, 1200, 250, 32, 95, 110),
+                    # r2 (Terran, 8m): maxed 200/200 NOT a supply cap; zero_income at m4; zero_gas at m6; 55 wk @8m
+                    ("r2", 4, 250, 100, 0, 180, 12, 50, 62),
+                    ("r2", 6, 300, 120, 1300, 0, 20, 90, 108),
+                    ("r2", 8, 400, 200, 1600, 300, 55, 200, 200),
+                    # r3 (Zerg, 6m only -> excluded from 8m plateau denom!):
+                    #   - m5 has 22 wk (<=24 @5m), intentional Law-2 gas valve (gas_cur=520 >= 450, gas_rate=0) -> NOT zero_gas!
+                    #   - m6 has 3 wk (<5) with 0 min_rate -> NOT zero_income!
+                    #   - gas_rich_min_starved at m5 (520g >= 450, 100m < 200, 120 food < 175)
+                    ("r3", 5, 100, 520, 900, 0, 22, 120, 140),
+                    ("r3", 6, 150, 500, 0, 100, 3, 40, 80),
+                    # r4 (Protoss, 8m): completely healthy
+                    ("r4", 2, 150, 50, 800, 100, 20, 24, 31),
+                    ("r4", 5, 250, 150, 1400, 250, 42, 75, 92),
+                    ("r4", 8, 300, 200, 1800, 350, 58, 140, 160),
+                ],
+            )
+            con.commit()
+            con.close()
+
+            ro = CMP_MOD.open_replay_db_ro(db_path)
+            self.assertIsNotNone(ro)
+            try:
+                res = CMP_MOD.compute_stall_watchdog_kpis(ro, ["r1", "r2", "r3", "r4"])
+            finally:
+                ro.close()
+
+            self.assertIsNotNone(res)
+            self.assertEqual(res["n"], 4)
+            self.assertEqual(res["sup_cap_matches"], 1)
+            self.assertEqual(res["sup_cap_min_pct"], 25.0)
+            self.assertEqual(res["zero_income_matches"], 1)
+            self.assertEqual(res["zero_income_pct"], 25.0)
+            self.assertEqual(res["zero_gas_matches"], 1)
+            self.assertEqual(res["zero_gas_pct"], 25.0)
+            self.assertEqual(res["wk_plateau_8m_denom"], 3)
+            self.assertEqual(res["wk_plateau_8m_matches"], 1)
+            self.assertEqual(res["wk_plateau_8m_pct"], 33.3)
+            self.assertEqual(res["wk_plateau_5m_matches"], 1)
+            self.assertEqual(res["gas_rich_min_starved_matches"], 1)
+            self.assertEqual(set(res["by_race"].keys()), {"Protoss", "Terran", "Zerg"})
+            self.assertEqual(res["by_race"]["Protoss"]["sup_cap_min_pct"], 50.0)
+            self.assertEqual(res["by_race"]["Terran"]["zero_income_matches"], 1)
+            self.assertEqual(res["by_race"]["Terran"]["zero_gas_matches"], 1)
+
+    def test_base_geometry_kpis_exact_math_and_rotation_invariance(self):
+        # Verify rotation/reflection invariance of normalize_base_coords + compute_single_base_geometry
+        base_bldgs = [
+            ("Nexus", 0.0, 0.0, 0.0),
+            ("Nexus", 30.0, 0.0, 95.0),
+            ("Pylon", 10.0, 4.0, 20.0),
+            ("Gateway", 12.0, 4.0, 40.0),
+            ("CyberneticsCore", 15.0, 4.0, 80.0),
+            ("Pylon", 32.0, 3.0, 140.0),
+        ]
+        n1_dist, n1_b = CMP_MOD.normalize_base_coords(base_bldgs)
+        m1 = CMP_MOD.compute_single_base_geometry("Protoss", n1_dist, n1_b)
+
+        # Rotate by 135 degrees and translate to (140, 120)
+        ang = math.radians(135.0)
+        ca, sa = math.cos(ang), math.sin(ang)
+        rot_bldgs = [
+            (ut, 140.0 + x * ca - y * sa, 120.0 + x * sa + y * ca, sec)
+            for ut, x, y, sec in base_bldgs
+        ]
+        n2_dist, n2_b = CMP_MOD.normalize_base_coords(rot_bldgs)
+        m2 = CMP_MOD.compute_single_base_geometry("Protoss", n2_dist, n2_b)
+        self.assertAlmostEqual(n1_dist, n2_dist, places=5)
+        self.assertAlmostEqual(m1["sup_nn_avg"], m2["sup_nn_avg"], places=5)
+        self.assertEqual(m1["sup_clump_pct"], m2["sup_clump_pct"])
+        self.assertEqual(m1["has_nat_supply"], m2["has_nat_supply"])
+        self.assertEqual(m1["main_wall_tight"], m2["main_wall_tight"])
+
+        # Synthetic 4-match SQLite DB covering Protoss (clumped + spread), Terran (2 early bunkers), ZvZ (nat wall)
+        with tempfile.TemporaryDirectory() as td:
+            db_path = Path(td) / "arena_geo.sqlite"
+            con = _init_synthetic_arena_sqlite(db_path)
+            con.execute(
+                "INSERT INTO runs VALUES ('run_geo', 'geo', '/tmp/geo_score.json', 4, '2026-11-21T20:00:00Z')"
+            )
+            con.executemany(
+                "INSERT INTO matches VALUES (?, 'run_geo', ?, 1000.0, ?, ?, ?, ?, 1, 20.0, 20.0, 'win', 400.0, 1, 0)",
+                [
+                    ("g1", "001_PvP.SC2Replay", "Protoss", "Protoss", "Protoss", "PvP"),
+                    ("g2", "002_PvZ.SC2Replay", "Protoss", "Protoss", "Zerg", "PvZ"),
+                    ("g3", "003_TvZ.SC2Replay", "Terran", "Terran", "Zerg", "TvZ"),
+                    ("g4", "004_ZvZ.SC2Replay", "Zerg", "Zerg", "Zerg", "ZvZ"),
+                ],
+            )
+            # All 4 have Main at (20,20) and Natural at (50,20) -> nat_dist = 30.0
+            bevs = [
+                # g1 (PvP): 2 clumped Pylons (3t apart) in Main, NO Nat Pylon
+                ("g1", 1, 95.0, "init", "Nexus", 50.0, 20.0),
+                ("g1", 1, 20.0, "init", "Pylon", 26.0, 22.0),
+                ("g1", 1, 70.0, "init", "Pylon", 29.0, 22.0),
+                ("g1", 1, 40.0, "init", "Gateway", 32.0, 22.0),
+                ("g1", 1, 80.0, "init", "CyberneticsCore", 35.0, 22.0),
+                # g2 (PvZ): 2 spread Pylons (24t apart), 2nd Pylon at Natural (dist=2t from Nat)
+                ("g2", 1, 90.0, "init", "Nexus", 50.0, 20.0),
+                ("g2", 1, 20.0, "init", "Pylon", 28.0, 22.0),
+                ("g2", 1, 130.0, "init", "Pylon", 52.0, 22.0),
+                ("g2", 1, 45.0, "init", "Gateway", 55.0, 22.0),
+                ("g2", 1, 85.0, "init", "CyberneticsCore", 55.0, 25.0),
+                # g3 (TvZ): Depot at Nat + 2 Bunkers <=250s + 1 late Bunker at 260s (must be excluded!)
+                ("g3", 1, 100.0, "init", "CommandCenter", 50.0, 20.0),
+                ("g3", 1, 20.0, "init", "SupplyDepot", 32.0, 21.0),
+                ("g3", 1, 42.0, "init", "Barracks", 35.0, 21.0),
+                ("g3", 1, 140.0, "init", "SupplyDepot", 54.0, 21.0),
+                ("g3", 1, 180.0, "init", "Bunker", 56.0, 20.0),
+                ("g3", 1, 210.0, "init", "Bunker", 56.0, 24.0),
+                ("g3", 1, 260.0, "init", "Bunker", 56.0, 28.0),
+                # g4 (ZvZ): Tight Natural wall (Evo + RoachWarren 3.0t apart within 16t of Nat) + Pool in Main
+                ("g4", 1, 55.0, "init", "Hatchery", 50.0, 20.0),
+                ("g4", 1, 70.0, "init", "SpawningPool", 17.0, 20.0),
+                ("g4", 1, 170.0, "init", "EvolutionChamber", 56.0, 20.0),
+                ("g4", 1, 185.0, "init", "RoachWarren", 56.0, 23.0),
+            ]
+            con.executemany(
+                "INSERT INTO match_build_events (replay_id, player_id, sec, event_type, unit_type, x, y) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                bevs,
+            )
+            con.commit()
+            con.close()
+
+            ro = CMP_MOD.open_replay_db_ro(db_path)
+            self.assertIsNotNone(ro)
+            try:
+                geo = CMP_MOD.compute_base_geometry_kpis(ro, ["g1", "g2", "g3", "g4"])
+            finally:
+                ro.close()
+
+            self.assertIsNotNone(geo)
+            self.assertEqual(geo["n"], 4)
+            self.assertEqual(geo["pylon_clump_pct"], 50.0)
+            self.assertEqual(geo["pylon_clump_n"], 2)
+            self.assertEqual(geo["nat_supply_pct"], 66.7)
+            self.assertEqual(geo["protoss_nat_supply_pct"], 50.0)
+            self.assertEqual(geo["terran_nat_supply_pct"], 100.0)
+            self.assertEqual(geo["zvz_nat_wall_pct"], 100.0)
+            self.assertEqual(geo["zvz_n"], 1)
+            self.assertEqual(geo["early_bunkers_4m"], 2.0)
+            self.assertEqual(geo["terran_nat_def"], 2.0)
+            self.assertEqual(set(geo["by_matchup"].keys()), {"PvP", "PvZ", "TvZ", "ZvZ"})
+
+    def test_compare_vs_pro_cli_end_to_end_with_and_without_sqlite(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            db_path = root / "arena.sqlite"
+            cur_score = root / "cur_score.json"
+            base_score = root / "base_score.json"
+            out_json = root / "compare_out.json"
+
+            def _mk_score_file(p: Path, prefix: str):
+                matches = [
+                    {
+                        "id": "1", "file": f"{prefix}_001_PvP.SC2Replay",
+                        "our_bot": "Mothman-P", "opp_bot": "puck",
+                        "our_race": "Protoss", "opp_race": "Protoss", "matchup": "PvP",
+                        "result": "win", "duration_sec": 500.0,
+                        "killed_val": 6000, "lost_val": 2000, "trade_ratio": 3.0,
+                        "supply_block_pct": 2.0,
+                    },
+                    {
+                        "id": "2", "file": f"{prefix}_002_TvZ.SC2Replay",
+                        "our_bot": "Mothman-T", "opp_bot": "SmoothBrain",
+                        "our_race": "Terran", "opp_race": "Zerg", "matchup": "TvZ",
+                        "result": "win", "duration_sec": 500.0,
+                        "killed_val": 5000, "lost_val": 2500, "trade_ratio": 2.0,
+                        "supply_block_pct": 1.5,
+                    },
+                    {
+                        "id": "3", "file": f"{prefix}_003_ZvZ.SC2Replay",
+                        "our_bot": "Mothman-Z", "opp_bot": "12PoolBot",
+                        "our_race": "Zerg", "opp_race": "Zerg", "matchup": "ZvZ",
+                        "result": "win", "duration_sec": 500.0,
+                        "killed_val": 4000, "lost_val": 2000, "trade_ratio": 2.0,
+                        "supply_block_pct": 3.0,
+                    },
+                ]
+                p.write_text(json.dumps({"matches": matches}), encoding="utf-8")
+
+            _mk_score_file(base_score, "base")
+            _mk_score_file(cur_score, "cur")
+
+            con = _init_synthetic_arena_sqlite(db_path)
+            con.executemany(
+                "INSERT INTO runs VALUES (?, ?, ?, 3, ?)",
+                [
+                    ("run_base", "base", str(base_score), "2026-11-21T19:00:00Z"),
+                    ("run_cur", "cur", str(cur_score), "2026-11-21T20:00:00Z"),
+                ],
+            )
+            con.executemany(
+                "INSERT INTO matches VALUES (?, ?, ?, 1000.0, ?, ?, ?, ?, 1, 20.0, 20.0, 'win', 500.0, 1, 0)",
+                [
+                    ("b1", "run_base", "base_001_PvP.SC2Replay", "Protoss", "Protoss", "Protoss", "PvP"),
+                    ("b2", "run_base", "base_002_TvZ.SC2Replay", "Terran", "Terran", "Zerg", "TvZ"),
+                    ("b3", "run_base", "base_003_ZvZ.SC2Replay", "Zerg", "Zerg", "Zerg", "ZvZ"),
+                    ("c1", "run_cur", "cur_001_PvP.SC2Replay", "Protoss", "Protoss", "Protoss", "PvP"),
+                    ("c2", "run_cur", "cur_002_TvZ.SC2Replay", "Terran", "Terran", "Zerg", "TvZ"),
+                    ("c3", "run_cur", "cur_003_ZvZ.SC2Replay", "Zerg", "Zerg", "Zerg", "ZvZ"),
+                ],
+            )
+            # Baseline has stalls (sup_cap + zero_income + zero_gas + wk_plateau); Current fixes all 4!
+            con.executemany(
+                "INSERT INTO match_minute_stats VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    ("b1", 3, 200, 50, 900, 150, 22, 46, 46),
+                    ("b1", 8, 300, 100, 1100, 200, 30, 80, 96),
+                    ("b2", 4, 200, 80, 0, 100, 18, 55, 70),
+                    ("b2", 6, 300, 100, 1100, 0, 24, 75, 92),
+                    ("b2", 8, 300, 100, 1200, 200, 48, 120, 140),
+                    ("b3", 8, 300, 100, 1400, 250, 52, 130, 150),
+                    ("c1", 3, 200, 50, 900, 150, 24, 42, 54),
+                    ("c1", 8, 300, 100, 1600, 300, 55, 130, 150),
+                    ("c2", 4, 200, 80, 1000, 180, 28, 58, 70),
+                    ("c2", 6, 300, 100, 1400, 250, 44, 95, 112),
+                    ("c2", 8, 300, 100, 1700, 300, 58, 140, 160),
+                    ("c3", 8, 300, 100, 1800, 350, 62, 150, 172),
+                ],
+            )
+            # Baseline geometry: PvP clumped Pylons (no Nat Pylon), TvZ 2 Bunkers (no Nat Depot), ZvZ no Nat wall
+            # Current geometry:  PvP spread Pylons + Nat Pylon, TvZ 1 Bunker + Nat Depot, ZvZ tight Nat wall!
+            con.executemany(
+                "INSERT INTO match_build_events (replay_id, player_id, sec, event_type, unit_type, x, y) "
+                "VALUES (?, 1, ?, 'init', ?, ?, ?)",
+                [
+                    ("b1", 95.0, "Nexus", 50.0, 20.0), ("b1", 20.0, "Pylon", 26.0, 22.0), ("b1", 60.0, "Pylon", 29.0, 22.0), ("b1", 40.0, "Gateway", 32.0, 22.0), ("b1", 80.0, "CyberneticsCore", 35.0, 22.0),
+                    ("b2", 100.0, "CommandCenter", 50.0, 20.0), ("b2", 20.0, "SupplyDepot", 30.0, 22.0), ("b2", 42.0, "Barracks", 33.0, 22.0), ("b2", 160.0, "Bunker", 55.0, 20.0), ("b2", 190.0, "Bunker", 55.0, 24.0),
+                    ("b3", 55.0, "Hatchery", 50.0, 20.0), ("b3", 70.0, "SpawningPool", 17.0, 20.0), ("b3", 150.0, "RoachWarren", 17.0, 24.0), ("b3", 180.0, "EvolutionChamber", 17.0, 28.0),
+                    ("c1", 95.0, "Nexus", 50.0, 20.0), ("c1", 20.0, "Pylon", 26.0, 22.0), ("c1", 120.0, "Pylon", 52.0, 22.0), ("c1", 40.0, "Gateway", 32.0, 22.0), ("c1", 80.0, "CyberneticsCore", 35.0, 22.0),
+                    ("c2", 100.0, "CommandCenter", 50.0, 20.0), ("c2", 20.0, "SupplyDepot", 30.0, 22.0), ("c2", 42.0, "Barracks", 33.0, 22.0), ("c2", 140.0, "SupplyDepot", 54.0, 21.0), ("c2", 170.0, "Bunker", 55.0, 24.0),
+                    ("c3", 55.0, "Hatchery", 50.0, 20.0), ("c3", 70.0, "SpawningPool", 17.0, 20.0), ("c3", 165.0, "EvolutionChamber", 56.0, 20.0), ("c3", 180.0, "RoachWarren", 56.0, 23.0),
+                ],
+            )
+            con.commit()
+            con.close()
+
+            # 1. Full CLI run with read-only SQLite
+            p1 = subprocess.run(
+                [
+                    sys.executable, str(COMPARE_PATH),
+                    "--current", str(cur_score),
+                    "--baseline", str(base_score),
+                    "--replay-db", str(db_path),
+                    "--out-json", str(out_json),
+                ],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(p1.returncode, 0, f"compare-vs-pro failed: {p1.stderr}\n{p1.stdout}")
+            self.assertIn("### Stall Watchdog KPIs", p1.stdout)
+            self.assertIn("### Pro-vs-Mothman Base Geometry KPIs", p1.stdout)
+
+            rep = json.loads(out_json.read_text(encoding="utf-8"))
+            self.assertEqual(rep["sqlite_replay_db"]["current_run_id"], "run_cur")
+            self.assertEqual(rep["sqlite_replay_db"]["baseline_run_id"], "run_base")
+            sw = rep["stall_watchdog_kpis"]
+            self.assertEqual(sw["current"]["sup_cap_min_pct"], 0.0)
+            self.assertEqual(sw["current"]["zero_income_matches"], 0)
+            self.assertEqual(sw["current"]["zero_gas_matches"], 0)
+            self.assertEqual(sw["current"]["wk_plateau_8m_pct"], 0.0)
+            self.assertEqual(sw["delta"]["sup_cap_min_pct"], -33.3)
+            self.assertEqual(sw["delta"]["zero_income_matches"], -1)
+            self.assertEqual(sw["delta"]["zero_gas_matches"], -1)
+            self.assertEqual(sw["delta"]["wk_plateau_8m_pct"], -33.3)
+
+            bg = rep["base_geometry_kpis"]
+            self.assertEqual(bg["current"]["pylon_clump_pct"], 0.0)
+            self.assertEqual(bg["baseline"]["pylon_clump_pct"], 100.0)
+            self.assertEqual(bg["delta"]["pylon_clump_pct"], -100.0)
+            self.assertEqual(bg["delta"]["nat_supply_pct"], 100.0)
+            self.assertEqual(bg["delta"]["zvz_nat_wall_pct"], 100.0)
+            self.assertEqual(bg["delta"]["early_bunkers_4m"], -1.0)
+            self.assertEqual(bg["pro_reference"]["zvz_nat_wall_pct"], 48.0)
+
+            # 2. Graceful fallback with --replay-db "" (disabled)
+            out_nodb = root / "compare_nodb.json"
+            p2 = subprocess.run(
+                [
+                    sys.executable, str(COMPARE_PATH),
+                    "--current", str(cur_score),
+                    "--replay-db", "",
+                    "--out-json", str(out_nodb),
+                ],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(p2.returncode, 0, f"compare-vs-pro (no db) failed: {p2.stderr}")
+            self.assertNotIn("### Stall Watchdog KPIs", p2.stdout)
+            rep2 = json.loads(out_nodb.read_text(encoding="utf-8"))
+            self.assertIsNone(rep2["sqlite_replay_db"])
+            self.assertIsNone(rep2["stall_watchdog_kpis"])
+            self.assertIsNone(rep2["base_geometry_kpis"])
 
 
 if __name__ == "__main__":

@@ -12,6 +12,8 @@ Usage:
       --current scratch/iter1_wave1_score.json \\
       --baseline scratch/baseline_32ab101a_score.json \\
       [--tactics scratch/loop/tactics_wave1.json] \\
+      [--replay-db ~/sc2-local-arena/arena_replays.sqlite] \\
+      [--run-id RUN_ID] [--baseline-run-id BASE_RUN_ID] \\
       [--out-json scratch/loop/pro_comparison_iter1_wave1.json] \\
       [--exclude-opp-crash]
 """
@@ -20,12 +22,15 @@ import argparse
 import json
 import math
 import os
+import sqlite3
 import statistics
 import sys
 from collections import Counter, defaultdict
+from pathlib import Path
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_PRO_BASELINES = os.path.join(SCRIPT_DIR, "pro_baselines.json")
+DEFAULT_REPLAY_DB = str(Path.home() / "sc2-local-arena" / "arena_replays.sqlite")
 
 RACES = ("Protoss", "Terran", "Zerg")
 MATCHUPS = ("PvP", "PvT", "PvZ", "TvP", "TvT", "TvZ", "ZvP", "ZvT", "ZvZ")
@@ -634,6 +639,636 @@ def compute_paired_diff(cur_rows, base_rows):
     return pairs
 
 
+# ---------------------------------------------------------------------------
+# Read-only SQLite KPIs: Stall Watchdog (4-Law Audit) & Pro-vs-Mothman Base Geometry (4:10)
+# ---------------------------------------------------------------------------
+
+BASE_TOWN_HALLS = frozenset({
+    "Nexus", "CommandCenter", "OrbitalCommand", "PlanetaryFortress",
+    "Hatchery", "Lair", "Hive",
+})
+BASE_GASES = frozenset({
+    "Assimilator", "Refinery", "Extractor",
+    "AssimilatorRich", "RefineryRich", "ExtractorRich",
+})
+BASE_SUPPLY = frozenset({"Pylon", "SupplyDepot", "SupplyDepotLowered"})
+BASE_STATIC_DEF = frozenset({
+    "PhotonCannon", "ShieldBattery", "Bunker",
+    "MissileTurret", "SpineCrawler", "SporeCrawler",
+})
+BASE_PROD = frozenset({
+    "Gateway", "WarpGate", "RoboticsFacility", "Stargate",
+    "Barracks", "Factory", "Starport",
+})
+BASE_TECH = frozenset({
+    "CyberneticsCore", "TwilightCouncil", "Forge", "RoboticsBay",
+    "TemplarArchive", "DarkShrine", "FleetBeacon",
+    "EngineeringBay", "Armory", "GhostAcademy", "FusionCore",
+    "SpawningPool", "RoachWarren", "BanelingNest", "EvolutionChamber",
+    "HydraliskDen", "Spire", "InfestationPit", "LurkerDenMP",
+})
+BASE_ADDONS = frozenset({
+    "TechLab", "Reactor",
+    "BarracksTechLab", "BarracksReactor",
+    "FactoryTechLab", "FactoryReactor",
+    "StarportTechLab", "StarportReactor",
+})
+BASE_ALL_BLDGS = (
+    BASE_TOWN_HALLS | BASE_GASES | BASE_SUPPLY | BASE_STATIC_DEF
+    | BASE_PROD | BASE_TECH | BASE_ADDONS
+)
+TH_FOR_RACE = {"Protoss": "Nexus", "Terran": "CommandCenter", "Zerg": "Hatchery"}
+
+# 519-match Stall Watchdog audit reference (Loops 42-48 + Live Ships #5/#6)
+STALL_WATCHDOG_AUDIT_REF = {
+    "n": 519,
+    "sup_cap_min_pct": 32.4,
+    "zero_income_pct": 9.4,
+    "zero_gas_pct": 12.1,
+    "wk_plateau_8m_pct": 23.7,
+    "gas_rich_min_starved_pct": 13.9,
+}
+
+# Canonical Grandmaster Pro 4:10 base geometry reference (182 pro_corpus ladder games:
+# herO, Stats, Maru, HeroMarine, Serral; Main TH=(0,0), Natural along +X).
+PRO_BASE_GEOMETRY_BY_MATCHUP = {
+    "PvP": {"n": 22, "sup_nn": 14.53, "sup_clump_pct": 7.9, "main_wall_pct": 81.8, "nat_wall_pct": 31.8, "nat_sup_pct": 72.7, "nat_def": 0.45, "tech_exposed": 0.0},
+    "PvT": {"n": 25, "sup_nn": 16.26, "sup_clump_pct": 2.0, "main_wall_pct": 44.0, "nat_wall_pct": 36.0, "nat_sup_pct": 92.0, "nat_def": 0.24, "tech_exposed": 0.4},
+    "PvZ": {"n": 25, "sup_nn": 19.51, "sup_clump_pct": 12.7, "main_wall_pct": 48.0, "nat_wall_pct": 100.0, "nat_sup_pct": 100.0, "nat_def": 0.0, "tech_exposed": 1.28},
+    "TvP": {"n": 25, "sup_nn": 7.75, "sup_clump_pct": 69.6, "main_wall_pct": 88.0, "nat_wall_pct": 40.0, "nat_sup_pct": 60.0, "nat_def": 0.28, "tech_exposed": 0.04},
+    "TvT": {"n": 3, "sup_nn": 7.39, "sup_clump_pct": 66.7, "main_wall_pct": 100.0, "nat_wall_pct": 66.7, "nat_sup_pct": 100.0, "nat_def": 0.0, "tech_exposed": 0.0},
+    "TvZ": {"n": 25, "sup_nn": 6.53, "sup_clump_pct": 72.1, "main_wall_pct": 76.0, "nat_wall_pct": 68.0, "nat_sup_pct": 76.0, "nat_def": 0.24, "tech_exposed": 0.16},
+    "ZvP": {"n": 25, "sup_nn": None, "sup_clump_pct": 0.0, "main_wall_pct": 0.0, "nat_wall_pct": 24.0, "nat_sup_pct": 0.0, "nat_def": 0.6, "tech_exposed": 0.76},
+    "ZvT": {"n": 7, "sup_nn": None, "sup_clump_pct": 0.0, "main_wall_pct": 0.0, "nat_wall_pct": 28.6, "nat_sup_pct": 0.0, "nat_def": 0.57, "tech_exposed": 0.71},
+    "ZvZ": {"n": 25, "sup_nn": None, "sup_clump_pct": 0.0, "main_wall_pct": 0.0, "nat_wall_pct": 48.0, "nat_sup_pct": 0.0, "nat_def": 0.04, "tech_exposed": 2.12},
+}
+
+
+def _build_pro_base_geometry_ref():
+    def _wavg(mus, key, prec=1):
+        tot_w = 0
+        tot_v = 0.0
+        for mu in mus:
+            d = PRO_BASE_GEOMETRY_BY_MATCHUP[mu]
+            v = d.get(key)
+            if v is not None and d["n"] > 0:
+                tot_w += d["n"]
+                tot_v += d["n"] * float(v)
+        return round(tot_v / tot_w, prec) if tot_w else None
+
+    p_mus = ("PvP", "PvT", "PvZ")
+    t_mus = ("TvP", "TvT", "TvZ")
+    pt_mus = p_mus + t_mus
+    return {
+        "n": sum(d["n"] for d in PRO_BASE_GEOMETRY_BY_MATCHUP.values()),
+        "pylon_clump_pct": _wavg(p_mus, "sup_clump_pct", 1),
+        "pylon_spacing_nn": _wavg(p_mus, "sup_nn", 1),
+        "nat_supply_pct": _wavg(pt_mus, "nat_sup_pct", 1),
+        "protoss_nat_supply_pct": _wavg(p_mus, "nat_sup_pct", 1),
+        "terran_nat_supply_pct": _wavg(t_mus, "nat_sup_pct", 1),
+        "zvz_nat_wall_pct": PRO_BASE_GEOMETRY_BY_MATCHUP["ZvZ"]["nat_wall_pct"],
+        "early_bunkers_4m": _wavg(t_mus, "nat_def", 2),
+        "terran_nat_def": _wavg(t_mus, "nat_def", 2),
+        "pvz_tech_exposed": PRO_BASE_GEOMETRY_BY_MATCHUP["PvZ"]["tech_exposed"],
+        "by_matchup": PRO_BASE_GEOMETRY_BY_MATCHUP,
+    }
+
+
+PRO_BASE_GEOMETRY_REF = _build_pro_base_geometry_ref()
+
+
+def open_replay_db_ro(db_path):
+    """Open arena_replays.sqlite strictly read-only (?mode=ro). Returns None if unavailable."""
+    if not db_path:
+        return None
+    p = os.path.abspath(os.path.expanduser(str(db_path)))
+    if not os.path.isfile(p):
+        return None
+    try:
+        conn = sqlite3.connect(Path(p).as_uri() + "?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except sqlite3.Error:
+        return None
+
+
+def _chunked_in_query(conn, sql_template, ids, extra_params=(), chunk_size=400):
+    """Execute a query with `{ph}` placeholder safely across arbitrary ID list sizes."""
+    out = []
+    id_list = list(ids)
+    for i in range(0, len(id_list), chunk_size):
+        chunk = id_list[i:i + chunk_size]
+        ph = ",".join("?" for _ in chunk)
+        sql = sql_template.format(ph=ph)
+        out.extend(conn.execute(sql, tuple(chunk) + tuple(extra_params)).fetchall())
+    return out
+
+
+def resolve_sqlite_run_and_replay_ids(conn, score_path, rows, run_id=None):
+    """
+    Resolve the SQLite `run_id` and exact matched `replay_id`s corresponding to a
+    `score-replay-batch.rkt` JSON and its already-filtered `rows` (self-play / opp-crash excluded).
+    Returns `(resolved_run_id, replay_ids)`.
+    """
+    if conn is None:
+        return None, []
+    fnames = {os.path.basename(m["file"]) for m in (rows or []) if m.get("file")}
+    resolved_run_id = run_id
+
+    try:
+        if not resolved_run_id and score_path:
+            abs_sp = os.path.abspath(score_path)
+            r = conn.execute(
+                "SELECT run_id FROM runs WHERE score_json_path = ? OR score_json_path = ? "
+                "ORDER BY ingested_at DESC LIMIT 1",
+                (abs_sp, score_path),
+            ).fetchone()
+            if r:
+                resolved_run_id = r["run_id"]
+            else:
+                base_sp = os.path.basename(score_path)
+                for cand in conn.execute(
+                    "SELECT run_id, score_json_path FROM runs "
+                    "WHERE score_json_path IS NOT NULL ORDER BY ingested_at DESC"
+                ).fetchall():
+                    if os.path.basename(cand["score_json_path"]) == base_sp:
+                        resolved_run_id = cand["run_id"]
+                        break
+
+        if not resolved_run_id and fnames:
+            counts = Counter()
+            latest_mt = defaultdict(float)
+            fn_list = sorted(fnames)
+            for i in range(0, len(fn_list), 400):
+                chunk = fn_list[i:i + 400]
+                ph = ",".join("?" for _ in chunk)
+                for r in conn.execute(
+                    f"SELECT run_id, replay_filename, COALESCE(replay_mtime, 0) AS mt "
+                    f"FROM matches WHERE replay_filename IN ({ph})",
+                    chunk,
+                ).fetchall():
+                    counts[r["run_id"]] += 1
+                    if float(r["mt"] or 0.0) > latest_mt[r["run_id"]]:
+                        latest_mt[r["run_id"]] = float(r["mt"] or 0.0)
+            if counts:
+                best_rid, best_hits = max(
+                    counts.items(),
+                    key=lambda kv: (kv[1], latest_mt[kv[0]], kv[0]),
+                )
+                if best_hits >= max(1, (len(fnames) + 1) // 2):
+                    resolved_run_id = best_rid
+
+        if not resolved_run_id:
+            return None, []
+
+        mrows = conn.execute(
+            "SELECT replay_id, replay_filename, COALESCE(is_selfplay, 0) AS is_selfplay "
+            "FROM matches WHERE run_id = ?",
+            (resolved_run_id,),
+        ).fetchall()
+        if not mrows:
+            return resolved_run_id, []
+
+        if fnames:
+            matched = [r["replay_id"] for r in mrows if r["replay_filename"] in fnames]
+            if matched:
+                return resolved_run_id, matched
+
+        ext = [r["replay_id"] for r in mrows if not r["is_selfplay"]]
+        selected = ext if ext else [r["replay_id"] for r in mrows]
+        return resolved_run_id, selected
+    except sqlite3.Error:
+        return None, []
+
+
+def _summarize_stall_watchdog_matches(rep_entries):
+    """Aggregate Stall Watchdog KPIs across a list of `(race, snaps)` entries."""
+    n = len(rep_entries)
+    if n == 0:
+        return None
+    sup_cap_matches = 0
+    sup_cap_snaps = 0
+    sup_cap_snaps_denom = 0
+    zero_income_matches = 0
+    zero_gas_matches = 0
+    zero_gas_5m_denom = 0
+    wk_plateau_8m_matches = 0
+    wk_plateau_8m_denom = 0
+    wk_plateau_5m_matches = 0
+    wk_plateau_5m_denom = 0
+    wk_plateau_5m_or_8m_matches = 0
+    gas_rich_min_starved_matches = 0
+
+    for _race, snaps in rep_entries:
+        has_sup_cap = False
+        has_zero_inc = False
+        has_zero_gas = False
+        has_5m_plus = False
+        has_5m = False
+        plat_5m = False
+        has_8m = False
+        plat_8m = False
+        has_grms = False
+        for s in snaps:
+            mn = int(s["minute"] or 0)
+            fm = float(s["food_made"] or 0.0)
+            fu = float(s["food_used"] or 0.0)
+            wa = float(s["workers_active"] or 0.0)
+            mr = float(s["minerals_rate"] or 0.0)
+            vr = float(s["vespene_rate"] or 0.0)
+            mc = float(s["minerals_current"] or 0.0)
+            vc = float(s["vespene_current"] or 0.0)
+
+            if mn >= 1 and fm < 195.0:
+                sup_cap_snaps_denom += 1
+                if fu >= fm:
+                    has_sup_cap = True
+                    sup_cap_snaps += 1
+            if mn >= 2 and wa >= 5.0 and mr <= 0.0:
+                has_zero_inc = True
+            if mn >= 5:
+                has_5m_plus = True
+                # True zero-gas stall: >=16 active workers, 0 gas income, and not intentionally
+                # banked above the Law-2 gas valve cutoff (>=450 vespene).
+                if wa >= 16.0 and vr <= 0.0 and vc < 450.0:
+                    has_zero_gas = True
+            if mn == 5:
+                has_5m = True
+                if wa <= 24.0:
+                    plat_5m = True
+            if mn == 8:
+                has_8m = True
+                if wa <= 36.0:
+                    plat_8m = True
+            if vc >= 450.0 and mc < 200.0 and fu < 175.0:
+                has_grms = True
+
+        if has_sup_cap:
+            sup_cap_matches += 1
+        if has_zero_inc:
+            zero_income_matches += 1
+        if has_5m_plus:
+            zero_gas_5m_denom += 1
+            if has_zero_gas:
+                zero_gas_matches += 1
+        if has_5m:
+            wk_plateau_5m_denom += 1
+            if plat_5m:
+                wk_plateau_5m_matches += 1
+        if has_8m:
+            wk_plateau_8m_denom += 1
+            if plat_8m:
+                wk_plateau_8m_matches += 1
+        if plat_5m or plat_8m:
+            wk_plateau_5m_or_8m_matches += 1
+        if has_grms:
+            gas_rich_min_starved_matches += 1
+
+    return {
+        "n": n,
+        "sup_cap_min_pct": round(100.0 * sup_cap_matches / n, 1),
+        "sup_cap_matches": sup_cap_matches,
+        "sup_cap_snapshots_pct": (
+            round(100.0 * sup_cap_snaps / sup_cap_snaps_denom, 1)
+            if sup_cap_snaps_denom > 0
+            else None
+        ),
+        "zero_income_matches": zero_income_matches,
+        "zero_income_pct": round(100.0 * zero_income_matches / n, 1),
+        "zero_gas_matches": zero_gas_matches,
+        "zero_gas_pct": round(100.0 * zero_gas_matches / n, 1),
+        "zero_gas_5m_denom": zero_gas_5m_denom,
+        "zero_gas_5m_pct": (
+            round(100.0 * zero_gas_matches / zero_gas_5m_denom, 1)
+            if zero_gas_5m_denom > 0
+            else None
+        ),
+        "wk_plateau_8m_pct": (
+            round(100.0 * wk_plateau_8m_matches / wk_plateau_8m_denom, 1)
+            if wk_plateau_8m_denom > 0
+            else None
+        ),
+        "wk_plateau_8m_matches": wk_plateau_8m_matches,
+        "wk_plateau_8m_denom": wk_plateau_8m_denom,
+        "wk_plateau_5m_matches": wk_plateau_5m_matches,
+        "wk_plateau_5m_denom": wk_plateau_5m_denom,
+        "wk_plateau_5m_or_8m_pct": round(100.0 * wk_plateau_5m_or_8m_matches / n, 1),
+        "gas_rich_min_starved_matches": gas_rich_min_starved_matches,
+        "gas_rich_min_starved_pct": round(100.0 * gas_rich_min_starved_matches / n, 1),
+    }
+
+
+def compute_stall_watchdog_kpis(conn, replay_ids):
+    """Compute Stall Watchdog 4-Law KPIs from read-only `arena_replays.sqlite`."""
+    if conn is None or not replay_ids:
+        return None
+    try:
+        rows = _chunked_in_query(
+            conn,
+            "SELECT m.replay_id, m.actual_race, m.our_race, "
+            "       s.minute, s.minerals_current, s.vespene_current, "
+            "       s.minerals_rate, s.vespene_rate, s.workers_active, "
+            "       s.food_used, s.food_made "
+            "FROM matches m "
+            "JOIN match_minute_stats s "
+            "  ON s.replay_id = m.replay_id AND s.player_id = m.our_player_id "
+            "WHERE m.replay_id IN ({ph}) "
+            "ORDER BY m.replay_id, s.minute",
+            replay_ids,
+        )
+    except sqlite3.Error:
+        return None
+    if not rows:
+        return None
+
+    by_rep = defaultdict(list)
+    race_by_rep = {}
+    for r in rows:
+        rid = r["replay_id"]
+        by_rep[rid].append(r)
+        if rid not in race_by_rep:
+            ar = r["actual_race"] if r["actual_race"] in RACES else r["our_race"]
+            race_by_rep[rid] = ar if ar in RACES else "Unknown"
+
+    entries = [(race_by_rep[rid], snaps) for rid, snaps in by_rep.items()]
+    summary = _summarize_stall_watchdog_matches(entries)
+    if summary is None:
+        return None
+    summary["by_race"] = {}
+    for race in RACES:
+        sub = [e for e in entries if e[0] == race]
+        if sub:
+            summary["by_race"][race] = _summarize_stall_watchdog_matches(sub)
+    return summary
+
+
+def compute_stall_watchdog_delta(cur, base):
+    if not cur or not base:
+        return None
+    return {
+        "sup_cap_min_pct": diff_val(cur.get("sup_cap_min_pct"), base.get("sup_cap_min_pct"), 1),
+        "sup_cap_matches": diff_val(cur.get("sup_cap_matches"), base.get("sup_cap_matches"), 0),
+        "zero_income_matches": diff_val(cur.get("zero_income_matches"), base.get("zero_income_matches"), 0),
+        "zero_income_pct": diff_val(cur.get("zero_income_pct"), base.get("zero_income_pct"), 1),
+        "zero_gas_matches": diff_val(cur.get("zero_gas_matches"), base.get("zero_gas_matches"), 0),
+        "zero_gas_pct": diff_val(cur.get("zero_gas_pct"), base.get("zero_gas_pct"), 1),
+        "wk_plateau_8m_pct": diff_val(cur.get("wk_plateau_8m_pct"), base.get("wk_plateau_8m_pct"), 1),
+        "wk_plateau_8m_matches": diff_val(cur.get("wk_plateau_8m_matches"), base.get("wk_plateau_8m_matches"), 0),
+        "gas_rich_min_starved_matches": diff_val(
+            cur.get("gas_rich_min_starved_matches"),
+            base.get("gas_rich_min_starved_matches"),
+            0,
+        ),
+    }
+
+
+def normalize_base_coords(bldgs):
+    """
+    Given `[(unit_type, x, y, sec), ...]`, find Main TH (earliest TH) and Natural TH
+    (first subsequent TH at distance 18..55 tiles). Rotate coordinate frame so
+    Main=(0, 0) and Natural=(+nat_dist, 0), flipping Y deterministically so early
+    buildings (`0 < sec <= 120`) sit on +Y. Returns `(nat_dist, norm_bldgs)` or `None`.
+    """
+    ths = [b for b in bldgs if b[0] in BASE_TOWN_HALLS]
+    if not ths:
+        return None
+    ths.sort(key=lambda b: b[3])
+    mx, my = ths[0][1], ths[0][2]
+    nat = None
+    for b in ths[1:]:
+        d = math.hypot(b[1] - mx, b[2] - my)
+        if 18.0 <= d <= 55.0:
+            nat = b
+            break
+    if nat is None:
+        return None
+    dx, dy = nat[1] - mx, nat[2] - my
+    nat_dist = math.hypot(dx, dy)
+    if nat_dist <= 0.0:
+        return None
+    ux, uy = dx / nat_dist, dy / nat_dist
+    vx, vy = -uy, ux
+
+    out = []
+    for ut, x, y, sec in bldgs:
+        px, py = x - mx, y - my
+        rx = px * ux + py * uy
+        ry = px * vx + py * vy
+        out.append((ut, rx, ry, sec))
+    early_ref = [
+        b[2] for b in out
+        if b[0] in (BASE_SUPPLY | BASE_PROD | BASE_TECH) and 0.0 < b[3] <= 120.0
+    ]
+    if early_ref and sum(early_ref) < 0.0:
+        out = [(ut, rx, -ry, sec) for ut, rx, ry, sec in out]
+    return nat_dist, out
+
+
+def compute_single_base_geometry(race, nat_dist, norm_bldgs):
+    """Compute normalized 4:10 (<=250s) base geometry metrics for one match."""
+    b250 = [b for b in norm_bldgs if b[3] <= 250.0]
+    non_th_gas = [
+        b for b in b250
+        if b[0] not in BASE_TOWN_HALLS and b[0] not in BASE_GASES and b[0] not in BASE_ADDONS
+    ]
+    if len(non_th_gas) < 3:
+        return None
+
+    sups = [b for b in b250 if b[0] in BASE_SUPPLY]
+    sup_nn = []
+    sup_clumped = 0
+    for i, a in enumerate(sups):
+        dists = [math.hypot(a[1] - b[1], a[2] - b[2]) for j, b in enumerate(sups) if i != j]
+        if dists:
+            md = min(dists)
+            sup_nn.append(md)
+            if md < 5.0:
+                sup_clumped += 1
+
+    main_ramp_bldgs = [
+        b for b in non_th_gas
+        if 0.25 * nat_dist <= b[1] <= 0.75 * nat_dist and abs(b[2]) <= 12.0
+    ]
+    nat_area_bldgs = [b for b in non_th_gas if math.hypot(b[1] - nat_dist, b[2]) <= 16.0]
+
+    main_wall_tight = any(
+        math.hypot(a[1] - b[1], a[2] - b[2]) <= 4.2
+        for i, a in enumerate(main_ramp_bldgs)
+        for b in main_ramp_bldgs[i + 1:]
+    )
+    nat_wall_tight = any(
+        math.hypot(a[1] - b[1], a[2] - b[2]) <= 4.2
+        for i, a in enumerate(nat_area_bldgs)
+        for b in nat_area_bldgs[i + 1:]
+    )
+
+    tech_objs = [
+        b for b in b250
+        if b[0] in BASE_TECH or b[0] in {"RoboticsFacility", "Stargate", "Factory", "Starport"}
+    ]
+    exposed_tech = sum(1 for b in tech_objs if (b[1] / nat_dist) >= 0.70)
+    nat_static = sum(
+        1 for b in b250
+        if b[0] in BASE_STATIC_DEF and math.hypot(b[1] - nat_dist, b[2]) <= 15.0
+    )
+    early_bunkers_4m = sum(1 for b in b250 if b[0] == "Bunker")
+    has_nat_supply = any(math.hypot(b[1] - nat_dist, b[2]) <= 14.0 for b in sups)
+
+    return {
+        "race": race,
+        "nat_dist": nat_dist,
+        "bldg_cnt": len(non_th_gas),
+        "sup_cnt": len(sups),
+        "sup_nn_avg": (sum(sup_nn) / len(sup_nn)) if sup_nn else None,
+        "sup_clump_pct": (100.0 * sup_clumped / len(sups)) if len(sups) >= 2 else None,
+        "main_wall_tight": 100.0 if main_wall_tight else 0.0,
+        "nat_wall_tight": 100.0 if nat_wall_tight else 0.0,
+        "has_nat_supply": 100.0 if has_nat_supply else 0.0,
+        "nat_static": nat_static,
+        "early_bunkers_4m": early_bunkers_4m,
+        "tech_exposed_cnt": exposed_tech,
+    }
+
+
+def _avg_prec(vals, prec=1):
+    xs = [float(v) for v in vals if v is not None]
+    return round(sum(xs) / len(xs), prec) if xs else None
+
+
+def _summarize_base_geometry_slice(mets):
+    if not mets:
+        return None
+    return {
+        "n": len(mets),
+        "sup_nn": _avg_prec([m["sup_nn_avg"] for m in mets], 2),
+        "sup_clump_pct": _avg_prec([m["sup_clump_pct"] for m in mets], 1),
+        "main_wall_pct": _avg_prec([m["main_wall_tight"] for m in mets], 1),
+        "nat_wall_pct": _avg_prec([m["nat_wall_tight"] for m in mets], 1),
+        "nat_sup_pct": _avg_prec([m["has_nat_supply"] for m in mets], 1),
+        "nat_def": _avg_prec([m["nat_static"] for m in mets], 2),
+        "early_bunkers_4m": _avg_prec([m["early_bunkers_4m"] for m in mets], 2),
+        "tech_exposed": _avg_prec([m["tech_exposed_cnt"] for m in mets], 2),
+    }
+
+
+def compute_base_geometry_kpis(conn, replay_ids):
+    """Compute Pro-vs-Mothman 4:10 Base Geometry KPIs from read-only `arena_replays.sqlite`."""
+    if conn is None or not replay_ids:
+        return None
+    try:
+        mrows = _chunked_in_query(
+            conn,
+            "SELECT replay_id, actual_race, our_race, opp_race, matchup, "
+            "       our_player_id, our_start_x, our_start_y, duration_sec "
+            "FROM matches "
+            "WHERE replay_id IN ({ph}) "
+            "  AND COALESCE(duration_sec, 0) >= 250.0 "
+            "  AND our_start_x IS NOT NULL AND our_start_y IS NOT NULL",
+            replay_ids,
+        )
+        if not mrows:
+            return None
+        cand_ids = [r["replay_id"] for r in mrows]
+        bev_rows = _chunked_in_query(
+            conn,
+            "SELECT replay_id, player_id, unit_type, sec, x, y "
+            "FROM match_build_events "
+            "WHERE replay_id IN ({ph}) "
+            "  AND event_type IN ('born', 'init') "
+            "  AND sec <= 270.0 "
+            "  AND x IS NOT NULL AND y IS NOT NULL",
+            cand_ids,
+        )
+    except sqlite3.Error:
+        return None
+
+    bmap = defaultdict(list)
+    for r in bev_rows:
+        ut = r["unit_type"]
+        if ut in BASE_ALL_BLDGS:
+            bmap[(r["replay_id"], r["player_id"])].append(
+                (ut, float(r["x"]), float(r["y"]), float(r["sec"]))
+            )
+
+    all_mets = []
+    by_race_mets = defaultdict(list)
+    by_mu_mets = defaultdict(list)
+
+    for m in mrows:
+        orace = m["actual_race"] if m["actual_race"] in RACES else m["our_race"]
+        if orace not in TH_FOR_RACE:
+            continue
+        mu = m["matchup"]
+        if mu not in MATCHUPS and m["opp_race"] in RACES:
+            mu = f"{orace[0]}v{m['opp_race'][0]}"
+        bldgs = [(TH_FOR_RACE[orace], float(m["our_start_x"]), float(m["our_start_y"]), 0.0)]
+        bldgs.extend(bmap.get((m["replay_id"], m["our_player_id"]), []))
+        norm = normalize_base_coords(bldgs)
+        if norm is None:
+            continue
+        nat_dist, norm_bldgs = norm
+        met = compute_single_base_geometry(orace, nat_dist, norm_bldgs)
+        if met is None:
+            continue
+        all_mets.append(met)
+        by_race_mets[orace].append(met)
+        if mu in MATCHUPS:
+            by_mu_mets[mu].append(met)
+
+    if not all_mets:
+        return None
+
+    p_mets = by_race_mets["Protoss"]
+    t_mets = by_race_mets["Terran"]
+    pt_mets = p_mets + t_mets
+    zvz_mets = by_mu_mets["ZvZ"]
+    pvz_mets = by_mu_mets["PvZ"]
+    p_clump_vals = [m["sup_clump_pct"] for m in p_mets if m["sup_clump_pct"] is not None]
+
+    return {
+        "n": len(all_mets),
+        "pylon_clump_pct": _avg_prec(p_clump_vals, 1),
+        "pylon_clump_n": len(p_clump_vals),
+        "pylon_spacing_nn": _avg_prec([m["sup_nn_avg"] for m in p_mets], 1),
+        "nat_supply_pct": _avg_prec([m["has_nat_supply"] for m in pt_mets], 1),
+        "nat_supply_n": len(pt_mets),
+        "protoss_nat_supply_pct": _avg_prec([m["has_nat_supply"] for m in p_mets], 1),
+        "protoss_n": len(p_mets),
+        "terran_nat_supply_pct": _avg_prec([m["has_nat_supply"] for m in t_mets], 1),
+        "terran_n": len(t_mets),
+        "zvz_nat_wall_pct": _avg_prec([m["nat_wall_tight"] for m in zvz_mets], 1),
+        "zvz_n": len(zvz_mets),
+        "early_bunkers_4m": _avg_prec([m["early_bunkers_4m"] for m in t_mets], 2),
+        "terran_nat_def": _avg_prec([m["nat_static"] for m in t_mets], 2),
+        "pvz_tech_exposed": _avg_prec([m["tech_exposed_cnt"] for m in pvz_mets], 2),
+        "pvz_n": len(pvz_mets),
+        "by_race": {
+            r: _summarize_base_geometry_slice(by_race_mets[r])
+            for r in RACES if by_race_mets[r]
+        },
+        "by_matchup": {
+            mu: _summarize_base_geometry_slice(by_mu_mets[mu])
+            for mu in MATCHUPS if by_mu_mets[mu]
+        },
+    }
+
+
+def compute_base_geometry_delta(cur, base):
+    if not cur or not base:
+        return None
+    return {
+        "pylon_clump_pct": diff_val(cur.get("pylon_clump_pct"), base.get("pylon_clump_pct"), 1),
+        "pylon_spacing_nn": diff_val(cur.get("pylon_spacing_nn"), base.get("pylon_spacing_nn"), 1),
+        "nat_supply_pct": diff_val(cur.get("nat_supply_pct"), base.get("nat_supply_pct"), 1),
+        "protoss_nat_supply_pct": diff_val(cur.get("protoss_nat_supply_pct"), base.get("protoss_nat_supply_pct"), 1),
+        "terran_nat_supply_pct": diff_val(cur.get("terran_nat_supply_pct"), base.get("terran_nat_supply_pct"), 1),
+        "zvz_nat_wall_pct": diff_val(cur.get("zvz_nat_wall_pct"), base.get("zvz_nat_wall_pct"), 1),
+        "early_bunkers_4m": diff_val(cur.get("early_bunkers_4m"), base.get("early_bunkers_4m"), 2),
+        "terran_nat_def": diff_val(cur.get("terran_nat_def"), base.get("terran_nat_def"), 2),
+        "pvz_tech_exposed": diff_val(cur.get("pvz_tech_exposed"), base.get("pvz_tech_exposed"), 2),
+    }
+
+
 def evaluate_promotion_gates(overall, by_race, tactics_data=None):
     """Explicit closed-loop promotion criteria before shipping to AI Arena."""
     gates = {
@@ -673,6 +1308,13 @@ def main():
     ap.add_argument("--tactics", default=None, help="Optional tactics scorecard JSON")
     ap.add_argument("--out-json", default=None, help="Optional output JSON path")
     ap.add_argument("--exclude-opp-crash", action="store_true", help="Exclude early opponent crash matches (<20s, 0 kills)")
+    ap.add_argument(
+        "--replay-db",
+        default=DEFAULT_REPLAY_DB,
+        help="Read-only arena_replays.sqlite path for Stall Watchdog & Base Geometry KPIs (pass '' to disable)",
+    )
+    ap.add_argument("--run-id", default=None, help="Optional SQLite runs.run_id override for --current")
+    ap.add_argument("--baseline-run-id", default=None, help="Optional SQLite runs.run_id override for --baseline")
     args = ap.parse_args()
 
     with open(args.pro_baselines) as f:
@@ -793,6 +1435,52 @@ def main():
 
     paired_diff = compute_paired_diff(cur_rows, base_rows)
 
+    sqlite_meta = None
+    stall_watchdog_report = None
+    base_geometry_report = None
+    conn = open_replay_db_ro(args.replay_db)
+    if conn is not None:
+        try:
+            cur_run_id, cur_rids = resolve_sqlite_run_and_replay_ids(
+                conn, args.current, cur_rows, run_id=args.run_id
+            )
+            base_run_id, base_rids = (None, [])
+            if args.baseline or args.baseline_run_id:
+                base_run_id, base_rids = resolve_sqlite_run_and_replay_ids(
+                    conn, args.baseline, base_rows, run_id=args.baseline_run_id
+                )
+            sqlite_meta = {
+                "db_path": os.path.abspath(os.path.expanduser(str(args.replay_db))),
+                "current_run_id": cur_run_id,
+                "current_matched_replays": len(cur_rids),
+                "baseline_run_id": base_run_id,
+                "baseline_matched_replays": len(base_rids),
+            }
+            sw_cur = compute_stall_watchdog_kpis(conn, cur_rids)
+            sw_base = compute_stall_watchdog_kpis(conn, base_rids) if base_rids else None
+            if sw_cur is not None or sw_base is not None:
+                stall_watchdog_report = {
+                    "run_id": cur_run_id,
+                    "baseline_run_id": base_run_id,
+                    "current": sw_cur,
+                    "baseline": sw_base,
+                    "delta": compute_stall_watchdog_delta(sw_cur, sw_base),
+                    "audit_reference": STALL_WATCHDOG_AUDIT_REF,
+                }
+            bg_cur = compute_base_geometry_kpis(conn, cur_rids)
+            bg_base = compute_base_geometry_kpis(conn, base_rids) if base_rids else None
+            if bg_cur is not None or bg_base is not None:
+                base_geometry_report = {
+                    "run_id": cur_run_id,
+                    "baseline_run_id": base_run_id,
+                    "current": bg_cur,
+                    "baseline": bg_base,
+                    "delta": compute_base_geometry_delta(bg_cur, bg_base),
+                    "pro_reference": PRO_BASE_GEOMETRY_REF,
+                }
+        finally:
+            conn.close()
+
     report = {
         "current_path": os.path.abspath(args.current),
         "baseline_path": os.path.abspath(args.baseline) if args.baseline else None,
@@ -805,6 +1493,9 @@ def main():
         "by_matchup": by_matchup,
         "paired_diff": paired_diff,
         "tactics": tactics_data,
+        "sqlite_replay_db": sqlite_meta,
+        "stall_watchdog_kpis": stall_watchdog_report,
+        "base_geometry_kpis": base_geometry_report,
         "promotion_gates": gates,
     }
 
@@ -991,6 +1682,149 @@ def main():
             f"`own_base_retreat >= 440f` = **{cur_all.get('own_base_retreat_matches', 0)}/{cur_all['n']}** "
             f"(total `{cur_all.get('total_own_base_retreat_frames', 0):,}f`){extra_w8}"
         )
+
+    if stall_watchdog_report and stall_watchdog_report.get("current"):
+        swc = stall_watchdog_report["current"]
+        swb = stall_watchdog_report.get("baseline")
+        swd = stall_watchdog_report.get("delta") or {}
+        swref = stall_watchdog_report.get("audit_reference") or STALL_WATCHDOG_AUDIT_REF
+        rid_lbl = stall_watchdog_report.get("run_id") or "matched"
+        base_lbl = stall_watchdog_report.get("baseline_run_id") or "-"
+        swb_sup = f"{fmt(swb['sup_cap_min_pct'],'%')} ({swb['sup_cap_matches']}/{swb['n']})" if swb else "-"
+        swb_inc = f"{swb['zero_income_matches']} ({fmt(swb['zero_income_pct'],'%')})" if swb else "-"
+        swb_gas = f"{swb['zero_gas_matches']} ({fmt(swb['zero_gas_pct'],'%')})" if swb else "-"
+        swb_wk8 = f"{fmt(swb['wk_plateau_8m_pct'],'%')} ({swb['wk_plateau_8m_matches']}/{swb['wk_plateau_8m_denom']})" if swb else "-"
+        swb_grm = f"{swb['gas_rich_min_starved_matches']} ({fmt(swb['gas_rich_min_starved_pct'],'%')})" if swb else "-"
+        swd_inc = (
+            f"{fmt_delta(swd.get('zero_income_matches'),'',0)} ({fmt_delta(swd.get('zero_income_pct'),'%')})"
+            if swb
+            else "-"
+        )
+        swd_gas = (
+            f"{fmt_delta(swd.get('zero_gas_matches'),'',0)} ({fmt_delta(swd.get('zero_gas_pct'),'%')})"
+            if swb
+            else "-"
+        )
+        print(
+            f"\n### Stall Watchdog KPIs (SQLite 4-Law Audit, `run={rid_lbl}`, `n={swc['n']}`"
+            + (f" vs `base={base_lbl}`, `n={swb['n']}`" if swb else "")
+            + ")"
+        )
+        print("| KPI | Current | Baseline | Delta | 519-Match Audit Ref | Goal |")
+        print("|---|---:|---:|---:|---:|---|")
+        print(
+            f"| **`sup_cap_min_pct`** (capped `<195` at min mark) "
+            f"| **{fmt(swc['sup_cap_min_pct'],'%')}** ({swc['sup_cap_matches']}/{swc['n']}) "
+            f"| {swb_sup} | {fmt_delta(swd.get('sup_cap_min_pct'),'%')} "
+            f"| {fmt(swref.get('sup_cap_min_pct'),'%')} | Lower ↓ |"
+        )
+        print(
+            f"| **`zero_income_matches`** (`>=5` wk, `>=2m`, `0` min/s) "
+            f"| **{swc['zero_income_matches']}** ({fmt(swc['zero_income_pct'],'%')}) "
+            f"| {swb_inc} | {swd_inc} "
+            f"| {fmt(swref.get('zero_income_pct'),'%')} | 0 ↓ |"
+        )
+        print(
+            f"| **`zero_gas_matches`** (`>=16` wk, `>=5m`, `0` gas/s, `<450g`) "
+            f"| **{swc['zero_gas_matches']}** ({fmt(swc['zero_gas_pct'],'%')}) "
+            f"| {swb_gas} | {swd_gas} "
+            f"| {fmt(swref.get('zero_gas_pct'),'%')} | 0 ↓ |"
+        )
+        print(
+            f"| **`wk_plateau_8m_pct`** (`<=36` wk @8m) "
+            f"| **{fmt(swc['wk_plateau_8m_pct'],'%')}** ({swc['wk_plateau_8m_matches']}/{swc['wk_plateau_8m_denom']}) "
+            f"| {swb_wk8} | {fmt_delta(swd.get('wk_plateau_8m_pct'),'%')} "
+            f"| {fmt(swref.get('wk_plateau_8m_pct'),'%')} | Lower ↓ |"
+        )
+        print(
+            f"| `gas_rich_min_starved_matches` (`>=450g`, `<200m`, `<175s`) "
+            f"| {swc['gas_rich_min_starved_matches']} ({fmt(swc['gas_rich_min_starved_pct'],'%')}) "
+            f"| {swb_grm} | {fmt_delta(swd.get('gas_rich_min_starved_matches'),'',0)} "
+            f"| {fmt(swref.get('gas_rich_min_starved_pct'),'%')} | 0 ↓ |"
+        )
+        if swc.get("by_race"):
+            race_bits = []
+            for r in RACES:
+                sr = swc["by_race"].get(r)
+                if sr:
+                    race_bits.append(
+                        f"**{r[0]}**(`n={sr['n']}`): SupCap `{fmt(sr['sup_cap_min_pct'],'%')}`, "
+                        f"ZeroInc `{sr['zero_income_matches']}`, ZeroGas `{sr['zero_gas_matches']}`, "
+                        f"WkPlat8m `{fmt(sr['wk_plateau_8m_pct'],'%')}`"
+                    )
+            if race_bits:
+                print("- **By Race:** " + " | ".join(race_bits))
+
+    if base_geometry_report and base_geometry_report.get("current"):
+        bgc = base_geometry_report["current"]
+        bgb = base_geometry_report.get("baseline")
+        bgd = base_geometry_report.get("delta") or {}
+        bgp = base_geometry_report.get("pro_reference") or PRO_BASE_GEOMETRY_REF
+        rid_lbl = base_geometry_report.get("run_id") or "matched"
+        base_lbl = base_geometry_report.get("baseline_run_id") or "-"
+        bgb_clump = f"{fmt(bgb.get('pylon_clump_pct'),'%')} (NN `{fmt(bgb.get('pylon_spacing_nn'),'t')}`)" if bgb else "-"
+        bgb_nsup = (
+            f"{fmt(bgb.get('nat_supply_pct'),'%')} "
+            f"(P `{fmt(bgb.get('protoss_nat_supply_pct'),'%')}` / T `{fmt(bgb.get('terran_nat_supply_pct'),'%')}`)"
+            if bgb
+            else "-"
+        )
+        bgb_zvz = f"{fmt(bgb.get('zvz_nat_wall_pct'),'%')} (`n={bgb.get('zvz_n', 0)}`)" if bgb else "-"
+        bgb_bnk = f"{fmt(bgb.get('early_bunkers_4m'),'',2)} (NatDef `{fmt(bgb.get('terran_nat_def'),'',2)}`)" if bgb else "-"
+        print(
+            f"\n### Pro-vs-Mothman Base Geometry KPIs (4:10 / 250s, `run={rid_lbl}`, `n={bgc['n']}`"
+            + (f" vs `base={base_lbl}`, `n={bgb['n']}`" if bgb else "")
+            + ")"
+        )
+        print("| KPI | Current | Baseline | Delta | GM Pro Ref (`n=182`) | Goal |")
+        print("|---|---:|---:|---:|---:|---|")
+        print(
+            f"| **`pylon_clump_pct`** (Protoss Pylons `<5t` NN) "
+            f"| **{fmt(bgc.get('pylon_clump_pct'),'%')}** (NN `{fmt(bgc.get('pylon_spacing_nn'),'t')}`, `n={bgc.get('pylon_clump_n', 0)}`) "
+            f"| {bgb_clump} | {fmt_delta(bgd.get('pylon_clump_pct'),'%')} "
+            f"| {fmt(bgp.get('pylon_clump_pct'),'%')} (NN `{fmt(bgp.get('pylon_spacing_nn'),'t')}`) | Lower ↓ |"
+        )
+        print(
+            f"| **`nat_supply_pct`** (P+T Supply `<=14t` of Nat) "
+            f"| **{fmt(bgc.get('nat_supply_pct'),'%')}** (P `{fmt(bgc.get('protoss_nat_supply_pct'),'%')}` / T `{fmt(bgc.get('terran_nat_supply_pct'),'%')}`) "
+            f"| {bgb_nsup} | {fmt_delta(bgd.get('nat_supply_pct'),'%')} "
+            f"| {fmt(bgp.get('nat_supply_pct'),'%')} (P `{fmt(bgp.get('protoss_nat_supply_pct'),'%')}` / T `{fmt(bgp.get('terran_nat_supply_pct'),'%')}`) | Higher ↑ |"
+        )
+        print(
+            f"| **`zvz_nat_wall_pct`** (ZvZ Nat Tight Wall `<=4.2t`) "
+            f"| **{fmt(bgc.get('zvz_nat_wall_pct'),'%')}** (`n={bgc.get('zvz_n', 0)}`) "
+            f"| {bgb_zvz} | {fmt_delta(bgd.get('zvz_nat_wall_pct'),'%')} "
+            f"| {fmt(bgp.get('zvz_nat_wall_pct'),'%')} | Higher ↑ |"
+        )
+        print(
+            f"| **`early_bunkers_4m`** (Terran Bunkers `<=250s`) "
+            f"| **{fmt(bgc.get('early_bunkers_4m'),'',2)}** (NatDef `{fmt(bgc.get('terran_nat_def'),'',2)}`, `n={bgc.get('terran_n', 0)}`) "
+            f"| {bgb_bnk} | {fmt_delta(bgd.get('early_bunkers_4m'),'',2)} "
+            f"| {fmt(bgp.get('early_bunkers_4m'),'',2)} | Lower ↓ |"
+        )
+        if bgc.get("by_matchup"):
+            pro_mu_map = bgp.get("by_matchup") or {}
+            print("\n| Matchup (`n`) | SupNN (Bot/Pro) | Clump<5t (Bot/Pro) | MainWall% | NatWall% (Bot/Pro) | NatSup% (Bot/Pro) | NatDef / Bunk4m (Bot/Pro) | ExpTech |")
+            print("|---|---:|---:|---:|---:|---:|---:|---:|")
+            for mu in MATCHUPS:
+                mc = bgc["by_matchup"].get(mu)
+                if not mc:
+                    continue
+                mp = pro_mu_map.get(mu) or {}
+                sup_nn_s = f"{fmt(mc.get('sup_nn'),'t')}/{fmt(mp.get('sup_nn'),'t')}" if mu[0] in ("P", "T") else "-"
+                clump_s = f"{fmt(mc.get('sup_clump_pct'),'%')}/{fmt(mp.get('sup_clump_pct'),'%')}" if mu[0] in ("P", "T") else "-"
+                natsup_s = f"{fmt(mc.get('nat_sup_pct'),'%')}/{fmt(mp.get('nat_sup_pct'),'%')}" if mu[0] in ("P", "T") else "-"
+                def_s = (
+                    f"{fmt(mc.get('nat_def'),'',2)} (B:{fmt(mc.get('early_bunkers_4m'),'',2)}) / {fmt(mp.get('nat_def'),'',2)}"
+                    if mu[0] == "T"
+                    else f"{fmt(mc.get('nat_def'),'',2)} / {fmt(mp.get('nat_def'),'',2)}"
+                )
+                print(
+                    f"| **{mu}** (`n={mc['n']}`) | {sup_nn_s} | {clump_s} "
+                    f"| {fmt(mc.get('main_wall_pct'),'%')} "
+                    f"| {fmt(mc.get('nat_wall_pct'),'%')}/{fmt(mp.get('nat_wall_pct'),'%')} "
+                    f"| {natsup_s} | {def_s} | {fmt(mc.get('tech_exposed'),'',2)} |"
+                )
 
     if cohorts:
         c_act = cohorts["core_active"]

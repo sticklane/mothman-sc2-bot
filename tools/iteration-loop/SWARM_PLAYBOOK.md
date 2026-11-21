@@ -20,8 +20,8 @@ Every role operates asynchronously on the shared message board. **No two active 
 | `@verifier` | Solo 10-gate verification (compile, unit/wire/runtime/belief/tactics/SM, pro starvation/divergence, Python/Arena/Replay-DB, hygiene) | Read-only (bounces failures directly to owning author) | Exclusive owner of **wall-clock perf gates** (`Suite 28 <5ms`, `w5-p0-1a <4.5ms`) |
 | `@tactics-tester` | Real-`SC2_x64` Tactics Arena 3.0 (`--suite core`, `66×2 = 132` MP4 duels across `16` categories) & `25s` targeted `--category`/`--scenario` pre-checks | `scratch/loop/tactics_sc2_*_iter*.json`, `scratch/loop/visuals_iter*/{arena,selfplay}/` | — |
 | `@harness` | Exclusive GPU/Podman runner: **`H2H-First` (`6`m vs live Ship ZIPs)**, `84`-match roster (`core_14` + `unseen_12` + `self_6`), and `4`-race ELF ZIP smoke | `tools/run-local-sc2-arena.py`, `tools/sc2-match-proxy.py`, `scratch/iter*_score.json` | — |
-| `@analyzer` | Live AI Arena `sync-prod`, SQLite forensics, root-cause audits, strictly-disjoint next-loop blueprints, qualitative trajectory audits | `tools/score-replay-batch.rkt`, `scratch/loop/*_audit.md` | Owns SQLite during Step 4A (`sync-prod`) |
-| `@loop-architect` | Pro-Corpus comparison, `loop_ledger.json`, 3D Live-HUD MP4 highlights & Ship `90/90` full-match videos, SQLite ingestion, Arena 3.0 catalog/harness, **Step 4C Trajectory Flywheel** | `tools/iteration-loop/*`, `tools/sc2-tactics-arena.py`, `tools/arena-scenarios.json`, `.agents/skills/add-arena-scenario/**`, `tools/replay-db.py`, `tests/test-replay-db.py`, `tests/test-loop-flywheel.py` | Owns SQLite during Step 4B (`ingest-runs` + `extract-raw`) |
+| `@analyzer` | Live AI Arena `sync-prod`, SQLite forensics, **mandatory Replay + Video Trade Review** (reads contact-sheet `.jpg` + telemetry cards), disjoint next-loop blueprints | `tools/score-replay-batch.rkt`, `scratch/loop/*_audit.md` | Owns SQLite during Step 4A (`sync-prod`) |
+| `@loop-architect` | Pro-Corpus comparison (`compare-vs-pro.py`, `pro-deep-comparison.py`), `trade-review-pack.py` contact sheets, `loop_ledger.json`, 3D match MP4s, SQLite ingestion, Arena 3.1 harness, Step 4C trajectory logs | `tools/iteration-loop/*`, `tools/pro-deep-comparison.py`, `tools/trade-review-pack.py`, `tools/sc2-tactics-arena.py`, `tools/arena-scenarios.json`, `.agents/skills/add-arena-scenario/**`, `tools/replay-db.py`, `tests/test-replay-db.py`, `tests/test-loop-flywheel.py` | Owns SQLite during Step 4B (`ingest-runs` + `extract-raw`) |
 | `@reporter` | Living visual campaign report, phase log, GitHub Pages & Release media publishing | `tools/publish-gh-pages.py` (when directed), `scratch/loop/phase_reports.md`, campaign report artifact | Never blocks handoffs |
 | `@monitor-2` | Low-frequency stall watchdog (adaptive backoff during active GPU/benchmark phases to minimize empty polling turns) | None | Read-only |
 
@@ -61,11 +61,17 @@ Authors do **not** need to pause coding to ask `@coordinator` for permission to 
    - If Ship Gate passes -> @coordinator rebuilds 4 BotZips -> @harness 4-race ELF ZIP smoke (~2.5m) -> LIVE SHIP!
           |
           v
-[Step 4A || Step 4B || Step 4C — Parallel Post-Benchmark Forensics, Archival & Flywheel]
-   - Step 4A (@analyzer, owns SQLite first): `sync-prod` + live AI Arena audit + next-loop disjoint blueprint -> clears SQLite
-   - Step 4B (@loop-architect, owns GPU): `compare-vs-pro.py`, `loop_ledger.json`, Top-8 live-HUD MP4s
-     (+ ALL 90/90 full-length MP4s & `visual_report_iterN.md` on SHIP-ZIP loops; skip 90/90 on HOLD-ZIP!),
-     SQLite `ingest-runs` + `extract-raw` once `@analyzer` clears SQLite
+[Step 4A || Step 4B || Step 4C — Post-Run Replay + Video Trade Review, Archival & Trajectory Log]
+   - Step 4A (@analyzer, owns SQLite first): `sync-prod` + live AI Arena audit -> clears SQLite;
+     **MANDATORY Replay + Video Trade Review Gate**: after `@loop-architect` builds the Arena & Match
+     review packs (`tools/trade-review-pack.py`), `@analyzer` visually opens EVERY generated 6-frame
+     contact sheet (`.jpg`) alongside its replay telemetry card BEFORE drafting the Loop-(N+1) blueprint,
+     so trade fixes address what units actually do on screen (not just summary stats).
+   - Step 4B (@loop-architect, owns GPU): `compare-vs-pro.py` (with read-only SQLite Stall Watchdog &
+     Base Geometry KPIs), `loop_ledger.json`, Top-8 live-HUD MP4s (+ 90/90 full-length MP4s on SHIP-ZIP
+     loops), SQLite `ingest-runs` + `extract-raw` once `@analyzer` clears SQLite, and `trade-review-pack.py`
+     for both the Arena run and the real-match run (plus `pro-deep-comparison.py` whenever spatial/timing
+     baselines need refreshing).
    - Step 4C (@loop-architect, <3s offline): `log-loop-trajectory.py --loop <N>` + `analyze-loop-flywheel.py`
      -> appends Loop N trajectory to `loop_trajectory_log.jsonl` & refreshes `scratch/loop/loop_flywheel_retro.{md,json}`
      -> feeds Flip-Flop warnings & top friction fixes directly into `@coordinator`'s Loop-(N+1) brief!
@@ -74,14 +80,15 @@ Authors do **not** need to pause coding to ask `@coordinator` for permission to 
 
 ---
 
-## 3. Hard Flywheel Guardrails (Derived from Loops 19–47)
+## 3. Hard Guardrails (Derived from Loops 19–48)
 
 1. **Exclusive GPU & SQLite Locks:** Never run `podman`, host `SC2_x64` rendering, or `sc2-tactics-arena.py` concurrently. Never write to `arena_replays.sqlite` while `@analyzer` runs `sync-prod`. Always verify `PODMAN_AFTER=0, SC2_AFTER=0` (`pgrep -cf '[p]odman'`, `pgrep -cf '[S]C2_x64'`).
 2. **Flip-Flop Guard (`<= 3`-Loop Churn Rule):** Whenever `analyze-loop-flywheel.py` flags a scenario or subsystem as touched in `>= 2` of the last `3` loops (e.g., `r02/r05/r06`, `e01`, `rd01`, `ro09`, `0`-Colossus), **no threshold change may be submitted without a `25s` `--scenario` A/B proof** (or closed-loop multi-frame macro trace in Gate 1).
 3. **Brain ↔ Runtime Contract Parity:** Every macro cap or priority rule in `lib/priority-macro-brain.rkt` MUST match `lib/bot-runtime.rkt`'s execution ceiling (preventing silent `prod_placement_stall=132` split-brains) and preserve urgency partial orders (e.g., `colossus > phoenix > stalker`, `colossus > immortal` when `colossus = 0`).
 4. **Main-Army Negative Guard Mandate:** Any global runtime heuristic added to `lib/bot-runtime.rkt` or `lib/tactics/pro-spellcaster-micro.rkt` (e.g., light-harass splits, Blink-Forward, worker-focus multipliers) MUST ship with a negative unit test proving it does **not** fire during parity/outnumbered frontal clashes or unsiege defensive Tanks.
 5. **Solo Perf Gate Discipline:** While `@loop-architect` runs heavy H.264 3D renders (`loadavg > 8`), authors run targeted functional unit tests and defer wall-clock microbenches (`Suite 28 <5ms`, `w5-p0-1a <4.5ms`) to `@verifier`'s solo Gate 1 pass.
-6. **Zero Hacks & Calm Copy:** Zero opponent-name hacks, map-name hacks, replay-ID branches, or speed-mining. Reader-facing reports use calm, plain-English prose. Never commit credentials or personal paths into tracked repo files.
+6. **Zero Hacks & Plain Copy:** Zero opponent-name hacks, map-name hacks, replay-ID branches, or speed-mining. Reader-facing reports use plain, direct English (no hype adjectives, vanity counts, or cute internal nicknames). Never commit credentials or personal paths into tracked repo files.
+7. **Mandatory Post-Run Replay + Video Trade Review Gate:** Every Arena batch (`tactics_sc2_*.json` + MP4s) and every real-match batch (`run_id` in SQLite + rendered match MP4s) MUST produce a `trade-review-pack.py` bundle (6-frame `.jpg` contact sheets + replay telemetry cards for the worst-trading fights). `@analyzer` MUST visually inspect the contact sheets alongside replay stats before finalizing the next loop's combat or micro fixes, extracting generalizable rules rather than one-off patches.
 
 ---
 
@@ -159,6 +166,32 @@ python3 tools/iteration-loop/analyze-loop-flywheel.py \
   --out-md <scratch>/loop/loop_flywheel_retro.md \
   --out-json <scratch>/loop/loop_flywheel_retro.json
 
-# 3. Verify flywheel unit tests (runs in <1s, included in Gate 1!)
+# 3. Verify flywheel & comparator unit tests (runs in <1s, included in Gate 1!)
 python3 tests/test-loop-flywheel.py
 ```
+
+### Step 4D — Mandatory Post-Run Replay + Video Trade Review & Deep Pro Comparison
+```bash
+# 1. Arena worst-trade review pack (6-frame JPEG contact sheets + telemetry cards)
+python3 tools/trade-review-pack.py \
+  --tactics-json <scratch>/loop/tactics_sc2_duel_iter<N>.json \
+  --video-dir <scratch>/loop/visuals_iter<N>/arena \
+  --out-dir <scratch>/loop/trade_review_iter<N>_arena \
+  --top 8
+
+# 2. Real-match worst-trade review pack (decisive battle window contact sheets + SQLite cards)
+python3 tools/trade-review-pack.py \
+  --run-id <run_id_full> \
+  --video-dir <scratch>/loop/visuals_iter<N>/full_matches \
+  --out-dir <scratch>/loop/trade_review_iter<N>_matches \
+  --top 8
+
+# 3. Deep Pro vs. Mothman spatial, walling & timing comparison across all 9 matchups
+python3 tools/pro-deep-comparison.py \
+  --run-prefixes iter<N-3>,iter<N-2>,iter<N-1>,iter<N> \
+  --out-json <scratch>/loop/pro_deep_comparison.json \
+  --out-md <scratch>/loop/pro_deep_comparison.md \
+  --jobs 8
+```
+
+**Required Handoff:** `@analyzer` opens `<out-dir>/trade_review_pack.md` AND visually inspects the generated `sheets/*.jpg` contact sheets before writing the next loop's combat or micro blueprint.

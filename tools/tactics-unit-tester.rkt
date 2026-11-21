@@ -87,7 +87,7 @@
 (define AB-CALLDOWN-MULE        171)
 (define AB-SPAWN-CHANGELING     181)
 (define AB-VIPER-CONSUME        2073)
-(define AB-AUTO-TURRET          349)
+(define AB-AUTO-TURRET          1764)
 (define AB-MICROBIAL-SHROUD     2545)
 (define AB-PULSAR-BEAM-OFF      2376)
 (define AB-CREEP-TUMOR-QUEEN    1694)
@@ -119,10 +119,10 @@
 (define AB-DEPOT-RAISE          558)
 (define AB-BUNKER-LOAD          407)
 (define AB-GRAVITON-BEAM        173)
-(define AB-SPAWN-LOCUSTS        1990)
+(define AB-SPAWN-LOCUSTS        2704)
 (define AB-SPAWN-LOCUSTS-FLYING 2704)
 (define AB-CLOAK-GHOST          382)
-(define AB-MORPH-BANELING       80)
+(define AB-MORPH-BANELING       4121)
 (define AB-MORPH-RAVAGER        2330)
 (define AB-CAUSTIC-SPRAY        2324)
 (define AB-CONTAMINATE          1825)
@@ -5691,7 +5691,7 @@
        (mk-obs fr
                (append (mk-home-base-units 'Protoss #:with-natural? #t)
                        (list (mk-unit 7101 'oracle 1 70.0 70.0 #:hp 100.0 #:hp-max 100.0 #:shield 60.0 #:shield-max 60.0
-                                      #:energy 40.0 #:flying? #t #:buffs '(56))
+                                      #:energy 40.0 #:flying? #t #:buffs '(99))
                              (mk-unit 9701 'command-center 4 160.0 160.0 #:hp 1500.0 #:hp-max 1500.0)))
                #:food-used 30 #:food-cap 46 #:food-army 3 #:food-workers 24))
      (define out-ora (last (run-pipeline-sequence 'Protoss 'Terran
@@ -5705,7 +5705,7 @@
                         (format "Carrier 6801 emitted Build Interceptors (1042): ~a" int-ok?))
               (mk-check "oracle-turns-pulsar-beam-off-2376-after-dwell"
                         beam-off?
-                        (format "Oracle 7101 (buff=56, 140f dwell, 0 enemies near) emitted Pulsar Beam Off (2376): ~a (abs=~a)"
+                        (format "Oracle 7101 (buff=99, 140f dwell, 0 enemies near) emitted Pulsar Beam Off (2376): ~a (abs=~a)"
                                 beam-off? (wire-abilities-for-tag (step-outcome-wire-cmds out-ora) 7101)))
               (mk-check "zero-wire-rejects"
                         (and (= (step-outcome-wire-rejects out-car) 0) (= (step-outcome-wire-rejects out-ora) 0))
@@ -7873,7 +7873,7 @@
      (define ally1 (append home (list (mk-unit 5301 'banshee 1 75.0 80.0 #:hp 60.0 #:hp-max 140.0 #:energy 100.0)
                                       (mk-unit 5302 'ghost 1 75.0 82.0 #:hp 40.0 #:hp-max 100.0 #:energy 100.0))))
      (define ally2 (append home (list (mk-unit 5301 'banshee 1 75.0 80.0 #:hp 60.0 #:hp-max 140.0 #:energy 70.0 #:cloak 1 #:buffs '(7))
-                                      (mk-unit 5302 'ghost 1 75.0 82.0 #:hp 40.0 #:hp-max 100.0 #:energy 70.0 #:cloak 1 #:buffs '(8)))))
+                                      (mk-unit 5302 'ghost 1 75.0 82.0 #:hp 40.0 #:hp-max 100.0 #:energy 70.0 #:cloak 1 #:buffs '(6)))))
      (define outs
        (run-pipeline-sequence 'Terran 'Terran
          (list (hash 'obs (mk-obs 12000 (append ally1 enemy) #:upgrades '(banshee-cloak personal-cloaking) #:food-used 30 #:food-cap 50 #:food-army 14 #:food-workers 16))
@@ -8105,7 +8105,7 @@
                                                 (list (mk-unit 5101 'oracle 1 155.0 158.0 #:hp 100.0 #:hp-max 100.0 #:shield 60.0 #:shield-max 60.0 #:energy 80.0))
                                                 (for/list ([i (in-range 8)]) (mk-unit (+ 8101 i) 'scv 4 159.0 (+ 156.0 (* i 0.5)) #:hp 45.0 #:hp-max 45.0)))
                                         #:food-used 20 #:food-cap 31 #:food-army 4 #:food-workers 16))))))
-     (define ally-off (append home (list (mk-unit 5111 'oracle 1 70.0 70.0 #:hp 100.0 #:hp-max 100.0 #:shield 60.0 #:shield-max 60.0 #:energy 60.0 #:buffs '(56)))))
+     (define ally-off (append home (list (mk-unit 5111 'oracle 1 70.0 70.0 #:hp 100.0 #:hp-max 100.0 #:shield 60.0 #:shield-max 60.0 #:energy 60.0 #:buffs '(99)))))
      (define outs-off
        (run-pipeline-sequence 'Protoss 'Terran
          (list (hash 'obs (mk-obs 7200 ally-off #:food-used 20 #:food-cap 31 #:food-army 4 #:food-workers 16))

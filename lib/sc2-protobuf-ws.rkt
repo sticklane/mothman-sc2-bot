@@ -184,6 +184,9 @@
  SC2-TERRAN-5X3-MISS-STREAK
  SC2-PROD-PLACEMENT-MISS-STREAK
  SC2-EXPANSION-PAD-BLOCK-STREAK
+ SC2-WATCHDOG-RING-EXPAND-SYMS
+ SC2-PROTOSS-FRAGILE-TECH-SYMS
+ sc2-request-ring-expand!
  SC2-TUMOR-PLACEMENT-CACHE
  SC2-PLACEMENT-CACHE-TTL
  SC2-LAST-TUMOR-RPC-LOOP
@@ -1100,8 +1103,12 @@
           (train-viper 1354 #t)
           (train-queen 1632 #t)
           ;; Zerg Morphs
-          (morph-baneling 80 #t)
-          (train-baneling 80 #f)
+          ;; L49 (`#1156` / `#1157`): SC2 4.10 (`protocol 75689`) requires `4121`
+          ;; (`MORPHTOBANELING_BANELING`) on Zerglings; legacy `80` returns `NotSupported`!
+          ;; Keep `80` strictly as a non-primary inbound decode alias.
+          (morph-baneling 80 #f)
+          (morph-baneling 4121 #t)
+          (train-baneling 4121 #f)
           (morph-ravager 2330 #t)
           (train-ravager 2330 #f)
           (morph-lurker 2332 #t)
@@ -1118,7 +1125,7 @@
           (build-hive 1218 #f)
           (morph-greater-spire 1220 #t)
           (build-greater-spire 1220 #f)
-          (morph-lurker-den 2112 #t)
+          (morph-lurker-den 2112 #f)
           ;; Zerg Building Construction
           (build-hatchery 1152 #t)
           (build-extractor 1154 #t)
@@ -1128,6 +1135,7 @@
           (build-baneling-nest 1162 #t)
           (build-hydralisk-den 1157 #t)
           (build-lurker-den 1163 #t)
+          (morph-lurker-den 1163 #f)
           (build-spire 1158 #t)
           (build-infestation-pit 1160 #t)
           (build-ultralisk-cavern 1159 #t)
@@ -1137,8 +1145,9 @@
           (build-spine-crawler 1166 #t)
           (build-spore-crawler 1167 #t)
           (build-creep-tumor 3691 #t)
+          (spawn-creep-tumor-queen 1662 #f)
           (build-creep-tumor-queen 1694 #t)
-          (spawn-creep-tumor-queen 1662 #t)
+          (spawn-creep-tumor-queen 1694 #f)
           (build-creep-tumor-tumor 1733 #t)
           ;; Terran Training
           (train-scv 524 #t)
@@ -1274,10 +1283,13 @@
           (abduct 2067 #t)
           (blinding-cloud 2063 #t)
           (parasitic-bomb 2542 #t)
+          (viper-consume 2069 #f)
           (viper-consume 2073 #t)
           (consume 2073 #f)
-          (viper-consume-structure 2069 #t)
-          (spawn-locusts 1990 #t)
+          (viper-consume-structure 2073 #f)
+          (spawn-locusts 1990 #f)
+          (spawn-locusts 2704 #t)
+          (spawn-locusts-legacy 2704 #f)
           (spawn-changeling 181 #t)
           (contaminate 1825 #t)
           (caustic-spray 2324 #t)
@@ -1318,7 +1330,9 @@
           (kd8-charge 2588 #t)
           (interference-matrix 3747 #t)
           (anti-armor-missile 3753 #t)
-          (auto-turret 349 #t)
+          (auto-turret 349 #f)
+          (auto-turret 1764 #t)
+          (build-auto-turret 1764 #f)
           (repair 3685 #t)
           (salvage 32 #t)
           (load-transport 3668 #t)
@@ -1353,8 +1367,9 @@
           (oracle-stasis-ward 2505 #f)
           (build-stasis-trap 2505 #f)
           (build-interceptors 1042 #t)
-          (overlord-generate-creep 1882 #t)
-          (generate-creep 1882 #f)
+          (overlord-generate-creep 1882 #f)
+          (overlord-generate-creep 1692 #t)
+          (generate-creep 1692 #f)
           (time-warp 2244 #t)
           (nexus-mass-recall 3757 #f)
           (mothership-mass-recall 2368 #t)
@@ -1381,12 +1396,13 @@
           (baneling-explode 42 #t)
           (widow-mine-attack 2099 #t)
           (widow-mine-retarget 2099 #f)
-          (spawn-locusts-flying 2704 #t)
+          (spawn-locusts-flying 2704 #f)
           (swarm-host-spawn-locusts 2704 #f)
-          (locust-swoop 2706 #t)
+          (locust-swoop 2706 #f)
+          (locust-swoop 2387 #t)
           (cancel-adept-phase-shift 2594 #t)
           (cancel-phase-shift 2594 #f)
-          (cancel-adept-shade 2546 #t)
+          (cancel-adept-shade 2596 #t)
           (cancel-build 314 #f)
           (cancel-building 314 #f)
           (shadow-stride 2700 #t)
@@ -1459,7 +1475,10 @@
           (research-banshee-cloak 790 #t)
           (research-cloaking-field 790 #f)
           (research-hyperflight-rotors 799 #t)
-          (research-advanced-ballistics 805 #t)
+          (research-advanced-ballistics 805 #f)
+          (research-advanced-ballistics 1533 #t)
+          (research-caduceus-reactor 1535 #t)
+          (research-medivac-caduceus-reactor 1535 #f)
           (research-personal-cloaking 820 #t)
           (research-weapon-refit 1532 #t)
           (research-terran-infantry-weapons-1 652 #t)
@@ -1513,6 +1532,7 @@
           (research-gravitic-booster 1093 #t)
           (research-gravitic-boosters 1093 #f)
           (research-gravitic-drive 1094 #t)
+          (research-anion-pulse-crystals 46 #t)
           (research-flux-vanes 48 #t)
           (research-protoss-ground-weapons-1 1062 #t)
           (research-ground-weapons-1 1062 #f)
@@ -1548,7 +1568,7 @@
   (register-id-pair! SC2-ABILITY-SYM->ID SC2-ABILITY-ID->SYM sym id #:primary? prim?))
 
 ;; Decode-only variant ability ID aliases observed in `#115` pro-replay telemetry
-;; (preserve canonical outbound IDs 2545 / 349 in SC2-ABILITY-SYM->ID).
+;; (preserve canonical outbound IDs 2545 / 1764 in SC2-ABILITY-SYM->ID).
 (hash-set! SC2-ABILITY-ID->SYM 3807 'microbial-shroud)
 (hash-set! SC2-ABILITY-ID->SYM 3829 'microbial-shroud)
 (hash-set! SC2-ABILITY-ID->SYM 379 'auto-turret)
@@ -1641,7 +1661,7 @@
           (cloaking-field 20 #f)
           (personal-cloaking 25 #t)
           (weapon-refit 76 #t)
-          (hyperflight-rotors 138 #t)
+          (hyperflight-rotors 136 #t)
           (advanced-ballistics 140 #t)
           (terran-infantry-weapons-1 7 #t)
           (infantry-weapons-1 7 #f)
@@ -1695,6 +1715,7 @@
           (gravitic-booster 48 #t)
           (gravitic-boosters 48 #f)
           (gravitic-drive 49 #t)
+          (anion-pulse-crystals 99 #t)
           (flux-vanes 288 #t)
           (protoss-ground-weapons-1 39 #t)
           (ground-weapons-1 39 #f)
@@ -1732,32 +1753,41 @@
 ;; Populate Canonical BuffId Table
 (for ([entry
        (in-list
-        '((banshee-cloak 7 #t)
-          (ghost-cloak 8 #t)
+        '((graviton-beam 5 #t)
+          (ghost-cloak 6 #t)
+          (banshee-cloak 7 #t)
           (queen-spawn-larva-timer 11 #t)
           (fungal-growth 17 #t)
           (guardian-shield 18 #t)
           (neural-parasite 22 #t)
           (stimpack-marauder 24 #t)
           (stimpack 27 #t)
-          (transfusion 28 #t)
+          (psi-storm 28 #t)
+          (contaminate 36 #t)
           (oracle-revelation 49 #t)
           (oracle-cloak-field 55 #t)
-          (oracle-weapon 56 #t)
-          (pulsar-beam 56 #f)
-          (oracle-stasis-trap-target 57 #t)
-          (stasis-ward-target 57 #f)
+          (oracle-cloak-field-effect 56 #t)
+          (stasis 72 #t)
           (blinding-cloud 83 #t)
           (medivac-speed-boost 89 #t)
+          (oracle-weapon 99 #t)
+          (pulsar-beam 99 #f)
           (immortal-overload 102 #t)
           (lock-on 116 #t)
+          (void-ray-prismatic-alignment 122 #t)
+          (oracle-stasis-trap-target 129 #t)
+          (stasis-ward-target 129 #f)
           (parasitic-bomb 132 #t)
           (carry-mineral-field-minerals 271 #t)
           (carry-high-yield-mineral-field-minerals 272 #t)
           (carry-vespene-geyser-gas 273 #t)
           (carry-vespene-geyser-gas-protoss 274 #t)
           (carry-vespene-geyser-gas-zerg 275 #t)
+          (permanently-cloaked 276 #t)
+          (interference-matrix 277 #t)
+          (anti-armor-missile 280 #t)
           (chrono-boost 281 #t)
+          (transfusion 288 #t)
           (battery-overcharge 301 #t)))])
   (match-define (list sym id prim?) entry)
   (register-id-pair! SC2-BUFF-SYM->ID SC2-BUFF-ID->SYM sym id #:primary? prim?))
@@ -4573,6 +4603,16 @@
 (define SC2-TERRAN-5X3-MISS-STREAK (make-hasheq))
 (define SC2-PROD-PLACEMENT-MISS-STREAK (make-hasheq))
 (define SC2-EXPANSION-PAD-BLOCK-STREAK (make-hash))
+(define SC2-WATCHDOG-RING-EXPAND-SYMS (make-hasheq))
+(define SC2-PROTOSS-FRAGILE-TECH-SYMS
+  '(robotics-facility stargate twilight-council
+    robotics-bay robotics-support-bay
+    templar-archive templar-archives dark-shrine fleet-beacon))
+(define (sc2-request-ring-expand! bldg-sym [cur-loop (unbox SC2-WARPGATE-LAST-LOOP)])
+  (define canon (sc2-canonical-structure-sym bldg-sym))
+  (when canon
+    (hash-set! SC2-WATCHDOG-RING-EXPAND-SYMS canon
+               (if (exact-integer? cur-loop) cur-loop 0))))
 (define SC2-TUMOR-PLACEMENT-CACHE (make-hash))
 (define SC2-MACRO-ABILITY-LAST-LOOP (make-hash))
 
@@ -4809,6 +4849,7 @@
     (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
     (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
     (hash-clear! SC2-EXPANSION-PAD-BLOCK-STREAK)
+    (hash-clear! SC2-WATCHDOG-RING-EXPAND-SYMS)
     (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
     (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
     (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
@@ -5807,7 +5848,7 @@
              [else #f]))
          (sc2-unit-orders b))))))
 
-  ;; Stasis-frozen friendly unit & worker tracking (Oracle Stasis Ward buff 57 = 21.4s / 480 frames)
+  ;; Stasis-frozen friendly unit & worker tracking (Oracle Stasis Ward buff 129 = 21.4s / 480 frames)
   (define (unit-record-stasis-frozen? u)
     (define bfs (hash-ref u 'buffs '()))
     (or (memq 'oracle-stasis-trap-target bfs)
@@ -6669,7 +6710,8 @@
                                    #:game-info [game-info #f]
                                    #:check-bfs [pre-check-bfs 'auto]
                                    #:layout-safety-ok? [pre-layout-safety-ok? 'auto]
-                                   #:skip-terran-addon-reserve? [skip-terran-addon-reserve? #f])
+                                   #:skip-terran-addon-reserve? [skip-terran-addon-reserve? #f]
+                                   #:min-pylon-spacing [min-pylon-spacing 0.0])
   (define canon-bldg (and bldg-sym (sc2-canonical-structure-sym bldg-sym)))
   (define-values (cand-hw cand-hh)
     (sc2-structure-half-dims (or canon-bldg 'barracks)))
@@ -6730,6 +6772,9 @@
   (define blocking-circles '())
   (define blocking-aabbs '())
   (define local-blocking-res '())
+  (define pylon-spacing-pts '())
+  (define enforce-pylon-spacing? (and (eq? canon-bldg 'pylon) (> min-pylon-spacing 0.0)))
+  (define pylon-spacing-sq (if enforce-pylon-spacing? (sqr min-pylon-spacing) 0.0))
   (for ([u (in-list existing-units)])
     (define is-struct? (sc2-unit-is-structure? u))
     (define is-res?
@@ -6774,6 +6819,13 @@
               (cons (vector px py (- (+ cand-hw u-hw) 0.05) (- (+ cand-hh u-hh) 0.05))
                     blocking-aabbs)))
       (when (and is-struct?
+                 enforce-pylon-spacing?
+                 (= (sc2-unit-alliance u) 1)
+                 (not (= (sc2-unit-display-type u) 4))
+                 (not (sc2-unit-is-flying u))
+                 (= (sc2-unit-unit-type u) 60))
+        (set! pylon-spacing-pts (cons (cons px py) pylon-spacing-pts)))
+      (when (and is-struct?
                  (not skip-terran-addon-reserve?)
                  (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
                        '(barracks factory starport)))
@@ -6791,6 +6843,10 @@
             (set! in-transit-build-pts
                   (cons (sc2-point2d (any-point-x tp) (any-point-y tp))
                         in-transit-build-pts)))
+          (when (and enforce-pylon-spacing? (= ab-id 881))
+            (set! pylon-spacing-pts
+                  (cons (cons (any-point-x tp) (any-point-y tp))
+                        pylon-spacing-pts)))
           (when (and (not skip-terran-addon-reserve?)
                      (memv ab-id '(321 328 329)))
             (set! in-transit-terran-addon-pts
@@ -6837,7 +6893,11 @@
               (vector-ref bc 2)))
          (for/and ([ba (in-list blocking-aabbs)])
            (not (and (< (abs (- cx (vector-ref ba 0))) (vector-ref ba 2))
-                     (< (abs (- cy (vector-ref ba 1))) (vector-ref ba 3)))))))
+                     (< (abs (- cy (vector-ref ba 1))) (vector-ref ba 3)))))
+         ;; L49 Anti-"Pylon Soup": Enforce >= 9.0t spacing between non-wall Pylons on primary search!
+         (or (not enforce-pylon-spacing?)
+             (for/and ([pp (in-list pylon-spacing-pts)])
+               (>= (+ (sqr (- cx (car pp))) (sqr (- cy (cdr pp)))) pylon-spacing-sq)))))
   (define (clear-spot? cx cy)
     (and (or (not check-bfs)
              (< (check-bfs cx cy 4) +inf.0))
@@ -6962,7 +7022,8 @@
                                           #:require-addon-clear? [require-addon-clear? #f]
                                           #:prefer-3x3-fallback? [prefer-3x3-fallback? #f]
                                           #:creep-grid [creep-grid #f]
-                                          #:wide-fallback? [wide-fallback? #f])
+                                          #:wide-fallback? [wide-fallback? #f]
+                                          #:min-pylon-spacing [min-pylon-spacing 0.0])
   (define eff-creep-grid (or creep-grid (unbox SC2-ACTIVE-STEP-CREEP-GRID)))
   ;; For Terran production facilities (Barracks=321, Factory=328, Starport=329), also filter out
   ;; candidates whose East (+X) add-on footprint at (cx + 2.5, cy - 0.5) collides with structures or reserved AABBs,
@@ -7188,14 +7249,17 @@
 
   ;; If this build specifically targets a reserved wall-slot AABB matching our footprint dims,
   ;; exclude that slot (and its own paired `terran-addon-pad` AABB) from self-repulsion.
+  ;; L49 Protected Tech: Fragile Protoss tech (`Robo`/`Stargate`/`Twilight`/`RoboBay`/`TemplarArchive`)
+  ;; MUST NEVER match or claim a front `'wall-slot` AABB — wall strictly with sturdy Gateway/CyberCore/Forge!
   (define matched-wall-slot
-    (for/first ([b (in-list reserved-aabbs)]
-                #:when (and (reserved-aabb? b)
-                            (eq? (reserved-aabb-kind b) 'wall-slot)
-                            (<= (pt-dist anchor-x anchor-y (reserved-aabb-cx b) (reserved-aabb-cy b)) 3.0)
-                            (<= (abs (- (reserved-aabb-half-w b) cand-hw)) 0.35)
-                            (<= (abs (- (reserved-aabb-half-h b) cand-hh)) 0.35)))
-      b))
+    (and (not (memq canon-bldg SC2-PROTOSS-FRAGILE-TECH-SYMS))
+         (for/first ([b (in-list reserved-aabbs)]
+                     #:when (and (reserved-aabb? b)
+                                 (eq? (reserved-aabb-kind b) 'wall-slot)
+                                 (<= (pt-dist anchor-x anchor-y (reserved-aabb-cx b) (reserved-aabb-cy b)) 3.0)
+                                 (<= (abs (- (reserved-aabb-half-w b) cand-hw)) 0.35)
+                                 (<= (abs (- (reserved-aabb-half-h b) cand-hh)) 0.35)))
+           b)))
   (define eff-reserved-aabbs
     (if matched-wall-slot
         (let ([wx (reserved-aabb-cx matched-wall-slot)]
@@ -7363,7 +7427,16 @@
                 ;; W17-P0-1-wire: Preserve cached `3x3` Terran fallback spots unless `require-addon-clear?`
                 ;; is explicitly required (add-on relocation), eliminating needless cache-miss thrashing!
                 (or (not require-addon-clear?)
-                    (pair? (filter-addon-clear (list cpt) #:ignore-reserved-aabbs? #t)))))))
+                    (pair? (filter-addon-clear (list cpt) #:ignore-reserved-aabbs? #t)))
+                ;; L49 Anti-"Pylon Soup": Invalidate cached Pylon spot if a newly placed Pylon now sits within < min-pylon-spacing!
+                (or (not (and (eq? canon-bldg 'pylon) (> min-pylon-spacing 0.0) (not matched-wall-slot)))
+                    (for/and ([u (in-list existing-units)]
+                              #:when (and (= (sc2-unit-alliance u) 1)
+                                          (not (= (sc2-unit-display-type u) 4))
+                                          (not (sc2-unit-is-flying u))
+                                          (= (sc2-unit-unit-type u) 60)))
+                      (define up (sc2-unit-pos u))
+                      (>= (pt-dist cx cy (sc2-point3d-x up) (sc2-point3d-y up)) min-pylon-spacing)))))))
   (define pos-cache-hit
     (and ws-active?
          pos-cache-key
@@ -7521,7 +7594,13 @@
                                          #:bldg-sym canon-bldg
                                          #:game-info game-info
                                          #:check-bfs shared-check-bfs
-                                         #:layout-safety-ok? shared-layout-safety-ok?)))])
+                                         #:layout-safety-ok? shared-layout-safety-ok?
+                                         #:min-pylon-spacing (if (and (eq? canon-bldg 'pylon)
+                                                                      (> min-pylon-spacing 0.0)
+                                                                      (not matched-wall-slot)
+                                                                      (not tight-spacing?))
+                                                                 min-pylon-spacing
+                                                                 0.0))))])
       (dedup-point2ds (take all-pts (min 64 (length all-pts))))))
 
   (define raw-cands
@@ -8818,12 +8897,12 @@
                     cyclone-lock-on-damage mag-field-accelerator smart-servos))
        '(factory-tech-lab factory-techlab)]
       [(memq norm '(banshee-cloak cloaking-field hyperflight-rotors
-                    corvid-reactor caduceus-reactor medivac-caduceus-reactor
-                    advanced-ballistics interference-matrix hurricane-thrusters))
+                    corvid-reactor interference-matrix hurricane-thrusters))
        '(starport-tech-lab starport-techlab)]
       [(eq? norm 'personal-cloaking)
        '(ghost-academy)]
-      [(memq norm '(weapon-refit yamato-cannon behemoth-reactor))
+      [(memq norm '(weapon-refit yamato-cannon behemoth-reactor
+                    advanced-ballistics caduceus-reactor medivac-caduceus-reactor))
        '(fusion-core)]
       [(or (string-contains? str "terran-infantry")
            (string-contains? str "infantry-weapons")
@@ -10714,7 +10793,8 @@
                                                  #:game-info [game-info #f]
                                                  #:suppress-attack? [suppress-attack-kw #f]
                                                  #:tactical-posture [tactical-posture-kw #f]
-                                                 #:endgame-cleanup? [endgame-cleanup-kw #f])
+                                                 #:endgame-cleanup? [endgame-cleanup-kw #f]
+                                                 #:watchdog-expand-ring-syms [watchdog-expand-ring-syms '()])
   (define-values (actions step-action-rejects)
     (filter-valid-bot-actions (if (list? raw-actions) raw-actions '())))
   (set-box! SC2-LAST-BOT-ACTION-REJECTS step-action-rejects)
@@ -10823,6 +10903,7 @@
       (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
       (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
       (hash-clear! SC2-EXPANSION-PAD-BLOCK-STREAK)
+      (hash-clear! SC2-WATCHDOG-RING-EXPAND-SYMS)
       (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
       (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
       (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
@@ -10859,6 +10940,7 @@
       (hash-clear! SC2-TERRAN-5X3-MISS-STREAK)
       (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
       (hash-clear! SC2-EXPANSION-PAD-BLOCK-STREAK)
+      (hash-clear! SC2-WATCHDOG-RING-EXPAND-SYMS)
       (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
       (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
       (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
@@ -12588,6 +12670,110 @@
                                   lurker-den lurker-den-mp))))
                enemy-units)))
 
+  ;; L49: Shared 100% spawn-symmetric base geometry & Law 1 Stage-2 watchdog ring-expand helpers.
+  (define step-enemy-race
+    (or (and (hash? obs)
+             (let ([er (hash-ref obs 'enemy-race #f)])
+               (and (memq er '(Zerg Terran Protoss)) er)))
+        (and (sc2-game-info? eff-game-info)
+             (let ([my-pid (if (sc2-observation? obs)
+                               (sc2-player-common-player-id (sc2-observation-player-common obs))
+                               1)])
+               (for/first ([pi (in-list (sc2-game-info-player-info eff-game-info))]
+                           #:when (and (hash? pi)
+                                       (not (= (hash-ref pi 'player-id 0) my-pid))
+                                       (memq (hash-ref pi 'race-requested #f) '(Zerg Terran Protoss))))
+                 (hash-ref pi 'race-requested))))
+        (for/first ([e (in-list enemy-units)]
+                    #:when (let ([es (sc2-id->unit-symbol (sc2-unit-unit-type e) 'unknown)])
+                             (or (memq es '(hatchery lair hive drone zergling overlord spawning-pool roach queen))
+                                 (memq es '(command-center orbital-command scv marine barracks supply-depot factory))
+                                 (memq es '(nexus probe pylon gateway zealot stalker cybernetics-core)))))
+          (let ([es (sc2-id->unit-symbol (sc2-unit-unit-type e) 'unknown)])
+            (cond
+              [(memq es '(hatchery lair hive drone zergling overlord spawning-pool roach queen)) 'Zerg]
+              [(memq es '(command-center orbital-command scv marine barracks supply-depot factory)) 'Terran]
+              [else 'Protoss])))
+        'Random))
+  (define (watchdog-ring-expand-active? bldg-sym)
+    (define canon (sc2-canonical-structure-sym bldg-sym))
+    (or (and (list? watchdog-expand-ring-syms)
+             (or (memq bldg-sym watchdog-expand-ring-syms)
+                 (and canon (memq canon watchdog-expand-ring-syms)))
+             #t)
+        (let ([entry (and canon (hash-ref SC2-WATCHDOG-RING-EXPAND-SYMS canon #f))])
+          (and (exact-integer? entry)
+               (<= (abs (- cur-loop entry)) 224)))))
+  (define (clamp-playable-pt x y)
+    (let-values ([(bx0 by0 bx1 by1) (playable-sweep-bounds)])
+      (cons (max bx0 (min bx1 x))
+            (max by0 (min by1 y)))))
+  (define (req-matches-wall-slot? rx ry bldg-sym)
+    (define-values (hw hh) (sc2-structure-half-dims bldg-sym))
+    (and (ormap (lambda (b)
+                  (and (reserved-aabb? b)
+                       (eq? (reserved-aabb-kind b) 'wall-slot)
+                       (<= (pt-dist rx ry (reserved-aabb-cx b) (reserved-aabb-cy b)) 3.0)
+                       (<= (abs (- (reserved-aabb-half-w b) hw)) 0.35)
+                       (<= (abs (- (reserved-aabb-half-h b) hh)) 0.35)))
+                reserved-aabbs)
+         #t))
+  (define (near-any-wall-slot? rx ry [rad 4.5])
+    (and (ormap (lambda (b)
+                  (and (reserved-aabb? b)
+                       (eq? (reserved-aabb-kind b) 'wall-slot)
+                       (<= (pt-dist rx ry (reserved-aabb-cx b) (reserved-aabb-cy b)) rad)))
+                reserved-aabbs)
+         #t))
+  (define (base-mineral-away-dir bx by)
+    (define near-mins
+      (filter (lambda (m)
+                (define mp (sc2-unit-pos m))
+                (<= (pt-dist bx by (sc2-point3d-x mp) (sc2-point3d-y mp)) 12.5))
+              mineral-fields))
+    (if (pair? near-mins)
+        (let* ([cnt (exact->inexact (length near-mins))]
+               [mcx (/ (for/sum ([m (in-list near-mins)]) (sc2-point3d-x (sc2-unit-pos m))) cnt)]
+               [mcy (/ (for/sum ([m (in-list near-mins)]) (sc2-point3d-y (sc2-unit-pos m))) cnt)]
+               [dx (- bx mcx)]
+               [dy (- by mcy)]
+               [d (max 0.5 (sqrt (+ (* dx dx) (* dy dy))))])
+          (values (/ dx d) (/ dy d) mcx mcy #t near-mins))
+        (let* ([dx (- default-eb-x bx)]
+               [dy (- default-eb-y by)]
+               [d (max 0.5 (sqrt (+ (* dx dx) (* dy dy))))])
+          (values (/ dx d) (/ dy d) (- bx (* 6.5 (/ dx d))) (- by (* 6.5 (/ dy d))) #f '()))))
+  (define (find-natural-townhall [min-bp 0.01])
+    (define cand-nats
+      (for/list ([th (in-list townhalls)]
+                 #:when (and (not (sc2-unit-is-flying th))
+                             (>= (sc2-unit-build-progress th) min-bp)
+                             (let ([tp (sc2-unit-pos th)])
+                               (> (pt-dist home-x home-y (sc2-point3d-x tp) (sc2-point3d-y tp)) 10.0))))
+        th))
+    (if (pair? cand-nats)
+        (let* ([nat (argmin (lambda (th)
+                              (define tp (sc2-unit-pos th))
+                              (pt-dist home-x home-y (sc2-point3d-x tp) (sc2-point3d-y tp)))
+                            cand-nats)]
+               [np (sc2-unit-pos nat)])
+          (values nat (sc2-point3d-x np) (sc2-point3d-y np)))
+        (values #f #f #f)))
+  (define (natural-front-choke-dir nx ny)
+    (define-values (aux auy _mcx _mcy has-mins? _nm) (base-mineral-away-dir nx ny))
+    (define ed (max 0.5 (pt-dist nx ny default-eb-x default-eb-y)))
+    (define eux (/ (- default-eb-x nx) ed))
+    (define euy (/ (- default-eb-y ny) ed))
+    (if has-mins?
+        (let* ([bx (+ (* 0.55 eux) (* 0.45 aux))]
+               [by (+ (* 0.55 euy) (* 0.45 auy))]
+               [bn (sqrt (+ (* bx bx) (* by by)))])
+          (if (and (> bn 0.25)
+                   (>= (+ (* (/ bx bn) aux) (* (/ by bn) auy)) 0.35))
+              (values (/ bx bn) (/ by bn))
+              (values aux auy)))
+        (values eux euy)))
+
   ;; L29-P0-1 (`#52/#54` CloakLoss -> 0): Compute mineral-line static-detector anchors
   ;; (midpoint between each grounded TownHall and its mineral cluster, sorted so TownHalls
   ;; with active cloaked/burrowed threats within 18.0t come FIRST!).
@@ -13613,9 +13799,35 @@
                   (memq norm '(gateway cybernetics-core robotics-facility stargate shield-battery
                                forge twilight-council robotics-bay robotics-support-bay
                                templar-archive templar-archives dark-shrine fleet-beacon))))
+            ;; L49 Protoss Protected Tech: Keep fragile tech (`Robo`/`Stargate`/`Twilight`/`RoboBay`/
+            ;; `TemplarArchive`/`DarkShrine`/`FleetBeacon`) OUT of front/PvZ natural wall slots,
+            ;; tucking them inside Main under a safe Main-interior Pylon whenever one exists!
+            (define is-fragile-protoss-tech?
+              (and (memq norm SC2-PROTOSS-FRAGILE-TECH-SYMS) #t))
+            (define main-safe-pylons
+              (if (and is-fragile-protoss-tech? (pair? uncontested-pylons))
+                  (let* ([in-main
+                          (filter (lambda (pt)
+                                    (<= (pt-dist home-x home-y (car pt) (cdr pt)) 16.0))
+                                  uncontested-pylons)]
+                         [non-wall-main
+                          (filter (lambda (pt) (not (near-any-wall-slot? (car pt) (cdr pt) 4.0)))
+                                  in-main)]
+                         [best-main (if (pair? non-wall-main) non-wall-main in-main)])
+                    (sort best-main < #:key (lambda (pt) (pt-dist home-x home-y (car pt) (cdr pt)))))
+                  '()))
+            (define fragile-tech-main-protect?
+              (and is-fragile-protoss-tech?
+                   (pair? main-safe-pylons)
+                   (or (near-any-wall-slot? req-x req-y 4.5)
+                       (and (eq? step-enemy-race 'Zerg)
+                            (> (pt-dist home-x home-y req-x req-y) 13.5))
+                       (> (pt-dist home-x home-y req-x req-y) 16.0))))
             (define search-anchors
               (cond
                 [(and emerg-cloak-cannon? (pair? cloak-cannon-anchors)) cloak-cannon-anchors]
+                [fragile-tech-main-protect?
+                 (remove-duplicates (append main-safe-pylons uncontested-pylons))]
                 [(and protoss-tight-fallback-bldg? (pair? uncontested-pylons)) uncontested-pylons]
                 [(pair? pylon-anchors) pylon-anchors]
                 [else (list (cons req-x req-y))]))
@@ -13632,17 +13844,24 @@
                                                         completed-pylons))))
             (define primary-x
               (if (and req-powered? (not req-contested?) (not emerg-cloak-cannon?)
-                       (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?))
+                       (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?)
+                       (not fragile-tech-main-protect?))
                   req-x px))
             (define primary-y
               (if (and req-powered? (not req-contested?) (not emerg-cloak-cannon?)
-                       (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?))
+                       (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?)
+                       (not fragile-tech-main-protect?))
                   req-y py))
             (define eff-anchors
               (if (and req-powered? (not req-contested?) (not emerg-cloak-cannon?)
-                       (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?))
+                       (not early-rush-gw2-main-safe?) (not wide-gateway4-fallback?)
+                       (not fragile-tech-main-protect?))
                   (remove-duplicates (cons (cons req-x req-y) search-anchors))
-                  (remove-duplicates (append search-anchors (if req-powered? (list (cons req-x req-y)) '())))))
+                  (remove-duplicates
+                   (append search-anchors
+                           (if (and req-powered? (not fragile-tech-main-protect?))
+                               (list (cons req-x req-y))
+                               '())))))
             (define protoss-budget-before (unbox step-placement-rpc-budget))
             (define place-pt0
               (and (not skip-unpowered-cannon?)
@@ -13757,10 +13976,16 @@
               (and tight-can-run?
                    ws-conn-open?
                    (<= (unbox step-placement-rpc-budget) 0)))
-            (define gw-miss-streak
-              (if (eq? norm 'gateway)
-                  (hash-ref SC2-PROD-PLACEMENT-MISS-STREAK 'gateway 0)
-                  0))
+            ;; L49 Law 1 Stage-2: Track placement miss-streak uniformly across ALL Protoss powered
+            ;; prod/tech buildings (`>= 2` misses or watchdog ring-expand widens search across all
+            ;; Pylons + rear-base relief Pylon!).
+            (define protoss-bldg-miss-streak
+              (hash-ref SC2-PROD-PLACEMENT-MISS-STREAK norm 0))
+            (define protoss-stage2-ring-expand?
+              (and protoss-tight-fallback-bldg?
+                   (or (>= protoss-bldg-miss-streak 2)
+                       (watchdog-ring-expand-active? norm))))
+            (define gw-miss-streak protoss-bldg-miss-streak)
             (define place-pt-pre
               (cond
                 [place-pt1 place-pt1]
@@ -13783,13 +14008,16 @@
                                                      #:cur-loop cur-loop))
                  (and (powered-place-pt? pt-tight) pt-tight)]
                 [else #f]))
-            ;; L42-P0-3b (`ProdStall 5 -> 0`, `#33/#48` gateway): After >= 3 consecutive `gateway`
-            ;; placement failures, run a wide `0.0t`-spacing powered fallback across ALL completed
-            ;; Pylons (`#:wide-fallback? #t`), and if ALL Pylons are truly boxed out while `>= 100M`
-            ;; and 0 Pylons are warping in, place a relief `Pylon (881)` at the least-crowded
-            ;; uncontested secondary TownHall/Nexus!
+            ;; L42-P0-3b + L49 Law 1 Stage-2 (`ProdStall -> 0`): After >= 2 consecutive placement
+            ;; misses (or watchdog ring-expand flag!) on ANY Protoss prod/tech building, run a wide
+            ;; `0.0t`-spacing powered fallback across ALL completed Pylons (`#:wide-fallback? #t`),
+            ;; and if ALL Pylons are boxed out while `>= 100M` and 0 Pylons are warping in, place a
+            ;; safe relief `Pylon (881)` at the least-crowded uncontested TownHall/Nexus!
             (define gw-wide-anchors
-              (if (and (eq? norm 'gateway) (not place-pt-pre) (>= gw-miss-streak 3) (pair? pylon-anchors))
+              (if (and (not place-pt-pre)
+                       (or protoss-stage2-ring-expand?
+                           (and (eq? norm 'gateway) (>= gw-miss-streak 3)))
+                       (pair? pylon-anchors))
                   (remove-duplicates (append tight-safe-pylons pylon-anchors))
                   '()))
             (define gw-wide-can-run?
@@ -13825,8 +14053,8 @@
                          (and (powered-place-pt? pt-w) pt-w)))))
             (cond
               [place-pt
-               (when (eq? norm 'gateway)
-                 (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK 'gateway 0))
+               (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK norm 0)
+               (hash-remove! SC2-WATCHDOG-RING-EXPAND-SYMS (sc2-canonical-structure-sym norm))
                ;; L30-P0-1 (`#36/#40` power-fail persistence): Keep `SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP`
                ;; sticky whenever a 3x3 Protoss prod/tech building failed earlier this step, and never
                ;; let a 2x2 Cannon/Battery sneaking into a small nook clear an active 3x3 power-fail flag!
@@ -13858,8 +14086,10 @@
                                           (ormap (lambda (o) (= (sc2-unit-order-ability-id o) 881))
                                                  (sc2-unit-orders u))))
                                    self-units))])
-                   (if (and (eq? norm 'gateway)
-                            (>= gw-miss-streak 3)
+                   (if (and (or (>= protoss-bldg-miss-streak 3)
+                                (and (watchdog-ring-expand-active? norm)
+                                     protoss-tight-fallback-bldg?
+                                     (not (memq norm '(photon-cannon shield-battery)))))
                             (>= cur-m 100)
                             (not pylon-warping?)
                             (pair? townhalls))
@@ -13922,13 +14152,13 @@
                                   (record-step-built-structure! 'pylon)
                                   (record-builder-reservation! wtag (sc2-point2d-x py-pt) (sc2-point2d-y py-pt) 881)
                                   (emit! (sc2-raw-unit-command 881 py-pt 0 (list wtag) #f))
-                                  (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK 'gateway 0)
+                                  (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK norm 0)
                                   #t]
                                  [else #f]))
                              #f))
                        #f)))
-               (when (and (eq? norm 'gateway) (not relief-pylon-emitted?))
-                 (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK 'gateway (add1 gw-miss-streak)))
+               (when (not relief-pylon-emitted?)
+                 (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK norm (add1 protoss-bldg-miss-streak)))
                (set! step-protoss-power-fail? #t)
                (set-box! SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP
                          (if (sc2-observation? obs)
@@ -14042,11 +14272,134 @@
                           (append on-c off-c))
                         dedup-pts))
                   '()))
+            ;; L49 Zerg Pro-Style Layout:
+            ;;   (1) Rear / mineral-line side of Main Hatchery for SpawningPool & early non-wall tech
+            ;;       (`BanelingNest`, `HydraliskDen`, `Spire`) so the front ramp stays 100% open!
+            ;;   (2) Routine & emergency `SporeCrawler` anchored cleanly `~3.5t` toward mineral centroid!
+            ;;   (3) `ZvZ` Natural front choke partial wall for `RoachWarren` + `EvolutionChamber`
+            ;;       once Natural Hatchery is completed (`NatWall 20% -> >= 50%`)!
+            (define (prioritize-on-creep pts)
+              (if (and step-creep-grid (pair? pts))
+                  (let-values ([(on-c off-c)
+                                (partition (lambda (pt)
+                                             (image-grid-pixel-set? step-creep-grid (car pt) (cdr pt)))
+                                           pts)])
+                    (append on-c off-c))
+                  pts))
+            (define zerg-main-rear-tech-anchors
+              (if (memq norm '(spawning-pool baneling-nest hydralisk-den spire))
+                  (let* ([comp-ths
+                          (filter (lambda (u)
+                                    (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
+                                               '(hatchery lair hive))
+                                         (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
+                                  self-units)]
+                         [main-th
+                          (and (pair? comp-ths)
+                               (argmin (lambda (u)
+                                         (define p (sc2-unit-pos u))
+                                         (pt-dist home-x home-y (sc2-point3d-x p) (sc2-point3d-y p)))
+                                       comp-ths))])
+                    (if main-th
+                        (let*-values ([(mp) (sc2-unit-pos main-th)]
+                                      [(hx hy) (values (sc2-point3d-x mp) (sc2-point3d-y mp))]
+                                      [(aux auy _mcx _mcy has-m? near-mins) (base-mineral-away-dir hx hy)])
+                          ;; Only pivot to rear/mineral-arc pockets when local minerals are observed
+                          ;; (preserving tight Hatchery-adjacent placement when no minerals are present!).
+                          (if (not has-m?)
+                              '()
+                              (let ([rear-cands
+                                     (filter
+                                      (lambda (pt)
+                                        (for/and ([m (in-list near-mins)])
+                                          (define mpos (sc2-unit-pos m))
+                                          (> (pt-dist (car pt) (cdr pt) (sc2-point3d-x mpos) (sc2-point3d-y mpos)) 2.55)))
+                                      (list
+                                       (let* ([ang 2.007] [ca (cos ang)] [sa (sin ang)])
+                                         (clamp-playable-pt (+ hx (* 5.2 (- (* aux ca) (* auy sa))))
+                                                            (+ hy (* 5.2 (+ (* aux sa) (* auy ca))))))
+                                       (let* ([ang -2.007] [ca (cos ang)] [sa (sin ang)])
+                                         (clamp-playable-pt (+ hx (* 5.2 (- (* aux ca) (* auy sa))))
+                                                            (+ hy (* 5.2 (+ (* aux sa) (* auy ca))))))
+                                       (let* ([ang 2.531] [ca (cos ang)] [sa (sin ang)])
+                                         (clamp-playable-pt (+ hx (* 5.5 (- (* aux ca) (* auy sa))))
+                                                            (+ hy (* 5.5 (+ (* aux sa) (* auy ca))))))
+                                       (let* ([ang -2.531] [ca (cos ang)] [sa (sin ang)])
+                                         (clamp-playable-pt (+ hx (* 5.5 (- (* aux ca) (* auy sa))))
+                                                            (+ hy (* 5.5 (+ (* aux sa) (* auy ca))))))
+                                       (clamp-playable-pt (- hx (* 8.5 aux)) (- hy (* 8.5 auy)))))])
+                                (take (prioritize-on-creep (remove-duplicates rear-cands))
+                                      (min 3 (length (remove-duplicates rear-cands)))))))
+                        '()))
+                  '()))
+            (define routine-spore-mineral-anchors
+              (if (and (eq? norm 'spore-crawler) (not emerg-cloak-spore?))
+                  (let* ([comp-ths
+                          (sort
+                           (filter (lambda (u)
+                                     (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
+                                                '(hatchery lair hive))
+                                          (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
+                                   self-units)
+                           <
+                           #:key (lambda (u)
+                                   (define p (sc2-unit-pos u))
+                                   (pt-dist req-x req-y (sc2-point3d-x p) (sc2-point3d-y p))))]
+                         [pts
+                          (append*
+                           (for/list ([th (in-list comp-ths)])
+                             (define tp (sc2-unit-pos th))
+                             (define hx (sc2-point3d-x tp))
+                             (define hy (sc2-point3d-y tp))
+                             (define-values (aux auy _mcx _mcy has-m? _nm) (base-mineral-away-dir hx hy))
+                             (if has-m?
+                                 (let ([mux (- aux)] [muy (- auy)] [px (- auy)] [py aux])
+                                   (list (clamp-playable-pt (+ hx (* 3.5 mux)) (+ hy (* 3.5 muy)))
+                                         (clamp-playable-pt (+ hx (* 3.5 mux) (* 1.5 px)) (+ hy (* 3.5 muy) (* 1.5 py)))
+                                         (clamp-playable-pt (+ hx (* 3.5 mux) (* -1.5 px)) (+ hy (* 3.5 muy) (* -1.5 py)))))
+                                 (list (cons hx hy)))))])
+                    (prioritize-on-creep (remove-duplicates pts)))
+                  '()))
+            (define zvz-nat-choke-wall-anchors
+              (if (and (memq norm '(roach-warren evolution-chamber))
+                       (eq? step-enemy-race 'Zerg))
+                  (let-values ([(nat-th nx ny) (find-natural-townhall 0.90)])
+                    (if (and nat-th
+                             (not (ormap (lambda (e)
+                                           (and (not (sc2-unit-is-flying e))
+                                                (sc2-unit-targetable-enemy-combat? e)
+                                                (let ([ep (sc2-unit-pos e)])
+                                                  (<= (pt-dist nx ny (sc2-point3d-x ep) (sc2-point3d-y ep)) 8.5))))
+                                         enemy-units))
+                             (< (count (lambda (s)
+                                         (and (memq (sc2-id->unit-symbol (sc2-unit-unit-type s) 'unknown)
+                                                    '(roach-warren evolution-chamber))
+                                              (let ([sp (sc2-unit-pos s)])
+                                                (<= (pt-dist nx ny (sc2-point3d-x sp) (sc2-point3d-y sp)) 10.0))))
+                                       self-structures)
+                                2))
+                        (let-values ([(fux fuy) (natural-front-choke-dir nx ny)])
+                          (define pux (- fuy))
+                          (define puy fux)
+                          (define cands
+                            (list (clamp-playable-pt (+ nx (* 5.8 fux) (* 2.0 pux)) (+ ny (* 5.8 fuy) (* 2.0 puy)))
+                                  (clamp-playable-pt (+ nx (* 5.8 fux) (* -2.0 pux)) (+ ny (* 5.8 fuy) (* -2.0 puy)))
+                                  (clamp-playable-pt (+ nx (* 6.2 fux)) (+ ny (* 6.2 fuy)))))
+                          (prioritize-on-creep (remove-duplicates cands)))
+                        '()))
+                  '()))
             (define safe-creep-pts
               (let ([base-pts (ordered-zerg-creep-anchors req-x req-y)])
-                (if emerg-cloak-spore?
-                    (remove-duplicates (append (cloaked-detector-mineral-anchors req-x req-y) base-pts))
-                    base-pts)))
+                (cond
+                  [emerg-cloak-spore?
+                   (remove-duplicates (append (cloaked-detector-mineral-anchors req-x req-y) base-pts))]
+                  [(pair? routine-spore-mineral-anchors)
+                   (remove-duplicates (append routine-spore-mineral-anchors base-pts))]
+                  [(pair? zvz-nat-choke-wall-anchors)
+                   (remove-duplicates (append zvz-nat-choke-wall-anchors base-pts))]
+                  [(pair? zerg-main-rear-tech-anchors)
+                   (remove-duplicates (append zerg-main-rear-tech-anchors base-pts))]
+                  [else base-pts])))
             (define cx (caar safe-creep-pts))
             (define cy (cdar safe-creep-pts))
             (define creep-bud-before (unbox step-placement-rpc-budget))
@@ -14090,29 +14443,33 @@
             (define place-pt0
               (or spine-front-pt
                   (find-verified-building-placement ws-conn ab-id cx cy units
-                                                    #:min-spacing 2.0
-                                                    #:max-radius (if emerg-cloak-spore? 8.0 8.5)
+                                                    #:min-spacing (if (pair? routine-spore-mineral-anchors) 0.5 2.0)
+                                                    #:max-radius (cond
+                                                                   [(or emerg-cloak-spore? (pair? routine-spore-mineral-anchors)) 8.0]
+                                                                   [(pair? zvz-nat-choke-wall-anchors) 6.5]
+                                                                   [else 8.5])
                                                     #:step 1.0
                                                     #:extra-reserved-points step-reserved-build-pts
                                                     #:anchor-points safe-creep-pts
-                                                    #:reserved-aabbs reserved-aabbs
+                                                    #:reserved-aabbs (if (pair? routine-spore-mineral-anchors) '() reserved-aabbs)
                                                     #:expansion-pads all-expansion-pads
                                                     #:bldg-sym norm
                                                     #:game-info eff-game-info
                                                     #:rpc-budget step-placement-rpc-budget
                                                     #:cur-loop cur-loop)))
-            ;; L24-P0-1 (`#52` SpireDrop=14t): For high-priority Zerg tech (`spire`, `hydralisk-den`,
-            ;; `lurker-den`, `lurker-den-mp`), when default `8.5t` search actively tried and failed,
-            ;; expand search radius `8.5 -> 11.5` across ALL completed Hatchery/Lair/Hive creep anchors
-            ;; (plus outer `9.5t` creep-ring offsets so crowded inner rings never exhaust candidate limit)!
-            ;; L29-P0-1 (`#52/#54` CloakLoss -> 0): For emergency `spore-crawler` under cloaked/burrowed
-            ;; threat, immediately fall back to `0.5t` tight spacing (`#:reserved-aabbs '()`, `3.45` pad
-            ;; clearance) right next to the attacked mineral line when `2.0t` placement fails!
+            ;; L24-P0-1 + L48-P0-3a + L49 Law 1 Stage-2 (`SpireDrop/ProdStall -> 0`):
+            ;; Track `SC2-PROD-PLACEMENT-MISS-STREAK` across ALL Zerg creep buildings; expand multi-Hatchery
+            ;; creep-ring fallback for Spire/HydraDen/LurkerDen OR any Zerg building with miss-streak >= 2
+            ;; or active watchdog ring-expand flag!
+            (define zerg-miss-streak (hash-ref SC2-PROD-PLACEMENT-MISS-STREAK norm 0))
+            (define zerg-stage2-ring-expand?
+              (or (>= zerg-miss-streak 2)
+                  (watchdog-ring-expand-active? norm)))
             (define creep-85-tried?
               (or (< (unbox step-placement-rpc-budget) creep-bud-before)
                   (not creep-ws-open?)))
             (define spore-tight-can-run?
-              (and emerg-cloak-spore?
+              (and (eq? norm 'spore-crawler)
                    (not place-pt0)
                    (or creep-85-tried?
                        (> creep-bud-before 0)
@@ -14134,15 +14491,17 @@
                                                          #:game-info eff-game-info
                                                          #:rpc-budget step-placement-rpc-budget
                                                          #:cur-loop cur-loop))
-                  ;; L48-P0-3a (`SpireDrop 2 -> 0`): Multi-Hatchery creep-ring anchor fallback across
+                  ;; L48-P0-3a + L49 Law 1 Stage-2: Multi-Hatchery creep-ring anchor fallback across
                   ;; ALL completed Hatcheries/Lairs/Hives (`5.5t`/`7.0t`/`9.5t` cardinal + diagonal rings,
-                  ;; on-creep prioritized when `step-creep-grid` exists, `1.0t` spacing, `#:wide-fallback? #t`),
-                  ;; granting a single fallback RPC when prior builds exhausted the base step budget!
-                  (and (memq norm '(spire hydralisk-den lurker-den lurker-den-mp))
+                  ;; on-creep prioritized, `0.5t`/`0.9t` spacing, `#:wide-fallback? #t`), granting a single
+                  ;; fallback RPC when prior builds exhausted the base step budget!
+                  (and (or (memq norm '(spire hydralisk-den lurker-den lurker-den-mp))
+                           zerg-stage2-ring-expand?)
                        (or creep-85-tried?
                            (> creep-bud-before 0)
                            (not creep-ws-open?)
-                           (and (null? (hash-ref self-units-by-sym norm '()))
+                           (and (or zerg-stage2-ring-expand?
+                                    (null? (hash-ref self-units-by-sym norm '())))
                                 (not (unbox step-wide-fallback-used?))))
                        (let* ([completed-th-pts
                                (for/list ([u (in-list self-units)]
@@ -14171,14 +14530,7 @@
                                                (min SC2-MAP-PLAYABLE-MAX-COORD (+ (car thp) (car off))))
                                           (max SC2-MAP-PLAYABLE-MIN-COORD
                                                (min SC2-MAP-PLAYABLE-MAX-COORD (+ (cdr thp) (cdr off))))))))]
-                              [ring-pts
-                               (if (and step-creep-grid (pair? raw-ring-pts))
-                                   (let-values ([(on-c off-c)
-                                                 (partition (lambda (pt)
-                                                              (image-grid-pixel-set? step-creep-grid (car pt) (cdr pt)))
-                                                            raw-ring-pts)])
-                                     (append on-c off-c))
-                                   raw-ring-pts)]
+                              [ring-pts (prioritize-on-creep raw-ring-pts)]
                               [expanded-creep-pts
                                (remove-duplicates
                                 (append other-th-pts ring-pts ordered-th-pts safe-creep-pts))]
@@ -14194,8 +14546,8 @@
                          (hash-remove! SC2-PLACEMENT-NEG-COOLDOWN
                                        (list norm (inexact->exact (round ex-cx)) (inexact->exact (round ex-cy))))
                          (find-verified-building-placement ws-conn ab-id ex-cx ex-cy units
-                                                           #:min-spacing 0.9
-                                                           #:max-radius 11.5
+                                                           #:min-spacing (if zerg-stage2-ring-expand? 0.5 0.9)
+                                                           #:max-radius (if zerg-stage2-ring-expand? 12.5 11.5)
                                                            #:step 1.0
                                                            #:extra-reserved-points step-reserved-build-pts
                                                            #:anchor-points expanded-creep-pts
@@ -14206,13 +14558,18 @@
                                                            #:rpc-budget step-placement-rpc-budget
                                                            #:cur-loop cur-loop
                                                            #:wide-fallback? #t)))))
-            (when place-pt
-              (reserve-step-build-pt! place-pt ab-id)
-              (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
-              (when wtag
-                (record-step-built-structure! norm)
-                (record-builder-reservation! wtag (sc2-point2d-x place-pt) (sc2-point2d-y place-pt) ab-id)
-                (emit! (sc2-raw-unit-command ab-id place-pt 0 (list wtag) #f))))]
+            (cond
+              [place-pt
+               (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK norm 0)
+               (hash-remove! SC2-WATCHDOG-RING-EXPAND-SYMS (sc2-canonical-structure-sym norm))
+               (reserve-step-build-pt! place-pt ab-id)
+               (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
+               (when wtag
+                 (record-step-built-structure! norm)
+                 (record-builder-reservation! wtag (sc2-point2d-x place-pt) (sc2-point2d-y place-pt) ab-id)
+                 (emit! (sc2-raw-unit-command ab-id place-pt 0 (list wtag) #f)))]
+              [(or creep-85-tried? (> creep-bud-before 0) (not creep-ws-open?))
+               (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK norm (add1 zerg-miss-streak))])]
 
            ;; Standard ground building placement (Pylons, Supply Depots, Barracks, Factories, Starports, etc.)
            ;; W16-P1-2-wire (`#17`): Include all grounded maturing/completed TownHalls (>= 0.50),
@@ -14436,10 +14793,192 @@
               (if is-terran-prod-bldg?
                   (hash-ref SC2-TERRAN-5X3-MISS-STREAK norm 0)
                   0))
+            ;; L49: Track general placement miss-streak & Law 1 Stage-2 ring-expand flag across ALL
+            ;; non-TownHall standard ground structures (Pylon, Supply Depot, Terran prod & tech!).
+            (define cur-bldg-miss-streak
+              (if (memq norm '(command-center nexus hatchery))
+                  0
+                  (hash-ref SC2-PROD-PLACEMENT-MISS-STREAK norm 0)))
             (define cur-prod-miss-streak
-              (if is-terran-prod-bldg?
-                  (hash-ref SC2-PROD-PLACEMENT-MISS-STREAK norm 0)
-                  0))
+              (if is-terran-prod-bldg? cur-bldg-miss-streak 0))
+            (define std-stage2-ring-expand?
+              (and (not (memq norm '(command-center nexus hatchery)))
+                   (or (>= cur-bldg-miss-streak 2)
+                       (watchdog-ring-expand-active? norm))))
+            (define req-is-wall-slot? (req-matches-wall-slot? req-x req-y norm))
+            ;; L49 (a) Protoss Natural Pylon Coverage + Perimeter Drop-Vision Pylons (Anti-"Pylon Soup"):
+            (define all-owned-pylon-pts
+              (if (eq? norm 'pylon)
+                  (for/list ([s (in-list self-structures)]
+                             #:when (and (not (sc2-unit-is-flying s))
+                                         (= (sc2-unit-unit-type s) 60)))
+                    (define sp (sc2-unit-pos s))
+                    (cons (sc2-point3d-x sp) (sc2-point3d-y sp)))
+                  '()))
+            (define pylon-nat-anchors
+              (if (and (eq? norm 'pylon)
+                       (not repower-target)
+                       (not req-contested-by-rush?)
+                       (not req-is-wall-slot?))
+                  (let-values ([(nat-th nx ny) (find-natural-townhall 0.01)])
+                    (if (and nat-th
+                             (not (ormap (lambda (pp) (<= (pt-dist nx ny (car pp) (cdr pp)) 11.0))
+                                         all-owned-pylon-pts))
+                             (not (ormap (lambda (e)
+                                           (and (not (sc2-unit-is-flying e))
+                                                (sc2-unit-targetable-enemy-combat? e)
+                                                (let ([ep (sc2-unit-pos e)])
+                                                  (<= (pt-dist nx ny (sc2-point3d-x ep) (sc2-point3d-y ep)) 8.0))))
+                                         enemy-units)))
+                        (let-values ([(aux auy _mcx _mcy _hm? _nm) (base-mineral-away-dir nx ny)])
+                          (define hdx (- home-x nx))
+                          (define hdy (- home-y ny))
+                          (define hd (max 0.5 (sqrt (+ (* hdx hdx) (* hdy hdy)))))
+                          (define hux (/ hdx hd))
+                          (define huy (/ hdy hd))
+                          (define pux (- auy))
+                          (define puy aux)
+                          (remove-duplicates
+                           (list (clamp-playable-pt (+ nx (* 5.5 hux)) (+ ny (* 5.5 huy)))
+                                 (clamp-playable-pt (+ nx (* 5.5 aux)) (+ ny (* 5.5 auy)))
+                                 (clamp-playable-pt (+ nx (* 5.5 pux)) (+ ny (* 5.5 puy)))
+                                 (clamp-playable-pt (+ nx (* -5.5 pux)) (+ ny (* -5.5 puy))))))
+                        '()))
+                  '()))
+            (define pylon-perimeter-vision-anchors
+              (if (and (eq? norm 'pylon)
+                       (not repower-target)
+                       (not req-contested-by-rush?)
+                       (not req-is-wall-slot?)
+                       (null? pylon-nat-anchors)
+                       (>= (length all-owned-pylon-pts) 2))
+                  (let*-values ([(aux auy _mcx _mcy _hm? main-mins) (base-mineral-away-dir home-x home-y)])
+                    (define ed (max 0.5 (pt-dist home-x home-y default-eb-x default-eb-y)))
+                    (define rdx (/ (- home-x default-eb-x) ed))
+                    (define rdy (/ (- home-y default-eb-y) ed))
+                    (define raw-perim
+                      (for/list ([ang (in-list '(0.0 0.785 -0.785 1.571 -1.571 2.356 -2.356))])
+                        (define ca (cos ang))
+                        (define sa (sin ang))
+                        (define rx (- (* rdx ca) (* rdy sa)))
+                        (define ry (+ (* rdx sa) (* rdy ca)))
+                        (clamp-playable-pt (+ home-x (* 10.5 rx)) (+ home-y (* 10.5 ry)))))
+                    (filter (lambda (pt)
+                              (and (for/and ([pp (in-list all-owned-pylon-pts)])
+                                     (>= (pt-dist (car pt) (cdr pt) (car pp) (cdr pp)) 9.0))
+                                   (for/and ([m (in-list main-mins)])
+                                     (define mp (sc2-unit-pos m))
+                                     (> (pt-dist (car pt) (cdr pt) (sc2-point3d-x mp) (sc2-point3d-y mp)) 3.25))))
+                            (remove-duplicates raw-perim)))
+                  '()))
+            ;; L49 (b) Terran Natural Depot Wall (`#3/#4`) + 1 Back-Edge Drop-Vision Depot:
+            (define cur-depot-pts
+              (if (eq? norm 'supply-depot)
+                  (for/list ([s (in-list self-structures)]
+                             #:when (and (not (sc2-unit-is-flying s))
+                                         (memq (sc2-id->unit-symbol (sc2-unit-unit-type s) 'unknown)
+                                               '(supply-depot supply-depot-lowered))))
+                    (define sp (sc2-unit-pos s))
+                    (cons (sc2-point3d-x sp) (sc2-point3d-y sp)))
+                  '()))
+            (define terran-nat-depot-wall-anchors
+              (if (and (eq? norm 'supply-depot)
+                       (not req-contested-by-rush?)
+                       (not req-is-wall-slot?)
+                       (>= (length cur-depot-pts) 2))
+                  (let-values ([(nat-th nx ny) (find-natural-townhall 0.01)])
+                    (if (and nat-th
+                             (< (count (lambda (dp) (<= (pt-dist nx ny (car dp) (cdr dp)) 12.0))
+                                       cur-depot-pts)
+                                2)
+                             (not (ormap (lambda (e)
+                                           (and (not (sc2-unit-is-flying e))
+                                                (sc2-unit-targetable-enemy-combat? e)
+                                                (let ([ep (sc2-unit-pos e)])
+                                                  (<= (pt-dist nx ny (sc2-point3d-x ep) (sc2-point3d-y ep)) 9.0))))
+                                         enemy-units)))
+                        (let-values ([(fux fuy) (natural-front-choke-dir nx ny)])
+                          (define pux (- fuy))
+                          (define puy fux)
+                          (remove-duplicates
+                           (list (clamp-playable-pt (+ nx (* 6.8 fux) (* 2.2 pux)) (+ ny (* 6.8 fuy) (* 2.2 puy)))
+                                 (clamp-playable-pt (+ nx (* 6.8 fux) (* -2.2 pux)) (+ ny (* 6.8 fuy) (* -2.2 puy)))
+                                 (clamp-playable-pt (+ nx (* 7.2 fux)) (+ ny (* 7.2 fuy))))))
+                        '()))
+                  '()))
+            (define terran-back-edge-depot-anchors
+              (if (and (eq? norm 'supply-depot)
+                       (not req-contested-by-rush?)
+                       (not req-is-wall-slot?)
+                       (null? terran-nat-depot-wall-anchors)
+                       (>= (length cur-depot-pts) 4))
+                  (let* ([ed (max 0.5 (pt-dist home-x home-y default-eb-x default-eb-y))]
+                         [rdx (/ (- home-x default-eb-x) ed)]
+                         [rdy (/ (- home-y default-eb-y) ed)]
+                         [has-back?
+                          (ormap (lambda (dp)
+                                   (and (>= (pt-dist home-x home-y (car dp) (cdr dp)) 7.0)
+                                        (> (+ (* (- (car dp) home-x) rdx)
+                                              (* (- (cdr dp) home-y) rdy))
+                                           3.0)))
+                                 cur-depot-pts)])
+                    (if has-back?
+                        '()
+                        (let-values ([(_aux _auy _mcx _mcy _hm? main-mins) (base-mineral-away-dir home-x home-y)])
+                          (filter (lambda (pt)
+                                    (for/and ([m (in-list main-mins)])
+                                      (define mp (sc2-unit-pos m))
+                                      (> (pt-dist (car pt) (cdr pt) (sc2-point3d-x mp) (sc2-point3d-y mp)) 3.25)))
+                                  (remove-duplicates
+                                   (list (clamp-playable-pt (+ home-x (* 10.5 rdx)) (+ home-y (* 10.5 rdy)))
+                                         (clamp-playable-pt (+ home-x (* 9.5 (- (* rdx 0.707) (* rdy 0.707))))
+                                                            (+ home-y (* 9.5 (+ (* rdx 0.707) (* rdy 0.707)))))
+                                         (clamp-playable-pt (+ home-x (* 9.5 (+ (* rdx 0.707) (* rdy 0.707))))
+                                                            (+ home-y (* 9.5 (- (* rdy 0.707) (* rdx 0.707)))))))))))
+                  '()))
+            ;; L49 (b2) Terran Compact Main Addon-Swap Cluster: When building Main Barracks/Factory/Starport
+            ;; at `miss-streak == 0` (non-wall, uncontested), align cleanly into compact rows/columns
+            ;; beside existing Main production (preserving `+2.5x` east add-on clearance, zero sprawl!).
+            (define terran-compact-swap-anchors
+              (if (and is-terran-prod-bldg?
+                       (= cur-prod-miss-streak 0)
+                       (not req-contested-by-rush?)
+                       (not req-is-wall-slot?)
+                       (< cur-terran-prod-count 5))
+                  (let* ([main-prod-pts
+                          (for/list ([s (in-list self-structures)]
+                                     #:when (and (not (sc2-unit-is-flying s))
+                                                 (memq (sc2-id->unit-symbol (sc2-unit-unit-type s) 'unknown)
+                                                       '(barracks factory starport))
+                                                 (let ([sp (sc2-unit-pos s)])
+                                                   (<= (pt-dist home-x home-y (sc2-point3d-x sp) (sc2-point3d-y sp)) 16.0))))
+                            (define sp (sc2-unit-pos s))
+                            (cons (sc2-point3d-x sp) (sc2-point3d-y sp)))])
+                    (if (and (pair? main-prod-pts)
+                             (> (apply min (map (lambda (sp) (pt-dist req-x req-y (car sp) (cdr sp))) main-prod-pts)) 6.5))
+                        (let-values ([(_aux _auy _mcx _mcy _hm? main-mins) (base-mineral-away-dir home-x home-y)])
+                          (define raw-swap
+                            (append*
+                             (for/list ([sp (in-list (take main-prod-pts (min 3 (length main-prod-pts))))])
+                               (define sx (car sp))
+                               (define sy (cdr sp))
+                               ;; Stack neat rows (`dy = ±4.0`, same x-column) or parallel swap lane (`dx = ±6.0`)
+                               ;; so east `+2.5x` addon pad stays cleanly aligned without vertical sprawl!
+                               (list (clamp-playable-pt sx (+ sy 4.0))
+                                     (clamp-playable-pt sx (- sy 4.0))
+                                     (clamp-playable-pt (- sx 6.0) sy)
+                                     (clamp-playable-pt (+ sx 6.0) sy)))))
+                          (define filtered
+                            (filter (lambda (pt)
+                                      (and (<= (pt-dist home-x home-y (car pt) (cdr pt)) 13.5)
+                                           (>= (pt-dist home-x home-y (car pt) (cdr pt)) 4.5)
+                                           (for/and ([m (in-list main-mins)])
+                                             (define mp (sc2-unit-pos m))
+                                             (> (pt-dist (car pt) (cdr pt) (sc2-point3d-x mp) (sc2-point3d-y mp)) 3.75))))
+                                    (remove-duplicates raw-swap)))
+                          (sort filtered < #:key (lambda (pt) (pt-dist home-x home-y (car pt) (cdr pt)))))
+                        '()))
+                  '()))
             (define terran-prod-spillover-eligible?
               (and is-terran-prod-bldg?
                    (or (>= cur-terran-prod-count 1)
@@ -14505,6 +15044,10 @@
                 [(and emerg-cloak-turret? (pair? cloak-turret-anchors))
                  (caar cloak-turret-anchors)]
                 [early-rush-1base-inmain? (caar inmain-safe-anchors)]
+                [(pair? pylon-nat-anchors) (caar pylon-nat-anchors)]
+                [(pair? pylon-perimeter-vision-anchors) (caar pylon-perimeter-vision-anchors)]
+                [(pair? terran-nat-depot-wall-anchors) (caar terran-nat-depot-wall-anchors)]
+                [(pair? terran-back-edge-depot-anchors) (caar terran-back-edge-depot-anchors)]
                 [(and terran-prod-spillover-eligible? terran-5x3-missed? (pair? safe-completed-th-anchors))
                  (caar safe-completed-th-anchors)]
                 [(and (or req-contested-by-rush? terran-5x3-missed?)
@@ -14519,6 +15062,10 @@
                 [(and emerg-cloak-turret? (pair? cloak-turret-anchors))
                  (cdar cloak-turret-anchors)]
                 [early-rush-1base-inmain? (cdar inmain-safe-anchors)]
+                [(pair? pylon-nat-anchors) (cdar pylon-nat-anchors)]
+                [(pair? pylon-perimeter-vision-anchors) (cdar pylon-perimeter-vision-anchors)]
+                [(pair? terran-nat-depot-wall-anchors) (cdar terran-nat-depot-wall-anchors)]
+                [(pair? terran-back-edge-depot-anchors) (cdar terran-back-edge-depot-anchors)]
                 [(and terran-prod-spillover-eligible? terran-5x3-missed? (pair? safe-completed-th-anchors))
                  (cdar safe-completed-th-anchors)]
                 [(and (or req-contested-by-rush? terran-5x3-missed?)
@@ -14543,7 +15090,9 @@
             ;; minerals, AND only appended as fallback after `cur-prod-miss-streak >= 1` (never ahead
             ;; of safe Main/Natural interior spots!).
             (define secondary-th-perimeter-anchors
-              (if (and is-terran-prod-bldg? (>= cur-prod-miss-streak 1) (pair? townhalls))
+              (if (and (or (and is-terran-prod-bldg? (>= cur-prod-miss-streak 1))
+                           std-stage2-ring-expand?)
+                       (pair? townhalls))
                   (let*-values ([(bx0 by0 bx1 by1) (playable-sweep-bounds)])
                     (define (clamp-p x y)
                       (cons (max bx0 (min bx1 x))
@@ -14667,10 +15216,33 @@
                   (append inmain-safe-anchors
                           th-overflow-anchors
                           (list (cons home-x home-y) (cons req-x req-y)))]
+                 [(pair? pylon-nat-anchors)
+                  (append pylon-nat-anchors
+                          (list (cons req-x req-y) (cons home-x home-y))
+                          inmain-safe-anchors
+                          th-overflow-anchors)]
+                 [(pair? pylon-perimeter-vision-anchors)
+                  (append (take pylon-perimeter-vision-anchors (min 4 (length pylon-perimeter-vision-anchors)))
+                          (list (cons req-x req-y) (cons home-x home-y))
+                          inmain-safe-anchors
+                          th-overflow-anchors)]
+                 [(pair? terran-nat-depot-wall-anchors)
+                  (append terran-nat-depot-wall-anchors
+                          (list (cons req-x req-y))
+                          inmain-safe-anchors
+                          (list (cons home-x home-y))
+                          th-overflow-anchors)]
+                 [(pair? terran-back-edge-depot-anchors)
+                  (append terran-back-edge-depot-anchors
+                          (list (cons req-x req-y))
+                          inmain-safe-anchors
+                          (list (cons home-x home-y))
+                          th-overflow-anchors)]
                  [(and terran-prod-spillover-eligible?
                        (or terran-5x3-missed? is-terran-prod-relaxed?)
                        (pair? safe-completed-th-anchors))
-                  (append (list (cons req-x req-y) (cons home-x home-y))
+                  (append (take terran-compact-swap-anchors (min 3 (length terran-compact-swap-anchors)))
+                          (list (cons req-x req-y) (cons home-x home-y))
                           (take inmain-safe-anchors (min 2 (length inmain-safe-anchors)))
                           safe-completed-th-anchors
                           th-overflow-anchors
@@ -14686,7 +15258,8 @@
                           (list (cons home-x home-y) (cons req-x req-y))
                           th-overflow-anchors)]
                  [is-terran-prod-bldg?
-                  (append (list (cons req-x req-y))
+                  (append (take terran-compact-swap-anchors (min 3 (length terran-compact-swap-anchors)))
+                          (list (cons req-x req-y))
                           th-overflow-anchors
                           (list (cons home-x home-y))
                           (take inmain-safe-anchors (min 2 (length inmain-safe-anchors))))]
@@ -14696,6 +15269,13 @@
                           (list (cons home-x home-y))
                           th-overflow-anchors)])))
             (define std-bud-before (unbox step-placement-rpc-budget))
+            (define pylon-spacing-target
+              (if (and (eq? norm 'pylon)
+                       (not repower-target)
+                       (not req-is-wall-slot?)
+                       (not req-contested-by-rush?))
+                  9.0
+                  0.0))
             (define place-pt0
               (or repower-place-pt
                   (and (memq norm '(command-center nexus hatchery))
@@ -14710,7 +15290,10 @@
                                                       #:cur-loop cur-loop))
                   (find-verified-building-placement ws-conn ab-id eff-req-x eff-req-y units
                                                     #:min-spacing (if is-terran-prod-relaxed? 1.5 2.0)
-                                                    #:max-radius (if emerg-cloak-turret? 8.0 15.0)
+                                                    #:max-radius (cond
+                                                                   [emerg-cloak-turret? 8.0]
+                                                                   [(pair? terran-compact-swap-anchors) 12.0]
+                                                                   [else 15.0])
                                                     #:step 1.0
                                                     #:extra-reserved-points step-reserved-build-pts
                                                     #:anchor-points std-anchors
@@ -14720,7 +15303,8 @@
                                                     #:game-info eff-game-info
                                                     #:rpc-budget step-placement-rpc-budget
                                                     #:cur-loop cur-loop
-                                                    #:prefer-3x3-fallback? terran-5x3-missed?)))
+                                                    #:prefer-3x3-fallback? terran-5x3-missed?
+                                                    #:min-pylon-spacing pylon-spacing-target)))
             (define std-ws-open? (and (sc2-ws-conn? ws-conn) (not (sc2-ws-conn-closed? ws-conn))))
             (define std-tried-0?
               (or (< (unbox step-placement-rpc-budget) std-bud-before)
@@ -14815,19 +15399,19 @@
                                                          #:rpc-budget step-placement-rpc-budget
                                                          #:cur-loop cur-loop
                                                          #:prefer-3x3-fallback? #t))))
-            ;; L42-P0-3b + L43-P0-3a + L44-P0-3a (`ProdStall -> 0`): After >= 2 consecutive
-            ;; `barracks`/`factory`/`starport` misses (or >= 1 miss on relaxed Barracks!), widen
-            ;; spiral search to `30.0t` (`step = 2.0`, `min-spacing = 0.25`, `#:wide-fallback? #t`)
-            ;; across ALL grounded friendly TownHalls (`bp >= 0.25`, uncontested/least-crowded/secondary
-            ;; first), top-2 nearest uncontested open expansion aprons (`all-expansion-pads`, shifted
-            ;; `7.0t` outside the `4.5t` CC footprint so packed 1-base mains spill cleanly onto open
-            ;; natural/3rd flats without blocking expansion!), and playable-clamped `+/-14`, `+/-10`,
-            ;; `+/-18` diagonal, and `+/-22` outer-ring fallback grid offsets!
+            ;; L42-P0-3b + L43-P0-3a + L44-P0-3a + L49 Law 1 Stage-2 (`ProdStall -> 0`):
+            ;; After >= 2 consecutive misses (or watchdog Stage-2 ring-expand flag!) on ANY non-TownHall
+            ;; standard building (or >= 1 miss on relaxed Terran Barracks!), widen spiral search to
+            ;; `30.0t` (`step = 2.0`, `min-spacing = 0.25`, `#:wide-fallback? #t`) across ALL grounded
+            ;; friendly TownHalls, rear-side secondary-TH perimeters, open expansion aprons, and outer-ring
+            ;; offsets!
             (define terran-wide-eligible?
-              (and is-terran-prod-bldg?
+              (and (not (memq norm '(command-center nexus hatchery)))
                    (not place-pt-pre)
-                   (or (>= cur-prod-miss-streak 2)
-                       (and is-terran-prod-relaxed? (>= cur-prod-miss-streak 1)))
+                   (or std-stage2-ring-expand?
+                       (and is-terran-prod-bldg?
+                            (or (>= cur-prod-miss-streak 2)
+                                (and is-terran-prod-relaxed? (>= cur-prod-miss-streak 1)))))
                    (not (unbox step-wide-fallback-used?))))
             (define terran-wide-anchors
               (if terran-wide-eligible?
@@ -14945,21 +15529,22 @@
                                                          #:wide-fallback? #t))))
             (cond
               [place-pt
-               (when is-terran-prod-bldg?
-                 (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK norm 0))
+               (when (not (memq norm '(command-center nexus hatchery)))
+                 (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK norm 0)
+                 (hash-remove! SC2-WATCHDOG-RING-EXPAND-SYMS (sc2-canonical-structure-sym norm)))
                (reserve-step-build-pt! place-pt ab-id)
                (define wtag (pick-worker-near (sc2-point2d-x place-pt) (sc2-point2d-y place-pt)))
                (when wtag
                  (record-step-built-structure! norm)
                  (record-builder-reservation! wtag (sc2-point2d-x place-pt) (sc2-point2d-y place-pt) ab-id)
                  (emit! (sc2-raw-unit-command ab-id place-pt 0 (list wtag) #f)))]
-              [(and is-terran-prod-bldg?
+              [(and (not (memq norm '(command-center nexus hatchery)))
                     (or std-tried-0?
                         (> std-bud-before 0)
                         terran-tight-bonus-granted?
                         terran-wide-ran?
                         (not std-ws-open?)))
-               (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK norm (add1 cur-prod-miss-streak))])]))]
+               (hash-set! SC2-PROD-PLACEMENT-MISS-STREAK norm (add1 cur-bldg-miss-streak))])]))]
 
       ;; 2b. Dedicated Nydus Worm intent: `(build-nydus-worm <x> <y>)` or `(build-nydus-worm <nydus-id> <x> <y>)`
       [(or (list 'build-nydus-worm (? exact-integer? explicit-nid) (? real? raw-x) (? real? raw-y))
@@ -15555,8 +16140,8 @@
          (define ty (scale-bot-coord-to-world raw-y home-y))
          (define target-pt (sc2-point2d tx ty))
          (set-add! commanded-combat-tags uid)
-         (unless (unit-already-executing-order? uid 2706 target-pt 0)
-           (emit! (sc2-raw-unit-command 2706 target-pt 0 (list uid) #f))))]
+         (unless (unit-already-executing-order? uid 2387 target-pt 0)
+           (emit! (sc2-raw-unit-command 2387 target-pt 0 (list uid) #f))))]
 
       ;; W17-P0-2-wire (`#17` 143s & `#11` 55s freeze defense-in-depth): NEVER mark routine Bunker
       ;; Salvage (`32`) as P0 urgent survival! Require an empty completed Bunker (cargo == 0), skip
@@ -18021,7 +18606,7 @@
 (define SC2-FASTER-LOOPS-PER-MINUTE 1344.0)
 (define SC2-WIRE-COALESCABLE-ABILITIES
   (seteqv 16 17 18 23 42 76 171 380 388 390 403 405 556 558 1036 1042 1442 1526
-          1725 1727 1729 1731 1882 2095 2097 2108 2110 2244 2328 2338 2346 2375 2393 2706
+          1692 1725 1727 1729 1731 1882 2095 2097 2108 2110 2244 2328 2338 2346 2375 2387 2393 2706
           3661 3662 3665 3666 3667 3674 3675 3680 3681 3687))
 
 (struct wire-apm-governor
@@ -18053,8 +18638,8 @@
       ;; P0: Life-or-death survival, tactical spells, cancel, & combat mode-switches
       ;;     (L33-P0-1: Supply Depot lower/raise 556/558 moved out of P0 -> P2 so a blocked depot
       ;;      can NEVER saturate the 485 rolling APM cap and starve P1 macro!)
-      [(memv ab '(42 314 349 380 382 383 396 407 408 913 1408 1437 1438 1882 2244
-                  2368 2370 2371 2546 2594 2706 3659 3675 1442 3687 74 76 140 249 251 399 401
+      [(memv ab '(42 314 349 380 382 383 396 407 408 913 1408 1437 1438 1692 1764 1882 2244
+                  2368 2370 2371 2387 2546 2594 2596 2704 2706 3659 3675 1442 3687 74 76 140 249 251 399 401
                   1036 1526 1528 1530 1628 1664 1978 1998 2063 2067 2069 2073 2116 2146
                   2324 2338 2346 2350 2358 2375 2376 2393 2505 2542 2545 2588 2714 3668 3669
                   3747 3751 3753 3755 3757 4107 4113 4126 142 3686 388 390

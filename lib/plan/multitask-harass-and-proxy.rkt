@@ -151,7 +151,7 @@
 (define WIDOW-MINE-BURROWED-UNIT-ID 500)
 
 (: AUTO-TURRET-ABILITY-ID Integer)
-(define AUTO-TURRET-ABILITY-ID 349)
+(define AUTO-TURRET-ABILITY-ID 1764)
 
 (: ANTI-ARMOR-MISSILE-ABILITY-ID Integer)
 (define ANTI-ARMOR-MISSILE-ABILITY-ID 3753)
@@ -305,7 +305,7 @@
     [(500)  'widow-mine-burrowed]
     [(54)   'medivac]
     [(56)   'raven]
-    [(379)  'auto-turret]
+    [(31 379) 'auto-turret]
     [(34)   'viking-assault]
     [(35)   'viking-fighter]
     [(311)  'adept]
@@ -334,7 +334,7 @@
       [(500)  'widow-mine-burrowed]
       [(54)   'medivac]
       [(56)   'raven]
-      [(379)  'auto-turret]
+      [(31 379) 'auto-turret]
       [(34)   'viking-assault]
       [(35)   'viking-fighter]
       [(311)  'adept]
@@ -1683,7 +1683,7 @@
   '(carrier tempest battlecruiser brood-lord broodlord mothership
     void-ray voidray corruptor phoenix mutalisk viking viking-fighter))
 
-;; Plans peripheral air harass across Raven (`auto-turret` `349`/`379`, `anti-armor-missile` `3753`),
+;; Plans peripheral air harass across Raven (`auto-turret` `1764`, `anti-armor-missile` `3753`),
 ;; Oracle (`pulsar-beam` `2375` `60f` dwell, `stasis-ward` `2505`, `oracle-revelation` `2146`), and
 ;; Simultaneous Multi-Base Viking Landings (`>= 4` Vikings split into `2–3` pairs via `403`, liftoff `405`).
 (: plan-air-worker-harass-tactics

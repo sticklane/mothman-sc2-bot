@@ -284,16 +284,16 @@
     910 912 1038 1040 1182
     1217 1219 1221 1373 1411 1412 1438 1449 1451
     1517 1519 1521 1529 1531
-    1623 1624 1626 1685 1686
+    1623 1624 1626 1685 1686 1692
     1724 1726 1728 1730 1732 1763 1798 1882
     2051 2052 2075 2096 2107 2109 2113
     2331 2333 2354 2363 2365 2371
     2535 2546 2594 2596 2709 2715
     3659 3663 3664 3665 3671 3688 3689 3707 3793
     4114 4122 4128 4130
-    ;; Zerg Training (Larva + Queen 1632) & NoTarget Morphs
+    ;; Zerg Training (Larva + Queen 1632) & NoTarget Morphs (4121 = MORPHTOBANELING_BANELING)
     1342 1343 1344 1345 1346 1348 1351 1352 1353 1354 1356 1632
-    80 1216 1218 1220 1372 1448 1725 1727 2112 2330 2332 2708 3743 3745
+    80 4121 1216 1218 1220 1372 1448 1725 1727 2112 2330 2332 2708 3743 3745
     ;; Terran Training & NoTarget Morphs / Lift / Modes
     524 560 561 562 563 591 594 595 596 597 614 620 621 622 623 624 626 710
     388 390 403 405 417 452 485 518 556 558
@@ -310,7 +310,7 @@
     2328 2340 2342 2375 2376 2389 2391 2393
     3661 3662 3675 3676 3677 4124
     ;; Zerg / Terran / Protoss Research Abilities (including generic 3692..3706)
-    44 48 216 217 263 265
+    44 46 48 216 217 263 265
     652 653 654 656 657 658
     730 731 732 761 764 765 766 769 790 799 805 820
     855 856 857 861 862 863 864 865 866
@@ -319,7 +319,7 @@
     1186 1187 1188 1189 1190 1191 1192 1193 1194
     1223 1225 1252 1253 1282 1283
     1312 1313 1314 1315 1316 1317
-    1455 1456 1482 1532
+    1455 1456 1482 1532 1533 1535
     1562 1563 1564 1565 1566 1567 1568 1571 1592 1593 1594
     2720
     3692 3693 3694 3695 3696 3697 3698 3699 3700 3701 3702 3703 3704 3705 3706
@@ -342,7 +342,7 @@
     1413 1414 1416 1417 1418 1419
     ;; Point-Target Active Spells & Area Effects
     74 142 349 399 1036 1442 1526 1622 1628 1764 1990
-    2063 2146 2244 2338 2346 2358 2368 2505 2544 2545 2558 2588 2698 2700 2704 2706
+    2063 2146 2244 2338 2346 2358 2368 2387 2505 2544 2545 2558 2588 2698 2700 2704 2706
     3684 3686 3687 3757))
 
 ;; Dual-mode `PointOrUnit` (`SMART 1`, `MOVE 16/3794`, `PATROL 17/3795`, `ATTACK 23/24/25/3674`, Rallies, UnloadAllAt)
@@ -367,7 +367,7 @@
 
 ;; Autocast-toggleable abilities (`ActionRawToggleAutocast`)
 (define AUTOCAST-IDS : (Listof Positive-Integer)
-  '(78 316 386 1042 1819 1990 2099 2328 2350 3685 4113))
+  '(78 316 386 1042 1819 1990 2099 2328 2350 2704 3685 4113))
 
 (for ([id (in-list (append STRICT-NO-TARGET-IDS POINT-OR-NONE-IDS))])
   (when (< id SC2-ABILITY-TABLE-SIZE)
@@ -1350,7 +1350,7 @@
      (swarm-host . 1356)
      (swarmhost . 1356)
      (queen . 1632)
-     (baneling . 80)
+     (baneling . 4121)
      (ravager . 2330)
      (lurker . 2332)
      (brood-lord . 1372)
@@ -1402,7 +1402,7 @@
 
 (define MORPH-ABILITY-TABLE : (Immutable-HashTable Symbol Positive-Integer)
   (make-immutable-hasheq
-   '((baneling . 80)
+   '((baneling . 4121)
      (ravager . 2330)
      (lurker . 2332)
      (lurker-mp . 2332)
@@ -1512,7 +1512,9 @@
      (banshee-cloak . 790)
      (cloaking-field . 790)
      (hyperflight-rotors . 799)
-     (advanced-ballistics . 805)
+     (advanced-ballistics . 1533)
+     (caduceus-reactor . 1535)
+     (medivac-caduceus-reactor . 1535)
      (personal-cloaking . 820)
      (weapon-refit . 1532)
      (terran-infantry-weapons-1 . 652)
@@ -1568,7 +1570,7 @@
      (gravitic-booster . 1093)
      (gravitic-boosters . 1093)
      (gravitic-drive . 1094)
-     (anion-pulse-crystals . 44)
+     (anion-pulse-crystals . 46)
      (flux-vanes . 48)
      (protoss-ground-weapons-1 . 1062)
      (ground-weapons-1 . 1062)
@@ -1686,8 +1688,8 @@
      (morph-observer-siege-mode . (morph-observer-siege-mode . 3741))
      (morph-overseer-mode . (morph-overseer-mode . 3743))
      (morph-oversight-mode . (morph-oversight-mode . 3745))
-     (overlord-generate-creep . (overlord-generate-creep . 1882))
-     (generate-creep . (overlord-generate-creep . 1882))
+     (overlord-generate-creep . (overlord-generate-creep . 1692))
+     (generate-creep . (overlord-generate-creep . 1692))
      (baneling-explode . (baneling-explode . 42))
      (salvage-bunker . (salvage . 32))
      (bunker-unload . (bunker-unload . 408))
@@ -1700,7 +1702,8 @@
      (cancel-building . (cancel-build . 314))
      (hold-position . (hold-position . 18))
      (cancel-phase-shift . (cancel-adept-phase-shift . 2594))
-     (cancel-adept-phase-shift . (cancel-adept-phase-shift . 2594)))))
+     (cancel-adept-phase-shift . (cancel-adept-phase-shift . 2594))
+     (cancel-adept-shade . (cancel-adept-shade . 2596)))))
 
 (define POINT-SPELL-TABLE : (Immutable-HashTable Symbol (Pairof Symbol Positive-Integer))
   (make-immutable-hasheq
@@ -1729,9 +1732,11 @@
      (microbial-shroud . (microbial-shroud . 2545))
      (corrosive-bile . (corrosive-bile . 2338))
      (blinding-cloud . (blinding-cloud . 2063))
-     (spawn-locusts . (spawn-locusts . 1990))
-     (spawn-locusts-legacy . (spawn-locusts . 1990))
-     (locust-swoop . (locust-swoop . 2706))
+     (spawn-locusts . (spawn-locusts . 2704))
+     (spawn-locusts-legacy . (spawn-locusts . 2704))
+     (spawn-locusts-flying . (spawn-locusts . 2704))
+     (swarm-host-spawn-locusts . (spawn-locusts . 2704))
+     (locust-swoop . (locust-swoop . 2387))
      (spawn-creep-tumor . (spawn-creep-tumor . 1694))
      (spread-creep-tumor . (spread-creep-tumor . 1733))
      (build-creep-tumor . (build-creep-tumor . 3691))
@@ -1743,8 +1748,8 @@
      (scan . (scanner-sweep . 399))
      (tactical-jump . (tactical-jump . 2358))
      (kd8-charge . (kd8-charge . 2588))
-     (auto-turret . (auto-turret . 349))
-     (build-auto-turret . (auto-turret . 349))
+     (auto-turret . (auto-turret . 1764))
+     (build-auto-turret . (auto-turret . 1764))
      (morph-liberator-ag . (morph-liberator-ag . 2558))
      (nuke-calldown . (nuke-calldown . 1622))
      (tac-nuke-strike . (nuke-calldown . 1622))
@@ -1762,8 +1767,8 @@
      (neural-parasite . (neural-parasite . 249))
      (abduct . (abduct . 2067))
      (parasitic-bomb . (parasitic-bomb . 2542))
-     (viper-consume . (viper-consume . 2069))
-     (consume . (viper-consume . 2069))
+     (viper-consume . (viper-consume . 2073))
+     (consume . (viper-consume . 2073))
      (viper-consume-structure . (viper-consume-structure . 2073))
      (contaminate . (contaminate . 1825))
      (caustic-spray . (caustic-spray . 2324))
@@ -1801,8 +1806,12 @@
 (define (resolve-canonical-spell raw-sp)
   (define sym : (Option Symbol)
     (cond
-      ;; Legacy Ghost EMP integer `381` canonicalized to `'emp-round` -> `1628` (never raw `381`!)
+      ;; Legacy raw integers canonicalized to SC2 4.10 ability symbols
       [(and (exact-integer? raw-sp) (= raw-sp 381)) 'emp-round]
+      [(and (exact-integer? raw-sp) (= raw-sp 349)) 'auto-turret]
+      [(and (exact-integer? raw-sp) (= raw-sp 2069)) 'viper-consume]
+      [(and (exact-integer? raw-sp) (= raw-sp 1990)) 'spawn-locusts]
+      [(and (exact-integer? raw-sp) (= raw-sp 1882)) 'overlord-generate-creep]
       [else (extract-norm-symbol raw-sp)]))
   (cond
     [(not sym) #f]
@@ -2432,7 +2441,7 @@
            (define ab-id : Positive-Integer
              (cond
                [(eq? head 'purification-nova) 2346]
-               [(eq? head 'locust-swoop) 2706]
+               [(eq? head 'locust-swoop) 2387]
                [(eq? head 'spine-crawler-root) 1729]
                [(eq? head 'spore-crawler-root) 1731]
                [else 3680]))

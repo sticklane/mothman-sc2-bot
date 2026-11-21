@@ -637,7 +637,8 @@
    'snipe                2714
    'yamato-cannon        401
    'tactical-jump        2358
-   'auto-turret          349
+   'auto-turret          1764
+   'build-auto-turret    1764
    'interference-matrix  3747
    'anti-armor-missile   3753
    'salvage              32
@@ -664,11 +665,12 @@
    'pulsar-beam-off      2376
    'lock-on              2350
    ;; Wave 1 / 1.5 / 1C / 1D / 1E / 2A Canonical Spells & Tactical Abilities
-   'spawn-locusts        1990
+   'spawn-locusts        2704
    'spawn-locusts-legacy 2704
-   'locust-swoop         2706
-   'overlord-generate-creep 1882
-   'generate-creep       1882
+   'locust-swoop         2387
+   'cancel-adept-shade   2596
+   'overlord-generate-creep 1692
+   'generate-creep       1692
    'time-warp            2244
    'nexus-mass-recall    3757
    'mothership-mass-recall 2368
@@ -744,7 +746,8 @@
      1725  ;; SPINECRAWLERUPROOT_SPINECRAWLERUPROOT
      1727  ;; SPORECRAWLERUPROOT_SPORECRAWLERUPROOT
      1766  ;; MORPH_ARCHON
-     1882  ;; BEHAVIOR_GENERATECREEPON (Overlord Generate Creep)
+     1692  ;; BEHAVIOR_GENERATECREEPON (SC2 4.10 Overlord Generate Creep)
+     1882  ;; BEHAVIOR_GENERATECREEPON (legacy Overlord Generate Creep alias)
      1978  ;; MORPH_HELLION
      1998  ;; MORPH_HELLBAT
      2095  ;; BURROWDOWN_WIDOWMINE
@@ -762,6 +765,7 @@
      2546  ;; CANCEL_ADEPTPHASESHIFT (raw replay variant)
      2560  ;; MORPH_LIBERATORAAMODE
      2594  ;; CANCEL_ADEPTPHASESHIFT
+     2596  ;; CANCEL_ADEPTSHADEPHASESHIFT (SC2 4.10)
      2708  ;; MORPH_OVERLORDTRANSPORT
      556   ;; MORPH_SUPPLYDEPOT_LOWER
      558   ;; MORPH_SUPPLYDEPOT_RAISE
@@ -785,7 +789,7 @@
 (define SC2-POINT-TARGET-ABILITY-IDS
   (list->seteqv
    '(74    ;; FUNGALGROWTH_FUNGALGROWTH
-     349   ;; BUILD_AUTOTURRET
+     349   ;; BUILD_AUTOTURRET (legacy alias)
      399   ;; SCAN_MOVE (Scanner Sweep)
      1036  ;; PSISTORM_PSISTORM
      1442  ;; EFFECT_BLINK_STALKER
@@ -795,8 +799,9 @@
      1729  ;; SPINECRAWLERROOT_SPINECRAWLERROOT
      1731  ;; SPORECRAWLERROOT_SPORECRAWLERROOT
      1733  ;; BUILD_CREEPTUMOR_TUMOR
+     1764  ;; BUILDAUTOTURRET_AUTOTURRET (SC2 4.10)
      1768  ;; BUILD_NYDUSWORM
-     1990  ;; EFFECT_SPAWNLOCUSTS
+     1990  ;; EFFECT_SPAWNLOCUSTS (legacy alias)
      2063  ;; BLINDINGCLOUD_BLINDINGCLOUD
      2146  ;; ORACLEREVELATION_ORACLEREVELATION
      2244  ;; TIMEWARP_TIMEWARP
@@ -804,13 +809,14 @@
      2346  ;; EFFECT_PURIFICATIONNOVA
      2358  ;; EFFECT_TACTICALJUMP
      2368  ;; EFFECT_MASSRECALL_MOTHERSHIP
+     2387  ;; EFFECT_LOCUSTSWOOP (SC2 4.10)
      2505  ;; BUILD_STASISTRAP
      2544  ;; EFFECT_ADEPTPHASESHIFT
      2545  ;; EFFECT_MICROBIALSHROUD
      2558  ;; MORPH_LIBERATORAGMODE
      2588  ;; KD8CHARGE_KD8CHARGE
      2700  ;; EFFECT_SHADOWSTRIDE
-     2704  ;; EFFECT_SPAWNLOCUSTS (legacy alias)
+     2704  ;; EFFECT_SPAWNLOCUSTS (SC2 4.10)
      2706  ;; LOCUSTMPFLYINGSWOOPATTACK
      3678  ;; LAND
      3680  ;; ROOT
@@ -1588,7 +1594,13 @@
                   ((1442 3687)             . blink)
                   ((142 3686 3757)         . mass-recall)
                   ((1163 2112)             . build-lurker-den)
-                  ((895 1909)              . build-shield-battery))]
+                  ((895 1909)              . build-shield-battery)
+                  ((80 4121)               . morph-baneling)
+                  ((349 379 1764)          . auto-turret)
+                  ((2069 2073)             . viper-consume)
+                  ((1990 2704)             . spawn-locusts)
+                  ((2706 2387)             . locust-swoop)
+                  ((1882 1692)             . overlord-generate-creep))]
          [ht : (Immutable-HashTable Integer Symbol)
              (for*/hasheqv : (Immutable-HashTable Integer Symbol)
                            ([grp (in-list pairs)]
@@ -1604,7 +1616,7 @@
 (: SC2-PROTECTED-ORDER-CLASS-TABLE (Immutable-HashTable Integer Symbol))
 (define SC2-PROTECTED-ORDER-CLASS-TABLE
   (let ([ht : (Mutable-HashTable Integer Symbol) (make-hasheqv)])
-    (for ([id (in-list '(80 2330 2332 1372 1448 2708 1766 1216 1218 1220 1516 1450 1518))])
+    (for ([id (in-list '(80 4121 2330 2332 1372 1448 2708 1766 1216 1218 1220 1516 1450 1518))])
       (hash-set! ht id 'morph))
     (for ([id (in-list '(401 2358 2714 249 173 2073 2069 2324 258 3757 142 3686))])
       (hash-set! ht id 'channel))
@@ -1618,7 +1630,7 @@
                          1398 1400 3681))])
       (hash-set! ht id 'mode-switch))
     (for ([id (in-list '(251 1662 1694 3691 1733 1664 1628 1036 140 74 3763
-                         2338 2346 2067 2063 2542 2545 3747 3753 181 2505 1526))])
+                         1764 2338 2346 2067 2063 2542 2545 2704 3747 3753 181 2505 1526))])
       (hash-set! ht id 'cast-walk))
     (for/hasheqv : (Immutable-HashTable Integer Symbol) ([(k v) (in-hash ht)])
       (values k v))))
