@@ -47,6 +47,8 @@ VALID_TERRAINS = (
     "mineral-line-harass",
 )
 VALID_SOURCES = ("core", "match-forensics", "pro-db", "pattern-coverage", "replay-extract", "custom")
+VALID_TIERS = ("canonical", "regression", "econ-harass")
+VALID_SCORING_MODES = ("combat", "mineral-defense")
 
 VALID_UPGRADES = {
     "Burrow", "TunnelingClaws", "GlialReconstitution", "MetabolicBoost", "AdrenalGlands",
@@ -433,6 +435,14 @@ def validate_catalog(scenarios: list[dict[str, Any]]) -> list[str]:
         terrain = s.get("terrain", "open")
         if terrain not in VALID_TERRAINS:
             errs.append(f"{sid}: invalid terrain={terrain!r}")
+        tier = s.get("tier", "canonical")
+        if tier not in VALID_TIERS:
+            errs.append(f"{sid}: invalid tier={tier!r}")
+        scoring_mode = s.get("scoring_mode", "combat")
+        if scoring_mode not in VALID_SCORING_MODES:
+            errs.append(f"{sid}: invalid scoring_mode={scoring_mode!r}")
+        if scoring_mode == "mineral-defense" and float(s.get("pass_net_econ_min", 0.0)) <= 0.0:
+            errs.append(f"{sid}: mineral-defense scenario requires pass_net_econ_min > 0")
         for ukey in ("upgrades", "p1_upgrades", "p2_upgrades"):
             for u in s.get(ukey) or []:
                 if u not in VALID_UPGRADES:
@@ -472,6 +482,10 @@ def main() -> int:
     ap.add_argument("--terrain", choices=list(VALID_TERRAINS), default="open", help="Real SC2 terrain spawn mode")
     ap.add_argument("--high-ground-side", choices=["p1", "p2"], default="p1", help="Which side holds high ground on high-ground-ramp")
     ap.add_argument("--source", choices=list(VALID_SOURCES), default="custom", help="Scenario provenance tag")
+    ap.add_argument("--tier", choices=list(VALID_TIERS), default="canonical", help="Scenario tier (canonical | regression | econ-harass)")
+    ap.add_argument("--scoring-mode", choices=list(VALID_SCORING_MODES), default="combat", help="Scoring mode (combat | mineral-defense)")
+    ap.add_argument("--pass-net-econ-min", type=float, default=0.0, help="Net econ pass threshold for mineral-defense scenarios")
+    ap.add_argument("--origin-match-id", default="", help="Optional replay provenance tag for regression scenarios")
     ap.add_argument("--patterns", default="", help="Comma-separated tactical pattern tags")
     ap.add_argument("--upgrades", default="", help="Comma-separated shared upgrades (auto-routed by race)")
     ap.add_argument("--p1-upgrades", default="", help="Comma-separated P1 upgrades (e.g. 'Burrow,TunnelingClaws')")
@@ -508,16 +522,20 @@ def main() -> int:
         return 0
 
     if args.list:
-        print(f"{'ID':54s} {'MU':4s} {'Terrain':19s} {'Source':16s} {'P1/P2':>11s}")
-        print("-" * 110)
+        print(f"{'ID':58s} {'MU':4s} {'Tier':11s} {'Terrain':19s} {'Source':16s} {'P1/P2':>11s}")
+        print("-" * 126)
+        tier_counts: Counter[str] = Counter()
         for s in scenarios:
             v1 = army_value(s["p1_units"])
             v2 = army_value(s["p2_units"])
             mu = f"{s['our_race'][0]}v{s['enemy_race'][0]}"
+            tier = s.get("tier", "canonical")
+            tier_counts[tier] += 1
             terr = s.get("terrain", "open")
             src = s.get("source", "core")
-            print(f"{s['id']:54s} {mu:4s} {terr:19s} {src:16s} {v1:5.0f}/{v2:5.0f}")
-        print(f"\nTotal: {len(scenarios)} scenarios ({cat_path})")
+            print(f"{s['id']:58s} {mu:4s} {tier:11s} {terr:19s} {src:16s} {v1:5.0f}/{v2:5.0f}")
+        t_summary = ", ".join(f"{t}={tier_counts.get(t, 0)}" for t in VALID_TIERS)
+        print(f"\nTotal: {len(scenarios)} scenarios ({t_summary}) ({cat_path})")
         return 0
 
     if args.remove:
@@ -569,6 +587,7 @@ def main() -> int:
         "id": sid,
         "our_race": args.race,
         "enemy_race": args.enemy_race,
+        "tier": args.tier,
         "source": args.source,
         "terrain": args.terrain,
         "description": desc,
@@ -576,6 +595,12 @@ def main() -> int:
         "p2_units": p2_units,
         "max_loops": int(args.max_loops),
     }
+    if args.scoring_mode != "combat":
+        entry["scoring_mode"] = args.scoring_mode
+    if args.pass_net_econ_min > 0.0:
+        entry["pass_net_econ_min"] = float(args.pass_net_econ_min)
+    if args.origin_match_id.strip():
+        entry["origin_match_id"] = args.origin_match_id.strip()
     if args.terrain == "high-ground-ramp":
         entry["high_ground_side"] = args.high_ground_side
     pats = parse_csv_list(args.patterns)

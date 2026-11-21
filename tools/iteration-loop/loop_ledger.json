@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter37_wave37_full",
+  "active_wave": "iter38_wave38_full",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -3395,6 +3395,152 @@
         "FIRST 40-SCENARIO (80-DUEL) HONEST ARENA 2.0: SHATTERED Self-Play ATH 35W-5L-0D (40/40 KOs, 1.77x ATH!), Dummy A:M ATH 6.90, Zerg 26W-0L combined & 109W-0L 9-loop streak! Live Prod AI Arena DB = 2,257/2,257 (369 prod matches, Mothman-P NEW ELO ATH 1280!)."
       ],
       "promotion_gates_passed": "3/9 PASS across full 78-match roster (zero_crashes_and_rejects, sup_blk_le_6pct [4.3%], tactics_suite_100pct [33W-7L Dummy / 35W-5L SP ATH!]); UNCONDITIONAL LIVE AI ARENA SHIP GATE PASS (FIRST-EVER 6W-0L 2.54x H2H SWEEP over L36 ZIPs!)"
+    },
+    {
+      "id": "iter38_wave38_full",
+      "status": "NEW_84_MATCH_ATH_27W_NEW_78_MATCH_HWM_23W_TRIPLE_ZERO_ANOMALIES_3_TIER_55_ARENA",
+      "campaign": "Loops 29+ Self-Play, Honest 3-Tier Tactics Arena 2.0 & Expanded Roster Campaign (Loop 38 NEW 84-Match ATH & 78-Match HWM!)",
+      "loop_self_improvements": [
+        "L38-LOOP-1 (Honest 3-Tier 55-Scenario / 110-Duel Tactics Arena 2.0): Upgraded tools/sc2-tactics-arena.py (eliminated phantom fog-of-war KOs, added mineral-defense scoring mode measuring net_econ_score = minerals_gathered + enemy_killed - 50*workers_lost & mining_uptime_pct) and expanded tools/arena-scenarios.json to 55 scenarios across 3 tiers (48 canonical + 4 Tier-2 econ-harass mineral-defense e01-e04 + 3 Tier-3 prod-loss regressions r01-r03).",
+        "L38-LOOP-2 (3-Tier Arena Visual-Report Upgrade): Upgraded tools/iteration-loop/build-visual-report.py to render the 3-Tier Tactics Arena 2.0 Summary (canonical / econ-harass / regression) and Tier-2 Econ-Harass Mineral-Defense Results tables alongside 118 3D clips (110 Arena + 8 Replays) and Map x Spawn-Position Outlier Watch."
+      ],
+      "spec_summary": "Loop 38 (wltznsuw c3e49bdf \u2014 NEW 84-MATCH ATH 27W-52L-5T & NEW 78-MATCH HWM 23W-50L-5T!): Zero-crash/fault/reject/spike 90/90 run. SHATTERED 84-match ATH (27W-52L-5T 32.1% WR / 38.1% NL, +4W vs L37) and claimed NEW 78-match HWM (23W-50L-5T 29.5% WR / 35.9% NL, 0.51x/0.28x, beating Loop 32 23W-52L-3T 0.49x/0.20x!). CORE14 tied 18W ATH with -1L (18W-21L-3T 50.0% NL, 5 unbeaten bots: titania/monsterbot/oberon 3-0, onlyfans/puck 2-0-1!), Protoss NEW CORE14 ATH (8W-5L-1T 57.1% WR / 64.3% NL 1.09x, CyberCore>1 = 0/29!), Terran NEW SB ATL (1.5% EXT78 / 1.6% ALL84), UNSEEN12 rebounded 2-32-2 -> 5W-29L-2T (FIRST-EVER sc2ai_protoss WIN #33 P 2.38x!), TRIPLE-ZERO ANOMALY ERADICATION (CloakLoss=0/84, TvT0Tank=0/84, 1BaseLock=0/84; Siege0DPS 15->10, T111Stall 8->5), PERFECT North=South 35.9% NL symmetry across 78 external games, NEW latency ATLs (max_step_ms=198.99ms sub-200ms!, tr95max=6.45ms -16%!), baseline_h2h 3W-3L-0T (1.19x agg vs newly shipped L37 6-0 ZIPs), and FIRST 3-Tier 55-scenario (110-duel) Honest Arena 2.0 baseline (Dummy 34W-19L-2D 1.20x [canonical 33-14-1, econ 1P-3F, reg 0-2-1, Orig-40 30-10 w/ p13 WIN] + SP 25W-25L-5D 0.87x [canonical 22-22-4, econ 2P-2F, reg 1-1-1 w/ r01 KO WIN]).",
+      "rev": "wltznsuw c3e49bdf (iter38 NEW 84-match ATH & 78-match HWM)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_041102_iter38_wave38_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261121_044151_iter38_baseline_h2h",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter38_wave38_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter38_baseline_h2h_score.json",
+      "pro_comparison_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/pro_comparison_iter38_wave38_full.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter38.json",
+      "tactics_selfplay_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter38.json",
+      "visual_report_md": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/visual_report_iter38.md",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "23W-50L-5T (NEW 78-MATCH HWM 29.5% WR / 35.9% NL, 0.51x/0.28x! CORE14 18W-21L-3T [50.0% NL, 5 unbeaten bots!] + UNSEEN12 5W-29L-2T [1st sc2ai_protoss W!]; ALL84 NEW ATH 27W-52L-5T [self_6 4W-2L 1.30x]; baseline_h2h 3W-3L-0T 1.19x vs L37 6-0 ZIP!)",
+      "win_rate_pct": 29.5,
+      "trade_agg": 0.51,
+      "trade_med": 0.28,
+      "sup_blk_pct": 4.5,
+      "w4_alive_med": 26.0,
+      "w6_alive_med": 39.0,
+      "pk_army_avg": 2903.5,
+      "action_rejects": 0,
+      "crashes": 0,
+      "siege_range_zero_dps_losses": 10,
+      "cloaked_unit_damage_losses": 0,
+      "gas_rich_min_starved_matches": 10,
+      "one_base_lockout_matches": 0,
+      "early_opening_order_fault_matches": 0,
+      "terran_111_opening_stall_matches": 5,
+      "prod_placement_stall_matches": 2,
+      "zero_kill_collapse_matches": 7,
+      "drip_feed_collapse_matches": 33,
+      "prod_idle_bank_freeze_matches": 0,
+      "gas_zero_harvest_freeze_matches": 0,
+      "spire_sched_drop_matches": 3,
+      "wall_timeout_ties": 4,
+      "army_val_4m_ratio_vs_pro": 0.8,
+      "army_val_8m_ratio_vs_pro": 0.46,
+      "latency_summary": "ALL 90/90 clean <=198.99ms (NEW sub-200ms max_step_ms ATL! 0 spikes >=500ms!; NEW 84-match tr95max ATL 6.45ms [-16%!], rt=5.94ms, tr=2.45ms, avg=9.17ms, p95=15.70ms; 0 rejects!)",
+      "by_race": {
+        "Protoss": {
+          "record": "NEW CORE14 ATH 8W-5L-1T (57.1% WR / 64.3% NL, 1.09x, CyberCore>1=0/29!); EXT78 10W-14L-2T (38.5% WR / 46.2% NL, 0.61x, SB 4.7%, FIRST-EVER sc2ai_protoss WIN #33 2.38x!); H2H 1-2 (PvP 6.07x 0-anom, PvT 0.26x, PvZ 0.23x); Arena Dummy 9-12 / SP 9-9-3 (p13 FLIPPED WIN!)",
+          "trade_agg": 0.61,
+          "w4_alive_med": 27.0,
+          "w6_alive_med": 39.5,
+          "nat_sec": 91.7,
+          "sup_blk": 4.7
+        },
+        "Terran": {
+          "record": "CORE14 4W-9L-1T (0.85x, puck 5.80x 0-anom!, onlyfans T 2.16x); EXT78 7W-18L-1T (26.9% WR, 0.61x, NEW SB ATL 1.5% [ALL84 1.6%], Top BO MATCH!, TvT0Tank=0/84!, T111Stall 8->5, North=South SB 1.5%/1.5%!); H2H 1-1 (TvZ 6.50x 0-anom, TvT 0.57x); Arena Dummy 10-5-1 (1.45x) / SP 7-8-1",
+          "trade_agg": 0.61,
+          "w4_alive_med": 24.5,
+          "w6_alive_med": 36.0,
+          "nat_sec": 114.1,
+          "sup_blk": 1.5
+        },
+        "Zerg": {
+          "record": "CORE14 6W-7L-1T (50.0% NL, 0.52x, oberon 3-0 sweep!); EXT78 6W-18L-2T (23.1% WR, 0.34x, SB 7.4% skewed by #28 Zvmini-puck 74.6%); H2H ZvZ WIN 3.58x; Arena Dummy 15W-2L-1D (1.75x, e02 PASS 540/520M!) / SP 9W-8L-1D (e02 PASS 685/520M!)",
+          "trade_agg": 0.34,
+          "w4_alive_med": 27.0,
+          "w6_alive_med": 42.0,
+          "nat_sec": 55.4,
+          "sup_blk": 7.4
+        }
+      },
+      "tactics_summary": {
+        "rev": "wltznsuw c3e49bdf (iter38 \u2014 FIRST 3-TIER 55-SCENARIO / 110-DUEL HONEST RUN!)",
+        "passed": "Verifier 7/7 + L31..L38 + 30/30 Belief + 6/6 Replay-DB + 231/231 Tactics + 0/0/0/0 Pro-Starve; first 3-tier honest Arena baseline after #883 phantom fog-of-war KO fix!",
+        "sc2_duel36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_duel_iter38.json",
+        "sc2_selfplay36_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/tactics_sc2_selfplay_iter38.json",
+        "sc2_duel36_summary": "HONEST 3-TIER 55-SCENARIO (110-DUEL!) ARENA 2.0: Dummy 34W-19L-2D (1.20x, A:M 3.71) [canonical 48: 33W-14L-1D 1.25x A:M 3.81; econ-harass 4: 1P-3F net=+28.8M mined=278.8M up=78.5% wlost=24 (e02 PASS 540/520M); regression 3: 0W-2L-1D 0.63x; Orig-40: 30W-10L-0D 1.73x w/ p13 FLIPPED WIN!] + Self-Play 25W-25L-5D (0.87x, P1 A:M 3.24) [canonical 48: 22W-22L-4D 0.88x; econ-harass 4: 2P-2F net=+132.5M mined=351.2M up=82.4% wlost=23 (e01+e02 PASS!); regression 3: 1W-1L-1D 0.84x (r01 KO WIN!)]",
+        "by_tier_duel": {
+          "canonical": {
+            "total": 48,
+            "wins": 33,
+            "losses": 14,
+            "draws": 1,
+            "trade_agg": 1.25,
+            "am_ratio": 3.81
+          },
+          "econ-harass": {
+            "total": 4,
+            "passes": 1,
+            "fails": 3,
+            "avg_net_econ_score": 28.8,
+            "avg_minerals_gathered": 278.8,
+            "avg_mining_uptime_pct": 78.5,
+            "total_workers_lost": 24
+          },
+          "regression": {
+            "total": 3,
+            "wins": 0,
+            "losses": 2,
+            "draws": 1,
+            "trade_agg": 0.63,
+            "am_ratio": 1.13
+          }
+        },
+        "by_tier_selfplay": {
+          "canonical": {
+            "total": 48,
+            "p1_wins": 22,
+            "p2_wins": 22,
+            "draws": 4,
+            "trade_agg": 0.88,
+            "am_ratio": 3.23
+          },
+          "econ-harass": {
+            "total": 4,
+            "passes": 2,
+            "fails": 2,
+            "avg_net_econ_score": 132.5,
+            "avg_minerals_gathered": 351.2,
+            "avg_mining_uptime_pct": 82.4,
+            "total_workers_lost": 23
+          },
+          "regression": {
+            "total": 3,
+            "p1_wins": 1,
+            "p2_wins": 1,
+            "draws": 1,
+            "trade_agg": 0.84,
+            "am_ratio": 1.93
+          }
+        }
+      },
+      "visual_qa_highlights": [
+        "SHOWCASE WINS: #11 T v puck (10:34 WIN 5.80x, TorchesAIE N-spawn) textbook high-ground 2-Tank siege + Bio/Medivac/Viking shredding puck's Immortals+Nexus; #33 P v sc2ai_protoss (07:52 FIRST-EVER WIN 2.38x, PersephoneAIE SW) Blink Stalkers+Zealots+Phoenix trading 1 Stalker for Tempest+VoidRay+2 Stalkers; #82 P v T-SP (13:01 WIN 1.80x) Colossus+Stalkers+Phoenix cleanly defending natural mineral line vs Vikings+Medivacs+Thor.",
+        "LOOP 39 SMOKING GUNS (REPLAYS): #58 Z v Creepy_strategies (15:58 LOSS 0.08x Siege0DPS) shows 10+ Blue Tempests sniping Red Lair/Drones from range 15 across cliff while spire_sched_drop left ZERO Corruptors/AA; #72 P v 12PoolBot (02:24 LOSS 0.15x) catches lone Red Zealot chasing 1 decoy Ling mid-map while 12PoolBot Lings kill 10 Probes inside SW main; #44 T v QueenBot (11:30 LOSS 0.75x) shows 25+ Blue Queens marching over 75% map creep into NE Orbital with only ~20 Bio and ZERO Tanks/Liberators/Bunkers.",
+        "TIER-2 ECON-HARASS 3D VISUALS: e02 (Zerg vs 2 Reapers) PASSES BOTH Dummy (540/520M, 98.2% uptime, 1 Drone lost) & SP (685/520M); e03 (3 Adepts vs Terran SCVs, wlost=17 Dummy) shows SCVs clumped on one far patch while 3 Adepts walk past 1 Marine; e04 (6 Lings vs Protoss Probes) shows 6 Lings shredding inside Probe cluster with only 1 Zealot. (Minor camera note: #13 ZvT & #72 PvZ split-battle mean centroid can land between 2 simultaneous skirmishes -> candidate future spatial-cluster upgrade for render-replay-clips.py.)"
+      ],
+      "key_wins": [
+        "NEW 84-MATCH ATH (27W-52L-5T, 32.1% WR / 38.1% NL, +4W vs L37) AND NEW 78-MATCH HWM (23W-50L-5T, 29.5% WR / 35.9% NL, 0.51x/0.28x, beating Loop 32 HWM 23W-52L-3T 0.49x/0.20x)!",
+        "NEW PROTOSS CORE14 ATH (8W-5L-1T 57.1% WR / 64.3% NL 1.09x, CyberCore>1=0/29!), NEW TERRAN SB ATL (1.5% EXT78 / 1.6% ALL84), FIRST-EVER sc2ai_protoss UNSEEN WIN (#33 P 2.38x), 5 UNBEATEN CORE14 BOTS (titania/monsterbot/oberon 3-0, onlyfans/puck 2-0-1)!",
+        "TRIPLE-ZERO ANOMALY ERADICATION (CloakLoss=0/84, TvT0Tank=0/84, 1BaseLock=0/84; Siege0DPS 15->10, T111Stall 8->5), PERFECT North=South 35.9% NL symmetry across 78 external matches, NEW sub-200ms max_step_ms ATL (198.99ms) & tr95max ATL (6.45ms -16%!)!",
+        "FIRST 3-TIER 55-SCENARIO (110-DUEL) HONEST ARENA 2.0 BASELINE + 3W-3L-0T (1.19x agg) baseline_h2h parity against newly shipped Loop 37 (6-0) BotZips!"
+      ],
+      "promotion_gates_passed": "2/9 PASS across full 78-match roster (zero_crashes_and_rejects, sup_blk_le_6pct [4.5%]; tactics_suite_100pct reported FAIL solely on 3-tier aggregate 34/55=61.8%<65% while Tier-1 canonical is 33W-14L-1D=68.8% and Orig-40 is 30/40=75.0%!); baseline_h2h 3W-3L (1.19x) vs shipped L37 ZIPs -> NO-SHIP / keep sharpening for Loop 39!"
     }
   ],
   "final_18_loop_summary": {

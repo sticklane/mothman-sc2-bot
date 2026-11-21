@@ -60,6 +60,10 @@ VALID_TERRAINS = (
     "cliff-air-chasm",
     "mineral-line-harass",
 )
+VALID_TIERS = ("canonical", "regression", "econ-harass")
+VALID_SCORING_MODES = ("combat", "mineral-defense")
+MINING_ORDER_ABILITY_IDS = {295, 296, 298, 299, 1183, 1184, 3666}
+CARRYING_MINERAL_BUFF_IDS = {271, 272}
 
 # Canonical SC2 UnitTypeIds (Blizzard 4.10 — synced with add-arena-scenario skill)
 UNIT_IDS: dict[str, int] = {
@@ -482,6 +486,10 @@ class SkirmishSpec:
     terrain: str = "open"
     high_ground_side: str = "p1"
     source: str = "core"
+    tier: str = "canonical"              # canonical | regression | econ-harass
+    scoring_mode: str = "combat"         # combat | mineral-defense
+    pass_net_econ_min: float = 0.0       # mineral-defense net econ pass threshold
+    origin_match_id: str = ""            # replay-extract provenance tag for regression tier
     patterns: list[str] = field(default_factory=list)
     p1_upgrades: list[str] = field(default_factory=list)
     p2_upgrades: list[str] = field(default_factory=list)
@@ -574,6 +582,12 @@ def load_scenarios(scenarios_path: str = "", repo_dir: Path | None = None) -> li
         terrain = str(sc.get("terrain", "open"))
         if terrain not in VALID_TERRAINS:
             raise ValueError(f"Scenario {sid!r} has invalid terrain {terrain!r} (valid: {VALID_TERRAINS})")
+        tier = str(sc.get("tier", "canonical"))
+        if tier not in VALID_TIERS:
+            raise ValueError(f"Scenario {sid!r} has invalid tier {tier!r} (valid: {VALID_TIERS})")
+        scoring_mode = str(sc.get("scoring_mode", "combat"))
+        if scoring_mode not in VALID_SCORING_MODES:
+            raise ValueError(f"Scenario {sid!r} has invalid scoring_mode {scoring_mode!r} (valid: {VALID_SCORING_MODES})")
         shared_upgs = normalize_upgrades(sc.get("upgrades"))
         p1_upgs = normalize_upgrades(sc.get("p1_upgrades"))
         p2_upgs = normalize_upgrades(sc.get("p2_upgrades"))
@@ -597,6 +611,10 @@ def load_scenarios(scenarios_path: str = "", repo_dir: Path | None = None) -> li
             terrain=terrain,
             high_ground_side=str(sc.get("high_ground_side", "p1")),
             source=str(sc.get("source", "core")),
+            tier=tier,
+            scoring_mode=scoring_mode,
+            pass_net_econ_min=float(sc.get("pass_net_econ_min", 0.0)),
+            origin_match_id=str(sc.get("origin_match_id", "")),
             patterns=[str(p) for p in (sc.get("patterns") or [])],
             p1_upgrades=p1_upgs,
             p2_upgrades=p2_upgs,
@@ -616,8 +634,9 @@ def filter_scenarios(
     enemy_race: str = "",
     terrain_filter: str = "",
     source_filter: str = "",
+    tier_filter: str = "",
 ) -> list[SkirmishSpec]:
-    """Filter scenarios by our_race, enemy_race, terrain, source, and substring on id."""
+    """Filter scenarios by our_race, enemy_race, terrain, source, tier, and substring on id."""
     out = (
         list(scenarios)
         if race.lower() == "all"
@@ -631,13 +650,16 @@ def filter_scenarios(
     if source_filter:
         sf = source_filter.lower()
         out = [s for s in out if s.source.lower() == sf]
+    if tier_filter and tier_filter.lower() != "all":
+        trf = tier_filter.lower()
+        out = [s for s in out if s.tier.lower() == trf]
     if scenario_filter:
         needle = scenario_filter.lower()
         out = [s for s in out if needle in s.id.lower()]
     if not out:
         raise ValueError(
             f"No scenarios matched race={race!r} enemy_race={enemy_race!r} "
-            f"terrain={terrain_filter!r} source={source_filter!r} scenario={scenario_filter!r}"
+            f"terrain={terrain_filter!r} source={source_filter!r} tier={tier_filter!r} scenario={scenario_filter!r}"
         )
     return out
 
@@ -769,6 +791,8 @@ def run_single_container(
             inner_cmd.extend(["--terrain", args.terrain])
         if getattr(args, "source", ""):
             inner_cmd.extend(["--source", args.source])
+        if getattr(args, "tier", "") and getattr(args, "tier", "") != "all":
+            inner_cmd.extend(["--tier", args.tier])
     if replay_host_path is not None:
         inner_cmd.extend(["--save-replay-path", f"/out-replays/{replay_host_path.name}"])
     cmd = ["podman", "run", "--rm", "--network", "none", *mounts, args.image, *inner_cmd]
@@ -812,19 +836,27 @@ def _build_aggregate_report(
         d_rows = [s for s in rows if s.get("winner") not in (win_tag, *loss_tags)]
         ko_w = sum(1 for s in w_rows if s.get("win_type", "ko") == "ko")
         pts_w = sum(1 for s in w_rows if s.get("win_type") == "points")
+        econ_w = sum(1 for s in w_rows if s.get("win_type") == "econ_pass")
         ko_l = sum(1 for s in l_rows if s.get("win_type", "ko") == "ko")
         pts_l = sum(1 for s in l_rows if s.get("win_type") == "points")
+        econ_l = sum(1 for s in l_rows if s.get("win_type") == "econ_fail")
         w, l, d = len(w_rows), len(l_rows), len(d_rows)
+        if econ_w or econ_l:
+            rec_str = f"{w}W-{l}L-{d}D (KO {ko_w}/Pts {pts_w}/Econ {econ_w} - KO {ko_l}/Pts {pts_l}/Econ {econ_l} - {d}D)"
+        else:
+            rec_str = f"{w}W-{l}L-{d}D (KO {ko_w}/Pts {pts_w} - KO {ko_l}/Pts {pts_l} - {d}D)"
         return {
             "mothman_wins": w,
             "ko_wins": ko_w,
             "points_wins": pts_w,
+            "econ_wins": econ_w,
             "p2_wins": l,
             "ko_losses": ko_l,
             "points_losses": pts_l,
+            "econ_losses": econ_l,
             "draws": d,
             "timeouts": d,  # backward-compatible alias
-            "record_str": f"{w}W-{l}L-{d}D (KO {ko_w}/Pts {pts_w} - KO {ko_l}/Pts {pts_l} - {d}D)",
+            "record_str": rec_str,
         }
 
     tot_t = _tally_slice(all_scens)
@@ -854,6 +886,36 @@ def _build_aggregate_report(
             "spell_unit_cmds": r_spl,
             "am_ratio": round(r_atk / max(1, r_mov), 2),
         }
+    by_tier: dict[str, Any] = {}
+    for tname in VALID_TIERS:
+        ts = [s for s in all_scens if s.get("tier", "canonical") == tname]
+        if not ts:
+            continue
+        t_p1 = sum(float(s.get("p1_lost_val", 0.0)) for s in ts)
+        t_p2 = sum(float(s.get("p2_lost_val", 0.0)) for s in ts)
+        t_atk = sum(int(s.get("mothman_attack_unit_cmds", 0)) for s in ts)
+        t_mov = sum(int(s.get("mothman_move_unit_cmds", 0)) for s in ts)
+        t_spl = sum(int(s.get("mothman_spell_unit_cmds", 0)) for s in ts)
+        tt = _tally_slice(ts)
+        t_entry: dict[str, Any] = {
+            "total": len(ts),
+            **tt,
+            "agg_trade_ratio": round(t_p2 / max(1.0, t_p1), 2) if t_p1 > 0 else 99.0,
+            "attack_unit_cmds": t_atk,
+            "move_unit_cmds": t_mov,
+            "spell_unit_cmds": t_spl,
+            "am_ratio": round(t_atk / max(1, t_mov), 2),
+        }
+        econ_rows = [s for s in ts if s.get("scoring_mode") == "mineral-defense"]
+        if econ_rows:
+            t_entry["econ_passes"] = sum(1 for s in econ_rows if s.get("win_type") == "econ_pass")
+            t_entry["econ_fails"] = sum(1 for s in econ_rows if s.get("win_type") != "econ_pass")
+            t_entry["avg_net_econ_score"] = round(sum(float(s.get("net_econ_score", 0.0)) for s in econ_rows) / len(econ_rows), 1)
+            t_entry["avg_minerals_gathered"] = round(sum(float(s.get("minerals_gathered", 0.0)) for s in econ_rows) / len(econ_rows), 1)
+            t_entry["avg_mining_uptime_pct"] = round(sum(float(s.get("mining_uptime_pct", 0.0)) for s in econ_rows) / len(econ_rows), 1)
+            t_entry["total_workers_lost"] = sum(int(s.get("workers_lost", 0)) for s in econ_rows)
+        by_tier[tname] = t_entry
+
     summary: dict[str, Any] = {
         "total": len(all_scens),
         **tot_t,
@@ -865,6 +927,7 @@ def _build_aggregate_report(
         "total_spell_unit_cmds": tot_spl,
         "am_ratio": round(tot_atk / max(1, tot_mov), 2),
         "by_race": by_race,
+        "by_tier": by_tier,
     }
     if opp_mode == "self":
         tot_p2_atk = sum(int(s.get("p2_attack_unit_cmds", 0)) for s in all_scens)
@@ -898,6 +961,7 @@ def run_host_driver(args: argparse.Namespace) -> int:
         getattr(args, "enemy_race", ""),
         getattr(args, "terrain", ""),
         getattr(args, "source", ""),
+        getattr(args, "tier", "all"),
     )
 
     render_dir = Path(args.render_dir).resolve() if getattr(args, "render_dir", "") else None
@@ -1056,6 +1120,22 @@ def run_host_driver(args: argparse.Namespace) -> int:
             f"A:M={rsum.get('am_ratio')} | wall={report.get('total_wall_ms')}ms",
             file=sys.stderr,
         )
+        bt = rsum.get("by_tier") or {}
+        if bt:
+            parts = []
+            for tn in VALID_TIERS:
+                if tn in bt:
+                    te = bt[tn]
+                    if "econ_passes" in te:
+                        parts.append(
+                            f"{tn}: {te['econ_passes']}P-{te['econ_fails']}F "
+                            f"(net={te['avg_net_econ_score']}M, mined={te['avg_minerals_gathered']}M, "
+                            f"up={te['avg_mining_uptime_pct']}%, wlost={te['total_workers_lost']})"
+                        )
+                    else:
+                        parts.append(f"{tn}: {te['mothman_wins']}W-{te['p2_wins']}L-{te['draws']}D ({te['agg_trade_ratio']}x)")
+            if parts:
+                print(f"[ARENA 2.0 by_tier] {' | '.join(parts)}", file=sys.stderr)
     print(json.dumps(report, indent=2))
     return 0
 
@@ -1112,20 +1192,32 @@ class MapTerrainAnalyzer:
         avoid: list[tuple[float, float]] | None = None,
         with_addon: bool = False,
         min_spacing: float = 5.5,
+        avoid_large: list[tuple[float, float]] | None = None,
+        large_radius: float = 12.0,
     ) -> list[tuple[float, float]]:
-        """Find `count` clean buildable 3x3 (or 5x3 with Terran addon) building centers near anchor."""
+        """Find `count` clean buildable 3x3 (or 5x3+margin with Terran addon) building centers near anchor."""
         chosen: list[tuple[float, float]] = []
         avoid_pts = list(avoid or [])
+        avoid_big = list(avoid_large or [])
         ax, ay = int(round(anchor_x)), int(round(anchor_y))
-        x_hi = 4 if with_addon else 2
+        x_hi = 5 if with_addon else 2
+        y_lo = -2 if with_addon else -1
 
         def _ok(cx: int, cy: int) -> bool:
-            if any(math.hypot(cx - ox, cy - oy) < 5.5 for ox, oy in avoid_pts):
+            bx, by = cx + 0.5, cy + 0.5
+            if any(math.hypot(bx - ox, by - oy) < large_radius for ox, oy in avoid_big):
                 return False
-            if any(math.hypot(cx - ox, cy - oy) < min_spacing for ox, oy in chosen):
+            if with_addon and any(
+                math.hypot((bx + 2.5) - ox, (by - 0.5) - oy) < max(6.0, large_radius - 1.5)
+                for ox, oy in avoid_big
+            ):
+                return False
+            if any(math.hypot(bx - ox, by - oy) < 5.5 for ox, oy in avoid_pts):
+                return False
+            if any(math.hypot(bx - ox, by - oy) < min_spacing for ox, oy in chosen):
                 return False
             for dx in range(-1, x_hi):
-                for dy in range(-1, 2):
+                for dy in range(y_lo, 2):
                     if not self.is_buildable(cx + dx, cy + dy, margin=10):
                         return False
             return True
@@ -1432,15 +1524,53 @@ class MapTerrainAnalyzer:
         if best_site is not None:
             self.sites["mineral-line-harass"] = best_site[1]
 
+    def compute_main_mineral_site(
+        self,
+        obs: Any,
+        th_pos: tuple[float, float],
+    ) -> tuple[ArenaSite, list[int]]:
+        """Build a spawn-symmetric site centered on P1's actual starting main TownHall & mineral line.
+
+        Axis +u points FROM the mineral centroid THROUGH the TownHall into the open base front, so:
+          - dx < 0 sits directly between the TownHall and real starting mineral patches (mining workers)
+          - dx ~ +1.5..+2.5 sits on the front side of the TownHall (home defenders)
+          - dx ~ +8.5..+9.5 sits right outside P1's starting main (harass entry vector)
+        """
+        th_x, th_y = float(th_pos[0]), float(th_pos[1])
+        near_mins = [
+            u for u in obs.raw_data.units
+            if u.unit_type in MINERAL_IDS and math.hypot(float(u.pos.x) - th_x, float(u.pos.y) - th_y) <= 12.0
+        ]
+        if near_mins:
+            mx = sum(float(u.pos.x) for u in near_mins) / len(near_mins)
+            my = sum(float(u.pos.y) for u in near_mins) / len(near_mins)
+            vx, vy = th_x - mx, th_y - my
+        else:
+            vx, vy = (self.w / 2.0) - th_x, (self.h / 2.0) - th_y
+        vlen = math.hypot(vx, vy)
+        ux, uy = (vx / vlen, vy / vlen) if vlen > 0.2 else (1.0, 0.0)
+        px, py = -uy, ux
+        site = ArenaSite(
+            terrain="mineral-line-harass",
+            cx=th_x,
+            cy=th_y,
+            ux=ux,
+            uy=uy,
+            px=px,
+            py=py,
+        )
+        return site, [int(u.tag) for u in near_mins]
+
     def resolve_spawn_point(
         self,
         scen: SkirmishSpec,
         unit_name: str,
         dx: float,
         dy: float,
+        site_override: ArenaSite | None = None,
     ) -> tuple[float, float]:
-        site = self.sites.get(scen.terrain) or self.sites["open"]
-        if scen.terrain == "open":
+        site = site_override or self.sites.get(scen.terrain) or self.sites["open"]
+        if scen.terrain == "open" and site_override is None:
             return site.cx + dx, site.cy + dy
         ux, uy, px, py = site.ux, site.uy, site.px, site.py
         if scen.terrain == "high-ground-ramp" and scen.high_ground_side == "p2":
@@ -1535,6 +1665,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
             getattr(args, "enemy_race", ""),
             getattr(args, "terrain", ""),
             getattr(args, "source", ""),
+            getattr(args, "tier", "all"),
         )
 
     opp_mode = getattr(args, "opponent", "dummy")
@@ -1598,6 +1729,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         "p2_orig_th_tag": None,
                         "p1_orig_th_pos": None,
                         "p2_orig_th_pos": None,
+                        "p1_main_mineral_site": None,
+                        "p1_main_mineral_tags": [],
                         "orig_th_positions": [],
                         "mineral_refined": False,
                         "scen_idx": 0,
@@ -1612,6 +1745,9 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         "p2_own_units_loop": -1,
                         "p1_done_upgrades": set(),
                         "p2_done_upgrades": set(),
+                        "p1_accepted_upgrades": set(),
+                        "p2_accepted_upgrades": set(),
+                        "upg_wave_attempts": 0,
                         "p1_pending_upgrades": [],  # list[(upg_name, bldg_uid, research_ab, x, y)]
                         "p2_pending_upgrades": [],
                         "p1_pending_addons": [],    # list[(parent_uid, addon_ab, addon_uid, x, y)]
@@ -1627,6 +1763,13 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         "p1_upgrade_ids_obs": [],
                         "p2_upgrade_ids_obs": [],
                         "p2_pre_cloak_pending": False,
+                        "econ_start_minerals": 0.0,
+                        "econ_cur_minerals": 0.0,
+                        "econ_start_workers": 0,
+                        "econ_seen_worker_tags": set(),
+                        "econ_cur_worker_tags": set(),
+                        "econ_worker_mining_ticks": 0,
+                        "econ_worker_total_ticks": 0,
                         "round_t0": time.monotonic(),
                         "attack_cmds": 0,
                         "move_cmds": 0,
@@ -1671,6 +1814,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         return sc2api_pb2.Request(join_game=jg)
 
                     def _site_for_scen(scen: SkirmishSpec) -> ArenaSite:
+                        if scen.scoring_mode == "mineral-defense" and dstate["p1_main_mineral_site"] is not None:
+                            return dstate["p1_main_mineral_site"]
                         an: MapTerrainAnalyzer | None = dstate["analyzer"]
                         if an is None:
                             return ArenaSite(terrain="open", cx=88.0, cy=88.0)
@@ -1680,12 +1825,13 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         ws: aiohttp.ClientWebSocketResponse,
                         obs: Any,
                         pending: list[tuple[str, int, int, float, float]],
-                    ) -> bool:
+                    ) -> tuple[bool, set[str]]:
                         if not pending:
-                            return True
+                            return True, set()
                         acts: list[Any] = []
+                        act_unames: list[str] = []
                         used_tags: set[int] = set()
-                        for _uname, bldg_uid, ab_id, bx, by in pending:
+                        for uname, bldg_uid, ab_id, bx, by in pending:
                             cands = [
                                 u for u in obs.raw_data.units
                                 if u.alliance == 1 and u.unit_type == bldg_uid
@@ -1695,6 +1841,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 continue
                             bldg = min(cands, key=lambda u: math.hypot(u.pos.x - bx, u.pos.y - by))
                             used_tags.add(bldg.tag)
+                            act_unames.append(uname)
                             acts.append(sc2api_pb2.Action(
                                 action_raw=raw_pb2.ActionRaw(
                                     unit_command=raw_pb2.ActionRawUnitCommand(
@@ -1705,11 +1852,16 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             ))
                         if acts:
                             aresp = await rpc(ws, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=acts)))
+                            accepted = {
+                                act_unames[i]
+                                for i, r in enumerate(aresp.action.result)
+                                if i < len(act_unames) and r == 1
+                            }
                             bad = [r for r in aresp.action.result if r != 1]
                             if bad:
                                 dstate["errors"].append(f"upgrade_action_results={bad} pending={[(u, b, a) for u, b, a, _, _ in pending]}")
-                            return len(acts) >= len(pending)
-                        return False
+                            return (len(accepted) >= len(pending)), accepted
+                        return False, set()
 
                     async def _issue_pre_cloak(ws: aiohttp.ClientWebSocketResponse, obs: Any) -> None:
                         acts: list[Any] = []
@@ -1788,9 +1940,14 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             if not dstate["p2_pending_upgrades"]:
                                 dstate["p2_upg_issued"] = True
                             else:
-                                ok = await _issue_owner_upgrades(sc2_ws2, obs, dstate["p2_pending_upgrades"])
-                                if ok or obs.game_loop >= dstate["phase_start_loop"] + 20:
+                                rem_p2 = [it for it in dstate["p2_pending_upgrades"] if it[0] not in dstate["p2_accepted_upgrades"]]
+                                if not rem_p2:
                                     dstate["p2_upg_issued"] = True
+                                else:
+                                    ok, acc2 = await _issue_owner_upgrades(sc2_ws2, obs, rem_p2)
+                                    dstate["p2_accepted_upgrades"].update(acc2)
+                                    if ok or len(dstate["p2_accepted_upgrades"]) >= len(dstate["p2_pending_upgrades"]) or obs.game_loop >= dstate["phase_start_loop"] + 20:
+                                        dstate["p2_upg_issued"] = True
                         elif phase == "upgrade_wait":
                             p2_uids = {b for _, b, _, _, _ in dstate["p2_pending_upgrades"]}
                             dstate["p2_upg_busy"] = bool(p2_uids) and any(
@@ -1844,6 +2001,10 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                 ]
                                 en_armed = [u for u in en_u if u.unit_type not in PURE_UNARMED_IDS]
                                 en_targets = en_armed if en_armed else en_u
+                                if scen_p2.scoring_mode == "mineral-defense":
+                                    en_workers = [u for u in en_targets if u.unit_type in WORKER_IDS]
+                                    if en_workers:
+                                        en_targets = en_workers
                                 acts_p2: list[Any] = []
                                 # Planetary Fortress (`130`) SCV Repair (`316`) & structure handling:
                                 # never issue Move/point-attack-move to static structures (`130`/`23`);
@@ -2007,7 +2168,30 @@ async def run_in_container(args: argparse.Namespace) -> int:
                         p2_trade = round(p1_lost / max(1.0, p2_lost), 2) if p2_lost > 0 else (99.0 if p1_lost > 0 else 1.0)
                         p1_tag = "Mothman-P1" if opp_mode == "self" else "Mothman"
                         p2_tag = "Mothman-P2" if opp_mode == "self" else "MicroDummy"
-                        if ko_winner_side == 1:
+                        econ_extra: dict[str, Any] = {}
+                        econ_ctx = ""
+                        if scen.scoring_mode == "mineral-defense":
+                            mins_gath = round(max(0.0, float(dstate["econ_cur_minerals"]) - float(dstate["econ_start_minerals"])), 1)
+                            up_pct = round(100.0 * float(dstate["econ_worker_mining_ticks"]) / max(1.0, float(dstate["econ_worker_total_ticks"])), 1)
+                            w_lost = len(dstate["econ_seen_worker_tags"] - dstate["econ_cur_worker_tags"])
+                            en_killed = round(p2_lost, 1)
+                            net_econ = round(mins_gath + en_killed - 50.0 * w_lost, 1)
+                            passed_econ = (net_econ >= scen.pass_net_econ_min) and (len(dstate["econ_cur_worker_tags"]) > 0) and (ko_winner_side != 2)
+                            winner = p1_tag if passed_econ else p2_tag
+                            win_type = "econ_pass" if passed_econ else "econ_fail"
+                            econ_extra = {
+                                "minerals_gathered": mins_gath,
+                                "mining_uptime_pct": up_pct,
+                                "workers_lost": w_lost,
+                                "enemy_killed_val": en_killed,
+                                "net_econ_score": net_econ,
+                                "pass_net_econ_min": scen.pass_net_econ_min,
+                            }
+                            econ_ctx = (
+                                f" | ECON net={net_econ:.1f}/{scen.pass_net_econ_min:.0f}M "
+                                f"(mined={mins_gath:.0f}M, up={up_pct:.1f}%, wlost={w_lost}, kill={en_killed:.0f})"
+                            )
+                        elif ko_winner_side == 1:
                             winner = p1_tag
                             win_type = "ko"
                         elif ko_winner_side == 2:
@@ -2035,10 +2219,12 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             f"{winner} ({win_type}/{end_reason}, {trade:.2f}x trade; alive {dstate['p1_alive_cnt']}/{dstate['p1_start_cnt']} "
                             f"[combat {dstate['p1_combat_alive_cnt']}] vs {dstate['p2_alive_cnt']}/{dstate['p2_start_cnt']} "
                             f"[combat {dstate['p2_combat_alive_cnt']}]; "
-                            f"ATK={dstate['attack_cmds']}, MOV={dstate['move_cmds']}, Spells={dstate['spell_cmds']}{p2_ctx_extra})."
+                            f"ATK={dstate['attack_cmds']}, MOV={dstate['move_cmds']}, Spells={dstate['spell_cmds']}{econ_ctx}{p2_ctx_extra})."
                         )
                         rec: dict[str, Any] = {
                             "id": scen.id,
+                            "tier": scen.tier,
+                            "scoring_mode": scen.scoring_mode,
                             "opponent_mode": opp_mode,
                             "bot": bname1,
                             "p1_bot": bname1,
@@ -2086,6 +2272,10 @@ async def run_in_container(args: argparse.Namespace) -> int:
                             "loops_simulated": cur_loop - dstate["phase_start_loop"],
                             "wall_ms": round((time.monotonic() - dstate["round_t0"]) * 1000.0, 1),
                         }
+                        if scen.origin_match_id:
+                            rec["origin_match_id"] = scen.origin_match_id
+                        if econ_extra:
+                            rec.update(econ_extra)
                         if opp_mode == "self":
                             rec["p2_attack_unit_cmds"] = dstate["p2_attack_cmds"]
                             rec["p2_move_unit_cmds"] = dstate["p2_move_cmds"]
@@ -2161,6 +2351,11 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 dstate["orig_th_tags"].add(u.tag)
                                                 dstate["orig_th_positions"].append((float(u.pos.x), float(u.pos.y)))
                                                 break
+                                    if dstate["p1_main_mineral_site"] is None and dstate["p1_orig_th_pos"] is not None and dstate["analyzer"] is not None:
+                                        msite, mtags = dstate["analyzer"].compute_main_mineral_site(obs, dstate["p1_orig_th_pos"])
+                                        if mtags:
+                                            dstate["p1_main_mineral_site"] = msite
+                                            dstate["p1_main_mineral_tags"] = mtags
                                     if not dstate["mineral_refined"] and dstate["analyzer"] is not None and len(dstate["orig_th_positions"]) >= 2:
                                         dstate["analyzer"].refine_mineral_site(obs, dstate["orig_th_positions"])
                                         dstate["mineral_refined"] = True
@@ -2210,6 +2405,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 dstate["p2_upg_busy"] = True
                                                 dstate["p1_pending_upgrades"] = []
                                                 dstate["p2_pending_upgrades"] = []
+                                                dstate["p1_accepted_upgrades"] = set()
+                                                dstate["p2_accepted_upgrades"] = set()
                                                 dstate["p1_pending_addons"] = []
                                                 dstate["p2_pending_addons"] = []
                                             else:
@@ -2266,14 +2463,23 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 if UPGRADE_SPECS[u][4] is None
                                                 and not (UPGRADE_SPECS[u][1] == 86 and ((owner == 1 and our_race == "Zerg") or (owner == 2 and enemy_race == "Zerg")))
                                             )
-                                            avoid_pts = list(dstate["orig_th_positions"]) + [(open_site.cx, open_site.cy)]
+                                            avoid_pts = [(open_site.cx, open_site.cy)]
+                                            avoid_th = list(dstate["orig_th_positions"])
                                             addon_spots = (
-                                                an.find_buildable_spots(base_pos[0], base_pos[1], need_addon_cnt, avoid=avoid_pts, with_addon=True, min_spacing=6.5)
+                                                an.find_buildable_spots(
+                                                    base_pos[0], base_pos[1], need_addon_cnt,
+                                                    avoid=avoid_pts, with_addon=True, min_spacing=6.5,
+                                                    avoid_large=avoid_th, large_radius=12.0,
+                                                )
                                                 if (an is not None and need_addon_cnt > 0) else []
                                             )
                                             avoid_pts2 = avoid_pts + addon_spots
                                             plain_spots = (
-                                                an.find_buildable_spots(base_pos[0], base_pos[1], need_plain_cnt, avoid=avoid_pts2, with_addon=False, min_spacing=5.5)
+                                                an.find_buildable_spots(
+                                                    base_pos[0], base_pos[1], need_plain_cnt,
+                                                    avoid=avoid_pts2, with_addon=False, min_spacing=5.5,
+                                                    avoid_large=avoid_th, large_radius=12.0,
+                                                )
                                                 if (an is not None and need_plain_cnt > 0) else []
                                             )
                                             ai, pi = 0, 0
@@ -2385,9 +2591,14 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             if not dstate["p1_pending_upgrades"]:
                                                 dstate["p1_upg_issued"] = True
                                             else:
-                                                ok1 = await _issue_owner_upgrades(sc2_ws, obs, dstate["p1_pending_upgrades"])
-                                                if ok1 or gl >= dstate["phase_start_loop"] + 20:
+                                                rem_p1 = [it for it in dstate["p1_pending_upgrades"] if it[0] not in dstate["p1_accepted_upgrades"]]
+                                                if not rem_p1:
                                                     dstate["p1_upg_issued"] = True
+                                                else:
+                                                    ok1, acc1 = await _issue_owner_upgrades(sc2_ws, obs, rem_p1)
+                                                    dstate["p1_accepted_upgrades"].update(acc1)
+                                                    if ok1 or len(dstate["p1_accepted_upgrades"]) >= len(dstate["p1_pending_upgrades"]) or gl >= dstate["phase_start_loop"] + 20:
+                                                        dstate["p1_upg_issued"] = True
                                         if dstate["p1_upg_issued"] and (dstate["p2_upg_issued"] or gl >= dstate["phase_start_loop"] + 24):
                                             dstate["phase"] = "upgrade_wait"
                                             dstate["phase_start_loop"] = gl
@@ -2399,12 +2610,19 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             for u in obs.raw_data.units
                                         )
                                         if (not dstate["p1_upg_busy"] and not dstate["p2_upg_busy"]) or gl >= dstate["phase_start_loop"] + 360:
+                                            dstate["upg_wave_attempts"] += 1
+                                            # Mark accepted upgrades done (or all pending after max retry waves to avoid deadlock)
+                                            force_mark = dstate["upg_wave_attempts"] >= 6
                                             for unm, _, _, _, _ in dstate["p1_pending_upgrades"]:
-                                                dstate["p1_done_upgrades"].add(unm)
+                                                if force_mark or unm in dstate["p1_accepted_upgrades"]:
+                                                    dstate["p1_done_upgrades"].add(unm)
                                             for unm, _, _, _, _ in dstate["p2_pending_upgrades"]:
-                                                dstate["p2_done_upgrades"].add(unm)
+                                                if force_mark or unm in dstate["p2_accepted_upgrades"]:
+                                                    dstate["p2_done_upgrades"].add(unm)
                                             dstate["p1_pending_upgrades"] = []
                                             dstate["p2_pending_upgrades"] = []
+                                            dstate["p1_accepted_upgrades"] = set()
+                                            dstate["p2_accepted_upgrades"] = set()
                                             dstate["p1_pending_addons"] = []
                                             dstate["p2_pending_addons"] = []
                                             kill_tmp = [
@@ -2432,8 +2650,14 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         an = dstate["analyzer"]
                                         site = _site_for_scen(scen)
                                         dstate["arena_cx"], dstate["arena_cy"] = site.cx, site.cy
+                                        dstate["upg_wave_attempts"] = 0
+                                        site_ov = site if scen.scoring_mode == "mineral-defense" else None
                                         dbg = []
-                                        placed_structs: list[tuple[float, float, float]] = []
+                                        placed_structs: list[tuple[float, float, float]] = (
+                                            [(site.cx, site.cy, 3.2)]
+                                            if scen.scoring_mode == "mineral-defense"
+                                            else []
+                                        )
 
                                         def _spawn_side_entries(entries: list[tuple[str, int, float, float]], owner: int) -> None:
                                             # Spawn static structures FIRST on exact buildable grid centers, then mobile units cleanly outside footprints!
@@ -2442,7 +2666,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             for uname, cnt, dx, dy in struct_items:
                                                 uid = UNIT_IDS[uname]
                                                 fp = STRUCTURE_FOOTPRINTS.get(uid, 2)
-                                                sx0, sy0 = an.resolve_spawn_point(scen, uname, dx, dy) if an is not None else (site.cx + dx, site.cy + dy)
+                                                sx0, sy0 = an.resolve_spawn_point(scen, uname, dx, dy, site_override=site_ov) if an is not None else (site.cx + dx, site.cy + dy)
                                                 for _k in range(cnt):
                                                     sx, sy = (
                                                         an.snap_buildable_footprint(sx0, sy0, fp, avoid=placed_structs)
@@ -2457,7 +2681,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                     ))
                                             for uname, cnt, dx, dy in mobile_items:
                                                 uid = UNIT_IDS[uname]
-                                                sx, sy = an.resolve_spawn_point(scen, uname, dx, dy) if an is not None else (site.cx + dx, site.cy + dy)
+                                                sx, sy = an.resolve_spawn_point(scen, uname, dx, dy, site_override=site_ov) if an is not None else (site.cx + dx, site.cy + dy)
                                                 if uid not in AIR_UNIT_IDS and placed_structs:
                                                     for stx, sty, st_rad in placed_structs:
                                                         min_clr = st_rad - 0.5
@@ -2500,6 +2724,13 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                         dstate["p2_own_units"] = None
                                         dstate["p2_own_units_loop"] = -1
                                         dstate["p2_pre_cloak_pending"] = False
+                                        dstate["econ_start_minerals"] = 0.0
+                                        dstate["econ_cur_minerals"] = 0.0
+                                        dstate["econ_start_workers"] = 0
+                                        dstate["econ_seen_worker_tags"] = set()
+                                        dstate["econ_cur_worker_tags"] = set()
+                                        dstate["econ_worker_mining_ticks"] = 0
+                                        dstate["econ_worker_total_ticks"] = 0
 
                                     elif dstate["phase"] == "fighting":
                                         scen = scenarios[dstate["scen_idx"]]
@@ -2564,6 +2795,32 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             ]
                                             if energy_cmds:
                                                 await rpc(sc2_ws, sc2api_pb2.Request(debug=sc2api_pb2.RequestDebug(debug=energy_cmds)))
+                                            if scen.scoring_mode == "mineral-defense":
+                                                cur_cm = float(getattr(obs.score.score_details, "collected_minerals", 0.0)) if obs.HasField("score") else 0.0
+                                                dstate["econ_start_minerals"] = cur_cm
+                                                dstate["econ_cur_minerals"] = cur_cm
+                                                w_units = [u for u in p1u if u.unit_type in WORKER_IDS]
+                                                dstate["econ_start_workers"] = len(w_units)
+                                                dstate["econ_seen_worker_tags"] = {u.tag for u in w_units}
+                                                dstate["econ_cur_worker_tags"] = {u.tag for u in w_units}
+                                                dstate["econ_worker_mining_ticks"] = 0
+                                                dstate["econ_worker_total_ticks"] = 0
+                                                # Start all P1 main workers actively mining round-robin across real main mineral patches on frame 0
+                                                mtags = list(dstate["p1_main_mineral_tags"])
+                                                if w_units and mtags:
+                                                    g_acts = [
+                                                        sc2api_pb2.Action(
+                                                            action_raw=raw_pb2.ActionRaw(
+                                                                unit_command=raw_pb2.ActionRawUnitCommand(
+                                                                    ability_id=3666,
+                                                                    target_unit_tag=mtags[i % len(mtags)],
+                                                                    unit_tags=[wu.tag],
+                                                                )
+                                                            )
+                                                        )
+                                                        for i, wu in enumerate(w_units)
+                                                    ]
+                                                    await rpc(sc2_ws, sc2api_pb2.Request(action=sc2api_pb2.RequestAction(actions=g_acts)))
                                             if scen.p1_pre_cloaked:
                                                 await _issue_pre_cloak(sc2_ws, obs)
                                             if scen.p2_pre_cloaked:
@@ -2576,6 +2833,21 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             dstate["p2_combat_alive_cnt"] = count_combat_capable(p2u, is_dummy=p2_is_dummy)
                                             dstate["p1_rem_val"] = sum(UNIT_VALUES.get(u.unit_type, 100.0) for u in p1u)
                                             dstate["p2_rem_val"] = sum(UNIT_VALUES.get(u.unit_type, 100.0) for u in p2u)
+
+                                            if scen.scoring_mode == "mineral-defense":
+                                                if obs.HasField("score"):
+                                                    dstate["econ_cur_minerals"] = float(getattr(obs.score.score_details, "collected_minerals", dstate["econ_cur_minerals"]))
+                                                cur_ws = [u for u in p1u if u.unit_type in WORKER_IDS]
+                                                cur_wtags = {u.tag for u in cur_ws}
+                                                dstate["econ_seen_worker_tags"].update(cur_wtags)
+                                                dstate["econ_cur_worker_tags"] = cur_wtags
+                                                mining_now = sum(
+                                                    1 for u in cur_ws
+                                                    if any(o.ability_id in MINING_ORDER_ABILITY_IDS for o in u.orders)
+                                                    or any(b in CARRYING_MINERAL_BUFF_IDS for b in u.buff_ids)
+                                                )
+                                                dstate["econ_worker_mining_ticks"] += min(mining_now, max(1, dstate["econ_start_workers"]))
+                                                dstate["econ_worker_total_ticks"] += max(1, dstate["econ_start_workers"])
 
                                             # Track HP/shield damage or unit deaths for smart no-damage stalemate early-stop
                                             cur_hp = {u.tag: float(u.health) + float(u.shield) for u in (p1u + p2u)}
@@ -2592,7 +2864,14 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                             end_reason: str | None = None
                                             ko_side = 0
 
-                                            if not p1u and not p2u:
+                                            if scen.scoring_mode == "mineral-defense":
+                                                # Run full duration so gathered minerals reflect real mining uptime;
+                                                # stop early ONLY if all P1 units/workers are wiped out!
+                                                if not p1u:
+                                                    end_reason, ko_side = "ko_eliminated", 2
+                                                elif fight_elapsed >= scen.max_loops:
+                                                    end_reason = "mineral_defense_complete"
+                                            elif not p1u and not p2u:
                                                 end_reason = "mutual_eliminated"
                                             elif not p2u:
                                                 end_reason, ko_side = "ko_eliminated", 1
@@ -2614,7 +2893,7 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                 elif p2_can and not p1_can:
                                                     end_reason, ko_side = "ko_incapable_survivors", 2
 
-                                            if end_reason is None:
+                                            if end_reason is None and scen.scoring_mode != "mineral-defense":
                                                 if fight_elapsed >= STALEMATE_NO_DAMAGE_LOOPS and no_dmg_elapsed >= STALEMATE_NO_DAMAGE_LOOPS:
                                                     end_reason = "no_damage_stalemate"
                                                 elif fight_elapsed >= scen.max_loops:
@@ -2924,7 +3203,8 @@ def main() -> int:
     parser.add_argument("--scenarios", default="", help="Optional path to arena scenarios JSON catalog (defaults to tools/arena-scenarios.json)")
     parser.add_argument("--scenario", default="", help="Optional case-insensitive substring filter on scenario ID (e.g. 'p04' or 'burrow')")
     parser.add_argument("--terrain", default="", help="Optional filter on scenario terrain (open | high-ground-ramp | flank-surround | cliff-air-chasm | mineral-line-harass)")
-    parser.add_argument("--source", default="", help="Optional filter on scenario source (core | match-forensics | pro-db | pattern-coverage)")
+    parser.add_argument("--source", default="", help="Optional filter on scenario source (core | match-forensics | pro-db | pattern-coverage | replay-extract | custom)")
+    parser.add_argument("--tier", choices=["canonical", "regression", "econ-harass", "all"], default="all", help="Optional filter on scenario tier (canonical | regression | econ-harass | all)")
     parser.add_argument("--workers", type=int, default=3, help="Max parallel containers / 3D render workers (default: 3)")
     parser.add_argument("--map", default=DEFAULT_MAP)
     parser.add_argument("--step-size", type=int, default=4)

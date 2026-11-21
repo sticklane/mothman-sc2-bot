@@ -60,6 +60,10 @@
            dyn-u-has-buff?
            dyn-u-flying-flag
            dyn-u-hallucination-flag
+           dyn-u-cloak-state
+           dyn-u-snapshot-flag
+           dyn-u-burrowed-flag
+           dyn-u-has-order-ability?
            dyn-units-xy-batch)
   (define (dyn-hash-ref h k default)
     (if (hash? h)
@@ -154,6 +158,40 @@
     (and (hash? u)
          (or (eq? (hash-ref u 'is-hallucination #f) #t)
              (eq? (hash-ref u 'hallucination #f) #t))))
+  ;; Returns 'undetected (cloak=1), 'detected (cloak=2), 'not-cloaked (cloak=3/4), or 'unknown
+  (define (dyn-u-cloak-state u)
+    (if (hash? u)
+        (let ([cv (hash-ref u 'cloak #f)])
+          (cond
+            [(or (eqv? cv 1) (eq? cv 'cloaked)) 'undetected]
+            [(or (eqv? cv 2) (eq? cv 'cloaked-detected)) 'detected]
+            [(or (eqv? cv 3) (eqv? cv 4) (eq? cv 'not-cloaked) (eq? cv 'not-cloaked-unknown)) 'not-cloaked]
+            [(eq? (hash-ref u 'cloaked #f) #t) 'undetected]
+            [else 'unknown]))
+        'unknown))
+  (define (dyn-u-snapshot-flag u)
+    (and (hash? u)
+         (or (eq? (hash-ref u 'snapshot? #f) #t)
+             (eqv? (hash-ref u 'display-type 1) 2))))
+  (define (dyn-u-burrowed-flag u)
+    (and (hash? u)
+         (or (eq? (hash-ref u 'burrowed #f) #t)
+             (eq? (hash-ref u 'burrowed? #f) #t)
+             (eq? (hash-ref u 'is-burrowed #f) #t)
+             (eq? (hash-ref u 'is-burrowed? #f) #t))))
+  (define (dyn-u-has-order-ability? u target-ab-id)
+    (and (hash? u)
+         (or (eqv? (hash-ref u 'order-ability-id 0) target-ab-id)
+             (let ([ords (hash-ref u 'orders '())])
+               (and (list? ords)
+                    (let loop ([rem ords])
+                      (and (pair? rem)
+                           (let ([o (car rem)])
+                             (or (eqv? o target-ab-id)
+                                 (and (hash? o)
+                                      (or (eqv? (hash-ref o 'ability-id 0) target-ab-id)
+                                          (eqv? (hash-ref o 'ability_id 0) target-ab-id)))
+                                 (loop (cdr rem)))))))))))
   (define (dyn-units-xy-batch units)
     (define max-n (length units))
     (define xs (make-flvector max-n 0.0))
@@ -184,6 +222,10 @@
   [dyn-u-has-buff? (-> Any Symbol Boolean)]
   [dyn-u-flying-flag (-> Any Boolean)]
   [dyn-u-hallucination-flag (-> Any Boolean)]
+  [dyn-u-cloak-state (-> Any Symbol)]
+  [dyn-u-snapshot-flag (-> Any Boolean)]
+  [dyn-u-burrowed-flag (-> Any Boolean)]
+  [dyn-u-has-order-ability? (-> Any Integer Boolean)]
   [dyn-units-xy-batch (-> (Listof Any) (Values FlVector FlVector (Vectorof Any) Integer))])
 
 (provide
@@ -257,7 +299,18 @@
  plan-terran-spellcaster-micro
  plan-protoss-spellcaster-micro
  step-pro-spellcaster-micro!
- step-pro-spellcaster-sexps!)
+ step-pro-spellcaster-sexps!
+
+ ;; L38-P0-1a / 1b: DT ShadowStride PF Snipe & Burrowed Widow Mine Detection Helpers
+ SHADOW-STRIDE-COOLDOWN-FRAMES
+ SHADOW-STRIDE-MAX-RANGE
+ PF-PERIMETER-BLINK-INNER-RADIUS
+ PF-PERIMETER-BLINK-OUTER-RADIUS
+ WIDOW-MINE-TRIGGER-RADIUS
+ WIDOW-MINE-MELEE-SAFE-RADIUS
+ shadow-stride-researched?
+ plan-dt-blink-pf-snipe
+ widow-mine-detected-targetable?)
 
 ;; -----------------------------------------------------------------------------
 ;; 1. Calibrated Constants (#115 Pro Corpus)
@@ -295,6 +348,14 @@
 (define BC-TACTICAL-JUMP-COOLDOWN-FRAMES : Integer 1590)
 (define BC-YAMATO-COOLDOWN-FRAMES : Integer 1590)
 (define CORRUPTOR-CAUSTIC-SPRAY-COOLDOWN-FRAMES : Integer 1008)
+;; L38-P0-1a / 1b: DT ShadowStride (`2700`, upg `141`) PF snipe & Widow Mine standoff constants
+;; Use `7.65t` clamp so even after `0.5`-tile `safe-coord` rounding, cast range stays strictly `<= 8.0t`!
+(define SHADOW-STRIDE-COOLDOWN-FRAMES : Integer 314)
+(define SHADOW-STRIDE-MAX-RANGE : Float 7.65)
+(define PF-PERIMETER-BLINK-INNER-RADIUS : Float 3.0)
+(define PF-PERIMETER-BLINK-OUTER-RADIUS : Float 3.5)
+(define WIDOW-MINE-TRIGGER-RADIUS : Float 5.0)
+(define WIDOW-MINE-MELEE-SAFE-RADIUS : Float 6.0)
 
 (define ANTI-ARMOR-CLAIM-RADIUS : Float 2.5)
 (define ANTI-ARMOR-CLAIM-TTL : Integer 48)
@@ -372,7 +433,8 @@
    [cyclone-lock-on-ready-frame : (HashTable Integer Integer)]
    [bc-jump-ready-frame : (HashTable Integer Integer)]
    [bc-yamato-ready-frame : (HashTable Integer Integer)]
-   [corruptor-spray-ready-frame : (HashTable Integer Integer)])
+   [corruptor-spray-ready-frame : (HashTable Integer Integer)]
+   [dt-blink-ready-frame : (HashTable Integer Integer)])
   #:mutable
   #:transparent)
 
@@ -385,6 +447,7 @@
    -10000
    -10000
    -10000
+   (make-hasheqv)
    (make-hasheqv)
    (make-hasheqv)
    (make-hasheqv)
@@ -966,6 +1029,7 @@
     [(revelation) 'oracle-revelation]
     [(emp) 'emp-round]
     [(consume) 'viper-consume]
+    [(shadow-strike) 'shadow-stride]
     [else ab]))
 
 (: uh-tag (-> Any Integer))
@@ -1275,7 +1339,8 @@
   (prune-hash-below! (spell-claims-cyclone-lock-on-ready-frame claims) current-frame)
   (prune-hash-below! (spell-claims-bc-jump-ready-frame claims) current-frame)
   (prune-hash-below! (spell-claims-bc-yamato-ready-frame claims) current-frame)
-  (prune-hash-below! (spell-claims-corruptor-spray-ready-frame claims) current-frame))
+  (prune-hash-below! (spell-claims-corruptor-spray-ready-frame claims) current-frame)
+  (prune-hash-below! (spell-claims-dt-blink-ready-frame claims) current-frame))
 
 ;; Returns `#t` if an active claim of `ability` covers `(x, y)` at `current-frame`.
 ;; Supports `(claims ability x y frame)` and `(claims ability x y radius frame)`.
@@ -1534,6 +1599,7 @@
          (list 'morph 'archon))]
     [(move) (list 'move uid tx ty)]
     [(kite) (list 'kite uid tx ty)]
+    [(attack-unit) (list 'attack-unit uid tid)]
     [else (list 'cast-spell uid ab)]))
 
 ;; -----------------------------------------------------------------------------
@@ -4253,3 +4319,220 @@
         #:inject-queen-tags inject-queen-tags
         #:choke-points choke-points
         #:exclude-tags exclude-tags)))
+
+;; -----------------------------------------------------------------------------
+;; 9. L38-P0-1a / 1b: DT ShadowStride PF Snipe & Burrowed Widow Mine Helpers
+;; -----------------------------------------------------------------------------
+
+(: shadow-stride-researched? (-> (Listof Any) Boolean))
+(define (shadow-stride-researched? researched-upgrades)
+  (for/or : Boolean ([up (in-list researched-upgrades)])
+    (or (eqv? up 141)
+        (let ([s (safe-sym up 'unknown)])
+          (and (memq s '(shadow-stride shadow-strike effect-shadow-stride dark-templar-blink)) #t)))))
+
+(: detector-unit-or-bldg-sym? (-> Symbol Boolean))
+(define (detector-unit-or-bldg-sym? s)
+  (and (memq s '(observer observer-siege-mode overseer overseer-siege-mode raven
+                 photon-cannon missile-turret spore-crawler))
+       #t))
+
+;; Exact detection check for `widow-mine-burrowed`: NEVER target `cloak=1` undetected mines;
+;; targetable iff unburrowed, explicitly detected (`cloak=2/3/4`), or within `11.0t` of a
+;; friendly mobile/static detector when the observation omits `cloak`.
+(: widow-mine-detected-targetable? (-> Any (Listof Any) Boolean))
+(define (widow-mine-detected-targetable? wm ally-entities)
+  (cond
+    [(not (hash? wm)) #f]
+    [(dyn-u-snapshot-flag wm) #f]
+    [else
+     (define raw-t (uh-raw-type wm))
+     (define burrowed?
+       (or (eq? raw-t 'widow-mine-burrowed)
+           (dyn-u-burrowed-flag wm)))
+     (cond
+       [(not burrowed?) #t]
+       [else
+        (define cs (dyn-u-cloak-state wm))
+        (cond
+          [(eq? cs 'undetected) #f]
+          [(or (eq? cs 'detected) (eq? cs 'not-cloaked)) #t]
+          [else
+           (define wmx (uh-x wm))
+           (define wmy (uh-y wm))
+           (for/or : Boolean ([a (in-list ally-entities)]
+                              #:when (and (hash? a)
+                                          (detector-unit-or-bldg-sym? (uh-raw-type a))))
+             (define dx (- wmx (uh-x a)))
+             (define dy (- wmy (uh-y a)))
+             (<= (+ (* dx dx) (* dy dy)) 121.0))])])]))
+
+(: dt-angle-diff (-> Float Float Float))
+(define (dt-angle-diff a b)
+  (define raw (- a b))
+  (define pi-fl (exact->inexact pi))
+  (define two-pi (* 2.0 pi-fl))
+  (let loop ([v raw])
+    (cond
+      [(> v pi-fl) (loop (- v two-pi))]
+      [(< v (- pi-fl)) (loop (+ v two-pi))]
+      [else v])))
+
+(: dt-clamp-blink-target (-> Float Float Float Float Float Float Float (Values Float Float)))
+(define (dt-clamp-blink-target ux uy rx0 ry0 cx cy min-center-r)
+  (define dx (- rx0 ux))
+  (define dy (- ry0 uy))
+  (define d (flsqrt (+ (* dx dx) (* dy dy))))
+  (define-values (tx1 ty1)
+    (if (> d SHADOW-STRIDE-MAX-RANGE)
+        (let ([scale (/ SHADOW-STRIDE-MAX-RANGE (max 1e-4 d))])
+          (values (+ ux (* scale dx)) (+ uy (* scale dy))))
+        (values rx0 ry0)))
+  (define pdx (- tx1 cx))
+  (define pdy (- ty1 cy))
+  (define pd (flsqrt (+ (* pdx pdx) (* pdy pdy))))
+  (if (< pd min-center-r)
+      (let* ([ox (if (> pd 0.05) pdx (- ux cx))]
+             [oy (if (> pd 0.05) pdy (- uy cy))]
+             [od (max 1e-4 (flsqrt (+ (* ox ox) (* oy oy))))]
+             [px (+ cx (* min-center-r (/ ox od)))]
+             [py (+ cy (* min-center-r (/ oy od)))]
+             [cdx (- px ux)]
+             [cdy (- py uy)]
+             [cd (flsqrt (+ (* cdx cdx) (* cdy cdy)))])
+        (if (> cd SHADOW-STRIDE-MAX-RANGE)
+            (let ([s (/ SHADOW-STRIDE-MAX-RANGE (max 1e-4 cd))])
+              (values (+ ux (* s cdx)) (+ uy (* s cdy))))
+            (values px py)))
+      (values tx1 ty1)))
+
+;; L38-P0-1a: Coordinated Dark Templar `ShadowStride` (`2700`, upg `141`) Planetary Fortress
+;; 1-shot perimeter-ring snipe + immediate PF focus-fire, followed by post-PF static detector
+;; snipe (`missile-turret`/`photon-cannon`/`spore-crawler`) so surviving DTs go dark and sweep!
+(: plan-dt-blink-pf-snipe
+   (->* ((Listof Any) (Listof Any) (Listof Any) spell-claims Integer)
+        (#:researched-upgrades (Listof Any)
+         #:shadow-stride-ok? (Option Boolean)
+         #:exclude-tags (Listof Integer))
+        (Listof spell-directive)))
+(define (plan-dt-blink-pf-snipe
+         ally-units enemy-units enemy-buildings claims current-frame
+         #:researched-upgrades [researched-upgrades '()]
+         #:shadow-stride-ok? [shadow-stride-override #f]
+         #:exclude-tags [exclude-tags '()])
+  (define dts
+    (for/list : (Listof Any) ([u (in-list ally-units)]
+                              #:when (and (hash? u)
+                                          (eq? (uh-type u) 'dark-templar)
+                                          (not (uh-hallucination? u))
+                                          (> (uh-tag u) 0)
+                                          (not (memv (uh-tag u) exclude-tags))))
+      u))
+  (cond
+    [(< (length dts) 4) '()]
+    [else
+     (define ss-ok?
+       (if (boolean? shadow-stride-override)
+           shadow-stride-override
+           (shadow-stride-researched? researched-upgrades)))
+     (define dt-blink-ht (spell-claims-dt-blink-ready-frame claims))
+     (define all-enemies
+       (if (null? enemy-buildings) enemy-units (append enemy-buildings enemy-units)))
+     (define n-dts (exact->inexact (length dts)))
+     (define dt-cx
+       (/ (for/fold ([s : Float 0.0]) ([u (in-list dts)]) (+ s (uh-x u))) n-dts))
+     (define dt-cy
+       (/ (for/fold ([s : Float 0.0]) ([u (in-list dts)]) (+ s (uh-y u))) n-dts))
+     ;; Priority 1: Live visible enemy Planetary Fortress within <= 14.5t of DT squad
+     (define-values (best-pf best-pf-d)
+       (for/fold ([bp : Any #f] [bd : Float 14.51])
+                 ([e (in-list all-enemies)]
+                  #:when (and (hash? e)
+                              (eq? (uh-raw-type e) 'planetary-fortress)
+                              (not (dyn-u-snapshot-flag e))
+                              (> (uh-tag e) 0)))
+         (define ex (uh-x e))
+         (define ey (uh-y e))
+         (define d (flsqrt (+ (* (- ex dt-cx) (- ex dt-cx))
+                              (* (- ey dt-cy) (- ey dt-cy)))))
+         (if (< d bd) (values e d) (values bp bd))))
+     ;; Priority 2 (when no PF nearby): Nearby enemy ground static detector revealing DTs
+     (define-values (best-det best-det-d)
+       (if best-pf
+           (values #f 999.0)
+           (for/fold ([bt : Any #f] [bd : Float 11.01])
+                     ([e (in-list all-enemies)]
+                      #:when (and (hash? e)
+                                  (memq (uh-raw-type e) '(missile-turret photon-cannon spore-crawler))
+                                  (not (dyn-u-snapshot-flag e))
+                                  (> (uh-tag e) 0)))
+             (define ex (uh-x e))
+             (define ey (uh-y e))
+             (define d (flsqrt (+ (* (- ex dt-cx) (- ex dt-cx))
+                                  (* (- ey dt-cy) (- ey dt-cy)))))
+             (if (< d bd) (values e d) (values bt bd)))))
+     (define primary-tgt (or best-pf best-det))
+     (define is-pf? (and best-pf #t))
+     (cond
+       [(not primary-tgt) '()]
+       [else
+        (define tgt-id (uh-tag primary-tgt))
+        (define tx0 (uh-x primary-tgt))
+        (define ty0 (uh-y primary-tgt))
+        (define max-part-dist (if is-pf? 15.0 11.5))
+        (define active-dts
+          (for/list : (Listof Any) ([u (in-list dts)]
+                                    #:when (let ([dx (- (uh-x u) tx0)]
+                                                 [dy (- (uh-y u) ty0)])
+                                             (<= (+ (* dx dx) (* dy dy))
+                                                 (* max-part-dist max-part-dist))))
+            u))
+        (if (< (length active-dts) 4)
+            '()
+            (let* ([an (exact->inexact (length active-dts))]
+                   [acx (/ (for/fold ([s : Float 0.0]) ([u (in-list active-dts)]) (+ s (uh-x u))) an)]
+                   [acy (/ (for/fold ([s : Float 0.0]) ([u (in-list active-dts)]) (+ s (uh-y u))) an)]
+                   [theta0 (real->double-flonum (atan (- acy ty0) (- acx tx0)))]
+                   [sorted-dts
+                    (sort active-dts
+                          (lambda ([a : Any] [b : Any])
+                            (define aa (dt-angle-diff (real->double-flonum (atan (- (uh-y a) ty0) (- (uh-x a) tx0))) theta0))
+                            (define ab (dt-angle-diff (real->double-flonum (atan (- (uh-y b) ty0) (- (uh-x b) tx0))) theta0))
+                            (if (= aa ab) (< (uh-tag a) (uh-tag b)) (< aa ab))))]
+                   [n-act (length sorted-dts)]
+                   [in-melee-r (if is-pf? 4.2 2.4)]
+                   [inner-r (if is-pf? PF-PERIMETER-BLINK-INNER-RADIUS 1.65)]
+                   [outer-r (if is-pf? PF-PERIMETER-BLINK-OUTER-RADIUS 2.15)]
+                   [min-center-r (if is-pf? 2.9 1.35)]
+                   [blink-pat (if is-pf? 'dt-blink-pf-snipe 'dt-blink-detector-snipe)]
+                   [focus-pat (if is-pf? 'dt-pf-focus-fire 'dt-detector-focus-fire)])
+              (for/list : (Listof spell-directive)
+                        ([u (in-list sorted-dts)]
+                         [i (in-naturals)])
+                (define tag (uh-tag u))
+                (define ux (uh-x u))
+                (define uy (uh-y u))
+                (define d-tgt (flsqrt (+ (* (- ux tx0) (- ux tx0))
+                                         (* (- uy ty0) (- uy ty0)))))
+                (define ready-f (hash-ref dt-blink-ht tag (lambda () -10000)))
+                (cond
+                  [(dyn-u-has-order-ability? u 2700)
+                   (spell-directive tag 'dark-templar 'shadow-stride 'hold 0 ux uy 'dt-blink-in-flight)]
+                  [(and ss-ok?
+                        (> d-tgt in-melee-r)
+                        (>= current-frame ready-f))
+                   (define frac
+                     (if (<= n-act 1)
+                         0.0
+                         (/ (exact->inexact i) (exact->inexact (- n-act 1)))))
+                   (define ang-off (+ -1.55 (* 3.10 frac)))
+                   (define ring-r (if (even? i) inner-r outer-r))
+                   (define th (+ theta0 ang-off))
+                   (define rx0 (+ tx0 (* ring-r (flcos th))))
+                   (define ry0 (+ ty0 (* ring-r (flsin th))))
+                   (define-values (bx by)
+                     (dt-clamp-blink-target ux uy rx0 ry0 tx0 ty0 min-center-r))
+                   (hash-set! dt-blink-ht tag (+ current-frame SHADOW-STRIDE-COOLDOWN-FRAMES))
+                   (spell-directive tag 'dark-templar 'shadow-stride 'point 0 bx by blink-pat)]
+                  [else
+                   (spell-directive tag 'dark-templar 'attack-unit 'attack-unit tgt-id tx0 ty0 focus-pat)]))))])]))

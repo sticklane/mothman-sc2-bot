@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "notes": "Real-SC2_x64 micro skirmish scenarios (41 scenarios: 21 core + 20 Tactics Arena 2.0 match-forensics/pro-db/pattern-coverage/custom across 5 terrains & selective upgrades) loaded by tools/sc2-tactics-arena.py. Add or edit via .agents/skills/add-arena-scenario/scripts/add_scenario.py.",
+  "notes": "Real-SC2_x64 micro skirmish scenarios (55 scenarios across 3 tiers: 48 canonical + 4 econ-harass mineral-defense + 3 replay-extracted regression across 5 terrains & selective upgrades) loaded by tools/sc2-tactics-arena.py. Add or edit via .agents/skills/add-arena-scenario/scripts/add_scenario.py.",
   "scenarios": [
     {
       "id": "sc2-real-p01-zealot-stalker-vs-bio",
@@ -462,6 +462,51 @@
       "max_loops": 960
     },
     {
+      "id": "sc2-real-p16-warpprism-immortal-juggle-vs-roach-ravager",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": ["warp-prism-immortal-juggle", "transport-pickup-micro", "blink-kite", "corrosive-bile-dodge"],
+      "p1_upgrades": ["Blink"],
+      "p2_upgrades": ["GlialReconstitution"],
+      "description": "PvZ Warp Prism Juggle: 1 Warp Prism + 3 Immortals + 4 Blink Stalkers vs 12 Speed Roaches + 4 Ravagers",
+      "p1_units": [
+        ["immortal", 3, -3.8, 0.0],
+        ["stalker", 4, -5.2, 0.0],
+        ["warp-prism", 1, -5.8, 1.5]
+      ],
+      "p2_units": [
+        ["roach", 12, 4.2, 0.0],
+        ["ravager", 4, 5.5, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-real-p17-skytoss-ht-feedback-vs-corruptor-viper",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "source": "pattern-coverage",
+      "terrain": "cliff-air-chasm",
+      "patterns": ["ht-feedback-viper", "ht-psi-storm-air", "skytoss-carrier-tempest", "cliff-air-engagement"],
+      "p1_upgrades": ["PsiStorm"],
+      "description": "Cliff-Air Late PvZ: 3 Carriers + 2 Tempests + 3 High Templars + 1 Oracle vs 14 Corruptors + 3 Vipers + 2 Infestors",
+      "p1_units": [
+        ["high-templar", 3, -3.8, 0.0],
+        ["oracle", 1, -4.5, 2.0],
+        ["carrier", 3, -5.2, 0.0],
+        ["tempest", 2, -6.5, -1.8]
+      ],
+      "p2_units": [
+        ["infestor", 2, 1.5, 0.0],
+        ["corruptor", 14, 5.2, 0.0],
+        ["viper", 3, 6.4, 2.0]
+      ],
+      "max_loops": 960
+    },
+    {
       "id": "sc2-real-t01-bio-medivac-vs-zealot-stalker",
       "our_race": "Terran",
       "enemy_race": "Protoss",
@@ -872,6 +917,51 @@
       "max_loops": 960
     },
     {
+      "id": "sc2-real-t14-raven-imatrix-aam-bio-vs-colossus",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": ["raven-interference-matrix", "raven-anti-armor-missile", "viking-colossus-snipe", "bio-stutter"],
+      "p1_upgrades": ["Stim", "CombatShield"],
+      "p2_upgrades": ["Blink", "ThermalLance"],
+      "description": "TvP Raven Spell Clash: 2 Ravens + 4 Vikings + 14 Stim Marines + 6 Marauders + 2 Medivacs vs 2 Colossi + 10 Blink Stalkers + 6 Zealots",
+      "p1_units": [
+        ["marauder", 6, -3.8, 0.0],
+        ["marine", 14, -4.8, 0.0],
+        ["viking-fighter", 4, -5.2, 2.0],
+        ["raven", 2, -5.8, -1.8],
+        ["medivac", 2, -6.4, 0.0]
+      ],
+      "p2_units": [
+        ["zealot", 6, 3.6, 0.0],
+        ["stalker", 10, 4.8, 0.0],
+        ["colossus", 2, 6.2, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-real-t15-bc-yamato-jump-vs-corruptor-viper",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "source": "pattern-coverage",
+      "terrain": "cliff-air-chasm",
+      "patterns": ["bc-yamato-focus", "bc-tactical-jump", "anti-corruptor-viking", "cliff-air-engagement"],
+      "description": "Cliff-Air Late TvZ: 3 Battlecruisers + 4 Vikings (Yamato + Tactical Jump) vs 12 Corruptors + 2 Vipers + 6 Hydralisks",
+      "p1_units": [
+        ["battlecruiser", 3, -5.0, 0.0],
+        ["viking-fighter", 4, -6.2, 2.0]
+      ],
+      "p2_units": [
+        ["hydralisk", 6, 1.5, 0.0],
+        ["corruptor", 12, 5.5, -1.5],
+        ["viper", 2, 6.5, 2.0]
+      ],
+      "max_loops": 960
+    },
+    {
       "id": "sc2-real-z01-lings-vs-marines-open",
       "our_race": "Zerg",
       "enemy_race": "Terran",
@@ -1241,6 +1331,216 @@
         ["siege-tank-sieged", 3, -1.2, 1.5],
         ["siege-tank-sieged", 2, 1.2, -1.8],
         ["medivac", 2, 0.0, 2.2]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-real-z14-infestor-fungal-neural-lingbane-vs-bio-tank",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": ["infestor-fungal-growth", "infestor-neural-parasite", "ling-bane-surround", "bio-tank-break"],
+      "p1_upgrades": ["NeuralParasite", "MetabolicBoost", "CentrifugalHooks"],
+      "p2_upgrades": ["Stim", "CombatShield"],
+      "description": "ZvT Infestor Spell Clash: 3 Infestors + 10 Speed Banelings + 24 Speedlings vs 20 Stim Marines + 6 Marauders + 2 Sieged Tanks + 2 Medivacs",
+      "p1_units": [
+        ["zergling", 24, -3.8, 0.0],
+        ["baneling", 10, -4.6, 0.0],
+        ["infestor", 3, -5.8, 0.0]
+      ],
+      "p2_units": [
+        ["marauder", 6, 3.8, 0.0],
+        ["marine", 20, 4.8, 0.0],
+        ["siege-tank-sieged", 2, 6.2, 0.0],
+        ["medivac", 2, 6.2, 2.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-real-z15-viper-blindingcloud-pbomb-ultra-vs-mech-bio",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": ["viper-blinding-cloud", "viper-parasitic-bomb", "ultralisk-tank-break", "corruptor-anti-viking"],
+      "p1_upgrades": ["ChitinousPlating", "MetabolicBoost"],
+      "p2_upgrades": ["Stim"],
+      "description": "Late ZvT Viper+Ultra: 3 Vipers + 3 Chitinous Ultralisks + 20 Speedlings + 4 Corruptors vs 5 Sieged Tanks + 16 Stim Marines + 6 Vikings + 2 Medivacs",
+      "p1_units": [
+        ["zergling", 20, -3.5, 0.0],
+        ["ultralisk", 3, -4.2, 0.0],
+        ["corruptor", 4, -5.5, -2.0],
+        ["viper", 3, -6.2, 2.0]
+      ],
+      "p2_units": [
+        ["marine", 16, 4.0, 0.0],
+        ["siege-tank-sieged", 3, 5.8, -1.8],
+        ["siege-tank-sieged", 2, 5.8, 1.8],
+        ["viking-fighter", 6, 5.5, 2.8],
+        ["medivac", 2, 6.5, -2.2]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-real-z16-muta-magicbox-vs-thors",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": ["muta-magic-box", "anti-splash-spread", "air-focus-fire"],
+      "description": "ZvT Mutalisk Magic-Box: 16 Mutalisks spreading over 3 Thors + 8 Marines (punishes clumping vs Javelin splash)",
+      "p1_units": [
+        ["mutalisk", 16, -5.0, 0.0]
+      ],
+      "p2_units": [
+        ["thor", 3, 4.5, 0.0],
+        ["marine", 8, 5.5, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-econ-e01-probe-harass-mineral-defense",
+      "our_race": "Protoss",
+      "enemy_race": "Protoss",
+      "tier": "econ-harass",
+      "scoring_mode": "mineral-defense",
+      "pass_net_econ_min": 420.0,
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "patterns": ["mineral-defense-uptime", "proportional-worker-pull", "probe-harass-defense"],
+      "description": "Econ-Harass (PvP): 12 actively mining main Probes vs 2 enemy harass Probes (measures mined minerals + kills - 50*workers_lost over 960 loops; over-pulling fails)",
+      "p1_units": [
+        ["probe", 12, -3.2, 0.0]
+      ],
+      "p2_units": [
+        ["probe", 2, 8.5, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-econ-e02-reaper-harass-mineral-defense",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "tier": "econ-harass",
+      "scoring_mode": "mineral-defense",
+      "pass_net_econ_min": 520.0,
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "patterns": ["mineral-defense-uptime", "queen-reaper-defense", "proportional-worker-pull"],
+      "description": "Econ-Harass (ZvT): 16 actively mining main Drones + 1 Queen vs 2 enemy Reapers (preserves mineral uptime while fending off Reaper harass)",
+      "p1_units": [
+        ["drone", 16, -3.2, 0.0],
+        ["queen", 1, 3.2, 0.0]
+      ],
+      "p2_units": [
+        ["reaper", 2, 9.5, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-econ-e03-3adept-scv-mineral-defense",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "tier": "econ-harass",
+      "scoring_mode": "mineral-defense",
+      "pass_net_econ_min": 520.0,
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "patterns": ["mineral-defense-uptime", "adept-scv-breakpoint", "proportional-worker-pull"],
+      "description": "Econ-Harass (TvP): 16 actively mining main SCVs + 2 Marines vs 3 enemy Adepts (exact 45-HP SCV 2-shot breakpoint vs mineral uptime)",
+      "p1_units": [
+        ["scv", 16, -3.2, 0.0],
+        ["marine", 2, 3.2, 0.0]
+      ],
+      "p2_units": [
+        ["adept", 3, 9.5, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-econ-e04-6ling-runby-mineral-defense",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "tier": "econ-harass",
+      "scoring_mode": "mineral-defense",
+      "pass_net_econ_min": 480.0,
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "patterns": ["mineral-defense-uptime", "ling-runby-defense", "proportional-worker-pull"],
+      "p2_upgrades": ["MetabolicBoost"],
+      "description": "Econ-Harass (PvZ): 14 actively mining main Probes + 1 Zealot vs 6 Speedlings (preserves mineral uptime during early runby)",
+      "p1_units": [
+        ["probe", 14, -3.2, 0.0],
+        ["zealot", 1, 3.2, 0.0]
+      ],
+      "p2_units": [
+        ["zergling", 6, 9.5, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-reg-r01-prod5138254-pvt-obs-stalker-vs-cloaked-banshees",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "tier": "regression",
+      "source": "replay-extract",
+      "origin_match_id": "prod-5138254",
+      "terrain": "mineral-line-harass",
+      "patterns": ["observer-tether-escort", "cloak-anti-air", "mineral-line-defense"],
+      "p2_upgrades": ["Cloak"],
+      "p2_pre_cloaked": true,
+      "description": "Replay Regression (PvT): 1 Observer + 9 Stalkers + 12 Probes defending expansion mineral line vs 6 Cloaked Banshees",
+      "p1_units": [
+        ["probe", 12, -3.0, 0.0],
+        ["stalker", 9, -1.5, 0.0],
+        ["observer", 1, -2.2, 1.5]
+      ],
+      "p2_units": [
+        ["banshee", 6, 5.5, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-reg-r02-prod5138248-zvp-drone-hold-vs-15probe-rush",
+      "our_race": "Zerg",
+      "enemy_race": "Protoss",
+      "tier": "regression",
+      "source": "replay-extract",
+      "origin_match_id": "prod-5138248",
+      "terrain": "mineral-line-harass",
+      "patterns": ["worker-rush-defense", "drone-mineral-stack", "worker-combat-surround"],
+      "description": "Replay Regression (ZvP): 16 Drones defending mineral line vs 15-Probe all-in worker rush",
+      "p1_units": [
+        ["drone", 16, -2.5, 0.0]
+      ],
+      "p2_units": [
+        ["probe", 15, 4.8, 0.0]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-reg-r03-iter37-m42-pvz-ramp-hold-vs-ling-flood",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "tier": "regression",
+      "source": "replay-extract",
+      "origin_match_id": "iter37-m42",
+      "terrain": "high-ground-ramp",
+      "high_ground_side": "p1",
+      "patterns": ["high-ground-ramp", "zealot-choke-hold", "ling-flood-defense"],
+      "p2_upgrades": ["MetabolicBoost"],
+      "description": "Replay Regression (PvZ): 2 Zealots + 2 Adepts + 3 Stalkers holding high-ground ramp vs 24 Speedlings",
+      "p1_units": [
+        ["zealot", 2, -2.8, 0.0],
+        ["adept", 2, -3.8, 0.0],
+        ["stalker", 3, -4.8, 0.0]
+      ],
+      "p2_units": [
+        ["zergling", 24, 4.8, 0.0]
       ],
       "max_loops": 960
     }

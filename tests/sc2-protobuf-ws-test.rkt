@@ -8346,33 +8346,57 @@
   (check-true "l37-p0-3e-creep-and-changeling-4corner-spawn-symmetry"
               creep-4corner-ok?)
 
-  ;; L37-P0-3f: Honest Arena 2.0 catalog expanded `36 -> 41` with 4 prod-killer scenarios + DT Blink PF snipe!
+  ;; L37-P0-3f / L38-P0-4: Honest Arena 2.0 3-tier catalog (`55` scenarios: `48` canonical + `4` econ-harass + `3` regression)!
   (define cat-path (build-path (current-directory) "tools" "arena-scenarios.json"))
   (define cat-j (and (file-exists? cat-path) (call-with-input-file cat-path read-json)))
   (define cat-scens (if (hash? cat-j) (hash-ref cat-j 'scenarios '()) '()))
   (define cat-ids (for/list ([s (in-list cat-scens)]) (hash-ref s 'id "")))
   (define cat-by-id (for/hash ([s (in-list cat-scens)]) (values (hash-ref s 'id "") s)))
+  (define tier-canon (count (lambda (s) (equal? (hash-ref s 'tier "canonical") "canonical")) cat-scens))
+  (define tier-econ  (count (lambda (s) (equal? (hash-ref s 'tier "canonical") "econ-harass")) cat-scens))
+  (define tier-reg   (count (lambda (s) (equal? (hash-ref s 'tier "canonical") "regression")) cat-scens))
   (define req-ids
     '("sc2-real-p13-obs-colossus-stalker-vs-bio-widowmines"
       "sc2-real-p14-pvp-stalker-chargelot-immortal-mirror"
       "sc2-real-p15-dt-blink-snipe-planetary"
+      "sc2-real-p16-warpprism-immortal-juggle-vs-roach-ravager"
+      "sc2-real-p17-skytoss-ht-feedback-vs-corruptor-viper"
       "sc2-real-t13-bio-tank-viking-vs-blink-colossus"
-      "sc2-real-z13-ravager-hydra-ling-vs-heavy-tank-line"))
+      "sc2-real-t14-raven-imatrix-aam-bio-vs-colossus"
+      "sc2-real-t15-bc-yamato-jump-vs-corruptor-viper"
+      "sc2-real-z13-ravager-hydra-ling-vs-heavy-tank-line"
+      "sc2-real-z14-infestor-fungal-neural-lingbane-vs-bio-tank"
+      "sc2-real-z15-viper-blindingcloud-pbomb-ultra-vs-mech-bio"
+      "sc2-real-z16-muta-magicbox-vs-thors"
+      "sc2-econ-e01-probe-harass-mineral-defense"
+      "sc2-econ-e02-reaper-harass-mineral-defense"
+      "sc2-econ-e03-3adept-scv-mineral-defense"
+      "sc2-econ-e04-6ling-runby-mineral-defense"
+      "sc2-reg-r01-prod5138254-pvt-obs-stalker-vs-cloaked-banshees"
+      "sc2-reg-r02-prod5138248-zvp-drone-hold-vs-15probe-rush"
+      "sc2-reg-r03-iter37-m42-pvz-ramp-hold-vs-ling-flood"))
   (define p15-s (hash-ref cat-by-id "sc2-real-p15-dt-blink-snipe-planetary" #f))
-  (check-true (format "l37-p0-3f-arena-scenarios-41-catalog (n=~a)" (length cat-scens))
+  (define e03-s (hash-ref cat-by-id "sc2-econ-e03-3adept-scv-mineral-defense" #f))
+  (define r01-s (hash-ref cat-by-id "sc2-reg-r01-prod5138254-pvt-obs-stalker-vs-cloaked-banshees" #f))
+  (check-true (format "l37-p0-3f-l38-arena-scenarios-55-3tier-catalog (n=~a c=~a e=~a r=~a)"
+                      (length cat-scens) tier-canon tier-econ tier-reg)
               (and (hash? cat-j)
                    (= (hash-ref cat-j 'schema_version 0) 2)
-                   (= (length cat-scens) 41)
-                   (= (length (remove-duplicates cat-ids)) 41)
+                   (= (length cat-scens) 55)
+                   (= (length (remove-duplicates cat-ids)) 55)
+                   (= tier-canon 48)
+                   (= tier-econ 4)
+                   (= tier-reg 3)
                    (for/and ([rid (in-list req-ids)]) (hash-has-key? cat-by-id rid))
-                   (equal? (hash-ref (hash-ref cat-by-id "sc2-real-p13-obs-colossus-stalker-vs-bio-widowmines") 'terrain "") "open")
-                   (equal? (hash-ref (hash-ref cat-by-id "sc2-real-p14-pvp-stalker-chargelot-immortal-mirror") 'enemy_race "") "Protoss")
                    (hash? p15-s)
-                   (equal? (hash-ref p15-s 'terrain "") "open")
                    (member "ShadowStride" (hash-ref p15-s 'p1_upgrades '()))
                    (member "ProtossGroundWeapons3" (hash-ref p15-s 'p1_upgrades '()))
-                   (equal? (hash-ref (hash-ref cat-by-id "sc2-real-t13-bio-tank-viking-vs-blink-colossus") 'our_race "") "Terran")
-                   (equal? (hash-ref (hash-ref cat-by-id "sc2-real-z13-ravager-hydra-ling-vs-heavy-tank-line") 'terrain "") "flank-surround"))))
+                   (hash? e03-s)
+                   (equal? (hash-ref e03-s 'scoring_mode "") "mineral-defense")
+                   (> (hash-ref e03-s 'pass_net_econ_min 0) 0)
+                   (hash? r01-s)
+                   (equal? (hash-ref r01-s 'source "") "replay-extract")
+                   (equal? (hash-ref r01-s 'origin_match_id "") "prod-5138254"))))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"

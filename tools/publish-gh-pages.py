@@ -153,6 +153,24 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             required=False,
         ),
         ReportSpec(
+            slug="loop37-forensics",
+            out_file="loop37-forensics.html",
+            title="Loop 37 Forensics & Live Prod Loop 36 Ladder Audit (Mothman-P 1280 ELO ATH)",
+            short_title="L37 + Prod L36",
+            category="Forensic & Empirical Audits",
+            badge="SHIP #3 AUDIT",
+            summary=(
+                "Live AI Arena audit of deployed Loop 36 (mqklxqnz_1cd044c1, Mothman-P 1280 ELO ATH), "
+                "Loop 37 90-match verification proving North > South symmetry & zero NW placement bug, "
+                "unconditional Ship #3 verdict, and Loop 38 blueprint (p15 DT Blink + p13 Widow Mines)."
+            ),
+            source_candidates=(
+                analyzer_dir / "loop37_forensics_prod_l36_audit.md",
+                brain_dir / "loop37_forensics_prod_l36_audit.md",
+            ),
+            required=False,
+        ),
+        ReportSpec(
             slug="loop36-forensics",
             out_file="loop36-forensics.html",
             title="Loop 36 Forensics (90/90 Matches) & Loop 37 Top-3 Blueprint",
@@ -1788,12 +1806,13 @@ def push_gh_pages_and_enable(repo_slug: str, out_dir: Path) -> str:
         cwd=out_dir,
         env=env,
     )
+    pushed_sha = run_cmd(["git", "rev-parse", "HEAD"], cwd=out_dir, env=env).stdout.strip()
     run_cmd(
         ["git", "push", "--force", remote_url, "HEAD:gh-pages"],
         cwd=out_dir,
         env=env,
     )
-    print(f"[Step C] Pushed orphan gh-pages branch to {remote_url}.")
+    print(f"[Step C] Pushed orphan gh-pages ({pushed_sha[:8]}) to {remote_url}.")
 
     # Ensure GitHub Pages is enabled on gh-pages root (idempotent; handles 409 race cleanly).
     check_pages = run_cmd(["gh", "api", f"repos/{repo_slug}/pages"], check=False)
@@ -1833,13 +1852,14 @@ def push_gh_pages_and_enable(repo_slug: str, out_dir: Path) -> str:
         if bp.returncode == 0:
             bdata = json.loads(bp.stdout)
             last_status = str(bdata.get("status", "unknown"))
-            if last_status == "built":
+            built_sha = str(bdata.get("commit", ""))
+            if last_status == "built" and built_sha == pushed_sha:
                 # Also check HTTP 200 on live index
                 code = http_head_status(site_url)
                 if code == 200:
-                    print(f"[Step C] Pages build status=built & live HTTP {code}!")
+                    print(f"[Step C] Pages build {pushed_sha[:8]} status=built & live HTTP {code}!")
                     break
-            elif last_status == "errored":
+            elif last_status == "errored" and built_sha == pushed_sha:
                 raise RuntimeError(f"GitHub Pages build errored: {bdata.get('error')}")
         time.sleep(4.0)
     else:

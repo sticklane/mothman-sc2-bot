@@ -15533,6 +15533,121 @@
   (assert-true! (and l37-ne-spine (< (third l37-ne-spine) 167.5) (< (fourth l37-ne-spine) 167.5)
                      l37-ne-brain-bld (< (third l37-ne-brain-bld) 167.5) (< (fourth l37-ne-brain-bld) 167.5))
                 "L37-P0-1 #846: NE spawn SpineCrawler & priority-macro-brain build coords must project forward toward Natural (<167.5, <167.5), NEVER behind main (+X,+Y)")
+
+  ;; 51.26 L38-P0-2: Prod L36 (#5138250 PvZ Fast Robo + Continuous Immortals, #5138255 PvP Post-Probe-Rush CyberCore)
+  ;;       + Loop 37 (#65 TvZ FactoryTechLab#1 ahead of RaxTL#2+, #23 TvP 1BaseLock Break & 1-Base Cloak Turret)
+  (reset-macro-escrow-tracker!)
+  (define l38-p-pvz-fast-robo
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Zerg #:frame 3300
+      #:minerals 180 #:gas 110 #:supply-used 28 #:supply-cap 39 #:workers 23 #:active-bases 1
+      #:mineral-harvesters 17 #:gas-harvesters 6
+      #:army-supply 4 #:enemy-threat-supply 0 #:under-attack? #f
+      #:pending-upgrades '(warp-gate-research)
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 3 'gateway 1 'cybernetics-core 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 23 'zealot 1 'stalker 1)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 1 'cybernetics-core 0))))
+  (reset-macro-escrow-tracker!)
+  (define l38-p-pvz-immortal-cont
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Zerg #:frame 6200
+      #:minerals 190 #:gas 115 #:supply-used 62 #:supply-cap 86 #:workers 42 #:active-bases 2
+      #:mineral-harvesters 34 #:gas-harvesters 8
+      #:army-supply 20 #:enemy-threat-supply 0 #:under-attack? #f
+      #:researched-upgrades '(warp-gate-research)
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 8 'warp-gate 4 'cybernetics-core 1 'robotics-facility 1 'assimilator 4)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 8 'warp-gate 4 'cybernetics-core 1 'robotics-facility 1 'assimilator 4)
+      #:unit-counts (hasheq 'probe 42 'stalker 4 'zealot 2 'immortal 2 'observer 1)
+      #:enemy-unit-counts (hasheq 'roach 2 'zergling 8)
+      #:enemy-building-counts (hasheq 'roach-warren 1)
+      #:open-facility-slots (hasheq 'townhall 2 'warp-gate 4 'robotics-facility 1))))
+  (assert-true! (and (not (not (memq 'robotics-facility (macro-brain-decision-scheduled-ids l38-p-pvz-fast-robo))))
+                     (not (memq 'twilight-council (macro-brain-decision-scheduled-ids l38-p-pvz-fast-robo)))
+                     (not (memq 'cybernetics-core (macro-brain-decision-scheduled-ids l38-p-pvz-fast-robo)))
+                     (eq? (macro-brain-decision-saving-for l38-p-pvz-immortal-cont) 'immortal))
+                "L38-P0-2 #5138250 PvZ: Must accelerate RoboticsFacility <=155s ahead of Twilight (CyberCore==1) & sustain continuous Immortal #3+")
+
+  (reset-macro-escrow-tracker!)
+  (define l38-p-pvp-post-probe-cyber
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Protoss #:frame 2400
+      #:minerals 160 #:gas 0 #:supply-used 18 #:supply-cap 23 #:workers 16 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 0
+      #:army-supply 2 #:enemy-threat-supply 2 #:under-attack? #t
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 1 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 1 'assimilator 1)
+      #:unit-counts (hasheq 'probe 16 'zealot 1)
+      #:enemy-unit-counts (hasheq 'probe 2)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 1))))
+  (reset-macro-escrow-tracker!)
+  (define l38-p-pvp-post-probe-escrow
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Protoss #:frame 2550
+      #:minerals 115 #:gas 0 #:supply-used 20 #:supply-cap 31 #:workers 16 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 0
+      #:army-supply 4 #:enemy-threat-supply 1 #:under-attack? #t
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 2 'assimilator 1)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 2 'assimilator 1)
+      #:unit-counts (hasheq 'probe 16 'zealot 2)
+      #:enemy-unit-counts (hasheq 'probe 1)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 2))))
+  (assert-true! (and (not (not (memq 'cybernetics-core (macro-brain-decision-scheduled-ids l38-p-pvp-post-probe-cyber))))
+                     (eq? (macro-brain-decision-saving-for l38-p-pvp-post-probe-escrow) 'cybernetics-core)
+                     (not (memq 'zealot (macro-brain-decision-scheduled-ids l38-p-pvp-post-probe-escrow))))
+                "L38-P0-2 #5138255 PvP: Post-Probe-rush (<3 enemy Probes) must release Zealot-only spam and build/escrow CyberCore by ~2:00")
+
+  (reset-macro-escrow-tracker!)
+  (define l38-t-65-factl-before-raxtl2
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Zerg #:frame 5200
+      #:minerals 80 #:gas 40 #:supply-used 48 #:supply-cap 62 #:workers 34 #:active-bases 2
+      #:mineral-harvesters 28 #:gas-harvesters 6
+      #:army-supply 14 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 6 'barracks 3 'barracks-techlab 1 'factory 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 6 'barracks 3 'barracks-techlab 1 'factory 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 34 'marine 14)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 1))))
+  (reset-macro-escrow-tracker!)
+  (define l38-t-23-1base-dt-turret
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 5000
+      #:minerals 180 #:gas 50 #:supply-used 34 #:supply-cap 47 #:workers 22 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 6
+      #:army-supply 12 #:enemy-threat-supply 2 #:under-attack? #f #:requires-detection? #t
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 4 'barracks 2 'engineering-bay 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 4 'barracks 2 'engineering-bay 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 22 'marine 12)
+      #:enemy-unit-counts (hasheq 'dark-templar 1)
+      #:enemy-building-counts (hasheq 'dark-shrine 1)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 2))))
+  (reset-macro-escrow-tracker!)
+  (void (macro-escrow-sync-entry! 'Terran 'Protoss 4600 260 1 #:workers 22 #:gas 100))
+  (macro-escrow-record-decision! 'Terran 'Protoss 4600 260 1 'command-center '())
+  (void (macro-escrow-sync-entry! 'Terran 'Protoss 5600 260 1 #:workers 22 #:gas 100))
+  (define l38-t-23-1base-backoff-break
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 5620
+      #:minerals 260 #:gas 100 #:supply-used 32 #:supply-cap 47 #:workers 22 #:active-bases 1
+      #:mineral-harvesters 16 #:gas-harvesters 6
+      #:army-supply 10 #:enemy-threat-supply 2 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 4 'barracks 2 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 4 'barracks 2 'refinery 2)
+      #:unit-counts (hasheq 'scv 22 'marine 10)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 2))))
+  (assert-true! (and (not (not (memq 'factory-techlab (macro-brain-decision-scheduled-ids l38-t-65-factl-before-raxtl2))))
+                     (not (memq 'barracks-techlab (macro-brain-decision-scheduled-ids l38-t-65-factl-before-raxtl2)))
+                     (not (not (memq 'missile-turret (macro-brain-decision-scheduled-ids l38-t-23-1base-dt-turret))))
+                     (not (eq? (macro-brain-decision-saving-for l38-t-23-1base-dt-turret) 'command-center))
+                     (not (eq? (macro-brain-decision-saving-for l38-t-23-1base-backoff-break) 'command-center)))
+                "L38-P0-2 #65/#23: TvZ must attach FactoryTechLab#1 ahead of RaxTL#2+, and 1-base TvP must break 1BaseLock & fire MissileTurret on DT/DarkShrine")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms

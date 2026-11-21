@@ -247,10 +247,13 @@ def _enrich_arena_clips(
         extra = by_id.get(str(c.get("id") or ""))
         if extra:
             for k in (
-                "race", "enemy_race", "terrain", "source", "opponent_mode", "p2_bot",
-                "win_type", "end_reason", "p1_combat_alive_cnt", "p2_combat_alive_cnt",
+                "race", "enemy_race", "terrain", "source", "tier", "scoring_mode",
+                "opponent_mode", "p2_bot", "win_type", "end_reason",
+                "p1_combat_alive_cnt", "p2_combat_alive_cnt",
                 "p2_trade_ratio", "p2_attack_unit_cmds", "p2_move_unit_cmds", "p2_spell_unit_cmds",
                 "applied_p1_upgrade_ids", "applied_p2_upgrade_ids",
+                "minerals_gathered", "mining_uptime_pct", "workers_lost",
+                "enemy_killed_val", "net_econ_score", "pass_net_econ_min",
             ):
                 if merged.get(k) in (None, "") or (k == "race" and "_" in str(merged.get(k))):
                     if extra.get(k) is not None:
@@ -419,6 +422,53 @@ def build_report(
         lines.append("")
 
     _render_spawn_watch_section(lines, score_data, replay_db_path)
+
+    # 3-Tier Arena Summary & Econ-Harass Mineral-Defense Table (Loop 38+ 55-scenario Arena 2.0)
+    a_tiers = ((arena_json or {}).get("summary") or {}).get("by_tier") or {}
+    sp_tiers = ((selfplay_json or {}).get("summary") or {}).get("by_tier") or {}
+    if a_tiers or sp_tiers:
+        lines.append("## 3-Tier Tactics Arena 2.0 Summary (`canonical` / `econ-harass` / `regression`)")
+        lines.append("")
+        lines.append("| Tier | Dummy Record | Dummy Trade / A:M | Self-Play Record | SP Trade / A:M |")
+        lines.append("|---|---|---|---|---|")
+        for tname in ("canonical", "econ-harass", "regression"):
+            at = a_tiers.get(tname) or {}
+            st = sp_tiers.get(tname) or {}
+            if not at and not st:
+                continue
+            a_rec = at.get("record_str", "—")
+            s_rec = st.get("record_str", "—")
+            if tname == "econ-harass":
+                a_m = f"`net={at.get('avg_net_econ_score', 0):+.1f}M, mined={at.get('avg_minerals_gathered', 0):.0f}M, up={at.get('avg_mining_uptime_pct', 0):.1f}%`" if at else "—"
+                s_m = f"`net={st.get('avg_net_econ_score', 0):+.1f}M, mined={st.get('avg_minerals_gathered', 0):.0f}M, up={st.get('avg_mining_uptime_pct', 0):.1f}%`" if st else "—"
+            else:
+                a_m = f"`{at.get('agg_trade_ratio', 0):.2f}x` / `A:M {at.get('am_ratio', 0):.2f}`" if at else "—"
+                s_m = f"`{st.get('agg_trade_ratio', 0):.2f}x` / `A:M {st.get('am_ratio', 0):.2f}`" if st else "—"
+            lines.append(f"| **`{tname}`** | `{a_rec}` | {a_m} | `{s_rec}` | {s_m} |")
+        lines.append("")
+
+        econ_d = [s for s in ((arena_json or {}).get("scenarios") or []) if s.get("tier") == "econ-harass"]
+        econ_sp = {str(s.get("id")): s for s in ((selfplay_json or {}).get("scenarios") or []) if s.get("tier") == "econ-harass"}
+        if econ_d:
+            lines.append("### Tier 2 Econ-Harass Mineral-Defense Results")
+            lines.append("")
+            lines.append("| Scenario | Target Net | Dummy Result (Mined / Up% / WLost / Net) | Self-Play Result (Mined / Up% / WLost / Net) |")
+            lines.append("|---|---:|---|---|")
+            for s in econ_d:
+                sid = str(s.get("id", ""))
+                short_id = sid.replace("sc2-econ-", "")
+                tgt = s.get("pass_net_econ_min")
+                tgt_s = f"`>= {tgt}M`" if tgt is not None else "—"
+                d_ok = "PASS" if s.get("win_type") == "econ_pass" else "FAIL"
+                d_str = f"**{d_ok}** (`{s.get('minerals_gathered', 0):.0f}M` / `{s.get('mining_uptime_pct', 0):.1f}%` / `{s.get('workers_lost', 0)}w` / `{s.get('net_econ_score', 0):+.0f}M`)"
+                sp_s = econ_sp.get(sid)
+                if sp_s:
+                    sp_ok = "PASS" if sp_s.get("win_type") == "econ_pass" else "FAIL"
+                    s_str = f"**{sp_ok}** (`{sp_s.get('minerals_gathered', 0):.0f}M` / `{sp_s.get('mining_uptime_pct', 0):.1f}%` / `{sp_s.get('workers_lost', 0)}w` / `{sp_s.get('net_econ_score', 0):+.0f}M`)"
+                else:
+                    s_str = "—"
+                lines.append(f"| `{short_id}` | {tgt_s} | {d_str} | {s_str} |")
+            lines.append("")
 
     # -------------------------------------------------------------------------
     # SECTION 1: CRITICAL REPLAY MOMENTS
