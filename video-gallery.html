@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Replays &amp; Drills — Mothman</title>
+  <style>
+:root {
+  --bg: #FAF9F5;
+  --surface: #F4F2EA;
+  --surface-alt: #EFECE3;
+  --surface-input: #FFFFFF;
+  --border: #E5E2D8;
+  --border-strong: #262522;
+  --ink: #141413;
+  --ink-2: #4A4945;
+  --muted: #7A7870;
+  --accent: #C4633E;
+  --accent-hover: #A34E2E;
+  --slate: #4A6B82;
+  --win: #2F6B48;
+  --loss: #A83E32;
+  --warn: #A35B1F;
+  --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16.5px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 3px;
+}
+a:hover {
+  color: var(--accent-hover);
+  text-decoration-color: var(--accent-hover);
+}
+.num, table { font-variant-numeric: tabular-nums; }
+
+/* Header — static document flow, minimal, never blocks mobile viewport */
+.site-header {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.header-inner {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.wordmark {
+  font-family: var(--serif);
+  font-size: 1.18rem;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.wordmark:hover { color: var(--ink); text-decoration: none; }
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+}
+.nav-link {
+  font-size: 0.9rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+  padding: 0.2rem 0;
+  border-bottom: 2px solid transparent;
+  text-decoration: none;
+}
+.nav-link:hover { color: var(--ink); text-decoration: none; }
+.nav-link.active {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.nav-toggle {
+  display: none;
+  background: transparent;
+  border: 0;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.35rem 0.25rem;
+  cursor: pointer;
+}
+.nav-toggle:hover { color: var(--ink); }
+
+.mobile-drawer {
+  display: none;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0.4rem 1.25rem 0.8rem;
+}
+.mobile-drawer.open { display: block; }
+.mobile-drawer a {
+  display: block;
+  padding: 0.6rem 0;
+  color: var(--ink);
+  font-size: 0.96rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.mobile-drawer a:last-child { border-bottom: 0; }
+.mobile-drawer a.active { color: var(--accent); font-weight: 600; }
+
+/* Page containers — centered editorial essay column with wider figure breakouts */
+.page-wrap {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4.75rem;
+}
+.page-grid {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 2.25rem 1.25rem 4.75rem;
+  display: grid;
+  grid-template-columns: 215px minmax(0, 1fr);
+  gap: 2.75rem;
+}
+.content { min-width: 0; }
+.prose-col {
+  max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.wide-col {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.prose { max-width: 680px; }
+
+/* Sidebar TOC (Desktop) + Collapsible TOC (Mobile) */
+.toc-sidebar {
+  position: sticky;
+  top: 1.5rem;
+  align-self: start;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  padding-right: 0.85rem;
+  border-right: 1px solid var(--border);
+  font-size: 0.84rem;
+}
+.toc-heading {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin: 0 0 0.65rem;
+}
+.toc-list { list-style: none; padding: 0; margin: 0; }
+.toc-list li { margin: 0.44rem 0; line-height: 1.38; }
+.toc-list a { color: var(--ink-2); text-decoration: none; }
+.toc-list a:hover { color: var(--accent); }
+.toc-latest {
+  display: block;
+  font-weight: 600;
+  color: var(--accent);
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.latest-jump-bar {
+  font-size: 0.9rem;
+  margin: -0.2rem 0 1.25rem;
+}
+.toc-mobile { display: none; margin-bottom: 1.5rem; }
+
+/* Typography */
+h1, h2, h3 {
+  font-family: var(--serif);
+  color: var(--ink);
+  font-weight: 500;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+}
+h1 {
+  font-size: 2.3rem;
+  margin: 0 0 0.7rem;
+}
+h2 {
+  font-size: 1.5rem;
+  margin: 3.1rem 0 0.85rem;
+}
+.page-grid h2 {
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+h3 {
+  font-size: 1.16rem;
+  margin: 2rem 0 0.55rem;
+  font-weight: 600;
+}
+h4 {
+  font-family: var(--sans);
+  font-size: 0.98rem;
+  font-weight: 600;
+  margin: 0 0 0.45rem;
+  line-height: 1.38;
+  color: var(--ink);
+}
+p { margin: 0 0 1.1rem; color: var(--ink-2); }
+strong { color: var(--ink); font-weight: 600; }
+ul, ol { margin: 0.5rem 0 1.15rem; padding-left: 1.3rem; color: var(--ink-2); }
+li { margin: 0.4rem 0; }
+.content > p, .content > ul, .content > ol, .content > blockquote { max-width: 680px; }
+.anchor {
+  color: var(--muted);
+  opacity: 0;
+  font-family: var(--sans);
+  font-size: 0.76em;
+  margin-left: 0.3rem;
+  font-weight: 400;
+  text-decoration: none;
+}
+h1:hover .anchor, h2:hover .anchor, h3:hover .anchor { opacity: 0.65; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+
+/* Editorial Opening (Front Page & Subpages) */
+.eyebrow {
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+.masthead {
+  margin-bottom: 2.2rem;
+}
+.masthead h1 {
+  font-size: 2.55rem;
+  margin: 0 0 0.65rem;
+}
+.lead {
+  color: var(--ink-2);
+  font-size: 1.08rem;
+  line-height: 1.62;
+  margin: 0;
+}
+.section-rule {
+  border-top: 1px solid var(--border);
+  padding-top: 2.4rem;
+  margin-top: 2.8rem;
+}
+.section-kicker {
+  font-family: var(--serif);
+  font-size: 1.48rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 0 0 0.75rem;
+}
+
+/* Inline code & code blocks */
+code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--surface);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  color: var(--ink);
+}
+.code-block {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 1.1rem 0;
+  overflow-x: auto;
+}
+.code-block pre { margin: 0; padding: 0.95rem 1.1rem; }
+.code-block code { background: none; padding: 0; font-size: 0.84rem; }
+.code-lang {
+  position: absolute; top: 6px; right: 10px;
+  font-size: 0.7rem; text-transform: uppercase; color: var(--muted);
+}
+.mermaid-wrap {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 1.1rem;
+  margin: 1.25rem 0;
+  overflow-x: auto;
+}
+
+/* Editorial Callouts */
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  border-radius: 0 6px 6px 0;
+  padding: 0.95rem 1.2rem;
+  margin: 1.35rem 0;
+  max-width: 680px;
+}
+.callout-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+}
+.callout-warning, .callout-caution { border-left-color: var(--warn); }
+.callout-warning .callout-label, .callout-caution .callout-label { color: var(--warn); }
+.callout-body > p:first-child { margin-top: 0; }
+.callout-body > p:last-child { margin-bottom: 0; }
+
+blockquote {
+  margin: 1.25rem 0;
+  padding: 0.25rem 0 0.25rem 1.15rem;
+  border-left: 2px solid var(--accent);
+  color: var(--ink-2);
+}
+
+/* Collapsible Sections (<details>) */
+details {
+  margin: 1.4rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 0;
+}
+summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--ink);
+  font-size: 0.95rem;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: "+";
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-weight: 400;
+}
+details[open] > summary::before { content: "−"; }
+details[open] > summary { margin-bottom: 0.85rem; }
+
+/* Tufte Horizontal-Rule Tables */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0.9rem 0 1.1rem;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+}
+thead th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 0.65rem 0.7rem;
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+  background: transparent;
+}
+td {
+  padding: 0.68rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--ink-2);
+}
+tbody tr:last-child td { border-bottom: 0; }
+.table-note {
+  font-size: 0.87rem;
+  color: var(--muted);
+  margin: 0.6rem 0 0;
+  line-height: 1.55;
+}
+.t-win { color: var(--win); font-weight: 600; }
+.t-loss { color: var(--loss); font-weight: 600; }
+.t-muted { color: var(--muted); }
+.nw { white-space: nowrap; }
+
+/* Responsive Stacked Mobile Standings (< 700px) */
+.standings-mobile {
+  display: none;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+  margin: 0.75rem 0 0.85rem;
+}
+.standing-row { padding: 0.78rem 0; border-bottom: 1px solid var(--border); }
+.standing-row:last-child { border-bottom: 0; }
+.standing-top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
+.standing-bot { font-weight: 600; color: var(--ink); font-size: 0.98rem; }
+.standing-race { color: var(--muted); font-weight: 400; font-size: 0.88rem; }
+.standing-elo { font-weight: 600; font-size: 1rem; font-variant-numeric: tabular-nums; color: var(--ink); }
+.standing-stats { font-size: 0.87rem; color: var(--ink-2); margin-top: 0.16rem; font-variant-numeric: tabular-nums; }
+.standing-note { font-size: 0.87rem; color: var(--muted); margin: 0.28rem 0 0; line-height: 1.46; }
+
+/* Anthropic-Style Warm Sand Figures */
+.figure-block {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.35rem 1.45rem 1.15rem;
+  margin: 1.5rem auto 1.75rem;
+  max-width: 780px;
+}
+.figure-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 0.25rem;
+}
+.figure-title {
+  font-family: var(--serif);
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin: 0 0 0.75rem;
+  color: var(--ink);
+}
+.chart-svg { width: 100%; height: auto; display: block; }
+.figure-caption {
+  font-size: 0.86rem;
+  color: var(--ink-2);
+  margin: 0.75rem 0 0;
+  line-height: 1.52;
+}
+
+/* Clean Typographic Reading Lists */
+.doc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.65rem 0 1.85rem;
+  border-top: 1px solid var(--border);
+}
+.doc-item {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 0.25rem 1.75rem;
+  align-items: baseline;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--border);
+  margin: 0;
+}
+.doc-item-title {
+  font-family: var(--serif);
+  font-size: 1.02rem;
+  font-weight: 500;
+  display: inline-block;
+}
+.doc-item-desc {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--ink-2);
+  line-height: 1.52;
+}
+
+/* Replays & Video Figures */
+.clip-gallery { margin: 1.25rem 0 2rem; }
+.clip-gallery-grid, .featured-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.35rem;
+}
+.clip-card {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1rem 1.05rem;
+  display: flex;
+  flex-direction: column;
+}
+.clip-index {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+.clip-figure { margin: 0.4rem 0 0; }
+.clip-img, .clip-video {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 6px;
+  background: #141413;
+}
+.clip-img { cursor: zoom-in; min-height: 150px; }
+.clip-figure figcaption {
+  font-size: 0.85rem;
+  color: var(--ink-2);
+  margin-top: 0.55rem;
+  line-height: 1.48;
+}
+.video-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.84rem;
+}
+.text-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 2px;
+}
+.text-btn:hover { color: var(--accent-hover); text-decoration-color: var(--accent-hover); }
+.media-link {
+  font-size: 0.86rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Video Gallery Filter Controls */
+.gallery-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-end;
+  padding: 1rem 0 1.25rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin: 1.25rem 0 1.5rem;
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.filter-group label {
+  font-size: 0.74rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.filter-select, .filter-input {
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--surface-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.44rem 0.65rem;
+  min-width: 135px;
+}
+.filter-input { min-width: 210px; }
+.gallery-count {
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin: 0 0 1rem;
+}
+.gallery-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+.show-more-wrap { text-align: center; margin-top: 1.75rem; }
+.editorial-btn {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 1.2rem;
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.editorial-btn:hover { background: var(--surface-alt); }
+
+/* Lightbox & Video Theater Modals */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(20, 20, 19, 0.92);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 1.25rem;
+}
+.modal-overlay.open { display: flex; }
+.modal-overlay img, .modal-overlay video {
+  max-width: 94vw;
+  max-height: 80vh;
+  border-radius: 6px;
+  background: #000;
+}
+.modal-caption {
+  color: #F4F2EA;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  text-align: center;
+  max-width: 820px;
+}
+.modal-controls {
+  position: fixed;
+  top: 1rem;
+  right: 1.25rem;
+  display: flex;
+  gap: 0.5rem;
+}
+.modal-btn {
+  background: #262522;
+  color: #FAF9F5;
+  border: 1px solid #44423C;
+  border-radius: 6px;
+  padding: 0.4rem 0.78rem;
+  cursor: pointer;
+  font-size: 0.86rem;
+  text-decoration: none;
+}
+.modal-btn:hover { background: #3B3934; color: #FFFFFF; text-decoration: none; }
+
+/* Footer */
+.site-footer {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1.6rem 1.25rem 3.25rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.84rem;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+}
+
+@media (max-width: 1020px) {
+  .page-grid { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .toc-sidebar { display: none; }
+  .toc-mobile { display: block; }
+}
+@media (max-width: 820px) {
+  .clip-gallery-grid, .featured-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 799px) {
+  body { font-size: 15.5px; }
+  .header-inner { height: 50px; }
+  .nav-links { display: none; }
+  .nav-toggle { display: inline-block; }
+  .page-wrap, .page-grid { padding: 1.35rem 1rem 3.5rem; }
+  .masthead { margin-bottom: 1.45rem; }
+  .masthead h1 { font-size: 1.85rem; margin-bottom: 0.45rem; }
+  .lead { font-size: 0.98rem; line-height: 1.56; }
+  h1 { font-size: 1.7rem; }
+  h2, .section-kicker { font-size: 1.3rem; }
+  .section-rule { padding-top: 1.85rem; margin-top: 2.1rem; }
+  .figure-block { padding: 1.05rem 0.95rem 0.95rem; border-radius: 8px; }
+  .doc-item { grid-template-columns: minmax(0, 1fr); gap: 0.2rem; }
+  .filter-input { min-width: 0; width: 100%; }
+  .filter-group { flex: 1 1 140px; }
+}
+@media (max-width: 699px) {
+  .standings-desktop { display: none; }
+  .standings-mobile { display: block; }
+}
+</style>
+</head>
+<body>
+<header class="site-header"><div class="header-inner"><a class="wordmark" href="./index.html">Mothman</a><nav class="nav-links" aria-label="Primary"><a class="nav-link" href="./index.html">Ladder</a><a class="nav-link active" href="./video-gallery.html">Replays</a><a class="nav-link" href="./loops-29-plus.html">Updates</a><a class="nav-link" href="./index.html#technical-notes">Notes</a><a class="nav-link" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav><button type="button" class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="mobile-drawer">Menu</button></div><nav class="mobile-drawer" id="mobile-drawer" aria-label="Mobile menu"><a class="" href="./index.html">Ladder</a><a class="active" href="./video-gallery.html">Replays</a><a class="" href="./loops-29-plus.html">Updates</a><a class="" href="./index.html#technical-notes">Notes</a><a class="" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav></header>
+<div class="page-wrap"><main class="content">
+<section class="masthead" style="padding-bottom:1.1rem;margin-bottom:1.25rem;">
+  <h1>Replays</h1>
+  <p class="lead" style="margin-bottom:0;">206 full match and combat recordings, plus 11 short highlights. Videos only load when you press play.</p>
+</section>
+
+<div class="gallery-controls" aria-label="Filter replays">
+  <div class="filter-group">
+    <label for="f-loop">Loop</label>
+    <select id="f-loop" class="filter-select"><option value="all">All loops</option><option value="Loop 42">Loop 42</option><option value="Loop 41">Loop 41</option><option value="Loop 40">Loop 40</option></select>
+  </div>
+  <div class="filter-group">
+    <label for="f-cat">Category</label>
+    <select id="f-cat" class="filter-select"><option value="all">All categories</option><option value="Full Matches">Full Matches</option><option value="Tactics Drills">Tactics Drills</option><option value="Self-Play Drills">Self-Play Drills</option><option value="Featured Clips">Featured Clips</option></select>
+  </div>
+  <div class="filter-group">
+    <label for="f-race">Race</label>
+    <select id="f-race" class="filter-select">
+      <option value="all">All races</option>
+      <option value="Protoss">Protoss</option>
+      <option value="Terran">Terran</option>
+      <option value="Zerg">Zerg</option>
+      <option value="Random">Random</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label for="f-out">Outcome</label>
+    <select id="f-out" class="filter-select">
+      <option value="all">All outcomes</option>
+      <option value="win">Win / Pass</option>
+      <option value="loss">Loss / Watch</option>
+      <option value="tie">Tie / Draw</option>
+    </select>
+  </div>
+  <div class="filter-group" style="flex:1 1 200px;">
+    <label for="f-search">Search</label>
+    <input id="f-search" type="search" class="filter-input" placeholder="Opponent, map, or drill…" />
+  </div>
+</div>
+
+<p class="gallery-count" id="gallery-count"></p>
+<div class="clip-gallery-grid" id="gallery-grid"></div>
+<div class="show-more-wrap" id="show-more-wrap" style="display:none;">
+  <button type="button" class="editorial-btn" id="show-more-btn">Show more replays</button>
+</div>
+</main></div>
+<footer class="site-footer">
+  <div>Mothman · StarCraft II bots on AI Arena</div>
+  <div>Updated 2026-11-21 11:09 UTC · <a href="https://github.com/sticklane/mothman-sc2-bot/releases" target="_blank" rel="noopener noreferrer">Replay Archives</a></div>
+</footer>
+
+<script>
+(function() {
+  // 1. Mobile menu toggle
+  const toggle = document.getElementById('nav-toggle');
+  const drawer = document.getElementById('mobile-drawer');
+  if (toggle && drawer) {
+    toggle.addEventListener('click', function() {
+      const open = drawer.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.textContent = open ? 'Close' : 'Menu';
+    });
+  }
+
+  // 2. Auto-pause other videos when one starts playing
+  document.addEventListener('play', function(e) {
+    if (e.target && e.target.tagName === 'VIDEO') {
+      document.querySelectorAll('video').forEach(function(v) {
+        if (v !== e.target && !v.paused) v.pause();
+      });
+    }
+  }, true);
+
+  // 3. Image Lightbox Modal
+  const imgs = Array.from(document.querySelectorAll('img.clip-img'));
+  if (imgs.length) {
+    const lb = document.createElement('div');
+    lb.className = 'modal-overlay';
+    lb.innerHTML =
+      '<div class="modal-controls">' +
+        '<button class="modal-btn" id="lb-prev">Prev</button>' +
+        '<button class="modal-btn" id="lb-next">Next</button>' +
+        '<a class="modal-btn" id="lb-raw" target="_blank" rel="noopener noreferrer">Open file</a>' +
+        '<button class="modal-btn" id="lb-close">Close</button>' +
+      '</div>' +
+      '<img id="lb-img" alt="" />' +
+      '<div class="modal-caption" id="lb-cap"></div>';
+    document.body.appendChild(lb);
+    const lbImg = document.getElementById('lb-img');
+    const lbCap = document.getElementById('lb-cap');
+    const lbRaw = document.getElementById('lb-raw');
+    let cur = 0;
+    function show(i) {
+      cur = (i + imgs.length) % imgs.length;
+      const src = imgs[cur].getAttribute('data-lightbox-src') || imgs[cur].src;
+      const alt = imgs[cur].getAttribute('data-lightbox-alt') || imgs[cur].alt || '';
+      lbImg.src = src;
+      lbImg.alt = alt;
+      lbRaw.href = src;
+      lbCap.textContent = (cur + 1) + ' of ' + imgs.length + (alt ? ' — ' + alt : '');
+      lb.classList.add('open');
+    }
+    function closeLb() { lb.classList.remove('open'); }
+    imgs.forEach(function(im, idx) { im.addEventListener('click', function() { show(idx); }); });
+    document.getElementById('lb-prev').addEventListener('click', function(e) { e.stopPropagation(); show(cur - 1); });
+    document.getElementById('lb-next').addEventListener('click', function(e) { e.stopPropagation(); show(cur + 1); });
+    document.getElementById('lb-close').addEventListener('click', function(e) { e.stopPropagation(); closeLb(); });
+    lb.addEventListener('click', function(e) { if (e.target === lb) closeLb(); });
+    document.addEventListener('keydown', function(e) {
+      if (!lb.classList.contains('open')) return;
+      if (e.key === 'Escape') closeLb();
+      else if (e.key === 'ArrowRight') show(cur + 1);
+      else if (e.key === 'ArrowLeft') show(cur - 1);
+    });
+  }
+
+  // 4. Video Theater Modal (delegated for both report videos and dynamic gallery cards)
+  const vm = document.createElement('div');
+  vm.className = 'modal-overlay';
+  vm.innerHTML =
+    '<div class="modal-controls">' +
+      '<a class="modal-btn" id="vm-raw" target="_blank" rel="noopener noreferrer">Download MP4</a>' +
+      '<button class="modal-btn" id="vm-close">Close</button>' +
+    '</div>' +
+    '<video id="vm-video" controls playsinline preload="metadata"></video>' +
+    '<div class="modal-caption" id="vm-cap"></div>';
+  document.body.appendChild(vm);
+  const vmVideo = document.getElementById('vm-video');
+  const vmCap = document.getElementById('vm-cap');
+  const vmRaw = document.getElementById('vm-raw');
+  function closeVm() {
+    vmVideo.pause();
+    vmVideo.removeAttribute('src');
+    vmVideo.load();
+    vm.classList.remove('open');
+  }
+  document.addEventListener('click', function(e) {
+    const btn = e.target.closest('.video-theater-btn');
+    if (!btn) return;
+    const src = btn.getAttribute('data-video-src') || '';
+    const poster = btn.getAttribute('data-video-poster') || '';
+    const title = btn.getAttribute('data-video-title') || '';
+    if (!src) return;
+    document.querySelectorAll('video').forEach(function(v) { if (!v.paused) v.pause(); });
+    vmVideo.src = src;
+    if (poster) vmVideo.poster = poster; else vmVideo.removeAttribute('poster');
+    vmRaw.href = src;
+    vmCap.textContent = title;
+    vm.classList.add('open');
+    vmVideo.play().catch(function() {});
+  });
+  document.getElementById('vm-close').addEventListener('click', function(e) { e.stopPropagation(); closeVm(); });
+  vm.addEventListener('click', function(e) { if (e.target === vm) closeVm(); });
+  document.addEventListener('keydown', function(e) {
+    if (vm.classList.contains('open') && e.key === 'Escape') closeVm();
+  });
+})();
+</script>
+
+
+<script>
+(function() {
+  const ITEMS = [{"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "#1 Mothman-Z vs. titania", "subtitle": "ZvZ · Magannatha · 9:34 · 10.22× trade · 3.7% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m001_Mothman-Z_vs_titania.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m001_Mothman-Z_vs_titania.png", "search": "loop 42 1 mothman-z titania zvz magannatha core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "#2 Mothman-T vs. titania", "subtitle": "TvZ · Ultralove · 11:12 · 5.77× trade · 5.2% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m002_Mothman-T_vs_titania.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m002_Mothman-T_vs_titania.png", "search": "loop 42 2 mothman-t titania tvz ultralove core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "#3 Mothman-P vs. titania", "subtitle": "PvZ · LeyLines · 10:15 · 4.70× trade · 2.3% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m003_Mothman-P_vs_titania.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m003_Mothman-P_vs_titania.png", "search": "loop 42 3 mothman-p titania pvz leylines core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "#4 Mothman-Z vs. monsterbot", "subtitle": "ZvZ · Torches · 9:42 · 31.36× trade · 7.3% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m004_Mothman-Z_vs_monsterbot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m004_Mothman-Z_vs_monsterbot.png", "search": "loop 42 4 mothman-z monsterbot zvz torches core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "#5 Mothman-T vs. monsterbot", "subtitle": "TvZ · Persephone · 8:42 · 13.81× trade · 1.4% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m005_Mothman-T_vs_monsterbot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m005_Mothman-T_vs_monsterbot.png", "search": "loop 42 5 mothman-t monsterbot tvz persephone core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "#6 Mothman-P vs. monsterbot", "subtitle": "PvZ · Incorporeal · 13:13 · 4.54× trade · 1.8% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m006_Mothman-P_vs_monsterbot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m006_Mothman-P_vs_monsterbot.png", "search": "loop 42 6 mothman-p monsterbot pvz incorporeal core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "#7 Mothman-Z vs. Chance", "subtitle": "ZvZ · Pylon · 1.00× trade · 0.0% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m007_Mothman-Z_vs_Chance.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m007_Mothman-Z_vs_Chance.png", "search": "loop 42 7 mothman-z chance zvz pylon core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "#8 Mothman-T vs. Chance", "subtitle": "TvP · Magannatha · 7:34 · 5.00× trade · 1.5% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m008_Mothman-T_vs_Chance.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m008_Mothman-T_vs_Chance.png", "search": "loop 42 8 mothman-t chance tvp magannatha core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#9 Mothman-P vs. Chance", "subtitle": "PvZ · Ultralove · 9:48 · 0.34× trade · 7.2% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m009_Mothman-P_vs_Chance.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m009_Mothman-P_vs_Chance.png", "search": "loop 42 9 mothman-p chance pvz ultralove core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "#10 Mothman-Z vs. puck", "subtitle": "ZvP · LeyLines · 12:35 · 4.06× trade · 4.7% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m010_Mothman-Z_vs_puck.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m010_Mothman-Z_vs_puck.png", "search": "loop 42 10 mothman-z puck zvp leylines core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "#11 Mothman-T vs. puck", "subtitle": "TvP · Torches · 20:40 · 2.77× trade · 0.6% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m011_Mothman-T_vs_puck.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m011_Mothman-T_vs_puck.png", "search": "loop 42 11 mothman-t puck tvp torches core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "#12 Mothman-P vs. puck", "subtitle": "PvP · Persephone · 9:54 · 4.12× trade · 3.5% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m012_Mothman-P_vs_puck.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m012_Mothman-P_vs_puck.png", "search": "loop 42 12 mothman-p puck pvp persephone core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "#13 Mothman-Z vs. oberon", "subtitle": "ZvT · Incorporeal · 14:27 · 1.32× trade · 2.4% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m013_Mothman-Z_vs_oberon.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m013_Mothman-Z_vs_oberon.png", "search": "loop 42 13 mothman-z oberon zvt incorporeal core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "#14 Mothman-T vs. oberon", "subtitle": "TvT · Pylon · 12:41 · 2.40× trade · 3.7% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m014_Mothman-T_vs_oberon.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m014_Mothman-T_vs_oberon.png", "search": "loop 42 14 mothman-t oberon tvt pylon core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#15 Mothman-P vs. oberon", "subtitle": "PvT · Magannatha · 5:41 · 0.04× trade · 8.5% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m015_Mothman-P_vs_oberon.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m015_Mothman-P_vs_oberon.png", "search": "loop 42 15 mothman-p oberon pvt magannatha core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#16 Mothman-Z vs. RustyNikolaj", "subtitle": "ZvT · Ultralove · 11:04 · 0.11× trade · 3.3% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m016_Mothman-Z_vs_RustyNikolaj.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m016_Mothman-Z_vs_RustyNikolaj.png", "search": "loop 42 16 mothman-z rustynikolaj zvt ultralove core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "#17 Mothman-T vs. RustyNikolaj", "subtitle": "TvT · LeyLines · 12:33 · 3.90× trade · 0.9% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m017_Mothman-T_vs_RustyNikolaj.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m017_Mothman-T_vs_RustyNikolaj.png", "search": "loop 42 17 mothman-t rustynikolaj tvt leylines core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "#18 Mothman-P vs. RustyNikolaj", "subtitle": "PvT · Torches · 14:32 · 2.70× trade · 2.4% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m018_Mothman-P_vs_RustyNikolaj.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m018_Mothman-P_vs_RustyNikolaj.png", "search": "loop 42 18 mothman-p rustynikolaj pvt torches core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#19 Mothman-Z vs. PolyMorph", "subtitle": "ZvZ · Persephone · 12:33 · 0.18× trade · 5.6% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m019_Mothman-Z_vs_PolyMorph.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m019_Mothman-Z_vs_PolyMorph.png", "search": "loop 42 19 mothman-z polymorph zvz persephone unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#20 Mothman-T vs. PolyMorph", "subtitle": "TvZ · Incorporeal · 18:39 · 0.54× trade · 0.7% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m020_Mothman-T_vs_PolyMorph.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m020_Mothman-T_vs_PolyMorph.png", "search": "loop 42 20 mothman-t polymorph tvz incorporeal unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "#21 Mothman-P vs. PolyMorph", "subtitle": "PvZ · Pylon · 10:08 · 6.93× trade · 3.4% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m021_Mothman-P_vs_PolyMorph.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m021_Mothman-P_vs_PolyMorph.png", "search": "loop 42 21 mothman-p polymorph pvz pylon unseen_6 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#22 Mothman-Z vs. CryptBotRevival", "subtitle": "ZvP · Magannatha · 12:34 · 0.18× trade · 5.6% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m022_Mothman-Z_vs_CryptBotRevival.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m022_Mothman-Z_vs_CryptBotRevival.png", "search": "loop 42 22 mothman-z cryptbotrevival zvp magannatha unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "#23 Mothman-T vs. CryptBotRevival", "subtitle": "TvT · Ultralove · 6:21 · 11.00× trade · 1.8% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m023_Mothman-T_vs_CryptBotRevival.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m023_Mothman-T_vs_CryptBotRevival.png", "search": "loop 42 23 mothman-t cryptbotrevival tvt ultralove unseen_6 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#24 Mothman-P vs. CryptBotRevival", "subtitle": "PvP · LeyLines · 12:35 · 0.15× trade · 10.6% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m024_Mothman-P_vs_CryptBotRevival.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m024_Mothman-P_vs_CryptBotRevival.png", "search": "loop 42 24 mothman-p cryptbotrevival pvp leylines unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "#25 Mothman-Z vs. onlyfans", "subtitle": "ZvT · Torches · 15:46 · 3.44× trade · 2.2% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m025_Mothman-Z_vs_onlyfans.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m025_Mothman-Z_vs_onlyfans.png", "search": "loop 42 25 mothman-z onlyfans zvt torches core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "#26 Mothman-T vs. onlyfans", "subtitle": "TvT · Persephone · 18:29 · 2.23× trade · 1.9% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m026_Mothman-T_vs_onlyfans.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m026_Mothman-T_vs_onlyfans.png", "search": "loop 42 26 mothman-t onlyfans tvt persephone core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "#27 Mothman-P vs. onlyfans", "subtitle": "PvT · Incorporeal · 17:53 · 1.87× trade · 2.6% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m027_Mothman-P_vs_onlyfans.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m027_Mothman-P_vs_onlyfans.png", "search": "loop 42 27 mothman-p onlyfans pvt incorporeal core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#28 Mothman-Z vs. mini-puck", "subtitle": "ZvP · Pylon · 8:48 · 0.08× trade · 4.0% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m028_Mothman-Z_vs_mini-puck.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m028_Mothman-Z_vs_mini-puck.png", "search": "loop 42 28 mothman-z mini-puck zvp pylon core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#29 Mothman-T vs. mini-puck", "subtitle": "TvP · Magannatha · 23:26 · 0.67× trade · 2.0% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m029_Mothman-T_vs_mini-puck.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m029_Mothman-T_vs_mini-puck.png", "search": "loop 42 29 mothman-t mini-puck tvp magannatha core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#30 Mothman-P vs. mini-puck", "subtitle": "PvP · Ultralove · 9:16 · 0.16× trade · 10.3% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m030_Mothman-P_vs_mini-puck.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m030_Mothman-P_vs_mini-puck.png", "search": "loop 42 30 mothman-p mini-puck pvp ultralove core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#31 Mothman-Z vs. sc2ai_protoss", "subtitle": "ZvP · LeyLines · 14:12 · 0.10× trade · 12.1% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m031_Mothman-Z_vs_sc2ai_protoss.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m031_Mothman-Z_vs_sc2ai_protoss.png", "search": "loop 42 31 mothman-z sc2ai_protoss zvp leylines unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#32 Mothman-T vs. sc2ai_protoss", "subtitle": "TvP · Torches · 15:48 · 0.11× trade · 1.5% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m032_Mothman-T_vs_sc2ai_protoss.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m032_Mothman-T_vs_sc2ai_protoss.png", "search": "loop 42 32 mothman-t sc2ai_protoss tvp torches unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "#33 Mothman-P vs. sc2ai_protoss", "subtitle": "PvP · Persephone · 17:57 · 1.29× trade · 2.0% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m033_Mothman-P_vs_sc2ai_protoss.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m033_Mothman-P_vs_sc2ai_protoss.png", "search": "loop 42 33 mothman-p sc2ai_protoss pvp persephone unseen_6 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Zerg", "outcome": "tie", "result_label": "Tie", "title": "#34 Mothman-Z vs. AxeFighter", "subtitle": "ZvT · Incorporeal · 17:21 · 0.18× trade · 2.1% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m034_Mothman-Z_vs_AxeFighter.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m034_Mothman-Z_vs_AxeFighter.png", "search": "loop 42 34 mothman-z axefighter zvt incorporeal unseen_6 tie"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#35 Mothman-T vs. AxeFighter", "subtitle": "TvT · Pylon · 15:54 · 0.26× trade · 0.7% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m035_Mothman-T_vs_AxeFighter.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m035_Mothman-T_vs_AxeFighter.png", "search": "loop 42 35 mothman-t axefighter tvt pylon unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Protoss", "outcome": "tie", "result_label": "Tie", "title": "#36 Mothman-P vs. AxeFighter", "subtitle": "PvT · Magannatha · 18:22 · 0.83× trade · 1.9% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m036_Mothman-P_vs_AxeFighter.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m036_Mothman-P_vs_AxeFighter.png", "search": "loop 42 36 mothman-p axefighter pvt magannatha unseen_6 tie"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#37 Mothman-Z vs. norman", "subtitle": "ZvP · Ultralove · 8:04 · 0.05× trade · 11.8% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m037_Mothman-Z_vs_norman.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m037_Mothman-Z_vs_norman.png", "search": "loop 42 37 mothman-z norman zvp ultralove unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#38 Mothman-T vs. norman", "subtitle": "TvP · LeyLines · 8:35 · 0.19× trade · 1.4% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m038_Mothman-T_vs_norman.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m038_Mothman-T_vs_norman.png", "search": "loop 42 38 mothman-t norman tvp leylines unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#39 Mothman-P vs. norman", "subtitle": "PvP · Torches · 8:26 · 0.08× trade · 4.2% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m039_Mothman-P_vs_norman.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m039_Mothman-P_vs_norman.png", "search": "loop 42 39 mothman-p norman pvp torches unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#40 Mothman-Z vs. Thessaloniki", "subtitle": "ZvZ · Persephone · 7:07 · 0.19× trade · 6.6% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m040_Mothman-Z_vs_Thessaloniki.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m040_Mothman-Z_vs_Thessaloniki.png", "search": "loop 42 40 mothman-z thessaloniki zvz persephone unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#41 Mothman-T vs. Thessaloniki", "subtitle": "TvZ · Incorporeal · 5:21 · 0.05× trade · 2.3% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m041_Mothman-T_vs_Thessaloniki.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m041_Mothman-T_vs_Thessaloniki.png", "search": "loop 42 41 mothman-t thessaloniki tvz incorporeal unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#42 Mothman-P vs. Thessaloniki", "subtitle": "PvZ · Pylon · 5:08 · 0.06× trade · 9.3% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m042_Mothman-P_vs_Thessaloniki.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m042_Mothman-P_vs_Thessaloniki.png", "search": "loop 42 42 mothman-p thessaloniki pvz pylon unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#43 Mothman-Z vs. QueenBot", "subtitle": "ZvZ · Magannatha · 12:32 · 0.24× trade · 7.7% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m043_Mothman-Z_vs_QueenBot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m043_Mothman-Z_vs_QueenBot.png", "search": "loop 42 43 mothman-z queenbot zvz magannatha unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#44 Mothman-T vs. QueenBot", "subtitle": "TvZ · Ultralove · 15:43 · 0.55× trade · 0.8% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m044_Mothman-T_vs_QueenBot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m044_Mothman-T_vs_QueenBot.png", "search": "loop 42 44 mothman-t queenbot tvz ultralove unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#45 Mothman-P vs. QueenBot", "subtitle": "PvZ · LeyLines · 13:44 · 0.35× trade · 10.5% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m045_Mothman-P_vs_QueenBot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m045_Mothman-P_vs_QueenBot.png", "search": "loop 42 45 mothman-p queenbot pvz leylines unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "#46 Mothman-Z vs. sludgement2-revived", "subtitle": "ZvZ · Torches · 10:49 · 0.86× trade · 3.3% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m046_Mothman-Z_vs_sludgement2-revived.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m046_Mothman-Z_vs_sludgement2-revived.png", "search": "loop 42 46 mothman-z sludgement2-revived zvz torches core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#47 Mothman-T vs. sludgement2-revived", "subtitle": "TvZ · Persephone · 13:27 · 0.34× trade · 0.9% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m047_Mothman-T_vs_sludgement2-revived.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m047_Mothman-T_vs_sludgement2-revived.png", "search": "loop 42 47 mothman-t sludgement2-revived tvz persephone core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#48 Mothman-P vs. sludgement2-revived", "subtitle": "PvZ · Incorporeal · 7:30 · 0.09× trade · 3.2% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m048_Mothman-P_vs_sludgement2-revived.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m048_Mothman-P_vs_sludgement2-revived.png", "search": "loop 42 48 mothman-p sludgement2-revived pvz incorporeal core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#49 Mothman-Z vs. Thssprtssbt", "subtitle": "ZvP · Pylon · 11:20 · 0.22× trade · 3.8% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m049_Mothman-Z_vs_Thssprtssbt.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m049_Mothman-Z_vs_Thssprtssbt.png", "search": "loop 42 49 mothman-z thssprtssbt zvp pylon core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#50 Mothman-T vs. Thssprtssbt", "subtitle": "TvP · Magannatha · 15:34 · 0.39× trade · 2.3% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m050_Mothman-T_vs_Thssprtssbt.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m050_Mothman-T_vs_Thssprtssbt.png", "search": "loop 42 50 mothman-t thssprtssbt tvp magannatha core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#51 Mothman-P vs. Thssprtssbt", "subtitle": "PvP · Ultralove · 12:35 · 0.72× trade · 2.9% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m051_Mothman-P_vs_Thssprtssbt.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m051_Mothman-P_vs_Thssprtssbt.png", "search": "loop 42 51 mothman-p thssprtssbt pvp ultralove core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Zerg", "outcome": "tie", "result_label": "Tie", "title": "#52 Mothman-Z vs. zig-reapers", "subtitle": "ZvT · LeyLines · 30:00 · 0.03× trade · 1.2% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m052_Mothman-Z_vs_zig-reapers.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m052_Mothman-Z_vs_zig-reapers.png", "search": "loop 42 52 mothman-z zig-reapers zvt leylines unseen_6 tie"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#53 Mothman-T vs. zig-reapers", "subtitle": "TvT · Torches · 6:58 · 0.12× trade · 1.8% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m053_Mothman-T_vs_zig-reapers.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m053_Mothman-T_vs_zig-reapers.png", "search": "loop 42 53 mothman-t zig-reapers tvt torches unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#54 Mothman-P vs. zig-reapers", "subtitle": "PvT · Persephone · 12:43 · 0.27× trade · 1.9% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m054_Mothman-P_vs_zig-reapers.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m054_Mothman-P_vs_zig-reapers.png", "search": "loop 42 54 mothman-p zig-reapers pvt persephone unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#55 Mothman-Z vs. Mulebot", "subtitle": "ZvT · Incorporeal · 6:29 · 0.27× trade · 5.4% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m055_Mothman-Z_vs_Mulebot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m055_Mothman-Z_vs_Mulebot.png", "search": "loop 42 55 mothman-z mulebot zvt incorporeal unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "#56 Mothman-T vs. Mulebot", "subtitle": "TvT · Pylon · 15:54 · 4.49× trade · 4.4% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m056_Mothman-T_vs_Mulebot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m056_Mothman-T_vs_Mulebot.png", "search": "loop 42 56 mothman-t mulebot tvt pylon unseen_6 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#57 Mothman-P vs. Mulebot", "subtitle": "PvT · Magannatha · 11:17 · 0.07× trade · 3.2% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m057_Mothman-P_vs_Mulebot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m057_Mothman-P_vs_Mulebot.png", "search": "loop 42 57 mothman-p mulebot pvt magannatha unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "#58 Mothman-Z vs. Creepy_strategies", "subtitle": "ZvP · Ultralove · 13:10 · 4.35× trade · 2.7% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m058_Mothman-Z_vs_Creepy_strategies.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m058_Mothman-Z_vs_Creepy_strategies.png", "search": "loop 42 58 mothman-z creepy_strategies zvp ultralove core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#59 Mothman-T vs. Creepy_strategies", "subtitle": "TvP · LeyLines · 17:49 · 0.66× trade · 2.7% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m059_Mothman-T_vs_Creepy_strategies.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m059_Mothman-T_vs_Creepy_strategies.png", "search": "loop 42 59 mothman-t creepy_strategies tvp leylines core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "#60 Mothman-P vs. Creepy_strategies", "subtitle": "PvP · Torches · 11:40 · 12.17× trade · 3.0% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m060_Mothman-P_vs_Creepy_strategies.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m060_Mothman-P_vs_Creepy_strategies.png", "search": "loop 42 60 mothman-p creepy_strategies pvp torches core_12 win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#61 Mothman-Z vs. SmoothBrain", "subtitle": "ZvT · Persephone · 9:35 · 0.12× trade · 4.9% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m061_Mothman-Z_vs_SmoothBrain.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m061_Mothman-Z_vs_SmoothBrain.png", "search": "loop 42 61 mothman-z smoothbrain zvt persephone core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#62 Mothman-T vs. SmoothBrain", "subtitle": "TvT · Incorporeal · 9:00 · 0.11× trade · 3.9% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m062_Mothman-T_vs_SmoothBrain.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m062_Mothman-T_vs_SmoothBrain.png", "search": "loop 42 62 mothman-t smoothbrain tvt incorporeal core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#63 Mothman-P vs. SmoothBrain", "subtitle": "PvT · Pylon · 8:32 · 0.06× trade · 6.9% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m063_Mothman-P_vs_SmoothBrain.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m063_Mothman-P_vs_SmoothBrain.png", "search": "loop 42 63 mothman-p smoothbrain pvt pylon core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#64 Mothman-Z vs. Clicadinha", "subtitle": "ZvZ · Magannatha · 7:17 · 0.02× trade · 7.9% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m064_Mothman-Z_vs_Clicadinha.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m064_Mothman-Z_vs_Clicadinha.png", "search": "loop 42 64 mothman-z clicadinha zvz magannatha unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#65 Mothman-T vs. Clicadinha", "subtitle": "TvZ · Ultralove · 9:41 · 0.12× trade · 1.2% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m065_Mothman-T_vs_Clicadinha.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m065_Mothman-T_vs_Clicadinha.png", "search": "loop 42 65 mothman-t clicadinha tvz ultralove unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#66 Mothman-P vs. Clicadinha", "subtitle": "PvZ · LeyLines · 7:22 · 0.06× trade · 3.2% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m066_Mothman-P_vs_Clicadinha.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m066_Mothman-P_vs_Clicadinha.png", "search": "loop 42 66 mothman-p clicadinha pvz leylines unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#67 Mothman-Z vs. ModBotNewBuilds", "subtitle": "ZvP · Torches · 8:47 · 0.22× trade · 4.0% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m067_Mothman-Z_vs_ModBotNewBuilds.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m067_Mothman-Z_vs_ModBotNewBuilds.png", "search": "loop 42 67 mothman-z modbotnewbuilds zvp torches unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#68 Mothman-T vs. ModBotNewBuilds", "subtitle": "TvP · Persephone · 11:24 · 0.04× trade · 1.0% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m068_Mothman-T_vs_ModBotNewBuilds.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m068_Mothman-T_vs_ModBotNewBuilds.png", "search": "loop 42 68 mothman-t modbotnewbuilds tvp persephone unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#69 Mothman-P vs. ModBotNewBuilds", "subtitle": "PvP · Incorporeal · 9:17 · 0.04× trade · 18.9% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m069_Mothman-P_vs_ModBotNewBuilds.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m069_Mothman-P_vs_ModBotNewBuilds.png", "search": "loop 42 69 mothman-p modbotnewbuilds pvp incorporeal unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#70 Mothman-Z vs. 12PoolBot", "subtitle": "ZvZ · Pylon · 5:47 · 0.53× trade · 6.0% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m070_Mothman-Z_vs_12PoolBot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m070_Mothman-Z_vs_12PoolBot.png", "search": "loop 42 70 mothman-z 12poolbot zvz pylon core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#71 Mothman-T vs. 12PoolBot", "subtitle": "TvZ · Magannatha · 3:50 · 0.08× trade · 3.0% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m071_Mothman-T_vs_12PoolBot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m071_Mothman-T_vs_12PoolBot.png", "search": "loop 42 71 mothman-t 12poolbot tvz magannatha core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#72 Mothman-P vs. 12PoolBot", "subtitle": "PvZ · Ultralove · 3:32 · 0.05× trade · 10.0% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m072_Mothman-P_vs_12PoolBot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m072_Mothman-P_vs_12PoolBot.png", "search": "loop 42 72 mothman-p 12poolbot pvz ultralove core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#73 Mothman-Z vs. who", "subtitle": "ZvZ · LeyLines · 12:13 · 0.08× trade · 3.0% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m073_Mothman-Z_vs_who.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m073_Mothman-Z_vs_who.png", "search": "loop 42 73 mothman-z who zvz leylines core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#74 Mothman-T vs. who", "subtitle": "TvZ · Torches · 10:38 · 0.09× trade · 1.1% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m074_Mothman-T_vs_who.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m074_Mothman-T_vs_who.png", "search": "loop 42 74 mothman-t who tvz torches core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "core_12", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#75 Mothman-P vs. who", "subtitle": "PvZ · Persephone · 12:27 · 0.08× trade · 2.9% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m075_Mothman-P_vs_who.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m075_Mothman-P_vs_who.png", "search": "loop 42 75 mothman-p who pvz persephone core_12 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "#76 Mothman-Z vs. VeTerran-revived", "subtitle": "ZvT · Incorporeal · 7:33 · 0.10× trade · 8.3% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m076_Mothman-Z_vs_VeTerran-revived.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m076_Mothman-Z_vs_VeTerran-revived.png", "search": "loop 42 76 mothman-z veterran-revived zvt incorporeal unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#77 Mothman-T vs. VeTerran-revived", "subtitle": "TvT · Pylon · 8:38 · 0.04× trade · 1.4% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m077_Mothman-T_vs_VeTerran-revived.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m077_Mothman-T_vs_VeTerran-revived.png", "search": "loop 42 77 mothman-t veterran-revived tvt pylon unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "unseen_6", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "#78 Mothman-P vs. VeTerran-revived", "subtitle": "PvT · Magannatha · 7:22 · 0.01× trade · 6.6% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m078_Mothman-P_vs_VeTerran-revived.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m078_Mothman-P_vs_VeTerran-revived.png", "search": "loop 42 78 mothman-p veterran-revived pvt magannatha unseen_6 loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "selfplay", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "#79 Mothman-Z vs. Mothman-Z-SP", "subtitle": "ZvZ · Ultralove · 13:24 · 4.44× trade · 3.5% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m079_Mothman-Z_vs_Mothman-Z-SP.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m079_Mothman-Z_vs_Mothman-Z-SP.png", "search": "loop 42 79 mothman-z mothman-z-sp zvz ultralove selfplay win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "selfplay", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "#80 Mothman-T vs. Mothman-T-SP", "subtitle": "TvT · LeyLines · 13:18 · 2.57× trade · 3.5% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m080_Mothman-T_vs_Mothman-T-SP.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m080_Mothman-T_vs_Mothman-T-SP.png", "search": "loop 42 80 mothman-t mothman-t-sp tvt leylines selfplay win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "selfplay", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "#81 Mothman-P vs. Mothman-P-SP", "subtitle": "PvP · Torches · 14:57 · 2.90× trade · 2.4% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m081_Mothman-P_vs_Mothman-P-SP.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m081_Mothman-P_vs_Mothman-P-SP.png", "search": "loop 42 81 mothman-p mothman-p-sp pvp torches selfplay win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "selfplay", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "#82 Mothman-P vs. Mothman-T-SP", "subtitle": "PvT · Persephone · 15:40 · 3.35× trade · 2.3% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m082_Mothman-P_vs_Mothman-T-SP.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m082_Mothman-P_vs_Mothman-T-SP.png", "search": "loop 42 82 mothman-p mothman-t-sp pvt persephone selfplay win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "selfplay", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "#83 Mothman-P vs. Mothman-Z-SP", "subtitle": "PvZ · Incorporeal · 12:07 · 4.31× trade · 3.9% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m083_Mothman-P_vs_Mothman-Z-SP.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m083_Mothman-P_vs_Mothman-Z-SP.png", "search": "loop 42 83 mothman-p mothman-z-sp pvz incorporeal selfplay win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "selfplay", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "#84 Mothman-T vs. Mothman-Z-SP", "subtitle": "TvZ · Pylon · 9:32 · 9.33× trade · 0.0% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m084_Mothman-T_vs_Mothman-Z-SP.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_m084_Mothman-T_vs_Mothman-Z-SP.png", "search": "loop 42 84 mothman-t mothman-z-sp tvz pylon selfplay win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "baseline_h2h", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "#H2H-1 Mothman-Z vs. Mothman-Z-Base", "subtitle": "ZvZ · Magannatha · 14:03 · 3.09× trade · 3.3% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_h2h001_Mothman-Z_vs_Mothman-Z-Base.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_h2h001_Mothman-Z_vs_Mothman-Z-Base.png", "search": "loop 42 h2h-1 mothman-z mothman-z-base zvz magannatha baseline_h2h win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "baseline_h2h", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "#H2H-2 Mothman-T vs. Mothman-T-Base", "subtitle": "TvT · Ultralove · 15:10 · 0.61× trade · 0.8% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_h2h002_Mothman-T_vs_Mothman-T-Base.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_h2h002_Mothman-T_vs_Mothman-T-Base.png", "search": "loop 42 h2h-2 mothman-t mothman-t-base tvt ultralove baseline_h2h loss"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "baseline_h2h", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "#H2H-3 Mothman-P vs. Mothman-P-Base", "subtitle": "PvP · LeyLines · 10:38 · 5.07× trade · 3.3% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_h2h003_Mothman-P_vs_Mothman-P-Base.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_h2h003_Mothman-P_vs_Mothman-P-Base.png", "search": "loop 42 h2h-3 mothman-p mothman-p-base pvp leylines baseline_h2h win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "baseline_h2h", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "#H2H-4 Mothman-P vs. Mothman-T-Base", "subtitle": "PvT · Torches · 14:07 · 2.38× trade · 3.3% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_h2h004_Mothman-P_vs_Mothman-T-Base.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_h2h004_Mothman-P_vs_Mothman-T-Base.png", "search": "loop 42 h2h-4 mothman-p mothman-t-base pvt torches baseline_h2h win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "baseline_h2h", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "#H2H-5 Mothman-P vs. Mothman-Z-Base", "subtitle": "PvZ · Persephone · 11:02 · 6.09× trade · 4.3% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_h2h005_Mothman-P_vs_Mothman-Z-Base.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_h2h005_Mothman-P_vs_Mothman-Z-Base.png", "search": "loop 42 h2h-5 mothman-p mothman-z-base pvz persephone baseline_h2h win"}, {"loop": "Loop 42", "category": "Full Matches", "cohort": "baseline_h2h", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "#H2H-6 Mothman-T vs. Mothman-Z-Base", "subtitle": "TvZ · Incorporeal · 12:46 · 5.36× trade · 1.8% supply-blocked", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_h2h006_Mothman-T_vs_Mothman-Z-Base.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42-matches/full_h2h006_Mothman-T_vs_Mothman-Z-Base.png", "search": "loop 42 h2h-6 mothman-t mothman-z-base tvz incorporeal baseline_h2h win"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "econ-harass", "race": "Protoss", "outcome": "win", "result_label": "Pass", "title": "E01 Probe Harass Mineral Defense", "subtitle": "Self-Play Drills · 99.00× trade · econ-harass", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-econ-e01-probe-harass-mineral-defense.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-econ-e01-probe-harass-mineral-defense.png", "search": "loop 42 sc2-econ-e01-probe-harass-mineral-defense e01 probe harass mineral defense self-play drills protoss pass econ-harass"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "econ-harass", "race": "Zerg", "outcome": "win", "result_label": "Pass", "title": "E02 Reaper Harass Mineral Defense", "subtitle": "Self-Play Drills · 2.50× trade · econ-harass", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-econ-e02-reaper-harass-mineral-defense.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-econ-e02-reaper-harass-mineral-defense.png", "search": "loop 42 sc2-econ-e02-reaper-harass-mineral-defense e02 reaper harass mineral defense self-play drills zerg pass econ-harass"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "econ-harass", "race": "Terran", "outcome": "loss", "result_label": "Fail", "title": "E03 3Adept Scv Mineral Defense", "subtitle": "Self-Play Drills · 0.00× trade · econ-harass", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-econ-e03-3adept-scv-mineral-defense.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-econ-e03-3adept-scv-mineral-defense.png", "search": "loop 42 sc2-econ-e03-3adept-scv-mineral-defense e03 3adept scv mineral defense self-play drills terran fail econ-harass"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "econ-harass", "race": "Protoss", "outcome": "loss", "result_label": "Fail", "title": "E04 6Ling Runby Mineral Defense", "subtitle": "Self-Play Drills · 0.09× trade · econ-harass", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-econ-e04-6ling-runby-mineral-defense.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-econ-e04-6ling-runby-mineral-defense.png", "search": "loop 42 sc2-econ-e04-6ling-runby-mineral-defense e04 6ling runby mineral defense self-play drills protoss fail econ-harass"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P01 Zealot Stalker Vs Bio", "subtitle": "Self-Play Drills · 0.38× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p01-zealot-stalker-vs-bio.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p01-zealot-stalker-vs-bio.png", "search": "loop 42 sc2-real-p01-zealot-stalker-vs-bio p01 zealot stalker vs bio self-play drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P02 Stalker Immortal Vs Roach Ravager", "subtitle": "Self-Play Drills · 1.58× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p02-stalker-immortal-vs-roach-ravager.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p02-stalker-immortal-vs-roach-ravager.png", "search": "loop 42 sc2-real-p02-stalker-immortal-vs-roach-ravager p02 stalker immortal vs roach ravager self-play drills protoss win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P03 Outnumbered Stalkers Vs Lings", "subtitle": "Self-Play Drills · 0.47× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p03-outnumbered-stalkers-vs-lings.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p03-outnumbered-stalkers-vs-lings.png", "search": "loop 42 sc2-real-p03-outnumbered-stalkers-vs-lings p03 outnumbered stalkers vs lings self-play drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P04 Colossus Sentry Stalker Vs Bio", "subtitle": "Self-Play Drills · 6.25× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p04-colossus-sentry-stalker-vs-bio.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p04-colossus-sentry-stalker-vs-bio.png", "search": "loop 42 sc2-real-p04-colossus-sentry-stalker-vs-bio p04 colossus sentry stalker vs bio self-play drills protoss win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P05 Ht Archon Stalker Vs Hydra Infestor", "subtitle": "Self-Play Drills · 2.20× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p05-ht-archon-stalker-vs-hydra-infestor.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p05-ht-archon-stalker-vs-hydra-infestor.png", "search": "loop 42 sc2-real-p05-ht-archon-stalker-vs-hydra-infestor p05 ht archon stalker vs hydra infestor self-play drills protoss win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P06 Early 12Pool Zealot Adept Vs Lings", "subtitle": "Self-Play Drills · 1.75× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p06-early-12pool-zealot-adept-vs-lings.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p06-early-12pool-zealot-adept-vs-lings.png", "search": "loop 42 sc2-real-p06-early-12pool-zealot-adept-vs-lings p06 early 12pool zealot adept vs lings self-play drills protoss win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P07 Stalkers Vs Tempests Voidrays", "subtitle": "Self-Play Drills · 1.78× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p07-stalkers-vs-tempests-voidrays.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p07-stalkers-vs-tempests-voidrays.png", "search": "loop 42 sc2-real-p07-stalkers-vs-tempests-voidrays p07 stalkers vs tempests voidrays self-play drills protoss win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P08 Stalker Phoenix Zealot Vs Bio Tank Cyclone", "subtitle": "Self-Play Drills · 0.24× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p08-stalker-phoenix-zealot-vs-bio-tank-cyclone.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p08-stalker-phoenix-zealot-vs-bio-tank-cyclone.png", "search": "loop 42 sc2-real-p08-stalker-phoenix-zealot-vs-bio-tank-cyclone p08 stalker phoenix zealot vs bio tank cyclone self-play drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P09 Disruptor Blink Prism Vs Bio Liberator Viking", "subtitle": "Self-Play Drills · 0.00× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p09-disruptor-blink-prism-vs-bio-liberator-viking.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p09-disruptor-blink-prism-vs-bio-liberator-viking.png", "search": "loop 42 sc2-real-p09-disruptor-blink-prism-vs-bio-liberator-viking p09 disruptor blink prism vs bio liberator viking self-play drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P10 Phoenix Oracle Stalker Vs Muta Ling Harass", "subtitle": "Self-Play Drills · 4.69× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p10-phoenix-oracle-stalker-vs-muta-ling-harass.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p10-phoenix-oracle-stalker-vs-muta-ling-harass.png", "search": "loop 42 sc2-real-p10-phoenix-oracle-stalker-vs-muta-ling-harass p10 phoenix oracle stalker vs muta ling harass self-play drills protoss win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P11 Dt Observer Stalker Vs Banshee Raven Bio", "subtitle": "Self-Play Drills · 0.50× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p11-dt-observer-stalker-vs-banshee-raven-bio.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p11-dt-observer-stalker-vs-banshee-raven-bio.png", "search": "loop 42 sc2-real-p11-dt-observer-stalker-vs-banshee-raven-bio p11 dt observer stalker vs banshee raven bio self-play drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P12 12Pool Probe Zealot Mineral Hold", "subtitle": "Self-Play Drills · 0.00× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p12-12pool-probe-zealot-mineral-hold.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p12-12pool-probe-zealot-mineral-hold.png", "search": "loop 42 sc2-real-p12-12pool-probe-zealot-mineral-hold p12 12pool probe zealot mineral hold self-play drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P13 Obs Colossus Stalker Vs Bio Widowmines", "subtitle": "Self-Play Drills · 1.22× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p13-obs-colossus-stalker-vs-bio-widowmines.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p13-obs-colossus-stalker-vs-bio-widowmines.png", "search": "loop 42 sc2-real-p13-obs-colossus-stalker-vs-bio-widowmines p13 obs colossus stalker vs bio widowmines self-play drills protoss win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P14 Pvp Stalker Chargelot Immortal Mirror", "subtitle": "Self-Play Drills · 0.80× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p14-pvp-stalker-chargelot-immortal-mirror.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p14-pvp-stalker-chargelot-immortal-mirror.png", "search": "loop 42 sc2-real-p14-pvp-stalker-chargelot-immortal-mirror p14 pvp stalker chargelot immortal mirror self-play drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P15 Dt Blink Snipe Planetary", "subtitle": "Self-Play Drills · 0.12× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p15-dt-blink-snipe-planetary.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p15-dt-blink-snipe-planetary.png", "search": "loop 42 sc2-real-p15-dt-blink-snipe-planetary p15 dt blink snipe planetary self-play drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P16 Warpprism Immortal Juggle Vs Roach Ravager", "subtitle": "Self-Play Drills · 0.38× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p16-warpprism-immortal-juggle-vs-roach-ravager.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p16-warpprism-immortal-juggle-vs-roach-ravager.png", "search": "loop 42 sc2-real-p16-warpprism-immortal-juggle-vs-roach-ravager p16 warpprism immortal juggle vs roach ravager self-play drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P17 Skytoss Ht Feedback Vs Corruptor Viper", "subtitle": "Self-Play Drills · 0.52× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p17-skytoss-ht-feedback-vs-corruptor-viper.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p17-skytoss-ht-feedback-vs-corruptor-viper.png", "search": "loop 42 sc2-real-p17-skytoss-ht-feedback-vs-corruptor-viper p17 skytoss ht feedback vs corruptor viper self-play drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P18 Glaive Adept Oracle Revelation Vs Lurker Hydra", "subtitle": "Self-Play Drills · 0.07× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p18-glaive-adept-oracle-revelation-vs-lurker-hydra.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-p18-glaive-adept-oracle-revelation-vs-lurker-hydra.png", "search": "loop 42 sc2-real-p18-glaive-adept-oracle-revelation-vs-lurker-hydra p18 glaive adept oracle revelation vs lurker hydra self-play drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "T01 Bio Medivac Vs Zealot Stalker", "subtitle": "Self-Play Drills · 2.42× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t01-bio-medivac-vs-zealot-stalker.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t01-bio-medivac-vs-zealot-stalker.png", "search": "loop 42 sc2-real-t01-bio-medivac-vs-zealot-stalker t01 bio medivac vs zealot stalker self-play drills terran win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "T02 Tank Marine Vs Roach Ling", "subtitle": "Self-Play Drills · 0.65× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t02-tank-marine-vs-roach-ling.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t02-tank-marine-vs-roach-ling.png", "search": "loop 42 sc2-real-t02-tank-marine-vs-roach-ling t02 tank marine vs roach ling self-play drills terran loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "T03 Outnumbered Bio Vs Lings", "subtitle": "Self-Play Drills · 0.52× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t03-outnumbered-bio-vs-lings.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t03-outnumbered-bio-vs-lings.png", "search": "loop 42 sc2-real-t03-outnumbered-bio-vs-lings t03 outnumbered bio vs lings self-play drills terran loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "T04 Ghost Bio Medivac Vs Ultra Infestor", "subtitle": "Self-Play Drills · 0.06× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t04-ghost-bio-medivac-vs-ultra-infestor.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t04-ghost-bio-medivac-vs-ultra-infestor.png", "search": "loop 42 sc2-real-t04-ghost-bio-medivac-vs-ultra-infestor t04 ghost bio medivac vs ultra infestor self-play drills terran loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "T05 Bio Medivac Vs Ling Bane", "subtitle": "Self-Play Drills · 1.68× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t05-bio-medivac-vs-ling-bane.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t05-bio-medivac-vs-ling-bane.png", "search": "loop 42 sc2-real-t05-bio-medivac-vs-ling-bane t05 bio medivac vs ling bane self-play drills terran win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Terran", "outcome": "tie", "result_label": "Draw", "title": "T06 Early 12Pool Marines Reaper Vs Lings", "subtitle": "Self-Play Drills · 0.92× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t06-early-12pool-marines-reaper-vs-lings.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t06-early-12pool-marines-reaper-vs-lings.png", "search": "loop 42 sc2-real-t06-early-12pool-marines-reaper-vs-lings t06 early 12pool marines reaper vs lings self-play drills terran draw canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "T07 Bio Cyclones Vs Stalker Immortal", "subtitle": "Self-Play Drills · 0.20× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t07-bio-cyclones-vs-stalker-immortal.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t07-bio-cyclones-vs-stalker-immortal.png", "search": "loop 42 sc2-real-t07-bio-cyclones-vs-stalker-immortal t07 bio cyclones vs stalker immortal self-play drills terran loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "T08 Tvt Tank Viking Marine Highground Ramp", "subtitle": "Self-Play Drills · 3.92× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t08-tvt-tank-viking-marine-highground-ramp.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t08-tvt-tank-viking-marine-highground-ramp.png", "search": "loop 42 sc2-real-t08-tvt-tank-viking-marine-highground-ramp t08 tvt tank viking marine highground ramp self-play drills terran win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "T09 Widowmine Hellbat Cyclone Vs Ling Bane", "subtitle": "Self-Play Drills · 1.26× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t09-widowmine-hellbat-cyclone-vs-ling-bane.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t09-widowmine-hellbat-cyclone-vs-ling-bane.png", "search": "loop 42 sc2-real-t09-widowmine-hellbat-cyclone-vs-ling-bane t09 widowmine hellbat cyclone vs ling bane self-play drills terran win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "T10 Ghost Bio Liberator Vs Ht Archon Chargelot", "subtitle": "Self-Play Drills · 0.52× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t10-ghost-bio-liberator-vs-ht-archon-chargelot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t10-ghost-bio-liberator-vs-ht-archon-chargelot.png", "search": "loop 42 sc2-real-t10-ghost-bio-liberator-vs-ht-archon-chargelot t10 ghost bio liberator vs ht archon chargelot self-play drills terran loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "T11 Thor Viking Hellbat Vs Broodlord Corruptor Viper", "subtitle": "Self-Play Drills · 1.66× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t11-thor-viking-hellbat-vs-broodlord-corruptor-viper.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t11-thor-viking-hellbat-vs-broodlord-corruptor-viper.png", "search": "loop 42 sc2-real-t11-thor-viking-hellbat-vs-broodlord-corruptor-viper t11 thor viking hellbat vs broodlord corruptor viper self-play drills terran win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Terran", "outcome": "tie", "result_label": "Draw", "title": "T12 Banshee Raven Marine Vs Dt Stalker Observer", "subtitle": "Self-Play Drills · 0.97× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t12-banshee-raven-marine-vs-dt-stalker-observer.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t12-banshee-raven-marine-vs-dt-stalker-observer.png", "search": "loop 42 sc2-real-t12-banshee-raven-marine-vs-dt-stalker-observer t12 banshee raven marine vs dt stalker observer self-play drills terran draw canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "T13 Bio Tank Viking Vs Blink Colossus", "subtitle": "Self-Play Drills · 0.50× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t13-bio-tank-viking-vs-blink-colossus.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t13-bio-tank-viking-vs-blink-colossus.png", "search": "loop 42 sc2-real-t13-bio-tank-viking-vs-blink-colossus t13 bio tank viking vs blink colossus self-play drills terran loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "T14 Raven Imatrix Aam Bio Vs Colossus", "subtitle": "Self-Play Drills · 0.71× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t14-raven-imatrix-aam-bio-vs-colossus.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t14-raven-imatrix-aam-bio-vs-colossus.png", "search": "loop 42 sc2-real-t14-raven-imatrix-aam-bio-vs-colossus t14 raven imatrix aam bio vs colossus self-play drills terran loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "T15 Bc Yamato Jump Vs Corruptor Viper", "subtitle": "Self-Play Drills · 0.79× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t15-bc-yamato-jump-vs-corruptor-viper.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-t15-bc-yamato-jump-vs-corruptor-viper.png", "search": "loop 42 sc2-real-t15-bc-yamato-jump-vs-corruptor-viper t15 bc yamato jump vs corruptor viper self-play drills terran loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z01 Lings Vs Marines Open", "subtitle": "Self-Play Drills · 3.00× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z01-lings-vs-marines-open.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z01-lings-vs-marines-open.png", "search": "loop 42 sc2-real-z01-lings-vs-marines-open z01 lings vs marines open self-play drills zerg win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "Z02 Roach Ravager Vs Tank Bio", "subtitle": "Self-Play Drills · 0.30× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z02-roach-ravager-vs-tank-bio.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z02-roach-ravager-vs-tank-bio.png", "search": "loop 42 sc2-real-z02-roach-ravager-vs-tank-bio z02 roach ravager vs tank bio self-play drills zerg loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z03 Hydra Roach Vs Stalker Zealot", "subtitle": "Self-Play Drills · 2.04× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z03-hydra-roach-vs-stalker-zealot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z03-hydra-roach-vs-stalker-zealot.png", "search": "loop 42 sc2-real-z03-hydra-roach-vs-stalker-zealot z03 hydra roach vs stalker zealot self-play drills zerg win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z04 Queen Ultra Ling Vs Stalker Immortal", "subtitle": "Self-Play Drills · 2.33× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z04-queen-ultra-ling-vs-stalker-immortal.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z04-queen-ultra-ling-vs-stalker-immortal.png", "search": "loop 42 sc2-real-z04-queen-ultra-ling-vs-stalker-immortal z04 queen ultra ling vs stalker immortal self-play drills zerg win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z05 Hydra Roach Vs Voidray Zealot", "subtitle": "Self-Play Drills · 2.65× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z05-hydra-roach-vs-voidray-zealot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z05-hydra-roach-vs-voidray-zealot.png", "search": "loop 42 sc2-real-z05-hydra-roach-vs-voidray-zealot z05 hydra roach vs voidray zealot self-play drills zerg win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z06 Early 12Pool Queen Lings Vs Lings", "subtitle": "Self-Play Drills · 1.40× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z06-early-12pool-queen-lings-vs-lings.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z06-early-12pool-queen-lings-vs-lings.png", "search": "loop 42 sc2-real-z06-early-12pool-queen-lings-vs-lings z06 early 12pool queen lings vs lings self-play drills zerg win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z07 Hydras Vipers Vs Carriers Voidrays", "subtitle": "Self-Play Drills · 2.04× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z07-hydras-vipers-vs-carriers-voidrays.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z07-hydras-vipers-vs-carriers-voidrays.png", "search": "loop 42 sc2-real-z07-hydras-vipers-vs-carriers-voidrays z07 hydras vipers vs carriers voidrays self-play drills zerg win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z08 Corruptor Viper Volley Vs Tempest Carrier Cliff", "subtitle": "Self-Play Drills · 4.69× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z08-corruptor-viper-volley-vs-tempest-carrier-cliff.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z08-corruptor-viper-volley-vs-tempest-carrier-cliff.png", "search": "loop 42 sc2-real-z08-corruptor-viper-volley-vs-tempest-carrier-cliff z08 corruptor viper volley vs tempest carrier cliff self-play drills zerg win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "Z09 Roach Burrow Heal Vs Stalker Immortal", "subtitle": "Self-Play Drills · 0.00× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z09-roach-burrow-heal-vs-stalker-immortal.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z09-roach-burrow-heal-vs-stalker-immortal.png", "search": "loop 42 sc2-real-z09-roach-burrow-heal-vs-stalker-immortal z09 roach burrow heal vs stalker immortal self-play drills zerg loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z10 Lurker Hydra Overseer Vs Stalker Immortal Obs Ramp", "subtitle": "Self-Play Drills · 99.00× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z10-lurker-hydra-overseer-vs-stalker-immortal-obs-ramp.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z10-lurker-hydra-overseer-vs-stalker-immortal-obs-ramp.png", "search": "loop 42 sc2-real-z10-lurker-hydra-overseer-vs-stalker-immortal-obs-ramp z10 lurker hydra overseer vs stalker immortal obs ramp self-play drills zerg win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z11 Ling Bane Flank Surround Vs Bio Tank", "subtitle": "Self-Play Drills · 1.20× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z11-ling-bane-flank-surround-vs-bio-tank.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z11-ling-bane-flank-surround-vs-bio-tank.png", "search": "loop 42 sc2-real-z11-ling-bane-flank-surround-vs-bio-tank z11 ling bane flank surround vs bio tank self-play drills zerg win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "Z12 12Pool Queen Ling Drone Mineral Hold", "subtitle": "Self-Play Drills · 0.43× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z12-12pool-queen-ling-drone-mineral-hold.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z12-12pool-queen-ling-drone-mineral-hold.png", "search": "loop 42 sc2-real-z12-12pool-queen-ling-drone-mineral-hold z12 12pool queen ling drone mineral hold self-play drills zerg loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z13 Ravager Hydra Ling Vs Heavy Tank Line", "subtitle": "Self-Play Drills · 2.06× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z13-ravager-hydra-ling-vs-heavy-tank-line.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z13-ravager-hydra-ling-vs-heavy-tank-line.png", "search": "loop 42 sc2-real-z13-ravager-hydra-ling-vs-heavy-tank-line z13 ravager hydra ling vs heavy tank line self-play drills zerg win canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "Z14 Infestor Fungal Neural Lingbane Vs Bio Tank", "subtitle": "Self-Play Drills · 0.58× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z14-infestor-fungal-neural-lingbane-vs-bio-tank.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z14-infestor-fungal-neural-lingbane-vs-bio-tank.png", "search": "loop 42 sc2-real-z14-infestor-fungal-neural-lingbane-vs-bio-tank z14 infestor fungal neural lingbane vs bio tank self-play drills zerg loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "Z15 Viper Blindingcloud Pbomb Ultra Vs Mech Bio", "subtitle": "Self-Play Drills · 0.86× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z15-viper-blindingcloud-pbomb-ultra-vs-mech-bio.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z15-viper-blindingcloud-pbomb-ultra-vs-mech-bio.png", "search": "loop 42 sc2-real-z15-viper-blindingcloud-pbomb-ultra-vs-mech-bio z15 viper blindingcloud pbomb ultra vs mech bio self-play drills zerg loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "canonical", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "Z16 Muta Magicbox Vs Thors", "subtitle": "Self-Play Drills · 0.07× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z16-muta-magicbox-vs-thors.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-real-z16-muta-magicbox-vs-thors.png", "search": "loop 42 sc2-real-z16-muta-magicbox-vs-thors z16 muta magicbox vs thors self-play drills zerg loss canonical"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "regression", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "R01 Prod5138254 Pvt Obs Stalker Vs Cloaked Banshees", "subtitle": "Self-Play Drills · 1.00× trade · regression", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-reg-r01-prod5138254-pvt-obs-stalker-vs-cloaked-banshees.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-reg-r01-prod5138254-pvt-obs-stalker-vs-cloaked-banshees.png", "search": "loop 42 sc2-reg-r01-prod5138254-pvt-obs-stalker-vs-cloaked-banshees r01 prod5138254 pvt obs stalker vs cloaked banshees self-play drills protoss win regression"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "regression", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "R02 Prod5138248 Zvp Drone Hold Vs 15Probe Rush", "subtitle": "Self-Play Drills · 0.62× trade · regression", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-reg-r02-prod5138248-zvp-drone-hold-vs-15probe-rush.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-reg-r02-prod5138248-zvp-drone-hold-vs-15probe-rush.png", "search": "loop 42 sc2-reg-r02-prod5138248-zvp-drone-hold-vs-15probe-rush r02 prod5138248 zvp drone hold vs 15probe rush self-play drills zerg loss regression"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "regression", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "R03 Iter37 M42 Pvz Ramp Hold Vs Ling Flood", "subtitle": "Self-Play Drills · 0.46× trade · regression", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-reg-r03-iter37-m42-pvz-ramp-hold-vs-ling-flood.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-reg-r03-iter37-m42-pvz-ramp-hold-vs-ling-flood.png", "search": "loop 42 sc2-reg-r03-iter37-m42-pvz-ramp-hold-vs-ling-flood r03 iter37 m42 pvz ramp hold vs ling flood self-play drills protoss loss regression"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "regression", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "R05 Prod5140013 Tvp Scv Hold Vs 15Probe Rush", "subtitle": "Self-Play Drills · 0.50× trade · regression", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-reg-r05-prod5140013-tvp-scv-hold-vs-15probe-rush.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-reg-r05-prod5140013-tvp-scv-hold-vs-15probe-rush.png", "search": "loop 42 sc2-reg-r05-prod5140013-tvp-scv-hold-vs-15probe-rush r05 prod5140013 tvp scv hold vs 15probe rush self-play drills terran loss regression"}, {"loop": "Loop 42", "category": "Self-Play Drills", "cohort": "regression", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "R06 Prod5140055 Pvp Probe Hold Vs 15Probe Rush", "subtitle": "Self-Play Drills · 0.50× trade · regression", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-reg-r06-prod5140055-pvp-probe-hold-vs-15probe-rush.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/selfplay_sc2-reg-r06-prod5140055-pvp-probe-hold-vs-15probe-rush.png", "search": "loop 42 sc2-reg-r06-prod5140055-pvp-probe-hold-vs-15probe-rush r06 prod5140055 pvp probe hold vs 15probe rush self-play drills protoss loss regression"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "econ-harass", "race": "Protoss", "outcome": "win", "result_label": "Pass", "title": "E01 Probe Harass Mineral Defense", "subtitle": "Tactics Drills · 99.00× trade · econ-harass", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-econ-e01-probe-harass-mineral-defense.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-econ-e01-probe-harass-mineral-defense.png", "search": "loop 42 sc2-econ-e01-probe-harass-mineral-defense e01 probe harass mineral defense tactics drills protoss pass econ-harass"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "econ-harass", "race": "Zerg", "outcome": "win", "result_label": "Pass", "title": "E02 Reaper Harass Mineral Defense", "subtitle": "Tactics Drills · 5.00× trade · econ-harass", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-econ-e02-reaper-harass-mineral-defense.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-econ-e02-reaper-harass-mineral-defense.png", "search": "loop 42 sc2-econ-e02-reaper-harass-mineral-defense e02 reaper harass mineral defense tactics drills zerg pass econ-harass"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "econ-harass", "race": "Terran", "outcome": "loss", "result_label": "Fail", "title": "E03 3Adept Scv Mineral Defense", "subtitle": "Tactics Drills · 0.00× trade · econ-harass", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-econ-e03-3adept-scv-mineral-defense.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-econ-e03-3adept-scv-mineral-defense.png", "search": "loop 42 sc2-econ-e03-3adept-scv-mineral-defense e03 3adept scv mineral defense tactics drills terran fail econ-harass"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "econ-harass", "race": "Protoss", "outcome": "loss", "result_label": "Fail", "title": "E04 6Ling Runby Mineral Defense", "subtitle": "Tactics Drills · 0.33× trade · econ-harass", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-econ-e04-6ling-runby-mineral-defense.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-econ-e04-6ling-runby-mineral-defense.png", "search": "loop 42 sc2-econ-e04-6ling-runby-mineral-defense e04 6ling runby mineral defense tactics drills protoss fail econ-harass"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P01 Zealot Stalker Vs Bio", "subtitle": "Tactics Drills · 0.29× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p01-zealot-stalker-vs-bio.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p01-zealot-stalker-vs-bio.png", "search": "loop 42 sc2-real-p01-zealot-stalker-vs-bio p01 zealot stalker vs bio tactics drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P02 Stalker Immortal Vs Roach Ravager", "subtitle": "Tactics Drills · 2.42× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p02-stalker-immortal-vs-roach-ravager.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p02-stalker-immortal-vs-roach-ravager.png", "search": "loop 42 sc2-real-p02-stalker-immortal-vs-roach-ravager p02 stalker immortal vs roach ravager tactics drills protoss win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P03 Outnumbered Stalkers Vs Lings", "subtitle": "Tactics Drills · 0.33× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p03-outnumbered-stalkers-vs-lings.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p03-outnumbered-stalkers-vs-lings.png", "search": "loop 42 sc2-real-p03-outnumbered-stalkers-vs-lings p03 outnumbered stalkers vs lings tactics drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P04 Colossus Sentry Stalker Vs Bio", "subtitle": "Tactics Drills · 4.17× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p04-colossus-sentry-stalker-vs-bio.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p04-colossus-sentry-stalker-vs-bio.png", "search": "loop 42 sc2-real-p04-colossus-sentry-stalker-vs-bio p04 colossus sentry stalker vs bio tactics drills protoss win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P05 Ht Archon Stalker Vs Hydra Infestor", "subtitle": "Tactics Drills · 0.87× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p05-ht-archon-stalker-vs-hydra-infestor.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p05-ht-archon-stalker-vs-hydra-infestor.png", "search": "loop 42 sc2-real-p05-ht-archon-stalker-vs-hydra-infestor p05 ht archon stalker vs hydra infestor tactics drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P06 Early 12Pool Zealot Adept Vs Lings", "subtitle": "Tactics Drills · 1.75× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p06-early-12pool-zealot-adept-vs-lings.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p06-early-12pool-zealot-adept-vs-lings.png", "search": "loop 42 sc2-real-p06-early-12pool-zealot-adept-vs-lings p06 early 12pool zealot adept vs lings tactics drills protoss win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P07 Stalkers Vs Tempests Voidrays", "subtitle": "Tactics Drills · 2.49× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p07-stalkers-vs-tempests-voidrays.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p07-stalkers-vs-tempests-voidrays.png", "search": "loop 42 sc2-real-p07-stalkers-vs-tempests-voidrays p07 stalkers vs tempests voidrays tactics drills protoss win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "tie", "result_label": "Draw", "title": "P08 Stalker Phoenix Zealot Vs Bio Tank Cyclone", "subtitle": "Tactics Drills · 1.05× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p08-stalker-phoenix-zealot-vs-bio-tank-cyclone.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p08-stalker-phoenix-zealot-vs-bio-tank-cyclone.png", "search": "loop 42 sc2-real-p08-stalker-phoenix-zealot-vs-bio-tank-cyclone p08 stalker phoenix zealot vs bio tank cyclone tactics drills protoss draw canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P09 Disruptor Blink Prism Vs Bio Liberator Viking", "subtitle": "Tactics Drills · 0.37× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p09-disruptor-blink-prism-vs-bio-liberator-viking.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p09-disruptor-blink-prism-vs-bio-liberator-viking.png", "search": "loop 42 sc2-real-p09-disruptor-blink-prism-vs-bio-liberator-viking p09 disruptor blink prism vs bio liberator viking tactics drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P10 Phoenix Oracle Stalker Vs Muta Ling Harass", "subtitle": "Tactics Drills · 2.06× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p10-phoenix-oracle-stalker-vs-muta-ling-harass.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p10-phoenix-oracle-stalker-vs-muta-ling-harass.png", "search": "loop 42 sc2-real-p10-phoenix-oracle-stalker-vs-muta-ling-harass p10 phoenix oracle stalker vs muta ling harass tactics drills protoss win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P11 Dt Observer Stalker Vs Banshee Raven Bio", "subtitle": "Tactics Drills · 0.04× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p11-dt-observer-stalker-vs-banshee-raven-bio.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p11-dt-observer-stalker-vs-banshee-raven-bio.png", "search": "loop 42 sc2-real-p11-dt-observer-stalker-vs-banshee-raven-bio p11 dt observer stalker vs banshee raven bio tactics drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P12 12Pool Probe Zealot Mineral Hold", "subtitle": "Tactics Drills · 0.00× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p12-12pool-probe-zealot-mineral-hold.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p12-12pool-probe-zealot-mineral-hold.png", "search": "loop 42 sc2-real-p12-12pool-probe-zealot-mineral-hold p12 12pool probe zealot mineral hold tactics drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P13 Obs Colossus Stalker Vs Bio Widowmines", "subtitle": "Tactics Drills · 2.20× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p13-obs-colossus-stalker-vs-bio-widowmines.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p13-obs-colossus-stalker-vs-bio-widowmines.png", "search": "loop 42 sc2-real-p13-obs-colossus-stalker-vs-bio-widowmines p13 obs colossus stalker vs bio widowmines tactics drills protoss win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P14 Pvp Stalker Chargelot Immortal Mirror", "subtitle": "Tactics Drills · 2.51× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p14-pvp-stalker-chargelot-immortal-mirror.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p14-pvp-stalker-chargelot-immortal-mirror.png", "search": "loop 42 sc2-real-p14-pvp-stalker-chargelot-immortal-mirror p14 pvp stalker chargelot immortal mirror tactics drills protoss win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P15 Dt Blink Snipe Planetary", "subtitle": "Tactics Drills · 0.27× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p15-dt-blink-snipe-planetary.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p15-dt-blink-snipe-planetary.png", "search": "loop 42 sc2-real-p15-dt-blink-snipe-planetary p15 dt blink snipe planetary tactics drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "P16 Warpprism Immortal Juggle Vs Roach Ravager", "subtitle": "Tactics Drills · 0.77× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p16-warpprism-immortal-juggle-vs-roach-ravager.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p16-warpprism-immortal-juggle-vs-roach-ravager.png", "search": "loop 42 sc2-real-p16-warpprism-immortal-juggle-vs-roach-ravager p16 warpprism immortal juggle vs roach ravager tactics drills protoss loss canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P17 Skytoss Ht Feedback Vs Corruptor Viper", "subtitle": "Tactics Drills · 0.60× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p17-skytoss-ht-feedback-vs-corruptor-viper.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p17-skytoss-ht-feedback-vs-corruptor-viper.png", "search": "loop 42 sc2-real-p17-skytoss-ht-feedback-vs-corruptor-viper p17 skytoss ht feedback vs corruptor viper tactics drills protoss win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "P18 Glaive Adept Oracle Revelation Vs Lurker Hydra", "subtitle": "Tactics Drills · 0.59× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p18-glaive-adept-oracle-revelation-vs-lurker-hydra.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-p18-glaive-adept-oracle-revelation-vs-lurker-hydra.png", "search": "loop 42 sc2-real-p18-glaive-adept-oracle-revelation-vs-lurker-hydra p18 glaive adept oracle revelation vs lurker hydra tactics drills protoss win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "T01 Bio Medivac Vs Zealot Stalker", "subtitle": "Tactics Drills · 2.81× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t01-bio-medivac-vs-zealot-stalker.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t01-bio-medivac-vs-zealot-stalker.png", "search": "loop 42 sc2-real-t01-bio-medivac-vs-zealot-stalker t01 bio medivac vs zealot stalker tactics drills terran win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "T02 Tank Marine Vs Roach Ling", "subtitle": "Tactics Drills · 0.67× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t02-tank-marine-vs-roach-ling.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t02-tank-marine-vs-roach-ling.png", "search": "loop 42 sc2-real-t02-tank-marine-vs-roach-ling t02 tank marine vs roach ling tactics drills terran loss canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "T03 Outnumbered Bio Vs Lings", "subtitle": "Tactics Drills · 1.33× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t03-outnumbered-bio-vs-lings.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t03-outnumbered-bio-vs-lings.png", "search": "loop 42 sc2-real-t03-outnumbered-bio-vs-lings t03 outnumbered bio vs lings tactics drills terran win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "T04 Ghost Bio Medivac Vs Ultra Infestor", "subtitle": "Tactics Drills · 0.15× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t04-ghost-bio-medivac-vs-ultra-infestor.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t04-ghost-bio-medivac-vs-ultra-infestor.png", "search": "loop 42 sc2-real-t04-ghost-bio-medivac-vs-ultra-infestor t04 ghost bio medivac vs ultra infestor tactics drills terran loss canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "T05 Bio Medivac Vs Ling Bane", "subtitle": "Tactics Drills · 2.39× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t05-bio-medivac-vs-ling-bane.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t05-bio-medivac-vs-ling-bane.png", "search": "loop 42 sc2-real-t05-bio-medivac-vs-ling-bane t05 bio medivac vs ling bane tactics drills terran win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "T06 Early 12Pool Marines Reaper Vs Lings", "subtitle": "Tactics Drills · 0.76× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t06-early-12pool-marines-reaper-vs-lings.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t06-early-12pool-marines-reaper-vs-lings.png", "search": "loop 42 sc2-real-t06-early-12pool-marines-reaper-vs-lings t06 early 12pool marines reaper vs lings tactics drills terran loss canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "T07 Bio Cyclones Vs Stalker Immortal", "subtitle": "Tactics Drills · 0.20× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t07-bio-cyclones-vs-stalker-immortal.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t07-bio-cyclones-vs-stalker-immortal.png", "search": "loop 42 sc2-real-t07-bio-cyclones-vs-stalker-immortal t07 bio cyclones vs stalker immortal tactics drills terran loss canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "T08 Tvt Tank Viking Marine Highground Ramp", "subtitle": "Tactics Drills · 2.39× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t08-tvt-tank-viking-marine-highground-ramp.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t08-tvt-tank-viking-marine-highground-ramp.png", "search": "loop 42 sc2-real-t08-tvt-tank-viking-marine-highground-ramp t08 tvt tank viking marine highground ramp tactics drills terran win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "T09 Widowmine Hellbat Cyclone Vs Ling Bane", "subtitle": "Tactics Drills · 1.58× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t09-widowmine-hellbat-cyclone-vs-ling-bane.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t09-widowmine-hellbat-cyclone-vs-ling-bane.png", "search": "loop 42 sc2-real-t09-widowmine-hellbat-cyclone-vs-ling-bane t09 widowmine hellbat cyclone vs ling bane tactics drills terran win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "T10 Ghost Bio Liberator Vs Ht Archon Chargelot", "subtitle": "Tactics Drills · 2.81× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t10-ghost-bio-liberator-vs-ht-archon-chargelot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t10-ghost-bio-liberator-vs-ht-archon-chargelot.png", "search": "loop 42 sc2-real-t10-ghost-bio-liberator-vs-ht-archon-chargelot t10 ghost bio liberator vs ht archon chargelot tactics drills terran win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "T11 Thor Viking Hellbat Vs Broodlord Corruptor Viper", "subtitle": "Tactics Drills · 1.79× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t11-thor-viking-hellbat-vs-broodlord-corruptor-viper.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t11-thor-viking-hellbat-vs-broodlord-corruptor-viper.png", "search": "loop 42 sc2-real-t11-thor-viking-hellbat-vs-broodlord-corruptor-viper t11 thor viking hellbat vs broodlord corruptor viper tactics drills terran win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "T12 Banshee Raven Marine Vs Dt Stalker Observer", "subtitle": "Tactics Drills · 1.16× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t12-banshee-raven-marine-vs-dt-stalker-observer.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t12-banshee-raven-marine-vs-dt-stalker-observer.png", "search": "loop 42 sc2-real-t12-banshee-raven-marine-vs-dt-stalker-observer t12 banshee raven marine vs dt stalker observer tactics drills terran win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "T13 Bio Tank Viking Vs Blink Colossus", "subtitle": "Tactics Drills · 3.23× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t13-bio-tank-viking-vs-blink-colossus.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t13-bio-tank-viking-vs-blink-colossus.png", "search": "loop 42 sc2-real-t13-bio-tank-viking-vs-blink-colossus t13 bio tank viking vs blink colossus tactics drills terran win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Terran", "outcome": "tie", "result_label": "Draw", "title": "T14 Raven Imatrix Aam Bio Vs Colossus", "subtitle": "Tactics Drills · 1.00× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t14-raven-imatrix-aam-bio-vs-colossus.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t14-raven-imatrix-aam-bio-vs-colossus.png", "search": "loop 42 sc2-real-t14-raven-imatrix-aam-bio-vs-colossus t14 raven imatrix aam bio vs colossus tactics drills terran draw canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Terran", "outcome": "tie", "result_label": "Draw", "title": "T15 Bc Yamato Jump Vs Corruptor Viper", "subtitle": "Tactics Drills · 0.92× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t15-bc-yamato-jump-vs-corruptor-viper.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-t15-bc-yamato-jump-vs-corruptor-viper.png", "search": "loop 42 sc2-real-t15-bc-yamato-jump-vs-corruptor-viper t15 bc yamato jump vs corruptor viper tactics drills terran draw canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z01 Lings Vs Marines Open", "subtitle": "Tactics Drills · 2.40× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z01-lings-vs-marines-open.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z01-lings-vs-marines-open.png", "search": "loop 42 sc2-real-z01-lings-vs-marines-open z01 lings vs marines open tactics drills zerg win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z02 Roach Ravager Vs Tank Bio", "subtitle": "Tactics Drills · 0.91× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z02-roach-ravager-vs-tank-bio.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z02-roach-ravager-vs-tank-bio.png", "search": "loop 42 sc2-real-z02-roach-ravager-vs-tank-bio z02 roach ravager vs tank bio tactics drills zerg win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z03 Hydra Roach Vs Stalker Zealot", "subtitle": "Tactics Drills · 3.11× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z03-hydra-roach-vs-stalker-zealot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z03-hydra-roach-vs-stalker-zealot.png", "search": "loop 42 sc2-real-z03-hydra-roach-vs-stalker-zealot z03 hydra roach vs stalker zealot tactics drills zerg win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z04 Queen Ultra Ling Vs Stalker Immortal", "subtitle": "Tactics Drills · 7.70× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z04-queen-ultra-ling-vs-stalker-immortal.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z04-queen-ultra-ling-vs-stalker-immortal.png", "search": "loop 42 sc2-real-z04-queen-ultra-ling-vs-stalker-immortal z04 queen ultra ling vs stalker immortal tactics drills zerg win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z05 Hydra Roach Vs Voidray Zealot", "subtitle": "Tactics Drills · 3.56× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z05-hydra-roach-vs-voidray-zealot.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z05-hydra-roach-vs-voidray-zealot.png", "search": "loop 42 sc2-real-z05-hydra-roach-vs-voidray-zealot z05 hydra roach vs voidray zealot tactics drills zerg win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z06 Early 12Pool Queen Lings Vs Lings", "subtitle": "Tactics Drills · 3.50× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z06-early-12pool-queen-lings-vs-lings.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z06-early-12pool-queen-lings-vs-lings.png", "search": "loop 42 sc2-real-z06-early-12pool-queen-lings-vs-lings z06 early 12pool queen lings vs lings tactics drills zerg win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z07 Hydras Vipers Vs Carriers Voidrays", "subtitle": "Tactics Drills · 2.05× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z07-hydras-vipers-vs-carriers-voidrays.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z07-hydras-vipers-vs-carriers-voidrays.png", "search": "loop 42 sc2-real-z07-hydras-vipers-vs-carriers-voidrays z07 hydras vipers vs carriers voidrays tactics drills zerg win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z08 Corruptor Viper Volley Vs Tempest Carrier Cliff", "subtitle": "Tactics Drills · 4.69× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z08-corruptor-viper-volley-vs-tempest-carrier-cliff.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z08-corruptor-viper-volley-vs-tempest-carrier-cliff.png", "search": "loop 42 sc2-real-z08-corruptor-viper-volley-vs-tempest-carrier-cliff z08 corruptor viper volley vs tempest carrier cliff tactics drills zerg win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z09 Roach Burrow Heal Vs Stalker Immortal", "subtitle": "Tactics Drills · 2.93× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z09-roach-burrow-heal-vs-stalker-immortal.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z09-roach-burrow-heal-vs-stalker-immortal.png", "search": "loop 42 sc2-real-z09-roach-burrow-heal-vs-stalker-immortal z09 roach burrow heal vs stalker immortal tactics drills zerg win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z10 Lurker Hydra Overseer Vs Stalker Immortal Obs Ramp", "subtitle": "Tactics Drills · 1.63× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z10-lurker-hydra-overseer-vs-stalker-immortal-obs-ramp.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z10-lurker-hydra-overseer-vs-stalker-immortal-obs-ramp.png", "search": "loop 42 sc2-real-z10-lurker-hydra-overseer-vs-stalker-immortal-obs-ramp z10 lurker hydra overseer vs stalker immortal obs ramp tactics drills zerg win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z11 Ling Bane Flank Surround Vs Bio Tank", "subtitle": "Tactics Drills · 1.06× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z11-ling-bane-flank-surround-vs-bio-tank.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z11-ling-bane-flank-surround-vs-bio-tank.png", "search": "loop 42 sc2-real-z11-ling-bane-flank-surround-vs-bio-tank z11 ling bane flank surround vs bio tank tactics drills zerg win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z12 12Pool Queen Ling Drone Mineral Hold", "subtitle": "Tactics Drills · 4.67× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z12-12pool-queen-ling-drone-mineral-hold.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z12-12pool-queen-ling-drone-mineral-hold.png", "search": "loop 42 sc2-real-z12-12pool-queen-ling-drone-mineral-hold z12 12pool queen ling drone mineral hold tactics drills zerg win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z13 Ravager Hydra Ling Vs Heavy Tank Line", "subtitle": "Tactics Drills · 2.06× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z13-ravager-hydra-ling-vs-heavy-tank-line.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z13-ravager-hydra-ling-vs-heavy-tank-line.png", "search": "loop 42 sc2-real-z13-ravager-hydra-ling-vs-heavy-tank-line z13 ravager hydra ling vs heavy tank line tactics drills zerg win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "tie", "result_label": "Draw", "title": "Z14 Infestor Fungal Neural Lingbane Vs Bio Tank", "subtitle": "Tactics Drills · 0.89× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z14-infestor-fungal-neural-lingbane-vs-bio-tank.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z14-infestor-fungal-neural-lingbane-vs-bio-tank.png", "search": "loop 42 sc2-real-z14-infestor-fungal-neural-lingbane-vs-bio-tank z14 infestor fungal neural lingbane vs bio tank tactics drills zerg draw canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "Z15 Viper Blindingcloud Pbomb Ultra Vs Mech Bio", "subtitle": "Tactics Drills · 1.31× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z15-viper-blindingcloud-pbomb-ultra-vs-mech-bio.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z15-viper-blindingcloud-pbomb-ultra-vs-mech-bio.png", "search": "loop 42 sc2-real-z15-viper-blindingcloud-pbomb-ultra-vs-mech-bio z15 viper blindingcloud pbomb ultra vs mech bio tactics drills zerg loss canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "canonical", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Z16 Muta Magicbox Vs Thors", "subtitle": "Tactics Drills · 1.47× trade · canonical", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z16-muta-magicbox-vs-thors.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-real-z16-muta-magicbox-vs-thors.png", "search": "loop 42 sc2-real-z16-muta-magicbox-vs-thors z16 muta magicbox vs thors tactics drills zerg win canonical"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "regression", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "R01 Prod5138254 Pvt Obs Stalker Vs Cloaked Banshees", "subtitle": "Tactics Drills · 0.62× trade · regression", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-reg-r01-prod5138254-pvt-obs-stalker-vs-cloaked-banshees.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-reg-r01-prod5138254-pvt-obs-stalker-vs-cloaked-banshees.png", "search": "loop 42 sc2-reg-r01-prod5138254-pvt-obs-stalker-vs-cloaked-banshees r01 prod5138254 pvt obs stalker vs cloaked banshees tactics drills protoss loss regression"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "regression", "race": "Zerg", "outcome": "loss", "result_label": "Loss", "title": "R02 Prod5138248 Zvp Drone Hold Vs 15Probe Rush", "subtitle": "Tactics Drills · 0.38× trade · regression", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-reg-r02-prod5138248-zvp-drone-hold-vs-15probe-rush.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-reg-r02-prod5138248-zvp-drone-hold-vs-15probe-rush.png", "search": "loop 42 sc2-reg-r02-prod5138248-zvp-drone-hold-vs-15probe-rush r02 prod5138248 zvp drone hold vs 15probe rush tactics drills zerg loss regression"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "regression", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "R03 Iter37 M42 Pvz Ramp Hold Vs Ling Flood", "subtitle": "Tactics Drills · 1.26× trade · regression", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-reg-r03-iter37-m42-pvz-ramp-hold-vs-ling-flood.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-reg-r03-iter37-m42-pvz-ramp-hold-vs-ling-flood.png", "search": "loop 42 sc2-reg-r03-iter37-m42-pvz-ramp-hold-vs-ling-flood r03 iter37 m42 pvz ramp hold vs ling flood tactics drills protoss win regression"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "regression", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "R05 Prod5140013 Tvp Scv Hold Vs 15Probe Rush", "subtitle": "Tactics Drills · 0.69× trade · regression", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-reg-r05-prod5140013-tvp-scv-hold-vs-15probe-rush.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-reg-r05-prod5140013-tvp-scv-hold-vs-15probe-rush.png", "search": "loop 42 sc2-reg-r05-prod5140013-tvp-scv-hold-vs-15probe-rush r05 prod5140013 tvp scv hold vs 15probe rush tactics drills terran loss regression"}, {"loop": "Loop 42", "category": "Tactics Drills", "cohort": "regression", "race": "Protoss", "outcome": "loss", "result_label": "Loss", "title": "R06 Prod5140055 Pvp Probe Hold Vs 15Probe Rush", "subtitle": "Tactics Drills · 0.38× trade · regression", "media_type": "mp4", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-reg-r06-prod5140055-pvp-probe-hold-vs-15probe-rush.mp4", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter42/arena_sc2-reg-r06-prod5140055-pvp-probe-hold-vs-15probe-rush.png", "search": "loop 42 sc2-reg-r06-prod5140055-pvp-probe-hold-vs-15probe-rush r06 prod5140055 pvp probe hold vs 15probe rush tactics drills protoss loss regression"}, {"loop": "Loop 41", "category": "Tactics Drills", "cohort": "curated", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Queen and Drones stop an early Reaper raid", "subtitle": "The Queen intercepts both raiding Reapers while the Drones keep mining at 97% uptime (+785 minerals net).", "media_type": "webp", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/arena_sc2-econ-e02-reaper-harass-mineral-defense.webp", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/arena_sc2-econ-e02-reaper-harass-mineral-defense.png", "search": "loop 41 tactics drills zerg win queen and drones stop an early reaper raid the queen intercepts both raiding reapers while the drones keep mining at 97% uptime (+785 minerals net)."}, {"loop": "Loop 41", "category": "Featured Clips", "cohort": "curated", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "Protoss breaks through against Mulebot (9.6× trade)", "subtitle": "First Protoss win against held-out opponent Mulebot—Stalkers and Immortals clear the front and force a lifted base.", "media_type": "webp", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/rep_clip01_m57_Mothman-P_vs_Mulebot_first-ever.webp", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/rep_clip01_m57_Mothman-P_vs_Mulebot_first-ever.png", "search": "loop 41 featured clips protoss win protoss breaks through against mulebot (9.6× trade) first protoss win against held-out opponent mulebot—stalkers and immortals clear the front and force a lifted base."}, {"loop": "Loop 41", "category": "Featured Clips", "cohort": "curated", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "Colossus and Immortals clear a Zerg base (4.5×)", "subtitle": "Head-to-head test against our live build: Colossus splash clears 27 Drones in six seconds with zero Protoss losses.", "media_type": "webp", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/rep_clip06_h2h5_Mothman-P_vs_Mothman-Z-Base_h2h.webp", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/rep_clip06_h2h5_Mothman-P_vs_Mothman-Z-Base_h2h.png", "search": "loop 41 featured clips protoss win colossus and immortals clear a zerg base (4.5×) head-to-head test against our live build: colossus splash clears 27 drones in six seconds with zero protoss losses."}, {"loop": "Loop 41", "category": "Featured Clips", "cohort": "curated", "race": "Zerg", "outcome": "win", "result_label": "Win", "title": "Drones and early Zerglings turn back an SCV rush (7.8×)", "subtitle": "When Mulebot pulls its workers across the map, Zerg pulls just enough Drones to trap them at the ramp.", "media_type": "webp", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/rep_clip02_m55_Mothman-Z_vs_Mulebot_showcase.webp", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/rep_clip02_m55_Mothman-Z_vs_Mulebot_showcase.png", "search": "loop 41 featured clips zerg win drones and early zerglings turn back an scv rush (7.8×) when mulebot pulls its workers across the map, zerg pulls just enough drones to trap them at the ramp."}, {"loop": "Loop 41", "category": "Tactics Drills", "cohort": "curated", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "Dark Templars blink into a Planetary Fortress", "subtitle": "Group blink destroys the Planetary Fortress; next we are changing this tactic to clear Missile Turrets first so the Dark Templars stay cloaked.", "media_type": "webp", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/arena_sc2-real-p15-dt-blink-snipe-planetary.webp", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/arena_sc2-real-p15-dt-blink-snipe-planetary.png", "search": "loop 41 tactics drills protoss win dark templars blink into a planetary fortress group blink destroys the planetary fortress; next we are changing this tactic to clear missile turrets first so the dark templars stay cloaked."}, {"loop": "Loop 41", "category": "Featured Clips", "cohort": "curated", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "Protoss vs. Clicadinha (4.9× trade)", "subtitle": "First Protoss win against held-out opponent Clicadinha with Charge Zealots, Colossus, and Disruptors.", "media_type": "webp", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/rep_clip04_m66_Mothman-P_vs_Clicadinha_first-ever.webp", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/rep_clip04_m66_Mothman-P_vs_Clicadinha_first-ever.png", "search": "loop 41 featured clips protoss win protoss vs. clicadinha (4.9× trade) first protoss win against held-out opponent clicadinha with charge zealots, colossus, and disruptors."}, {"loop": "Loop 41", "category": "Featured Clips", "cohort": "curated", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "Terran vs. CryptBotRevival (11.0×, zero losses)", "subtitle": "Clean early Terran push closed out a 2–1 series against a held-out bot without losing a single unit.", "media_type": "webp", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/rep_clip05_m23_Mothman-T_vs_CryptBotRevival_showcase.webp", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/rep_clip05_m23_Mothman-T_vs_CryptBotRevival_showcase.png", "search": "loop 41 featured clips terran win terran vs. cryptbotrevival (11.0×, zero losses) clean early terran push closed out a 2–1 series against a held-out bot without losing a single unit."}, {"loop": "Loop 41", "category": "Tactics Drills", "cohort": "curated", "race": "Protoss", "outcome": "win", "result_label": "Win", "title": "Phoenixes lift Tanks for Blink Stalkers (4.4×)", "subtitle": "Phoenix Graviton Beams pick up the Siege Tanks while Zealots and Stalkers close the gap underneath.", "media_type": "webp", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/arena_sc2-real-p08-stalker-phoenix-zealot-vs-bio-tank-cyclone.webp", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/arena_sc2-real-p08-stalker-phoenix-zealot-vs-bio-tank-cyclone.png", "search": "loop 41 tactics drills protoss win phoenixes lift tanks for blink stalkers (4.4×) phoenix graviton beams pick up the siege tanks while zealots and stalkers close the gap underneath."}, {"loop": "Loop 41", "category": "Self-Play Drills", "cohort": "curated", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "SCVs hold a three-Adept mineral raid", "subtitle": "93% mining uptime with only one SCV lost against three raiding Adepts.", "media_type": "webp", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/selfplay_sc2-econ-e03-3adept-scv-mineral-defense.webp", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/selfplay_sc2-econ-e03-3adept-scv-mineral-defense.png", "search": "loop 41 self-play drills terran win scvs hold a three-adept mineral raid 93% mining uptime with only one scv lost against three raiding adepts."}, {"loop": "Loop 41", "category": "Featured Clips", "cohort": "curated", "race": "Terran", "outcome": "loss", "result_label": "Loss", "title": "Where Terran fell behind vs. SmoothBrain", "subtitle": "Overbuilding early Vikings drained the gas needed for Siege Tanks—fixed in the next build.", "media_type": "webp", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/rep_clip08_m62_Mothman-T_vs_SmoothBrain_tvt0tank.webp", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter41/rep_clip08_m62_Mothman-T_vs_SmoothBrain_tvt0tank.png", "search": "loop 41 featured clips terran loss where terran fell behind vs. smoothbrain overbuilding early vikings drained the gas needed for siege tanks—fixed in the next build."}, {"loop": "Loop 40", "category": "Self-Play Drills", "cohort": "curated", "race": "Terran", "outcome": "win", "result_label": "Win", "title": "Battlecruisers Yamato and Tactical Jump (1.3×)", "subtitle": "Three Yamato shots followed by Tactical Jumps out of Corruptor focus fire turn the air fight around.", "media_type": "webp", "src": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter40/selfplay_sc2-real-t15-bc-yamato-jump-vs-corruptor-viper.webp", "poster": "https://github.com/sticklane/mothman-sc2-bot/releases/download/media-iter40/selfplay_sc2-real-t15-bc-yamato-jump-vs-corruptor-viper.png", "search": "loop 40 self-play drills terran win battlecruisers yamato and tactical jump (1.3×) three yamato shots followed by tactical jumps out of corruptor focus fire turn the air fight around."}];
+  const grid = document.getElementById('gallery-grid');
+  const countEl = document.getElementById('gallery-count');
+  const moreWrap = document.getElementById('show-more-wrap');
+  const moreBtn = document.getElementById('show-more-btn');
+  const fLoop = document.getElementById('f-loop');
+  const fCat = document.getElementById('f-cat');
+  const fRace = document.getElementById('f-race');
+  const fOut = document.getElementById('f-out');
+  const fSearch = document.getElementById('f-search');
+  const PAGE_SIZE = 24;
+  let visibleLimit = PAGE_SIZE;
+
+  function esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function cardHtml(it) {
+    const resCls = it.outcome === 'win' ? 't-win' : (it.outcome === 'loss' ? 't-loss' : 't-muted');
+    let media = '';
+    if (it.media_type === 'mp4') {
+      const pAttr = it.poster ? ' poster="' + esc(it.poster) + '"' : '';
+      media =
+        '<div class="clip-video-wrap">' +
+          '<video class="clip-video" controls preload="none" playsinline' + pAttr + ' src="' + esc(it.src) + '"></video>' +
+        '</div>' +
+        '<div class="video-bar">' +
+          '<button type="button" class="text-btn video-theater-btn" data-video-src="' + esc(it.src) + '" data-video-poster="' + esc(it.poster) + '" data-video-title="' + esc(it.title) + '">Expand video</button>' +
+          '<a class="text-btn" href="' + esc(it.src) + '" target="_blank" rel="noopener noreferrer">Download MP4</a>' +
+          (it.poster ? '<a class="text-btn" href="' + esc(it.poster) + '" target="_blank" rel="noopener noreferrer">Still frame</a>' : '') +
+        '</div>';
+    } else {
+      media =
+        '<a href="' + esc(it.src) + '" target="_blank" rel="noopener noreferrer">' +
+          '<img class="clip-img" loading="lazy" decoding="async" src="' + esc(it.src) + '" alt="' + esc(it.title) + '" />' +
+        '</a>' +
+        (it.poster ? '<div class="video-bar"><a class="text-btn" href="' + esc(it.poster) + '" target="_blank" rel="noopener noreferrer">High-res still frame</a></div>' : '');
+    }
+    return (
+      '<article class="clip-card">' +
+        '<div class="gallery-meta-row">' +
+          '<span>' + esc(it.loop) + ' · ' + esc(it.category) + ' · ' + esc(it.race) + '</span>' +
+          '<span class="' + resCls + '">' + esc(it.result_label) + '</span>' +
+        '</div>' +
+        '<h4>' + esc(it.title) + '</h4>' +
+        '<figure class="clip-figure">' + media + '<figcaption>' + esc(it.subtitle) + '</figcaption></figure>' +
+      '</article>'
+    );
+  }
+
+  function render() {
+    const lp = fLoop.value;
+    const cat = fCat.value;
+    const race = fRace.value;
+    const out = fOut.value;
+    const q = (fSearch.value || '').trim().toLowerCase();
+    const filtered = ITEMS.filter(function(it) {
+      if (lp !== 'all' && it.loop !== lp) return false;
+      if (cat !== 'all' && it.category !== cat) return false;
+      if (race !== 'all' && it.race !== race) return false;
+      if (out !== 'all' && it.outcome !== out) return false;
+      if (q && it.search.indexOf(q) === -1) return false;
+      return true;
+    });
+    const shown = filtered.slice(0, visibleLimit);
+    countEl.textContent = 'Showing ' + shown.length + ' of ' + filtered.length + ' replay' + (filtered.length === 1 ? '' : 's') + '.';
+    grid.innerHTML = shown.length
+      ? shown.map(cardHtml).join('')
+      : '<p class="t-muted">No replays match those filters.</p>';
+    moreWrap.style.display = filtered.length > visibleLimit ? 'block' : 'none';
+  }
+
+  [fLoop, fCat, fRace, fOut].forEach(function(el) {
+    el.addEventListener('change', function() { visibleLimit = PAGE_SIZE; render(); });
+  });
+  fSearch.addEventListener('input', function() { visibleLimit = PAGE_SIZE; render(); });
+  moreBtn.addEventListener('click', function() { visibleLimit += PAGE_SIZE; render(); });
+  render();
+})();
+</script>
+
+
+</body>
+</html>

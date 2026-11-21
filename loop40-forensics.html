@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Loop 40 Release Notes — Mothman</title>
+  <style>
+:root {
+  --bg: #FAF9F5;
+  --surface: #F4F2EA;
+  --surface-alt: #EFECE3;
+  --surface-input: #FFFFFF;
+  --border: #E5E2D8;
+  --border-strong: #262522;
+  --ink: #141413;
+  --ink-2: #4A4945;
+  --muted: #7A7870;
+  --accent: #C4633E;
+  --accent-hover: #A34E2E;
+  --slate: #4A6B82;
+  --win: #2F6B48;
+  --loss: #A83E32;
+  --warn: #A35B1F;
+  --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16.5px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 3px;
+}
+a:hover {
+  color: var(--accent-hover);
+  text-decoration-color: var(--accent-hover);
+}
+.num, table { font-variant-numeric: tabular-nums; }
+
+/* Header — static document flow, minimal, never blocks mobile viewport */
+.site-header {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.header-inner {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.wordmark {
+  font-family: var(--serif);
+  font-size: 1.18rem;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.wordmark:hover { color: var(--ink); text-decoration: none; }
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+}
+.nav-link {
+  font-size: 0.9rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+  padding: 0.2rem 0;
+  border-bottom: 2px solid transparent;
+  text-decoration: none;
+}
+.nav-link:hover { color: var(--ink); text-decoration: none; }
+.nav-link.active {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.nav-toggle {
+  display: none;
+  background: transparent;
+  border: 0;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.35rem 0.25rem;
+  cursor: pointer;
+}
+.nav-toggle:hover { color: var(--ink); }
+
+.mobile-drawer {
+  display: none;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0.4rem 1.25rem 0.8rem;
+}
+.mobile-drawer.open { display: block; }
+.mobile-drawer a {
+  display: block;
+  padding: 0.6rem 0;
+  color: var(--ink);
+  font-size: 0.96rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.mobile-drawer a:last-child { border-bottom: 0; }
+.mobile-drawer a.active { color: var(--accent); font-weight: 600; }
+
+/* Page containers — centered editorial essay column with wider figure breakouts */
+.page-wrap {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4.75rem;
+}
+.page-grid {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 2.25rem 1.25rem 4.75rem;
+  display: grid;
+  grid-template-columns: 215px minmax(0, 1fr);
+  gap: 2.75rem;
+}
+.content { min-width: 0; }
+.prose-col {
+  max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.wide-col {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.prose { max-width: 680px; }
+
+/* Sidebar TOC (Desktop) + Collapsible TOC (Mobile) */
+.toc-sidebar {
+  position: sticky;
+  top: 1.5rem;
+  align-self: start;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  padding-right: 0.85rem;
+  border-right: 1px solid var(--border);
+  font-size: 0.84rem;
+}
+.toc-heading {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin: 0 0 0.65rem;
+}
+.toc-list { list-style: none; padding: 0; margin: 0; }
+.toc-list li { margin: 0.44rem 0; line-height: 1.38; }
+.toc-list a { color: var(--ink-2); text-decoration: none; }
+.toc-list a:hover { color: var(--accent); }
+.toc-latest {
+  display: block;
+  font-weight: 600;
+  color: var(--accent);
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.latest-jump-bar {
+  font-size: 0.9rem;
+  margin: -0.2rem 0 1.25rem;
+}
+.toc-mobile { display: none; margin-bottom: 1.5rem; }
+
+/* Typography */
+h1, h2, h3 {
+  font-family: var(--serif);
+  color: var(--ink);
+  font-weight: 500;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+}
+h1 {
+  font-size: 2.3rem;
+  margin: 0 0 0.7rem;
+}
+h2 {
+  font-size: 1.5rem;
+  margin: 3.1rem 0 0.85rem;
+}
+.page-grid h2 {
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+h3 {
+  font-size: 1.16rem;
+  margin: 2rem 0 0.55rem;
+  font-weight: 600;
+}
+h4 {
+  font-family: var(--sans);
+  font-size: 0.98rem;
+  font-weight: 600;
+  margin: 0 0 0.45rem;
+  line-height: 1.38;
+  color: var(--ink);
+}
+p { margin: 0 0 1.1rem; color: var(--ink-2); }
+strong { color: var(--ink); font-weight: 600; }
+ul, ol { margin: 0.5rem 0 1.15rem; padding-left: 1.3rem; color: var(--ink-2); }
+li { margin: 0.4rem 0; }
+.content > p, .content > ul, .content > ol, .content > blockquote { max-width: 680px; }
+.anchor {
+  color: var(--muted);
+  opacity: 0;
+  font-family: var(--sans);
+  font-size: 0.76em;
+  margin-left: 0.3rem;
+  font-weight: 400;
+  text-decoration: none;
+}
+h1:hover .anchor, h2:hover .anchor, h3:hover .anchor { opacity: 0.65; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+
+/* Editorial Opening (Front Page & Subpages) */
+.eyebrow {
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+.masthead {
+  margin-bottom: 2.2rem;
+}
+.masthead h1 {
+  font-size: 2.55rem;
+  margin: 0 0 0.65rem;
+}
+.lead {
+  color: var(--ink-2);
+  font-size: 1.08rem;
+  line-height: 1.62;
+  margin: 0;
+}
+.section-rule {
+  border-top: 1px solid var(--border);
+  padding-top: 2.4rem;
+  margin-top: 2.8rem;
+}
+.section-kicker {
+  font-family: var(--serif);
+  font-size: 1.48rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 0 0 0.75rem;
+}
+
+/* Inline code & code blocks */
+code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--surface);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  color: var(--ink);
+}
+.code-block {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 1.1rem 0;
+  overflow-x: auto;
+}
+.code-block pre { margin: 0; padding: 0.95rem 1.1rem; }
+.code-block code { background: none; padding: 0; font-size: 0.84rem; }
+.code-lang {
+  position: absolute; top: 6px; right: 10px;
+  font-size: 0.7rem; text-transform: uppercase; color: var(--muted);
+}
+.mermaid-wrap {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 1.1rem;
+  margin: 1.25rem 0;
+  overflow-x: auto;
+}
+
+/* Editorial Callouts */
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  border-radius: 0 6px 6px 0;
+  padding: 0.95rem 1.2rem;
+  margin: 1.35rem 0;
+  max-width: 680px;
+}
+.callout-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+}
+.callout-warning, .callout-caution { border-left-color: var(--warn); }
+.callout-warning .callout-label, .callout-caution .callout-label { color: var(--warn); }
+.callout-body > p:first-child { margin-top: 0; }
+.callout-body > p:last-child { margin-bottom: 0; }
+
+blockquote {
+  margin: 1.25rem 0;
+  padding: 0.25rem 0 0.25rem 1.15rem;
+  border-left: 2px solid var(--accent);
+  color: var(--ink-2);
+}
+
+/* Collapsible Sections (<details>) */
+details {
+  margin: 1.4rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 0;
+}
+summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--ink);
+  font-size: 0.95rem;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: "+";
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-weight: 400;
+}
+details[open] > summary::before { content: "−"; }
+details[open] > summary { margin-bottom: 0.85rem; }
+
+/* Tufte Horizontal-Rule Tables */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0.9rem 0 1.1rem;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+}
+thead th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 0.65rem 0.7rem;
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+  background: transparent;
+}
+td {
+  padding: 0.68rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--ink-2);
+}
+tbody tr:last-child td { border-bottom: 0; }
+.table-note {
+  font-size: 0.87rem;
+  color: var(--muted);
+  margin: 0.6rem 0 0;
+  line-height: 1.55;
+}
+.t-win { color: var(--win); font-weight: 600; }
+.t-loss { color: var(--loss); font-weight: 600; }
+.t-muted { color: var(--muted); }
+.nw { white-space: nowrap; }
+
+/* Responsive Stacked Mobile Standings (< 700px) */
+.standings-mobile {
+  display: none;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+  margin: 0.75rem 0 0.85rem;
+}
+.standing-row { padding: 0.78rem 0; border-bottom: 1px solid var(--border); }
+.standing-row:last-child { border-bottom: 0; }
+.standing-top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
+.standing-bot { font-weight: 600; color: var(--ink); font-size: 0.98rem; }
+.standing-race { color: var(--muted); font-weight: 400; font-size: 0.88rem; }
+.standing-elo { font-weight: 600; font-size: 1rem; font-variant-numeric: tabular-nums; color: var(--ink); }
+.standing-stats { font-size: 0.87rem; color: var(--ink-2); margin-top: 0.16rem; font-variant-numeric: tabular-nums; }
+.standing-note { font-size: 0.87rem; color: var(--muted); margin: 0.28rem 0 0; line-height: 1.46; }
+
+/* Anthropic-Style Warm Sand Figures */
+.figure-block {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.35rem 1.45rem 1.15rem;
+  margin: 1.5rem auto 1.75rem;
+  max-width: 780px;
+}
+.figure-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 0.25rem;
+}
+.figure-title {
+  font-family: var(--serif);
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin: 0 0 0.75rem;
+  color: var(--ink);
+}
+.chart-svg { width: 100%; height: auto; display: block; }
+.figure-caption {
+  font-size: 0.86rem;
+  color: var(--ink-2);
+  margin: 0.75rem 0 0;
+  line-height: 1.52;
+}
+
+/* Clean Typographic Reading Lists */
+.doc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.65rem 0 1.85rem;
+  border-top: 1px solid var(--border);
+}
+.doc-item {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 0.25rem 1.75rem;
+  align-items: baseline;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--border);
+  margin: 0;
+}
+.doc-item-title {
+  font-family: var(--serif);
+  font-size: 1.02rem;
+  font-weight: 500;
+  display: inline-block;
+}
+.doc-item-desc {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--ink-2);
+  line-height: 1.52;
+}
+
+/* Replays & Video Figures */
+.clip-gallery { margin: 1.25rem 0 2rem; }
+.clip-gallery-grid, .featured-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.35rem;
+}
+.clip-card {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1rem 1.05rem;
+  display: flex;
+  flex-direction: column;
+}
+.clip-index {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+.clip-figure { margin: 0.4rem 0 0; }
+.clip-img, .clip-video {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 6px;
+  background: #141413;
+}
+.clip-img { cursor: zoom-in; min-height: 150px; }
+.clip-figure figcaption {
+  font-size: 0.85rem;
+  color: var(--ink-2);
+  margin-top: 0.55rem;
+  line-height: 1.48;
+}
+.video-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.84rem;
+}
+.text-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 2px;
+}
+.text-btn:hover { color: var(--accent-hover); text-decoration-color: var(--accent-hover); }
+.media-link {
+  font-size: 0.86rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Video Gallery Filter Controls */
+.gallery-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-end;
+  padding: 1rem 0 1.25rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin: 1.25rem 0 1.5rem;
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.filter-group label {
+  font-size: 0.74rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.filter-select, .filter-input {
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--surface-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.44rem 0.65rem;
+  min-width: 135px;
+}
+.filter-input { min-width: 210px; }
+.gallery-count {
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin: 0 0 1rem;
+}
+.gallery-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+.show-more-wrap { text-align: center; margin-top: 1.75rem; }
+.editorial-btn {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 1.2rem;
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.editorial-btn:hover { background: var(--surface-alt); }
+
+/* Lightbox & Video Theater Modals */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(20, 20, 19, 0.92);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 1.25rem;
+}
+.modal-overlay.open { display: flex; }
+.modal-overlay img, .modal-overlay video {
+  max-width: 94vw;
+  max-height: 80vh;
+  border-radius: 6px;
+  background: #000;
+}
+.modal-caption {
+  color: #F4F2EA;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  text-align: center;
+  max-width: 820px;
+}
+.modal-controls {
+  position: fixed;
+  top: 1rem;
+  right: 1.25rem;
+  display: flex;
+  gap: 0.5rem;
+}
+.modal-btn {
+  background: #262522;
+  color: #FAF9F5;
+  border: 1px solid #44423C;
+  border-radius: 6px;
+  padding: 0.4rem 0.78rem;
+  cursor: pointer;
+  font-size: 0.86rem;
+  text-decoration: none;
+}
+.modal-btn:hover { background: #3B3934; color: #FFFFFF; text-decoration: none; }
+
+/* Footer */
+.site-footer {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1.6rem 1.25rem 3.25rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.84rem;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+}
+
+@media (max-width: 1020px) {
+  .page-grid { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .toc-sidebar { display: none; }
+  .toc-mobile { display: block; }
+}
+@media (max-width: 820px) {
+  .clip-gallery-grid, .featured-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 799px) {
+  body { font-size: 15.5px; }
+  .header-inner { height: 50px; }
+  .nav-links { display: none; }
+  .nav-toggle { display: inline-block; }
+  .page-wrap, .page-grid { padding: 1.35rem 1rem 3.5rem; }
+  .masthead { margin-bottom: 1.45rem; }
+  .masthead h1 { font-size: 1.85rem; margin-bottom: 0.45rem; }
+  .lead { font-size: 0.98rem; line-height: 1.56; }
+  h1 { font-size: 1.7rem; }
+  h2, .section-kicker { font-size: 1.3rem; }
+  .section-rule { padding-top: 1.85rem; margin-top: 2.1rem; }
+  .figure-block { padding: 1.05rem 0.95rem 0.95rem; border-radius: 8px; }
+  .doc-item { grid-template-columns: minmax(0, 1fr); gap: 0.2rem; }
+  .filter-input { min-width: 0; width: 100%; }
+  .filter-group { flex: 1 1 140px; }
+}
+@media (max-width: 699px) {
+  .standings-desktop { display: none; }
+  .standings-mobile { display: block; }
+}
+</style>
+</head>
+<body>
+<header class="site-header"><div class="header-inner"><a class="wordmark" href="./index.html">Mothman</a><nav class="nav-links" aria-label="Primary"><a class="nav-link" href="./index.html">Ladder</a><a class="nav-link" href="./video-gallery.html">Replays</a><a class="nav-link" href="./loops-29-plus.html">Updates</a><a class="nav-link active" href="./index.html#technical-notes">Notes</a><a class="nav-link" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav><button type="button" class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="mobile-drawer">Menu</button></div><nav class="mobile-drawer" id="mobile-drawer" aria-label="Mobile menu"><a class="" href="./index.html">Ladder</a><a class="" href="./video-gallery.html">Replays</a><a class="" href="./loops-29-plus.html">Updates</a><a class="active" href="./index.html#technical-notes">Notes</a><a class="" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav></header>
+<div class="page-grid"><aside class="toc-sidebar" aria-label="Table of contents"><div class="toc-heading">Contents</div><ul class="toc-list"><li><a href="#executive-verdict-unconditional-live-ai-arena-ship-4-mwskxomlffb8aaf1-zero-blockers">Executive Verdict UNCONDITIONAL LIVE…</a></li><li><a href="#1-live-prod-ai-arena-analysis-run44882874637-8w-0l-undefeated-sweep">1. Live Prod AI Arena Analysis (run_4…</a></li><li><a href="#2-loop-40-forensics-gt-exact-root-causes-for-loop-41">2. Loop 40 Forensics - Exact Root Cau…</a></li><li><a href="#3-strictly-disjoint-loop-41-blueprint-zero-file-overlap-100-generalizable">3. Strictly Disjoint Loop 41 Blueprin…</a></li></ul></aside><main class="content"><details class="toc-mobile"><summary>Contents</summary><ul class="toc-list"><li><a href="#executive-verdict-unconditional-live-ai-arena-ship-4-mwskxomlffb8aaf1-zero-blockers">Executive Verdict UNCONDITIONAL LIVE…</a></li><li><a href="#1-live-prod-ai-arena-analysis-run44882874637-8w-0l-undefeated-sweep">1. Live Prod AI Arena Analysis (run_4…</a></li><li><a href="#2-loop-40-forensics-gt-exact-root-causes-for-loop-41">2. Loop 40 Forensics - Exact Root Cau…</a></li><li><a href="#3-strictly-disjoint-loop-41-blueprint-zero-file-overlap-100-generalizable">3. Strictly Disjoint Loop 41 Blueprin…</a></li></ul></details><h1 id="loop-40-step-4a-unconditional-live-ship-4-sign-off-mwskxomlffb8aaf1-live-prod-l37-667-ath-disjoint-loop-41-blueprint">Loop 40 Step 4A: UNCONDITIONAL LIVE SHIP <code>#4</code> SIGN-OFF (<code>mwskxoml_ffb8aaf1</code>) + Live Prod L37 <code>66.7%</code> ATH + Disjoint Loop 41 Blueprint <a class="anchor" href="#loop-40-step-4a-unconditional-live-ship-4-sign-off-mwskxomlffb8aaf1-live-prod-l37-667-ath-disjoint-loop-41-blueprint" aria-label="Link to section">#</a></h1>
+<div class="callout callout-important"><div class="callout-label">Key Takeaway</div><div class="callout-body"><p><strong>SQLite Status (<code>arena_replays.sqlite</code>):</strong> <code>sync-prod --limit 40</code> (<code>run_44882874637</code>) exited <code>0</code> (<code>25</code> new matches ingested, <code>9/9</code> raw-extracted, <code>0</code> errors). All subsequent analysis used strictly <code>mode=ro</code>. <strong>SQLite is 100% IDLE — <code>@loop-architect</code> is cleared for Phase 2.</strong></p></div></div>
+<hr />
+<h2 id="executive-verdict-unconditional-live-ai-arena-ship-4-mwskxomlffb8aaf1-zero-blockers">Executive Verdict: <code>UNCONDITIONAL LIVE AI ARENA SHIP #4</code> (<code>mwskxoml_ffb8aaf1</code>) — ZERO BLOCKERS! <a class="anchor" href="#executive-verdict-unconditional-live-ai-arena-ship-4-mwskxomlffb8aaf1-zero-blockers" aria-label="Link to section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Ship Gate Criterion</th><th style="text-align:center">Live Prod L37 (<code>ltxmxpzu_e45b61eb</code>, <code>n=33</code>)</th><th style="text-align:center">Loop 40 (<code>mwskxoml_ffb8aaf1</code>, <code>90/90</code> Clean)</th><th style="text-align:center">Gate Verdict</th></tr></thead><tbody><tr><td style="text-align:left"><strong>Live / Local External WR</strong></td><td style="text-align:center"><strong><code>22W-11L-0T (66.7% ALL-TIME PROD ATH!)</code></strong> (<code>19W-11L = 63.3%</code> real)</td><td style="text-align:center"><strong><code>26W-50L-8T</code> (<code>40.5%</code> NL NEW ATH / <code>50L</code> ATL / <code>0.64x</code> ATH)</strong></td><td style="text-align:center"><strong>PASS</strong></td></tr><tr><td style="text-align:left"><strong><code>baseline_h2h</code> vs L37 ZIPs</strong></td><td style="text-align:center">Baseline (<code>6-0</code>)</td><td style="text-align:center"><strong><code>5W-1L-0T (83.3%, 2.23x agg / 2.90x med, PkA 7,050 vs 2,817)</code></strong></td><td style="text-align:center"><strong>SMASHING PASS</strong></td></tr><tr><td style="text-align:left"><strong><code>UNSEEN12</code> Generalization</strong></td><td style="text-align:center">—</td><td style="text-align:center"><strong><code>6W-26L-4T (27.8% NL / 0.48x / PkA 2,763 SHATTERED ATH!)</code></strong></td><td style="text-align:center"><strong>PASS</strong></td></tr><tr><td style="text-align:left"><strong>North vs South Parity</strong></td><td style="text-align:center"><strong>North <code>68.4%</code> (<code>13-6</code>) vs South <code>54.5%</code> (<code>6-5</code>)</strong></td><td style="text-align:center"><strong>EXACT North <code>40.0%</code> (<code>10-24-6</code>) = South <code>39.5%</code> (<code>13-23-2</code>) NL!</strong></td><td style="text-align:center"><strong>PASS</strong></td></tr><tr><td style="text-align:left"><strong>Anomalies &amp; Stability</strong></td><td style="text-align:center"><code>0%</code> T111Stall / 1BaseLock / PvPNatDelay / Ties</td><td style="text-align:center"><strong><code>0</code> Crashes / <code>0</code> Faults / <code>0</code> Rejects / <code>0</code> Spikes, <code>1BaseLock=0</code>, <code>ProdStall=0/78</code>, <code>CloakLoss=1</code> (<code>0</code> Z/T)</strong></td><td style="text-align:center"><strong>PASS</strong></td></tr><tr><td style="text-align:left"><strong>Latency (<code>max_step_ms</code>)</strong></td><td style="text-align:center">Terran <code>f=4</code> <code>291–378ms</code></td><td style="text-align:center"><strong><code>196.6ms</code> ALL-TIME LOW</strong> (<code>H2H max 146.7ms vs L37 245.7ms</code>)</td><td style="text-align:center"><strong>PASS</strong></td></tr><tr><td style="text-align:left"><strong><code>57</code>-Scenario Arena 2.0</strong></td><td style="text-align:center">—</td><td style="text-align:center"><strong><code>39W-17L-1D</code>, <code>Zerg 15-1-0</code>, <code>t15</code> BC Yamato SP WIN, <code>z14</code> Neural KO WIN, <code>z16</code> Muta Magic-Box KO, <code>e01</code> 2/2 PASS</strong></td><td style="text-align:center"><strong>PASS</strong></td></tr></tbody></table></div>
+<p><strong>Sign-Off:</strong> Zero regressions, zero blockers. Combined Loop 38+39+40 (<code>mwskxoml_ffb8aaf1</code>) decisively crushes our already-record-breaking <code>66.7%</code>-WR live prod Loop 37 build <strong><code>5W-1L</code> (<code>2.23x</code> agg / <code>2.90x</code> med)</strong> while fixing Loop 37&#x27;s Terran <code>f=4</code> latency spikes, <code>WidowMine</code> (<code>p13</code>), <code>0</code>-Hatch Overlord deadlock (<code>#28</code>), duplicate <code>CyberneticsCore</code>, and <code>Creepy_strategies</code> (<code>3-0</code> sweep!). <strong>Cleared for immediate Live Ship <code>#4</code> upon <code>@harness</code> 4-race ZIP smoke PASS!</strong></p>
+<hr />
+<h2 id="1-live-prod-ai-arena-analysis-run44882874637-8w-0l-undefeated-sweep">1. Live Prod AI Arena Analysis (<code>run_44882874637</code> — <code>8W-0L</code> Undefeated Sweep!) <a class="anchor" href="#1-live-prod-ai-arena-analysis-run44882874637-8w-0l-undefeated-sweep" aria-label="Link to section">#</a></h2>
+<h3 id="11-cumulative-loop-37-ltxmxpzue45b61eb-prod-record-shatters-every-build-in-history">1.1 Cumulative Loop 37 (<code>ltxmxpzu_e45b61eb</code>) Prod Record — Shatters Every Build in History <a class="anchor" href="#11-cumulative-loop-37-ltxmxpzue45b61eb-prod-record-shatters-every-build-in-history" aria-label="Link to section">#</a></h3>
+<ul><li><strong>Total External (<code>n=33</code>):</strong> <strong><code>22W-11L-0T (66.7% WR — +12.7pp over prior ATH </code>73c70041<code> 54.0%!)</code></strong>, <strong><code>0.79x</code> Trade</strong>, <strong><code>2.89%</code> ATL SB</strong>, <code>0</code> Ties!</li><li><strong>Real Played External (<code>n=30</code>, excl. <code>3</code> <code>0.1s</code> <code>Stand</code> opp crashes):</strong> <strong><code>19W-11L-0T (63.3% WR)</code></strong>, <code>3.42ms</code> avg step, <code>3.18%</code> SB, <code>0.79x</code> Trade!</li><li><strong>ALL 4 Live Bots &gt; <code>57%</code> WR &amp; Surging in Live ELO (<code>live_status.txt</code>, 2026-11-21 08:05Z):</strong> | Bot | Live ELO (Δ since 04:45Z) | Real External Record | WR% | SB% | Trade | | :--- | :---: | :---: | :---: | :---: | :---: | | <strong><code>Mothman-T (#1459)</code></strong> | <strong><code>1260</code> (<code>+16</code>!)</strong> | <code>5W-2L-0T</code> | <strong><code>71.4%</code></strong> | <strong><code>1.36%</code></strong> | <strong><code>1.40x</code></strong> | | <strong><code>Mothman-X (#1461)</code></strong> | <strong><code>1266</code> (<code>+4</code>)</strong> | <code>5W-3L-0T</code> (<code>8-3</code> all) | <strong><code>62.5%</code></strong> | <code>3.15%</code> | <code>0.78x</code> | | <strong><code>Mothman-Z (#1458)</code></strong> | <strong><code>1236</code> (<code>+17</code>!)</strong> | <code>5W-3L-0T</code> | <strong><code>62.5%</code></strong> | <code>4.28%</code> | <code>0.62x</code> | | <strong><code>Mothman-P (#1460)</code></strong> | <strong><code>1280</code> (<code>+5</code>, NEW HIGH!)</strong> | <code>4W-3L-0T</code> | <strong><code>57.1%</code></strong> | <code>3.77%</code> | <code>0.61x</code> |</li><li><strong>Live Prod North-vs-South (<code>n=30</code> real):</strong> <strong>NORTH <code>13W-6L (68.4% WR, 3.24% SB, 0.77x)</code></strong> vs <strong>SOUTH <code>6W-5L (54.5% WR, 3.07% SB, 0.82x)</code></strong> — <code>7</code> of the <code>8</code> new wins in <code>run_44882874637</code> were on <code>NW</code>/<code>NE</code> North spawns!</li><li><strong>Zero New Prod Losses in <code>run_44882874637</code> (<code>8W-0L</code> ext + <code>1</code> SP):</strong><ul><li><code>#5138723</code> <code>Mothman-T vs GhostProtocol</code> <code>[NE]</code>: <strong>WIN <code>1.53x</code></strong> (<code>SB 2.0%</code>, <code>22</code> Tanks + <code>23</code> Vikings, <code>0/77</code> SCVs lost!)</li><li><code>#5138618</code> <code>Mothman-Z vs MetaScoreCritic</code> <code>[NE]</code>: <strong>WIN</strong> (<code>SB 1.9%</code>, <code>94</code> Corruptors + <code>71</code> Hydras killed <code>4/4</code> Tempests!)</li><li><code>#5138569</code> <code>Mothman-Z vs Myztery (1376)</code> <code>[SE]</code>: <strong>WIN <code>3.16x</code></strong> (<code>SB 3.0%</code>, <code>151</code> Lings + <code>35</code> Roaches + <code>19</code> Hydras!)</li><li><strong><code>3-0</code> <code>NW</code> North Sweep of <code>Kazham</code></strong>: <code>#5138848</code> T <code>2.39x</code> (<code>SB 1.1%</code>, killed <code>206/206</code> Lings), <code>#5138849</code> P <code>1.51x</code> (<code>SB 2.7%</code>), <code>#5138850</code> X(Z) <code>1.58x</code> (<code>SB 3.3%</code>).</li><li><code>#5138631</code> P &amp; <code>#5138604</code> Z vs <code>Positive_Null</code> <code>[NW]</code>: <strong>WIN <code>15.5x</code></strong> each (<code>0</code> lost in <code>#5138631</code>).</li><li><em>(Note: <code>Mothman-Z</code> <code>#5138618</code>/<code>#5138604</code>/<code>#5138569</code> still built <code>9–13</code> <code>OverlordTransport</code>s in L37 — already capped in Loop 40!)</em></li></ul></li><li><strong><code>4B</code> Prod Map × Spawn Outliers (All-Time <code>n=373</code>):</strong> Unchanged historical pre-L37 skew (<code>Ultralove NE vs SW +22.8pp z=+2.06</code>, <code>TvT|Pylon NW vs SE -50pp z=-1.69</code>); live L37 itself is <code>68.4%</code> North vs <code>54.5%</code> South!</li></ul>
+<hr />
+<h2 id="2-loop-40-forensics-gt-exact-root-causes-for-loop-41">2. Loop 40 Forensics -&gt; Exact Root Causes for Loop 41 <a class="anchor" href="#2-loop-40-forensics-gt-exact-root-causes-for-loop-41" aria-label="Link to section">#</a></h2>
+<h3 id="21-ladder-targets-04-pvt-h2h-75-pvp-who-tvt0tank-spiredrop-72-12poolbot-wallties">2.1 Ladder Targets (<code>#04 PvT</code> H2H, <code>#75 PvP who</code>, <code>TvT0Tank</code>, <code>SpireDrop</code>, <code>#72 12PoolBot</code>, <code>WallTies</code>) <a class="anchor" href="#21-ladder-targets-04-pvt-h2h-75-pvp-who-tvt0tank-spiredrop-72-12poolbot-wallties" aria-label="Link to section">#</a></h3>
+<ol><li><strong><code>#04 PvT</code> H2H (<code>0.14x</code> — SOLE H2H loss out of 6):</strong><ul><li>Even at <code>m06</code> (<code>W=45/41</code>, <code>A=1,350/1,650</code>), yet P1 built <strong>ZERO <code>RoboticsBay</code> / ZERO <code>Colossus</code></strong> (only <code>3</code> Immortals <code>@370s</code> + <code>14</code> Stalkers + <code>11</code> Zealots) vs L37&#x27;s <code>50</code> Marines + <code>14</code> Marauders + <code>7</code> Medivacs + <code>7</code> Tanks!</li><li><strong>Root Cause:</strong> P1&#x27;s gas hovered at <code>90–102G</code> (<code>m06–m08</code>), staying below <code>protoss-midgame-robo-bay-due?</code>&#x27;s <code>125G</code> threshold (raised in <code>#907</code>), so Stalker/Immortal gas spending prevented <code>RoboticsBay</code> (<code>150M/150G</code>) from ever starting!</li></ul></li><li><strong><code>#75 PvP vs who</code> (<code>0.13x</code> — SOLE remaining <code>CloakLoss</code> across ALL 84 matches!):</strong><ul><li><strong><code>Observer:2</code> finished at <code>208s</code> (<code>3:28</code>) — <code>30s</code> BEFORE <code>who</code>&#x27;s <code>5</code> Dark Templars arrived (<code>238s</code>)</strong>, and <strong><code>0</code> Observers died!</strong></li><li><strong>Root Cause:</strong> Both Observers were scouting mid-map instead of hovering over our Natural/Main mineral line while <code>who</code>&#x27;s <code>4</code> Warp Prisms (<code>@210s</code>) dropped <code>5</code> DTs (<code>Probe: 30 -&gt; 3</code> in 2 min; only <code>4</code> Stalkers + <code>1</code> Zealot!).</li></ul></li><li><strong><code>TvT0Tank</code> (<code>#53 zig-reapers</code>, <code>#56 Mulebot</code>, <code>#62 SmoothBrain</code>):</strong><ul><li><code>#62 SmoothBrain</code> (<code>0.17x</code>, <code>47</code> enemy Tanks <code>@237s</code>): We built <strong><code>4</code> Factories starting <code>@156s</code></strong>, yet <code>FactoryTechLab</code> didn&#x27;t start until <strong><code>319s</code> (<code>163s</code> late!!)</strong> -&gt; only <code>1</code> Tank <code>@462s</code>! Need immediate <code>factory-techlab</code> attachment on Factory #1 before building Factories #2–#4!</li><li><code>#53 zig-reapers</code> (<code>25</code> Reapers <code>@122s</code>, <code>0</code> killed) &amp; <code>#56 Mulebot</code> (<code>W=5/23</code> at <code>m04</code> vs Marine push): early Terran Reaper/Marine bunker + Hellion/Cyclone mineral-line defense.</li></ul></li><li><strong><code>SpireDrop</code> (<code>#46</code> WIN, <code>#58</code> WIN <code>5.65x</code>, <code>#49</code> Thssprtssbt <code>0.20x</code>, <code>#73</code> who <code>0.16x</code>):</strong><ul><li><strong>HUGE WIN on <code>#73 ZvP who</code>:</strong> Loop 40 killed <strong><code>6/6</code> Dark Templars</strong> (<code>3</code> Spores <code>@253s</code> + <code>2</code> Overseers <code>@281s</code> -&gt; <strong>ZERO Zerg CloakLosses!</strong>). Then our <code>Lair</code> died (<code>Lair:1(-1)</code> in BOTH <code>#73</code> and <code>#49</code>!) and was not immediately re-morphed at remaining Hatchery when <code>who</code>&#x27;s <code>13</code> Tempests (<code>@435s</code>) / <code>Thssprtssbt</code>&#x27;s <code>4</code> Tempests (<code>@486s</code>) arrived!</li></ul></li><li><strong><code>#72 PvZ 12PoolBot</code> (<code>0.06x</code>, <code>3:33</code>):</strong> <code>m02</code> <code>Bank=130M/88G</code>, only <code>2</code> Zealots (<code>@127s</code>) vs <code>34</code> Lings (<code>@78s</code>) — Protoss is still mining <code>88G</code> early vs 12-Pool instead of pulling off gas to Chrono continuous Zealots + <code>ShieldBattery</code> wall!</li><li><strong><code>WallTies</code> (<code>#10/#11/#34/#36/#44</code>):</strong> <code>#44 T v QueenBot</code> was a <strong>crushing <code>3.33x</code> winning tie</strong> (<code>A=8,875/1,150</code>, <code>26k</code> killed vs <code>8k</code> lost — just ran out of 10m host wall time at <code>16:43</code>!); <code>#10/#11</code> (<code>puck</code>) &amp; <code>#34/#36</code> (<code>AxeFighter</code>) also hit 10m host wall cap (<code>17m–20m</code> game time).</li></ol>
+<h3 id="22-exact-line-level-root-causes-for-final-927-arena-20-flips-p15-r02r05-e02e04">2.2 Exact Line-Level Root Causes for Final <code>#927</code> Arena 2.0 Flips (<code>p15</code>, <code>r02</code>/<code>r05</code>, <code>e02..e04</code>) <a class="anchor" href="#22-exact-line-level-root-causes-for-final-927-arena-20-flips-p15-r02r05-e02e04" aria-label="Link to section">#</a></h3>
+<ol><li><strong><code>p15</code> DT Blink PF Snipe (<code>0.32x</code> Dummy / <code>0.18x</code> SP — Staggered Lead-2 Blink):</strong><ul><li><strong>Exact Bug (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/tactics/pro-spellcaster-micro.rkt#L4862-L4884" target="_blank" rel="noopener noreferrer">pro-spellcaster-micro.rkt</a>):</strong> Each DT checks <code>(&gt; d-slot SHADOW-STRIDE-MAX-RANGE)</code> <strong>individually</strong>, so the first 2–3 DTs blink onto the PF alone and get deleted by Turret/Bio/Tanks while 20+ trailing DTs are still flanking!</li><li><strong>4-Line Fix:</strong> Compute <code>ready-in-range-cnt</code> (<code>&lt;= 7.65t</code> of assigned N/S/E PF rim slot). Hold the ENTIRE squad on cloaked flanking <code>move (16)</code> until <strong><code>ready-in-range-cnt &gt;= max(4, floor(0.70 * ready-tot))</code></strong> (~19/27 DTs simultaneously in blink range!), then fire <strong>ONE synchronized 20+-DT <code>ShadowStride (2700)</code> alpha-strike</strong> onto the N/S/E PF rim (<code>20 * 45 = 900</code> dmg/volley -&gt; PF dead in <code>&lt; 2s</code>!).</li></ul></li><li><strong><code>r02</code> (<code>3666</code>: <code>73</code>/<code>146</code>) &amp; <code>r05</code> (<code>3666</code>: <code>47</code>/<code>62</code>, SP <code>3685</code>: <code>10</code>) — STILL RED (<code>0.38–0.50x</code>):</strong><ul><li><strong>Smoking Gun #1 (<code>3666</code> Gather Leak — <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/sc2-protobuf-ws.rkt#L9120-L9134" target="_blank" rel="noopener noreferrer">sc2-protobuf-ws.rkt</a>, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/sc2-protobuf-ws.rkt#L9766-L9849" target="_blank" rel="noopener noreferrer">L9766-L9849</a>):</strong> Whenever a fighting worker kills its target Probe (<code>orders == &#x27;()</code>) OR skips re-issuing <code>23</code> for 1 frame (<code>unit-already-executing-order?</code>), <code>auto-saturate-workers</code> immediately sees it in <code>idle-workers</code> (<code>L9130</code>) and emits <strong><code>3666</code> (<code>HARVEST_GATHER</code>)</strong>, pulling defenders off combat every few frames!</li><li><strong>Smoking Gun #2 (<code>r05</code> SP <code>3685:10</code> — <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt#L7538" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a>):</strong> <code>heavy-pure-worker-allin?</code> requires <code>&gt;= 10</code> enemy workers; mid-fight in <code>r05</code> SP, once 6 enemy Probes died (<code>9 &lt; 10</code>!), <code>heavy-pure-worker-allin?</code> <strong>turned OFF</strong>, re-enabling SCV <code>3685</code> repair + <code>3666</code> drill!</li><li><strong>Fix:</strong> (a) In <code>sc2-protobuf-ws.rkt</code>, suppress <code>auto-saturate-workers</code> <code>idle-workers</code> <code>3666</code> gather whenever <code>&gt;= 6</code> enemy workers are within <code>&lt;= 14t</code> of a ready TownHall and <code>food-army &lt; 4</code> (or worker tag is in active rush-fighting set); (b) in <code>bot-runtime.rkt:7538</code>, latch <code>heavy-pure-worker-allin?</code> until <code>&lt; 3</code> enemy rush workers remain (or lower active threshold to <code>&gt;= 6</code> pure enemy workers with <code>0</code> enemy combat units!).</li></ul></li><li><strong><code>e02</code>/<code>e03</code>/<code>e04</code> (<code>econ-harass</code>):</strong> <code>e01</code> is now <strong><code>2/2</code> PASS (<code>445M</code>/<code>495M</code>)</strong>, <code>e02</code> SP PASS (<code>635M</code>), <code>e03</code> SP <code>+300M</code> (<code>wlost=2</code>), <code>e04</code> Dummy <code>+215M</code> (<code>wlost 6-&gt;3</code>). Remaining gaps: <code>e02</code> Dummy (<code>wlost=6</code> vs 2 Reapers — earlier Drone evac at <code>&lt;= 28</code> HP + Queen priority), <code>e03</code> Dummy (<code>wlost=17</code> vs 3 Adepts — keep SCVs away from Adept bounce vector rather than clumping on 1 patch), <code>e04</code> SP (<code>wlost=15</code> vs 6 Lings — faster <code>6</code>-Probe surround + Zealot bodyblock).</li></ol>
+<hr />
+<h2 id="3-strictly-disjoint-loop-41-blueprint-zero-file-overlap-100-generalizable">3. Strictly Disjoint Loop 41 Blueprint (Zero File Overlap, 100% Generalizable) <a class="anchor" href="#3-strictly-disjoint-loop-41-blueprint-zero-file-overlap-100-generalizable" aria-label="Link to section">#</a></h2>
+<h3 id="stream-1-runtime-author">Stream 1 — <code>@runtime-author</code> <a class="anchor" href="#stream-1-runtime-author" aria-label="Link to section">#</a></h3>
+<p><strong>Owned Files (Exclusive):</strong> <code>lib/tactics/pro-spellcaster-micro.rkt</code>, <code>lib/bot-runtime.rkt</code>, <code>tests/l41-tactics-runtime-test.rkt</code></p>
+<ol><li><strong><code>L41-P0-1a</code> (<code>p15</code> Synchronized 20+-DT Squad Blink — <code>pro-spellcaster-micro.rkt:4860–4885</code>):</strong> Hold flanking cloaked <code>move (16)</code> until <code>&gt;= 70%</code> of ready DTs are within <code>&lt;= 7.65t</code> of their N/S/E PF rim slots, then fire ONE synchronized <code>ShadowStride (2700)</code> alpha-strike (<code>p15</code> <code>0.32x -&gt; PF KO WIN!</code>).</li><li><strong><code>L41-P0-1b</code> (<code>r02</code>/<code>r05</code> Pure Worker-Rush Latch — <code>bot-runtime.rkt:7538</code>):</strong> Latch <code>heavy-pure-worker-allin?</code> once triggered (<code>&gt;= 10</code> -&gt; stays active until <code>&lt; 3</code> pure enemy workers remain, or trigger at <code>&gt;= 6</code> pure enemy workers with <code>food-army &lt; 2</code>), eliminating <code>r05</code> SP&#x27;s mid-fight <code>3685:10</code> repair relapse!</li><li><strong><code>L41-P0-1c</code> (<code>#75 PvP who</code> Home Observer Leash — <code>bot-runtime.rkt</code>):</strong> Whenever enemy <code>DarkTemplar</code>/<code>WarpPrism</code>/<code>Banshee</code> enters <code>&lt;= 20t</code> of an owned TownHall (or <code>dark-shrine</code> is scouted), immediately pull/leash <code>Observer #1</code> directly over the threatened Nexus/enemy cloak cluster instead of letting both Observers wander mid-map (<code>CloakLoss 1 -&gt; 0/84</code>!).</li><li><strong><code>L41-P0-1d</code> (<code>e02</code>/<code>e03</code>/<code>e04</code> Econ-Harass Final Polish — <code>bot-runtime.rkt:8563–8855</code>):</strong> <code>e02</code> <code>&lt;= 28</code> HP Drone mineral-walk slide vs Reapers (<code>wlost 6 -&gt; &lt;= 2</code>); <code>e03</code> scatter SCVs across 2–3 opposite-side patches vs 3 Adepts (<code>Dummy wlost 17 -&gt; &lt;= 4</code>); <code>e04</code> immediate <code>6</code>-Probe + Zealot surround vs 6 Speedlings (<code>SP wlost 15 -&gt; &lt;= 4</code>).</li></ol>
+<h3 id="stream-2-belief-author">Stream 2 — <code>@belief-author</code> <a class="anchor" href="#stream-2-belief-author" aria-label="Link to section">#</a></h3>
+<p><strong>Owned Files (Exclusive):</strong> <code>lib/priority-macro-brain.rkt</code>, <code>tests/run-all-tests.rkt</code>, scratch <code>verify_wave41_belief.rkt</code></p>
+<ol><li><strong><code>L41-P0-2a</code> (<code>#04 PvT</code> H2H Sole Loss — <code>RoboticsBay</code>/<code>Colossus</code> Escrow):</strong> Reserve <code>150G</code> for <code>RoboticsBay</code> (<code>u &gt;= 590</code>) on 2-base PvT once <code>RoboticsFacility</code> is ready &amp; <code>army &gt;= 16</code> (<code>&gt;= 1</code> Immortal) instead of waiting for <code>125G</code> unspent float while Stalkers drain gas (<code>#04</code> <code>0.14x -&gt; WIN</code> -&gt; <strong><code>6W-0L</code> H2H!</strong>).</li><li><strong><code>L41-P0-2b</code> (<code>TvT0Tank</code> <code>#62</code> FactoryTechLab Stall + <code>#53</code> Reaper Defense):</strong> Force <code>factory-techlab</code> attachment on Factory #1 (<code>u &gt;= 650</code>) strictly BEFORE building Factory #2–#4 in TvT (<code>#62</code> built 4 Factories <code>@156s</code> with <code>0</code> TechLabs until <code>319s</code>!), plus immediate <code>hellion</code>/<code>reaper</code>/Bunker defense when <code>&gt;= 3</code> enemy Reapers are scouted (<code>#53</code>).</li><li><strong><code>L41-P0-2c</code> (<code>SpireDrop</code> <code>#49/#73</code> Post-Lair-Loss Recovery + <code>#72</code> 12-Pool Spend):</strong> Immediately re-morph <code>lair</code> (<code>u &gt;= 680</code>) on any surviving Hatchery when enemy Stargate/Tempest/VoidRay is confirmed and <code>lair == 0</code> (<code>#49/#73</code>); pause Assimilator mining / prioritize continuous <code>zealot</code> + <code>shield-battery</code> when early 12-Pool Lings (<code>&lt; 2:30</code>) are scouted (<code>#72</code>).</li></ol>
+<h3 id="stream-3-wire-author">Stream 3 — <code>@wire-author</code> <a class="anchor" href="#stream-3-wire-author" aria-label="Link to section">#</a></h3>
+<p><strong>Owned Files (Exclusive):</strong> <code>lib/sc2-protobuf-ws.rkt</code>, <code>tests/sc2-protobuf-ws-test.rkt</code></p>
+<ol><li><strong><code>L41-P0-3a</code> (<code>r02</code>/<code>r05</code> <code>3666</code> Auto-Saturate Suppression — <code>sc2-protobuf-ws.rkt:9120–9135, 9766–9849</code>):</strong> During an active worker rush (<code>&gt;= 6</code> enemy workers within <code>&lt;= 14.0t</code> of a ready TownHall AND <code>food-army &lt; 4</code>), suppress <code>auto-saturate-workers</code> <code>idle-workers</code> <code>3666</code> (<code>HARVEST_GATHER</code>) emission so fighting Drones/SCVs NEVER get pulled back to minerals on 1-frame kill transitions (<code>3666</code> <code>47–146 -&gt; &lt; 10</code>, flipping BOTH <code>r02</code> &amp; <code>r05</code> RED -&gt; GREEN!). Add wire unit tests in <code>tests/sc2-protobuf-ws-test.rkt</code>.</li></ol></main></div>
+<footer class="site-footer">
+  <div>Mothman · StarCraft II bots on AI Arena</div>
+  <div>Updated 2026-11-21 11:09 UTC · <a href="https://github.com/sticklane/mothman-sc2-bot/releases" target="_blank" rel="noopener noreferrer">Replay Archives</a></div>
+</footer>
+
+<script>
+(function() {
+  // 1. Mobile menu toggle
+  const toggle = document.getElementById('nav-toggle');
+  const drawer = document.getElementById('mobile-drawer');
+  if (toggle && drawer) {
+    toggle.addEventListener('click', function() {
+      const open = drawer.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.textContent = open ? 'Close' : 'Menu';
+    });
+  }
+
+  // 2. Auto-pause other videos when one starts playing
+  document.addEventListener('play', function(e) {
+    if (e.target && e.target.tagName === 'VIDEO') {
+      document.querySelectorAll('video').forEach(function(v) {
+        if (v !== e.target && !v.paused) v.pause();
+      });
+    }
+  }, true);
+
+  // 3. Image Lightbox Modal
+  const imgs = Array.from(document.querySelectorAll('img.clip-img'));
+  if (imgs.length) {
+    const lb = document.createElement('div');
+    lb.className = 'modal-overlay';
+    lb.innerHTML =
+      '<div class="modal-controls">' +
+        '<button class="modal-btn" id="lb-prev">Prev</button>' +
+        '<button class="modal-btn" id="lb-next">Next</button>' +
+        '<a class="modal-btn" id="lb-raw" target="_blank" rel="noopener noreferrer">Open file</a>' +
+        '<button class="modal-btn" id="lb-close">Close</button>' +
+      '</div>' +
+      '<img id="lb-img" alt="" />' +
+      '<div class="modal-caption" id="lb-cap"></div>';
+    document.body.appendChild(lb);
+    const lbImg = document.getElementById('lb-img');
+    const lbCap = document.getElementById('lb-cap');
+    const lbRaw = document.getElementById('lb-raw');
+    let cur = 0;
+    function show(i) {
+      cur = (i + imgs.length) % imgs.length;
+      const src = imgs[cur].getAttribute('data-lightbox-src') || imgs[cur].src;
+      const alt = imgs[cur].getAttribute('data-lightbox-alt') || imgs[cur].alt || '';
+      lbImg.src = src;
+      lbImg.alt = alt;
+      lbRaw.href = src;
+      lbCap.textContent = (cur + 1) + ' of ' + imgs.length + (alt ? ' — ' + alt : '');
+      lb.classList.add('open');
+    }
+    function closeLb() { lb.classList.remove('open'); }
+    imgs.forEach(function(im, idx) { im.addEventListener('click', function() { show(idx); }); });
+    document.getElementById('lb-prev').addEventListener('click', function(e) { e.stopPropagation(); show(cur - 1); });
+    document.getElementById('lb-next').addEventListener('click', function(e) { e.stopPropagation(); show(cur + 1); });
+    document.getElementById('lb-close').addEventListener('click', function(e) { e.stopPropagation(); closeLb(); });
+    lb.addEventListener('click', function(e) { if (e.target === lb) closeLb(); });
+    document.addEventListener('keydown', function(e) {
+      if (!lb.classList.contains('open')) return;
+      if (e.key === 'Escape') closeLb();
+      else if (e.key === 'ArrowRight') show(cur + 1);
+      else if (e.key === 'ArrowLeft') show(cur - 1);
+    });
+  }
+
+  // 4. Video Theater Modal (delegated for both report videos and dynamic gallery cards)
+  const vm = document.createElement('div');
+  vm.className = 'modal-overlay';
+  vm.innerHTML =
+    '<div class="modal-controls">' +
+      '<a class="modal-btn" id="vm-raw" target="_blank" rel="noopener noreferrer">Download MP4</a>' +
+      '<button class="modal-btn" id="vm-close">Close</button>' +
+    '</div>' +
+    '<video id="vm-video" controls playsinline preload="metadata"></video>' +
+    '<div class="modal-caption" id="vm-cap"></div>';
+  document.body.appendChild(vm);
+  const vmVideo = document.getElementById('vm-video');
+  const vmCap = document.getElementById('vm-cap');
+  const vmRaw = document.getElementById('vm-raw');
+  function closeVm() {
+    vmVideo.pause();
+    vmVideo.removeAttribute('src');
+    vmVideo.load();
+    vm.classList.remove('open');
+  }
+  document.addEventListener('click', function(e) {
+    const btn = e.target.closest('.video-theater-btn');
+    if (!btn) return;
+    const src = btn.getAttribute('data-video-src') || '';
+    const poster = btn.getAttribute('data-video-poster') || '';
+    const title = btn.getAttribute('data-video-title') || '';
+    if (!src) return;
+    document.querySelectorAll('video').forEach(function(v) { if (!v.paused) v.pause(); });
+    vmVideo.src = src;
+    if (poster) vmVideo.poster = poster; else vmVideo.removeAttribute('poster');
+    vmRaw.href = src;
+    vmCap.textContent = title;
+    vm.classList.add('open');
+    vmVideo.play().catch(function() {});
+  });
+  document.getElementById('vm-close').addEventListener('click', function(e) { e.stopPropagation(); closeVm(); });
+  vm.addEventListener('click', function(e) { if (e.target === vm) closeVm(); });
+  document.addEventListener('keydown', function(e) {
+    if (vm.classList.contains('open') && e.key === 'Escape') closeVm();
+  });
+})();
+</script>
+
+
+
+</body>
+</html>

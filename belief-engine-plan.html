@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Scouting &amp; Strategy Inference — Mothman</title>
+  <style>
+:root {
+  --bg: #FAF9F5;
+  --surface: #F4F2EA;
+  --surface-alt: #EFECE3;
+  --surface-input: #FFFFFF;
+  --border: #E5E2D8;
+  --border-strong: #262522;
+  --ink: #141413;
+  --ink-2: #4A4945;
+  --muted: #7A7870;
+  --accent: #C4633E;
+  --accent-hover: #A34E2E;
+  --slate: #4A6B82;
+  --win: #2F6B48;
+  --loss: #A83E32;
+  --warn: #A35B1F;
+  --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16.5px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 3px;
+}
+a:hover {
+  color: var(--accent-hover);
+  text-decoration-color: var(--accent-hover);
+}
+.num, table { font-variant-numeric: tabular-nums; }
+
+/* Header — static document flow, minimal, never blocks mobile viewport */
+.site-header {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+.header-inner {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.wordmark {
+  font-family: var(--serif);
+  font-size: 1.18rem;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.wordmark:hover { color: var(--ink); text-decoration: none; }
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+}
+.nav-link {
+  font-size: 0.9rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+  padding: 0.2rem 0;
+  border-bottom: 2px solid transparent;
+  text-decoration: none;
+}
+.nav-link:hover { color: var(--ink); text-decoration: none; }
+.nav-link.active {
+  color: var(--ink);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.nav-toggle {
+  display: none;
+  background: transparent;
+  border: 0;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.35rem 0.25rem;
+  cursor: pointer;
+}
+.nav-toggle:hover { color: var(--ink); }
+
+.mobile-drawer {
+  display: none;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 0.4rem 1.25rem 0.8rem;
+}
+.mobile-drawer.open { display: block; }
+.mobile-drawer a {
+  display: block;
+  padding: 0.6rem 0;
+  color: var(--ink);
+  font-size: 0.96rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.mobile-drawer a:last-child { border-bottom: 0; }
+.mobile-drawer a.active { color: var(--accent); font-weight: 600; }
+
+/* Page containers — centered editorial essay column with wider figure breakouts */
+.page-wrap {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4.75rem;
+}
+.page-grid {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 2.25rem 1.25rem 4.75rem;
+  display: grid;
+  grid-template-columns: 215px minmax(0, 1fr);
+  gap: 2.75rem;
+}
+.content { min-width: 0; }
+.prose-col {
+  max-width: 680px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.wide-col {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.prose { max-width: 680px; }
+
+/* Sidebar TOC (Desktop) + Collapsible TOC (Mobile) */
+.toc-sidebar {
+  position: sticky;
+  top: 1.5rem;
+  align-self: start;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  padding-right: 0.85rem;
+  border-right: 1px solid var(--border);
+  font-size: 0.84rem;
+}
+.toc-heading {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  margin: 0 0 0.65rem;
+}
+.toc-list { list-style: none; padding: 0; margin: 0; }
+.toc-list li { margin: 0.44rem 0; line-height: 1.38; }
+.toc-list a { color: var(--ink-2); text-decoration: none; }
+.toc-list a:hover { color: var(--accent); }
+.toc-latest {
+  display: block;
+  font-weight: 600;
+  color: var(--accent);
+  padding-bottom: 0.6rem;
+  margin-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.latest-jump-bar {
+  font-size: 0.9rem;
+  margin: -0.2rem 0 1.25rem;
+}
+.toc-mobile { display: none; margin-bottom: 1.5rem; }
+
+/* Typography */
+h1, h2, h3 {
+  font-family: var(--serif);
+  color: var(--ink);
+  font-weight: 500;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+}
+h1 {
+  font-size: 2.3rem;
+  margin: 0 0 0.7rem;
+}
+h2 {
+  font-size: 1.5rem;
+  margin: 3.1rem 0 0.85rem;
+}
+.page-grid h2 {
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+h3 {
+  font-size: 1.16rem;
+  margin: 2rem 0 0.55rem;
+  font-weight: 600;
+}
+h4 {
+  font-family: var(--sans);
+  font-size: 0.98rem;
+  font-weight: 600;
+  margin: 0 0 0.45rem;
+  line-height: 1.38;
+  color: var(--ink);
+}
+p { margin: 0 0 1.1rem; color: var(--ink-2); }
+strong { color: var(--ink); font-weight: 600; }
+ul, ol { margin: 0.5rem 0 1.15rem; padding-left: 1.3rem; color: var(--ink-2); }
+li { margin: 0.4rem 0; }
+.content > p, .content > ul, .content > ol, .content > blockquote { max-width: 680px; }
+.anchor {
+  color: var(--muted);
+  opacity: 0;
+  font-family: var(--sans);
+  font-size: 0.76em;
+  margin-left: 0.3rem;
+  font-weight: 400;
+  text-decoration: none;
+}
+h1:hover .anchor, h2:hover .anchor, h3:hover .anchor { opacity: 0.65; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+
+/* Editorial Opening (Front Page & Subpages) */
+.eyebrow {
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+.masthead {
+  margin-bottom: 2.2rem;
+}
+.masthead h1 {
+  font-size: 2.55rem;
+  margin: 0 0 0.65rem;
+}
+.lead {
+  color: var(--ink-2);
+  font-size: 1.08rem;
+  line-height: 1.62;
+  margin: 0;
+}
+.section-rule {
+  border-top: 1px solid var(--border);
+  padding-top: 2.4rem;
+  margin-top: 2.8rem;
+}
+.section-kicker {
+  font-family: var(--serif);
+  font-size: 1.48rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 0 0 0.75rem;
+}
+
+/* Inline code & code blocks */
+code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--surface);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  color: var(--ink);
+}
+.code-block {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 1.1rem 0;
+  overflow-x: auto;
+}
+.code-block pre { margin: 0; padding: 0.95rem 1.1rem; }
+.code-block code { background: none; padding: 0; font-size: 0.84rem; }
+.code-lang {
+  position: absolute; top: 6px; right: 10px;
+  font-size: 0.7rem; text-transform: uppercase; color: var(--muted);
+}
+.mermaid-wrap {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 1.1rem;
+  margin: 1.25rem 0;
+  overflow-x: auto;
+}
+
+/* Editorial Callouts */
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  border-radius: 0 6px 6px 0;
+  padding: 0.95rem 1.2rem;
+  margin: 1.35rem 0;
+  max-width: 680px;
+}
+.callout-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.3rem;
+}
+.callout-warning, .callout-caution { border-left-color: var(--warn); }
+.callout-warning .callout-label, .callout-caution .callout-label { color: var(--warn); }
+.callout-body > p:first-child { margin-top: 0; }
+.callout-body > p:last-child { margin-bottom: 0; }
+
+blockquote {
+  margin: 1.25rem 0;
+  padding: 0.25rem 0 0.25rem 1.15rem;
+  border-left: 2px solid var(--accent);
+  color: var(--ink-2);
+}
+
+/* Collapsible Sections (<details>) */
+details {
+  margin: 1.4rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 0;
+}
+summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--ink);
+  font-size: 0.95rem;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+summary::-webkit-details-marker { display: none; }
+summary::before {
+  content: "+";
+  display: inline-block;
+  width: 1rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-weight: 400;
+}
+details[open] > summary::before { content: "−"; }
+details[open] > summary { margin-bottom: 0.85rem; }
+
+/* Tufte Horizontal-Rule Tables */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0.9rem 0 1.1rem;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+}
+thead th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 0.65rem 0.7rem;
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+  background: transparent;
+}
+td {
+  padding: 0.68rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--ink-2);
+}
+tbody tr:last-child td { border-bottom: 0; }
+.table-note {
+  font-size: 0.87rem;
+  color: var(--muted);
+  margin: 0.6rem 0 0;
+  line-height: 1.55;
+}
+.t-win { color: var(--win); font-weight: 600; }
+.t-loss { color: var(--loss); font-weight: 600; }
+.t-muted { color: var(--muted); }
+.nw { white-space: nowrap; }
+
+/* Responsive Stacked Mobile Standings (< 700px) */
+.standings-mobile {
+  display: none;
+  border-top: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
+  margin: 0.75rem 0 0.85rem;
+}
+.standing-row { padding: 0.78rem 0; border-bottom: 1px solid var(--border); }
+.standing-row:last-child { border-bottom: 0; }
+.standing-top { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
+.standing-bot { font-weight: 600; color: var(--ink); font-size: 0.98rem; }
+.standing-race { color: var(--muted); font-weight: 400; font-size: 0.88rem; }
+.standing-elo { font-weight: 600; font-size: 1rem; font-variant-numeric: tabular-nums; color: var(--ink); }
+.standing-stats { font-size: 0.87rem; color: var(--ink-2); margin-top: 0.16rem; font-variant-numeric: tabular-nums; }
+.standing-note { font-size: 0.87rem; color: var(--muted); margin: 0.28rem 0 0; line-height: 1.46; }
+
+/* Anthropic-Style Warm Sand Figures */
+.figure-block {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1.35rem 1.45rem 1.15rem;
+  margin: 1.5rem auto 1.75rem;
+  max-width: 780px;
+}
+.figure-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0 0 0.25rem;
+}
+.figure-title {
+  font-family: var(--serif);
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin: 0 0 0.75rem;
+  color: var(--ink);
+}
+.chart-svg { width: 100%; height: auto; display: block; }
+.figure-caption {
+  font-size: 0.86rem;
+  color: var(--ink-2);
+  margin: 0.75rem 0 0;
+  line-height: 1.52;
+}
+
+/* Clean Typographic Reading Lists */
+.doc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.65rem 0 1.85rem;
+  border-top: 1px solid var(--border);
+}
+.doc-item {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 0.25rem 1.75rem;
+  align-items: baseline;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--border);
+  margin: 0;
+}
+.doc-item-title {
+  font-family: var(--serif);
+  font-size: 1.02rem;
+  font-weight: 500;
+  display: inline-block;
+}
+.doc-item-desc {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--ink-2);
+  line-height: 1.52;
+}
+
+/* Replays & Video Figures */
+.clip-gallery { margin: 1.25rem 0 2rem; }
+.clip-gallery-grid, .featured-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.35rem;
+}
+.clip-card {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 1rem 1.05rem;
+  display: flex;
+  flex-direction: column;
+}
+.clip-index {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+.clip-figure { margin: 0.4rem 0 0; }
+.clip-img, .clip-video {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 6px;
+  background: #141413;
+}
+.clip-img { cursor: zoom-in; min-height: 150px; }
+.clip-figure figcaption {
+  font-size: 0.85rem;
+  color: var(--ink-2);
+  margin-top: 0.55rem;
+  line-height: 1.48;
+}
+.video-bar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.84rem;
+}
+.text-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: rgba(196, 99, 62, 0.32);
+  text-underline-offset: 2px;
+}
+.text-btn:hover { color: var(--accent-hover); text-decoration-color: var(--accent-hover); }
+.media-link {
+  font-size: 0.86rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Video Gallery Filter Controls */
+.gallery-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-end;
+  padding: 1rem 0 1.25rem;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  margin: 1.25rem 0 1.5rem;
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.filter-group label {
+  font-size: 0.74rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.filter-select, .filter-input {
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--surface-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.44rem 0.65rem;
+  min-width: 135px;
+}
+.filter-input { min-width: 210px; }
+.gallery-count {
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin: 0 0 1rem;
+}
+.gallery-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.3rem;
+}
+.show-more-wrap { text-align: center; margin-top: 1.75rem; }
+.editorial-btn {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 1.2rem;
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.editorial-btn:hover { background: var(--surface-alt); }
+
+/* Lightbox & Video Theater Modals */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(20, 20, 19, 0.92);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 1.25rem;
+}
+.modal-overlay.open { display: flex; }
+.modal-overlay img, .modal-overlay video {
+  max-width: 94vw;
+  max-height: 80vh;
+  border-radius: 6px;
+  background: #000;
+}
+.modal-caption {
+  color: #F4F2EA;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  text-align: center;
+  max-width: 820px;
+}
+.modal-controls {
+  position: fixed;
+  top: 1rem;
+  right: 1.25rem;
+  display: flex;
+  gap: 0.5rem;
+}
+.modal-btn {
+  background: #262522;
+  color: #FAF9F5;
+  border: 1px solid #44423C;
+  border-radius: 6px;
+  padding: 0.4rem 0.78rem;
+  cursor: pointer;
+  font-size: 0.86rem;
+  text-decoration: none;
+}
+.modal-btn:hover { background: #3B3934; color: #FFFFFF; text-decoration: none; }
+
+/* Footer */
+.site-footer {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1.6rem 1.25rem 3.25rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.84rem;
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+}
+
+@media (max-width: 1020px) {
+  .page-grid { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+  .toc-sidebar { display: none; }
+  .toc-mobile { display: block; }
+}
+@media (max-width: 820px) {
+  .clip-gallery-grid, .featured-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 799px) {
+  body { font-size: 15.5px; }
+  .header-inner { height: 50px; }
+  .nav-links { display: none; }
+  .nav-toggle { display: inline-block; }
+  .page-wrap, .page-grid { padding: 1.35rem 1rem 3.5rem; }
+  .masthead { margin-bottom: 1.45rem; }
+  .masthead h1 { font-size: 1.85rem; margin-bottom: 0.45rem; }
+  .lead { font-size: 0.98rem; line-height: 1.56; }
+  h1 { font-size: 1.7rem; }
+  h2, .section-kicker { font-size: 1.3rem; }
+  .section-rule { padding-top: 1.85rem; margin-top: 2.1rem; }
+  .figure-block { padding: 1.05rem 0.95rem 0.95rem; border-radius: 8px; }
+  .doc-item { grid-template-columns: minmax(0, 1fr); gap: 0.2rem; }
+  .filter-input { min-width: 0; width: 100%; }
+  .filter-group { flex: 1 1 140px; }
+}
+@media (max-width: 699px) {
+  .standings-desktop { display: none; }
+  .standings-mobile { display: block; }
+}
+</style>
+</head>
+<body>
+<header class="site-header"><div class="header-inner"><a class="wordmark" href="./index.html">Mothman</a><nav class="nav-links" aria-label="Primary"><a class="nav-link" href="./index.html">Ladder</a><a class="nav-link" href="./video-gallery.html">Replays</a><a class="nav-link" href="./loops-29-plus.html">Updates</a><a class="nav-link active" href="./index.html#technical-notes">Notes</a><a class="nav-link" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav><button type="button" class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-controls="mobile-drawer">Menu</button></div><nav class="mobile-drawer" id="mobile-drawer" aria-label="Mobile menu"><a class="" href="./index.html">Ladder</a><a class="" href="./video-gallery.html">Replays</a><a class="" href="./loops-29-plus.html">Updates</a><a class="active" href="./index.html#technical-notes">Notes</a><a class="" href="https://github.com/sticklane/mothman-sc2-bot" target="_blank" rel="noopener noreferrer">GitHub</a></nav></header>
+<div class="page-grid"><aside class="toc-sidebar" aria-label="Table of contents"><div class="toc-heading">Contents</div><ul class="toc-list"><li><a href="#1-era-by-era-ladder-comparison-317-external-games">1. Era-by-Era Ladder Comparison (317…</a></li><li><a href="#2-why-enemy-visible-fails-audit-of-the-6-opponent-knowledge-dimensions">2. Why enemy-visible Fails Audit of t…</a></li><li><a href="#3-other-concrete-deviations-from-our-design-found-in-recent-losses">3. Other Concrete Deviations From Our…</a></li><li><a href="#4-prioritized-architectural-recommendations">4. Prioritized Architectural Recommen…</a></li><li><a href="#5-implemented-holistic-opponent-world-model-amp-verification-summary">5. Implemented Holistic Opponent Worl…</a></li><li><a href="#6-14-loop-autonomous-local-parallel-sc2-iteration-campaign-amp-final-ship">6. 14-Loop Autonomous Local Parallel…</a></li><li><a href="#7-wave-15-15c-architectural-refinements-flexible-t3-amp-symmetry-agnostic-voronoi-territory">7. Wave 15  15c Architectural Refinem…</a></li><li><a href="#8-loops-1618-live-ai-arena-audit-action-budgetsiege0-breakthroughs-amp-live-ai-arena-ship-bf1043b7">8. Loops 16–18 Live AI Arena Audit, A…</a></li></ul></aside><main class="content"><details class="toc-mobile"><summary>Contents</summary><ul class="toc-list"><li><a href="#1-era-by-era-ladder-comparison-317-external-games">1. Era-by-Era Ladder Comparison (317…</a></li><li><a href="#2-why-enemy-visible-fails-audit-of-the-6-opponent-knowledge-dimensions">2. Why enemy-visible Fails Audit of t…</a></li><li><a href="#3-other-concrete-deviations-from-our-design-found-in-recent-losses">3. Other Concrete Deviations From Our…</a></li><li><a href="#4-prioritized-architectural-recommendations">4. Prioritized Architectural Recommen…</a></li><li><a href="#5-implemented-holistic-opponent-world-model-amp-verification-summary">5. Implemented Holistic Opponent Worl…</a></li><li><a href="#6-14-loop-autonomous-local-parallel-sc2-iteration-campaign-amp-final-ship">6. 14-Loop Autonomous Local Parallel…</a></li><li><a href="#7-wave-15-15c-architectural-refinements-flexible-t3-amp-symmetry-agnostic-voronoi-territory">7. Wave 15  15c Architectural Refinem…</a></li><li><a href="#8-loops-1618-live-ai-arena-audit-action-budgetsiege0-breakthroughs-amp-live-ai-arena-ship-bf1043b7">8. Loops 16–18 Live AI Arena Audit, A…</a></li></ul></details><h1 id="post-deploy-loss-forensics-amp-6-dimensional-opponent-belief-engine-design">Post-Deploy Loss Forensics &amp; 6-Dimensional Opponent Belief Engine Design <a class="anchor" href="#post-deploy-loss-forensics-amp-6-dimensional-opponent-belief-engine-design" aria-label="Link to section">#</a></h1>
+<div class="callout callout-important"><div class="callout-label">Key Takeaway</div><div class="callout-body"><p>Across <code>317</code> external AI Arena games through <code>#5132989</code> (<code>36</code> games on commit <code>49e1457a</code>), our macro rewrite <strong>improved base count (<code>2.38 -&gt; 3.64</code>), early workers (<code>W@4m: 19.5 -&gt; 25.2</code>), peak workers (<code>33.7 -&gt; 48.4</code>), and non-loss rate (<code>12.5% -&gt; 30.6%</code>)</strong>, <strong>but Combat Trade Efficiency collapsed (<code>2.32x -&gt; 0.56x</code>, and <code>0.01x–0.20x</code> in losses)</strong>. Our bots are losing (or tying at <code>45:00</code> on <code>11</code> bases) because single-frame/lack-of-observation tricks blind our army sizing and engagement decisions, and three specific escrow/tech-gating bugs still deviate from our macro design.</p></div></div>
+<hr />
+<h2 id="1-era-by-era-ladder-comparison-317-external-games">1. Era-by-Era Ladder Comparison (<code>317</code> External Games) <a class="anchor" href="#1-era-by-era-ladder-comparison-317-external-games" aria-label="Link to section">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Era</th><th style="text-align:left">Commit / Window</th><th style="text-align:center">Record (<code>W-L-T</code>)</th><th style="text-align:center">Win %</th><th style="text-align:center">Non-Loss %</th><th style="text-align:center">Avg Bases (Us/Opp)</th><th style="text-align:center"><code>W@4m</code> (Us/Opp)</th><th style="text-align:center"><code>W@6m</code> (Us/Opp)</th><th style="text-align:center">Peak W (Us/Opp)</th><th style="text-align:center"><strong>Trade Ratio (<code>Kill/Lost</code>)</strong></th></tr></thead><tbody><tr><td style="text-align:left"><strong>Era 2b (Pre-Regress)</strong></td><td style="text-align:left"><code>0da49f0d</code> (<code>Nov 15</code>, <code>n=45</code>, <code>~1256</code> ELO)</td><td style="text-align:center"><code>6-38-1</code></td><td style="text-align:center"><code>13.3%</code></td><td style="text-align:center"><code>15.6%</code></td><td style="text-align:center"><code>2.67 / 3.91</code></td><td style="text-align:center"><code>23.6 / 27.8</code></td><td style="text-align:center"><code>28.4 / 35.9</code></td><td style="text-align:center"><code>41.7 / 55.5</code></td><td style="text-align:center"><strong><code>1.67x</code></strong></td></tr><tr><td style="text-align:left"><strong>Era 3 (Regression)</strong></td><td style="text-align:left"><code>2c96a08d..f2427d06</code> (<code>Nov 16</code>, <code>n=80</code>)</td><td style="text-align:center"><code>4-70-6</code></td><td style="text-align:center"><code>5.0%</code></td><td style="text-align:center"><code>12.5%</code></td><td style="text-align:center"><code>2.38 / 3.45</code></td><td style="text-align:center"><code>19.5 / 28.0</code></td><td style="text-align:center"><code>18.7 / 34.0</code></td><td style="text-align:center"><code>33.7 / 48.1</code></td><td style="text-align:center"><code>0.51x</code></td></tr><tr><td style="text-align:left"><strong>Era 4 (Recovery Peak)</strong></td><td style="text-align:left"><code>ba89bfdb</code> (<code>Nov 17a</code>, <code>n=34</code>)</td><td style="text-align:center"><code>6-26-2</code></td><td style="text-align:center"><strong><code>17.6%</code></strong></td><td style="text-align:center"><code>23.5%</code></td><td style="text-align:center"><code>3.35 / 5.06</code></td><td style="text-align:center"><code>23.5 / 28.0</code></td><td style="text-align:center"><code>29.3 / 40.6</code></td><td style="text-align:center"><code>48.7 / 63.6</code></td><td style="text-align:center"><strong><code>2.32x</code></strong></td></tr><tr><td style="text-align:left"><strong>Era 5/6a</strong></td><td style="text-align:left"><code>77352e02</code> (<code>Nov 17b–18a</code>, <code>n=68</code>)</td><td style="text-align:center"><code>8-49-11</code></td><td style="text-align:center"><code>11.8%</code></td><td style="text-align:center"><code>27.9%</code></td><td style="text-align:center"><code>3.44 / 4.22</code></td><td style="text-align:center"><code>23.6 / 29.9</code></td><td style="text-align:center"><code>28.5 / 39.6</code></td><td style="text-align:center"><code>44.7 / 54.9</code></td><td style="text-align:center"><code>1.15x</code></td></tr><tr><td style="text-align:left"><strong>Era 6b (Current)</strong></td><td style="text-align:left"><strong><code>49e1457a</code> (<code>Nov 18 &gt;= 11:17Z</code>, <code>n=36</code>)</strong></td><td style="text-align:center"><code>5-25-6</code></td><td style="text-align:center"><code>13.9%</code></td><td style="text-align:center"><strong><code>30.6%</code></strong></td><td style="text-align:center"><strong><code>3.64 / 4.08</code></strong></td><td style="text-align:center"><strong><code>25.2 / 28.4</code></strong></td><td style="text-align:center"><strong><code>30.1 / 36.8</code></strong></td><td style="text-align:center"><strong><code>48.4 / 54.4</code></strong></td><td style="text-align:center"><strong><code>0.56x</code></strong></td></tr></tbody></table></div>
+<hr />
+<h2 id="2-why-enemy-visible-fails-audit-of-the-6-opponent-knowledge-dimensions">2. Why <code>enemy-visible</code> Fails: Audit of the 6 Opponent-Knowledge Dimensions <a class="anchor" href="#2-why-enemy-visible-fails-audit-of-the-6-opponent-knowledge-dimensions" aria-label="Link to section">#</a></h2>
+<p>Your intuition is exact: <code>enemy-visible</code> (and <code>enemy-threat-supply</code>) collapses a 6-dimensional belief problem into <em>&quot;are enemy combat units near our bases right now or in the last 10 seconds?&quot;</em> Both <strong>lack of observation</strong> and <strong>single transient observations</strong> actively deceive our planner:</p>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Dimension</th><th style="text-align:left">How Current Code Handles It</th><th style="text-align:left">How Single / Missing Observations Trick Us in Live Games</th></tr></thead><tbody><tr><td style="text-align:left"><strong>1. Enemy Army (Total Value &amp; Composition)</strong></td><td style="text-align:left"><a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt#L9918-L9924" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a> builds <code>enemy-u-counts</code> purely from <strong>this frame&#x27;s visible <code>enemy-units</code></strong>. <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt#L8678-L8702" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a> forgets <code>remembered-enemy-threat-supply</code> after <strong><code>224</code> frames (<code>10.0s</code>)</strong> and subtracts <code>0.85 * live-defending-force-supply</code>.</td><td style="text-align:left"><strong>Lack of observation = &quot;Enemy has 0 army&quot;</strong>: In <code>#5131381</code> (<code>Z vs SicToss</code>), we sent <code>13</code> Changelings that saw <code>30</code> Stalkers + <code>6</code> Immortals (<code>9,925</code> army value), yet because they stood <code>&gt; 55</code> tiles away (or stepped out of vision for <code>10s</code>), <code>enemy-threat-supply</code> was <code>0</code>, <code>peaceful?</code> was <code>#t</code>, and Zerg droned to <code>72</code> with only <code>1,400</code> army (<code>7</code> Roaches, <code>12</code> Lings) before dying in one push (<code>0.04x</code> trade).</td></tr><tr><td style="text-align:left"><strong>2. Enemy Army Position &amp; Reachability</strong></td><td style="text-align:left"><a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/mirror-mind-predictor.rkt#L932-L997" target="_blank" rel="noopener noreferrer">mirror-mind-predictor.rkt</a> computes reachability only over currently visible <code>enemy-units</code>, instead of propagating last-seen tag positions <code>(x_0, y_0, t_0)</code> outward as an expanding speed cone $r(t) = v_{\text{army}}(t - t_0)$.</td><td style="text-align:left">When an enemy <code>30</code>-supply push leaves their natural and crosses mid-map (<code>25–35s</code> travel time), our <code>10s</code> threat memory expires mid-transit, so we expand or drone right before impact, OR send small squads out on <code>pos=attack</code> directly into the fogged main army.</td></tr><tr><td style="text-align:left"><strong>3. Enemy Bases (Confirmed vs Confirmed-Empty vs Unscouted)</strong></td><td style="text-align:left"><a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt#L10019-L10052" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a> <strong>never passes <code>#:enemy-building-counts</code> to <code>make-macro-world-state</code></strong> (it stays <code>#f</code> in live games!). Worse, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/mirror-mind-predictor.rkt#L3073-L3115" target="_blank" rel="noopener noreferrer">mirror-mind-predictor.rkt</a> treats <code>unaccounted-minerals &gt;= 450</code> + <code>visible_combat &lt;= 3</code> as <code>&#x27;hidden-expansion-or-macro-boom</code> -&gt; <code>&#x27;punish-And-Deny-Greedy-Expand</code>!</td><td style="text-align:left"><strong>Catastrophic inversion</strong>: We do not distinguish <em>&quot;we scouted the natural pad at <code>2:15</code> and confirmed it EMPTY&quot;</em> (1-base all-in!) from <em>&quot;we haven&#x27;t scouted the enemy at all (<code>unaccounted-minerals &gt;= 450</code>)&quot;</em>. Unscouted enemy bases/armies in fog trigger <code>hexp &gt;= 0.70</code> (<code>267</code> steps in <code>#5131383</code>, <code>94</code> steps in <code>#5131381</code>) and <code>pos=attack</code> (<code>win=0.88–0.95</code>) into a <code>2–3</code> base army!</td></tr><tr><td style="text-align:left"><strong>4. Enemy Gas (Geysers &amp; Implied Gas Bank)</strong></td><td style="text-align:left">Only counts currently visible <code>enemy-bldgs</code> geysers in Layer 2; never tracks per-geyser vespene depletion delta from snapshots or reconciles <code>2</code> gasses + <code>0</code> expansion = tech/all-in vs <code>0</code> gas + fast natural = mineral macro.</td><td style="text-align:left">Missing a second geyser (or forgetting one if not persisted by tag/location) blinds us to fast Stargate/Cloak/Baneling-Bust timings; conversely, a single scouting Probe/Stalker (<code>#5132985</code>) sets <code>rush&gt;=0.5</code> for <code>100</code> steps and wastes <code>575M</code> on <code>2</code> Bunkers + <code>3</code> Missile Turrets against a <code>48</code>-Probe macro Protoss!</td></tr><tr><td style="text-align:left"><strong>5. Enemy Tech (Observed + Implied + Destroyed)</strong></td><td style="text-align:left">Implied tech from visible units works on the frame a unit is seen, but <code>enemy-u-counts</code> vanishes in fog, and summoned units (<code>LocustMP</code>) are not separated from persistent army supply.</td><td style="text-align:left"><strong>Single-observation / summon trap (<code>#5132988 P vs who</code>)</strong>: <code>who</code> made Swarm Hosts (<code>386</code> <code>LocustMP</code>) + <code>31</code> Spines. Our Stalkers/Zealots fought <code>8</code> consecutive waves of <strong>free summoned Locusts</strong> (<code>0</code> kill value, <code>18,450</code> lost = <code>0.01x</code>), then whenever Locusts expired, <code>enemy-units</code> became <code>&#x27;()</code>, <code>win</code> jumped to <code>0.92</code> (<code>pos=attack</code>), and our wounded units walked onto creep into the next Locust wave!</td></tr><tr><td style="text-align:left"><strong>6. Enemy Production Capacity</strong></td><td style="text-align:left"><a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt#L8646-L8658" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a> only adds <code>implied-prod-threat-supply</code> when <code>enemy-prod-bldg-cnt &gt; 1 + 2 * our_bases</code> — so <code>8</code> Gateways (<code>#5131381</code>) on <code>3</code> bases contributed almost nothing once subtracted by <code>0.85 * live-defending-force</code>!</td><td style="text-align:left">Seeing <code>6–8</code> Barracks/Gateways (<code>#5131381</code>, <code>#5131435</code>, <code>#5132949</code>, <code>#5132983</code>) proves the opponent is converting <code>~1,200–1,800</code> resources/min into army <em>whether we see the units or not</em>. Ignoring confirmed production capacity lets us sit on <code>2–3</code> Gateways/Barracks (<code>1,400–1,700</code> army) against <code>6–8</code> facility pushes (<code>8,000–10,000</code> army).</td></tr></tbody></table></div>
+<hr />
+<h2 id="3-other-concrete-deviations-from-our-design-found-in-recent-losses">3. Other Concrete Deviations From Our Design Found in Recent Losses <a class="anchor" href="#3-other-concrete-deviations-from-our-design-found-in-recent-losses" aria-label="Link to section">#</a></h2>
+<p>Inspecting <code>[SCBOT_PRIORITY]</code> and <code>[SCBOT_STATE]</code> frame-by-frame in the <code>match_log.zip</code> archives exposed four additional implementation bugs where live play deviated directly from our intended design:</p>
+<ol><li><strong>Premature T3 Tech Escrows Blocking Core Army at <code>3:45</code> (<code>#5132983</code>, <code>#5132984</code>, <code>#5131612</code>)</strong>:<ul><li>Because Phase C added full <code>4+</code> base T3 tech nodes (<code>ghost-academy</code>, <code>templar-archive</code>, <code>fleet-beacon</code>) to the matchup specs, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/priority-macro-brain.rkt" target="_blank" rel="noopener noreferrer">priority-macro-brain.rkt</a> promoted them via <code>macro-tech-plan</code> (<code>u = 478–494</code>) <strong>before</strong> checking if our midgame army/production foundation existed!</li><li><strong>Smoking gun (<code>#5132983</code>, <code>f=5040</code> / <code>3:45</code> at <code>31</code> supply)</strong>: <code>saving_for=ghost-academy(floor=150M/100G) escrow_queue=(ghost-academy@478.1, marauder(blocked-by-escrow@425.0), marine(blocked-by-escrow@241.0))</code> — Terran froze Marine &amp; Marauder production on <code>2</code> Barracks at <code>3:45</code> to save for a <code>Ghost Academy</code>! In <code>#5132984</code> and <code>#5131612</code>, Protoss similarly locked <code>300M/200G</code> on <code>templar-archive</code> + <code>fleet-beacon</code> while under-producing Gateway/Robo units.</li></ul></li><li><strong>Full <code>0 -&gt; 400M</code> Expansion Escrow Freezes Early TownHalls for <code>20–25s</code> (<code>#5131383</code>, <code>#5132950</code>, <code>#5132985</code>)</strong>:<ul><li>In <code>#5131383</code> (<code>f=1200..1756</code>) and <code>#5132950</code> (<code>f=1452..1900</code>), <code>nexus</code>/<code>command-center</code> (<code>u = 620.0</code>) set <code>floor = 400M</code> starting at <code>85M</code>, blocking <code>probe@488.0</code> / <code>scv@488.0</code> for <code>550</code> frames (<code>25s</code> = <code>2+</code> lost workers right at <code>1:00</code>)!</li><li>Pros <strong>never</strong> stop Probes/SCVs at <code>85M</code> to save <code>400M</code>: a TownHall takes <code>12s</code> per worker (<code>50M</code>), while <code>16</code> workers mine <code>~960M/min</code> (<code>~190M</code> per <code>12s</code>), so banking only begins inside the <strong>imminent window (<code>minerals &gt;= 260M</code>)</strong> while continuing nonstop worker production below <code>260M</code>!</li></ul></li><li><strong>Unplaced Scheduled Structure Spins Without Releasing Production (<code>#5132950</code>, <code>#5132985</code>)</strong>:<ul><li>In <code>#5132950</code> (<code>f=2004..2352</code>), <code>sched=(barracks@171..191)</code> repeated for <code>350</code> frames at <code>375M</code> with <code>sup=18/23</code> frozen (<code>0</code> SCVs trained because <code>1</code> CC was morphing Orbital and <code>CC #2</code> was still building, capping <code>1</code>-base <code>max-useful-workers</code>). In <code>#5132985</code> (<code>f=5004</code>), Terran floated <code>495M/336G</code> at <code>23</code> supply (<code>4</code> SCVs gained in <code>4</code> minutes!).</li></ul></li><li><strong><code>45:00</code> Stalemates on <code>11</code> Bases Because Maxed Zerg Spams T1 Lings Into Siege (<code>#5131434</code>, <code>#5132986</code>)</strong>:<ul><li><code>49e1457a</code> got Zerg to <code>10–11</code> Hatcheries and <code>78–79</code> Drones against <code>CutterSlayer</code> and <code>oberon</code>, <strong>proving the <code>4+</code> base economy works</strong> — but Zerg built <strong><code>308–338</code> Zerglings + <code>16</code> Spine Crawlers + <code>0</code> Lurkers / <code>0</code> Brood Lords / <code>0</code> Ultralisks</strong>, trading at <code>0.06x–0.49x</code> into Bunkers and Siege Tanks until the <code>2700s</code> clock expired!</li></ul></li></ol>
+<hr />
+<h2 id="4-prioritized-architectural-recommendations">4. Prioritized Architectural Recommendations <a class="anchor" href="#4-prioritized-architectural-recommendations" aria-label="Link to section">#</a></h2>
+<div class="mermaid-wrap"><pre class="mermaid">flowchart LR
+    OBS[&quot;Raw SC2 Wire Observation + Visibility Grid&quot;] --&gt; BELIEF[&quot;Persistent 6D OpponentBeliefState (Tag Memory + Pad Sightings + Resource Bounds)&quot;]
+    BELIEF --&gt; REGIME[&quot;Coupled Macro Regime &amp; Army-Parity Floor (W*, B*, G*, A_min*)&quot;]
+    BELIEF --&gt; TACTICS[&quot;Reachability-Aware Combat Gate (No Blind Fog Attacks + Summon Cooldown Kiting)&quot;]
+    REGIME --&gt; ALLOC[&quot;Imminent-Only Escrow &amp; Tier-Gated DAG Scheduler&quot;]</pre></div>
+<h3 id="p0-build-a-single-persistent-opponentbeliefstate-across-all-6-dimensions-replaces-enemy-visible">P0 — Build a Single Persistent <code>OpponentBeliefState</code> Across All 6 Dimensions (Replaces <code>enemy-visible</code>) <a class="anchor" href="#p0-build-a-single-persistent-opponentbeliefstate-across-all-6-dimensions-replaces-enemy-visible" aria-label="Link to section">#</a></h3>
+<p>Create a dedicated <code>lib/opponent-belief.rkt</code> module maintained across the entire match and passed into <strong>both</strong> <code>make-macro-world-state</code> (<code>#:enemy-belief</code> + <code>#:enemy-building-counts</code>) and Tactical Layer 3/4:</p>
+<ol><li><strong>Persistent Unit &amp; Structure Registry by Tag</strong>:<ul><li>Never drop an enemy unit from <code>believed-enemy-units</code> when it enters fog! Keep <code>(tag, type, last-x, last-y, last-seen-frame, hp)</code> until either <strong>(a)</strong> it dies in vision (<code>raw_data.event.dead_units</code>!), <strong>(b)</strong> our vision covers <code>(last-x, last-y)</code> within its movement cone and confirms absence, or <strong>(c)</strong> gradual confidence decay over <code>90s</code> (<code>2,016</code> frames, not <code>10s</code>!).</li><li>Separate <strong>persistent army value</strong> from <strong>free temporary summons</strong> (<code>locust</code>, <code>locust-flying</code>, <code>broodling</code>, <code>auto-turret</code>, <code>hallucination</code>, <code>changeling</code>) so summons trigger local micro kiting (<code>retreat for 18s</code>) without corrupting strategic army-value accounting.</li></ul></li><li><strong>3-State Expansion Pad Belief (<code>Confirmed-Owned</code> | <code>Confirmed-Empty(t_seen)</code> | <code>Unscouted</code>)</strong>:<ul><li>Track exact <code>last-cleared-frame</code> for every expansion pad on the map using our unit sight radii!</li><li><strong>Eliminate the dark-matter greed inversion</strong> in <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/mirror-mind-predictor.rkt#L3073-L3115" target="_blank" rel="noopener noreferrer">mirror-mind-predictor.rkt</a>: <code>unaccounted-minerals</code> under <strong>unscouted fog</strong> must increase <strong>uncertainty + scouting priority + defensive army floor</strong> (<code>&quot;unknown threat in fog&quot;</code>), NEVER <code>&#x27;punish-And-Deny-Greedy-Expand</code>! Only trigger <code>&#x27;punish-And-Deny-Greedy-Expand</code> when we <strong>positively observe</strong> an early 3rd/4th TownHall with low enemy production/army.</li></ul></li><li><strong>Production- &amp; Income-Coupled Enemy Army Lower Bound ($\hat{A}_{\text{enemy}}$)</strong>:<ul><li>Estimate $\hat{A}_{\text{enemy}} = \max\!\big(A_{\text{persisted-tags}},\; \hat{I}_{\text{opp}}(t) - C_{\text{observed-econ-tech}} - L_{\text{enemy-killed}}\big)$ bounded by observed production facilities (<code>8</code> Gateways -&gt; opponent is producing up to <code>16</code> supply per warp cycle!).</li></ul></li></ol>
+<h3 id="p1-couple-our-army-floor-amin-to-hatatextenemy-amp-fix-the-3-macroescrow-deviations">P1 — Couple Our Army Floor ($A_{\min}^*$) to $\hat{A}_{\text{enemy}}$ &amp; Fix the 3 Macro/Escrow Deviations <a class="anchor" href="#p1-couple-our-army-floor-amin-to-hatatextenemy-amp-fix-the-3-macroescrow-deviations" aria-label="Link to section">#</a></h3>
+<ol><li><strong>Belief-Coupled Army Floor (Fixes <code>#5131381</code> &amp; <code>#5131383</code> <code>0.04x</code> Steamrolls)</strong>:<ul><li>Instead of <code>peaceful? = (enemy-threat-supply &lt;= 0)</code> allowing <code>72</code> Drones on <code>1,400</code> army against <code>9,925</code> Stalker/Immortal, set target minimum standing army $A_{\min}^*(t) = \max\!\big(A_{\text{curve}}(W),\; 0.70 \cdot \hat{A}_{\text{enemy}}\big)$ once <code>W &gt;= 32</code> (for Zerg, banking larva/minerals or building Roach/Hydra/Lurker waves whenever our army falls below <code>70%</code> of believed enemy army + production output!).</li></ul></li><li><strong>Imminent-Only Expansion Escrow (<code>&gt;= 250M</code>) + In-Progress TownHall Worker Cap Credit (Fixes <code>#5131383</code>, <code>#5132950</code>, <code>#5132985</code>)</strong>:<ul><li>Never reserve <code>400M</code> at <code>85M</code>! Only activate TownHall expansion mineral floor once <code>minerals &gt;= 250M</code> (or builder is en route), so Probes/SCVs build <strong>100% continuously</strong> through <code>17 -&gt; 18 -&gt; 19 -&gt; 20</code> right up to Nexus/CC placement!</li><li>Count an <strong>in-progress (<code>&gt;= 40%</code> built) natural TownHall</strong> (and morphing Orbital&#x27;s completion queue) toward <code>max-useful-workers</code> so <code>1</code>-base Terran/Protoss never stalls at <code>18–20</code> workers (<code>sched=()</code>) while the natural finishes.</li></ul></li><li><strong>Flexible T3 Tech Authorization &amp; Follow-Up Expand Coupling (Refined from Rigid 3-Base Gate — Fixes <code>#5132983</code> <code>3:45</code> Ghost Academy &amp; <code>#5132984</code> Templar Archive Without Locking Out T3 Tech Rushes)</strong>:<ul><li><em>Initial Phase-1 guardrail:</em> Gating non-emergency T3 tech structures (<code>ghost-academy</code>, <code>fusion-core</code>, <code>templar-archive</code>, <code>fleet-beacon</code>, <code>ultralisk-cavern</code>, <code>greater-spire</code>, <code>dark-shrine</code>) behind <code>active-bases &gt;= 3</code>, <code>workers &gt;= 46</code>, and <code>army-supply &gt;= 24</code> stopped generic macro templates from self-starving early production, <strong>but is too rigid</strong> because it locks out legitimate 1- or 2-base T3 tech-rush / timing builds (fast BC, DT drop, 2-base Storm/Archon, fast Skytoss) that deliberately tech first and expand immediately behind pressure.</li><li><em>Refined Wave-15 design (3-tier authorization):</em><ol><li><strong>Committed Plan-Intent Exemption + Post-Tech Expand Coupling:</strong> When an active build plan or strategic counter explicitly commits to a T3 timing branch, bypass the generic 3-base wall (while requiring basic rush-survival safety) and automatically schedule the follow-up expansion behind the T3 structure as soon as it starts/completes.</li><li><strong>Continuous Opportunity-Cost / Throughput Gate (for default/unplanned macro templates):</strong> Replace the binary <code>bases &gt;= 3</code> cliff with economic throughput &amp; production utilization — allowing T3 once either the standard 3-base foundation holds <em>or</em> a saturated 2-base gas-rich economy (<code>workers &gt;= 38</code>, <code>&gt;= 3</code> geysers / gas surplus, core production unstarved, survival margin covered) can afford the T3 building + first payoff unit without idling workers or core production.</li><li><strong>Emergency Counter Override:</strong> Retain immediate bypass for enemy capital-air / mass-HT / cloak emergencies.</li></ol></li></ul></li></ol>
+<h3 id="p2-symmetry-agnostic-territory-control-commitment-risk-gating-anti-summon-kiting-amp-late-game-siege-breakers">P2 — Symmetry-Agnostic Territory Control, Commitment-Risk Gating, Anti-Summon Kiting &amp; Late-Game Siege Breakers <a class="anchor" href="#p2-symmetry-agnostic-territory-control-commitment-risk-gating-anti-summon-kiting-amp-late-game-siege-breakers" aria-label="Link to section">#</a></h3>
+<ol><li><strong>Symmetry-Agnostic Ground-Path Voronoi Territory Partition &amp; Dynamic Commitment-Risk Gate (Refined from Hard Mid-Map Rule)</strong>:<ul><li><em>Initial Phase-1 guardrail:</em> Requiring <code>our_army_value &gt;= 1.12 * believed_enemy_army_value</code> before crossing into unscouted fog prevented blind suicide pushes, <strong>but</strong> both Euclidean mid-map assumptions and a blanket mid-map wall are too rigid: SC2 maps vary across <strong>rotational 180°, horizontal/vertical mirror, diagonal reflection, and asymmetric/pocket layouts</strong>, and sound play frequently crosses mid-map without global army superiority.</li><li><em>Refined Wave-15 design:</em><ol><li><strong>Map-Symmetry Inference + Dual Ground-BFS Voronoi Partition:</strong> At match start, infer map mirroring style (<code>rotational-180</code>, <code>mirror-horizontal</code>, <code>mirror-vertical</code>, <code>mirror-diagonal</code>, <code>asymmetric</code>) from start locations, playable bounds, and expansion pads, and precompute <code>our-ground-bfs</code> and <code>enemy-ground-bfs</code> (via existing <code>compute-ground-bfs-distances</code>) to obtain an O(1) ground-path territory margin <code>m_ground(p) = d_ground_enemy(p) - d_ground_ours(p)</code> (with air distance tracked separately for flying/harass units) dynamically anchored to live/believed bases.</li><li><strong>Commitment-Risk Gating Instead of a Hard Mid-Map Cutoff:</strong> Partition engagements into <strong>Own Territory</strong> (always defend), <strong>Contested Frontline Band</strong> (contestable for map control/vision/chokes/creep clearing), and <strong>Deep Enemy Territory</strong> (<code>m_ground &lt; -8</code>), where ONLY <strong>slow, non-retreatable main-army commitment into unscouted lethal fog</strong> is gated on a continuous threshold (<code>speed/escape margin + reinforcement distance vs. reachable believed enemy army</code>). Explicitly exempt <strong>mobile/retreatable harass squads</strong> (Reapers, Hellions, Banshees, Medivac drops, Oracles, Phoenix, Warp Prisms, Adepts, Blink Stalkers, Mutalisks, Ling runbys), <strong>upgrade power-spike timings</strong>, <strong>exposed expansion denials</strong>, and <strong>behind-in-eco desperation pushes</strong>.</li></ol></li></ul></li><li><strong>Free-Summon Lifespan Disengage + Cooldown Counter-Push (<code>#5132988</code> vs Swarm Hosts)</strong>:<ul><li>When <code>&gt;= 4</code> enemy <code>locust</code> / <code>broodling</code> / <code>auto-turret</code> units are active and no Swarm Host / Raven / Brood Lord body is in weapon range, <strong>kite back off creep</strong> until the <code>18s</code> Locust timer expires, then immediately advance/Warp-Prism-hunt the <code>0</code>-DPS Swarm Hosts during their <code>43s</code> cooldown!</li></ul></li><li><strong>Maxed-Out (<code>&gt;= 130</code> Supply / <code>&gt;= 4</code> Bases) Zerg/Protoss/Terran T3 Siege-Breaker Transition (<code>#5131434</code>, <code>#5132986</code>, <code>#5131612</code>)</strong>:<ul><li>Hard-cap Zergling count (<code>&lt;= 24</code> past <code>66</code> Drones unless enemy is pure Immortal/Tank in open field) and force <code>Lurker Den + Seismic Spines -&gt; Lurkers</code> and <code>Greater Spire -&gt; Brood Lords + Viper</code> (and <code>Tempest</code>/<code>Colossus</code>/<code>Siege Tank + Liberator</code> for P/T) whenever enemy has <code>&gt;= 2</code> Bunkers / Siege Tanks / Planetary Fortresses / <code>&gt;= 6</code> Spine-Photon static defense!</li></ul></li></ol>
+<h3 id="p3-early-cannon-rush-pull-arithmetic-5132982-5132989-amp-frame-0-random-neutral-opening">P3 — Early Cannon-Rush Pull Arithmetic (<code>#5132982</code>, <code>#5132989</code>) &amp; Frame-0 Random Neutral Opening <a class="anchor" href="#p3-early-cannon-rush-pull-arithmetic-5132982-5132989-amp-frame-0-random-neutral-opening" aria-label="Link to section">#</a></h3>
+<ul><li>Against an enemy Probe + Pylon/Cannon in/near Zerg main/natural (<code>Creepy_strategies</code>), assign <code>1</code> Drone trailing each Probe + <code>4</code> Drones focus-firing the lowest-progress Cannon/Pylon (never canceling Pool, rushing Spine + Ravagers) instead of switching into <code>CrisisZealotRush</code> at <code>16</code> Drones with <code>0</code> kills.</li><li>Against <code>Random</code> opponents (<code>who</code>, <code>sc2-bot-next-random</code>), use a safe <strong>vs-Random neutral wall/scout opening</strong> until the <code>14/16</code> worker scout confirms actual race, instead of guessing <code>PvP</code> on frame <code>0</code>.</li></ul>
+<hr />
+<h2 id="5-implemented-holistic-opponent-world-model-amp-verification-summary">5. Implemented Holistic Opponent World Model &amp; Verification Summary <a class="anchor" href="#5-implemented-holistic-opponent-world-model-amp-verification-summary" aria-label="Link to section">#</a></h2>
+<p>All P0–P3 architectural fixes have been implemented, formally verified, and tested:</p>
+<ol><li><strong>Wire Observation Enrichment (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/sc2-protobuf-ws.rkt#L4810-L4885" target="_blank" rel="noopener noreferrer">sc2-protobuf-ws.rkt</a>)</strong>:<ul><li>Exported <code>&#x27;attack-upgrade-level</code>, <code>&#x27;armor-upgrade-level</code>, <code>&#x27;shield-upgrade-level</code> on enemy units, <code>&#x27;vespene-contents</code>, <code>&#x27;active?</code>, <code>&#x27;add-on-tag</code>, <code>&#x27;buffs</code> on enemy structures, and <code>&#x27;dead-unit-tags</code> (<code>raw_data.event.dead_units</code>) on every observation step.</li></ul></li><li><strong>Holistic Constraint-Narrowing Opponent World Model (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/opponent-world-model.rkt#L1-L976" target="_blank" rel="noopener noreferrer">opponent-world-model.rkt</a>)</strong>:<ul><li>Integrates cumulative opponent <code>(Minerals, Vespene)</code> from base/geyser timelines (<code>1.05</code> min/worker-sec optimal, <code>0.45</code> oversat, Terran MULE bonus, <code>1.92</code> gas/geyser-sec) without requiring visibility of enemy workers, anchored to exact <code>2250 - vespene-contents</code> geyser depletion whenever geysers are spotted.</li><li>Tracks persistent enemy unit/structure tags across fog until confirmed dead via <code>dead-unit-tags</code>, sight-cleared in vision, or aged out into sunk costs.</li><li>Enforces the <strong>Rational-Opponent Happy-Path Deviation Meta</strong>: <code>happy-path-expected-bases</code> detects when an opponent has stopped expanding (<code>stopped-expanding? = #t</code>), treating unaccounted <code>(Minerals, Gas)</code> as threatening unseen Army/Tech (<code>believed-total-army-supply</code>, <code>believed-total-army-value</code>, <code>imminent-reachable-supply</code>), while routing periodic scouting directly to overdue unscouted pads (<code>urgent-scout-pad</code>).</li><li>Separates free temporary summons (<code>locust-mp</code>, <code>broodling</code>, <code>auto-turret</code>, hallucinations, changelings) from standing army sunk costs and tracks <code>locust-wave-active?</code> (<code>18s</code>) -&gt; <code>swarm-host-cooldown-window?</code> (<code>23s</code>).</li></ul></li><li><strong>Eliminated Dark-Matter Greed Inversion (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/mirror-mind-predictor.rkt#L3083-L3385" target="_blank" rel="noopener noreferrer">mirror-mind-predictor.rkt</a>, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/plan/situational-counter.rkt#L2336-L2341" target="_blank" rel="noopener noreferrer">situational-counter.rkt</a>)</strong>:<ul><li>Unaccounted resources under 1-base fog classify as <code>&#x27;imminent-fog-timing-wave</code> (never <code>&#x27;hidden-expansion-or-macro-boom</code>), and <code>&#x27;punish-And-Deny-Greedy-Expand</code> strictly requires <strong>positively observed</strong> early expansions.</li></ul></li><li><strong>Belief-Coupled Army Parity, Imminent-Only Natural Escrow, T3 Gate &amp; Ling Cap (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/priority-macro-brain.rkt#L1979-L5555" target="_blank" rel="noopener noreferrer">priority-macro-brain.rkt</a>, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/econ-ledger.rkt#L2262-L2282" target="_blank" rel="noopener noreferrer">econ-ledger.rkt</a>)</strong>:<ul><li>Coupled <code>belief-army-floor</code> to <code>believed-enemy-army-supply</code> and <code>opp-stopped-expanding?</code> (<code>#5131381</code>, <code>#5131383</code>).</li><li>Hard-gated non-emergency T3 tech structures (<code>ghost-academy</code>, <code>fusion-core</code>, <code>templar-archive</code>, <code>fleet-beacon</code>, <code>ultralisk-cavern</code>, <code>greater-spire</code>, <code>dark-shrine</code>) behind <code>active-bases &gt;= 3</code>, <code>workers &gt;= 46</code>, <code>army-supply &gt;= 24</code> (<code>#5132983</code>, <code>#5132984</code>).</li><li>Made 1-base natural escrow imminent-only (<code>&lt; 240M</code> yields to open TownHall worker slots at <code>477.0 &lt; 478.0..488.0</code> while still escrowing ahead of <code>&lt;= 460.0</code> buildings, <code>#5131383</code>) and credited in-progress TownHalls toward <code>worker-cap-now</code> (<code>#5132985</code>).</li><li>Capped late-game Zerglings vs Bunkers/Planetaries/Siege Tanks (<code>&lt;= 20</code>) and escalated to <code>Lurkers</code> / <code>Brood Lords</code> / <code>Vipers</code> (<code>#5131434</code>, <code>#5132986</code>).</li></ul></li><li><strong>Runtime Wiring, Belief-Gated Attacks, Locust Kiting &amp; Anti-Cannon/Random Scout (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt#L8640-L17745" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a>)</strong>:<ul><li>Wired <code>rt-opponent-world-model</code> into Layer 2 (<code>enemy-u-counts</code>, <code>#:enemy-building-counts</code>, <code>mirror-signals</code>, <code>urgent-scout-pad</code>) and Layer 3/4 (<code>fog-belief-suppress?</code> blocking cross-map attacks when <code>our_combat_val &lt; 1.12 * believed_enemy_val</code>, <code>locust-wave-active?</code> kite-back off creep, <code>swarm-host-cooldown-window?</code> counter-push, <code>&gt;= 8</code> mining worker floor during multi-pylon cannon rushes, and immediate <code>13</code>-supply worker scout vs <code>Random</code>).</li></ul></li></ol>
+<h3 id="verification-results">Verification Results <a class="anchor" href="#verification-results" aria-label="Link to section">#</a></h3>
+<ul><li><code>racket lib/state-machine-verifier.rkt</code>: <strong><code>24/24</code> formal invariants passed</strong> (<code>117,220</code> states explored).</li><li><code>racket tests/sc2-protobuf-ws-test.rkt</code>: <strong><code>334/334</code> wire checks passed</strong> (<code>0</code> failed).</li><li><code>racket tests/run-all-tests.rkt</code>: <strong><code>51/51</code> test suites passed</strong> (<code>2,297</code> assertions, <code>12/12</code> mutation kill rate, including new Suite 51).</li><li><code>racket tools/audit-pro-replay-starvation.rkt --stride 1</code>: <strong><code>0</code> failures</strong> across <code>5,575</code> pro-replay checkpoints (<code>558</code> trajectories; <code>99.6%–99.9%</code> worker active rate).</li><li><code>racket tools/benchmark-pro-divergence.rkt --spatial --max-replays 80</code>: <strong><code>0</code> exceptions</strong> across <code>1,368</code> spatial LotV snapshots (<code>0.0%–0.4%</code> peaceful worker <code>Util &lt; 50</code>, <code>2.5%–4.4%</code> premature gas <code>&lt; 40w</code>).</li><li><strong>AI Arena Packaging &amp; Live Deployment</strong>: Rebuilt all 4 untethered Linux <code>x86_64</code> ELF <code>BotZip</code>s (<code>Mothman-{P,T,Z,X}.zip</code>, <code>32.7 MB &lt;= 35.0 MB</code> limit, headless init verified), pushed commit <code>32ab101a</code> to <code>main</code>/<code>master</code>, and verified <code>Deploy SC2 Bots to AI Arena</code> workflow run <code>44425416945</code> succeeded (<code>1m0s</code>).</li></ul>
+<hr />
+<h2 id="6-14-loop-autonomous-local-parallel-sc2-iteration-campaign-amp-final-ship">6. 14-Loop Autonomous Local Parallel SC2 Iteration Campaign &amp; Final Ship <a class="anchor" href="#6-14-loop-autonomous-local-parallel-sc2-iteration-campaign-amp-final-ship" aria-label="Link to section">#</a></h2>
+<p>Following <code>32ab101a</code>, we built and ran a closed-loop multi-agent local StarCraft II benchmark and self-improving engineering pipeline against <strong>18 real AI Arena bots</strong> inside real Linux <code>SC2_x64</code> (<code>docker.io/aiarena/arenaclient-combined:v0.8.0</code> via rootless <code>podman</code> at the host-benchmarked <code>-j 14</code> concurrency sweet spot) across <strong>14 full iterations</strong> (4 initial loops + 10 <code>/goal</code> loops):</p>
+<h3 id="infrastructure-amp-continuous-self-improvement-committed-to-repo">Infrastructure &amp; Continuous Self-Improvement Committed to Repo <a class="anchor" href="#infrastructure-amp-continuous-self-improvement-committed-to-repo" aria-label="Link to section">#</a></h3>
+<ul><li><strong>Parallel Local Arena Runner &amp; Telemetry Proxy:</strong> <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tools/run-local-sc2-arena.py" target="_blank" rel="noopener noreferrer">run-local-sc2-arena.py</a> (<code>-j 14</code>, <code>--network none</code>, <code>--stagger-sec 0.25</code>, <code>--schedule-order interleaved</code>, <code>~11m</code> for 36-match <code>core_12</code>, <code>~16m</code> for 54-match <code>--opponents all</code>) &amp; <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tools/sc2-match-proxy.py" target="_blank" rel="noopener noreferrer">sc2-match-proxy.py</a>.</li><li><strong>Profiled Single-Pass Replay Analyzer (<code>486s → 0.8–1.35s</code>):</strong> <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tools/score-replay-batch.rkt" target="_blank" rel="noopener noreferrer">score-replay-batch.rkt</a> with Pro Corpus v2 curves, <code>core_12</code> / <code>unseen_6_breakdown</code> generalization splits, and automated anomaly detectors (<code>cloaked_unit_damage_loss</code>, <code>siege_range_zero_dps_losses</code>, <code>non_combat_robo_waste_val</code>, <code>zerg_non_ling_army_pct</code>, <code>endgame_home_stall_sec</code>, <code>own_base_retreat_frames</code>, <code>own_territory_retreat_frames</code>, <code>gas_rich_min_starved_ticks</code>, <code>early_rush_idle_bank_3m</code>, <code>prod_placement_stall</code>, <code>pvp_nat_delay_flag</code>).</li><li><strong>288-Replay / 576-Perspective LotV Pro-Corpus Benchmark &amp; Loop Architect Layer:</strong> <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tools/iteration-loop/pro_baselines.json" target="_blank" rel="noopener noreferrer">pro_baselines.json</a>, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tools/iteration-loop/measure-pro-scouting.rkt" target="_blank" rel="noopener noreferrer">measure-pro-scouting.rkt</a>, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tools/iteration-loop/compare-vs-pro.py" target="_blank" rel="noopener noreferrer">compare-vs-pro.py</a>, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tools/iteration-loop/loop_ledger.json" target="_blank" rel="noopener noreferrer">loop_ledger.json</a>, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tools/iteration-loop/README.md" target="_blank" rel="noopener noreferrer">README.md</a>, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tools/iteration-loop/SWARM_PLAYBOOK.md" target="_blank" rel="noopener noreferrer">SWARM_PLAYBOOK.md</a>.</li><li><strong>Tactical Unit-Tester &amp; Real-<code>SC2_x64</code> Physics Micro Duel Arena:</strong> <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tools/tactics-unit-tester.rkt" target="_blank" rel="noopener noreferrer">tactics-unit-tester.rkt</a> (<strong><code>204/204</code></strong> strict live-pipeline scenarios passing <code>100.0%</code> with <code>wire_rejects = 0</code> on shipped HWM <code>45ca28a6</code>, including <code>123/123</code> novel shields) and <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/tools/sc2-tactics-arena.py" target="_blank" rel="noopener noreferrer">sc2-tactics-arena.py</a> (<code>21</code> real-<code>SC2_x64</code> 2-participant <code>RequestDebug</code> duels running in <code>~13.6s</code>).</li><li><strong>Full Periodic Phase Report Log:</strong> <a href="./phase-reports.html">phase_reports.md</a>.</li></ul>
+<h3 id="verified-high-water-mark-progression-core12-n36-clean">Verified High-Water Mark Progression (<code>core_12</code>, <code>n=36</code> Clean) <a class="anchor" href="#verified-high-water-mark-progression-core12-n36-clean" aria-label="Link to section">#</a></h3>
+<div class="table-wrap"><table><thead><tr><th style="text-align:left">Milestone</th><th style="text-align:center">Commit</th><th style="text-align:center"><code>core_12</code> Clean</th><th style="text-align:center">WR% / NL%</th><th style="text-align:center">Trade Agg / Med</th><th style="text-align:center"><code>SupBlk%</code></th><th style="text-align:center"><code>PkArmy</code></th><th style="text-align:center"><code>MaxStep</code></th><th style="text-align:center">Tactics Strict</th><th style="text-align:center">Promotion Gates</th></tr></thead><tbody><tr><td style="text-align:left"><strong>Baseline</strong></td><td style="text-align:center"><code>32ab101a</code></td><td style="text-align:center"><code>3W-22L-8T</code> (<code>n=33</code>)</td><td style="text-align:center"><code>9.1% / 33.3%</code></td><td style="text-align:center"><code>0.44x / 0.11x</code></td><td style="text-align:center"><code>9.4%</code></td><td style="text-align:center"><code>1,622</code></td><td style="text-align:center"><code>2,311 ms</code></td><td style="text-align:center">—</td><td style="text-align:center"><code>1/9</code></td></tr><tr><td style="text-align:left"><strong>W4 HWM</strong></td><td style="text-align:center"><code>5588af67</code></td><td style="text-align:center"><code>7W-24L-5T</code></td><td style="text-align:center"><code>19.4% / 33.3%</code></td><td style="text-align:center"><code>0.55x / 0.16x</code></td><td style="text-align:center"><code>7.9%</code></td><td style="text-align:center"><code>1,910</code></td><td style="text-align:center"><code>2,311 ms</code></td><td style="text-align:center"><code>80/80</code></td><td style="text-align:center"><code>2/9</code></td></tr><tr><td style="text-align:left"><strong>W7 HWM</strong></td><td style="text-align:center"><code>3cd35f03</code></td><td style="text-align:center"><code>7W-23L-6T</code></td><td style="text-align:center"><code>19.4% / 36.1%</code></td><td style="text-align:center"><code>0.44x / 0.15x</code></td><td style="text-align:center"><code>7.6%</code></td><td style="text-align:center"><code>2,018</code></td><td style="text-align:center"><code>255.6 ms</code></td><td style="text-align:center"><code>112/112</code></td><td style="text-align:center"><code>2/9</code></td></tr><tr><td style="text-align:left"><strong>W8 HWM</strong></td><td style="text-align:center"><code>c079c8cb</code></td><td style="text-align:center"><code>11W-21L-4T</code></td><td style="text-align:center"><code>30.6% / 41.7%</code></td><td style="text-align:center"><code>0.65x / 0.24x</code></td><td style="text-align:center"><code>8.6%</code></td><td style="text-align:center"><code>2,266</code></td><td style="text-align:center"><code>213.1 ms</code></td><td style="text-align:center"><code>124/124</code></td><td style="text-align:center"><code>3/9</code></td></tr><tr><td style="text-align:left"><strong>W12 HWM (Shipped Bot)</strong></td><td style="text-align:center"><strong><code>45ca28a6</code></strong> (<code>b1fecacb</code>)</td><td style="text-align:center"><strong><code>14W-19L-3T</code></strong></td><td style="text-align:center"><strong><code>38.9% / 47.2%</code></strong></td><td style="text-align:center"><strong><code>0.82x / 0.28x</code></strong></td><td style="text-align:center"><strong><code>5.6%</code></strong></td><td style="text-align:center"><strong><code>2,717</code></strong></td><td style="text-align:center"><strong><code>205.7 ms</code></strong></td><td style="text-align:center"><strong><code>204/204</code></strong></td><td style="text-align:center"><strong><code>4/9</code></strong></td></tr></tbody></table></div>
+<ul><li><strong>Net Campaign Leap (<code>Baseline 32ab101a → Shipped HWM 45ca28a6</code>):</strong><ul><li><strong><code>+11W</code> (<code>+29.8 pp</code> WR, <code>+13.9 pp</code> NL, first time <code>&lt; 20L</code>)</strong>, <strong><code>+86%</code> TradeAgg (<code>0.44x → 0.82x</code>; BOTH Protoss <code>1.13x</code> &amp; Terran <code>1.10x</code> broke <code>&gt; 1.0x</code>)</strong>, <strong><code>-3.8 pp</code> SupBlk (<code>5.6% &lt;= 6%</code> gate PASS)</strong>, <strong><code>+68%</code> Peak Army (<code>2,717</code>)</strong>, <strong><code>-91.1%</code> MaxStep latency (<code>2,311 → 205.7 ms</code>)</strong>.</li><li><strong>All 3 races <code>&gt;= 33.3%</code> WR</strong> (<code>Mothman-P 6W–6L–0T = 50.0%</code>, <code>Mothman-T 4W–7L–1T = 33.3%</code>, <code>Mothman-Z 4W–6L–2T = 33.3%</code> / <code>50.0%</code> NL), <strong><code>3</code> sweeps</strong> (<code>titania 3–0</code>, <code>monsterbot 3–0</code>, <code>Chance 3–0</code>), undefeated vs <code>RustyNikolaj (2–0–1)</code> &amp; <code>puck (1–0–2)</code>, and <strong><code>0</code> HomeStall / <code>0</code> RoboWaste / <code>0</code> CloakLoss / <code>0</code> SelfCancel</strong>.</li></ul></li><li><strong>Full-Roster 54-Match Generalization Validation (<code>iter14_wave14</code>, <code>--opponents all</code>, <code>54/54</code> replays, <code>0</code> errors / <code>0</code> ourFault):</strong><ul><li>Full-roster clean (<code>n=53</code>): <strong><code>13W–36L–4T</code> (<code>24.5%</code> WR)</strong> beating Loop 9 (<code>12W–33L–6T</code>, <code>23.5%</code>), <strong><code>max_step = 200.57 ms</code></strong> across all <code>54/54</code> matches, <strong><code>CloakLoss</code> cut <code>-60%</code> (<code>5 → 2</code>)</strong>, and <strong><code>unseen_6</code> generalization doubled (<code>2W → 4W</code>, <code>22.2%</code> WR, <code>SupBlk 4.8%</code>)</strong> with <code>CryptBotRevival 3–0</code> (<code>24.25x</code>), <code>onlyfans 1–1–1</code> (<code>CloakLoss 2 → 0</code>, <code>97</code> Banshees killed), and <code>who</code> <code>8×</code> trade jump (<code>8/8</code> DTs killed).</li><li>Anti-regression hold: Because <code>uzqylkro</code>&#x27;s Loop 13–14 <code>lib/</code> edits dipped <code>core_12</code> (<code>9W–23L–3T</code> clean vs committed W12 HWM <code>45ca28a6</code> <code>14W–19L–3T</code>), we shipped <strong>verified HWM <code>45ca28a6</code> bot code</strong> (<code>0</code> <code>lib/</code> diffs) paired with the compatible Loop 13–14 tooling/ledger upgrades (<code>204/204</code> strict tactics, <code>21</code>-duel arena, <code>unseen_6</code> scorer).</li></ul></li></ul>
+<h3 id="final-verification-standalone-elf-botzip-smoke-sweep-amp-live-ai-arena-deploy">Final Verification, Standalone ELF <code>BotZip</code> Smoke Sweep &amp; Live AI Arena Deploy <a class="anchor" href="#final-verification-standalone-elf-botzip-smoke-sweep-amp-live-ai-arena-deploy" aria-label="Link to section">#</a></h3>
+<ul><li><strong>Verification Gates (<code>b1fecacb</code>):</strong> <code>raco make</code> (<code>27</code> mods) PASS | <code>state-machine-verifier</code> <strong><code>24/24</code></strong> (<code>117,220</code> states) | <code>sc2-protobuf-ws-test</code> <strong><code>536/536</code></strong> | <code>run-all-tests</code> <strong><code>2,281</code></strong> assertions (<code>12/12</code> mutation kill, Suite 19 BotZip PASS) | <code>audit-pro-replay-starvation</code> <strong><code>0/0/0/0</code></strong> | <code>benchmark-pro-divergence</code> PASS (<code>exns=0</code>) | <code>tactics-unit-tester --all --strict</code> <strong><code>204/204</code> (<code>100.0%</code>, <code>wire_rejects = 0</code>, <code>novel 123/123</code>)</strong>.</li><li><strong>Standalone ELF <code>BotZip</code>s (<code>ladder/build-aiarena-zip.rkt --all-races</code>, Racket 8.16 <code>GLIBC_2.14</code>):</strong> All 4 zips (<code>ladder/Mothman-{P,T,Z,X}.zip</code>) = <strong><code>33.06 MiB</code> (<code>&lt;= 35 MB</code>)</strong>, headless-verified, and swept <strong><code>4W–0L–0T</code> (<code>100%</code>)</strong> in real <code>SC2_x64</code> <code>--mothman-mode zip</code> smoke testing (<code>avg = 7.99 ms</code>, <code>p95 = 12.97 ms</code>, <code>max = 213.41 ms</code>, <code>0</code> faults/leftovers).</li><li><strong>GitHub Push &amp; Live AI Arena Deploy:</strong> Pushed <code>uzqylkro b1fecacb</code> to <code>origin</code> (<code>main</code> &amp; <code>master</code>, fresh empty <code>@ = zqtlwvzs 482a0066</code>), and <code>.github/workflows/deploy-aiarena.yml</code> Run <code>44567288576</code> succeeded (<code>SUCCESS</code>) — all 4 bots (<code>Mothman-Z #1458</code>, <code>Mothman-T #1459</code>, <code>Mothman-P #1460</code>, <code>Mothman-X #1461</code>) verified MD5-matching and ACTIVE in Competition <code>#38</code> with 8 live matches (<code>#5136381..#5136388</code>) queued.</li></ul>
+<hr />
+<h2 id="7-wave-15-15c-architectural-refinements-flexible-t3-amp-symmetry-agnostic-voronoi-territory">7. Wave 15 → 15c Architectural Refinements (Flexible T3 &amp; Symmetry-Agnostic Voronoi Territory) <a class="anchor" href="#7-wave-15-15c-architectural-refinements-flexible-t3-amp-symmetry-agnostic-voronoi-territory" aria-label="Link to section">#</a></h2>
+<p>Implemented, calibrated across three real-<code>SC2_x64</code> 36-match gauntlets (<code>W15 → W15b → W15c</code>), verified across all 7/7 gates, and pushed as commit <strong><code>zqtlwvzs 62a0ceed</code></strong> (<code>origin/main</code> &amp; <code>origin/master</code>, leaving <code>ladder/Mothman-*.zip</code> untouched pending deploy decision):</p>
+<ul><li><strong>3-Tier Flexible T3 Authorization + Post-T3 Expand Coupling (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/priority-macro-brain.rkt" target="_blank" rel="noopener noreferrer">priority-macro-brain.rkt</a>):</strong><ul><li>Replaced the rigid <code>active-bases &gt;= 3</code> gate with <code>Tier A</code> (explicit 1-/2-base T3 build-plan intent exemption + coupled <code>post-t3-tech-expand-due?</code> follow-up expand), <code>Tier B</code> (3-base foundation OR saturated 2-base gas-throughput opportunity-cost gate), and <code>Tier C</code> (emergency counter overrides), while plugging a pre-existing <code>active-nodes</code> 1-base <code>GhostAcademy</code> plan-node leak (<code>214/214</code> belief checks, <code>0/0/0/0</code> Pro Audit).</li><li><strong>Live Gauntlet Proof (<code>W15c</code>):</strong> <strong><code>4W–0L–0T</code> (<code>100%</code> WR)</strong> across all T3 starts (including 2-base <code>GhostAcademy@482s</code> W and 2-base <code>RoboticsBay@711s</code> <code>15.28x</code> W), <strong><code>0</code> unplanned 1-base T3 leaks, <code>0</code> premature starve</strong>.</li></ul></li><li><strong>Map-Symmetry Inference, Dual Ground-BFS Voronoi &amp; Dynamic Commitment-Risk Gate (<a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/sc2-placement.rkt" target="_blank" rel="noopener noreferrer">sc2-placement.rkt</a>, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/sc2-protobuf-ws.rkt" target="_blank" rel="noopener noreferrer">sc2-protobuf-ws.rkt</a>, <a href="https://github.com/sticklane/mothman-sc2-bot/blob/main/lib/bot-runtime.rkt" target="_blank" rel="noopener noreferrer">bot-runtime.rkt</a>):</strong><ul><li>Match-start symmetry classifier (<code>rotational-180</code>, <code>mirror-horizontal</code>, <code>mirror-vertical</code>, <code>mirror-diagonal-main</code>, <code>mirror-diagonal-anti</code>, <code>asymmetric</code>; confirmed <code>44.4%</code> of our 36-match pool is non-rotational) + cached dual Ground-BFS Voronoi fields (<code>~4.8 ms</code> once at match start, <strong><code>0 ms/step</code></strong> cached; <code>553/553</code> wire tests).</li><li>3-zone partition (<code>Own Territory</code>, <code>Contested Frontline</code>, <code>Deep Enemy Territory</code>, with separate air metric) + commitment-risk gating exempting dedicated mobile/air harass, pure mobile squads, calibrated upgrade spikes (<code>&gt;= 18</code> sup, <code>&gt;= 0.85x</code>), greedy/3rd+ exposed expand denials (<code>&gt;= 0.90x</code>), and behind-in-eco desperation pushes — after diagnosing and fixing a main-ramp <code>cliff-blocked?</code> inversion (<code>L18590</code>/<code>L18683</code>/<code>L19955</code>) and empty-Medivac detachment (<code>l34-phase7</code>).</li></ul></li><li><strong>Bench &amp; Verification Results (<code>zqtlwvzs 62a0ceed</code>):</strong><ul><li><strong>All 7/7 Verification Gates PASS:</strong> <code>24/24</code> SMV, <strong><code>553/553</code> wire tests</strong>, <code>2,281</code> unit assertions (<code>12/12</code> mutation kill), <code>0/0/0/0</code> Pro Audit, <strong><code>214/214</code> strict live-pipeline tactics (<code>100.0%</code>, <code>wave15-repro 8/8</code>, <code>novel 125/125</code>, <code>wire_rejects = 0</code>)</strong>.</li><li><strong>21-Duel Real-<code>SC2_x64</code> Physics Arena:</strong> <strong>SHATTERED ALL-TIME RECORDS — <code>12W–1L–8T</code> &amp; <code>1.79x</code> Agg Trade</strong> (original 18 undefeated <code>11W–0L–7T</code>; all 3 races <code>&gt; 1.0x</code>: Zerg 2nd straight <code>7W–0L–0T</code> <code>3.26x</code> ATH, Protoss <code>3W–0L–4T</code> <code>1.59x</code> ATH, Terran <code>2W–1L–4T</code> <code>1.06x</code>).</li><li><strong>36-Match Real-<code>SC2_x64</code> Gauntlet (<code>iter15c_wave15c</code>):</strong> <strong>Non-<code>Chance</code> (<code>n=33</code>) tied shipped W12 HWM at <code>11W–19L–3T</code></strong> (<code>+3W / -3L</code> over <code>W15b</code>, <code>WallTies 3 → 1</code>, <code>mirror-vertical 5W–5L 0.92x</code>, first <code>2–1</code> series win vs <code>puck</code>, undefeated <code>1–0–2</code> vs <code>oberon</code>, first Zerg non-loss vs <code>sludgement2-revived</code>, <code>HomeStall = 0 / CloakLoss = 0 / SelfCancel = 0 / AirAA = 0</code>; raw <code>11W–22L–3T</code> differed from W12 <code>14W</code> solely on <code>Chance</code> rolling <code>3× Zerg 0–3</code> vs <code>2P+1T 3–0</code>, while Non-<code>Chance</code> TradeAgg <code>0.67x</code> vs <code>0.80x</code> and <code>Siege0</code> <code>9</code> vs <code>6</code> remain the next polish target).</li></ul></li></ul>
+<hr />
+<h2 id="8-loops-1618-live-ai-arena-audit-action-budgetsiege0-breakthroughs-amp-live-ai-arena-ship-bf1043b7">8. Loops 16–18: Live AI Arena Audit, Action-Budget/Siege0 Breakthroughs &amp; Live AI Arena Ship (<code>bf1043b7</code>) <a class="anchor" href="#8-loops-1618-live-ai-arena-audit-action-budgetsiege0-breakthroughs-amp-live-ai-arena-ship-bf1043b7" aria-label="Link to section">#</a></h2>
+<h3 id="live-ai-arena-audit-5136381-post-b1fecacb-deploy">Live AI Arena Audit (<code>#5136381+</code>, Post-<code>b1fecacb</code> Deploy) <a class="anchor" href="#live-ai-arena-audit-5136381-post-b1fecacb-deploy" aria-label="Link to section">#</a></h3>
+<ul><li>Across <code>31</code> completed external matches (<code>0</code> crashes, <code>0</code> timeouts, <code>0</code> <code>ourFault</code>, <code>avgStepTime 1.8–13.6 ms</code>): <strong><code>10W–21L–0T</code> (<code>32.3%</code> WR, <code>+11</code> Net ELO)</strong>; Comp #38 ladder <code>9W–15L</code> (<code>37.5%</code> WR, <code>+11</code> ELO; <code>Mothman-T 4W–5L +12 ELO</code>), <strong><code>SupBlk 4.2%</code></strong>, out-macroing live opponents (<code>W@4/6m 25.7/39.7</code> vs <code>25.4/37.1</code>).</li><li>Identified the #1 live loss driver: <strong><code>SIEGE_ZERO_DPS_LOSS</code> (<code>9/21 = 42.9%</code> of all live losses)</strong> plus live <code>77–150s</code> Terran bank freezes (<code>#5134986</code>, <code>#5136226</code>) and <code>FastBC</code> counter gaps (<code>#5136357</code>, <code>#5136362</code>).</li></ul>
+<h3 id="root-causes-eliminated-across-loops-1618-nxspoxkw-bf1043b7">Root Causes Eliminated Across Loops 16–18 (<code>nxspoxkw bf1043b7</code>) <a class="anchor" href="#root-causes-eliminated-across-loops-1618-nxspoxkw-bf1043b7" aria-label="Link to section">#</a></h3>
+<ol><li><strong><code>Siege0</code> 3-Bug Chain (<code>bot-runtime.rkt</code>, <code>arena-minimax.rkt</code>):</strong> Unified <code>siege-shelling-friendly-structure?</code> with <code>&lt;= 30t</code> / own-Voronoi home defense, removed unreachable <code>L19053</code> dead-code guard on <code>capital-siege-dive?</code>, and eliminated <code>9.6–13.5t</code> <code>0</code>-DPS backward yo-yo across Tanks/Colossi/Tempests (<code>Siege0</code> <code>-56%</code> in W16; <code>z02</code> Tank kite <code>-77%</code>, <code>p07 4.94x</code>).</li><li><strong>Terran Bunker <code>Salvage</code> <code>1,344</code>-APM Macro Freeze (<code>bot-runtime.rkt</code>, <code>sc2-protobuf-ws.rkt</code>):</strong> Two completed Bunkers spamming <code>P0</code> <code>mark-urgent-survival-cmd!</code> <code>(salvage bid)</code> every <code>4f</code> starved <code>100%</code> of <code>P1</code> Terran macro for <code>77–150s</code> (both locally and on live AI Arena). Demoted <code>ab=32</code> <code>P0 → P3</code>, required empty idle Bunker + <code>112f</code>/<code>168f</code> cooldown → <strong><code>IdleBankFreeze = 0/54</code></strong>.</li><li><strong>Zerg <code>43</code>-Cast/Step Creep Tumor Action-Cap Eviction (<code>bot-runtime.rkt</code>):</strong> Uncapped <code>plan-multi-highway-creep-spread</code> evicted <code>&lt; 85</code> combat <code>attack-pos</code> orders; capped to <code>&lt;= 2</code>/step (<code>64f</code> CD) + Rally-idle <code>Lair</code> morph + high-bank Larva unlock → <strong><code>HomeStall = 0/54</code></strong>, <code>20</code>-Tumor step latency <code>117 ms → 24 ms</code>.</li><li><strong><code>P2</code> Combat Micro Starving <code>P3</code> Gas/Worker Recovery <code>0/100</code> (<code>sc2-protobuf-ws.rkt</code>):</strong> Elevated critical worker/gas recovery (<code>gas-resat</code>, <code>idle-worker</code>, <code>offline-evac</code>, <code>gas-float-pull</code>) <code>P3 → P1</code> (<code>mark-macro-econ-cmd!</code>) + <code>&gt;= 24f</code> <code>P3</code> overdue rescue + carrying-cargo exclusion → gas resat <strong><code>0/100 → 100/100</code></strong>, <strong><code>GasZeroFreeze = 0/54</code></strong>.</li><li><strong>Global Placement Cache-Thrash, Counter Comps, <code>&lt; 3:30</code> Rush Defense &amp; P0 <code>has-core?</code> Crash Fix (<code>sc2-protobuf-ws.rkt</code>, <code>priority-macro-brain.rkt</code>, <code>econ-ledger.rkt</code>):</strong> Replaced global <code>hash-clear!</code> with targeted <code>(bldg, anchor)</code> invalidation + <code>48f/64f</code> TTL + 1-miss <code>5×3 → 3×3</code> overflow (<code>ProdPlaceStall -49.5%</code>, <code>tr95max = 9.16 ms</code>), added <code>FastBC</code> / anti-Tank / proxy-Marauder / <code>&lt; 3:30</code> Ling-rush stand-and-fight fixes, and hoisted <code>has-core?</code> above <code>protoss-upg-prereq-ok?</code> (<code>econ-ledger.rkt:4082</code>, <code>0</code> remaining forward-ref hazards across all <code>194</code> internal defines, locked by <code>novel-138</code>).</li></ol>
+<h3 id="final-54-match-opponents-all-scorecard-iter18wave18-j-10-amp-live-ai-arena-deploy">Final 54-Match <code>--opponents all</code> Scorecard (<code>iter18_wave18</code>, <code>-j 10</code>) &amp; Live AI Arena Deploy <a class="anchor" href="#final-54-match-opponents-all-scorecard-iter18wave18-j-10-amp-live-ai-arena-deploy" aria-label="Link to section">#</a></h3>
+<ul><li><strong>Full-Roster (<code>n=54</code>, <code>0</code> Ties):</strong> <strong><code>17W–37L–0T</code> (<code>31.5%</code> WR — <code>+4W / +7.0 pp</code> ATH vs Loop 14 <code>13W–36L–4T</code>; would be <code>18W–36L = 33.3%</code> with <code>#24</code>&#x27;s now-fixed <code>win=0.99</code> crash)</strong>, TradeAgg <strong><code>0.78x</code> (<code>+53%</code>)</strong>, PkArmy <strong><code>2,663</code> (<code>+32%</code>)</strong>, <strong><code>Mothman-T 7W–11L (38.9%)</code></strong>, <strong><code>Mothman-Z 6W–12L (33.3%)</code></strong>.</li><li><strong><code>core_12</code> Non-<code>Chance</code> (<code>n=33</code>):</strong> <strong>NEW ATH <code>12W–21L–0T</code> (<code>36.4%</code>, <code>0.75x</code>)</strong> (<code>titania 3–0</code>, <strong><code>puck 2–1</code></strong>, <strong><code>oberon 2–1</code></strong>, <code>monsterbot 2–1</code>, <code>#16 Z v RustyNikolaj 2.60x W</code>; <code>OBRet</code> slashed <strong><code>-90.2%</code></strong> <code>131.8k → 12.9k</code>).</li><li><strong>Held-Out <code>unseen_6</code> (<code>n=18</code>) Outperformed <code>core_12</code> (Zero Overfitting):</strong> <strong><code>5W–13L–0T</code> (<code>6W–12L</code> w/o <code>#24</code>)</strong>, TradeAgg <strong><code>0.94x</code> (<code>+135%</code> vs W14 <code>0.40x</code>)</strong>, PkArmy <strong><code>2,869</code> (<code>+57%</code>)</strong>, <code>SupBlk 4.3%</code>, <strong><code>Mothman-Z 3W–3L = 50.0%</code> (<code>1.53x</code>)</strong>.</li><li><strong>Cleanliness &amp; Latency Records (<code>n=53</code> telemetry):</strong> <strong><code>IdleBankFreeze = 0</code></strong>, <strong><code>GasZeroFreeze = 0</code></strong>, <strong><code>HomeStall = 0</code></strong>, <strong><code>RoboWaste = 0</code></strong>, <strong><code>WallTies = 0</code></strong>, <strong><code>T3 = 19</code> (<code>0</code> starve)</strong>, <strong><code>Z NonLing = 76.2%</code> ATH</strong>, <strong><code>SupBlk = 4.5%</code> PASS</strong>, <strong><code>avg = 7.89 ms</code></strong>, <strong><code>p95 = 13.45 ms</code></strong>, <strong><code>tr95max = 9.16 ms</code></strong>, <strong><code>max = 177.04 ms</code> ATH</strong>.</li><li><strong>Final Verification, Standalone ELF <code>BotZip</code> Smoke Sweep &amp; Live AI Arena Deploy:</strong><ul><li>All <code>7/7</code> gates PASS (<code>24/24</code> SMV, <strong><code>593/593</code> wire</strong>, <strong><code>2,283/2,283</code> unit</strong> incl. Suite 19 BotZip, <code>0/0/0/0</code> Pro Audit, <strong><code>231/231</code> strict tactics <code>wire_rejects = 0</code></strong>).</li><li>All 4 standalone ELF zips (<code>ladder/Mothman-{P,T,Z,X}.zip</code>, <code>33.24 MiB &lt;= 35.0 MB</code>) swept <strong><code>4W–0L–0T</code> (<code>100%</code>)</strong> in real <code>SC2_x64</code> (<code>avg = 6.78 ms</code>, <code>p95 = 11.03 ms</code>, <code>max = 193.0 ms</code>, <code>0</code> faults).</li><li>Pushed <strong><code>nxspoxkw bf1043b7</code></strong> to <code>origin</code> (<code>main</code> &amp; <code>master</code>, fresh empty <code>@ = vpxtsyux 10e9d56a</code>), and <a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/44677711138" target="_blank" rel="noopener noreferrer"><code>deploy-aiarena.yml</code> Run <code>44677711138</code></a> <strong>SUCCEEDED (<code>1m5s</code>)</strong> — all 4 bots (<code>Mothman-Z #1458</code>, <code>Mothman-T #1459</code>, <code>Mothman-P #1460</code>, <code>Mothman-X #1461</code>) verified MD5-matching and ACTIVE in Competition <code>#38</code> with 8 live matches (<code>#5136470–#5136477</code>) queued.</li></ul></li></ul></main></div>
+<footer class="site-footer">
+  <div>Mothman · StarCraft II bots on AI Arena</div>
+  <div>Updated 2026-11-21 11:09 UTC · <a href="https://github.com/sticklane/mothman-sc2-bot/releases" target="_blank" rel="noopener noreferrer">Replay Archives</a></div>
+</footer>
+
+<script>
+(function() {
+  // 1. Mobile menu toggle
+  const toggle = document.getElementById('nav-toggle');
+  const drawer = document.getElementById('mobile-drawer');
+  if (toggle && drawer) {
+    toggle.addEventListener('click', function() {
+      const open = drawer.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.textContent = open ? 'Close' : 'Menu';
+    });
+  }
+
+  // 2. Auto-pause other videos when one starts playing
+  document.addEventListener('play', function(e) {
+    if (e.target && e.target.tagName === 'VIDEO') {
+      document.querySelectorAll('video').forEach(function(v) {
+        if (v !== e.target && !v.paused) v.pause();
+      });
+    }
+  }, true);
+
+  // 3. Image Lightbox Modal
+  const imgs = Array.from(document.querySelectorAll('img.clip-img'));
+  if (imgs.length) {
+    const lb = document.createElement('div');
+    lb.className = 'modal-overlay';
+    lb.innerHTML =
+      '<div class="modal-controls">' +
+        '<button class="modal-btn" id="lb-prev">Prev</button>' +
+        '<button class="modal-btn" id="lb-next">Next</button>' +
+        '<a class="modal-btn" id="lb-raw" target="_blank" rel="noopener noreferrer">Open file</a>' +
+        '<button class="modal-btn" id="lb-close">Close</button>' +
+      '</div>' +
+      '<img id="lb-img" alt="" />' +
+      '<div class="modal-caption" id="lb-cap"></div>';
+    document.body.appendChild(lb);
+    const lbImg = document.getElementById('lb-img');
+    const lbCap = document.getElementById('lb-cap');
+    const lbRaw = document.getElementById('lb-raw');
+    let cur = 0;
+    function show(i) {
+      cur = (i + imgs.length) % imgs.length;
+      const src = imgs[cur].getAttribute('data-lightbox-src') || imgs[cur].src;
+      const alt = imgs[cur].getAttribute('data-lightbox-alt') || imgs[cur].alt || '';
+      lbImg.src = src;
+      lbImg.alt = alt;
+      lbRaw.href = src;
+      lbCap.textContent = (cur + 1) + ' of ' + imgs.length + (alt ? ' — ' + alt : '');
+      lb.classList.add('open');
+    }
+    function closeLb() { lb.classList.remove('open'); }
+    imgs.forEach(function(im, idx) { im.addEventListener('click', function() { show(idx); }); });
+    document.getElementById('lb-prev').addEventListener('click', function(e) { e.stopPropagation(); show(cur - 1); });
+    document.getElementById('lb-next').addEventListener('click', function(e) { e.stopPropagation(); show(cur + 1); });
+    document.getElementById('lb-close').addEventListener('click', function(e) { e.stopPropagation(); closeLb(); });
+    lb.addEventListener('click', function(e) { if (e.target === lb) closeLb(); });
+    document.addEventListener('keydown', function(e) {
+      if (!lb.classList.contains('open')) return;
+      if (e.key === 'Escape') closeLb();
+      else if (e.key === 'ArrowRight') show(cur + 1);
+      else if (e.key === 'ArrowLeft') show(cur - 1);
+    });
+  }
+
+  // 4. Video Theater Modal (delegated for both report videos and dynamic gallery cards)
+  const vm = document.createElement('div');
+  vm.className = 'modal-overlay';
+  vm.innerHTML =
+    '<div class="modal-controls">' +
+      '<a class="modal-btn" id="vm-raw" target="_blank" rel="noopener noreferrer">Download MP4</a>' +
+      '<button class="modal-btn" id="vm-close">Close</button>' +
+    '</div>' +
+    '<video id="vm-video" controls playsinline preload="metadata"></video>' +
+    '<div class="modal-caption" id="vm-cap"></div>';
+  document.body.appendChild(vm);
+  const vmVideo = document.getElementById('vm-video');
+  const vmCap = document.getElementById('vm-cap');
+  const vmRaw = document.getElementById('vm-raw');
+  function closeVm() {
+    vmVideo.pause();
+    vmVideo.removeAttribute('src');
+    vmVideo.load();
+    vm.classList.remove('open');
+  }
+  document.addEventListener('click', function(e) {
+    const btn = e.target.closest('.video-theater-btn');
+    if (!btn) return;
+    const src = btn.getAttribute('data-video-src') || '';
+    const poster = btn.getAttribute('data-video-poster') || '';
+    const title = btn.getAttribute('data-video-title') || '';
+    if (!src) return;
+    document.querySelectorAll('video').forEach(function(v) { if (!v.paused) v.pause(); });
+    vmVideo.src = src;
+    if (poster) vmVideo.poster = poster; else vmVideo.removeAttribute('poster');
+    vmRaw.href = src;
+    vmCap.textContent = title;
+    vm.classList.add('open');
+    vmVideo.play().catch(function() {});
+  });
+  document.getElementById('vm-close').addEventListener('click', function(e) { e.stopPropagation(); closeVm(); });
+  vm.addEventListener('click', function(e) { if (e.target === vm) closeVm(); });
+  document.addEventListener('keydown', function(e) {
+    if (vm.classList.contains('open') && e.key === 'Escape') closeVm();
+  });
+})();
+</script>
+
+
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'neutral', securityLevel: 'loose' });
+</script>
+
+</body>
+</html>
