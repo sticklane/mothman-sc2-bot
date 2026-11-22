@@ -1,0 +1,419 @@
+name: Deploy v2 SC2 Bots to AI Arena
+
+on:
+  workflow_dispatch:
+    inputs:
+      suffix:
+        description: "Name suffix to append to Mothman-{Z,T,P,X} (default: 2)"
+        required: false
+        default: "2"
+      bots:
+        description: "Comma-separated races/names to deploy (or 'all')"
+        required: false
+        default: "all"
+      activate_competition:
+        description: "Activate Competition #38 participation for the new bots"
+        required: false
+        default: "true"
+      request_matches:
+        description: "Number of initial matches to request across activated v2 bots (0 to skip)"
+        required: false
+        default: "8"
+      opponents:
+        description: "Opponent preset ('div3-5', 'div2-3', 'div1') or comma-separated names/IDs"
+        required: false
+        default: "div3-5"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-aiarena-v2
+  cancel-in-progress: false
+
+jobs:
+  deploy-v2:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Repackage, Upload/Update v2 Bots, Activate Competition #38, and Request Matches
+        env:
+          AIARENA_API_TOKEN: ${{ secrets.AIARENA_API_TOKEN }}
+          NAME_SUFFIX: ${{ inputs.suffix }}
+          DISPATCH_BOTS: ${{ inputs.bots }}
+          ACTIVATE_COMPETITION: ${{ inputs.activate_competition }}
+          REQUEST_MATCHES: ${{ inputs.request_matches }}
+          OPPONENTS_SPEC: ${{ inputs.opponents }}
+        run: |
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          import tempfile
+          import time
+          import urllib.parse
+          import zipfile
+
+          BASE_BOTS = [
+              ("ladder/Mothman-Z.zip", "Mothman-Z", "Z"),
+              ("ladder/Mothman-T.zip", "Mothman-T", "T"),
+              ("ladder/Mothman-P.zip", "Mothman-P", "P"),
+              ("ladder/Mothman-X.zip", "Mothman-X", "R"),
+          ]
+          COMPETITION_ID = 38
+          DEFAULT_MAP_POOL_ID = 18
+          USER_ID = 3871
+
+          OPPONENT_PRESETS = {
+              "div1": [(1256, "Atlas"), (248, "Eris"), (611, "Phobos"), (730, "Deimos")],
+              "div2-3": ["Creepy_strategies", "Thssprtssbt", "Mulebot"],
+              "div3-5": [
+                  "Creepy_strategies",
+                  "Thssprtssbt",
+                  "sludgement2-revived",
+                  "mini-puck",
+                  "onlyfans",
+                  "oberon",
+                  "titania",
+                  "who",
+              ],
+          }
+
+          token = os.environ.get("AIARENA_API_TOKEN", "").strip()
+          if not token:
+              print("ERROR: AIARENA_API_TOKEN secret is empty", file=sys.stderr)
+              sys.exit(1)
+
+          suffix = (os.environ.get("NAME_SUFFIX") or "2").strip()
+          if not re.fullmatch(r"[0-9A-Za-z._-]+", suffix):
+              print(f"ERROR: invalid suffix {suffix!r}", file=sys.stderr)
+              sys.exit(1)
+
+          def relay_id(type_name: str, obj_id: int) -> str:
+              return base64.b64encode(f"{type_name}:{obj_id}".encode("utf-8")).decode("ascii")
+
+          def decode_relay_id(b64: str):
+              try:
+                  raw = base64.b64decode(b64.strip()).decode("utf-8", errors="replace")
+                  parts = raw.split(":", 1)
+                  if len(parts) == 2 and parts[1].isdigit():
+                      return parts[0], int(parts[1])
+                  return parts[0], None
+              except Exception:
+                  return "", None
+
+          def curl_json(args, timeout_s=None):
+              is_upload = any(isinstance(a, str) and ("=@" in a) for a in args)
+              eff_timeout = str(timeout_s if timeout_s is not None else (180 if is_upload else 45))
+              last_code, last_body = 0, ""
+              for attempt in range(6):
+                  if attempt > 0:
+                      time.sleep(0.5)
+                  res = subprocess.run(
+                      ["curl", "-sS", "--max-time", eff_timeout, "-w", "\n%{http_code}", *args],
+                      capture_output=True,
+                      text=True,
+                  )
+                  if res.returncode != 0:
+                      wait_s = min(30.0, 2.5 * (attempt + 1))
+                      last_code, last_body = 0, (res.stderr or "")[:400]
+                      print(f"  [WARN] curl rc={res.returncode} (attempt {attempt + 1}/6); retrying in {wait_s:.1f}s: {last_body}", file=sys.stderr)
+                      time.sleep(wait_s)
+                      continue
+                  body, _, status = res.stdout.rpartition("\n")
+                  status_code = int(status.strip()) if status.strip().isdigit() else 0
+                  last_code, last_body = status_code, body
+                  detail = ""
+                  if body.strip():
+                      try:
+                          parsed = json.loads(body)
+                          if isinstance(parsed, dict):
+                              detail = str(parsed.get("detail", ""))
+                      except Exception:
+                          detail = ""
+                  if status_code == 429 or status_code >= 500 or "throttled" in detail.lower():
+                      m = re.search(r"Expected available in (\d+(?:\.\d+)?) seconds", detail)
+                      wait_s = (float(m.group(1)) + 0.5) if m else min(30.0, 2.5 * (attempt + 1))
+                      print(f"  [RATE_LIMIT/HTTP {status_code}] retrying in {wait_s:.1f}s ({detail[:160]})", file=sys.stderr)
+                      time.sleep(wait_s)
+                      continue
+                  return status_code, body
+              return last_code, last_body
+
+          def api_get(endpoint: str):
+              url = endpoint if endpoint.startswith("http") else f"https://aiarena.net/api/{endpoint.lstrip('/')}"
+              code, body = curl_json(["-H", f"Authorization: Token {token}", url])
+              if not (200 <= code < 300):
+                  return None
+              try:
+                  return json.loads(body)
+              except Exception:
+                  return None
+
+          def graphql_post(query: str, variables: dict):
+              payload = json.dumps({"query": query, "variables": variables})
+              code, body = curl_json([
+                  "-X", "POST",
+                  "-H", f"Authorization: Token {token}",
+                  "-H", "Content-Type: application/json",
+                  "-d", payload,
+                  "https://aiarena.net/graphql/",
+              ])
+              try:
+                  parsed = json.loads(body)
+              except Exception:
+                  parsed = {"raw": body[:400], "http_status": code}
+              return code, parsed
+
+          def resolve_opponents(spec: str):
+              key = (spec or "div3-5").strip().lower()
+              raw_entries = OPPONENT_PRESETS[key] if key in OPPONENT_PRESETS else [x.strip() for x in spec.split(",") if x.strip()]
+              if not raw_entries:
+                  raw_entries = OPPONENT_PRESETS["div3-5"]
+              resolved = []
+              for entry in raw_entries:
+                  if isinstance(entry, tuple) and len(entry) == 2:
+                      resolved.append(entry)
+                  elif isinstance(entry, int) or (isinstance(entry, str) and entry.isdigit()):
+                      oid = int(entry)
+                      data = api_get(f"bots/{oid}/")
+                      oname = data.get("name", f"Bot{oid}") if isinstance(data, dict) else f"Bot{oid}"
+                      resolved.append((oid, oname))
+                  elif isinstance(entry, str):
+                      data = api_get(f"bots/?name={urllib.parse.quote(entry)}")
+                      results = data.get("results", []) if isinstance(data, dict) else []
+                      exact = next((b for b in results if isinstance(b, dict) and str(b.get("name", "")).lower() == entry.lower()),
+                                   results[0] if results and isinstance(results[0], dict) else None)
+                      if exact and isinstance(exact.get("id"), int):
+                          resolved.append((exact["id"], exact.get("name", entry)))
+              return resolved or list(OPPONENT_PRESETS["div1"])
+
+          def list_user_bots():
+              bots = []
+              url = f"bots/?user={USER_ID}&limit=100"
+              while url:
+                  data = api_get(url)
+                  if not isinstance(data, dict):
+                      break
+                  bots.extend(data.get("results", []))
+                  url = data.get("next")
+              return bots
+
+          def repack_v2_zip(src_zip: str, base_name: str, v2_name: str, out_zip: str):
+              with zipfile.ZipFile(src_zip, "r") as zin, zipfile.ZipFile(out_zip, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                  for info in zin.infolist():
+                      data = zin.read(info.filename)
+                      new_name = v2_name if info.filename == base_name else info.filename
+                      if new_name in ("config.json", "bot_config.json"):
+                          cfg = json.loads(data.decode("utf-8"))
+                          cfg["BotName"] = v2_name
+                          data = (json.dumps(cfg, indent=2) + "\n").encode("utf-8")
+                      elif new_name == "run.py":
+                          txt = data.decode("utf-8")
+                          txt = txt.replace(
+                              '("Mothman", "Mothman-X", "Mothman-Z", "Mothman-T", "Mothman-P", "Mothman-R")',
+                              f'("{v2_name}", "Mothman", "Mothman-X", "Mothman-Z", "Mothman-T", "Mothman-P", "Mothman-R")',
+                          )
+                          data = txt.encode("utf-8")
+                      zi = zipfile.ZipInfo(new_name, date_time=info.date_time)
+                      zi.compress_type = zipfile.ZIP_DEFLATED
+                      zi.create_system = 3
+                      zi.external_attr = info.external_attr
+                      zout.writestr(zi, data)
+
+              # Dry-run verify extracted ELF binary before uploading
+              with tempfile.TemporaryDirectory() as td:
+                  with zipfile.ZipFile(out_zip, "r") as zf:
+                      for info in zf.infolist():
+                          zf.extract(info, td)
+                          mode = (info.external_attr >> 16) & 0o777
+                          if mode:
+                              os.chmod(os.path.join(td, info.filename), mode)
+                  exe = os.path.join(td, v2_name)
+                  if not os.path.isfile(exe):
+                      raise RuntimeError(f"Repacked zip missing root executable {v2_name}")
+                  res = subprocess.run([exe, "--dry-run"], cwd=td, capture_output=True, text=True, timeout=30)
+                  if res.returncode != 0 or "DRY_RUN_OK" not in res.stdout:
+                      raise RuntimeError(f"Dry-run failed for {v2_name}: rc={res.returncode} out={res.stdout[:300]} err={res.stderr[:300]}")
+                  print(f"DRY_RUN_OK {v2_name}: {res.stdout.strip()}")
+
+          existing = list_user_bots()
+          by_name = {b.get("name"): b for b in existing if isinstance(b, dict) and b.get("name")}
+          print(f"Found {len(existing)} existing bots for user #{USER_ID}:")
+          for b in existing:
+              print(f"  - {b.get('name')} (#{b.get('id')}): type={b.get('type')} race={b.get('plays_race')} md5={b.get('bot_zip_md5hash')}")
+
+          # Inherit exact bot type from Mothman-P (default cpplinux)
+          default_type = (by_name.get("Mothman-P") or {}).get("type") or "cpplinux"
+          print(f"Using bot type: {default_type}")
+
+          req = (os.environ.get("DISPATCH_BOTS") or "all").strip()
+          if not req or req.lower() == "all":
+              targets = list(BASE_BOTS)
+          else:
+              wanted = {x.strip().lower() for x in req.split(",") if x.strip()}
+              targets = [
+                  item for item in BASE_BOTS
+                  if item[1].lower() in wanted
+                  or f"{item[1]}{suffix}".lower() in wanted
+                  or item[1].split("-")[-1].lower() in wanted
+                  or item[2].lower() in wanted
+              ]
+
+          uploaded_bots = []
+          os.makedirs("/tmp/v2_zips", exist_ok=True)
+          upload_mut = (
+              "mutation($input: UploadBotInput!) { "
+              "uploadBot(input: $input) { bot { id name } errors { field messages } } }"
+          )
+
+          for src_zip, base_name, race_code in targets:
+              if not os.path.isfile(src_zip):
+                  print(f"ERROR: missing source zip {src_zip}", file=sys.stderr)
+                  sys.exit(1)
+              v2_name = f"{base_name}{suffix}"
+              v2_zip = f"/tmp/v2_zips/{v2_name}.zip"
+              repack_v2_zip(src_zip, base_name, v2_name, v2_zip)
+              with open(v2_zip, "rb") as fh:
+                  local_md5 = hashlib.md5(fh.read()).hexdigest()
+
+              if v2_name in by_name:
+                  bot_id = int(by_name[v2_name]["id"])
+                  print(f"Updating existing {v2_name} (#{bot_id}, local_md5={local_md5})...")
+                  code, body = curl_json([
+                      "-X", "PATCH",
+                      "-H", f"Authorization: Token {token}",
+                      "-F", f"bot_zip=@{v2_zip}",
+                      "-F", "bot_data_enabled=true",
+                      f"https://aiarena.net/api/bots/{bot_id}/",
+                  ])
+                  if not (200 <= code < 300):
+                      print(f"ERROR updating {v2_name}: HTTP {code}\n{body}", file=sys.stderr)
+                      sys.exit(1)
+                  payload = json.loads(body)
+                  if "bot_zip_md5hash" not in payload:
+                      payload = api_get(f"bots/{bot_id}/") or payload
+                  remote_md5 = payload.get("bot_zip_md5hash", "unknown")
+                  print(f"OK UPDATED {v2_name} (#{bot_id}): remote_md5={remote_md5} match={remote_md5 == local_md5}")
+                  uploaded_bots.append((bot_id, v2_name))
+              else:
+                  print(f"Creating NEW bot {v2_name} (race={race_code}, type={default_type}, local_md5={local_md5})...")
+                  ops = json.dumps({
+                      "query": upload_mut,
+                      "variables": {
+                          "input": {
+                              "name": v2_name,
+                              "playsRace": race_code,
+                              "type": default_type,
+                              "botDataEnabled": True,
+                              "botZip": None,
+                          }
+                      },
+                  })
+                  fmap = json.dumps({"0": ["variables.input.botZip"]})
+                  code, body = curl_json([
+                      "-X", "POST",
+                      "-H", f"Authorization: Token {token}",
+                      "-F", f"operations={ops}",
+                      "-F", f"map={fmap}",
+                      "-F", f"0=@{v2_zip};type=application/zip",
+                      "https://aiarena.net/graphql/",
+                  ])
+                  try:
+                      resp = json.loads(body)
+                  except Exception:
+                      print(f"ERROR creating {v2_name}: HTTP {code}\n{body[:600]}", file=sys.stderr)
+                      sys.exit(1)
+                  ub = (resp.get("data") or {}).get("uploadBot") or {}
+                  errs = ub.get("errors") or resp.get("errors")
+                  bot_obj = ub.get("bot") or {}
+                  if errs or not bot_obj.get("id"):
+                      print(f"ERROR creating {v2_name}: HTTP {code} errors={errs} resp={resp}", file=sys.stderr)
+                      sys.exit(1)
+                  _, bot_id = decode_relay_id(bot_obj["id"])
+                  info = api_get(f"bots/{bot_id}/") or {}
+                  remote_md5 = info.get("bot_zip_md5hash", "unknown")
+                  print(f"OK CREATED {v2_name} (#{bot_id}, https://aiarena.net/bots/{bot_id}/): remote_md5={remote_md5} match={remote_md5 == local_md5}")
+                  uploaded_bots.append((bot_id, v2_name))
+
+          activated_bots = []
+          activate_flag = os.environ.get("ACTIVATE_COMPETITION", "true").strip().lower() != "false"
+          if activate_flag and uploaded_bots:
+              comp_gql = relay_id("CompetitionType", COMPETITION_ID)
+              comp_mut = (
+                  "mutation($input: UpdateCompetitionParticipationInput!) { "
+                  "updateCompetitionParticipation(input: $input) { errors { field messages } } }"
+              )
+              for bid, bname in uploaded_bots:
+                  code, resp = graphql_post(
+                      comp_mut,
+                      {"input": {"bot": relay_id("BotType", bid), "competition": comp_gql, "active": True}},
+                  )
+                  errs = ((resp.get("data") or {}).get("updateCompetitionParticipation") or {}).get("errors") or resp.get("errors")
+                  if errs or code >= 400:
+                      print(f"WARN competition activation {bname} (#{bid}): HTTP {code} {errs}")
+                  else:
+                      print(f"ACTIVE Competition #{COMPETITION_ID}: {bname} (#{bid})")
+                      activated_bots.append((bid, bname))
+
+          raw_req = (os.environ.get("REQUEST_MATCHES") or "8").strip()
+          req_matches = int(raw_req) if raw_req.isdigit() else 0
+          match_targets = activated_bots if activated_bots else uploaded_bots
+          if req_matches > 0 and match_targets:
+              opponents = resolve_opponents(os.environ.get("OPPONENTS_SPEC", "div3-5"))
+              pool_gql = relay_id("MapPoolType", DEFAULT_MAP_POOL_ID)
+              req_mut = (
+                  "mutation($input: RequestMatchInput!) { "
+                  "requestMatch(input: $input) { errors { field messages } match { id } } }"
+              )
+              ordered = sorted(match_targets, key=lambda x: x[0])
+              nb, no = len(ordered), len(opponents)
+              created_ids = []
+              for idx in range(req_matches):
+                  b_id, b_name = ordered[idx % nb]
+                  o_id, o_name = opponents[(idx + (idx // nb)) % no]
+                  code, resp = graphql_post(
+                      req_mut,
+                      {
+                          "input": {
+                              "bot1": relay_id("BotType", b_id),
+                              "bot2": relay_id("BotType", o_id),
+                              "matchCount": 1,
+                              "mapSelectionType": "map_pool",
+                              "mapPool": pool_gql,
+                          }
+                      },
+                  )
+                  rm = (resp.get("data") or {}).get("requestMatch") or {}
+                  errs = rm.get("errors") or resp.get("errors")
+                  raw_match = rm.get("match")
+                  match_objs = raw_match if isinstance(raw_match, list) else ([raw_match] if isinstance(raw_match, dict) else [])
+                  mids = [decode_relay_id(mo["id"])[1] for mo in match_objs if isinstance(mo, dict) and isinstance(mo.get("id"), str)]
+                  mids = [m for m in mids if m]
+                  if mids:
+                      for mid in mids:
+                          created_ids.append(mid)
+                          print(f"REQUESTED Match #{mid}: {b_name} (#{b_id}) vs {o_name} (#{o_id}) -> https://aiarena.net/matches/{mid}/")
+                  else:
+                      print(f"WARN Match request failed ({b_name} vs {o_name}): HTTP {code} errors={errs}")
+                      if errs and any(k in json.dumps(errs).lower() for k in ("limit", "quota")):
+                          print("Stopping further match requests due to quota/limit.")
+                          break
+              if created_ids:
+                  print(f"MATCH_REQUEST_SUMMARY: count={len(created_ids)} ids={','.join(str(x) for x in created_ids)}")
+
+          print("\n=== Final User Bots Summary ===")
+          for b in list_user_bots():
+              print(f"  * {b.get('name')} (#{b.get('id')}, https://aiarena.net/bots/{b.get('id')}/): type={b.get('type')} race={b.get('plays_race')} updated={b.get('bot_zip_updated')} md5={b.get('bot_zip_md5hash')}")
+          PY
