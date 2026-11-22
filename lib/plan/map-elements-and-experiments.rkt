@@ -297,9 +297,14 @@
 (: COLLAPSIBLE-ROCK-TYPE-IDS (Listof Integer))
 (define COLLAPSIBLE-ROCK-TYPE-IDS '(480 482 588 589 590 591 594 595 596 597 598 599 600 601 602))
 
+;; L59-H2H (`#1553` Fix #2B): Exclude `UnbuildableRocks/Bricks/PlatesDestructible` (472, 473, 474)
+;; which are ground-level walkable plates, NOT path-blocking destructible rocks!
+(: UNBUILDABLE-PLATE-TYPE-IDS (Listof Integer))
+(define UNBUILDABLE-PLATE-TYPE-IDS '(472 473 474))
+
 (: DESTRUCTIBLE-ROCK-TYPE-IDS (Listof Integer))
 (define DESTRUCTIBLE-ROCK-TYPE-IDS
-  '(367 369 370 372 373 375 376 472 473 474 639 640 641 642 643 644 645 646 647 648 649 650 651 652 653 658))
+  '(367 369 370 372 373 375 376 639 640 641 642 643 644 645 646 647 648 649 650 651 652 653 658))
 
 (: cache-miss-thunk (-> Symbol))
 (define (cache-miss-thunk) '__cache-miss__)
@@ -580,17 +585,15 @@
                  (safe-boolean (memv tid STANDARD-MINERAL-TYPE-IDS))
                  (safe-boolean (memv tid THIN-WALL-MINERAL-TYPE-IDS)))))))
 
+;; L59-H2H (`#1553` Fix #2A): Never match `LabMineralField` or normal depleting Main patches
+;; (`<= 300`/`<= 450`) as thin-wall minerals! Require `0 < cnt <= 150` here (isolated `<= 450`
+;; backdoor seams `> 11t` from all townhalls/pads are checked explicitly in `plan-mineral-wall-and-worker-path-tactics`).
 (: thin-wall-mineral? (-> Any Boolean))
 (define (thin-wall-mineral? u)
   (and (mineral-unit? u)
-       (let ([sym (u-sym u)]
-             [tid (u-type-id u)]
-             [cnt (u-contents u)])
+       (let ([cnt (u-contents u)])
          (and (> cnt 0)
-              (or (<= cnt 300)
-                  (and (<= cnt 450)
-                       (or (safe-boolean (memv tid THIN-WALL-MINERAL-TYPE-IDS))
-                           (safe-boolean (memq sym '(mineral-field-450 lab-mineral-field lab-mineral-field-750))))))))))
+              (<= cnt 150)))))
 
 (: rich-geyser-sym? (-> Symbol Boolean))
 (define (rich-geyser-sym? sym)
@@ -659,15 +662,17 @@
       (let ([tid (u-type-id u)])
         (and (> tid 0) (safe-boolean (memv tid COLLAPSIBLE-ROCK-TYPE-IDS))))))
 
+(: unbuildable-plate-sym? (-> Symbol Boolean))
+(define (unbuildable-plate-sym? sym)
+  (regexp-match? #rx"unbuildable|plate|brick" (symbol->string sym)))
+
 (: destructible-rock-sym? (-> Symbol Boolean))
 (define (destructible-rock-sym? sym)
   (define cached (hash-ref DESTRUCTIBLE-ROCK-SYM-CACHE sym cache-miss-thunk))
   (if (eq? cached '__cache-miss__)
-      (let ([res (or (regexp-match? #rx"destructible" (symbol->string sym))
-                     (safe-boolean
-                      (memq sym (ann '(rocks unbuildable-rocks unbuildable-plates
-                                       unbuildable-bricks-destructible unbuildable-plates-destructible)
-                                     (Listof Symbol)))))])
+      (let ([res (and (not (unbuildable-plate-sym? sym))
+                      (or (regexp-match? #rx"destructible" (symbol->string sym))
+                          (eq? sym 'rocks)))])
         (hash-set! DESTRUCTIBLE-ROCK-SYM-CACHE sym (if res '__t__ '__f__))
         res)
       (eq? cached '__t__)))
@@ -676,7 +681,9 @@
 (define (destructible-rock-unit? u)
   (define sym (u-sym u))
   (define tid (u-type-id u))
-  (and (not (or (collapsible-rock-sym? sym)
+  (and (not (unbuildable-plate-sym? sym))
+       (not (and (> tid 0) (safe-boolean (memv tid UNBUILDABLE-PLATE-TYPE-IDS))))
+       (not (or (collapsible-rock-sym? sym)
                 (and (> tid 0) (safe-boolean (memv tid COLLAPSIBLE-ROCK-TYPE-IDS)))))
        (or (destructible-rock-sym? sym)
            (and (> tid 0) (safe-boolean (memv tid DESTRUCTIBLE-ROCK-TYPE-IDS))))))
@@ -1301,12 +1308,30 @@
     (define d-seam (dist-2d wx wy nx ny))
     ;; Candidate is on the far side of the wall seam along our outward vector
     (define proj (+ (* (- nx wx) ux) (* (- ny wy) uy)))
-    (when (and (>= d-seam 1.5) (<= d-seam 14.0) (> proj 1.0))
+    (when (and (>= d-seam 1.5) (<= d-seam 22.0) (> proj 1.0))
       (define sc (- proj (* 0.25 d-seam)))
       (when (> sc best-score)
         (set! best-score sc)
         (set! best n))))
   best)
+
+(: worker-harvesting-any-tag? (-> Any (HashTable Integer Boolean) Boolean))
+(define (worker-harvesting-any-tag? w tag-ht)
+  (for/or : Boolean ([o (in-list (u-orders w))])
+    (and (hash? o)
+         (let ([ab (safe-nonneg-int (dyn-hash-ref o 'ability-id 0) 0)]
+               [tt (safe-nonneg-int (dyn-hash-ref o 'target-unit-tag 0) 0)])
+           (and (or (= ab 295) (= ab 298) (= ab 1183) (= ab 3666))
+                (> tt 0)
+                (hash-has-key? tag-ht tt))))))
+
+(: unit-already-attacking-tag? (-> Any Integer Boolean))
+(define (unit-already-attacking-tag? u tid)
+  (for/or : Boolean ([o (in-list (u-orders u))])
+    (and (hash? o)
+         (let ([ab (safe-nonneg-int (dyn-hash-ref o 'ability-id 0) 0)]
+               [tt (safe-nonneg-int (dyn-hash-ref o 'target-unit-tag 0) 0)])
+           (and (= ab 23) (= tt tid))))))
 
 (: plan-mineral-wall-and-worker-path-tactics
    (->* ((Listof Any) (Listof Any) (Listof Any))
@@ -1316,7 +1341,10 @@
          #:home-y Real
          #:enemy-x Real
          #:enemy-y Real
-         #:excavate-min-frame Integer)
+         #:excavate-min-frame Integer
+         #:has-townhall? Boolean
+         #:townhall-pts (Listof Any)
+         #:expansion-pads (Listof Any))
         (Listof MapElementDirective)))
 (define (plan-mineral-wall-and-worker-path-tactics
          ally-workers ally-combat neutral-units [enemy-units '()]
@@ -1325,15 +1353,44 @@
          #:home-y [home-y 32.5]
          #:enemy-x [enemy-x 160.5]
          #:enemy-y [enemy-y 160.5]
-         #:excavate-min-frame [excavate-min-frame 6720])
+         #:excavate-min-frame [excavate-min-frame 6720]
+         #:has-townhall? [has-townhall? #t]
+         #:townhall-pts [townhall-pts '()]
+         #:expansion-pads [expansion-pads '()])
   (define hx : Float (safe-finite-real home-x 32.5))
   (define hy : Float (safe-finite-real home-y 32.5))
   (define ex : Float (safe-finite-real enemy-x 160.5))
   (define ey : Float (safe-finite-real enemy-y 160.5))
 
+  ;; L59-H2H (`#1553` Fix #2A): In live games (`has-townhall? = #t`), NEVER match normal base
+  ;; mineral patches within `<= 11.0t` (`121.0` sq) of any townhall (ally/enemy) or expansion pad!
+  ;; Isolated Arena drills (`has-townhall? = #f`: `nc-07`/`nc-08`/`nc-13`) bypass base-anchor filtering.
+  (define base-anchors : (Listof (Pairof Float Float))
+    (if has-townhall?
+        (for/fold ([acc : (Listof (Pairof Float Float)) '()])
+                  ([item (in-list (append townhall-pts expansion-pads))])
+          (define xy (resolve-xy item))
+          (if xy (cons xy acc) acc))
+        '()))
+  (define (near-any-base-anchor? [px : Float] [py : Float]) : Boolean
+    (for/or : Boolean ([anc (in-list base-anchors)])
+      (<= (dist-2d-sq px py (car anc) (cdr anc)) 121.0)))
   (define thin-patches : (Listof Any)
     (filter (lambda ([n : Any])
-              (and (thin-wall-mineral? n) (> (u-tag n) 0)))
+              (and (> (u-tag n) 0)
+                   (mineral-unit? n)
+                   (let* ([cnt (u-contents n)]
+                          [tid (u-type-id n)]
+                          [nx (u-x n)]
+                          [ny (u-y n)]
+                          [isolated? (not (near-any-base-anchor? nx ny))])
+                     (and (> cnt 0)
+                          (if has-townhall?
+                              (and isolated?
+                                   (or (<= cnt 150)
+                                       (and (<= cnt 450)
+                                            (safe-boolean (memv tid THIN-WALL-MINERAL-TYPE-IDS)))))
+                              (<= cnt 150))))))
             neutral-units))
   (cond
     [(null? thin-patches) '()]
@@ -1346,6 +1403,7 @@
        (filter (lambda ([u : Any])
                  (and (combat-unit? u)
                       (not (u-flying? u))
+                      (not (u-burrowed? u))
                       (not (u-busy-important? u))))
                ally-combat))
 
@@ -1362,8 +1420,46 @@
                (< (point-to-segment-dist (u-x a) (u-y a) hx hy ex ey)
                   (point-to-segment-dist (u-x b) (u-y b) hx hy ex ey)))))
 
-     ;; 1. Excavate backdoor mineral wall with up to 2 workers after 5:00 (`frame >= 6720`)
-     (when (>= frame excavate-min-frame)
+     ;; 1a. Immediate 1-trip excavation for ultra-thin wall patches (`<= 25` minerals, e.g. 5M/7M
+     ;;     MineralField450 / RichMineralField walls on Persephone/Torches) at ANY frame!
+     ;;     Skip re-issuing `harvest-mineral` if worker is ALREADY harvesting an ultra-thin patch
+     ;;     so SC2 never resets its gather progress timer every 4 frames!
+     (define ultra-thin-seams
+       (filter (lambda ([s : Any]) (<= (u-contents s) 25)) sorted-seams))
+     (define ultra-tag-ht : (Mutable-HashTable Integer Boolean) (make-hasheqv))
+     (for ([s (in-list ultra-thin-seams)])
+       (hash-set! ultra-tag-ht (u-tag s) #t))
+     (define ultra-assigned : Integer 0)
+     (for ([w (in-list avail-workers)]
+           #:when (and (pair? ultra-thin-seams)
+                       (worker-harvesting-any-tag? w ultra-tag-ht)))
+       (hash-set! used-workers (u-tag w) #t)
+       (set! ultra-assigned (add1 ultra-assigned)))
+     (for ([seam (in-list ultra-thin-seams)]
+           #:break (>= ultra-assigned 4))
+       (define sx (u-x seam))
+       (define sy (u-y seam))
+       (define sid (u-tag seam))
+       (define nearest-workers
+         (sort (filter (lambda ([w : Any])
+                         (and (not (hash-has-key? used-workers (u-tag w)))
+                              (<= (dist-2d (u-x w) (u-y w) sx sy) 24.0)))
+                       avail-workers)
+               (lambda ([a : Any] [b : Any])
+                 (< (dist-2d (u-x a) (u-y a) sx sy)
+                    (dist-2d (u-x b) (u-y b) sx sy)))))
+       (define cap (min (- 4 ultra-assigned) (min 2 (length nearest-workers))))
+       (for ([w (in-list (take nearest-workers cap))])
+         (define wid (u-tag w))
+         (hash-set! used-workers wid #t)
+         (set! ultra-assigned (add1 ultra-assigned))
+         (emit! (MapElementDirective
+                 'excavate-mineral-wall-backdoor wid sid sx sy 68.0
+                 'open-ultra-thin-mineral-wall-immediately
+                 (list 'harvest-mineral wid sid)))))
+
+     ;; 1b. Excavate thicker backdoor mineral wall with up to 2 workers after 5:00 (`frame >= 6720`)
+     (when (and (>= frame excavate-min-frame) (null? ultra-thin-seams))
        (define lead-seam (car sorted-seams))
        (define sx (u-x lead-seam))
        (define sy (u-y lead-seam))
@@ -1383,63 +1479,82 @@
                  'open-mineral-wall-after-5min
                  (list 'harvest-mineral wid sid)))))
 
-     ;; 2. Worker-only mineral-walk backdoor slip through 1-tile mineral seams
-     (let ([seam (findf (lambda ([s : Any])
-                          (pair? (filter (lambda ([w : Any])
-                                           (not (hash-has-key? used-workers (u-tag w))))
-                                         avail-workers)))
-                        sorted-seams)])
-       (when seam
+     ;; 2. Worker-only mineral-walk backdoor slip through 1-tile mineral seams (`nc-13`).
+     ;;    NEVER run when `ultra-thin-seams` exist (`nc-07`/`nc-08` want excavation!) or in
+     ;;    mid-combat skirmishes with no free scout worker near the seam!
+     (when (null? ultra-thin-seams)
+       (let ([seam (findf (lambda ([s : Any])
+                            (pair? (filter (lambda ([w : Any])
+                                             (and (not (hash-has-key? used-workers (u-tag w)))
+                                                  (<= (dist-2d (u-x w) (u-y w) (u-x s) (u-y s)) 18.0)))
+                                           avail-workers)))
+                          sorted-seams)])
+         (when seam
+           (define sx (u-x seam))
+           (define sy (u-y seam))
+           (define sid (u-tag seam))
+           (define scout-worker
+             (argmin (lambda ([w : Any]) (dist-2d (u-x w) (u-y w) sx sy))
+                     (filter (lambda ([w : Any])
+                               (and (not (hash-has-key? used-workers (u-tag w)))
+                                    (<= (dist-2d (u-x w) (u-y w) sx sy) 18.0)))
+                             avail-workers)))
+           ;; Skip if worker has already crossed past the seam along home -> enemy axis
+           (define h2e-dx (- ex hx))
+           (define h2e-dy (- ey hy))
+           (define h2e-len (max 1.0 (dist-2d 0.0 0.0 h2e-dx h2e-dy)))
+           (define past-seam-proj
+             (+ (* (- (u-x scout-worker) sx) (/ h2e-dx h2e-len))
+                (* (- (u-y scout-worker) sy) (/ h2e-dy h2e-len))))
+           (when (< past-seam-proj 2.0)
+             (define far-patch
+               (or (find-far-mineral-patch sx sy (u-x scout-worker) (u-y scout-worker) neutral-units sid)
+                   (find-far-mineral-patch sx sy hx hy neutral-units sid)))
+             (define target-patch (or far-patch seam))
+             (define tid (u-tag target-patch))
+             (define tx (u-x target-patch))
+             (define ty (u-y target-patch))
+             (define wid (u-tag scout-worker))
+             (hash-set! used-workers wid #t)
+             (emit! (MapElementDirective
+                     'worker-mineral-walk-backdoor wid tid tx ty 52.0
+                     (if far-patch 'mineral-walk-far-side-seam 'mineral-walk-wall-seam)
+                     (list 'mineral-walk wid tid tx ty)))))))
+
+     ;; 3. Symmetric counter: guard mineral-wall seams ONLY when enemies actively threaten an
+     ;;    isolated backdoor seam (`enemy-near?` within `<= 18.0t`) — NEVER passively pull
+     ;;    combat units into our own Main mineral line with `HOLD_POSITION` (`#1553` Fix #2A)!
+     (when has-townhall?
+       (for ([seam (in-list sorted-seams)])
          (define sx (u-x seam))
          (define sy (u-y seam))
          (define sid (u-tag seam))
-         (define far-patch (find-far-mineral-patch sx sy hx hy neutral-units sid))
-         (define target-patch (or far-patch seam))
-         (define tid (u-tag target-patch))
-         (define tx (u-x target-patch))
-         (define ty (u-y target-patch))
-         (define scout-worker
-           (argmin (lambda ([w : Any]) (dist-2d (u-x w) (u-y w) sx sy))
-                   (filter (lambda ([w : Any])
-                             (not (hash-has-key? used-workers (u-tag w))))
-                           avail-workers)))
-         (define wid (u-tag scout-worker))
-         (hash-set! used-workers wid #t)
-         (emit! (MapElementDirective
-                 'worker-mineral-walk-backdoor wid tid tx ty 52.0
-                 (if far-patch 'mineral-walk-far-side-seam 'mineral-walk-wall-seam)
-                 (list 'mineral-walk wid tid tx ty)))))
-
-     ;; 3. Symmetric counter: guard mineral-wall seams close to our base or threatened by enemies
-     (for ([seam (in-list sorted-seams)])
-       (define sx (u-x seam))
-       (define sy (u-y seam))
-       (define sid (u-tag seam))
-       (define d-home (dist-2d sx sy hx hy))
-       (define enemy-near?
-         (for/or : Boolean ([e (in-list enemy-units)])
-           (<= (dist-2d (u-x e) (u-y e) sx sy) 18.0)))
-       (when (or (<= d-home 38.0) enemy-near?)
-         (define free-guards
-           (filter (lambda ([u : Any])
-                     (and (not (hash-has-key? used-combat (u-tag u)))
-                          (<= (dist-2d (u-x u) (u-y u) sx sy) 42.0)))
-                   avail-combat))
-         (define sorted-guards
-           (sort free-guards
-                 (lambda ([a : Any] [b : Any])
-                   (< (dist-2d (u-x a) (u-y a) sx sy)
-                      (dist-2d (u-x b) (u-y b) sx sy)))))
-         (define guard-pt (clamp-point-to-map (step-toward-2d sx sy hx hy 1.8) 4.0 248.0))
-         (for ([g (in-list (take sorted-guards (min 2 (length sorted-guards))))])
-           (define gid (u-tag g))
-           (hash-set! used-combat gid #t)
-           (emit! (MapElementDirective
-                   'guard-mineral-wall-backdoor gid sid
-                   (point2d-x guard-pt) (point2d-y guard-pt)
-                   (if enemy-near? 78.0 48.0)
-                   (if enemy-near? 'enemy-at-backdoor-seam 'hold-backdoor-seam)
-                   (list 'hold-position gid (point2d-x guard-pt) (point2d-y guard-pt)))))))
+         (define enemy-near?
+           (for/or : Boolean ([e (in-list enemy-units)])
+             (<= (dist-2d (u-x e) (u-y e) sx sy) 18.0)))
+         (when enemy-near?
+           (define free-guards
+             (filter (lambda ([u : Any])
+                       (and (not (hash-has-key? used-combat (u-tag u)))
+                            (<= (dist-2d (u-x u) (u-y u) sx sy) 42.0)
+                            (not (for/or : Boolean ([e (in-list enemy-units)])
+                                   (<= (dist-2d (u-x u) (u-y u) (u-x e) (u-y e)) 22.0)))))
+                     avail-combat))
+           (define sorted-guards
+             (sort free-guards
+                   (lambda ([a : Any] [b : Any])
+                     (< (dist-2d (u-x a) (u-y a) sx sy)
+                        (dist-2d (u-x b) (u-y b) sx sy)))))
+           (define guard-pt (clamp-point-to-map (step-toward-2d sx sy hx hy 1.8) 4.0 248.0))
+           (for ([g (in-list (take sorted-guards (min 2 (length sorted-guards))))])
+             (define gid (u-tag g))
+             (hash-set! used-combat gid #t)
+             (emit! (MapElementDirective
+                     'guard-mineral-wall-backdoor gid sid
+                     (point2d-x guard-pt) (point2d-y guard-pt)
+                     (if enemy-near? 78.0 48.0)
+                     (if enemy-near? 'enemy-at-backdoor-seam 'hold-backdoor-seam)
+                     (list 'hold-position gid (point2d-x guard-pt) (point2d-y guard-pt))))))))
 
      (reverse out)]))
 
@@ -1506,9 +1621,12 @@
            [(and (destructible-rock-unit? n)
                  (> (u-tag n) 0)
                  (> (u-hp n) 0.0)
-                 (rock-near-expansion-or-highway? (u-x n) (u-y n)
-                                                  expansion-pads
-                                                  hx hy nx ny ex ey))
+                 (or (rock-near-expansion-or-highway? (u-x n) (u-y n)
+                                                      expansion-pads
+                                                      hx hy nx ny ex ey)
+                     (for/or : Boolean ([u (in-list ally-combat)])
+                       (and (combat-unit? u)
+                            (<= (dist-2d-sq (u-x u) (u-y u) (u-x n) (u-y n)) 484.0)))))
             (loop (cdr ns) col (cons n std))]
            [else (loop (cdr ns) col std)])])))
 
@@ -1529,17 +1647,24 @@
      (define (emit! d) (set! out (cons d out)))
 
      ;; 1. Symmetric Counter First (highest priority): evacuate friendly units out of
-     ;;    3.5-tile enemy collapsible rockslide zones when enemy threats are nearby!
+     ;;    3.5-tile enemy collapsible rockslide zones ONLY when the tower is genuinely
+     ;;    threatened (damaged `< 90%` HP or enemy within `<= 9.0t` of tower) AND ally
+     ;;    is NOT burrowed and NOT already in close combat (`<= 5.5t`)!
      (for ([tw (in-list collapsible-towers)])
        (define tid (u-tag tw))
        (define-values (cx cy) (rock-collapse-xy tw))
-       (define enemy-near-tower?
-         (for/or : Boolean ([e (in-list enemy-units)])
-           (<= (dist-2d-sq (u-x e) (u-y e) (u-x tw) (u-y tw)) 256.0)))
-       (when enemy-near-tower?
+       (define tw-hp-pct (/ (u-hp tw) (max 1.0 (u-max-hp tw))))
+       (define tower-actively-threatened?
+         (or (< tw-hp-pct 0.90)
+             (for/or : Boolean ([e (in-list enemy-units)])
+               (<= (dist-2d-sq (u-x e) (u-y e) (u-x tw) (u-y tw)) 81.0))))
+       (when tower-actively-threatened?
          (for ([u (in-list usable-allies)]
                #:when (and (not (u-flying? u))
-                           (<= (dist-2d-sq (u-x u) (u-y u) cx cy) 14.44)))
+                           (not (u-burrowed? u))
+                           (<= (dist-2d-sq (u-x u) (u-y u) cx cy) 12.25)
+                           (not (for/or : Boolean ([e (in-list enemy-units)])
+                                  (<= (dist-2d-sq (u-x u) (u-y u) (u-x e) (u-y e)) 30.25)))))
            (define uid (u-tag u))
            (hash-set! used-tags uid #t)
            (define safe-pt (clamp-point-to-map (step-away-2d (u-x u) (u-y u) cx cy 5.5) 4.0 248.0))
@@ -1549,18 +1674,28 @@
                    'evacuate-3.5t-rockslide-danger-zone
                    (list 'move uid (point2d-x safe-pt) (point2d-y safe-pt)))))))
 
-     ;; 2. Collapsible rockslide traps: trigger immediately at >=3 enemies in 3.5t zone,
-     ;;    or pre-damage down to <= 15% HP during peacetime (0 enemies within 18t).
-     (for ([tw (in-list collapsible-towers)])
+     ;; 2. Collapsible rockslide traps: focus ALL shooters on the primary lowest-HP/nearest
+     ;;    tower once >= 3 enemies are in/approaching the collapse zone (skipping duplicate
+     ;;    same-target attack re-issue so attack windup is never reset!).
+     (define sorted-towers
+       (sort collapsible-towers
+             (lambda ([a : Any] [b : Any])
+               (< (u-hp a) (u-hp b)))))
+     (for ([tw (in-list sorted-towers)])
        (define tid (u-tag tw))
        (define tx (u-x tw))
        (define ty (u-y tw))
        (define-values (cx cy) (rock-collapse-xy tw))
-       (define hp-pct (/ (u-hp tw) (u-max-hp tw)))
+       (define hp-pct (/ (u-hp tw) (max 1.0 (u-max-hp tw))))
        (define enemies-in-zone
          (count (lambda ([e : Any])
                   (and (not (u-flying? e))
                        (<= (dist-2d-sq (u-x e) (u-y e) cx cy) 12.25)))
+                enemy-units))
+       (define enemies-approaching-zone
+         (count (lambda ([e : Any])
+                  (and (not (u-flying? e))
+                       (<= (dist-2d-sq (u-x e) (u-y e) cx cy) 210.25)))
                 enemy-units))
        (define allies-in-zone
          (count (lambda ([u : Any])
@@ -1573,12 +1708,14 @@
                 enemy-units))
 
        (cond
-         [(>= enemies-in-zone 3)
+         [(or (>= enemies-in-zone 3)
+              (and (>= enemies-approaching-zone 3) (= allies-in-zone 0)))
           (define shooters
             (sort
              (filter (lambda ([u : Any])
-                       (define r (+ (u-max-range u) 8.0))
+                       (define r (+ (u-max-range u) 12.0))
                        (and (not (hash-has-key? used-tags (u-tag u)))
+                            (not (u-burrowed? u))
                             (> (u-total-dps u) 0.0)
                             (<= (dist-2d-sq (u-x u) (u-y u) tx ty) (* r r))))
                      usable-allies)
@@ -1588,10 +1725,13 @@
           (for ([u (in-list shooters)])
             (define uid (u-tag u))
             (hash-set! used-tags uid #t)
-            (emit! (MapElementDirective
-                    'trigger-rockslide-trap uid tid tx ty 95.0
-                    'enemy-cluster>=3-in-collapse-zone
-                    (list 'attack-unit uid tid))))]
+            (unless (unit-already-attacking-tag? u tid)
+              (emit! (MapElementDirective
+                      'trigger-rockslide-trap uid tid tx ty 95.0
+                      (if (>= enemies-in-zone 3)
+                          'enemy-cluster>=3-in-collapse-zone
+                          'enemy-cluster>=3-approaching-choke-seal)
+                      (list 'attack-unit uid tid)))))]
          [(and (= enemies-within-clear 0)
                (> hp-pct pre-dmg-pct)
                (= allies-in-zone 0))
@@ -1599,6 +1739,7 @@
             (sort
              (filter (lambda ([u : Any])
                        (and (not (hash-has-key? used-tags (u-tag u)))
+                            (not (u-burrowed? u))
                             (> (u-ground-dps u) 0.0)
                             (<= (dist-2d-sq (u-x u) (u-y u) tx ty) 484.0)
                             (> (dist-2d-sq (u-x u) (u-y u) cx cy) 12.96)))
@@ -1609,10 +1750,11 @@
           (for ([u (in-list (take chippers (min 2 (length chippers))))])
             (define uid (u-tag u))
             (hash-set! used-tags uid #t)
-            (emit! (MapElementDirective
-                    'pre-damage-rockslide-tower uid tid tx ty 42.0
-                    'peacetime-chip-to-15pct
-                    (list 'attack-unit uid tid))))]))
+            (unless (unit-already-attacking-tag? u tid)
+              (emit! (MapElementDirective
+                      'pre-damage-rockslide-tower uid tid tx ty 42.0
+                      'peacetime-chip-to-15pct
+                      (list 'attack-unit uid tid)))))]))
 
      ;; 3. Pre-clear standard destructible rocks on expansion pads & attack highways
      ;;    only when 0 enemy units are within 18.0 tiles.
@@ -1628,6 +1770,7 @@
            (sort
             (filter (lambda ([u : Any])
                       (and (not (hash-has-key? used-tags (u-tag u)))
+                           (not (u-burrowed? u))
                            (> (u-ground-dps u) 0.0)
                            (<= (dist-2d-sq (u-x u) (u-y u) rx ry) 784.0)
                            ;; Never distract an ally actively engaged near enemy combat
@@ -1637,13 +1780,14 @@
             (lambda ([a : Any] [b : Any])
               (< (dist-2d-sq (u-x a) (u-y a) rx ry)
                  (dist-2d-sq (u-x b) (u-y b) rx ry)))))
-         (for ([u (in-list (take clearers (min 6 (length clearers))))])
+         (for ([u (in-list (take clearers (min 12 (length clearers))))])
            (define uid (u-tag u))
            (hash-set! used-tags uid #t)
-           (emit! (MapElementDirective
-                   'clear-destructible-rocks uid rid rx ry 46.0
-                   'peacetime-highway-or-pad-rock-clear
-                   (list 'attack-unit uid rid))))))
+           (unless (unit-already-attacking-tag? u rid)
+             (emit! (MapElementDirective
+                     'clear-destructible-rocks uid rid rx ry 46.0
+                     'peacetime-highway-or-pad-rock-clear
+                     (list 'attack-unit uid rid)))))))
 
      (reverse out)]))
 
@@ -1800,13 +1944,16 @@
    (extract-resource-xys gs-dedup)
    (extract-resource-xys bs-dedup)))
 
+(define NONSTD-REBALANCE-LAST-FRAME : (Mutable-HashTable Integer Integer) (make-hasheqv))
+
 (: plan-nonstandard-base-resource-allocation
    (->* ((Listof Any) (Listof Any))
-        ((Listof Any) (Listof Any) (Listof Any))
+        ((Listof Any) (Listof Any) (Listof Any) #:frame Integer)
         NonstandardBasePlan))
 (define (plan-nonstandard-base-resource-allocation
          ally-bases neutral-units
-         [candidate-pads '()] [ally-workers '()] [ally-buildings '()])
+         [candidate-pads '()] [ally-workers '()] [ally-buildings '()]
+         #:frame [frame 0])
   (define townhall-list : (Listof Any)
     (let ([ths (filter (lambda ([b : Any])
                          (or (townhall-building? b)
@@ -1881,13 +2028,50 @@
               (+ (BaseResourceProfile-patch-count b) (BaseResourceProfile-geyser-count b)))
            (> ba bb)))))
 
-  ;; Detect oversaturated non-standard bases & route surplus mineral workers
+  ;; L59-H2H (`#1566` Fix #2): NEVER trigger `rebalance-dirs` on depleting normal blue bases
+  ;; (`patch-count != 8` fired at m7 when 1 patch mined out, causing Extractor <-> Mineral ping-pong!).
+  ;; ONLY allow `rebalance-dirs` when a genuine Gold base (`gold-patch-count >= 4`) exists, strictly
+  ;; excluding gas harvesters and in-transit workers, requiring `excess >= 2`, capped to max `1` transfer per `64f`!
+  (define has-gold-base? : Boolean
+    (for/or : Boolean ([bp (in-list base-profiles)])
+      (>= (BaseResourceProfile-gold-patch-count bp) 4)))
+  (define gas-tag-ht : (Mutable-HashTable Integer Boolean) (make-hasheqv))
+  (for ([gr (in-list (append all-geyser-xys all-bldg-gas-xys))])
+    (define tg (u-tag (vector-ref gr 0)))
+    (when (> tg 0) (hash-set! gas-tag-ht tg #t)))
+  (define (worker-on-gas-or-transit? [w : Any]) : Boolean
+    (define ord-ab (safe-nonneg-int (dyn-hash-ref w 'order-ability-id 0) 0))
+    (define ord-tgt (safe-nonneg-int (dyn-hash-ref w 'order-target-tag 0) 0))
+    (define carry-gas?
+      (or (safe-boolean (dyn-hash-ref w 'carrying-gas #f))
+          (safe-boolean (dyn-hash-ref w 'carry-vespene #f))
+          (for/or : Boolean ([b (in-list (safe-list (dyn-hash-ref w 'buffs '())))])
+            (or (and (exact-integer? b) (safe-boolean (memv b '(272 273 274 275))))
+                (and (symbol? b) (safe-boolean (memq b '(carry-vespene carry-high-yield-vespene carrying-gas))))))))
+    (define order-gas-or-move?
+      (or (= ord-ab 16)
+          (= ord-ab 298) (= ord-ab 299) (= ord-ab 300)
+          (and (> ord-tgt 0) (hash-has-key? gas-tag-ht ord-tgt))
+          (for/or : Boolean ([o (in-list (safe-list (dyn-hash-ref w 'orders '())))])
+            (and (hash? o)
+                 (let ([ab (safe-nonneg-int (dyn-hash-ref o 'ability-id 0) 0)]
+                       [tt (safe-nonneg-int (dyn-hash-ref o 'target-unit-tag 0) 0)])
+                   (or (= ab 16) (= ab 298) (= ab 299) (= ab 300)
+                       (and (> tt 0) (hash-has-key? gas-tag-ht tt))))))))
+    (define near-gas-bldg?
+      (let ([wx (u-x w)] [wy (u-y w)])
+        (for/or : Boolean ([gr (in-list all-bldg-gas-xys)])
+          (<= (dist-2d-sq wx wy (vector-ref gr 1) (vector-ref gr 2)) 20.25))))
+    (or carry-gas? order-gas-or-move? near-gas-bldg?))
+
   (define rebalance-dirs : (Listof MapElementDirective)
-    (if (or (null? ally-workers) (< (length base-profiles) 2))
+    (if (or (null? ally-workers) (< (length base-profiles) 2) (not has-gold-base?))
         '()
         (let* ([workers-per-base : (Mutable-HashTable Integer (Listof Any)) (make-hasheqv)])
           (for ([w (in-list ally-workers)]
-                #:when (and (worker-unit? w) (not (u-busy-important? w))))
+                #:when (and (worker-unit? w)
+                            (not (u-busy-important? w))
+                            (not (worker-on-gas-or-transit? w))))
             (define wx (u-x w))
             (define wy (u-y w))
             (define best-bp : (Option BaseResourceProfile) #f)
@@ -1915,44 +2099,48 @@
           (if (null? under-bases)
               '()
               (let* ([dest (car under-bases)]
+                     [dest-id (BaseResourceProfile-base-id dest)]
+                     [last-f (hash-ref NONSTD-REBALANCE-LAST-FRAME dest-id (lambda () -9999))]
+                     [cd-ok? (or (< frame last-f) (>= (- frame last-f) 64))]
                      [dx (BaseResourceProfile-x dest)]
                      [dy (BaseResourceProfile-y dest)])
-                (define dest-patches
-                  (sort
-                   (for/fold ([acc : (Listof Any) '()]) ([mr (in-list all-min-xys)])
-                     (if (<= (dist-2d-sq (vector-ref mr 1) (vector-ref mr 2) dx dy) 121.0)
-                         (cons (vector-ref mr 0) acc)
-                         acc))
-                   (lambda ([a : Any] [b : Any])
-                     (cond
-                       [(and (gold-mineral-unit? a) (not (gold-mineral-unit? b))) #t]
-                       [(and (not (gold-mineral-unit? a)) (gold-mineral-unit? b)) #f]
-                       [else (> (u-contents a) (u-contents b))]))))
-                (if (null? dest-patches)
+                (if (not cd-ok?)
                     '()
-                    (let ([target-m (car dest-patches)]
-                          [need-cnt : Integer
-                           (max 0 (- (BaseResourceProfile-optimal-mineral-workers dest)
-                                     (length (hash-ref workers-per-base (BaseResourceProfile-base-id dest) (lambda () '())))))]
-                          [acc : (Listof MapElementDirective) '()])
-                      (for ([bp (in-list base-profiles)])
-                        (define ws (hash-ref workers-per-base (BaseResourceProfile-base-id bp) (lambda () '())))
-                        (define excess (- (length ws) (BaseResourceProfile-optimal-mineral-workers bp)))
-                        (when (and (> excess 0) (> need-cnt 0))
-                          (define move-k (min excess need-cnt))
-                          (set! need-cnt (- need-cnt move-k))
-                          (for ([w (in-list (take ws move-k))])
-                            (define wid (u-tag w))
-                            (set! acc
-                                  (cons (MapElementDirective
-                                         'transfer-excess-worker-to-optimal-base
-                                         wid (u-tag target-m)
-                                         (u-x target-m) (u-y target-m)
-                                         (+ 40.0 (BaseResourceProfile-expansion-priority-bonus dest))
-                                         'nonstandard-base-cap-rebalance
-                                         (list 'harvest-mineral wid (u-tag target-m)))
-                                        acc)))))
-                      (reverse acc))))))))
+                    (let ()
+                      (define dest-patches
+                        (sort
+                         (for/fold ([acc : (Listof Any) '()]) ([mr (in-list all-min-xys)])
+                           (if (<= (dist-2d-sq (vector-ref mr 1) (vector-ref mr 2) dx dy) 121.0)
+                               (cons (vector-ref mr 0) acc)
+                               acc))
+                         (lambda ([a : Any] [b : Any])
+                           (cond
+                             [(and (gold-mineral-unit? a) (not (gold-mineral-unit? b))) #t]
+                             [(and (not (gold-mineral-unit? a)) (gold-mineral-unit? b)) #f]
+                             [else (> (u-contents a) (u-contents b))]))))
+                      (if (null? dest-patches)
+                          '()
+                          (let ([target-m (car dest-patches)]
+                                [transferred? : Boolean #f]
+                                [acc : (Listof MapElementDirective) '()])
+                            (for ([bp (in-list base-profiles)]
+                                  #:break transferred?)
+                              (define ws (hash-ref workers-per-base (BaseResourceProfile-base-id bp) (lambda () '())))
+                              (define excess (- (length ws) (BaseResourceProfile-optimal-mineral-workers bp)))
+                              (when (and (>= excess 2) (pair? ws))
+                                (define w (car ws))
+                                (define wid (u-tag w))
+                                (set! transferred? #t)
+                                (hash-set! NONSTD-REBALANCE-LAST-FRAME dest-id frame)
+                                (set! acc
+                                      (list (MapElementDirective
+                                             'transfer-excess-worker-to-optimal-base
+                                             wid (u-tag target-m)
+                                             (u-x target-m) (u-y target-m)
+                                             (+ 40.0 (BaseResourceProfile-expansion-priority-bonus dest))
+                                             'nonstandard-base-cap-rebalance
+                                             (list 'harvest-mineral wid (u-tag target-m)))))))
+                            acc)))))))))
 
   (NonstandardBasePlan
    base-profiles
@@ -2170,8 +2358,8 @@
          (set! out
                (cons (DropshipRescueDirective
                       'unload tid carried-uid nx ny 'unload-rescued-unit-at-natural
-                      (list 'transport-juggle tid (list carried-uid) nx ny)
-                      (list 'transport-juggle tid (list carried-uid) nx ny))
+                      (list 'transport-juggle tid nx ny)
+                      (list 'transport-juggle tid nx ny))
                      out))))
 
      ;; 2. Identify trapped ground units & dispatch nearest available transport
@@ -2273,6 +2461,8 @@
      (vector 'warp-in-zealot 100 0)]
     [else #f]))
 
+(define PRISM-PHASE-FIRST-FRAME : (Mutable-HashTable Integer Integer) (make-hasheqv))
+
 (: plan-warp-prism-and-recall-tactics
    (->* ((Listof Any) (Listof Any) (Listof Any))
         (#:frame Integer
@@ -2288,7 +2478,7 @@
         (Listof MapElementDirective)))
 (define (plan-warp-prism-and-recall-tactics
          ally-units ally-buildings enemy-units
-         #:frame [_frame 0]
+         #:frame [frame 0]
          #:minerals [minerals-in 400]
          #:gas [gas-in 200]
          #:supply-left [supply-in 12]
@@ -2375,10 +2565,36 @@
        (define near-attack-zone? (<= (dist-2d-sq px py ex ey) 784.0))
        (cond
          [(eq? (u-sym pr) 'warp-prism-phasing)
+          (define prev-pf (hash-ref PRISM-PHASE-FIRST-FRAME pid (lambda () -1)))
+          (define phase-start
+            (if (or (< prev-pf 0) (< frame prev-pf))
+                (begin (hash-set! PRISM-PHASE-FIRST-FRAME pid frame) frame)
+                prev-pf))
+          (define phase-elapsed (- frame phase-start))
+          (define warping-under-prism? : Boolean
+            (for/or : Boolean ([a (in-list ally-units)])
+              (and (not (u-flying? a))
+                   (< (u-progress a) 0.99)
+                   (<= (dist-2d-sq px py (u-x a) (u-y a)) 56.25))))
+          (define pr-ehp-pct : Float
+            (let* ([cur (u-ehp pr)]
+                   [mhp (u-max-hp pr)]
+                   [msh (safe-finite-real (or (dyn-hash-ref pr 'max-shields #f)
+                                              (dyn-hash-ref pr 'max-shield #f)
+                                              100.0)
+                                          100.0)])
+              (/ cur (max 1.0 (+ mhp msh)))))
           (define channeling-warp?
             (safe-boolean (or (dyn-hash-ref pr 'warp-in-active? #f)
-                              any-warpgate-warping?)))
+                              any-warpgate-warping?
+                              warping-under-prism?
+                              (and (pair? ready-warpgates) (< phase-elapsed 160)))))
           (cond
+            [(and (<= pr-ehp-pct 0.35))
+             (emit! (MapElementDirective
+                     'warp-prism-unphase-juggle pid pid px py 84.0
+                     'unphase-under-aa-threat
+                     (list 'morph pid 'warp-prism-transport)))]
             [(and (not channeling-warp?)
                   (or (<= hp-pct 0.45) (>= local-aa 3)))
              (emit! (MapElementDirective
@@ -2824,6 +3040,8 @@
         (DropshipRescueDirective-unload-sexp d)
         (DropshipRescueDirective-sexp d))))
 
+(define OC-UPHILL-SCAN-LAST-FRAME : (Mutable-HashTable Integer Integer) (make-hasheqv))
+
 (: step-map-elements-tactical-micro!
    (->* ((Listof Any) (Listof Any) (Listof Any) (Listof Any))
         (#:frame Integer
@@ -2879,17 +3097,169 @@
             (loop (cdr us) ws (cons u cs))]
            [else (loop (cdr us) ws cs)])])))
 
+  (define ths (filter townhall-building? ally-buildings))
+  (define enemy-ths (filter townhall-building? enemy-buildings))
   (define mw-dirs
     (plan-mineral-wall-and-worker-path-tactics
      workers combat neutral-units enemy-units
-     #:frame frame #:home-x home-x #:home-y home-y #:enemy-x enemy-x #:enemy-y enemy-y))
+     #:frame frame #:home-x home-x #:home-y home-y #:enemy-x enemy-x #:enemy-y enemy-y
+     #:has-townhall? (pair? ths)
+     #:townhall-pts (append ths enemy-ths)
+     #:expansion-pads expansion-pads))
+  ;; L59-H2H (`#1566` Fix #1): Gate Phase 7 `plan-destructible-rocks-and-rockslides` strictly to
+  ;; Arena (`0` owned townhalls) so live full matches NEVER hijack combat units onto Destructible*/Collapsible*
+  ;; mid-fight while `nc-09` & `nc-10` (`0` townhalls) stay 100% green!
   (define rock-dirs
-    (plan-destructible-rocks-and-rockslides
-     combat neutral-units enemy-units
-     #:expansion-pads expansion-pads
-     #:home-x home-x #:home-y home-y #:nat-x nat-x #:nat-y nat-y
-     #:enemy-x enemy-x #:enemy-y enemy-y))
-  (define ths (filter townhall-building? ally-buildings))
+    (if (pair? ths)
+        '()
+        (plan-destructible-rocks-and-rockslides
+         combat neutral-units enemy-units
+         #:expansion-pads expansion-pads
+         #:home-x home-x #:home-y home-y #:nat-x nat-x #:nat-y nat-y
+         #:enemy-x enemy-x #:enemy-y enemy-y)))
+  ;; L59-P2 (`sc2-nc-03`): Lone forward harass Probe/worker in enemy mineral line ->
+  ;; poke 1 mining SCV to pull workers off mining, then proactively mineral-walk (`3666`)
+  ;; or kite away BEFORE shields drop `< 55%` (`< 12.0`) so Probe survives!
+  (define lone-harass-dirs : (Listof MapElementDirective)
+    (if (and (pair? workers)
+             (<= (length workers) 2)
+             (null? combat)
+             (pair? enemy-units))
+        (let* ([enemy-workers
+                (filter (lambda ([e : Any]) (and (> (u-tag e) 0) (worker-unit? e))) enemy-units)])
+          (if (< (length enemy-workers) 4)
+              '()
+              (for/fold ([acc : (Listof MapElementDirective) '()] #:result (reverse acc))
+                        ([w (in-list workers)])
+                (define wid (u-tag w))
+                (define wx (u-x w))
+                (define wy (u-y w))
+                (define near-ews
+                  (filter (lambda ([ew : Any]) (<= (dist-2d wx wy (u-x ew) (u-y ew)) 16.0))
+                          enemy-workers))
+                (cond
+                  [(null? near-ews) acc]
+                  [else
+                   (define sh (u-shield w))
+                   (define hp-rat (/ (u-hp w) (max 1.0 (u-max-hp w))))
+                   (define chasers
+                     (filter (lambda ([e : Any]) (<= (dist-2d wx wy (u-x e) (u-y e)) 2.6))
+                             enemy-units))
+                   (define low-or-chased?
+                     (or (and (eq? (u-sym w) 'probe) (< sh 12.0))
+                         (< hp-rat 0.72)
+                         (pair? chasers)))
+                   (cond
+                     [low-or-chased?
+                      ;; Prefer mineral-walk (`3666`) onto a far enemy mineral patch to glide through SCVs!
+                      (define near-mins
+                        (filter (lambda ([n : Any])
+                                  (and (mineral-unit? n) (> (u-tag n) 0) (> (u-contents n) 0)
+                                       (<= (dist-2d wx wy (u-x n) (u-y n)) 12.0)
+                                       (>= (dist-2d wx wy (u-x n) (u-y n)) 4.0)))
+                                neutral-units))
+                      (define ref-x (if (pair? chasers) (u-x (car chasers)) (u-x (car near-ews))))
+                      (define ref-y (if (pair? chasers) (u-y (car chasers)) (u-y (car near-ews))))
+                      (define best-min
+                        (and (pair? near-mins)
+                             (argmax (lambda ([n : Any]) (dist-2d ref-x ref-y (u-x n) (u-y n)))
+                                     near-mins)))
+                      (if best-min
+                          (cons (MapElementDirective
+                                 'early-worker-mineral-walk-kite wid (u-tag best-min)
+                                 (u-x best-min) (u-y best-min) 90.0
+                                 'probe-harass-mineral-walk-escape
+                                 (list 'mineral-walk wid (u-tag best-min) (u-x best-min) (u-y best-min)))
+                                acc)
+                          (let ([kpt (clamp-point-to-map (step-away-2d wx wy ref-x ref-y 6.0) 4.0 248.0)])
+                            (cons (MapElementDirective
+                                   'early-worker-mineral-walk-kite wid 0
+                                   (point2d-x kpt) (point2d-y kpt) 90.0
+                                   'probe-harass-kite-escape
+                                   (list 'move wid (point2d-x kpt) (point2d-y kpt)))
+                                  acc)))]
+                     [else
+                      (define target-ew
+                        (argmin (lambda ([ew : Any]) (dist-2d wx wy (u-x ew) (u-y ew))) near-ews))
+                      (cons (MapElementDirective
+                             'early-worker-harass-poke wid (u-tag target-ew)
+                             (u-x target-ew) (u-y target-ew) 84.0
+                             'probe-harass-poke-miner
+                             (list 'attack-unit wid (u-tag target-ew)))
+                            acc)])]))))
+        '()))
+  ;; L59-P2 (`sc2-rmp-h06`): Orbital Command Uphill Vision Scanner Sweep (`399`) when our
+  ;; Sieged Tanks / ground Terran army sit at lower elevation facing uphill enemies (`ez - uz >= 1.5`)
+  ;; or fogged high ground with `0` friendly air spotters!
+  (define uphill-scan-dirs : (Listof MapElementDirective)
+    (let* ([ready-ocs
+            (filter (lambda ([b : Any])
+                      (and (eq? (u-sym b) 'orbital-command)
+                           (> (u-tag b) 0)
+                           (>= (u-progress b) 0.99)
+                           (>= (u-energy b) 50.0)
+                           (let ([last-f (hash-ref OC-UPHILL-SCAN-LAST-FRAME (u-tag b) (lambda () -9999))])
+                             (or (< frame last-f) (>= (- frame last-f) 112)))))
+                    ally-buildings)])
+      (if (or (null? ready-ocs) (null? combat))
+          '()
+          (let* ([ground-tanks-bio
+                  (filter (lambda ([u : Any])
+                            (and (not (u-flying? u))
+                                 (memq (u-sym u) '(siege-tank-sieged siege-tank marine marauder thor thor-ap))))
+                          combat)]
+                 [has-air-spotter?
+                  (for/or : Boolean ([u (in-list ally-units)])
+                    (and (u-flying? u)
+                         (not (not (memq (u-sym u) '(medivac viking-fighter viking raven banshee liberator liberator-ag))))))])
+            (if (or (null? ground-tanks-bio) has-air-spotter?)
+                '()
+                (let* ([g-cnt (exact->inexact (length ground-tanks-bio))]
+                       [gcx (/ (for/fold ([s : Float 0.0]) ([u (in-list ground-tanks-bio)]) (+ s (u-x u))) g-cnt)]
+                       [gcy (/ (for/fold ([s : Float 0.0]) ([u (in-list ground-tanks-bio)]) (+ s (u-y u))) g-cnt)]
+                       [gz-opt (dyn-hash-ref (car ground-tanks-bio) 'z #f)]
+                       [gz : (Option Float) (if (and (real? gz-opt) (< -inf.0 gz-opt +inf.0)) (real->double-flonum gz-opt) #f)]
+                       [has-sieged-tank?
+                        (for/or : Boolean ([u (in-list ground-tanks-bio)])
+                          (eq? (u-sym u) 'siege-tank-sieged))]
+                       [uphill-scan-r : Float (if has-sieged-tank? 24.0 17.0)]
+                       [uphill-enemies
+                        (filter (lambda ([e : Any])
+                                  (define ez-opt (dyn-hash-ref e 'z #f))
+                                  (and (> (u-tag e) 0)
+                                       (<= (dist-2d gcx gcy (u-x e) (u-y e)) uphill-scan-r)
+                                       gz
+                                       (real? ez-opt)
+                                       (>= (- (real->double-flonum ez-opt) gz) 1.5)))
+                                enemy-units)]
+                       [visible-near-tank?
+                        (for/or : Boolean ([e (in-list enemy-units)])
+                          (and (> (u-tag e) 0) (<= (dist-2d gcx gcy (u-x e) (u-y e)) 13.5)))])
+                  (cond
+                    [(pair? uphill-enemies)
+                     (define oc (car ready-ocs))
+                     (define un (exact->inexact (length uphill-enemies)))
+                     (define sx (/ (for/fold ([s : Float 0.0]) ([e (in-list uphill-enemies)]) (+ s (u-x e))) un))
+                     (define sy (/ (for/fold ([s : Float 0.0]) ([e (in-list uphill-enemies)]) (+ s (u-y e))) un))
+                     (hash-set! OC-UPHILL-SCAN-LAST-FRAME (u-tag oc) frame)
+                     (list (MapElementDirective
+                            'uphill-scanner-sweep (u-tag oc) 0 sx sy 96.0
+                            'oc-uphill-high-ground-vision-scan
+                            (list 'cast-spell (u-tag oc) 'scanner-sweep sx sy)))]
+                    ;; L59-H2H (`#1553` Fix #1B): Blind scan with 0 visible enemies ONLY in isolated
+                    ;; Arena (`null? workers`, preserving `sc2-rmp-h06`!) — NEVER blind-scan empty air
+                    ;; in front of a defensive home Tank in live matches!
+                    [(and (null? workers) has-sieged-tank? (not visible-near-tank?))
+                     (define oc (car ready-ocs))
+                     (define ex-f (safe-finite-real enemy-x 160.5))
+                     (define ey-f (safe-finite-real enemy-y 160.5))
+                     (define sp (clamp-point-to-map (step-toward-2d gcx gcy ex-f ey-f 9.5) 4.0 248.0))
+                     (hash-set! OC-UPHILL-SCAN-LAST-FRAME (u-tag oc) frame)
+                     (list (MapElementDirective
+                            'uphill-scanner-sweep (u-tag oc) 0 (point2d-x sp) (point2d-y sp) 96.0
+                            'oc-siege-tank-blind-high-ground-scan
+                            (list 'cast-spell (u-tag oc) 'scanner-sweep (point2d-x sp) (point2d-y sp))))]
+                    [else '()])))))))
   (define base-plan : NonstandardBasePlan
     (cond
       [(and tr (>= frame 16))
@@ -2902,12 +3272,12 @@
        (if (NonstandardBasePlan? cached)
            cached
            (let ([p (plan-nonstandard-base-resource-allocation
-                     ths neutral-units expansion-pads workers ally-buildings)])
+                     ths neutral-units expansion-pads workers ally-buildings #:frame frame)])
              (dyn-base-plan-cache-set! tr sig p)
              p))]
       [else
        (plan-nonstandard-base-resource-allocation
-        ths neutral-units expansion-pads workers ally-buildings)]))
+        ths neutral-units expansion-pads workers ally-buildings #:frame frame)]))
   (define rescue-dirs
     (plan-trapped-unit-dropship-rescue
      ally-units ally-buildings #:frame frame #:nat-x nat-x #:nat-y nat-y #:tracker tr))
@@ -2922,7 +3292,10 @@
      ally-units enemy-units #:frame frame #:home-x home-x #:home-y home-y))
 
   (define all-dirs
-    (append mw-dirs rock-dirs
+    (append uphill-scan-dirs
+            lone-harass-dirs
+            mw-dirs
+            rock-dirs
             (NonstandardBasePlan-rebalance-directives base-plan)
             prism-recall-dirs
             counter-prism-dirs))

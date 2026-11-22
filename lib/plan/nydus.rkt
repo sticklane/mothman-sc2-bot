@@ -545,18 +545,184 @@
         (define actions '())
         (define (emit! a) (set! actions (cons a actions)))
 
-        ;; Bypass fortified enemy bunker contain via main-edge Nydus Worm
+        ;; L59-P2 (`#1481`): Vision-Verified Nydus Worm Placement!
+        ;; Locate live vision spotters (`changeling*` > `overlord`/`overseer` > `mutalisk`/`corruptor`)
+        ;; already near enemy Main/Nat (`<= 32t`) so `build-nydus-worm` lands on a VISIBLE tile instead
+        ;; of failing `CantSeeBuildLocation` in fog!
+        (define all-changelings
+          (bucket-pos-ids au-ht '(changeling changeling-zealot changeling-marine
+                                  changeling-marine-shield changeling-zergling
+                                  changeling-zergling-wings)))
+        (define all-air-spotters
+          (bucket-pos-ids au-ht '(overlord overlord-transport overseer overseer-siege-mode
+                                  mutalisk corruptor)))
+        (define all-spotters (append all-changelings all-air-spotters))
+        (define (spotter-near-enemy? u)
+          (define ux (u-x u bx))
+          (define uy (u-y u by))
+          (or (<= (fast-dist2 ux uy ex ey) 1024.0)
+              (<= (fast-dist2 ux uy eex eey) 1024.0)))
+        (define active-spotters
+          (filter spotter-near-enemy? all-spotters))
+        (define frame (nydus-index-frame idx))
+        ;; L59-P3 (`n20` fix): Collect visible enemy combat units near enemy Main (`<= 30t`) so
+        ;; emerging Nydus Worms (`1768`) are NEVER planted right in front of Sieged Tanks / Marines!
+        (define enemy-main-combat
+          (for/list ([eu (in-list (nydus-index-enemy-units idx))]
+                     #:when (and (hash? eu)
+                                 (fast-hash-unit-pos-id? eu)
+                                 (let ([meta (fast-unit-meta (fast-hash-raw-sym eu))])
+                                   (and (not (vector-ref meta 1))
+                                        (not (vector-ref meta 2))))
+                                 (<= (fast-dist2 (u-x eu ex) (u-y eu ey) ex ey) 900.0)))
+            eu))
+        (define (point-safe-from-enemy-combat? px py)
+          (for/and ([eu (in-list enemy-main-combat)])
+            (define meta (fast-unit-meta (fast-hash-raw-sym eu)))
+            (define sym (vector-ref meta 0))
+            (define min-r2 (if (memq sym '(siege-tank siege-tank-sieged)) 182.25 110.25)) ;; 13.5t vs Tank, 10.5t vs Bio
+            (>= (fast-dist2 px py (u-x eu ex) (u-y eu ey)) min-r2)))
+        (define (compute-safe-corner-xy sx sy)
+          ;; Pick a safe rear corner behind enemy Main / mineral line opposite visible enemy combat centroid!
+          (define nc (length enemy-main-combat))
+          (define ecx (/ (for/fold ([s 0.0]) ([eu (in-list enemy-main-combat)]) (+ s (u-x eu ex))) (exact->inexact nc)))
+          (define ecy (/ (for/fold ([s 0.0]) ([eu (in-list enemy-main-combat)]) (+ s (u-y eu ey))) (exact->inexact nc)))
+          ;; Vector from enemy combat centroid through enemy TH (or away from combat centroid)
+          (define ax (- ex ecx))
+          (define ay (- ey ecy))
+          (define al (sqrt (+ (* ax ax) (* ay ay))))
+          (define-values (ux uy)
+            (if (> al 0.5)
+                (values (/ ax al) (/ ay al))
+                (let* ([dx (- sx ecx)]
+                       [dy (- sy ecy)]
+                       [dl (max 0.1 (sqrt (+ (* dx dx) (* dy dy))))])
+                  (values (/ dx dl) (/ dy dl)))))
+          (define px (- uy))
+          (define py ux)
+          ;; Evaluate 8 rear-corner / far-flank candidates (`12..16t` from `(ex, ey)`) and pick the
+          ;; safest candidate closest to our live spotter `(sx, sy)`!
+          (define cands
+            (list
+             ;; Far side past current spotter away from combat centroid (often already in 11t Overseer vision!)
+             (let* ([sdx (- sx ecx)]
+                    [sdy (- sy ecy)]
+                    [sdl (max 0.1 (sqrt (+ (* sdx sdx) (* sdy sdy))))])
+               (cons (clamp-coord (+ ecx (* 14.5 (/ sdx sdl))))
+                     (clamp-coord (+ ecy (* 14.5 (/ sdy sdl))))))
+             (cons (clamp-coord (+ ex (* 11.5 ux) (* 7.0 px)))
+                   (clamp-coord (+ ey (* 11.5 uy) (* 7.0 py))))
+             (cons (clamp-coord (+ ex (* 11.5 ux) (* -7.0 px)))
+                   (clamp-coord (+ ey (* 11.5 uy) (* -7.0 py))))
+             (cons (clamp-coord (+ ex (* 13.5 ux)))
+                   (clamp-coord (+ ey (* 13.5 uy))))
+             (cons (clamp-coord (+ ex (* 7.0 ux) (* 12.0 px)))
+                   (clamp-coord (+ ey (* 7.0 uy) (* 12.0 py))))
+             (cons (clamp-coord (+ ex (* 7.0 ux) (* -12.0 px)))
+                   (clamp-coord (+ ey (* 7.0 uy) (* -12.0 py))))))
+          (define safe-cands (filter (lambda (pt) (point-safe-from-enemy-combat? (car pt) (cdr pt))) cands))
+          (define pool
+            (sort (if (pair? safe-cands) safe-cands cands)
+                  (lambda (a b) (< (fast-dist2 sx sy (car a) (cdr a))
+                                   (fast-dist2 sx sy (car b) (cdr b))))))
+          ;; Rotate across safe rear-corner candidates every 24f if the first tile hit an unbuildable cliff edge!
+          (define idx-c (modulo (quotient (max 0 frame) 24) (length pool)))
+          (define best (list-ref pool idx-c))
+          (values (car best) (cdr best)))
+        (define (spotter-drop-xy u)
+          (define sx (u-x u ex))
+          (define sy (u-y u ey))
+          ;; Nudge 4.8t away from enemy TH center if sitting directly on its 5x5 footprint
+          (define d2-th (fast-dist2 sx sy ex ey))
+          (define-values (base-x base-y)
+            (if (< d2-th 16.0)
+                (let* ([dx (- sx ex)]
+                       [dy (- sy ey)]
+                       [dl (max 0.1 (sqrt (+ (* dx dx) (* dy dy))))])
+                  (values (+ ex (* 4.8 (/ dx dl)))
+                          (+ ey (* 4.8 (/ dy dl)))))
+                (values sx sy)))
+          ;; L59-P2 (`n20` fix): Frame-indexed retry spiral (`slot = 0` at `frame < 16` uses exact `(base-x, base-y)`,
+          ;; then sweeps inward/laterally toward `(ex, ey)` if the first tile was unbuildable cliff/mineral/geyser!)
+          (define slot (modulo (quotient (max 0 frame) 16) 8))
+          (if (= slot 0)
+              (values (clamp-coord base-x) (clamp-coord base-y))
+              (let* ([ix (- ex base-x)]
+                     [iy (- ey base-y)]
+                     [il (max 0.1 (sqrt (+ (* ix ix) (* iy iy))))]
+                     [ux (/ ix il)]
+                     [uy (/ iy il)]
+                     [px (- uy)]
+                     [py ux]
+                     [off (case slot
+                            [(1) '(2.6 . 0.0)]
+                            [(2) '(2.6 . 2.6)]
+                            [(3) '(2.6 . -2.6)]
+                            [(4) '(4.5 . 0.0)]
+                            [(5) '(0.0 . 3.2)]
+                            [(6) '(0.0 . -3.2)]
+                            [else '(4.5 . 2.8)])]
+                     [fwd (car off)]
+                     [lat (cdr off)])
+                (values (clamp-coord (+ base-x (* fwd ux) (* lat px)))
+                        (clamp-coord (+ base-y (* fwd uy) (* lat py)))))))
+        ;; Emit safe Nydus Worm or glide spotter to safe rear corner when spotter is inside Tank/Marine range!
+        (define (emit-safe-nydus-for-spotter! net-u sp-u)
+          (define sx (u-x sp-u ex))
+          (define sy (u-y sp-u ey))
+          (define-values (wx0 wy0) (spotter-drop-xy sp-u))
+          (cond
+            [(or (null? enemy-main-combat) (point-safe-from-enemy-combat? wx0 wy0))
+             (emit! (list 'build-nydus-worm (u-id net-u) wx0 wy0))]
+            [else
+             (define-values (cx cy) (compute-safe-corner-xy sx sy))
+             ;; Overseer/Overlord sight radius is 11t (`<= 9.5t` guarantees live vision on `(cx, cy)`)!
+             (if (<= (fast-dist2 sx sy cx cy) 90.25)
+                 (emit! (list 'build-nydus-worm (u-id net-u) cx cy))
+                 (emit! (list 'move (u-id sp-u) cx cy)))]))
+
+        ;; Bypass fortified enemy bunker contain via main-edge Nydus Worm (preferring spotter vision!)
         (when (and (pair? e-bunkers) (pair? nets))
-          (emit! (list 'build-nydus-worm (u-id (first nets))
-                       (clamp-coord (- ex 10.0))
-                       (clamp-coord (+ ey 8.0)))))
+          (cond
+            [(pair? active-spotters)
+             (emit-safe-nydus-for-spotter! (first nets) (first active-spotters))]
+            [else
+             (emit! (list 'build-nydus-worm (u-id (first nets))
+                          (clamp-coord (- ex 10.0))
+                          (clamp-coord (+ ey 8.0))))]))
 
         (when (and (pair? nets) (null? worms))
-          (emit! (list 'build-nydus-worm (u-id (first nets))
-                       (clamp-coord (+ ex 9.0)) (clamp-coord (+ ey 9.0))))
-          (when (>= (length nets) 2)
-            (emit! (list 'build-nydus-worm (u-id (second nets))
-                         (clamp-coord (- eex 10.0)) (clamp-coord (+ eey 10.0))))))
+          (cond
+            [(pair? active-spotters)
+             (define sp0 (first active-spotters))
+             (emit-safe-nydus-for-spotter! (first nets) sp0)
+             (when (>= (length nets) 2)
+               (define sp0x (u-x sp0 ex))
+               (define sp0y (u-y sp0 ey))
+               (define sp1
+                 (findf (lambda (u)
+                          (>= (fast-dist2 (u-x u ex) (u-y u ey) sp0x sp0y) 100.0))
+                        (cdr active-spotters)))
+               (when sp1
+                 (emit-safe-nydus-for-spotter! (second nets) sp1)))]
+            [(pair? all-spotters)
+             ;; Live match with spotters available elsewhere -> send nearest Changeling/Overlord
+             ;; to enemy main back corner to open vision instead of spamming blind fogged Nydus!
+             (define dx (- ex bx))
+             (define dy (- ey by))
+             (define dl (max 1.0 (sqrt (+ (* dx dx) (* dy dy)))))
+             (define corner-x (clamp-coord (+ ex (* 9.5 (/ dx dl)) (* 6.5 (/ (- dy) dl)))))
+             (define corner-y (clamp-coord (+ ey (* 9.5 (/ dy dl)) (* 6.5 (/ dx dl)))))
+             (define lead-sp
+               (car (k-nearest-to corner-x corner-y 1 all-spotters)))
+             (emit! (list 'move (u-id lead-sp) corner-x corner-y))]
+            [else
+             ;; Synthetic/minimal test with 0 spotters in obs -> preserve legacy placement fallback
+             (emit! (list 'build-nydus-worm (u-id (first nets))
+                          (clamp-coord (+ ex 9.0)) (clamp-coord (+ ey 9.0))))
+             (when (>= (length nets) 2)
+               (emit! (list 'build-nydus-worm (u-id (second nets))
+                            (clamp-coord (- eex 10.0)) (clamp-coord (+ eey 10.0)))))]))
 
         (when (and (pair? nets) (pair? worms))
           (define army (bucket-pos-ids au-ht '(zergling baneling roach ravager hydralisk lurker ultralisk)))
@@ -582,12 +748,29 @@
             (define wid (u-id w))
             (define wx (u-x w ex))
             (define wy (u-y w ey))
-            (define local-allies (cloud-entities-within au-cld wx wy 12.0))
+            ;; L59-P2 (`n20` fix): Only ground COMBAT allies can enter a Nydus Worm (`overseer`/`changeling` cannot!),
+            ;; only enemy COMBAT units count toward outnumbering (never 16 SCVs in a mineral line!), and never abort
+            ;; `(nydus-unload wid)` while the worm still holds cargo and has `>= 35%` HP!
+            (define local-allies
+              (for/list ([au (in-list (cloud-entities-within au-cld wx wy 12.0))]
+                         #:when (let ([meta (fast-unit-meta (fast-hash-raw-sym au))])
+                                  (and (not (vector-ref meta 2))
+                                       (not (vector-ref meta 3)))))
+                au))
+            (define enemy-combat-cnt
+              (for/sum ([eu (in-list (cloud-entities-within eu-cld wx wy 14.0))]
+                        #:when (let ([meta (fast-unit-meta (fast-hash-raw-sym eu))])
+                                 (and (not (vector-ref meta 1))
+                                      (not (vector-ref meta 2)))))
+                1))
+            (define worm-cargo
+              (fast-safe-nonneg-int (hash-ref w 'cargo-space-taken 0) 0))
             (define trapped-or-dying?
               (and (pair? local-allies)
                    (or (< (u-hp-frac w) 0.35)
-                       (let ([limit (+ 1 (* 2 (length local-allies)))])
-                         (>= (cloud-count-within? eu-cld wx wy 14.0 limit) limit)))))
+                       (and (= worm-cargo 0)
+                            (>= (length local-allies) 3)
+                            (>= enemy-combat-cnt (+ 1 (* 2 (length local-allies))))))))
             (cond
               [trapped-or-dying?
                (for ([au (in-list local-allies)])

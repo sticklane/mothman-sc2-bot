@@ -1597,14 +1597,28 @@
                            (let ([pre (upgrade-catalog-entry-prereq u)])
                              (or (not pre) (eq? (hash-ref have-ht pre #f) 'researched)))
                            (or (not have-bldgs?)
-                               (let ([st (upgrade-catalog-entry-structure u)])
-                                 (or (hash-ref bldg-ht st #f)
-                                     (and (eq? st 'hatchery)
-                                          (or (hash-ref bldg-ht 'lair #f) (hash-ref bldg-ht 'hive #f)))
-                                     (and (eq? st 'spire)
-                                          (hash-ref bldg-ht 'greater-spire #f))
-                                     (and (eq? st 'templar-archive)
-                                          (hash-ref bldg-ht 'templar-archives #f)))))))
+                               (let ([st (upgrade-catalog-entry-structure u)]
+                                     [usym (upgrade-catalog-entry-sym u)])
+                                 (and
+                                  (or (hash-ref bldg-ht st #f)
+                                      (and (eq? st 'hatchery)
+                                           (or (hash-ref bldg-ht 'lair #f) (hash-ref bldg-ht 'hive #f)))
+                                      (and (eq? st 'spire)
+                                           (hash-ref bldg-ht 'greater-spire #f))
+                                      (and (eq? st 'templar-archive)
+                                           (hash-ref bldg-ht 'templar-archives #f)))
+                                  ;; L58: Never recommend CyberCore Protoss air upgrades without a Stargate
+                                  ;; (+ Fleet Beacon for +2/+3) or Armory Terran ship weapons without a Starport!
+                                  (cond
+                                    [(memq usym '(protoss-air-weapons-1 protoss-air-armor-1))
+                                     (hash-ref bldg-ht 'stargate #f)]
+                                    [(memq usym '(protoss-air-weapons-2 protoss-air-weapons-3
+                                                  protoss-air-armor-2 protoss-air-armor-3))
+                                     (and (hash-ref bldg-ht 'stargate #f)
+                                          (hash-ref bldg-ht 'fleet-beacon #f))]
+                                    [(memq usym '(terran-ship-weapons-1 terran-ship-weapons-2 terran-ship-weapons-3))
+                                     (hash-ref bldg-ht 'starport #f)]
+                                    [else #t]))))))
       (define sit-hits : Integer
         (if (memq situation (upgrade-catalog-entry-situation-triggers u)) 1 0))
       (define trig-units : (Listof Symbol) (upgrade-catalog-entry-enemy-unit-triggers u))

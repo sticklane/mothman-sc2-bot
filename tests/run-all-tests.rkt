@@ -6431,12 +6431,12 @@
               (mk-s28-unit (+ 930 z) 105 (+ 40.0 (* 0.5 z)) 40.0 #:hp 35.0 #:hp-max 35.0))
             (list (mk-s28-unit 9901 48 120.0 120.0 #:alliance 4 #:hp 45.0 #:hp-max 45.0))
             bases-16-neutrals))
-  ;; Warm per-map cache & one-time translate/build-metadata cache on step 0
+  ;; Warm per-map cache & one-time translate/build-metadata cache at gl=400, then measure monotonic cached steps gl=408..464
   (void (sc2-observation->runtime-obs-hash (mk-s28-obs 400 units-16-base) #:game-info g200-info))
-  (void (translate-bot-actions->sc2-raw-commands '() (mk-s28-obs 0 units-16-base) #:game-info g200-info))
+  (void (translate-bot-actions->sc2-raw-commands '() (mk-s28-obs 400 units-16-base) #:game-info g200-info))
   (define lat-t0 (current-inexact-monotonic-milliseconds))
   (for ([step-k (in-range 1 9)])
-    (define obs-k (mk-s28-obs (* step-k 8) units-16-base))
+    (define obs-k (mk-s28-obs (+ 400 (* step-k 8)) units-16-base))
     (define rt-hash-k (sc2-observation->runtime-obs-hash obs-k #:game-info g200-info))
     (assert-true! (>= (length (hash-ref rt-hash-k 'expansion-candidates '())) 14)
                   "Cached 200x200 16-base converter must expose solved expansion-candidates")
@@ -7575,11 +7575,11 @@
   (assert-true! (and mw-rout-cmd (not (urgent-survival-cmd? mw-rout-cmd)) (= (wire-cmd-priority-tier mw-rout-cmd) 3))
                 "Routine harvest-mineral command must remain Tier P3 (3)")
   (define test-gov (make-wire-apm-governor))
-  ;; Drain governor from 24.0 tokens down to P2 floor (4.0 tokens) at loop 640
+  ;; Drain governor from initial tokens (24..36) down to P2 floor (4.0 tokens) at loop 640
   (void
    (govern-sc2-wire-actions!
     test-gov
-    (for/list ([i (in-range 10)])
+    (for/list ([i (in-range 16)])
       (sc2-raw-unit-command 16 (sc2-point2d (+ 40.0 i) 40.0) 0 (list (+ 900 i)) #f))
     640))
   (define gov-out
@@ -8019,12 +8019,12 @@
                 "2-base Protoss floating 750M with 3 Gateways must scale extra Gateways toward 8")
   (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'robotics-facility))) acts-p-float)
                 "Protoss floating 750M/250G at >= 72 supply must build 2nd RoboticsFacility")
-  ;; (c) Earlier vs-Terran RoboticsBay at 58 supply, >= 4 Gateways & 16 army (1 Immortal)
+  ;; (c) Earlier vs-Terran RoboticsBay at 58 supply, >= 4 Gateways & 16 army (1 Immortal, >= 6:00 on 2 bases per L59C)
   (define rt-p-bay (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
   (define res-p-bay
     (step-live-bot-runtime!
      rt-p-bay
-     (hash 'frame 5000 'minerals 300 'gas 200 'supply-used 58 'supply-cap 78 'supply-left 20
+     (hash 'frame 8100 'minerals 300 'gas 200 'supply-used 58 'supply-cap 78 'supply-left 20
            'mineral-harvesters 32 'vespene-harvesters 10 'enemy-race 'Terran
            'researched-upgrades '(warp-gate-research)
            'base-x 32.5 'base-y 32.5 'natural-x 58.5 'natural-y 32.5
@@ -8276,29 +8276,29 @@
                                   (hash 'id 18589 'type 'cybernetics-core 'x 40.5 'y 32.5 'hp 550 'shield 550 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1)
                                   (hash 'id 18590 'type 'robotics-facility 'x 44.5 'y 32.5 'hp 500 'shield 500 'build-progress 1.0 'powered? #t 'busy? #t 'order-count 1))
             'enemy-units '()))
-    (define acts-cd-p1 (hash-ref (step-live-bot-runtime! rt-cd-p (mk-p-bay-cd-obs 5000)) 'actions '()))
+    (define acts-cd-p1 (hash-ref (step-live-bot-runtime! rt-cd-p (mk-p-bay-cd-obs 8100)) 'actions '()))
     (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'robotics-bay))) acts-cd-p1)
                   "Step 1 must issue (build robotics-bay)")
     ;; Clear pending order ledger to isolate the 56f duplicate build-issue lock
     (clear-oledger! (live-bot-runtime-order-ledger rt-cd-p))
-    (define acts-cd-p2 (hash-ref (step-live-bot-runtime! rt-cd-p (mk-p-bay-cd-obs 5024)) 'actions '()))
+    (define acts-cd-p2 (hash-ref (step-live-bot-runtime! rt-cd-p (mk-p-bay-cd-obs 8124)) 'actions '()))
     (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'robotics-bay))) acts-cd-p2))
                   "Within 56 frames and unchanged count, build-issue-blocked? must suppress duplicate (build robotics-bay)")
-    ;; Simulate save-cancel on frame 5032 -> stays held while within 60f save-cancel cooldown (5040),
-    ;; then unblocks once >= 60f past save-cancel (5094); also test pure 56f build-issue-lock expiry on fresh runtime.
+    ;; Simulate save-cancel on frame 8132 -> stays held while within 60f save-cancel cooldown (8140),
+    ;; then unblocks once >= 60f past save-cancel (8194); also test pure 56f build-issue-lock expiry on fresh runtime.
     (hash-set! (refractory-cooldown-tracker-table (live-bot-runtime-cooldown-tracker rt-cd-p))
-               'save-cancel-rebuild-robotics-bay 5032)
-    (define acts-cd-p3-held (hash-ref (step-live-bot-runtime! rt-cd-p (mk-p-bay-cd-obs 5040)) 'actions '()))
+               'save-cancel-rebuild-robotics-bay 8132)
+    (define acts-cd-p3-held (hash-ref (step-live-bot-runtime! rt-cd-p (mk-p-bay-cd-obs 8140)) 'actions '()))
     (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'robotics-bay))) acts-cd-p3-held))
-                  "Within 60f of save-cancel-rebuild-robotics-bay (5040 vs 5032), rebuild must remain held")
-    (define acts-cd-p4 (hash-ref (step-live-bot-runtime! rt-cd-p (mk-p-bay-cd-obs 5094)) 'actions '()))
+                  "Within 60f of save-cancel-rebuild-robotics-bay (8140 vs 8132), rebuild must remain held")
+    (define acts-cd-p4 (hash-ref (step-live-bot-runtime! rt-cd-p (mk-p-bay-cd-obs 8194)) 'actions '()))
     (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'robotics-bay))) acts-cd-p4)
                   "Once save-cancel-rebuild cooldown expires (>= 60f), robotics-bay rebuild must resume immediately")
     (define rt-cd-p-exp (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
-    (void (step-live-bot-runtime! rt-cd-p-exp (mk-p-bay-cd-obs 5000)))
+    (void (step-live-bot-runtime! rt-cd-p-exp (mk-p-bay-cd-obs 8100)))
     (clear-oledger! (live-bot-runtime-order-ledger rt-cd-p-exp))
     (define acts-cd-p-exp
-      (hash-ref (step-live-bot-runtime! rt-cd-p-exp (mk-p-bay-cd-obs 5058)) 'actions '()))
+      (hash-ref (step-live-bot-runtime! rt-cd-p-exp (mk-p-bay-cd-obs 8158)) 'actions '()))
     (assert-true! (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'robotics-bay))) acts-cd-p-exp)
                   "After 56f build-issue-blocked? cooldown expires without save-cancel, robotics-bay retry is allowed")
 
@@ -17132,6 +17132,1062 @@
                      (not (memq 'twilight-council (macro-brain-decision-scheduled-ids l48-p-12-nat5820)))
                      (not (memq 'forge (macro-brain-decision-scheduled-ids l48-p-12-nat5820))))
                 "L48-P0-2b #01 ZvZ non-blocking Hatch, #53 TvT Reaper#1 OC defer, & #12 f=5820 Twilight/Forge defer")
+  (reset-macro-escrow-tracker!))
+
+(run-suite "51.37 Loop 58 Div-5 & L57 Macro Fixes (0-Stargate Air Upg, PvT Obs Cap, Fast Stim / 3-Rax Marauder, ZvP Tech/Evo)"
+  (define (l58-cand-u dec sym)
+    (define sched (macro-brain-decision-priority-schedule dec))
+    (define cat-ht (priority-schedule-result-category-utilities sched))
+    (define trace (if (hash? cat-ht) (hash-ref cat-ht 'decision-trace '()) '()))
+    (define hit (findf (lambda (e) (eq? (priority-decision-entry-id e) sym)) trace))
+    (if hit (priority-decision-entry-utility-score hit) -1.0))
+
+  ;; 1. ProtossAirWeaponsLevel1 (1562) 0-Stargate Leak (situational-counter + econ-ledger)
+  (define sit-p-no-sg
+    (select-situational-upgrades 'Protoss 'enemy-turtle-skytoss-or-mech '(carrier tempest void-ray)
+                                 '(warpgate) '() '(nexus gateway cybernetics-core) 300 300))
+  (define sit-p-with-sg
+    (select-situational-upgrades 'Protoss 'enemy-turtle-skytoss-or-mech '(carrier tempest void-ray)
+                                 '(warpgate) '() '(nexus gateway cybernetics-core stargate) 300 300))
+  (define sit-p-air2-no-fb
+    (select-situational-upgrades 'Protoss 'enemy-turtle-skytoss-or-mech '(carrier tempest)
+                                 '(warpgate protoss-air-weapons-1) '() '(nexus gateway cybernetics-core stargate) 400 400))
+  (define sit-t-no-sp
+    (select-situational-upgrades 'Terran 'enemy-turtle-skytoss-or-mech '(carrier tempest)
+                                 '() '() '(command-center barracks armory) 300 300))
+  (assert-true! (and (not (memq 'protoss-air-weapons-1 sit-p-no-sg))
+                     (not (memq 'protoss-air-armor-1 sit-p-no-sg))
+                     (not (not (memq 'protoss-air-weapons-1 sit-p-with-sg)))
+                     (not (memq 'protoss-air-weapons-2 sit-p-air2-no-fb))
+                     (not (memq 'terran-ship-weapons-1 sit-t-no-sp)))
+                "L58(1a) select-situational-upgrades MUST gate Protoss air upgs on Stargate(+FleetBeacon) & Terran ship upgs on Starport")
+
+  (assert-true! (and (not (upgrade-allowed-by-unit-and-order-gates?
+                           'Protoss 'protoss-air-weapons-1 6500 40
+                           (hasheq 'nexus 2 'cybernetics-core 1) (hasheq 'nexus 2 'cybernetics-core 1)
+                           (hasheq 'stalker 10 'zealot 4) '() '()))
+                     (not (upgrade-allowed-by-unit-and-order-gates?
+                           'Protoss 'protoss-air-weapons-1 6500 40
+                           (hasheq 'nexus 2 'cybernetics-core 1 'stargate 1) (hasheq 'nexus 2 'cybernetics-core 1 'stargate 1)
+                           (hasheq 'void-ray 2) '() '()))
+                     (upgrade-allowed-by-unit-and-order-gates?
+                      'Protoss 'protoss-air-weapons-1 6500 40
+                      (hasheq 'nexus 2 'cybernetics-core 1 'stargate 1) (hasheq 'nexus 2 'cybernetics-core 1 'stargate 1)
+                      (hasheq 'void-ray 3) '() '()))
+                "L58(1b) upgrade-allowed-by-unit-and-order-gates? MUST require stargate>=1 & >=3 air ships for protoss-air-weapons-1")
+
+  (define p-post-bo-no-sg
+    (evaluate-post-bo-strategic-goals
+     (hash 'race 'Protoss 'enemy-race 'Protoss 'frame 7500 'minerals 300 'gas 250
+           'workers 42 'active-bases 2 'army-supply 24
+           'building-counts (hasheq 'nexus 2 'gateway 4 'cybernetics-core 1 'robotics-facility 1)
+           'unit-counts (hasheq 'probe 42 'stalker 10 'immortal 2)
+           'enemy-unit-counts (hasheq 'carrier 4 'tempest 2))))
+  (assert-true! (not (memq 'protoss-air-weapons-1 (hash-ref p-post-bo-no-sg 'recommended-upgrades '())))
+                "L58(1c) evaluate-post-bo-strategic-goals MUST NOT recommend protoss-air-weapons-1 with 0 Stargates vs enemy air")
+
+  ;; 2. PvT Observer Rebuild Cap (#78 VeTerran): 0 Immortals & 0 Banshees -> cap Observer at 1 vs Widow Mines
+  ;;    (but still allow Observer #2 when enemy Banshees are present with >=6 Stalkers!)
+  (reset-macro-escrow-tracker!)
+  (define l58-p-pvt-obs-cap1
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 6000
+      #:minerals 320 #:gas 150 #:supply-used 44 #:supply-cap 66 #:supply-left 22 #:pending-supply 0
+      #:workers 32 #:active-bases 2 #:mineral-harvesters 24 #:gas-harvesters 8
+      #:army-supply 12 #:enemy-threat-supply 10 #:under-attack? #t #:requires-detection? #t
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 7 'gateway 3 'cybernetics-core 1
+                                      'robotics-facility 1 'assimilator 3)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 7 'gateway 3 'cybernetics-core 1
+                                      'robotics-facility 1 'assimilator 3)
+      #:unit-counts (hasheq 'probe 32 'stalker 6 'observer 1)
+      #:enemy-unit-counts (hasheq 'widow-mine 3 'siege-tank 2 'marine 6)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 0 'robotics-facility 1))))
+  (reset-macro-escrow-tracker!)
+  (define l58-p-pvt-obs-banshee-ok
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 6000
+      #:minerals 320 #:gas 150 #:supply-used 44 #:supply-cap 66 #:supply-left 22 #:pending-supply 0
+      #:workers 32 #:active-bases 2 #:mineral-harvesters 24 #:gas-harvesters 8
+      #:army-supply 12 #:enemy-threat-supply 10 #:under-attack? #t #:requires-detection? #t
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 7 'gateway 3 'cybernetics-core 1
+                                      'robotics-facility 1 'assimilator 3)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 7 'gateway 3 'cybernetics-core 1
+                                      'robotics-facility 1 'assimilator 3)
+      #:unit-counts (hasheq 'probe 32 'stalker 6 'observer 1)
+      #:enemy-unit-counts (hasheq 'banshee 2 'marine 6)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 0 'robotics-facility 1))))
+  (assert-true! (and (not (memq 'observer (macro-brain-decision-scheduled-ids l58-p-pvt-obs-cap1)))
+                     (not (not (memq 'immortal (macro-brain-decision-scheduled-ids l58-p-pvt-obs-cap1))))
+                     (not (not (memq 'observer (macro-brain-decision-scheduled-ids l58-p-pvt-obs-banshee-ok)))))
+                "L58(2) PvT vs Widow Mines w/ 1 live Obs & 0 Immortals MUST cap Obs at 1 & train Immortal #1, while Banshees allow Obs #2")
+
+  ;; 3a. Faster Terran Stimpack (~4:45): BarracksTechLab #1 (580) & Stimpack (605) ahead of EBay
+  (reset-macro-escrow-tracker!)
+  (define l58-t-fast-raxtl
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 3800
+      #:minerals 160 #:gas 60 #:supply-used 34 #:supply-cap 46 #:supply-left 12 #:pending-supply 0
+      #:workers 26 #:active-bases 2 #:mineral-harvesters 20 #:gas-harvesters 6
+      #:army-supply 8 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 4
+                                      'barracks 2 'factory 1 'factory-techlab 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 4
+                                      'barracks 2 'factory 1 'factory-techlab 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 26 'marine 8)
+      #:open-facility-slots (hasheq 'townhall 0 'barracks 1 'factory 0))))
+  (reset-macro-escrow-tracker!)
+  (define l58-t-fast-stim
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 4100
+      #:minerals 180 #:gas 110 #:supply-used 40 #:supply-cap 54 #:supply-left 14 #:pending-supply 0
+      #:workers 28 #:active-bases 2 #:mineral-harvesters 22 #:gas-harvesters 6
+      #:army-supply 12 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'barracks-techlab 1
+                                      'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'barracks-techlab 1
+                                      'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 28 'marine 8 'siege-tank 1)
+      #:open-facility-slots (hasheq 'townhall 0 'barracks 0 'barracks-techlab 1 'factory 0 'starport 0))))
+  (assert-true! (and (>= (l58-cand-u l58-t-fast-raxtl 'barracks-techlab) 486.0)
+                     (not (not (memq 'barracks-techlab (macro-brain-decision-scheduled-ids l58-t-fast-raxtl))))
+                     (>= (l58-cand-u l58-t-fast-stim 'stimpack) 605.0)
+                     (not (not (memq 'stimpack (macro-brain-decision-scheduled-ids l58-t-fast-stim)))))
+                "L58(3a) Fast Div-5 Stimpack MUST prioritize BarracksTechLab #1 (>=486 > Reactor@478) and Stimpack (>=605) on 2-CC Factory+Starport")
+
+  ;; 3b. TvT 3-Rax Marauder Defense (#14 oberon): Marauder (905) > Bunker#1 (898) > Marine (895), suppress Rax #3 while 0 Tanks
+  (reset-macro-escrow-tracker!)
+  (define l58-t-marauder-bunker1
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 3300
+      #:minerals 115 #:gas 40 #:supply-used 22 #:supply-cap 39 #:supply-left 17 #:pending-supply 0
+      #:workers 18 #:active-bases 1 #:mineral-harvesters 15 #:gas-harvesters 3
+      #:army-supply 4 #:enemy-threat-supply 8 #:under-attack? #t
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 3 'barracks 1 'refinery 1)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 3 'barracks 1 'refinery 1)
+      #:unit-counts (hasheq 'scv 18 'marine 4)
+      #:enemy-unit-counts (hasheq 'marauder 4)
+      #:open-facility-slots (hasheq 'townhall 0 'barracks 1))))
+  (reset-macro-escrow-tracker!)
+  (define l58-t-marauder-over-marine
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 3600
+      #:minerals 115 #:gas 40 #:supply-used 24 #:supply-cap 39 #:supply-left 15 #:pending-supply 0
+      #:workers 18 #:active-bases 1 #:mineral-harvesters 15 #:gas-harvesters 3
+      #:army-supply 6 #:enemy-threat-supply 8 #:under-attack? #t
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 3 'barracks 2 'barracks-techlab 1
+                                      'bunker 1 'factory 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 3 'barracks 2 'barracks-techlab 1
+                                      'bunker 1 'factory 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 18 'marine 6)
+      #:enemy-unit-counts (hasheq 'marauder 4)
+      #:open-facility-slots (hasheq 'townhall 0 'barracks 1 'factory 0))))
+  (assert-true! (and (>= (l58-cand-u l58-t-marauder-bunker1 'bunker) 898.0)
+                     (> (l58-cand-u l58-t-marauder-bunker1 'bunker)
+                        (l58-cand-u l58-t-marauder-bunker1 'marine))
+                     (not (not (memq 'bunker (macro-brain-decision-scheduled-ids l58-t-marauder-bunker1))))
+                     (>= (l58-cand-u l58-t-marauder-over-marine 'marauder) 905.0)
+                     (> (l58-cand-u l58-t-marauder-over-marine 'marauder)
+                        (l58-cand-u l58-t-marauder-over-marine 'marine))
+                     (not (not (memq 'marauder (macro-brain-decision-scheduled-ids l58-t-marauder-over-marine))))
+                     (not (memq 'barracks (macro-brain-decision-scheduled-ids l58-t-marauder-over-marine))))
+                "L58(3b) TvT 3-Rax Marauder defense MUST train Marauder (905) > Bunker#1 (898) > Marine (895), & suppress Rax#3 at 0 Tanks")
+
+  ;; 4. ZvP Early Droning (defer Evo on 2b <36W) & Stop 4-Parallel Tech Bloat (no RW+BN or HydraDen+Spire vs 3 Phoenix)
+  (reset-macro-escrow-tracker!)
+  (define l58-z-2b-defer-evo-30w
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 7000
+      #:minerals 220 #:gas 80 #:supply-used 40 #:supply-cap 66 #:supply-left 26 #:pending-supply 0
+      #:workers 30 #:active-bases 2 #:mineral-harvesters 24 #:gas-harvesters 6
+      #:army-supply 10 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'roach-warren 1 'extractor 2)
+      #:total-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'roach-warren 1 'extractor 2)
+      #:unit-counts (hasheq 'drone 30 'queen 2 'roach 3 'zergling 8)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 3))))
+  (reset-macro-escrow-tracker!)
+  (define l58-z-norman-no-4tech
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 6800
+      #:minerals 260 #:gas 240 #:supply-used 48 #:supply-cap 66 #:supply-left 18 #:pending-supply 0
+      #:workers 32 #:active-bases 2 #:mineral-harvesters 26 #:gas-harvesters 6
+      #:army-supply 16 #:enemy-threat-supply 26 #:under-attack? #t
+      #:ready-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'baneling-nest 1 'extractor 3)
+      #:total-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'baneling-nest 1 'hydralisk-den 1 'extractor 3)
+      #:unit-counts (hasheq 'drone 32 'queen 3 'zergling 16 'baneling 4)
+      #:enemy-unit-counts (hasheq 'stalker 8 'sentry 4 'phoenix 3)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 3))))
+  (assert-true! (and (not (memq 'evolution-chamber (macro-brain-decision-scheduled-ids l58-z-2b-defer-evo-30w)))
+                     (not (memq 'roach-warren (macro-brain-decision-scheduled-ids l58-z-norman-no-4tech)))
+                     (not (memq 'spire (macro-brain-decision-scheduled-ids l58-z-norman-no-4tech))))
+                "L58(4) ZvP MUST defer Evo on 2b <36W, keep RW/BN mutually exclusive under attack, & defer Spire when HydraDen exists vs 3 Phoenixes")
+
+  ;; 5a. L58 BUG #4a: Spire non-deferral vs scouted/remembered Tempest, Carrier, FleetBeacon, or >=2 Stargates
+  (assert-true!
+   (and (not (zerg-cap-air-tech-or-unit-scouted?
+              (list (hash 'id 9001 'type 'phoenix 'x 120.0 'y 100.0))
+              (list (hash 'id 9002 'type 'stargate 'x 140.0 'y 140.0))
+              (hasheq 'phoenix 3) (hasheq 'stargate 1)))
+        (zerg-cap-air-tech-or-unit-scouted?
+         (list (hash 'id 9003 'type 'tempest 'x 120.0 'y 100.0)) '() #f #f)
+        (zerg-cap-air-tech-or-unit-scouted?
+         '() (list (hash 'id 9004 'type 'fleet-beacon 'x 140.0 'y 140.0)) #f #f)
+        (zerg-cap-air-tech-or-unit-scouted?
+         '() (list (hash 'id 9005 'type 'stargate 'x 140.0 'y 140.0)
+                   (hash 'id 9006 'type 'stargate 'x 144.0 'y 140.0)) #f #f)
+        (zerg-cap-air-tech-or-unit-scouted?
+         '() '() (hasheq 'carrier 1) (hasheq))
+        (zerg-cap-air-tech-or-unit-scouted?
+         '() '() (hasheq) (hasheq 'fleet-beacon 1))
+        (zerg-cap-air-tech-or-unit-scouted?
+         '() '() (hasheq) (hasheq 'stargate 2)))
+   "L58(5a-pred) zerg-cap-air-tech-or-unit-scouted? MUST trigger on live or OWM tempest/carrier/fleet-beacon/>=2 stargate, NOT 1 stargate + 3 phoenix")
+
+  (let ()
+    (define (mk-l58-u id ty x y [hp 100.0] [bp 1.0])
+      (hash 'id id 'type ty 'x x 'y y 'z 10.0 'hp hp 'max-hp hp 'shield 0.0 'max-shield 0.0
+            'build-progress bp 'is-flying #f 'flying #f 'order-count 0))
+    (define z-drones-26
+      (for/list ([i (in-range 26)])
+        (mk-l58-u (+ 8100 i) 'drone (+ 28.0 (* 0.15 i)) 30.0 40.0)))
+    (define z-bldgs-hd
+      (list (mk-l58-u 8200 'lair 32.5 32.5 2000.0)
+            (mk-l58-u 8201 'hatchery 56.5 32.5 1500.0)
+            (mk-l58-u 8202 'spawning-pool 36.0 36.0 1000.0)
+            (mk-l58-u 8203 'hydralisk-den 38.0 38.0 850.0)
+            (mk-l58-u 8204 'extractor 30.0 38.0 500.0)
+            (mk-l58-u 8205 'extractor 30.0 26.0 500.0)))
+    (define (run-z-spire-obs eb-list eu-list)
+      (define rt (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+      (step-layer2-economy!
+       rt
+       (hash 'race 'Zerg 'enemy-race 'Protoss 'frame 5600
+             'minerals 420 'gas 260 'supply-used 40 'supply-cap 66
+             'mineral-harvesters 20 'vespene-harvesters 6 'live-obs? #t
+             'base-x 32.5 'base-y 32.5 'nat-x 56.5 'nat-y 32.5
+             'enemy-x 160.0 'enemy-y 160.0 'map-width 200.0 'map-height 200.0
+             'ally-units (append z-drones-26
+                                 (list (mk-l58-u 8301 'queen 35.0 33.0 175.0)
+                                       (mk-l58-u 8302 'roach 54.0 32.5 145.0)
+                                       (mk-l58-u 8303 'roach 55.0 32.5 145.0)))
+             'ally-buildings z-bldgs-hd
+             'enemy-units eu-list
+             'enemy-buildings eb-list)))
+    (define acts-fb
+      (run-z-spire-obs (list (mk-l58-u 8401 'fleet-beacon 156.0 156.0 500.0)) '()))
+    (define acts-2sg
+      (run-z-spire-obs (list (mk-l58-u 8402 'stargate 156.0 156.0 600.0)
+                             (mk-l58-u 8403 'stargate 160.0 156.0 600.0)) '()))
+    (define acts-1sg-phx
+      (run-z-spire-obs (list (mk-l58-u 8404 'stargate 156.0 156.0 600.0))
+                       (list (mk-l58-u 8405 'phoenix 120.0 100.0 120.0)
+                             (mk-l58-u 8406 'phoenix 121.0 100.0 120.0))))
+    (define (built-spire? acts)
+      (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'spire))) acts))))
+    (assert-true! (and (built-spire? acts-fb)
+                       (built-spire? acts-2sg)
+                       (not (built-spire? acts-1sg-phx)))
+                  "L58(5a) Live 2-base Zerg w/ HydraDen MUST build Spire vs FleetBeacon or 2x Stargate, while deferring Spire vs 1x Stargate + 2 Phoenix")
+
+    ;; 5b. L58 BUG #4b: Strict 2-base BN/RW exclusivity on `brain-sched-rw?` (<=2 completed Hatcheries)
+    (define rt-z-bn (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+    (define acts-bn-no-rw
+      (step-layer2-economy!
+       rt-z-bn
+       (hash 'race 'Zerg 'enemy-race 'Protoss 'frame 4600
+             'minerals 240 'gas 120 'supply-used 42 'supply-cap 66
+             'mineral-harvesters 20 'vespene-harvesters 6 'live-obs? #t
+             'base-x 32.5 'base-y 32.5 'nat-x 56.5 'nat-y 32.5
+             'enemy-x 160.0 'enemy-y 160.0 'map-width 200.0 'map-height 200.0
+             'ally-units (append z-drones-26
+                                 (list (mk-l58-u 8501 'queen 35.0 33.0 175.0)
+                                       (mk-l58-u 8502 'queen 54.0 33.0 175.0)
+                                       (mk-l58-u 8503 'zergling 55.0 32.0 35.0)
+                                       (mk-l58-u 8504 'zergling 56.0 32.0 35.0)))
+             'ally-buildings (list (mk-l58-u 8510 'hatchery 32.5 32.5 1500.0)
+                                   (mk-l58-u 8511 'hatchery 56.5 32.5 1500.0)
+                                   (mk-l58-u 8512 'hatchery 78.5 32.5 1500.0 0.35) ;; 3rd Hatch in progress (<=2 completed!)
+                                   (mk-l58-u 8513 'spawning-pool 36.0 36.0 1000.0)
+                                   (mk-l58-u 8514 'baneling-nest 38.0 34.0 850.0)
+                                   (mk-l58-u 8515 'extractor 30.0 38.0 500.0))
+             'enemy-units '() 'enemy-buildings '())))
+    (define built-rw-with-bn?
+      (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'roach-warren))) acts-bn-no-rw))))
+    (assert-true! (not built-rw-with-bn?)
+                  "L58(5b) Live Zerg w/ <=2 completed Hatcheries & existing BanelingNest MUST NOT build RoachWarren even on brain-sched-rw?"))
+
+  (reset-macro-escrow-tracker!))
+
+(run-suite "51.38 Loop 59 Pro Camera/APM, Tier-1A/1B Wiring, zero_gas Guard, Pro 3rd Bases & TvT0Tank (#74)"
+  (define (l59-cand-u dec sym)
+    (define sched (macro-brain-decision-priority-schedule dec))
+    (define cat-ht (priority-schedule-result-category-utilities sched))
+    (define trace (if (hash? cat-ht) (hash-ref cat-ht 'decision-trace '()) '()))
+    (define hit (findf (lambda (e) (eq? (priority-decision-entry-id e) sym)) trace))
+    (if hit (priority-decision-entry-utility-score hit) -1.0))
+
+  ;; 1. Pro Base-Hotkey (F1..F8) + Minimap-Click Camera Governor w/ 20f dwell & crisis interleave
+  (let ()
+    (define rt-cam (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+    (define bldgs-3b
+      (list (hash 'id 1 'type 'orbital-command 'x 32.5 'y 32.5 'hp 1500.0 'build-progress 1.0)
+            (hash 'id 2 'type 'orbital-command 'x 56.5 'y 32.5 'hp 1500.0 'build-progress 1.0)
+            (hash 'id 3 'type 'command-center  'x 32.5 'y 64.5 'hp 1500.0 'build-progress 1.0)))
+    (define units-front
+      (list (hash 'id 11 'type 'marine 'x 115.0 'y 115.0 'hp 45.0)
+            (hash 'id 12 'type 'marine 'x 116.0 'y 115.0 'hp 45.0)
+            (hash 'id 13 'type 'reaper 'x 150.0 'y 140.0 'hp 60.0)))
+    (define live-cam-cmds
+      (for/list ([f (in-list '(100 126 152 178 204))])
+        (step-pro-human-camera-and-apm-governor!
+         rt-cam
+         (hash 'frame f 'mineral-harvesters 30 'vespene-harvesters 6
+               'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5
+               'enemy-x 160.5 'enemy-y 160.5 'enemy-expand-x 148.0 'enemy-expand-y 148.0
+               'ally-buildings bldgs-3b 'ally-units units-front
+               'enemy-units (list (hash 'id 99 'type 'stalker 'x 125.0 'y 125.0 'hp 160.0))))))
+    (define saw-f1? (ormap (lambda (as) (ormap (lambda (a) (and (pair? a) (eq? (car a) 'camera-bookmark-jump) (eqv? (second a) 1))) as)) live-cam-cmds))
+    (define saw-f2? (ormap (lambda (as) (ormap (lambda (a) (and (pair? a) (eq? (car a) 'camera-bookmark-jump) (eqv? (second a) 2))) as)) live-cam-cmds))
+    (define saw-f3? (ormap (lambda (as) (ormap (lambda (a) (and (pair? a) (eq? (car a) 'camera-bookmark-jump) (eqv? (second a) 3))) as)) live-cam-cmds))
+    (define saw-minimap? (ormap (lambda (as) (ormap (lambda (a) (and (pair? a) (eq? (car a) 'camera-focus) (eq? (second a) 'minimap-jump))) as)) live-cam-cmds))
+    (define apm-cap-ok?
+      (let ([ap (findf (lambda (a) (and (pair? a) (eq? (car a) 'human-apm-discipline))) (car live-cam-cmds))])
+        (and (pair? ap) (>= (second ap) 350) (<= (second ap) 420))))
+    (assert-true! (and saw-f1? saw-f2? saw-f3? saw-minimap? apm-cap-ok?)
+                  "L59(1a) Live camera governor MUST emit F1..F3 base-centered camera-bookmark-jump + minimap-jump at 26f dwell & <=420 APM")
+
+    ;; Crisis interleave: enemy attacking natural must interleave crisis focus with F1/F3 base hotkeys!
+    (define rt-crisis (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+    (define crisis-slots
+      (for/list ([f (in-list '(400 426 452 478))])
+        (define as
+          (step-pro-human-camera-and-apm-governor!
+           rt-crisis
+           (hash 'frame f 'mineral-harvesters 30 'vespene-harvesters 6 'under-attack #t
+                 'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5
+                 'enemy-x 160.5 'enemy-y 160.5
+                 'ally-buildings bldgs-3b 'ally-units units-front
+                 'enemy-units (list (hash 'id 199 'type 'zergling 'x 60.0 'y 34.0 'hp 35.0)))))
+        (findf (lambda (a) (and (pair? a) (memq (car a) '(camera-bookmark-jump camera-focus)))) as)))
+    (define distinct-crisis-cmds (remove-duplicates crisis-slots))
+    (assert-true! (>= (length distinct-crisis-cmds) 2)
+                  "L59(1b) Crisis camera focus MUST interleave with F1..F8 base hotkeys instead of locking onto one unit every tick"))
+
+  ;; 2. Tier-1A Wiring: record-enemy-tech-building-destroyed! + watchdog-expand-ring-syms + zero_gas guard
+  (let ()
+    (define rt-mm (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+    (step-layer1c-mirror-mind!
+     rt-mm
+     (hash 'frame 3000 'race 'Protoss 'enemy-race 'Protoss
+           'enemy-buildings (list (hash 'id 7701 'type 'dark-shrine 'x 150.0 'y 150.0 'hp 500.0))
+           'enemy-units '() 'ally-buildings '()))
+    (step-layer1c-mirror-mind!
+     rt-mm
+     (hash 'frame 3200 'race 'Protoss 'enemy-race 'Protoss
+           'enemy-buildings '() 'enemy-units '() 'ally-buildings '()
+           'dead-tags '(7701)))
+    (define mm-tech (mirror-mind-state-last-tech-observation (live-bot-runtime-mirror-mind rt-mm)))
+    (define step-res (step-live-bot-runtime! rt-mm (hash 'frame 100 'race 'Protoss 'enemy-race 'Terran)))
+    (assert-true! (and (not (not (memq 'dark-shrine (enemy-tech-observation-crippled-tech-buildings mm-tech))))
+                       (hash-has-key? step-res 'watchdog-expand-ring-syms)
+                       (list? (hash-ref step-res 'watchdog-expand-ring-syms)))
+                  "L59(2a) Layer 1c MUST record destroyed enemy tech buildings & step-live-bot-runtime! MUST return 'watchdog-expand-ring-syms")
+
+    ;; zero_gas guard (L59C `#1566` Fix #2): 24 Probes, 60 gas (<100G), 0 gas harvesters on alive Assimilator MUST force harvest-gas!
+    (define rt-zg (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+    (define probes-24
+      (for/list ([i (in-range 24)])
+        (hash 'id (+ 9100 i) 'type 'probe 'x (+ 30.0 (* 0.2 i)) 'y 32.0 'hp 40.0 'build-progress 1.0 'orders '())))
+    (define zg-acts
+      (step-layer2-economy!
+       rt-zg
+       (hash 'race 'Protoss 'enemy-race 'Terran 'frame 6000
+             'minerals 220 'gas 60 'supply-used 38 'supply-cap 54
+             'mineral-harvesters 24 'vespene-harvesters 0 'live-obs? #t
+             'base-x 32.5 'base-y 32.5 'nat-x 56.5 'nat-y 32.5
+             'enemy-x 160.0 'enemy-y 160.0
+             'ally-units probes-24
+             'ally-buildings (list (hash 'id 9200 'type 'nexus 'x 32.5 'y 32.5 'hp 2000.0 'build-progress 1.0)
+                                   (hash 'id 9201 'type 'nexus 'x 56.5 'y 32.5 'hp 2000.0 'build-progress 1.0)
+                                   (hash 'id 9202 'type 'pylon 'x 36.0 'y 36.0 'hp 400.0 'build-progress 1.0)
+                                   (hash 'id 9203 'type 'assimilator 'x 30.0 'y 38.0 'hp 900.0
+                                         'build-progress 1.0 'vespene-contents 1800 'assigned-harvesters 0))
+             'enemy-units '() 'enemy-buildings '())))
+    (assert-true! (and (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'harvest-gas))) zg-acts)))
+                       (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'rebalance-gas-to-minerals))) zg-acts)))
+                  "L59(2b) zero_gas guard MUST force-saturate alive geyser at 0 gas harvesters (<100G, >=18W) & never pull-to-minerals"))
+
+  ;; 3. Pro-Timed 3rd Bases (9:00 Income Cliff Fix across Zerg / Protoss / Terran; L59C ZvP requires RW started)
+  (reset-macro-escrow-tracker!)
+  (define l59-z-3rd
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 4000
+      #:minerals 190 #:gas 50 #:supply-used 34 #:supply-cap 52 #:supply-left 18 #:pending-supply 0
+      #:workers 26 #:active-bases 2 #:mineral-harvesters 23 #:gas-harvesters 3
+      #:army-supply 6 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'extractor 1)
+      #:total-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'extractor 1 'roach-warren 1)
+      #:unit-counts (hasheq 'drone 26 'queen 2 'zergling 6 'overlord 4)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 3))))
+  (reset-macro-escrow-tracker!)
+  (define l59-p-3rd
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 6800
+      #:minerals 280 #:gas 90 #:supply-used 50 #:supply-cap 70 #:supply-left 20 #:pending-supply 0
+      #:workers 36 #:active-bases 2 #:mineral-harvesters 28 #:gas-harvesters 8
+      #:army-supply 12 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 8 'gateway 4 'cybernetics-core 1 'robotics-facility 1 'assimilator 3)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 8 'gateway 4 'cybernetics-core 1 'robotics-facility 1 'assimilator 3)
+      #:unit-counts (hasheq 'probe 36 'stalker 5 'immortal 1)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 2 'robotics-facility 1))))
+  (reset-macro-escrow-tracker!)
+  (define l59-t-3rd
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 6800
+      #:minerals 180 #:gas 80 #:supply-used 46 #:supply-cap 62 #:supply-left 16 #:pending-supply 0
+      #:workers 34 #:active-bases 2 #:mineral-harvesters 28 #:gas-harvesters 6
+      #:army-supply 10 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 6 'barracks 3 'barracks-techlab 1
+                                      'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 6 'barracks 3 'barracks-techlab 1
+                                      'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 34 'marine 8 'siege-tank 1)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 1 'starport 1))))
+  (assert-true! (and (>= (l59-cand-u l59-z-3rd 'hatchery) 608.0)
+                     (eq? (macro-brain-decision-saving-for l59-z-3rd) 'hatchery)
+                     (>= (l59-cand-u l59-p-3rd 'nexus) 625.0)
+                     (eq? (macro-brain-decision-saving-for l59-p-3rd) 'nexus)
+                     (>= (l59-cand-u l59-t-3rd 'command-center) 640.0)
+                     (eq? (macro-brain-decision-saving-for l59-t-3rd) 'command-center))
+                "L59(3) Safe 2-base Zerg (2:55/26W), Protoss (5:00/36W) & Terran (5:00/34W) MUST prioritize & escrow 3rd base")
+
+  ;; 4. TvT0Tank (#74 who vs Cloaked Banshees): Force Starport #1 & Siege Tank #1 when Factory+TechLab ready + Turret up
+  (reset-macro-escrow-tracker!)
+  (define l59-t-banshee-sp1
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 5200
+      #:minerals 180 #:gas 120 #:supply-used 36 #:supply-cap 54 #:supply-left 18 #:pending-supply 0
+      #:workers 24 #:active-bases 2 #:mineral-harvesters 18 #:gas-harvesters 6
+      #:army-supply 10 #:enemy-threat-supply 9 #:under-attack? #t #:requires-detection? #t #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'engineering-bay 1
+                                      'missile-turret 2 'factory 1 'factory-techlab 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'engineering-bay 1
+                                      'missile-turret 2 'factory 1 'factory-techlab 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 24 'marine 10)
+      #:enemy-unit-counts (hasheq 'banshee 3)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1 'factory 1))))
+  (reset-macro-escrow-tracker!)
+  (define l59-t-banshee-tank1
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 5600
+      #:minerals 180 #:gas 140 #:supply-used 38 #:supply-cap 54 #:supply-left 16 #:pending-supply 0
+      #:workers 24 #:active-bases 2 #:mineral-harvesters 18 #:gas-harvesters 6
+      #:army-supply 12 #:enemy-threat-supply 9 #:under-attack? #t #:requires-detection? #t #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'engineering-bay 1
+                                      'missile-turret 2 'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'engineering-bay 1
+                                      'missile-turret 2 'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 24 'marine 10 'viking-fighter 1)
+      #:enemy-unit-counts (hasheq 'banshee 3)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1 'factory 1 'starport 0))))
+  (reset-macro-escrow-tracker!)
+  (define l59-t-banshee-tank1-220m
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 5600
+      #:minerals 220 #:gas 140 #:supply-used 38 #:supply-cap 54 #:supply-left 16 #:pending-supply 0
+      #:workers 24 #:active-bases 2 #:mineral-harvesters 18 #:gas-harvesters 6
+      #:army-supply 12 #:enemy-threat-supply 9 #:under-attack? #t #:requires-detection? #t #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'engineering-bay 1
+                                      'missile-turret 2 'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 5 'barracks 2 'engineering-bay 1
+                                      'missile-turret 2 'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 24 'marine 10 'viking-fighter 1)
+      #:enemy-unit-counts (hasheq 'banshee 3)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1 'factory 1 'starport 0))))
+  (assert-true! (and (>= (l59-cand-u l59-t-banshee-sp1 'starport) 945.0)
+                     (not (not (memq 'starport (macro-brain-decision-scheduled-ids l59-t-banshee-sp1))))
+                     (eq? (macro-brain-decision-saving-for l59-t-banshee-tank1) 'siege-tank)
+                     (not (not (memq 'siege-tank (macro-brain-decision-scheduled-ids l59-t-banshee-tank1-220m)))))
+                "L59(4) TvT vs Banshees w/ Turrets+FactoryTechLab MUST force Starport #1 (>=945) & escrow/train Siege Tank #1 when Starport busy")
+  (reset-macro-escrow-tracker!))
+
+(run-suite "51.39 Loop 59 Pass 2 Arena Guards + Live Div-5 Fixes (Nuke Evac, Turtle Mech, Anti-VoidRay, Blinkstep/Vesper/who)"
+  (define (l59p2-cand-u dec sym)
+    (define sched (macro-brain-decision-priority-schedule dec))
+    (define cat-ht (priority-schedule-result-category-utilities sched))
+    (define trace (if (hash? cat-ht) (hash-ref cat-ht 'decision-trace '()) '()))
+    (define hit (findf (lambda (e) (eq? (priority-decision-entry-id e) sym)) trace))
+    (if hit (priority-decision-entry-utility-score hit) -1.0))
+
+  ;; 1a. Arena 0-Townhall Guards: `sc2-trn-n17` Chargelots attack undefended SCVs (no kite!),
+  ;;     and 0-TH Arena clash never hijacks combat units via counter-drop or p7-reserved-harass!
+  (define rt-n17 (make-live-bot-runtime #:race 'Protoss))
+  (define obs-n17
+    (hasheq
+     'mineral-harvesters 0 'gas-harvesters 0
+     'frame 600 'race 'Protoss 'enemy-race 'Terran
+     'minerals 400 'gas 200 'supply-used 10 'supply-cap 24 'supply-left 14
+     'base-x 40.0 'base-y 40.0 'natural-x 48.0 'natural-y 40.0
+     'enemy-x 100.0 'enemy-y 100.0 'map-width 160.0 'map-height 160.0
+     'ally-units
+     (cons (hasheq 'id 200 'type 'warp-prism-phasing 'x 109.5 'y 100.0 'hp 80.0 'max-hp 80.0 'shield 100.0 'max-shield 100.0 'flying #t)
+           (for/list ([i (in-range 4)])
+             (hasheq 'id (+ 201 i) 'type 'zealot 'x 108.0 'y (+ 98.5 (* i 1.0))
+                     'hp 100.0 'max-hp 100.0 'shield 50.0 'max-shield 50.0)))
+     'ally-buildings
+     (list (hasheq 'id 301 'type 'warp-gate 'x 118.0 'y 100.0 'hp 500.0 'max-hp 500.0 'structure? #t)
+           (hasheq 'id 302 'type 'pylon 'x 118.5 'y 102.8 'hp 200.0 'max-hp 200.0 'structure? #t))
+     'enemy-units
+     (for/list ([i (in-range 16)])
+       (hasheq 'id (+ 700 i) 'type 'scv 'x 96.8 'y (+ 96.0 (* i 0.5)) 'hp 45.0 'max-hp 45.0))
+     'enemy-buildings
+     (list (hasheq 'id 800 'type 'command-center 'x 100.0 'y 100.0 'hp 1500.0 'max-hp 1500.0 'structure? #t)
+           (hasheq 'id 801 'type 'missile-turret 'x 97.8 'y 102.2 'hp 250.0 'max-hp 250.0 'structure? #t))))
+  (define res-n17 (step-live-bot-runtime! rt-n17 obs-n17))
+  (define acts-n17 (hash-ref res-n17 'actions '()))
+  (assert-true! (and (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit))) acts-n17)
+                     (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'kite))) acts-n17)))
+                "L59P2(1a) sc2-trn-n17 warped-in Chargelots MUST attack undefended SCVs (never kite away!)")
+
+  ;; 1b. `sc2-ab-z05`: Corruptor cast-walk protection (<=32f) + <=6.0t Caustic Spray fallback
+  (define rt-z05 (make-live-bot-runtime #:race 'Zerg))
+  (define eb-z05
+    (list (hasheq 'id 600 'type 'nexus 'x 93.5 'y 86.0 'hp 1000.0 'max-hp 1000.0 'shield 1000.0 'max-shield 1000.0 'structure? #t)))
+  (define obs-z05-20
+    (hasheq
+     'mineral-harvesters 0 'gas-harvesters 0 'frame 20 'race 'Zerg 'enemy-race 'Protoss
+     'minerals 0 'gas 0 'supply-used 16 'supply-cap 16 'supply-left 0
+     'base-x 40.0 'base-y 40.0 'natural-x 48.0 'natural-y 40.0 'enemy-x 93.5 'enemy-y 86.0
+     'map-width 160.0 'map-height 160.0
+     'ally-units (list (hasheq 'id 100 'type 'corruptor 'x 83.0 'y 86.0 'hp 200.0 'max-hp 200.0 'flying #t))
+     'ally-buildings '() 'enemy-units eb-z05 'enemy-buildings eb-z05))
+  (define r-z05-20 (step-live-bot-runtime! rt-z05 obs-z05-20))
+  (define r-z05-24 (step-live-bot-runtime! rt-z05 (hash-set obs-z05-20 'frame 24)))
+  (define obs-z05-96
+    (hash-set* obs-z05-20 'frame 96
+               'ally-units (list (hasheq 'id 100 'type 'corruptor 'x 88.5 'y 86.0 'hp 200.0 'max-hp 200.0 'flying #t 'order-ability-id 0))))
+  (define r-z05-96 (step-live-bot-runtime! rt-z05 obs-z05-96))
+  (assert-true! (and (ormap (lambda (a) (equal? a '(cast-spell 100 caustic-spray 600))) (hash-ref r-z05-20 'actions '()))
+                     (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (equal? (cadr a) 100))) (hash-ref r-z05-24 'actions '())))
+                     (ormap (lambda (a) (equal? a '(cast-spell 100 caustic-spray 600))) (hash-ref r-z05-96 'actions '())))
+                "L59P2(1b) Corruptor MUST protect Caustic Spray walk-and-cast <=32f & refire fallback at <=6.0t if idle")
+
+  ;; 2. Nuke Radial Evacuation (`'nuke-points` + EffectId=7 on Main mineral line — `#5143533 Aether2040`)
+  (define rt-nk (make-live-bot-runtime #:race 'Protoss))
+  (define obs-nk
+    (hasheq
+     'mineral-harvesters 16 'gas-harvesters 6 'frame 18000 'race 'Protoss 'enemy-race 'Terran
+     'minerals 400 'gas 200 'supply-used 80 'supply-cap 110 'supply-left 30
+     'base-x 32.0 'base-y 32.0 'natural-x 54.0 'natural-y 34.0 'enemy-x 132.0 'enemy-y 132.0
+     'map-width 160.0 'map-height 160.0
+     'nuke-alert #t
+     'nuke-points (list (cons 32.0 32.0))
+     'effects (list (hasheq 'effect-id 7 'x 32.0 'y 32.0))
+     'ally-units
+     (list (hasheq 'id 501 'type 'probe 'x 33.0 'y 32.0 'hp 20.0 'max-hp 20.0 'shield 20.0 'max-shield 20.0)
+           (hasheq 'id 502 'type 'stalker 'x 34.0 'y 35.0 'hp 80.0 'max-hp 80.0 'shield 80.0 'max-shield 80.0))
+     'ally-buildings
+     (list (hasheq 'id 601 'type 'nexus 'x 32.0 'y 32.0 'hp 1000.0 'max-hp 1000.0 'structure? #t))
+     'enemy-units '() 'enemy-buildings '()))
+  (define res-nk (step-live-bot-runtime! rt-nk obs-nk))
+  (define nk-moves
+    (filter (lambda (a) (and (pair? a) (eq? (car a) 'move) (memv (cadr a) '(501 502))))
+            (hash-ref res-nk 'actions '())))
+  (assert-true! (and (= (length nk-moves) 2)
+                     (for/and ([m (in-list nk-moves)])
+                       (>= (sqrt (+ (sqr (- (caddr m) 32.0)) (sqr (- (cadddr m) 32.0)))) 10.5)))
+                "L59P2(2) Active Nuke on Main MUST evacuate Probe & Stalker radially outward >=10.5t away from (32,32)")
+
+  ;; 3. Anti-Turtle-Mech Pivot (`#5143532/533/534 Aether2040`: Zerg BroodLord+Viper & Protoss Tempest)
+  (reset-macro-escrow-tracker!)
+  (define l59p2-z-tmech
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Terran #:frame 18000
+      #:minerals 500 #:gas 350 #:supply-used 130 #:supply-cap 170 #:supply-left 40 #:pending-supply 0
+      #:workers 72 #:active-bases 4 #:mineral-harvesters 56 #:gas-harvesters 16
+      #:army-supply 58 #:enemy-threat-supply 30 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 3 'hive 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1
+                                      'lurker-den 1 'greater-spire 1 'extractor 6)
+      #:total-building-counts (hasheq 'hatchery 3 'hive 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1
+                                      'lurker-den 1 'greater-spire 1 'extractor 6)
+      #:unit-counts (hasheq 'drone 72 'queen 4 'corruptor 8 'hydralisk 8 'lurker 4 'brood-lord 1 'viper 0)
+      #:enemy-unit-counts (hasheq 'siege-tank-sieged 8 'liberator-ag 4 'cyclone 6)
+      #:enemy-building-counts (hasheq 'planetary-fortress 2)
+      #:open-facility-slots (hasheq 'townhall 4 'larva 8))))
+  (reset-macro-escrow-tracker!)
+  (define l59p2-p-tmech
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 18000
+      #:minerals 550 #:gas 320 #:supply-used 120 #:supply-cap 160 #:supply-left 40 #:pending-supply 0
+      #:workers 66 #:active-bases 4 #:mineral-harvesters 50 #:gas-harvesters 16
+      #:army-supply 54 #:enemy-threat-supply 30 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 4 'pylon 18 'gateway 8 'cybernetics-core 1 'robotics-facility 1
+                                      'stargate 2 'fleet-beacon 1 'assimilator 6)
+      #:total-building-counts (hasheq 'nexus 4 'pylon 18 'gateway 8 'cybernetics-core 1 'robotics-facility 1
+                                      'stargate 2 'fleet-beacon 1 'assimilator 6)
+      #:unit-counts (hasheq 'probe 66 'stalker 18 'immortal 2 'tempest 0)
+      #:enemy-unit-counts (hasheq 'siege-tank-sieged 8 'liberator-ag 4)
+      #:enemy-building-counts (hasheq 'planetary-fortress 2)
+      #:open-facility-slots (hasheq 'townhall 4 'gateway 6 'stargate 2))))
+  (assert-true! (and (>= (l59p2-cand-u l59p2-z-tmech 'brood-lord) 680.0)
+                     (>= (l59p2-cand-u l59p2-z-tmech 'viper) 670.0)
+                     (<= (l59p2-cand-u l59p2-z-tmech 'lurker) 440.0)
+                     (>= (l59p2-cand-u l59p2-p-tmech 'tempest) 680.0)
+                     (<= (l59p2-cand-u l59p2-p-tmech 'stalker) 435.0))
+                "L59P2(3) Anti-Turtle-Mech MUST pivot Zerg->BroodLord+Viper (curb Lurker) & Protoss->Tempest (curb Stalker)")
+
+  ;; 4. Zerg Anti-Void-Ray Non-AA Freeze + <=2 Overlord Cap + 8-10 Queens (`#5143226 VoidCrushAgain`)
+  (reset-macro-escrow-tracker!)
+  (define l59p2-z-voidray
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 10000
+      #:minerals 300 #:gas 150 #:supply-used 60 #:supply-cap 56 #:supply-left -4 #:pending-supply 2
+      #:workers 42 #:active-bases 3 #:mineral-harvesters 30 #:gas-harvesters 12
+      #:army-supply 18 #:enemy-threat-supply 24 #:under-attack? #t #:requires-anti-air? #t
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'evolution-chamber 1 'extractor 4)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'evolution-chamber 1 'extractor 4)
+      #:unit-counts (hasheq 'drone 42 'queen 6 'zergling 4)
+      #:enemy-unit-counts (hasheq 'void-ray 8)
+      #:enemy-building-counts (hasheq 'stargate 2)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 4))))
+  (assert-true! (and (<= (l59p2-cand-u l59p2-z-voidray 'overlord) 180.0)
+                     (>= (l59p2-cand-u l59p2-z-voidray 'queen) 610.0)
+                     (not (memq 'overlord (macro-brain-decision-scheduled-ids l59p2-z-voidray)))
+                     (not (memq 'zerg-ground-armor-1 (macro-brain-decision-scheduled-ids l59p2-z-voidray)))
+                     (not (memq 'burrow (macro-brain-decision-scheduled-ids l59p2-z-voidray))))
+                "L59P2(4) Zerg vs 8 Void Rays w/ 2 pending Overlords MUST cap Overlord<=2, freeze ground upgs & train Queen>=610")
+
+  ;; 5. `<2:00` TvP BunkerSiegeRecovery Guard (`#5143672`), GhostAcademy->Ghosts (`#5143662`),
+  ;;    & Low-Worker `missile-turret` Non-Blocking (`#5143784`)
+  (define rt-t-early (make-live-bot-runtime #:race 'Terran))
+  (define obs-t-045
+    (hasheq
+     'mineral-harvesters 14 'gas-harvesters 3 'frame 1008 'race 'Terran 'enemy-race 'Protoss
+     'minerals 180 'gas 40 'supply-used 17 'supply-cap 23 'supply-left 6
+     'base-x 32.0 'base-y 32.0 'natural-x 54.0 'natural-y 34.0 'enemy-x 132.0 'enemy-y 132.0
+     'map-width 160.0 'map-height 160.0
+     'ally-units (list (hasheq 'id 10 'type 'scv 'x 32.0 'y 32.0 'hp 45.0 'max-hp 45.0))
+     'ally-buildings (list (hasheq 'id 11 'type 'command-center 'x 32.0 'y 32.0 'hp 1500.0 'max-hp 1500.0 'structure? #t)
+                           (hasheq 'id 12 'type 'barracks 'x 38.0 'y 34.0 'hp 1000.0 'max-hp 1000.0 'structure? #t))
+     'enemy-units '() 'enemy-buildings '()))
+  (define res-t-045 (step-live-bot-runtime! rt-t-early obs-t-045))
+  (reset-macro-escrow-tracker!)
+  (define l59p2-t-blink
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 7200
+      #:minerals 220 #:gas 150 #:supply-used 46 #:supply-cap 62 #:supply-left 16 #:pending-supply 0
+      #:workers 30 #:active-bases 2 #:mineral-harvesters 24 #:gas-harvesters 6
+      #:army-supply 16 #:enemy-threat-supply 16 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 6 'barracks 2 'factory 1 'factory-techlab 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 6 'barracks 2 'factory 1 'factory-techlab 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 30 'marine 12)
+      #:enemy-unit-counts (hasheq 'stalker 8)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1 'factory 1))))
+  (reset-macro-escrow-tracker!)
+  (define l59p2-t-ghosts
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 9600
+      #:minerals 220 #:gas 160 #:supply-used 72 #:supply-cap 94 #:supply-left 22 #:pending-supply 0
+      #:workers 44 #:active-bases 3 #:mineral-harvesters 32 #:gas-harvesters 12
+      #:army-supply 28 #:enemy-threat-supply 16 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 3 'supply-depot 9 'barracks 4 'barracks-techlab 2
+                                      'ghost-academy 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 4)
+      #:total-building-counts (hasheq 'orbital-command 3 'supply-depot 9 'barracks 4 'barracks-techlab 2
+                                      'ghost-academy 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 4)
+      #:unit-counts (hasheq 'scv 44 'marine 16 'marauder 4 'siege-tank 2 'ghost 0)
+      #:enemy-unit-counts (hasheq 'archon 2 'zealot 8 'immortal 2)
+      #:open-facility-slots (hasheq 'townhall 3 'barracks 2 'factory 0 'starport 0))))
+  (reset-macro-escrow-tracker!)
+  (define l59p2-t-who-turret
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 6400
+      #:minerals 60 #:gas 40 #:supply-used 16 #:supply-cap 38 #:supply-left 22 #:pending-supply 0
+      #:workers 12 #:active-bases 2 #:mineral-harvesters 12 #:gas-harvesters 0
+      #:army-supply 4 #:enemy-threat-supply 6 #:under-attack? #t #:requires-detection? #t
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 3 'barracks 1 'engineering-bay 1 'missile-turret 1)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 3 'barracks 1 'engineering-bay 1 'missile-turret 1)
+      #:unit-counts (hasheq 'scv 12 'marine 4)
+      #:enemy-unit-counts (hasheq 'dark-templar 2)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1))))
+  (assert-true! (and (eq? (hash-ref res-t-045 'posture #f) 'OneRaxFE)
+                     (>= (l59p2-cand-u l59p2-t-blink 'siege-tank) 635.0)
+                     (not (not (memq 'siege-tank (macro-brain-decision-scheduled-ids l59p2-t-blink))))
+                     (>= (l59p2-cand-u l59p2-t-ghosts 'ghost) 665.0)
+                     (not (not (memq 'ghost (macro-brain-decision-scheduled-ids l59p2-t-ghosts))))
+                     (not (eq? (macro-brain-decision-saving-for l59p2-t-who-turret) 'missile-turret))
+                     (or (not (not (memq 'scv (macro-brain-decision-scheduled-ids l59p2-t-who-turret))))
+                         (not (not (memq 'marine (macro-brain-decision-scheduled-ids l59p2-t-who-turret))))))
+                "L59P2(5) <2m OneRaxFE intact, TvP Anti-Stalker Tanks, GhostAcademy->Ghosts vs 2 Archons, & low-econ Turret#2 non-blocking")
+
+  ;; 6. Loop 59 Pass 3 (`#1542`): Pre-Phase-5b Destructible Rock Breach (`nc-09`),
+  ;;    Collapsible Rockslide Seal (`nc-10`), Post-Barrier Follow-Through (`nc-07`),
+  ;;    & 0-Building Wall-Integrity Guard (`p09`/`b11`/`b01`/`d04`)
+  (define rt-nc09 (make-live-bot-runtime #:race 'Terran))
+  (define obs-nc09
+    (hasheq
+     'mineral-harvesters 0 'gas-harvesters 0
+     'frame 180 'race 'Terran 'enemy-race 'Protoss
+     'minerals 0 'gas 0 'supply-used 16 'supply-cap 24
+     'base-x 66.0 'base-y 114.0 'enemy-x 80.0 'enemy-y 114.0
+     'ally-units
+     (append
+      (for/list ([i (in-range 8)])
+        (hasheq 'id (+ 1101 i) 'type 'marine 'x 66.0 'y (+ 110.5 (* 1.0 i)) 'hp 45.0 'max-hp 45.0))
+      (for/list ([i (in-range 4)])
+        (hasheq 'id (+ 1121 i) 'type 'marauder 'x 65.0 'y (+ 112.5 (* 1.0 i)) 'hp 125.0 'max-hp 125.0)))
+     'ally-buildings '()
+     'enemy-units '()
+     'enemy-buildings (list (hasheq 'id 9901 'type 'pylon 'x 80.0 'y 114.0 'hp 200.0 'max-hp 200.0 'shield 200.0 'max-shield 200.0 'structure? #t))
+     'neutral-units (list (hasheq 'id 9101 'tag 9101 'type 'destructible-rocks 'unit-type-id 626
+                                  'x 72.0 'y 114.0 'hp 2000.0 'max-hp 2000.0 'mineral-contents 0 'vespene-contents 0))))
+  (define acts-nc09 (hash-ref (step-live-bot-runtime! rt-nc09 obs-nc09) 'actions '()))
+  (define nc09-rock-attackers
+    (for/fold ([cnt 0]) ([a (in-list acts-nc09)])
+      (if (and (pair? a) (eq? (car a) 'attack-unit) (= (length a) 3) (equal? (third a) 9101))
+          (+ cnt (if (list? (second a)) (length (second a)) 1))
+          cnt)))
+  (assert-true! (and (>= nc09-rock-attackers 12)
+                     (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit) (equal? (third a) 9901))) acts-nc09)))
+                "L59P3(a) Blocking destructible rock MUST claim all 12 ground units to attack rock before Phase 5b targets far Pylon")
+
+  (define rt-nc10 (make-live-bot-runtime #:race 'Protoss))
+  (define obs-nc10
+    (hasheq
+     'mineral-harvesters 0 'gas-harvesters 0
+     'frame 140 'race 'Protoss 'enemy-race 'Zerg
+     'minerals 0 'gas 0 'supply-used 8 'supply-cap 16
+     'base-x 75.0 'base-y 79.5 'enemy-x 93.5 'enemy-y 79.5
+     'ally-units
+     (for/list ([i (in-range 4)])
+       (hasheq 'id (+ 1201 i) 'type 'stalker 'x 75.0 'y (+ 78.0 (* 1.0 i)) 'hp 80.0 'max-hp 80.0 'shield 80.0 'max-shield 80.0))
+     'ally-buildings '()
+     'enemy-units
+     (for/list ([i (in-range 16)])
+       (hasheq 'id (+ 1301 i) 'type 'zergling 'x 93.5 'y (+ 75.5 (* 0.5 i)) 'hp 35.0 'max-hp 35.0))
+     'enemy-buildings '()
+     'neutral-units (list (hasheq 'id 9201 'tag 9201 'type 'collapsible-rock-tower 'unit-type-id 609
+                                  'x 79.5 'y 79.5 'hp 500.0 'max-hp 500.0 'mineral-contents 0 'vespene-contents 0))))
+  (define acts-nc10 (hash-ref (step-live-bot-runtime! rt-nc10 obs-nc10) 'actions '()))
+  (define nc10-tower-attackers
+    (for/fold ([cnt 0]) ([a (in-list acts-nc10)])
+      (if (and (pair? a) (eq? (car a) 'attack-unit) (= (length a) 3) (equal? (third a) 9201))
+          (+ cnt (if (list? (second a)) (length (second a)) 1))
+          cnt)))
+  (assert-true! (>= nc10-tower-attackers 4)
+                "L59P3(b) Collapsible rock tower with 16 approaching Zerglings MUST claim all 4 Stalkers to seal choke")
+
+  (define rt-nc07 (make-live-bot-runtime #:race 'Protoss))
+  (define obs-nc07-base
+    (hasheq
+     'mineral-harvesters 0 'gas-harvesters 0
+     'frame 40 'race 'Protoss 'enemy-race 'Protoss
+     'minerals 0 'gas 0 'supply-used 14 'supply-cap 22
+     'base-x 64.5 'base-y 70.0 'enemy-x 140.0 'enemy-y 30.0
+     'ally-units
+     (append
+      (for/list ([i (in-range 2)])
+        (hasheq 'id (+ 1401 i) 'type 'probe 'x 66.0 'y (+ 69.5 (* 1.0 i)) 'hp 20.0 'max-hp 20.0 'shield 20.0 'max-shield 20.0))
+      (for/list ([i (in-range 6)])
+        (hasheq 'id (+ 1411 i) 'type 'stalker 'x 69.0 'y (+ 67.5 (* 1.0 i)) 'hp 80.0 'max-hp 80.0 'shield 80.0 'max-shield 80.0)))
+     'ally-buildings '()
+     'enemy-units '()
+     'enemy-buildings (list (hasheq 'id 9801 'type 'pylon 'x 77.5 'y 70.0 'hp 200.0 'max-hp 200.0 'shield 200.0 'max-shield 200.0 'structure? #t))
+     'neutral-units (list (hasheq 'id 9301 'tag 9301 'type 'mineral-field 'unit-type-id 666 'x 70.5 'y 69.5 'hp 0.0 'max-hp 1.0 'mineral-contents 5 'vespene-contents 0)
+                          (hasheq 'id 9302 'tag 9302 'type 'mineral-field 'unit-type-id 666 'x 70.5 'y 70.5 'hp 0.0 'max-hp 1.0 'mineral-contents 5 'vespene-contents 0))))
+  (void (step-live-bot-runtime! rt-nc07 obs-nc07-base))
+  (define obs-nc07-cleared
+    (hash-set* obs-nc07-base 'frame 180 'enemy-buildings '() 'neutral-units '()))
+  (define acts-nc07-clr (hash-ref (step-live-bot-runtime! rt-nc07 obs-nc07-cleared) 'actions '()))
+  (define nc07-cross-cnt
+    (for/fold ([cnt 0]) ([a (in-list acts-nc07-clr)])
+      (if (and (pair? a) (eq? (car a) 'attack-pos) (= (length a) 4)
+               (<= (abs (- (third a) 77.5)) 1.0) (<= (abs (- (fourth a) 70.0)) 1.0))
+          (+ cnt (if (list? (second a)) (length (second a)) 1))
+          cnt)))
+  (assert-true! (>= nc07-cross-cnt 6)
+                "L59P3(c) After thin mineral wall + far Pylon clear, all >=6 allies MUST advance across gap onto cleared target")
+
+  (define rt-b11-p3 (make-live-bot-runtime #:race 'Protoss))
+  (define obs-b11-p3
+    (hasheq
+     'mineral-harvesters 0 'gas-harvesters 0
+     'frame 200 'race 'Protoss 'enemy-race 'Protoss
+     'minerals 0 'gas 0 'supply-used 20 'supply-cap 30
+     'base-x 80.0 'base-y 86.0 'enemy-x 96.0 'enemy-y 86.0
+     'researched-upgrades '(blink)
+     'ally-units
+     (for/list ([i (in-range 10)])
+       (hasheq 'id (+ 1501 i) 'type 'stalker 'x 83.5 'y (+ 82.0 (* 0.8 i))
+               'hp (if (< i 2) 55.0 80.0) 'max-hp 80.0
+               'shield (if (< i 2) 5.0 80.0) 'max-shield 80.0 'weapon-cooldown 0.0))
+     'ally-buildings '()
+     'enemy-units
+     (for/list ([i (in-range 11)])
+       (hasheq 'id (+ 1601 i) 'type 'stalker 'x 92.5 'y (+ 82.0 (* 0.8 i))
+               'hp 80.0 'max-hp 80.0 'shield 80.0 'max-shield 80.0))
+     'enemy-buildings '()))
+  (define acts-b11-p3 (hash-ref (step-live-bot-runtime! rt-b11-p3 obs-b11-p3) 'actions '()))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move))) acts-b11-p3))
+                "L59P3(d) 0-building Protoss Arena clash MUST emit ZERO phantom wall-integrity Move commands on Stalkers")
+
+  ;; 7. Loop 59 Pass 3b (`#1553` Fix #2B + Camera Polish):
+  ;;    Never attack UnbuildablePlatesDestructible/Bricks in live matches, never steal Phase 5b army
+  ;;    onto rocks when live enemy combat exists, and interleave 1-base crisis camera with enemy-exp!
+  (define rt-plates (make-live-bot-runtime #:race 'Terran))
+  (define obs-plates
+    (hasheq
+     'mineral-harvesters 16 'gas-harvesters 6
+     'frame 5200 'race 'Terran 'enemy-race 'Protoss
+     'minerals 200 'gas 100 'supply-used 42 'supply-cap 54
+     'base-x 32.0 'base-y 32.0 'natural-x 56.0 'natural-y 34.0 'enemy-x 132.0 'enemy-y 132.0
+     'ally-units
+     (for/list ([i (in-range 6)])
+       (hasheq 'id (+ 1701 i) 'type 'marine 'x 60.0 'y (+ 32.0 (* 0.8 i)) 'hp 45.0 'max-hp 45.0))
+     'ally-buildings
+     (list (hasheq 'id 1790 'type 'orbital-command 'x 32.0 'y 32.0 'hp 1500.0 'max-hp 1500.0 'structure? #t))
+     'enemy-units '()
+     'enemy-buildings '()
+     'neutral-units
+     (list (hasheq 'id 9401 'tag 9401 'type 'unbuildable-plates-destructible 'unit-type-id 474
+                   'x 63.0 'y 34.0 'hp 400.0 'max-hp 400.0 'mineral-contents 0 'vespene-contents 0)
+           (hasheq 'id 9402 'tag 9402 'type 'unbuildable-bricks-destructible 'unit-type-id 473
+                   'x 63.5 'y 35.0 'hp 400.0 'max-hp 400.0 'mineral-contents 0 'vespene-contents 0)
+           (hasheq 'id 9403 'tag 9403 'type 'unbuildable-rocks-destructible 'unit-type-id 472
+                   'x 64.0 'y 34.5 'hp 2000.0 'max-hp 2000.0 'mineral-contents 0 'vespene-contents 0))))
+  (define acts-plates (hash-ref (step-live-bot-runtime! rt-plates obs-plates) 'actions '()))
+  (define obs-live-rk-combat
+    (hash-set* obs-plates
+               'frame 5240
+               'enemy-units (list (hasheq 'id 9501 'type 'stalker 'x 80.0 'y 34.0 'hp 80.0 'max-hp 80.0 'shield 80.0 'max-shield 80.0))
+               'neutral-units (list (hasheq 'id 9404 'tag 9404 'type 'destructible-rocks 'unit-type-id 626
+                                            'x 63.0 'y 34.0 'hp 2000.0 'max-hp 2000.0 'mineral-contents 0 'vespene-contents 0))))
+  (define acts-live-rk-combat (hash-ref (step-live-bot-runtime! rt-plates obs-live-rk-combat) 'actions '()))
+  (define rt-cam-1b (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define cam-1b-cmds
+    (for/list ([f (in-list '(600 626 652))])
+      (findf (lambda (a) (and (pair? a) (memq (car a) '(camera-bookmark-jump camera-focus))))
+             (step-pro-human-camera-and-apm-governor!
+              rt-cam-1b
+              (hash 'frame f 'mineral-harvesters 14 'vespene-harvesters 3 'under-attack #t
+                    'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5
+                    'enemy-x 160.5 'enemy-y 160.5 'enemy-expand-x 148.0 'enemy-expand-y 148.0
+                    'ally-buildings (list (hash 'id 1 'type 'orbital-command 'x 32.5 'y 32.5 'hp 1500.0 'build-progress 1.0))
+                    'ally-units (list (hash 'id 11 'type 'marine 'x 35.0 'y 34.0 'hp 45.0))
+                    'enemy-units (list (hash 'id 299 'type 'zergling 'x 36.0 'y 34.0 'hp 35.0)))))))
+  (assert-true! (and (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit) (memv (third a) '(9401 9402 9403)))) acts-plates))
+                     (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit) (equal? (third a) 9404))) acts-live-rk-combat))
+                     (>= (length (remove-duplicates cam-1b-cmds)) 2)
+                     (ormap (lambda (a) (and (pair? a) (eq? (car a) 'camera-focus) (eq? (second a) 'minimap-jump)
+                                             (= (third a) 148.0) (= (fourth a) 148.0)))
+                            cam-1b-cmds))
+                "L59P3(e) Live matches MUST ignore UnbuildablePlates/Bricks, never steal Phase 5b army vs live enemies onto rocks, & interleave 1-base crisis camera")
+
+  ;; 8. Loop 59C Final H2H Fixes (`#1566` Item 3):
+  ;;    (a) Live 1-TH match NEVER steals combat units onto Destructible* rocks or Collapsible* towers (even w/ 0 enemies!)
+  (define obs-live-rk-and-tower
+    (hash-set* obs-plates
+               'frame 5280
+               'enemy-units '()
+               'neutral-units
+               (list (hasheq 'id 9404 'tag 9404 'type 'destructible-rocks 'unit-type-id 626
+                             'x 63.0 'y 34.0 'hp 2000.0 'max-hp 2000.0 'mineral-contents 0 'vespene-contents 0)
+                     (hasheq 'id 9405 'tag 9405 'type 'collapsible-rock-tower 'unit-type-id 609
+                             'x 62.5 'y 34.5 'hp 500.0 'max-hp 500.0 'mineral-contents 0 'vespene-contents 0))))
+  (define acts-live-rk-tower (hash-ref (step-live-bot-runtime! rt-plates obs-live-rk-and-tower) 'actions '()))
+  (assert-true! (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit) (memv (third a) '(9404 9405)))) acts-live-rk-tower))
+                "L59C(1) Live >=1-TH full match MUST NEVER steal combat units onto Destructible* rocks or Collapsible* towers")
+
+  ;;    (b) Relaxed `zero_gas` guard (`< 100G`, `<= 1` gas harvester): at `260G / 45M` (`GAS_RICH_MIN_STARVED`),
+  ;;        `rebalance-gas-to-minerals` MUST fire instead of locking workers on gas!
+  (let ()
+    (define rt-grm (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+    (define probes-grm
+      (append
+       (for/list ([i (in-range 18)])
+         (hash 'id (+ 9500 i) 'type 'probe 'x (+ 30.0 (* 0.2 i)) 'y 32.0 'hp 40.0 'build-progress 1.0 'orders '()))
+       (for/list ([i (in-range 6)])
+         (hash 'id (+ 9550 i) 'type 'probe 'x 30.0 'y 38.0 'hp 40.0 'build-progress 1.0
+               'order-target-id (if (< i 3) 9603 9604) 'orders '()))))
+    (define grm-acts
+      (step-layer2-economy!
+       rt-grm
+       (hash 'race 'Protoss 'enemy-race 'Terran 'frame 8400
+             'minerals 45 'gas 260 'collection-rate-vespene 330 'supply-used 46 'supply-cap 62
+             'mineral-harvesters 18 'vespene-harvesters 6 'live-obs? #t
+             'base-x 32.5 'base-y 32.5 'nat-x 56.5 'nat-y 32.5
+             'enemy-x 160.0 'enemy-y 160.0
+             'ally-units probes-grm
+             'ally-buildings (list (hash 'id 9600 'type 'nexus 'x 32.5 'y 32.5 'hp 2000.0 'build-progress 1.0)
+                                   (hash 'id 9601 'type 'nexus 'x 56.5 'y 32.5 'hp 2000.0 'build-progress 1.0)
+                                   (hash 'id 9602 'type 'pylon 'x 36.0 'y 36.0 'hp 400.0 'build-progress 1.0)
+                                   (hash 'id 9603 'type 'assimilator 'x 30.0 'y 38.0 'hp 900.0
+                                         'build-progress 1.0 'vespene-contents 1600 'assigned-harvesters 3)
+                                   (hash 'id 9604 'type 'assimilator 'x 56.0 'y 38.0 'hp 900.0
+                                         'build-progress 1.0 'vespene-contents 1600 'assigned-harvesters 3))
+             'mineral-patches (list (hash 'id 9699 'x 26.0 'y 32.5 'mineral-contents 1200))
+             'enemy-units '() 'enemy-buildings '())))
+    (assert-true! (not (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'rebalance-gas-to-minerals))) grm-acts)))
+                  "L59C(2) Relaxed zero_gas guard (<100G) MUST allow pull-to-minerals when gas-rich & mineral-starved (260G/45M)"))
+
+  ;;    (c) Counter-drop defense tightly gated (`<= 16t` transport-to-TH, `<= 28t` home defenders ONLY — NEVER yank frontline >= 40t away!)
+  ;;        and `l59-p7-reserved-harass-tags` strictly empty in live matches!
+  (let ()
+    (define rt-cd (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+    (define home-hydras
+      (for/list ([i (in-range 4)])
+        (hasheq 'id (+ 3101 i) 'type 'hydralisk 'x 36.0 'y (+ 30.0 (* 1.0 i)) 'hp 90.0 'max-hp 90.0)))
+    (define front-hydras
+      (for/list ([i (in-range 6)])
+        (hasheq 'id (+ 3201 i) 'type 'hydralisk 'x 112.0 'y (+ 110.0 (* 1.0 i)) 'hp 90.0 'max-hp 90.0)))
+    (define obs-cd-midmap
+      (hasheq 'frame 9000 'race 'Zerg 'enemy-race 'Terran 'live-obs? #t
+              'minerals 200 'gas 100 'supply-used 60 'supply-cap 80
+              'mineral-harvesters 30 'gas-harvesters 6
+              'base-x 32.0 'base-y 32.0 'natural-x 54.0 'natural-y 32.0 'enemy-x 132.0 'enemy-y 132.0
+              'ally-buildings (list (hasheq 'id 3001 'type 'hatchery 'x 32.0 'y 32.0 'hp 1500.0 'max-hp 1500.0 'structure? #t))
+              'ally-units (append home-hydras front-hydras)
+              ;; Medivac 20t from Hatchery (> 16t) -> MUST NOT trigger counter-drop!
+              'enemy-units (list (hasheq 'id 3901 'type 'medivac 'x 52.0 'y 32.0 'hp 150.0 'max-hp 150.0 'is-flying #t))
+              'enemy-buildings (list (hasheq 'id 3999 'type 'command-center 'x 132.0 'y 132.0 'hp 1500.0 'max-hp 1500.0 'structure? #t))))
+    (define res-cd-mid (step-live-bot-runtime! rt-cd obs-cd-midmap))
+    (define acts-cd-mid (hash-ref res-cd-mid 'actions '()))
+    (define midmap-yanked-home?
+      (ormap (lambda (a) (and (pair? a) (eq? (car a) 'intercept-drop))) acts-cd-mid))
+    (define obs-cd-drop
+      (hash-set* obs-cd-midmap
+                 'frame 9040
+                 ;; Medivac 10t from Hatchery (<= 16t) -> ONLY home-hydras (3101..3104) may defend; front-hydras (3201..3206) MUST NOT be yanked to x<=60!
+                 'enemy-units (list (hasheq 'id 3901 'type 'medivac 'x 42.0 'y 32.0 'hp 150.0 'max-hp 150.0 'is-flying #t)
+                                    (hasheq 'id 3902 'type 'marine 'x 120.0 'y 112.0 'hp 45.0 'max-hp 45.0))))
+    (define res-cd-drop (step-live-bot-runtime! rt-cd obs-cd-drop))
+    (define acts-cd-drop (hash-ref res-cd-drop 'actions '()))
+    (define front-yanked-home?
+      (ormap (lambda (a)
+               (and (pair? a)
+                    (memq (car a) '(move attack-pos intercept-drop))
+                    (let ([u (cadr a)])
+                      (or (and (exact-integer? u) (>= u 3201) (<= u 3206))
+                          (and (list? u) (ormap (lambda (id) (and (exact-integer? id) (>= id 3201) (<= id 3206))) u))))
+                    (>= (length a) 4)
+                    (real? (third a))
+                    (< (third a) 60.0)))
+             acts-cd-drop))
+    (assert-true! (and (not midmap-yanked-home?)
+                       (not front-yanked-home?))
+                  "L59C(4) Counter-drop MUST ignore mid-map Medivac (>16t) & NEVER yank frontline army (>28t) across map"))
+
+  ;;    (d) Fix #3 Macro regressions: Zerg 3rd Hatch never starves RW; Protoss 3rd Nexus non-blocking <275M
+  ;;        & 2-base RoboBay waits past 6:00/3rd; Terran never builds GhostAcademy in TvZ or 2b <7:00;
+  ;;        TvT Tank4 (>=2 Tanks, gas<125) never starves 0-gas Marine/Barracks!
+  (reset-macro-escrow-tracker!)
+  (define l59c-z-no-rw
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Protoss #:frame 4000
+      #:minerals 190 #:gas 50 #:supply-used 34 #:supply-cap 52 #:supply-left 18 #:pending-supply 0
+      #:workers 26 #:active-bases 2 #:mineral-harvesters 23 #:gas-harvesters 3
+      #:army-supply 6 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'extractor 1)
+      #:total-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'extractor 1)
+      #:unit-counts (hasheq 'drone 26 'queen 2 'zergling 6 'overlord 4)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 3))))
+  (reset-macro-escrow-tracker!)
+  (define l59c-p-3rd-low-min
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 8200
+      #:minerals 220 #:gas 90 #:supply-used 52 #:supply-cap 70 #:supply-left 18 #:pending-supply 0
+      #:workers 38 #:active-bases 2 #:mineral-harvesters 30 #:gas-harvesters 8
+      #:army-supply 14 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 8 'gateway 4 'cybernetics-core 1 'robotics-facility 1 'assimilator 3)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 8 'gateway 4 'cybernetics-core 1 'robotics-facility 1 'assimilator 3)
+      #:unit-counts (hasheq 'probe 38 'stalker 5 'immortal 1)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 3 'robotics-facility 0))))
+  (reset-macro-escrow-tracker!)
+  (define l59c-p-2b-early-robobay
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 7300
+      #:minerals 220 #:gas 165 #:supply-used 58 #:supply-cap 78 #:supply-left 20 #:pending-supply 0
+      #:workers 38 #:active-bases 2 #:mineral-harvesters 28 #:gas-harvesters 10
+      #:army-supply 20 #:enemy-threat-supply 6 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 9 'gateway 4 'cybernetics-core 1 'robotics-facility 1 'assimilator 4)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 9 'gateway 4 'cybernetics-core 1 'robotics-facility 1 'assimilator 4)
+      #:unit-counts (hasheq 'probe 38 'stalker 8 'immortal 1)
+      #:enemy-unit-counts (hasheq 'marine 6 'marauder 2)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 3 'robotics-facility 1))))
+  (reset-macro-escrow-tracker!)
+  (define l59c-t-tvz-no-ga
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Zerg #:frame 8800
+      #:minerals 300 #:gas 180 #:supply-used 74 #:supply-cap 102 #:supply-left 28 #:pending-supply 0
+      #:workers 44 #:active-bases 2 #:mineral-harvesters 34 #:gas-harvesters 10
+      #:army-supply 30 #:enemy-threat-supply 16 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 10 'barracks 4 'barracks-techlab 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 4)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 10 'barracks 4 'barracks-techlab 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 4)
+      #:unit-counts (hasheq 'scv 44 'marine 20 'siege-tank 2 'medivac 2)
+      #:enemy-unit-counts (hasheq 'queen 8 'zergling 20 'roach 8)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 0 'starport 0))))
+  (reset-macro-escrow-tracker!)
+  (define l59c-t-tvp-2b-no-ga
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Protoss #:frame 8200
+      #:minerals 300 #:gas 180 #:supply-used 74 #:supply-cap 102 #:supply-left 28 #:pending-supply 0
+      #:workers 44 #:active-bases 2 #:mineral-harvesters 34 #:gas-harvesters 10
+      #:army-supply 30 #:enemy-threat-supply 16 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 10 'barracks 4 'barracks-techlab 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 4)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 10 'barracks 4 'barracks-techlab 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 4)
+      #:unit-counts (hasheq 'scv 44 'marine 20 'marauder 4 'siege-tank 2 'medivac 2)
+      #:enemy-unit-counts (hasheq 'stalker 10 'zealot 6 'immortal 2)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 0 'starport 0))))
+  (reset-macro-escrow-tracker!)
+  (define l59c-t-tvt-tank3-keeps-marines
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 6900
+      #:minerals 165 #:gas 90 #:supply-used 58 #:supply-cap 78 #:supply-left 20 #:pending-supply 0
+      #:workers 38 #:active-bases 2 #:mineral-harvesters 28 #:gas-harvesters 10
+      #:army-supply 20 #:enemy-threat-supply 12 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'supply-depot 8 'barracks 2 'barracks-reactor 1
+                                      'factory 1 'factory-techlab 1 'starport 1 'engineering-bay 1 'refinery 3)
+      #:total-building-counts (hasheq 'orbital-command 2 'supply-depot 8 'barracks 2 'barracks-reactor 1
+                                      'factory 1 'factory-techlab 1 'starport 1 'engineering-bay 1 'refinery 3)
+      #:unit-counts (hasheq 'scv 38 'marine 10 'siege-tank 2)
+      #:enemy-unit-counts (hasheq 'marine 12 'siege-tank 2)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'factory 1 'starport 1))))
+  (assert-true! (and (< (l59p2-cand-u l59c-z-no-rw 'hatchery) 555.0)
+                     (not (eq? (macro-brain-decision-saving-for l59c-z-no-rw) 'hatchery))
+                     (not (eq? (macro-brain-decision-saving-for l59c-p-3rd-low-min) 'nexus))
+                     (not (memq 'robotics-bay (macro-brain-decision-scheduled-ids l59c-p-2b-early-robobay)))
+                     (not (eq? (macro-brain-decision-saving-for l59c-p-2b-early-robobay) 'robotics-bay))
+                     (not (memq 'ghost-academy (macro-brain-decision-scheduled-ids l59c-t-tvz-no-ga)))
+                     (not (eq? (macro-brain-decision-saving-for l59c-t-tvz-no-ga) 'ghost-academy))
+                     (not (memq 'ghost-academy (macro-brain-decision-scheduled-ids l59c-t-tvp-2b-no-ga)))
+                     (not (eq? (macro-brain-decision-saving-for l59c-t-tvp-2b-no-ga) 'ghost-academy))
+                     (or (not (not (memq 'marine (macro-brain-decision-scheduled-ids l59c-t-tvt-tank3-keeps-marines))))
+                         (not (not (memq 'barracks (macro-brain-decision-scheduled-ids l59c-t-tvt-tank3-keeps-marines))))))
+                "L59C(3) Zerg 3rd yields to RW; Protoss 3rd non-blocking <275M & 2b RoboBay waits; Terran blocks TvZ/2b GhostAcademy & TvT Tank3 keeps Marine/Barracks")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms

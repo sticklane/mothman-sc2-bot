@@ -523,88 +523,141 @@
 (define (plan-own-wall-integrity-defense obs)
   (define sanitized-obs : Any (if (hash? obs) obs (hash)))
   (define enemy-units (dyn-list (dyn-hash-ref sanitized-obs 'enemy-units '())))
+  (define ally-bldgs (dyn-list (dyn-hash-ref sanitized-obs 'ally-buildings '())))
+  (define ally-units (dyn-list (dyn-hash-ref sanitized-obs 'ally-units '())))
+  (define base-x (safe-real (dyn-hash-ref sanitized-obs 'base-x SC2-DEFAULT-HOME-BASE-X) 32.0))
+  (define base-y (safe-real (dyn-hash-ref sanitized-obs 'base-y SC2-DEFAULT-HOME-BASE-Y) 32.0))
+  (define default-eb (default-reflected-enemy-xy sanitized-obs base-x base-y))
+  (define enemy-x (safe-real (dyn-hash-ref sanitized-obs 'enemy-x (car default-eb)) (car default-eb)))
+  (define enemy-y (safe-real (dyn-hash-ref sanitized-obs 'enemy-y (cdr default-eb)) (cdr default-eb)))
+  (define default-nat (symmetric-directed-offset base-x base-y enemy-x enemy-y 22.627416997969522 0.0))
+  (define nat-x (safe-real (dyn-hash-ref sanitized-obs 'natural-x (car default-nat)) (car default-nat)))
+  (define nat-y (safe-real (dyn-hash-ref sanitized-obs 'natural-y (cdr default-nat)) (cdr default-nat)))
+  (define default-door (compute-default-ramp-xy nat-x nat-y enemy-x enemy-y 8.0))
+  (define explicit-door (parse-pt-pair (dyn-hash-ref sanitized-obs 'door-pos #f) (car default-door) (cdr default-door)))
+  (define door-x
+    (cond
+      [explicit-door (car explicit-door)]
+      [(dyn-hash-has-key? sanitized-obs 'wall-door-x)
+       (safe-real (dyn-hash-ref sanitized-obs 'wall-door-x (car default-door)) (car default-door))]
+      [else (car default-door)]))
+  (define door-y
+    (cond
+      [explicit-door (cdr explicit-door)]
+      [(dyn-hash-has-key? sanitized-obs 'wall-door-y)
+       (safe-real (dyn-hash-ref sanitized-obs 'wall-door-y (cdr default-door)) (cdr default-door))]
+      [else (cdr default-door)]))
+
+  (define raw-ws (dyn-list (dyn-hash-ref sanitized-obs 'wall-slots '())))
+  (define raw-ows (dyn-list (dyn-hash-ref sanitized-obs 'own-wall-slots '())))
+  (define wall-slots : (Listof (Pairof Flonum Flonum))
+    (if (and (null? raw-ws) (null? raw-ows))
+        '()
+        (append
+         (filter-map (lambda ([p : Any]) (parse-pt-pair p door-x door-y)) raw-ws)
+         (filter-map (lambda ([p : Any]) (parse-pt-pair p door-x door-y)) raw-ows))))
+
+  (: ground-enemy-within? (-> Flonum Flonum Flonum Boolean))
+  (define (ground-enemy-within? px py r)
+    (for/or : Boolean ([e (in-list enemy-units)])
+      (and (hash? e)
+           (not (dyn-hash-ref e 'flying #f))
+           (not (dyn-hash-ref e 'is-flying #f))
+           (<= (dist2d px py
+                       (safe-real (dyn-hash-ref e 'x 9999.0) 9999.0)
+                       (safe-real (dyn-hash-ref e 'y 9999.0) 9999.0))
+               r))))
+
+  ;; Threat within 15.0 tiles of door/wall slots OR any lowered Supply Depot (handles main ramp & Arena `nc-11`!)
+  (define runby-threat?
+    (and (pair? enemy-units)
+         (fast-runby-within-15? enemy-units door-x door-y wall-slots)))
+
+  ;; 1. Terran lowered depots threatened either via wall-door/slots OR directly within 15.0t of ground enemies
+  (define threatened-lowered-depots : (Listof Any)
+    (if (null? enemy-units)
+        '()
+        (filter (lambda ([b : Any])
+                  (and (hash? b)
+                       (or (eq? (dyn-symbol (dyn-hash-ref b 'type 'unknown) 'unknown) 'supply-depot-lowered)
+                           (= (safe-exact-int (dyn-hash-ref b 'unit-type 0) 0) 47))
+                       (let ([bx (safe-real (dyn-hash-ref b 'x 9999.0) 9999.0)]
+                             [by (safe-real (dyn-hash-ref b 'y 9999.0) 9999.0)])
+                         (or (ground-enemy-within? bx by 15.0)
+                             (and runby-threat?
+                                  (or (<= (dist2d door-x door-y bx by) 8.5)
+                                      (ormap (lambda ([sp : (Pairof Flonum Flonum)])
+                                               (<= (dist2d (car sp) (cdr sp) bx by) 2.5))
+                                             wall-slots)))))))
+                ally-bldgs)))
+
+  ;; 1b. Safe raised depots with 0 ground enemies within 16.0t AND a friendly unit waiting right beside (`<= 3.2t`)
+  (define clear-raised-depots : (Listof Any)
+    (filter (lambda ([b : Any])
+              (and (hash? b)
+                   (or (eq? (dyn-symbol (dyn-hash-ref b 'type 'unknown) 'unknown) 'supply-depot)
+                       (= (safe-exact-int (dyn-hash-ref b 'unit-type 0) 0) 19))
+                   (let ([bx (safe-real (dyn-hash-ref b 'x 9999.0) 9999.0)]
+                         [by (safe-real (dyn-hash-ref b 'y 9999.0) 9999.0)])
+                     (and (not (ground-enemy-within? bx by 16.0))
+                          (for/or : Boolean ([u (in-list ally-units)])
+                            (and (hash? u)
+                                 (not (dyn-hash-ref u 'flying #f))
+                                 (not (dyn-hash-ref u 'is-flying #f))
+                                 (<= (dist2d bx by
+                                             (safe-real (dyn-hash-ref u 'x 9999.0) 9999.0)
+                                             (safe-real (dyn-hash-ref u 'y 9999.0) 9999.0))
+                                     3.2)))))))
+            ally-bldgs))
+
   (cond
-    [(null? enemy-units) '()]
+    [(and (not runby-threat?)
+          (null? threatened-lowered-depots)
+          (null? clear-raised-depots))
+     '()]
     [else
-     (define base-x (safe-real (dyn-hash-ref sanitized-obs 'base-x SC2-DEFAULT-HOME-BASE-X) 32.0))
-     (define base-y (safe-real (dyn-hash-ref sanitized-obs 'base-y SC2-DEFAULT-HOME-BASE-Y) 32.0))
-     (define default-eb (default-reflected-enemy-xy sanitized-obs base-x base-y))
-     (define enemy-x (safe-real (dyn-hash-ref sanitized-obs 'enemy-x (car default-eb)) (car default-eb)))
-     (define enemy-y (safe-real (dyn-hash-ref sanitized-obs 'enemy-y (cdr default-eb)) (cdr default-eb)))
-     (define default-nat (symmetric-directed-offset base-x base-y enemy-x enemy-y 22.627416997969522 0.0))
-     (define nat-x (safe-real (dyn-hash-ref sanitized-obs 'natural-x (car default-nat)) (car default-nat)))
-     (define nat-y (safe-real (dyn-hash-ref sanitized-obs 'natural-y (cdr default-nat)) (cdr default-nat)))
-     (define default-door (compute-default-ramp-xy nat-x nat-y enemy-x enemy-y 8.0))
-     (define explicit-door (parse-pt-pair (dyn-hash-ref sanitized-obs 'door-pos #f) (car default-door) (cdr default-door)))
-     (define door-x
-       (cond
-         [explicit-door (car explicit-door)]
-         [(dyn-hash-has-key? sanitized-obs 'wall-door-x)
-          (safe-real (dyn-hash-ref sanitized-obs 'wall-door-x (car default-door)) (car default-door))]
-         [else (car default-door)]))
-     (define door-y
-       (cond
-         [explicit-door (cdr explicit-door)]
-         [(dyn-hash-has-key? sanitized-obs 'wall-door-y)
-          (safe-real (dyn-hash-ref sanitized-obs 'wall-door-y (cdr default-door)) (cdr default-door))]
-         [else (cdr default-door)]))
+     (define actions : (Listof (Listof Any)) '())
+     (define used-ids : (HashTable Any Boolean) (make-hash))
+     (: emit! (-> (Listof Any) Void))
+     (define (emit! a) (set! actions (cons a actions)))
 
-     (define raw-ws (dyn-list (dyn-hash-ref sanitized-obs 'wall-slots '())))
-     (define raw-ows (dyn-list (dyn-hash-ref sanitized-obs 'own-wall-slots '())))
-     (define wall-slots : (Listof (Pairof Flonum Flonum))
-       (if (and (null? raw-ws) (null? raw-ows))
-           '()
-           (append
-            (filter-map (lambda ([p : Any]) (parse-pt-pair p door-x door-y)) raw-ws)
-            (filter-map (lambda ([p : Any]) (parse-pt-pair p door-x door-y)) raw-ows))))
-
-     ;; Threat within 15.0 tiles of door or wall slots (bounding-box pre-check)
-     (define runby-threat?
-       (fast-runby-within-15? enemy-units door-x door-y wall-slots))
-
-     (cond
-       [(not runby-threat?) '()]
-       [else
-        (define ally-units (dyn-list (dyn-hash-ref sanitized-obs 'ally-units '())))
-        (define ally-bldgs (dyn-list (dyn-hash-ref sanitized-obs 'ally-buildings '())))
-        (define actions : (Listof (Listof Any)) '())
-        (define used-ids : (HashTable Any Boolean) (make-hash))
-        (: emit! (-> (Listof Any) Void))
-        (define (emit! a) (set! actions (cons a actions)))
-
-        (when runby-threat?
-    ;; 1. Terran: raise any `supply-depot-lowered` (`558`) in our wall
-    (define lowered-depots : (Listof Any)
-      (filter (lambda ([b : Any])
-                (and (hash? b)
-                     (or (eq? (dyn-symbol (dyn-hash-ref b 'type 'unknown) 'unknown) 'supply-depot-lowered)
-                         (= (safe-exact-int (dyn-hash-ref b 'unit-type 0) 0) 47))
-                     (let ([bx (safe-real (dyn-hash-ref b 'x 9999.0) 9999.0)]
-                           [by (safe-real (dyn-hash-ref b 'y 9999.0) 9999.0)])
-                       (or (<= (dist2d door-x door-y bx by) 8.5)
-                           (ormap (lambda ([sp : (Pairof Flonum Flonum)])
-                                    (<= (dist2d (car sp) (cdr sp) bx by) 2.5))
-                                  wall-slots)))))
-              ally-bldgs))
-    (for ([dep (in-list lowered-depots)])
-      (define did (dyn-hash-ref dep 'id 0))
-      (define dx (safe-real (dyn-hash-ref dep 'x door-x) door-x))
-      (define dy (safe-real (dyn-hash-ref dep 'y door-y) door-y))
-      ;; Move any friendly unit standing directly on the lowered depot off toward home
-      (for ([u (in-list ally-units)]
-            #:when (and (hash? u)
+     ;; 1. Terran: raise any threatened `supply-depot-lowered` (`558`) ONLY once 0 friendlies are on/transiting it!
+     (for ([dep (in-list threatened-lowered-depots)])
+       (define did (dyn-hash-ref dep 'id 0))
+       (define dx (safe-real (dyn-hash-ref dep 'x door-x) door-x))
+       (define dy (safe-real (dyn-hash-ref dep 'y door-y) door-y))
+       (define friendlies-on-depot
+         (filter (lambda ([u : Any])
+                   (and (hash? u)
                         (not (dyn-hash-ref u 'flying #f))
-                        (<= (dist2d dx dy
-                                    (safe-real (dyn-hash-ref u 'x 9999.0) 9999.0)
-                                    (safe-real (dyn-hash-ref u 'y 9999.0) 9999.0))
-                            1.3)))
-        (define uid (dyn-hash-ref u 'id 0))
-        (hash-set! used-ids uid #t)
-        (emit! (list 'move uid base-x base-y)))
-      (hash-set! used-ids did #t)
-      (emit! (list 'cast-spell did 'morph-supply-depot-raise)))
+                        (not (dyn-hash-ref u 'is-flying #f))
+                        (let ([ux (safe-real (dyn-hash-ref u 'x 9999.0) 9999.0)]
+                              [uy (safe-real (dyn-hash-ref u 'y 9999.0) 9999.0)])
+                          ;; Exact SC2 2x2 Supply Depot footprint overlap (`|dx| < 1.25 && |dy| < 1.25`):
+                          ;; never steals Marines standing behind the wall (`>= 1.5t` away) off DPS!
+                          (and (< (abs (- ux dx)) 1.25)
+                               (< (abs (- uy dy)) 1.25)))))
+                 ally-units))
+       (cond
+         [(pair? friendlies-on-depot)
+          ;; Clear friendlies off the depot first; hold `558` until 0 friendlies stand on/transit it!
+          (for ([u (in-list friendlies-on-depot)])
+            (define uid (dyn-hash-ref u 'id 0))
+            (hash-set! used-ids uid #t)
+            (emit! (list 'move uid base-x base-y)))]
+         [(not (ground-enemy-within? dx dy 1.15))
+          (hash-set! used-ids did #t)
+          (emit! (list 'cast-spell did 'morph-supply-depot-raise))]))
 
-    ;; 2. Door slot hold-position unit (`1` zealot/adept/immortal/queen/roach) when no depot covered door
+     ;; 1b. Lower raised depots once threat clears (`> 16.0t`) and friendlies need to walk out
+     (for ([dep (in-list clear-raised-depots)])
+       (define did (dyn-hash-ref dep 'id 0))
+       (unless (hash-has-key? used-ids did)
+         (hash-set! used-ids did #t)
+         (emit! (list 'cast-spell did 'morph-supply-depot-lower))))
+
+     (when runby-threat?
+       ;; 2. Door slot hold-position unit (`1` zealot/adept/immortal/queen/roach) when no depot covered door
     (define door-covered-by-depot?
       (for/or : Boolean ([b (in-list ally-bldgs)])
         (and (hash? b)
@@ -646,7 +699,7 @@
             (emit! (list 'hold-position pid))
             (emit! (list 'move pid door-x door-y))))))
 
-        (reverse actions)])]))
+        (reverse actions)]))
 
 ;; =============================================================================
 ;; 3. Offensive Expansion Blocks, Gas Steals & Smart Cancel (`314`)

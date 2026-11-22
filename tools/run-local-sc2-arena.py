@@ -512,6 +512,212 @@ def parse_mothman_telemetry(log_path: Path) -> dict[str, Any]:
     return {}
 
 
+APM_DROP_TIERS = ("P0", "P1", "P2", "P3", "P4")
+
+
+def _normalize_ability_counts(raw: Any) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            key = str(k).strip()
+            if not key:
+                continue
+            try:
+                iv = int(v)
+            except Exception:
+                continue
+            if iv > 0:
+                counts[key] = counts.get(key, 0) + iv
+    elif isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                key = str(item[0]).strip()
+                try:
+                    iv = int(item[1])
+                except Exception:
+                    continue
+                if key and iv > 0:
+                    counts[key] = counts.get(key, 0) + iv
+            elif isinstance(item, dict):
+                key = str(item.get("ability") or item.get("id") or "").strip()
+                try:
+                    iv = int(item.get("count", 0))
+                except Exception:
+                    continue
+                if key and iv > 0:
+                    counts[key] = counts.get(key, 0) + iv
+    return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def parse_apm_cap_drops_line(line: str) -> dict[str, Any] | None:
+    """Parse a single `[APM_CAP_DROPS] ...` stderr line."""
+    idx = line.find("[APM_CAP_DROPS]")
+    if idx < 0:
+        return None
+    tail = line[idx + len("[APM_CAP_DROPS]"):].strip()
+    if not tail:
+        return None
+
+    def _int_field(names: tuple[str, ...]) -> int:
+        for nm in names:
+            m = re.search(rf"\b{re.escape(nm)}=(-?\d+)\b", tail)
+            if m:
+                return int(m.group(1))
+        return 0
+
+    total = _int_field(("total",))
+    tok = _int_field(("tok", "token_bucket"))
+    cap = _int_field(("cap", "rolling_hard_cap"))
+    by_tier = {t: _int_field((t, t.lower())) for t in APM_DROP_TIERS}
+
+    top_abilities: dict[str, int] = {}
+    m_top = re.search(r"\btop=([^\s]+)", tail)
+    if m_top:
+        raw_top = m_top.group(1).strip()
+        if raw_top and raw_top.lower() not in ("none", "-", "()", "null"):
+            for entry in raw_top.split(","):
+                entry = entry.strip()
+                if ":" not in entry:
+                    continue
+                ab, cnt_s = entry.rsplit(":", 1)
+                ab = ab.strip()
+                try:
+                    cnt = int(cnt_s.strip())
+                except Exception:
+                    continue
+                if ab and cnt > 0:
+                    top_abilities[ab] = top_abilities.get(ab, 0) + cnt
+            top_abilities = dict(sorted(top_abilities.items(), key=lambda kv: (-kv[1], kv[0])))
+
+    return {
+        "total": total,
+        "tok": tok,
+        "cap": cap,
+        "by_tier": by_tier,
+        "top_abilities": top_abilities,
+    }
+
+
+def parse_apm_cap_drops(log_path: Path, telemetry: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Extract per-match APM-cap drop telemetry from JSON summary or `[APM_CAP_DROPS]` stderr line."""
+    if isinstance(telemetry, dict) and isinstance(telemetry.get("apm_cap_drops"), dict):
+        raw = telemetry["apm_cap_drops"]
+        bt_raw = raw.get("by_tier") if isinstance(raw.get("by_tier"), dict) else {}
+        by_tier = {
+            t: int(bt_raw.get(t, bt_raw.get(t.lower(), 0)) or 0)
+            for t in APM_DROP_TIERS
+        }
+        top_src = raw.get("top_abilities") if raw.get("top_abilities") is not None else raw.get("by_ability")
+        out: dict[str, Any] = {
+            "total": int(raw.get("total", 0) or 0),
+            "tok": int(raw.get("token_bucket", raw.get("tok", 0)) or 0),
+            "cap": int(raw.get("rolling_hard_cap", raw.get("cap", 0)) or 0),
+            "by_tier": by_tier,
+            "top_abilities": _normalize_ability_counts(top_src),
+        }
+        if isinstance(raw.get("by_minute"), dict):
+            bm: dict[str, int] = {}
+            for k, v in raw["by_minute"].items():
+                try:
+                    iv = int(v)
+                except Exception:
+                    continue
+                if iv > 0:
+                    bm[str(k)] = iv
+            if bm:
+                out["by_minute"] = dict(sorted(bm.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit() else 9999))
+        return out
+
+    if not log_path.is_file():
+        return None
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception:
+        return None
+    for line in reversed(lines):
+        if "[APM_CAP_DROPS]" in line:
+            parsed = parse_apm_cap_drops_line(line)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def aggregate_apm_cap_drops(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate per-match APM-cap drop stats across a run."""
+    matches_parsed = 0
+    matches_with_drops = 0
+    total_drops = 0
+    total_tok = 0
+    total_cap = 0
+    by_tier = {t: 0 for t in APM_DROP_TIERS}
+    ability_totals: dict[str, int] = {}
+    minute_totals: dict[str, int] = {}
+    worst: list[dict[str, Any]] = []
+
+    for r in records:
+        d = r.get("apm_cap_drops")
+        if not isinstance(d, dict):
+            telem = r.get("our_telemetry")
+            if isinstance(telem, dict) and isinstance(telem.get("apm_cap_drops"), dict):
+                d = parse_apm_cap_drops(Path(), telem)
+        if not isinstance(d, dict):
+            continue
+        matches_parsed += 1
+        tot = int(d.get("total", 0) or 0)
+        tok = int(d.get("tok", d.get("token_bucket", 0)) or 0)
+        cap = int(d.get("cap", d.get("rolling_hard_cap", 0)) or 0)
+        total_drops += tot
+        total_tok += tok
+        total_cap += cap
+        bt = d.get("by_tier") if isinstance(d.get("by_tier"), dict) else {}
+        tier_row: dict[str, int] = {}
+        for t in APM_DROP_TIERS:
+            v = int(bt.get(t, bt.get(t.lower(), 0)) or 0)
+            by_tier[t] += v
+            tier_row[t] = v
+        ab_map = _normalize_ability_counts(d.get("top_abilities") if d.get("top_abilities") is not None else d.get("by_ability"))
+        for ab, cnt in ab_map.items():
+            ability_totals[ab] = ability_totals.get(ab, 0) + cnt
+        if isinstance(d.get("by_minute"), dict):
+            for mk, mv in d["by_minute"].items():
+                try:
+                    iv = int(mv)
+                except Exception:
+                    continue
+                if iv > 0:
+                    minute_totals[str(mk)] = minute_totals.get(str(mk), 0) + iv
+        if tot > 0:
+            matches_with_drops += 1
+            worst.append({
+                "index": r.get("index"),
+                "bot1": r.get("bot1"),
+                "bot2": r.get("bot2"),
+                "map": r.get("map"),
+                "outcome": r.get("outcome"),
+                "total": tot,
+                "tok": tok,
+                "cap": cap,
+                "by_tier": tier_row,
+                "top_abilities": dict(list(ab_map.items())[:5]),
+            })
+
+    top_abilities = dict(sorted(ability_totals.items(), key=lambda kv: (-kv[1], kv[0]))[:12])
+    worst.sort(key=lambda item: (-item["total"], item.get("index") or 0))
+    out: dict[str, Any] = {
+        "matches_parsed": matches_parsed,
+        "matches_with_drops": matches_with_drops,
+        "total_drops": total_drops,
+        "tok": total_tok,
+        "cap": total_cap,
+        "by_tier": by_tier,
+        "top_abilities": top_abilities,
+        "worst_matches": worst[:5],
+    }
+    if minute_totals:
+        out["by_minute"] = dict(sorted(minute_totals.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit() else 9999))
+    return out
+
+
 def classify_result(raw_result: str) -> str:
     if raw_result in ("Player1Win", "Player2Crash", "Player2TimeOut"):
         return "Win"
@@ -751,6 +957,8 @@ def run_single_match(
 
     our_telemetry = parse_mothman_telemetry(our_log_dest) if our_log_saved else {}
     opp_telemetry = parse_mothman_telemetry(opp_log_dest) if (opp_log_saved and task.bot2.is_mothman) else {}
+    our_apm_cap_drops = parse_apm_cap_drops(our_log_dest, our_telemetry) if our_log_saved else None
+    opp_apm_cap_drops = parse_apm_cap_drops(opp_log_dest, opp_telemetry) if (opp_log_saved and task.bot2.is_mothman) else None
     outcome = classify_result(raw_result)
     game_minutes = round(game_steps / (22.4 * 60.0), 2) if game_steps > 0 else 0.0
 
@@ -765,12 +973,13 @@ def run_single_match(
     pw = our_telemetry.get("peak_workers", "-")
     pb = our_telemetry.get("peak_bases", "-")
     pa = our_telemetry.get("peak_army_supply", "-")
+    apm_drop_str = f" | apmDrop={our_apm_cap_drops['total']}" if (our_apm_cap_drops and our_apm_cap_drops.get("total", 0) > 0) else ""
     coh_tag = f"[{task.cohort.upper()}] " if task.cohort == "selfplay" else ""
     log(
         f"[{task.index:02d}/{total_matches:02d}] {coh_tag}{task.bot1.name}({task.bot1.race}) vs "
         f"{task.bot2.name}({task.bot2.race},{task.bot2.bot_type}) on {task.map_name} -> "
         f"{outcome} ({raw_result}) | {game_steps} loops ({game_minutes:.1f}m) | "
-        f"{wall_sec:.1f}s | step={step_str} | pkW={pw} pkB={pb} pkA={pa}"
+        f"{wall_sec:.1f}s | step={step_str} | pkW={pw} pkB={pb} pkA={pa}{apm_drop_str}"
     )
 
     rec: dict[str, Any] = {
@@ -799,8 +1008,12 @@ def run_single_match(
         "opp_log_path": opp_log_saved,
         "controller_log_path": str(controller_log_dest),
     }
+    if our_apm_cap_drops is not None:
+        rec["apm_cap_drops"] = our_apm_cap_drops
     if opp_telemetry:
         rec["opp_telemetry"] = opp_telemetry
+    if opp_apm_cap_drops is not None:
+        rec["opp_apm_cap_drops"] = opp_apm_cap_drops
     return rec
 
 
@@ -855,9 +1068,29 @@ def format_summary_text(summary: dict[str, Any]) -> str:
         f"WR={t['win_rate_pct']}% | clean={t['clean_wins']}W-{t['clean_losses']}L | "
         f"oppFault={t['opp_crash_or_timeout_wins']} | ourFault={t['our_crash_or_timeout_losses']} | "
         f"avgGame={t['avg_game_minutes']}m | avgStep={t['avg_bot1_step_ms']}ms",
+    ]
+    apm_drops = summary.get("apm_cap_drops")
+    if isinstance(apm_drops, dict) and apm_drops.get("matches_parsed", 0) > 0:
+        bt = apm_drops.get("by_tier") or {}
+        top_ab = apm_drops.get("top_abilities") or {}
+        top_str = ",".join(f"{k}:{v}" for k, v in list(top_ab.items())[:6]) or "none"
+        worst_list = apm_drops.get("worst_matches") or []
+        worst_str = (
+            " | worst=" + ",".join(f"#{w['index']}({w['total']})" for w in worst_list[:3])
+            if worst_list
+            else ""
+        )
+        lines.append(
+            f"APM_CAP_DROPS: total={apm_drops.get('total_drops', 0)} "
+            f"(tok={apm_drops.get('tok', 0)}, cap={apm_drops.get('cap', 0)}) | "
+            f"matches={apm_drops.get('matches_with_drops', 0)}/{apm_drops.get('matches_parsed', 0)} | "
+            f"P0={bt.get('P0', 0)} P1={bt.get('P1', 0)} P2={bt.get('P2', 0)} "
+            f"P3={bt.get('P3', 0)} P4={bt.get('P4', 0)} | top={top_str}{worst_str}"
+        )
+    lines.extend([
         "",
         "--- Per Our Bot ---",
-    ]
+    ])
     for k, v in sorted(summary["by_bot"].items()):
         lines.append(
             f"  {k:<12} {v['wins']:>2}W-{v['losses']:<2}L-{v['ties']:<2}T "
@@ -1185,32 +1418,54 @@ def main() -> int:
 
     t_start = time.monotonic()
     results: list[dict[str, Any]] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futs = [
-            pool.submit(
-                run_single_match,
-                task,
-                len(tasks),
-                run_dir,
-                arena_dir,
-                repo_dir,
-                args.mothman_mode,
-                args.image,
-                runtime,
-                args.timeout_sec,
-                args.max_game_time,
-                args.max_frame_time,
-                args.strikes,
-                args.realtime,
-                args.keep_workdirs,
-                run_id_short,
-                args.network,
-                (idx * args.stagger_sec) if idx < concurrency else 0.0,
-            )
-            for idx, task in enumerate(tasks)
-        ]
-        for fut in concurrent.futures.as_completed(futs):
-            results.append(fut.result())
+    dash_stop = threading.Event()
+    dash_script = repo_dir / "tools" / "update-dashboard-state.py"
+
+    def _dash_pulse() -> None:
+        while not dash_stop.wait(timeout=5.0):
+            if dash_script.is_file():
+                try:
+                    subprocess.run(
+                        [sys.executable, str(dash_script), "--auto"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=8,
+                    )
+                except Exception:
+                    pass
+
+    dash_thread = threading.Thread(target=_dash_pulse, daemon=True)
+    dash_thread.start()
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futs = [
+                pool.submit(
+                    run_single_match,
+                    task,
+                    len(tasks),
+                    run_dir,
+                    arena_dir,
+                    repo_dir,
+                    args.mothman_mode,
+                    args.image,
+                    runtime,
+                    args.timeout_sec,
+                    args.max_game_time,
+                    args.max_frame_time,
+                    args.strikes,
+                    args.realtime,
+                    args.keep_workdirs,
+                    run_id_short,
+                    args.network,
+                    (idx * args.stagger_sec) if idx < concurrency else 0.0,
+                )
+                for idx, task in enumerate(tasks)
+            ]
+            for fut in concurrent.futures.as_completed(futs):
+                results.append(fut.result())
+    finally:
+        dash_stop.set()
+        dash_thread.join(timeout=2.0)
 
     results.sort(key=lambda r: r["index"])
     wall_elapsed = round(time.monotonic() - t_start, 2)
@@ -1254,6 +1509,7 @@ def main() -> int:
         "wall_elapsed_sec": wall_elapsed,
         "totals": aggregate_records(results),
         "totals_external": aggregate_records(ext_results) if ext_results else None,
+        "apm_cap_drops": aggregate_apm_cap_drops(results),
         "by_cohort": by_cohort,
         "by_bot": by_bot,
         "by_opponent": by_opponent,

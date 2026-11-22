@@ -459,6 +459,117 @@ class TestLoopFlywheel(unittest.TestCase):
                 for ef in a.get("edited_files") or []:
                     self.assertFalse(ef.startswith("/home/"), f"Home path leaked in edited_files: {ef}")
 
+    def test_arena_passes_tracking_and_deltas(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            p0_path = root / "pass0_ability.json"
+            p1_path = root / "pass1_ability.json"
+            p2_path = root / "pass2_ability.json"
+
+            def _write_arena(path: Path, scens, w, l, d, trade_agg, wall_ms):
+                payload = {
+                    "total_wall_ms": wall_ms,
+                    "summary": {
+                        "total": len(scens),
+                        "mothman_wins": w,
+                        "p2_wins": l,
+                        "draws": d,
+                        "agg_trade_ratio": trade_agg,
+                        "record_str": f"{w}W-{l}L-{d}D",
+                    },
+                    "scenarios": scens,
+                }
+                path.write_text(json.dumps(payload), encoding="utf-8")
+
+            # Pass 0: 1W-2L, 1/3 spell_verified
+            _write_arena(
+                p0_path,
+                [
+                    {"id": "sp01", "winner": "mothman", "trade_ratio": 2.0, "expected_abilities": ["PsiStorm"], "spell_verified": True},
+                    {"id": "sp02", "winner": "p2", "trade_ratio": 0.4, "expected_abilities": ["EMP"], "spell_verified": False},
+                    {"id": "sp03", "winner": "p2", "trade_ratio": 0.5, "expected_abilities": ["Abduct"], "spell_verified": False},
+                ],
+                w=1, l=2, d=0, trade_agg=0.95, wall_ms=60000,
+            )
+            # Pass 1: improves sp02 (+spell), temporarily regresses sp01
+            _write_arena(
+                p1_path,
+                [
+                    {"id": "sp01", "winner": "p2", "trade_ratio": 0.6, "expected_abilities": ["PsiStorm"], "spell_verified": False},
+                    {"id": "sp02", "winner": "mothman", "trade_ratio": 2.4, "expected_abilities": ["EMP"], "spell_verified": True},
+                    {"id": "sp03", "winner": "p2", "trade_ratio": 0.7, "expected_abilities": ["Abduct"], "spell_verified": False},
+                ],
+                w=1, l=2, d=0, trade_agg=1.10, wall_ms=55000,
+            )
+            # Pass 2: fixes sp01 regression and wins sp03 too -> 3W-0L, 3/3 spell_verified, 0 regressions vs pass0
+            _write_arena(
+                p2_path,
+                [
+                    {"id": "sp01", "winner": "mothman", "trade_ratio": 2.2, "expected_abilities": ["PsiStorm"], "spell_verified": True},
+                    {"id": "sp02", "winner": "mothman", "trade_ratio": 2.5, "expected_abilities": ["EMP"], "spell_verified": True},
+                    {"id": "sp03", "winner": "mothman", "trade_ratio": 1.8, "expected_abilities": ["Abduct"], "spell_verified": True},
+                ],
+                w=3, l=0, d=0, trade_agg=2.15, wall_ms=52000,
+            )
+
+            passes = LOG_MOD.summarize_arena_passes(
+                [
+                    {"pass_id": "pass0", "opponent": "dummy", "suite": "ability-mastery", "result_json": str(p0_path)},
+                    {"pass_id": "pass1", "opponent": "dummy", "suite": "ability-mastery", "result_json": str(p1_path)},
+                    {"pass_id": "pass2", "opponent": "dummy", "suite": "ability-mastery", "result_json": str(p2_path)},
+                    # Separate inline-only selfplay track should delta independently
+                    {"pass_id": "pass0", "opponent": "self", "suite": "core", "total": 10, "w": 5, "l": 5, "d": 0, "trade_agg": 1.0, "wall_sec": 40.0},
+                    {"pass_id": "pass1", "opponent": "self", "suite": "core", "total": 10, "w": 7, "l": 3, "d": 0, "trade_agg": 1.45, "wall_sec": 42.0},
+                ]
+            )
+            self.assertEqual(len(passes), 5)
+            p0, p1, p2, s0, s1 = passes
+
+            self.assertEqual(p0["spell_verified"], 1)
+            self.assertEqual(p0["spell_expected"], 3)
+            self.assertEqual(p0["trade_med"], 0.5)
+            self.assertEqual(p0["delta_w_vs_pass0"], 0)
+
+            self.assertEqual(p1["improved_ids"], ["sp02"])
+            self.assertEqual(p1["regressed_ids"], ["sp01"])
+            self.assertEqual(p1["spell_gained_ids"], ["sp02"])
+            self.assertEqual(p1["spell_lost_ids"], ["sp01"])
+            self.assertEqual(p1["regression_count_vs_pass0"], 1)
+
+            self.assertEqual(p2["w"], 3)
+            self.assertEqual(p2["delta_w_vs_pass0"], 2)
+            self.assertAlmostEqual(p2["delta_trade_vs_pass0"], 1.2, places=2)
+            self.assertEqual(p2["delta_spell_verified_vs_pass0"], 2)
+            self.assertEqual(p2["regressed_vs_pass0_ids"], [])
+            self.assertEqual(p2["regression_count_vs_pass0"], 0)
+
+            self.assertEqual(s0["delta_w_vs_pass0"], 0)
+            self.assertEqual(s1["delta_w_vs_prev"], 2)
+            self.assertAlmostEqual(s1["delta_trade_vs_pass0"], 0.45, places=2)
+
+            # End-to-end build_trajectory_records emits arena_passes and flags unresolved pass0 regression
+            brain, _, ledger_path, db_path = _build_synthetic_workspace(root / "ws")
+            ledger_data = json.loads(ledger_path.read_text(encoding="utf-8"))
+            ledger_data["iterations"][-1]["arena_passes"] = [
+                {"pass_id": "pass0", "opponent": "dummy", "suite": "ability-mastery", "result_json": str(p0_path)},
+                {"pass_id": "pass1", "opponent": "dummy", "suite": "ability-mastery", "result_json": str(p1_path)},
+            ]
+            ledger_path.write_text(json.dumps(ledger_data, indent=2), encoding="utf-8")
+
+            recs = LOG_MOD.build_trajectory_records(
+                ledger_path=ledger_path,
+                brain_root=brain,
+                coordinator_id=None,
+                db_path=db_path,
+                from_loop=47,
+                to_loop=47,
+            )
+            self.assertEqual(len(recs), 1)
+            bd47 = recs[0]["bot_deltas"]
+            self.assertIn("arena_passes", bd47)
+            self.assertEqual(len(bd47["arena_passes"]), 2)
+            self.assertIn("arena_pass_regression", {f["kind"] for f in recs[0]["friction_events"]})
+
 
 def _init_synthetic_arena_sqlite(db_path: Path):
     """Create a synthetic SQLite DB matching arena_replays.sqlite schema for unit tests."""

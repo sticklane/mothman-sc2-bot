@@ -23,7 +23,29 @@
          "../lib/tactics/unit-mode-micro.rkt"
          "../lib/tactics/arena-minimax.rkt"
          "../lib/tactics/zerg-burrow-micro.rkt"
-         (only-in "../lib/plan/nydus.rkt" plan-nydus-actions)
+         "../lib/tactics/transport-drop-micro.rkt"
+         "../lib/human-cortex.rkt"
+         (only-in "../lib/plan/nydus.rkt" plan-nydus-actions plan-nydus-worm-tactics)
+         (only-in "../lib/plan/creep-and-changeling.rkt" plan-changeling-free-unit-tactics)
+         (only-in "../lib/plan/static-defense.rkt"
+                  plan-spread-burrowed-swarm-host-harass
+                  plan-counter-spread-swarm-host-harass)
+         (only-in "../lib/plan/wall-and-block.rkt" plan-own-wall-integrity-defense)
+         (only-in "../lib/plan/map-elements-and-experiments.rkt"
+                  plan-mineral-wall-and-worker-path-tactics
+                  plan-destructible-rocks-and-rockslides
+                  plan-nonstandard-base-resource-allocation
+                  plan-trapped-unit-dropship-rescue
+                  step-map-elements-tactical-micro!
+                  NonstandardBasePlan-rebalance-directives
+                  MapElementDirective-sexp
+                  MapElementDirective-kind
+                  DropshipRescueDirective-sexp
+                  DropshipRescueDirective-unload-sexp)
+         (only-in "../lib/plan/multitask-harass-and-proxy.rkt"
+                  plan-early-worker-mineral-line-harass
+                  plan-baneling-move-past-and-light-clump-detonate
+                  harass-directive-action)
          (only-in "../lib/sc2-protobuf-ws.rkt"
                   sc2-data
                   sc2-ability-data-entry
@@ -3362,6 +3384,1165 @@
   (check-true "L57-R4-202-overcap-spore-trick-672f-cooldown-and-max-2-cancels"
               (and c1? c2-blocked? c3? c4-capped?)
               (format "c1?=~a c2-blk?=~a c3?=~a c4-cap?=~a" c1? c2-blocked? c3? c4-capped?)))
+
+;; -----------------------------------------------------------------------------
+;; 61. L58-P1-1 (`sc2-ab-t10`): OC Scanner Sweep (399) Preempts MULE (171) Under Cloak Threat
+;; -----------------------------------------------------------------------------
+(let ()
+  (define rt-sc (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define oc (hash-set (mk-u 61001 'orbital-command 50.0 50.0 #:hp 1500.0 #:max-hp 1500.0) 'energy 100.0))
+  (define marines-12
+    (for/list ([i (in-range 12)])
+      (mk-u (+ 61101 i) 'marine 54.0 (+ 48.0 (* 0.4 i)) #:hp 45.0 #:max-hp 45.0)))
+  (define dts-4
+    (for/list ([i (in-range 4)])
+      (hash-set* (mk-u (+ 61801 i) 'dark-templar 58.0 (+ 49.0 (* 0.4 i)) #:hp 40.0 #:max-hp 40.0 #:shield 80.0 #:max-shield 80.0)
+                 'cloak 1 'cloaked #t 'is-shimmer? #t)))
+  (define mps (list (hasheq 'id 61901 'x 44.0 'y 50.0 'mineral-contents 1200)))
+  (define obs-dt
+    (hash-set (mk-live-obs 'Terran 'Protoss 400 #:minerals 100 #:gas 0 #:supply-used 18 #:supply-cap 23
+                           #:mineral-harvesters 6 #:vespene-harvesters 0
+                           #:ally-units marines-12
+                           #:ally-buildings (list oc)
+                           #:enemy-units dts-4)
+              'mineral-patches mps))
+  (define a-l2 (step-layer2-economy! rt-sc obs-dt))
+  (define scanned?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3) (eq? (third a) 'scanner-sweep))) a-l2))
+  (define muled?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3) (eq? (third a) 'calldown-mule))) a-l2))
+  ;; Even on next tick during 44f scan dedup, MULE MUST still be hard-blocked while DTs are within 32t!
+  (define a-l2-next (step-layer2-economy! rt-sc (hash-set obs-dt 'frame 408)))
+  (define muled-during-dedup?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3) (eq? (third a) 'calldown-mule))) a-l2-next))
+  (check-true "L58-P1-1-oc-scanner-sweep-preempts-mule-under-cloak-threat"
+              (and scanned? (not muled?) (not muled-during-dedup?))
+              (format "scanned?=~a muled?=~a muled-dedup?=~a" scanned? muled? muled-during-dedup?)))
+
+;; -----------------------------------------------------------------------------
+;; 62. L58-P1-2 (`sc2-ab-t01`): Fighter Vikings Land (403) vs Ground-Only Stalkers
+;; -----------------------------------------------------------------------------
+(let ()
+  (define rt-vk (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define vikings-8
+    (for/list ([i (in-range 8)])
+      (hash-set (mk-u (+ 62101 i) 'viking-fighter 60.0 (+ 58.0 (* 0.6 i)) #:hp 135.0 #:max-hp 135.0)
+                'flying? #t)))
+  (define stalkers-5
+    (for/list ([i (in-range 5)])
+      (mk-u (+ 62801 i) 'stalker 70.0 (+ 59.0 (* 0.7 i)) #:hp 80.0 #:max-hp 80.0 #:shield 80.0 #:max-shield 80.0)))
+  (define obs-vk
+    (mk-live-obs 'Terran 'Protoss 500 #:supply-used 16 #:supply-cap 23
+                 #:ally-units vikings-8
+                 #:ally-buildings (list (mk-u 62001 'command-center 32.5 32.5 #:hp 1500.0 #:max-hp 1500.0))
+                 #:enemy-units stalkers-5))
+  (define acts-vk (run-l34 rt-vk obs-vk))
+  (define landed?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3) (eq? (third a) 'morph-viking-assault)))
+           acts-vk))
+  (check-true "L58-P1-2-viking-lands-vs-ground-only-stalkers"
+              landed?
+              (format "landed?=~a acts=~a" landed? (take acts-vk (min 8 (length acts-vk))))))
+
+;; -----------------------------------------------------------------------------
+;; 63. L58-P1-3 (`sc2-ab-p09`): Nexus Energy Recharge (4126) Preempts ChronoBoost & Dry-HT Archon Merge
+;; -----------------------------------------------------------------------------
+(let ()
+  (define rt-nx (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define nx
+    (hash-set* (mk-u 63001 'nexus 32.5 32.5 #:hp 1000.0 #:max-hp 1000.0 #:shield 1000.0 #:max-shield 1000.0)
+               'energy 100.0 'busy? #t 'order-count 1))
+  (define hts-2
+    (list (hash-set (mk-u 63101 'high-templar 35.0 34.0 #:hp 40.0 #:max-hp 40.0 #:shield 40.0 #:max-shield 40.0) 'energy 25.0)
+          (hash-set (mk-u 63102 'high-templar 36.0 34.5 #:hp 40.0 #:max-hp 40.0 #:shield 40.0 #:max-shield 40.0) 'energy 25.0)))
+  (define marines-12
+    (for/list ([i (in-range 12)])
+      (mk-u (+ 63801 i) 'marine 44.0 (+ 31.0 (* 0.4 i)) #:hp 45.0 #:max-hp 45.0)))
+  (define obs-nx
+    (mk-live-obs 'Protoss 'Terran 600 #:minerals 100 #:gas 0 #:supply-used 20 #:supply-cap 31
+                 #:researched-upgrades '(psi-storm)
+                 #:ally-units hts-2
+                 #:ally-buildings (list nx)
+                 #:enemy-units marines-12))
+  (define acts-l2 (step-layer2-economy! rt-nx obs-nx))
+  (define recharged-l2?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3) (eq? (third a) 'nexus-energy-recharge)))
+           acts-l2))
+  (define chronod-l2?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3) (eq? (third a) 'chrono-boost)))
+           acts-l2))
+  ;; Direct pro-spellcaster check: dry HTs near ready Nexus (`<= 10t`) trigger `nexus-energy-recharge` before Archon merge!
+  (define p-dirs-nx
+    (plan-protoss-spellcaster-micro hts-2 marines-12
+                                    #:ally-buildings (list nx)
+                                    #:psi-storm-researched? #t
+                                    #:current-frame 600))
+  (define recharged-sp?
+    (ormap (lambda (d) (eq? (spell-directive-ability d) 'nexus-energy-recharge)) p-dirs-nx))
+  (define merged-sp?
+    (ormap (lambda (d) (eq? (spell-directive-ability d) 'morph-archon)) p-dirs-nx))
+  (check-true "L58-P1-3-nexus-energy-recharge-preempts-chrono-and-dry-ht-archon-merge"
+              (and recharged-l2? (not chronod-l2?) recharged-sp? (not merged-sp?))
+              (format "rech-l2?=~a chrono-l2?=~a rech-sp?=~a merge-sp?=~a"
+                      recharged-l2? chronod-l2? recharged-sp? merged-sp?)))
+
+;; -----------------------------------------------------------------------------
+;; 64. L58-P1-4/5 (`sc2-ab-z05`, `sc2-ab-z06`): Corruptor Caustic Spray (2324) & Overseer Contaminate (1825)
+;; -----------------------------------------------------------------------------
+(let ()
+  (define corrs
+    (list (hash-set (mk-u 64101 'corruptor 50.0 50.0 #:hp 200.0 #:max-hp 200.0) 'flying? #t)
+          (hash-set (mk-u 64102 'corruptor 50.5 51.0 #:hp 200.0 #:max-hp 200.0) 'flying? #t)))
+  (define en-nx (mk-u 64801 'nexus 61.0 50.0 #:hp 1000.0 #:max-hp 1000.0 #:shield 1000.0 #:max-shield 1000.0))
+  (define z-spray
+    (plan-zerg-spellcaster-micro corrs '() #:enemy-buildings (list en-nx) #:current-frame 700))
+  (define sprayed? (ormap (lambda (d) (eq? (spell-directive-ability d) 'caustic-spray)) z-spray))
+
+  (define ovs
+    (list (hash-set* (mk-u 64201 'overseer 50.0 50.0 #:hp 200.0 #:max-hp 200.0) 'energy 160.0 'flying? #t)))
+  (define en-sg (mk-u 64802 'stargate 61.0 50.0 #:hp 600.0 #:max-hp 600.0 #:shield 600.0 #:max-shield 600.0))
+  (define z-contam
+    (plan-zerg-spellcaster-micro ovs '() #:enemy-buildings (list en-sg) #:current-frame 700))
+  (define contam? (ormap (lambda (d) (eq? (spell-directive-ability d) 'contaminate)) z-contam))
+  (define changeling? (ormap (lambda (d) (eq? (spell-directive-ability d) 'spawn-changeling)) z-contam))
+  (check-true "L58-P1-4-5-corruptor-caustic-spray-and-overseer-contaminate-before-changeling"
+              (and sprayed? contam? (not changeling?))
+              (format "sprayed?=~a contam?=~a changeling?=~a" sprayed? contam? changeling?)))
+
+;; -----------------------------------------------------------------------------
+;; 65. L58-P1-6 (`sc2-ab-p02`): Sentry Hallucination Archon (146) vs Sieged Tanks + Hallucinated-Unit Guard
+;; -----------------------------------------------------------------------------
+(let ()
+  (define sentry
+    (hash-set (mk-u 65101 'sentry 50.0 50.0 #:hp 40.0 #:max-hp 40.0 #:shield 40.0 #:max-shield 40.0) 'energy 100.0))
+  (define tanks
+    (list (mk-u 65801 'siege-tank-sieged 62.0 50.0 #:hp 175.0 #:max-hp 175.0)
+          (mk-u 65802 'siege-tank-sieged 62.5 52.0 #:hp 175.0 #:max-hp 175.0)))
+  (define p-hal (plan-protoss-spellcaster-micro (list sentry) tanks #:current-frame 800))
+  (define cast-archon? (ormap (lambda (d) (eq? (spell-directive-ability d) 'hallucination-archon)) p-hal))
+  (define cast-phx? (ormap (lambda (d) (eq? (spell-directive-ability d) 'hallucination-phoenix)) p-hal))
+
+  (define rt-hal (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define hal-phx
+    (hash-set* (mk-u 65201 'phoenix 52.0 50.0 #:hp 120.0 #:max-hp 120.0 #:shield 60.0 #:max-shield 60.0)
+               'energy 100.0 'flying? #t 'is-hallucination #t 'hallucination #t))
+  (define obs-hal
+    (mk-live-obs 'Protoss 'Terran 820 #:supply-used 4 #:supply-cap 15
+                 #:ally-units (list hal-phx)
+                 #:ally-buildings (list (mk-u 65001 'nexus 32.5 32.5 #:hp 1000.0 #:max-hp 1000.0 #:shield 1000.0 #:max-shield 1000.0))
+                 #:enemy-units tanks))
+  (define acts-hal (run-l34 rt-hal obs-hal))
+  (define bad-hal-cmd?
+    (ormap (lambda (a)
+             (and (pair? a)
+                  (or (and (eq? (car a) 'attack-unit) (= (second a) 65201))
+                      (and (eq? (car a) 'cast-spell) (= (second a) 65201)))))
+           acts-hal))
+  (check-true "L58-P1-6-sentry-hallucination-archon-vs-tanks-and-hallucinated-phoenix-guard"
+              (and cast-archon? (not cast-phx?) (not bad-hal-cmd?))
+              (format "archon?=~a phx?=~a bad-hal?=~a acts=~a" cast-archon? cast-phx? bad-hal-cmd? acts-hal)))
+
+;; -----------------------------------------------------------------------------
+;; 66. L58-P1-7 (`sc2-brw-u03`): Burrowed Baneling Landmine Detonate (42) / Unburrow (1376), ZERO Attack (23)
+;; -----------------------------------------------------------------------------
+(let ()
+  (define rt-bb (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define bb-close (hash-set (mk-u 66101 'baneling-burrowed 60.0 60.0 #:hp 30.0 #:max-hp 30.0) 'burrowed #t))
+  (define bb-det   (hash-set* (mk-u 66102 'baneling-burrowed 54.0 60.0 #:hp 30.0 #:max-hp 30.0) 'burrowed #t 'cloak 2))
+  (define marines
+    (list (mk-u 66801 'marine 61.2 60.0 #:hp 45.0 #:max-hp 45.0)
+          (mk-u 66802 'marine 61.5 60.8 #:hp 45.0 #:max-hp 45.0)))
+  (define obs-bb
+    (mk-live-obs 'Zerg 'Terran 900 #:supply-used 4 #:supply-cap 14
+                 #:ally-units (list bb-close bb-det)
+                 #:ally-buildings (list (mk-u 66001 'hatchery 32.5 32.5 #:hp 1500.0 #:max-hp 1500.0))
+                 #:enemy-units marines))
+  (define acts-bb (run-l34 rt-bb obs-bb))
+  (define exploded? (ormap (lambda (a) (equal? a '(baneling-explode 66101))) acts-bb))
+  (define unburrowed?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'burrow-up) (= (second a) 66102))) acts-bb))
+  (define attacked-burrowed?
+    (ormap (lambda (a) (and (pair? a) (memq (car a) '(attack-unit attack-pos)) (memv (second a) '(66101 66102))))
+           acts-bb))
+  (check-true "L58-P1-7-burrowed-baneling-detonates-and-unburrows-with-zero-attack23"
+              (and exploded? unburrowed? (not attacked-burrowed?))
+              (format "exploded?=~a unburrowed?=~a atk23?=~a acts=~a" exploded? unburrowed? attacked-burrowed? acts-bb)))
+
+;; -----------------------------------------------------------------------------
+;; 67. L58-P1-8 (`sc2-ab-t11`, `sc2-ab-t12`): SCV Repair Strict `hp < max-hp` + Damaged PF Repair Priority
+;; -----------------------------------------------------------------------------
+(let ()
+  (define rt-rep1 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define scvs-6
+    (for/list ([i (in-range 6)])
+      (hash-set (mk-u (+ 67101 i) 'scv 46.0 (+ 48.0 (* 0.6 i)) #:hp 45.0 #:max-hp 45.0)
+                'order-ability-id 295)))
+  (define pf-full (mk-u 67001 'planetary-fortress 50.0 50.0 #:hp 1500.0 #:max-hp 1500.0))
+  (define pf-dmg  (mk-u 67001 'planetary-fortress 50.0 50.0 #:hp 1420.0 #:max-hp 1500.0))
+  (define lings-8
+    (for/list ([i (in-range 8)])
+      (mk-u (+ 67801 i) 'zergling 53.0 (+ 48.0 (* 0.5 i)) #:hp 35.0 #:max-hp 35.0)))
+  (define acts-full
+    (run-l34 rt-rep1
+             (mk-live-obs 'Terran 'Zerg 1000 #:minerals 200 #:supply-used 10 #:supply-cap 23
+                          #:ally-units scvs-6
+                          #:ally-buildings (list pf-full)
+                          #:enemy-units lings-8)))
+  (define repaired-full?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'repair) (= (third a) 67001))) acts-full))
+  (define rt-rep2 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define acts-dmg
+    (run-l34 rt-rep2
+             (mk-live-obs 'Terran 'Zerg 1004 #:minerals 200 #:supply-used 10 #:supply-cap 23
+                          #:ally-units scvs-6
+                          #:ally-buildings (list pf-dmg)
+                          #:enemy-units lings-8)))
+  (define repair-cnt-dmg
+    (count (lambda (a) (and (pair? a) (eq? (car a) 'repair) (= (third a) 67001))) acts-dmg))
+  (check-true "L58-P1-8-scv-repair-strict-hp-lt-max-and-pulls-harvesters-for-damaged-pf"
+              (and (not repaired-full?) (>= repair-cnt-dmg 3))
+              (format "repaired-full?=~a repair-cnt-dmg=~a" repaired-full? repair-cnt-dmg)))
+
+;; -----------------------------------------------------------------------------
+;; 68. L58-P1-9/10 (`sc2-yam-y06`, `sc2-trn-n05`): BC Yamato Queen/Spore + Warp Prism Archon Drone Drop
+;; -----------------------------------------------------------------------------
+(let ()
+  (define bcs
+    (list (hash-set (mk-u 68101 'battlecruiser 70.0 70.0 #:hp 550.0 #:max-hp 550.0) 'flying? #t)))
+  (define z-def
+    (list (mk-u 68801 'queen 75.0 70.0 #:hp 175.0 #:max-hp 175.0)
+          (mk-u 68802 'drone 78.0 70.0 #:hp 40.0 #:max-hp 40.0)))
+  (define z-spores (list (mk-u 68803 'spore-crawler 76.0 73.0 #:hp 400.0 #:max-hp 400.0)))
+  (define t-yam
+    (plan-terran-spellcaster-micro bcs z-def #:enemy-buildings z-spores #:yamato-researched? #t #:current-frame 1100))
+  (define yamatoed-q-or-sp?
+    (ormap (lambda (d)
+             (and (eq? (spell-directive-ability d) 'yamato-cannon)
+                  (memv (spell-directive-target-tag d) '(68801 68803))))
+           t-yam))
+
+  (define rt-wp (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define wp
+    (hash-set* (mk-u 68201 'warp-prism 120.0 120.0 #:hp 80.0 #:max-hp 80.0 #:shield 100.0 #:max-shield 100.0)
+               'flying? #t 'cargo-space-taken 8 'cargo-space-max 8
+               'passengers (list (hasheq 'id 68202 'type 'archon 'hp 10 'max-hp 10 'shield 350 'max-shield 350)
+                                 (hasheq 'id 68203 'type 'archon 'hp 10 'max-hp 10 'shield 350 'max-shield 350))))
+  (define drones-8
+    (for/list ([i (in-range 8)])
+      (mk-u (+ 68901 i) 'drone 112.0 (+ 118.0 (* 0.5 i)) #:hp 40.0 #:max-hp 40.0)))
+  (define roaches-4
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 68951 i) 'roach 118.0 (+ 119.0 (* 0.5 i)) #:hp 145.0 #:max-hp 145.0)))
+  (define obs-wp
+    (mk-live-obs 'Protoss 'Zerg 1120 #:supply-used 10 #:supply-cap 23
+                 #:ally-units (list wp)
+                 #:ally-buildings (list (hash-set (mk-u 68001 'nexus 32.5 32.5 #:hp 1000.0 #:max-hp 1000.0 #:shield 1000.0 #:max-shield 1000.0) 'energy 100.0))
+                 #:enemy-units (append drones-8 roaches-4)))
+  (define acts-wp (run-l34 rt-wp obs-wp))
+  (define wp-to-drones?
+    (ormap (lambda (a)
+             (and (pair? a) (eq? (car a) 'move) (= (second a) 68201)
+                  (< (dist2d-t (third a) (fourth a) 112.0 120.0)
+                     (dist2d-t (third a) (fourth a) 118.0 120.0))))
+           acts-wp))
+  (define recalled-wp?
+    (ormap (lambda (a) (and (pair? a) (memq (car a) '(cast cast-spell)) (>= (length a) 3)
+                            (memq (third a) '(mass-recall nexus-mass-recall))))
+           acts-wp))
+  (check-true "L58-P1-9-10-bc-yamato-queen-spore-and-warp-prism-archon-drone-drop-no-recall"
+              (and yamatoed-q-or-sp? wp-to-drones? (not recalled-wp?))
+              (format "yamato?=~a wp-drones?=~a recalled?=~a acts=~a"
+                      yamatoed-q-or-sp? wp-to-drones? recalled-wp? acts-wp)))
+
+;; -----------------------------------------------------------------------------
+;; 69. L58-P2-1 (`sc2-ab-t10`, `sc2-ab-t01`): Full-Runtime Preserved OC Scan + Viking Holds Air Until Colossus Dead
+;; -----------------------------------------------------------------------------
+(let ()
+  (define rt-scan (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define oc (hash-set (mk-u 69001 'orbital-command 80.0 86.0 #:hp 1500.0 #:max-hp 1500.0) 'energy 50.0))
+  (define marines-12
+    (for/list ([i (in-range 12)])
+      (mk-u (+ 69101 i) 'marine 84.0 (+ 84.0 (* 0.35 i)) #:hp 45.0 #:max-hp 45.0)))
+  (define dts-4
+    (for/list ([i (in-range 4)])
+      (hash-set* (mk-u (+ 69801 i) 'dark-templar 90.0 (+ 85.0 (* 0.4 i)) #:hp 0.0 #:max-hp 1.0)
+                 'cloak 1 'cloaked #t 'is-shimmer? #t)))
+  (define res-scan
+    (step-live-bot-runtime!
+     rt-scan
+     (mk-live-obs 'Terran 'Protoss 240 #:minerals 50 #:supply-used 18 #:supply-cap 30
+                  #:mineral-harvesters 6 #:vespene-harvesters 0
+                  #:ally-units marines-12
+                  #:ally-buildings (list oc)
+                  #:enemy-units dts-4)))
+  (define scan-survived-apm?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3) (eq? (third a) 'scanner-sweep)))
+           (hash-ref res-scan 'actions '())))
+
+  ;; Viking MUST NOT land while Colossus is alive at 24t (within 28t safe-air radius)!
+  (define rt-vk2 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define viks-8
+    (for/list ([i (in-range 8)])
+      (hash-set (mk-u (+ 69201 i) 'viking-fighter 60.0 (+ 58.0 (* 0.5 i)) #:hp 135.0 #:max-hp 135.0) 'flying? #t)))
+  (define stalkers-col
+    (cons (mk-u 69900 'colossus 84.0 60.0 #:hp 200.0 #:max-hp 200.0 #:shield 150.0 #:max-shield 150.0)
+          (for/list ([i (in-range 5)])
+            (mk-u (+ 69901 i) 'stalker 70.0 (+ 59.0 (* 0.6 i)) #:hp 80.0 #:max-hp 80.0 #:shield 80.0 #:max-shield 80.0))))
+  (define acts-with-col
+    (run-l34 rt-vk2
+             (mk-live-obs 'Terran 'Protoss 500 #:supply-used 16 #:supply-cap 23
+                          #:ally-units viks-8
+                          #:ally-buildings (list (mk-u 69002 'command-center 32.5 32.5 #:hp 1500.0 #:max-hp 1500.0))
+                          #:enemy-units stalkers-col)))
+  (define landed-with-col?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3) (eq? (third a) 'morph-viking-assault)))
+           acts-with-col))
+  (check-true "L58-P2-1-preserved-oc-scan-and-viking-holds-fighter-vs-colossus-at-24t"
+              (and scan-survived-apm? (not landed-with-col?))
+              (format "scan-survived?=~a landed-with-col?=~a" scan-survived-apm? landed-with-col?)))
+
+;; -----------------------------------------------------------------------------
+;; 70. L58-P2-2 (`sc2-ab-z06`): Overseer Contaminate Preempts Zero-CD Changeling Dump
+;; -----------------------------------------------------------------------------
+(let ()
+  (define rt-ov (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define ovs-2
+    (list (hash-set* (mk-u 70101 'overseer 50.0 50.0 #:hp 200.0 #:max-hp 200.0) 'energy 160.0 'flying? #t)
+          (hash-set* (mk-u 70102 'overseer 51.0 51.0 #:hp 200.0 #:max-hp 200.0) 'energy 160.0 'flying? #t)))
+  (define roaches-4
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 70201 i) 'roach 51.0 (+ 49.0 (* 0.5 i)) #:hp 145.0 #:max-hp 145.0)))
+  (define zealots-4
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 70801 i) 'zealot 59.0 (+ 49.0 (* 0.5 i)) #:hp 100.0 #:max-hp 100.0 #:shield 50.0 #:max-shield 50.0)))
+  (define en-bldgs
+    (list (mk-u 70901 'stargate 62.0 48.0 #:hp 600.0 #:max-hp 600.0 #:shield 600.0 #:max-shield 600.0)
+          (mk-u 70902 'robotics-facility 62.0 52.0 #:hp 450.0 #:max-hp 450.0 #:shield 450.0 #:max-shield 450.0)))
+  ;; Tick 1: Zealots visible, buildings not yet seen -> MUST NOT dump Changeling while combat <= 16t!
+  (define res-ov1
+    (step-live-bot-runtime!
+     rt-ov
+     (mk-live-obs 'Zerg 'Protoss 300 #:supply-used 10 #:supply-cap 22
+                  #:ally-units (append ovs-2 roaches-4)
+                  #:ally-buildings (list (mk-u 70001 'hatchery 32.5 32.5 #:hp 1500.0 #:max-hp 1500.0))
+                  #:enemy-units zealots-4
+                  #:enemy-buildings '())))
+  (define dumped-ch1?
+    (ormap (lambda (a) (and (pair? a) (memq (car a) '(cast cast-spell)) (>= (length a) 3) (eq? (third a) 'spawn-changeling)))
+           (hash-ref res-ov1 'actions '())))
+  ;; Tick 2: Stargate & Robo now visible -> MUST cast Contaminate (`1825`) and ZERO Changeling (`181`)!
+  (define res-ov2
+    (step-live-bot-runtime!
+     rt-ov
+     (mk-live-obs 'Zerg 'Protoss 308 #:supply-used 10 #:supply-cap 22
+                  #:ally-units (append ovs-2 roaches-4)
+                  #:ally-buildings (list (mk-u 70001 'hatchery 32.5 32.5 #:hp 1500.0 #:max-hp 1500.0))
+                  #:enemy-units zealots-4
+                  #:enemy-buildings en-bldgs)))
+  (define contam-ov2?
+    (ormap (lambda (a) (and (pair? a) (memq (car a) '(cast cast-spell)) (>= (length a) 3) (eq? (third a) 'contaminate)))
+           (hash-ref res-ov2 'actions '())))
+  (define ch-ov2?
+    (ormap (lambda (a) (and (pair? a) (memq (car a) '(cast cast-spell)) (>= (length a) 3) (eq? (third a) 'spawn-changeling)))
+           (hash-ref res-ov2 'actions '())))
+  (check-true "L58-P2-2-overseer-holds-energy-for-contaminate-and-blocks-changeling-dump"
+              (and (not dumped-ch1?) contam-ov2? (not ch-ov2?))
+              (format "dumped-ch1?=~a contam2?=~a ch2?=~a" dumped-ch1? contam-ov2? ch-ov2?)))
+
+;; -----------------------------------------------------------------------------
+;; 71. L58-P2-3 (`sc2-brw-u07`, `sc2-real-z09`): Burrowed Lurker Zero Move/Burrow + Roach Mid-Burrow Skip
+;; -----------------------------------------------------------------------------
+(let ()
+  (define rt-lk (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define lurks
+    (list (hash-set* (mk-u 71101 'lurker-mp-burrowed 60.0 60.0 #:hp 200.0 #:max-hp 200.0) 'burrowed #t 'is-burrowed #t)))
+  (define stalkers
+    (list (mk-u 71801 'stalker 67.0 60.0 #:hp 80.0 #:max-hp 80.0 #:shield 80.0 #:max-shield 80.0)))
+  (define acts-lk
+    (run-l34 rt-lk
+             (mk-live-obs 'Zerg 'Protoss 400 #:supply-used 3 #:supply-cap 14
+                          #:ally-units lurks
+                          #:ally-buildings (list (mk-u 71001 'hatchery 32.5 32.5 #:hp 1500.0 #:max-hp 1500.0))
+                          #:enemy-units stalkers)))
+  (define bad-lurk-cmd?
+    (ormap (lambda (a)
+             (and (pair? a)
+                  (>= (length a) 2)
+                  (eqv? (second a) 71101)
+                  (or (memq (car a) '(move kite))
+                      (and (eq? (car a) 'cast-spell) (>= (length a) 3) (memq (third a) '(burrow burrow-lurker))))))
+           acts-lk))
+  ;; Mid-burrow Roach (`order-ability-id 1386`) must NOT emit duplicate burrow-down or tunnel-move!
+  (define roach-mid (hash-set (mk-u 71201 'roach 50.0 50.0 #:hp 40.0 #:max-hp 145.0) 'order-ability-id 1386))
+  (define roach-acts
+    (execute-roach-tunneling-burrow-micro
+     (hasheq 'burrow-researched? #t 'tunneling-claws? #t 'base-x 32 'base-y 32
+             'ally-units (list roach-mid)
+             'enemy-units (list (mk-u 71802 'stalker 55.0 50.0 #:hp 80.0 #:max-hp 80.0)))))
+  (check-true "L58-P2-3-lurker-mp-burrowed-zero-move-burrow-and-roach-mid-burrow-skip"
+              (and (not bad-lurk-cmd?) (null? roach-acts))
+              (format "bad-lurk?=~a roach-acts=~a acts-lk=~a" bad-lurk-cmd? roach-acts acts-lk)))
+
+;; -----------------------------------------------------------------------------
+;; 72. L58-P2-4 (`sc2-ab-t05`, `sc2-sta-s01`): Thor HI Ignores Interceptors & Focuses Carriers + Oracle Stasis Offset
+;; -----------------------------------------------------------------------------
+(let ()
+  (define thor-u (mk-u 72101 'thor 60.0 60.0 #:hp 400.0 #:max-hp 400.0))
+  (define carriers-and-ints
+    (append (list (hash-set (mk-u 72801 'carrier 69.0 60.0 #:hp 300.0 #:max-hp 300.0 #:shield 150.0 #:max-shield 150.0) 'flying? #t)
+                  (hash-set (mk-u 72802 'tempest 70.0 62.0 #:hp 200.0 #:max-hp 200.0 #:shield 100.0 #:max-shield 100.0) 'flying? #t))
+            (for/list ([i (in-range 8)])
+              (hash-set (mk-u (+ 72810 i) 'interceptor 63.0 (+ 58.0 (* 0.5 i)) #:hp 40.0 #:max-hp 40.0 #:shield 40.0 #:max-shield 40.0) 'flying? #t))))
+  (define thor-dirs (plan-thor-modes (list thor-u) carriers-and-ints #:current-frame 500))
+  (define morphed-hi? (ormap (lambda (d) (eq? (unit-mode-directive-ability d) 'morph-thor-high-impact)) thor-dirs))
+
+  (define rt-th (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define thor-ap-u (mk-u 72102 'thor-ap 60.0 60.0 #:hp 400.0 #:max-hp 400.0))
+  (define acts-th
+    (run-l34 rt-th
+             (mk-live-obs 'Terran 'Protoss 520 #:supply-used 6 #:supply-cap 15
+                          #:ally-units (list thor-ap-u)
+                          #:ally-buildings (list (mk-u 72001 'command-center 32.5 32.5 #:hp 1500.0 #:max-hp 1500.0))
+                          #:enemy-units carriers-and-ints)))
+  (define focused-cap?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit) (= (second a) 72102) (memv (third a) '(72801 72802))))
+           acts-th))
+
+  ;; Oracle Stasis Ward near workers offsets 2.2t from centroid & respects 64f per-Oracle cooldown!
+  (define cl-st (make-spell-claims))
+  (define orc (hash-set* (mk-u 72201 'oracle 80.0 80.0 #:hp 100.0 #:max-hp 100.0 #:shield 20.0 #:max-shield 60.0) 'energy 80.0 'flying? #t))
+  (define scvs-4
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 72901 i) 'scv 84.0 80.0 #:hp 45.0 #:max-hp 45.0)))
+  (define d-st1 (plan-protoss-spellcaster-micro (list orc) scvs-4 #:claims cl-st #:current-frame 600))
+  (define st1 (findf (lambda (d) (eq? (spell-directive-ability d) 'stasis-ward)) d-st1))
+  (define offset-ok? (and st1 (>= (dist2d-t (spell-directive-target-x st1) (spell-directive-target-y st1) 84.0 80.0) 1.5)))
+  (define d-st2 (plan-protoss-spellcaster-micro (list orc) scvs-4 #:claims cl-st #:current-frame 616))
+  (define st2-cd-blocked? (not (ormap (lambda (d) (eq? (spell-directive-ability d) 'stasis-ward)) d-st2)))
+  (check-true "L58-P2-4-thor-hi-ignores-interceptors-focuses-carriers-and-oracle-stasis-offset-cd"
+              (and morphed-hi? focused-cap? offset-ok? st2-cd-blocked?)
+              (format "hi?=~a cap?=~a off?=~a cd?=~a" morphed-hi? focused-cap? offset-ok? st2-cd-blocked?)))
+
+;; -----------------------------------------------------------------------------
+;; 73. L58-P3-1 (`d04`/`b06`/`b07`): Emergency-Only Full-Army Nexus Mass Recall (`3757`)
+;; -----------------------------------------------------------------------------
+(let ()
+  (define nx-home (mk-u 73001 'nexus 32.5 32.5 #:hp 1000.0 #:max-hp 1000.0 #:shield 1000.0 #:max-shield 1000.0))
+  ;; (a) Full-HP 14 Blink Stalkers vs 3 Sieged Tanks + 12 Marines at (90,90) -> ZERO premature `mass-recall`!
+  (define rt-b06 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define stalks-14
+    (for/list ([i (in-range 14)])
+      (mk-u (+ 73101 i) 'stalker (+ 86.0 (* 0.3 (modulo i 4))) (+ 88.0 (* 0.4 (quotient i 4)))
+            #:hp 80.0 #:max-hp 80.0 #:shield 80.0 #:max-shield 80.0)))
+  (define terran-b06
+    (append (for/list ([i (in-range 3)]) (mk-u (+ 73801 i) 'siege-tank-sieged 95.0 (+ 88.0 (* 1.5 i)) #:hp 175.0 #:max-hp 175.0))
+            (for/list ([i (in-range 12)]) (mk-u (+ 73810 i) 'marine 93.0 (+ 86.0 (* 0.4 i)) #:hp 45.0 #:max-hp 45.0))))
+  (define acts-b06
+    (run-l34 rt-b06
+             (mk-live-obs 'Protoss 'Terran 400 #:supply-used 28 #:supply-cap 40
+                          #:ally-units stalks-14 #:ally-buildings (list nx-home) #:enemy-units terran-b06)))
+  (define recalled-b06?
+    (ormap (lambda (a) (and (pair? a) (memq (car a) '(cast cast-spell)) (>= (length a) 3) (memq (third a) '(mass-recall nexus-mass-recall))))
+           acts-b06))
+  ;; (b) Genuine survival emergency: 4 battered Stalkers (30% HP) vs 14 Roaches + 4 Ravagers -> MUST allow recall!
+  (define rt-em (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define battered-4
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 73201 i) 'stalker (+ 88.0 (* 0.4 i)) 88.0 #:hp 24.0 #:max-hp 80.0 #:shield 10.0 #:max-shield 80.0)))
+  (define zerg-overwhelm
+    (append (for/list ([i (in-range 14)]) (mk-u (+ 73901 i) 'roach 92.0 (+ 85.0 (* 0.4 i)) #:hp 145.0 #:max-hp 145.0))
+            (for/list ([i (in-range 4)]) (mk-u (+ 73920 i) 'ravager 93.0 (+ 86.0 (* 0.8 i)) #:hp 120.0 #:max-hp 120.0))))
+  (define acts-em
+    (run-l34 rt-em
+             (mk-live-obs 'Protoss 'Zerg 500 #:supply-used 8 #:supply-cap 40
+                          #:ally-units battered-4 #:ally-buildings (list nx-home) #:enemy-units zerg-overwhelm)))
+  ;; Note: Phase 5b may claim battered-4 first, so also verify d04 stealth-snipe squad never recalls!
+  (define rt-d04 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define d04-allies
+    (append (for/list ([i (in-range 4)]) (mk-u (+ 73301 i) 'dark-templar 88.0 (+ 88.0 (* 0.4 i)) #:hp 40.0 #:max-hp 40.0 #:shield 80.0 #:max-shield 80.0))
+            (for/list ([i (in-range 4)]) (hash-set (mk-u (+ 73311 i) 'phoenix 88.0 (+ 90.0 (* 0.4 i)) #:hp 120.0 #:max-hp 120.0 #:shield 60.0 #:max-shield 60.0) 'flying? #t))
+            (for/list ([i (in-range 4)]) (mk-u (+ 73321 i) 'stalker 87.0 (+ 88.0 (* 0.4 i)) #:hp 80.0 #:max-hp 80.0 #:shield 80.0 #:max-shield 80.0))))
+  (define d04-enemies
+    (append (for/list ([i (in-range 12)]) (mk-u (+ 73950 i) 'roach 95.0 (+ 86.0 (* 0.4 i)) #:hp 145.0 #:max-hp 145.0))
+            (for/list ([i (in-range 2)]) (hash-set (mk-u (+ 73970 i) 'overseer 96.0 (+ 88.0 i) #:hp 200.0 #:max-hp 200.0) 'flying? #t))))
+  (define acts-d04
+    (run-l34 rt-d04
+             (mk-live-obs 'Protoss 'Zerg 420 #:supply-used 24 #:supply-cap 40
+                          #:ally-units d04-allies #:ally-buildings (list nx-home) #:enemy-units d04-enemies)))
+  (define recalled-d04?
+    (ormap (lambda (a) (and (pair? a) (memq (car a) '(cast cast-spell)) (>= (length a) 3) (memq (third a) '(mass-recall nexus-mass-recall))))
+           acts-d04))
+  (check-true "L58-P3-1-no-premature-mass-recall-on-healthy-b06-and-d04-squads"
+              (and (not recalled-b06?) (not recalled-d04?) (list? acts-em))
+              (format "b06-rec?=~a d04-rec?=~a" recalled-b06? recalled-d04?)))
+
+;; -----------------------------------------------------------------------------
+;; 74. L58-P3-2 (`t01`/`t10`): Single-Owner Vikings (No Colossus Land / No 0-Air Liftoff) + 101e Pre-Contact OC Scan Hold
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) 8 Viking-Fighters vs living Colossus + 5 Stalkers -> ZERO premature `morph-viking-assault (403)`!
+  (define rt-v (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define viks-8
+    (for/list ([i (in-range 8)])
+      (hash-set (mk-u (+ 74101 i) 'viking-fighter (+ 80.0 (* 0.4 i)) 80.0 #:hp 135.0 #:max-hp 135.0) 'flying? #t)))
+  (define col-stalks
+    (cons (mk-u 74801 'colossus 94.0 80.0 #:hp 200.0 #:max-hp 200.0 #:shield 150.0 #:max-shield 150.0)
+          (for/list ([i (in-range 5)])
+            (mk-u (+ 74810 i) 'stalker 92.0 (+ 78.0 (* 0.8 i)) #:hp 80.0 #:max-hp 80.0 #:shield 80.0 #:max-shield 80.0))))
+  (define acts-v-col
+    (run-l34 rt-v
+             (mk-live-obs 'Terran 'Protoss 400 #:supply-used 16 #:supply-cap 24
+                          #:ally-units viks-8
+                          #:ally-buildings (list (mk-u 74001 'command-center 32.5 32.5 #:hp 1500.0 #:max-hp 1500.0))
+                          #:enemy-units col-stalks)))
+  (define bad-land-vs-col?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3) (eq? (third a) 'morph-viking-assault)))
+           acts-v-col))
+  ;; (b) 8 Landed Viking-Assaults (including 1 at 40% HP) vs 5 Stalkers (0 air/Colossus, tracker active) -> ZERO `morph-viking-fighter (405)`!
+  (define v-tr (make-unit-mode-tracker))
+  (define viks-landed
+    (cons (mk-u 74201 'viking-assault 82.0 80.0 #:hp 54.0 #:max-hp 135.0)
+          (for/list ([i (in-range 7)])
+            (mk-u (+ 74202 i) 'viking-assault 82.0 (+ 80.5 (* 0.5 i)) #:hp 135.0 #:max-hp 135.0))))
+  (sync-unit-mode-tracker! v-tr viks-landed (cdr col-stalks) 500)
+  (define lift-dirs-0air (plan-viking-modes viks-landed (cdr col-stalks) #:tracker v-tr #:current-frame 600))
+  ;; (c) 100e OC with 12 Marines & 0 Ravens/Turrets pre-contact (`enemy-units = '()`, race `'Unknown`) -> ZERO MULE (`171`)!
+  (define rt-oc (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define oc-100 (hash-set (mk-u 74002 'orbital-command 32.5 32.5 #:hp 1500.0 #:max-hp 1500.0) 'energy 100.0))
+  (define mar-12 (for/list ([i (in-range 12)]) (mk-u (+ 74301 i) 'marine (+ 36.0 (* 0.3 i)) 34.0 #:hp 45.0 #:max-hp 45.0)))
+  (define mps-oc (list (hasheq 'id 74901 'type 'mineral-field 'x 26.5 'y 32.5 'mineral-contents 1500)))
+  (define acts-oc-pre
+    (step-layer2-economy!
+     rt-oc
+     (mk-live-obs 'Terran 'Unknown 20 #:minerals 50 #:gas 0 #:supply-used 12 #:supply-cap 23
+                  #:mineral-harvesters 6 #:vespene-harvesters 0
+                  #:ally-units mar-12 #:ally-buildings (list oc-100) #:enemy-units '() #:mineral-patches mps-oc)))
+  (define muled-pre?
+    (ormap (lambda (a) (and (pair? a) (memq (car a) '(cast cast-spell)) (>= (length a) 3) (eq? (third a) 'calldown-mule)))
+           acts-oc-pre))
+  (check-true "L58-P3-2-single-owner-vikings-and-101e-precontact-oc-scan-reserve"
+              (and (not bad-land-vs-col?) (null? lift-dirs-0air) (not muled-pre?))
+              (format "land-col?=~a lift0air=~a muled?=~a" bad-land-vs-col? lift-dirs-0air muled-pre?)))
+
+;; -----------------------------------------------------------------------------
+;; 75. L58-P3-3 (`z03`/`t04`/`p03`): Viper Blinding Cloud Priority + Ghost Focus-Snipe + HT 13t Feedback
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) 3 Vipers (120e) at 12.0t from 4 Sieged Tanks + 12 Marines -> cast `blinding-cloud` (ZERO `abduct`!)
+  (define cl-v (make-spell-claims))
+  (define vips (for/list ([i (in-range 3)]) (hash-set* (mk-u (+ 75101 i) 'viper 60.0 (+ 60.0 i) #:hp 150.0 #:max-hp 150.0) 'energy 120.0 'flying? #t)))
+  (define z-allies (append vips (for/list ([i (in-range 6)]) (mk-u (+ 75110 i) 'roach 62.0 (+ 58.0 i) #:hp 145.0 #:max-hp 145.0))))
+  (define t-tanks (append (for/list ([i (in-range 4)]) (mk-u (+ 75801 i) 'siege-tank-sieged 72.0 (+ 59.0 (* 0.8 i)) #:hp 175.0 #:max-hp 175.0))
+                          (for/list ([i (in-range 6)]) (mk-u (+ 75810 i) 'marine 70.0 (+ 59.0 (* 0.5 i)) #:hp 45.0 #:max-hp 45.0))))
+  (define d-vip (plan-zerg-spellcaster-micro z-allies t-tanks #:claims cl-v #:current-frame 400))
+  (define vip-bc? (ormap (lambda (d) (eq? (spell-directive-ability d) 'blinding-cloud)) d-vip))
+  (define vip-ab? (ormap (lambda (d) (eq? (spell-directive-ability d) 'abduct)) d-vip))
+  ;; (b) 2 Ghosts vs 2 500-HP Ultralisks -> BOTH focus-snipe the SAME Ultralisk!
+  (define cl-g (make-spell-claims))
+  (define ghosts (list (hash-set (mk-u 75201 'ghost 60.0 60.0 #:hp 100.0 #:max-hp 100.0) 'energy 100.0)
+                       (hash-set (mk-u 75202 'ghost 60.0 61.0 #:hp 100.0 #:max-hp 100.0) 'energy 100.0)))
+  (define ultras (list (mk-u 75851 'ultralisk 68.0 60.0 #:hp 500.0 #:max-hp 500.0)
+                       (mk-u 75852 'ultralisk 68.0 61.5 #:hp 500.0 #:max-hp 500.0)))
+  (define d-gh (plan-terran-spellcaster-micro ghosts ultras #:claims cl-g #:current-frame 400))
+  (define gh-tgts (for/list ([d (in-list d-gh)] #:when (eq? (spell-directive-ability d) 'steady-targeting))
+                    (spell-directive-target-tag d)))
+  (define gh-focused? (and (= (length gh-tgts) 2) (= (first gh-tgts) (second gh-tgts))))
+  ;; (c) HT at 12.0t from high-energy Viper -> emits `feedback`!
+  (define cl-ht (make-spell-claims))
+  (define ht1 (hash-set (mk-u 75301 'high-templar 60.0 60.0 #:hp 40.0 #:max-hp 40.0 #:shield 40.0 #:max-shield 40.0) 'energy 75.0))
+  (define evip (hash-set* (mk-u 75891 'viper 72.0 60.0 #:hp 150.0 #:max-hp 150.0) 'energy 150.0 'flying? #t))
+  (define d-ht (plan-protoss-spellcaster-micro (list ht1) (list evip) #:claims cl-ht #:current-frame 400 #:psi-storm-researched? #f))
+  (define ht-fb? (ormap (lambda (d) (and (eq? (spell-directive-ability d) 'feedback) (= (spell-directive-target-tag d) 75891))) d-ht))
+  (check-true "L58-P3-3-viper-bcloud-priority-ghost-focus-snipe-and-ht-13t-feedback"
+              (and vip-bc? (not vip-ab?) gh-focused? ht-fb?)
+              (format "bc?=~a ab?=~a gh-tgts=~a fb?=~a" vip-bc? vip-ab? gh-tgts ht-fb?)))
+
+;; -----------------------------------------------------------------------------
+;; 76. L58-P3-4 (`p05`/`ro01`/`s03`): Morphing Archon Skip + Widow Mine 2099 Cooldown + Oracle 20f Stasis Retry Offset
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) Morphing Archon (`build-progress 0.45`) in Phase 5b emits ZERO `move`/`attack-unit`!
+  (define rt-ar (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define archon-morph (hash-set (mk-u 76101 'archon 80.0 80.0 #:hp 10.0 #:max-hp 10.0 #:shield 350.0 #:max-shield 350.0) 'build-progress 0.45))
+  (define acts-ar
+    (run-l34 rt-ar
+             (mk-live-obs 'Protoss 'Zerg 500 #:supply-used 4 #:supply-cap 20
+                          #:ally-units (list archon-morph)
+                          #:ally-buildings (list (mk-u 76001 'nexus 32.5 32.5 #:hp 1000.0 #:max-hp 1000.0))
+                          #:enemy-units (list (mk-u 76801 'hydralisk 85.0 80.0 #:hp 90.0 #:max-hp 90.0)))))
+  (define bad-archon-cmd?
+    (ormap (lambda (a) (and (pair? a) (memq (car a) '(move attack-unit attack-pos kite)) (eqv? (second a) 76101)))
+           acts-ar))
+  ;; (b) Reloading burrowed Widow Mine (`weapon-cooldown 15.0`) emits ZERO `widow-mine-retarget`!
+  (define rt-wm (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define wm-cd (hash-set* (mk-u 76201 'widow-mine-burrowed 80.0 80.0 #:hp 90.0 #:max-hp 90.0) 'burrowed #t 'weapon-cooldown 15.0))
+  (define drones-6 (for/list ([i (in-range 6)]) (mk-u (+ 76810 i) 'drone 82.0 (+ 79.0 (* 0.4 i)) #:hp 40.0 #:max-hp 40.0)))
+  (define acts-wm
+    (run-l34 rt-wm
+             (mk-live-obs 'Terran 'Zerg 500 #:supply-used 2 #:supply-cap 20
+                          #:ally-units (list wm-cd)
+                          #:ally-buildings (list (mk-u 76002 'command-center 32.5 32.5 #:hp 1500.0 #:max-hp 1500.0))
+                          #:enemy-units drones-6)))
+  (define bad-wm-cd?
+    (ormap (lambda (a) (and (pair? a) (memq (car a) '(widow-mine-retarget widow-mine-attack)) (eqv? (second a) 76201)))
+           acts-wm))
+  ;; (c) Oracle Stasis Ward (`s03` default-pt) retries cleanly at +20f with rotated offset > 2.5t!
+  (define cl-s3 (make-spell-claims))
+  (define orc-s3 (hash-set* (mk-u 76301 'oracle 80.0 80.0 #:hp 100.0 #:max-hp 100.0 #:shield 60.0 #:max-shield 60.0) 'energy 90.0 'flying? #t))
+  (define d-s3a (plan-protoss-spellcaster-micro (list orc-s3) '() #:claims cl-s3 #:current-frame 100 #:enemy-base-x 140.0 #:enemy-base-y 140.0))
+  (define d-s3b (plan-protoss-spellcaster-micro (list orc-s3) '() #:claims cl-s3 #:current-frame 124 #:enemy-base-x 140.0 #:enemy-base-y 140.0))
+  (define st-a (findf (lambda (d) (eq? (spell-directive-ability d) 'stasis-ward)) d-s3a))
+  (define st-b (findf (lambda (d) (eq? (spell-directive-ability d) 'stasis-ward)) d-s3b))
+  (define retry-shifted?
+    (and st-a st-b
+         (> (dist2d-t (spell-directive-target-x st-a) (spell-directive-target-y st-a)
+                      (spell-directive-target-x st-b) (spell-directive-target-y st-b))
+            2.5)))
+  (check-true "L58-P3-4-morphing-archon-skip-wm-2099-cd-and-oracle-20f-stasis-retry"
+              (and (not bad-archon-cmd?) (not bad-wm-cd?) retry-shifted?)
+              (format "archon-bad?=~a wm-bad?=~a retry-shifted?=~a" bad-archon-cmd? bad-wm-cd? retry-shifted?)))
+
+;; -----------------------------------------------------------------------------
+;; 77. L58-P3B-1: Fogged Colossus Stays in Air-Memory Past 24f; Dead-Tag Prunes Instantly
+;; -----------------------------------------------------------------------------
+(let ()
+  (define tr-3b (make-unit-mode-tracker))
+  (define viks-6
+    (for/list ([i (in-range 6)])
+      (hash-set (mk-u (+ 77101 i) 'viking-fighter 60.0 (+ 58.0 (* 0.5 i)) #:hp 135.0 #:max-hp 135.0) 'flying? #t)))
+  (define col-far (mk-u 77801 'colossus 96.0 60.0 #:hp 200.0 #:max-hp 200.0 #:shield 150.0 #:max-shield 150.0))
+  (define stalks-4
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 77810 i) 'stalker 70.0 (+ 58.0 (* 0.7 i)) #:hp 80.0 #:max-hp 80.0 #:shield 80.0 #:max-shield 80.0)))
+  (sync-unit-mode-tracker! tr-3b viks-6 (cons col-far stalks-4) 100 #:track-air-memory? #t)
+  (define d-vis (plan-viking-modes viks-6 (cons col-far stalks-4) #:tracker tr-3b #:current-frame 100))
+  (sync-unit-mode-tracker! tr-3b viks-6 stalks-4 150 #:track-air-memory? #t)
+  (define d-fog (plan-viking-modes viks-6 stalks-4 #:tracker tr-3b #:current-frame 150))
+  (sync-unit-mode-tracker! tr-3b viks-6 stalks-4 170 #:dead-tags '(77801) #:track-air-memory? #t)
+  (define d-dead (plan-viking-modes viks-6 stalks-4 #:tracker tr-3b #:current-frame 170))
+  (check-true "L58-P3B-1-fogged-colossus-retained-past-24f-and-pruned-on-dead-tag"
+              (and (null? d-vis)
+                   (null? d-fog)
+                   (pair? d-dead)
+                   (eq? (unit-mode-directive-ability (car d-dead)) 'morph-viking-assault))
+              (format "vis=~a fog=~a dead=~a" (length d-vis) (length d-fog) (length d-dead))))
+
+;; -----------------------------------------------------------------------------
+;; 78. L59-P2-1: Human Cortex EPM Cap 420 + Base-Centered F1..F8 Townhall Bookmarks
+;; -----------------------------------------------------------------------------
+(let ()
+  (define hc (make-human-cortex))
+  (define obs-4base
+    (hasheq 'base-x 32.5 'base-y 32.5 'natural-x 60.0 'natural-y 32.5
+            'third-x 32.5 'third-y 65.0 'enemy-x 167.5 'enemy-y 167.5
+            'ally-buildings
+            (list (hasheq 'id 1 'type 'nexus 'x 33.0 'y 31.0 'hp 1000.0)
+                  (hasheq 'id 2 'type 'nexus 'x 92.0 'y 34.0 'hp 1000.0)
+                  (hasheq 'id 3 'type 'nexus 'x 59.0 'y 33.5 'hp 1000.0)
+                  (hasheq 'id 4 'type 'nexus 'x 34.5 'y 64.0 'hp 1000.0))))
+  (cortex-sync-camera-bookmarks! hc obs-4base)
+  (check-true "L59-P2-1-cortex-epm420-max56-and-base-centered-F1-to-F4-townhall-bookmarks"
+              (and (= (human-cortex-epm-cap hc) 420)
+                   (= (human-cortex-max-tokens hc) 56)
+                   (equal? (cortex-get-camera-bookmark hc 1) '(33.0 . 31.0))
+                   (equal? (cortex-get-camera-bookmark hc 2) '(59.0 . 33.5))
+                   (equal? (cortex-get-camera-bookmark hc 3) '(34.5 . 64.0))
+                   (equal? (cortex-get-camera-bookmark hc 4) '(92.0 . 34.0))
+                   (pair? (cortex-get-camera-bookmark hc 5)))
+              (format "epm=~a tok=~a F1=~a F2=~a F3=~a F4=~a"
+                      (human-cortex-epm-cap hc) (human-cortex-max-tokens hc)
+                      (cortex-get-camera-bookmark hc 1) (cortex-get-camera-bookmark hc 2)
+                      (cortex-get-camera-bookmark hc 3) (cortex-get-camera-bookmark hc 4))))
+
+;; -----------------------------------------------------------------------------
+;; 79. L59-P2-2: Wire-Audit Fixes (3-Arg Dropship Unload, Swarm Host State-Step + attack-pos)
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) Dropship rescue unload emits 3-arg `(transport-juggle tid nx ny)` (NOT 4-arg load!)
+  (define rescued-tr (hasheq 'tag 81001 'type 'medivac 'x 40.0 'y 40.0 'hp 150.0
+                             'passengers (list (hasheq 'tag 81002 'type 'marine 'rescued? #t))))
+  (define rdirs (plan-trapped-unit-dropship-rescue (list rescued-tr) '() #:frame 100 #:nat-x 55.0 #:nat-y 45.0))
+  (define u-sexp (and (pair? rdirs) (DropshipRescueDirective-unload-sexp (car rdirs))))
+  ;; (b) Swarm Host burrowed ready -> ONLY `burrow-up` (no same-tick `burrow-down` clobber!);
+  ;;     unburrowed ready -> `spawn-locusts` (no same-tick `burrow-down`!);
+  ;;     unburrowed on CD -> `burrow-down`!
+  (define sh-bur (hasheq 'id 82096 'type 'swarm-host-burrowed 'x 89.0 'y 110.0 'burrowed #t 'cooldown 0))
+  (define sh-up  (hasheq 'id 82096 'type 'swarm-host 'x 89.0 'y 110.0 'burrowed #f 'cooldown 0))
+  (define sh-cd  (hasheq 'id 82096 'type 'swarm-host 'x 89.0 'y 110.0 'burrowed #f 'cooldown 300))
+  (define sh-obs-base (hasheq 'frame 448 'base-x 32.5 'base-y 32.5 'enemy-x 110.0 'enemy-y 110.0))
+  (define a-sh1 (plan-spread-burrowed-swarm-host-harass (hash-set sh-obs-base 'ally-units (list sh-bur))))
+  (define a-sh2 (plan-spread-burrowed-swarm-host-harass (hash-set sh-obs-base 'ally-units (list sh-up))))
+  (define a-sh3 (plan-spread-burrowed-swarm-host-harass (hash-set sh-obs-base 'ally-units (list sh-cd))))
+  ;; (c) Counter Swarm Host emits `attack-pos` (never bare `'attack`!)
+  (define a-csh
+    (plan-counter-spread-swarm-host-harass
+     (hasheq 'base-x 32.5 'base-y 32.5 'natural-x 56.5 'natural-y 32.5
+             'ally-units (for/list ([i (in-range 6)])
+                           (hasheq 'id (+ 82100 i) 'type 'zergling 'x 40.0 'y 32.5 'hp 35.0))
+             'enemy-units (list (hasheq 'id 82901 'type 'locust 'x 50.0 'y 32.5 'hp 50.0)))))
+  (check-true "L59-P2-2-wire-audit-dropship-3arg-unload-swarm-host-state-step-and-attack-pos"
+              (and (equal? u-sexp '(transport-juggle 81001 55.0 45.0))
+                   (member '(burrow-up 82096) a-sh1)
+                   (not (member '(burrow-down 82096) a-sh1))
+                   (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'spawn-locusts))) a-sh2)
+                   (not (member '(burrow-down 82096) a-sh2))
+                   (member '(burrow-down 82096) a-sh3)
+                   (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-pos))) a-csh)
+                   (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack))) a-csh)))
+              (format "u=~a sh1=~a sh2=~a sh3=~a csh=~a" u-sexp a-sh1 a-sh2 a-sh3 a-csh)))
+
+;; -----------------------------------------------------------------------------
+;; 80. L59-P2-3: Non-Combat Drills (`nc-03`, `nc-07`/`08`, `nc-09`, `nc-10`, `nc-11`, `nc-13`, `nc-14`)
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; `nc-07`/`nc-08`: 5M mineral wall excavates at frame=10; `nc-13`: 150M seam mineral-walks
+  (define w1 (hasheq 'tag 83001 'type 'probe 'x 50.0 'y 50.0 'hp 20.0 'shield 20.0))
+  (define m5 (hasheq 'tag 83901 'type 'mineral-field-450 'x 55.0 'y 50.0 'mineral-contents 5))
+  (define m150 (hasheq 'tag 83902 'type 'battle-station-mineral-field-750 'x 55.0 'y 50.0 'mineral-contents 150))
+  (define mfar (hasheq 'tag 83903 'type 'mineral-field 'x 66.0 'y 50.0 'mineral-contents 1500))
+  (define mw-07 (plan-mineral-wall-and-worker-path-tactics (list w1) '() (list m5) '() #:frame 10 #:home-x 45.0 #:home-y 50.0 #:enemy-x 90.0 #:enemy-y 50.0))
+  (define mw-13 (plan-mineral-wall-and-worker-path-tactics (list w1) '() (list m150 mfar) '() #:frame 10 #:home-x 45.0 #:home-y 50.0 #:enemy-x 90.0 #:enemy-y 50.0))
+  ;; `nc-09` & `nc-10`: 12 units clear rock; 4 Stalkers seal collapsible rock tower at <= 12t incoming Zerglings
+  (define bio-12 (for/list ([i (in-range 12)]) (hasheq 'tag (+ 83100 i) 'type 'marine 'x 52.0 'y (+ 46.0 (* 0.5 i)) 'hp 45.0)))
+  (define rock-std (hasheq 'tag 83910 'type 'destructible-rock-ex1-6x6 'x 60.0 'y 50.0 'hp 2000.0 'max-hp 2000.0))
+  (define d-nc09 (plan-destructible-rocks-and-rockslides bio-12 (list rock-std) '() #:home-x 10.0 #:home-y 10.0 #:enemy-x 160.0 #:enemy-y 160.0))
+  (define stalks-4 (for/list ([i (in-range 4)]) (hasheq 'tag (+ 83200 i) 'type 'stalker 'x 52.0 'y (+ 49.0 (* 0.6 i)) 'hp 80.0 'shield 80.0)))
+  (define col-tw (hasheq 'tag 83920 'type 'collapsible-rock-tower-diagonal 'x 58.0 'y 50.0 'hp 500.0 'max-hp 500.0))
+  (define lings-8 (for/list ([i (in-range 8)]) (hasheq 'tag (+ 83800 i) 'type 'zergling 'x 69.0 'y (+ 48.5 (* 0.4 i)) 'hp 35.0)))
+  (define d-nc10 (plan-destructible-rocks-and-rockslides stalks-4 (list col-tw) lings-8))
+  ;; `nc-11`: Depot ramp raise waits while friendly is on depot, raises once clear, lowers when enemies gone!
+  (define dep-low (hasheq 'id 83301 'type 'supply-depot-lowered 'x 80.0 'y 80.0))
+  (define dep-up  (hasheq 'id 83301 'type 'supply-depot 'x 80.0 'y 80.0))
+  (define mar-on  (hasheq 'id 83311 'type 'marine 'x 80.5 'y 80.0))
+  (define mar-off (hasheq 'id 83311 'type 'marine 'x 77.5 'y 80.0))
+  (define ling-in (hasheq 'id 83850 'type 'zergling 'x 88.0 'y 80.0))
+  (define a-nc11-hold  (plan-own-wall-integrity-defense (hasheq 'base-x 32.0 'base-y 32.0 'ally-buildings (list dep-low) 'ally-units (list mar-on) 'enemy-units (list ling-in))))
+  (define a-nc11-raise (plan-own-wall-integrity-defense (hasheq 'base-x 32.0 'base-y 32.0 'ally-buildings (list dep-low) 'ally-units (list mar-off) 'enemy-units (list ling-in))))
+  (define a-nc11-lower (plan-own-wall-integrity-defense (hasheq 'base-x 32.0 'base-y 32.0 'ally-buildings (list dep-up)  'ally-units (list mar-off) 'enemy-units '())))
+  ;; `nc-14`: Oracle facing 8 Marines at 10t plants Stasis Ward on ramp choke!
+  (define orc-14 (hash-set* (mk-u 83401 'oracle 80.0 80.0 #:hp 100.0 #:shield 60.0) 'energy 90.0 'flying? #t))
+  (define mar-8 (for/list ([i (in-range 8)]) (mk-u (+ 83860 i) 'marine 90.0 (+ 78.0 (* 0.5 i)) #:hp 45.0)))
+  (define d-nc14 (plan-protoss-spellcaster-micro (list orc-14) mar-8 #:claims (make-spell-claims) #:current-frame 100 #:choke-points (list (cons 81.0 80.0))))
+  ;; `nc-03`: Forward Probe pokes mining SCVs when unchased and kites when chased by >= 2 SCVs!
+  (define prb-03 (hasheq 'tag 83501 'type 'probe 'x 130.0 'y 130.0 'hp 20.0 'shields 20.0))
+  (define scv-far (list (hasheq 'tag 83880 'type 'scv 'x 135.0 'y 130.0 'hp 45.0)))
+  (define scv-chase (list (hasheq 'tag 83880 'type 'scv 'x 131.5 'y 130.0 'hp 45.0)
+                          (hasheq 'tag 83881 'type 'scv 'x 131.5 'y 131.0 'hp 45.0)))
+  (define d-nc03-poke (plan-early-worker-mineral-line-harass (list prb-03) scv-far #:home-x 32.5 #:home-y 32.5))
+  (define d-nc03-kite (plan-early-worker-mineral-line-harass (list prb-03) scv-chase #:home-x 32.5 #:home-y 32.5))
+  (check-true "L59-P2-3-non-combat-drills-nc03-nc07-nc09-nc10-nc11-nc13-nc14"
+              (and (ormap (lambda (d) (equal? (MapElementDirective-sexp d) '(harvest-mineral 83001 83901))) mw-07)
+                   (ormap (lambda (d) (and (pair? (MapElementDirective-sexp d)) (eq? (car (MapElementDirective-sexp d)) 'mineral-walk) (= (caddr (MapElementDirective-sexp d)) 83903))) mw-13)
+                   (= (length d-nc09) 12)
+                   (and (= (length d-nc10) 4) (eq? (MapElementDirective-kind (car d-nc10)) 'trigger-rockslide-trap))
+                   (and (ormap (lambda (a) (eq? (car a) 'move)) a-nc11-hold)
+                        (not (ormap (lambda (a) (and (eq? (car a) 'cast-spell) (eq? (caddr a) 'morph-supply-depot-raise))) a-nc11-hold)))
+                   (ormap (lambda (a) (equal? a '(cast-spell 83301 morph-supply-depot-raise))) a-nc11-raise)
+                   (ormap (lambda (a) (equal? a '(cast-spell 83301 morph-supply-depot-lower))) a-nc11-lower)
+                   (ormap (lambda (d) (eq? (spell-directive-ability d) 'stasis-ward)) d-nc14)
+                   (and (pair? d-nc03-poke) (eq? (harass-directive-action (car d-nc03-poke)) 'focus-fire))
+                   (and (pair? d-nc03-kite) (eq? (harass-directive-action (car d-nc03-kite)) 'move)))
+              (format "07=~a 13=~a 09=~a 10=~a 11h/r/l=~a/~a/~a 14=~a 03=~a/~a"
+                      (length mw-07) (length mw-13) (length d-nc09) (length d-nc10)
+                      a-nc11-hold a-nc11-raise a-nc11-lower (length d-nc14)
+                      (map harass-directive-action d-nc03-poke)
+                      (map harass-directive-action d-nc03-kite))))
+
+;; -----------------------------------------------------------------------------
+;; 81. L59-P2-4: Waterfall Blink (`<= 5.8t` Firing Arc) & Uphill/Downhill Cliff Blink
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; Waterfall Blink: front-rank injured Stalker at `3.2t` from enemy with healthy rank behind it
+  ;; blinks `2.2..3.0t` back, staying `<= 5.8t` from enemy (zero DPS break!)
+  (define st-wf-inj (mk-u 84001 'stalker 66.8 60.0 #:hp 80.0 #:max-hp 80.0 #:shield 12.0 #:max-shield 80.0))
+  (define st-wf-ok  (mk-u 84002 'stalker 65.2 60.0 #:hp 80.0 #:max-hp 80.0 #:shield 80.0 #:max-shield 80.0))
+  (define en-ro     (list (mk-u 84901 'roach 70.0 60.0 #:hp 145.0)))
+  (define wf-dirs (plan-stalker-blink-micro (list st-wf-inj st-wf-ok) en-ro (make-spell-claims) 400 #:researched-upgrades '(blink)))
+  (define wf-d (and (= (length wf-dirs) 1) (car wf-dirs)))
+  (define wf-step (and wf-d (dist2d-t 66.8 60.0 (spell-directive-target-x wf-d) (spell-directive-target-y wf-d))))
+  (define wf-to-en (and wf-d (dist2d-t 70.0 60.0 (spell-directive-target-x wf-d) (spell-directive-target-y wf-d))))
+  ;; Uphill Cliff Blink-In: 4 healthy Stalkers at z=8.0 vs visible enemy at z=10.0 (`8t` away)
+  (define up-stalks (for/list ([i (in-range 4)]) (hash-set (mk-u (+ 84100 i) 'stalker 60.0 (+ 59.0 (* 0.5 i)) #:hp 80.0 #:shield 80.0) 'z 8.0)))
+  (define up-mar    (list (hash-set (mk-u 84910 'marine 68.0 60.0 #:hp 45.0) 'z 10.0)))
+  (define up-dirs (plan-stalker-blink-micro up-stalks up-mar (make-spell-claims) 400 #:researched-upgrades '(blink)))
+  ;; Downhill Cliff Escape: low-shield Stalker outnumbered on high ground blinks out!
+  (define dn-stalk (hash-set (mk-u 84201 'stalker 68.0 60.0 #:hp 70.0 #:max-hp 80.0 #:shield 28.0 #:max-shield 80.0) 'z 10.0))
+  (define dn-ens   (list (hash-set (mk-u 84920 'marauder 70.0 60.0 #:hp 125.0) 'z 10.0)
+                         (hash-set (mk-u 84921 'marauder 70.0 61.0 #:hp 125.0) 'z 10.0)))
+  (define dn-dirs (plan-stalker-blink-micro (list dn-stalk) dn-ens (make-spell-claims) 400 #:researched-upgrades '(blink)))
+  (check-true "L59-P2-4-waterfall-blink-arc-and-uphill-downhill-cliff-blink"
+              (and wf-d wf-step wf-to-en
+                   (>= wf-step 2.1) (<= wf-step 3.1) (<= wf-to-en 5.9)
+                   (= (length up-dirs) 4)
+                   (eq? (spell-directive-pattern-name (car up-dirs)) 'stalker-blink-uphill-in)
+                   (= (length dn-dirs) 1)
+                   (eq? (spell-directive-pattern-name (car dn-dirs)) 'stalker-blink-downhill-escape))
+              (format "wf-step=~a wf-en=~a up=~a dn=~a" wf-step wf-to-en (length up-dirs) dn-dirs)))
+
+;; -----------------------------------------------------------------------------
+;; 82. L59-P2-5: 13-Row DROP-PROFILE-TABLE, Cliff Laddering, Raid Evac/Rotate & Baneling Moving Drop
+;; -----------------------------------------------------------------------------
+(let ()
+  (define prof-ok?
+    (and (= (length DROP-PROFILE-TABLE) 13)
+         (= (drop-profile-load-cd-frames (lookup-drop-profile 'ht-storm)) 14)
+         (drop-profile-rotate-base? (lookup-drop-profile 'archon-drop))
+         (= (drop-profile-unload-dist (lookup-drop-profile 'baneling-drop)) 1.2)
+         (memq 'widow-mine SAVE-HIGH-VALUE-SYMS)
+         (memq 'baneling SAVE-HIGH-VALUE-SYMS)))
+  ;; Cliff-ladder shuttle loads Siege Tank at z=8.0 for plateau at z=10.0
+  (define mv-lad (hasheq 'tag 85001 'type 'medivac 'x 50.0 'y 50.0 'hp 150.0 'flying? #t 'cargo-space-taken 0))
+  (define tk-low (hasheq 'tag 85002 'type 'siege-tank 'x 51.0 'y 50.0 'hp 175.0 'z 8.0))
+  (define lad-dirs (plan-cliff-ladder-shuttle (list mv-lad tk-low) '() #:dest-x 60.0 #:dest-y 50.0 #:dest-z 10.0))
+  ;; Archon shield-regen evac + base rotation: Archon at <25% shields (`70/360`) -> Prism loads,
+  ;; while Archon at 33% (`120/360`) keeps fighting (`n05` fix), then loaded Prism rotates to 2nd base!
+  (define pr-ev (hasheq 'tag 85101 'type 'warp-prism 'x 130.0 'y 130.0 'hp 80.0 'shield 100.0 'flying? #t 'cargo-space-taken 0))
+  (define ar-lo (hasheq 'tag 85102 'type 'archon 'x 132.0 'y 130.0 'hp 10.0 'max-hp 10.0 'shield 70.0 'max-shield 360.0))
+  (define ar-mid (hasheq 'tag 85103 'type 'archon 'x 132.0 'y 130.0 'hp 10.0 'max-hp 10.0 'shield 120.0 'max-shield 360.0))
+  (define ev-load (plan-raid-evac-and-rotate (list pr-ev ar-lo) '() #:home-x 32.5 #:home-y 32.5 #:enemy-targets (list (cons 130.0 130.0) (cons 130.0 95.0))))
+  (define ev-mid-hold (plan-raid-evac-and-rotate (list pr-ev ar-mid) '() #:home-x 32.5 #:home-y 32.5 #:enemy-targets (list (cons 130.0 130.0) (cons 130.0 95.0))))
+  (define pr-rot (hasheq 'tag 85101 'type 'warp-prism 'x 130.0 'y 130.0 'hp 80.0 'shield 100.0 'flying? #t 'cargo-space-taken 4 'cargo-types '(archon) 'passengers '(85102)))
+  (define en-aa  (list (hasheq 'tag 85901 'type 'queen 'x 134.0 'y 130.0 'hp 175.0)
+                       (hasheq 'tag 85902 'type 'queen 'x 135.0 'y 131.0 'hp 175.0)))
+  (define ev-rot (plan-raid-evac-and-rotate (list pr-rot) en-aa #:home-x 32.5 #:home-y 32.5 #:enemy-targets (list (cons 130.0 130.0) (cons 130.0 95.0))))
+  ;; Baneling drop overhead (`<= 1.2t`) emits moving carpet-bomb self-drop!
+  (define dl-bn (hasheq 'tag 85201 'type 'overlord-transport 'x 130.5 'y 130.0 'hp 200.0 'flying? #t 'cargo-space-taken 8 'cargo-types '(baneling) 'passengers '(85210 85211)))
+  (define bn-dirs (plan-multi-angle-mini-overlord-drops (list dl-bn) '() #:home-x 32.5 #:home-y 32.5 #:enemy-targets (list (cons 130.0 130.0))))
+  (check-true "L59-P2-5-drop-profiles-cliff-ladder-archon-evac-rotate-and-baneling-moving-drop"
+              (and prof-ok?
+                   (and (pair? lad-dirs) (eq? (transport-directive-action (car lad-dirs)) 'load-unit))
+                   (and (pair? ev-load) (eq? (transport-directive-reason (car ev-load)) 'archon-shield-regen-pickup))
+                   (null? ev-mid-hold)
+                   (and (pair? ev-rot) (eq? (transport-directive-reason (car ev-rot)) 'raid-rotate-next-base-regen))
+                   (and (pair? bn-dirs) (eq? (transport-directive-action (car bn-dirs)) 'transport-drop-moving)))
+              (format "prof=~a lad=~a load=~a mid=~a rot=~a bn=~a" prof-ok? lad-dirs ev-load ev-mid-hold ev-rot bn-dirs)))
+
+;; -----------------------------------------------------------------------------
+;; 83. L59-P2-6: Changeling Vision Corner Role & Vision-Verified Nydus Placement
+;; -----------------------------------------------------------------------------
+(let ()
+  (define ch-obs
+    (hasheq 'base-x 32.5 'base-y 32.5 'enemy-x 150.0 'enemy-y 150.0
+            'ally-buildings (list (hasheq 'id 86001 'type 'nydus-network 'x 35.0 'y 35.0 'hp 850.0))
+            'ally-units (list (hasheq 'id 86101 'type 'changeling 'x 100.0 'y 100.0 'hp 5.0))))
+  (define ch-acts (plan-changeling-free-unit-tactics ch-obs))
+  ;; Nydus Worm uses live Changeling's visible position `(158.0, 152.0)` instead of blind fogged `(+ ex 9)`!
+  (define ny-vis-obs
+    (hasheq 'base-x 32.5 'base-y 32.5 'enemy-x 150.0 'enemy-y 150.0
+            'ally-buildings (list (hasheq 'id 86001 'type 'nydus-network 'x 35.0 'y 35.0 'hp 850.0))
+            'ally-units (list (hasheq 'id 86101 'type 'changeling 'x 158.0 'y 152.0 'hp 5.0))))
+  (define ny-vis-acts (plan-nydus-worm-tactics ny-vis-obs))
+  ;; When spotters exist ONLY at home (no enemy vision yet), sends spotter instead of blind fogged worm!
+  (define ny-fog-obs
+    (hasheq 'base-x 32.5 'base-y 32.5 'enemy-x 150.0 'enemy-y 150.0
+            'ally-buildings (list (hasheq 'id 86001 'type 'nydus-network 'x 35.0 'y 35.0 'hp 850.0))
+            'ally-units (list (hasheq 'id 86102 'type 'overlord 'x 40.0 'y 40.0 'hp 200.0))))
+  (define ny-fog-acts (plan-nydus-worm-tactics ny-fog-obs))
+  (check-true "L59-P2-6-changeling-nydus-corner-and-vision-verified-nydus-worm"
+              (and (pair? ch-acts) (eq? (caar ch-acts) 'move) (> (caddar ch-acts) 150.0)
+                   (equal? ny-vis-acts '((build-nydus-worm 86001 158.0 152.0)))
+                   (and (pair? ny-fog-acts) (eq? (caar ny-fog-acts) 'move) (= (cadar ny-fog-acts) 86102)))
+              (format "ch=~a vis=~a fog=~a" ch-acts ny-vis-acts ny-fog-acts)))
+
+;; -----------------------------------------------------------------------------
+;; 84. L59-Pass2: Core Stalemate Fixes & Pro-14 / Non-Combat Drill Verification
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) p15: Melee DTs NEVER kite Hellbats (`unit-mode-micro`); p08: Cyclone auto-attack (`engaged-target-tag`
+  ;;     without real Lock-On buff 116) NEVER triggers 15.5t retreat!
+  (define dt-p15 (mk-u 87001 'dark-templar 60.0 60.0 #:hp 40.0 #:shield 80.0))
+  (define hb-p15 (mk-u 87901 'hellbat 62.5 60.0 #:hp 135.0))
+  (define p15-dirs (plan-counter-unit-mode-micro (list dt-p15) (list hb-p15) #:current-frame 100))
+  (define st-p08 (mk-u 87002 'stalker 60.0 60.0 #:hp 80.0 #:shield 80.0))
+  (define cy-p08 (hash-set (mk-u 87902 'cyclone 64.5 60.0 #:hp 110.0) 'engaged-target-tag 87002))
+  (define p08-dirs (plan-counter-unit-mode-micro (list st-p08) (list cy-p08) #:current-frame 100))
+  (define p15-p08-ok?
+    (and (not (ormap (lambda (d) (eq? (unit-mode-directive-action d) 'move)) p15-dirs))
+         (not (ormap (lambda (d) (eq? (unit-mode-directive-action d) 'move)) p08-dirs))))
+
+  ;; (b) ab-z01: Infestor casts Microbial Shroud (`4111`) ahead of Fungal Growth vs 3 Carriers + 2 Tempests!
+  (define inf-z01 (mk-u 87101 'infestor 60.0 60.0 #:hp 90.0 #:energy 125.0))
+  (define hyd-z01 (for/list ([i (in-range 4)]) (mk-u (+ 87110 i) 'hydralisk 61.5 (+ 59.0 (* 0.8 i)) #:hp 90.0)))
+  (define sky-z01 (list (mk-u 87910 'carrier 68.0 60.0 #:hp 300.0 #:shield 150.0 #:flying #t)
+                        (mk-u 87911 'carrier 68.5 61.0 #:hp 300.0 #:shield 150.0 #:flying #t)
+                        (mk-u 87912 'carrier 68.5 59.0 #:hp 300.0 #:shield 150.0 #:flying #t)
+                        (mk-u 87913 'tempest 70.0 60.0 #:hp 200.0 #:shield 125.0 #:flying #t)))
+  (define z01-dirs (plan-zerg-spellcaster-micro (cons inf-z01 hyd-z01) sky-z01 #:claims (make-spell-claims) #:current-frame 200 #:neural-parasite-researched? #f))
+  (define z01-ok? (and (pair? z01-dirs) (eq? (spell-directive-ability (car z01-dirs)) 'microbial-shroud)))
+
+  ;; (c) n20: Overseer with `nydus-network` casts `spawn-changeling` (`181`) even at en=100 near Marines,
+  ;;     AND completed Nydus Worm with cargo & 16 enemy SCVs emits `(nydus-unload wid)` (never premature evac)!
+  (define ov-n20  (mk-u 87201 'overseer 140.0 140.0 #:hp 200.0 #:energy 100.0 #:flying #t))
+  (define net-n20 (hasheq 'tag 87202 'id 87202 'type 'nydus-network 'x 35.0 'y 35.0 'hp 850.0 'is-building #t))
+  (define mar-n20 (list (mk-u 87920 'marine 132.0 137.0 #:hp 45.0)))
+  (define n20-ov-dirs (plan-zerg-spellcaster-micro (list ov-n20) mar-n20 #:ally-buildings (list net-n20) #:claims (make-spell-claims) #:current-frame 100))
+  (define n20-worm-obs
+    (hasheq 'frame 240 'base-x 32.5 'base-y 32.5 'enemy-x 130.0 'enemy-y 130.0
+            'ally-buildings (list (hasheq 'id 87202 'type 'nydus-network 'x 35.0 'y 35.0 'hp 850.0 'build-progress 1.0)
+                                  (hasheq 'id 87203 'type 'nydus-canal 'x 138.0 'y 132.0 'hp 300.0 'max-hp 300.0 'build-progress 1.0 'cargo-space-taken 16))
+            'ally-units (list (hasheq 'id 87201 'type 'overseer 'x 140.0 'y 134.0 'hp 200.0)
+                              (hasheq 'id 87204 'type 'roach 'x 137.5 'y 132.0 'hp 145.0))
+            'enemy-units (append (for/list ([i (in-range 16)]) (hasheq 'id (+ 87930 i) 'type 'scv 'x 127.0 'y (+ 126.0 (* 0.4 i)) 'hp 45.0))
+                                 (list (hasheq 'id 87950 'type 'marine 'x 133.0 'y 130.0 'hp 45.0)))))
+  (define n20-worm-acts (plan-nydus-worm-tactics n20-worm-obs))
+  (define n20-ok?
+    (and (ormap (lambda (d) (eq? (spell-directive-ability d) 'spawn-changeling)) n20-ov-dirs)
+         (ormap (lambda (a) (equal? a '(nydus-unload 87203))) n20-worm-acts)
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'nydus-load) (= (cadr a) 87203))) n20-worm-acts))))
+
+  ;; (d) n16 & n14: Lurker skips low-ground burrow for cliff-ladder Dropperlord + 2 Dropperlords load 2 DISTINCT
+  ;;     `lurker-mp` + 2 Medivacs load 2 DISTINCT Siege Tanks (`claimed` dedup in `plan-transport-fleet-micro`)!
+  (define dl1 (hasheq 'tag 87301 'type 'overlord-transport 'x 50.0 'y 50.0 'hp 200.0 'flying? #t 'cargo-space-taken 0 'z 8.0))
+  (define dl2 (hasheq 'tag 87302 'type 'overlord-transport 'x 50.0 'y 51.0 'hp 200.0 'flying? #t 'cargo-space-taken 0 'z 8.0))
+  (define lk1 (hasheq 'tag 87311 'type 'lurker-mp 'x 51.0 'y 49.5 'hp 200.0 'z 8.0))
+  (define lk2 (hasheq 'tag 87312 'type 'lurker-mp 'x 51.0 'y 51.5 'hp 200.0 'z 8.0))
+  (define en-hi (list (hasheq 'tag 87960 'type 'marine 'x 60.0 'y 50.0 'hp 45.0 'z 10.0)
+                      (hasheq 'tag 87961 'type 'marine 'x 60.5 'y 51.0 'hp 45.0 'z 10.0)))
+  (define n16-lk-dirs (plan-zerg-spellcaster-micro (list dl1 dl2 lk1 lk2) en-hi #:claims (make-spell-claims) #:current-frame 100))
+  (define n16-tr-dirs (plan-transport-fleet-micro (list dl1 dl2 lk1 lk2) en-hi #:current-frame 100))
+  (define mv1 (hasheq 'tag 87321 'type 'medivac 'x 50.0 'y 50.0 'hp 150.0 'flying? #t 'cargo-space-taken 0 'z 8.0))
+  (define mv2 (hasheq 'tag 87322 'type 'medivac 'x 50.0 'y 51.0 'hp 150.0 'flying? #t 'cargo-space-taken 0 'z 8.0))
+  (define tk1 (hasheq 'tag 87331 'type 'siege-tank 'x 51.0 'y 49.5 'hp 175.0 'z 8.0))
+  (define tk2 (hasheq 'tag 87332 'type 'siege-tank 'x 51.0 'y 51.5 'hp 175.0 'z 8.0))
+  (define n14-tr-dirs (plan-transport-fleet-micro (list mv1 mv2 tk1 tk2) en-hi #:current-frame 100))
+  (define n14-n16-ok?
+    (and (not (ormap (lambda (d) (eq? (spell-directive-ability d) 'burrow-lurker)) n16-lk-dirs))
+         (= (length n16-tr-dirs) 2)
+         (andmap (lambda (d) (eq? (transport-directive-action d) 'load-unit)) n16-tr-dirs)
+         (not (= (transport-directive-target-tag (first n16-tr-dirs))
+                 (transport-directive-target-tag (second n16-tr-dirs))))
+         (= (length n14-tr-dirs) 2)
+         (andmap (lambda (d) (eq? (transport-directive-action d) 'load-unit)) n14-tr-dirs)
+         (not (= (transport-directive-target-tag (first n14-tr-dirs))
+                 (transport-directive-target-tag (second n14-tr-dirs))))))
+
+  ;; (e) n18/ro28: Pre-loaded Medivac (`0` ground allies) flies straight over defenders toward enemy Drones
+  ;;     (`offensive-mineral-drop?`), AND once Marines are on ground with closing Banelings, evacuates Marines!
+  (define mv-n18 (hasheq 'tag 87401 'type 'medivac 'x 139.2 'y 130.0 'hp 150.0 'flying? #t 'cargo-space-taken 8 'cargo-types '(marine) 'passengers '(87410 87411) 'boost-ready? #t))
+  (define dr-n18 (for/list ([i (in-range 10)]) (hasheq 'tag (+ 87970 i) 'type 'drone 'x 126.8 'y (+ 128.0 (* 0.4 i)) 'hp 40.0)))
+  (define bn-n18 (list (hasheq 'tag 87985 'type 'baneling 'x 136.0 'y 130.0 'hp 30.0)
+                       (hasheq 'tag 87986 'type 'baneling 'x 136.5 'y 131.0 'hp 30.0)))
+  (define n18-drop-dirs (plan-transport-fleet-micro (list mv-n18) (append dr-n18 bn-n18) #:home-x 32.5 #:home-y 32.5 #:current-frame 16))
+  (define mv-ev (hasheq 'tag 87401 'type 'medivac 'x 127.0 'y 130.0 'hp 150.0 'flying? #t 'cargo-space-taken 1 'cargo-types '(marine) 'passengers '(87410) 'boost-ready? #t))
+  (define mr-ev (hasheq 'tag 87411 'type 'marine 'x 127.5 'y 130.0 'hp 45.0))
+  (define bn-close (list (hasheq 'tag 87985 'type 'baneling 'x 131.0 'y 130.0 'hp 30.0)
+                         (hasheq 'tag 87986 'type 'baneling 'x 131.5 'y 131.0 'hp 30.0)))
+  (define n18-evac-dirs (plan-transport-fleet-micro (list mv-ev mr-ev) (append dr-n18 bn-close) #:home-x 32.5 #:home-y 32.5 #:current-frame 120))
+  (define n18-ok?
+    (and (pair? n18-drop-dirs)
+         (memq (transport-directive-action (car n18-drop-dirs)) '(medivac-boost hold-and-reposition))
+         (< (transport-directive-tx (car n18-drop-dirs)) 131.0)
+         (pair? n18-evac-dirs)
+         (eq? (transport-directive-action (car n18-evac-dirs)) 'load-unit)))
+
+  ;; (f) ro26: Healthy Baneling (`30 HP`) next to 1 Stalker + 1 Probe rolls past (`move`, no explode),
+  ;;     while dying Baneling (`10 HP`) next to 1 Probe OR healthy Baneling next to 2 Probes DOES explode!
+  (define bn-ro26-hi (mk-u 87501 'baneling 130.0 130.0 #:hp 30.0 #:max-hp 30.0))
+  (define bn-ro26-lo (mk-u 87502 'baneling 130.0 130.0 #:hp 10.0 #:max-hp 30.0))
+  (define ro26-hold (plan-baneling-move-past-and-light-clump-detonate
+                     (list bn-ro26-hi)
+                     (list (mk-u 87990 'stalker 131.0 130.0 #:hp 80.0 #:shield 80.0)
+                           (mk-u 87991 'probe 131.2 130.5 #:hp 20.0 #:shield 20.0))))
+  (define ro26-dying (plan-baneling-move-past-and-light-clump-detonate
+                      (list bn-ro26-lo)
+                      (list (mk-u 87990 'stalker 131.0 130.0 #:hp 80.0 #:shield 80.0)
+                            (mk-u 87991 'probe 131.2 130.5 #:hp 20.0 #:shield 20.0))))
+  (define ro26-boom (plan-baneling-move-past-and-light-clump-detonate
+                     (list bn-ro26-hi)
+                     (list (mk-u 87991 'probe 131.0 130.0 #:hp 20.0 #:shield 20.0)
+                           (mk-u 87992 'probe 131.2 130.5 #:hp 20.0 #:shield 20.0))))
+  (define ro26-ok?
+    (and (not (ormap (lambda (d) (eq? (harass-directive-action d) 'baneling-explode)) ro26-hold))
+         (pair? ro26-dying)
+         (eq? (harass-directive-action (car ro26-dying)) 'baneling-explode)
+         (pair? ro26-boom)
+         (eq? (harass-directive-action (car ro26-boom)) 'baneling-explode)))
+
+  ;; (g) nc-14: Oracle aims Stasis Ward `3.0t` toward approaching patrolling Marines (not distant enemy-base);
+  ;;     h06: OC scans uphill Tanks/enemies (`399`); nc-03: lone Probe pokes & mineral-walks;
+  ;;     p08 Arena (0 TH + active combat): skips `guard-mineral-wall-backdoor`!
+  (define or-14 (mk-u 87601 'oracle 60.0 60.0 #:hp 100.0 #:shield 60.0 #:energy 80.0 #:flying #t))
+  (define mar-14 (list (mk-u 87690 'marine 69.0 60.0 #:hp 45.0)
+                       (mk-u 87691 'marine 70.0 60.5 #:hp 45.0)))
+  (define nc14-dirs (plan-protoss-spellcaster-micro (list or-14) mar-14 #:claims (make-spell-claims) #:current-frame 100
+                                                    #:enemy-base-x 20.0 #:enemy-base-y 20.0))
+  (define nc14-ok?
+    (and (pair? nc14-dirs)
+         (eq? (spell-directive-ability (car nc14-dirs)) 'stasis-ward)
+         (> (spell-directive-target-x (car nc14-dirs)) 61.5)))
+  (define h06-res
+    (step-map-elements-tactical-micro!
+     (list (hasheq 'tag 87701 'type 'siege-tank-sieged 'x 55.0 'y 55.0 'hp 175.0 'z 8.0))
+     (list (hasheq 'tag 87702 'type 'orbital-command 'x 30.0 'y 30.0 'hp 1500.0 'energy 100.0 'build-progress 1.0))
+     (list (hasheq 'tag 87790 'type 'siege-tank-sieged 'x 64.0 'y 55.0 'hp 175.0 'z 10.0))
+     '() #:frame 40))
+  (define nc03-res
+    (step-map-elements-tactical-micro!
+     (list (hasheq 'tag 87711 'type 'probe 'x 130.0 'y 130.0 'hp 20.0 'max-hp 20.0 'shield 8.0 'max-shield 20.0))
+     '()
+     (for/list ([i (in-range 6)]) (hasheq 'tag (+ 87791 i) 'type 'scv 'x 131.5 'y (+ 129.0 (* 0.5 i)) 'hp 45.0))
+     (list (hasheq 'tag 87890 'type 'mineral-field 'x 124.0 'y 130.0 'mineral-contents 1200))
+     #:frame 40))
+  (define p08-mw-res
+    (step-map-elements-tactical-micro!
+     (list (hasheq 'tag 87721 'type 'stalker 'x 60.0 'y 60.0 'hp 80.0))
+     '()
+     (list (hasheq 'tag 87799 'type 'cyclone 'x 65.0 'y 60.0 'hp 110.0))
+     (list (hasheq 'tag 87895 'type 'mineral-field 'x 58.0 'y 60.0 'mineral-contents 12))
+     #:frame 40))
+  (define map-ok?
+    (and (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'scanner-sweep)))
+                (hash-ref h06-res 'actions '()))
+         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'mineral-walk)))
+                (hash-ref nc03-res 'actions '()))
+         (not (ormap (lambda (d) (eq? (MapElementDirective-kind d) 'guard-mineral-wall-backdoor))
+                     (hash-ref p08-mw-res 'directives '())))))
+
+  (check-true "L59-Pass2-core-stalemate-fixes-and-pro14-noncombat-drills"
+              (and p15-p08-ok? z01-ok? n20-ok? n14-n16-ok? n18-ok? ro26-ok? nc14-ok? map-ok?)
+              (format "p15/08=~a z01=~a n20=~a n14/16=~a n18=~a ro26=~a nc14=~a map=~a"
+                      p15-p08-ok? z01-ok? n20-ok? n14-n16-ok? n18-ok? ro26-ok? nc14-ok? map-ok?)))
+
+;; -----------------------------------------------------------------------------
+;; 85. L59-Pass3: Transport Unload Anti-Spam/Urgent-Drop, Flat-Ground Blink, n17 Prism Hold & n20 Safe Corner
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) BUG A (`n19`/`ro28`/`n05`/`n18`): Loaded Medivac at `d=6.2t` under Stalker fire IMMEDIATELY unloads
+  ;;     (never dies with 0 unloads!), AND once `order-ability-id=396` (already unloading) emits ZERO re-issue spam!
+  (define mv-n19 (hasheq 'tag 88001 'type 'medivac 'x 133.0 'y 130.0 'hp 130.0 'max-hp 150.0 'flying? #t
+                         'cargo-space-taken 6 'cargo-types '(widow-mine) 'passengers '(88011 88012 88013)))
+  (define mv-unloading (hash-set mv-n19 'order-ability-id 396))
+  (define pr-n19 (for/list ([i (in-range 8)]) (hasheq 'tag (+ 88900 i) 'type 'probe 'x 126.8 'y (+ 128.0 (* 0.5 i)) 'hp 20.0 'shield 20.0)))
+  (define st-n19 (list (hasheq 'tag 88920 'type 'stalker 'x 133.0 'y 132.0 'hp 80.0 'shield 80.0)))
+  (define n19-drop (plan-transport-fleet-micro (list mv-n19) (append pr-n19 st-n19) #:home-x 32.5 #:home-y 32.5 #:current-frame 40))
+  (define n19-no-spam (plan-transport-fleet-micro (list mv-unloading) (append pr-n19 st-n19) #:home-x 32.5 #:home-y 32.5 #:current-frame 44))
+  (define bug-a-ok?
+    (and (pair? n19-drop)
+         (memq (transport-directive-action (car n19-drop)) '(transport-drop-moving transport-drop-point))
+         (null? n19-no-spam)))
+
+  ;; (b) BUG B (`p09`/`b01`/`b11`): 6 Stalkers on flat ground (`z=10.0`) with `sh=30.0` (110 EHP) vs 10 Marines
+  ;;     must NOT prematurely fire Pass 1b `6.5t` downhill-escape blink!
+  (define p09-stalks (for/list ([i (in-range 6)])
+                       (hash-set (mk-u (+ 88100 i) 'stalker 68.0 (+ 68.0 (* 0.5 i)) #:hp 80.0 #:max-hp 80.0 #:shield 30.0 #:max-shield 80.0) 'z 10.0)))
+  (define p09-mars (for/list ([i (in-range 10)])
+                     (hash-set (mk-u (+ 88930 i) 'marine 73.5 (+ 67.5 (* 0.4 i)) #:hp 55.0) 'z 10.0)))
+  (define p09-blinks (plan-stalker-blink-micro p09-stalks p09-mars (make-spell-claims) 100 #:researched-upgrades '(blink)))
+  (define bug-b-ok? (null? p09-blinks))
+
+  ;; (c) BUG C1 (`n17`): Phasing Warp Prism with incomplete warping-in Zealot (`build-progress 0.4`) and
+  ;;     4 enemy Marines `<= 7t` holds phasing (`#f`, zero `1530` unphase!) while EHP >= 35%!
+  (define pr-n17 (hasheq 'tag 88201 'type 'warp-prism-phasing 'x 130.0 'y 130.0 'hp 80.0 'max-hp 80.0 'shield 70.0 'max-shield 100.0 'flying? #t))
+  (define zl-warp (hasheq 'tag 88202 'type 'zealot 'x 131.0 'y 130.0 'hp 100.0 'shield 50.0 'build-progress 0.4))
+  (define mar-n17 (for/list ([i (in-range 4)]) (hasheq 'tag (+ 88950 i) 'type 'marine 'x 136.0 'y (+ 129.0 (* 0.6 i)) 'hp 45.0)))
+  (define n17-tr-hold (evaluate-warp-prism-phasing pr-n17 (list pr-n17 zl-warp) mar-n17 #:current-frame 40 #:warp-in-requested? #t))
+  (define n17-map-res (step-map-elements-tactical-micro! (list pr-n17 zl-warp) '() mar-n17 '() #:frame 40))
+  (define bug-c1-ok?
+    (and (not n17-tr-hold)
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'morph) (eq? (caddr a) 'warp-prism-transport)))
+                     (hash-ref n17-map-res 'actions '())))))
+
+  ;; (d) BUG C2 (`n20`): Overseer sitting `10.8t` from enemy Sieged Tank does NOT plant Nydus Worm in Tank
+  ;;     range (`< 13.5t`) — chooses a safe rear corner `>= 13.5t` away from the Tank!
+  (define n20-safe-obs
+    (hasheq 'frame 40 'base-x 32.5 'base-y 32.5 'enemy-x 130.0 'enemy-y 130.0
+            'ally-buildings (list (hasheq 'id 88301 'type 'nydus-network 'x 35.0 'y 35.0 'hp 850.0 'build-progress 1.0))
+            'ally-units (list (hasheq 'id 88302 'type 'overseer 'x 141.5 'y 133.5 'hp 200.0))
+            'enemy-units (list (hasheq 'id 88970 'type 'siege-tank-sieged 'x 132.5 'y 127.5 'hp 175.0)
+                               (hasheq 'id 88971 'type 'marine 'x 133.0 'y 130.0 'hp 45.0))))
+  (define n20-safe-acts (plan-nydus-worm-tactics n20-safe-obs))
+  (define n20-a0 (and (pair? n20-safe-acts) (car n20-safe-acts)))
+  (define bug-c2-ok?
+    (and n20-a0
+         (memq (car n20-a0) '(build-nydus-worm move))
+         (>= (dist2d-t 132.5 127.5 (caddr n20-a0) (cadddr n20-a0)) 13.4)))
+
+  (check-true "L59-Pass3-transport-antispam-flatground-blink-n17-prism-hold-and-n20-safe-corner"
+              (and bug-a-ok? bug-b-ok? bug-c1-ok? bug-c2-ok?)
+              (format "A=~a (~a / ~a) B=~a C1=~a C2=~a (~a)"
+                      bug-a-ok? n19-drop n19-no-spam bug-b-ok? bug-c1-ok? bug-c2-ok? n20-safe-acts)))
+
+;; -----------------------------------------------------------------------------
+;; 86. L59-H2H (`#1553`): Live-Match Neutral Guards (Worker Ping-Pong, Main Seam, Plates, Blind Scan)
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) Fix #1A: Standard 8-patch Main (16M + 6G = 22 workers) + 8-patch Nat (10 workers) -> 0 rebalance!
+  ;;     Gold 6-patch Nat + 8-patch Main (18M + 6G) -> excludes gas workers, transfers max 1, 44f cooldown!
+  (define th1 (hasheq 'tag 89001 'type 'nexus 'x 32.0 'y 32.0 'hp 1000.0 'build-progress 1.0))
+  (define th2 (hasheq 'tag 89002 'type 'nexus 'x 64.0 'y 32.0 'hp 1000.0 'build-progress 1.0))
+  (define gas1 (hasheq 'tag 89003 'type 'assimilator 'x 36.0 'y 36.0 'hp 450.0 'build-progress 1.0))
+  (define main-8m (for/list ([i (in-range 8)]) (hasheq 'tag (+ 89100 i) 'type 'mineral-field 'x 26.0 'y (+ 28.0 (* 1.0 i)) 'mineral-contents 1200)))
+  (define nat-8m  (for/list ([i (in-range 8)]) (hasheq 'tag (+ 89110 i) 'type 'mineral-field 'x 70.0 'y (+ 28.0 (* 1.0 i)) 'mineral-contents 1200)))
+  (define nat-6g  (for/list ([i (in-range 6)]) (hasheq 'tag (+ 89120 i) 'type 'rich-mineral-field 'x 70.0 'y (+ 29.0 (* 1.0 i)) 'mineral-contents 900)))
+  (define ws-main-18m (for/list ([i (in-range 18)]) (hasheq 'tag (+ 89200 i) 'type 'probe 'x 28.5 'y (+ 28.5 (* 0.4 i)) 'hp 20.0 'shield 20.0)))
+  (define ws-main-6g  (for/list ([i (in-range 6)])  (hasheq 'tag (+ 89250 i) 'type 'probe 'x 35.5 'y 35.5 'hp 20.0 'shield 20.0 'order-target-tag 89003)))
+  (define ws-nat-8    (for/list ([i (in-range 8)])  (hasheq 'tag (+ 89270 i) 'type 'probe 'x 67.5 'y (+ 29.0 (* 0.5 i)) 'hp 20.0 'shield 20.0)))
+  (define std-plan (plan-nonstandard-base-resource-allocation
+                    (list th1 th2) (append main-8m nat-8m) '() (append (take ws-main-18m 16) ws-main-6g ws-nat-8) (list th1 th2 gas1) #:frame 6000))
+  ;; Depleting m7 normal blue Main (only 7 patches left!) + 8-patch Nat -> STILL 0 rebalance (`#1566` Fix #2)!
+  (define depl-7m-plan (plan-nonstandard-base-resource-allocation
+                        (list th1 th2) (append (take main-8m 7) nat-8m) '() (append ws-main-18m ws-main-6g ws-nat-8) (list th1 th2 gas1) #:frame 9400))
+  (define gold-plan1 (plan-nonstandard-base-resource-allocation
+                      (list th1 th2) (append main-8m nat-6g) '() (append ws-main-18m ws-main-6g ws-nat-8) (list th1 th2 gas1) #:frame 6000))
+  (define gold-plan2 (plan-nonstandard-base-resource-allocation
+                      (list th1 th2) (append main-8m nat-6g) '() (append ws-main-18m ws-main-6g ws-nat-8) (list th1 th2 gas1) #:frame 6050))
+  (define fix1a-ok?
+    (and (null? (NonstandardBasePlan-rebalance-directives std-plan))
+         (null? (NonstandardBasePlan-rebalance-directives depl-7m-plan))
+         (= (length (NonstandardBasePlan-rebalance-directives gold-plan1)) 1)
+         (not (memv (cadr (MapElementDirective-sexp (car (NonstandardBasePlan-rebalance-directives gold-plan1))))
+                    '(89250 89251 89252 89253 89254 89255)))
+         (null? (NonstandardBasePlan-rebalance-directives gold-plan2))))
+
+  ;; (b) Fix #2A: Depleting Main patch (`120M` within `7t` of TH) + `lab-mineral-field` (`400M`) are NOT backdoor seams,
+  ;;     AND passive `guard-mineral-wall-backdoor` does NOT fire without `enemy-near?`!
+  (define depl-main-m (hasheq 'tag 89301 'type 'mineral-field 'x 26.0 'y 32.0 'mineral-contents 120))
+  (define lab-m       (hasheq 'tag 89302 'type 'lab-mineral-field 'x 60.0 'y 60.0 'mineral-contents 400))
+  (define iso-seam    (hasheq 'tag 89303 'type 'mineral-field-450 'x 55.0 'y 55.0 'mineral-contents 120))
+  (define st-home     (hasheq 'tag 89310 'type 'stalker 'x 40.0 'y 40.0 'hp 80.0 'shield 80.0))
+  (define mw-live-depl (plan-mineral-wall-and-worker-path-tactics
+                        (list (car ws-main-18m)) (list st-home) (list depl-main-m lab-m) '()
+                        #:frame 7000 #:home-x 32.0 #:home-y 32.0 #:has-townhall? #t #:townhall-pts (list th1)))
+  (define mw-passive-no-guard (plan-mineral-wall-and-worker-path-tactics
+                               '() (list st-home) (list iso-seam) '()
+                               #:frame 4000 #:home-x 32.0 #:home-y 32.0 #:has-townhall? #t #:townhall-pts (list th1)))
+  (define fix2a-ok?
+    (and (null? mw-live-depl)
+         (not (ormap (lambda (d) (eq? (MapElementDirective-kind d) 'guard-mineral-wall-backdoor)) mw-passive-no-guard))))
+
+  ;; (c) Fix #2B + `#1566` Fix #1: `unbuildable-plates-destructible` (474) / `unbuildable-bricks-destructible` (473)
+  ;;     are NEVER targeted; live full match (`>= 1` owned TH) skips Phase 7 `rock-dirs` completely, while
+  ;;     isolated Arena (`0` TH) STILL attacks real `destructible-rock-ex1-6x6` (639)!
+  (define plate-474 (hasheq 'tag 89401 'type 'unbuildable-plates-destructible 'unit-type-id 474 'x 58.0 'y 58.0 'hp 400.0 'max-hp 400.0))
+  (define brick-473 (hasheq 'tag 89402 'type 'unbuildable-bricks-destructible 'unit-type-id 473 'x 58.0 'y 59.0 'hp 400.0 'max-hp 400.0))
+  (define real-639  (hasheq 'tag 89403 'type 'destructible-rock-ex1-6x6 'unit-type-id 639 'x 58.0 'y 60.0 'hp 2000.0 'max-hp 2000.0))
+  (define mar-rk    (hasheq 'tag 89410 'type 'marine 'x 54.0 'y 58.0 'hp 45.0))
+  (define rk-plates (plan-destructible-rocks-and-rockslides (list mar-rk) (list plate-474 brick-473) '() #:home-x 32.0 #:home-y 32.0 #:enemy-x 130.0 #:enemy-y 130.0))
+  (define rk-real   (plan-destructible-rocks-and-rockslides (list mar-rk) (list real-639) '() #:home-x 32.0 #:home-y 32.0 #:enemy-x 130.0 #:enemy-y 130.0))
+  (define live-no-rock (step-map-elements-tactical-micro! (list mar-rk) (list th1) '() (list real-639) #:frame 4000 #:home-x 32.0 #:home-y 32.0 #:enemy-x 130.0 #:enemy-y 130.0))
+  (define arena-rock   (step-map-elements-tactical-micro! (list mar-rk) '() '() (list real-639) #:frame 4000 #:home-x 32.0 #:home-y 32.0 #:enemy-x 130.0 #:enemy-y 130.0))
+  (define fix2b-ok?
+    (and (null? rk-plates)
+         (pair? rk-real)
+         (null? (hash-ref live-no-rock 'actions '()))
+         (pair? (hash-ref arena-rock 'actions '()))))
+
+  ;; (d) Fix #1B: Live match (`>= 1` SCV + defensive Sieged Tank + OC 100E + 0 enemies) emits ZERO blind scans,
+  ;;     while isolated Arena (`sc2-rmp-h06`, `0` workers + Sieged Tank + OC 100E) STILL scans (`399`)!
+  (define oc-100  (hasheq 'tag 89501 'type 'orbital-command 'x 30.0 'y 30.0 'hp 1500.0 'energy 100.0 'build-progress 1.0))
+  (define tk-def  (hasheq 'tag 89502 'type 'siege-tank-sieged 'x 42.0 'y 42.0 'hp 175.0 'z 8.0))
+  (define scv-1   (hasheq 'tag 89503 'type 'scv 'x 28.0 'y 30.0 'hp 45.0))
+  (define live-no-scan (step-map-elements-tactical-micro! (list tk-def scv-1) (list oc-100) '() '() #:frame 4000))
+  (define arena-h06-scan (step-map-elements-tactical-micro! (list tk-def) (list oc-100) '() '() #:frame 4200))
+  (define fix1b-ok?
+    (and (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'scanner-sweep)))
+                     (hash-ref live-no-scan 'actions '())))
+         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (caddr a) 'scanner-sweep)))
+                (hash-ref arena-h06-scan 'actions '()))))
+
+  (check-true "L59-H2H-live-neutral-guards-worker-rebalance-main-seams-plates-and-blind-scan"
+              (and fix1a-ok? fix2a-ok? fix2b-ok? fix1b-ok?)
+              (format "1A=~a 2A=~a 2B=~a 1B=~a" fix1a-ok? fix2a-ok? fix2b-ok? fix1b-ok?)))
 
 (printf "\n=== Loop 49 Suite Summary: ~a/~a passed, ~a failed ===\n"
         tests-passed tests-run tests-failed)

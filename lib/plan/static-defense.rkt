@@ -968,8 +968,9 @@
                      (define slot-ang (+ base-ang (* (- i 1.5) 0.48)))
                      (define ax (clamp-coord (+ ex (* 21.0 (cos slot-ang)))))
                      (define ay (clamp-coord (+ ey (* 21.0 (sin slot-ang)))))
-                     (when burrowed? (emit! (list 'burrow-up sh-id)))
-                     (emit! (list 'move sh-id ax ay))]
+                     (if burrowed?
+                         (emit! (list 'burrow-up sh-id))
+                         (emit! (list 'move sh-id ax ay)))]
                     [else
                      (define stagger-slot (modulo (+ frame (* 37 sh-id)) SWARM-HOST-STAGGER-MODULO))
                      (define fire-window? (<= stagger-slot 15))
@@ -989,10 +990,14 @@
                         (define sub-kind (first sub))
                         (define tx (second sub))
                         (define ty (third sub))
-                        (when burrowed? (emit! (list 'burrow-up sh-id)))
-                        (emit! (list 'cast-spell sh-id 'spawn-locusts tx ty))
-                        (emit! (list 'swarm-host-stagger-spawn sh-id tx ty sub-kind))
-                        (emit! (list 'burrow-down sh-id))]
+                        ;; L59-P2 (`#1502` wire-audit fix): State-step unburrow -> spawn -> next-tick burrow
+                        ;; so same-step `burrow-down` NEVER clobbers `spawn-locusts`!
+                        (cond
+                          [burrowed?
+                           (emit! (list 'burrow-up sh-id))]
+                          [else
+                           (emit! (list 'cast-spell sh-id 'spawn-locusts tx ty))
+                           (emit! (list 'swarm-host-stagger-spawn sh-id tx ty sub-kind))])]
                        [(not burrowed?)
                         (emit! (list 'burrow-down sh-id))])])))
 
@@ -1070,7 +1075,7 @@
                    (emit! (list 'cast-spell (u-id ready-oc) 'scanner-sweep hide-x hide-y)))])
 
               (for ([hu (in-list (take remaining-hunters (min 6 (length remaining-hunters))))])
-                (emit! (list 'attack (u-id hu) hide-x hide-y)))
+                (emit! (list 'attack-pos (u-id hu) hide-x hide-y)))
               (reverse actions))))))
 
 (define (plan-counter-spread-swarm-host-harass raw-obs)

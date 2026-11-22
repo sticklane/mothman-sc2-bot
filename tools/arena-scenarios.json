@@ -1,6 +1,6 @@
 {
   "schema_version": 3,
-  "notes": "Real-SC2_x64 Tactics Arena 3.0 catalog (213 validated scenarios across 16 tactical categories, 3 tiers, 3 scoring modes [combat, mineral-defense, worker-runby], 5 real SC2 terrain modes, selective per-player upgrades, and pre-loaded transports; 66 fast_core flagships for --suite core). Loaded by tools/sc2-tactics-arena.py.",
+  "notes": "Real-SC2_x64 Tactics Arena 3.1 catalog (278 scenarios across 18 categories, 4 tiers, 4 scoring modes, 10 terrains, selective upgrades, pre-loaded transports, and non-combat drills) loaded by tools/sc2-tactics-arena.py.",
   "scenarios": [
     {
       "id": "sc2-real-p01-zealot-stalker-vs-bio",
@@ -158,7 +158,11 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "spellcasters",
-      "fast_core": false
+      "fast_core": false,
+      "expected_abilities": [
+        76,
+        1526
+      ]
     },
     {
       "id": "sc2-real-p05-ht-archon-stalker-vs-hydra-infestor",
@@ -211,7 +215,11 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "spellcasters",
-      "fast_core": true
+      "fast_core": true,
+      "expected_abilities": [
+        1036,
+        140
+      ]
     },
     {
       "id": "sc2-real-p06-early-12pool-zealot-adept-vs-lings",
@@ -364,7 +372,11 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "stalker-blink",
-      "fast_core": true
+      "fast_core": true,
+      "expected_abilities": [
+        1442,
+        3687
+      ]
     },
     {
       "id": "sc2-real-p09-disruptor-blink-prism-vs-bio-liberator-viking",
@@ -435,7 +447,10 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "spellcasters",
-      "fast_core": true
+      "fast_core": true,
+      "expected_abilities": [
+        2346
+      ]
     },
     {
       "id": "sc2-real-p10-phoenix-oracle-stalker-vs-muta-ling-harass",
@@ -885,7 +900,10 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "detection-snipe",
-      "fast_core": true
+      "fast_core": true,
+      "expected_abilities": [
+        2700
+      ]
     },
     {
       "id": "sc2-real-p16-warpprism-immortal-juggle-vs-roach-ravager",
@@ -1010,7 +1028,11 @@
       ],
       "max_loops": 960,
       "category": "spellcasters",
-      "fast_core": false
+      "fast_core": false,
+      "expected_abilities": [
+        140,
+        1036
+      ]
     },
     {
       "id": "sc2-real-p18-glaive-adept-oracle-revelation-vs-lurker-hydra",
@@ -1072,7 +1094,10 @@
       ],
       "max_loops": 960,
       "category": "spellcasters",
-      "fast_core": false
+      "fast_core": false,
+      "expected_abilities": [
+        2146
+      ]
     },
     {
       "id": "sc2-real-t01-bio-medivac-vs-zealot-stalker",
@@ -1242,7 +1267,11 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "spellcasters",
-      "fast_core": true
+      "fast_core": true,
+      "expected_abilities": [
+        2714,
+        1628
+      ]
     },
     {
       "id": "sc2-real-t05-bio-medivac-vs-ling-bane",
@@ -1505,7 +1534,11 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "burrow-micro",
-      "fast_core": true
+      "fast_core": true,
+      "expected_abilities": [
+        2095,
+        2097
+      ]
     },
     {
       "id": "sc2-real-t10-ghost-bio-liberator-vs-ht-archon-chargelot",
@@ -1588,7 +1621,10 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "spellcasters",
-      "fast_core": false
+      "fast_core": false,
+      "expected_abilities": [
+        1628
+      ]
     },
     {
       "id": "sc2-real-t11-thor-viking-hellbat-vs-broodlord-corruptor-viper",
@@ -1881,7 +1917,13 @@
       ],
       "max_loops": 960,
       "category": "spellcasters",
-      "fast_core": false
+      "fast_core": false,
+      "requires_5014": true,
+      "expected_abilities": [
+        3747,
+        3753,
+        1764
+      ]
     },
     {
       "id": "sc2-real-t15-bc-yamato-jump-vs-corruptor-viper",
@@ -1936,7 +1978,11 @@
       ],
       "max_loops": 960,
       "category": "yamato-jump",
-      "fast_core": true
+      "fast_core": true,
+      "expected_abilities": [
+        401,
+        2358
+      ]
     },
     {
       "id": "sc2-real-z01-lings-vs-marines-open",
@@ -2000,7 +2046,10 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "kiting-concave",
-      "fast_core": true
+      "fast_core": true,
+      "expected_abilities": [
+        2338
+      ]
     },
     {
       "id": "sc2-real-z03-hydra-roach-vs-stalker-zealot",
@@ -2088,7 +2137,10 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "spellcasters",
-      "fast_core": false
+      "fast_core": false,
+      "expected_abilities": [
+        1664
+      ]
     },
     {
       "id": "sc2-real-z05-hydra-roach-vs-voidray-zealot",
@@ -2300,7 +2352,13 @@
       "max_loops": 960,
       "tier": "canonical",
       "category": "burrow-micro",
-      "fast_core": true
+      "fast_core": true,
+      "expected_abilities": [
+        1386,
+        1388,
+        3661,
+        3662
+      ]
     },
     {
       "id": "sc2-real-z10-lurker-hydra-overseer-vs-stalker-immortal-obs-ramp",
@@ -2677,7 +2735,11 @@
       ],
       "max_loops": 960,
       "category": "spellcasters",
-      "fast_core": true
+      "fast_core": true,
+      "expected_abilities": [
+        74,
+        249
+      ]
     },
     {
       "id": "sc2-real-z15-viper-blindingcloud-pbomb-ultra-vs-mech-bio",
@@ -2760,7 +2822,12 @@
       ],
       "max_loops": 960,
       "category": "spellcasters",
-      "fast_core": false
+      "fast_core": false,
+      "expected_abilities": [
+        2063,
+        2542,
+        2067
+      ]
     },
     {
       "id": "sc2-real-z16-muta-magicbox-vs-thors",
@@ -3605,7 +3672,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2700
+      ]
     },
     {
       "id": "sc2-det-d08-t-cloaked-banshee-marauder-vs-cannons-stalker",
@@ -3971,7 +4041,10 @@
           2.4
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        382
+      ]
     },
     {
       "id": "sc2-det-d13-t-cloaked-ghost-viking-vs-overseers-ultra-ling",
@@ -4042,7 +4115,10 @@
           2.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        382
+      ]
     },
     {
       "id": "sc2-det-d14-t-cloaked-ghost-marauder-vs-cannons-archon-zealot",
@@ -4120,7 +4196,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        382
+      ]
     },
     {
       "id": "sc2-det-d15-z-burrowed-lurker-hydra-vs-turrets-bio-tank",
@@ -4383,7 +4462,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1442,
+        3687
+      ]
     },
     {
       "id": "sc2-blk-b02-pvz-12-blink-stalkers-vs-16-speed-roach-3-ravager",
@@ -4428,7 +4511,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1442,
+        3687
+      ]
     },
     {
       "id": "sc2-blk-b03-pvt-12-blink-stalkers-vs-stim-bio-concussive",
@@ -4481,7 +4568,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1442,
+        3687
+      ]
     },
     {
       "id": "sc2-blk-b04-pvp-14-blink-stalkers-vs-chargelot-immortal",
@@ -4526,7 +4617,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1442,
+        3687
+      ]
     },
     {
       "id": "sc2-blk-b05-pvz-14-blink-stalkers-vs-hydra-ling-concave",
@@ -4571,7 +4666,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1442,
+        3687
+      ]
     },
     {
       "id": "sc2-blk-b06-pvt-14-blink-stalkers-forward-snipe-3-sieged-tanks",
@@ -4621,7 +4720,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1442,
+        3687
+      ]
     },
     {
       "id": "sc2-blk-b07-pvp-14-blink-stalkers-forward-snipe-2-colossi",
@@ -4671,7 +4774,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1442,
+        3687
+      ]
     },
     {
       "id": "sc2-blk-b08-pvt-14-blink-stalkers-forward-snipe-3-liberators",
@@ -4721,7 +4828,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1442,
+        3687
+      ]
     },
     {
       "id": "sc2-blk-b09-pvz-14-blink-stalkers-forward-snipe-3-broodlords",
@@ -4768,7 +4879,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1442,
+        3687
+      ]
     },
     {
       "id": "sc2-blk-b10-pvp-12-blink-stalkers-forward-snipe-ht-disruptor",
@@ -4818,7 +4933,11 @@
           1.5
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1442,
+        3687
+      ]
     },
     {
       "id": "sc2-runby-ro01-tvz-widow-mine-drop-drones",
@@ -7239,7 +7358,11 @@
       "max_loops": 960,
       "use_p2_main_base": true,
       "scoring_mode": "worker-runby",
-      "pass_workers_killed_min": 4
+      "pass_workers_killed_min": 4,
+      "expected_abilities": [
+        2505,
+        2375
+      ]
     },
     {
       "id": "sc2-sta-s02-pvz-oracle-stasis-mineral-harass",
@@ -7290,7 +7413,11 @@
           1.5
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2505,
+        2375
+      ]
     },
     {
       "id": "sc2-sta-s03-pvt-oracle-stasis-ramp-trap",
@@ -7355,7 +7482,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2505
+      ]
     },
     {
       "id": "sc2-sta-s04-pvz-oracle-stasis-choke-split",
@@ -7408,7 +7538,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2505
+      ]
     },
     {
       "id": "sc2-sta-s05-zvp-stasis-ward-defuse-ling-sac",
@@ -7724,7 +7857,11 @@
           1.5
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        401,
+        2358
+      ]
     },
     {
       "id": "sc2-yam-y02-tvp-bc-yamato-jump-vs-carriers",
@@ -7772,7 +7909,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        401,
+        2358
+      ]
     },
     {
       "id": "sc2-yam-y03-tvt-bc-yamato-jump-vs-vikings-raven",
@@ -7820,7 +7961,11 @@
           2.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        401,
+        2358
+      ]
     },
     {
       "id": "sc2-yam-y04-tvz-bc-yamato-jump-vs-corruptor-infestor",
@@ -7871,7 +8016,11 @@
           2.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        401,
+        2358
+      ]
     },
     {
       "id": "sc2-yam-y05-tvt-bc-yamato-jump-vs-thor-tank-mech",
@@ -7925,7 +8074,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        401,
+        2358
+      ]
     },
     {
       "id": "sc2-yam-y06-tvz-bc-mineral-line-jump-raid",
@@ -7982,7 +8135,11 @@
       "max_loops": 960,
       "use_p2_main_base": true,
       "scoring_mode": "worker-runby",
-      "pass_workers_killed_min": 6
+      "pass_workers_killed_min": 6,
+      "expected_abilities": [
+        401,
+        2358
+      ]
     },
     {
       "id": "sc2-yam-y07-tvp-bc-lowhp-escape-jump-vs-blink-stalkers",
@@ -8033,7 +8190,11 @@
           -2.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        401,
+        2358
+      ]
     },
     {
       "id": "sc2-yam-y08-tvp-bc-yamato-vs-skytoss-ht-feedback",
@@ -8096,7 +8257,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        401,
+        2358
+      ]
     },
     {
       "id": "sc2-yam-y09-tvt-bc-yamato-mirror",
@@ -8147,7 +8312,11 @@
           -2.2
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        401,
+        2358
+      ]
     },
     {
       "id": "sc2-trn-n01-tvz-medivac-pickup-juggle-vs-banelings",
@@ -9073,7 +9242,13 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1386,
+        1388,
+        3661,
+        3662
+      ]
     },
     {
       "id": "sc2-brw-u02-zvt-roach-burrow-heal-vs-marauders",
@@ -9121,7 +9296,13 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1386,
+        1388,
+        3661,
+        3662
+      ]
     },
     {
       "id": "sc2-brw-u03-zvt-baneling-landmine-trap-vs-bio",
@@ -9193,7 +9374,12 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1376,
+        3662,
+        42
+      ]
     },
     {
       "id": "sc2-brw-u04-zvp-baneling-landmine-trap-vs-zealot-stalker",
@@ -9252,7 +9438,12 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1376,
+        3662,
+        42
+      ]
     },
     {
       "id": "sc2-brw-u05-zvt-infestor-burrowed-fungal-neural-bio-tank",
@@ -9325,7 +9516,11 @@
           2.2
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        74,
+        249
+      ]
     },
     {
       "id": "sc2-brw-u06-zvp-infestor-burrowed-neural-colossus-archon",
@@ -9389,7 +9584,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        74,
+        249
+      ]
     },
     {
       "id": "sc2-brw-u07-zvp-lurker-leapfrog-vs-disruptor-stalker",
@@ -9460,7 +9659,11 @@
           2.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2108,
+        2110
+      ]
     },
     {
       "id": "sc2-brw-u08-zvt-lurker-leapfrog-vs-liberator-bio",
@@ -9526,7 +9729,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2108,
+        2110
+      ]
     },
     {
       "id": "sc2-brw-u09-zvt-lurker-unburrow-reposition-vs-tanks",
@@ -9590,7 +9797,11 @@
           2.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2108,
+        2110
+      ]
     },
     {
       "id": "sc2-brw-u10-zvp-zergling-burrow-ambush-stalkers",
@@ -9648,7 +9859,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1392,
+        3662
+      ]
     },
     {
       "id": "sc2-brw-u11-tvp-widow-mine-burrow-reposition-vs-chargelot-stalker",
@@ -9732,7 +9947,11 @@
           2.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2095,
+        2097
+      ]
     },
     {
       "id": "sc2-brw-u12-zvt-swarmhost-locust-burrow-retreat-vs-mech",
@@ -9793,7 +10012,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2704,
+        2387
+      ]
     },
     {
       "id": "sc2-spl-sp01-pvz-sentry-forcefield-ramp-split",
@@ -9849,7 +10072,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1526,
+        76
+      ]
     },
     {
       "id": "sc2-spl-sp02-pvz-ht-storm-vs-ling-bane-hydra",
@@ -9915,7 +10142,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1036
+      ]
     },
     {
       "id": "sc2-spl-sp03-pvz-disruptor-nova-vs-lurker-hydra",
@@ -9972,7 +10202,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2346
+      ]
     },
     {
       "id": "sc2-spl-sp04-tvp-ghost-emp-vs-archon-ht-chargelot",
@@ -10043,7 +10276,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1628
+      ]
     },
     {
       "id": "sc2-spl-sp05-tvz-ghost-snipe-vs-broodlord-ultra-infestor",
@@ -10112,7 +10348,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2714
+      ]
     },
     {
       "id": "sc2-spl-sp06-tvt-raven-imatrix-vs-sieged-tanks",
@@ -10129,7 +10368,8 @@
       ],
       "p1_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "InterferenceMatrix"
       ],
       "p2_upgrades": [
         "Stim",
@@ -10182,7 +10422,11 @@
           2.2
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "requires_5014": true,
+      "expected_abilities": [
+        3747
+      ]
     },
     {
       "id": "sc2-spl-sp07-zvz-infestor-fungal-vs-mutalisk-flock",
@@ -10230,7 +10474,11 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        74,
+        4111
+      ]
     },
     {
       "id": "sc2-spl-sp08-zvp-viper-abduct-colossus-immortal",
@@ -10294,7 +10542,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2067
+      ]
     },
     {
       "id": "sc2-spl-sp09-zvp-queen-transfuse-brood-hydra-vs-voidray",
@@ -10347,7 +10598,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        1664
+      ]
     },
     {
       "id": "sc2-kit-k01-tvp-cyclone-lockon-kite-vs-stalker-immortal",
@@ -10391,7 +10645,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2350
+      ]
     },
     {
       "id": "sc2-kit-k02-tvz-cyclone-hellion-kite-vs-speed-roaches",
@@ -10441,7 +10698,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2350
+      ]
     },
     {
       "id": "sc2-kit-k03-zvp-hydra-roach-concave-vs-chargelot-archon",
@@ -10623,7 +10883,10 @@
           0.0
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2544
+      ]
     },
     {
       "id": "sc2-flk-f01-pvt-chargelot-archon-2prong-flank-tanks",
@@ -11265,7 +11528,10 @@
           2.2
         ]
       ],
-      "max_loops": 960
+      "max_loops": 960,
+      "expected_abilities": [
+        2338
+      ]
     },
     {
       "id": "sc2-air-a01-pvz-phoenix-air-kite-vs-mutalisks",
@@ -12239,6 +12505,3298 @@
         ]
       ],
       "max_loops": 2240
+    },
+    {
+      "id": "sc2-ab-p01-sentry-guardian-shield-vs-marines",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "guardian-shield",
+        "sentry-micro",
+        "anti-bio"
+      ],
+      "p2_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "expected_abilities": [
+        76
+      ],
+      "p1_energy": 120.0,
+      "description": "Ability-Mastery PvT (Guardian Shield): 3 Sentries + 8 Stalkers popping Guardian Shield (-2 ranged dmg) vs 18 Stim Marines",
+      "p1_units": [
+        [
+          "stalker",
+          8,
+          -5.5,
+          0.0
+        ],
+        [
+          "sentry",
+          3,
+          -6.8,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "marine",
+          18,
+          5.5,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-p02-sentry-hallucination-archon-tank-vs-tanks",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "hallucination-archon",
+        "sentry-micro"
+      ],
+      "expected_abilities": [
+        146,
+        154,
+        164
+      ],
+      "p1_energy": 160.0,
+      "description": "Ability-Mastery PvT (Hallucination): 2 high-energy Sentries (160e) + 6 Stalkers spawning Hallucination Archon/Phoenix to soak 2 Sieged Tanks + 8 Marines",
+      "p1_units": [
+        [
+          "stalker",
+          6,
+          -5.5,
+          0.0
+        ],
+        [
+          "sentry",
+          2,
+          -6.8,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "marine",
+          8,
+          5.0,
+          0.0
+        ],
+        [
+          "siege-tank-sieged",
+          2,
+          7.0,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-p03-ht-feedback-snipe-vs-medivac-viper-infestor",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "ht-feedback",
+        "anti-spellcaster"
+      ],
+      "expected_abilities": [
+        140
+      ],
+      "p1_energy": 120.0,
+      "description": "Ability-Mastery PvZ (Feedback Isolated): 3 High Templars (no PsiStorm) + 6 Stalkers casting Feedback onto 3 high-energy Vipers + 3 Infestors + 6 Roaches",
+      "p1_units": [
+        [
+          "stalker",
+          6,
+          -5.2,
+          0.0
+        ],
+        [
+          "high-templar",
+          3,
+          -7.2,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "roach",
+          6,
+          4.8,
+          0.0
+        ],
+        [
+          "infestor",
+          3,
+          6.2,
+          -1.5
+        ],
+        [
+          "viper",
+          3,
+          6.2,
+          1.5
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-p04-dry-ht-archon-merge-vs-lings",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "archon-morph",
+        "dry-ht-merge"
+      ],
+      "p2_upgrades": [
+        "MetabolicBoost"
+      ],
+      "expected_abilities": [
+        1766
+      ],
+      "p1_energy": {
+        "high-templar": 15.0
+      },
+      "description": "Ability-Mastery PvZ (Dry HT Archon Merge): 4 dry High Templars (15e) + 4 Zealots merging into 2 Archons vs 24 Speedlings",
+      "p1_units": [
+        [
+          "zealot",
+          4,
+          -4.5,
+          0.0
+        ],
+        [
+          "high-templar",
+          4,
+          -6.8,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "zergling",
+          24,
+          6.5,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-p05-phoenix-graviton-lift-vs-tanks-immortals",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "phoenix-graviton-beam",
+        "anti-siege"
+      ],
+      "p1_upgrades": [
+        "AnionPulseCrystals"
+      ],
+      "expected_abilities": [
+        173
+      ],
+      "p1_energy": 120.0,
+      "description": "Ability-Mastery PvT (Phoenix Graviton Beam): 6 Range Phoenixes + 6 Stalkers lifting 3 Sieged Tanks + 3 Marauders",
+      "p1_units": [
+        [
+          "stalker",
+          6,
+          -5.5,
+          0.0
+        ],
+        [
+          "phoenix",
+          6,
+          -6.2,
+          2.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "marauder",
+          4,
+          4.8,
+          0.0
+        ],
+        [
+          "siege-tank-sieged",
+          3,
+          6.5,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-p06-voidray-prismatic-alignment-vs-armored",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "prismatic-alignment",
+        "anti-armored"
+      ],
+      "p1_upgrades": [
+        "FluxVanes"
+      ],
+      "expected_abilities": [
+        2393
+      ],
+      "description": "Ability-Mastery PvZ (Void Ray Prismatic Alignment): 5 Speed Void Rays activating Prismatic Alignment vs 7 Corruptors + 6 Roaches",
+      "p1_units": [
+        [
+          "void-ray",
+          5,
+          -5.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "corruptor",
+          7,
+          5.5,
+          0.0
+        ],
+        [
+          "roach",
+          6,
+          4.5,
+          2.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-p07-observer-surveillance-mode-watch",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "observer-surveillance",
+        "cloak-detection"
+      ],
+      "p1_upgrades": [
+        "GraviticBoosters"
+      ],
+      "p2_upgrades": [
+        "BansheeCloak"
+      ],
+      "p2_pre_cloaked": true,
+      "expected_abilities": [
+        3741,
+        3739
+      ],
+      "description": "Ability-Mastery PvT (Observer Surveillance Mode): 2 Speed Observers + 8 Stalkers toggling Surveillance Mode while revealing 3 Cloaked Banshees + 2 Vikings",
+      "p1_units": [
+        [
+          "stalker",
+          8,
+          -5.0,
+          0.0
+        ],
+        [
+          "observer",
+          2,
+          -6.5,
+          1.5
+        ]
+      ],
+      "p2_units": [
+        [
+          "banshee",
+          3,
+          5.5,
+          0.0
+        ],
+        [
+          "viking-fighter",
+          2,
+          7.0,
+          2.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-p08-warp-prism-phasing-mode-deploy",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "warp-prism-phasing",
+        "mobile-power-field"
+      ],
+      "p1_upgrades": [
+        "GraviticDrive"
+      ],
+      "expected_abilities": [
+        1528,
+        1530,
+        911,
+        913
+      ],
+      "description": "Ability-Mastery PvZ (Warp Prism Phasing/Juggle): 1 Speed Warp Prism + 3 Immortals + 4 Stalkers vs 12 Roaches",
+      "p1_units": [
+        [
+          "immortal",
+          3,
+          -5.0,
+          0.0
+        ],
+        [
+          "stalker",
+          4,
+          -6.2,
+          0.0
+        ],
+        [
+          "warp-prism",
+          1,
+          -7.2,
+          1.5
+        ]
+      ],
+      "p2_units": [
+        [
+          "roach",
+          12,
+          5.5,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-p09-nexus-energy-recharge-ht-5014",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "use_main_base": true,
+      "requires_5014": true,
+      "patterns": [
+        "nexus-energy-recharge",
+        "ht-psi-storm",
+        "5.0.14"
+      ],
+      "p1_upgrades": [
+        "PsiStorm"
+      ],
+      "p2_upgrades": [
+        "Stim"
+      ],
+      "expected_abilities": [
+        4126,
+        4107
+      ],
+      "p1_energy": {
+        "nexus": 100.0,
+        "high-templar": 25.0
+      },
+      "description": "Ability-Mastery PvT (5.0.14 Nexus Energy Recharge): Main Nexus (100e) recharging low-energy High Templars (25e) + 6 Stalkers to Storm 16 Stim Marines",
+      "p1_units": [
+        [
+          "probe",
+          12,
+          -3.2,
+          0.0
+        ],
+        [
+          "stalker",
+          6,
+          2.5,
+          0.0
+        ],
+        [
+          "high-templar",
+          2,
+          1.5,
+          1.8
+        ]
+      ],
+      "p2_units": [
+        [
+          "marine",
+          16,
+          9.5,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-t01-viking-land-assault-vs-ground-only",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "viking-land-assault",
+        "air-to-ground-morph"
+      ],
+      "expected_abilities": [
+        403
+      ],
+      "description": "Ability-Mastery TvP (Viking Land vs Ground-Only): 8 Viking-Fighters killing 1 Colossus then landing (403 Assault Mode) to wipe 5 Stalkers when zero air remains",
+      "p1_units": [
+        [
+          "viking-fighter",
+          8,
+          -5.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "colossus",
+          1,
+          5.0,
+          0.0
+        ],
+        [
+          "stalker",
+          5,
+          5.5,
+          1.5
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-t02-viking-assault-takeoff-vs-air-arrival",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "viking-takeoff-fighter",
+        "anti-air-morph"
+      ],
+      "expected_abilities": [
+        405
+      ],
+      "description": "Ability-Mastery TvP (Viking Takeoff vs Air): 6 landed Viking-Assaults + 6 Marines immediately lifting off (405 Fighter Mode) vs 4 Void Rays + 2 Phoenixes",
+      "p1_units": [
+        [
+          "viking-assault",
+          6,
+          -5.5,
+          0.0
+        ],
+        [
+          "marine",
+          6,
+          -4.5,
+          1.5
+        ]
+      ],
+      "p2_units": [
+        [
+          "void-ray",
+          4,
+          5.5,
+          0.0
+        ],
+        [
+          "phoenix",
+          2,
+          6.2,
+          2.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-t03-reaper-kd8-charge-kite-vs-lings-zealots",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "reaper-kd8-charge",
+        "stutter-kite"
+      ],
+      "expected_abilities": [
+        2588
+      ],
+      "description": "Ability-Mastery TvZ (Reaper KD8 Charge): 4 Reapers throwing KD8 knockback grenades while kiting 12 Zerglings",
+      "p1_units": [
+        [
+          "reaper",
+          4,
+          -5.0,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "zergling",
+          12,
+          5.0,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-t04-hellion-hellbat-morph-vs-ling-bane",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "hellion-hellbat-morph",
+        "smart-servos"
+      ],
+      "p1_upgrades": [
+        "SmartServos",
+        "InfernalPreigniter"
+      ],
+      "p2_upgrades": [
+        "MetabolicBoost"
+      ],
+      "expected_abilities": [
+        1998
+      ],
+      "description": "Ability-Mastery TvZ (Hellion -> Hellbat Morph): Armory + 6 Smart-Servos Blue-Flame Hellions + 2 Medivacs morphing to Hellbats (1998) vs 24 Speedlings",
+      "p1_units": [
+        [
+          "armory",
+          1,
+          -9.0,
+          0.0
+        ],
+        [
+          "hellion",
+          6,
+          -5.0,
+          0.0
+        ],
+        [
+          "medivac",
+          2,
+          -6.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "zergling",
+          24,
+          5.5,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-t05-thor-high-impact-vs-broodlord-tempest",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "thor-high-impact",
+        "anti-massive-air"
+      ],
+      "expected_abilities": [
+        2362
+      ],
+      "description": "Ability-Mastery TvP (Thor High-Impact Payload): 4 Thors switching to High-Impact Payload (2362) vs 3 Tempests + 2 Carriers",
+      "p1_units": [
+        [
+          "thor",
+          4,
+          -5.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "tempest",
+          3,
+          6.0,
+          -1.5
+        ],
+        [
+          "carrier",
+          2,
+          6.5,
+          1.5
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-t06-thor-explosive-payload-vs-mutalisks",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "thor-explosive-payload",
+        "anti-mutalisk-splash"
+      ],
+      "expected_abilities": [
+        2364
+      ],
+      "description": "Ability-Mastery TvZ (Thor Explosive Payload): 3 High-Impact Thor-APs switching back to Explosive Payload splash (2364) vs 18 Mutalisks",
+      "p1_units": [
+        [
+          "thor-ap",
+          3,
+          -5.0,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "mutalisk",
+          18,
+          6.0,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-t07-raven-anti-armor-missile-vs-roach-ultra",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "raven-anti-armor-missile",
+        "bio-shred"
+      ],
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "p2_upgrades": [
+        "ChitinousPlating"
+      ],
+      "expected_abilities": [
+        3753
+      ],
+      "p1_energy": 120.0,
+      "description": "Ability-Mastery TvZ (Raven Anti-Armor Missile Isolated): 2 Ravens (no IM) + 16 Stim Marines + 4 Marauders casting AAM (3753) onto 12 Roaches + 2 Chitinous Ultralisks",
+      "p1_units": [
+        [
+          "marauder",
+          4,
+          -4.5,
+          0.0
+        ],
+        [
+          "marine",
+          16,
+          -5.8,
+          0.0
+        ],
+        [
+          "raven",
+          2,
+          -6.5,
+          2.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "ultralisk",
+          2,
+          4.8,
+          0.0
+        ],
+        [
+          "roach",
+          12,
+          6.0,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-t08-raven-auto-turret-mineral-harass",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "tier": "econ-harass",
+      "category": "ability-mastery",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "scoring_mode": "worker-runby",
+      "use_p2_main_base": true,
+      "pass_workers_killed_min": 5,
+      "patterns": [
+        "raven-auto-turret",
+        "worker-harass"
+      ],
+      "expected_abilities": [
+        1764
+      ],
+      "p1_energy": 120.0,
+      "description": "Ability-Mastery TvP (Raven Auto-Turret Harass): 2 Ravens (120e) dropping Auto-Turrets (1764) into P2 active Probe mineral line",
+      "p1_units": [
+        [
+          "raven",
+          2,
+          6.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "probe",
+          16,
+          -3.2,
+          0.0
+        ],
+        [
+          "stalker",
+          2,
+          2.2,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-t09-medivac-afterburners-and-heal",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "medivac-boost",
+        "medivac-heal"
+      ],
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "expected_abilities": [
+        2116,
+        386
+      ],
+      "p1_hp_pct": {
+        "medivac": 0.4,
+        "marine": 0.65
+      },
+      "description": "Ability-Mastery TvP (Medivac Afterburners + Heal): 2 wounded Medivacs (40% HP) boosting & healing 12 injured Stim Marines (65% HP) vs 6 Stalkers",
+      "p1_units": [
+        [
+          "marine",
+          12,
+          -5.0,
+          0.0
+        ],
+        [
+          "medivac",
+          2,
+          -6.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "stalker",
+          6,
+          5.5,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-t10-orbital-scanner-sweep-vs-cloaked-dts",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": true,
+      "source": "match-forensics",
+      "terrain": "open",
+      "patterns": [
+        "scanner-sweep",
+        "anti-dt",
+        "cloak-detection"
+      ],
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "expected_abilities": [
+        399
+      ],
+      "p1_energy": {
+        "orbital-command": 100.0
+      },
+      "description": "Ability-Mastery TvP (Orbital Scanner Sweep vs DTs): 1 Orbital Command (100e) + 12 Stim Marines + 6 SCVs scanning (399) and wiping 4 Dark Templars",
+      "p1_units": [
+        [
+          "orbital-command",
+          1,
+          -8.5,
+          0.0
+        ],
+        [
+          "scv",
+          6,
+          -6.2,
+          -1.5
+        ],
+        [
+          "marine",
+          12,
+          -4.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "dark-templar",
+          4,
+          5.5,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-t11-bunker-load-and-scv-repair-vs-roach-ravager",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "bunker-load",
+        "scv-repair"
+      ],
+      "expected_abilities": [
+        407,
+        316,
+        3685
+      ],
+      "p1_hp_pct": {
+        "bunker": 0.65
+      },
+      "description": "Ability-Mastery TvZ (Bunker Load + SCV Repair): 2 Bunkers (65% HP) + 8 Marines + 6 SCVs loading & repairing vs 8 Roaches + 2 Ravagers",
+      "p1_units": [
+        [
+          "bunker",
+          2,
+          -4.5,
+          0.0
+        ],
+        [
+          "marine",
+          8,
+          -5.8,
+          0.0
+        ],
+        [
+          "scv",
+          6,
+          -6.8,
+          -1.5
+        ]
+      ],
+      "p2_units": [
+        [
+          "roach",
+          8,
+          5.5,
+          0.0
+        ],
+        [
+          "ravager",
+          2,
+          6.8,
+          0.0
+        ]
+      ],
+      "max_loops": 960,
+      "p1_minerals": 250
+    },
+    {
+      "id": "sc2-ab-t12-pf-scv-repair-hold-vs-ling-bane",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "planetary-fortress-repair",
+        "scv-repair"
+      ],
+      "p2_upgrades": [
+        "MetabolicBoost",
+        "CentrifugalHooks"
+      ],
+      "expected_abilities": [
+        316,
+        3685
+      ],
+      "description": "Ability-Mastery TvZ (Planetary Fortress + SCV Repair): 1 Planetary Fortress + 12 SCVs repairing through 28 Speedlings + 6 Banelings",
+      "p1_units": [
+        [
+          "planetary-fortress",
+          1,
+          -4.5,
+          0.0
+        ],
+        [
+          "scv",
+          12,
+          -7.2,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "zergling",
+          28,
+          5.5,
+          0.0
+        ],
+        [
+          "baneling",
+          6,
+          6.5,
+          0.0
+        ]
+      ],
+      "max_loops": 960,
+      "p1_minerals": 250,
+      "p1_vespene": 100
+    },
+    {
+      "id": "sc2-ab-t13-supply-depot-lower-march-out",
+      "our_race": "Terran",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "match-forensics",
+      "terrain": "open",
+      "patterns": [
+        "depot-lower",
+        "anti-wall-lock"
+      ],
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "expected_abilities": [
+        556
+      ],
+      "description": "Ability-Mastery TvT (Depot Lower Unblock): 2 raised Supply Depots + 12 Stim Marines lowering depots (556) to march out and crush 6 Reapers",
+      "p1_units": [
+        [
+          "supply-depot",
+          2,
+          -3.2,
+          0.0
+        ],
+        [
+          "marine",
+          12,
+          -6.0,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "reaper",
+          6,
+          6.0,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-z01-infestor-microbial-shroud-vs-carriers-5014",
+      "our_race": "Zerg",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "requires_5014": true,
+      "patterns": [
+        "microbial-shroud",
+        "anti-skytoss",
+        "5.0.14"
+      ],
+      "p1_upgrades": [
+        "GroovedSpines",
+        "MuscularAugments"
+      ],
+      "expected_abilities": [
+        4111
+      ],
+      "p1_energy": 120.0,
+      "description": "Ability-Mastery ZvP (5.0.14 Microbial Shroud): 3 Infestors + 14 Hydralisks casting Microbial Shroud (4111) to shred 3 Carriers + 2 Tempests",
+      "p1_units": [
+        [
+          "hydralisk",
+          14,
+          -5.2,
+          0.0
+        ],
+        [
+          "infestor",
+          3,
+          -6.8,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "carrier",
+          3,
+          5.8,
+          -1.0
+        ],
+        [
+          "tempest",
+          2,
+          6.5,
+          1.5
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-z02-viper-parasitic-bomb-vs-air-flock",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "viper-parasitic-bomb",
+        "anti-air-clump"
+      ],
+      "expected_abilities": [
+        2542
+      ],
+      "p1_energy": 160.0,
+      "description": "Ability-Mastery ZvT (Viper Parasitic Bomb Isolated): 3 Vipers (160e) + 10 Corruptors bombing a tight flock of 16 Vikings + 4 Banshees",
+      "p1_units": [
+        [
+          "corruptor",
+          10,
+          -5.2,
+          0.0
+        ],
+        [
+          "viper",
+          3,
+          -6.8,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "viking-fighter",
+          16,
+          5.5,
+          0.0
+        ],
+        [
+          "banshee",
+          4,
+          6.5,
+          1.5
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-z03-viper-blinding-cloud-vs-tank-bio",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "viper-blinding-cloud",
+        "anti-siege-line"
+      ],
+      "p1_upgrades": [
+        "MetabolicBoost",
+        "GlialReconstitution"
+      ],
+      "p2_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "expected_abilities": [
+        2063
+      ],
+      "p1_energy": 120.0,
+      "description": "Ability-Mastery ZvT (Viper Blinding Cloud Isolated): 3 Vipers (120e) + 10 Roaches + 16 Speedlings blinding 4 Sieged Tanks + 12 Stim Marines",
+      "p1_units": [
+        [
+          "zergling",
+          16,
+          -4.5,
+          0.0
+        ],
+        [
+          "roach",
+          10,
+          -5.5,
+          0.0
+        ],
+        [
+          "viper",
+          3,
+          -6.8,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "marine",
+          12,
+          4.8,
+          0.0
+        ],
+        [
+          "siege-tank-sieged",
+          4,
+          6.5,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-z04-viper-consume-hatchery-recharge",
+      "our_race": "Zerg",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "viper-consume",
+        "viper-abduct"
+      ],
+      "p1_upgrades": [
+        "GroovedSpines"
+      ],
+      "expected_abilities": [
+        2073
+      ],
+      "p1_energy": {
+        "viper": 35.0
+      },
+      "description": "Ability-Mastery ZvP (Viper Consume): 2 low-energy Vipers (35e) Consuming a friendly Hatchery (2073) behind 12 Hydralisks vs 2 Colossi + 6 Stalkers",
+      "p1_units": [
+        [
+          "hatchery",
+          1,
+          -13.5,
+          0.0
+        ],
+        [
+          "viper",
+          2,
+          -10.5,
+          0.0
+        ],
+        [
+          "hydralisk",
+          12,
+          -5.0,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "stalker",
+          6,
+          5.5,
+          0.0
+        ],
+        [
+          "colossus",
+          2,
+          7.0,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-z05-corruptor-caustic-spray-unguarded-nexus",
+      "our_race": "Zerg",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "corruptor-caustic-spray",
+        "base-snipe"
+      ],
+      "expected_abilities": [
+        2324
+      ],
+      "description": "Ability-Mastery ZvP (Corruptor Caustic Spray): 8 Corruptors melting an unguarded enemy Nexus + Robotics Facility + 6 Probes (0 AA) via Caustic Spray (2324)",
+      "p1_units": [
+        [
+          "corruptor",
+          8,
+          -5.0,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "nexus",
+          1,
+          5.5,
+          0.0
+        ],
+        [
+          "robotics-facility",
+          1,
+          8.5,
+          3.0
+        ],
+        [
+          "probe",
+          6,
+          4.5,
+          -2.5
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-z06-overseer-contaminate-stargate-robo",
+      "our_race": "Zerg",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "overseer-contaminate",
+        "tech-denial"
+      ],
+      "p1_upgrades": [
+        "OverlordSpeed"
+      ],
+      "expected_abilities": [
+        1825
+      ],
+      "p1_energy": {
+        "overseer": 160.0
+      },
+      "description": "Ability-Mastery ZvP (Overseer Contaminate): 2 Speed Overseers (160e) + 8 Roaches contaminating enemy Stargate + Robotics Facility (1825)",
+      "p1_units": [
+        [
+          "roach",
+          8,
+          -5.0,
+          0.0
+        ],
+        [
+          "overseer",
+          2,
+          -5.5,
+          1.5
+        ]
+      ],
+      "p2_units": [
+        [
+          "stargate",
+          1,
+          5.5,
+          -2.0
+        ],
+        [
+          "robotics-facility",
+          1,
+          5.5,
+          2.0
+        ],
+        [
+          "pylon",
+          1,
+          7.5,
+          0.0
+        ],
+        [
+          "zealot",
+          4,
+          4.0,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-z07-overseer-oversight-and-changeling",
+      "our_race": "Zerg",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "overseer-oversight",
+        "overseer-changeling",
+        "cloak-detection"
+      ],
+      "p1_upgrades": [
+        "OverlordSpeed"
+      ],
+      "expected_abilities": [
+        3743,
+        181
+      ],
+      "p1_energy": {
+        "overseer": 100.0
+      },
+      "description": "Ability-Mastery ZvP (Overseer Oversight + Changeling): 2 Overseers (100e) + 10 Roaches deploying Oversight (3743) & Changeling (181) vs 3 Dark Templars + 4 Zealots",
+      "p1_units": [
+        [
+          "roach",
+          10,
+          -5.0,
+          0.0
+        ],
+        [
+          "overseer",
+          2,
+          -6.5,
+          1.5
+        ]
+      ],
+      "p2_units": [
+        [
+          "dark-templar",
+          3,
+          5.5,
+          0.0
+        ],
+        [
+          "zealot",
+          4,
+          4.5,
+          1.5
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-z08-ravager-bile-vs-bunkers-liberator",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "ravager-corrosive-bile",
+        "anti-bunker",
+        "anti-liberator"
+      ],
+      "p1_upgrades": [
+        "GlialReconstitution"
+      ],
+      "expected_abilities": [
+        2338
+      ],
+      "description": "Ability-Mastery ZvT (Ravager Corrosive Bile vs Static/Siege): 6 Ravagers + 8 Roaches biling (2338) 2 loaded Bunkers + 2 Sieged Liberators",
+      "p1_units": [
+        [
+          "roach",
+          8,
+          -5.0,
+          0.0
+        ],
+        [
+          "ravager",
+          6,
+          -6.2,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "liberator-ag",
+          2,
+          5.8,
+          0.0
+        ]
+      ],
+      "p2_loaded_transports": [
+        {
+          "transport": "bunker",
+          "dx": 4.2,
+          "dy": -2.0,
+          "cargo": [
+            [
+              "marine",
+              4
+            ]
+          ]
+        },
+        {
+          "transport": "bunker",
+          "dx": 4.2,
+          "dy": 2.0,
+          "cargo": [
+            [
+              "marine",
+              4
+            ]
+          ]
+        }
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-z09-queen-transfusion-wounded-ultralisk",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "use_main_base": true,
+      "patterns": [
+        "queen-transfusion",
+        "ultralisk-sustain"
+      ],
+      "p1_upgrades": [
+        "ChitinousPlating"
+      ],
+      "p2_upgrades": [
+        "Stim",
+        "ConcussiveShells"
+      ],
+      "expected_abilities": [
+        1664
+      ],
+      "p1_energy": {
+        "queen": 100.0
+      },
+      "p1_hp_pct": {
+        "ultralisk": 0.45
+      },
+      "description": "Ability-Mastery ZvT (Queen Transfusion on Creep): Main Hatchery creep + 4 Queens (100e) transfusing (1664) 2 wounded Ultralisks (45% HP) vs 8 Marauders + 8 Marines",
+      "p1_units": [
+        [
+          "ultralisk",
+          2,
+          3.0,
+          0.0
+        ],
+        [
+          "queen",
+          4,
+          1.4,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "marauder",
+          8,
+          10.0,
+          0.0
+        ],
+        [
+          "marine",
+          8,
+          11.2,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-ab-z10-queen-inject-and-creep-tumor-defense",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "ability-mastery",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "use_main_base": true,
+      "patterns": [
+        "queen-inject",
+        "queen-creep-tumor"
+      ],
+      "expected_abilities": [
+        251,
+        1694,
+        3691
+      ],
+      "p1_energy": {
+        "queen": 75.0
+      },
+      "description": "Ability-Mastery ZvT (Queen Inject + Creep Tumor): Main Hatchery + 2 Queens (75e) + 12 Drones + 6 Zerglings injecting (251) & spreading Creep Tumor (1694) while holding 4 Hellions",
+      "p1_units": [
+        [
+          "drone",
+          12,
+          -3.2,
+          0.0
+        ],
+        [
+          "queen",
+          2,
+          1.8,
+          0.0
+        ],
+        [
+          "zergling",
+          6,
+          3.0,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "hellion",
+          4,
+          10.5,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-nc-01-protoss-close-patch-mining-priority",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "map": "PersephoneAIE_v4.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "use_main_base": true,
+      "patterns": [
+        "mining-priority",
+        "close-patch-pairing",
+        "worker-split"
+      ],
+      "non_combat_objective": "mining-priority",
+      "non_combat_params": {
+        "target_minerals": 520.0,
+        "pass_score_min": 75.0
+      },
+      "description": "Non-Combat P (Mining Priority): Main Nexus + 12 Probes prioritizing close mineral patches (2-per-patch, low idle/bounces, >= 520M in 60s)",
+      "p1_units": [
+        [
+          "probe",
+          12,
+          -3.2,
+          0.0
+        ]
+      ],
+      "p2_units": [],
+      "max_loops": 1344
+    },
+    {
+      "id": "sc2-nc-02-terran-scv-mineral-split-efficiency",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "map": "PersephoneAIE_v4.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "use_main_base": true,
+      "patterns": [
+        "mining-priority",
+        "close-patch-pairing",
+        "worker-split"
+      ],
+      "non_combat_objective": "mining-priority",
+      "non_combat_params": {
+        "target_minerals": 500.0,
+        "pass_score_min": 75.0
+      },
+      "description": "Non-Combat T (SCV Mineral Split): Main Command Center + 12 SCVs optimizing close-patch pairing & uninterrupted mining (>= 500M in 60s)",
+      "p1_units": [
+        [
+          "scv",
+          12,
+          -3.2,
+          0.0
+        ]
+      ],
+      "p2_units": [],
+      "max_loops": 1344
+    },
+    {
+      "id": "sc2-nc-03-probe-mineral-line-harass-disrupt",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "map": "PersephoneAIE_v4.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "use_p2_main_base": true,
+      "patterns": [
+        "probe-harass",
+        "mineral-walk-escape",
+        "worker-disruption"
+      ],
+      "non_combat_objective": "probe-harass-disrupt",
+      "non_combat_params": {
+        "variant": "mineral-harass",
+        "target_denied": 100.0,
+        "target_pulled_sec": 20.0,
+        "pass_score_min": 65.0
+      },
+      "description": "Non-Combat PvT (Probe Mineral Harass): 1 Scout Probe disrupting 12 mining enemy SCVs, pulling chasers, denying minerals & escaping via mineral-walk",
+      "p1_units": [
+        [
+          "probe",
+          1,
+          6.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "scv",
+          12,
+          -3.2,
+          0.0
+        ]
+      ],
+      "max_loops": 1008
+    },
+    {
+      "id": "sc2-nc-04-probe-deny-enemy-natural-expand",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "map": "PersephoneAIE_v4.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "natural-expand",
+      "patterns": [
+        "expand-block",
+        "probe-harass",
+        "scv-deny"
+      ],
+      "non_combat_objective": "probe-harass-disrupt",
+      "non_combat_params": {
+        "variant": "expand-block",
+        "p2_natural": true,
+        "target_delay_sec": 25.0,
+        "pass_score_min": 65.0
+      },
+      "description": "Non-Combat PvT (Natural Expand Block): 1 Scout Probe hovering over enemy natural center to block SCV Command Center placement & chip the SCV",
+      "p1_units": [
+        [
+          "probe",
+          1,
+          2.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "scv",
+          1,
+          -1.5,
+          0.0
+        ]
+      ],
+      "max_loops": 784
+    },
+    {
+      "id": "sc2-nc-05-probe-worker-stack-mineral-walk-escape",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "map": "PersephoneAIE_v4.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "use_main_base": true,
+      "p2_upgrades": [
+        "MetabolicBoost"
+      ],
+      "patterns": [
+        "worker-stack-drill",
+        "mineral-walk",
+        "anti-surround"
+      ],
+      "non_combat_objective": "worker-stack-drill",
+      "non_combat_params": {
+        "target_kill_val": 100.0,
+        "pass_score_min": 70.0
+      },
+      "description": "Non-Combat PvZ (Probe Mineral-Walk Stack): 12 Probes mineral-walking (`3666`) into a tight stack against 8 Speedlings to deny surrounds & counter-drill",
+      "p1_units": [
+        [
+          "probe",
+          12,
+          -3.2,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "zergling",
+          8,
+          7.5,
+          0.0
+        ]
+      ],
+      "max_loops": 672
+    },
+    {
+      "id": "sc2-nc-06-drone-drill-stack-counter-vs-probes",
+      "our_race": "Zerg",
+      "enemy_race": "Protoss",
+      "map": "PersephoneAIE_v4.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "use_main_base": true,
+      "patterns": [
+        "worker-stack-drill",
+        "drone-drill",
+        "mineral-walk"
+      ],
+      "non_combat_objective": "worker-stack-drill",
+      "non_combat_params": {
+        "target_kill_val": 350.0,
+        "pass_score_min": 70.0
+      },
+      "description": "Non-Combat ZvP (Drone Drill Stack): 12 Drones mineral-walk stacking (`3666`) on a mineral patch then burst-attacking to crush 10 rushing Probes",
+      "p1_units": [
+        [
+          "drone",
+          12,
+          -3.2,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "probe",
+          10,
+          6.0,
+          0.0
+        ]
+      ],
+      "max_loops": 784
+    },
+    {
+      "id": "sc2-nc-07-persephone-mineral-wall-clear-and-cross",
+      "our_race": "Protoss",
+      "enemy_race": "Protoss",
+      "map": "PersephoneAIE_v4.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "mineral-wall",
+      "patterns": [
+        "mineral-wall-clear",
+        "map-feature-traversal"
+      ],
+      "non_combat_objective": "mineral-wall-clear",
+      "non_combat_params": {
+        "target_patches": 2,
+        "max_clear_sec": 16.0,
+        "target_cross": 6,
+        "goal_dx": 7.0,
+        "p2_passive": true,
+        "pass_score_min": 70.0
+      },
+      "description": "Non-Combat P (Persephone Mineral Wall): 2 Probes + 6 Stalkers clearing 1-trip `MineralField450` (5M) wall patches and crossing through to the far side",
+      "p1_units": [
+        [
+          "probe",
+          2,
+          -4.5,
+          0.0
+        ],
+        [
+          "stalker",
+          6,
+          -6.0,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "pylon",
+          1,
+          7.0,
+          0.0
+        ]
+      ],
+      "max_loops": 784
+    },
+    {
+      "id": "sc2-nc-08-torches-rich-mineral-wall-breach",
+      "our_race": "Zerg",
+      "enemy_race": "Protoss",
+      "map": "TorchesAIE_v4.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "mineral-wall",
+      "patterns": [
+        "mineral-wall-clear",
+        "rich-mineral-corridor"
+      ],
+      "non_combat_objective": "mineral-wall-clear",
+      "non_combat_params": {
+        "target_patches": 4,
+        "max_clear_sec": 20.0,
+        "target_cross": 6,
+        "goal_dx": 8.0,
+        "p2_passive": true,
+        "pass_score_min": 70.0
+      },
+      "description": "Non-Combat Z (Torches Rich Mineral Corridor): 4 Drones + 8 Roaches mining open `RichMineralField` (7M) wall patches & pushing across the shortcut",
+      "p1_units": [
+        [
+          "drone",
+          4,
+          -5.0,
+          0.0
+        ],
+        [
+          "roach",
+          8,
+          -6.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "pylon",
+          1,
+          8.0,
+          0.0
+        ]
+      ],
+      "max_loops": 784
+    },
+    {
+      "id": "sc2-nc-09-persephone-destructible-rocks-breach",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "map": "PersephoneAIE_v4.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "destructible-rock",
+      "p1_upgrades": [
+        "Stim"
+      ],
+      "patterns": [
+        "destructible-rocks",
+        "rock-breach"
+      ],
+      "non_combat_objective": "destructible-rocks",
+      "non_combat_params": {
+        "variant": "breach",
+        "target_rocks": 1,
+        "max_clear_sec": 20.0,
+        "target_cross": 10,
+        "goal_dx": 8.0,
+        "p2_passive": true,
+        "pass_score_min": 70.0
+      },
+      "description": "Non-Combat T (Destructible Rocks Breach): 8 Marines + 4 Marauders focus-firing Persephone destructible rocks and advancing through the opened lane",
+      "p1_units": [
+        [
+          "marine",
+          8,
+          -6.0,
+          0.0
+        ],
+        [
+          "marauder",
+          4,
+          -7.0,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "pylon",
+          1,
+          8.0,
+          0.0
+        ]
+      ],
+      "max_loops": 784
+    },
+    {
+      "id": "sc2-nc-10-magannatha-collapsible-rock-tower-seal",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "map": "MagannathaAIE_v2.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "collapsible-tower",
+      "p2_upgrades": [
+        "MetabolicBoost"
+      ],
+      "patterns": [
+        "collapsible-tower",
+        "choke-seal",
+        "destructible-rocks"
+      ],
+      "non_combat_objective": "destructible-rocks",
+      "non_combat_params": {
+        "variant": "collapsible-seal",
+        "max_seal_sec": 12.0,
+        "pass_score_min": 70.0
+      },
+      "description": "Non-Combat PvZ (Collapsible Tower Seal): 4 Stalkers dropping a Magannatha Collapsible Rock Tower before 16 incoming Speedlings breach the choke",
+      "p1_units": [
+        [
+          "stalker",
+          4,
+          -4.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "zergling",
+          16,
+          14.0,
+          0.0
+        ]
+      ],
+      "max_loops": 560
+    },
+    {
+      "id": "sc2-nc-11-terran-depot-wall-raise-and-lower-march",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "map": "PersephoneAIE_v4.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "main-ramp-wall",
+      "p2_upgrades": [
+        "MetabolicBoost"
+      ],
+      "patterns": [
+        "depot-wall-control",
+        "ramp-wall-raise-lower"
+      ],
+      "non_combat_objective": "deployable-wall-control",
+      "non_combat_params": {
+        "variant": "depot-wall",
+        "target_exit": 6,
+        "pass_score_min": 75.0
+      },
+      "description": "Non-Combat TvZ (Terran Depot Ramp Wall): 2 Lowered Supply Depots + 8 Marines raising (`558`) to seal out 8 Speedlings, then lowering (`556`) to march out",
+      "p1_units": [
+        [
+          "supply-depot-lowered",
+          1,
+          -0.5,
+          -1.6
+        ],
+        [
+          "supply-depot-lowered",
+          1,
+          -0.5,
+          1.6
+        ],
+        [
+          "marine",
+          8,
+          -3.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "zergling",
+          8,
+          7.5,
+          0.0
+        ],
+        [
+          "evolution-chamber",
+          1,
+          11.5,
+          0.0
+        ]
+      ],
+      "max_loops": 896
+    },
+    {
+      "id": "sc2-nc-12-protoss-natural-wall-door-hold-and-open",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "map": "PersephoneAIE_v4.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "natural-expand",
+      "p2_upgrades": [
+        "MetabolicBoost"
+      ],
+      "patterns": [
+        "protoss-wall-door",
+        "hold-position-door"
+      ],
+      "non_combat_objective": "deployable-wall-control",
+      "non_combat_params": {
+        "variant": "protoss-door",
+        "target_exit": 4,
+        "pass_score_min": 75.0
+      },
+      "description": "Non-Combat PvZ (Protoss Natural Wall Door): Gateway + Cyber Core + Zealot door holding (`18`) against 10 Speedlings with 4 Stalkers, then opening to advance",
+      "p1_units": [
+        [
+          "gateway",
+          1,
+          1.0,
+          -2.5
+        ],
+        [
+          "cybernetics-core",
+          1,
+          1.0,
+          2.5
+        ],
+        [
+          "pylon",
+          1,
+          -1.8,
+          0.0
+        ],
+        [
+          "zealot",
+          1,
+          0.8,
+          0.0
+        ],
+        [
+          "stalker",
+          4,
+          -2.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "zergling",
+          10,
+          8.0,
+          0.0
+        ],
+        [
+          "evolution-chamber",
+          1,
+          11.5,
+          0.0
+        ]
+      ],
+      "max_loops": 784
+    },
+    {
+      "id": "sc2-nc-13-leylines-probe-only-mineral-walk-shortcut",
+      "our_race": "Protoss",
+      "enemy_race": "Protoss",
+      "map": "LeyLinesAIE_v3.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "mineral-wall",
+      "patterns": [
+        "worker-only-path",
+        "mineral-walk-shortcut"
+      ],
+      "non_combat_objective": "worker-only-path",
+      "non_combat_params": {
+        "goal_dx": 6.0,
+        "shortcut_max_sec": 12.0,
+        "p2_passive": true,
+        "pass_score_min": 75.0
+      },
+      "description": "Non-Combat P (LeyLines Worker-Only Seam): 1 Probe mineral-walking (`3666`) through a persistent `BattleStationMineralField750` (150M) worker-only shortcut",
+      "p1_units": [
+        [
+          "probe",
+          1,
+          -3.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "probe",
+          1,
+          6.0,
+          0.0
+        ]
+      ],
+      "max_loops": 560
+    },
+    {
+      "id": "sc2-nc-14-oracle-stasis-ward-choke-patrol-trap",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "map": "PersephoneAIE_v4.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "high-ground-ramp",
+      "high_ground_side": "p1",
+      "expected_abilities": [
+        2505
+      ],
+      "p1_energy": {
+        "oracle": 100.0
+      },
+      "patterns": [
+        "oracle-stasis-ward",
+        "choke-trap"
+      ],
+      "non_combat_objective": "stasis-and-utility",
+      "non_combat_params": {
+        "variant": "stasis-place",
+        "patrol_delay_loops": 224,
+        "target_frozen": 4,
+        "pass_score_min": 70.0
+      },
+      "description": "Non-Combat PvT (Oracle Stasis Choke Trap): 1 Oracle (100e) planting a valid Stasis Ward (`2505`, 0 placement rejects) on the ramp before 8 Marines patrol through",
+      "p1_units": [
+        [
+          "oracle",
+          1,
+          -3.0,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "marine",
+          8,
+          11.0,
+          0.0
+        ]
+      ],
+      "max_loops": 784
+    },
+    {
+      "id": "sc2-nc-15-stasis-ward-safe-trigger-and-defuse",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "map": "PersephoneAIE_v4.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "stasis-ward-defuse",
+        "detector-clearance"
+      ],
+      "non_combat_objective": "stasis-and-utility",
+      "non_combat_params": {
+        "variant": "stasis-defuse",
+        "goal_dx": 9.0,
+        "target_goal": 8,
+        "p2_passive": true,
+        "pass_score_min": 75.0
+      },
+      "description": "Non-Combat TvP (Stasis Ward Defuse): 1 Raven + 8 Marines + 2 Marauders spotting and safely clearing 2 enemy Stasis Traps (`<= 1` ally frozen) before advancing",
+      "p1_units": [
+        [
+          "raven",
+          1,
+          -8.0,
+          0.0
+        ],
+        [
+          "marine",
+          8,
+          -7.0,
+          0.0
+        ],
+        [
+          "marauder",
+          2,
+          -6.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "oracle-stasis-trap",
+          1,
+          0.0,
+          -1.5
+        ],
+        [
+          "oracle-stasis-trap",
+          1,
+          0.0,
+          1.5
+        ],
+        [
+          "pylon",
+          1,
+          9.0,
+          0.0
+        ]
+      ],
+      "max_loops": 672
+    },
+    {
+      "id": "sc2-nc-16-queen-creep-tumor-highway-and-pillar-vision",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "map": "PersephoneAIE_v4.SC2Map",
+      "tier": "non-combat",
+      "category": "non-combat",
+      "fast_core": false,
+      "scoring_mode": "non-combat",
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "use_main_base": true,
+      "expected_abilities": [
+        251,
+        1694,
+        3691
+      ],
+      "p1_energy": {
+        "queen": 75.0
+      },
+      "patterns": [
+        "queen-inject",
+        "creep-tumor-highway",
+        "overlord-pillar-vision"
+      ],
+      "non_combat_objective": "stasis-and-utility",
+      "non_combat_params": {
+        "variant": "creep-vision",
+        "pass_score_min": 70.0
+      },
+      "description": "Non-Combat Z (Creep Highway + Pillar Vision): Main Hatchery + 2 Queens (75e) + 12 Drones + 1 Overlord hitting Inject (`251`), planting >= 2 Creep Tumors (`1694`), and maintaining safe Overlord vision",
+      "p1_units": [
+        [
+          "drone",
+          12,
+          -3.2,
+          0.0
+        ],
+        [
+          "queen",
+          2,
+          1.8,
+          0.0
+        ],
+        [
+          "overlord",
+          1,
+          6.0,
+          0.0
+        ]
+      ],
+      "p2_units": [],
+      "max_loops": 1008
+    },
+    {
+      "id": "sc2-blk-b11-pvp-waterfall-blink-front-rank-arc",
+      "our_race": "Protoss",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "stalker-blink",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "waterfall-blink",
+        "stalker-blink-back",
+        "firing-arc-preservation"
+      ],
+      "p1_upgrades": [
+        "Blink"
+      ],
+      "expected_abilities": [
+        1442,
+        3687
+      ],
+      "description": "Waterfall Blink Micro (PvP): 10 Blink Stalkers rolling wounded frontliners to the 5.5t rear firing arc without breaking DPS vs 11 Stalkers",
+      "p1_units": [
+        [
+          "stalker",
+          10,
+          -4.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "stalker",
+          11,
+          4.5,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-blk-b12-pvt-uphill-blink-cliff-spotter",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "stalker-blink",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "high-ground-ramp",
+      "high_ground_side": "p2",
+      "patterns": [
+        "uphill-blink",
+        "hallucination-phoenix-vision",
+        "high-ground-break"
+      ],
+      "p1_upgrades": [
+        "Blink"
+      ],
+      "p1_energy": {
+        "sentry": 100.0
+      },
+      "expected_abilities": [
+        154,
+        1442,
+        3687
+      ],
+      "description": "Uphill Blink + Cliff Spotter (PvT): 10 Blink Stalkers + 1 Sentry (100e) spawning Hallucinated Phoenix (154) to spot high ground and Blink onto 2 Sieged Tanks + 6 Marines",
+      "p1_units": [
+        [
+          "stalker",
+          10,
+          -4.5,
+          0.0
+        ],
+        [
+          "sentry",
+          1,
+          -5.8,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "marine",
+          6,
+          3.8,
+          0.0
+        ],
+        [
+          "siege-tank-sieged",
+          2,
+          5.6,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-trn-n14-tvz-medivac-cliff-ladder-tanks",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "transport-nydus",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "high-ground-ramp",
+      "high_ground_side": "p2",
+      "patterns": [
+        "cliff-laddering",
+        "medivac-tank-drop",
+        "siege-high-ground"
+      ],
+      "p1_upgrades": [
+        "Stim"
+      ],
+      "p2_upgrades": [
+        "GlialReconstitution"
+      ],
+      "expected_abilities": [
+        394,
+        3668,
+        1408,
+        388
+      ],
+      "description": "Medivac Cliff Laddering (TvZ): 2 empty Medivacs + 2 Siege Tanks + 8 Stim Marines ferrying up to high ground and sieging against 12 Speed Roaches + 4 Ravagers",
+      "p1_units": [
+        [
+          "medivac",
+          2,
+          -6.5,
+          0.0
+        ],
+        [
+          "siege-tank",
+          2,
+          -5.0,
+          -1.5
+        ],
+        [
+          "marine",
+          8,
+          -4.2,
+          1.5
+        ]
+      ],
+      "p2_units": [
+        [
+          "roach",
+          12,
+          4.2,
+          0.0
+        ],
+        [
+          "ravager",
+          4,
+          5.6,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-trn-n15-pvz-prism-cliff-ladder-immortals",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "transport-nydus",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "high-ground-ramp",
+      "high_ground_side": "p2",
+      "patterns": [
+        "cliff-laddering",
+        "warp-prism-immortal-juggle"
+      ],
+      "p1_upgrades": [
+        "GraviticDrive"
+      ],
+      "p2_upgrades": [
+        "GlialReconstitution"
+      ],
+      "expected_abilities": [
+        911,
+        913,
+        3668
+      ],
+      "description": "Warp Prism Cliff Laddering (PvZ): 1 empty Speed Warp Prism shuttling 2 Immortals + 2 Archons onto high ground and juggling vs 14 Speed Roaches + 2 Spine Crawlers",
+      "p1_units": [
+        [
+          "warp-prism",
+          1,
+          -6.5,
+          0.0
+        ],
+        [
+          "immortal",
+          2,
+          -4.8,
+          -1.2
+        ],
+        [
+          "archon",
+          2,
+          -4.5,
+          1.2
+        ]
+      ],
+      "p2_units": [
+        [
+          "spine-crawler",
+          2,
+          3.6,
+          0.0
+        ],
+        [
+          "roach",
+          14,
+          4.8,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-trn-n16-zvt-dropperlord-cliff-ladder-lurkers",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "transport-nydus",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "high-ground-ramp",
+      "high_ground_side": "p2",
+      "patterns": [
+        "cliff-laddering",
+        "dropperlord-lurker-drop",
+        "lurker-burrow"
+      ],
+      "p1_upgrades": [
+        "OverlordSpeed",
+        "Burrow",
+        "LurkerRange"
+      ],
+      "p2_upgrades": [
+        "Stim"
+      ],
+      "expected_abilities": [
+        1406,
+        1408,
+        2108
+      ],
+      "description": "Dropperlord Cliff Laddering (ZvT): 2 empty Speed Dropperlords ferrying 2 Lurkers + 4 Roaches onto high ground to burrow behind 12 Stim Marines + 2 Sieged Tanks",
+      "p1_units": [
+        [
+          "overlord-transport",
+          2,
+          -6.5,
+          0.0
+        ],
+        [
+          "lurker-mp",
+          2,
+          -5.2,
+          -1.5
+        ],
+        [
+          "roach",
+          4,
+          -4.2,
+          1.5
+        ]
+      ],
+      "p2_units": [
+        [
+          "marine",
+          12,
+          3.8,
+          0.0
+        ],
+        [
+          "siege-tank-sieged",
+          2,
+          5.6,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-trn-n17-pvt-prism-chargelot-dt-warp-in",
+      "our_race": "Protoss",
+      "enemy_race": "Terran",
+      "tier": "econ-harass",
+      "category": "transport-nydus",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "scoring_mode": "worker-runby",
+      "pass_workers_killed_min": 6,
+      "use_p2_main_base": true,
+      "patterns": [
+        "warp-prism-phasing",
+        "chargelot-dt-warp-in",
+        "worker-runby"
+      ],
+      "p1_upgrades": [
+        "WarpGate",
+        "GraviticDrive",
+        "Charge"
+      ],
+      "p1_minerals": 800,
+      "p1_vespene": 400,
+      "expected_abilities": [
+        1528,
+        1413,
+        1417
+      ],
+      "description": "Warp Prism Offensive Chargelot/DT Warp-In (PvT): 1 Speed Warp Prism + 4 WarpGates + Home Pylon + Dark Shrine phasing (1528) and warping Chargelots/DTs (1413/1417) at the Prism behind 16 SCVs + 4 Marines + 1 Turret",
+      "p1_units": [
+        [
+          "warp-prism",
+          1,
+          9.5,
+          0.0
+        ],
+        [
+          "pylon",
+          1,
+          18.5,
+          0.0
+        ],
+        [
+          "warp-gate",
+          4,
+          18.0,
+          0.0
+        ],
+        [
+          "dark-shrine",
+          1,
+          19.5,
+          -2.5
+        ]
+      ],
+      "p2_units": [
+        [
+          "scv",
+          16,
+          -3.2,
+          0.0
+        ],
+        [
+          "marine",
+          4,
+          2.8,
+          0.0
+        ],
+        [
+          "missile-turret",
+          1,
+          -2.2,
+          2.2
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-trn-n18-tvz-medivac-bio-drop-evac-escape",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "tier": "econ-harass",
+      "category": "transport-nydus",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "scoring_mode": "worker-runby",
+      "pass_workers_killed_min": 5,
+      "use_p2_main_base": true,
+      "patterns": [
+        "medivac-bio-drop",
+        "squad-pickup-escape",
+        "medivac-afterburners"
+      ],
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "p2_upgrades": [
+        "MetabolicBoost",
+        "CentrifugalHooks"
+      ],
+      "expected_abilities": [
+        2116,
+        394,
+        3668
+      ],
+      "description": "Medivac Bio Drop + Squad Evac Escape (TvZ): Loaded Medivac dropping 8 Stim Marines on 16 Drones + 2 Queens, then scooping survivors & Boosting (2116) from 20 Speedlings + 4 Banelings",
+      "p1_units": [],
+      "p1_loaded_transports": [
+        {
+          "transport": "medivac",
+          "dx": 9.2,
+          "dy": 0.0,
+          "cargo": [
+            [
+              "marine",
+              8
+            ]
+          ]
+        }
+      ],
+      "p2_units": [
+        [
+          "drone",
+          16,
+          -3.2,
+          0.0
+        ],
+        [
+          "queen",
+          2,
+          2.6,
+          0.0
+        ],
+        [
+          "zergling",
+          20,
+          6.2,
+          -2.0
+        ],
+        [
+          "baneling",
+          4,
+          6.8,
+          2.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-trn-n19-tvp-widow-mine-drop-pickup-redrop",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "tier": "econ-harass",
+      "category": "transport-nydus",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "scoring_mode": "worker-runby",
+      "pass_workers_killed_min": 5,
+      "use_p2_main_base": true,
+      "patterns": [
+        "widow-mine-drop",
+        "post-shot-unburrow-evac",
+        "medivac-afterburners"
+      ],
+      "p1_upgrades": [
+        "DrillingClaws"
+      ],
+      "expected_abilities": [
+        2095,
+        2097,
+        2116
+      ],
+      "description": "Widow Mine Drop + Post-Shot Pickup Escape (TvP): Loaded Medivac dropping 3 Drilling-Claws Widow Mines on 16 Probes + 3 Stalkers, then unburrowing (2097) & Boosting (2116) out alive",
+      "p1_units": [],
+      "p1_loaded_transports": [
+        {
+          "transport": "medivac",
+          "dx": 9.2,
+          "dy": 0.0,
+          "cargo": [
+            [
+              "widow-mine",
+              3
+            ]
+          ]
+        }
+      ],
+      "p2_units": [
+        [
+          "probe",
+          16,
+          -3.2,
+          0.0
+        ],
+        [
+          "stalker",
+          3,
+          3.0,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-runby-ro27-zvp-baneling-runby-past-blockers",
+      "our_race": "Zerg",
+      "enemy_race": "Protoss",
+      "tier": "econ-harass",
+      "category": "runby-offense",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "scoring_mode": "worker-runby",
+      "pass_workers_killed_min": 8,
+      "use_p2_main_base": true,
+      "patterns": [
+        "baneling-runby",
+        "move-past-blockers",
+        "worker-focus"
+      ],
+      "p1_upgrades": [
+        "MetabolicBoost",
+        "CentrifugalHooks"
+      ],
+      "description": "Baneling Runby Past Blockers (ZvP): 6 Speed Banelings + 8 Speedlings rolling past 2 frontline Zealots to detonate directly inside 16 mining Probes",
+      "p1_units": [
+        [
+          "baneling",
+          6,
+          8.8,
+          0.0
+        ],
+        [
+          "zergling",
+          8,
+          9.6,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "probe",
+          16,
+          -3.2,
+          0.0
+        ],
+        [
+          "zealot",
+          2,
+          3.2,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-runby-ro28-zvt-dropperlord-zergling-drop",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "tier": "econ-harass",
+      "category": "runby-offense",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "scoring_mode": "worker-runby",
+      "pass_workers_killed_min": 6,
+      "use_p2_main_base": true,
+      "patterns": [
+        "dropperlord-zergling-drop",
+        "worker-runby",
+        "worker-focus"
+      ],
+      "p1_upgrades": [
+        "MetabolicBoost",
+        "OverlordSpeed"
+      ],
+      "description": "Dropperlord Zergling Drop (ZvT): Pre-loaded Speed Dropperlord unloading 8 Speedlings behind 16 mining SCVs + 4 Marines",
+      "p1_units": [],
+      "p1_loaded_transports": [
+        {
+          "transport": "overlord-transport",
+          "dx": 9.2,
+          "dy": 0.0,
+          "cargo": [
+            [
+              "zergling",
+              8
+            ]
+          ]
+        }
+      ],
+      "p2_units": [
+        [
+          "scv",
+          16,
+          -3.2,
+          0.0
+        ],
+        [
+          "marine",
+          4,
+          3.0,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-trn-n20-zvt-changeling-vision-nydus-worm",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "tier": "econ-harass",
+      "category": "transport-nydus",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "scoring_mode": "worker-runby",
+      "pass_workers_killed_min": 5,
+      "use_p2_main_base": true,
+      "patterns": [
+        "changeling-nydus-vision",
+        "nydus-worm-placement",
+        "nydus-raid"
+      ],
+      "p1_upgrades": [
+        "OverlordSpeed"
+      ],
+      "p1_energy": {
+        "overseer": 100.0
+      },
+      "p1_minerals": 250,
+      "p1_vespene": 200,
+      "expected_abilities": [
+        181,
+        1768
+      ],
+      "description": "Changeling Vision -> Nydus Worm (ZvT): Overseer (100e) spawning Changeling (181) to spot P2 base corner & plant Nydus Worm (1768) for home-based loaded Nydus Network (2 Queens + 6 Roaches + 4 Hydras)",
+      "p1_units": [
+        [
+          "overseer",
+          1,
+          11.5,
+          3.5
+        ]
+      ],
+      "p1_loaded_transports": [
+        {
+          "transport": "nydus-network",
+          "dx": 4.2,
+          "dy": 2.0,
+          "at_home": true,
+          "cargo": [
+            [
+              "queen",
+              2
+            ],
+            [
+              "roach",
+              6
+            ],
+            [
+              "hydralisk",
+              4
+            ]
+          ]
+        }
+      ],
+      "p2_units": [
+        [
+          "scv",
+          16,
+          -3.2,
+          0.0
+        ],
+        [
+          "marine",
+          6,
+          3.0,
+          0.0
+        ],
+        [
+          "siege-tank-sieged",
+          1,
+          2.5,
+          -2.5
+        ]
+      ],
+      "max_loops": 1120
+    },
+    {
+      "id": "sc2-rmp-h06-tvp-blind-uphill-scan-tank-break",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "high-ground-ramp",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "high-ground-ramp",
+      "high_ground_side": "p2",
+      "patterns": [
+        "blind-uphill-retreat",
+        "uphill-scanner-sweep",
+        "high-ground-break"
+      ],
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "p1_energy": {
+        "orbital-command": 100.0
+      },
+      "expected_abilities": [
+        399
+      ],
+      "description": "Blind Uphill Scan + Tank Break (TvP): 3 Sieged Tanks + 10 Stim Marines + Orbital Command (100e, 0 flyers) scanning high ground (399) to break 8 Stalkers + 2 Immortals",
+      "p1_units": [
+        [
+          "orbital-command",
+          1,
+          -9.5,
+          0.0
+        ],
+        [
+          "siege-tank-sieged",
+          3,
+          -6.5,
+          0.0
+        ],
+        [
+          "marine",
+          10,
+          -4.5,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "stalker",
+          8,
+          4.2,
+          0.0
+        ],
+        [
+          "immortal",
+          2,
+          5.2,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-rmp-h07-pvz-blind-uphill-halluc-phoenix-vision",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "high-ground-ramp",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "high-ground-ramp",
+      "high_ground_side": "p2",
+      "patterns": [
+        "blind-uphill-retreat",
+        "hallucination-phoenix-vision",
+        "high-ground-break"
+      ],
+      "p1_upgrades": [
+        "Blink"
+      ],
+      "p2_upgrades": [
+        "GroovedSpines",
+        "LurkerRange"
+      ],
+      "p1_energy": {
+        "sentry": 100.0
+      },
+      "expected_abilities": [
+        154
+      ],
+      "description": "Blind Uphill Hallucinated Phoenix Vision (PvZ): 8 Blink Stalkers + 2 Immortals + 1 Sentry (100e, 0 Obs) spawning Hallucinated Phoenix (154) to spot uphill 8 Hydralisks + 2 Lurkers",
+      "p1_units": [
+        [
+          "stalker",
+          8,
+          -4.5,
+          0.0
+        ],
+        [
+          "immortal",
+          2,
+          -5.2,
+          0.0
+        ],
+        [
+          "sentry",
+          1,
+          -6.2,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "hydralisk",
+          8,
+          4.2,
+          0.0
+        ],
+        [
+          "lurker-mp-burrowed",
+          2,
+          4.8,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-rmp-h08-zvt-blind-uphill-retreat-no-spotter",
+      "our_race": "Zerg",
+      "enemy_race": "Terran",
+      "tier": "canonical",
+      "category": "high-ground-ramp",
+      "fast_core": false,
+      "source": "pattern-coverage",
+      "terrain": "high-ground-ramp",
+      "high_ground_side": "p2",
+      "patterns": [
+        "blind-uphill-retreat",
+        "anti-ramp-suicide"
+      ],
+      "p1_upgrades": [
+        "GlialReconstitution"
+      ],
+      "p2_upgrades": [
+        "Stim"
+      ],
+      "description": "Blind Uphill Retreat Without Spotter (ZvT): 10 Speed Roaches + 4 Ravagers (0 flyers) holding/retreating outside blind uphill fire from 2 Sieged Tanks + 8 Stim Marines",
+      "p1_units": [
+        [
+          "roach",
+          10,
+          -4.5,
+          0.0
+        ],
+        [
+          "ravager",
+          4,
+          -5.8,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "marine",
+          8,
+          3.8,
+          0.0
+        ],
+        [
+          "siege-tank-sieged",
+          2,
+          5.6,
+          0.0
+        ]
+      ],
+      "max_loops": 960
     }
   ]
 }

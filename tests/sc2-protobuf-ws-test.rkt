@@ -4971,9 +4971,10 @@
                    (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
                                                 (= (sc2-raw-unit-command-ability-id c) 171)))
                                sat-after-l2-mule))))
-  ;; Cloak threat: OC at 55 energy reserves Scan (0 MULEs), while OC at 105 energy still drops MULE!
+  ;; Cloak threat (revealed cloak=2 DT): OC at 55 energy reserves Scan (0 MULEs), while OC at 105 energy still drops MULE!
+  ;; (Undetected cloak=1 DT within 32t hard-blocks MULE even at 100e — verified by `l58-p1-l23-mule-blocks-uncovered-cloak`.)
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
-  (define dt-cloak (mk-l23-u 9299 76 4 45.0 45.0 #:hp 40.0 #:shield 80.0 #:cloak 1 #:rad 0.375))
+  (define dt-cloak (mk-l23-u 9299 76 4 45.0 45.0 #:hp 40.0 #:shield 80.0 #:cloak 2 #:rad 0.375))
   (define cmds-mule-cloak-55
     (saturate-workers-and-gas-commands
      (sc2-observation 3400 (sc2-player-common 1 120 40 50 26 6 20 0 0 0 0)
@@ -9093,11 +9094,18 @@
      '((burrow-down 94501) (burrow-down 94502) (burrow-down 94503)
        (burrow-down 94504) (burrow-down 94505) (burrow-down 94506))
      obs-bur))
+  (define u-roach-b (mk-l43-u 94501 118 1 50.0 50.0 #:hp 145.0))
+  (define u-bane-b  (mk-l43-u 94502 115 1 51.0 50.0 #:hp 30.0))
+  (define u-inf-b   (mk-l43-u 94503 127 1 52.0 50.0 #:hp 90.0))
+  (define u-lurk-b  (mk-l43-u 94504 503 1 53.0 50.0 #:hp 200.0))
+  (define u-ling-b  (mk-l43-u 94505 119 1 54.0 50.0 #:hp 35.0))
+  (define u-mine-b  (mk-l43-u 94506 500 1 55.0 50.0 #:hp 90.0))
+  (define obs-bur-up (make-test-obs 4820 100 50 (list u-roach-b u-bane-b u-inf-b u-lurk-b u-ling-b u-mine-b)))
   (define cmds-bu
     (translate-bot-actions->sc2-raw-commands
      '((burrow-up 94501) (burrow-up 94502) (burrow-up 94503)
        (burrow-up 94504) (burrow-up 94505) (burrow-up 94506))
-     obs-bur))
+     obs-bur-up))
   (define cmds-cast-bd
     (translate-bot-actions->sc2-raw-commands
      '((cast 94501 burrow) (cast 94504 burrow) (cast 94506 burrow-down))
@@ -9105,7 +9113,7 @@
   (define cmds-cast-bu
     (translate-bot-actions->sc2-raw-commands
      '((cast 94501 unburrow) (cast 94504 unburrow) (cast 94506 burrow-up))
-     (make-test-obs 5000 100 50 (list u-roach u-lurk u-mine))))
+     (make-test-obs 5000 100 50 (list u-roach-b u-lurk-b u-mine-b))))
   (define (tags-for-ab cmds ab)
     (apply append
            (for/list ([c (in-list cmds)]
@@ -11261,7 +11269,8 @@
     (l55-mule-tags (saturate-workers-and-gas-commands
                     (make-test-obs 5732 200 100 (list l55-oc1-75 l55-min1))
                     #:game-info l55-gi-p)))
-  ;; (b) L55-W3a: 2 OCs (75e + 60e) in TvP at >= 4:00 -> BOTH OCs hold Scan (2-Scan bank)!
+  ;; (b) L59-C (`#1566` Fix #3): 2 OCs (75e + 60e) in TvP at >= 4:00 -> ONLY top-1 OC (99973) holds Scan,
+  ;;     2nd OC (99974) MULEs freely at 50e (eliminating `#010` 2-base TvP 65s OC #2 blackout)!
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define m-two-oc
     (l55-mule-tags (saturate-workers-and-gas-commands
@@ -11320,7 +11329,7 @@
                    (equal? m-tvt-415-clean '(99973))
                    (equal? (sort m-tvt-415-two-oc <) '(99973 99974))
                    (null? m-hold-1)
-                   (null? m-two-oc)
+                   (equal? m-two-oc '(99974))
                    (equal? m-three-oc '(99979))
                    (equal? m-100e '(99973))
                    (equal? m-with-turret '(99973))
@@ -11368,9 +11377,1459 @@
   (check-true "l55-w3-high-ground-air-spotter-excludes-detectors"
               (and (not l55-hg-det-hijacked?)
                    l55-hg-picked-phx?))
+
+  ;; 16. L58-P1 (`#1431` / `#1435`): Arena Pass 1 wire/reject fixes:
+  ;;     (a) `hallucination-zealot` (`164`) + all 13 Sentry hallucinations mapped & emitted as NoTarget,
+  ;;     (b) Hallucinated casters blocked from spells (`173` `2:NotSupported`), air-only attackers (`35/78/112`)
+  ;;         blocked from ground unit-target Attack (`111:MustTargetAirUnits`, Colossus `4` still allowed!),
+  ;;         and burrowed non-attackers (`baneling-burrowed=115`) blocked from Attack (`23`, `2:NotSupported`),
+  ;;     (c) Nydus Worm unload (`2371`) gated on cargo > 0 (`0` empty-worm `2:NotSupported`),
+  ;;     (d) Warp Prism unload (`913`) gated on live owned loaded transport + Recall/Stasis freeze shield
+  ;;         (`0` `88:YouCantIssueCommandsToThatUnit` & `0` `3757` `6:Cooldown`),
+  ;;     (e) SCV Repair (`3685`) strictly requires `health < health-max` (`0` `28:TooMuchLife`),
+  ;;     (f) Nexus Energy Recharge (`4126`) enforces `<= 15.0t` range, `>= 50.0e` energy, & non-full target,
+  ;;     (g) `L23-P0-1` MULE blocks on nearby uncovered `cloak=1` threats & ChronoBoost yields to `4126`!
+  (define (mk-l58-u tag utype alliance x y
+                    #:hp [hp 100.0] #:hp-max [hp-max hp] #:en [en 100.0] #:en-max [en-max 200.0]
+                    #:fly [fly #f] #:halluc [halluc #f] #:cloak [cloak 0] #:burr [burr #f]
+                    #:orders [ords '()] #:buffs [buffs '()]
+                    #:ctaken [ctaken 0] #:cmax [cmax 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 4) 2 0))
+              (sc2-point3d x y 8.0) 0.0 0.75 1.0 cloak #f #t #f
+              hp hp-max 0.0 0.0 en en-max 0 0 fly burr halluc #t #f
+              ords 0 buffs 0 0 0.0 0 0 0 0 '() ctaken cmax))
+
+  ;; (16a + 16b) Hallucination Zealot (164), Hallucinated caster block, Air-only ground guard, Burrowed Bane guard
+  (define l58-sentry (mk-l58-u 98101 77  1 30.0 30.0 #:hp 40.0 #:en 150.0))
+  (define l58-hphx   (mk-l58-u 98102 78  1 32.0 30.0 #:hp 120.0 #:en 100.0 #:fly #t #:halluc #t))
+  (define l58-rphx   (mk-l58-u 98103 78  1 33.0 30.0 #:hp 120.0 #:en 100.0 #:fly #t))
+  (define l58-bbane  (mk-l58-u 98104 115 1 35.0 30.0 #:hp 30.0  #:en 0.0   #:en-max 0.0 #:burr #t))
+  (define l58-emar   (mk-l58-u 98111 48  4 40.0 30.0 #:hp 45.0  #:en 0.0   #:en-max 0.0))
+  (define l58-ecol   (mk-l58-u 98112 4   4 41.0 30.0 #:hp 200.0 #:en 0.0   #:en-max 0.0))
+  (define l58-emed   (mk-l58-u 98113 54  4 42.0 30.0 #:hp 150.0 #:en 50.0  #:fly #t))
+  (define l58-cmds-hal
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 98101 hallucination-zealot)
+       (cast-spell 98101 hallucination-archon)
+       (cast-spell 98102 graviton-beam 98111)
+       (attack-unit 98102 98111)
+       (attack-unit 98103 98111)
+       (attack-unit 98103 98112)
+       (attack-unit 98104 98111)
+       (attack-pos (98104) 40.0 30.0)
+       (baneling-explode 98104))
+     (make-test-obs 6100 300 200 (list l58-sentry l58-hphx l58-rphx l58-bbane l58-emar l58-ecol l58-emed))))
+  (define l58-has-164?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 164)
+                            (equal? (sc2-raw-unit-command-unit-tags c) '(98101)))) l58-cmds-hal))
+  (define l58-has-146?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 146))) l58-cmds-hal))
+  (define l58-has-173?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 173))) l58-cmds-hal))
+  (define l58-phx-hit-mar?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23)
+                            (= (sc2-raw-unit-command-target-unit-tag c) 98111)
+                            (ormap (lambda (t) (memv t '(98102 98103))) (sc2-raw-unit-command-unit-tags c))))
+           l58-cmds-hal))
+  (define l58-phx-hit-col?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23)
+                            (= (sc2-raw-unit-command-target-unit-tag c) 98112)
+                            (equal? (sc2-raw-unit-command-unit-tags c) '(98103))))
+           l58-cmds-hal))
+  (define l58-bbane-atk?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23)
+                            (memv 98104 (sc2-raw-unit-command-unit-tags c))))
+           l58-cmds-hal))
+  (define l58-bbane-exp?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 42)
+                            (equal? (sc2-raw-unit-command-unit-tags c) '(98104))))
+           l58-cmds-hal))
+  (define l58-bbane-idle-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '()
+     (make-test-obs 6108 300 200 (list l58-bbane l58-emar))))
+  (define l58-bbane-idle-atk?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23)
+                            (memv 98104 (sc2-raw-unit-command-unit-tags c))))
+           l58-bbane-idle-cmds))
+  (check-true "l58-p1-hallucination-zealot-and-hallucinated-air-burrow-guards"
+              (and (= (ability-symbol->sc2-id 'hallucination-zealot) 164)
+                   (= (ability-symbol->sc2-id 'hallucination-archon) 146)
+                   (= (ability-symbol->sc2-id 'hallucination-phoenix) 154)
+                   (= (ability-symbol->sc2-id 'hallucination-adept) 2391)
+                   l58-has-164? l58-has-146?
+                   (not l58-has-173?)
+                   (not l58-phx-hit-mar?)
+                   l58-phx-hit-col?
+                   (not l58-bbane-atk?)
+                   (not l58-bbane-idle-atk?)
+                   l58-bbane-exp?))
+
+  ;; (16c + 16d) Nydus empty-cargo guard (2371), Warp Prism guard (913), Recall/Stasis freeze shield (88)
+  (define l58-nyd-full  (mk-l58-u 98201 142 1 60.0 60.0 #:hp 300.0 #:ctaken 8 #:cmax 255))
+  (define l58-nyd-empty (mk-l58-u 98202 142 1 64.0 60.0 #:hp 300.0 #:ctaken 0 #:cmax 255))
+  (define l58-cmds-nyd-full
+    (translate-bot-actions->sc2-raw-commands '((nydus-unload 98201)) (make-test-obs 6120 100 50 (list l58-nyd-full))))
+  (define l58-cmds-nyd-empty
+    (translate-bot-actions->sc2-raw-commands '((nydus-unload 98202)) (make-test-obs 6124 100 50 (list l58-nyd-empty))))
+  (define l58-nx-rec   (mk-l58-u 98210 59 1 30.0 30.0 #:hp 1000.0 #:en 100.0))
+  (define l58-wp-far   (mk-l58-u 98211 81 1 80.0 80.0 #:hp 80.0   #:fly #t #:ctaken 4 #:cmax 8))
+  (define l58-wp-empty (mk-l58-u 98212 81 1 50.0 50.0 #:hp 80.0   #:fly #t #:ctaken 0 #:cmax 8))
+  (define l58-wp-home  (mk-l58-u 98211 81 1 32.0 32.0 #:hp 80.0   #:fly #t #:ctaken 4 #:cmax 8))
+  (define l58-wp-stas  (mk-l58-u 98213 81 1 55.0 55.0 #:hp 80.0   #:fly #t #:ctaken 4 #:cmax 8 #:buffs '(129)))
+  ;; Cast Mass Recall (3757) at (80,80), then verify second 3757 is blocked by cooldown AND 913/16 on recalled wp-far are blocked!
+  (define l58-cmds-rec1
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 98210 mass-recall 80.0 80.0))
+     (make-test-obs 6140 200 100 (list l58-nx-rec l58-wp-far l58-wp-empty l58-wp-stas))))
+  (define l58-cmds-rec2
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 98210 mass-recall 80.0 80.0)
+       (unload-all-at 98211 80.0 80.0)
+       (move 98211 82.0 82.0)
+       (unload-all-at 98212 50.0 50.0)
+       (unload-all-at 98213 55.0 55.0)
+       (unload-all-at 999999 80.0 80.0))
+     (make-test-obs 6144 200 100 (list l58-nx-rec l58-wp-far l58-wp-empty l58-wp-stas))))
+  ;; Once Warp Prism finishes teleporting home to (32, 32) (> 8.5t from recall zone), 913 immediately works again!
+  (define l58-cmds-rec-home
+    (translate-bot-actions->sc2-raw-commands
+     '((unload-all-at 98211 32.0 32.0))
+     (make-test-obs 6160 200 100 (list l58-nx-rec l58-wp-home))))
+  (check-true "l58-p1-nydus-empty-guard-warp-prism-and-recall-stasis-shield"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2371))) l58-cmds-nyd-full)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 2371))) l58-cmds-nyd-empty))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3757))) l58-cmds-rec1)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (memv (sc2-raw-unit-command-ability-id c) '(3757 913 16)))) l58-cmds-rec2))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 913)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98211))))
+                          l58-cmds-rec-home)))
+
+  ;; (16e + 16f) SCV Repair damaged-only guard (`28:TooMuchLife`) & Nexus Energy Recharge `4126` (`<=15t`, `>=50e`)
+  (define l58-scv1    (mk-l58-u 98301 45 1 30.0 30.0 #:hp 45.0   #:hp-max 45.0   #:en 0.0 #:en-max 0.0))
+  (define l58-scv2    (mk-l58-u 98302 45 1 31.0 30.0 #:hp 45.0   #:hp-max 45.0   #:en 0.0 #:en-max 0.0))
+  (define l58-bkr-ok  (mk-l58-u 98303 24 1 33.0 30.0 #:hp 400.0  #:hp-max 400.0  #:en 0.0 #:en-max 0.0))
+  (define l58-bkr-dmg (mk-l58-u 98304 24 1 33.0 33.0 #:hp 260.0  #:hp-max 400.0  #:en 0.0 #:en-max 0.0))
+  (define l58-cmds-rep
+    (translate-bot-actions->sc2-raw-commands
+     '((repair 98301 98303)
+       (cast-spell 98302 repair 98303)
+       (repair 98301 98304))
+     (make-test-obs 6200 200 100 (list l58-scv1 l58-scv2 l58-bkr-ok l58-bkr-dmg))))
+  (define l58-nx-hi   (mk-l58-u 98310 59 1 30.0 30.0 #:hp 1000.0 #:en 100.0))
+  (define l58-nx-lo   (mk-l58-u 98311 59 1 32.0 30.0 #:hp 1000.0 #:en 40.0))
+  (define l58-ht-near (mk-l58-u 98312 75 1 35.0 30.0 #:hp 40.0   #:en 25.0))
+  (define l58-ht-far  (mk-l58-u 98313 75 1 70.0 30.0 #:hp 40.0   #:en 25.0))
+  (define l58-ht-full (mk-l58-u 98314 75 1 34.0 30.0 #:hp 40.0   #:en 200.0))
+  (define l58-cmds-er
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 98310 nexus-energy-recharge 98313)
+       (cast-spell 98311 nexus-energy-recharge 98312)
+       (cast-spell 98310 nexus-energy-recharge 98314)
+       (cast-spell 98310 nexus-energy-recharge 98312))
+     (make-test-obs 6220 200 100 (list l58-nx-hi l58-nx-lo l58-ht-near l58-ht-far l58-ht-full))))
+  (define l58-er-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 4126))) l58-cmds-er))
+  (check-true "l58-p1-scv-repair-damaged-only-and-nexus-energy-recharge-4126-guards"
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3685)
+                                                (= (sc2-raw-unit-command-target-unit-tag c) 98303)))
+                               l58-cmds-rep))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3685)
+                                           (= (sc2-raw-unit-command-target-unit-tag c) 98304)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98301))))
+                          l58-cmds-rep)
+                   (= (length l58-er-cmds) 1)
+                   (= (sc2-raw-unit-command-target-unit-tag (first l58-er-cmds)) 98312)
+                   (equal? (sc2-raw-unit-command-unit-tags (first l58-er-cmds)) '(98310))))
+
+  ;; (16g) L23-P0-1 MULE hard-blocks on nearby uncovered cloak=1 DT (even at 100e!),
+  ;;       banks 50e Scan vs Protoss when >= 8 combat units exist even < 4:00, & ChronoBoost yields to 4126!
+  (define l58-dt-cl1 (mk-l58-u 98401 76 4 38.0 30.0 #:hp 40.0 #:cloak 1))
+  (define l58-8mar
+    (for/list ([i (in-range 8)])
+      (mk-l58-u (+ 98420 i) 48 1 (+ 32.0 (* 0.5 i)) 30.0 #:hp 45.0 #:en 0.0 #:en-max 0.0)))
+  (define l58-nx-prb
+    (mk-l58-u 98410 59 1 30.0 30.0 #:hp 1000.0 #:en 100.0
+              #:orders (list (sc2-unit-order 1006 #f 0 0.25))))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define l58-mule-under-dt
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 6240 200 100 (list l55-oc1-100 l55-min1 l58-dt-cl1))
+                    #:game-info l55-gi-p)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  ;; Rewind to loop 16 (< 5376): with 8 Marines vs Protoss & 0 Ravens/Turrets, 75e OC holds 50e Scan!
+  (define l58-mule-8mar-tvp
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 16 200 100 (append (list l55-oc1-75 l55-min1) l58-8mar))
+                    #:game-info l55-gi-p)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define l58-chrono-yield
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3755)))
+            (saturate-workers-and-gas-commands
+             (make-test-obs 6250 200 100 (list l58-nx-prb l58-ht-near l58-emar l55-min1)))))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define l58-chrono-normal
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3755)))
+            (saturate-workers-and-gas-commands
+             (make-test-obs 6260 200 100 (list l58-nx-prb l58-ht-full l58-emar l55-min1)))))
+  ;; Rewind cleanly so no recall/cooldown boxes persist
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l55-min1))))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l55-min1))))
+  (check-true "l58-p1-l23-mule-blocks-uncovered-cloak-and-chrono-yields-to-4126"
+              (and (null? l58-mule-under-dt)
+                   (null? l58-mule-8mar-tvp)
+                   (null? l58-chrono-yield)
+                   (= (length l58-chrono-normal) 1)))
+
+  ;; 17. L58-P2 (`#1442`): Arena Pass 2 wire fixes:
+  ;;     (a) Exact Nexus Recall (`3757`) radius (`2.5t`) + post-teleport arrival stun at Nexus `(nx, ny)`
+  ;;         through `cast+108` (`0` `23:88` on recalled units, `0` false-freeze on unrecalled allies `5.5t` away!)
+  ;;         + ground-only attacker guard against flying enemies (`113:MustTargetGroundUnits`),
+  ;;     (b) Loop-0 MULE dedup (`saturate` preserves same-loop `SC2-MACRO-ABILITY-LAST-LOOP`) + emergency
+  ;;         P0 Terran OC `Scanner Sweep (399)` vs `cloak=1` DTs in `12a` (with effect-6 non-duplication),
+  ;;     (c) Overseer (`129`) preserves energy for `Contaminate (1825)` (Tier P0) instead of spamming `181`
+  ;;         near uncontaminated enemy production/tech structures (`<= 24t`),
+  ;;     (d) Immobile burrowed/sieged units (`503` Lurker) drop `Move (16)` & wrong-polarity `2108`
+  ;;         (`2:NotSupported`), while burrow-moving `118` Roach keeps `16`, and active burrow transitions
+  ;;         drop duplicate `1386`/`3662` (`4:CantQueueThatOrder`),
+  ;;     (e) Burrowed `InfestorBurrowed (127)` drops `74` (`2:NotSupported`) & `4111` (`211:TargetIsOutOfArc`)
+  ;;         while keeping `249` Neural Parasite & `3662` Unburrow (and unburrowed `111` still casts `74`/`4111`)!
+
+  ;; (17a) Nexus Recall exact radius + post-teleport Nexus arrival stun + ground-only vs flying guard
+  (define l58p2-nx    (mk-l58-u 98501 59  1 30.0 30.0 #:hp 1000.0 #:en 100.0))
+  (define l58p2-stk-c (mk-l58-u 98502 74  1 88.0 86.0 #:hp 80.0   #:en 0.0 #:en-max 0.0)) ;; inside 2.5t recall!
+  (define l58p2-phx-o (mk-l58-u 98503 78  1 93.8 86.0 #:hp 120.0  #:en 100.0 #:fly #t))   ;; 5.8t away -> NOT recalled!
+  (define l58p2-dt    (mk-l58-u 98504 76  1 82.0 86.0 #:hp 40.0   #:en 0.0 #:en-max 0.0)) ;; 6.0t away -> NOT recalled!
+  (define l58p2-eovs  (mk-l58-u 98511 129 4 95.0 86.0 #:hp 200.0  #:en 50.0 #:fly #t))
+  (define l58p2-eroa  (mk-l58-u 98512 110 4 90.0 86.0 #:hp 145.0  #:en 0.0 #:en-max 0.0))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l55-min1))))
+  ;; Cast Nexus Recall (3757) at (88, 86) on loop 6500
+  (define l58p2-rc-cast
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 98501 mass-recall 88.0 86.0))
+     (make-test-obs 6500 200 100 (list l58p2-nx l58p2-stk-c l58p2-phx-o l58p2-dt l58p2-eovs l58p2-eroa))))
+  ;; Windup loop 6540 (+40): captured Stalker (98502) frozen, unrecalled Phoenix (98503) & DT (98504) free!
+  ;; Also DT (98504) drops Attack (23) on flying Overseer (98511) while Phoenix (98503) attacks it!
+  (define l58p2-rc-windup
+    (translate-bot-actions->sc2-raw-commands
+     '((attack-unit 98502 98512)
+       (attack-unit 98503 98511)
+       (attack-unit 98504 98511)
+       (attack-unit 98504 98512))
+     (make-test-obs 6540 200 100 (list l58p2-nx l58p2-stk-c l58p2-phx-o l58p2-dt l58p2-eovs l58p2-eroa))))
+  ;; Post-teleport arrival stun loop 6592 (+92): Stalker teleported to Nexus (31, 31) -> STILL frozen (`0` 23:88)!
+  (define l58p2-stk-home (mk-l58-u 98502 74 1 31.0 31.0 #:hp 80.0 #:en 0.0 #:en-max 0.0))
+  (define l58p2-rc-arrive
+    (translate-bot-actions->sc2-raw-commands
+     '((attack-unit 98502 98512))
+     (make-test-obs 6592 200 100 (list l58p2-nx l58p2-stk-home l58p2-eroa))))
+  ;; Post-stun loop 6612 (+112): Stalker at Nexus unlocked cleanly!
+  (define l58p2-rc-free
+    (translate-bot-actions->sc2-raw-commands
+     '((attack-unit 98502 98512))
+     (make-test-obs 6612 200 100 (list l58p2-nx l58p2-stk-home l58p2-eroa))))
+  (check-true "l58-p2-recall-exact-radius-nexus-arrival-stun-and-ground-vs-air-guard"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3757)))
+                          l58p2-rc-cast)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (memv 98502 (sc2-raw-unit-command-unit-tags c))))
+                               l58p2-rc-windup))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 23)
+                                           (= (sc2-raw-unit-command-target-unit-tag c) 98511)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98503))))
+                          l58p2-rc-windup)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (= (sc2-raw-unit-command-ability-id c) 23)
+                                                (= (sc2-raw-unit-command-target-unit-tag c) 98511)
+                                                (memv 98504 (sc2-raw-unit-command-unit-tags c))))
+                               l58p2-rc-windup))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 23)
+                                           (= (sc2-raw-unit-command-target-unit-tag c) 98512)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98504))))
+                          l58p2-rc-windup)
+                   (null? l58p2-rc-arrive)
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 23)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98502))))
+                          l58p2-rc-free)))
+
+  ;; (17b) Loop-0 MULE dedup across translate+saturate AND 12a emergency Terran OC Scanner Sweep (399) vs cloak=1 DT!
+  (define l58p2-oc-100 (mk-l58-u 98521 132 1 30.0 30.0 #:hp 1500.0 #:en 100.0))
+  (define l58p2-oc-50  (mk-l58-u 98521 132 1 30.0 30.0 #:hp 1500.0 #:en 50.0))
+  (define l58p2-mar    (mk-l58-u 98522 48  1 34.0 30.0 #:hp 45.0   #:en 0.0 #:en-max 0.0))
+  (define l58p2-min    (sc2-unit 1 3 98523 341 0 (sc2-point3d 25.0 30.0 8.0) 0.0 1.0 1.0 0 #f #t #f
+                                 1000.0 1000.0 0.0 0.0 0.0 0.0 1500 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define l58p2-dt-cl1 (mk-l58-u 98524 76  4 40.0 30.0 #:hp 0.0 #:hp-max 40.0 #:en 0.0 #:en-max 0.0 #:cloak 1))
+  (define l58p2-obs-l0 (make-test-obs 0 200 100 (list l58p2-oc-100 l58p2-mar l58p2-min)))
+  (define l58p2-l0-tr  (translate-bot-actions->sc2-raw-commands '((cast-spell 98521 calldown-mule 98523)) l58p2-obs-l0))
+  (define l58p2-l0-sat (saturate-workers-and-gas-commands l58p2-obs-l0))
+  ;; Loop 4: cloak=1 (hp=0) DT enters sight -> 12a fires P0 emergency Scan (399) and suppresses competing 171!
+  (define l58p2-obs-dt4 (make-test-obs 4 200 100 (list l58p2-oc-50 l58p2-mar l58p2-min l58p2-dt-cl1)))
+  (define l58p2-dt4-cmds (translate-bot-actions->sc2-raw-commands '((cast-spell 98521 calldown-mule 98523)) l58p2-obs-dt4))
+  ;; Loop 200 with active ScannerSweep effect (effect-id = 6) covering DT -> 0 duplicate 399!
+  (define l58p2-obs-dt200
+    (sc2-observation 200 (sc2-player-common 1 200 100 20 50 10 0 0 0 0 0)
+                     (list l58p2-oc-50 l58p2-mar l58p2-min l58p2-dt-cl1)
+                     '() '() #f '()
+                     (list (sc2-effect 6 (list (sc2-point2d 40.0 30.0)) 1 1 13.0))
+                     '() '() '() '()))
+  (define l58p2-dt200-cmds (translate-bot-actions->sc2-raw-commands '() l58p2-obs-dt200))
+  (check-true "l58-p2-t10-loop0-mule-dedup-and-12a-emergency-oc-scan-399"
+              (and (= (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 171)))
+                             l58p2-l0-tr)
+                      1)
+                   (null? (l55-mule-tags l58p2-l0-sat))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 399)
+                                           (urgent-survival-cmd? c)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98521))))
+                          l58p2-dt4-cmds)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 171)))
+                               l58p2-dt4-cmds))
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 399)))
+                               l58p2-dt200-cmds))))
+
+  ;; (17c) Overseer (129) saves energy for Contaminate (1825, P0) instead of spamming 181 near enemy Stargate!
+  (define l58p2-ov    (mk-l58-u 98531 129 1 82.0 86.0 #:hp 200.0 #:en 160.0 #:fly #t))
+  (define l58p2-sg-u  (mk-l58-u 98532 67  4 92.0 86.0 #:hp 600.0 #:en 0.0 #:en-max 0.0))
+  (define l58p2-sg-c  (mk-l58-u 98532 67  4 92.0 86.0 #:hp 600.0 #:en 0.0 #:en-max 0.0 #:buffs '(36)))
+  (define l58p2-z06-uncontam
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-deception-and-scout-spells)
+       (cast-spell 98531 spawn-changeling)
+       (cast-spell 98531 contaminate 98532))
+     (make-test-obs 6700 200 100 (list l58p2-ov l58p2-sg-u))))
+  (define l58p2-z06-contam
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-deception-and-scout-spells))
+     (make-test-obs 6720 200 100 (list l58p2-ov l58p2-sg-c))))
+  (check-true "l58-p2-z06-overseer-blocks-181-near-uncontaminated-stargate-and-emits-1825-p0"
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 181)))
+                               l58p2-z06-uncontam))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 1825)
+                                           (= (wire-cmd-priority-tier c) 0)
+                                           (= (sc2-raw-unit-command-target-unit-tag c) 98532)))
+                          l58p2-z06-uncontam)
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 181)))
+                          l58p2-z06-contam)))
+
+  ;; (17d) LurkerMPBurrowed (503) drops Move (16) & BurrowDown (2108), RoachBurrowed (118) keeps Move (16),
+  ;;       and mid-transition Roach (order 1386) drops duplicate 1386/3662 (`4:CantQueueThatOrder`)!
+  (define l58p2-lurk-b (mk-l58-u 98541 503 1 84.0 86.0 #:hp 200.0 #:en 0.0 #:en-max 0.0 #:burr #t))
+  (define l58p2-roa-b  (mk-l58-u 98542 118 1 85.0 86.0 #:hp 145.0 #:en 0.0 #:en-max 0.0 #:burr #t))
+  (define l58p2-roa-tx (mk-l58-u 98543 110 1 86.0 86.0 #:hp 145.0 #:en 0.0 #:en-max 0.0
+                                 #:orders (list (sc2-unit-order 1386 #f 0 0.4))))
+  (define l58p2-roa-ok (mk-l58-u 98544 110 1 87.0 86.0 #:hp 145.0 #:en 0.0 #:en-max 0.0))
+  (define l58p2-brw-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((move 98541 90.0 86.0)
+       (burrow-down 98541)
+       (cast-spell 98541 lurker-burrow)
+       (burrow-up 98541)
+       (move 98542 90.0 86.0)
+       (burrow-down 98543 1386)
+       (burrow-up 98543)
+       (burrow-down 98544 1386)
+       (burrow-down 98544 1386))
+     (make-test-obs 6800 200 100 (list l58p2-lurk-b l58p2-roa-b l58p2-roa-tx l58p2-roa-ok))))
+  (check-true "l58-p2-u07-z09-immobile-move-burrow-polarity-and-transition-dedup"
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (memv (sc2-raw-unit-command-ability-id c) '(16 2108))
+                                                (memv 98541 (sc2-raw-unit-command-unit-tags c))))
+                               l58p2-brw-cmds))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 2110)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98541))))
+                          l58p2-brw-cmds)
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 16)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98542))))
+                          l58p2-brw-cmds)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (memv 98543 (sc2-raw-unit-command-unit-tags c))))
+                               l58p2-brw-cmds))
+                   (= (count (lambda (c) (and (sc2-raw-unit-command? c)
+                                              (= (sc2-raw-unit-command-ability-id c) 1386)
+                                              (equal? (sc2-raw-unit-command-unit-tags c) '(98544))))
+                             l58p2-brw-cmds)
+                      1)))
+
+  ;; (17e) Burrowed Infestor (127) drops 74 (Fungal) & 4111 (Microbial Shroud) while keeping 249 (Neural) & 3662!
+  (define l58p2-inf-b  (mk-l58-u 98551 127 1 84.0 86.0 #:hp 90.0 #:en 150.0 #:burr #t))
+  (define l58p2-inf-u  (mk-l58-u 98552 111 1 83.0 86.0 #:hp 90.0 #:en 150.0))
+  (define l58p2-etank  (mk-l58-u 98553 32  4 91.0 86.0 #:hp 175.0 #:en 0.0 #:en-max 0.0))
+  (define l58p2-inf-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 98551 fungal-growth 91.0 86.0)
+       (cast-spell 98551 microbial-shroud 84.0 86.0)
+       (infestor-burrow-cast 98551 fungal-growth 91.0 86.0)
+       (infestor-burrow-cast 98551 neural-parasite 98553)
+       (burrow-up 98551)
+       (cast-spell 98552 fungal-growth 91.0 86.0)
+       (cast-spell 98552 microbial-shroud 83.0 86.0))
+     (make-test-obs 6900 200 100 (list l58p2-inf-b l58p2-inf-u l58p2-etank))))
+  ;; Clean rewind reset
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l55-min1))))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l55-min1))))
+  (check-true "l58-p2-u05-burrowed-infestor-drops-74-and-4111-while-keeping-249-and-3662"
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (memv (sc2-raw-unit-command-ability-id c) '(74 4111))
+                                                (memv 98551 (sc2-raw-unit-command-unit-tags c))))
+                               l58p2-inf-cmds))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 249)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98551))))
+                          l58p2-inf-cmds)
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 3662)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98551))))
+                          l58p2-inf-cmds)
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 74)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98552))))
+                          l58p2-inf-cmds)
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 4111)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98552))))
+                          l58p2-inf-cmds)))
+
+  ;; 18. L58-P3 (`#1451`): Arena Pass 3 wire fixes:
+  ;;     (a) `sc2-ab-t10`: `>= 8` combat units & `0` Ravens/Turrets reserves Scan (`floor = 101.0e`) across
+  ;;         BOTH `Case C (171)` & `L23-P0-1` even before contact / in multi-race batches, + `24f` MULE refractory,
+  ;;     (b) `sc2-ab-z01`: weaponless spellcasters (`111` Infestor, `499` Viper, `56` Raven, `82` Observer,
+  ;;         `129` Overseer, `81` WarpPrism, `694` Disruptor, `494` SwarmHost) strip `Attack (23)` without
+  ;;         stealing `commanded-combat-tags`, so `cast-protective-buff-aura 'microbial-shroud` emits `4111`
+  ;;         on unburrowed `111` (and skips burrowed `127`),
+  ;;     (c) `sc2-real-p05`: incomplete non-structures (merging `Archon 141` `bp < 1.0`) & immobile morphed
+  ;;         supports (`136`/`1911`/`1912`) strip both `Move (16)` & `Attack (23)` (`0` `2:NotSupported`),
+  ;;     (d) `sc2-runby-ro01` & `sc2-ab-t01`: reloading burrowed `WidowMine (500, weapon-cooldown > 0)` drops
+  ;;         `2099` (`6:Cooldown`), and `Viking` with active `403`/`405` order drops duplicate morph (`4:CantQueueThatOrder`)!
+
+  ;; (18a) `sc2-ab-t10` scan reserve across unknown/Zerg race before contact + 24f MULE refractory
+  (define l58p3-oc-100 (mk-l58-u 98601 132 1 30.0 30.0 #:hp 1500.0 #:en 100.0))
+  (define l58p3-oc-105 (mk-l58-u 98601 132 1 30.0 30.0 #:hp 1500.0 #:en 105.0))
+  (define l58p3-mars8
+    (for/list ([i (in-range 8)])
+      (mk-l58-u (+ 98610 i) 48 1 (+ 34.0 (* 0.4 i)) 30.0 #:hp 45.0 #:en 0.0 #:en-max 0.0)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define l58p3-obs-100 (make-test-obs 2204 50 0 (append (list l58p3-oc-100 l58p2-min) l58p3-mars8)))
+  (define l58p3-tr-100  (translate-bot-actions->sc2-raw-commands '((cast-spell 98601 calldown-mule 98523)) l58p3-obs-100 #:game-info l55-gi-z))
+  (define l58p3-sat-100 (saturate-workers-and-gas-commands l58p3-obs-100 #:game-info l55-gi-z))
+  ;; At 105e on loop 2208 -> drops 1 MULE; 16 loops later on loop 2224 (< 24f refractory!) -> drops 0 MULE!
+  (define l58p3-obs-105a (make-test-obs 2208 50 0 (append (list l58p3-oc-105 l58p2-min) l58p3-mars8)))
+  (define l58p3-sat-105a (saturate-workers-and-gas-commands l58p3-obs-105a #:game-info l55-gi-z))
+  (define l58p3-obs-105b (make-test-obs 2224 50 0 (append (list l58p3-oc-105 l58p2-min) l58p3-mars8)))
+  (define l58p3-sat-105b (saturate-workers-and-gas-commands l58p3-obs-105b #:game-info l55-gi-z))
+  (check-true "l58-p3-t10-scan-reserve-across-unknown-race-and-24f-mule-refractory"
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 171))) l58p3-tr-100))
+                   (null? (l55-mule-tags l58p3-sat-100))
+                   (equal? (l55-mule-tags l58p3-sat-105a) '(98601))
+                   (null? (l55-mule-tags l58p3-sat-105b))))
+
+  ;; (18b) `sc2-ab-z01`: Infestor (111) strips bogus Attack (23) AND stays free for `4111` Microbial Shroud!
+  (define l58p3-inf-u (mk-l58-u 98631 111 1 82.0 86.0 #:hp 90.0 #:en 120.0))
+  (define l58p3-inf-b (mk-l58-u 98632 127 1 81.0 86.0 #:hp 90.0 #:en 120.0 #:burr #t))
+  (define l58p3-hyd   (mk-l58-u 98633 107 1 83.0 86.0 #:hp 90.0 #:en 0.0 #:en-max 0.0))
+  (define l58p3-ecar  (mk-l58-u 98639 79  4 92.0 86.0 #:hp 300.0 #:en 0.0 #:en-max 0.0 #:fly #t))
+  (define l58p3-z01-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((attack-unit (98631 98633) 98639)
+       (attack-pos (98631 98632) 92.0 86.0)
+       (cast-protective-buff-aura microbial-shroud 83.0 86.0 3.5))
+     (make-test-obs 7100 200 100 (list l58p3-inf-u l58p3-inf-b l58p3-hyd l58p3-ecar))))
+  ;; Also verify `cast-protective-buff-aura 'microbial-shroud` NEVER picks burrowed 127 when only 127 exists!
+  (define l58p3-z01-bur-only
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-protective-buff-aura microbial-shroud 83.0 86.0 3.5))
+     (make-test-obs 7104 200 100 (list l58p3-inf-b l58p3-ecar))))
+  (check-true "l58-p3-z01-unarmed-infestor-strips-23-and-fires-4111-on-unburrowed-111-only"
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (= (sc2-raw-unit-command-ability-id c) 23)
+                                                (or (memv 98631 (sc2-raw-unit-command-unit-tags c))
+                                                    (memv 98632 (sc2-raw-unit-command-unit-tags c)))))
+                               l58p3-z01-cmds))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 23)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98633))))
+                          l58p3-z01-cmds)
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 4111)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98631))))
+                          l58p3-z01-cmds)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 4111)))
+                               l58p3-z01-bur-only))))
+
+  ;; (18c) `sc2-real-p05`: Merging Archon (141, bp=0.45) & WarpPrismPhasing (136) strip Move (16) & Attack (23),
+  ;;       while completed Archon (141, bp=1.0) executes both cleanly!
+  (define l58p3-arch-inc
+    (sc2-unit 1 1 98641 141 1 (sc2-point3d 84.0 86.0 8.0) 0.0 1.0 0.45 0 #f #t #f
+              10.0 10.0 350.0 350.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define l58p3-arch-ok (mk-l58-u 98642 141 1 85.0 86.0 #:hp 10.0 #:en 0.0 #:en-max 0.0))
+  (define l58p3-wpp     (mk-l58-u 98643 136 1 83.0 86.0 #:hp 80.0 #:en 0.0 #:en-max 0.0 #:fly #t))
+  (define l58p3-ehyd    (mk-l58-u 98649 107 4 91.0 86.0 #:hp 90.0 #:en 0.0 #:en-max 0.0))
+  (define l58p3-p05-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((move (98641 98643) 90.0 86.0)
+       (attack-unit (98641 98642 98643) 98649))
+     (make-test-obs 7200 200 100 (list l58p3-arch-inc l58p3-arch-ok l58p3-wpp l58p3-ehyd))))
+  (check-true "l58-p3-p05-merging-archon-and-phased-prism-strip-16-and-23"
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (memv (sc2-raw-unit-command-ability-id c) '(16 23))
+                                                (or (memv 98641 (sc2-raw-unit-command-unit-tags c))
+                                                    (memv 98643 (sc2-raw-unit-command-unit-tags c)))))
+                               l58p3-p05-cmds))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 23)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98642))))
+                          l58p3-p05-cmds)))
+
+  ;; (18d) `sc2-runby-ro01` WidowMine (500) weapon-cooldown > 0 drops `2099` (`6:Cooldown`) &
+  ;;       `sc2-ab-t01` Viking already executing morph `403` drops duplicate `403`/`405` (`4:CantQueueThatOrder`)!
+  (define l58p3-wm-cd
+    (sc2-unit 1 1 98651 500 1 (sc2-point3d 84.0 86.0 8.0) 0.0 0.5 1.0 0 #f #t #f
+              90.0 90.0 0.0 0.0 0.0 0.0 0 0 #f #t #f #t #f '() 0 '() 0 0 18.0 0 0 0 0 '() 0 0))
+  (define l58p3-wm-ok (mk-l58-u 98652 500 1 85.0 86.0 #:hp 90.0 #:en 0.0 #:en-max 0.0 #:burr #t))
+  (define l58p3-vik-tx
+    (mk-l58-u 98653 35 1 83.0 86.0 #:hp 135.0 #:en 0.0 #:en-max 0.0 #:fly #t
+              #:orders (list (sc2-unit-order 403 #f 0 0.3))))
+  (define l58p3-vik-ok (mk-l58-u 98654 35 1 83.5 86.0 #:hp 135.0 #:en 0.0 #:en-max 0.0 #:fly #t))
+  (define l58p3-edrn (mk-l58-u 98659 104 4 86.0 86.0 #:hp 40.0 #:en 0.0 #:en-max 0.0))
+  (define l58p3-ro01-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((widow-mine-retarget 98651 98659)
+       (attack-unit (98651 98652) 98659)
+       (cast-spell (98653 98654) morph-viking-assault))
+     (make-test-obs 7300 200 100 (list l58p3-wm-cd l58p3-wm-ok l58p3-vik-tx l58p3-vik-ok l58p3-edrn))))
+  ;; Clean rewind reset
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l55-min1))))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l55-min1))))
+  (check-true "l58-p3-ro01-widow-mine-2099-cooldown-and-t01-viking-morph-order-dedup"
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (= (sc2-raw-unit-command-ability-id c) 2099)
+                                                (memv 98651 (sc2-raw-unit-command-unit-tags c))))
+                               l58p3-ro01-cmds))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 2099)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98652))))
+                          l58p3-ro01-cmds)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                                (= (sc2-raw-unit-command-ability-id c) 403)
+                                                (memv 98653 (sc2-raw-unit-command-unit-tags c))))
+                               l58p3-ro01-cmds))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c)
+                                           (= (sc2-raw-unit-command-ability-id c) 403)
+                                           (equal? (sc2-raw-unit-command-unit-tags c) '(98654))))
+                          l58p3-ro01-cmds)))
+
+  ;; 19. L58-P3B (`#1469`): Quick 3-item wire polish:
+  ;;     (a) `sc2-ab-z01`: Unit-targeted `Attack (23)` on untargetable `Interceptor (85)` auto-converts
+  ;;         to point-target `Attack-Move` at Interceptor's `(x, y)` (`0` `2:NotSupported`), and `Medivac (54)`
+  ;;         strips ALL `23` (both point-target & unit-target),
+  ;;     (b) `sc2-ab-t10`: `>= 6` combat units (or latched enemy cloak sighting!) preserves Scan energy on
+  ;;         top-1 OC even when combat units drop `< 6` mid-fight,
+  ;;     (c) `sc2-real-t04` & `sc2-det-d12`: Medivac Heal (`386`) requires live damaged unhealed bio ally,
+  ;;         auto-redirects Medivac #2 to a second wounded bio ally (`0` `206:AlreadyTargeted`), and skips
+  ;;         full-HP / Mech targets!
+
+  ;; (19a) Interceptor (85) unit-target Attack (23) -> Attack-Move point-target + Medivac (54) strips ALL 23
+  (define l58p3b-hyd  (mk-l58-u 98701 107 1 83.0 86.0 #:hp 90.0 #:en 0.0 #:en-max 0.0))
+  (define l58p3b-med  (mk-l58-u 98702 54  1 82.0 86.0 #:hp 150.0 #:en 100.0 #:fly #t))
+  (define l58p3b-intc (mk-l58-u 98709 85  4 89.5 87.5 #:hp 40.0 #:en 0.0 #:en-max 0.0 #:fly #t))
+  (define l58p3b-z01-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((attack-unit 98701 98709)
+       (attack-pos 98702 89.5 87.5)
+       (attack-unit 98702 98709))
+     (make-test-obs 7400 200 100 (list l58p3b-hyd l58p3b-med l58p3b-intc))))
+  (check-true "l58-p3b-z01-interceptor-85-converts-to-attack-move-and-medivac-strips-all-23"
+              (and (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 23)
+                                 (= (sc2-raw-unit-command-target-unit-tag c) 0)
+                                 (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                                 (< (abs (- (sc2-point2d-x (sc2-raw-unit-command-target-pos c)) 89.5)) 0.1)
+                                 (equal? (sc2-raw-unit-command-unit-tags c) '(98701))))
+                          l58p3b-z01-cmds)
+                   (not (ormap (lambda (c)
+                                 (and (sc2-raw-unit-command? c)
+                                      (= (sc2-raw-unit-command-ability-id c) 23)
+                                      (memv 98702 (sc2-raw-unit-command-unit-tags c))))
+                               l58p3b-z01-cmds))))
+
+  ;; (19b) 6-combat reserve + enemy cloak latch keeps OC at >= 50e even when Marines drop to 4 (< 6)!
+  (define l58p3b-oc-100 (mk-l58-u 98711 132 1 30.0 30.0 #:hp 1500.0 #:en 100.0))
+  (define l58p3b-oc-70  (mk-l58-u 98711 132 1 30.0 30.0 #:hp 1500.0 #:en 70.0))
+  (define l58p3b-mars6  (for/list ([i (in-range 6)])
+                          (mk-l58-u (+ 98720 i) 48 1 (+ 34.0 (* 0.4 i)) 30.0 #:hp 45.0 #:en 0.0 #:en-max 0.0)))
+  (define l58p3b-mars4  (take l58p3b-mars6 4))
+  (define l58p3b-dt-far (mk-l58-u 98729 76 4 120.0 120.0 #:hp 40.0 #:en 0.0 #:en-max 0.0 #:cloak 1))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define l58p3b-sat-6m
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 7450 50 0 (append (list l58p3b-oc-100 l58p2-min) l58p3b-mars6))
+                    #:game-info l55-gi-z)))
+  ;; Sight DT once (latches SC2-SAT-SEEN-ENEMY-CLOAK?), then next tick with only 4 Marines & 0 visible DTs -> 70e OC STILL holds Scan!
+  (void (saturate-workers-and-gas-commands
+         (make-test-obs 7454 50 0 (append (list l58p3b-oc-70 l58p2-min l58p3b-dt-far) l58p3b-mars4))
+         #:game-info l55-gi-z))
+  (define l58p3b-sat-4m-latched
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 7490 50 0 (append (list l58p3b-oc-70 l58p2-min) l58p3b-mars4))
+                    #:game-info l55-gi-z)))
+  (check-true "l58-p3b-t10-6-combat-and-cloak-latch-preserve-oc-scan-energy"
+              (and (null? l58p3b-sat-6m)
+                   (null? l58p3b-sat-4m-latched)))
+
+  ;; (19c) Medivac Heal (386): bio-only damaged check + single-healer dedup + Medivac #2 auto-redirect!
+  (define l58p3b-med1 (mk-l58-u 98731 54 1 82.0 86.0 #:hp 150.0 #:en 100.0 #:fly #t))
+  (define l58p3b-med2 (mk-l58-u 98732 54 1 82.5 86.0 #:hp 150.0 #:en 100.0 #:fly #t))
+  (define l58p3b-m1-w (mk-l58-u 98733 48 1 84.0 86.0 #:hp 20.0 #:hp-max 45.0 #:en 0.0 #:en-max 0.0))
+  (define l58p3b-m2-w (mk-l58-u 98734 48 1 85.0 86.0 #:hp 25.0 #:hp-max 45.0 #:en 0.0 #:en-max 0.0))
+  (define l58p3b-m3-f (mk-l58-u 98735 48 1 84.5 86.5 #:hp 45.0 #:hp-max 45.0 #:en 0.0 #:en-max 0.0))
+  (define l58p3b-tnk  (mk-l58-u 98736 33 1 84.5 85.5 #:hp 80.0 #:hp-max 175.0 #:en 0.0 #:en-max 0.0))
+  (define l58p3b-heal-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 98731 heal 98735)
+       (cast-spell 98731 heal 98736)
+       (cast-spell 98731 heal 98733)
+       (cast-spell 98732 heal 98733))
+     (make-test-obs 7500 200 100 (list l58p3b-med1 l58p3b-med2 l58p3b-m1-w l58p3b-m2-w l58p3b-m3-f l58p3b-tnk))))
+  ;; Clean rewind reset
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l55-min1))))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l55-min1))))
+  (define l58p3b-386-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 386)))
+            l58p3b-heal-cmds))
+  (check-true "l58-p3b-t04-d12-medivac-heal-386-dedup-bio-only-and-auto-redirect"
+              (and (= (length l58p3b-386-cmds) 2)
+                   (not (ormap (lambda (c) (memv (sc2-raw-unit-command-target-unit-tag c) '(98735 98736)))
+                               l58p3b-386-cmds))
+                   (= (length (remove-duplicates (map sc2-raw-unit-command-target-unit-tag l58p3b-386-cmds))) 2)))
+
   (hash-clear! SC2-DEPOT-TOGGLE-COOLDOWN)
   (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
   (hash-clear! SC2-WATCHDOG-RING-EXPAND-SYMS))
+
+;; =============================================================================
+;; Loop 59 Package 1 (`L59-W1`, `#1507`): Pro APM/EPM/SPM + Base-Centered Camera
+;; Hotkeys & Minimap Clicks + All `#1502`/`#1499` Tier-1 Wire Fixes
+;; =============================================================================
+(printf "[Loop 59] Testing L59-W1 Pro APM/SPM governor, base-centered camera hotkeys, minimap clicks, neutral-units/expansion-pads, forward Warp Prism priority, dropship rescue unload & all 11 TC<->WS aliases...\n")
+(let ()
+  (define (l59-dist x1 y1 x2 y2)
+    (sqrt (+ (sqr (- x1 x2)) (sqr (- y1 y2)))))
+  (define (mk-l59-u tag utype alliance x y
+                    #:hp [hp 100.0] #:hp-max [hp-max hp]
+                    #:sh [sh 0.0] #:sh-max [sh-max sh]
+                    #:en [en 100.0] #:en-max [en-max 200.0]
+                    #:fly [fly #f] #:burr [burr #f] #:powered [powered #t]
+                    #:cloak [cloak 0]
+                    #:rad [rad 0.75] #:bp [bp 1.0]
+                    #:mins [mins 0] #:gas [gas 0]
+                    #:orders [ords '()] #:buffs [buffs '()]
+                    #:pax [pax '()] #:ctaken [ctaken 0] #:cmax [cmax 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 (if (= alliance 4) 2 0))
+              (sc2-point3d x y 8.0) 0.0 rad bp cloak #f #t #f
+              hp hp-max sh sh-max en en-max mins gas fly burr #f powered #f
+              ords 0 buffs 0 0 0.0 0 0 0 0 pax ctaken cmax))
+
+  ;; 1. Pro APM / EPM / SPM governor defaults + P2 Pro camera jump vs P4 legacy raw camera
+  (define l59-gov (make-wire-apm-governor))
+  (define l59-raw-cam (sc2-raw-camera-move 50.0 50.0 0.0))
+  (define l59-pro-cam (mark-pro-camera-jump-cmd! (sc2-raw-camera-move 50.0 50.0 0.0)))
+  (check-true "l59-w1-pro-apm-governor-defaults-and-dedup-dist"
+              (and (= (wire-apm-governor-target-apm l59-gov) 495.0)
+                   (= (wire-apm-governor-hard-cap-apm l59-gov) 595.0)
+                   (= (wire-apm-governor-burst-capacity l59-gov) 36.0)
+                   (= SC2-CAMERA-MOVE-DEDUP-DIST 8.0)
+                   (= (wire-cmd-priority-tier l59-raw-cam) 4)
+                   (= (wire-cmd-priority-tier l59-pro-cam) 2)
+                   (not (pro-camera-jump-cmd? l59-raw-cam))
+                   (pro-camera-jump-cmd? l59-pro-cam)))
+
+  ;; 2. Pro camera cooldown: 18-loop routine base/minimap vs 6-loop crisis (>14t) vs 28-loop legacy,
+  ;;    plus cross-step short non-base scroll-drift suppression (<= 8.0t) & 5:00+ combat saturation rescue!
+  (define l59-gov-pro (make-wire-apm-governor))
+  (define l59-cc-m (mk-l59-u 99001 18 1 28.5 28.5 #:hp 1500.0 #:en 0.0 #:en-max 0.0 #:rad 2.75))
+  (define l59-cc-n (mk-l59-u 99002 18 1 64.5 28.5 #:hp 1500.0 #:en 0.0 #:en-max 0.0 #:rad 2.75))
+  (define l59-cam-obs (make-test-obs 9000 200 100 (list l59-cc-m l59-cc-n)))
+  (define c-pro-0
+    (govern-sc2-wire-actions!
+     l59-gov-pro
+     (list (mark-pro-camera-jump-cmd! (sc2-raw-camera-move 80.0 80.0 0.0)))
+     9000 l59-cam-obs))
+  ;; +6 loops, distant crisis/minimap jump (40t > 14t) -> ALLOWED!
+  (define c-pro-crisis
+    (govern-sc2-wire-actions!
+     l59-gov-pro
+     (list (mark-pro-camera-jump-cmd! (sc2-raw-camera-move 120.0 80.0 0.0) 40.0 #:crisis? #t))
+     9006 l59-cam-obs))
+  ;; +12 loops, medium jump (10t <= 14t) -> blocked (needs 18 loops)
+  (define c-pro-too-soon
+    (govern-sc2-wire-actions!
+     l59-gov-pro
+     (list (mark-pro-camera-jump-cmd! (sc2-raw-camera-move 110.0 80.0 0.0)))
+     9018 l59-cam-obs))
+  ;; +18 loops from 9006 (= 9024), medium jump (10t > 8.0t) -> ALLOWED!
+  (define c-pro-routine18
+    (govern-sc2-wire-actions!
+     l59-gov-pro
+     (list (mark-pro-camera-jump-cmd! (sc2-raw-camera-move 110.0 80.0 0.0)))
+     9024 l59-cam-obs))
+  ;; +20 loops (= 9044), tiny non-base scroll drift (4.0t <= 8.0t) -> SUPPRESSED!
+  (define c-pro-drift
+    (govern-sc2-wire-actions!
+     l59-gov-pro
+     (list (mark-pro-camera-jump-cmd! (sc2-raw-camera-move 114.0 80.0 0.0)))
+     9044 l59-cam-obs))
+  ;; +30 loops (= 9054, overdue >= 28) under 40 P3 combat moves -> P2 Pro camera NOT starved & capped <= 1!
+  (define p3-flood
+    (for/list ([i (in-range 40)])
+      (sc2-raw-unit-command 16 (sc2-point2d (+ 70.0 (* 0.5 i)) 70.0) 0 (list (+ 99500 i)) #f)))
+  (define c-pro-midgame
+    (govern-sc2-wire-actions!
+     l59-gov-pro
+     (append p3-flood
+             (list (mark-pro-camera-jump-cmd! (sc2-raw-camera-move 28.5 28.5 0.0))
+                   (mark-pro-camera-jump-cmd! (sc2-raw-camera-move 64.5 28.5 0.0))))
+     9054 l59-cam-obs))
+  (define c-pro-midgame-cams (filter sc2-raw-camera-move? c-pro-midgame))
+  ;; Legacy unmarked raw camera still obeys 28-loop cooldown (blocked at +20, allowed at +28)
+  (define l59-gov-leg (make-wire-apm-governor))
+  (define c-leg-0  (govern-sc2-wire-actions! l59-gov-leg (list (sc2-raw-camera-move 40.0 40.0 0.0)) 1000))
+  (define c-leg-20 (govern-sc2-wire-actions! l59-gov-leg (list (sc2-raw-camera-move 90.0 90.0 0.0)) 1020))
+  (define c-leg-28 (govern-sc2-wire-actions! l59-gov-leg (list (sc2-raw-camera-move 90.0 90.0 0.0)) 1028))
+  (check-true "l59-w1-pro-camera-cooldown-18-routine-6-crisis-drift-suppress-and-midgame-p2-survival"
+              (and (= (length c-pro-0) 1)
+                   (= (length c-pro-crisis) 1)
+                   (null? c-pro-too-soon)
+                   (= (length c-pro-routine18) 1)
+                   (null? c-pro-drift)
+                   (= (length c-pro-midgame-cams) 1)
+                   (= (length c-leg-0) 1)
+                   (null? c-leg-20)
+                   (= (length c-leg-28) 1)))
+
+  ;; 3. Base-Centered Camera Hotkeys (<= 16t snaps to exact townhall center) + Minimap Clicks vs Scroll Drift
+  (define l59-cam-obs-at-80
+    (sc2-observation 9100 (sc2-player-common 1 200 100 40 20 10 10 0 0 0 0)
+                     (list l59-cc-m l59-cc-n) '() '()
+                     (sc2-point3d 80.0 80.0 0.0) '() '() '() '() '() '()))
+  (define l59-base-snap-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((camera-focus 36.0 34.0))
+     l59-cam-obs-at-80))
+  (define l59-base-cam (findf sc2-raw-camera-move? l59-base-snap-cmds))
+  (define l59-drift-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((move-camera 84.0 81.0))
+     l59-cam-obs-at-80))
+  (define l59-minimap-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((move-camera 120.0 110.0))
+     l59-cam-obs-at-80))
+  (define l59-mm-cam (findf sc2-raw-camera-move? l59-minimap-cmds))
+  (check-true "l59-w1-base-centered-camera-snap-and-minimap-vs-scroll-drift"
+              (and (sc2-raw-camera-move? l59-base-cam)
+                   (pro-camera-jump-cmd? l59-base-cam)
+                   (< (abs (- (sc2-raw-camera-move-x l59-base-cam) 28.5)) 0.01)
+                   (< (abs (- (sc2-raw-camera-move-y l59-base-cam) 28.5)) 0.01)
+                   (not (ormap sc2-raw-camera-move? l59-drift-cmds))
+                   (sc2-raw-camera-move? l59-mm-cam)
+                   (pro-camera-jump-cmd? l59-mm-cam)
+                   (< (abs (- (sc2-raw-camera-move-x l59-mm-cam) 120.0)) 0.01)
+                   (< (abs (- (sc2-raw-camera-move-y l59-mm-cam) 110.0)) 0.01)))
+
+  ;; 4. `sc2-observation->runtime-obs-hash` emits `'neutral-units` (minerals/walls/gold/geysers/rocks/towers,
+  ;;    skipping critters) AND `'expansion-pads`!
+  (define l59-neut-min   (mk-l59-u 99011 341  3 22.0 28.0 #:hp 1000.0 #:mins 1500))
+  (define l59-neut-gold  (mk-l59-u 99012 146  3 72.0 28.0 #:hp 1000.0 #:mins 900))
+  (define l59-neut-wall  (mk-l59-u 99013 1996 3 55.0 55.0 #:hp 1000.0 #:mins 5))
+  (define l59-neut-gas   (mk-l59-u 99014 342  3 24.0 34.0 #:hp 1000.0 #:gas 2250))
+  (define l59-neut-rock  (mk-l59-u 99015 367  3 60.0 60.0 #:hp 2000.0))
+  (define l59-neut-ctwr  (mk-l59-u 99016 588  3 62.0 60.0 #:hp 500.0))
+  (define l59-neut-xnt   (mk-l59-u 99017 149  3 64.0 64.0 #:hp 1000.0))
+  (define l59-neut-crit  (mk-l59-u 99018 190  3 50.0 50.0 #:hp 10.0)) ;; critter -> excluded!
+  ;; Add cluster of minerals for an expansion pad around (68, 28)
+  (define l59-exp-mins
+    (for/list ([y (in-list '(25.0 27.0 29.0 31.0))] [i (in-naturals 0)])
+      (mk-l59-u (+ 99020 i) 341 3 72.0 y #:hp 1000.0 #:mins 1500)))
+  (define l59-obs-neut
+    (make-test-obs 400 200 100
+                   (append (list l59-cc-m l59-neut-min l59-neut-gold l59-neut-wall
+                                 l59-neut-gas l59-neut-rock l59-neut-ctwr l59-neut-xnt l59-neut-crit)
+                           l59-exp-mins)))
+  (define l59-obs-hash (sc2-observation->runtime-obs-hash l59-obs-neut))
+  (define l59-neut-list (hash-ref l59-obs-hash 'neutral-units '()))
+  (define l59-neut-tags (map (lambda (h) (hash-ref h 'id 0)) l59-neut-list))
+  (define l59-exp-pads (hash-ref l59-obs-hash 'expansion-pads '()))
+  (check-true "l59-w1-obs-hash-emits-neutral-units-and-expansion-pads"
+              (and (memv 99011 l59-neut-tags)
+                   (memv 99012 l59-neut-tags)
+                   (memv 99013 l59-neut-tags)
+                   (memv 99014 l59-neut-tags)
+                   (memv 99015 l59-neut-tags)
+                   (memv 99016 l59-neut-tags)
+                   (memv 99017 l59-neut-tags)
+                   (not (memv 99018 l59-neut-tags))
+                   (let ([xnt (findf (lambda (h) (= (hash-ref h 'id 0) 99017)) l59-neut-list)])
+                     (and xnt (eq? (hash-ref xnt 'type #f) 'xel-naga-tower)))
+                   (list? l59-exp-pads)
+                   (pair? l59-exp-pads)))
+
+  ;; 5. Forward Phasing Warp Prism (136) Warp-In Priority:
+  ;;    - Explicit `(warp-in wg-id dark-templar 100.0 100.0)` -> 1417 near Prism EVEN with 1 nearby Marine!
+  ;;    - Explicit 4-arg `(train-unit wg-id zealot 100.0 100.0)` -> 1413 near Prism!
+  ;;    - Offensive 2-arg `(train-unit wg-id stalker)` with uncontested Prism -> 1414 near Prism!
+  ;;    - Routine `(train zealot)` -> keeps home Pylon `(30, 30)` priority!
+  (define l59-nx   (mk-l59-u 99100 59  1 28.0 28.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75))
+  (define l59-pyl  (mk-l59-u 99101 60  1 30.0 34.0 #:hp 200.0 #:sh 200.0 #:rad 1.0))
+  (define l59-wg1  (mk-l59-u 99102 133 1 32.0 34.0 #:hp 500.0 #:sh 500.0 #:rad 1.5))
+  (define l59-wg2  (mk-l59-u 99103 133 1 35.0 34.0 #:hp 500.0 #:sh 500.0 #:rad 1.5))
+  (define l59-wg3  (mk-l59-u 99104 133 1 38.0 34.0 #:hp 500.0 #:sh 500.0 #:rad 1.5))
+  (define l59-wg4  (mk-l59-u 99105 133 1 41.0 34.0 #:hp 500.0 #:sh 500.0 #:rad 1.5))
+  (define l59-wpp  (mk-l59-u 99106 136 1 100.0 100.0 #:hp 80.0 #:sh 100.0 #:fly #t))
+  (define l59-emar (mk-l59-u 99109 48  4 105.0 100.0 #:hp 45.0 #:en 0.0 #:en-max 0.0))
+  (define l59-psrcs
+    (list (sc2-power-source (sc2-point3d 30.0 34.0 8.0) 6.5 99101)
+          (sc2-power-source (sc2-point3d 100.0 100.0 8.0) 3.75 99106)))
+  (define l59-prism-obs-clean
+    (sc2-observation 9200 (sc2-player-common 1 800 400 80 40 20 20 0 0 4 0)
+                     (list l59-nx l59-pyl l59-wg1 l59-wg2 l59-wg3 l59-wg4 l59-wpp)
+                     '(84) l59-psrcs #f '() '() '() '() '() '()))
+  (define l59-prism-obs-cont
+    (sc2-observation 9210 (sc2-player-common 1 800 400 80 40 20 20 0 0 4 0)
+                     (list l59-nx l59-pyl l59-wg1 l59-wg2 l59-wg3 l59-wg4 l59-wpp l59-emar)
+                     '(84) l59-psrcs #f '() '() '() '() '() '()))
+  (define l59-wi-explicit-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((warp-in 99102 dark-templar 100.0 100.0)
+       (train-unit 99103 zealot 100.0 100.0))
+     l59-prism-obs-cont #:enemy-base '(108.0 . 108.0)))
+  (define l59-wi-off-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((train-unit 99104 stalker)
+       (train zealot))
+     l59-prism-obs-clean #:enemy-base '(108.0 . 108.0)))
+  (define c-dt-wi  (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1417))) l59-wi-explicit-cmds))
+  (define c-zl-4a  (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1413))) l59-wi-explicit-cmds))
+  (define c-st-2a  (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1414))) l59-wi-off-cmds))
+  (define c-zl-hm  (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1413))) l59-wi-off-cmds))
+  (check-true "l59-w1-forward-warp-prism-priority-explicit-offensive-and-home-routine"
+              (and (sc2-raw-unit-command? c-dt-wi)
+                   (<= (l59-dist (sc2-point2d-x (sc2-raw-unit-command-target-pos c-dt-wi))
+                                 (sc2-point2d-y (sc2-raw-unit-command-target-pos c-dt-wi))
+                                 100.0 100.0) 3.15)
+                   (sc2-raw-unit-command? c-zl-4a)
+                   (<= (l59-dist (sc2-point2d-x (sc2-raw-unit-command-target-pos c-zl-4a))
+                                 (sc2-point2d-y (sc2-raw-unit-command-target-pos c-zl-4a))
+                                 100.0 100.0) 3.15)
+                   (sc2-raw-unit-command? c-st-2a)
+                   (<= (l59-dist (sc2-point2d-x (sc2-raw-unit-command-target-pos c-st-2a))
+                                 (sc2-point2d-y (sc2-raw-unit-command-target-pos c-st-2a))
+                                 100.0 100.0) 3.15)
+                   (sc2-raw-unit-command? c-zl-hm)
+                   (<= (l59-dist (sc2-point2d-x (sc2-raw-unit-command-target-pos c-zl-hm))
+                                 (sc2-point2d-y (sc2-raw-unit-command-target-pos c-zl-hm))
+                                 30.0 34.0) 6.5)))
+
+  ;; 6. Dropship Rescue Unload (`transport-juggle` 4-arg when passenger already carried -> UNLOAD_ALL_AT
+  ;;    396/913/1408, NOT 3668!) + 3-arg `(attack uid x y)` -> 23 point + 2-arg `(harvest wid tid)` -> 3666!
+  (define l59-med-loaded
+    (mk-l59-u 99201 54 1 86.0 86.0 #:hp 150.0 #:fly #t #:ctaken 1 #:cmax 8
+              #:pax (list (sc2-passenger-unit 99210 48 45.0 45.0 0.0 0.0 0.0 0.0))))
+  (define l59-med-empty
+    (mk-l59-u 99202 54 1 82.0 86.0 #:hp 150.0 #:fly #t #:ctaken 0 #:cmax 8))
+  (define l59-mar-gnd (mk-l59-u 99211 48 1 82.5 86.0 #:hp 45.0 #:en 0.0 #:en-max 0.0))
+  (define l59-mar-atk (mk-l59-u 99212 48 1 80.0 80.0 #:hp 45.0 #:en 0.0 #:en-max 0.0))
+  (define l59-scv-har (mk-l59-u 99213 45 1 26.0 28.0 #:hp 45.0 #:en 0.0 #:en-max 0.0))
+  (define l59-min-har (mk-l59-u 99214 341 3 22.0 28.0 #:hp 1000.0 #:mins 1500))
+  (define l59-juggle-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((transport-juggle 99201 (99210) 88.0 88.0)
+       (transport-juggle 99202 (99211) 88.0 88.0)
+       (attack 99212 95.0 95.0)
+       (harvest 99213 99214))
+     (make-test-obs 9300 200 100 (list l59-med-loaded l59-med-empty l59-mar-gnd l59-mar-atk l59-scv-har l59-min-har))))
+  (check-true "l59-w1-dropship-rescue-unload-3arg-attack-and-2arg-harvest"
+              (and (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 396)
+                                 (equal? (sc2-raw-unit-command-unit-tags c) '(99201))
+                                 (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                                 (< (abs (- (sc2-point2d-x (sc2-raw-unit-command-target-pos c)) 88.0)) 0.1)))
+                          l59-juggle-cmds)
+                   (not (ormap (lambda (c)
+                                 (and (sc2-raw-unit-command? c)
+                                      (= (sc2-raw-unit-command-ability-id c) 3668)
+                                      (memv 99201 (sc2-raw-unit-command-unit-tags c))))
+                               l59-juggle-cmds))
+                   (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 3668)
+                                 (equal? (sc2-raw-unit-command-unit-tags c) '(99202))
+                                 (= (sc2-raw-unit-command-target-unit-tag c) 99211)))
+                          l59-juggle-cmds)
+                   (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 23)
+                                 (equal? (sc2-raw-unit-command-unit-tags c) '(99212))
+                                 (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                                 (< (abs (- (sc2-point2d-x (sc2-raw-unit-command-target-pos c)) 95.0)) 0.1)))
+                          l59-juggle-cmds)
+                   (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 3666)
+                                 (equal? (sc2-raw-unit-command-unit-tags c) '(99213))
+                                 (= (sc2-raw-unit-command-target-unit-tag c) 99214)))
+                          l59-juggle-cmds)))
+
+  ;; 7. End-to-End Verification of ALL 11 Fixed TC<->WS Aliases + Standalone Heads
+  ;;    (filter-valid-bot-actions -> translate-bot-actions->sc2-raw-commands -> encode-sc2-action: 0 rejects, 0 drops!)
+  (define rej0  (get-total-bot-action-reject-count))
+  (define drop0 (get-total-wire-action-drop-count))
+  (define l59-a-gh1   (mk-l59-u 99301 50  1 50.0 50.0 #:hp 100.0 #:en 100.0))
+  (define l59-a-gh2   (mk-l59-u 99302 50  1 52.0 50.0 #:hp 100.0 #:en 100.0))
+  (define l59-a-sen   (mk-l59-u 99303 77  1 54.0 50.0 #:hp 40.0  #:en 100.0))
+  (define l59-a-ora1  (mk-l59-u 99304 495 1 56.0 50.0 #:hp 100.0 #:en 100.0 #:fly #t))
+  (define l59-a-ora2  (mk-l59-u 99305 495 1 58.0 50.0 #:hp 100.0 #:en 100.0 #:fly #t))
+  (define l59-a-scv   (mk-l59-u 99306 45  1 30.0 30.0 #:hp 45.0  #:en 0.0 #:en-max 0.0))
+  (define l59-a-tnk   (mk-l59-u 99307 33  1 31.0 30.0 #:hp 80.0  #:hp-max 175.0 #:en 0.0 #:en-max 0.0))
+  (define l59-a-ovi   (mk-l59-u 99308 106 1 32.0 30.0 #:hp 200.0 #:fly #t))
+  (define l59-a-gw    (mk-l59-u 99309 62  1 34.0 30.0 #:hp 500.0 #:sh 500.0 #:rad 1.5))
+  (define l59-a-hyd   (mk-l59-u 99310 107 1 36.0 30.0 #:hp 90.0  #:en 0.0 #:en-max 0.0))
+  (define l59-a-drn   (mk-l59-u 99311 104 1 28.0 34.0 #:hp 40.0  #:en 0.0 #:en-max 0.0))
+  (define l59-a-hat   (mk-l59-u 99312 86  1 26.0 34.0 #:hp 1500.0 #:rad 2.75))
+  (define l59-a-btl   (mk-l59-u 99313 37  1 38.0 30.0 #:hp 400.0 #:rad 1.0))
+  (define l59-a-ftl   (mk-l59-u 99314 39  1 40.0 30.0 #:hp 400.0 #:rad 1.0))
+  (define l59-a-cyb   (mk-l59-u 99315 72  1 42.0 30.0 #:hp 550.0 #:sh 550.0 #:rad 1.5))
+  (define l59-a-ta    (mk-l59-u 99316 68  1 44.0 30.0 #:hp 500.0 #:sh 500.0 #:rad 1.5))
+  (define l59-a-rch1  (mk-l59-u 99317 110 1 46.0 30.0 #:hp 145.0 #:en 0.0 #:en-max 0.0))
+  (define l59-a-rch2  (mk-l59-u 99318 110 1 48.0 30.0 #:hp 145.0 #:en 0.0 #:en-max 0.0 #:burr #t))
+  (define l59-a-med   (mk-l59-u 99319 54  1 30.0 32.0 #:hp 150.0 #:fly #t #:cmax 8))
+  (define l59-a-mar   (mk-l59-u 99320 48  1 30.5 32.0 #:hp 45.0  #:en 0.0 #:en-max 0.0))
+  (define l59-a-ezlt  (mk-l59-u 99329 73  4 60.0 54.0 #:hp 100.0 #:sh 50.0 #:en 0.0 #:en-max 0.0))
+  (define l59-alias-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 99301 nuke-calldown 60.0 54.0)
+       (cast-spell 99302 tac-nuke-strike 61.0 54.0)
+       (cast-spell 99303 forcefield 58.0 52.0)
+       (cast-spell 99304 revelation 60.0 54.0)
+       (cast-spell 99306 effect-repair 99307)
+       (morph 99308 dropperlord)
+       (morph 99309 warpgate)
+       (morph 99310 lurker-mp)
+       (build lurker-den-mp 28.0 38.0)
+       (research combat-shields)
+       (research lock-on-range)
+       (research hallucination)
+       (research psistorm-tech)
+       (burrow 99317)
+       (unburrow 99318)
+       (oracle-stasis-ward 99305 59.0 51.0)
+       (load-transport 99319 99320))
+     (make-test-obs 9400 2000 1000
+                    (list l59-a-gh1 l59-a-gh2 l59-a-sen l59-a-ora1 l59-a-ora2
+                          l59-a-scv l59-a-tnk l59-a-ovi l59-a-gw l59-a-hyd
+                          l59-a-drn l59-a-hat l59-a-btl l59-a-ftl l59-a-cyb
+                          l59-a-ta l59-a-rch1 l59-a-rch2 l59-a-med l59-a-mar l59-a-ezlt))))
+  (define l59-alias-ab-ids
+    (for/list ([c (in-list l59-alias-cmds)] #:when (sc2-raw-unit-command? c))
+      (sc2-raw-unit-command-ability-id c)))
+  (define l59-encoded-ok?
+    (for/and ([c (in-list l59-alias-cmds)])
+      (define bs (encode-sc2-action c))
+      (and (bytes? bs) (> (bytes-length bs) 0))))
+  ;; Clean rewind reset
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l59-neut-min))))
+  (check-true "l59-w1-all-11-aliases-and-standalone-heads-e2e-zero-rejects-zero-drops"
+              (and (= (get-total-bot-action-reject-count) rej0)
+                   (= (get-total-wire-action-drop-count) drop0)
+                   l59-encoded-ok?
+                   (memv 1622 l59-alias-ab-ids) ;; nuke-calldown / tac-nuke-strike
+                   (memv 1526 l59-alias-ab-ids) ;; forcefield
+                   (memv 2146 l59-alias-ab-ids) ;; revelation
+                   (or (memv 316 l59-alias-ab-ids) (memv 3685 l59-alias-ab-ids)) ;; effect-repair
+                   (memv 2708 l59-alias-ab-ids) ;; dropperlord
+                   (memv 1518 l59-alias-ab-ids) ;; warpgate
+                   (memv 2332 l59-alias-ab-ids) ;; lurker-mp
+                   (memv 1163 l59-alias-ab-ids) ;; lurker-den-mp
+                   (memv 731  l59-alias-ab-ids) ;; combat-shields
+                   (memv 765  l59-alias-ab-ids) ;; lock-on-range
+                   (memv 1571 l59-alias-ab-ids) ;; hallucination
+                   (memv 1126 l59-alias-ab-ids) ;; psistorm-tech
+                   (memv 3661 l59-alias-ab-ids) ;; burrow
+                   (memv 3662 l59-alias-ab-ids) ;; unburrow
+                   (memv 2505 l59-alias-ab-ids) ;; oracle-stasis-ward
+                   (memv 3668 l59-alias-ab-ids))) ;; load-transport
+
+  ;; ===========================================================================
+  ;; Loop 59 Pass 2 (`L59-P2`, `#1533`): nc-09/nc-10 Destructible Rocks,
+  ;; nc-07/nc-08 Thin Mineral Wall Persistence, n17 WarpGate CD / Rej-21 Lock,
+  ;; h06 Scan vs MULE + Uphill Siege Reserve, & Live Div-5 Nuke Alert/Points!
+  ;; ===========================================================================
+  (printf "[Loop 59 Pass 2] Testing L59-P2 neutral rock attacks, thin mineral wall persistence, WarpGate rej-21 hard-lock, Scan-vs-MULE uphill reserve, & live nuke-alert/nuke-points...\n")
+
+  ;; 8. `nc-09` & `nc-10`: Unit-targeted `(attack-unit ...)` / `(focus-fire ...)` on visible
+  ;;    neutral Destructible Rock (367) & Collapsible Rock Tower (588) emits unit-targeted `23`!
+  ;;    Air-only Phoenix (78) cannot target ground rocks; Minerals (341) & Watchtowers (149) stay non-attackable!
+  (define p2-mar1 (mk-l59-u 99401 48  1 70.0 70.0 #:hp 45.0 #:en 0.0 #:en-max 0.0))
+  (define p2-mar2 (mk-l59-u 99402 48  1 71.0 70.0 #:hp 45.0 #:en 0.0 #:en-max 0.0))
+  (define p2-mdr1 (mk-l59-u 99403 51  1 72.0 70.0 #:hp 125.0 #:en 0.0 #:en-max 0.0))
+  (define p2-phx1 (mk-l59-u 99404 78  1 73.0 70.0 #:hp 120.0 #:sh 60.0 #:fly #t))
+  (define p2-rock (mk-l59-u 99410 367 3 75.0 70.0 #:hp 2000.0 #:hp-max 2000.0))
+  (define p2-ctwr (mk-l59-u 99411 588 3 76.0 72.0 #:hp 500.0  #:hp-max 500.0))
+  (define p2-xnt  (mk-l59-u 99412 149 3 78.0 72.0 #:hp 1000.0 #:hp-max 1000.0))
+  (define p2-min  (mk-l59-u 99413 341 3 66.0 70.0 #:hp 1000.0 #:hp-max 1000.0 #:mins 1500))
+  (define p2-rock-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((attack-unit (99401 99402 99404) 99410)
+       (focus-fire 99403 99411)
+       (attack-unit 99401 99412))
+     (make-test-obs 9500 200 100 (list p2-mar1 p2-mar2 p2-mdr1 p2-phx1 p2-rock p2-ctwr p2-xnt p2-min))))
+  (check-true "l59-p2-nc09-nc10-attack-unit-targets-visible-destructible-rock-and-collapsible-tower"
+              (and (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 23)
+                                 (= (sc2-raw-unit-command-target-unit-tag c) 99410)
+                                 (equal? (sort (sc2-raw-unit-command-unit-tags c) <) '(99401 99402))))
+                          p2-rock-cmds)
+                   (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 23)
+                                 (= (sc2-raw-unit-command-target-unit-tag c) 99411)
+                                 (equal? (sc2-raw-unit-command-unit-tags c) '(99403))))
+                          p2-rock-cmds)
+                   (not (ormap (lambda (c)
+                                 (and (sc2-raw-unit-command? c)
+                                      (= (sc2-raw-unit-command-target-unit-tag c) 99412)))
+                               p2-rock-cmds))
+                   (not (ormap (lambda (c)
+                                 (and (sc2-raw-unit-command? c)
+                                      (memv 99404 (sc2-raw-unit-command-unit-tags c))))
+                               p2-rock-cmds))))
+
+  ;; 9. `nc-07` & `nc-08`: Thin mineral wall (`<= 150M`) harvest persistence:
+  ;;    (a) Worker mining normal mineral (`1500M`) CAN switch to nearby thin wall (`5M`, dist < 14t),
+  ;;    (b) Worker ALREADY harvesting thin wall (`5M`) does NOT get re-issued `3666` AND is added
+  ;;        to `commanded-workers`, AND `saturate-workers-and-gas-commands` NEVER pulls it off!
+  (define p2-nx-w   (mk-l59-u 99420 59 1 28.0 28.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75))
+  (define p2-m-norm (mk-l59-u 99421 341 3 23.0 28.0 #:hp 1000.0 #:mins 1500))
+  (define p2-m-wall (mk-l59-u 99422 1996 3 34.0 28.0 #:hp 1000.0 #:mins 5))
+  (define p2-prb-norm
+    (mk-l59-u 99423 84 1 25.0 28.0 #:hp 20.0 #:sh 20.0 #:en 0.0 #:en-max 0.0
+              #:orders (list (sc2-unit-order 295 #f 99421 0.0))))
+  (define p2-prb-exc
+    (mk-l59-u 99424 84 1 33.0 28.0 #:hp 20.0 #:sh 20.0 #:en 0.0 #:en-max 0.0
+              #:orders (list (sc2-unit-order 295 #f 99422 0.0))))
+  (define p2-wall-obs
+    (make-test-obs 9520 200 100 (list p2-nx-w p2-m-norm p2-m-wall p2-prb-norm p2-prb-exc)))
+  (define p2-cmd-workers (mutable-seteqv))
+  (define p2-wall-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((harvest-mineral (99423 99424) 99422))
+     p2-wall-obs #:commanded-workers p2-cmd-workers))
+  (define p2-sat-cmds
+    (saturate-workers-and-gas-commands p2-wall-obs)) ;; even WITHOUT excluded-worker-tags!
+  (check-true "l59-p2-nc07-nc08-thin-mineral-wall-harvest-switch-and-persistence"
+              (and (ormap (lambda (c)
+                            (and (sc2-raw-unit-command? c)
+                                 (= (sc2-raw-unit-command-ability-id c) 3666)
+                                 (= (sc2-raw-unit-command-target-unit-tag c) 99422)
+                                 (equal? (sc2-raw-unit-command-unit-tags c) '(99423))))
+                          p2-wall-cmds)
+                   (not (ormap (lambda (c)
+                                 (and (sc2-raw-unit-command? c)
+                                      (memv 99424 (sc2-raw-unit-command-unit-tags c))))
+                               p2-wall-cmds))
+                   (set-member? p2-cmd-workers 99424)
+                   (not (ormap (lambda (c)
+                                 (and (sc2-raw-unit-command? c)
+                                      (memv 99424 (sc2-raw-unit-command-unit-tags c))))
+                               p2-sat-cmds))))
+
+  ;; 10. `sc2-trn-n17`: WarpGate `627` Zealot CD, stale `warp_gate_count` guard (`< 32f`),
+  ;;     `21:NotEnoughCharges` hard-lock (vs `47` placement unlock), & `'warp-in-dark-templar -> 1417`!
+  (define p2-wg1 (mk-l59-u 99431 133 1 32.0 34.0 #:hp 500.0 #:sh 500.0 #:rad 1.5))
+  (define p2-wg2 (mk-l59-u 99432 133 1 36.0 34.0 #:hp 500.0 #:sh 500.0 #:rad 1.5))
+  (define p2-wpp (mk-l59-u 99433 136 1 100.0 100.0 #:hp 80.0 #:sh 100.0 #:fly #t))
+  (define p2-ps  (list (sc2-power-source (sc2-point3d 100.0 100.0 8.0) 3.75 99433)))
+  (define (mk-p2-wg-obs gl wgc errs)
+    (sc2-observation gl (sc2-player-common 1 800 400 80 40 20 20 0 0 wgc 0)
+                     (list p2-nx-w p2-wg1 p2-wg2 p2-wpp) '(84) p2-ps #f '() '() '() errs '() '()))
+  ;; Step 1 (loop 9600): Warp 1 Zealot on wg1 + 1 `'warp-in-dark-templar` on wg2
+  (define p2-wg-c1
+    (translate-bot-actions->sc2-raw-commands
+     '((warp-in 99431 zealot 100.0 100.0)
+       (train-unit 99432 warp-in-dark-templar 100.0 100.0))
+     (mk-p2-wg-obs 9600 2 '())))
+  ;; Step 2 (loop 9604, +4f < 32f): Even if SC2 still reports stale `warp_gate_count = 2`, BOTH stay locked!
+  (define p2-wg-c2
+    (translate-bot-actions->sc2-raw-commands
+     '((warp-in 99431 zealot 100.0 100.0))
+     (mk-p2-wg-obs 9604 2 '())))
+  ;; Step 3 (loop 9640): SC2 reports `res = 21 (NotEnoughCharges)` on wg1 with stale `warp_gate_count = 2` -> HARD-LOCKED!
+  (define p2-wg-c3
+    (translate-bot-actions->sc2-raw-commands
+     '((warp-in 99431 zealot 100.0 100.0))
+     (mk-p2-wg-obs 9640 2 (list (hash 'unit-tag 99431 'ability-id 1413 'result 21)))))
+  ;; Step 4 (loop 9644): SC2 reports `res = 47` (placement miss) on wg2 -> STILL unlocks wg2 immediately!
+  (define p2-wg-c4
+    (translate-bot-actions->sc2-raw-commands
+     '((warp-in 99432 dark-templar 100.0 100.0))
+     (mk-p2-wg-obs 9644 2 (list (hash 'unit-tag 99432 'ability-id 1417 'result 47)))))
+  (check-true "l59-p2-n17-warpgate-cd-627-stale-wgc-guard-rej21-hard-lock-and-warp-in-dt-1417"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1413))) p2-wg-c1)
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1417))) p2-wg-c1)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1413))) p2-wg-c2))
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1413))) p2-wg-c3))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1417))) p2-wg-c4)))
+
+  ;; 11. `sc2-rmp-h06`: Scan (399) beats same-step MULE (171) AND uphill Tank siege preserves Scan energy!
+  (define p2-oc-100 (mk-l59-u 99441 132 1 30.0 30.0 #:hp 1500.0 #:en 100.0 #:rad 2.75))
+  (define p2-oc-155 (mk-l59-u 99441 132 1 30.0 30.0 #:hp 1500.0 #:en 155.0 #:rad 2.75))
+  (define p2-tk1    (mk-l59-u 99442 32  1 76.0 90.0 #:hp 175.0 #:en 0.0 #:en-max 0.0))
+  (define p2-stk-hg
+    (sc2-unit 1 4 99449 74 2 (sc2-point3d 80.0 96.0 10.0) 0.0 0.625 1.0 0 #f #t #f
+              80.0 80.0 80.0 80.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define p2-h06-min (mk-l59-u 99448 341 3 24.0 30.0 #:hp 1000.0 #:mins 1500))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  ;; (a) Same-step MULE listed BEFORE Scan -> Scan wins, MULE stripped!
+  (define p2-scan-vs-mule-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 99441 calldown-mule 99448)
+       (cast-spell 99441 scanner-sweep 80.0 96.0))
+     (make-test-obs 9700 200 100 (list p2-oc-100 p2-h06-min))))
+  ;; (b) Auto-MULE at loop 9760 (past 24f cooldown) under uphill Tank siege (dz = +2.0, 0 air spotters):
+  ;;     100e OC holds Scan (0 MULEs), while 155e OC STILL drops MULE cleanly!
+  (define p2-sat-uphill-100
+    (saturate-workers-and-gas-commands
+     (make-test-obs 9760 200 100 (list p2-oc-100 p2-tk1 p2-stk-hg p2-h06-min))))
+  (define p2-sat-uphill-155
+    (saturate-workers-and-gas-commands
+     (make-test-obs 9764 200 100 (list p2-oc-155 p2-tk1 p2-stk-hg p2-h06-min))))
+  (check-true "l59-p2-h06-scan-399-beats-mule-171-and-uphill-siege-preserves-scan-energy"
+              (and (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 399))) p2-scan-vs-mule-cmds)
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 171))) p2-scan-vs-mule-cmds))
+                   (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 171))) p2-sat-uphill-100))
+                   (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 171))) p2-sat-uphill-155)))
+
+  ;; 12. Live Div-5 Bug #1 (`#1531`): `'nuke-alert` & `'nuke-points` populated from EffectId=7
+  ;;     (`NukePersistent`) AND `Alert.NuclearLaunchDetected (1)`!
+  (define p2-obs-nuke-eff
+    (sc2-observation 9800 (sc2-player-common 1 200 100 40 20 10 10 0 0 0 0)
+                     (list l59-cc-m) '() '() #f '()
+                     (list (sc2-effect 7 (list (sc2-point2d 88.5 42.0)) 4 2 8.0))
+                     '() '() '() '()))
+  (define p2-obs-nuke-alert
+    (sc2-observation 9804 (sc2-player-common 1 200 100 40 20 10 10 0 0 0 0)
+                     (list l59-cc-m) '() '() #f '() '() '() '() '() '(1)))
+  (define p2-obs-no-nuke
+    (make-test-obs 9808 200 100 (list l59-cc-m)))
+  (define p2-nh-eff   (sc2-observation->runtime-obs-hash p2-obs-nuke-eff))
+  (define p2-nh-alert (sc2-observation->runtime-obs-hash p2-obs-nuke-alert))
+  (define p2-nh-clean (sc2-observation->runtime-obs-hash p2-obs-no-nuke))
+  ;; Clean rewind reset
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l59-neut-min))))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l59-neut-min))))
+  (check-true "l59-p2-div5-nuke-alert-and-nuke-points-from-effect7-and-alert1"
+              (and (eq? (hash-ref p2-nh-eff 'nuke-alert #f) #t)
+                   (equal? (hash-ref p2-nh-eff 'nuke-points '()) '((88.5 . 42.0)))
+                   (eq? (hash-ref p2-nh-alert 'nuke-alert #f) #t)
+                   (null? (hash-ref p2-nh-alert 'nuke-points '()))
+                   (eq? (hash-ref p2-nh-clean 'nuke-alert #t) #f)
+                   (null? (hash-ref p2-nh-clean 'nuke-points '(bad)))))
+
+  ;; ===========================================================================
+  ;; Loop 59 Pass 3 (`L59-P3`, `#1553` Fix #1B & #2B):
+  ;;   13. Early Terran pre-Starport Marines/Reapers near a ramp NEVER hit 150e MULE blackout,
+  ;;       while Sieged Tank + uphill enemy (<=15t, dz>=1.5, 0 air spotters <=16t) OR 83 err (44f)
+  ;;       reserves Scan cleanly!
+  ;;   14. UnbuildablePlatesDestructible (474) / UnbuildableBricksDestructible (473) excluded from
+  ;;       `'neutral-units` AND `live-visible-neutral-attackable-tags` (keeping real rocks 367/588)!
+  ;; ===========================================================================
+  (printf "[Loop 59 Pass 3] Testing L59-P3 early Terran MULE non-blackout + UnbuildablePlates/Bricks exclusion...\n")
+  (define p3-oc-105 (mk-l59-u 99501 132 1 30.0 30.0 #:hp 1500.0 #:en 105.0 #:rad 2.75))
+  (define p3-scv1   (mk-l59-u 99502 45  1 26.0 30.0 #:hp 45.0 #:en 0.0 #:en-max 0.0))
+  (define p3-min1   (mk-l59-u 99503 341 3 24.0 30.0 #:hp 1000.0 #:mins 1500))
+  (define p3-mars6  (for/list ([i (in-range 6)])
+                      (mk-l59-u (+ 99510 i) 48 1 (+ 74.0 (* 0.5 i)) 90.0 #:hp 45.0 #:en 0.0 #:en-max 0.0)))
+  (define p3-tk1    (mk-l59-u 99520 32  1 76.0 90.0 #:hp 175.0 #:en 0.0 #:en-max 0.0))
+  (define p3-med1   (mk-l59-u 99521 54  1 78.0 92.0 #:hp 150.0 #:en 100.0 #:fly #t))
+  (define p3-ehg
+    (sc2-unit 1 4 99529 74 2 (sc2-point3d 80.0 96.0 10.0) 0.0 0.625 1.0 0 #f #t #f
+              80.0 80.0 80.0 80.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  ;; (a) 6 Marines + SCV facing uphill Stalker (0 Tanks, 0 err-83, 0 air spotters) -> MULE FIRES at 105e!
+  (define p3-sat-bio-ok
+    (saturate-workers-and-gas-commands
+     (make-test-obs 5000 200 100 (append (list p3-oc-105 p3-scv1 p3-min1 p3-ehg) p3-mars6))))
+  ;; (b) Same check via explicit Case C `(cast-spell oc calldown-mule min)` at +30f -> MULE FIRES at 105e!
+  (define p3-casec-bio-ok
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 99501 calldown-mule 99503))
+     (make-test-obs 5030 200 100 (append (list p3-oc-105 p3-scv1 p3-min1 p3-ehg) p3-mars6))))
+  ;; (c) Sieged Tank + uphill Stalker WITH Medivac spotter <= 16t -> MULE FIRES at 105e!
+  (define p3-sat-tank-spotted-ok
+    (saturate-workers-and-gas-commands
+     (make-test-obs 5060 200 100 (list p3-oc-105 p3-scv1 p3-min1 p3-tk1 p3-med1 p3-ehg))))
+  ;; (d) 83:MustTargetVisibleUnit error -> blocks MULE at 105e for 44f, then resumes at +48f!
+  (define p3-obs-err83
+    (sc2-observation 5100 (sc2-player-common 1 200 100 40 20 10 10 0 0 0 0)
+                     (append (list p3-oc-105 p3-scv1 p3-min1 p3-ehg) p3-mars6)
+                     '() '() #f '() '() '()
+                     (list (hash 'unit-tag 99510 'ability-id 23 'result 83))
+                     '() '()))
+  (define p3-sat-err83-block (saturate-workers-and-gas-commands p3-obs-err83))
+  (define p3-sat-err83-still (saturate-workers-and-gas-commands
+                              (make-test-obs 5130 200 100 (append (list p3-oc-105 p3-scv1 p3-min1 p3-ehg) p3-mars6))))
+  (define p3-sat-err83-clear (saturate-workers-and-gas-commands
+                              (make-test-obs 5148 200 100 (append (list p3-oc-105 p3-scv1 p3-min1 p3-ehg) p3-mars6))))
+  (define (has-mule-171? cs)
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 171))) cs))
+  (check-true "l59-p3-fix1b-early-marines-never-blackout-mule-while-err83-44f-and-unspotted-tank-reserve-scan"
+              (and (has-mule-171? p3-sat-bio-ok)
+                   (has-mule-171? p3-casec-bio-ok)
+                   (has-mule-171? p3-sat-tank-spotted-ok)
+                   (not (has-mule-171? p3-sat-err83-block))
+                   (not (has-mule-171? p3-sat-err83-still))
+                   (has-mule-171? p3-sat-err83-clear)))
+
+  ;; 14. Fix #2B: UnbuildablePlatesDestructible (474) / UnbuildableBricksDestructible (473) excluded!
+  (define p3-plate (mk-l59-u 99541 474 3 36.0 30.0 #:hp 2000.0 #:hp-max 2000.0))
+  (define p3-brick (mk-l59-u 99542 473 3 38.0 30.0 #:hp 2000.0 #:hp-max 2000.0))
+  (define p3-rock  (mk-l59-u 99543 367 3 75.0 70.0 #:hp 2000.0 #:hp-max 2000.0))
+  (define p3-obs-plates
+    (make-test-obs 5200 200 100 (list p3-oc-105 (first p3-mars6) p3-plate p3-brick p3-rock)))
+  (define p3-oh-plates (sc2-observation->runtime-obs-hash p3-obs-plates))
+  (define p3-neut-ids (map (lambda (h) (hash-ref h 'id 0)) (hash-ref p3-oh-plates 'neutral-units '())))
+  (define p3-plate-atk-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((attack-unit 99510 99541)
+       (attack-unit 99510 99542))
+     p3-obs-plates))
+  ;; Clean rewind reset
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l59-neut-min))))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l59-neut-min))))
+  (check-true "l59-p3-fix2b-unbuildable-plates-and-bricks-excluded-from-neutral-units-and-attackable-tags"
+              (and (memv 99543 p3-neut-ids)
+                   (not (memv 99541 p3-neut-ids))
+                   (not (memv 99542 p3-neut-ids))
+                   (not (ormap (lambda (c)
+                                 (and (sc2-raw-unit-command? c)
+                                      (memv (sc2-raw-unit-command-target-unit-tag c) '(99541 99542))))
+                               p3-plate-atk-cmds))))
+
+  ;; ===========================================================================
+  ;; Loop 59 APM-Cap Drop Telemetry (`L59-APM-LOG`, `#1562`):
+  ;;   15. Exact per-governor APM-cap drop counters (`total`, `token_bucket`, `rolling_hard_cap`,
+  ;;       `by_tier` P0..P4, `by_ability` incl. `"camera"`, `by_minute`), strictly excluding
+  ;;       dedup/cooldown drops, `#:top-k` cap, `jsexpr?` validity, explicit reset & rewind reset!
+  ;; ===========================================================================
+  (printf "[Loop 59 APM-Log] Testing #1562 per-governor APM-cap drop stats (token_bucket / rolling_hard_cap / P0..P4 / by_ability / by_minute / rewind)...\n")
+  ;; (a) Zero drops on normal batch + dedup/cooldown drops MUST NOT count as APM-cap drops!
+  (define apm-gov-clean (make-wire-apm-governor #:target-apm 495.0 #:hard-cap-apm 595.0))
+  (void (govern-sc2-wire-actions!
+         apm-gov-clean
+         (list (sc2-raw-unit-command 388 #f 0 '(99601) #f)
+               (mark-urgent-survival-cmd! (sc2-raw-unit-command 23 (sc2-point2d 50.0 50.0) 0 '(99602) #f))
+               (sc2-raw-camera-move 40.0 40.0 0.0))
+         1000))
+  ;; Repeat identical mode-switch `388` (+4f < 10f dedup), identical urgent `23` (+4f < 8f dedup),
+  ;; and camera move (+4f < 28f cooldown) -> ALL blocked by dedup/cooldown, 0 APM-cap drops!
+  (void (govern-sc2-wire-actions!
+         apm-gov-clean
+         (list (sc2-raw-unit-command 388 #f 0 '(99601) #f)
+               (mark-urgent-survival-cmd! (sc2-raw-unit-command 23 (sc2-point2d 50.0 50.0) 0 '(99602) #f))
+               (sc2-raw-camera-move 90.0 90.0 0.0))
+         1004))
+  (define st-clean (get-wire-apm-drop-stats apm-gov-clean))
+
+  ;; (b) Token-bucket drops (high hard-cap 500, low target 200 -> tokens=24.0, burst=28.0) at minute 1 (loop 1500).
+  ;;     Warm up `last-cam-loop` (loop 1470: +30f passes 28f cooldown, skips 44f overdue P4 rescue) and
+  ;;     `LAST-P2-LOOP`/`LAST-P3-LOOP` (loop 1496: +4f skips 12f/24f overdue rescues) -> 0 warmup drops!
+  (define apm-gov-tok (make-wire-apm-governor #:target-apm 200.0 #:hard-cap-apm 500.0))
+  (void (govern-sc2-wire-actions! apm-gov-tok (list (sc2-raw-camera-move 30.0 30.0 0.0)) 1470))
+  (void (govern-sc2-wire-actions!
+         apm-gov-tok
+         (list (sc2-raw-unit-command 23 (sc2-point2d 55.0 55.0) 0 '(99608) #f)
+               (sc2-raw-unit-command 3666 #f 99698 '(99609) #f))
+         1496))
+  (define st-tok-warmup (get-wire-apm-drop-stats apm-gov-tok))
+  (define tok-batch
+    (append
+     (for/list ([i (in-range 14)])
+       (sc2-raw-unit-command 23 (sc2-point2d (+ 60.0 i) 60.0) 0 (list (+ 99610 i)) #f))
+     (list (sc2-raw-unit-command 3666 #f 99699 '(99650) #f)
+           (sc2-raw-unit-command 3666 #f 99697 '(99651) #f)
+           (sc2-raw-camera-move 80.0 80.0 0.0))))
+  (define tok-emitted (govern-sc2-wire-actions! apm-gov-tok tok-batch 1500))
+  (define st-tok (get-wire-apm-drop-stats apm-gov-tok))
+  (define st-tok-tier (hash-ref st-tok 'by_tier))
+  (define st-tok-ab   (hash-ref st-tok 'by_ability))
+  (define st-tok-min  (hash-ref st-tok 'by_minute))
+  (define st-tok-top2 (get-wire-apm-drop-stats apm-gov-tok #:top-k 2))
+
+  ;; (c) Rolling hard-cap drops (high target 495 -> plentiful tokens, hard-cap 12.0 minus 2.0 warmup = 10.0)
+  ;;     at minute 3 (loop 4100). Warm up `LAST-P1-LOOP` at loop 4096 (+4f < 8f -> skips overdue P1-before-P0).
+  (define apm-gov-cap (make-wire-apm-governor #:target-apm 495.0 #:hard-cap-apm 12.0))
+  (void (govern-sc2-wire-actions! apm-gov-cap (list (sc2-raw-unit-command 171 #f 99798 '(99700) #f)) 4096))
+  (define cap-batch
+    (list (sc2-raw-unit-command 399 (sc2-point2d 80.0 80.0) 0 '(99701) #f)
+          (sc2-raw-unit-command 399 (sc2-point2d 90.0 90.0) 0 '(99702) #f)
+          (sc2-raw-unit-command 399 (sc2-point2d 100.0 100.0) 0 '(99703) #f)
+          (sc2-raw-unit-command 399 (sc2-point2d 110.0 110.0) 0 '(99704) #f)
+          (sc2-raw-unit-command 399 (sc2-point2d 120.0 120.0) 0 '(99705) #f)
+          (sc2-raw-unit-command 399 (sc2-point2d 130.0 130.0) 0 '(99706) #f) ;; P0 6th cmd hits hard-cap 10!
+          (sc2-raw-unit-command 171 #f 99799 '(99710) #f)                     ;; P1 MULE hits hard-cap!
+          (sc2-raw-unit-command 16 (sc2-point2d 70.0 70.0) 0 '(99711) #f)))   ;; P2 Move hits hard-cap!
+  (void (govern-sc2-wire-actions! apm-gov-cap cap-batch 4100))
+  (define st-cap (get-wire-apm-drop-stats apm-gov-cap))
+  (define st-cap-tier (hash-ref st-cap 'by_tier))
+  (define st-cap-ab   (hash-ref st-cap 'by_ability))
+  (define st-cap-min  (hash-ref st-cap 'by_minute))
+
+  ;; (d) Rewind reset clears stats automatically AND explicit `reset-wire-apm-drop-stats!` clears stats!
+  (void (govern-sc2-wire-actions! apm-gov-cap '() 100)) ;; rewind 4100 -> 100!
+  (define st-cap-rewound (get-wire-apm-drop-stats apm-gov-cap))
+  (reset-wire-apm-drop-stats! apm-gov-tok)
+  (define st-tok-reset (get-wire-apm-drop-stats apm-gov-tok))
+
+  (check-true "l59-apm-log-exact-token-cap-tier-ability-minute-exclusion-and-reset"
+              (and (= (hash-ref st-clean 'total -1) 0)
+                   (= (hash-ref st-tok-warmup 'total -1) 0)
+                   (jsexpr? st-tok)
+                   (jsexpr? st-cap)
+                   (= (hash-ref st-tok 'total 0) 8)
+                   (= (hash-ref st-tok 'total 0) (- (length tok-batch) (length tok-emitted)))
+                   (= (hash-ref st-tok 'token_bucket 0) 8)
+                   (= (hash-ref st-tok 'rolling_hard_cap 0) 0)
+                   (= (hash-ref st-tok-tier 'P2 0) 5)
+                   (= (hash-ref st-tok-tier 'P3 0) 2)
+                   (= (hash-ref st-tok-tier 'P4 0) 1)
+                   (= (+ (hash-ref st-tok-tier 'P0 0) (hash-ref st-tok-tier 'P1 0)
+                         (hash-ref st-tok-tier 'P2 0) (hash-ref st-tok-tier 'P3 0)
+                         (hash-ref st-tok-tier 'P4 0))
+                      (hash-ref st-tok 'total 0))
+                   (= (hash-ref st-tok-ab '|23| 0) 5)
+                   (= (hash-ref st-tok-ab '|3666| 0) 2)
+                   (= (hash-ref st-tok-ab 'camera 0) 1)
+                   (= (hash-ref st-tok-min '|1| 0) 8)
+                   (= (hash-count (hash-ref st-tok-top2 'by_ability)) 2)
+                   (= (hash-ref st-cap 'total 0) 3)
+                   (= (hash-ref st-cap 'rolling_hard_cap 0) 3)
+                   (= (hash-ref st-cap 'token_bucket 0) 0)
+                   (= (hash-ref st-cap-tier 'P0 0) 1)
+                   (= (hash-ref st-cap-tier 'P1 0) 1)
+                   (= (hash-ref st-cap-tier 'P2 0) 1)
+                   (= (hash-ref st-cap-ab '|399| 0) 1)
+                   (= (hash-ref st-cap-ab '|171| 0) 1)
+                   (= (hash-ref st-cap-ab '|16| 0) 1)
+                   (= (hash-ref st-cap-min '|3| 0) 3)
+                   (= (hash-ref st-cap-rewound 'total -1) 0)
+                   (= (hash-ref st-tok-reset 'total -1) 0)))
+
+  ;; ===========================================================================
+  ;; Loop 59C H2H Fix #3 (`L59C-MULE`, `#1565`/`#1566`):
+  ;;   16. Unprovoked live TvT (2 OCs, >= 6 Marines, SCVs+Barracks, 0 Banshee/Ghost/Starport-TL)
+  ;;       and unprovoked live TvZ (even with enemy CreepTumorBurrowed 137 visible!) MULE freely
+  ;;       at 50e across BOTH `saturate-workers-and-gas-commands` AND `Case C (171)`; TvP >= 4:00
+  ;;       holds ONLY 1 OC until >= 3 OCs; AND isolated Arena `sc2-ab-t10` (6 SCVs, 12 Marines,
+  ;;       0 Barracks/Depots, 1 OC @ 100e) STILL reserves 101e Scan bank 100% intact!
+  ;; ===========================================================================
+  (printf "[Loop 59C MULE] Testing #1566 unprovoked TvT/TvZ 50e MULE, TvP 1-OC@4:00 / 2-OC@3-OC, CreepTumor non-latch, & sc2-ab-t10 101e preservation...\n")
+  (define (mk-l59c-gi erace)
+    (sc2-game-info "L59CTestMap" ""
+                   (list (hash 'player-id 1 'race-requested 'Terran)
+                         (hash 'player-id 2 'race-requested erace))
+                   '(128 128) '(4 4 124 124) (list (sc2-point2d 100.0 100.0))
+                   #f #f #f))
+  (define l59c-gi-t (mk-l59c-gi 'Terran))
+  (define l59c-gi-p (mk-l59c-gi 'Protoss))
+  (define l59c-gi-z (mk-l59c-gi 'Zerg))
+  (define (l59c-mule-tags cs)
+    (for/list ([c (in-list cs)]
+               #:when (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 171)))
+      (car (sc2-raw-unit-command-unit-tags c))))
+  (define l59c-oc1-65  (mk-l59-u 99801 132 1 30.0 30.0 #:hp 1500.0 #:en 65.0 #:rad 2.75))
+  (define l59c-oc2-55  (mk-l59-u 99802 132 1 56.0 30.0 #:hp 1500.0 #:en 55.0 #:rad 2.75))
+  (define l59c-oc1-100 (mk-l59-u 99801 132 1 30.0 30.0 #:hp 1500.0 #:en 100.0 #:rad 2.75))
+  (define l59c-min1    (mk-l59-u 99808 341 3 25.0 30.0 #:hp 1800.0 #:en 0.0 #:en-max 0.0 #:mins 1500))
+  (define l59c-min2    (mk-l59-u 99809 341 3 61.0 30.0 #:hp 1800.0 #:en 0.0 #:en-max 0.0 #:mins 1500))
+  (define l59c-rax     (mk-l59-u 99810 21  1 38.0 34.0 #:hp 1000.0 #:en 0.0 #:en-max 0.0 #:rad 1.5))
+  (define l59c-scvs12  (for/list ([i (in-range 12)])
+                         (mk-l59-u (+ 99820 i) 45 1 (+ 27.0 (* 0.3 i)) 30.0 #:hp 45.0 #:en 0.0 #:en-max 0.0)))
+  (define l59c-scvs6   (take l59c-scvs12 6))
+  (define l59c-mars12  (for/list ([i (in-range 12)])
+                         (mk-l59-u (+ 99840 i) 48 1 (+ 36.0 (* 0.4 i)) 30.0 #:hp 45.0 #:en 0.0 #:en-max 0.0)))
+  (define l59c-mars6   (take l59c-mars12 6))
+  (define l59c-etumor  (mk-l59-u 99860 137 4 70.0 70.0 #:hp 50.0 #:en 0.0 #:en-max 0.0 #:cloak 1 #:burr #t))
+  (define l59c-elurk   (mk-l59-u 99861 504 4 95.0 95.0 #:hp 200.0 #:en 0.0 #:en-max 0.0 #:cloak 1 #:burr #t))
+  ;; Clean rewind before live TvT check
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l59c-min1)) #:game-info l59c-gi-t))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l59c-min1)) #:game-info l59c-gi-t))
+  ;; (a) Live unprovoked TvT (`#002` at 225s = loop 5040): 2 OCs (65e & 55e) + 6 Marines + 12 SCVs + Barracks -> BOTH OCs MULE freely!
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define l59c-tvt-sat
+    (l59c-mule-tags (saturate-workers-and-gas-commands
+                     (make-test-obs 5040 200 100 (append (list l59c-oc1-65 l59c-oc2-55 l59c-rax l59c-min1 l59c-min2) l59c-scvs12 l59c-mars6))
+                     #:game-info l59c-gi-t)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define l59c-tvt-casec
+    (l59c-mule-tags (translate-bot-actions->sc2-raw-commands
+                     '((cast-spell 99801 calldown-mule 99808))
+                     (make-test-obs 5080 200 100 (append (list l59c-oc1-65 l59c-oc2-55 l59c-rax l59c-min1 l59c-min2) l59c-scvs12 l59c-mars6))
+                     #:game-info l59c-gi-t)))
+  ;; (b) Live unprovoked TvZ WITH enemy CreepTumorBurrowed (137) visible: STILL MULEs freely at 55e/65e (tumor NEVER latches cloak)!
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define l59c-tvz-tumor-sat
+    (l59c-mule-tags (saturate-workers-and-gas-commands
+                     (make-test-obs 5600 200 100 (append (list l59c-oc1-65 l59c-oc2-55 l59c-rax l59c-min1 l59c-min2 l59c-etumor) l59c-scvs12 l59c-mars6))
+                     #:game-info l59c-gi-z)))
+  ;; (c) Live TvZ WITH enemy Burrowed Lurker (504) sighted -> holds Scan while visible (both OCs),
+  ;;     and after Lurker leaves vision (`SC2-SAT-SEEN-ENEMY-CLOAK?` latched) top-1 OC (99801) holds Scan
+  ;;     while OC #2 (99802) still MULEs freely!
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define l59c-tvz-lurker-vis
+    (l59c-mule-tags (saturate-workers-and-gas-commands
+                     (make-test-obs 5640 200 100 (append (list l59c-oc1-65 l59c-oc2-55 l59c-rax l59c-min1 l59c-min2 l59c-elurk) l59c-scvs12 l59c-mars6))
+                     #:game-info l59c-gi-z)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define l59c-tvz-lurker-latched
+    (l59c-mule-tags (saturate-workers-and-gas-commands
+                     (make-test-obs 5668 200 100 (append (list l59c-oc1-65 l59c-oc2-55 l59c-rax l59c-min1 l59c-min2) l59c-scvs12 l59c-mars6))
+                     #:game-info l59c-gi-z)))
+  ;; (d) Live TvP at 4:10 (loop 5680, after rewind clearing Lurker latch): 2 OCs -> ONLY top-1 OC (99801) holds Scan, OC #2 (99802) MULEs!
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l59c-min1)) #:game-info l59c-gi-p))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l59c-min1)) #:game-info l59c-gi-p))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define l59c-tvp-2oc-sat
+    (l59c-mule-tags (saturate-workers-and-gas-commands
+                     (make-test-obs 5680 200 100 (append (list l59c-oc1-65 l59c-oc2-55 l59c-rax l59c-min1 l59c-min2) l59c-scvs12 l59c-mars6))
+                     #:game-info l59c-gi-p)))
+  ;; (e) Isolated Arena `sc2-ab-t10` exact unit composition (1 OC @ 100e + 6 SCVs + 12 Marines, 0 Barracks/Depots):
+  ;;     STILL holds 101e Scan bank across BOTH `saturate` AND `Case C` even at loop 16!
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 50 0 (list l59c-min1)) #:game-info l59c-gi-p))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 50 0 (list l59c-min1)) #:game-info l59c-gi-p))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define l59c-t10-obs
+    (make-test-obs 16 50 0 (append (list l59c-oc1-100 l59c-min1) l59c-scvs6 l59c-mars12)))
+  (define l59c-t10-sat   (l59c-mule-tags (saturate-workers-and-gas-commands l59c-t10-obs #:game-info l59c-gi-p)))
+  (define l59c-t10-casec (l59c-mule-tags (translate-bot-actions->sc2-raw-commands '((cast-spell 99801 calldown-mule 99808)) l59c-t10-obs #:game-info l59c-gi-p)))
+  ;; Final clean rewind
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l59c-min1))))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l59c-min1))))
+  (check-true "l59c-fix3-unprovoked-tvt-tvz-50e-mule-tvp-1oc-and-sc2-ab-t10-scan-bank-preserved"
+              (and (equal? (sort l59c-tvt-sat <) '(99801 99802))
+                   (equal? l59c-tvt-casec '(99801))
+                   (equal? (sort l59c-tvz-tumor-sat <) '(99801 99802))
+                   (null? l59c-tvz-lurker-vis)
+                   (equal? l59c-tvz-lurker-latched '(99802))
+                   (equal? l59c-tvp-2oc-sat '(99802))
+                   (null? l59c-t10-sat)
+                   (null? l59c-t10-casec))))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"

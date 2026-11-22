@@ -127,6 +127,9 @@
  plan-anti-baneling-split-and-target-fire
  plan-baneling-move-past-and-light-clump-detonate
 
+ ;; Early Scout/Probe Mineral-Line Harass (`nc-03`)
+ plan-early-worker-mineral-line-harass
+
  ;; S-Expression Orchestration
  harass-directive->sexp
  step-multitask-harass-and-proxy)
@@ -1270,6 +1273,16 @@
                                         #:force-commit? [force-commit? #f])
   (define hx (->float home-x))
   (define hy (->float home-y))
+  (define enemy-combat-units : (Listof Any)
+    (if force-commit?
+        '()
+        (for/list : (Listof Any)
+                  ([e (in-list enemy-units)]
+                   #:when (and (u-alive? e)
+                               (not (u-worker? (u-type e)))
+                               (not (u-structure? e))
+                               (not (memq (u-type e) '(larva egg overlord observer overseer changeling)))))
+          e)))
   (define-values (rev-runby rcnt rev-air-harass)
     (for/fold ([rs : (Listof Any) '()] [n : Integer 0] [as : (Listof Any) '()])
               ([a (in-list ally-units)])
@@ -1277,7 +1290,13 @@
       (cond
         [(and (memq ut '(zergling baneling hellion zealot roach))
               (> (u-tag a) 0)
-              (u-alive? a))
+              (u-alive? a)
+              ;; L59-P2 (`novel-109` guard): NEVER steal a unit already engaged in active combat
+              ;; (`<= 10.0t` from enemy combat units) for a cross-map runby!
+              (or force-commit?
+                  (let ([ax (u-x a)] [ay (u-y a)])
+                    (not (for/or : Boolean ([ec (in-list enemy-combat-units)])
+                           (<= (dist2 ax ay (u-x ec) (u-y ec)) 10.0))))))
          (values (cons a rs) (add1 n) as)]
         [(and (not force-commit?)
               (memq ut '(oracle raven banshee mutalisk medivac liberator overlord-transport warp-prism))
@@ -2672,45 +2691,33 @@
             (define bx (baneling-unit-rec-x b))
             (define by (baneling-unit-rec-y b))
             (define bhp (baneling-unit-rec-hp b))
-            (define light-in-splash
-              (for/sum : Integer ([j (in-range raw-n)])
+            ;; L59-P2 (`sc2-runby-ro26` fix): Strictly require `>= 2` workers OR `>= 3` light units
+            ;; within `2.1t` (`4.41` sq) before manual-Exploding (`42`) — never blow up prematurely
+            ;; on Stalker/Marauder blockers at low HP before reaching the mineral line!
+            (define-values (light-in-splash workers-in-splash)
+              (for/fold ([lc : Integer 0] [wc : Integer 0])
+                        ([j (in-range raw-n)])
                 (define rj (vector-ref raw-vec j))
                 (define dx (- bx (baneling-raw-light-x rj)))
                 (define dy (- by (baneling-raw-light-y rj)))
-                (if (and (<= (abs dx) splash-r)
-                         (<= (abs dy) splash-r)
-                         (<= (+ (* dx dx) (* dy dy)) splash-r2))
-                    1
-                    0)))
+                (if (and (<= (abs dx) 2.1)
+                         (<= (abs dy) 2.1)
+                         (<= (+ (* dx dx) (* dy dy)) 4.41))
+                    (values (add1 lc)
+                            (if (baneling-raw-light-worker? rj) (add1 wc) wc))
+                    (values lc wc))))
             (define-values (near-ci near-d2) (nearest-clump-idx-d2 bx by))
-            (define det-quota-ok?
-              (and (>= near-ci 0)
-                   (<= near-d2 splash-r2)
-                   (< (vector-ref clump-det-cnt near-ci)
-                      (light-clump-rec-needed-banes (vector-ref clump-vec near-ci)))))
-            (define low-hp-detonate?
-              (and (< light-in-splash 3)
-                   (<= bhp 12.0)
-                   (or (< near-ci 0)
-                       (< (vector-ref clump-det-cnt near-ci)
-                          (light-clump-rec-needed-banes (vector-ref clump-vec near-ci))))
-                   (>= (for/sum : Integer ([g (in-list ground-recs)])
-                         (define dx (- bx (gnd-enemy-rec-x g)))
-                         (define dy (- by (gnd-enemy-rec-y g)))
-                         (if (and (<= (abs dx) splash-r)
-                                  (<= (abs dy) splash-r)
-                                  (<= (+ (* dx dx) (* dy dy)) splash-r2))
-                             1
-                             0))
-                       2)))
+            (define quota-ok?
+              (or (< near-ci 0)
+                  (< (vector-ref clump-det-cnt near-ci)
+                     (light-clump-rec-needed-banes (vector-ref clump-vec near-ci)))))
             (define should-explode?
-              (and (or (and (>= light-in-splash 3)
-                            (or (< near-ci 0)
-                                (< (vector-ref clump-det-cnt near-ci)
-                                   (light-clump-rec-needed-banes (vector-ref clump-vec near-ci)))))
-                       low-hp-detonate?)
-                   ;; Only detonate if either there's a valid clump with remaining det quota or low-hp trade
-                   (or det-quota-ok? low-hp-detonate? (>= light-in-splash 3))))
+              (and quota-ok?
+                   (or (>= workers-in-splash 2)
+                       (>= light-in-splash 3)
+                       ;; L59-P3 (`ro26` fix): Dying Baneling (`< 55%` HP) next to a worker detonates
+                       ;; to secure the kill instead of dying with 0 damage!
+                       (and (< bhp 16.5) (>= workers-in-splash 1)))))
             (cond
               [should-explode?
                (when (>= near-ci 0)
@@ -2803,6 +2810,134 @@
                              res-idx))
                    (values acc res-idx))])))
         (reverse final-rev-acc)])]))
+
+;; =============================================================================
+;; 6b. Early Scout / Probe Mineral-Line Harass (`nc-03`)
+;; =============================================================================
+;; Controls a lone forward scout worker (`probe`/`scv`/`drone`, up to 2 forward workers
+;; far from our home townhalls) harassing an enemy mineral line:
+;;   - Pokes damaged / constructing / isolated mining enemy workers (`focus-fire`).
+;;   - Immediately kites away along a perpendicular mineral-line orbit when `>= 2`
+;;     enemy workers chase within `3.2t`, ANY enemy combat unit closes within `5.5t`,
+;;     or the Probe drops below `8.0` shields (`< 0.55` EHP ratio) so it regenerates
+;;     shields and drags enemy workers off mining without feeding!
+(: plan-early-worker-mineral-line-harass
+   (->* ((Listof Any) (Listof Any))
+        (#:home-x Real
+         #:home-y Real
+         #:enemy-main-x Real
+         #:enemy-main-y Real
+         #:ally-bases (Listof (Pair Float Float))
+         #:map-width Real
+         #:map-height Real)
+        (Listof harass-directive)))
+(define (plan-early-worker-mineral-line-harass ally-units enemy-units
+                                               #:home-x [hx SC2-DEFAULT-HOME-BASE-X]
+                                               #:home-y [hy SC2-DEFAULT-HOME-BASE-Y]
+                                               #:enemy-main-x [emx 132.0]
+                                               #:enemy-main-y [emy 132.0]
+                                               #:ally-bases [ally-bases '()]
+                                               #:map-width [mw 200.0]
+                                               #:map-height [mh 200.0])
+  (define enemy-workers : (Listof Any)
+    (for/list : (Listof Any)
+              ([e (in-list enemy-units)]
+               #:when (and (> (u-tag e) 0)
+                           (u-alive? e)
+                           (memq (u-type e) '(scv probe drone mule))))
+      e))
+  (cond
+    [(null? enemy-workers) '()]
+    [else
+     (define hx-f (->float hx))
+     (define hy-f (->float hy))
+     (define mw-f (->float mw))
+     (define mh-f (->float mh))
+     (define has-home-ths? (pair? ally-bases))
+     ;; Forward scout/harass workers: strictly far (`>= 24t`) from our own townhalls
+     ;; (or any worker when `ally-bases` is empty, e.g. Arena `nc-03`), AND near enemy workers!
+     (define forward-workers : (Listof Any)
+       (for/list : (Listof Any)
+                 ([a (in-list ally-units)]
+                  #:when (and (> (u-tag a) 0)
+                              (u-alive? a)
+                              (memq (u-type a) '(probe scv drone))
+                              (or (not has-home-ths?)
+                                  (and (> (dist2 (u-x a) (u-y a) hx-f hy-f) 24.0)
+                                       (for/and : Boolean ([bp (in-list ally-bases)])
+                                         (> (dist2 (u-x a) (u-y a) (car bp) (cdr bp)) 20.0))))
+                              (for/or : Boolean ([ew (in-list enemy-workers)])
+                                (<= (dist2 (u-x a) (u-y a) (u-x ew) (u-y ew)) 22.0))))
+         a))
+     (cond
+       [(or (null? forward-workers) (> (length forward-workers) 3)) '()]
+       [else
+        (define enemy-combat : (Listof Any)
+          (for/list : (Listof Any)
+                    ([e (in-list enemy-units)]
+                     #:when (and (> (u-tag e) 0)
+                                 (u-alive? e)
+                                 (not (memq (u-type e) '(scv probe drone mule larva egg overlord observer changeling)))
+                                 (not (hash-ref *harass-structure-sym-set* (u-type e) (lambda () #f)))))
+            e))
+        (for/list : (Listof harass-directive) ([w (in-list forward-workers)])
+          (define wid (u-tag w))
+          (define wt (u-type w))
+          (define wx (u-x w))
+          (define wy (u-y w))
+          (define sh (safe-finite-real (or (dyn-hash-ref w 'shields #f) (dyn-hash-ref w 'shield #f)) 20.0))
+          (define low-shield-or-hp?
+            (or (and (eq? wt 'probe) (< sh 11.0))
+                (< (u-hp-ratio w) 0.65)))
+          (define near-chasers : (Listof Any)
+            (for/list : (Listof Any)
+                      ([ew (in-list enemy-workers)]
+                       #:when (<= (dist2 wx wy (u-x ew) (u-y ew)) 2.8))
+              ew))
+          (define near-combat : (Listof Any)
+            (for/list : (Listof Any)
+                      ([ec (in-list enemy-combat)]
+                       #:when (<= (dist2 wx wy (u-x ec) (u-y ec)) 6.0))
+              ec))
+          (define threats : (Listof Any) (append near-combat near-chasers))
+          (cond
+            [(or (pair? near-combat)
+                 (>= (length near-chasers) 2)
+                 (and low-shield-or-hp? (pair? enemy-workers)))
+             ;; Kite away + orbit tangentially to drag enemy workers off mining while regenerating shields
+             (define kite-refs (if (pair? threats) threats enemy-workers))
+             (define n-th (exact->inexact (max 1 (length kite-refs))))
+             (define tcx (/ (for/fold ([s : Float 0.0]) ([t (in-list kite-refs)]) (+ s (u-x t))) n-th))
+             (define tcy (/ (for/fold ([s : Float 0.0]) ([t (in-list kite-refs)]) (+ s (u-y t))) n-th))
+             (define dx (- wx tcx))
+             (define dy (- wy tcy))
+             (define d (max 0.01 (dist2 0.0 0.0 dx dy)))
+             (define ax (/ dx d))
+             (define ay (/ dy d))
+             ;; Blend 75% away + 25% perpendicular orbit so Probe stays in mineral-line radius without cornering
+             (define px (- ay))
+             (define py ax)
+             (define raw-kx (+ wx (* 5.5 (+ (* 0.78 ax) (* 0.28 px)))))
+             (define raw-ky (+ wy (* 5.5 (+ (* 0.78 ay) (* 0.28 py)))))
+             (define kpt (clamp-pt raw-kx raw-ky mw-f mh-f))
+             (harass-directive wid wt 'move #f 16 0
+                               (car kpt) (cdr kpt) 86.0
+                               (if low-shield-or-hp?
+                                   'early-worker-harass-shield-regen-kite
+                                   'early-worker-harass-drag-chasers)
+                               'early-worker-harass)]
+            [else
+             ;; Pick highest-value enemy worker (prefer low-HP / constructing worker, then nearest)
+             (define best-ew
+               (argmin (lambda ([ew : Any])
+                         (define d (dist2 wx wy (u-x ew) (u-y ew)))
+                         (define low-bonus (if (< (u-hp-ratio ew) 0.75) -4.5 0.0))
+                         (+ d low-bonus))
+                       enemy-workers))
+             (harass-directive wid wt 'focus-fire #f 23 (u-tag best-ew)
+                               (u-x best-ew) (u-y best-ew) 82.0
+                               'early-worker-harass-poke-miner
+                               'early-worker-harass)]))])]))
 
 ;; =============================================================================
 ;; 7. S-Expression Orchestration
@@ -2995,5 +3130,11 @@
          '())
      (if a-has-air-harass?
          (plan-air-worker-harass-tactics ally-units enemy-units #:home-x hx #:home-y hy #:enemy-main-x emx #:enemy-main-y emy #:enemy-targets cached-enemy-targets #:current-frame current-frame)
+         '())
+     (if (or (<= current-frame 4500) (null? rev-ally-ths))
+         (plan-early-worker-mineral-line-harass ally-units enemy-units
+                                                #:home-x hx #:home-y hy
+                                                #:enemy-main-x emx #:enemy-main-y emy
+                                                #:ally-bases (reverse rev-ally-ths))
          '())))
   (map harass-directive->sexp all-dirs))

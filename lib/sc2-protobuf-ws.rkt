@@ -234,12 +234,19 @@
  macro-econ-cmd?
  mark-framing-camera-cmd!
  framing-camera-cmd?
+ mark-pro-camera-jump-cmd!
+ pro-camera-jump-cmd?
  friendly-unit-on-depot-footprint?
  friendly-unit-requesting-depot-transit?
  wire-cmd-priority-tier
  coalesce-sc2-raw-commands
  make-wire-apm-governor
+ wire-apm-governor-target-apm
+ wire-apm-governor-hard-cap-apm
+ wire-apm-governor-burst-capacity
  govern-sc2-wire-actions!
+ get-wire-apm-drop-stats
+ reset-wire-apm-drop-stats!
  load-bot-build-metadata
  reset-bot-build-version-cache!
  format-bot-build-banner
@@ -1063,7 +1070,9 @@
           (rich-vespene-geyser 344 #t)
           (protoss-vespene-geyser 608 #t)
           (purifier-vespene-geyser 880 #t)
-          (shakuras-vespene-geyser 881 #t)))])
+          (shakuras-vespene-geyser 881 #t)
+          ;; Neutral Map Elements (Xel'Naga Watchtowers)
+          (xel-naga-tower 149 #t)))])
   (match-define (list sym id prim?) entry)
   (register-id-pair! SC2-UNIT-SYM->ID SC2-UNIT-ID->SYM sym id #:primary? prim?))
 
@@ -1120,6 +1129,7 @@
           (morph-ravager 2330 #t)
           (train-ravager 2330 #f)
           (morph-lurker 2332 #t)
+          (morph-lurker-mp 2332 #f)
           (train-lurker 2332 #f)
           (morph-brood-lord 1372 #t)
           (morph-broodlord 1372 #f)
@@ -1127,6 +1137,7 @@
           (morph-overseer 1448 #t)
           (train-overseer 1448 #f)
           (morph-overlord-transport 2708 #t)
+          (morph-dropperlord 2708 #f)
           (morph-lair 1216 #t)
           (build-lair 1216 #f)
           (morph-hive 1218 #t)
@@ -1143,7 +1154,9 @@
           (build-baneling-nest 1162 #t)
           (build-hydralisk-den 1157 #t)
           (build-lurker-den 1163 #t)
+          (build-lurker-den-mp 1163 #f)
           (morph-lurker-den 1163 #f)
+          (morph-lurker-den-mp 1163 #f)
           (build-spire 1158 #t)
           (build-infestation-pit 1160 #t)
           (build-ultralisk-cavern 1159 #t)
@@ -1258,6 +1271,7 @@
           (morph-archon 1766 #t)
           (train-archon 1766 #f)
           (morph-warp-gate 1518 #t)
+          (morph-warpgate 1518 #f)
           (morph-gateway 1520 #t)
           (morph-warp-prism-phasing 1528 #t)
           (morph-warp-prism-transport 1530 #t)
@@ -1341,6 +1355,8 @@
           (kd8-charge 2588 #t)
           (interference-matrix 3747 #t)
           (anti-armor-missile 3753 #t)
+          (nuke-calldown 1622 #t)
+          (tac-nuke-strike 1622 #f)
           (auto-turret 349 #f)
           (auto-turret 1764 #t)
           (build-auto-turret 1764 #f)
@@ -1360,9 +1376,21 @@
           (adept-phase-shift 2544 #t)
           (psionic-transfer 2544 #f)
           (force-field 1526 #t)
+          (forcefield 1526 #f)
           (guardian-shield 76 #t)
           (hallucination-phoenix 154 #t)
           (hallucination-archon 146 #t)
+          (hallucination-colossus 148 #t)
+          (hallucination-high-templar 150 #t)
+          (hallucination-immortal 152 #t)
+          (hallucination-probe 156 #t)
+          (hallucination-stalker 158 #t)
+          (hallucination-void-ray 160 #t)
+          (hallucination-warp-prism 162 #t)
+          (hallucination-zealot 164 #t)
+          (hallucination-oracle 2114 #t)
+          (hallucination-disruptor 2389 #t)
+          (hallucination-adept 2391 #t)
           (psi-storm 1036 #t)
           (psistorm 1036 #f)
           (feedback 140 #t)
@@ -1374,6 +1402,7 @@
           (pulsar-beam-on 2375 #f)
           (pulsar-beam-off 2376 #t)
           (oracle-revelation 2146 #t)
+          (revelation 2146 #f)
           (stasis-ward 2505 #t)
           (oracle-stasis-ward 2505 #f)
           (build-stasis-trap 2505 #f)
@@ -1396,8 +1425,8 @@
           (nydus-unload 1438 #t)
           (nydus-worm-load 2370 #t)
           (nydus-worm-unload 2371 #t)
-          (effect-repair 316 #t)
-          (repair-scv 316 #f)
+          (repair-scv 316 #t)
+          (effect-repair 3685 #f)
           (salvage-bunker 32 #f)
           (spine-crawler-uproot 1725 #t)
           (spine-crawler-root 1729 #t)
@@ -1479,10 +1508,12 @@
           (research-flyer-carapace-3 1317 #f)
           (research-stimpack 730 #t)
           (research-combat-shield 731 #t)
+          (research-combat-shields 731 #f)
           (research-concussive-shells 732 #t)
           (research-infernal-preigniter 761 #t)
           (research-infernal-pre-igniter 761 #f)
           (research-drilling-claws 764 #t)
+          (research-lock-on-range 765 #f)
           (research-smart-servos 766 #t)
           (research-cyclone-lock-on-damage 769 #t)
           (research-mag-field-accelerator 769 #f)
@@ -1542,6 +1573,8 @@
           (research-psi-storm 1126 #t)
           (research-psistorm 1126 #f)
           (research-psi-storm-tech 1126 #f)
+          (research-psistorm-tech 1126 #f)
+          (research-hallucination 1571 #f)
           (research-shadow-strike 2720 #t)
           (research-shadow-stride 2720 #f)
           (research-extended-thermal-lance 1097 #t)
@@ -3920,6 +3953,15 @@
           (not (string-contains? s "brick"))
           (not (string-contains? s "tower")))]))
 
+;; L59-P3 (`#1552`/`#1553`): Walk-over unbuildable anti-proxy plates/bricks/rocks (IDs 472/473/474
+;; or any type matching `unbuildable|plate|brick`) must NEVER be treated as attackable destructible
+;; rocks (keeps real destructible rocks `367/...` and collapsible rock towers `588/...` for nc-09/nc-10!).
+(define (neutral-unit-is-unbuildable-plate-or-brick? utype [sym-hint #f])
+  (or (memv utype '(472 473 474))
+      (let* ([sym (or sym-hint (sc2-id->unit-symbol utype 'unknown))]
+             [s (and (symbol? sym) (symbol->string sym))])
+        (and s (regexp-match? #rx"(?i:unbuildable|plate|brick)" s)))))
+
 (define (compute-ground-bfs-distances pathing-grid home-x home-y [neutral-units '()])
   (cond
     [(not (sc2-image-grid? pathing-grid)) #f]
@@ -4536,6 +4578,11 @@
 
 (define SC2-WARPGATE-LAST-LOOP (box 0))
 (define SC2-WARPGATE-COOLDOWN-UNTIL (make-hasheqv))
+(define SC2-WARPGATE-WARP-START-LOOP (make-hasheqv))
+(define SC2-WARPGATE-HARD-CD-UNTIL (make-hasheqv))
+(define SC2-WARPGATE-PREV-LIVE-READY (box 0))
+(define SC2-LAST-SCAN-REQUEST-LOOP (box -9999))
+(define SC2-LAST-BLIND-UPHILL-ERR-LOOP (box -9999))
 (define SC2-WARP-IN-ABILITY-IDS '(1413 1414 1416 1417 1418 1419))
 ;; W11-P0-3-wire: Reconcile client-side WarpGate cooldown estimates against SC2 `action-errors`
 ;; (rejected warp-ins must NEVER lock out a WarpGate for 23s!) and live `player_common.warp_gate_count`
@@ -4651,8 +4698,29 @@
         (when (and (memv ab SC2-WARP-IN-ABILITY-IDS) (not (= res 1)))
           (define utag (hash-ref ae 'unit-tag 0))
           (cond
+            ;; L59-P2 (`sc2-trn-n17`): `21:NotEnoughCharges` & `6:Cooldown` prove the WarpGate IS on
+            ;; cooldown! NEVER delete its cooldown entry (which caused 99x `1413` rej code 21 spam!);
+            ;; hard-lock it for up to `627` loops (28s) and let `live-wg-ready` stepping UP unlock it
+            ;; the exact frame SC2 reports a real ready charge!
+            [(memv res '(6 21))
+             (cond
+               [(and (exact-integer? utag) (> utag 0))
+                (define lock-until (max (hash-ref SC2-WARPGATE-COOLDOWN-UNTIL utag 0) (+ cur-loop 627)))
+                (hash-set! SC2-WARPGATE-COOLDOWN-UNTIL utag lock-until)
+                (hash-set! SC2-WARPGATE-HARD-CD-UNTIL utag lock-until)]
+               [else
+                (for ([u (in-list (if (list? units) units '()))]
+                      #:when (and (sc2-unit? u)
+                                  (= (sc2-unit-unit-type u) 133)
+                                  (= (sc2-unit-alliance u) 1)))
+                  (define t (sc2-unit-tag u))
+                  (define lock-until (max (hash-ref SC2-WARPGATE-COOLDOWN-UNTIL t 0) (+ cur-loop 64)))
+                  (hash-set! SC2-WARPGATE-COOLDOWN-UNTIL t lock-until)
+                  (hash-set! SC2-WARPGATE-HARD-CD-UNTIL t lock-until))])]
             [(and (exact-integer? utag) (> utag 0))
-             (hash-remove! SC2-WARPGATE-COOLDOWN-UNTIL utag)]
+             (hash-remove! SC2-WARPGATE-COOLDOWN-UNTIL utag)
+             (hash-remove! SC2-WARPGATE-WARP-START-LOOP utag)
+             (hash-remove! SC2-WARPGATE-HARD-CD-UNTIL utag)]
             [else
              ;; Action error omitted unit-tag: release any WarpGate locked within the last ~24 loops
              (define stale-keys
@@ -4660,9 +4728,14 @@
                           #:when (> (- v cur-loop) 420))
                  k))
              (for ([k (in-list stale-keys)])
-               (hash-remove! SC2-WARPGATE-COOLDOWN-UNTIL k))]))))
+               (hash-remove! SC2-WARPGATE-COOLDOWN-UNTIL k)
+               (hash-remove! SC2-WARPGATE-WARP-START-LOOP k)
+               (hash-remove! SC2-WARPGATE-HARD-CD-UNTIL k))]))))
     (define pc (sc2-observation-player-common obs))
     (define live-wg-ready (if (sc2-player-common? pc) (sc2-player-common-warp-gate-count pc) 0))
+    (define prev-live-ready (unbox SC2-WARPGATE-PREV-LIVE-READY))
+    (define live-wg-increased? (> live-wg-ready prev-live-ready))
+    (set-box! SC2-WARPGATE-PREV-LIVE-READY live-wg-ready)
     (when (and (exact-integer? live-wg-ready) (> live-wg-ready 0) (list? units))
       (define est-ready-cnt 0)
       (define est-busy '())
@@ -4676,14 +4749,26 @@
                         (or (not our-player-id) (= (sc2-unit-owner u) our-player-id) (= (sc2-unit-owner u) 1))))
         (define tag (sc2-unit-tag u))
         (define until (hash-ref SC2-WARPGATE-COOLDOWN-UNTIL tag 0))
-        (if (< cur-loop until)
-            (set! est-busy (cons (cons tag until) est-busy))
-            (set! est-ready-cnt (add1 est-ready-cnt))))
+        (define warp-start (hash-ref SC2-WARPGATE-WARP-START-LOOP tag -9999))
+        (define hard-until (hash-ref SC2-WARPGATE-HARD-CD-UNTIL tag 0))
+        (cond
+          [(< cur-loop until)
+           ;; L59-P2 (`sc2-trn-n17`): Physically impossible for ANY WarpGate (even 100% Chronoboosted
+           ;; Zealot: 448 * 2/3 = 299f) to finish cooldown in < 280f! Require >= 280f elapsed AND
+           ;; (not hard-locked by `21:NotEnoughCharges`/`6:Cooldown` OR `live-wg-ready` stepped UP!).
+           (when (and (>= (- cur-loop warp-start) 280)
+                      (or (and (>= cur-loop hard-until) live-wg-increased?)
+                          (and (>= cur-loop hard-until) (= prev-live-ready 0))
+                          live-wg-increased?))
+             (set! est-busy (cons (cons tag until) est-busy)))]
+          [else
+           (set! est-ready-cnt (add1 est-ready-cnt))]))
       (define deficit (- live-wg-ready est-ready-cnt))
       (when (and (> deficit 0) (pair? est-busy))
         (define sorted-busy (sort est-busy < #:key cdr))
         (for ([pair (in-list (take sorted-busy (min deficit (length sorted-busy))))])
-          (hash-remove! SC2-WARPGATE-COOLDOWN-UNTIL (car pair)))))))
+          (hash-remove! SC2-WARPGATE-COOLDOWN-UNTIL (car pair))
+          (hash-remove! SC2-WARPGATE-HARD-CD-UNTIL (car pair)))))))
 (define SC2-WORKER-BUILD-ORDER-START (make-hasheqv))
 (define SC2-HOME-BASE-ANCHOR (box #f))
 (define SC2-CLEARED-ENEMY-BASES (box '()))
@@ -4876,6 +4961,20 @@
 (define (framing-camera-cmd? cmd)
   (and (sc2-raw-camera-move? cmd)
        (not (not (hash-ref SC2-FRAMING-CAMERA-CMDS cmd #f)))))
+(define SC2-PRO-CAM-JUMP-CMDS (make-weak-hasheq))
+(define (mark-pro-camera-jump-cmd! cmd [jump-dist #f]
+                                   #:base-snapped? [base-snapped? #f]
+                                   #:crisis? [crisis? #f])
+  (when (sc2-raw-camera-move? cmd)
+    (define eff-d
+      (if (and (real? jump-dist) (not (nan? jump-dist)) (not (infinite? jump-dist)))
+          (exact->inexact jump-dist)
+          #f))
+    (hash-set! SC2-PRO-CAM-JUMP-CMDS cmd (vector (and base-snapped? #t) (and crisis? #t) eff-d)))
+  cmd)
+(define (pro-camera-jump-cmd? cmd)
+  (and (sc2-raw-camera-move? cmd)
+       (not (not (hash-ref SC2-PRO-CAM-JUMP-CMDS cmd #f)))))
 (define SC2-CMD-FRAMING-CAM (make-weak-hasheq))
 
 ;; Structural 3-Base Proxy Invariant:
@@ -4928,6 +5027,11 @@
     (set-box! SC2-ACTIVE-GAME-INFO game-info))
   (when (< cur-loop (unbox SC2-WARPGATE-LAST-LOOP))
     (hash-clear! SC2-WARPGATE-COOLDOWN-UNTIL)
+    (hash-clear! SC2-WARPGATE-WARP-START-LOOP)
+    (hash-clear! SC2-WARPGATE-HARD-CD-UNTIL)
+    (set-box! SC2-WARPGATE-PREV-LIVE-READY 0)
+    (set-box! SC2-LAST-SCAN-REQUEST-LOOP -9999)
+    (set-box! SC2-LAST-BLIND-UPHILL-ERR-LOOP -9999)
     (hash-clear! SC2-WORKER-BUILD-ORDER-START)
     (set-box! SC2-HOME-BASE-ANCHOR #f)
     (set-box! SC2-CLEARED-ENEMY-BASES '())
@@ -5846,7 +5950,7 @@
   (define enemy-proxy-bldg-records
     (filter (lambda (eb) (eq? (hash-ref eb 'is-proxy? #f) #t)) enemy-bldg-records))
 
-  ;; Persistent effects
+  ;; Persistent effects + L59-P2 (`#1531` Live Div-5 Bug #1): live Nuke alert & exact coordinates!
   (define effect-records
     (apply append
            (for/list ([eff (in-list (sc2-observation-effects obs))])
@@ -5855,6 +5959,15 @@
                (hasheq 'type (if (memq esym '(temporal-field temporal-field-growing)) 'force-field esym)
                        'x (sc2-point2d-x pt)
                        'y (sc2-point2d-y pt))))))
+  (define nuke-points
+    (for*/list ([eff (in-list (sc2-observation-effects obs))]
+                #:when (= (sc2-effect-effect-id eff) 7) ;; EffectId=7 NukePersistent
+                [pt (in-list (sc2-effect-positions eff))])
+      (cons (sc2-point2d-x pt) (sc2-point2d-y pt))))
+  (define obs-alerts (or (sc2-observation-alerts obs) '()))
+  (define nuke-alert-now?
+    (or (pair? nuke-points)
+        (and (memv 1 obs-alerts) #t))) ;; Alert.NuclearLaunchDetected = 1
 
   ;; Expand upgrade aliases so both canonical and short names are recognized
   (define (expand-upgrade-aliases upgs)
@@ -5995,6 +6108,39 @@
             'y (sc2-point3d-y gp)
             'vespene-contents (sc2-unit-vespene-contents u))))
 
+  ;; L59-W1: Forward interactive neutral map elements (`mineral-field*`, thin mineral walls,
+  ;; rich/gold minerals, vespene geysers, destructible rocks, collapsible rock towers, Xel'Naga towers)
+  ;; under `'neutral-units` so `step-map-elements-tactical-micro!` works in live SC2 games!
+  (define neutral-unit-records
+    (for/list ([u (in-list neutral-all)]
+               #:when (let* ([ut (sc2-unit-unit-type u)]
+                             [usym (sc2-id->unit-symbol ut 'unknown)])
+                        (and (not (neutral-unit-is-unbuildable-plate-or-brick? ut usym))
+                             (or (sc2-unit-is-mineral-field? u)
+                                 (sc2-unit-is-vespene-geyser? u)
+                                 (= ut 149) ;; Xel'Naga Watchtower
+                                 (sc2-unit-is-structure? u)
+                                 (>= (sc2-unit-health-max u) 250.0)
+                                 (memv ut '(367 369 370 372 373 375 376
+                                            480 482 588 589 590 591 594 595 596 597 598 599 600 601 602
+                                            639 640 641 642 643 644 645 646 647 648 649 650 651 652 653 658))))))
+      (define np (sc2-unit-pos u))
+      (define ut (sc2-unit-unit-type u))
+      (define usym (sc2-id->unit-symbol ut 'unknown))
+      (hasheq 'id (sc2-unit-tag u)
+              'tag (sc2-unit-tag u)
+              'type usym
+              'unit-type-id ut
+              'x (sc2-point3d-x np)
+              'y (sc2-point3d-y np)
+              'z (sc2-point3d-z np)
+              'hp (sc2-unit-health u)
+              'max-hp (max 1.0 (sc2-unit-health-max u))
+              'mineral-contents (sc2-unit-mineral-contents u)
+              'vespene-contents (sc2-unit-vespene-contents u)
+              'radius (sc2-unit-radius u)
+              'is-flying (sc2-unit-is-flying u))))
+
   ;; Harvester & depletion metrics (deduct stasis-frozen workers from active mineral-harvesters
   ;; so the economy layer immediately trains/transfers replacement workers during a 21.4s stasis freeze!)
   (define raw-min-harvesters
@@ -6128,6 +6274,7 @@
         'fourth-x fourth-x
         'fourth-y fourth-y
         'expansion-candidates expansion-candidates
+        'expansion-pads expansion-candidates
         'enemy-x enemy-x
         'enemy-y enemy-y
         'enemy-base (list enemy-x enemy-y)
@@ -6144,6 +6291,7 @@
         'mineral-patch-id closest-mineral-patch-id
         'mineral-patches mineral-patch-records
         'geysers geyser-records
+        'neutral-units neutral-unit-records
         'ally-units ally-unit-records
         'ally-creep-tumors ally-creep-tumor-records
         'ally-buildings ally-bldg-records
@@ -6170,7 +6318,8 @@
         'busy-townhalls busy-townhalls
         'enemy-workers-killed 0
         'visible-sectors '(0 1 2 3)
-        'nuke-alert #f
+        'nuke-alert nuke-alert-now?
+        'nuke-points nuke-points
         'army-supply (max 0 (exact-round (sc2-player-common-food-army pc)))
         'power-placement-failed?
         (let ([fl (unbox SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP)])
@@ -8894,7 +9043,7 @@
                 #:key (lambda (u)
                         (define up (sc2-unit-pos u))
                         (pt-dist ref-x ref-y (sc2-point3d-x up) (sc2-point3d-y up)))))]
-    [(eq? norm 'overlord-transport)
+    [(memq norm '(overlord-transport dropperlord))
      (idle-ready-of-types '(overlord))]
     ;; Terran
     [(eq? norm 'scv)
@@ -9000,10 +9149,10 @@
       [(memq norm '(burrow overlord-speed overlordspeed pneumatized-carapace))
        '(hatchery lair hive)]
       ;; Attached TechLabs only — unattached 'tech-lab (5) cannot research!
-      [(memq norm '(stimpack combat-shield concussive-shells))
+      [(memq norm '(stimpack combat-shield combat-shields concussive-shells))
        '(barracks-tech-lab barracks-techlab)]
       [(memq norm '(infernal-preigniter infernal-pre-igniter drilling-claws
-                    cyclone-lock-on-damage mag-field-accelerator smart-servos
+                    cyclone-lock-on-damage lock-on-range mag-field-accelerator smart-servos
                     hurricane-thrusters))
        '(factory-tech-lab factory-techlab)]
       [(memq norm '(banshee-cloak cloaking-field hyperflight-rotors
@@ -9026,7 +9175,7 @@
            (string-contains? str "terran-ship")
            (string-contains? str "ship-weapons"))
        '(armory)]
-      [(memq norm '(warpgate warp-gate warp-gate-research warpgate-research))
+      [(memq norm '(warpgate warp-gate warp-gate-research warpgate-research hallucination))
        '(cybernetics-core)]
       [(memq norm '(charge blink blink-tech resonating-glaives adept-piercing-attack))
        '(twilight-council)]
@@ -9112,9 +9261,20 @@
               [else #t])))]
     [else #f]))
 
+;; L59-P2 (`nc-07`/`nc-08`): Thin mineral wall patch (mineral-contents in 1..150, e.g. 5M/100M wall blockers).
+(define (sc2-unit-is-thin-mineral-wall? u)
+  (and (sc2-unit? u)
+       (sc2-unit-is-mineral-field? u)
+       (let ([mc (sc2-unit-mineral-contents u)])
+         (and (> mc 0) (<= mc 150)))))
+
 ;; Returns #t if `u` is carrying cargo (including Harvest.Return orders) or already gathering
-;; gas / a mineral patch at the same base as `patch-id` (permitting explicit cross-base transfers).
+;; gas / a mineral patch at the same base as `patch-id` (permitting explicit cross-base transfers
+;; AND allowing switching from normal base minerals onto a thin mineral wall `<= 150M` while
+;; protecting active thin-wall harvesters from being pulled back to normal minerals or re-issued!).
 (define (worker-busy-harvesting-mineral? u patch-id mineral-by-tag gas-bldg-tags-set mineral-fields)
+  (define tgt-m (and (exact-integer? patch-id) (hash-ref mineral-by-tag patch-id #f)))
+  (define tgt-thin-wall? (and tgt-m (sc2-unit-is-thin-mineral-wall? tgt-m)))
   (or (worker-carrying-cargo? u)
       (ormap (lambda (o)
                (define ab (sc2-unit-order-ability-id o))
@@ -9126,9 +9286,14 @@
                         [(null? mineral-fields) #t]
                         [else
                          (define cur-m (hash-ref mineral-by-tag otag #f))
-                         (define tgt-m (and (exact-integer? patch-id) (hash-ref mineral-by-tag patch-id #f)))
                          (cond
                            [(not cur-m) #f]
+                           [(and (sc2-unit-is-thin-mineral-wall? cur-m)
+                                 (not tgt-thin-wall?))
+                            #t] ;; Never pull a thin-wall excavator onto normal minerals!
+                           [(and tgt-thin-wall?
+                                 (not (sc2-unit-is-thin-mineral-wall? cur-m)))
+                            #f] ;; Always allow pulling a normal miner onto a thin mineral wall!
                            [(not tgt-m) #t]
                            [else
                             (define cp (sc2-unit-pos cur-m))
@@ -9417,6 +9582,7 @@
 (define SC2-GAS-BLDG-ZERO-WORKERS-SINCE (make-hasheqv))
 (define SC2-SAT-OBSERVED-ENEMY-RACE (box #f))
 (define SC2-SAT-SEEN-TERRAN-CLOAK-TECH? (box #f))
+(define SC2-SAT-SEEN-ENEMY-CLOAK? (box #f))
 
 (define (sc2-infer-race-from-units ulist)
   (for/first ([e (in-list ulist)]
@@ -9438,9 +9604,12 @@
   (void reserved-aabbs)
   (define cur-loop (sc2-observation-game-loop obs))
   (define prev-sat-loop (unbox SC2-WORKER-TRANSFER-LAST-LOOP))
-  (when (or (<= cur-loop 8) (< cur-loop prev-sat-loop))
+  (when (or (< cur-loop prev-sat-loop)
+            (and (<= cur-loop 8) (> prev-sat-loop 8)))
     (hash-clear! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL)
-    (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+    (for ([k (in-list (hash-keys SC2-MACRO-ABILITY-LAST-LOOP))])
+      (unless (= (hash-ref SC2-MACRO-ABILITY-LAST-LOOP k -1) cur-loop)
+        (hash-remove! SC2-MACRO-ABILITY-LAST-LOOP k)))
     (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
     (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f)
     (set-box! SC2-ZERO-GAS-STREAK-START-LOOP #f)
@@ -9451,7 +9620,8 @@
     (set-box! SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP #f)
     (hash-clear! SC2-GAS-BLDG-ZERO-WORKERS-SINCE)
     (set-box! SC2-SAT-OBSERVED-ENEMY-RACE #f)
-    (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #f))
+    (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #f)
+    (set-box! SC2-SAT-SEEN-ENEMY-CLOAK? #f))
   (when (> (- cur-loop prev-sat-loop) 64)
     (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f))
   (set-box! SC2-WORKER-TRANSFER-LAST-LOOP cur-loop)
@@ -9528,6 +9698,16 @@
   (define (worker-returning-cargo? w)
     (worker-carrying-cargo? w))
 
+  (define thin-wall-mineral-tags
+    (for/seteqv ([m (in-list mineral-fields)]
+                 #:when (sc2-unit-is-thin-mineral-wall? m))
+      (sc2-unit-tag m)))
+  (define (worker-excavating-thin-wall? w)
+    (and (not (set-empty? thin-wall-mineral-tags))
+         (ormap (lambda (o)
+                  (and (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666))
+                       (set-member? thin-wall-mineral-tags (sc2-unit-order-target-unit-tag o))))
+                (sc2-unit-orders w))))
   (define sat-self-structures
     (filter sc2-unit-is-structure? self-units))
   (define workers
@@ -9536,6 +9716,7 @@
               (and (sc2-unit-is-worker? w)
                    (not (memv 57 (sc2-unit-buff-ids w)))
                    (not (set-member? excluded-worker-tags wtag))
+                   (not (worker-excavating-thin-wall? w))
                    (not (and (hash? role-leases)
                              (unit-leased-above? role-leases wtag 'harvester cur-loop)))
                    (not (worker-has-build-order? w cur-loop sat-self-structures))))
@@ -10753,16 +10934,20 @@
                      (and (memq ra '(Zerg Terran Protoss)) ra))
                    (hash-ref pi 'race-requested #f))))))
     (define sat-enemy-race
-      (or (and (memq gi-enemy-race '(Zerg Terran Protoss)) gi-enemy-race)
-          seen-enemy-race-now
+      (or seen-enemy-race-now
+          (and (memq gi-enemy-race '(Zerg Terran Protoss)) gi-enemy-race)
           (unbox SC2-SAT-OBSERVED-ENEMY-RACE)
           gi-enemy-race))
     (define enemy-cloak-threat?
       (ormap (lambda (e)
-               (or (memv (sc2-unit-cloak e) '(1 2))
-                   (sc2-unit-is-burrowed e)
-                   (memv (sc2-unit-unit-type e) '(50 55 69 76 498 502 503 504))))
+               (define et (sc2-unit-unit-type e))
+               (and (not (memv et '(87 137 138)))
+                    (or (memv (sc2-unit-cloak e) '(1 2))
+                        (sc2-unit-is-burrowed e)
+                        (memv et '(50 55 69 76 498 500 502 503 504)))))
              enemy-units))
+    (when enemy-cloak-threat?
+      (set-box! SC2-SAT-SEEN-ENEMY-CLOAK? #t))
     (define has-raven-now?
       (ormap (lambda (u) (= (sc2-unit-unit-type u) 56)) self-units))
     (define has-ready-turret-now?
@@ -10772,11 +10957,34 @@
              self-units))
     (define ready-ocs
       (filter (lambda (th) (= (sc2-unit-unit-type th) 132)) ready-townhalls))
+    (define friendly-combat-cnt-now
+      (count (lambda (u)
+               (and (not (sc2-unit-is-structure? u))
+                    (not (sc2-unit-is-worker? u))
+                    (not (memv (sc2-unit-unit-type u)
+                               '(12 13 14 15 16 17 82 103 106 129 151 268 1911 1912)))))
+             self-units))
+    ;; L59-C (`#1565`/`#1566` Fix #3): Distinguish isolated Arena skirmishes (`sc2-ab-t10`:
+    ;; `<= 8` SCVs and `0` SupplyDepot/Refinery/Barracks/Factory/Starport macro structures)
+    ;; from live full ladder matches so unprovoked live TvT/TvZ NEVER lock MULEs to `101e`!
+    (define isolated-arena-skirmish?
+      (and (<= (length workers) 8)
+           (not (ormap (lambda (u)
+                         (memv (sc2-unit-unit-type u) '(19 20 21 27 28 47)))
+                       self-units))))
     (define proactive-scan-oc-limit
       (cond
+        ;; TvP >= 4:00 (5376f): reserve Scan on top-1 OC ONLY until >= 3 ready OCs (then 2 OCs),
+        ;; so 2-base Terran OC #2 MULEs freely at 50e instead of suffering a 65s blackout!
         [(and (>= cur-loop 5376)
               (memq sat-enemy-race '(Protoss Random)))
-         2]
+         (if (>= (length ready-ocs) 3) 2 1)]
+        ;; Reserve top-1 OC Scan bank strictly when enemy cloak/burrow was explicitly sighted
+        ;; OR in an isolated Arena skirmish (`sc2-ab-t10`: <= 8 workers, 0 macro infra, >= 6 combat).
+        [(or (unbox SC2-SAT-SEEN-ENEMY-CLOAK?)
+             (and isolated-arena-skirmish?
+                  (>= friendly-combat-cnt-now 6)))
+         1]
         [(and (eq? sat-enemy-race 'Terran)
               (or seen-terran-cloak-tech-now?
                   (unbox SC2-SAT-SEEN-TERRAN-CLOAK-TECH?)))
@@ -10798,29 +11006,123 @@
                  [take-n (min proactive-scan-oc-limit (length sorted-ocs))])
             (map sc2-unit-tag (take sorted-ocs take-n)))
           '()))
-    (for ([oc (in-list ready-ocs)])
-      (define oc-tag (sc2-unit-tag oc))
-      (define mule-energy-floor
-        (if (or enemy-cloak-threat?
-                (and (pair? proactive-scan-oc-tags)
-                     (memv oc-tag proactive-scan-oc-tags)))
-            100.0
-            50.0))
-      (when (and (>= (sc2-unit-energy oc) mule-energy-floor)
-                 (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule oc-tag) -1000)) 16))
-        (define safe-min-tag (pick-safe-mule-mineral-patch oc self-units mineral-fields enemy-units))
-        (when (and (exact-integer? safe-min-tag) (> safe-min-tag 0))
-          (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule oc-tag) cur-loop)
-          (set! cmds
-                (cons (mark-macro-econ-cmd!
-                       (sc2-raw-unit-command 171 #f safe-min-tag (list oc-tag) #f))
-                      cmds))))))
+    ;; L58-P1: When an undetected cloaked (`cloak=1`) or burrowed combat enemy is within `32t`
+    ;; of friendly units, hard-block `L23-P0-1` MULE (`171`) even at `100e` so an Orbital Command
+    ;; NEVER steals energy from an immediate `Scanner Sweep (399)`!
+    (define active-uncovered-cloak-near-us?
+      (ormap (lambda (e)
+               (and (or (= (sc2-unit-cloak e) 1)
+                        (sc2-unit-is-burrowed e))
+                    (not (memv (sc2-unit-unit-type e) '(137 138 732)))
+                    (let ([ep (sc2-unit-pos e)])
+                      (ormap (lambda (u)
+                               (let ([up (sc2-unit-pos u)])
+                                 (<= (pt-dist (sc2-point3d-x ep) (sc2-point3d-y ep)
+                                              (sc2-point3d-x up) (sc2-point3d-y up))
+                                     32.0)))
+                             self-units))))
+             enemy-units))
+    ;; L59-P3 (`#1552`/`#1553` Fix #1B): Gate the `150.0` uphill-scan MULE energy floor strictly to:
+    ;;   1) Isolated Arena (`0` owned townhalls or `sc2-rmp-h06` 0-worker Tank+OC clash), OR
+    ;;   2) Explicit `83:MustTargetVisibleUnit` blind uphill attack error within the last `44f`, OR
+    ;;   3) Explicit `scanner-sweep (399)` requested in `actions` on this step, OR
+    ;;   4) A friendly Sieged Tank (`32`) with an uphill enemy (`dz >= 1.5`) within `<= 15.0t`
+    ;;      and `0` friendly air spotters within `<= 16.0t` of that Tank!
+    ;; NEVER raise `mule-energy-floor` to `150.0` for routine `3:00-6:00` pre-Starport Marines/Reapers!
+    (define sat-air-spotters
+      (filter (lambda (u) (memv (sc2-unit-unit-type u) '(35 54 55 56 57 689 692))) self-units))
+    (define sat-sieged-tanks
+      (filter (lambda (u) (= (sc2-unit-unit-type u) 32)) self-units))
+    (define sat-blind-uphill-err-now?
+      (let ([errs (sc2-observation-action-errors obs)])
+        (and (list? errs)
+             (ormap (lambda (ae)
+                      (and (hash? ae)
+                           (= (hash-ref ae 'ability-id 0) 23)
+                           (= (hash-ref ae 'result 0) 83))) ;; MustTargetVisibleUnit
+                    errs))))
+    (when sat-blind-uphill-err-now?
+      (set-box! SC2-LAST-BLIND-UPHILL-ERR-LOOP cur-loop))
+    (define sat-recent-blind-uphill-err?
+      (and (>= (unbox SC2-LAST-BLIND-UPHILL-ERR-LOOP) 0)
+           (<= (- cur-loop (unbox SC2-LAST-BLIND-UPHILL-ERR-LOOP)) 44)))
+    (define sat-sieged-tank-uphill-needs-scan?
+      (and (pair? sat-sieged-tanks)
+           (pair? enemy-units)
+           (ormap (lambda (tk)
+                    (define tp (sc2-unit-pos tk))
+                    (define tx (sc2-point3d-x tp))
+                    (define ty (sc2-point3d-y tp))
+                    (define tz (sc2-point3d-z tp))
+                    (and (not (ormap (lambda (sp)
+                                       (define sp-pos (sc2-unit-pos sp))
+                                       (<= (pt-dist tx ty (sc2-point3d-x sp-pos) (sc2-point3d-y sp-pos)) 16.0))
+                                     sat-air-spotters))
+                         (ormap (lambda (e)
+                                  (define ep (sc2-unit-pos e))
+                                  (and (not (sc2-unit-is-flying e))
+                                       (>= (- (sc2-point3d-z ep) tz) 1.5)
+                                       (<= (pt-dist tx ty (sc2-point3d-x ep) (sc2-point3d-y ep)) 15.0)))
+                                enemy-units)))
+                  sat-sieged-tanks)))
+    (define sat-isolated-arena-scan-clash?
+      (or (null? ready-townhalls)
+          (and (= (length ready-townhalls) 1)
+               (not (ormap sc2-unit-is-worker? self-units))
+               (pair? sat-sieged-tanks)
+               (null? sat-air-spotters))))
+    (define sat-scan-reserved-now?
+      (or (= cur-loop (unbox SC2-LAST-SCAN-REQUEST-LOOP))
+          sat-recent-blind-uphill-err?
+          sat-sieged-tank-uphill-needs-scan?
+          sat-isolated-arena-scan-clash?))
+    (unless active-uncovered-cloak-near-us?
+      (for ([oc (in-list ready-ocs)])
+        (define oc-tag (sc2-unit-tag oc))
+        (define mule-energy-floor
+          (cond
+            [sat-scan-reserved-now? 150.0]
+            [(and isolated-arena-skirmish?
+                  (>= friendly-combat-cnt-now 6)
+                  (pair? proactive-scan-oc-tags)
+                  (memv oc-tag proactive-scan-oc-tags))
+             101.0]
+            [(or enemy-cloak-threat?
+                 (and (pair? proactive-scan-oc-tags)
+                      (memv oc-tag proactive-scan-oc-tags)))
+             100.0]
+            [else 50.0]))
+        (when (and (>= (sc2-unit-energy oc) mule-energy-floor)
+                   (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule oc-tag) -1000)) 24))
+          (define safe-min-tag (pick-safe-mule-mineral-patch oc self-units mineral-fields enemy-units))
+          (when (and (exact-integer? safe-min-tag) (> safe-min-tag 0))
+            (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule oc-tag) cur-loop)
+            (set! cmds
+                  (cons (mark-macro-econ-cmd!
+                         (sc2-raw-unit-command 171 #f safe-min-tag (list oc-tag) #f))
+                        cmds)))))))
   ;; 6b. Early Nexus ChronoBoost (`3755`): `0:00-5:00` (`< 6720f`) & `< 50` Probes — keep active
-  ;;     Probe-training Nexuses boosted at Tier P1 (`+4-5` Probes by `4:00`)!
+  ;;     Probe-training Nexuses boosted at Tier P1 (`+4-5` Probes by `4:00`), yielding only when a
+  ;;     low-energy friendly spellcaster (`< 75e`, HT/Sentry/Oracle/Mothership) is within `15t`
+  ;;     during active enemy contact so `5.0.14` `Nexus Energy Recharge (4126)` fires first!
   (when (and (< cur-loop 6720)
              (< (length workers) 50))
     (define ready-nexuses
       (filter (lambda (th) (= (sc2-unit-unit-type th) 59)) ready-townhalls))
+    (define (low-energy-protoss-caster-near-nexus? nx)
+      (and (sc2-ability-live-available? 4126)
+           (pair? enemy-units)
+           (let ([np (sc2-unit-pos nx)])
+             (ormap (lambda (u)
+                      (and (memv (sc2-unit-unit-type u) '(10 75 77 495))
+                           (not (sc2-unit-is-hallucination u))
+                           (> (sc2-unit-energy-max u) 0.0)
+                           (< (sc2-unit-energy u) 75.0)
+                           (let ([up (sc2-unit-pos u)])
+                             (<= (pt-dist (sc2-point3d-x np) (sc2-point3d-y np)
+                                          (sc2-point3d-x up) (sc2-point3d-y up))
+                                 15.0))))
+                    self-units))))
     (define probe-training-unboosted-nexuses
       (filter (lambda (nx)
                 (define ntag (sc2-unit-tag nx))
@@ -10832,6 +11134,7 @@
       (define claimed-chrono-tgts (mutable-seteqv))
       (for ([caster-nx (in-list ready-nexuses)]
             #:when (and (>= (sc2-unit-energy caster-nx) 50.0)
+                        (not (low-energy-protoss-caster-near-nexus? caster-nx))
                         (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono (sc2-unit-tag caster-nx)) -1000)) 16)))
         (define ctag (sc2-unit-tag caster-nx))
         (define tgt-nx
@@ -10883,6 +11186,8 @@
 (define SC2-TRANS-LAST-CAM-LOOP (box -1000))
 (define SC2-LAST-BOT-ACTION-REJECTS (box '()))
 (define SC2-TOTAL-BOT-ACTION-REJECT-COUNT (box 0))
+(define SC2-ACTIVE-RECALL-ZONES (box '()))
+(define SC2-NEXUS-RECALL-READY-LOOP (box -10000))
 
 ;; Verify whether `(px, py)` lies inside any completed power field (`power-sources` when populated,
 ;; or completed friendly Pylon / WarpPrism-Phasing units as fallback).
@@ -10988,8 +11293,32 @@
                                                  #:tactical-posture [tactical-posture-kw #f]
                                                  #:endgame-cleanup? [endgame-cleanup-kw #f]
                                                  #:watchdog-expand-ring-syms [watchdog-expand-ring-syms '()])
+  (define (normalize-warp-in-unit-sym u)
+    (case u
+      [(warp-in-zealot)       'zealot]
+      [(warp-in-stalker)      'stalker]
+      [(warp-in-sentry)       'sentry]
+      [(warp-in-adept)        'adept]
+      [(warp-in-high-templar) 'high-templar]
+      [(warp-in-dark-templar) 'dark-templar]
+      [else u]))
+  (define normalized-raw-actions
+    (if (list? raw-actions)
+        (for/list ([a (in-list raw-actions)])
+          (match a
+            [(list 'train-unit prod u rest ...)
+             (let ([nu (normalize-warp-in-unit-sym u)])
+               (if (eq? nu u) a (list* 'train-unit prod nu rest)))]
+            [(list 'warp-in prod u x y)
+             (let ([nu (normalize-warp-in-unit-sym u)])
+               (if (eq? nu u) a (list 'warp-in prod nu x y)))]
+            [(list 'warp-in u x y)
+             (let ([nu (normalize-warp-in-unit-sym u)])
+               (if (eq? nu u) a (list 'warp-in nu x y)))]
+            [_ a]))
+        '()))
   (define-values (actions step-action-rejects)
-    (filter-valid-bot-actions (if (list? raw-actions) raw-actions '())))
+    (filter-valid-bot-actions normalized-raw-actions))
   (set-box! SC2-LAST-BOT-ACTION-REJECTS step-action-rejects)
   (when (pair? step-action-rejects)
     (set-box! SC2-TOTAL-BOT-ACTION-REJECT-COUNT
@@ -11108,8 +11437,16 @@
       (set-box! SC2-WIRE-HOLD-POSTURE-STATE #f)
       (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE #f)
       (set-box! SC2-TERRITORY-FIELD-CACHE #f)
-      (set-box! SC2-BUILD-TAG-EMITTED? #f))
-    (set-box! SC2-WIRE-LAST-LOOP-BOX cur-loop))
+      (set-box! SC2-BUILD-TAG-EMITTED? #f)
+      (set-box! SC2-ACTIVE-RECALL-ZONES '())
+      (set-box! SC2-NEXUS-RECALL-READY-LOOP -10000)
+      (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #f)
+      (set-box! SC2-SAT-SEEN-ENEMY-CLOAK? #f))
+    (set-box! SC2-WIRE-LAST-LOOP-BOX cur-loop)
+    (let ([rzs (unbox SC2-ACTIVE-RECALL-ZONES)])
+      (when (pair? rzs)
+        (set-box! SC2-ACTIVE-RECALL-ZONES
+                  (filter (lambda (z) (< cur-loop (second z))) rzs)))))
   (when (sc2-observation? obs)
     (when (or (< cur-loop (unbox SC2-ENEMY-POS-LAST-LOOP))
               (and (<= cur-loop 8) (> (unbox SC2-ENEMY-POS-LAST-LOOP) 8)))
@@ -11117,6 +11454,11 @@
       (set-clear! SC2-LAST-KNOWN-ENEMY-NON-CAMPERS)
       (hash-clear! SC2-LAST-KNOWN-ENEMY-META)
       (hash-clear! SC2-WARPGATE-COOLDOWN-UNTIL)
+      (hash-clear! SC2-WARPGATE-WARP-START-LOOP)
+      (hash-clear! SC2-WARPGATE-HARD-CD-UNTIL)
+      (set-box! SC2-WARPGATE-PREV-LIVE-READY 0)
+      (set-box! SC2-LAST-SCAN-REQUEST-LOOP -9999)
+      (set-box! SC2-LAST-BLIND-UPHILL-ERR-LOOP -9999)
       (hash-clear! SC2-DEPOT-TOGGLE-COOLDOWN)
       (hash-clear! SC2-MODE-TOGGLE-COOLDOWN)
       (hash-clear! SC2-MINE-CLEAR-SINCE-LOOP)
@@ -11153,12 +11495,21 @@
       (set-box! SC2-EVER-SAW-MINERALS? #f)
       (set-box! SC2-WIRE-HOLD-POSTURE-STATE #f)
       (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE #f)
+      (set-box! SC2-ACTIVE-RECALL-ZONES '())
+      (set-box! SC2-NEXUS-RECALL-READY-LOOP -10000)
+      (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #f)
+      (set-box! SC2-SAT-SEEN-ENEMY-CLOAK? #f)
       (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
       (set-box! SC2-TERRITORY-FIELD-CACHE #f)
       (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999))
     (set-box! SC2-ENEMY-POS-LAST-LOOP cur-loop)
     (when (< cur-loop (unbox SC2-WARPGATE-LAST-LOOP))
-      (hash-clear! SC2-WARPGATE-COOLDOWN-UNTIL))
+      (hash-clear! SC2-WARPGATE-COOLDOWN-UNTIL)
+      (hash-clear! SC2-WARPGATE-WARP-START-LOOP)
+      (hash-clear! SC2-WARPGATE-HARD-CD-UNTIL)
+      (set-box! SC2-WARPGATE-PREV-LIVE-READY 0)
+      (set-box! SC2-LAST-SCAN-REQUEST-LOOP -9999)
+      (set-box! SC2-LAST-BLIND-UPHILL-ERR-LOOP -9999))
     (set-box! SC2-WARPGATE-LAST-LOOP cur-loop)
     (define raw-dead (sc2-observation-dead-unit-tags obs))
     (when (list? raw-dead)
@@ -11167,7 +11518,9 @@
         (hash-remove! SC2-LAST-KNOWN-ENEMY-POS dtag)
         (set-remove! SC2-LAST-KNOWN-ENEMY-NON-CAMPERS dtag)
         (hash-remove! SC2-LAST-KNOWN-ENEMY-META dtag)
-        (hash-remove! SC2-WARPGATE-COOLDOWN-UNTIL dtag))))
+        (hash-remove! SC2-WARPGATE-COOLDOWN-UNTIL dtag)
+        (hash-remove! SC2-WARPGATE-WARP-START-LOOP dtag)
+        (hash-remove! SC2-WARPGATE-HARD-CD-UNTIL dtag))))
   (define units
     (if (and (sc2-observation? obs) (list? (sc2-observation-units obs)))
         (filter-map sanitize-obs-unit (sc2-observation-units obs))
@@ -11286,6 +11639,42 @@
   (when (> (length step-clusters) (length (unbox SC2-CACHED-MAP-BASE-CLUSTERS)))
     (set-box! SC2-CACHED-MAP-BASE-CLUSTERS step-clusters))
   (define live-visible-enemy-tags (mutable-seteqv))
+  ;; L59-P2/P3 (`nc-09`/`nc-10`, `#1553`): Visible attackable neutral units (real destructible rocks
+  ;; & collapsible rock towers: `alliance=3, display-type=1, health-max > 0, health > 0`, strictly
+  ;; excluding minerals, geysers, Xel'Naga watchtowers `149`, AND walk-over `UnbuildablePlates*` /
+  ;; `UnbuildableBricks*` / `UnbuildableRocks*`!) so unit-targeted `(attack-unit uid rock-tag)` emits
+  ;; unit-targeted `Attack (23)` on real rocks while never letting armies target unbuildable plates!
+  (define live-visible-neutral-attackable-tags (mutable-seteqv))
+  (for ([nu (in-list rev-neutral-units)])
+    (define ntag (sc2-unit-tag nu))
+    (define nutype (sc2-unit-unit-type nu))
+    (when (and (valid-u64-tag? ntag)
+               (= (sc2-unit-display-type nu) 1)
+               (> (sc2-unit-health-max nu) 0.0)
+               (> (sc2-unit-health nu) 0.0)
+               (not (sc2-unit-is-mineral-field? nu))
+               (not (sc2-unit-is-vespene-geyser? nu))
+               (not (= nutype 149)) ;; exclude Xel'Naga watchtower
+               (not (neutral-unit-is-unbuildable-plate-or-brick? nutype)))
+      (set-add! live-visible-neutral-attackable-tags ntag)))
+  (when (hash? obs)
+    (define raw-nh (hash-ref obs 'neutral-units '()))
+    (when (list? raw-nh)
+      (for ([nh (in-list raw-nh)] #:when (hash? nh))
+        (define nid (hash-ref nh 'id 0))
+        (define nmhp (hash-ref nh 'max-hp 0))
+        (define nhp (hash-ref nh 'hp 0))
+        (define ntype (hash-ref nh 'type 'unknown))
+        (define nutype-id (hash-ref nh 'unit-type-id 0))
+        (when (and (valid-u64-tag? nid)
+                   (finite-num? nmhp) (> nmhp 0)
+                   (finite-num? nhp) (> nhp 0)
+                   (equal? (hash-ref nh 'display-type 1) 1)
+                   (not (eq? (hash-ref nh 'is-mineral? #f) #t))
+                   (not (eq? (hash-ref nh 'is-geyser? #f) #t))
+                   (not (eq? ntype 'xel-naga-tower))
+                   (not (neutral-unit-is-unbuildable-plate-or-brick? nutype-id ntype)))
+          (set-add! live-visible-neutral-attackable-tags nid)))))
   (define enemy-ground-units '())
   (define enemy-fast-breach-units '())
   (define enemy-gas-bldgs '())
@@ -12522,6 +12911,36 @@
          (not (memv 56 (sc2-unit-buff-ids u)))
          (not (set-member? step-activating-pulsar-beam-tags t))))
 
+  ;; Immobile burrowed / sieged / phased / cocoon / incomplete non-structure units that reject
+  ;; `Move (16)` / `Patrol (17)` with `2:NotSupported` (explicitly excludes burrow-moving `118`
+  ;; RoachBurrowed and `127` InfestorBurrowed!).
+  (define (unit-immobile-burrowed-or-sieged? u)
+    (and (sc2-unit? u)
+         (or (memv (sc2-unit-unit-type u)
+                   '(8 32 103 113 115 116 117 119 125 128 131 136 150 493 500 501 503 687 690 734 892 1911 1912))
+             (and (not (sc2-unit-is-structure? u))
+                  (< (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))))
+
+  ;; Weaponless spellcasters / supports / eggs / cocoons / incomplete non-structures (e.g. merging
+  ;; Archon `141` with `bp < 1.0`, `Medivac 54`, `Infestor 111`) that reject `Attack (23)` (`2:NotSupported`)!
+  (define (unit-weaponless-non-attacker? u)
+    (and (sc2-unit? u)
+         (or (memv (sc2-unit-unit-type u)
+                   '(8 54 56 81 82 103 106 111 113 128 129 136 150 494 498 499 501 502 687 694 733 892 893 1911 1912))
+             (and (not (sc2-unit-is-structure? u))
+                  (< (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))))
+
+  ;; L58-P3B: SC2 rejects unit-targeted `Attack (23)` on `Interceptor (85)` / `DisruptorPhased (733)` /
+  ;; `AdeptPhaseShift (801)` / `KD8Charge (830)` with `2:NotSupported` (`sc2-ab-z01` 158x!) — convert
+  ;; automatically to point-target `Attack-Move` at the target's position!
+  (define SC2-UNTARGETABLE-ATTACK-UNIT-TYPE-IDS '(85 733 801 824 830))
+  (define (untargetable-attack-target-pt target-id)
+    (define tu (and (exact-integer? target-id) (> target-id 0) (hash-ref all-unit-by-tag target-id #f)))
+    (and tu
+         (memv (sc2-unit-unit-type tu) SC2-UNTARGETABLE-ATTACK-UNIT-TYPE-IDS)
+         (let ([tp (sc2-unit-pos tu)])
+           (sc2-point2d (sc2-point3d-x tp) (sc2-point3d-y tp)))))
+
   ;; Filters a list of combat unit tags:
   ;;   1. Skips tags already commanded earlier in this step (`commanded-combat-tags`).
   ;;   2. Skips units with protected active morph/channel/mode-switch/cast-walk orders or higher role leases.
@@ -12534,6 +12953,11 @@
                 (and (exact-integer? t)
                      (> t 0)
                      (not (and (= ab-id 23) (weaponless-beam-off-oracle-tag? t)))
+                     (not (and (= ab-id 23) u
+                               (or (unit-weaponless-non-attacker? u)
+                                   (and (= (sc2-unit-unit-type u) 54) (> target-unit-id 0)))))
+                     (not (and (= ab-id 2099) u (> (sc2-unit-weapon-cooldown u) 0.0)))
+                     (not (and (memv ab-id '(16 17)) u (unit-immobile-burrowed-or-sieged? u)))
                      (not (set-member? commanded-combat-tags t))
                      (not (set-member? used-producer-tags t))
                      (not (set-member? used-worker-tags t))
@@ -12594,6 +13018,26 @@
            (or (> (sc2-point3d-x cam) 0.5) (> (sc2-point3d-y cam) 0.5))
            (cons (exact->inexact (sc2-point3d-x cam))
                  (exact->inexact (sc2-point3d-y cam))))))
+  ;; L59-W1: Base-Centered Camera Hotkey Snap helper — whenever any framing or focus camera target
+  ;; lies within `<= 16.0t` of an owned grounded townhall, snap cleanly to that exact townhall center
+  ;; `(th-x, th-y)` instead of off-center mineral/wall panning!
+  (define (snap-camera-to-base-or-raw fx fy)
+    (define grounded-ths
+      (filter (lambda (th) (not (sc2-unit-is-flying th))) townhalls))
+    (cond
+      [(null? grounded-ths) (values fx fy #f)]
+      [else
+       (define best-th
+         (argmin (lambda (th)
+                   (define tp (sc2-unit-pos th))
+                   (pt-dist fx fy (sc2-point3d-x tp) (sc2-point3d-y tp)))
+                 grounded-ths))
+       (define bp (sc2-unit-pos best-th))
+       (define bx (exact->inexact (sc2-point3d-x bp)))
+       (define by (exact->inexact (sc2-point3d-y bp)))
+       (if (<= (pt-dist fx fy bx by) 16.0)
+           (values bx by #t)
+           (values fx fy #f))]))
   (define (maybe-emit-framing-cam-before! cmd)
     (when (sc2-raw-unit-command? cmd)
       (define ab (sc2-raw-unit-command-ability-id cmd))
@@ -12619,8 +13063,9 @@
                  (cons (any-point-x tp) (any-point-y tp)))]
               [else #f])))
         (when focus-pt
-          (define fx (car focus-pt))
-          (define fy (cdr focus-pt))
+          (define raw-fx (car focus-pt))
+          (define raw-fy (cdr focus-pt))
+          (define-values (fx fy base-snapped?) (snap-camera-to-base-or-raw raw-fx raw-fy))
           (define ref-cam-pt
             (cond
               [(pair? last-cam-pt) last-cam-pt]
@@ -12639,10 +13084,15 @@
               [else #f]))
           (define ref-cam-x (and ref-cam-pt (car ref-cam-pt)))
           (define ref-cam-y (and ref-cam-pt (cdr ref-cam-pt)))
+          (define snap-shift
+            (if (and ref-cam-x ref-cam-y)
+                (pt-dist fx fy ref-cam-x ref-cam-y)
+                +inf.0))
           (when (and ref-cam-x
                      ref-cam-y
-                     (or (> (abs (- fx ref-cam-x)) 12.0)
-                         (> (abs (- fy ref-cam-y)) 9.0)))
+                     (> snap-shift (if base-snapped? 2.0 SC2-CAMERA-MOVE-DEDUP-DIST))
+                     (or (> (abs (- raw-fx ref-cam-x)) 12.0)
+                         (> (abs (- raw-fy ref-cam-y)) 9.0)))
             (define jump-from-gov
               (if (and (real? (unbox SC2-GOV-LAST-CAM-X))
                        (real? (unbox SC2-GOV-LAST-CAM-Y)))
@@ -12656,10 +13106,138 @@
             (set-box! SC2-TRANS-LAST-CAM-Y fy)
             (set-box! SC2-TRANS-LAST-CAM-LOOP cur-loop)
             (set! raw-cmds (cons cam-cmd raw-cmds)))))))
+  ;; L58-P2: Exact burrow polarity + transition dedup helpers (`sc2-brw-u07` 2108 `2:NotSupported`,
+  ;; `sc2-real-z09` 3662/1386 `4:CantQueueThatOrder`).
+  (define SC2-BURROWED-UNIT-TYPE-IDS '(115 116 117 118 119 125 127 131 493 500 503 690))
+  (define SC2-BURROW-DOWN-ABILITY-IDS '(1374 1378 1382 1386 1390 1433 1444 1512 2014 2095 2108 2340 3661))
+  (define SC2-BURROW-UP-ABILITY-IDS   '(1376 1380 1384 1388 1392 1435 1446 1514 2016 2097 2110 2342 3662))
+  (define emitted-burrow-tx-tags (mutable-seteqv))
+  (define (unit-is-burrowed-now? u)
+    (and (sc2-unit? u)
+         (or (sc2-unit-is-burrowed u)
+             (memv (sc2-unit-unit-type u) SC2-BURROWED-UNIT-TYPE-IDS))))
+  (define (unit-executing-burrow-transition? u)
+    (and (sc2-unit? u)
+         (ormap (lambda (o)
+                  (define oab (sc2-unit-order-ability-id o))
+                  (or (memv oab SC2-BURROW-DOWN-ABILITY-IDS)
+                      (memv oab SC2-BURROW-UP-ABILITY-IDS)))
+                (sc2-unit-orders u))))
+  (define (filter-valid-burrow-tags! tags ab-id)
+    (define dir
+      (cond
+        [(memv ab-id SC2-BURROW-DOWN-ABILITY-IDS) 'down]
+        [(memv ab-id SC2-BURROW-UP-ABILITY-IDS) 'up]
+        [else #f]))
+    (if (not dir)
+        tags
+        (let ([valid
+               (filter (lambda (t)
+                         (define u (hash-ref self-unit-by-tag t #f))
+                         (and (not (set-member? emitted-burrow-tx-tags t))
+                              (or (not u)
+                                  (and (not (unit-executing-burrow-transition? u))
+                                       (if (eq? dir 'down)
+                                           (not (unit-is-burrowed-now? u))
+                                           (unit-is-burrowed-now? u))))
+                              (>= cur-loop
+                                  (hash-ref SC2-WIRE-NONSTACK-CMD-COOLDOWN
+                                            (list 'wire-burrow-dir t dir)
+                                            -1))))
+                       tags)])
+          (for ([t (in-list valid)])
+            (set-add! emitted-burrow-tx-tags t)
+            (hash-set! SC2-WIRE-NONSTACK-CMD-COOLDOWN (list 'wire-burrow-dir t dir) (+ cur-loop 16)))
+          valid)))
+
+  ;; L58-P1/P2: Units under Recall windup / post-teleport Nexus arrival stun, Stasis Trap (`129`),
+  ;; Stasis (`72`), Graviton Beam (`5`), Neural Parasite (`22`), or DisableAbils (`3`) reject every
+  ;; SC2 command with `88:YouCantIssueCommandsToThatUnit` — strip them automatically at `emit!`.
+  ;; Each active recall zone tracks exact `captured-tags` (using true SC2 5.0.14 capture radius:
+  ;; `2.5` for Nexus `3757`, `6.5` for Mothership `142`), windup at `(rx, ry)`, AND post-teleport
+  ;; arrival stun at casting Nexus/Mothership `(nx, ny)` through `cast-loop + 108` without ever
+  ;; freezing unrecalled allies outside the capture circle!
+  (define (unit-uncommandable-stasis-or-recall? u)
+    (and (sc2-unit? u)
+         (or (ormap (lambda (bid)
+                      (memv bid '(3 5 15 22 46 51 52 71 72 101 129 138 147)))
+                    (sc2-unit-buff-ids u))
+             (and (not (sc2-unit-is-structure? u))
+                  (let ([zones (unbox SC2-ACTIVE-RECALL-ZONES)])
+                    (and (pair? zones)
+                         (let* ([up (sc2-unit-pos u)]
+                                [ux (sc2-point3d-x up)]
+                                [uy (sc2-point3d-y up)]
+                                [utag (sc2-unit-tag u)]
+                                [urad (sc2-unit-radius u)])
+                           (ormap (lambda (z)
+                                    (cond
+                                      [(>= (length z) 8)
+                                       (define cast-l (list-ref z 0))
+                                       (define end-l  (list-ref z 1))
+                                       (define rx     (list-ref z 2))
+                                       (define ry     (list-ref z 3))
+                                       (define nx     (list-ref z 4))
+                                       (define ny     (list-ref z 5))
+                                       (define rr     (list-ref z 6))
+                                       (define ctags  (list-ref z 7))
+                                       (and (< cur-loop end-l)
+                                            (if (not (set-empty? ctags))
+                                                (and (>= cur-loop (+ cast-l 1))
+                                                     (set-member? ctags utag)
+                                                     (or (< cur-loop (+ cast-l 8))
+                                                         (<= (pt-dist ux uy rx ry) (+ rr urad 1.5))
+                                                         (and nx ny
+                                                              (>= cur-loop (+ cast-l 68))
+                                                              (<= (pt-dist ux uy nx ny) 11.0))))
+                                                (and (>= cur-loop (+ cast-l 1))
+                                                     (<= (pt-dist ux uy rx ry) (+ rr urad 0.5)))))]
+                                      [else
+                                       (and (>= cur-loop (first z))
+                                            (< cur-loop (second z))
+                                            (<= (pt-dist ux uy (third z) (fourth z)) 3.5))]))
+                                  zones))))))))
   (define (emit! cmd)
     (when cmd
-      (maybe-emit-framing-cam-before! cmd)
-      (set! raw-cmds (cons cmd raw-cmds))))
+      (define eff-cmd
+        (if (and (sc2-raw-unit-command? cmd)
+                 (pair? self-units))
+            (let* ([ab (sc2-raw-unit-command-ability-id cmd)]
+                   [raw-tpos (sc2-raw-unit-command-target-pos cmd)]
+                   [raw-ttag (sc2-raw-unit-command-target-unit-tag cmd)]
+                   [untargetable-pt (and (= ab 23) (> raw-ttag 0) (untargetable-attack-target-pt raw-ttag))]
+                   [eff-tpos (if untargetable-pt untargetable-pt raw-tpos)]
+                   [eff-ttag (if untargetable-pt 0 raw-ttag)]
+                   [tags (sc2-raw-unit-command-unit-tags cmd)]
+                   [filtered
+                    (filter (lambda (t)
+                              (define u (hash-ref self-unit-by-tag t #f))
+                              (and (or u (not (hash-has-key? all-unit-by-tag t)))
+                                   (or (memv ab '(314 3659 3671 3757 142))
+                                       (not (and u (unit-uncommandable-stasis-or-recall? u))))
+                                   (not (and (memv ab '(16 17)) u (unit-immobile-burrowed-or-sieged? u)))
+                                   (not (and (= ab 23) u (unit-weaponless-non-attacker? u)))
+                                   (not (and (= ab 2099) u (> (sc2-unit-weapon-cooldown u) 0.0)))))
+                            tags)])
+              (cond
+                [(null? filtered) #f]
+                [(and (not untargetable-pt)
+                      (or (eq? filtered tags) (= (length filtered) (length tags))))
+                 cmd]
+                [else
+                 (define new-cmd
+                   (sc2-raw-unit-command ab
+                                         eff-tpos
+                                         eff-ttag
+                                         filtered
+                                         (sc2-raw-unit-command-queue? cmd)))
+                 (when (urgent-survival-cmd? cmd) (mark-urgent-survival-cmd! new-cmd))
+                 (when (macro-econ-cmd? cmd) (mark-macro-econ-cmd! new-cmd))
+                 new-cmd]))
+            cmd))
+      (when eff-cmd
+        (maybe-emit-framing-cam-before! eff-cmd)
+        (set! raw-cmds (cons eff-cmd raw-cmds)))))
 
   ;; L36-P0-1: Emit a `0`-APM team-only build-version tag (`Tag:v_<rev>`) once per match at
   ;; frame `~24` (`[20, 224]`) so every `.SC2Replay` permanently self-identifies its build!
@@ -12671,6 +13249,22 @@
     (emit! (make-bot-build-tag-chat-action)))
 
   ;; W9-TAC-3 & W9-TAC-4: Per-step deduplication for Orbital Scanner Sweep (399) and Overseer Spawn Changeling (181)
+  ;; L59-P2 (`sc2-rmp-h06`): Pre-scan `actions` for any explicit `399` Scanner Sweep request so
+  ;; competing same-step `171` MULE actions NEVER steal that Orbital Command's energy, and strip any
+  ;; already-emitted `171` on `chosen-oc` when `emit-scanner-sweep-deduped!` fires!
+  (define step-scan-requested-oc-tags (mutable-seteqv))
+  (define step-has-any-scan-request? #f)
+  (for ([a (in-list actions)] #:when (pair? a))
+    (match a
+      [(or (list (or 'cast 'cast-spell) uid (or 'scanner-sweep 'scan 399) _ ...)
+           (list (or 'scanner-sweep 'scan) uid _ ...))
+       (set! step-has-any-scan-request? #t)
+       (for ([t (in-list (if (list? uid) uid (list uid)))]
+             #:when (and (exact-integer? t) (> t 0)))
+         (set-add! step-scan-requested-oc-tags t))]
+      [_ (void)]))
+  (when step-has-any-scan-request?
+    (set-box! SC2-LAST-SCAN-REQUEST-LOOP cur-loop))
   (define emitted-scan-oc-tags (mutable-seteqv))
   (define emitted-scan-pts '())
   (define (emit-scanner-sweep-deduped! oc-tags tx ty)
@@ -12688,7 +13282,30 @@
       (define chosen-oc (first fresh-ocs))
       (set-add! emitted-scan-oc-tags chosen-oc)
       (set! emitted-scan-pts (cons (cons tx ty) emitted-scan-pts))
-      (emit! (sc2-raw-unit-command 399 (sc2-point2d tx ty) 0 (list chosen-oc) #f))))
+      (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule chosen-oc) cur-loop)
+      (set-box! SC2-LAST-SCAN-REQUEST-LOOP cur-loop)
+      ;; Strip any competing same-step `171` MULE on `chosen-oc` so Scan owns the energy!
+      (set! raw-cmds
+            (filter-map
+             (lambda (c)
+               (cond
+                 [(and (sc2-raw-unit-command? c)
+                       (= (sc2-raw-unit-command-ability-id c) 171)
+                       (memv chosen-oc (sc2-raw-unit-command-unit-tags c)))
+                  (define rem (remv chosen-oc (sc2-raw-unit-command-unit-tags c)))
+                  (and (pair? rem)
+                       (mark-macro-econ-cmd!
+                        (sc2-raw-unit-command 171
+                                              (sc2-raw-unit-command-target-pos c)
+                                              (sc2-raw-unit-command-target-unit-tag c)
+                                              rem
+                                              (sc2-raw-unit-command-queue? c))))]
+                 [else c]))
+             raw-cmds))
+      (define raw-scan (sc2-raw-unit-command 399 (sc2-point2d tx ty) 0 (list chosen-oc) #f))
+      (emit! (if uncovered-stealth-present?
+                 (mark-urgent-survival-cmd! raw-scan)
+                 raw-scan))))
 
   (define emitted-changeling-tags (mutable-seteqv))
   ;; W11-P0-4-wire (`w11-tac-4`): Active uncovered cloaked (`cloak=1`) or undetected burrowed
@@ -12719,17 +13336,41 @@
     (filter (lambda (e)
               (define etype (sc2-unit-unit-type e))
               (and (not (= (sc2-unit-display-type e) 4))
-                   (not (memv etype '(87 137 151)))
+                   (not (memv etype '(87 137 138 151)))
                    (or (= (sc2-unit-cloak e) 1)
                        (and (sc2-unit-is-burrowed e)
                             (not (enemy-covered-by-ally-detector? e))))))
             enemy-units))
   (define uncovered-stealth-present? (pair? uncovered-stealth-enemies))
 
+  ;; L58-P2: Do not drain Overseer energy on Spawn Changeling (`181`, 50e) when an uncontaminated
+  ;; (`buff 36` absent) enemy production/tech/townhall structure is within `24.0t` — preserve `125e`
+  ;; so `Contaminate (1825)` fires reliably!
+  (define (overseer-should-save-energy-for-contaminate? u)
+    (and (sc2-unit? u)
+         (= (sc2-unit-unit-type u) 129)
+         (let ([up (sc2-unit-pos u)])
+           (define ox (sc2-point3d-x up))
+           (define oy (sc2-point3d-y up))
+           (ormap (lambda (eb)
+                    (and (not (= (sc2-unit-display-type eb) 4))
+                         (>= (sc2-unit-build-progress eb) SC2-BUILD-COMPLETE-PROGRESS)
+                         (memv (sc2-unit-unit-type eb)
+                               '(18 21 26 27 28 29 30 59 62 63 64 65 67 68 69 70 71 72
+                                    86 89 90 91 92 95 100 101 130 132 133))
+                         (not (memv 36 (sc2-unit-buff-ids eb)))
+                         (let ([ep (sc2-unit-pos eb)])
+                           (<= (pt-dist ox oy (sc2-point3d-x ep) (sc2-point3d-y ep)) 24.0))))
+                  enemy-units))))
+
   (define (emit-spawn-changeling-deduped! overseer-tags)
     (unless uncovered-stealth-present?
       (define fresh-os
-        (filter (lambda (t) (and (exact-integer? t) (> t 0) (not (set-member? emitted-changeling-tags t))))
+        (filter (lambda (t)
+                  (and (exact-integer? t) (> t 0)
+                       (not (set-member? emitted-changeling-tags t))
+                       (not (overseer-should-save-energy-for-contaminate?
+                             (hash-ref self-unit-by-tag t #f)))))
                 (if (list? overseer-tags) overseer-tags (list overseer-tags))))
       (when (pair? fresh-os)
         (for ([t (in-list fresh-os)])
@@ -12798,8 +13439,11 @@
                 (and (exact-integer? t) (> t 0)
                      (not (set-member? emitted-viking-morph-tags t))
                      (or (not vu)
-                         (not (or (and (= ab-id 405) (= (sc2-unit-unit-type vu) 35))
-                                  (and (= ab-id 403) (= (sc2-unit-unit-type vu) 34)))))))
+                         (and (not (or (and (= ab-id 405) (= (sc2-unit-unit-type vu) 35))
+                                       (and (= ab-id 403) (= (sc2-unit-unit-type vu) 34))))
+                              (not (ormap (lambda (o)
+                                            (memv (sc2-unit-order-ability-id o) '(403 405)))
+                                          (sc2-unit-orders vu)))))))
               (if (list? raw-tags) raw-tags (list raw-tags))))
     (when (pair? fresh-vs)
       (for ([t (in-list fresh-vs)])
@@ -12809,6 +13453,28 @@
 
   (define emitted-prismatic-tags (mutable-seteqv))
   (define emitted-kd8-tags (mutable-seteqv))
+  ;; L58-P3B: Medivac Heal (`386`) strict single-healer-per-target dedup + biological damaged check
+  ;; (`sc2-real-t04` 6x & `sc2-det-d12` 13x `206:AlreadyTargeted` -> `0`, and Medivac #2 auto-redirects
+  ;; to the next wounded unhealed bio ally instead of colliding on the same target!).
+  (define emitted-heal-target-tags (mutable-seteqv))
+  (define already-healed-target-tags
+    (for/seteqv ([u (in-list self-units)]
+                 #:when (= (sc2-unit-unit-type u) 54)
+                 [o (in-list (sc2-unit-orders u))]
+                 #:when (and (= (sc2-unit-order-ability-id o) 386)
+                             (> (sc2-unit-order-target-unit-tag o) 0)))
+      (sc2-unit-order-target-unit-tag o)))
+  (define SC2-MEDIVAC-HEALABLE-BIO-TYPES
+    '(45 48 49 50 51 484
+         73 75 76 311
+         9 104 105 107 108 109 110 111 112 114 126 129 489 494 499 502 503 688))
+  (define (unit-medivac-healable-bio? u)
+    (and (sc2-unit? u)
+         (not (sc2-unit-is-hallucination u))
+         (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+         (memv (sc2-unit-unit-type u) SC2-MEDIVAC-HEALABLE-BIO-TYPES)
+         (> (sc2-unit-health-max u) 0.0)
+         (< (sc2-unit-health u) (- (sc2-unit-health-max u) 0.1))))
 
   ;; W9-TAC-5-wire: Never cancel a unit actively channeling Steady Targeting (2714) or another
   ;; protected `'channel` spell via LOAD_TRANSPORT (3668/394/911/1406) unless an enemy combat
@@ -12846,6 +13512,65 @@
         (and (<= (sc2-unit-cargo-space-max tr-u) 0) (null? (sc2-unit-passengers tr-u)))
         (> (sc2-unit-cargo-space-taken tr-u) 0)
         (pair? (sc2-unit-passengers tr-u))))
+  ;; L58-P1: Strict wire validators preventing SC2 `2:NotSupported`, `28:TooMuchLife`,
+  ;; `88:YouCantIssueCommandsToThatUnit`, and `111:MustTargetAirUnits` rejections!
+  (define (transport-valid-to-unload? tr-id tr-u)
+    (and (exact-integer? tr-id) (> tr-id 0)
+         (or (null? self-units)
+             (and tr-u
+                  (memv (sc2-unit-unit-type tr-u) '(54 81 136 893))
+                  (>= (sc2-unit-build-progress tr-u) SC2-BUILD-COMPLETE-PROGRESS)
+                  (not (sc2-unit-is-hallucination tr-u))
+                  (not (unit-uncommandable-stasis-or-recall? tr-u))
+                  (transport-has-cargo-to-unload? tr-u)))))
+  (define (nydus-valid-to-unload? net-id net-u)
+    (and (exact-integer? net-id) (> net-id 0)
+         (or (null? self-units)
+             (and net-u
+                  (memv (sc2-unit-unit-type net-u) '(95 142))
+                  (>= (sc2-unit-build-progress net-u) SC2-BUILD-COMPLETE-PROGRESS)
+                  (or (transport-has-cargo-to-unload? net-u)
+                      (ormap (lambda (u)
+                               (and (memv (sc2-unit-unit-type u) '(95 142))
+                                    (or (> (sc2-unit-cargo-space-taken u) 0)
+                                        (pair? (sc2-unit-passengers u)))))
+                             self-units))))))
+  (define (repair-target-valid-damaged? scv-id target-id)
+    (and (exact-integer? scv-id) (> scv-id 0)
+         (exact-integer? target-id) (> target-id 0)
+         (not (= scv-id target-id))
+         (or (null? self-units)
+             (let ([scv-u (hash-ref self-unit-by-tag scv-id #f)]
+                   [tgt-u (hash-ref self-unit-by-tag target-id #f)])
+               (and scv-u
+                    (= (sc2-unit-unit-type scv-u) 45)
+                    (not (sc2-unit-is-hallucination scv-u))
+                    tgt-u
+                    (not (sc2-unit-is-hallucination tgt-u))
+                    (> (sc2-unit-health-max tgt-u) 0.0)
+                    (< (sc2-unit-health tgt-u) (- (sc2-unit-health-max tgt-u) 0.01)))))))
+  ;; Burrowed Zerg non-attackers (excludes Lurker 503 & WidowMine 500) cannot execute Attack (23);
+  ;; air-only attackers (VikingFighter 35, Phoenix 78, Corruptor 112) cannot unit-target non-Colossus
+  ;; ground (`111:MustTargetAirUnits`); ground-only attackers cannot unit-target flying units (`113:MustTargetGroundUnits`)!
+  (define (unit-burrowed-non-attacker? u)
+    (and u (memv (sc2-unit-unit-type u) '(115 116 117 118 119 125 127 131 493 690))))
+  (define (unit-can-attack-target-id? t target-id)
+    (define u (hash-ref self-unit-by-tag t #f))
+    (cond
+      [(not u) #t]
+      [(unit-burrowed-non-attacker? u) #f]
+      [(or (unit-weaponless-non-attacker? u) (= (sc2-unit-unit-type u) 54)) #f]
+      [(memv (sc2-unit-unit-type u) '(35 78 112))
+       (define tu (hash-ref all-unit-by-tag target-id #f))
+       (or (not tu)
+           (sc2-unit-is-flying tu)
+           (= (sc2-unit-unit-type tu) 4))] ;; Colossus is targetable by air weapons
+      [(memv (sc2-unit-unit-type u)
+             '(4 9 32 33 34 45 49 51 53 55 73 76 83 84 98 104 105 109 110 114 289 311 484 495 503 688))
+       (define tu (hash-ref all-unit-by-tag target-id #f))
+       (or (not tu)
+           (not (sc2-unit-is-flying tu)))]
+      [else #t]))
 
   ;; W10-TAC-6: Detect visible cloaked/burrowed enemies or known cloak/burrow threat units/structures
   ;; so detectors (Observer 82 / Overseer 129) are NEVER sent cross-map away from defense!
@@ -13117,17 +13842,46 @@
         (when (not (null? ctags))
           (emit! (sc2-raw-unit-command 23 target-pt 0 ctags #f))))))
 
-  (define (emit-camera-move! raw-x raw-y)
-    (define cx (scale-bot-coord-to-world raw-x home-x))
-    (define cy (scale-bot-coord-to-world raw-y home-y))
-    (when (or (not last-cam-pt)
-              (> (pt-dist cx cy (car last-cam-pt) (cdr last-cam-pt))
-                 SC2-CAMERA-MOVE-DEDUP-DIST))
+  ;; L59-W1: Pro Base-Centered Camera Hotkey & Minimap-Click Emitter:
+  ;;   1) Snaps any target within <= 16.0t of an owned townhall directly to that townhall center.
+  ;;   2) Suppresses short non-base screen-scrolling drift (<= SC2-CAMERA-MOVE-DEDUP-DIST = 8.0t).
+  ;;   3) Marks intentional base-hotkey & minimap-click jumps (`pro-camera-jump-cmd!`) for P2
+  ;;      governance at 18-loop routine / 6-loop crisis (>14t) cadence (sustaining Pro 34-40 SPM!).
+  (define (emit-camera-move! raw-x raw-y #:kind [kind 'routine])
+    (define raw-cx (scale-bot-coord-to-world raw-x home-x))
+    (define raw-cy (scale-bot-coord-to-world raw-y home-y))
+    (define-values (cx cy base-snapped?) (snap-camera-to-base-or-raw raw-cx raw-cy))
+    (define step-dedup-r (if base-snapped? 2.0 SC2-CAMERA-MOVE-DEDUP-DIST))
+    (define obs-dist
+      (and step-obs-cam-pt
+           (pt-dist cx cy (car step-obs-cam-pt) (cdr step-obs-cam-pt))))
+    (define gov-dist
+      (and (real? (unbox SC2-GOV-LAST-CAM-X))
+           (real? (unbox SC2-GOV-LAST-CAM-Y))
+           (pt-dist cx cy (unbox SC2-GOV-LAST-CAM-X) (unbox SC2-GOV-LAST-CAM-Y))))
+    (define suppress-short-obs-scroll?
+      (and obs-dist
+           (not (eq? kind 'bookmark))
+           (not base-snapped?)
+           (<= obs-dist SC2-CAMERA-MOVE-DEDUP-DIST)))
+    (when (and (not suppress-short-obs-scroll?)
+               (or (not last-cam-pt)
+                   (> (pt-dist cx cy (car last-cam-pt) (cdr last-cam-pt)) step-dedup-r)))
+      (define est-jump (or gov-dist obs-dist 99.0))
+      (define crisis-jump?
+        (or (eq? kind 'crisis)
+            (and (eq? kind 'minimap) (> est-jump 14.0))))
+      (define cam-cmd
+        (mark-pro-camera-jump-cmd!
+         (sc2-raw-camera-move cx cy 0.0)
+         est-jump
+         #:base-snapped? (or base-snapped? (eq? kind 'bookmark))
+         #:crisis? crisis-jump?))
       (set! last-cam-pt (cons cx cy))
       (set-box! SC2-TRANS-LAST-CAM-X cx)
       (set-box! SC2-TRANS-LAST-CAM-Y cy)
       (set-box! SC2-TRANS-LAST-CAM-LOOP cur-loop)
-      (emit! (sc2-raw-camera-move cx cy 0.0))))
+      (emit! cam-cmd)))
 
   ;; Partition actions so that:
   ;;   1. Emergency/macro structure builds, cancels, and bunker-loads execute FIRST (W12-P0-3-wire:
@@ -13273,8 +14027,10 @@
                     raw-atk-ids))
        (cond
          [(or (not enforce-live-enemy-tag-filter?)
-              (set-member? live-visible-enemy-tags target-id))
-          (when (pair? burrowed-wm-ids)
+              (set-member? live-visible-enemy-tags target-id)
+              (set-member? live-visible-neutral-attackable-tags target-id))
+          (define is-neutral-rock? (set-member? live-visible-neutral-attackable-tags target-id))
+          (when (and (pair? burrowed-wm-ids) (not is-neutral-rock?))
             (define wm-list (claim-combat-tags-for-order! burrowed-wm-ids 2099 #f target-id))
             (when (pair? wm-list)
               (define raw-wm (sc2-raw-unit-command 2099 #f target-id wm-list #f))
@@ -13282,12 +14038,15 @@
                          (mark-urgent-survival-cmd! raw-wm)
                          raw-wm))))
           (when (pair? normal-atk-ids)
-            (define tag-list (claim-combat-tags-for-order! normal-atk-ids 23 #f target-id))
-            (when (not (null? tag-list))
-              (define raw-atk (sc2-raw-unit-command 23 #f target-id tag-list #f))
-              (emit! (if (set-member? enemy-near-own-base-tags target-id)
-                         (mark-urgent-survival-cmd! raw-atk)
-                         raw-atk))))]
+            (define legal-atk-ids
+              (filter (lambda (t) (unit-can-attack-target-id? t target-id)) normal-atk-ids))
+            (when (pair? legal-atk-ids)
+              (define tag-list (claim-combat-tags-for-order! legal-atk-ids 23 #f target-id))
+              (when (not (null? tag-list))
+                (define raw-atk (sc2-raw-unit-command 23 #f target-id tag-list #f))
+                (emit! (if (set-member? enemy-near-own-base-tags target-id)
+                           (mark-urgent-survival-cmd! raw-atk)
+                           raw-atk)))))]
          [else
           (define cached-pt (hash-ref SC2-LAST-KNOWN-ENEMY-POS target-id #f))
           (define fallback-pt
@@ -13295,18 +14054,52 @@
                 (sc2-point2d (car cached-pt) (cdr cached-pt))
                 (sc2-point2d default-eb-x default-eb-y)))
           (when (pair? normal-atk-ids)
-            (define tag-list (claim-combat-tags-for-order! normal-atk-ids 23 fallback-pt 0))
-            (when (not (null? tag-list))
-              (emit! (sc2-raw-unit-command 23 fallback-pt 0 tag-list #f))))])]
+            (define legal-atk-ids
+              (filter (lambda (t) (not (unit-burrowed-non-attacker? (hash-ref self-unit-by-tag t #f))))
+                      normal-atk-ids))
+            (when (pair? legal-atk-ids)
+              (define tag-list (claim-combat-tags-for-order! legal-atk-ids 23 fallback-pt 0))
+              (when (not (null? tag-list))
+                (emit! (sc2-raw-unit-command 23 fallback-pt 0 tag-list #f)))))])]
       [else
     (match act
-      ;; 1. Train unit: `(train <unit-sym>)` or `(train-unit <prod-id> <unit-sym>)`
+      ;; 1. Train unit / Warp-In: `(train <unit-sym>)`, `(train-unit <prod-id> <unit-sym> [<wx> <wy>])`,
+      ;;    or `(warp-in [<wg-id>] <unit-sym> <wx> <wy>)`
       [(or (list 'train unit-sym)
-           (list 'train-unit _ unit-sym))
-       (define explicit-prod-id (and (eq? (car act) 'train-unit) (second act)))
-       (define norm-train-sym (normalize-sc2-name->symbol unit-sym))
-       (define ab-id (train-symbol->ability-id unit-sym))
-       (define all-prod-tags (select-producer-tags-for-unit unit-sym self-units enemy-units #:units-by-sym self-units-by-sym))
+           (list 'train-unit _ unit-sym)
+           (list 'train-unit _ unit-sym (? real? _) (? real? _))
+           (list 'warp-in unit-sym (? real? _) (? real? _))
+           (list 'warp-in _ unit-sym (? real? _) (? real? _)))
+       (define act-head (car act))
+       (define explicit-prod-id
+         (cond
+           [(eq? act-head 'train-unit) (second act)]
+           [(and (eq? act-head 'warp-in) (= (length act) 5)) (second act)]
+           [else #f]))
+       (define-values (req-warp-x req-warp-y)
+         (cond
+           [(and (eq? act-head 'train-unit) (= (length act) 5))
+            (values (scale-bot-coord-to-world (fourth act) home-x)
+                    (scale-bot-coord-to-world (fifth act) home-y))]
+           [(and (eq? act-head 'warp-in) (= (length act) 4))
+            (values (scale-bot-coord-to-world (third act) home-x)
+                    (scale-bot-coord-to-world (fourth act) home-y))]
+           [(and (eq? act-head 'warp-in) (= (length act) 5))
+            (values (scale-bot-coord-to-world (fourth act) home-x)
+                    (scale-bot-coord-to-world (fifth act) home-y))]
+           [else (values #f #f)]))
+       (define norm-train-sym0 (normalize-sc2-name->symbol unit-sym))
+       (define norm-train-sym
+         (case norm-train-sym0
+           [(warp-in-zealot)       'zealot]
+           [(warp-in-stalker)      'stalker]
+           [(warp-in-sentry)       'sentry]
+           [(warp-in-adept)        'adept]
+           [(warp-in-high-templar) 'high-templar]
+           [(warp-in-dark-templar) 'dark-templar]
+           [else norm-train-sym0]))
+       (define ab-id (train-symbol->ability-id norm-train-sym))
+       (define all-prod-tags (select-producer-tags-for-unit norm-train-sym self-units enemy-units #:units-by-sym self-units-by-sym))
        (define zerg-combat-morph? (not (not (memq norm-train-sym SC2-ZERG-COMBAT-MORPH-SYMS))))
        (define raw-prod-tags
          (filter (lambda (t)
@@ -13370,9 +14163,13 @@
             ;; W11-P0-3-wire: Accurate WarpGate cooldown (respecting Chronoboost buff 281),
             ;; radius-aware power anchors (Pylon 6.5 vs Phasing WarpPrism 3.75), grid-verified
             ;; pathable/buildable polar ring search, and non-overlapping multi-gate batching!
+            ;; L59-P2 (`sc2-trn-n17`): Use `627` loops (28s) for Zealot/Adept WarpGate cooldown so
+            ;; SC2 4.10 never emits `21:NotEnoughCharges` spam; `live-wg-ready` increase still unlocks
+            ;; early in 5.0 when cooldown finishes at 20s (`448`). Track `SC2-WARPGATE-WARP-START-LOOP`
+            ;; so stale 1-frame `warp_gate_count` lag cannot immediately re-unlock a just-used gate!
             (define base-wg-cd-loops
-              (case (normalize-sc2-name->symbol unit-sym)
-                [(zealot adept)               448]
+              (case norm-train-sym
+                [(zealot adept)               627]
                 [(stalker sentry)             515]
                 [(high-templar dark-templar)  717]
                 [else                         515]))
@@ -13381,24 +14178,37 @@
                   (inexact->exact (round (* base-wg-cd-loops 2/3)))
                   base-wg-cd-loops))
             (when (and (sc2-observation? obs) (> (sc2-observation-game-loop obs) 0))
-              (set-box! SC2-WARPGATE-LAST-LOOP (sc2-observation-game-loop obs))
-              (hash-set! SC2-WARPGATE-COOLDOWN-UNTIL ptag
-                         (+ (sc2-observation-game-loop obs) wg-cd-loops)))
-            (define warp-ab (or (unit-symbol->warp-in-ability-id unit-sym) ab-id))
+              (define gl (sc2-observation-game-loop obs))
+              (set-box! SC2-WARPGATE-LAST-LOOP gl)
+              (hash-set! SC2-WARPGATE-WARP-START-LOOP ptag gl)
+              (hash-set! SC2-WARPGATE-COOLDOWN-UNTIL ptag (+ gl wg-cd-loops)))
+            (define warp-ab (or (unit-symbol->warp-in-ability-id norm-train-sym) ab-id))
+            (define phasing-prisms
+              (filter (lambda (u)
+                        (and (= (sc2-unit-unit-type u) 136) ;; WarpPrism Phasing
+                             (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
+                      self-units))
+            (define (pt-matches-phasing-prism? ax ay arad)
+              (or (<= arad 4.5)
+                  (ormap (lambda (u)
+                           (define up (sc2-unit-pos u))
+                           (<= (pt-dist ax ay (sc2-point3d-x up) (sc2-point3d-y up)) 1.5))
+                         phasing-prisms)))
             (define raw-warp-anchors
               (append
+               (for/list ([u (in-list phasing-prisms)])
+                 (define p (sc2-unit-pos u))
+                 (list (sc2-point3d-x p) (sc2-point3d-y p) 3.75 #t))
                (for/list ([ps (in-list power-sources)]
                           #:when (> (sc2-power-source-radius ps) 1.5))
                  (define p (sc2-power-source-pos ps))
-                 (list (sc2-point3d-x p) (sc2-point3d-y p) (exact->inexact (sc2-power-source-radius ps))))
+                 (define ax (sc2-point3d-x p))
+                 (define ay (sc2-point3d-y p))
+                 (define arad (exact->inexact (sc2-power-source-radius ps)))
+                 (list ax ay arad (pt-matches-phasing-prism? ax ay arad)))
                (for/list ([u (in-list completed-pylons)])
                  (define p (sc2-unit-pos u))
-                 (list (sc2-point3d-x p) (sc2-point3d-y p) 6.5))
-               (for/list ([u (in-list self-units)]
-                          #:when (and (= (sc2-unit-unit-type u) 136) ;; WarpPrism Phasing
-                                      (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
-                 (define p (sc2-unit-pos u))
-                 (list (sc2-point3d-x p) (sc2-point3d-y p) 3.75))))
+                 (list (sc2-point3d-x p) (sc2-point3d-y p) 6.5 #f))))
             (define deduped-warp-anchors
               (for/fold ([acc '()] #:result (reverse acc))
                         ([a (in-list raw-warp-anchors)])
@@ -13424,11 +14234,38 @@
                        (and (<= (abs dx) 9.0) (<= (abs dy) 9.0)
                             (<= (+ (* dx dx) (* dy dy)) 81.0)))
                      enemy-combat-pts-for-warp))
+            ;; L59-W1: Forward Warp Prism Warp-In Priority!
+            ;;   - Explicit `(warp-in ... wx wy)` or 4-arg `(train-unit wg unit wx wy)`:
+            ;;     sort anchors closest to `(req-warp-x, req-warp-y)` (preferring safe/uncontested).
+            ;;   - Offensive `(train-unit wg-id unit)` when an uncontested completed Phasing
+            ;;     Warp Prism (`136`) exists: prefer the forward Phasing Warp Prism anchor FIRST
+            ;;     before falling back to home Pylons!
+            ;;   - Routine `(train unit)`: keep home-closest safe Pylon ordering.
             (define sorted-warp-anchors
               (let-values ([(safe-a cont-a) (partition (lambda (a) (not (warp-anchor-contested? a)))
                                                        deduped-warp-anchors)])
-                (append (sort safe-a < #:key (lambda (a) (pt-dist home-x home-y (first a) (second a))))
-                        (sort cont-a < #:key (lambda (a) (pt-dist home-x home-y (first a) (second a)))))))
+                (cond
+                  [(and (real? req-warp-x) (real? req-warp-y))
+                   (define-values (near-req far-req)
+                     (partition (lambda (a)
+                                  (<= (pt-dist req-warp-x req-warp-y (first a) (second a))
+                                      (+ (third a) 4.5)))
+                                deduped-warp-anchors))
+                   (define-values (far-safe far-cont)
+                     (partition (lambda (a) (not (warp-anchor-contested? a))) far-req))
+                   (append (sort near-req < #:key (lambda (a) (pt-dist req-warp-x req-warp-y (first a) (second a))))
+                           (sort far-safe < #:key (lambda (a) (pt-dist req-warp-x req-warp-y (first a) (second a))))
+                           (sort far-cont < #:key (lambda (a) (pt-dist req-warp-x req-warp-y (first a) (second a)))))]
+                  [(and (eq? act-head 'train-unit)
+                        (exact-integer? explicit-prod-id)
+                        (pair? phasing-prisms))
+                   (define-values (safe-prisms safe-pylons) (partition fourth safe-a))
+                   (append (sort safe-prisms < #:key (lambda (a) (pt-dist default-eb-x default-eb-y (first a) (second a))))
+                           (sort safe-pylons < #:key (lambda (a) (pt-dist home-x home-y (first a) (second a))))
+                           (sort cont-a < #:key (lambda (a) (pt-dist home-x home-y (first a) (second a)))))]
+                  [else
+                   (append (sort safe-a < #:key (lambda (a) (pt-dist home-x home-y (first a) (second a))))
+                           (sort cont-a < #:key (lambda (a) (pt-dist home-x home-y (first a) (second a)))))])))
             (define-values (px py)
               (if (pair? sorted-warp-anchors)
                   (values (first (car sorted-warp-anchors)) (second (car sorted-warp-anchors)))
@@ -13446,12 +14283,13 @@
                     (not (sc2-image-grid? step-pl-grid))
                     (= (sc2-grid-ref step-pl-grid wx wy) 1)))
               (and path-ok? pl-ok?))
-            (define (valid-warp-spot? wx wy ax ay arad require-pl?)
+            (define (valid-warp-spot? wx wy ax ay arad is-prism? require-pl?)
               (define adist (pt-dist wx wy ax ay))
+              (define min-r-anchor (if is-prism? 0.0 1.85))
               (define max-r (max 2.0 (- arad 0.65)))
               (and (>= wx SC2-MAP-PLAYABLE-MIN-COORD) (<= wx SC2-MAP-PLAYABLE-MAX-COORD)
                    (>= wy SC2-MAP-PLAYABLE-MIN-COORD) (<= wy SC2-MAP-PLAYABLE-MAX-COORD)
-                   (>= adist 1.85) (<= adist max-r)
+                   (>= adist min-r-anchor) (<= adist max-r)
                    (warp-spot-grid-ok? wx wy require-pl?)
                    (for/and ([u (in-list units)]
                              #:when (not (sc2-unit-is-flying u)))
@@ -13467,18 +14305,29 @@
                              #:when (any-point? rp))
                      (> (pt-dist wx wy (any-point-x rp) (any-point-y rp)) 1.5))))
             (define (search-warp-spot require-pl?)
-              (for*/first ([a (in-list sorted-warp-anchors)]
-                           [ax (in-value (first a))]
-                           [ay (in-value (second a))]
-                           [arad (in-value (third a))]
-                           [r (in-list '(2.2 3.0 3.8 4.6 5.4))]
-                           #:when (<= r (- arad 0.65))
-                           [k (in-range 16)]
-                           [ang (in-value (* k (/ (* 2.0 pi) 16.0)))]
-                           [wx (in-value (+ ax (* r (cos ang))))]
-                           [wy (in-value (+ ay (* r (sin ang))))]
-                           #:when (valid-warp-spot? wx wy ax ay arad require-pl?))
-                (sc2-point2d wx wy)))
+              (or (and (real? req-warp-x)
+                       (real? req-warp-y)
+                       (for/first ([a (in-list sorted-warp-anchors)]
+                                   #:when (valid-warp-spot? req-warp-x req-warp-y
+                                                            (first a) (second a) (third a)
+                                                            (fourth a) require-pl?))
+                         (sc2-point2d (real->double-flonum req-warp-x)
+                                      (real->double-flonum req-warp-y))))
+                  (for*/first ([a (in-list sorted-warp-anchors)]
+                               [ax (in-value (first a))]
+                               [ay (in-value (second a))]
+                               [arad (in-value (third a))]
+                               [is-prism? (in-value (fourth a))]
+                               [r (in-list (if is-prism?
+                                               '(0.0 1.2 2.2 3.0)
+                                               '(2.2 3.0 3.8 4.6 5.4)))]
+                               #:when (<= r (- arad 0.65))
+                               [k (in-range (if (= r 0.0) 1 16))]
+                               [ang (in-value (* k (/ (* 2.0 pi) 16.0)))]
+                               [wx (in-value (+ ax (* r (cos ang))))]
+                               [wy (in-value (+ ay (* r (sin ang))))]
+                               #:when (valid-warp-spot? wx wy ax ay arad is-prism? require-pl?))
+                    (sc2-point2d wx wy))))
             (define-values (warp-ux warp-uy)
               (let* ([dx (- default-eb-x px)]
                      [dy (- default-eb-y py)]
@@ -16059,11 +16908,15 @@
               (emit! (sc2-raw-unit-command ab-id #f 0 (list ptag) #f))))])]
 
       ;; 6. Attack / Move / Kite / Hold-Position / Retreat (with per-step & in-flight order deduplication)
-      [(list 'attack-pos ids raw-x raw-y)
+      ;;    L59-W1: Also match 3-arg `(attack ids raw-x raw-y)` directly as Attack-Move (`23`)!
+      [(list (or 'attack-pos 'attack) ids (? real? raw-x) (? real? raw-y))
        (define tx (scale-bot-coord-to-world raw-x home-x))
        (define ty (scale-bot-coord-to-world raw-y home-y))
        (define target-pt (sc2-point2d tx ty))
-       (define tag-list (claim-combat-tags-for-order! ids 23 target-pt 0))
+       (define legal-ids
+         (filter (lambda (t) (not (unit-burrowed-non-attacker? (hash-ref self-unit-by-tag t #f))))
+                 (if (list? ids) ids (list ids))))
+       (define tag-list (claim-combat-tags-for-order! legal-ids 23 target-pt 0))
        (when (not (null? tag-list))
          (emit! (sc2-raw-unit-command 23 target-pt 0 tag-list #f)))]
 
@@ -16079,8 +16932,10 @@
                     raw-atk-ids))
        (cond
          [(or (not enforce-live-enemy-tag-filter?)
-              (set-member? live-visible-enemy-tags target-id))
-          (when (pair? burrowed-wm-ids)
+              (set-member? live-visible-enemy-tags target-id)
+              (set-member? live-visible-neutral-attackable-tags target-id))
+          (define is-neutral-rock? (set-member? live-visible-neutral-attackable-tags target-id))
+          (when (and (pair? burrowed-wm-ids) (not is-neutral-rock?))
             (define wm-list (claim-combat-tags-for-order! burrowed-wm-ids 2099 #f target-id))
             (when (pair? wm-list)
               (define raw-wm (sc2-raw-unit-command 2099 #f target-id wm-list #f))
@@ -16088,12 +16943,15 @@
                          (mark-urgent-survival-cmd! raw-wm)
                          raw-wm))))
           (when (pair? normal-atk-ids)
-            (define tag-list (claim-combat-tags-for-order! normal-atk-ids 23 #f target-id))
-            (when (not (null? tag-list))
-              (define raw-atk (sc2-raw-unit-command 23 #f target-id tag-list #f))
-              (emit! (if (set-member? enemy-near-own-base-tags target-id)
-                         (mark-urgent-survival-cmd! raw-atk)
-                         raw-atk))))]
+            (define legal-atk-ids
+              (filter (lambda (t) (unit-can-attack-target-id? t target-id)) normal-atk-ids))
+            (when (pair? legal-atk-ids)
+              (define tag-list (claim-combat-tags-for-order! legal-atk-ids 23 #f target-id))
+              (when (not (null? tag-list))
+                (define raw-atk (sc2-raw-unit-command 23 #f target-id tag-list #f))
+                (emit! (if (set-member? enemy-near-own-base-tags target-id)
+                           (mark-urgent-survival-cmd! raw-atk)
+                           raw-atk)))))]
          [else
           (define cached-pt (hash-ref SC2-LAST-KNOWN-ENEMY-POS target-id #f))
           (define fallback-pt
@@ -16107,9 +16965,13 @@
                                (- SC2-DEFAULT-MAP-HEIGHT home-y))])
                   (sc2-point2d ebx eby))))
           (when (pair? normal-atk-ids)
-            (define tag-list (claim-combat-tags-for-order! normal-atk-ids 23 fallback-pt 0))
-            (when (not (null? tag-list))
-              (emit! (sc2-raw-unit-command 23 fallback-pt 0 tag-list #f))))])]
+            (define legal-atk-ids
+              (filter (lambda (t) (not (unit-burrowed-non-attacker? (hash-ref self-unit-by-tag t #f))))
+                      normal-atk-ids))
+            (when (pair? legal-atk-ids)
+              (define tag-list (claim-combat-tags-for-order! legal-atk-ids 23 fallback-pt 0))
+              (when (not (null? tag-list))
+                (emit! (sc2-raw-unit-command 23 fallback-pt 0 tag-list #f)))))])]
 
       [(list (or 'focus-fire 'cannon-focus-fire) uid target-id rest ...)
        #:when (and (or (exact-integer? uid) (list? uid)) (exact-integer? target-id))
@@ -16123,8 +16985,10 @@
                     raw-ff-ids))
        (cond
          [(or (not enforce-live-enemy-tag-filter?)
-              (set-member? live-visible-enemy-tags target-id))
-          (when (pair? burrowed-wm-ids)
+              (set-member? live-visible-enemy-tags target-id)
+              (set-member? live-visible-neutral-attackable-tags target-id))
+          (define is-neutral-rock? (set-member? live-visible-neutral-attackable-tags target-id))
+          (when (and (pair? burrowed-wm-ids) (not is-neutral-rock?))
             (define wm-list (claim-combat-tags-for-order! burrowed-wm-ids 2099 #f target-id))
             (when (pair? wm-list)
               (define raw-wm (sc2-raw-unit-command 2099 #f target-id wm-list #f))
@@ -16132,12 +16996,15 @@
                          (mark-urgent-survival-cmd! raw-wm)
                          raw-wm))))
           (when (pair? normal-ff-ids)
-            (define tag-list (claim-combat-tags-for-order! normal-ff-ids 23 #f target-id))
-            (when (not (null? tag-list))
-              (define raw-atk (sc2-raw-unit-command 23 #f target-id tag-list #f))
-              (emit! (if (set-member? enemy-near-own-base-tags target-id)
-                         (mark-urgent-survival-cmd! raw-atk)
-                         raw-atk))))]
+            (define legal-ff-ids
+              (filter (lambda (t) (unit-can-attack-target-id? t target-id)) normal-ff-ids))
+            (when (pair? legal-ff-ids)
+              (define tag-list (claim-combat-tags-for-order! legal-ff-ids 23 #f target-id))
+              (when (not (null? tag-list))
+                (define raw-atk (sc2-raw-unit-command 23 #f target-id tag-list #f))
+                (emit! (if (set-member? enemy-near-own-base-tags target-id)
+                           (mark-urgent-survival-cmd! raw-atk)
+                           raw-atk)))))]
          [else
           (define cached-pt (hash-ref SC2-LAST-KNOWN-ENEMY-POS target-id #f))
           (define fallback-pt
@@ -16151,9 +17018,13 @@
                (sc2-point2d (- SC2-DEFAULT-MAP-WIDTH home-x)
                             (- SC2-DEFAULT-MAP-HEIGHT home-y))]))
           (when (pair? normal-ff-ids)
-            (define tag-list (claim-combat-tags-for-order! normal-ff-ids 23 fallback-pt 0))
-            (when (not (null? tag-list))
-              (emit! (sc2-raw-unit-command 23 fallback-pt 0 tag-list #f))))])]
+            (define legal-ff-ids
+              (filter (lambda (t) (not (unit-burrowed-non-attacker? (hash-ref self-unit-by-tag t #f))))
+                      normal-ff-ids))
+            (when (pair? legal-ff-ids)
+              (define tag-list (claim-combat-tags-for-order! legal-ff-ids 23 fallback-pt 0))
+              (when (not (null? tag-list))
+                (emit! (sc2-raw-unit-command 23 fallback-pt 0 tag-list #f)))))])]
 
       [(list 'mineral-walk uid patch-id raw-x raw-y)
        (define tx (scale-bot-coord-to-world raw-x home-x))
@@ -16307,8 +17178,12 @@
          (emit! (mark-urgent-survival-cmd! (sc2-raw-unit-command 42 #f 0 blist #f))))]
 
       [(list 'widow-mine-retarget uid target-id)
+       (define wm-u (and (exact-integer? uid) (hash-ref self-unit-by-tag uid #f)))
        (when (and (exact-integer? uid) (> uid 0)
                   (exact-integer? target-id) (> target-id 0)
+                  (or (not wm-u)
+                      (and (= (sc2-unit-unit-type wm-u) 500)
+                           (<= (sc2-unit-weapon-cooldown wm-u) 0.0)))
                   (or (not enforce-live-enemy-tag-filter?)
                       (set-member? live-visible-enemy-tags target-id)))
          (set-add! commanded-combat-tags uid)
@@ -16353,10 +17228,10 @@
            (emit! (sc2-raw-unit-command 32 #f 0 (list bid) #f))))]
 
       [(list 'repair scv-id target-id)
-       (when (and (exact-integer? scv-id) (> scv-id 0)
-                  (exact-integer? target-id) (> target-id 0))
+       (when (repair-target-valid-damaged? scv-id target-id)
          (record-worker-used! scv-id)
-         (unless (unit-already-executing-order? scv-id 3685 #f target-id)
+         (unless (or (unit-already-executing-order? scv-id 3685 #f target-id)
+                     (unit-already-executing-order? scv-id 316 #f target-id))
            (emit! (sc2-raw-unit-command 3685 #f target-id (list scv-id) #f))))]
 
       [(list (or 'shield-battery-restore 'shield-battery-recharge) bat-id target-id)
@@ -16364,6 +17239,27 @@
                   (exact-integer? target-id) (> target-id 0))
          (unless (unit-already-executing-order? bat-id 4113 #f target-id)
            (emit! (sc2-raw-unit-command 4113 #f target-id (list bat-id) #f))))]
+
+      [(list (or 'nexus-energy-recharge 'energy-recharge) nx-id target-id)
+       (when (and (sc2-ability-live-available? 4126)
+                  (exact-integer? nx-id) (> nx-id 0)
+                  (exact-integer? target-id) (> target-id 0))
+         (define nx-u (hash-ref self-unit-by-tag nx-id #f))
+         (define tgt-u (hash-ref self-unit-by-tag target-id #f))
+         (when (or (null? self-units)
+                   (and nx-u tgt-u
+                        (= (sc2-unit-unit-type nx-u) 59)
+                        (>= (sc2-unit-build-progress nx-u) SC2-BUILD-COMPLETE-PROGRESS)
+                        (>= (sc2-unit-energy nx-u) 50.0)
+                        (not (sc2-unit-is-hallucination tgt-u))
+                        (> (sc2-unit-energy-max tgt-u) 0.0)
+                        (< (sc2-unit-energy tgt-u) (- (sc2-unit-energy-max tgt-u) 0.5))
+                        (let ([np (sc2-unit-pos nx-u)] [tp (sc2-unit-pos tgt-u)])
+                          (<= (pt-dist (sc2-point3d-x np) (sc2-point3d-y np)
+                                       (sc2-point3d-x tp) (sc2-point3d-y tp))
+                              15.0))))
+           (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono nx-id) cur-loop)
+           (emit! (sc2-raw-unit-command 4126 #f target-id (list nx-id) #f))))]
 
       [(list 'bunker-load bid raw-uid)
        (when (and (exact-integer? bid) (> bid 0))
@@ -16396,19 +17292,24 @@
       [(list 'nydus-load net-id raw-uid)
        (when (and (exact-integer? net-id) (> net-id 0))
          (define net-u (hash-ref self-unit-by-tag net-id #f))
-         (define ab-id (if (and net-u (= (sc2-unit-unit-type net-u) 142)) 2370 1437))
-         (define ulist
-           (filter (lambda (u) (and (exact-integer? u) (> u 0) (not (= net-id u))))
-                   (if (list? raw-uid) raw-uid (list raw-uid))))
-         (for ([uid (in-list ulist)])
-           (record-unit-used! uid)
-           (emit! (sc2-raw-unit-command ab-id #f uid (list net-id) #f))))]
+         (when (or (null? self-units)
+                   (and net-u
+                        (memv (sc2-unit-unit-type net-u) '(95 142))
+                        (>= (sc2-unit-build-progress net-u) SC2-BUILD-COMPLETE-PROGRESS)))
+           (define ab-id (if (and net-u (= (sc2-unit-unit-type net-u) 142)) 2370 1437))
+           (define ulist
+             (filter (lambda (u) (and (exact-integer? u) (> u 0) (not (= net-id u))))
+                     (if (list? raw-uid) raw-uid (list raw-uid))))
+           (for ([uid (in-list ulist)])
+             (record-unit-used! uid)
+             (emit! (sc2-raw-unit-command ab-id #f uid (list net-id) #f)))))]
 
       [(list 'nydus-unload net-id _ ...)
        (when (and (exact-integer? net-id) (> net-id 0))
          (define net-u (hash-ref self-unit-by-tag net-id #f))
-         (define ab-id (if (and net-u (= (sc2-unit-unit-type net-u) 142)) 2371 1438))
-         (emit! (sc2-raw-unit-command ab-id #f 0 (list net-id) #f)))]
+         (when (nydus-valid-to-unload? net-id net-u)
+           (define ab-id (if (and net-u (= (sc2-unit-unit-type net-u) 142)) 2371 1438))
+           (emit! (sc2-raw-unit-command ab-id #f 0 (list net-id) #f))))]
 
       [(or (list* 'load-unit tr-id ptag _rest)
            (list* 'load-transport tr-id ptag _rest))
@@ -16422,22 +17323,17 @@
 
       [(list* (or 'unload-unit 'unload-all-at) tr-id rest)
        (when (and (exact-integer? tr-id) (> tr-id 0))
-         (record-unit-used! tr-id)
          (define tr-u (hash-ref self-unit-by-tag tr-id #f))
-         (define tr-utype (if tr-u (sc2-unit-unit-type tr-u) 0))
-         (define unload-ab-id
-           (cond
-             [(= tr-utype 54) 396]
-             [(or (= tr-utype 81) (= tr-utype 136)) 913]
-             [(= tr-utype 893) 1408]
-             [else 3669]))
-         (if (and (>= (length rest) 2) (real? (first rest)) (real? (second rest)))
-             (emit! (sc2-raw-unit-command
-                     unload-ab-id
-                     (sc2-point2d (scale-bot-coord-to-world (first rest) home-x)
-                                  (scale-bot-coord-to-world (second rest) home-y))
-                     0 (list tr-id) #f))
-             (emit! (sc2-raw-unit-command unload-ab-id #f tr-id (list tr-id) #f))))]
+         (when (transport-valid-to-unload? tr-id tr-u)
+           (record-unit-used! tr-id)
+           (define unload-ab-id (transport-unload-ability-id tr-u))
+           (if (and (>= (length rest) 2) (real? (first rest)) (real? (second rest)))
+               (emit! (sc2-raw-unit-command
+                       unload-ab-id
+                       (sc2-point2d (scale-bot-coord-to-world (first rest) home-x)
+                                    (scale-bot-coord-to-world (second rest) home-y))
+                       0 (list tr-id) #f))
+               (emit! (sc2-raw-unit-command unload-ab-id #f tr-id (list tr-id) #f)))))]
 
       [(list 'spine-crawler-uproot uid)
        (when (and (exact-integer? uid) (> uid 0))
@@ -16532,7 +17428,11 @@
       [(list (or 'cast 'cast-spell) raw-caster-id spell-sym rest ...)
        (define caster-ids
          (remove-duplicates
-          (filter (lambda (t) (and (exact-integer? t) (> t 0)))
+          (filter (lambda (t)
+                    (and (exact-integer? t) (> t 0)
+                         ;; L58-P1: Hallucinated units CANNOT cast any SC2 ability (`2:NotSupported`)!
+                         (let ([u (hash-ref self-unit-by-tag t #f)])
+                           (not (and u (sc2-unit-is-hallucination u))))))
                   (if (list? raw-caster-id) raw-caster-id (list raw-caster-id)))))
        (when (not (null? caster-ids))
          (define caster-id (first caster-ids))
@@ -16566,17 +17466,33 @@
                    '(stimpack stim stim-marine stim-marauder
                      cloak-banshee cloak-ghost decloak-ghost
                      medivac-boost guardian-shield
-                     hallucination-phoenix hallucination-archon
+                     hallucination-phoenix hallucination-archon hallucination-zealot
+                     hallucination-colossus hallucination-high-templar hallucination-immortal
+                     hallucination-probe hallucination-stalker hallucination-void-ray
+                     hallucination-warp-prism hallucination-oracle hallucination-disruptor
+                     hallucination-adept
                      immortal-barrier prismatic-alignment
                      hydralisk-frenzy
                      build-interceptors pulsar-beam pulsar-beam-on pulsar-beam-off)))
-           (unless (or off-gcd-buff? (memv ab-id '(1766 181 403 405 2146 2350 2588 3741 3743)))
+           (unless (or off-gcd-buff?
+                       (memv ab-id '(1766 181 316 386 396 403 405 913 1408 1438 2146 2350 2371
+                                     2588 3669 3685 3741 3743 4126 74 4111 2545))
+                       (memv ab-id SC2-BURROW-DOWN-ABILITY-IDS)
+                       (memv ab-id SC2-BURROW-UP-ABILITY-IDS))
              (for ([cid (in-list caster-ids)])
                (set-add! commanded-combat-tags cid)))
            (cond
-             ;; Case A: Ability requires NO target (Stimpack, Guardian Shield, Siege/Unsiege, Burrow, Cloak, Build Interceptors, Pulsar Beam, etc.)
-             [(set-member? SC2-NO-TARGET-ABILITY-IDS ab-id)
+             ;; Case A: Ability requires NO target (Stimpack, Guardian Shield, Hallucinations, Siege/Unsiege, Burrow, Cloak, Build Interceptors, Pulsar Beam, etc.)
+             [(or (set-member? SC2-NO-TARGET-ABILITY-IDS ab-id)
+                  (memv ab-id '(148 150 152 156 158 160 162 164 2114 2389 2391)))
               (cond
+                [(memv ab-id '(1438 2371))
+                 (define valid-nydus-ids
+                   (filter (lambda (cid)
+                             (nydus-valid-to-unload? cid (hash-ref self-unit-by-tag cid #f)))
+                           caster-ids))
+                 (when (pair? valid-nydus-ids)
+                   (emit! (sc2-raw-unit-command ab-id #f 0 valid-nydus-ids #f)))]
                 [(= ab-id 1766)
                  (when (>= (length caster-ids) 2)
                    (define chosen2 (take caster-ids 2))
@@ -16609,20 +17525,34 @@
                    (emit! (sc2-raw-unit-command ab-id #f 0 caster-ids #f)))]
                 ;; Mode-toggle hysteresis cooldown (>= 44 game loops; 66 loops clear before unburrowing WidowMine)
                 [(memv ab-id '(388 390 2095 2097))
+                 (define burrow-ok-ids
+                   (if (memv ab-id '(2095 2097))
+                       (filter-valid-burrow-tags! caster-ids ab-id)
+                       caster-ids))
                  (define ready-ids
                    (filter (lambda (cid)
                              (and (>= cur-loop (hash-ref SC2-MODE-TOGGLE-COOLDOWN cid -1))
                                   (or (not (= ab-id 2097))
                                       (let ([cs (hash-ref SC2-MINE-CLEAR-SINCE-LOOP cid #f)])
                                         (or (not cs) (>= (- cur-loop cs) 66))))))
-                           caster-ids))
+                           burrow-ok-ids))
                  (when (pair? ready-ids)
                    (for ([cid (in-list ready-ids)])
+                     (set-add! commanded-combat-tags cid)
                      (hash-set! SC2-MODE-TOGGLE-COOLDOWN cid (+ cur-loop 44))
                      (cond
                        [(= ab-id 2095) (hash-set! SC2-MINE-CLEAR-SINCE-LOOP cid cur-loop)]
                        [(= ab-id 2097) (hash-remove! SC2-MINE-CLEAR-SINCE-LOOP cid)]))
                    (emit! (sc2-raw-unit-command ab-id #f 0 ready-ids #f)))]
+                ;; L58-P2: Guard all remaining burrow-down / burrow-up abilities against wrong polarity
+                ;; (`2:NotSupported` on already-burrowed Lurker 503) & active transitions (`4:CantQueueThatOrder`).
+                [(or (memv ab-id SC2-BURROW-DOWN-ABILITY-IDS)
+                     (memv ab-id SC2-BURROW-UP-ABILITY-IDS))
+                 (define valid-bur-ids (filter-valid-burrow-tags! caster-ids ab-id))
+                 (when (pair? valid-bur-ids)
+                   (for ([cid (in-list valid-bur-ids)])
+                     (set-add! commanded-combat-tags cid))
+                   (emit! (sc2-raw-unit-command ab-id #f 0 valid-bur-ids #f)))]
                 [(memv ab-id '(556 558))
                  (define ready-ids
                    (filter (lambda (cid)
@@ -16818,34 +17748,211 @@
                     (emit! (sc2-raw-unit-command ab-id verified-tumor-pt 0 caster-ids #f)))))]
 
              ;; Case C: Orbital Command Calldown MULE (171) -> resolve ONLY to safe friendly-base mineral field tag (P1 macro-econ!)
+             ;; L58-P2/P3: Hard-block MULE when an uncovered cloaked/burrowed threat is within `32t` of
+             ;; friendly units, when the OC already scanned/MULEd within `24` loops or this step, OR on
+             ;; the top-1 OC at `<= 100.0e` when `>= 8` combat units exist with `0` Ravens/Turrets!
              [(= ab-id 171)
-              (cond
-                [(not (null? townhalls))
-                 (define safe-min-tag (pick-safe-mule-mineral-patch caster-u self-units mineral-fields enemy-units))
-                 (when (and (exact-integer? safe-min-tag) (> safe-min-tag 0))
-                   (for ([cid (in-list caster-ids)])
-                     (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule cid) cur-loop))
-                   (emit! (mark-macro-econ-cmd! (sc2-raw-unit-command ab-id #f safe-min-tag caster-ids #f))))]
-                [else
-                 (define arg-tag (if (pair? rest) (first rest) 0))
-                 (define valid-min?
-                   (and (exact-integer? arg-tag)
-                        (ormap (lambda (m) (= (sc2-unit-tag m) arg-tag)) mineral-fields)))
-                 (define resolved-min-tag
-                   (cond
-                     [valid-min? arg-tag]
-                     [(not (null? mineral-fields))
-                      (sc2-unit-tag
-                       (argmin (lambda (m)
-                                 (define mp (sc2-unit-pos m))
-                                 (pt-dist home-x home-y (sc2-point3d-x mp) (sc2-point3d-y mp)))
-                               mineral-fields))]
-                     [(and (exact-integer? arg-tag) (> arg-tag 0)) arg-tag]
-                     [else 0]))
-                 (when (> resolved-min-tag 0)
-                   (for ([cid (in-list caster-ids)])
-                     (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule cid) cur-loop))
-                   (emit! (mark-macro-econ-cmd! (sc2-raw-unit-command ab-id #f resolved-min-tag caster-ids #f))))])]
+              (define near-uncovered-stealth?
+                (and uncovered-stealth-present?
+                     (ormap (lambda (e)
+                              (define ep (sc2-unit-pos e))
+                              (ormap (lambda (u)
+                                       (define up (sc2-unit-pos u))
+                                       (<= (pt-dist (sc2-point3d-x ep) (sc2-point3d-y ep)
+                                                    (sc2-point3d-x up) (sc2-point3d-y up))
+                                           32.0))
+                                     self-units))
+                            uncovered-stealth-enemies)))
+              (define has-mobile-or-turret-det?
+                (ormap (lambda (u)
+                         (or (= (sc2-unit-unit-type u) 56)
+                             (and (= (sc2-unit-unit-type u) 23)
+                                  (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS))))
+                       self-units))
+              (define combat-cnt-case-c
+                (count (lambda (u)
+                         (and (not (sc2-unit-is-structure? u))
+                              (not (sc2-unit-is-worker? u))
+                              (not (memv (sc2-unit-unit-type u)
+                                         '(12 13 14 15 16 17 82 103 106 129 151 268 1911 1912)))))
+                       self-units))
+              (define case-c-seen-enemy-race (sc2-infer-race-from-units enemy-units))
+              (when case-c-seen-enemy-race
+                (set-box! SC2-SAT-OBSERVED-ENEMY-RACE case-c-seen-enemy-race))
+              (define case-c-seen-terran-cloak-tech?
+                (ormap (lambda (e) (memv (sc2-unit-unit-type e) '(41 26 50 55))) enemy-units))
+              (when case-c-seen-terran-cloak-tech?
+                (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #t))
+              (define case-c-gi-enemy-race
+                (and (sc2-game-info? eff-game-info)
+                     (sc2-observation? obs)
+                     (sc2-player-common? (sc2-observation-player-common obs))
+                     (let ([my-pid (sc2-player-common-player-id (sc2-observation-player-common obs))])
+                       (for/first ([pi (in-list (sc2-game-info-player-info eff-game-info))]
+                                   #:when (and (hash? pi)
+                                               (not (= (hash-ref pi 'player-id 0) my-pid))))
+                         (or (let ([ra (hash-ref pi 'race-actual #f)])
+                               (and (memq ra '(Zerg Terran Protoss)) ra))
+                             (hash-ref pi 'race-requested #f))))))
+              (define case-c-enemy-race
+                (or case-c-seen-enemy-race
+                    (and (memq case-c-gi-enemy-race '(Zerg Terran Protoss)) case-c-gi-enemy-race)
+                    (unbox SC2-SAT-OBSERVED-ENEMY-RACE)
+                    case-c-gi-enemy-race))
+              (when (or uncovered-stealth-present?
+                        (ormap (lambda (e)
+                                 (define et (sc2-unit-unit-type e))
+                                 (and (not (memv et '(87 137 138)))
+                                      (or (memv (sc2-unit-cloak e) '(1 2))
+                                          (sc2-unit-is-burrowed e)
+                                          (memv et '(50 55 69 76 498 500 502 503 504)))))
+                               enemy-units))
+                (set-box! SC2-SAT-SEEN-ENEMY-CLOAK? #t))
+              (define case-c-isolated-arena-skirmish?
+                (and (<= (count sc2-unit-is-worker? self-units) 8)
+                     (not (ormap (lambda (u)
+                                   (memv (sc2-unit-unit-type u) '(19 20 21 27 28 47)))
+                                 self-units))))
+              (define ready-ocs-c
+                (filter (lambda (u)
+                          (and (= (sc2-unit-unit-type u) 132)
+                               (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                               (not (sc2-unit-is-flying u))))
+                        self-units))
+              (define case-c-proactive-scan-oc-limit
+                (cond
+                  [(and (>= cur-loop 5376)
+                        (memq case-c-enemy-race '(Protoss Random)))
+                   (if (>= (length ready-ocs-c) 3) 2 1)]
+                  [(or (unbox SC2-SAT-SEEN-ENEMY-CLOAK?)
+                       (and case-c-isolated-arena-skirmish?
+                            (>= combat-cnt-case-c 6)))
+                   1]
+                  [(and (eq? case-c-enemy-race 'Terran)
+                        (or case-c-seen-terran-cloak-tech?
+                            (unbox SC2-SAT-SEEN-TERRAN-CLOAK-TECH?)))
+                   1]
+                  [else 0]))
+              (define reserved-scan-oc-tags
+                (if (and (> case-c-proactive-scan-oc-limit 0)
+                         (not has-mobile-or-turret-det?)
+                         (pair? ready-ocs-c))
+                    (let* ([sorted-ocs
+                            (sort ready-ocs-c
+                                  (lambda (a b)
+                                    (let ([ea (sc2-unit-energy a)]
+                                          [eb (sc2-unit-energy b)])
+                                      (if (= ea eb)
+                                          (< (sc2-unit-tag a) (sc2-unit-tag b))
+                                          (> ea eb)))))]
+                           [take-n (min case-c-proactive-scan-oc-limit (length sorted-ocs))])
+                      (map sc2-unit-tag (take sorted-ocs take-n)))
+                    '()))
+              (define case-c-scan-floor
+                (if (and case-c-isolated-arena-skirmish? (>= combat-cnt-case-c 6))
+                    101.0
+                    100.0))
+              ;; L59-P3 (`#1552`/`#1553` Fix #1B): Gate the `150.0` uphill-scan MULE energy floor
+              ;; strictly to isolated Arena, explicit `83:MustTargetVisibleUnit` in the last `44f`,
+              ;; explicit `399` scan request on this step, OR a friendly Sieged Tank (`32`) facing an
+              ;; uphill enemy (`dz >= 1.5`) within `<= 15.0t` with `0` air spotters within `<= 16.0t`!
+              (define case-c-air-spotters
+                (filter (lambda (u) (memv (sc2-unit-unit-type u) '(35 54 55 56 57 689 692))) self-units))
+              (define case-c-sieged-tanks
+                (filter (lambda (u) (= (sc2-unit-unit-type u) 32)) self-units))
+              (define case-c-blind-uphill-err-now?
+                (and (sc2-observation? obs)
+                     (let ([errs (sc2-observation-action-errors obs)])
+                       (and (list? errs)
+                            (ormap (lambda (ae)
+                                     (and (hash? ae)
+                                          (= (hash-ref ae 'ability-id 0) 23)
+                                          (= (hash-ref ae 'result 0) 83)))
+                                   errs)))))
+              (when case-c-blind-uphill-err-now?
+                (set-box! SC2-LAST-BLIND-UPHILL-ERR-LOOP cur-loop))
+              (define case-c-recent-blind-uphill-err?
+                (and (>= (unbox SC2-LAST-BLIND-UPHILL-ERR-LOOP) 0)
+                     (<= (- cur-loop (unbox SC2-LAST-BLIND-UPHILL-ERR-LOOP)) 44)))
+              (define case-c-sieged-tank-uphill-needs-scan?
+                (and (pair? case-c-sieged-tanks)
+                     (pair? enemy-units)
+                     (ormap (lambda (tk)
+                              (define tp (sc2-unit-pos tk))
+                              (define tx (sc2-point3d-x tp))
+                              (define ty (sc2-point3d-y tp))
+                              (define tz (sc2-point3d-z tp))
+                              (and (not (ormap (lambda (sp)
+                                                 (define sp-pos (sc2-unit-pos sp))
+                                                 (<= (pt-dist tx ty (sc2-point3d-x sp-pos) (sc2-point3d-y sp-pos)) 16.0))
+                                               case-c-air-spotters))
+                                   (ormap (lambda (e)
+                                            (define ep (sc2-unit-pos e))
+                                            (and (not (sc2-unit-is-flying e))
+                                                 (>= (- (sc2-point3d-z ep) tz) 1.5)
+                                                 (<= (pt-dist tx ty (sc2-point3d-x ep) (sc2-point3d-y ep)) 15.0)))
+                                          enemy-units)))
+                            case-c-sieged-tanks)))
+              (define case-c-isolated-arena-scan-clash?
+                (or (null? townhalls)
+                    (and (= (length townhalls) 1)
+                         (not (ormap sc2-unit-is-worker? self-units))
+                         (pair? case-c-sieged-tanks)
+                         (null? case-c-air-spotters))))
+              (define case-c-uphill-scan-reserve?
+                (or step-has-any-scan-request?
+                    case-c-recent-blind-uphill-err?
+                    case-c-sieged-tank-uphill-needs-scan?
+                    case-c-isolated-arena-scan-clash?))
+              (define fresh-mule-ocs
+                (if near-uncovered-stealth?
+                    '()
+                    (filter (lambda (cid)
+                              (define ocu (hash-ref self-unit-by-tag cid #f))
+                              (and (not (set-member? emitted-scan-oc-tags cid))
+                                   (not (set-member? step-scan-requested-oc-tags cid))
+                                   (not (and case-c-uphill-scan-reserve?
+                                             ocu
+                                             (< (sc2-unit-energy ocu) 150.0)))
+                                   (not (ormap (lambda (c)
+                                                 (and (sc2-raw-unit-command? c)
+                                                      (= (sc2-raw-unit-command-ability-id c) 171)
+                                                      (memv cid (sc2-raw-unit-command-unit-tags c))))
+                                               raw-cmds))
+                                   (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule cid) -1000)) 24)
+                                   (not (and (pair? reserved-scan-oc-tags)
+                                             (memv cid reserved-scan-oc-tags)
+                                             ocu
+                                             (< (sc2-unit-energy ocu) case-c-scan-floor)))))
+                            caster-ids)))
+              (when (pair? fresh-mule-ocs)
+                (cond
+                  [(not (null? townhalls))
+                   (define safe-min-tag (pick-safe-mule-mineral-patch caster-u self-units mineral-fields enemy-units))
+                   (when (and (exact-integer? safe-min-tag) (> safe-min-tag 0))
+                     (for ([cid (in-list fresh-mule-ocs)])
+                       (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule cid) cur-loop))
+                     (emit! (mark-macro-econ-cmd! (sc2-raw-unit-command ab-id #f safe-min-tag fresh-mule-ocs #f))))]
+                  [else
+                   (define arg-tag (if (pair? rest) (first rest) 0))
+                   (define valid-min?
+                     (and (exact-integer? arg-tag)
+                          (ormap (lambda (m) (= (sc2-unit-tag m) arg-tag)) mineral-fields)))
+                   (define resolved-min-tag
+                     (cond
+                       [valid-min? arg-tag]
+                       [(not (null? mineral-fields))
+                        (sc2-unit-tag
+                         (argmin (lambda (m)
+                                   (define mp (sc2-unit-pos m))
+                                   (pt-dist home-x home-y (sc2-point3d-x mp) (sc2-point3d-y mp)))
+                                 mineral-fields))]
+                       [(and (exact-integer? arg-tag) (> arg-tag 0)) arg-tag]
+                       [else 0]))
+                   (when (> resolved-min-tag 0)
+                     (for ([cid (in-list fresh-mule-ocs)])
+                       (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule cid) cur-loop))
+                     (emit! (mark-macro-econ-cmd! (sc2-raw-unit-command ab-id #f resolved-min-tag fresh-mule-ocs #f))))]))]
 
              ;; Case C2: Nydus Worm (1768) -> must be cast ONLY by a completed Nydus Network (unit-type = 95), NEVER a worker
              [(= ab-id 1768)
@@ -16904,10 +18011,71 @@
                      (set-add! emitted-kd8-tags cid)
                      (set-add! commanded-combat-tags cid))
                    (emit! (sc2-raw-unit-command 2588 (sc2-point2d tx ty) 0 fresh-reapers #f)))]
+                [(memv ab-id '(396 913 1408 3669))
+                 (define valid-tr-ids
+                   (filter (lambda (cid)
+                             (transport-valid-to-unload? cid (hash-ref self-unit-by-tag cid #f)))
+                           caster-ids))
+                 (when (pair? valid-tr-ids)
+                   (for ([cid (in-list valid-tr-ids)])
+                     (set-add! commanded-combat-tags cid))
+                   (emit! (sc2-raw-unit-command ab-id (sc2-point2d tx ty) 0 valid-tr-ids #f)))]
+                [(memv ab-id '(74 4111 2545))
+                 ;; L58-P2: Burrowed Infestors (`127`) cannot cast Fungal Growth (`74`: `2:NotSupported`)
+                 ;; or Microbial Shroud (`4111`/`2545`: `211:TargetIsOutOfArc`) — drop cleanly!
+                 (define unburrowed-casters
+                   (filter (lambda (cid)
+                             (define cu (hash-ref self-unit-by-tag cid #f))
+                             (not (and cu
+                                       (or (= (sc2-unit-unit-type cu) 127)
+                                           (sc2-unit-is-burrowed cu)))))
+                           caster-ids))
+                 (when (pair? unburrowed-casters)
+                   (for ([cid (in-list unburrowed-casters)])
+                     (set-add! commanded-combat-tags cid))
+                   (emit! (sc2-raw-unit-command ab-id (sc2-point2d tx ty) 0 unburrowed-casters #f)))]
+                [(= ab-id 3757)
+                 (unless (and (pair? self-units)
+                              (< cur-loop (unbox SC2-NEXUS-RECALL-READY-LOOP)))
+                   (when (pair? self-units)
+                     (set-box! SC2-NEXUS-RECALL-READY-LOOP (+ cur-loop 2880)))
+                   (define nx-u (and (pair? caster-ids) (hash-ref self-unit-by-tag (first caster-ids) #f)))
+                   (define nx (and nx-u (sc2-point3d-x (sc2-unit-pos nx-u))))
+                   (define ny (and nx-u (sc2-point3d-y (sc2-unit-pos nx-u))))
+                   (define recall-r 2.65)
+                   (define cap-tags
+                     (for/seteqv ([su (in-list self-units)]
+                                  #:when (and (not (sc2-unit-is-structure? su))
+                                              (not (memv (sc2-unit-tag su) caster-ids))
+                                              (let ([sp (sc2-unit-pos su)])
+                                                (<= (pt-dist (sc2-point3d-x sp) (sc2-point3d-y sp) tx ty)
+                                                    (+ recall-r (sc2-unit-radius su) 0.35)))))
+                       (sc2-unit-tag su)))
+                   (emit! (sc2-raw-unit-command ab-id (sc2-point2d tx ty) 0 caster-ids #f))
+                   (set-box! SC2-ACTIVE-RECALL-ZONES
+                             (cons (list cur-loop (+ cur-loop 108) tx ty nx ny recall-r cap-tags)
+                                   (unbox SC2-ACTIVE-RECALL-ZONES))))]
+                [(= ab-id 142)
+                 (define ms-u (and (pair? caster-ids) (hash-ref self-unit-by-tag (first caster-ids) #f)))
+                 (define mx (and ms-u (sc2-point3d-x (sc2-unit-pos ms-u))))
+                 (define my (and ms-u (sc2-point3d-y (sc2-unit-pos ms-u))))
+                 (define recall-r 6.65)
+                 (define cap-tags
+                   (for/seteqv ([su (in-list self-units)]
+                                #:when (and (not (sc2-unit-is-structure? su))
+                                            (not (memv (sc2-unit-tag su) caster-ids))
+                                            (let ([sp (sc2-unit-pos su)])
+                                              (<= (pt-dist (sc2-point3d-x sp) (sc2-point3d-y sp) tx ty)
+                                                  (+ recall-r (sc2-unit-radius su) 0.35)))))
+                     (sc2-unit-tag su)))
+                 (emit! (sc2-raw-unit-command ab-id (sc2-point2d tx ty) 0 caster-ids #f))
+                 (set-box! SC2-ACTIVE-RECALL-ZONES
+                           (cons (list cur-loop (+ cur-loop 108) tx ty mx my recall-r cap-tags)
+                                 (unbox SC2-ACTIVE-RECALL-ZONES)))]
                 [else
                  (emit! (sc2-raw-unit-command ab-id (sc2-point2d tx ty) 0 caster-ids #f))])]
 
-             ;; Case E: Unit-target ability (Inject Larva, Chrono Boost, Transfusion, Feedback, Snipe, Yamato, Abduct, Neural Parasite, Repair, etc.)
+             ;; Case E: Unit-target ability (Inject Larva, Chrono Boost, Energy Recharge, Transfusion, Feedback, Snipe, Yamato, Abduct, Neural Parasite, Repair, etc.)
              ;;         NEVER fall back to TargetNone (0) — if target-id <= 0, drop cleanly!
              [(set-member? SC2-UNIT-TARGET-ABILITY-IDS ab-id)
               (unless (and (= ab-id 251) (unit-has-protected-order? caster-id))
@@ -16916,6 +18084,106 @@
                   [(= ab-id 2350)
                    (when (and (exact-integer? target-id) (> target-id 0))
                      (emit-cyclone-lock-on-deduped! caster-ids target-id))]
+                  ;; L58-P1: SC2 5.0.14 Nexus Energy Recharge (`4126`) enforces `<= 15.0t` range
+                  ;; (`209:TargetIsOutOfRange`), `>= 50.0e` (`17:NotEnoughEnergy`), and non-full energy target!
+                  [(= ab-id 4126)
+                   (when (and (sc2-ability-live-available? 4126)
+                              (exact-integer? target-id) (> target-id 0))
+                     (cond
+                       [(null? self-units)
+                        (emit! (sc2-raw-unit-command 4126 #f target-id (list (first caster-ids)) #f))]
+                       [else
+                        (define tgt-u (hash-ref self-unit-by-tag target-id #f))
+                        (when (and tgt-u
+                                   (not (sc2-unit-is-hallucination tgt-u))
+                                   (> (sc2-unit-energy-max tgt-u) 0.0)
+                                   (< (sc2-unit-energy tgt-u) (- (sc2-unit-energy-max tgt-u) 0.5)))
+                          (define tp (sc2-unit-pos tgt-u))
+                          (define valid-nxs
+                            (filter-map
+                             (lambda (cid)
+                               (define cu (hash-ref self-unit-by-tag cid #f))
+                               (and cu
+                                    (= (sc2-unit-unit-type cu) 59)
+                                    (>= (sc2-unit-build-progress cu) SC2-BUILD-COMPLETE-PROGRESS)
+                                    (>= (sc2-unit-energy cu) 50.0)
+                                    (let ([np (sc2-unit-pos cu)])
+                                      (<= (pt-dist (sc2-point3d-x np) (sc2-point3d-y np)
+                                                   (sc2-point3d-x tp) (sc2-point3d-y tp))
+                                          15.0))
+                                    cu))
+                             caster-ids))
+                          (when (pair? valid-nxs)
+                            (define best-nx (sc2-unit-tag (argmax sc2-unit-energy valid-nxs)))
+                            (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono best-nx) cur-loop)
+                            (emit! (sc2-raw-unit-command 4126 #f target-id (list best-nx) #f))))]))]
+                  ;; L58-P3B: Medivac Heal (`386`) strictly targets live, damaged, unhealed friendly
+                  ;; biological units (1 Medivac per bio target — auto-redirects Medivac #2 to the next
+                  ;; wounded bio unit within `10.0t` to eliminate `206:AlreadyTargeted` rejects!).
+                  [(= ab-id 386)
+                   (when (and (exact-integer? target-id) (> target-id 0))
+                     (cond
+                       [(null? self-units)
+                        (emit! (sc2-raw-unit-command 386 #f target-id (list (first caster-ids)) #f))]
+                       [else
+                        (for ([cid (in-list caster-ids)])
+                          (define mu (hash-ref self-unit-by-tag cid #f))
+                          (when (and mu
+                                     (= (sc2-unit-unit-type mu) 54)
+                                     (>= (sc2-unit-build-progress mu) SC2-BUILD-COMPLETE-PROGRESS)
+                                     (>= (sc2-unit-energy mu) 1.0))
+                            (define mp (sc2-unit-pos mu))
+                            (define mx (sc2-point3d-x mp))
+                            (define my (sc2-point3d-y mp))
+                            (define req-u (hash-ref self-unit-by-tag target-id #f))
+                            (define (heal-tgt-free? tid)
+                              (and (not (set-member? already-healed-target-tags tid))
+                                   (not (set-member? emitted-heal-target-tags tid))))
+                            (define chosen-tid
+                              (cond
+                                [(and req-u
+                                      (unit-medivac-healable-bio? req-u)
+                                      (heal-tgt-free? target-id))
+                                 target-id]
+                                [(unit-already-executing-order? cid 386 #f target-id)
+                                 #f] ;; already healing this target — no-op!
+                                [else
+                                 ;; Auto-redirect to closest other damaged unhealed friendly bio unit <= 10.0t
+                                 (define alt-cands
+                                   (filter (lambda (su)
+                                             (define st (sc2-unit-tag su))
+                                             (and (not (= st target-id))
+                                                  (unit-medivac-healable-bio? su)
+                                                  (heal-tgt-free? st)
+                                                  (let ([sp (sc2-unit-pos su)])
+                                                    (<= (pt-dist mx my (sc2-point3d-x sp) (sc2-point3d-y sp)) 10.0))))
+                                           self-units))
+                                 (and (pair? alt-cands)
+                                      (sc2-unit-tag
+                                       (argmin (lambda (su)
+                                                 (define sp (sc2-unit-pos su))
+                                                 (+ (* 0.25 (pt-dist mx my (sc2-point3d-x sp) (sc2-point3d-y sp)))
+                                                    (/ (sc2-unit-health su) (max 1.0 (sc2-unit-health-max su)))))
+                                               alt-cands)))]))
+                            (when (and chosen-tid
+                                       (not (unit-already-executing-order? cid 386 #f chosen-tid)))
+                              (set-add! emitted-heal-target-tags chosen-tid)
+                              (set-add! commanded-combat-tags cid)
+                              (emit! (sc2-raw-unit-command 386 #f chosen-tid (list cid) #f)))))]))]
+                  ;; L58-P1: SCV Repair (`316`/`3685`) strictly requires damaged target (`health < health-max`)
+                  ;; to eliminate `28:TooMuchLife` rejects!
+                  [(memv ab-id '(316 3685))
+                   (define valid-rep-cids
+                     (filter (lambda (cid)
+                               (and (repair-target-valid-damaged? cid target-id)
+                                    (not (unit-already-executing-order? cid 3685 #f target-id))
+                                    (not (unit-already-executing-order? cid 316 #f target-id))))
+                             caster-ids))
+                   (when (pair? valid-rep-cids)
+                     (for ([cid (in-list valid-rep-cids)])
+                       (record-worker-used! cid)
+                       (set-add! commanded-combat-tags cid))
+                     (emit! (sc2-raw-unit-command ab-id #f target-id valid-rep-cids #f)))]
                   [(and (exact-integer? target-id) (> target-id 0)
                         (not (and (memv ab-id '(394 911 1406 3668))
                                   (passenger-protected-channeling-safe? target-id))))
@@ -16928,7 +18196,7 @@
                          caster-ids))
                    (when (pair? eff-cids)
                      (define raw-u-cmd (sc2-raw-unit-command ab-id #f target-id eff-cids #f))
-                     (when (memv ab-id '(3755 3686 4107))
+                     (when (memv ab-id '(3755 3686 4107 4126))
                        (for ([cid (in-list eff-cids)])
                          (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono cid) cur-loop)))
                      (when (= ab-id 3755)
@@ -17076,11 +18344,74 @@
            (emit! (mark-urgent-survival-cmd!
                    (sc2-raw-unit-command 23 target-pt eff-tgt-id need-strike #f)))))]
 
-      [(list 'harvest-mineral wid patch-id)
+      ;; L59-W1/P2: Generic `(harvest wid tid)` — routes cleanly to gas or mineral `HARVEST_GATHER (3666)`
+      ;; and reserves workers already excavating a thin mineral wall (`<= 150M`) without re-issuing `3666`!
+      [(list 'harvest wid tid)
+       (define is-gas-tgt?
+         (and (exact-integer? tid)
+              (or (set-member? gas-bldg-tags-set tid)
+                  (ormap (lambda (g) (= (sc2-unit-tag g) tid)) completed-gas-buildings))))
+       (define (worker-on-thin-wall? u)
+         (and u
+              (ormap (lambda (o)
+                       (and (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666))
+                            (let ([m (hash-ref mineral-by-tag (sc2-unit-order-target-unit-tag o) #f)])
+                              (and m (sc2-unit-is-thin-mineral-wall? m)))))
+                     (sc2-unit-orders u))))
        (define wlist
          (filter (lambda (t)
                    (define u (and (exact-integer? t) (hash-ref self-unit-by-tag t #f)))
                    (define uh (and (exact-integer? t) (hash-ref hash-ally-by-id t #f)))
+                   (when (and (exact-integer? t) (> t 0) (worker-on-thin-wall? u))
+                     (record-worker-used! t))
+                   (define busy?
+                     (or (and u (worker-has-build-order? u cur-loop self-structures))
+                         (and uh (hash-ref uh 'has-build-order? #f))
+                         (if is-gas-tgt?
+                             (and u (or (worker-carrying-cargo? u)
+                                        (and (pair? (sc2-unit-orders u))
+                                             (memv (sc2-unit-order-ability-id (first (sc2-unit-orders u)))
+                                                   '(295 296 298 299 1183 1184 3666 3667)))))
+                             (and u (worker-busy-harvesting-mineral? u tid mineral-by-tag gas-bldg-tags-set mineral-fields)))))
+                   (and (exact-integer? t)
+                        (> t 0)
+                        (not (set-member? used-worker-tags t))
+                        (not busy?)))
+                 (if (list? wid) wid (list wid))))
+       (define eff-tgt-id
+         (cond
+           [(and (exact-integer? tid) (> tid 0)
+                 (or is-gas-tgt?
+                     (hash-has-key? mineral-by-tag tid)
+                     (null? self-units)))
+            tid]
+           [(and (not is-gas-tgt?) (pair? mineral-fields))
+            (sc2-unit-tag
+             (argmin (lambda (m)
+                       (define mp (sc2-unit-pos m))
+                       (pt-dist home-x home-y (sc2-point3d-x mp) (sc2-point3d-y mp)))
+                     mineral-fields))]
+           [(and (exact-integer? tid) (> tid 0)) tid]
+           [else 0]))
+       (when (and (pair? wlist) (> eff-tgt-id 0))
+         (for ([wt (in-list wlist)])
+           (record-worker-used! wt))
+         (emit! (sc2-raw-unit-command 3666 #f eff-tgt-id wlist #f)))]
+
+      [(list 'harvest-mineral wid patch-id)
+       (define (worker-on-thin-wall? u)
+         (and u
+              (ormap (lambda (o)
+                       (and (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666))
+                            (let ([m (hash-ref mineral-by-tag (sc2-unit-order-target-unit-tag o) #f)])
+                              (and m (sc2-unit-is-thin-mineral-wall? m)))))
+                     (sc2-unit-orders u))))
+       (define wlist
+         (filter (lambda (t)
+                   (define u (and (exact-integer? t) (hash-ref self-unit-by-tag t #f)))
+                   (define uh (and (exact-integer? t) (hash-ref hash-ally-by-id t #f)))
+                   (when (and (exact-integer? t) (> t 0) (worker-on-thin-wall? u))
+                     (record-worker-used! t))
                    (define already-harvesting-or-building?
                      (or (and u (worker-has-build-order? u cur-loop self-structures))
                          (and uh (hash-ref uh 'has-build-order? #f))
@@ -17389,14 +18720,16 @@
        (when sentry-u
          (record-unit-used! (sc2-unit-tag sentry-u))
          (emit! (sc2-raw-unit-command 154 #f 0 (list (sc2-unit-tag sentry-u)) #f)))
-       ;; 2. Overseer Spawn Changeling (181) when energy >= 50 (deduped <= 1 per Overseer per step)
+       ;; 2. Overseer Spawn Changeling (181) when energy >= 50 (deduped <= 1 per Overseer per step;
+       ;;    L58-P2: preserve energy for Contaminate 1825 when uncontaminated enemy prod/tech <= 24t!)
        (define overseer-u
          (for/first ([u (in-list self-units)]
                      #:when (and (= (sc2-unit-unit-type u) 129)
                                  (>= (sc2-unit-energy u) 50.0)
                                  (null? (sc2-unit-orders u))
                                  (not (set-member? emitted-changeling-tags (sc2-unit-tag u)))
-                                 (not (set-member? commanded-combat-tags (sc2-unit-tag u)))))
+                                 (not (set-member? commanded-combat-tags (sc2-unit-tag u)))
+                                 (not (overseer-should-save-energy-for-contaminate? u))))
            u))
        (when overseer-u
          (emit-spawn-changeling-deduped! (sc2-unit-tag overseer-u)))
@@ -17532,7 +18865,6 @@
              a))
          (define by-ab (make-hasheqv))
          (for ([uid (in-list ulist)])
-           (record-unit-used! uid)
            (define u (hash-ref self-unit-by-tag uid #f))
            (define utype (if u (sc2-unit-unit-type u) 0))
            (define ab-id
@@ -17543,7 +18875,11 @@
                    [else 3661])))
            (hash-set! by-ab ab-id (cons uid (hash-ref by-ab ab-id '()))))
          (for ([(ab-id tags-rev) (in-hash by-ab)])
-           (emit! (sc2-raw-unit-command ab-id #f 0 (reverse tags-rev) #f))))]
+           (define valid-tags (filter-valid-burrow-tags! (reverse tags-rev) ab-id))
+           (when (pair? valid-tags)
+             (for ([uid (in-list valid-tags)])
+               (record-unit-used! uid))
+             (emit! (sc2-raw-unit-command ab-id #f 0 valid-tags #f)))))]
 
       [(list (or 'unburrow 'burrow-up) raw-uid rest ...)
        (define ulist
@@ -17557,7 +18893,6 @@
              a))
          (define by-ab (make-hasheqv))
          (for ([uid (in-list ulist)])
-           (record-unit-used! uid)
            (define u (hash-ref self-unit-by-tag uid #f))
            (define utype (if u (sc2-unit-unit-type u) 0))
            (define ab-id
@@ -17568,7 +18903,11 @@
                    [else 3662])))
            (hash-set! by-ab ab-id (cons uid (hash-ref by-ab ab-id '()))))
          (for ([(ab-id tags-rev) (in-hash by-ab)])
-           (emit! (sc2-raw-unit-command ab-id #f 0 (reverse tags-rev) #f))))]
+           (define valid-tags (filter-valid-burrow-tags! (reverse tags-rev) ab-id))
+           (when (pair? valid-tags)
+             (for ([uid (in-list valid-tags)])
+               (record-unit-used! uid))
+             (emit! (sc2-raw-unit-command ab-id #f 0 valid-tags #f)))))]
 
       [(list (or 'roach-tunnel-move 'infestor-burrow-move) uid raw-x raw-y)
        (when (and (exact-integer? uid) (> uid 0))
@@ -17587,11 +18926,14 @@
       [(list 'infestor-burrow-cast uid spell-sym (? real? raw-x) (? real? raw-y))
        (when (and (exact-integer? uid) (> uid 0)
                   (not (eq? spell-sym 'neural-parasite)))
-         (record-unit-used! uid)
-         (emit! (sc2-raw-unit-command 74
-                                      (sc2-point2d (scale-bot-coord-to-world raw-x home-x)
-                                                   (scale-bot-coord-to-world raw-y home-y))
-                                      0 (list uid) #f)))]
+         (define u (hash-ref self-unit-by-tag uid #f))
+         ;; L58-P2: Burrowed Infestor (`127`) cannot cast Fungal Growth (`74`: `2:NotSupported`).
+         (unless (and u (or (= (sc2-unit-unit-type u) 127) (sc2-unit-is-burrowed u)))
+           (record-unit-used! uid)
+           (emit! (sc2-raw-unit-command 74
+                                        (sc2-point2d (scale-bot-coord-to-world raw-x home-x)
+                                                     (scale-bot-coord-to-world raw-y home-y))
+                                        0 (list uid) #f))))]
 
       [(list 'blind-skillshot-shimmer uid spell-sym raw-x raw-y)
        (when (and (exact-integer? uid) (> uid 0))
@@ -18079,30 +19421,50 @@
 
       [(list 'transport-juggle tr-id pass-ids (? real? raw-x) (? real? raw-y))
        (when (and (exact-integer? tr-id) (> tr-id 0))
+         (define tr-u (hash-ref self-unit-by-tag tr-id #f))
          (define self-drop?
            (or (equal? pass-ids tr-id)
                (and (list? pass-ids)
                     (= (length pass-ids) 1)
                     (equal? (car pass-ids) tr-id))))
+         (define raw-plist
+           (filter (lambda (t) (and (exact-integer? t) (> t 0) (not (= t tr-id))))
+                   (if (list? pass-ids) pass-ids (list pass-ids))))
+         ;; L59-W1: Dropship Rescue Unload fix — if `pass-ids` names unit(s) ALREADY carried inside
+         ;; `tr-u` (`sc2-unit-passengers` or absent from top-level `self-unit-by-tag` while `tr-u` has
+         ;; cargo), emit point-target `UNLOAD_ALL_AT` at `(tx, ty)` instead of `LOAD_TRANSPORT (3668)`!
+         (define carried-tags
+           (if tr-u
+               (for/seteqv ([p (in-list (sc2-unit-passengers tr-u))])
+                 (sc2-passenger-unit-tag p))
+               (seteqv)))
+         (define already-carried-unload?
+           (and (not self-drop?)
+                tr-u
+                (pair? raw-plist)
+                (transport-valid-to-unload? tr-id tr-u)
+                (for/and ([ptag (in-list raw-plist)])
+                  (or (set-member? carried-tags ptag)
+                      (and (not (hash-has-key? self-unit-by-tag ptag))
+                           (> (sc2-unit-cargo-space-taken tr-u) 0))))))
          (cond
            [self-drop?
+            (when (transport-valid-to-unload? tr-id tr-u)
+              (record-unit-used! tr-id)
+              (define unload-ab-id (transport-unload-ability-id tr-u))
+              ;; Moving self-drop: UnloadAllAt targeting the transport's own UnitTag (#f pos)
+              (emit! (sc2-raw-unit-command unload-ab-id #f tr-id (list tr-id) #f)))]
+           [already-carried-unload?
             (record-unit-used! tr-id)
-            (define tr-u (hash-ref self-unit-by-tag tr-id #f))
-            (define tr-utype (if tr-u (sc2-unit-unit-type tr-u) 0))
-            (define unload-ab-id
-              (cond
-                [(= tr-utype 54) 396]
-                [(or (= tr-utype 81) (= tr-utype 136)) 913]
-                [(= tr-utype 893) 1408]
-                [else 3669]))
-            ;; Moving self-drop: UnloadAllAt targeting the transport's own UnitTag (#f pos)
-            (emit! (sc2-raw-unit-command unload-ab-id #f tr-id (list tr-id) #f))]
+            (define unload-ab-id (transport-unload-ability-id tr-u))
+            (define tx (scale-bot-coord-to-world raw-x home-x))
+            (define ty (scale-bot-coord-to-world raw-y home-y))
+            (emit! (sc2-raw-unit-command unload-ab-id (sc2-point2d tx ty) 0 (list tr-id) #f))]
            [else
             (define plist
               (filter (lambda (t)
-                        (and (exact-integer? t) (> t 0) (not (= t tr-id))
-                             (not (passenger-protected-channeling-safe? t))))
-                      (if (list? pass-ids) pass-ids (list pass-ids))))
+                        (not (passenger-protected-channeling-safe? t)))
+                      raw-plist))
             (when (not (null? plist))
               (record-unit-used! tr-id)
               (for ([ptag (in-list plist)]
@@ -18117,7 +19479,7 @@
       [(list 'transport-juggle tr-id (? real? raw-x) (? real? raw-y))
        (when (and (exact-integer? tr-id) (> tr-id 0))
          (define tr-u (hash-ref self-unit-by-tag tr-id #f))
-         (when (transport-has-cargo-to-unload? tr-u)
+         (when (transport-valid-to-unload? tr-id tr-u)
            (record-unit-used! tr-id)
            (define unload-ab-id (transport-unload-ability-id tr-u))
            (define tx (scale-bot-coord-to-world raw-x home-x))
@@ -18127,7 +19489,7 @@
       [(list* 'transport-drop-moving tr-id maybe-tgt)
        (when (and (exact-integer? tr-id) (> tr-id 0))
          (define tr-u (hash-ref self-unit-by-tag tr-id #f))
-         (when (transport-has-cargo-to-unload? tr-u)
+         (when (transport-valid-to-unload? tr-id tr-u)
            (define tgt-id (and (pair? maybe-tgt) (car maybe-tgt)))
            (record-unit-used! tr-id)
            (define unload-ab-id (transport-unload-ability-id tr-u))
@@ -18188,7 +19550,8 @@
          [(eq? norm-aura 'microbial-shroud)
           (define infestor-u
             (for/first ([u (in-list self-units)]
-                        #:when (and (memv (sc2-unit-unit-type u) '(111 127))
+                        #:when (and (= (sc2-unit-unit-type u) 111)
+                                    (not (sc2-unit-is-burrowed u))
                                     (>= (sc2-unit-energy u) 75.0)
                                     (not (set-member? commanded-combat-tags (sc2-unit-tag u)))))
               u))
@@ -18238,14 +19601,19 @@
       [(list 'control-group-recall _ ...)
        (void)]
 
-      [(list 'camera-focus _ raw-x raw-y)
-       (emit-camera-move! raw-x raw-y)]
+      [(list 'camera-focus zone raw-x raw-y)
+       (define cam-kind
+         (cond
+           [(memq zone '(crisis base-defense under-attack emergency-defense defense-alert)) 'crisis]
+           [(memq zone '(minimap-jump battle combat active-front harass drop active-army-front)) 'minimap]
+           [else 'routine]))
+       (emit-camera-move! raw-x raw-y #:kind cam-kind)]
       [(list 'camera-focus raw-x raw-y)
-       (emit-camera-move! raw-x raw-y)]
+       (emit-camera-move! raw-x raw-y #:kind 'minimap)]
       [(list 'move-camera raw-x raw-y)
-       (emit-camera-move! raw-x raw-y)]
+       (emit-camera-move! raw-x raw-y #:kind 'routine)]
       [(list 'camera-bookmark-jump _ raw-x raw-y)
-       (emit-camera-move! raw-x raw-y)]
+       (emit-camera-move! raw-x raw-y #:kind 'bookmark)]
 
       [_ (void)])]))
 
@@ -18541,13 +19909,82 @@
                (set! already-heading-pts (cons (cons tx ty) already-heading-pts))
                (unless (unit-already-executing-order? dtag 16 dest-pt 0)
                  (emit! (mark-urgent-survival-cmd!
-                         (sc2-raw-unit-command 16 dest-pt 0 (list dtag) #f))))]))))))
+                         (sc2-raw-unit-command 16 dest-pt 0 (list dtag) #f))))])))))
+    ;; L58-P2: Emergency Terran Orbital Command Scanner Sweep (`399`) defense-in-depth!
+    ;; When an uncovered `cloak=1` / burrowed enemy is actively threatening friendly units (`<= 18.0t`)
+    ;; and no active `ScannerSweep` effect (`effect-id = 6`) or same-step `399` already covers it,
+    ;; fire P0 `399` directly from the highest-energy ready Orbital Command (`132`, `energy >= 50.0`)
+    ;; and strip any competing same-step `171` MULE on that OC!
+    (define ready-scan-ocs
+      (sort (filter (lambda (u)
+                      (and (= (sc2-unit-unit-type u) 132)
+                           (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                           (not (sc2-unit-is-flying u))
+                           (>= (sc2-unit-energy u) 50.0)
+                           (not (set-member? emitted-scan-oc-tags (sc2-unit-tag u)))))
+                    self-units)
+            > #:key sc2-unit-energy))
+    (when (pair? ready-scan-ocs)
+      (define active-scan-effect-pts
+        (if (sc2-observation? obs)
+            (for/fold ([pts '()]) ([eff (in-list (sc2-observation-effects obs))]
+                                   #:when (= (sc2-effect-effect-id eff) 6))
+              (for/fold ([acc pts]) ([pt (in-list (sc2-effect-positions eff))])
+                (cons (cons (sc2-point2d-x pt) (sc2-point2d-y pt)) acc)))
+            '()))
+      (define threat-stealth
+        (filter (lambda (se)
+                  (define ep (sc2-unit-pos se))
+                  (define ex (sc2-point3d-x ep))
+                  (define ey (sc2-point3d-y ep))
+                  (and (ormap (lambda (su)
+                                (define sp (sc2-unit-pos su))
+                                (<= (pt-dist ex ey (sc2-point3d-x sp) (sc2-point3d-y sp)) 18.0))
+                              self-units)
+                       (not (ormap (lambda (pt) (<= (pt-dist ex ey (car pt) (cdr pt)) 10.5))
+                                   active-scan-effect-pts))
+                       (not (ormap (lambda (pt) (<= (pt-dist ex ey (car pt) (cdr pt)) 10.0))
+                                   emitted-scan-pts))))
+                uncovered-stealth-enemies))
+      (when (pair? threat-stealth)
+        (define target-se (first threat-stealth))
+        (define ep (sc2-unit-pos target-se))
+        (define ex (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD (sc2-point3d-x ep))))
+        (define ey (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD (sc2-point3d-y ep))))
+        (define scan-cell-key
+          (list 'wire-emerg-scan
+                (quotient (inexact->exact (round ex)) 6)
+                (quotient (inexact->exact (round ey)) 6)))
+        (when (wire-nonstack-allow?! scan-cell-key 160)
+          (define chosen-oc-tag (sc2-unit-tag (first ready-scan-ocs)))
+          ;; Strip any competing same-step `171` MULE on `chosen-oc-tag` so Scan owns the energy!
+          (set! raw-cmds
+                (filter-map
+                 (lambda (c)
+                   (if (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-ability-id c) 171)
+                            (memv chosen-oc-tag (sc2-raw-unit-command-unit-tags c)))
+                       (let ([rem (filter (lambda (t) (not (= t chosen-oc-tag)))
+                                          (sc2-raw-unit-command-unit-tags c))])
+                         (and (pair? rem)
+                              (mark-macro-econ-cmd!
+                               (sc2-raw-unit-command 171
+                                                     (sc2-raw-unit-command-target-pos c)
+                                                     (sc2-raw-unit-command-target-unit-tag c)
+                                                     rem
+                                                     (sc2-raw-unit-command-queue? c)))))
+                       c))
+                 raw-cmds))
+          (emit-scanner-sweep-deduped! (list chosen-oc-tag) ex ey)))))
 
   (define idle-combat-units
     (filter (lambda (u)
               (and (null? (sc2-unit-orders u))
                    (not (set-member? commanded-combat-tags (sc2-unit-tag u)))
                    (not (memv (sc2-unit-unit-type u) '(32 500 503 694 733)))
+                   (not (unit-burrowed-non-attacker? u))
+                   (not (unit-weaponless-non-attacker? u))
+                   (not (unit-immobile-burrowed-or-sieged? u))
                    (not (eq? (sc2-id->unit-symbol (sc2-unit-unit-type u)) 'queen))))
             combat-units))
   (when (and (>= cur-loop 6000) (null? enemy-units) sweep-context-active?)
@@ -18886,12 +20323,19 @@
   #:mutable
   #:transparent)
 
-(define (make-wire-apm-governor #:target-apm [target-apm 410.0]
-                                #:hard-cap-apm [hard-cap-apm 485.0])
-  (wire-apm-governor (exact->inexact target-apm)
-                     (exact->inexact hard-cap-apm)
-                     24.0
-                     28.0
+(define (make-wire-apm-governor #:target-apm [target-apm 495.0]
+                                #:hard-cap-apm [hard-cap-apm 595.0]
+                                #:burst-capacity [burst-cap #f])
+  (define eff-target (exact->inexact target-apm))
+  (define eff-cap (exact->inexact hard-cap-apm))
+  (define eff-burst (if (real? burst-cap)
+                        (exact->inexact burst-cap)
+                        (if (>= eff-target 450.0) 36.0 28.0)))
+  (define init-tokens (min eff-burst (if (>= eff-target 450.0) 30.0 24.0)))
+  (wire-apm-governor eff-target
+                     eff-cap
+                     init-tokens
+                     eff-burst
                      -1
                      -1000
                      #f
@@ -18902,10 +20346,10 @@
     (cond
       ;; P0: Life-or-death survival, tactical spells, cancel, & combat mode-switches
       ;;     (L33-P0-1: Supply Depot lower/raise 556/558 moved out of P0 -> P2 so a blocked depot
-      ;;      can NEVER saturate the 485 rolling APM cap and starve P1 macro!)
+      ;;      can NEVER saturate the rolling APM cap and starve P1 macro!)
       [(memv ab '(42 314 349 380 382 383 396 407 408 913 1408 1437 1438 1692 1764 1882 2244
                   2368 2370 2371 2387 2546 2594 2596 2704 2706 3659 3675 1442 3687 74 76 140 249 251 399 401
-                  1036 1526 1528 1530 1628 1664 1978 1998 2063 2067 2069 2073 2116 2146
+                  1036 1526 1528 1530 1622 1628 1664 1825 1978 1998 2063 2067 2069 2073 2116 2146
                   2324 2338 2346 2350 2358 2375 2376 2393 2505 2542 2545 2588 2714 3668 3669
                   3747 3751 3753 3755 3757 4107 4109 4111 4113 4126 142 3686 388 390
                   2095 2097 2108 2110 403 405 2362 2364))
@@ -18923,6 +20367,7 @@
   (cond
     [(or (sc2-chat-action? cmd) (WireChat? cmd)) 0]
     [(framing-camera-cmd? cmd) 1]
+    [(pro-camera-jump-cmd? cmd) 2]
     [(or (sc2-raw-camera-move? cmd) (WireCameraMove? cmd)) 4]
     [(urgent-survival-cmd? cmd) 0]
     [(macro-econ-cmd? cmd) 1]
@@ -18953,6 +20398,103 @@
 (define SC2-GOV-P0-MODE-DEDUP (make-weak-hasheq))
 (define SC2-GOV-URGENT-COMBAT-DEDUP (make-weak-hasheq))
 (define SC2-GOV-UNCHANGED-REPEAT (make-weak-hasheq))
+(define SC2-GOV-APM-DROP-STATS (make-weak-hasheq))
+(struct wire-apm-drop-tracker
+  (total
+   token-bucket
+   rolling-hard-cap
+   both
+   by-tier-vec
+   by-ability-ht
+   by-minute-vec)
+  #:mutable)
+
+(define (make-wire-apm-drop-tracker)
+  (wire-apm-drop-tracker 0 0 0 0 (make-vector 5 0) (make-hash) (make-vector 31 0)))
+
+(define (reset-wire-apm-drop-stats! gov)
+  (when (wire-apm-governor? gov)
+    (hash-remove! SC2-GOV-APM-DROP-STATS gov)))
+
+(define (wire-cmd->apm-drop-ability-str cmd)
+  (cond
+    [(or (sc2-raw-camera-move? cmd) (WireCameraMove? cmd)) "camera"]
+    [(sc2-raw-unit-command? cmd) (number->string (sc2-raw-unit-command-ability-id cmd))]
+    [(WireCmdNone? cmd) (number->string (NoTargetAbility-id (WireCmdNone-ability cmd)))]
+    [(WireCmdPoint? cmd) (number->string (PointTargetAbility-id (WireCmdPoint-ability cmd)))]
+    [(WireCmdUnit? cmd) (number->string (UnitTargetAbility-id (WireCmdUnit-ability cmd)))]
+    [(WireCmdArchon? cmd) "1766"]
+    [(WireToggleAutocast? cmd) "autocast"]
+    [else "other"]))
+
+(define (record-wire-apm-drop! gov cmd tier reason cur-loop)
+  (define tr
+    (or (hash-ref SC2-GOV-APM-DROP-STATS gov #f)
+        (let ([fresh (make-wire-apm-drop-tracker)])
+          (hash-set! SC2-GOV-APM-DROP-STATS gov fresh)
+          fresh)))
+  (set-wire-apm-drop-tracker-total! tr (add1 (wire-apm-drop-tracker-total tr)))
+  (case reason
+    [(rolling_hard_cap)
+     (set-wire-apm-drop-tracker-rolling-hard-cap!
+      tr (add1 (wire-apm-drop-tracker-rolling-hard-cap tr)))]
+    [(both)
+     (set-wire-apm-drop-tracker-rolling-hard-cap!
+      tr (add1 (wire-apm-drop-tracker-rolling-hard-cap tr)))
+     (set-wire-apm-drop-tracker-both!
+      tr (add1 (wire-apm-drop-tracker-both tr)))]
+    [else
+     (set-wire-apm-drop-tracker-token-bucket!
+      tr (add1 (wire-apm-drop-tracker-token-bucket tr)))])
+  (define tidx (max 0 (min 4 (if (exact-integer? tier) tier 4))))
+  (define tvec (wire-apm-drop-tracker-by-tier-vec tr))
+  (vector-set! tvec tidx (add1 (vector-ref tvec tidx)))
+  (define ab-str (wire-cmd->apm-drop-ability-str cmd))
+  (define ab-ht (wire-apm-drop-tracker-by-ability-ht tr))
+  (hash-set! ab-ht ab-str (add1 (hash-ref ab-ht ab-str 0)))
+  (define min-idx (max 0 (min 30 (quotient (max 0 cur-loop) 1344))))
+  (define mvec (wire-apm-drop-tracker-by-minute-vec tr))
+  (vector-set! mvec min-idx (add1 (vector-ref mvec min-idx))))
+
+(define (get-wire-apm-drop-stats gov #:top-k [top-k #f])
+  (define tr (and (wire-apm-governor? gov) (hash-ref SC2-GOV-APM-DROP-STATS gov #f)))
+  (cond
+    [(not tr)
+     (hasheq 'total 0
+             'token_bucket 0
+             'rolling_hard_cap 0
+             'both 0
+             'by_tier (hasheq 'P0 0 'P1 0 'P2 0 'P3 0 'P4 0)
+             'by_ability (hasheq)
+             'by_minute (hasheq))]
+    [else
+     (define tvec (wire-apm-drop-tracker-by-tier-vec tr))
+     (define ab-pairs
+       (sort (hash->list (wire-apm-drop-tracker-by-ability-ht tr))
+             (lambda (a b)
+               (if (= (cdr a) (cdr b))
+                   (string<? (car a) (car b))
+                   (> (cdr a) (cdr b))))))
+     (define kept-ab
+       (if (and (exact-positive-integer? top-k) (> (length ab-pairs) top-k))
+           (take ab-pairs top-k)
+           ab-pairs))
+     (define mvec (wire-apm-drop-tracker-by-minute-vec tr))
+     (hasheq 'total (wire-apm-drop-tracker-total tr)
+             'token_bucket (wire-apm-drop-tracker-token-bucket tr)
+             'rolling_hard_cap (wire-apm-drop-tracker-rolling-hard-cap tr)
+             'both (wire-apm-drop-tracker-both tr)
+             'by_tier (hasheq 'P0 (vector-ref tvec 0)
+                              'P1 (vector-ref tvec 1)
+                              'P2 (vector-ref tvec 2)
+                              'P3 (vector-ref tvec 3)
+                              'P4 (vector-ref tvec 4))
+             'by_ability (for/hasheq ([kv (in-list kept-ab)])
+                           (values (string->symbol (car kv)) (cdr kv)))
+             'by_minute (for/hasheq ([m (in-range 31)]
+                                     #:when (> (vector-ref mvec m) 0))
+                          (values (string->symbol (number->string m))
+                                  (vector-ref mvec m))))]))
 (define SC2-GOV-P0-MODE-SWITCH-ABILITIES
   (seteqv 388 390 403 405 556 558 1978 1998 2095 2097 2108 2110 2362 2364 2558 2560))
 (define SC2-GOV-P1-ADDON-ABILITIES
@@ -18963,7 +20505,10 @@
   ;; Auto-reset state across sequential matches when game-loop rewinds
   (when (and (>= (wire-apm-governor-last-loop gov) 0)
              (< cur-loop (wire-apm-governor-last-loop gov)))
-    (set-wire-apm-governor-tokens! gov 24.0)
+    (set-wire-apm-governor-tokens!
+     gov
+     (min (wire-apm-governor-burst-capacity gov)
+          (if (>= (wire-apm-governor-target-apm gov) 450.0) 30.0 24.0)))
     (set-wire-apm-governor-last-loop! gov -1)
     (set-wire-apm-governor-last-cam-loop! gov -1000)
     (set-wire-apm-governor-last-selected-tags! gov #f)
@@ -18975,7 +20520,8 @@
     (hash-set! SC2-GOV-LAST-P3-LOOP gov -1000)
     (hash-set! SC2-GOV-P0-MODE-DEDUP gov (make-hash))
     (hash-set! SC2-GOV-URGENT-COMBAT-DEDUP gov (make-hash))
-    (hash-set! SC2-GOV-UNCHANGED-REPEAT gov (make-hash)))
+    (hash-set! SC2-GOV-UNCHANGED-REPEAT gov (make-hash))
+    (hash-remove! SC2-GOV-APM-DROP-STATS gov))
   (define gov-mode-dedup
     (or (hash-ref SC2-GOV-P0-MODE-DEDUP gov #f)
         (let ([ht (make-hash)])
@@ -19016,25 +20562,45 @@
     (max 0.0 (- (wire-apm-governor-hard-cap-apm gov) (exact->inexact rolling-used))))
 
   ;; 3. Strip Raw-mode no-op UI control-group commands, rate-limit camera moves
-  ;;    (>= 28 loops routine, >= 6 loops for framing camera moves jumping > 10.0 tiles),
-  ;;    coalesce compatible unit commands, canonicalize sorted tag lists, and chunk to <= 64 tags.
+  ;;    (L59-W1: >= 18 loops routine Pro base-hotkey / minimap-click cadence, >= 6 loops for
+  ;;     crisis/framing jumps > 14.0t, suppress non-base <= 8.0t scrolling drift, >= 28 loops
+  ;;     for legacy unmarked raw camera moves), coalesce compatible unit commands, canonicalize
+  ;;    sorted tag lists, and chunk to <= 64 tags.
   (define (cam-cmd-cooldown-ok? c)
     (define dloop (- cur-loop (wire-apm-governor-last-cam-loop gov)))
     (define gov-cx (unbox SC2-GOV-LAST-CAM-X))
     (define gov-cy (unbox SC2-GOV-LAST-CAM-Y))
+    (define has-gov-cam? (and (>= (wire-apm-governor-last-cam-loop gov) 0)
+                              (real? gov-cx)
+                              (real? gov-cy)))
+    (define pro-meta (hash-ref SC2-PRO-CAM-JUMP-CMDS c #f))
     (define jump-dist
       (cond
-        [(and (real? gov-cx) (real? gov-cy))
+        [has-gov-cam?
          (pt-dist (sc2-raw-camera-move-x c)
                   (sc2-raw-camera-move-y c)
                   gov-cx
                   gov-cy)]
         [(real? (hash-ref SC2-FRAMING-CAMERA-CMDS c #f))
          (hash-ref SC2-FRAMING-CAMERA-CMDS c)]
+        [(and (vector? pro-meta) (real? (vector-ref pro-meta 2)))
+         (vector-ref pro-meta 2)]
         [else 0.0]))
+    (define base-snap? (and (vector? pro-meta) (vector-ref pro-meta 0)))
+    (define crisis-jump? (and (vector? pro-meta) (vector-ref pro-meta 1)))
+    (define short-non-base-scroll?
+      (and has-gov-cam?
+           pro-meta
+           (not base-snap?)
+           (<= jump-dist SC2-CAMERA-MOVE-DEDUP-DIST)))
     (define needed-cd
-      (if (and (framing-camera-cmd? c) (> jump-dist 10.0)) 6 28))
-    (>= dloop needed-cd))
+      (cond
+        [(and (framing-camera-cmd? c) (> jump-dist 14.0)) 6]
+        [(and crisis-jump? (> jump-dist 14.0)) 6]
+        [(or (framing-camera-cmd? c) pro-meta) 18]
+        [else 28]))
+    (and (not short-non-base-scroll?)
+         (>= dloop needed-cd)))
   (define raw-cmd-list (if (list? raw-cmds) raw-cmds '()))
   (define has-allowed-framing-cam?
     (for/or ([c (in-list raw-cmd-list)])
@@ -19200,6 +20766,11 @@
         (wire-cmd-priority-tier c)))
   (define emitted '())
   (define emitted-set (make-hasheq))
+  (define apm-fail-ht #f)
+  (define (record-step-apm-fail! cmd reason)
+    (unless apm-fail-ht
+      (set! apm-fail-ht (make-hasheq)))
+    (hash-set! apm-fail-ht cmd reason))
   (define (tier-token-floor tier cmd)
     (case tier
       [(0)  (if (or (urgent-survival-cmd? cmd) (opening-worker-split-cmd? cmd)) -4.0 -1.0)]
@@ -19247,13 +20818,30 @@
         (define cost-fl (exact->inexact ev-cost))
         (define tok-floor (tok-floor-fn chosen))
         (define hr-floor (hr-floor-fn chosen))
+        (define dedup-blocked?
+          (or (mode-switch-dedup-drop? chosen)
+              (urgent-combat-dedup-drop? chosen)))
+        (define cap-fail?
+          (and (> ev-cost 0)
+               (< (- rem-headroom cost-fl) hr-floor)))
+        (define tok-fail?
+          (and (> ev-cost 0)
+               (< (- (wire-apm-governor-tokens gov) cost-fl) tok-floor)))
         (define did-emit?
-          (and (not (mode-switch-dedup-drop? chosen))
-               (not (urgent-combat-dedup-drop? chosen))
-               (or (= ev-cost 0)
-                   (and (>= (- rem-headroom cost-fl) hr-floor)
-                        (>= (- (wire-apm-governor-tokens gov) cost-fl) tok-floor)))
-               #t))
+          (and (not dedup-blocked?)
+               (not cap-fail?)
+               (not tok-fail?)))
+        (unless did-emit?
+          (cond
+            [dedup-blocked?
+             (when apm-fail-ht (hash-remove! apm-fail-ht chosen))]
+            [(or cap-fail? tok-fail?)
+             (record-step-apm-fail!
+              chosen
+              (cond
+                [(and cap-fail? tok-fail?) 'both]
+                [cap-fail? 'rolling_hard_cap]
+                [else 'token_bucket]))]))
         (when did-emit?
           (define ms-key (mode-switch-dedup-key chosen))
           (when ms-key
@@ -19377,6 +20965,11 @@
   (when (and (pair? p3-cmds)
              (>= (- cur-loop (hash-ref SC2-GOV-LAST-P3-LOOP gov -1000)) 24))
     (run-cmd-list! p3-cmds (lambda (_) 1.5) (lambda (_) 8.0) #:max-count 1))
+  (define pro-cam-cmds
+    (filter pro-camera-jump-cmd? p2-cmds))
+  (when (and (pair? pro-cam-cmds)
+             (>= (- cur-loop (wire-apm-governor-last-cam-loop gov)) 28))
+    (run-cmd-list! pro-cam-cmds (lambda (_) 0.0) (lambda (_) 4.0) #:max-count 1))
   (define p4-cam-cmds
     (filter sc2-raw-camera-move? (cmds-for-tier 4)))
   (when (and (pair? p4-cam-cmds)
@@ -19390,6 +20983,13 @@
                    (lambda (c) (tier-token-floor tier c))
                    (lambda (_) hr-floor)))
 
+  ;; L59-APM-LOG (`#1562`): Record every candidate command that was NOT emitted specifically due to
+  ;; APM-cap budget (`rolling_hard_cap` / `token_bucket` / `both`), strictly excluding dedup/cooldown!
+  (when apm-fail-ht
+    (for ([(c reason) (in-hash apm-fail-ht)]
+          #:when (not (hash-has-key? emitted-set c)))
+      (record-wire-apm-drop! gov c (eff-cmd-tier c) reason cur-loop)))
+
   ;; W11-P0-3-wire: If APM throttling dropped any WarpGate warp-in command (1413..1419),
   ;; immediately release its client-side cooldown lock so it retries on the next step instead
   ;; of being falsely locked out for 23 seconds!
@@ -19398,7 +20998,8 @@
                     (memv (sc2-raw-unit-command-ability-id c) SC2-WARP-IN-ABILITY-IDS)
                     (not (hash-has-key? emitted-set c))))
     (for ([t (in-list (sc2-raw-unit-command-unit-tags c))])
-      (hash-remove! SC2-WARPGATE-COOLDOWN-UNTIL t)))
+      (hash-remove! SC2-WARPGATE-COOLDOWN-UNTIL t)
+      (hash-remove! SC2-WARPGATE-WARP-START-LOOP t)))
 
   ;; L54-W1: If APM throttling or backoff dropped any Supply Depot lower/raise command (556/558),
   ;; immediately clear SC2-DEPOT-TOGGLE-COOLDOWN so the ramp never locks out for 44 loops!

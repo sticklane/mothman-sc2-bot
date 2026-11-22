@@ -190,7 +190,7 @@
                     (mk-u 203 'supply-depot 42.0 34.0)
                     (mk-u 204 'supply-depot 42.0 36.0)
                     (mk-u 205 'barracks 40.5 36.5 #:addon 'barracks-techlab)
-                    (mk-u 206 'barracks-techlab 43.0 36.0)
+                    (mk-u 206 'barracks-techlab 43.0 36.0 #:order-count 1)
                     (mk-u 207 'factory 38.5 30.5 #:addon 'factory-techlab)
                     (mk-u 208 'factory-techlab 41.0 30.0)
                     (mk-u 209 'starport 38.5 24.5)

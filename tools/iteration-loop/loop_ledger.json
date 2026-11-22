@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter56_ship10_full",
+  "active_wave": "iter57_ship10_full",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -5504,6 +5504,75 @@
           "record": "CORE14 6W-7L-1T (0.70x), EXT78 8W-17L-1T (30.8% WR / 34.6% NL, 0.55x, SB 5.4%), ZvT 5-4-0 (0.88x, PkA 5,644; #25 onlyfans 56/56 Banshees W 2.85x, #16 Rusty W 2.65x, #52 zig-reapers W 2.59x), #10 puck Overseers capped 5(4d), BUT ZvP 1-7-1, ZvZ 2-6-0, 4x SporeCrawler SelfCancel, #73 who ZvP CloakLoss",
           "trade_agg": 0.55,
           "sup_blk": 5.4
+        }
+      }
+    },
+    {
+      "id": "iter57_ship10_full",
+      "status": "UNCONDITIONAL_LIVE_SHIP_10_H2H12_7W_5L_1_21X_UNSEEN12_9W_PROTOSS_11W_0_84X_4RACE_ZIP_SMOKE_4W_0L",
+      "campaign": "Loops 29+ Self-Play, Tactics Arena 3.1 & Expanded Roster Campaign (Loop 57 Live Release #10: commit tppnrnpo 668f47f8, BuildVersion tppnrnpo_22f810ed on all 8 v1+v2 bots)",
+      "loop_self_improvements": [
+        "L57-LOOP-1 (Opponent Draw Strength & Non-Chance Control): Tracking OppPkA and <2k/<1k draw counts alongside 12-game H2H (7W-5L 1.21x/2.66x, all 3 races >=50%) separated true build strength from Ship #9 opponent-draw variance, proving Loop 57 EXT_78 27W sits +2.1 sigma above the 11-run normal-draw band and tied Ship #9 on EXT_75 Non-Chance non-loss rate (41.3%) against a tougher draw.",
+        "L57-LOOP-2 (Inner Arena Pass Trajectory Support for Loop 58+): Added optional arena_passes multi-pass schema tracking (pass0 -> pass1 -> ... -> final with per-track win/trade/spell_verified deltas and scenario regression checks) to log-loop-trajectory.py so Loop 58+ can iterate multiple fast Tactics Arena micro passes without re-running the 84-match roster."
+      ],
+      "spec_summary": "Loop 57 (Live Release #10, commit tppnrnpo 668f47f8, BuildVersion tppnrnpo_22f810ed, live on all 8 v1+v2 AI Arena bots): 96/96 Gate 2B matches plus 4/4 ELF ZIP smoke finished with 0 crashes, 0 faults, 0 wire rejects, and 0 step spikes >=500ms (max 242.3ms). Head-to-head H2H_12 vs Live Release #9 ZIPs (nkxlrsuk_4e7c6f39): 7W-5L-0T (58.3%, 1.21x agg / 2.66x med, PkA 5,929 vs 5,000, SB 3.1%; Protoss 3-1, Terran 2-2, Zerg 2-2). Full roster: ALL_84 32W-48L-4T (38.1% WR / 42.9% NL, 0.74x), EXT_78 27W-47L-4T (34.6% WR / 39.7% NL, 0.66x, SB 3.8%, OppPkA 4,568; +2.1 sigma above 11-run normal-draw band), EXT_75 Non-Chance 27W-44L-4T (41.3% NL, tied Ship #9 on harder draw), CORE14 18W-22L-2T (42.9% WR / 47.6% NL, 0.74x; Creepy 3-0, puck 2-0-1), HIST12 16W-18L-2T (44.4% WR / 50.0% NL, 0.77x), UNSEEN12 9W-25L-2T (25.0% WR / 30.6% NL, 0.60x, sc2ai_protoss 3-0 sweep -- new high), SELF_6 5W-1L-0T (83.3%, 1.58x). Standout race highs: Protoss ALL_84 11W-17L-1T (0.84x) & UNSEEN12 4W-8L-0T (0.81x, up from 0-12 in L56; allNat median 91.4s, <=6m Stalkers +34%, nat_supply 100.0%); Terran TvP 5W-3L-0T (62.5%, 0.98x/2.30x, TvP Nat@ 93.9s, 0 Terran Cloak losses); Zerg ZvP 3W-3L-1T (0.73x), ZvZ 4W-4L-1T (1.20x), and 0 SporeCrawler self-cancel loops across all 96 matches. Structural & watchdog lows: EscrowLock 8, Siege0DPS 8, ProdStall 0, StaleTie 0, SelfCancel 0, CloakLoss 2, sup_cap_min 29.5%, InterferenceMatrix (807) in 5 games, SupplyDepotLowered 501 (+75 H2H), VikingAssault 93 (+23 H2H), and 4-corner N-vs-S parity 1.0pp (NORTH 35.1% vs SOUTH 34.1%). 4-Race ELF ZIP Smoke vs titania: 4W-0L-0T (100.0%, 11.05x agg / 10.79x med, avgStep 8.43ms, max 218.6ms).",
+      "rev": "tppnrnpo 668f47f8 (BuildVersion tppnrnpo_22f810ed, LIVE AI ARENA SHIP #10)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_150542_iter57_ship10_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_150132_iter57_h2h_12",
+      "zip_smoke_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_154149_iter57_ship10_zip_smoke",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter57_ship10_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter57_h2h_12_score.json",
+      "zip_smoke_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter57_ship10_zip_smoke_score.json",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "27W-47L-4T (34.6% WR / 39.7% NL, 0.66x @ OppPkA 4,568; EXT_75 Non-Chance 27W-44L-4T 41.3% NL; CORE14 18W-22L-2T 0.74x, HIST12 16W-18L-2T 50.0% NL 0.77x, UNSEEN12 9W-25L-2T 0.60x; ALL_84 32W-48L-4T 0.74x; SELF_6 5W-1L 1.58x; H2H_12 7W-5L 1.21x; ZIP Smoke 4W-0L 11.05x)",
+      "win_rate_pct": 34.6,
+      "non_loss_pct": 39.7,
+      "core14_wr_pct": 42.9,
+      "hist12_wr_pct": 44.4,
+      "unseen12_wins": 9,
+      "h2h_record": "7W-5L-0T (58.3%, 1.21x agg / 2.66x med; P 3-1, T 2-2, Z 2-2)",
+      "trade_agg": 0.66,
+      "sup_blk_pct": 3.8,
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 5,
+      "prod_placement_stall_matches": 0,
+      "one_base_lockout_matches": 2,
+      "gas_rich_min_starved_matches": 10,
+      "cloaked_unit_damage_losses": 2,
+      "siege_range_zero_dps_losses": 8,
+      "zero_kill_collapse_matches": 5,
+      "stall_watchdog_kpis": {
+        "sup_cap_min_pct": 29.5,
+        "zero_income_matches": 4,
+        "zero_gas_matches": 7,
+        "wk_plateau_8m_pct": 32.8
+      },
+      "base_geometry_kpis": {
+        "pylon_clump_pct": 3.9,
+        "pylon_spacing_nn": 15.3,
+        "nat_supply_pct": 93.3,
+        "protoss_nat_supply_pct": 100.0,
+        "terran_nat_supply_pct": 86.4,
+        "zvz_nat_wall_pct": 12.5,
+        "early_bunkers_4m": 1.32
+      },
+      "by_race": {
+        "Protoss": {
+          "record": "ALL_84 11W-17L-1T (37.9%, 0.84x), EXT78 8W-17L-1T (30.8% WR / 34.6% NL, 0.65x, SB 4.3%), UNSEEN12 4W-8L-0T (33.3%, 0.81x, PkA 3,712), allNat 91.4s (-33.1s vs L56), <=6m Stalkers +34%, nat_supply 100.0%",
+          "trade_agg": 0.65,
+          "sup_blk": 4.3
+        },
+        "Terran": {
+          "record": "ALL_84 12W-15L-1T (42.9% WR / 46.4% NL, 0.78x), EXT78 10W-15L-1T (38.5% WR / 42.3% NL, 0.70x, SB 2.3%), TvP 5W-3L-0T (62.5%, 0.98x/2.30x), TvP Nat@ 93.9s, 0 Terran Cloak losses, InterferenceMatrix 5g, SupplyDepotLowered 501 (+75 H2H), VikingAssault 93 (+23 H2H)",
+          "trade_agg": 0.7,
+          "sup_blk": 2.3
+        },
+        "Zerg": {
+          "record": "ALL_84 9W-16L-2T (33.3% WR / 40.7% NL, 0.60x), EXT78 9W-15L-2T (34.6% WR / 42.3% NL, 0.63x, SB 4.8%), CORE14 7W-6L-1T (50.0% WR / 57.1% NL, 0.81x), ZvP 3W-3L-1T (0.73x; #10 puck W, #58 Creepy W), ZvZ 4W-4L-1T (1.20x), 0 SporeCrawler self-cancel across 96/96",
+          "trade_agg": 0.63,
+          "sup_blk": 4.8
         }
       }
     }

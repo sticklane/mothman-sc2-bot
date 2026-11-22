@@ -731,10 +731,27 @@
                          (>= (safe-real (dyn-hash-ref u 'energy 0.0) 0.0) 50.0)))
          (emit! (list 'cast-spell (dyn-hash-ref u 'id 0) 'spawn-changeling))))
 
-     ;; 2. Assign active Changelings (`12..17`) across body-block, shot-bait & spotter roles
+     ;; 2. Assign active Changelings (`12..17`) across Nydus vision corner (when Nydus Network exists),
+     ;;    body-block, shot-bait & spotter roles
+     (define ally-bldgs (dyn-list (dyn-hash-ref sanitized-obs 'ally-buildings '())))
+     (define has-nydus-network? : Boolean
+       (for/or : Boolean ([b (in-list ally-bldgs)])
+         (and (hash? b)
+              (eq? (dyn-symbol (dyn-hash-ref b 'type 'unknown) 'unknown) 'nydus-network))))
      (define changelings : (Listof Any)
        (if has-ch? (filter changeling-unit? ally-units) '()))
   (unless (null? changelings)
+    ;; Compute dark back corner of enemy Main (`11.0t` past enemy TH away from our base + lateral corner)
+    (define nydus-corner : (Pairof Flonum Flonum)
+      (let* ([dx (- enemy-x base-x)]
+             [dy (- enemy-y base-y)]
+             [dl (max 1.0 (dist2d 0.0 0.0 dx dy))]
+             [ux (/ dx dl)]
+             [uy (/ dy dl)]
+             [px (- uy)]
+             [py ux])
+        (cons (clamp-map-coord (+ enemy-x (* 9.5 ux) (* 6.5 px)))
+              (clamp-map-coord (+ enemy-y (* 9.5 uy) (* 6.5 py))))))
     (define enemy-chokes : (Listof (Pairof Flonum Flonum))
       (let ([raw-chokes (dyn-list (dyn-hash-ref sanitized-obs 'enemy-chokes '()))]
             [eramp (point->pair (dyn-hash-ref sanitized-obs 'enemy-ramp #f)
@@ -769,18 +786,26 @@
       (define cid (dyn-hash-ref c 'id 0))
       (define cx (safe-real (dyn-hash-ref c 'x base-x) base-x))
       (define cy (safe-real (dyn-hash-ref c 'y base-y) base-y))
+      (define eff-ci (if has-nydus-network? (- ci 1) ci))
       (cond
-        [(< ci n-chokes)
+        [(and has-nydus-network? (= ci 0))
+         ;; `'nydus-vision-corner`: hold dark back corner of enemy Main for vision-verified Nydus Worm!
+         (define ncx (car nydus-corner))
+         (define ncy (cdr nydus-corner))
+         (if (<= (dist2d cx cy ncx ncy) 2.0)
+             (emit! (list 'hold-position cid))
+             (emit! (list 'move cid ncx ncy)))]
+        [(< eff-ci n-chokes)
          ;; `'ramp-body-block`
-         (define choke-pt (list-ref enemy-chokes ci))
+         (define choke-pt (list-ref enemy-chokes eff-ci))
          (define kx (car choke-pt))
          (define ky (cdr choke-pt))
          (if (<= (dist2d cx cy kx ky) 1.2)
              (emit! (list 'hold-position cid))
              (emit! (list 'move cid kx ky)))]
-        [(< (- ci n-chokes) n-heavy)
+        [(< (- eff-ci n-chokes) n-heavy)
          ;; `'shot-bait-distractor` (`6.0-8.5` tiles in front of heavy enemy unit)
-         (define he (list-ref heavy-enemies (- ci n-chokes)))
+         (define he (list-ref heavy-enemies (- eff-ci n-chokes)))
          (define hx (safe-real (dyn-hash-ref he 'x enemy-x) enemy-x))
          (define hy (safe-real (dyn-hash-ref he 'y enemy-y) enemy-y))
          (define vx (- cx hx))
@@ -798,7 +823,7 @@
          (emit! (list 'move cid bait-x bait-y))]
         [else
          ;; `'expansion-spotter`
-         (define spot (list-ref exp-spots (modulo (- ci n-chokes n-heavy) n-spots)))
+         (define spot (list-ref exp-spots (modulo (- eff-ci n-chokes n-heavy) n-spots)))
          (emit! (list 'move cid (car spot) (cdr spot)))])))
 
   (reverse actions)]))

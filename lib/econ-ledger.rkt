@@ -4134,10 +4134,16 @@
                protoss-shields-2 protoss-shields-3)
               (and (ready-bldg-has? 'forge)
                    (ready-bldg-has? 'twilight-council))]
-             [(protoss-air-weapons-1 protoss-air-armor-1 protoss-air-armors-1) has-core?]
+             [(protoss-air-weapons-1 protoss-air-armor-1 protoss-air-armors-1)
+              (and has-core?
+                   has-stargate-ready?
+                   (>= (unit-ht-count '(void-ray carrier tempest phoenix oracle)) 3))]
              [(protoss-air-weapons-2 protoss-air-armor-2 protoss-air-armors-2
                protoss-air-weapons-3 protoss-air-armor-3 protoss-air-armors-3)
-              (and has-core? (ready-bldg-has? 'fleet-beacon))]
+              (and has-core?
+                   has-stargate-ready?
+                   (ready-bldg-has? 'fleet-beacon)
+                   (>= (unit-ht-count '(void-ray carrier tempest phoenix oracle)) 3))]
              [else (ready-bldg-has? 'forge)])
            #t))
      (define protoss-second-upg-sym
@@ -6802,7 +6808,9 @@
           protoss-ground-weapons-2 protoss-ground-armor-2
           protoss-ground-weapons-3 protoss-ground-armor-3
           protoss-shields-1 protoss-shields-2 protoss-shields-3)
-        (if (or has-air-fleet? (hash-ref attrs 'capital-air? #f) (> (hash-ref attrs 'air-pct 0.0) 0.25))
+        ;; L58: Gate Protoss air upgrades strictly on OUR air fleet (`stargate >= 1` & `>= 3` air ships),
+        ;; never on enemy `air-pct` alone with 0 Stargates!
+        (if has-air-fleet?
             '(protoss-air-weapons-1 protoss-air-armor-1
               protoss-air-weapons-2 protoss-air-armor-2
               protoss-air-weapons-3 protoss-air-armor-3)
@@ -6885,14 +6893,18 @@
       [(Terran) 'engineering-bay]
       [else 'forge]))
   (define has-air-fleet?
-    (> (+ (hash-ref ally-u 'corruptor 0)
-          (hash-ref ally-u 'mutalisk 0)
-          (hash-ref ally-u 'viking-fighter 0)
-          (hash-ref ally-u 'liberator 0)
-          (hash-ref ally-u 'void-ray 0)
-          (hash-ref ally-u 'tempest 0)
-          (hash-ref ally-u 'carrier 0))
-       2))
+    (and (or (not (eq? race 'Protoss))
+             (> (hash-ref ally-b 'stargate 0) 0))
+         (> (+ (hash-ref ally-u 'corruptor 0)
+               (hash-ref ally-u 'mutalisk 0)
+               (hash-ref ally-u 'viking-fighter 0)
+               (hash-ref ally-u 'liberator 0)
+               (hash-ref ally-u 'void-ray 0)
+               (hash-ref ally-u 'tempest 0)
+               (hash-ref ally-u 'carrier 0)
+               (hash-ref ally-u 'phoenix 0)
+               (hash-ref ally-u 'oracle 0))
+            2)))
   (define has-robo-or-colossus?
     (or (> (hash-ref ally-u 'colossus 0) 0)
         (> (hash-ref ally-b 'robotics-bay 0) 0)))
@@ -8346,7 +8358,8 @@
        [(protoss-air-weapons-1 protoss-air-armor-1
          protoss-air-weapons-2 protoss-air-armor-2
          protoss-air-weapons-3 protoss-air-armor-3)
-        (>= air-ships 2)]
+        (and (>= (bc 'stargate) 1)
+             (>= air-ships 3))]
        [(charge)
         (or (>= zealots 3) (and (>= gateways 3) (>= ground-army 3)))]
        [(blink) (>= stalkers 3)]

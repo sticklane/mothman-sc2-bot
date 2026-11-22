@@ -2137,6 +2137,7 @@
  make-burrow-dodge-tracker
  execute-zerg-reactive-burrow-dodge-micro
  execute-stationary-detection-ring-ambush-micro
+ plan-burrowed-baneling-landmine-micro
  (struct-out CounterBurrowPlan)
  plan-counter-burrow-response
  plan-burrowed-zergling-expansion-blocks
@@ -2262,6 +2263,9 @@
                          (memq (dyn-hash-ref u 'type 'unknown) '(roach roach-burrowed))))
          (define uid (dyn-hash-ref u 'id 0))
          (define burrowed? (zerg-unit-burrowed? u 'roach-burrowed))
+         (define cur-ab (safe-exact-int (dyn-hash-ref u 'order-ability-id 0) 0))
+         (define mid-burrow-transition?
+           (not (not (memv cur-ab '(1386 1388 3661 3662)))))
          (define hp (max 1.0 (safe-real (dyn-hash-ref u 'hp 145.0) 145.0)))
          (define max-hp (max 1.0 (safe-real (dyn-hash-ref u 'max-hp 145.0) 145.0)))
          (define hp-pct (/ hp max-hp))
@@ -2269,6 +2273,7 @@
          (define uy (safe-real (dyn-hash-ref u 'y base-y) base-y))
          (define-values (nearest-e dist-e) (nearest-enemy-and-dist ux uy enemy-units))
          (cond
+           [mid-burrow-transition? (void)]
            [(and (not burrowed?)
                  (<= hp-pct SC2-ROACH-BURROW-HP-PCT-THRESH)
                  (<= dist-e 12.0))
@@ -2293,7 +2298,7 @@
                     (values base-x base-y)))
               (emit! (list 'roach-tunnel-move uid kx ky)))]
            [(and burrowed? (>= hp-pct SC2-ROACH-UNBURROW-HP-PCT-THRESH))
-            (emit! (list 'burrow-up uid 'roach-healed-reengage))])))
+            (emit! (list 'burrow-up uid 'roach-healed-reengage 1388))])))
      (reverse actions)]))
 
 ;; Burrowed Infestor movement, cast & escape micro:
@@ -3694,3 +3699,87 @@
   (fast-plan-avoid-siege-tank-and-lurker-splash-zones
    ally-units enemy-units effects hx hy
    commit-through-splash? enemy-upgrades tactical-disposition lr))
+
+;; L58-P1 (`sc2-brw-u03`): Burrowed Baneling (`baneling-burrowed`, type 115) landmine micro.
+;; NEVER emits `attack-unit` (`23`, rejected `2:NotSupported` on burrowed Banelings!):
+;; - Detonates (`baneling-explode` = `42`) when >= 2 enemy ground combat/worker units are
+;;   within `2.45t` splash radius, or >= 1 enemy ground unit is within `1.85t`.
+;; - Unburrows (`burrow-up uid 'baneling-landmine-unburrow 1376`) when revealed/damaged
+;;   while enemy ground is within `7.5t`, OR when >= 3 enemy ground units are stalled in
+;;   `2.45..5.0t` fighting friendly units and not walking closer.
+;; - Otherwise holds silent stealth underground.
+(: plan-burrowed-baneling-landmine-micro
+   (->* ((Listof Any) (Listof Any))
+        (#:ally-combat-units (Listof Any))
+        (Listof (Listof Any))))
+(define (plan-burrowed-baneling-landmine-micro ally-units enemy-units
+                                               #:ally-combat-units [ally-combat-units '()])
+  (define burrowed-banes : (Listof Any)
+    (for/list : (Listof Any) ([u (in-list ally-units)]
+                              #:when (and (hash? u)
+                                          (eq? (dyn-hash-ref u 'type 'unknown) 'baneling-burrowed)))
+      u))
+  (cond
+    [(null? burrowed-banes) '()]
+    [else
+     (define ground-enemies : (Listof Any)
+       (for/list : (Listof Any) ([e (in-list enemy-units)]
+                                 #:when (and (hash? e)
+                                             (not (eq? (dyn-hash-ref e 'snapshot? #f) #t))
+                                             (not (eq? (dyn-hash-ref e 'flying? #f) #t))
+                                             (not (eq? (dyn-hash-ref e 'is-flying #f) #t))
+                                             (not (eq? (dyn-hash-ref e 'structure? #f) #t))
+                                             (not (memq (dyn-hash-ref e 'type 'unknown)
+                                                        '(larva egg changeling changeling-zealot
+                                                          changeling-zergling changeling-marine
+                                                          medivac warp-prism overlord overseer
+                                                          observer banshee mutalisk phoenix
+                                                          void-ray carrier battlecruiser viking-fighter
+                                                          corruptor brood-lord liberator liberator-ag
+                                                          raven oracle tempest mothership viper)))))
+         e))
+     (define actions : (Listof (Listof Any)) '())
+     (for ([u (in-list burrowed-banes)])
+       (define uid (dyn-hash-ref u 'id 0))
+       (when (and (exact-integer? uid) (> uid 0))
+         (define ux (safe-real (dyn-hash-ref u 'x 0.0) 0.0))
+         (define uy (safe-real (dyn-hash-ref u 'y 0.0) 0.0))
+         (define hp (safe-real (dyn-hash-ref u 'hp 30.0) 30.0))
+         (define max-hp (max 1.0 (safe-real (dyn-hash-ref u 'max-hp 30.0) 30.0)))
+         (define cloak-v (dyn-hash-ref u 'cloak #f))
+         (define revealed-or-hurt?
+           (or (eqv? cloak-v 2)
+               (eq? cloak-v 'cloaked-detected)
+               (eq? (dyn-hash-ref u 'detected? #f) #t)
+               (< hp (* 0.95 max-hp))))
+         (define-values (cnt-1.85 cnt-2.45 cnt-5.0 min-d)
+           (for/fold ([c1 : Integer 0]
+                      [c2 : Integer 0]
+                      [c5 : Integer 0]
+                      [md : Flonum 999.0])
+                     ([e (in-list ground-enemies)])
+             (define ex (safe-real (dyn-hash-ref e 'x 9999.0) 9999.0))
+             (define ey (safe-real (dyn-hash-ref e 'y 9999.0) 9999.0))
+             (define d (dist2d ux uy ex ey))
+             (values (if (<= d 1.85) (+ c1 1) c1)
+                     (if (<= d 2.45) (+ c2 1) c2)
+                     (if (<= d 5.0) (+ c5 1) c5)
+                     (if (< d md) d md))))
+         (define friendly-fighting-near?
+           (and (>= cnt-5.0 3)
+                (for/or : Boolean ([a (in-list ally-combat-units)])
+                  (and (hash? a)
+                       (not (eq? (dyn-hash-ref a 'type 'unknown) 'baneling-burrowed))
+                       (<= (dist2d ux uy
+                                   (safe-real (dyn-hash-ref a 'x 9999.0) 9999.0)
+                                   (safe-real (dyn-hash-ref a 'y 9999.0) 9999.0))
+                           6.0)))))
+         (cond
+           [(or (>= cnt-2.45 2) (>= cnt-1.85 1))
+            (set! actions (cons (list 'baneling-explode uid) actions))]
+           [(and revealed-or-hurt? (<= min-d 7.5))
+            (set! actions (cons (list 'burrow-up uid 'baneling-landmine-unburrow 1376) actions))]
+           [(and friendly-fighting-near? (<= min-d 4.8))
+            (set! actions (cons (list 'burrow-up uid 'baneling-landmine-unburrow 1376) actions))]
+           [else (void)])))
+     (reverse actions)]))

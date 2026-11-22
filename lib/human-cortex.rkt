@@ -100,8 +100,8 @@
 (define (make-human-cortex #:profile [profile 'Serral]
                            #:cam-x [cam-x 32.0]
                            #:cam-y [cam-y 32.0]
-                           #:epm-cap [epm-cap 360]
-                           #:max-tokens [max-tokens 48])
+                           #:epm-cap [epm-cap 420]
+                           #:max-tokens [max-tokens 56])
   (human-cortex
    profile
    cam-x
@@ -733,8 +733,46 @@
     (cortex-move-camera! cortex (car pos) (cdr pos)))
   pos)
 
+(define CORTEX-TOWNHALL-SYMS
+  '(nexus command-center orbital-command planetary-fortress
+    hatchery lair hive
+    command-center-flying orbital-command-flying))
+
+(define (cortex-extract-owned-townhall-pts obs bx by)
+  (define bldgs (hash-ref obs 'ally-buildings '()))
+  (define raw-ths
+    (for/list ([b (in-list (if (list? bldgs) bldgs '()))]
+               #:when (and (hash? b)
+                           (let ([t (hash-ref b 'type #f)])
+                             (memq (if (symbol? t)
+                                       t
+                                       (if (string? t)
+                                           (string->symbol (string-downcase t))
+                                           #f))
+                                   CORTEX-TOWNHALL-SYMS))
+                           (let ([hp (hash-ref b 'hp 100.0)])
+                             (or (not (real? hp)) (> hp 0.0)))
+                           (real? (hash-ref b 'x #f))
+                           (real? (hash-ref b 'y #f))))
+      (cons (exact->inexact (hash-ref b 'x))
+            (exact->inexact (hash-ref b 'y)))))
+  (define sorted
+    (sort raw-ths
+          (lambda (a b)
+            (< (+ (sqr (- (car a) bx)) (sqr (- (cdr a) by)))
+               (+ (sqr (- (car b) bx)) (sqr (- (cdr b) by)))))))
+  ;; Deduplicate stacked/rebuilt townhall coords within 2.0t
+  (reverse
+   (for/fold ([acc '()]) ([pt (in-list sorted)])
+     (if (for/or ([prev (in-list acc)])
+           (< (+ (sqr (- (car pt) (car prev))) (sqr (- (cdr pt) (cdr prev)))) 4.0))
+         acc
+         (cons pt acc)))))
+
 ;; Synchronize all 8 pro camera bookmarks (F1..F8 = slots 1..8) with drift gating
-;; (`>= SC2-BOOKMARK-DRIFT-UPDATE-DIST` tiles) so bookmarks are only saved when needed.
+;; (`>= SC2-BOOKMARK-DRIFT-UPDATE-DIST` tiles). Slots F1..Fk are strictly centered
+;; on our owned townhalls (Main -> Natural -> 3rd -> 4th -> ...), with remaining
+;; slots bound to expansion/rally/combat-front anchors matching pro SC2 usage.
 (define (cortex-sync-camera-bookmarks! cortex obs-or-alist)
   (define slot-coords-alist
     (if (hash? obs-or-alist)
@@ -755,15 +793,39 @@
                [stage-y (* 0.5 (+ ny ey))]
                [e-units (hash-ref obs 'enemy-units '())]
                [arena-x (if (pair? e-units) (hash-ref (car e-units) 'x stage-x) stage-x)]
-               [arena-y (if (pair? e-units) (hash-ref (car e-units) 'y stage-y) stage-y)])
-          (list (list 1 bx by)
-                (list 2 nx ny)
-                (list 3 tx ty)
-                (list 4 ramp-x ramp-y)
-                (list 5 stage-x stage-y)
-                (list 6 arena-x arena-y)
-                (list 7 eex eey)
-                (list 8 ex ey)))
+               [arena-y (if (pair? e-units) (hash-ref (car e-units) 'y stage-y) stage-y)]
+               [owned-ths (cortex-extract-owned-townhall-pts obs bx by)]
+               [n-ths (min SC2-CAMERA-BOOKMARK-COUNT (length owned-ths))]
+               [defaults
+                (vector (cons bx by)           ;; slot 1 fallback: Main
+                        (cons nx ny)           ;; slot 2 fallback: Natural
+                        (cons tx ty)           ;; slot 3 fallback: 3rd
+                        (cons ramp-x ramp-y)   ;; slot 4 fallback: Ramp / Rally
+                        (cons stage-x stage-y) ;; slot 5 fallback: Primary Combat Front
+                        (cons arena-x arena-y) ;; slot 6 fallback: Active Arena Front
+                        (cons eex eey)         ;; slot 7 fallback: Enemy Expansion
+                        (cons ex ey))])        ;; slot 8 fallback: Enemy Main
+          (cond
+            [(= n-ths 0)
+             (for/list ([i (in-range SC2-CAMERA-BOOKMARK-COUNT)])
+               (define pt (vector-ref defaults i))
+               (list (add1 i) (car pt) (cdr pt)))]
+            [(<= n-ths 4)
+             ;; F1..Fn strictly on owned townhalls; remaining slots up to F8 keep
+             ;; natural/3rd/ramp defaults and F5=Combat Front, F6=Arena, F7=EnemyExp, F8=EnemyMain
+             (for/list ([i (in-range SC2-CAMERA-BOOKMARK-COUNT)])
+               (define pt (if (< i n-ths) (list-ref owned-ths i) (vector-ref defaults i)))
+               (list (add1 i) (car pt) (cdr pt)))]
+            [else
+             ;; 5..8 owned townhalls: F1..Fn strictly on owned townhalls, remaining slots
+             ;; fill with Primary Combat Front -> Arena -> Enemy Exp
+             (define extra-front (list (cons stage-x stage-y) (cons arena-x arena-y) (cons eex eey)))
+             (for/list ([i (in-range SC2-CAMERA-BOOKMARK-COUNT)])
+               (define pt
+                 (if (< i n-ths)
+                     (list-ref owned-ths i)
+                     (list-ref extra-front (min (- (length extra-front) 1) (- i n-ths)))))
+               (list (add1 i) (car pt) (cdr pt)))]))
         obs-or-alist))
   (define actions '())
   (for ([entry (in-list (if (list? slot-coords-alist) slot-coords-alist '()))])

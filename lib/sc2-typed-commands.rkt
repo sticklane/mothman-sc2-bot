@@ -101,6 +101,7 @@
  (struct-out BotBuildNydusWorm)
  (struct-out BotExpand)
  (struct-out BotTrain)
+ (struct-out BotWarpIn)
  (struct-out BotResearch)
  (struct-out BotMorph)
  (struct-out BotCastSelf)
@@ -1035,6 +1036,13 @@
    [ability : (U NoTargetAbility PointTargetAbility)])
   #:transparent)
 
+(struct BotWarpIn
+  ([producer-id : (Option Positive-Integer)]
+   [unit : Symbol]
+   [ability : PointTargetAbility]
+   [target : WorldPoint2D])
+  #:transparent)
+
 (struct BotResearch
   ([upgrade : Symbol]
    [ability : NoTargetAbility])
@@ -1153,6 +1161,7 @@
      BotBuildNydusWorm
      BotExpand
      BotTrain
+     BotWarpIn
      BotResearch
      BotMorph
      BotCastSelf
@@ -1180,6 +1189,7 @@
       (BotBuildNydusWorm? v)
       (BotExpand? v)
       (BotTrain? v)
+      (BotWarpIn? v)
       (BotResearch? v)
       (BotMorph? v)
       (BotCastSelf? v)
@@ -2031,7 +2041,7 @@
              [else (BotExpand th pt)])]
           [else (BotActionReject 'invalid-expand-arity raw)])]
 
-       ;; 3. Train (`train <unit-sym>` or `train-unit <prod-id> <unit-sym>`)
+       ;; 3. Train (`train <unit-sym>`, `train-unit <prod-id> <unit-sym>`, or targeted `train-unit <wg-id> <unit-sym> <x> <y>`)
        [(or (eq? head 'train) (eq? head 'train-unit))
         (cond
           [(and (eq? head 'train) (= nargs 1))
@@ -2054,6 +2064,51 @@
              [(not pid) (BotActionReject 'invalid-producer-tag raw)]
              [(not (and usym tab)) (BotActionReject 'unknown-train-unit raw)]
              [else (BotTrain pid usym tab)])]
+          [(and (eq? head 'train-unit) (= nargs 4))
+           (define pid (extract-unit-tag (car args)))
+           (define usym (extract-norm-symbol (cadr args)))
+           (define pt (extract-world-point2d (caddr args) (cadddr args)))
+           (define wid : (Option Positive-Integer)
+             (case usym
+               [(zealot) 1413] [(stalker) 1414] [(high-templar) 1416]
+               [(dark-templar) 1417] [(sentry) 1418] [(adept) 1419]
+               [else #f]))
+           (define wab (and wid (lookup-point-target-ability wid)))
+           (cond
+             [(not pid) (BotActionReject 'invalid-producer-tag raw)]
+             [(not (and usym wab)) (BotActionReject 'unknown-train-unit raw)]
+             [(not pt) (BotActionReject 'invalid-world-point raw)]
+             [else (BotWarpIn pid usym wab pt)])]
+          [else (BotActionReject 'invalid-train-arity raw)])]
+
+       ;; 3b. Targeted Warp-In (`warp-in <unit-sym> <x> <y>` or `warp-in <wg-id> <unit-sym> <x> <y>`)
+       [(eq? head 'warp-in)
+        (define (lookup-warp-ab [usym : (Option Symbol)]) : (Option PointTargetAbility)
+          (define wid : (Option Positive-Integer)
+            (case usym
+              [(zealot) 1413] [(stalker) 1414] [(high-templar) 1416]
+              [(dark-templar) 1417] [(sentry) 1418] [(adept) 1419]
+              [else #f]))
+          (and wid (lookup-point-target-ability wid)))
+        (cond
+          [(= nargs 3)
+           (define usym (extract-norm-symbol (car args)))
+           (define pt (extract-world-point2d (cadr args) (caddr args)))
+           (define wab (lookup-warp-ab usym))
+           (cond
+             [(not (and usym wab)) (BotActionReject 'unknown-train-unit raw)]
+             [(not pt) (BotActionReject 'invalid-world-point raw)]
+             [else (BotWarpIn #f usym wab pt)])]
+          [(= nargs 4)
+           (define pid (extract-unit-tag (car args)))
+           (define usym (extract-norm-symbol (cadr args)))
+           (define pt (extract-world-point2d (caddr args) (cadddr args)))
+           (define wab (lookup-warp-ab usym))
+           (cond
+             [(not pid) (BotActionReject 'invalid-producer-tag raw)]
+             [(not (and usym wab)) (BotActionReject 'unknown-train-unit raw)]
+             [(not pt) (BotActionReject 'invalid-world-point raw)]
+             [else (BotWarpIn pid usym wab pt)])]
           [else (BotActionReject 'invalid-train-arity raw)])]
 
        ;; 4. Research (`research <upg-sym>`)
@@ -2259,15 +2314,16 @@
                (BotCancelBuilding uid)
                (BotActionReject 'invalid-actor-tags raw))])]
 
-       [(or (eq? head 'burrow-down) (eq? head 'burrow-up))
+       [(memq head '(burrow burrow-down unburrow burrow-up))
         (cond
           [(< nargs 1) (BotActionReject 'invalid-burrow-arity raw)]
           [else
            (define actors (extract-actor-tags (car args)))
-           (define ab-id : Positive-Integer (if (eq? head 'burrow-down) 3661 3662))
+           (define down? (or (eq? head 'burrow) (eq? head 'burrow-down)))
+           (define ab-id : Positive-Integer (if down? 3661 3662))
            (define ab (lookup-no-target-ability ab-id))
            (if (and actors ab)
-               (BotModeSwitch head actors ab)
+               (BotModeSwitch (if down? 'burrow-down 'burrow-up) actors ab)
                (BotActionReject 'invalid-actor-tags raw))])]
 
        ;; 11. Harvest & Resume Building (`harvest`, `harvest-mineral`, `harvest-gas`, `rebalance-gas-to-minerals`, `resume-halted-building`)
@@ -2374,7 +2430,7 @@
              [else (BotTransportAction 'transport-juggle tr-id #f pt)])]
           [else (BotActionReject 'invalid-transport-arity raw)])]
 
-       [(memq head '(transport-pickup load load-unit bunker-load nydus-load))
+       [(memq head '(transport-pickup load load-unit load-transport bunker-load nydus-load))
         (cond
           [(not (= nargs 2)) (BotActionReject 'invalid-transport-arity raw)]
           [else
@@ -2439,7 +2495,8 @@
                (BotModeSwitch head actors ab)
                (BotActionReject 'invalid-actor-tags raw))])]
 
-       [(memq head '(purification-nova locust-swoop spine-crawler-root spore-crawler-root root))
+       [(memq head '(purification-nova locust-swoop spine-crawler-root spore-crawler-root root
+                     stasis-ward oracle-stasis-ward build-stasis-trap))
         (cond
           [(not (= nargs 3)) (BotActionReject 'point-spell-requires-xy raw)]
           [else
@@ -2451,15 +2508,21 @@
                [(eq? head 'locust-swoop) 2387]
                [(eq? head 'spine-crawler-root) 1729]
                [(eq? head 'spore-crawler-root) 1731]
+               [(memq head '(stasis-ward oracle-stasis-ward build-stasis-trap)) 2505]
                [else 3680]))
+           (define canon-head : Symbol
+             (if (memq head '(stasis-ward oracle-stasis-ward build-stasis-trap))
+                 'stasis-ward
+                 head))
            (define pab (lookup-point-target-ability ab-id))
            (cond
              [(not actors) (BotActionReject 'invalid-actor-tags raw)]
              [(not pt) (BotActionReject 'invalid-world-point raw)]
              [(not pab) (BotActionReject 'internal-ability-missing raw)]
-             [else (BotCastPoint actors head pab pt)])])]
+             [else (BotCastPoint actors canon-head pab pt)])])]
 
-       [(memq head '(repair widow-mine-retarget shield-battery-restore shield-battery-recharge))
+       [(memq head '(repair widow-mine-retarget shield-battery-restore shield-battery-recharge
+                     nexus-energy-recharge energy-recharge))
         (cond
           [(not (= nargs 2)) (BotActionReject 'unit-spell-requires-unit-tag raw)]
           [else
@@ -2469,6 +2532,7 @@
              (cond
                [(eq? head 'repair) 3685]
                [(eq? head 'widow-mine-retarget) 2099]
+               [(memq head '(nexus-energy-recharge energy-recharge)) 4126]
                [else 4113]))
            (define uab (lookup-unit-target-ability ab-id))
            (cond
@@ -2732,6 +2796,12 @@
      (if pid
          (list 'train-unit pid (BotTrain-unit act))
          (list 'train (BotTrain-unit act)))]
+    [(BotWarpIn? act)
+     (define pid (BotWarpIn-producer-id act))
+     (define pt (BotWarpIn-target act))
+     (if pid
+         (list 'warp-in pid (BotWarpIn-unit act) (WorldPoint2D-x pt) (WorldPoint2D-y pt))
+         (list 'warp-in (BotWarpIn-unit act) (WorldPoint2D-x pt) (WorldPoint2D-y pt)))]
     [(BotResearch? act)
      (list 'research (BotResearch-upgrade act))]
     [(BotMorph? act)
@@ -2895,13 +2965,28 @@
 (: sanitize-validated-sexp (-> Any TypedBotAction Any))
 (define (sanitize-validated-sexp raw parsed)
   (cond
-    ;; Strip legacy dummy args on self-cast spells and canonicalize raw `381` -> `'emp-round`
+    ;; Strip legacy dummy args on self-cast spells and canonicalize aliased/integer point & unit spells
     [(BotCastSelf? parsed)
      (typed-bot-action->sexp parsed)]
     [(and (BotCastPoint? parsed)
           (pair? raw) (list? raw) (>= (length raw) 3)
-          (exact-integer? (cadr (cdr raw))))
-     ;; Raw integer spell `381` was passed; emit canonical `'emp-round` symbol (`1628`)
+          (let ([hd (car raw)]
+                [raw-sp (cadr (cdr raw))])
+            (or (exact-integer? raw-sp)
+                (and (memq hd '(cast cast-spell))
+                     (not (eq? raw-sp (BotCastPoint-spell parsed)))))))
+     ;; Canonicalize raw integer spells (e.g. `381` -> `'emp-round`) and aliased point spells
+     ;; (e.g. `'forcefield` -> `'force-field`, `'revelation` -> `'oracle-revelation`)
+     (typed-bot-action->sexp parsed)]
+    [(and (BotCastUnit? parsed)
+          (pair? raw) (list? raw) (>= (length raw) 3)
+          (memq (car raw) '(cast cast-spell))
+          (not (eq? (cadr (cdr raw)) (BotCastUnit-spell parsed))))
+     ;; Canonicalize aliased unit spells (e.g. `'effect-repair` -> `'repair` 3685)
+     (typed-bot-action->sexp parsed)]
+    [(and (BotAttackPos? parsed)
+          (pair? raw) (eq? (car raw) 'attack))
+     ;; Canonicalize 3-arg `(attack uid x y)` -> `(attack-pos uid x y)` so wire never drops it!
      (typed-bot-action->sexp parsed)]
     [else raw]))
 

@@ -381,7 +381,42 @@ def summarize_tactics_json(path_str: Optional[str]) -> Dict[str, Any]:
     wall_ms = d.get("total_wall_ms") or d.get("sc2_duel_wall_ms") or s.get("total_wall_ms")
     by_tier = s.get("by_tier") or {}
     econ = by_tier.get("econ-harass") or {}
-    return {
+
+    tr_vals = sorted(
+        float(sc.get("trade_ratio"))
+        for sc in scens
+        if isinstance(sc, dict) and sc.get("trade_ratio") is not None
+    )
+    if s.get("median_trade_ratio") is not None:
+        trade_med: Optional[float] = round(float(s["median_trade_ratio"]), 2)
+    elif tr_vals:
+        mid = len(tr_vals) // 2
+        med = tr_vals[mid] if len(tr_vals) % 2 == 1 else (tr_vals[mid - 1] + tr_vals[mid]) / 2.0
+        trade_med = round(med, 2)
+    else:
+        trade_med = None
+
+    spell_expected_scens = [
+        sc
+        for sc in scens
+        if isinstance(sc, dict)
+        and (bool(sc.get("expected_abilities")) or sc.get("spell_verified") is not None)
+    ]
+    if s.get("spell_expected_count") is not None:
+        spell_expected: Optional[int] = int(s["spell_expected_count"])
+    elif spell_expected_scens:
+        spell_expected = len(spell_expected_scens)
+    else:
+        spell_expected = None
+
+    if s.get("spell_verified_count") is not None:
+        spell_verified: Optional[int] = int(s["spell_verified_count"])
+    elif spell_expected_scens:
+        spell_verified = sum(1 for sc in spell_expected_scens if sc.get("spell_verified") is True)
+    else:
+        spell_verified = None
+
+    out: Dict[str, Any] = {
         "total": int(s.get("total") or len(scens)),
         "w": int(s.get("mothman_wins") if s.get("mothman_wins") is not None else s.get("wins") or 0),
         "l": int(s.get("p2_wins") if s.get("p2_wins") is not None else s.get("losses") or 0),
@@ -392,6 +427,252 @@ def summarize_tactics_json(path_str: Optional[str]) -> Dict[str, Any]:
         "wall_sec": round(float(wall_ms) / 1000.0, 1) if wall_ms is not None else None,
         "record_str": s.get("record_str"),
     }
+    if trade_med is not None:
+        out["trade_med"] = trade_med
+    if spell_expected is not None:
+        out["spell_expected"] = spell_expected
+        out["spell_verified"] = spell_verified if spell_verified is not None else 0
+    if s.get("total_spell_unit_cmds") is not None:
+        out["spell_unit_cmds"] = int(s["total_spell_unit_cmds"])
+    return out
+
+
+def _load_tactics_scenarios(path_str: Optional[str]) -> Dict[str, Dict[str, Any]]:
+    """Load per-scenario outcomes indexed by scenario id for pass-to-pass diffing."""
+    if not path_str:
+        return {}
+    p = Path(path_str)
+    if not p.is_file():
+        return {}
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for sc in d.get("scenarios") or []:
+        if isinstance(sc, dict) and sc.get("id"):
+            out[str(sc["id"])] = sc
+    return out
+
+
+def _arena_winner_rank(sc: Dict[str, Any]) -> Optional[int]:
+    """Map scenario outcome to ordered rank: win=2, draw=1, loss=0."""
+    w = str(sc.get("winner") or "").strip().lower()
+    if w in ("mothman", "p1", "win", "player1"):
+        return 2
+    if w in ("draw", "tie", "timeout"):
+        return 1
+    if w in ("p2", "opponent", "dummy", "loss", "player2"):
+        return 0
+    if sc.get("passed") is True:
+        return 2
+    if sc.get("passed") is False:
+        return 0
+    return None
+
+
+def _compare_arena_scenarios(
+    base_scens: Dict[str, Dict[str, Any]],
+    cur_scens: Dict[str, Dict[str, Any]],
+) -> Dict[str, List[str]]:
+    """Compare overlapping scenario IDs across two Arena passes."""
+    improved: List[str] = []
+    regressed: List[str] = []
+    spell_gained: List[str] = []
+    spell_lost: List[str] = []
+    for sid in sorted(set(base_scens.keys()) & set(cur_scens.keys())):
+        b_sc = base_scens[sid]
+        c_sc = cur_scens[sid]
+        b_rank = _arena_winner_rank(b_sc)
+        c_rank = _arena_winner_rank(c_sc)
+        if b_rank is not None and c_rank is not None:
+            if c_rank > b_rank:
+                improved.append(sid)
+            elif c_rank < b_rank:
+                regressed.append(sid)
+        b_sv = b_sc.get("spell_verified")
+        c_sv = c_sc.get("spell_verified")
+        if b_sv is False and c_sv is True:
+            spell_gained.append(sid)
+        elif b_sv is True and c_sv is False:
+            spell_lost.append(sid)
+    return {
+        "improved_ids": improved,
+        "regressed_ids": regressed,
+        "spell_gained_ids": spell_gained,
+        "spell_lost_ids": spell_lost,
+    }
+
+
+def summarize_arena_passes(raw_passes: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """
+    Normalize optional inner Tactics Arena pass entries (`pass0 -> pass1 -> ...`)
+    from loop_ledger.json into compact trajectory records with pass-over-pass and
+    cumulative vs-pass0 deltas per `(opponent, suite, category)` track.
+    """
+    if not raw_passes or not isinstance(raw_passes, list):
+        return []
+
+    out: List[Dict[str, Any]] = []
+    track_pass0: Dict[Tuple[str, str, str], Tuple[Dict[str, Any], Dict[str, Dict[str, Any]]]] = {}
+    track_prev: Dict[Tuple[str, str, str], Tuple[Dict[str, Any], Dict[str, Dict[str, Any]]]] = {}
+
+    for idx, raw in enumerate(raw_passes):
+        if not isinstance(raw, dict):
+            continue
+        pass_id = str(raw.get("pass_id") or f"pass{idx}")
+        opponent = str(raw.get("opponent") or "dummy")
+        suite = str(raw.get("suite") or "core")
+        category = str(raw.get("category") or "")
+
+        primary_path = raw.get("result_json") or raw.get("dummy_json")
+        primary = summarize_tactics_json(primary_path)
+        ability = summarize_tactics_json(raw.get("ability_json"))
+        selfplay = summarize_tactics_json(raw.get("selfplay_json"))
+        primary_scens = _load_tactics_scenarios(primary_path)
+
+        # Merge inline fallback fields when JSON file is omitted or synthetic
+        total = primary.get("total") if primary else raw.get("total")
+        w = primary.get("w") if primary else raw.get("w")
+        l = primary.get("l") if primary else raw.get("l")
+        d = primary.get("d") if primary else raw.get("d")
+        trade_agg = primary.get("trade_agg") if primary else raw.get("trade_agg")
+        trade_med = primary.get("trade_med") if primary and "trade_med" in primary else raw.get("trade_med")
+        spell_verified = (
+            primary.get("spell_verified")
+            if primary and "spell_verified" in primary
+            else raw.get("spell_verified")
+        )
+        spell_expected = (
+            primary.get("spell_expected")
+            if primary and "spell_expected" in primary
+            else raw.get("spell_expected")
+        )
+        wall_sec = primary.get("wall_sec") if primary and primary.get("wall_sec") is not None else raw.get("wall_sec")
+        if wall_sec is None:
+            ws_sum = sum(
+                float(x["wall_sec"])
+                for x in (primary, ability, selfplay)
+                if x and x.get("wall_sec") is not None
+            )
+            if ws_sum > 0:
+                wall_sec = round(ws_sum, 1)
+
+        rec: Dict[str, Any] = {
+            "pass_id": pass_id,
+            "opponent": opponent,
+            "suite": suite,
+        }
+        if category:
+            rec["category"] = category
+        if raw.get("label"):
+            rec["label"] = str(raw["label"])
+        if total is not None:
+            rec["total"] = int(total)
+        if w is not None:
+            rec["w"] = int(w)
+        if l is not None:
+            rec["l"] = int(l)
+        if d is not None:
+            rec["d"] = int(d)
+        if total and w is not None:
+            rec["wr_pct"] = round(100.0 * int(w) / max(1, int(total)), 1)
+        if trade_agg is not None:
+            rec["trade_agg"] = round(float(trade_agg), 2)
+        if trade_med is not None:
+            rec["trade_med"] = round(float(trade_med), 2)
+        if spell_expected is not None:
+            rec["spell_expected"] = int(spell_expected)
+            rec["spell_verified"] = int(spell_verified or 0)
+        elif spell_verified is not None:
+            rec["spell_verified"] = int(spell_verified)
+        if wall_sec is not None:
+            rec["wall_sec"] = round(float(wall_sec), 1)
+        if primary and primary.get("record_str"):
+            rec["record_str"] = primary["record_str"]
+        elif raw.get("record_str"):
+            rec["record_str"] = str(raw["record_str"])
+        if ability:
+            rec["ability"] = ability
+        if selfplay:
+            rec["selfplay"] = selfplay
+        if raw.get("notes"):
+            rec["notes"] = str(raw["notes"])[:240]
+
+        track = (opponent, suite, category)
+        if track not in track_pass0:
+            track_pass0[track] = (rec, primary_scens)
+            rec["delta_w_vs_prev"] = None
+            rec["delta_trade_vs_prev"] = None
+            rec["delta_w_vs_pass0"] = 0 if "w" in rec else None
+            rec["delta_trade_vs_pass0"] = 0.0 if "trade_agg" in rec else None
+            if "spell_verified" in rec:
+                rec["delta_spell_verified_vs_prev"] = None
+                rec["delta_spell_verified_vs_pass0"] = 0
+        else:
+            p0_rec, p0_scens = track_pass0[track]
+            pv_rec, pv_scens = track_prev[track]
+            rec["delta_w_vs_prev"] = (
+                (rec["w"] - pv_rec["w"]) if ("w" in rec and "w" in pv_rec) else None
+            )
+            rec["delta_trade_vs_prev"] = (
+                round(rec["trade_agg"] - pv_rec["trade_agg"], 2)
+                if ("trade_agg" in rec and "trade_agg" in pv_rec)
+                else None
+            )
+            rec["delta_w_vs_pass0"] = (
+                (rec["w"] - p0_rec["w"]) if ("w" in rec and "w" in p0_rec) else None
+            )
+            rec["delta_trade_vs_pass0"] = (
+                round(rec["trade_agg"] - p0_rec["trade_agg"], 2)
+                if ("trade_agg" in rec and "trade_agg" in p0_rec)
+                else None
+            )
+            if "spell_verified" in rec:
+                rec["delta_spell_verified_vs_prev"] = (
+                    (rec["spell_verified"] - pv_rec["spell_verified"])
+                    if "spell_verified" in pv_rec
+                    else None
+                )
+                rec["delta_spell_verified_vs_pass0"] = (
+                    (rec["spell_verified"] - p0_rec["spell_verified"])
+                    if "spell_verified" in p0_rec
+                    else None
+                )
+
+            # Scenario-level improvement/regression tracking (file-backed or inline)
+            if pv_scens and primary_scens:
+                diff_prev = _compare_arena_scenarios(pv_scens, primary_scens)
+                rec["improved_ids"] = diff_prev["improved_ids"]
+                rec["regressed_ids"] = diff_prev["regressed_ids"]
+                if diff_prev["spell_gained_ids"] or diff_prev["spell_lost_ids"]:
+                    rec["spell_gained_ids"] = diff_prev["spell_gained_ids"]
+                    rec["spell_lost_ids"] = diff_prev["spell_lost_ids"]
+            else:
+                if raw.get("improved_ids") is not None:
+                    rec["improved_ids"] = list(raw["improved_ids"])
+                if raw.get("regressed_ids") is not None:
+                    rec["regressed_ids"] = list(raw["regressed_ids"])
+                if raw.get("spell_gained_ids") is not None:
+                    rec["spell_gained_ids"] = list(raw["spell_gained_ids"])
+                if raw.get("spell_lost_ids") is not None:
+                    rec["spell_lost_ids"] = list(raw["spell_lost_ids"])
+
+            if p0_scens and primary_scens:
+                diff_p0 = _compare_arena_scenarios(p0_scens, primary_scens)
+                rec["regressed_vs_pass0_ids"] = diff_p0["regressed_ids"]
+                rec["regression_count_vs_pass0"] = len(diff_p0["regressed_ids"])
+            elif raw.get("regressed_vs_pass0_ids") is not None:
+                rec["regressed_vs_pass0_ids"] = list(raw["regressed_vs_pass0_ids"])
+                rec["regression_count_vs_pass0"] = len(rec["regressed_vs_pass0_ids"])
+
+            if "regressed_ids" in rec:
+                rec["regression_count"] = len(rec["regressed_ids"])
+
+        track_prev[track] = (rec, primary_scens)
+        out.append(rec)
+
+    return out
 
 
 def classify_tool_error(err_text: str) -> str:
@@ -462,6 +743,7 @@ def find_loop_windows(
             r"Kick(?:ing)? off (?:Loop|Wave)\s+(\d+)\b",
             r"Loop\s+(\d+)(?:\s+Wave\s+\d+)?\s+Kickoff\b",
             r"Loop\s+(\d+)(?:\s*\([^)]*\))?(?:\s+Wave\s+\d+)?\s*[—–-]+\s*APPROVED\s+GO\b",
+            r"GO!\s+Loop\s+(\d+)\b",
             r"Wave[- ](\d+)\s+Spec\b",
             r"Loop\s+(\d+)\s+Implementation\b",
             r"Loop\s+(\d+)\s+Disjoint",
@@ -1063,8 +1345,13 @@ def build_trajectory_records(
         sc_h2h = summarize_score_json(entry.get("baseline_h2h_score_json"))
         tac_d = summarize_tactics_json(entry.get("tactics_json"))
         tac_sp = summarize_tactics_json(entry.get("tactics_selfplay_json"))
+        arena_passes = summarize_arena_passes(entry.get("arena_passes"))
 
         phases = compute_phase_durations(item, loop_evs, board_events, tac_d, tac_sp)
+        if phases.get("tactics_arena", 0.0) == 0.0 and arena_passes:
+            ap_wall = sum(float(ap.get("wall_sec") or 0.0) for ap in arena_passes)
+            if ap_wall > 0.0:
+                phases["tactics_arena"] = round(ap_wall, 1)
 
         # Fallback ext metrics from ledger when score_json isn't present (e.g., synthetic tests)
         ext_summary = sc_main.get("ext") or {}
@@ -1172,6 +1459,27 @@ def build_trajectory_records(
                 }
             )
 
+        # Inner Arena pass regression check: flag if any track's final pass still has regressions vs pass0
+        if arena_passes:
+            last_by_track: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+            for ap in arena_passes:
+                tk = (str(ap.get("opponent") or "dummy"), str(ap.get("suite") or "core"), str(ap.get("category") or ""))
+                last_by_track[tk] = ap
+            for tk, ap in last_by_track.items():
+                reg_p0 = ap.get("regressed_vs_pass0_ids") or []
+                if reg_p0:
+                    frictions.append(
+                        {
+                            "kind": "arena_pass_regression",
+                            "agent": "tactics-tester",
+                            "ts": fmt_iso(end),
+                            "detail": (
+                                f"Arena pass {ap.get('pass_id')} ({tk[0]}/{tk[1]}) ended with "
+                                f"{len(reg_p0)} regression(s) vs pass0: {', '.join(reg_p0[:5])}"
+                            ),
+                        }
+                    )
+
         agents_map = per_loop_agents.get(lid) or {}
         totals = {
             "active_agents": len(agents_map),
@@ -1193,6 +1501,18 @@ def build_trajectory_records(
             "output_tokens": sum(a["tokens"]["output"] for a in agents_map.values()),
         }
 
+        bot_deltas: Dict[str, Any] = {
+            "core14": core_summary,
+            "ext78": ext_summary,
+            "unseen12": unseen_summary,
+            "h2h": h2h_summary,
+            "arena_dummy": tac_d,
+            "arena_selfplay": tac_sp,
+            "anomalies": anomalies,
+        }
+        if arena_passes:
+            bot_deltas["arena_passes"] = arena_passes
+
         records.append(
             {
                 "schema_version": SCHEMA_VERSION,
@@ -1204,15 +1524,7 @@ def build_trajectory_records(
                 "total_wall_sec": total_wall,
                 "ship_verdict": verdict,
                 "ship_number": ship_num,
-                "bot_deltas": {
-                    "core14": core_summary,
-                    "ext78": ext_summary,
-                    "unseen12": unseen_summary,
-                    "h2h": h2h_summary,
-                    "arena_dummy": tac_d,
-                    "arena_selfplay": tac_sp,
-                    "anomalies": anomalies,
-                },
+                "bot_deltas": bot_deltas,
                 "phase_durations_sec": phases,
                 "totals": totals,
                 "agent_trajectories": agents_map,

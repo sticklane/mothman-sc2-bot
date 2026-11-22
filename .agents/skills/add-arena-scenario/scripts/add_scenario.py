@@ -45,10 +45,25 @@ VALID_TERRAINS = (
     "flank-surround",
     "cliff-air-chasm",
     "mineral-line-harass",
+    "mineral-wall",
+    "destructible-rock",
+    "collapsible-tower",
+    "main-ramp-wall",
+    "natural-expand",
 )
 VALID_SOURCES = ("core", "match-forensics", "pro-db", "pattern-coverage", "replay-extract", "custom")
-VALID_TIERS = ("canonical", "regression", "econ-harass")
-VALID_SCORING_MODES = ("combat", "mineral-defense", "worker-runby")
+VALID_TIERS = ("canonical", "regression", "econ-harass", "non-combat")
+VALID_SCORING_MODES = ("combat", "mineral-defense", "worker-runby", "non-combat")
+VALID_NON_COMBAT_OBJECTIVES = (
+    "mining-priority",
+    "probe-harass-disrupt",
+    "worker-stack-drill",
+    "mineral-wall-clear",
+    "destructible-rocks",
+    "deployable-wall-control",
+    "worker-only-path",
+    "stasis-and-utility",
+)
 VALID_CATEGORIES = (
     "detection-snipe",
     "stalker-blink",
@@ -59,6 +74,7 @@ VALID_CATEGORIES = (
     "transport-nydus",
     "burrow-micro",
     "spellcasters",
+    "ability-mastery",
     "kiting-concave",
     "flank-surround",
     "high-ground-ramp",
@@ -66,16 +82,19 @@ VALID_CATEGORIES = (
     "early-rush-defense",
     "capital-endgame",
     "regression",
+    "non-combat",
 )
 
 VALID_UPGRADES = {
     "Burrow", "TunnelingClaws", "GlialReconstitution", "MetabolicBoost", "AdrenalGlands",
-    "CentrifugalHooks", "LurkerRange", "AdaptiveTalons", "GroovedSpines", "MuscularAugments",
+    "CentrifugalHooks", "LurkerRange", "AdaptiveTalons", "GroovedSpines", "MuscularAugments", "HydraliskFrenzy",
     "ChitinousPlating", "AnabolicSynthesis", "NeuralParasite", "OverlordSpeed", "PneumatizedCarapace", "VentralSacks",
-    "Blink", "Charge", "ResonatingGlaives", "ThermalLance", "GraviticDrive", "GraviticBoosters", "PsiStorm",
+    "WarpGate", "Blink", "Charge", "ResonatingGlaives", "ThermalLance", "GraviticDrive", "GraviticBoosters",
+    "AnionPulseCrystals", "FluxVanes", "TempestGroundAttackUpgrade", "PsiStorm",
     "ShadowStride", "ProtossGroundWeapons1", "ProtossGroundWeapons2", "ProtossGroundWeapons3",
     "Stim", "CombatShield", "ConcussiveShells", "DrillingClaws", "SmartServos",
-    "InfernalPreigniter", "BansheeCloak", "InterferenceMatrix", "HyperflightRotors", "PersonalCloaking", "AdvancedBallistics", "WeaponRefit", "Cloak",
+    "InfernalPreigniter", "CycloneLockOnDamage", "BansheeCloak", "InterferenceMatrix",
+    "HyperflightRotors", "PersonalCloaking", "AdvancedBallistics", "WeaponRefit", "Cloak",
 }
 
 TRANSPORT_UNITS = {
@@ -101,12 +120,22 @@ UNITS: dict[str, tuple[int, float, float]] = {
     "void-ray": (80, 475.0, 1.5),
     "tempest": (496, 512.5, 3.0),
     "carrier": (79, 725.0, 3.0),
+    "mothership": (10, 1000.0, 2.8),
     "observer": (82, 137.5, 2.2),
+    "observer-siege-mode": (1911, 137.5, 2.2),
     "warp-prism": (81, 250.0, 2.5),
+    "warp-prism-phasing": (136, 250.0, 2.5),
     "probe": (84, 50.0, 0.5),
+    "nexus": (59, 400.0, 2.5),
     "photon-cannon": (66, 150.0, 1.5),
     "pylon": (60, 100.0, 2.2),
     "shield-battery": (1910, 100.0, 2.0),
+    "gateway": (62, 150.0, 2.2),
+    "warp-gate": (133, 150.0, 2.2),
+    "cybernetics-core": (72, 150.0, 2.2),
+    "dark-shrine": (69, 250.0, 2.2),
+    "stargate": (67, 375.0, 2.2),
+    "robotics-facility": (71, 300.0, 2.2),
     "oracle-stasis-trap": (732, 50.0, 0.0),
     "stasis-trap": (732, 50.0, 0.0),
     # Terran
@@ -117,6 +146,7 @@ UNITS: dict[str, tuple[int, float, float]] = {
     "reaper": (49, 125.0, 0.4),
     "cyclone": (692, 300.0, 0.9),
     "thor": (52, 600.0, 0.6),
+    "thor-ap": (691, 600.0, 0.6),
     "ghost": (50, 337.5, 2.0),
     "siege-tank": (33, 337.5, 2.2),
     "siege-tank-sieged": (32, 337.5, 2.8),
@@ -132,8 +162,17 @@ UNITS: dict[str, tuple[int, float, float]] = {
     "battlecruiser": (57, 850.0, 2.8),
     "scv": (45, 50.0, 0.5),
     "planetary-fortress": (130, 775.0, 2.0),
+    "orbital-command": (132, 550.0, 2.5),
+    "command-center": (18, 400.0, 2.5),
     "missile-turret": (23, 100.0, 1.5),
     "bunker": (24, 100.0, 1.5),
+    "supply-depot": (19, 100.0, 1.5),
+    "supply-depot-lowered": (47, 100.0, 1.5),
+    "barracks": (21, 150.0, 2.2),
+    "factory": (27, 300.0, 2.2),
+    "starport": (28, 300.0, 2.2),
+    "armory": (29, 300.0, 2.2),
+    "sensor-tower": (25, 275.0, 2.0),
     # Zerg
     "zergling": (105, 25.0, 0.0),
     "zergling-burrowed": (119, 25.0, 0.0),
@@ -160,9 +199,15 @@ UNITS: dict[str, tuple[int, float, float]] = {
     "viper": (499, 400.0, 2.4),
     "brood-lord": (114, 675.0, 3.0),
     "overseer": (129, 225.0, 2.2),
+    "overseer-siege-mode": (1912, 225.0, 2.2),
     "overlord": (106, 100.0, 2.4),
     "overlord-transport": (893, 150.0, 2.4),
     "dropperlord": (893, 150.0, 2.4),
+    "hatchery": (86, 300.0, 2.5),
+    "lair": (100, 450.0, 2.5),
+    "hive": (101, 600.0, 2.5),
+    "spire": (92, 500.0, 2.2),
+    "evolution-chamber": (90, 75.0, 2.0),
     "spore-crawler": (99, 125.0, 1.5),
     "spine-crawler": (98, 150.0, 1.2),
     "nydus-canal": (142, 100.0, 2.2),
@@ -208,6 +253,7 @@ ALIASES: dict[str, str] = {
     "voidray": "void-ray", "voidrays": "void-ray", "void-rays": "void-ray",
     "tempests": "tempest", "carriers": "carrier", "warpprism": "warp-prism", "warpprismphasing": "warp-prism",
     "cannon": "photon-cannon", "cannons": "photon-cannon", "photoncannon": "photon-cannon",
+    "warpgate": "warp-gate", "warpgates": "warp-gate", "darkshrine": "dark-shrine",
     "stasis": "oracle-stasis-trap", "stasisward": "oracle-stasis-trap", "oraclestasistrap": "oracle-stasis-trap",
 }
 
@@ -215,9 +261,9 @@ RACE_PREFIX = {"Protoss": "p", "Terran": "t", "Zerg": "z"}
 RACE_ORDER = {"Protoss": 0, "Terran": 1, "Zerg": 2}
 UNIT_TO_RACE: dict[str, str] = {}
 for _k, (_uid, _, _) in UNITS.items():
-    if _k in ("zealot", "adept", "stalker", "sentry", "immortal", "archon", "dark-templar", "high-templar", "colossus", "disruptor", "phoenix", "oracle", "void-ray", "tempest", "carrier", "observer", "warp-prism", "probe", "photon-cannon", "pylon", "shield-battery", "oracle-stasis-trap", "stasis-trap"):
+    if _k in ("zealot", "adept", "stalker", "sentry", "immortal", "archon", "dark-templar", "high-templar", "colossus", "disruptor", "phoenix", "oracle", "void-ray", "tempest", "carrier", "mothership", "observer", "observer-siege-mode", "warp-prism", "warp-prism-phasing", "probe", "nexus", "photon-cannon", "pylon", "shield-battery", "gateway", "warp-gate", "cybernetics-core", "dark-shrine", "stargate", "robotics-facility", "oracle-stasis-trap", "stasis-trap"):
         UNIT_TO_RACE[_k] = "Protoss"
-    elif _k in ("hellbat", "hellion", "marauder", "marine", "reaper", "cyclone", "thor", "ghost", "siege-tank", "siege-tank-sieged", "widow-mine", "widow-mine-burrowed", "medivac", "viking-fighter", "viking-assault", "banshee", "raven", "liberator", "liberator-ag", "battlecruiser", "scv", "planetary-fortress", "missile-turret", "bunker"):
+    elif _k in ("hellbat", "hellion", "marauder", "marine", "reaper", "cyclone", "thor", "thor-ap", "ghost", "siege-tank", "siege-tank-sieged", "widow-mine", "widow-mine-burrowed", "medivac", "viking-fighter", "viking-assault", "banshee", "raven", "liberator", "liberator-ag", "battlecruiser", "scv", "planetary-fortress", "orbital-command", "command-center", "missile-turret", "bunker", "supply-depot", "supply-depot-lowered", "barracks", "factory", "starport", "armory", "sensor-tower"):
         UNIT_TO_RACE[_k] = "Terran"
     else:
         UNIT_TO_RACE[_k] = "Zerg"
@@ -449,11 +495,12 @@ def save_catalog(path: Path, scenarios: list[dict[str, Any]]) -> None:
         scenarios,
         key=lambda s: (RACE_ORDER.get(s.get("our_race", ""), 9), s.get("id", "")),
     )
+    cat_cnt = len({s.get("category", "") for s in scenarios_sorted if s.get("category")})
     payload = {
         "schema_version": 3,
         "notes": (
-            f"Real-SC2_x64 Tactics Arena 3.0 catalog ({len(scenarios_sorted)} scenarios across 16 categories, "
-            "3 tiers, 3 scoring modes, 5 terrains, selective upgrades, and pre-loaded transports) "
+            f"Real-SC2_x64 Tactics Arena 3.1 catalog ({len(scenarios_sorted)} scenarios across {cat_cnt} categories, "
+            "4 tiers, 4 scoring modes, 10 terrains, selective upgrades, pre-loaded transports, and non-combat drills) "
             "loaded by tools/sc2-tactics-arena.py."
         ),
         "scenarios": scenarios_sorted,
@@ -513,6 +560,10 @@ def validate_catalog(scenarios: list[dict[str, Any]]) -> list[str]:
             errs.append(f"{sid}: mineral-defense scenario requires pass_net_econ_min > 0")
         if scoring_mode == "worker-runby" and int(s.get("pass_workers_killed_min", 0)) <= 0:
             errs.append(f"{sid}: worker-runby scenario requires pass_workers_killed_min > 0")
+        if scoring_mode == "non-combat":
+            nc_obj = str(s.get("non_combat_objective", "") or "")
+            if nc_obj not in VALID_NON_COMBAT_OBJECTIVES:
+                errs.append(f"{sid}: non-combat scenario requires valid non_combat_objective (got {nc_obj!r})")
         if "use_main_base" in s and not isinstance(s["use_main_base"], bool):
             errs.append(f"{sid}: use_main_base must be a boolean")
         if "use_p2_main_base" in s and not isinstance(s["use_p2_main_base"], bool):
@@ -533,7 +584,8 @@ def validate_catalog(scenarios: list[dict[str, Any]]) -> list[str]:
                 errs.append(f"{sid}: {lt_key} must be a list")
                 continue
             if not ulist and not lt_list:
-                errs.append(f"{sid}: must specify non-empty {side_key} or {lt_key}")
+                if not (scoring_mode == "non-combat" and side_key == "p2_units"):
+                    errs.append(f"{sid}: must specify non-empty {side_key} or {lt_key}")
                 continue
             for item in ulist:
                 if not isinstance(item, list) or len(item) != 4:
@@ -564,7 +616,7 @@ def validate_catalog(scenarios: list[dict[str, Any]]) -> list[str]:
                             errs.append(f"{sid}: unknown cargo unit {cu!r} in {lt_key}[{idx_lt}]")
                         if not isinstance(cc, int) or cc <= 0:
                             errs.append(f"{sid}: invalid cargo count {cc!r} in {lt_key}[{idx_lt}]")
-    missing_fc = sorted(cats_present - fast_core_cats)
+    missing_fc = sorted((cats_present - {"non-combat"}) - fast_core_cats)
     if missing_fc and fast_core_cats:
         errs.append(f"Categories missing fast_core coverage: {missing_fc}")
     return errs

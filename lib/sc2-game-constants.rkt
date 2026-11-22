@@ -798,6 +798,7 @@
      1036  ;; PSISTORM_PSISTORM
      1442  ;; EFFECT_BLINK_STALKER
      1526  ;; FORCEFIELD_FORCEFIELD
+     1622  ;; TACNUKESTRIKE_NUKECALLDOWN
      1628  ;; EMP_EMP
      1694  ;; BUILD_CREEPTUMOR_QUEEN
      1729  ;; SPINECRAWLERROOT_SPINECRAWLERROOT
@@ -908,7 +909,7 @@
 (define SC2-CONTROL-GROUP-ACTION-APPEND-AND-STEAL 5)
 (define SC2-CAMERA-BOOKMARK-COUNT           8)     ;; Slots 1..8 (F1..F8)
 (define SC2-CAMERA-SACCADE-MIN-DWELL-FRAMES 16)    ;; ~0.71s minimum fixation dwell between routine jumps
-(define SC2-CAMERA-MOVE-DEDUP-DIST          2.0)   ;; Minimum camera shift (tiles) to emit ActionRawCameraMove
+(define SC2-CAMERA-MOVE-DEDUP-DIST          8.0)   ;; Min non-base camera shift (tiles) — suppresses short 2-7t screen scrolling in favor of base hotkeys & minimap clicks
 (define SC2-BOOKMARK-DRIFT-UPDATE-DIST      4.0)   ;; Minimum drift (tiles) to re-save dynamic camera bookmark
 
 ;; Terran Ramp Wall-In & East (+X) Add-on Geometry Constants
@@ -1765,6 +1766,8 @@
     [(scout)            70]
     [(spotter)          68]
     [(creep-queen)      65]
+    [(strike-group)     55]
+    [(staging-group)    50]
     [(army)             20]
     [(harvester)        10]
     [else                0]))

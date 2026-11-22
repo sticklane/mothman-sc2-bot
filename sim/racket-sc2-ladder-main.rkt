@@ -809,7 +809,9 @@
       (define sum-runtime-ms 0.0)
       (define sum-translate-ms 0.0)
       (define match-result "Undecided")
-      (define wire-apm-gov (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+      (define wire-apm-gov (make-wire-apm-governor #:target-apm 495.0 #:hard-cap-apm 595.0))
+      (define start-bot-action-reject-count (get-total-bot-action-reject-count))
+      (define start-wire-action-drop-count (get-total-wire-action-drop-count))
       (define frame0-split-done? #f)
 
       ;; 5. Main WebSocket Match Loop (catch SIGINT/SIGTERM break and clean LadderServer socket close at 45m tie cap)
@@ -1054,6 +1056,8 @@
                            '()))
                      (define step-role-leases (hash-ref step-res 'role-leases #f))
                      (define step-reserved-aabbs (hash-ref step-res 'wall-reserved-aabbs '()))
+                     (define step-watchdog-expand-ring-syms
+                       (hash-ref step-res 'watchdog-expand-ring-syms '()))
                      (define action-cmds
                        (translate-bot-actions->sc2-raw-commands
                         bot-actions
@@ -1064,7 +1068,8 @@
                         #:commanded-workers commanded-workers
                         #:role-leases step-role-leases
                         #:reserved-aabbs step-reserved-aabbs
-                        #:game-info game-info))
+                        #:game-info game-info
+                        #:watchdog-expand-ring-syms step-watchdog-expand-ring-syms))
                      (define sat-cmds
                        (saturate-workers-and-gas-commands
                         obs
@@ -1140,6 +1145,48 @@
             0.0
             (round2 (last sorted-step-ms))))
 
+      (define match-bot-action-reject-count
+        (max 0 (- (get-total-bot-action-reject-count) start-bot-action-reject-count)))
+      (define match-wire-action-drop-count
+        (max 0 (- (get-total-wire-action-drop-count) start-wire-action-drop-count)))
+      (when (or (> match-bot-action-reject-count 0)
+                (> match-wire-action-drop-count 0))
+        (fprintf (current-error-port)
+                 "[wire-gate] bot_action_reject_count=~a wire_action_drop_count=~a\n"
+                 match-bot-action-reject-count
+                 match-wire-action-drop-count)
+        (flush-output (current-error-port)))
+
+      (define apm-drop-stats (get-wire-apm-drop-stats wire-apm-gov #:top-k 12))
+      (define apm-drop-total (hash-ref apm-drop-stats 'total 0))
+      (when (>= apm-drop-total 0)
+        (define apm-drop-tier (hash-ref apm-drop-stats 'by_tier (hasheq)))
+        (define apm-drop-ab-pairs
+          (sort (hash->list (hash-ref apm-drop-stats 'by_ability (hasheq)))
+                (lambda (a b)
+                  (if (= (cdr a) (cdr b))
+                      (string<? (symbol->string (car a)) (symbol->string (car b)))
+                      (> (cdr a) (cdr b))))))
+        (define top-str
+          (if (null? apm-drop-ab-pairs)
+              "none"
+              (string-join
+               (for/list ([kv (in-list apm-drop-ab-pairs)])
+                 (format "~a:~a" (car kv) (cdr kv)))
+               ",")))
+        (fprintf (current-error-port)
+                 "[APM_CAP_DROPS] total=~a tok=~a cap=~a P0=~a P1=~a P2=~a P3=~a P4=~a top=~a\n"
+                 apm-drop-total
+                 (hash-ref apm-drop-stats 'token_bucket 0)
+                 (hash-ref apm-drop-stats 'rolling_hard_cap 0)
+                 (hash-ref apm-drop-tier 'P0 0)
+                 (hash-ref apm-drop-tier 'P1 0)
+                 (hash-ref apm-drop-tier 'P2 0)
+                 (hash-ref apm-drop-tier 'P3 0)
+                 (hash-ref apm-drop-tier 'P4 0)
+                 top-str)
+        (flush-output (current-error-port)))
+
       (define summary
         (hasheq 'status "MATCH_COMPLETED"
                 'engine "racket_native_protobuf_ws"
@@ -1159,6 +1206,9 @@
                 'game_loops last-game-loop
                 'steps_executed total-steps
                 'commands_sent total-raw-cmds-sent
+                'bot_action_reject_count match-bot-action-reject-count
+                'wire_action_drop_count match-wire-action-drop-count
+                'apm_cap_drops apm-drop-stats
                 'priority_logs_emitted priority-logs-emitted
                 'state_logs_emitted state-logs-emitted
                 'last_state_log (if (hash? last-state-log)

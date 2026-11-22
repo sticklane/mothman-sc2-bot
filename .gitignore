@@ -26,3 +26,5 @@ replays/.s2ma_cache/
 replays/maps/.s2ma_cache/
 /stdout.log
 /stderr.log
+scratch/dashboard_state.json
+scratch/dashboard_state.json.tmp*

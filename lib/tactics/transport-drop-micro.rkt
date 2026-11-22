@@ -198,6 +198,14 @@
   plan-counter-drop-defense
   counter-drop-plan->sexps
 
+  ;; L59-P2 (`#1481`) 13-Row Pro Drop Profiles, 3-Race Cliff Laddering & Raid Evac/Rotation
+  (struct-out drop-profile)
+  DROP-PROFILE-TABLE
+  lookup-drop-profile
+  infer-drop-profile
+  plan-cliff-ladder-shuttle
+  plan-raid-evac-and-rotate
+
   ;; S-Expression Orchestrator
   transport-directive->sexp
   step-transport-drop-micro!)
@@ -275,8 +283,13 @@
 
 (: SAVE-HIGH-VALUE-SYMS (Listof Symbol))
 (define SAVE-HIGH-VALUE-SYMS
-  '(immortal archon colossus high-templar disruptor siege-tank thor thor-ap
-    cyclone ghost marauder lurker ravager roach hydralisk queen infestor))
+  '(immortal archon colossus high-templar disruptor dark-templar zealot
+    siege-tank thor thor-ap cyclone ghost marauder marine widow-mine hellbat hellion
+    lurker lurker-mp ravager roach hydralisk queen infestor baneling zergling))
+
+(: SAVE-CRITICAL-BIO-SYMS (Listof Symbol))
+(define SAVE-CRITICAL-BIO-SYMS
+  '(marauder marine hellbat hellion zealot zergling))
 
 ;; Drop & Emergency Dump Constants
 (: TRANSPORT-LOAD-UNLOAD-COOLDOWN-FRAMES Integer)
@@ -537,6 +550,10 @@
     [(50)   'ghost]
     [(51)   'marauder]
     [(48)   'marine]
+    [(53)   'hellion]
+    [(484)  'hellbat]
+    [(498)  'widow-mine]
+    [(500)  'widow-mine-burrowed]
     [(502)  'lurker]
     [(503)  'lurker-burrowed]
     [(688)  'ravager]
@@ -592,6 +609,79 @@
   (if (transport-unit-input? u)
       (transport-unit-input-y u)
       (dyn-u-y u)))
+
+(: u-z (-> Any (Option Float)))
+(define (u-z u)
+  (if (hash? u)
+      (let ([raw (or (dyn-hash-ref u 'z #f) (dyn-hash-ref u 'pos-z #f))])
+        (if (and (real? raw) (< -inf.0 raw +inf.0))
+            (real->double-flonum raw)
+            #f))
+      #f))
+
+;; =============================================================================
+;; L59-P2 (`#1481`) 13-Row Declarative Pro Drop Profile Table
+;; =============================================================================
+(struct drop-profile
+  ([id : Symbol]
+   [transport : Symbol]          ;; 'warp-prism | 'medivac | 'overlord-transport | 'any
+   [load-cd-frames : Integer]    ;; Per-profile Load<->Unload cadence (`14..44f`)
+   [min-dwell-frames : Integer]  ;; Minimum cargo carry dwell (`8..18f`)
+   [unload-dist : Float]         ;; Distance to target for drop (`1.2t` Banelings .. `4.0t`)
+   [evac-ratio : Float]          ;; Local ally/enemy power ratio below which squad evacuates
+   [moving-drop? : Boolean]      ;; Prefer self-targeted moving drop (`transport-drop-moving`)
+   [rotate-base? : Boolean])     ;; Rotate to next enemy base to regen shields / re-hit
+  #:transparent)
+
+(: DROP-PROFILE-TABLE (Listof drop-profile))
+(define DROP-PROFILE-TABLE
+  (list
+   (drop-profile 'ht-storm            'warp-prism         14  8 2.5 0.50 #f #f)
+   (drop-profile 'archon-drop         'warp-prism         18 10 2.5 0.65 #f #t)
+   (drop-profile 'disruptor-drop      'warp-prism         16 10 3.0 0.60 #f #f)
+   (drop-profile 'immortal-juggle     'warp-prism         16  8 2.5 0.55 #f #f)
+   (drop-profile 'prism-warp-in       'warp-prism         44 18 4.0 0.60 #f #f)
+   (drop-profile 'widow-mine          'medivac            22 14 1.8 0.60 #t #t)
+   (drop-profile 'bio-drop            'medivac            36 18 3.0 0.65 #t #t)
+   (drop-profile 'hellbat-drop        'medivac            28 16 2.0 0.65 #t #f)
+   (drop-profile 'cliff-tank          'medivac            24 12 2.2 0.60 #f #f)
+   (drop-profile 'baneling-drop       'overlord-transport 24 14 1.2 0.55 #t #f)
+   (drop-profile 'ling-drop           'overlord-transport 32 16 2.8 0.65 #f #f)
+   (drop-profile 'lurker-ravager-drop 'overlord-transport 28 16 3.2 0.60 #f #f)
+   (drop-profile 'cliff-ladder        'any                18 10 2.0 0.50 #f #f)))
+
+(: lookup-drop-profile (-> Symbol (Option drop-profile)))
+(define (lookup-drop-profile id)
+  (for/or : (Option drop-profile) ([p (in-list DROP-PROFILE-TABLE)])
+    (and (eq? (drop-profile-id p) id) p)))
+
+(: infer-drop-profile (-> Symbol (Listof Symbol) drop-profile))
+(define (infer-drop-profile tr-sym cargo-syms)
+  (define chosen-id : Symbol
+    (case tr-sym
+      [(warp-prism warp-prism-phasing)
+       (cond
+         [(memq 'high-templar cargo-syms) 'ht-storm]
+         [(memq 'archon cargo-syms)       'archon-drop]
+         [(memq 'disruptor cargo-syms)    'disruptor-drop]
+         [(memq 'immortal cargo-syms)     'immortal-juggle]
+         [else                            'prism-warp-in])]
+      [(medivac)
+       (cond
+         [(or (memq 'widow-mine cargo-syms) (memq 'widow-mine-burrowed cargo-syms)) 'widow-mine]
+         [(memq 'hellbat cargo-syms)      'hellbat-drop]
+         [(or (memq 'siege-tank cargo-syms) (memq 'siege-tank-sieged cargo-syms)) 'cliff-tank]
+         [else                            'bio-drop])]
+      [(overlord-transport)
+       (cond
+         [(memq 'baneling cargo-syms)     'baneling-drop]
+         [(or (memq 'lurker cargo-syms) (memq 'lurker-mp cargo-syms) (memq 'ravager cargo-syms)) 'lurker-ravager-drop]
+         [else                            'ling-drop])]
+      [else 'cliff-ladder]))
+  (or (lookup-drop-profile chosen-id) (first DROP-PROFILE-TABLE)))
+
+(define current-active-drop-profile : (Parameterof (Option drop-profile))
+  (make-parameter #f))
 
 (: u-hp (-> Any Float Float))
 (define (u-hp u default)
@@ -857,7 +947,7 @@
     [(marauder ghost hellion hellbat widow-mine widow-mine-burrowed
       zealot stalker sentry adept high-templar dark-templar
       roach ravager hydralisk queen infestor) 2]
-    [(siege-tank cyclone immortal archon disruptor lurker) 4]
+    [(siege-tank cyclone immortal archon disruptor lurker lurker-mp) 4]
     [(thor thor-ap colossus ultralisk) 8]
     [else 2]))
 
@@ -872,7 +962,7 @@
                              dark-templar archon immortal colossus disruptor))))]
     [(overlord-transport)
      (not (not (memq u-sym '(drone zergling baneling roach ravager hydralisk
-                             lurker infestor queen ultralisk))))]
+                             lurker lurker-mp infestor queen ultralisk))))]
     [else #f]))
 
 ;; Synchronizes transport passenger pickup timestamps & WarpPrism phase state across frames.
@@ -1207,10 +1297,11 @@
         (values 0.0 #f)]
        [else
         (define hp-rat (if (or in-aoe? disruptor-cd-danger?) 1.0 (u-hp-ratio ally-u)))
+        (define critical-bio? (not (not (memq ut SAVE-CRITICAL-BIO-SYMS))))
         (define save-hp-thresh
-          (if (eq? ut 'marauder) SAVE-CRITICAL-BIO-HP-RATIO SAVE-UNDER-FIRE-HP-RATIO))
+          (if critical-bio? SAVE-CRITICAL-BIO-HP-RATIO SAVE-UNDER-FIRE-HP-RATIO))
         (define bruised-hp-thresh
-          (if (eq? ut 'marauder) SAVE-CRITICAL-BIO-HP-RATIO SAVE-BRUISED-HP-RATIO))
+          (if critical-bio? SAVE-CRITICAL-BIO-HP-RATIO SAVE-BRUISED-HP-RATIO))
         (define need-rescue?
           (or in-aoe?
               disruptor-cd-danger?
@@ -1510,6 +1601,7 @@
   (define cargo-used (u-cargo-space-taken tr-u))
   (cond
     [(or (not (u-alive? tr-u))
+         (<= tr-tag 0)
          (not (transport-unit-sym? tr-sym))
          (and (null? ptags) (<= cargo-used 0)))
      #f]
@@ -1538,9 +1630,48 @@
      (define safe-pt
        (or pre-safe
            (compute-safe-rear-drop-point front-x front-y home-x home-y zones enemy-units)))
-     (define sx (point2d-x safe-pt))
-     (define sy (point2d-y safe-pt))
+     ;; L59-P2 (`n18`/`ro28`/`ro26` offensive mineral-line drop fix):
+     ;; When a loaded transport arrives near an enemy mineral line (`>= 4` enemy workers within `22t`)
+     ;; with `0` friendly ground combat units already on the ground (`<= 10t`), fly PAST defenders
+     ;; straight to the enemy worker cluster `(wcx, wcy)` instead of dumping `4.25t` toward home!
+     (define nearby-enemy-workers : (Listof Any)
+       (if (and (not front-x-arg) (not front-y-arg))
+           (for/list : (Listof Any)
+                     ([e (in-list enemy-units)]
+                      #:when (and (u-alive? e)
+                                  (memq (exact-unit-type e) '(scv probe drone mule))
+                                  (<= (dist-2d tx ty (u-x e) (u-y e)) 22.0)))
+             e)
+           '()))
+     (define ally-ground-near? : Boolean
+       (and (pair? nearby-enemy-workers)
+            (for/or : Boolean ([a (in-list ally-units)])
+              (and (u-alive? a)
+                   (not (u-flying? a))
+                   (not (u-structure? a))
+                   (not (memq (exact-unit-type a) '(scv probe drone mule)))
+                   (<= (dist-2d tx ty (u-x a) (u-y a)) 10.0)))))
+     (define offensive-mineral-drop?
+       (and (>= (length nearby-enemy-workers) 4)
+            (not ally-ground-near?)))
+     (define ptypes-now (extract-passenger-types tr-u))
+     (define has-bane-cargo? (not (not (memq 'baneling ptypes-now))))
+     (define-values (sx sy)
+       (if offensive-mineral-drop?
+           (let ([nw (exact->inexact (length nearby-enemy-workers))])
+             (values (/ (for/fold ([s : Float 0.0]) ([w (in-list nearby-enemy-workers)]) (+ s (u-x w))) nw)
+                     (/ (for/fold ([s : Float 0.0]) ([w (in-list nearby-enemy-workers)]) (+ s (u-y w))) nw)))
+           (values (point2d-x safe-pt) (point2d-y safe-pt))))
      (define unload-ab-id (transport-unload-ability-id tr-sym))
+     ;; L59-P3 (`n05`/`n18`/`n14` anti-spam fix): Never re-issue `396`/`913`/`1408` while the
+     ;; transport is ALREADY executing an unload order or within `< 12f` of our last unload order,
+     ;; otherwise SC2 resets the `0.5s` unload channel every 4 frames and traps passengers inside!
+     (define cur-order-ab (safe-exact-int (dyn-hash-ref tr-u 'order-ability-id 0) 0))
+     (define already-unloading?
+       (or (not (not (memv cur-order-ab '(395 396 913 914 1408 1409 3669))))
+           (and tr
+                (let ([last-u (hash-ref (transport-tracker-transport-last-unload tr) tr-tag (lambda () -10000))])
+                  (and (>= current-frame last-u) (< (- current-frame last-u) 12))))))
 
      (define last-boost
        (if tr (hash-ref (transport-tracker-medivac-last-boost tr) tr-tag (lambda () -1000)) -1000))
@@ -1552,13 +1683,62 @@
        (and (eq? tr-sym 'medivac)
             (u-boost-ready? tr-u)
             (>= boost-delta 224)))
+     (define active-prof (current-active-drop-profile))
+     (define eff-min-dwell : Integer
+       (if offensive-mineral-drop?
+           0
+           (if active-prof (drop-profile-min-dwell-frames active-prof) MIN-CARRY-DWELL-FRAMES)))
+     (define eff-load-cd : Integer
+       (if active-prof (drop-profile-load-cd-frames active-prof) TRANSPORT-LOAD-UNLOAD-COOLDOWN-FRAMES))
      (define unload-cd
-       (if tr (transport-tracker-unload-cooldown tr tr-tag current-frame) 0))
+       (if tr
+           (let ([last-load (hash-ref (transport-tracker-transport-last-load tr) tr-tag (lambda () -10000))])
+             (max 0 (- (+ last-load eff-load-cd) current-frame)))
+           0))
      (define can-unload?
-       (or (= unload-cd 0) (>= carry-dwell STUCK-CARGO-CEILING-FRAMES)))
+       (and (not already-unloading?)
+            (or (= unload-cd 0) (>= carry-dwell STUCK-CARGO-CEILING-FRAMES))))
 
      (cond
-       ;; 1. `< 25%` HP+shields emergency dump (only when `>= 44f` Load->UnloadAt cooldown satisfied)
+       ;; 0. L59-P3 (`n19`/`ro28`/`ro26`/`n05`/`n18` fix): Offensive mineral-line drop transit &
+       ;;    reliable unload! Unload cleanly once within `<= 6.5t` (or `<= 2.8t` for Banelings) OR
+       ;;    immediately when taking fire (`hp < 92%`, `< 72%` Banelings) or facing AA defenders
+       ;;    within `<= 8.0t` — NEVER fly over Stalkers/Marines and die with `0` unloads!
+       [offensive-mineral-drop?
+        (define d-ml (dist-2d tx ty sx sy))
+        (define aa-threat-near? : Boolean
+          (for/or : Boolean ([e (in-list enemy-units)])
+            (and (u-alive? e)
+                 (anti-air-defender-sym? (exact-unit-type e))
+                 (<= (dist-2d tx ty (u-x e) (u-y e)) 8.0))))
+        (define drop-r : Float (if has-bane-cargo? 2.8 6.5))
+        (define urgent-drop? : Boolean
+          (or (<= d-ml drop-r)
+              (< hp-rat (if has-bane-cargo? 0.72 0.92))
+              (and aa-threat-near? (<= d-ml (if has-bane-cargo? 6.0 9.5)))))
+        (cond
+          [already-unloading? #f]
+          [(and can-unload? urgent-drop?)
+           (when tr (transport-tracker-record-unload! tr tr-tag current-frame))
+           ;; Use moving self-drop when over-flying (`d-ml > 3.5` or Banelings/Medivac) so cargo pours
+           ;; out cleanly while gliding toward workers; use point unload at worker center when right on top!
+           (if (or has-bane-cargo? (eq? tr-sym 'medivac) (> d-ml 3.5))
+               (transport-directive tr-tag tr-sym 'transport-drop-moving 'transport-drop-moving
+                                    unload-ab-id tr-tag ptags sx sy 'offensive-mineral-line-moving-drop)
+               (transport-directive tr-tag tr-sym 'transport-drop-point 'unload-all-at
+                                    unload-ab-id 0 ptags sx sy 'offensive-mineral-line-drop))]
+          [(and boost-available? (> d-ml 5.0))
+           (when tr (transport-tracker-record-boost! tr tr-tag current-frame))
+           (transport-directive tr-tag tr-sym 'medivac-boost 'medivac-boost
+                                MEDIVAC-BOOST-ABILITY-ID tr-tag ptags sx sy 'offensive-drop-medivac-boost)]
+          [else
+           (transport-directive tr-tag tr-sym 'move-to-drop 'move
+                                16 tr-tag ptags sx sy 'offensive-drop-transit-mineral-line)])]
+
+       ;; 0b. If already executing an unload order, do NOT stomp the unload channel with a fresh move/unload!
+       [already-unloading? #f]
+
+       ;; 1. `< 25%` HP+shields emergency dump (only when per-profile Load->UnloadAt cooldown satisfied)
        [(and can-unload? (< hp-rat EMERGENCY-DUMP-HP-RATIO))
         (when tr (transport-tracker-record-unload! tr tr-tag current-frame))
         (if pos-safe?
@@ -1576,8 +1756,8 @@
             (transport-directive tr-tag tr-sym 'transport-drop-point 'unload-all-at
                                  unload-ab-id 0 ptags sx sy 'stuck-cargo-ceiling-offset-672f))]
 
-       ;; 3. `< 18f` carry dwell or `< 44f` Load->UnloadAt cooldown -> hold/reposition safely
-       [(or (< carry-dwell MIN-CARRY-DWELL-FRAMES) (not can-unload?))
+       ;; 3. `< eff-min-dwell` carry dwell or `< eff-load-cd` Load->UnloadAt cooldown -> hold/reposition safely
+       [(or (< carry-dwell eff-min-dwell) (not can-unload?))
         (if (and boost-available? (> (dist-2d tx ty sx sy) 4.0))
             (begin
               (when tr (transport-tracker-record-boost! tr tr-tag current-frame))
@@ -1585,7 +1765,7 @@
                                    MEDIVAC-BOOST-ABILITY-ID tr-tag ptags sx sy 'medivac-boost-escape-hold))
             (transport-directive tr-tag tr-sym 'hold-and-reposition 'move
                                  16 tr-tag ptags sx sy
-                                 (if (< carry-dwell MIN-CARRY-DWELL-FRAMES)
+                                 (if (< carry-dwell eff-min-dwell)
                                      'carry-dwell-protect-hold
                                      'load-unload-cooldown-44f-hold)))]
 
@@ -1633,7 +1813,8 @@
          #:front-y (Option Real)
          #:danger-zones (Listof danger-zone)
          #:effects (Listof Any)
-         #:prefer-moving-drop? Boolean)
+         #:prefer-moving-drop? Boolean
+         #:drop-profile (Option drop-profile))
         (Option transport-directive)))
 (define (evaluate-transport-drop tr-u ally-units enemy-units
                                  #:tracker [tr #f]
@@ -1644,19 +1825,24 @@
                                  #:front-y [front-y-arg #f]
                                  #:danger-zones [explicit-zones '()]
                                  #:effects [effects '()]
-                                 #:prefer-moving-drop? [prefer-moving-drop? #f])
+                                 #:prefer-moving-drop? [prefer-moving-drop? #f]
+                                 #:drop-profile [prof #f])
   (define tr-sym (exact-unit-type tr-u))
+  (define tr-tag (u-tag tr-u))
   (define ptags (extract-passenger-tags tr-u))
   (define cargo-used (u-cargo-space-taken tr-u))
   (cond
     [(or (not (u-alive? tr-u))
+         (<= tr-tag 0)
          (not (transport-unit-sym? tr-sym))
          (and (null? ptags) (<= cargo-used 0)))
      #f]
     [else
      (define zones (append explicit-zones (collect-active-danger-zones enemy-units effects current-frame)))
-     (evaluate-transport-drop/zones tr-u ally-units enemy-units tr current-frame
-                                    home-x home-y front-x-arg front-y-arg zones prefer-moving-drop?)]))
+     (define eff-moving? (or prefer-moving-drop? (and prof (drop-profile-moving-drop? prof))))
+     (parameterize ([current-active-drop-profile prof])
+       (evaluate-transport-drop/zones tr-u ally-units enemy-units tr current-frame
+                                      home-x home-y front-x-arg front-y-arg zones eff-moving?))]))
 
 ;; =============================================================================
 ;; 3. WarpPrism Phasing Management (`1528` <-> `1530`)
@@ -1701,9 +1887,25 @@
                                  (not (u-structure? a))
                                  (not (memq (exact-unit-type a) '(probe)))))
             (values (+ sx (u-x a)) (+ sy (u-y a)) (add1 n))))
+        ;; L59-P3 (`n17` fix): Protect active warp-ins (`build-progress < 1.0` within `7.5t`) and
+        ;; offensive warp-in prism cycles (`phase-dwell < 160f`, 0 ground army yet) from premature
+        ;; unphasing (`1530`) unless Prism EHP drops below `< 35%` (`novel-104` still unphases at `19.4%`!).
+        (define warping-allies-under-prism? : Boolean
+          (for/or : Boolean ([a (in-list ally-units)])
+            (and (u-alive? a)
+                 (not (u-flying? a))
+                 (not (u-structure? a))
+                 (not (u-completed? a))
+                 (<= (dist-2d px py (u-x a) (u-y a)) 7.5))))
+        (define hold-phase-for-live-warp? : Boolean
+          (and (>= hp-rat 0.35)
+               (or warping-allies-under-prism?
+                   (and warp-in-requested? (not has-army?) (< phase-dwell 160)))))
         (define immediate-reason : (Option Symbol)
           (cond
             [(not can-unphase?)                      #f]
+            [(< hp-rat 0.35)                         'warp-prism-unphase-low-hp]
+            [hold-phase-for-live-warp?               #f]
             [emergency-victim                         'warp-prism-unphase-emergency-save]
             [(< hp-rat WARP-PRISM-UNPHASE-HP-RATIO)   'warp-prism-unphase-low-hp]
             [(< (nearest-enemy-combat-dist px py enemy-units) WARP-PRISM-THREAT-UNPHASE-RADIUS)
@@ -1714,7 +1916,8 @@
              'warp-prism-unphase-army-far]
             [else #f]))
         (define keep-phasing-for-warp-or-army?
-          (or warp-in-requested?
+          (or hold-phase-for-live-warp?
+              warp-in-requested?
               (and has-army? (not warp-in-complete?))))
         (define cycle-reason : (Option Symbol)
           (cond
@@ -2247,11 +2450,24 @@
           ;; Loaded (`>= 4` cargo or already deep near enemy line) -> fly via peripheral edge & unload
           [(or (>= cargo MINI-DROP-CARGO-MIN)
                (and (> cargo 0) (< d-target 26.0)))
+           (define ptags-dl (extract-passenger-tags dl))
+           ;; L59-P2 (`#1481`): Detect Baneling carpet-bomb cargo -> moving self-drop right overhead (`<= 1.2t`)!
+           (define raw-pass-list (if (hash? dl) (dyn-hash-ref dl 'passengers '()) '()))
+           (define has-baneling-cargo?
+             (or (and (list? raw-pass-list)
+                      (for/or : Boolean ([p (in-list raw-pass-list)])
+                        (and (hash? p) (eq? (exact-unit-type p) 'baneling))))
+                 (let ([ctypes (if (hash? dl) (dyn-hash-ref dl 'cargo-types '()) '())])
+                   (and (list? ctypes) (not (not (memq 'baneling ctypes)))))))
            (cond
-             [(<= d-target 5.5)
+             [(and has-baneling-cargo? (<= d-target 1.2))
+              (transport-directive dtag 'overlord-transport 'transport-drop-moving
+                                   'transport-drop-moving OVERLORD-UNLOAD-ALL-AT-ABILITY-ID
+                                   dtag ptags-dl tx ty 'baneling-drop-moving-carpet-bomb)]
+             [(and (not has-baneling-cargo?) (<= d-target 5.5))
               (transport-directive dtag 'overlord-transport 'transport-drop-point
                                    'unload-all-at OVERLORD-UNLOAD-ALL-AT-ABILITY-ID
-                                   dtag (extract-passenger-tags dl) tx ty
+                                   dtag ptags-dl tx ty
                                    (if (= edge-side 1)
                                        'mini-dropperlord-unload-left-edge
                                        'mini-dropperlord-unload-right-edge))]
@@ -2507,6 +2723,307 @@
            (counter-drop-order-ty wp)))))
 
 ;; =============================================================================
+;; 5b. L59-P2 (`#1481`): 3-Race Cliff-Laddering Shuttle & Raid Evac/Base Rotation
+;; =============================================================================
+
+(: extract-passenger-types (-> Any (Listof Symbol)))
+(define (extract-passenger-types tr-u)
+  (cond
+    [(not (hash? tr-u)) '()]
+    [else
+     (define ctypes (dyn-hash-ref tr-u 'cargo-types #f))
+     (if (list? ctypes)
+         (for/list : (Listof Symbol) ([s (in-list ctypes)] #:when (symbol? s)) s)
+         (let ([raw (or (dyn-hash-ref tr-u 'passengers #f) (dyn-hash-ref tr-u 'cargo #f))])
+           (if (list? raw)
+               (for/fold ([acc : (Listof Symbol) '()] #:result (reverse acc))
+                         ([item (in-list raw)])
+                 (if (hash? item)
+                     (let ([sym (exact-unit-type item)])
+                       (if (eq? sym 'unknown) acc (cons sym acc)))
+                     acc))
+               '())))]))
+
+;; 3-Race Cliff-Laddering Shuttle (`medivac`, `warp-prism`, `overlord-transport`):
+;; Ferries friendly ground units at `z_lo` across an unpathable cliff/chasm onto
+;; `(dest-x, dest-y)` at `dest-z` whenever `|dest-z - z_lo| >= 1.5`, strictly
+;; outside active danger zones. Works symmetrically for uphill climb & cliff escape!
+(: plan-cliff-ladder-shuttle
+   (->* ((Listof Any) (Listof Any))
+        (#:dest-x Real
+         #:dest-y Real
+         #:dest-z Real
+         #:danger-zones (Listof danger-zone)
+         #:tracker (Option transport-tracker)
+         #:current-frame Integer)
+        (Listof transport-directive)))
+(define (plan-cliff-ladder-shuttle ally-units enemy-units
+                                   #:dest-x [dest-x 80.0]
+                                   #:dest-y [dest-y 80.0]
+                                   #:dest-z [dest-z 12.0]
+                                   #:danger-zones [zones '()]
+                                   #:tracker [tr #f]
+                                   #:current-frame [current-frame 0])
+  (define dx-f (->float dest-x))
+  (define dy-f (->float dest-y))
+  (define dz-f (->float dest-z))
+  (define transports : (Listof Any)
+    (for/list : (Listof Any)
+              ([a (in-list ally-units)]
+               #:when (and (u-alive? a)
+                           (> (u-tag a) 0)
+                           (transport-unit-sym? (exact-unit-type a))))
+      a))
+  (define claimed-units : (Mutable-HashTable Integer Boolean) (make-hasheqv))
+  (for/fold ([acc : (Listof transport-directive) '()] #:result (reverse acc))
+            ([tr-u (in-list transports)])
+    (define tr-tag (u-tag tr-u))
+    (define tr-sym (exact-unit-type tr-u))
+    (define tx (u-x tr-u))
+    (define ty (u-y tr-u))
+    (define cargo-used (u-cargo-space-taken tr-u))
+    (define cargo-free (max 0 (- TRANSPORT-MAX-CARGO-CAPACITY cargo-used)))
+    (define ptags (extract-passenger-tags tr-u))
+    (define unload-ab (transport-unload-ability-id tr-sym))
+    (define p-range (transport-pickup-range tr-sym))
+    (define d-dest (dist-2d tx ty dx-f dy-f))
+    (define dest-safe? (not (point-in-danger-zones? dx-f dy-f zones 0.5)))
+    ;; Eligible ground allies on the DIFFERENT elevation (`|uz - dest-z| >= 1.5`) near this shuttle,
+    ;; strictly excluding burrowed units and prioritizing heavy artillery (`siege-tank`/`lurker-mp`/`immortal`) first!
+    (define (cliff-priority [u : Any]) : Float
+      (define ut (exact-unit-type u))
+      (define d (dist-2d tx ty (u-x u) (u-y u)))
+      (- d
+         (cond
+           [(memq ut '(siege-tank lurker lurker-mp immortal archon colossus)) 20.0]
+           [(memq ut '(marauder roach ravager stalker)) 6.0]
+           [else 0.0])))
+    (define ground-cands : (Listof Any)
+      (sort
+       (for/list : (Listof Any)
+                 ([a (in-list ally-units)]
+                  #:when (let ([ut (exact-unit-type a)]
+                               [uz (u-z a)])
+                           (and (u-alive? a)
+                                (> (u-tag a) 0)
+                                (not (hash-has-key? claimed-units (u-tag a)))
+                                (not (u-flying? a))
+                                (not (u-structure? a))
+                                (not (memq ut '(lurker-burrowed lurker-mp-burrowed siege-tank-sieged widow-mine-burrowed)))
+                                (not (eq? (dyn-hash-ref a 'burrowed #f) #t))
+                                (not (eq? (dyn-hash-ref a 'is-burrowed #f) #t))
+                                (transport-race-accepts-unit? tr-sym ut)
+                                (<= (unit-cargo-size ut) cargo-free)
+                                uz
+                                (>= (abs (- uz dz-f)) 1.5)
+                                (<= (dist-2d tx ty (u-x a) (u-y a)) 14.0))))
+         a)
+       (lambda ([a : Any] [b : Any])
+         (< (cliff-priority a) (cliff-priority b)))))
+    (define dir : (Option transport-directive)
+      (cond
+        [(eq? tr-sym 'warp-prism-phasing)
+         (transport-directive tr-tag tr-sym 'morph-warp-prism-transport
+                              'morph-warp-prism-transport MORPH-WARP-PRISM-TRANSPORT-ABILITY-ID
+                              tr-tag '() tx ty 'cliff-ladder-unphase)]
+        ;; If loaded & near cliff plateau (or full / no more nearby passengers), deliver & unload!
+        [(and (> cargo-used 0)
+              (or (null? ground-cands) (<= cargo-free 1) (<= d-dest 6.0)))
+         (cond
+           [(and (<= d-dest 2.2) dest-safe?)
+            (when tr (transport-tracker-record-unload! tr tr-tag current-frame))
+            (transport-directive tr-tag tr-sym 'transport-drop-point 'unload-all-at
+                                 unload-ab 0 ptags dx-f dy-f 'cliff-ladder-unload)]
+           [else
+            (transport-directive tr-tag tr-sym 'move-to-drop 'move 16
+                                 tr-tag ptags dx-f dy-f 'cliff-ladder-transit-plateau)])]
+        ;; Empty or partially loaded with eligible ground allies waiting at `z_lo` -> scoop them!
+        [(pair? ground-cands)
+         (define u (car ground-cands))
+         (define uid (u-tag u))
+         (define ux (u-x u))
+         (define uy (u-y u))
+         (hash-set! claimed-units uid #t)
+         (if (<= (dist-2d tx ty ux uy) p-range)
+             (begin
+               (when tr
+                 (transport-tracker-record-pickup! tr tr-tag uid current-frame)
+                 (transport-tracker-record-load! tr tr-tag current-frame))
+               (transport-directive tr-tag tr-sym 'load-unit 'load-transport
+                                    LOAD-TRANSPORT-ABILITY-ID uid (list uid) ux uy 'cliff-ladder-load))
+             (transport-directive tr-tag tr-sym 'approach-save-pickup 'move 16
+                                  uid (list uid) ux uy 'cliff-ladder-approach))]
+        [else #f]))
+    (if dir (cons dir acc) acc)))
+
+;; Outnumbered Raid Squad Evacuation, Medivac Boost Escape & Base-to-Base Shield-Regen Rotation:
+;; Handles all 3 races' drop raids (`archon-drop`, `bio-drop`, `widow-mine`, `ling-drop`, etc.)
+;; when raiders are locally outnumbered (`< evac-ratio`), threatened by AA, or an Archon drops
+;; below 45% shields / gets surrounded by `>= 4` melee units within `2.5t`.
+(: plan-raid-evac-and-rotate
+   (->* ((Listof Any) (Listof Any))
+        (#:home-x Real
+         #:home-y Real
+         #:enemy-targets (Listof (Pair Real Real))
+         #:tracker (Option transport-tracker)
+         #:current-frame Integer)
+        (Listof transport-directive)))
+(define (plan-raid-evac-and-rotate ally-units enemy-units
+                                   #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
+                                   #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
+                                   #:enemy-targets [enemy-targets '()]
+                                   #:tracker [tr #f]
+                                   #:current-frame [current-frame 0])
+  (define hx (->float home-x))
+  (define hy (->float home-y))
+  (define transports : (Listof Any)
+    (for/list : (Listof Any)
+              ([a (in-list ally-units)]
+               #:when (and (u-alive? a)
+                           (> (u-tag a) 0)
+                           (transport-unit-sym? (exact-unit-type a))
+                           (> (dist-2d (u-x a) (u-y a) hx hy) 20.0)))
+      a))
+  (for/fold ([acc : (Listof transport-directive) '()] #:result (reverse acc))
+            ([tr-u (in-list transports)])
+    (define tr-tag (u-tag tr-u))
+    (define tr-sym (exact-unit-type tr-u))
+    (define tx (u-x tr-u))
+    (define ty (u-y tr-u))
+    (define cargo-used (u-cargo-space-taken tr-u))
+    (define cargo-free (max 0 (- TRANSPORT-MAX-CARGO-CAPACITY cargo-used)))
+    (define ptags (extract-passenger-tags tr-u))
+    (define ptypes (extract-passenger-types tr-u))
+    (define p-range (transport-pickup-range tr-sym))
+    ;; Ground raid allies operating within `10.0t` of this transport (completed units ONLY — never incomplete warp-ins!)
+    (define local-raiders : (Listof Any)
+      (for/list : (Listof Any)
+                ([a (in-list ally-units)]
+                 #:when (and (u-alive? a)
+                             (> (u-tag a) 0)
+                             (u-completed? a)
+                             (not (u-flying? a))
+                             (not (u-structure? a))
+                             (transport-race-accepts-unit? tr-sym (exact-unit-type a))
+                             (<= (dist-2d tx ty (u-x a) (u-y a)) 10.0)))
+        a))
+    (define warping-under-tr? : Boolean
+      (and (eq? tr-sym 'warp-prism-phasing)
+           (for/or : Boolean ([a (in-list ally-units)])
+             (and (u-alive? a) (not (u-flying? a)) (not (u-structure? a))
+                  (not (u-completed? a))
+                  (<= (dist-2d tx ty (u-x a) (u-y a)) 7.5)))))
+    (define local-enemies : (Listof Any)
+      (for/list : (Listof Any)
+                ([e (in-list enemy-units)]
+                 #:when (and (u-alive? e)
+                             (> (u-tag e) 0)
+                             (not (u-structure? e))
+                             (not (memq (exact-unit-type e) '(scv probe drone mule larva egg overlord observer changeling)))
+                             (<= (dist-2d tx ty (u-x e) (u-y e)) 11.5)))
+        e))
+    (define aa-cnt
+      (for/sum : Integer ([e (in-list local-enemies)]
+                          #:when (and (anti-air-defender-sym? (exact-unit-type e))
+                                      (<= (dist-2d tx ty (u-x e) (u-y e)) 9.0)))
+        1))
+    (define all-raid-syms (append ptypes (map exact-unit-type local-raiders)))
+    (define prof (infer-drop-profile tr-sym all-raid-syms))
+    (define local-ally-pwr
+      (for/fold ([s : Float 0.0]) ([a (in-list local-raiders)])
+        (+ s (drop-unit-combat-power a))))
+    (define local-enemy-pwr
+      (for/fold ([s : Float 0.0]) ([e (in-list local-enemies)])
+        (+ s (drop-unit-combat-power e))))
+    ;; L59-P2 (`n05` fix): Archon shield-regen pickup ONLY when shields `< 25%` OR hull `< 60%`
+    ;; (never yank winning Archons at `< 45%` shields mid-fight!)
+    (define archon-evac-target : (Option Any)
+      (for/or : (Option Any) ([a (in-list local-raiders)])
+        (and (eq? (exact-unit-type a) 'archon)
+             (let* ([sh (u-shield a 360.0)]
+                    [msh (max 1.0 (u-max-shield a 360.0))]
+                    [sh-rat (/ sh msh)]
+                    [hp (u-hp a 10.0)]
+                    [mhp (max 1.0 (u-max-hp a 10.0))]
+                    [hp-rat (/ hp mhp)])
+               (or (< sh-rat 0.25) (< hp-rat 0.60)))
+             a)))
+    ;; L59-P2 (`n18` fix): Banelings closing within `<= 6.5t` of ground Bio trigger immediate evac pickup!
+    (define baneling-threat-near-raiders? : Boolean
+      (and (pair? local-raiders)
+           (for/or : Boolean ([e (in-list local-enemies)])
+             (and (eq? (exact-unit-type e) 'baneling)
+                  (for/or : Boolean ([r (in-list local-raiders)])
+                    (<= (dist-2d (u-x e) (u-y e) (u-x r) (u-y r)) 6.5))))))
+    (define outnumbered?
+      (and (>= (length local-enemies) 2)
+           (> local-enemy-pwr 0.0)
+           (< local-ally-pwr (* (drop-profile-evac-ratio prof) local-enemy-pwr))))
+    (define danger-evac?
+      (or outnumbered?
+          baneling-threat-near-raiders?
+          (>= aa-cnt 3)
+          (and (>= aa-cnt 2) (< (u-hp-ratio tr-u) 0.72))
+          (< (u-hp-ratio tr-u) 0.50)
+          (and archon-evac-target #t)))
+    (define next-rotate-base : (Option (Pair Float Float))
+      (and (drop-profile-rotate-base? prof)
+           (>= (u-hp-ratio tr-u) 0.55)
+           (for/or : (Option (Pair Float Float)) ([pt (in-list enemy-targets)])
+             (define px (->float (car pt)))
+             (define py (->float (cdr pt)))
+             (and (>= (dist-2d tx ty px py) 18.0) (cons px py)))))
+    (define dir : (Option transport-directive)
+      (cond
+        [(not danger-evac?) #f]
+        ;; Priority 1: Scoop surviving raiders if cargo space remains!
+        [(and (or archon-evac-target (pair? local-raiders)) (> cargo-free 0))
+         (define pick-cand : (Option Any)
+           (or (and archon-evac-target (<= (unit-cargo-size 'archon) cargo-free) archon-evac-target)
+               (let ([fits (filter (lambda ([a : Any]) (<= (unit-cargo-size (exact-unit-type a)) cargo-free))
+                                   local-raiders)])
+                 (and (pair? fits)
+                      (argmin (lambda ([a : Any]) (dist-2d tx ty (u-x a) (u-y a))) fits)))))
+         (cond
+           [(not pick-cand) #f]
+           [(eq? tr-sym 'warp-prism-phasing)
+            (if (and warping-under-tr? (>= (u-hp-ratio tr-u) 0.35))
+                #f
+                (transport-directive tr-tag tr-sym 'morph-warp-prism-transport
+                                     'morph-warp-prism-transport MORPH-WARP-PRISM-TRANSPORT-ABILITY-ID
+                                     tr-tag '() tx ty 'raid-evac-unphase))]
+           [else
+            (define uid (u-tag pick-cand))
+            (define ux (u-x pick-cand))
+            (define uy (u-y pick-cand))
+            (if (<= (dist-2d tx ty ux uy) p-range)
+                (begin
+                  (when tr
+                    (transport-tracker-record-pickup! tr tr-tag uid current-frame)
+                    (transport-tracker-record-load! tr tr-tag current-frame))
+                  (transport-directive tr-tag tr-sym 'load-unit 'load-transport
+                                       LOAD-TRANSPORT-ABILITY-ID uid (list uid) ux uy
+                                       (if archon-evac-target 'archon-shield-regen-pickup 'raid-evac-pickup)))
+                (transport-directive tr-tag tr-sym 'approach-save-pickup 'move 16
+                                     uid (list uid) ux uy 'raid-evac-approach))])]
+        ;; Priority 2: Loaded with evacuated squad -> Boost / rotate to next base (Archon shield regen) or escape home!
+        [(> cargo-used 0)
+         (define dest-x (if next-rotate-base (car next-rotate-base) hx))
+         (define dest-y (if next-rotate-base (cdr next-rotate-base) hy))
+         (define reason (if next-rotate-base 'raid-rotate-next-base-regen 'raid-evac-escape-home))
+         (define last-boost
+           (if tr (hash-ref (transport-tracker-medivac-last-boost tr) tr-tag (lambda () -1000)) -1000))
+         (if (and (eq? tr-sym 'medivac) (u-boost-ready? tr-u) (>= (- current-frame last-boost) 224))
+             (begin
+               (when tr (transport-tracker-record-boost! tr tr-tag current-frame))
+               (transport-directive tr-tag tr-sym 'medivac-boost 'medivac-boost
+                                    MEDIVAC-BOOST-ABILITY-ID tr-tag ptags dest-x dest-y 'raid-evac-medivac-boost))
+             (transport-directive tr-tag tr-sym 'hold-and-reposition 'move 16
+                                  tr-tag ptags dest-x dest-y reason))]
+        [else #f]))
+    (if dir (cons dir acc) acc)))
+
+;; =============================================================================
 ;; 6. Unified Single-Transport, Fleet & S-Expression Orchestrator
 ;; =============================================================================
 
@@ -2608,13 +3125,127 @@
                          [current-fleet-save-cands s-cands]
                          [current-fleet-front-xy shared-front]
                          [current-fleet-safe-drop shared-safe])
-            (for/fold ([acc : (Listof transport-directive) '()] #:result (reverse acc))
+            (for/fold ([acc : (Listof transport-directive) '()]
+                       [claimed : (Listof Integer) '()]
+                       [tr-idx : Integer 0]
+                       #:result (reverse acc))
                       ([a (in-list transports)])
-              (define d (evaluate-transport-micro/zones a ally-units enemy-units
-                                                        tr current-frame home-x home-y
-                                                        zones prefer-moving-drop?
-                                                        warp-in-complete? warp-in-requested?))
-              (if d (cons d acc) acc))))))
+              (define ax (u-x a))
+              (define ay (u-y a))
+              (define at-sym (exact-unit-type a))
+              (define at-tag (u-tag a))
+              (define a-cargo (u-cargo-space-taken a))
+              ;; L59-P2 (`n14`/`n16` live hook): Detect cliff-laddering elevation split (`|ez - uz| >= 1.5`)
+              ;; between nearby unclaimed ground allies (`<= 14t`) and visible ground enemies (`<= 20t`)!
+              (define cliff-dir : (Option transport-directive)
+                (let* ([near-gnd-allies
+                        (for/list : (Listof Any)
+                                  ([u (in-list ally-units)]
+                                   #:when (and (u-alive? u) (not (u-flying? u)) (not (u-structure? u))
+                                               (not (memv (u-tag u) claimed))
+                                               (u-z u)
+                                               (transport-race-accepts-unit? at-sym (exact-unit-type u))
+                                               (<= (dist-2d ax ay (u-x u) (u-y u)) 14.0)))
+                          u)]
+                       [ref-z : (Option Float)
+                        (if (pair? near-gnd-allies) (u-z (car near-gnd-allies)) #f)]
+                       [uphill-enemies
+                        (if (or ref-z (> a-cargo 0))
+                            (for/list : (Listof Any)
+                                      ([e (in-list enemy-units)]
+                                       #:when (let ([ez (u-z e)])
+                                                (and (u-alive? e) (not (u-flying? e)) (not (u-structure? e))
+                                                     ez
+                                                     (<= (dist-2d ax ay (u-x e) (u-y e)) 20.0)
+                                                     (or (not ref-z) (>= (abs (- ez ref-z)) 1.5)))))
+                              e)
+                            '())])
+                  (if (and (pair? uphill-enemies)
+                           (or (pair? near-gnd-allies)
+                               (and (> a-cargo 0)
+                                    (let ([az-first (u-z (car uphill-enemies))])
+                                      (and az-first
+                                           (for/or : Boolean ([u (in-list ally-units)])
+                                             (let ([uz (u-z u)])
+                                               (and (not (u-flying? u)) uz (>= (abs (- az-first uz)) 1.5)))))))))
+                      (let* ([ne (exact->inexact (length uphill-enemies))]
+                             [ecx (/ (for/fold ([s : Float 0.0]) ([e (in-list uphill-enemies)]) (+ s (u-x e))) ne)]
+                             [ecy (/ (for/fold ([s : Float 0.0]) ([e (in-list uphill-enemies)]) (+ s (u-y e))) ne)]
+                             [ez-avg (/ (for/fold ([s : Float 0.0]) ([e (in-list uphill-enemies)]) (+ s (or (u-z e) 10.0))) ne)]
+                             [dx (- ax ecx)]
+                             [dy (- ay ecy)]
+                             [dn (max 0.1 (dist-2d 0.0 0.0 dx dy))]
+                             [ux (/ dx dn)]
+                             [uy (/ dy dn)]
+                             ;; Lateral stagger (`-1.2t` / `+1.2t`) so 2 transports drop 2 Tanks/Lurkers cleanly side-by-side
+                             [lat (if (even? tr-idx) -1.2 1.2)]
+                             ;; Land on high-ground cliff edge `3.2t` back from enemy cluster toward shuttle
+                             [land-pt (clamp-playable-pt (+ ecx (* 3.2 ux) (* lat (- uy)))
+                                                         (+ ecy (* 3.2 uy) (* lat ux)))]
+                             [ldirs (plan-cliff-ladder-shuttle
+                                     (cons a near-gnd-allies) enemy-units
+                                     #:dest-x (point2d-x land-pt) #:dest-y (point2d-y land-pt)
+                                     #:dest-z ez-avg #:danger-zones zones
+                                     #:tracker tr #:current-frame current-frame)])
+                        (and (pair? ldirs) (car ldirs)))
+                      #f)))
+              ;; L59-P2 (`n18`/`n05` live hook): Run active raid evac BEFORE re-drop when ground raiders
+              ;; are present (`pair? near-raiders`) OR this transport JUST scooped raiders (`recent-load?`),
+              ;; while frame-0 pre-loaded mineral drops (`null? near-raiders` & no prior load) run drop-in first!
+              (define near-raiders : (Listof Any)
+                (for/list : (Listof Any)
+                          ([u (in-list ally-units)]
+                           #:when (and (u-alive? u) (not (u-flying? u)) (not (u-structure? u))
+                                       (not (memv (u-tag u) claimed))
+                                       (transport-race-accepts-unit? at-sym (exact-unit-type u))
+                                       (<= (dist-2d ax ay (u-x u) (u-y u)) 10.5)))
+                  u))
+              ;; L59-P2 (`n18`/`n05` live hook): Run active raid evac BEFORE re-drop ONLY during genuine
+              ;; behind-enemy-lines raids (`>= 3` enemy workers within `22t`, OR Baneling rush, OR
+              ;; WarpPrism Archon juggle) — never hijacking open-field frontline healing Medivacs
+              ;; (`w10-tac-1`/`w10-tac-3`/`w11-tac-5`), and never overriding `< 25% HP` emergency cargo dump!
+              (define raid-context? : Boolean
+                (or (>= (for/sum : Integer ([e (in-list enemy-units)]
+                                            #:when (and (u-alive? e)
+                                                        (memq (exact-unit-type e) '(scv probe drone))
+                                                        (<= (dist-2d ax ay (u-x e) (u-y e)) 22.0)))
+                          1)
+                        3)
+                    (and (memq at-sym '(warp-prism warp-prism-phasing))
+                         (for/or : Boolean ([u (in-list near-raiders)])
+                           (eq? (exact-unit-type u) 'archon)))))
+              (define emergency-dump-needed? : Boolean
+                (and (> a-cargo 0) (< (u-hp-ratio a) 0.25)))
+              (define recent-load? : Boolean
+                (let ([last-l (hash-ref (transport-tracker-transport-last-load tr) at-tag (lambda () #f))])
+                  (and last-l (<= (- current-frame last-l) 240))))
+              (define active-evac-dir : (Option transport-directive)
+                (if (and (not cliff-dir)
+                         (not emergency-dump-needed?)
+                         raid-context?
+                         (or (pair? near-raiders)
+                             (and (> a-cargo 0) recent-load?)))
+                    (let ([edirs (plan-raid-evac-and-rotate
+                                  (cons a near-raiders)
+                                  enemy-units
+                                  #:home-x home-x #:home-y home-y
+                                  #:tracker tr #:current-frame current-frame)])
+                      (and (pair? edirs) (car edirs)))
+                    #f))
+              (define d
+                (or cliff-dir
+                    active-evac-dir
+                    (evaluate-transport-micro/zones a ally-units enemy-units
+                                                    tr current-frame home-x home-y
+                                                    zones prefer-moving-drop?
+                                                    warp-in-complete? warp-in-requested?)))
+              (define next-claimed : (Listof Integer)
+                (if (and d
+                         (memq (transport-directive-action d) '(load-unit approach-save-pickup))
+                         (> (transport-directive-target-tag d) 0))
+                    (cons (transport-directive-target-tag d) claimed)
+                    claimed))
+              (values (if d (cons d acc) acc) next-claimed (+ tr-idx 1)))))))
   (define ovi-dirs
     (if has-overlord?
         (plan-overlord-transport-morphs ally-units enemy-units

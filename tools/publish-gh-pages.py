@@ -39,6 +39,7 @@ from site_report_sections import (  # noqa: E402
     INTERACTIVE_SECTIONS_JS,
     load_rich_report_telemetry,
     render_architecture_section,
+    render_historical_faults_details,
     render_issues_fixed_section,
     render_loop_diagram_section,
     render_matchup_evaluation_section,
@@ -102,7 +103,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="Speeding Up the Test & Release Cycle",
             short_title="Timing Review",
             section="Technical Notes",
-            summary="Where time went across 33 runs, why we moved the 2-minute head-to-head check first, and which rules kept flip-flopping.",
+            summary="Where time went across 39 runs, why we moved the 2-minute head-to-head check first, and which rules kept flip-flopping.",
             source_candidates=(brain_dir / "scratch/loop/loop_flywheel_retro.md",),
             required=False,
         ),
@@ -338,6 +339,24 @@ def run_cmd(
     )
 
 
+def _is_placeholder_arena_clip(p: Path, clip_meta: Optional[Dict[str, Any]] = None) -> bool:
+    """Strictly block unrendered/red-box placeholder or corrupt stub clips from staging & site cards."""
+    s_low = str(p).lower()
+    if "probe_iter51_w2_5014" in s_low and "sp07" in p.name.lower():
+        return True
+    if clip_meta:
+        for flag in ("placeholder", "is_placeholder", "red_placeholder", "render_failed"):
+            if clip_meta.get(flag):
+                return True
+    if p.suffix.lower() == ".mp4" and p.is_file():
+        try:
+            if p.stat().st_size < 25_000:
+                return True
+        except OSError:
+            return True
+    return False
+
+
 def classify_media_path(p: Path) -> Tuple[str, str]:
     """Return (release_tag, asset_name) for a local media file.
 
@@ -354,6 +373,12 @@ def classify_media_path(p: Path) -> Tuple[str, str]:
     m_fm = re.search(r"/visuals_(iter\d+)/(?:replays/)?full_matches/([^/\s)]+)$", s)
     if m_fm:
         return f"media-{m_fm.group(1)}-matches", m_fm.group(2)
+
+    m_ia = re.search(r"/(iter\d+)_arena/(?:[^/]+/)*([^/\s)]+)$", s)
+    if m_ia:
+        iter_name, fname = m_ia.group(1), m_ia.group(2)
+        asset_name = fname if fname.startswith("arena_") else f"arena_{fname}"
+        return f"media-{iter_name}", asset_name
 
     m_vis = re.search(r"/(?:visuals|probe)_(iter\d+)(?:_[A-Za-z0-9_]+)?/(?:persephone_v4/)?(arena|selfplay|replays)/([^/\s)]+)$", s)
     if m_vis:
@@ -545,8 +570,37 @@ def discover_media_to_upload(
     ):
         for ext in (".mp4", ".png"):
             p = l51_root / rel_sub / f"{sid}{ext}"
-            if p.is_file():
+            if p.is_file() and not _is_placeholder_arena_clip(p):
                 register(p, force_tag="media-iter51", force_name=f"arena_{p.name}")
+
+    # 2D. Auto-register verified Loop 58+ iter*_arena/pass* renders (core + ability-mastery + non-combat), skipping placeholders.
+    loop_scratch_dir = brain_dir / "scratch" / "loop"
+    if loop_scratch_dir.is_dir():
+        for adir in sorted(loop_scratch_dir.glob("iter*_arena")):
+            m_it = re.search(r"iter(\d+)_arena$", adir.name)
+            if not m_it or not adir.is_dir():
+                continue
+            tag_name = f"media-iter{m_it.group(1)}"
+            # Sort ascending by (pass_num, mtime) so the highest pass wins in tag_files / abs_to_asset
+            rdirs_asc = sorted(
+                (d for d in adir.iterdir() if d.is_dir() and "render" in d.name.lower()),
+                key=lambda p: (
+                    999 if "final" in p.name.lower() else (
+                        int(re.search(r"pass(\d+)", p.name.lower()).group(1))
+                        if re.search(r"pass(\d+)", p.name.lower())
+                        else 0
+                    ),
+                    p.stat().st_mtime,
+                ),
+            )
+            for rdir in rdirs_asc:
+                for mp4_p in sorted(rdir.rglob("*.mp4")):
+                    if _is_placeholder_arena_clip(mp4_p):
+                        continue
+                    register(mp4_p, force_tag=tag_name, force_name=f"arena_{mp4_p.name}")
+                    png_p = mp4_p.with_suffix(".png")
+                    if png_p.is_file():
+                        register(png_p, force_tag=tag_name, force_name=f"arena_{png_p.name}")
 
     # 3. Optionally include ALL campaign_media/iter* files.
     cm_root = brain_dir / "campaign_media"
@@ -1438,28 +1492,193 @@ DEPLOY_LABELS: Dict[str, str] = {
     "oyzplryr_dc3a33b6": "Loop 48",
     "mmmkputx_6c3f9529": "Loop 50",
     "nkxlrsuk_4e7c6f39": "Loop 51",
+    "tppnrnpo_22f810ed": "Loop 57",
 }
 
 BOT_META: Dict[str, Dict[str, str]] = {
     "Mothman-P": {
         "race": "Protoss",
-        "highlight": "Reached 1310 rating; beat Hubert (2.57× trade) with Disruptors and shut out FastBC with zero losses.",
+        "highlight": "Strong in PvT and Disruptor mid-game fights.",
     },
     "Mothman-T": {
         "race": "Terran",
-        "highlight": "Went 6–3 on Build 45 (1.64× trade); beat Slowpoke (5.41×, 18 Siege Tanks, 0 lost) and Thssprtssbt (7.35×).",
+        "highlight": "Highest v1 rating, backed by Bio-Tank-Medivac macro.",
     },
     "Mothman-Z": {
         "race": "Zerg",
-        "highlight": "9–0 in live ZvZ mirrors (2.78× trade); beat oberon (2.61×) on five bases with 32 Lurkers, though weak vs. Protoss.",
+        "highlight": "Undefeated in recent live ZvZ mirrors.",
     },
     "Mothman-X": {
         "race": "Random",
-        "highlight": "Reached 1298 rating playing random races; beat CosmicSiege (2.34×) and MetaScoreCritic (2.86×).",
+        "highlight": "Rotates Protoss, Terran, and Zerg on ladder.",
+    },
+    "Mothman-P2": {
+        "race": "Protoss",
+        "highlight": "Testing against stronger macro and proxy builds.",
+    },
+    "Mothman-T2": {
+        "race": "Terran",
+        "highlight": "Testing live Interference Matrix and 1-1-1 openings.",
+    },
+    "Mothman-Z2": {
+        "race": "Zerg",
+        "highlight": "Facing tighter timing pushes and Skytoss.",
+    },
+    "Mothman-X2": {
+        "race": "Random",
+        "highlight": "Includes a live win over 1624-Elo Enyo.",
     },
 }
 
 DEPLOY_ORDER: Dict[str, int] = {k: idx for idx, k in enumerate(DEPLOY_LABELS.keys())}
+
+
+def load_aiarena_live_summary(brain_dir: Path, sqlite_path: Path) -> Dict[str, Any]:
+    """Load live v1 (Div 9) + v2 (Div 5) AI Arena standings and opponent-Elo context."""
+    race_names = {"P": "Protoss", "T": "Terran", "Z": "Zerg", "R": "Random"}
+    result: Dict[str, Any] = {
+        "available": False,
+        "v2_bots": [],
+        "v1_bots": [],
+        "v2_opp_elo_avg": 0.0,
+        "v2_opp_elo_min": 0,
+        "v2_opp_elo_max": 0,
+        "v2_nonmirror": {"w": 0, "l": 0, "t": 0},
+        "v1_opp_elo_avg": 0.0,
+        "v1_opp_elo_min": 0,
+        "v1_opp_elo_max": 0,
+        "v1_nonmirror": {"w": 0, "l": 0, "t": 0},
+    }
+    fetch_dirs = [
+        Path("/tmp/aiarena_v1_v2_fetch"),
+        brain_dir / "scratch" / "loop" / "aiarena_v1_v2_fetch",
+    ]
+    ai_dir = next((d for d in fetch_dirs if (d / "all_bots_summary.json").is_file()), None)
+    if not ai_dir:
+        return result
+
+    try:
+        summary = json.loads((ai_dir / "all_bots_summary.json").read_text(encoding="utf-8"))
+    except Exception:
+        return result
+
+    # Aggregate non-mirror match metadata (*_meta.json) for avg opponent Elo & per-bot non-mirror records
+    by_bot_nm: Dict[str, Dict[str, Any]] = {}
+    v1_elos: List[int] = []
+    v2_elos: List[int] = []
+    for mf in sorted(ai_dir.glob("*_meta.json")):
+        try:
+            m = json.loads(mf.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if m.get("both_ours"):
+            continue
+        coh = str(m.get("our_bot_cohort") or "")
+        bname = str(m.get("our_bot_name") or "")
+        oelo = m.get("opp_elo_before")
+        res = str(m.get("result") or "").lower()
+        ent = by_bot_nm.setdefault(bname, {"w": 0, "l": 0, "t": 0, "elos": []})
+        if res == "win":
+            ent["w"] += 1
+        elif res == "loss":
+            ent["l"] += 1
+        elif res:
+            ent["t"] += 1
+        if isinstance(oelo, (int, float)) and oelo > 0:
+            ent["elos"].append(int(oelo))
+            if coh == "v2":
+                v2_elos.append(int(oelo))
+            elif coh == "v1":
+                v1_elos.append(int(oelo))
+        if coh == "v2":
+            if res == "win":
+                result["v2_nonmirror"]["w"] += 1
+            elif res == "loss":
+                result["v2_nonmirror"]["l"] += 1
+            elif res:
+                result["v2_nonmirror"]["t"] += 1
+        elif coh == "v1":
+            if res == "win":
+                result["v1_nonmirror"]["w"] += 1
+            elif res == "loss":
+                result["v1_nonmirror"]["l"] += 1
+            elif res:
+                result["v1_nonmirror"]["t"] += 1
+
+    if v2_elos:
+        result["v2_opp_elo_avg"] = round(sum(v2_elos) / len(v2_elos), 1)
+        result["v2_opp_elo_min"] = min(v2_elos)
+        result["v2_opp_elo_max"] = max(v2_elos)
+    if v1_elos:
+        result["v1_opp_elo_avg"] = round(sum(v1_elos) / len(v1_elos), 1)
+        result["v1_opp_elo_min"] = min(v1_elos)
+        result["v1_opp_elo_max"] = max(v1_elos)
+
+    # Pull recent SQLite trade ratios for v1 bots so v1 rows include trade efficiency
+    v1_trade_by_bot: Dict[str, Tuple[int, int, float]] = {}
+    if sqlite_path.is_file():
+        try:
+            con = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
+            for bname, bw, bl, btr in con.execute(
+                """
+                SELECT bot,
+                       SUM(CASE WHEN LOWER(result)='win' THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN LOWER(result)='loss' THEN 1 ELSE 0 END),
+                       ROUND(SUM(killed_val)*1.0/NULLIF(SUM(lost_val),0), 2)
+                FROM matches
+                WHERE source_type='prod_aiarena' AND COALESCE(is_selfplay,0)=0
+                  AND bot_build_version IN ('womqlpsp_6917245e', 'qpqqolmk_3b21fe7a', 'oyzplryr_dc3a33b6', 'mmmkputx_6c3f9529', 'nkxlrsuk_4e7c6f39', 'tppnrnpo_22f810ed')
+                GROUP BY bot
+                """
+            ).fetchall():
+                v1_trade_by_bot[str(bname)] = (int(bw or 0), int(bl or 0), float(btr or 0.0))
+            con.close()
+        except Exception:
+            pass
+
+    bots_by_name = {str(b.get("name") or ""): b for b in summary.get("bots", []) if isinstance(b, dict)}
+    for cohort_key, names in (
+        ("v2_bots", ("Mothman-P2", "Mothman-T2", "Mothman-Z2", "Mothman-X2")),
+        ("v1_bots", ("Mothman-P", "Mothman-T", "Mothman-Z", "Mothman-X")),
+    ):
+        rows = []
+        for bname in names:
+            b = bots_by_name.get(bname)
+            if not b:
+                continue
+            cp = b.get("competition_participation") or {}
+            if not cp.get("active"):
+                continue
+            rlabel = str((b.get("plays_race") or {}).get("label") or "")
+            race = race_names.get(rlabel, BOT_META.get(bname, {}).get("race", rlabel))
+            nm = by_bot_nm.get(bname, {"w": 0, "l": 0, "t": 0, "elos": []})
+            opp_avg = round(sum(nm["elos"]) / len(nm["elos"])) if nm["elos"] else 0
+            rec_w, rec_l, rec_tr = v1_trade_by_bot.get(bname, (0, 0, 0.0))
+            rows.append(
+                {
+                    "bot": bname,
+                    "race": race,
+                    "division": int(cp.get("division_num") or 0),
+                    "elo": int(cp.get("elo") or 1600),
+                    "w": int(cp.get("win_count") or 0),
+                    "l": int(cp.get("loss_count") or 0),
+                    "t": int(cp.get("tie_count") or 0),
+                    "win_perc": round(float(cp.get("win_perc") or 0.0), 1),
+                    "crashes": int(cp.get("crash_count") or 0),
+                    "nm_w": nm["w"],
+                    "nm_l": nm["l"],
+                    "nm_t": nm["t"],
+                    "opp_elo_avg": opp_avg,
+                    "recent_w": rec_w,
+                    "recent_l": rec_l,
+                    "recent_trade": rec_tr,
+                    "highlight": BOT_META.get(bname, {}).get("highlight", ""),
+                }
+            )
+        result[cohort_key] = rows
+
+    result["available"] = bool(result["v2_bots"] or result["v1_bots"])
+    return result
 
 
 def load_dashboard_telemetry(sqlite_path: Path) -> Dict[str, Any]:
@@ -1671,7 +1890,8 @@ def render_live_progress_svg(series: List[Dict[str, Any]]) -> str:
     cw = w - pl - pr
     ch = h - pt - pb
     n = max(1, len(series))
-    max_tr = max(1.4, max((float(s.get("trade", 0.0)) for s in series), default=1.0) + 0.15)
+    tr_vals = [float(s["trade"]) for s in series if s.get("trade") is not None]
+    max_tr = max(1.4, max(tr_vals, default=1.0) + 0.15)
     max_tr = 1.6 if max_tr > 1.25 else 1.2
 
     def x_at(idx: int) -> float:
@@ -1715,16 +1935,18 @@ def render_live_progress_svg(series: List[Dict[str, Any]]) -> str:
     )
 
     wr_pts = " ".join(f"{x_at(i):.1f},{y_wr(s['wr']):.1f}" for i, s in enumerate(series))
-    tr_pts = " ".join(f"{x_at(i):.1f},{y_tr(s['trade']):.1f}" for i, s in enumerate(series))
+    tr_pairs = [(i, float(s["trade"])) for i, s in enumerate(series) if s.get("trade") is not None]
+    tr_pts = " ".join(f"{x_at(i):.1f},{y_tr(v):.1f}" for i, v in tr_pairs)
 
     parts.append(
         f'<polyline fill="none" stroke="#C4633E" stroke-width="2.4" '
         f'stroke-linejoin="round" stroke-linecap="round" points="{wr_pts}" />'
     )
-    parts.append(
-        f'<polyline fill="none" stroke="#4A6B82" stroke-width="2" '
-        f'stroke-dasharray="5,3" stroke-linejoin="round" stroke-linecap="round" points="{tr_pts}" />'
-    )
+    if len(tr_pairs) >= 2:
+        parts.append(
+            f'<polyline fill="none" stroke="#4A6B82" stroke-width="2" '
+            f'stroke-dasharray="5,3" stroke-linejoin="round" stroke-linecap="round" points="{tr_pts}" />'
+        )
 
     # Select well-spaced x-axis tick indices so labels never touch
     tick_indices = {0, n - 1}
@@ -1738,17 +1960,22 @@ def render_live_progress_svg(series: List[Dict[str, Any]]) -> str:
     for i, s in enumerate(series):
         xx = x_at(i)
         yw = y_wr(s["wr"])
-        yt = y_tr(s["trade"])
+        tr_v = s.get("trade")
         lbl = html.escape(str(s["label"]))
-        tip = f"{lbl}: {s['wr']:.1f}% wins, {s['trade']:.2f}× trade (n={s['n']})"
+        if tr_v is not None:
+            tip = f"{lbl}: {s['wr']:.1f}% wins, {float(tr_v):.2f}× trade (n={s['n']})"
+        else:
+            tip = f"{lbl}: {s['wr']:.1f}% wins (n={s['n']})"
         parts.append(
             f'<circle cx="{xx:.1f}" cy="{yw:.1f}" r="3.6" fill="#C4633E" stroke="#F4F2EA" stroke-width="1.2">'
             f"<title>{tip}</title></circle>"
         )
-        parts.append(
-            f'<circle cx="{xx:.1f}" cy="{yt:.1f}" r="3.3" fill="#4A6B82" stroke="#F4F2EA" stroke-width="1.2">'
-            f"<title>{tip}</title></circle>"
-        )
+        if tr_v is not None:
+            yt = y_tr(float(tr_v))
+            parts.append(
+                f'<circle cx="{xx:.1f}" cy="{yt:.1f}" r="3.3" fill="#4A6B82" stroke="#F4F2EA" stroke-width="1.2">'
+                f"<title>{tip}</title></circle>"
+            )
         if i in tick_indices:
             short_lbl = re.sub(r"^Loop\s+", "L", lbl) if i >= n - 2 else lbl
             parts.append(
@@ -1769,17 +1996,26 @@ def render_live_progress_svg(series: List[Dict[str, Any]]) -> str:
             f'text-anchor="{anchor}" fill="#C4633E" font-size="10.5" font-weight="600">'
             f'{peak["wr"]:.1f}%</text>'
         )
-        last = series[-1]
-        lx = x_at(n - 1)
-        ly_tr = y_tr(last["trade"])
-        ly_wr = y_wr(last["wr"])
-        # Always place latest trade label cleanly below the blue dot away from the incoming slope
-        tr_y = min(h - pb - 4.0, ly_tr + 17.0)
-        parts.append(
-            f'<text x="{lx + 2.0:.1f}" y="{tr_y:.1f}" '
-            f'text-anchor="end" fill="#4A6B82" font-size="10.5" font-weight="600">'
-            f'{last["trade"]:.2f}×</text>'
-        )
+        if peak_idx != n - 1:
+            last = series[-1]
+            lx = x_at(n - 1)
+            ly_wr = y_wr(last["wr"])
+            parts.append(
+                f'<text x="{lx - 2.0:.1f}" y="{max(pt+10, ly_wr - 9.0):.1f}" '
+                f'text-anchor="end" fill="#C4633E" font-size="10.5" font-weight="600">'
+                f'{last["wr"]:.1f}%</text>'
+            )
+        if tr_pairs:
+            last_tr_idx, last_tr_val = tr_pairs[-1]
+            lx_tr = x_at(last_tr_idx)
+            ly_tr = y_tr(last_tr_val)
+            tr_y = min(h - pb - 4.0, ly_tr + 17.0)
+            tr_anchor = "end" if last_tr_idx >= n - 1 else "middle"
+            parts.append(
+                f'<text x="{lx_tr + (2.0 if tr_anchor == "end" else 0.0):.1f}" y="{tr_y:.1f}" '
+                f'text-anchor="{tr_anchor}" fill="#4A6B82" font-size="10.5" font-weight="600">'
+                f"{last_tr_val:.2f}×</text>"
+            )
 
     # Inline legend top-left
     parts.append(
@@ -1902,7 +2138,6 @@ def _outcome_norm(res: str) -> str:
 _DRILL_WORD_MAP: Dict[str, str] = {
     "vs": "vs.",
     "dt": "DT",
-    "dts": "DTs",
     "pf": "PF",
     "bc": "BC",
     "bcs": "BCs",
@@ -1929,7 +2164,11 @@ _DRILL_WORD_MAP: Dict[str, str] = {
     "mutas": "Mutalisks",
     "ling": "Zerglings",
     "lings": "Zerglings",
-    "lingbane": "Ling/Bane",
+    "lingbane": "Ling-Bane",
+    "6ling": "6-Zergling",
+    "kd8": "KD8",
+    "blindingcloud": "Blinding Cloud",
+    "pbomb": "Parasitic Bomb",
     "blueflame": "Blue-Flame",
     "magicbox": "Magic-Box",
     "planetary": "Planetary Fortress",
@@ -1947,6 +2186,9 @@ _DRILL_WORD_MAP: Dict[str, str] = {
     "widowmine": "Widow Mine",
     "highground": "High-Ground",
     "imatrix": "Interference Matrix",
+    "robo": "Robotics",
+    "dts": "Dark Templars",
+    "leylines": "Ley Lines",
 }
 
 _DRILL_TITLE_OVERRIDES: Dict[str, str] = {
@@ -1961,21 +2203,25 @@ def _format_drill_title(sid: str) -> str:
     if sid_clean in _DRILL_TITLE_OVERRIDES:
         return _DRILL_TITLE_OVERRIDES[sid_clean]
     s = re.sub(
-        r"^sc2-(?:air|blk|brw|cap|def|det|econ|flk|kit|real|reg|rmp|rsh|runby|spl|sta|trn|yam)-",
+        r"^sc2-(?:ab|air|blk|brw|cap|def|det|econ|flk|kit|nc|real|reg|rmp|rsh|runby|spl|sta|trn|yam)-",
         "",
         sid_clean,
         flags=re.I,
     )
-    # Strip short scenario code prefix (e.g. d10-, p15-, ro01-, rd03-, r14-, b01-, y01-, prod5140013-)
-    s = re.sub(r"^(?:[a-z]{1,3}\d{1,2})-", "", s, flags=re.I)
+    # Strip short scenario code prefix (e.g. d10-, p15-, 01-, ro01-, rd03-, r14-, b01-, y01-, prod5140013-)
+    s = re.sub(r"^(?:[a-z]{0,3}\d{1,2})-", "", s, flags=re.I)
     s = re.sub(r"^prod\d+-", "", s, flags=re.I)
     s = re.sub(r"^iter\d+-m\d+-", "", s, flags=re.I)
     # Strip leading single race letter or matchup token when followed by descriptive words
     s = re.sub(r"^(?:p|t|z|pvp|pvt|pvz|tvp|tvt|tvz|zvp|zvt|zvz)-", "", s, flags=re.I)
+    # Keep compound hyphenated unit pairs intact before tokenizing
+    s = re.sub(r"\bling-bane\b", "lingbane", s, flags=re.I)
     tokens = [tok for tok in re.split(r"[-_\s]+", s) if tok]
     out: List[str] = []
     for idx, tok in enumerate(tokens):
         low = tok.lower()
+        if low == "5014":
+            continue
         if low in _DRILL_WORD_MAP:
             out.append(_DRILL_WORD_MAP[low])
         elif idx > 0 and low in ("and", "or", "in", "on", "to", "of", "the", "with", "into", "from", "then", "for"):
@@ -1998,11 +2244,31 @@ def _format_trade_label(tr: Any, outcome: str) -> str:
 def _clean_drill_caption(desc: str) -> str:
     """Strip scenario metadata prefixes and internal tags without mid-phrase slicing."""
     s = str(desc or "").strip()
+    s = re.sub(
+        r"^(?:Ability-Mastery|Non-Combat|Real SC2|Pro-DB|Match-forensics|Replay Regression|Econ-Harass)[^:]{0,84}:\s*",
+        "",
+        s,
+        flags=re.I,
+    )
     if ":" in s:
         head, tail = s.split(":", 1)
-        if len(head.strip()) <= 56 and len(tail.strip()) >= 24:
+        if len(head.strip()) <= 76 and len(tail.strip()) >= 24:
             s = tail.strip()
-    s = re.sub(r"\bW\d+-(?:TAC|EARLY)-\d+[a-z]?(?:/\d+)?\s*", "", s)
+    s = s.replace("`", "")
+    s = re.sub(r"\bW\d+-(?:TAC|EARLY|LOOP)-\d+[a-z]?(?:/\d+)?\s*", "", s)
+    s = re.sub(r"\s*\(guards\s+[^)]+\)", "", s, flags=re.I)
+    s = re.sub(r",?\s*\bguards\s+arena-minimax\s+retreat\b", "", s, flags=re.I)
+    # Strip raw SC2 numeric Ability IDs while keeping human-readable labels inside parens
+    s = re.sub(r"\(\d{3,4}\s+([^()]+)\)", r"(\1)", s)
+    s = re.sub(r"\(\d{3,4},\s*([^()]+)\)", r"(\1)", s)
+    s = re.sub(r"\s*\(\d{2,4}\)", "", s)
+    # Rewrite raw SC2 map-unit CamelCase names and shorthand abbreviations
+    s = s.replace("MineralField450 (5M)", "5-mineral")
+    s = s.replace("RichMineralField (7M)", "7-mineral rich")
+    s = s.replace("BattleStationMineralField750 (150M)", "150-mineral")
+    s = s.replace("(no IM)", "(no Interference Matrix)")
+    s = re.sub(r"\bcasting AAM\b", "casting Anti-Armor Missile", s)
+    s = s.replace("(0 AA)", "(no anti-air)")
     s = re.sub(r"\bP2\s+active\b", "enemy", s)
     s = re.sub(r"\bBOTH\b", "both", s)
     s = re.sub(r"\bFIRST\b", "first", s)
@@ -2172,8 +2438,10 @@ def discover_gallery_items(
                 cand_p = Path(mp4_raw)
                 if not cand_p.is_absolute():
                     cand_p = (mpath.parent / cand_p).resolve()
-                if cand_p.is_file():
+                if cand_p.is_file() and not _is_placeholder_arena_clip(cand_p, clip):
                     mp4_local_p = cand_p
+            if mp4_local_p is None and mp4_raw and "sp07" in str(mp4_raw).lower() and "probe_iter51_w2_5014" in str(mpath).lower():
+                continue
             mp4_url = resolve_cdn(mp4_raw, mpath.parent)
             if not mp4_url and not mp4_local_p:
                 continue
@@ -2362,6 +2630,138 @@ def discover_gallery_items(
             }
         )
 
+    # 2D. Auto-discover Loop 58+ iter*_arena/pass* renders (core + ability-mastery + non-combat), skipping placeholders
+    loop_scratch_dir = brain_dir / "scratch" / "loop"
+    if loop_scratch_dir.is_dir():
+        def _pass_rank(name: str) -> int:
+            low = name.lower()
+            if "final" in low:
+                return 999
+            if low.startswith("recheck_"):
+                return -1
+            m_p = re.search(r"pass(\d+)", low)
+            return int(m_p.group(1)) if m_p else 0
+
+        for adir in sorted(loop_scratch_dir.glob("iter*_arena"), reverse=True):
+            m_it = re.search(r"iter(\d+)_arena$", adir.name)
+            if not m_it or not adir.is_dir():
+                continue
+            alnum = int(m_it.group(1))
+            # Merge pass JSON metadata (highest pass number wins per scenario ID)
+            pass_tactics: Dict[str, Dict[str, Any]] = {}
+            pass_jsons = sorted(
+                adir.glob("*.json"),
+                key=lambda p: (_pass_rank(p.name), p.stat().st_mtime),
+            )
+            for pf in pass_jsons:
+                if "selfplay" in pf.name.lower():
+                    continue
+                try:
+                    pdata = json.loads(pf.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                for sc in pdata.get("scenarios", pdata.get("results", [])):
+                    if isinstance(sc, dict) and sc.get("id"):
+                        pass_tactics[str(sc["id"])] = sc
+
+            # Scan render dirs highest-pass first, keeping latest verified render per scenario ID
+            render_dirs = sorted(
+                (d for d in adir.iterdir() if d.is_dir() and "render" in d.name.lower()),
+                key=lambda p: (_pass_rank(p.name), p.stat().st_mtime),
+                reverse=True,
+            )
+            seen_sids_in_iter: set[str] = set()
+            for rdir in render_dirs:
+                rdir_pnum = _pass_rank(rdir.name)
+                for mp4_p in sorted(rdir.rglob("*.mp4")):
+                    sid = mp4_p.stem
+                    if sid in seen_sids_in_iter:
+                        continue
+                    tinfo = pass_tactics.get(sid, {})
+                    if _is_placeholder_arena_clip(mp4_p, tinfo):
+                        continue
+                    seen_sids_in_iter.add(sid)
+                    png_p = mp4_p.with_suffix(".png")
+                    mp4_url = resolve_cdn(str(mp4_p), mp4_p.parent)
+                    png_url = resolve_cdn(str(png_p), png_p.parent) if png_p.is_file() else ""
+                    race_guess = str(tinfo.get("p1_race") or tinfo.get("our_race") or tinfo.get("race") or "")
+                    if not race_guess:
+                        low_sid = sid.lower()
+                        if any(k in low_sid for k in ("protoss", "probe", "oracle", "stalker", "zealot")):
+                            race_guess = "Protoss"
+                        elif any(k in low_sid for k in ("terran", "scv", "depot", "marine", "raven")):
+                            race_guess = "Terran"
+                        elif any(k in low_sid for k in ("zerg", "drone", "queen", "roach")):
+                            race_guess = "Zerg"
+                        elif "-p" in low_sid or "_p" in low_sid:
+                            race_guess = "Protoss"
+                        elif "-t" in low_sid or "_t" in low_sid:
+                            race_guess = "Terran"
+                        elif "-z" in low_sid or "_z" in low_sid:
+                            race_guess = "Zerg"
+                    winner_raw = str(tinfo.get("winner") or "").strip().lower()
+                    win_type = str(tinfo.get("win_type") or "").strip().lower()
+                    scoring_mode = str(tinfo.get("scoring_mode") or "").strip().lower()
+                    nc_score_raw = tinfo.get("non_combat_score")
+                    nc_score = float(nc_score_raw) if isinstance(nc_score_raw, (int, float)) else None
+                    is_nc = (scoring_mode == "non-combat") or (nc_score is not None) or ("non_combat" in win_type) or sid.startswith("sc2-nc-")
+                    is_pass_fail = is_nc or ("econ" in win_type) or ("runby" in win_type)
+                    if winner_raw in ("mothman", "mothman-p1", "p1") or win_type == "non_combat_pass":
+                        outcome = "win"
+                        res_label = "Pass" if is_pass_fail else "Win"
+                    elif winner_raw in ("microdummy", "mothman-p2", "p2") or win_type == "non_combat_fail":
+                        outcome = "loss"
+                        res_label = "Fail" if is_pass_fail else "Loss"
+                    elif winner_raw in ("draw", "tie"):
+                        outcome = "tie"
+                        res_label = "Draw"
+                    else:
+                        outcome = "win"
+                        res_label = "Drill"
+                    tr = None if is_nc else tinfo.get("trade_ratio")
+                    sv = tinfo.get("spell_verified")
+                    clean_title = _format_drill_title(sid)
+                    bits = ["Tactics Drills"]
+                    if is_nc:
+                        if nc_score is not None:
+                            bits.append(f"Score {nc_score:.0f}/100")
+                    else:
+                        tr_lbl = _format_trade_label(tr, outcome)
+                        if tr_lbl:
+                            bits.append(tr_lbl)
+                    if sv is True:
+                        bits.append("Spell verified")
+                    elif sv is False:
+                        bits.append("Spell uncast")
+                    items.append(
+                        {
+                            "loop": f"Loop {alnum}",
+                            "loop_num": alnum,
+                            "pass_num": rdir_pnum,
+                            "category": "Tactics Drills",
+                            "cohort": str(tinfo.get("category") or ("non-combat" if is_nc else "arena")),
+                            "race": _race_full(race_guess),
+                            "outcome": outcome,
+                            "result_label": res_label,
+                            "trade_ratio": tr,
+                            "scoring_mode": "non-combat" if is_nc else scoring_mode,
+                            "non_combat_score": nc_score,
+                            "spell_verified": sv,
+                            "p1_ability_accepted": tinfo.get("p1_ability_accepted"),
+                            "p1_ability_rejected": tinfo.get("p1_ability_rejected"),
+                            "title": clean_title,
+                            "subtitle": " · ".join(bits),
+                            "media_type": "mp4",
+                            "playable_mp4": False,
+                            "src": mp4_url or "",
+                            "download_url": mp4_url or "",
+                            "poster": png_url,
+                            "_local_mp4": str(mp4_p),
+                            "_safe_name": f"l{alnum}_arena_{mp4_p.name}",
+                            "search": f"loop {alnum} {sid} {clean_title} tactics drills {race_guess} {res_label}".lower(),
+                        }
+                    )
+
     # 3. Curated Recent Highlights (with clear plain-English captions for what to watch)
     curated_specs = [
         ("media-iter41", "arena_sc2-econ-e02-reaper-harass-mineral-defense.webp", "Loop 41", "Tactics Drills", "Zerg", "win", "Queen and Drones stop an early Reaper raid", "The Queen intercepts both raiding Reapers while the Drones keep mining at 97% uptime (+785 minerals net)."),
@@ -2373,7 +2773,7 @@ def discover_gallery_items(
         ("media-iter41", "rep_clip05_m23_Mothman-T_vs_CryptBotRevival_showcase.webp", "Loop 41", "Featured Clips", "Terran", "win", "Terran vs. CryptBotRevival (11.0×, zero losses)", "Clean early Terran push closed out a 2–1 series against a held-out bot without losing a single unit."),
         ("media-iter41", "arena_sc2-real-p08-stalker-phoenix-zealot-vs-bio-tank-cyclone.webp", "Loop 41", "Tactics Drills", "Protoss", "win", "Phoenixes lift Tanks for Blink Stalkers (4.4×)", "Phoenix Graviton Beams pick up the Siege Tanks while Zealots and Stalkers close the gap underneath."),
         ("media-iter41", "selfplay_sc2-econ-e03-3adept-scv-mineral-defense.webp", "Loop 41", "Self-Play Drills", "Terran", "win", "SCVs hold a three-Adept mineral raid", "93% mining uptime with only one SCV lost against three raiding Adepts."),
-        ("media-iter41", "rep_clip08_m62_Mothman-T_vs_SmoothBrain_tvt0tank.webp", "Loop 41", "Featured Clips", "Terran", "loss", "Where Terran fell behind vs. SmoothBrain", "Overbuilding early Vikings drained the gas needed for Siege Tanks—fixed in the next build."),
+        ("media-iter41", "rep_clip08_m62_Mothman-T_vs_SmoothBrain_tvt0tank.webp", "Loop 41", "Featured Clips", "Terran", "loss", "Where Terran fell behind vs. SmoothBrain", "Overbuilding early Vikings drained the gas needed for Siege Tanks (fixed in the next build)."),
         ("media-iter40", "rep_clip01_m59_Mothman-T_vs_Creepy_strategies_first-ever.webp", "Loop 40", "Featured Clips", "Terran", "win", "Terran completes a 3–0 sweep of Creepy_strategies (3.6×)", "First Terran win against Creepy_strategies, finishing a clean sweep across all three races."),
         ("media-iter40", "selfplay_sc2-real-t15-bc-yamato-jump-vs-corruptor-viper.webp", "Loop 40", "Self-Play Drills", "Terran", "win", "Battlecruisers Yamato and Tactical Jump (1.3×)", "Three Yamato shots followed by Tactical Jumps out of Corruptor focus fire turn the air fight around."),
     ]
@@ -2814,6 +3214,20 @@ tbody tr:last-child td { border-bottom: 0; }
 .t-loss { color: var(--loss); font-weight: 600; }
 .t-muted { color: var(--muted); }
 .nw { white-space: nowrap; }
+.table-flywheel table { font-size: 0.75rem; }
+.table-flywheel thead th {
+  font-size: 0.72rem;
+  line-height: 1.2;
+  padding: 0.36rem 0.26rem;
+  white-space: normal;
+  vertical-align: bottom;
+}
+.table-flywheel td {
+  padding: 0.36rem 0.26rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.36;
+}
+.table-flywheel td:first-child { white-space: nowrap; }
 
 /* Responsive Stacked Mobile Standings (< 700px) */
 .standings-mobile {
@@ -3245,18 +3659,17 @@ MERMAID_JS = """
 
 def build_header(repo_slug: str, active_slug: str) -> str:
     nav_items = [
-        ("index", "Overview", "./index.html", False),
+        ("index", "Current State", "./index.html", False),
+        ("history", "History & Fixes", "./history.html", False),
         ("video-gallery", "Replays", "./video-gallery.html", False),
-        ("loops-29-plus", "Updates", "./loops-29-plus.html", False),
-        ("technical", "Notes", "./index.html#technical-notes", False),
         ("github", "GitHub", f"https://github.com/{repo_slug}", True),
     ]
     desktop_links = []
     mobile_links = []
     for sl, lbl, href, is_ext in nav_items:
         is_active = sl == active_slug or (
-            sl == "technical"
-            and active_slug not in ("index", "loops-29-plus", "loops-19-28", "video-gallery")
+            sl == "history"
+            and active_slug not in ("index", "video-gallery")
         )
         cls = "nav-link active" if is_active else "nav-link"
         mcls = "active" if is_active else ""
@@ -3616,43 +4029,160 @@ def _build_showcase_card(
     )
 
 
-def build_index_page(
-    *,
-    repo_slug: str,
-    repo_dir: Path,
-    brain_dir: Path,
-    sqlite_path: Path,
-    published_specs: List[ReportSpec],
-    gallery_items: List[Dict[str, Any]],
-    media_by_tag: Dict[str, Dict[str, str]],
-    staged_mp4_map: Dict[str, str],
-    staged_poster_map: Dict[str, str],
-    built_utc: str,
+def _render_standings_tables(
+    ai_live: Dict[str, Any],
+    dash_bots: List[Dict[str, Any]],
+    recent_note_builds: str,
 ) -> str:
-    dash = load_dashboard_telemetry(sqlite_path)
-    rich = load_rich_report_telemetry(
-        sqlite_path=sqlite_path, repo_dir=repo_dir, brain_dir=brain_dir
-    )
-    bots = dash["bots"]
-    latest_lbl = dash["latest_build_label"]
-    latest_w = dash["latest_build_w"]
-    latest_l = dash["latest_build_l"]
-    latest_n = dash.get("latest_build_n", latest_w + latest_l)
-    latest_tr = dash["latest_build_trade"]
-    prev_lbl = dash["prev_build_label"]
-    prev_w = dash["prev_build_w"]
-    prev_l = dash["prev_build_l"]
-    prev_tr = dash.get("prev_build_trade", 0.82)
-    prev_pct = round(100.0 * prev_w / max(1, prev_w + prev_l), 1)
-    comb_w = prev_w + latest_w
-    comb_l = prev_l + latest_l
-    comb_pct = round(100.0 * comb_w / max(1, comb_w + comb_l), 1)
-    sym = dash["symmetry"]
+    """Render live AI Arena standings for BOTH v2 (Division 5) and v1 (Division 9), with mobile cards."""
+    blocks: List[str] = []
 
-    # 1. Clean 4-row Tufte Live Ladder Table (Desktop) + Stacked Rows (Mobile < 700px)
+    if ai_live.get("available"):
+        # 1. v2 Cohort — Division 5 (~1600+ Elo meta)
+        v2_bots = ai_live.get("v2_bots") or []
+        if v2_bots:
+            v2_rows = []
+            v2_mob = []
+            for b in v2_bots:
+                rec = f"{b['w']}–{b['l']}" + (f"–{b['t']}" if b.get("t") else "")
+                wr_s = f"{rec} ({b['win_perc']:.0f}%)" if (b["w"] + b["l"] + b["t"]) else "—"
+                opp_s = f"{b['opp_elo_avg']}" if b.get("opp_elo_avg") else "—"
+                v2_rows.append(
+                    f"<tr>"
+                    f'<td class="nw"><strong>{html.escape(b["bot"])}</strong></td>'
+                    f'<td class="nw">{html.escape(b["race"])}</td>'
+                    f'<td class="nw" style="text-align:right">Div {b["division"]}</td>'
+                    f'<td class="nw" style="text-align:right"><strong>{b["elo"]}</strong></td>'
+                    f'<td class="nw" style="text-align:right">{wr_s}</td>'
+                    f'<td class="nw" style="text-align:right">{opp_s}</td>'
+                    f'<td class="nw" style="text-align:right">{b["crashes"]}</td>'
+                    f"<td>{html.escape(b['highlight'])}</td>"
+                    f"</tr>"
+                )
+                v2_mob.append(
+                    f'<div class="standing-row">'
+                    f'<div class="standing-top">'
+                    f'<span class="standing-bot">{html.escape(b["bot"])} '
+                    f'<span class="standing-race">· {html.escape(b["race"])} · Div {b["division"]}</span></span>'
+                    f'<span class="standing-elo">{b["elo"]}</span>'
+                    f"</div>"
+                    f'<div class="standing-stats">{wr_s} · Opp avg {opp_s} · {b["crashes"]} crashes</div>'
+                    f'<p class="standing-note">{html.escape(b["highlight"])}</p>'
+                    f"</div>"
+                )
+            v2_tag = (
+                f"Division 5 · avg opponent Elo {ai_live['v2_opp_elo_avg']:.0f} ({ai_live['v2_opp_elo_min']}–{ai_live['v2_opp_elo_max']})"
+                if ai_live.get("v2_opp_elo_avg")
+                else "Division 5"
+            )
+            blocks.append(f"""
+  <div class="cohort-heading">
+    <h3>v2 Cohort (Division 5)</h3>
+    <span class="cohort-tag">{html.escape(v2_tag)}</span>
+  </div>
+  <div class="table-wrap standings-desktop">
+    <table>
+      <thead>
+        <tr>
+          <th>Bot</th>
+          <th>Race</th>
+          <th style="text-align:right">Div</th>
+          <th style="text-align:right">Rating</th>
+          <th style="text-align:right">Season</th>
+          <th style="text-align:right">Opp Elo</th>
+          <th style="text-align:right">Crashes</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>{"".join(v2_rows)}</tbody>
+    </table>
+  </div>
+  <div class="standings-mobile" aria-label="Live AI Arena v2 Division 5 standings">
+    {"".join(v2_mob)}
+  </div>
+""")
+
+        # 2. v1 Cohort — Division 9 (~1350 Elo meta)
+        v1_bots = ai_live.get("v1_bots") or []
+        if v1_bots:
+            v1_rows = []
+            v1_mob = []
+            for b in v1_bots:
+                rec = f"{b['w']}–{b['l']}" + (f"–{b['t']}" if b.get("t") else "")
+                wr_s = f"{rec} ({b['win_perc']:.1f}%)" if (b["w"] + b["l"] + b["t"]) else "—"
+                opp_s = f"{b['opp_elo_avg']}" if b.get("opp_elo_avg") else "—"
+                tr_v = float(b.get("recent_trade") or 0.0)
+                tr_cls = "t-win" if tr_v >= 1.0 else ""
+                tr_s = f"{tr_v:.2f}×" if tr_v > 0 else "—"
+                v1_rows.append(
+                    f"<tr>"
+                    f'<td class="nw"><strong>{html.escape(b["bot"])}</strong></td>'
+                    f'<td class="nw">{html.escape(b["race"])}</td>'
+                    f'<td class="nw" style="text-align:right">Div {b["division"]}</td>'
+                    f'<td class="nw" style="text-align:right"><strong>{b["elo"]}</strong></td>'
+                    f'<td class="nw" style="text-align:right">{wr_s}</td>'
+                    f'<td class="nw {tr_cls}" style="text-align:right">{tr_s}</td>'
+                    f'<td class="nw" style="text-align:right">{opp_s}</td>'
+                    f"<td>{html.escape(b['highlight'])}</td>"
+                    f"</tr>"
+                )
+                v1_mob.append(
+                    f'<div class="standing-row">'
+                    f'<div class="standing-top">'
+                    f'<span class="standing-bot">{html.escape(b["bot"])} '
+                    f'<span class="standing-race">· {html.escape(b["race"])} · Div {b["division"]}</span></span>'
+                    f'<span class="standing-elo">{b["elo"]}</span>'
+                    f"</div>"
+                    f'<div class="standing-stats">{wr_s} · <span class="{tr_cls}">{tr_s} recent trade</span> · Opp avg {opp_s}</div>'
+                    f'<p class="standing-note">{html.escape(b["highlight"])}</p>'
+                    f"</div>"
+                )
+            v1_tag = (
+                f"Division 9 · avg opponent Elo {ai_live['v1_opp_elo_avg']:.0f} ({ai_live['v1_opp_elo_min']}–{ai_live['v1_opp_elo_max']})"
+                if ai_live.get("v1_opp_elo_avg")
+                else "Division 9"
+            )
+            blocks.append(f"""
+  <div class="cohort-heading">
+    <h3>v1 Cohort (Division 9)</h3>
+    <span class="cohort-tag">{html.escape(v1_tag)}</span>
+  </div>
+  <div class="table-wrap standings-desktop">
+    <table>
+      <thead>
+        <tr>
+          <th>Bot</th>
+          <th>Race</th>
+          <th style="text-align:right">Div</th>
+          <th style="text-align:right">Rating</th>
+          <th style="text-align:right">Season</th>
+          <th style="text-align:right">Recent Trade</th>
+          <th style="text-align:right">Opp Elo</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>{"".join(v1_rows)}</tbody>
+    </table>
+  </div>
+  <div class="standings-mobile" aria-label="Live AI Arena v1 Division 9 standings">
+    {"".join(v1_mob)}
+  </div>
+""")
+
+        note_html = (
+            '<p class="table-note">'
+            "AI Arena ratings start at 1600. The v2 accounts play Division 5 (~1600+ Elo) opponents and recorded zero crashes "
+            "(the fetched v2 games above ran earlier Release #7 before Release #10 synced all eight bots), while the older v1 "
+            "accounts play Division 9 (~1350 Elo), where Release #9 went 19–9–3 (61.3% wins, 71.0% win-or-tie) across ranked games. "
+            "All eight bots now run Release #10. Trade ratio divides enemy army and worker value destroyed by our own value lost."
+            "</p>"
+        )
+        return "".join(blocks) + note_html
+
+    # Fallback when live AI Arena JSON snapshot is unavailable (SQLite v1 table only)
     bot_rows = []
-    mobile_standing_rows = []
-    for b in bots:
+    mobile_rows = []
+    for b in dash_bots:
         tot = b["w"] + b["l"]
         wr_s = f"{b['w']}–{b['l']} ({round(100.0 * b['w'] / tot)}%)" if tot else "—"
         tr_cls = "t-win" if b["trade"] >= 1.0 else ""
@@ -3666,7 +4196,7 @@ def build_index_page(
             f"<td>{html.escape(b['highlight'])}</td>"
             f"</tr>"
         )
-        mobile_standing_rows.append(
+        mobile_rows.append(
             f'<div class="standing-row">'
             f'<div class="standing-top">'
             f'<span class="standing-bot">{html.escape(b["bot"])} '
@@ -3678,12 +4208,77 @@ def build_index_page(
             f'<p class="standing-note">{html.escape(b["highlight"])}</p>'
             f"</div>"
         )
+    return f"""
+  <div class="table-wrap standings-desktop">
+    <table>
+      <thead>
+        <tr>
+          <th>Bot</th>
+          <th>Race</th>
+          <th style="text-align:right">Rating</th>
+          <th style="text-align:right">Recent</th>
+          <th style="text-align:right">Trade</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>{"".join(bot_rows)}</tbody>
+    </table>
+  </div>
+  <div class="standings-mobile" aria-label="Live AI Arena standings">
+    {"".join(mobile_rows)}
+  </div>
+  <p class="table-note">
+    AI Arena ratings start at 1600. Recent records combine {html.escape(recent_note_builds)}.
+    Trade ratio divides enemy army and worker value destroyed by our own value lost, so 1.0× is an even trade.
+  </p>
+"""
 
-    # 2. Inline Editorial SVG Charts
-    chart_live_svg = render_live_progress_svg(dash["prod_series"])
-    chart_sym_svg = render_symmetry_svg(sym)
 
-    # 3A. Build Per-Category Playable Tactics Arena 3.0 Video Clips (all 16 categories!)
+def build_index_page(
+    *,
+    repo_slug: str,
+    repo_dir: Path,
+    brain_dir: Path,
+    sqlite_path: Path,
+    published_specs: List[ReportSpec],
+    gallery_items: List[Dict[str, Any]],
+    media_by_tag: Dict[str, Dict[str, str]],
+    staged_mp4_map: Dict[str, str],
+    staged_poster_map: Dict[str, str],
+    built_utc: str,
+    dash: Optional[Dict[str, Any]] = None,
+    rich: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Build index.html focused strictly on Current State + Complete Tactics Arena Gallery."""
+    dash = dash or load_dashboard_telemetry(sqlite_path)
+    rich = rich or load_rich_report_telemetry(
+        sqlite_path=sqlite_path, repo_dir=repo_dir, brain_dir=brain_dir
+    )
+    ai_live = load_aiarena_live_summary(brain_dir, sqlite_path)
+    cb = rich.get("current_build") or {}
+    live_loop_num = int(cb.get("live_loop_num") or 57)
+    live_ship_num = int(cb.get("live_ship_num") or 10)
+    b_tag = cb.get("build_tag") or cb.get("loop_num") or live_loop_num
+
+    latest_lbl = dash["latest_build_label"]
+    latest_w = dash["latest_build_w"]
+    latest_l = dash["latest_build_l"]
+    prev_lbl = dash["prev_build_label"]
+    prev_w = dash["prev_build_w"]
+    prev_l = dash["prev_build_l"]
+    comb_w = prev_w + latest_w
+    comb_l = prev_l + latest_l
+    latest_num_m = re.search(r"(\d+)", latest_lbl)
+    prev_num_m = re.search(r"(\d+)", prev_lbl)
+    latest_b_num = int(latest_num_m.group(1)) if latest_num_m else 45
+    prev_b_num = int(prev_num_m.group(1)) if prev_num_m else 42
+    if cb.get("is_shipped") and cb.get("ship_num"):
+        eyebrow_txt = f"AI Arena Ladder · Live Release #{cb['ship_num']} (Build {b_tag})"
+    else:
+        eyebrow_txt = f"AI Arena Ladder · Live Release #{live_ship_num} (Build {live_loop_num}) · Local Benchmark: Build {b_tag}"
+    recent_note_builds = f"Builds {prev_b_num} and {latest_b_num} ({comb_w} wins, {comb_l} losses across completed v1 games)"
+
+    # 1. Build Per-Category Playable Tactics Arena Video Clips (EVERY verified scenario we run — NO [:4] cap!)
     clips_by_cat: Dict[str, List[Dict[str, Any]]] = {}
     scen_meta_by_id: Dict[str, Dict[str, Any]] = {}
     scen_json_p = repo_dir / "tools/arena-scenarios.json"
@@ -3694,18 +4289,17 @@ def build_index_page(
                     scen_meta_by_id[str(sc["id"])] = sc
         except Exception:
             pass
-    # Map latest Loop Arena results so each clip shows real outcome & trade ratio
-    arena_loop_num = int(rich["arena3"].get("loop_num") or 47)
-    arena_res_by_id: Dict[str, Dict[str, Any]] = {}
+    arena_res_by_id: Dict[str, Dict[str, Any]] = dict(rich["arena3"].get("scenario_results") or {})
+    arena_loop_num = int(rich["arena3"].get("loop_num") or 48)
     duel_json_p = brain_dir / "scratch" / "loop" / f"tactics_sc2_duel_iter{arena_loop_num}.json"
     if duel_json_p.is_file():
         try:
             for sc in json.loads(duel_json_p.read_text(encoding="utf-8")).get("scenarios", []):
-                if sc.get("id"):
+                if sc.get("id") and str(sc["id"]) not in arena_res_by_id:
                     arena_res_by_id[str(sc["id"])] = sc
         except Exception:
             pass
-    # Match staged playable Tactics Drills from gallery_items (preferring latest loop)
+
     arena_gallery = [
         it for it in gallery_items
         if it.get("playable_mp4") and it.get("category") == "Tactics Drills"
@@ -3713,30 +4307,27 @@ def build_index_page(
     arena_gallery.sort(
         key=lambda x: (
             -int(x.get("loop_num") or 0),
+            -int(x.get("pass_num") or 0),
             0 if x.get("outcome") == "win" else 1,
         )
     )
     seen_clip_sid: set[str] = set()
     for it in arena_gallery:
-        # Recover scenario id from staged filename or search string
         src_name = Path(str(it.get("src") or "")).stem
         m_sid = re.search(r"(sc2-[a-z0-9-]+)$", src_name)
         sid = m_sid.group(1) if m_sid else ""
-        if not sid or sid in seen_clip_sid or sid not in scen_meta_by_id:
+        if not sid or sid in seen_clip_sid:
+            continue
+        if sid not in scen_meta_by_id and not it.get("cohort"):
             continue
         seen_clip_sid.add(sid)
-        smeta = scen_meta_by_id[sid]
-        cat = str(smeta.get("category") or "other")
+        smeta = scen_meta_by_id.get(sid, {})
         sres = arena_res_by_id.get(sid, {})
+        cat = str(smeta.get("category") or sres.get("category") or it.get("cohort") or "other")
         if sid == "sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker" and int(it.get("loop_num") or 0) >= 51:
             desc = (
                 "Vikings clear both Observers so Cloaked Banshees stay invisible, then land on the remaining "
                 "Stalkers while the Raven casts Anti-Armor Missile and Auto-Turret and survives."
-            )
-        elif sid == "sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker" and int(it.get("loop_num") or 0) >= 50:
-            desc = (
-                "Vikings clear both Observers so Cloaked Banshees stay invisible, then land on the remaining "
-                "Stalkers while the Raven drops two Auto-Turrets and kites to safety."
             )
         elif sid == "sc2-real-t14-raven-imatrix-aam-bio-vs-colossus" and int(it.get("loop_num") or 0) >= 51:
             desc = (
@@ -3746,15 +4337,33 @@ def build_index_page(
         else:
             desc = _clean_drill_caption(str(smeta.get("description") or it.get("subtitle") or ""))
         outcome_val = str(it.get("outcome") or "win")
-        tr = it.get("trade_ratio") if it.get("trade_ratio") is not None else sres.get("trade_ratio")
-        tr_lbl = _format_trade_label(tr, outcome_val)
-        tr_str = f" · {tr_lbl}" if tr_lbl else ""
+        scoring_mode = str(it.get("scoring_mode") or sres.get("scoring_mode") or smeta.get("scoring_mode") or "").lower()
+        nc_raw = it.get("non_combat_score") if it.get("non_combat_score") is not None else sres.get("non_combat_score")
+        nc_score = float(nc_raw) if isinstance(nc_raw, (int, float)) else None
+        is_nc = (scoring_mode == "non-combat") or (cat == "non-combat") or (nc_score is not None)
+        if is_nc:
+            tr_str = ""
+        else:
+            tr = it.get("trade_ratio") if it.get("trade_ratio") is not None else sres.get("trade_ratio")
+            tr_lbl = _format_trade_label(tr, outcome_val)
+            tr_str = f" · {tr_lbl}" if tr_lbl else ""
+        sv = it.get("spell_verified")
+        if sv is None and "spell_verified" in sres:
+            sv = sres.get("spell_verified")
+        race_val = str(it.get("race") or _race_full(str(smeta.get("our_race") or smeta.get("p1_race") or smeta.get("race") or "")))
+        res_lbl = str(it.get("result_label") or "Drill")
+        if is_nc and res_lbl in ("Win", "Loss"):
+            res_lbl = "Pass" if outcome_val == "win" else "Fail"
         clips_by_cat.setdefault(cat, []).append(
             {
                 "id": sid,
-                "meta": f"{it.get('loop', f'Loop {arena_loop_num}')} · {it.get('race', '')}{tr_str}",
+                "race": race_val,
+                "meta": f"{it.get('loop', f'Loop {arena_loop_num}')} · {race_val}{tr_str}",
                 "outcome": outcome_val,
-                "result_label": it.get("result_label", "Drill"),
+                "result_label": res_lbl,
+                "non_combat_score": nc_score,
+                "scoring_mode": "non-combat" if is_nc else scoring_mode,
+                "spell_verified": sv,
                 "title": it.get("title", _format_drill_title(sid)),
                 "caption": desc,
                 "src": it["src"],
@@ -3763,38 +4372,45 @@ def build_index_page(
                 "playable_mp4": True,
             }
         )
+    for cat_clips in clips_by_cat.values():
+        cat_clips.sort(
+            key=lambda cl: (
+                0 if cl.get("spell_verified") is True else (1 if cl.get("outcome") == "win" else 2),
+                str(cl.get("id") or ""),
+            )
+        )
 
-    # 3B. Flagship Full-Match Playable MP4 Replays (same-origin iOS H.264 Main L3.1)
+    # 2. Compact Full-Match Featured Replays strip (4 playable in-browser replays)
     match_flagships = [
         (
             "showcase:h2h003",
-            "Loop 45 · Protoss · Head-to-Head",
-            "Mothman-P vs. Build 42 (PvP · 3.40×)",
-            "Protoss mirror win over the previous ladder build with Blink Stalkers, Immortals, and Colossi.",
+            "Protoss · Head-to-Head",
+            "Mothman-P vs. Previous Live Build (PvP · 3.40×)",
+            "Protoss mirror win with Blink Stalkers, Immortals, and Colossi.",
             None,
             None,
         ),
         (
             "showcase:h2h006",
-            "Loop 45 · Terran · Head-to-Head",
-            "Mothman-T vs. Build 42 (TvZ · 6.32×)",
-            "Infantry, Siege Tank, and Medivac push breaks Zerg's expansions after fixing the dead-Broodling anti-air bug.",
+            "Terran · Head-to-Head",
+            "Mothman-T vs. Previous Live Build (TvZ · 6.32×)",
+            "Infantry, Siege Tank, and Medivac push breaks Zerg expansions.",
             None,
             None,
         ),
         (
             "showcase:m074",
-            "Loop 45 · Terran · Held-Out Bot",
+            "Terran · Held-Out Bot",
             "Mothman-T vs. who (TvP · 23.75×)",
-            "First Terran win against held-out bot who, finished under nine minutes with 1.8% supply-blocked time.",
+            "Terran win against held-out bot who, finished under nine minutes with 1.8% supply-blocked time.",
             "Mothman-T vs. <code>who</code> (TvP · 23.75×)",
-            "First Terran win against held-out bot <code>who</code>, finished under nine minutes with 1.8% supply-blocked time.",
+            "Terran win against held-out bot <code>who</code>, finished under nine minutes with 1.8% supply-blocked time.",
         ),
         (
             "showcase:h2h002",
-            "Loop 45 · Terran · Head-to-Head",
-            "Mothman-T vs. Build 42 (TvT · 2.18×)",
-            "Terran mirror win over Build 42 behind earlier Siege Tanks and faster second-base timing.",
+            "Terran · Head-to-Head",
+            "Mothman-T vs. Previous Live Build (TvT · 2.18×)",
+            "Terran mirror win behind earlier Siege Tanks and faster second-base timing.",
             None,
             None,
         ),
@@ -3815,26 +4431,158 @@ def build_index_page(
                     caption_html=cap_h,
                 )
             )
-    if len(featured_cards) < 4:
-        fallback_items = [it for it in gallery_items if it.get("playable_mp4")][: 4 - len(featured_cards)]
-        for it in fallback_items:
-            featured_cards.append(
-                _build_showcase_card(
-                    meta_left=f"{it['loop']} · {it['race']}",
-                    title=it["title"],
-                    caption=it["subtitle"],
-                    src=it["src"],
-                    poster=it.get("poster", ""),
-                    download_url=it.get("download_url") or it["src"],
-                    playable_mp4=bool(it.get("playable_mp4")),
-                )
-            )
 
-    # 4. Reading Lists (Updates & Technical Notes — 7 evergreen visible + collapsible per-loop archive)
+    standings_html = _render_standings_tables(ai_live, dash["bots"], recent_note_builds)
+    sec_matchups = render_matchup_evaluation_section(rich, section_num="Section 2")
+    sec_tactics = render_tactics_explorer_section(rich, clips_by_cat, section_num="Section 3")
+    sec_arch = render_architecture_section(rich, section_num="Section 4", include_history_details=False)
+
+    replays_strip = ""
+    if featured_cards:
+        replays_strip = f"""
+<section class="section-rule wide-col" aria-labelledby="replays-heading">
+  <div class="section-head">
+    <h2 id="replays-heading" class="section-kicker">Selected Full-Match Replays</h2>
+    <p class="section-intro">
+      Full-length games playable directly in your browser.
+      <a href="./video-gallery.html">Browse all {len(gallery_items):,} recorded matches and combat drills →</a>
+    </p>
+  </div>
+  <div class="featured-grid">{"".join(featured_cards)}</div>
+</section>
+"""
+
+    body = f"""
+<header class="masthead wide-col">
+  <p class="eyebrow">{html.escape(eyebrow_txt)}</p>
+  <h1>Mothman StarCraft II Bots</h1>
+  <p class="lead" style="max-width:740px;">
+    Eight StarCraft II bots written in Racket play Protoss, Terran, Zerg, and Random across AI Arena's
+    Division 5 (v2) and Division 9 (v1) ladders. This page covers where the live build stands right now;
+    past releases, bug write-ups, and iteration history live on <a href="./history.html">History &amp; Fixes</a>.
+  </p>
+  <nav class="jump-bar" aria-label="Current state sections">
+    <a href="#standings-heading">1. Live AI Arena</a>
+    <a href="#matchups-section">2. Local Benchmark</a>
+    <a href="#tactics-section">3. Tactics Arena</a>
+    <a href="#architecture-section">4. How It Plays</a>
+    <a href="./history.html">History &amp; Fixes →</a>
+  </nav>
+</header>
+
+<section class="wide-col" aria-labelledby="standings-heading">
+  <div class="section-head">
+    <p class="section-num">Section 1</p>
+    <h2 id="standings-heading" class="section-kicker">Live AI Arena Standings (v2 &amp; v1)</h2>
+  </div>
+  {standings_html}
+  <details style="margin-top:0.75rem;">
+    <summary>StarCraft II and benchmark terms used on this page</summary>
+    <ul class="compact-list" style="margin-top:0.5rem;">
+      <li><strong>Supply-blocked:</strong> Share of match time the bot could not train units because it hit its current supply cap (Pylons, Supply Depots, or Overlords). Lower is better; under 4% is solid.</li>
+      <li><strong>Natural expansion:</strong> The second base site just outside a player's starting main base.</li>
+      <li><strong>Bio / 1-1-1 / 12-Pool:</strong> <em>Bio</em> is Terran infantry (Marines, Marauders, Medivacs). <em>1-1-1</em> is opening one Barracks, one Factory, and one Starport. <em>12-Pool</em> is an immediate Zergling rush started at 12 workers.</li>
+      <li><strong>14 Core Bots vs. All 26 Local Bots:</strong> Locally we test against 14 regular practice bots (<em>Core-14</em>) plus 12 held-out bots (<em>Unseen-12</em>) that we never tune against directly, so we can tell whether a change generalizes. Matches hitting the 30-minute time limit count as ties.</li>
+    </ul>
+  </details>
+</section>
+
+{sec_matchups}
+{sec_tactics}
+{replays_strip}
+{sec_arch}
+
+<section class="section-rule wide-col">
+  <div class="history-cta">
+    <p><strong>Looking for older builds, past bugs we fixed, or the full iteration log?</strong> Ladder history charts, release notes, and technical deep dives live on the companion history page.</p>
+    <a href="./history.html">Open History &amp; Fixes →</a>
+  </div>
+</section>
+"""
+    return render_page_shell(
+        repo_slug=repo_slug,
+        title="Mothman — StarCraft II Bots (Current State)",
+        active_slug="index",
+        body_html=body,
+        toc=None,
+        include_mermaid=False,
+        extra_scripts=INTERACTIVE_SECTIONS_JS,
+        built_utc=built_utc,
+    )
+
+
+def build_history_page(
+    *,
+    repo_slug: str,
+    repo_dir: Path,
+    brain_dir: Path,
+    sqlite_path: Path,
+    published_specs: List[ReportSpec],
+    media_by_tag: Dict[str, Dict[str, str]],
+    built_utc: str,
+    dash: Optional[Dict[str, Any]] = None,
+    rich: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Build history.html housing ladder progression, testing workflow, bugs fixed, release log, and notes."""
+    dash = dash or load_dashboard_telemetry(sqlite_path)
+    rich = rich or load_rich_report_telemetry(
+        sqlite_path=sqlite_path, repo_dir=repo_dir, brain_dir=brain_dir
+    )
+    sym = dash["symmetry"]
+    latest_lbl = dash["latest_build_label"]
+    latest_w = dash["latest_build_w"]
+    latest_l = dash["latest_build_l"]
+    latest_n = dash.get("latest_build_n", latest_w + latest_l)
+    latest_tr = dash["latest_build_trade"]
+    prev_lbl = dash["prev_build_label"]
+    prev_w = dash["prev_build_w"]
+    prev_l = dash["prev_build_l"]
+    prev_n_val = dash.get("prev_build_n", prev_w + prev_l)
+    latest_ties = max(0, latest_n - latest_w - latest_l)
+    prev_ties = max(0, prev_n_val - prev_w - prev_l)
+    latest_rec_str = f"{latest_w}–{latest_l}" + (f"–{latest_ties}" if latest_ties else "")
+    prev_rec_str = f"{prev_w}–{prev_l}" + (f"–{prev_ties}" if prev_ties else "")
+    latest_num_m = re.search(r"(\d+)", latest_lbl)
+    prev_num_m = re.search(r"(\d+)", prev_lbl)
+    latest_b_num = int(latest_num_m.group(1)) if latest_num_m else 45
+    prev_b_num = int(prev_num_m.group(1)) if prev_num_m else 42
+
+    prod_series = [dict(s) for s in dash["prod_series"]]
+    has_l51 = any(
+        str(s.get("label") or "").strip().lower() in ("loop 51", "build 51", "l51")
+        or str(s.get("bv") or "") == "nkxlrsuk_4e7c6f39"
+        for s in prod_series
+    )
+    if not has_l51 and prod_series:
+        prod_series.append(
+            {
+                "bv": "nkxlrsuk_4e7c6f39",
+                "label": "Loop 51",
+                "n": 31,
+                "w": 19,
+                "l": 9,
+                "wr": 61.3,
+                "trade": None,
+            }
+        )
+
+    chart_live_svg = render_live_progress_svg(prod_series)
+    chart_sym_svg = render_symmetry_svg(sym)
+    live_caption = (
+        f"The first deployed build went 0–10 on AI Arena. Recent v1 builds win roughly 55–61% of their games: "
+        f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
+        f"and Release #9 (Build 51) climbed to 19–9–3 (61.3% wins) before Release #10 (Build 57) rolled out to all 8 ladder bots."
+    )
+
+    sec_loop = render_loop_diagram_section(rich, section_num="Section 2")
+    sec_issues = render_issues_fixed_section(chart_sym_svg, sym, rich, section_num="Section 3")
+    hist_faults = render_historical_faults_details(rich)
+
+    # Reading lists (Campaign Updates & Technical Notes)
     progress_items = [
         '<li class="doc-item">'
         '<a class="doc-item-title" href="./video-gallery.html">Replay library</a>'
-        '<p class="doc-item-desc">Filterable recordings of full matches and combat drills by loop, race, opponent, and outcome.</p>'
+        '<p class="doc-item-desc">Filterable recordings of full matches and combat drills across past loops, races, and opponents.</p>'
         "</li>"
     ]
     evergreen_order = (
@@ -3861,10 +4609,9 @@ def build_index_page(
             evergreen_by_slug[sp.slug] = li
         else:
             per_loop_items.append(li)
-
     evergreen_items = [evergreen_by_slug[sl] for sl in evergreen_order if sl in evergreen_by_slug]
     per_loop_archive_html = (
-        "<details style=\"margin-top:0.85rem;\">"
+        '<details style="margin-top:0.85rem;">'
         "<summary>Per-loop forensic notes &amp; raw run log (Loops 36–47)</summary>"
         f'<ul class="doc-list" style="margin-top:0.65rem;">{"".join(per_loop_items)}</ul>'
         "</details>"
@@ -3872,24 +4619,130 @@ def build_index_page(
         else ""
     )
 
-    # 5. Collapsible Engineering Ledger (for developers)
-    ledger_path = repo_dir / "tools/iteration-loop/loop_ledger.json"
+    # Shipped Releases Table + Collapsible Benchmark Ledger from loop_ledger.json
+    _SHIP_RELEASE_NUMS: Dict[str, int] = {
+        "iter34_wave34_full": 1,
+        "iter36_wave36_full": 2,
+        "iter37_wave37_full": 3,
+        "iter40_wave40_full": 4,
+        "iter42_wave42_full": 5,
+        "iter45_wave45_full": 6,
+        "iter48_wave48_full": 7,
+        "iter50_w3_full": 8,
+        "iter51_ship9_full": 9,
+        "iter57_ship10_full": 10,
+    }
+
+    def _format_run_label(run_id: str, status_raw: str = "") -> str:
+        rid = str(run_id or "").strip()
+        st_u = str(status_raw or "").upper()
+        is_shipped = "SHIP" in st_u and "HOLD" not in st_u and "FAIL" not in st_u
+        m_iter = re.match(r"^iter(\d+[a-z]?)(?=_|$|-)", rid, flags=re.I)
+        btag = m_iter.group(1).upper() if m_iter else ""
+        if rid in _SHIP_RELEASE_NUMS and (is_shipped or not st_u):
+            rel_n = _SHIP_RELEASE_NUMS[rid]
+            return f"Release #{rel_n} (Build {btag})" if btag else f"Release #{rel_n}"
+        if is_shipped:
+            m_sh = re.search(r"ship(\d+)", rid, flags=re.I) or re.search(r"SHIP_(\d+)", st_u)
+            if m_sh and btag:
+                return f"Release #{int(m_sh.group(1))} (Build {btag})"
+        if btag:
+            return f"Build {btag}"
+        return rid
+
+    shipped_table_html = ""
     ledger_section = ""
+    ledger_path = repo_dir / "tools/iteration-loop/loop_ledger.json"
     if ledger_path.is_file():
         try:
             ld = json.loads(ledger_path.read_text(encoding="utf-8"))
             iters = ld.get("iterations", [])
-            recent = list(reversed(iters[-12:]))
+            shipped_rows = []
+            for it in reversed(iters):
+                st = str(it.get("status") or "").upper()
+                if "SHIP" not in st or "HOLD" in st or "FAIL" in st:
+                    continue
+                cn = int(it.get("clean_n") or 0)
+                if cn < 70:
+                    continue
+                raw_id = str(it.get("id", ""))
+                it_id = html.escape(_format_run_label(raw_id, st))
+                rec_short = _format_ledger_record(str(it.get("record_clean", "")))
+                c14 = it.get("core14_wr_pct")
+                c14_s = f"{float(c14):.1f}%" if isinstance(c14, (int, float)) else "—"
+                u12 = it.get("unseen12_wins")
+                u12_s = f"{int(u12)} wins" if isinstance(u12, (int, float)) else "—"
+                tr = it.get("trade_agg")
+                tr_s = f"{tr:.2f}×" if isinstance(tr, (int, float)) else "—"
+                sb = it.get("sup_blk_pct")
+                sb_s = f"{sb:.1f}%" if isinstance(sb, (int, float)) else "—"
+                shipped_rows.append(
+                    f"<tr>"
+                    f'<td class="nw"><strong>{it_id}</strong></td>'
+                    f"<td>{html.escape(rec_short)}</td>"
+                    f'<td style="text-align:right">{c14_s}</td>'
+                    f'<td style="text-align:right">{u12_s}</td>'
+                    f'<td style="text-align:right">{tr_s}</td>'
+                    f'<td style="text-align:right">{sb_s}</td>'
+                    f"</tr>"
+                )
+            if shipped_rows:
+                shipped_table_html = f"""
+  <div class="table-wrap" style="margin-bottom:1.1rem;">
+    <table>
+      <thead>
+        <tr>
+          <th>Shipped Release Run</th>
+          <th>External Benchmark Record</th>
+          <th style="text-align:right">14 Core WR</th>
+          <th style="text-align:right">12 Held-Out</th>
+          <th style="text-align:right">Trade</th>
+          <th style="text-align:right">Supply-Blocked</th>
+        </tr>
+      </thead>
+      <tbody>{"".join(shipped_rows[:12])}</tbody>
+    </table>
+  </div>
+"""
+            recent = list(reversed(iters[-18:]))
             lrows = []
+            cur_b = (rich or {}).get("current_build") or {}
+            cur_tag = str(cur_b.get("build_tag") or "").upper()
+            cur_ext = (cur_b.get("cohorts") or {}).get("ext") or {}
+            already_has_cur = bool(
+                cur_tag
+                and any(
+                    re.match(rf"^iter{re.escape(cur_tag)}(?=_|$|-)", str(it.get("id") or ""), flags=re.I)
+                    for it in recent
+                )
+            )
+            if cur_tag and cur_ext.get("n") and not already_has_cur:
+                cw, cl, ct = int(cur_ext.get("w", 0)), int(cur_ext.get("l", 0)), int(cur_ext.get("t", 0))
+                cn_cur = int(cur_ext.get("n", cw + cl + ct))
+                rec_cur = _format_ledger_record(f"{cw}W-{cl}L-{ct}T" if ct else f"{cw}W-{cl}L")
+                tr_cur = f"{float(cur_ext['tr']):.2f}×" if isinstance(cur_ext.get("tr"), (int, float)) else "—"
+                sb_cur = f"{float(cur_ext['sb']):.1f}%" if isinstance(cur_ext.get("sb"), (int, float)) else "—"
+                lrows.append(
+                    f'<tr><td class="nw"><strong>Build {html.escape(cur_tag)}</strong></td>'
+                    f"<td>Latest Benchmark</td>"
+                    f'<td style="text-align:right">{cn_cur}</td>'
+                    f"<td>{html.escape(rec_cur)}</td>"
+                    f'<td style="text-align:right">{tr_cur}</td>'
+                    f'<td style="text-align:right">{sb_cur}</td>'
+                    f"<td>—</td></tr>"
+                )
             for it in recent:
-                it_id = html.escape(str(it.get("id", "")))
+                raw_id = str(it.get("id", ""))
+                st_raw = str(it.get("status") or "")
+                it_id = html.escape(_format_run_label(raw_id, st_raw))
                 clean_n = html.escape(str(it.get("clean_n", "")))
                 rec_short = _format_ledger_record(str(it.get("record_clean", "")))
                 tr = it.get("trade_agg")
                 tr_s = f"{tr:.2f}×" if isinstance(tr, (int, float)) else "—"
                 sb = it.get("sup_blk_pct")
                 sb_s = f"{sb:.1f}%" if isinstance(sb, (int, float)) else "—"
-                m_it = re.match(r"(iter\d+)", str(it.get("id", "")))
+                st_lbl = "Shipped" if ("SHIP" in st_raw.upper() and "HOLD" not in st_raw.upper()) else ("Held" if "HOLD" in st_raw.upper() else st_raw[:18])
+                m_it = re.match(r"(iter\d+)", raw_id)
                 rel_cell = "—"
                 if m_it and f"media-{m_it.group(1)}" in media_by_tag:
                     tag = f"media-{m_it.group(1)}"
@@ -3898,7 +4751,8 @@ def build_index_page(
                         f'target="_blank" rel="noopener noreferrer">{tag}</a>'
                     )
                 lrows.append(
-                    f"<tr><td>{it_id}</td>"
+                    f'<tr><td class="nw">{it_id}</td>'
+                    f"<td>{html.escape(st_lbl)}</td>"
                     f'<td style="text-align:right">{clean_n}</td>'
                     f"<td>{html.escape(rec_short)}</td>"
                     f'<td style="text-align:right">{tr_s}</td>'
@@ -3907,101 +4761,44 @@ def build_index_page(
                 )
             ledger_section = (
                 "<details>"
-                "<summary>Benchmark ledger (last 12 practice runs)</summary>"
+                f"<summary>Full practice benchmark ledger (last {len(lrows)} runs)</summary>"
                 '<div class="table-wrap"><table><thead><tr>'
-                '<th>Run</th><th style="text-align:right">Matches</th>'
+                '<th>Run</th><th>Outcome</th><th style="text-align:right">Matches</th>'
                 '<th>Record</th><th style="text-align:right">Trade</th>'
-                '<th style="text-align:right">Supply-blocked</th><th>Media</th>'
+                '<th style="text-align:right">Supply-Blocked</th><th>Media</th>'
                 f'</tr></thead><tbody>{"".join(lrows)}</tbody></table></div>'
                 "</details>"
             )
         except Exception:
-            ledger_section = ""
-
-    # Dynamic live-ladder eyebrow & caption (distinguish live deployed build vs. latest build with >=8 ladder games)
-    latest_ties = max(0, latest_n - latest_w - latest_l)
-    latest_rec_str = f"{latest_w}–{latest_l}" + (f"–{latest_ties}" if latest_ties else "")
-    prev_n_val = dash.get("prev_build_n", prev_w + prev_l)
-    prev_ties = max(0, prev_n_val - prev_w - prev_l)
-    prev_rec_str = f"{prev_w}–{prev_l}" + (f"–{prev_ties}" if prev_ties else "")
-    deployed_build_num = 51
-    latest_num_m = re.search(r"(\d+)", latest_lbl)
-    prev_num_m = re.search(r"(\d+)", prev_lbl)
-    latest_b_num = int(latest_num_m.group(1)) if latest_num_m else 45
-    prev_b_num = int(prev_num_m.group(1)) if prev_num_m else 42
-    if latest_b_num >= deployed_build_num:
-        eyebrow_txt = f"AI Arena Ladder · Live Build {latest_b_num}"
-        recent_note_builds = f"Builds {prev_b_num} and {latest_b_num} ({comb_w} wins, {comb_l} losses across completed ladder games)"
-    else:
-        eyebrow_txt = f"AI Arena Ladder · Live Build {deployed_build_num} (Stats: Builds {prev_b_num} & {latest_b_num})"
-        recent_note_builds = f"Builds {prev_b_num} and {latest_b_num} ({comb_w} wins, {comb_l} losses across completed ladder games; Build {deployed_build_num} just deployed)"
-
-    live_caption = (
-        f"Our first deployed build went 0–10 on the ladder. Recent builds win roughly 55–60% of their matches: "
-        f"Build {prev_b_num} went {prev_rec_str} and Build {latest_b_num} is {latest_rec_str} with a {latest_tr:.2f}× trade ratio."
-    )
-
-    sec_loop = render_loop_diagram_section(rich)
-    sec_arch = render_architecture_section(rich)
-    sec_tactics = render_tactics_explorer_section(rich, clips_by_cat)
-    sec_matchups = render_matchup_evaluation_section(rich)
-    sec_issues = render_issues_fixed_section(chart_sym_svg, sym, rich)
+            pass
 
     body = f"""
 <header class="masthead wide-col">
-  <p class="eyebrow">{html.escape(eyebrow_txt)}</p>
-  <h1>Mothman StarCraft II Bots</h1>
-  <p class="lead" style="max-width:720px;">
-    Four StarCraft II bots written in Racket play Protoss, Terran, Zerg, and Random on the public AI Arena ladder.
-    New builds are tested in short combat drills, a head-to-head match against the current live bot,
-    and an 84-game local practice set before going live.
+  <p class="eyebrow">Campaign Archive · Releases &amp; Bug Fixes</p>
+  <h1>History &amp; Fixes</h1>
+  <p class="lead" style="max-width:740px;">
+    How Mothman progressed across live ladder builds, what bugs we caught in replays and combat drills,
+    and our complete release and benchmark history. For where the bots stand right now, see
+    <a href="./index.html">Current State</a>.
   </p>
-  <nav class="jump-bar" aria-label="Report sections">
-    <a href="#standings-heading">Standings</a>
-    <a href="#loop-section">1. Testing &amp; Releases</a>
-    <a href="#architecture-section">2. How the Bot Plays</a>
-    <a href="#tactics-section">3. Combat Drills</a>
-    <a href="#matchups-section">4. Matchup Results</a>
-    <a href="#issues-section">5. Bugs Fixed</a>
-    <a href="#replays-heading">6. Replays</a>
-    <a href="#technical-notes">Notes</a>
+  <nav class="jump-bar" aria-label="History sections">
+    <a href="#ladder-history">1. Ladder History</a>
+    <a href="#loop-section">2. Testing Loop</a>
+    <a href="#issues-section">3. Bugs Fixed</a>
+    <a href="#releases-section">4. Releases &amp; Runs</a>
+    <a href="#technical-notes">5. Archive &amp; Notes</a>
   </nav>
 </header>
 
-<section class="wide-col" aria-labelledby="standings-heading">
-  <h2 id="standings-heading" class="section-kicker">Live Ladder Standings</h2>
-  <div class="table-wrap standings-desktop">
-    <table>
-      <thead>
-        <tr>
-          <th>Bot</th>
-          <th>Race</th>
-          <th style="text-align:right">Rating</th>
-          <th style="text-align:right">Recent</th>
-          <th style="text-align:right">Trade</th>
-          <th>Recent games</th>
-        </tr>
-      </thead>
-      <tbody>{"".join(bot_rows)}</tbody>
-    </table>
+<section class="wide-col" id="ladder-history">
+  <div class="section-head">
+    <p class="section-num">Section 1</p>
+    <h2 class="section-kicker">Live Ladder Progression</h2>
+    <p class="section-intro">
+      Win rate and trade ratio across live AI Arena builds from the initial release through our recent v1 deployments.
+    </p>
   </div>
-  <div class="standings-mobile" aria-label="Live AI Arena standings">
-    {"".join(mobile_standing_rows)}
-  </div>
-  <p class="table-note">
-    AI Arena ratings start at 1600. Recent records combine {html.escape(recent_note_builds)}.
-    Trade ratio divides enemy army and worker value destroyed by our own value lost, so 1.0× is an even trade.
-  </p>
-  <details style="margin-top:0.75rem;">
-    <summary>StarCraft II and benchmark terms used on this page</summary>
-    <ul class="compact-list" style="margin-top:0.5rem;">
-      <li><strong>Supply-blocked:</strong> Share of match time the bot could not train units because it hit its current supply cap (Pylons, Supply Depots, or Overlords). Lower is better; under 4% is solid.</li>
-      <li><strong>Natural expansion:</strong> The second base site just outside a player's starting main base.</li>
-      <li><strong>Bio / 1-1-1 / 12-Pool:</strong> <em>Bio</em> is Terran infantry (Marines, Marauders, Medivacs). <em>1-1-1</em> is opening one Barracks, one Factory, and one Starport. <em>12-Pool</em> is an immediate Zergling rush started at 12 workers.</li>
-      <li><strong>14 Core Bots vs. All 26 Local Bots:</strong> Locally we test against 14 regular practice bots (<em>Core-14</em>) plus 12 held-out bots (<em>Unseen-12</em>) that we never tune against directly, so we can tell whether a change generalizes. Matches hitting the 30-minute time limit count as ties.</li>
-    </ul>
-  </details>
-  <figure class="figure-block" style="margin-top:1.35rem;">
+  <figure class="figure-block" style="margin-top:0.5rem;">
     <div class="figure-label">Figure 1 · Ladder History</div>
     <div class="figure-title">Win rate and trade ratio across live AI Arena builds</div>
     {chart_live_svg}
@@ -4010,47 +4807,169 @@ def build_index_page(
 </section>
 
 {sec_loop}
-{sec_arch}
-{sec_tactics}
-{sec_matchups}
 {sec_issues}
 
-<section class="section-rule wide-col" aria-labelledby="replays-heading">
+<section class="section-rule wide-col" id="releases-section">
   <div class="section-head">
-    <p class="section-num">Section 6</p>
-    <h2 id="replays-heading" class="section-kicker">Full-Match Replays</h2>
+    <p class="section-num">Section 4</p>
+    <h2 class="section-kicker">Shipped Releases &amp; Practice Runs</h2>
     <p class="section-intro">
-      Full-length games from Build 45 playable directly in your browser.
-      <a href="./video-gallery.html">Browse all {len(gallery_items):,} match replays and combat drills →</a>
+      Every shipped release passed our head-to-head gate, full local benchmark, and standalone 4-race package check before going live.
     </p>
   </div>
-  <div class="featured-grid">{"".join(featured_cards)}</div>
+  {shipped_table_html}
+  {ledger_section}
+  {hist_faults}
 </section>
 
-<section class="section-rule prose-col">
-  <h2 class="section-kicker">Campaign Updates</h2>
+<section class="section-rule prose-col" id="technical-notes">
+  <div class="section-head">
+    <p class="section-num">Section 5</p>
+    <h2 class="section-kicker">Campaign Logs &amp; Technical Notes</h2>
+  </div>
+  <h3 style="margin:0.25rem 0 0.6rem;font-size:1.06rem;">Campaign Updates</h3>
   <ul class="doc-list">{"".join(progress_items)}</ul>
 
-  <h2 id="technical-notes" class="section-kicker" style="margin-top:2.4rem;">Technical Notes</h2>
+  <h3 style="margin:2rem 0 0.5rem;font-size:1.06rem;">Technical Notes</h3>
   <p class="prose-tight">
-    Deep dives into map symmetry, scouting accuracy, economy priorities, and testing speed, followed by per-loop notes.
+    Deep dives into map symmetry, scouting accuracy, economy priorities, and testing workflow, followed by per-loop notes.
   </p>
   <ul class="doc-list">{"".join(evergreen_items)}</ul>
   {per_loop_archive_html}
-
-  {ledger_section}
 </section>
 """
     return render_page_shell(
         repo_slug=repo_slug,
-        title="Mothman — StarCraft II Bots",
-        active_slug="index",
+        title="History & Fixes",
+        active_slug="history",
         body_html=body,
         toc=None,
         include_mermaid=False,
         extra_scripts=INTERACTIVE_SECTIONS_JS,
         built_utc=built_utc,
     )
+
+
+def _sanitize_flywheel_retro_md(md: str) -> str:
+    """Turn auto-generated loop_flywheel_retro.md into clean cold-reader prose without touching the generator."""
+    # 1. Strip internal '- **Files:** ...' lines (removes file paths and extra sub-bullets in Section 5)
+    lines = [
+        ln for ln in md.splitlines()
+        if not re.match(r"^\s*-\s+\*\*Files:\*\*", ln)
+    ]
+    text = "\n".join(lines)
+
+    # 2. Strip internal *(Owner: @...)* suffixes on Section 5 items
+    text = re.sub(r"\s*\*\(Owner:[^)]+\)\*", "", text)
+
+    # 3. Clean ISO timestamp & Section 2 compact headers
+    text = re.sub(
+        r"`(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}):\d{2}Z`",
+        r"\1 \2 UTC",
+        text,
+    )
+    text = text.replace(
+        "| Agent | Runs | Steps | Tool Calls | Tool Errs (%) | Edit Misses | Cmd Fails | `raco make` | `run-all-tests` | Monolith Reads | Own Reqs | Compactions | Cache Hit |",
+        "| Role | Runs | Steps | Tool Calls | Tool Errs | Edit Miss | Cmd Fail | Builds | Test Runs | Large Reads | Handoffs | Compacts | Cache |",
+    )
+    text = text.replace("| 84m Bench Min |", "| Bench Min |")
+
+    # 4. Map internal snake_case phase keys, root causes, and agent handles to plain English
+    replacements: List[Tuple[str, str]] = [
+        # Phase keys (Section 1 + prose)
+        ("`benchmark_84`", "84-match benchmark"),
+        ("`coding`", "Engineering changes"),
+        ("`idle_gaps_sec`", "Idle gaps between phases"),
+        ("`forensics`", "Replay forensics"),
+        ("`tactics_arena`", "Combat drills"),
+        ("`publish`", "Site & release publishing"),
+        ("`archival_render`", "Video rendering"),
+        ("`gate1_verify`", "Build & test verification"),
+        ("`baseline_h2h`", "Head-to-head gate"),
+        # Agent roles (Section 2)
+        ("`runtime-author`", "Runtime micro"),
+        ("`belief-author`", "Macro & scouting"),
+        ("`monitor-2`", "Watchdog monitor"),
+        ("`coordinator`", "Coordinator"),
+        ("`analyzer`", "Replay analyzer"),
+        ("`wire-author`", "SC2 protocol wire"),
+        ("`loop-architect`", "Process review"),
+        ("`reporter`", "Report publisher"),
+        ("`harness`", "Match harness"),
+        ("`tactics-tester`", "Combat drill runner"),
+        ("`verifier`", "Test verifier"),
+        ("`opponents`", "Opponent setup"),
+        # Root causes (Section 3a)
+        ("`sibling_matchup_h2h_regression`", "Head-to-head regression"),
+        ("`macro_and_micro_side_effect`", "Macro/micro interaction"),
+        ("`runtime_heuristic_regression`", "Global micro heuristic"),
+        ("`brain_runtime_split_brain`", "Planner vs. runtime cap mismatch"),
+        ("`watchdog_escrow_and_tvp_regression`", "Expansion escrow & TvP stall"),
+        # Section 3a summaries
+        ("External/Arena improved but H2H mirror/cross-race regressed against live Ship baseline",
+         "External and drill scores improved, while head-to-head against the live build regressed"),
+        ("Protoss macro/micro interaction (Blink-Forward into Tanks, Gateway overbuild, or 0-Colossus / PvP exclusion)",
+         "Protoss macro/micro interaction (Blink into Tanks, Gateway overbuild, or missing Colossi)"),
+        ("Global runtime heuristic (light-harass split) lacked posture/main-army parity guard -> Terran TvP 0-8",
+         "Global light-harass split lacked a main-army strength guard (Terran TvP 0–8)"),
+        ("Macro-brain vs runtime cap/urgency mismatch (Barracks 2*CC cap & Phoenix@860 > Colossus@760)",
+         "Macro planner vs. runtime cap mismatch (Barracks 2× Command Center cap and Phoenix priority above Colossus)"),
+        ("Expansion escrow flush & Starport gas-yield guard stalled Terran 1-1-1 / TvP (fixed in Loop 50)",
+         "Expansion savings and Starport gas-yield guard stalled Terran 1-1-1 openings in TvP (fixed in Loop 50)"),
+        # Section 3b fault codes & ability IDs
+        ("(`<= 3`-Loop Clusters)", "(3-Loop Clusters)"),
+        ("(ProdStall)", "(production stall)"),
+        ("(1BaseLock)", "(1-base lock)"),
+        ("(PvPNatDelay)", "(PvP natural expansion delay)"),
+        ("RoboticsBay", "Robotics Bay"),
+        ("(p15 / 1766 / 3757)", "(Dark Templar Blink raid)"),
+        ("(b06/b07 / Siege0DPS)", "(Blink-forward into Siege Tanks)"),
+        ("(e01 sticky disengage / 3666)", "(worker mineral-walk disengage)"),
+        ("(z16 / HOLD_POSITION 18)", "(Mutalisk spread & Hold Position)"),
+        ("(r02/r05/r06)", "(worker-rush drills)"),
+        ("25-second `--scenario` A/B pass", "25-second targeted drill A/B pass"),
+        # Section 4 process table
+        ("H2H-First Fail-Fast Gate (2m H2H before 30m 84-Match Roster)",
+         "Head-to-head gate before 84-match roster"),
+        ("Brain <-> Runtime Cap & Urgency Contract Lint + Macro Trace (<3s Gate 1)",
+         "Planner vs. runtime cap contract check (<3s)"),
+        ("Targeted 25s --category / --scenario Combat Drill Pre-Check",
+         "Targeted 25s combat drill pre-check"),
+        ("Author --skip-perf Validation + Solo Verifier Perf Gate",
+         "Fast unit validation + solo timing gate"),
+        ("Pre-Granted Track Test Ownership in Kickoff Briefs",
+         "Pre-assigned test file ownership"),
+        # Section 5 prose cleanups
+        ("requires a 25s `--scenario` A/B pass before Gate 2.",
+         "requires a 25-second targeted drill A/B pass before the full benchmark."),
+        ("Pre-Granted Track Test Ownership and `--skip-perf` Author Mode",
+         "Pre-Assigned Test Ownership and Fast Unit-Test Mode"),
+        ("Authors edit their own track tests directly; @verifier owns wall-clock timing checks on an idle CPU.",
+         "Authors edit their own track tests directly; the verifier owns wall-clock timing checks on an idle CPU."),
+        ("(monitor-2 logged 7,138 steps / 1 posts)",
+         "(watchdog polling previously logged 7,138 steps for a single alert)"),
+        ("Each run appends to loop_trajectory_log.jsonl and produces Replay + Video trade review packs.",
+         "Each run appends to the run timing log and produces replay and video trade review packs."),
+        ("-> ", "→ "),
+        (" <= ", " ≤ "),
+        (" >= ", " ≥ "),
+    ]
+    for old, new in replacements:
+        text = text.replace(old, new)
+
+    # 5. Unwrap backtick pills around plain numbers, percentages, durations, ranges, records, and IF-* tags
+    text = re.sub(
+        r"`((?:n=)?\d[\d.,]*\s*(?:%|min|m|h|hours|x|×)?|L\d+[–-](?:L)?\d+|\d+W[-–]\d+L|IF-\d+)`",
+        r"\1",
+        text,
+    )
+    # Normalize lowercase 'x' multipliers like 1.31x -> 1.31× and W-L records in Table 3a
+    text = re.sub(r"(\d+\.\d+)x\b", r"\1×", text)
+    text = re.sub(r"\b(\d+)W-(\d+)L\b", r"\1–\2", text)
+    text = text.replace("Across L34–L57, Engineering changes", "Across Loops 34–57, engineering changes")
+    text = text.replace("L34–L57", "Loops 34–57")
+    text = text.replace("L37–L57", "Loops 37–57")
+    return text
 
 
 def _assert_no_local_leaks(html_text: str, page_name: str) -> None:
@@ -4095,30 +5014,13 @@ def build_static_site(
 
     # Build prioritized same-origin iOS-playable MP4 staging list (H.264 Main L3.1 + JPG posters)
     # Priority order:
-    #   1. Homepage flagship Arena drills (4) + flagship Ship #6 full matches (4)
-    #   2. Any local MP4 referenced inside markdown reports (loops-29-plus.md, etc.)
-    #   3. Latest-loop Arena & Self-Play drill MP4s + latest-loop H2H & full-match MP4s
+    # Deduplicated same-origin MP4 priority queue:
+    #   Tier 1: 1 latest verified non-placeholder clip per unique Tactics Arena scenario ID (guarantees 100% Arena coverage!)
+    #   Tier 2: Featured showcase full-match replays
+    #   Tier 3: Embedded MP4s referenced inside markdown reports
+    #   Tier 4: Latest full matches & non-duplicate self-play clips (never bloating gh-pages with older duplicate Arena loops!)
     gallery_items = discover_gallery_items(brain_dir, media_by_tag, abs_to_asset)
     priority_entries: List[Tuple[str, Path, str]] = []
-
-    loop_root = brain_dir / "scratch" / "loop"
-    flagship_specs = [
-        ("showcase:p15", loop_root / "visuals_iter48/arena/sc2-real-p15-dt-blink-snipe-planetary.mp4", "feat_p15_dt_pf.mp4"),
-        ("showcase:d10", loop_root / "probe_iter51_w2_5014/arena/sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker.mp4", "feat_l51_d10_banshee_obs.mp4"),
-        ("showcase:t14", loop_root / "probe_iter51_w2_5014/persephone_v4/arena/sc2-real-t14-raven-imatrix-aam-bio-vs-colossus.mp4", "feat_l51_t14_raven_imatrix.mp4"),
-        ("showcase:r15", loop_root / "visuals_iter50_w3_probe/arena/sc2-reg-r15-tvp-full-lifecycle-vs-15-kiting-probes.mp4", "feat_l50_r15_scv_hold.mp4"),
-        ("showcase:t12", loop_root / "visuals_iter50_w3_probe/arena/sc2-real-t12-banshee-raven-marine-vs-dt-stalker-observer.mp4", "feat_l50_t12_banshee_raven.mp4"),
-        ("showcase:s04", loop_root / "visuals_iter50_w3_probe/arena/sc2-sta-s04-pvz-oracle-stasis-choke-split.mp4", "feat_l50_s04_stasis_choke.mp4"),
-        ("showcase:ro01", loop_root / "visuals_iter48/arena/sc2-runby-ro01-tvz-widow-mine-drop-drones.mp4", "feat_ro01_widow_mine.mp4"),
-        ("showcase:ro04", loop_root / "visuals_iter48/arena/sc2-runby-ro04-tvz-blueflame-hellion-runby-drones.mp4", "feat_ro04_hellion.mp4"),
-        ("showcase:h2h003", loop_root / "visuals_iter45/full_matches/full_h2h003_Mothman-P_vs_Mothman-P-Base.mp4", "feat_l45_h2h003_pvp.mp4"),
-        ("showcase:h2h006", loop_root / "visuals_iter45/full_matches/full_h2h006_Mothman-T_vs_Mothman-Z-Base.mp4", "feat_l45_h2h006_tvz.mp4"),
-        ("showcase:m074", loop_root / "visuals_iter45/full_matches/full_m074_Mothman-T_vs_who.mp4", "feat_l45_m074_tvt_who.mp4"),
-        ("showcase:h2h002", loop_root / "visuals_iter45/full_matches/full_h2h002_Mothman-T_vs_Mothman-T-Base.mp4", "feat_l45_h2h002_tvt.mp4"),
-    ]
-    for fkey, fp, fname in flagship_specs:
-        if fp.is_file():
-            priority_entries.append((fkey, fp, fname))
 
     # Map CDN URL -> local Path for every discovered MP4 so report embeds & gallery items can stage cleanly
     cdn_to_local_mp4: Dict[str, Path] = {}
@@ -4126,10 +5028,49 @@ def build_static_site(
         if abs_s.lower().endswith(".mp4"):
             u = media_by_tag.get(tag, {}).get(aname)
             lp = Path(abs_s)
-            if u and lp.is_file():
+            if u and lp.is_file() and not _is_placeholder_arena_clip(lp):
                 cdn_to_local_mp4[u] = lp
 
-    # Scan markdown reports for embedded MP4 URLs (highest priority after homepage flagships)
+    # Tier 1: Deduplicated unique Tactics Arena scenario clips (latest verified non-placeholder per scenario ID)
+    staged_arena_sids: set[str] = set()
+    arena_only = [
+        it for it in gallery_items
+        if it.get("media_type") == "mp4" and it.get("category") == "Tactics Drills"
+    ]
+    arena_only.sort(
+        key=lambda x: (
+            -int(x.get("loop_num") or 0),
+            -int(x.get("pass_num") or 0),
+            0 if x.get("outcome") == "win" else 1,
+        )
+    )
+    for it in arena_only:
+        lp_s = it.get("_local_mp4") or ""
+        lp = Path(lp_s) if lp_s else cdn_to_local_mp4.get(it.get("src", ""))
+        if not lp or not lp.is_file() or _is_placeholder_arena_clip(lp, it):
+            continue
+        m_sid = re.search(r"(sc2-[a-z0-9-]+)$", lp.stem)
+        sid = m_sid.group(1) if m_sid else lp.stem
+        if sid in staged_arena_sids:
+            continue
+        staged_arena_sids.add(sid)
+        key = it.get("src") or f"gal:{it.get('_safe_name') or lp.name}"
+        sname = it.get("_safe_name") or lp.name
+        priority_entries.append((key, lp, sname))
+
+    # Tier 2: Featured full-match replays
+    loop_root = brain_dir / "scratch" / "loop"
+    flagship_specs = [
+        ("showcase:h2h003", loop_root / "visuals_iter45/full_matches/full_h2h003_Mothman-P_vs_Mothman-P-Base.mp4", "feat_l45_h2h003_pvp.mp4"),
+        ("showcase:h2h006", loop_root / "visuals_iter45/full_matches/full_h2h006_Mothman-T_vs_Mothman-Z-Base.mp4", "feat_l45_h2h006_tvz.mp4"),
+        ("showcase:m074", loop_root / "visuals_iter45/full_matches/full_m074_Mothman-T_vs_who.mp4", "feat_l45_m074_tvt_who.mp4"),
+        ("showcase:h2h002", loop_root / "visuals_iter45/full_matches/full_h2h002_Mothman-T_vs_Mothman-T-Base.mp4", "feat_l45_h2h002_tvt.mp4"),
+    ]
+    for fkey, fp, fname in flagship_specs:
+        if fp.is_file() and not _is_placeholder_arena_clip(fp):
+            priority_entries.append((fkey, fp, fname))
+
+    # Tier 3: Scan markdown reports for embedded MP4 URLs
     rewrite_md = make_path_rewriter(
         repo_slug=repo_slug,
         repo_dir=repo_dir,
@@ -4146,28 +5087,43 @@ def build_static_site(
         rewritten_reports.append((sp, rew))
         for m_url in re.findall(r"https://[^\s\"'<>)]+\.mp4", rew, flags=re.I):
             lp = cdn_to_local_mp4.get(m_url)
-            if lp and lp.is_file():
+            if lp and lp.is_file() and not _is_placeholder_arena_clip(lp):
                 tag, aname = classify_media_path(lp)
                 priority_entries.append((m_url, lp, f"{tag}_{aname}"))
 
-    # Add gallery items ordered by: newest Arena drills -> newest H2H/wins -> remaining newest matches
-    def _gal_stage_key(it: Dict[str, Any]) -> Tuple[int, int, int]:
+    # Tier 4: Latest full matches + 1 latest Self-Play clip per unique scenario ID (capped cleanly; skip duplicate older Arena loops!)
+    staged_sp_sids: set[str] = set()
+    other_gallery = [
+        it for it in gallery_items
+        if it.get("media_type") == "mp4" and it.get("category") != "Tactics Drills"
+    ]
+    def _other_stage_key(it: Dict[str, Any]) -> Tuple[int, int, int]:
         lnum = int(it.get("loop_num") or 0)
         cat = str(it.get("category") or "")
         is_h2h = 0 if "h2h" in str(it.get("cohort") or "").lower() or "h2h" in str(it.get("title") or "").lower() else 1
-        cat_rank = 0 if cat == "Tactics Drills" else (1 if cat == "Self-Play Drills" else 2)
+        cat_rank = 0 if cat == "Full Matches" else 1
         out_rank = 0 if it.get("outcome") == "win" else 1
         return (-lnum, cat_rank, is_h2h * 2 + out_rank)
 
-    for it in sorted(gallery_items, key=_gal_stage_key):
-        if it.get("media_type") != "mp4":
-            continue
+    full_match_staged_cnt = 0
+    for it in sorted(other_gallery, key=_other_stage_key):
         lp_s = it.get("_local_mp4") or ""
         lp = Path(lp_s) if lp_s else cdn_to_local_mp4.get(it.get("src", ""))
-        if lp and lp.is_file():
-            key = it.get("src") or f"gal:{it.get('_safe_name') or lp.name}"
-            sname = it.get("_safe_name") or lp.name
-            priority_entries.append((key, lp, sname))
+        if not lp or not lp.is_file() or _is_placeholder_arena_clip(lp, it):
+            continue
+        if it.get("category") == "Self-Play Drills":
+            m_sid = re.search(r"(sc2-[a-z0-9-]+)$", lp.stem)
+            sid = m_sid.group(1) if m_sid else lp.stem
+            if sid in staged_sp_sids:
+                continue
+            staged_sp_sids.add(sid)
+        elif it.get("category") == "Full Matches":
+            if full_match_staged_cnt >= 32:
+                continue
+            full_match_staged_cnt += 1
+        key = it.get("src") or f"gal:{it.get('_safe_name') or lp.name}"
+        sname = it.get("_safe_name") or lp.name
+        priority_entries.append((key, lp, sname))
 
     staged_mp4_map, staged_poster_map = stage_ios_playable_mp4s(
         brain_dir=brain_dir,
@@ -4215,12 +5171,16 @@ def build_static_site(
 
     page_stats: Dict[str, Dict[str, object]] = {}
     for sp, rewritten_md in rewritten_reports:
+        if sp.slug == "loop-flywheel-retro":
+            rewritten_md = _sanitize_flywheel_retro_md(rewritten_md)
         renderer = MarkdownRenderer(
             poster_lookup=poster_lookup,
             staged_mp4_map=staged_mp4_map,
             staged_poster_map=staged_poster_map,
         )
         body_html = renderer.render_blocks(rewritten_md, record_toc=True)
+        if sp.slug == "loop-flywheel-retro":
+            body_html = body_html.replace('<div class="table-wrap">', '<div class="table-wrap table-flywheel">')
         _EVERGREEN_NOTE_BANNERS: Dict[str, str] = {
             "north-vs-south-audit": "Historical engineering note recorded during Loop 37 while investigating map spawn symmetry.",
             "mirror-brain-audit": "Historical engineering note recorded during Loop 34 evaluating replay prediction accuracy.",
@@ -4294,7 +5254,13 @@ def build_static_site(
         f"{sum(1 for x in clean_gallery_items if x.get('playable_mp4'))} iOS-playable MP4s)"
     )
 
-    # Build interactive editorial index.html
+    # Load shared dashboard & rich telemetry once for BOTH index.html (Current State) and history.html (History & Fixes)
+    shared_dash = load_dashboard_telemetry(sqlite_path)
+    shared_rich = load_rich_report_telemetry(
+        sqlite_path=sqlite_path, repo_dir=repo_dir, brain_dir=brain_dir
+    )
+
+    # Build Current State index.html
     index_html = build_index_page(
         repo_slug=repo_slug,
         repo_dir=repo_dir,
@@ -4306,14 +5272,33 @@ def build_static_site(
         staged_mp4_map=staged_mp4_map,
         staged_poster_map=staged_poster_map,
         built_utc=built_utc,
+        dash=shared_dash,
+        rich=shared_rich,
     )
     _assert_no_local_leaks(index_html, "index.html")
     (out_dir / "index.html").write_text(index_html, encoding="utf-8")
+    print(f"  ✓ Built {'index.html':28s} ({(out_dir / 'index.html').stat().st_size / 1024.0:6.1f} KB, Current State)")
+
+    # Build History & Fixes history.html
+    history_html = build_history_page(
+        repo_slug=repo_slug,
+        repo_dir=repo_dir,
+        brain_dir=brain_dir,
+        sqlite_path=sqlite_path,
+        published_specs=published_specs,
+        media_by_tag=media_by_tag,
+        built_utc=built_utc,
+        dash=shared_dash,
+        rich=shared_rich,
+    )
+    _assert_no_local_leaks(history_html, "history.html")
+    (out_dir / "history.html").write_text(history_html, encoding="utf-8")
+    print(f"  ✓ Built {'history.html':28s} ({(out_dir / 'history.html').stat().st_size / 1024.0:6.1f} KB, History & Fixes)")
 
     site_bytes = sum(p.stat().st_size for p in out_dir.rglob("*") if p.is_file())
     print(
         f"[Step B] Static site built in {out_dir} "
-        f"({len(published_specs) + 2} HTML pages, {site_bytes / (1024 * 1024):.1f} MB total, 0 path leaks)."
+        f"({len(published_specs) + 3} HTML pages, {site_bytes / (1024 * 1024):.1f} MB total, 0 path leaks)."
     )
     return page_stats
 
@@ -4437,6 +5422,7 @@ def verify_live_site(
 ) -> None:
     check_urls = [
         site_url,
+        site_url + "history.html",
         site_url + "loops-29-plus.html",
         site_url + "video-gallery.html",
         site_url + "loops-19-28.html",

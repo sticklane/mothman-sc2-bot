@@ -319,6 +319,46 @@ async def run_match(args: argparse.Namespace) -> int:
     bot_connected_events = {1: asyncio.Event(), 2: asyncio.Event()}
     player_finished_events = {1: asyncio.Event(), 2: asyncio.Event()}
 
+    live_stats: dict[int, dict[str, int]] = {1: {}, 2: {}}
+    live_status_path = log_root / "live_match_status.json"
+    last_live_write_loop = -999
+
+    def write_live_status(status: str = "running", force: bool = False) -> None:
+        nonlocal last_live_write_loop
+        gl = max(outcomes[1].game_loops, outcomes[2].game_loops)
+        if not force and (gl - last_live_write_loop) < 112:
+            return
+        last_live_write_loop = gl
+        s1 = live_stats[1]
+        s2 = live_stats[2]
+        secs = int(round(gl / 22.4))
+        payload = {
+            "match_id": replay_path.stem.split("_")[0] if replay_path.stem else "",
+            "mode": "full",
+            "map": args.map,
+            "our_bot": cfg1.name,
+            "our_race": cfg1.race,
+            "opp_bot": cfg2.name,
+            "opp_race": cfg2.race,
+            "status": status,
+            "game_loop": gl,
+            "game_time_str": f"{secs // 60:02d}:{secs % 60:02d}",
+            "our_supply": s1.get("food_used"),
+            "our_supply_cap": s1.get("food_cap"),
+            "opp_supply": s2.get("food_used"),
+            "our_workers": s1.get("food_workers"),
+            "opp_workers": s2.get("food_workers"),
+            "our_army_supply": s1.get("food_army"),
+            "opp_army_supply": s2.get("food_army"),
+            "updated_at_epoch_ms": int(time.time() * 1000),
+        }
+        try:
+            tmp = live_status_path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
+            os.replace(tmp, live_status_path)
+        except Exception:
+            pass
+
     async def save_replay_once(sc2_ws: aiohttp.ClientWebSocketResponse) -> None:
         nonlocal replay_saved
         async with replay_lock:
@@ -507,6 +547,16 @@ async def run_match(args: argparse.Namespace) -> int:
                                 gl = obs.observation.game_loop
                                 if gl > outcome.game_loops:
                                     outcome.game_loops = gl
+                                pc = obs.observation.player_common
+                                live_stats[cfg.player_num] = {
+                                    "food_used": int(pc.food_used),
+                                    "food_cap": int(pc.food_cap),
+                                    "food_workers": int(pc.food_workers),
+                                    "food_army": int(pc.food_army),
+                                    "minerals": int(pc.minerals),
+                                    "vespene": int(pc.vespene),
+                                }
+                                write_live_status("running")
 
                                 if obs.player_result:
                                     res_enum = None
@@ -523,6 +573,9 @@ async def run_match(args: argparse.Namespace) -> int:
                                         outcome.result = "Tie"
                                     else:
                                         outcome.result = "Tie"
+                                    if cfg.player_num == 1:
+                                        st = "win" if outcome.result == "Victory" else ("loss" if outcome.result == "Defeat" else "tie")
+                                        write_live_status(st, force=True)
                                     return bot_ws
 
                                 if args.max_game_time > 0 and outcome.game_loops >= args.max_game_time:
