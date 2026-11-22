@@ -287,10 +287,10 @@
     (list (mk-u 12 'supply-depot 38.0 30.0 #:hp 400.0)
           (mk-u 13 'barracks 41.0 32.0 #:hp 1000.0)))
 
-  ;; T2a-1: Frame 4800 (>= 3:30) vs Protoss, 0 Ravens, 0 ready Turrets, 1 OC at 65e -> MUST HOLD 50e (no MULE)!
+  ;; T2a-1: Frame 5400 (>= 4:00, L55-T6 / L56 R2) vs Protoss, 0 Ravens, 0 ready Turrets, 1 OC at 65e -> MUST HOLD 50e (no MULE)!
   (define rt-oc1 (make-live-bot-runtime #:race 'Terran))
   (define obs-oc1
-    (mk-live-obs 'Terran 'Protoss 4800
+    (mk-live-obs 'Terran 'Protoss 5400
                  #:minerals 100 #:gas 40 #:supply-used 34 #:supply-cap 54
                  #:ally-units scvs
                  #:ally-buildings (cons (mk-u 10 'orbital-command 32.5 32.5 #:hp 1500.0 #:energy 65.0) base-t-bldgs)
@@ -298,12 +298,12 @@
   (define acts-oc1 (step-layer2-economy! rt-oc1 obs-oc1))
   (check-true "L32-T2a-oc-past-330-vs-protoss-reserves-50e-scan"
               (null? (mule-caster-ids acts-oc1))
-              (format "Expected OC at 65e past 3:30 vs Protoss to hold 50e for Scan; mules=~a" (mule-caster-ids acts-oc1)))
+              (format "Expected OC at 65e past 4:00 vs Protoss to hold 50e for Scan; mules=~a" (mule-caster-ids acts-oc1)))
 
   ;; T2a-2: Same state at 105e -> DOES drop MULE (still retains 55e >= 50e for Scan!)
   (define rt-oc2 (make-live-bot-runtime #:race 'Terran))
   (define obs-oc2
-    (mk-live-obs 'Terran 'Protoss 4800
+    (mk-live-obs 'Terran 'Protoss 5400
                  #:minerals 100 #:gas 40 #:supply-used 34 #:supply-cap 54
                  #:ally-units scvs
                  #:ally-buildings (cons (mk-u 10 'orbital-command 32.5 32.5 #:hp 1500.0 #:energy 105.0) base-t-bldgs)
@@ -313,20 +313,22 @@
               (equal? (mule-caster-ids acts-oc2) '(10))
               (format "Expected OC at 105e to drop MULE (keeping 55e); mules=~a" (mule-caster-ids acts-oc2)))
 
-  ;; T2a-3: 2 OCs (OC1=75e, OC2=65e) past 3:30 vs Protoss -> OC1 holds 50e, OC2 drops MULE!
+  ;; T2a-3: L55-T9 / L56 R2: 3 OCs (OC1=75e, OC2=65e, OC3=60e) past 4:00 vs Protoss ->
+  ;; top-2 OCs (OC1 & OC2) BOTH hold 50e for 2 back-to-back Scans, and OC3 drops MULE!
   (define rt-oc3 (make-live-bot-runtime #:race 'Terran))
   (define obs-oc3
-    (mk-live-obs 'Terran 'Protoss 5000
+    (mk-live-obs 'Terran 'Protoss 5600
                  #:minerals 100 #:gas 40 #:supply-used 34 #:supply-cap 54
                  #:ally-units scvs
                  #:ally-buildings (append (list (mk-u 10 'orbital-command 32.5 32.5 #:hp 1500.0 #:energy 75.0)
-                                                (mk-u 11 'orbital-command 56.5 32.5 #:hp 1500.0 #:energy 65.0))
+                                                (mk-u 11 'orbital-command 56.5 32.5 #:hp 1500.0 #:energy 65.0)
+                                                (mk-u 14 'orbital-command 32.5 56.5 #:hp 1500.0 #:energy 60.0))
                                           base-t-bldgs)
                  #:mineral-patches patches))
   (define acts-oc3 (step-layer2-economy! rt-oc3 obs-oc3))
   (check-true "L32-T2a-2oc-highest-holds-scan-second-mules"
-              (equal? (mule-caster-ids acts-oc3) '(11))
-              (format "Expected OC1(75e) to reserve Scan and OC2(65e) to MULE; mules=~a" (mule-caster-ids acts-oc3)))
+              (equal? (mule-caster-ids acts-oc3) '(14))
+              (format "Expected OC1(75e) & OC2(65e) to reserve 2 Scans and OC3(60e, id=14) to MULE; mules=~a" (mule-caster-ids acts-oc3)))
 
   ;; T2a-4: Negative guard — ready Missile Turret exists -> OC at 65e drops MULE normally!
   (define rt-oc4 (make-live-bot-runtime #:race 'Terran))

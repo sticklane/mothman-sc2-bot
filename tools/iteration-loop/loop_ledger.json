@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter51_ship9_full",
+  "active_wave": "iter56_ship10_full",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -5174,6 +5174,335 @@
         "Zerg": {
           "record": "CORE14 9W-5L-0T (64.3% WR, 1.23x), EXT78 12W-13L-1T (46.2% WR / 50.0% NL, 0.81x, SB 5.4%), H2H #01 ZvZ 8.32x W, 74 OverseerSiegeMode (3743), 266 Banelings, 1 OverlordTransport, 0 Hydra/Ravager Burrow, 73 Lurker Burrow",
           "trade_agg": 0.81,
+          "sup_blk": 5.4
+        }
+      }
+    },
+    {
+      "id": "iter52_ship10_full",
+      "status": "HOLD_ZIP_ZERG_TERRAN_REGRESSION_KEEP_PROTOSS_HIGHS",
+      "campaign": "Loops 29+ Self-Play, Tactics Arena 3.1 & Expanded Roster Campaign (Loop 52 HOLD-ZIP: Protoss Highs 11-13-2 / 50% NL & Live InterferenceMatrix vs Zerg/Terran Regressions -> Loop 53 Ship #10)",
+      "loop_self_improvements": [
+        "L52-LOOP-1 (Live InterferenceMatrix Verification & Zero-Reject Rollout): Researched and completed Interference Matrix (807) in 7 live SC2 matches with 0 wire rejects alongside 10 Auto-Turrets, 73 Assault Vikings, 63 OverseerSiegeMode casts, and 0 OverlordTransport leaks.",
+        "L52-LOOP-2 (Targeted Hold-Trigger Discipline): Held Loop 52 before shipping despite Protoss hitting highs across every cohort (EXT_78 11-13-2 / 50.0% NL, CORE14 8-6 1.20x) and launched 8-replay Replay + Video contact-sheet diff against Ship #9 to isolate exact Zerg/Terran regressions."
+      ],
+      "spec_summary": "Loop 52 (HOLD-ZIP \u2014 held for Zerg -5W EXT_78 / -6W incl. H2H & Terran -4W / TvP Nat@ 94s->249s / T111Stall 6->8 regressions -> Loop 53 Ship #10): 90/90 matches finished with 0 crashes, 0 faults, 0 wire rejects, and 0 step spikes >=500ms (max 214ms). H2H vs Build 51 (Ship #9): 3W-3L-0T (50.0%, 1.05x trade). Full roster: ALL_84 27W-52L-5T (0.62x), EXT_78 25W-48L-5T (32.1% WR / 38.5% NL, 0.62x, SB 3.8%, -6W vs Ship #9), CORE14 20W-20L-2T (47.6% WR / 52.4% NL, 0.88x), HIST12 18W-16L-2T (50.0% WR, 0.93x), UNSEEN12 5W-28L-3T (13.9% WR, 0.47x). Protoss highs to preserve: EXT_78 11W-13L-2T (42.3% WR / 50.0% NL, 0.73x), CORE14 8W-6L-0T (57.1%, 1.20x), #54 zig-reapers flipped 0.05x L -> 14.03x W, #12 puck 5.86x W, #15 oberon 3.20x W, #33 sc2ai_protoss 1.55x W, 0 Protoss 1BaseLock, 0 loss PvPNatDelay. Terran wins to preserve: #59 Creepy flipped 0.23x L -> 8.27x W, #77 VeTerran Tank #1 294.5s->240.9s (-53.6s), InterferenceMatrix (807) completed in 7 live matches with 0 rejects, nat_supply 94.7%. HOLD causes: Zerg dropped 12W-13L-1T -> 7W-18L-1T EXT_78 (-5W, PkA -1280, W->L flips on #7 Chance, #22 CryptBot, #25 onlyfans, #58 Creepy, zvz_nat_wall 0.0%); Terran dropped 11W-14L-1T -> 7W-17L-2T EXT_78 (-4W, TvP Nat@ 94s->249s, T111Stall 6->8 on #8 Chance, #23 CryptBot, #38 norman, #56 Mulebot); wk_plateau_8m 28.8%->40.6%.",
+      "rev": "szvlmwow (Loop 52 HOLD-ZIP \u2014 Protoss highs vs Zerg/Terran regressions)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_070300_iter52_ship10_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_065946_iter52_h2h_first",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter52_ship10_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter52_h2h_first_score.json",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "25W-48L-5T (32.1% WR / 38.5% NL, 0.62x; CORE14 20W-20L-2T 47.6% WR, HIST12 18W-16L-2T 50.0% WR, UNSEEN12 5W-28L-3T; ALL_84 27W-52L-5T; H2H_6 3W-3L 1.05x \u2014 HOLD)",
+      "win_rate_pct": 32.1,
+      "non_loss_pct": 38.5,
+      "core14_wr_pct": 47.6,
+      "hist12_wr_pct": 50.0,
+      "unseen12_wins": 5,
+      "h2h_record": "3W-3L-0T (50.0%, 1.05x agg)",
+      "trade_agg": 0.62,
+      "sup_blk_pct": 3.8,
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 8,
+      "prod_placement_stall_matches": 0,
+      "one_base_lockout_matches": 1,
+      "gas_rich_min_starved_matches": 5,
+      "stall_watchdog_kpis": {
+        "sup_cap_min_pct": 30.8,
+        "zero_income_matches": 4,
+        "zero_gas_matches": 7,
+        "wk_plateau_8m_pct": 40.6
+      },
+      "base_geometry_kpis": {
+        "pylon_clump_pct": 2.0,
+        "pylon_spacing_nn": 14.0,
+        "nat_supply_pct": 93.2,
+        "protoss_nat_supply_pct": 92.0,
+        "terran_nat_supply_pct": 94.7,
+        "zvz_nat_wall_pct": 0.0,
+        "early_bunkers_4m": 0.84
+      },
+      "by_race": {
+        "Protoss": {
+          "record": "CORE14 8W-6L-0T (57.1% WR, 1.20x), EXT78 11W-13L-2T (42.3% WR / 50.0% NL, 0.73x, SB 4.5%), #54 zig-reapers 14.03x W, #12 puck 5.86x W, #15 oberon 3.20x W, 0 1BaseLock, pylon_clump 2.0%, nat_supply 92.0%",
+          "trade_agg": 0.73,
+          "sup_blk": 4.5
+        },
+        "Terran": {
+          "record": "CORE14 6W-7L-1T (42.9%, 0.81x), EXT78 7W-17L-2T (26.9% WR / 34.6% NL, 0.71x, SB 2.1%), #59 Creepy 8.27x W, InterferenceMatrix live in 7 games, BUT TvP Nat@ 94s->249s & T111Stall 6->8",
+          "trade_agg": 0.71,
+          "sup_blk": 2.1
+        },
+        "Zerg": {
+          "record": "CORE14 6W-7L-1T (42.9%, 0.74x), EXT78 7W-18L-1T (26.9% WR / 30.8% NL, 0.45x, SB 4.9%, -5W vs Ship #9), PkA -1280, OverlordTransport 0, 63 OverseerSiegeMode, zvz_nat_wall 0.0%",
+          "trade_agg": 0.45,
+          "sup_blk": 4.9
+        }
+      }
+    },
+    {
+      "id": "iter53_ship10_full",
+      "status": "HOLD_ZIP_ZVP_0W_6L_2T_TIES_OVERSEER_LEAK",
+      "campaign": "Loops 29+ Self-Play, Tactics Arena 3.1 & Expanded Roster Campaign (Loop 53 HOLD-ZIP: H2H 4-2 1.35x, 1BaseLock=0, PvPNatDelay=0, T111Stall 8->3, TvP Nat@ 96s vs ZvP 0-6-2 & 6 Ties -> Loop 54 Ship #10)",
+      "loop_self_improvements": [
+        "L53-LOOP-1 (Wave 1 H2H-First Stop Caught Mirror Regression in 150s): Stage 1 H2H (2W-4L) stopped before the 30-minute roster, leading to Wave 2 fixes that immediately lifted H2H to 4W-2L (1.35x, 0 EscrowLock / 0 DripFeed).",
+        "L53-LOOP-2 (Structural Anomaly Zero-Outs Verified): 1BaseLock dropped 3->1->0, PvPNatDelay dropped 2->1->0, T111Stall dropped 8->3, TvP Nat@ recovered 249s->96s, Siege0DPS dropped 16->9, sup_cap dropped 38.5%->29.5%, wk_plateau_8m dropped 40.6%->27.9%, and zvz_nat_wall jumped 0.0%->44.4%."
+      ],
+      "spec_summary": "Loop 53 (HOLD-ZIP \u2014 keep Live Release #9 active while fixing ZvP 0-6-2, 6 ties, 15 Overseers in #25, and #54/#75 flips -> Loop 54 Ship #10): Wave 1 H2H-First stopped early at 2W-4L (150s, saving ~30m); Wave 2 H2H passed 4W-2L-0T (66.7%, 1.35x trade, 0 EscrowLock/DripFeed) and 90/90 completed with 0 crashes, 0 faults, 0 wire rejects, and 0 step spikes >=500ms (max 203ms). Full roster: ALL_84 27W-51L-6T (0.60x), EXT_78 25W-47L-6T (32.1% WR / 39.7% NL, 0.60x, SB 4.0%), CORE14 19W-19L-4T (45.2% WR / 54.8% NL, 0.86x), HIST12 16W-16L-4T (44.4% WR / 55.6% NL, 0.90x), UNSEEN12 6W-28L-2T (16.7% WR, 0.39x). Structural gains to preserve: 1BaseLock=0 (3->1->0), PvPNatDelay=0 (2->1->0), ProdStall=0, T111Stall=3 (8->3), TvP Nat@ 249s->96s, Siege0DPS 16->9, sup_cap 38.5%->29.5%, wk_plateau_8m 40.6%->27.9%, zvz_nat_wall 0.0%->44.4%, early_bunkers_4m 0.77, pylon_clump 1.9%, nat_supply 85.4%, InterferenceMatrix (807) completed live in 5 matches (0 rejects), Protoss EXT_78 10W-15L-1T / CORE14 7W-6L-1T (1.07x), Terran CORE14 1.01x, #59 Creepy 7.22x W, #77 Tank #1 235.6s. HOLD causes: ZvP 0W-6L-2T (0.18x, #58 Creepy ESCROW_LOCKOUT corruptor 492M), 15 Overseers built in #25 onlyfans, 6 ties (4 cpu_wall_timeout incl. puck 0-0-3 + 2 loop_cap_30m incl. #53 zig-reapers 10.25x ENDGAME_HOME_STALL 236s), Protoss flips #54 zig-reapers (0.02x) and #75 who (0.02x), and #39 norman (ESCROW_LOCKOUT colossus 460M).",
+      "rev": "szvlmwow (Loop 53 Wave 2 HOLD-ZIP \u2014 structural wins vs ZvP 0-6-2 & 6 ties)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_082440_iter53_ship10_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_082213_iter53_w2_h2h_first",
+      "wave1_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_080037_iter53_h2h_first",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter53_ship10_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter53_w2_h2h_first_score.json",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "25W-47L-6T (32.1% WR / 39.7% NL, 0.60x; CORE14 19W-19L-4T 54.8% NL 0.86x, HIST12 16W-16L-4T 55.6% NL 0.90x, UNSEEN12 6W-28L-2T; ALL_84 27W-51L-6T; W2 H2H_6 4W-2L 1.35x \u2014 HOLD)",
+      "win_rate_pct": 32.1,
+      "non_loss_pct": 39.7,
+      "core14_wr_pct": 45.2,
+      "hist12_wr_pct": 44.4,
+      "unseen12_wins": 6,
+      "h2h_record": "4W-2L-0T (66.7%, 1.35x agg; W1 H2H stopped early 2W-4L)",
+      "trade_agg": 0.6,
+      "sup_blk_pct": 4.0,
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 3,
+      "prod_placement_stall_matches": 0,
+      "one_base_lockout_matches": 0,
+      "gas_rich_min_starved_matches": 8,
+      "stall_watchdog_kpis": {
+        "sup_cap_min_pct": 29.5,
+        "zero_income_matches": 4,
+        "zero_gas_matches": 7,
+        "wk_plateau_8m_pct": 27.9
+      },
+      "base_geometry_kpis": {
+        "pylon_clump_pct": 1.9,
+        "pylon_spacing_nn": 14.5,
+        "nat_supply_pct": 85.4,
+        "protoss_nat_supply_pct": 92.3,
+        "terran_nat_supply_pct": 77.3,
+        "zvz_nat_wall_pct": 44.4,
+        "early_bunkers_4m": 0.77
+      },
+      "by_race": {
+        "Protoss": {
+          "record": "CORE14 7W-6L-1T (50.0% WR / 57.1% NL, 1.07x), EXT78 10W-15L-1T (38.5% WR / 42.3% NL, 0.72x, SB 4.1%), PvZ 4-5 (0.94x), 0 1BaseLock, 0 PvPNatDelay, pylon_clump 1.9%, nat_supply 92.3%",
+          "trade_agg": 0.72,
+          "sup_blk": 4.1
+        },
+        "Terran": {
+          "record": "CORE14 6W-7L-1T (42.9% WR, 1.01x), EXT78 8W-16L-2T (30.8% WR / 38.5% NL, 0.81x, SB 3.0%), TvT 3-4-1 (1.61x), 1BaseLock=0, T111Stall=3, TvP Nat@ 96s, #59 Creepy 7.22x W, #53 zig-reapers 10.25x 30m tie, InterferenceMatrix live in 5 games",
+          "trade_agg": 0.81,
+          "sup_blk": 3.0
+        },
+        "Zerg": {
+          "record": "CORE14 6W-6L-2T (42.9% WR / 57.1% NL, 0.64x), EXT78 7W-16L-3T (26.9% WR / 38.5% NL, 0.38x, SB 4.8%), zvz_nat_wall 44.4%, OverlordTransport 0, BUT ZvP 0W-6L-2T (0.18x) & 15 Overseers in #25",
+          "trade_agg": 0.38,
+          "sup_blk": 4.8
+        }
+      }
+    },
+    {
+      "id": "iter54_ship10_full",
+      "status": "HOLD_ZIP_ZERG_3RUN_COLLAPSE_AND_5X_CLOAK_LOSS",
+      "campaign": "Loops 29+ Self-Play, Tactics Arena 3.1 & Expanded Roster Campaign (Loop 54 HOLD-ZIP: H2H 5-1 1.72x, Terran Highs CORE14 8-5-1 1.37x, nat_supply 95.8% vs Zerg 6-17-3 & 5x CloakLoss -> Loop 55 Ship #10)",
+      "loop_self_improvements": [
+        "L54-LOOP-1 (Wave 1 H2H-First Stop Caught Protoss +90-106s 1st-Stalker Regression in 118s): Stopped before the 30-minute roster; Wave 2 fix flipped H2H to 5W-1L (83.3%, 1.72x, 3-0 mirror sweep).",
+        "L54-LOOP-2 (Zero-Out Geometry & Anomaly Milestones): Hit pylon_clump 0.0% (n=26, NN 14.6t), nat_supply 95.8% (P 96.2% / T 95.5%), early_bunkers_4m 0.68, TvP Nat@ 93.2s, SupplyDepotLowered 473 (+42 H2H), 1BaseLock=0, ProdStall=0, SelfCancel=0, EndgameHomeStall=0, and capped Overseer flood cleanly."
+      ],
+      "spec_summary": "Loop 54 (HOLD-ZIP \u2014 keep Live Release #9 active while fixing the 3-run Zerg decline and 5x CLOAK_DAMAGE_LOSS -> Loop 55 Ship #10): Wave 1 H2H-First stopped early at 2W-4L (118s, catching Protoss +90-106s 1st Stalker delay); Wave 2 H2H passed 5W-1L-0T (83.3%, 1.72x, 3-0 mirror sweep) and 90/90 completed with 0 crashes, 0 faults, 0 wire rejects, and 0 step spikes >=500ms (max 278.6ms). Full roster: ALL_84 28W-48L-8T (0.70x), EXT_78 25W-45L-8T (32.1% WR / 42.3% NL, 0.67x, SB 5.0%), CORE14 19W-20L-3T (45.2% WR / 52.4% NL, 1.00x), HIST12 17W-16L-3T (47.2% WR / 55.6% NL, 0.98x), UNSEEN12 6W-25L-5T (16.7% WR / 30.6% NL, 0.40x). Major wins to preserve: Terran CORE14 8W-5L-1T (57.1%, 1.37x) & EXT_78 11W-13L-2T (42.3% WR / 50.0% NL, 0.90x), TvP Nat@ 93.2s, SupplyDepotLowered 473, Protoss pylon_clump 0.0% & nat_supply 96.2%, overall nat_supply 95.8% & early_bunkers_4m 0.68, ZvP recovery (#10 puck 18.17x W, #58 Creepy 6.98x W, Overseers capped), 1BaseLock=0, ProdStall=0, SelfCancel=0, EndgameHomeStall=0, T111Stall=3, zero_gas 6, InterferenceMatrix (807) in 5 matches (0 rejects), AutoTurret 6. HOLD causes (2 blockers): (1) Zerg declined across 3 straight 84m runs (EXT_78 6W-17L-3T, 0.47x, W@6m 32.8 vs S9 37.2, PkA 2,871 vs S9 4,333); (2) CLOAK_DAMAGE_LOSS jumped 1->5 (#16 Rusty, #25 onlyfans, #73/#74/#75 who \u2014 #75 PvT lost 36 Probes to Cloaked Banshees while 2 Observers stayed alive at base).",
+      "rev": "szvlmwow (Loop 54 Wave 2 HOLD-ZIP \u2014 H2H 5-1 & Terran highs vs Zerg decline & 5x CloakLoss)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_095923_iter54_ship10_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_095618_iter54_w2_h2h_first",
+      "wave1_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_093642_iter54_h2h_first",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter54_ship10_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter54_w2_h2h_first_score.json",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "25W-45L-8T (32.1% WR / 42.3% NL, 0.67x; CORE14 19W-20L-3T 1.00x, HIST12 17W-16L-3T 55.6% NL 0.98x, UNSEEN12 6W-25L-5T; ALL_84 28W-48L-8T 0.70x; W2 H2H_6 5W-1L 1.72x \u2014 HOLD)",
+      "win_rate_pct": 32.1,
+      "non_loss_pct": 42.3,
+      "core14_wr_pct": 45.2,
+      "hist12_wr_pct": 47.2,
+      "unseen12_wins": 6,
+      "h2h_record": "5W-1L-0T (83.3%, 1.72x agg, 3-0 mirror sweep; W1 H2H stopped early 2W-4L)",
+      "trade_agg": 0.67,
+      "sup_blk_pct": 5.0,
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 3,
+      "prod_placement_stall_matches": 0,
+      "one_base_lockout_matches": 0,
+      "gas_rich_min_starved_matches": 12,
+      "cloaked_unit_damage_losses": 5,
+      "stall_watchdog_kpis": {
+        "sup_cap_min_pct": 34.6,
+        "zero_income_matches": 7,
+        "zero_gas_matches": 6,
+        "wk_plateau_8m_pct": 28.3
+      },
+      "base_geometry_kpis": {
+        "pylon_clump_pct": 0.0,
+        "pylon_spacing_nn": 14.6,
+        "nat_supply_pct": 95.8,
+        "protoss_nat_supply_pct": 96.2,
+        "terran_nat_supply_pct": 95.5,
+        "zvz_nat_wall_pct": 12.5,
+        "early_bunkers_4m": 0.68
+      },
+      "by_race": {
+        "Protoss": {
+          "record": "CORE14 5W-8L-1T (0.77x), EXT78 8W-15L-3T (30.8% WR / 42.3% NL, 0.64x, SB 4.9%), pylon_clump 0.0%, nat_supply 96.2%, 0 1BaseLock, BUT #75 who CloakLoss with 2 alive Observers",
+          "trade_agg": 0.64,
+          "sup_blk": 4.9
+        },
+        "Terran": {
+          "record": "CORE14 8W-5L-1T (57.1% WR / 64.3% NL, 1.37x), EXT78 11W-13L-2T (42.3% WR / 50.0% NL, 0.90x, SB 5.2%), TvP Nat@ 93.2s, nat_supply 95.5%, early_bunkers_4m 0.68, SupplyDepotLowered 473, T111Stall 3, InterferenceMatrix in 5 games",
+          "trade_agg": 0.9,
+          "sup_blk": 5.2
+        },
+        "Zerg": {
+          "record": "CORE14 6W-7L-1T (42.9% WR, 0.91x), EXT78 6W-17L-3T (23.1% WR / 34.6% NL, 0.47x, SB 4.9%), #10 puck 18.17x W & #58 Creepy 6.98x W, Overseers capped, BUT 3-run Zerg econ/army dip (W@6m 32.8, PkA 2871) & 3x CloakLoss",
+          "trade_agg": 0.47,
+          "sup_blk": 4.9
+        }
+      }
+    },
+    {
+      "id": "iter55_ship10_full",
+      "status": "HOLD_ZIP_GLOBAL_ESCROW_DRIPFEED_DRAG_REBASE_ON_SHIP9",
+      "campaign": "Loops 29+ Self-Play, Tactics Arena 3.1 & Expanded Roster Campaign (Loop 55 HOLD-ZIP: Zerg ZvT/macro recovered + SmoothBrain W + Stall Watchdog lows vs EXT_78 23-50-5 stacked-branch drag -> Loop 56 Clean Rebase on Ship #9)",
+      "loop_self_improvements": [
+        "L55-LOOP-1 (3 Fast Pre-Gate Stops Saved ~90m Before Full Roster): Wave 1 H2H stopped at 2W-4L (92s, caught early TvT MULE starvation), Wave 2 H2H stopped at 2W-4L (132s), and Target-8 probe stopped at 4W-3L-1T / CloakedLoss=2 (326s, proving Zerg 4W-1L-1T & 0/3 cloak losses while isolating the 2 remaining T/P cloak gaps).",
+        "L55-LOOP-2 (4-HOLD Monotonic Drift Triggered Clean-Slate Rebase Rule): Drift across 4 stacked HOLD runs on szvlmwow (EscrowLock 10->16, DripFeed 24->33, ZeroKill 5->11, TvP Nat@ 93.2s->148.0s) triggered a full hunk audit of nkxlrsuk..@ and a clean rebase onto Live Release #9 for Loop 56."
+      ],
+      "spec_summary": "Loop 55 (HOLD-ZIP -- keep Live Release #9 nkxlrsuk active and rebase Loop 56 directly on nkxlrsuk): Fast pre-gates caught Wave 1 TvT MULE blackout (92s), Wave 2 H2H (132s), and Target-8 T/P cloak leaks (326s) before Wave 3 passed H2H 3W-3L-0T (50.0%, 0.91x) and completed 90/90 with 0 crashes, 0 faults, 0 wire rejects, and 0 step spikes >=500ms (max 202.8ms). Full roster: ALL_84 28W-51L-5T (33.3% WR / 39.3% NL, 0.60x), EXT_78 23W-50L-5T (29.5% WR / 35.9% NL, 0.51x, SB 4.0%), CORE14 17W-22L-3T (40.5% WR / 47.6% NL, 0.62x), HIST12 14W-19L-3T (38.9% WR / 47.2% NL, 0.60x), UNSEEN12 6W-28L-2T (16.7% WR / 22.2% NL, 0.42x), SELF_6 5W-1L-0T (83.3%, 1.92x). Proven gains to cherry-pick onto nkxlrsuk: Zerg ZvT recovery (5-3-1 0.78x, W@6m 40.1, 0/27 Zerg cloak losses, #16 Rusty 3.29x W, #25 onlyfans 2.06x W, #07 Chance 6.57x W, #52 zig-reapers 2.17x W), first-ever Terran win vs SmoothBrain (#62, TvT 5-5-0), T111Stall 2, InterferenceMatrix (807) in 8 games (0 rejects), SupplyDepotLowered 540 (+40 H2H), pylon_clump 0.0% (NN 14.8t), Stall Watchdog lows (sup_cap_min 30.8%, wk_plateau_8m 23.8%, zero_gas 6), 4-corner N-vs-S parity healed (-21.2pp -> -4.1pp), and 0 non-PvZ Protoss patrol-cmd minutes. HOLD causes: monotonic stacked-branch macro drag (EscrowLock 10->16, DripFeed 24->33, GasRich 5->11, ZeroKill 5->11, TvP Nat@ 93.2s->148.0s), Terran TvP 1-7 & TvZ 2-6 slip, Zerg ZvP 1-6-1 (#10 puck 25 Ov, #58 Creepy) & ZvZ 2-6-1, and 3 remaining T/P Banshee cloak losses (#74 who TvT, #75 who PvT AIR_AA_STARVE, #18 Rusty PvT).",
+      "rev": "szvlmwow 0302b428 (Loop 55 Wave 3 HOLD-ZIP -- Zerg ZvT recovery & Stall Watchdog lows vs stacked-branch macro drag -> Loop 56 rebase on nkxlrsuk)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_121257_iter55_ship10_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_120802_iter55_w3_h2h",
+      "wave1_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_112146_iter55_h2h_first",
+      "wave2_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_113756_iter55_w2_h2h_first",
+      "target8_probe_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_114215_iter55_target8_probe",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter55_ship10_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter55_w3_h2h_score.json",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "23W-50L-5T (29.5% WR / 35.9% NL, 0.51x; CORE14 17W-22L-3T 0.62x, HIST12 14W-19L-3T 47.2% NL 0.60x, UNSEEN12 6W-28L-2T; ALL_84 28W-51L-5T 0.60x; SELF_6 5W-1L 1.92x; W3 H2H_6 3W-3L 0.91x -- HOLD)",
+      "win_rate_pct": 29.5,
+      "non_loss_pct": 35.9,
+      "core14_wr_pct": 40.5,
+      "hist12_wr_pct": 38.9,
+      "unseen12_wins": 6,
+      "h2h_record": "3W-3L-0T (50.0%, 0.91x agg; W1 H2H stopped 2W-4L, W2 H2H stopped 2W-4L, Target-8 probe 4W-3L-1T)",
+      "trade_agg": 0.51,
+      "sup_blk_pct": 4.0,
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 2,
+      "prod_placement_stall_matches": 3,
+      "one_base_lockout_matches": 1,
+      "gas_rich_min_starved_matches": 11,
+      "cloaked_unit_damage_losses": 3,
+      "stall_watchdog_kpis": {
+        "sup_cap_min_pct": 30.8,
+        "zero_income_matches": 5,
+        "zero_gas_matches": 6,
+        "wk_plateau_8m_pct": 23.8
+      },
+      "base_geometry_kpis": {
+        "pylon_clump_pct": 0.0,
+        "pylon_spacing_nn": 14.8,
+        "nat_supply_pct": 85.4,
+        "protoss_nat_supply_pct": 88.0,
+        "terran_nat_supply_pct": 82.6,
+        "zvz_nat_wall_pct": 22.2,
+        "early_bunkers_4m": 1.04
+      },
+      "by_race": {
+        "Protoss": {
+          "record": "CORE14 4W-9L-1T, EXT78 7W-17L-2T (26.9% WR / 34.6% NL, 0.42x, SB 5.1%), UNSEEN12 3W-8L-1T (0.45x), pylon_clump 0.0%, nat_supply 88.0%, 0 non-PvZ patrol-min, BUT 2x Banshee CloakLoss (#75 who AIR_AA_STARVE & #18 Rusty)",
+          "trade_agg": 0.42,
+          "sup_blk": 5.1
+        },
+        "Terran": {
+          "record": "CORE14 7W-7L-0T (50.0%, 0.87x), EXT78 8W-18L-0T (30.8%, 0.62x, SB 2.2%), TvT 5-5-0 w/ first SmoothBrain win (#62), T111Stall 2, InterferenceMatrix in 8 games, SupplyDepotLowered 540 (+40 H2H), BUT TvP 1-7 (Nat@ 148.0s), TvZ 2-6, #74 who TvT CloakLoss",
+          "trade_agg": 0.62,
+          "sup_blk": 2.2
+        },
+        "Zerg": {
+          "record": "CORE14 6W-6L-2T (42.9% WR / 57.1% NL), EXT78 8W-15L-3T (30.8% WR / 42.3% NL, 0.48x, SB 4.8%), ZvT recovered 5-3-1 (0.78x), W@6m 40.1, 0/27 Zerg CloakLoss (#16/#25/#52/#07 all W), BUT ZvP 1-6-1 (#10 puck 25 Ov, #58 Creepy) & ZvZ 2-6-1",
+          "trade_agg": 0.48,
+          "sup_blk": 4.8
+        }
+      }
+    },
+    {
+      "id": "iter56_ship10_full",
+      "status": "HOLD_ZIP_CLEAN_SLATE_UNSEEN_PROTOSS_0_12_AND_VARIANCE_AUDIT",
+      "campaign": "Loops 29+ Self-Play, Tactics Arena 3.1 & Expanded Roster Campaign (Loop 56 Clean-Slate HOLD-ZIP on nkxlrsuk: H2H 4-2 1.56x, TvP Nat@ 94.3s, ZeroKill 4, WallTies 1, ZvT 5-4 0.88x vs EXT_78 20-54-4 & Protoss UNSEEN12 0-12 -> Audit K1-K13 vs S9 variance)",
+      "loop_self_improvements": [
+        "L56-LOOP-1 (Wave 1 H2H-First Caught 0W-6L Catastrophe in 145s): Stopped before the 30-minute roster, isolated 3 over-dropped/TvT-MULE bugs in Wave 1, and flipped Wave 2 H2H to 4W-2L (66.7%, 1.56x, PkA 6,628 vs 3,875).",
+        "L56-LOOP-2 (Clean-Slate Rebase Isolated Persistent Baseline Anomalies): Rebuilding directly off Live Release #9 (nkxlrsuk) without D1-D9 healed TvP Nat@ (148.0s->94.3s), ZeroKill (11->4), WallTies (4->1), and 1BaseLock (1->0), while proving EscrowLock (15), DripFeed (33), and GasRich (11) persisted even without D1-D9, motivating a decisive K1-K13 vs Ship #9 variance audit."
+      ],
+      "spec_summary": "Loop 56 (HOLD-ZIP -- Clean-Slate rebase @ = tppnrnpo b0982fce directly off Live Release #9 nkxlrsuk): Wave 1 H2H-First stopped at 0W-6L (145s, catching TvT MULE blackout + over-dropped L54-W2-P1/L53-W2-3); Wave 2 flipped H2H to 4W-2L-0T (66.7%, 1.56x, 5-loop H2H cumulative 19W-11L / 63.3%) and completed 90/90 with 0 crashes, 0 faults, 0 wire rejects, and 0 step spikes >=500ms (max 325.5ms). Full roster: ALL_84 23W-57L-4T (27.4% WR / 32.1% NL, 0.60x), EXT_78 20W-54L-4T (25.6% WR / 30.8% NL, 0.55x, SB 3.9%), CORE14 15W-24L-3T (35.7% WR / 42.9% NL, 0.85x), HIST12 13W-21L-2T (36.1% WR / 41.7% NL, 0.73x), UNSEEN12 5W-30L-1T (13.9% WR / 16.7% NL, 0.34x), SELF_6 3W-3L-0T (50.0%, 1.02x). Clean-slate wins: TvP Nat@ healed 148.0s->94.3s, ZeroKill 11->4, WallTies 4->1, 1BaseLock 1->0, Protoss CloakLoss=0 (#75 who killed 4/6 DTs), Zerg ZvT 5-4-0 (0.88x, PkA 5,644; #25 onlyfans 56/56 Banshees W 2.85x, #16 Rusty W 2.65x, #52 zig-reapers W 2.59x), Terran SB 2.0% & UNSEEN12 3-8-1 (#53 zig-reapers W 5.18x, #59 Creepy W 7.15x, #20 PolyMorph W 5.37x), pylon_clump 0.0% (NN 13.7t), InterferenceMatrix (807) in 4 games, SupplyDepotLowered 499 (+31 H2H), 4-corner parity +5.3pp. HOLD causes: Protoss UNSEEN12 0W-12L-0T (0.19x, PkA 1,379), persistent EscrowLock (15) / DripFeed (33) / GasRich (11) / Siege0DPS (13) / ProdStall (3) / wk_plateau_8m (41.5%) / sup_cap_min (42.3%) even on clean nkxlrsuk base, SELF_CANCEL_LOOP(SporeCrawler) in 4 games (#13/#16/#79/H2H#1), and 3 CloakLosses (#73 who ZvP, #74 who TvT, #77 VeTerran TvT).",
+      "rev": "tppnrnpo b0982fce (Loop 56 Clean-Slate Wave 2 HOLD-ZIP on nkxlrsuk -- H2H 4-2 1.56x vs EXT_78 20-54-4 & Protoss UNSEEN12 0-12)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_135625_iter56_ship10_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_135353_iter56_w2_h2h_first",
+      "wave1_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_132937_iter56_h2h_first",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter56_ship10_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter56_w2_h2h_first_score.json",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "20W-54L-4T (25.6% WR / 30.8% NL, 0.55x; CORE14 15W-24L-3T 0.85x, HIST12 13W-21L-2T 41.7% NL 0.73x, UNSEEN12 5W-30L-1T; ALL_84 23W-57L-4T 0.60x; SELF_6 3W-3L 1.02x; W2 H2H_6 4W-2L 1.56x -- HOLD)",
+      "win_rate_pct": 25.6,
+      "non_loss_pct": 30.8,
+      "core14_wr_pct": 35.7,
+      "hist12_wr_pct": 36.1,
+      "unseen12_wins": 5,
+      "h2h_record": "4W-2L-0T (66.7%, 1.56x agg, PkA 6,628 vs 3,875; W1 H2H stopped 0W-6L)",
+      "trade_agg": 0.55,
+      "sup_blk_pct": 3.9,
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 4,
+      "prod_placement_stall_matches": 3,
+      "one_base_lockout_matches": 0,
+      "gas_rich_min_starved_matches": 11,
+      "cloaked_unit_damage_losses": 3,
+      "stall_watchdog_kpis": {
+        "sup_cap_min_pct": 42.3,
+        "zero_income_matches": 6,
+        "zero_gas_matches": 9,
+        "wk_plateau_8m_pct": 41.5
+      },
+      "base_geometry_kpis": {
+        "pylon_clump_pct": 0.0,
+        "pylon_spacing_nn": 13.7,
+        "nat_supply_pct": 82.6,
+        "protoss_nat_supply_pct": 87.0,
+        "terran_nat_supply_pct": 78.3,
+        "zvz_nat_wall_pct": 12.5,
+        "early_bunkers_4m": 1.04
+      },
+      "by_race": {
+        "Protoss": {
+          "record": "CORE14 5W-8L-1T (0.75x), EXT78 5W-20L-1T (19.2% WR / 23.1% NL, 0.40x, SB 4.4%), 0 CloakLoss (#75 who 4/6 DTs), pylon_clump 0.0%, nat_supply 87.0%, BUT UNSEEN12 0W-12L-0T (0.19x, PkA 1,379, W6 27.3)",
+          "trade_agg": 0.4,
+          "sup_blk": 4.4
+        },
+        "Terran": {
+          "record": "CORE14 4W-9L-1T (1.09x), EXT78 7W-17L-2T (26.9% WR / 34.6% NL, 0.67x, SB 2.0%), UNSEEN12 3-8-1 (#53 zig-reapers 5.18x W, #59 Creepy 7.15x W, #20 PolyMorph 5.37x W), TvP Nat@ healed 94.3s, SupplyDepotLowered 499, InterferenceMatrix 4g, BUT T111Stall 4 & 2x TvT Banshee CloakLoss (#74/#77)",
+          "trade_agg": 0.67,
+          "sup_blk": 2.0
+        },
+        "Zerg": {
+          "record": "CORE14 6W-7L-1T (0.70x), EXT78 8W-17L-1T (30.8% WR / 34.6% NL, 0.55x, SB 5.4%), ZvT 5-4-0 (0.88x, PkA 5,644; #25 onlyfans 56/56 Banshees W 2.85x, #16 Rusty W 2.65x, #52 zig-reapers W 2.59x), #10 puck Overseers capped 5(4d), BUT ZvP 1-7-1, ZvZ 2-6-0, 4x SporeCrawler SelfCancel, #73 who ZvP CloakLoss",
+          "trade_agg": 0.55,
           "sup_blk": 5.4
         }
       }

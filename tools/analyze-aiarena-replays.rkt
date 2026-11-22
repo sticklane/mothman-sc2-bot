@@ -87,7 +87,15 @@
            1458 "Mothman-Z"
            1459 "Mothman-T"
            1460 "Mothman-P"
-           1461 "Mothman-X"))
+           1461 "Mothman-X"
+           1505 "Mothman-Z2"
+           1506 "Mothman-T2"
+           1507 "Mothman-P2"
+           1508 "Mothman-X2"))
+
+(define ALL-ACTIVE-BOT-IDS '(1458 1459 1460 1461 1505 1506 1507 1508))
+(define V1-BOT-IDS '(1458 1459 1460 1461))
+(define V2-BOT-IDS '(1505 1506 1507 1508))
 
 (define KNOWN-BOT-NAMES
   (make-hasheqv
@@ -96,6 +104,10 @@
      (1459 . "Mothman-T")
      (1460 . "Mothman-P")
      (1461 . "Mothman-X")
+     (1505 . "Mothman-Z2")
+     (1506 . "Mothman-T2")
+     (1507 . "Mothman-P2")
+     (1508 . "Mothman-X2")
      (1256 . "Atlas")
      (248  . "Eris")
      (611  . "Phobos")
@@ -112,23 +124,30 @@
 (define (parse-bot-filter bots-str)
   (cond
     [(or (not bots-str) (string=? (string-trim bots-str) "") (string-ci=? (string-trim bots-str) "all"))
-     '(1458 1459 1460 1461)]
+     ALL-ACTIVE-BOT-IDS]
     [else
      (define tokens
        (filter (lambda (s) (not (string=? s "")))
                (map string-trim (string-split bots-str ","))))
      (remove-duplicates
-      (filter values
-              (for/list ([tok (in-list tokens)])
-                (define up (string-upcase tok))
-                (cond
-                  [(or (string=? up "Z") (string=? up "MOTHMAN-Z") (string=? up "1458")) 1458]
-                  [(or (string=? up "T") (string=? up "MOTHMAN-T") (string=? up "1459")) 1459]
-                  [(or (string=? up "P") (string=? up "MOTHMAN-P") (string=? up "1460")) 1460]
-                  [(or (string=? up "X") (string=? up "MOTHMAN-X") (string=? up "1461")) 1461]
-                  [(or (string=? up "R") (string=? up "MOTHMAN-R") (string=? up "1457")) 1457]
-                  [(string->number tok) => (lambda (n) (and (exact-integer? n) n))]
-                  [else #f]))))]))
+      (apply append
+             (for/list ([tok (in-list tokens)])
+               (define up (string-upcase tok))
+               (cond
+                 [(string=? up "V1") V1-BOT-IDS]
+                 [(string=? up "V2") V2-BOT-IDS]
+                 [(string=? up "ALL") ALL-ACTIVE-BOT-IDS]
+                 [(or (string=? up "Z") (string=? up "MOTHMAN-Z") (string=? up "1458")) '(1458)]
+                 [(or (string=? up "T") (string=? up "MOTHMAN-T") (string=? up "1459")) '(1459)]
+                 [(or (string=? up "P") (string=? up "MOTHMAN-P") (string=? up "1460")) '(1460)]
+                 [(or (string=? up "X") (string=? up "MOTHMAN-X") (string=? up "1461")) '(1461)]
+                 [(or (string=? up "Z2") (string=? up "MOTHMAN-Z2") (string=? up "1505")) '(1505)]
+                 [(or (string=? up "T2") (string=? up "MOTHMAN-T2") (string=? up "1506")) '(1506)]
+                 [(or (string=? up "P2") (string=? up "MOTHMAN-P2") (string=? up "1507")) '(1507)]
+                 [(or (string=? up "X2") (string=? up "MOTHMAN-X2") (string=? up "1508")) '(1508)]
+                 [(or (string=? up "R") (string=? up "MOTHMAN-R") (string=? up "1457")) '(1457)]
+                 [(string->number tok) => (lambda (n) (if (exact-integer? n) (list n) '()))]
+                 [else '()]))))]))
 
 (define (parse-match-ids-str ids-str)
   (if (or (not ids-str) (string=? (string-trim ids-str) ""))
@@ -169,9 +188,9 @@
 (define (infer-bot-race-short bot-name)
   (define s (if (string? bot-name) (string-upcase (string-trim bot-name)) ""))
   (cond
-    [(string-suffix? s "-Z") "Z"]
-    [(string-suffix? s "-T") "T"]
-    [(string-suffix? s "-P") "P"]
+    [(or (string-suffix? s "-Z") (string-suffix? s "-Z2")) "Z"]
+    [(or (string-suffix? s "-T") (string-suffix? s "-T2")) "T"]
+    [(or (string-suffix? s "-P") (string-suffix? s "-P2")) "P"]
     [else "Unknown"]))
 
 (define (compute-matchup-code our-race opp-race)
@@ -417,7 +436,7 @@
 
 (define (fetch-aiarena-matches! out-dir
                                 #:token [token DEFAULT-TOKEN]
-                                #:bot-ids [bot-ids '(1458 1459 1460 1461)]
+                                #:bot-ids [bot-ids ALL-ACTIVE-BOT-IDS]
                                 #:match-ids [explicit-match-ids '()]
                                 #:since-match [since-match #f]
                                 #:limit [limit 25])
@@ -2030,7 +2049,7 @@
                                         #:quiet? [quiet? #f])
   (define out-dir (if (path? dir-in) dir-in (string->path dir-in)))
   (make-directory* out-dir)
-  (define active-bots (or bot-ids '(1458 1459 1460 1461)))
+  (define active-bots (or bot-ids ALL-ACTIVE-BOT-IDS))
   (define bot-filter-active? (and bot-ids #t))
   (define eff-matchup-filter
     (cond

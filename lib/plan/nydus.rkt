@@ -329,6 +329,8 @@
 
 (struct nydus-index
   (frame
+   enemy-race
+   under-attack?
    bx by nx ny ex ey eex eey
    ally-units enemy-units
    ally-u-by-type ally-b-by-type enemy-b-by-type
@@ -470,6 +472,8 @@
 (define (build-nydus-index raw-obs)
   (define obs (ensure-obs raw-obs))
   (define frame (fast-safe-nonneg-int (obs-ref obs 'frame 0) 0))
+  (define enemy-race (obs-ref obs 'enemy-race 'Unknown))
+  (define under-attack? (and (obs-ref obs 'under-attack? #f) #t))
   (define-values (bx by) (home-xy obs))
   (define-values (nx ny) (nat-xy obs))
   (define-values (ex ey) (enemy-xy obs))
@@ -510,7 +514,8 @@
   (finalize-buckets! ally-b-ht)
   (finalize-buckets! enemy-b-ht)
 
-  (nydus-index frame bx by nx ny ex ey eex eey
+  (nydus-index frame enemy-race under-attack?
+               bx by nx ny ex ey eex eey
                ally-units enemy-units
                ally-u-ht ally-b-ht enemy-b-ht
                (reverse workers-rev) (reverse combat-rev)
@@ -606,13 +611,25 @@
 (define (plan-nydus-worm-tactics raw-obs)
   (plan-nydus-worm-tactics/idx (build-nydus-index raw-obs)))
 
+(define (enemy-race-is-zerg? r)
+  (or (eq? r 'Zerg)
+      (eq? r 'zerg)
+      (and (string? r) (string-ci=? r "zerg"))))
+
 (define (plan-counter-nydus-worm-tactics/idx idx)
   (define eb-ht (nydus-index-enemy-b-by-type idx))
   (define enemy-worms (bucket-pos-ids eb-ht '(nydus-canal nydus-worm)))
   (define combat (nydus-index-ally-combat idx))
   (define frame (nydus-index-frame idx))
+  (define enemy-zerg? (enemy-race-is-zerg? (nydus-index-enemy-race idx)))
+  (define patrol-candidate?
+    (and (>= frame 4500)
+         (pair? combat)
+         (or (pair? enemy-worms)
+             (and enemy-zerg?
+                  (>= (length combat) 10)))))
   (if (and (null? enemy-worms)
-           (or (< frame 4500) (null? combat)))
+           (not patrol-candidate?))
       '()
       (let ()
         (define bx (nydus-index-bx idx))
@@ -639,11 +656,25 @@
             (when (pair? local-def)
               (emit! (list 'focus-fire (map u-id local-def) (u-id ew))))))
 
-        (when (and (>= frame 4500) (pair? combat))
-          (define spotter (first combat))
-          (emit! (list 'patrol (u-id spotter) (clamp-coord (- bx 9.0)) (clamp-coord (- by 9.0))))
-          (when (pair? (cdr combat))
-            (emit! (list 'patrol (u-id (second combat)) (clamp-coord (+ nx 9.0)) (clamp-coord (- ny 8.0))))))
+        ;; L55-N1 (`#1371`/`#1372`): Gate anti-Nydus perimeter patrol on enemy Zerg (>= 10 combat)
+        ;; or active enemy Nydus Worms AND never yank combat units defending against enemy combat
+        ;; units near Main/Natural (<= 30t)!
+        (when patrol-candidate?
+          (define enemy-combat-near-home?
+            (or (nydus-index-under-attack? idx)
+                (for/or ([eu (in-list (nydus-index-enemy-units idx))])
+                  (and (hash? eu)
+                       (fast-hash-unit-pos-id? eu)
+                       (not (vector-ref (fast-unit-meta (fast-hash-raw-sym eu)) 2))
+                       (let ([exu (u-x eu 9999.0)]
+                             [eyu (u-y eu 9999.0)])
+                         (or (<= (fast-dist2 bx by exu eyu) 900.0)
+                             (<= (fast-dist2 nx ny exu eyu) 900.0)))))))
+          (when (not enemy-combat-near-home?)
+            (define spotter (first combat))
+            (emit! (list 'patrol (u-id spotter) (clamp-coord (- bx 9.0)) (clamp-coord (- by 9.0))))
+            (when (pair? (cdr combat))
+              (emit! (list 'patrol (u-id (second combat)) (clamp-coord (+ nx 9.0)) (clamp-coord (- ny 8.0)))))))
 
         (reverse actions))))
 

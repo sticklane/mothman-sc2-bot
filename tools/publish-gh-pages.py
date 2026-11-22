@@ -79,7 +79,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
         ReportSpec(
             slug="loops-29-plus",
             out_file="loops-29-plus.html",
-            title="Campaign Updates (Loops 29–50)",
+            title="Campaign Updates (Loops 29–51)",
             short_title="Updates",
             section="Progress & Replays",
             summary="Build summaries, live releases, and playable 3D match clips from recent test runs.",
@@ -102,7 +102,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="Speeding Up the Test & Release Cycle",
             short_title="Timing Review",
             section="Technical Notes",
-            summary="Where time went across 32 runs, why we moved the 2-minute head-to-head check first, and which rules kept flip-flopping.",
+            summary="Where time went across 33 runs, why we moved the 2-minute head-to-head check first, and which rules kept flip-flopping.",
             source_candidates=(brain_dir / "scratch/loop/loop_flywheel_retro.md",),
             required=False,
         ),
@@ -355,7 +355,7 @@ def classify_media_path(p: Path) -> Tuple[str, str]:
     if m_fm:
         return f"media-{m_fm.group(1)}-matches", m_fm.group(2)
 
-    m_vis = re.search(r"/visuals_(iter\d+)(?:_[A-Za-z0-9_]+)?/(arena|selfplay|replays)/([^/\s)]+)$", s)
+    m_vis = re.search(r"/(?:visuals|probe)_(iter\d+)(?:_[A-Za-z0-9_]+)?/(?:persephone_v4/)?(arena|selfplay|replays)/([^/\s)]+)$", s)
     if m_vis:
         iter_name, sub, fname = m_vis.group(1), m_vis.group(2), m_vis.group(3)
         if sub == "replays" and (
@@ -536,6 +536,17 @@ def discover_media_to_upload(
                 p = l50_probe_dir / f"{sid}{ext}"
                 if p.is_file():
                     register(p, force_tag="media-iter50", force_name=f"arena_{p.name}")
+
+    # 2C. Register verified Loop 51 clips (t14 PersephoneAIE_v4 3.75x KO, d10 1.75x KO; exclude sp07 placeholder).
+    l51_root = brain_dir / "scratch" / "loop" / "probe_iter51_w2_5014"
+    for rel_sub, sid in (
+        ("persephone_v4/arena", "sc2-real-t14-raven-imatrix-aam-bio-vs-colossus"),
+        ("arena", "sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker"),
+    ):
+        for ext in (".mp4", ".png"):
+            p = l51_root / rel_sub / f"{sid}{ext}"
+            if p.is_file():
+                register(p, force_tag="media-iter51", force_name=f"arena_{p.name}")
 
     # 3. Optionally include ALL campaign_media/iter* files.
     cm_root = brain_dir / "campaign_media"
@@ -1426,6 +1437,7 @@ DEPLOY_LABELS: Dict[str, str] = {
     "qpqqolmk_3b21fe7a": "Loop 45",
     "oyzplryr_dc3a33b6": "Loop 48",
     "mmmkputx_6c3f9529": "Loop 50",
+    "nkxlrsuk_4e7c6f39": "Loop 51",
 }
 
 BOT_META: Dict[str, Dict[str, str]] = {
@@ -2297,6 +2309,58 @@ def discover_gallery_items(
                     "search": f"loop 50 {sid} {clean_title} tactics drills {race_guess} {res_label} {tier_val}".lower(),
                 }
             )
+
+    # 2C. Loop 51 Verified Probe Clips (t14 PersephoneAIE_v4 3.75x KO, d10 1.75x KO; exclude sp07 placeholder)
+    l51_root = brain_dir / "scratch" / "loop" / "probe_iter51_w2_5014"
+    l51_specs = [
+        (
+            l51_root / "persephone_v4" / "arena",
+            "sc2-real-t14-raven-imatrix-aam-bio-vs-colossus",
+            "Terran",
+            "win",
+            "Win",
+            3.75,
+        ),
+        (
+            l51_root / "arena",
+            "sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker",
+            "Terran",
+            "win",
+            "Win",
+            1.75,
+        ),
+    ]
+    for pdir, sid, race_val, outcome, res_label, tr in l51_specs:
+        mp4_p = pdir / f"{sid}.mp4"
+        if not mp4_p.is_file():
+            continue
+        png_p = pdir / f"{sid}.png"
+        mp4_url = resolve_cdn(str(mp4_p), pdir)
+        png_url = resolve_cdn(str(png_p), pdir) if png_p.is_file() else ""
+        clean_title = _format_drill_title(sid)
+        bits = ["Tactics Drills", _format_trade_label(tr, outcome), "canonical"]
+        items.append(
+            {
+                "loop": "Loop 51",
+                "loop_num": 51,
+                "category": "Tactics Drills",
+                "cohort": "canonical",
+                "race": _race_full(race_val),
+                "outcome": outcome,
+                "result_label": res_label,
+                "trade_ratio": tr,
+                "title": clean_title,
+                "subtitle": " · ".join(b for b in bits if b),
+                "media_type": "mp4",
+                "playable_mp4": False,
+                "src": mp4_url or "",
+                "download_url": mp4_url or "",
+                "poster": png_url,
+                "_local_mp4": str(mp4_p),
+                "_safe_name": f"l51_arena_{mp4_p.name}",
+                "search": f"loop 51 {sid} {clean_title} tactics drills {race_val} {res_label} canonical".lower(),
+            }
+        )
 
     # 3. Curated Recent Highlights (with clear plain-English captions for what to watch)
     curated_specs = [
@@ -3237,6 +3301,7 @@ _CALM_LOOP_TITLES: Dict[int, str] = {
     48: "Live release #7 (50% core benchmark)",
     49: "Banelings, base layouts & stall checks (held)",
     50: "Live release #8 (Zerg breakthrough & SC2 4.10 fixes)",
+    51: "Live release #9 (54.8% core benchmark & SC2 5.0.14 fixes)",
 }
 
 
@@ -3663,10 +3728,20 @@ def build_index_page(
         smeta = scen_meta_by_id[sid]
         cat = str(smeta.get("category") or "other")
         sres = arena_res_by_id.get(sid, {})
-        if sid == "sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker" and int(it.get("loop_num") or 0) >= 50:
+        if sid == "sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker" and int(it.get("loop_num") or 0) >= 51:
+            desc = (
+                "Vikings clear both Observers so Cloaked Banshees stay invisible, then land on the remaining "
+                "Stalkers while the Raven casts Anti-Armor Missile and Auto-Turret and survives."
+            )
+        elif sid == "sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker" and int(it.get("loop_num") or 0) >= 50:
             desc = (
                 "Vikings clear both Observers so Cloaked Banshees stay invisible, then land on the remaining "
                 "Stalkers while the Raven drops two Auto-Turrets and kites to safety."
+            )
+        elif sid == "sc2-real-t14-raven-imatrix-aam-bio-vs-colossus" and int(it.get("loop_num") or 0) >= 51:
+            desc = (
+                "Both Ravens open with Interference Matrix to shut down both enemy Colossi before they fire, "
+                "follow with Anti-Armor Missile on the Stalkers, and land Vikings to finish the sweep with zero Ravens or Medivacs lost."
             )
         else:
             desc = _clean_drill_caption(str(smeta.get("description") or it.get("subtitle") or ""))
@@ -3849,7 +3924,7 @@ def build_index_page(
     prev_n_val = dash.get("prev_build_n", prev_w + prev_l)
     prev_ties = max(0, prev_n_val - prev_w - prev_l)
     prev_rec_str = f"{prev_w}–{prev_l}" + (f"–{prev_ties}" if prev_ties else "")
-    deployed_build_num = 50
+    deployed_build_num = 51
     latest_num_m = re.search(r"(\d+)", latest_lbl)
     prev_num_m = re.search(r"(\d+)", prev_lbl)
     latest_b_num = int(latest_num_m.group(1)) if latest_num_m else 45
@@ -4029,7 +4104,8 @@ def build_static_site(
     loop_root = brain_dir / "scratch" / "loop"
     flagship_specs = [
         ("showcase:p15", loop_root / "visuals_iter48/arena/sc2-real-p15-dt-blink-snipe-planetary.mp4", "feat_p15_dt_pf.mp4"),
-        ("showcase:d10", loop_root / "visuals_iter50_w3_probe/arena/sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker.mp4", "feat_l50_d10_banshee_obs.mp4"),
+        ("showcase:d10", loop_root / "probe_iter51_w2_5014/arena/sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker.mp4", "feat_l51_d10_banshee_obs.mp4"),
+        ("showcase:t14", loop_root / "probe_iter51_w2_5014/persephone_v4/arena/sc2-real-t14-raven-imatrix-aam-bio-vs-colossus.mp4", "feat_l51_t14_raven_imatrix.mp4"),
         ("showcase:r15", loop_root / "visuals_iter50_w3_probe/arena/sc2-reg-r15-tvp-full-lifecycle-vs-15-kiting-probes.mp4", "feat_l50_r15_scv_hold.mp4"),
         ("showcase:t12", loop_root / "visuals_iter50_w3_probe/arena/sc2-real-t12-banshee-raven-marine-vs-dt-stalker-observer.mp4", "feat_l50_t12_banshee_raven.mp4"),
         ("showcase:s04", loop_root / "visuals_iter50_w3_probe/arena/sc2-sta-s04-pvz-oracle-stasis-choke-split.mp4", "feat_l50_s04_stasis_choke.mp4"),

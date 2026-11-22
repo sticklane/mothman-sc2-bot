@@ -7310,8 +7310,9 @@
              (lp))))))
     (values ws rpc-cnt saw-319? (lambda () (close-output-port c-out) (close-input-port c-in) (thread-wait th))))
 
-  ;; L33-P0-1a: Supply Depot lower/raise (`556`/`558`) moved out of P0 -> P2, and identical
-  ;; non-urgent mode switches `(ab, sorted-tags)` are deduped for >= 10 game loops at the governor!
+  ;; L33-P0-1a (+ L54-W1): Supply Depot raise (`558`) stays P2 (cannot starve P1 macro),
+  ;; Supply Depot lower (`556`) is promoted to P1 (cannot be starved by trapped P2 combat spam),
+  ;; and identical non-urgent mode switches `(ab, sorted-tags)` are deduped for >= 10 loops!
   (define cmd-556 (sc2-raw-unit-command 556 #f 0 '(13001) #f))
   (define cmd-558 (sc2-raw-unit-command 558 #f 0 '(13001) #f))
   (define gov-33a (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
@@ -7329,8 +7330,8 @@
                               (list (sc2-raw-unit-command 388 #f 0 '(13002 13003) #f))
                               gl)))
       gl))
-  (check-true "l33-p0-1a-depot-556-558-tier-2-and-10-loop-mode-switch-dedup"
-              (and (= (wire-cmd-priority-tier cmd-556) 2)
+  (check-true "l33-p0-1a-depot-556-p1-558-p2-and-10-loop-mode-switch-dedup"
+              (and (= (wire-cmd-priority-tier cmd-556) 1)
                    (= (wire-cmd-priority-tier cmd-558) 2)
                    (equal? emit-loops-558 '(100 110))
                    (equal? emit-loops-388 '(200 210))))
@@ -11003,6 +11004,371 @@
                    (eq? mod-b-im-sym 'interference-matrix)  (= mod-b-im-id 300)
                    (not mod-b-4107?) mod-b-4111? mod-b-def?
                    mod-b-bo-suppressed? offline-4107?))
+
+  ;; 11. L54-W1 (`#1323`): Raised-Depot Wall-Lock Fix —
+  ;;     (a) All clear raised depots (`utype=19`) batch into ONE multi-tag `556` command (`2` APM total),
+  ;;     (b) `556` is promoted to P1 (and P0 urgent-survival when `friendly-transit?`) so P2 army
+  ;;         MOVE/ATTACK spam can NEVER starve ramp lowering,
+  ;;     (c) Dropping a depot command (`556`/`558`) in the APM governor clears `SC2-DEPOT-TOGGLE-COOLDOWN`!
+  (hash-clear! SC2-DEPOT-TOGGLE-COOLDOWN)
+  (define l54-cc  (mk-l49-u 99901 18 1 30.0 30.0 #:hp 1500.0 #:rad 2.75))
+  (define l54-d1  (mk-l49-u 99911 19 1 42.0 42.0 #:hp 400.0  #:rad 1.25))
+  (define l54-d2  (mk-l49-u 99912 19 1 44.0 44.0 #:hp 400.0  #:rad 1.25))
+  (define l54-d3  (mk-l49-u 99913 19 1 46.0 46.0 #:hp 400.0  #:rad 1.25))
+  (define l54-d4  (mk-l49-u 99914 19 1 34.0 24.0 #:hp 400.0  #:rad 1.25))
+  (define l54-obs-batch (make-test-obs 5000 300 100 (list l54-cc l54-d1 l54-d2 l54-d3 l54-d4)))
+  (define l54-cmds-batch (translate-bot-actions->sc2-raw-commands '() l54-obs-batch #:game-info gi-sw))
+  (define l54-556-batch
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 556)))
+            l54-cmds-batch))
+  ;; (b) Friendly Marine requesting transit across depot `99911` promotes batched `556` to P0 urgent-survival
+  ;;     AND beats heavy P2 Marine MOVE/ATTACK spam in the APM governor!
+  (hash-clear! SC2-DEPOT-TOGGLE-COOLDOWN)
+  (define l54-mar-tr
+    (mk-l49-u 99921 48 1 41.0 41.0 #:hp 45.0 #:rad 0.375
+              #:orders (list (sc2-unit-order 16 (sc2-point3d 80.0 80.0 0.0) 0 0.0))))
+  (define l54-obs-tr (make-test-obs 5100 300 100 (list l54-cc l54-d1 l54-d2 l54-mar-tr)))
+  (define l54-cmds-tr (translate-bot-actions->sc2-raw-commands '() l54-obs-tr #:game-info gi-sw))
+  (define l54-556-tr
+    (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 556)))
+           l54-cmds-tr))
+  (define gov-54-spam (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0))
+  (define p2-spam-54
+    (for/list ([k (in-range 25)])
+      (sc2-raw-unit-command 16 (sc2-point2d (+ 80.0 k) 80.0) 0 (list (+ 98000 k)) #f)))
+  (define gov-54-out
+    (govern-sc2-wire-actions!
+     gov-54-spam
+     (append p2-spam-54 (list (sc2-raw-unit-command 556 #f 0 '(99911 99912) #f)))
+     5100))
+  (define gov-54-emitted-556?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 556)))
+           gov-54-out))
+  ;; (c) When APM governor drops a depot toggle command (`556`/`558`), SC2-DEPOT-TOGGLE-COOLDOWN is cleared!
+  (define gov-54-dry (make-wire-apm-governor #:target-apm 10.0 #:hard-cap-apm 10.0))
+  ;; Exhaust rolling headroom (10 APM) via 6 distinct non-coalescable P1 train commands (`524`, 2 APM each)
+  (govern-sc2-wire-actions!
+   gov-54-dry
+   (for/list ([k (in-range 6)])
+     (sc2-raw-unit-command 524 #f 0 (list (+ 98500 k)) #f))
+   5200)
+  (hash-set! SC2-DEPOT-TOGGLE-COOLDOWN 99931 5244)
+  (hash-set! SC2-DEPOT-TOGGLE-COOLDOWN 99932 5244)
+  (define gov-54-drop-out
+    (govern-sc2-wire-actions!
+     gov-54-dry
+     (list (sc2-raw-unit-command 558 #f 0 '(99931) #f)
+           (sc2-raw-unit-command 556 #f 0 '(99932) #f))
+     5204))
+  (define l54-cd-cleared?
+    (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (memv (sc2-raw-unit-command-ability-id c) '(556 558))))
+                     gov-54-drop-out))
+         (not (hash-has-key? SC2-DEPOT-TOGGLE-COOLDOWN 99931))
+         (not (hash-has-key? SC2-DEPOT-TOGGLE-COOLDOWN 99932))))
+  (check-true "l54-w1-depot-556-batching-p1-urgent-and-dropped-cooldown-clear"
+              (and (= (length l54-556-batch) 1)
+                   (equal? (sort (sc2-raw-unit-command-unit-tags (car l54-556-batch)) <)
+                           '(99911 99912 99913 99914))
+                   (= (wire-cmd-priority-tier (car l54-556-batch)) 1)
+                   (sc2-raw-unit-command? l54-556-tr)
+                   (urgent-survival-cmd? l54-556-tr)
+                   (= (wire-cmd-priority-tier l54-556-tr) 0)
+                   gov-54-emitted-556?
+                   l54-cd-cleared?))
+
+  ;; 12. L54-W2 (`#1323`): Observer/Overseer Cross-Map Scout Hijack Suppression + `12a` Preemption!
+  ;;     (a) Under cloaked Banshee threat, `periodic-scout` on Observer `82` is suppressed (NO cross-map
+  ;;         MOVE `16` to `(160, 160)`), and `12a` flies the Observer onto the cloaked Banshee `(36, 36)` as P0!
+  ;;     (b) Under home-base combat (`enemy-combat-near-own-base?`), `periodic-scout` on Observer `82` /
+  ;;         Overseer `129` is also suppressed; in peacetime, `periodic-scout` on Observer `82` still works!
+  (define l54-nex   (mk-l49-u 99941 59 1 32.0 32.0 #:hp 1000.0 #:rad 2.5))
+  (define l54-obs82 (mk-l49-u 99942 82 1 40.0 40.0 #:hp 40.0   #:rad 0.5))
+  (define l54-stk   (mk-l49-u 99943 74 1 36.0 34.0 #:hp 80.0   #:rad 0.625))
+  (define l54-ban
+    (sc2-unit 1 4 99944 55 2 (sc2-point3d 36.0 36.0 8.0) 0.0 0.75 1.0 1 #f #t #f
+              140.0 140.0 0.0 0.0 50.0 200.0 0 0 #t #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define l54-scout-cloak-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((periodic-scout 99942 160.0 160.0)
+       (cast-deception-and-scout-spells))
+     (make-test-obs 5300 300 200 (list l54-nex l54-obs82 l54-stk l54-ban))
+     #:game-info gi-sw))
+  (define l54-obs-far-scout?
+    (ormap (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 16)
+                  (memv 99942 (sc2-raw-unit-command-unit-tags c))
+                  (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                  (> (sc2-point2d-x (sc2-raw-unit-command-target-pos c)) 100.0)))
+           l54-scout-cloak-cmds))
+  (define l54-obs-covers-ban?
+    (ormap (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 16)
+                  (urgent-survival-cmd? c)
+                  (memv 99942 (sc2-raw-unit-command-unit-tags c))
+                  (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                  (<= (sqrt (+ (sqr (- (sc2-point2d-x (sc2-raw-unit-command-target-pos c)) 36.0))
+                               (sqr (- (sc2-point2d-y (sc2-raw-unit-command-target-pos c)) 36.0))))
+                      12.0)))
+           l54-scout-cloak-cmds))
+  ;; (b) Under active non-stealth home-base attack, Overseer `129` `periodic-scout` is suppressed too!
+  (define l54-htch  (mk-l49-u 99951 86  1 32.0 32.0 #:hp 1500.0 #:rad 2.75))
+  (define l54-ovs   (mk-l49-u 99952 129 1 38.0 38.0 #:hp 200.0  #:rad 1.0))
+  (define l54-emr   (mk-l49-u 99953 48  4 38.0 36.0 #:hp 45.0   #:rad 0.375))
+  (define l54-ovs-base-atk-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((periodic-scout 99952 160.0 160.0))
+     (make-test-obs 5320 300 200 (list l54-htch l54-ovs l54-emr))
+     #:game-info gi-sw))
+  (define l54-ovs-suppressed?
+    (not (ormap (lambda (c)
+                  (and (sc2-raw-unit-command? c)
+                       (= (sc2-raw-unit-command-ability-id c) 16)
+                       (memv 99952 (sc2-raw-unit-command-unit-tags c))))
+                l54-ovs-base-atk-cmds)))
+  ;; (c) In peacetime (`0` stealth, `0` enemies near base), Observer `82` `periodic-scout` STILL works!
+  (define l54-obs-peace-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((periodic-scout 99942 160.0 160.0))
+     (make-test-obs 5340 300 200 (list l54-nex l54-obs82))
+     #:game-info gi-sw))
+  (define l54-obs-peace-ok?
+    (ormap (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 16)
+                  (memv 99942 (sc2-raw-unit-command-unit-tags c))
+                  (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                  (> (sc2-point2d-x (sc2-raw-unit-command-target-pos c)) 100.0)))
+           l54-obs-peace-cmds))
+  (check-true "l54-w2-detector-scout-suppression-and-12a-preemption"
+              (and (not l54-obs-far-scout?)
+                   l54-obs-covers-ban?
+                   l54-ovs-suppressed?
+                   l54-obs-peace-ok?))
+
+  ;; 13. L55-W1 (`#1345`): Global Cloak Shimmer Fix (`cloak=1` undetected, NOT `cloak=2` detected)
+  ;;     + `'over-unpathable-airspace?` tag on flying enemy records via `path-grid`!
+  (define l55-pgrid-bytes (make-bytes (* 128 128) 1))
+  (for* ([y (in-range 128)] [x (in-range 25)])
+    (bytes-set! l55-pgrid-bytes (+ x (* y 128)) 0))
+  (define l55-pgrid (sc2-image-grid 8 128 128 l55-pgrid-bytes #f #f))
+  (define l55-gi-p
+    (sc2-game-info "L55TestMap" ""
+                   (list (hash 'player-id 1 'race-requested 'Terran)
+                         (hash 'player-id 2 'race-requested 'Protoss))
+                   '(128 128) '(4 4 124 124) (list (sc2-point2d 100.0 100.0))
+                   l55-pgrid #f l55-pgrid))
+  (define l55-dt-c1
+    (sc2-unit 1 4 99961 76 2 (sc2-point3d 40.0 40.0 8.0) 0.0 0.375 1.0 1 #f #t #f
+              40.0 40.0 80.0 80.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define l55-dt-c2
+    (sc2-unit 1 4 99962 76 2 (sc2-point3d 42.0 42.0 8.0) 0.0 0.375 1.0 2 #f #t #f
+              40.0 40.0 80.0 80.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define l55-ban-cliff
+    (sc2-unit 1 4 99963 55 2 (sc2-point3d 18.0 60.0 8.0) 0.0 0.75 1.0 0 #f #t #f
+              140.0 140.0 0.0 0.0 50.0 200.0 0 0 #t #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define l55-ban-walk
+    (sc2-unit 1 4 99964 55 2 (sc2-point3d 40.0 60.0 8.0) 0.0 0.75 1.0 0 #f #t #f
+              140.0 140.0 0.0 0.0 50.0 200.0 0 0 #t #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define l55-rt-hash
+    (sc2-observation->runtime-obs-hash
+     (make-test-obs 5500 300 200 (list l54-cc l55-dt-c1 l55-dt-c2 l55-ban-cliff l55-ban-walk))
+     #:game-info l55-gi-p))
+  (define l55-eus (hash-ref l55-rt-hash 'enemy-units '()))
+  (define (l55-eu id) (findf (lambda (u) (= (hash-ref u 'id 0) id)) l55-eus))
+  (define l55-shims (hash-ref l55-rt-hash 'shimmer-and-burrow-ripples '()))
+  (check-true "l55-w1-shimmer-cloak1-and-unpathable-airspace-tag"
+              (and (hash-ref (l55-eu 99961) 'is-shimmer? #f)
+                   (not (hash-ref (l55-eu 99962) 'is-shimmer? #t))
+                   (ormap (lambda (u) (= (hash-ref u 'id 0) 99961)) l55-shims)
+                   (not (ormap (lambda (u) (= (hash-ref u 'id 0) 99962)) l55-shims))
+                   (hash-ref (l55-eu 99963) 'over-unpathable-airspace? #f)
+                   (not (hash-ref (l55-eu 99964) 'over-unpathable-airspace? #t))
+                   (not (hash-ref (l55-eu 99961) 'over-unpathable-airspace? #t))))
+
+  ;; 14. L56-W2-1 (L55-W2b/L55-W3a, `#1357`/`#1372`/`#1394`): Tier-P1 MULE Safety Net Proactive Scan Reserve:
+  ;;     - TvP/Random `>= 5376` (4:00), `0` Ravens & `0` Turrets -> `100.0e` floor on up to `2`
+  ;;       ready OCs (top-2 by energy; 3rd+ OC MULEs at `50.0e`; `3:30` still MULEs!)
+  ;;     - TvT with NO scouted cloak tech (`41`/`26`/`50`/`55`): BOTH 1-OC and 2-OC MULE freely even `>= 4:15` (`5712`)!
+  ;;     - TvT WITH scouted StarportTechLab (`41`) or Banshee (`55`) -> reserves `100.0e` on top-1 OC (2nd OC still MULEs)!
+  (define (mk-l55-oc tag x y en)
+    (sc2-unit 1 1 tag 132 1 (sc2-point3d x y 8.0) 0.0 2.75 1.0 0 #f #t #f
+              1500.0 1500.0 0.0 0.0 en 200.0 0 0 #f #f #f #t #f '() 0 '() 14 16 0.0 0 0 0 0 '() 0 0))
+  (define l55-min1 (mk-l49-u 99971 341 3 24.0 30.0 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define l55-min2 (mk-l49-u 99972 341 3 56.0 30.0 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define l55-min3 (mk-l49-u 99980 341 3 76.0 30.0 #:hp 1000.0 #:rad 1.0 #:mins 1500))
+  (define l55-oc1-75  (mk-l55-oc 99973 30.0 30.0 75.0))
+  (define l55-oc1-90  (mk-l55-oc 99973 30.0 30.0 90.0))
+  (define l55-oc1-100 (mk-l55-oc 99973 30.0 30.0 100.0))
+  (define l55-oc2-60  (mk-l55-oc 99974 50.0 30.0 60.0))
+  (define l55-oc2-75  (mk-l55-oc 99974 50.0 30.0 75.0))
+  (define l55-oc3-60  (mk-l55-oc 99979 70.0 30.0 60.0))
+  (define l55-turret  (mk-l49-u 99975 23 1 28.0 28.0 #:hp 250.0 #:rad 1.0))
+  (define l55-raven   (mk-l49-u 99976 56 1 32.0 32.0 #:hp 140.0 #:rad 0.75))
+  (define l55-enemy-stl (mk-l49-u 99977 41 4 95.0 95.0 #:hp 400.0 #:rad 1.0))
+  (define l55-enemy-ban
+    (sc2-unit 1 4 99978 55 2 (sc2-point3d 95.0 95.0 8.0) 0.0 0.75 1.0 0 #f #t #f
+              140.0 140.0 0.0 0.0 50.0 200.0 0 0 #t #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define l55-gi-t
+    (sc2-game-info "L55TestMap" ""
+                   (list (hash 'player-id 1 'race-requested 'Terran)
+                         (hash 'player-id 2 'race-requested 'Terran))
+                   '(128 128) '(4 4 124 124) (list (sc2-point2d 100.0 100.0))
+                   l55-pgrid #f l55-pgrid))
+  (define l55-gi-z
+    (sc2-game-info "L55TestMap" ""
+                   (list (hash 'player-id 1 'race-requested 'Terran)
+                         (hash 'player-id 2 'race-requested 'Zerg))
+                   '(128 128) '(4 4 124 124) (list (sc2-point2d 100.0 100.0))
+                   l55-pgrid #f l55-pgrid))
+  (define (l55-mule-tags cs)
+    (for/list ([c (in-list cs)]
+               #:when (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 171)))
+      (car (sc2-raw-unit-command-unit-tags c))))
+  ;; Rewind match state cleanly before TvT no-cloak checks
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l55-oc1-75 l55-min1)) #:game-info l55-gi-t))
+  ;; (a0) TvP at 3:30 (4704 < 5376): STILL drops MULE normally at 75e!
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-tvp-330
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 4704 200 100 (list l55-oc1-75 l55-min1))
+                    #:game-info l55-gi-p)))
+  ;; (a1) TvT with NO scouted cloak tech: 1-OC & 2-OC at 3:30 (4724), 4:05 (5488), & 4:15+ (5712/5720) MULE freely!
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-tvt-330-clean
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 4724 200 100 (list l55-oc1-75 l55-min1))
+                    #:game-info l55-gi-t)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-tvt-405-two-oc
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 5488 200 100 (list l55-oc1-75 l55-oc2-60 l55-min1 l55-min2))
+                    #:game-info l55-gi-t)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-tvt-415-clean
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 5712 200 100 (list l55-oc1-75 l55-min1))
+                    #:game-info l55-gi-t)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-tvt-415-two-oc
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 5720 200 100 (list l55-oc1-75 l55-oc2-60 l55-min1 l55-min2))
+                    #:game-info l55-gi-t)))
+  ;; (a2) TvP at 4:15 (5732 >= 5376), 0 Ravens, 0 Turrets -> HOLD MULE (reserves Scan!)
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-hold-1
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 5732 200 100 (list l55-oc1-75 l55-min1))
+                    #:game-info l55-gi-p)))
+  ;; (b) L55-W3a: 2 OCs (75e + 60e) in TvP at >= 4:00 -> BOTH OCs hold Scan (2-Scan bank)!
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-two-oc
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 5840 200 100 (list l55-oc1-75 l55-oc2-60 l55-min1 l55-min2))
+                    #:game-info l55-gi-p)))
+  ;; (b2) L55-W3a: 3 OCs (90e + 75e + 60e) in TvP at >= 4:00 -> top-2 OCs hold 100e, 3rd OC (99979) MULEs at 50e!
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-three-oc
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 5850 200 100 (list l55-oc1-90 l55-oc2-75 l55-oc3-60 l55-min1 l55-min2 l55-min3))
+                    #:game-info l55-gi-p)))
+  ;; (c) OC1 at 100e -> drops MULE cleanly (50e Scan remains banked!)
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-100e
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 5860 200 100 (list l55-oc1-100 l55-min1))
+                    #:game-info l55-gi-p)))
+  ;; (d) With a ready Missile Turret OR Raven OR vs Zerg -> OC1 at 75e drops MULE!
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-with-turret
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 5880 200 100 (list l55-oc1-75 l55-turret l55-min1))
+                    #:game-info l55-gi-p)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-with-raven
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 5900 200 100 (list l55-oc1-75 l55-raven l55-min1))
+                    #:game-info l55-gi-p)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-vs-zerg
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 5920 200 100 (list l55-oc1-75 l55-min1))
+                    #:game-info l55-gi-z)))
+  ;; (e) TvT WITH scouted enemy StarportTechLab (41) OR Banshee (55) -> holds 100e on top-1 OC only (2nd OC still MULEs)!
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-tvt-stl
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 5940 200 100 (list l55-oc1-75 l55-min1 l55-enemy-stl))
+                    #:game-info l55-gi-t)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-tvt-stl-two-oc
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 5950 200 100 (list l55-oc1-75 l55-oc2-60 l55-min1 l55-min2 l55-enemy-stl))
+                    #:game-info l55-gi-t)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define m-tvt-ban
+    (l55-mule-tags (saturate-workers-and-gas-commands
+                    (make-test-obs 5960 200 100 (list l55-oc1-75 l55-min1 l55-enemy-ban))
+                    #:game-info l55-gi-t)))
+  ;; Clean rewind reset for subsequent checks
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l55-min1))))
+  (check-true "l55-w2-mule-safety-net-proactive-scan-reserve"
+              (and (equal? m-tvp-330 '(99973))
+                   (equal? m-tvt-330-clean '(99973))
+                   (equal? (sort m-tvt-405-two-oc <) '(99973 99974))
+                   (equal? m-tvt-415-clean '(99973))
+                   (equal? (sort m-tvt-415-two-oc <) '(99973 99974))
+                   (null? m-hold-1)
+                   (null? m-two-oc)
+                   (equal? m-three-oc '(99979))
+                   (equal? m-100e '(99973))
+                   (equal? m-with-turret '(99973))
+                   (equal? m-with-raven '(99973))
+                   (equal? m-vs-zerg '(99973))
+                   (null? m-tvt-stl)
+                   (equal? m-tvt-stl-two-oc '(99974))
+                   (null? m-tvt-ban)))
+
+  ;; 15. L55-W3 (`#1345`): `high-ground-tactics` `air-spotter` excludes detectors
+  ;;     `'(82 106 129 1911 1912)` while still picking real non-detector flyers (e.g. Phoenix `78`)!
+  (define (mk-l55-fly tag utype x y)
+    (sc2-unit 1 1 tag utype 1 (sc2-point3d x y 10.0) 0.0 0.75 1.0 0 #f #t #f
+              120.0 120.0 60.0 60.0 50.0 200.0 0 0 #t #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define l55-det-only
+    (list l54-nex
+          (mk-l55-fly 99981 82   40.0 40.0)
+          (mk-l55-fly 99982 106  41.0 40.0)
+          (mk-l55-fly 99983 129  42.0 40.0)
+          (mk-l55-fly 99984 1911 43.0 40.0)
+          (mk-l55-fly 99985 1912 44.0 40.0)))
+  (define l55-hg-det-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((high-ground-tactics hold-high-ground-ramp-arc 80.0 80.0 #t))
+     (make-test-obs 5940 300 200 l55-det-only)
+     #:game-info gi-sw))
+  (define l55-hg-det-hijacked?
+    (ormap (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 16)
+                  (ormap (lambda (t) (memv t '(99981 99982 99983 99984 99985)))
+                         (sc2-raw-unit-command-unit-tags c))))
+           l55-hg-det-cmds))
+  (define l55-hg-phx-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((high-ground-tactics hold-high-ground-ramp-arc 80.0 80.0 #t))
+     (make-test-obs 5960 300 200 (append l55-det-only (list (mk-l55-fly 99986 78 45.0 40.0))))
+     #:game-info gi-sw))
+  (define l55-hg-picked-phx?
+    (ormap (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 16)
+                  (equal? (sc2-raw-unit-command-unit-tags c) '(99986))))
+           l55-hg-phx-cmds))
+  (check-true "l55-w3-high-ground-air-spotter-excludes-detectors"
+              (and (not l55-hg-det-hijacked?)
+                   l55-hg-picked-phx?))
+  (hash-clear! SC2-DEPOT-TOGGLE-COOLDOWN)
   (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
   (hash-clear! SC2-WATCHDOG-RING-EXPAND-SYMS))
 

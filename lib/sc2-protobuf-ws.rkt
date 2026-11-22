@@ -192,6 +192,7 @@
  SC2-PROD-PLACEMENT-MISS-STREAK
  SC2-EXPANSION-PAD-BLOCK-STREAK
  SC2-WATCHDOG-RING-EXPAND-SYMS
+ SC2-DEPOT-TOGGLE-COOLDOWN
  SC2-PROTOSS-FRAGILE-TECH-SYMS
  sc2-request-ring-expand!
  SC2-TUMOR-PLACEMENT-CACHE
@@ -5719,20 +5720,30 @@
     (for/list ([eu (in-list enemy-all)]
                #:when (not (sc2-unit-is-structure? eu)))
       (define p (sc2-unit-pos eu))
+      (define ex (sc2-point3d-x p))
+      (define ey (sc2-point3d-y p))
       (define utype (sc2-id->unit-symbol (sc2-unit-unit-type eu)))
       (define disp-type (sc2-unit-display-type eu))
       (define cloak-st (sc2-unit-cloak eu))
       (define is-halluc? (sc2-unit-is-hallucination eu))
       (define is-burr? (sc2-unit-is-burrowed eu))
+      (define is-fly? (sc2-unit-is-flying eu))
+      ;; L55-W1: Tag flying enemies hovering over unpathable cliff/chasm airspace (`path-grid = 0`)
+      ;; so ground AA units never lock onto unreachable cliff decoys!
+      (define over-unpathable-airspace?
+        (and is-fly?
+             (sc2-image-grid? path-grid)
+             (not (image-grid-pixel-set? path-grid ex ey))))
+      ;; L55-W1: `cloak = 1` is undetected `Cloaked` (NOT `2` = `CloakedDetected`!)
       (define shimmer?
         (or (= disp-type SC2-SHIMMER-DISPLAY-TYPE-HIDDEN)
-            (= cloak-st 2)))
+            (= cloak-st 1)))
       (define changeling?
         (not (not (memq utype SC2-CHANGELING-UNIT-SYMS))))
       (hasheq 'id (sc2-unit-tag eu)
               'type utype
-              'x (sc2-point3d-x p)
-              'y (sc2-point3d-y p)
+              'x ex
+              'y ey
               'z (sc2-point3d-z p)
               'hp (max 1 (exact-round (+ (sc2-unit-health eu) (sc2-unit-shield eu))))
               'hull-hp (max 1 (exact-round (sc2-unit-health eu)))
@@ -5741,7 +5752,8 @@
               'energy (max 0 (exact-round (sc2-unit-energy eu)))
               'energy-max (max 0 (exact-round (sc2-unit-energy-max eu)))
               'build-progress (max 0.0 (min 1.0 (sc2-unit-build-progress eu)))
-              'flying? (sc2-unit-is-flying eu)
+              'flying? is-fly?
+              'over-unpathable-airspace? over-unpathable-airspace?
               'display-type disp-type
               'cloak cloak-st
               'cloak-state cloak-st
@@ -9403,13 +9415,27 @@
 (define SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP (box #f))
 (define SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP (box #f))
 (define SC2-GAS-BLDG-ZERO-WORKERS-SINCE (make-hasheqv))
+(define SC2-SAT-OBSERVED-ENEMY-RACE (box #f))
+(define SC2-SAT-SEEN-TERRAN-CLOAK-TECH? (box #f))
+
+(define (sc2-infer-race-from-units ulist)
+  (for/first ([e (in-list ulist)]
+              #:when (let ([ut (sc2-unit-unit-type e)])
+                       (or (memv ut '(86 89 90 91 92 93 95 96 97 98 100 101 104 105 106 107 108 109 110 111 112 114 126 129 688))
+                           (memv ut '(18 19 20 21 22 23 24 25 26 27 28 29 30 32 33 34 35 45 47 48 49 50 51 52 53 54 55 56 57 130 132 498 692))
+                           (memv ut '(59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 133 311 495 496 694 1910)))))
+    (define ut (sc2-unit-unit-type e))
+    (cond
+      [(memv ut '(86 89 90 91 92 93 95 96 97 98 100 101 104 105 106 107 108 109 110 111 112 114 126 129 688)) 'Zerg]
+      [(memv ut '(18 19 20 21 22 23 24 25 26 27 28 29 30 32 33 34 35 45 47 48 49 50 51 52 53 54 55 56 57 130 132 498 692)) 'Terran]
+      [else 'Protoss])))
 
 (define (saturate-workers-and-gas-commands obs
                                            #:excluded-worker-tags [excluded-worker-tags (seteqv)]
                                            #:role-leases [role-leases #f]
                                            #:reserved-aabbs [reserved-aabbs '()]
                                            #:game-info [game-info #f])
-  (void reserved-aabbs game-info)
+  (void reserved-aabbs)
   (define cur-loop (sc2-observation-game-loop obs))
   (define prev-sat-loop (unbox SC2-WORKER-TRANSFER-LAST-LOOP))
   (when (or (<= cur-loop 8) (< cur-loop prev-sat-loop))
@@ -9423,7 +9449,9 @@
     (set-box! SC2-ZERO-GAS-RESCUE-ROTATION-IDX 0)
     (set-box! SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP #f)
     (set-box! SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP #f)
-    (hash-clear! SC2-GAS-BLDG-ZERO-WORKERS-SINCE))
+    (hash-clear! SC2-GAS-BLDG-ZERO-WORKERS-SINCE)
+    (set-box! SC2-SAT-OBSERVED-ENEMY-RACE #f)
+    (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #f))
   (when (> (- cur-loop prev-sat-loop) 64)
     (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f))
   (set-box! SC2-WORKER-TRANSFER-LAST-LOOP cur-loop)
@@ -10701,25 +10729,92 @@
   ;;    `SC2-MACRO-ABILITY-LAST-LOOP` (`16f` cooldown) so zero duplicate commands or rejects occur!
   ;; 6a. Orbital Command MULE (`171`): cast at >= 50 energy when no cloaked/burrowed threat exists
   ;;     (or >= 100 energy to preserve 50-energy Scan reserve under cloak threat).
+  ;;     L56-W2-1 (L55-W2b/L55-W3a): Scope proactive `100.0e` scan-bank guard (when `0` Ravens and
+  ;;     `0` ready Missile Turrets) to:
+  ;;     - `(memq sat-enemy-race '(Protoss Random))` with `cur-loop >= 5376` (4:00) on up to `2`
+  ;;       ready OCs (top-2 by energy; 3rd+ OC MULEs at `50.0e`, holding 2 back-to-back Scans),
+  ;;     - `TvT` ONLY on top-1 OC when enemy cloak/Banshee/Ghost tech (`41`/`26`/`50`/`55`) is
+  ;;       scouted — never starve unprovoked `TvT` MULEs on 1-OC or 2-OC!
   (when (not (null? owned-base-minerals))
+    (define seen-enemy-race-now (sc2-infer-race-from-units enemy-units))
+    (when seen-enemy-race-now
+      (set-box! SC2-SAT-OBSERVED-ENEMY-RACE seen-enemy-race-now))
+    (define seen-terran-cloak-tech-now?
+      (ormap (lambda (e) (memv (sc2-unit-unit-type e) '(41 26 50 55))) enemy-units))
+    (when seen-terran-cloak-tech-now?
+      (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #t))
+    (define gi-enemy-race
+      (and (sc2-game-info? game-info)
+           (let ([my-pid (sc2-player-common-player-id pc)])
+             (for/first ([pi (in-list (sc2-game-info-player-info game-info))]
+                         #:when (and (hash? pi)
+                                     (not (= (hash-ref pi 'player-id 0) my-pid))))
+               (or (let ([ra (hash-ref pi 'race-actual #f)])
+                     (and (memq ra '(Zerg Terran Protoss)) ra))
+                   (hash-ref pi 'race-requested #f))))))
+    (define sat-enemy-race
+      (or (and (memq gi-enemy-race '(Zerg Terran Protoss)) gi-enemy-race)
+          seen-enemy-race-now
+          (unbox SC2-SAT-OBSERVED-ENEMY-RACE)
+          gi-enemy-race))
     (define enemy-cloak-threat?
       (ormap (lambda (e)
                (or (memv (sc2-unit-cloak e) '(1 2))
                    (sc2-unit-is-burrowed e)
                    (memv (sc2-unit-unit-type e) '(50 55 69 76 498 502 503 504))))
              enemy-units))
-    (define mule-energy-floor (if enemy-cloak-threat? 100.0 50.0))
-    (for ([oc (in-list ready-townhalls)]
-          #:when (and (= (sc2-unit-unit-type oc) 132)
-                      (>= (sc2-unit-energy oc) mule-energy-floor)
-                      (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule (sc2-unit-tag oc)) -1000)) 16)))
-      (define safe-min-tag (pick-safe-mule-mineral-patch oc self-units mineral-fields enemy-units))
-      (when (and (exact-integer? safe-min-tag) (> safe-min-tag 0))
-        (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule (sc2-unit-tag oc)) cur-loop)
-        (set! cmds
-              (cons (mark-macro-econ-cmd!
-                     (sc2-raw-unit-command 171 #f safe-min-tag (list (sc2-unit-tag oc)) #f))
-                    cmds)))))
+    (define has-raven-now?
+      (ormap (lambda (u) (= (sc2-unit-unit-type u) 56)) self-units))
+    (define has-ready-turret-now?
+      (ormap (lambda (u)
+               (and (= (sc2-unit-unit-type u) 23)
+                    (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
+             self-units))
+    (define ready-ocs
+      (filter (lambda (th) (= (sc2-unit-unit-type th) 132)) ready-townhalls))
+    (define proactive-scan-oc-limit
+      (cond
+        [(and (>= cur-loop 5376)
+              (memq sat-enemy-race '(Protoss Random)))
+         2]
+        [(and (eq? sat-enemy-race 'Terran)
+              (or seen-terran-cloak-tech-now?
+                  (unbox SC2-SAT-SEEN-TERRAN-CLOAK-TECH?)))
+         1]
+        [else 0]))
+    (define proactive-scan-oc-tags
+      (if (and (> proactive-scan-oc-limit 0)
+               (not has-raven-now?)
+               (not has-ready-turret-now?)
+               (pair? ready-ocs))
+          (let* ([sorted-ocs
+                  (sort ready-ocs
+                        (lambda (a b)
+                          (let ([ea (sc2-unit-energy a)]
+                                [eb (sc2-unit-energy b)])
+                            (if (= ea eb)
+                                (< (sc2-unit-tag a) (sc2-unit-tag b))
+                                (> ea eb)))))]
+                 [take-n (min proactive-scan-oc-limit (length sorted-ocs))])
+            (map sc2-unit-tag (take sorted-ocs take-n)))
+          '()))
+    (for ([oc (in-list ready-ocs)])
+      (define oc-tag (sc2-unit-tag oc))
+      (define mule-energy-floor
+        (if (or enemy-cloak-threat?
+                (and (pair? proactive-scan-oc-tags)
+                     (memv oc-tag proactive-scan-oc-tags)))
+            100.0
+            50.0))
+      (when (and (>= (sc2-unit-energy oc) mule-energy-floor)
+                 (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule oc-tag) -1000)) 16))
+        (define safe-min-tag (pick-safe-mule-mineral-patch oc self-units mineral-fields enemy-units))
+        (when (and (exact-integer? safe-min-tag) (> safe-min-tag 0))
+          (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule oc-tag) cur-loop)
+          (set! cmds
+                (cons (mark-macro-econ-cmd!
+                       (sc2-raw-unit-command 171 #f safe-min-tag (list oc-tag) #f))
+                      cmds))))))
   ;; 6b. Early Nexus ChronoBoost (`3755`): `0:00-5:00` (`< 6720f`) & `< 50` Probes — keep active
   ;;     Probe-training Nexuses boosted at Tier P1 (`+4-5` Probes by `4:00`)!
   (when (and (< cur-loop 6720)
@@ -11903,6 +11998,7 @@
   (define builder-worker-tags (mutable-seteqv))
   (define used-geyser-tags (mutable-seteqv))
   (define commanded-combat-tags (mutable-seteqv))
+  (define low-prio-scout-move-tags (mutable-seteqv))
   ;; Per-step placement RPC budget (<= 2 RPCs/step normally; 3 when >= 2 distinct Protoss or Terran
   ;; structures queue in one step so neither Protoss `gateway` nor Terran `0.5t` spillover starves
   ;; at budget=0!) and Creep Tumor throttle (<= 1 fan search/step & <= 1 RPC per 8 loops).
@@ -17071,12 +17167,25 @@
 
       [(list 'overlord-scout oid raw-x raw-y)
        (when (and (exact-integer? oid) (> oid 0))
-         (record-unit-used! oid)
-         (define tx (scale-bot-coord-to-world raw-x home-x))
-         (define ty (scale-bot-coord-to-world raw-y home-y))
-         (define target-pt (sc2-point2d tx ty))
-         (unless (unit-already-executing-order? oid 16 target-pt 0)
-           (emit! (sc2-raw-unit-command 16 target-pt 0 (list oid) #f))))]
+         (define ou (hash-ref self-unit-by-tag oid #f))
+         (define ouh (hash-ref hash-ally-by-id oid #f))
+         (define is-mobile-det?
+           (or (and ou (memv (sc2-unit-unit-type ou) '(82 129 1911 1912)))
+               (and ouh (memq (hash-ref ouh 'type 'unknown)
+                              '(observer overseer observer-siege-mode overseer-siege-mode)))))
+         (define suppress-det-scout?
+           (and is-mobile-det?
+                (or cloaked-or-burrowed-threat-present?
+                    uncovered-stealth-present?
+                    enemy-combat-near-own-base?)))
+         (unless suppress-det-scout?
+           (record-unit-used! oid)
+           (set-add! low-prio-scout-move-tags oid)
+           (define tx (scale-bot-coord-to-world raw-x home-x))
+           (define ty (scale-bot-coord-to-world raw-y home-y))
+           (define target-pt (sc2-point2d tx ty))
+           (unless (unit-already-executing-order? oid 16 target-pt 0)
+             (emit! (sc2-raw-unit-command 16 target-pt 0 (list oid) #f)))))]
 
       [(list 'periodic-scout uid raw-x raw-y)
        (when (and (exact-integer? uid) (> uid 0))
@@ -17085,6 +17194,10 @@
          (define is-worker?
            (or (and u (sc2-unit-is-worker? u))
                (and uh (memq (hash-ref uh 'type 'unknown) '(drone probe scv)))))
+         (define is-mobile-detector?
+           (or (and u (memv (sc2-unit-unit-type u) '(82 129 1911 1912)))
+               (and uh (memq (hash-ref uh 'type 'unknown)
+                             '(observer overseer observer-siege-mode overseer-siege-mode)))))
          (define tx (scale-bot-coord-to-world raw-x home-x))
          (define ty (scale-bot-coord-to-world raw-y home-y))
          (define suppress-rush-worker-scout?
@@ -17094,7 +17207,15 @@
                 (or (not u)
                     (let ([up (sc2-unit-pos u)])
                       (<= (pt-dist home-x home-y (sc2-point3d-x up) (sc2-point3d-y up)) 24.0)))))
+         ;; L54-W2: Never hijack Observer (82) / Overseer (129) cross-map during cloak/burrow
+         ;; threats, uncovered stealth, or active home-base combat!
+         (define suppress-detector-scout?
+           (and is-mobile-detector?
+                (or cloaked-or-burrowed-threat-present?
+                    uncovered-stealth-present?
+                    enemy-combat-near-own-base?)))
          (unless (or suppress-rush-worker-scout?
+                     suppress-detector-scout?
                      (set-member? commanded-combat-tags uid)
                      (unit-has-protected-order? uid)
                      (and is-worker?
@@ -17104,7 +17225,9 @@
                               (and uh (hash-ref uh 'has-build-order? #f)))))
            (if is-worker?
                (record-worker-used! uid)
-               (record-unit-used! uid))
+               (begin
+                 (record-unit-used! uid)
+                 (set-add! low-prio-scout-move-tags uid)))
            (define target-pt (sc2-point2d tx ty))
            (unless (unit-already-executing-order? uid 16 target-pt 0)
              (emit! (sc2-raw-unit-command 16 target-pt 0 (list uid) #f)))))]
@@ -17287,9 +17410,13 @@
                            (null? (sc2-unit-orders u))
                            (not (set-member? commanded-combat-tags utag))
                            (not (set-member? used-producer-tags utag))
-                           (not (and (= utype 82) cloaked-or-burrowed-threat-present?)))))
+                           (not (and (= utype 82)
+                                     (or cloaked-or-burrowed-threat-present?
+                                         uncovered-stealth-present?
+                                         enemy-combat-near-own-base?))))))
          (define utag (sc2-unit-tag u))
          (record-unit-used! utag)
+         (set-add! low-prio-scout-move-tags utag)
          (emit! (sc2-raw-unit-command 16 (sc2-point2d eb-x eb-y) 0 (list utag) #f)))
        ;; 4. Orbital Command Scanner Sweep (399) at enemy base when energy >= 125 and 0 enemies visible
        (when (null? enemy-units)
@@ -18082,7 +18209,8 @@
              (for/first ([u (in-list self-units)]
                          #:when (and (sc2-unit-is-flying u)
                                      (not (sc2-unit-is-structure? u))
-                                     (not (memv (sc2-unit-unit-type u) '(106 129)))
+                                     ;; L55-W3: Never hijack mobile/sieged detectors for high-ground spotter duty
+                                     (not (memv (sc2-unit-unit-type u) '(82 106 129 1911 1912)))
                                      (not (set-member? commanded-combat-tags (sc2-unit-tag u)))
                                      (null? (sc2-unit-orders u))))
                u))
@@ -18167,6 +18295,11 @@
         (emit! (sc2-raw-unit-command 16 clear-pt 0 (list utag) #f)))))
 
   ;; 12. Automatic Terran Supply Depot Hysteresis, Siege Tank Unsiege, & Lurker / Widow Mine Unburrow
+  ;; L54-W1: Batch all clear raised depots (`utype=19`) to lower into ONE multi-tag `556` command
+  ;; (`2` APM total instead of N single-tag cmds), promoted to P1 (and P0 urgent-survival when
+  ;; `friendly-transit?`) so trapped-army MOVE/ATTACK spam can NEVER starve ramp lowering!
+  (define depot-lower-tags '())
+  (define depot-lower-urgent? #f)
   (for ([u (in-list self-mode-toggle-units)]
         #:when (and (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
                     (null? (sc2-unit-orders u))))
@@ -18199,7 +18332,9 @@
         [(and (= utype 19)
               (> min-ground-enemy-dist depot-lower-clear-dist))
          (hash-set! SC2-DEPOT-TOGGLE-COOLDOWN utag (+ cur-loop (if friendly-transit? 36 44)))
-         (emit! (sc2-raw-unit-command 556 #f 0 (list utag) #f))] ;; MORPH_SUPPLYDEPOT_LOWER
+         (set! depot-lower-tags (cons utag depot-lower-tags))
+         (when friendly-transit?
+           (set! depot-lower-urgent? #t))]
         [(and (= utype 47)
               (<= min-ground-enemy-dist depot-raise-dist)
               (not friendly-on-footprint?)
@@ -18280,12 +18415,17 @@
            (hash-set! SC2-MINE-CLEAR-SINCE-LOOP utag cur-loop)
            (set-add! commanded-combat-tags utag)
            (emit! (sc2-raw-unit-command 2097 #f 0 (list utag) #f)))])))
+  (when (pair? depot-lower-tags)
+    (define lower-cmd (sc2-raw-unit-command 556 #f 0 (reverse depot-lower-tags) #f))
+    (emit! (if depot-lower-urgent?
+               (mark-urgent-survival-cmd! lower-cmd)
+               lower-cmd)))
 
   ;; 12a. W11-P0-4-wire (`w11-tac-4`): Emergency mobile detector intercept!
   ;;      When any uncovered cloaked (`cloak=1`) or undetected burrowed combat enemy is active,
-  ;;      immediately fly the closest uncommanded mobile detector (`Overseer 129` / `Observer 82`)
-  ;;      directly to reveal it (or unmorph stationary `OverseerSiege 1912` / `ObserverSiege 1911`)
-  ;;      as a P0 urgent survival order so detectors are NEVER paralyzed while cloaked Banshees/DTs kill our army!
+  ;;      immediately fly the closest uncommanded (or low-priority-scout-preempted, L54-W2)
+  ;;      mobile detector (`Overseer 129` / `Observer 82`) directly to reveal it (or unmorph
+  ;;      stationary `OverseerSiege 1912` / `ObserverSiege 1911`) as a P0 urgent survival order!
   (when uncovered-stealth-present?
     (define mobile-or-sieged-detectors
       (filter (lambda (u) (memv (sc2-unit-unit-type u) '(129 82 1912 1911)))
@@ -18297,14 +18437,19 @@
                                #:when (and (sc2-raw-unit-command? c)
                                            (= (sc2-raw-unit-command-ability-id c) 16)
                                            (any-point? (sc2-raw-unit-command-target-pos c))
-                                           (ormap (lambda (t) (set-member? det-tag-set t))
+                                           (ormap (lambda (t)
+                                                    (and (set-member? det-tag-set t)
+                                                         (not (set-member? low-prio-scout-move-tags t))))
                                                   (sc2-raw-unit-command-unit-tags c))))
           (define tp (sc2-raw-unit-command-target-pos c))
           (cons (cons (any-point-x tp) (any-point-y tp)) pts)))
       (define assigned-det-tags (mutable-seteqv))
       (for ([d (in-list mobile-or-sieged-detectors)])
-        (when (set-member? commanded-combat-tags (sc2-unit-tag d))
-          (set-add! assigned-det-tags (sc2-unit-tag d))))
+        (define dt (sc2-unit-tag d))
+        ;; L54-W2: Allow 12a detector cover to preempt low-priority scout moves!
+        (when (and (set-member? commanded-combat-tags dt)
+                   (not (set-member? low-prio-scout-move-tags dt)))
+          (set-add! assigned-det-tags dt)))
       (define (stealth-priority-dist se)
         (define ep (sc2-unit-pos se))
         (define ex (sc2-point3d-x ep))
@@ -18342,6 +18487,27 @@
             (define dutype (sc2-unit-unit-type chosen-det))
             (set-add! assigned-det-tags dtag)
             (set-add! commanded-combat-tags dtag)
+            ;; L54-W2: If `12a` preempted a low-priority scout move on `dtag`, strip that stale
+            ;; scout MOVE `16` from `raw-cmds` so SC2 receives ONLY the P0 stealth intercept!
+            (when (set-member? low-prio-scout-move-tags dtag)
+              (set-remove! low-prio-scout-move-tags dtag)
+              (set! raw-cmds
+                    (filter-map
+                     (lambda (c)
+                       (if (and (sc2-raw-unit-command? c)
+                                (= (sc2-raw-unit-command-ability-id c) 16)
+                                (not (urgent-survival-cmd? c))
+                                (memv dtag (sc2-raw-unit-command-unit-tags c)))
+                           (let ([rem (filter (lambda (t) (not (= t dtag)))
+                                              (sc2-raw-unit-command-unit-tags c))])
+                             (and (pair? rem)
+                                  (sc2-raw-unit-command 16
+                                                        (sc2-raw-unit-command-target-pos c)
+                                                        (sc2-raw-unit-command-target-unit-tag c)
+                                                        rem
+                                                        (sc2-raw-unit-command-queue? c))))
+                           c))
+                     raw-cmds)))
             (cond
               [(= dutype 1912)
                (emit! (mark-urgent-survival-cmd!
@@ -18747,10 +18913,12 @@
       ;; P3: Routine harvest, worker rebalance & non-urgent Bunker Salvage (`32`)
       [(memv ab '(32 166 167 295 296 298 299 1183 1184 3666 3667))
        3]
-      ;; P2: Combat attack, move, kite, hold-position, patrol, stop, & Supply Depot raise/lower (`556`/`558`)
-      [(memv ab '(4 5 6 7 16 17 18 19 20 23 24 25 556 558 2099 3665 3674 3771 3793 3794 3795))
+      ;; P2: Combat attack, move, kite, hold-position, patrol, stop, & Supply Depot raise (`558`)
+      ;;     (L54-W1: Supply Depot lower `556` promoted to P1 — and P0 urgent-survival on friendly
+      ;;      transit — so trapped-army MOVE/ATTACK spam can NEVER starve ramp lowering!)
+      [(memv ab '(4 5 6 7 16 17 18 19 20 23 24 25 558 2099 3665 3674 3771 3793 3794 3795))
        2]
-      ;; P1: Macro build, expand, morph, train, warp-in, research, tumor, MULE
+      ;; P1: Macro build, expand, morph, train, warp-in, research, tumor, MULE, & Supply Depot lower (`556`)
       [else 1]))
   (cond
     [(or (sc2-chat-action? cmd) (WireChat? cmd)) 0]
@@ -19231,6 +19399,15 @@
                     (not (hash-has-key? emitted-set c))))
     (for ([t (in-list (sc2-raw-unit-command-unit-tags c))])
       (hash-remove! SC2-WARPGATE-COOLDOWN-UNTIL t)))
+
+  ;; L54-W1: If APM throttling or backoff dropped any Supply Depot lower/raise command (556/558),
+  ;; immediately clear SC2-DEPOT-TOGGLE-COOLDOWN so the ramp never locks out for 44 loops!
+  (for ([c (in-list coalesced0)]
+        #:when (and (sc2-raw-unit-command? c)
+                    (memv (sc2-raw-unit-command-ability-id c) '(556 558))
+                    (not (hash-has-key? emitted-set c))))
+    (for ([t (in-list (sc2-raw-unit-command-unit-tags c))])
+      (hash-remove! SC2-DEPOT-TOGGLE-COOLDOWN t)))
 
   (when (not (null? new-events))
     (set-wire-apm-governor-rolling-events!

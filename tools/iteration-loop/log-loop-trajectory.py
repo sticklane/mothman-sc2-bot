@@ -461,6 +461,7 @@ def find_loop_windows(
             r"LAUNCHING LOOP\s+(\d+)\b",
             r"Kick(?:ing)? off (?:Loop|Wave)\s+(\d+)\b",
             r"Loop\s+(\d+)(?:\s+Wave\s+\d+)?\s+Kickoff\b",
+            r"Loop\s+(\d+)(?:\s*\([^)]*\))?(?:\s+Wave\s+\d+)?\s*[—–-]+\s*APPROVED\s+GO\b",
             r"Wave[- ](\d+)\s+Spec\b",
             r"Loop\s+(\d+)\s+Implementation\b",
             r"Loop\s+(\d+)\s+Disjoint",
@@ -640,11 +641,12 @@ def compute_phase_durations(
     h_done = last_ts(lambda e: e["agent"] == "harness")
 
     # Forensics, archival, and publish may legitimately overlap into Loop N+1's coding window!
-    bench_end_est = None
+    bench_end_cands = []
+    if item["r1_start"] is not None:
+        bench_end_cands.append(item["r1_start"] + timedelta(seconds=bench_sec or 900.0))
     if item["r2_start"] is not None:
-        bench_end_est = item["r2_start"] + timedelta(seconds=h2h_sec or 110.0)
-    elif item["r1_start"] is not None:
-        bench_end_est = item["r1_start"] + timedelta(seconds=bench_sec or 900.0)
+        bench_end_cands.append(item["r2_start"] + timedelta(seconds=h2h_sec or 110.0))
+    bench_end_est = max(bench_end_cands) if bench_end_cands else None
     if h_done is not None and (bench_end_est is None or h_done > bench_end_est):
         bench_end_est = h_done
 
@@ -1125,7 +1127,12 @@ def build_trajectory_records(
 
         # Synthetic/structural friction events from metrics + phases
         frictions = list(per_loop_frictions.get(lid) or [])
-        if verdict == "HOLD-ZIP" and phases["benchmark_84"] >= 600 and h2h_summary:
+        h2h_after_bench = (
+            item["r1_start"] is None
+            or item["r2_start"] is None
+            or item["r2_start"] >= item["r1_start"]
+        )
+        if verdict == "HOLD-ZIP" and phases["benchmark_84"] >= 600 and h2h_summary and h2h_after_bench:
             h2h_w = h2h_summary.get("w", 0)
             h2h_l = h2h_summary.get("l", 0)
             p_h2h = (h2h_summary.get("by_race") or {}).get("Protoss") or {}
@@ -1235,6 +1242,30 @@ def upsert_jsonl(out_path: Path, new_records: List[Dict[str, Any]]) -> List[Dict
         existing[int(rec["loop_id"])] = rec
 
     merged = [existing[k] for k in sorted(existing.keys())]
+    prev_ext_w: Optional[int] = None
+    prev_ext_trade: Optional[float] = None
+    prev_core_w: Optional[int] = None
+    for rec in merged:
+        bd = rec.get("bot_deltas") or {}
+        ext = bd.get("ext78") or {}
+        core = bd.get("core14") or {}
+        if ext:
+            ew = ext.get("w")
+            et = ext.get("trade_agg")
+            if ext.get("delta_w_vs_prev") is None and ew is not None and prev_ext_w is not None:
+                ext["delta_w_vs_prev"] = ew - prev_ext_w
+            if ext.get("delta_trade_vs_prev") is None and et is not None and prev_ext_trade is not None:
+                ext["delta_trade_vs_prev"] = round(et - prev_ext_trade, 2)
+            if ew is not None:
+                prev_ext_w = ew
+            if et is not None:
+                prev_ext_trade = et
+        if core:
+            cw = core.get("w")
+            if core.get("delta_w_vs_prev") is None and cw is not None and prev_core_w is not None:
+                core["delta_w_vs_prev"] = cw - prev_core_w
+            if cw is not None:
+                prev_core_w = cw
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = out_path.with_suffix(out_path.suffix + ".tmp")
     with open(tmp, "w", encoding="utf-8") as f:

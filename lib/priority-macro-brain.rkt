@@ -233,6 +233,7 @@
    (sc2-tech-node 'infernal-pre-igniter 'Terran 'research 'tech-upgrade      100 100 0  0 1760 'factory-techlab   '(factory-techlab)                  #t)
    (sc2-tech-node 'drilling-claws      'Terran 'research 'tech-upgrade        75  75 0  0 1760 'factory-techlab   '(factory-techlab armory)           #t)
    (sc2-tech-node 'banshee-cloak       'Terran 'research 'tech-upgrade       100 100 0  0 1760 'starport-techlab  '(starport-techlab)                 #t)
+   (sc2-tech-node 'interference-matrix 'Terran 'research 'tech-upgrade        50  50 0  0 1280 'starport-techlab  '(starport-techlab)                 #t)
    (sc2-tech-node 'advanced-ballistics 'Terran 'research 'tech-upgrade       150 150 0  0 1280 'fusion-core       '(fusion-core)                      #t)
    (sc2-tech-node 'weapon-refit        'Terran 'research 'tech-upgrade       150 150 0  0  960 'fusion-core       '(fusion-core)                      #t)
    (sc2-tech-node 'personal-cloaking   'Terran 'research 'tech-upgrade       150 150 0  0 1920 'ghost-academy     '(ghost-academy)                    #t)
@@ -348,6 +349,7 @@
    'zergling-movementspeed    'metabolic-boost
    'centrifugal-hooks         'centrifical-hooks
    'cloaking-field            'banshee-cloak
+   'research-interference-matrix 'interference-matrix
    'adrenal-glands            'zergling-attackspeed
    'warpgate-research         'warp-gate-research
    'melee-attacks-1           'zerg-melee-weapons-1
@@ -3755,12 +3757,21 @@
     (when (and pvt-fast-kiter-threat?
                (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0))
       (define mass-reapers? (>= (unit-count-equivalent enemy-u-counts 'reaper) 2))
+      (define cur-gw-cnt (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                            (bldg-count-equivalent total-bldg-counts 'warp-gate)))
+      (define cur-st-cnt (unit-count-equivalent unit-counts 'stalker))
+      (define cur-sb-cnt (bldg-count-equivalent total-bldg-counts 'shield-battery))
+      ;; L57-B2 (`L54-1C` strictly under `mass-reapers?` >= 2 Reapers): Rank Gateway #2 (504.0)
+      ;; strictly above Shield Battery (cap qty=1 until gateways >= 2 && stalkers >= 2; 496.0 for #1, 484.0 for #2)!
+      (define sb-target (if (and mass-reapers? (or (< cur-gw-cnt 2) (< cur-st-cnt 2))) 1 2))
       (add-goal-spec! 'stalker 'army-production 'train 8 (if mass-reapers? 512.0 492.0) 'pvt-fast-kiter-counter)
       (unless mass-reapers?
         (add-goal-spec! 'adept 'army-production 'train 4 486.0 'pvt-fast-kiter-counter))
-      (add-goal-spec! 'shield-battery 'survival-supply 'build 2 (if mass-reapers? 496.0 484.0) 'pvt-fast-kiter-counter)
-      (when (and mass-reapers? (< (bldg-count-equivalent total-bldg-counts 'gateway) 2))
-        (add-goal-spec! 'gateway 'production-scaling 'build 2 488.0 'pvt-fast-kiter-counter)))
+      (when (and mass-reapers? (< cur-gw-cnt 2))
+        (add-goal-spec! 'gateway 'production-scaling 'build 2 504.0 'pvt-fast-kiter-counter))
+      (add-goal-spec! 'shield-battery 'survival-supply 'build sb-target
+                      (if (and mass-reapers? (= cur-sb-cnt 0)) 496.0 484.0)
+                      'pvt-fast-kiter-counter))
     (when (and (not pvt-fast-kiter-threat?)
                (not suppress-opening-harass?)
                (sg-unit-allowed? 'adept)
@@ -4489,6 +4500,7 @@
     [(drilling-claws) '(train widow-mine 3 factory)]
     [(cyclone-lock-on-damage) '(train cyclone 2 factory)]
     [(banshee-cloak hyperflight-rotors) '(train banshee 2 starport)]
+    [(interference-matrix) '(train raven 1 starport)]
     [(combat-shield) '(research stimpack 1 barracks-techlab)]
     [(concussive-shells)
      (if (not (or (memq 'stimpack researched-upgrades)
@@ -6993,7 +7005,15 @@
          (or enemy-cloaked-threat-active?
              terran-enemy-banshee-starport-tl?)))
   (define protoss-shield-battery-hard-cap
-    (if (or enemy-air-dominant? protoss-cloaked-air-crisis?)
+    (if (or enemy-air-dominant?
+            protoss-cloaked-air-crisis?
+            ;; L57-B2 (`L54-1C` strictly under `>= 2` Reapers): Cap Shield Battery at 1 until >= 2 Gateways AND >= 2 Stalkers!
+            (and (eq? race 'Protoss)
+                 (>= enemy-reaper-cnt 2)
+                 (or (< (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                           (bldg-count-equivalent total-bldg-counts 'warp-gate))
+                        2)
+                     (< (unit-count-equivalent unit-counts 'stalker) 2))))
         1
         (min 3 (max 1 active-bases))))
   (define protoss-observer-cap
@@ -7243,8 +7263,12 @@
          (not zerg-reactive-cloak-spore-due?)
          (or (>= (bldg-count-equivalent total-bldg-counts 'spore-crawler) (max 1 active-bases))
              (and (>= enemy-ground-combat-supply 4.0)
-                  (not (and enemy-cloaked-threat-active?
-                            (= (unit-count-equivalent unit-counts 'overseer) 0)
+                  (not (and (or enemy-cloaked-threat-active?
+                                zerg-zvt-banshee-aa-rush?
+                                (>= enemy-banshee-cnt 1))
+                            (or (= (unit-count-equivalent unit-counts 'overseer) 0)
+                                zerg-zvt-banshee-aa-rush?
+                                (>= enemy-banshee-cnt 1))
                             (< (bldg-count-equivalent total-bldg-counts 'spore-crawler)
                                (min 2 (max 1 active-bases)))))))))
   (define enemy-cap-air-cnt
@@ -7913,7 +7937,9 @@
   ;; (strictly ABOVE `twilight-council@1153.8` & `queen@499`!).
   (define (emergency-cloak-det-boost-info nsym)
     (and (or enemy-cloaked-threat-active?
-             terran-enemy-banshee-starport-tl?)
+             terran-enemy-banshee-starport-tl?
+             zerg-zvt-banshee-aa-rush?
+             (and (eq? race 'Zerg) (>= enemy-banshee-cnt 1)))
          (case race
            [(Protoss)
             (let ([obs-cnt (unit-count-equivalent unit-counts 'observer)]
@@ -7957,23 +7983,39 @@
                   [lair-cnt (bldg-count-equivalent total-bldg-counts 'lair)]
                   [hive-cnt (bldg-count-equivalent total-bldg-counts 'hive)]
                   [spore-tgt (min 2 (max 1 active-bases))])
-              (and (= overseer-cnt 0)
-                   (case nsym
-                     [(overseer)
-                      (and has-lair-or-hive-ready?
-                           (> (unit-count-equivalent unit-counts 'overlord) 0)
-                           (cons 1240.0 #t))]
-                     [(lair)
-                      (and (= lair-cnt 0)
-                           (= hive-cnt 0)
-                           (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
-                           (> (bldg-count-equivalent ready-bldg-counts 'hatchery) 0)
-                           (cons (if (>= gas 100) 1210.0 1165.0) #t))]
-                     [(spore-crawler)
-                      (and (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
-                           (< spore-cnt spore-tgt)
-                           (cons 1190.0 #t))]
-                     [else #f])))]
+              (cond
+                ;; L55-M2 (`#25 onlyfans`): Weaponless Overseer #1 cannot kill Banshees — keep Spore
+                ;; Crawler active up to `min(2, active-bases)` whenever Banshees or
+                ;; `zerg-zvt-banshee-aa-rush?` threaten (preserving `1640.0` > `queen@1630` when
+                ;; `zerg-banshee-spore-floor-needed?` and Lair is started/ready or `< 100G`, else
+                ;; `1190.0` > `queen@960`) so Queens never starve a `75M` Spore!
+                [(and (eq? nsym 'spore-crawler)
+                      (or (= overseer-cnt 0)
+                          zerg-zvt-banshee-aa-rush?
+                          (>= enemy-banshee-cnt 1))
+                      (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+                      (< spore-cnt spore-tgt))
+                 (cons (if (and zerg-banshee-spore-floor-needed?
+                                (or has-lair-or-hive-ready?
+                                    (> lair-cnt 0)
+                                    (< gas 100)))
+                           1640.0
+                           1190.0)
+                       #t)]
+                [(= overseer-cnt 0)
+                 (case nsym
+                   [(overseer)
+                    (and has-lair-or-hive-ready?
+                         (> (unit-count-equivalent unit-counts 'overlord) 0)
+                         (cons 1240.0 #t))]
+                   [(lair)
+                    (and (= lair-cnt 0)
+                         (= hive-cnt 0)
+                         (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+                         (> (bldg-count-equivalent ready-bldg-counts 'hatchery) 0)
+                         (cons (if (>= gas 100) 1210.0 1165.0) #t))]
+                   [else #f])]
+                [else #f]))]
            [(Terran)
             (let* ([raven-cnt (unit-count-equivalent unit-counts 'raven)]
                    [turret-cnt (bldg-count-equivalent total-bldg-counts 'missile-turret)]
@@ -8232,6 +8274,11 @@
             (min terran-tvt-factl-target (bldg-count-equivalent ready-bldg-counts 'factory)))
          (not (facility-addon-slot-occupied? 'factory-techlab ready-bldg-counts total-bldg-counts #:min-ready-floor 1))
          (or early-proxy-marauder-rush-active?
+             ;; L52-1C (`#77 TvT VeTerran`): Attach FactoryTechLab #1 immediately upon Factory #1 completion in TvT!
+             (and (eq? enemy-race 'Terran)
+                  (= (bldg-count-equivalent total-bldg-counts 'factory-techlab) 0)
+                  (not early-worker-rush-active?)
+                  (not terran-early-ground-rush-survival-due?))
              (and (or (eq? enemy-race 'Terran) (>= workers 22))
                   (not under-early-rush-crisis?)
                   (not terran-early-rush-hold?)))))
@@ -8245,9 +8292,8 @@
                   (<= enemy-threat-supply army-supply))
              (and (= (bldg-count-equivalent total-bldg-counts 'factory-techlab) 0)
                   (not terran-1base-nat-cc-lock?)
-                  (>= gas 25)
-                  (or (>= army-supply 4)
-                      (>= enemy-siege-tank-cnt 1))))))
+                  (not early-worker-rush-active?)
+                  (>= gas 25)))))
   ;; L38-P0-2 (`#889`, Loop 37 `#65 TvZ Clicadinha` `BarracksTechLab:4` before `FactoryTechLab #1`):
   ;; Across TvZ/TvP, once Factory #1 is ready and `factory-techlab == 0`, prioritize `factory-techlab #1`
   ;; (`u = 795.0` when `barracks-techlab >= 1`, `615.0` when `0`, `blk = #t` at `gas >= 25`) and defer
@@ -8267,12 +8313,20 @@
     (and (or terran-first-factl-priority-due? terran-tvt-factl-priority-due?)
          (eq? nsym 'barracks-techlab)
          (>= (bldg-count-equivalent total-bldg-counts 'barracks-techlab) 1)))
+  ;; L52-1C (`#1280`/`#1281` `#77 TvT VeTerran`): Block `widow-mine` pre-TechLab and while `siege-tank < 4`
+  ;; in TvT, and defer `hellion` on Tech-Lab Factory while `siege-tank < 4` (outside early Reaper/ground rush)!
+  (define terran-tvt-block-widow-mine?
+    (and (eq? race 'Terran)
+         (eq? enemy-race 'Terran)
+         (or (= (bldg-count-equivalent total-bldg-counts 'factory-techlab) 0)
+             terran-factory-techlab-due?
+             (< (unit-count-equivalent unit-counts 'siege-tank) 4))))
   (define terran-tvt-no-hellion-wm?
     (and (eq? race 'Terran)
          (or (and (not terran-early-ground-rush-survival-due?)
                   (or (and (eq? enemy-race 'Terran)
                            (or terran-factory-techlab-due?
-                               (< (unit-count-equivalent unit-counts 'siege-tank) 2)))
+                               (< (unit-count-equivalent unit-counts 'siege-tank) 4)))
                       (and terran-factory-techlab-due?
                            (<= (bldg-count-equivalent ready-bldg-counts 'factory) 1)
                            (< (unit-count-equivalent enemy-u-counts 'zergling) 16))))
@@ -8282,6 +8336,20 @@
                   (= (bldg-count-equivalent total-bldg-counts 'factory-techlab) 0)
                   (>= (unit-count-equivalent unit-counts 'hellion) 1)
                   (< enemy-reaper-cnt 3)))))
+  ;; L52-1C P1 (`#1280`/`#1281`): Research `interference-matrix` (`807`, `50M/50G`) at ready
+  ;; `starport-techlab` once `raven >= 1` so live Terran Ravens unlock Interference Matrix (`3747`)!
+  (define terran-interference-matrix-due?
+    (and (eq? race 'Terran)
+         (>= (unit-count-equivalent unit-counts 'raven) 1)
+         (> (bldg-count-equivalent ready-bldg-counts 'starport-techlab) 0)
+         (or (not (hash? open-facility-slots))
+             (> (hash-ref open-facility-slots 'starport-techlab 0) 0))
+         (not (step-already-satisfied? 'interference-matrix))
+         (not supply-preempt-now?)
+         (not zero-townhall-rebuild-due?)
+         (not early-worker-rush-active?)
+         (not terran-early-ground-rush-survival-due?)
+         (>= gas 50)))
   (define terran-siege-tank-core-due?
     (and (eq? race 'Terran)
          (not terran-early-ground-rush-survival-due?)
@@ -8526,6 +8594,20 @@
          (not (step-already-satisfied? 'blink))
          (not supply-preempt-now?)
          (>= gas 100)))
+  ;; L52-1B (`#1280`/`#1281` `#54 zig-reapers`): When facing `>= 2` enemy Reapers with CyberCore ready
+  ;; and `< 4` Stalkers, hard-defer `zealot` (melee can't catch Reapers!) and `robotics-facility`
+  ;; (150M/100G steals Stalkers & Shield Battery!) until `stalker >= 4`!
+  (define protoss-anti-reaper-macro-active?
+    (and (eq? race 'Protoss)
+         (>= enemy-reaper-cnt 2)
+         (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
+         (< (unit-count-equivalent unit-counts 'stalker) 4)))
+  (define (protoss-anti-reaper-deferred-sym? nsym)
+    (and protoss-anti-reaper-macro-active?
+         (not (emergency-cloak-det-boost-info nsym))
+         (or (and (eq? nsym 'zealot)
+                  (< (- enemy-ground-combat-cnt enemy-reaper-cnt) 4))
+             (eq? nsym 'robotics-facility))))
   ;; L35-P0-2 Pillar 1 + L36-P0-2 + L40-P0-2a + L42-P0-2a + L44-P0-2b (`#75 PvT who`, CloakLoss -> 0):
   ;; On confirmed Banshee / <= 6m StarportTechLab, boost Stalker floor >= 10 (even while gas ticks 0..49G!),
   ;; boost Gateway #3 (`u = 845.0, blk = #t`) ahead of Assimilator #3+ & ShieldBattery #2+, and defer
@@ -8551,6 +8633,7 @@
          (or (not (hash? open-facility-slots)) (> open-gw-slots-live 0))
          (or (and protoss-confirmed-banshee-or-sptl? has-gas-income?)
              (>= gas (if (or (>= enemy-air-combat-cnt 1)
+                             protoss-anti-reaper-macro-active?
                              protoss-anti-tempest-pvp-due?
                              protoss-cloaked-air-crisis?
                              protoss-enemy-starport-banshee-threat?)
@@ -8609,7 +8692,7 @@
          (or (>= enemy-reaper-cnt 2)
              (>= enemy-air-combat-cnt 1)
              protoss-cloaked-air-crisis?)
-         (<= enemy-ground-combat-cnt 1)
+         (<= (- enemy-ground-combat-cnt enemy-reaper-cnt) 1)
          (>= gas 25)))
   ;; L35-P0-2 Pillar 2 (`H2H #04 PvT` -> 6-0!, `#18/#63/#82` Anti-Bio Colossus Scaling):
   ;; Detect Bio-heavy Terran (`Marines + Marauders >= 16`, or `>= 12` with `>= 2` Medivacs) —
@@ -8687,6 +8770,45 @@
          (not supply-preempt-now?)
          (not enemy-air-dominant?)
          (< (unit-count-equivalent unit-counts 'high-templar) 6)))
+  ;; L57-B1 (Lightweight `L52-1A` ONLY — NO `L52-2A` runtime lock, NO `L53-W2-4` Forge/RoboBay/Immortal!):
+  ;; On 1 base (`<= total-townhalls-incl-pending 1`) during the Natural Nexus expand window once
+  ;; `>= 2` combat units exist (preserving L51-1A's `-37.5s` 1st Stalker!), not under attack/rush/reaper/cloak
+  ;; crisis, and `minerals >= 225`, yield L51-1A Stalker boost, `robotics-facility`, extra `gateway` (`>= 1`),
+  ;; and `twilight-council` so `400M` Natural Nexus lands cleanly!
+  (define protoss-1base-nat-nexus-floor-yield?
+    (and (eq? race 'Protoss)
+         (<= total-townhalls-incl-pending 1)
+         (or early-nat-exp-window?
+             mid-nat-exp-window?
+             midgame-1base-natural-due?
+             late-1base-commit-expand-due?)
+         (not under-attack?)
+         (not under-early-rush-crisis?)
+         (not early-ling-rush-defense-active?)
+         (not early-worker-rush-active?)
+         (not pvz-early-ling-flood-active?)
+         (not early-proxy-marauder-rush-active?)
+         (not protoss-pvz-12pool-block-nexus2?)
+         (not protoss-anti-reaper-macro-active?)
+         (not protoss-confirmed-banshee-or-sptl?)
+         (not protoss-cloaked-air-crisis?)
+         (not supply-preempt-now?)
+         (>= (+ (unit-count-equivalent unit-counts 'zealot)
+                (unit-count-equivalent unit-counts 'stalker)
+                (unit-count-equivalent unit-counts 'adept)
+                (unit-count-equivalent unit-counts 'sentry)
+                (unit-count-equivalent unit-counts 'immortal))
+             2)
+         (>= minerals 225)))
+  (define (protoss-1base-nat-floor-deferred-sym? nsym)
+    (and protoss-1base-nat-nexus-floor-yield?
+         (not (emergency-cloak-det-boost-info nsym))
+         (or (eq? nsym 'robotics-facility)
+             (and (eq? nsym 'gateway)
+                  (>= (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                         (bldg-count-equivalent total-bldg-counts 'warp-gate))
+                      1))
+             (eq? nsym 'twilight-council))))
   ;; L51-1A (`#1235`/`#1240` `#60/#75/#78/#18/#51`): Eliminate the +41..84s `CyberCore Done -> 1st Stalker` dead zone!
   ;; Boost the first 2 Stalkers (`u = 525.0 > zealot@494.0`, `blk = #t` at >=90M) as soon as CyberCore is ready,
   ;; open Gateway slot exists, and gas >= 50 (outside early-nat-exp-window? / pvz-early-ling-zealot-pump? / rush).
@@ -8697,6 +8819,7 @@
                (bldg-count-equivalent ready-bldg-counts 'warp-gate)) 0)
          (or (not (hash? open-facility-slots)) (> open-gw-slots-live 0))
          (not early-nat-exp-window?)
+         (not protoss-1base-nat-nexus-floor-yield?)
          (not pvz-early-ling-zealot-pump?)
          (not pvz-first-zealot-wall-due?)
          (not early-worker-rush-active?)
@@ -8711,6 +8834,7 @@
     (and (eq? race 'Protoss)
          (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
          (not early-nat-exp-window?)
+         (not protoss-1base-nat-nexus-floor-yield?)
          (not pvz-early-ling-zealot-pump?)
          (>= workers 26)
          (or (>= frame 4032) (>= workers 30))
@@ -8934,8 +9058,16 @@
   ;; L42-P0-2c + L47-P0-2a (`H2H #04 PvT` / `#21` / `PvP 0-7` Colossus #1/#2 300M/200G escrow lock):
   ;; Once RoboticsBay is ready and Colossus < 2 across PvT/PvZ/PvP, reserve 300M/200G for Colossus (`u >= 760.0, blk = #t`)
   ;; strictly ahead of Stargate, Stalker, Immortal (when Colossus==0 & Immortal>=2), Nexus #3, Forge, and Lance!
+  ;; L54-1B (`#1322`/`#1323` `#39 norman` `ESCROW_LOCKOUT: colossus, 460M/119G`):
+  ;; Release Colossus gas guard when under attack with low gas/army OR high bank + low gas/army
+  ;; so defending Stalkers aren't locked out behind a 200G Colossus floor!
+  (define protoss-colossus-release-for-defense?
+    (and (eq? race 'Protoss)
+         (or (and under-attack? (< gas 180) (< army-supply 20))
+             (and (>= minerals 350) (< gas 140) (< army-supply 16)))))
   (define protoss-colossus-core2-gas-guard?
     (and (eq? race 'Protoss)
+         (not protoss-colossus-release-for-defense?)
          (memq enemy-race '(Terran Zerg Protoss))
          (> (bldg-count-equivalent ready-bldg-counts 'robotics-facility) 0)
          (> (bldg-count-equivalent ready-bldg-counts 'robotics-bay) 0)
@@ -9415,11 +9547,40 @@
          (not under-early-rush-crisis?)
          (not zerg-cloaked-air-crisis?)
          (not enemy-air-dominant?)))
+  ;; L53-1B + L55-M1 (`#07`/`#52`/`#16`/`#25`):
+  ;; Boost `ZvT` `Lair` (`u = 525.0`, `blk = #t` — above `queen@518`/`drone@488`, strictly below
+  ;; `roach-warren@555` & `3rd-hatch@595`) once `workers >= 26`, `gas >= 100`, `frame >= 3696` (2:45)
+  ;; on `>= 2` bases, ONLY when unpressured (`not under-attack?`, `not early-rush-override-active?`,
+  ;; `< 2` Reapers) and grounded (`army-supply >= 8` or `roach-warren > 0`)!
+  (define zerg-zvt-early-lair-due?
+    (and (eq? race 'Zerg)
+         (eq? enemy-race 'Terran)
+         (>= active-bases 2)
+         (>= workers 26)
+         (>= frame 3696)
+         (>= gas 100)
+         (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+         (> (bldg-count-equivalent ready-bldg-counts 'hatchery) 0)
+         (= (bldg-count-equivalent total-bldg-counts 'lair) 0)
+         (= (bldg-count-equivalent total-bldg-counts 'hive) 0)
+         (or (>= army-supply 8)
+             (> (bldg-count-equivalent total-bldg-counts 'roach-warren) 0))
+         (< enemy-reaper-cnt 2)
+         (not under-attack?)
+         (not early-rush-override-active?)
+         (not zerg-anti-bio-baneling-nest-due?)
+         (not supply-preempt-now?)
+         (not under-early-rush-crisis?)
+         (not early-worker-rush-active?)
+         (not early-ling-rush-defense-active?)
+         (<= enemy-threat-supply (max 4.0 army-supply))
+         (not (and (< total-townhalls-incl-pending 3) (>= frame 10000) (>= gas 600) (< minerals 400)))))
   (define zerg-2base-defer-lair-for-3rd-hatch?
     (and (eq? race 'Zerg)
          (memq enemy-race '(Protoss Terran))
          (< total-townhalls-incl-pending 3)
          (< frame 6720)
+         (not zerg-zvt-early-lair-due?)
          (not zerg-cloaked-air-crisis?)
          (not zerg-zvt-banshee-aa-rush?)
          (not zerg-zvp-dt-lair-due?)
@@ -10039,11 +10200,16 @@
                     (not (hash-has-key? existing-id-norms-ht (normalize-brain-sym s)))
                     (lookup-sc2-tech-node s)
                     (or (and (emergency-cloak-det-boost-info (normalize-brain-sym s)) #t)
+                        (and protoss-anti-reaper-macro-active?
+                             (eq? (normalize-brain-sym s) 'gateway)
+                             (< (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                                   (bldg-count-equivalent total-bldg-counts 'warp-gate))
+                                2))
                         (and (not (crisis-deferred-sym? (normalize-brain-sym s) crisis-defer?
                                                         #:defer-stargate? defer-stargate?
                                                         #:keep-ship-weapons? ship-weap-due?
                                                         #:keep-spire-aa? keep-spire-aa?
-                                                        #:keep-lair-aa? keep-lair-aa?))
+                                                        #:keep-lair-aa? (or keep-lair-aa? zerg-zvt-early-lair-due?)))
                              (not (and protoss-forge-gated-off? (eq? (normalize-brain-sym s) 'forge)))))
                     (not (and zerg-2base-second-t15-tech-blocked?
                               (or (and (not zerg-2base-rw-allowed-with-bn?)
@@ -10088,7 +10254,7 @@
                               (> (bldg-count-equivalent ready-bldg-counts 'hatchery) 0))
                          '(lair)
                          '())
-                     (if zerg-macro-lair-due?
+                     (if (or zerg-macro-lair-due? zerg-zvt-early-lair-due?)
                          '(lair)
                          '())
                      (if (or zerg-3rd-hatch-pro-due? zerg-late-low-min-high-gas-3rd-hatch-due?)
@@ -10183,6 +10349,7 @@
                      (if (or protoss-midgame-ht-due? protoss-gas-sink-ht-due?) '(high-templar) '())
                      (if (or protoss-early-core-stalker-due? protoss-midgame-stalker-pump-due?) '(stalker) '())
                      (if zerg-zvz-midgame-hydraden-due? '(hydralisk-den) '())
+                     (if terran-interference-matrix-due? '(interference-matrix) '())
                      (if terran-rush-survival-hellion-due? '(hellion) '())
                      (if terran-rush-survival-marine-due? '(marine) '())
                      (if terran-rush-survival-bunker-due? '(bunker) '())
@@ -10216,6 +10383,12 @@
                      (if zerg-anti-bio-baneling-nest-due? '(baneling-nest) '())
                      (if zerg-anti-bio-baneling-due? '(baneling) '())
                      (if zerg-anti-bio-needs-morph-lings? '(zergling) '())
+                     (if (and protoss-anti-reaper-macro-active?
+                              (< (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                                    (bldg-count-equivalent total-bldg-counts 'warp-gate))
+                                 2))
+                         '(gateway)
+                         '())
                      (if zerg-midgame-army-floor-due?
                          (append (if (and (> (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0) (>= gas 50))
                                      '(hydralisk) '())
@@ -11214,6 +11387,11 @@
       (or (not (memq id '(gateway barracks)))
           (= (bldg-count-equivalent total-bldg-counts id) 0)
           early-ling-rush-defense-active?
+          (and protoss-anti-reaper-macro-active?
+               (eq? id 'gateway)
+               (< (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                     (bldg-count-equivalent total-bldg-counts 'warp-gate))
+                  2))
           (and (eq? race 'Protoss)
                (memq enemy-race '(Protoss Random))
                (eq? id 'gateway)
@@ -11356,13 +11534,19 @@
             #f]
            [(emergency-cloak-det-boost-info csym)
             #t]
+           [(and protoss-anti-reaper-macro-active?
+                 (eq? csym 'gateway)
+                 (< (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                       (bldg-count-equivalent total-bldg-counts 'warp-gate))
+                    2))
+            #t]
            [(zerg-cap-air-defer-gas-drain-sym? csym)
             #f]
            [(crisis-deferred-sym? csym crisis-defer?
                                   #:defer-stargate? defer-stargate?
                                   #:keep-ship-weapons? ship-weap-due?
                                   #:keep-spire-aa? keep-spire-aa?
-                                  #:keep-lair-aa? keep-lair-aa?)
+                                  #:keep-lair-aa? (or keep-lair-aa? zerg-zvt-early-lair-due?))
             #f]
            [(and (eq? csym 'spore-crawler)
                  (>= (bldg-count-equivalent total-bldg-counts 'spore-crawler) (max 1 active-bases)))
@@ -11404,6 +11588,14 @@
            [(zerg-zvp-dt-defer-gas-sym? csym)
             #f]
            [(pvp-nat-deferred-bldg-sym? csym)
+            #f]
+           [(protoss-1base-nat-floor-deferred-sym? csym)
+            #f]
+           [(protoss-anti-reaper-deferred-sym? csym)
+            #f]
+           [(and terran-tvt-block-widow-mine? (eq? csym 'widow-mine))
+            #f]
+           [(and terran-tvt-no-hellion-wm? (memq csym '(widow-mine hellion)))
             #f]
            [(and (memq csym SC2-DUAL-CAP-TECH-BUILDINGS)
                  (>= (bldg-count-equivalent total-bldg-counts csym) 2))
@@ -11648,7 +11840,7 @@
                      (and (hash? open-facility-slots) (>= open-larva-cnt 8))))
             #t]
            [(and keep-lair-aa? (eq? csym 'lair)) #t]
-           [(and zerg-macro-lair-due? (eq? csym 'lair)) #t]
+           [(and (or zerg-macro-lair-due? zerg-zvt-early-lair-due?) (eq? csym 'lair)) #t]
            [(and zerg-3rd-hatch-pro-due? (eq? csym 'hatchery)) #t]
            [(and terran-3rd-cc-due? (eq? csym 'command-center)) #t]
            [(and terran-4th-cc-due? (eq? csym 'command-center)) #t]
@@ -11676,6 +11868,7 @@
            [(and (or protoss-midgame-ht-due? protoss-gas-sink-ht-due?) (eq? csym 'high-templar)) #t]
            [(and (or protoss-early-core-stalker-due? protoss-midgame-stalker-pump-due?) (eq? csym 'stalker)) #t]
            [(and zerg-zvz-midgame-hydraden-due? (eq? csym 'hydralisk-den)) #t]
+           [(and terran-interference-matrix-due? (eq? csym 'interference-matrix)) #t]
            [(and (or zerg-cloak-air-spore-due? zerg-zvp-proactive-spore-due? zerg-reactive-cloak-spore-due?) (eq? csym 'spore-crawler)) #t]
            [(and zerg-cap-air-spire-due? (eq? csym 'spire)) #t]
            [(and zerg-cloak-air-hydraden-due? (eq? csym 'hydralisk-den)) #t]
@@ -11740,6 +11933,12 @@
            [(and zerg-anti-bio-baneling-nest-due? (eq? csym 'baneling-nest)) #t]
            [(and zerg-anti-bio-baneling-due? (eq? csym 'baneling)) #t]
            [(and zerg-anti-bio-needs-morph-lings? (eq? csym 'zergling)) #t]
+           [(and protoss-anti-reaper-macro-active?
+                 (eq? csym 'gateway)
+                 (< (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                       (bldg-count-equivalent total-bldg-counts 'warp-gate))
+                    2))
+            #t]
            [(and zerg-midgame-army-floor-due?
                  (or (and (eq? csym 'hydralisk) (> (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0))
                      (and (eq? csym 'baneling) (> (bldg-count-equivalent ready-bldg-counts 'baneling-nest) 0) (>= (unit-count-equivalent unit-counts 'zergling) 2))
@@ -12803,7 +13002,7 @@
            (and zerg-cap-air-extractor-boost?
                 (eq? (normalize-brain-sym sym) 'extractor)))
          (define zerg-macro-lair-boost?
-           (and zerg-macro-lair-due?
+           (and (or zerg-macro-lair-due? zerg-zvt-early-lair-due?)
                 (eq? (normalize-brain-sym sym) 'lair)))
          (define zerg-midgame-ext-boost?
            (and zerg-midgame-extractor-due?
@@ -13049,6 +13248,7 @@
                (and terran-rush-survival-rax-reactor-due? (eq? (normalize-brain-sym sym) 'barracks-reactor))
                (and protoss-pvz-mass-roach-robo-due? (eq? (normalize-brain-sym sym) 'robotics-facility))
                (and protoss-pvt-anti-bio-lance-due? (eq? (normalize-brain-sym sym) 'extended-thermal-lance))
+               (and terran-interference-matrix-due? (eq? (normalize-brain-sym sym) 'interference-matrix))
                (and protoss-pvt-2nd-robo-due? (eq? (normalize-brain-sym sym) 'robotics-facility))
                zvz-rush-pool-boost?
                zvz-rush-ling-boost?
@@ -13415,6 +13615,7 @@
                     (and protoss-midgame-robo-bay-due? (eq? nsym 'robotics-bay))
                     (and protoss-colossus-core2-due? (eq? nsym 'colossus))
                     (and protoss-midgame-colossus-boost?
+                         (not protoss-colossus-release-for-defense?)
                          (or (and protoss-pvt-anti-bio-colossus-due? (>= minerals 150) (>= gas 125))
                              (and (>= minerals 200) (>= gas 150))))
                     (and protoss-pvt-anti-bio-lance-due? (eq? nsym 'extended-thermal-lance) (>= minerals 100) (>= gas 100))
@@ -13614,6 +13815,12 @@
               (min 360.0 u-after-gas-lock)]
              [(pvp-nat-deferred-bldg-sym? nsym)
               (min 420.0 u-after-gas-lock)]
+             [(protoss-1base-nat-floor-deferred-sym? nsym)
+              (min 420.0 u-after-gas-lock)]
+             [(protoss-anti-reaper-deferred-sym? nsym)
+              (min 380.0 u-after-gas-lock)]
+             [(and terran-tvt-block-widow-mine? (eq? nsym 'widow-mine))
+              (min 40.0 u-after-gas-lock)]
              [(protoss-pvp-immortal-defer-sym? nsym)
               (min 440.0 u-after-gas-lock)]
              [(terran-tvp-starport-medivac-defer-sym? nsym)
@@ -13984,7 +14191,7 @@
              [(and terran-proactive-ebay-due? (eq? nsym 'engineering-bay)) (max terran-proactive-ebay-u plan-weight u0)]
              [terran-air-dom-marine-boost? (max 560.0 plan-weight u0)]
              [pvz-ling-gate2-boost? (max 585.0 plan-weight u0)]
-             [zerg-macro-lair-boost? (max 585.0 plan-weight u0)]
+             [zerg-macro-lair-boost? (max (if zerg-macro-lair-due? 585.0 525.0) plan-weight u0)]
              [pvz-first-zealot-boost? (max 580.0 plan-weight u0)]
              [protoss-midgame-colossus-boost?
               (max (if protoss-pvt-anti-bio-colossus-due? 600.0 566.0) plan-weight u0)]
@@ -14142,8 +14349,20 @@
              [protoss-midgame-ht-boost? (max (if protoss-gas-sink-ht-due? 535.0 498.0) plan-weight u0)]
              [(and zerg-zvz-midgame-hydraden-due? (eq? nsym 'hydralisk-den))
               (max 560.0 plan-weight u0)]
+             [(and terran-interference-matrix-due? (eq? nsym 'interference-matrix))
+              (max 585.0 plan-weight u0)]
              [(and protoss-early-core-stalker-due? (eq? nsym 'stalker))
               (max 525.0 plan-weight u0)]
+             [(and protoss-anti-reaper-macro-active?
+                   (eq? nsym 'gateway)
+                   (< (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                         (bldg-count-equivalent total-bldg-counts 'warp-gate))
+                      2))
+              (max 504.0 plan-weight u0)]
+             [(and protoss-anti-reaper-macro-active?
+                   (eq? nsym 'shield-battery))
+              (min (if (= (bldg-count-equivalent total-bldg-counts 'shield-battery) 0) 496.0 484.0)
+                   u-after-gas-lock)]
              [protoss-midgame-stalker-pump-boost?
               (max (cond
                      [(or (>= workers 44) under-attack? (> enemy-threat-supply 0)) 496.0]
@@ -14371,7 +14590,7 @@
               (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
               (> (bldg-count-equivalent ready-bldg-counts 'hatchery) 0)))
        (define zerg-macro-lair-post?
-         (and zerg-macro-lair-due?
+         (and (or zerg-macro-lair-due? zerg-zvt-early-lair-due?)
               (eq? nsym 'lair)))
        (define pvz-ling-zealot-pump-post?
          (and pvz-early-ling-zealot-pump?
@@ -14852,6 +15071,12 @@
             (min u 360.0)]
            [(pvp-nat-deferred-bldg-sym? nsym)
             (min u 420.0)]
+           [(protoss-1base-nat-floor-deferred-sym? nsym)
+            (min u 420.0)]
+           [(protoss-anti-reaper-deferred-sym? nsym)
+            (min u 380.0)]
+           [(and terran-tvt-block-widow-mine? (eq? nsym 'widow-mine))
+            (min u 40.0)]
            [(and zvz-hatchery-nonblocking-now? (eq? nsym 'hatchery))
             (min u 450.0)]
            [(and terran-zero-air-suppress-viking? (eq? nsym 'viking-fighter))
@@ -15179,7 +15404,7 @@
                        574.0))]
            [terran-air-dom-marine-post? (max u 560.0)]
            [pvz-ling-gate2-post? (max u 585.0)]
-           [zerg-macro-lair-post? (max u 585.0)]
+           [zerg-macro-lair-post? (max u (if zerg-macro-lair-due? 585.0 525.0))]
            [pvz-first-zealot-post? (max u 580.0)]
            [(and terran-3rd-cc-due? (eq? nsym 'command-center))
             (max u (if terran-3rd-cc-urgent-rescue? 920.0 620.0))]
@@ -15377,8 +15602,19 @@
            [protoss-midgame-ht-post? (max u (if protoss-gas-sink-ht-due? 535.0 498.0))]
            [(and zerg-zvz-midgame-hydraden-due? (eq? nsym 'hydralisk-den))
             (max u 560.0)]
+           [(and terran-interference-matrix-due? (eq? nsym 'interference-matrix))
+            (max u 585.0)]
            [(and protoss-early-core-stalker-due? (eq? nsym 'stalker))
             (max u 525.0)]
+           [(and protoss-anti-reaper-macro-active?
+                 (eq? nsym 'gateway)
+                 (< (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                       (bldg-count-equivalent total-bldg-counts 'warp-gate))
+                    2))
+            (max u 504.0)]
+           [(and protoss-anti-reaper-macro-active?
+                 (eq? nsym 'shield-battery))
+            (min u (if (= (bldg-count-equivalent total-bldg-counts 'shield-battery) 0) 496.0 484.0))]
            [protoss-midgame-stalker-pump-post?
             (max u (cond
                      [(or (>= workers 44) under-attack? (> enemy-threat-supply 0)) 496.0]
@@ -15537,6 +15773,9 @@
                 (and (eq? nsym 'medivac) terran-tvt-medivac-tank4-capped?)
                 (terran-early-reaper2-deferred-sym? nsym)
                 (pvp-nat-deferred-bldg-sym? nsym)
+                (protoss-1base-nat-floor-deferred-sym? nsym)
+                (protoss-anti-reaper-deferred-sym? nsym)
+                (and terran-tvt-block-widow-mine? (eq? nsym 'widow-mine))
                 (and zvz-hatchery-nonblocking-now? (eq? nsym 'hatchery))
                 (protoss-pvp-immortal-defer-sym? nsym)
                 (terran-tvp-starport-medivac-defer-sym? nsym)
@@ -15657,6 +15896,7 @@
                      (and protoss-colossus-core2-due? (eq? nsym 'colossus))
                      (and protoss-midgame-robo-bay-due? (eq? nsym 'robotics-bay))
                      (and protoss-midgame-colossus-post?
+                          (not protoss-colossus-release-for-defense?)
                           (or (and protoss-pvt-anti-bio-colossus-due? (>= minerals 150) (>= gas 125))
                               (and (>= minerals 200) (>= gas 150))))
                      (and protoss-pvt-anti-bio-lance-due? (eq? nsym 'extended-thermal-lance) (>= minerals 100) (>= gas 100))
@@ -15917,7 +16157,7 @@
                        (not opp-cap-air-override?)
                        (not (early-ling-rush-boost-info csym))
                        (not (early-proxy-marauder-boost-info csym))
-                       (not (and (or keep-lair-aa? zerg-macro-lair-due? zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due?) (eq? csym 'lair)))
+                       (not (and (or keep-lair-aa? zerg-macro-lair-due? zerg-zvt-early-lair-due? zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due?) (eq? csym 'lair)))
                        (not (and terran-anti-ht-archon-ghost-academy-due? (eq? csym 'ghost-academy)))
                        (not (and protoss-root-cyber-due? (eq? csym 'cybernetics-core)))
                        (not (and zerg-post-hatch-pool-due? (eq? csym 'spawning-pool)))
@@ -15953,7 +16193,7 @@
                        (not opp-cap-air-override?)
                        (not (early-ling-rush-boost-info csym))
                        (not (early-proxy-marauder-boost-info csym))
-                       (not (and (or keep-lair-aa? zerg-macro-lair-due? zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due?) (eq? csym 'lair)))
+                       (not (and (or keep-lair-aa? zerg-macro-lair-due? zerg-zvt-early-lair-due? zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due?) (eq? csym 'lair)))
                        (not (and terran-anti-ht-archon-ghost-academy-due? (eq? csym 'ghost-academy)))
                        (not (and protoss-root-cyber-due? (eq? csym 'cybernetics-core)))
                        (not (and zerg-post-hatch-pool-due? (eq? csym 'spawning-pool)))
@@ -15999,7 +16239,7 @@
                        (not w-counter-u)
                        (not (early-ling-rush-boost-info csym))
                        (not (early-proxy-marauder-boost-info csym))
-                       (not (and (or keep-lair-aa? zerg-macro-lair-due? zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due?) (eq? csym 'lair)))
+                       (not (and (or keep-lair-aa? zerg-macro-lair-due? zerg-zvt-early-lair-due? zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due?) (eq? csym 'lair)))
                        (not (and terran-anti-ht-archon-ghost-academy-due? (eq? csym 'ghost-academy)))
                        (not (and protoss-root-cyber-due? (eq? csym 'cybernetics-core)))
                        (not (and zerg-post-hatch-pool-due? (eq? csym 'spawning-pool)))
@@ -16492,6 +16732,7 @@
          ;; <= 2 early / <= 3 midgame in TvP, and <= 2 when TechLab ready & Tanks < 4!
          [(widow-mine)
           (let ([wm-cap (cond
+                          [terran-tvt-block-widow-mine? 0]
                           [terran-tvt-no-hellion-wm? 0]
                           [terran-tvt-tank4-gas-lock? 0]
                           [terran-early-ground-rush-survival-due? 0]
@@ -16740,6 +16981,49 @@
                     protoss-robo-immortal-due?)
                (and (eq? csym 'colossus)
                     protoss-midgame-colossus-due?))))
+    ;; L53-1C (`#1300`/`#1301` `#39 norman` `ESCROW_LOCKOUT: immortal, 455M/92G`):
+    ;; Under base attack or heavy threat (`enemy-threat-supply > 1.3 * army-supply`) with open
+    ;; Gateway slots, `minerals >= 275`, and `gas >= 50`, never let `immortal` lock minerals/gas
+    ;; ahead of defending `stalker` warp-ins!
+    (define protoss-defending-stalker-ignores-immortal-escrow?
+      (and (eq? race 'Protoss)
+           (eq? csym 'stalker)
+           (or (and (or under-attack?
+                        (> enemy-threat-supply (* 1.3 army-supply)))
+                    (or (not (hash? open-facility-slots))
+                        (> open-gw-slots-live 0))
+                    (>= minerals 275)
+                    (>= gas 50)
+                    reserved-cand
+                    (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
+                      (or (eq? rid 'immortal)
+                          (and (eq? rid 'robotics-facility)
+                               (>= (bldg-count-equivalent total-bldg-counts 'robotics-facility) 1)))))
+               (and protoss-colossus-release-for-defense?
+                    (or (not (hash? open-facility-slots))
+                        (> open-gw-slots-live 0))
+                    (>= gas 50)
+                    reserved-cand
+                    (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'colossus)))))
+    ;; L54-1B (`#1322`/`#1323` `#58` `corruptor` escrow lockout):
+    ;; When `corruptor` waits on `< 100G` with `minerals >= 350`, never block 0-gas Queens/Lings/Hatches/Spores
+    ;; OR `overseer #1` (`overseer == 0`, `50M/50G`)!
+    (define zerg-zero-gas-ignores-corruptor-escrow?
+      (and (eq? race 'Zerg)
+           reserved-cand
+           (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'corruptor)
+           (< rem-gas 100)
+           (>= minerals 350)
+           (= g-cost 0)
+           (memq csym '(queen zergling hatchery spore-crawler))))
+    (define zerg-overseer1-ignores-corruptor-escrow?
+      (and (eq? race 'Zerg)
+           reserved-cand
+           (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'corruptor)
+           (< rem-gas 100)
+           (eq? csym 'overseer)
+           (= (unit-count-equivalent unit-counts 'overseer) 0)
+           (>= rem-gas 50)))
     ;; W9-P0-4-belief + W11-P0-1-belief + W12-P0-4-belief + L30-P0-2 (`#19 AirAAStarve`):
     ;; Never let Hydralisk/HydraliskDen/Ravager escrow block Roach/Baneling/Zergling —
     ;; EXCEPT when facing Stargate mass-air (`>= 4` air or Stargate+`>=2` air), where Roach MUST NOT steal gas from HydraDen/Hydras!
@@ -16773,7 +17057,7 @@
            (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))])
              (and (memq rid '(lair spore-crawler))
                   (not (and (eq? rid 'lair)
-                            (or zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due? zerg-air-lair-remorph-due?)
+                            (or zerg-banshee-lair-rush-due? zerg-zvp-dt-lair-due? zerg-air-lair-remorph-due? zerg-zvt-early-lair-due?)
                             (> g-cost 0)))
                   (not (emergency-cloak-det-boost-info rid))))))
     ;; W17-P0-2b-belief (`#4 Z v monsterbot`): When Zerg has `gas >= 600`, let excess-gas combat
@@ -17094,6 +17378,9 @@
         [terran-marine-scv-ignores-cc-escrow? 0]
         [terran-bio-scv-ignores-air-escrow? 0]
         [protoss-probe-or-immortal-ignores-stalker-escrow? 0]
+        [protoss-defending-stalker-ignores-immortal-escrow? 0]
+        [zerg-zero-gas-ignores-corruptor-escrow? 0]
+        [zerg-overseer1-ignores-corruptor-escrow? 0]
         [zerg-roach-ignores-hydra-escrow? 0]
         [zerg-combat-ignores-lair-spore-escrow? 0]
         [zerg-excess-gas-dump-ignores-escrow? 0]
@@ -17118,6 +17405,9 @@
               (or (not (or enemy-cap-air? enemy-air-dominated-now?)) (<= open-starport-slots 0) (>= gas 125)))
          0]
         [protoss-probe-or-immortal-ignores-stalker-escrow? 0]
+        [protoss-defending-stalker-ignores-immortal-escrow? 0]
+        [zerg-zero-gas-ignores-corruptor-escrow? 0]
+        [zerg-overseer1-ignores-corruptor-escrow? 0]
         [zerg-roach-ignores-hydra-escrow? 0]
         [zerg-combat-ignores-lair-spore-escrow? 0]
         [zerg-excess-gas-dump-ignores-escrow? 0]
@@ -17241,11 +17531,19 @@
               #:frames (if (or terran-3rd-cc-due? protoss-3rd-nexus-pro-due? protoss-3rd-nexus-oversat-urgent? step-post-t3-tech-expand-due?)
                            320
                            120))))
-       ;; W4-P0-1c: Never hold a blocking 275M Immortal mineral escrow when workers < 16 or Robo not ready
+       ;; W4-P0-1c + L53-1C (`#39 norman` `ESCROW_LOCKOUT: immortal, 455M/92G`):
+       ;; Never hold a blocking Immortal escrow when workers < 16, Robo not ready, OR under active
+       ;; base attack / heavy threat (`> 1.3 * army`) with open Gateway slots, `minerals >= 275`, and `gas >= 50`!
        (define unbuildable-immortal-escrow?
          (and (eq? csym 'immortal)
               (or (< workers 16)
-                  (= (bldg-count-equivalent ready-bldg-counts 'robotics-facility) 0))))
+                  (= (bldg-count-equivalent ready-bldg-counts 'robotics-facility) 0)
+                  (and (or under-attack?
+                           (> enemy-threat-supply (* 1.3 army-supply)))
+                       (or (not (hash? open-facility-slots))
+                           (> open-gw-slots-live 0))
+                       (>= minerals 275)
+                       (>= gas 50)))))
        ;; W5-P0-4-belief: When top reserved-cand is pure-gas-starved? (or gas-blocked under threat / low army),
        ;; never let a lower-priority 400M expansion stack a 400M mineral floor behind it (`gas_starved_min_lockout`).
        (define skip-exp-behind-gas-starved?
@@ -17281,6 +17579,7 @@
                                        (and protoss-confirmed-banshee-or-sptl? (>= rem-gas 10)))))))
                 (or (not has-gas-income?)
                     (<= rem-gas (- g-cost 30))
+                    (and (eq? csym 'corruptor) (>= minerals 350))
                     (>= rem-min (+ m-cost 150)))))
          (define min-escrow-amt (if pure-gas-starved? 0 m-cost))
          (set! min-floor (max min-floor min-escrow-amt))
@@ -17335,11 +17634,20 @@
              (not supply-preempt-now?)
              (< gas (if zerg-cap-air-spire-due? 200 100)))
     (set! gas-floor (max gas-floor (if zerg-cap-air-spire-due? 200 100))))
-  ;; L40-P0-2a (`#25 ZvT` 15 Banshees): Protect 100G floor while HydraDen builds/trains first 8..16 Hydras!
+  ;; L54-1B (`#58` `corruptor` escrow un-locker): keep `min-floor = 0` when `corruptor` waits on `< 100G` with `>= 350M`!
+  (when (and reserved-cand
+             (eq? (normalize-brain-sym (priority-candidate-id reserved-cand)) 'corruptor)
+             (< gas 100)
+             (>= minerals 350))
+    (set! min-floor 0))
+  ;; L40-P0-2a + L55-M3 (`#25 ZvT` 15 Banshees): Protect 100G floor until HydraDen is ready,
+  ;; dropping to 50G once `(ready 'hydralisk-den) > 0` so Hydralisks (`100M/50G`) train immediately!
   (when (and zerg-banshee-aa-gas-protect?
-             (not supply-preempt-now?)
-             (< gas 100))
-    (set! gas-floor (max gas-floor 100)))
+             (not supply-preempt-now?))
+    (define banshee-gas-floor
+      (if (> (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0) 50 100))
+    (when (< gas banshee-gas-floor)
+      (set! gas-floor (max gas-floor banshee-gas-floor))))
   ;; L41-P0-2a (`#04 PvT` Sole H2H Loss): Protect 150G floor for RoboticsBay on 2-base PvT once army >= 16 & >= 1 Immortal!
   (when (and protoss-midgame-robo-bay-due?
              protoss-pvt-robo-bay-gas-reserve-due?

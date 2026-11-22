@@ -6208,7 +6208,8 @@
          #:third-x [raw-third-x 68.5]
          #:third-y [raw-third-y 50.5]
          #:enemy-x [raw-enemy-x 160.5]
-         #:enemy-y [raw-enemy-y 160.5])
+         #:enemy-y [raw-enemy-y 160.5]
+         #:allow-spore-trick? [allow-spore-trick? #t])
   (define race (normalize-ledger-race raw-race))
   (define minerals (safe-nonneg-int raw-minerals 0))
   (define gas (safe-nonneg-int raw-gas 0))
@@ -6233,7 +6234,8 @@
            ally-bldgs))
 
   (define has-pending-spore-overcap?
-    (and (eq? race 'Zerg)
+    (and allow-spore-trick?
+         (eq? race 'Zerg)
          (>= supply-used 198)
          (>= supply-cap 198)
          (ormap (lambda (b)
@@ -6280,7 +6282,7 @@
                         (and (real? bp) (< bp 0.95) (exact-integer? bid) (> bid 0)))))
                ally-bldgs))
      (define cancelling-pending-spores?
-       (and (eq? race 'Zerg) (>= supply-used 198) (not (null? pending-spores))))
+       (and allow-spore-trick? (eq? race 'Zerg) (>= supply-used 198) (not (null? pending-spores))))
 
      ;; 1. Fist of Neeb: Convert surplus late-game mineral bank (>= 600M at >= 194/200)
      ;;    into 0-supply forward static defense batteries / Planetary Fortresses,
@@ -6343,9 +6345,9 @@
          [else 'drone]))
      (define spore-acts
        (cond
-         [(not (eq? race 'Zerg)) '()]
+         [(or (not allow-spore-trick?) (not (eq? race 'Zerg))) '()]
          [cancelling-pending-spores?
-          (for/list ([sp (in-list (take pending-spores (min 4 (length pending-spores))))])
+          (for/list ([sp (in-list (take pending-spores (min 2 (length pending-spores))))])
             (list 'cancel-building (hash-ref sp 'id)))]
          [(and (>= supply-used 198)
                (>= supply-cap 200)

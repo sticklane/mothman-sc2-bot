@@ -52,10 +52,14 @@
 
 (define MOTHMAN-BOT-UPLOADS
   ;; (bot-id bot-name zip-filename)
-  '((1461 "Mothman-X" "Mothman-X.zip")
-    (1458 "Mothman-Z" "Mothman-Z.zip")
-    (1459 "Mothman-T" "Mothman-T.zip")
-    (1460 "Mothman-P" "Mothman-P.zip")))
+  '((1461 "Mothman-X"  "Mothman-X.zip")
+    (1458 "Mothman-Z"  "Mothman-Z.zip")
+    (1459 "Mothman-T"  "Mothman-T.zip")
+    (1460 "Mothman-P"  "Mothman-P.zip")
+    (1508 "Mothman-X2" "Mothman-X.zip")
+    (1505 "Mothman-Z2" "Mothman-Z.zip")
+    (1506 "Mothman-T2" "Mothman-T.zip")
+    (1507 "Mothman-P2" "Mothman-P.zip")))
 
 (define OPPONENT-PRESETS
   (hash "div1"
@@ -255,7 +259,7 @@
   numeric-mid)
 
 (define (sync-all-bot-zips! [token DEFAULT-TOKEN]
-                            #:bot-ids [bot-ids '(1461 1458 1459 1460)])
+                            #:bot-ids [bot-ids '(1461 1458 1459 1460 1508 1505 1506 1507)])
   (define want-set (list->seteqv bot-ids))
   (printf "============================================================================\n")
   (printf "  Uploading Mothman BotZip Packages to AI Arena (`https://aiarena.net`)\n")
@@ -270,7 +274,7 @@
 
 (define (request-n-matches! count
                             [token DEFAULT-TOKEN]
-                            #:bot-ids [bot-ids '(1458 1459 1460 1461)]
+                            #:bot-ids [bot-ids '(1458 1459 1460 1461 1505 1506 1507 1508)]
                             #:opponents [opponents #f]
                             #:map-pool-id [map-pool-id DEFAULT-MAP-POOL-ID])
   (define eff-opponents (or opponents (resolve-opponents-spec #f "div1" token)))
@@ -421,14 +425,14 @@
 
   (when do-sync?
     (sync-all-bot-zips! DEFAULT-TOKEN
-                        #:bot-ids (or selected-bot-ids '(1461 1458 1459 1460))))
+                        #:bot-ids (or selected-bot-ids '(1461 1458 1459 1460 1508 1505 1506 1507))))
 
   (define requested-ids
     (if (> req-count 0)
         (let ([opps (resolve-opponents-spec opponents-str preset-str DEFAULT-TOKEN)])
           (request-n-matches! req-count
                               DEFAULT-TOKEN
-                              #:bot-ids (or selected-bot-ids '(1458 1459 1460 1461))
+                              #:bot-ids (or selected-bot-ids '(1458 1459 1460 1461 1505 1506 1507 1508))
                               #:opponents opps
                               #:map-pool-id map-pool-id))
         '()))

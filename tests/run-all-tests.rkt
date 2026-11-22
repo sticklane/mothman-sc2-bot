@@ -9145,9 +9145,10 @@
                      '() '() cam '() '() '() '() '() '()))
 
   ;; 40.1 Terran Supply Depot Front-Door Management (1A)
-  ;; L33-P0-1: Depot Lower (556) & Raise (558) sit at Tier 2 (P2) so blocked depot toggles never starve P1 macro!
-  (assert-eq! (wire-cmd-priority-tier (sc2-raw-unit-command 556 #f 0 '(4201) #f)) 2
-              "Supply Depot Lower (556) must be Tier 2 (P2) alongside Raise (558) so toggles never starve P1 macro")
+  ;; L54-W1: Depot Lower (556) is promoted to Tier 1 (P1) so trapped-army P2 spam can never starve ramp lowering,
+  ;; while Raise (558) stays at Tier 2 (P2) so blocked depot raise retries never starve P1 macro.
+  (assert-eq! (wire-cmd-priority-tier (sc2-raw-unit-command 556 #f 0 '(4201) #f)) 1
+              "Supply Depot Lower (556) must be Tier 1 (P1) so trapped-army MOVE/ATTACK spam never starves lowering")
   (assert-eq! (wire-cmd-priority-tier (sc2-raw-unit-command 558 #f 0 '(4201) #f)) 2
               "Supply Depot Raise (558) must be Tier 2 (P2) so toggles never starve P1 macro")
 

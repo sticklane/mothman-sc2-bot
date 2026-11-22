@@ -3600,9 +3600,11 @@
                                   (spell-directive tag 'raven 'anti-armor-missile 'unit (uh-tag tgt)
                                                    (uh-x tgt) (uh-y tgt) 'raven-anti-armor-missile))))))
                ;; 3. Auto-Turret (`energy >= 50`, harass workers / melee / engaged zone;
-               ;;    preserve `>= 75` energy for Interference Matrix when an un-Matrixed HV mech target is <=13.5t!)
+               ;;    L54-2E: allow 50..64e Ravens to drop Auto-Turret; hold energy for Matrix only
+               ;;    when `65 <= en < 125` and an unclaimed un-Matrixed HV mech target is <= 13.5t!)
                (and (>= en 50.0)
                     (or (not hv-matrix-tgt-near?)
+                        (< en 65.0)
                         (>= en 125.0))
                     (let-values ([(ok? tgt _w)
                                   (best-unit-target
