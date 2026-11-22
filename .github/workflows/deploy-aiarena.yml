@@ -9,11 +9,11 @@ on:
   workflow_dispatch:
     inputs:
       bots:
-        description: "Comma-separated bot names to deploy (or 'all')"
+        description: "Targets: 'all' (v1+v2), 'v1', 'v2', or comma-separated bot names/IDs/races"
         required: false
         default: "all"
       request_matches:
-        description: "Number of new AI Arena matches to request across bots (0 to skip)"
+        description: "Number of new AI Arena matches to request across deployed bots (0 to skip)"
         required: false
         default: "8"
       opponents:
@@ -44,7 +44,7 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Upload BotZips, Activate Competition #38, and Request Matches
+      - name: Upload v1 + v2 BotZips, Activate Competition #38, and Request Matches
         env:
           AIARENA_API_TOKEN: ${{ secrets.AIARENA_API_TOKEN }}
           EVENT_NAME: ${{ github.event_name }}
@@ -61,15 +61,23 @@ jobs:
           import re
           import subprocess
           import sys
+          import tempfile
           import time
           import urllib.parse
+          import zipfile
 
-          BOT_MAP = {
-              "ladder/Mothman-Z.zip": (1458, "Mothman-Z"),
-              "ladder/Mothman-T.zip": (1459, "Mothman-T"),
-              "ladder/Mothman-P.zip": (1460, "Mothman-P"),
-              "ladder/Mothman-X.zip": (1461, "Mothman-X"),
-          }
+          # Each entry: (bot_id, bot_name, cohort, src_zip, base_name)
+          BOT_SPECS = [
+              (1458, "Mothman-Z",  "v1", "ladder/Mothman-Z.zip", "Mothman-Z"),
+              (1459, "Mothman-T",  "v1", "ladder/Mothman-T.zip", "Mothman-T"),
+              (1460, "Mothman-P",  "v1", "ladder/Mothman-P.zip", "Mothman-P"),
+              (1461, "Mothman-X",  "v1", "ladder/Mothman-X.zip", "Mothman-X"),
+              (1505, "Mothman-Z2", "v2", "ladder/Mothman-Z.zip", "Mothman-Z"),
+              (1506, "Mothman-T2", "v2", "ladder/Mothman-T.zip", "Mothman-T"),
+              (1507, "Mothman-P2", "v2", "ladder/Mothman-P.zip", "Mothman-P"),
+              (1508, "Mothman-X2", "v2", "ladder/Mothman-X.zip", "Mothman-X"),
+          ]
+          ALL_MANAGED_IDS = {b[0] for b in BOT_SPECS}
           COMPETITION_ID = 38
           DEFAULT_MAP_POOL_ID = 18
           USER_ID = 3871
@@ -109,7 +117,7 @@ jobs:
 
           def curl_json(args, timeout_s=None):
               is_upload = any(isinstance(a, str) and a.startswith("bot_zip=@") for a in args)
-              eff_timeout = str(timeout_s if timeout_s is not None else (120 if is_upload else 45))
+              eff_timeout = str(timeout_s if timeout_s is not None else (180 if is_upload else 45))
               last_code, last_body = 0, ""
               for attempt in range(6):
                   if attempt > 0:
@@ -212,40 +220,88 @@ jobs:
                   resolved = list(OPPONENT_PRESETS["div1"])
               return resolved
 
+          def repack_named_zip(src_zip: str, base_name: str, target_name: str, out_zip: str):
+              with zipfile.ZipFile(src_zip, "r") as zin, zipfile.ZipFile(out_zip, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+                  for info in zin.infolist():
+                      data = zin.read(info.filename)
+                      new_name = target_name if info.filename == base_name else info.filename
+                      if new_name in ("config.json", "bot_config.json"):
+                          cfg = json.loads(data.decode("utf-8"))
+                          cfg["BotName"] = target_name
+                          data = (json.dumps(cfg, indent=2) + "\n").encode("utf-8")
+                      elif new_name == "run.py":
+                          txt = data.decode("utf-8")
+                          txt = txt.replace(
+                              '("Mothman", "Mothman-X", "Mothman-Z", "Mothman-T", "Mothman-P", "Mothman-R")',
+                              f'("{target_name}", "Mothman", "Mothman-X", "Mothman-Z", "Mothman-T", "Mothman-P", "Mothman-R")',
+                          )
+                          data = txt.encode("utf-8")
+                      zi = zipfile.ZipInfo(new_name, date_time=info.date_time)
+                      zi.compress_type = zipfile.ZIP_DEFLATED
+                      zi.create_system = 3
+                      zi.external_attr = info.external_attr
+                      zout.writestr(zi, data)
+
+              with tempfile.TemporaryDirectory() as td:
+                  with zipfile.ZipFile(out_zip, "r") as zf:
+                      for info in zf.infolist():
+                          zf.extract(info, td)
+                          mode = (info.external_attr >> 16) & 0o777
+                          if mode:
+                              os.chmod(os.path.join(td, info.filename), mode)
+                  exe = os.path.join(td, target_name)
+                  if not os.path.isfile(exe):
+                      raise RuntimeError(f"Repacked zip missing root executable {target_name}")
+                  res = subprocess.run([exe, "--dry-run"], cwd=td, capture_output=True, text=True, timeout=30)
+                  if res.returncode != 0 or "DRY_RUN_OK" not in res.stdout:
+                      raise RuntimeError(
+                          f"Dry-run failed for {target_name}: rc={res.returncode} out={res.stdout[:300]} err={res.stderr[:300]}"
+                      )
+                  print(f"DRY_RUN_OK {target_name}: {res.stdout.strip()}")
+
           event_name = os.environ["EVENT_NAME"]
           if event_name == "workflow_dispatch":
               req = os.environ.get("DISPATCH_BOTS", "all").strip()
               if not req or req.lower() == "all":
-                  targets = list(BOT_MAP.keys())
+                  targets = list(BOT_SPECS)
               else:
                   wanted = {x.strip().lower() for x in req.split(",") if x.strip()}
                   targets = [
-                      p for p, (bid, name) in BOT_MAP.items()
-                      if name.lower() in wanted or str(bid) in wanted or name.split("-")[-1].lower() in wanted
+                      spec for spec in BOT_SPECS
+                      if spec[1].lower() in wanted
+                      or str(spec[0]) in wanted
+                      or spec[2].lower() in wanted
+                      or spec[1].split("-")[-1].lower() in wanted
+                      or spec[4].split("-")[-1].lower() in wanted
                   ]
           else:
               diff = subprocess.check_output(["git", "diff", "--name-only", "HEAD~1", "HEAD"], text=True)
               changed = {line.strip() for line in diff.splitlines() if line.strip()}
-              targets = [p for p in BOT_MAP if p in changed]
+              targets = [spec for spec in BOT_SPECS if spec[3] in changed]
 
           deployed_bots = []
+          os.makedirs("/tmp/deploy_repacked_zips", exist_ok=True)
           if not targets:
               print("No changed ladder/Mothman-*.zip files in commit; continuing to competition/match checks.")
           else:
-              for zip_path in targets:
-                  bot_id, bot_name = BOT_MAP[zip_path]
-                  if not os.path.isfile(zip_path):
-                      print(f"Skipping missing file: {zip_path}")
+              for bot_id, bot_name, cohort, src_zip, base_name in targets:
+                  if not os.path.isfile(src_zip):
+                      print(f"Skipping missing file: {src_zip}")
                       continue
 
-                  with open(zip_path, "rb") as fh:
+                  upload_zip = src_zip
+                  if bot_name != base_name:
+                      upload_zip = f"/tmp/deploy_repacked_zips/{bot_name}.zip"
+                      repack_named_zip(src_zip, base_name, bot_name, upload_zip)
+
+                  with open(upload_zip, "rb") as fh:
                       local_md5 = hashlib.md5(fh.read()).hexdigest()
 
-                  print(f"Deploying {bot_name} (ID {bot_id}, local_md5={local_md5}) from {zip_path}...")
+                  print(f"Deploying {bot_name} ({cohort}, ID {bot_id}, local_md5={local_md5}) from {upload_zip}...")
                   code, body = curl_json([
                       "-X", "PATCH",
                       "-H", f"Authorization: Token {token}",
-                      "-F", f"bot_zip=@{zip_path}",
+                      "-F", f"bot_zip=@{upload_zip}",
                       "-F", "bot_data_enabled=true",
                       f"https://aiarena.net/api/bots/{bot_id}/",
                   ])
@@ -258,12 +314,12 @@ jobs:
                       payload = api_get(f"bots/{bot_id}/") or payload
                   remote_md5 = payload.get("bot_zip_md5hash", "unknown")
                   print(
-                      f"OK {bot_name} (ID {bot_id}): bot_zip_updated={payload.get('bot_zip_updated')} "
+                      f"OK {bot_name} ({cohort}, ID {bot_id}): bot_zip_updated={payload.get('bot_zip_updated')} "
                       f"remote_md5={remote_md5} match={remote_md5 == local_md5}"
                   )
                   deployed_bots.append((bot_id, bot_name))
 
-          active_bots = deployed_bots if deployed_bots else [(bid, name) for (bid, name) in BOT_MAP.values()]
+          active_bots = deployed_bots if deployed_bots else [(spec[0], spec[1]) for spec in BOT_SPECS]
           activate_flag = os.environ.get("ACTIVATE_COMPETITION", "true").strip().lower() != "false"
           if activate_flag:
               comp_gql = relay_id("CompetitionType", COMPETITION_ID)
@@ -271,7 +327,7 @@ jobs:
                   "mutation($input: UpdateCompetitionParticipationInput!) { "
                   "updateCompetitionParticipation(input: $input) { errors { field messages } } }"
               )
-              for bid, bname in BOT_MAP.values():
+              for bid, bname, _, _, _ in BOT_SPECS:
                   code, resp = graphql_post(
                       comp_mut,
                       {"input": {"bot": relay_id("BotType", bid), "competition": comp_gql, "active": True}},
@@ -283,10 +339,7 @@ jobs:
                       print(f"ACTIVE Competition #{COMPETITION_ID}: {bname} (#{bid})")
 
           raw_req_count = os.environ.get("REQUEST_MATCHES", "").strip()
-          if event_name == "workflow_dispatch":
-              req_matches = int(raw_req_count) if raw_req_count.isdigit() else 8
-          else:
-              req_matches = int(raw_req_count) if raw_req_count.isdigit() else 8
+          req_matches = int(raw_req_count) if raw_req_count.isdigit() else 8
 
           if req_matches > 0 and active_bots:
               opponents = resolve_opponents(os.environ.get("OPPONENTS_SPEC", "div3-5"))
@@ -346,11 +399,11 @@ jobs:
               if created_ids:
                   print(f"MATCH_REQUEST_SUMMARY: count={len(created_ids)} ids={','.join(str(x) for x in created_ids)}")
 
-          bots_resp = api_get(f"bots/?user={USER_ID}")
+          bots_resp = api_get(f"bots/?user={USER_ID}&limit=100")
           if isinstance(bots_resp, dict):
-              print("\n=== Live AI Arena Bot Verification Summary ===")
+              print("\n=== Live AI Arena Bot Verification Summary (v1 + v2) ===")
               for b in bots_resp.get("results", []):
-                  if b.get("id") in {1458, 1459, 1460, 1461}:
+                  if b.get("id") in ALL_MANAGED_IDS:
                       print(
                           f"  * {b.get('name')} (#{b.get('id')}): updated={b.get('bot_zip_updated')} "
                           f"md5={b.get('bot_zip_md5hash')}"
