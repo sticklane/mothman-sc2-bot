@@ -216,10 +216,16 @@
   (cond
     [(and (number? food-made) (<= food-made 14)) 1]
     [(and (number? food-made) (= food-made 15)) (if (eq? race 'Terran) 2 1)]
-    ;; L50-W1 (`#1200`/`#1201` Fix 1B) + L50-W2 (`#1212`/`#1213` W2-1 `#05 PvZ` 20/23 Pylon #2):
-    ;; Keep early supply headroom conservative below food-used < 38 (`3` for Protoss 19..37 so
-    ;; Pylon #2 lands at 20/23 w/o 22/23 block, `2` for Terran/Zerg <28 & `3` for <38), ramping
-    ;; to `6..16` only once `>= 3` production facilities AND `>= 38` supply exist!
+    ;; L50-W1 (`#1200`/`#1201` Fix 1B) + L50-W2 (`#1212`/`#1213` W2-1 `#05 PvZ` 20/23 Pylon #2) +
+    ;; L51-1B (`#1235`/`#1240` `H2H #05 PvZ` `22/23` block): At `19..23` on `food-made == 23`
+    ;; with Gateway ready (`prod >= 1`), trigger headroom `4` so Pylon #2 starts at `19/23`
+    ;; before a +2 Zealot + +1 Probe hits `22/23`; keep `24..37` at `3` and Terran unchanged!
+    [(and (eq? race 'Protoss)
+          (number? food-made)
+          (= food-made 23)
+          (>= prod 1)
+          (>= food-used 19))
+     4]
     [(< food-used 19) (if (eq? race 'Terran) 2 1)]
     [(< food-used 28) (if (eq? race 'Protoss) 3 2)]
     [(< food-used 38) 3]

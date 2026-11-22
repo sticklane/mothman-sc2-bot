@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter49_ship8_clean_full",
+  "active_wave": "iter51_ship9_full",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -5043,6 +5043,138 @@
           "record": "CORE14 6W-7L-1T (0.51x), UNSEEN12 2W-9L-1T (0.34x), EXT78 8W-16L-2T (30.8% WR / 38.5% NL, 0.41x, SB 5.3%), H2H 1W-0L (8.06x), 653 real Banelings, 0 HydraBurrow, 116 LurkerBurrow, zvz_nat_wall 44.4%, sup_cap_min 30.8%",
           "trade_agg": 0.41,
           "sup_blk": 5.3
+        }
+      }
+    },
+    {
+      "id": "iter50_w3_full",
+      "status": "UNCONDITIONAL_LIVE_SHIP_8_EXT78_25W_ALL84_28W_ZERG_50PCT_NL_4W0L_ZIP_SMOKE",
+      "campaign": "Loops 29+ Self-Play, Tactics Arena 3.1 & Expanded Roster Campaign (Loop 50 Live Release #8: BuildVersion mmmkputx_6c3f9529, commit 4e7c6f39)",
+      "loop_self_improvements": [
+        "L50-LOOP-1 (H2H-First Early Stop Saved 30 min): Stage 1 H2H (iter50_ship8_h2h, 3W-3L) caught the Protoss 22/23 supply-block over-correction in 144s before burning a 32-minute 84-match run.",
+        "L50-LOOP-2 (Replay + Video Contact Sheets Caught Four Live Ability/Micro Bugs): Visual inspection of 6-frame contact sheets from trade-review-pack.py exposed Raven Auto-Turret ability ID 349->1764 (0/291 Ravens -> 8 live Auto-Turrets), Viking landing dwell/ratio blockers (VikingAssault 35->78), Medivac solo over-fly, and Cannon-rush follow-up SCV abandonment.",
+        "L50-LOOP-3 (Plain-English Timing Review Template): Updated analyze-loop-flywheel.py to compute recent-loop counts dynamically (fixing the 5+7 vs 11 arithmetic mismatch), filter ephemeral worker IDs, deduplicate Table 3b, and use plain-English headings."
+      ],
+      "spec_summary": "Loop 50 (Live Release #8, commit 4e7c6f39, BuildVersion mmmkputx_6c3f9529): 90/90 matches finished with 0 crashes, 0 faults, 0 wire rejects, and 0 step spikes >=500ms. Head-to-head vs Build 48 (Ship #7): 4W-2L-0T (1.25x agg / 2.14x med). Full roster: EXT_78 25W-48L-5T (32.1% WR / 38.5% non-loss, 0.54x, SB 3.9%), ALL_84 28W-51L-5T (33.3% WR / 39.3% non-loss), CORE14 18W-21L-3T (42.9% WR / 50.0% non-loss, 0.69x), HIST12 16W-17L-3T (44.4% WR / 52.8% non-loss, 0.70x), UNSEEN12 7W-27L-2T (+4W vs Build 48, incl. 3-0 sweep of zig-reapers at 3.25x). Zerg hit 10W-13L-3T on EXT_78 (38.5% WR / 50.0% non-loss, 0.66x trade, +0.21x vs Build 48) and 7W-5L-2T on CORE14 (64.3% non-loss), with 235 focused Light-ground Banelings, OverlordTransport leaks cut 128->1 (-99.2%), 0 Hydralisk/Ravager/Drone/Queen burrow stuns, and 101 Lurker burrows. Terran recovered CORE14 to 7W-6L-1T (0.86x), landed 78 Assault Vikings (+47% vs Build 48), and dropped Mothman's first 8 live Raven Auto-Turrets (1764). Base geometry held ahead of pro spacing/natural targets: pylon_clump 4.2% (NN 14.2t vs pro 7.5%), nat_supply 87.2% (P 95.8% / T 78.3% vs pro 80.8%), zvz_nat_wall 30.0%, early_bunkers_4m 0.87. Seven anomaly counters hit zero: 1BaseLock=0, PvPNatDelay=0, SpireDrop=0, ProdFreeze=0, GasZeroFrz=0, OpenFault=0, Spikes>=500=0; zero_gas dropped 11->6 (-45%). Mandatory 4-race ELF BotZip smoke passed 4W-0L (7.24x agg / 7.17x med, SB 3.2%, max_step 202ms, 4/4 Tag:v_mmmkputx_6c3f9529).",
+      "rev": "4e7c6f39 / BuildVersion mmmkputx_6c3f9529 (LIVE AI ARENA SHIP #8)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_030955_iter50_w3_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_030704_iter50_w3_h2h",
+      "zip_smoke_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_034854_iter50_ship8_zip_smoke",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter50_w3_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter50_w3_h2h_score.json",
+      "zip_smoke_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter50_ship8_zip_smoke_score.json",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "25W-48L-5T (32.1% WR / 38.5% NL, 0.54x; CORE14 18W-21L-3T 42.9% WR / 50.0% NL, HIST12 16W-17L-3T 44.4% WR, UNSEEN12 7W-27L-2T +4W vs Ship #7; ALL_84 28W-51L-5T; H2H_6 4W-2L 1.25x/2.14x; ZIP Smoke 4W-0L 7.24x 4/4 Tag:v_mmmkputx_6c3f9529)",
+      "win_rate_pct": 32.1,
+      "non_loss_pct": 38.5,
+      "core14_wr_pct": 42.9,
+      "hist12_wr_pct": 44.4,
+      "unseen12_wins": 7,
+      "h2h_record": "4W-2L-0T (66.7%, 1.25x agg / 2.14x med)",
+      "zip_smoke_record": "4W-0L-0T (100.0%, 7.24x agg / 7.17x med, 4/4 Tag:v_mmmkputx_6c3f9529)",
+      "trade_agg": 0.54,
+      "sup_blk_pct": 3.9,
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 5,
+      "prod_placement_stall_matches": 2,
+      "one_base_lockout_matches": 0,
+      "gas_rich_min_starved_matches": 12,
+      "stall_watchdog_kpis": {
+        "sup_cap_min_pct": 30.8,
+        "zero_income_matches": 7,
+        "zero_gas_matches": 6,
+        "wk_plateau_8m_pct": 34.3
+      },
+      "base_geometry_kpis": {
+        "pylon_clump_pct": 4.2,
+        "pylon_spacing_nn": 14.2,
+        "nat_supply_pct": 87.2,
+        "protoss_nat_supply_pct": 95.8,
+        "terran_nat_supply_pct": 78.3,
+        "zvz_nat_wall_pct": 30.0,
+        "early_bunkers_4m": 0.87
+      },
+      "by_race": {
+        "Protoss": {
+          "record": "CORE14 4W-10L-0T (0.47x), UNSEEN12 3W-9L-0T, EXT78 7W-19L-0T (26.9% WR, 0.36x, SB 4.9%), pylon_clump 4.2%, nat_supply 95.8%, sup_cap_min 30.8% (-19.2pp vs Build 48)",
+          "trade_agg": 0.36,
+          "sup_blk": 4.9
+        },
+        "Terran": {
+          "record": "CORE14 7W-6L-1T (50.0% WR / 57.1% NL, 0.86x), UNSEEN12 1W-10L-1T, EXT78 8W-16L-2T (38.5% NL, 0.53x, SB 2.4%), TvT 4W-3L-1T (0.84x), 8 live Auto-Turrets, 78 Assault Vikings, nat_supply 78.3%, early_bunkers_4m 0.87",
+          "trade_agg": 0.53,
+          "sup_blk": 2.4
+        },
+        "Zerg": {
+          "record": "CORE14 7W-5L-2T (50.0% WR / 64.3% NL, 0.73x), UNSEEN12 3W-8L-1T (0.59x), EXT78 10W-13L-3T (38.5% WR / 50.0% NL, 0.66x, SB 4.6%), 235 focused Banelings, OverlordTransport 128->1, 0 Hydra/Ravager Burrow, 101 Lurker Burrow",
+          "trade_agg": 0.66,
+          "sup_blk": 4.6
+        }
+      }
+    },
+    {
+      "id": "iter51_ship9_full",
+      "status": "UNCONDITIONAL_LIVE_SHIP_9_CORE14_23W_19L_54_8PCT_1_05X_EXT78_31W_ALL84_35W_0_80X_SC2_5014_WIRE_GROUND_TRUTH",
+      "campaign": "Loops 29+ Self-Play, Tactics Arena 3.1 & Expanded Roster Campaign (Loop 51 Live Release #9: BuildVersion nkxlrsuk_4e7c6f39)",
+      "loop_self_improvements": [
+        "L51-LOOP-1 (Live SC2 5.0.14 ResponseData Ground-Truth Wire & Upgrade-Gate Audit): Audited outbound spell/morph/upgrade IDs directly against live SC2 5.0.14 ResponseData, fixing Overseer Oversight (3743: 0 -> 74 live casts across 20 Zerg games), Overseer morph (3745: 77 casts), Battery Overcharge (4107: 0 wire rejects), Microbial Shroud (4111), and Interference Matrix (3747) upgrade gating.",
+        "L51-LOOP-2 (Replay + Video Contact Sheet Verification Loop): Post-run 6-frame contact sheets from Loop 50 pinpointed the exact CyberCore-to-1st-Stalker dead zone, Observer-vs-Immortal priority under cloaked Banshees, natural CC placement-reject retry loop (#20 PolyMorph), and Cannon-rush SCV over-pull (#50 Thssprtssbt), all four flipping L -> W in Loop 51."
+      ],
+      "spec_summary": "Loop 51 (Live Release #9, BuildVersion nkxlrsuk_4e7c6f39): 90/90 matches finished with 0 crashes, 0 faults, 0 wire rejects, and 0 step spikes >=500ms (max 251ms). Head-to-head vs Build 50 (Ship #8): 4W-2L-0T (66.7%, 1.10x trade, incl. H2H #01 ZvZ 8.32x win with earlier HydraliskDen). Full roster highs across every cohort: ALL_84 35W-46L-3T (41.7% WR / 45.2% non-loss, 0.80x trade, +7W over Ship #8), EXT_78 31W-44L-3T (39.7% WR / 43.6% non-loss, 0.75x trade, +6W over Ship #8), CORE14 23W-19L-0T (54.8% WR, 1.05x trade \u2014 all three races >=50%: Zerg 9W-5L 64.3% 1.23x, Terran 7W-7L 50.0% 0.96x, Protoss 7W-7L 50.0% 0.93x), HIST12 19W-17L-0T (52.8% WR, 0.98x), UNSEEN12 8W-25L-3T (22.2% WR / 30.6% non-loss, 0.52x). Targeted fixes live-verified: Protoss 1st Stalker faster (-37.5s in PvT, -11.9s in PvP), #75 who flipped 0.02x L -> 2.52x W (Observers #1/#2 before Immortal, 0 cloak deaths), #18 RustyNikolaj flipped L -> 2.67x W, #20 PolyMorph flipped 0.17x L -> 6.25x W (0 T111Stall, 24 Tanks / 1 died), #50 Thssprtssbt flipped 0.29x L -> 3.69x W (only 3 SCVs lost vs cannon rush). SC2 5.0.14 ground-truth spells: OverseerSiegeMode (3743) 0 -> 74 across 20 Zerg games, AutoTurret (1764) 8 across 4/6 Raven games, VikingAssault (403) 67, Banelings 266, OverlordTransport 1, 0 Hydra/Ravager/Drone/Queen burrow stuns. Anomalies & geometry: GasRich 12->5 (-58%), DripFeed 37->24 (-35%), EscrowLock 17->10 (-41%), zero_income 7->4 (-43%), wk_plateau_8m 34.3%->28.8%, pylon_clump 4.2%->0.0% (n=24), nat_supply 84.8%, N-vs-S parity gap halved 16.2pp->8.8pp (NW 17.4%->31.8%).",
+      "rev": "nkxlrsuk_4e7c6f39 (LIVE AI ARENA SHIP #9)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_052825_iter51_ship9_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_052446_iter51_h2h_first",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter51_ship9_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter51_h2h_first_score.json",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "31W-44L-3T (39.7% WR / 43.6% NL, 0.75x; CORE14 23W-19L-0T 54.8% WR 1.05x, HIST12 19W-17L-0T 52.8% WR 0.98x, UNSEEN12 8W-25L-3T 30.6% NL 0.52x; ALL_84 35W-46L-3T 0.80x; H2H_6 4W-2L 1.10x)",
+      "win_rate_pct": 39.7,
+      "non_loss_pct": 43.6,
+      "core14_wr_pct": 54.8,
+      "hist12_wr_pct": 52.8,
+      "unseen12_wins": 8,
+      "h2h_record": "4W-2L-0T (66.7%, 1.10x agg)",
+      "trade_agg": 0.75,
+      "sup_blk_pct": 4.2,
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 6,
+      "prod_placement_stall_matches": 1,
+      "one_base_lockout_matches": 3,
+      "gas_rich_min_starved_matches": 5,
+      "stall_watchdog_kpis": {
+        "sup_cap_min_pct": 38.5,
+        "zero_income_matches": 4,
+        "zero_gas_matches": 10,
+        "wk_plateau_8m_pct": 28.8
+      },
+      "base_geometry_kpis": {
+        "pylon_clump_pct": 0.0,
+        "pylon_spacing_nn": 14.1,
+        "nat_supply_pct": 84.8,
+        "protoss_nat_supply_pct": 87.5,
+        "terran_nat_supply_pct": 81.8,
+        "zvz_nat_wall_pct": 12.5,
+        "early_bunkers_4m": 0.91
+      },
+      "by_race": {
+        "Protoss": {
+          "record": "CORE14 7W-7L-0T (50.0% WR, 0.93x), EXT78 8W-17L-1T (30.8% WR / 34.6% NL, 0.52x, SB 4.4%), 1st Stalker -37.5s PvT / -11.9s PvP, #75 who 2.52x W (0 cloak deaths), #18 Rusty 2.67x W, pylon_clump 0.0%, nat_supply 87.5%",
+          "trade_agg": 0.52,
+          "sup_blk": 4.4
+        },
+        "Terran": {
+          "record": "CORE14 7W-7L-0T (50.0% WR, 0.96x), EXT78 11W-14L-1T (42.3% WR / 46.2% NL, 0.93x, SB 2.7%), #20 PolyMorph 6.25x W, #50 Thssprtssbt 3.69x W, 8 Auto-Turrets, 67 Assault Vikings, nat_supply 81.8%, early_bunkers_4m 0.91",
+          "trade_agg": 0.93,
+          "sup_blk": 2.7
+        },
+        "Zerg": {
+          "record": "CORE14 9W-5L-0T (64.3% WR, 1.23x), EXT78 12W-13L-1T (46.2% WR / 50.0% NL, 0.81x, SB 5.4%), H2H #01 ZvZ 8.32x W, 74 OverseerSiegeMode (3743), 266 Banelings, 1 OverlordTransport, 0 Hydra/Ravager Burrow, 73 Lurker Burrow",
+          "trade_agg": 0.81,
+          "sup_blk": 5.4
         }
       }
     }

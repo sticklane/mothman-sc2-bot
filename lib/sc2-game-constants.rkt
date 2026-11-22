@@ -606,14 +606,16 @@
 ;; Canonical LotV active spell -> ability_id map (ground-truth `s2clientprotocol` IDs):
 ;;   - `emp-round` = `1628` (`EFFECT_EMP`, PointTarget; never `381`!)
 ;;   - `oracle-revelation` = `2146` (`EFFECT_ORACLEREVELATION`, PointTarget; `1632` is `TRAIN_QUEEN`!)
-;;   - `microbial-shroud` = `2545` (`EFFECT_MICROBIALSHROUD`, PointTarget)
+;;   - `microbial-shroud` = `4111` (`EFFECT_AMORPHOUSARMORCLOUD`, PointTarget; SC2 5.0.14)
 ;;   - `guardian-shield` = `76` (`GUARDIANSHIELD_GUARDIANSHIELD`, NoTarget)
 (: SC2-SPELL-ABILITY-IDS (Immutable-HashTable Symbol Integer))
 (define SC2-SPELL-ABILITY-IDS
   (hasheq
    'emp-round            1628
    'oracle-revelation    2146
-   'microbial-shroud     2545
+   'microbial-shroud     4111
+   'amorphous-armorcloud 4111
+   'hydralisk-frenzy     4109
    'guardian-shield      76
    'force-field          1526
    'psi-storm            1036
@@ -673,7 +675,7 @@
    'generate-creep       1692
    'time-warp            2244
    'nexus-mass-recall    3757
-   'mothership-mass-recall 2368
+   'mothership-mass-recall 142
    'energy-recharge      4126
    'nexus-energy-recharge 4126
    'shield-battery-recharge 4113
@@ -707,8 +709,8 @@
    'siege-mode           388
    'unsiege              390
    'unsiege-mode         390
-   'morph-overseer-mode  3743
-   'morph-oversight-mode 3745
+   'morph-oversight-mode 3743
+   'morph-overseer-mode  3745
    'morph-observer-mode  3739
    'morph-observer-siege-mode 3741
    'morph-supply-depot-lower 556
@@ -778,8 +780,9 @@
      3681  ;; UPROOT
      3739  ;; MORPH_OBSERVERMODE
      3741  ;; MORPH_OBSERVERSIEGEMODE
-     3743  ;; MORPH_OVERSEERMODE
-     3745  ;; MORPH_OVERSIGHTMODE
+     3743  ;; MORPH_OVERSIGHTMODE
+     3745  ;; MORPH_OVERSEERMODE
+     4109  ;; HYDRALISKFRENZY_0 (SC2 5.0.14 Hydralisk Lunge)
      1528  ;; MORPH_WARPPRISMPHASINGMODE
      1530  ;; MORPH_WARPPRISMTRANSPORTMODE
      1042  ;; BUILD_INTERCEPTORS
@@ -789,6 +792,7 @@
 (define SC2-POINT-TARGET-ABILITY-IDS
   (list->seteqv
    '(74    ;; FUNGALGROWTH_FUNGALGROWTH
+     142   ;; EFFECT_MASSRECALL_STRATEGICRECALL (Mothership Mass Recall, SC2 5.0.14)
      349   ;; BUILD_AUTOTURRET (legacy alias)
      399   ;; SCAN_MOVE (Scanner Sweep)
      1036  ;; PSISTORM_PSISTORM
@@ -823,6 +827,7 @@
      3687  ;; EFFECT_BLINK
      3691  ;; BUILD_CREEPTUMOR
      3757  ;; EFFECT_MASSRECALL_NEXUS
+     4111  ;; EFFECT_AMORPHOUSARMORCLOUD (SC2 5.0.14 Microbial Shroud)
      )))
 
 (: SC2-UNIT-TARGET-ABILITY-IDS (Setof Integer))
@@ -1592,7 +1597,7 @@
                   ((1662 1694 1733 3691)   . spawn-creep-tumor)
                   ((253 380 3675)          . stim)
                   ((1442 3687)             . blink)
-                  ((142 3686 3757)         . mass-recall)
+                  ((142 2368 3686 3757)    . mass-recall)
                   ((1163 2112)             . build-lurker-den)
                   ((895 1909)              . build-shield-battery)
                   ((80 4121)               . morph-baneling)
@@ -1600,6 +1605,7 @@
                   ((2069 2073)             . viper-consume)
                   ((1990 2704)             . spawn-locusts)
                   ((2706 2387)             . locust-swoop)
+                  ((2545 4111)             . microbial-shroud)
                   ((1882 1692)             . overlord-generate-creep))]
          [ht : (Immutable-HashTable Integer Symbol)
              (for*/hasheqv : (Immutable-HashTable Integer Symbol)
@@ -1630,7 +1636,7 @@
                          1398 1400 3681))])
       (hash-set! ht id 'mode-switch))
     (for ([id (in-list '(251 1662 1694 3691 1733 1664 1628 1036 140 74 3763
-                         1764 2338 2346 2067 2063 2542 2545 2704 3747 3753 181 2505 1526))])
+                         1764 2338 2346 2067 2063 2542 2545 4111 2704 3747 3753 181 2505 1526))])
       (hash-set! ht id 'cast-walk))
     (for/hasheqv : (Immutable-HashTable Integer Symbol) ([(k v) (in-hash ht)])
       (values k v))))

@@ -407,7 +407,7 @@
    (ab 'corrosive-bile          2338 'Zerg 'ravager             'point 0   157  9.0 '(enemy-cannon-or-bunker-contain enemy-siege-or-lurker-contain enemy-turtle-skytoss-or-mech) "60-dmg skillshot breaks bunkers, force fields, tanks, liberators")
    (ab 'fungal-growth           74   'Zerg 'infestor            'point 75   0  10.0 '(enemy-multi-prong-drop-or-runby enemy-air-harass-transition late-game-spellcaster-standoff) "Root & reveal bio/blink/phoenix/muta clumps")
    (ab 'neural-parasite         249  'Zerg 'infestor            'unit  100  0   8.0 '(enemy-turtle-skytoss-or-mech late-game-spellcaster-standoff) "Hijack Carrier/Thor/Tempest/Mothership/HT")
-   (ab 'microbial-shroud        2545 'Zerg 'infestor            'point 100  0   9.0 '(enemy-turtle-skytoss-or-mech enemy-air-harass-transition late-game-spellcaster-standoff) "-50% air-to-ground damage dome")
+   (ab 'microbial-shroud        4111 'Zerg 'infestor            'point 100  0   9.0 '(enemy-turtle-skytoss-or-mech enemy-air-harass-transition late-game-spellcaster-standoff) "-50% air-to-ground damage dome (SC2 5.0.14 AmorphousArmorcloud)")
    (ab 'abduct                  2067 'Zerg 'viper               'unit  75   0   9.0 '(enemy-siege-or-lurker-contain enemy-turtle-skytoss-or-mech late-game-spellcaster-standoff) "Yank Siege Tank/Colossus/Tempest/Carrier/Lurker into kill zone")
    (ab 'blinding-cloud          2063 'Zerg 'viper               'point 100  0  11.0 '(enemy-siege-or-lurker-contain enemy-cannon-or-bunker-contain late-game-spellcaster-standoff) "Reduce ground weapon & PF/Tank/SCV range to melee")
    (ab 'parasitic-bomb          2542 'Zerg 'viper               'unit  125  0   8.0 '(enemy-turtle-skytoss-or-mech enemy-air-harass-transition late-game-spellcaster-standoff) "AoE air-to-air DoT vs Void Ray/Viking/Muta/Phoenix")
@@ -417,8 +417,8 @@
    (ab 'locust-swoop            2387 'Zerg 'locust-flying       'point 0    0   4.0 '(our-eco-deficit-comeback-harass base-trade-race) "Canonical SC2 4.10 EFFECT_LOCUSTSWOOP (legacy alias 2706)")
    (ab 'spawn-changeling        181  'Zerg 'overseer            'none  50   0   0.0 '(enemy-fast-3cc-or-nexus-greed opponent-proxy-all-in-defense) "Scout production, ramp wall, and tech branches")
    (ab 'contaminate             1825 'Zerg 'overseer            'unit  125  0   7.0 '(enemy-fast-3cc-or-nexus-greed opponent-proxy-all-in-defense enemy-turtle-skytoss-or-mech) "Halt production/upgrade structure for 21s")
-   (ab 'morph-oversight-mode    3745 'Zerg 'overseer            'none  0    0   0.0 '(enemy-cloaked-or-burrowed-threat enemy-multi-prong-drop-or-runby) "Expand detector/vision radius while stationary")
-   (ab 'morph-overseer-mode     3743 'Zerg 'overseer-siege-mode 'none  0    0   0.0 '(our-army-trapped-or-out-of-position) "Resume mobile Overseer flight")
+   (ab 'morph-oversight-mode    3743 'Zerg 'overseer            'none  0    0   0.0 '(enemy-cloaked-or-burrowed-threat enemy-multi-prong-drop-or-runby) "Expand detector/vision radius while stationary")
+   (ab 'morph-overseer-mode     3745 'Zerg 'overseer-siege-mode 'none  0    0   0.0 '(our-army-trapped-or-out-of-position) "Resume mobile Overseer flight")
    (ab 'caustic-spray           2324 'Zerg 'corruptor           'unit  0    0   6.0 '(base-trade-race enemy-turtle-skytoss-or-mech) "Focus-melt Nexuses, PFs, and Stargates")
    (ab 'build-nydus-worm        1768 'Zerg 'nydus-network       'point 0    0 256.0 '(our-army-trapped-or-out-of-position our-eco-deficit-comeback-harass base-trade-race) "Open remote Nydus Canal")
    (ab 'nydus-load              1437 'Zerg 'nydus-network       'unit  0    0   1.5 '(our-army-trapped-or-out-of-position base-trade-race) "LOAD_NYDUSNETWORK")
@@ -518,7 +518,7 @@
    (ab 'oracle-revelation       2146 'Protoss 'oracle            'point 25   0   9.0 '(enemy-cloaked-or-burrowed-threat enemy-siege-or-lurker-contain) "Tag cloaked/burrowed & siege army for 20s")
    (ab 'stasis-ward             2505 'Protoss 'oracle            'point 50   0   3.0 '(enemy-multi-prong-drop-or-runby opponent-proxy-all-in-defense) "Plant cloaked Stasis Trap")
    (ab 'build-interceptors      1042 'Protoss 'carrier           'none  0    0   0.0 '(enemy-turtle-skytoss-or-mech) "Replenish Carrier Interceptors")
-   (ab 'mothership-mass-recall  2368 'Protoss 'mothership        'point 0 2000 256.0 '(our-army-trapped-or-out-of-position base-trade-race) "Recall army to Mothership")
+   (ab 'mothership-mass-recall  142  'Protoss 'mothership        'point 0 2000 256.0 '(our-army-trapped-or-out-of-position base-trade-race) "Recall army to Mothership (SC2 5.0.14 StrategicRecall)")
 
    ;; Shared structural / unit control abilities
    (ab 'cancel-build            314  'Shared 'building           'none  0    0   0.0 '(enemy-cannon-or-bunker-contain our-eco-deficit-comeback-harass) "CANCEL_BUILDINPROGRESS refund 75%")
@@ -1440,7 +1440,7 @@
        (when pid (emit! (list 'cast-spell pid 'morph-warp-prism-transport))))]
 
     [(enemy-cloaked-or-burrowed-threat)
-     ;; Never cast `morph-oversight-mode` (3745) or `morph-observer-siege-mode` (3741) here:
+     ;; Never cast `morph-oversight-mode` (3743) or `morph-observer-siege-mode` (3741) here:
      ;; detectors must remain mobile to fly directly to active cloaked/burrowed threats!
      (unless live-obs?
        (cond

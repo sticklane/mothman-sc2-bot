@@ -1819,7 +1819,8 @@
       ],
       "p1_upgrades": [
         "Stim",
-        "CombatShield"
+        "CombatShield",
+        "InterferenceMatrix"
       ],
       "p2_upgrades": [
         "Blink",

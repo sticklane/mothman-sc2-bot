@@ -43,20 +43,20 @@ MATCHUP_NOTES: Dict[str, Dict[str, str]] = {
         "gaps": "Pulling too much of the main army home against small Adept or Oracle raids, and late natural expansions when harassed early or cannon-rushed.",
     },
     "TvT": {
-        "working": "81.8% live ladder win rate (9–1–1, 1.04× trade, including an 18-Tank zero-loss win over Slowpoke at 5.41×) and 1.7% local supply-blocked time.",
-        "gaps": "Early enemy Reapers delaying our first Marines and Bunkers, and building extra Medivacs ahead of the first four Siege Tanks.",
+        "working": "81.8% live ladder win rate (9–1–1, 1.04× trade, including an 18-Tank zero-loss win over Slowpoke at 5.41×), 62.5% win-or-tie locally in Loop 50 (4–3–1, 0.84×), and 1.7% local supply-blocked time.",
+        "gaps": "Early enemy Reapers delaying our first Marines and Bunkers, and occasional natural Command Center placement retries on contested ramps.",
     },
     "TvZ": {
-        "working": "77.8% on the live ladder (7–1–1, 2.31× trade, including wins over titania and Carcara), backed by Widow Mine drops and Blue-Flame Hellion raids.",
-        "gaps": "Scaling smoothly onto third-base Barracks after fixing the bug where dead Zerg buildings triggered false anti-air panics.",
+        "working": "77.8% on the live ladder (7–1–1, 2.31× trade, including wins over titania and Carcara), backed by Widow Mine drops, Blue-Flame Hellion raids, and live Raven Auto-Turrets.",
+        "gaps": "Scaling smoothly onto third-base Barracks and resolving natural Command Center placement retries when early builds are contested.",
     },
     "ZvP": {
-        "working": "Fast 3.5-base economy, Queen/Drone mineral-line defense, and late-game Lurker/Ravager pushes when Zerg reaches Hive tech.",
-        "gaps": "Weakest ladder matchup (3–8–1, 0.26× trade): third Hatcheries landed nearly three minutes later than pros (5:41 vs. 2:43), Hydralisks and Ravagers repeatedly burrowed mid-fight, and an outdated command ID prevented any Banelings from morphing (all targeted in Loop 49).",
+        "working": "Fast 4-base economy, Queen/Drone mineral-line defense, and Loop 50's Baneling and Burrow fixes (lifting ZvP to 42.9% win-or-tie and 0.57× trade locally, with 0 Hydralisk or Ravager burrow locks).",
+        "gaps": "Weakest historical ladder matchup (3–8–1, 0.26× trade before Loop 50): third Hatcheries still land behind pro timings (5:41 vs. 2:43 baseline) against mid-game Protoss timing pushes.",
     },
     "ZvT": {
-        "working": "Five-base Roach/Hydra/Lurker/Brood Lord late games (2.61× live vs. oberon with 32 Lurkers), Reaper defense at 97% mining uptime, and Mutalisk spread against Thors.",
-        "gaps": "Zero Banelings morphed across 1,070 games due to an outdated SC2 ability ID (fixed in Loop 49), late third Hatcheries (5:07 vs. 2:59 pro median), and extra Corruptors starving Hive tech against Terran Bio-Tank.",
+        "working": "Five-base Roach/Hydra/Lurker/Brood Lord late games (2.61× live vs. oberon with 32 Lurkers), 55.6% win-or-tie locally in Loop 50 (0.61× trade) after shipping Banelings and cutting unused Overlord transports from 128 to 1.",
+        "gaps": "Over-droning past 66 workers while army supply is low and late third Hatcheries against Terran Bio-Tank pushes (targeted in Loop 51).",
     },
     "ZvZ": {
         "working": "9–0 on the recent live ladder (2.78× trade, including 10.63× vs. Carcara) with 3.8-base scaling and fast Zergling-to-Roach transitions.",
@@ -534,7 +534,7 @@ def load_rich_report_telemetry(
             """
             SELECT m.our_race, ROUND(AVG(c.apm), 1), ROUND(MAX(c.apm), 1)
             FROM match_cmd_summary c JOIN matches m ON m.replay_id = c.replay_id
-            WHERE c.user_id = m.our_player_id AND m.run_id LIKE '%iter4%'
+            WHERE c.user_id = m.our_player_id AND (m.run_id LIKE '%iter4%' OR m.run_id LIKE '%iter5%')
             GROUP BY m.our_race
             """
         ).fetchall():
@@ -546,7 +546,8 @@ def load_rich_report_telemetry(
             AND m.run_id NOT LIKE '%h2h%' AND m.run_id NOT LIKE '%smoke%' AND m.run_id NOT LIKE '%gauntlet%'
             AND (m.run_id LIKE '%iter42%' OR m.run_id LIKE '%iter43%' OR m.run_id LIKE '%iter44%'
                  OR m.run_id LIKE '%iter45%' OR m.run_id LIKE '%iter46%' OR m.run_id LIKE '%iter47%'
-                 OR m.run_id LIKE '%iter48%')
+                 OR m.run_id LIKE '%iter48%' OR m.run_id LIKE '%iter49_ship8_clean_full%'
+                 OR m.run_id LIKE '%iter50_w3_full%')
         """
 
         # Per-matchup Local stats (All 26 external opponents)
@@ -1200,7 +1201,7 @@ def render_loop_diagram_section(rich: Dict[str, Any]) -> str:
                 "Win rate bounces around over ten-game samples. Recording economy curves and fault flags "
                 "catches silent bugs, such as production stalling mid-game, even in matches Mothman wins."
             ),
-            "metric": f"{lp['prod_replays']} public AI Arena matches · 0 crashes on Live Build 45",
+            "metric": f"{lp['prod_replays']} public AI Arena matches · 0 crashes across recent live builds",
         },
         {
             "id": "forensics",
@@ -1723,20 +1724,22 @@ def render_architecture_section(rich: Dict[str, Any]) -> str:
   </div>
 
   <details style="margin-top:1.1rem;">
-    <summary>Economy stalls targeted next (Loop 49)</summary>
+    <summary>Economy stalls addressed in Loops 49–50</summary>
     <p class="prose-tight" style="margin-top:0.65rem;">
-      Across Loops 42–48 and our last two ladder builds, most macro losses still trace to seven recurring economy stalls.
-      Instead of adding more one-off matchup patches, Loop 49 adds four general fallback checks to unstick blocked builds,
-      rebalance mineral and gas workers, build supply ahead of production spikes, and resume halted structures.
+      Across Loops 42–48 and our recent ladder builds, most macro losses traced to seven recurring economy stalls.
+      Loops 49 and 50 shipped four general fallback checks to unstick blocked builds, rebalance mineral and gas workers,
+      build supply ahead of production spikes, and resume halted structures. In Loop 50's 84-game release run, those checks
+      cut zero-gas freezes by 45% (11 to 6), drove 1-base lockouts and PvP expansion delays to zero, and lowered Protoss
+      minute-mark supply blocks from 50.0% to 30.8%.
     </p>
     <div class="table-wrap" style="margin-bottom:0.5rem;">
       <table>
         <thead>
           <tr>
             <th>Economy Stall</th>
-            <th style="text-align:right">Matches</th>
+            <th style="text-align:right">Baseline (L42–48)</th>
             <th style="text-align:right">Loss Rate</th>
-            <th>Loop 49 Fallback</th>
+            <th>Shipped Fallback (L49–50)</th>
           </tr>
         </thead>
         <tbody>
@@ -1926,9 +1929,9 @@ def _render_matchup_wr_svg(mu_list: List[Dict[str, Any]]) -> str:
         f'<svg viewBox="0 0 {w} {h}" class="chart-svg" role="img" aria-label="Win rate by matchup across Live AI Arena, Core14, and Local 26-bot roster">',
         # Legend at top
         f'<rect x="{pl}" y="8" width="11" height="11" rx="2" fill="#C4633E" />'
-        f'<text x="{pl+16}" y="17.5" fill="#141413" font-size="11" font-weight="600">Live AI Arena (Builds 37–48)</text>'
+        f'<text x="{pl+16}" y="17.5" fill="#141413" font-size="11" font-weight="600">Live AI Arena (Builds 37–50)</text>'
         f'<rect x="{pl+204}" y="8" width="11" height="11" rx="2" fill="#4A6B82" />'
-        f'<text x="{pl+220}" y="17.5" fill="#141413" font-size="11" font-weight="600">14 Core Bots (L42–48)</text>'
+        f'<text x="{pl+220}" y="17.5" fill="#141413" font-size="11" font-weight="600">14 Core Bots (L42–50)</text>'
         f'<rect x="{pl+376}" y="8" width="11" height="11" rx="2" fill="#C5C0B4" />'
         f'<text x="{pl+392}" y="17.5" fill="#5E5D59" font-size="11">All 26 Local Bots</text>',
     ]
@@ -2055,8 +2058,8 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
       </div>
       <div class="metric-strip" id="mu-detail-metrics">
         <div class="m-chip"><span class="m-lbl">Live Ladder</span><strong>{prd_s}</strong></div>
-        <div class="m-chip"><span class="m-lbl">14 Core Bots (L42–48)</span><strong>{cor_s}</strong></div>
-        <div class="m-chip"><span class="m-lbl">All 26 Local (L42–48)</span><strong>{loc_s}</strong></div>
+        <div class="m-chip"><span class="m-lbl">14 Core Bots (L42–50)</span><strong>{cor_s}</strong></div>
+        <div class="m-chip"><span class="m-lbl">All 26 Local (L42–50)</span><strong>{loc_s}</strong></div>
         <div class="m-chip"><span class="m-lbl">Time Supply-Blocked</span><strong>{loc['sb']:.1f}%</strong></div>
         <div class="m-chip"><span class="m-lbl">Workers (4m / 6m / Peak)</span><strong>{loc['w4m']:.0f} / {loc['w6m']:.0f} / {loc['pkw']:.0f}</strong></div>
         <div class="m-chip"><span class="m-lbl">Peak Army Value (Us / Opp)</span><strong>{loc['pka']:,} / {loc['opka']:,}</strong></div>
@@ -2252,7 +2255,7 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
           <tbody>{"".join(pro_bp_rows)}</tbody>
         </table>
       </div>
-      <p class="table-note" style="margin-top:0.45rem;">All columns show Grandmaster Pro / Mothman at 4:10 (Main base at origin, second base along +X; spacing in tiles, walls and power in % of games, static defense in avg structures). Across our broader 398-game pro timing check, Mothman's third expansion also lands 109–178 seconds later than pro medians across all three races, Protoss exposes fragile tech in 68% of PvZ walls (vs. 31% for pros), and Terran production sits in a tight addon cluster in 50–58% of games (vs. 79–100% for pros).</p>
+      <p class="table-note" style="margin-top:0.45rem;">Baseline maps and table compare Grandmaster Pros vs. pre-Loop 49 Mothman at 4:10 (Main base at origin, second base along +X; spacing in tiles, walls and power in % of games, static defense in avg structures). Loop 50 shipped the layout fixes directly from this audit: across 78 external games, Protoss Pylon clumping dropped from 51.0% to 4.2% (better than the 7.5% pro average, spacing 6.5 to 14.2 tiles), natural-base supply placement jumped from 44.9% to 87.2% (95.8% Protoss, 78.3% Terran), ZvZ natural walls rose from 12.5% to 30.0%, and early 4:00 Terran Bunkers dropped from 1.42 to 0.87. Third-expansion timing (109–254s behind pro medians) remains targeted for Loop 51.</p>
     </div>
 """
 
@@ -2279,14 +2282,14 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
       against Protoss (<strong>ZvP 25%</strong>, <strong>TvP 33%</strong>, <strong>PvP 40%</strong>).
     </p>
     <p class="section-intro" style="margin-top:0.65rem;">
-      Two patterns explain both the anti-Protoss slump and why Zerg trails our other bots by more than 50 rating points.
-      Against Protoss, mid-game Gateway/Immortal/Colossus pushes and late-game Tempest fleets punish Mothman whenever
-      counter-tech (Terran Vikings, Zerg Lurkers and Vipers, or PvP second bases) comes out late. For Zerg specifically,
-      checking 1,070 clean replays uncovered three concrete bugs now targeted in Loop 49: Mothman built Baneling Nests in
-      82% of longer games yet morphed <strong>zero Banelings</strong> because it sent an outdated command ID (80 instead of 4121);
-      a defensive Burrow rule kept locking Hydralisks and Ravagers underground mid-fight; and third Hatcheries landed two to
-      three minutes behind pro timings (5:41 vs. 2:43 in ZvP; 5:07 vs. 2:59 in ZvT), leaving Zerg outnumbered two-to-one in
-      army value by Minute 10.
+      Loop 50 (Release #8) directly fixed the root causes behind Zerg's earlier slump and several hidden unit-control bugs.
+      Auditing 1,070 clean replays uncovered 19 outdated StarCraft II 4.10 ability, buff, and upgrade IDs (for example,
+      sending legacy ID 80 instead of 4121 for Banelings and 349 instead of 1764 for Raven Auto-Turrets), a defensive Burrow
+      rule that locked Hydralisks and Ravagers underground mid-fight, and clumped base layouts. Shipping those fixes alongside
+      Viking landing and safer Raven kiting lifted Zerg from our weakest external local race (8–16–2, 0.45× trade) to our
+      strongest (<strong>10–13–3, 50.0% win-or-tie, 0.66× trade</strong>), cut Protoss Pylon clumping from 51% to 4.2%, raised
+      natural-base supply placement from 44.9% to 87.2%, and unlocked live Raven Auto-Turrets across real ladder practice
+      games. Against Protoss, mid-game Gateway/Immortal/Colossus timing pushes and late third bases remain the focus for Loop 51.
     </p>
   </div>
 
@@ -2295,14 +2298,14 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
     <div class="figure-title">Win rate (%) by matchup across live ladder and local sparring pools</div>
     {wr_svg}
     <figcaption class="figure-caption">
-      Live AI Arena win rates (terracotta, Builds 37–48) alongside our 14 regular local sparring bots (slate, Loops 42–48)
+      Live AI Arena win rates (terracotta, Builds 37–50) alongside our 14 regular local sparring bots (slate, Loops 42–50)
       and all 26 local bots including 12 held-out opponents (gray). Local win rates run lower than ladder win rates because
       the 12 held-out bots include specialist cheese and stronger benchmark bots we do not tune against directly.
     </figcaption>
   </figure>
 
   <p class="table-note" style="margin:0 0 0.5rem;">
-    Live records cover Builds 37–48 on AI Arena; local records cover Loops 42–48, where matches hitting the 30-minute limit count as ties (Win + Tie %).
+    Live records cover Builds 37–50 on AI Arena; local records cover Loops 42–50, where matches hitting the 30-minute limit count as ties (Win + Tie %).
   </p>
   <div class="table-wrap" style="margin-bottom:1.5rem;">
     <table>
@@ -2355,12 +2358,12 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
   <div class="eval-subsection">
     <h3>4.2 Time Spent Supply-Blocked</h3>
     <p class="prose-tight">
-      Terran spends just 1.7%–2.1% of match time supply-blocked across all three matchups, while Protoss and Zerg sit
-      between 3.8% and 5.9% when early pressure kills Pylons or Overlords.
+      Terran spends just 1.9%–2.1% of match time supply-blocked across all three matchups, while Protoss and Zerg sit
+      between 3.9% and 6.0% when early pressure kills Pylons or Overlords.
     </p>
     <figure class="figure-block">
       <div class="figure-label">Figure 3</div>
-      <div class="figure-title">Average time supply-blocked by matchup (Loops 42–48, lower is better)</div>
+      <div class="figure-title">Average time supply-blocked by matchup (Loops 42–50, lower is better)</div>
       {sb_svg}
       <figcaption class="figure-caption">
         Percentage of match time unable to train units due to hitting supply cap (Pylon, Depot, or Overlord).
@@ -2373,7 +2376,7 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
     <p class="prose-tight">
       Average active workers over the first 10 minutes (compared with Grandmaster medians) and total army resource value
       over the first 12 minutes (compared with local practice opponents). Notice how all three races fall behind opponent
-      army value after Minute 8, steepest of all on Zerg (2.0k vs. 5.9k at Minute 12).
+      army value after Minute 8, steepest of all on Zerg (2.2k vs. 5.8k at Minute 12).
     </p>
     <div class="race-toggle" role="tablist" aria-label="Select race curves">
       <button type="button" class="cat-pill is-active" data-race-curve="Protoss">Protoss</button>
@@ -2399,7 +2402,7 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
   </div>
 
   <details style="margin-top:1.5rem;">
-    <summary>Detailed expansion, gas, and tech-response fault counts by matchup (Loops 42–48)</summary>
+    <summary>Detailed expansion, gas, and tech-response fault counts by matchup (Loops 42–50)</summary>
 
     <div class="eval-subsection" style="margin-top:0.85rem;">
       <h4 style="margin:0 0 0.45rem;font-family:var(--serif);font-size:1.05rem;">Expansions &amp; Placement Stalls</h4>
@@ -2436,7 +2439,7 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
           <tbody>{"".join(gas_rows)}</tbody>
         </table>
       </div>
-      <p class="table-note" style="margin-top:0.35rem;">Re-assigning idle gas geysers within 8 seconds eliminated empty-gas freezes in Loops 45, 47, and 48.</p>
+      <p class="table-note" style="margin-top:0.35rem;">Re-assigning idle gas geysers within 8 seconds eliminated empty-gas freezes in Loops 45, 47, 48, and 50.</p>
     </div>
 
     <div class="eval-subsection" style="margin-top:1.15rem;">
@@ -2454,7 +2457,7 @@ def render_matchup_evaluation_section(rich: Dict[str, Any]) -> str:
           <tbody>{"".join(mm_rows)}</tbody>
         </table>
       </div>
-      <p class="table-note" style="margin-top:0.35rem;">Cumulative fault counts across Loops 42–48 ({total_cloak_losses} cloak wipeouts total across earlier runs, dropping to 0 across all 84 games in Loop 47). TvT zero-Tank games: {tvt_zero_tank_cnt} of {tvt_total_n} games (down from 4 in Loop 45 to 1 in Loops 46–48).</p>
+      <p class="table-note" style="margin-top:0.35rem;">Cumulative fault counts across Loops 42–50 ({total_cloak_losses} cloak wipeouts total across earlier runs, dropping to 0 across all 84 games in Loop 47). TvT zero-Tank games: {tvt_zero_tank_cnt} of {tvt_total_n} games (down from 4 in Loop 45 to 1 in Loops 46–48).</p>
     </div>
   </details>
   <script>window.__MATCHUP_DATA__ = {mu_json};</script>
@@ -2482,7 +2485,7 @@ def render_issues_fixed_section(chart_sym_svg: str, sym: Dict[str, Any], rich: D
         <div>
           <p><strong>Symptom:</strong> Bots won 16 percentage points less often when spawning north-east on Ley Lines (21.7% vs. 37.8%) and trailed by nearly 5 points across all northern spawns.</p>
           <p><strong>Root cause:</strong> Building placement and early scout offsets assumed the enemy sat roughly up and to the right, causing top-half spawns to wall off their own second base.</p>
-          <p><strong>Fix &amp; result:</strong> Replaced compass-direction offsets with actual ground walking distances. Across {sym["post_n"]} local matches since Loop 37, north and south win rates leveled out ({sym["all_after_n"]:.1f}% vs. {sym["all_after_s"]:.1f}%), and Build 42 split 53.3% North vs. 53.8% South on the live ladder.</p>
+          <p><strong>Fix &amp; result:</strong> Replaced compass-direction offsets with actual ground walking distances. Across {sym["post_n"]:,} local matches since Loop 37, north and south win rates leveled out ({sym["all_after_n"]:.1f}% vs. {sym["all_after_s"]:.1f}%), and Build 42 split 53.3% North vs. 53.8% South on the live ladder.</p>
         </div>
         <figure class="figure-block" style="margin:0;">
           <div class="figure-title" style="font-size:0.98rem;">North vs. South win rate before and after fix</div>
@@ -3084,8 +3087,8 @@ INTERACTIVE_SECTIONS_JS = """
       document.getElementById('mu-detail-meta').textContent = 'Avg duration ' + Number(loc.dur_m || 0).toFixed(1) + 'm · ' + Number(loc.bases || 0).toFixed(1) + ' peak bases';
       document.getElementById('mu-detail-metrics').innerHTML =
         '<div class="m-chip"><span class="m-lbl">Live Ladder</span><strong>' + esc(prdS) + '</strong></div>' +
-        '<div class="m-chip"><span class="m-lbl">14 Core Bots (L42–48)</span><strong>' + esc(corS) + '</strong></div>' +
-        '<div class="m-chip"><span class="m-lbl">All 26 Local (L42–48)</span><strong>' + esc(locS) + '</strong></div>' +
+        '<div class="m-chip"><span class="m-lbl">14 Core Bots (L42–50)</span><strong>' + esc(corS) + '</strong></div>' +
+        '<div class="m-chip"><span class="m-lbl">All 26 Local (L42–50)</span><strong>' + esc(locS) + '</strong></div>' +
         '<div class="m-chip"><span class="m-lbl">Time Supply-Blocked</span><strong>' + Number(loc.sb || 0).toFixed(1) + '%</strong></div>' +
         '<div class="m-chip"><span class="m-lbl">Workers (4m / 6m / Peak)</span><strong>' + Math.round(loc.w4m || 0) + ' / ' + Math.round(loc.w6m || 0) + ' / ' + Math.round(loc.pkw || 0) + '</strong></div>' +
         '<div class="m-chip"><span class="m-lbl">Peak Army Value (Us / Opp)</span><strong>' + Number(loc.pka || 0).toLocaleString() + ' / ' + Number(loc.opka || 0).toLocaleString() + '</strong></div>';

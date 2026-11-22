@@ -12,6 +12,7 @@
          (except-in "sc2-common.rkt" unit-type-sym)
          "sc2-bayesian.rkt"
          "sc2-game-constants.rkt"
+         (only-in "sc2-protobuf-ws.rkt" sc2-ability-live-available?)
          (prefix-in geo: (except-in "sc2-geometry.rkt" aabb-overlaps?))
          (prefix-in pathing: "sc2-pathing.rkt")
          (prefix-in placement: "sc2-placement.rkt")
@@ -3204,8 +3205,19 @@
   (set-l2-ctx-terran-saving-for-cc-expand?! ctx #f))
 
 
+;; L51-W2 (`#1262/#1263`): Suppress removed abilities (`4107` Battery Overcharge on SC2 5.0.14)
+;; whenever match-start ResponseData reports `available = #f`.
+(define (runtime-suppressed-live-ability-action? act)
+  (and (pair? act)
+       (eq? (car act) 'cast-spell)
+       (pair? (cdr act))
+       (pair? (cddr act))
+       (eq? (caddr act) 'battery-overcharge)
+       (not (sc2-ability-live-available? 4107))))
+
 (define (l2-emit! ctx act)
-    (set-l2-ctx-actions! ctx (cons act (l2-ctx-actions ctx))))
+  (unless (runtime-suppressed-live-ability-action? act)
+    (set-l2-ctx-actions! ctx (cons act (l2-ctx-actions ctx)))))
 
 (define (l2-building-grounded-and-powered? ctx b)
     (if (hash? b)
@@ -4668,16 +4680,32 @@
        (or (and genuine-air-or-cloak-threat?
                 (not terran-hold-sd-for-nat-cc?)
                 (try-sd! 'missile-turret ebay-ready? aa-desire-cap))
-           ;; L49-W1: Trim unpressured Terran early Bunker spam — only auto-build Bunkers when
-           ;; under genuine rush/cheese/base-attack OR enemy threat outnumbers our army!
+           ;; L49-W1 + L51-2B: Trim unpressured Terran early Bunker spam — only auto-build Bunkers
+           ;; when under genuine rush/cheese/base-attack OR enemy threat (`>= 4.0` supply) outnumbers
+           ;; our army, and NEVER build a blind `< 2:30` main Bunker vs zero-threat Hatch-first Zerg!
            (and boost-sd?
                 (not terran-hold-sd-for-nat-cc?)
+                (not (and live-game?
+                          (eq? (l2-ctx-effective-enemy-race ctx) 'Zerg)
+                          (<= active-bases 1)
+                          (< frame 3360)
+                          (not (l2-ctx-worker-rush-active? ctx))
+                          (not (l2-ctx-in-base-proxy-detected? ctx))
+                          (not (l2-ctx-forward-proxy-detected? ctx))
+                          (not (l2-ctx-under-base-attack? ctx))
+                          (not (for/or ([e (in-list (or (l2-ctx-enemy-units ctx) '()))])
+                                 (and (hash? e)
+                                      (combat-unit-record? e)
+                                      (not (memq (unit-type-sym e) '(drone overlord overseer larva egg)))
+                                      (or (<= (dist2d base-x base-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 36.0)
+                                          (<= (dist2d nat-x nat-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 30.0)))))))
                 (or (not live-game?)
                     (l2-ctx-early-survival-crisis? ctx)
                     (l2-ctx-under-early-cheese? ctx)
                     (l2-ctx-under-base-attack? ctx)
-                    (> (l2-ctx-live-enemy-threat-supply ctx)
-                       (* 1.15 (l2-ctx-live-army-supply ctx))))
+                    (and (>= (l2-ctx-live-enemy-threat-supply ctx) 4.0)
+                         (> (l2-ctx-live-enemy-threat-supply ctx)
+                            (* 1.15 (l2-ctx-live-army-supply ctx)))))
                 (try-sd! 'bunker rax-ready? ground-desire-cap)))]))
   ;; When base-loss-recovery fires and no expand is pending, reclaim uncamped expansion pad cleanly.
   (when (and boost-exp?
@@ -7296,6 +7324,30 @@
   (define pre-345-enemy-ling-cnt
     (count (lambda (e) (eq? (fast-canonical-unit-sym (unit-type-sym e)) 'zergling))
            pre-345-enemy-combat-units))
+  ;; L51-2B (`#20 TvZ PolyMorph`): Distinguish Zerglings actively approaching / crossing the map
+  ;; from passive Hatch-first safety Zerglings sitting at Zerg's own main/natural!
+  (define pre-345-enemy-hatch-first?
+    (and (< frame 3360)
+         (or (>= (count (lambda (eb)
+                          (and (hash? eb)
+                               (eq? (fast-canonical-structure-sym (unit-type-sym eb)) 'hatchery)))
+                        enemy-bldgs)
+                 2)
+             (ormap (lambda (eb)
+                      (and (hash? eb)
+                           (eq? (fast-canonical-structure-sym (unit-type-sym eb)) 'hatchery)
+                           (<= (dist2d early-enemy-nat-x early-enemy-nat-y
+                                       (hash-ref eb 'x 9999.0) (hash-ref eb 'y 9999.0))
+                               14.0)))
+                    enemy-bldgs))))
+  (define pre-345-approaching-ling-cnt
+    (count (lambda (e)
+             (and (eq? (fast-canonical-unit-sym (unit-type-sym e)) 'zergling)
+                  (let ([ex (exact->inexact (hash-ref e 'x 9999.0))]
+                        [ey (exact->inexact (hash-ref e 'y 9999.0))])
+                    (and (> (+ (sqr (- ex enemy-x)) (sqr (- ey enemy-y))) 676.0)
+                         (> (+ (sqr (- ex early-enemy-nat-x)) (sqr (- ey early-enemy-nat-y))) 484.0)))))
+           pre-345-enemy-combat-units))
   (define pre-345-rush-posterior
     (if (hash? prev-tel-early)
         (max (safe-finite-real (hash-ref prev-tel-early 'rush-posterior 0.0) 0.0)
@@ -7313,8 +7365,8 @@
     (and (>= ally-combat-supply-early 4.0)
          (<= pre-345-near-enemy-supply 3.0)
          (<= pre-345-near-enemy-supply (* 0.65 ally-combat-supply-early))
-         (< pre-345-enemy-ling-cnt 4)
-         (not (and (< frame 2800) (>= pre-345-enemy-ling-cnt 2)))
+         (< pre-345-approaching-ling-cnt 4)
+         (not (and (< frame 2800) (>= pre-345-approaching-ling-cnt 2)))
          (< pre-345-rush-posterior 0.50)))
   (define pre-345-early-rush-raw?
     (and live-obs-harvesters?
@@ -7322,9 +7374,13 @@
          (< ally-combat-supply-early 12)
          (pair? pre-345-enemy-combat-units)
          (not pre-345-outnumbered-light-poke?)
-         (or (>= pre-345-enemy-ling-cnt 4)
-             (and (< frame 2800) (>= pre-345-enemy-ling-cnt 2))
-             (>= pre-345-rush-posterior 0.50)
+         (or (>= pre-345-approaching-ling-cnt 4)
+             (and (< frame 2800) (>= pre-345-approaching-ling-cnt 2))
+             (and (not pre-345-enemy-hatch-first?) (< frame 2150) (>= pre-345-enemy-ling-cnt 4))
+             (and (>= pre-345-rush-posterior 0.50)
+                  (or (not pre-345-enemy-hatch-first?)
+                      (> pre-345-near-enemy-supply 0.0)
+                      (>= pre-345-approaching-ling-cnt 2)))
              (> pre-345-near-enemy-supply 0.0))))
   ;; W18-P0-1-rt (`#35 T v 12PoolBot` `f=2433` natural CC mid-rush): Latch early-rush survival
   ;; memory for 30s (`672f`, capped at `5400f`) so a 4s fog gap between 12-Pool Ling waves
@@ -9377,6 +9433,28 @@
       (define healthy-proxy-workers
         (filter (lambda (w) (> (unit-total-hp-and-shield w) SC2-FIGHTING-WORKER-DISENGAGE-HP))
                 non-builder-defense-workers))
+      ;; L51-2C (`#50 TvP Thssprtssbt` Cannon-Rush SCV Over-Pull): Exclude active gas harvesters
+      ;; from our mineral-mining floor count and ALWAYS reserve `>= 6` non-gas mineral harvesters
+      ;; (recalling excess attackers if mining workers ever dip below `6`), while keeping sticky
+      ;; proxy defenders pinned so Barracks never freezes at `5..10M` (`#59` preserved!).
+      (define owned-gas-ids
+        (for/seteqv ([b (in-list (or (l2-ctx-ally-bldgs ctx) '()))]
+                     #:when (and (hash? b)
+                                 (memq (fast-canonical-structure-sym (unit-type-sym b))
+                                       '(refinery assimilator extractor))))
+          (hash-ref b 'id -1)))
+      (define (worker-on-gas? w)
+        (and (not (set-empty? owned-gas-ids))
+             (or (set-member? owned-gas-ids (hash-ref w 'order-target-id -2))
+                 (eq? (hash-ref w 'order-ability-sym #f) 'harvest-gather-gas)
+                 (eq? (hash-ref w 'carrying-vespene? #f) #t))))
+      (define non-gas-healthy-workers
+        (if live-obs-harvesters?
+            (filter (lambda (w) (not (worker-on-gas? w))) healthy-proxy-workers)
+            healthy-proxy-workers))
+      (define prev-proxy-wids
+        (let ([pw (hash-ref rush-def-st 'proxy-def-wids '())])
+          (if (list? pw) pw '())))
       (define in-main-cannon-rush-now?
         (or (ormap (lambda (eb)
                      (and (eq? (fast-canonical-structure-sym (unit-type-sym eb)) 'photon-cannon)
@@ -9388,16 +9466,43 @@
                               (<= (dist2d base-x base-y (hash-ref eb 'x 9999.0) (hash-ref eb 'y 9999.0)) 22.0)))
                        pullable-proxy-structures)
                 2)))
-      ;; Keep >= 8 workers mining for lone proxy Pylons, or >= 5 (up to 12 fighters!) when a warping
-      ;; Cannon or multi-Pylon cannon rush is active inside Main (`<= 22t`, `#59` `REG #1`)!
+      ;; Strictly keep `>= 6` mineral workers mining during cannon/proxy defense (`>= 8` on lone
+      ;; proxy Pylons when `>= 14` workers), preserving `6` SCVs on warping Cannons + `4` on Pylons!
       (define min-mining-floor
         (cond
-          [(and live-obs-harvesters? in-main-cannon-rush-now? (>= (length healthy-proxy-workers) 10)) 5]
-          [(and live-obs-harvesters? (>= (length healthy-proxy-workers) 12)) 8]
+          [(and live-obs-harvesters? in-main-cannon-rush-now?) 6]
+          [(and live-obs-harvesters? (>= (length non-gas-healthy-workers) 14)) 8]
+          [live-obs-harvesters? 6]
           [else 4]))
+      (define safe-mp-x (if safe-mp (hash-ref safe-mp 'x base-x) base-x))
+      (define safe-mp-y (if safe-mp (hash-ref safe-mp 'y base-y) base-y))
+      (define safe-mp-id (and safe-mp (safe-nonneg-int (hash-ref safe-mp 'id 0) 0)))
+      (define sorted-for-mining
+        (sort non-gas-healthy-workers
+              <
+              #:key (lambda (w)
+                      (define wid (hash-ref w 'id 10))
+                      (define attacking?
+                        (or (= (hash-ref w 'order-ability-id 0) 23)
+                            (and (memv wid prev-proxy-wids) #t)))
+                      (+ (if attacking? 100.0 0.0)
+                         (dist2d safe-mp-x safe-mp-y (hash-ref w 'x base-x) (hash-ref w 'y base-y))))))
+      (define reserve-n (min min-mining-floor (length sorted-for-mining)))
+      (define pinned-miners (take sorted-for-mining reserve-n))
+      (define pull-candidates (drop sorted-for-mining reserve-n))
+      ;; If fewer than `min-mining-floor` non-attacking miners existed, return the reserved attackers
+      ;; straight to minerals so active mineral income stays `>= 6` SCVs!
+      (when (and live-obs-harvesters? safe-mp-id (> safe-mp-id 0))
+        (for ([mw (in-list pinned-miners)])
+          (define mwid (hash-ref mw 'id 10))
+          (when (or (= (hash-ref mw 'order-ability-id 0) 23)
+                    (memv mwid prev-proxy-wids))
+            (l2-emit! ctx (list 'harvest-mineral mwid safe-mp-id)))))
       (define surplus-cnt
-        (min (if live-obs-harvesters? (if in-main-cannon-rush-now? 12 8) 99)
-             (max 0 (- (length healthy-proxy-workers) min-mining-floor))))
+        (min (if live-obs-harvesters? (if in-main-cannon-rush-now? 10 8) 99)
+             (length pull-candidates)))
+      (when (= surplus-cnt 0)
+        (hash-set! rush-def-st 'proxy-def-wids '()))
       (when (> surplus-cnt 0)
         (define proxy-pylon-cnt
           (count (lambda (eb)
@@ -9436,16 +9541,20 @@
                            (dist2d base-x base-y
                                    (hash-ref eb 'x base-x)
                                    (hash-ref eb 'y base-y))))))
-        ;; Pick workers closest to the primary proxy structure
+        ;; Pick workers closest to the primary proxy structure (preferring sticky already-fighting
+        ;; proxy defenders first to eliminate cross-tick miner churn!)
         (define p0 (car sorted-proxies))
         (define p0x (hash-ref p0 'x base-x))
         (define p0y (hash-ref p0 'y base-y))
         (define pull-pool
-          (take (sort healthy-proxy-workers
+          (take (sort pull-candidates
                       <
                       #:key (lambda (w)
-                              (dist2d p0x p0y (hash-ref w 'x base-x) (hash-ref w 'y base-y))))
+                              (define wid (hash-ref w 'id 10))
+                              (define base-d (dist2d p0x p0y (hash-ref w 'x base-x) (hash-ref w 'y base-y)))
+                              (if (memv wid prev-proxy-wids) (- base-d 100.0) base-d)))
                 surplus-cnt))
+        (hash-set! rush-def-st 'proxy-def-wids (map (lambda (w) (hash-ref w 'id 10)) pull-pool))
         (let assign-loop ([rem-workers pull-pool]
                           [rem-proxies sorted-proxies])
           (cond
@@ -18828,13 +18937,24 @@
        (if robo-st (hash-ref robo-st 'last-wp-loss-frame -99999) -99999))
   (define wp-trained-cnt
        (if robo-st (hash-ref robo-st 'wp-trained-cnt 0) 0))
+  (define obs-requires-det? (enemy-tech-observation-requires-detection? tech-obs))
+  (define visible-cloaked-or-burrowed-enemy? protoss-visible-cloaked-or-burrowed?)
+  ;; L51-2A (`#75 PvT who`): In PvT, always train `Observer #1` (`25M/75G`, `21s`) out of
+  ;; `RoboticsFacility #1` FIRST ahead of `Immortal #1` (`275M/100G`) so Cloaked Banshees
+  ;; never catch Protoss at `23G` with `0` Observers!
+  (define pvt-first-observer-priority?
+    (and live-game?
+         (eq? effective-enemy-race 'Terran)
+         (= cur-obs-total 0)
+         (or (= obs-trained-cnt 0)
+             obs-requires-det?
+             visible-cloaked-or-burrowed-enemy?)))
   (when (and (or (not protoss-saving-for-expand?)
+                    pvt-first-observer-priority?
                     (and (= cur-obs-total 0) protoss-cloak-det-emergency?)
                     (and endgame-corner-hunt? (< cur-obs-total 1)))
                 (memq 'robotics-facility ready-bldg-types)
                 (l2-can-spend-supply? ctx (sc2-supply-cost 'observer)))
-       (define obs-requires-det? (enemy-tech-observation-requires-detection? tech-obs))
-       (define visible-cloaked-or-burrowed-enemy? protoss-visible-cloaked-or-burrowed?)
        (define obs-urgent-zero-det?
          (and (= cur-obs-total 0)
               (or visible-cloaked-or-burrowed-enemy? obs-requires-det?)))
@@ -18884,12 +19004,15 @@
              (and (or visible-cloaked-or-burrowed-enemy? obs-requires-det?)
                   (= cur-obs-total 0)
                   (< obs-trained-cnt 8))))
-       ;; W11-P0-3-rt: Defer first Observer until army-supply >= 8 unless cloaked/burrowed threat!
+       ;; W11-P0-3-rt + L51-2A: Defer first Observer until army-supply >= 8 unless cloaked/burrowed
+       ;; threat OR PvT first Observer #1 priority!
        (define obs-army-ready?
          (or (not live-game?)
              (>= live-army-supply 8)
+             pvt-first-observer-priority?
              obs-requires-det?
              visible-cloaked-or-burrowed-enemy?))
+       (define obs-started-now? #f)
        (when (and (< cur-obs-total desired-observers)
                   obs-army-ready?
                   obs-loss-cd-ok?
@@ -18899,15 +19022,19 @@
                       obs-requires-det?
                       visible-cloaked-or-burrowed-enemy?
                       (l2-protoss-colossus-escrow-ok? ctx (sc2-min-cost 'observer) (sc2-gas-cost 'observer)))
-                  (or obs-requires-det?
+                  (or pvt-first-observer-priority?
+                      obs-requires-det?
                       visible-cloaked-or-burrowed-enemy?
                       (aa-stargate-gas-ok? (sc2-gas-cost 'observer))))
          (when (l2-try-train-unit! ctx 'observer 'robotics-facility 1
-                                   #:respect-bo-reserve? (not obs-urgent-zero-det?))
+                                   #:respect-bo-reserve? (not (or obs-urgent-zero-det?
+                                                                  pvt-first-observer-priority?)))
+           (set! obs-started-now? #t)
            (when live-game?
              (when robo-st
                (hash-set! robo-st 'obs-trained-cnt (add1 obs-trained-cnt)))
              (refractory-allow-action?! cd-tracker '(train-observer) frame obs-train-cd-frames))))
+       (define cur-obs-total-now (+ cur-obs-total (if obs-started-now? 1 0)))
        ;; L36-P0-3 (`#5138232` PvZ 124s idle Robo): Keep Robotics Facility continuously pumping
        ;; Immortals in PvZ (`< 3` Immortals) even while expanding/saving so Roach-Ling never crushes
        ;; an idle Robo!
@@ -18937,6 +19064,8 @@
                                #:respect-bo-reserve? (not (or bio-colossus-priority-now?
                                                               crisis-tech-upgrade-deferral?))))
          (when (and crisis-tech-upgrade-deferral?
+                    (or (not pvt-first-observer-priority?)
+                        (> cur-obs-total-now 0))
                     (p2-urgent-stalker-res-ok? (sc2-min-cost 'immortal) (sc2-gas-cost 'immortal))
                     (or (not bio-colossus-priority-now?)
                         (< (l2-ctx-gas ctx) (sc2-gas-cost 'colossus))
@@ -18956,9 +19085,10 @@
                     (aa-stargate-gas-ok? (sc2-gas-cost 'disruptor))
                     (l2-can-spend-supply? ctx (sc2-supply-cost 'disruptor)))
            (l2-try-train-unit! ctx 'disruptor 'robotics-facility 6))
-         ;; W9-P0-3-rt / L36-P0-3 / L48-W2 (`#5138232`, `H2H #04 PvT`): In PvP, PvZ, AND PvT
-         ;; (`< 2` Immortals while no Robotics Bay is ready), never let BO/Stalker/Stargate reserve
-         ;; leave an idle Robotics Facility sitting empty when we can train Immortals!
+         ;; W9-P0-3-rt / L36-P0-3 / L48-W2 / L51-2A (`#5138232`, `H2H #04 PvT`, `#75 PvT who`):
+         ;; In PvP, PvZ, AND PvT (`< 2` Immortals while no Robotics Bay is ready), never let
+         ;; BO/Stalker/Stargate reserve leave an idle Robotics Facility sitting empty — EXCEPT in
+         ;; PvT where `Observer #1` (`25M/75G`) must ALWAYS train FIRST ahead of `Immortal #1`!
          (define pvp-idle-robo-immortal-ok?
            (and live-game?
                 (memq effective-enemy-race '(Protoss Zerg Terran))
@@ -18966,10 +19096,13 @@
                 (not protoss-enemy-capital-air?)
                 (if (eq? effective-enemy-race 'Terran)
                     (and (not (memq 'robotics-bay ready-bldg-types))
+                         (>= (l2-unit-count ctx 'observer) 1)
                          (< (l2-unit-count ctx 'immortal) 2))
                     (or (not (memq 'robotics-bay ready-bldg-types))
                         (< (l2-unit-count ctx 'immortal) (if (eq? effective-enemy-race 'Zerg) 3 2))))))
-         (when (and (p2-urgent-stalker-res-ok? (sc2-min-cost 'immortal) (sc2-gas-cost 'immortal))
+         (when (and (or (not pvt-first-observer-priority?)
+                        (> cur-obs-total-now 0))
+                    (p2-urgent-stalker-res-ok? (sc2-min-cost 'immortal) (sc2-gas-cost 'immortal))
                     (or (not bio-colossus-priority-now?)
                         (and (>= (l2-ctx-minerals ctx) (+ (sc2-min-cost 'immortal) (sc2-min-cost 'colossus)))
                              (>= (l2-ctx-gas ctx) (+ (sc2-gas-cost 'immortal) (sc2-gas-cost 'colossus)))))
@@ -20897,12 +21030,74 @@
          (not (l2-ctx-bldg-actively-damaged? ctx))
          (or (not under-base-attack?)
              terran-light-poke-ok?)))
+  ;; L51-2B (`#20 TvZ PolyMorph` Natural CC Placement-Reject Retry Loop):
+  ;; Detect when 1-base Terran natural `(expand ...)` orders expire/reject in `order-ledger`
+  ;; without starting CC #2: on expiration #1 lower ramp Depots & allow a fast retry (`24f`);
+  ;; after `>= 2` retries/expirations (within `80f`, or `360f` safety window), lower ramp Depots
+  ;; AND immediately fall back to high-ground in-base CC (ending the `280s` `ESCROW_LOCKOUT` loop!).
+  (define door-st-cc (rt-door-state rt))
+  (when (or (<= frame 4) (>= (length ccs) 2))
+    (hash-remove! door-st-cc 'terran-cc-nat-retry-st)
+    (when (>= (length ccs) 2)
+      (hash-remove! door-st-cc 'terran-cc-needs-depot-lower-until)))
+  (define cc-retry-st0
+    (and live-game?
+         (= (length ccs) 1)
+         (hash-ref door-st-cc 'terran-cc-nat-retry-st #f)))
+  (define pend-cc-pre (order-ledger-pending-count-for-type oledger 'command-center frame))
+  (define cc-retry-st
+    (cond
+      [(and live-game? (= (length ccs) 1) (hash? cc-retry-st0))
+       (define last-ef (hash-ref cc-retry-st0 'last-exp-f -1))
+       (define counted? (hash-ref cc-retry-st0 'last-exp-counted? #t))
+       (define old-fails
+         (filter (lambda (f) (and (exact-integer? f) (<= 0 (- frame f)) (<= (- frame f) 360)))
+                 (hash-ref cc-retry-st0 'fail-frames '())))
+       (if (and (> last-ef 0)
+                (not counted?)
+                (= pend-cc-pre 0)
+                (>= (- frame last-ef) 8))
+           (let ([new-fails (cons frame old-fails)]
+                 [new-st (hasheq 'last-exp-f last-ef
+                                 'last-exp-counted? #t
+                                 'fail-frames (cons frame old-fails))])
+             (hash-set! door-st-cc 'terran-cc-nat-retry-st new-st)
+             (hash-set! door-st-cc 'terran-cc-needs-depot-lower-until (+ frame 160))
+             new-st)
+           (if (equal? old-fails (hash-ref cc-retry-st0 'fail-frames '()))
+               cc-retry-st0
+               (let ([pruned (hash-set cc-retry-st0 'fail-frames old-fails)])
+                 (hash-set! door-st-cc 'terran-cc-nat-retry-st pruned)
+                 pruned)))]
+      [else #f]))
+  (define cc-fail-frames-now (if (hash? cc-retry-st) (hash-ref cc-retry-st 'fail-frames '()) '()))
+  (define cc-fails-within-80 (count (lambda (f) (<= (- frame f) 80)) cc-fail-frames-now))
+  (define cc-fails-total (length cc-fail-frames-now))
+  (define terran-nat-cc-in-base-fallback?
+    (and live-game?
+         (= (length ccs) 1)
+         (or (>= cc-fails-within-80 2)
+             (>= cc-fails-total 2))))
+  (define terran-nat-cc-fast-retry?
+    (and live-game?
+         (= (length ccs) 1)
+         (= cc-fails-total 1)
+         (hash? cc-retry-st)
+         (>= (- frame (hash-ref cc-retry-st 'last-exp-f -9999)) 24)))
+  (define terran-cc-expand-cd
+    (cond
+      [terran-nat-cc-in-base-fallback? 8]
+      [terran-nat-cc-fast-retry? 24]
+      [(and live-game? (< (length ccs) 2)) 196]
+      [else SC2-EXPANSION-COOLDOWN-FRAMES]))
   (when (and (>= (l2-ctx-minerals ctx) (sc2-min-cost 'command-center))
                 (or terran-contained-bank-breakout?
                     terran-3rd-cc-overdue-override?
                     brain-sched-t-nat-cc?
+                    terran-nat-cc-in-base-fallback?
                     (l2-non-combat-min-ok? ctx (sc2-min-cost 'command-center) 'command-center))
                 (or brain-sched-t-nat-cc?
+                    terran-nat-cc-in-base-fallback?
                     (not blocked-nat-expanded-early?))
                 (not under-early-cheese?)
                 (not early-survival-crisis?)
@@ -20913,7 +21108,7 @@
                     brain-sched-t-nat-cc?
                     (not under-base-attack?))
                 (< (length ccs) SC2-MAX-ACTIVE-BASES)
-                (= (order-ledger-pending-count-for-type oledger 'command-center frame) 0)
+                (= pend-cc-pre 0)
                 (or terran-contained-bank-breakout?
                     terran-3rd-cc-overdue-override?
                     (< (length ccs) SC2-MIN-DESIRED-BASES)
@@ -20946,10 +21141,14 @@
                          (or (coupled-macro-plan-should-expand? macro-plan)
                              (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
                              (>= frame SC2-MACRO-EXPAND-FRAME-THRESHOLD))))
-                (not (l2-build-issue-blocked? ctx 'command-center))
-                (refractory-ready? cd-tracker '(macro-expand Terran) frame
-                                   (if (and live-game? (< (length ccs) 2)) 196 SC2-EXPANSION-COOLDOWN-FRAMES))
-                (or (and live-game? (= (length ccs) 1) (or natural-blocked? natural-pad-camped?))
+                (or terran-nat-cc-in-base-fallback?
+                    terran-nat-cc-fast-retry?
+                    (not (l2-build-issue-blocked? ctx 'command-center)))
+                (or terran-nat-cc-in-base-fallback?
+                    terran-nat-cc-fast-retry?
+                    (refractory-ready? cd-tracker '(macro-expand Terran) frame terran-cc-expand-cd))
+                (or (and live-game? (= (length ccs) 1)
+                         (or natural-blocked? natural-pad-camped? terran-nat-cc-in-base-fallback?))
                     (let-values ([(cand-ex cand-ey)
                                   (if (and live-game?
                                            (= (length ccs) 1)
@@ -20971,20 +21170,36 @@
                                (>= total-workers 17)
                                (memq 'barracks (l2-ctx-bldg-types ctx)))
                           (and live-game? (= (length ccs) 2) (>= (l2-ctx-minerals ctx) 500)))))
-                (refractory-allow-action?! cd-tracker
-                                           '(macro-expand Terran)
-                                           frame
-                                           (if (and live-game? (< (length ccs) 2)) 196 SC2-EXPANSION-COOLDOWN-FRAMES)))
+                (or terran-nat-cc-in-base-fallback?
+                    terran-nat-cc-fast-retry?
+                    (refractory-allow-action?! cd-tracker
+                                               '(macro-expand Terran)
+                                               frame
+                                               terran-cc-expand-cd)))
        (cond
          [(and live-game?
                (= (length ccs) 1)
                (or natural-blocked?
                    natural-pad-camped?
+                   terran-nat-cc-in-base-fallback?
                    (l2-enemy-early-pool-detected? ctx)
                    (not (and terran-exp-x terran-exp-y))))
+          (when terran-nat-cc-in-base-fallback?
+            (hash-set! door-st-cc 'terran-cc-needs-depot-lower-until (+ frame 160))
+            (hash-remove! door-st-cc 'terran-cc-nat-retry-st)
+            (when (and (refractory-cooldown-tracker? cd-tracker)
+                       (hash? (refractory-cooldown-tracker-table cd-tracker)))
+              (hash-remove! (refractory-cooldown-tracker-table cd-tracker)
+                            (fast-build-issue-lock-key 'command-center))))
           (let-values ([(in-ccx in-ccy) (l2-interior-offset ctx 5.0 0.0)])
             (l2-emit-build-verified! ctx 'command-center in-ccx in-ccy))]
          [(and terran-exp-x terran-exp-y)
+          (when (and live-game? (= (length ccs) 1))
+            (hash-set! door-st-cc 'terran-cc-nat-retry-st
+                       (hasheq 'last-exp-f frame
+                               'last-exp-counted? #f
+                               'fail-frames cc-fail-frames-now))
+            (hash-set! door-st-cc 'terran-cc-needs-depot-lower-until (+ frame 64)))
           (l2-emit! ctx (list 'expand terran-exp-x terran-exp-y))
           (l2-record-expand-pad-issued! ctx terran-exp-x terran-exp-y)
           (l2-record-build-issue-lock! ctx 'command-center)
@@ -21055,7 +21270,25 @@
                     (>= (l2-ctx-minerals ctx) 200)))
            2
            1))
-  (when (and (or early-survival-crisis?
+  ;; L51-2B (`#20 TvZ PolyMorph`): Drop unnecessary `92s` (`< 2:30`) 1-base main Bunker against
+  ;; peaceful zero-threat Hatch-first Zerg when no enemy combat unit is within 36t of Main or 30t of Natural.
+  (define terran-zero-threat-early-zerg?
+    (and live-game?
+         (eq? (l2-ctx-effective-enemy-race ctx) 'Zerg)
+         (<= (length ccs) 1)
+         (< frame 3360)
+         (not (l2-ctx-worker-rush-active? ctx))
+         (not (l2-ctx-in-base-proxy-detected? ctx))
+         (not forward-proxy-detected?)
+         (not under-base-attack?)
+         (not (for/or ([e (in-list enemy-units)])
+                (and (hash? e)
+                     (combat-unit-record? e)
+                     (not (memq (unit-type-sym e) '(drone overlord overseer larva egg)))
+                     (or (<= (dist2d base-x base-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 36.0)
+                         (<= (dist2d nat-x nat-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 30.0)))))))
+  (when (and (not terran-zero-threat-early-zerg?)
+             (or early-survival-crisis?
                     under-early-cheese?
                     under-base-attack?
                     forward-proxy-detected?
@@ -23624,9 +23857,16 @@
                       (> did 0)
                       (refractory-allow-action?! cd-tracker (list 'depot-raise did) frame 12))
              (l2-emit! ctx (list 'cast-spell did 'morph-supply-depot-raise)))))
-       ;; Lower raised depots ONLY when friendly units need transit and NO ground enemy is within 15.0 (17.0 vs fast)
-       ;; and NOT locked raised against early melee rush (`early-melee-wall-lock?`).
-       (when (and (not (null? transiting-tags))
+       ;; Lower raised depots when friendly units need transit OR when 1-base Terran CC expansion
+       ;; is pending/retrying/falling back (L51-2B `#20 TvZ`), and NO ground enemy is within 15.0
+       ;; (17.0 vs fast) and NOT locked raised against early melee rush (`early-melee-wall-lock?`).
+       (define terran-cc-depot-lower-req?
+         (let ([until-f (hash-ref door-st 'terran-cc-needs-depot-lower-until -1)])
+           (and (l2-ctx-live-obs-harvesters? ctx)
+                (exact-integer? until-f)
+                (>= until-f frame))))
+       (when (and (or (not (null? transiting-tags))
+                      terran-cc-depot-lower-req?)
                   (not early-melee-wall-lock?))
          (for ([rd (in-list raised-depots)]
                #:when (>= (hash-ref rd 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS))
@@ -24483,12 +24723,14 @@
       (and (memq upg-sym (l34-ctx-researched-upgs ctx)) #t)))
 
 (define (l34-emit! ctx act)
-  (order-ledger-record-issued! (l34-ctx-oledger ctx) (l34-ctx-frame ctx) act)
-  (set-l34-ctx-actions! ctx (cons act (l34-ctx-actions ctx))))
+  (unless (runtime-suppressed-live-ability-action? act)
+    (order-ledger-record-issued! (l34-ctx-oledger ctx) (l34-ctx-frame ctx) act)
+    (set-l34-ctx-actions! ctx (cons act (l34-ctx-actions ctx)))))
 
 (define (l34-emit-preserved! ctx act)
-  (set-add! (l34-ctx-wave3-preserved-set ctx) act)
-  (l34-emit! ctx act))
+  (unless (runtime-suppressed-live-ability-action? act)
+    (set-add! (l34-ctx-wave3-preserved-set ctx) act)
+    (l34-emit! ctx act)))
 
 (define (l34-quantize-cell-2.5 ctx v fallback)
   (geo:quantize-cell-2.5 v (if (real? fallback) fallback 32.5) (l34-ctx-live-tactics-obs? ctx)))
@@ -31066,6 +31308,7 @@
                   #:yamato-researched? (or (not (l34-ctx-live-upgrades-tracked? ctx))
                                            (l34-has-upgrade? ctx 'weapon-refit))
                   #:ghost-cloak-researched? (l34-has-upgrade? ctx 'personal-cloaking)
+                  #:interference-matrix-researched? (l34-has-upgrade? ctx 'interference-matrix)
                   #:home-x hx
                   #:home-y hy
                   #:exclude-tags spell-excl-tags))
@@ -34915,7 +35158,7 @@
                  (memq b-cloak-v '(cloaked cloaked-detected cloaked-allied))
                  (and (list? b-buffs)
                       (for/or ([bf (in-list b-buffs)])
-                        (or (eq? bf 'cloak-banshee) (eq? bf 'cloaked) (eqv? bf 5))))))
+                        (or (eq? bf 'cloak-banshee) (eq? bf 'banshee-cloak) (eq? bf 'cloaked) (eqv? bf 7))))))
            (define b-mobile-det-near?
              (for/or ([e (in-list enemy-units)])
                (and (hash? e)
@@ -36072,8 +36315,15 @@
                 (execute-shimmer-and-burrow-ripple-response
                  (hash-set shimmer-obs 'shimmer-and-burrow-ripples synth-ripples))
                 '()))))
+    (define shimmer-psi-storm-ok? (l34-has-upgrade? ctx 'psi-storm))
     (for ([sa (in-list resolved-shimmer-acts)])
-      (l34-emit! ctx sa)))
+      (unless (and (not shimmer-psi-storm-ok?)
+                   (pair? sa)
+                   (eq? (car sa) 'blind-skillshot-shimmer)
+                   (pair? (cdr sa))
+                   (pair? (cddr sa))
+                   (eq? (caddr sa) 'psi-storm))
+        (l34-emit! ctx sa))))
 
   ;; L49-W1 (Overseer Anti-Cloak Combat Escort): When paired with friendly anti-air / burrow-stealth
   ;; squads (`corruptor`/`hydralisk`/`mutalisk`) engaging enemy units within `<= 22t` (and not already
@@ -36511,7 +36761,8 @@
                      (and (= (length filtered-act) 4)
                           (equal? (fourth filtered-act) 1)
                           (not (for/or ([eu (in-list enemy-units)]) (= (hash-ref eu 'id -1) 1)))))))
-          (unless (or skip-layer34-macro-leak? skip-worker-proxy-pull? skip-dummy?)
+          (unless (or skip-layer34-macro-leak? skip-worker-proxy-pull? skip-dummy?
+                      (runtime-suppressed-live-ability-action? filtered-act))
             (set-add! direct-seen-sexps filtered-act)
             (l34-emit! ctx filtered-act)
             (for ([uid (in-list actor-ids)])

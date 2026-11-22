@@ -114,18 +114,36 @@
   (define (buff-match? b target)
     (cond
       [(eq? b target) #t]
+      [(symbol? b)
+       (or (and (eq? target 'interference-matrix) (eq? b 'interference-matrix-carrier))
+           (and (eq? target 'anti-armor-missile) (eq? b 'raven-shredder-missile-tint))
+           (and (eq? target 'oracle-weapon) (eq? b 'pulsar-beam))
+           (and (eq? target 'microbial-shroud) (eq? b 'amorphous-armorcloud))
+           (and (eq? target 'banshee-cloak) (eq? b 'cloak-banshee)))]
       [(exact-integer? b)
        (case b
+         [(5) (eq? target 'graviton-beam)]
+         [(6) (eq? target 'ghost-cloak)]
+         [(7) (or (eq? target 'banshee-cloak) (eq? target 'cloak-banshee))]
          [(17) (eq? target 'fungal-growth)]
          [(18) (eq? target 'guardian-shield)]
          [(22) (eq? target 'neural-parasite)]
-         [(28) (eq? target 'transfusion)]
+         [(28) (eq? target 'psi-storm)]
+         [(36) (eq? target 'contaminate)]
          [(49) (eq? target 'oracle-revelation)]
-         [(56) (eq? target 'oracle-weapon)]
+         [(72) (eq? target 'stasis)]
          [(83) (eq? target 'blinding-cloud)]
          [(89) (eq? target 'medivac-speed-boost)]
+         [(99) (or (eq? target 'oracle-weapon) (eq? target 'pulsar-beam))]
          [(116) (eq? target 'lock-on)]
+         [(122) (eq? target 'void-ray-prismatic-alignment)]
+         [(129) (or (eq? target 'oracle-stasis-trap-target) (eq? target 'stasis-ward-target))]
          [(132) (eq? target 'parasitic-bomb)]
+         [(277 300) (or (eq? target 'interference-matrix) (eq? target 'interference-matrix-carrier))]
+         [(279 280) (or (eq? target 'anti-armor-missile) (eq? target 'raven-shredder-missile-tint))]
+         [(288) (eq? target 'transfusion)]
+         [(297) (or (eq? target 'microbial-shroud) (eq? target 'amorphous-armorcloud))]
+         [(302) (eq? target 'hydralisk-frenzy)]
          [else #f])]
       [(string? b)
        (let ([t (string-trim b)])
@@ -525,7 +543,7 @@
                       "Emergency Transfuse on targeted Hatchery/Lair/Hive under timing push"
                       "ally townhall hp-ratio<0.65")
 
-   ;; ZERG: Overseer (Contaminate 1825/182, Oversight 3745/1912, SpawnChangeling 181)
+   ;; ZERG: Overseer (Contaminate 1825/182, Oversight 3743/1912, SpawnChangeling 181)
    (spell-tactic-mode 'overseer 'contaminate 1825 'overseer-contaminate-upgrade-tech
                       "Freeze active enemy upgrade lab (Twilight/Forge/Ebay/Armory/Cyber) for 30s"
                       "en>=125 & enemy upgrade/tech building<=7.0")
@@ -535,13 +553,13 @@
    (spell-tactic-mode 'overseer 'contaminate 1825 'overseer-contaminate-threat-delay
                       "Contaminate Gateway/Barracks/Hatchery during enemy all-in rally"
                       "en>=125 & enemy production<=7.0")
-   (spell-tactic-mode 'overseer 'morph-oversight-mode 3745 'overseer-oversight-ring-watch
+   (spell-tactic-mode 'overseer 'morph-oversight-mode 3743 'overseer-oversight-ring-watch
                       "Anchor Oversight +50% vision over dead-air/drop approach when AA is absent"
                       "safe>11.0 from enemy AA & stationary spot")
-   (spell-tactic-mode 'overseer 'morph-oversight-mode 3745 'overseer-oversight-burrow-guard
+   (spell-tactic-mode 'overseer 'morph-oversight-mode 3743 'overseer-oversight-burrow-guard
                       "Hold Oversight over friendly base/choke against DT, Banshee, or burrow ambushes"
                       "home/choke oversight-desired?")
-   (spell-tactic-mode 'overseer 'morph-oversight-mode 3745 'overseer-unmorph-mobile-follow
+   (spell-tactic-mode 'overseer 'morph-oversight-mode 3743 'overseer-unmorph-mobile-follow
                       "Exit Oversight back to mobile Overseer when AA closes <10.5 tiles"
                       "overseer-siege-mode & enemy AA<=10.5")
    (spell-tactic-mode 'overseer 'spawn-changeling 181 'overseer-changeling-ramp-block
@@ -565,7 +583,7 @@
                       "Target immobile SiegeTankSieged, LiberatorAG, LurkerBurrowed, Cannon, Battery, Bunker"
                       "bile ready & immobile target or >=2 clump<=9.0")
 
-   ;; ZERG: Infestor (Fungal Growth 74, Neural Parasite 249, Microbial Shroud 2545/3821)
+   ;; ZERG: Infestor (Fungal Growth 74, Neural Parasite 249, Microbial Shroud 4111)
    (spell-tactic-mode 'infestor 'fungal-growth 74 'infestor-fungal-kite-root
                       "Lead velocity 0.5 tiles onto >=2 unbuffed Bio/Ling/Air targets with delta-f=0 claim"
                       "en>=75 & >=2 unbuffed enemies r=2.25")
@@ -584,13 +602,13 @@
    (spell-tactic-mode 'infestor 'neural-parasite 249 'infestor-burrowed-neural-ambush
                       "Channel safe Neural Parasite while burrowed behind front line"
                       "infestor-burrowed & en>=100")
-   (spell-tactic-mode 'infestor 'microbial-shroud 2545 'infestor-shroud-anti-carrier-tempest
+   (spell-tactic-mode 'infestor 'microbial-shroud 4111 'infestor-shroud-anti-carrier-tempest
                       "Blanket >=3 ground combat units under >=3 enemy air threats (-50% air-to-ground dmg)"
                       "en>=75 & >=3 air enemies<=14.0 & >=3 ground allies")
-   (spell-tactic-mode 'infestor 'microbial-shroud 2545 'infestor-shroud-vs-liberator-banshee
+   (spell-tactic-mode 'infestor 'microbial-shroud 4111 'infestor-shroud-vs-liberator-banshee
                       "Shield Hydralisk/Queen/Lurker core trading upward vs Carrier/Tempest/Banshee"
                       "en>=75 & r=3.5 unclaimed")
-   (spell-tactic-mode 'infestor 'microbial-shroud 2545 'infestor-shroud-retreat-cover
+   (spell-tactic-mode 'infestor 'microbial-shroud 4111 'infestor-shroud-retreat-cover
                       "Deploy protective Shroud when <70 energy Infestor retreats out of air threat"
                       "fallback when en<70 & threat<=12.0")
 
@@ -1167,16 +1185,30 @@
     [(string? b) (string->symbol (string-downcase (string-trim b)))]
     [(exact-integer? b)
      (case b
+       [(5) 'graviton-beam]
+       [(6) 'ghost-cloak]
+       [(7) 'banshee-cloak]
        [(17) 'fungal-growth]
        [(18) 'guardian-shield]
        [(22) 'neural-parasite]
-       [(28) 'transfusion]
+       [(28) 'psi-storm]
+       [(36) 'contaminate]
        [(49) 'oracle-revelation]
-       [(56) 'oracle-weapon]
+       [(72) 'stasis]
        [(83) 'blinding-cloud]
        [(89) 'medivac-speed-boost]
+       [(99) 'oracle-weapon]
        [(116) 'lock-on]
+       [(122) 'void-ray-prismatic-alignment]
+       [(129) 'oracle-stasis-trap-target]
        [(132) 'parasitic-bomb]
+       [(277) 'interference-matrix]
+       [(279) 'raven-shredder-missile-tint]
+       [(280) 'anti-armor-missile]
+       [(288) 'transfusion]
+       [(297) 'microbial-shroud]
+       [(300) 'interference-matrix-carrier]
+       [(302) 'hydralisk-frenzy]
        [else #f])]
     [else #f]))
 
@@ -2929,7 +2961,7 @@
                           (spell-directive tag 'corruptor 'caustic-spray 'unit (uh-tag th)
                                            (uh-x th) (uh-y th) 'corruptor-caustic-spray))))])]
 
-             ;; --- OVERSEER (Contaminate 1825/182, SpawnChangeling 181, Oversight 3745/1912) ---
+             ;; --- OVERSEER (Contaminate 1825/182, SpawnChangeling 181, Oversight 3743/1912) ---
              [(overseer overseer-siege-mode)
               (define aa-near? (any-unit-within? all-enemies ux uy 10.8 enemy-anti-air-or-air-threat?))
               (define oversight-wanted? (eq? (dyn-hash-ref u 'oversight-desired? #f) #t))
@@ -3172,14 +3204,15 @@
    (->* ((Listof Any) (Listof Any) (Listof Any) spell-claims Integer
          (Listof Any) (Listof Any) (Listof Any) (Listof Any) Boolean Float Float
          (Listof Integer))
-        ((Option (Listof Any)) Boolean)
+        ((Option (Listof Any)) Boolean Boolean)
         (Listof spell-directive)))
 (define (run-terran-spellcaster-micro
          caster-units ally-units enemy-units
          claims current-frame ally-buildings enemy-buildings _effects
          researched-upgrades yamato-researched? home-x home-y exclude-tags
          [precomputed-repair-targets #f]
-         [ghost-cloak-researched? #t])
+         [ghost-cloak-researched? #t]
+         [interference-matrix-researched? #t])
   (define all-enemies (if (null? enemy-buildings) enemy-units (append enemy-units enemy-buildings)))
   ;; L40-P0-1d (`#918/#919`, `t15`): SC2 4.10/5.0 still requires Fusion Core `WeaponRefit`
   ;; (upgrade ID `76`, `'weapon-refit`) to unlock Battlecruiser Yamato Cannon (`401`).
@@ -3189,6 +3222,13 @@
           (or (eq? (safe-sym up 'unknown) 'weapon-refit)
               (and (exact-integer? up) (= up 76))))))
   (define ghost-cloak-ok? (terran-upgrade-ready? researched-upgrades 'personal-cloaking ghost-cloak-researched?))
+  ;; L51-W2 (`#1262/#1263`): SC2 5.0.14 locks Raven Interference Matrix (`3747`) behind
+  ;; StarportTechLab `807` (`upg 300` on PersephoneAIE_v4/TorchesAIE_v4, `upg 299` on AcropolisAIE).
+  (define interference-matrix-ok?
+    (or interference-matrix-researched?
+        (for/or : Boolean ([up (in-list researched-upgrades)])
+          (or (eq? (safe-sym up 'unknown) 'interference-matrix)
+              (and (exact-integer? up) (or (= up 299) (= up 300)))))))
 
   (define-values (dirs-rev _)
     (for/fold ([acc : (Listof spell-directive) '()]
@@ -3426,17 +3466,36 @@
 
              ;; --- RAVEN ---
              [(raven)
+              ;; L51-2D (`t14`): Prioritize Interference Matrix (3747) on high-value mechanical
+              ;; targets (`<= 9.5t` general, `<= 13.5t` for Colossus/SiegedTank/Carrier/Tempest/
+              ;; Immortal/Disruptor/etc.) FIRST when `en >= 75`, and never spend energy below `75`
+              ;; on a 2nd/3rd Auto-Turret while an unclaimed un-Matrixed HV mech target is `<= 13.5t`!
+              (define (raven-hv-mech-matrix-target? [e : Any]) : Boolean
+                (and (memq (uh-type e)
+                           '(colossus siege-tank-sieged carrier tempest immortal disruptor
+                             thor thor-ap battlecruiser mothership))
+                     (not (uh-hallucination? e))
+                     (not (uh-has-buff? e 'interference-matrix))
+                     (= (spell-unit-claim-count claims 'interference-matrix (uh-tag e) current-frame) 0)
+                     (> (raven-matrix-weight e) 0.0)))
+              (define hv-matrix-tgt-near?
+                (and interference-matrix-ok?
+                     (any-unit-within? enemy-units ux uy 13.5 raven-hv-mech-matrix-target?)))
               (or
-               ;; 1. Interference Matrix (`energy >= 75`, `range 9.0`, 1/target)
-               (and (>= en 75.0)
+               ;; 1. Interference Matrix (`energy >= 75`, `<= 9.5t` general / `<= 13.5t` HV mech, 1/target;
+               ;;    strictly gated on `interference-matrix-ok?` per SC2 5.0.14 StarportTechLab `807`!)
+               (and interference-matrix-ok?
+                    (>= en 75.0)
                     (let-values ([(ok? tgt _w)
                                   (best-unit-target
-                                   ux uy 9.0 enemy-units
+                                   ux uy 13.5 enemy-units
                                    (lambda ([e : Any])
                                      (and (not (uh-hallucination? e))
                                           (not (uh-has-buff? e 'interference-matrix))
                                           (= (spell-unit-claim-count claims 'interference-matrix (uh-tag e) current-frame) 0)
-                                          (> (raven-matrix-weight e) 0.0)))
+                                          (> (raven-matrix-weight e) 0.0)
+                                          (or (<= (dist2 ux uy (uh-x e) (uh-y e)) 9.5)
+                                              (raven-hv-mech-matrix-target? e))))
                                    (lambda ([e : Any]) (raven-matrix-weight e)))])
                       (and ok?
                            (spell-claim-unit?! claims 'interference-matrix (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
@@ -3540,8 +3599,11 @@
                                                        ANTI-ARMOR-CLAIM-RADIUS current-frame ANTI-ARMOR-CLAIM-TTL)
                                   (spell-directive tag 'raven 'anti-armor-missile 'unit (uh-tag tgt)
                                                    (uh-x tgt) (uh-y tgt) 'raven-anti-armor-missile))))))
-               ;; 3. Auto-Turret (`energy >= 50`, harass workers / melee / engaged zone)
+               ;; 3. Auto-Turret (`energy >= 50`, harass workers / melee / engaged zone;
+               ;;    preserve `>= 75` energy for Interference Matrix when an un-Matrixed HV mech target is <=13.5t!)
                (and (>= en 50.0)
+                    (or (not hv-matrix-tgt-near?)
+                        (>= en 125.0))
                     (let-values ([(ok? tgt _w)
                                   (best-unit-target
                                    ux uy 8.0 enemy-units
@@ -3840,6 +3902,7 @@
          #:researched-upgrades (Listof Any)
          #:yamato-researched? Boolean
          #:ghost-cloak-researched? Boolean
+         #:interference-matrix-researched? Boolean
          #:home-x Float
          #:home-y Float
          #:exclude-tags (Listof Integer))
@@ -3854,6 +3917,7 @@
          #:researched-upgrades [researched-upgrades '()]
          #:yamato-researched? [yamato-researched? #t]
          #:ghost-cloak-researched? [ghost-cloak-researched? #t]
+         #:interference-matrix-researched? [interference-matrix-researched? #t]
          #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
          #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
          #:exclude-tags [exclude-tags '()])
@@ -3895,7 +3959,8 @@
       (run-terran-spellcaster-micro
        effective-casters ally-units enemy-units claims current-frame
        ally-buildings enemy-buildings effects researched-upgrades
-       yamato-researched? home-x home-y exclude-tags repair-targets ghost-cloak-researched?)))
+       yamato-researched? home-x home-y exclude-tags repair-targets
+       ghost-cloak-researched? interference-matrix-researched?)))
 
 ;; -----------------------------------------------------------------------------
 ;; 8. Protoss Spellcaster Patterns (Sentry, High Templar, Oracle)
@@ -4557,6 +4622,7 @@
          #:psi-storm-researched? Boolean
          #:yamato-researched? Boolean
          #:ghost-cloak-researched? Boolean
+         #:interference-matrix-researched? Boolean
          #:neural-parasite-researched? Boolean
          #:home-x Float
          #:home-y Float
@@ -4579,6 +4645,7 @@
          #:psi-storm-researched? [psi-storm-researched? #t]
          #:yamato-researched? [yamato-researched? #t]
          #:ghost-cloak-researched? [ghost-cloak-researched? #t]
+         #:interference-matrix-researched? [interference-matrix-researched? #t]
          #:neural-parasite-researched? [neural-parasite-researched? #t]
          #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
          #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
@@ -4650,7 +4717,8 @@
                 (run-terran-spellcaster-micro
                  eff-t-casters ally-units enemy-units claims current-frame
                  ally-buildings enemy-buildings effects researched-upgrades
-                 yamato-researched? home-x home-y exclude-tags t-repair-targets ghost-cloak-researched?))
+                 yamato-researched? home-x home-y exclude-tags t-repair-targets
+                 ghost-cloak-researched? interference-matrix-researched?))
             (if (null? p-casters)
                 '()
                 (run-protoss-spellcaster-micro
@@ -4676,6 +4744,7 @@
          #:psi-storm-researched? Boolean
          #:yamato-researched? Boolean
          #:ghost-cloak-researched? Boolean
+         #:interference-matrix-researched? Boolean
          #:neural-parasite-researched? Boolean
          #:home-x Float
          #:home-y Float
@@ -4698,6 +4767,7 @@
          #:psi-storm-researched? [psi-storm-researched? #t]
          #:yamato-researched? [yamato-researched? #t]
          #:ghost-cloak-researched? [ghost-cloak-researched? #t]
+         #:interference-matrix-researched? [interference-matrix-researched? #t]
          #:neural-parasite-researched? [neural-parasite-researched? #t]
          #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
          #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
@@ -4720,6 +4790,7 @@
         #:psi-storm-researched? psi-storm-researched?
         #:yamato-researched? yamato-researched?
         #:ghost-cloak-researched? ghost-cloak-researched?
+        #:interference-matrix-researched? interference-matrix-researched?
         #:neural-parasite-researched? neural-parasite-researched?
         #:home-x home-x
         #:home-y home-y

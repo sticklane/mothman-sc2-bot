@@ -308,16 +308,16 @@
     1433 1435 1444 1446 1512 1514 1683 1684
     2014 2016 2095 2097 2108 2110 2114 2116
     2328 2340 2342 2375 2376 2389 2391 2393
-    3661 3662 3675 3676 3677 4124
+    3661 3662 3675 3676 3677 4109 4124
     ;; Zerg / Terran / Protoss Research Abilities (including generic 3692..3706)
-    44 46 48 216 217 263 265
+    44 46 48 49 216 217 263 265
     652 653 654 656 657 658
-    730 731 732 761 764 765 766 769 790 799 805 820
+    730 731 732 761 764 765 766 769 770 790 799 805 807 820
     855 856 857 861 862 863 864 865 866
     1062 1063 1064 1065 1066 1067 1068 1069 1070
     1093 1094 1097 1126
     1186 1187 1188 1189 1190 1191 1192 1193 1194
-    1223 1225 1252 1253 1282 1283
+    1223 1225 1252 1253 1282 1283 1284
     1312 1313 1314 1315 1316 1317
     1455 1456 1482 1532 1533 1535
     1562 1563 1564 1565 1566 1567 1568 1571 1592 1593 1594
@@ -343,7 +343,7 @@
     ;; Point-Target Active Spells & Area Effects
     74 142 349 399 1036 1442 1526 1622 1628 1764 1990
     2063 2146 2244 2338 2346 2358 2368 2387 2505 2544 2545 2558 2588 2698 2700 2704 2706
-    3684 3686 3687 3757))
+    3684 3686 3687 3757 4111))
 
 ;; Dual-mode `PointOrUnit` (`SMART 1`, `MOVE 16/3794`, `PATROL 17/3795`, `ATTACK 23/24/25/3674`, Rallies, UnloadAllAt)
 (define POINT-OR-UNIT-IDS : (Listof Positive-Integer)
@@ -1437,8 +1437,8 @@
      (warp-prism-transport . 1530)
      (observer-mode . 3739)
      (observer-siege-mode . 3741)
-     (overseer-mode . 3743)
-     (oversight-mode . 3745)
+     (oversight-mode . 3743)
+     (overseer-mode . 3745)
      (spine-crawler-uproot . 1725)
      (spore-crawler-uproot . 1727)
      (uproot . 3681))))
@@ -1455,6 +1455,8 @@
      (centrifical-hooks . 1482)
      (grooved-spines . 1282)
      (muscular-augments . 1283)
+     (hydralisk-frenzy . 1284)
+     (frenzy . 1284)
      (adaptive-talons . 3709)
      (lurker-range . 3710)
      (seismic-spines . 3710)
@@ -1509,9 +1511,11 @@
      (smart-servos . 766)
      (cyclone-lock-on-damage . 769)
      (mag-field-accelerator . 769)
+     (hurricane-thrusters . 770)
      (banshee-cloak . 790)
      (cloaking-field . 790)
      (hyperflight-rotors . 799)
+     (interference-matrix . 807)
      (advanced-ballistics . 1533)
      (caduceus-reactor . 1535)
      (medivac-caduceus-reactor . 1535)
@@ -1572,6 +1576,7 @@
      (gravitic-drive . 1094)
      (anion-pulse-crystals . 46)
      (flux-vanes . 48)
+     (tectonic-destabilizers . 49)
      (protoss-ground-weapons-1 . 1062)
      (ground-weapons-1 . 1062)
      (protoss-ground-weapons-2 . 1063)
@@ -1686,10 +1691,11 @@
      (morph-warp-prism-transport . (morph-warp-prism-transport . 1530))
      (morph-observer-mode . (morph-observer-mode . 3739))
      (morph-observer-siege-mode . (morph-observer-siege-mode . 3741))
-     (morph-overseer-mode . (morph-overseer-mode . 3743))
-     (morph-oversight-mode . (morph-oversight-mode . 3745))
+     (morph-oversight-mode . (morph-oversight-mode . 3743))
+     (morph-overseer-mode . (morph-overseer-mode . 3745))
      (overlord-generate-creep . (overlord-generate-creep . 1692))
      (generate-creep . (overlord-generate-creep . 1692))
+     (hydralisk-frenzy . (hydralisk-frenzy . 4109))
      (baneling-explode . (baneling-explode . 42))
      (salvage-bunker . (salvage . 32))
      (bunker-unload . (bunker-unload . 408))
@@ -1727,9 +1733,10 @@
      (time-warp . (time-warp . 2244))
      (mass-recall . (mass-recall . 3757))
      (nexus-mass-recall . (mass-recall . 3757))
-     (mothership-mass-recall . (mothership-mass-recall . 2368))
+     (mothership-mass-recall . (mothership-mass-recall . 142))
      (fungal-growth . (fungal-growth . 74))
-     (microbial-shroud . (microbial-shroud . 2545))
+     (microbial-shroud . (microbial-shroud . 4111))
+     (amorphous-armorcloud . (microbial-shroud . 4111))
      (corrosive-bile . (corrosive-bile . 2338))
      (blinding-cloud . (blinding-cloud . 2063))
      (spawn-locusts . (spawn-locusts . 2704))

@@ -88,7 +88,7 @@
 (define AB-SPAWN-CHANGELING     181)
 (define AB-VIPER-CONSUME        2073)
 (define AB-AUTO-TURRET          1764)
-(define AB-MICROBIAL-SHROUD     2545)
+(define AB-MICROBIAL-SHROUD     4111)
 (define AB-PULSAR-BEAM-OFF      2376)
 (define AB-CREEP-TUMOR-QUEEN    1694)
 (define AB-UNLOAD-ALL-AT        3669)
@@ -131,7 +131,7 @@
 (define AB-ADEPT-SHADE          2544)
 (define AB-CLOAK-BANSHEE        392)
 (define AB-HALLUCINATION-PHOENIX 154)
-(define AB-MORPH-OVERSIGHT-MODE 3745)
+(define AB-MORPH-OVERSIGHT-MODE 3743)
 (define AB-PRISMATIC-ALIGNMENT 2393)
 (define AB-KD8-CHARGE 2588)
 (define AB-MORPH-WARP-PRISM-TRANSPORT 1530)
@@ -1418,7 +1418,7 @@
              (mk-unit 6422 'colossus 4 87.5 81.0 #:hp 200.0 #:hp-max 200.0 #:shield 150.0 #:shield-max 150.0)
              (mk-unit 6423 'stalker 4 86.5 79.5 #:shield 80.0 #:shield-max 80.0)
              (mk-unit 6424 'stalker 4 86.5 80.5 #:shield 80.0 #:shield-max 80.0)))
-     (define s1 (mk-obs 9500 (append allies enemies) #:food-used 34 #:food-cap 66 #:food-army 18 #:food-workers 16))
+     (define s1 (mk-obs 9500 (append allies enemies) #:upgrades '(interference-matrix) #:food-used 34 #:food-cap 66 #:food-army 18 #:food-workers 16))
      (define outs (run-pipeline-sequence 'Terran 'Protoss (list (hash 'obs s1))))
      (define out (last outs))
      (define wcmds (step-outcome-wire-cmds out))
@@ -3801,7 +3801,7 @@
      (define enemies-b
        (list (mk-unit 7571 'colossus 4 85.0 79.5 #:hp 200.0 #:hp-max 200.0 #:shield 150.0 #:shield-max 150.0)
              (mk-unit 7572 'colossus 4 85.0 80.5 #:hp 200.0 #:hp-max 200.0 #:shield 150.0 #:shield-max 150.0)))
-     (define s2 (mk-obs 11200 (append allies-b enemies-b) #:food-used 28 #:food-cap 54 #:food-army 4 #:food-workers 24))
+     (define s2 (mk-obs 11200 (append allies-b enemies-b) #:upgrades '(interference-matrix) #:food-used 28 #:food-cap 54 #:food-army 4 #:food-workers 24))
      (define out-b (last (run-pipeline-sequence 'Terran 'Protoss (list (hash 'obs s2)))))
      (define wcmds-b (step-outcome-wire-cmds out-b))
      (define mx-targets
@@ -5549,12 +5549,12 @@
               (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0)
                         (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
 
-;; 78. Zerg Infestor Microbial Shroud Over Ground Army vs Air Fleet (2545)
+;; 78. Zerg Infestor Microbial Shroud Over Ground Army vs Air Fleet (4111)
 (define scen-novel-78
   (tactical-scenario
    "novel-78-zerg-infestor-microbial-shroud-vs-air"
    "novel" "Zerg" "Protoss" "spellcasters"
-   "Infestor (120en) with 6 Hydralisks facing 4 Void Rays at 11.5t (outside Fungal range) casts Microbial Shroud (2545) over Hydralisks."
+   "Infestor (120en) with 6 Hydralisks facing 4 Void Rays at 11.5t (outside Fungal range) casts Microbial Shroud (4111) over Hydralisks."
    (lambda ()
      (define allies
        (append (mk-home-base-units 'Zerg #:with-natural? #t)
@@ -5572,9 +5572,9 @@
      (define shroud? (wire-has-ability? wcmds '(7201) AB-MICROBIAL-SHROUD))
      (values out
              (list
-              (mk-check "infestor-casts-microbial-shroud-2545"
+              (mk-check "infestor-casts-microbial-shroud-4111"
                         shroud?
-                        (format "Infestor 7201 emitted Microbial Shroud (2545): ~a (abs=~a)"
+                        (format "Infestor 7201 emitted Microbial Shroud (4111): ~a (abs=~a)"
                                 shroud? (wire-abilities-for-tag wcmds 7201)))
               (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0)
                         (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
@@ -6922,8 +6922,8 @@
              (mk-unit 8903 'stalker 4 81.0 81.5 #:hp 80.0 #:hp-max 80.0 #:shield 80.0 #:shield-max 80.0)))
      (define outs-r
        (run-pipeline-sequence 'Terran 'Protoss
-         (list (hash 'obs (mk-obs 13000 (append allies-r enemies-r) #:food-used 46 #:food-cap 66 #:food-army 30 #:food-workers 16))
-               (hash 'obs (mk-obs 13008 (append allies-r enemies-r) #:food-used 46 #:food-cap 66 #:food-army 30 #:food-workers 16)))))
+         (list (hash 'obs (mk-obs 13000 (append allies-r enemies-r) #:upgrades '(interference-matrix) #:food-used 46 #:food-cap 66 #:food-army 30 #:food-workers 16))
+               (hash 'obs (mk-obs 13008 (append allies-r enemies-r) #:upgrades '(interference-matrix) #:food-used 46 #:food-cap 66 #:food-army 30 #:food-workers 16)))))
      (define im1 (wire-count-tags-with-ability (step-outcome-wire-cmds (first outs-r)) '(5901 5902) AB-INTERFERENCE-MATRIX))
      (define aam1 (wire-count-tags-with-ability (step-outcome-wire-cmds (first outs-r)) '(5901 5902) AB-ANTI-ARMOR-MISSILE))
      (define im2 (wire-count-tags-with-ability (step-outcome-wire-cmds (second outs-r)) '(5901 5902) AB-INTERFERENCE-MATRIX))
@@ -7227,7 +7227,7 @@
   (tactical-scenario
    "w11-tac-4-overseer-flies-to-cloaked-banshee-not-oversight-or-changeling"
    "wave11-repro" "Zerg" "Terran" "detection"
-   "Wave-11 P0 (Zerg detector paralysis #49 Z v onlyfans): Overseer must fly to active Cloaked Banshee instead of freezing in Oversight Mode (3745) or casting Changeling (181)"
+   "Wave-11 P0 (Zerg detector paralysis #49 Z v onlyfans): Overseer must fly to active Cloaked Banshee instead of freezing in Oversight Mode (3743) or casting Changeling (181)"
    (lambda ()
      (define home-z (mk-home-base-units 'Zerg #:workers 16))
      ;; Sub-case A: 0-energy Overseer at (60, 60) with Cloaked Banshee attacking Hydras at (115, 115)
@@ -7267,7 +7267,7 @@
      (values out-a
              (list
               (mk-check "0en-overseer-does-not-freeze-in-oversight-mode" (not froze-oversight-a?)
-                        (format "0en Overseer cast 3745 Oversight Mode 78t from Banshee: ~a" froze-oversight-a?))
+                        (format "0en Overseer cast 3743 Oversight Mode 78t from Banshee: ~a" froze-oversight-a?))
               (mk-check "0en-overseer-flies-to-cloaked-banshee" moved-to-115?
                         (format "0en Overseer MOVE toward (115,115): ~a" moved-to-115?))
               (mk-check "50en-overseer-skips-changeling-and-oversight-during-home-cloak" (and (not changeling-b?) (not froze-oversight-b?))
@@ -7920,7 +7920,7 @@
   (tactical-scenario
    "novel-116-infestors-vs-skytoss-split-fungal-neural-no-4.11-shroud"
    "novel" "Zerg" "Protoss" "spellcaster"
-   "Two Infestors vs Carriers + Void Rays split Fungal Growth (74) and Neural Parasite (249) with 0 Patch-4.11 Microbial Shroud (2545)"
+   "Two Infestors vs Carriers + Void Rays split Fungal Growth (74) and Neural Parasite (249) with 0 Microbial Shroud (4111)"
    (lambda ()
      (define home (mk-home-base-units 'Zerg #:workers 16))
      (define allies (append home
@@ -7938,7 +7938,7 @@
      (values out
              (list
               (mk-check "infestors-cast-fungal-and-neural" (and fung? neur?) (format "Fungal=~a Neural=~a" fung? neur?))
-              (mk-check "zero-4.11-microbial-shroud-on-4.10.0" (not shroud?) (format "Microbial Shroud (2545)=~a" shroud?))
+              (mk-check "zero-4.11-microbial-shroud-on-4.10.0" (not shroud?) (format "Microbial Shroud (4111)=~a" shroud?))
               (mk-check "zero-wire-rejects" (= (step-outcome-wire-rejects out) 0) (format "wire_rejects=~a" (step-outcome-wire-rejects out))))))))
 
 (define scen-novel-117
@@ -8277,7 +8277,7 @@
                                                       (mk-unit 5402 'raven 1 74.0 81.0 #:energy 0.0)
                                                       (mk-unit 5403 'banshee 1 74.0 79.0 #:energy 0.0)
                                                       (mk-unit 8401 'colossus 4 80.0 80.0 #:hp 200.0 #:hp-max 200.0 #:shield 150.0 #:shield-max 150.0)))
-                                        #:upgrades '(banshee-cloak personal-cloaking) #:food-used 32 #:food-cap 54 #:food-army 16 #:food-workers 16))))))
+                                        #:upgrades '(banshee-cloak personal-cloaking interference-matrix) #:food-used 32 #:food-cap 54 #:food-army 16 #:food-workers 16))))))
      (define bad-z? (wire-any-ability? (step-outcome-wire-cmds o-z) '(5501 5502 5503 5504)
                                        (list AB-FUNGAL-GROWTH AB-NEURAL-PARASITE AB-PARASITIC-BOMB AB-BLINDING-CLOUD AB-ABDUCT AB-TRANSFUSE AB-SPAWN-CHANGELING AB-CONTAMINATE)))
      (define bad-t? (wire-any-ability? (step-outcome-wire-cmds o-t) '(5401 5402 5403)

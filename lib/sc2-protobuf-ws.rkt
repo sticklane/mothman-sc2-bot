@@ -146,6 +146,13 @@
  effect-id->symbol
  result-enum->symbol
  register-sc2-response-data!
+ reset-sc2-live-response-data!
+ sc2-ability-data-entry
+ sc2-ability-data-entry?
+ sc2-ability-data-entry-available?
+ SC2-LIVE-AVAILABLE-ABILITIES
+ sc2-ability-live-available?
+ sc2-upgrade-defined-in-live-data?
 
  ;; Observation Converter & S-Expression Actuator
  sc2-unit-is-structure?
@@ -1278,7 +1285,10 @@
           (transfuse 1664 #f)
           (corrosive-bile 2338 #t)
           (fungal-growth 74 #t)
-          (microbial-shroud 2545 #t)
+          (microbial-shroud 2545 #f)
+          (microbial-shroud 4111 #t)
+          (amorphous-armorcloud 4111 #f)
+          (hydralisk-frenzy 4109 #t)
           (neural-parasite 249 #t)
           (abduct 2067 #t)
           (blinding-cloud 2063 #t)
@@ -1372,7 +1382,8 @@
           (generate-creep 1692 #f)
           (time-warp 2244 #t)
           (nexus-mass-recall 3757 #f)
-          (mothership-mass-recall 2368 #t)
+          (mothership-mass-recall 2368 #f)
+          (mothership-mass-recall 142 #t)
           (nexus-energy-recharge 4126 #t)
           (energy-recharge 4126 #f)
           (shield-battery-recharge 4113 #t)
@@ -1407,8 +1418,8 @@
           (cancel-building 314 #f)
           (shadow-stride 2700 #t)
           (morph-observer-mode 3739 #t)
-          (morph-overseer-mode 3743 #t)
-          (morph-oversight-mode 3745 #t)
+          (morph-oversight-mode 3743 #t)
+          (morph-overseer-mode 3745 #t)
           ;; Research Abilities
           (research-zergling-movementspeed 1253 #t)
           (research-metabolic-boost 1253 #f)
@@ -1420,6 +1431,8 @@
           (research-centrifical-hooks 1482 #f)
           (research-grooved-spines 1282 #t)
           (research-muscular-augments 1283 #t)
+          (research-hydralisk-frenzy 1284 #t)
+          (research-frenzy 1284 #f)
           (research-adaptive-talons 3709 #t)
           (research-lurker-range 3710 #t)
           (research-seismic-spines 3710 #f)
@@ -1472,9 +1485,11 @@
           (research-smart-servos 766 #t)
           (research-cyclone-lock-on-damage 769 #t)
           (research-mag-field-accelerator 769 #f)
+          (research-hurricane-thrusters 770 #t)
           (research-banshee-cloak 790 #t)
           (research-cloaking-field 790 #f)
           (research-hyperflight-rotors 799 #t)
+          (research-interference-matrix 807 #t)
           (research-advanced-ballistics 805 #f)
           (research-advanced-ballistics 1533 #t)
           (research-caduceus-reactor 1535 #t)
@@ -1534,6 +1549,7 @@
           (research-gravitic-drive 1094 #t)
           (research-anion-pulse-crystals 46 #t)
           (research-flux-vanes 48 #t)
+          (research-tectonic-destabilizers 49 #t)
           (research-protoss-ground-weapons-1 1062 #t)
           (research-ground-weapons-1 1062 #f)
           (research-protoss-ground-weapons-2 1063 #t)
@@ -1568,7 +1584,7 @@
   (register-id-pair! SC2-ABILITY-SYM->ID SC2-ABILITY-ID->SYM sym id #:primary? prim?))
 
 ;; Decode-only variant ability ID aliases observed in `#115` pro-replay telemetry
-;; (preserve canonical outbound IDs 2545 / 1764 in SC2-ABILITY-SYM->ID).
+;; (preserve canonical outbound IDs 4111 / 1764 in SC2-ABILITY-SYM->ID).
 (hash-set! SC2-ABILITY-ID->SYM 3807 'microbial-shroud)
 (hash-set! SC2-ABILITY-ID->SYM 3829 'microbial-shroud)
 (hash-set! SC2-ABILITY-ID->SYM 379 'auto-turret)
@@ -1657,12 +1673,19 @@
           (smart-servos 289 #t)
           (cyclone-lock-on-damage 144 #t)
           (mag-field-accelerator 144 #f)
+          (hurricane-thrusters 296 #t)
           (banshee-cloak 20 #t)
           (cloaking-field 20 #f)
+          (caduceus-reactor 21 #t)
+          (medivac-caduceus-reactor 21 #f)
           (personal-cloaking 25 #t)
           (weapon-refit 76 #t)
           (hyperflight-rotors 136 #t)
           (advanced-ballistics 140 #t)
+          (hydralisk-frenzy 298 #t)
+          (frenzy 298 #f)
+          (microbial-shroud 299 #t)
+          (interference-matrix 300 #t)
           (terran-infantry-weapons-1 7 #t)
           (infantry-weapons-1 7 #f)
           (terran-infantry-weapons-2 8 #t)
@@ -1717,6 +1740,7 @@
           (gravitic-drive 49 #t)
           (anion-pulse-crystals 99 #t)
           (flux-vanes 288 #t)
+          (tectonic-destabilizers 297 #t)
           (protoss-ground-weapons-1 39 #t)
           (ground-weapons-1 39 #f)
           (protoss-ground-weapons-2 40 #t)
@@ -1785,10 +1809,15 @@
           (carry-vespene-geyser-gas-zerg 275 #t)
           (permanently-cloaked 276 #t)
           (interference-matrix 277 #t)
+          (raven-shredder-missile-tint 279 #t)
           (anti-armor-missile 280 #t)
           (chrono-boost 281 #t)
           (transfusion 288 #t)
-          (battery-overcharge 301 #t)))])
+          (microbial-shroud 297 #t)
+          (amorphous-armorcloud 297 #f)
+          (interference-matrix-carrier 300 #t)
+          (battery-overcharge 301 #t)
+          (hydralisk-frenzy 302 #t)))])
   (match-define (list sym id prim?) entry)
   (register-id-pair! SC2-BUFF-SYM->ID SC2-BUFF-ID->SYM sym id #:primary? prim?))
 
@@ -2078,7 +2107,27 @@
                         start-locations pathing-grid terrain-height placement-grid)]))
 
 (struct sc2-data-entry (id name) #:transparent)
+(struct sc2-ability-data-entry sc2-data-entry (available?) #:transparent)
 (struct sc2-data (abilities units upgrades buffs effects) #:transparent)
+
+;; Dynamic match-start ResponseData tables (populated by `register-sc2-response-data!`)
+(define SC2-LIVE-DATA-LOADED? (box #f))
+(define SC2-LIVE-AVAILABLE-ABILITIES (make-hasheqv))
+(define SC2-LIVE-DEFINED-UPGRADES (make-hasheq))
+
+(define (sc2-ability-live-available? ab-id)
+  (if (unbox SC2-LIVE-DATA-LOADED?)
+      (hash-ref SC2-LIVE-AVAILABLE-ABILITIES ab-id #t)
+      #t))
+
+(define (sc2-upgrade-defined-in-live-data? sym)
+  (and (unbox SC2-LIVE-DATA-LOADED?)
+       (hash-has-key? SC2-LIVE-DEFINED-UPGRADES (normalize-sc2-name->symbol sym))))
+
+(define (reset-sc2-live-response-data!)
+  (set-box! SC2-LIVE-DATA-LOADED? #f)
+  (hash-clear! SC2-LIVE-AVAILABLE-ABILITIES)
+  (hash-clear! SC2-LIVE-DEFINED-UPGRADES))
 
 (struct sc2-response
   (id
@@ -3268,7 +3317,7 @@
 
 (define (decode-response-data-bytes bstr)
   (define fields (decode-protobuf-message bstr))
-  ;; data.proto: AbilityData ability_id=1, link_name=2, friendly_name=5
+  ;; data.proto: AbilityData ability_id=1, link_name=2, friendly_name=5, available=8
   ;; UnitTypeData unit_id=1, name=2
   ;; UpgradeData upgrade_id=1, name=2
   ;; BuffData buff_id=1, name=2
@@ -3279,15 +3328,49 @@
       (define id (field-first-varint f 1 0))
       (define fname (field-first-string f 5 ""))
       (define lname (field-first-string f 2 ""))
-      (sc2-data-entry id (if (string=? fname "") lname fname))))
+      (define avail? (= (field-first-varint f 8 0) 1))
+      (sc2-ability-data-entry id (if (string=? fname "") lname fname) avail?)))
   (define units (decode-data-entries (field-all-bytes fields 2) 1 2))
   (define upgrades (decode-data-entries (field-all-bytes fields 3) 1 2))
   (define buffs (decode-data-entries (field-all-bytes fields 4) 1 2))
   (define effects (decode-data-entries (field-all-bytes fields 5) 1 2))
   (sc2-data abilities units upgrades buffs effects))
 
+;; Canonical CamelCase SC2 UpgradeData.name -> bot hyphenated upgrade symbol aliases.
+;; Ensures map-shifted balance-mod IDs (e.g. InterferenceMatrix = 299 vs 300 across patch mods)
+;; always resolve cleanly to canonical bot upgrade symbols at match start!
+(define SC2-LIVE-UPGRADE-NAME-ALIASES
+  (hasheq
+   'interferencematrix         '(interference-matrix)
+   'microbialshroud            '(microbial-shroud)
+   'frenzy                     '(hydralisk-frenzy frenzy)
+   'hurricanethrusters         '(hurricane-thrusters)
+   'tempestgroundattackupgrade '(tectonic-destabilizers tempest-ground-attack-upgrade)
+   'medivaccaduceusreactor     '(caduceus-reactor medivac-caduceus-reactor)
+   'ravencorvidreactor         '(corvid-reactor)
+   'diggingclaws               '(adaptive-talons)
+   'lurkerrange                '(lurker-range seismic-spines)
+   'voidrayspeedupgrade        '(flux-vanes)
+   'phoenixrangeupgrade        '(anion-pulse-crystals)
+   'bansheespeed               '(hyperflight-rotors)
+   'liberatoragrangeupgrade    '(advanced-ballistics)
+   'sunderingimpact            '(sundering-impact)
+   'amplifiedshielding         '(amplified-shielding)
+   'psionicamplifiers          '(psionic-amplifiers)
+   'secretedcoating            '(secreted-coating)))
+
 (define (register-sc2-response-data! data)
   (when (sc2-data? data)
+    (hash-clear! SC2-LIVE-AVAILABLE-ABILITIES)
+    (hash-clear! SC2-LIVE-DEFINED-UPGRADES)
+    (set-box! SC2-LIVE-DATA-LOADED? #t)
+    (for ([e (in-list (sc2-data-abilities data))])
+      (define id (sc2-data-entry-id e))
+      (when (> id 0)
+        (define avail? (if (sc2-ability-data-entry? e)
+                           (sc2-ability-data-entry-available? e)
+                           #t))
+        (hash-set! SC2-LIVE-AVAILABLE-ABILITIES id avail?)))
     (for ([e (in-list (sc2-data-units data))])
       (define id (sc2-data-entry-id e))
       (define name (sc2-data-entry-name e))
@@ -3298,8 +3381,22 @@
       (define id (sc2-data-entry-id e))
       (define name (sc2-data-entry-name e))
       (when (and (> id 0) (not (string=? name "")))
-        (register-id-pair! SC2-UPGRADE-SYM->ID SC2-UPGRADE-ID->SYM
-                           (normalize-sc2-name->symbol name) id #:primary? #f)))
+        (define norm (normalize-sc2-name->symbol name))
+        (define aliases (hash-ref SC2-LIVE-UPGRADE-NAME-ALIASES norm #f))
+        (define override-shifted? (>= id 290))
+        (hash-set! SC2-LIVE-DEFINED-UPGRADES norm id)
+        (cond
+          [(pair? aliases)
+           (for ([asym (in-list aliases)]
+                 [idx (in-naturals)])
+             (hash-set! SC2-LIVE-DEFINED-UPGRADES asym id)
+             (register-id-pair! SC2-UPGRADE-SYM->ID SC2-UPGRADE-ID->SYM
+                                asym id #:primary? (and override-shifted? (= idx 0))))
+           (register-id-pair! SC2-UPGRADE-SYM->ID SC2-UPGRADE-ID->SYM
+                              norm id #:primary? #f)]
+          [else
+           (register-id-pair! SC2-UPGRADE-SYM->ID SC2-UPGRADE-ID->SYM
+                              norm id #:primary? override-shifted?)])))
     (for ([e (in-list (sc2-data-buffs data))])
       (define id (sc2-data-entry-id e))
       (define name (sc2-data-entry-name e))
@@ -8869,7 +8966,7 @@
        '(roach-warren)]
       [(memq norm '(centrifugal-hooks centrifical-hooks))
        '(baneling-nest)]
-      [(memq norm '(grooved-spines muscular-augments))
+      [(memq norm '(grooved-spines muscular-augments hydralisk-frenzy frenzy))
        '(hydralisk-den)]
       [(memq norm '(adaptive-talons lurker-range seismic-spines))
        '(lurker-den lurker-den-mp)]
@@ -8894,10 +8991,11 @@
       [(memq norm '(stimpack combat-shield concussive-shells))
        '(barracks-tech-lab barracks-techlab)]
       [(memq norm '(infernal-preigniter infernal-pre-igniter drilling-claws
-                    cyclone-lock-on-damage mag-field-accelerator smart-servos))
+                    cyclone-lock-on-damage mag-field-accelerator smart-servos
+                    hurricane-thrusters))
        '(factory-tech-lab factory-techlab)]
       [(memq norm '(banshee-cloak cloaking-field hyperflight-rotors
-                    corvid-reactor interference-matrix hurricane-thrusters))
+                    corvid-reactor interference-matrix))
        '(starport-tech-lab starport-techlab)]
       [(eq? norm 'personal-cloaking)
        '(ghost-academy)]
@@ -16365,7 +16463,7 @@
                    (or (= caster-utype 502) (= caster-utype 503)))
               2110] ;; BURROWUP_LURKER
              [else (spell-symbol->ability-id norm-spell)]))
-         (when ab-id
+         (when (and ab-id (or (not (= ab-id 4107)) (sc2-ability-live-available? 4107)))
            ;; Off-GCD instant 0-cast-point buffs do NOT lock the unit out of attacking/kiting on the same frame
            (define off-gcd-buff?
              (memq norm-spell
@@ -16374,8 +16472,9 @@
                      medivac-boost guardian-shield
                      hallucination-phoenix hallucination-archon
                      immortal-barrier prismatic-alignment
+                     hydralisk-frenzy
                      build-interceptors pulsar-beam pulsar-beam-on pulsar-beam-off)))
-           (unless (or off-gcd-buff? (memv ab-id '(1766 181 403 405 2146 2350 2588 3741 3745)))
+           (unless (or off-gcd-buff? (memv ab-id '(1766 181 403 405 2146 2350 2588 3741 3743)))
              (for ([cid (in-list caster-ids)])
                (set-add! commanded-combat-tags cid)))
            (cond
@@ -16405,9 +16504,9 @@
                    (for ([cid (in-list fresh-vrs)])
                      (set-add! emitted-prismatic-tags cid))
                    (emit! (sc2-raw-unit-command 2393 #f 0 fresh-vrs #f)))]
-                ;; W11-P0-4-wire (`w11-tac-4`): NEVER immobilize an Overseer (3745) or Observer (3741)
+                ;; W11-P0-4-wire (`w11-tac-4`): NEVER immobilize an Overseer (3743) or Observer (3741)
                 ;; into stationary mode while an uncovered cloaked/burrowed threat needs mobile detection!
-                [(memv ab-id '(3741 3745))
+                [(memv ab-id '(3741 3743))
                  (unless uncovered-stealth-present?
                    (for ([cid (in-list caster-ids)])
                      (set-add! commanded-combat-tags cid))
@@ -17969,7 +18068,7 @@
           (when infestor-u
             (define itag (sc2-unit-tag infestor-u))
             (record-unit-used! itag)
-            (emit! (sc2-raw-unit-command 2545 (sc2-point2d tx ty) 0 (list itag) #f)))])]
+            (emit! (sc2-raw-unit-command 4111 (sc2-point2d tx ty) 0 (list itag) #f)))])]
 
       [(list 'high-ground-tactics hg-mode (? real? raw-x) (? real? raw-y) spot-flag)
        (define tx (scale-bot-coord-to-world raw-x home-x))
@@ -18246,7 +18345,7 @@
             (cond
               [(= dutype 1912)
                (emit! (mark-urgent-survival-cmd!
-                       (sc2-raw-unit-command 3743 #f 0 (list dtag) #f)))]
+                       (sc2-raw-unit-command 3745 #f 0 (list dtag) #f)))]
               [(= dutype 1911)
                (emit! (mark-urgent-survival-cmd!
                        (sc2-raw-unit-command 3739 #f 0 (list dtag) #f)))]
@@ -18607,7 +18706,7 @@
 (define SC2-WIRE-COALESCABLE-ABILITIES
   (seteqv 16 17 18 23 42 76 171 380 388 390 403 405 556 558 1036 1042 1442 1526
           1692 1725 1727 1729 1731 1882 2095 2097 2108 2110 2244 2328 2338 2346 2375 2387 2393 2706
-          3661 3662 3665 3666 3667 3674 3675 3680 3681 3687))
+          3661 3662 3665 3666 3667 3674 3675 3680 3681 3687 4109))
 
 (struct wire-apm-governor
   (target-apm
@@ -18642,7 +18741,7 @@
                   2368 2370 2371 2387 2546 2594 2596 2704 2706 3659 3675 1442 3687 74 76 140 249 251 399 401
                   1036 1526 1528 1530 1628 1664 1978 1998 2063 2067 2069 2073 2116 2146
                   2324 2338 2346 2350 2358 2375 2376 2393 2505 2542 2545 2588 2714 3668 3669
-                  3747 3751 3753 3755 3757 4107 4113 4126 142 3686 388 390
+                  3747 3751 3753 3755 3757 4107 4109 4111 4113 4126 142 3686 388 390
                   2095 2097 2108 2110 403 405 2362 2364))
        0]
       ;; P3: Routine harvest, worker rebalance & non-urgent Bunker Salvage (`32`)

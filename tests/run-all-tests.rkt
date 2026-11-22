@@ -6132,8 +6132,8 @@
                      (PointTargetAbility? (lookup-point-target-ability 1628))
                      (PointTargetAbility? (lookup-point-target-ability 2146))
                      (PointTargetAbility? (lookup-point-target-ability 1768))
-                     (PointTargetAbility? (lookup-point-target-ability 2545)))
-                "Ground-truth ability target-mode witnesses must enforce 32/3692=NoTarget, 1628/2146/1768/2545=PointTarget, 197=#f")
+                     (PointTargetAbility? (lookup-point-target-ability 4111)))
+                "Ground-truth ability target-mode witnesses must enforce 32/3692=NoTarget, 1628/2146/1768/4111=PointTarget, 197=#f")
 
   ;; Round-trip encode-typed-sc2-action -> decode-typed-sc2-action across all wire variants
   (define tags-701 (make-non-empty-unit-tags '(701 702)))
@@ -6292,11 +6292,11 @@
                 "cast-protective-buff-aura on Sentry must emit GuardianShield (76)")
   (assert-true! (ormap (lambda (c)
                          (and (sc2-raw-unit-command? c)
-                              (= (sc2-raw-unit-command-ability-id c) 2545)
+                              (= (sc2-raw-unit-command-ability-id c) 4111)
                               (equal? (sc2-raw-unit-command-unit-tags c) '(731))
                               (sc2-point2d? (sc2-raw-unit-command-target-pos c))))
                        cmds-s28)
-                "cast-protective-buff-aura on Infestor must emit MicrobialShroud (2545) PointTarget")
+                "cast-protective-buff-aura on Infestor must emit MicrobialShroud (4111) PointTarget")
   (assert-true! (and (ormap (lambda (c)
                               (and (sc2-raw-unit-command? c)
                                    (memv (sc2-raw-unit-command-ability-id c) '(452 3679))
@@ -11208,7 +11208,7 @@
   (define (mk-t45-obs frame)
     (hash 'frame frame 'minerals 1400 'gas 1000 'supply-used 110 'supply-cap 160 'supply-left 50
           'mineral-harvesters 48 'vespene-harvesters 8 'enemy-race 'Protoss 'armory-ready? #t
-          'researched-upgrades '(stimpack combat-shield concussive-shells weapon-refit)
+          'researched-upgrades '(stimpack combat-shield concussive-shells weapon-refit interference-matrix)
           'base-x 24.5 'base-y 48.5 'natural-x 52.5 'natural-y 48.5
           'ally-units (append
                        (for/list ([i (in-range 40)]) (hash 'id (+ 46100 i) 'type 'scv 'x 24.5 'y 48.5 'hp 45))

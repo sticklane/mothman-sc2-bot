@@ -136,8 +136,10 @@ def compute_agent_scorecard(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     by_role: Dict[str, Dict[str, Any]] = {}
     for r in records:
         for role, a in (r.get("agent_trajectories") or {}).items():
-            # Fold legacy suffix roles into canonical role buckets for cleaner scorecards
+            # Fold legacy suffix roles into canonical role buckets; skip ephemeral unnamed/browser workers
             canon = re.sub(r"-legacy-[0-9a-f]+$", "", role)
+            if re.match(r"^worker-[0-9a-f]{6,}$", canon) or "browser" in canon.lower():
+                continue
             if canon not in by_role:
                 by_role[canon] = {
                     "role": canon,
@@ -238,6 +240,8 @@ def classify_hold_root_cause(rec: Dict[str, Any], ledger_entry: Dict[str, Any]) 
     low = text.lower()
     fr_kinds = {f.get("kind") for f in (rec.get("friction_events") or [])}
 
+    if lid >= 49 and "t111stall" in low and ("1->5" in low or "tvp" in low) and "hold" in low:
+        return "watchdog_escrow_and_tvp_regression", "Expansion escrow flush & Starport gas-yield guard stalled Terran 1-1-1 / TvP (fixed in Loop 50)"
     if "tvp" in low and ("0w-8l" in low or "0-8" in low):
         return "runtime_heuristic_regression", "Global runtime heuristic (light-harass split) lacked posture/main-army parity guard -> Terran TvP 0-8"
     if ("brain_runtime_cap_mismatch" in fr_kinds and lid >= 47) or "raw-desired-barracks" in low or "prod_stall=132" in low:
@@ -254,7 +258,8 @@ def compute_hold_taxonomy_and_flipflops(
     ledger_by_loop: Dict[int, Dict[str, Any]],
 ) -> Dict[str, Any]:
     ship_era = [r for r in records if int(r.get("loop_id") or 0) >= 34]
-    recent11 = [r for r in records if int(r.get("loop_id") or 0) >= 37]
+    recent_l37 = [r for r in records if int(r.get("loop_id") or 0) >= 37]
+    recent_span = [recent_l37[0]["loop_id"], recent_l37[-1]["loop_id"]] if recent_l37 else [37, 37]
 
     hold_cases = []
     cause_counts = Counter()
@@ -349,8 +354,9 @@ def compute_hold_taxonomy_and_flipflops(
 
     ships_34 = sum(1 for r in ship_era if r.get("ship_verdict") == "SHIP-ZIP")
     holds_34 = sum(1 for r in ship_era if r.get("ship_verdict") == "HOLD-ZIP")
-    ships_37 = sum(1 for r in recent11 if r.get("ship_verdict") == "SHIP-ZIP")
-    holds_37 = sum(1 for r in recent11 if r.get("ship_verdict") == "HOLD-ZIP")
+    ships_37 = sum(1 for r in recent_l37 if r.get("ship_verdict") == "SHIP-ZIP")
+    holds_37 = sum(1 for r in recent_l37 if r.get("ship_verdict") == "HOLD-ZIP")
+    recent_decided = ships_37 + holds_37
 
     friction_counts = Counter()
     for r in ship_era:
@@ -359,11 +365,13 @@ def compute_hold_taxonomy_and_flipflops(
 
     return {
         "ship_gate_era_n": len(ship_era),
+        "ship_gate_span": [ship_era[0]["loop_id"], ship_era[-1]["loop_id"]] if ship_era else [34, 34],
         "ship_zip_count": ships_34,
         "hold_zip_count": holds_34,
-        "ship_rate_pct": round(100.0 * ships_34 / max(1, len(ship_era)), 1),
-        "recent_l37_l47_ship_rate_pct": round(100.0 * ships_37 / max(1, len(recent11)), 1),
-        "recent_l37_l47_counts": {"ships": ships_37, "holds": holds_37, "n": len(recent11)},
+        "ship_rate_pct": round(100.0 * ships_34 / max(1, ships_34 + holds_34), 1),
+        "recent_l37_span": recent_span,
+        "recent_l37_l47_ship_rate_pct": round(100.0 * ships_37 / max(1, recent_decided), 1),
+        "recent_l37_l47_counts": {"ships": ships_37, "holds": holds_37, "n": recent_decided},
         "hold_root_cause_counts": dict(cause_counts.most_common()),
         "hold_cases": hold_cases,
         "friction_event_counts_l34_plus": dict(friction_counts.most_common()),
@@ -512,11 +520,11 @@ def run_counterfactual_simulator(
         },
         {
             "id": "IF-3",
-            "name": "Targeted 25s --category / --scenario Arena 3.0 Pre-Check",
+            "name": "Targeted 25s --category / --scenario Combat Drill Pre-Check",
             "standalone_saved_min": round(arena_precheck_saved_min, 1),
             "saved_min_per_ship": round(arena_precheck_saved_min / n_ships, 1),
             "affected_loops": arena_precheck_loops,
-            "mechanism": "Before launching the full 132-duel Arena 3.0 run, execute a 25s targeted --category/--scenario A/B check on every edited micro rule (mandatory whenever a rule hits the Flip-Flop Guard).",
+            "mechanism": "Before launching the full 132-duel drill run, execute a 25s targeted --category/--scenario A/B check on every edited micro rule.",
         },
         {
             "id": "IF-4",
@@ -540,8 +548,10 @@ def run_counterfactual_simulator(
         },
     ]
 
+    sg_lo = int(ship_era[0]["loop_id"])
+    sg_hi = int(ship_era[-1]["loop_id"])
     return {
-        "cohort": "Loops 34–47 (Ship-Gate Era)",
+        "cohort": f"Loops {sg_lo}–{sg_hi}",
         "n_loops": n_loops,
         "n_ships": n_ships,
         "actual_total_min": round(actual_total_min, 1),
@@ -562,6 +572,8 @@ def build_ranked_patches(
     hold_tax: Dict[str, Any],
     agent_sc: Dict[str, Any],
 ) -> List[Dict[str, Any]]:
+    sg_lo, sg_hi = hold_tax.get("ship_gate_span") or [34, 50]
+    span_lbl = f"L{sg_lo}–L{sg_hi}"
     monitor_steps = next(
         (a["steps"] for a in agent_sc.get("agents") or [] if a["role"] == "monitor-2"),
         0,
@@ -573,62 +585,62 @@ def build_ranked_patches(
     return [
         {
             "rank": 1,
-            "patch": "H2H-First Fail-Fast Gate (`baseline_h2h` 2m BEFORE 84-match 30m roster)",
+            "patch": "Run 2-Minute Head-to-Head Check Before the 30-Minute Roster",
             "owner": "@coordinator + @harness",
             "target_files": ["tools/iteration-loop/SWARM_PLAYBOOK.md", "tools/run-local-sc2-arena.py"],
             "expected_impact": (
-                f"Saves {cf['interventions'][0]['standalone_saved_min']:.0f}m across L34–L47 "
-                f"({cf['interventions'][0]['saved_min_per_ship']:.1f}m/Ship); fails dead-on-arrival builds in ~2m instead of ~31m."
+                f"Saves {cf['interventions'][0]['standalone_saved_min']:.0f} min across {span_lbl} "
+                f"({cf['interventions'][0]['saved_min_per_ship']:.1f} min/release); catches regressions in 2 min instead of 31 min."
             ),
-            "verification": "H2H runs first on Loop 49; HOLD triggered in <=3m if H2H <= 3W-3L or any race drops 0-2.",
+            "verification": "H2H runs first; stops early if H2H finishes <= 3W-3L or any race goes 0-2.",
         },
         {
             "rank": 2,
-            "patch": "Gate 1 Brain <-> Runtime Cap & Urgency Contract Test (`<3s`)",
+            "patch": "Brain and Runtime Production-Cap Contract Check (<3s in Gate 1)",
             "owner": "@belief-author + @runtime-author + @verifier",
             "target_files": ["tests/run-all-tests.rkt", "lib/priority-macro-brain.rkt", "lib/bot-runtime.rkt"],
             "expected_impact": (
-                f"Eliminates split-brain HOLDs (L46/L47), projecting Gate-2 Ship Rate "
+                f"Prevents split-brain held builds, lifting Gate-2 release rate "
                 f"{cf.get('actual_ship_rate_pct')}% -> {cf.get('projected_gate2_ship_rate_pct')}%."
             ),
-            "verification": "Gate 1 asserts runtime production caps >= brain caps and Colossus > Phoenix > Stalker + gas=0->250 Colossus spawn.",
+            "verification": "Gate 1 asserts runtime production caps >= brain caps and Colossus > Phoenix > Stalker.",
         },
         {
             "rank": 3,
-            "patch": "Targeted 25s `--category`/`--scenario` Arena Pre-Check + Flip-Flop Guard",
+            "patch": "25-Second Targeted Drill Pre-Check for Repeatedly Edited Rules",
             "owner": "@tactics-tester + @loop-architect",
             "target_files": ["tools/iteration-loop/SWARM_PLAYBOOK.md", "tools/iteration-loop/analyze-loop-flywheel.py"],
             "expected_impact": (
-                f"Flags {len(hold_tax.get('flip_flops') or [])} oscillating subsystems before editing; "
-                f"saves {cf['interventions'][2]['standalone_saved_min']:.0f}m in wasted Arena runs."
+                f"Flags {len(hold_tax.get('flip_flops') or [])} repeatedly edited rules before changes land; "
+                f"saves {cf['interventions'][2]['standalone_saved_min']:.0f} min in wasted full drill runs."
             ),
-            "verification": "Any rule touched in >=2 of last 3 loops requires a 25s `--scenario` A/B pass before Gate 2.",
+            "verification": "Any rule touched in >= 2 of the last 3 runs requires a 25s `--scenario` A/B pass before Gate 2.",
         },
         {
             "rank": 4,
-            "patch": "Pre-Granted Track Test Ownership + Author `--skip-perf` Validation Mode",
+            "patch": "Pre-Granted Track Test Ownership and `--skip-perf` Author Mode",
             "owner": "@coordinator + @verifier",
             "target_files": ["tools/iteration-loop/SWARM_PLAYBOOK.md", "tests/run-all-tests.rkt"],
             "expected_impact": (
-                f"Eliminates ownership ping-pong pauses ({cf['interventions'][4]['standalone_saved_min']:.0f}m) and "
-                f"CPU-contention microbench false fails ({cf['interventions'][3]['standalone_saved_min']:.0f}m across L34–L47)."
+                f"Removes ownership wait pauses ({cf['interventions'][4]['standalone_saved_min']:.0f} min) and "
+                f"CPU-contention timing retries ({cf['interventions'][3]['standalone_saved_min']:.0f} min across {span_lbl})."
             ),
-            "verification": "Zero mid-coding test-ownership board requests and zero loadavg>8 perf false fails.",
+            "verification": "Authors edit their own track tests directly; @verifier owns wall-clock timing checks on an idle CPU.",
         },
         {
             "rank": 5,
-            "patch": "Step 4C Automatic Trajectory Flywheel Logging + Adaptive Monitor Cadence",
-            "owner": "@loop-architect + @monitor-2",
+            "patch": "Post-Run Log Review, Trade Video Contact Sheets & Quiet Polling",
+            "owner": "@loop-architect + @analyzer + @monitor-2",
             "target_files": [
                 "tools/iteration-loop/log-loop-trajectory.py",
                 "tools/iteration-loop/analyze-loop-flywheel.py",
-                "tools/iteration-loop/loop_trajectory_log.jsonl",
+                "tools/trade-review-pack.py",
             ],
             "expected_impact": (
-                f"Closes the loop-on-loop feedback cycle every iteration in <3s and cuts idle polling overhead "
-                f"(monitor-2 logged {monitor_steps:,} steps / {monitor_posts} posts across L19–L47)."
+                f"Updates timing logs in <3s after each run, pairs worst fights with 6-frame video sheets, "
+                f"and cuts idle monitor polling (monitor-2 logged {monitor_steps:,} steps / {monitor_posts} posts)."
             ),
-            "verification": "Step 4C appends new loop to loop_trajectory_log.jsonl and refreshes loop_flywheel_retro.md cleanly.",
+            "verification": "Each run appends to loop_trajectory_log.jsonl and produces Replay + Video trade review packs.",
         },
     ]
 
@@ -643,41 +655,47 @@ def render_markdown(report: Dict[str, Any]) -> str:
     cf = report["counterfactual_simulator"]
     patches = report["ranked_patches"]
 
+    lo_lid, hi_lid = report["loop_span"]
+    sg_lo, sg_hi = ht.get("ship_gate_span") or [34, hi_lid]
+    rec_lo, rec_hi = ht.get("recent_l37_span") or [37, hi_lid]
+    rec_cnt = ht["recent_l37_l47_counts"]
+    rec_n = rec_cnt["ships"] + rec_cnt["holds"]
+    sg_decided = ht["ship_zip_count"] + ht["hold_zip_count"]
+
     lines: List[str] = []
-    lines.append("# Mothman SC2 Autonomous Loop — Trajectory Flywheel Retrospective")
+    lines.append(f"# Build and Test Cycle Timing Review (Loops {lo_lid}–{hi_lid})")
     lines.append("")
     lines.append(
-        f"> Generated `{report['generated_at']}` from `{report['loops_analyzed']}` logged loops "
-        f"(Loops `{report['loop_span'][0]}–{report['loop_span'][1]}`, `{ag['totals']['steps']:,}` real swarm steps, "
-        f"`{ag['totals']['tool_calls']:,}` tool calls)."
+        f"> Generated `{report['generated_at']}` from `{report['loops_analyzed']}` logged runs "
+        f"(Loops {lo_lid}–{hi_lid})."
     )
     lines.append("")
 
-    # Executive summary
-    lines.append("## Executive Summary")
+    # Summary
+    lines.append("## Summary")
     lines.append("")
     lines.append(
-        f"- **Ship-Gate Cadence (Loops 34–47, `n={ht['ship_gate_era_n']}`):** "
-        f"`{ht['ship_zip_count']}` live Ships (`{ht['ship_rate_pct']}%`) vs `{ht['hold_zip_count']}` HOLD-ZIPs "
-        f"(recent 11 loops `L37–L47`: `{ht['recent_l37_l47_counts']['ships']}` Ships / `{ht['recent_l37_l47_counts']['holds']}` HOLDs = `{ht['recent_l37_l47_ship_rate_pct']}%`)."
+        f"- **Release Rate (Loops {sg_lo}–{sg_hi}, `n={sg_decided}`):** "
+        f"`{ht['ship_zip_count']}` shipped (`{ht['ship_rate_pct']}%`) vs `{ht['hold_zip_count']}` held "
+        f"(recent `{rec_n}` runs `L{rec_lo}–L{rec_hi}`: `{rec_cnt['ships']}` shipped / `{rec_cnt['holds']}` held = `{ht['recent_l37_l47_ship_rate_pct']}%`)."
     )
     lines.append(
-        f"- **Mean Loop Wall Time (`L34–L47`):** `{sg['mean_wall_min']:.1f} min` "
-        f"(Ships `{ships_p['mean_wall_min']:.1f}m` | HOLDs `{holds_p['mean_wall_min']:.1f}m` | "
-        f"GPU active `{sg['gpu_util_pct']:.1f}%` | overlapped post-bench work saved `{sg['overlapped_saved_min']:.1f}m`)."
+        f"- **Mean Run Wall Time (`L{sg_lo}–L{sg_hi}`):** `{sg['mean_wall_min']:.1f} min` "
+        f"(shipped `{ships_p['mean_wall_min']:.1f}m` | held `{holds_p['mean_wall_min']:.1f}m` | "
+        f"GPU active `{sg['gpu_util_pct']:.1f}%` | overlapped post-benchmark work saved `{sg['overlapped_saved_min']:.1f}m`)."
     )
     lines.append(
-        f"- **Counterfactual Speedup (`L34–L47`):** Adopting the top 5 flywheel patches would have saved "
-        f"**`{cf['combined_saved_min']:.1f} min` (`{cf['combined_saved_hours']:.2f} hours`)**, cutting wall time per live Ship from "
-        f"**`{cf['actual_min_per_ship']:.1f} min` → `{cf['projected_min_per_ship']:.1f} min` (`{cf['effective_speedup_x']:.2f}x` faster)** "
-        f"and lifting Gate-2 Ship Rate from **`{cf['actual_ship_rate_pct']}%` → `{cf['projected_gate2_ship_rate_pct']}%`**."
+        f"- **Estimated Time Saved (`L{sg_lo}–L{sg_hi}`):** Reordering gates and checks would have saved "
+        f"**`{cf['combined_saved_min']:.1f} min` (`{cf['combined_saved_hours']:.2f} hours`)**, reducing wall time per release from "
+        f"**`{cf['actual_min_per_ship']:.1f} min` to `{cf['projected_min_per_ship']:.1f} min` (`{cf['effective_speedup_x']:.2f}x`)** "
+        f"and raising Gate-2 release rate from **`{cf['actual_ship_rate_pct']}%` to `{cf['projected_gate2_ship_rate_pct']}%`**."
     )
     lines.append("")
 
-    # 1. Phase Pareto
-    lines.append("## 1. Phase Wall-Clock Pareto & GPU Utilization (Loops 34–47)")
+    # 1. Where Time Goes Each Run
+    lines.append(f"## 1. Where Time Goes Each Run (Loops {sg_lo}–{sg_hi})")
     lines.append("")
-    lines.append("| Phase | Total Min (`n=14`) | Mean Min | Median Min | P90 Min | Share of Wall | Ship Mean | Hold Mean |")
+    lines.append(f"| Phase | Total Min (`n={sg['n']}`) | Mean Min | Median Min | P90 Min | Share of Wall | Shipped Mean | Held Mean |")
     lines.append("|---|---:|---:|---:|---:|---:|---:|---:|")
     for ph, st in sg["phases"].items():
         sm = (ships_p["phases"].get(ph) or {}).get("mean_min", 0.0)
@@ -688,17 +706,17 @@ def render_markdown(report: Dict[str, Any]) -> str:
         )
     lines.append("")
     lines.append(
-        f"Across `L34–L47`, `coding` (`{sg['phases']['coding']['share_of_wall_pct']:.1f}%`) and "
-        f"`benchmark_84` (`{sg['phases']['benchmark_84']['share_of_wall_pct']:.1f}%`) dominate wall-clock time, "
-        f"while `baseline_h2h` averages just **`{sg['phases']['baseline_h2h']['nonzero_mean_min']:.1f} min`** yet catches almost every HOLD-ZIP regression."
+        f"Across `L{sg_lo}–L{sg_hi}`, `coding` (`{sg['phases']['coding']['share_of_wall_pct']:.1f}%`) and "
+        f"`benchmark_84` (`{sg['phases']['benchmark_84']['share_of_wall_pct']:.1f}%`) account for most wall time, "
+        f"while `baseline_h2h` averages **`{sg['phases']['baseline_h2h']['nonzero_mean_min']:.1f} min`** and catches most held regressions early."
     )
     lines.append("")
 
-    # 2. Agent Scorecard
-    lines.append("## 2. Per-Agent Step, Tool-Error, Retry & Churn Scorecard (Loops 19–47)")
+    # 2. Agent Steps, Errors, and Retries
+    lines.append(f"## 2. Agent Steps, Errors, and Retries (Loops {lo_lid}–{hi_lid})")
     lines.append("")
     lines.append(
-        "| Agent | Loops | Steps | Tool Calls | Tool Errs (%) | Edit Misses | Cmd Fails | `raco make` | `run-all-tests` | Monolith Reads | Own Reqs | Compactions | Cache Hit |"
+        "| Agent | Runs | Steps | Tool Calls | Tool Errs (%) | Edit Misses | Cmd Fails | `raco make` | `run-all-tests` | Monolith Reads | Own Reqs | Compactions | Cache Hit |"
     )
     lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for a in ag["agents"]:
@@ -710,12 +728,12 @@ def render_markdown(report: Dict[str, Any]) -> str:
         )
     lines.append("")
 
-    # 3. HOLD-ZIP Taxonomy & Flip-Flops
-    lines.append("## 3. HOLD-ZIP Root-Cause Taxonomy & Flip-Flop Detector")
+    # 3. Why Held Builds Failed & Repeated Edits
+    lines.append("## 3. Why Held Builds Failed & Repeated Edits")
     lines.append("")
-    lines.append("### 3a. HOLD-ZIP Breakdown (Loops 34–47)")
+    lines.append(f"### 3a. Held Builds (Loops {sg_lo}–{sg_hi})")
     lines.append("")
-    lines.append("| Loop | H2H | H2H Early Catch? | 84m Bench Min | Primary Root-Cause Class | Summary |")
+    lines.append("| Loop | H2H | H2H Early Catch? | 84m Bench Min | Root Cause | Summary |")
     lines.append("|---:|---|---|---:|---|---|")
     for hc in ht["hold_cases"]:
         lines.append(
@@ -724,46 +742,56 @@ def render_markdown(report: Dict[str, Any]) -> str:
         )
     lines.append("")
 
-    lines.append("### 3b. Detected Flip-Flops & Repeated Subsystem Churn (`<= 3`-Loop Rolling Clusters)")
+    lines.append("### 3b. Repeatedly Edited Rules (`<= 3`-Loop Clusters)")
     lines.append("")
     if ht["flip_flops"]:
-        lines.append("| Subsystem | Loops Touched | Touches | Recommended Flywheel Guard |")
+        micro_keys = {
+            "worker_rush_r02_r05_r06", "probe_harass_e01", "widow_mine_defense_rd01",
+            "oracle_runby_ro09", "muta_magic_box_z16", "banshee_runby_ro11", "stalker_blink_forward",
+        }
+        lines.append("| Subsystem | Loops Touched | Touches | Check Before Re-Editing |")
         lines.append("|---|---|---:|---|")
         for ff in ht["flip_flops"]:
             l_str = ", ".join(f"L{x}" for x in ff["loops"])
-            lines.append(f"| **{ff['label']}** | {l_str} | {ff['touch_count']} | {ff['recommended_guard']} |")
+            kind_lbl = "25s drill A/B" if ff["topic_key"] in micro_keys else "Gate 1 macro trace"
+            lines.append(f"| **{ff['label']}** | {l_str} | {ff['touch_count']} | {kind_lbl} |")
+        lines.append("")
+        lines.append(
+            "Rule: any micro drill touched twice in 3 runs requires a 25-second `--scenario` A/B pass before editing thresholds again; "
+            "any macro subsystem requires a closed-loop Gate 1 contract or trace test."
+        )
     else:
-        lines.append("_No recurring <=3-loop subsystem flip-flops detected._")
+        lines.append("_No recurring <=3-loop edit clusters detected._")
     lines.append("")
 
-    # 4. Counterfactual Speedup Simulator
-    lines.append("## 4. Empirical Counterfactual Speedup Simulator (Loops 34–47)")
+    # 4. Time Saved by Reordering Gates
+    lines.append(f"## 4. Time Saved by Reordering Gates (Loops {sg_lo}–{sg_hi})")
     lines.append("")
-    lines.append("| ID | Flywheel Intervention | Standalone Saved (Min) | Min Saved / Ship | Affected Loops |")
+    lines.append("| ID | Process Change | Standalone Saved (Min) | Min Saved / Release | Affected Loops |")
     lines.append("|---|---|---:|---:|---|")
     for iv in cf["interventions"]:
-        l_str = ", ".join(f"L{x}" for x in iv["affected_loops"]) if iv["affected_loops"] else "—"
+        l_str = ", ".join(f"L{x}" for x in iv["affected_loops"]) if iv["affected_loops"] else "-"
         lines.append(
             f"| `{iv['id']}` | **{iv['name']}** | {iv['standalone_saved_min']:.1f} | "
             f"{iv['saved_min_per_ship']:.1f} | {l_str} |"
         )
     lines.append("")
     lines.append(
-        f"- **Combined Non-Double-Counted Savings (`L34–L47`):** **`{cf['combined_saved_min']:.1f} min` (`{cf['combined_saved_hours']:.2f} h`)** "
-        f"— reducing total wall time `{cf['actual_total_min']:.1f}m -> {cf['projected_total_min']:.1f}m` "
-        f"(**`{cf['actual_min_per_ship']:.1f}m -> {cf['projected_min_per_ship']:.1f}m` per Ship**, **`{cf['effective_speedup_x']:.2f}x` throughput**)."
+        f"- **Combined Non-Double-Counted Savings (`L{sg_lo}–L{sg_hi}`):** **`{cf['combined_saved_min']:.1f} min` (`{cf['combined_saved_hours']:.2f} h`)**, "
+        f"reducing total wall time from `{cf['actual_total_min']:.1f}m` to `{cf['projected_total_min']:.1f}m` "
+        f"(**`{cf['actual_min_per_ship']:.1f}m` to `{cf['projected_min_per_ship']:.1f}m` per release**, **`{cf['effective_speedup_x']:.2f}x`**)."
     )
     lines.append("")
 
-    # 5. Ranked Patches
-    lines.append("## 5. Ranked Concrete Loop-Process Patches")
+    # 5. Workflow Changes Applied
+    lines.append("## 5. Workflow Changes Applied")
     lines.append("")
     for p in patches:
         files_s = ", ".join(f"`{x}`" for x in p["target_files"])
         lines.append(f"{p['rank']}. **{p['patch']}** *(Owner: {p['owner']})*")
         lines.append(f"   - **Files:** {files_s}")
-        lines.append(f"   - **Expected Impact:** {p['expected_impact']}")
-        lines.append(f"   - **Verification:** {p['verification']}")
+        lines.append(f"   - **Impact:** {p['expected_impact']}")
+        lines.append(f"   - **Check:** {p['verification']}")
     lines.append("")
     return "\n".join(lines)
 

@@ -419,20 +419,33 @@ class TestLoopFlywheel(unittest.TestCase):
             self.assertEqual(len(rep["ranked_patches"]), 5)
 
             md_text = out_md.read_text(encoding="utf-8")
-            self.assertIn("Phase Wall-Clock Pareto", md_text)
-            self.assertIn("Per-Agent Step, Tool-Error", md_text)
-            self.assertIn("Flip-Flop Detector", md_text)
-            self.assertIn("Counterfactual Speedup Simulator", md_text)
+            self.assertIn("Build and Test Cycle Timing Review (Loops 45", md_text)
+            self.assertIn("1. Where Time Goes Each Run", md_text)
+            self.assertIn("2. Agent Steps, Errors, and Retries", md_text)
+            self.assertIn("3. Why Held Builds Failed & Repeated Edits", md_text)
+            self.assertIn("4. Time Saved by Reordering Gates", md_text)
+            self.assertIn("5. Workflow Changes Applied", md_text)
+            self.assertNotIn("Recommended Flywheel Guard", md_text)
+            self.assertNotIn("Trajectory Flywheel", md_text)
             self.assertNotIn("/home/fakeuser", md_text)
+            # Arithmetic consistency: recent ships + holds must match reported recent n
+            rec_c = ht["recent_l37_l47_counts"]
+            self.assertEqual(rec_c["n"], rec_c["ships"] + rec_c["holds"])
+            self.assertIn(f"recent `{rec_c['n']}` runs", md_text)
+            # Ephemeral worker-XXXXXXXX roles must be filtered from agent scorecard
+            fake_rows = ANA_MOD.load_jsonl(jsonl_path)
+            fake_rows[0]["agent_trajectories"]["worker-78877342"] = {"steps": 12, "tool_calls_total": 5}
+            sc_filtered = ANA_MOD.compute_agent_scorecard(fake_rows)
+            self.assertNotIn("worker-78877342", [a["role"] for a in sc_filtered["agents"]])
 
     def test_live_backfilled_trajectory_log_integrity(self):
         self.assertTrue(LIVE_JSONL.is_file(), f"Missing backfilled log: {LIVE_JSONL}")
         rows = ANA_MOD.load_jsonl(LIVE_JSONL)
-        self.assertGreaterEqual(len(rows), 29, "Expected Loops 19..47 backfilled (>=29 rows)")
+        self.assertGreaterEqual(len(rows), 32, "Expected Loops 19..50 logged (>=32 rows)")
         lids = [r["loop_id"] for r in rows]
         self.assertEqual(lids, sorted(set(lids)), "loop_id must be strictly unique & ascending")
         self.assertLessEqual(lids[0], 19)
-        self.assertGreaterEqual(lids[-1], 47)
+        self.assertGreaterEqual(lids[-1], 50)
 
         raw_text = LIVE_JSONL.read_text(encoding="utf-8")
         # Hygiene: no home paths in edited_files & no bearer/token leaks

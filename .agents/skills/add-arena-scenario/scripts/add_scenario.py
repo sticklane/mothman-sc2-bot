@@ -75,7 +75,7 @@ VALID_UPGRADES = {
     "Blink", "Charge", "ResonatingGlaives", "ThermalLance", "GraviticDrive", "GraviticBoosters", "PsiStorm",
     "ShadowStride", "ProtossGroundWeapons1", "ProtossGroundWeapons2", "ProtossGroundWeapons3",
     "Stim", "CombatShield", "ConcussiveShells", "DrillingClaws", "SmartServos",
-    "InfernalPreigniter", "BansheeCloak", "HyperflightRotors", "PersonalCloaking", "AdvancedBallistics", "WeaponRefit", "Cloak",
+    "InfernalPreigniter", "BansheeCloak", "InterferenceMatrix", "HyperflightRotors", "PersonalCloaking", "AdvancedBallistics", "WeaponRefit", "Cloak",
 }
 
 TRANSPORT_UNITS = {

@@ -1071,7 +1071,8 @@
   (define p-probes-44 (for/list ([i (in-range 44)]) (mk-u (+ 10400 i) 'probe 29.0 32.0 #:hp 20.0 #:shield 20.0)))
   (define p-army-20
     (append (for/list ([i (in-range 6)]) (mk-u (+ 10460 i) 'stalker 44.0 (+ 30.0 (* 0.5 i)) #:hp 80.0 #:shield 80.0))
-            (for/list ([i (in-range 4)]) (mk-u (+ 10470 i) 'zealot 45.0 (+ 30.0 (* 0.5 i)) #:hp 100.0 #:shield 50.0))))
+            (for/list ([i (in-range 4)]) (mk-u (+ 10470 i) 'zealot 45.0 (+ 30.0 (* 0.5 i)) #:hp 100.0 #:shield 50.0))
+            (list (mk-u 10475 'observer 46.0 32.0 #:hp 40.0 #:shield 20.0 #:flying? #t))))
   (define p-bldgs-pvt
     (list (mk-u 10501 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0 #:assigned-harvesters 16 #:ideal-harvesters 16)
           (mk-u 10502 'nexus 56.5 32.5 #:hp 1000.0 #:shield 1000.0 #:assigned-harvesters 16 #:ideal-harvesters 16)

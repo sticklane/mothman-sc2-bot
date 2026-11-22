@@ -79,7 +79,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
         ReportSpec(
             slug="loops-29-plus",
             out_file="loops-29-plus.html",
-            title="Campaign Updates (Loops 29–48)",
+            title="Campaign Updates (Loops 29–50)",
             short_title="Updates",
             section="Progress & Replays",
             summary="Build summaries, live releases, and playable 3D match clips from recent test runs.",
@@ -102,7 +102,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="Speeding Up the Test & Release Cycle",
             short_title="Timing Review",
             section="Technical Notes",
-            summary="Where time went across 30 runs, why we moved the 2-minute head-to-head check first, and which rules kept flip-flopping.",
+            summary="Where time went across 32 runs, why we moved the 2-minute head-to-head check first, and which rules kept flip-flopping.",
             source_candidates=(brain_dir / "scratch/loop/loop_flywheel_retro.md",),
             required=False,
         ),
@@ -355,7 +355,7 @@ def classify_media_path(p: Path) -> Tuple[str, str]:
     if m_fm:
         return f"media-{m_fm.group(1)}-matches", m_fm.group(2)
 
-    m_vis = re.search(r"/visuals_(iter\d+)/(arena|selfplay|replays)/([^/\s)]+)$", s)
+    m_vis = re.search(r"/visuals_(iter\d+)(?:_[A-Za-z0-9_]+)?/(arena|selfplay|replays)/([^/\s)]+)$", s)
     if m_vis:
         iter_name, sub, fname = m_vis.group(1), m_vis.group(2), m_vis.group(3)
         if sub == "replays" and (
@@ -520,6 +520,22 @@ def discover_media_to_upload(
                 if p.is_file():
                     aname = p.name if p.name.startswith(prefix) else f"{prefix}{p.name}"
                     register(p, force_tag=arena_tag, force_name=aname)
+
+    # 2B. Register verified Loop 50 probe clips (d10, r15, t12, t14, s04, s05) under media-iter50.
+    l50_probe_dir = brain_dir / "scratch" / "loop" / "visuals_iter50_w3_probe" / "arena"
+    if l50_probe_dir.is_dir():
+        for sid in (
+            "sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker",
+            "sc2-reg-r15-tvp-full-lifecycle-vs-15-kiting-probes",
+            "sc2-real-t12-banshee-raven-marine-vs-dt-stalker-observer",
+            "sc2-real-t14-raven-imatrix-aam-bio-vs-colossus",
+            "sc2-sta-s04-pvz-oracle-stasis-choke-split",
+            "sc2-sta-s05-zvp-stasis-ward-defuse-ling-sac",
+        ):
+            for ext in (".mp4", ".png"):
+                p = l50_probe_dir / f"{sid}{ext}"
+                if p.is_file():
+                    register(p, force_tag="media-iter50", force_name=f"arena_{p.name}")
 
     # 3. Optionally include ALL campaign_media/iter* files.
     cm_root = brain_dir / "campaign_media"
@@ -1057,7 +1073,7 @@ class MarkdownRenderer:
         s = html.escape(s)
 
         s = re.sub(
-            r"(?<!['\"=])(https?://[^\s<>()]+)",
+            r"(?<!['\"=])(https?://[^\s<>()\*`\"']+[A-Za-z0-9/_-])",
             lambda m: (
                 f'<a href="{m.group(1)}" target="_blank" rel="noopener noreferrer">'
                 f"{m.group(1)}</a>"
@@ -1409,6 +1425,7 @@ DEPLOY_LABELS: Dict[str, str] = {
     "womqlpsp_6917245e": "Loop 42",
     "qpqqolmk_3b21fe7a": "Loop 45",
     "oyzplryr_dc3a33b6": "Loop 48",
+    "mmmkputx_6c3f9529": "Loop 50",
 }
 
 BOT_META: Dict[str, Dict[str, str]] = {
@@ -1917,10 +1934,12 @@ _DRILL_WORD_MAP: Dict[str, str] = {
     "warpprism": "Warp Prism",
     "widowmine": "Widow Mine",
     "highground": "High-Ground",
+    "imatrix": "Interference Matrix",
 }
 
 _DRILL_TITLE_OVERRIDES: Dict[str, str] = {
     "sc2-reg-r03-iter37-m42-pvz-ramp-hold-vs-ling-flood": "High-Ground Ramp Hold vs. Zergling Flood",
+    "sc2-reg-r15-tvp-full-lifecycle-vs-15-kiting-probes": "SCV Hold vs. 15 Kiting Probes",
 }
 
 
@@ -2190,6 +2209,7 @@ def discover_gallery_items(
                     "race": _race_full(race_guess),
                     "outcome": outcome,
                     "result_label": res_label,
+                    "trade_ratio": tr,
                     "title": clean_title,
                     "subtitle": " · ".join(bits),
                     "media_type": "mp4",
@@ -2200,6 +2220,81 @@ def discover_gallery_items(
                     "_local_mp4": str(mp4_local_p) if mp4_local_p else "",
                     "_safe_name": f"l{loop_num}_{mode}_{mp4_local_p.name}" if mp4_local_p else "",
                     "search": f"loop {loop_num} {sid} {clean_title} {cat_label} {race_guess} {res_label} {tier_val or ''}".lower(),
+                }
+            )
+
+    # 2B. Loop 50 Probe Drill MP4 Clips (d10 1.66x KO, r15 5.00x Pass, t12 1.78x KO, s04 1.39x KO, s05 3.51x KO)
+    l50_probe_dir = brain_dir / "scratch" / "loop" / "visuals_iter50_w3_probe" / "arena"
+    if l50_probe_dir.is_dir():
+        l50_tactics: Dict[str, Dict[str, Any]] = {}
+        for jname in ("tactics_probe_iter50_w3_dummy.json", "tactics_probe_iter50_w3_extra_dummy.json"):
+            jp = brain_dir / "scratch" / "loop" / jname
+            if jp.is_file():
+                try:
+                    jd = json.loads(jp.read_text(encoding="utf-8"))
+                    for sc in jd.get("results", jd.get("scenarios", [])):
+                        if isinstance(sc, dict) and sc.get("id"):
+                            l50_tactics[str(sc["id"])] = sc
+                except Exception:
+                    pass
+        for sid in (
+            "sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker",
+            "sc2-reg-r15-tvp-full-lifecycle-vs-15-kiting-probes",
+            "sc2-real-t12-banshee-raven-marine-vs-dt-stalker-observer",
+            "sc2-sta-s04-pvz-oracle-stasis-choke-split",
+            "sc2-sta-s05-zvp-stasis-ward-defuse-ling-sac",
+            "sc2-real-t14-raven-imatrix-aam-bio-vs-colossus",
+        ):
+            mp4_p = l50_probe_dir / f"{sid}.mp4"
+            if not mp4_p.is_file():
+                continue
+            png_p = l50_probe_dir / f"{sid}.png"
+            mp4_url = resolve_cdn(str(mp4_p), l50_probe_dir)
+            png_url = resolve_cdn(str(png_p), l50_probe_dir) if png_p.is_file() else ""
+            tinfo = l50_tactics.get(sid, {})
+            race_guess = str(tinfo.get("p1_race") or tinfo.get("race") or "")
+            if not race_guess:
+                race_guess = "Terran" if ("-t-" in sid or "-tvp-" in sid or "-t1" in sid) else ("Protoss" if "-p" in sid else "Zerg")
+            winner_raw = str(tinfo.get("winner") or "").strip().lower()
+            win_type = str(tinfo.get("win_type") or "").strip().lower()
+            if winner_raw in ("mothman", "mothman-p1", "p1"):
+                outcome = "win"
+                res_label = "Pass" if "econ" in win_type else "Win"
+            elif winner_raw in ("draw", "tie"):
+                outcome = "tie"
+                res_label = "Draw"
+            else:
+                outcome = "loss"
+                res_label = "Fail" if "econ" in win_type else "Loss"
+            tr = tinfo.get("trade_ratio")
+            tier_val = tinfo.get("tier") or "canonical"
+            clean_title = _format_drill_title(sid)
+            bits = ["Tactics Drills"]
+            tr_lbl = _format_trade_label(tr, outcome)
+            if tr_lbl:
+                bits.append(tr_lbl)
+            if tier_val:
+                bits.append(str(tier_val))
+            items.append(
+                {
+                    "loop": "Loop 50",
+                    "loop_num": 50,
+                    "category": "Tactics Drills",
+                    "cohort": str(tier_val),
+                    "race": _race_full(race_guess),
+                    "outcome": outcome,
+                    "result_label": res_label,
+                    "trade_ratio": tr,
+                    "title": clean_title,
+                    "subtitle": " · ".join(bits),
+                    "media_type": "mp4",
+                    "playable_mp4": False,
+                    "src": mp4_url or "",
+                    "download_url": mp4_url or "",
+                    "poster": png_url,
+                    "_local_mp4": str(mp4_p),
+                    "_safe_name": f"l50_arena_{mp4_p.name}",
+                    "search": f"loop 50 {sid} {clean_title} tactics drills {race_guess} {res_label} {tier_val}".lower(),
                 }
             )
 
@@ -3140,6 +3235,8 @@ _CALM_LOOP_TITLES: Dict[int, str] = {
     46: "Zerg core high & p15 win (held)",
     47: "Zero cloak losses & drill peak (held)",
     48: "Live release #7 (50% core benchmark)",
+    49: "Banelings, base layouts & stall checks (held)",
+    50: "Live release #8 (Zerg breakthrough & SC2 4.10 fixes)",
 }
 
 
@@ -3566,9 +3663,15 @@ def build_index_page(
         smeta = scen_meta_by_id[sid]
         cat = str(smeta.get("category") or "other")
         sres = arena_res_by_id.get(sid, {})
-        desc = _clean_drill_caption(str(smeta.get("description") or it.get("subtitle") or ""))
+        if sid == "sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker" and int(it.get("loop_num") or 0) >= 50:
+            desc = (
+                "Vikings clear both Observers so Cloaked Banshees stay invisible, then land on the remaining "
+                "Stalkers while the Raven drops two Auto-Turrets and kites to safety."
+            )
+        else:
+            desc = _clean_drill_caption(str(smeta.get("description") or it.get("subtitle") or ""))
         outcome_val = str(it.get("outcome") or "win")
-        tr = sres.get("trade_ratio")
+        tr = it.get("trade_ratio") if it.get("trade_ratio") is not None else sres.get("trade_ratio")
         tr_lbl = _format_trade_label(tr, outcome_val)
         tr_str = f" · {tr_lbl}" if tr_lbl else ""
         clips_by_cat.setdefault(cat, []).append(
@@ -3746,7 +3849,7 @@ def build_index_page(
     prev_n_val = dash.get("prev_build_n", prev_w + prev_l)
     prev_ties = max(0, prev_n_val - prev_w - prev_l)
     prev_rec_str = f"{prev_w}–{prev_l}" + (f"–{prev_ties}" if prev_ties else "")
-    deployed_build_num = 48
+    deployed_build_num = 50
     latest_num_m = re.search(r"(\d+)", latest_lbl)
     prev_num_m = re.search(r"(\d+)", prev_lbl)
     latest_b_num = int(latest_num_m.group(1)) if latest_num_m else 45
@@ -3926,7 +4029,10 @@ def build_static_site(
     loop_root = brain_dir / "scratch" / "loop"
     flagship_specs = [
         ("showcase:p15", loop_root / "visuals_iter48/arena/sc2-real-p15-dt-blink-snipe-planetary.mp4", "feat_p15_dt_pf.mp4"),
-        ("showcase:d10", loop_root / "visuals_iter48/arena/sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker.mp4", "feat_d10_banshee_obs.mp4"),
+        ("showcase:d10", loop_root / "visuals_iter50_w3_probe/arena/sc2-det-d10-t-cloaked-banshee-viking-vs-observers-stalker.mp4", "feat_l50_d10_banshee_obs.mp4"),
+        ("showcase:r15", loop_root / "visuals_iter50_w3_probe/arena/sc2-reg-r15-tvp-full-lifecycle-vs-15-kiting-probes.mp4", "feat_l50_r15_scv_hold.mp4"),
+        ("showcase:t12", loop_root / "visuals_iter50_w3_probe/arena/sc2-real-t12-banshee-raven-marine-vs-dt-stalker-observer.mp4", "feat_l50_t12_banshee_raven.mp4"),
+        ("showcase:s04", loop_root / "visuals_iter50_w3_probe/arena/sc2-sta-s04-pvz-oracle-stasis-choke-split.mp4", "feat_l50_s04_stasis_choke.mp4"),
         ("showcase:ro01", loop_root / "visuals_iter48/arena/sc2-runby-ro01-tvz-widow-mine-drop-drones.mp4", "feat_ro01_widow_mine.mp4"),
         ("showcase:ro04", loop_root / "visuals_iter48/arena/sc2-runby-ro04-tvz-blueflame-hellion-runby-drones.mp4", "feat_ro04_hellion.mp4"),
         ("showcase:h2h003", loop_root / "visuals_iter45/full_matches/full_h2h003_Mothman-P_vs_Mothman-P-Base.mp4", "feat_l45_h2h003_pvp.mp4"),

@@ -2840,8 +2840,8 @@
               (not (not (ormap (lambda (a) (equal? a '(cast-spell 5001 battery-overcharge 5002)))
                                (situational-counter-plan-ability-actions live-battery-plan)))))
 
-  ;; 2. W11-P0-4-wire (`w11-tac-4`): Wire suppresses 3745/181 and flies Overseer directly to
-  ;;    uncovered Cloaked Banshee (115,115) / (35,35), and unmorphs OverseerSiege (1912) via 3743!
+  ;; 2. W11-P0-4-wire (`w11-tac-4`): Wire suppresses 3743/181 and flies Overseer directly to
+  ;;    uncovered Cloaked Banshee (115,115) / (35,35), and unmorphs OverseerSiege (1912) via 3745!
   (define ov-a-cmds
     (translate-bot-actions->sc2-raw-commands
      '((cast-spell 6401 morph-oversight-mode))
@@ -2850,8 +2850,8 @@
                           (mk-w11-u 6401 129 1 60.0 60.0 #:hp 200.0 #:en 0.0 #:flying? #t)
                           (mk-w11-u 6410 107 1 112.0 113.0 #:hp 90.0)
                           (mk-w11-u 9401 55 4 115.0 115.0 #:hp 140.0 #:flying? #t #:cloak 1)))))
-  (check-true "w11-tac-4-wire-0en-overseer-skips-3745-and-moves-to-cloaked-banshee"
-              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3745))) ov-a-cmds))
+  (check-true "w11-tac-4-wire-0en-overseer-skips-3743-and-moves-to-cloaked-banshee"
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3743))) ov-a-cmds))
                    (ormap (lambda (c)
                             (and (sc2-raw-unit-command? c)
                                  (= (sc2-raw-unit-command-ability-id c) 16)
@@ -2873,8 +2873,8 @@
                           (mk-w11-u 6421 129 1 60.0 60.0 #:hp 200.0 #:en 50.0 #:flying? #t)
                           (mk-w11-u 6430 107 1 36.0 34.0 #:hp 90.0)
                           (mk-w11-u 9421 55 4 35.0 35.0 #:hp 140.0 #:flying? #t #:cloak 1)))))
-  (check-true "w11-tac-4-wire-50en-overseer-skips-181-3745-and-moves-home-to-banshee"
-              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (memv (sc2-raw-unit-command-ability-id c) '(181 3745)))) ov-b-cmds))
+  (check-true "w11-tac-4-wire-50en-overseer-skips-181-3743-and-moves-home-to-banshee"
+              (and (not (ormap (lambda (c) (and (sc2-raw-unit-command? c) (memv (sc2-raw-unit-command-ability-id c) '(181 3743)))) ov-b-cmds))
                    (ormap (lambda (c)
                             (and (sc2-raw-unit-command? c)
                                  (= (sc2-raw-unit-command-ability-id c) 16)
@@ -2893,10 +2893,10 @@
                     (list (mk-w11-u 1001 86 1 32.5 32.5 #:hp 1500.0 #:rad 2.75)
                           (mk-w11-u 6441 1912 1 60.0 60.0 #:hp 200.0 #:flying? #t)
                           (mk-w11-u 9441 55 4 115.0 115.0 #:hp 140.0 #:flying? #t #:cloak 1)))))
-  (check-true "w11-tac-4-wire-unmorphs-sieged-overseer-1912-via-3743"
+  (check-true "w11-tac-4-wire-unmorphs-sieged-overseer-1912-via-3745"
               (ormap (lambda (c)
                        (and (sc2-raw-unit-command? c)
-                            (= (sc2-raw-unit-command-ability-id c) 3743)
+                            (= (sc2-raw-unit-command-ability-id c) 3745)
                             (memv 6441 (sc2-raw-unit-command-unit-tags c))))
                      ov-siege-cmds))
 
@@ -2905,10 +2905,10 @@
      '((cast-spell 6450 morph-oversight-mode))
      (make-test-obs 11012 300 200
                     (list (mk-w11-u 6450 129 1 60.0 60.0 #:hp 200.0 #:flying? #t)))))
-  (check-true "w11-tac-4-peacetime-explicit-oversight-3745-still-allowed"
+  (check-true "w11-tac-4-peacetime-explicit-oversight-3743-still-allowed"
               (ormap (lambda (c)
                        (and (sc2-raw-unit-command? c)
-                            (= (sc2-raw-unit-command-ability-id c) 3745)
+                            (= (sc2-raw-unit-command-ability-id c) 3743)
                             (memv 6450 (sc2-raw-unit-command-unit-tags c))))
                      ov-peace-cmds))
 
@@ -10887,6 +10887,122 @@
                    (equal? (sc2-raw-unit-command-unit-tags l50-c-46) '(99813))
                    (l50-wire-ok? l50-c-2387) (= (wire-cmd-priority-tier l50-c-2387) 0)
                    (l50-wire-ok? l50-c-2596) (= (wire-cmd-priority-tier l50-c-2596) 0)))
+
+  ;; 10. L51 (`#1263`): SC2 5.0.14 Wire Fixes (`4111` Microbial Shroud, `3743 <-> 3745` Overseer swap,
+  ;;     `142` Mothership Recall, `4109` Hydralisk Frenzy, `807`/`49`/`770`/`1284` research + `279`/`297`/`300`/`302` buffs)
+  ;;     + Dynamic `ResponseData` Sync (patch-mod A `299` vs patch-mod B `300` InterferenceMatrix, `4107` unavailable / `4111` available)
+  (define l51-inf  (mk-l49-u 99821 111 1 30.0 60.0 #:hp 90.0   #:rad 0.75)) ;; Infestor
+  (define l51-moth (mk-l49-u 99822 10  1 34.0 60.0 #:hp 350.0  #:rad 1.375)) ;; Mothership
+  (define l51-hyd  (mk-l49-u 99823 107 1 36.0 60.0 #:hp 90.0   #:rad 0.625)) ;; Hydralisk
+  (define l51-ovs  (mk-l49-u 99824 129 1 38.0 60.0 #:hp 200.0  #:rad 1.0)) ;; Overseer
+  (define l51-stl  (mk-l49-u 99825 41  1 40.0 60.0 #:hp 400.0  #:rad 1.0)) ;; StarportTechLab
+  (define l51-ftl  (mk-l49-u 99826 39  1 42.0 60.0 #:hp 400.0  #:rad 1.0)) ;; FactoryTechLab
+  (define l51-fb   (mk-l49-u 99827 64  1 44.0 60.0 #:hp 500.0  #:rad 1.5)) ;; FleetBeacon
+  (define l51-hden (mk-l49-u 99828 91  1 46.0 60.0 #:hp 850.0  #:rad 1.5)) ;; HydraliskDen
+  (define l51-nex  (mk-l49-u 99829 59  1 48.0 60.0 #:hp 1000.0 #:rad 2.5)) ;; Nexus
+  (define l51-bat  (mk-l49-u 99830 1910 1 50.0 60.0 #:hp 150.0 #:rad 1.0)) ;; ShieldBattery
+  (define l51-obs  (make-test-obs 4700 800 800
+                                  (list l51-inf l51-moth l51-hyd l51-ovs l51-stl l51-ftl l51-fb l51-hden l51-nex l51-bat)))
+  (define l51-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 99821 microbial-shroud 35.0 62.0)
+       (cast-spell 99822 mothership-mass-recall 35.0 62.0)
+       (cast-spell 99823 hydralisk-frenzy)
+       (cast-spell 99824 morph-oversight-mode)
+       (research interference-matrix)
+       (research hurricane-thrusters)
+       (research tectonic-destabilizers)
+       (research hydralisk-frenzy))
+     l51-obs #:game-info gi-sw))
+  (define l51-c-4111 (l50-find2 l51-cmds 4111))
+  (define l51-c-142  (l50-find2 l51-cmds 142))
+  (define l51-c-4109 (l50-find2 l51-cmds 4109))
+  (define l51-c-3743 (l50-find2 l51-cmds 3743))
+  (define l51-c-807  (l50-find2 l51-cmds 807))
+  (define l51-c-770  (l50-find2 l51-cmds 770))
+  (define l51-c-49   (l50-find2 l51-cmds 49))
+  (define l51-c-1284 (l50-find2 l51-cmds 1284))
+  ;; Dynamic ResponseData sync: test patch-mod A (InterferenceMatrix=299, 4107=avail)
+  ;; then patch-mod B (MicrobialShroud=299, InterferenceMatrix=300, 4107=unavail, 4111=avail)
+  (define mod-a-data
+    (sc2-data (list (sc2-ability-data-entry 4107 "Effect BatteryOvercharge" #t)
+                    (sc2-ability-data-entry 4111 "Effect AmorphousArmorcloud" #t))
+              '()
+              (list (sc2-data-entry 299 "InterferenceMatrix"))
+              '() '()))
+  (register-sc2-response-data! mod-a-data)
+  (define mod-a-im-sym (sc2-id->upgrade-symbol 299))
+  (define mod-a-im-id  (upgrade-symbol->sc2-id 'interference-matrix))
+  (define mod-a-4107?  (sc2-ability-live-available? 4107))
+  (define mod-a-def?   (sc2-upgrade-defined-in-live-data? 'interference-matrix))
+  (define mod-b-data
+    (sc2-data (list (sc2-ability-data-entry 4107 "Effect BatteryOvercharge" #f)
+                    (sc2-ability-data-entry 4111 "Effect AmorphousArmorcloud" #t))
+              '()
+              (list (sc2-data-entry 296 "HurricaneThrusters")
+                    (sc2-data-entry 297 "TempestGroundAttackUpgrade")
+                    (sc2-data-entry 298 "Frenzy")
+                    (sc2-data-entry 299 "MicrobialShroud")
+                    (sc2-data-entry 300 "InterferenceMatrix"))
+              '() '()))
+  (register-sc2-response-data! mod-b-data)
+  (define mod-b-ms-sym  (sc2-id->upgrade-symbol 299))
+  (define mod-b-im-sym  (sc2-id->upgrade-symbol 300))
+  (define mod-b-im-id   (upgrade-symbol->sc2-id 'interference-matrix))
+  (define mod-b-4107?   (sc2-ability-live-available? 4107))
+  (define mod-b-4111?   (sc2-ability-live-available? 4111))
+  (define mod-b-def?    (sc2-upgrade-defined-in-live-data? 'interference-matrix))
+  ;; Wire suppresses 4107 BatteryOvercharge when ResponseData marks 4107 unavailable
+  (define mod-b-bo-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 99829 battery-overcharge 99830))
+     l51-obs #:game-info gi-sw))
+  (define mod-b-bo-suppressed? (not (l50-find2 mod-b-bo-cmds 4107)))
+  ;; Clean reset restores offline default (`sc2-ability-live-available? 4107` -> `#t`)
+  (reset-sc2-live-response-data!)
+  (define offline-4107? (sc2-ability-live-available? 4107))
+  (check-true "l51-sc2-5014-wire-ids-and-dynamic-response-data-sync"
+              (and ;; 1. Corrected 5.0.14 outbound IDs & inbound legacy aliases
+                   (= (ability-symbol->sc2-id 'microbial-shroud) 4111)
+                   (eq? (sc2-id->ability-symbol 4111) 'microbial-shroud)
+                   (eq? (sc2-id->ability-symbol 2545) 'microbial-shroud)
+                   (= (ability-symbol->sc2-id 'morph-oversight-mode) 3743)
+                   (= (ability-symbol->sc2-id 'morph-overseer-mode) 3745)
+                   (eq? (sc2-id->ability-symbol 3743) 'morph-oversight-mode)
+                   (eq? (sc2-id->ability-symbol 3745) 'morph-overseer-mode)
+                   (= (ability-symbol->sc2-id 'mothership-mass-recall) 142)
+                   (eq? (sc2-id->ability-symbol 142) 'mothership-mass-recall)
+                   (eq? (sc2-id->ability-symbol 2368) 'mothership-mass-recall)
+                   (= (ability-symbol->sc2-id 'hydralisk-frenzy) 4109)
+                   (= (research-symbol->ability-id 'interference-matrix) 807)
+                   (= (research-symbol->ability-id 'hurricane-thrusters) 770)
+                   (= (research-symbol->ability-id 'tectonic-destabilizers) 49)
+                   (= (research-symbol->ability-id 'hydralisk-frenzy) 1284)
+                   ;; 2. Missing 5.0.14 buffs & upgrades
+                   (eq? (buff-id->symbol 279) 'raven-shredder-missile-tint)
+                   (eq? (buff-id->symbol 297) 'microbial-shroud)
+                   (eq? (buff-id->symbol 300) 'interference-matrix-carrier)
+                   (eq? (buff-id->symbol 302) 'hydralisk-frenzy)
+                   (= (upgrade-symbol->sc2-id 'caduceus-reactor) 21)
+                   (= (upgrade-symbol->sc2-id 'medivac-caduceus-reactor) 21)
+                   (= (upgrade-symbol->sc2-id 'hurricane-thrusters) 296)
+                   (= (upgrade-symbol->sc2-id 'tectonic-destabilizers) 297)
+                   (= (upgrade-symbol->sc2-id 'hydralisk-frenzy) 298)
+                   ;; 3. Live translation & research-building routing + wire verifier OK
+                   (l50-wire-ok? l51-c-4111) (= (wire-cmd-priority-tier l51-c-4111) 0)
+                   (l50-wire-ok? l51-c-142)  (= (wire-cmd-priority-tier l51-c-142) 0)
+                   (l50-wire-ok? l51-c-4109) (= (wire-cmd-priority-tier l51-c-4109) 0)
+                   (l50-wire-ok? l51-c-3743)
+                   (l50-wire-ok? l51-c-807)  (equal? (sc2-raw-unit-command-unit-tags l51-c-807)  '(99825))
+                   (l50-wire-ok? l51-c-770)  (equal? (sc2-raw-unit-command-unit-tags l51-c-770)  '(99826))
+                   (l50-wire-ok? l51-c-49)   (equal? (sc2-raw-unit-command-unit-tags l51-c-49)   '(99827))
+                   (l50-wire-ok? l51-c-1284) (equal? (sc2-raw-unit-command-unit-tags l51-c-1284) '(99828))
+                   ;; 4. Dynamic ResponseData map-shift resolution (299 vs 300) & live availability
+                   (eq? mod-a-im-sym 'interference-matrix) (= mod-a-im-id 299) mod-a-4107? mod-a-def?
+                   (eq? mod-b-ms-sym 'microbial-shroud)
+                   (eq? mod-b-im-sym 'interference-matrix)  (= mod-b-im-id 300)
+                   (not mod-b-4107?) mod-b-4111? mod-b-def?
+                   mod-b-bo-suppressed? offline-4107?))
   (hash-clear! SC2-PROD-PLACEMENT-MISS-STREAK)
   (hash-clear! SC2-WATCHDOG-RING-EXPAND-SYMS))
 

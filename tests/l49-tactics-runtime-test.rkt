@@ -22,7 +22,13 @@
          "../lib/tactics/pro-spellcaster-micro.rkt"
          "../lib/tactics/unit-mode-micro.rkt"
          "../lib/tactics/arena-minimax.rkt"
-         "../lib/tactics/zerg-burrow-micro.rkt")
+         "../lib/tactics/zerg-burrow-micro.rkt"
+         (only-in "../lib/sc2-protobuf-ws.rkt"
+                  sc2-data
+                  sc2-ability-data-entry
+                  register-sc2-response-data!
+                  reset-sc2-live-response-data!
+                  sc2-ability-live-available?))
 
 (define tests-run 0)
 (define tests-passed 0)
@@ -1494,6 +1500,345 @@
               (format "meta?=~a cast-only?=~a walk1764?=~a hurt-kite?=~a low-en-9.5?=~a det-tether?=~a"
                       meta-ids-ok? cast-turret-only? walk-1764-protected?
                       hurt-kites-away? low-en-retreats-9.5? det-stays-tethered?)))
+
+;; -----------------------------------------------------------------------------
+;; 28. L51-2A: `#75 PvT who` — Observer #1 Trains FIRST Out of Robo #1 Ahead of Immortal #1
+;; -----------------------------------------------------------------------------
+(let ()
+  (define nex1 (mk-u 28001 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0))
+  (define nex2 (mk-u 28002 'nexus 58.5 32.5 #:hp 1000.0 #:shield 1000.0))
+  (define pyl  (mk-u 28003 'pylon 38.5 34.5 #:hp 200.0 #:shield 200.0))
+  (define gw1  (mk-u 28004 'gateway 39.5 32.5 #:hp 500.0 #:shield 500.0))
+  (define cyb  (mk-u 28005 'cybernetics-core 39.5 36.5 #:hp 550.0 #:shield 550.0))
+  (define robo (mk-u 28006 'robotics-facility 40.5 35.5 #:hp 450.0 #:shield 450.0))
+  (define assm (list (mk-u 28011 'assimilator 28.5 36.5 #:hp 450.0 #:shield 450.0)
+                     (mk-u 28012 'assimilator 36.5 28.5 #:hp 450.0 #:shield 450.0)))
+  (define probes (for/list ([i (in-range 28)]) (mk-u (+ 28101 i) 'probe 28.0 (+ 30.0 (* 0.2 i)) #:hp 20.0 #:shield 20.0)))
+  ;; Only 2 Zealots + 1 Stalker (6 army supply < 8!) + 300M/155G when Robo finishes at 197s (`f=4410`)!
+  (define army0 (list (mk-u 28201 'zealot 50.0 32.0 #:hp 100.0 #:shield 50.0)
+                      (mk-u 28202 'zealot 50.0 33.0 #:hp 100.0 #:shield 50.0)
+                      (mk-u 28203 'stalker 49.0 32.5 #:hp 80.0 #:shield 80.0)))
+  (define a-obs1
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss)
+     (mk-live-obs 'Protoss 'Terran 4410 #:minerals 300 #:gas 155 #:supply-used 34 #:supply-cap 54
+                  #:mineral-harvesters 22 #:vespene-harvesters 6
+                  #:ally-units (append probes army0)
+                  #:ally-buildings (append (list nex1 nex2 pyl gw1 cyb robo) assm)
+                  #:enemy-buildings (list (mk-u 28950 'command-center 142.5 138.5 #:hp 1500.0)))))
+  (define trained-obs1? (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'observer))) a-obs1))
+  (define trained-imm-before-obs? (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'immortal))) a-obs1))
+  ;; Once Observer #1 IS live, Robo immediately resumes Immortal #1 training!
+  (define obs-live (mk-u 28250 'observer 52.0 33.0 #:hp 40.0 #:shield 20.0 #:flying #t))
+  (define a-imm1
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss)
+     (mk-live-obs 'Protoss 'Terran 4900 #:minerals 450 #:gas 150 #:supply-used 35 #:supply-cap 54
+                  #:mineral-harvesters 22 #:vespene-harvesters 6
+                  #:ally-units (append probes army0 (list obs-live))
+                  #:ally-buildings (append (list nex1 nex2 pyl gw1 cyb robo) assm)
+                  #:enemy-buildings (list (mk-u 28950 'command-center 142.5 138.5 #:hp 1500.0)))))
+  (define trained-imm-after-obs? (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'immortal))) a-imm1))
+  (check-true "L51-2A-pvt-observer1-before-immortal1-and-immortal-resumes-after"
+              (and trained-obs1? (not trained-imm-before-obs?) trained-imm-after-obs?)
+              (format "obs1?=~a imm-before?=~a imm-after?=~a"
+                      trained-obs1? trained-imm-before-obs? trained-imm-after-obs?)))
+
+;; -----------------------------------------------------------------------------
+;; 29. L51-2B: `#20 TvZ PolyMorph` — 2 CC Rejects -> Lower Ramp Depots + In-Base CC Fallback
+;;             + Zero Blind 92s Main Bunker vs Peaceful Hatch-First Zerg
+;; -----------------------------------------------------------------------------
+(let ()
+  (define cc  (mk-u 29001 'command-center 32.5 32.5 #:hp 1500.0))
+  (define dep1 (mk-u 29002 'supply-depot 42.5 32.5 #:hp 400.0))
+  (define rax (mk-u 29003 'barracks 42.5 35.5 #:hp 1000.0))
+  (define ref (mk-u 29004 'refinery 28.5 36.5 #:hp 500.0))
+  (define scvs (for/list ([i (in-range 19)]) (mk-u (+ 29101 i) 'scv 28.0 (+ 29.0 (* 0.3 i)) #:hp 45.0)))
+  (define mps (for/list ([i (in-range 8)]) (mk-u (+ 29501 i) 'mineral-field 25.0 (+ 28.0 (* 0.8 i)) #:hp 1500.0)))
+  ;; Peaceful Hatch-first Zerg (`2` Hatcheries at enemy main/nat + `2` passive safety Lings at enemy nat):
+  (define e-hatch-first
+    (list (mk-u 29901 'hatchery 142.5 138.5 #:hp 1500.0)
+          (mk-u 29902 'hatchery 122.5 136.5 #:hp 1500.0)))
+  (define e-home-lings
+    (list (mk-u 29911 'zergling 124.0 135.0 #:hp 35.0)
+          (mk-u 29912 'zergling 125.0 135.0 #:hp 35.0)))
+  ;; (a) At 92s (`f=2060`, `180M`), zero blind main Bunker vs zero-threat Hatch-first Zerg!
+  (define a-92s
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+     (mk-live-obs 'Terran 'Zerg 2060 #:minerals 180 #:gas 40 #:supply-used 19 #:supply-cap 23
+                  #:mineral-harvesters 16 #:vespene-harvesters 3
+                  #:ally-units scvs #:ally-buildings (list cc dep1 rax ref)
+                  #:enemy-units e-home-lings #:enemy-buildings e-hatch-first #:mineral-patches mps)))
+  (define built-blind-bunker? (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'bunker))) a-92s))
+  ;; (b) Natural CC placement-reject retry loop (`f=3260` -> expire `f=3276` -> retry `f=3284` -> expire `f=3300`):
+  ;;     After 2 expirations within 80f, immediately lower ramp Depots AND fall back to high-ground in-base CC!
+  (define oc (mk-u 29001 'orbital-command 32.5 32.5 #:hp 1500.0))
+  (define rt-cc (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define (mk-cc-obs f)
+    (mk-live-obs 'Terran 'Zerg f #:minerals 450 #:gas 50 #:supply-used 21 #:supply-cap 31
+                 #:mineral-harvesters 16 #:vespene-harvesters 3
+                 #:ally-units scvs #:ally-buildings (list oc dep1 rax ref)
+                 #:enemy-units '() #:enemy-buildings e-hatch-first #:mineral-patches mps))
+  ;; Tick 1 (`f=3260`): First natural CC attempt (`expand`) + proactively lowers ramp Depot!
+  (define a-t1 (step-layer2-economy! rt-cc (mk-cc-obs 3260)))
+  (define t1-expanded? (ormap (lambda (a) (and (pair? a) (eq? (car a) 'expand))) a-t1))
+  (define t1-lowered-depot?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (third a) 'morph-supply-depot-lower))) a-t1))
+  ;; Tick 2 (`f=3276`): Order-ledger expires rejected expand (1st expiration recorded)
+  (define a-t2 (step-layer2-economy! rt-cc (mk-cc-obs 3276)))
+  ;; Tick 3 (`f=3284`): Fast retry #2 (`expand`) + re-lowers raised ramp Depot (`>= 24f`)!
+  (define a-t3 (step-layer2-economy! rt-cc (mk-cc-obs 3284)))
+  (define t3-retried? (ormap (lambda (a) (and (pair? a) (eq? (car a) 'expand))) a-t3))
+  (define t3-lowered-depot?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (third a) 'morph-supply-depot-lower))) a-t3))
+  ;; Tick 4 (`f=3304`, 44f <= 80f after first attempt): Expiration #2 -> IMMEDIATE in-base `(build command-center ...)`!
+  (define a-t4 (step-layer2-economy! rt-cc (mk-cc-obs 3304)))
+  (define t4-in-base-cc?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'command-center))) a-t4))
+  (check-true "L51-2B-tvz-cc-reject-lower-depot-in-base-fallback-and-no-92s-bunker"
+              (and (not built-blind-bunker?)
+                   t1-expanded?
+                   t1-lowered-depot?
+                   t3-retried?
+                   t3-lowered-depot?
+                   t4-in-base-cc?)
+              (format "blind-bunk?=~a t1-exp?=~a t1-low?=~a t3-retry?=~a t3-low?=~a t4-inbase?=~a"
+                      built-blind-bunker? t1-expanded? t1-lowered-depot? t3-retried? t3-lowered-depot? t4-in-base-cc?)))
+
+;; -----------------------------------------------------------------------------
+;; 30. L51-2C: `#50 TvP Thssprtssbt` — Cannon-Rush SCV Pull Keeps `>= 6` Mineral SCVs Mining
+;; -----------------------------------------------------------------------------
+(let ()
+  (define cc  (mk-u 30001 'command-center 32.5 32.5 #:hp 1500.0))
+  (define dep (mk-u 30002 'supply-depot 42.5 32.5 #:hp 400.0))
+  (define rax (mk-u 30003 'barracks 42.5 35.5 #:hp 1000.0))
+  (define ref (mk-u 30004 'refinery 28.5 36.5 #:hp 500.0))
+  (define mps (for/list ([i (in-range 8)]) (mk-u (+ 30501 i) 'mineral-field 25.0 (+ 28.0 (* 0.8 i)) #:hp 1500.0)))
+  ;; 13 SCVs total: 3 harvesting gas (Refinery 30004) + 10 mineral SCVs vs in-main warping Cannon + Pylon!
+  ;; Must pull at most `10 - 6 = 4` SCVs so `>= 6` non-gas SCVs remain mining minerals!
+  (define gas-scvs
+    (for/list ([i (in-range 3)])
+      (mk-u (+ 30101 i) 'scv 28.5 (+ 36.0 (* 0.3 i)) #:hp 45.0 #:order-ability-id 295 #:order-target-id 30004)))
+  (define min-scvs
+    (for/list ([i (in-range 10)])
+      (mk-u (+ 30201 i) 'scv 27.5 (+ 28.5 (* 0.5 i)) #:hp 45.0 #:order-ability-id 295 #:order-target-id 30501)))
+  (define proxy-pyl (mk-u 30850 'pylon 39.5 31.5 #:hp 200.0 #:shield 200.0 #:build-progress 1.0))
+  (define proxy-can (mk-u 30851 'photon-cannon 38.5 33.0 #:hp 70.0 #:shield 70.0 #:build-progress 0.35))
+  (define a-50
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+     (mk-live-obs 'Terran 'Protoss 2600 #:minerals 60 #:gas 20 #:supply-used 13 #:supply-cap 23
+                  #:mineral-harvesters 10 #:vespene-harvesters 3
+                  #:ally-units (append gas-scvs min-scvs)
+                  #:ally-buildings (list cc dep rax ref)
+                  #:enemy-units (list (mk-u 30860 'probe 40.0 32.0 #:hp 20.0 #:shield 20.0))
+                  #:enemy-buildings (list proxy-pyl proxy-can) #:mineral-patches mps)))
+  (define pulled-ids
+    (remove-duplicates
+     (append* (for/list ([a (in-list a-50)] #:when (and (pair? a) (eq? (car a) 'pull-workers-attack)))
+                (second a)))))
+  (define remaining-min-scvs (- (length min-scvs) (length pulled-ids)))
+  (check-true "L51-2C-cannon-rush-scv-pull-keeps-at-least-6-mineral-scvs-mining"
+              (and (> (length pulled-ids) 0)
+                   (>= remaining-min-scvs 6)
+                   (not (ormap (lambda (id) (memv id '(30101 30102 30103))) pulled-ids)))
+              (format "pulled=~a remaining-min=~a" (length pulled-ids) remaining-min-scvs)))
+
+;; -----------------------------------------------------------------------------
+;; 31. L51-2D: `t14` Raven Interference Matrix (3747) Priority Ahead of Auto-Turret
+;; -----------------------------------------------------------------------------
+(let ()
+  (define bio
+    (for/list ([i (in-range 8)])
+      (mk-u (+ 31101 i) 'marine 75.5 (+ 78.0 (* 0.5 i)) #:hp 45.0 #:max-hp 45.0)))
+  (define zealots-close
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 31801 i) 'zealot 79.5 (+ 78.5 (* 0.6 i)) #:hp 100.0 #:max-hp 100.0 #:shield 50.0 #:max-shield 50.0)))
+  (define col-9.4t
+    (mk-u 31850 'colossus 83.4 80.0 #:hp 200.0 #:max-hp 200.0 #:shield 150.0 #:max-shield 150.0))
+  ;; (a) Raven at `en=80` with Zealot clump at 5.5t AND Colossus at 9.4t -> MUST cast Interference Matrix (`3747`) FIRST!
+  (define rav-80 (mk-u 31001 'raven 74.0 80.0 #:hp 140.0 #:max-hp 140.0 #:energy 80.0 #:flying #t))
+  (define dirs-80
+    (plan-terran-spellcaster-micro (cons rav-80 bio) (cons col-9.4t zealots-close) #:current-frame 5000))
+  (define cast-matrix-first?
+    (ormap (lambda (d) (and (eqv? (spell-directive-caster-tag d) 31001)
+                            (eq? (spell-directive-ability d) 'interference-matrix)
+                            (eqv? (spell-directive-target-tag d) 31850)))
+           dirs-80))
+  ;; (b) `t14` geometry (`12.2t` Colossus behind `9.5t` Stalkers with 8 Marines in AAM range):
+  ;;     Raven at `en=100` MUST cast Interference Matrix (`'raven-interference-matrix`) AHEAD OF AAM!
+  (define stalkers-9.5t
+    (for/list ([i (in-range 5)])
+      (mk-u (+ 31821 i) 'stalker 83.5 (+ 79.0 (* 0.5 i)) #:hp 80.0 #:max-hp 80.0 #:shield 80.0 #:max-shield 80.0)))
+  (define col-12.2t
+    (mk-u 31851 'colossus 86.2 80.0 #:hp 200.0 #:max-hp 200.0 #:shield 150.0 #:max-shield 150.0))
+  (define rav-100 (mk-u 31002 'raven 74.0 80.0 #:hp 140.0 #:max-hp 140.0 #:energy 100.0 #:flying #t))
+  (define dirs-12.2t
+    (plan-terran-spellcaster-micro (cons rav-100 bio) (cons col-12.2t stalkers-9.5t) #:current-frame 5004))
+  (define cast-matrix-12.2t-before-aam?
+    (and (ormap (lambda (d) (and (eqv? (spell-directive-caster-tag d) 31002)
+                                 (eq? (spell-directive-ability d) 'interference-matrix)
+                                 (eq? (spell-directive-pattern-name d) 'raven-interference-matrix)
+                                 (eqv? (spell-directive-target-tag d) 31851)))
+                dirs-12.2t)
+         (not (ormap (lambda (d) (and (eqv? (spell-directive-caster-tag d) 31002)
+                                      (eq? (spell-directive-ability d) 'anti-armor-missile)))
+                     dirs-12.2t))))
+  ;; (c) Raven at `en=70` (`50 <= en < 75`) with un-Matrixed `12.2t` Colossus + close Zealots ->
+  ;;     MUST hold energy for Matrix instead of wasting 50 energy on Auto-Turret!
+  (define rav-70 (mk-u 31003 'raven 74.0 80.0 #:hp 140.0 #:max-hp 140.0 #:energy 70.0 #:flying #t))
+  (define dirs-hold
+    (plan-terran-spellcaster-micro (cons rav-70 bio) (cons col-12.2t zealots-close) #:current-frame 5008))
+  (define burned-turret-below-75?
+    (ormap (lambda (d) (and (eqv? (spell-directive-caster-tag d) 31003)
+                            (eq? (spell-directive-ability d) 'auto-turret)))
+           dirs-hold))
+  (check-true "L51-2D-raven-interference-matrix-3747-priority-over-auto-turret"
+              (and cast-matrix-first? cast-matrix-12.2t-before-aam? (not burned-turret-below-75?))
+              (format "matrix-first?=~a matrix-12.2t-before-aam?=~a burned-turret?=~a"
+                      cast-matrix-first? cast-matrix-12.2t-before-aam? burned-turret-below-75?)))
+
+;; -----------------------------------------------------------------------------
+;; 32. L51-W2 (`#1262/#1263`): SC2 5.0.14 Raven Interference Matrix Upgrade Gate,
+;;     Removed 4107 Battery Overcharge Live Suppression, & Fixed 5.0.14 IDs/Buffs
+;; -----------------------------------------------------------------------------
+(let ()
+  (define bio
+    (for/list ([i (in-range 8)])
+      (mk-u (+ 32101 i) 'marine 75.5 (+ 78.0 (* 0.5 i)) #:hp 45.0 #:max-hp 45.0)))
+  (define stalkers-9.5t
+    (for/list ([i (in-range 5)])
+      (mk-u (+ 32821 i) 'stalker 83.5 (+ 79.0 (* 0.5 i)) #:hp 80.0 #:max-hp 80.0 #:shield 80.0 #:max-shield 80.0)))
+  (define zealots-close
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 32801 i) 'zealot 79.5 (+ 78.5 (* 0.6 i)) #:hp 100.0 #:max-hp 100.0 #:shield 50.0 #:max-shield 50.0)))
+  (define col-12.2t
+    (mk-u 32851 'colossus 86.2 80.0 #:hp 200.0 #:max-hp 200.0 #:shield 150.0 #:max-shield 150.0))
+  ;; (a) Un-upgraded Raven (`#:interference-matrix-researched? #f`, `'()`):
+  ;;     - At en=100 vs 12.2t Colossus + 9.5t Stalkers -> MUST skip 3747 and cast AAM (`3753`)!
+  ;;     - At en=70 vs 12.2t Colossus + close Zealots -> MUST skip energy hold and drop Auto-Turret (`1764`)!
+  (define rav-100 (mk-u 32001 'raven 74.0 80.0 #:hp 140.0 #:max-hp 140.0 #:energy 100.0 #:flying #t))
+  (define dirs-unupg-100
+    (plan-terran-spellcaster-micro (cons rav-100 bio) (cons col-12.2t stalkers-9.5t)
+                                   #:current-frame 5200
+                                   #:researched-upgrades '()
+                                   #:interference-matrix-researched? #f))
+  (define unupg-skipped-im-cast-aam?
+    (and (not (ormap (lambda (d) (eq? (spell-directive-ability d) 'interference-matrix)) dirs-unupg-100))
+         (ormap (lambda (d) (and (eqv? (spell-directive-caster-tag d) 32001)
+                                 (eq? (spell-directive-ability d) 'anti-armor-missile)))
+                dirs-unupg-100)))
+  (define rav-70 (mk-u 32002 'raven 74.0 80.0 #:hp 140.0 #:max-hp 140.0 #:energy 70.0 #:flying #t))
+  (define dirs-unupg-70
+    (plan-terran-spellcaster-micro (cons rav-70 bio) (cons col-12.2t zealots-close)
+                                   #:current-frame 5204
+                                   #:researched-upgrades '()
+                                   #:interference-matrix-researched? #f))
+  (define unupg-dropped-turret-no-hold?
+    (and (not (ormap (lambda (d) (eq? (spell-directive-ability d) 'interference-matrix)) dirs-unupg-70))
+         (ormap (lambda (d) (and (eqv? (spell-directive-caster-tag d) 32002)
+                                 (eq? (spell-directive-ability d) 'auto-turret)))
+                dirs-unupg-70)))
+  ;; (b) End-to-end `run-l34` live-obs upgrade gate:
+  ;;     - Without `'interference-matrix`: emits 0 `interference-matrix`, casts AAM directly.
+  ;;     - With `'interference-matrix`: casts `interference-matrix` on 12.2t Colossus ahead of AAM.
+  (define cc-home (mk-u 32900 'command-center 32.5 32.5 #:hp 1500.0 #:max-hp 1500.0))
+  (define rt-unupg (make-live-bot-runtime #:race 'Terran))
+  (define obs-unupg
+    (mk-live-obs 'Terran 'Protoss 5400
+                 #:ally-units (cons rav-100 bio)
+                 #:ally-buildings (list cc-home)
+                 #:enemy-units (cons col-12.2t stalkers-9.5t)
+                 #:researched-upgrades '(stimpack combat-shield)))
+  (define acts-unupg (run-l34 rt-unupg obs-unupg 0.5))
+  (define l34-unupg-ok?
+    (and (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3)
+                                      (eq? (caddr a) 'interference-matrix)))
+                     acts-unupg))
+         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3)
+                                 (eqv? (cadr a) 32001)
+                                 (eq? (caddr a) 'anti-armor-missile)))
+                acts-unupg)))
+  (define rt-upg (make-live-bot-runtime #:race 'Terran))
+  (define obs-upg
+    (mk-live-obs 'Terran 'Protoss 5400
+                 #:ally-units (cons rav-100 bio)
+                 #:ally-buildings (list cc-home)
+                 #:enemy-units (cons col-12.2t stalkers-9.5t)
+                 #:researched-upgrades '(stimpack combat-shield interference-matrix)))
+  (define acts-upg (run-l34 rt-upg obs-upg 0.5))
+  (define l34-upg-ok?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 4)
+                            (eqv? (cadr a) 32001)
+                            (eq? (caddr a) 'interference-matrix)
+                            (eqv? (cadddr a) 32851)))
+           acts-upg))
+  ;; (c) Live SC2 5.0.14 buff ID recognition (`300` interference-matrix-carrier prevents double Matrix)
+  ;;     & catalog IDs (`morph-oversight-mode` = `3743`, `microbial-shroud` = `4111`).
+  (define carrier-already-matrixed
+    (mk-u 32852 'carrier 83.0 80.0 #:hp 300.0 #:max-hp 300.0 #:shield 150.0 #:max-shield 150.0 #:flying #t #:buffs '(300)))
+  (define dirs-buff300
+    (plan-terran-spellcaster-micro (list rav-100) (list carrier-already-matrixed)
+                                   #:current-frame 5212
+                                   #:researched-upgrades '(interference-matrix)
+                                   #:interference-matrix-researched? #t))
+  (define buff300-no-rematrix?
+    (not (ormap (lambda (d) (eq? (spell-directive-ability d) 'interference-matrix)) dirs-buff300)))
+  (define catalog-5014-ok?
+    (and (for/and ([m (in-list SPELL-ABILITY-3-TACTICS-CATALOG)]
+                   #:when (eq? (spell-tactic-mode-ability m) 'morph-oversight-mode))
+           (= (spell-tactic-mode-ability-id m) 3743))
+         (for/and ([m (in-list SPELL-ABILITY-3-TACTICS-CATALOG)]
+                   #:when (eq? (spell-tactic-mode-ability m) 'microbial-shroud))
+           (= (spell-tactic-mode-ability-id m) 4111))))
+  ;; (d) Live ResponseData `4107` (`battery-overcharge`) suppression when `available = #f`!
+  (define suppressed-4107-ok?
+    (dynamic-wind
+     (lambda ()
+       (register-sc2-response-data!
+        (sc2-data (list (sc2-ability-data-entry 4107 "Effect_BatteryOvercharge" #f)
+                        (sc2-ability-data-entry 4111 "Effect_AmorphousArmorcloud" #t))
+                  '() '() '() '())))
+     (lambda ()
+       (define avail-4107? (sc2-ability-live-available? 4107))
+       (define rt-p (make-live-bot-runtime #:race 'Protoss))
+       (define nex (mk-u 32910 'nexus 32.5 32.5 #:hp 1000.0 #:max-hp 1000.0 #:shield 1000.0 #:max-shield 1000.0 #:energy 100.0))
+       (define bat (mk-u 32911 'shield-battery 36.5 32.5 #:hp 150.0 #:max-hp 150.0 #:shield 150.0 #:max-shield 150.0 #:energy 100.0))
+       (define stks (for/list ([i (in-range 4)])
+                      (mk-u (+ 32920 i) 'stalker 38.0 (+ 31.0 (* 0.6 i)) #:hp 60.0 #:max-hp 80.0 #:shield 20.0 #:max-shield 80.0)))
+       (define enemy-bunker (mk-u 32950 'bunker 41.0 32.5 #:hp 400.0 #:max-hp 400.0))
+       (define enemy-mars (for/list ([i (in-range 6)])
+                            (mk-u (+ 32960 i) 'marine 40.5 (+ 30.5 (* 0.6 i)) #:hp 45.0 #:max-hp 45.0)))
+       (define obs-p
+         (mk-live-obs 'Protoss 'Terran 3200
+                      #:ally-units stks
+                      #:ally-buildings (list nex bat)
+                      #:enemy-units enemy-mars
+                      #:enemy-buildings (list enemy-bunker)))
+       (define acts-p (run-l34 rt-p obs-p 0.4))
+       (and (not avail-4107?)
+            (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3)
+                                         (eq? (caddr a) 'battery-overcharge)))
+                        acts-p))))
+     (lambda ()
+       (reset-sc2-live-response-data!))))
+  (check-true "L51-W2-raven-im-upgrade-gate-5014-buffs-and-4107-live-suppression"
+              (and unupg-skipped-im-cast-aam?
+                   unupg-dropped-turret-no-hold?
+                   l34-unupg-ok?
+                   l34-upg-ok?
+                   buff300-no-rematrix?
+                   catalog-5014-ok?
+                   suppressed-4107-ok?)
+              (format "unupg-aam?=~a unupg-turret?=~a l34-unupg?=~a l34-upg?=~a buff300?=~a cat5014?=~a sup4107?=~a"
+                      unupg-skipped-im-cast-aam?
+                      unupg-dropped-turret-no-hold?
+                      l34-unupg-ok?
+                      l34-upg-ok?
+                      buff300-no-rematrix?
+                      catalog-5014-ok?
+                      suppressed-4107-ok?)))
 
 (printf "\n=== Loop 49 Suite Summary: ~a/~a passed, ~a failed ===\n"
         tests-passed tests-run tests-failed)
