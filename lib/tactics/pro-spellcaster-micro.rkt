@@ -4910,8 +4910,11 @@
              (values acc used))])))
 
   ;; Phase B: Post-storm dry High Templars (< 50 energy) -> Hold merge if a friendly ready Nexus
-  ;; (`>= 50e`, off `4126` Energy Recharge cooldown) is within `14.0t` and can recharge for Psi Storm;
-  ;; otherwise Archon pair merge vs unpaired kite.
+  ;; (`>= 50e`, off `4126` Energy Recharge cooldown) is within `rech-approach-rng` (`max 18.0, +3.5t`)
+  ;; and can recharge for Psi Storm; otherwise Archon pair merge vs unpaired kite.
+  (define rech-rng (sc2-spell-cast-range 'nexus-energy-recharge 14.5))
+  (define rech-approach-rng (max 18.0 (+ rech-rng 3.5)))
+  (define rech-cd (sc2-spell-cooldown-frames 'nexus-energy-recharge 1344))
   (define recharge-ready-nexuses : (Listof Any)
     (if (and storm-ok?
              (= (spell-unit-claim-count claims 'nexus-energy-recharge 1 current-frame) 0))
@@ -4929,7 +4932,7 @@
            (let loop-nx : Any ([rem : (Listof Any) recharge-ready-nexuses])
              (cond
                [(null? rem) #f]
-               [(<= (dist2 ux uy (uh-x (car rem)) (uh-y (car rem))) 14.0) (car rem)]
+               [(<= (dist2 ux uy (uh-x (car rem)) (uh-y (car rem))) rech-approach-rng) (car rem)]
                [else (loop-nx (cdr rem))])))))
   (define dry-hts : (Listof Any)
     (if (null? friendly-hts)
@@ -4954,8 +4957,6 @@
              (cond
                [nx
                 (define d-nx (dist2 (uh-x ht) (uh-y ht) (uh-x nx) (uh-y nx)))
-                (define rech-rng (sc2-spell-cast-range 'nexus-energy-recharge 10.0))
-                (define rech-cd (sc2-spell-cooldown-frames 'nexus-energy-recharge 1344))
                 (if (<= d-nx rech-rng)
                     (begin
                       (spell-claim-unit?! claims 'nexus-energy-recharge 1 current-frame rech-cd #:caster-tag (uh-tag nx))
@@ -4965,7 +4966,7 @@
                                     acc)
                               keep-rev
                               #t))
-                    ;; Step HT into 10.0t Nexus Energy Recharge cast range instead of burning it on Archon merge!
+                    ;; Step HT into Nexus Energy Recharge cast range instead of burning it on Archon merge!
                     (loop-r (cdr rem)
                             (cons (spell-directive (uh-tag ht) 'high-templar 'move 'move 0
                                                    (uh-x nx) (uh-y nx) 'ht-approach-nexus-recharge)

@@ -1729,11 +1729,13 @@
                             (emit! (list 'spine-crawler-uproot (u-id sp)))
                             (emit! (list 'spine-crawler-root (u-id sp) spx spy)))))
                       ;; Terran: High-ground Bunker + swap-bunker-builder-scv if builder damaged
+                      ;; Loop 63B Bug #1B: On live obs, L2 owns Bunker caps/Marine checks; keep L4
+                      ;; build emission strictly for isolated non-live Tactics Arena fixtures.
                       (when (or (eq? race-sym 'Terran)
                                 (hash-has-key? au-ht 'scv) (hash-has-key? ab-ht 'command-center)
                                 (hash-has-key? ab-ht 'orbital-command) (hash-has-key? ab-ht 'barracks))
                         (define bunkers (hash-ref ab-ht 'bunker '()))
-                        (when (null? bunkers)
+                        (when (and (null? bunkers) (not (sd-index-live-obs? idx)))
                           (define-values (bkx bky) (step-from-to tx ty bx by 8.5))
                           (emit! (list 'build 'bunker bkx bky)))
                         (define scvs (hash-ref au-ht 'scv '()))

@@ -10,6 +10,7 @@ import glob
 import json
 import os
 import re
+import statistics
 import time
 from pathlib import Path
 from typing import Any
@@ -18,10 +19,184 @@ REPO_ROOT = Path("/home/sjaconette/repos/mothman-sc2-bot")
 DEFAULT_OUT = REPO_ROOT / "scratch" / "dashboard_state.json"
 RUNS_DIR = Path("/home/sjaconette/sc2-local-arena/runs")
 BRAIN_SCRATCH = Path("/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch")
-AIARENA_SUMMARY = Path("/tmp/aiarena_v1_v2_fetch/all_bots_summary.json")
-AIARENA_META_DIR = Path("/tmp/aiarena_v1_v2_fetch")
-ARENA_DIR = BRAIN_SCRATCH / "loop" / "iter58_arena"
+AIARENA_GLOB = "/tmp/aiarena_v1_v2_fetch*"
+ARENA_LOOP_DIR = BRAIN_SCRATCH / "loop"
+ARENA_FALLBACK_DIR = BRAIN_SCRATCH / "loop" / "iter58_arena"
 PRO_CURVES_JSON = BRAIN_SCRATCH / "pro_curves_and_timings.json"
+
+RACE_FULL = {"P": "Protoss", "T": "Terran", "Z": "Zerg", "Protoss": "Protoss", "Terran": "Terran", "Zerg": "Zerg"}
+
+
+def _compact_floats(obj: Any, digits: int = 3) -> Any:
+    if isinstance(obj, float):
+        return round(obj, digits)
+    if isinstance(obj, list):
+        return [_compact_floats(x, digits) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _compact_floats(v, digits) for k, v in obj.items()}
+    return obj
+
+
+def _find_latest_aiarena_summary() -> tuple[Path | None, Path | None]:
+    cands: list[Path] = []
+    for raw_dir in glob.glob(AIARENA_GLOB):
+        d = Path(raw_dir)
+        for sub in (d / "all_bots_summary.json", d / "aiarena-replays" / "all_bots_summary.json"):
+            if sub.is_file():
+                cands.append(sub)
+    if not cands:
+        return None, None
+    cands.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    best = cands[0]
+    return best, best.parent
+
+
+def _fmt_div_range(bots: list[dict[str, Any]]) -> str:
+    divs = sorted({int(b["division"]) for b in bots if isinstance(b.get("division"), int)})
+    if not divs:
+        return "Division --"
+    if len(divs) == 1:
+        return f"Division {divs[0]}"
+    return f"Division {divs[0]}–{divs[-1]}"
+
+
+def _compute_slice_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {}
+    wins = sum(1 for r in rows if str(r.get("result", "")).lower() == "win")
+    losses = sum(1 for r in rows if str(r.get("result", "")).lower() == "loss")
+    ties = len(rows) - wins - losses
+
+    k_sum = sum(float(r.get("killed_val") or 0.0) for r in rows)
+    l_sum = sum(float(r.get("lost_val") or 0.0) for r in rows)
+    trade_agg = round(k_sum / l_sum, 2) if l_sum > 0 else None
+    trs = [float(r["trade_ratio"]) for r in rows if isinstance(r.get("trade_ratio"), (int, float)) and float(r["trade_ratio"]) < 90.0]
+    trade_med = round(statistics.median(trs), 2) if trs else None
+
+    min_rows = [r for r in rows if isinstance(r.get("our_min_collected"), (int, float)) and isinstance(r.get("opp_min_collected"), (int, float)) and float(r["opp_min_collected"]) > 0]
+    om_sum = sum(float(r["our_min_collected"]) for r in min_rows)
+    em_sum = sum(float(r["opp_min_collected"]) for r in min_rows)
+    agg_min_ratio = round(om_sum / em_sum, 2) if em_sum > 0 else None
+    mrs = [float(r["min_collected_ratio"]) for r in min_rows if isinstance(r.get("min_collected_ratio"), (int, float))]
+    median_min_ratio = round(statistics.median(mrs), 2) if mrs else None
+    our_min_avg = round(om_sum / len(min_rows), 1) if min_rows else None
+    opp_min_avg = round(em_sum / len(min_rows), 1) if min_rows else None
+
+    gas_rows = [r for r in rows if isinstance(r.get("our_gas_collected"), (int, float)) and isinstance(r.get("opp_gas_collected"), (int, float)) and float(r["opp_gas_collected"]) > 0]
+    og_sum = sum(float(r["our_gas_collected"]) for r in gas_rows)
+    eg_sum = sum(float(r["opp_gas_collected"]) for r in gas_rows)
+    agg_gas_ratio = round(og_sum / eg_sum, 2) if eg_sum > 0 else None
+    our_gas_avg = round(og_sum / len(gas_rows), 1) if gas_rows else None
+    opp_gas_avg = round(eg_sum / len(gas_rows), 1) if gas_rows else None
+
+    upg_rows = [r for r in rows if isinstance(r.get("our_upg_levels"), (int, float)) and isinstance(r.get("opp_upg_levels"), (int, float))]
+    our_upg = round(sum(float(r["our_upg_levels"]) for r in upg_rows) / len(upg_rows), 1) if upg_rows else None
+    opp_upg = round(sum(float(r["opp_upg_levels"]) for r in upg_rows) / len(upg_rows), 1) if upg_rows else None
+    upg_delta = round(our_upg - opp_upg, 1) if (our_upg is not None and opp_upg is not None) else None
+
+    t_val_rows = [r for r in rows if isinstance(r.get("our_t1_val"), (int, float)) and isinstance(r.get("our_t2_val"), (int, float)) and isinstance(r.get("our_t3_val"), (int, float))]
+    t_pct_rows = [r for r in rows if isinstance(r.get("our_t1_pct"), (int, float)) and isinstance(r.get("our_t2_pct"), (int, float)) and isinstance(r.get("our_t3_pct"), (int, float))]
+    if t_val_rows:
+        v1 = sum(float(r["our_t1_val"]) for r in t_val_rows)
+        v2 = sum(float(r["our_t2_val"]) for r in t_val_rows)
+        v3 = sum(float(r["our_t3_val"]) for r in t_val_rows)
+        vt = v1 + v2 + v3
+        t1 = round(100.0 * v1 / vt, 1) if vt > 0 else 0.0
+        t2 = round(100.0 * v2 / vt, 1) if vt > 0 else 0.0
+        t3 = round(100.0 * v3 / vt, 1) if vt > 0 else 0.0
+    elif t_pct_rows:
+        t1 = round(sum(float(r["our_t1_pct"]) for r in t_pct_rows) / len(t_pct_rows), 1)
+        t2 = round(sum(float(r["our_t2_pct"]) for r in t_pct_rows) / len(t_pct_rows), 1)
+        t3 = round(sum(float(r["our_t3_pct"]) for r in t_pct_rows) / len(t_pct_rows), 1)
+    else:
+        t1 = t2 = t3 = None
+
+    return {
+        "n": len(rows),
+        "wins": wins,
+        "losses": losses,
+        "ties": ties,
+        "trade_agg": trade_agg,
+        "trade_med": trade_med,
+        "agg_min_ratio": agg_min_ratio,
+        "median_min_ratio": median_min_ratio,
+        "our_min_collected_avg": our_min_avg,
+        "opp_min_collected_avg": opp_min_avg,
+        "agg_gas_ratio": agg_gas_ratio,
+        "our_gas_collected_avg": our_gas_avg,
+        "opp_gas_collected_avg": opp_gas_avg,
+        "our_upg_levels": our_upg,
+        "opp_upg_levels": opp_upg,
+        "upg_level_delta": upg_delta,
+        "our_t1_pct": t1,
+        "our_t2_pct": t2,
+        "our_t3_pct": t3,
+    }
+
+
+def _compute_mine_trade_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    ext = [r for r in rows if not r.get("is_selfplay")]
+    src = ext if ext else rows
+    by_race: dict[str, Any] = {}
+    for rn in ("Protoss", "Terran", "Zerg"):
+        sub = [r for r in src if RACE_FULL.get(str(r.get("our_race") or ""), "") == rn]
+        if sub:
+            by_race[rn] = _compute_slice_metrics(sub)
+    return {
+        "overall": _compute_slice_metrics(src),
+        "by_race": by_race,
+    }
+
+
+def _build_mine_trade_scatter(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ext = [r for r in rows if not r.get("is_selfplay")]
+    src = ext if ext else rows
+    pts: list[dict[str, Any]] = []
+    for r in src:
+        mr = r.get("min_collected_ratio")
+        tr = r.get("trade_ratio")
+        if not isinstance(mr, (int, float)) or not isinstance(tr, (int, float)):
+            continue
+        res = str(r.get("result") or "").lower()
+        race_full = RACE_FULL.get(str(r.get("our_race") or ""), str(r.get("our_race") or ""))
+        tr_clean = round(min(9.99, float(tr)), 2)
+        pts.append({
+            "id": str(r.get("id") or ""),
+            "race": race_full,
+            "matchup": str(r.get("matchup") or ""),
+            "opp": str(r.get("opp_bot") or "Opponent"),
+            "result": "win" if res == "win" else ("loss" if res == "loss" else "tie"),
+            "trade_ratio": tr_clean,
+            "min_ratio": round(float(mr), 2),
+            "our_min": int(round(float(r.get("our_min_collected") or 0))),
+            "opp_min": int(round(float(r.get("opp_min_collected") or 0))),
+            "gas_ratio": round(float(r["gas_collected_ratio"]), 2) if isinstance(r.get("gas_collected_ratio"), (int, float)) else None,
+            "upg_lv": int(r["our_upg_levels"]) if isinstance(r.get("our_upg_levels"), (int, float)) else None,
+            "opp_upg_lv": int(r["opp_upg_levels"]) if isinstance(r.get("opp_upg_levels"), (int, float)) else None,
+            "t1": round(float(r["our_t1_pct"]), 1) if isinstance(r.get("our_t1_pct"), (int, float)) else None,
+            "t2": round(float(r["our_t2_pct"]), 1) if isinstance(r.get("our_t2_pct"), (int, float)) else None,
+            "t3": round(float(r["our_t3_pct"]), 1) if isinstance(r.get("our_t3_pct"), (int, float)) else None,
+        })
+    return pts
+
+
+def _find_score_files() -> list[Path]:
+    cands: list[Path] = []
+    for base in (BRAIN_SCRATCH, REPO_ROOT / "scratch"):
+        if base.is_dir():
+            cands.extend(base.glob("iter*_score.json"))
+    cands.sort(key=lambda p: (0 if "smoke" in p.name else 1, p.stat().st_mtime), reverse=True)
+    return cands
+
+
+def _find_score_for_run(run_id: str) -> Path | None:
+    cands = _find_score_files()
+    if run_id:
+        short = re.sub(r"^\d{8}_\d{6}_", "", run_id)
+        for p in cands:
+            if p.stem == f"{short}_score" or (short and short in p.stem):
+                return p
+    return cands[0] if cands else None
 
 
 def fmt_game_time(loops: int | float | None, secs: float | None = None) -> str:
@@ -44,19 +219,21 @@ def load_json_safe(path: Path) -> Any:
 
 
 def collect_aiarena_live() -> dict[str, Any]:
-    data = load_json_safe(AIARENA_SUMMARY)
+    summary_path, meta_dir = _find_latest_aiarena_summary()
+    data = load_json_safe(summary_path) if summary_path else None
     if not isinstance(data, dict):
-        return {"updated_label": "", "bots": []}
+        return {"updated_label": "", "v2_div_label": "Division --", "v1_div_label": "Division 9", "v2_crashes": 0, "bots": []}
 
     opp_elos: dict[str, list[int]] = {}
-    for mp in glob.glob(str(AIARENA_META_DIR / "*_meta.json")):
-        m = load_json_safe(Path(mp))
-        if not isinstance(m, dict):
-            continue
-        bname = m.get("our_bot_name")
-        oelo = m.get("opp_elo_before")
-        if bname and isinstance(oelo, (int, float)) and oelo > 0 and not m.get("both_ours"):
-            opp_elos.setdefault(bname, []).append(int(oelo))
+    if meta_dir:
+        for mp in glob.glob(str(meta_dir / "*_meta.json")):
+            m = load_json_safe(Path(mp))
+            if not isinstance(m, dict):
+                continue
+            bname = m.get("our_bot_name")
+            oelo = m.get("opp_elo_before")
+            if bname and isinstance(oelo, (int, float)) and oelo > 0 and not m.get("both_ours"):
+                opp_elos.setdefault(bname, []).append(int(oelo))
 
     order = [
         "Mothman-P2", "Mothman-T2", "Mothman-Z2", "Mothman-X2",
@@ -84,8 +261,16 @@ def collect_aiarena_live() -> dict[str, Any]:
             "crashes": cp.get("crash_count", 0),
             "avg_opp_elo": avg_opp,
         })
+    v2_bots = [r for r in rows if r["cohort"] == "v2"]
+    v1_bots = [r for r in rows if r["cohort"] == "v1"]
+    v2_div_label = _fmt_div_range(v2_bots)
+    v1_div_label = _fmt_div_range(v1_bots)
+    v2_crashes = sum(int(r.get("crashes") or 0) for r in v2_bots)
     return {
-        "updated_label": "Comp #38 · Ship #10 synced v1+v2",
+        "updated_label": f"Comp #38 · v2 {v2_div_label} / v1 {v1_div_label}",
+        "v2_div_label": v2_div_label,
+        "v1_div_label": v1_div_label,
+        "v2_crashes": v2_crashes,
         "bots": rows,
     }
 
@@ -166,12 +351,7 @@ def scan_live_and_recent_matches(max_matches: int = 84) -> tuple[list[dict[str, 
                 })
 
     # Find newest full/h2h score JSON across brain scratch & repo scratch
-    candidates: list[Path] = []
-    for base in (BRAIN_SCRATCH, REPO_ROOT / "scratch"):
-        if base.is_dir():
-            candidates.extend(base.glob("iter*_score.json"))
-    # Prefer full/h2h over tiny 4-match smoke, sorted by mtime desc
-    candidates.sort(key=lambda p: (0 if "smoke" in p.name else 1, p.stat().st_mtime), reverse=True)
+    candidates = _find_score_files()
 
     recent: list[dict[str, Any]] = []
     batch_meta: dict[str, Any] = {
@@ -195,6 +375,30 @@ def scan_live_and_recent_matches(max_matches: int = 84) -> tuple[list[dict[str, 
         batch_meta["wins"] = sum(1 for r in rows if str(r.get("result", "")).lower() == "win")
         batch_meta["losses"] = sum(1 for r in rows if str(r.get("result", "")).lower() == "loss")
         batch_meta["ties"] = len(rows) - batch_meta["wins"] - batch_meta["losses"]
+        mt_summ = _compute_mine_trade_summary(rows)
+        ov = mt_summ.get("overall") or {}
+        batch_meta.update({
+            "ext_total": ov.get("n"),
+            "ext_wins": ov.get("wins"),
+            "ext_losses": ov.get("losses"),
+            "ext_ties": ov.get("ties"),
+            "trade_agg": ov.get("trade_agg"),
+            "trade_med": ov.get("trade_med"),
+            "agg_min_ratio": ov.get("agg_min_ratio"),
+            "median_min_ratio": ov.get("median_min_ratio"),
+            "our_min_collected_avg": ov.get("our_min_collected_avg"),
+            "opp_min_collected_avg": ov.get("opp_min_collected_avg"),
+            "agg_gas_ratio": ov.get("agg_gas_ratio"),
+            "our_gas_collected_avg": ov.get("our_gas_collected_avg"),
+            "opp_gas_collected_avg": ov.get("opp_gas_collected_avg"),
+            "our_upg_levels": ov.get("our_upg_levels"),
+            "opp_upg_levels": ov.get("opp_upg_levels"),
+            "upg_level_delta": ov.get("upg_level_delta"),
+            "our_t1_pct": ov.get("our_t1_pct"),
+            "our_t2_pct": ov.get("our_t2_pct"),
+            "our_t3_pct": ov.get("our_t3_pct"),
+            "by_race": mt_summ.get("by_race") or {},
+        })
 
         # Pick an informative spread across races (top wins + worst losses + recent)
         def norm_row(r: dict[str, Any]) -> dict[str, Any]:
@@ -205,6 +409,8 @@ def scan_live_and_recent_matches(max_matches: int = 84) -> tuple[list[dict[str, 
             tr = r.get("trade_ratio")
             if isinstance(tr, (int, float)) and tr >= 90:
                 tr = None
+            mr = r.get("min_collected_ratio")
+            gr = r.get("gas_collected_ratio")
             return {
                 "match_id": str(r.get("id") or ""),
                 "mode": r.get("opp_cohort") or ("self" if r.get("is_selfplay") else "full"),
@@ -226,6 +432,15 @@ def scan_live_and_recent_matches(max_matches: int = 84) -> tuple[list[dict[str, 
                 "our_army_val": r.get("our_peak_army"),
                 "opp_army_val": r.get("opp_peak_army"),
                 "trade_ratio": round(float(tr), 2) if isinstance(tr, (int, float)) else None,
+                "min_collected_ratio": round(float(mr), 2) if isinstance(mr, (int, float)) else None,
+                "our_min_collected": int(round(float(r["our_min_collected"]))) if isinstance(r.get("our_min_collected"), (int, float)) else None,
+                "opp_min_collected": int(round(float(r["opp_min_collected"]))) if isinstance(r.get("opp_min_collected"), (int, float)) else None,
+                "gas_collected_ratio": round(float(gr), 2) if isinstance(gr, (int, float)) else None,
+                "our_upg_levels": int(r["our_upg_levels"]) if isinstance(r.get("our_upg_levels"), (int, float)) else None,
+                "opp_upg_levels": int(r["opp_upg_levels"]) if isinstance(r.get("opp_upg_levels"), (int, float)) else None,
+                "our_t1_pct": round(float(r["our_t1_pct"]), 1) if isinstance(r.get("our_t1_pct"), (int, float)) else None,
+                "our_t2_pct": round(float(r["our_t2_pct"]), 1) if isinstance(r.get("our_t2_pct"), (int, float)) else None,
+                "our_t3_pct": round(float(r["our_t3_pct"]), 1) if isinstance(r.get("our_t3_pct"), (int, float)) else None,
                 "tags": [pretty_sig(x) for x in sigs[:2]],
                 "is_peak_metric": True,
             }
@@ -252,13 +467,31 @@ def scan_live_and_recent_matches(max_matches: int = 84) -> tuple[list[dict[str, 
     return (running + recent)[:max_matches], batch_meta
 
 
+def _find_latest_arena_dir() -> Path:
+    cands: list[tuple[int, Path]] = []
+    if ARENA_LOOP_DIR.is_dir():
+        for d in ARENA_LOOP_DIR.glob("iter*_arena"):
+            if not d.is_dir():
+                continue
+            if not list(d.glob("pass*_*.json")):
+                continue
+            m = re.match(r"iter(\d+)", d.name)
+            num = int(m.group(1)) if m else 0
+            cands.append((num, d))
+    if cands:
+        cands.sort(key=lambda x: (x[0], x[1].stat().st_mtime), reverse=True)
+        return cands[0][1]
+    return ARENA_FALLBACK_DIR
+
+
 def collect_arena_sprint() -> dict[str, Any]:
     passes: list[dict[str, Any]] = []
     latest_ability: dict[str, Any] | None = None
     latest_core: dict[str, Any] | None = None
+    arena_dir = _find_latest_arena_dir()
 
-    if ARENA_DIR.is_dir():
-        for jf in sorted(ARENA_DIR.glob("pass*_*.json")):
+    if arena_dir.is_dir():
+        for jf in sorted(arena_dir.glob("pass*_*.json")):
             d = load_json_safe(jf)
             if not isinstance(d, dict):
                 continue
@@ -473,16 +706,104 @@ def collect_curves_vs_pro() -> dict[str, Any] | None:
             rows_out.append(row)
         compact_timings[rname] = rows_out
 
-    return {
+    obs_extra_keys = (
+        "army_cohesion",
+        "engage_retreat",
+        "expansions_4plus",
+        "gas_7plus",
+        "tier_composition",
+        "all_upgrades",
+        "concave_layering",
+        "army_rotation",
+        "multiprong_backstabs",
+        "unit_comp_clusters",
+        "production_utilization",
+        "macro_abilities",
+        "macro_energy",
+        "combat_spells",
+    )
+
+    out: dict[str, Any] = {
+        "schema_version": raw.get("schema_version", 4),
         "run_id": meta.get("run_id", ""),
         "generated_at": raw.get("generated_at", ""),
         "buckets_sec": raw.get("buckets_sec") or list(range(0, 901, 30)),
         "segments": segments,
+        "matchups": raw.get("matchups") or [],
         "cohorts": compact_cohorts,
         "notes": meta.get("notes") or [],
         "summary": compact_summary,
         "curves": compact_curves,
         "timings": compact_timings,
+    }
+    for ek in obs_extra_keys:
+        if ek in raw and raw[ek] is not None:
+            out[ek] = _compact_floats(raw[ek], 3)
+
+    # Attach North Star Mine x Trade summary & per-match scatter from matching score JSON
+    score_path = _find_score_for_run(str(meta.get("run_id") or ""))
+    if score_path:
+        sd = load_json_safe(score_path)
+        if isinstance(sd, dict) and isinstance(sd.get("matches"), list) and sd["matches"]:
+            out["mine_trade_summary"] = _compute_mine_trade_summary(sd["matches"])
+            out["mine_trade_scatter"] = _build_mine_trade_scatter(sd["matches"])
+            out["mine_trade_source"] = score_path.stem.replace("_score", "")
+
+    return out
+
+
+def build_benchmark_snapshot(batch_meta: dict[str, Any]) -> dict[str, Any] | None:
+    if not batch_meta or not batch_meta.get("total"):
+        return None
+    metrics: list[dict[str, Any]] = []
+    if batch_meta.get("trade_agg") is not None:
+        med_s = f"med {batch_meta['trade_med']:.2f}x" if batch_meta.get("trade_med") is not None else "external"
+        metrics.append({
+            "label": "Primary · Trade",
+            "value": f"{batch_meta['trade_agg']:.2f}x",
+            "sub": med_s,
+        })
+    if batch_meta.get("agg_min_ratio") is not None:
+        om = batch_meta.get("our_min_collected_avg")
+        em = batch_meta.get("opp_min_collected_avg")
+        sub_m = f"{int(round(om)):,} / {int(round(em)):,}" if (om and em) else "us / opp avg"
+        metrics.append({
+            "label": "Primary · MinCol",
+            "value": f"{batch_meta['agg_min_ratio']:.2f}x",
+            "sub": sub_m,
+        })
+    if batch_meta.get("ext_total"):
+        metrics.append({
+            "label": f"EXT_{batch_meta['ext_total']}",
+            "value": f"{batch_meta.get('ext_wins', 0)}-{batch_meta.get('ext_losses', 0)}-{batch_meta.get('ext_ties', 0)}",
+            "sub": f"of {batch_meta['total']} total",
+        })
+    if batch_meta.get("agg_gas_ratio") is not None:
+        metrics.append({
+            "label": "Secondary · Gas",
+            "value": f"{batch_meta['agg_gas_ratio']:.2f}x",
+            "sub": f"Upg {batch_meta.get('our_upg_levels', '--')}/{batch_meta.get('opp_upg_levels', '--')}",
+        })
+    if batch_meta.get("our_t1_pct") is not None:
+        metrics.append({
+            "label": "Secondary · Tier Mix",
+            "value": f"{round(batch_meta['our_t1_pct'])}/{round(batch_meta['our_t2_pct'])}/{round(batch_meta['our_t3_pct'])}%",
+            "sub": "T1 / T2 / T3 share",
+        })
+    by_race = batch_meta.get("by_race") or {}
+    for rn in ("Protoss", "Terran", "Zerg"):
+        rs = by_race.get(rn)
+        if rs:
+            tr_s = f"{rs['trade_agg']:.2f}x" if rs.get("trade_agg") is not None else "--"
+            mn_s = f" · Min {rs['agg_min_ratio']:.2f}x" if rs.get("agg_min_ratio") is not None else ""
+            metrics.append({
+                "label": rn,
+                "value": f"{rs.get('wins', 0)}-{rs.get('losses', 0)}-{rs.get('ties', 0)}",
+                "sub": f"Trade {tr_s}{mn_s}",
+            })
+    return {
+        "label": batch_meta.get("batch_label") or "Latest Local Batch",
+        "metrics": metrics,
     }
 
 
@@ -499,7 +820,7 @@ def deep_merge(dst: dict[str, Any], src: dict[str, Any]) -> dict[str, Any]:
 def atomic_write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
-    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    tmp.write_text(json.dumps(data, separators=(",", ":")) + "\n", encoding="utf-8")
     os.replace(tmp, path)
 
 
@@ -519,6 +840,9 @@ def main() -> None:
         matches, batch_meta = scan_live_and_recent_matches()
         state["live_matches"] = matches
         state["matches_meta"] = batch_meta
+        bench_auto = build_benchmark_snapshot(batch_meta)
+        if bench_auto:
+            state["benchmark"] = bench_auto
         arena = collect_arena_sprint()
         if arena["passes"]:
             state["arena_sprint"] = arena

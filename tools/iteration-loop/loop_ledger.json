@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "Loop 62 (Phase 2 Single Spell-Planning Authority + Extracted Macro-Ability Policy + Protoss Nat Escrow/Flood & Siege Fixes)",
+  "active_wave": "Loop 63B (Live Release #15: Protoss 12-14 ATH +3W, EXT_75 28W Ties ATH, 730:0 Recharge 33/17g, Terran Early Bunkers 0.75, RALLY_WORKERS -44.8%, SB 3.6% ATL, WallTies 2 ATL)",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -6121,6 +6121,527 @@
         "remote_md5_match": "8/8",
         "competition_id": 38,
         "validation_matches": "5145805-5145812"
+      }
+    },
+    {
+      "id": "iter62c_ship14_full",
+      "status": "UNCONDITIONAL_LIVE_SHIP_14_PHASE2_COMPLETE_SINGLE_SPELL_AUTHORITY_MACRO_POLICY_EXTRACTED_ZERO_ONE_BASE_LOCKOUT_ABILITY_MASTERY_23W_9L_ATH_APM_SPM_MIN_ATH",
+      "campaign": "Loops 29+ Self-Play, Tactics Arena 3.1 & Expanded Roster Campaign (Loop 62 Live Release #14: commit nxsykszs e5e69116, BuildVersion nxsykszs_d6c595db completing all 3 Patch-Resilience Phases 0->1->2 live on all 8 v1+v2 bots)",
+      "loop_self_improvements": [
+        "L62-LOOP-1 (H2H-First Caught Combat/Bile/Recharge Drift in 5m Before Full Roster): Wave 1 H2H stopped at 4W-7L-1T isolating Ravager Bile FF-radius starvation & tank-commit regression; Wave 2B hit 7W-5L (1.16x/2.21x) + ALL-TIME LOW APM drops (399.7k) while surfacing 730:0 Energy Recharge = 0; Wave 2C restored 730:0 live casts (combined L62B+C H2H 12W-11L-1T) and shipped full Phase 2 cleanly with 0 crashes/rejects.",
+        "L62-LOOP-2 (Completed All 3 Approved Patch-Resilience Phases 0->1->2 + Verified Real AI Arena Production Lift): Extracted Terran MULE/Scan & Protoss Chrono/Recharge into pure leaf lib/plan/macro-ability-policy.rkt, retired duplicate live Ravager/Viper/Recharge/BC spell loops from bot-runtime.rkt, unified sc2-upgrade-researcher-slot, and verified Release #13 live production AI Arena lift (run 45172219366: v1 +106 Elo combined, external WR +16.1pp to 44.0%, live harvest drops -93.0%)."
+      ],
+      "spec_summary": "Loop 62C (Live Release #14, commit nxsykszs e5e69116, BuildVersion nxsykszs_d6c595db, live on all 8 v1+v2 AI Arena bots via deploy-aiarena.yml run 45178674199): Completes Phase 2 (and all 3 approved Patch-Resilience Phases 0->1->2): extracted MULE-vs-Scan & Chrono-vs-Energy-Recharge policy out of sc2-protobuf-ws.rkt into pure leaf lib/plan/macro-ability-policy.rkt, retired duplicate live spellcaster loops in bot-runtime.rkt (Ravager Bile, Viper casts, L3/L4 Energy Recharge, dead Yamato finder, BC Jump) while keeping pro-spellcaster-micro.rkt single authority, unified sc2-upgrade-researcher-slot, and added Protoss contested-natural Nexus escrow & ZvZ Roach-flood fixes. Inner Tactics Arena hit a new all-time high on ability-mastery (23W-9L-0D, 1.37x agg / 2.67x med, 28/32 spells). Combined L62B+C H2H_12 vs Release #13 ZIPs = 12W-11L-1T (L62B 7-5 1.16x/2.21x, L62C 5-6-1 0.90x/0.91x). Full roster (iter62c_ship14_full): ALL_84 30W-50L-4T (35.7% WR / 40.5% NL, 0.70x, SB 4.1%, avgStep 12.01ms), EXT_78 28W-46L-4T (35.9% WR / 41.0% NL, 0.71x, SB 4.2%), CORE14 19W-20L-3T (52.4% NL, 0.93x, PkA 3,861 [+150 > R13]), UNSEEN12 9W-26L-1T (27.8% NL, 0.51x), SELF_6 2W-4L-0T (0.66x). Standout highs: Terran EXT_78 11W-14L-1T (42.3% WR ATH, 0.94x, ALL PRO FLAGS OK, TvT 5-4 1.40x); Protoss EXT_78 9W-15L-2T (+1W & +0.05x vs R13, NO LOW_TRADE FLAG, PvT 5-3-1 1.33x); first-ever AxeFighter 2-1 series win, Mulebot 2-1, onlyfans 2-1, #74 T v who 38.50x W; 0/84 one_base_lockout (ATL!), tvt_zero_tank 1 ATL, 281:0 Ravager Bile 796 (+6.3% under single authority); Public Pro Curves ATHs: APM 292.8 ATH, EPM 148.2 (> Pro 147.6), SPM 41.0 ATH, Min/m 1,082.6 ATH (@9m 1,959 > Opp 1,735), Gas/m @9m 627 > Opp 571, [APM_CAP_DROPS] 497,849 (-8.5% vs R13), P3 5,599 (-90.4% vs R12), 3666 7,466 (-89.3% vs R12). Live AI Arena fetch (run 45172219366): v1 +106 Elo combined (Z 1304, T 1373, P 1346, X 1348), R13 live external WR +16.1pp to 44.0% (v1 ranked 6W-2L 75%, 0 crashes across 114 career games). 4-Race ELF ZIP Smoke vs titania: 4W-0L-0T (100.0%, 9.15x agg / 9.94x med, avgStep 10.17ms, 0 crashes/faults/rejects).",
+      "rev": "nxsykszs e5e69116 (BuildVersion nxsykszs_d6c595db, LIVE AI ARENA SHIP #14)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_121311_iter62c_ship14_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_120449_iter62c_h2h_12",
+      "wave1_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_103859_iter62_h2h_12",
+      "wave2_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_111004_iter62b_h2h_12",
+      "wave2_full_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_111537_iter62b_ship14_full",
+      "zip_smoke_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_124956_iter62c_ship14_zip_smoke",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter62c_ship14_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter62c_h2h_12_score.json",
+      "zip_smoke_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter62c_ship14_zip_smoke_score.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter62_arena/pass1_ability_dummy.json",
+      "arena_passes": [
+        {
+          "pass_id": "pass1",
+          "label": "Loop 62 Ability-Mastery-32 (23W-9L ATH, 1.37x/2.67x, 28/32 spells)",
+          "opponent": "dummy",
+          "suite": "ability-mastery",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter62_arena/pass1_ability_dummy.json"
+        },
+        {
+          "pass_id": "pass1",
+          "label": "Loop 62 BC-Jump Verification Pass",
+          "opponent": "dummy",
+          "suite": "bc-jump",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter62_arena/pass1_bcjump_dummy.json"
+        }
+      ],
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "28W-46L-4T (35.9% WR / 41.0% NL, 0.71x; CORE14 19W-20L-3T 52.4% NL 0.93x PkA 3,861, UNSEEN12 9W-26L-1T 27.8% NL 0.51x; ALL_84 30W-50L-4T 40.5% NL 0.70x; SELF_6 2W-4L 0.66x; H2H_12 5W-6L-1T [L62B+C 12W-11L-1T]; ZIP Smoke 4W-0L 9.15x)",
+      "win_rate_pct": 35.9,
+      "non_loss_pct": 41.0,
+      "core14_wr_pct": 45.2,
+      "unseen12_wins": 9,
+      "h2h_record": "5W-6L-1T (41.7% WR / 50.0% NL, 0.90x/0.91x; L62B 7W-5L 1.16x/2.21x -> combined 12W-11L-1T; W1 H2H stopped 4W-7L-1T)",
+      "trade_agg": 0.71,
+      "sup_blk_pct": 4.2,
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 4,
+      "prod_placement_stall_matches": 0,
+      "one_base_lockout_matches": 0,
+      "gas_rich_min_starved_matches": 16,
+      "cloaked_unit_damage_losses": 2,
+      "siege_range_zero_dps_losses": 15,
+      "zero_kill_collapse_matches": 5,
+      "drip_feed_collapse_matches": 30,
+      "wall_timeout_ties": 3,
+      "pro_mechanics_kpis": {
+        "apm_avg": 292.8,
+        "epm_avg": 148.2,
+        "epm_pro_ref": 147.6,
+        "spm_avg": 41.0,
+        "spm_pro_ref": 36.9,
+        "collection_min_med": 1082.6,
+        "collection_gas_med": 224.8,
+        "apm_cap_drops_total_84m": 497849,
+        "apm_cap_drops_p0_84m": 19509,
+        "apm_cap_drops_p1_84m": 13854,
+        "apm_cap_drops_p3_84m": 5599,
+        "apm_cap_drops_3666_84m": 7466,
+        "rally_workers_cmds_84m": 1487
+      },
+      "stall_watchdog_kpis": {
+        "sup_cap_min_pct": 32.5,
+        "zero_income_matches": 6,
+        "zero_gas_matches": 15,
+        "wk_plateau_8m_pct": 27.9
+      },
+      "base_geometry_kpis": {
+        "pylon_clump_pct": 0.0,
+        "pylon_spacing_nn": 15.1,
+        "nat_supply_pct": 87.2,
+        "protoss_nat_supply_pct": 92.0,
+        "terran_nat_supply_pct": 81.8,
+        "zvz_nat_wall_pct": 0.0,
+        "early_bunkers_4m": 0.82
+      },
+      "by_race": {
+        "Protoss": {
+          "record": "EXT78 9W-15L-2T (34.6% WR / 42.3% NL, 0.71x, SB 5.5%, +1W vs R13, NO LOW_TRADE FLAG), PvT 5-3-1 (1.33x, PkA 4,939), Nat Nexus adopt 96.2%, 0 one_base_lockout, Concave +1.81t, Annihilation 7.2%",
+          "trade_agg": 0.71,
+          "sup_blk": 5.5
+        },
+        "Terran": {
+          "record": "EXT78 11W-14L-1T (42.3% WR ATH / 46.2% NL, 0.94x/0.59x, SB 2.6%, ALL PRO FLAGS OK), TvT 5-4 (1.40x), @9m Min/m 1,959 (+448), Stimpack -15s (5:13), +2/+2 adopt 26.9%, #74 v who 38.50x W",
+          "trade_agg": 0.94,
+          "sup_blk": 2.6
+        },
+        "Zerg": {
+          "record": "EXT78 8W-17L-1T (30.8% WR / 34.6% NL, 0.54x, SB 4.6%), APM 309.6 (+18.7), Nat Hatch 0:53 (-4s), 3rd Hatch 4:59 (-11s), 281:0 Bile 796 (+6.3% single authority), ReinfLinked 79.8%",
+          "trade_agg": 0.54,
+          "sup_blk": 4.6
+        }
+      },
+      "live_aiarena_snapshot": {
+        "fetch_run_id": 45172219366,
+        "v1_elo_delta_combined": 106,
+        "v1_elos": {
+          "Z": 1304,
+          "T": 1373,
+          "P": 1346,
+          "X": 1348
+        },
+        "r13_external_wr_pct": 44.0,
+        "r13_external_wr_delta_pp": 16.1,
+        "v1_ranked_record": "6W-2L (75.0%)",
+        "career_crashes": 0,
+        "career_games": 114
+      },
+      "aiarena_deploy": {
+        "workflow": "deploy-aiarena.yml",
+        "run_id": 45178674199,
+        "url": "https://github.com/sticklane/mothman-sc2-bot/actions/runs/45178674199",
+        "status": "GREEN",
+        "bots_active": 8,
+        "remote_md5_match": "8/8",
+        "competition_id": 38,
+        "validation_matches": "5145814-5145821"
+      }
+    },
+    {
+      "id": "iter63_ship15_full",
+      "status": "HOLD_ZIP_TERRAN_EARLY_BUNKERS_1_29_MINUS_4W_RECHARGE_2G_ZERG_W4_DIP",
+      "campaign": "Loops 29+ Self-Play, Tactics Arena 3.1 & Expanded Roster Campaign (Loop 63 Wave 1 HOLD-ZIP: H2H 8W-3L-1T + APM Drops ATL -23.5% + RALLY_WORKERS -36.7% vs Terran early_bunkers_4m 1.29 & 730:0 Recharge 2g -> Fixed in Loop 63B Ship #15)",
+      "loop_self_improvements": [
+        "L63-LOOP-1 (Hold-Gate Caught 3 Causal Ship Blockers Before Live Release): Wave 1 H2H finished 8W-3L-1T (66.7%, 1.55x/2.68x) and ALL_84 hit APM-cap-drop ATL (380,809, -23.5% vs R14) and RALLY_WORKERS -36.7%, but full roster audit caught Terran early_bunkers_4m 0.82->1.29 (-4W), 730:0 Energy Recharge stuck at 2/2g (exact-round 49.51..49.99e phantom-claim bug in sc2-protobuf-ws.rkt), and Zerg W@4m 29.0->27.0, triggering a targeted 3-lane Loop 63B fix.",
+        "L63-LOOP-2 (Primary MinCol + Trade & Secondary GasCol/UpgLv/Tier% Instrumentation): Added full Minerals Collected ratio alongside Trade Ratio as joint Primary KPIs (plus GasCol, UpgLv, Tier 1/2/3 % as Secondary KPIs) across score-replay-batch.rkt, replay-db.py, dashboard, and Observatory Graphs 1-22."
+      ],
+      "spec_summary": "Loop 63 Wave 1 (HOLD-ZIP, rev rqsntsos ab48976b, parent Release #14 nxsykszs e5e69116 -> fixed in Loop 63B Ship #15): Landed live Div 6-7 & local macro defenses, 4126 14.5t range parity, Tempest Dive / Anti-SwarmHost / Anti-Phoenix reactions, worker rally & harvest de-spam, and Zerg early drone tempo. Stage 1 H2H_12 vs R14 ZIPs dominated 8W-3L-1T (66.7% WR / 75.0% NL, Trade 1.55x/2.58x; P 3-1 1.68x, T 3-0-1 2.26x, Z 2-2 1.00x). Full roster (iter63_ship15_full, 0 crashes/rejects/opp crashes, avgStep 16.39ms under concurrent analyzer load): ALL_84 27W-50L-7T (32.1% WR / 40.5% NL, Trade 0.70x/0.32x, MinCol 0.84x/0.71x [13,760/16,323], GasCol 0.93x, UpgLv 1.7/1.6, Tier 64.9/30.9/4.2%, PkA 3,154, SB 4.1%), EXT_78 24W-47L-7T (30.8% WR / 39.7% NL, Trade 0.67x/0.28x, MinCol 0.82x/0.70x [13,049/15,938], GasCol 0.90x, UpgLv 1.5/1.4, SB 4.3%), EXT_75 23W-45L-7T (30.7% WR / 40.0% NL, Trade 0.68x, MinCol 0.81x), CORE14 17W-23L-2T (40.5% WR / 45.2% NL, Trade 0.84x, MinCol 0.90x), UNSEEN12 7W-24L-5T (19.4% WR / 33.3% NL, Trade 0.49x, MinCol 0.74x), SELF_6 3W-3L-0T (50.0%, Trade 0.90x, MinCol 1.08x). Confirmed major wins: [APM_CAP_DROPS] ATL 380,809 (-23.5% vs R14), RALLY_WORKERS 942 (11.21/g, -36.7%), GRMS 16->11, EscrowLock 11->7, Siege0DPS 15->13, RustyNikolaj 3-0-0 sweep, onlyfans 2-0-1 undefeated, AxeFighter 2-0-1 undefeated, ZvT +2W (5-5-0). HOLD causes: (1) Terran early_bunkers_4m 0.82->1.29 pulled T_EXT78 down -4W (11-14-1 -> 7-17-2, W@6m 37.5->30.0, t111 4->7, 1BaseLock 0->2); (2) 730:0 Energy Recharge still 2 casts/2g due to exact-round energy phantom-claim bug; (3) Zerg W@4m dipped 29.0->27.0.",
+      "rev": "rqsntsos ab48976b (Loop 63 Wave 1 HOLD-ZIP -- H2H 8-3-1 & APM Drops ATL -23.5% vs Terran early_bunkers 1.29 & 730:0 Recharge 2g)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_133316_iter63_ship15_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_132538_iter63_h2h_12",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter63_ship15_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter63_h2h_12_score.json",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "24W-47L-7T (30.8% WR / 39.7% NL, Trade 0.67x, MinCol 0.82x; EXT_75 23W-45L-7T 0.68x; CORE14 17W-23L-2T 45.2% NL 0.84x MinCol 0.90x, UNSEEN12 7W-24L-5T 33.3% NL 0.49x MinCol 0.74x; ALL_84 27W-50L-7T 40.5% NL 0.70x MinCol 0.84x; SELF_6 3W-3L 0.90x; H2H_12 8W-3L-1T 1.55x)",
+      "win_rate_pct": 30.8,
+      "non_loss_pct": 39.7,
+      "core14_wr_pct": 40.5,
+      "unseen12_wins": 7,
+      "h2h_record": "8W-3L-1T (66.7% WR / 75.0% NL, Trade 1.55x/2.58x; P 3-1 1.68x, T 3-0-1 2.26x, Z 2-2 1.00x)",
+      "trade_agg": 0.67,
+      "trade_med": 0.28,
+      "sup_blk_pct": 4.3,
+      "primary_kpis": {
+        "ext78": {
+          "trade_agg": 0.67,
+          "trade_med": 0.28,
+          "agg_min_ratio": 0.82,
+          "med_min_ratio": 0.7,
+          "our_min_collected_avg": 13049,
+          "opp_min_collected_avg": 15938
+        },
+        "ext75": {
+          "trade_agg": 0.68,
+          "trade_med": 0.27,
+          "agg_min_ratio": 0.81,
+          "med_min_ratio": 0.68,
+          "our_min_collected_avg": 13096,
+          "opp_min_collected_avg": 16134
+        },
+        "all84": {
+          "trade_agg": 0.7,
+          "trade_med": 0.32,
+          "agg_min_ratio": 0.84,
+          "med_min_ratio": 0.71,
+          "our_min_collected_avg": 13760,
+          "opp_min_collected_avg": 16323
+        },
+        "core14": {
+          "trade_agg": 0.84,
+          "trade_med": 0.33,
+          "agg_min_ratio": 0.9,
+          "med_min_ratio": 0.78,
+          "our_min_collected_avg": 13497,
+          "opp_min_collected_avg": 14993
+        },
+        "unseen12": {
+          "trade_agg": 0.49,
+          "trade_med": 0.21,
+          "agg_min_ratio": 0.74,
+          "med_min_ratio": 0.64,
+          "our_min_collected_avg": 12527,
+          "opp_min_collected_avg": 17042
+        }
+      },
+      "secondary_kpis": {
+        "ext78": {
+          "agg_gas_ratio": 0.9,
+          "med_gas_ratio": 0.74,
+          "our_gas_collected_avg": 3202,
+          "opp_gas_collected_avg": 3550,
+          "our_upg_levels": 1.5,
+          "opp_upg_levels": 1.4,
+          "t1_val_pct": 66.1,
+          "t2_val_pct": 30.3,
+          "t3_val_pct": 3.6,
+          "t1_avg_pct": 72.2,
+          "t2_avg_pct": 25.2,
+          "t3_avg_pct": 2.6
+        },
+        "all84": {
+          "agg_gas_ratio": 0.93,
+          "med_gas_ratio": 0.74,
+          "our_gas_collected_avg": 3453,
+          "opp_gas_collected_avg": 3717,
+          "our_upg_levels": 1.7,
+          "opp_upg_levels": 1.6,
+          "t1_val_pct": 64.9,
+          "t2_val_pct": 30.9,
+          "t3_val_pct": 4.2,
+          "t1_avg_pct": 71.5,
+          "t2_avg_pct": 25.7,
+          "t3_avg_pct": 2.8
+        }
+      },
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 7,
+      "prod_placement_stall_matches": 0,
+      "one_base_lockout_matches": 2,
+      "gas_rich_min_starved_matches": 11,
+      "cloaked_unit_damage_losses": 3,
+      "siege_range_zero_dps_losses": 13,
+      "zero_kill_collapse_matches": 4,
+      "drip_feed_collapse_matches": 31,
+      "wall_timeout_ties": 7,
+      "pro_mechanics_kpis": {
+        "apm_cap_drops_total_84m": 380809,
+        "apm_cap_drops_p0_84m": 13900,
+        "apm_cap_drops_p1_84m": 7200,
+        "apm_cap_drops_p2_84m": 355000,
+        "apm_cap_drops_p3_84m": 4800,
+        "apm_cap_drops_3666_84m": 6192,
+        "rally_workers_cmds_84m": 942,
+        "harvest_gather_per_game_84m": 116.04,
+        "nexus_energy_recharge_casts_84m": 2,
+        "nexus_energy_recharge_games_84m": 2,
+        "ravager_bile_casts_84m": 714,
+        "medivac_boost_casts_84m": 65
+      },
+      "stall_watchdog_kpis": {
+        "sup_cap_min_pct": 32.1,
+        "zero_income_matches": 6,
+        "zero_gas_matches": 6,
+        "wk_plateau_8m_pct": 27.0
+      },
+      "base_geometry_kpis": {
+        "pylon_clump_pct": 0.0,
+        "pylon_spacing_nn": 14.5,
+        "nat_supply_pct": 86.4,
+        "protoss_nat_supply_pct": 91.3,
+        "terran_nat_supply_pct": 81.0,
+        "zvz_nat_wall_pct": 0.0,
+        "early_bunkers_4m": 1.29
+      },
+      "by_race": {
+        "Protoss": {
+          "record": "EXT78 9W-15L-2T (34.6% WR / 42.3% NL, Trade 0.65x/0.24x, MinCol 0.80x [11,982/15,013], GasCol 1.01x, UpgLv 1.0/1.3, Tier 74.2/18.4/7.4%, SB 5.4%), PvP 3-5-0 (+1W, 2x tr), PvZ 3-6-1, 730:0 Recharge still 2/2g",
+          "trade_agg": 0.65,
+          "min_ratio": 0.8,
+          "gas_ratio": 1.01,
+          "upg_levels": 1.0,
+          "tier_pct": [
+            74.2,
+            18.4,
+            7.4
+          ],
+          "sup_blk": 5.4
+        },
+        "Terran": {
+          "record": "EXT78 7W-17L-2T (26.9% WR / 34.6% NL, Trade 0.77x/0.25x, MinCol 0.78x [11,860/15,136], GasCol 0.75x, UpgLv 1.7/1.4, Tier 65.1/34.7/0.2%, SB 2.5%), HOLD blocker: early_bunkers_4m 1.29, W@6m 30.0 (-7.5), t111 7, 1BaseLock 2",
+          "trade_agg": 0.77,
+          "min_ratio": 0.78,
+          "gas_ratio": 0.75,
+          "upg_levels": 1.7,
+          "tier_pct": [
+            65.1,
+            34.7,
+            0.2
+          ],
+          "sup_blk": 2.5
+        },
+        "Zerg": {
+          "record": "EXT78 8W-15L-3T (30.8% WR / 42.3% NL, Trade 0.61x/0.34x, MinCol 0.87x [15,305/17,666], GasCol 0.95x, UpgLv 1.8/1.5, Tier 77.3/22.6/0.2%, SB 5.1%), ZvT 5-5-0 (+2W), ZvZ 3-4-2 (0.91x), W@4m dipped to 27.0",
+          "trade_agg": 0.61,
+          "min_ratio": 0.87,
+          "gas_ratio": 0.95,
+          "upg_levels": 1.8,
+          "tier_pct": [
+            77.3,
+            22.6,
+            0.2
+          ],
+          "sup_blk": 5.1
+        }
+      }
+    },
+    {
+      "id": "iter63b_ship15_full",
+      "status": "UNCONDITIONAL_LIVE_SHIP_15_PROTOSS_12W_ATH_EXT75_28W_ATH_RECHARGE_33_17G_RALLY_WORKERS_MINUS_44_8PCT_SB_3_6PCT_ATL_WALLTIES_2_ATL",
+      "campaign": "Loops 29+ Self-Play, Tactics Arena 3.1 & Expanded Roster Campaign (Loop 63B Live Release #15: rev rqsntsos, BuildVersion rqsntsos_e5e69116, Protoss 12-14 ATH +3W, EXT_75 28W Ties ATH, zig-reapers 3-0-0 Sweep, 1st mini-puck Win, 730:0 Recharge 33/17g)",
+      "loop_self_improvements": [
+        "L63B-LOOP-1 (Disjoint 3-Lane Surgical Fix Smashed All 3 Wave-1 Blockers in One Pass): Root-caused and fixed (1) Terran 4-emitter empty-bunker spam + early_bunkers_4m 1.29->0.75 (below R14 0.82, W@6m 32.0->38.0), (2) sc2-protobuf-ws.rkt exact-round 49.51..49.99e -> 50e infinite phantom-claim death loop on 4126 (730:0 Recharge 1/1g -> 33 casts in 17g = 58.6% of Protoss games, beating R13's 12g record), and (3) Zerg peaceful drone tempo cliffs + L2 BO-reserve bypass (Zerg W@4m 27.0->29.0, MinCol 0.94x, 1st-ever mini-puck win).",
+        "L63B-LOOP-2 (Primary MinCol + Trade & 22-Graph Observatory Upgrade): Promoted Minerals Collected ratio alongside Trade Ratio as joint Primary KPIs (with GasCol, UpgLv, and Tier 1/2/3 % as Secondary KPIs) across replay scoring, ledger, trajectory log, and the 5-Tab 22-Graph Pro Observatory, unlocking new public Pro-curve ATHs (EPM 149.1, Min/m 1,101.8, SPM 41.0)."
+      ],
+      "spec_summary": "Loop 63B (Live Release #15, rev rqsntsos 4e0afc95, BuildVersion rqsntsos_e5e69116, 4-Race ELF ZIP Smoke 4W-0L 100% GO, deploy pending coordinator push): Fixes all 3 Loop 63 Wave-1 HOLD blockers cleanly across 3 disjoint lanes while keeping every Wave-1 macro/wire win. Combined L63+L63B H2H_12 vs R14 ZIPs = 13W-10L-1T (L63 8-3-1 1.55x; L63B 5-7-0 0.92x/0.81x, MinCol 1.00x, GasCol 1.05x, UpgLv 5.0/4.1, SB 2.6%). Full roster (iter63b_ship15_full, 0 crashes/rejects/opp crashes, avgStep 13.29ms [rt 9.04, tr 3.11, p95 21.30, max 270.6ms]): ALL_84 30W-51L-3T [30W clean] (35.7% WR / 39.3% NL, Trade 0.66x/0.29x, MinCol 0.84x/0.76x [13,638/16,283], GasCol 0.91x/0.83x [3,495/3,827], UpgLv 1.8/1.7, Tier 71.1/26.7/2.2% [val 64.6/32.5/2.9%], PkA 3,257, SB 3.6% ATL), EXT_78 28W-47L-3T [28W clean, +1W clean vs R14 / +4W vs L63] (35.9% WR / 39.7% NL, Trade 0.66x/0.29x, MinCol 0.83x/0.76x [13,043/15,796], GasCol 0.91x, UpgLv 1.6/1.5, Tier 71.7/26.4/2.0%, SB 3.7% ATL), EXT_75 (non-Chance) 28W-44L-3T (37.3% WR / 41.3% NL -- TIES R13 ATH & +3W vs R14!, Trade 0.68x, MinCol 0.83x, GasCol 0.91x), CORE14 19W-22L-1T (45.2% WR / 47.6% NL; Non-Chance 19-19-1 = 48.7%, Trade 0.77x/0.46x, MinCol 0.90x, GasCol 0.96x, 0 WallTies), UNSEEN12 9W-25L-2T (25.0% WR / 30.6% NL, Trade 0.56x [+0.05x vs R14], MinCol 0.76x, GasCol 0.87x, SB 3.6% ATL), SELF_6 2W-4L-0T (33.3%, Trade 0.68x, MinCol 0.94x, SB 3.1%). Breakthroughs: Protoss EXT_78 12W-14L-0T ALL-TIME RECORD (+3W, 46.2% WR, Trade 0.95x [+0.24x vs R14], MinCol 0.85x, SB 4.8% ATL, W@6m 41.5 ATH, PvP 5-4 1.18x, PvT 5-3 1.85x, #75 PvZ who SwarmHost W 16.53x); Zerg EXT_78 9W-15L-2T (+1W vs R14, Trade 0.64x, MinCol 0.94x [+0.18x], GasCol 1.17x, 1st-ever mini-puck win #28 ZvP 2.20x, Ravager Bile 1,108/25g [+39%]); Terran opening econ recovered (early_bunkers_4m 0.75, W@6m 38.0, SB 2.0% ATL, MedivacBoost 158 [+37%], #50 Thssprtssbt W, zig-reapers 10.92x W) with EXT_78 7W-18L-1T queued for Loop 64 midgame muster/fallback; zig-reapers 1st-ever 3-0-0 sweep (4.32x), CryptBotRevival 3-0-0 sweep (2.98x). Mechanics & Wire: 730:0 Energy Recharge 33 casts in 17g (58.6% of P games), RALLY_WORKERS 821 (9.77/g, -44.8% vs R14), HARVEST_GATHER 111.19/g (-13.0% >=3m), [APM_CAP_DROPS] 410,903 (-17.5% vs R14, P 79.0k ATL), WallTies 2 ATL (win=1), Siege0DPS EXT 10 ATL, 4-Corner Parity deltaWR 18.2pp (-7.4pp vs R14). Public Pro Curves ATHs (pro_curves_iter63b.json): EPM med 149.1 ATH, SPM med 41.0 (ties ATH > Pro 36.9), Min/m med 1,101.8 ATH (+19.2 vs R14), Gas/m med 233.8 (+9.0). 4-Race ELF ZIP Smoke vs titania (20261123_162806_iter63b_ship15_zip_smoke): 4W-0L-0T (100.0%, Trade 13.50x/11.55x, MinCol 1.51x/1.49x, GasCol 1.72x, SB 3.4%, avgStep 9.87ms, 4/4 mode=zip Tag:v_rqsntsos_e5e69116, 0 crashes/faults/rejects).",
+      "rev": "rqsntsos 4e0afc95 (BuildVersion rqsntsos_e5e69116, LIVE AI ARENA SHIP #15)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_155215_iter63b_ship15_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_154205_iter63b_h2h_12",
+      "wave1_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_133316_iter63_ship15_full",
+      "wave1_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_132538_iter63_h2h_12",
+      "zip_smoke_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_162806_iter63b_ship15_zip_smoke",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter63b_ship15_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter63b_h2h_12_score.json",
+      "zip_smoke_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter63b_ship15_zip_smoke_score.json",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "28W-47L-3T (35.9% WR / 39.7% NL, Trade 0.66x, MinCol 0.83x; EXT_75 28W-44L-3T TIES ATH 37.3% WR; CORE14 19W-22L-1T 47.6% NL 0.77x MinCol 0.90x, UNSEEN12 9W-25L-2T 30.6% NL 0.56x MinCol 0.76x; ALL_84 30W-51L-3T 39.3% NL 0.66x MinCol 0.84x SB 3.6% ATL; SELF_6 2W-4L 0.68x; H2H_12 5W-7L [L63+L63B 13W-10L-1T]; ZIP Smoke 4W-0L 13.50x MinCol 1.51x)",
+      "win_rate_pct": 35.9,
+      "non_loss_pct": 39.7,
+      "core14_wr_pct": 45.2,
+      "unseen12_wins": 9,
+      "h2h_record": "5W-7L-0T (41.7% WR, Trade 0.92x/0.81x, MinCol 1.00x/0.72x, GasCol 1.05x, UpgLv 5.0/4.1, SB 2.6%; L63 W1 8W-3L-1T 1.55x -> combined 13W-10L-1T)",
+      "trade_agg": 0.66,
+      "trade_med": 0.29,
+      "sup_blk_pct": 3.7,
+      "primary_kpis": {
+        "ext78": {
+          "trade_agg": 0.66,
+          "trade_med": 0.29,
+          "agg_min_ratio": 0.83,
+          "med_min_ratio": 0.76,
+          "our_min_collected_avg": 13043,
+          "opp_min_collected_avg": 15796
+        },
+        "ext75": {
+          "trade_agg": 0.68,
+          "trade_med": 0.3,
+          "agg_min_ratio": 0.83,
+          "med_min_ratio": 0.76,
+          "our_min_collected_avg": 13177,
+          "opp_min_collected_avg": 15943
+        },
+        "all84": {
+          "trade_agg": 0.66,
+          "trade_med": 0.29,
+          "agg_min_ratio": 0.84,
+          "med_min_ratio": 0.76,
+          "our_min_collected_avg": 13638,
+          "opp_min_collected_avg": 16283
+        },
+        "core14": {
+          "trade_agg": 0.77,
+          "trade_med": 0.46,
+          "agg_min_ratio": 0.9,
+          "med_min_ratio": 0.75,
+          "our_min_collected_avg": 12719,
+          "opp_min_collected_avg": 14116
+        },
+        "unseen12": {
+          "trade_agg": 0.56,
+          "trade_med": 0.2,
+          "agg_min_ratio": 0.76,
+          "med_min_ratio": 0.77,
+          "our_min_collected_avg": 13421,
+          "opp_min_collected_avg": 17757
+        },
+        "h2h12": {
+          "trade_agg": 0.92,
+          "trade_med": 0.81,
+          "agg_min_ratio": 1.0,
+          "med_min_ratio": 0.72,
+          "our_min_collected_avg": 26014,
+          "opp_min_collected_avg": 25959
+        }
+      },
+      "secondary_kpis": {
+        "ext78": {
+          "agg_gas_ratio": 0.91,
+          "med_gas_ratio": 0.86,
+          "our_gas_collected_avg": 3312,
+          "opp_gas_collected_avg": 3633,
+          "our_upg_levels": 1.6,
+          "opp_upg_levels": 1.5,
+          "t1_val_pct": 64.9,
+          "t2_val_pct": 32.3,
+          "t3_val_pct": 2.8,
+          "t1_avg_pct": 71.7,
+          "t2_avg_pct": 26.4,
+          "t3_avg_pct": 2.0
+        },
+        "all84": {
+          "agg_gas_ratio": 0.91,
+          "med_gas_ratio": 0.83,
+          "our_gas_collected_avg": 3495,
+          "opp_gas_collected_avg": 3827,
+          "our_upg_levels": 1.8,
+          "opp_upg_levels": 1.7,
+          "t1_val_pct": 64.6,
+          "t2_val_pct": 32.5,
+          "t3_val_pct": 2.9,
+          "t1_avg_pct": 71.1,
+          "t2_avg_pct": 26.7,
+          "t3_avg_pct": 2.2
+        },
+        "h2h12": {
+          "agg_gas_ratio": 1.05,
+          "med_gas_ratio": 0.6,
+          "our_gas_collected_avg": 7832,
+          "opp_gas_collected_avg": 7473,
+          "our_upg_levels": 5.0,
+          "opp_upg_levels": 4.1,
+          "t1_val_pct": 63.4,
+          "t2_val_pct": 30.9,
+          "t3_val_pct": 5.7,
+          "t1_avg_pct": 64.9,
+          "t2_avg_pct": 30.3,
+          "t3_avg_pct": 4.8
+        }
+      },
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 5,
+      "prod_placement_stall_matches": 0,
+      "one_base_lockout_matches": 1,
+      "gas_rich_min_starved_matches": 14,
+      "cloaked_unit_damage_losses": 2,
+      "siege_range_zero_dps_losses": 12,
+      "zero_kill_collapse_matches": 6,
+      "drip_feed_collapse_matches": 35,
+      "wall_timeout_ties": 2,
+      "pro_mechanics_kpis": {
+        "apm_avg": 289.1,
+        "epm_avg": 149.1,
+        "epm_pro_ref": 151.0,
+        "spm_avg": 41.0,
+        "spm_pro_ref": 36.9,
+        "collection_min_med": 1101.8,
+        "collection_gas_med": 233.8,
+        "apm_cap_drops_total_84m": 410903,
+        "apm_cap_drops_p0_84m": 16000,
+        "apm_cap_drops_p1_84m": 9300,
+        "apm_cap_drops_p2_84m": 379200,
+        "apm_cap_drops_p3_84m": 6400,
+        "rally_workers_cmds_84m": 821,
+        "harvest_gather_per_game_84m": 111.19,
+        "nexus_energy_recharge_casts_84m": 33,
+        "nexus_energy_recharge_games_84m": 17,
+        "ravager_bile_casts_84m": 1108,
+        "medivac_boost_casts_84m": 158,
+        "oracle_pulsar_beam_casts_84m": 36
+      },
+      "stall_watchdog_kpis": {
+        "sup_cap_min_pct": 34.6,
+        "zero_income_matches": 4,
+        "zero_gas_matches": 9,
+        "wk_plateau_8m_pct": 29.7
+      },
+      "base_geometry_kpis": {
+        "pylon_clump_pct": 1.8,
+        "pylon_spacing_nn": 14.3,
+        "nat_supply_pct": 85.7,
+        "protoss_nat_supply_pct": 90.9,
+        "terran_nat_supply_pct": 80.0,
+        "zvz_nat_wall_pct": 0.0,
+        "early_bunkers_4m": 0.75
+      },
+      "by_race": {
+        "Protoss": {
+          "record": "EXT78 12W-14L-0T (46.2% WR ALL-TIME RECORD +3W, Trade 0.95x/0.44x [+0.24x vs R14], MinCol 0.85x [11,007/12,967], GasCol 0.91x, UpgLv 0.7/1.2, Tier 69.6/25.1/5.3%, SB 4.8% ATL, W@6m 41.5 ATH), PvP 5-4 (1.18x), PvT 5-3 (1.85x), 730:0 Recharge 33 casts in 17g (58.6%), #75 PvZ who SwarmHost W 16.53x",
+          "trade_agg": 0.95,
+          "min_ratio": 0.85,
+          "gas_ratio": 0.91,
+          "upg_levels": 0.7,
+          "tier_pct": [
+            69.6,
+            25.1,
+            5.3
+          ],
+          "sup_blk": 4.8
+        },
+        "Terran": {
+          "record": "EXT78 7W-18L-1T (26.9% WR / 30.8% NL, Trade 0.50x/0.29x, MinCol 0.70x [12,412/17,704], GasCol 0.69x, UpgLv 2.1/2.1, Tier 65.2/34.6/0.2%, SB 2.0% ATL), early_bunkers_4m 0.75 (below R14), W@6m 38.0 recovered, MedivacBoost 158 (+37%), #50 Thssprtssbt W 1.50x, zig-reapers W 10.92x",
+          "trade_agg": 0.5,
+          "min_ratio": 0.7,
+          "gas_ratio": 0.69,
+          "upg_levels": 2.1,
+          "tier_pct": [
+            65.2,
+            34.6,
+            0.2
+          ],
+          "sup_blk": 2.0
+        },
+        "Zerg": {
+          "record": "EXT78 9W-15L-2T (34.6% WR / 42.3% NL, +1W vs R14, Trade 0.64x/0.27x, MinCol 0.94x [+0.18x, 15,710/16,718], GasCol 1.17x, UpgLv 2.1/1.3, Tier 80.1/19.4/0.5%, PkA 3,805, SB 4.2% ATL), W@4m 29.0 recovered, 1st-ever mini-puck win #28 ZvP 2.20x, Ravager Bile 1,108/25g (+39%)",
+          "trade_agg": 0.64,
+          "min_ratio": 0.94,
+          "gas_ratio": 1.17,
+          "upg_levels": 2.1,
+          "tier_pct": [
+            80.1,
+            19.4,
+            0.5
+          ],
+          "sup_blk": 4.2
+        }
       }
     }
   ],

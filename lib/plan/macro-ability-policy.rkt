@@ -567,14 +567,15 @@
        (not (macro-caster-info-hallucination? c))
        (let ([sym (macro-caster-info-sym c)]
              [en (exact->inexact (macro-caster-info-energy c))])
-         (or (and (eq? sym 'high-templar) (< en 75.0))
-             (and (eq? sym 'oracle) (< en 60.0))
-             (and (eq? sym 'sentry) (< en 95.0))))))
+         ;; L63B (`#1752` Bug #2A): Any Protoss spellcaster (`high-templar`/`oracle`/`sentry`/`mothership`)
+         ;; below `100.0e` (< 50% max energy) is eligible for Nexus Energy Recharge (`4126`).
+         (and (memq sym '(high-templar oracle sentry mothership))
+              (< en 100.0)))))
 
 (define (caster-recharge-priority sym)
   (case sym
     [(high-templar) 3]
-    [(oracle)       2]
+    [(oracle mothership) 2]
     [else           1]))
 
 (define (evaluate-protoss-nexus-recharge-policy
@@ -583,14 +584,14 @@
          #:enemy-units-present? enemy-units-present?
          #:recharge-available? recharge-available?
          #:recharge-off-cooldown? recharge-off-cooldown?
-         #:cast-range [cast-range (sc2-spell-cast-range 'nexus-energy-recharge 10.0)]
-         #:approach-hold-range [approach-hold-range 14.0])
+         #:cast-range [cast-range (sc2-spell-cast-range 'nexus-energy-recharge 14.5)]
+         #:approach-hold-range [approach-hold-range (+ (exact->inexact cast-range) 4.0)])
   (define eff-cast-range (exact->inexact cast-range))
   (define eff-hold-range (max eff-cast-range (exact->inexact approach-hold-range)))
-  ;; L62B (`#1680` Fix 3): Dry casters within `<= eff-cast-range` (`10t`) recharge cleanly
-  ;; EVEN out of combat (`enemy-units-present? = #f`) so Sentries/Oracles/HTs top up between
-  ;; fights; keep `enemy-units-present?` ONLY on `10..14t` `hold-nexus-tags` Chrono-yield!
-  (define eff-scan-range (if enemy-units-present? eff-hold-range eff-cast-range))
+  ;; L63B (`#1752` Bug #2A): Always scan up to `eff-hold-range` (`<= 22.0t`) BOTH in combat
+  ;; and out of combat (`enemy-units-present? = #f`) so `hold-nexus-tags` preserves `50..99e`
+  ;; Nexus energy while a dry caster approaches; always prefer any in-range (`<= eff-cast-range`)
+  ;; dry caster for immediate `4126` emission!
   (cond
     [(or (not recharge-available?)
          (not recharge-off-cooldown?)
@@ -615,25 +616,28 @@
           (define nx-en (exact->inexact (macro-nexus-info-energy nx)))
           (define nxx (macro-nexus-info-x nx))
           (define nxy (macro-nexus-info-y nx))
-          (define-values (best-c _best-prio best-d)
-            (for/fold ([bc #f] [bp -1] [bd +inf.0]) ([c (in-list dry-casters)])
+          (define-values (best-cast-c _cast-prio _cast-d any-hold?)
+            (for/fold ([bc #f] [bp -1] [bd +inf.0] [hold? #f]) ([c (in-list dry-casters)])
               (define d (dist2d nxx nxy (macro-caster-info-x c) (macro-caster-info-y c)))
-              (if (<= d eff-scan-range)
-                  (let ([p (caster-recharge-priority (macro-caster-info-sym c))])
-                    (if (or (> p bp) (and (= p bp) (< d bd)))
-                        (values c p d)
-                        (values bc bp bd)))
-                  (values bc bp bd))))
-          (when best-c
-            (cond
-              [(and (not cast-nx-tag)
-                    (<= best-d eff-cast-range)
-                    (exact-integer? (macro-caster-info-tag best-c))
-                    (> (macro-caster-info-tag best-c) 0))
-               (set! cast-nx-tag nx-tag)
-               (set! cast-tgt-tag (macro-caster-info-tag best-c))]
-              [(and enemy-units-present? (< nx-en 100.0))
-               (set-add! hold-tags nx-tag)])))
+              (cond
+                [(<= d eff-cast-range)
+                 (let ([p (caster-recharge-priority (macro-caster-info-sym c))])
+                   (if (or (> p bp) (and (= p bp) (< d bd)))
+                       (values c p d #t)
+                       (values bc bp bd #t)))]
+                [(<= d eff-hold-range)
+                 (values bc bp bd #t)]
+                [else
+                 (values bc bp bd hold?)])))
+          (cond
+            [(and (not cast-nx-tag)
+                  best-cast-c
+                  (exact-integer? (macro-caster-info-tag best-cast-c))
+                  (> (macro-caster-info-tag best-cast-c) 0))
+             (set! cast-nx-tag nx-tag)
+             (set! cast-tgt-tag (macro-caster-info-tag best-cast-c))]
+            [(and (not cast-nx-tag) any-hold? (< nx-en 100.0))
+             (set-add! hold-tags nx-tag)]))
         (protoss-nexus-recharge-decision
          cast-nx-tag
          cast-tgt-tag
@@ -649,6 +653,7 @@
          #:ally-casters ally-casters
          #:enemy-units-present? enemy-units-present?
          #:recharge-available? recharge-available?
+         #:recharge-off-cooldown? [recharge-off-cooldown? #t]
          #:caster-ready? caster-ready?
          #:target-ready? target-ready?)
   (cond
@@ -657,18 +662,20 @@
          (null? ready-nexuses))
      '()]
     [else
+     ;; L63B (`#1752` Bug #2A): Widen `Sec 6b` Probe Chrono yield radius to `20.0t` and gate
+     ;; yield on `recharge-off-cooldown?` so Probe Chrono yields `50..99e` ONLY when Recharge is
+     ;; actually off cooldown and a dry caster (`< 100.0e`) is within `20.0t`!
+     (define eff-yield-range
+       (max 20.0 (exact->inexact (sc2-spell-cast-range 'nexus-energy-recharge 14.5))))
      (define (low-energy-caster-near-nexus? nx)
        (and recharge-available?
-            enemy-units-present?
+            recharge-off-cooldown?
+            (< (exact->inexact (macro-nexus-info-energy nx)) 100.0)
             (ormap (lambda (c)
-                     (and (macro-caster-info? c)
-                          (not (macro-caster-info-hallucination? c))
-                          (set-member? EARLY-CHRONO-RECHARGE-YIELD-CASTER-SYMS
-                                       (macro-caster-info-sym c))
-                          (< (exact->inexact (macro-caster-info-energy c)) 75.0)
+                     (and (caster-dry-for-recharge? c)
                           (<= (dist2d (macro-nexus-info-x nx) (macro-nexus-info-y nx)
                                       (macro-caster-info-x c) (macro-caster-info-y c))
-                              15.0)))
+                              eff-yield-range)))
                    ally-casters)))
      (define probe-training-unboosted
        (filter (lambda (nx)

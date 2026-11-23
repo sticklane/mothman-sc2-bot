@@ -14,6 +14,8 @@
 
 (require racket/list
          racket/set
+         (only-in "../lib/sc2-game-constants.rkt"
+                  sc2-spell-cast-range)
          "../lib/plan/macro-ability-policy.rkt"
          "../lib/priority-macro-brain.rkt"
          (only-in "../lib/plan/static-defense.rkt"
@@ -375,11 +377,13 @@
                   (protoss-nexus-recharge-decision-cast-target-tag dec-prio))
             '(401 503))
 
-  ;; 3b. Approaching caster at 12t (10 < d <= 14) -> holds 50..99e Nexus in hold-nexus-tags, does NOT cast yet!
+  ;; 3b. Approaching caster in (cast-range, cast-range + 4.0] -> holds 50..99e Nexus in hold-nexus-tags, does NOT cast yet!
+  (define live-recharge-range (exact->inexact (sc2-spell-cast-range 'nexus-energy-recharge 14.5)))
+  (define approach-x (+ 30.0 live-recharge-range 2.0))
   (define dec-hold
     (evaluate-protoss-nexus-recharge-policy
      #:ready-nexuses (list (mk-nx 401 75.0 30.0 30.0) (mk-nx 402 120.0 30.0 30.0))
-     #:ally-casters (list (mk-caster 503 'high-templar 42.0 30.0 40.0))
+     #:ally-casters (list (mk-caster 503 'high-templar approach-x 30.0 40.0))
      #:enemy-units-present? #t
      #:recharge-available? #t
      #:recharge-off-cooldown? #t))
@@ -388,6 +392,33 @@
               (set-member? (protoss-nexus-recharge-decision-hold-nexus-tags dec-hold) 401))
   (check-true "recharge-approach-does-not-hold-120e-nx"
               (not (set-member? (protoss-nexus-recharge-decision-hold-nexus-tags dec-hold) 402)))
+
+  ;; 3b2. Explicit 14.5t parity check (`#1704`/`#1705`): 13.0t fires cleanly, 16.5t holds in combat!
+  (define dec-145-cast
+    (evaluate-protoss-nexus-recharge-policy
+     #:ready-nexuses (list (mk-nx 401 75.0 30.0 30.0))
+     #:ally-casters (list (mk-caster 503 'sentry 43.0 30.0 85.0))
+     #:enemy-units-present? #f
+     #:recharge-available? #t
+     #:recharge-off-cooldown? #t
+     #:cast-range 14.5))
+  (check-eq "recharge-14.5t-casts-at-13t"
+            (list (protoss-nexus-recharge-decision-cast-nexus-tag dec-145-cast)
+                  (protoss-nexus-recharge-decision-cast-target-tag dec-145-cast))
+            '(401 503))
+
+  (define dec-145-approach
+    (evaluate-protoss-nexus-recharge-policy
+     #:ready-nexuses (list (mk-nx 401 75.0 30.0 30.0))
+     #:ally-casters (list (mk-caster 503 'high-templar 46.5 30.0 40.0))
+     #:enemy-units-present? #t
+     #:recharge-available? #t
+     #:recharge-off-cooldown? #t
+     #:cast-range 14.5))
+  (check-eq "recharge-14.5t-approach-16.5t-no-cast"
+            (protoss-nexus-recharge-decision-cast-nexus-tag dec-145-approach) #f)
+  (check-true "recharge-14.5t-approach-16.5t-holds-75e-nx"
+              (set-member? (protoss-nexus-recharge-decision-hold-nexus-tags dec-145-approach) 401))
 
   ;; 3c. Unavailable or on cooldown -> no cast, empty holds
   (define dec-cd
@@ -400,73 +431,143 @@
   (check-eq "recharge-on-cd-no-cast" (protoss-nexus-recharge-decision-cast-nexus-tag dec-cd) #f)
   (check-true "recharge-on-cd-no-holds" (set-empty? (protoss-nexus-recharge-decision-hold-nexus-tags dec-cd)))
 
-  ;; 3c2. L62B (`#1680` Fix 3): Out-of-combat (`enemy-units-present? = #f`) Recharge `<= 10t` STILL fires,
-  ;;      while `10..14t` out-of-combat does NOT hold Chrono Boost!
+  ;; 3c2. L63B (`#1752` Bug #2A): Out-of-combat (`enemy-units-present? = #f`) Recharge `<= cast-range`
+  ;;      casts immediately (preferring in-range Sentry over out-of-range HT), AND approaching casters
+  ;;      in `(cast-range, eff-hold-range]` STILL hold `50..99e` Nexus energy out of combat!
   (define dec-peace-cast
     (evaluate-protoss-nexus-recharge-policy
      #:ready-nexuses (list (mk-nx 401 70.0 30.0 30.0) (mk-nx 402 70.0 60.0 30.0))
      #:ally-casters (list (mk-caster 501 'sentry 36.0 30.0 35.0)
-                          (mk-caster 503 'high-templar 42.0 30.0 40.0)
+                          (mk-caster 503 'high-templar approach-x 30.0 40.0)
                           (mk-caster 505 'oracle 65.0 30.0 30.0))
      #:enemy-units-present? #f
      #:recharge-available? #t
      #:recharge-off-cooldown? #t))
-  (check-eq "recharge-peace-in-range-casts-sentry-ignores-12t-ht"
+  (check-eq "recharge-peace-in-range-casts-sentry-ignores-out-of-range-ht"
             (list (protoss-nexus-recharge-decision-cast-nexus-tag dec-peace-cast)
                   (protoss-nexus-recharge-decision-cast-target-tag dec-peace-cast))
             '(401 501))
-  (check-true "recharge-peace-does-not-hold-chrono-on-second-nx"
+  (check-true "recharge-peace-does-not-hold-chrono-on-second-nx-once-casting"
               (set-empty? (protoss-nexus-recharge-decision-hold-nexus-tags dec-peace-cast)))
 
   (define dec-peace-approach
     (evaluate-protoss-nexus-recharge-policy
-     #:ready-nexuses (list (mk-nx 401 75.0 30.0 30.0))
-     #:ally-casters (list (mk-caster 503 'high-templar 42.0 30.0 40.0))
+     #:ready-nexuses (list (mk-nx 401 75.0 30.0 30.0) (mk-nx 402 120.0 30.0 30.0))
+     #:ally-casters (list (mk-caster 503 'high-templar 51.0 30.0 90.0))
      #:enemy-units-present? #f
      #:recharge-available? #t
-     #:recharge-off-cooldown? #t))
-  (check-eq "recharge-peace-12t-no-cast" (protoss-nexus-recharge-decision-cast-nexus-tag dec-peace-approach) #f)
-  (check-true "recharge-peace-12t-no-chrono-hold"
-              (set-empty? (protoss-nexus-recharge-decision-hold-nexus-tags dec-peace-approach)))
+     #:recharge-off-cooldown? #t
+     #:cast-range 17.5
+     #:approach-hold-range 22.0))
+  (check-eq "recharge-peace-approach-no-cast" (protoss-nexus-recharge-decision-cast-nexus-tag dec-peace-approach) #f)
+  (check-true "recharge-peace-approach-holds-75e-nx-within-22t"
+              (set-member? (protoss-nexus-recharge-decision-hold-nexus-tags dec-peace-approach) 401))
+  (check-true "recharge-peace-approach-does-not-hold-120e-nx"
+              (not (set-member? (protoss-nexus-recharge-decision-hold-nexus-tags dec-peace-approach) 402)))
 
-  ;; 3c3. L62C (`#1690`): Sentry threshold `< 95.0e` (matches R13 `< 50%` max energy):
-  ;;      85.0e Sentry <= 10t recharges out of combat; 95.0e Sentry does NOT.
-  (define dec-sentry-85
-    (evaluate-protoss-nexus-recharge-policy
-     #:ready-nexuses (list (mk-nx 401 70.0 30.0 30.0))
-     #:ally-casters (list (mk-caster 506 'sentry 36.0 30.0 85.0))
-     #:enemy-units-present? #f
-     #:recharge-available? #t
-     #:recharge-off-cooldown? #t))
-  (check-eq "recharge-sentry-85e-out-of-combat-fires"
-            (list (protoss-nexus-recharge-decision-cast-nexus-tag dec-sentry-85)
-                  (protoss-nexus-recharge-decision-cast-target-tag dec-sentry-85))
-            '(401 506))
-
+  ;; 3c3. L63B (`#1752` Bug #2A): `< 100.0e` dry threshold across HT/Oracle/Sentry/Mothership:
+  ;;      95.0e Sentry & 90.0e Mothership fire out of combat; 100.0e Sentry does NOT.
   (define dec-sentry-95
     (evaluate-protoss-nexus-recharge-policy
      #:ready-nexuses (list (mk-nx 401 70.0 30.0 30.0))
-     #:ally-casters (list (mk-caster 507 'sentry 36.0 30.0 95.0))
+     #:ally-casters (list (mk-caster 506 'sentry 36.0 30.0 95.0))
      #:enemy-units-present? #f
      #:recharge-available? #t
      #:recharge-off-cooldown? #t))
-  (check-eq "recharge-sentry-95e-does-not-fire"
-            (protoss-nexus-recharge-decision-cast-nexus-tag dec-sentry-95)
+  (check-eq "recharge-sentry-95e-out-of-combat-fires"
+            (list (protoss-nexus-recharge-decision-cast-nexus-tag dec-sentry-95)
+                  (protoss-nexus-recharge-decision-cast-target-tag dec-sentry-95))
+            '(401 506))
+
+  (define dec-mothership-90
+    (evaluate-protoss-nexus-recharge-policy
+     #:ready-nexuses (list (mk-nx 401 70.0 30.0 30.0))
+     #:ally-casters (list (mk-caster 508 'mothership 36.0 30.0 90.0))
+     #:enemy-units-present? #f
+     #:recharge-available? #t
+     #:recharge-off-cooldown? #t))
+  (check-eq "recharge-mothership-90e-out-of-combat-fires"
+            (list (protoss-nexus-recharge-decision-cast-nexus-tag dec-mothership-90)
+                  (protoss-nexus-recharge-decision-cast-target-tag dec-mothership-90))
+            '(401 508))
+
+  (define dec-sentry-100
+    (evaluate-protoss-nexus-recharge-policy
+     #:ready-nexuses (list (mk-nx 401 70.0 30.0 30.0))
+     #:ally-casters (list (mk-caster 507 'sentry 36.0 30.0 100.0))
+     #:enemy-units-present? #f
+     #:recharge-available? #t
+     #:recharge-off-cooldown? #t))
+  (check-eq "recharge-sentry-100e-does-not-fire"
+            (protoss-nexus-recharge-decision-cast-nexus-tag dec-sentry-100)
             #f)
 
-  ;; 3d. Early Probe Chrono Boost (< 6720f, < 50 workers) boosts self & yields during active contact w/ dry caster
-  (define pairs-peace
+  ;; 3d. Early Probe Chrono Boost (< 6720f, < 50 workers) boosts self when no dry caster <= 20.0t,
+  ;;     when Recharge is ON cooldown (`#:recharge-off-cooldown? #f`), or when Nexus >= 100e;
+  ;;     yields BOTH in combat & out of combat when Recharge is off cooldown and dry caster <= 20.0t!
+  (define pairs-peace-clear
     (select-early-probe-chrono-pairs
      #:loop 2400
      #:worker-count 24
      #:ready-nexuses (list (mk-nx 401 55.0 30.0 30.0 #:training-probe? #t #:chrono-buffed? #f)
                            (mk-nx 402 55.0 60.0 30.0 #:training-probe? #t #:chrono-buffed? #t))
-     #:ally-casters (list (mk-caster 503 'high-templar 36.0 30.0 40.0))
+     #:ally-casters (list (mk-caster 503 'sentry 36.0 30.0 100.0))
      #:enemy-units-present? #f
      #:recharge-available? #t
      #:caster-ready? (lambda (_) #t)
      #:target-ready? (lambda (_) #t)))
-  (check-eq "early-chrono-boosts-unbuffed-probe-nx-in-peace" pairs-peace '((401 . 401)))
+  (check-eq "early-chrono-boosts-unbuffed-probe-nx-when-caster-full" pairs-peace-clear '((401 . 401)))
+
+  (define pairs-peace-yield-sentry-19t
+    (select-early-probe-chrono-pairs
+     #:loop 2400
+     #:worker-count 24
+     #:ready-nexuses (list (mk-nx 401 55.0 30.0 30.0 #:training-probe? #t #:chrono-buffed? #f))
+     #:ally-casters (list (mk-caster 506 'sentry 49.0 30.0 95.0))
+     #:enemy-units-present? #f
+     #:recharge-available? #t
+     #:recharge-off-cooldown? #t
+     #:caster-ready? (lambda (_) #t)
+     #:target-ready? (lambda (_) #t)))
+  (check-eq "early-chrono-yields-out-of-combat-near-dry-sentry-19t" pairs-peace-yield-sentry-19t '())
+
+  (define pairs-peace-cd-allows-chrono
+    (select-early-probe-chrono-pairs
+     #:loop 2400
+     #:worker-count 24
+     #:ready-nexuses (list (mk-nx 401 55.0 30.0 30.0 #:training-probe? #t #:chrono-buffed? #f))
+     #:ally-casters (list (mk-caster 506 'sentry 49.0 30.0 95.0))
+     #:enemy-units-present? #f
+     #:recharge-available? #t
+     #:recharge-off-cooldown? #f
+     #:caster-ready? (lambda (_) #t)
+     #:target-ready? (lambda (_) #t)))
+  (check-eq "early-chrono-boosts-when-recharge-on-cooldown" pairs-peace-cd-allows-chrono '((401 . 401)))
+
+  (define pairs-peace-21t-allows-chrono
+    (select-early-probe-chrono-pairs
+     #:loop 2400
+     #:worker-count 24
+     #:ready-nexuses (list (mk-nx 401 55.0 30.0 30.0 #:training-probe? #t #:chrono-buffed? #f))
+     #:ally-casters (list (mk-caster 506 'sentry 51.0 30.0 95.0))
+     #:enemy-units-present? #f
+     #:recharge-available? #t
+     #:recharge-off-cooldown? #t
+     #:caster-ready? (lambda (_) #t)
+     #:target-ready? (lambda (_) #t)))
+  (check-eq "early-chrono-boosts-when-dry-caster-beyond-20t" pairs-peace-21t-allows-chrono '((401 . 401)))
+
+  (define pairs-peace-105e-ok
+    (select-early-probe-chrono-pairs
+     #:loop 2400
+     #:worker-count 24
+     #:ready-nexuses (list (mk-nx 401 105.0 30.0 30.0 #:training-probe? #t #:chrono-buffed? #f))
+     #:ally-casters (list (mk-caster 506 'sentry 43.0 30.0 85.0))
+     #:enemy-units-present? #f
+     #:recharge-available? #t
+     #:caster-ready? (lambda (_) #t)
+     #:target-ready? (lambda (_) #t)))
+  (check-eq "early-chrono-boosts-105e-nx-preserving-50e-for-recharge" pairs-peace-105e-ok '((401 . 401)))
 
   (define pairs-yield
     (select-early-probe-chrono-pairs

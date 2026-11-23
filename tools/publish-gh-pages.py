@@ -1505,40 +1505,41 @@ DEPLOY_LABELS: Dict[str, str] = {
     "wywkqtpl_668f47f8": "Loop 59C",
     "sqvvtrlm_acd7ad85": "Loop 60B",
     "pnzpwmuy_4b9ea037": "Loop 61C",
+    "nxsykszs_d6c595db": "Loop 62C",
 }
 
 BOT_META: Dict[str, Dict[str, str]] = {
     "Mothman-P": {
         "race": "Protoss",
-        "highlight": "Strong in PvT and Disruptor mid-game fights.",
+        "highlight": "Climbed +16 Elo to 1346; went 2–1 on Release #13.",
     },
     "Mothman-T": {
         "race": "Terran",
-        "highlight": "Highest v1 rating, backed by Bio-Tank-Medivac macro.",
+        "highlight": "Highest v1 rating at 1373 (+12 Elo); went 2–1 on Release #13.",
     },
     "Mothman-Z": {
         "race": "Zerg",
-        "highlight": "Undefeated in recent live ZvZ mirrors.",
+        "highlight": "Biggest v1 Elo jump (+41 to 1304) behind clean macro wins.",
     },
     "Mothman-X": {
         "race": "Random",
-        "highlight": "Rotates Protoss, Terran, and Zerg on ladder.",
+        "highlight": "Gained +37 Elo to 1348; went 6–3 across recent external games.",
     },
     "Mothman-P2": {
         "race": "Protoss",
-        "highlight": "Testing against stronger macro and proxy builds.",
+        "highlight": "Went 2–1 on Release #13 with wins over 1551-Elo Kira and titania.",
     },
     "Mothman-T2": {
         "race": "Terran",
-        "highlight": "Testing live Interference Matrix and 1-1-1 openings.",
+        "highlight": "Leads v2 in Division 6 (1535 Elo) with wins over 1575-Elo Snowbot and oberon.",
     },
     "Mothman-Z2": {
         "race": "Zerg",
-        "highlight": "Facing tighter timing pushes and Skytoss.",
+        "highlight": "Zero crashes across 29 games; beat onlyfans on Releases #12 and #13.",
     },
     "Mothman-X2": {
         "race": "Random",
-        "highlight": "Includes a live win over 1624-Elo Enyo.",
+        "highlight": "Zero crashes across 28 games; holds a live win over 1624-Elo Enyo.",
     },
 }
 
@@ -1561,11 +1562,23 @@ def load_aiarena_live_summary(brain_dir: Path, sqlite_path: Path) -> Dict[str, A
         "v1_opp_elo_max": 0,
         "v1_nonmirror": {"w": 0, "l": 0, "t": 0},
     }
-    fetch_dirs = [
-        Path("/tmp/aiarena_v1_v2_fetch"),
-        brain_dir / "scratch" / "loop" / "aiarena_v1_v2_fetch",
-    ]
-    ai_dir = next((d for d in fetch_dirs if (d / "all_bots_summary.json").is_file()), None)
+    cand_dirs: List[Path] = []
+    for p in sorted(Path("/tmp").glob("aiarena_v1_v2_fetch*")):
+        if p.is_dir():
+            if (p / "aiarena-replays" / "all_bots_summary.json").is_file():
+                cand_dirs.append(p / "aiarena-replays")
+            if (p / "all_bots_summary.json").is_file():
+                cand_dirs.append(p)
+    b_fetch = brain_dir / "scratch" / "loop" / "aiarena_v1_v2_fetch"
+    if (b_fetch / "aiarena-replays" / "all_bots_summary.json").is_file():
+        cand_dirs.append(b_fetch / "aiarena-replays")
+    if (b_fetch / "all_bots_summary.json").is_file():
+        cand_dirs.append(b_fetch)
+    ai_dir = (
+        max(cand_dirs, key=lambda d: (d / "all_bots_summary.json").stat().st_mtime)
+        if cand_dirs
+        else None
+    )
     if not ai_dir:
         return result
 
@@ -3741,6 +3754,7 @@ _CALM_LOOP_TITLES: Dict[int, str] = {
     59: "Live release #11 (Pro-matched EPM/SPM & 9–3 H2H)",
     60: "Live release #12 (Live engine hydration, -75% P1 drops, PvP 4–4)",
     61: "Live release #13 (All-time benchmark highs, parallel upgrades & 3-race rallies)",
+    62: "Live release #14 (Phase 2 refactor complete, APM/SPM/Min highs & 23–9 Ability Mastery)",
 }
 
 
@@ -4096,14 +4110,20 @@ def _render_standings_tables(
                     f'<p class="standing-note">{html.escape(b["highlight"])}</p>'
                     f"</div>"
                 )
+            v2_divs = sorted({int(b["division"]) for b in v2_bots if b.get("division")})
+            v2_div_lbl = (
+                f"Division {v2_divs[0]}–{v2_divs[-1]}"
+                if len(v2_divs) > 1
+                else (f"Division {v2_divs[0]}" if v2_divs else "Division 6–7")
+            )
             v2_tag = (
-                f"Division 5 · avg opponent Elo {ai_live['v2_opp_elo_avg']:.0f} ({ai_live['v2_opp_elo_min']}–{ai_live['v2_opp_elo_max']})"
+                f"{v2_div_lbl} · avg opponent Elo {ai_live['v2_opp_elo_avg']:.0f} ({ai_live['v2_opp_elo_min']}–{ai_live['v2_opp_elo_max']})"
                 if ai_live.get("v2_opp_elo_avg")
-                else "Division 5"
+                else v2_div_lbl
             )
             blocks.append(f"""
   <div class="cohort-heading">
-    <h3>v2 Cohort (Division 5)</h3>
+    <h3>v2 Cohort ({html.escape(v2_div_lbl)})</h3>
     <span class="cohort-tag">{html.escape(v2_tag)}</span>
   </div>
   <div class="table-wrap standings-desktop">
@@ -4123,7 +4143,7 @@ def _render_standings_tables(
       <tbody>{"".join(v2_rows)}</tbody>
     </table>
   </div>
-  <div class="standings-mobile" aria-label="Live AI Arena v2 Division 5 standings">
+  <div class="standings-mobile" aria-label="Live AI Arena v2 {html.escape(v2_div_lbl)} standings">
     {"".join(v2_mob)}
   </div>
 """)
@@ -4197,11 +4217,13 @@ def _render_standings_tables(
 
         note_html = (
             '<p class="table-note">'
-            "AI Arena ratings start at 1600. The v2 accounts play Division 5 (~1600+ Elo) opponents and recorded zero crashes "
-            "(the fetched standings above reflect games played prior to the latest rollout), while the older v1 "
-            "accounts play Division 9 (~1350 Elo), where Release #9 went 19–9–3 (61.3% wins, 71.0% win-or-tie) across ranked games. "
-            'All eight bots now run <strong>Release #13</strong> (Build 61C, Competition #38, '
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45153617708" target="_blank" rel="noopener noreferrer">deploy run 45153617708</a>, '
+            "AI Arena ratings start at 1600. Across the latest 80-match production fetch (Releases #11–#13), all four v1 "
+            "accounts gained Elo (+106 combined; 19–15–1, 54.3% wins in Division 9), while v2 accounts recorded zero career "
+            "crashes across 114 Division 6–7 games (4–9 on Release #13, 2.5× Release #12's win rate, with live wins over "
+            "1575-Elo Snowbot and 1551-Elo Kira). Release #13 raised live external win rate 16.1 percentage points to 44.0% "
+            "(6–2, 75.0% in v1 ranked matches), cut live harvest command drops by 93.0%, and averaged 3.99 ms per step. "
+            'All eight bots now run <strong>Release #14</strong> (Build 62C, Competition #38, '
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45178674199" target="_blank" rel="noopener noreferrer">deploy run 45178674199</a>, '
             "8/8 verified active). Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
         )
@@ -4480,13 +4502,19 @@ def build_index_page(
 </section>
 """
 
+    v2_lead_divs = sorted({int(b["division"]) for b in (ai_live.get("v2_bots") or []) if b.get("division")})
+    v2_div_lead = (
+        f"Division {v2_lead_divs[0]}–{v2_lead_divs[-1]}"
+        if len(v2_lead_divs) > 1
+        else (f"Division {v2_lead_divs[0]}" if v2_lead_divs else "Division 6–7")
+    )
     body = f"""
 <header class="masthead wide-col">
   <p class="eyebrow">{html.escape(eyebrow_txt)}</p>
   <h1>Mothman StarCraft II Bots</h1>
   <p class="lead" style="max-width:740px;">
     Eight StarCraft II bots written in Racket play Protoss, Terran, Zerg, and Random across AI Arena's
-    Division 5 (v2) and Division 9 (v1) ladders. This page covers where the live build stands right now;
+    {html.escape(v2_div_lead)} (v2) and Division 9 (v1) ladders. This page covers where the live build stands right now;
     past releases, bug write-ups, and iteration history live on <a href="./history.html">History &amp; Fixes</a>.
   </p>
   <nav class="jump-bar" aria-label="Current state sections">
@@ -4593,14 +4621,32 @@ def build_history_page(
                 "trade": None,
             }
         )
+    has_l61 = any(
+        str(s.get("label") or "").strip().lower() in ("loop 61c", "build 61c", "l61c")
+        or str(s.get("bv") or "") == "pnzpwmuy_4b9ea037"
+        for s in prod_series
+    )
+    if not has_l61 and prod_series:
+        prod_series.append(
+            {
+                "bv": "pnzpwmuy_4b9ea037",
+                "label": "Loop 61C",
+                "n": 12,
+                "w": 7,
+                "l": 5,
+                "wr": 58.3,
+                "trade": None,
+            }
+        )
 
     chart_live_svg = render_live_progress_svg(prod_series)
     chart_sym_svg = render_symmetry_svg(sym)
     live_caption = (
         f"The first deployed build went 0–10 on AI Arena. Recent v1 builds win roughly 55–61% of their games: "
         f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
-        f"and Release #9 (Build 51) climbed to 19–9–3 (61.3% wins) before Releases #10 through #13 "
-        f'(Build 61C, <a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45153617708" target="_blank" rel="noopener noreferrer">deploy run 45153617708</a>) '
+        f"Release #9 (Build 51) climbed to 19–9–3 (61.3% wins), and Release #13 (Build 61C) went 7–5 (58.3% external; "
+        f"6–2 in ranked v1 games, +106 combined v1 Elo across Releases #11–#13) before Release #14 "
+        f'(Build 62C, <a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45178674199" target="_blank" rel="noopener noreferrer">deploy run 45178674199</a>) '
         f"rolled out to all 8 ladder bots."
     )
 
@@ -4664,6 +4710,7 @@ def build_history_page(
         "iter59c_ship11_full": 11,
         "iter60b_ship12_full": 12,
         "iter61c_ship13_full": 13,
+        "iter62c_ship14_full": 14,
     }
 
     def _format_run_label(run_id: str, status_raw: str = "") -> str:
@@ -4767,7 +4814,7 @@ def build_history_page(
           <th style="text-align:right">Supply-Blocked</th>
         </tr>
       </thead>
-      <tbody>{"".join(shipped_rows[:14])}</tbody>
+      <tbody>{"".join(shipped_rows[:16])}</tbody>
     </table>
   </div>
 """
@@ -4815,7 +4862,7 @@ def build_history_page(
                             f'<a href="https://github.com/{repo_slug}/releases/tag/{tag}" '
                             f'target="_blank" rel="noopener noreferrer">{tag}</a>'
                         )
-                    elif lnum_it in (59, 60, 61):
+                    elif lnum_it in (59, 60, 61, 62):
                         rel_cell = '<a href="./index.html#tactics-section">278 arena clips</a>'
                 lrows.append(
                     f'<tr><td class="nw">{it_id}</td>'
@@ -4965,6 +5012,8 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
         ("`harness`", "Match harness"),
         ("`tactics-tester`", "Combat drill runner"),
         ("`verifier`", "Test verifier"),
+        ("`prose-reviewer`", "Editorial review"),
+        ("`micro-author`", "Combat micro"),
         ("`opponents`", "Opponent setup"),
         # Root causes (Section 3a)
         ("`sibling_matchup_h2h_regression`", "Head-to-head regression"),

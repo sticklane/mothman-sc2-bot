@@ -3267,7 +3267,7 @@
    'psi-storm             (sc2-spell-spec 'psi-storm             1036 'high-templar        'point 75.0  0    9.0   1.5  2.0  56   64  0  80.0  0.0   0                     'psi-storm)
    'feedback              (sc2-spell-spec 'feedback              140  'high-templar        'unit  50.0  0    10.0  0.0  0.0  36   0   0  0.0   0.0   0                     #f)
    'purification-nova     (sc2-spell-spec 'purification-nova     2346 'disruptor           'point 0.0   480  10.0  1.5  4.0  47   47  0  100.0 200.0 0                     #f)
-   'nexus-energy-recharge (sc2-spell-spec 'nexus-energy-recharge 4126 'nexus               'unit  50.0  1344 10.0  0.0  0.0  1344 0   0  0.0   0.0   0                     #f)
+   'nexus-energy-recharge (sc2-spell-spec 'nexus-energy-recharge 4126 'nexus               'unit  50.0  1344 14.5  0.0  0.0  1344 0   0  0.0   0.0   0                     #f)
    'guardian-shield       (sc2-spell-spec 'guardian-shield       76   'sentry              'none  75.0  0    0.0   4.5  5.0  246  246 0  0.0   0.0   0                     #f)
    'force-field           (sc2-spell-spec 'force-field           1526 'sentry              'point 50.0  0    9.0   1.5  1.5  32   246 0  0.0   0.0   0                     #f)
    'revelation            (sc2-spell-spec 'revelation            2146 'oracle              'point 25.0  0    9.0   6.0  6.0  448  448 0  0.0   0.0   0                     #f)

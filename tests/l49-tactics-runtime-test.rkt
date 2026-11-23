@@ -29,7 +29,8 @@
          (only-in "../lib/plan/creep-and-changeling.rkt" plan-changeling-free-unit-tactics)
          (only-in "../lib/plan/static-defense.rkt"
                   plan-spread-burrowed-swarm-host-harass
-                  plan-counter-spread-swarm-host-harass)
+                  plan-counter-spread-swarm-host-harass
+                  plan-counter-cannon-rush-tactics)
          (only-in "../lib/plan/wall-and-block.rkt"
                   plan-own-wall-integrity-defense
                   plan-expansion-and-gas-blocks)
@@ -5186,28 +5187,30 @@
                       'actions '())))
   (define rav-ok? (and (>= (length biles-f1) 2) (null? biles-cd) (null? biles-ff)))
 
-  ;; (c) Unified Nexus Energy Recharge cooldown & live 5.0.15 cast-range hydration across L2 & tactics
+  ;; (c) Unified Nexus Energy Recharge live 5.0.15 cast-range hydration across L2 (+2.5t edge-to-edge)
+  ;;     & tactics, plus 24f L2 dedup (wire owns authoritative 1344f global cooldown upon emission!)
   (define rech-ok?
     (dynamic-wind
       (lambda () (reset-sc2-live-game-data!) (reset-sc2-live-response-data!))
       (lambda ()
         (define nx-r (hash-set (mk-u 93301 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0) 'energy 100.0))
-        (define ht-112 (hash-set (mk-u 93302 'high-templar 43.7 32.5 #:hp 40.0 #:shield 40.0) 'energy 25.0)) ;; 11.2t away!
-        (define m-en (list (mk-u 93399 'marine 52.0 32.5 #:hp 45.0)))
+        (define ht-152 (hash-set (mk-u 93302 'high-templar 47.7 32.5 #:hp 40.0 #:shield 40.0) 'energy 25.0)) ;; 15.2t for tactics (14.5 vs 16.0)
+        (define ht-176 (hash-set (mk-u 93303 'high-templar 50.1 32.5 #:hp 40.0 #:shield 40.0) 'energy 25.0)) ;; 17.6t for L2 (17.0 vs 18.5)
+        (define m-en (list (mk-u 93399 'marine 56.0 32.5 #:hp 45.0)))
         (define obs-r (mk-live-obs 'Protoss 'Terran 1000 #:supply-used 10 #:supply-cap 23
-                                   #:ally-units (list ht-112) #:ally-buildings (list nx-r) #:enemy-units m-en
+                                   #:ally-units (list ht-176) #:ally-buildings (list nx-r) #:enemy-units m-en
                                    #:researched-upgrades '(psi-storm)))
-        ;; Static 10.0t range: 11.2t HT NOT recharged by L2 or tactics
+        ;; Static range (14.5t tactics / 17.0t L2 edge-to-edge): NOT recharged
         (define l2-st (step-layer2-economy! (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss) obs-r))
-        (define sp-st (plan-protoss-spellcaster-micro (list ht-112) m-en #:ally-buildings (list nx-r)
+        (define sp-st (plan-protoss-spellcaster-micro (list ht-152) m-en #:ally-buildings (list nx-r)
                                                       #:psi-storm-researched? #t #:current-frame 1000))
-        ;; Live 5.0.15 range = 12.0t: BOTH L2 and tactics recharge the 11.2t HT, and L2 shares 1344f cd!
-        (register-sc2-live-ability-data! 4126 'unit 12.0 #f 0)
+        ;; Live 5.0.15 range = 16.0t (18.5t L2 edge-to-edge): BOTH L2 and tactics recharge; L2 applies 24f dedup!
+        (register-sc2-live-ability-data! 4126 'unit 16.0 #f 0)
         (define rt-r (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
         (define l2-lv1 (step-layer2-economy! rt-r obs-r))
-        (define l2-lv-cd (step-layer2-economy! rt-r (hash-set obs-r 'frame 2000))) ;; +1000 < 1344 -> blocked!
-        (define l2-lv-ok (step-layer2-economy! rt-r (hash-set obs-r 'frame 2350))) ;; +1350 >= 1344 -> ready!
-        (define sp-lv (plan-protoss-spellcaster-micro (list ht-112) m-en #:ally-buildings (list nx-r)
+        (define l2-lv-cd (step-layer2-economy! rt-r (hash-set obs-r 'frame 1016))) ;; +16 < 24f L2 dedup -> blocked!
+        (define l2-lv-ok (step-layer2-economy! rt-r (hash-set obs-r 'frame 1030))) ;; +30 >= 24f -> retries if wire didn't emit!
+        (define sp-lv (plan-protoss-spellcaster-micro (list ht-152) m-en #:ally-buildings (list nx-r)
                                                       #:psi-storm-researched? #t #:current-frame 1000))
         (define (has-rech-act? xs)
           (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3) (eq? (third a) 'nexus-energy-recharge))) xs))
@@ -5404,9 +5407,9 @@
                  #:ally-buildings (list nx-sen)
                  #:enemy-units '()))
   (define acts-sen1 (step-layer2-economy! rt-sen obs-sen))
-  ;; Cooldown guard: +500f (< 1344f) MUST NOT re-cast; +1350f (>= 1344f) MUST cast again!
-  (define acts-sen-cd (step-layer2-economy! rt-sen (hash-set obs-sen 'frame 5000)))
-  (define acts-sen-ok (step-layer2-economy! rt-sen (hash-set obs-sen 'frame 5850)))
+  ;; L2 dedup guard: +16f (< 24f) blocked; +30f (>= 24f) retries if wire didn't consume (wire owns 1344f CD)!
+  (define acts-sen-cd (step-layer2-economy! rt-sen (hash-set obs-sen 'frame 4516)))
+  (define acts-sen-ok (step-layer2-economy! rt-sen (hash-set obs-sen 'frame 4530)))
 
   ;; 2. Dry Oracle (`30e`) & dry HT (`25e`) at `7.0t <= 10t` with `enemy-units = '()` MUST recharge!
   (define rt-orc (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
@@ -5428,11 +5431,11 @@
                   #:ally-buildings (list nx-sen)
                   #:enemy-units '())))
 
-  ;; 3. Out-of-range (`12.0t > 10t`) dry HT with `enemy-units = '()` does NOT recharge or hold Chrono!
+  ;; 3. Out-of-range (`23.0t > 22.0t` approach-hold) dry HT with `enemy-units = '()` does NOT recharge or hold Chrono!
   (define rt-far (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
   (define nx-busy (hash-set (hash-set (mk-u 93805 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0) 'energy 100.0)
                             'busy? #t))
-  (define ht-far (hash-set (mk-u 93806 'high-templar 44.5 32.5 #:hp 40.0 #:shield 40.0) 'energy 25.0))
+  (define ht-far (hash-set (mk-u 93806 'high-templar 55.5 32.5 #:hp 40.0 #:shield 40.0) 'energy 25.0))
   (define acts-far
     (step-layer2-economy!
      rt-far
@@ -5458,6 +5461,548 @@
                       (has-recharge? acts-orc 93801 93803)
                       (has-recharge? acts-ht 93801 93804)
                       far-chrono-ok?)))
+
+;; -----------------------------------------------------------------------------
+;; Test 93: Loop 63 — Coordinated Viking (>= 6) & Corruptor (>= 10, >= 0.5x)
+;; Dive-Commit vs >= 4 Tempests (Focus-Fire Lowest-HP Tempest, Zero 13..15t Lip Hover!)
+;; -----------------------------------------------------------------------------
+(let ()
+  (define (act-hits-id? a uid tgt-id)
+    (and (pair? a) (eq? (car a) 'attack-unit) (>= (length a) 3)
+         (or (equal? (second a) uid) (and (list? (second a)) (memv uid (second a))))
+         (equal? (third a) tgt-id)))
+  (define (act-kites-or-moves-uid? a uid)
+    (and (pair? a) (memq (car a) '(kite move)) (>= (length a) 2)
+         (or (equal? (second a) uid) (and (list? (second a)) (memv uid (second a))))))
+
+  ;; (a) 8 fighter Vikings at 14.5t lip facing 10 Tempests (94051 wounded @ 90 HP) + 6 Stalkers + Bio:
+  ;; ALL 8 Vikings MUST dive-commit (`attack-unit`) targeting wounded Tempest 94051 (zero kite)!
+  (define rt-vik (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define viks-8
+    (for/list ([i (in-range 8)])
+      (mk-u (+ 94001 i) 'viking-fighter 85.5 (+ 78.0 (* 0.5 i)) #:hp 135.0 #:max-hp 135.0 #:flying #t)))
+  (define bio-6
+    (for/list ([i (in-range 6)])
+      (mk-u (+ 94020 i) 'marine 74.0 (+ 78.0 (* 0.5 i)) #:hp 45.0 #:max-hp 45.0)))
+  (define tmp-10
+    (cons (mk-u 94051 'tempest 100.0 79.5 #:hp 90.0 #:max-hp 200.0 #:shield 0.0 #:max-shield 125.0 #:flying #t)
+          (for/list ([i (in-range 1 10)])
+            (mk-u (+ 94051 i) 'tempest 100.0 (+ 77.0 (* 0.6 i)) #:hp 200.0 #:max-hp 200.0 #:shield 125.0 #:max-shield 125.0 #:flying #t))))
+  (define stk-screen-6
+    (for/list ([i (in-range 6)])
+      (mk-u (+ 94071 i) 'stalker 95.0 (+ 77.5 (* 0.7 i)) #:hp 80.0 #:shield 80.0)))
+  (define a-vik
+    (run-l34 rt-vik
+             (mk-live-obs 'Terran 'Protoss 12000 #:supply-used 90 #:supply-cap 120
+                          #:ally-units (append viks-8 bio-6)
+                          #:ally-buildings (list (mk-u 94090 'orbital-command 32.5 32.5 #:hp 1500.0))
+                          #:enemy-units (append tmp-10 stk-screen-6))))
+  (define vik-all-commit?
+    (for/and ([vid (in-range 94001 94009)])
+      (and (ormap (lambda (a) (act-hits-id? a vid 94051)) a-vik)
+           (not (ormap (lambda (a) (act-kites-or-moves-uid? a vid)) a-vik)))))
+
+  ;; (b) 12 Corruptors at 14.5t lip facing 20 Tempests (0.60x >= 0.50x; 94151 wounded @ 80 HP):
+  ;; ALL 12 Corruptors MUST dive-commit (`attack-unit`) targeting wounded Tempest 94151 (zero move retreat)!
+  (define rt-cor (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define cors-12
+    (for/list ([i (in-range 12)])
+      (mk-u (+ 94101 i) 'corruptor 85.5 (+ 77.0 (* 0.4 i)) #:hp 200.0 #:max-hp 200.0 #:flying #t)))
+  (define tmp-20
+    (cons (mk-u 94151 'tempest 100.0 79.0 #:hp 80.0 #:max-hp 200.0 #:shield 0.0 #:max-shield 125.0 #:flying #t)
+          (for/list ([i (in-range 1 20)])
+            (mk-u (+ 94151 i) 'tempest (+ 100.0 (* 0.2 (modulo i 3))) (+ 75.0 (* 0.4 i))
+                  #:hp 200.0 #:max-hp 200.0 #:shield 125.0 #:max-shield 125.0 #:flying #t))))
+  (define a-cor
+    (run-l34 rt-cor
+             (mk-live-obs 'Zerg 'Protoss 12500 #:supply-used 110 #:supply-cap 140
+                          #:ally-units cors-12
+                          #:ally-buildings (list (mk-u 94190 'hive 32.5 32.5 #:hp 2500.0))
+                          #:enemy-units tmp-20)))
+  (define cor-all-commit?
+    (for/and ([cid (in-range 94101 94113)])
+      (and (ormap (lambda (a) (act-hits-id? a cid 94151)) a-cor)
+           (not (ormap (lambda (a) (act-kites-or-moves-uid? a cid)) a-cor)))))
+
+  (check-true "L63-Tempest-Viking-And-Corruptor-Coordinated-Dive-Commit"
+              (and vik-all-commit? cor-all-commit?)
+              (format "vik-commit=~a cor-commit=~a" vik-all-commit? cor-all-commit?)))
+
+;; -----------------------------------------------------------------------------
+;; Test 94: Loop 63 — Anti-SwarmHost No-Locust-Chase & Exposed Swarm Host Snipe
+;; -----------------------------------------------------------------------------
+(let ()
+  (define roa-8
+    (for/list ([i (in-range 8)])
+      (mk-u (+ 94201 i) 'roach 80.0 (+ 48.0 (* 0.5 i)) #:hp 145.0 #:max-hp 145.0)))
+  (define loc-6
+    (for/list ([i (in-range 6)])
+      (mk-u (+ 94251 i) (if (even? i) 'locust-mp 'locust) 88.0 (+ 48.5 (* 0.5 i)) #:hp 50.0 #:max-hp 50.0)))
+  (define bldgs-z
+    (list (mk-u 94290 'lair 32.5 50.0 #:hp 2000.0)
+          (mk-u 94291 'hatchery 56.5 50.0 #:hp 1500.0)))
+
+  ;; (a) Mid-map squad vs timed-life Locusts ONLY (no exposed Swarm Host): MUST kite/move back,
+  ;; ZERO `attack-unit` chasing timed-life Locusts!
+  (define rt-loc (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define a-loc
+    (run-l34 rt-loc
+             (mk-live-obs 'Zerg 'Zerg 9000 #:supply-used 60 #:supply-cap 80
+                          #:ally-units roa-8 #:ally-buildings bldgs-z #:enemy-units loc-6)))
+  (define loc-kited?
+    (and (ormap (lambda (a) (and (pair? a) (memq (car a) '(move kite)))) a-loc)
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit)
+                                      (>= (length a) 3) (<= 94251 (third a) 94256)))
+                     a-loc))))
+
+  ;; (b) Same squad when 3 exposed Swarm Hosts (`swarm-host-mp`) are within 14t (<= 22t) behind
+  ;; the Locusts: MUST focus-fire the exposed Swarm Hosts instead of chasing Locusts or fleeing!
+  (define rt-sh (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define sh-3
+    (for/list ([i (in-range 3)])
+      (mk-u (+ 94271 i) 'swarm-host-mp 94.0 (+ 49.0 (* 0.8 i)) #:hp 160.0 #:max-hp 160.0)))
+  (define a-sh
+    (run-l34 rt-sh
+             (mk-live-obs 'Zerg 'Zerg 9000 #:supply-used 60 #:supply-cap 80
+                          #:ally-units roa-8 #:ally-buildings bldgs-z #:enemy-units (append loc-6 sh-3))))
+  (define sh-focused?
+    (and (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit)
+                                 (>= (length a) 3) (<= 94271 (third a) 94273)))
+                a-sh)
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit)
+                                      (>= (length a) 3) (<= 94251 (third a) 94256)))
+                     a-sh))))
+
+  (check-true "L63-Anti-SwarmHost-No-Locust-Chase-And-Exposed-SH-Snipe"
+              (and loc-kited? sh-focused?)
+              (format "loc-kited=~a sh-focused=~a" loc-kited? sh-focused?)))
+
+;; -----------------------------------------------------------------------------
+;; Test 95: Loop 63 — Anti-Phoenix Battery-Anchor Stalker Leash (3-5 Stalkers
+;; Anchored <= 8t of Shield Battery / Nexus, Rest of Army Unpulled!)
+;; -----------------------------------------------------------------------------
+(let ()
+  (define nx-main (mk-u 94390 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0))
+  (define sb-main (mk-u 94391 'shield-battery 30.0 32.5 #:hp 150.0 #:shield 150.0))
+  (define home-stks-5
+    (for/list ([i (in-range 5)])
+      (mk-u (+ 94301 i) 'stalker 32.0 (+ 31.0 (* 0.6 i)) #:hp 80.0 #:shield 80.0)))
+  (define front-stks-5
+    (for/list ([i (in-range 5)])
+      (mk-u (+ 94311 i) 'stalker 95.0 (+ 94.0 (* 0.6 i)) #:hp 80.0 #:shield 80.0)))
+  (define front-en
+    (list (mk-u 94381 'stalker 101.0 95.0 #:hp 80.0 #:shield 80.0)
+          (mk-u 94382 'stalker 101.5 96.0 #:hp 80.0 #:shield 80.0)))
+
+  ;; (a) 4 Phoenixes hovering 14t off-base trying to bait Stalkers away from Battery (30.0, 32.5):
+  ;; 4 home Stalkers hold/move back inside Battery ring (<= 6.5t of 30.0, 32.5), ZERO off-base chase,
+  ;; AND all 5 frontline Stalkers (94311..94315) keep fighting at (101, 95) (NOT pulled home)!
+  (define rt-phx1 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define phx-bait-4
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 94351 i) 'phoenix 44.0 (+ 31.5 (* 0.6 i)) #:hp 120.0 #:shield 60.0 #:flying #t)))
+  (define a-bait
+    (run-l34 rt-phx1
+             (mk-live-obs 'Protoss 'Protoss 7500 #:supply-used 60 #:supply-cap 80
+                          #:ally-units (append home-stks-5 front-stks-5)
+                          #:ally-buildings (list nx-main sb-main)
+                          #:enemy-units (append phx-bait-4 front-en))))
+  (define anchored-held-battery?
+    (and (>= (count (lambda (sid)
+                      (ormap (lambda (a)
+                               (and (pair? a) (eq? (car a) 'move)
+                                    (or (equal? (second a) sid) (and (list? (second a)) (memv sid (second a))))
+                                    (<= (abs (- (third a) 30.0)) 6.5)))
+                             a-bait))
+                    '(94301 94302 94303 94304 94305))
+             4)
+         (not (ormap (lambda (a)
+                       (and (pair? a) (eq? (car a) 'attack-unit) (>= (length a) 3)
+                            (<= 94351 (third a) 94354)
+                            (let ([u0 (second a)])
+                              (or (and (integer? u0) (<= 94301 u0 94305))
+                                  (and (list? u0) (ormap (lambda (x) (<= 94301 x 94305)) u0))))))
+                     a-bait))))
+  (define front-unpulled?
+    (ormap (lambda (a)
+             (and (pair? a) (eq? (car a) 'attack-unit) (>= (length a) 3)
+                  (memv (third a) '(94381 94382))))
+           a-bait))
+
+  ;; (b) Same 4 Phoenixes swooping inside 5.5t of Shield Battery (35.5, 32.5):
+  ;; Anchored Stalkers shoot them down (`attack-unit` on Phoenix IDs)!
+  (define rt-phx2 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define phx-close-4
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 94361 i) 'phoenix 35.5 (+ 31.5 (* 0.6 i)) #:hp 120.0 #:shield 60.0 #:flying #t)))
+  (define a-close
+    (run-l34 rt-phx2
+             (mk-live-obs 'Protoss 'Protoss 7500 #:supply-used 60 #:supply-cap 80
+                          #:ally-units (append home-stks-5 front-stks-5)
+                          #:ally-buildings (list nx-main sb-main)
+                          #:enemy-units (append phx-close-4 front-en))))
+  (define anchored-fired?
+    (>= (count (lambda (sid)
+                 (ormap (lambda (a)
+                          (and (pair? a) (eq? (car a) 'attack-unit) (>= (length a) 3)
+                               (or (equal? (second a) sid) (and (list? (second a)) (memv sid (second a))))
+                               (<= 94361 (third a) 94364)))
+                        a-close))
+               '(94301 94302 94303 94304 94305))
+        4))
+
+  (check-true "L63-Anti-Phoenix-Battery-Anchor-Stalker-Leash"
+              (and anchored-held-battery? front-unpulled? anchored-fired?)
+              (format "held=~a front=~a fired=~a" anchored-held-battery? front-unpulled? anchored-fired?)))
+
+;; -----------------------------------------------------------------------------
+;; Test 96: Loop 63 — Peaceful Zerg 2:30-4:30 Drone-vs-Ling Larva Tempo
+;; (Cap Safety Lings @ 4 Non-ZvZ / 6 ZvZ When Peaceful; Uncap Immediately vs Rush!)
+;; -----------------------------------------------------------------------------
+(let ()
+  (define bldgs-calm
+    (list (mk-u 94490 'hatchery 32.5 32.5 #:hp 1500.0)
+          (mk-u 94491 'hatchery 56.5 32.5 #:hp 1500.0)
+          (mk-u 94495 'hatchery 39.5 59.5 #:hp 1500.0)
+          (mk-u 94492 'spawning-pool 36.5 35.5 #:hp 1000.0)
+          (mk-u 94493 'extractor 30.0 34.5 #:hp 500.0)
+          (mk-u 94494 'roach-warren 40.0 34.5 #:hp 850.0)))
+  (define bldgs-2b
+    (list (mk-u 94490 'hatchery 32.5 32.5 #:hp 1500.0)
+          (mk-u 94491 'hatchery 56.5 32.5 #:hp 1500.0)
+          (mk-u 94492 'spawning-pool 36.5 35.5 #:hp 1000.0)))
+  (define drones-26
+    (for/list ([i (in-range 26)])
+      (mk-u (+ 94401 i) 'drone 28.0 (+ 30.0 (* 0.2 i)) #:hp 40.0)))
+  (define queens-3
+    (list (mk-u 94431 'queen 33.0 32.5 #:hp 175.0)
+          (mk-u 94432 'queen 56.0 32.5 #:hp 175.0)
+          (mk-u 94433 'queen 45.0 32.5 #:hp 175.0)))
+  (define lings-6
+    (for/list ([i (in-range 6)])
+      (mk-u (+ 94441 i) 'zergling 50.0 (+ 32.0 (* 0.4 i)) #:hp 35.0)))
+  (define lings-4 (take lings-6 4))
+  (define larvae-4
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 94461 i) 'larva 34.0 (+ 32.0 (* 0.2 i)) #:hp 25.0)))
+
+  ;; (a) Peaceful ZvZ at 3:20 (frame 4500) with 26 Drones & 6 safety Lings: trains 4 Drones, ZERO extra Lings!
+  (define a-zvz-calm
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg)
+     (mk-live-obs 'Zerg 'Zerg 4500 #:minerals 300 #:gas 20 #:supply-used 35 #:supply-cap 60
+                  #:mineral-harvesters 24 #:vespene-harvesters 2
+                  #:ally-units (append drones-26 queens-3 lings-6 larvae-4)
+                  #:ally-buildings bldgs-calm #:enemy-units '())))
+  (define zvz-calm-drones (count (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'drone))) a-zvz-calm))
+  (define zvz-calm-lings  (count (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'zergling))) a-zvz-calm))
+
+  ;; (b) Peaceful ZvT at 3:20 (frame 4500) with 26 Drones & 4 safety Lings: trains 4 Drones, ZERO extra Lings!
+  (define a-zvt-calm
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg)
+     (mk-live-obs 'Zerg 'Terran 4500 #:minerals 300 #:gas 20 #:supply-used 34 #:supply-cap 60
+                  #:mineral-harvesters 24 #:vespene-harvesters 2
+                  #:ally-units (append drones-26 queens-3 lings-4 larvae-4)
+                  #:ally-buildings bldgs-calm #:enemy-units '())))
+  (define zvt-calm-drones (count (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'drone))) a-zvt-calm))
+  (define zvt-calm-lings  (count (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'zergling))) a-zvt-calm))
+
+  ;; (c) Active ZvZ rush at 3:20 (10 enemy Lings attacking Natural): cancels peaceful cap & trains Lings!
+  (define enemy-lings-10
+    (for/list ([i (in-range 10)])
+      (mk-u (+ 94481 i) 'zergling 58.0 (+ 31.0 (* 0.3 i)) #:hp 35.0)))
+  (define a-zvz-rush
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg)
+     (mk-live-obs 'Zerg 'Zerg 4500 #:minerals 250 #:gas 20 #:supply-used 29 #:supply-cap 44
+                  #:mineral-harvesters 24 #:vespene-harvesters 2
+                  #:ally-units (append drones-26 lings-6 larvae-4)
+                  #:ally-buildings bldgs-2b #:enemy-units enemy-lings-10)))
+  (define zvz-rush-lings (count (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'zergling))) a-zvz-rush))
+
+  (check-true "L63-Peaceful-Zerg-Early-Drone-Tempo-230-To-430"
+              (and (>= zvz-calm-drones 4) (= zvz-calm-lings 0)
+                   (>= zvt-calm-drones 4) (= zvt-calm-lings 0)
+                   (>= zvz-rush-lings 1))
+              (format "zvz-calm=(d:~a l:~a) zvt-calm=(d:~a l:~a) zvz-rush-l=~a"
+                      zvz-calm-drones zvz-calm-lings zvt-calm-drones zvt-calm-lings zvz-rush-lings)))
+
+;; -----------------------------------------------------------------------------
+;; Test 97: Loop 63B Bug #1B — Terran Single-Worker-Scout BunkerSiegeRecovery
+;; Guard, Empty-Bunker / <4:00 Cap / <2:15 Nat CC Protection, L4 Live Gate &
+;; Factory #1 Deferral for Orbital Command #1
+;; -----------------------------------------------------------------------------
+(let ()
+  (define (has-bunker-build? acts)
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'bunker))) acts))
+  (define (has-factory-build? acts)
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'factory))) acts))
+
+  (define cc1 (mk-u 94501 'command-center 32.5 32.5 #:hp 1500.0))
+  (define cc1-busy (hash-set (hash-set cc1 'order-count 1) 'busy? #t))
+  (define rax1 (mk-u 94502 'barracks 36.5 36.5 #:hp 1000.0))
+  (define scvs-16
+    (for/list ([i (in-range 16)])
+      (mk-u (+ 94510 i) 'scv 29.0 (+ 30.0 (* 0.2 i)) #:hp 45.0)))
+  (define mars-3
+    (for/list ([i (in-range 3)])
+      (mk-u (+ 94530 i) 'marine 38.0 (+ 32.0 (* 0.4 i)) #:hp 45.0)))
+
+  ;; (a) < 2:00 (f=1500) single enemy worker scout in main does NOT enter `BunkerSiegeRecovery`;
+  ;;     2 enemy workers OR 1 enemy combat unit DOES enter `BunkerSiegeRecovery`!
+  (define rt-scout1 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (step-layer1b-mastermind!
+   rt-scout1
+   (mk-live-obs 'Terran 'Protoss 1500 #:minerals 180 #:gas 0 #:supply-used 16 #:supply-cap 23
+                #:mineral-harvesters 16 #:ally-units scvs-16 #:ally-buildings (list cc1 rax1)
+                #:enemy-units (list (mk-u 94580 'probe 35.0 34.0 #:hp 20.0 #:shield 20.0))))
+  (define scout1-stays-fe? (not (eq? (live-bot-runtime-posture rt-scout1) 'BunkerSiegeRecovery)))
+
+  (define rt-combat1 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (step-layer1b-mastermind!
+   rt-combat1
+   (mk-live-obs 'Terran 'Protoss 1500 #:minerals 180 #:gas 0 #:supply-used 16 #:supply-cap 23
+                #:mineral-harvesters 16 #:ally-units scvs-16 #:ally-buildings (list cc1 rax1)
+                #:enemy-units (list (mk-u 94581 'zealot 38.0 34.0 #:hp 100.0 #:shield 50.0))))
+  (define combat1-enters-bsr? (eq? (live-bot-runtime-posture rt-combat1) 'BunkerSiegeRecovery))
+
+  ;; (b) 0-Marine Terran under early threat builds 0 Bunkers; 1-Marine vs 2 Reapers builds Bunker #1;
+  ;;     < 4:00 with 1 finished Bunker + 3 Marines caps at 1 Bunker (no 2nd Bunker);
+  ;;     < 2:15 1-base non-breach with 2 Marines & 250M protects Natural CC escrow (0 Bunkers)!
+  (define reapers-2
+    (list (mk-u 94582 'reaper 42.0 32.0 #:hp 60.0)
+          (mk-u 94583 'reaper 43.0 33.0 #:hp 60.0)))
+  (define a-zero-mar
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+     (mk-live-obs 'Terran 'Terran 3400 #:minerals 220 #:gas 0 #:supply-used 16 #:supply-cap 23
+                  #:mineral-harvesters 16 #:ally-units scvs-16 #:ally-buildings (list cc1 rax1)
+                  #:enemy-units reapers-2)))
+  (define a-one-mar-reap
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+     (mk-live-obs 'Terran 'Terran 3400 #:minerals 220 #:gas 0 #:supply-used 17 #:supply-cap 23
+                  #:mineral-harvesters 16 #:ally-units (append scvs-16 (take mars-3 1))
+                  #:ally-buildings (list cc1 rax1) #:enemy-units reapers-2)))
+  (define bnk-done (mk-u 94503 'bunker 41.0 33.0 #:hp 400.0))
+  (define stalkers-4
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 94585 i) 'stalker 42.0 (+ 31.0 i) #:hp 80.0 #:shield 80.0)))
+  (define a-cap1-under4m
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+     (mk-live-obs 'Terran 'Protoss 4200 #:minerals 300 #:gas 0 #:supply-used 22 #:supply-cap 31
+                  #:mineral-harvesters 16 #:ally-units (append scvs-16 mars-3)
+                  #:ally-buildings (list cc1 rax1 bnk-done) #:enemy-units stalkers-4)))
+  (define stalkers-far-threat
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 94590 i) 'stalker 82.0 (+ 32.0 i) #:hp 80.0 #:shield 80.0)))
+  (define a-early-nat-cc
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+     (mk-live-obs 'Terran 'Protoss 2600 #:minerals 250 #:gas 0 #:supply-used 18 #:supply-cap 23
+                  #:mineral-harvesters 16 #:ally-units (append scvs-16 (take mars-3 2))
+                  #:ally-buildings (list cc1 rax1) #:enemy-units stalkers-far-threat)))
+
+  ;; (c) L4 `plan-counter-cannon-rush-tactics` suppresses `(build 'bunker ...)` on live obs, keeps on Arena!
+  (define cannon-obs-base
+    (hasheq 'race 'Terran 'enemy-race 'Protoss 'frame 2400 'base-x 32.5 'base-y 32.5
+            'ally-units scvs-16 'ally-buildings (list cc1 rax1)
+            'enemy-buildings (list (mk-u 94595 'pylon 44.0 34.0 #:hp 200.0 #:shield 200.0)
+                                   (mk-u 94596 'photon-cannon 43.0 34.0 #:hp 150.0 #:shield 150.0))))
+  (define l4-arena-bunker? (has-bunker-build? (plan-counter-cannon-rush-tactics cannon-obs-base)))
+  (define l4-live-bunker?  (has-bunker-build? (plan-counter-cannon-rush-tactics (hash-set cannon-obs-base 'raw-mineral-harvesters 16))))
+
+  ;; (d) Factory #1 defers at 200M/100G when 2 CCs exist (0 OCs present/pending) and Brain
+  ;;     schedules `(morph orbital-command)`; builds cleanly at 320M/100G (>= 300M covers both)!
+  (define cc2-busy (hash-set (hash-set (mk-u 94506 'command-center 56.5 32.5 #:hp 1500.0) 'order-count 1) 'busy? #t))
+  (define a-fac-defer-oc1
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+     (mk-live-obs 'Terran 'Terran 2350 #:minerals 200 #:gas 100 #:supply-used 19 #:supply-cap 31
+                  #:mineral-harvesters 14 #:vespene-harvesters 3
+                  #:ally-units (append scvs-16 (take mars-3 2))
+                  #:ally-buildings (list cc1-busy cc2-busy rax1
+                                         (mk-u 94504 'supply-depot 35.0 35.0 #:hp 400.0)
+                                         (mk-u 94505 'refinery 29.0 35.0 #:hp 500.0)))))
+  (define a-fac-at-320m
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+     (mk-live-obs 'Terran 'Terran 2350 #:minerals 320 #:gas 100 #:supply-used 19 #:supply-cap 31
+                  #:mineral-harvesters 14 #:vespene-harvesters 3
+                  #:ally-units (append scvs-16 (take mars-3 2))
+                  #:ally-buildings (list cc1-busy cc2-busy rax1
+                                         (mk-u 94504 'supply-depot 35.0 35.0 #:hp 400.0)
+                                         (mk-u 94505 'refinery 29.0 35.0 #:hp 500.0)))))
+
+  (check-true "L63B-Terran-Bunker-Caps-Single-Scout-L4-Live-Gate-And-OC1-Priority"
+              (and scout1-stays-fe?
+                   combat1-enters-bsr?
+                   (not (has-bunker-build? a-zero-mar))
+                   (has-bunker-build? a-one-mar-reap)
+                   (not (has-bunker-build? a-cap1-under4m))
+                   (not (has-bunker-build? a-early-nat-cc))
+                   l4-arena-bunker?
+                   (not l4-live-bunker?)
+                   (not (has-factory-build? a-fac-defer-oc1))
+                   (has-factory-build? a-fac-at-320m))
+              (format "scout1=~a c1=~a m0=~a m1r=~a cap1=~a natcc=~a l4a=~a l4l=~a fac200=~a fac320=~a"
+                      scout1-stays-fe? combat1-enters-bsr?
+                      (has-bunker-build? a-zero-mar) (has-bunker-build? a-one-mar-reap)
+                      (has-bunker-build? a-cap1-under4m) (has-bunker-build? a-early-nat-cc)
+                      l4-arena-bunker? l4-live-bunker?
+                      (has-factory-build? a-fac-defer-oc1) (has-factory-build? a-fac-at-320m))))
+
+;; -----------------------------------------------------------------------------
+;; Test 98: Loop 63B Bug #2B — Protoss Nexus Energy Recharge Edge-to-Edge Range,
+;; Mothership Support, 24f Short L2 Dedup & Out-of-Combat <= 22t Chrono Hold
+;; -----------------------------------------------------------------------------
+(let ()
+  (define (has-rech? acts nx-id tgt-id)
+    (ormap (lambda (a)
+             (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 4)
+                  (equal? (second a) nx-id) (eq? (third a) 'nexus-energy-recharge)
+                  (equal? (fourth a) tgt-id)))
+           acts))
+  (define (has-chrono? acts)
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3) (eq? (third a) 'chrono-boost))) acts))
+
+  (dynamic-wind
+    (lambda () (reset-sc2-live-game-data!) (reset-sc2-live-response-data!))
+    (lambda ()
+      (define nx-65 (hash-set (hash-set (mk-u 94601 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0) 'energy 65.0) 'busy? #t))
+      ;; 1. Dry Mothership (`60e < 100e`) at `16.8t` (<= 17.0t static edge-to-edge) gets Recharged!
+      (define ms-dry (hash-set (mk-u 94602 'mothership 49.3 32.5 #:hp 350.0 #:shield 350.0 #:flying #t) 'energy 60.0))
+      (define rt-ms (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+      (define obs-ms (mk-live-obs 'Protoss 'Zerg 5000 #:supply-used 40 #:supply-cap 60
+                                  #:ally-units (list ms-dry) #:ally-buildings (list nx-65) #:enemy-units '()))
+      (define a-ms1 (step-layer2-economy! rt-ms obs-ms))
+      (define a-ms-cd (step-layer2-economy! rt-ms (hash-set obs-ms 'frame 5016))) ;; +16f < 24f dedup
+      (define a-ms-retry (step-layer2-economy! rt-ms (hash-set obs-ms 'frame 5030))) ;; +30f >= 24f retries!
+
+      ;; 2. Dry Sentry (`80e < 100e`) at `20.5t` (<= 22.0t hold) with `enemy-units = '()` & 65e Nexus (< 100e):
+      ;;    HOLDS ChronoBoost for Recharge; at `23.5t` (> 22.0t) Nexus Chronos freely!
+      (define sen-205 (hash-set (mk-u 94603 'sentry 53.0 32.5 #:hp 40.0 #:shield 40.0) 'energy 80.0))
+      (define sen-235 (hash-set (mk-u 94604 'sentry 56.0 32.5 #:hp 40.0 #:shield 40.0) 'energy 80.0))
+      (define a-hold
+        (step-layer2-economy!
+         (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss)
+         (mk-live-obs 'Protoss 'Terran 5100 #:supply-used 24 #:supply-cap 39
+                      #:ally-units (list sen-205) #:ally-buildings (list nx-65) #:enemy-units '())))
+      (define a-free
+        (step-layer2-economy!
+         (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss)
+         (mk-live-obs 'Protoss 'Terran 5100 #:supply-used 24 #:supply-cap 39
+                      #:ally-units (list sen-235) #:ally-buildings (list nx-65) #:enemy-units '())))
+
+      (check-true "L63B-Protoss-Nexus-Recharge-Mothership-EdgeRange-24fDedup-And-22tHold"
+                  (and (has-rech? a-ms1 94601 94602)
+                       (not (has-rech? a-ms-cd 94601 94602))
+                       (has-rech? a-ms-retry 94601 94602)
+                       (not (has-chrono? a-hold))
+                       (has-chrono? a-free))
+                  (format "ms1=~a cd=~a retry=~a hold-no-chrono=~a free-chrono=~a"
+                          (has-rech? a-ms1 94601 94602)
+                          (not (has-rech? a-ms-cd 94601 94602))
+                          (has-rech? a-ms-retry 94601 94602)
+                          (not (has-chrono? a-hold))
+                          (has-chrono? a-free))))
+    (lambda () (reset-sc2-live-game-data!) (reset-sc2-live-response-data!))))
+
+;; -----------------------------------------------------------------------------
+;; Test 99: Loop 63B Bug #3B — Peaceful Zerg Home-Threat Scoping (> 40t Scouted
+;; Enemy Keeps Peaceful Tempo!), < 4:00 Drone Non-Essential BO-Reserve Bypass &
+;; Peaceful Roach (<= 2) / Ling (cap 4/6, batch 2) Caps
+;; -----------------------------------------------------------------------------
+(let ()
+  (define bldgs-3b-rw
+    (list (mk-u 94701 'hatchery 32.5 32.5 #:hp 1500.0)
+          (mk-u 94702 'hatchery 56.5 32.5 #:hp 1500.0)
+          (mk-u 94709 'hatchery 39.5 59.5 #:hp 1500.0)
+          (mk-u 94703 'spawning-pool 36.5 35.5 #:hp 1000.0)
+          (mk-u 94704 'extractor 30.0 34.5 #:hp 500.0)
+          (mk-u 94705 'roach-warren 40.0 34.5 #:hp 850.0)))
+  (define bldgs-3b-cap
+    (list (mk-u 94701 'lair 32.5 32.5 #:hp 2000.0)
+          (mk-u 94702 'hatchery 56.5 32.5 #:hp 1500.0)
+          (mk-u 94709 'hatchery 39.5 59.5 #:hp 1500.0)
+          (mk-u 94703 'spawning-pool 36.5 35.5 #:hp 1000.0)
+          (mk-u 94704 'extractor 30.0 34.5 #:hp 500.0)
+          (mk-u 94706 'extractor 53.0 34.5 #:hp 500.0)
+          (mk-u 94705 'roach-warren 40.0 34.5 #:hp 850.0)
+          (mk-u 94707 'evolution-chamber 36.5 30.5 #:hp 750.0)))
+  (define queens-3
+    (list (mk-u 94711 'queen 33.0 32.5 #:hp 175.0)
+          (mk-u 94712 'queen 56.0 32.5 #:hp 175.0)
+          (mk-u 94713 'queen 40.0 59.0 #:hp 175.0)))
+  (define drones-24
+    (for/list ([i (in-range 24)])
+      (mk-u (+ 94720 i) 'drone 28.0 (+ 30.0 (* 0.2 i)) #:hp 40.0)))
+  (define drones-38
+    (for/list ([i (in-range 38)])
+      (mk-u (+ 94720 i) 'drone 28.0 (+ 30.0 (* 0.14 i)) #:hp 40.0)))
+  (define lings-4
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 94760 i) 'zergling 50.0 (+ 32.0 (* 0.4 i)) #:hp 35.0)))
+  (define larvae-5
+    (for/list ([i (in-range 5)])
+      (mk-u (+ 94770 i) 'larva 34.0 (+ 32.0 (* 0.2 i)) #:hp 25.0)))
+  ;; Distant scouted Terran Marines at (145, 145) (> 100t from Main/Nat -> NOT a home threat!)
+  (define far-marines-8
+    (for/list ([i (in-range 8)])
+      (mk-u (+ 94780 i) 'marine 145.0 (+ 142.0 (* 0.4 i)) #:hp 45.0)))
+  ;; Home-threat Terran Marines at (76, 32.5) (19.5t from Natural <= 40t -> breaks peaceful tempo!)
+  (define near-marines-8
+    (for/list ([i (in-range 8)])
+      (mk-u (+ 94790 i) 'marine 76.0 (+ 31.0 (* 0.4 i)) #:hp 45.0)))
+
+  ;; (a) Peaceful ZvT at 3:15 (f=4368), 24 Drones, 4 Lings, 250M/30G + 8 distant scouted Marines:
+  ;;     Peaceful tempo STAYS ACTIVE despite distant scouted army -> trains 4 Drones & 0 Roaches/Lings!
+  (define a-far-scout
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg)
+     (mk-live-obs 'Zerg 'Terran 4368 #:minerals 250 #:gas 30 #:supply-used 31 #:supply-cap 52
+                  #:mineral-harvesters 21 #:vespene-harvesters 3
+                  #:ally-units (append drones-24 queens-3 lings-4 larvae-5)
+                  #:ally-buildings bldgs-3b-rw #:enemy-units far-marines-8)))
+  (define far-drones (count (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'drone))) a-far-scout))
+  (define far-roaches (count (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'roach))) a-far-scout))
+  (define far-lings (count (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'zergling))) a-far-scout))
+
+  ;; (b) Peaceful ZvT at 3:45 (f=5040) with 36 Drones (< 38), 0 Roaches, 0 Lings, 350M/75G, 5 Larvae:
+  ;;     Peaceful Roach cap <= 2 and Ling batch <= 2 (never dumps 4 Roaches or 4 Larvae into Lings!)
+  (define drones-36 (take drones-38 36))
+  (define a-peace-cap
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg)
+     (mk-live-obs 'Zerg 'Terran 5040 #:minerals 350 #:gas 75 #:supply-used 42 #:supply-cap 66
+                  #:mineral-harvesters 31 #:vespene-harvesters 5
+                  #:ally-units (append drones-36 queens-3 larvae-5)
+                  #:ally-buildings bldgs-3b-cap #:enemy-units far-marines-8)))
+  (define cap-roaches (count (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'roach))) a-peace-cap))
+  (define cap-lings (count (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'zergling))) a-peace-cap))
+
+  ;; (c) Near home threat (8 Marines at 19.5t <= 40t of Natural): cancels peaceful cap & trains >= 3 combat!
+  (define a-near-threat
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg)
+     (mk-live-obs 'Zerg 'Terran 5040 #:minerals 350 #:gas 150 #:supply-used 42 #:supply-cap 66
+                  #:mineral-harvesters 31 #:vespene-harvesters 5
+                  #:ally-units (append drones-36 queens-3 larvae-5)
+                  #:ally-buildings bldgs-3b-cap #:enemy-units near-marines-8)))
+  (define near-combat
+    (count (lambda (a) (and (pair? a) (eq? (car a) 'train) (memq (second a) '(roach zergling)))) a-near-threat))
+
+  (check-true "L63B-Zerg-Peaceful-HomeThreat-BOReserve-And-RoachLing-Caps"
+              (and (>= far-drones 4)
+                   (= far-lings 0)
+                   (= far-roaches 0)
+                   (<= cap-roaches 2)
+                   (<= cap-lings 2)
+                   (>= near-combat 3))
+              (format "far=(d:~a r:~a l:~a) cap=(r:~a l:~a) near-combat=~a"
+                      far-drones far-roaches far-lings cap-roaches cap-lings near-combat)))
 
 (printf "\n=== Loop 49 Suite Summary: ~a/~a passed, ~a failed ===\n"
         tests-passed tests-run tests-failed)

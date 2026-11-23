@@ -11567,7 +11567,7 @@
     (for/list ([i (in-range 8)])
       (mk-l58-u (+ 98420 i) 48 1 (+ 32.0 (* 0.5 i)) 30.0 #:hp 45.0 #:en 0.0 #:en-max 0.0)))
   (define l58-nx-prb
-    (mk-l58-u 98410 59 1 30.0 30.0 #:hp 1000.0 #:en 100.0
+    (mk-l58-u 98410 59 1 30.0 30.0 #:hp 1000.0 #:en 75.0
               #:orders (list (sc2-unit-order 1006 #f 0 0.25))))
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define l58-mule-under-dt
@@ -13003,9 +13003,11 @@
                    (= (length r-mined-out) 1)
                    (= (sc2-raw-unit-command-target-unit-tag (first r-mined-out)) 81011)))
 
-  ;; (1c) Saturated Main (16/16) rallies -> Natural (2/16), holds at 14/16 (-3 hysteresis) AND sticks to
-  ;;      Natural even when a 3rd base (1/16) opens, enforces 224f routine cd, and switches back at 13/16!
+  ;; (1c) Over-saturated Main (18/16, excess >= 2) rallies -> Natural (2/16, >= 3 open), holds at 14/16
+  ;;      (-3 hysteresis) AND sticks to Natural even when a 3rd base (1/16) opens, enforces 224f routine
+  ;;      cd, and switches back at 13/16!
   (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l61-m1a))))
+  (define l61-main-18 (mk-l61-u 81301 59 1 28.5 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:assigned 18 #:ideal 16))
   (define l61-main-16 (mk-l61-u 81301 59 1 28.5 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:assigned 16 #:ideal 16))
   (define l61-main-14 (mk-l61-u 81301 59 1 28.5 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:assigned 14 #:ideal 16))
   (define l61-main-13 (mk-l61-u 81301 59 1 28.5 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:assigned 13 #:ideal 16))
@@ -13013,20 +13015,20 @@
   (define l61-3rd-1   (mk-l61-u 81303 59 1 92.5 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:assigned 1 #:ideal 16))
   (define l61-m3a     (mk-l61-u 81030 341 3 98.0 30.0 #:mins 1800))
   (define r-sat-to-nat
-    (rally-cmds (saturate-workers-and-gas-commands (make-test-obs 1000 200 0 (list l61-main-16 l61-nat-2 l61-m1a l61-m2a)))))
+    (rally-cmds (saturate-workers-and-gas-commands (make-test-obs 1000 200 0 (list l61-main-18 l61-nat-2 l61-m1a l61-m2a)))))
   ;; Sticky: even when 3rd (1/16) is more under-saturated than Nat (2/16) after +250f, Main stays rallied to Nat!
   (define r-sticky-nat
-    (rally-cmds (saturate-workers-and-gas-commands (make-test-obs 1250 200 0 (list l61-main-16 l61-nat-2 l61-3rd-1 l61-m1a l61-m2a l61-m3a)))))
+    (rally-cmds (saturate-workers-and-gas-commands (make-test-obs 1250 200 0 (list l61-main-18 l61-nat-2 l61-3rd-1 l61-m1a l61-m2a l61-m3a)))))
   ;; -3 hysteresis: Main at 14/16 (> 16-3 = 13) stays rallied to Nat!
   (define r-hyst-14
     (rally-cmds (saturate-workers-and-gas-commands (make-test-obs 1260 200 0 (list l61-main-14 l61-nat-2 l61-m1a l61-m2a)))))
-  ;; 224f routine cooldown: dropping to 13/16 at +100f (1100) is held; at >= +224f (1260+ -> 1260-1000=260) switches back!
+  ;; 224f routine cooldown: dropping to 13/16 at >= +224f (1270) switches back; re-saturating to 18/16 at +100f (1370) is held; at >= +224f (1500) routes to Nat!
   (define r-back-13
     (rally-cmds (saturate-workers-and-gas-commands (make-test-obs 1270 200 0 (list l61-main-13 l61-nat-2 l61-m1a l61-m2a)))))
   (define r-cd-block-100
-    (rally-cmds (saturate-workers-and-gas-commands (make-test-obs 1370 200 0 (list l61-main-16 l61-nat-2 l61-m1a l61-m2a)))))
+    (rally-cmds (saturate-workers-and-gas-commands (make-test-obs 1370 200 0 (list l61-main-18 l61-nat-2 l61-m1a l61-m2a)))))
   (define r-cd-allow-224
-    (rally-cmds (saturate-workers-and-gas-commands (make-test-obs 1500 200 0 (list l61-main-16 l61-nat-2 l61-m1a l61-m2a)))))
+    (rally-cmds (saturate-workers-and-gas-commands (make-test-obs 1500 200 0 (list l61-main-18 l61-nat-2 l61-m1a l61-m2a)))))
   (check-true "l61-rally-workers-saturated-main-routes-to-nat-sticky-hysteresis-and-224f-cd"
               (and (ormap (lambda (c) (and (equal? (sc2-raw-unit-command-unit-tags c) '(81301))
                                            (= (sc2-raw-unit-command-target-unit-tag c) 81020)))
@@ -13385,9 +13387,202 @@
                    (equal? p2-arena-sat-101 '(82001))
                    (equal? p2-arena-cc-101 '(82001))))
 
+  ;; (2i) Loop 63 (`#1704`): Pro-Rate RALLY_WORKERS — requires own excess >= 2 (18/16), target >= 3
+  ;;      open slots (13/16 or less), and blocks cross-rally ping-pong (A->B while B->A)!
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l61-m1a))))
+  (define l63-main-17 (mk-l61-u 81301 59 1 28.5 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:assigned 17 #:ideal 16))
+  (define l63-nat-14  (mk-l61-u 81302 59 1 60.5 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:assigned 14 #:ideal 16))
+  (define l63-nat-13  (mk-l61-u 81302 59 1 60.5 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:assigned 13 #:ideal 16))
+  (define l63-nat-18  (mk-l61-u 81302 59 1 60.5 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:assigned 18 #:ideal 16))
+  ;; Initial tick: Main 16/16 (excess 0) & Nat 2/16 -> Main stays on Main (81010), NOT Nat!
+  (define r63-ex0 (rally-cmds (saturate-workers-and-gas-commands (make-test-obs 1000 200 0 (list l61-main-16 l61-nat-2 l61-m1a l61-m2a)))))
+  ;; +250f: Main 17/16 (excess 1 < 2) -> still stays on Main (0 re-rally)!
+  (define r63-ex1 (rally-cmds (saturate-workers-and-gas-commands (make-test-obs 1250 200 0 (list l63-main-17 l61-nat-2 l61-m1a l61-m2a)))))
+  ;; +500f: Main 18/16 (excess 2) but Nat 14/16 (only 2 open slots < 3) -> still stays on Main (0 re-rally)!
+  (define r63-open2 (rally-cmds (saturate-workers-and-gas-commands (make-test-obs 1500 200 0 (list l61-main-18 l63-nat-14 l61-m1a l61-m2a)))))
+  ;; +750f: Main 18/16 (excess 2) & Nat 13/16 (3 open slots >= 3) -> routes to Nat (81020)!
+  (define r63-open3 (rally-cmds (saturate-workers-and-gas-commands (make-test-obs 1750 200 0 (list l61-main-18 l63-nat-13 l61-m1a l61-m2a)))))
+  ;; Anti-ping-pong: Main is currently rallied -> Nat (at 1750); at 1850 (+100f < 224f so Main is still
+  ;; rallied -> Nat, while Nat hasn't re-rallied since 1000 -> +850f >= 224f!), Nat (18/16) MUST NOT
+  ;; cross-rally back onto Main (13/16) while Main's target is Nat!
+  (define r63-no-pp (rally-cmds (saturate-workers-and-gas-commands (make-test-obs 1850 200 0 (list l61-main-13 l63-nat-18 l61-m1a l61-m2a)))))
+  (check-true "l63-rally-workers-requires-excess2-target-open3-and-no-ping-pong"
+              (and (ormap (lambda (c) (and (equal? (sc2-raw-unit-command-unit-tags c) '(81301))
+                                           (= (sc2-raw-unit-command-target-unit-tag c) 81010)))
+                          r63-ex0)
+                   (null? r63-ex1)
+                   (null? r63-open2)
+                   (ormap (lambda (c) (and (equal? (sc2-raw-unit-command-unit-tags c) '(81301))
+                                           (= (sc2-raw-unit-command-target-unit-tag c) 81020)))
+                          r63-open3)
+                   (not (ormap (lambda (c) (and (equal? (sc2-raw-unit-command-unit-tags c) '(81302))
+                                                (= (sc2-raw-unit-command-target-unit-tag c) 81010)))
+                               r63-no-pp))))
+
+  ;; (2j) Loop 63 (`#1704`): GRMS urgent pull (`>= 200G & < 110M`, P1) bypasses recent geyser-fill
+  ;;      `112f` opposite-direction cooldown and fires ONE coalesced 3-worker P1 cmd immediately,
+  ;;      while routine non-GRMS pull (`265G / 140M`) still respects `112f` opp-cd!
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l61-m1a))))
+  (define l63-ref1-full (mk-l61-u 81802 20 1 25.0 24.0 #:hp 500.0 #:rad 1.5 #:assigned 3 #:ideal 3 #:vesp 1800))
+  (define l63-ref2-empty (mk-l61-u 81803 20 1 31.0 24.0 #:hp 500.0 #:rad 1.5 #:assigned 0 #:ideal 3 #:vesp 1800))
+  (define l63-ref2-full (mk-l61-u 81803 20 1 31.0 24.0 #:hp 500.0 #:rad 1.5 #:assigned 3 #:ideal 3 #:vesp 1800))
+  (define l63-gws-6
+    (append
+     (for/list ([i (in-range 3)])
+       (mk-l61-u (+ 81810 i) 45 1 (+ 25.0 (* 0.2 i)) 25.0 #:hp 45.0 #:rad 0.375
+                 #:orders (list (sc2-unit-order 295 #f 81802 0.0))))
+     (for/list ([i (in-range 3)])
+       (mk-l61-u (+ 81820 i) 45 1 (+ 31.0 (* 0.2 i)) 25.0 #:hp 45.0 #:rad 0.375
+                 #:orders (list (sc2-unit-order 295 #f 81803 0.0))))))
+  (define l63-min-scvs-20
+    (for/list ([i (in-range 20)])
+      (mk-l61-u (+ 81830 i) 45 1 (+ 24.0 (* 0.2 (modulo i 5))) (+ 28.0 (* 0.4 (quotient i 5)))
+                #:hp 45.0 #:rad 0.375 #:orders (list (sc2-unit-order 295 #f 81010 0.0)))))
+  ;; Tick 9000: Sec 2 fills 2nd Refinery (`81803`), setting SC2-SAT-GAS-LAST-FILL-GLOBAL = 9000.
+  (define l63-fill-9000
+    (gather-3666-cmds (saturate-workers-and-gas-commands
+                       (make-test-obs 9000 320 120 (append (list l61-main-cc-15 l61-nat-cc-2 l63-ref1-full l63-ref2-empty l61-m1a) l61-nat-mins-4 (take l63-gws-6 3) l63-min-scvs-20)))))
+  ;; Tick 9020 (+20f < 112f): routine non-GRMS pull (`265G / 140M`) STILL blocked by 112f opp-cd!
+  (define l63-routine-blocked-9020
+    (gather-3666-cmds (saturate-workers-and-gas-commands
+                       (make-test-obs 9020 140 265 (append (list l61-main-cc-15 l61-nat-cc-2 l63-ref1-full l63-ref2-full l61-m1a) l61-nat-mins-4 l63-gws-6 l63-min-scvs-20)))))
+  ;; Tick 9024 (+24f < 112f): genuine GRMS (`210G / 95M`) with 6 active gas workers bypasses opp-cd
+  ;; and fires ONE coalesced P1 cmd pulling 3 workers immediately!
+  (define l63-grms-bypass-9024
+    (gather-3666-cmds (saturate-workers-and-gas-commands
+                       (make-test-obs 9024 95 210 (append (list l61-main-cc-15 l61-nat-cc-2 l63-ref1-full l63-ref2-full l61-m1a) l61-nat-mins-4 l63-gws-6 l63-min-scvs-20)))))
+  (check-true "l63-grms-urgent-pull-bypasses-fill-opp-cd-at-p1"
+              (and (ormap (lambda (c) (= (sc2-raw-unit-command-target-unit-tag c) 81803)) l63-fill-9000)
+                   (null? l63-routine-blocked-9020)
+                   (= (length l63-grms-bypass-9024) 1)
+                   (macro-econ-cmd? (first l63-grms-bypass-9024))
+                   (= (wire-cmd-priority-tier (first l63-grms-bypass-9024)) 1)
+                   (= (length (sc2-raw-unit-command-unit-tags (first l63-grms-bypass-9024))) 3)))
+
   ;; Clean final rewind
   (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 0 (list l61-m1a))))
   (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l61-m1a)))))
+
+(printf "[Loop 63B Bug #2C] Testing obs->snapshot energy floor (49.6->49), 4126 edge-to-edge range + Tier P1 + 1344f wire cooldown & Sec 6b yield handoff...\n")
+(let ()
+  (define (mk-l63b-u tag utype alliance x y
+                     #:hp [hp 100.0] #:sh [sh 0.0] #:rad [rad 1.0]
+                     #:en [en 0.0] #:en-max [en-max 200.0]
+                     #:bp [bp 1.0] #:fly [fly? #f] #:orders [ords '()]
+                     #:mins [mins 0] #:pax [pax '()])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y (if fly? 12.0 8.0)) 0.0 rad bp 0 #f #f #f
+              hp hp sh sh en en-max mins 0 fly? #f #f #t #f
+              ords 0 '() 0 0 0.0 0 0 0 0 pax (length pax) (if (null? pax) 0 8)))
+  (define (er-4126-cmds cmds)
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 4126))) cmds))
+  (define (chrono-3755-cmds cmds)
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3755))) cmds))
+  (define l63b-min (mk-l63b-u 83001 341 3 23.0 30.0 #:mins 1500 #:en 0.0 #:en-max 0.0))
+
+  ;; (1) `sc2-observation->runtime-obs-hash` floors self building, self unit, & passenger energy
+  ;;     so `49.6e` / `49.99e` / `74.6e` NEVER round up to `50` / `75` and cause phantom cooldown claims!
+  (reset-sc2-live-response-data!)
+  (define l63b-nx-496  (mk-l63b-u 83101 59 1 30.0 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:en 49.6))
+  (define l63b-nx-4999 (mk-l63b-u 83102 59 1 42.0 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:en 49.99))
+  (define l63b-nx-500  (mk-l63b-u 83103 59 1 54.0 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:en 50.0))
+  (define l63b-sen-496 (mk-l63b-u 83104 77 1 36.0 30.0 #:hp 40.0 #:sh 40.0 #:rad 0.5 #:en 49.6))
+  (define l63b-sen-500 (mk-l63b-u 83105 77 1 38.0 30.0 #:hp 40.0 #:sh 40.0 #:rad 0.5 #:en 50.0))
+  (define l63b-wp-pax  (mk-l63b-u 83106 81 1 40.0 30.0 #:hp 80.0 #:sh 100.0 #:rad 1.0 #:fly #t #:en 0.0 #:en-max 0.0
+                                  #:pax (list (sc2-passenger-unit 83107 75 40.0 40.0 40.0 40.0 74.6 200.0))))
+  (define l63b-snap
+    (sc2-observation->runtime-obs-hash
+     (make-test-obs 2000 100 50 (list l63b-nx-496 l63b-nx-4999 l63b-nx-500 l63b-sen-496 l63b-sen-500 l63b-wp-pax l63b-min))))
+  (define (find-by-id lst id)
+    (findf (lambda (h) (= (hash-ref h 'id -1) id)) lst))
+  (define snap-b (hash-ref l63b-snap 'ally-buildings '()))
+  (define snap-u (hash-ref l63b-snap 'ally-units '()))
+  (define snap-wp (find-by-id snap-u 83106))
+  (define snap-pax (and snap-wp (find-by-id (hash-ref snap-wp 'passengers '()) 83107)))
+  (check-true "l63b-obs-energy-floors-49-6-to-49-building-unit-and-passenger"
+              (and (equal? (hash-ref (find-by-id snap-b 83101) 'energy #f) 49)
+                   (equal? (hash-ref (find-by-id snap-b 83102) 'energy #f) 49)
+                   (equal? (hash-ref (find-by-id snap-b 83103) 'energy #f) 50)
+                   (equal? (hash-ref (find-by-id snap-u 83104) 'energy #f) 49)
+                   (equal? (hash-ref (find-by-id snap-u 83105) 'energy #f) 50)
+                   (equal? (and snap-pax (hash-ref snap-pax 'energy #f)) 74)))
+
+  ;; (2) Wire `4126` uses true edge-to-edge range `15.0 + rad(nx) + rad(tgt) - 0.25` (Nexus 2.75 + Sentry 0.5
+  ;;     => 18.0t center-to-center -> emits at 16.6t, rejects at 20.0t), wraps in Tier P1 `mark-macro-econ-cmd!`,
+  ;;     records `SC2-NEXUS-RECHARGE-LAST-LOOP` ONLY upon real emission, blocks repeats for `< 1344f`, and allows
+  ;;     again at `>= +1344f`!
+  (reset-sc2-live-response-data!)
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 100 50 (list l63b-min))))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 100 50 (list l63b-min))))
+  (define l63b-nx-50   (mk-l63b-u 83201 59 1 30.0 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:en 50.0))
+  (define l63b-nx-496b (mk-l63b-u 83202 59 1 30.0 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:en 49.6))
+  (define l63b-sen-166 (mk-l63b-u 83203 77 1 46.6 30.0 #:hp 40.0 #:sh 40.0 #:rad 0.5 #:en 25.0))
+  (define l63b-sen-200 (mk-l63b-u 83204 77 1 50.0 30.0 #:hp 40.0 #:sh 40.0 #:rad 0.5 #:en 25.0))
+  ;; Rejected casts (`49.6e` or `20.0t` out-of-range) emit 0 cmds and MUST NOT trip the 1344f latch!
+  (define l63b-rej-cmds
+    (er-4126-cmds
+     (translate-bot-actions->sc2-raw-commands
+      '((cast-spell 83202 nexus-energy-recharge 83203)
+        (cast-spell 83201 nexus-energy-recharge 83204))
+      (make-test-obs 5000 100 50 (list l63b-nx-50 l63b-nx-496b l63b-sen-166 l63b-sen-200)))))
+  (define l63b-ready-after-rej? (sc2-nexus-recharge-cooldown-ready? 5004))
+  ;; Valid cast at 16.6t (`> 15.0` old cap, `<= 18.0` edge-to-edge) succeeds at Tier P1 & latches 5010!
+  (define l63b-emit-5010
+    (er-4126-cmds
+     (translate-bot-actions->sc2-raw-commands
+      '((cast-spell 83201 nexus-energy-recharge 83203))
+      (make-test-obs 5010 100 50 (list l63b-nx-50 l63b-sen-166)))))
+  (define l63b-ready-5100? (sc2-nexus-recharge-cooldown-ready? 5100))
+  (define l63b-ready-6353? (sc2-nexus-recharge-cooldown-ready? 6353))
+  (define l63b-ready-6354? (sc2-nexus-recharge-cooldown-ready? 6354))
+  ;; Second cast within `< 1344f` (both `cast-spell` & direct `nexus-energy-recharge` form) is blocked!
+  (define l63b-blocked-5100
+    (er-4126-cmds
+     (translate-bot-actions->sc2-raw-commands
+      '((cast-spell 83201 nexus-energy-recharge 83203)
+        (nexus-energy-recharge 83201 83203))
+      (make-test-obs 5100 100 50 (list l63b-nx-50 l63b-sen-166)))))
+  ;; Sec 6b Probe Chrono (`3755`) MUST NOT yield to `4126` while `4126` is on its 1344f wire cooldown!
+  (define l63b-nx-prb-75
+    (mk-l63b-u 83210 59 1 30.0 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75 #:en 75.0
+               #:orders (list (sc2-unit-order 1006 #f 0 0.25))))
+  (define l63b-sen-near (mk-l63b-u 83211 77 1 35.0 30.0 #:hp 40.0 #:sh 40.0 #:rad 0.5 #:en 25.0))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define l63b-chrono-on-cd
+    (chrono-3755-cmds
+     (saturate-workers-and-gas-commands
+      (make-test-obs 5110 100 50 (list l63b-nx-prb-75 l63b-sen-near l63b-min)))))
+  ;; At `+1344f` (`6354`), `4126` unlocks cleanly and emits again at Tier P1 (including direct action form)!
+  (define l63b-emit-6354
+    (er-4126-cmds
+     (translate-bot-actions->sc2-raw-commands
+      '((nexus-energy-recharge 83201 83203))
+      (make-test-obs 6354 100 50 (list l63b-nx-50 l63b-sen-166)))))
+  ;; Rewind (`cur-loop = 4`) & `reset-sc2-live-response-data!` reset `SC2-NEXUS-RECHARGE-LAST-LOOP`!
+  (define l63b-cd-after-6354? (sc2-nexus-recharge-cooldown-ready? 6400))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 100 50 (list l63b-min))))
+  (define l63b-ready-after-rewind? (sc2-nexus-recharge-cooldown-ready? 500))
+  (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP 5000)
+  (reset-sc2-live-response-data!)
+  (define l63b-ready-after-reset? (sc2-nexus-recharge-cooldown-ready? 5100))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l63b-min))))
+  (check-true "l63b-nexus-recharge-4126-edge-to-edge-p1-1344f-cd-and-sec6b-handoff"
+              (and (null? l63b-rej-cmds)
+                   l63b-ready-after-rej?
+                   (= (length l63b-emit-5010) 1)
+                   (macro-econ-cmd? (first l63b-emit-5010))
+                   (= (wire-cmd-priority-tier (first l63b-emit-5010)) 1)
+                   (not l63b-ready-5100?)
+                   (not l63b-ready-6353?)
+                   l63b-ready-6354?
+                   (null? l63b-blocked-5100)
+                   (= (length l63b-chrono-on-cd) 1)
+                   (= (length l63b-emit-6354) 1)
+                   (macro-econ-cmd? (first l63b-emit-6354))
+                   (= (wire-cmd-priority-tier (first l63b-emit-6354)) 1)
+                   (not l63b-cd-after-6354?)
+                   l63b-ready-after-rewind?
+                   l63b-ready-after-reset?)))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"

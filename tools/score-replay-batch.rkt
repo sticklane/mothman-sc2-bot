@@ -212,6 +212,53 @@
         "Ultralisk" 475
         "BroodLord" 550))
 
+;; LotV combat unit -> (tier . total-resource-cost) matching `#1723` canonical tier map
+;; (excludes workers, Overlords/Overseers, Changelings, Interceptors, Locusts, Broodlings, MULEs, AutoTurrets)
+(define COMBAT-UNIT-TIER-COST-HT
+  (hash
+   ;; Protoss
+   "Zealot" '(1 . 100) "Stalker" '(1 . 175) "Adept" '(1 . 125) "Sentry" '(1 . 150)
+   "Immortal" '(2 . 375) "Observer" '(2 . 100) "ObserverSiegeMode" '(2 . 100)
+   "WarpPrism" '(2 . 250) "WarpPrismPhasing" '(2 . 250)
+   "Phoenix" '(2 . 250) "VoidRay" '(2 . 400) "Oracle" '(2 . 300) "DarkTemplar" '(2 . 250)
+   "Colossus" '(3 . 500) "Disruptor" '(3 . 300) "HighTemplar" '(3 . 200)
+   "Archon" '(3 . 400) "Carrier" '(3 . 600) "Tempest" '(3 . 425) "Mothership" '(3 . 600)
+   ;; Terran
+   "Marine" '(1 . 50) "Marauder" '(1 . 125) "Reaper" '(1 . 100)
+   "Hellion" '(2 . 100) "HellionTank" '(2 . 100)
+   "WidowMine" '(2 . 100) "WidowMineBurrowed" '(2 . 100)
+   "Cyclone" '(2 . 175) "SiegeTank" '(2 . 275) "SiegeTankSieged" '(2 . 275)
+   "Medivac" '(2 . 200) "VikingFighter" '(2 . 225) "VikingAssault" '(2 . 225)
+   "Liberator" '(2 . 275) "LiberatorAG" '(2 . 275)
+   "Banshee" '(2 . 250) "Raven" '(2 . 250)
+   "Ghost" '(3 . 275) "Thor" '(3 . 500) "ThorAP" '(3 . 500) "Battlecruiser" '(3 . 700)
+   ;; Zerg
+   "Zergling" '(1 . 25) "ZerglingBurrowed" '(1 . 25)
+   "Baneling" '(1 . 75) "BanelingBurrowed" '(1 . 75)
+   "Roach" '(1 . 100) "RoachBurrowed" '(1 . 100)
+   "Ravager" '(1 . 200) "RavagerBurrowed" '(1 . 200)
+   "Queen" '(1 . 150) "QueenBurrowed" '(1 . 150)
+   "Hydralisk" '(2 . 150) "HydraliskBurrowed" '(2 . 150)
+   "Mutalisk" '(2 . 200) "Corruptor" '(2 . 250)
+   "Infestor" '(2 . 250) "InfestorBurrowed" '(2 . 250)
+   "SwarmHostMP" '(2 . 175) "SwarmHostBurrowedMP" '(2 . 175)
+   "LurkerMP" '(2 . 300) "LurkerMPBurrowed" '(2 . 300)
+   "Ultralisk" '(3 . 475) "UltraliskBurrowed" '(3 . 475)
+   "BroodLord" '(3 . 400) "Viper" '(3 . 300)))
+
+(define (real-upgrade-name? upg)
+  (and (string? upg)
+       (not (string=? upg ""))
+       (not (string-prefix? upg "Spray"))
+       (not (string-prefix? upg "Reward"))
+       (not (string-prefix? upg "GameHeart"))
+       (not (string-contains? upg "Skin"))
+       (not (string-contains? upg "Alternate"))))
+
+(define (combat-level-upgrade? upg)
+  (and (real-upgrade-name? upg)
+       (regexp-match? #rx"Level[123]$" upg)))
+
 ;; W9-LOOP-2: Long-range siege/capital unit set & core-12 opponent cohort set
 (define SIEGE-CAPITAL-UNIT-SET
   (set "Tempest" "SiegeTank" "SiegeTankSieged" "Colossus" "Carrier"
@@ -1018,6 +1065,30 @@
           (define total-stat-ev (make-hasheqv '((1 . 0) (2 . 0))))
           (define sb-steps (make-hasheqv '((1 . 0) (2 . 0))))
           (define upg-cnt (make-hasheqv '((1 . 0) (2 . 0))))
+          (define upg-lvl-cnt (make-hasheqv '((1 . 0) (2 . 0))))
+          ;; Primary / Secondary collection & unit-tier trackers (#1726 / #1746)
+          (define prev-col-sec (make-hasheqv '((1 . 0.0) (2 . 0.0))))
+          (define last-min-rate (make-hasheqv '((1 . 0.0) (2 . 0.0))))
+          (define last-gas-rate (make-hasheqv '((1 . 0.0) (2 . 0.0))))
+          (define min-collected-acc (make-hasheqv '((1 . 0.0) (2 . 0.0))))
+          (define gas-collected-acc (make-hasheqv '((1 . 0.0) (2 . 0.0))))
+          (define last-cons-min (make-hasheqv '((1 . 0) (2 . 0))))
+          (define last-cons-gas (make-hasheqv '((1 . 0) (2 . 0))))
+          (define unit-tier-rec (make-hasheqv)) ; tag -> (cons tier cost)
+          (define tier-val-by-p (hasheqv 1 (vector 0 0 0 0) 2 (vector 0 0 0 0)))
+          (define (record-tier-unit! p tag ut)
+            (define tc (hash-ref COMBAT-UNIT-TIER-COST-HT ut #f))
+            (when (and tc (memv p '(1 2)))
+              (define prev (hash-ref unit-tier-rec tag #f))
+              (define tv (hash-ref tier-val-by-p p))
+              (cond
+                [(not prev)
+                 (hash-set! unit-tier-rec tag tc)
+                 (vector-set! tv (car tc) (+ (vector-ref tv (car tc)) (cdr tc)))]
+                [(not (equal? prev tc))
+                 (vector-set! tv (car prev) (max 0 (- (vector-ref tv (car prev)) (cdr prev))))
+                 (hash-set! unit-tier-rec tag tc)
+                 (vector-set! tv (car tc) (+ (vector-ref tv (car tc)) (cdr tc)))])))
           (define th-timings (make-hasheqv '((1 . ()) (2 . ()))))
           (define gas-timings (make-hasheqv '((1 . ()) (2 . ()))))
           (define sup-timings (make-hasheqv '((1 . ()) (2 . ()))))
@@ -1140,6 +1211,29 @@
                    (define k-min (+ (hash-ref st 23 0) (hash-ref st 24 0) (hash-ref st 25 0)))
                    (define k-gas (+ (hash-ref st 26 0) (hash-ref st 27 0) (hash-ref st 28 0)))
                    (define cur-asup (max 0 (- fu w-cur)))
+                   ;; Integrate SC2 collection rates over elapsed real-time dt/60 (right-endpoint trailing avg)
+                   (define mr-c (exact->inexact (safe-num (hash-ref st 2 0) 0)))
+                   (define gr-c (exact->inexact (safe-num (hash-ref st 3 0) 0)))
+                   (define dt-c (max 0.0 (- sec (hash-ref prev-col-sec p 0.0))))
+                   (when (> dt-c 0.0)
+                     (hash-set! min-collected-acc p (+ (hash-ref min-collected-acc p 0.0) (* mr-c (/ dt-c 60.0))))
+                     (hash-set! gas-collected-acc p (+ (hash-ref gas-collected-acc p 0.0) (* gr-c (/ dt-c 60.0)))))
+                   (hash-set! prev-col-sec p sec)
+                   (hash-set! last-min-rate p mr-c)
+                   (hash-set! last-gas-rate p gr-c)
+                   (define cons-m
+                     (max 0 (- (+ (hash-ref st 0 0)
+                                  (hash-ref st 5 0) (hash-ref st 6 0) (hash-ref st 7 0)
+                                  (hash-ref st 11 0) (hash-ref st 12 0) (hash-ref st 13 0)
+                                  (hash-ref st 17 0) (hash-ref st 18 0) (hash-ref st 19 0))
+                               1050)))
+                   (define cons-g
+                     (max 0 (+ (hash-ref st 1 0)
+                               (hash-ref st 8 0) (hash-ref st 9 0) (hash-ref st 10 0)
+                               (hash-ref st 14 0) (hash-ref st 15 0) (hash-ref st 16 0)
+                               (hash-ref st 20 0) (hash-ref st 21 0) (hash-ref st 22 0))))
+                   (hash-set! last-cons-min p cons-m)
+                   (hash-set! last-cons-gas p cons-g)
                    (cond
                      [(= p opp-pid)
                       (set! last-opp-asup cur-asup)]
@@ -1255,6 +1349,9 @@
                  (hash-set! unit-xy tag (cons ux uy))
                  (when (and (= p our-pid) (not first-scout-cross-sec) (<= sec 360.0))
                    (hash-set! idx->owner-type u-idx ut))
+                 (when (and (memv p '(1 2))
+                            (or (= eid 1) (set-member? WARPABLE-UNIT-SET ut)))
+                   (record-tier-unit! p tag ut))
                  (when (and (memv p '(1 2))
                             (or (= eid 1) (set-member? WARPABLE-UNIT-SET ut))
                             (not (set-member? NON-COMBAT-UNIT-SET ut))
@@ -1411,6 +1508,7 @@
                  (define p (hash-ref unit-owner tag 0))
                  (when (not (string=? ut ""))
                    (hash-set! unit-type tag ut)
+                   (record-tier-unit! p tag ut)
                    (when (and (= p our-pid) (not first-scout-cross-sec) (<= sec 360.0))
                      (hash-set! idx->owner-type u-idx ut))
                    (when (and our-zerg? (= p our-pid) (<= sec 615.0))
@@ -1576,11 +1674,10 @@
                 [(5) ; SUpgradeEvent
                  (define p (hash-ref pl 0 0))
                  (define upg (b->s (hash-ref pl 1 #"")))
-                 (when (and (memv p '(1 2))
-                            (not (string=? upg ""))
-                            (not (string-prefix? upg "Spray"))
-                            (not (string-prefix? upg "RewardDance")))
+                 (when (and (memv p '(1 2)) (real-upgrade-name? upg))
                    (hash-update! upg-cnt p add1 0)
+                   (when (combat-level-upgrade? upg)
+                     (hash-update! upg-lvl-cnt p add1 0))
                    (when (and (= p our-pid) (> gl 0))
                      (define ulow (string-downcase upg))
                      (define s1 (round1 sec))
@@ -1786,6 +1883,39 @@
           (define our-pk-min (peak-stat our-s (lambda (h) (safe-num (hash-ref h 'min_cur 0)))))
           (define our-pk-gas (peak-stat our-s (lambda (h) (safe-num (hash-ref h 'gas_cur 0)))))
           (define upgs (hash-ref upg-cnt our-pid 0))
+          (define opp-upgs (hash-ref upg-cnt opp-pid 0))
+          (define our-upg-lvls (hash-ref upg-lvl-cnt our-pid 0))
+          (define opp-upg-lvls (hash-ref upg-lvl-cnt opp-pid 0))
+          (define upg-lvl-delta (- our-upg-lvls opp-upg-lvls))
+          ;; Primary: Total Minerals Collected & Ratio; Secondary: Total Gas Collected & Unit Tier Mix
+          (define (finalize-collected acc-ht rate-ht cons-ht p)
+            (define tail-dt (min 10.0 (max 0.0 (- dur (hash-ref prev-col-sec p 0.0)))))
+            (define est (+ (hash-ref acc-ht p 0.0)
+                           (* (hash-ref rate-ht p 0.0) (/ tail-dt 60.0))))
+            (define rounded (inexact->exact (round est)))
+            (if (> rounded 0) rounded (max 0 (hash-ref cons-ht p 0))))
+          (define our-min-collected (finalize-collected min-collected-acc last-min-rate last-cons-min our-pid))
+          (define opp-min-collected (finalize-collected min-collected-acc last-min-rate last-cons-min opp-pid))
+          (define min-collected-ratio (round2 (/ (+ our-min-collected 100.0) (+ opp-min-collected 100.0))))
+          (define our-gas-collected (finalize-collected gas-collected-acc last-gas-rate last-cons-gas our-pid))
+          (define opp-gas-collected (finalize-collected gas-collected-acc last-gas-rate last-cons-gas opp-pid))
+          (define gas-collected-ratio (round2 (/ (+ our-gas-collected 50.0) (+ opp-gas-collected 50.0))))
+          (define our-tv (hash-ref tier-val-by-p our-pid))
+          (define opp-tv (hash-ref tier-val-by-p opp-pid))
+          (define our-t1-val (vector-ref our-tv 1))
+          (define our-t2-val (vector-ref our-tv 2))
+          (define our-t3-val (vector-ref our-tv 3))
+          (define our-t-tot (+ our-t1-val our-t2-val our-t3-val))
+          (define our-t1-pct (and (> our-t-tot 0) (round1 (* 100.0 (/ our-t1-val our-t-tot)))))
+          (define our-t2-pct (and (> our-t-tot 0) (round1 (* 100.0 (/ our-t2-val our-t-tot)))))
+          (define our-t3-pct (and (> our-t-tot 0) (round1 (* 100.0 (/ our-t3-val our-t-tot)))))
+          (define opp-t1-val (vector-ref opp-tv 1))
+          (define opp-t2-val (vector-ref opp-tv 2))
+          (define opp-t3-val (vector-ref opp-tv 3))
+          (define opp-t-tot (+ opp-t1-val opp-t2-val opp-t3-val))
+          (define opp-t1-pct (and (> opp-t-tot 0) (round1 (* 100.0 (/ opp-t1-val opp-t-tot)))))
+          (define opp-t2-pct (and (> opp-t-tot 0) (round1 (* 100.0 (/ opp-t2-val opp-t-tot)))))
+          (define opp-t3-pct (and (> opp-t-tot 0) (round1 (* 100.0 (/ opp-t3-val opp-t-tot)))))
           (define tot-ev (max 1 (hash-ref total-stat-ev our-pid 1)))
           (define sb-ev (hash-ref sb-steps our-pid 0))
           (define sb-pct (round1 (* 100.0 (/ sb-ev tot-ev))))
@@ -2782,6 +2912,16 @@
                   'killed_val killed-val
                   'lost_val lost-val
                   'trade_ratio trade-ratio
+                  'our_min_collected our-min-collected
+                  'opp_min_collected opp-min-collected
+                  'min_collected_ratio min-collected-ratio
+                  'our_gas_collected our-gas-collected
+                  'opp_gas_collected opp-gas-collected
+                  'gas_collected_ratio gas-collected-ratio
+                  'our_t1_val our-t1-val 'our_t2_val our-t2-val 'our_t3_val our-t3-val
+                  'our_t1_pct our-t1-pct 'our_t2_pct our-t2-pct 'our_t3_pct our-t3-pct
+                  'opp_t1_val opp-t1-val 'opp_t2_val opp-t2-val 'opp_t3_val opp-t3-val
+                  'opp_t1_pct opp-t1-pct 'opp_t2_pct opp-t2-pct 'opp_t3_pct opp-t3-pct
                   'our_bases our-bases
                   'opp_bases opp-bases
                   'our_w2 our-w2 'opp_w2 opp-w2
@@ -2823,6 +2963,11 @@
                   'our_peak_min our-pk-min
                   'our_peak_gas our-pk-gas
                   'upgrades upgs
+                  'our_upgrades upgs
+                  'opp_upgrades opp-upgs
+                  'our_upg_levels our-upg-lvls
+                  'opp_upg_levels opp-upg-lvls
+                  'upg_level_delta upg-lvl-delta
                   'supply_block_pct sb-pct
                   'macro_timings macro-timings*
                   'our_top_units (for/list ([p (in-list (top-k-pairs our-units-ht 6))])
@@ -2998,6 +3143,25 @@
         (define agg-tr (round2 (/ (+ tot-k 100.0) (+ tot-l 100.0))))
         (define tr-sorted (sort (map (lambda (r) (exact->inexact (hash-ref r 'trade_ratio 0.0))) rows) <))
         (define med-tr (round2 (or (percentile-sorted tr-sorted 0.50) 0.0)))
+        ;; Primary: Minerals Collected & Ratio; Secondary: Gas Collected & Tier Value Mix
+        (define tot-our-min (for/sum ([r (in-list rows)]) (safe-num (hash-ref r 'our_min_collected 0) 0)))
+        (define tot-opp-min (for/sum ([r (in-list rows)]) (safe-num (hash-ref r 'opp_min_collected 0) 0)))
+        (define agg-min-ratio (round2 (/ (exact->inexact tot-our-min) (max 1.0 (exact->inexact tot-opp-min)))))
+        (define mr-vals (sort (filter real? (map (lambda (r) (hash-ref r 'min_collected_ratio #f)) rows)) <))
+        (define med-min-ratio (if (pair? mr-vals) (round2 (or (percentile-sorted mr-vals 0.50) 0.0)) #f))
+        (define tot-our-gas (for/sum ([r (in-list rows)]) (safe-num (hash-ref r 'our_gas_collected 0) 0)))
+        (define tot-opp-gas (for/sum ([r (in-list rows)]) (safe-num (hash-ref r 'opp_gas_collected 0) 0)))
+        (define agg-gas-ratio (round2 (/ (exact->inexact tot-our-gas) (max 1.0 (exact->inexact tot-opp-gas)))))
+        (define gr-vals (sort (filter real? (map (lambda (r) (hash-ref r 'gas_collected_ratio #f)) rows)) <))
+        (define med-gas-ratio (if (pair? gr-vals) (round2 (or (percentile-sorted gr-vals 0.50) 0.0)) #f))
+        (define sum-our-t1 (for/sum ([r (in-list rows)]) (safe-num (hash-ref r 'our_t1_val 0) 0)))
+        (define sum-our-t2 (for/sum ([r (in-list rows)]) (safe-num (hash-ref r 'our_t2_val 0) 0)))
+        (define sum-our-t3 (for/sum ([r (in-list rows)]) (safe-num (hash-ref r 'our_t3_val 0) 0)))
+        (define sum-our-t (+ sum-our-t1 sum-our-t2 sum-our-t3))
+        (define sum-opp-t1 (for/sum ([r (in-list rows)]) (safe-num (hash-ref r 'opp_t1_val 0) 0)))
+        (define sum-opp-t2 (for/sum ([r (in-list rows)]) (safe-num (hash-ref r 'opp_t2_val 0) 0)))
+        (define sum-opp-t3 (for/sum ([r (in-list rows)]) (safe-num (hash-ref r 'opp_t3_val 0) 0)))
+        (define sum-opp-t (+ sum-opp-t1 sum-opp-t2 sum-opp-t3))
         (define (avg-field k)
           (round1 (/ (for/sum ([r (in-list rows)]) (exact->inexact (safe-num (hash-ref r k 0) 0))) n)))
         (define (avg-field2 k)
@@ -3047,6 +3211,20 @@
                 'non_loss_pct (round1 (* 100.0 (/ (+ wins ties) n)))
                 'killed_val tot-k 'lost_val tot-l
                 'trade_agg agg-tr 'trade_med med-tr
+                'our_min_collected_avg (round1 (/ (exact->inexact tot-our-min) n))
+                'opp_min_collected_avg (round1 (/ (exact->inexact tot-opp-min) n))
+                'agg_min_ratio agg-min-ratio
+                'median_min_ratio med-min-ratio
+                'our_gas_collected_avg (round1 (/ (exact->inexact tot-our-gas) n))
+                'opp_gas_collected_avg (round1 (/ (exact->inexact tot-opp-gas) n))
+                'agg_gas_ratio agg-gas-ratio
+                'median_gas_ratio med-gas-ratio
+                'our_t1_pct (and (> sum-our-t 0) (round1 (* 100.0 (/ sum-our-t1 sum-our-t))))
+                'our_t2_pct (and (> sum-our-t 0) (round1 (* 100.0 (/ sum-our-t2 sum-our-t))))
+                'our_t3_pct (and (> sum-our-t 0) (round1 (* 100.0 (/ sum-our-t3 sum-our-t))))
+                'opp_t1_pct (and (> sum-opp-t 0) (round1 (* 100.0 (/ sum-opp-t1 sum-opp-t))))
+                'opp_t2_pct (and (> sum-opp-t 0) (round1 (* 100.0 (/ sum-opp-t2 sum-opp-t))))
+                'opp_t3_pct (and (> sum-opp-t 0) (round1 (* 100.0 (/ sum-opp-t3 sum-opp-t))))
                 'avg_dur_sec (avg-field 'duration_sec)
                 'avg_wall_sec (avg-opt 'wall_sec)
                 'avg_obs_ms (avg-opt2 'avg_obs_ms)
@@ -3129,6 +3307,11 @@
                 'our_avg_gas (avg-field 'our_avg_gas)
                 'supply_block_pct (avg-field 'supply_block_pct)
                 'upgrades (avg-field 'upgrades)
+                'our_upgrades (avg-field 'our_upgrades)
+                'opp_upgrades (avg-field 'opp_upgrades)
+                'our_upg_levels (avg-field 'our_upg_levels)
+                'opp_upg_levels (avg-field 'opp_upg_levels)
+                'upg_level_delta (avg-field 'upg_level_delta)
                 'action_rejects (for/sum ([r (in-list rows)]) (hash-ref r 'action_rejects 0))
                 'logged (count (lambda (r) (hash-ref r 'has_logs #f)) rows)
                 'first_scout_unit_counts (for/list ([p (in-list (top-k-pairs scout-unit-ht 6))])
@@ -3261,12 +3444,22 @@
 (define (print-agg-line label agg)
   (when (> (hash-ref agg 'n 0) 0)
     (define ac (hash-ref agg 'anomaly_counts (hasheq)))
-    (printf "  ~a (n=~a): ~aW-~aL-~aT (Win=~a%, NonLoss=~a%) | Trade: agg=~ax med=~ax (~a/~a)\n"
+    (define min-agg (hash-ref agg 'agg_min_ratio #f))
+    (define min-med (hash-ref agg 'median_min_ratio #f))
+    (define min-our (hash-ref agg 'our_min_collected_avg #f))
+    (define min-opp (hash-ref agg 'opp_min_collected_avg #f))
+    (define min-col-str
+      (if (and (real? min-agg) (real? min-our) (real? min-opp))
+          (format " | MinCol: agg=~ax med=~ax (~a/~a)"
+                  (r2 min-agg) (if (real? min-med) (r2 min-med) "-") (r0 min-our) (r0 min-opp))
+          ""))
+    (printf "  ~a (n=~a): ~aW-~aL-~aT (Win=~a%, NonLoss=~a%) | Trade: agg=~ax med=~ax (~a/~a)~a\n"
             label (hash-ref agg 'n)
             (hash-ref agg 'wins) (hash-ref agg 'losses) (hash-ref agg 'ties)
             (r1 (hash-ref agg 'win_rate_pct)) (r1 (hash-ref agg 'non_loss_pct))
             (r2 (hash-ref agg 'trade_agg)) (r2 (hash-ref agg 'trade_med))
-            (hash-ref agg 'killed_val) (hash-ref agg 'lost_val))
+            (hash-ref agg 'killed_val) (hash-ref agg 'lost_val)
+            min-col-str)
     (define (fmt-signed1 v)
       (if (real? v) (format "~a~a" (if (>= v 0) "+" "") (r1 v)) "-"))
     (define atk26 (hash-ref agg 'early_atk_pct_2m_6m #f))
@@ -3276,8 +3469,28 @@
     (define p-wg-med (hash-ref agg 'protoss_warpgate_med_sec #f))
     (define z-rw-avg (hash-ref agg 'zerg_roach_warren_sec #f))
     (define z-rw-med (hash-ref agg 'zerg_roach_warren_med_sec #f))
+    (define gas-agg (hash-ref agg 'agg_gas_ratio #f))
+    (define gas-our (hash-ref agg 'our_gas_collected_avg #f))
+    (define gas-opp (hash-ref agg 'opp_gas_collected_avg #f))
+    (define ul-our (hash-ref agg 'our_upg_levels #f))
+    (define ul-opp (hash-ref agg 'opp_upg_levels #f))
+    (define ot1 (hash-ref agg 'our_t1_pct #f))
+    (define ot2 (hash-ref agg 'our_t2_pct #f))
+    (define ot3 (hash-ref agg 'our_t3_pct #f))
+    (define sec-diag-tail
+      (string-append
+       (if (and (real? gas-agg) (real? gas-our) (real? gas-opp))
+           (format " | GasCol=~ax(~a/~a)" (r2 gas-agg) (r0 gas-our) (r0 gas-opp))
+           "")
+       (if (and (real? ul-our) (real? ul-opp))
+           (format " | UpgLv=~a/~a" (r1 ul-our) (r1 ul-opp))
+           "")
+       (if (and (real? ot1) (real? ot2) (real? ot3))
+           (format " | Tier=~a/~a/~a%" (r0 ot1) (r0 ot2) (r0 ot3))
+           "")))
     (define timing-tail
       (string-append
+       sec-diag-tail
        (if (real? atk26) (format " | Atk2-6=~a%" (r1 atk26)) "")
        (if (and (real? dth-h) (real? dth-e))
            (format " | Dth(H/E)=~a/~a%" (r0 dth-h) (r0 dth-e))
@@ -3397,11 +3610,11 @@
       (or (hash-ref s 'worker_growth_2m_to_4m #f)
           (let ([w2 (hash-ref s 'our_w2 #f)] [w4 (hash-ref s 'our_w4 #f)])
             (and (real? w2) (real? w4) (round1 (- w4 w2))))))
-    (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
-            (pad-r "Slice" 12) (pad-r "W-L-T (Base->Cur)" 19) (pad-r "TradeAgg" 18)
+    (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
+            (pad-r "Slice" 12) (pad-r "W-L-T (Base->Cur)" 19) (pad-r "TradeAgg" 18) (pad-r "MinColAgg" 18)
             (pad-r "W@4m" 16) (pad-r "dW2->4" 16) (pad-r "W@6m" 16) (pad-r "PkArmy" 18)
             (pad-r "Bases" 18) (pad-r "SupBlk%" 18) (pad-r "Atk2-6%" 18) "Upgs")
-    (printf "~a\n" (make-string 186 #\-))
+    (printf "~a\n" (make-string 206 #\-))
     (for ([entry (in-list '((all . "ALL") (clean . "CLEAN") (core_12 . "CORE12(cl)") (unseen_6 . "UNSEEN6(cl)") (selfplay . "SELFPLAY(cl)") (Protoss . "Protoss(cl)") (Terran . "Terran(cl)") (Zerg . "Zerg(cl)")))])
       (define sk (car entry))
       (define lbl (cdr entry))
@@ -3418,10 +3631,11 @@
          (define wlt (format "~a-~a-~a -> ~a-~a-~a"
                              (hash-ref b 'wins) (hash-ref b 'losses) (hash-ref b 'ties)
                              (hash-ref c 'wins) (hash-ref c 'losses) (hash-ref c 'ties)))
-         (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
+         (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
                  (pad-r lbl 12)
                  (pad-r wlt 19)
                  (pad-r (fmt-delta (hash-ref c 'trade_agg) (hash-ref b 'trade_agg) 2 "x") 18)
+                 (pad-r (fmt-delta (hash-ref c 'agg_min_ratio #f) (hash-ref b 'agg_min_ratio #f) 2 "x") 18)
                  (pad-r (fmt-delta (hash-ref c 'our_w4) (hash-ref b 'our_w4) 1) 16)
                  (pad-r (fmt-delta (slice-dw24 c) (slice-dw24 b) 1) 16)
                  (pad-r (fmt-delta (hash-ref c 'our_w6) (hash-ref b 'our_w6) 1) 16)
@@ -3433,10 +3647,11 @@
         [(and (eq? sk 'selfplay) (= b-n 0) (> c-n 0))
          (define wlt (format "(new) -> ~a-~a-~a"
                              (hash-ref c 'wins) (hash-ref c 'losses) (hash-ref c 'ties)))
-         (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
+         (printf "~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a | ~a\n"
                  (pad-r lbl 12)
                  (pad-r wlt 19)
                  (pad-r (fmt-new (hash-ref c 'trade_agg) 2 "x") 18)
+                 (pad-r (fmt-new (hash-ref c 'agg_min_ratio #f) 2 "x") 18)
                  (pad-r (fmt-new (hash-ref c 'our_w4) 1) 16)
                  (pad-r (fmt-new (slice-dw24 c) 1) 16)
                  (pad-r (fmt-new (hash-ref c 'our_w6) 1) 16)

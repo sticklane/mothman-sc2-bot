@@ -263,6 +263,8 @@
  format-bot-build-banner
  SC2-NON-BLOCKING-RALLY-ABILITIES
  SC2-TH-WORKER-RALLY-TARGET
+ SC2-NEXUS-RECHARGE-LAST-LOOP
+ sc2-nexus-recharge-cooldown-ready?
  make-bot-build-tag-chat-action)
 
 ;; =============================================================================
@@ -2204,6 +2206,17 @@
 ;; Phase 2 (`#1662`): Single per-match macro-ability policy latch shared by Sec 6a & Case C.
 (define SC2-MACRO-POLICY-LATCH (make-macro-policy-latch))
 
+;; L63B (`#1754` Bug #2C): Authoritative global Protoss Nexus Energy Recharge (`4126`)
+;; wire cooldown latch — ONLY recorded when the wire actually emits a valid `4126`, so
+;; floating-point energy edge-cases or rejected casts NEVER lock out Recharge for 60s!
+(define SC2-NEXUS-RECHARGE-LAST-LOOP (box -99999))
+
+(define (sc2-nexus-recharge-cooldown-ready? cur-loop)
+  (define last (unbox SC2-NEXUS-RECHARGE-LAST-LOOP))
+  (define cd (sc2-spell-cooldown-frames 'nexus-energy-recharge 1344))
+  (or (< cur-loop last)
+      (>= (- cur-loop last) cd)))
+
 (define (reset-sc2-live-response-data!)
   (set-box! SC2-LIVE-DATA-LOADED? #f)
   (hash-clear! SC2-LIVE-AVAILABLE-ABILITIES)
@@ -2212,7 +2225,8 @@
   (reset-sc2-live-game-data!)
   (reset-live-typed-ability-overrides!)
   (reset-verifier-live-ability-modes!)
-  (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH))
+  (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
+  (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999))
 
 (struct sc2-response
   (id
@@ -5376,7 +5390,7 @@
           'max-hp (max 1 (exact-round (+ (sc2-passenger-unit-health-max pu)
                                          (sc2-passenger-unit-shield-max pu))))
           'shield (max 0 (exact-round (sc2-passenger-unit-shield pu)))
-          'energy (max 0 (exact-round (sc2-passenger-unit-energy pu)))
+          'energy (max 0 (exact-floor (sc2-passenger-unit-energy pu)))
           'energy-max (max 0 (exact-round (sc2-passenger-unit-energy-max pu)))))
 
 (define (sc2-observation->runtime-obs-hash obs
@@ -5388,6 +5402,9 @@
   (define cur-loop (sc2-observation-game-loop obs))
   (when (sc2-game-info? game-info)
     (set-box! SC2-ACTIVE-GAME-INFO game-info))
+  (when (or (< cur-loop (unbox SC2-NEXUS-RECHARGE-LAST-LOOP))
+            (and (<= cur-loop 8) (> (unbox SC2-NEXUS-RECHARGE-LAST-LOOP) 8)))
+    (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999))
   (when (< cur-loop (unbox SC2-WARPGATE-LAST-LOOP))
     (hash-clear! SC2-WARPGATE-COOLDOWN-UNTIL)
     (hash-clear! SC2-WARPGATE-WARP-START-LOOP)
@@ -5395,6 +5412,7 @@
     (set-box! SC2-WARPGATE-PREV-LIVE-READY 0)
     (set-box! SC2-LAST-SCAN-REQUEST-LOOP -9999)
     (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
+    (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999)
     (hash-clear! SC2-WORKER-BUILD-ORDER-START)
     (set-box! SC2-HOME-BASE-ANCHOR #f)
     (set-box! SC2-CLEARED-ENEMY-BASES '())
@@ -5908,7 +5926,7 @@
                'hull-hp (max 1 (exact-round (sc2-unit-health u)))
                'max-hp (max 1 (exact-round (+ (sc2-unit-health-max u) (sc2-unit-shield-max u))))
                'shield (max 0 (exact-round (sc2-unit-shield u)))
-               'energy (max 0 (exact-round (sc2-unit-energy u)))
+               'energy (max 0 (exact-floor (sc2-unit-energy u)))
                'energy-max (max 0 (exact-round (sc2-unit-energy-max u)))
                'cargo-space-taken eff-cargo-taken
                'cargo-space-max (sc2-unit-cargo-space-max u)
@@ -6150,7 +6168,7 @@
                'hp (max 1 (exact-round cur-hp+sh))
                'max-hp (max 1 (exact-round hp-max))
                'hp-pct eff-hp-pct
-               'energy (exact-round (sc2-unit-energy b))
+               'energy (max 0 (exact-floor (sc2-unit-energy b)))
                'energy-max (max 0 (exact-round (sc2-unit-energy-max b)))
                'cargo-space-taken (max (sc2-unit-cargo-space-taken b)
                                        (length (sc2-unit-passengers b)))
@@ -9981,6 +9999,7 @@
     (set-box! SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP #f)
     (hash-clear! SC2-GAS-BLDG-ZERO-WORKERS-SINCE)
     (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
+    (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999)
     (hash-clear! SC2-TH-WORKER-RALLY-TARGET)
     (hash-clear! SC2-SAT-EVAC-LAST-LOOP)
     (hash-clear! SC2-SAT-IDLE-LAST-LOOP)
@@ -10533,17 +10552,38 @@
     (define under-th-by-tag
       (for/hasheqv ([u (in-list under-townhalls)])
         (values (sc2-unit-tag u) u)))
-    (define best-under-th
-      (and (pair? under-townhalls)
+    ;; L63 (`#1704`): Tighten routine RALLY_WORKERS (`17.7/g -> ~5-6/g`, Pro GM pace):
+    ;;   - Require own excess `>= 2` (`th-asgn >= th-idl + 2`) before routing a saturated base elsewhere
+    ;;   - Require target base to have `>= 3` open slots (`idl - asgn >= 3`), not be `th` itself,
+    ;;     and NOT be currently rallied onto `th` (anti-ping-pong!)
+    ;;   - Keep `prev-dst-th-tag` sticky while still under-saturated (`-3` return hysteresis -> 5w band!)
+    (define (th-not-rallied-to? cand-th src-tag)
+      (define cprev (hash-ref SC2-TH-WORKER-RALLY-TARGET (sc2-unit-tag cand-th) #f))
+      (not (and cprev (= (vector-ref cprev 0) src-tag))))
+    (define open3-under-townhalls
+      (filter (lambda (u)
+                (>= (- (th-effective-ideal u) (th-effective-assigned u)) 3))
+              under-townhalls))
+    (define (pick-best-under-for src-th-tag)
+      (define cands
+        (filter (lambda (u)
+                  (and (not (= (sc2-unit-tag u) src-th-tag))
+                       (th-not-rallied-to? u src-th-tag)))
+                open3-under-townhalls))
+      (and (pair? cands)
            (argmin (lambda (u)
                      (+ (* 1000.0 (th-safety-score u))
                         (exact->inexact (th-effective-assigned u))))
-                   under-townhalls)))
+                   cands)))
     (define safe-online-by-tag
       (for/hasheqv ([u (in-list safe-online-townhalls)])
         (values (sc2-unit-tag u) u)))
     (define best-safe-th
-      (or best-under-th
+      (or (and (pair? under-townhalls)
+               (argmin (lambda (u)
+                         (+ (* 1000.0 (th-safety-score u))
+                            (exact->inexact (th-effective-assigned u))))
+                       under-townhalls))
           (and (pair? safe-online-townhalls) (first safe-online-townhalls))))
     (for ([th (in-list ready-townhalls)])
       (define th-tag (sc2-unit-tag th))
@@ -10553,26 +10593,37 @@
       (define last-set-loop (if prev (vector-ref prev 2) -1000))
       (define was-flying? (and prev (vector-ref prev 3)))
       (define rallied-elsewhere? (and (> prev-dst-th-tag 0) (not (= prev-dst-th-tag th-tag))))
-      (define sticky-under-th (and rallied-elsewhere? (hash-ref under-th-by-tag prev-dst-th-tag #f)))
+      (define sticky-under-th
+        (let ([u (and rallied-elsewhere? (hash-ref under-th-by-tag prev-dst-th-tag #f))])
+          (and u (th-not-rallied-to? u th-tag) u)))
+      (define best-under-for-th (pick-best-under-for th-tag))
+      (define best-safe-for-th
+        (or best-under-for-th
+            (let ([safe-others
+                   (filter (lambda (u)
+                             (and (not (= (sc2-unit-tag u) th-tag))
+                                  (th-not-rallied-to? u th-tag)))
+                           safe-online-townhalls)])
+              (and (pair? safe-others) (first safe-others)))
+            best-safe-th))
       (define th-asgn (th-effective-assigned th))
       (define th-idl (th-effective-ideal th))
       (define th-off? (th-local-offline? th))
-      ;; L61B (`#1640`/`#1641`): Keep `prev-dst-th-tag` sticky whenever still under-saturated
-      ;; (or safe online when offline), widen saturation return hysteresis `-2 -> -3`, and
-      ;; split re-rally cooldown into `32f` urgent (initial/land/dead-patch/offline) vs `224f`
-      ;; (`10s`) routine saturation routing so THs never flip-flop every `64f` (`16.7 -> ~5/g`).
       (define dst-th
         (cond
           [th-off?
            (or sticky-under-th
-               (and rallied-elsewhere? (hash-ref safe-online-by-tag prev-dst-th-tag #f))
-               best-safe-th)]
-          [(and (>= th-asgn th-idl) best-under-th)
-           (or sticky-under-th best-under-th)]
+               (and rallied-elsewhere?
+                    (let ([su (hash-ref safe-online-by-tag prev-dst-th-tag #f)])
+                      (and su (th-not-rallied-to? su th-tag) su)))
+               best-safe-for-th)]
+          [(and (>= (- th-asgn th-idl) 2)
+                (or sticky-under-th best-under-for-th))
+           (or sticky-under-th best-under-for-th)]
           [(and rallied-elsewhere?
-                best-under-th
+                (or sticky-under-th best-under-for-th)
                 (> th-asgn (max 0 (- th-idl 3))))
-           (or sticky-under-th best-under-th)]
+           (or sticky-under-th best-under-for-th)]
           [else th]))
       (when dst-th
         (define dst-th-tag (sc2-unit-tag dst-th))
@@ -11477,6 +11528,8 @@
   ;;    carrying gas workers (`buff 273/274/275`) whenever `>= 200G & < 120M` or worker-crisis!
   ;;    L61 (`#1609` A2): `>= 32f` retry cooldown when `eff-active-gas-workers` didn't decrease,
   ;;    `>= 112f` opposite-direction cooldown after gas fill, midgame coalesced at Tier `P3`.
+  (define grms-urgent-pull?
+    (and gas-over-banked? (>= cur-gas 200) (< cur-min 110)))
   (define gas-pull-target-floor
     (cond
       [gas-pull-to-zero-now? 0]
@@ -11499,8 +11552,12 @@
   (define pull-retry-throttled?
     (and (< (- cur-loop (car prev-pull-state)) 32)
          (>= eff-active-gas-workers (cdr prev-pull-state))))
+  ;; L63 (`#1704`): Never block genuine `grms-urgent-pull?` (`>= 200G & < 110M`, P1) behind a recent
+  ;; geyser-fill `112f` opposite-direction cd (Sec 2's `112f` PULL->FILL cd + hysteresis latch prevent
+  ;; oscillation while letting fresh 3rd/4th-geyser crunches evacuate immediately!).
   (define pull-opp-throttled?
     (and (< (- cur-loop (unbox SC2-SAT-GAS-LAST-FILL-GLOBAL)) 112)
+         (not grms-urgent-pull?)
          (not worker-rush-evacuate-gas?)
          (not worker-crisis-gas-evac?)
          (not mined-out-gas-evac?)))
@@ -11571,12 +11628,10 @@
                (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wtag bmtag)
                wtag))
            (when (pair? pull-wtags)
-             ;; L61B (`#1640`/`#1641`): Elevate Sec 4's single coalesced gas-pull to Tier `P1`
+             ;; L61B/L63 (`#1640`/`#1704`): Elevate Sec 4's single coalesced gas-pull to Tier `P1`
              ;; ONLY during genuine `gas_rich_min_starved` (`gas >= 200 & min < 110`) so combat
              ;; tokens never starve gas-to-mineral rescue, while keeping routine pulls at `P3`.
              (define raw-pull (sc2-raw-unit-command 3666 #f bmtag pull-wtags #f))
-             (define grms-urgent-pull?
-               (and gas-over-banked? (>= cur-gas 200) (< cur-min 110)))
              (set! cmds
                    (cons (if grms-urgent-pull? (mark-macro-econ-cmd! raw-pull) raw-pull)
                          cmds)))]))))
@@ -11662,6 +11717,7 @@
                   #:ally-casters (sc2-units->macro-caster-infos self-units)
                   #:enemy-units-present? (pair? enemy-units)
                   #:recharge-available? (sc2-ability-live-available? 4126)
+                  #:recharge-off-cooldown? (sc2-nexus-recharge-cooldown-ready? cur-loop)
                   #:caster-ready? (lambda (ctag)
                                     (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono ctag) -1000)) 16))
                   #:target-ready? (lambda (ttag)
@@ -11960,7 +12016,11 @@
       (set-box! SC2-BUILD-TAG-EMITTED? #f)
       (set-box! SC2-ACTIVE-RECALL-ZONES '())
       (set-box! SC2-NEXUS-RECALL-READY-LOOP -10000)
-      (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH))
+      (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
+      (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999))
+    (when (or (< cur-loop (unbox SC2-NEXUS-RECHARGE-LAST-LOOP))
+              (and (<= cur-loop 8) (> (unbox SC2-NEXUS-RECHARGE-LAST-LOOP) 8)))
+      (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999))
     (set-box! SC2-WIRE-LAST-LOOP-BOX cur-loop)
     (let ([rzs (unbox SC2-ACTIVE-RECALL-ZONES)])
       (when (pair? rzs)
@@ -12016,6 +12076,7 @@
       (set-box! SC2-ACTIVE-RECALL-ZONES '())
       (set-box! SC2-NEXUS-RECALL-READY-LOOP -10000)
       (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
+      (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999)
       (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
       (set-box! SC2-TERRITORY-FIELD-CACHE #f)
       (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999))
@@ -12026,7 +12087,8 @@
       (hash-clear! SC2-WARPGATE-HARD-CD-UNTIL)
       (set-box! SC2-WARPGATE-PREV-LIVE-READY 0)
       (set-box! SC2-LAST-SCAN-REQUEST-LOOP -9999)
-      (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH))
+      (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
+      (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999))
     (set-box! SC2-WARPGATE-LAST-LOOP cur-loop)
     (define raw-dead (sc2-observation-dead-unit-tags obs))
     (when (list? raw-dead)
@@ -17793,6 +17855,7 @@
 
       [(list (or 'nexus-energy-recharge 'energy-recharge) nx-id target-id)
        (when (and (sc2-ability-live-available? 4126)
+                  (sc2-nexus-recharge-cooldown-ready? cur-loop)
                   (exact-integer? nx-id) (> nx-id 0)
                   (exact-integer? target-id) (> target-id 0))
          (define nx-u (hash-ref self-unit-by-tag nx-id #f))
@@ -17805,12 +17868,16 @@
                         (not (sc2-unit-is-hallucination tgt-u))
                         (> (sc2-unit-energy-max tgt-u) 0.0)
                         (< (sc2-unit-energy tgt-u) (- (sc2-unit-energy-max tgt-u) 0.5))
-                        (let ([np (sc2-unit-pos nx-u)] [tp (sc2-unit-pos tgt-u)])
+                        (let ([np (sc2-unit-pos nx-u)]
+                              [tp (sc2-unit-pos tgt-u)]
+                              [max-d (+ 15.0 (sc2-unit-radius nx-u) (sc2-unit-radius tgt-u) -0.25)])
                           (<= (pt-dist (sc2-point3d-x np) (sc2-point3d-y np)
                                        (sc2-point3d-x tp) (sc2-point3d-y tp))
-                              15.0))))
+                              max-d))))
            (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono nx-id) cur-loop)
-           (emit! (sc2-raw-unit-command 4126 #f target-id (list nx-id) #f))))]
+           (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP cur-loop)
+           (emit! (mark-macro-econ-cmd!
+                   (sc2-raw-unit-command 4126 #f target-id (list nx-id) #f)))))]
 
       [(list 'bunker-load bid raw-uid)
        (when (and (exact-integer? bid) (> bid 0))
@@ -18495,14 +18562,20 @@
                   [(= ab-id 2350)
                    (when (and (exact-integer? target-id) (> target-id 0))
                      (emit-cyclone-lock-on-deduped! caster-ids target-id))]
-                  ;; L58-P1: SC2 5.0.14 Nexus Energy Recharge (`4126`) enforces `<= 15.0t` range
-                  ;; (`209:TargetIsOutOfRange`), `>= 50.0e` (`17:NotEnoughEnergy`), and non-full energy target!
+                  ;; L58-P1 / L63B (`#1754` Bug #2C): SC2 5.0.14 Nexus Energy Recharge (`4126`) enforces
+                  ;; true edge-to-edge `15.0 + rad(nx) + rad(tgt) - 0.25` (~17.7..18.0t center-to-center,
+                  ;; preventing `209:TargetIsOutOfRange`), `>= 50.0e` (`17:NotEnoughEnergy`), non-full energy
+                  ;; target, and global 1344f wire cooldown (`SC2-NEXUS-RECHARGE-LAST-LOOP`) recorded ONLY
+                  ;; upon actual emission; wrapped in `mark-macro-econ-cmd!` (Tier P1, matching Chrono `3755`).
                   [(= ab-id 4126)
                    (when (and (sc2-ability-live-available? 4126)
+                              (sc2-nexus-recharge-cooldown-ready? cur-loop)
                               (exact-integer? target-id) (> target-id 0))
                      (cond
                        [(null? self-units)
-                        (emit! (sc2-raw-unit-command 4126 #f target-id (list (first caster-ids)) #f))]
+                        (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP cur-loop)
+                        (emit! (mark-macro-econ-cmd!
+                                (sc2-raw-unit-command 4126 #f target-id (list (first caster-ids)) #f)))]
                        [else
                         (define tgt-u (hash-ref self-unit-by-tag target-id #f))
                         (when (and tgt-u
@@ -18518,16 +18591,19 @@
                                     (= (sc2-unit-unit-type cu) 59)
                                     (>= (sc2-unit-build-progress cu) SC2-BUILD-COMPLETE-PROGRESS)
                                     (>= (sc2-unit-energy cu) 50.0)
-                                    (let ([np (sc2-unit-pos cu)])
+                                    (let ([np (sc2-unit-pos cu)]
+                                          [max-d (+ 15.0 (sc2-unit-radius cu) (sc2-unit-radius tgt-u) -0.25)])
                                       (<= (pt-dist (sc2-point3d-x np) (sc2-point3d-y np)
                                                    (sc2-point3d-x tp) (sc2-point3d-y tp))
-                                          15.0))
+                                          max-d))
                                     cu))
                              caster-ids))
                           (when (pair? valid-nxs)
                             (define best-nx (sc2-unit-tag (argmax sc2-unit-energy valid-nxs)))
                             (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono best-nx) cur-loop)
-                            (emit! (sc2-raw-unit-command 4126 #f target-id (list best-nx) #f))))]))]
+                            (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP cur-loop)
+                            (emit! (mark-macro-econ-cmd!
+                                    (sc2-raw-unit-command 4126 #f target-id (list best-nx) #f)))))]))]
                   ;; L58-P3B: Medivac Heal (`386`) strictly targets live, damaged, unhealed friendly
                   ;; biological units (1 Medivac per bio target — auto-redirects Medivac #2 to the next
                   ;; wounded bio unit within `10.0t` to eliminate `206:AlreadyTargeted` rejects!).

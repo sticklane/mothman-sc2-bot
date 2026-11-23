@@ -282,6 +282,16 @@ def stage_ios_playable_mp4s(
 # 2. Rich Live Telemetry Loader (SQLite + Pro Baselines + Arena 3.0 + Ledger)
 # ---------------------------------------------------------------------------
 
+def _compact_floats(obj: Any, digits: int = 3) -> Any:
+    if isinstance(obj, float):
+        return round(obj, digits)
+    if isinstance(obj, list):
+        return [_compact_floats(x, digits) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _compact_floats(v, digits) for k, v in obj.items()}
+    return obj
+
+
 def _median_or_none(vals: List[float]) -> Optional[float]:
     clean = [float(v) for v in vals if v is not None and v > 0]
     if not clean:
@@ -349,11 +359,43 @@ def load_rich_report_telemetry(
         except Exception:
             pass
 
+    # Load shipped release IDs from loop_ledger.json upfront so BOTH Section 2.2/2.3 (pro_deep)
+    # and Section 2 (SQLite current_build) always agree on the latest SHIPPED release (never leaking HOLD runs).
+    shipped_ids: set[str] = set()
+    live_ship_iter = 57
+    live_ship_num = 10
+    ledger_p = repo_dir / "tools/iteration-loop/loop_ledger.json"
+    if ledger_p.is_file():
+        try:
+            ldata = json.loads(ledger_p.read_text(encoding="utf-8"))
+            for it in ldata.get("iterations", []):
+                st = str(it.get("status") or "").upper()
+                if "SHIP" in st and "HOLD" not in st and "FAIL" not in st:
+                    iid = str(it.get("id") or "")
+                    shipped_ids.add(iid)
+                    m_li = re.search(r"iter(\d+)([a-z]?)_ship(\d+)_full", iid, flags=re.I)
+                    if m_li:
+                        li_n, ls_n = int(m_li.group(1)), int(m_li.group(3))
+                        if (li_n, ls_n) > (live_ship_iter, live_ship_num):
+                            live_ship_iter, live_ship_num = li_n, ls_n
+        except Exception:
+            pass
+
+    def _is_shipped_build(it_n: int, suf: str, sh_n: int) -> bool:
+        canon_id = f"iter{it_n}{suf.lower()}_ship{sh_n}_full"
+        return (
+            (canon_id in shipped_ids)
+            or (it_n == 57 and not suf and sh_n == 10)
+            or (it_n == 59 and suf.lower() == "c" and sh_n == 11)
+            or (it_n == 60 and suf.lower() == "b" and sh_n == 12)
+            or (it_n == 61 and suf.lower() == "c" and sh_n == 13)
+            or (it_n == 62 and suf.lower() == "c" and sh_n == 14)
+        )
+
     # A2. Load Combat Positioning (Section 5) & Army-Group Positioning (Section 6) vs. Pro
-    # Prefer latest iter*_ship*_full/pro_deep.json (e.g. iter58b_ship11_full/pro_deep.json),
-    # with clean fallback to standalone scratch/loop/pro_*_audit.json files.
+    # Prefer latest SHIPPED iter*_ship*_full/pro_deep.json so Sections 2.2/2.3 match Sections 1/2/2.4.
     loop_scratch_a = brain_dir / "scratch" / "loop"
-    latest_pro_deep: Optional[Tuple[Tuple[int, str, int, float], str, Path]] = None
+    latest_pro_deep: Optional[Tuple[Tuple[int, int, str, int, float], str, Path]] = None
     if loop_scratch_a.is_dir():
         for pdp in loop_scratch_a.glob("iter*_ship*_full/pro_deep.json"):
             m_pd = re.fullmatch(r"iter(\d+)([a-z]?)_ship(\d+)_full", pdp.parent.name, flags=re.I)
@@ -362,7 +404,8 @@ def load_rich_report_telemetry(
             it_n = int(m_pd.group(1))
             suf = m_pd.group(2).upper()
             sh_n = int(m_pd.group(3))
-            rk = (it_n, suf, sh_n, pdp.stat().st_mtime)
+            is_sh = 1 if _is_shipped_build(it_n, suf, sh_n) else 0
+            rk = (is_sh, it_n, suf, sh_n, pdp.stat().st_mtime)
             if latest_pro_deep is None or rk > latest_pro_deep[0]:
                 latest_pro_deep = (rk, f"Build {it_n}{suf}", pdp)
     if latest_pro_deep is not None:
@@ -564,15 +607,37 @@ def load_rich_report_telemetry(
                             }
                         t_list.append(t_row)
                     c_timings[rname] = t_list
-                out["pro_curves"] = {
+                obs_extra_keys = (
+                    "army_cohesion",
+                    "engage_retreat",
+                    "expansions_4plus",
+                    "gas_7plus",
+                    "tier_composition",
+                    "all_upgrades",
+                    "concave_layering",
+                    "army_rotation",
+                    "multiprong_backstabs",
+                    "unit_comp_clusters",
+                    "production_utilization",
+                    "macro_abilities",
+                    "macro_energy",
+                    "combat_spells",
+                )
+                pro_cv_out: Dict[str, Any] = {
+                    "schema_version": raw_cv.get("schema_version", 4),
                     "run_id": c_meta.get("run_id", ""),
                     "buckets_sec": raw_cv.get("buckets_sec") or list(range(0, 901, 30)),
                     "segments": c_segs,
+                    "matchups": raw_cv.get("matchups") or [],
                     "cohorts": c_cohorts,
                     "summary": c_summary,
                     "curves": c_curves,
                     "timings": c_timings,
                 }
+                for ek in obs_extra_keys:
+                    if ek in raw_cv and raw_cv[ek] is not None:
+                        pro_cv_out[ek] = _compact_floats(raw_cv[ek], 3)
+                out["pro_curves"] = pro_cv_out
         except Exception:
             pass
 
@@ -842,7 +907,7 @@ def load_rich_report_telemetry(
                     b_tot = b["wins"] + b["losses"] + b["draws"]
                     cat_tot = int((cat_catalog.get(c) or {}).get("total", 0) or 0)
                     is_full_cat = 1 if (cat_tot <= 0 or b_tot >= cat_tot) else 0
-                    cand_rank = (alnum, is_full_cat, pnum, b_tot)
+                    cand_rank = (is_full_cat, alnum, pnum, b_tot)
                     if cand_rank >= d_by_cat_rank.get(c, (-1, -1, -1, -1)):
                         d_by_cat_rank[c] = cand_rank
                         d_by_cat[c] = b
@@ -939,30 +1004,12 @@ def load_rich_report_telemetry(
             HAVING COUNT(*) >= 78
             """
         ).fetchall()
-        shipped_ids: set[str] = set()
-        live_ship_iter = 57
-        live_ship_num = 10
-        ledger_p = repo_dir / "tools/iteration-loop/loop_ledger.json"
-        if ledger_p.is_file():
-            try:
-                ldata = json.loads(ledger_p.read_text(encoding="utf-8"))
-                for it in ldata.get("iterations", []):
-                    st = str(it.get("status") or "").upper()
-                    if "SHIP" in st and "HOLD" not in st and "FAIL" not in st:
-                        iid = str(it.get("id") or "")
-                        shipped_ids.add(iid)
-                        m_li = re.search(r"iter(\d+)([a-z]?)_ship(\d+)_full", iid, flags=re.I)
-                        if m_li:
-                            li_n, ls_n = int(m_li.group(1)), int(m_li.group(3))
-                            if (li_n, ls_n) > (live_ship_iter, live_ship_num):
-                                live_ship_iter, live_ship_num = li_n, ls_n
-            except Exception:
-                pass
         latest_ship_run = ""
         latest_ship_iter = 0
         latest_ship_suffix = ""
         latest_ship_num = 0
         latest_is_shipped = False
+        best_ship_key: Tuple[int, int, str, int, str] = (-1, -1, "", -1, "")
         for rid, _cnt in ship_cands:
             m_sh = re.search(r"iter(\d+)([a-z]?)_ship(\d+)_full", str(rid), flags=re.I)
             if not m_sh:
@@ -970,19 +1017,15 @@ def load_rich_report_telemetry(
             it_n = int(m_sh.group(1))
             suf = m_sh.group(2).upper()
             sh_n = int(m_sh.group(3))
-            if (it_n, suf, sh_n, str(rid)) > (latest_ship_iter, latest_ship_suffix, latest_ship_num, latest_ship_run):
+            cand_shipped = _is_shipped_build(it_n, suf, sh_n)
+            cand_key = (1 if cand_shipped else 0, it_n, suf, sh_n, str(rid))
+            if cand_key > best_ship_key:
+                best_ship_key = cand_key
                 latest_ship_iter = it_n
                 latest_ship_suffix = suf
                 latest_ship_num = sh_n
                 latest_ship_run = str(rid)
-                canon_id = f"iter{it_n}{suf.lower()}_ship{sh_n}_full"
-                latest_is_shipped = (
-                    (canon_id in shipped_ids)
-                    or (it_n == 57 and not suf and sh_n == 10)
-                    or (it_n == 59 and suf.lower() == "c" and sh_n == 11)
-                    or (it_n == 60 and suf.lower() == "b" and sh_n == 12)
-                    or (it_n == 61 and suf.lower() == "c" and sh_n == 13)
-                )
+                latest_is_shipped = cand_shipped
         if latest_is_shipped and (latest_ship_iter, latest_ship_num) > (live_ship_iter, live_ship_num):
             live_ship_iter, live_ship_num = latest_ship_iter, latest_ship_num
 
@@ -996,7 +1039,18 @@ def load_rich_report_telemetry(
                            SUM(CASE WHEN LOWER(m.result)='tie' THEN 1 ELSE 0 END),
                            ROUND(SUM(m.killed_val)*1.0/NULLIF(SUM(m.lost_val),0), 2),
                            ROUND(AVG(m.sup_blk_pct), 1),
-                           ROUND(AVG(m.avg_step_ms), 2)
+                           ROUND(AVG(m.avg_step_ms), 2),
+                           ROUND(SUM(CASE WHEN m.opp_min_collected > 0 THEN m.our_min_collected END)*1.0/NULLIF(SUM(CASE WHEN m.opp_min_collected > 0 THEN m.opp_min_collected END),0), 2),
+                           ROUND(AVG(CASE WHEN m.opp_min_collected > 0 THEN m.our_min_collected END), 0),
+                           ROUND(AVG(CASE WHEN m.opp_min_collected > 0 THEN m.opp_min_collected END), 0),
+                           ROUND(SUM(CASE WHEN m.opp_gas_collected > 0 THEN m.our_gas_collected END)*1.0/NULLIF(SUM(CASE WHEN m.opp_gas_collected > 0 THEN m.opp_gas_collected END),0), 2),
+                           ROUND(AVG(CASE WHEN m.opp_gas_collected > 0 THEN m.our_gas_collected END), 0),
+                           ROUND(AVG(CASE WHEN m.opp_gas_collected > 0 THEN m.opp_gas_collected END), 0),
+                           ROUND(AVG(m.our_upg_levels), 1),
+                           ROUND(AVG(m.opp_upg_levels), 1),
+                           ROUND(AVG(m.our_t1_pct), 1),
+                           ROUND(AVG(m.our_t2_pct), 1),
+                           ROUND(AVG(m.our_t3_pct), 1)
                     FROM matches m WHERE {where_sql}
                     """,
                     params,
@@ -1015,6 +1069,17 @@ def load_rich_report_telemetry(
                     "tr": float(r[4] or 0.0),
                     "sb": float(r[5] or 0.0),
                     "step_ms": float(r[6] or 0.0),
+                    "min_ratio": float(r[7]) if r[7] is not None else None,
+                    "our_min_avg": float(r[8]) if r[8] is not None else None,
+                    "opp_min_avg": float(r[9]) if r[9] is not None else None,
+                    "gas_ratio": float(r[10]) if r[10] is not None else None,
+                    "our_gas_avg": float(r[11]) if r[11] is not None else None,
+                    "opp_gas_avg": float(r[12]) if r[12] is not None else None,
+                    "our_upg_lv": float(r[13]) if r[13] is not None else None,
+                    "opp_upg_lv": float(r[14]) if r[14] is not None else None,
+                    "t1_pct": float(r[15]) if r[15] is not None else None,
+                    "t2_pct": float(r[16]) if r[16] is not None else None,
+                    "t3_pct": float(r[17]) if r[17] is not None else None,
                 }
 
             # Matching H2H run for the same loop (including suffix e.g. iter58b_h2h)
@@ -1146,6 +1211,102 @@ def load_rich_report_telemetry(
                 "army_curves": cb_ar,
             }
 
+            # Attach North Star Mine x Trade summary & scatter to out["pro_curves"] from SQLite
+            if isinstance(out.get("pro_curves"), dict) and out["pro_curves"].get("curves"):
+                obs_rid = str(out["pro_curves"].get("run_id") or "") or latest_ship_run
+                sc_rows = cur.execute(
+                    """
+                    SELECT m.match_index, m.our_race, m.matchup, m.opponent, LOWER(m.result),
+                           m.killed_val, m.lost_val, m.trade_ratio,
+                           m.our_min_collected, m.opp_min_collected, m.min_collected_ratio,
+                           m.our_gas_collected, m.opp_gas_collected, m.gas_collected_ratio,
+                           m.our_upg_levels, m.opp_upg_levels,
+                           m.our_t1_pct, m.our_t2_pct, m.our_t3_pct
+                    FROM matches m
+                    WHERE m.run_id = ? AND COALESCE(m.is_selfplay,0)=0
+                    ORDER BY m.match_index ASC
+                    """,
+                    (obs_rid,),
+                ).fetchall()
+                if not sc_rows and obs_rid != latest_ship_run:
+                    sc_rows = cur.execute(
+                        """
+                        SELECT m.match_index, m.our_race, m.matchup, m.opponent, LOWER(m.result),
+                               m.killed_val, m.lost_val, m.trade_ratio,
+                               m.our_min_collected, m.opp_min_collected, m.min_collected_ratio,
+                               m.our_gas_collected, m.opp_gas_collected, m.gas_collected_ratio,
+                               m.our_upg_levels, m.opp_upg_levels,
+                               m.our_t1_pct, m.our_t2_pct, m.our_t3_pct
+                        FROM matches m
+                        WHERE m.run_id = ? AND COALESCE(m.is_selfplay,0)=0
+                        ORDER BY m.match_index ASC
+                        """,
+                        (latest_ship_run,),
+                    ).fetchall()
+                if sc_rows:
+                    def _mt_slice(rlist: List[Tuple[Any, ...]]) -> Dict[str, Any]:
+                        if not rlist:
+                            return {}
+                        ks = sum(float(x[5] or 0) for x in rlist)
+                        ls = sum(float(x[6] or 0) for x in rlist)
+                        trs = [float(x[7]) for x in rlist if x[7] is not None and float(x[7]) < 90.0]
+                        mvalid = [x for x in rlist if x[8] is not None and x[9] is not None and float(x[9]) > 0]
+                        om_s = sum(float(x[8]) for x in mvalid)
+                        em_s = sum(float(x[9]) for x in mvalid)
+                        gvalid = [x for x in rlist if x[11] is not None and x[12] is not None and float(x[12]) > 0]
+                        og_s = sum(float(x[11]) for x in gvalid)
+                        eg_s = sum(float(x[12]) for x in gvalid)
+                        uvalid = [x for x in rlist if x[14] is not None and x[15] is not None]
+                        tvalid = [x for x in rlist if x[16] is not None and x[17] is not None and x[18] is not None]
+                        return {
+                            "n": len(rlist),
+                            "trade_agg": round(ks / ls, 2) if ls > 0 else None,
+                            "trade_med": round(statistics.median(trs), 2) if trs else None,
+                            "agg_min_ratio": round(om_s / em_s, 2) if em_s > 0 else None,
+                            "our_min_collected_avg": round(om_s / len(mvalid), 0) if mvalid else None,
+                            "opp_min_collected_avg": round(em_s / len(mvalid), 0) if mvalid else None,
+                            "agg_gas_ratio": round(og_s / eg_s, 2) if eg_s > 0 else None,
+                            "our_gas_collected_avg": round(og_s / len(gvalid), 0) if gvalid else None,
+                            "opp_gas_collected_avg": round(eg_s / len(gvalid), 0) if gvalid else None,
+                            "our_upg_levels": round(sum(float(x[14]) for x in uvalid) / len(uvalid), 1) if uvalid else None,
+                            "opp_upg_levels": round(sum(float(x[15]) for x in uvalid) / len(uvalid), 1) if uvalid else None,
+                            "our_t1_pct": round(sum(float(x[16]) for x in tvalid) / len(tvalid), 1) if tvalid else None,
+                            "our_t2_pct": round(sum(float(x[17]) for x in tvalid) / len(tvalid), 1) if tvalid else None,
+                            "our_t3_pct": round(sum(float(x[18]) for x in tvalid) / len(tvalid), 1) if tvalid else None,
+                        }
+
+                    mt_by_race = {
+                        rn: _mt_slice([x for x in sc_rows if x[1] == rn])
+                        for rn in ("Protoss", "Terran", "Zerg")
+                        if any(x[1] == rn for x in sc_rows)
+                    }
+                    mt_pts = []
+                    for x in sc_rows:
+                        if x[7] is None or x[10] is None:
+                            continue
+                        mt_pts.append({
+                            "id": str(x[0] or ""),
+                            "race": str(x[1] or ""),
+                            "matchup": str(x[2] or ""),
+                            "opp": str(x[3] or "Opponent"),
+                            "result": x[4] if x[4] in ("win", "loss") else "tie",
+                            "trade_ratio": round(min(9.99, float(x[7])), 2),
+                            "min_ratio": round(float(x[10]), 2),
+                            "our_min": int(round(float(x[8] or 0))),
+                            "opp_min": int(round(float(x[9] or 0))),
+                            "gas_ratio": round(float(x[13]), 2) if x[13] is not None else None,
+                            "upg_lv": int(x[14]) if x[14] is not None else None,
+                            "opp_upg_lv": int(x[15]) if x[15] is not None else None,
+                            "t1": round(float(x[16]), 1) if x[16] is not None else None,
+                            "t2": round(float(x[17]), 1) if x[17] is not None else None,
+                            "t3": round(float(x[18]), 1) if x[18] is not None else None,
+                        })
+                    out["pro_curves"]["mine_trade_summary"] = {
+                        "overall": _mt_slice(sc_rows),
+                        "by_race": mt_by_race,
+                    }
+                    out["pro_curves"]["mine_trade_scatter"] = mt_pts
+
         # APM per race from match_cmd_summary
         for rname, avg_apm, max_apm in cur.execute(
             """
@@ -1167,7 +1328,7 @@ def load_rich_report_telemetry(
                  OR m.run_id LIKE '%iter50_w3_full%' OR m.run_id LIKE '%iter51_ship9_full%'
                  OR m.run_id LIKE '%iter57_ship10_full%' OR m.run_id LIKE '%iter58b_ship11_full%'
                  OR m.run_id LIKE '%iter59c_ship11_full%' OR m.run_id LIKE '%iter60b_ship12_full%'
-                 OR m.run_id LIKE '%iter61c_ship13_full%')
+                 OR m.run_id LIKE '%iter61c_ship13_full%' OR m.run_id LIKE '%iter62c_ship14_full%')
         """
 
         # Per-matchup Local stats (All 26 external opponents)
@@ -2532,10 +2693,16 @@ def render_tactics_explorer_section(
         else ""
     )
     l60_arena_note = (
-        "Loop 60 updates lifted Ability Mastery to <strong>22–10</strong> (Protoss <strong>9–0</strong> sweep) "
-        "and restored Non-Combat destructible-rock and mineral-walk shortcuts to <strong>62.0/100</strong> average. "
-        if int(a3.get("loop_num") or 0) >= 60
-        else ""
+        "Loop 62 updates lifted Ability Mastery to a new high of <strong>23–9</strong> "
+        "(28 of 32 spells verified in-engine; Protoss <strong>9–0</strong> sweep, Zerg <strong>8–2</strong>) "
+        "alongside <strong>62.0/100</strong> average on Non-Combat destructible-rock and mineral-walk drills. "
+        if int(a3.get("loop_num") or 0) >= 62
+        else (
+            "Loop 60 updates lifted Ability Mastery to <strong>22–10</strong> (Protoss <strong>9–0</strong> sweep) "
+            "and restored Non-Combat destructible-rock and mineral-walk shortcuts to <strong>62.0/100</strong> average. "
+            if int(a3.get("loop_num") or 0) >= 60
+            else ""
+        )
     )
 
     return f"""
@@ -2860,11 +3027,13 @@ def render_matchup_evaluation_section(
     cohort_strip_html = ""
     if has_cb:
         co = cb["cohorts"]
+        def _min_tag(c_obj: Dict[str, Any]) -> str:
+            return f" · {c_obj['min_ratio']:.2f}× min" if c_obj.get("min_ratio") is not None else ""
         chips = [
-            ("All 84 Local", f"{_fmt_wlt(co['all'])}", f"{co['all']['wr']:.1f}% wins · {co['all']['tr']:.2f}× trade"),
-            ("78 External", f"{_fmt_wlt(co['ext'])}", f"{co['ext']['wr']:.1f}% wins · {co['ext']['nl']:.1f}% win+tie · {co['ext']['tr']:.2f}×"),
-            ("14 Core Bots", f"{_fmt_wlt(co['core'])}", f"{co['core']['wr']:.1f}% wins · {co['core']['nl']:.1f}% win+tie · {co['core']['tr']:.2f}×"),
-            ("12 Held-Out Bots", f"{_fmt_wlt(co['unseen'])}", f"{co['unseen']['wr']:.1f}% wins · {co['unseen']['nl']:.1f}% win+tie · {co['unseen']['tr']:.2f}×"),
+            ("All 84 Local", f"{_fmt_wlt(co['all'])}", f"{co['all']['wr']:.1f}% wins · {co['all']['tr']:.2f}× trade{_min_tag(co['all'])}"),
+            ("78 External", f"{_fmt_wlt(co['ext'])}", f"{co['ext']['wr']:.1f}% wins · {co['ext']['tr']:.2f}× trade{_min_tag(co['ext'])}"),
+            ("14 Core Bots", f"{_fmt_wlt(co['core'])}", f"{co['core']['wr']:.1f}% wins · {co['core']['tr']:.2f}× trade{_min_tag(co['core'])}"),
+            ("12 Held-Out Bots", f"{_fmt_wlt(co['unseen'])}", f"{co['unseen']['wr']:.1f}% wins · {co['unseen']['tr']:.2f}× trade{_min_tag(co['unseen'])}"),
         ]
         if co["h2h"]["n"]:
             chips.append(
@@ -2887,6 +3056,7 @@ def render_matchup_evaluation_section(
         for rname in ("Protoss", "Terran", "Zerg"):
             rd = cb["by_race"][rname]
             ex, cr, un = rd["ext"], rd["core"], rd["unseen"]
+            min_cell = f'{ex["min_ratio"]:.2f}×' if ex.get("min_ratio") is not None else "--"
             r_rows.append(
                 f"<tr>"
                 f"<td><strong>{rname}</strong></td>"
@@ -2895,12 +3065,27 @@ def render_matchup_evaluation_section(
                 f'<td style="text-align:right">{cr["wr"]:.1f}% <span class="t-muted">({_fmt_wlt(cr)})</span></td>'
                 f'<td style="text-align:right">{un["wr"]:.1f}% <span class="t-muted">({_fmt_wlt(un)})</span></td>'
                 f'<td style="text-align:right">{ex["tr"]:.2f}×</td>'
+                f'<td style="text-align:right">{min_cell}</td>'
                 f'<td style="text-align:right">{ex["sb"]:.1f}%</td>'
                 f"</tr>"
             )
+        ext_ov = cb["cohorts"]["ext"]
+        sec_bits = []
+        if ext_ov.get("gas_ratio") is not None:
+            sec_bits.append(f"Gas collected {ext_ov['gas_ratio']:.2f}× ({ext_ov.get('our_gas_avg', 0):,.0f} vs. {ext_ov.get('opp_gas_avg', 0):,.0f} avg)")
+        if ext_ov.get("our_upg_lv") is not None and ext_ov.get("opp_upg_lv") is not None:
+            sec_bits.append(f"combat upgrade levels {ext_ov['our_upg_lv']:.1f} vs. opponent {ext_ov['opp_upg_lv']:.1f}")
+        if ext_ov.get("t1_pct") is not None:
+            sec_bits.append(f"unit tier mix {ext_ov['t1_pct']:.0f}% T1 / {ext_ov['t2_pct']:.0f}% T2 / {ext_ov['t3_pct']:.0f}% T3")
+        sec_diag_p = (
+            f'\n  <p class="t-muted" style="margin:-0.9rem 0 1.2rem;font-size:0.84rem;">'
+            f'Secondary diagnostics across all 78 external games: {"; ".join(sec_bits)}.</p>'
+            if sec_bits
+            else ""
+        )
         race_table_html = f"""
   <h3 style="margin:1.25rem 0 0.45rem;font-size:1.08rem;">Current Build by Race ({html.escape(rel_in_parens)})</h3>
-  <div class="table-wrap" style="margin-bottom:1.35rem;">
+  <div class="table-wrap table-compact" style="margin-bottom:1.35rem;">
     <table>
       <thead>
         <tr>
@@ -2909,13 +3094,14 @@ def render_matchup_evaluation_section(
           <th style="text-align:right">Win + Tie %</th>
           <th style="text-align:right">14 Core Bots</th>
           <th style="text-align:right">12 Held-Out Bots</th>
-          <th style="text-align:right">Local Trade</th>
+          <th style="text-align:right">Trade Ratio</th>
+          <th style="text-align:right">Minerals Collected</th>
           <th style="text-align:right">Supply-Blocked</th>
         </tr>
       </thead>
       <tbody>{"".join(r_rows)}</tbody>
     </table>
-  </div>
+  </div>{sec_diag_p}
 """
 
     # Interactive 9-matchup pills (show current local WR% right on each pill!)
@@ -3096,7 +3282,7 @@ def render_matchup_evaluation_section(
                  alt="Protoss base layouts at 4:10 comparing Grandmaster pros and Mothman"
                  data-lightbox-src="./media/pro_vs_mothman_protoss.png"
                  data-lightbox-alt="Protoss base layouts at 4:10 comparing Grandmaster pros and Mothman" />
-            <figcaption>Grandmaster reference maps alongside Mothman's 4:10 baseline layouts. On Release #13 (Build 61C), Protoss Pylon clumping holds at 0.0% (down from 3.9% on Release #10, where natural power placement reached 100.0% and spacing averaged 15.3 tiles).</figcaption>
+            <figcaption>Grandmaster reference maps alongside Mothman's 4:10 baseline layouts. On Release #14 (Build 62C), Protoss Pylon clumping holds at 0.0% (15.1-tile average spacing, 92.0% natural-base power placement, and zero fragile tech structures in walls).</figcaption>
           </figure>
         </div>
         <div class="pro-bp-slot" data-pro-bp-panel="Terran" style="display:none;">
@@ -3134,7 +3320,7 @@ def render_matchup_evaluation_section(
           <tbody>{"".join(pro_bp_rows)}</tbody>
         </table>
       </div>
-      <p class="table-note" style="margin-top:0.45rem;">Reference audit table compares Grandmaster Pros against our pre-redesign 4:10 baseline (spacing in tiles, walls and power in % of games, static defense in average structures). After the layout redesign, Release #10 (Build 57) cut Protoss Pylon clumping to 3.9% (15.3-tile spacing) with 93.3% natural-base supply placement (100.0% Protoss, 86.4% Terran), and Releases #11 through #13 held 0.0% Pylon clumping.</p>
+      <p class="table-note" style="margin-top:0.45rem;">Reference audit table compares Grandmaster Pros against our pre-redesign 4:10 baseline (spacing in tiles, walls and power in % of games, static defense in average structures). After the layout redesign, Release #10 (Build 57) cut Protoss Pylon clumping to 3.9% (15.3-tile spacing) with 93.3% natural-base supply placement (100.0% Protoss, 86.4% Terran), and Releases #11 through #14 held 0.0% Pylon clumping.</p>
     </div>
 """
 
@@ -3349,7 +3535,32 @@ def render_matchup_evaluation_section(
             else ""
         )
         run_id_low = str(pro_curves.get("run_id") or "").lower()
-        if epm_m is not None and epm_p is not None and spm_m is not None and spm_p is not None and "61c" in run_id_low:
+        if epm_m is not None and epm_p is not None and spm_m is not None and spm_p is not None and "62c" in run_id_low:
+            col_min_m = (cv_s_all.get("collection_minerals") or {}).get("mothman", {}).get("med")
+            col_min_str = f"{col_min_m:,.1f}" if col_min_m is not None else "1,082.6"
+            apm_m_str = f"{apm_m:.1f}" if apm_m is not None else "292.8"
+            epm_rel = "topped" if epm_m >= epm_p else "tracked right near"
+            r_mech_para = (
+                f'\n    <p class="prose-tight">'
+                f"On {html.escape(rel_lbl)}, Mothman completed its three-phase patch-resilience refactor with unified spell execution "
+                f"and an extracted macro-ability policy layer (zero crashes and zero rejected commands). Mechanics and mineral "
+                f"income hit new all-time highs: median APM reached {apm_m_str} (Zerg rose from 290.9 to 309.6), median EPM "
+                f"{epm_rel} the Grandmaster benchmark ({epm_m:.1f} vs. Pro {epm_p:.1f}), median SPM reached {spm_m:.1f} "
+                f"(+4.1 above Pro {spm_p:.1f}), and median mineral collection climbed to {col_min_str} per minute. At minute 9, "
+                f"mineral income reached 1,959 per minute (224 ahead of local opponents' 1,735; Terran jumped +448 to 1,959), "
+                f"gas income reached 627 per minute (ahead of opponents' 571), and army value climbed over Release #13 in both "
+                f"minerals (1,525 to 1,638) and gas (575 to 650; Terran up +250 to 800)."
+                f'</p>\n    <p class="prose-tight">'
+                f"One-base lockouts fell to zero across all 84 local matches. Protoss natural Nexus adoption rose from 88.5% to "
+                f"96.2% (1:39), Terran natural Command Center hit 1:34 (11 seconds faster than Pro 1:45) with Stimpack at 5:13 "
+                f"and +2/+2 Infantry adoption at 26.9%, and Zerg natural Hatchery hit 0:53 (one second off Pro 0:52) with third "
+                f"Hatchery at 4:59 and Baneling Nest at 3:56. Terran matched its external high (11–14–1, 0.94× trade, all Pro "
+                f"timing checks clear), Protoss improved to 9–15–2 (PvT 5–3–1 at 1.33× trade), Core-14 held 52.4% win+tie "
+                f"(19–20–3), and held-out Unseen-12 recorded our first series win over AxeFighter (2–1) alongside series wins "
+                f"over Mulebot (2–1), CryptBot (3–0), and onlyfans (2–1)."
+                f"</p>"
+            )
+        elif epm_m is not None and epm_p is not None and spm_m is not None and spm_p is not None and "61c" in run_id_low:
             r_mech_para = (
                 f'\n    <p class="prose-tight">'
                 f"On {html.escape(rel_lbl)}, every economy and army curve hit new all-time highs across all three races, "
@@ -3401,55 +3612,14 @@ def render_matchup_evaluation_section(
             r_mech_para = ""
         pro_curves_section = f"""
   <div class="eval-subsection" id="performance-curves">
-    <h3>2.4 Performance Curves and Timings vs. Opponents and Pros</h3>
+    <h3>2.4 Pro Comparison Observatory (22 Graphs)</h3>
     <p class="prose-tight">
-      Time-series comparison across all eight telemetry tracks from minute 0 to 15 (standard Faster game clock)
-      comparing {html.escape(build_lbl)} ({cv_m_g} external games) against its exact local opponents ({cv_o_g} games) and
-      Grandmaster LotV replays ({cv_p_g} player-games; {cv_p_ge} with full APM/EPM/SPM event streams).{apm_note}
+      Five interactive views compare {html.escape(build_lbl)} ({cv_m_g} external games) against its exact local opponents ({cv_o_g} games) and
+      Grandmaster LotV replays ({cv_p_g} player-games; {cv_p_ge} with full event streams) across Mine × Trade outcomes, combat positioning,
+      late-game expansions and production, unit composition and upgrades, and spell and macro-ability efficiency.{apm_note}
     </p>{r_mech_para}
     <div class="interactive-panel site-curves-panel">
-      <div class="site-curves-toolbar">
-        <div class="arena-filter-group" role="group" aria-label="Filter curves by race">
-          <button type="button" class="cat-pill is-active" data-sc-race="all">All Races</button>
-          <button type="button" class="cat-pill" data-sc-race="Protoss">Protoss</button>
-          <button type="button" class="cat-pill" data-sc-race="Terran">Terran</button>
-          <button type="button" class="cat-pill" data-sc-race="Zerg">Zerg</button>
-        </div>
-        <div class="arena-filter-group" role="group" aria-label="APM and EPM Y-axis scale">
-          <button type="button" class="cat-pill is-active" data-sc-scale="log">Log (All 3)</button>
-          <button type="button" class="cat-pill" data-sc-scale="linear">Linear (vs. Pro)</button>
-        </div>
-      </div>
-      <div class="site-curves-legend">
-        <span class="sc-leg-item"><span class="sc-leg-line m"></span>Mothman <span class="t-muted" id="sc-leg-m">({cv_m_g}g)</span></span>
-        <span class="sc-leg-item"><span class="sc-leg-line p"></span>Pro GM <span class="t-muted" id="sc-leg-p">({cv_p_g}g)</span></span>
-        <span class="sc-leg-item"><span class="sc-leg-line o"></span>Opponents <span class="t-muted" id="sc-leg-o">({cv_o_g}g)</span></span>
-        <span class="t-muted sc-leg-band">Shaded bands show 25th–75th percentile range (IQR) · Hover any chart for exact values</span>
-      </div>
-      <div class="site-curves-grid" id="site-curves-grid"></div>
-      <div class="site-timings-box">
-        <div class="site-timings-head">
-          <div>
-            <div class="mini-kicker" style="margin:0;">Chart 8 · Upgrade and Structure Timings</div>
-            <div class="site-timings-sub">Horizontal 25th–75th percentile whiskers with median dot · Right column shows Δ vs. Pro median and Mothman / Pro adoption %</div>
-          </div>
-          <div class="arena-filter-group" role="group" aria-label="Select timings race">
-            <button type="button" class="cat-pill is-active" data-st-race="Protoss">Protoss</button>
-            <button type="button" class="cat-pill" data-st-race="Terran">Terran</button>
-            <button type="button" class="cat-pill" data-st-race="Zerg">Zerg</button>
-          </div>
-        </div>
-        <div class="site-curves-toolbar" style="margin:0.5rem 0 0.65rem;padding:0;border:none;">
-          <div class="arena-filter-group" role="group" aria-label="Filter milestone kind">
-            <button type="button" class="cat-pill is-active" data-st-kind="all">All Milestones</button>
-            <button type="button" class="cat-pill" data-st-kind="expansion">Expansions</button>
-            <button type="button" class="cat-pill" data-st-kind="structure">Structures</button>
-            <button type="button" class="cat-pill" data-st-kind="upgrade">Upgrades</button>
-          </div>
-          <span class="t-muted" style="font-size:0.78rem;">Structures record start time · Upgrades and morphs record completion time</span>
-        </div>
-        <div class="site-timings-wrap" id="site-timings-wrap"></div>
-      </div>
+      <div id="site-observatory-mount"></div>
     </div>
     <div id="site-curve-tooltip" class="site-curve-tooltip" style="display:none;" role="status" aria-live="polite"></div>
   </div>
@@ -3507,10 +3677,10 @@ def render_matchup_evaluation_section(
         else "Small ground squads still walk into sieged Tank deadzones or kite without firing in tough games."
     )
     open_gaps = [
-        f"<strong>Protoss natural expansion reliability and early-rush spend ({html.escape(weak_str)}):</strong> Protoss accounted for five of our eight steepest losses on {html.escape(rel_lbl)}. Contested-natural Nexus escrow resets left Protoss stuck on one base or expanding late in tough PvT and PvP games, and early Zergling floods still left unspent minerals when Gateways were busy or unpowered.",
-        f"<strong>Siege-line entry and zero-damage retreats ({an_cur.get('siege_range_zero_dps_loss', 0)} zero-damage siege losses, {an_cur.get('zero_fire_retreat', 0)} zero-fire retreats, {an_cur.get('drip_feed_collapse', 0)} drip-feed):</strong> {rot_gap_note}",
-        f"<strong>ZvZ Roach-mass composition balance:</strong> Against pure-Roach timings in ZvZ, Zerg occasionally over-invested in Zerglings and static defense instead of matching Roach and Ravager production.",
-        f"<strong>Late-game expansion and gas scaling:</strong> Minute-12 army value now exceeds local opponents in both minerals (2,438 vs. 2,313) and gas (950 vs. 663), while Terran third-base adoption (23% at 6:32 vs. Pro 77% at 5:02) and overall gas income (237 vs. Pro 448 per minute) still leave headroom.",
+        f"<strong>Early cheeses, air harass, and stealth defense ({html.escape(weak_str)}):</strong> Across local benchmarks and live Division 6–7 ladder games, early 1-base Marauder rushes, mass Reapers under 4:30, mass Phoenixes in PvP, mass Banshees in ZvT, and early Dark Templars caused our steepest worker losses ({an_cur.get('zero_kill_collapse_loss', 0)} zero-kill collapses and {an_cur.get('cloaked_unit_damage_loss', 0)} cloaked-unit losses on {html.escape(rel_lbl)}).",
+        f"<strong>Capital-air dive commits and siege-line entry ({an_cur.get('siege_range_zero_dps_loss', 0)} zero-damage siege losses, {an_cur.get('zero_fire_retreat', 0)} zero-fire retreats, {an_cur.get('drip_feed_collapse', 0)} drip-feed):</strong> Against mass Tempests, Vikings and Corruptors hovered at weapon-range edge instead of committing together. {rot_gap_note}",
+        f"<strong>Early Zerg worker tempo and ZvZ macro volume:</strong> Zerg active workers at 4:00 averaged 29.0 (six behind the Grandmaster median of 35.0) due to early defensive Zerglings in peaceful openings, which slowed mid-game Roach and Hydralisk scaling against Division 6–7 Zerg opponents and Swarm Host pressure.",
+        f"<strong>Early gas over-saturation and late-game expansion cadence:</strong> {an_cur.get('gas_rich_min_starved', 0)} games hit mineral starvation alongside surplus gas during two-base transitions, while Terran third-base adoption (23% at 7:30 vs. Pro 77% at 5:02) and overall median gas income (225 vs. Pro 448 per minute) still leave late-game headroom.",
     ]
     open_gaps_html = "".join(f"<li>{item}</li>" for item in open_gaps)
 
@@ -4310,9 +4480,308 @@ INTERACTIVE_SECTIONS_CSS = """
 .sct-lbl { display: inline-flex; align-items: center; gap: 0.36rem; font-family: var(--sans); }
 .sct-sub { font-size: 0.7rem; opacity: 0.76; margin-top: 0.2rem; }
 
+/* 5-Tab 22-Graph Pro Comparison Observatory (Warm Editorial Light Theme) */
+.obs-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.obs-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.35rem;
+}
+.obs-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.84rem;
+  font-weight: 500;
+  padding: 0.42rem 0.78rem;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+.obs-tab:hover { background: var(--surface); color: var(--ink); }
+.obs-tab.is-active {
+  background: rgba(196, 99, 62, 0.12);
+  color: #A84A27;
+  border-color: rgba(196, 99, 62, 0.36);
+  font-weight: 600;
+}
+.obs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.45rem 0.85rem;
+}
+.obs-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.32rem;
+}
+.obs-pill {
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  color: var(--ink-2);
+  border-radius: 999px;
+  padding: 0.22rem 0.68rem;
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.obs-pill:hover { border-color: var(--accent); color: var(--ink); }
+.obs-pill.is-active {
+  background: var(--ink);
+  color: #FAF9F5;
+  border-color: var(--ink);
+  font-weight: 600;
+}
+.obs-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 1.05rem;
+  padding: 0.5rem 0.75rem;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.81rem;
+  color: var(--ink-2);
+}
+.obs-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+.obs-line {
+  display: inline-block;
+  width: 18px;
+  height: 2.6px;
+  border-radius: 2px;
+}
+.obs-line.obs-dash {
+  height: 0;
+  background: transparent !important;
+  border-top: 2.2px dashed;
+}
+.obs-leg-note {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.76rem;
+  white-space: normal !important;
+}
+.obs-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+.obs-kpi {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.62rem 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.obs-kpi-primary {
+  border-color: rgba(196, 99, 62, 0.42);
+  background: linear-gradient(180deg, rgba(196, 99, 62, 0.06), #FFFFFF);
+}
+.obs-kpi-lbl {
+  font-size: 0.63rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obs-kpi strong {
+  font-family: var(--mono);
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.obs-kpi-sub {
+  font-size: 0.73rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.obs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.obs-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.82rem 0.95rem 0.72rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  overflow: hidden;
+}
+.obs-card.obs-span-2 { grid-column: 1 / -1; }
+.obs-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+}
+.obs-card-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.obs-card-sub {
+  font-size: 0.79rem;
+  color: var(--muted);
+  margin-top: 0.12rem;
+  line-height: 1.38;
+}
+.obs-badge {
+  font-family: var(--mono);
+  font-size: 0.73rem;
+  padding: 0.12rem 0.48rem;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.obs-meds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  color: var(--ink-2);
+}
+.obs-meds > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  white-space: nowrap;
+}
+.obs-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.obs-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+  user-select: none;
+  touch-action: pan-y;
+}
+.obs-split-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+.obs-mini-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  margin-bottom: 0.25rem;
+}
+.obs-empty {
+  padding: 1.2rem 0.75rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+.obs-missing-box {
+  margin-top: 0.55rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 7px;
+  background: rgba(180, 60, 46, 0.06);
+  border: 1px solid rgba(180, 60, 46, 0.22);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.79rem;
+}
+.obs-missing-lbl {
+  font-weight: 600;
+  color: #B43C2E;
+  margin-right: 0.2rem;
+}
+.obs-missing-pill {
+  display: inline-block;
+  padding: 0.12rem 0.5rem;
+  border-radius: 999px;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.73rem;
+}
+.obs-creep-strip {
+  margin-top: 0.45rem;
+  padding: 0.62rem 0.8rem;
+  border-radius: 7px;
+  background: var(--surface);
+  border-left: 3px solid #B43C2E;
+  font-size: 0.83rem;
+  color: var(--ink);
+}
+.obs-tip-head {
+  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  padding-bottom: 0.22rem;
+  margin-bottom: 0.28rem;
+}
+.obs-tip-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+}
+.obs-tip-row > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+  font-family: var(--sans);
+}
+.obs-tip-sub {
+  font-size: 0.7rem;
+  opacity: 0.76;
+  margin-top: 0.2rem;
+}
+
 @media (max-width: 900px) {
-  .subsys-grid, .charts-pair, .case-grid, .case-split, .mu-two-col, .explain-grid, .hist-pair, .site-curves-grid { grid-template-columns: minmax(0, 1fr); }
-  .site-curve-card.site-curve-span-2 { grid-column: auto; }
+  .subsys-grid, .charts-pair, .case-grid, .case-split, .mu-two-col, .explain-grid, .hist-pair, .site-curves-grid, .obs-grid, .obs-split-2 { grid-template-columns: minmax(0, 1fr); }
+  .site-curve-card.site-curve-span-2, .obs-card.obs-span-2 { grid-column: auto; }
+  .obs-kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 699px) {
   .interactive-panel { padding: 0.9rem 0.75rem; }
@@ -4320,6 +4789,8 @@ INTERACTIVE_SECTIONS_CSS = """
   .diagram-stage { padding: 0.5rem 0.35rem; }
   .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cohort-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .obs-tab { font-size: 0.78rem; padding: 0.36rem 0.58rem; }
+  .obs-leg-note { margin-left: 0; }
 }
 """
 
@@ -4718,370 +5189,25 @@ INTERACTIVE_SECTIONS_JS = """
     });
   });
 
-  // 6. Performance Curves & Timings vs. Opponents & Pros (All 8 Interactive Charts)
+  // 6. Pro Comparison Observatory (5 Tabs, 22 Interactive Graphs)
   const proCurves = window.__PRO_CURVES__;
-  const scGrid = document.getElementById('site-curves-grid');
-  const stWrap = document.getElementById('site-timings-wrap');
+  const obsMount = document.getElementById('site-observatory-mount');
   const scTip = document.getElementById('site-curve-tooltip');
-  if (proCurves && proCurves.curves && scGrid && stWrap) {
-    const SC_SPECS = [
-      { key: 'apm', title: 'Actions Per Minute (APM)', scaleToggle: true, showBands: true },
-      { key: 'epm', title: 'Effective Actions (EPM)', scaleToggle: true, showBands: true },
-      { key: 'spm', title: 'Screens Per Minute (SPM)', scaleToggle: false, showBands: true, spmNote: true, spanFull: true },
-      { key: 'army_minerals', title: 'Army Value (Minerals)', scaleToggle: false, showBands: true, showPeak: true },
-      { key: 'army_gas', title: 'Army Value (Gas)', scaleToggle: false, showBands: true, showPeak: true },
-      { key: 'collection_minerals', title: 'Mineral Income (per min)', scaleToggle: false, showBands: true, showPeak: true },
-      { key: 'collection_gas', title: 'Gas Income (per min)', scaleToggle: false, showBands: true, showPeak: true }
-    ];
-    let scRace = 'all';
-    let scScale = 'log';
-    let stRace = 'Protoss';
-    let stKind = 'all';
-
-    function scFmt(v) {
-      if (v == null || isNaN(Number(v))) return '—';
-      const n = Number(v);
-      if (Math.abs(n) >= 10000) return (n / 1000).toFixed(1) + 'k';
-      if (Math.abs(n) >= 1000) return (n / 1000).toFixed(2).replace(/\\.00$/, '') + 'k';
-      if (Math.abs(n) >= 100) return String(Math.round(n));
-      return n % 1 === 0 ? String(n) : n.toFixed(1);
-    }
-    function scMmss(sec) {
-      if (sec == null || isNaN(Number(sec))) return '—';
-      const s = Math.max(0, Math.round(Number(sec)));
-      const m = Math.floor(s / 60);
-      const r = s % 60;
-      return m + ':' + (r < 10 ? '0' : '') + r;
-    }
-    function scSignedDelta(mSec, pSec) {
-      if (mSec == null || pSec == null) return '';
-      const d = Math.round(Number(mSec) - Number(pSec));
-      const sign = d >= 0 ? '+' : '-';
-      const ad = Math.abs(d);
-      const m = Math.floor(ad / 60);
-      const r = ad % 60;
-      return sign + m + ':' + (r < 10 ? '0' : '') + r;
-    }
-    function scNiceMax(rawMax) {
-      const v = Math.max(10, Number(rawMax) || 10);
-      const mag = Math.pow(10, Math.floor(Math.log10(v)));
-      const norm = v / mag;
-      const steps = [1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
-      for (let i = 0; i < steps.length; i++) {
-        if (norm <= steps[i]) return steps[i] * mag;
-      }
-      return 10 * mag;
-    }
-    function showScTip(evt, htmlTxt) {
-      if (!scTip) return;
-      scTip.innerHTML = htmlTxt;
-      scTip.style.display = 'block';
-      const pad = 12;
-      const rect = scTip.getBoundingClientRect();
-      let x = evt.clientX + pad;
-      let y = evt.clientY - rect.height / 2;
-      if (x + rect.width > window.innerWidth - 8) x = evt.clientX - rect.width - pad;
-      if (x < 8) x = 8;
-      if (y < 8) y = 8;
-      if (y + rect.height > window.innerHeight - 8) y = window.innerHeight - rect.height - 8;
-      scTip.style.left = x + 'px';
-      scTip.style.top = y + 'px';
-    }
-    function hideScTip() {
-      if (scTip) scTip.style.display = 'none';
-    }
-
-    function computeYDomain(spec, mPts, pPts, oPts, useLog, zoomPro) {
-      if (useLog) {
-        let maxRaw = 200;
-        [mPts, pPts, oPts].forEach(function(arr) {
-          arr.forEach(function(pt) { if (pt.n >= 2 && pt.med != null) maxRaw = Math.max(maxRaw, pt.med); });
-        });
-        const logCap = Math.max(1000, Math.pow(10, Math.ceil(Math.log10(maxRaw + 1))));
-        const cand = logCap >= 50000 ? [0, 10, 100, 1000, 10000, 50000] : [0, 10, 50, 200, 1000, 5000, 20000];
-        return { yMax: Math.log10(logCap + 1), ticks: cand.filter(function(v) { return v <= logCap; }) };
-      }
-      let maxRaw = 10;
-      (zoomPro ? [mPts, pPts] : [mPts, pPts, oPts]).forEach(function(arr, idx) {
-        arr.forEach(function(pt) {
-          if (pt.n < 2) return;
-          if (pt.med != null) maxRaw = Math.max(maxRaw, pt.med);
-          if (spec.showBands && idx < 2 && pt.p75 != null) maxRaw = Math.max(maxRaw, pt.p75);
-        });
-      });
-      const yMax = scNiceMax(maxRaw * 1.08);
-      return { yMax: yMax, ticks: [0, 0.25, 0.5, 0.75, 1].map(function(f) { return Math.round(yMax * f); }) };
-    }
-
-    function renderSiteCurves() {
-      const seg = proCurves.curves[scRace] ? scRace : 'all';
-      const segC = proCurves.curves[seg] || {};
-      const segS = (proCurves.summary || {})[seg] || {};
-      const buckets = proCurves.buckets_sec || [];
-      const maxT = buckets.length ? buckets[buckets.length - 1] : 900;
-      const co = proCurves.cohorts || {};
-      const mN = seg === 'all' ? (co.mothman && co.mothman.games || 0) : ((co.mothman && co.mothman.by_race && co.mothman.by_race[seg]) || 0);
-      const pN = seg === 'all' ? (co.pros && co.pros.games || 0) : ((co.pros && co.pros.by_race && co.pros.by_race[seg]) || 0);
-      const oN = seg === 'all' ? (co.opponents && co.opponents.games || 0) : ((co.opponents && co.opponents.by_race && co.opponents.by_race[seg]) || 0);
-      const lm = document.getElementById('sc-leg-m');
-      const lp = document.getElementById('sc-leg-p');
-      const lo = document.getElementById('sc-leg-o');
-      if (lm) lm.textContent = '(' + mN + 'g)';
-      if (lp) lp.textContent = '(' + pN + 'g)';
-      if (lo) lo.textContent = '(' + oN + 'g)';
-
-      scGrid.innerHTML = SC_SPECS.map(function(spec) {
-        const mc = segC[spec.key] || {};
-        const ms = segS[spec.key] || {};
-        const mPts = mc.mothman || [], pPts = mc.pros || [], oPts = mc.opponents || [];
-        const useLog = !!(spec.scaleToggle && scScale === 'log');
-        const zoomPro = !!(spec.scaleToggle && scScale === 'linear');
-        const W = spec.spanFull ? 760 : 420;
-        const H = spec.spanFull ? 176 : 210;
-        const PL = 46, PR = 14, PT = 14, PB = 26;
-        const CW = W - PL - PR, CH = H - PT - PB;
-        const dom = computeYDomain(spec, mPts, pPts, oPts, useLog, zoomPro);
-        const xOf = function(t) { return PL + (Math.max(0, Math.min(maxT, t)) / maxT) * CW; };
-        const yOf = function(val) {
-          const v = Math.max(0, Number(val) || 0);
-          const frac = useLog ? Math.log10(v + 1) / dom.yMax : Math.min(1.06, v / dom.yMax);
-          return PT + CH - Math.max(0, Math.min(1.04, frac)) * CH;
-        };
-        const makeLine = function(pts) {
-          const valid = pts.filter(function(pt) { return pt.n >= 2 && pt.med != null; });
-          return valid.map(function(pt, i) { return (i === 0 ? 'M' : 'L') + xOf(pt.t).toFixed(1) + ',' + yOf(pt.med).toFixed(1); }).join(' ');
-        };
-        const makeBand = function(pts) {
-          const valid = pts.filter(function(pt) { return pt.n >= 3 && pt.p25 != null && pt.p75 != null; });
-          if (valid.length < 2) return '';
-          const top = valid.map(function(pt) { return xOf(pt.t).toFixed(1) + ',' + yOf(pt.p75).toFixed(1); }).join(' ');
-          const bot = valid.slice().reverse().map(function(pt) { return xOf(pt.t).toFixed(1) + ',' + yOf(pt.p25).toFixed(1); }).join(' ');
-          return top + ' ' + bot;
-        };
-        let grid = '';
-        dom.ticks.forEach(function(tv) {
-          const yy = yOf(tv);
-          grid += '<line x1="' + PL + '" y1="' + yy.toFixed(1) + '" x2="' + (W - PR) + '" y2="' + yy.toFixed(1) + '" stroke="#E7E3D8" stroke-width="1" />';
-          grid += '<text x="' + (PL - 6) + '" y="' + (yy + 3.5).toFixed(1) + '" text-anchor="end" fill="#7A7870" font-size="10" font-family="var(--mono)">' + scFmt(tv) + '</text>';
-        });
-        [0, 180, 360, 540, 720, 900].forEach(function(sec) {
-          const xx = xOf(sec);
-          grid += '<line x1="' + xx.toFixed(1) + '" y1="' + PT + '" x2="' + xx.toFixed(1) + '" y2="' + (H - PB) + '" stroke="#EFECE3" stroke-width="0.8" stroke-dasharray="2 3" />';
-          grid += '<text x="' + xx.toFixed(1) + '" y="' + (H - PB + 15) + '" text-anchor="middle" fill="#5E5D59" font-size="10" font-family="var(--mono)">' + (sec / 60) + 'm</text>';
-        });
-        const pBand = (spec.showBands && !useLog) ? makeBand(pPts) : '';
-        const mBand = (spec.showBands && !useLog) ? makeBand(mPts) : '';
-        const oPath = zoomPro ? '' : makeLine(oPts);
-        const pPath = makeLine(pPts);
-        const mPath = makeLine(mPts);
-        const sM = ms.mothman || {}, sP = ms.pros || {}, sO = ms.opponents || {};
-        const badgeTxt = useLog
-          ? 'Log scale'
-          : zoomPro
-            ? ('Linear · Opp ' + scFmt(sO.med) + ' off-scale')
-            : spec.spmNote
-              ? 'Linear · Opp 0.0'
-              : (spec.showPeak ? ('Peak ' + scFmt(sM.peak) + ' / Pro ' + scFmt(sP.peak)) : 'Linear');
-        return (
-          '<article class="site-curve-card' + (spec.spanFull ? ' site-curve-span-2' : '') + '">' +
-            '<div class="site-curve-head">' +
-              '<span class="site-curve-title">' + esc(spec.title) + '</span>' +
-              '<span class="site-curve-badge">' + esc(badgeTxt) + '</span>' +
-            '</div>' +
-            '<div class="site-curve-meds">' +
-              '<span class="sc-mpill"><span class="sc-dot m"></span>Mothman ' + scFmt(sM.med) + '</span>' +
-              '<span class="sc-mpill"><span class="sc-dot p"></span>Pro ' + scFmt(sP.med) + '</span>' +
-              '<span class="sc-mpill"><span class="sc-dot o"></span>Opp ' + scFmt(sO.med) + '</span>' +
-            '</div>' +
-            '<svg viewBox="0 0 ' + W + ' ' + H + '" class="site-curve-svg" data-sc-svg="' + esc(spec.key) + '" role="img" aria-label="' + esc(spec.title) + '">' +
-              grid +
-              (pBand ? '<polygon points="' + pBand + '" fill="#3B6E9C" opacity="0.10" />' : '') +
-              (mBand ? '<polygon points="' + mBand + '" fill="#C4633E" opacity="0.15" />' : '') +
-              (oPath ? '<path d="' + oPath + '" fill="none" stroke="#7A5A8E" stroke-width="1.8" opacity="0.88" stroke-linejoin="round" />' : '') +
-              (pPath ? '<path d="' + pPath + '" fill="none" stroke="#3B6E9C" stroke-width="2.1" stroke-dasharray="5 3" stroke-linejoin="round" />' : '') +
-              (mPath ? '<path d="' + mPath + '" fill="none" stroke="#C4633E" stroke-width="2.6" stroke-linejoin="round" />' : '') +
-              '<line class="sc-cross" x1="0" y1="' + PT + '" x2="0" y2="' + (H - PB) + '" stroke="#7A7870" stroke-width="1" stroke-dasharray="2 2" style="display:none" />' +
-              '<circle class="sc-dot-m" r="3.8" fill="#C4633E" stroke="#FFFFFF" stroke-width="1.3" style="display:none" />' +
-              '<circle class="sc-dot-p" r="3.4" fill="#3B6E9C" stroke="#FFFFFF" stroke-width="1.3" style="display:none" />' +
-              '<circle class="sc-dot-o" r="3.2" fill="#7A5A8E" stroke="#FFFFFF" stroke-width="1.3" style="display:none" />' +
-              '<rect class="sc-hit" x="' + PL + '" y="' + PT + '" width="' + CW + '" height="' + CH + '" fill="transparent" style="cursor:crosshair" />' +
-            '</svg>' +
-          '</article>'
-        );
-      }).join('');
-
-      SC_SPECS.forEach(function(spec) {
-        const svgEl = scGrid.querySelector('[data-sc-svg="' + spec.key + '"]');
-        if (!svgEl) return;
-        const mc = segC[spec.key] || {};
-        const mPts = mc.mothman || [], pPts = mc.pros || [], oPts = mc.opponents || [];
-        const useLog = !!(spec.scaleToggle && scScale === 'log');
-        const zoomPro = !!(spec.scaleToggle && scScale === 'linear');
-        const W = spec.spanFull ? 760 : 420;
-        const H = spec.spanFull ? 176 : 210;
-        const PL = 46, PR = 14, PT = 14, PB = 26;
-        const CW = W - PL - PR, CH = H - PT - PB;
-        const dom = computeYDomain(spec, mPts, pPts, oPts, useLog, zoomPro);
-        const xOf = function(t) { return PL + (Math.max(0, Math.min(maxT, t)) / maxT) * CW; };
-        const yOf = function(val) {
-          const v = Math.max(0, Number(val) || 0);
-          const frac = useLog ? Math.log10(v + 1) / dom.yMax : Math.min(1.06, v / dom.yMax);
-          return PT + CH - Math.max(0, Math.min(1.04, frac)) * CH;
-        };
-        const toMap = function(arr) { const mp = {}; arr.forEach(function(pt) { mp[pt.t] = pt; }); return mp; };
-        const mMap = toMap(mPts), pMap = toMap(pPts), oMap = toMap(oPts);
-        const hit = svgEl.querySelector('.sc-hit');
-        const cross = svgEl.querySelector('.sc-cross');
-        const dM = svgEl.querySelector('.sc-dot-m'), dP = svgEl.querySelector('.sc-dot-p'), dO = svgEl.querySelector('.sc-dot-o');
-        const onMove = function(evt) {
-          const pe = evt.touches ? evt.touches[0] : evt;
-          const r = svgEl.getBoundingClientRect();
-          const sx = ((pe.clientX - r.left) / r.width) * W;
-          const frac = Math.max(0, Math.min(1, (sx - PL) / CW));
-          const idx = Math.round(frac * (buckets.length - 1));
-          const t = buckets[idx] || 0;
-          const xx = xOf(t);
-          const pm = mMap[t], pp = pMap[t], po = oMap[t];
-          cross.setAttribute('x1', xx.toFixed(1)); cross.setAttribute('x2', xx.toFixed(1)); cross.style.display = '';
-          const setDot = function(el, pt, allow) {
-            if (allow && pt && pt.n >= 2 && pt.med != null) {
-              el.setAttribute('cx', xx.toFixed(1)); el.setAttribute('cy', yOf(pt.med).toFixed(1)); el.style.display = '';
-            } else { el.style.display = 'none'; }
-          };
-          setDot(dM, pm, true); setDot(dP, pp, true); setDot(dO, po, !zoomPro);
-          const rowT = function(cls, lbl, pt) {
-            if (!pt || pt.med == null) return '<div class="sct-row"><span class="sct-lbl"><span class="sc-dot ' + cls + '"></span>' + lbl + '</span><span>—</span></div>';
-            const rng = (pt.p25 != null && pt.p75 != null) ? (' (' + scFmt(pt.p25) + '–' + scFmt(pt.p75) + ')') : '';
-            return '<div class="sct-row"><span class="sct-lbl"><span class="sc-dot ' + cls + '"></span>' + lbl + '</span><span><strong>' + scFmt(pt.med) + '</strong><span style="opacity:.75">' + rng + '</span></span></div>';
-          };
-          showScTip(pe,
-            '<div class="sct-head">' + esc(spec.title) + ' · ' + scMmss(t) + '</div>' +
-            rowT('m', 'Mothman', pm) + rowT('p', 'Pro GM', pp) + rowT('o', 'Opponents', po) +
-            '<div class="sct-sub">Active at ' + scMmss(t) + ': ' + (pm ? pm.n : 0) + ' Mothman · ' + (pp ? pp.n : 0) + ' Pro · ' + (po ? po.n : 0) + ' Opp</div>'
-          );
-        };
-        const onLeave = function() {
-          cross.style.display = 'none'; dM.style.display = 'none'; dP.style.display = 'none'; dO.style.display = 'none';
-          hideScTip();
-        };
-        hit.addEventListener('mousemove', onMove);
-        hit.addEventListener('touchstart', onMove, { passive: true });
-        hit.addEventListener('mouseleave', onLeave);
-        hit.addEventListener('touchend', onLeave);
-      });
-    }
-
-    function renderSiteTimings() {
-      const rows = (proCurves.timings && proCurves.timings[stRace]) || [];
-      const filtered = stKind === 'all' ? rows : rows.filter(function(r) { return r.kind === stKind; });
-      if (!filtered.length) {
-        stWrap.innerHTML = '<p class="t-muted">No milestones match this filter.</p>';
-        return;
-      }
-      const maxSec = 900;
-      const W = 780, PL = 178, PR = 128, PT = 24, PB = 16, rowH = 31;
-      const H = PT + filtered.length * rowH + PB;
-      const CW = W - PL - PR;
-      const xOf = function(sec) { return PL + (Math.max(0, Math.min(maxSec, sec)) / maxSec) * CW; };
-      let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="site-curve-svg" role="img" aria-label="' + esc(stRace) + ' upgrade and structure timings">';
-      [0, 180, 360, 540, 720, 900].forEach(function(sec) {
-        const xx = xOf(sec);
-        svg += '<line x1="' + xx.toFixed(1) + '" y1="' + PT + '" x2="' + xx.toFixed(1) + '" y2="' + (H - PB) + '" stroke="#E7E3D8" stroke-width="1" />';
-        svg += '<text x="' + xx.toFixed(1) + '" y="14" text-anchor="middle" fill="#5E5D59" font-size="10.5" font-family="var(--mono)">' + (sec / 60) + 'm</text>';
-      });
-      filtered.forEach(function(row, i) {
-        const yTop = PT + i * rowH;
-        const yMid = yTop + rowH / 2;
-        if (i > 0) svg += '<line x1="0" y1="' + yTop + '" x2="' + W + '" y2="' + yTop + '" stroke="#EFECE3" stroke-width="0.8" />';
-        const lbl = String(row.label || '').replace(/\\s*\\(done\\)$/i, '').replace(/^Extended Thermal Lance$/i, 'Ext. Thermal Lance');
-        const ktag = row.kind === 'expansion' ? 'EXP' : (row.kind === 'upgrade' ? 'UPG' : 'STR');
-        svg += '<text x="4" y="' + (yMid + 3.5).toFixed(1) + '" fill="#8C8980" font-size="8.8" font-family="var(--mono)">' + ktag + '</text>';
-        svg += '<text x="32" y="' + (yMid + 3.8).toFixed(1) + '" fill="#141413" font-size="11" font-weight="' + (row.kind === 'expansion' ? '600' : '500') + '">' + esc(lbl.length > 24 ? lbl.slice(0, 23) + '…' : lbl) + '</text>';
-        [
-          { ck: 'mothman', dy: -6, col: '#C4633E', r: 3.6 },
-          { ck: 'pros', dy: 1, col: '#3B6E9C', r: 3.2 },
-          { ck: 'opponents', dy: 8, col: '#7A5A8E', r: 3.0 }
-        ].forEach(function(ln) {
-          const d = row[ln.ck] || {};
-          if (d.med == null) return;
-          const yy = yMid + ln.dy;
-          const p25 = d.p25 != null ? d.p25 : d.med;
-          const p75 = d.p75 != null ? d.p75 : d.med;
-          svg += '<line x1="' + xOf(p25).toFixed(1) + '" y1="' + yy.toFixed(1) + '" x2="' + xOf(p75).toFixed(1) + '" y2="' + yy.toFixed(1) + '" stroke="' + ln.col + '" stroke-width="2.1" opacity="0.55" stroke-linecap="round" />';
-          svg += '<circle cx="' + xOf(d.med).toFixed(1) + '" cy="' + yy.toFixed(1) + '" r="' + ln.r + '" fill="' + ln.col + '" stroke="#FFFFFF" stroke-width="0.9" />';
-        });
-        const m = row.mothman || {}, p = row.pros || {};
-        const dStr = scSignedDelta(m.med, p.med);
-        const dCol = (m.med != null && p.med != null) ? (m.med - p.med > 30 ? '#B43C2E' : (m.med - p.med < -15 ? '#1F6E43' : '#5E5D59')) : '#8C8980';
-        const adStr = (m.adopt_pct != null ? Math.round(m.adopt_pct) : 0) + '% / ' + (p.adopt_pct != null ? Math.round(p.adopt_pct) : 0) + '%';
-        svg += '<text x="' + (W - PR + 10) + '" y="' + (yMid - 1).toFixed(1) + '" fill="' + dCol + '" font-size="10.2" font-weight="600" font-family="var(--mono)">' + (dStr ? esc(dStr + ' vs Pro') : (m.med == null ? 'not built' : scMmss(m.med))) + '</text>';
-        svg += '<text x="' + (W - PR + 10) + '" y="' + (yMid + 10.5).toFixed(1) + '" fill="#7A7870" font-size="9.2" font-family="var(--mono)">M/P ' + esc(adStr) + '</text>';
-        svg += '<rect class="st-row-hit" data-st-idx="' + i + '" x="0" y="' + yTop + '" width="' + W + '" height="' + rowH + '" />';
-      });
-      svg += '</svg>';
-      stWrap.innerHTML = svg;
-
-      stWrap.querySelectorAll('.st-row-hit').forEach(function(el) {
-        const idx = parseInt(el.getAttribute('data-st-idx'), 10);
-        const row = filtered[idx];
-        if (!row) return;
-        const onHover = function(evt) {
-          const pe = evt.touches ? evt.touches[0] : evt;
-          const line = function(cls, name, d) {
-            if (!d || d.med == null) return '<div class="sct-row"><span class="sct-lbl"><span class="sc-dot ' + cls + '"></span>' + name + '</span><span>— (' + (d && d.adopt_pct != null ? Math.round(d.adopt_pct) : 0) + '%)</span></div>';
-            return '<div class="sct-row"><span class="sct-lbl"><span class="sc-dot ' + cls + '"></span>' + name + '</span><span><strong>' + esc(d.med_fmt || scMmss(d.med)) + '</strong> (' + scMmss(d.p25) + '–' + scMmss(d.p75) + ') · ' + Math.round(d.adopt_pct || 0) + '%</span></div>';
-          };
-          const dS = scSignedDelta(row.mothman && row.mothman.med, row.pros && row.pros.med);
-          showScTip(pe,
-            '<div class="sct-head">' + esc(row.label) + ' (' + esc(stRace) + ')</div>' +
-            line('m', 'Mothman', row.mothman) + line('p', 'Pro GM', row.pros) + line('o', 'Opponents', row.opponents) +
-            (dS ? '<div class="sct-sub">Median delta vs. Pro GM: <strong>' + esc(dS) + '</strong></div>' : '')
-          );
-        };
-        el.addEventListener('mousemove', onHover);
-        el.addEventListener('touchstart', onHover, { passive: true });
-        el.addEventListener('mouseleave', hideScTip);
-        el.addEventListener('touchend', hideScTip);
-      });
-    }
-
-    document.querySelectorAll('[data-sc-race]').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        scRace = btn.getAttribute('data-sc-race') || 'all';
-        document.querySelectorAll('[data-sc-race]').forEach(function(b) { b.classList.toggle('is-active', b === btn); });
-        if (scRace === 'Protoss' || scRace === 'Terran' || scRace === 'Zerg') {
-          stRace = scRace;
-          document.querySelectorAll('[data-st-race]').forEach(function(b) { b.classList.toggle('is-active', b.getAttribute('data-st-race') === stRace); });
-          renderSiteTimings();
-        }
-        renderSiteCurves();
-      });
+  if (proCurves && proCurves.curves && obsMount && window.MothmanObservatory) {
+    window.MothmanObservatory.mount(obsMount, proCurves, {
+      theme: 'light',
+      tooltipEl: scTip
     });
-    document.querySelectorAll('[data-sc-scale]').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        scScale = btn.getAttribute('data-sc-scale') || 'log';
-        document.querySelectorAll('[data-sc-scale]').forEach(function(b) { b.classList.toggle('is-active', b === btn); });
-        renderSiteCurves();
-      });
-    });
-    document.querySelectorAll('[data-st-race]').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        stRace = btn.getAttribute('data-st-race') || 'Protoss';
-        document.querySelectorAll('[data-st-race]').forEach(function(b) { b.classList.toggle('is-active', b === btn); });
-        renderSiteTimings();
-      });
-    });
-    document.querySelectorAll('[data-st-kind]').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        stKind = btn.getAttribute('data-st-kind') || 'all';
-        document.querySelectorAll('[data-st-kind]').forEach(function(b) { b.classList.toggle('is-active', b === btn); });
-        renderSiteTimings();
-      });
-    });
-
-    renderSiteCurves();
-    renderSiteTimings();
   }
 })();
 </script>
 """
+
+def _load_observatory_inline_script() -> str:
+    obs_path = Path(__file__).with_name("observatory_charts.js")
+    if obs_path.is_file():
+        code = obs_path.read_text(encoding="utf-8").replace("</script>", "<\\/script>")
+        return "<script>\n" + code + "\n</script>\n"
+    return ""
+
+INTERACTIVE_SECTIONS_JS = _load_observatory_inline_script() + INTERACTIVE_SECTIONS_JS

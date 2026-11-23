@@ -533,11 +533,13 @@
 (check-equal  "p1-static-recharge-id"   (sc2-spell-ability-id 'nexus-energy-recharge) 4126)
 (check-equal  "p1-static-recharge-cd"   (sc2-spell-cooldown-frames 'nexus-energy-recharge) 1344)
 (check-approx "p1-static-recharge-en"   (sc2-spell-energy 'nexus-energy-recharge) 50.0)
+(check-approx "l63-static-recharge-rng" (sc2-spell-cast-range 'nexus-energy-recharge) 14.5)
 ;; Alias checks
 (check-equal  "p1-alias-psionic-storm"        (sc2-spell-ability-id 'psionic-storm) 1036)
 (check-equal  "p1-alias-emp"                  (sc2-spell-ability-id 'emp) 1628)
 (check-equal  "p1-alias-snipe"                (sc2-spell-lockout-frames 'snipe) 34)
 (check-equal  "p1-alias-energy-recharge"      (sc2-spell-cooldown-frames 'energy-recharge) 1344)
+(check-approx "l63-alias-energy-recharge-rng" (sc2-spell-cast-range 'energy-recharge) 14.5)
 (check-equal  "p1-alias-amorphous-armorcloud" (sc2-spell-ability-id 'amorphous-armorcloud) 4111)
 (check-equal  "p1-alias-oracle-revelation"    (sc2-spell-ability-id 'oracle-revelation) 2146)
 (check-equal  "p1-alias-disruptor-nova"       (sc2-spell-cooldown-frames 'disruptor-nova) 480)
