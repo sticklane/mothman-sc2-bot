@@ -1506,6 +1506,7 @@ DEPLOY_LABELS: Dict[str, str] = {
     "sqvvtrlm_acd7ad85": "Loop 60B",
     "pnzpwmuy_4b9ea037": "Loop 61C",
     "nxsykszs_d6c595db": "Loop 62C",
+    "rqsntsos_e5e69116": "Loop 63B",
 }
 
 BOT_META: Dict[str, Dict[str, str]] = {
@@ -4222,8 +4223,8 @@ def _render_standings_tables(
             "crashes across 114 Division 6–7 games (4–9 on Release #13, 2.5× Release #12's win rate, with live wins over "
             "1575-Elo Snowbot and 1551-Elo Kira). Release #13 raised live external win rate 16.1 percentage points to 44.0% "
             "(6–2, 75.0% in v1 ranked matches), cut live harvest command drops by 93.0%, and averaged 3.99 ms per step. "
-            'All eight bots now run <strong>Release #14</strong> (Build 62C, Competition #38, '
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45178674199" target="_blank" rel="noopener noreferrer">deploy run 45178674199</a>, '
+            'All eight bots now run <strong>Release #15</strong> (Build 63B, Competition #38, '
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45218316184" target="_blank" rel="noopener noreferrer">deploy run 45218316184</a>, '
             "8/8 verified active). Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
         )
@@ -4646,7 +4647,8 @@ def build_history_page(
         f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
         f"Release #9 (Build 51) climbed to 19–9–3 (61.3% wins), and Release #13 (Build 61C) went 7–5 (58.3% external; "
         f"6–2 in ranked v1 games, +106 combined v1 Elo across Releases #11–#13) before Release #14 "
-        f'(Build 62C, <a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45178674199" target="_blank" rel="noopener noreferrer">deploy run 45178674199</a>) '
+        f"(Build 62C) and Release #15 (Build 63B, "
+        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45218316184" target="_blank" rel="noopener noreferrer">deploy run 45218316184</a>) '
         f"rolled out to all 8 ladder bots."
     )
 
@@ -4711,6 +4713,7 @@ def build_history_page(
         "iter60b_ship12_full": 12,
         "iter61c_ship13_full": 13,
         "iter62c_ship14_full": 14,
+        "iter63b_ship15_full": 15,
     }
 
     def _format_run_label(run_id: str, status_raw: str = "") -> str:

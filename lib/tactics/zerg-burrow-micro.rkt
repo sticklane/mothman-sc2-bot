@@ -21,6 +21,10 @@
 (module dyn-hash-ops racket/base
   (require racket/flonum
            racket/fixnum
+           (only-in "../sc2-common.rkt"
+                    dyn-hash-ref
+                    dyn-hash-has-key?
+                    fast-units-have-any-type?)
            (only-in "../sc2-game-constants.rkt" sc2-unit-on-field-supply))
   (provide dyn-hash-ref
            dyn-hash-has-key?
@@ -38,17 +42,6 @@
            fast-disruptor-nova-catchable-range
            fast-should-commit-through-splash?
            fast-plan-avoid-siege-tank-and-lurker-splash-zones)
-  (define (dyn-hash-ref h k default)
-    (if (hash? h)
-        (if (procedure? default)
-            (hash-ref h k (lambda () default))
-            (hash-ref h k default))
-        default))
-  (define (dyn-hash-has-key? h k)
-    (and (hash? h) (hash-has-key? h k)))
-  (define (fast-units-have-any-type? units syms)
-    (for/or ([u (in-list units)])
-      (and (hash? u) (not (not (memq (hash-ref u 'type 'unknown) syms))))))
   (define *potential-burrowers*
     '(zergling roach hydralisk baneling infestor swarm-host ultralisk
       lurker lurker-mp queen drone ravager infested-terran widow-mine unknown))

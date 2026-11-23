@@ -644,6 +644,7 @@
    'calldown-mule        171
    'scanner-sweep        399
    'supply-drop          255
+   'calldown-extra-supplies 255
    'stimpack             3675
    'stim-marine          380
    'stim-marauder        253
@@ -2924,7 +2925,9 @@
   (hash-clear! SC2-LIVE-ABIL-REMAP)
   (hash-clear! SC2-LIVE-UPG-COST-OVERLAY)
   (hash-clear! SC2-LIVE-UPG-ABIL-OVERLAY)
-  (hash-clear! SC2-LIVE-EFFECT-RADIUS))
+  (hash-clear! SC2-LIVE-EFFECT-RADIUS)
+  (reset-sc2-live-availability-tables!)
+  (reset-sc2-nexus-recharge-cooldown!))
 
 (: register-sc2-live-unit-data!
    (-> Symbol Integer Integer Real Integer Fixnum Boolean Flonum Flonum Flonum Flonum
@@ -3387,6 +3390,106 @@
 (define (sc2-spell-required-upgrade sym)
   (define spec (sc2-spell-spec-ref sym))
   (and spec (sc2-spell-spec-required-upgrade spec)))
+
+;; -----------------------------------------------------------------------------
+;; 15. Loop 64 P0 #0 (`#1787`): L0 Live ResponseData Availability & Recharge Latch
+;; -----------------------------------------------------------------------------
+;; Relocated from L4 `lib/sc2-protobuf-ws.rkt` so L1-L3 (`lib/bot-runtime.rkt`, etc.)
+;; have ZERO upward dependency on wire transport. Populated by `register-sc2-response-data!`
+;; and wire `4126` emission in `lib/sc2-protobuf-ws.rkt` (which re-exports these symbols
+;; for backwards compatibility with existing wire tests and external callers).
+
+(define SC2-LIVE-DATA-LOADED?          : (Boxof Boolean) (box #f))
+(define SC2-LIVE-AVAILABLE-ABILITIES   : (Mutable-HashTable Integer Boolean) (make-hasheqv))
+(define SC2-LIVE-AVAILABLE-ABILITY-IDS : (Mutable-HashTable Integer Boolean) SC2-LIVE-AVAILABLE-ABILITIES)
+(define SC2-LIVE-DEFINED-UPGRADES      : (Mutable-HashTable Symbol Integer) (make-hasheq))
+(define SC2-LIVE-DEFINED-UPGRADE-IDS   : (Mutable-HashTable Integer Boolean) (make-hasheqv))
+(define SC2-STATIC-UPGRADE-SYM->ID     : (Mutable-HashTable Symbol Integer) (make-hasheq))
+(define SC2-LIVE-NAME-NORM-CACHE       : (Mutable-HashTable Symbol Symbol) (make-hasheq))
+
+(define SC2-NEXUS-RECHARGE-LAST-LOOP   : (Boxof Integer) (box -99999))
+
+(: sc2-normalize-live-name->symbol (-> Any Symbol))
+(define (sc2-normalize-live-name->symbol v)
+  (cond
+    [(symbol? v)
+     (hash-ref SC2-LIVE-NAME-NORM-CACHE v
+               (lambda ()
+                 (define res
+                   (string->symbol
+                    (string-replace (string-downcase (symbol->string v)) "_" "-")))
+                 (hash-set! SC2-LIVE-NAME-NORM-CACHE v res)
+                 res))]
+    [(string? v)
+     (string->symbol
+      (string-replace (string-downcase (string-trim v)) "_" "-"))]
+    [else 'unknown]))
+
+(: register-sc2-static-upgrade-sym-id! (-> Symbol Integer Void))
+(define (register-sc2-static-upgrade-sym-id! sym id)
+  (hash-set! SC2-STATIC-UPGRADE-SYM->ID (sc2-normalize-live-name->symbol sym) id))
+
+(: set-sc2-live-data-loaded! (-> Boolean Void))
+(define (set-sc2-live-data-loaded! loaded?)
+  (set-box! SC2-LIVE-DATA-LOADED? loaded?))
+
+(: register-sc2-live-ability-availability! (-> Integer Boolean Void))
+(define (register-sc2-live-ability-availability! ab-id avail?)
+  (hash-set! SC2-LIVE-AVAILABLE-ABILITIES ab-id avail?))
+
+(: register-sc2-live-defined-upgrade! (-> Symbol Integer Void))
+(define (register-sc2-live-defined-upgrade! sym id)
+  (hash-set! SC2-LIVE-DEFINED-UPGRADES (sc2-normalize-live-name->symbol sym) id))
+
+(: register-sc2-live-defined-upgrade-id! (-> Integer Boolean Void))
+(define (register-sc2-live-defined-upgrade-id! id present?)
+  (hash-set! SC2-LIVE-DEFINED-UPGRADE-IDS id present?))
+
+(: reset-sc2-live-availability-tables! (-> Void))
+(define (reset-sc2-live-availability-tables!)
+  (set-box! SC2-LIVE-DATA-LOADED? #f)
+  (hash-clear! SC2-LIVE-AVAILABLE-ABILITIES)
+  (hash-clear! SC2-LIVE-DEFINED-UPGRADES)
+  (hash-clear! SC2-LIVE-DEFINED-UPGRADE-IDS))
+
+(: sc2-ability-live-available? (-> Any Boolean))
+(define (sc2-ability-live-available? ab-id)
+  (if (and (unbox SC2-LIVE-DATA-LOADED?) (exact-integer? ab-id))
+      (hash-ref SC2-LIVE-AVAILABLE-ABILITIES ab-id (lambda () #t))
+      #t))
+
+(: sc2-upgrade-defined-in-live-data? (-> Any Boolean))
+(define (sc2-upgrade-defined-in-live-data? sym)
+  (and (unbox SC2-LIVE-DATA-LOADED?)
+       (let ([norm (sc2-normalize-live-name->symbol sym)])
+         (or (hash-has-key? SC2-LIVE-DEFINED-UPGRADES norm)
+             (let ([uid (hash-ref SC2-STATIC-UPGRADE-SYM->ID norm (lambda () 0))])
+               (and (> uid 0)
+                    (< uid 290)
+                    (hash-has-key? SC2-LIVE-DEFINED-UPGRADE-IDS uid)))))))
+
+(: sc2-upgrade-live-available? (-> Any Boolean))
+(define (sc2-upgrade-live-available? sym)
+  (if (unbox SC2-LIVE-DATA-LOADED?)
+      (sc2-upgrade-defined-in-live-data? sym)
+      #t))
+
+(: record-sc2-nexus-recharge-loop! (-> Integer Void))
+(define (record-sc2-nexus-recharge-loop! cur-loop)
+  (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP cur-loop))
+
+(: reset-sc2-nexus-recharge-cooldown! (-> Void))
+(define (reset-sc2-nexus-recharge-cooldown!)
+  (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999))
+
+(: sc2-nexus-recharge-cooldown-ready? (-> Any Boolean))
+(define (sc2-nexus-recharge-cooldown-ready? cur-loop)
+  (define last (unbox SC2-NEXUS-RECHARGE-LAST-LOOP))
+  (define cd (sc2-spell-cooldown-frames 'nexus-energy-recharge 1344))
+  (or (not (real? cur-loop))
+      (< cur-loop last)
+      (>= (- cur-loop last) cd)))
+
 
 
 

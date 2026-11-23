@@ -2568,13 +2568,13 @@
                      (or
                       (let-values ([(ok? tgt _w)
                                     (best-unit-target
-                                     ux uy 9.5 all-allies
+                                     ux uy (if (>= current-frame 5376) 11.5 9.5) all-allies
                                      (lambda ([a : Any])
                                        (and (not (= (uh-tag a) tag))
                                             (not (uh-hallucination? a))
                                             (> (queen-transfuse-priority (uh-type a)) 0.0)
-                                            (>= (uh-missing-hp a) 55.0)
-                                            (< (uh-hp-ratio a) 0.70)
+                                            (>= (uh-missing-hp a) 50.0)
+                                            (< (uh-hp-ratio a) 0.72)
                                             (< (spell-unit-claim-count claims 'transfusion (uh-tag a) current-frame)
                                                (unit-claim-effective-cap 'transfusion 0.0 (uh-missing-hp a) #f #t))))
                                      (lambda ([a : Any])
@@ -3355,7 +3355,7 @@
                  (and (not cliff-ladder-ready?)
                       (not (spellcaster-channel-protected? u))
                       (not (= (safe-int (dyn-hash-ref u 'order-ability-id 0) 0) 2108))
-                      (any-unit-within? enemy-units ux uy 9.5 ground-enemy?)
+                      (any-unit-within? enemy-units ux uy 10.5 ground-enemy?)
                       (spell-directive tag sym 'burrow-lurker 'none 0 ux uy 'lurker-burrow-choke-siege))]
                 [else
                  (define hazard?
@@ -3366,8 +3366,8 @@
                  (and (not (= (safe-int (dyn-hash-ref u 'order-ability-id 0) 0) 2110))
                       (or hazard?
                           cliff-ladder-ready?
-                          (and (>= idle-frames 24)
-                               (not (any-unit-within? enemy-units ux uy 13.0 ground-enemy?))))
+                          (and (>= idle-frames 16)
+                               (not (any-unit-within? enemy-units ux uy 11.5 ground-enemy?))))
                       (spell-directive tag sym 'unburrow-lurker 'none 0 ux uy 'lurker-unburrow-reposition))])]
 
              [else #f]))
@@ -4148,7 +4148,7 @@
                      (and (pair? repair-pool)
                           (let-values ([(ok? tgt _w)
                                         (best-unit-target
-                                         ux uy 14.0 repair-pool
+                                         ux uy (if (< current-frame 6048) 22.0 14.0) repair-pool
                                          (lambda ([a : Any])
                                            (define asym (uh-type a))
                                            (define ax (uh-x a))
@@ -4159,9 +4159,7 @@
                                                [(bunker) 4]
                                                [(thor thor-ap battlecruiser siege-tank-sieged) 3]
                                                [else 2]))
-                                           (define max-rep-r
-                                             (if (memq asym '(planetary-fortress bunker missile-turret)) 14.0 10.0))
-                                           ;; L39-P0-1a / 1f + L41-P0-1b + L48-W2 (`#5140013` / `r05` / `r15` / `e03`):
+                                           ;; L39-P0-1a / 1f + L41-P0-1b + L48-W2 + L64 P2 #5 (`< 4:30` 22.0t Bunker repair):
                                            ;; - Never pull SCVs to repair another SCV under active enemy combat harass (`<= 6.5t`,
                                            ;;   e.g. Adepts/Lings) or enemy worker rush (`>= 6` workers, OR `>= 3` pure workers w/ 0
                                            ;;   enemy combat units).
@@ -4181,6 +4179,11 @@
                                                 (and (sc2-enemy-unit-targetable? e)
                                                      (not (memq (uh-type e) '(scv probe drone)))
                                                      (unit-combat-relevant? e)))))
+                                           (define max-rep-r : Float
+                                             (cond
+                                               [(and (eq? asym 'bunker) (< current-frame 6048) any-enemy-combat-24?) 22.0]
+                                               [(memq asym '(planetary-fortress bunker missile-turret)) 14.0]
+                                               [else 10.0]))
                                            (define pure-worker-rush-noncombat-bldg-repair?
                                              (and (>= near-ew-cnt-24 6)
                                                   (not any-enemy-combat-24?)
@@ -4442,7 +4445,7 @@
                     (spell-claim-point?! claims 'guardian-shield ux uy
                                          GUARDIAN-SHIELD-CLAIM-RADIUS current-frame GUARDIAN-SHIELD-CLAIM-TTL)
                     (spell-directive tag 'sentry 'guardian-shield 'none 0 ux uy 'sentry-guardian-shield))
-               ;; 2. Force Field (`energy >= 50`, `~27f` post-GS stagger, splitting >= 4 melee, zero allies < 1.8)
+               ;; 2. Force Field (`energy >= 50`, `~27f` post-GS stagger, splitting >= 3 melee or >= 2 close chargers <= 6.5t, zero allies < 1.8)
                (let* ([last-gs (spell-claims-last-guardian-shield-frame claims)]
                       [gs-stagger-ok? (or (< last-gs 0)
                                            (>= (- current-frame last-gs) SENTRY-FORCE-FIELD-POST-GS-DELAY-FRAMES))])
@@ -4453,7 +4456,11 @@
                                      ux uy 10.5 enemy-units 3.5 0.0
                                      (lambda ([_cx : Float] [_cy : Float] [cl : (Listof Any)])
                                        (define mcnt (count-units-within cl _cx _cy 3.5 force-field-splitter-target?))
-                                       (if (>= mcnt 4) (->float mcnt) 0.0)))])
+                                       (define cd (dist2 ux uy _cx _cy))
+                                       (if (or (>= mcnt 3)
+                                               (and (>= mcnt 2) (<= cd 6.5)))
+                                           (->float mcnt)
+                                           0.0)))])
                         (and ok?
                              (let* ([dx (- ux mx)]
                                     [dy (- uy my)]

@@ -21,7 +21,9 @@
          "../sc2-game-constants.rkt")
 
 (provide (struct-out macro-oc-info)
+         (struct-out macro-depot-info)
          (struct-out macro-nexus-info)
+         (struct-out macro-chrono-candidate-info)
          (struct-out macro-caster-info)
          (struct-out macro-th-info)
          (struct-out macro-mineral-info)
@@ -29,16 +31,20 @@
          (struct-out macro-self-unit-info)
          (struct-out macro-policy-latch)
          (struct-out terran-mule-policy-result)
+         (struct-out terran-supply-drop-decision)
          (struct-out protoss-nexus-recharge-decision)
          make-macro-policy-latch
          reset-macro-policy-latch!
          reset-macro-policy-latch-for-new-match!
          evaluate-terran-mule-policy
          terran-oc-mule-allowed?
+         evaluate-terran-supply-drop-policy
          SC2-MULE-HARMLESS-ENEMY-SYMS
          select-safe-mule-mineral-patch-tag
          evaluate-protoss-nexus-recharge-policy
-         select-early-probe-chrono-pairs)
+         select-early-probe-chrono-pairs
+         score-protoss-chrono-target-policy
+         select-protoss-chrono-target-policy)
 
 ;; -----------------------------------------------------------------------------
 ;; 1. Lightweight Transport-Agnostic Descriptor Structs & Per-Match Latch
@@ -47,8 +53,14 @@
 (struct macro-oc-info
   (tag x y energy) #:transparent)
 
+(struct macro-depot-info
+  (tag sym x y completed? already-upgraded?) #:transparent)
+
 (struct macro-nexus-info
   (tag x y energy training-probe? chrono-buffed?) #:transparent)
+
+(struct macro-chrono-candidate-info
+  (tag sym) #:transparent)
 
 (struct macro-caster-info
   (tag sym x y energy hallucination?) #:transparent)
@@ -94,6 +106,11 @@
    proactive-scan-oc-tags     ;; (Listof Integer): top-K OC tags reserving Scan energy
    proactive-scan-floor       ;; Flonum: 100.0 (normal) or 101.0 (DT/Prism 2-OC or isolated Arena reserve)
    oc-energy-floor-ht)        ;; (HashTable Integer Flonum): oc-tag -> required min energy to drop MULE
+  #:transparent)
+
+(struct terran-supply-drop-decision
+  (oc-tag                     ;; #f | Integer (OC tag casting Calldown: Extra Supplies / 255)
+   depot-tag)                 ;; #f | Integer (completed non-upgraded Supply Depot tag)
   #:transparent)
 
 (struct protoss-nexus-recharge-decision
@@ -238,7 +255,10 @@
          #:worker-count worker-count
          #:known-enemy-race [known-enemy-race #f]
          #:step-has-scan-request? [step-has-scan-request? #f]
-         #:blind-uphill-err-now? [blind-uphill-err-now? #f])
+         #:blind-uphill-err-now? [blind-uphill-err-now? #f]
+         #:under-pressure? [under-pressure? #f]
+         #:cloak-threat-known? [cloak-threat-known? #f]
+         #:active-bases [active-bases #f])
   (define seen-enemy-race-now (infer-enemy-race-from-infos enemy-units))
   (when (and (macro-policy-latch? latch) seen-enemy-race-now)
     (set-macro-policy-latch-observed-enemy-race! latch seen-enemy-race-now))
@@ -326,26 +346,60 @@
                                 (and (symbol? (macro-self-unit-info-sym u))
                                      (set-member? MACRO-INFRA-SELF-SYMS (macro-self-unit-info-sym u))))))
                      self-units))))
-  (define proactive-scan-oc-limit
+  (define enemy-widow-mine-cnt
+    (count (lambda (e)
+             (and (macro-enemy-info? e)
+                  (or (memv (macro-enemy-info-type-id e) '(498 500))
+                      (memq (macro-enemy-info-sym e) '(widow-mine widow-mine-burrowed)))))
+           enemy-units))
+  (define eff-active-bases
+    (if (exact-nonnegative-integer? active-bases)
+        active-bases
+        (count (lambda (th)
+                 (and (macro-th-info? th)
+                      (macro-th-info-completed? th)
+                      (not (macro-th-info-flying? th))
+                      (not (memq (macro-th-info-sym th)
+                                 '(command-center-flying orbital-command-flying)))))
+               townhalls)))
+  (define cloak-seen?
+    (or seen-enemy-cloak-latched?
+        (and cloak-threat-known? #t)))
+  (define cloak-proactive-oc-limit
     (cond
+      [(or has-raven-now? has-ready-turret-now?)
+       ;; Loop 64 A4: >= 2 enemy Widow Mines (498/500) still require mobile field Scan reserve
+       ;; on 1 OC unless a Raven provides mobile detection (static Turret at home does not).
+       (if (and (>= enemy-widow-mine-cnt 2) (not has-raven-now?)) 1 0)]
       [(and (memq eff-enemy-race '(Protoss Random))
             seen-dt-prism-latched?)
+       (if (>= (length ready-ocs) 2) 2 1)]
+      [cloak-seen?
+       ;; Loop 64 A5 (`#1755`): `cloak_seen` (DT/DarkShrine/Banshee/Ghost/Lurker/WidowMine)
+       ;; holds 100.0e (>= 1 Scan) on top-2 OCs (lifting `cloak_seen` Scan share toward Pro 50.7%).
        (if (>= (length ready-ocs) 2) 2 1)]
       [(and (>= cur-loop 5376)
             (memq eff-enemy-race '(Protoss Random)))
        (if (>= (length ready-ocs) 3) 2 1)]
-      [(or seen-enemy-cloak-latched?
-           (and isolated-arena-skirmish?
-                (>= friendly-combat-cnt 6)))
+      [(and isolated-arena-skirmish?
+            (>= friendly-combat-cnt 6))
        1]
       [(and (eq? eff-enemy-race 'Terran)
             seen-terran-cloak-latched?)
        1]
       [else 0]))
+  (define phase-proactive-oc-limit
+    ;; Loop 64 A5 (`#1755`): At >= 8:00 (10752f) OR under pressure on >= 2 bases, top-1 OC holds
+    ;; 100.0e for proactive map/army/creep Scans (closing -17.4pp 8-12m Scan gap vs Pro 46.4%).
+    (if (and (not isolated-arena-skirmish?)
+             (or (>= cur-loop 10752)
+                 (and under-pressure? (>= eff-active-bases 2))))
+        1
+        0))
+  (define proactive-scan-oc-limit
+    (max cloak-proactive-oc-limit phase-proactive-oc-limit))
   (define proactive-scan-oc-tags
     (if (and (> proactive-scan-oc-limit 0)
-             (not has-raven-now?)
-             (not has-ready-turret-now?)
              (pair? ready-ocs))
         (let* ([sorted-ocs
                 (sort ready-ocs
@@ -446,10 +500,6 @@
           [(and (pair? proactive-scan-oc-tags)
                 (memv tag proactive-scan-oc-tags))
            proactive-scan-floor]
-          [(and enemy-cloak-threat-now?
-                (not has-raven-now?)
-                (not has-ready-turret-now?))
-           100.0]
           [else 50.0]))
       (values tag floor-val)))
   (terran-mule-policy-result
@@ -468,6 +518,94 @@
                      (if (terran-mule-policy-result-uphill-scan-reserve? policy)
                          150.0
                          50.0)))))
+
+;; Loop 64 A5 (`#1755`, Graph 20): Terran OC Calldown: Extra Supplies (`255`) Policy.
+;; Fires on a completed non-upgraded Supply Depot during 4:00-12:00 combat supply blocks (< 192 cap),
+;; preserving Scan energy (`>= 100.0e`) whenever `cloak-seen?` or uphill scan reserve is active.
+(define (evaluate-terran-supply-drop-policy
+         #:loop cur-loop
+         #:supply-used supply-used
+         #:supply-cap supply-cap
+         #:ready-ocs ready-ocs
+         #:depots depots
+         #:under-pressure? [under-pressure? #f]
+         #:cloak-seen? [cloak-seen? #f]
+         #:mule-policy [mule-policy #f])
+  (define supply-left (- supply-cap supply-used))
+  (define hard-blocked?
+    (and (terran-mule-policy-result? mule-policy)
+         (terran-mule-policy-result-hard-blocked? mule-policy)))
+  (define uphill-reserve?
+    (and (terran-mule-policy-result? mule-policy)
+         (terran-mule-policy-result-uphill-scan-reserve? mule-policy)))
+  (define proactive-scan-tags
+    (if (terran-mule-policy-result? mule-policy)
+        (terran-mule-policy-result-proactive-scan-oc-tags mule-policy)
+        '()))
+  (cond
+    [(or (< cur-loop 5376)
+         (> cur-loop 16128)
+         (> supply-left 0)
+         (>= supply-cap 192)
+         (not under-pressure?)
+         hard-blocked?
+         (null? ready-ocs)
+         (null? depots))
+     (terran-supply-drop-decision #f #f)]
+    [else
+     (define eligible-depots
+       (filter (lambda (d)
+                 (and (macro-depot-info? d)
+                      (exact-integer? (macro-depot-info-tag d))
+                      (> (macro-depot-info-tag d) 0)
+                      (macro-depot-info-completed? d)
+                      (not (macro-depot-info-already-upgraded? d))
+                      (memq (macro-depot-info-sym d) '(supply-depot supply-depot-lowered))))
+               depots))
+     (define min-oc-energy (if (or cloak-seen? uphill-reserve?) 100.0 50.0))
+     (define eligible-ocs
+       (filter (lambda (oc)
+                 (and (macro-oc-info? oc)
+                      (exact-integer? (macro-oc-info-tag oc))
+                      (> (macro-oc-info-tag oc) 0)
+                      (>= (exact->inexact (macro-oc-info-energy oc)) min-oc-energy)))
+               ready-ocs))
+     (cond
+       [(or (null? eligible-depots) (null? eligible-ocs))
+        (terran-supply-drop-decision #f #f)]
+       [else
+        ;; Prefer an OC that leaves proactive-scan-tags with >= 50e (either unreserved OC or >= 100e),
+        ;; falling back to highest-energy eligible OC when emergency 1-OC supply block occurs!
+        (define (oc-preserves-scan-reserve? oc)
+          (or (not (memv (macro-oc-info-tag oc) proactive-scan-tags))
+              (>= (exact->inexact (macro-oc-info-energy oc)) 100.0)))
+        (define sorted-ocs
+          (sort eligible-ocs
+                (lambda (a b)
+                  (let ([pa (oc-preserves-scan-reserve? a)]
+                        [pb (oc-preserves-scan-reserve? b)])
+                    (cond
+                      [(and pa (not pb)) #t]
+                      [(and pb (not pa)) #f]
+                      [else
+                       (let ([ea (exact->inexact (macro-oc-info-energy a))]
+                             [eb (exact->inexact (macro-oc-info-energy b))])
+                         (if (= ea eb)
+                             (< (macro-oc-info-tag a) (macro-oc-info-tag b))
+                             (> ea eb)))])))))
+        (define chosen-oc (first sorted-ocs))
+        (define ocx (exact->inexact (macro-oc-info-x chosen-oc)))
+        (define ocy (exact->inexact (macro-oc-info-y chosen-oc)))
+        (define chosen-depot
+          (first (sort eligible-depots
+                       (lambda (a b)
+                         (let ([da (dist2d ocx ocy (macro-depot-info-x a) (macro-depot-info-y a))]
+                               [db (dist2d ocx ocy (macro-depot-info-x b) (macro-depot-info-y b))])
+                           (if (= da db)
+                               (< (macro-depot-info-tag a) (macro-depot-info-tag b))
+                               (< da db)))))))
+        (terran-supply-drop-decision (macro-oc-info-tag chosen-oc)
+                                     (macro-depot-info-tag chosen-depot))])]))
 
 ;; -----------------------------------------------------------------------------
 ;; 4. Safe MULE Mineral Patch Selector
@@ -658,7 +796,8 @@
          #:target-ready? target-ready?)
   (cond
     [(or (>= cur-loop 6720)
-         (>= worker-count 50)
+         (>= worker-count 34)
+         (and (>= cur-loop 5376) (>= worker-count 28))
          (null? ready-nexuses))
      '()]
     [else
@@ -709,3 +848,145 @@
             (set-add! claimed-tgts ttag)
             (set! pairs (cons (cons ctag ttag) pairs))))
         (reverse pairs)])]))
+
+;; -----------------------------------------------------------------------------
+;; 6. Loop 64 A5 (`#1755`, Graph 20): Dynamic Phase & Situation Protoss Chrono Boost Policy
+;; -----------------------------------------------------------------------------
+;; Pro GM calibration (`n=402`):
+;;   - 0-4m (`< 5376f` & `< 34w`): Nexus 900 > CyberCore/WarpGate 850 > Robo/Stargate 820 > Gateway 700.
+;;   - Sharp 4:00 Pivot (`>= 5376f` OR `>= 34w`): TechUpgrades (950) > Robo (900) > Stargate (860) >
+;;     Nexus (600 ONLY when `< 56w` AND no Tech/Robo/SG busy AND (`nx-en >= 100e` or no dry caster near)).
+;;   - NEVER Chrono `gateway`/`warp-gate` at `>= 4:00` (even `under-pressure? = #t`!) unless
+;;     `nx-en >= 150e` (cap bleed) OR (`0` Tech/Robo/SG busy AND `main-base-breach?` AND `army-supply < 6.0`).
+
+(define PROTOSS-CHRONO-TECH-UPGRADE-SYMS
+  (seteq 'forge 'twilight-council 'cybernetics-core 'robotics-bay
+         'templar-archive 'fleet-beacon 'dark-shrine))
+
+(define PROTOSS-CHRONO-TECH-OR-ROBO-SYMS
+  (seteq 'forge 'twilight-council 'cybernetics-core 'robotics-bay
+         'templar-archive 'fleet-beacon 'dark-shrine
+         'robotics-facility 'stargate))
+
+(define PROTOSS-CHRONO-GATE-SYMS
+  (seteq 'gateway 'warp-gate))
+
+(define (score-protoss-chrono-target-policy
+         target-sym
+         #:loop [cur-loop 0]
+         #:worker-count [worker-count 0]
+         #:nexus-energy [nexus-energy 50.0]
+         #:has-busy-tech-or-robo? [has-busy-tech-or-robo? #f]
+         #:dry-caster-near? [dry-caster-near? #f]
+         #:early-ling-or-worker-rush? [early-ling-or-worker-rush? #f]
+         #:early-gate-defenders [early-gate-defenders 0]
+         #:under-pressure? [under-pressure? #f]
+         #:main-base-breach? [main-base-breach? #f]
+         #:army-supply [army-supply 0.0])
+  (define sym (if (symbol? target-sym) target-sym 'unknown))
+  (define nx-en (exact->inexact nexus-energy))
+  (define army-sup (exact->inexact army-supply))
+  (define post-4m-pivot?
+    (or (>= cur-loop 5376)
+        (>= worker-count 34)))
+  (cond
+    [(not post-4m-pivot?)
+     ;; Phase 0-4m (`< 5376f` & `< 34w`)
+     (cond
+       [(and early-ling-or-worker-rush?
+             (eq? sym 'nexus)
+             (< early-gate-defenders 2))
+        -1.0]
+       [(and early-ling-or-worker-rush?
+             (or (set-member? PROTOSS-CHRONO-GATE-SYMS sym)
+                 (memq sym '(robotics-facility stargate))))
+        960.0]
+       [(eq? sym 'nexus)
+        (if (or (>= nx-en 100.0) (not dry-caster-near?)) 900.0 -1.0)]
+       [(eq? sym 'cybernetics-core) 850.0]
+       [(set-member? PROTOSS-CHRONO-TECH-UPGRADE-SYMS sym) 840.0]
+       [(eq? sym 'robotics-facility) 820.0]
+       [(eq? sym 'stargate) 815.0]
+       [(set-member? PROTOSS-CHRONO-GATE-SYMS sym) 700.0]
+       [else -1.0])]
+    [else
+     ;; Sharp 4:00 Pivot (`>= 5376f` OR `>= 34w`): TechUpgrades > Robo > Stargate > Nexus; suppress Gateway!
+     (cond
+       [(memq sym '(forge twilight-council templar-archive robotics-bay)) 955.0]
+       [(eq? sym 'cybernetics-core) 952.0]
+       [(set-member? PROTOSS-CHRONO-TECH-UPGRADE-SYMS sym) 950.0]
+       [(eq? sym 'robotics-facility) 900.0]
+       [(eq? sym 'stargate) 860.0]
+       [(eq? sym 'nexus)
+        (cond
+          ;; L64B (`#1814` Bug #4): Lift post-4m Nexus worker cap `< 56 -> < 66` when no unbuffed
+          ;; Tech/Robo needs Chrono, plus cap-bleed at `>= 125.0e` up to `< 72w` so Nexus #2/#3
+          ;; never sit idle on 100-149e while Tech/Robo is already Chrono-buffed!
+          [(and (< worker-count 66)
+                (not has-busy-tech-or-robo?)
+                (or (>= nx-en 100.0) (not dry-caster-near?)))
+           600.0]
+          [(and (>= nx-en 125.0) (< worker-count 72))
+           580.0]
+          [else -1.0])]
+       [(set-member? PROTOSS-CHRONO-GATE-SYMS sym)
+        (cond
+          [(and (not has-busy-tech-or-robo?)
+                main-base-breach?
+                (< army-sup 6.0))
+           750.0]
+          ;; L64B (`#1814` Bug #4): Lower post-4m Gateway/WarpGate cap-bleed `150.0e -> 100.0e`
+          ;; (requiring `>= 125.0e` when `dry-caster-near?` to preserve the 50e Recharge reserve!).
+          [(>= nx-en (if dry-caster-near? 125.0 100.0))
+           520.0]
+          [else -1.0])]
+       [else -1.0])]))
+
+(define (select-protoss-chrono-target-policy
+         #:candidates candidates
+         #:loop [cur-loop 0]
+         #:worker-count [worker-count 0]
+         #:nexus-energy [nexus-energy 50.0]
+         #:has-busy-tech-or-robo? [has-busy-tech-or-robo? 'auto]
+         #:dry-caster-near? [dry-caster-near? #f]
+         #:early-ling-or-worker-rush? [early-ling-or-worker-rush? #f]
+         #:early-gate-defenders [early-gate-defenders 0]
+         #:under-pressure? [under-pressure? #f]
+         #:main-base-breach? [main-base-breach? #f]
+         #:army-supply [army-supply 0.0])
+  (define valid-cands
+    (filter macro-chrono-candidate-info? candidates))
+  (cond
+    [(null? valid-cands) #f]
+    [else
+     (define eff-busy-tech-or-robo?
+       (if (eq? has-busy-tech-or-robo? 'auto)
+           (ormap (lambda (c)
+                    (set-member? PROTOSS-CHRONO-TECH-OR-ROBO-SYMS
+                                 (macro-chrono-candidate-info-sym c)))
+                  valid-cands)
+           (and has-busy-tech-or-robo? #t)))
+     (define-values (best-cand best-sc)
+       (for/fold ([bc #f] [bs 0.0]) ([c (in-list valid-cands)])
+         (define sc
+           (score-protoss-chrono-target-policy
+            (macro-chrono-candidate-info-sym c)
+            #:loop cur-loop
+            #:worker-count worker-count
+            #:nexus-energy nexus-energy
+            #:has-busy-tech-or-robo? eff-busy-tech-or-robo?
+            #:dry-caster-near? dry-caster-near?
+            #:early-ling-or-worker-rush? early-ling-or-worker-rush?
+            #:early-gate-defenders early-gate-defenders
+            #:under-pressure? under-pressure?
+            #:main-base-breach? main-base-breach?
+            #:army-supply army-supply))
+         (if (and (> sc 0.0)
+                  (or (not bc)
+                      (> sc bs)
+                      (and (= sc bs)
+                           (< (macro-chrono-candidate-info-tag c)
+                              (macro-chrono-candidate-info-tag bc)))))
+             (values c sc)
+             (values bc bs))))
+     best-cand]))

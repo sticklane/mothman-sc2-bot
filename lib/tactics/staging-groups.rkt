@@ -47,10 +47,13 @@
  (struct-out staging-group)
  (struct-out staging-group-manager)
  (struct-out staging-step-result)
+ STAGE-MUSTER-COMMIT-RATIO
+ STAGE-MUSTER-RETREAT-RATIO
  make-staging-group-manager
  staging-group-manager-reset!
  staging-live-full-match-eligible?
  pick-safe-staging-point
+ pick-safe-fallback-point
  step-staging-groups!
  staging-group-handled-tags)
 
@@ -71,6 +74,8 @@
 (define STAGE-TEMPEST-CONTACT-RADIUS 18.0)
 (define STAGE-COMMIT-STRENGTH-RATIO 0.70)
 (define STAGE-RETREAT-STRENGTH-RATIO 0.55)
+(define STAGE-MUSTER-COMMIT-RATIO 0.95)
+(define STAGE-MUSTER-RETREAT-RATIO 0.78)
 (define STAGE-REGROUP-DROP-RATIO 0.55)
 (define STAGE-REGROUP-HP-RATIO 0.45)
 (define STAGE-HOME-REINFORCE-RADIUS 24.0)
@@ -84,6 +89,10 @@
   '(command-center orbital-command planetary-fortress
     hatchery lair hive
     nexus))
+
+(define DEFENSIVE-ANCHOR-SYMS
+  '(shield-battery bunker photon-cannon spine-crawler spore-crawler planetary-fortress
+    siege-tank-sieged lurker-burrowed lurker-mp-burrowed liberator-ag))
 
 (define PRODUCTION-BLDG-SYMS
   '(hatchery lair hive spire greater-spire spawning-pool roach-warren baneling-nest hydralisk-den
@@ -500,6 +509,298 @@
      (cons best-x best-y)]))
 
 ;; =============================================================================
+;; Generalized Situational Pull-Back / Fallback Anchor (`pick-safe-fallback-point`)
+;; Loop 64 P0 #1 (`#1724`): 100% map/race/corner-agnostic situational fallback
+;; scoring all 1..N owned TownHalls, static defense & siege anchors, safe ally
+;; reinforcement centroids, local mid-map disengage offsets, and interior chokes.
+;; =============================================================================
+
+(define (rec-complete? r)
+  (or (not (hash? r))
+      (fl>= (fl->safe (hash-ref r 'build-progress 1.0) 1.0) 0.999)))
+
+(define (rec-z-opt r)
+  (and (hash? r)
+       (let ([z (hash-ref r 'z #f)])
+         (and (real? z) (not (nan? z)) (not (infinite? z)) (exact->inexact z)))))
+
+;; Count visible enemies lying within `r-block` of the interior (`0.12 < t < 0.92`)
+;; of the escape segment `(gx, gy) -> (cx, cy)` (anti-flank trap detection).
+(define (escape-segment-blocking-count gx gy cx cy enemy-pts [r-block 8.5])
+  (define dx (fl- cx gx))
+  (define dy (fl- cy gy))
+  (define len2 (fl+ (fl* dx dx) (fl* dy dy)))
+  (if (fl<= len2 4.0)
+      0
+      (let ([r2 (fl* r-block r-block)])
+        (for/sum ([ep (in-list enemy-pts)])
+          (define ex (car ep))
+          (define ey (cdr ep))
+          (define t (fl/ (fl+ (fl* (fl- ex gx) dx) (fl* (fl- ey gy) dy)) len2))
+          (if (and (fl> t 0.12) (fl< t 0.92))
+              (let* ([px (fl+ gx (fl* t dx))]
+                     [py (fl+ gy (fl* t dy))]
+                     [ddx (fl- ex px)]
+                     [ddy (fl- ey py)])
+                (if (fl<= (fl+ (fl* ddx ddx) (fl* ddy ddy)) r2) 1 0))
+              0)))))
+
+(define (pick-safe-fallback-point
+         #:domain [domain 'ground]
+         #:group-x group-x
+         #:group-y group-y
+         #:threat-x threat-x
+         #:threat-y threat-y
+         #:severity [severity 'muster]
+         #:ally-townhalls [ally-townhalls '()]
+         #:ally-buildings [ally-buildings '()]
+         #:ally-units [ally-units '()]
+         #:mineral-patches [mineral-patches '()]
+         #:enemy-units [enemy-units '()]
+         #:base-x base-x
+         #:base-y base-y
+         #:nat-x nat-x
+         #:nat-y nat-y
+         #:map-width [map-w 200.0]
+         #:map-height [map-h 200.0]
+         #:prev-pt [prev-pt #f]
+         #:bfs-dist-fn [bfs-dist-fn #f]
+         #:enemy-capital-air? [enemy-cap-air? #f]
+         #:group-z [group-z #f])
+  (define mw (flmax 64.0 (fl->safe map-w 200.0)))
+  (define mh (flmax 64.0 (fl->safe map-h 200.0)))
+  (define air-domain? (or (eq? domain 'air) (eq? domain 'drop)))
+  (define margin (if air-domain? 5.0 6.0))
+  (define fgx (fl->safe group-x (fl->safe nat-x 32.5)))
+  (define fgy (fl->safe group-y (fl->safe nat-y 32.5)))
+  (define ftx (fl->safe threat-x (fl- mw fgx)))
+  (define fty (fl->safe threat-y (fl- mh fgy)))
+  (define fbx (fl->safe base-x 32.5))
+  (define fby (fl->safe base-y 32.5))
+  (define fnx (fl->safe nat-x fbx))
+  (define fny (fl->safe nat-y fby))
+
+  (define th-recs
+    (if (pair? ally-townhalls)
+        (filter (lambda (b) (and (rec-xy? b) (not (rec-snapshot? b)))) ally-townhalls)
+        (filter (lambda (b) (and (rec-xy? b) (not (rec-snapshot? b)) (memq (rec-type-sym b) TOWNHALL-SYMS)))
+                (or ally-buildings '()))))
+  (define th-pts
+    (if (pair? th-recs)
+        (for/list ([b (in-list th-recs)]) (cons (rec-x b fbx) (rec-y b fby)))
+        (list (cons fbx fby))))
+
+  (define enemy-pts
+    (extract-xy-pts enemy-units
+                    (lambda (e)
+                      (not (memq (rec-type-sym e) '(larva egg changeling overlord observer overseer))))))
+  (define threat-z
+    (let-values ([(sz cnt)
+                  (for/fold ([s 0.0] [c 0]) ([e (in-list (or enemy-units '()))])
+                    (define ez (rec-z-opt e))
+                    (if (and ez (not (memq (rec-type-sym e) '(larva egg changeling overlord observer overseer))))
+                        (values (fl+ s ez) (+ c 1))
+                        (values s c)))])
+      (cond
+        [(> cnt 0) (fl/ sz (exact->inexact cnt))]
+        [(and (real? group-z) (not (nan? group-z)) (not (infinite? group-z))) (exact->inexact group-z)]
+        [else #f])))
+
+  (define obstacle-pts
+    (if air-domain?
+        '()
+        (append (extract-xy-pts ally-buildings)
+                (extract-xy-pts mineral-patches))))
+
+  ;; Defensive cover anchors (completed static D + sieged tanks/lurkers/liberators)
+  (define def-anchor-recs
+    (append
+     (filter (lambda (b)
+               (and (rec-xy? b) (not (rec-snapshot? b)) (rec-complete? b)
+                    (memq (rec-type-sym b) DEFENSIVE-ANCHOR-SYMS)))
+             (or ally-buildings '()))
+     (filter (lambda (u)
+               (and (rec-xy? u) (not (rec-snapshot? u))
+                    (memq (rec-type-sym u) DEFENSIVE-ANCHOR-SYMS)))
+             (or ally-units '()))))
+  (define def-anchor-pts
+    (for/list ([d (in-list def-anchor-recs)]) (cons (rec-x d fbx) (rec-y d fby))))
+
+  ;; Safe ally combat reinforcement cluster (combat allies outside 14t of threat & > 12t of enemies)
+  (define group-threat-d (dist2d-fl fgx fgy ftx fty))
+  (define safe-ally-pts
+    (for/list ([u (in-list (or ally-units '()))]
+               #:when (and (rec-xy? u) (not (rec-snapshot? u))
+                           (not (memq (rec-type-sym u) '(scv probe drone larva egg overlord observer overseer changeling)))
+                           (let ([ux (rec-x u 0.0)] [uy (rec-y u 0.0)])
+                             ;; Only count SEPARATE reinforcement allies (> 12t from group and further
+                             ;; from threat than the group itself) so Pool 3 never selects the group's
+                             ;; own standing centroid as its "fallback" point!
+                             (and (fl> (dist2d-fl ux uy fgx fgy) 12.0)
+                                  (fl> (dist2d-fl ux uy ftx fty) (flmax 14.0 (fl+ group-threat-d 4.0)))
+                                  (fl> (min-dist-to-pts ux uy enemy-pts) 12.0)))))
+      (cons (rec-x u 0.0) (rec-y u 0.0))))
+
+  (define safe-enemy-r (if enemy-cap-air? STAGE-ENEMY-CAP-AIR-SAFE-RADIUS STAGE-ENEMY-SAFE-RADIUS))
+  (define travel-w
+    (case severity
+      [(skirmish) 0.85]
+      [(severe)   0.35]
+      [else       0.50]))
+
+  ;; Helper: build candidate tuple `(vector cx cy raw-cx raw-cy hg-bonus?)`
+  (define cands-rev '())
+  (define (add-cand! raw-cx raw-cy [hg? #f])
+    (define cx (clamp-fl raw-cx margin (fl- mw margin)))
+    (define cy (clamp-fl raw-cy margin (fl- mh margin)))
+    (set! cands-rev (cons (vector cx cy raw-cx raw-cy hg?) cands-rev)))
+
+  ;; Pool 1: All live owned TownHalls 1..N (5.0t behind each TH away from threat)
+  (for ([th (in-list (if (pair? th-recs) th-recs (list (hasheq 'x fbx 'y fby))))])
+    (define thx (rec-x th fbx))
+    (define thy (rec-y th fby))
+    (define thz (rec-z-opt th))
+    (define th-hg? (and thz threat-z (fl>= (fl- thz threat-z) 0.5)))
+    (define vx (fl- thx ftx))
+    (define vy (fl- thy fty))
+    (define vd (flmax 1.0 (flsqrt (fl+ (fl* vx vx) (fl* vy vy)))))
+    (define ux (fl/ vx vd))
+    (define uy (fl/ vy vd))
+    (for ([ang (in-list '(0.0 0.55 -0.55))])
+      (define-values (rx ry) (rotate-vec ux uy ang))
+      (add-cand! (fl+ thx (fl* 5.0 rx)) (fl+ thy (fl* 5.0 ry)) th-hg?)))
+
+  ;; Pool 2: Friendly static defense & siege anchor cover (3.5t behind away from threat)
+  (for ([da (in-list def-anchor-recs)])
+    (define dax (rec-x da fbx))
+    (define day (rec-y da fby))
+    (define daz (rec-z-opt da))
+    (define da-hg? (and daz threat-z (fl>= (fl- daz threat-z) 0.5)))
+    (define vx (fl- dax ftx))
+    (define vy (fl- day fty))
+    (define vd (flmax 1.0 (flsqrt (fl+ (fl* vx vx) (fl* vy vy)))))
+    (define ux (fl/ vx vd))
+    (define uy (fl/ vy vd))
+    (add-cand! (fl+ dax (fl* 3.5 ux)) (fl+ day (fl* 3.5 uy)) da-hg?))
+
+  ;; Pool 3: Safe friendly reinforcement cluster centroid (>= 4 safe allies)
+  (define safe-ally-centroid #f)
+  (when (>= (length safe-ally-pts) 4)
+    (define n-sa (exact->inexact (length safe-ally-pts)))
+    (define-values (scx scy)
+      (for/fold ([sx 0.0] [sy 0.0] #:result (values (fl/ sx n-sa) (fl/ sy n-sa)))
+                ([p (in-list safe-ally-pts)])
+        (values (fl+ sx (car p)) (fl+ sy (cdr p)))))
+    (set! safe-ally-centroid (cons scx scy))
+    (add-cand! scx scy #f)
+    (define vx (fl- scx ftx))
+    (define vy (fl- scy fty))
+    (define vd (flmax 1.0 (flsqrt (fl+ (fl* vx vx) (fl* vy vy)))))
+    (add-cand! (fl+ scx (fl* 3.5 (fl/ vx vd))) (fl+ scy (fl* 3.5 (fl/ vy vd))) #f))
+
+  ;; Pool 4: Mid-map tactical disengage offset (14/18/22t along 65% away + 35% toward safe anchor)
+  (define min-group-th-d (min-dist-to-pts fgx fgy th-pts))
+  (when (and (eq? severity 'skirmish) (fl> min-group-th-d 26.0))
+    ;; Pick nearest safe TH (or safe ally centroid if closer)
+    (define safe-home-pt
+      (let* ([safe-ths (filter (lambda (p) (fl> (min-dist-to-pts (car p) (cdr p) enemy-pts) 14.0)) th-pts)]
+             [pool (append safe-ths (if safe-ally-centroid (list safe-ally-centroid) '()))]
+             [use-pool (if (pair? pool) pool th-pts)])
+        (for/fold ([best (car use-pool)]
+                   [bd (dist2d-fl fgx fgy (caar use-pool) (cdar use-pool))]
+                   #:result best)
+                  ([p (in-list (cdr use-pool))])
+          (define d (dist2d-fl fgx fgy (car p) (cdr p)))
+          (if (fl< d bd) (values p d) (values best bd)))))
+    (define adx (fl- fgx ftx))
+    (define ady (fl- fgy fty))
+    (define ad (flmax 1.0 (flsqrt (fl+ (fl* adx adx) (fl* ady ady)))))
+    (define hdx (fl- (car safe-home-pt) fgx))
+    (define hdy (fl- (cdr safe-home-pt) fgy))
+    (define hd (flmax 1.0 (flsqrt (fl+ (fl* hdx hdx) (fl* hdy hdy)))))
+    (define bxv (fl+ (fl* 0.65 (fl/ adx ad)) (fl* 0.35 (fl/ hdx hd))))
+    (define byv (fl+ (fl* 0.65 (fl/ ady ad)) (fl* 0.35 (fl/ hdy hd))))
+    (define bn (flmax 0.01 (flsqrt (fl+ (fl* bxv bxv) (fl* byv byv)))))
+    (define bux (fl/ bxv bn))
+    (define buy (fl/ byv bn))
+    (for ([r (in-list '(14.0 18.0 22.0))])
+      (for ([ang (in-list '(0.0 0.45 -0.45))])
+        (define-values (rx ry) (rotate-vec bux buy ang))
+        (add-cand! (fl+ fgx (fl* r rx)) (fl+ fgy (fl* r ry)) #f))))
+
+  ;; Pool 5: Interior high-ground / main ramp choke (5.0t from base toward nat, 0 / +/- 0.45 rad)
+  (let* ([dx (fl- fnx fbx)]
+         [dy (fl- fny fby)]
+         [d (flmax 1.0 (flsqrt (fl+ (fl* dx dx) (fl* dy dy))))]
+         [step (flmin 5.0 (fl* 0.35 d))]
+         [ux (fl/ dx d)]
+         [uy (fl/ dy d)]
+         [main-hg? (or (eq? severity 'severe)
+                       (fl<= (min-dist-to-pts fnx fny enemy-pts) 18.0))])
+    (for ([ang (in-list '(0.0 0.45 -0.45))])
+      (define-values (rx ry) (rotate-vec ux uy ang))
+      (add-cand! (fl+ fbx (fl* step rx)) (fl+ fby (fl* step ry)) main-hg?)))
+
+  (define (score-fallback-cand cx cy raw-cx raw-cy hg?)
+    (define clamp-pen (fl* -4.0 (dist2d-fl raw-cx raw-cy cx cy)))
+    (define path-ok? (or air-domain? (bfs-pathable? bfs-dist-fn cx cy)))
+    (define min-obs-d (if (null? obstacle-pts) 99.0 (min-dist-to-pts cx cy obstacle-pts)))
+    (define min-e-d (if (null? enemy-pts) 99.0 (min-dist-to-pts cx cy enemy-pts)))
+    (define blk-cnt (escape-segment-blocking-count fgx fgy cx cy enemy-pts 8.5))
+    (define def-cnt
+      (for/sum ([dp (in-list def-anchor-pts)])
+        (if (fl<= (dist2d-fl cx cy (car dp) (cdr dp)) 8.0) 1 0)))
+    (define ally-cnt
+      (for/sum ([ap (in-list safe-ally-pts)])
+        (if (fl<= (dist2d-fl cx cy (car ap) (cdr ap)) 10.0) 1 0)))
+    (define travel-d (dist2d-fl fgx fgy cx cy))
+    (fl+ clamp-pen
+         (fl+ (if path-ok? 0.0 -500.0)
+              (fl+ (if (and (not air-domain?) (fl< min-obs-d STAGE-OBSTACLE-MIN-CLEARANCE))
+                       (fl* -120.0 (fl- STAGE-OBSTACLE-MIN-CLEARANCE min-obs-d))
+                       (flmin 6.0 min-obs-d))
+                   (fl+ (if (fl< min-e-d safe-enemy-r)
+                            (fl* -25.0 (fl- safe-enemy-r min-e-d))
+                            (flmin 20.0 (fl* 0.8 (fl- min-e-d safe-enemy-r))))
+                        (fl+ (fl* -90.0 (exact->inexact blk-cnt))
+                             (fl+ (flmin 66.0 (fl* 22.0 (exact->inexact def-cnt)))
+                                  (fl+ (flmin 32.0 (fl* 4.0 (exact->inexact ally-cnt)))
+                                       (fl+ (if hg? 18.0 0.0)
+                                            (fl* (fl- travel-w) travel-d))))))))))
+
+  (define-values (best-x best-y _best-sc)
+    (for/fold ([bx (clamp-fl fbx margin (fl- mw margin))]
+               [by (clamp-fl fby margin (fl- mh margin))]
+               [bsc -1e18])
+              ([c (in-list cands-rev)])
+      (define cx (vector-ref c 0))
+      (define cy (vector-ref c 1))
+      (define sc (score-fallback-cand cx cy (vector-ref c 2) (vector-ref c 3) (vector-ref c 4)))
+      (if (fl> sc bsc)
+          (values cx cy sc)
+          (values bx by bsc))))
+
+  ;; Hysteresis Smoothing: hold `prev-pt` unless unsafe, flank-blocked, unpathable, or drifted `> 4.5t`
+  (cond
+    [(and (pair? prev-pt) (real? (car prev-pt)) (real? (cdr prev-pt)))
+     (define px (clamp-fl (fl->safe (car prev-pt) best-x) margin (fl- mw margin)))
+     (define py (clamp-fl (fl->safe (cdr prev-pt) best-y) margin (fl- mh margin)))
+     (define prev-e-d (if (null? enemy-pts) 99.0 (min-dist-to-pts px py enemy-pts)))
+     (define prev-obs-d (if (null? obstacle-pts) 99.0 (min-dist-to-pts px py obstacle-pts)))
+     (define prev-blk (escape-segment-blocking-count fgx fgy px py enemy-pts 8.5))
+     (define prev-safe?
+       (and (fl>= prev-e-d safe-enemy-r)
+            (= prev-blk 0)
+            (or air-domain?
+                (and (bfs-pathable? bfs-dist-fn px py)
+                     (fl>= prev-obs-d STAGE-OBSTACLE-MIN-CLEARANCE)))))
+     (if (and prev-safe? (fl<= (dist2d-fl px py best-x best-y) STAGE-SMOOTH-DRIFT-THRESH))
+         (cons px py)
+         (cons best-x best-y))]
+    [else
+     (cons best-x best-y)]))
+
+;; =============================================================================
 ;; Group Policy & State Machine (`'staging -> 'dispatched -> 'regrouping`)
 ;; =============================================================================
 
@@ -619,7 +920,8 @@
          #:supply-used [supply-used 0]
          #:ally-combat-supply [ally-combat-supply 0]
          #:enemy-believed-supply [enemy-believed-supply 0]
-         #:in-production-counts [in-prod-counts (hasheq)])
+         #:in-production-counts [in-prod-counts (hasheq)]
+         #:defensive-muster-active? [defensive-muster-active? #f])
   ;; Reset cleanly on new match / frame rewind
   (when (or (<= frame 4) (< frame (unbox (staging-group-manager-last-frame mgr))))
     (staging-group-manager-reset! mgr))
@@ -834,6 +1136,13 @@
                 (for/or ([bp (in-list base-pts)])
                   (fl<= (dist2d-fl ex ey (car bp) (cdr bp)) 24.0))))))
 
+     ;; Loop 64B Bug #1 (`#1811`): On `<= 2` bases, enemy combat `< 10.0t` from Natural is an
+     ;; existential core-base threat — allow home-defense scramble even during defensive muster!
+     (define enemy-near-nat-2base?
+       (and (<= (length ally-townhalls) 2)
+            (for/or ([e (in-list enemy-combat-recs)])
+              (fl< (dist2d-fl (rec-x e 9999.0) (rec-y e 9999.0) fnx fny) 10.0))))
+
      ;; Policy lookup per group family:
      ;; returns (values domain min-cnt min-sup max-wait-frames min-dwell-frames prod-cnt protect-vs-cap-air?)
      (define (group-policy gid)
@@ -946,9 +1255,16 @@
 
        ;; Hard Safety Override #1: Emergency Home-Defense Scramble
        ;; Releases all staging groups when home base / workers are under attack (or enemy capital air
-       ;; shells ANY base), EXCEPT `< 6` Corruptors vs `>= 3` Tempests so small packs don't feed!
+       ;; shells ANY base), EXCEPT `< 6` Corruptors vs `>= 3` Tempests so small packs don't feed,
+       ;; AND Loop 64B Bug #1: during `defensive-muster-active?`, suppress outer-base (3rd+)
+       ;; scramble so staging packs consolidate, while ALWAYS scrambling on Main threat OR
+       ;; `<= 2`-base Natural threat (`< 10.0t` of Natural)!
        (define home-scramble-override?
-         (and (or under-home-attack? (and protect-vs-cap-air? cap-air-shelling-base?))
+         (and (or (and under-home-attack?
+                       (or (not defensive-muster-active?)
+                           enemy-near-main?
+                           enemy-near-nat-2base?))
+                  (and protect-vs-cap-air? cap-air-shelling-base?))
               (not (and protect-vs-cap-air? (< n-members 6)))))
 
        ;; Ready-to-commit condition (pack threshold + cohesion OR anti-stall / endgame / home-defense)
@@ -1066,17 +1382,21 @@
                           (and (>= n-members 6)
                                (or under-home-attack? cap-air-shelling-base?)))
                       (fl<= u-edist STAGE-TEMPEST-CONTACT-RADIUS)))
+               (define eff-commit-ratio
+                 (if defensive-muster-active? STAGE-MUSTER-COMMIT-RATIO STAGE-COMMIT-STRENGTH-RATIO))
+               (define eff-retreat-ratio
+                 (if defensive-muster-active? STAGE-MUSTER-RETREAT-RATIO STAGE-RETREAT-STRENGTH-RATIO))
                (define commit-fight?
                  (and (not (and protect-vs-cap-air? (< n-members min-cnt) (not cap-dive-ok?)))
                       (or cap-dive-ok?
                           (fl<= local-e-str 0.01)
-                          (fl>= local-a-str (fl* STAGE-COMMIT-STRENGTH-RATIO local-e-str)))))
+                          (fl>= local-a-str (fl* eff-commit-ratio local-e-str)))))
                (cond
                  [commit-fight?
                   ;; Release this unit to Phase 5b to fight immediately!
                   (release-staging-lease! uid)]
                  [(or protect-vs-cap-air?
-                      (fl< local-a-str (fl* STAGE-RETREAT-STRENGTH-RATIO local-e-str)))
+                      (fl< local-a-str (fl* eff-retreat-ratio local-e-str)))
                   ;; Actively retreat air units away from enemy blended toward safe stage point
                   (define-values (rx ry) (compute-retreat-pt ux uy near-ex near-ey sx sy mw mh))
                   (set-add! handled uid)

@@ -746,6 +746,231 @@
               (or (not (eq? (situational-counter-plan-primary-situation sc-plan-off) 'late-game-spellcaster-standoff))
                   (has-recharge? (situational-counter-plan-ability-actions sc-plan-off)))))
 
+;; =============================================================================
+;; 6. Loop 64 A4 & A5: Dynamic Phase/Situation Chrono Boost, OC Scan Reserve,
+;;    Multi-Widow-Mine Reserve, & Terran Supply Drop (`255`) Policy
+;; =============================================================================
+
+(let ()
+  ;; 6a. Protoss Chrono Boost 4:00 Pivot & Gateway Sink Elimination
+  (define c-nx (macro-chrono-candidate-info 101 'nexus))
+  (define c-cy (macro-chrono-candidate-info 102 'cybernetics-core))
+  (define c-fg (macro-chrono-candidate-info 103 'forge))
+  (define c-rb (macro-chrono-candidate-info 104 'robotics-facility))
+  (define c-sg (macro-chrono-candidate-info 105 'stargate))
+  (define c-gw (macro-chrono-candidate-info 106 'gateway))
+  (define c-wg (macro-chrono-candidate-info 107 'warp-gate))
+
+  ;; Phase 0-4m (< 5376f & < 34w): Nexus > CyberCore > Robo > Gateway
+  (check-eq "l64-chrono-0-4m-picks-nexus-first"
+            (macro-chrono-candidate-info-tag
+             (select-protoss-chrono-target-policy
+              #:candidates (list c-gw c-rb c-cy c-nx)
+              #:loop 2400 #:worker-count 22 #:nexus-energy 60.0))
+            101)
+  (check-true "l64-chrono-0-4m-early-rush-prioritizes-gate-over-nexus"
+              (and (> (score-protoss-chrono-target-policy 'gateway #:loop 2200 #:worker-count 18
+                                                          #:early-ling-or-worker-rush? #t #:early-gate-defenders 1)
+                      900.0)
+                   (< (score-protoss-chrono-target-policy 'nexus #:loop 2200 #:worker-count 18
+                                                          #:early-ling-or-worker-rush? #t #:early-gate-defenders 1)
+                      0.0)))
+
+  ;; Sharp 4:00 Pivot (>= 5376f OR >= 34w): TechUpgrades (955) > Robo (900) > Stargate (860) > Nexus (600 only if idle tech/robo & <56w)
+  (check-eq "l64-chrono-4m-picks-forge-over-robo-nexus-gate"
+            (macro-chrono-candidate-info-tag
+             (select-protoss-chrono-target-policy
+              #:candidates (list c-nx c-gw c-rb c-fg c-sg)
+              #:loop 5600 #:worker-count 36 #:nexus-energy 75.0 #:under-pressure? #t))
+            103)
+  (check-eq "l64-chrono-4m-picks-robo-over-stargate-nexus-gate"
+            (macro-chrono-candidate-info-tag
+             (select-protoss-chrono-target-policy
+              #:candidates (list c-nx c-gw c-sg c-rb)
+              #:loop 6200 #:worker-count 40 #:nexus-energy 75.0))
+            104)
+  (check-eq "l64-chrono-4m-suppresses-gateway-even-under-pressure"
+            (select-protoss-chrono-target-policy
+             #:candidates (list c-gw c-wg)
+             #:loop 9000 #:worker-count 58 #:nexus-energy 85.0 #:under-pressure? #t #:army-supply 24.0)
+            #f)
+  (check-eq "l64-chrono-4m-allows-nexus-when-no-tech-robo-busy-and-under-56w"
+            (macro-chrono-candidate-info-tag
+             (select-protoss-chrono-target-policy
+              #:candidates (list c-nx c-gw)
+              #:loop 6200 #:worker-count 44 #:nexus-energy 75.0))
+            101)
+  (check-eq "l64-chrono-4m-bleeds-gateway-only-at-150e-plus"
+            (macro-chrono-candidate-info-tag
+             (select-protoss-chrono-target-policy
+              #:candidates (list c-gw)
+              #:loop 11000 #:worker-count 68 #:nexus-energy 155.0))
+            106)
+  (check-eq "l64-chrono-4m-allows-gateway-on-main-breach-under-6-army"
+            (macro-chrono-candidate-info-tag
+             (select-protoss-chrono-target-policy
+              #:candidates (list c-gw)
+              #:loop 6400 #:worker-count 40 #:nexus-energy 65.0
+              #:main-base-breach? #t #:army-supply 4.0))
+            106)
+  ;; L64B (`#1814` Bug #4): Post-4m Nexus `< 66w` (+ `>= 125e` `< 72w` bleed) & Gateway `>= 100e` (`>= 125e` near dry caster)
+  (check-eq "l64b-chrono-4m-allows-nexus-at-62w-when-no-unbuffed-tech-robo"
+            (macro-chrono-candidate-info-tag
+             (select-protoss-chrono-target-policy
+              #:candidates (list c-nx c-gw)
+              #:loop 9200 #:worker-count 62 #:nexus-energy 75.0))
+            101)
+  (check-true "l64b-chrono-4m-nexus-cap-bleed-125e-under-72w-stops-at-72w"
+              (and (= (score-protoss-chrono-target-policy 'nexus #:loop 11000 #:worker-count 70
+                                                          #:nexus-energy 130.0 #:has-busy-tech-or-robo? #t)
+                      580.0)
+                   (< (score-protoss-chrono-target-policy 'nexus #:loop 11000 #:worker-count 72
+                                                          #:nexus-energy 130.0 #:has-busy-tech-or-robo? #t)
+                      0.0)))
+  (check-eq "l64b-chrono-4m-gateway-cap-bleed-at-105e-no-dry-caster"
+            (macro-chrono-candidate-info-tag
+             (select-protoss-chrono-target-policy
+              #:candidates (list c-gw)
+              #:loop 11000 #:worker-count 68 #:nexus-energy 105.0 #:dry-caster-near? #f))
+            106)
+  (check-eq "l64b-chrono-4m-gateway-holds-110e-near-dry-caster"
+            (select-protoss-chrono-target-policy
+             #:candidates (list c-gw)
+             #:loop 11000 #:worker-count 68 #:nexus-energy 110.0 #:dry-caster-near? #t)
+            #f)
+  (check-eq "l64b-chrono-4m-gateway-bleeds-130e-near-dry-caster-preserving-50e-recharge"
+            (macro-chrono-candidate-info-tag
+             (select-protoss-chrono-target-policy
+              #:candidates (list c-gw)
+              #:loop 11000 #:worker-count 68 #:nexus-energy 130.0 #:dry-caster-near? #t))
+            106)
+  ;; Wire early probe chrono stops handing Nexus chrono at >= 4:00 w/ >= 28 probes!
+  (check-eq "l64-early-probe-chrono-yields-after-4m-28w"
+            (select-early-probe-chrono-pairs
+             #:loop 5600 #:worker-count 30
+             #:ready-nexuses (list (mk-nx 401 60.0 30.0 30.0 #:training-probe? #t #:chrono-buffed? #f))
+             #:ally-casters '() #:enemy-units-present? #f #:recharge-available? #t
+             #:caster-ready? (lambda (_) #t) #:target-ready? (lambda (_) #t))
+            '())
+
+  ;; 6b. Terran OC Policy: Multi-WM (>=2 even w/ Turret), cloak_seen top-2 OCs, >=8:00 & under-pressure top-1 OC
+  (define latch64 (make-macro-policy-latch))
+  (define p-wm2-with-turret
+    (evaluate-terran-mule-policy
+     #:latch latch64 #:loop 6000
+     #:ready-ocs (list (mk-oc 101 80.0) (mk-oc 102 65.0 56.0 30.0))
+     #:self-units (append (list std-oc-self std-rax (mk-self 'missile-turret 23 32.0 32.0 #:structure? #t #:completed? #t))
+                          std-scvs std-marines6)
+     #:enemy-units (list (mk-enemy 'widow-mine 498 90.0 90.0)
+                         (mk-enemy 'widow-mine-burrowed 500 92.0 90.0 #:burrowed? #t))
+     #:townhalls (list (mk-th 101 'orbital-command 30.0 30.0) (mk-th 102 'orbital-command 56.0 30.0))
+     #:worker-count 32
+     #:known-enemy-race 'Terran))
+  (check-eq "l64-multi-wm-reserves-1-oc-even-with-home-turret"
+            (terran-mule-policy-result-proactive-scan-oc-tags p-wm2-with-turret)
+            '(101))
+  (check-true "l64-multi-wm-oc1-holds-80e" (not (terran-oc-mule-allowed? p-wm2-with-turret 101 80.0)))
+  (check-true "l64-multi-wm-oc2-mules-65e" (terran-oc-mule-allowed? p-wm2-with-turret 102 65.0))
+
+  (reset-macro-policy-latch-for-new-match! latch64)
+  (define p-cloak-top2
+    (evaluate-terran-mule-policy
+     #:latch latch64 #:loop 7000
+     #:ready-ocs (list (mk-oc 101 90.0) (mk-oc 102 75.0 56.0 30.0) (mk-oc 103 60.0 80.0 30.0))
+     #:self-units (append (list std-oc-self std-rax) std-scvs std-marines6)
+     #:enemy-units (list (mk-enemy 'banshee 55 110.0 110.0 #:flying? #t))
+     #:townhalls (list (mk-th 101 'orbital-command 30.0 30.0)
+                       (mk-th 102 'orbital-command 56.0 30.0)
+                       (mk-th 103 'orbital-command 80.0 30.0))
+     #:worker-count 44
+     #:known-enemy-race 'Terran))
+  (check-eq "l64-cloak-seen-reserves-top2-ocs"
+            (terran-mule-policy-result-proactive-scan-oc-tags p-cloak-top2)
+            '(101 102))
+  (check-true "l64-cloak-seen-oc3-mules-60e" (terran-oc-mule-allowed? p-cloak-top2 103 60.0))
+
+  (reset-macro-policy-latch-for-new-match! latch64)
+  (define p-8m-phase
+    (evaluate-terran-mule-policy
+     #:latch latch64 #:loop 11000
+     #:ready-ocs (list (mk-oc 101 85.0) (mk-oc 102 65.0 56.0 30.0))
+     #:self-units (append (list std-oc-self std-rax) std-scvs std-marines6)
+     #:enemy-units '()
+     #:townhalls (list (mk-th 101 'orbital-command 30.0 30.0) (mk-th 102 'orbital-command 56.0 30.0))
+     #:worker-count 50
+     #:known-enemy-race 'Zerg))
+  (check-eq "l64-8m-phase-reserves-top1-oc"
+            (terran-mule-policy-result-proactive-scan-oc-tags p-8m-phase)
+            '(101))
+  (check-true "l64-8m-phase-oc1-holds-85e" (not (terran-oc-mule-allowed? p-8m-phase 101 85.0)))
+  (check-true "l64-8m-phase-oc2-mules-65e" (terran-oc-mule-allowed? p-8m-phase 102 65.0))
+
+  (reset-macro-policy-latch-for-new-match! latch64)
+  (define p-pressure-2b
+    (evaluate-terran-mule-policy
+     #:latch latch64 #:loop 6200
+     #:ready-ocs (list (mk-oc 101 85.0) (mk-oc 102 65.0 56.0 30.0))
+     #:self-units (append (list std-oc-self std-rax) std-scvs std-marines6)
+     #:enemy-units '()
+     #:townhalls (list (mk-th 101 'orbital-command 30.0 30.0) (mk-th 102 'orbital-command 56.0 30.0))
+     #:worker-count 36
+     #:known-enemy-race 'Zerg
+     #:under-pressure? #t))
+  (check-eq "l64-under-pressure-2b-reserves-top1-oc"
+            (terran-mule-policy-result-proactive-scan-oc-tags p-pressure-2b)
+            '(101))
+
+  ;; 6c. Terran Supply Drop (`evaluate-terran-supply-drop-policy`)
+  (define d-upg  (macro-depot-info 301 'supply-depot 32.0 32.0 #t #t))
+  (define d-free (macro-depot-info 302 'supply-depot-lowered 35.0 32.0 #t #f))
+  (define sd-go
+    (evaluate-terran-supply-drop-policy
+     #:loop 8000 #:supply-used 78 #:supply-cap 78
+     #:ready-ocs (list (mk-oc 101 85.0) (mk-oc 102 65.0 56.0 30.0))
+     #:depots (list d-upg d-free)
+     #:under-pressure? #t #:cloak-seen? #f #:mule-policy p-pressure-2b))
+  (check-eq "l64-supply-drop-prefers-unreserved-oc-and-fresh-depot"
+            (list (terran-supply-drop-decision-oc-tag sd-go)
+                  (terran-supply-drop-decision-depot-tag sd-go))
+            '(102 302))
+  (define sd-cloak-low
+    (evaluate-terran-supply-drop-policy
+     #:loop 8000 #:supply-used 78 #:supply-cap 78
+     #:ready-ocs (list (mk-oc 101 85.0))
+     #:depots (list d-free)
+     #:under-pressure? #t #:cloak-seen? #t))
+  (check-eq "l64-supply-drop-holds-under-cloak-below-100e"
+            (terran-supply-drop-decision-oc-tag sd-cloak-low)
+            #f)
+  (define sd-cloak-105
+    (evaluate-terran-supply-drop-policy
+     #:loop 8000 #:supply-used 78 #:supply-cap 78
+     #:ready-ocs (list (mk-oc 101 105.0))
+     #:depots (list d-free)
+     #:under-pressure? #t #:cloak-seen? #t))
+  (check-eq "l64-supply-drop-fires-under-cloak-at-105e"
+            (list (terran-supply-drop-decision-oc-tag sd-cloak-105)
+                  (terran-supply-drop-decision-depot-tag sd-cloak-105))
+            '(101 302))
+  (define sd-peace
+    (evaluate-terran-supply-drop-policy
+     #:loop 8000 #:supply-used 78 #:supply-cap 78
+     #:ready-ocs (list (mk-oc 101 85.0))
+     #:depots (list d-free)
+     #:under-pressure? #f))
+  (check-eq "l64-supply-drop-skips-when-peaceful"
+            (terran-supply-drop-decision-oc-tag sd-peace)
+            #f)
+  (define sd-cap192
+    (evaluate-terran-supply-drop-policy
+     #:loop 8000 #:supply-used 192 #:supply-cap 192
+     #:ready-ocs (list (mk-oc 101 85.0))
+     #:depots (list d-free)
+     #:under-pressure? #t))
+  (check-eq "l64-supply-drop-skips-at-192-plus-cap"
+            (terran-supply-drop-decision-oc-tag sd-cap192)
+            #f))
+
 (printf "macro-ability-policy-test: ~a/~a passed (~a failed)\n"
         passed (+ passed failed) failed)
 (when (> failed 0)

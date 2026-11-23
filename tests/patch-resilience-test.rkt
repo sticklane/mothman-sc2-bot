@@ -633,6 +633,174 @@
 (check-equal "p2-zero-duplicate-spell-loops-in-bot-runtime" rt-forbidden-spell-hits '())
 (check-equal "p2-macro-ability-policy-pure-leaf-module" macro-policy-bad-require-hits '())
 
+;; -----------------------------------------------------------------------------
+;; 9. Architecture Phase A (`#1784`): Strict AST Layer Import Matrix (`lib/**/*.rkt`)
+;; -----------------------------------------------------------------------------
+(printf "[9/10] Verifying Architecture Phase A strict AST layer import matrix...\n")
+
+;; Parse top-level `(require ...)` and `(unsafe-require/typed ...)` S-expressions
+;; (ignoring comments/docstrings) and extract relative `.rkt` module paths normalized
+;; relative to `repo-lib-dir` (e.g. "sc2-protobuf-ws.rkt", "tactics/zerg-burrow-micro.rkt").
+(define (extract-local-rkt-requires file-path)
+  (define src (file->string file-path))
+  ;; Skip `#lang ...` line before reading S-expressions
+  (define nl-idx (for/first ([i (in-range (string-length src))]
+                             #:when (char=? (string-ref src i) #\newline))
+                   i))
+  (define body (if nl-idx (substring src (add1 nl-idx)) ""))
+  (define base-dir (path-only file-path))
+  (define lib-root (simplify-path repo-lib-dir))
+  (define (norm-req s)
+    (define full (simplify-path (build-path base-dir s)))
+    (define rel (find-relative-path lib-root full))
+    (path->string rel))
+  (define (walk-req-spec spec acc)
+    (cond
+      [(string? spec)
+       (if (regexp-match? #px"\\.rkt$" spec) (cons (norm-req spec) acc) acc)]
+      [(and (pair? spec)
+            (memq (car spec) '(only-in except-in prefix-in rename-in combine-in for-syntax for-meta)))
+       (if (pair? (cdr spec)) (walk-req-spec (cadr spec) acc) acc)]
+      [else acc]))
+  (define in (open-input-string body))
+  (let loop ([acc '()])
+    (define datum (with-handlers ([exn:fail:read? (lambda (_) eof)]) (read in)))
+    (cond
+      [(eof-object? datum) (remove-duplicates (reverse acc))]
+      [(and (pair? datum) (eq? (car datum) 'require))
+       (loop (for/fold ([a acc]) ([spec (in-list (cdr datum))])
+               (walk-req-spec spec a)))]
+      [(and (pair? datum) (eq? (car datum) 'unsafe-require/typed) (pair? (cdr datum)))
+       (loop (walk-req-spec (cadr datum) acc))]
+      [(and (pair? datum) (eq? (car datum) 'module) (>= (length datum) 4))
+       ;; Also scan nested submodules (e.g. `dyn-hash-ops`) for require forms
+       (define sub-acc
+         (for/fold ([a acc]) ([form (in-list (cdddr datum))])
+           (if (and (pair? form) (eq? (car form) 'require))
+               (for/fold ([a2 a]) ([spec (in-list (cdr form))])
+                 (walk-req-spec spec a2))
+               a)))
+       (loop sub-acc)]
+      [else (loop acc)])))
+
+(define L0-MODULES
+  '("sc2-types.rkt"
+    "sc2-game-constants.rkt"
+    "sc2-geometry.rkt"
+    "sc2-common.rkt"
+    "sc2-typed-commands.rkt"
+    "sc2-logging.rkt"))
+
+(define L1-MODULES
+  '("perception-grid.rkt"
+    "opponent-world-model.rkt"
+    "mirror-mind-predictor.rkt"
+    "sc2-bayesian.rkt"
+    "sc2-combat-eval.rkt"
+    "sc2-pathing.rkt"
+    "stall-watchdog.rkt"))
+
+;; 9a. L0 foundation modules may ONLY require other L0 modules
+(define l0-upward-violations
+  (for*/list ([m (in-list L0-MODULES)]
+              [req (in-list (extract-local-rkt-requires (build-path repo-lib-dir m)))]
+              #:when (not (member req L0-MODULES)))
+    (list m '-> req)))
+(check-equal "pA-L0-no-upward-require" l0-upward-violations '())
+
+;; 9b. L1 belief/perception modules must NOT require L2/L3/L4 modules
+(define l1-upward-violations
+  (for*/list ([m (in-list L1-MODULES)]
+              [req (in-list (extract-local-rkt-requires (build-path repo-lib-dir m)))]
+              #:when (or (member req '("bot-runtime.rkt" "sc2-protobuf-ws.rkt" "priority-macro-brain.rkt"))
+                         (regexp-match? #px"^(?:plan|tactics|engine)/" req)))
+    (list m '-> req)))
+(check-equal "pA-L1-no-upward-require" l1-upward-violations '())
+
+;; 9c. `lib/engine/{arbiter,world-view}.rkt` must be strictly L0-only leaves
+(define engine-leaf-violations
+  (for*/list ([m (in-list '("engine/arbiter.rkt" "engine/world-view.rkt"))]
+              #:when (file-exists? (build-path repo-lib-dir m))
+              [req (in-list (extract-local-rkt-requires (build-path repo-lib-dir m)))]
+              #:when (not (member req L0-MODULES)))
+    (list m '-> req)))
+(check-true  "pA-engine-arbiter-exists" (file-exists? (build-path repo-lib-dir "engine" "arbiter.rkt")))
+(check-true  "pA-engine-world-view-exists" (file-exists? (build-path repo-lib-dir "engine" "world-view.rkt")))
+(check-equal "pA-L3-engine-leaves-L0-only" engine-leaf-violations '())
+
+;; 9d. `lib/plan/*.rkt` must NOT require `lib/tactics/*`, `bot-runtime.rkt`, or `sc2-protobuf-ws.rkt`
+(define plan-dir (build-path repo-lib-dir "plan"))
+(define plan-upward-violations
+  (for*/list ([p (in-directory plan-dir)]
+              #:when (and (file-exists? p) (equal? (path-get-extension p) #".rkt"))
+              [req (in-list (extract-local-rkt-requires p))]
+              #:when (or (regexp-match? #px"^tactics/" req)
+                         (member req '("bot-runtime.rkt" "sc2-protobuf-ws.rkt"))))
+    (list (path->string (find-relative-path repo-lib-dir p)) '-> req)))
+(check-equal "pA-L2a-plan-no-tactics-runtime-wire" plan-upward-violations '())
+
+;; 9e. `lib/tactics/*.rkt` must NOT require `bot-runtime.rkt`, `sc2-protobuf-ws.rkt`, or `priority-macro-brain.rkt`
+(define tactics-dir (build-path repo-lib-dir "tactics"))
+(define tactics-upward-violations
+  (for*/list ([p (in-directory tactics-dir)]
+              #:when (and (file-exists? p) (equal? (path-get-extension p) #".rkt"))
+              [req (in-list (extract-local-rkt-requires p))]
+              #:when (member req '("bot-runtime.rkt" "sc2-protobuf-ws.rkt" "priority-macro-brain.rkt")))
+    (list (path->string (find-relative-path repo-lib-dir p)) '-> req)))
+(check-equal "pA-L2bc-tactics-no-runtime-wire-brain" tactics-upward-violations '())
+
+;; 9f. `lib/bot-runtime.rkt` must have ZERO upward require of `lib/sc2-protobuf-ws.rkt` or dead `compiler/syntax.rkt`
+(define rt-requires (extract-local-rkt-requires (build-path repo-lib-dir "bot-runtime.rkt")))
+(define rt-forbidden-requires
+  (filter (lambda (r)
+            (or (equal? r "sc2-protobuf-ws.rkt")
+                (regexp-match? #px"compiler/syntax\\.rkt$" r)))
+          rt-requires))
+(check-equal "pA-runtime-no-wire-or-compiler-require" rt-forbidden-requires '())
+
+;; -----------------------------------------------------------------------------
+;; 10. Architecture Phase A (`#1784`): Single-Authority & No-Wire-Policy Ratchets
+;; -----------------------------------------------------------------------------
+(printf "[10/10] Verifying single-authority ratchets, OWM L1 order, & L0 common ownership...\n")
+
+;; 10a. Retroactive `set! raw-cmds` stripping ratchet in `sc2-protobuf-ws.rkt` (<= 3 in Phase A/B -> 0 in Phase C3)
+(define ws-retro-strip-hits
+  (regexp-match* #px"\\(set!\\s+raw-cmds\\s+\\(filter" ws-src))
+(check-true (format "pA-ws-retroactive-strip-ratchet<=3 (got ~a)" (length ws-retro-strip-hits))
+            (<= (length ws-retro-strip-hits) 3))
+
+;; 10b. No new ad-hoc `*-handled-tags` or `*-claimed-ht` mutable claim tables in runtime or tactics
+(define tag-claim-allowlist '("wave3-handled-tags" "disruptor-handled-tags" "direct-claimed-ht"))
+(define tag-claim-rx #px"\\(define\\s+([a-zA-Z0-9_\\-\\?!\\*]+-(?:handled-tags|claimed-ht))\\b")
+(define new-tag-claim-violations
+  (for*/list ([p (in-list (cons (build-path repo-lib-dir "bot-runtime.rkt")
+                                (for/list ([tp (in-directory tactics-dir)]
+                                           #:when (and (file-exists? tp)
+                                                       (equal? (path-get-extension tp) #".rkt")))
+                                  tp)))]
+              [m (in-list (regexp-match* tag-claim-rx (file->string p) #:match-select cadr))]
+              #:when (not (member m tag-claim-allowlist)))
+    (list (path->string (find-relative-path repo-lib-dir p)) m)))
+(check-equal "pA-no-new-ad-hoc-tag-claim-tables" new-tag-claim-violations '())
+
+;; 10c. `step-opponent-world-model!` runs in Layer 1 BEFORE `step-layer1c-mirror-mind!` (not in L2 Phase 6)
+(define owm-call-match (regexp-match-positions #px"\\(step-opponent-world-model!" rt-src))
+(define l1c-def-match  (regexp-match-positions #px"\\(define \\(step-layer1c-mirror-mind!" rt-src))
+(check-true "pA-owm-hoisted-before-mirror-mind"
+            (and owm-call-match l1c-def-match
+                 (< (caar owm-call-match) (caar l1c-def-match))))
+
+;; 10d. `lib/sc2-common.rkt` owns `dyn-hash-ref`/`dyn-hash-has-key?`/`fast-units-have-any-type?`
+;;      and `lib/plan/wall-and-block.rkt` has zero local duplicate definitions
+(define common-src (file->string (build-path repo-lib-dir "sc2-common.rkt")))
+(define wall-src   (file->string (build-path repo-lib-dir "plan" "wall-and-block.rkt")))
+(check-true "pA-sc2-common-defines-dyn-hash-ref"
+            (regexp-match? #px"\\(define \\(dyn-hash-ref(?=[ \t\r\n)])" common-src))
+(check-true "pA-sc2-common-defines-fast-units-have-any-type?"
+            (regexp-match? #px"\\(define \\(fast-units-have-any-type\\?(?=[ \t\r\n)])" common-src))
+(check-true "pA-wall-and-block-no-local-dyn-hash-ref"
+            (not (regexp-match? #px"\\(define \\(dyn-hash-ref(?=[ \t\r\n)])" wall-src)))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Patch-Resilience & ResponseData Checks: ~a/~a passed (~a failed)\n"
         passed (+ passed failed) failed)

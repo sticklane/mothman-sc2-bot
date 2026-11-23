@@ -976,6 +976,217 @@
                    (pair? z-ovi-acts) (eq? (caar z-ovi-acts) 'move) (= (cadar z-ovi-acts) 9405))
               (format "p-obs=~a p-sen=~a t-oc=~a z-ovi=~a" p-obs-acts p-sen-acts t-oc-acts z-ovi-acts)))
 
+;; =============================================================================
+;; 10. Loop 64 P0 #1: Generalized Situational Fallback (`pick-safe-fallback-point`)
+;;     & Defensive Muster (`STAGE-MUSTER-COMMIT-RATIO` / `#:defensive-muster-active?`)
+;; =============================================================================
+(let ()
+  ;; 10a (L64-B0): All 5 situational candidate pools
+  ;; Pool 1: Owned 1..N TownHalls (including 4th base) — selects safe nearby 4th TH over far Main
+  (define ths-4
+    (list (mk-u 9501 'nexus 32.5 32.5)
+          (mk-u 9502 'nexus 62.5 32.5)
+          (mk-u 9503 'nexus 110.0 55.0)
+          (mk-u 9504 'nexus 110.0 105.0)))
+  (define en-3rd (list (mk-u 9510 'roach 118.0 55.0 #:hp 145.0)
+                       (mk-u 9511 'roach 118.0 57.0 #:hp 145.0)))
+  (define fb-4th
+    (pick-safe-fallback-point #:group-x 102.0 #:group-y 62.0
+                              #:threat-x 118.0 #:threat-y 56.0
+                              #:severity 'muster
+                              #:ally-townhalls ths-4 #:ally-buildings ths-4
+                              #:enemy-units en-3rd
+                              #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5))
+  (define pool1-ok?
+    (and (< (dist2d (car fb-4th) (cdr fb-4th) 110.0 105.0) 15.0)
+         (>= (dist2d (car fb-4th) (cdr fb-4th) 118.0 56.0) 16.0)))
+
+  ;; Pool 2: Fortified static defense / siege cover bonus beats unfortified equidistant base
+  (define ths-eq (list (mk-u 9521 'nexus 40.0 40.0)
+                       (mk-u 9522 'nexus 40.0 120.0)))
+  (define def-north (list (mk-u 9523 'shield-battery 44.0 118.0)
+                          (mk-u 9524 'photon-cannon 44.0 122.0)
+                          (mk-u 9525 'shield-battery 42.0 115.0)))
+  (define en-east (list (mk-u 9529 'marauder 95.0 80.0 #:hp 125.0)))
+  (define fb-def
+    (pick-safe-fallback-point #:group-x 70.0 #:group-y 80.0
+                              #:threat-x 95.0 #:threat-y 80.0
+                              #:severity 'muster
+                              #:ally-townhalls ths-eq #:ally-buildings (append ths-eq def-north)
+                              #:enemy-units en-east
+                              #:base-x 40.0 #:base-y 40.0 #:nat-x 60.0 #:nat-y 40.0))
+  (define pool2-ok? (> (cdr fb-def) 95.0))
+
+  ;; Pool 3: Safe friendly reinforcement cluster centroid (`>= 4` allies > 14t from threat)
+  (define reinf-6
+    (for/list ([i (in-range 6)])
+      (mk-u (+ 9530 i) 'stalker 85.0 (+ 84.0 (* 0.4 i)) #:hp 80.0)))
+  (define fb-reinf
+    (pick-safe-fallback-point #:group-x 110.0 #:group-y 85.0
+                              #:threat-x 130.0 #:threat-y 85.0
+                              #:severity 'muster
+                              #:ally-townhalls (list (mk-u 9539 'nexus 32.5 32.5))
+                              #:ally-buildings (list (mk-u 9539 'nexus 32.5 32.5))
+                              #:ally-units reinf-6
+                              #:enemy-units (list (mk-u 9540 'roach 130.0 85.0 #:hp 145.0))
+                              #:base-x 32.5 #:base-y 32.5 #:nat-x 56.5 #:nat-y 32.5))
+  (define pool3-ok?
+    (and (< (dist2d (car fb-reinf) (cdr fb-reinf) 85.0 85.0) 14.0)
+         (>= (dist2d (car fb-reinf) (cdr fb-reinf) 130.0 85.0) 16.0)))
+
+  ;; Pool 4: Mid-map `'skirmish` tactical disengage offset (stays mid-map instead of running back to Main!)
+  (define fb-skirm
+    (pick-safe-fallback-point #:group-x 110.0 #:group-y 110.0
+                              #:threat-x 122.0 #:threat-y 122.0
+                              #:severity 'skirmish
+                              #:ally-townhalls (list (mk-u 9541 'hatchery 32.5 32.5))
+                              #:ally-buildings (list (mk-u 9541 'hatchery 32.5 32.5))
+                              #:enemy-units (list (mk-u 9542 'stalker 122.0 122.0 #:hp 80.0))
+                              #:base-x 32.5 #:base-y 32.5 #:nat-x 56.5 #:nat-y 32.5))
+  (define pool4-ok?
+    (and (> (dist2d (car fb-skirm) (cdr fb-skirm) 32.5 32.5) 40.0)
+         (>= (dist2d (car fb-skirm) (cdr fb-skirm) 122.0 122.0) 16.0)))
+
+  ;; Pool 5: Severe threat at Natural -> interior base/ramp fallback well clear of Natural
+  (define fb-int
+    (pick-safe-fallback-point #:group-x 50.0 #:group-y 32.5
+                              #:threat-x 60.0 #:threat-y 32.5
+                              #:severity 'severe
+                              #:ally-townhalls (list (mk-u 9543 'command-center 32.5 32.5)
+                                                     (mk-u 9544 'command-center 62.5 32.5))
+                              #:ally-buildings (list (mk-u 9543 'command-center 32.5 32.5)
+                                                     (mk-u 9544 'command-center 62.5 32.5))
+                              #:enemy-units (list (mk-u 9545 'zealot 60.0 32.5 #:hp 100.0))
+                              #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5))
+  (define pool5-ok?
+    (and (< (car fb-int) 42.0)
+         (>= (dist2d (car fb-int) (cdr fb-int) 60.0 32.5) 16.0)))
+
+  (check-true "l64-b0-pick-safe-fallback-point-5-situational-pools"
+              (and pool1-ok? pool2-ok? pool3-ok? pool4-ok? pool5-ok?)
+              (format "p1=~a(~a) p2=~a(~a) p3=~a(~a) p4=~a(~a) p5=~a(~a)"
+                      pool1-ok? fb-4th pool2-ok? fb-def pool3-ok? fb-reinf
+                      pool4-ok? fb-skirm pool5-ok? fb-int))
+
+  ;; 10b (L64-B0): Anti-flank escape-segment blocking penalty (`-90.0`/enemy) & `4.5t` smoothing
+  (define ths-flank (list (mk-u 9551 'hatchery 32.5 50.0)
+                          (mk-u 9552 'hatchery 90.0 100.0)))
+  (define flank-pack
+    (for/list ([i (in-range 5)])
+      (mk-u (+ 9560 i) 'zergling (+ 60.0 (* 0.5 i)) 50.0 #:hp 35.0)))
+  (define fb-noflank
+    (pick-safe-fallback-point #:group-x 90.0 #:group-y 50.0
+                              #:threat-x 102.0 #:threat-y 50.0
+                              #:severity 'muster
+                              #:ally-townhalls ths-flank #:ally-buildings ths-flank
+                              #:enemy-units (cons (mk-u 9569 'roach 102.0 50.0 #:hp 145.0) flank-pack)
+                              #:base-x 32.5 #:base-y 50.0 #:nat-x 56.5 #:nat-y 50.0))
+  (define anti-flank-ok? (> (cdr fb-noflank) 75.0))
+  ;; `4.5t` hysteresis smoothing: minor 1.5t threat wiggle preserves exact `prev-pt`
+  (define fb-smooth
+    (pick-safe-fallback-point #:group-x 90.0 #:group-y 50.0
+                              #:threat-x 103.5 #:threat-y 50.5
+                              #:severity 'muster
+                              #:ally-townhalls ths-flank #:ally-buildings ths-flank
+                              #:enemy-units (cons (mk-u 9569 'roach 103.5 50.5 #:hp 145.0) flank-pack)
+                              #:base-x 32.5 #:base-y 50.0 #:nat-x 56.5 #:nat-y 50.0
+                              #:prev-pt fb-noflank))
+  (define smooth-ok? (equal? fb-smooth fb-noflank))
+  (check-true "l64-b0-fallback-anti-flank-escape-and-4.5t-smoothing"
+              (and anti-flank-ok? smooth-ok?)
+              (format "noflank=~a smooth=~a antiFlank=~a smoothOk=~a"
+                      fb-noflank fb-smooth anti-flank-ok? smooth-ok?))
+
+  ;; 10c (L64-B2): `step-staging-groups!` `#:defensive-muster-active?` raises commit/retreat
+  ;;     to `0.95 / 0.78` while preserving default `0.70 / 0.55` when `#f`!
+  (define ratios-ok?
+    (and (= STAGE-MUSTER-COMMIT-RATIO 0.95)
+         (= STAGE-MUSTER-RETREAT-RATIO 0.78)))
+  (define drones-m (list (mk-u 9570 'drone 28.0 32.5)))
+  (define bldgs-m (list (mk-u 9571 'hatchery 32.5 32.5)
+                        (mk-u 9572 'hatchery 62.5 32.5)
+                        (mk-u 9573 'hatchery 95.0 32.5)))
+  ;; Outer-base home-scramble suppression: 3 Mutalisks staging at home (< min-cnt 6) while
+  ;; enemy attacks 3rd base (102, 32.5) with `under-home-attack? = #t` & `enemy-near-main? = #f`!
+  (define muta-home3 (for/list ([i (in-range 3)]) (mk-u (+ 9580 i) 'mutalisk 40.0 (+ 31.0 (* 0.3 i)) #:hp 120.0 #:flying #t)))
+  (define stalkers-3rd (for/list ([i (in-range 7)]) (mk-u (+ 9595 i) 'stalker 102.0 (+ 31.0 (* 0.4 i)) #:hp 80.0 #:shield 80.0)))
+  (define mgr-m-off (make-staging-group-manager))
+  (define r-m-off
+    (step-staging-groups! mgr-m-off #:frame 7000 #:live-obs? #t
+                          #:ally-units (append drones-m muta-home3)
+                          #:combat-units muta-home3
+                          #:ally-buildings bldgs-m #:enemy-units stalkers-3rd
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5
+                          #:under-home-attack? #t
+                          #:defensive-muster-active? #f))
+  (define mgr-m-on (make-staging-group-manager))
+  (define r-m-on
+    (step-staging-groups! mgr-m-on #:frame 7000 #:live-obs? #t
+                          #:ally-units (append drones-m muta-home3)
+                          #:combat-units muta-home3
+                          #:ally-buildings bldgs-m #:enemy-units stalkers-3rd
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5
+                          #:under-home-attack? #t
+                          #:defensive-muster-active? #t))
+  ;; 3 Mutalisks vs 4 enemy Mutalisks in contact (`0.75x`: >= 0.70 default commit, < 0.78 muster retreat!)
+  (define ally-m3 (for/list ([i (in-range 3)]) (mk-u (+ 9610 i) 'mutalisk 50.0 (+ 32.0 (* 0.3 i)) #:hp 120.0 #:flying #t)))
+  (define enemy-m4 (for/list ([i (in-range 4)]) (mk-u (+ 9620 i) 'mutalisk 58.0 (+ 32.0 (* 0.3 i)) #:hp 120.0 #:flying #t)))
+  (define mgr-air-off (make-staging-group-manager))
+  (define r-air-off
+    (step-staging-groups! mgr-air-off #:frame 7100 #:live-obs? #t
+                          #:ally-units (append drones-m ally-m3) #:combat-units ally-m3
+                          #:ally-buildings bldgs-m #:enemy-units enemy-m4
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5
+                          #:defensive-muster-active? #f))
+  (define mgr-air-on (make-staging-group-manager))
+  (define r-air-on
+    (step-staging-groups! mgr-air-on #:frame 7100 #:live-obs? #t
+                          #:ally-units (append drones-m ally-m3) #:combat-units ally-m3
+                          #:ally-buildings bldgs-m #:enemy-units enemy-m4
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5
+                          #:defensive-muster-active? #t))
+  (check-true "l64-b2-staging-groups-defensive-muster-ratios-and-nonmain-scramble-suppress"
+              (and ratios-ok?
+                   (memq 'air-harass-muta (staging-step-result-dispatched-groups r-m-off))
+                   (memq 'air-harass-muta (staging-step-result-staging-groups r-m-on))
+                   (not (memq 'air-harass-muta (staging-step-result-dispatched-groups r-m-on)))
+                   (not (ormap (lambda (a) (eq? (car a) 'move)) (staging-step-result-actions r-air-off)))
+                   (ormap (lambda (a) (and (eq? (car a) 'move) (= (second a) 9610)))
+                          (staging-step-result-actions r-air-on)))
+              (format "ratios=~a off-disp=~a on-stg=~a on-disp=~a airOff=~a airOn=~a"
+                      ratios-ok?
+                      (staging-step-result-dispatched-groups r-m-off)
+                      (staging-step-result-staging-groups r-m-on)
+                      (staging-step-result-dispatched-groups r-m-on)
+                      (staging-step-result-actions r-air-off)
+                      (staging-step-result-actions r-air-on)))
+
+  ;; 10d (Loop 64B Bug #1): On `<= 2` bases, enemy combat `< 10.0t` of Natural DOES scramble
+  ;;     even when `#:defensive-muster-active? #t` (whereas 3-base outer threat in 10c stayed staging!)
+  (define bldgs-2b (list (mk-u 9631 'hatchery 32.5 32.5)
+                         (mk-u 9632 'hatchery 62.5 32.5)))
+  (define stalkers-nat (for/list ([i (in-range 7)]) (mk-u (+ 9640 i) 'stalker 69.0 (+ 31.0 (* 0.4 i)) #:hp 80.0 #:shield 80.0)))
+  (define mgr-2b-nat (make-staging-group-manager))
+  (define r-2b-nat
+    (step-staging-groups! mgr-2b-nat #:frame 7000 #:live-obs? #t
+                          #:ally-units (append drones-m muta-home3)
+                          #:combat-units muta-home3
+                          #:ally-buildings bldgs-2b #:enemy-units stalkers-nat
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5
+                          #:under-home-attack? #t
+                          #:enemy-near-main? #f
+                          #:defensive-muster-active? #t))
+  (check-true "l64b-2base-natural-scramble-allowed-during-defensive-muster"
+              (and (memq 'air-harass-muta (staging-step-result-dispatched-groups r-2b-nat)) #t)
+              (format "2b-nat-disp=~a 2b-nat-stg=~a"
+                      (staging-step-result-dispatched-groups r-2b-nat)
+                      (staging-step-result-staging-groups r-2b-nat))))
+
 (printf "=== L58 Staging Groups & Concave Positioning Test Suite: ~a PASS, ~a FAIL ===\n"
         pass-cnt fail-cnt)
 (when (> fail-cnt 0)

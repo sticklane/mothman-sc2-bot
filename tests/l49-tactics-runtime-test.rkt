@@ -14,10 +14,20 @@
 ;;   9. L49-T2e: Protoss Kiting Worker-Rush (`r16` pinned miners at `h-cnt=6` + Zealot #1 `7.5t` guard)
 ;; =============================================================================
 
-(require racket/list
+(require racket/file
+         racket/list
          racket/match
          racket/math
          "../lib/bot-runtime.rkt"
+         (only-in "../lib/opponent-world-model.rkt"
+                  opponent-world-model-last-summary
+                  opponent-world-model-pads
+                  pad-belief-entry-label
+                  pad-belief-entry-x
+                  pad-belief-entry-y
+                  opponent-world-summary?
+                  opponent-world-summary-frame
+                  opponent-world-summary-known-bldg-counts)
          "../lib/tactics/order-ledger.rkt"
          "../lib/tactics/pro-spellcaster-micro.rkt"
          "../lib/tactics/unit-mode-micro.rkt"
@@ -6003,6 +6013,539 @@
                    (>= near-combat 3))
               (format "far=(d:~a r:~a l:~a) cap=(r:~a l:~a) near-combat=~a"
                       far-drones far-roaches far-lings cap-roaches cap-lings near-combat)))
+
+;; -----------------------------------------------------------------------------
+;; Test 100 (L64-B0 / 64B): Architecture Phase A Engine Layering — Zero Wire/Compiler
+;; Require in `bot-runtime.rkt` + Same-Frame OWM Perception Hoist + `enemy-exp-x/y` Parity
+;; -----------------------------------------------------------------------------
+(let ()
+  (define rt-src (file->string "lib/bot-runtime.rkt"))
+  (define no-ws-req? (not (regexp-match? #px"\"sc2-protobuf-ws\\.rkt\"" rt-src)))
+  (define no-comp-req? (not (regexp-match? #px"\"\\.\\./compiler/syntax\\.rkt\"" rt-src)))
+  ;; Same-frame OWM hoist: `step-layer1-perception!` immediately populates `opponent-world-model-last-summary`
+  ;; on the SAME frame BEFORE Layer 1c or Layer 2 runs, AND forwards `'enemy-exp-x`/`'enemy-exp-y`
+  ;; from `'enemy-expand-x`/`'enemy-expand-y` even when `#:sanitized? #t` is passed!
+  (define rt-owm (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define ds-bldg (mk-u 96001 'dark-shrine 140.0 135.0 #:hp 150.0 #:shield 150.0))
+  (define obs-owm
+    (hash-set*
+     (mk-live-obs 'Terran 'Protoss 3600 #:minerals 200 #:gas 100 #:supply-used 32 #:supply-cap 46
+                  #:ally-units (list (mk-u 96002 'scv 30.0 32.5 #:hp 45.0))
+                  #:ally-buildings (list (mk-u 96003 'orbital-command 32.5 32.5 #:hp 1500.0))
+                  #:enemy-buildings (list ds-bldg))
+     'enable-opponent-world-model #t
+     'enemy-expand-x 126.5
+     'enemy-expand-y 118.5))
+  (step-layer1-perception! rt-owm obs-owm #:sanitized? #t)
+  (define owm-m (rt-opponent-world-model rt-owm))
+  (define sum (opponent-world-model-last-summary owm-m))
+  (define enemy-nat-pad
+    (findf (lambda (p) (eq? (pad-belief-entry-label p) 'enemy-natural))
+           (opponent-world-model-pads owm-m)))
+  (define exp-parity-ok?
+    (and enemy-nat-pad
+         (< (abs (- (pad-belief-entry-x enemy-nat-pad) 126.5)) 0.01)
+         (< (abs (- (pad-belief-entry-y enemy-nat-pad) 118.5)) 0.01)))
+  (define owm-hoist-ok?
+    (and (opponent-world-summary? sum)
+         (= (opponent-world-summary-frame sum) 3600)
+         (> (hash-ref (opponent-world-summary-known-bldg-counts sum) 'dark-shrine 0) 0)
+         exp-parity-ok?))
+  (check-true "L64-B0-Zero-Upward-Wire-Require-And-SameFrame-OWM-Hoist"
+              (and no-ws-req? no-comp-req? owm-hoist-ok?)
+              (format "no-ws=~a no-comp=~a owm-hoist=~a expParity=~a"
+                      no-ws-req? no-comp-req? owm-hoist-ok? exp-parity-ok?)))
+
+;; -----------------------------------------------------------------------------
+;; Test 101 (L64-B1 / 64B Bug #1): Midgame Defensive Muster Safety —
+;; Dual Local+Global `<0.80x` Enter, Main `<=14t` Abort, `>18t` Move / `15..18t` Attack-Pos,
+;; `<=10t` Fighting-Ally No-Split Exemption, `>=0.88x/0.85x` & Unconditional `224f` Timeout,
+;; High-Ground `#56` Siege Tank Exempt, & Zero Trigger in Arena / `< 3:30`
+;; -----------------------------------------------------------------------------
+(let ()
+  (define bldgs-2b
+    (list (mk-u 96101 'orbital-command 32.5 32.5 #:hp 1500.0)
+          (mk-u 96102 'orbital-command 62.5 32.5 #:hp 1500.0)))
+  (define enemy-push-12
+    (for/list ([i (in-range 12)])
+      (mk-u (+ 96200 i) 'stalker 78.0 (+ 30.0 (* 0.4 i)) #:hp 80.0 #:shield 80.0)))
+  (define marine-far   (mk-u 96120 'marine 52.0 48.0 #:hp 45.0))
+  (define marine-mid   (mk-u 96121 'marine 65.0 45.0 #:hp 45.0))
+  (define marine-front (mk-u 96122 'marine 71.0 32.0 #:hp 45.0))
+  (define marine-rear  (mk-u 96123 'marine 62.5 32.0 #:hp 45.0))
+  (define hg-tank      (mk-u 96150 'siege-tank 63.5 32.5 #:hp 175.0))
+  (define small-squad  (list hg-tank marine-far marine-mid marine-front marine-rear))
+
+  ;; (a) Early `< 3:30` (frame=4000 < 4704): NEVER triggers defensive muster!
+  (define rt-early (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (run-l34 rt-early
+           (mk-live-obs 'Terran 'Protoss 4000 #:supply-used 40 #:supply-cap 54
+                        #:ally-units small-squad #:ally-buildings bldgs-2b #:enemy-units enemy-push-12))
+  (define early-off? (not (hash-ref (rt-door-state rt-early) 'l64-def-muster-active? #f)))
+
+  ;; (b) Arena (non-live, 0 harvesters / 0 THs): NEVER triggers defensive muster!
+  (define rt-arena (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (run-l34 rt-arena
+           (hasheq 'race 'Terran 'enemy-race 'Protoss 'frame 7000
+                   'minerals 0 'gas 0 'supply-used 10 'supply-cap 200
+                   'ally-units small-squad 'ally-buildings '() 'enemy-units enemy-push-12
+                   'base-x 32.5 'base-y 32.5 'natural-x 62.5 'natural-y 32.5
+                   'enemy-x 142.5 'enemy-y 138.5))
+  (define arena-off? (not (hash-ref (rt-door-state rt-arena) 'l64-def-muster-active? #f)))
+
+  ;; (c1) Global army AHEAD (`>= 0.80x` global, even with `0` local defenders at Natural): NEVER enters!
+  (define rt-ahead (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define global-ahead-army
+    (append
+     (for/list ([i (in-range 30)]) (mk-u (+ 96240 i) 'marine 22.0 (+ 48.0 (* 0.2 i)) #:hp 45.0))
+     (for/list ([i (in-range 6)])  (mk-u (+ 96280 i) 'marauder 24.0 (+ 48.0 (* 0.3 i)) #:hp 125.0))))
+  (run-l34 rt-ahead
+           (mk-live-obs 'Terran 'Protoss 7000 #:supply-used 84 #:supply-cap 100
+                        #:ally-units global-ahead-army #:ally-buildings bldgs-2b #:enemy-units enemy-push-12))
+  (define global-ahead-off? (not (hash-ref (rt-door-state rt-ahead) 'l64-def-muster-active? #f)))
+
+  ;; (c2) Enemy within `<= 14.0t` of Main (`11.5t`): direct core threat aborts muster!
+  (define rt-main14 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define enemy-at-main14
+    (for/list ([i (in-range 12)])
+      (mk-u (+ 96290 i) 'stalker 44.0 (+ 30.0 (* 0.4 i)) #:hp 80.0 #:shield 80.0)))
+  (run-l34 rt-main14
+           (mk-live-obs 'Terran 'Protoss 7000 #:supply-used 48 #:supply-cap 70
+                        #:ally-units small-squad #:ally-buildings bldgs-2b #:enemy-units enemy-at-main14))
+  (define main14-off? (not (hash-ref (rt-door-state rt-main14) 'l64-def-muster-active? #f)))
+
+  ;; (d) Live 2-base `frame=7000`, BOTH local & global `< 0.80x` -> ENTERS muster:
+  ;;     - `96120` (`29.3t > 18t`, isolated) -> `'move`
+  ;;     - `96121` (`16.8t` in `15..18t`, isolated) -> `'attack-pos` (NOT `'move`!)
+  ;;     - `96123` (`15.5t` from enemy, `8.5t <= 10t` from fighting `96122` at `7t`) -> EXEMPT (NO `'move`!)
+  ;;     - `96150` (`#56` Siege Tank) -> EXEMPT, still emits `(cast-spell 96150 siege-mode)`!
+  (define rt-m (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define obs-enter
+    (mk-live-obs 'Terran 'Protoss 7000 #:supply-used 48 #:supply-cap 70
+                 #:ally-units small-squad #:ally-buildings bldgs-2b #:enemy-units enemy-push-12))
+  (define acts-enter (run-l34 rt-m obs-enter))
+  (define entered? (and (hash-ref (rt-door-state rt-m) 'l64-def-muster-active? #f) #t))
+  (define far-moved?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (= (second a) 96120))) acts-enter))
+  (define mid-attack-pos?
+    (and (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-pos) (= (second a) 96121))) acts-enter)
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (= (second a) 96121))) acts-enter))))
+  (define rear-no-split?
+    (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (= (second a) 96123))) acts-enter)))
+  (define tank-sieged?
+    (ormap (lambda (a)
+             (and (pair? a) (eq? (car a) 'cast-spell) (= (second a) 96150) (eq? (third a) 'siege-mode)))
+           acts-enter))
+
+  ;; (e) Reinforced army (`>= 0.88x` local / `>= 0.85x` global) -> RELEASES defensive muster!
+  (define big-reinforce
+    (append
+     (for/list ([i (in-range 20)]) (mk-u (+ 96300 i) 'marine 48.0 (+ 28.0 (* 0.3 i)) #:hp 45.0))
+     (for/list ([i (in-range 6)])  (mk-u (+ 96340 i) 'marauder 49.0 (+ 30.0 (* 0.4 i)) #:hp 125.0))
+     (for/list ([i (in-range 2)])  (mk-u (+ 96360 i) 'siege-tank 44.0 (+ 30.0 (* 0.5 i)) #:hp 175.0))))
+  (run-l34 rt-m
+           (mk-live-obs 'Terran 'Protoss 7024 #:supply-used 90 #:supply-cap 110
+                        #:ally-units big-reinforce #:ally-buildings bldgs-2b #:enemy-units enemy-push-12))
+  (define released? (not (hash-ref (rt-door-state rt-m) 'l64-def-muster-active? #f)))
+
+  ;; (f) Unconditional `224f` (`10s`) hard timeout release (even when still `0.23x` outnumbered!)
+  ;;     + cooldown prevents immediate 1-step thrash re-entry at `+4f`!
+  (define rt-to (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (run-l34 rt-to
+           (mk-live-obs 'Terran 'Protoss 7000 #:supply-used 48 #:supply-cap 70
+                        #:ally-units small-squad #:ally-buildings bldgs-2b #:enemy-units enemy-push-12))
+  (define to-entered? (and (hash-ref (rt-door-state rt-to) 'l64-def-muster-active? #f) #t))
+  (run-l34 rt-to
+           (mk-live-obs 'Terran 'Protoss 7224 #:supply-used 48 #:supply-cap 70
+                        #:ally-units small-squad #:ally-buildings bldgs-2b #:enemy-units enemy-push-12))
+  (define to-released? (not (hash-ref (rt-door-state rt-to) 'l64-def-muster-active? #f)))
+  (run-l34 rt-to
+           (mk-live-obs 'Terran 'Protoss 7228 #:supply-used 48 #:supply-cap 70
+                        #:ally-units small-squad #:ally-buildings bldgs-2b #:enemy-units enemy-push-12))
+  (define to-cd-held? (not (hash-ref (rt-door-state rt-to) 'l64-def-muster-active? #f)))
+
+  (check-true "L64-B1-Defensive-Muster-Enter-Release-TankExempt-And-ArenaBypass"
+              (and early-off? arena-off? global-ahead-off? main14-off?
+                   entered? far-moved? mid-attack-pos? rear-no-split? tank-sieged?
+                   released? to-entered? to-released? to-cd-held?)
+              (format "early=~a arena=~a aheadOff=~a main14Off=~a enter=~a farM=~a midAP=~a rearNoSplit=~a tankS=~a rel=~a toE=~a toR=~a toCD=~a"
+                      early-off? arena-off? global-ahead-off? main14-off?
+                      entered? far-moved? mid-attack-pos? rear-no-split? tank-sieged?
+                      released? to-entered? to-released? to-cd-held?)))
+
+;; -----------------------------------------------------------------------------
+;; Test 102 (L64-B3): Protoss 1-Forge +1 Weapons First, Terran Proportional
+;; Medivac Cap & TvP Marauder, ZvZ Ravager Cap, ZvT Hydra Meatshield, PvP
+;; Immortal Cadence & PvZ Templar Archive
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) Protoss 1-Forge `+1 Weapons` strictly ahead of `+1 Armor`
+  (define rt-f1 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define acts-f1
+    (step-layer2-economy!
+     rt-f1
+     (mk-live-obs 'Protoss 'Terran 7200 #:minerals 350 #:gas 250 #:supply-used 60 #:supply-cap 84
+                  #:mineral-harvesters 34 #:vespene-harvesters 10
+                  #:ally-units (for/list ([i (in-range 10)]) (mk-u (+ 96400 i) 'stalker 50.0 32.5 #:hp 80.0 #:shield 80.0))
+                  #:ally-buildings (list (mk-u 96420 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                                         (mk-u 96421 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                                         (mk-u 96422 'forge 36.0 36.0 #:hp 400.0 #:shield 400.0)))))
+  (define f1-wpn1?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'research) (eq? (second a) 'protoss-ground-weapons-1))) acts-f1))
+  (define f1-no-arm1?
+    (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'research) (eq? (second a) 'protoss-ground-armor-1))) acts-f1)))
+
+  ;; (b) Terran Proportional Medivac Cap (`8` Marines -> cap `1` Medivac; blocks Medivac `#2`!)
+  ;;     + TvP TechLab Marauder target `>= 12` (trains Marauder when `< 12` & `gas >= 25`)
+  (define rt-med1 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define acts-med-cap
+    (step-layer2-economy!
+     rt-med1
+     (mk-live-obs 'Terran 'Protoss 8500 #:minerals 800 #:gas 400 #:supply-used 60 #:supply-cap 94
+                  #:mineral-harvesters 36 #:vespene-harvesters 10
+                  #:researched-upgrades '(stimpack combat-shield concussive-shells)
+                  #:ally-units (append
+                                (for/list ([i (in-range 8)]) (mk-u (+ 96430 i) 'marine 50.0 32.5 #:hp 45.0))
+                                (list (mk-u 96449 'medivac 48.0 32.5 #:hp 150.0 #:flying #t)))
+                  #:ally-buildings (list (mk-u 96450 'orbital-command 32.5 32.5 #:hp 1500.0)
+                                         (mk-u 96451 'orbital-command 62.5 32.5 #:hp 1500.0)
+                                         (mk-u 96456 'orbital-command 40.0 59.5 #:hp 1500.0)
+                                         (hash-set (mk-u 96452 'barracks 40.0 32.5 #:hp 1000.0) 'add-on-tag 96453)
+                                         (mk-u 96453 'barracks-techlab 42.5 32.5 #:hp 400.0)
+                                         (hash-set (mk-u 96455 'factory 44.0 38.0 #:hp 1250.0) 'add-on-tag 96457)
+                                         (mk-u 96457 'factory-techlab 46.5 38.0 #:hp 400.0)
+                                         (mk-u 96454 'starport 38.0 38.0 #:hp 1300.0)))))
+  (define med-capped-at-1?
+    (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'medivac))) acts-med-cap)))
+  (define tvp-marauder-trained?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'marauder))) acts-med-cap))
+
+  ;; (c) ZvZ Ravager ratio cap (`4` Roaches < 6 -> 0 Ravagers; `8` Roaches + `2` Ravagers -> 0 more!)
+  (define rt-zvz1 (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define acts-zvz-low
+    (step-layer2-economy!
+     rt-zvz1
+     (mk-live-obs 'Zerg 'Zerg 7200 #:minerals 500 #:gas 400 #:supply-used 54 #:supply-cap 78
+                  #:mineral-harvesters 34 #:vespene-harvesters 8
+                  #:ally-units (for/list ([i (in-range 4)]) (mk-u (+ 96460 i) 'roach 50.0 32.5 #:hp 145.0))
+                  #:ally-buildings (list (mk-u 96470 'lair 32.5 32.5 #:hp 2000.0)
+                                         (mk-u 96471 'hatchery 62.5 32.5 #:hp 1500.0)
+                                         (mk-u 96472 'roach-warren 38.0 36.0 #:hp 850.0)))))
+  (define zvz-low-no-rav?
+    (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'morph) (eq? (second a) 'ravager))) acts-zvz-low)))
+  (define rt-zvz2 (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define acts-zvz-cap
+    (step-layer2-economy!
+     rt-zvz2
+     (mk-live-obs 'Zerg 'Zerg 7500 #:minerals 500 #:gas 400 #:supply-used 66 #:supply-cap 90
+                  #:mineral-harvesters 36 #:vespene-harvesters 10
+                  #:ally-units (append
+                                (for/list ([i (in-range 8)]) (mk-u (+ 96480 i) 'roach 50.0 32.5 #:hp 145.0))
+                                (list (mk-u 96490 'ravager 52.0 32.5 #:hp 120.0)
+                                      (mk-u 96491 'ravager 52.5 32.5 #:hp 120.0)))
+                  #:ally-buildings (list (mk-u 96495 'lair 32.5 32.5 #:hp 2000.0)
+                                         (mk-u 96496 'hatchery 62.5 32.5 #:hp 1500.0)
+                                         (mk-u 96497 'roach-warren 38.0 36.0 #:hp 850.0)))))
+  (define zvz-cap-no-extra-rav?
+    (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'morph) (eq? (second a) 'ravager))) acts-zvz-cap)))
+
+  ;; (d) ZvT Hydralisk meatshield gate (`10` Hydras, `0` Lings/Banes/Roaches, no heavy air -> 0 Hydras!)
+  (define rt-zvt (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define acts-zvt-hy
+    (step-layer2-economy!
+     rt-zvt
+     (mk-live-obs 'Zerg 'Terran 9500 #:minerals 600 #:gas 400 #:supply-used 82 #:supply-cap 116
+                  #:mineral-harvesters 44 #:vespene-harvesters 12
+                  #:ally-units (append
+                                (for/list ([i (in-range 10)]) (mk-u (+ 96500 i) 'hydralisk 50.0 32.5 #:hp 90.0))
+                                (for/list ([i (in-range 4)])  (mk-u (+ 96520 i) 'larva 34.0 32.5 #:hp 25.0)))
+                  #:ally-buildings (list (mk-u 96530 'lair 32.5 32.5 #:hp 2000.0)
+                                         (mk-u 96531 'hatchery 62.5 32.5 #:hp 1500.0)
+                                         (mk-u 96532 'hatchery 82.5 52.5 #:hp 1500.0)
+                                         (mk-u 96533 'spawning-pool 36.0 36.0 #:hp 1000.0)
+                                         (mk-u 96534 'hydralisk-den 38.0 38.0 #:hp 850.0))
+                  #:enemy-units (for/list ([i (in-range 8)]) (mk-u (+ 96540 i) 'marine 130.0 130.0 #:hp 45.0)))))
+  (define zvt-hydra-gated?
+    (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'hydralisk))) acts-zvt-hy)))
+
+  ;; (e) PvP Idle Robo Immortal cadence (`4` Immortals < 8 -> keeps training Immortal `#5`)
+  ;;     + PvZ Templar Archive unlock at `2` Nexuses & `>= 68` supply
+  (define rt-pvp (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define acts-pvp
+    (step-layer2-economy!
+     rt-pvp
+     (mk-live-obs 'Protoss 'Protoss 8200 #:minerals 500 #:gas 300 #:supply-used 74 #:supply-cap 100
+                  #:mineral-harvesters 36 #:vespene-harvesters 10
+                  #:ally-units (append
+                                (for/list ([i (in-range 4)]) (mk-u (+ 96550 i) 'immortal 50.0 32.5 #:hp 200.0 #:shield 100.0))
+                                (for/list ([i (in-range 6)]) (mk-u (+ 96560 i) 'stalker 52.0 32.5 #:hp 80.0 #:shield 80.0))
+                                (list (mk-u 96569 'observer 60.0 32.5 #:hp 40.0 #:shield 20.0 #:flying #t)))
+                  #:ally-buildings (list (mk-u 96570 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                                         (mk-u 96571 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                                         (mk-u 96573 'pylon 36.0 34.0 #:hp 200.0 #:shield 200.0)
+                                         (mk-u 96574 'gateway 40.0 34.0 #:hp 500.0 #:shield 500.0)
+                                         (mk-u 96575 'gateway 42.0 34.0 #:hp 500.0 #:shield 500.0)
+                                         (mk-u 96576 'gateway 44.0 34.0 #:hp 500.0 #:shield 500.0)
+                                         (mk-u 96577 'cybernetics-core 40.0 38.0 #:hp 550.0 #:shield 550.0)
+                                         (mk-u 96572 'robotics-facility 38.0 36.0 #:hp 450.0 #:shield 450.0)))))
+  (define pvp-immortal5?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'immortal))) acts-pvp))
+  (define rt-pvz (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define acts-pvz
+    (step-layer2-economy!
+     rt-pvz
+     (mk-live-obs 'Protoss 'Zerg 5800 #:minerals 650 #:gas 550 #:supply-used 72 #:supply-cap 94
+                  #:mineral-harvesters 30 #:vespene-harvesters 8
+                  #:researched-upgrades '(warp-gate-research charge blink)
+                  #:ally-units (cons (mk-u 96579 'observer 58.0 32.5 #:hp 40.0 #:shield 20.0 #:flying #t)
+                                     (for/list ([i (in-range 10)]) (mk-u (+ 96580 i) 'stalker 50.0 32.5 #:hp 80.0 #:shield 80.0)))
+                  #:ally-buildings (list (mk-u 96590 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                                         (mk-u 96591 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                                         (mk-u 96598 'assimilator 30.0 36.0 #:hp 300.0 #:shield 300.0)
+                                         (mk-u 96599 'assimilator 30.0 28.0 #:hp 300.0 #:shield 300.0)
+                                         (mk-u 96588 'assimilator 60.0 36.0 #:hp 300.0 #:shield 300.0)
+                                         (mk-u 96589 'assimilator 60.0 28.0 #:hp 300.0 #:shield 300.0)
+                                         (mk-u 96593 'pylon 36.0 34.0 #:hp 200.0 #:shield 200.0)
+                                         (mk-u 96594 'gateway 40.0 34.0 #:hp 500.0 #:shield 500.0)
+                                         (mk-u 96595 'gateway 42.0 34.0 #:hp 500.0 #:shield 500.0)
+                                         (mk-u 96596 'gateway 44.0 34.0 #:hp 500.0 #:shield 500.0)
+                                         (mk-u 96597 'cybernetics-core 40.0 38.0 #:hp 550.0 #:shield 550.0)
+                                         (mk-u 96587 'robotics-facility 44.0 38.0 #:hp 450.0 #:shield 450.0)
+                                         (mk-u 96592 'twilight-council 38.0 36.0 #:hp 500.0 #:shield 500.0)))))
+  (define pvz-ta-built?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'templar-archive))) acts-pvz))
+
+  (check-true "L64-B3-ForgeWpn1-MedivacCap-TvPMarauder-ZvZRavager-ZvTHydra-PvPImm-PvZTA"
+              (and f1-wpn1? f1-no-arm1? med-capped-at-1? tvp-marauder-trained?
+                   zvz-low-no-rav? zvz-cap-no-extra-rav? zvt-hydra-gated?
+                   pvp-immortal5? pvz-ta-built?)
+              (format "f1w=~a f1noA=~a medCap=~a mar=~a zvzLow=~a zvzCap=~a zvtHy=~a pvpImm=~a pvzTA=~a"
+                      f1-wpn1? f1-no-arm1? med-capped-at-1? tvp-marauder-trained?
+                      zvz-low-no-rav? zvz-cap-no-extra-rav? zvt-hydra-gated?
+                      pvp-immortal5? pvz-ta-built?)))
+
+;; -----------------------------------------------------------------------------
+;; Test 103 (L64-B4): Widow Mine Pass A Range-5 Snipers (<=3) & Pass B Undetected
+;; Hold, Anti-Mutalisk Mineral-Line Anchor, <4:30 22t Bunker Repair & Bunker-Load
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) Widow Mine Pass A: detected burrowed mine, 0 range-6+ snipers, 5 Marines (range 5.0)
+  ;;     -> assigns <= 3 Marines (= 3) to attack mine and holds remaining 2 Marines in Pass B!
+  (define rt-wm1 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define wm-det (hash-set* (mk-u 96601 'widow-mine-burrowed 80.0 80.0 #:hp 90.0 #:max-hp 90.0)
+                            'burrowed #t 'cloak 2))
+  (define obs-det (mk-u 96602 'raven 76.0 80.0 #:hp 140.0 #:flying #t))
+  (define mar-5 (for/list ([i (in-range 5)]) (mk-u (+ 96610 i) 'marine (+ 73.5 (* 0.2 i)) 80.0 #:hp 45.0)))
+  (define acts-wm1
+    (run-l34
+     rt-wm1
+     (mk-live-obs 'Terran 'Terran 7200 #:supply-used 40 #:supply-cap 54
+                  #:ally-units (cons obs-det mar-5)
+                  #:ally-buildings (list (mk-u 96620 'orbital-command 32.5 32.5 #:hp 1500.0))
+                  #:enemy-units (list wm-det))))
+  (define r5-snipers-cnt
+    (count (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit) (= (third a) 96601))) acts-wm1))
+
+  ;; (b) Widow Mine Pass B: undetected burrowed mine (`cloak=1`), 0 snipers, Zealot at 5.2t -> kites away!
+  (define rt-wm2 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define wm-undet (hash-set* (mk-u 96631 'widow-mine-burrowed 80.0 80.0 #:hp 90.0 #:max-hp 90.0)
+                              'burrowed #t 'cloak 1))
+  (define zeal-close (mk-u 96632 'zealot 74.8 80.0 #:hp 100.0 #:shield 50.0))
+  (define acts-wm2
+    (run-l34
+     rt-wm2
+     (mk-live-obs 'Protoss 'Terran 7200 #:supply-used 36 #:supply-cap 54
+                  #:ally-units (list zeal-close)
+                  #:ally-buildings (list (mk-u 96633 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0))
+                  #:enemy-units (list wm-undet))))
+  (define undet-zeal-held?
+    (and (ormap (lambda (a) (and (pair? a) (eq? (car a) 'kite) (= (second a) 96632))) acts-wm2)
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit) (= (second a) 96632))) acts-wm2))))
+
+  ;; (c) Anti-Mutalisk Mineral-Line Anchor: >= 2 Mutalisks near Natural anchors 3..6 Stalkers <= 8.5t!
+  (define rt-muta (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define mutas-3 (for/list ([i (in-range 3)]) (mk-u (+ 96640 i) 'mutalisk 78.0 (+ 31.0 (* 0.5 i)) #:hp 120.0 #:flying #t)))
+  (define stks-home (for/list ([i (in-range 5)]) (mk-u (+ 96650 i) 'stalker 62.5 (+ 32.0 (* 0.3 i)) #:hp 80.0 #:shield 80.0)))
+  (define acts-muta
+    (run-l34
+     rt-muta
+     (mk-live-obs 'Protoss 'Zerg 8500 #:supply-used 60 #:supply-cap 78
+                  #:ally-units stks-home
+                  #:ally-buildings (list (mk-u 96660 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                                         (mk-u 96661 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                                         (mk-u 96662 'shield-battery 64.0 32.5 #:hp 150.0 #:shield 150.0))
+                  #:enemy-units mutas-3)))
+  (define muta-anchored-move?
+    (ormap (lambda (a)
+             (and (pair? a) (eq? (car a) 'move) (member (second a) '(96650 96651 96652 96653))
+                  (<= (sqrt (+ (expt (- (third a) 64.0) 2) (expt (- (fourth a) 32.5) 2))) 8.5)))
+           acts-muta))
+
+  ;; (d) `< 4:30` (`frame = 4200 < 6048`) damaged Bunker at 18.0t (> 14t, <= 22t) from SCV with enemy combat
+  ;;     -> `plan-terran-spellcaster-micro` emits `'repair`; pure worker rush (`0` combat) stays suppressed!
+  (define dmg-bunk (mk-u 96670 'bunker 52.0 32.5 #:hp 220.0 #:max-hp 400.0))
+  (define scv-far  (mk-u 96671 'scv 34.0 32.5 #:hp 45.0))
+  (define zeal-att (mk-u 96672 'zealot 54.0 32.5 #:hp 100.0 #:shield 50.0))
+  (define probe-r  (mk-u 96673 'probe 54.0 32.5 #:hp 20.0 #:shield 20.0))
+  (define d-bunk-rep
+    (plan-terran-spellcaster-micro (list scv-far dmg-bunk) (list zeal-att)
+                                   #:claims (make-spell-claims) #:current-frame 4200))
+  (define d-bunk-wrush
+    (plan-terran-spellcaster-micro (list scv-far dmg-bunk) (list probe-r)
+                                   #:claims (make-spell-claims) #:current-frame 4200))
+  (define early-bunk-rep-ok?
+    (and (ormap (lambda (d) (and (eq? (spell-directive-ability d) 'repair) (= (spell-directive-target-tag d) 96670))) d-bunk-rep)
+         (not (ormap (lambda (d) (eq? (spell-directive-ability d) 'repair)) d-bunk-wrush))))
+
+  ;; (e) `< 4:30` (`frame = 4500 < 6048`) Marine `bunker-load` override even when Phase 5b attacks Zealots
+  (define rt-bl (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define bunk-empty (hash-set* (mk-u 96680 'bunker 48.0 32.5 #:hp 400.0 #:max-hp 400.0)
+                                'cargo-space-taken 0 'cargo-space-max 4))
+  (define mar-near (mk-u 96681 'marine 46.5 32.5 #:hp 45.0))
+  (define zeal-rush (list (mk-u 96682 'zealot 51.5 32.5 #:hp 100.0 #:shield 50.0)
+                          (mk-u 96683 'zealot 52.0 33.0 #:hp 100.0 #:shield 50.0)))
+  (define acts-bl
+    (run-l34
+     rt-bl
+     (mk-live-obs 'Terran 'Protoss 4500 #:supply-used 22 #:supply-cap 31
+                  #:ally-units (list mar-near)
+                  #:ally-buildings (list (mk-u 96684 'orbital-command 32.5 32.5 #:hp 1500.0) bunk-empty)
+                  #:enemy-units zeal-rush)))
+  (define early-bunker-load-ok?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'bunker-load) (= (second a) 96680) (= (third a) 96681))) acts-bl))
+
+  (check-true "L64-B4-WMPassAB-AntiMutaAnchor-EarlyBunkerRepair-And-BunkerLoad"
+              (and (= r5-snipers-cnt 3) undet-zeal-held? muta-anchored-move?
+                   early-bunk-rep-ok? early-bunker-load-ok?)
+              (format "r5Cnt=~a undetHold=~a mutaAnc=~a bunkRep=~a bunkLoad=~a"
+                      r5-snipers-cnt undet-zeal-held? muta-anchored-move?
+                      early-bunk-rep-ok? early-bunker-load-ok?)))
+
+;; -----------------------------------------------------------------------------
+;; Test 104 (L64-B5): Creep Tumor 264f Maturity, Phase/Situation Chrono & Supply
+;; Drop Wiring, Queen 4m+ Transfuse Reserve, Lurker Leapfrog & Sentry ForceField
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) Creep Tumor `264f` maturity (`0.0%` LotV 240f cooldown fix): 0 emit at +240f, emits at +270f!
+  (define rt-ct (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define ct-u (mk-u 96701 'creep-tumor-burrowed 46.0 32.5 #:hp 50.0))
+  (define z-th (list (mk-u 96702 'hatchery 32.5 32.5 #:hp 1500.0)))
+  (define (has-spread? acts)
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast) (= (second a) 96701) (eq? (third a) 'spread-creep-tumor))) acts))
+  (define a-ct0 (step-layer2-economy! rt-ct (mk-live-obs 'Zerg 'Terran 5000 #:ally-units (list ct-u) #:ally-buildings z-th)))
+  (define a-ct240 (step-layer2-economy! rt-ct (mk-live-obs 'Zerg 'Terran 5240 #:ally-units (list ct-u) #:ally-buildings z-th)))
+  (define a-ct270 (step-layer2-economy! rt-ct (mk-live-obs 'Zerg 'Terran 5270 #:ally-units (list ct-u) #:ally-buildings z-th)))
+  (define creep-264-ok? (and (not (has-spread? a-ct0)) (not (has-spread? a-ct240)) (has-spread? a-ct270)))
+
+  ;; (b) Protoss `>= 4:00` Chrono Boost: pivots to Forge over Gateway, and suppresses Gateway sink!
+  (define rt-ch1 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define nx-ch (hash-set* (mk-u 96710 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0) 'energy 75.0 'busy? #t))
+  (define fg-ch (hash-set* (mk-u 96711 'forge 36.0 36.0 #:hp 400.0 #:shield 400.0) 'busy? #t))
+  (define gw-ch (hash-set* (mk-u 96712 'gateway 40.0 36.0 #:hp 500.0 #:shield 500.0) 'busy? #t 'order-count 1))
+  (define acts-ch-tech
+    (step-layer2-economy!
+     rt-ch1
+     (mk-live-obs 'Protoss 'Terran 6200 #:supply-used 56 #:supply-cap 78
+                  #:mineral-harvesters 36 #:vespene-harvesters 6
+                  #:ally-units (for/list ([i (in-range 10)]) (mk-u (+ 96715 i) 'stalker 50.0 32.5 #:hp 80.0 #:shield 80.0))
+                  #:ally-buildings (list nx-ch fg-ch gw-ch))))
+  (define ch-picked-forge?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (third a) 'chrono-boost) (= (fourth a) 96711))) acts-ch-tech))
+  (define rt-ch2 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define acts-ch-nogate
+    (step-layer2-economy!
+     rt-ch2
+     (mk-live-obs 'Protoss 'Terran 6200 #:supply-used 56 #:supply-cap 78
+                  #:mineral-harvesters 36 #:vespene-harvesters 6
+                  #:ally-units (for/list ([i (in-range 10)]) (mk-u (+ 96730 i) 'stalker 50.0 32.5 #:hp 80.0 #:shield 80.0))
+                  #:ally-buildings (list (hash-set nx-ch 'busy? #f) gw-ch))))
+  (define ch-no-gate-sink?
+    (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (third a) 'chrono-boost) (= (fourth a) 96712))) acts-ch-nogate)))
+  ;; Loop 64B Bug #4 (`#1811`): When busy Forge ALREADY carries `'chrono-boost` buff,
+  ;; `protoss-has-busy-tech-or-robo?` is `#f` so Nexus #2 immediately Chronos Probes (`nexus`)!
+  (define rt-ch3 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define fg-already-buffed (hash-set fg-ch 'buffs '(chrono-boost)))
+  (define acts-ch-buffed-tech
+    (step-layer2-economy!
+     rt-ch3
+     (mk-live-obs 'Protoss 'Terran 6200 #:supply-used 56 #:supply-cap 78
+                  #:mineral-harvesters 36 #:vespene-harvesters 6
+                  #:ally-units (for/list ([i (in-range 10)]) (mk-u (+ 96735 i) 'stalker 50.0 32.5 #:hp 80.0 #:shield 80.0))
+                  #:ally-buildings (list nx-ch fg-already-buffed gw-ch))))
+  (define ch-nexus-when-tech-buffed?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (third a) 'chrono-boost) (= (fourth a) 96710)))
+           acts-ch-buffed-tech))
+
+  ;; (c) Terran Supply Drop (`calldown-extra-supplies` / SC2 `255`) during 4-12m combat supply block
+  (define rt-sd (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define oc-sd (hash-set* (mk-u 96740 'orbital-command 32.5 32.5 #:hp 1500.0) 'energy 65.0))
+  (define dep-sd (mk-u 96741 'supply-depot 38.0 32.5 #:hp 400.0 #:max-hp 400.0))
+  (define acts-sd
+    (step-layer2-economy!
+     rt-sd
+     (mk-live-obs 'Terran 'Zerg 7200 #:minerals 300 #:gas 100 #:supply-used 46 #:supply-cap 46
+                  #:mineral-harvesters 28 #:vespene-harvesters 6
+                  #:ally-units (for/list ([i (in-range 8)]) (mk-u (+ 96745 i) 'marine 48.0 32.5 #:hp 45.0))
+                  #:ally-buildings (list oc-sd dep-sd)
+                  #:enemy-units (for/list ([i (in-range 6)]) (mk-u (+ 96755 i) 'roach 54.0 32.5 #:hp 145.0)))))
+  (define supply-drop-ok?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (= (second a) 96740)
+                            (eq? (third a) 'calldown-extra-supplies) (= (fourth a) 96741)))
+           acts-sd))
+
+  ;; (d) Zerg `>= 4:00` Queen Transfuse reserve (holds 50e instead of tumor) + `11.5t` reach in micro
+  (define rt-qtr (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define q-front (hash-set* (mk-u 96760 'queen 52.0 32.5 #:hp 175.0 #:max-hp 175.0) 'energy 55.0))
+  (define r-hurt  (mk-u 96761 'roach 62.5 32.5 #:hp 60.0 #:max-hp 145.0))
+  (define acts-qtr
+    (step-layer2-economy!
+     rt-qtr
+     (mk-live-obs 'Zerg 'Terran 6200 #:supply-used 48 #:supply-cap 66
+                  #:ally-units (list q-front r-hurt)
+                  #:ally-buildings (list (mk-u 96762 'hatchery 32.5 32.5 #:hp 1500.0)))))
+  (define queen-held-tumor?
+    (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast) (= (second a) 96760) (eq? (third a) 'build-creep-tumor))) acts-qtr)))
+  (define d-qtr
+    (plan-zerg-spellcaster-micro (list q-front r-hurt)
+                                 (list (mk-u 96763 'marine 66.0 32.5 #:hp 45.0))
+                                 #:claims (make-spell-claims) #:current-frame 6200))
+  (define queen-transfuse-11.5t?
+    (ormap (lambda (d) (and (eq? (spell-directive-ability d) 'transfusion) (= (spell-directive-target-tag d) 96761))) d-qtr))
+
+  ;; (e) Lurker leapfrog (`10.2t <= 10.5t` burrow, `>= 16f` idle unburrow at `12.0t > 11.5t`)
+  ;;     + Sentry Force Field (`>= 3` clustered enemies)
+  (define lurk-u (mk-u 96770 'lurker 60.0 60.0 #:hp 200.0))
+  (define d-lurk-b
+    (plan-zerg-spellcaster-micro (list lurk-u)
+                                 (list (mk-u 96771 'marine 70.2 60.0 #:hp 45.0))
+                                 #:claims (make-spell-claims) #:current-frame 7000))
+  (define lurk-burrow-ok?
+    (ormap (lambda (d) (and (eq? (spell-directive-ability d) 'burrow-lurker) (= (spell-directive-caster-tag d) 96770))) d-lurk-b))
+  (define l-claims (make-spell-claims))
+  (define lurk-b (hash-set* (mk-u 96772 'lurker-burrowed 60.0 60.0 #:hp 200.0)
+                            'burrowed #t 'burrowed-idle-frames 18))
+  (define far-en (list (mk-u 96773 'marine 72.0 60.0 #:hp 45.0)))
+  (define d-lurk-ub
+    (plan-zerg-spellcaster-micro (list lurk-b) far-en #:claims l-claims #:current-frame 7118))
+  (define lurk-unburrow-ok?
+    (ormap (lambda (d) (and (eq? (spell-directive-ability d) 'unburrow-lurker) (= (spell-directive-caster-tag d) 96772))) d-lurk-ub))
+  (define sen-ff (hash-set* (mk-u 96780 'sentry 50.0 50.0 #:hp 40.0 #:shield 40.0) 'energy 100.0))
+  (define m3-clust (list (mk-u 96781 'zealot 55.5 50.0 #:hp 100.0 #:shield 50.0)
+                         (mk-u 96782 'zealot 56.0 50.4 #:hp 100.0 #:shield 50.0)
+                         (mk-u 96783 'zealot 55.8 49.6 #:hp 100.0 #:shield 50.0)))
+  (define d-ff
+    (plan-protoss-spellcaster-micro (list sen-ff) m3-clust #:claims (make-spell-claims) #:current-frame 7200))
+  (define sentry-ff3-ok?
+    (ormap (lambda (d) (eq? (spell-directive-ability d) 'force-field)) d-ff))
+
+  (check-true "L64-B5-Creep264f-ChronoPivot-SupplyDrop-QueenTransfuse-LurkerFF"
+              (and creep-264-ok? ch-picked-forge? ch-no-gate-sink? ch-nexus-when-tech-buffed? supply-drop-ok?
+                   queen-held-tumor? queen-transfuse-11.5t?
+                   lurk-burrow-ok? lurk-unburrow-ok? sentry-ff3-ok?)
+              (format "ct=~a chF=~a chNoG=~a chBuffNx=~a sd=~a qHold=~a qTr=~a lB=~a lU=~a ff3=~a"
+                      creep-264-ok? ch-picked-forge? ch-no-gate-sink? ch-nexus-when-tech-buffed? supply-drop-ok?
+                      queen-held-tumor? queen-transfuse-11.5t?
+                      lurk-burrow-ok? lurk-unburrow-ok? sentry-ff3-ok?)))
 
 (printf "\n=== Loop 49 Suite Summary: ~a/~a passed, ~a failed ===\n"
         tests-passed tests-run tests-failed)

@@ -883,11 +883,11 @@
   (case norm-race
     [(Zerg)
      ;; Core Zerg Synergy ("What makes Roach/Hydra/Ling/Bane/Lurker work"):
-     ;; Metabolic Boost (zergling-movementspeed) + Burrow + Lair + Glial Reconstitution
-     ;; + Grooved Spines + +1/+1 Missile/Carapace
+     ;; Metabolic Boost (zergling-movementspeed) + Lair + Glial Reconstitution
+     ;; + Grooved Spines + +1/+1 Missile/Carapace (Burrow delayed until late midgame!)
      (define synergy-invariants
-       '(zergling-movementspeed burrow lair glial-reconstitution
-         grooved-spines missile-attacks-1 ground-carapace-1))
+       '(zergling-movementspeed lair glial-reconstitution
+         grooved-spines missile-attacks-1 ground-carapace-1 burrow))
      (define st1-b '(hatchery spawning-pool extractor))
      (define st1-u '(zergling-movementspeed))
      (define s1-ok? (and (have-all? st1-b ally-buildings) (have-all? st1-u researched-upgrades)))
@@ -926,11 +926,11 @@
      (define raw-prio-upgrades
        (case threat-family
          [(air-fleet)
-          '(zergling-movementspeed burrow grooved-spines muscular-augments missile-attacks-1 ground-carapace-1)]
+          '(zergling-movementspeed grooved-spines muscular-augments missile-attacks-1 ground-carapace-1 burrow)]
          [(armored-mech-siege)
-          '(zergling-movementspeed burrow glial-reconstitution grooved-spines adaptive-talons missile-attacks-1 ground-carapace-1)]
+          '(zergling-movementspeed glial-reconstitution grooved-spines adaptive-talons missile-attacks-1 ground-carapace-1 burrow)]
          [else
-          '(zergling-movementspeed burrow centrifical-hooks glial-reconstitution chitinous-plating missile-attacks-1 ground-carapace-1)]))
+          '(zergling-movementspeed centrifical-hooks glial-reconstitution missile-attacks-1 ground-carapace-1 chitinous-plating burrow)]))
      (define prio-upgrades
        (if zerg-hive-t3-ready?
            (filter (lambda (u)
@@ -974,7 +974,7 @@
          [else                 0.42]))
 
      (define st2-b '(roach-warren lair evolution-chamber))
-     (define st2-u '(burrow glial-reconstitution missile-attacks-1 ground-carapace-1))
+     (define st2-u '(glial-reconstitution missile-attacks-1 ground-carapace-1 burrow))
      (define st3-b counter-tech)
      (define st3-u '(grooved-spines))
      (define st4-b '(hive ultralisk-cavern greater-spire))
@@ -2150,12 +2150,15 @@
 
 (define zerg-queen-target desired-zerg-queen-count)
 
-(define (desired-zerg-overseer-count active-bases army-supply has-lair-or-hive? requires-detection?)
+(define (desired-zerg-overseer-count active-bases army-supply has-lair-or-hive? requires-detection?
+                                     #:enemy-widow-mines [enemy-widow-mines 0])
   (define bases (max 1 (safe-nonneg-int active-bases 1)))
   (define army (max 0.0 (safe-real army-supply 0.0)))
+  (define wm-cnt (safe-nonneg-int enemy-widow-mines 0))
   (cond
     [(not has-lair-or-hive?) 0]
-    [(or requires-detection? (>= bases 3) (>= army 50.0)) 2]
+    [(>= wm-cnt 3) 3]
+    [(or (>= wm-cnt 2) requires-detection? (>= bases 3) (>= army 50.0)) 2]
     [else 1]))
 
 (define (desired-zerg-overlord-transport-count active-bases army-supply workers has-lair-or-hive? [under-attack? #f])
@@ -2315,21 +2318,31 @@
 (define (gas-building-cap-ok? cur-gas-bldgs active-bases)
   (< (safe-nonneg-int cur-gas-bldgs 0) (gas-building-cap active-bases)))
 
-;; Mirrors runtime stepped Zerg Drone pause across all matchups (W9-P0-4-belief):
-;; >38 Drones requires >=12 army supply, >=46 (or >=44 in ZvZ) requires >=35 army supply!
-(define (zerg-stepped-drone-army-floor race enemy-race workers)
+;; Mirrors runtime stepped Zerg Drone pause across all matchups (W9-P0-4-belief + L64 A1):
+;; >38 Drones requires >=12 army supply, >=46 (or >=44 in ZvZ) requires >=34 army supply,
+;; >=62 requires >=56 army supply, and >=55 w/ enemy army >=24 requires >=0.87x enemy army!
+(define (zerg-stepped-drone-army-floor race enemy-race workers
+                                       #:enemy-army-supply [enemy-army-sup 0.0])
   (define w (safe-nonneg-int workers 0))
+  (define e-sup (max 0.0 (exact->inexact (safe-real enemy-army-sup 0.0))))
   (if (eq? race 'Zerg)
-      (cond
-        [(>= w 46) 34.0]
-        [(and (eq? enemy-race 'Zerg) (>= w 44)) 34.0]
-        [(> w 38) 12.0]
-        [else 0.0])
+      (let ([base-floor
+             (cond
+               [(>= w 62) 56.0]
+               [(>= w 46) 34.0]
+               [(and (eq? enemy-race 'Zerg) (>= w 44)) 34.0]
+               [(> w 38) 12.0]
+               [else 0.0])])
+        (if (and (>= w 55) (>= e-sup 24.0))
+            (max base-floor (* 0.87 e-sup))
+            base-floor))
       0.0))
 
-(define (zerg-worker-army-floor-ok? race enemy-race workers army-supply)
+(define (zerg-worker-army-floor-ok? race enemy-race workers army-supply
+                                    #:enemy-army-supply [enemy-army-sup 0.0])
   (>= (max 0.0 (safe-real army-supply 0.0))
-      (zerg-stepped-drone-army-floor race enemy-race workers)))
+      (zerg-stepped-drone-army-floor race enemy-race workers
+                                     #:enemy-army-supply enemy-army-sup)))
 
 (define (zergling-target-cap minerals enemy-u-counts
                              #:workers [workers 0]
@@ -2527,20 +2540,23 @@
 
 (define (protoss-4th-nexus-due? race active-bases workers army-supply minerals enemy-capital-air?
                                 #:has-tech? [has-tech? 'unspecified])
+  (define w (safe-nonneg-int workers 0))
   (define army (max 0.0 (safe-real army-supply 0.0)))
   (define mins (safe-nonneg-int minerals 0))
   (and (eq? race 'Protoss)
        (= (safe-nonneg-int active-bases 1) 3)
-       (>= (safe-nonneg-int workers 0) 54)
        (if (eq? has-tech? 'unspecified)
-           ;; Legacy 6-arg synthetic test compatibility (`tests/run-all-tests.rkt:10332`)
-           (or (>= army 12.0)
-               (>= mins 500)
-               (eq? enemy-capital-air? #t))
-           ;; W4-P0-1a: require >= 1 mid-tier tech facility AND (>= 28 army OR (>= 22 army & >= 650M))
+           ;; Legacy 6-arg synthetic test compatibility (`tests/run-all-tests.rkt:10332/10355`)
+           (and (>= w 54)
+                (or (>= army 12.0)
+                    (>= mins 500)
+                    (eq? enemy-capital-air? #t)))
+           ;; Loop 64 A2 (Graph 11 Pro 8:59 4th Nexus): require >= 1 mid-tier tech facility,
+           ;; workers >= 50, and (>= 24 army OR (>= 18 army & >= 450M))!
            (and (eq? has-tech? #t)
-                (or (>= army 28.0)
-                    (and (>= army 22.0) (>= mins 650)))))))
+                (>= w 50)
+                (or (>= army 24.0)
+                    (and (>= army 18.0) (>= mins 450)))))))
 
 (define (enrich-priority-metrics
          base-metrics
@@ -3750,7 +3766,11 @@
             (upgrade-allowed-by-unit-and-order-gates?
              'Zerg sym frame-val live-workers eff-ready-bldgs-ht eff-total-bldgs-ht unit-counts-ht upgs '())))
      (define early-burrow-due?
-       (zerg-upg-ok? 'burrow))
+       (and (zerg-upg-ok? 'burrow)
+            (or (> (unit-ht-count '(lurker lurker-burrowed infestor)) 0)
+                (and (>= frame-val 9408)
+                     (>= (unit-ht-count 'roach) 8)
+                     (has-upgrade-sym? 'glial-reconstitution upgs)))))
      (define upg-escalation? (or (>= active-bases 2) (>= live-workers 30)))
      (define sg-allowed-upgs
        (filter zerg-upg-ok? sg-rec-upgs))
@@ -3862,8 +3882,12 @@
        (max (desired-zerg-queen-count active-bases zvp-stargate-threat?)
             (if enemy-cap-air? SC2-MAX-QUEENS-CAP 0)))
      (define cur-overseers (unit-ht-count '(overseer overseer-siege-mode overlord-cocoon)))
+     (define enemy-wm-cnt-z
+       (+ (enemy-any-count enemy-u-counts #f 'widow-mine)
+          (enemy-any-count enemy-u-counts #f 'widow-mine-burrowed)))
      (define want-overseers
-       (desired-zerg-overseer-count active-bases army-val has-lair-or-hive? eff-req-det-here?))
+       (desired-zerg-overseer-count active-bases army-val has-lair-or-hive? eff-req-det-here?
+                                    #:enemy-widow-mines enemy-wm-cnt-z))
      (define cur-droppers (unit-ht-count '(overlord-transport transport-overlord-cocoon)))
      (define want-droppers
        (max (desired-zerg-overlord-transport-count active-bases army-val live-workers has-lair-or-hive? raw-under-attack?)
@@ -4232,6 +4256,10 @@
          [(extended-thermal-lance) (and has-robo-bay? has-colossus?)]
          [(gravitic-drive gravitic-booster) has-robo-bay?]
          [(psi-storm) has-templar-arch?]
+         [(protoss-ground-armor-1 protoss-ground-armors-1 ground-armor-1)
+          (and (or open-ok? (ready-bldg-has? 'forge))
+               (or (>= (ready-bldg-eq-count 'forge) 2)
+                   (has-upgrade-sym? 'protoss-ground-weapons-1 upgs)))]
          [(protoss-ground-weapons-2)
           (and (has-upgrade-sym? 'protoss-ground-weapons-1 upgs)
                (ready-bldg-has? 'twilight-council)
@@ -4472,47 +4500,52 @@
                  (< cur-phoenix 6))
             (list (boost-cand 'phoenix 'counter-tech '(train phoenix) #t 180.0))
             '())
-        (if (and (not crisis-defer?)
-                 (or t3-endgame?
-                     pvt-immortal-robo-bay-due?
-                     (> (sg-rec-bonus 'robotics-bay) 0.0)
-                     (> (sg-rec-bonus 'templar-archive) 0.0)
-                     (and (>= active-bases 3) (> (sg-rec-bonus 'twilight-council) 0.0))))
-            (append
-             (if (and (ready-bldg-has? 'robotics-facility)
-                      (= (bldg-eq-count 'robotics-bay) 0)
-                      (or t3-endgame?
-                          pvt-immortal-robo-bay-due?
-                          (> (sg-rec-bonus 'robotics-bay) 0.0)))
-                 (list (boost-cand 'robotics-bay 'tech-upgrade
-                                   (list 'build 'robotics-bay (safe-tile-coord (+ base-x 6.5)) (safe-tile-coord (- base-y 4.5)))
-                                   (or t3-endgame? pvt-immortal-robo-bay-due? (>= min-val 300))
-                                   (+ (cond
-                                        [pvt-immortal-robo-bay-due? 195.0]
-                                        [t3-endgame? 150.0]
-                                        [else 60.0])
-                                      (sg-rec-bonus 'robotics-bay))))
-                 '())
-             (if (and t3-endgame? has-core? (= (bldg-eq-count 'twilight-council) 0))
-                 (list (boost-cand 'twilight-council 'tech-upgrade
-                                   (list 'build 'twilight-council (safe-tile-coord (- base-x 4.5)) (safe-tile-coord (+ base-y 4.5)))
-                                   #t 145.0))
-                 '())
-             (if (and (ready-bldg-has? 'twilight-council)
-                      (= (bldg-eq-count 'templar-archive) 0)
-                      (or t3-endgame? (> (sg-rec-bonus 'templar-archive) 0.0)))
-                 (list (boost-cand 'templar-archive 'tech-upgrade
-                                   (list 'build 'templar-archive (safe-tile-coord (- base-x 5.5)) (safe-tile-coord (- base-y 4.5)))
-                                   (or t3-endgame? (>= min-val 300))
-                                   (+ (if t3-endgame? 150.0 60.0) (sg-rec-bonus 'templar-archive))))
-                 '())
-             (if (and (>= active-bases 4)
-                      (ready-bldg-has? 'fleet-beacon)
-                      (facility-slot-open? 'stargate 'fleet-beacon)
-                      (< (unit-ht-count 'carrier) 4))
-                 (list (boost-cand 'carrier 'combat-unit '(train carrier) #t 150.0))
-                 '()))
-            '())))
+        (let ([pvz-ta-ready-window?
+               (and (eq? enemy-race 'Zerg)
+                    (or (>= active-bases 3)
+                        (and (>= active-bases 2) (>= sup-used 68))))])
+          (if (and (not crisis-defer?)
+                   (or t3-endgame?
+                       pvt-immortal-robo-bay-due?
+                       pvz-ta-ready-window?
+                       (> (sg-rec-bonus 'robotics-bay) 0.0)
+                       (> (sg-rec-bonus 'templar-archive) 0.0)
+                       (and (>= active-bases 3) (> (sg-rec-bonus 'twilight-council) 0.0))))
+              (append
+               (if (and (ready-bldg-has? 'robotics-facility)
+                        (= (bldg-eq-count 'robotics-bay) 0)
+                        (or t3-endgame?
+                            pvt-immortal-robo-bay-due?
+                            (> (sg-rec-bonus 'robotics-bay) 0.0)))
+                   (list (boost-cand 'robotics-bay 'tech-upgrade
+                                     (list 'build 'robotics-bay (safe-tile-coord (+ base-x 6.5)) (safe-tile-coord (- base-y 4.5)))
+                                     (or t3-endgame? pvt-immortal-robo-bay-due? (>= min-val 300))
+                                     (+ (cond
+                                          [pvt-immortal-robo-bay-due? 195.0]
+                                          [t3-endgame? 150.0]
+                                          [else 60.0])
+                                        (sg-rec-bonus 'robotics-bay))))
+                   '())
+               (if (and (or t3-endgame? pvz-ta-ready-window?) has-core? (= (bldg-eq-count 'twilight-council) 0))
+                   (list (boost-cand 'twilight-council 'tech-upgrade
+                                     (list 'build 'twilight-council (safe-tile-coord (- base-x 4.5)) (safe-tile-coord (+ base-y 4.5)))
+                                     #t 145.0))
+                   '())
+               (if (and (ready-bldg-has? 'twilight-council)
+                        (= (bldg-eq-count 'templar-archive) 0)
+                        (or t3-endgame? pvz-ta-ready-window? (> (sg-rec-bonus 'templar-archive) 0.0)))
+                   (list (boost-cand 'templar-archive 'tech-upgrade
+                                     (list 'build 'templar-archive (safe-tile-coord (- base-x 5.5)) (safe-tile-coord (- base-y 4.5)))
+                                     (or t3-endgame? pvz-ta-ready-window? (>= min-val 300))
+                                     (+ (if (or t3-endgame? pvz-ta-ready-window?) 158.0 60.0) (sg-rec-bonus 'templar-archive))))
+                   '())
+               (if (and (>= active-bases 4)
+                        (ready-bldg-has? 'fleet-beacon)
+                        (facility-slot-open? 'stargate 'fleet-beacon)
+                        (< (unit-ht-count 'carrier) 4))
+                   (list (boost-cand 'carrier 'combat-unit '(train carrier) #t 150.0))
+                   '()))
+              '()))))
      (define protoss-base-cands
        (append
         protoss-rush-cands
@@ -4594,7 +4627,7 @@
                                         (cond
                                           [sg-high-bank? 10]
                                           [(>= active-bases 3) 8]
-                                          [(>= active-bases 2) (if (or (>= live-workers 34) (>= min-val 400)) 6 4)]
+                                          [(>= active-bases 2) (if (or (>= live-workers 36) (>= frame-val 6048) (>= min-val 400)) 6 4)]
                                           [(memq enemy-race '(Protoss Random)) 2]
                                           [else 1]))])
                      (and (< cur-gates gate-cap)
@@ -4663,6 +4696,15 @@
      (define has-fac-ready? (ready-bldg-has? 'factory))
      (define has-port-ready? (ready-bldg-has? 'starport))
      (define cur-medivacs (unit-ht-count 'medivac))
+     (define terran-bio-sup-ledger
+       (+ (unit-ht-count 'marine)
+          (* 2 (unit-ht-count 'marauder))
+          (* 2 (unit-ht-count 'ghost))
+          (unit-ht-count 'reaper)))
+     (define terran-medivac-bio-cap-ledger
+       (let ([raw-cap (min 6 (max (if (>= terran-bio-sup-ledger 6) 1 0)
+                                  (quotient terran-bio-sup-ledger 5)))])
+         (if (< terran-bio-sup-ledger 14) (min 2 raw-cap) raw-cap)))
      (define cur-thors (unit-ht-count '(thor thor-ap)))
      (define eff-ready-bldgs-ht
        (if (hash? raw-ready-bldg-counts)
@@ -4897,7 +4939,7 @@
                                    #t 145.0))
                  '())
              (if (and (facility-slot-open? 'starport 'starport)
-                      (< cur-medivacs 4))
+                      (< cur-medivacs (min 4 terran-medivac-bio-cap-ledger)))
                  (list (boost-cand 'medivac 'combat-unit '(train medivac) #t 140.0))
                  '())
              (if (and (facility-slot-open? 'factory 'armory)
@@ -5022,8 +5064,9 @@
                          [rax-cap (max raw-max-facilities
                                        (cond
                                          [sg-high-bank? 10]
-                                         [(>= active-bases 3) 8]
-                                         [(>= active-bases 2) (if (or (>= live-workers 34) (>= min-val 400)) 5 3)]
+                                         [(and (>= active-bases 3) (or (>= live-workers 54) (>= frame-val 10080))) 8]
+                                         [(>= active-bases 3) 7]
+                                         [(>= active-bases 2) (if (or (>= live-workers 36) (>= frame-val 6720) (>= min-val 400)) 5 3)]
                                          [else 2]))])
                      (and (not tvp-suppress-extra-rax?)
                           (< cur-rax rax-cap)
@@ -5057,8 +5100,11 @@
                           (list 'combat-unit '(train cyclone) #t 140.0))]
           [(thor) (and (facility-slot-open? 'factory 'armory) has-fac-tl?
                        (list 'combat-unit '(train thor) #t 145.0))]
-          [(medivac liberator) (and (facility-slot-open? 'starport 'starport)
-                                    (list 'combat-unit (list 'train u-sym) #t 140.0))]
+          [(medivac) (and (facility-slot-open? 'starport 'starport)
+                          (< cur-medivacs terran-medivac-bio-cap-ledger)
+                          (list 'combat-unit '(train medivac) #t 140.0))]
+          [(liberator) (and (facility-slot-open? 'starport 'starport)
+                            (list 'combat-unit '(train liberator) #t 140.0))]
           [(banshee) (and (facility-slot-open? 'starport 'starport) has-port-tl?
                           (list 'combat-unit '(train banshee) #t 140.0))]
           [(ghost) (and (facility-slot-open? 'barracks 'ghost-academy) has-rax-tl?
@@ -7180,7 +7226,9 @@
        (if (eq? enemy-race 'Terran)
            (for-each (lambda (u) (add-rec! u 40.0)) '(stalker tempest void-ray))
            (for-each (lambda (u) (add-rec! u 42.0))
-                     (if (> muta-cnt 0) '(phoenix stalker tempest) '(stalker tempest void-ray))))]))
+                     (if (> muta-cnt 0)
+                         '(phoenix stalker archon shield-battery photon-cannon tempest)
+                         '(stalker tempest void-ray))))]))
   (when req-det?
     (case race
       [(Zerg) (add-rec! 'overseer 55.0)]
@@ -8601,9 +8649,11 @@
      (define f (safe-nonneg-int frame 0))
      (case canon
        [(burrow)
-        (and (>= f 5376)
-             (or (done? 'metabolic-boost) (done? 'glial-reconstitution))
-             (or (>= roaches 4) (>= lurkers 1) (>= infestors 1) (>= w 44)))]
+        (or (>= lurkers 1)
+            (>= infestors 1)
+            (and (>= f 9408)
+                 (done? 'glial-reconstitution)
+                 (>= roaches 8)))]
        [(centrifical-hooks)
         (or (>= banelings 3)
             (and (>= baneling-nests 1) (>= zerglings 10)))]

@@ -8,8 +8,7 @@
 ;;   - Offensive natural expansion block + main gas-steal + `cancel-building` (`314`)
 ;;   - Counter expansion/gas block (1 patrol pre-stage at >= 180M + 3-4 combat /
 ;;     max 3 worker targeted clear)
-;;   - Clean re-exports of `plan-burrowed-zergling-expansion-blocks` and
-;;     `plan-clear-own-expansion-block-for-build` from `zerg-burrow-micro.rkt`
+;;   - Pure L2a plan module (zero upward imports from `lib/tactics/*`)
 ;; =============================================================================
 
 (require racket/list
@@ -18,25 +17,10 @@
          "../sc2-types.rkt"
          "../sc2-geometry.rkt"
          (except-in "../sc2-game-constants.rkt" aabb-overlaps?)
-         "../sc2-bayesian.rkt"
-         "../tactics/zerg-burrow-micro.rkt")
+         "../sc2-bayesian.rkt")
 
 (module dyn-hash-ops racket/base
-  (provide dyn-hash-ref
-           dyn-hash-has-key?
-           fast-units-have-any-type?
-           fast-runby-within-15?)
-  (define (dyn-hash-ref h k default)
-    (if (hash? h)
-        (if (procedure? default)
-            (hash-ref h k (lambda () default))
-            (hash-ref h k default))
-        default))
-  (define (dyn-hash-has-key? h k)
-    (and (hash? h) (hash-has-key? h k)))
-  (define (fast-units-have-any-type? units syms)
-    (for/or ([u (in-list units)])
-      (and (hash? u) (not (not (memq (hash-ref u 'type 'unknown) syms))))))
+  (provide fast-runby-within-15?)
   (define (fast-runby-within-15? enemy-units door-x door-y wall-slots)
     (define has-ws? (pair? wall-slots))
     (for/or ([e (in-list enemy-units)])
@@ -59,10 +43,12 @@
                              (<= (abs sdy) 15.0)
                              (<= (+ (* sdx sdx) (* sdy sdy)) 225.0))))))))))
 
-(unsafe-require/typed (submod "." dyn-hash-ops)
+(unsafe-require/typed "../sc2-common.rkt"
   [dyn-hash-ref (-> Any Any Any Any)]
   [dyn-hash-has-key? (-> Any Any Boolean)]
-  [fast-units-have-any-type? (-> (Listof Any) (Listof Symbol) Boolean)]
+  [fast-units-have-any-type? (-> (Listof Any) (Listof Symbol) Boolean)])
+
+(unsafe-require/typed (submod "." dyn-hash-ops)
   [fast-runby-within-15? (-> (Listof Any) Flonum Flonum (Listof (Pairof Flonum Flonum)) Boolean)])
 
 (provide
@@ -72,9 +58,7 @@
  plan-unwalled-opponent-punish
  plan-own-wall-integrity-defense
  plan-expansion-and-gas-blocks
- plan-counter-expansion-and-gas-blocks
- plan-burrowed-zergling-expansion-blocks
- plan-clear-own-expansion-block-for-build)
+ plan-counter-expansion-and-gas-blocks)
 
 ;; =============================================================================
 ;; Shared Constants & Helpers

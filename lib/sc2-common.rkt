@@ -45,6 +45,9 @@
  unit-type-sym
  safe-list
  safe-hash-list
+ dyn-hash-ref
+ dyn-hash-has-key?
+ fast-units-have-any-type?
  SC2-SINGLETON-TECH-BUILDINGS
  SC2-DUAL-CAP-TECH-BUILDINGS
  sc2-zerg-corruptor-target-cap)
@@ -127,3 +130,18 @@
   (if (list? xs)
       (if (andmap hash? xs) xs (filter hash? xs))
       '()))
+
+(define (dyn-hash-ref h k default)
+  (if (hash? h)
+      (if (procedure? default)
+          (hash-ref h k (lambda () default))
+          (hash-ref h k default))
+      default))
+
+(define (dyn-hash-has-key? h k)
+  (and (hash? h) (hash-has-key? h k)))
+
+(define (fast-units-have-any-type? units syms)
+  (and (list? units)
+       (for/or ([u (in-list units)])
+         (and (hash? u) (not (not (memq (hash-ref u 'type 'unknown) syms)))))))

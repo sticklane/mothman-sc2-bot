@@ -390,6 +390,7 @@ def load_rich_report_telemetry(
             or (it_n == 60 and suf.lower() == "b" and sh_n == 12)
             or (it_n == 61 and suf.lower() == "c" and sh_n == 13)
             or (it_n == 62 and suf.lower() == "c" and sh_n == 14)
+            or (it_n == 63 and suf.lower() == "b" and sh_n == 15)
         )
 
     # A2. Load Combat Positioning (Section 5) & Army-Group Positioning (Section 6) vs. Pro
@@ -1328,7 +1329,8 @@ def load_rich_report_telemetry(
                  OR m.run_id LIKE '%iter50_w3_full%' OR m.run_id LIKE '%iter51_ship9_full%'
                  OR m.run_id LIKE '%iter57_ship10_full%' OR m.run_id LIKE '%iter58b_ship11_full%'
                  OR m.run_id LIKE '%iter59c_ship11_full%' OR m.run_id LIKE '%iter60b_ship12_full%'
-                 OR m.run_id LIKE '%iter61c_ship13_full%' OR m.run_id LIKE '%iter62c_ship14_full%')
+                 OR m.run_id LIKE '%iter61c_ship13_full%' OR m.run_id LIKE '%iter62c_ship14_full%'
+                 OR m.run_id LIKE '%iter63b_ship15_full%')
         """
 
         # Per-matchup Local stats (All 26 external opponents)
@@ -2070,7 +2072,7 @@ def render_loop_diagram_section(rich: Dict[str, Any], section_num: str = "Sectio
             "why": (
                 "A new version only replaces the ladder bot after beating it directly and clearing the full practice pool without crashes."
             ),
-            "metric": f"{int((rich.get('current_build') or {}).get('live_ship_num') or 11)} live releases shipped across 8 AI Arena bots (Div 5 & Div 9)",
+            "metric": f"{int((rich.get('current_build') or {}).get('live_ship_num') or 15)} live releases shipped across 8 AI Arena bots (Div 6–7 & Div 9)",
         },
         {
             "id": "flywheel",
@@ -3282,7 +3284,7 @@ def render_matchup_evaluation_section(
                  alt="Protoss base layouts at 4:10 comparing Grandmaster pros and Mothman"
                  data-lightbox-src="./media/pro_vs_mothman_protoss.png"
                  data-lightbox-alt="Protoss base layouts at 4:10 comparing Grandmaster pros and Mothman" />
-            <figcaption>Grandmaster reference maps alongside Mothman's 4:10 baseline layouts. On Release #14 (Build 62C), Protoss Pylon clumping holds at 0.0% (15.1-tile average spacing, 92.0% natural-base power placement, and zero fragile tech structures in walls).</figcaption>
+            <figcaption>Grandmaster reference maps alongside Mothman's 4:10 baseline layouts. In our 4:10 base-layout audit (Release #14, Build 62C), Protoss Pylon clumping held at 0.0% (15.1-tile average spacing, 92.0% natural-base power placement, and zero fragile tech structures in walls).</figcaption>
           </figure>
         </div>
         <div class="pro-bp-slot" data-pro-bp-panel="Terran" style="display:none;">
@@ -3535,7 +3537,32 @@ def render_matchup_evaluation_section(
             else ""
         )
         run_id_low = str(pro_curves.get("run_id") or "").lower()
-        if epm_m is not None and epm_p is not None and spm_m is not None and spm_p is not None and "62c" in run_id_low:
+        if epm_m is not None and epm_p is not None and spm_m is not None and spm_p is not None and "63b" in run_id_low:
+            col_min_m = (cv_s_all.get("collection_minerals") or {}).get("mothman", {}).get("med")
+            col_min_str = f"{col_min_m:,.1f}" if col_min_m is not None else "1,101.8"
+            apm_m_str = f"{apm_m:.1f}" if apm_m is not None else "289.1"
+            epm_rel = "topped" if epm_m >= epm_p else "tracked right near"
+            r_mech_para = (
+                f'\n    <p class="prose-tight">'
+                f"On {html.escape(rel_lbl)}, Protoss set a new all-time local external record at 12–14 (46.2% wins, 0.95× trade, "
+                f"+3 wins over Release #14). Fixing Nexus Energy Recharge floor rounding and wire cooldown tracking raised live casts "
+                f"from 1 in 1 game to 33 across 17 games (53.8% external adoption, with 4–8 minute pace at 70% of Pro Grandmasters), "
+                f"sped up Blink by 90 seconds (9:08 to 7:38), and cut outnumbered engagements under 0.75× force ratio from 59.7% to "
+                f"35.0% (ahead of the Pro 37.4% benchmark). Across all three races, median mineral income reached an all-time high of "
+                f"{col_min_str} per minute, median EPM {epm_rel} the Grandmaster benchmark ({epm_m:.1f} vs. Pro {epm_p:.1f}), median "
+                f"SPM held at {spm_m:.1f} (+4.1 above Pro {spm_p:.1f}), median APM held at {apm_m_str}, supply-blocked time fell to "
+                f"a campaign-low 3.6% across 84 matches, worker-rally command churn dropped 44.8%, and action-cap drops fell 17.5%."
+                f'</p>\n    <p class="prose-tight">'
+                f"Zerg improved to 9–15–2 (+1 win over Release #14), raised its minerals-collected ratio from 0.76× to 0.94×, hit "
+                f"100% four-base reach in games past minute 14 (above Pro 98.2%), nearly tripled Queen Creep Tumor placements "
+                f"(67 to 178 casts), and boosted Ravager Corrosive Bile casts by 39% (796 to 1,108). Local validation recorded our "
+                f"first 3–0 sweep of zig-reapers (4.32× trade), our first win over mini-puck, and zero crashes or rejected wire "
+                f"commands across 96 games. Terran recovered its opening economy (38.0 median workers at minute 6, 2.0% supply-blocked "
+                f"time, and 0.75 early Bunkers before minute 4 vs. 0.82 on Release #14), though mid-game reinforcement trickle and two "
+                f"Random Zerg rolls kept Terran at 7–18–1 (0.50× trade)."
+                f"</p>"
+            )
+        elif epm_m is not None and epm_p is not None and spm_m is not None and spm_p is not None and "62c" in run_id_low:
             col_min_m = (cv_s_all.get("collection_minerals") or {}).get("mothman", {}).get("med")
             col_min_str = f"{col_min_m:,.1f}" if col_min_m is not None else "1,082.6"
             apm_m_str = f"{apm_m:.1f}" if apm_m is not None else "292.8"
@@ -3676,11 +3703,46 @@ def render_matchup_evaluation_section(
         if (our_rot_vals and pro_rot_vals)
         else "Small ground squads still walk into sieged Tank deadzones or kite without firing in tough games."
     )
+
+    # Dynamically compute Zerg 4:00 workers, Terran 3rd CC adoption/timing, and overall median gas income
+    # so Section 2.6 stays 100% locked to Section 2.4 & Chart 8 on every release.
+    z_w4_num = 0.0
+    z_w4_den = 0
+    for zmu in ("ZvP", "ZvT", "ZvZ"):
+        zex = ((cb.get("by_matchup") or {}).get(zmu) or {}).get("ext") or {}
+        zn = int(zex.get("n") or 0)
+        zw = float(zex.get("w4m") or 0.0)
+        if zn > 0 and zw > 0:
+            z_w4_num += zw * zn
+            z_w4_den += zn
+    z_w4_avg = round(z_w4_num / z_w4_den, 1) if z_w4_den > 0 else 29.2
+    pro_z_w4 = float(((rich.get("pro_worker_curves") or {}).get("Zerg") or {}).get(4, 35.0) or 35.0)
+    z_w4_gap = max(0.0, round(pro_z_w4 - z_w4_avg, 1))
+
+    t3_m_pct, t3_m_t, t3_p_pct, t3_p_t = 27, "7:53", 77, "5:02"
+    for t_row in ((pro_curves.get("timings") or {}).get("Terran") or []):
+        tlbl = str(t_row.get("label") or "").lower()
+        tkey = str(t_row.get("key") or "").lower()
+        if "3rd" in tlbl or "third" in tkey or "3rd" in tkey:
+            tm_m = t_row.get("mothman") or {}
+            tm_p = t_row.get("pros") or {}
+            if tm_m.get("adopt_pct") is not None and tm_m.get("med") is not None:
+                t3_m_pct = int(round(float(tm_m["adopt_pct"])))
+                t3_m_t = str(tm_m.get("med_fmt") or _fmt_mmss(tm_m["med"]))
+            if tm_p.get("adopt_pct") is not None and tm_p.get("med") is not None:
+                t3_p_pct = int(round(float(tm_p["adopt_pct"])))
+                t3_p_t = str(tm_p.get("med_fmt") or _fmt_mmss(tm_p["med"]))
+            break
+
+    gas_all = ((pro_curves.get("summary") or {}).get("all") or {}).get("collection_gas") or {}
+    gas_m_med = int(round(float((gas_all.get("mothman") or {}).get("med") or 234)))
+    gas_p_med = int(round(float((gas_all.get("pros") or {}).get("med") or 448)))
+
     open_gaps = [
         f"<strong>Early cheeses, air harass, and stealth defense ({html.escape(weak_str)}):</strong> Across local benchmarks and live Division 6–7 ladder games, early 1-base Marauder rushes, mass Reapers under 4:30, mass Phoenixes in PvP, mass Banshees in ZvT, and early Dark Templars caused our steepest worker losses ({an_cur.get('zero_kill_collapse_loss', 0)} zero-kill collapses and {an_cur.get('cloaked_unit_damage_loss', 0)} cloaked-unit losses on {html.escape(rel_lbl)}).",
         f"<strong>Capital-air dive commits and siege-line entry ({an_cur.get('siege_range_zero_dps_loss', 0)} zero-damage siege losses, {an_cur.get('zero_fire_retreat', 0)} zero-fire retreats, {an_cur.get('drip_feed_collapse', 0)} drip-feed):</strong> Against mass Tempests, Vikings and Corruptors hovered at weapon-range edge instead of committing together. {rot_gap_note}",
-        f"<strong>Early Zerg worker tempo and ZvZ macro volume:</strong> Zerg active workers at 4:00 averaged 29.0 (six behind the Grandmaster median of 35.0) due to early defensive Zerglings in peaceful openings, which slowed mid-game Roach and Hydralisk scaling against Division 6–7 Zerg opponents and Swarm Host pressure.",
-        f"<strong>Early gas over-saturation and late-game expansion cadence:</strong> {an_cur.get('gas_rich_min_starved', 0)} games hit mineral starvation alongside surplus gas during two-base transitions, while Terran third-base adoption (23% at 7:30 vs. Pro 77% at 5:02) and overall median gas income (225 vs. Pro 448 per minute) still leave late-game headroom.",
+        f"<strong>Early Zerg worker tempo and ZvZ macro volume:</strong> Zerg active workers at 4:00 averaged {z_w4_avg:.1f} ({z_w4_gap:.1f} behind the Grandmaster median of {pro_z_w4:.1f}) due to early defensive Zerglings in peaceful openings, which slowed mid-game Roach and Hydralisk scaling against Division 6–7 Zerg opponents and Swarm Host pressure.",
+        f"<strong>Early gas over-saturation and late-game expansion cadence:</strong> {an_cur.get('gas_rich_min_starved', 0)} games hit mineral starvation alongside surplus gas during two-base transitions, while Terran third-base adoption ({t3_m_pct}% at {html.escape(t3_m_t)} vs. Pro {t3_p_pct}% at {html.escape(t3_p_t)}) and overall median gas income ({gas_m_med:,} vs. Pro {gas_p_med:,} per minute) still leave late-game headroom.",
     ]
     open_gaps_html = "".join(f"<li>{item}</li>" for item in open_gaps)
 

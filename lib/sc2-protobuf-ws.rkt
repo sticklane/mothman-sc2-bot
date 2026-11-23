@@ -160,10 +160,15 @@
  sc2-ability-data-entry
  sc2-ability-data-entry?
  sc2-ability-data-entry-available?
+ SC2-LIVE-DATA-LOADED?
  SC2-LIVE-AVAILABLE-ABILITIES
+ SC2-LIVE-AVAILABLE-ABILITY-IDS
+ SC2-LIVE-DEFINED-UPGRADES
+ SC2-LIVE-DEFINED-UPGRADE-IDS
  sc2-ability-live-available?
  sc2-upgrade-defined-in-live-data?
  sc2-upgrade-live-available?
+ reset-sc2-live-availability-tables!
 
  ;; Observation Converter & S-Expression Actuator
  sc2-unit-is-structure?
@@ -265,6 +270,11 @@
  SC2-TH-WORKER-RALLY-TARGET
  SC2-NEXUS-RECHARGE-LAST-LOOP
  sc2-nexus-recharge-cooldown-ready?
+ record-sc2-nexus-recharge-loop!
+ reset-sc2-nexus-recharge-cooldown!
+ SC2-CREEP-TUMOR-FIRST-SEEN-LOOP
+ SC2-CREEP-TUMOR-EMIT-COUNT
+ SC2-SUPPLY-DROP-USED-DEPOTS
  make-bot-build-tag-chat-action)
 
 ;; =============================================================================
@@ -1348,6 +1358,8 @@
           (scanner-sweep 399 #t)
           (scan 399 #f)
           (supply-drop 255 #t)
+          (calldown-extra-supplies 255 #f)
+          (extra-supplies 255 #f)
           (stimpack 3675 #t)
           (stim 3675 #f)
           (stim-marine 380 #t)
@@ -1827,7 +1839,8 @@
           (protoss-air-armor-3 83 #t)
           (air-armor-3 83 #f)))])
   (match-define (list sym id prim?) entry)
-  (register-id-pair! SC2-UPGRADE-SYM->ID SC2-UPGRADE-ID->SYM sym id #:primary? prim?))
+  (register-id-pair! SC2-UPGRADE-SYM->ID SC2-UPGRADE-ID->SYM sym id #:primary? prim?)
+  (register-sc2-static-upgrade-sym-id! sym id))
 
 ;; Populate Canonical BuffId Table
 (for ([entry
@@ -2178,55 +2191,32 @@
 (struct sc2-effect-data-entry sc2-data-entry (friendly-name radius) #:transparent)
 (struct sc2-data (abilities units upgrades buffs effects) #:transparent)
 
-;; Dynamic match-start ResponseData tables (populated by `register-sc2-response-data!`)
-(define SC2-LIVE-DATA-LOADED? (box #f))
-(define SC2-LIVE-AVAILABLE-ABILITIES (make-hasheqv))
-(define SC2-LIVE-DEFINED-UPGRADES (make-hasheq))
-(define SC2-LIVE-DEFINED-UPGRADE-IDS (make-hasheqv))
-
-(define (sc2-ability-live-available? ab-id)
-  (if (unbox SC2-LIVE-DATA-LOADED?)
-      (hash-ref SC2-LIVE-AVAILABLE-ABILITIES ab-id #t)
-      #t))
-
-(define (sc2-upgrade-defined-in-live-data? sym)
-  (and (unbox SC2-LIVE-DATA-LOADED?)
-       (let ([norm (normalize-sc2-name->symbol sym)])
-         (or (hash-has-key? SC2-LIVE-DEFINED-UPGRADES norm)
-             (let ([uid (hash-ref SC2-UPGRADE-SYM->ID norm 0)])
-               (and (> uid 0)
-                    (< uid 290)
-                    (hash-has-key? SC2-LIVE-DEFINED-UPGRADE-IDS uid)))))))
-
-(define (sc2-upgrade-live-available? sym)
-  (if (unbox SC2-LIVE-DATA-LOADED?)
-      (sc2-upgrade-defined-in-live-data? sym)
-      #t))
+;; Loop 64 P0 #0 (`#1787`): Live-data availability tables (`SC2-LIVE-DATA-LOADED?`,
+;; `SC2-LIVE-AVAILABLE-ABILITIES`, `SC2-LIVE-DEFINED-UPGRADES`, `SC2-LIVE-DEFINED-UPGRADE-IDS`,
+;; `sc2-ability-live-available?`, `sc2-upgrade-defined-in-live-data?`, `sc2-upgrade-live-available?`)
+;; and Nexus Energy Recharge wire cooldown (`SC2-NEXUS-RECHARGE-LAST-LOOP`,
+;; `sc2-nexus-recharge-cooldown-ready?`, `record-sc2-nexus-recharge-loop!`,
+;; `reset-sc2-nexus-recharge-cooldown!`) now live in L0 `lib/sc2-game-constants.rkt` and are
+;; re-exported here for backwards compatibility.
 
 ;; Phase 2 (`#1662`): Single per-match macro-ability policy latch shared by Sec 6a & Case C.
 (define SC2-MACRO-POLICY-LATCH (make-macro-policy-latch))
-
-;; L63B (`#1754` Bug #2C): Authoritative global Protoss Nexus Energy Recharge (`4126`)
-;; wire cooldown latch — ONLY recorded when the wire actually emits a valid `4126`, so
-;; floating-point energy edge-cases or rejected casts NEVER lock out Recharge for 60s!
-(define SC2-NEXUS-RECHARGE-LAST-LOOP (box -99999))
-
-(define (sc2-nexus-recharge-cooldown-ready? cur-loop)
-  (define last (unbox SC2-NEXUS-RECHARGE-LAST-LOOP))
-  (define cd (sc2-spell-cooldown-frames 'nexus-energy-recharge 1344))
-  (or (< cur-loop last)
-      (>= (- cur-loop last) cd)))
+;; L64 (`#1787`): Per-match Creep Tumor maturity/emit tracking (non-premature `used-tumors`)
+;; and per-Depot Supply Drop (`255`) non-duplication ledger.
+(define SC2-CREEP-TUMOR-FIRST-SEEN-LOOP (make-hasheqv))
+(define SC2-CREEP-TUMOR-EMIT-COUNT (make-hasheqv))
+(define SC2-SUPPLY-DROP-USED-DEPOTS (make-hasheqv))
 
 (define (reset-sc2-live-response-data!)
-  (set-box! SC2-LIVE-DATA-LOADED? #f)
-  (hash-clear! SC2-LIVE-AVAILABLE-ABILITIES)
-  (hash-clear! SC2-LIVE-DEFINED-UPGRADES)
-  (hash-clear! SC2-LIVE-DEFINED-UPGRADE-IDS)
+  (reset-sc2-live-availability-tables!)
   (reset-sc2-live-game-data!)
   (reset-live-typed-ability-overrides!)
   (reset-verifier-live-ability-modes!)
   (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
-  (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999))
+  (reset-sc2-nexus-recharge-cooldown!)
+  (hash-clear! SC2-CREEP-TUMOR-FIRST-SEEN-LOOP)
+  (hash-clear! SC2-CREEP-TUMOR-EMIT-COUNT)
+  (hash-clear! SC2-SUPPLY-DROP-USED-DEPOTS))
 
 (struct sc2-response
   (id
@@ -3623,13 +3613,11 @@
 
 (define (register-sc2-response-data! data)
   (when (sc2-data? data)
-    (hash-clear! SC2-LIVE-AVAILABLE-ABILITIES)
-    (hash-clear! SC2-LIVE-DEFINED-UPGRADES)
-    (hash-clear! SC2-LIVE-DEFINED-UPGRADE-IDS)
+    (reset-sc2-live-availability-tables!)
     (reset-sc2-live-game-data!)
     (reset-live-typed-ability-overrides!)
     (reset-verifier-live-ability-modes!)
-    (set-box! SC2-LIVE-DATA-LOADED? #t)
+    (set-sc2-live-data-loaded! #t)
     (define abilities (sc2-data-abilities data))
     (for ([e (in-list abilities)])
       (define id (sc2-data-entry-id e))
@@ -3637,7 +3625,7 @@
         (define avail? (if (sc2-ability-data-entry? e)
                            (sc2-ability-data-entry-available? e)
                            #t))
-        (hash-set! SC2-LIVE-AVAILABLE-ABILITIES id avail?)
+        (register-sc2-live-ability-availability! id avail?)
         (when (sc2-ability-data-entry-rich? e)
           (register-sc2-live-ability-data!
            id
@@ -3712,36 +3700,39 @@
       (define name (sc2-data-entry-name e))
       (define upg-syms '())
       (when (> id 0)
-        (hash-set! SC2-LIVE-DEFINED-UPGRADE-IDS id #t))
+        (register-sc2-live-defined-upgrade-id! id #t))
       (when (and (> id 0) (not (string=? name "")))
         (define norm (normalize-sc2-name->symbol name))
         (define aliases (hash-ref SC2-LIVE-UPGRADE-NAME-ALIASES norm #f))
         (define override-shifted? (>= id 290))
-        (hash-set! SC2-LIVE-DEFINED-UPGRADES norm id)
+        (register-sc2-live-defined-upgrade! norm id)
         (set! upg-syms (cons norm upg-syms))
         (if (< id 290)
             (for ([asym (in-list (hash-ref static-upg-id->all-syms id '()))])
-              (hash-set! SC2-LIVE-DEFINED-UPGRADES asym id)
+              (register-sc2-live-defined-upgrade! asym id)
               (unless (memq asym upg-syms)
                 (set! upg-syms (cons asym upg-syms))))
             (let ([known-sym (and (not (pair? aliases)) (hash-ref SC2-UPGRADE-ID->SYM id #f))])
               (when (and known-sym (eq? known-sym norm) (not (memq known-sym upg-syms)))
-                (hash-set! SC2-LIVE-DEFINED-UPGRADES known-sym id)
+                (register-sc2-live-defined-upgrade! known-sym id)
                 (set! upg-syms (cons known-sym upg-syms)))))
         (cond
           [(pair? aliases)
            (for ([asym (in-list aliases)]
                  [idx (in-naturals)])
-             (hash-set! SC2-LIVE-DEFINED-UPGRADES asym id)
+             (register-sc2-live-defined-upgrade! asym id)
              (unless (memq asym upg-syms)
                (set! upg-syms (cons asym upg-syms)))
              (register-id-pair! SC2-UPGRADE-SYM->ID SC2-UPGRADE-ID->SYM
-                                asym id #:primary? (and override-shifted? (= idx 0))))
+                                asym id #:primary? (and override-shifted? (= idx 0)))
+             (register-sc2-static-upgrade-sym-id! asym id))
            (register-id-pair! SC2-UPGRADE-SYM->ID SC2-UPGRADE-ID->SYM
-                              norm id #:primary? #f)]
+                              norm id #:primary? #f)
+           (register-sc2-static-upgrade-sym-id! norm id)]
           [else
            (register-id-pair! SC2-UPGRADE-SYM->ID SC2-UPGRADE-ID->SYM
-                              norm id #:primary? override-shifted?)]))
+                              norm id #:primary? override-shifted?)
+           (register-sc2-static-upgrade-sym-id! norm id)]))
       (when (and (sc2-upgrade-data-entry? e) (pair? upg-syms))
         (define umin (sc2-upgrade-data-entry-mineral-cost e))
         (define ugas (sc2-upgrade-data-entry-vespene-cost e))
@@ -5404,7 +5395,7 @@
     (set-box! SC2-ACTIVE-GAME-INFO game-info))
   (when (or (< cur-loop (unbox SC2-NEXUS-RECHARGE-LAST-LOOP))
             (and (<= cur-loop 8) (> (unbox SC2-NEXUS-RECHARGE-LAST-LOOP) 8)))
-    (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999))
+    (reset-sc2-nexus-recharge-cooldown!))
   (when (< cur-loop (unbox SC2-WARPGATE-LAST-LOOP))
     (hash-clear! SC2-WARPGATE-COOLDOWN-UNTIL)
     (hash-clear! SC2-WARPGATE-WARP-START-LOOP)
@@ -5412,7 +5403,10 @@
     (set-box! SC2-WARPGATE-PREV-LIVE-READY 0)
     (set-box! SC2-LAST-SCAN-REQUEST-LOOP -9999)
     (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
-    (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999)
+    (reset-sc2-nexus-recharge-cooldown!)
+    (hash-clear! SC2-CREEP-TUMOR-FIRST-SEEN-LOOP)
+    (hash-clear! SC2-CREEP-TUMOR-EMIT-COUNT)
+    (hash-clear! SC2-SUPPLY-DROP-USED-DEPOTS)
     (hash-clear! SC2-WORKER-BUILD-ORDER-START)
     (set-box! SC2-HOME-BASE-ANCHOR #f)
     (set-box! SC2-CLEARED-ENEMY-BASES '())
@@ -5874,6 +5868,7 @@
                #:when (and (= (sc2-unit-unit-type u) 137)
                            (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
                            (not (set-member? used-tumors (sc2-unit-tag u)))))
+      (hash-ref! SC2-CREEP-TUMOR-FIRST-SEEN-LOOP (sc2-unit-tag u) cur-loop)
       (define p (sc2-unit-pos u))
       (hasheq 'id (sc2-unit-tag u)
               'type 'creep-tumor-burrowed
@@ -9999,7 +9994,8 @@
     (set-box! SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP #f)
     (hash-clear! SC2-GAS-BLDG-ZERO-WORKERS-SINCE)
     (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
-    (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999)
+    (reset-sc2-nexus-recharge-cooldown!)
+    (hash-clear! SC2-SUPPLY-DROP-USED-DEPOTS)
     (hash-clear! SC2-TH-WORKER-RALLY-TARGET)
     (hash-clear! SC2-SAT-EVAC-LAST-LOOP)
     (hash-clear! SC2-SAT-IDLE-LAST-LOOP)
@@ -11891,6 +11887,10 @@
             [(list 'warp-in u x y)
              (let ([nu (normalize-warp-in-unit-sym u)])
                (if (eq? nu u) a (list 'warp-in nu x y)))]
+            [(list (or 'cast 'cast-spell) caster (or 'calldown-extra-supplies 'extra-supplies) target)
+             (list 'cast-spell caster 'supply-drop target)]
+            [(list (or 'calldown-extra-supplies 'supply-drop 'extra-supplies) oc-id depot-id)
+             (list 'cast-spell oc-id 'supply-drop depot-id)]
             [_ a]))
         '()))
   (define-values (actions step-action-rejects)
@@ -12017,10 +12017,13 @@
       (set-box! SC2-ACTIVE-RECALL-ZONES '())
       (set-box! SC2-NEXUS-RECALL-READY-LOOP -10000)
       (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
-      (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999))
+      (reset-sc2-nexus-recharge-cooldown!)
+      (hash-clear! SC2-CREEP-TUMOR-FIRST-SEEN-LOOP)
+      (hash-clear! SC2-CREEP-TUMOR-EMIT-COUNT)
+      (hash-clear! SC2-SUPPLY-DROP-USED-DEPOTS))
     (when (or (< cur-loop (unbox SC2-NEXUS-RECHARGE-LAST-LOOP))
               (and (<= cur-loop 8) (> (unbox SC2-NEXUS-RECHARGE-LAST-LOOP) 8)))
-      (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999))
+      (reset-sc2-nexus-recharge-cooldown!))
     (set-box! SC2-WIRE-LAST-LOOP-BOX cur-loop)
     (let ([rzs (unbox SC2-ACTIVE-RECALL-ZONES)])
       (when (pair? rzs)
@@ -12076,7 +12079,10 @@
       (set-box! SC2-ACTIVE-RECALL-ZONES '())
       (set-box! SC2-NEXUS-RECALL-READY-LOOP -10000)
       (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
-      (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999)
+      (reset-sc2-nexus-recharge-cooldown!)
+      (hash-clear! SC2-CREEP-TUMOR-FIRST-SEEN-LOOP)
+      (hash-clear! SC2-CREEP-TUMOR-EMIT-COUNT)
+      (hash-clear! SC2-SUPPLY-DROP-USED-DEPOTS)
       (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
       (set-box! SC2-TERRITORY-FIELD-CACHE #f)
       (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999))
@@ -12088,7 +12094,10 @@
       (set-box! SC2-WARPGATE-PREV-LIVE-READY 0)
       (set-box! SC2-LAST-SCAN-REQUEST-LOOP -9999)
       (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
-      (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP -99999))
+      (reset-sc2-nexus-recharge-cooldown!)
+      (hash-clear! SC2-CREEP-TUMOR-FIRST-SEEN-LOOP)
+      (hash-clear! SC2-CREEP-TUMOR-EMIT-COUNT)
+      (hash-clear! SC2-SUPPLY-DROP-USED-DEPOTS))
     (set-box! SC2-WARPGATE-LAST-LOOP cur-loop)
     (define raw-dead (sc2-observation-dead-unit-tags obs))
     (when (list? raw-dead)
@@ -12169,6 +12178,8 @@
                   rev-blocking-unit-circles)))
     (cond
       [(and (= al 1) (not (= dt 4)))
+       (when (and (= utype 137) (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS))
+         (hash-ref! SC2-CREEP-TUMOR-FIRST-SEEN-LOOP utag cur-loop))
        (set! rev-self-units (cons u rev-self-units))]
       [(and (= al 4) (not (= dt 4)))
        (set! rev-enemy-units (cons u rev-enemy-units))]
@@ -14128,6 +14139,68 @@
                     (not (sc2-unit-is-hallucination tgt-u))
                     (> (sc2-unit-health-max tgt-u) 0.0)
                     (< (sc2-unit-health tgt-u) (- (sc2-unit-health-max tgt-u) 0.01)))))))
+  ;; L64 P2 #5 (`#1787`): Promote `< 4:30` (`cur-loop < 6048`) damaged Bunker (`24`) SCV repair
+  ;; (`3685`/`316`) to Tier P0 urgent survival for `<= 4` SCVs per Bunker on a `22f` per-(Bunker,SCV)
+  ;; cooldown, while keeping `316`/`3685` strictly at P2 globally (`L60 #1580`)!
+  (define step-early-bunker-p0-scvs (make-hasheqv))
+  (define (maybe-mark-early-bunker-repair-urgent! cmd target-id)
+    (define tgt-u (and (< cur-loop 6048) (hash-ref self-unit-by-tag target-id #f)))
+    (when (and tgt-u
+               (= (sc2-unit-unit-type tgt-u) 24)
+               (> (sc2-unit-health-max tgt-u) 0.0)
+               (< (sc2-unit-health tgt-u) (- (sc2-unit-health-max tgt-u) 0.01)))
+      (define tags (if (sc2-raw-unit-command? cmd) (sc2-raw-unit-command-unit-tags cmd) '()))
+      (define used-cnt (hash-ref step-early-bunker-p0-scvs target-id 0))
+      (when (and (pair? tags)
+                 (<= (+ used-cnt (length tags)) 4)
+                 (for/and ([st (in-list tags)])
+                   (wire-nonstack-allow?! (list 'early-bunker-p0-rep target-id st) 22)))
+        (hash-set! step-early-bunker-p0-scvs target-id (+ used-cnt (length tags)))
+        (mark-urgent-survival-cmd! cmd)))
+    cmd)
+  ;; L64 P0 #6 (`#1787`): Terran Orbital Command Calldown: Extra Supplies (`EFFECT_SUPPLYDROP = 255`)
+  ;; translates both `'calldown-extra-supplies` and `'supply-drop` with Tier P1 macro priority,
+  ;; guarding against already-dropped Depots (`health-max >= 450` or previously used) and sharing
+  ;; `SC2-MACRO-ABILITY-LAST-LOOP` `(cons 'mule oc-id)` so Sec 6a MULE won't double-spend!
+  (define (emit-supply-drop-255! raw-oc-ids depot-id)
+    (define oc-cands
+      (filter (lambda (t) (and (exact-integer? t) (> t 0)))
+              (if (list? raw-oc-ids) raw-oc-ids (list raw-oc-ids))))
+    (when (and (pair? oc-cands)
+               (exact-integer? depot-id) (> depot-id 0)
+               (sc2-ability-live-available? 255)
+               (not (hash-has-key? SC2-SUPPLY-DROP-USED-DEPOTS depot-id)))
+      (cond
+        [(null? self-units)
+         (define oc-id (first oc-cands))
+         (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule oc-id) cur-loop)
+         (hash-set! SC2-SUPPLY-DROP-USED-DEPOTS depot-id cur-loop)
+         (emit! (mark-macro-econ-cmd!
+                 (sc2-raw-unit-command 255 #f depot-id (list oc-id) #f)))]
+        [else
+         (define depot-u (hash-ref self-unit-by-tag depot-id #f))
+         (when (and depot-u
+                    (memv (sc2-unit-unit-type depot-u) '(19 47))
+                    (>= (sc2-unit-build-progress depot-u) SC2-BUILD-COMPLETE-PROGRESS)
+                    (< (sc2-unit-health-max depot-u) 450.0))
+           (define valid-ocs
+             (filter-map
+              (lambda (cid)
+                (define cu (hash-ref self-unit-by-tag cid #f))
+                (and cu
+                     (= (sc2-unit-unit-type cu) 132)
+                     (>= (sc2-unit-build-progress cu) SC2-BUILD-COMPLETE-PROGRESS)
+                     (not (sc2-unit-is-flying cu))
+                     (>= (sc2-unit-energy cu) 50.0)
+                     (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule cid) -1000)) 16)
+                     cu))
+              oc-cands))
+           (when (pair? valid-ocs)
+             (define best-oc (sc2-unit-tag (argmax sc2-unit-energy valid-ocs)))
+             (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule best-oc) cur-loop)
+             (hash-set! SC2-SUPPLY-DROP-USED-DEPOTS depot-id cur-loop)
+             (emit! (mark-macro-econ-cmd!
+                     (sc2-raw-unit-command 255 #f depot-id (list best-oc) #f)))))])))
   ;; Burrowed Zerg non-attackers (excludes Lurker 503 & WidowMine 500) cannot execute Attack (23);
   ;; air-only attackers (VikingFighter 35, Phoenix 78, Corruptor 112) cannot unit-target non-Colossus
   ;; ground (`111:MustTargetAirUnits`); ground-only attackers cannot unit-target flying units (`113:MustTargetGroundUnits`)!
@@ -17845,7 +17918,12 @@
          (record-worker-used! scv-id)
          (unless (or (unit-already-executing-order? scv-id 3685 #f target-id)
                      (unit-already-executing-order? scv-id 316 #f target-id))
-           (emit! (sc2-raw-unit-command 3685 #f target-id (list scv-id) #f))))]
+           (emit! (maybe-mark-early-bunker-repair-urgent!
+                   (sc2-raw-unit-command 3685 #f target-id (list scv-id) #f)
+                   target-id))))]
+
+      [(list (or 'calldown-extra-supplies 'supply-drop 'extra-supplies) oc-id depot-id)
+       (emit-supply-drop-255! oc-id depot-id)]
 
       [(list (or 'shield-battery-restore 'shield-battery-recharge) bat-id target-id)
        (when (and (exact-integer? bat-id) (> bat-id 0)
@@ -17875,7 +17953,7 @@
                                        (sc2-point3d-x tp) (sc2-point3d-y tp))
                               max-d))))
            (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono nx-id) cur-loop)
-           (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP cur-loop)
+           (record-sc2-nexus-recharge-loop! cur-loop)
            (emit! (mark-macro-econ-cmd!
                    (sc2-raw-unit-command 4126 #f target-id (list nx-id) #f)))))]
 
@@ -18290,7 +18368,7 @@
                   (define tumor-cached-pos
                     (and tumor-cached-raw-pos
                          (or (not (= ab-id 1733))
-                             (<= (pt-dist ox oy (sc2-point2d-x tumor-cached-raw-pos) (sc2-point2d-y tumor-cached-raw-pos)) 10.5))
+                             (<= (pt-dist ox oy (sc2-point2d-x tumor-cached-raw-pos) (sc2-point2d-y tumor-cached-raw-pos)) 9.8))
                          (tumor-cand-clear? (sc2-point2d-x tumor-cached-raw-pos) (sc2-point2d-y tumor-cached-raw-pos))
                          tumor-cached-raw-pos))
                   (define verified-tumor-pt
@@ -18300,20 +18378,22 @@
                        (define stx (+ (floor tx) 0.5))
                        (define sty (+ (floor ty) 0.5))
                        (define target-cand
-                         (if (and (or (not (= ab-id 1733)) (<= (pt-dist ox oy stx sty) 10.0))
+                         (if (and (or (not (= ab-id 1733)) (<= (pt-dist ox oy stx sty) 9.8))
                                   (tumor-cand-clear? stx sty))
                              (list (sc2-point2d stx sty))
                              '()))
-                       ;; Compact <= 16 candidate fan (3 radii x 5 angles + target-cand)
+                       ;; Compact <= 16 candidate fan (3 radii x 5 angles + target-cand);
+                       ;; L64 P0 #6 (`#1787`): strictly enforce `<= 9.8t` for `1733` Tumor spread!
                        (define fan-cands
                          (append
                           target-cand
                           (if (= ab-id 1733)
-                              (for*/list ([r (in-list '(9.5 8.0 6.5))]
+                              (for*/list ([r (in-list '(9.0 7.5 6.0))]
                                           [da (in-list '(0.0 0.35 -0.35 0.78 -0.78))]
                                           [px (in-value (+ (floor (+ ox (* r (cos (+ base-ang da))))) 0.5))]
                                           [py (in-value (+ (floor (+ oy (* r (sin (+ base-ang da))))) 0.5))]
-                                          #:when (tumor-cand-clear? px py))
+                                          #:when (and (<= (pt-dist ox oy px py) 9.8)
+                                                      (tumor-cand-clear? px py)))
                                 (sc2-point2d px py))
                               (for*/list ([r (in-list '(3.5 2.5 4.2))]
                                           [da (in-list '(0.0 0.78 -0.78 1.57 -1.57))]
@@ -18336,9 +18416,13 @@
                                   (consume-placement-rpc-budget! step-placement-rpc-budget))
                              (set! step-tumor-rpc-count (add1 step-tumor-rpc-count))
                              (set-box! SC2-LAST-TUMOR-RPC-LOOP cur-loop)
+                             ;; L64 P0 #6 (`#1787`): Query `1694` (`1x1` Queen creep footprint)
+                             ;; instead of `1733` with `placing_unit_tag = 0` (which SC2 rejects
+                             ;; as out-of-range!) while enforcing `<= 9.8t` in Racket & emitting `1733`!
+                             (define q-ab-id (if (= ab-id 1733) 1694 ab-id))
                              (define q-items
                                (for/list ([pt (in-list capped-fan)])
-                                 (sc2-query-placement ab-id (sc2-point2d-x pt) (sc2-point2d-y pt) 0)))
+                                 (sc2-query-placement q-ab-id (sc2-point2d-x pt) (sc2-point2d-y pt) 0)))
                              (define q-resp
                                (sc2-ws-rpc! ws-conn
                                             (make-request-query-placement q-items
@@ -18360,9 +18444,18 @@
                     (reserve-step-build-pt! verified-tumor-pt ab-id)
                     (for ([cid (in-list caster-ids)])
                       (hash-set! SC2-CREEP-TUMOR-COOLDOWN cid cur-loop))
-                    (when (and (= ab-id 1733) (set-mutable? used-tumors))
+                    ;; L64 P0 #6 (`#1787`): Never permanently ban a Creep Tumor on a single
+                    ;; immature/first emit! Require `>= 264f` maturity since first-seen AND
+                    ;; `>= 2` verified post-maturity emissions (separated by `44f` cooldown)
+                    ;; before adding `cid` to `used-tumors`!
+                    (when (= ab-id 1733)
                       (for ([cid (in-list caster-ids)])
-                        (set-add! used-tumors cid)))
+                        (define first-seen (hash-ref! SC2-CREEP-TUMOR-FIRST-SEEN-LOOP cid cur-loop))
+                        (when (>= (- cur-loop first-seen) 264)
+                          (define next-cnt (add1 (hash-ref SC2-CREEP-TUMOR-EMIT-COUNT cid 0)))
+                          (hash-set! SC2-CREEP-TUMOR-EMIT-COUNT cid next-cnt)
+                          (when (and (>= next-cnt 2) (set-mutable? used-tumors))
+                            (set-add! used-tumors cid)))))
                     (emit! (sc2-raw-unit-command ab-id verified-tumor-pt 0 caster-ids #f)))))]
 
              ;; Case C: Phase 2 (`#1662`): Orbital Command Calldown MULE (171) -> thin wire adapter
@@ -18573,7 +18666,7 @@
                               (exact-integer? target-id) (> target-id 0))
                      (cond
                        [(null? self-units)
-                        (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP cur-loop)
+                        (record-sc2-nexus-recharge-loop! cur-loop)
                         (emit! (mark-macro-econ-cmd!
                                 (sc2-raw-unit-command 4126 #f target-id (list (first caster-ids)) #f)))]
                        [else
@@ -18601,9 +18694,12 @@
                           (when (pair? valid-nxs)
                             (define best-nx (sc2-unit-tag (argmax sc2-unit-energy valid-nxs)))
                             (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono best-nx) cur-loop)
-                            (set-box! SC2-NEXUS-RECHARGE-LAST-LOOP cur-loop)
+                            (record-sc2-nexus-recharge-loop! cur-loop)
                             (emit! (mark-macro-econ-cmd!
                                     (sc2-raw-unit-command 4126 #f target-id (list best-nx) #f)))))]))]
+                  ;; L64 P0 #6 (`#1787`): Terran Orbital Command Calldown: Extra Supplies (`255`)
+                  [(= ab-id 255)
+                   (emit-supply-drop-255! caster-ids target-id)]
                   ;; L58-P3B: Medivac Heal (`386`) strictly targets live, damaged, unhealed friendly
                   ;; biological units (1 Medivac per bio target — auto-redirects Medivac #2 to the next
                   ;; wounded bio unit within `10.0t` to eliminate `206:AlreadyTargeted` rejects!).
@@ -18657,8 +18753,9 @@
                               (set-add! emitted-heal-target-tags chosen-tid)
                               (set-add! commanded-combat-tags cid)
                               (emit! (sc2-raw-unit-command 386 #f chosen-tid (list cid) #f)))))]))]
-                  ;; L58-P1: SCV Repair (`316`/`3685`) strictly requires damaged target (`health < health-max`)
-                  ;; to eliminate `28:TooMuchLife` rejects!
+                  ;; L58-P1 / L64 P2 #5: SCV Repair (`316`/`3685`) strictly requires damaged target
+                  ;; (`health < health-max`) and promotes `< 4:30` damaged Bunker repair (`<= 4` SCVs,
+                  ;; `22f` cooldown) to P0 while keeping all other repairs strictly P2 (`L60 #1580`)!
                   [(memv ab-id '(316 3685))
                    (define valid-rep-cids
                      (filter (lambda (cid)
@@ -18670,7 +18767,27 @@
                      (for ([cid (in-list valid-rep-cids)])
                        (record-worker-used! cid)
                        (set-add! commanded-combat-tags cid))
-                     (emit! (sc2-raw-unit-command ab-id #f target-id valid-rep-cids #f)))]
+                     (define rem-p0-slots (max 0 (- 4 (hash-ref step-early-bunker-p0-scvs target-id 0))))
+                     (define tgt-bkr-early-dmg?
+                       (and (< cur-loop 6048)
+                            (let ([tu (hash-ref self-unit-by-tag target-id #f)])
+                              (and tu (= (sc2-unit-unit-type tu) 24)
+                                   (> (sc2-unit-health-max tu) 0.0)
+                                   (< (sc2-unit-health tu) (- (sc2-unit-health-max tu) 0.01))))))
+                     (cond
+                       [(and tgt-bkr-early-dmg?
+                             (> rem-p0-slots 0)
+                             (> (length valid-rep-cids) rem-p0-slots))
+                        (define p0-cids (take valid-rep-cids rem-p0-slots))
+                        (define p2-cids (drop valid-rep-cids rem-p0-slots))
+                        (emit! (maybe-mark-early-bunker-repair-urgent!
+                                (sc2-raw-unit-command ab-id #f target-id p0-cids #f)
+                                target-id))
+                        (emit! (sc2-raw-unit-command ab-id #f target-id p2-cids #f))]
+                       [else
+                        (emit! (maybe-mark-early-bunker-repair-urgent!
+                                (sc2-raw-unit-command ab-id #f target-id valid-rep-cids #f)
+                                target-id))]))]
                   [(and (exact-integer? target-id) (> target-id 0)
                         (not (and (memv ab-id '(394 911 1406 3668))
                                   (passenger-protected-channeling-safe? target-id))))
@@ -20317,7 +20434,9 @@
           (for/fold ([best +inf.0]) ([cu (in-list combat-units)])
             (define cp (sc2-unit-pos cu))
             (min best (pt-dist ex ey (sc2-point3d-x cp) (sc2-point3d-y cp)))))
-        (min th-d army-d))
+        ;; L64 P1 #4 (`#1787`): `-4.0t` priority bonus on burrowed Widow Mines (`500`)!
+        (- (min th-d army-d)
+           (if (= (sc2-unit-unit-type se) 500) 4.0 0.0)))
       (define sorted-stealth
         (sort uncovered-stealth-enemies < #:key stealth-priority-dist))
       (for ([se (in-list sorted-stealth)])
@@ -20365,43 +20484,74 @@
                      raw-cmds)))
             (cond
               [(= dutype 1912)
+               (set! already-heading-pts (cons (cons ex ey) already-heading-pts))
                (emit! (mark-urgent-survival-cmd!
                        (sc2-raw-unit-command 3745 #f 0 (list dtag) #f)))]
               [(= dutype 1911)
+               (set! already-heading-pts (cons (cons ex ey) already-heading-pts))
                (emit! (mark-urgent-survival-cmd!
                        (sc2-raw-unit-command 3739 #f 0 (list dtag) #f)))]
               [else
-               ;; Aim directly over the stealth enemy (pulled <= 2.0t toward nearby allied combat
-               ;; if present, well inside 11.0t detection radius and <= 15.0t intercept bound)
+               ;; L64 P1 #4 (`#1787`): When multiple uncovered stealth enemies cluster within `<= 9.5t`,
+               ;; aim the detector at their verified centroid (all cluster members `<= 9.5t`) while
+               ;; updating `already-heading-pts` in-loop so additional detectors spread across separate fronts!
+               (define cluster-members
+                 (filter (lambda (o)
+                           (define op (sc2-unit-pos o))
+                           (define ox (sc2-point3d-x op))
+                           (define oy (sc2-point3d-y op))
+                           (and (<= (pt-dist ex ey ox oy) 9.5)
+                                (not (ormap (lambda (pt) (<= (pt-dist ox oy (car pt) (cdr pt)) 10.5))
+                                            already-heading-pts))))
+                         sorted-stealth))
+               (define-values (aim-x aim-y)
+                 (if (> (length cluster-members) 1)
+                     (let* ([n (exact->inexact (length cluster-members))]
+                            [cx (/ (for/sum ([o (in-list cluster-members)]) (sc2-point3d-x (sc2-unit-pos o))) n)]
+                            [cy (/ (for/sum ([o (in-list cluster-members)]) (sc2-point3d-y (sc2-unit-pos o))) n)])
+                       (if (for/and ([o (in-list cluster-members)])
+                             (define op (sc2-unit-pos o))
+                             (<= (pt-dist cx cy (sc2-point3d-x op) (sc2-point3d-y op)) 9.5))
+                           (values cx cy)
+                           (values ex ey)))
+                     (values ex ey)))
+               ;; Aim directly over stealth enemy / cluster centroid (pulled <= 2.0t toward nearby allied
+               ;; combat only if all cluster members remain inside <= 10.0t detection radius)
                (define near-ally
                  (for/fold ([best-u #f] [best-d 20.0] #:result best-u)
                            ([cu (in-list combat-units)])
                    (define cp (sc2-unit-pos cu))
-                   (define cd (pt-dist ex ey (sc2-point3d-x cp) (sc2-point3d-y cp)))
+                   (define cd (pt-dist aim-x aim-y (sc2-point3d-x cp) (sc2-point3d-y cp)))
                    (if (< cd best-d) (values cu cd) (values best-u best-d))))
                (define-values (tx ty)
                  (if near-ally
                      (let* ([ap (sc2-unit-pos near-ally)]
                             [ax (sc2-point3d-x ap)]
                             [ay (sc2-point3d-y ap)]
-                            [d (max 1.0 (pt-dist ex ey ax ay))]
-                            [pull (min 2.0 (* 0.4 d))])
-                       (values (max SC2-MAP-PLAYABLE-MIN-COORD
-                                    (min SC2-MAP-PLAYABLE-MAX-COORD (+ ex (* pull (/ (- ax ex) d)))))
-                               (max SC2-MAP-PLAYABLE-MIN-COORD
-                                    (min SC2-MAP-PLAYABLE-MAX-COORD (+ ey (* pull (/ (- ay ey) d)))))))
-                     (values (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD ex))
-                             (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD ey)))))
+                            [d (max 1.0 (pt-dist aim-x aim-y ax ay))]
+                            [pull (min 2.0 (* 0.4 d))]
+                            [px (max SC2-MAP-PLAYABLE-MIN-COORD
+                                     (min SC2-MAP-PLAYABLE-MAX-COORD (+ aim-x (* pull (/ (- ax aim-x) d)))))]
+                            [py (max SC2-MAP-PLAYABLE-MIN-COORD
+                                     (min SC2-MAP-PLAYABLE-MAX-COORD (+ aim-y (* pull (/ (- ay aim-y) d)))))])
+                       (if (for/and ([o (in-list cluster-members)])
+                             (define op (sc2-unit-pos o))
+                             (<= (pt-dist px py (sc2-point3d-x op) (sc2-point3d-y op)) 10.0))
+                           (values px py)
+                           (values (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD aim-x))
+                                   (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD aim-y)))))
+                     (values (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD aim-x))
+                             (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD aim-y)))))
                (define dest-pt (sc2-point2d tx ty))
                (set! already-heading-pts (cons (cons tx ty) already-heading-pts))
                (unless (unit-already-executing-order? dtag 16 dest-pt 0)
                  (emit! (mark-urgent-survival-cmd!
                          (sc2-raw-unit-command 16 dest-pt 0 (list dtag) #f))))])))))
-    ;; L58-P2: Emergency Terran Orbital Command Scanner Sweep (`399`) defense-in-depth!
-    ;; When an uncovered `cloak=1` / burrowed enemy is actively threatening friendly units (`<= 18.0t`)
-    ;; and no active `ScannerSweep` effect (`effect-id = 6`) or same-step `399` already covers it,
-    ;; fire P0 `399` directly from the highest-energy ready Orbital Command (`132`, `energy >= 50.0`)
-    ;; and strip any competing same-step `171` MULE on that OC!
+    ;; L58-P2 / L64 P1 #4 (`#1787`): Emergency Terran Orbital Command Scanner Sweep (`399`)!
+    ;; Scores each uncovered stealth cluster (`<= 11.0t`, guaranteed `<= 10.5t` from weighted centroid
+    ;; inside SC2's `13.0t` Scan radius) with `1.5x` weight on burrowed Widow Mines (`500`) near
+    ;; friendly workers (`<= 12.0t`) or `>= 3` combat units (`<= 12.0t`), dropping ONE P0 Scan on the
+    ;; highest-value cluster centroid and stripping any competing same-step `171` MULE on that OC!
     (define ready-scan-ocs
       (sort (filter (lambda (u)
                       (and (= (sc2-unit-unit-type u) 132)
@@ -20434,10 +20584,60 @@
                                    emitted-scan-pts))))
                 uncovered-stealth-enemies))
       (when (pair? threat-stealth)
-        (define target-se (first threat-stealth))
-        (define ep (sc2-unit-pos target-se))
-        (define ex (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD (sc2-point3d-x ep))))
-        (define ey (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD (sc2-point3d-y ep))))
+        (define (scan-threat-weight se)
+          (if (= (sc2-unit-unit-type se) 500)
+              (let* ([ep (sc2-unit-pos se)]
+                     [sx (sc2-point3d-x ep)]
+                     [sy (sc2-point3d-y ep)]
+                     [near-worker?
+                      (ormap (lambda (w)
+                               (define wp (sc2-unit-pos w))
+                               (<= (pt-dist sx sy (sc2-point3d-x wp) (sc2-point3d-y wp)) 12.0))
+                             workers)]
+                     [near-combat-cnt
+                      (if near-worker?
+                          0
+                          (count (lambda (cu)
+                                   (define cp (sc2-unit-pos cu))
+                                   (<= (pt-dist sx sy (sc2-point3d-x cp) (sc2-point3d-y cp)) 12.0))
+                                 combat-units))])
+                (if (or near-worker? (>= near-combat-cnt 3)) 1.5 1.0))
+              1.0))
+        (define weighted-stealth
+          (for/list ([se (in-list threat-stealth)])
+            (define ep (sc2-unit-pos se))
+            (vector (sc2-point3d-x ep) (sc2-point3d-y ep) (scan-threat-weight se))))
+        (define-values (best-cx best-cy _best-sc _best-d)
+          (for/fold ([bcx 0.0] [bcy 0.0] [bsc -1.0] [bd +inf.0])
+                    ([anchor (in-list weighted-stealth)])
+            (define ax (vector-ref anchor 0))
+            (define ay (vector-ref anchor 1))
+            (define raw-cl
+              (filter (lambda (v)
+                        (<= (pt-dist ax ay (vector-ref v 0) (vector-ref v 1)) 11.0))
+                      weighted-stealth))
+            (define wsum (for/sum ([v (in-list raw-cl)]) (vector-ref v 2)))
+            (define cx (/ (for/sum ([v (in-list raw-cl)]) (* (vector-ref v 0) (vector-ref v 2))) (max 1e-6 wsum)))
+            (define cy (/ (for/sum ([v (in-list raw-cl)]) (* (vector-ref v 1) (vector-ref v 2))) (max 1e-6 wsum)))
+            ;; Verify members stay strictly inside <= 10.5t of centroid (SC2 Scan radius = 13.0t)
+            (define in-cl
+              (filter (lambda (v)
+                        (<= (pt-dist cx cy (vector-ref v 0) (vector-ref v 1)) 10.5))
+                      raw-cl))
+            (define eff-cl (if (pair? in-cl) in-cl (list anchor)))
+            (define eff-wsum (for/sum ([v (in-list eff-cl)]) (vector-ref v 2)))
+            (define ecx (/ (for/sum ([v (in-list eff-cl)]) (* (vector-ref v 0) (vector-ref v 2))) (max 1e-6 eff-wsum)))
+            (define ecy (/ (for/sum ([v (in-list eff-cl)]) (* (vector-ref v 1) (vector-ref v 2))) (max 1e-6 eff-wsum)))
+            (define near-d
+              (for/fold ([md +inf.0]) ([u (in-list (if (pair? townhalls) townhalls self-units))])
+                (define up (sc2-unit-pos u))
+                (min md (pt-dist ecx ecy (sc2-point3d-x up) (sc2-point3d-y up)))))
+            (if (or (> eff-wsum bsc)
+                    (and (= eff-wsum bsc) (< near-d bd)))
+                (values ecx ecy eff-wsum near-d)
+                (values bcx bcy bsc bd))))
+        (define ex (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD best-cx)))
+        (define ey (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD best-cy)))
         (define scan-cell-key
           (list 'wire-emerg-scan
                 (quotient (inexact->exact (round ex)) 6)

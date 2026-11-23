@@ -16,6 +16,7 @@
          racket/tcp
          json
          "../lib/sc2-game-constants.rkt"
+         (prefix-in l0: "../lib/sc2-game-constants.rkt")
          (prefix-in pl: "../lib/sc2-placement.rkt")
          "../lib/plan/situational-counter.rkt"
          "../lib/sc2-protobuf-ws.rkt"
@@ -12807,8 +12808,9 @@
                      (make-test-obs 5600 200 100 (append (list l59c-oc1-65 l59c-oc2-55 l59c-rax l59c-min1 l59c-min2 l59c-etumor) l59c-scvs12 l59c-mars6))
                      #:game-info l59c-gi-z)))
   ;; (c) Live TvZ WITH enemy Burrowed Lurker (504) sighted -> holds Scan while visible (both OCs),
-  ;;     and after Lurker leaves vision (`SC2-SAT-SEEN-ENEMY-CLOAK?` latched) top-1 OC (99801) holds Scan
-  ;;     while OC #2 (99802) still MULEs freely!
+  ;;     and after Lurker leaves vision (`cloak_seen` latched, Loop 64 A5 `#1755`) top-2 OCs (99801/99802)
+  ;;     hold 100e Scan while a 3rd OC (99803) still MULEs freely!
+  (define l59c-oc3-55  (mk-l59-u 99803 132 1 36.0 34.0 #:hp 1500.0 #:en 55.0))
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define l59c-tvz-lurker-vis
     (l59c-mule-tags (saturate-workers-and-gas-commands
@@ -12817,7 +12819,7 @@
   (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
   (define l59c-tvz-lurker-latched
     (l59c-mule-tags (saturate-workers-and-gas-commands
-                     (make-test-obs 5668 200 100 (append (list l59c-oc1-65 l59c-oc2-55 l59c-rax l59c-min1 l59c-min2) l59c-scvs12 l59c-mars6))
+                     (make-test-obs 5668 200 100 (append (list l59c-oc1-65 l59c-oc2-55 l59c-oc3-55 l59c-rax l59c-min1 l59c-min2) l59c-scvs12 l59c-mars6))
                      #:game-info l59c-gi-z)))
   ;; (d) Live TvP at 4:10 (loop 5680, after rewind clearing Lurker latch): 2 OCs -> ONLY top-1 OC (99801) holds Scan, OC #2 (99802) MULEs!
   (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l59c-min1)) #:game-info l59c-gi-p))
@@ -12844,7 +12846,7 @@
                    (equal? l59c-tvt-casec '(99801))
                    (equal? (sort l59c-tvz-tumor-sat <) '(99801 99802))
                    (null? l59c-tvz-lurker-vis)
-                   (equal? l59c-tvz-lurker-latched '(99802))
+                   (equal? l59c-tvz-lurker-latched '(99803))
                    (equal? l59c-tvp-2oc-sat '(99802))
                    (null? l59c-t10-sat)
                    (null? l59c-t10-casec)))
@@ -13583,6 +13585,295 @@
                    (not l63b-cd-after-6354?)
                    l63b-ready-after-rewind?
                    l63b-ready-after-reset?)))
+
+(printf "[Loop 64 Lane C] Testing #1787 L0 live-data predicates, 3-mine centroid Scan 399, 12a 2-detector spread, <4:30 Bunker P0 repair, 1733->1694 Creep Tumor spread, & Supply Drop 255 P1...\n")
+(let ()
+  (define (mk-l64-u tag utype alliance x y
+                    #:hp [hp 100.0] #:hp-max [hp-max hp] #:sh [sh 0.0] #:rad [rad 1.0]
+                    #:en [en 0.0] #:en-max [en-max 200.0] #:bp [bp 1.0]
+                    #:fly [fly? #f] #:burr [burr? #f] #:cloak [cloak 0]
+                    #:orders [ords '()] #:mins [mins 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y (if fly? 12.0 8.0)) 0.0 rad bp cloak #f #f burr?
+              hp hp-max sh sh en en-max mins 0 fly? #f #f #t #f
+              ords 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define l64-min (mk-l64-u 84001 341 3 23.0 30.0 #:mins 1500 #:en 0.0 #:en-max 0.0))
+
+  ;; L64-C0: L0 `lib/sc2-game-constants.rkt` owns `sc2-ability-live-available?`,
+  ;;         `sc2-upgrade-defined-in-live-data?`, `sc2-upgrade-live-available?`, and
+  ;;         `sc2-nexus-recharge-cooldown-ready?` (re-exported identically from `sc2-protobuf-ws.rkt`)
+  ;;         and populates cleanly via `register-sc2-response-data!`!
+  (reset-sc2-live-response-data!)
+  (define l0-avail-fn l0:sc2-ability-live-available?)
+  (define l0-upg-fn   l0:sc2-upgrade-defined-in-live-data?)
+  (define l0-rech-fn  l0:sc2-nexus-recharge-cooldown-ready?)
+  (define l64-data
+    (sc2-data (list (sc2-ability-data-entry 4107 "BatteryOvercharge" #f)
+                    (sc2-ability-data-entry 4126 "EnergyRecharge" #t)
+                    (sc2-ability-data-entry 255 "SupplyDrop" #t))
+              '()
+              (list (sc2-upgrade-data-entry 84 "WarpGateResearch" 50 50 1120 1568))
+              '() '()))
+  (register-sc2-response-data! l64-data)
+  (define l64-c0-live-4107? (l0-avail-fn 4107))
+  (define l64-c0-live-4126? (l0-avail-fn 4126))
+  (define l64-c0-live-wg?   (l0-upg-fn 'warp-gate-research))
+  (define l64-c0-live-pg?   (l0-upg-fn 'pathogen-glands))
+  (record-sc2-nexus-recharge-loop! 5000)
+  (define l64-c0-rech-cd?   (l0-rech-fn 5100))
+  (reset-sc2-live-response-data!)
+  (define l64-c0-reset-ok?  (and (l0-avail-fn 4107) (not (l0-upg-fn 'warp-gate-research)) (l0-rech-fn 5100)))
+  (check-true "l64-c0-l0-live-data-predicates-owned-by-constants-and-hydrated"
+              (and (eq? l0-avail-fn sc2-ability-live-available?)
+                   (eq? l0-upg-fn sc2-upgrade-defined-in-live-data?)
+                   (eq? l0-rech-fn sc2-nexus-recharge-cooldown-ready?)
+                   (not l64-c0-live-4107?)
+                   l64-c0-live-4126?
+                   l64-c0-live-wg?
+                   (not l64-c0-live-pg?)
+                   (not l64-c0-rech-cd?)
+                   l64-c0-reset-ok?))
+
+  ;; L64-C1: 3-mine cluster-centroid Scan `399` (`1.5x` weight on burrowed Widow Mines `500`
+  ;;         near workers / `>= 3` combat units beats lone distant Banshee & lands on centroid!)
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l64-min))))
+  (define l64-oc    (mk-l64-u 84101 132 1 30.0 30.0 #:hp 1500.0 #:rad 2.75 #:en 60.0))
+  (define l64-scv-w (mk-l64-u 84102 45  1 35.0 30.0 #:hp 45.0   #:rad 0.375 #:en 0.0 #:en-max 0.0))
+  (define l64-m-far (mk-l64-u 84103 48  1 68.0 70.0 #:hp 45.0   #:rad 0.375 #:en 0.0 #:en-max 0.0))
+  (define l64-wm1   (mk-l64-u 84111 500 4 38.0 30.0 #:hp 0.0    #:hp-max 0.0 #:burr #t #:cloak 1))
+  (define l64-wm2   (mk-l64-u 84112 500 4 44.0 30.0 #:hp 0.0    #:hp-max 0.0 #:burr #t #:cloak 1))
+  (define l64-wm3   (mk-l64-u 84113 500 4 41.0 35.0 #:hp 0.0    #:hp-max 0.0 #:burr #t #:cloak 1))
+  (define l64-bsh   (mk-l64-u 84114 55  4 70.0 70.0 #:hp 0.0    #:hp-max 0.0 #:fly #t #:cloak 1))
+  (define l64-scan-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 399)))
+            (translate-bot-actions->sc2-raw-commands
+             '()
+             (make-test-obs 7000 200 100 (list l64-oc l64-scv-w l64-m-far l64-bsh l64-wm1 l64-wm2 l64-wm3 l64-min)))))
+  (define l64-scan-pt (and (= (length l64-scan-cmds) 1)
+                           (sc2-raw-unit-command-target-pos (first l64-scan-cmds))))
+  (check-true "l64-c1-3-mine-cluster-centroid-scan-399"
+              (and (sc2-point2d? l64-scan-pt)
+                   (< (abs (- (sc2-point2d-x l64-scan-pt) 41.0)) 0.25)
+                   (< (abs (- (sc2-point2d-y l64-scan-pt) 31.6667)) 0.25)
+                   (<= (sqrt (+ (sqr (- (sc2-point2d-x l64-scan-pt) 38.0)) (sqr (- (sc2-point2d-y l64-scan-pt) 30.0)))) 4.0)
+                   (<= (sqrt (+ (sqr (- (sc2-point2d-x l64-scan-pt) 44.0)) (sqr (- (sc2-point2d-y l64-scan-pt) 30.0)))) 4.0)
+                   (<= (sqrt (+ (sqr (- (sc2-point2d-x l64-scan-pt) 41.0)) (sqr (- (sc2-point2d-y l64-scan-pt) 35.0)))) 4.0)))
+
+  ;; L64-C2: Section `12a` 2-detector spread across 2 separated Widow Mines + `-4.0t` WM priority bonus!
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l64-min))))
+  (define l64-nx    (mk-l64-u 84201 59  1 30.0 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75))
+  (define l64-obs1  (mk-l64-u 84202 82  1 32.0 30.0 #:hp 40.0   #:sh 20.0   #:fly #t))
+  (define l64-obs2  (mk-l64-u 84203 82  1 34.0 30.0 #:hp 40.0   #:sh 20.0   #:fly #t))
+  (define l64-wm-a  (mk-l64-u 84211 500 4 45.0 30.0 #:hp 0.0    #:hp-max 0.0 #:burr #t #:cloak 1))
+  (define l64-wm-b  (mk-l64-u 84212 500 4 68.0 30.0 #:hp 0.0    #:hp-max 0.0 #:burr #t #:cloak 1))
+  (define l64-2det-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 16)))
+            (translate-bot-actions->sc2-raw-commands
+             '()
+             (make-test-obs 7100 200 100 (list l64-nx l64-obs1 l64-obs2 l64-wm-a l64-wm-b l64-min)))))
+  (define l64-2det-xs (sort (map (lambda (c) (sc2-point2d-x (sc2-raw-unit-command-target-pos c))) l64-2det-cmds) <))
+  ;; `-4.0t` priority bonus: 1 Observer picks burrowed WM at 42.0 (dist=12, eff=8.0) over DT at 40.0 (dist=10, eff=10.0)!
+  (define l64-dt-10 (mk-l64-u 84213 76  4 40.0 30.0 #:hp 0.0    #:hp-max 0.0 #:cloak 1))
+  (define l64-wm-12 (mk-l64-u 84214 500 4 30.0 42.0 #:hp 0.0    #:hp-max 0.0 #:burr #t #:cloak 1))
+  (define l64-1det-prio
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 16)))
+            (translate-bot-actions->sc2-raw-commands
+             '()
+             (make-test-obs 7120 200 100 (list l64-nx l64-obs1 l64-dt-10 l64-wm-12 l64-min)))))
+  (check-true "l64-c2-12a-2-detector-spread-and-widow-mine-4t-priority-bonus"
+              (and (= (length l64-2det-cmds) 2)
+                   (not (equal? (sc2-raw-unit-command-unit-tags (first l64-2det-cmds))
+                                (sc2-raw-unit-command-unit-tags (second l64-2det-cmds))))
+                   (< (abs (- (first l64-2det-xs) 45.0)) 2.5)
+                   (< (abs (- (second l64-2det-xs) 68.0)) 2.5)
+                   (= (length l64-1det-prio) 1)
+                   (< (abs (- (sc2-point2d-y (sc2-raw-unit-command-target-pos (first l64-1det-prio))) 42.0)) 2.5)))
+
+  ;; L64-C3: `< 4:30` (`cur-loop < 6048`) damaged Bunker `3685` P0 promotion (`<= 4` SCVs, `22f` cd)
+  ;;         vs SCV #5 P2, `>= 4:30` Bunker P2, and non-Bunker Tank P2 (`L60 #1580` preserved!)
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l64-min))))
+  (define l64-bkr-dmg (mk-l64-u 84301 24 1 35.0 30.0 #:hp 240.0 #:hp-max 400.0 #:en 0.0 #:en-max 0.0))
+  (define l64-tnk-dmg (mk-l64-u 84302 33 1 38.0 30.0 #:hp 100.0 #:hp-max 175.0 #:en 0.0 #:en-max 0.0))
+  (define l64-scvs-5
+    (for/list ([i (in-range 5)])
+      (mk-l64-u (+ 84310 i) 45 1 (+ 33.0 (* 0.4 i)) 30.0 #:hp 45.0 #:en 0.0 #:en-max 0.0)))
+  (define l64-rep-early5
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3685)))
+            (translate-bot-actions->sc2-raw-commands
+             '((repair 84310 84301) (repair 84311 84301) (repair 84312 84301)
+               (repair 84313 84301) (repair 84314 84301))
+             (make-test-obs 4000 200 100 (append (list l64-bkr-dmg l64-tnk-dmg l64-min) l64-scvs-5)))))
+  ;; Within 22f cooldown (4008): SCV 84310 stays P2!
+  (define l64-rep-cd
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3685)))
+            (translate-bot-actions->sc2-raw-commands
+             '((repair 84310 84301))
+             (make-test-obs 4008 200 100 (append (list l64-bkr-dmg l64-min) l64-scvs-5)))))
+  ;; After 22f cooldown (4024): SCV 84310 promotes to P0 again!
+  (define l64-rep-reopen
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3685)))
+            (translate-bot-actions->sc2-raw-commands
+             '((repair 84310 84301))
+             (make-test-obs 4024 200 100 (append (list l64-bkr-dmg l64-min) l64-scvs-5)))))
+  ;; Non-Bunker (Tank 33) at 4024 stays P2; Bunker at `>= 6048` (`4:30`) stays P2!
+  (define l64-rep-tank
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3685)))
+            (translate-bot-actions->sc2-raw-commands
+             '((repair 84311 84302))
+             (make-test-obs 4024 200 100 (append (list l64-tnk-dmg l64-min) l64-scvs-5)))))
+  (define l64-rep-late
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 3685)))
+            (translate-bot-actions->sc2-raw-commands
+             '((repair 84310 84301))
+             (make-test-obs 6048 200 100 (append (list l64-bkr-dmg l64-min) l64-scvs-5)))))
+  (check-true "l64-c3-early-damaged-bunker-repair-p0-cap4-22f-cd-vs-p2-default"
+              (and (= (length l64-rep-early5) 5)
+                   (= (count (lambda (c) (= (wire-cmd-priority-tier c) 0)) l64-rep-early5) 4)
+                   (= (count (lambda (c) (= (wire-cmd-priority-tier c) 2)) l64-rep-early5) 1)
+                   (= (length l64-rep-cd) 1)
+                   (= (wire-cmd-priority-tier (first l64-rep-cd)) 2)
+                   (= (length l64-rep-reopen) 1)
+                   (= (wire-cmd-priority-tier (first l64-rep-reopen)) 0)
+                   (= (length l64-rep-tank) 1)
+                   (= (wire-cmd-priority-tier (first l64-rep-tank)) 2)
+                   (= (length l64-rep-late) 1)
+                   (= (wire-cmd-priority-tier (first l64-rep-late)) 2)))
+
+  ;; L64-C4: Zerg Creep Tumor `1733` spread queries `1694` placement (`<= 9.8t`), emits `1733`,
+  ;;         and NEVER permanently bans the tumor on an immature or single post-maturity emit!
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l64-min))))
+  (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
+  (set-box! SC2-LAST-TUMOR-RPC-LOOP -9999)
+  (define l64-queried-ab-ids (box '()))
+  (define l64-queried-pts (box '()))
+  (define-values (c4-in s4-out) (make-pipe))
+  (define-values (s4-in c4-out) (make-pipe))
+  (define c4-ws (sc2-ws-conn "127.0.0.1" 0 "/sc2api" c4-in c4-out #f 1))
+  (define c4-thd
+    (thread
+     (lambda ()
+       (let lp ()
+         (define hdr2 (read-bytes 2 s4-in))
+         (unless (eof-object? hdr2)
+           (define b0 (bytes-ref hdr2 0))
+           (define b1 (bytes-ref hdr2 1))
+           (define opcode (bitwise-and b0 #x0F))
+           (define masked? (not (zero? (bitwise-and b1 #x80))))
+           (define len7 (bitwise-and b1 #x7F))
+           (define plen
+             (cond [(< len7 126) len7]
+                   [(= len7 126) (integer-bytes->integer (read-bytes 2 s4-in) #f #t)]
+                   [else (integer-bytes->integer (read-bytes 8 s4-in) #f #t)]))
+           (define mkey (if masked? (read-bytes 4 s4-in) #f))
+           (define raw (read-bytes plen s4-in))
+           (define payload (if masked? (mask-ws-payload raw mkey) raw))
+           (when (= opcode 2)
+             (define req-f (decode-protobuf-message payload))
+             (define req-id-p (assoc 97 req-f))
+             (define id-b (if req-id-p (encode-uint32 97 (third req-id-p)) #""))
+             (define q-p (assoc 14 req-f))
+             (when q-p
+               (define qf (decode-protobuf-message (third q-p)))
+               (define p-items (filter (lambda (e) (= (first e) 3)) qf))
+               (for ([it (in-list p-items)])
+                 (define pf (decode-protobuf-message (third it)))
+                 (define ab-f (assoc 1 pf))
+                 (define pt-f (assoc 2 pf))
+                 (when ab-f
+                   (set-box! l64-queried-ab-ids (cons (third ab-f) (unbox l64-queried-ab-ids))))
+                 (when pt-f
+                   (define ptf (decode-protobuf-message (third pt-f)))
+                   (define xf (assoc 1 ptf))
+                   (define yf (assoc 2 ptf))
+                   (when (and xf yf)
+                     (set-box! l64-queried-pts
+                               (cons (cons (floating-point-bytes->real (third xf) #f)
+                                           (floating-point-bytes->real (third yf) #f))
+                                     (unbox l64-queried-pts))))))
+               (define res-b
+                 (apply bytes-append
+                        (for/list ([_it (in-list p-items)])
+                          (encode-submessage-field 3 (encode-int32 1 1)))))
+               (define resp (bytes-append (encode-submessage-field 14 res-b) id-b (encode-int32 99 3)))
+               (define rlen (bytes-length resp))
+               (define rhdr
+                 (cond [(< rlen 126) (bytes #x82 rlen)]
+                       [(<= rlen 65535) (bytes-append (bytes #x82 126) (integer->integer-bytes rlen 2 #f #t))]
+                       [else (bytes-append (bytes #x82 127) (integer->integer-bytes rlen 8 #f #t))]))
+               (write-bytes rhdr s4-out)
+               (write-bytes resp s4-out)
+               (flush-output s4-out))
+             (lp)))))))
+  (define l64-hatch (mk-l64-u 84401 86  1 32.5 32.5 #:hp 1500.0 #:rad 2.75))
+  (define l64-tumor (mk-l64-u 84402 137 1 40.0 34.0 #:hp 50.0   #:rad 0.5 #:burr #t))
+  (define l64-used-tumors (mutable-seteqv))
+  ;; Immature emit at 5000 (age=0 < 264): queries 1694, emits 1733, MUST NOT ban in `used-tumors`!
+  (define l64-t-e0
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1733)))
+            (translate-bot-actions->sc2-raw-commands
+             '((cast 84402 spread-creep-tumor 48.0 34.0))
+             (make-test-obs 5000 300 100 (list l64-hatch l64-tumor))
+             #:ws-conn c4-ws #:game-info w3-ginfo #:used-creep-tumors l64-used-tumors)))
+  (define l64-used-after-e0? (set-member? l64-used-tumors 84402))
+  ;; Post-maturity emit #1 at 5264 (`age = 264 >= 264`): emits 1733, still NOT in `used-tumors` (`cnt = 1`)!
+  (define l64-t-e1
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1733)))
+            (translate-bot-actions->sc2-raw-commands
+             '((cast 84402 spread-creep-tumor 48.0 34.0))
+             (make-test-obs 5264 300 100 (list l64-hatch l64-tumor))
+             #:ws-conn c4-ws #:game-info w3-ginfo #:used-creep-tumors l64-used-tumors)))
+  (define l64-used-after-e1? (set-member? l64-used-tumors 84402))
+  ;; Post-maturity emit #2 at 5308 (`+44f` cooldown): emits 1733, NOW added to `used-tumors` (`cnt = 2`)!
+  (define l64-t-e2
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1733)))
+            (translate-bot-actions->sc2-raw-commands
+             '((cast 84402 spread-creep-tumor 48.0 34.0))
+             (make-test-obs 5308 300 100 (list l64-hatch l64-tumor))
+             #:ws-conn c4-ws #:game-info w3-ginfo #:used-creep-tumors l64-used-tumors)))
+  (define l64-used-after-e2? (set-member? l64-used-tumors 84402))
+  (close-output-port c4-out)
+  (close-input-port c4-in)
+  (thread-wait c4-thd)
+  (check-true "l64-c4-creep-tumor-1733-queries-1694-le-9-8t-and-non-premature-used-tumors"
+              (and (pair? (unbox l64-queried-ab-ids))
+                   (andmap (lambda (id) (= id 1694)) (unbox l64-queried-ab-ids))
+                   (pair? (unbox l64-queried-pts))
+                   (andmap (lambda (p)
+                             (<= (sqrt (+ (sqr (- (car p) 40.0)) (sqr (- (cdr p) 34.0)))) 9.8))
+                           (unbox l64-queried-pts))
+                   (= (length l64-t-e0) 1)
+                   (not l64-used-after-e0?)
+                   (= (length l64-t-e1) 1)
+                   (not l64-used-after-e1?)
+                   (= (length l64-t-e2) 1)
+                   l64-used-after-e2?))
+
+  ;; L64-C5: Terran Supply Drop (`calldown-extra-supplies` / `supply-drop` -> SC2 `255` Tier P1)
+  ;;         + already-dropped Depot (`health-max >= 500` or duplicate tag) guard!
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l64-min))))
+  (define l64-sd-oc1   (mk-l64-u 84501 132 1 30.0 30.0 #:hp 1500.0 #:rad 2.75 #:en 75.0))
+  (define l64-sd-oc2   (mk-l64-u 84504 132 1 55.0 30.0 #:hp 1500.0 #:rad 2.75 #:en 60.0))
+  (define l64-sd-dep1  (mk-l64-u 84502 19  1 34.0 30.0 #:hp 400.0  #:hp-max 400.0 #:en 0.0 #:en-max 0.0))
+  (define l64-sd-dep2  (mk-l64-u 84503 19  1 36.0 30.0 #:hp 500.0  #:hp-max 500.0 #:en 0.0 #:en-max 0.0))
+  (define l64-sd-dep3  (mk-l64-u 84505 47  1 38.0 30.0 #:hp 400.0  #:hp-max 400.0 #:en 0.0 #:en-max 0.0))
+  (define l64-sd-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 255)))
+            (translate-bot-actions->sc2-raw-commands
+             '((cast-spell 84501 calldown-extra-supplies 84502)
+               (cast-spell 84504 calldown-extra-supplies 84502)
+               (cast-spell 84504 calldown-extra-supplies 84503)
+               (supply-drop 84504 84505))
+             (make-test-obs 7500 200 100 (list l64-sd-oc1 l64-sd-oc2 l64-sd-dep1 l64-sd-dep2 l64-sd-dep3 l64-min)))))
+  (check-true "l64-c5-supply-drop-255-p1-and-already-dropped-depot-guard"
+              (and (= (length l64-sd-cmds) 2)
+                   (andmap macro-econ-cmd? l64-sd-cmds)
+                   (andmap (lambda (c) (= (wire-cmd-priority-tier c) 1)) l64-sd-cmds)
+                   (equal? (map sc2-raw-unit-command-target-unit-tag l64-sd-cmds) '(84502 84505))))
+
+  ;; Clean final rewind
+  (reset-sc2-live-response-data!)
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 0 (list l64-min))))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l64-min)))))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
