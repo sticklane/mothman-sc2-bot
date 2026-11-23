@@ -175,7 +175,7 @@
    'drone             (cons 50 0)
    'zergling          (cons 25 0)
    'baneling          (cons 50 25)
-   'queen             (cons 150 0)
+   'queen             (cons 175 0)
    'roach             (cons 75 25)
    'ravager           (cons 100 100)
    'hydralisk         (cons 100 50)
@@ -188,7 +188,7 @@
    'viper             (cons 100 200)
    'overlord          (cons 100 0)
    'overseer          (cons 150 50)
-   'hatchery          (cons 300 0)
+   'hatchery          (cons 275 0)
    'lair              (cons 450 100)
    'hive              (cons 650 250)
    'spawning-pool     (cons 200 0)
@@ -252,7 +252,7 @@
    'archon            (cons 175 275)
    'observer          (cons 25 75)
    'warp-prism        (cons 250 0)
-   'immortal          (cons 275 100)
+   'immortal          (cons 250 100)
    'colossus          (cons 300 200)
    'disruptor         (cons 150 150)
    'phoenix           (cons 150 100)
@@ -4215,16 +4215,16 @@
    (hasheq
     'Terran  '((raven starport-techlab 100 150) (liberator starport 150 150) (viking starport 150 75) (marauder barracks-techlab 100 25))
     'Zerg    '((viper hive 100 200) (ravager roach-warren 100 100) (mutalisk spire 100 100))
-    'Protoss '((immortal robotics-facility 275 100) (disruptor robotics-bay 150 150) (phoenix stargate 150 100) (zealot gateway 100 0)))
+    'Protoss '((immortal robotics-facility 250 100) (disruptor robotics-bay 150 150) (phoenix stargate 150 100) (zealot gateway 100 0)))
    'tempest
    (hasheq
     'Terran  '((viking-fighter starport 150 75) (thor armory 300 200) (marine barracks 50 0))
-    'Zerg    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50) (queen spawning-pool 150 0))
+    'Zerg    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50) (queen spawning-pool 175 0))
     'Protoss '((void-ray stargate 250 150) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
    'battlecruiser
    (hasheq
     'Terran  '((viking-fighter starport 150 75) (thor armory 300 200) (marine barracks 50 0))
-    'Zerg    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50) (queen spawning-pool 150 0))
+    'Zerg    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50) (queen spawning-pool 175 0))
     'Protoss '((void-ray stargate 250 150) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
    'carrier
    (hasheq
@@ -4243,7 +4243,7 @@
     'Protoss '((void-ray stargate 250 150) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
    'roach
    (hasheq
-    'Protoss '((immortal robotics-facility 275 100) (stalker cybernetics-core 125 50))
+    'Protoss '((immortal robotics-facility 250 100) (stalker cybernetics-core 125 50))
     'Terran  '((marauder barracks-techlab 100 25) (siege-tank factory-techlab 150 125) (marine barracks 50 0))
     'Zerg    '((lurker lurker-den 150 150) (ravager roach-warren 100 100) (roach roach-warren 75 25)))
    'zealot
@@ -4265,11 +4265,11 @@
    (hasheq
     'Terran  '((viking starport 150 75) (marauder barracks-techlab 100 25))
     'Zerg    '((corruptor spire 150 100) (viper hive 100 200) (lurker lurker-den 150 150))
-    'Protoss '((immortal robotics-facility 275 100) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
+    'Protoss '((immortal robotics-facility 250 100) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
    'mutalisk
    (hasheq
     'Terran  '((thor armory 300 200) (viking starport 150 75) (marine barracks 50 0))
-    'Zerg    '((hydralisk hydralisk-den 100 50) (corruptor spire 150 100) (queen spawning-pool 150 0))
+    'Zerg    '((hydralisk hydralisk-den 100 50) (corruptor spire 150 100) (queen spawning-pool 175 0))
     'Protoss '((phoenix stargate 150 100) (archon templar-archive 100 150) (stalker cybernetics-core 125 50)))))
 
 (define (normalize-counter-enemy-key sym)

@@ -743,6 +743,31 @@
   (check-false ok-msg "Well-typed control module compiles cleanly"))
 
 ;; =============================================================================
+;; 5. Loop 60 Phase 0: Unbounded `hasheqv` Live Ability Registration (`>= 4200`)
+;; =============================================================================
+(let ()
+  (reset-live-typed-ability-overrides!)
+  (check-false (lookup-point-target-ability 4512)
+               "Unregistered ID >= 4200 returns #f before live hydration")
+  (register-live-typed-ability-target! 4512 'point #t)
+  (register-live-typed-ability-target! 4513 'point-or-unit #f)
+  (register-live-typed-ability-target! 1766 'none #f) ;; must never bypass WireCmdArchon!
+  (check-true (PointTargetAbility? (lookup-point-target-ability 4512))
+              "Live hasheqv accepts point ability ID 4512 >= 4200")
+  (check-true (AutocastAbility? (lookup-autocast-ability 4512))
+              "Live hasheqv accepts autocast ability ID 4512 >= 4200")
+  (check-true (and (PointTargetAbility? (lookup-point-target-ability 4513))
+                   (UnitTargetAbility? (lookup-unit-target-ability 4513)))
+              "Live hasheqv registers point-or-unit ID 4513 in both tables")
+  (check-false (lookup-no-target-ability 1766)
+               "Live registration never bypasses 1766 MORPH_ARCHON WireCmdArchon invariant")
+  (reset-live-typed-ability-overrides!)
+  (check-false (lookup-point-target-ability 4512)
+               "reset-live-typed-ability-overrides! clears 4512 cleanly")
+  (check-false (lookup-autocast-ability 4512)
+               "reset-live-typed-ability-overrides! clears 4512 autocast cleanly"))
+
+;; =============================================================================
 ;; Summary & Exit Status
 ;; =============================================================================
 

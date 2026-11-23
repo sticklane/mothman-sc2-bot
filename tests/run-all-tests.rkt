@@ -2310,8 +2310,8 @@
      #:unit-counts (hash 'drone 16 'overlord 2)))
   (assert-eq! (pro-bo-eval-result-matchup bo-res) 'ZvT
               "evaluate-build-order-next-step for Zerg vs Terran must select ZvT")
-  (assert-true! (>= (pro-bo-eval-result-reserved-minerals bo-res) 300)
-                "When at 16 supply with 220 minerals in ZvT, executor must reserve >= 300 minerals for 16 Hatchery")
+  (assert-true! (>= (pro-bo-eval-result-reserved-minerals bo-res) (sc2-min-cost 'hatchery))
+                "When at 16 supply with 220 minerals in ZvT, executor must reserve >= (sc2-min-cost 'hatchery) minerals for 16 Hatchery")
 
   ;; 3. Diagonal & Cardinal Terran Ramp Wall Non-Overlap across all 8 ramp orientations
   (define (boxes-overlap? ax0 ax1 ay0 ay1 bx0 bx1 by0 by1)
@@ -9406,8 +9406,8 @@
     (translate-bot-actions->sc2-raw-commands '((attack-pos 8102 142.0 142.0)) obs-c40-grp))
   (assert-true! (not (ormap framing-camera-cmd? cmds-c40-grp))
                 "Wire translator must NOT emit framing sc2-raw-camera-move for control-grouped unit #8102")
-  (assert-eq! (wire-cmd-priority-tier (list-ref cmds-c40-wire cam-idx-w)) 1
-              "Framing sc2-raw-camera-move must have priority Tier 1 (P1), not Tier 4")
+  (assert-eq! (wire-cmd-priority-tier (list-ref cmds-c40-wire cam-idx-w)) 2
+              "Framing sc2-raw-camera-move must have priority Tier 2 (P2, Loop 60 P1 purification), not Tier 4")
   (assert-eq! (wire-cmd-priority-tier (sc2-raw-camera-move 50.0 50.0 0.0)) 4
               "Routine non-framing sc2-raw-camera-move must remain priority Tier 4 (P4)")
 
@@ -15828,7 +15828,7 @@
     (step-priority-macro-brain
      (make-macro-world-state
       #:race 'Zerg #:enemy-race 'Terran #:frame 6400
-      #:minerals 160 #:gas 70 #:supply-used 56 #:supply-cap 74 #:workers 36 #:active-bases 2
+      #:minerals 180 #:gas 70 #:supply-used 56 #:supply-cap 74 #:workers 36 #:active-bases 2
       #:mineral-harvesters 28 #:gas-harvesters 8
       #:army-supply 20 #:enemy-threat-supply 9 #:under-attack? #t #:requires-anti-air? #t #:requires-detection? #t
       #:ready-building-counts (hasheq 'hatchery 1 'lair 1 'spawning-pool 1 'roach-warren 1 'baneling-nest 1 'extractor 3 'spore-crawler 2)
@@ -18188,6 +18188,134 @@
                      (or (not (not (memq 'marine (macro-brain-decision-scheduled-ids l59c-t-tvt-tank3-keeps-marines))))
                          (not (not (memq 'barracks (macro-brain-decision-scheduled-ids l59c-t-tvt-tank3-keeps-marines))))))
                 "L59C(3) Zerg 3rd yields to RW; Protoss 3rd non-blocking <275M & 2b RoboBay waits; Terran blocks TvZ/2b GhostAcademy & TvT Tank3 keeps Marine/Barracks")
+  (reset-macro-escrow-tracker!))
+
+(run-suite "51.40 Loop 60 Package C (5.0.14 Costs/Prereqs) + PvP Nat/Anti-DT Observer + Anti-Mass-Reaper (#1580/#1582)"
+  (define (l60-cand-u dec sym)
+    (define sched (macro-brain-decision-priority-schedule dec))
+    (define cat-ht (priority-schedule-result-category-utilities sched))
+    (define trace (if (hash? cat-ht) (hash-ref cat-ht 'decision-trace '()) '()))
+    (define hit (findf (lambda (e) (eq? (priority-decision-entry-id e) sym)) trace))
+    (if hit (priority-decision-entry-utility-score hit) -1.0))
+
+  ;; 1. Package C 5.0.14 Tech-DAG & Pathogen Glands Alignment
+  (let ([n-hatch (lookup-sc2-tech-node 'hatchery)]
+        [n-queen (lookup-sc2-tech-node 'queen)]
+        [n-imm   (lookup-sc2-tech-node 'immortal)]
+        [n-tmp   (lookup-sc2-tech-node 'tempest)]
+        [n-dc    (lookup-sc2-tech-node 'drilling-claws)])
+    (assert-true! (and (= (sc2-tech-node-min-cost n-hatch) 275)
+                       (= (sc2-tech-node-min-cost n-queen) 175)
+                       (= (sc2-tech-node-min-cost n-imm) 250)
+                       (= (sc2-tech-node-supply-cost n-tmp) 4)
+                       (equal? (sc2-tech-node-prereqs n-dc) '(factory-techlab))
+                       (not (memq 'armory (sc2-tech-node-prereqs n-dc))))
+                  "L60-PkgC(1) SC2-TECH-DAG MUST reflect 5.0.14 costs/prereqs (Hatch 275, Queen 175, Immortal 250, Tempest 4s, DrillingClaws no Armory)"))
+
+  ;; 2. PvP Natural Timing & Robo/Twilight Deferral (`#12/#33/#51` 1:45 -> ~1:32)
+  (reset-macro-escrow-tracker!)
+  (define l60-pvp-nat-early
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Protoss #:frame 2160
+      #:minerals 190 #:gas 100 #:supply-used 22 #:supply-cap 31 #:supply-left 9 #:pending-supply 0
+      #:workers 19 #:active-bases 1 #:mineral-harvesters 15 #:gas-harvesters 4
+      #:army-supply 2 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 2 'cybernetics-core 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 2 'cybernetics-core 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 19 'stalker 1)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 2))))
+  (reset-macro-escrow-tracker!)
+  (define l60-pvp-nat-proxy-neg
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Protoss #:frame 2200
+      #:minerals 260 #:gas 80 #:supply-used 22 #:supply-cap 31 #:supply-left 9 #:pending-supply 0
+      #:workers 19 #:active-bases 1 #:mineral-harvesters 15 #:gas-harvesters 4
+      #:army-supply 2 #:enemy-threat-supply 6 #:under-attack? #t
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 2 'cybernetics-core 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 2 'cybernetics-core 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 19 'stalker 1)
+      #:enemy-building-counts (hasheq 'forge 1 'photon-cannon 1)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 2))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l60-pvp-nat-early) 'nexus)
+                     (>= (l60-cand-u l60-pvp-nat-early 'nexus) 620.0)
+                     (not (memq 'robotics-facility (macro-brain-decision-scheduled-ids l60-pvp-nat-early)))
+                     (not (memq 'twilight-council (macro-brain-decision-scheduled-ids l60-pvp-nat-early)))
+                     (not (memq 'gateway (macro-brain-decision-scheduled-ids l60-pvp-nat-early)))
+                     (not (eq? (macro-brain-decision-saving-for l60-pvp-nat-proxy-neg) 'nexus)))
+                "L60-Macro(2) Unpressured 1:36 PvP MUST escrow Natural Nexus (>=620) & defer Robo/Twilight/GW#3 while proxy Cannon still blocks expand")
+
+  ;; 3. Anti-DT Observer #1 Interrupts Immortal Escrow on Scouted WarpPrism / DarkShrine (`#75 who`)
+  (reset-macro-escrow-tracker!)
+  (define l60-pvp-prism-obs1
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Protoss #:frame 6224
+      #:minerals 35 #:gas 106 #:supply-used 48 #:supply-cap 70 #:supply-left 22 #:pending-supply 0
+      #:workers 32 #:active-bases 2 #:mineral-harvesters 24 #:gas-harvesters 8
+      #:army-supply 16 #:enemy-threat-supply 6 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 7 'gateway 3 'cybernetics-core 1 'robotics-facility 1 'assimilator 3)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 7 'gateway 3 'cybernetics-core 1 'robotics-facility 1 'assimilator 3)
+      #:unit-counts (hasheq 'probe 32 'stalker 6 'immortal 1)
+      #:enemy-unit-counts (hasheq 'warp-prism 1 'stalker 4)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 2 'robotics-facility 1))))
+  (reset-macro-escrow-tracker!)
+  (define l60-pvp-has-obs1-immortal
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Protoss #:frame 6300
+      #:minerals 255 #:gas 105 #:supply-used 49 #:supply-cap 70 #:supply-left 21 #:pending-supply 0
+      #:workers 32 #:active-bases 2 #:mineral-harvesters 24 #:gas-harvesters 8
+      #:army-supply 16 #:enemy-threat-supply 6 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 7 'gateway 3 'cybernetics-core 1 'robotics-facility 1 'assimilator 3)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 7 'gateway 3 'cybernetics-core 1 'robotics-facility 1 'assimilator 3)
+      #:unit-counts (hasheq 'probe 32 'stalker 6 'immortal 1 'observer 1)
+      #:enemy-unit-counts (hasheq 'warp-prism 1 'stalker 4)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 0 'robotics-facility 1))))
+  (assert-true! (and (not (not (memq 'observer (macro-brain-decision-scheduled-ids l60-pvp-prism-obs1))))
+                     (>= (l60-cand-u l60-pvp-prism-obs1 'observer) 1240.0)
+                     (not (eq? (macro-brain-decision-saving-for l60-pvp-prism-obs1) 'immortal))
+                     (not (not (memq 'immortal (macro-brain-decision-scheduled-ids l60-pvp-has-obs1-immortal)))))
+                "L60-Macro(3) Scouted WarpPrism w/ 0 Observers MUST interrupt Immortal escrow & schedule Observer #1 (>=1240); once Obs #1 exists, Immortal resumes @250M")
+
+  ;; 4. Anti-Mass-Reaper (`#53 zig-reapers`): >= 3 Reapers in early TvT (< 5:30 = 7392f) MUST defer EBay & FactoryTechLab until stabilized!
+  (reset-macro-escrow-tracker!)
+  (define l60-tvt-reapers-5m12
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 7000
+      #:minerals 220 #:gas 120 #:supply-used 34 #:supply-cap 46 #:supply-left 12 #:pending-supply 0
+      #:workers 24 #:active-bases 1 #:mineral-harvesters 18 #:gas-harvesters 6
+      #:army-supply 7 #:enemy-threat-supply 6 #:under-attack? #t
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 4 'barracks 2 'barracks-reactor 1 'factory 1 'bunker 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 4 'barracks 2 'barracks-reactor 1 'factory 1 'bunker 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 24 'marine 5 'hellion 1)
+      #:enemy-unit-counts (hasheq 'reaper 4)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 2 'factory 1))))
+  (reset-macro-escrow-tracker!)
+  (define l60-tvt-reapers-stabilized
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 7000
+      #:minerals 220 #:gas 120 #:supply-used 42 #:supply-cap 54 #:supply-left 12 #:pending-supply 0
+      #:workers 26 #:active-bases 1 #:mineral-harvesters 20 #:gas-harvesters 6
+      #:army-supply 16 #:enemy-threat-supply 4 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 5 'barracks 2 'barracks-reactor 1 'factory 1 'bunker 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 5 'barracks 2 'barracks-reactor 1 'factory 1 'bunker 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 26 'marine 8 'hellion 4)
+      #:enemy-unit-counts (hasheq 'reaper 4)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 0 'factory 1))))
+  (define l60-reaper-bo (macro-brain-decision-bo-active-goal l60-tvt-reapers-5m12))
+  (assert-true! (and (not (memq 'engineering-bay (macro-brain-decision-scheduled-ids l60-tvt-reapers-5m12)))
+                     (not (memq 'factory-techlab (macro-brain-decision-scheduled-ids l60-tvt-reapers-5m12)))
+                     (not (memq (macro-brain-decision-saving-for l60-tvt-reapers-5m12) '(engineering-bay factory-techlab)))
+                     (or (not l60-reaper-bo)
+                         (not (memq (pro-bo-goal-target-sym l60-reaper-bo) '(engineering-bay factory-techlab))))
+                     (or (not (not (memq 'hellion (macro-brain-decision-scheduled-ids l60-tvt-reapers-5m12))))
+                         (not (not (memq 'marine (macro-brain-decision-scheduled-ids l60-tvt-reapers-5m12)))))
+                     (not (not (memq 'factory-techlab (macro-brain-decision-scheduled-ids l60-tvt-reapers-stabilized)))))
+                "L60-Macro(4) Early TvT (<5:30) >=3 Reapers MUST defer EBay & FactoryTechLab (incl. BO goal) until stabilized, then unlock FactoryTechLab")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms

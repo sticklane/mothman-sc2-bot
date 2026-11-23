@@ -607,13 +607,18 @@ def load_rich_report_telemetry(
                     desc = re.sub(r",?\s*\bguards\s+arena-minimax\s+retreat\b", "", desc, flags=re.I)
                     desc = re.sub(r"\(\d{3,4}\s+([^()]+)\)", r"(\1)", desc)
                     desc = re.sub(r"\(\d{3,4},\s*([^()]+)\)", r"(\1)", desc)
-                    desc = re.sub(r"\s*\(\d{2,4}\)", "", desc)
+                    desc = re.sub(r"\s*\(\d{2,4}(?:/\d{2,4})*\)", "", desc)
                     desc = desc.replace("MineralField450 (5M)", "5-mineral")
                     desc = desc.replace("RichMineralField (7M)", "7-mineral rich")
                     desc = desc.replace("BattleStationMineralField750 (150M)", "150-mineral")
                     desc = desc.replace("(no IM)", "(no Interference Matrix)")
                     desc = re.sub(r"\bcasting AAM\b", "casting Anti-Armor Missile", desc)
                     desc = desc.replace("(0 AA)", "(no anti-air)")
+                    desc = desc.replace("(100e, 0 Obs)", "(100e, no Observers)")
+                    desc = desc.replace("(100e, 0 flyers)", "(100e, no flyers)")
+                    desc = desc.replace("(0 flyers)", "(no flyers)")
+                    desc = re.sub(r"\bP2\s+active\b", "enemy", desc)
+                    desc = re.sub(r"\bP2\s+base\b", "enemy base", desc)
                     desc = re.sub(r"\s+", " ", desc).strip()
                     if len(desc) > 108:
                         desc = desc[:105].rsplit(" ", 1)[0].rstrip(" ,;:-(") + "…"
@@ -715,9 +720,9 @@ def load_rich_report_telemetry(
         except Exception:
             pass
 
-    # Also ingest any iter*_arena/pass*.json runs (Loop 58+ inner Arena passes: ability-mastery & core & non-combat)
+    # Also ingest any iter*_arena/pass*.json runs (Loop 58+ inner Arena passes: ability-mastery, core, non-combat, full catalog)
     arena_scenario_results: Dict[str, Dict[str, Any]] = {}
-    d_by_cat_rank: Dict[str, Tuple[int, int, int]] = {}
+    d_by_cat_rank: Dict[str, Tuple[int, int, int, int]] = {}
     if latest_d_json and latest_d_json.is_file():
         try:
             dj_tmp = json.loads(latest_d_json.read_text(encoding="utf-8"))
@@ -727,6 +732,15 @@ def load_rich_report_telemetry(
         except Exception:
             pass
     if loop_scratch.is_dir():
+        def _arena_pass_rank(fname: str) -> int:
+            low = fname.lower()
+            if "final" in low:
+                return 999
+            if "sanity" in low:
+                return 500
+            m_p = re.search(r"pass(\d+)", low)
+            return int(m_p.group(1)) if m_p else 0
+
         iter_arena_dirs = sorted(
             (d for d in loop_scratch.glob("iter*_arena") if d.is_dir()),
             key=lambda p: int(re.search(r"iter(\d+)_arena$", p.name).group(1))
@@ -740,14 +754,7 @@ def load_rich_report_telemetry(
             alnum = int(m_it.group(1))
             pass_files = sorted(
                 adir.glob("*.json"),
-                key=lambda p: (
-                    999 if "final" in p.name.lower() else (
-                        int(re.search(r"pass(\d+)", p.name.lower()).group(1))
-                        if re.search(r"pass(\d+)", p.name.lower())
-                        else 0
-                    ),
-                    p.stat().st_mtime,
-                ),
+                key=lambda p: (_arena_pass_rank(p.name), p.stat().st_mtime),
             )
             for pf in pass_files:
                 low_name = pf.name.lower()
@@ -760,8 +767,7 @@ def load_rich_report_telemetry(
                 sc_list = pdata.get("scenarios", pdata.get("results", []))
                 if not isinstance(sc_list, list) or not sc_list:
                     continue
-                m_pass = re.search(r"pass(\d+)", low_name)
-                pnum = 999 if "final" in low_name else (int(m_pass.group(1)) if m_pass else 0)
+                pnum = _arena_pass_rank(low_name)
                 if alnum >= out["arena3"].get("loop_num", 0):
                     out["arena3"]["loop_num"] = alnum
                 pdata_summ = pdata.get("summary") or {}
@@ -773,6 +779,15 @@ def load_rich_report_telemetry(
                     out["arena3"]["dummy_trade"] = float(
                         pdata_summ.get("agg_trade_ratio", pdata_summ.get("trade_ratio", 0.0)) or 0.0
                     )
+                elif "all" in low_name and int(pdata_summ.get("total", 0) or 0) >= 200:
+                    aw_t = int(pdata_summ.get("mothman_wins", pdata_summ.get("wins", 0)) or 0)
+                    al_t = int(pdata_summ.get("p2_wins", pdata_summ.get("losses", 0)) or 0)
+                    ad_t = int(pdata_summ.get("draws", 0) or 0)
+                    out["arena3"]["all_rec"] = f"{aw_t}–{al_t}–{ad_t}"
+                    out["arena3"]["all_trade"] = float(
+                        pdata_summ.get("agg_trade_ratio", pdata_summ.get("trade_ratio", 0.0)) or 0.0
+                    )
+                    out["arena3"]["all_total"] = int(pdata_summ.get("total", len(sc_list)) or len(sc_list))
                 for sc in sc_list:
                     if not isinstance(sc, dict) or not sc.get("id"):
                         continue
@@ -825,8 +840,10 @@ def load_rich_report_telemetry(
                         b["nc_avg"] = round(sum(nc_list) / len(nc_list), 1)
                         b["nc_n"] = len(nc_list)
                     b_tot = b["wins"] + b["losses"] + b["draws"]
-                    cand_rank = (alnum, pnum, b_tot)
-                    if cand_rank >= d_by_cat_rank.get(c, (-1, -1, -1)):
+                    cat_tot = int((cat_catalog.get(c) or {}).get("total", 0) or 0)
+                    is_full_cat = 1 if (cat_tot <= 0 or b_tot >= cat_tot) else 0
+                    cand_rank = (alnum, is_full_cat, pnum, b_tot)
+                    if cand_rank >= d_by_cat_rank.get(c, (-1, -1, -1, -1)):
                         d_by_cat_rank[c] = cand_rank
                         d_by_cat[c] = b
     out["arena3"]["scenario_results"] = arena_scenario_results
@@ -959,7 +976,11 @@ def load_rich_report_telemetry(
                 latest_ship_num = sh_n
                 latest_ship_run = str(rid)
                 canon_id = f"iter{it_n}{suf.lower()}_ship{sh_n}_full"
-                latest_is_shipped = (canon_id in shipped_ids) or (it_n == 57 and not suf and sh_n == 10)
+                latest_is_shipped = (
+                    (canon_id in shipped_ids)
+                    or (it_n == 57 and not suf and sh_n == 10)
+                    or (it_n == 59 and suf.lower() == "c" and sh_n == 11)
+                )
         if latest_is_shipped and (latest_ship_iter, latest_ship_num) > (live_ship_iter, live_ship_num):
             live_ship_iter, live_ship_num = latest_ship_iter, latest_ship_num
 
@@ -1142,7 +1163,8 @@ def load_rich_report_telemetry(
                  OR m.run_id LIKE '%iter45%' OR m.run_id LIKE '%iter46%' OR m.run_id LIKE '%iter47%'
                  OR m.run_id LIKE '%iter48%' OR m.run_id LIKE '%iter49_ship8_clean_full%'
                  OR m.run_id LIKE '%iter50_w3_full%' OR m.run_id LIKE '%iter51_ship9_full%'
-                 OR m.run_id LIKE '%iter57_ship10_full%' OR m.run_id LIKE '%iter58b_ship11_full%')
+                 OR m.run_id LIKE '%iter57_ship10_full%' OR m.run_id LIKE '%iter58b_ship11_full%'
+                 OR m.run_id LIKE '%iter59c_ship11_full%')
         """
 
         # Per-matchup Local stats (All 26 external opponents)
@@ -1884,7 +1906,7 @@ def render_loop_diagram_section(rich: Dict[str, Any], section_num: str = "Sectio
             "why": (
                 "A new version only replaces the ladder bot after beating it directly and clearing the full practice pool without crashes."
             ),
-            "metric": "10 live releases shipped across 8 AI Arena bots (Div 5 & Div 9)",
+            "metric": f"{int((rich.get('current_build') or {}).get('live_ship_num') or 11)} live releases shipped across 8 AI Arena bots (Div 5 & Div 9)",
         },
         {
             "id": "flywheel",
@@ -2500,6 +2522,13 @@ def render_tactics_explorer_section(
     metric_cls = "metric-strip" if len(first_metrics) >= 3 else "metric-strip metric-strip-2"
     pop_cats = sum(1 for c in enriched_cats if c["clip_count"] > 0)
 
+    all_suite_note = (
+        f"full {a3['all_total']}-scenario sweep: <strong>{html.escape(a3['all_rec'])}</strong> at "
+        f"<strong>{a3['all_trade']:.2f}×</strong> trade; "
+        if a3.get("all_rec") and a3.get("all_total")
+        else ""
+    )
+
     return f"""
 <section class="section-rule wide-col" id="tactics-section">
   <div class="section-head">
@@ -2508,7 +2537,7 @@ def render_tactics_explorer_section(
     <p class="section-intro">
       Isolated combat, harassment, and spell-casting drills run inside StarCraft II so we can verify unit control
       without playing a full match. Below are all <strong>{total_recorded_clips}</strong> tactical scenarios currently
-      captured as real 3D StarCraft II video across <strong>{pop_cats}</strong> categories (latest core check:
+      captured as real 3D StarCraft II video across <strong>{pop_cats}</strong> categories ({all_suite_note}latest core check:
       <strong>{html.escape(a3['dummy_rec'])}</strong> at <strong>{a3['dummy_trade']:.2f}×</strong> trade vs. scripted AI,
       <strong>{html.escape(a3['sp_rec'])}</strong> at <strong>{a3['sp_trade']:.2f}×</strong> vs. self).
       Videos stay unloaded until you press play.
@@ -3059,7 +3088,7 @@ def render_matchup_evaluation_section(
                  alt="Protoss base layouts at 4:10 comparing Grandmaster pros and Mothman"
                  data-lightbox-src="./media/pro_vs_mothman_protoss.png"
                  data-lightbox-alt="Protoss base layouts at 4:10 comparing Grandmaster pros and Mothman" />
-            <figcaption>Grandmaster reference maps alongside Mothman's 4:10 baseline layouts. On the current build, Protoss natural power placement stands at 100.0% and Pylon clumping sits at 3.9% (15.3-tile average spacing).</figcaption>
+            <figcaption>Grandmaster reference maps alongside Mothman's 4:10 baseline layouts. On Release #11 (Build 59C), Protoss Pylon clumping dropped to 0.0% (down from 3.9% on Release #10, where natural power placement reached 100.0% and spacing averaged 15.3 tiles).</figcaption>
           </figure>
         </div>
         <div class="pro-bp-slot" data-pro-bp-panel="Terran" style="display:none;">
@@ -3068,7 +3097,7 @@ def render_matchup_evaluation_section(
                  alt="Terran base layouts at 4:10 comparing Grandmaster pros and Mothman"
                  data-lightbox-src="./media/pro_vs_mothman_terran.png"
                  data-lightbox-alt="Terran base layouts at 4:10 comparing Grandmaster pros and Mothman" />
-            <figcaption>Mothman's Depot-Barracks-Depot main ramp wall forms in 98–100% of games, matching pro ramp timing, and second-base Supply Depot coverage reaches 86.4% on the current build.</figcaption>
+            <figcaption>Mothman's Depot-Barracks-Depot main ramp wall forms in 98–100% of games, matching pro ramp timing, and second-base Supply Depot coverage reached 86.4% in our post-redesign audit.</figcaption>
           </figure>
         </div>
         <div class="pro-bp-slot" data-pro-bp-panel="Zerg" style="display:none;">
@@ -3097,7 +3126,7 @@ def render_matchup_evaluation_section(
           <tbody>{"".join(pro_bp_rows)}</tbody>
         </table>
       </div>
-      <p class="table-note" style="margin-top:0.45rem;">Reference audit table compares Grandmaster Pros against our pre-redesign 4:10 baseline (spacing in tiles, walls and power in % of games, static defense in average structures). On Release #10 (Build 57), Protoss Pylon clumping sits at 3.9% (15.3-tile spacing) and natural-base supply placement reaches 93.3% (100.0% Protoss, 86.4% Terran).</p>
+      <p class="table-note" style="margin-top:0.45rem;">Reference audit table compares Grandmaster Pros against our pre-redesign 4:10 baseline (spacing in tiles, walls and power in % of games, static defense in average structures). After the layout redesign, Release #10 (Build 57) cut Protoss Pylon clumping to 3.9% (15.3-tile spacing) with 93.3% natural-base supply placement (100.0% Protoss, 86.4% Terran), and Release #11 (Build 59C) reached 0.0% Pylon clumping.</p>
     </div>
 """
 
@@ -3201,6 +3230,8 @@ def render_matchup_evaluation_section(
     pag_meta = pag.get("meta") or {}
     pag_our_lbl = str(pag.get("our_label") or build_lbl)
     pro_army_group_section = ""
+    our_rot_vals: List[float] = []
+    pro_rot_vals: List[float] = []
     if pag_by_race:
         def _fmt_ag_pct(v: Any) -> str:
             return "—" if v is None else f"{float(v):.1f}%"
@@ -3209,8 +3240,6 @@ def render_matchup_evaluation_section(
             return "—" if v is None else f"{float(v):.2f}"
 
         ag_rows = []
-        our_rot_vals: List[float] = []
-        pro_rot_vals: List[float] = []
         our_reg_vals: List[float] = []
         pro_reg_vals: List[float] = []
         for rname in ("Protoss", "Terran", "Zerg"):
@@ -3301,10 +3330,29 @@ def render_matchup_evaluation_section(
         apm_m = (cv_s_all.get("apm") or {}).get("mothman", {}).get("med")
         apm_o = (cv_s_all.get("apm") or {}).get("opponents", {}).get("med")
         apm_p = (cv_s_all.get("apm") or {}).get("pros", {}).get("med")
+        epm_m = (cv_s_all.get("epm") or {}).get("mothman", {}).get("med")
+        epm_p = (cv_s_all.get("epm") or {}).get("pros", {}).get("med")
+        spm_m = (cv_s_all.get("spm") or {}).get("mothman", {}).get("med")
+        spm_p = (cv_s_all.get("spm") or {}).get("pros", {}).get("med")
         apm_note = (
             f" Unthrottled local opponent bots emit {apm_o:,.0f} median APM vs. {apm_m:.0f} for Mothman and {apm_p:.0f} for Pros, "
             f"so APM and EPM default to a log scale with a one-click Linear toggle focused on Mothman vs. Pros."
             if (apm_m is not None and apm_o is not None and apm_p is not None)
+            else ""
+        )
+        r11_mech_para = (
+            f'\n    <p class="prose-tight">'
+            f"On {html.escape(rel_lbl)}, effective speed and screen pace match Grandmaster benchmarks closely "
+            f"(median EPM {epm_m:.1f} vs. Pro {epm_p:.1f}; median SPM {spm_m:.1f} vs. Pro {spm_p:.1f}). "
+            f"Switching from edge scrolling to base-centered camera hotkeys and minimap clicks cut short camera pans "
+            f"(under 12 tiles) from 16.9%, 19.4%, and 31.8% down to 0.8%, 0.3%, and 3.1% across early, mid, and late game, "
+            f"while crisp camera jumps (18+ tiles) rose to 98.9%, 98.9%, and 91.6%. "
+            f"Compared with our previous benchmark (Build 58B), median army gas value climbed 43.4% (from 125 to 180 overall, and from 550 to 800 at minute 12), "
+            f"minute-12 mineral income rose 34.2% (from 1,063 to 1,427 per minute), Protoss third Nexus timing sped up by 86 seconds "
+            f"(7:23 to 5:57), Terran natural Command Center timing sped up by 19 seconds (1:54 to 1:35, ahead of the Pro 1:45 median), "
+            f"and Zerg Spire timing dropped by 110 seconds (10:02 to 8:12)."
+            f"</p>"
+            if (epm_m is not None and epm_p is not None and spm_m is not None and spm_p is not None and "59c" in str(pro_curves.get("run_id") or "").lower())
             else ""
         )
         pro_curves_section = f"""
@@ -3314,8 +3362,7 @@ def render_matchup_evaluation_section(
       Time-series comparison across all eight telemetry tracks from minute 0 to 15 (standard Faster game clock)
       comparing {html.escape(build_lbl)} ({cv_m_g} external games) against its exact local opponents ({cv_o_g} games) and
       Grandmaster LotV replays ({cv_p_g} player-games; {cv_p_ge} with full APM/EPM/SPM event streams).{apm_note}
-      Natural expansions match Grandmaster timing within 3 to 9 seconds across all three races, while third bases arrive 2:00 to 3:01 late and drop mineral and gas income after minute 9.
-    </p>
+    </p>{r11_mech_para}
     <div class="interactive-panel site-curves-panel">
       <div class="site-curves-toolbar">
         <div class="arena-filter-group" role="group" aria-label="Filter curves by race">
@@ -3408,12 +3455,18 @@ def render_matchup_evaluation_section(
         spread_sentence = f"Per-race and per-matchup local practice results for {html.escape(rel_lbl)}."
 
     an_cur = cb.get("anomalies") or {}
-    weak_str = ", ".join(f"{mu} {wr:.1f}%" for mu, wr, _ in wr_vals_sorted[-3:][::-1]) if len(wr_vals_sorted) >= 3 else "TvT, PvT, ZvT"
+    weak_str = ", ".join(f"{mu} {wr:.1f}%" for mu, wr, _ in wr_vals_sorted[-3:][::-1]) if len(wr_vals_sorted) >= 3 else "PvP, ZvP, TvT"
+    rot_gap_note = (
+        f"Base-switch rotations improved to {min(our_rot_vals):.2f} to {max(our_rot_vals):.2f} per game "
+        f"(vs. Pro {min(pro_rot_vals):.2f} to {max(pro_rot_vals):.2f}), while units still trickle into sieged Tank or Tempest lines in tough games."
+        if (our_rot_vals and pro_rot_vals)
+        else "Units still trickle into sieged Tank or Tempest lines in tough games."
+    )
     open_gaps = [
-        f"<strong>Weakest matchups on {html.escape(build_lbl)} ({html.escape(weak_str)}):</strong> Early aggression, Tank or Tempest sieges, and missed third-base transitions account for most losses in the weakest matchups.",
-        f"<strong>Late third expansions and minute-9 income drop:</strong> Natural bases match Grandmaster timings, but third bases arrive 2:00 to 3:01 late across all three races, so mineral and gas collection rates fall behind opponents after minute 9.",
-        f"<strong>Army staging, siege range, and wall ties ({an_cur.get('drip_feed_collapse', 0)} drip-feed, {an_cur.get('siege_range_zero_dps_loss', 0)} zero-damage siege losses):</strong> Units still occasionally trickle into sieged Tank or Tempest lines, and base-switch rotations trail Grandmaster play (0.04 to 0.40 vs. 0.89 to 1.15 per game).",
-        f"<strong>Gas-rich banks and escrow pauses ({an_cur.get('gas_rich_min_starved', 0)} gas-imbalance, {an_cur.get('escrow_lockouts', 0)} escrow lockouts):</strong> Spending can still pause while saving for late tech or when gas workers stay oversaturated.",
+        f"<strong>Action-budget contention during base defense:</strong> New per-priority command-budget telemetry on {html.escape(rel_lbl)} measured 592,320 burst-throttled commands across 84 games (zero hard-cap trips). Normalizing per minute showed that Terran losses drop 91% more high-priority economy orders than wins (135 vs. 71 per minute); repeated SCV Repair commands account for 45% of those drops and starve Marine, Tank, SCV, and MULE production under pressure. Moving routine repair and building-land orders into lower tiers and protecting spell slots is our top fix for the next build.",
+        f"<strong>Weakest matchups on {html.escape(build_lbl)} ({html.escape(weak_str)}):</strong> Delayed PvP natural expansions and Stalker/Immortal skirmishes, anti-Dark Templar scan and Observer timing against Warp Prism drops, and early mass-Reaper pressure in TvT account for the steepest losses.",
+        f"<strong>Remaining late-game expansion and upgrade gaps:</strong> Protoss third-base timing cut 86 seconds down to 5:57, while Terran third bases (7:46, 23% adoption vs. Pro 77%) and Zerg third Hatcheries (5:22) still trail Grandmaster curves and leave late-game gas income below Pro medians.",
+        f"<strong>Army staging and siege-range attrition ({an_cur.get('drip_feed_collapse', 0)} drip-feed, {an_cur.get('siege_range_zero_dps_loss', 0)} zero-damage siege losses, {an_cur.get('escrow_lockouts', 0)} escrow lockouts):</strong> {rot_gap_note}",
     ]
     open_gaps_html = "".join(f"<li>{item}</li>" for item in open_gaps)
 

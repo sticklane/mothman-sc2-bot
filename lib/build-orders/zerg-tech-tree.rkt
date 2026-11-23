@@ -70,7 +70,7 @@
     'zerg-infestation-pit 'Zerg 'zerg-lair-tech
     '(zerg-hive-tech)
     '(hatchery spawning-pool extractor lair infestation-pit) '(infestation-pit)
-    '(infestor swarm-host roach hydralisk) '(pathogen-glands neural-parasite)
+    '(infestor swarm-host roach hydralisk) '(neural-parasite)
     'ling-bane-hydra 4100 3 100 100 806 0.07)
    (build-order-tree-node
     'zerg-hive-tech 'Zerg 'zerg-infestation-pit

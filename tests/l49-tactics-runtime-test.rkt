@@ -30,12 +30,21 @@
          (only-in "../lib/plan/static-defense.rkt"
                   plan-spread-burrowed-swarm-host-harass
                   plan-counter-spread-swarm-host-harass)
-         (only-in "../lib/plan/wall-and-block.rkt" plan-own-wall-integrity-defense)
+         (only-in "../lib/plan/wall-and-block.rkt"
+                  plan-own-wall-integrity-defense
+                  plan-expansion-and-gas-blocks)
+         (only-in "../lib/tactics/disruptor-micro.rkt"
+                  DISRUPTOR-NOVA-BASE-DAMAGE
+                  DISRUPTOR-NOVA-SHIELD-BONUS
+                  score-purification-nova-impact
+                  nova-impact-score-enemy-raw-value)
+         (only-in "../lib/sc2-game-constants.rkt" sc2-min-cost)
          (only-in "../lib/plan/map-elements-and-experiments.rkt"
                   plan-mineral-wall-and-worker-path-tactics
                   plan-destructible-rocks-and-rockslides
                   plan-nonstandard-base-resource-allocation
                   plan-trapped-unit-dropship-rescue
+                  plan-counter-warp-prism-and-recall
                   step-map-elements-tactical-micro!
                   NonstandardBasePlan-rebalance-directives
                   MapElementDirective-sexp
@@ -4543,6 +4552,235 @@
   (check-true "L59-H2H-live-neutral-guards-worker-rebalance-main-seams-plates-and-blind-scan"
               (and fix1a-ok? fix2a-ok? fix2b-ok? fix1b-ok?)
               (format "1A=~a 2A=~a 2B=~a 1B=~a" fix1a-ok? fix2a-ok? fix2b-ok? fix1b-ok?)))
+
+;; -----------------------------------------------------------------------------
+;; 87. L60 Package B (`#1582`): Phase 0 Tactics/Plan/Runtime SC2 5.0.14 Parity + `nc-09`/`nc-13` Restore
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) Disruptor Nova 5.0.14 (`100` base + up to `+200` shield-first):
+  ;;     - 0-shield 125-HP Marauder does NOT get 1-shot credit (`100 < 125`)
+  ;;     - 200-HP + 10-sh Immortal gets `110/210` (strictly lower than 200-HP + 100-sh Immortal `200/300`)
+  ;;     - 80-HP + 80-sh Stalker IS 1-shot (`180 >= 160` -> `1.15x` kill-mult)
+  (define mar-nova (mk-u 90101 'marauder 50.0 50.0 #:hp 125.0 #:max-hp 125.0 #:shield 0.0))
+  (define stk-nova (mk-u 90102 'stalker  50.0 50.0 #:hp 80.0  #:max-hp 80.0  #:shield 80.0))
+  (define imm-10sh (mk-u 90103 'immortal 50.0 50.0 #:hp 200.0 #:max-hp 200.0 #:shield 10.0))
+  (define imm-100sh (mk-u 90104 'immortal 50.0 50.0 #:hp 200.0 #:max-hp 200.0 #:shield 100.0))
+  (define s-mar (nova-impact-score-enemy-raw-value (score-purification-nova-impact 50.0 50.0 (list mar-nova) '())))
+  (define s-stk (nova-impact-score-enemy-raw-value (score-purification-nova-impact 50.0 50.0 (list stk-nova) '())))
+  (define s-imm10 (nova-impact-score-enemy-raw-value (score-purification-nova-impact 50.0 50.0 (list imm-10sh) '())))
+  (define s-imm100 (nova-impact-score-enemy-raw-value (score-purification-nova-impact 50.0 50.0 (list imm-100sh) '())))
+  (define nova-ok?
+    (and (= DISRUPTOR-NOVA-BASE-DAMAGE 100.0)
+         (= DISRUPTOR-NOVA-SHIELD-BONUS 200.0)
+         (< s-mar 100.0)      ;; Marauder 131.25 * 0.8 * 0.85 = 89.25 (not 1-shot!)
+         (> s-stk 200.0)      ;; Stalker 187.5 * 1.0 * 1.15 = 215.625 (1-shot!)
+         (< s-imm10 s-imm100) ;; 10sh Immortal gets 110/210, NOT 300/210 over-credit!
+         (< s-imm10 250.0)))
+
+  ;; (b) Ghost Snipe 5.0.14 (`130` base + `40` vs Psionic):
+  ;;     Roach 145HP -> cap 2; Ultralisk 500HP -> cap 4; Psionic Viper 150HP -> cap 1;
+  ;;     2 Ghosts focus-snipe a single 160HP non-psionic Swarm Host (`cap = 2` vs old `1`!),
+  ;;     while 2 Ghosts assign only 1 Snipe onto a 150HP Psionic Viper (`cap = 1`!).
+  (define cap-roach (unit-claim-effective-cap 'steady-targeting 145.0 0.0 #f #t #:target-sym 'roach))
+  (define cap-ultra (unit-claim-effective-cap 'steady-targeting 500.0 0.0 #f #t #:target-sym 'ultralisk))
+  (define cap-viper (unit-claim-effective-cap 'steady-targeting 150.0 0.0 #f #t #:target-sym 'viper))
+  (define gs-2 (list (mk-u 90201 'ghost 50.0 50.0 #:hp 100.0 #:energy 100.0)
+                     (mk-u 90202 'ghost 50.0 51.0 #:hp 100.0 #:energy 100.0)))
+  (define sh-1 (list (mk-u 90210 'swarm-host 58.0 50.0 #:hp 160.0 #:max-hp 160.0)))
+  (define d-sn (plan-terran-spellcaster-micro gs-2 sh-1 #:claims (make-spell-claims) #:current-frame 400))
+  (define sn-cnt (count (lambda (d) (and (eq? (spell-directive-ability d) 'steady-targeting)
+                                         (= (spell-directive-target-tag d) 90210)))
+                        d-sn))
+  (define vp-1 (list (mk-u 90211 'viper 58.0 50.0 #:hp 150.0 #:max-hp 150.0 #:flying #t)))
+  (define d-sn-vp (plan-terran-spellcaster-micro gs-2 vp-1 #:claims (make-spell-claims) #:current-frame 400))
+  (define sn-vp-cnt (count (lambda (d) (and (eq? (spell-directive-ability d) 'steady-targeting)
+                                            (= (spell-directive-target-tag d) 90211)))
+                           d-sn-vp))
+  (define snipe-ok?
+    (and (= SNIPE-BASE-DAMAGE 130.0)
+         (= SNIPE-PSIONIC-BONUS 40.0)
+         (= SNIPE-DAMAGE 130.0)
+         (= cap-roach 2)
+         (= cap-ultra 4)
+         (= cap-viper 1)
+         (= sn-cnt 2)
+         (= sn-vp-cnt 1)))
+
+  ;; (c) Viper Abduct: 0.0 weight & 0 orders on Heroic Mothership (both spellcaster & map-elements),
+  ;;     AND 13f post-cast Viper lock holds after Abducting a Colossus!
+  (define vip-1 (mk-u 90301 'viper 50.0 50.0 #:hp 150.0 #:energy 120.0 #:flying #t))
+  (define hyd-5 (for/list ([i (in-range 5)]) (mk-u (+ 90310 i) 'hydralisk 51.0 (+ 48.0 i) #:hp 90.0)))
+  (define ms-e  (mk-u 90350 'mothership 58.0 50.0 #:hp 350.0 #:shield 350.0 #:flying #t))
+  (define col-e (mk-u 90351 'colossus 58.0 50.0 #:hp 200.0 #:shield 150.0))
+  (define cl-vm (make-spell-claims))
+  (define d-vm (plan-zerg-spellcaster-micro (cons vip-1 hyd-5) (list ms-e) #:claims cl-vm #:current-frame 100))
+  (define d-me-ms (plan-counter-warp-prism-and-recall (cons vip-1 hyd-5) (list ms-e)))
+  (define cl-vc (make-spell-claims))
+  (define d-vc0 (plan-zerg-spellcaster-micro (cons vip-1 hyd-5) (list col-e) #:claims cl-vc #:current-frame 100))
+  (define d-vc-locked (plan-zerg-spellcaster-micro (cons vip-1 hyd-5) (list col-e) #:claims cl-vc #:current-frame 108))
+  (define d-vc-unlocked (plan-zerg-spellcaster-micro (cons vip-1 hyd-5) (list (mk-u 90352 'colossus 58.0 51.0 #:hp 200.0 #:shield 150.0))
+                                                     #:claims cl-vc #:current-frame 114))
+  (define viper-ok?
+    (and (= VIPER-ABDUCT-LOCK-FRAMES 13)
+         (= (viper-abduct-weight 'mothership) 0.0)
+         (not (ormap (lambda (d) (eq? (spell-directive-ability d) 'abduct)) d-vm))
+         (not (ormap (lambda (d) (eq? (MapElementDirective-kind d) 'abduct-mothership)) d-me-ms))
+         (ormap (lambda (d) (eq? (spell-directive-ability d) 'abduct)) d-vc0)
+         (null? d-vc-locked)
+         (ormap (lambda (d) (eq? (spell-directive-ability d) 'abduct)) d-vc-unlocked)))
+
+  ;; (d) Infestor Microbial Shroud `#:microbial-shroud-ok?` gate
+  (define inf-1 (mk-u 90401 'infestor 50.0 50.0 #:hp 90.0 #:energy 100.0))
+  (define car-4 (for/list ([i (in-range 4)]) (mk-u (+ 90410 i) 'carrier 62.0 (+ 48.0 (* 1.5 i)) #:hp 300.0 #:shield 150.0 #:flying #t)))
+  (define d-sh-off (plan-zerg-spellcaster-micro (cons inf-1 hyd-5) car-4 #:claims (make-spell-claims) #:current-frame 200
+                                                #:neural-parasite-researched? #f #:microbial-shroud-ok? #f))
+  (define d-sh-on  (plan-zerg-spellcaster-micro (cons inf-1 hyd-5) car-4 #:claims (make-spell-claims) #:current-frame 200
+                                                #:neural-parasite-researched? #f #:microbial-shroud-ok? #t))
+  (define shroud-gate-ok?
+    (and (not (ormap (lambda (d) (eq? (spell-directive-ability d) 'microbial-shroud)) d-sh-off))
+         (ormap (lambda (d) (eq? (spell-directive-ability d) 'microbial-shroud)) d-sh-on)))
+
+  ;; (e) Widow Mine `1.5t` splash & Ghost EMP `1.5t` radius
+  (define wm-u (mk-u 90501 'widow-mine-burrowed 50.0 50.0 #:hp 90.0))
+  ;; Candidate A at (53,50) has neighbor at 1.4t (in 1.5t splash -> 2 probes = 6.0);
+  ;; Candidate B at (47,50) has 2 neighbors at 1.65t (outside 1.5t splash -> 1 probe = 3.0; would win at 1.75t!)
+  (define wm-tgt
+    (select-widow-mine-cluster-target
+     wm-u
+     (list (mk-u 90510 'probe 53.0 50.0 #:hp 20.0 #:shield 20.0)
+           (mk-u 90511 'probe 54.4 50.0 #:hp 20.0 #:shield 20.0)
+           (mk-u 90520 'probe 47.0 50.0 #:hp 20.0 #:shield 20.0)
+           (mk-u 90521 'probe 45.35 50.0 #:hp 20.0 #:shield 20.0)
+           (mk-u 90522 'probe 47.0 51.65 #:hp 20.0 #:shield 20.0))))
+  (define gh-emp (mk-u 90530 'ghost 50.0 50.0 #:hp 100.0 #:energy 100.0))
+  ;; Two 80-shield Stalkers (160 >= 120 together, 80 < 120 alone): 1.8t apart -> 0 EMP; 1.4t apart -> EMP!
+  (define emp-far (plan-terran-spellcaster-micro
+                   (list gh-emp)
+                   (list (mk-u 90531 'stalker 56.0 50.0 #:hp 80.0 #:shield 80.0)
+                         (mk-u 90532 'stalker 57.8 50.0 #:hp 80.0 #:shield 80.0))
+                   #:claims (make-spell-claims) #:current-frame 300))
+  (define emp-near (plan-terran-spellcaster-micro
+                    (list gh-emp)
+                    (list (mk-u 90533 'stalker 56.0 50.0 #:hp 80.0 #:shield 80.0)
+                          (mk-u 90534 'stalker 57.4 50.0 #:hp 80.0 #:shield 80.0))
+                    #:claims (make-spell-claims) #:current-frame 300))
+  (define radius-ok?
+    (and (= EMP-CLAIM-RADIUS 1.5)
+         wm-tgt
+         (memv (hash-ref wm-tgt 'id 0) '(90510 90511))
+         (not (ormap (lambda (d) (eq? (spell-directive-ability d) 'emp-round)) emp-far))
+         (ormap (lambda (d) (eq? (spell-directive-ability d) 'emp-round)) emp-near)))
+
+  ;; (f) `wall-and-block.rkt` Zerg hatch block tracks `(sc2-min-cost 'hatchery)` + `bot-runtime` never researches `pathogen-glands`
+  (define h-cost (sc2-min-cost 'hatchery))
+  (define wb-under (plan-expansion-and-gas-blocks
+                    (hasheq 'our-race 'Zerg 'frame 1000 'minerals (- h-cost 1)
+                            'enemy-natural-x 120.0 'enemy-natural-y 120.0
+                            'ally-units (list (mk-u 90601 'drone 118.0 120.0 #:hp 40.0)))))
+  (define wb-exact (plan-expansion-and-gas-blocks
+                    (hasheq 'our-race 'Zerg 'frame 1000 'minerals h-cost
+                            'enemy-natural-x 120.0 'enemy-natural-y 120.0
+                            'ally-units (list (mk-u 90601 'drone 118.0 120.0 #:hp 40.0)))))
+  (define rt-pg (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define pg-acts
+    (step-layer2-economy!
+     rt-pg
+     (mk-live-obs 'Zerg 'Protoss 7000 #:minerals 600 #:gas 600 #:supply-used 70 #:supply-cap 100
+                  #:ally-units (list (mk-u 90610 'infestor 40.0 40.0 #:hp 90.0))
+                  #:ally-buildings (list (mk-u 90611 'hive 32.5 32.5 #:hp 2500.0)
+                                         (mk-u 90612 'infestation-pit 36.0 36.0 #:hp 850.0))
+                  #:researched-upgrades '(neural-parasite))))
+  (define wb-pg-ok?
+    (and (null? wb-under)
+         (pair? wb-exact)
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'research) (memq 'pathogen-glands a)))
+                     pg-acts))))
+
+  ;; (g) Isolated Arena `sc2-nc-09` (8 Marines + 4 Marauders + 1 hidden CC far away, 0 workers) attacks
+  ;;     Destructible Rock (`639`) + pops Stim, while live full match (same + 12 SCVs near CC) skips rock!
+  ;;     AND `sc2-nc-13` (1 Probe + 1 hidden Nexus far away + LeyLines 150M seam near expansion pad)
+  ;;     emits `mineral-walk` through the seam, while live full match (12 Probes near Nexus) filters it!
+  (define cc-hidden (mk-u 90701 'command-center 32.0 32.0 #:hp 1500.0))
+  (define nc09-units
+    (append (for/list ([i (in-range 8)]) (mk-u (+ 90710 i) 'marine 66.0 (+ 112.0 (* 0.5 i)) #:hp 45.0))
+            (for/list ([i (in-range 4)]) (mk-u (+ 90720 i) 'marauder 65.0 (+ 113.0 (* 0.5 i)) #:hp 125.0))))
+  (define nc09-rock (hasheq 'id 90750 'tag 90750 'type 'destructible-rock-ex1-6x6 'unit-type-id 639 'x 72.0 'y 114.0 'hp 2000.0 'max-hp 2000.0))
+  (define nc09-pylon (mk-u 90760 'pylon 80.0 114.0 #:hp 200.0 #:shield 200.0))
+  (define rt-nc09 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define nc09-acts
+    (run-l34 rt-nc09
+             (hash-set (mk-live-obs 'Terran 'Protoss 200 #:supply-used 16 #:supply-cap 23
+                                    #:mineral-harvesters 0 #:vespene-harvesters 0
+                                    #:ally-units nc09-units
+                                    #:ally-buildings (list cc-hidden)
+                                    #:enemy-buildings (list nc09-pylon)
+                                    #:researched-upgrades '(stimpack))
+                       'neutral-units (list nc09-rock))))
+  (define nc09-rock-hits
+    (count (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit) (= (third a) 90750))) nc09-acts))
+  (define nc09-stim?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (third a) 'stimpack))) nc09-acts))
+  (define oc-upgraded (mk-u 90702 'orbital-command 32.0 32.0 #:hp 1500.0))
+  (define rt-nc09-oc (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define nc09-oc-acts
+    (run-l34 rt-nc09-oc
+             (hash-set (mk-live-obs 'Terran 'Protoss 200 #:supply-used 16 #:supply-cap 23
+                                    #:mineral-harvesters 0 #:vespene-harvesters 0
+                                    #:ally-units nc09-units
+                                    #:ally-buildings (list oc-upgraded)
+                                    #:enemy-buildings (list nc09-pylon))
+                       'neutral-units (list nc09-rock))))
+  (define nc09-oc-rock-hits
+    (count (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit) (= (third a) 90750))) nc09-oc-acts))
+  (define live-scvs-12 (for/list ([i (in-range 12)]) (mk-u (+ 90780 i) 'scv 29.0 (+ 29.0 (* 0.4 i)) #:hp 45.0)))
+  (define rt-nc09-live (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define nc09-live-acts
+    (run-l34 rt-nc09-live
+             (hash-set (mk-live-obs 'Terran 'Protoss 200 #:supply-used 28 #:supply-cap 40
+                                    #:ally-units (append nc09-units live-scvs-12)
+                                    #:ally-buildings (list cc-hidden)
+                                    #:enemy-buildings (list nc09-pylon))
+                       'neutral-units (list nc09-rock))))
+  (define nc09-live-rock-hits
+    (count (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit) (= (third a) 90750))) nc09-live-acts))
+
+  (define nx-hidden (hasheq 'tag 90801 'type 'nexus 'x 32.0 'y 32.0 'hp 1000.0 'build-progress 1.0))
+  (define pr-seam (hasheq 'tag 90802 'type 'probe 'x 88.5 'y 60.5 'hp 20.0 'shield 20.0))
+  (define ley-seam (hasheq 'tag 90810 'type 'battle-station-mineral-field-750 'unit-type-id 887 'x 92.0 'y 60.5 'mineral-contents 150))
+  (define ley-far  (hasheq 'tag 90811 'type 'mineral-field 'unit-type-id 341 'x 98.0 'y 60.5 'mineral-contents 1500))
+  (define ley-pad  (cons 96.0 62.0)) ;; < 11.0t from seam!
+  (define nc13-res
+    (step-map-elements-tactical-micro!
+     (list pr-seam) (list nx-hidden) '() (list ley-seam ley-far)
+     #:frame 40 #:home-x 32.0 #:home-y 32.0 #:enemy-x 160.0 #:enemy-y 160.0
+     #:expansion-pads (list ley-pad)))
+  (define nc13-mw?
+    (ormap (lambda (d) (eq? (MapElementDirective-kind d) 'worker-mineral-walk-backdoor))
+           (hash-ref nc13-res 'directives '())))
+  (define live-probes-12 (for/list ([i (in-range 12)]) (hasheq 'tag (+ 90850 i) 'type 'probe 'x 29.0 'y (+ 29.0 (* 0.4 i)) 'hp 20.0 'shield 20.0)))
+  (define nc13-live-res
+    (step-map-elements-tactical-micro!
+     (cons pr-seam live-probes-12) (list nx-hidden) '() (list ley-seam ley-far)
+     #:frame 40 #:home-x 32.0 #:home-y 32.0 #:enemy-x 160.0 #:enemy-y 160.0
+     #:expansion-pads (list ley-pad)))
+  (define nc13-live-mw?
+    (ormap (lambda (d) (eq? (MapElementDirective-kind d) 'worker-mineral-walk-backdoor))
+           (hash-ref nc13-live-res 'directives '())))
+  (define nc-restore-ok?
+    (and (= nc09-rock-hits 12)
+         nc09-stim?
+         (= nc09-oc-rock-hits 0)
+         (= nc09-live-rock-hits 0)
+         nc13-mw?
+         (not nc13-live-mw?)))
+
+  (check-true "L60-PkgB-Phase0-Tactics-Plan-Runtime-And-NC09-NC13"
+              (and nova-ok? snipe-ok? viper-ok? shroud-gate-ok? radius-ok? wb-pg-ok? nc-restore-ok?)
+              (format "nova=~a (mar=~a stk=~a imm10=~a imm100=~a) snipe=~a (~a/~a/~a cnt=~a) viper=~a shroud=~a rad=~a wbpg=~a nc=~a (rk=~a stim=~a live-rk=~a mw=~a live-mw=~a)"
+                      nova-ok? s-mar s-stk s-imm10 s-imm100
+                      snipe-ok? cap-roach cap-ultra cap-viper sn-cnt
+                      viper-ok? shroud-gate-ok? radius-ok? wb-pg-ok? nc-restore-ok?
+                      nc09-rock-hits nc09-stim? nc09-live-rock-hits nc13-mw? nc13-live-mw?)))
 
 (printf "\n=== Loop 49 Suite Summary: ~a/~a passed, ~a failed ===\n"
         tests-passed tests-run tests-failed)

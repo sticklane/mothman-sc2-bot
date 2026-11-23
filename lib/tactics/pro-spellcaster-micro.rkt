@@ -276,7 +276,10 @@
  STASIS-WARD-CLAIM-TTL
  UNIT-SPELL-CLAIM-TTL
  SNIPE-CHANNEL-LOCKOUT-FRAMES
+ SNIPE-BASE-DAMAGE
+ SNIPE-PSIONIC-BONUS
  SNIPE-DAMAGE
+ VIPER-ABDUCT-LOCK-FRAMES
  YAMATO-DAMAGE
  DISRUPTOR-NOVA-STAGGER-MIN-FRAMES
  DISRUPTOR-NOVA-STAGGER-MAX-FRAMES
@@ -301,7 +304,9 @@
  spell-point-claimed?
  spell-claim-point?!
  spell-unit-claim-count
+ unit-claim-effective-cap
  spell-claim-unit?!
+ viper-abduct-weight
  disruptor-nova-stagger-ready?
  record-disruptor-nova-cast!
  filter-staggered-nova-actions
@@ -346,7 +351,7 @@
 (define PSI-STORM-CLAIM-RADIUS : Float 2.0)
 (define PSI-STORM-CLAIM-TTL : Integer 56)
 
-(define EMP-CLAIM-RADIUS : Float 2.0)
+(define EMP-CLAIM-RADIUS : Float 1.5)
 (define EMP-CLAIM-TTL : Integer 24)
 
 (define FUNGAL-CLAIM-RADIUS : Float 2.25)
@@ -403,7 +408,12 @@
 (define UNIT-SPELL-CLAIM-TTL : Integer 36)
 
 (define SNIPE-CHANNEL-LOCKOUT-FRAMES : Integer 34)
-(define SNIPE-DAMAGE : Float 170.0)
+;; SC2 5.0.14 Steady Targeting (Snipe): 130 base + 40 vs Psionic (170 vs Psionic, 130 vs non-Psionic).
+(define SNIPE-BASE-DAMAGE : Float 130.0)
+(define SNIPE-PSIONIC-BONUS : Float 40.0)
+(define SNIPE-DAMAGE : Float 130.0)
+;; SC2 5.0.14 Viper Abduct: 0.57s (`13` frames at 22.4 fps) post-cast lock on the casting Viper.
+(define VIPER-ABDUCT-LOCK-FRAMES : Integer 13)
 (define YAMATO-DAMAGE : Float 240.0)
 
 (define DISRUPTOR-NOVA-STAGGER-MIN-FRAMES : Integer 28)
@@ -471,7 +481,8 @@
    [dt-blink-ready-frame : (HashTable Integer Integer)]
    [dt-blink-issue-state : (HashTable Integer (Vector Integer Float Float))]
    [bc-yamato-issue-frame : (HashTable Integer Integer)]
-   [stalker-blink-ready-frame : (HashTable Integer Integer)])
+   [stalker-blink-ready-frame : (HashTable Integer Integer)]
+   [viper-abduct-lock-frame : (HashTable Integer Integer)])
   #:mutable
   #:transparent)
 
@@ -497,6 +508,7 @@
    (make-hasheqv)
    (make-hasheqv)
    ((inst make-hasheqv Integer (Vector Integer Float Float)))
+   (make-hasheqv)
    (make-hasheqv)
    (make-hasheqv)))
 
@@ -1404,6 +1416,7 @@
   (prune-hash-below! (spell-claims-dt-blink-ready-frame claims) current-frame)
   (prune-hash-below! (spell-claims-bc-yamato-issue-frame claims) (- current-frame 64))
   (prune-hash-below! (spell-claims-stalker-blink-ready-frame claims) current-frame)
+  (prune-hash-below! (spell-claims-viper-abduct-lock-frame claims) current-frame)
   (let ([st (spell-claims-dt-blink-issue-state claims)])
     (define stale-dt
       (for/fold ([ks : (Listof Integer) '()])
@@ -1527,14 +1540,23 @@
     (set-spell-claims-unit-claims! claims updated))
   renewed?)
 
-;; Determine effective concurrent caster cap on `target-tag` per #115/#117 rules.
-(: unit-claim-effective-cap (-> Symbol Real Real (Option Positive-Integer) Boolean Positive-Integer))
-(define (unit-claim-effective-cap ab target-hp missing-hp explicit-max allow-multi?)
+;; Determine effective concurrent caster cap on `target-tag` per #115/#117 & SC2 5.0.14 rules.
+(: unit-claim-effective-cap
+   (->* (Symbol Real Real (Option Positive-Integer) Boolean)
+        (#:target-sym (Option Symbol))
+        Positive-Integer))
+(define (unit-claim-effective-cap ab target-hp missing-hp explicit-max allow-multi?
+                                  #:target-sym [target-sym #f])
   (cond
     [explicit-max explicit-max]
     [(eq? ab 'steady-targeting)
-     (define eff (if (> (safe-fl target-hp 0.0) 0.0) (safe-fl target-hp SNIPE-DAMAGE) SNIPE-DAMAGE))
-     (define c (safe-ceil-div eff SNIPE-DAMAGE))
+     ;; SC2 5.0.14 Steady Targeting: 130 base + 40 vs Psionic (170 vs Psionic, 130 vs non-Psionic).
+     (define snipe-dmg : Float
+       (if (and target-sym (unit-attr-has-any? target-sym SC2-UNIT-ATTR-PSIONIC))
+           (+ SNIPE-BASE-DAMAGE SNIPE-PSIONIC-BONUS)
+           SNIPE-BASE-DAMAGE))
+     (define eff (if (> (safe-fl target-hp 0.0) 0.0) (safe-fl target-hp snipe-dmg) snipe-dmg))
+     (define c (safe-ceil-div eff snipe-dmg))
      (if (> c 0) c 1)]
     [(eq? ab 'yamato-cannon)
      (define eff (if (> (safe-fl target-hp 0.0) 0.0) (safe-fl target-hp YAMATO-DAMAGE) YAMATO-DAMAGE))
@@ -1548,7 +1570,7 @@
 ;; Enforces `target-tag > 0` and delta-f = 0 / overkill limits.
 (: spell-claim-unit?!
    (->* (spell-claims Symbol Integer Integer)
-        (Integer #:caster-tag Integer #:max-casters (Option Positive-Integer) #:target-hp Real #:missing-hp Real #:allow-multi? Boolean)
+        (Integer #:caster-tag Integer #:max-casters (Option Positive-Integer) #:target-hp Real #:missing-hp Real #:allow-multi? Boolean #:target-sym (Option Symbol))
         Boolean))
 (define (spell-claim-unit?! claims ability target-tag current-frame
                             [ttl UNIT-SPELL-CLAIM-TTL]
@@ -1556,7 +1578,8 @@
                             #:max-casters [max-casters #f]
                             #:target-hp [target-hp 0.0]
                             #:missing-hp [missing-hp 0.0]
-                            #:allow-multi? [allow-multi? #t])
+                            #:allow-multi? [allow-multi? #t]
+                            #:target-sym [target-sym #f])
   (define ab (canonical-spell-key ability))
   (cond
     [(<= target-tag 0) #f]
@@ -1572,7 +1595,8 @@
                   #:when (and (eq? (unit-claim-ability c) ab)
                               (= (unit-claim-target-tag c) target-tag)))
          c))
-     (define cap (unit-claim-effective-cap ab target-hp missing-hp max-casters allow-multi?))
+     (define cap (unit-claim-effective-cap ab target-hp missing-hp max-casters allow-multi?
+                                           #:target-sym target-sym))
      (define same-caster-this-frame?
        (and (> caster-tag 0)
             (for/or : Boolean ([c (in-list matching)])
@@ -2402,8 +2426,10 @@
 
 (: viper-abduct-weight (-> Symbol Float))
 (define (viper-abduct-weight sym)
-  ;; Strictly requires not 'frenzied and 'armored or 'massive
+  ;; Strictly requires not 'frenzied, not 'heroic (SC2 5.0.14 Mothership is Heroic -> immune to Abduct),
+  ;; and 'armored or 'massive.
   (if (not (and (spell-valid-for-target-attrs? 'abduct sym)
+                (not (unit-attr-has-any? sym SC2-UNIT-ATTR-HEROIC))
                 (unit-attr-has-any? sym (fxior SC2-UNIT-ATTR-ARMORED SC2-UNIT-ATTR-MASSIVE))))
       0.0
       (case sym
@@ -2411,7 +2437,7 @@
         [(colossus) 125.0]
         [(thor thor-ap) 120.0]
         [(tempest) 115.0]
-        [(carrier mothership) 112.0]
+        [(carrier) 112.0]
         [(battlecruiser) 110.0]
         [(lurker-burrowed lurker-mp-burrowed lurker lurker-mp) 106.0]
         [(liberator-ag liberator) 102.0]
@@ -2464,7 +2490,7 @@
    (->* ((Listof Any) (Listof Any) (Listof Any) spell-claims Integer
          (Listof Any) (Listof Any) (Listof Any) Float Float Float Float
          (Listof Integer) (Listof Integer))
-        ((Listof Any) Boolean)
+        ((Listof Any) Boolean Boolean Float)
         (Listof spell-directive)))
 (define (run-zerg-spellcaster-micro
          caster-units ally-units enemy-units
@@ -2472,7 +2498,9 @@
          home-x home-y enemy-base-x enemy-base-y
          inject-queen-tags exclude-tags
          [researched-upgrades '()]
-         [neural-parasite-researched? #t])
+         [neural-parasite-researched? #t]
+         [microbial-shroud-ok? #t]
+         [microbial-shroud-energy 75.0])
   (define all-enemies (if (null? enemy-buildings) enemy-units (append enemy-units enemy-buildings)))
   (define all-allies (if (null? ally-buildings) ally-units (append ally-units ally-buildings)))
   ;; W8-TAC-2: Gate Infestor Neural Parasite (249) on 'neural-parasite upgrade
@@ -2792,9 +2820,10 @@
                   ;;    over `>= 3` friendly ground combat units PRIORITIZED above Fungal Growth when
                   ;;    not deferring for Neural/Fungal opening split (`novel-116` safe!), so Infestors
                   ;;    protect Hydralisks from Carriers/Tempests before spending energy on Fungal!
-                  (and (not defer-second-neural-for-opening-fungal?)
+                  (and microbial-shroud-ok?
+                       (not defer-second-neural-for-opening-fungal?)
                        (not neural-ok?)
-                       (>= en 75.0)
+                       (>= en microbial-shroud-energy)
                        (>= (count-units-within enemy-units ux uy 16.0 enemy-air-capital-or-ranged?) 3)
                        (let-values ([(ok? sx sy _cnt)
                                      (for/fold ([f? : Boolean #f] [bx : Float 0.0] [by : Float 0.0] [bc : Integer 2])
@@ -2836,8 +2865,9 @@
                               (spell-claim-point?! claims 'fungal-growth fx fy FUNGAL-CLAIM-RADIUS current-frame FUNGAL-CLAIM-TTL)
                               (spell-directive tag 'infestor 'fungal-growth 'point 0 fx fy 'infestor-fungal))))
                   ;; 3b. Microbial Shroud fallback when Neural IS researched and no Fungal target is in range
-                  (and neural-ok?
-                       (>= en 75.0)
+                  (and microbial-shroud-ok?
+                       neural-ok?
+                       (>= en microbial-shroud-energy)
                        (>= (count-units-within enemy-units ux uy 16.0 enemy-air-capital-or-ranged?) 3)
                        (let-values ([(ok? sx sy _cnt)
                                      (for/fold ([f? : Boolean #f] [bx : Float 0.0] [by : Float 0.0] [bc : Integer 2])
@@ -2868,7 +2898,10 @@
              ;; --- VIPER ---
              [(viper)
               (cond
-                [(spellcaster-channel-protected? u) #f]
+                [(or (spellcaster-channel-protected? u)
+                     (> (hash-ref (spell-claims-viper-abduct-lock-frame claims) tag (lambda () -10000))
+                        current-frame))
+                 #f]
                 [else
                  (or
                   ;; 1. Blinding Cloud on >= 2 ground ranged clumps, prioritizing 'armored/'mechanical lines (`range 11.0`)
@@ -2976,7 +3009,8 @@
                                            (lambda ([e : Any])
                                              (define et (uh-type e))
                                              (define d-e (dist2 ux uy (uh-x e) (uh-y e)))
-                                             (and (> (viper-abduct-weight et) 0.0)
+                                             (and (not (unit-attr-has-any? et SC2-UNIT-ATTR-HEROIC))
+                                                  (> (viper-abduct-weight et) 0.0)
                                                   ;; Keep `13.0t` Abduct approach for capital targets (Colossus/Carrier/
                                                   ;; Tempest/BC/BroodLord/Thor), while keeping Sieged Tank Abduct at
                                                   ;; native `<= 9.0t` cast range (never stealing `100e` from Blinding Cloud
@@ -2989,8 +3023,11 @@
                               (and ok?
                                    (spell-claim-unit?! claims 'abduct (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
                                                        #:caster-tag tag)
-                                   (spell-directive tag 'viper 'abduct 'unit (uh-tag tgt)
-                                                    (uh-x tgt) (uh-y tgt) 'viper-abduct)))))))
+                                   (begin
+                                     (hash-set! (spell-claims-viper-abduct-lock-frame claims)
+                                                tag (+ current-frame VIPER-ABDUCT-LOCK-FRAMES))
+                                     (spell-directive tag 'viper 'abduct 'unit (uh-tag tgt)
+                                                      (uh-x tgt) (uh-y tgt) 'viper-abduct))))))))
                   ;; 4. Safe Consume (`energy < 60`, `0` enemies within `12.0`, Zerg building `hp > 450`)
                   (and (< en 60.0)
                        (not (any-unit-within? all-enemies ux uy 12.0 sc2-enemy-unit-targetable?))
@@ -3235,6 +3272,8 @@
          #:effects (Listof Any)
          #:researched-upgrades (Listof Any)
          #:neural-parasite-researched? Boolean
+         #:microbial-shroud-ok? Boolean
+         #:microbial-shroud-energy Float
          #:home-x Float
          #:home-y Float
          #:enemy-base-x Float
@@ -3251,6 +3290,8 @@
          #:effects [effects '()]
          #:researched-upgrades [researched-upgrades '()]
          #:neural-parasite-researched? [neural-parasite-researched? #t]
+         #:microbial-shroud-ok? [microbial-shroud-ok? #t]
+         #:microbial-shroud-energy [microbial-shroud-energy 75.0]
          #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
          #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
          #:enemy-base-x [enemy-base-x SC2-DEFAULT-ENEMY-BASE-X]
@@ -3274,7 +3315,8 @@
        casters ally-units enemy-units claims current-frame
        ally-buildings enemy-buildings effects home-x home-y
        enemy-base-x enemy-base-y inject-queen-tags exclude-tags
-       researched-upgrades neural-parasite-researched?)))
+       researched-upgrades neural-parasite-researched?
+       microbial-shroud-ok? microbial-shroud-energy)))
 
 ;; -----------------------------------------------------------------------------
 ;; 7. Terran Spellcaster Patterns (Ghost, Raven, Battlecruiser)
@@ -3440,7 +3482,8 @@
                                                   lurker lurker-burrowed lurker-mp lurker-mp-burrowed))
                                           #f))
                                 (< (spell-unit-claim-count claims 'steady-targeting (uh-tag e) current-frame)
-                                   (unit-claim-effective-cap 'steady-targeting (uh-total-hp e) 0.0 #f #t)))))))
+                                   (unit-claim-effective-cap 'steady-targeting (uh-total-hp e) 0.0 #f #t
+                                                             #:target-sym (uh-type e))))))))
                  (define ghost-can-cloak-now? : Boolean
                    (and ghost-cloak-ok?
                         (>= en 50.0)
@@ -3509,7 +3552,7 @@
                    (and (>= en 75.0)
                         (let-values ([(ok? ex ey _s)
                                       (best-enemy-cluster
-                                       ux uy 10.0 enemy-units 2.0 0.25
+                                       ux uy 10.0 enemy-units 1.5 0.25
                                        (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
                                          (define-values (shield-sum energy-sum score-sum prio? sh-psi-cnt)
                                            (for/fold ([sh-s : Float 0.0]
@@ -3556,20 +3599,25 @@
                                          (and (not (uh-hallucination? e))
                                               (> (ghost-snipe-weight e) 0.0)
                                               (< (spell-unit-claim-count claims 'steady-targeting (uh-tag e) current-frame)
-                                                 (unit-claim-effective-cap 'steady-targeting (uh-total-hp e) 0.0 #f #t))))
+                                                 (unit-claim-effective-cap 'steady-targeting (uh-total-hp e) 0.0 #f #t
+                                                                           #:target-sym (uh-type e)))))
                                        (lambda ([e : Any])
-                                         ;; L58-P3 (`sc2-real-t04`): Focus-fire high-HP multi-Snipe targets
-                                         ;; (`> 170 HP`, e.g. Ultralisk/BroodLord) already claimed below cap so
-                                         ;; Ultralisk #1 drops before reaching melee, while `<= 170 HP` targets
-                                         ;; (`cap = 1`, e.g. Infestor/Viper) still split cleanly via `< cap`!
+                                         ;; L58-P3 (`sc2-real-t04`) + L60 SC2 5.0.14: Focus-fire multi-Snipe targets
+                                         ;; (`> 130 HP` non-psionic or `> 170 HP` psionic, e.g. Roach/Lurker/Ultralisk)
+                                         ;; already claimed below cap so primary target drops fast, while 1-shot targets
+                                         ;; (`cap = 1`, e.g. Infestor/Viper/Ravager) still split cleanly via `< cap`!
                                          (define cur-cl (spell-unit-claim-count claims 'steady-targeting (uh-tag e) current-frame))
-                                         (if (and (> cur-cl 0) (> (uh-total-hp e) 170.0))
+                                         (define one-shot-hp : Float
+                                           (if (unit-attr-has-any? (uh-type e) SC2-UNIT-ATTR-PSIONIC)
+                                               (+ SNIPE-BASE-DAMAGE SNIPE-PSIONIC-BONUS)
+                                               SNIPE-BASE-DAMAGE))
+                                         (if (and (> cur-cl 0) (> (uh-total-hp e) one-shot-hp))
                                              (+ (ghost-snipe-weight e) 12.0)
                                              (- (ghost-snipe-weight e) (* 8.0 (->float cur-cl))))))])
                           (and ok?
                                (spell-claim-unit?!
                                 claims 'steady-targeting (uh-tag tgt) current-frame SNIPE-CHANNEL-LOCKOUT-FRAMES
-                                #:caster-tag tag #:target-hp (uh-total-hp tgt))
+                                #:caster-tag tag #:target-hp (uh-total-hp tgt) #:target-sym (uh-type tgt))
                                (begin
                                  (lock-ghost-snipe-channel! claims tag current-frame SNIPE-CHANNEL-LOCKOUT-FRAMES)
                                  (spell-directive tag 'ghost 'steady-targeting 'unit (uh-tag tgt)
@@ -4938,6 +4986,8 @@
          #:ghost-cloak-researched? Boolean
          #:interference-matrix-researched? Boolean
          #:neural-parasite-researched? Boolean
+         #:microbial-shroud-ok? Boolean
+         #:microbial-shroud-energy Float
          #:home-x Float
          #:home-y Float
          #:natural-x Float
@@ -4961,6 +5011,8 @@
          #:ghost-cloak-researched? [ghost-cloak-researched? #t]
          #:interference-matrix-researched? [interference-matrix-researched? #t]
          #:neural-parasite-researched? [neural-parasite-researched? #t]
+         #:microbial-shroud-ok? [microbial-shroud-ok? #t]
+         #:microbial-shroud-energy [microbial-shroud-energy 75.0]
          #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
          #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
          #:natural-x [natural-x SC2-DEFAULT-NATURAL-X]
@@ -5025,7 +5077,8 @@
                  z-casters ally-units enemy-units claims current-frame
                  ally-buildings enemy-buildings effects home-x home-y
                  enemy-base-x enemy-base-y inject-queen-tags exclude-tags
-                 researched-upgrades neural-parasite-researched?))
+                 researched-upgrades neural-parasite-researched?
+                 microbial-shroud-ok? microbial-shroud-energy))
             (if (null? eff-t-casters)
                 '()
                 (run-terran-spellcaster-micro
@@ -5060,6 +5113,8 @@
          #:ghost-cloak-researched? Boolean
          #:interference-matrix-researched? Boolean
          #:neural-parasite-researched? Boolean
+         #:microbial-shroud-ok? Boolean
+         #:microbial-shroud-energy Float
          #:home-x Float
          #:home-y Float
          #:natural-x Float
@@ -5083,6 +5138,8 @@
          #:ghost-cloak-researched? [ghost-cloak-researched? #t]
          #:interference-matrix-researched? [interference-matrix-researched? #t]
          #:neural-parasite-researched? [neural-parasite-researched? #t]
+         #:microbial-shroud-ok? [microbial-shroud-ok? #t]
+         #:microbial-shroud-energy [microbial-shroud-energy 75.0]
          #:home-x [home-x SC2-DEFAULT-HOME-BASE-X]
          #:home-y [home-y SC2-DEFAULT-HOME-BASE-Y]
          #:natural-x [natural-x SC2-DEFAULT-NATURAL-X]
@@ -5106,6 +5163,8 @@
         #:ghost-cloak-researched? ghost-cloak-researched?
         #:interference-matrix-researched? interference-matrix-researched?
         #:neural-parasite-researched? neural-parasite-researched?
+        #:microbial-shroud-ok? microbial-shroud-ok?
+        #:microbial-shroud-energy microbial-shroud-energy
         #:home-x home-x
         #:home-y home-y
         #:natural-x natural-x

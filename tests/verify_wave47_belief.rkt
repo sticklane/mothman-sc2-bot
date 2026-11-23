@@ -449,7 +449,7 @@
   (step-priority-macro-brain
    (make-macro-world-state
     #:race 'Zerg #:enemy-race 'Terran #:frame 5960
-    #:minerals 160 #:gas 110 #:supply-used 54 #:supply-cap 74 #:workers 36 #:active-bases 3
+    #:minerals 180 #:gas 110 #:supply-used 54 #:supply-cap 74 #:workers 36 #:active-bases 3
     #:mineral-harvesters 28 #:gas-harvesters 8
     #:army-supply 18 #:enemy-threat-supply 12 #:under-attack? #t #:requires-anti-air? #t #:requires-detection? #t
     #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'spore-crawler 3 'extractor 3)

@@ -2811,7 +2811,7 @@
                          'save-overwhelmed-expedition>1.5x-enemy
                          (list 'cast-spell (u-tag best-nx) 'mass-recall gx gy))))))))
 
-       ;; 3. Mothership Mass Recall (`2368`) + Time Warp (`2244`)
+       ;; 3. Mothership Mass Recall (`142`; legacy alias `2368`) + Time Warp (`2244`)
        (for ([ms (in-list active-motherships)])
          (define mid (u-tag ms))
          (define mx (u-x ms))
@@ -2963,17 +2963,14 @@
        (define mid (u-tag ms))
        (define mx (u-x ms))
        (define my (u-y ms))
-       ;; Prefer Viper Abduct -> Infestor Neural -> Raven Interference Matrix -> BC Yamato -> AA focus-fire
+       ;; Prefer Raven Interference Matrix -> BC Yamato -> AA focus-fire
+       ;; (SC2 5.0.14: Heroic Mothership is immune to Viper Abduct & Infestor Neural Parasite!)
        (for ([a (in-list usable-allies)]
              #:when (not (hash-has-key? used-tags (u-tag a))))
          (define aid (u-tag a))
          (define asym (u-sym a))
          (define d2 (dist-2d-sq (u-x a) (u-y a) mx my))
          (cond
-           [(and (eq? asym 'viper) (>= (u-energy a) 75.0) (<= d2 90.25))
-            (hash-set! used-tags aid #t)
-            (emit! (MapElementDirective 'abduct-mothership aid mid mx my 90.0 'abduct-mothership
-                                        (list 'cast-spell aid 'abduct mid)))]
            [(and (eq? asym 'raven) (>= (u-energy a) 75.0) (<= d2 90.25))
             (hash-set! used-tags aid #t)
             (emit! (MapElementDirective 'matrix-mothership aid mid mx my 88.0 'disable-mothership
@@ -3099,11 +3096,28 @@
 
   (define ths (filter townhall-building? ally-buildings))
   (define enemy-ths (filter townhall-building? enemy-buildings))
+  ;; L60 (`sc2-nc-13` restore): Distinguish genuine live-economy bases (`>= 2` ally buildings OR
+  ;; `>= 2` townhalls OR `>= 3` workers within `16.0t` of our townhall — true from frame `0` in
+  ;; live full matches with 12 starting workers!) from isolated Tactics Arena drills that keep
+  ;; 1 hidden starting TownHall far away at spawn with `0..1` nearby workers & `0` other buildings.
+  (define has-live-econ-th? : Boolean
+    (and (pair? ths)
+         (or (> (length ally-buildings) 1)
+             (> (length ths) 1)
+             (for/or : Boolean ([b (in-list ths)])
+               (not (not (memq (u-sym b) '(orbital-command planetary-fortress lair hive)))))
+             (let* ([th0 (car ths)]
+                    [tx (u-x th0)]
+                    [ty (u-y th0)])
+               (>= (for/sum : Integer ([w (in-list workers)]
+                                       #:when (<= (dist-2d-sq tx ty (u-x w) (u-y w)) 256.0))
+                     1)
+                   3)))))
   (define mw-dirs
     (plan-mineral-wall-and-worker-path-tactics
      workers combat neutral-units enemy-units
      #:frame frame #:home-x home-x #:home-y home-y #:enemy-x enemy-x #:enemy-y enemy-y
-     #:has-townhall? (pair? ths)
+     #:has-townhall? has-live-econ-th?
      #:townhall-pts (append ths enemy-ths)
      #:expansion-pads expansion-pads))
   ;; L59-H2H (`#1566` Fix #1): Gate Phase 7 `plan-destructible-rocks-and-rockslides` strictly to

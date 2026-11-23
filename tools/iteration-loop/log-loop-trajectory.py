@@ -744,6 +744,7 @@ def find_loop_windows(
             r"Loop\s+(\d+)(?:\s+Wave\s+\d+)?\s+Kickoff\b",
             r"Loop\s+(\d+)(?:\s*\([^)]*\))?(?:\s+Wave\s+\d+)?\s*[—–-]+\s*APPROVED\s+GO\b",
             r"GO!\s+Loop\s+(\d+)\b",
+            r"Fresh Loop\s+(\d+)\s+working copy\b",
             r"Wave[- ](\d+)\s+Spec\b",
             r"Loop\s+(\d+)\s+Implementation\b",
             r"Loop\s+(\d+)\s+Disjoint",
@@ -794,9 +795,9 @@ def find_loop_windows(
         # Anchor start time
         start = it["launch_ts"]
         if start is not None and r1_start is not None:
-            # Sanity check: launch should precede run1 by 2m..3h
+            # Sanity check: launch should precede run1 by 1m..10h (allows multi-pass inner Arena sprints)
             delta = (r1_start - start).total_seconds()
-            if not (60 <= delta <= 14400):
+            if not (60 <= delta <= 36000):
                 start = None
         if start is None:
             if i > 0 and items[i - 1].get("ended_at") is not None:
@@ -817,7 +818,7 @@ def find_loop_windows(
             nl = nxt["launch_ts"]
             if nl is not None and nxt["r1_start"] is not None:
                 d_nl = (nxt["r1_start"] - nl).total_seconds()
-                if 60 <= d_nl <= 14400 and nl > start:
+                if 60 <= d_nl <= 36000 and nl > start:
                     next_launch = nl
             if next_launch is None and nxt["r1_start"] is not None:
                 # Find last archival/forensics post between benchmark end and next run1 start

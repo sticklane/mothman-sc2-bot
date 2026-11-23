@@ -2429,7 +2429,7 @@
     centrifical-hooks centrifugal-hooks
     grooved-spines muscular-augments
     burrow tunneling-claws
-    pathogen-glands neural-parasite chitinous-plating anabolic-synthesis zergling-attackspeed
+    neural-parasite chitinous-plating anabolic-synthesis zergling-attackspeed
     zerg-melee-weapons-1 zerg-melee-weapons-2 zerg-melee-weapons-3 melee-attacks-1
     zerg-missile-weapons-1 zerg-missile-weapons-2 zerg-missile-weapons-3 missile-attacks-1
     zerg-ground-armor-1 zerg-ground-armor-2 zerg-ground-armor-3 ground-carapace-1 zerg-ground-carapace-1

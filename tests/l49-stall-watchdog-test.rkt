@@ -429,13 +429,13 @@
                 (macro-brain-decision-saving-for z-rc4-defer-bn-240)
                 (macro-brain-decision-scheduled-ids z-rc4-bio-unlock-bn)))
 
-;; (16) Queen #3 & Queen #4 on-time scaling (no gas<100 stall on Queen#3, Queen#4 on 3 bases @ 4:00!):
+;; (16) Queen #3 & Queen #4 on-time scaling (5.0.14 Queen = 175M; no gas<100 stall on Queen#3, Queen#4 on 3 bases @ 4:00!):
 (reset-macro-escrow-tracker!)
 (define z-rc4-queen3-with-gas
   (step-priority-macro-brain
    (make-macro-world-state
     #:race 'Zerg #:enemy-race 'Terran #:frame 3900
-    #:minerals 160 #:gas 120 #:supply-used 34 #:supply-cap 44 #:supply-left 10 #:pending-supply 0
+    #:minerals 180 #:gas 120 #:supply-used 34 #:supply-cap 44 #:supply-left 10 #:pending-supply 0
     #:workers 24 #:active-bases 2 #:mineral-harvesters 21 #:gas-harvesters 3
     #:army-supply 4 #:enemy-threat-supply 0 #:under-attack? #f
     #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'roach-warren 1 'extractor 1)
@@ -447,7 +447,7 @@
   (step-priority-macro-brain
    (make-macro-world-state
     #:race 'Zerg #:enemy-race 'Protoss #:frame 5400
-    #:minerals 165 #:gas 40 #:supply-used 48 #:supply-cap 66 #:supply-left 18 #:pending-supply 0
+    #:minerals 185 #:gas 40 #:supply-used 48 #:supply-cap 66 #:supply-left 18 #:pending-supply 0
     #:workers 34 #:active-bases 3 #:mineral-harvesters 31 #:gas-harvesters 3
     #:army-supply 8 #:enemy-threat-supply 0 #:under-attack? #f
     #:ready-building-counts (hasheq 'hatchery 3 'spawning-pool 1 'roach-warren 1 'spore-crawler 2 'extractor 1)
@@ -1490,6 +1490,68 @@
                 (cand-u p-l57-reaper-gate2-over-sb1 'shield-battery)
                 (macro-brain-decision-scheduled-ids p-l57-reaper-gate2-over-sb1)
                 (macro-brain-decision-scheduled-ids p-l57-reaper-sb-cap1)))
+
+;; (41) Loop 60 Package C (`5.0.14` Cost Alignment):
+;;      Zerg schedules `hatchery` at `275M` and `queen` at `175M` (NOT `150M`!),
+;;      and Protoss schedules `immortal` at `250M/100G`!
+(reset-macro-escrow-tracker!)
+(define z-l60-hatch-275m
+  (step-priority-macro-brain
+   (make-macro-world-state
+    #:race 'Zerg #:enemy-race 'Terran #:frame 1344
+    #:minerals 275 #:gas 0 #:supply-used 16 #:supply-cap 22 #:supply-left 6 #:pending-supply 0
+    #:workers 16 #:active-bases 1 #:mineral-harvesters 16 #:gas-harvesters 0
+    #:army-supply 0 #:enemy-threat-supply 0 #:under-attack? #f
+    #:ready-building-counts (hasheq 'hatchery 1)
+    #:total-building-counts (hasheq 'hatchery 1)
+    #:unit-counts (hasheq 'drone 16 'overlord 2)
+    #:open-facility-slots (hasheq 'townhall 1 'larva 2))))
+(reset-macro-escrow-tracker!)
+(define z-l60-queen-150m-wait
+  (step-priority-macro-brain
+   (make-macro-world-state
+    #:race 'Zerg #:enemy-race 'Terran #:frame 2600
+    #:minerals 150 #:gas 0 #:supply-used 22 #:supply-cap 36 #:supply-left 14 #:pending-supply 0
+    #:workers 20 #:active-bases 2 #:mineral-harvesters 17 #:gas-harvesters 3
+    #:army-supply 2 #:enemy-threat-supply 0 #:under-attack? #f
+    #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'extractor 1)
+    #:total-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'extractor 1)
+    #:unit-counts (hasheq 'drone 20 'queen 1 'zergling 4 'overlord 3)
+    #:open-facility-slots (hasheq 'townhall 2 'larva 0))))
+(reset-macro-escrow-tracker!)
+(define z-l60-queen-175m-go
+  (step-priority-macro-brain
+   (make-macro-world-state
+    #:race 'Zerg #:enemy-race 'Terran #:frame 2600
+    #:minerals 175 #:gas 0 #:supply-used 22 #:supply-cap 36 #:supply-left 14 #:pending-supply 0
+    #:workers 20 #:active-bases 2 #:mineral-harvesters 17 #:gas-harvesters 3
+    #:army-supply 2 #:enemy-threat-supply 0 #:under-attack? #f
+    #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'extractor 1)
+    #:total-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'extractor 1)
+    #:unit-counts (hasheq 'drone 20 'queen 1 'zergling 4 'overlord 3)
+    #:open-facility-slots (hasheq 'townhall 2 'larva 0))))
+(reset-macro-escrow-tracker!)
+(define p-l60-immortal-250m
+  (step-priority-macro-brain
+   (make-macro-world-state
+    #:race 'Protoss #:enemy-race 'Protoss #:frame 5400
+    #:minerals 250 #:gas 100 #:supply-used 46 #:supply-cap 70 #:supply-left 24 #:pending-supply 0
+    #:workers 32 #:active-bases 2 #:mineral-harvesters 24 #:gas-harvesters 8
+    #:army-supply 14 #:enemy-threat-supply 6 #:under-attack? #f
+    #:ready-building-counts (hasheq 'nexus 2 'pylon 7 'gateway 3 'cybernetics-core 1 'robotics-facility 1 'assimilator 3)
+    #:total-building-counts (hasheq 'nexus 2 'pylon 7 'gateway 3 'cybernetics-core 1 'robotics-facility 1 'assimilator 3)
+    #:unit-counts (hasheq 'probe 32 'stalker 6 'observer 1)
+    #:enemy-unit-counts (hasheq 'stalker 6)
+    #:open-facility-slots (hasheq 'townhall 2 'gateway 0 'robotics-facility 1))))
+(check! (and (not (not (memq 'hatchery (macro-brain-decision-scheduled-ids z-l60-hatch-275m))))
+             (not (memq 'queen (macro-brain-decision-scheduled-ids z-l60-queen-150m-wait)))
+             (not (not (memq 'queen (macro-brain-decision-scheduled-ids z-l60-queen-175m-go))))
+             (not (not (memq 'immortal (macro-brain-decision-scheduled-ids p-l60-immortal-250m)))))
+        (format "L60-PkgC(41) 5.0.14 costs failed: hatch275=~s q150=~s q175=~s imm250=~s"
+                (macro-brain-decision-scheduled-ids z-l60-hatch-275m)
+                (macro-brain-decision-scheduled-ids z-l60-queen-150m-wait)
+                (macro-brain-decision-scheduled-ids z-l60-queen-175m-go)
+                (macro-brain-decision-scheduled-ids p-l60-immortal-250m)))
 
 (reset-macro-escrow-tracker!)
 (printf "l49-stall-watchdog-test: ~a/~a passed (~a failed) [wd_8calls_avg=~a ms]\n"

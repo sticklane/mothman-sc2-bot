@@ -723,7 +723,7 @@
   (define-values (block-sym block-cost)
     (cond
       [(memq race '(Protoss protoss PROTOSS)) (values 'pylon 100.0)]
-      [(memq race '(Zerg zerg ZERG)) (values 'hatchery 300.0)]
+      [(memq race '(Zerg zerg ZERG)) (values 'hatchery (real->double-flonum (sc2-min-cost 'hatchery)))]
       [else (values 'engineering-bay 125.0)]))
   (define has-incomplete-block-bldg? : Boolean
     (for/or : Boolean ([b (in-list ally-bldgs)])

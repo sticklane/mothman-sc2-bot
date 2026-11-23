@@ -308,7 +308,8 @@
     leg-enhancements
     scarab-damage
     charon-boosters
-    irradiate))
+    irradiate
+    pathogen-glands))
 
 (define SC2-LOTV-VALID-UPGRADE-SYMS
   '(;; Zerg SC2 LotV upgrades
@@ -329,7 +330,6 @@
     overlordspeed
     burrow
     neural-parasite
-    pathogen-glands
     microbial-shroud
     digging-claws
     EvolveGroovedSpines

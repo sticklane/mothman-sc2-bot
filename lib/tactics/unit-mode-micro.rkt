@@ -2875,9 +2875,10 @@
       (plan-widow-mine-modes/list wms ally-units enemy-units tr current-frame anchors)))
 
 ;; L43-P0-1c (Widow Mine Optimal Worker-Cluster Target Fire):
-;; For a burrowed Widow Mine, select the targetable enemy within `<= 5.25t` whose `1.75t` splash
-;; envelope maximizes weighted splash kills (workers `+3.0`, light/shielded combat `+2.5`, other
-;; combat `+2.0`, structures `+0.1`), breaking ties toward the densest enemy worker cluster centroid!
+;; For a burrowed Widow Mine, select the targetable enemy within `<= 5.25t` whose `1.5t` splash
+;; envelope (SC2 5.0.14 Sentinel Missiles splash radius = 1.5) maximizes weighted splash kills
+;; (workers `+3.0`, light/shielded combat `+2.5`, other combat `+2.0`, structures `+0.1`),
+;; breaking ties toward the densest enemy worker cluster centroid!
 (: widow-mine-splash-target-weight (-> Any Symbol Float))
 (define (widow-mine-splash-target-weight e et)
   (cond
@@ -2895,7 +2896,7 @@
   (define wx (u-x wm-u))
   (define wy (u-y wm-u))
   (define max-r2 (* max-range max-range))
-  (define splash-r2 (* 1.75 1.75))
+  (define splash-r2 (* 1.5 1.5))
   (define valid-enemies
     (for/list : (Listof Any)
               ([e (in-list enemy-units)]

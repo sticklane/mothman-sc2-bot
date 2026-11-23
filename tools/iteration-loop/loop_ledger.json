@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter57_ship10_full",
+  "active_wave": "iter59c_ship11_full",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -5574,6 +5574,346 @@
           "trade_agg": 0.63,
           "sup_blk": 4.8
         }
+      }
+    },
+    {
+      "id": "iter58b_ship11_full",
+      "status": "HOLD_ZIP_WALLTIES_6_SIEGE0DPS_13_PROTOSS_UNSEEN_1_10_1",
+      "campaign": "Loops 29+ Self-Play, Tactics Arena 3.1 & Expanded Roster Campaign (Loop 58B HOLD-ZIP: First Multi-Pass Inner Arena Sprint 57W-25L-2D 39/39 Spells + Concave & Macro-Group Staging + DripFeed 27 Low vs WallTies 6 & Siege0DPS 13 -> Loop 59 Ship #11)",
+      "loop_self_improvements": [
+        "L58-LOOP-1 (Two-Tier Inner/Outer Arena Sprint Launched): Ran 5 rapid inner Arena passes (P0->P4 across 84 core + 32 ability-mastery + 16 new non-combat scenarios) without rerunning the 84-match roster between passes, driving core from 48W-33L-3D (1.07x, 34/39 spells) to 57W-25L-2D (1.23x, 39/39 = 100% spells).",
+        "L58-LOOP-2 (Sections 5 & 6 Pro Combat-Concave and Macro Army-Group Audits): Added quantitative combat-concave (wrap, role inversion, caster exposure, uphill, choke) and operational macro-group (multiprong, sync harass, reinforcement linking, solo trickle, rotations) benchmarks to tools/pro-deep-comparison.py, catching and fixing L58's sticky staging-group yank-back in L58B (DripFeed 38->27, Z SyncHarass 2.6%->38.2%)."
+      ],
+      "spec_summary": "Loop 58 / 58B (HOLD-ZIP -- keep Release #10 active while advancing to Loop 59): First Two-Tier Inner Arena Sprint drove Core-84 from 48W-33L-3D (1.07x, 34/39 spells) to 57W-25L-2D (1.23x, 39/39 = 100% spells) and introduced the 16-scenario Non-Combat suite (Pass 0: 6P-10F, avg 51.8/100). Wave 1 (iter58) hit Zerg staging yank-back (DripFeed 38, SELF_6 1-5); Wave 2 (iter58b) fixed all 4 staging/concave bugs, dropping DripFeed to 27 (low) and EscrowLock to 6, lifting P/T/Z concave wrap above Pro (+0.36t / +0.16t / +0.27t) and Z SyncHarass 2.6%->38.2%. Full L58B 96/96 (0 crashes, 0 faults, 0 wire rejects, max_step 259.7ms): H2H_12 6W-6L-0T (50.0%, 0.81x), ALL_84 27W-50L-7T (32.1% WR / 40.5% NL, 0.65x), EXT_78 22W-49L-7T (28.2% WR / 37.2% NL, 0.57x, SB 4.3%), CORE14 18W-23L-1T (42.9% WR / 45.2% NL, 0.90x), UNSEEN12 4W-26L-6T (11.1% WR / 27.8% NL, 0.32x), SELF_6 5W-1L-0T (83.3%, 1.31x). Macro wins: 0-SG AirWeapons 0, Fast Stim 330.6s, pylon_clump 0.0%, 1BaseLock 0, ProdIdleBank 0, SELF_CANCEL 0. HOLD causes: WallTies 6 (7 total ties), Siege0DPS 13, TvT0Tank 3, Protoss UNSEEN12 1-10-1, sup_cap_min 41.0%, zero_gas 13 (16.7%).",
+      "rev": "wywkqtpl abaefd23 (Loop 58B HOLD-ZIP -- Core-84 57W 39/39 Spells & DripFeed 27 vs WallTies 6 & Siege0DPS 13)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_204644_iter58b_ship11_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_203957_iter58b_h2h_12",
+      "wave1_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_193809_iter58_ship11_full",
+      "wave1_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261122_193302_iter58_h2h_12",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter58b_ship11_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter58b_h2h_12_score.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter58_arena/pass4_core_dummy.json",
+      "arena_passes": [
+        {
+          "pass_id": "pass0",
+          "label": "Ship #10 Core-84 baseline",
+          "opponent": "dummy",
+          "suite": "core",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter58_arena/pass0_core_dummy.json"
+        },
+        {
+          "pass_id": "pass1",
+          "label": "Inner Pass 1 Core-84",
+          "opponent": "dummy",
+          "suite": "core",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter58_arena/pass1_core_dummy.json"
+        },
+        {
+          "pass_id": "pass2",
+          "label": "Inner Pass 2 Core-84",
+          "opponent": "dummy",
+          "suite": "core",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter58_arena/pass2_core_dummy.json"
+        },
+        {
+          "pass_id": "pass3",
+          "label": "Inner Pass 3 Core-84",
+          "opponent": "dummy",
+          "suite": "core",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter58_arena/pass3_core_dummy.json"
+        },
+        {
+          "pass_id": "pass4",
+          "label": "Inner Pass 4 Core-84 (57W 39/39 spells)",
+          "opponent": "dummy",
+          "suite": "core",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter58_arena/pass4_core_dummy.json"
+        },
+        {
+          "pass_id": "pass0",
+          "label": "Ship #10 Ability-32 baseline",
+          "opponent": "dummy",
+          "suite": "ability-mastery",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter58_arena/pass0_ability_dummy.json"
+        },
+        {
+          "pass_id": "pass1",
+          "label": "Inner Pass 1 Ability-32",
+          "opponent": "dummy",
+          "suite": "ability-mastery",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter58_arena/pass1_ability_dummy.json"
+        },
+        {
+          "pass_id": "pass2",
+          "label": "Inner Pass 2 Ability-32",
+          "opponent": "dummy",
+          "suite": "ability-mastery",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter58_arena/pass2_ability_dummy.json"
+        },
+        {
+          "pass_id": "pass3",
+          "label": "Inner Pass 3 Ability-32 (28/32 spells)",
+          "opponent": "dummy",
+          "suite": "ability-mastery",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter58_arena/pass3_ability_dummy.json"
+        },
+        {
+          "pass_id": "pass4",
+          "label": "Inner Pass 4 Ability-32",
+          "opponent": "dummy",
+          "suite": "ability-mastery",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter58_arena/pass4_ability_dummy.json"
+        },
+        {
+          "pass_id": "pass0",
+          "label": "Non-Combat-16 baseline (avg 51.8/100)",
+          "opponent": "dummy",
+          "suite": "non-combat",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter58_arena/pass0_noncombat_dummy.json"
+        }
+      ],
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "22W-49L-7T (28.2% WR / 37.2% NL, 0.57x; CORE14 18W-23L-1T 0.90x, UNSEEN12 4W-26L-6T 0.32x; ALL_84 27W-50L-7T 0.65x; SELF_6 5W-1L 1.31x; H2H_12 6W-6L 0.81x; Core-84 57W-25L-2D 39/39 spells -- HOLD)",
+      "win_rate_pct": 28.2,
+      "non_loss_pct": 37.2,
+      "core14_wr_pct": 42.9,
+      "unseen12_wins": 4,
+      "h2h_record": "6W-6L-0T (50.0%, 0.81x agg / 0.73x med; Wave 1 H2H_12 6W-6L 0.93x)",
+      "trade_agg": 0.57,
+      "sup_blk_pct": 4.3,
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 4,
+      "prod_placement_stall_matches": 2,
+      "one_base_lockout_matches": 0,
+      "gas_rich_min_starved_matches": 9,
+      "cloaked_unit_damage_losses": 2,
+      "siege_range_zero_dps_losses": 13,
+      "zero_kill_collapse_matches": 6,
+      "drip_feed_collapse_matches": 27,
+      "wall_timeout_ties": 6,
+      "stall_watchdog_kpis": {
+        "sup_cap_min_pct": 41.0,
+        "zero_income_matches": 8,
+        "zero_gas_matches": 13,
+        "wk_plateau_8m_pct": 34.5
+      },
+      "base_geometry_kpis": {
+        "pylon_clump_pct": 0.0,
+        "pylon_spacing_nn": 15.6,
+        "nat_supply_pct": 81.8,
+        "protoss_nat_supply_pct": 90.9,
+        "terran_nat_supply_pct": 72.7,
+        "zvz_nat_wall_pct": 12.5,
+        "early_bunkers_4m": 0.91
+      },
+      "by_race": {
+        "Protoss": {
+          "record": "CORE14 5W-9L-0T (0.76x), EXT78 6W-19L-1T (23.1% WR / 26.9% NL, 0.42x, SB 5.5%), pylon_clump 0.0%, Wrap +0.36t, Annihilation 12.1%, BUT UNSEEN12 1-10-1 & PvT 1-6-1",
+          "trade_agg": 0.42,
+          "sup_blk": 5.5
+        },
+        "Terran": {
+          "record": "CORE14 6W-8L-0T (1.15x), EXT78 8W-16L-2T (30.8% WR / 38.5% NL, 0.67x, SB 2.2%), TvZ 5-3-1 (1.02x), Fast Stim 330.6s, Wrap +0.16t, BUT TvT 1-7-1 & TvT0Tank 3",
+          "trade_agg": 0.67,
+          "sup_blk": 2.2
+        },
+        "Zerg": {
+          "record": "CORE14 7W-6L-1T, EXT78 8W-14L-4T (30.8% WR / 46.2% NL, 0.64x, SB 5.2%), Wrap +0.27t, SyncHarass 38.2%, SoloTrickle 14.6%, BUT ZvP 2-5-1 & 4 ties",
+          "trade_agg": 0.64,
+          "sup_blk": 5.2
+        }
+      }
+    },
+    {
+      "id": "iter59c_ship11_full",
+      "status": "UNCONDITIONAL_LIVE_SHIP_11_H2H12_9W_3L_1_83X_CORE14_50PCT_NL_0_93X_UNSEEN12_38_9PCT_NL_0_61X_PRO_EPM_SPM_MATCH",
+      "campaign": "Loops 29+ Self-Play, Tactics Arena 3.1 & Expanded Roster Campaign (Loop 59 Live Release #11: commit wywkqtpl acd7ad85, BuildVersion wywkqtpl_668f47f8 live on all 8 v1+v2 bots)",
+      "loop_self_improvements": [
+        "L59-LOOP-1 (Two Fast H2H-First Stops Saved ~64m Before 84m Roster): Wave 1 H2H stopped at 1W-11L (230s, isolating neutral-units worker ping-pong & uphill-scan MULE lock) and Wave 2 H2H stopped at 2W-10L (332s, isolating live rock-attack steals & 3rd-base escrow), flipping Wave 3 H2H_12 to 9W-3L-0T (75.0%, 1.83x agg / 3.69x med).",
+        "L59-LOOP-2 (Pro-GM Camera/EPM/SPM Parity + APM-Drop Instrumentation): Base-hotkey F1..F8 + >=18t minimap snaps matched Pro GM mechanics (EPM 148.4 vs Pro 147.6, SPM 37.2 vs Pro 36.9, <12t pans crushed to 0.8%/0.3%/3.1%), while [APM_CAP_DROPS] telemetry (592,320 drops across 84m, tok=100%) pinpointed 3685 SCV Repair P1 flooding for Loop 60."
+      ],
+      "spec_summary": "Loop 59C (Live Release #11, commit wywkqtpl acd7ad85, BuildVersion wywkqtpl_668f47f8, live on all 8 v1+v2 AI Arena bots via deploy-aiarena.yml run 45108531214): Inner Arena Sprint (3 passes + pre-ship sanity) hit 59/59 (100.0%) spell verification across Core-92 (54W-32L-6D, 1.20x, 46/46 spells), Pro-14 (5W-9L, 11/11 spells), and Non-Combat-16 (8P-8F avg 65.4/100 Pass 3; 7P-9F avg 59.3/100 sanity). After two fast H2H-First catches (1-11 & 2-10, saving ~64m), Wave 3 H2H_12 crushed Live Release #10 ZIPs 9W-3L-0T (75.0%, 1.83x agg / 3.69x med) and completed 96/96 + 4/4 ELF ZIP smoke with 0 crashes, 0 faults, 0 wire rejects, and 0 step spikes >=500ms. Full roster: ALL_84 28W-47L-9T (33.3% WR / 44.0% NL, 0.75x), EXT_78 26W-43L-9T (33.3% WR / 44.9% NL, 0.74x, SB 3.8%), CORE14 19W-21L-2T (45.2% WR / 50.0% NL, 0.93x), UNSEEN12 7W-22L-7T (19.4% WR / 38.9% NL, 0.61x), SELF_6 2W-4L-0T (0.80x). Standout highs: Zerg EXT_78 11W-11L-4T (42.3% WR / 57.7% NL, 0.88x, ZvT 7-2-0 77.8% 1.48x/3.02x, UNSEEN12 4-6-2 50.0% NL 0.87x); Terran CORE14 7-7 (1.18x/1.21x med) & TvZ 3-3-2 (62.5% NL, 1.38x); Protoss 3rd Nexus -86s (5:57) & Terran Nat CC -19s (1:35); Pro-matched EPM 148.4 (Pro 147.6) & SPM 37.2 (Pro 36.9), <12t pans 0.8/0.3/3.1% & >=18t snaps 98.9/98.9/91.6%; Army Gas +43.4% & @12m Mineral Collection +34.2%; all 3 races beat Pro on Role Inv% (P 12.5%, T 25.6%, Z 27.3%); EscrowLock 3, sup_cap_min 28.2%, pylon_clump 0.0%, ProdStall 0, SELF_CANCEL 0, StaleTie 0; [APM_CAP_DROPS] 592,320 across 84m exposing 3685 Repair P1 flooding for Loop 60. 4-Race ELF ZIP Smoke vs titania: 4W-0L-0T (100.0%, 8.23x agg / 12.50x med, 0 crashes/faults/rejects).",
+      "rev": "wywkqtpl acd7ad85 (BuildVersion wywkqtpl_668f47f8, LIVE AI ARENA SHIP #11)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_025311_iter59c_ship11_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_024637_iter59c_h2h_12",
+      "wave1_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_012038_iter59_h2h_12",
+      "wave2_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_015539_iter59b_h2h_12",
+      "zip_smoke_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_034641_iter59c_ship11_zip_smoke",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter59c_ship11_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter59c_h2h_12_score.json",
+      "zip_smoke_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter59c_ship11_zip_smoke_score.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter59_arena/pass3_core_dummy.json",
+      "arena_passes": [
+        {
+          "pass_id": "pass1",
+          "label": "Inner Pass 1 Core-92",
+          "opponent": "dummy",
+          "suite": "core",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter59_arena/pass1_core_dummy.json"
+        },
+        {
+          "pass_id": "pass2",
+          "label": "Inner Pass 2 Core-92",
+          "opponent": "dummy",
+          "suite": "core",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter59_arena/pass2_core_dummy.json"
+        },
+        {
+          "pass_id": "pass3",
+          "label": "Inner Pass 3 Core-92 (54W 46/46 spells)",
+          "opponent": "dummy",
+          "suite": "core",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter59_arena/pass3_core_dummy.json"
+        },
+        {
+          "pass_id": "pass1",
+          "label": "Inner Pass 1 Non-Combat-16",
+          "opponent": "dummy",
+          "suite": "non-combat",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter59_arena/pass1_noncombat_dummy.json"
+        },
+        {
+          "pass_id": "pass2",
+          "label": "Inner Pass 2 Non-Combat-16",
+          "opponent": "dummy",
+          "suite": "non-combat",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter59_arena/pass2_noncombat_dummy.json"
+        },
+        {
+          "pass_id": "pass3",
+          "label": "Inner Pass 3 Non-Combat-16 (8P-8F avg 65.4)",
+          "opponent": "dummy",
+          "suite": "non-combat",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter59_arena/pass3_noncombat_dummy.json"
+        },
+        {
+          "pass_id": "sanity",
+          "label": "Pre-Ship #11 Non-Combat-16 sanity (7P-9F avg 59.3)",
+          "opponent": "dummy",
+          "suite": "non-combat",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter59_arena/ship11_sanity_noncombat_dummy.json"
+        },
+        {
+          "pass_id": "pass1",
+          "label": "Inner Pass 1 Pro-14",
+          "opponent": "dummy",
+          "suite": "l59-pro14",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter59_arena/pass1_l59_pro14_dummy.json"
+        },
+        {
+          "pass_id": "pass2",
+          "label": "Inner Pass 2 Pro-14",
+          "opponent": "dummy",
+          "suite": "l59-pro14",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter59_arena/pass2_l59_pro14_dummy.json"
+        },
+        {
+          "pass_id": "pass3",
+          "label": "Inner Pass 3 Pro-14 (11/11 spells)",
+          "opponent": "dummy",
+          "suite": "l59-pro14",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter59_arena/pass3_l59_pro14_dummy.json"
+        },
+        {
+          "pass_id": "sanity",
+          "label": "Pre-Ship #11 Pro-14+t10 sanity (12/12 spells)",
+          "opponent": "dummy",
+          "suite": "l59-pro14",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter59_arena/ship11_sanity_pro14_t10_dummy.json"
+        },
+        {
+          "pass_id": "pass1",
+          "label": "Full Catalog All-278 (174-90-14 1.32x)",
+          "opponent": "dummy",
+          "suite": "all-278",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter59_arena/pass1_all278_dummy.json"
+        }
+      ],
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "26W-43L-9T (33.3% WR / 44.9% NL, 0.74x; CORE14 19W-21L-2T 50.0% NL 0.93x, UNSEEN12 7W-22L-7T 38.9% NL 0.61x; ALL_84 28W-47L-9T 0.75x; SELF_6 2W-4L 0.80x; H2H_12 9W-3L 75.0% 1.83x; ZIP Smoke 4W-0L 8.23x)",
+      "win_rate_pct": 33.3,
+      "non_loss_pct": 44.9,
+      "core14_wr_pct": 45.2,
+      "unseen12_wins": 7,
+      "h2h_record": "9W-3L-0T (75.0%, 1.83x agg / 3.69x med; W1 H2H stopped 1W-11L, W2 H2H stopped 2W-10L)",
+      "trade_agg": 0.74,
+      "sup_blk_pct": 3.8,
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 6,
+      "prod_placement_stall_matches": 0,
+      "one_base_lockout_matches": 1,
+      "gas_rich_min_starved_matches": 9,
+      "cloaked_unit_damage_losses": 2,
+      "siege_range_zero_dps_losses": 13,
+      "zero_kill_collapse_matches": 7,
+      "drip_feed_collapse_matches": 33,
+      "wall_timeout_ties": 9,
+      "pro_mechanics_kpis": {
+        "apm_avg": 290.2,
+        "epm_avg": 148.4,
+        "epm_pro_ref": 147.6,
+        "spm_avg": 37.2,
+        "spm_pro_ref": 36.9,
+        "short_pan_lt12t_pct": [
+          0.8,
+          0.3,
+          3.1
+        ],
+        "crisp_snap_ge18t_pct": [
+          98.9,
+          98.9,
+          91.6
+        ],
+        "apm_cap_drops_total_84m": 592320,
+        "apm_cap_drops_p0_84m": 26169,
+        "apm_cap_drops_p1_84m": 74602
+      },
+      "stall_watchdog_kpis": {
+        "sup_cap_min_pct": 28.2,
+        "zero_income_matches": 4,
+        "zero_gas_matches": 11,
+        "wk_plateau_8m_pct": 38.5
+      },
+      "base_geometry_kpis": {
+        "pylon_clump_pct": 0.0,
+        "pylon_spacing_nn": 14.3,
+        "nat_supply_pct": 84.8,
+        "protoss_nat_supply_pct": 100.0,
+        "terran_nat_supply_pct": 66.7,
+        "zvz_nat_wall_pct": 0.0,
+        "early_bunkers_4m": 1.0
+      },
+      "by_race": {
+        "Protoss": {
+          "record": "CORE14 5W-9L-0T (0.74x), EXT78 7W-17L-2T (26.9% WR / 34.6% NL, 0.61x, SB 3.9%), UNSEEN12 2-8-2 (33.3% NL, 0.53x), 3rd Nexus 5:57 (-86s), nat_supply 100.0%, pylon_clump 0.0%, Role Inv 12.5%, Multiprong 22.2%, BUT PvP 1-7",
+          "trade_agg": 0.61,
+          "sup_blk": 3.9
+        },
+        "Terran": {
+          "record": "CORE14 7W-7L-0T (50.0%, 1.18x/1.21x med), EXT78 8W-15L-3T (30.8% WR / 42.3% NL, 0.76x, SB 2.8%), TvZ 3-3-2 (62.5% NL, 1.38x), Nat CC 1:35 (-19s), Role Inv 25.6%, BUT 3685 Repair P1 APM-drop flood on losses",
+          "trade_agg": 0.76,
+          "sup_blk": 2.8
+        },
+        "Zerg": {
+          "record": "CORE14 7W-5L-2T (64.3% NL, 0.90x), EXT78 11W-11L-4T (42.3% WR / 57.7% NL, 0.88x, SB 4.5%), ZvT 7-2-0 (77.8%, 1.48x/3.02x), UNSEEN12 4-6-2 (50.0% NL, 0.87x), Spire 8:12 (-110s), Role Inv 27.3%, SyncHarass 41.7%",
+          "trade_agg": 0.88,
+          "sup_blk": 4.5
+        }
+      },
+      "aiarena_deploy": {
+        "workflow": "deploy-aiarena.yml",
+        "run_id": 45108531214,
+        "url": "https://github.com/sticklane/mothman-sc2-bot/actions/runs/45108531214",
+        "status": "GREEN",
+        "duration_sec": 111,
+        "bots_active": 8,
+        "remote_md5_match": "8/8",
+        "competition_id": 38,
+        "validation_matches": "5143855-5143862"
       }
     }
   ],

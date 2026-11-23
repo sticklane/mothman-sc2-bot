@@ -281,7 +281,7 @@
    'supply-depot            '(100 0 0)
 
    ;; TownHalls & Gas Buildings
-   'hatchery                '(300 0 0)
+   'hatchery                '(275 0 0)
    'lair                    '(150 100 0)
    'hive                    '(200 150 0)
    'nexus                   '(400 0 0)
@@ -308,7 +308,7 @@
    'spore-crawler           '(75 0 0)
 
    ;; Zerg Units
-   'queen                   '(150 0 2)
+   'queen                   '(175 0 2)
    'zergling                '(50 0 1)
    'baneling                '(25 25 1)
    'roach                   '(75 25 2)
@@ -352,15 +352,15 @@
    'archon                  '(100 300 4)
    'observer                '(25 75 1)
    'warp-prism              '(250 0 2)
-   'immortal                '(275 100 4)
+   'immortal                '(250 100 4)
    'colossus                '(300 200 6)
-   'disruptor               '(150 150 4)
+   'disruptor               '(150 150 3)
    'phoenix                 '(150 100 2)
    'void-ray                '(250 150 4)
    'oracle                  '(150 150 3)
    'carrier                 '(350 250 6)
-   'tempest                 '(250 175 5)
-   'mothership              '(300 300 6)
+   'tempest                 '(250 175 4)
+   'mothership              '(400 400 8)
 
    ;; Terran Structures
    'barracks                '(150 0 0)
@@ -370,7 +370,7 @@
    'armory                  '(150 100 0)
    'missile-turret          '(100 0 0)
    'bunker                  '(100 0 0)
-   'sensor-tower            '(125 100 0)
+   'sensor-tower            '(100 50 0)
    'ghost-academy           '(150 50 0)
    'fusion-core             '(150 150 0)
    'barracks-techlab        '(50 25 0)
@@ -532,7 +532,7 @@
    'viking-assault           '(150 75 2)
    'liberator-ag             '(150 125 3)
    'drone-burrowed           '(50 0 1)
-   'queen-burrowed           '(150 0 2)
+   'queen-burrowed           '(175 0 2)
    'zergling-burrowed        '(50 0 1)
    'baneling-burrowed        '(50 25 1)
    'roach-burrowed           '(75 25 2)
@@ -561,27 +561,39 @@
    'point-defense-drone      '(0 0 0)
    'advanced-ballistics      '(150 150 0)))
 
+(: sc2-lookup-cost-triple (-> Any (Option (List Integer Integer Integer))))
+(define (sc2-lookup-cost-triple sym)
+  (and (symbol? sym)
+       (or (and (unbox SC2-LIVE-DATA-ACTIVE?)
+                (let ([canon (canonical-unit-type-sym sym)])
+                  (or (hash-ref SC2-LIVE-COST-OVERLAY sym (lambda () #f))
+                      (and (not (eq? canon sym))
+                           (hash-ref SC2-LIVE-COST-OVERLAY canon (lambda () #f)))
+                      (let ([upg (hash-ref SC2-LIVE-UPG-COST-OVERLAY sym (lambda () #f))])
+                        (and upg (list (first upg) (second upg) 0))))))
+           (hash-ref SC2-LOTV-COST-TABLE sym (lambda () #f)))))
+
 (: sc2-min-cost (->* (Any) (Integer) Integer))
 (define (sc2-min-cost sym [default 50])
-  (match (and (symbol? sym) (hash-ref SC2-LOTV-COST-TABLE sym (lambda () #f)))
+  (match (sc2-lookup-cost-triple sym)
     [(list m _ _) m]
     [_ default]))
 
 (: sc2-gas-cost (->* (Any) (Integer) Integer))
 (define (sc2-gas-cost sym [default 0])
-  (match (and (symbol? sym) (hash-ref SC2-LOTV-COST-TABLE sym (lambda () #f)))
+  (match (sc2-lookup-cost-triple sym)
     [(list _ g _) g]
     [_ default]))
 
 (: sc2-supply-cost (->* (Any) (Integer) Integer))
 (define (sc2-supply-cost sym [default 1])
-  (match (and (symbol? sym) (hash-ref SC2-LOTV-COST-TABLE sym (lambda () #f)))
+  (match (sc2-lookup-cost-triple sym)
     [(list _ _ s) s]
     [_ default]))
 
 (: sc2-can-afford? (->* (Any Real Real) (Real) Boolean))
 (define (sc2-can-afford? sym minerals gas [supply-left 200])
-  (match (and (symbol? sym) (hash-ref SC2-LOTV-COST-TABLE sym (lambda () #f)))
+  (match (sc2-lookup-cost-triple sym)
     [(list m g s)
      (and (>= minerals m)
           (>= gas g)
@@ -992,7 +1004,7 @@
    'oracle            (hasheq 'max-hp 100 'max-shield 60  'armor 0 'speed 5.60 'ground-dps 24.4 'air-dps 0.0  'ground-range 4.0  'air-range 0.0  'weapon-period 0.61  'damage-point 0.05 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.75)
    'carrier           (hasheq 'max-hp 300 'max-shield 150 'armor 2 'speed 2.62 'ground-dps 37.5 'air-dps 37.5 'ground-range 8.0  'air-range 8.0  'weapon-period 2.14  'damage-point 0.10 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 1.25)
    'interceptor       (hasheq 'max-hp 40  'max-shield 40  'armor 0 'speed 10.5 'ground-dps 5.0  'air-dps 5.0  'ground-range 2.0  'air-range 2.0  'weapon-period 2.14  'damage-point 0.10 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 0.25)
-   'tempest           (hasheq 'max-hp 200 'max-shield 100 'armor 2 'speed 3.15 'ground-dps 16.8 'air-dps 14.3 'ground-range 10.0 'air-range 14.0 'weapon-period 2.36  'damage-point 0.15 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 1.25)
+   'tempest           (hasheq 'max-hp 200 'max-shield 100 'armor 2 'speed 3.15 'ground-dps 16.8 'air-dps 14.3 'ground-range 10.0 'air-range 13.0 'weapon-period 2.36  'damage-point 0.15 'splash-radius 0.0  'flying? #t 'detector? #f 'can-cloak? #f 'radius 1.25)
    'photon-cannon     (hasheq 'max-hp 150 'max-shield 150 'armor 1 'speed 0.0  'ground-dps 22.4 'air-dps 22.4 'ground-range 7.0  'air-range 7.0  'weapon-period 0.89  'damage-point 0.08 'splash-radius 0.0  'flying? #f 'detector? #t 'can-cloak? #f 'radius 1.0)
     'oracle-stasis-trap (hasheq 'max-hp 30  'max-shield 30  'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 4.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 4.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.5  'attribute 'Light)
     'stasis-ward       (hasheq 'max-hp 30  'max-shield 30  'armor 0 'speed 0.0  'ground-dps 0.0  'air-dps 0.0  'ground-range 4.0  'air-range 0.0  'weapon-period 1.0   'damage-point 0.0  'splash-radius 4.0  'flying? #f 'detector? #f 'can-cloak? #t 'radius 0.5  'attribute 'Light)
@@ -1041,9 +1053,35 @@
 (define sc2-unit-combat-stats
   (let ([default-thunk : (-> CombatStatTable) (lambda () DEFAULT-UNIT-COMBAT-STATS)])
     (lambda (sym)
-      (if (symbol? sym)
-          (hash-ref SC2-UNIT-COMBAT-STATS-TABLE sym default-thunk)
-          DEFAULT-UNIT-COMBAT-STATS))))
+      (cond
+        [(not (symbol? sym)) DEFAULT-UNIT-COMBAT-STATS]
+        [(not (unbox SC2-LIVE-DATA-ACTIVE?))
+         (hash-ref SC2-UNIT-COMBAT-STATS-TABLE sym default-thunk)]
+        [else
+         (define cached (hash-ref SC2-LIVE-COMBAT-STATS-CACHE sym (lambda () #f)))
+         (if cached
+             cached
+             (let* ([canon (canonical-unit-type-sym sym)]
+                    [base (hash-ref SC2-UNIT-COMBAT-STATS-TABLE sym default-thunk)]
+                    [rng (or (hash-ref SC2-LIVE-RANGE-OVERLAY sym (lambda () #f))
+                             (and (not (eq? canon sym))
+                                  (hash-ref SC2-LIVE-RANGE-OVERLAY canon (lambda () #f))))]
+                    [spd (or (hash-ref SC2-LIVE-SPEED-OVERLAY sym (lambda () #f))
+                             (and (not (eq? canon sym))
+                                  (hash-ref SC2-LIVE-SPEED-OVERLAY canon (lambda () #f))))]
+                    [arm (or (hash-ref SC2-LIVE-ARMOR-OVERLAY sym (lambda () #f))
+                             (and (not (eq? canon sym))
+                                  (hash-ref SC2-LIVE-ARMOR-OVERLAY canon (lambda () #f))))]
+                    [h1 (if rng
+                            (let* ([gr (car rng)]
+                                   [ar (cdr rng)]
+                                   [b1 (if (fl> gr 0.0) (hash-set base 'ground-range gr) base)])
+                              (if (fl> ar 0.0) (hash-set b1 'air-range ar) b1))
+                            base)]
+                    [h2 (if spd (hash-set h1 'speed spd) h1)]
+                    [h3 (if arm (hash-set h2 'armor arm) h2)])
+               (hash-set! SC2-LIVE-COMBAT-STATS-CACHE sym h3)
+               h3))]))))
 
 (: sc2-unit-can-attack-air? (-> Any Boolean))
 (define sc2-unit-can-attack-air?
@@ -1169,6 +1207,7 @@
   '(marauder
     ghost
     siege-tank
+    cyclone
     thor
     banshee
     raven
@@ -1176,7 +1215,19 @@
 
 (: sc2-unit-requires-techlab? (-> Any Boolean))
 (define (sc2-unit-requires-techlab? sym)
-  (and (symbol? sym) (memq sym SC2-TECHLAB-REQUIRED-UNIT-SYMS) #t))
+  (cond
+    [(not (symbol? sym)) #f]
+    [(unbox SC2-LIVE-DATA-ACTIVE?)
+     (define canon (canonical-unit-type-sym sym))
+     (define live
+       (hash-ref SC2-LIVE-TECHLAB-OVERLAY sym
+                 (lambda ()
+                   (hash-ref SC2-LIVE-TECHLAB-OVERLAY canon (lambda () 'miss)))))
+     (if (boolean? live)
+         live
+         (and (memq canon SC2-TECHLAB-REQUIRED-UNIT-SYMS) #t))]
+    [else
+     (and (memq (canonical-unit-type-sym sym) SC2-TECHLAB-REQUIRED-UNIT-SYMS) #t)]))
 
 (: sc2-enemy-unit-targetable? (-> Any Boolean))
 (define (sc2-enemy-unit-targetable? e)
@@ -2323,7 +2374,14 @@
   (let ([zero-thunk : (-> Fixnum) (lambda () 0)])
     (lambda (unit-type-or-id)
       (define sym (canonical-unit-type-sym unit-type-or-id))
-      (hash-ref SC2-UNIT-ATTRIBUTE-MASK-TABLE sym zero-thunk))))
+      (if (unbox SC2-LIVE-DATA-ACTIVE?)
+          (hash-ref SC2-LIVE-ATTR-OVERLAY sym
+                    (lambda () (hash-ref SC2-UNIT-ATTRIBUTE-MASK-TABLE sym zero-thunk)))
+          (hash-ref SC2-UNIT-ATTRIBUTE-MASK-TABLE sym zero-thunk)))))
+
+(: sc2-unit-attr-has-any? (-> Any Fixnum Boolean))
+(define (sc2-unit-attr-has-any? unit-type-or-id mask)
+  (fx> (fxand (unit-attribute-mask unit-type-or-id) mask) 0))
 
 (: SC2-UNIT-COLLISION-RADIUS-TABLE (Immutable-HashTable Symbol Flonum))
 (define SC2-UNIT-COLLISION-RADIUS-TABLE
@@ -2561,18 +2619,35 @@
     (define raw (hash-ref stats 'armor (lambda () 0)))
     (values k (if (real? raw) (->float raw) 0.0))))
 
+(: sc2-ground-weapon (-> Any (Option sc2-weapon-spec)))
+(define sc2-ground-weapon
+  (let ([false-thunk : (-> False) (lambda () #f)])
+    (lambda (unit-type-or-id)
+      (define sym (canonical-unit-type-sym unit-type-or-id))
+      (or (and (unbox SC2-LIVE-DATA-ACTIVE?)
+               (hash-ref SC2-LIVE-GROUND-WPN-OVERLAY sym false-thunk))
+          (hash-ref SC2-GROUND-WEAPON-TABLE sym false-thunk)))))
+
+(: sc2-air-weapon (-> Any (Option sc2-weapon-spec)))
+(define sc2-air-weapon
+  (let ([false-thunk : (-> False) (lambda () #f)])
+    (lambda (unit-type-or-id)
+      (define sym (canonical-unit-type-sym unit-type-or-id))
+      (or (and (unbox SC2-LIVE-DATA-ACTIVE?)
+               (hash-ref SC2-LIVE-AIR-WPN-OVERLAY sym false-thunk))
+          (hash-ref SC2-AIR-WEAPON-TABLE sym false-thunk)))))
+
 (: select-weapon-spec-for-target (-> Symbol Symbol Boolean (Option sc2-weapon-spec)))
 (define select-weapon-spec-for-target
-  (let ([false-thunk : (-> False) (lambda () #f)])
-    (lambda (atk-sym tgt-sym tgt-flying?)
-      (cond
-        [tgt-flying?
-         (hash-ref SC2-AIR-WEAPON-TABLE atk-sym false-thunk)]
-        [(eq? tgt-sym 'colossus)
-         (or (hash-ref SC2-GROUND-WEAPON-TABLE atk-sym false-thunk)
-             (hash-ref SC2-AIR-WEAPON-TABLE atk-sym false-thunk))]
-        [else
-         (hash-ref SC2-GROUND-WEAPON-TABLE atk-sym false-thunk)]))))
+  (lambda (atk-sym tgt-sym tgt-flying?)
+    (cond
+      [tgt-flying?
+       (sc2-air-weapon atk-sym)]
+      [(eq? tgt-sym 'colossus)
+       (or (sc2-ground-weapon atk-sym)
+           (sc2-air-weapon atk-sym))]
+      [else
+       (sc2-ground-weapon atk-sym)])))
 
 (: SC2-BANELING-STRUCT-WEAPON sc2-weapon-spec)
 (define SC2-BANELING-STRUCT-WEAPON
@@ -2595,7 +2670,11 @@
       (define tgt-sym (canonical-unit-type-sym target-type))
       (define tmask (unit-attribute-mask tgt-sym))
       (define flying? (sc2-unit-is-flying-sym? tgt-sym))
-      (define hull-base (hash-ref SC2-UNIT-HULL-ARMOR-TABLE tgt-sym zero-fl-thunk))
+      (define hull-base
+        (if (unbox SC2-LIVE-DATA-ACTIVE?)
+            (hash-ref SC2-LIVE-ARMOR-OVERLAY tgt-sym
+                      (lambda () (hash-ref SC2-UNIT-HULL-ARMOR-TABLE tgt-sym zero-fl-thunk)))
+            (hash-ref SC2-UNIT-HULL-ARMOR-TABLE tgt-sym zero-fl-thunk)))
       (define spec
         (if (and (eq? atk-sym 'baneling)
                  (fx> (fxand tmask SC2-UNIT-ATTR-STRUCTURE) 0))
@@ -2753,7 +2832,7 @@
     [(neural-parasite)
      (and (fx> mask 0) (not frenzied?) (not struct?) (not heroic?))]
     [(abduct)
-     (and (fx> mask 0) (not frenzied?) (not struct?))]
+     (and (fx> mask 0) (not frenzied?) (not struct?) (not heroic?))]
     [(repair)
      mech?]
     [(transfuse transfusion)
@@ -2762,5 +2841,264 @@
      (and bio? (not struct?))]
     [else
      (fx> mask 0)]))
+
+;; -----------------------------------------------------------------------------
+;; 13. Loop 60 Phase 0: Live Frame-0 `ResponseData` Overlay Store & Query API
+;; -----------------------------------------------------------------------------
+;; Populated once at match start by `register-sc2-response-data!` in
+;; `lib/sc2-protobuf-ws.rkt` using flat primitive arguments (zero Typed/Untyped
+;; chaperone overhead). Cleared cleanly by `reset-sc2-live-game-data!` between
+;; matches and tests so offline unit tests always fall back to static `5.0.14`
+;; defaults when `SC2-LIVE-DATA-ACTIVE?` is `#f`.
+
+(define SC2-LIVE-DATA-ACTIVE?        : (Boxof Boolean) (box #f))
+(define SC2-LIVE-COST-OVERLAY        : (Mutable-HashTable Symbol (List Integer Integer Integer)) (make-hasheq))
+(define SC2-LIVE-RAW-COST-OVERLAY    : (Mutable-HashTable Symbol (List Integer Integer Real))    (make-hasheq))
+(define SC2-LIVE-ATTR-OVERLAY        : (Mutable-HashTable Symbol Fixnum)  (make-hasheq))
+(define SC2-LIVE-TECHLAB-OVERLAY     : (Mutable-HashTable Symbol Boolean) (make-hasheq))
+(define SC2-LIVE-BUILD-TIME-OVERLAY  : (Mutable-HashTable Symbol Integer) (make-hasheq))
+(define SC2-LIVE-RANGE-OVERLAY       : (Mutable-HashTable Symbol (Pairof Flonum Flonum)) (make-hasheq))
+(define SC2-LIVE-SPEED-OVERLAY       : (Mutable-HashTable Symbol Flonum)  (make-hasheq))
+(define SC2-LIVE-ARMOR-OVERLAY       : (Mutable-HashTable Symbol Flonum)  (make-hasheq))
+(define SC2-LIVE-GROUND-WPN-OVERLAY  : (Mutable-HashTable Symbol sc2-weapon-spec) (make-hasheq))
+(define SC2-LIVE-AIR-WPN-OVERLAY     : (Mutable-HashTable Symbol sc2-weapon-spec) (make-hasheq))
+(define SC2-LIVE-COMBAT-STATS-CACHE  : (Mutable-HashTable Symbol CombatStatTable) (make-hasheq))
+(define SC2-LIVE-ABIL-CAST-RANGE     : (Mutable-HashTable Integer Flonum) (make-hasheqv))
+(define SC2-LIVE-ABIL-TARGET-MODE    : (Mutable-HashTable Integer Symbol) (make-hasheqv))
+(define SC2-LIVE-ABIL-AUTOCAST       : (Mutable-HashTable Integer Boolean) (make-hasheqv))
+(define SC2-LIVE-ABIL-REMAP          : (Mutable-HashTable Integer Integer) (make-hasheqv))
+(define SC2-LIVE-UPG-COST-OVERLAY    : (Mutable-HashTable Symbol (List Integer Integer Integer)) (make-hasheq))
+(define SC2-LIVE-UPG-ABIL-OVERLAY    : (Mutable-HashTable Symbol Integer) (make-hasheq))
+(define SC2-LIVE-EFFECT-RADIUS       : (Mutable-HashTable Symbol Flonum)  (make-hasheq))
+
+;; Base-cost subtraction map for SC2 `UnitTypeData` cumulative morph/drone costs:
+;; - Zerg structures include the consumed Drone (`50M / 0G`, keeping `supply = 0`)
+;; - Upgraded structures include their predecessor structure (`supply = 0`)
+;; - Morphed units include their source unit (`min`, `gas`, & `supply`)
+(define SC2-ZERG-DRONE-CONSUMED-STRUCTS : (Listof Symbol)
+  '(hatchery spawning-pool extractor extractor-rich roach-warren baneling-nest
+    evolution-chamber hydralisk-den lurker-den lurker-den-mp spire infestation-pit
+    ultralisk-cavern spine-crawler spore-crawler nydus-network))
+
+(define SC2-UPGRADED-ZERO-SUPPLY-STRUCTS : (Immutable-HashTable Symbol Symbol)
+  (hasheq
+   'lair                'hatchery
+   'hive                'lair
+   'greater-spire       'spire
+   'orbital-command     'command-center
+   'planetary-fortress  'command-center))
+
+(define SC2-UNIT-MORPH-BASE-MAP : (Immutable-HashTable Symbol (U Symbol (List Integer Integer Real)))
+  (let ([ht : (Mutable-HashTable Symbol (U Symbol (List Integer Integer Real))) (make-hasheq)])
+    (for ([s (in-list SC2-ZERG-DRONE-CONSUMED-STRUCTS)])
+      (hash-set! ht s 'drone))
+    (for ([(s base) (in-hash SC2-UPGRADED-ZERO-SUPPLY-STRUCTS)])
+      (hash-set! ht s base))
+    (hash-set! ht 'ravager    'roach)
+    (hash-set! ht 'lurker     'hydralisk)
+    (hash-set! ht 'lurker-mp  'hydralisk)
+    (hash-set! ht 'brood-lord 'corruptor)
+    (hash-set! ht 'overseer   'overlord)
+    (hash-set! ht 'baneling   '(25 0 0.5))
+    (for/hasheq : (Immutable-HashTable Symbol (U Symbol (List Integer Integer Real)))
+                ([(k v) (in-hash ht)])
+      (values k v))))
+
+(: reset-sc2-live-game-data! (-> Void))
+(define (reset-sc2-live-game-data!)
+  (set-box! SC2-LIVE-DATA-ACTIVE? #f)
+  (hash-clear! SC2-LIVE-COST-OVERLAY)
+  (hash-clear! SC2-LIVE-RAW-COST-OVERLAY)
+  (hash-clear! SC2-LIVE-ATTR-OVERLAY)
+  (hash-clear! SC2-LIVE-TECHLAB-OVERLAY)
+  (hash-clear! SC2-LIVE-BUILD-TIME-OVERLAY)
+  (hash-clear! SC2-LIVE-RANGE-OVERLAY)
+  (hash-clear! SC2-LIVE-SPEED-OVERLAY)
+  (hash-clear! SC2-LIVE-ARMOR-OVERLAY)
+  (hash-clear! SC2-LIVE-GROUND-WPN-OVERLAY)
+  (hash-clear! SC2-LIVE-AIR-WPN-OVERLAY)
+  (hash-clear! SC2-LIVE-COMBAT-STATS-CACHE)
+  (hash-clear! SC2-LIVE-ABIL-CAST-RANGE)
+  (hash-clear! SC2-LIVE-ABIL-TARGET-MODE)
+  (hash-clear! SC2-LIVE-ABIL-AUTOCAST)
+  (hash-clear! SC2-LIVE-ABIL-REMAP)
+  (hash-clear! SC2-LIVE-UPG-COST-OVERLAY)
+  (hash-clear! SC2-LIVE-UPG-ABIL-OVERLAY)
+  (hash-clear! SC2-LIVE-EFFECT-RADIUS))
+
+(: register-sc2-live-unit-data!
+   (-> Symbol Integer Integer Real Integer Fixnum Boolean Flonum Flonum Flonum Flonum
+       (Option sc2-weapon-spec) (Option sc2-weapon-spec) Void))
+(define (register-sc2-live-unit-data!
+         raw-sym min-cost gas-cost food-req build-frames attr-mask require-attached?
+         speed armor ground-range air-range ground-wpn air-wpn)
+  (set-box! SC2-LIVE-DATA-ACTIVE? #t)
+  (define canon (canonical-unit-type-sym raw-sym))
+  (hash-set! SC2-LIVE-RAW-COST-OVERLAY canon (list min-cost gas-cost food-req))
+  (unless (eq? raw-sym canon)
+    (hash-set! SC2-LIVE-RAW-COST-OVERLAY raw-sym (list min-cost gas-cost food-req)))
+  (when (fx> attr-mask 0)
+    (define static-mask (hash-ref SC2-UNIT-ATTRIBUTE-MASK-TABLE canon (lambda () 0)))
+    (define preserved-synth
+      (fxand static-mask (fxior SC2-UNIT-ATTR-SHIELDED SC2-UNIT-ATTR-FRENZIED)))
+    (define eff-mask (fxior attr-mask preserved-synth))
+    (hash-set! SC2-LIVE-ATTR-OVERLAY canon eff-mask)
+    (unless (eq? raw-sym canon)
+      (hash-set! SC2-LIVE-ATTR-OVERLAY raw-sym eff-mask)))
+  (hash-set! SC2-LIVE-TECHLAB-OVERLAY canon require-attached?)
+  (unless (eq? raw-sym canon)
+    (hash-set! SC2-LIVE-TECHLAB-OVERLAY raw-sym require-attached?))
+  (when (> build-frames 0)
+    (hash-set! SC2-LIVE-BUILD-TIME-OVERLAY canon build-frames)
+    (unless (eq? raw-sym canon)
+      (hash-set! SC2-LIVE-BUILD-TIME-OVERLAY raw-sym build-frames)))
+  (when (or (fl> ground-range 0.0) (fl> air-range 0.0))
+    (define rng-pair (cons ground-range air-range))
+    (hash-set! SC2-LIVE-RANGE-OVERLAY canon rng-pair)
+    (unless (eq? raw-sym canon)
+      (hash-set! SC2-LIVE-RANGE-OVERLAY raw-sym rng-pair)))
+  (when (fl> speed 0.0)
+    (hash-set! SC2-LIVE-SPEED-OVERLAY canon speed)
+    (unless (eq? raw-sym canon)
+      (hash-set! SC2-LIVE-SPEED-OVERLAY raw-sym speed)))
+  (when (fl>= armor 0.0)
+    (hash-set! SC2-LIVE-ARMOR-OVERLAY canon armor)
+    (unless (eq? raw-sym canon)
+      (hash-set! SC2-LIVE-ARMOR-OVERLAY raw-sym armor)))
+  (when ground-wpn
+    (hash-set! SC2-LIVE-GROUND-WPN-OVERLAY canon ground-wpn)
+    (unless (eq? raw-sym canon)
+      (hash-set! SC2-LIVE-GROUND-WPN-OVERLAY raw-sym ground-wpn)))
+  (when air-wpn
+    (hash-set! SC2-LIVE-AIR-WPN-OVERLAY canon air-wpn)
+    (unless (eq? raw-sym canon)
+      (hash-set! SC2-LIVE-AIR-WPN-OVERLAY raw-sym air-wpn)))
+  (hash-remove! SC2-LIVE-COMBAT-STATS-CACHE canon)
+  (hash-remove! SC2-LIVE-COMBAT-STATS-CACHE raw-sym))
+
+(: lookup-raw-or-static-base-cost (-> Symbol (List Integer Integer Real)))
+(define (lookup-raw-or-static-base-cost base-sym)
+  (or (hash-ref SC2-LIVE-RAW-COST-OVERLAY base-sym (lambda () #f))
+      (let ([st (hash-ref SC2-LOTV-COST-TABLE base-sym (lambda () #f))])
+        (if st
+            (list (first st) (second st) (third st))
+            '(0 0 0)))))
+
+(: finalize-sc2-live-unit-costs! (-> Void))
+(define (finalize-sc2-live-unit-costs!)
+  (hash-clear! SC2-LIVE-COST-OVERLAY)
+  (for ([(sym raw-triple) (in-hash SC2-LIVE-RAW-COST-OVERLAY)])
+    (define raw-min (first raw-triple))
+    (define raw-gas (second raw-triple))
+    (define raw-food (third raw-triple))
+    (define static-entry (hash-ref SC2-LOTV-COST-TABLE sym (lambda () #f)))
+    (cond
+      ;; Special-case Zergling pair trained from 1 Larva (50M / 0G / 1 supply)
+      [(eq? sym 'zergling)
+       (define eff-min (if (and (= raw-min 25) (= raw-food 0.5)) 50 raw-min))
+       (define eff-gas (if (and (= raw-min 25) (= raw-food 0.5)) (* 2 raw-gas) raw-gas))
+       (define eff-sup (if (= raw-food 0.5) 1 (max 0 (exact-round raw-food))))
+       (hash-set! SC2-LIVE-COST-OVERLAY sym (list eff-min eff-gas eff-sup))]
+      ;; Guard against zero-cost UnitTypeData entries (e.g. Archon 0/0/4, cocoons) clobbering static costs
+      [(and (= raw-min 0) (= raw-gas 0)
+            static-entry
+            (or (> (first static-entry) 0) (> (second static-entry) 0)))
+       (when (> raw-food 0)
+         (hash-set! SC2-LIVE-COST-OVERLAY sym
+                    (list (first static-entry) (second static-entry) (max 0 (exact-round raw-food)))))]
+      [else
+       (define morph-base (hash-ref SC2-UNIT-MORPH-BASE-MAP sym (lambda () #f)))
+       (cond
+         [(not morph-base)
+          (hash-set! SC2-LIVE-COST-OVERLAY sym
+                     (list (max 0 raw-min)
+                           (max 0 raw-gas)
+                           (max 0 (exact-round raw-food))))]
+         [(symbol? morph-base)
+          (define base-cost (lookup-raw-or-static-base-cost morph-base))
+          (define struct-zero-sup?
+            (or (and (memq sym SC2-ZERG-DRONE-CONSUMED-STRUCTS) #t)
+                (hash-has-key? SC2-UPGRADED-ZERO-SUPPLY-STRUCTS sym)))
+          (define inc-min (max 0 (- raw-min (first base-cost))))
+          (define inc-gas (max 0 (- raw-gas (second base-cost))))
+          (define inc-sup
+            (if struct-zero-sup?
+                0
+                (max 0 (exact-round (- raw-food (third base-cost))))))
+          (hash-set! SC2-LIVE-COST-OVERLAY sym (list inc-min inc-gas inc-sup))]
+         [else
+          (define inc-min (max 0 (- raw-min (first morph-base))))
+          (define inc-gas (max 0 (- raw-gas (second morph-base))))
+          (define inc-sup (max 0 (exact-round (- raw-food (third morph-base)))))
+          (hash-set! SC2-LIVE-COST-OVERLAY sym (list inc-min inc-gas inc-sup))])])))
+
+(: register-sc2-live-ability-data! (-> Integer Symbol Flonum Boolean Integer Void))
+(define (register-sc2-live-ability-data! ab-id target-sym cast-range allow-autocast? remaps-to)
+  (when (> ab-id 0)
+    (set-box! SC2-LIVE-DATA-ACTIVE? #t)
+    (unless (eq? target-sym 'unknown)
+      (hash-set! SC2-LIVE-ABIL-TARGET-MODE ab-id target-sym))
+    (when (fl> cast-range 0.0)
+      (hash-set! SC2-LIVE-ABIL-CAST-RANGE ab-id cast-range))
+    (hash-set! SC2-LIVE-ABIL-AUTOCAST ab-id allow-autocast?)
+    (when (> remaps-to 0)
+      (hash-set! SC2-LIVE-ABIL-REMAP ab-id remaps-to))))
+
+(: register-sc2-live-upgrade-data! (-> Symbol Integer Integer Integer Integer Void))
+(define (register-sc2-live-upgrade-data! upg-sym min-cost gas-cost research-frames ab-id)
+  (set-box! SC2-LIVE-DATA-ACTIVE? #t)
+  (when (or (> min-cost 0) (> gas-cost 0) (> research-frames 0))
+    (hash-set! SC2-LIVE-UPG-COST-OVERLAY upg-sym
+               (list (max 0 min-cost) (max 0 gas-cost) (max 0 research-frames))))
+  (when (> ab-id 0)
+    (hash-set! SC2-LIVE-UPG-ABIL-OVERLAY upg-sym ab-id)))
+
+(: register-sc2-live-effect-data! (-> Symbol Flonum Void))
+(define (register-sc2-live-effect-data! eff-sym radius)
+  (when (fl> radius 0.0)
+    (set-box! SC2-LIVE-DATA-ACTIVE? #t)
+    (hash-set! SC2-LIVE-EFFECT-RADIUS eff-sym radius)))
+
+(: sc2-ability-cast-range (->* (Integer) (Flonum) Flonum))
+(define (sc2-ability-cast-range ab-id [default 0.0])
+  (if (unbox SC2-LIVE-DATA-ACTIVE?)
+      (hash-ref SC2-LIVE-ABIL-CAST-RANGE ab-id (lambda () default))
+      default))
+
+(: sc2-ability-live-target-mode (-> Integer (Option Symbol)))
+(define (sc2-ability-live-target-mode ab-id)
+  (and (unbox SC2-LIVE-DATA-ACTIVE?)
+       (hash-ref SC2-LIVE-ABIL-TARGET-MODE ab-id (lambda () #f))))
+
+(: sc2-ability-live-autocast? (-> Integer Boolean))
+(define (sc2-ability-live-autocast? ab-id)
+  (and (unbox SC2-LIVE-DATA-ACTIVE?)
+       (hash-ref SC2-LIVE-ABIL-AUTOCAST ab-id (lambda () #f))))
+
+(: sc2-ability-live-remap (-> Integer (Option Integer)))
+(define (sc2-ability-live-remap ab-id)
+  (and (unbox SC2-LIVE-DATA-ACTIVE?)
+       (hash-ref SC2-LIVE-ABIL-REMAP ab-id (lambda () #f))))
+
+(: sc2-live-effect-radius (->* (Symbol) (Flonum) Flonum))
+(define (sc2-live-effect-radius eff-sym [default 0.0])
+  (if (unbox SC2-LIVE-DATA-ACTIVE?)
+      (hash-ref SC2-LIVE-EFFECT-RADIUS eff-sym (lambda () default))
+      default))
+
+(: sc2-unit-build-frames (->* (Symbol) (Integer) Integer))
+(define (sc2-unit-build-frames sym [default 0])
+  (if (unbox SC2-LIVE-DATA-ACTIVE?)
+      (let ([canon (canonical-unit-type-sym sym)])
+        (hash-ref SC2-LIVE-BUILD-TIME-OVERLAY sym
+                  (lambda ()
+                    (hash-ref SC2-LIVE-BUILD-TIME-OVERLAY canon (lambda () default)))))
+      default))
+
+(: sc2-upgrade-research-ability-id (-> Symbol (Option Integer)))
+(define (sc2-upgrade-research-ability-id upg-sym)
+  (and (unbox SC2-LIVE-DATA-ACTIVE?)
+       (hash-ref SC2-LIVE-UPG-ABIL-OVERLAY upg-sym (lambda () #f))))
+
 
 

@@ -20,26 +20,50 @@
  verify-sc2-request-bytes
  verify-sc2-action-bytes
  verify-sc2-point2d-bytes
- verify-sc2-point-bytes)
+ verify-sc2-point-bytes
+ register-verifier-live-ability-mode!
+ reset-verifier-live-ability-modes!)
 
 ;; =============================================================================
-;; 1. Independent LotV `ability_id` Target-Mode & Autocast Tables
+;; 1. Independent LotV `ability_id` Target-Mode & Autocast Tables (`hasheqv`)
 ;; =============================================================================
 
-(define VERIFIER-ABILITY-VEC-SIZE 4200)
 (define VERIFIER-MAX-UINT32 #xFFFFFFFF)
 (define VERIFIER-MAX-INT32  #x7FFFFFFF)
 (define VERIFIER-MAX-UINT64 #xFFFFFFFFFFFFFFFF)
 (define VERIFIER-MAX-FIELD  #x1FFFFFFF)
 
-(define ABILITY-TARGET-MODE-VEC (make-vector VERIFIER-ABILITY-VEC-SIZE #f))
-(define AUTOCAST-ALLOWED-VEC    (make-vector VERIFIER-ABILITY-VEC-SIZE #f))
+(define ABILITY-TARGET-MODE-HT      (make-hasheqv))
+(define AUTOCAST-ALLOWED-HT         (make-hasheqv))
+(define LIVE-ABILITY-TARGET-MODE-HT (make-hasheqv))
+(define LIVE-AUTOCAST-ALLOWED-HT    (make-hasheqv))
+
+(define (register-verifier-live-ability-mode! ab-id target-sym allow-autocast?)
+  (when (and (exact-integer? ab-id) (> ab-id 0))
+    (unless (or (= ab-id 1766)
+                (hash-has-key? ABILITY-TARGET-MODE-HT ab-id))
+      (define mapped-mode
+        (case target-sym
+          [(none strict-no-target)       'strict-no-target]
+          [(point point-only strict-point) 'strict-point]
+          [(unit unit-only strict-unit)  'strict-unit]
+          [(point-or-unit)               'point-or-unit]
+          [(point-or-none)               'point-or-none]
+          [else #f]))
+      (when mapped-mode
+        (hash-set! LIVE-ABILITY-TARGET-MODE-HT ab-id mapped-mode)))
+    (when allow-autocast?
+      (hash-set! LIVE-AUTOCAST-ALLOWED-HT ab-id #t))))
+
+(define (reset-verifier-live-ability-modes!)
+  (hash-clear! LIVE-ABILITY-TARGET-MODE-HT)
+  (hash-clear! LIVE-AUTOCAST-ALLOWED-HT))
 
 (let ([register-mode!
        (lambda (mode ids)
          (for ([id (in-list ids)])
-           (when (and (> id 0) (< id VERIFIER-ABILITY-VEC-SIZE))
-             (vector-set! ABILITY-TARGET-MODE-VEC id mode))))])
+           (when (> id 0)
+             (hash-set! ABILITY-TARGET-MODE-HT id mode))))])
   ;; 1A. Strict NoTarget abilities (excludes 1766 MORPH_ARCHON)
   (register-mode!
    'strict-no-target
@@ -128,7 +152,7 @@
 
   ;; 1G. Autocast toggleable abilities
   (for ([id (in-list '(78 316 386 1042 1819 1990 2099 2328 2350 2704 3685 4113))])
-    (vector-set! AUTOCAST-ALLOWED-VEC id #t)))
+    (hash-set! AUTOCAST-ALLOWED-HT id #t)))
 
 ;; =============================================================================
 ;; 2. Clean-Room Binary Protobuf Wire Reader
@@ -329,10 +353,12 @@
           (cond
             [(not has-ab?)
              (values #f 'unit-cmd-missing-ability-id)]
-            [(or (<= ab-id 0) (>= ab-id VERIFIER-ABILITY-VEC-SIZE))
+            [(<= ab-id 0)
              (values #f 'unit-cmd-unrecognized-ability-id)]
             [else
-             (define mode (vector-ref ABILITY-TARGET-MODE-VEC ab-id))
+             (define mode
+               (hash-ref LIVE-ABILITY-TARGET-MODE-HT ab-id
+                         (lambda () (hash-ref ABILITY-TARGET-MODE-HT ab-id #f))))
              (define tags (reverse rev-tags))
              (cond
                [(not mode)
@@ -444,8 +470,8 @@
             [(not has-ab?)
              (values #f 'autocast-missing-ability-id)]
             [(or (<= ab-id 0)
-                 (>= ab-id VERIFIER-ABILITY-VEC-SIZE)
-                 (not (vector-ref AUTOCAST-ALLOWED-VEC ab-id)))
+                 (not (or (hash-ref LIVE-AUTOCAST-ALLOWED-HT ab-id #f)
+                          (hash-ref AUTOCAST-ALLOWED-HT ab-id #f))))
              (values #f 'autocast-invalid-ability-id)]
             [(not (strictly-unique-positive-u64-tags? tags))
              (values #f 'autocast-invalid-or-duplicate-unit-tags)]

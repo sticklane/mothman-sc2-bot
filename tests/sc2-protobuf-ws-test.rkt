@@ -7962,9 +7962,9 @@
          (append
           (for/list ([k (in-range 14)])
             (mark-urgent-survival-cmd!
-             (sc2-raw-unit-command 23 (sc2-point2d (+ 20.0 k) 20.0) 0 (list (+ 15400 k)) #f)))
+             (sc2-raw-unit-command 407 #f 15999 (list (+ 15400 k)) #f)))
           (list (mark-urgent-survival-cmd!
-                 (sc2-raw-unit-command 16 (sc2-point2d 40.5 40.5) 0 '(15301) #f))))
+                 (sc2-raw-unit-command 407 #f 15999 '(15301) #f))))
          14016 obs-35d0))
   ;; At `14020` (`+1.22 -> -1.90`), emit 1 same-selection urgent cmd on `'(15301)` (`1 ev -> -2.90`).
   ;; At `14024` (`+1.22 -> -1.68`, `cur-sel = '(15301)`, `24f` retry window!), room for ONLY ONE
@@ -7972,7 +7972,7 @@
   (void (govern-sc2-wire-actions!
          gov-35d
          (list (mark-urgent-survival-cmd!
-                (sc2-raw-unit-command 16 (sc2-point2d 42.5 42.5) 0 '(15301) #f)))
+                (sc2-raw-unit-command 407 #f 15999 '(15301) #f)))
          14020 obs-35d0))
   (define obs-35d1 (make-test-obs 14024 600 200 (list cc-35a sp-sel)))
   (define out-35d
@@ -12040,7 +12040,7 @@
   (define l59-raw-cam (sc2-raw-camera-move 50.0 50.0 0.0))
   (define l59-pro-cam (mark-pro-camera-jump-cmd! (sc2-raw-camera-move 50.0 50.0 0.0)))
   (check-true "l59-w1-pro-apm-governor-defaults-and-dedup-dist"
-              (and (= (wire-apm-governor-target-apm l59-gov) 495.0)
+              (and (= (wire-apm-governor-target-apm l59-gov) 530.0)
                    (= (wire-apm-governor-hard-cap-apm l59-gov) 595.0)
                    (= (wire-apm-governor-burst-capacity l59-gov) 36.0)
                    (= SC2-CAMERA-MOVE-DEDUP-DIST 8.0)
@@ -12829,7 +12829,101 @@
                    (equal? l59c-tvz-lurker-latched '(99802))
                    (equal? l59c-tvp-2oc-sat '(99802))
                    (null? l59c-t10-sat)
-                   (null? l59c-t10-casec))))
+                   (null? l59c-t10-casec)))
+
+  ;; ===========================================================================
+  ;; Loop 60 Wire Fixes (`L60-GOV-ANTIDT`, `#1580`/`#1582`):
+  ;;   17. APM Governor P1 Purification & P0 Spell Protection (`3685` Repair P2 + coalesce +
+  ;;       12f dedup; `3678` Land P2 + unchanged backoff; `framing-camera` P2; routine midgame
+  ;;       `3666` P3; non-urgent P0 spell `-3.0` survives after urgent `23/16` capped at `-2.0`;
+  ;;       `p2-large` stops at `0.0`; `target-apm = 530.0`) + Anti-DT 2-OC Scan on scouted
+  ;;       WarpPrism / DarkShrine / DarkTemplar (`#74 TvP who`)!
+  ;; ===========================================================================
+  (printf "[Loop 60 Wire] Testing #1580 APM governor P1 purification, P0 spell protection, & Anti-DT 2-OC scan...\n")
+  ;; (a) Tier purification: Repair 3685/316 -> P2, Land 3678 -> P2, framing-camera -> P2, queued 3666 -> P3,
+  ;;     and routine midgame idle-worker 3666 (loop > 2688) -> P3 (NOT P1)!
+  (define l60-rep-a (sc2-raw-unit-command 3685 #f 99901 '(99911) #f))
+  (define l60-rep-b (sc2-raw-unit-command 3685 #f 99901 '(99912) #f))
+  (define l60-land  (sc2-raw-unit-command 3678 (sc2-point2d 42.0 42.0) 0 '(99913) #f))
+  (define l60-fcam  (mark-framing-camera-cmd! (sc2-raw-camera-move 60.0 60.0 0.0) 24.0))
+  (define l60-q3666 (sc2-raw-unit-command 3666 #f 99808 '(99914) #t))
+  (define l60-idle-late-scv (mk-l59-u 99915 45 1 28.0 30.0 #:hp 45.0 #:en 0.0 #:en-max 0.0))
+  (define l60-idle-late-cmds
+    (saturate-workers-and-gas-commands
+     (make-test-obs 4000 200 100 (list l59c-oc1-65 l59c-min1 l60-idle-late-scv))
+     #:game-info l59c-gi-t))
+  (define l60-idle-late-3666
+    (findf (lambda (c) (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-ability-id c) 3666)
+                            (equal? (sc2-raw-unit-command-unit-tags c) '(99915))))
+           l60-idle-late-cmds))
+  ;; (b) Repair 3685 coalesces multi-SCV commands on same target AND dedupes identical repeat < 12f with 0 APM drops!
+  (define l60-gov-rep (make-wire-apm-governor))
+  (define l60-rep-out1 (govern-sc2-wire-actions! l60-gov-rep (list l60-rep-a l60-rep-b) 3000))
+  (define l60-rep-out2 (govern-sc2-wire-actions! l60-gov-rep (list l60-rep-a l60-rep-b) 3008)) ;; +8f < 12f -> deduped!
+  (define l60-rep-out3 (govern-sc2-wire-actions! l60-gov-rep (list l60-rep-a l60-rep-b) 3012)) ;; +12f >= 12f -> allowed!
+  (define l60-rep-drops (hash-ref (get-wire-apm-drop-stats l60-gov-rep) 'total -1))
+  ;; (c) Land 3678 gets unchanged-repeat backoff (`24f`) when flying Barracks remains unchanged in obs!
+  (define l60-fly-rax (mk-l59-u 99913 46 1 42.0 42.0 #:hp 1000.0 #:en 0.0 #:en-max 0.0 #:fly #t))
+  (define l60-gov-land (make-wire-apm-governor))
+  (define l60-land-obs1 (make-test-obs 3100 200 100 (list l60-fly-rax)))
+  (define l60-land-obs2 (make-test-obs 3108 200 100 (list l60-fly-rax)))
+  (define l60-land-out1 (govern-sc2-wire-actions! l60-gov-land (list l60-land) 3100 l60-land-obs1))
+  (define l60-land-out2 (govern-sc2-wire-actions! l60-gov-land (list l60-land) 3108 l60-land-obs2))
+  ;; (d) P0 Spell Protection: urgent `23/16` caps overdraft at `-2.0` so non-urgent P0 spell `251` Inject (`-3.0`)
+  ;;     STILL FIRES cleanly right after an urgent `23` burst!
+  (define l60-gov-p0 (make-wire-apm-governor #:target-apm 200.0 #:hard-cap-apm 500.0 #:burst-capacity 4.0))
+  (define l60-p0-batch
+    (list (mark-urgent-survival-cmd! (sc2-raw-unit-command 23 (sc2-point2d 50.0 50.0) 0 '(99921) #f))
+          (mark-urgent-survival-cmd! (sc2-raw-unit-command 23 (sc2-point2d 52.0 50.0) 0 '(99922) #f))
+          (mark-urgent-survival-cmd! (sc2-raw-unit-command 23 (sc2-point2d 54.0 50.0) 0 '(99923) #f))
+          (mark-urgent-survival-cmd! (sc2-raw-unit-command 23 (sc2-point2d 56.0 50.0) 0 '(99924) #f)) ;; blocked at -2.0!
+          (sc2-raw-unit-command 251 #f 99999 '(99925) #f))) ;; Inject Larva (non-urgent P0) fires at -3.0!
+  ;; Note: init tokens=4.0, 3 urgent 23 cmds cost 2+2+2=6 -> tokens=-2.0; 4th urgent 23 would hit -4.0 < -2.0 (blocked),
+  ;; while 251 with same-sel or fresh? Wait: 251 with fresh tags costs 2 -> -2.0 - 2 = -4.0 < -3.0; if tokens starts at 5.0
+  ;; (or 3 urgent cmds take 6 -> -1.0), 4th urgent (-1-2=-3 < -2) is BLOCKED and 251 (-1-2=-3 >= -3.0) FIRES!
+  (define l60-gov-p0b (make-wire-apm-governor #:target-apm 200.0 #:hard-cap-apm 500.0 #:burst-capacity 5.0))
+  (define l60-p0-out (govern-sc2-wire-actions! l60-gov-p0b l60-p0-batch 3200))
+  (define l60-p0-has-inject?
+    (ormap (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 251))) l60-p0-out))
+  (define l60-p0-urgent-cnt
+    (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23))) l60-p0-out))
+  ;; (e) Anti-DT 2-OC Scan (`#74 TvP who`): scouted WarpPrism (81) in TvP expands 2-OC scan reserve to BOTH OCs!
+  (define l60-ewp (mk-l59-u 99930 81 4 90.0 90.0 #:hp 80.0 #:sh 100.0 #:en 0.0 #:en-max 0.0 #:fly #t))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l59c-min1)) #:game-info l59c-gi-p))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l59c-min1)) #:game-info l59c-gi-p))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define l60-tvp-wp-sat
+    (l59c-mule-tags (saturate-workers-and-gas-commands
+                     (make-test-obs 5150 200 100 (append (list l59c-oc1-65 l59c-oc2-55 l59c-rax l59c-min1 l59c-min2 l60-ewp) l59c-scvs12 l59c-mars6))
+                     #:game-info l59c-gi-p)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define l60-tvp-wp-casec
+    (l59c-mule-tags (translate-bot-actions->sc2-raw-commands
+                     '((cast-spell (99801 99802) calldown-mule 99808))
+                     (make-test-obs 5180 200 100 (append (list l59c-oc1-65 l59c-oc2-55 l59c-rax l59c-min1 l59c-min2) l59c-scvs12 l59c-mars6))
+                     #:game-info l59c-gi-p)))
+  ;; Clean final rewind
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l59c-min1))))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list l59c-min1))))
+  (check-true "l60-apm-gov-p1-purification-p0-spell-protection-and-anti-dt-2oc-scan"
+              (and (= (wire-cmd-priority-tier l60-rep-a) 2)
+                   (= (wire-cmd-priority-tier l60-land) 2)
+                   (= (wire-cmd-priority-tier l60-fcam) 2)
+                   (= (wire-cmd-priority-tier l60-q3666) 3)
+                   (sc2-raw-unit-command? l60-idle-late-3666)
+                   (= (wire-cmd-priority-tier l60-idle-late-3666) 3)
+                   (= (length l60-rep-out1) 1)
+                   (equal? (sort (sc2-raw-unit-command-unit-tags (first l60-rep-out1)) <) '(99911 99912))
+                   (null? l60-rep-out2)
+                   (= (length l60-rep-out3) 1)
+                   (= l60-rep-drops 0)
+                   (= (length l60-land-out1) 1)
+                   (null? l60-land-out2)
+                   (= l60-p0-urgent-cnt 2)
+                   l60-p0-has-inject?
+                   (null? l60-tvp-wp-sat)
+                   (null? l60-tvp-wp-casec))))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"

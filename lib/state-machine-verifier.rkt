@@ -1731,7 +1731,7 @@
        pm))
     (define u-expand
       (compute-candidate-marginal-utility
-       (priority-candidate 'hatchery 'expansion '(expand 50.5 56.5) 300 0 0 0.0 'medium #f)
+       (priority-candidate 'hatchery 'expansion '(expand 50.5 56.5) 275 0 0 0.0 'medium #f)
        pm))
     (define expected-method
       (cond

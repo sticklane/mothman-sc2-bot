@@ -12,7 +12,9 @@
          (except-in "sc2-common.rkt" unit-type-sym)
          "sc2-bayesian.rkt"
          "sc2-game-constants.rkt"
-         (only-in "sc2-protobuf-ws.rkt" sc2-ability-live-available?)
+         (only-in "sc2-protobuf-ws.rkt"
+                  sc2-ability-live-available?
+                  sc2-upgrade-defined-in-live-data?)
          (prefix-in geo: (except-in "sc2-geometry.rkt" aabb-overlaps?))
          (prefix-in pathing: "sc2-pathing.rkt")
          (prefix-in placement: "sc2-placement.rkt")
@@ -5289,7 +5291,12 @@
   (define frame (l2-ctx-frame ctx))
   (define oledger (l2-ctx-oledger ctx))
   (define researched-upgs (l2-ctx-researched-upgs ctx))
-    (and (not (memq upg-sym researched-upgs))
+    (and (not (eq? upg-sym 'pathogen-glands))
+         ;; Phase 0 Patch Resilience: when live ResponseData is loaded (`'stimpack` is always
+         ;; defined in every SC2 build), skip upgrades absent from the live server's upgrade table.
+         (or (not (sc2-upgrade-defined-in-live-data? 'stimpack))
+             (sc2-upgrade-defined-in-live-data? upg-sym))
+         (not (memq upg-sym researched-upgs))
          (not (memq upg-sym (l2-ctx-pending-upgs ctx)))
          (= (order-ledger-pending-count-for-type oledger upg-sym frame) 0)))
 
@@ -5759,7 +5766,7 @@
            [(centrifical-hooks) 'baneling-nest]
            [(grooved-spines muscular-augments) 'hydralisk-den]
            [(lurker-range seismic-spines adaptive-talons) 'lurker-den]
-           [(neural-parasite pathogen-glands) 'infestation-pit]
+           [(neural-parasite) 'infestation-pit]
            [(chitinous-plating anabolic-synthesis) 'ultralisk-cavern]
            [(zerg-flyer-weapons-1 zerg-flyer-weapons-2 zerg-flyer-weapons-3
              zerg-flyer-armor-1 zerg-flyer-armor-2 zerg-flyer-armor-3) 'spire]
@@ -32717,6 +32724,7 @@
                 #:effects effects
                 #:researched-upgrades researched-upgs
                 #:neural-parasite-researched? (l34-has-upgrade? ctx 'neural-parasite)
+                #:microbial-shroud-ok? (sc2-ability-live-available? 4111)
                 #:home-x hx
                 #:home-y hy
                 #:enemy-base-x (exact->inexact enemy-x)
@@ -34541,10 +34549,12 @@
   (let ([sc-r (l34-ctx-l34-sc ctx)])
     (when (hash? sc-r)
       (hash-set! sc-r 'l59-p7-reserved-harass-tags (mutable-seteqv))))
-  ;; L59-P3 + L59C (`#1566` Fix #1): Pre-Phase-5b Destructible Rock Breach (`nc-09`),
-  ;; Collapsible Rockslide Seal (`nc-10`), & Post-Clear Follow-Through (`nc-07`/`nc-08`).
-  ;; Strictly gated to `(not has-th-rk?)` (0-townhall Arena drills ONLY — ZERO live full-match
-  ;; combat steals onto Destructible* rocks or Collapsible* towers!).
+  ;; L59-P3 + L59C (`#1566` Fix #1) + L60 (`sc2-nc-09` restore): Pre-Phase-5b Destructible Rock
+  ;; Breach (`nc-09`), Collapsible Rockslide Seal (`nc-10`), & Post-Clear Follow-Through (`nc-07`/`nc-08`).
+  ;; Strictly gated to `(not has-th-rk?)` where `has-th-rk?` means a LIVE-ECONOMY base (`>= 2` ally
+  ;; buildings OR `>= 2` townhalls OR `>= 3` workers within `16.0t` of our townhall — true from frame `0`
+  ;; in live full matches with 12 starting workers, while `#f` in 0-TH unit tests AND isolated Arena
+  ;; drills that keep 1 hidden starting TownHall far away at spawn with `0..1` nearby workers!).
   (let* ([obs-rk (l34-ctx-obs ctx)]
          [neutrals-rk (let ([v (and (hash? obs-rk) (hash-ref obs-rk 'neutral-units '()))])
                         (if (list? v) v '()))]
@@ -34552,11 +34562,40 @@
          [dst-rk (and rt-rk (rt-door-state rt-rk))]
          [fr-rk (l34-ctx-frame ctx)]
          [ab-rk (or (l34-ctx-ally-bldgs ctx) '())]
+         [th-list-rk
+          (for/list ([b (in-list ab-rk)]
+                     #:when (and (hash? b)
+                                 (memq (fast-canonical-structure-sym (unit-type-sym b))
+                                       '(hatchery lair hive nexus command-center orbital-command planetary-fortress))))
+            b)]
          [has-th-rk?
-          (for/or ([b (in-list ab-rk)])
-            (and (hash? b)
-                 (memq (fast-canonical-structure-sym (unit-type-sym b))
-                       '(hatchery lair hive nexus command-center orbital-command planetary-fortress))))])
+          (and (pair? th-list-rk)
+               (or (> (length ab-rk) 1)
+                   (> (length th-list-rk) 1)
+                   (for/or ([b (in-list th-list-rk)])
+                     (memq (fast-canonical-structure-sym (unit-type-sym b))
+                           '(orbital-command planetary-fortress lair hive)))
+                   (let ([mh (if (hash? obs-rk) (safe-finite-real (hash-ref obs-rk 'mineral-harvesters 0) 0) 0)]
+                         [gh (if (hash? obs-rk)
+                                 (safe-finite-real (hash-ref obs-rk 'vespene-harvesters
+                                                             (hash-ref obs-rk 'gas-harvesters 0))
+                                                   0)
+                                 0)])
+                     (>= (+ mh gh) 3))
+                   (let* ([th0 (car th-list-rk)]
+                          [tx (exact->inexact (hash-ref th0 'x 0.0))]
+                          [ty (exact->inexact (hash-ref th0 'y 0.0))]
+                          [near-w
+                           (count (lambda (u)
+                                    (and (hash? u)
+                                         (memq (unit-type-sym u) '(probe scv drone))
+                                         (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f))
+                                         (fl<= (fast-dist2d tx ty
+                                                            (exact->inexact (hash-ref u 'x 9999.0))
+                                                            (exact->inexact (hash-ref u 'y 9999.0)))
+                                               16.0)))
+                                  (or (l34-ctx-ally-units ctx) '()))])
+                     (>= near-w 3))))])
     (when (and (hash? dst-rk) (< fr-rk (hash-ref dst-rk 'l59-prev-barrier-frame -1)))
       (hash-set! dst-rk 'l59-prev-barrier-cnt 0)
       (hash-set! dst-rk 'l59-barrier-cleared-until -1)
@@ -34798,7 +34837,21 @@
                 u))
             (for ([u (in-list (take rk-clearers (min 12 (length rk-clearers))))])
               (define uid (hash-ref u 'id))
+              (define ut (unit-type-sym u))
               (set-add! w3-rk uid)
+              ;; L60 (`sc2-nc-09`): Pop Stimpack on healthy unstimmed Bio rock-clearers in isolated
+              ;; Arena breach drills when Stim is researched, accelerating clear time under 20s!
+              (when (and (not has-th-rk?)
+                         (memq ut '(marine marauder))
+                         (l34-has-upgrade? ctx 'stimpack)
+                         (fl>= (exact->inexact (hash-ref u 'hp 0.0))
+                               (exact->inexact SC2-MARINE-STIM-MIN-HP)))
+                (let ([ub (hash-ref u 'buffs '())])
+                  (when (and (not (memq 'stimpack ub))
+                             (not (memq 'stimpack-marauder ub))
+                             (not (memv 24 ub))
+                             (not (memv 27 ub)))
+                    (l34-emit-preserved! ctx (list 'cast-spell uid 'stimpack)))))
               (unless (or (eqv? (hash-ref u 'order-target-tag 0) rid)
                           (eqv? (hash-ref u 'engaged-target-tag 0) rid))
                 (l34-emit-preserved! ctx (list 'attack-unit uid rid)))))))

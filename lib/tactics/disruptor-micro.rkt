@@ -6,7 +6,7 @@
 ;; Comprehensive Offensive & Defensive Micro Module (Typed Racket):
 ;;
 ;; Offensive Micro:
-;;   - `plan-disruptor-nova-casts`     : Ground-cluster optimization, 145 (+55 shield)
+;;   - `plan-disruptor-nova-casts`     : Ground-cluster optimization, 100 (+200 shield)
 ;;                                       splash scoring, 2.0x friendly-fire guard,
 ;;                                       min-value gate, reach clamp, >= 4.0-tile
 ;;                                       volley de-confliction across casters/Novas
@@ -504,10 +504,10 @@
 (define DISRUPTOR-NOVA-FF-COMBAT-COUNT-RADIUS 2.0)
 
 (: DISRUPTOR-NOVA-BASE-DAMAGE Float)
-(define DISRUPTOR-NOVA-BASE-DAMAGE 145.0)
+(define DISRUPTOR-NOVA-BASE-DAMAGE 100.0)
 
 (: DISRUPTOR-NOVA-SHIELD-BONUS Float)
-(define DISRUPTOR-NOVA-SHIELD-BONUS 55.0)
+(define DISRUPTOR-NOVA-SHIELD-BONUS 200.0)
 
 (: DISRUPTOR-NOVA-LIFETIME-FRAMES Integer)
 (define DISRUPTOR-NOVA-LIFETIME-FRAMES 47)
@@ -995,7 +995,7 @@
   (filter ground-nova-vulnerable-unit? units))
 
 ;; =============================================================================
-;; Splash Cluster Scoring (`145 + 55 shield`, 1.5 radius, 2.0x FF penalty)
+;; Splash Cluster Scoring (`100 + 200 vs shield`, 1.5 radius, 2.0x FF penalty)
 ;; =============================================================================
 
 (: unit-nova-replacement-value (-> Any Float))
@@ -1012,10 +1012,9 @@
   (define hp (unit-hp u 80.0))
   (define sh (unit-shield u 0.0))
   (define ehp (+ hp sh))
+  ;; SC2 5.0.14 Purification Nova: 100 base + up to +200 bonus vs shields (shield-first).
   (define nova-dmg
-    (if (> sh 0.0)
-        (+ DISRUPTOR-NOVA-BASE-DAMAGE DISRUPTOR-NOVA-SHIELD-BONUS)
-        DISRUPTOR-NOVA-BASE-DAMAGE))
+    (+ (min sh DISRUPTOR-NOVA-SHIELD-BONUS) DISRUPTOR-NOVA-BASE-DAMAGE))
   (define frac (if (> ehp 0.0) (min 1.0 (/ nova-dmg ehp)) 1.0))
   (define kill-mult (if (<= ehp nova-dmg) 1.15 0.85))
   (* unit-val frac kill-mult))
@@ -1124,9 +1123,7 @@
                 (define uval (* base tier-mult))
                 (define ehp (+ hp sh))
                 (define nova-dmg
-                  (if (> sh 0.0)
-                      (+ DISRUPTOR-NOVA-BASE-DAMAGE DISRUPTOR-NOVA-SHIELD-BONUS)
-                      DISRUPTOR-NOVA-BASE-DAMAGE))
+                  (+ (min sh DISRUPTOR-NOVA-SHIELD-BONUS) DISRUPTOR-NOVA-BASE-DAMAGE))
                 (define frac (if (> ehp 0.0) (min 1.0 (/ nova-dmg ehp)) 1.0))
                 (define kill-mult (if (<= ehp nova-dmg) 1.15 0.85))
                 (define contrib (* mult (* uval frac kill-mult)))

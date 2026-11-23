@@ -2699,8 +2699,8 @@
           'liberator 3.0 'liberator-ag 3.0 'raven 2.0 'banshee 3.0 'battlecruiser 6.0
           'zealot 2.0 'stalker 2.0 'sentry 2.0 'adept 2.0
           'high-templar 2.0 'dark-templar 2.0 'archon 4.0 'immortal 4.0
-          'colossus 6.0 'disruptor 4.0 'phoenix 2.0 'void-ray 4.0
-          'oracle 3.0 'carrier 6.0 'tempest 5.0 'mothership 6.0
+          'colossus 6.0 'disruptor 3.0 'phoenix 2.0 'void-ray 4.0
+          'oracle 3.0 'carrier 6.0 'tempest 4.0 'mothership 8.0
           'drone 1.0 'scv 1.0 'probe 1.0)]
         [pw-ht
          (hasheq

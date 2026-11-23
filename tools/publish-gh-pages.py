@@ -103,7 +103,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="Speeding Up the Test & Release Cycle",
             short_title="Timing Review",
             section="Technical Notes",
-            summary="Where time went across 39 runs, why we moved the 2-minute head-to-head check first, and which rules kept flip-flopping.",
+            summary="Where time went across 41 runs, why we moved the 2-minute head-to-head check first, and which rules kept flip-flopping.",
             source_candidates=(brain_dir / "scratch/loop/loop_flywheel_retro.md",),
             required=False,
         ),
@@ -1493,6 +1493,7 @@ DEPLOY_LABELS: Dict[str, str] = {
     "mmmkputx_6c3f9529": "Loop 50",
     "nkxlrsuk_4e7c6f39": "Loop 51",
     "tppnrnpo_22f810ed": "Loop 57",
+    "wywkqtpl_668f47f8": "Loop 59C",
 }
 
 BOT_META: Dict[str, Dict[str, str]] = {
@@ -2183,9 +2184,11 @@ _DRILL_WORD_MAP: Dict[str, str] = {
     "nonblink": "Non-Blink",
     "lowhp": "Low-HP",
     "warpprism": "Warp Prism",
+    "warpin": "Warp-In",
     "widowmine": "Widow Mine",
     "highground": "High-Ground",
     "imatrix": "Interference Matrix",
+    "halluc": "Hallucinated",
     "robo": "Robotics",
     "dts": "Dark Templars",
     "leylines": "Ley Lines",
@@ -2214,8 +2217,9 @@ def _format_drill_title(sid: str) -> str:
     s = re.sub(r"^iter\d+-m\d+-", "", s, flags=re.I)
     # Strip leading single race letter or matchup token when followed by descriptive words
     s = re.sub(r"^(?:p|t|z|pvp|pvt|pvz|tvp|tvt|tvz|zvp|zvt|zvz)-", "", s, flags=re.I)
-    # Keep compound hyphenated unit pairs intact before tokenizing
+    # Keep compound hyphenated unit/ability pairs intact before tokenizing
     s = re.sub(r"\bling-bane\b", "lingbane", s, flags=re.I)
+    s = re.sub(r"\bwarp-in\b", "warpin", s, flags=re.I)
     tokens = [tok for tok in re.split(r"[-_\s]+", s) if tok]
     out: List[str] = []
     for idx, tok in enumerate(tokens):
@@ -2224,7 +2228,7 @@ def _format_drill_title(sid: str) -> str:
             continue
         if low in _DRILL_WORD_MAP:
             out.append(_DRILL_WORD_MAP[low])
-        elif idx > 0 and low in ("and", "or", "in", "on", "to", "of", "the", "with", "into", "from", "then", "for"):
+        elif 0 < idx < len(tokens) - 1 and low in ("and", "or", "in", "on", "to", "of", "the", "with", "into", "from", "then", "for"):
             out.append(low)
         else:
             out.append(tok.capitalize())
@@ -2261,7 +2265,7 @@ def _clean_drill_caption(desc: str) -> str:
     # Strip raw SC2 numeric Ability IDs while keeping human-readable labels inside parens
     s = re.sub(r"\(\d{3,4}\s+([^()]+)\)", r"(\1)", s)
     s = re.sub(r"\(\d{3,4},\s*([^()]+)\)", r"(\1)", s)
-    s = re.sub(r"\s*\(\d{2,4}\)", "", s)
+    s = re.sub(r"\s*\(\d{2,4}(?:/\d{2,4})*\)", "", s)
     # Rewrite raw SC2 map-unit CamelCase names and shorthand abbreviations
     s = s.replace("MineralField450 (5M)", "5-mineral")
     s = s.replace("RichMineralField (7M)", "7-mineral rich")
@@ -2269,7 +2273,11 @@ def _clean_drill_caption(desc: str) -> str:
     s = s.replace("(no IM)", "(no Interference Matrix)")
     s = re.sub(r"\bcasting AAM\b", "casting Anti-Armor Missile", s)
     s = s.replace("(0 AA)", "(no anti-air)")
+    s = s.replace("(100e, 0 Obs)", "(100e, no Observers)")
+    s = s.replace("(100e, 0 flyers)", "(100e, no flyers)")
+    s = s.replace("(0 flyers)", "(no flyers)")
     s = re.sub(r"\bP2\s+active\b", "enemy", s)
+    s = re.sub(r"\bP2\s+base\b", "enemy base", s)
     s = re.sub(r"\bBOTH\b", "both", s)
     s = re.sub(r"\bFIRST\b", "first", s)
     s = s.replace("DrillingClaws", "Drilling Claws")
@@ -2637,6 +2645,8 @@ def discover_gallery_items(
             low = name.lower()
             if "final" in low:
                 return 999
+            if "sanity" in low:
+                return 500
             if low.startswith("recheck_"):
                 return -1
             m_p = re.search(r"pass(\d+)", low)
@@ -3715,6 +3725,9 @@ _CALM_LOOP_TITLES: Dict[int, str] = {
     49: "Banelings, base layouts & stall checks (held)",
     50: "Live release #8 (Zerg breakthrough & SC2 4.10 fixes)",
     51: "Live release #9 (54.8% core benchmark & SC2 5.0.14 fixes)",
+    57: "Live release #10 (8-bot v1 & v2 ladder rollout)",
+    58: "Ability mastery & non-combat drills (held)",
+    59: "Live release #11 (Pro-matched EPM/SPM & 9–3 H2H)",
 }
 
 
@@ -4172,9 +4185,11 @@ def _render_standings_tables(
         note_html = (
             '<p class="table-note">'
             "AI Arena ratings start at 1600. The v2 accounts play Division 5 (~1600+ Elo) opponents and recorded zero crashes "
-            "(the fetched v2 games above ran earlier Release #7 before Release #10 synced all eight bots), while the older v1 "
+            "(the fetched standings above reflect games played prior to the latest rollout), while the older v1 "
             "accounts play Division 9 (~1350 Elo), where Release #9 went 19–9–3 (61.3% wins, 71.0% win-or-tie) across ranked games. "
-            "All eight bots now run Release #10. Trade ratio divides enemy army and worker value destroyed by our own value lost."
+            'All eight bots now run <strong>Release #11</strong> (Build 59C, Competition #38, '
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45108531214" target="_blank" rel="noopener noreferrer">deploy run 45108531214</a>, '
+            "8/8 verified active). Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
         )
         return "".join(blocks) + note_html
@@ -4571,7 +4586,9 @@ def build_history_page(
     live_caption = (
         f"The first deployed build went 0–10 on AI Arena. Recent v1 builds win roughly 55–61% of their games: "
         f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
-        f"and Release #9 (Build 51) climbed to 19–9–3 (61.3% wins) before Release #10 (Build 57) rolled out to all 8 ladder bots."
+        f"and Release #9 (Build 51) climbed to 19–9–3 (61.3% wins) before Release #10 (Build 57) and Release #11 "
+        f'(Build 59C, <a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45108531214" target="_blank" rel="noopener noreferrer">deploy run 45108531214</a>) '
+        f"rolled out to all 8 ladder bots."
     )
 
     sec_loop = render_loop_diagram_section(rich, section_num="Section 2")
@@ -4631,6 +4648,7 @@ def build_history_page(
         "iter50_w3_full": 8,
         "iter51_ship9_full": 9,
         "iter57_ship10_full": 10,
+        "iter59c_ship11_full": 11,
     }
 
     def _format_run_label(run_id: str, status_raw: str = "") -> str:
@@ -4742,14 +4760,22 @@ def build_history_page(
                 sb = it.get("sup_blk_pct")
                 sb_s = f"{sb:.1f}%" if isinstance(sb, (int, float)) else "—"
                 st_lbl = "Shipped" if ("SHIP" in st_raw.upper() and "HOLD" not in st_raw.upper()) else ("Held" if "HOLD" in st_raw.upper() else st_raw[:18])
-                m_it = re.match(r"(iter\d+)", raw_id)
+                m_it = re.match(r"iter(\d+)", raw_id)
                 rel_cell = "—"
-                if m_it and f"media-{m_it.group(1)}" in media_by_tag:
-                    tag = f"media-{m_it.group(1)}"
-                    rel_cell = (
-                        f'<a href="https://github.com/{repo_slug}/releases/tag/{tag}" '
-                        f'target="_blank" rel="noopener noreferrer">{tag}</a>'
-                    )
+                if m_it:
+                    lnum_it = int(m_it.group(1))
+                    tag = f"media-iter{lnum_it}"
+                    tag_map = media_by_tag.get(tag) or {}
+                    has_live_gh_release = any(
+                        str(u).startswith("https://github.com/") for u in tag_map.values()
+                    ) and lnum_it <= 51
+                    if has_live_gh_release:
+                        rel_cell = (
+                            f'<a href="https://github.com/{repo_slug}/releases/tag/{tag}" '
+                            f'target="_blank" rel="noopener noreferrer">{tag}</a>'
+                        )
+                    elif lnum_it == 59:
+                        rel_cell = '<a href="./index.html#tactics-section">278 arena clips</a>'
                 lrows.append(
                     f'<tr><td class="nw">{it_id}</td>'
                     f"<td>{html.escape(st_lbl)}</td>"
@@ -4946,8 +4972,6 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
          "Pre-Assigned Test Ownership and Fast Unit-Test Mode"),
         ("Authors edit their own track tests directly; @verifier owns wall-clock timing checks on an idle CPU.",
          "Authors edit their own track tests directly; the verifier owns wall-clock timing checks on an idle CPU."),
-        ("(monitor-2 logged 7,138 steps / 1 posts)",
-         "(watchdog polling previously logged 7,138 steps for a single alert)"),
         ("Each run appends to loop_trajectory_log.jsonl and produces Replay + Video trade review packs.",
          "Each run appends to the run timing log and produces replay and video trade review packs."),
         ("-> ", "→ "),
@@ -4963,12 +4987,16 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
         r"\1",
         text,
     )
-    # Normalize lowercase 'x' multipliers like 1.31x -> 1.31× and W-L records in Table 3a
+    text = re.sub(
+        r"\(monitor-2 logged ([\d,]+) steps / (\d+) posts?\)",
+        lambda m: f"(watchdog polling previously logged {m.group(1)} steps for {m.group(2)} {'alert' if m.group(2) == '1' else 'alerts'})",
+        text,
+    )
+    # Normalize lowercase 'x' multipliers like 1.30x -> 1.30× and W-L records in Table 3a
     text = re.sub(r"(\d+\.\d+)x\b", r"\1×", text)
     text = re.sub(r"\b(\d+)W-(\d+)L\b", r"\1–\2", text)
-    text = text.replace("Across L34–L57, Engineering changes", "Across Loops 34–57, engineering changes")
-    text = text.replace("L34–L57", "Loops 34–57")
-    text = text.replace("L37–L57", "Loops 37–57")
+    text = re.sub(r"\bL(\d+)[–-]L(\d+)\b", r"Loops \1–\2", text)
+    text = re.sub(r"Across (Loops \d+–\d+), Engineering changes", r"Across \1, engineering changes", text)
     return text
 
 
@@ -5143,6 +5171,11 @@ def build_static_site(
             shutil.copy2(pf, out_dir / "media" / pf.name)
 
     # Rewrite gallery items to use same-origin playable MP4s & JPG posters, stripping private local keys
+    # Never emit links to unpublished GitHub Release tags (> media-iter51 when self-hosted via --skip-media).
+    def _is_unpublished_release_url(url: str) -> bool:
+        m_rel = re.search(r"/releases/download/media-iter(\d+)\b", str(url or ""))
+        return bool(m_rel and int(m_rel.group(1)) > 51)
+
     clean_gallery_items: List[Dict[str, Any]] = []
     for it in gallery_items:
         item = {k: v for k, v in it.items() if not k.startswith("_")}
@@ -5152,12 +5185,20 @@ def build_static_site(
             if key in staged_mp4_map:
                 item["src"] = staged_mp4_map[key]
                 item["playable_mp4"] = True
-                if not item.get("download_url"):
+                if not item.get("download_url") or _is_unpublished_release_url(str(item.get("download_url"))):
                     item["download_url"] = staged_mp4_map[key]
             else:
+                if _is_unpublished_release_url(orig_src):
+                    continue
                 item["playable_mp4"] = False
+                if _is_unpublished_release_url(str(item.get("download_url") or "")):
+                    item["download_url"] = item.get("src", "")
             if key in staged_poster_map:
                 item["poster"] = staged_poster_map[key]
+            elif _is_unpublished_release_url(str(item.get("poster") or "")):
+                item["poster"] = ""
+        elif _is_unpublished_release_url(str(item.get("src") or "")):
+            continue
         clean_gallery_items.append(item)
 
     # Sort gallery so playable in-browser videos surface cleanly first within each loop

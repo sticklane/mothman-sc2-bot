@@ -25,6 +25,9 @@
          net/base64
          "sc2-game-constants.rkt"
          "sc2-typed-commands.rkt"
+         (only-in "sc2-proto-wire-verifier.rkt"
+                  register-verifier-live-ability-mode!
+                  reset-verifier-live-ability-modes!)
          (only-in "sc2-placement.rkt"
                   sc2-symmetry-reflect-point
                   sc2-detect-map-symmetry
@@ -79,6 +82,11 @@
  (except-out (struct-out sc2-game-info) raw-sc2-game-info sc2-game-info)
  (rename-out [make-sc2-game-info sc2-game-info])
  (struct-out sc2-data-entry)
+ (struct-out sc2-ability-data-entry-rich)
+ (struct-out sc2-weapon-data)
+ (struct-out sc2-unit-data-entry)
+ (struct-out sc2-upgrade-data-entry)
+ (struct-out sc2-effect-data-entry)
  (struct-out sc2-data)
  (struct-out sc2-response)
  (struct-out sc2-raw-unit-command)
@@ -145,6 +153,7 @@
  buff-id->symbol
  effect-id->symbol
  result-enum->symbol
+ decode-response-data-bytes
  register-sc2-response-data!
  reset-sc2-live-response-data!
  sc2-ability-data-entry
@@ -153,6 +162,7 @@
  SC2-LIVE-AVAILABLE-ABILITIES
  sc2-ability-live-available?
  sc2-upgrade-defined-in-live-data?
+ sc2-upgrade-live-available?
 
  ;; Observation Converter & S-Expression Actuator
  sc2-unit-is-structure?
@@ -1697,6 +1707,10 @@
           (zerg-flyer-armor-3 73 #t)
           (flyer-carapace-3 73 #f)
           (stimpack 15 #t)
+          (hi-sec-auto-tracking 5 #t)
+          (hisec-auto-tracking 5 #f)
+          (terran-building-armor 6 #t)
+          (neosteel-armor 6 #f)
           (combat-shield 16 #t)
           (shield-wall 16 #f)
           (concussive-shells 17 #t)
@@ -1712,6 +1726,7 @@
           (cloaking-field 20 #f)
           (caduceus-reactor 21 #t)
           (medivac-caduceus-reactor 21 #f)
+          (corvid-reactor 22 #t)
           (personal-cloaking 25 #t)
           (weapon-refit 76 #t)
           (hyperflight-rotors 136 #t)
@@ -1763,6 +1778,7 @@
           (resonating-glaives 130 #t)
           (adept-piercing-attack 130 #f)
           (psi-storm 52 #t)
+          (psionic-storm 52 #f)
           (psistorm 52 #f)
           (psistorm-tech 52 #f)
           (psi-storm-tech 52 #f)
@@ -2142,12 +2158,26 @@
 
 (struct sc2-data-entry (id name) #:transparent)
 (struct sc2-ability-data-entry sc2-data-entry (available?) #:transparent)
+(struct sc2-ability-data-entry-rich sc2-ability-data-entry
+  (remaps-to target allow-minimap? allow-autocast? is-building? footprint-radius cast-range)
+  #:transparent)
+(struct sc2-weapon-data (type damage damage-bonuses attacks range speed) #:transparent)
+(struct sc2-unit-data-entry sc2-data-entry
+  (available? cargo-size attributes movement-speed armor weapons
+   mineral-cost vespene-cost food-required food-provided ability-id build-time
+   tech-alias unit-alias tech-requirement require-attached? sight-range)
+  #:transparent)
+(struct sc2-upgrade-data-entry sc2-data-entry
+  (mineral-cost vespene-cost research-time ability-id)
+  #:transparent)
+(struct sc2-effect-data-entry sc2-data-entry (friendly-name radius) #:transparent)
 (struct sc2-data (abilities units upgrades buffs effects) #:transparent)
 
 ;; Dynamic match-start ResponseData tables (populated by `register-sc2-response-data!`)
 (define SC2-LIVE-DATA-LOADED? (box #f))
 (define SC2-LIVE-AVAILABLE-ABILITIES (make-hasheqv))
 (define SC2-LIVE-DEFINED-UPGRADES (make-hasheq))
+(define SC2-LIVE-DEFINED-UPGRADE-IDS (make-hasheqv))
 
 (define (sc2-ability-live-available? ab-id)
   (if (unbox SC2-LIVE-DATA-LOADED?)
@@ -2156,12 +2186,26 @@
 
 (define (sc2-upgrade-defined-in-live-data? sym)
   (and (unbox SC2-LIVE-DATA-LOADED?)
-       (hash-has-key? SC2-LIVE-DEFINED-UPGRADES (normalize-sc2-name->symbol sym))))
+       (let ([norm (normalize-sc2-name->symbol sym)])
+         (or (hash-has-key? SC2-LIVE-DEFINED-UPGRADES norm)
+             (let ([uid (hash-ref SC2-UPGRADE-SYM->ID norm 0)])
+               (and (> uid 0)
+                    (< uid 290)
+                    (hash-has-key? SC2-LIVE-DEFINED-UPGRADE-IDS uid)))))))
+
+(define (sc2-upgrade-live-available? sym)
+  (if (unbox SC2-LIVE-DATA-LOADED?)
+      (sc2-upgrade-defined-in-live-data? sym)
+      #t))
 
 (define (reset-sc2-live-response-data!)
   (set-box! SC2-LIVE-DATA-LOADED? #f)
   (hash-clear! SC2-LIVE-AVAILABLE-ABILITIES)
-  (hash-clear! SC2-LIVE-DEFINED-UPGRADES))
+  (hash-clear! SC2-LIVE-DEFINED-UPGRADES)
+  (hash-clear! SC2-LIVE-DEFINED-UPGRADE-IDS)
+  (reset-sc2-live-game-data!)
+  (reset-live-typed-ability-overrides!)
+  (reset-verifier-live-ability-modes!))
 
 (struct sc2-response
   (id
@@ -3343,6 +3387,45 @@
   (make-sc2-game-info map-name local-map-path player-info map-size playable-area start-locs
                       pathing-grid terrain-height placement-grid))
 
+(define (proto-ability-target-enum->sym v)
+  (case v
+    [(1) 'none]
+    [(2) 'point]
+    [(3) 'unit]
+    [(4) 'point-or-unit]
+    [(5) 'point-or-none]
+    [else 'unknown]))
+
+(define (proto-attr-enum->bit v)
+  (case v
+    [(1)  SC2-UNIT-ATTR-LIGHT]
+    [(2)  SC2-UNIT-ATTR-ARMORED]
+    [(3)  SC2-UNIT-ATTR-BIOLOGICAL]
+    [(4)  SC2-UNIT-ATTR-MECHANICAL]
+    [(6)  SC2-UNIT-ATTR-PSIONIC]
+    [(7)  SC2-UNIT-ATTR-MASSIVE]
+    [(8)  SC2-UNIT-ATTR-STRUCTURE]
+    [(10) SC2-UNIT-ATTR-HEROIC]
+    [else 0]))
+
+(define (proto-attrs->bitmask attrs)
+  (for/fold ([acc 0]) ([a (in-list attrs)])
+    (bitwise-ior acc (proto-attr-enum->bit a))))
+
+(define (decode-weapon-bytes bstr)
+  (define f (decode-protobuf-message bstr))
+  (define wtype (field-first-varint f 1 1))
+  (define dmg (exact->inexact (field-first-float32 f 2 0.0)))
+  (define bonuses
+    (for/list ([db (in-list (field-all-bytes f 3))])
+      (define df (decode-protobuf-message db))
+      (cons (field-first-varint df 1 0)
+            (exact->inexact (field-first-float32 df 2 0.0)))))
+  (define atks (max 1 (field-first-varint f 4 1)))
+  (define rng (exact->inexact (field-first-float32 f 5 0.0)))
+  (define spd (exact->inexact (field-first-float32 f 6 1.0)))
+  (sc2-weapon-data wtype dmg bonuses atks rng (if (> spd 0.0) spd 1.0)))
+
 (define (decode-data-entries raw-bytes-list id-field name-field)
   (for/list ([b (in-list raw-bytes-list)])
     (define f (decode-protobuf-message b))
@@ -3351,23 +3434,79 @@
 
 (define (decode-response-data-bytes bstr)
   (define fields (decode-protobuf-message bstr))
-  ;; data.proto: AbilityData ability_id=1, link_name=2, friendly_name=5, available=8
-  ;; UnitTypeData unit_id=1, name=2
-  ;; UpgradeData upgrade_id=1, name=2
-  ;; BuffData buff_id=1, name=2
-  ;; EffectData effect_id=1, name=2, friendly_name=3
+  ;; data.proto:
+  ;;   AbilityData: 1=ability_id, 2=link_name, 5=friendly_name, 7=remaps_to_ability_id,
+  ;;                8=available, 9=target, 10=allow_minimap, 11=allow_autocast,
+  ;;                12=is_building, 13=footprint_radius, 14=is_instant_placement, 15=cast_range
+  ;;   UnitTypeData: 1=unit_id, 2=name, 3=available, 4=cargo_size, 8=attributes,
+  ;;                 9=movement_speed, 10=armor, 11=weapons, 12=mineral_cost, 13=vespene_cost,
+  ;;                 14=food_required, 15=ability_id, 17=build_time, 18=food_provided,
+  ;;                 21=tech_alias, 22=unit_alias, 23=tech_requirement, 24=require_attached, 25=sight_range
+  ;;   UpgradeData: 1=upgrade_id, 2=name, 3=mineral_cost, 4=vespene_cost, 5=research_time, 6=ability_id
+  ;;   BuffData: 1=buff_id, 2=name
+  ;;   EffectData: 1=effect_id, 2=name, 3=friendly_name, 4=radius
   (define abilities
     (for/list ([b (in-list (field-all-bytes fields 1))])
       (define f (decode-protobuf-message b))
       (define id (field-first-varint f 1 0))
       (define fname (field-first-string f 5 ""))
       (define lname (field-first-string f 2 ""))
-      (define avail? (= (field-first-varint f 8 0) 1))
-      (sc2-ability-data-entry id (if (string=? fname "") lname fname) avail?)))
-  (define units (decode-data-entries (field-all-bytes fields 2) 1 2))
-  (define upgrades (decode-data-entries (field-all-bytes fields 3) 1 2))
+      (define remaps-to (field-first-varint f 7 0))
+      (define avail? (field-first-bool f 8 #t))
+      (define target (proto-ability-target-enum->sym (field-first-varint f 9 0)))
+      (define allow-minimap? (field-first-bool f 10 #f))
+      (define allow-autocast? (field-first-bool f 11 #f))
+      (define is-building? (field-first-bool f 12 #f))
+      (define footprint-radius (exact->inexact (field-first-float32 f 13 0.0)))
+      (define cast-range (exact->inexact (field-first-float32 f 15 0.0)))
+      (sc2-ability-data-entry-rich
+       id (if (string=? fname "") lname fname) avail?
+       remaps-to target allow-minimap? allow-autocast? is-building? footprint-radius cast-range)))
+  (define units
+    (for/list ([b (in-list (field-all-bytes fields 2))])
+      (define f (decode-protobuf-message b))
+      (define id (field-first-varint f 1 0))
+      (define name (field-first-string f 2 ""))
+      (define avail? (field-first-bool f 3 #t))
+      (define cargo-size (field-first-varint f 4 0))
+      (define attrs (decode-packed-or-unpacked-varints f 8))
+      (define speed (exact->inexact (field-first-float32 f 9 -1.0)))
+      (define armor (exact->inexact (field-first-float32 f 10 -1.0)))
+      (define weapons (map decode-weapon-bytes (field-all-bytes f 11)))
+      (define min-cost (field-first-varint f 12 0))
+      (define gas-cost (field-first-varint f 13 0))
+      (define food-req (exact->inexact (field-first-float32 f 14 0.0)))
+      (define ability-id (field-first-varint f 15 0))
+      (define build-time (exact->inexact (field-first-float32 f 17 0.0)))
+      (define food-prov (exact->inexact (field-first-float32 f 18 0.0)))
+      (define tech-alias (decode-packed-or-unpacked-varints f 21))
+      (define unit-alias (field-first-varint f 22 0))
+      (define tech-req (field-first-varint f 23 0))
+      (define req-attached? (field-first-bool f 24 #f))
+      (define sight-range (exact->inexact (field-first-float32 f 25 0.0)))
+      (sc2-unit-data-entry
+       id name avail? cargo-size attrs speed armor weapons
+       min-cost gas-cost food-req food-prov ability-id build-time
+       tech-alias unit-alias tech-req req-attached? sight-range)))
+  (define upgrades
+    (for/list ([b (in-list (field-all-bytes fields 3))])
+      (define f (decode-protobuf-message b))
+      (sc2-upgrade-data-entry
+       (field-first-varint f 1 0)
+       (field-first-string f 2 "")
+       (field-first-varint f 3 0)
+       (field-first-varint f 4 0)
+       (exact->inexact (field-first-float32 f 5 0.0))
+       (field-first-varint f 6 0))))
   (define buffs (decode-data-entries (field-all-bytes fields 4) 1 2))
-  (define effects (decode-data-entries (field-all-bytes fields 5) 1 2))
+  (define effects
+    (for/list ([b (in-list (field-all-bytes fields 5))])
+      (define f (decode-protobuf-message b))
+      (sc2-effect-data-entry
+       (field-first-varint f 1 0)
+       (field-first-string f 2 "")
+       (field-first-string f 3 "")
+       (exact->inexact (field-first-float32 f 4 0.0)))))
   (sc2-data abilities units upgrades buffs effects))
 
 ;; Canonical CamelCase SC2 UpgradeData.name -> bot hyphenated upgrade symbol aliases.
@@ -3383,6 +3522,7 @@
    'medivaccaduceusreactor     '(caduceus-reactor medivac-caduceus-reactor)
    'ravencorvidreactor         '(corvid-reactor)
    'diggingclaws               '(adaptive-talons)
+   'adaptivetalons             '(adaptive-talons)
    'lurkerrange                '(lurker-range seismic-spines)
    'voidrayspeedupgrade        '(flux-vanes)
    'phoenixrangeupgrade        '(anion-pulse-crystals)
@@ -3393,44 +3533,190 @@
    'psionicamplifiers          '(psionic-amplifiers)
    'secretedcoating            '(secreted-coating)))
 
+(define SC2-LIVE-EFFECT-NAME-ALIASES
+  (hasheq
+   'psistormpersistent                   '(psi-storm)
+   'psistorm                             '(psi-storm)
+   'psi-storm                            '(psi-storm)
+   'guardianshieldpersistent             '(guardian-shield)
+   'temporalfieldgrowingbubblecreatepersistent '(temporal-field-growing time-warp)
+   'temporalfieldafterbubblecreatepersistent   '(temporal-field time-warp)
+   'thermallanceforward                  '(thermal-lances)
+   'scannersweep                         '(scanner-sweep)
+   'nukepersistent                       '(nuke-persistent nuke)
+   'liberatortargetmorphdelaypersistent  '(liberator-defender-zone-setup)
+   'liberatortargetmorphpersistent       '(liberator-defender-zone)
+   'blindingcloudcp                      '(blinding-cloud)
+   'ravagercorrosivebilecp               '(corrosive-bile)
+   'lurkermp                             '(lurker-spines)
+   'amorphousarmorcloud                  '(microbial-shroud)
+   'microbialshroud                      '(microbial-shroud)))
+
+(define (sc2-weapon-data->weapon-spec wd static-spec)
+  (define hits (max 1 (sc2-weapon-data-attacks wd)))
+  (define base (exact->inexact (sc2-weapon-data-damage wd)))
+  (define bonuses (sc2-weapon-data-damage-bonuses wd))
+  (define-values (bonus-mask bonus-val)
+    (if (pair? bonuses)
+        (let ([b0 (first bonuses)])
+          (values (proto-attr-enum->bit (car b0)) (exact->inexact (cdr b0))))
+        (values 0 0.0)))
+  (define upg-base (if (sc2-weapon-spec? static-spec) (sc2-weapon-spec-upg-base static-spec) 0.0))
+  (define upg-bonus (if (sc2-weapon-spec? static-spec) (sc2-weapon-spec-upg-bonus static-spec) 0.0))
+  (define period (let ([s (exact->inexact (sc2-weapon-data-speed wd))]) (if (> s 0.0) s 1.0)))
+  (define ranged? (>= (sc2-weapon-data-range wd) 2.0))
+  (sc2-weapon-spec hits base upg-base bonus-mask bonus-val upg-bonus period ranged?))
+
+(define (hydrate-typed-ability-tables-from-live-data! abilities)
+  (for ([e (in-list abilities)])
+    (when (sc2-ability-data-entry-rich? e)
+      (define id (sc2-data-entry-id e))
+      (define avail? (sc2-ability-data-entry-available? e))
+      (define target (sc2-ability-data-entry-rich-target e))
+      (define autocast? (sc2-ability-data-entry-rich-allow-autocast? e))
+      (when (and (> id 0) avail?
+                 (or (not (eq? target 'unknown)) autocast?))
+        (register-live-typed-ability-target! id target autocast?)))))
+
+(define (hydrate-verifier-ability-tables-from-live-data! abilities)
+  (for ([e (in-list abilities)])
+    (when (sc2-ability-data-entry-rich? e)
+      (define id (sc2-data-entry-id e))
+      (define avail? (sc2-ability-data-entry-available? e))
+      (define target (sc2-ability-data-entry-rich-target e))
+      (define autocast? (sc2-ability-data-entry-rich-allow-autocast? e))
+      (when (and (> id 0) avail?
+                 (or (not (eq? target 'unknown)) autocast?))
+        (register-verifier-live-ability-mode! id target autocast?)))))
+
 (define (register-sc2-response-data! data)
   (when (sc2-data? data)
     (hash-clear! SC2-LIVE-AVAILABLE-ABILITIES)
     (hash-clear! SC2-LIVE-DEFINED-UPGRADES)
+    (hash-clear! SC2-LIVE-DEFINED-UPGRADE-IDS)
+    (reset-sc2-live-game-data!)
+    (reset-live-typed-ability-overrides!)
+    (reset-verifier-live-ability-modes!)
     (set-box! SC2-LIVE-DATA-LOADED? #t)
-    (for ([e (in-list (sc2-data-abilities data))])
+    (define abilities (sc2-data-abilities data))
+    (for ([e (in-list abilities)])
       (define id (sc2-data-entry-id e))
       (when (> id 0)
         (define avail? (if (sc2-ability-data-entry? e)
                            (sc2-ability-data-entry-available? e)
                            #t))
-        (hash-set! SC2-LIVE-AVAILABLE-ABILITIES id avail?)))
+        (hash-set! SC2-LIVE-AVAILABLE-ABILITIES id avail?)
+        (when (sc2-ability-data-entry-rich? e)
+          (register-sc2-live-ability-data!
+           id
+           (sc2-ability-data-entry-rich-target e)
+           (exact->inexact (sc2-ability-data-entry-rich-cast-range e))
+           (and (sc2-ability-data-entry-rich-allow-autocast? e) #t)
+           (sc2-ability-data-entry-rich-remaps-to e)))))
+    (hydrate-typed-ability-tables-from-live-data! abilities)
+    (hydrate-verifier-ability-tables-from-live-data! abilities)
     (for ([e (in-list (sc2-data-units data))])
       (define id (sc2-data-entry-id e))
       (define name (sc2-data-entry-name e))
       (when (and (> id 0) (not (string=? name "")))
         (register-id-pair! SC2-UNIT-SYM->ID SC2-UNIT-ID->SYM
-                           (normalize-sc2-name->symbol name) id #:primary? #f)))
+                           (normalize-sc2-name->symbol name) id #:primary? #f))
+      (when (and (sc2-unit-data-entry? e) (> id 0))
+        (define id-sym (sc2-id->unit-symbol id #f))
+        (define const-sym (let ([cs (canonical-unit-type-sym id)])
+                            (and (not (eq? cs 'unknown)) cs)))
+        (define name-sym (and (not (string=? name "")) (normalize-sc2-name->symbol name)))
+        (define primary-sym (or id-sym const-sym name-sym))
+        (when (symbol? primary-sym)
+          (define canon-sym (canonical-unit-type-sym primary-sym))
+          (define wpns (sc2-unit-data-entry-weapons e))
+          (define g-wpns (filter (lambda (w) (memv (sc2-weapon-data-type w) '(1 3))) wpns))
+          (define a-wpns (filter (lambda (w) (memv (sc2-weapon-data-type w) '(2 3))) wpns))
+          (define g-range
+            (for/fold ([best 0.0]) ([w (in-list g-wpns)])
+              (max best (exact->inexact (sc2-weapon-data-range w)))))
+          (define a-range
+            (for/fold ([best 0.0]) ([w (in-list a-wpns)])
+              (max best (exact->inexact (sc2-weapon-data-range w)))))
+          (define g-spec
+            (and (pair? g-wpns)
+                 (sc2-weapon-data->weapon-spec
+                  (first g-wpns)
+                  (hash-ref SC2-GROUND-WEAPON-TABLE canon-sym #f))))
+          (define a-spec
+            (and (pair? a-wpns)
+                 (sc2-weapon-data->weapon-spec
+                  (first a-wpns)
+                  (hash-ref SC2-AIR-WEAPON-TABLE canon-sym #f))))
+          (register-sc2-live-unit-data!
+           primary-sym
+           (sc2-unit-data-entry-mineral-cost e)
+           (sc2-unit-data-entry-vespene-cost e)
+           (sc2-unit-data-entry-food-required e)
+           (inexact->exact (round (max 0.0 (sc2-unit-data-entry-build-time e))))
+           (proto-attrs->bitmask (sc2-unit-data-entry-attributes e))
+           (and (sc2-unit-data-entry-require-attached? e) #t)
+           (exact->inexact (sc2-unit-data-entry-movement-speed e))
+           (exact->inexact (sc2-unit-data-entry-armor e))
+           g-range
+           a-range
+           g-spec
+           a-spec))))
+    (finalize-sc2-live-unit-costs!)
+    ;; L60B (`#1605`/`#1606`): Pre-build `upgrade-id -> all static alias symbols` (for canonical
+    ;; stable IDs `< 290`) so every live `UpgradeData(id, name)` registers ALL aliases of `id`
+    ;; (e.g. `84 "WarpGateResearch"` -> `warp-gate-research`, `warp-gate`, `warpgate`;
+    ;;  `66 "zerglingmovementspeed"` -> `metabolic-boost`, `zergling-movementspeed`;
+    ;;  `75 "CentrificalHooks"` -> `centrifical-hooks`, `centrifugal-hooks`;
+    ;;  `116/117/118` -> `terran-vehicle-and-ship-plating-1/2/3`) into BOTH
+    ;; `SC2-LIVE-DEFINED-UPGRADES` and `register-sc2-live-upgrade-data!`!
+    ;; Balance-mod shifted IDs (`>= 290`) continue resolving strictly by name + `SC2-LIVE-UPGRADE-NAME-ALIASES`.
+    (define static-upg-id->all-syms (make-hasheqv))
+    (for ([(usym uid) (in-hash SC2-UPGRADE-SYM->ID)]
+          #:when (and (> uid 0) (< uid 290)))
+      (hash-update! static-upg-id->all-syms uid (lambda (prev) (cons usym prev)) '()))
     (for ([e (in-list (sc2-data-upgrades data))])
       (define id (sc2-data-entry-id e))
       (define name (sc2-data-entry-name e))
+      (define upg-syms '())
+      (when (> id 0)
+        (hash-set! SC2-LIVE-DEFINED-UPGRADE-IDS id #t))
       (when (and (> id 0) (not (string=? name "")))
         (define norm (normalize-sc2-name->symbol name))
         (define aliases (hash-ref SC2-LIVE-UPGRADE-NAME-ALIASES norm #f))
         (define override-shifted? (>= id 290))
         (hash-set! SC2-LIVE-DEFINED-UPGRADES norm id)
+        (set! upg-syms (cons norm upg-syms))
+        (if (< id 290)
+            (for ([asym (in-list (hash-ref static-upg-id->all-syms id '()))])
+              (hash-set! SC2-LIVE-DEFINED-UPGRADES asym id)
+              (unless (memq asym upg-syms)
+                (set! upg-syms (cons asym upg-syms))))
+            (let ([known-sym (and (not (pair? aliases)) (hash-ref SC2-UPGRADE-ID->SYM id #f))])
+              (when (and known-sym (eq? known-sym norm) (not (memq known-sym upg-syms)))
+                (hash-set! SC2-LIVE-DEFINED-UPGRADES known-sym id)
+                (set! upg-syms (cons known-sym upg-syms)))))
         (cond
           [(pair? aliases)
            (for ([asym (in-list aliases)]
                  [idx (in-naturals)])
              (hash-set! SC2-LIVE-DEFINED-UPGRADES asym id)
+             (unless (memq asym upg-syms)
+               (set! upg-syms (cons asym upg-syms)))
              (register-id-pair! SC2-UPGRADE-SYM->ID SC2-UPGRADE-ID->SYM
                                 asym id #:primary? (and override-shifted? (= idx 0))))
            (register-id-pair! SC2-UPGRADE-SYM->ID SC2-UPGRADE-ID->SYM
                               norm id #:primary? #f)]
           [else
            (register-id-pair! SC2-UPGRADE-SYM->ID SC2-UPGRADE-ID->SYM
-                              norm id #:primary? override-shifted?)])))
+                              norm id #:primary? override-shifted?)]))
+      (when (and (sc2-upgrade-data-entry? e) (pair? upg-syms))
+        (define umin (sc2-upgrade-data-entry-mineral-cost e))
+        (define ugas (sc2-upgrade-data-entry-vespene-cost e))
+        (define urt  (inexact->exact (round (max 0.0 (sc2-upgrade-data-entry-research-time e)))))
+        (define uab  (sc2-upgrade-data-entry-ability-id e))
+        (for ([usym (in-list upg-syms)])
+          (register-sc2-live-upgrade-data! usym umin ugas urt uab))))
     (for ([e (in-list (sc2-data-buffs data))])
       (define id (sc2-data-entry-id e))
       (define name (sc2-data-entry-name e))
@@ -3442,7 +3728,28 @@
       (define name (sc2-data-entry-name e))
       (when (and (> id 0) (not (string=? name "")))
         (register-id-pair! SC2-EFFECT-SYM->ID SC2-EFFECT-ID->SYM
-                           (normalize-sc2-name->symbol name) id #:primary? #f)))
+                           (normalize-sc2-name->symbol name) id #:primary? #f))
+      (when (sc2-effect-data-entry? e)
+        (define rad (exact->inexact (sc2-effect-data-entry-radius e)))
+        (when (> rad 0.0)
+          (define eff-syms '())
+          (define (add-eff-sym! s)
+            (when (and (symbol? s) (not (eq? s 'none)) (not (memq s eff-syms)))
+              (set! eff-syms (cons s eff-syms))))
+          (add-eff-sym! (hash-ref SC2-EFFECT-ID->SYM id #f))
+          (unless (string=? name "")
+            (define ns (normalize-sc2-name->symbol name))
+            (add-eff-sym! ns)
+            (for ([as (in-list (hash-ref SC2-LIVE-EFFECT-NAME-ALIASES ns '()))])
+              (add-eff-sym! as)))
+          (define fname (sc2-effect-data-entry-friendly-name e))
+          (unless (string=? fname "")
+            (define fs (normalize-sc2-name->symbol fname))
+            (add-eff-sym! fs)
+            (for ([as (in-list (hash-ref SC2-LIVE-EFFECT-NAME-ALIASES fs '()))])
+              (add-eff-sym! as)))
+          (for ([es (in-list eff-syms)])
+            (register-sc2-live-effect-data! es rad)))))
     (hash-clear! NORMALIZE-SYM-CACHE)
     (hash-clear! TRAIN-ABILITY-CACHE)
     (hash-clear! BUILD-ABILITY-CACHE)
@@ -9131,7 +9438,7 @@
        '(hydralisk-den)]
       [(memq norm '(adaptive-talons lurker-range seismic-spines))
        '(lurker-den lurker-den-mp)]
-      [(memq norm '(neural-parasite pathogen-glands microbial-shroud))
+      [(memq norm '(neural-parasite microbial-shroud))
        '(infestation-pit)]
       [(memq norm '(chitinous-plating anabolic-synthesis))
        '(ultralisk-cavern)]
@@ -9582,6 +9889,7 @@
 (define SC2-GAS-BLDG-ZERO-WORKERS-SINCE (make-hasheqv))
 (define SC2-SAT-OBSERVED-ENEMY-RACE (box #f))
 (define SC2-SAT-SEEN-TERRAN-CLOAK-TECH? (box #f))
+(define SC2-SAT-SEEN-PROTOSS-DT-PRISM? (box #f))
 (define SC2-SAT-SEEN-ENEMY-CLOAK? (box #f))
 
 (define (sc2-infer-race-from-units ulist)
@@ -9589,7 +9897,7 @@
               #:when (let ([ut (sc2-unit-unit-type e)])
                        (or (memv ut '(86 89 90 91 92 93 95 96 97 98 100 101 104 105 106 107 108 109 110 111 112 114 126 129 688))
                            (memv ut '(18 19 20 21 22 23 24 25 26 27 28 29 30 32 33 34 35 45 47 48 49 50 51 52 53 54 55 56 57 130 132 498 692))
-                           (memv ut '(59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 133 311 495 496 694 1910)))))
+                           (memv ut '(59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 133 136 311 495 496 694 1910)))))
     (define ut (sc2-unit-unit-type e))
     (cond
       [(memv ut '(86 89 90 91 92 93 95 96 97 98 100 101 104 105 106 107 108 109 110 111 112 114 126 129 688)) 'Zerg]
@@ -9621,6 +9929,7 @@
     (hash-clear! SC2-GAS-BLDG-ZERO-WORKERS-SINCE)
     (set-box! SC2-SAT-OBSERVED-ENEMY-RACE #f)
     (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #f)
+    (set-box! SC2-SAT-SEEN-PROTOSS-DT-PRISM? #f)
     (set-box! SC2-SAT-SEEN-ENEMY-CLOAK? #f))
   (when (> (- cur-loop prev-sat-loop) 64)
     (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f))
@@ -10382,7 +10691,7 @@
         (define bmtag (sc2-unit-tag best-min))
         (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
         (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wtag bmtag)
-        (issue-gather! w bmtag #:macro-econ? #t))))
+        (issue-gather! w bmtag #:macro-econ? #f))))
 
   ;; L32-P0-1 (`#10` 2.69x WallTie -> WIN): Whenever ALL owned bases are mined out
   ;; (`owned-base-minerals = '()`), find all safe available map mineral patches (`display-type = 1`
@@ -10464,7 +10773,7 @@
        (define bmtag (sc2-unit-tag best-min))
        (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
        (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wtag bmtag)
-       (issue-gather! w bmtag #:macro-econ? #t))]
+       (issue-gather! w bmtag #:macro-econ? (<= cur-loop 2688)))]
     [(and (not heavy-worker-rush-at-base?) (null? owned-base-minerals))
      (for ([w (in-list idle-workers)])
        (cond
@@ -10477,7 +10786,7 @@
                (not (set-member? commanded-this-frame (sc2-unit-tag w)))
                (not (worker-returning-cargo? w)))
           (define best-min (pick-nearest-safe-map-mineral w safe-map-minerals))
-          (issue-long-distance-mine! w best-min #:macro-econ? #t)]))
+          (issue-long-distance-mine! w best-min #:macro-econ? #f)]))
      ;; Upgrade workers already `MOVE (16)`-ing toward a snapshot mineral patch the instant vision
      ;; reveals `display-type = 1` nearby so they begin mining immediately via `SMART (3666)`!
      (define vis-safe-map-mins
@@ -10504,7 +10813,7 @@
                                                     14.0)))
                                          vis-safe-map-mins))))))
          (define best-min (pick-nearest-safe-map-mineral w vis-safe-map-mins))
-         (issue-long-distance-mine! w best-min #:macro-econ? #t)))])
+         (issue-long-distance-mine! w best-min #:macro-econ? #f)))])
 
   ;; 1b. Opening Anti-Bounce Close-Patch Lock (`cur-loop <= 336`):
   ;;     Prevent SC2 auto-bounce from kicking Frame-0 workers off their assigned close patch.
@@ -10792,9 +11101,7 @@
                              (sc2-point3d-x wp) (sc2-point3d-y wp)))))
         (define ranked-xfers (sort transferable < #:key xfer-worker-score))
         (define xfer-macro-econ?
-          (or early-natural-split?
-              (< cur-loop 6720)
-              (< (th-effective-assigned dst-th) 8)))
+          early-natural-split?)
         (for ([chosen-w (in-list (take ranked-xfers (min transfer-limit (length ranked-xfers))))])
           (define best-dst-min (pick-best-slot-patch chosen-w dst-mins))
           (define bmtag (sc2-unit-tag best-dst-min))
@@ -10924,6 +11231,10 @@
       (ormap (lambda (e) (memv (sc2-unit-unit-type e) '(41 26 50 55))) enemy-units))
     (when seen-terran-cloak-tech-now?
       (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #t))
+    (define seen-protoss-dt-prism-now?
+      (ormap (lambda (e) (memv (sc2-unit-unit-type e) '(69 76 81 136))) enemy-units))
+    (when seen-protoss-dt-prism-now?
+      (set-box! SC2-SAT-SEEN-PROTOSS-DT-PRISM? #t))
     (define gi-enemy-race
       (and (sc2-game-info? game-info)
            (let ([my-pid (sc2-player-common-player-id pc)])
@@ -10974,8 +11285,15 @@
                        self-units))))
     (define proactive-scan-oc-limit
       (cond
-        ;; TvP >= 4:00 (5376f): reserve Scan on top-1 OC ONLY until >= 3 ready OCs (then 2 OCs),
-        ;; so 2-base Terran OC #2 MULEs freely at 50e instead of suffering a 65s blackout!
+        ;; L60 (`#1580` Anti-DT `#74 TvP who`): Once enemy DarkShrine (69), DarkTemplar (76),
+        ;; or WarpPrism (81/136) is scouted in TvP, immediately reserve Scan on up to 2 ready OCs
+        ;; so a Warp Prism DT drop cannot exhaust a single Scan!
+        [(and (memq sat-enemy-race '(Protoss Random))
+              (or seen-protoss-dt-prism-now?
+                  (unbox SC2-SAT-SEEN-PROTOSS-DT-PRISM?)))
+         (if (>= (length ready-ocs) 2) 2 1)]
+        ;; L59-C (`#1565`/`#1566` Fix #3): In unprovoked TvP >= 4:00 (5376f), hold Scan on 1 OC ONLY
+        ;; until >= 3 ready OCs (then 2 OCs) so 2-base Terran OC #2 MULEs freely at 50e!
         [(and (>= cur-loop 5376)
               (memq sat-enemy-race '(Protoss Random)))
          (if (>= (length ready-ocs) 3) 2 1)]
@@ -11441,6 +11759,7 @@
       (set-box! SC2-ACTIVE-RECALL-ZONES '())
       (set-box! SC2-NEXUS-RECALL-READY-LOOP -10000)
       (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #f)
+      (set-box! SC2-SAT-SEEN-PROTOSS-DT-PRISM? #f)
       (set-box! SC2-SAT-SEEN-ENEMY-CLOAK? #f))
     (set-box! SC2-WIRE-LAST-LOOP-BOX cur-loop)
     (let ([rzs (unbox SC2-ACTIVE-RECALL-ZONES)])
@@ -11498,6 +11817,7 @@
       (set-box! SC2-ACTIVE-RECALL-ZONES '())
       (set-box! SC2-NEXUS-RECALL-READY-LOOP -10000)
       (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #f)
+      (set-box! SC2-SAT-SEEN-PROTOSS-DT-PRISM? #f)
       (set-box! SC2-SAT-SEEN-ENEMY-CLOAK? #f)
       (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
       (set-box! SC2-TERRITORY-FIELD-CACHE #f)
@@ -17783,6 +18103,10 @@
                 (ormap (lambda (e) (memv (sc2-unit-unit-type e) '(41 26 50 55))) enemy-units))
               (when case-c-seen-terran-cloak-tech?
                 (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #t))
+              (define case-c-seen-protoss-dt-prism?
+                (ormap (lambda (e) (memv (sc2-unit-unit-type e) '(69 76 81 136))) enemy-units))
+              (when case-c-seen-protoss-dt-prism?
+                (set-box! SC2-SAT-SEEN-PROTOSS-DT-PRISM? #t))
               (define case-c-gi-enemy-race
                 (and (sc2-game-info? eff-game-info)
                      (sc2-observation? obs)
@@ -17821,6 +18145,10 @@
                         self-units))
               (define case-c-proactive-scan-oc-limit
                 (cond
+                  [(and (memq case-c-enemy-race '(Protoss Random))
+                        (or case-c-seen-protoss-dt-prism?
+                            (unbox SC2-SAT-SEEN-PROTOSS-DT-PRISM?)))
+                   (if (>= (length ready-ocs-c) 2) 2 1)]
                   [(and (>= cur-loop 5376)
                         (memq case-c-enemy-race '(Protoss Random)))
                    (if (>= (length ready-ocs-c) 3) 2 1)]
@@ -20307,9 +20635,9 @@
 
 (define SC2-FASTER-LOOPS-PER-MINUTE 1344.0)
 (define SC2-WIRE-COALESCABLE-ABILITIES
-  (seteqv 16 17 18 23 42 76 171 380 388 390 403 405 556 558 1036 1042 1442 1526
+  (seteqv 16 17 18 23 42 76 171 316 380 388 390 403 405 556 558 1036 1042 1442 1526
           1692 1725 1727 1729 1731 1882 2095 2097 2108 2110 2244 2328 2338 2346 2375 2387 2393 2706
-          3661 3662 3665 3666 3667 3674 3675 3680 3681 3687 4109))
+          3661 3662 3665 3666 3667 3674 3675 3680 3681 3685 3687 4109))
 
 (struct wire-apm-governor
   (target-apm
@@ -20323,7 +20651,7 @@
   #:mutable
   #:transparent)
 
-(define (make-wire-apm-governor #:target-apm [target-apm 495.0]
+(define (make-wire-apm-governor #:target-apm [target-apm 530.0]
                                 #:hard-cap-apm [hard-cap-apm 595.0]
                                 #:burst-capacity [burst-cap #f])
   (define eff-target (exact->inexact target-apm))
@@ -20357,25 +20685,24 @@
       ;; P3: Routine harvest, worker rebalance & non-urgent Bunker Salvage (`32`)
       [(memv ab '(32 166 167 295 296 298 299 1183 1184 3666 3667))
        3]
-      ;; P2: Combat attack, move, kite, hold-position, patrol, stop, & Supply Depot raise (`558`)
-      ;;     (L54-W1: Supply Depot lower `556` promoted to P1 — and P0 urgent-survival on friendly
-      ;;      transit — so trapped-army MOVE/ATTACK spam can NEVER starve ramp lowering!)
-      [(memv ab '(4 5 6 7 16 17 18 19 20 23 24 25 558 2099 3665 3674 3771 3793 3794 3795))
+      ;; P2: Combat attack, move, kite, hold-position, patrol, stop, Supply Depot raise (`558`),
+      ;;     SCV Repair (`316`/`3685`), & Building Land (`419`/`520`/`522`/`554`/`1524`/`3678`)
+      ;;     (L60 `#1580`: Repair & Land demoted out of P1 so defense repair / blocked landing
+      ;;      can NEVER flood P1 rescue and starve Marine/Tank/SCV/MULE production!)
+      [(memv ab '(4 5 6 7 16 17 18 19 20 23 24 25 316 419 520 522 554 558 1524 2099
+                  3665 3674 3678 3685 3771 3793 3794 3795))
        2]
       ;; P1: Macro build, expand, morph, train, warp-in, research, tumor, MULE, & Supply Depot lower (`556`)
       [else 1]))
   (cond
     [(or (sc2-chat-action? cmd) (WireChat? cmd)) 0]
-    [(framing-camera-cmd? cmd) 1]
+    [(framing-camera-cmd? cmd) 2]
     [(pro-camera-jump-cmd? cmd) 2]
     [(or (sc2-raw-camera-move? cmd) (WireCameraMove? cmd)) 4]
     [(urgent-survival-cmd? cmd) 0]
     [(macro-econ-cmd? cmd) 1]
     [(sc2-raw-unit-command? cmd)
-     (define ab (sc2-raw-unit-command-ability-id cmd))
-     (if (and (sc2-raw-unit-command-queue? cmd) (memv ab '(3666 3667)))
-         2
-         (ab-tier ab))]
+     (ab-tier (sc2-raw-unit-command-ability-id cmd))]
     [(WireCmdNone? cmd) (ab-tier (NoTargetAbility-id (WireCmdNone-ability cmd)))]
     [(WireCmdPoint? cmd) (ab-tier (PointTargetAbility-id (WireCmdPoint-ability cmd)))]
     [(WireCmdUnit? cmd) (ab-tier (UnitTargetAbility-id (WireCmdUnit-ability cmd)))]
@@ -20397,6 +20724,7 @@
 (define SC2-GOV-LAST-P3-LOOP (make-weak-hasheq))
 (define SC2-GOV-P0-MODE-DEDUP (make-weak-hasheq))
 (define SC2-GOV-URGENT-COMBAT-DEDUP (make-weak-hasheq))
+(define SC2-GOV-REPAIR-DEDUP (make-weak-hasheq))
 (define SC2-GOV-UNCHANGED-REPEAT (make-weak-hasheq))
 (define SC2-GOV-APM-DROP-STATS (make-weak-hasheq))
 (struct wire-apm-drop-tracker
@@ -20498,7 +20826,7 @@
 (define SC2-GOV-P0-MODE-SWITCH-ABILITIES
   (seteqv 388 390 403 405 556 558 1978 1998 2095 2097 2108 2110 2362 2364 2558 2560))
 (define SC2-GOV-P1-ADDON-ABILITIES
-  (seteqv 421 422 454 455 487 488 3682 3683))
+  (seteqv 419 421 422 454 455 487 488 520 522 554 1524 3678 3682 3683))
 
 (define (govern-sc2-wire-actions! gov raw-cmds game-loop [_obs #f])
   (define cur-loop (if (exact-integer? game-loop) (max 0 game-loop) 0))
@@ -20520,6 +20848,7 @@
     (hash-set! SC2-GOV-LAST-P3-LOOP gov -1000)
     (hash-set! SC2-GOV-P0-MODE-DEDUP gov (make-hash))
     (hash-set! SC2-GOV-URGENT-COMBAT-DEDUP gov (make-hash))
+    (hash-set! SC2-GOV-REPAIR-DEDUP gov (make-hash))
     (hash-set! SC2-GOV-UNCHANGED-REPEAT gov (make-hash))
     (hash-remove! SC2-GOV-APM-DROP-STATS gov))
   (define gov-mode-dedup
@@ -20531,6 +20860,11 @@
     (or (hash-ref SC2-GOV-URGENT-COMBAT-DEDUP gov #f)
         (let ([ht (make-hash)])
           (hash-set! SC2-GOV-URGENT-COMBAT-DEDUP gov ht)
+          ht)))
+  (define gov-repair-dedup
+    (or (hash-ref SC2-GOV-REPAIR-DEDUP gov #f)
+        (let ([ht (make-hash)])
+          (hash-set! SC2-GOV-REPAIR-DEDUP gov ht)
           ht)))
   (define gov-unchanged-repeat
     (or (hash-ref SC2-GOV-UNCHANGED-REPEAT gov #f)
@@ -20665,6 +20999,18 @@
     (define k (urgent-combat-dedup-key c))
     (and k (< (- cur-loop (hash-ref gov-urgent-combat-dedup k -1000)) 8)))
 
+  ;; L60 (`#1580`): 12-loop repeat dedup on identical `(ab, target-unit-tag, sorted-tags)` SCV Repair
+  ;; (`316`/`3685`) orders so defense repair never spams the token bucket (`17,853` drops -> 0)!
+  (define (repair-dedup-key c)
+    (and (sc2-raw-unit-command? c)
+         (memv (sc2-raw-unit-command-ability-id c) '(316 3685))
+         (list (sc2-raw-unit-command-ability-id c)
+               (sc2-raw-unit-command-target-unit-tag c)
+               (sort (sc2-raw-unit-command-unit-tags c) <))))
+  (define (repair-dedup-drop? c)
+    (define k (repair-dedup-key c))
+    (and k (< (- cur-loop (hash-ref gov-repair-dedup k -1000)) 12)))
+
   (define coalesced0
     (coalesce-sc2-raw-commands filtered0 SC2-WIRE-COALESCABLE-ABILITIES chunk-tag-list))
 
@@ -20742,6 +21088,7 @@
     (filter (lambda (c)
               (and (not (mode-switch-dedup-drop? c))
                    (not (urgent-combat-dedup-drop? c))
+                   (not (repair-dedup-drop? c))
                    (not (hash-has-key? unchanged-drop-set c))))
             coalesced0))
 
@@ -20773,7 +21120,19 @@
     (hash-set! apm-fail-ht cmd reason))
   (define (tier-token-floor tier cmd)
     (case tier
-      [(0)  (if (or (urgent-survival-cmd? cmd) (opening-worker-split-cmd? cmd)) -4.0 -1.0)]
+      [(0)
+       (cond
+         [(opening-worker-split-cmd? cmd) -4.0]
+         [(and (urgent-survival-cmd? cmd)
+               (sc2-raw-unit-command? cmd)
+               (memv (sc2-raw-unit-command-ability-id cmd) '(23 16)))
+          -2.0]  ;; L60 (`#1580`): cap urgent 23/16 overdraft so P0 spells (251/2338/3675) never starve!
+         [(urgent-survival-cmd? cmd) -4.0]
+         [(and (sc2-raw-unit-command? cmd)
+               (set-member? SC2-GOV-P0-MODE-SWITCH-ABILITIES
+                            (sc2-raw-unit-command-ability-id cmd)))
+          -1.0]  ;; Keep non-urgent P0 mode-switches (388/390/403/405) at -1.0 so they never starve P1 macro
+         [else -3.0])]  ;; L60 (`#1580`): lower non-urgent P0 active spell floor -1.0 -> -3.0
       [(1)  0.0]  ;; P1 macro executes whenever >= ev-cost tokens remain (never starved behind P2!)
       [(2)  4.0]  ;; P2 combat leaves >= 4 tokens for P0/P1
       [(3)  8.0]  ;; P3 harvest/lower leaves >= 8 tokens for P0/P1/P2
@@ -20820,7 +21179,8 @@
         (define hr-floor (hr-floor-fn chosen))
         (define dedup-blocked?
           (or (mode-switch-dedup-drop? chosen)
-              (urgent-combat-dedup-drop? chosen)))
+              (urgent-combat-dedup-drop? chosen)
+              (repair-dedup-drop? chosen)))
         (define cap-fail?
           (and (> ev-cost 0)
                (< (- rem-headroom cost-fl) hr-floor)))
@@ -20851,6 +21211,10 @@
           (when uc-key
             (when (> (hash-count gov-urgent-combat-dedup) 512) (hash-clear! gov-urgent-combat-dedup))
             (hash-set! gov-urgent-combat-dedup uc-key cur-loop))
+          (define rp-key (repair-dedup-key chosen))
+          (when rp-key
+            (when (> (hash-count gov-repair-dedup) 512) (hash-clear! gov-repair-dedup))
+            (hash-set! gov-repair-dedup rp-key cur-loop))
           (define ur-meta (hash-ref unchanged-cmd-meta chosen #f))
           (when ur-meta
             (when (> (hash-count gov-unchanged-repeat) 512) (hash-clear! gov-unchanged-repeat))
@@ -20912,13 +21276,35 @@
                       (set-member? SC2-GOV-P0-MODE-SWITCH-ABILITIES
                                    (sc2-raw-unit-command-ability-id c))))
                p0-cmds))
-  (run-cmd-list! p0-urgent-cmds
+  (define-values (p0-urgent-23-16-cmds p0-spells-and-survival-cmds)
+    (partition (lambda (c)
+                 (and (urgent-survival-cmd? c)
+                      (sc2-raw-unit-command? c)
+                      (memv (sc2-raw-unit-command-ability-id c) '(23 16))))
+               p0-urgent-cmds))
+  (define-values (p0-urgent-non23-cmds p0-active-spell-cmds)
+    (partition (lambda (c)
+                 (or (urgent-survival-cmd? c)
+                     (opening-worker-split-cmd? c)))
+               p0-spells-and-survival-cmds))
+  ;; L60 (`#1580`): Execute active P0 spells (251/2338/3675/1036/1628/399, floor -3.0) first,
+  ;; then urgent 23/16 survival (capped at -2.0), then critical non-23/16 survival (407/split, -4.0)
+  ;; so urgent 23/16 bursts never starve P0 spells while 407+23 both clear under tight tokens!
+  (run-cmd-list! p0-active-spell-cmds
+                 (lambda (c) (tier-token-floor 0 c))
+                 (lambda (_) (tier-headroom-floor 0)))
+  (run-cmd-list! p0-urgent-23-16-cmds
+                 (lambda (c) (tier-token-floor 0 c))
+                 (lambda (_) (tier-headroom-floor 0)))
+  (run-cmd-list! p0-urgent-non23-cmds
                  (lambda (c) (tier-token-floor 0 c))
                  (lambda (_) (tier-headroom-floor 0)))
 
   ;; 1b. W7-P0-2-wire: Guaranteed overdue rescue slot for large multi-unit P2 combat march/attack
   ;;     commands (>= 8 tags, AB 23/16) when >= 8 loops have elapsed since last P2 emission, so
   ;;     late-game P1 creep-tumor / macro bursts NEVER starve army-wide marches or endgame hunts!
+  ;;     L60 (`#1580`): Tighten overdraft floor `-2.0 -> -1.0` and cap overdraft count to `<= 2`
+  ;;     when tokens < 6.0 so P2 large rescues never starve P0 spells or P1 macro.
   (define p2-cmds (cmds-for-tier 2))
   (define p2-large-cmds
     (sort
@@ -20931,7 +21317,10 @@
      #:key (lambda (c) (length (sc2-raw-unit-command-unit-tags c)))))
   (when (and (pair? p2-large-cmds)
              (>= (- cur-loop (hash-ref SC2-GOV-LAST-P2-LOOP gov -1000)) 8))
-    (run-cmd-list! p2-large-cmds (lambda (_) -2.0) (lambda (_) 2.0) #:max-count 4))
+    (run-cmd-list! p2-large-cmds
+                   (lambda (_) -1.5)
+                   (lambda (_) 2.0)
+                   #:max-count (if (>= (wire-apm-governor-tokens gov) 6.0) 4 1)))
 
   ;; 1c. L33-P0-1: Overdue P1 macro rescue (`>= 8` loops since `SC2-GOV-LAST-P1-LOOP`, `#:max-count 4`,
   ;;     `hr-floor = 0.0`) runs BEFORE non-urgent P0 mode switches (`1d`).
@@ -20966,7 +21355,7 @@
              (>= (- cur-loop (hash-ref SC2-GOV-LAST-P3-LOOP gov -1000)) 24))
     (run-cmd-list! p3-cmds (lambda (_) 1.5) (lambda (_) 8.0) #:max-count 1))
   (define pro-cam-cmds
-    (filter pro-camera-jump-cmd? p2-cmds))
+    (filter (lambda (c) (or (pro-camera-jump-cmd? c) (framing-camera-cmd? c))) p2-cmds))
   (when (and (pair? pro-cam-cmds)
              (>= (- cur-loop (wire-apm-governor-last-cam-loop gov)) 28))
     (run-cmd-list! pro-cam-cmds (lambda (_) 0.0) (lambda (_) 4.0) #:max-count 1))

@@ -61,6 +61,8 @@
  lookup-point-target-ability
  lookup-unit-target-ability
  lookup-autocast-ability
+ register-live-typed-ability-target!
+ reset-live-typed-ability-overrides!
  canonicalize-harvest-return-ability-id
  canonicalize-harvest-gather-ability-id
 
@@ -136,7 +138,6 @@
 (define SC2-MAX-UINT64 : Positive-Integer #xFFFFFFFFFFFFFFFF)
 (define SC2-WORLD-COORD-MIN : Flonum 0.0)
 (define SC2-WORLD-COORD-MAX : Flonum 256.0)
-(define SC2-ABILITY-TABLE-SIZE : Positive-Integer 4200)
 
 (struct NoTargetAbility ([id : Positive-Integer])
   #:transparent
@@ -242,7 +243,7 @@
       #f))
 
 ;; =============================================================================
-;; 2. Ground-Truth LotV `ability_id` Witness Tables (`O(1)` Vector Dispatch)
+;; 2. Ground-Truth LotV `ability_id` Witness Tables (`O(1)` `hasheqv` Dispatch)
 ;; =============================================================================
 ;;
 ;; Ground-truth verified against Blizzard `s2clientprotocol` LotV `ability_id`:
@@ -261,18 +262,32 @@
 ;;     `UNLOADALLAT* (396, 913, 1408, 3669)`.
 ;;   - Dual-mode `PointOrNone`: Terran AddOns `421, 422, 454, 455, 487, 488, 3682, 3683`
 ;;     plus generic root/uproot `3680, 3681`.
+;;   - Loop 60 Phase 0: Unbounded `hasheqv` tables (no 4200 ID ceiling!) + live
+;;     `ResponseData` overlay hashes hydrated on frame 0 for forward patch resilience.
 
-(define NO-TARGET-ABILITY-VEC : (Vectorof (Option NoTargetAbility))
-  (make-vector SC2-ABILITY-TABLE-SIZE #f))
+(define NO-TARGET-ABILITY-HT : (Mutable-HashTable Integer NoTargetAbility)
+  (make-hasheqv))
 
-(define POINT-TARGET-ABILITY-VEC : (Vectorof (Option PointTargetAbility))
-  (make-vector SC2-ABILITY-TABLE-SIZE #f))
+(define POINT-TARGET-ABILITY-HT : (Mutable-HashTable Integer PointTargetAbility)
+  (make-hasheqv))
 
-(define UNIT-TARGET-ABILITY-VEC : (Vectorof (Option UnitTargetAbility))
-  (make-vector SC2-ABILITY-TABLE-SIZE #f))
+(define UNIT-TARGET-ABILITY-HT : (Mutable-HashTable Integer UnitTargetAbility)
+  (make-hasheqv))
 
-(define AUTOCAST-ABILITY-VEC : (Vectorof (Option AutocastAbility))
-  (make-vector SC2-ABILITY-TABLE-SIZE #f))
+(define AUTOCAST-ABILITY-HT : (Mutable-HashTable Integer AutocastAbility)
+  (make-hasheqv))
+
+(define LIVE-NO-TARGET-ABILITY-HT : (Mutable-HashTable Integer NoTargetAbility)
+  (make-hasheqv))
+
+(define LIVE-POINT-TARGET-ABILITY-HT : (Mutable-HashTable Integer PointTargetAbility)
+  (make-hasheqv))
+
+(define LIVE-UNIT-TARGET-ABILITY-HT : (Mutable-HashTable Integer UnitTargetAbility)
+  (make-hasheqv))
+
+(define LIVE-AUTOCAST-ABILITY-HT : (Mutable-HashTable Integer AutocastAbility)
+  (make-hasheqv))
 
 ;; Strictly `NoTarget` abilities (excludes `1766` MORPH_ARCHON which requires `WireCmdArchon`)
 (define STRICT-NO-TARGET-IDS : (Listof Positive-Integer)
@@ -371,42 +386,69 @@
   '(78 316 386 1042 1819 1990 2099 2328 2350 2704 3685 4113))
 
 (for ([id (in-list (append STRICT-NO-TARGET-IDS POINT-OR-NONE-IDS))])
-  (when (< id SC2-ABILITY-TABLE-SIZE)
-    (vector-set! NO-TARGET-ABILITY-VEC id (raw-NoTargetAbility id))))
+  (hash-set! NO-TARGET-ABILITY-HT id (raw-NoTargetAbility id)))
 
 (for ([id (in-list (append STRICT-POINT-TARGET-IDS POINT-OR-NONE-IDS POINT-OR-UNIT-IDS))])
-  (when (< id SC2-ABILITY-TABLE-SIZE)
-    (vector-set! POINT-TARGET-ABILITY-VEC id (raw-PointTargetAbility id))))
+  (hash-set! POINT-TARGET-ABILITY-HT id (raw-PointTargetAbility id)))
 
 (for ([id (in-list (append STRICT-UNIT-TARGET-IDS POINT-OR-UNIT-IDS))])
-  (when (< id SC2-ABILITY-TABLE-SIZE)
-    (vector-set! UNIT-TARGET-ABILITY-VEC id (raw-UnitTargetAbility id))))
+  (hash-set! UNIT-TARGET-ABILITY-HT id (raw-UnitTargetAbility id)))
 
 (for ([id (in-list AUTOCAST-IDS)])
-  (when (< id SC2-ABILITY-TABLE-SIZE)
-    (vector-set! AUTOCAST-ABILITY-VEC id (raw-AutocastAbility id))))
+  (hash-set! AUTOCAST-ABILITY-HT id (raw-AutocastAbility id)))
 
-(: lookup-ability-vec (All (T) (-> (Vectorof (Option T)) Integer (Option T))))
-(define (lookup-ability-vec vec id)
-  (if (and (> id 0) (< id SC2-ABILITY-TABLE-SIZE))
-      (vector-ref vec id)
+(: register-live-typed-ability-target! (-> Integer Symbol Boolean Void))
+(define (register-live-typed-ability-target! id target-mode allow-autocast?)
+  (when (> id 0)
+    ;; 1766 MORPH_ARCHON must always flow through WireCmdArchon (2 distinct Templar tags)
+    (unless (= id 1766)
+      (case target-mode
+        [(none)
+         (hash-set! LIVE-NO-TARGET-ABILITY-HT id (raw-NoTargetAbility id))]
+        [(point)
+         (hash-set! LIVE-POINT-TARGET-ABILITY-HT id (raw-PointTargetAbility id))]
+        [(unit)
+         (hash-set! LIVE-UNIT-TARGET-ABILITY-HT id (raw-UnitTargetAbility id))]
+        [(point-or-unit)
+         (hash-set! LIVE-POINT-TARGET-ABILITY-HT id (raw-PointTargetAbility id))
+         (hash-set! LIVE-UNIT-TARGET-ABILITY-HT id (raw-UnitTargetAbility id))]
+        [(point-or-none)
+         (hash-set! LIVE-POINT-TARGET-ABILITY-HT id (raw-PointTargetAbility id))
+         (hash-set! LIVE-NO-TARGET-ABILITY-HT id (raw-NoTargetAbility id))]
+        [else (void)]))
+    (when allow-autocast?
+      (hash-set! LIVE-AUTOCAST-ABILITY-HT id (raw-AutocastAbility id)))))
+
+(: reset-live-typed-ability-overrides! (-> Void))
+(define (reset-live-typed-ability-overrides!)
+  (hash-clear! LIVE-NO-TARGET-ABILITY-HT)
+  (hash-clear! LIVE-POINT-TARGET-ABILITY-HT)
+  (hash-clear! LIVE-UNIT-TARGET-ABILITY-HT)
+  (hash-clear! LIVE-AUTOCAST-ABILITY-HT))
+
+(: lookup-ability-ht
+   (All (T) (-> (Mutable-HashTable Integer T) (Mutable-HashTable Integer T) Integer (Option T))))
+(define (lookup-ability-ht live-ht static-ht id)
+  (if (> id 0)
+      (or (hash-ref live-ht id (lambda () #f))
+          (hash-ref static-ht id (lambda () #f)))
       #f))
 
 (: lookup-no-target-ability (-> Integer (Option NoTargetAbility)))
 (define (lookup-no-target-ability id)
-  (lookup-ability-vec NO-TARGET-ABILITY-VEC id))
+  (lookup-ability-ht LIVE-NO-TARGET-ABILITY-HT NO-TARGET-ABILITY-HT id))
 
 (: lookup-point-target-ability (-> Integer (Option PointTargetAbility)))
 (define (lookup-point-target-ability id)
-  (lookup-ability-vec POINT-TARGET-ABILITY-VEC id))
+  (lookup-ability-ht LIVE-POINT-TARGET-ABILITY-HT POINT-TARGET-ABILITY-HT id))
 
 (: lookup-unit-target-ability (-> Integer (Option UnitTargetAbility)))
 (define (lookup-unit-target-ability id)
-  (lookup-ability-vec UNIT-TARGET-ABILITY-VEC id))
+  (lookup-ability-ht LIVE-UNIT-TARGET-ABILITY-HT UNIT-TARGET-ABILITY-HT id))
 
 (: lookup-autocast-ability (-> Integer (Option AutocastAbility)))
 (define (lookup-autocast-ability id)
-  (lookup-ability-vec AUTOCAST-ABILITY-VEC id))
+  (lookup-ability-ht LIVE-AUTOCAST-ABILITY-HT AUTOCAST-ABILITY-HT id))
 
 (: canonicalize-harvest-return-ability-id (-> Integer Integer))
 (define (canonicalize-harvest-return-ability-id ab-id)
