@@ -28,6 +28,7 @@
          "mirror-mind-predictor.rkt"
          "econ-ledger.rkt"
          "priority-macro-brain.rkt"
+         "sc2-game-constants.rkt"
          "sc2-protobuf-ws.rkt"
          "sc2-combat-eval.rkt")
 
@@ -1120,15 +1121,17 @@
   ;; ---------------------------------------------------------------------------
   (define pv1-states 0)
   (define pv1-cex #f)
+  (define (tech-spec sym)
+    (list sym (sc2-min-cost sym) (sc2-gas-cost sym)))
   (define race-tech-specs
-    (hash 'Zerg    (list (list 'roach-warren 150 0)
-                         (list 'hydralisk-den 100 100)
-                         (list 'spire 200 200))
-          'Terran  (list (list 'stimpack 100 100)
-                         (list 'barracks 150 0))
-          'Protoss (list (list 'cybernetics-core 150 0)
-                         (list 'robotics-facility 150 100)
-                         (list 'gateway 150 0))))
+    (hash 'Zerg    (list (tech-spec 'roach-warren)
+                         (tech-spec 'hydralisk-den)
+                         (tech-spec 'spire))
+          'Terran  (list (tech-spec 'stimpack)
+                         (tech-spec 'barracks))
+          'Protoss (list (tech-spec 'cybernetics-core)
+                         (tech-spec 'robotics-facility)
+                         (tech-spec 'gateway))))
   (for* ([race (in-list PV-LATTICE-RACES)]
          [active-bases (in-list pv-bases)]
          [workers (in-list pv-workers)]
@@ -1731,7 +1734,7 @@
        pm))
     (define u-expand
       (compute-candidate-marginal-utility
-       (priority-candidate 'hatchery 'expansion '(expand 50.5 56.5) 275 0 0 0.0 'medium #f)
+       (priority-candidate 'hatchery 'expansion '(expand 50.5 56.5) (sc2-min-cost 'hatchery) 0 0 0.0 'medium #f)
        pm))
     (define expected-method
       (cond

@@ -980,6 +980,7 @@ def load_rich_report_telemetry(
                     (canon_id in shipped_ids)
                     or (it_n == 57 and not suf and sh_n == 10)
                     or (it_n == 59 and suf.lower() == "c" and sh_n == 11)
+                    or (it_n == 60 and suf.lower() == "b" and sh_n == 12)
                 )
         if latest_is_shipped and (latest_ship_iter, latest_ship_num) > (live_ship_iter, live_ship_num):
             live_ship_iter, live_ship_num = latest_ship_iter, latest_ship_num
@@ -1164,7 +1165,7 @@ def load_rich_report_telemetry(
                  OR m.run_id LIKE '%iter48%' OR m.run_id LIKE '%iter49_ship8_clean_full%'
                  OR m.run_id LIKE '%iter50_w3_full%' OR m.run_id LIKE '%iter51_ship9_full%'
                  OR m.run_id LIKE '%iter57_ship10_full%' OR m.run_id LIKE '%iter58b_ship11_full%'
-                 OR m.run_id LIKE '%iter59c_ship11_full%')
+                 OR m.run_id LIKE '%iter59c_ship11_full%' OR m.run_id LIKE '%iter60b_ship12_full%')
         """
 
         # Per-matchup Local stats (All 26 external opponents)
@@ -2528,6 +2529,12 @@ def render_tactics_explorer_section(
         if a3.get("all_rec") and a3.get("all_total")
         else ""
     )
+    l60_arena_note = (
+        "Loop 60 updates lifted Ability Mastery to <strong>22–10</strong> (Protoss <strong>9–0</strong> sweep) "
+        "and restored Non-Combat destructible-rock and mineral-walk shortcuts to <strong>62.0/100</strong> average. "
+        if int(a3.get("loop_num") or 0) >= 60
+        else ""
+    )
 
     return f"""
 <section class="section-rule wide-col" id="tactics-section">
@@ -2539,8 +2546,7 @@ def render_tactics_explorer_section(
       without playing a full match. Below are all <strong>{total_recorded_clips}</strong> tactical scenarios currently
       captured as real 3D StarCraft II video across <strong>{pop_cats}</strong> categories ({all_suite_note}latest core check:
       <strong>{html.escape(a3['dummy_rec'])}</strong> at <strong>{a3['dummy_trade']:.2f}×</strong> trade vs. scripted AI,
-      <strong>{html.escape(a3['sp_rec'])}</strong> at <strong>{a3['sp_trade']:.2f}×</strong> vs. self).
-      Videos stay unloaded until you press play.
+      <strong>{html.escape(a3['sp_rec'])}</strong> at <strong>{a3['sp_trade']:.2f}×</strong> vs. self). {l60_arena_note}Videos stay unloaded until you press play.
     </p>
   </div>
 
@@ -3088,7 +3094,7 @@ def render_matchup_evaluation_section(
                  alt="Protoss base layouts at 4:10 comparing Grandmaster pros and Mothman"
                  data-lightbox-src="./media/pro_vs_mothman_protoss.png"
                  data-lightbox-alt="Protoss base layouts at 4:10 comparing Grandmaster pros and Mothman" />
-            <figcaption>Grandmaster reference maps alongside Mothman's 4:10 baseline layouts. On Release #11 (Build 59C), Protoss Pylon clumping dropped to 0.0% (down from 3.9% on Release #10, where natural power placement reached 100.0% and spacing averaged 15.3 tiles).</figcaption>
+            <figcaption>Grandmaster reference maps alongside Mothman's 4:10 baseline layouts. On Release #12 (Build 60B), Protoss Pylon clumping holds at 0.0% (down from 3.9% on Release #10, where natural power placement reached 100.0% and spacing averaged 15.3 tiles).</figcaption>
           </figure>
         </div>
         <div class="pro-bp-slot" data-pro-bp-panel="Terran" style="display:none;">
@@ -3126,7 +3132,7 @@ def render_matchup_evaluation_section(
           <tbody>{"".join(pro_bp_rows)}</tbody>
         </table>
       </div>
-      <p class="table-note" style="margin-top:0.45rem;">Reference audit table compares Grandmaster Pros against our pre-redesign 4:10 baseline (spacing in tiles, walls and power in % of games, static defense in average structures). After the layout redesign, Release #10 (Build 57) cut Protoss Pylon clumping to 3.9% (15.3-tile spacing) with 93.3% natural-base supply placement (100.0% Protoss, 86.4% Terran), and Release #11 (Build 59C) reached 0.0% Pylon clumping.</p>
+      <p class="table-note" style="margin-top:0.45rem;">Reference audit table compares Grandmaster Pros against our pre-redesign 4:10 baseline (spacing in tiles, walls and power in % of games, static defense in average structures). After the layout redesign, Release #10 (Build 57) cut Protoss Pylon clumping to 3.9% (15.3-tile spacing) with 93.3% natural-base supply placement (100.0% Protoss, 86.4% Terran), and Releases #11 and #12 held 0.0% Pylon clumping.</p>
     </div>
 """
 
@@ -3340,21 +3346,38 @@ def render_matchup_evaluation_section(
             if (apm_m is not None and apm_o is not None and apm_p is not None)
             else ""
         )
-        r11_mech_para = (
-            f'\n    <p class="prose-tight">'
-            f"On {html.escape(rel_lbl)}, effective speed and screen pace match Grandmaster benchmarks closely "
-            f"(median EPM {epm_m:.1f} vs. Pro {epm_p:.1f}; median SPM {spm_m:.1f} vs. Pro {spm_p:.1f}). "
-            f"Switching from edge scrolling to base-centered camera hotkeys and minimap clicks cut short camera pans "
-            f"(under 12 tiles) from 16.9%, 19.4%, and 31.8% down to 0.8%, 0.3%, and 3.1% across early, mid, and late game, "
-            f"while crisp camera jumps (18+ tiles) rose to 98.9%, 98.9%, and 91.6%. "
-            f"Compared with our previous benchmark (Build 58B), median army gas value climbed 43.4% (from 125 to 180 overall, and from 550 to 800 at minute 12), "
-            f"minute-12 mineral income rose 34.2% (from 1,063 to 1,427 per minute), Protoss third Nexus timing sped up by 86 seconds "
-            f"(7:23 to 5:57), Terran natural Command Center timing sped up by 19 seconds (1:54 to 1:35, ahead of the Pro 1:45 median), "
-            f"and Zerg Spire timing dropped by 110 seconds (10:02 to 8:12)."
-            f"</p>"
-            if (epm_m is not None and epm_p is not None and spm_m is not None and spm_p is not None and "59c" in str(pro_curves.get("run_id") or "").lower())
-            else ""
-        )
+        run_id_low = str(pro_curves.get("run_id") or "").lower()
+        if epm_m is not None and epm_p is not None and spm_m is not None and spm_p is not None and "60b" in run_id_low:
+            col_min_m = (cv_s_all.get("collection_minerals") or {}).get("mothman", {}).get("med")
+            col_min_str = f"{col_min_m:,.0f}" if col_min_m is not None else "1,031"
+            r_mech_para = (
+                f'\n    <p class="prose-tight">'
+                f"On {html.escape(rel_lbl)}, the bot now reads live StarCraft II unit costs, supply, abilities, and upgrades directly "
+                f"from the game engine at frame 0 (zero rejected commands across all 96 local validation games) and keeps effective speed "
+                f"and camera pace right on Grandmaster medians (median EPM {epm_m:.1f} vs. Pro {epm_p:.1f}; median SPM {spm_m:.1f} vs. Pro {spm_p:.1f}). "
+                f"Moving routine SCV Repair and building-land orders out of the economy tier cut high-priority economy command drops by 75.0% "
+                f"(from 74,602 to 18,634 across 84 games; Terran down 85.3%) and emergency spell drops by 27.4% (Inject Larva cut over 83%, "
+                f"Stimpack over 75%). Natural expansions hit Pro marks for Protoss (1:33 vs. Pro 1:29) and Zerg (0:53 vs. Pro 0:52), "
+                f"median mineral income rose to {col_min_str} per minute, and Protoss set a new local benchmark high (10–15–1 at 0.90× trade; "
+                f"PvP jumped from 1–7 to 4–4)."
+                f"</p>"
+            )
+        elif epm_m is not None and epm_p is not None and spm_m is not None and spm_p is not None and "59c" in run_id_low:
+            r_mech_para = (
+                f'\n    <p class="prose-tight">'
+                f"On {html.escape(rel_lbl)}, effective speed and screen pace match Grandmaster benchmarks closely "
+                f"(median EPM {epm_m:.1f} vs. Pro {epm_p:.1f}; median SPM {spm_m:.1f} vs. Pro {spm_p:.1f}). "
+                f"Switching from edge scrolling to base-centered camera hotkeys and minimap clicks cut short camera pans "
+                f"(under 12 tiles) from 16.9%, 19.4%, and 31.8% down to 0.8%, 0.3%, and 3.1% across early, mid, and late game, "
+                f"while crisp camera jumps (18+ tiles) rose to 98.9%, 98.9%, and 91.6%. "
+                f"Compared with our previous benchmark (Build 58B), median army gas value climbed 43.4% (from 125 to 180 overall, and from 550 to 800 at minute 12), "
+                f"minute-12 mineral income rose 34.2% (from 1,063 to 1,427 per minute), Protoss third Nexus timing sped up by 86 seconds "
+                f"(7:23 to 5:57), Terran natural Command Center timing sped up by 19 seconds (1:54 to 1:35, ahead of the Pro 1:45 median), "
+                f"and Zerg Spire timing dropped by 110 seconds (10:02 to 8:12)."
+                f"</p>"
+            )
+        else:
+            r_mech_para = ""
         pro_curves_section = f"""
   <div class="eval-subsection" id="performance-curves">
     <h3>2.4 Performance Curves and Timings vs. Opponents and Pros</h3>
@@ -3362,7 +3385,7 @@ def render_matchup_evaluation_section(
       Time-series comparison across all eight telemetry tracks from minute 0 to 15 (standard Faster game clock)
       comparing {html.escape(build_lbl)} ({cv_m_g} external games) against its exact local opponents ({cv_o_g} games) and
       Grandmaster LotV replays ({cv_p_g} player-games; {cv_p_ge} with full APM/EPM/SPM event streams).{apm_note}
-    </p>{r11_mech_para}
+    </p>{r_mech_para}
     <div class="interactive-panel site-curves-panel">
       <div class="site-curves-toolbar">
         <div class="arena-filter-group" role="group" aria-label="Filter curves by race">
@@ -3455,18 +3478,18 @@ def render_matchup_evaluation_section(
         spread_sentence = f"Per-race and per-matchup local practice results for {html.escape(rel_lbl)}."
 
     an_cur = cb.get("anomalies") or {}
-    weak_str = ", ".join(f"{mu} {wr:.1f}%" for mu, wr, _ in wr_vals_sorted[-3:][::-1]) if len(wr_vals_sorted) >= 3 else "PvP, ZvP, TvT"
+    weak_str = ", ".join(f"{mu} {wr:.1f}%" for mu, wr, _ in wr_vals_sorted[-3:][::-1]) if len(wr_vals_sorted) >= 3 else "ZvP, ZvZ, TvP"
     rot_gap_note = (
-        f"Base-switch rotations improved to {min(our_rot_vals):.2f} to {max(our_rot_vals):.2f} per game "
+        f"Base-switch rotations sit at {min(our_rot_vals):.2f} to {max(our_rot_vals):.2f} per game "
         f"(vs. Pro {min(pro_rot_vals):.2f} to {max(pro_rot_vals):.2f}), while units still trickle into sieged Tank or Tempest lines in tough games."
         if (our_rot_vals and pro_rot_vals)
         else "Units still trickle into sieged Tank or Tempest lines in tough games."
     )
     open_gaps = [
-        f"<strong>Action-budget contention during base defense:</strong> New per-priority command-budget telemetry on {html.escape(rel_lbl)} measured 592,320 burst-throttled commands across 84 games (zero hard-cap trips). Normalizing per minute showed that Terran losses drop 91% more high-priority economy orders than wins (135 vs. 71 per minute); repeated SCV Repair commands account for 45% of those drops and starve Marine, Tank, SCV, and MULE production under pressure. Moving routine repair and building-land orders into lower tiers and protecting spell slots is our top fix for the next build.",
-        f"<strong>Weakest matchups on {html.escape(build_lbl)} ({html.escape(weak_str)}):</strong> Delayed PvP natural expansions and Stalker/Immortal skirmishes, anti-Dark Templar scan and Observer timing against Warp Prism drops, and early mass-Reaper pressure in TvT account for the steepest losses.",
-        f"<strong>Remaining late-game expansion and upgrade gaps:</strong> Protoss third-base timing cut 86 seconds down to 5:57, while Terran third bases (7:46, 23% adoption vs. Pro 77%) and Zerg third Hatcheries (5:22) still trail Grandmaster curves and leave late-game gas income below Pro medians.",
-        f"<strong>Army staging and siege-range attrition ({an_cur.get('drip_feed_collapse', 0)} drip-feed, {an_cur.get('siege_range_zero_dps_loss', 0)} zero-damage siege losses, {an_cur.get('escrow_lockouts', 0)} escrow lockouts):</strong> {rot_gap_note}",
+        f"<strong>Midgame worker-harvest churn and townhall rallies:</strong> After cutting high-priority economy drops by 75% on {html.escape(rel_lbl)} (from 74,602 down to 18,634), repeated midgame harvest re-issues (70,080 throttled orders across 84 games) are now the single largest remaining macro command sink. Moving all three races to tag-based townhall worker rallies and per-base harvest cooldowns is our top cleanup for the next build.",
+        f"<strong>Cloak Banshee detection and early rush defense ({html.escape(weak_str)}; {an_cur.get('cloaked_unit_damage_loss', 0)} cloak wipeouts):</strong> All cloak wipeouts on {html.escape(build_lbl)} came from early Cloaked Banshees (zero Dark Templar losses), where Starport production temporarily preempted the first Missile Turret in TvT. Early mass-Reaper pressure in TvT and 1-base floods against early Protoss Robotics facilities are targeted alongside it.",
+        f"<strong>Late-game expansion and gas scaling:</strong> Natural expansions now match Grandmaster timings for Protoss (1:33) and Zerg (0:53), while late-game mineral and gas collection rates still trail Pro medians after minute 8 (1,031 vs. 1,631 minerals/min; 206 vs. 448 gas/min).",
+        f"<strong>Army staging and siege-range attrition ({an_cur.get('drip_feed_collapse', 0)} drip-feed, {an_cur.get('siege_range_zero_dps_loss', 0)} zero-damage siege losses):</strong> {rot_gap_note}",
     ]
     open_gaps_html = "".join(f"<li>{item}</li>" for item in open_gaps)
 

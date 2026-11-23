@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "iter59c_ship11_full",
+  "active_wave": "Loop 61 (Phase 1 Single-Source Costs/Spells + Parallel Per-Building Upgrades + 3-Race RALLY_WORKERS & Midgame Harvest Throttle)",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -5914,6 +5914,115 @@
         "remote_md5_match": "8/8",
         "competition_id": 38,
         "validation_matches": "5143855-5143862"
+      }
+    },
+    {
+      "id": "iter60b_ship12_full",
+      "status": "UNCONDITIONAL_LIVE_SHIP_12_PHASE0_LIVE_RESPONSE_DATA_H2H12_7W_5L_1_20X_PROTOSS_EXT78_10W_0_90X_ATH_UNSEEN12_9W_ATH_P1_DROPS_MINUS_75PCT",
+      "campaign": "Loops 29+ Self-Play, Tactics Arena 3.1 & Expanded Roster Campaign (Loop 60 Live Release #12: commit sqvvtrlm 4b9ea037, BuildVersion sqvvtrlm_acd7ad85 live on all 8 v1+v2 bots)",
+      "loop_self_improvements": [
+        "L60-LOOP-1 (Stage 1 H2H-First Hard-Stop Caught Non-Primary Upgrade Alias Bug in 6.8m, Saving ~35m): iter60_h2h_12 halted at 5W-7L (Protoss 0W-4L, WarpGate 581s/False) after isolating non-primary upgrade aliases blocked by live ResponseData checks (warp-gate-research, metabolic-boost, centrifical-hooks, terran-vehicle-and-ship-plating-1/2/3). A 10-line canonical ID+alias fanout fix flipped iter60b_h2h_12 to 7W-5L-0T (58.3%, 1.20x agg / 2.37x med) with all 3 races >=50%.",
+        "L60-LOOP-2 (Phase 0 Live Frame-0 ResponseData Hydration + APM Governor P1 Purification): Match-start ResponseData now hydrates live unit costs, weapons, ranges, speeds, armor, techlab prereqs, ability ranges/targets, upgrade costs/IDs, and effect radii across 96/96 live SC2 5.0.14 matches (0 rejects), while APM Governor P1/P0 purification cut P1 macro/prod drops -75.0% (74,602 -> 18,634; Terran -85.3%) and exposed 3666 midgame worker-harvest spam (70,080 drops) for Loop 61."
+      ],
+      "spec_summary": "Loop 60B (Live Release #12, commit sqvvtrlm 4b9ea037, BuildVersion sqvvtrlm_acd7ad85, live on all 8 v1+v2 AI Arena bots via deploy-aiarena.yml run 45120681255): Phase 0 live frame-0 ResponseData hydration + SC2 5.0.14 parity + APM Governor P1/P0 purification + PvP Nat/Observer + Anti-DT 2-OC Scan + Anti-Mass-Reaper. Inner Tactics Arena (48 scenarios) hit a new all-time high on ability-mastery (22W-10L-0D, 1.25x agg / 1.22x med, 27/32 spells, Protoss 9W-0L sweep) and restored non-combat drills nc-09 (70.0 PASS, 10/10 crossed) and nc-13 (100.0 PASS; 7P-9F avg 62.0/100). After Stage 1 H2H caught the upgrade-alias bug in 6.8m (saving ~35m), Loop 60B H2H_12 beat Release #11 ZIPs 7W-5L-0T (58.3%, 1.20x agg / 2.37x med; T 3-1 1.67x, Z 2-2 1.14x, P 2-2 0.98x) and completed 96/96 + 4/4 ELF ZIP smoke with 0 crashes, 0 faults, 0 wire rejects, 0 SELF_CANCEL, and 0 spikes >=500ms. Full roster: ALL_84 28W-51L-5T (33.3% WR / 39.3% NL, 0.69x, SB 4.2%), EXT_78 26W-47L-5T (33.3% WR / 39.7% NL, 0.68x, SB 4.4%), EXT_75 25W (+2W), CORE14 17W-24L-1T (40.5% WR / 42.9% NL, 0.78x), UNSEEN12 9W-23L-4T (25.0% WR / 36.1% NL, 0.57x; 9W ATH!), SELF_6 2W-4L-0T (0.81x). Standout highs: Protoss EXT_78 10W-15L-1T (38.5% WR, 0.90x ATH; PvP 1-7 -> 4-4-0 0.90x; Nat 93.0s exact Pro match; Annihilation 23.8% -> 9.2%); Terran ALL_84 10W-17L-1T (0.86x, +1W; TvT 2-5-1 -> 4-6-0 1.11x); Zerg W6 37.5 -> 39.5, Nat 52.7s (-2.5s), ArmyGas +20.4% (ZvT variance cleared); [APM_CAP_DROPS] total 592,320 -> 450,013 (-24.0%), P0 26,169 -> 18,987 (-27.4%), P1 74,602 -> 18,634 (-75.0%, Terran -85.3%), 251 Inject >83% cut; 6 simultaneous anomaly ATLs (PvPNatDelay 1, ZeroKill 4, zero_income 3, zero_gas 7, wk_plateau_8m 30.0%, early_bunk4m 0.83), WallTies 9->5, DripFeed 33->29, 4-Corner delta NL +0.5pp, p95 latency 26.69 -> 24.71ms. 4-Race ELF ZIP Smoke vs titania: 4W-0L-0T (100.0%, 10.37x agg / 14.08x med, 0 anomaly signatures, P1 drops -85.0% vs R11 smoke).",
+      "rev": "sqvvtrlm 4b9ea037 (BuildVersion sqvvtrlm_acd7ad85, LIVE AI ARENA SHIP #12)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_050237_iter60b_ship12_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_045541_iter60b_h2h_12",
+      "wave1_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_043437_iter60_h2h_12",
+      "zip_smoke_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_054828_iter60b_ship12_zip_smoke",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter60b_ship12_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter60b_h2h_12_score.json",
+      "zip_smoke_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter60b_ship12_zip_smoke_score.json",
+      "tactics_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter60_arena/pass1_ability_dummy.json",
+      "arena_passes": [
+        {
+          "pass_id": "pass1",
+          "label": "Loop 60 Ability-Mastery-32 (22W-10L ATH, 27/32 spells)",
+          "opponent": "dummy",
+          "suite": "ability-mastery",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter60_arena/pass1_ability_dummy.json"
+        },
+        {
+          "pass_id": "pass1",
+          "label": "Loop 60 Non-Combat-16 (7P-9F avg 62.0, nc-09 70.0 / nc-13 100.0)",
+          "opponent": "dummy",
+          "suite": "non-combat",
+          "result_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/loop/iter60_arena/pass1_noncombat_dummy.json"
+        }
+      ],
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "26W-47L-5T (33.3% WR / 39.7% NL, 0.68x; EXT_75 25W; CORE14 17W-24L-1T 42.9% NL 0.78x, UNSEEN12 9W-23L-4T 36.1% NL 0.57x [9W ATH]; ALL_84 28W-51L-5T 0.69x; SELF_6 2W-4L 0.81x; H2H_12 7W-5L 58.3% 1.20x; ZIP Smoke 4W-0L 10.37x)",
+      "win_rate_pct": 33.3,
+      "non_loss_pct": 39.7,
+      "core14_wr_pct": 40.5,
+      "unseen12_wins": 9,
+      "h2h_record": "7W-5L-0T (58.3%, 1.20x agg / 2.37x med vs Rel #11; W1 H2H stopped 5W-7L catching upgrade-alias bug)",
+      "trade_agg": 0.68,
+      "sup_blk_pct": 4.4,
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 4,
+      "prod_placement_stall_matches": 0,
+      "one_base_lockout_matches": 1,
+      "gas_rich_min_starved_matches": 8,
+      "cloaked_unit_damage_losses": 3,
+      "siege_range_zero_dps_losses": 12,
+      "zero_kill_collapse_matches": 4,
+      "drip_feed_collapse_matches": 29,
+      "wall_timeout_ties": 5,
+      "pro_mechanics_kpis": {
+        "apm_avg": 286.3,
+        "epm_avg": 146.6,
+        "epm_pro_ref": 147.6,
+        "spm_avg": 40.2,
+        "spm_pro_ref": 36.9,
+        "apm_cap_drops_total_84m": 450013,
+        "apm_cap_drops_p0_84m": 18987,
+        "apm_cap_drops_p1_84m": 18634
+      },
+      "stall_watchdog_kpis": {
+        "sup_cap_min_pct": 33.3,
+        "zero_income_matches": 3,
+        "zero_gas_matches": 7,
+        "wk_plateau_8m_pct": 30.0
+      },
+      "base_geometry_kpis": {
+        "pylon_clump_pct": 0.0,
+        "pylon_spacing_nn": 14.6,
+        "nat_supply_pct": 80.4,
+        "protoss_nat_supply_pct": 91.3,
+        "terran_nat_supply_pct": 69.6,
+        "zvz_nat_wall_pct": 0.0,
+        "early_bunkers_4m": 0.83
+      },
+      "by_race": {
+        "Protoss": {
+          "record": "EXT78 10W-15L-1T (38.5% WR / 42.3% NL, 0.90x ATH, SB 6.0%), ALL84 11W-17L-1T (0.83x), PvP 4-4-0 (0.90x vs 1-7 R11), Nat 93.0s (exact Pro 93s), Annihilation 9.2% (beats Pro 15.4%), PvPNatDelay 1 ATL, pylon_clump 0.0%",
+          "trade_agg": 0.9,
+          "sup_blk": 6.0
+        },
+        "Terran": {
+          "record": "EXT78 9W-16L-1T (34.6% WR / 38.5% NL, 0.76x, SB 2.5%), CORE14 6-8-0 (1.05x), UNSEEN12 3-8-1 (+2W), ALL84 10W-17L-1T (0.86x), TvT 4-6-0 (1.11x vs 2-5-1 R11), P1 APM drops -85.3% (39.7k -> 5.8k)",
+          "trade_agg": 0.76,
+          "sup_blk": 2.5
+        },
+        "Zerg": {
+          "record": "EXT78 7W-16L-3T (26.9% WR / 38.5% NL, 0.49x, SB 4.6%), CORE14 5-8-1 (0.50x), UNSEEN12 2-8-2 (0.48x), H2H 2-2 (1.14x), W6 39.5 (+2.0), Nat 52.7s (-2.5s), ArmyGas +20.4% (ZvT variance +1,808 OppPkA cleared)",
+          "trade_agg": 0.49,
+          "sup_blk": 4.6
+        }
+      },
+      "aiarena_deploy": {
+        "workflow": "deploy-aiarena.yml",
+        "run_id": 45120681255,
+        "url": "https://github.com/sticklane/mothman-sc2-bot/actions/runs/45120681255",
+        "status": "GREEN",
+        "duration_sec": 110,
+        "bots_active": 8,
+        "remote_md5_match": "8/8",
+        "competition_id": 38,
+        "validation_matches": "5145784-5145791"
       }
     }
   ],

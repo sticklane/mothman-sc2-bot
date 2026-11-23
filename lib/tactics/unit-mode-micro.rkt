@@ -2892,11 +2892,13 @@
     [else 2.0]))
 
 (: select-widow-mine-cluster-target (->* (Any (Listof Any)) (#:max-range Float) (Option Any)))
-(define (select-widow-mine-cluster-target wm-u enemy-units #:max-range [max-range 5.25])
+(define (select-widow-mine-cluster-target wm-u enemy-units
+                                          #:max-range [max-range (+ (sc2-spell-cast-range 'widow-mine-splash 5.0) 0.25)])
   (define wx (u-x wm-u))
   (define wy (u-y wm-u))
   (define max-r2 (* max-range max-range))
-  (define splash-r2 (* 1.5 1.5))
+  (define splash-r (sc2-spell-effect-radius 'widow-mine-splash 1.5))
+  (define splash-r2 (* splash-r splash-r))
   (define valid-enemies
     (for/list : (Listof Any)
               ([e (in-list enemy-units)]

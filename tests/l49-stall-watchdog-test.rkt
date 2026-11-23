@@ -1553,6 +1553,58 @@
                 (macro-brain-decision-scheduled-ids z-l60-queen-175m-go)
                 (macro-brain-decision-scheduled-ids p-l60-immortal-250m)))
 
+;; (42) Loop 61 Phase 1 (`#1618`): Per-Building Parallel Upgrade Candidate Emission (T/P/Z)
+;;      wired to `due-pro-upgrade-timings` (E-Bay + RaxTL, Forge + Twilight + TemplarArchive,
+;;      2x Evo + RoachWarren all emit ready upgrades simultaneously without serial blocking!).
+(let ()
+  (define (cand-ids cs) (map priority-candidate-id cs))
+  (define t-cands-2ebay
+    (cand-ids
+     (generate-race-priority-candidates
+      #:race 'Terran #:enemy-race 'Protoss #:frame 7500
+      #:minerals 400 #:gas 400 #:supply-left 20 #:supply-cap 90 #:workers 42 #:active-bases 2
+      #:army-supply 28 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'orbital-command 2 'barracks 3 'barracks-techlab 1 'engineering-bay 2 'factory 1)
+      #:total-building-counts (hasheq 'orbital-command 2 'barracks 3 'barracks-techlab 1 'engineering-bay 2 'factory 1)
+      #:unit-counts (hasheq 'scv 42 'marine 14 'marauder 4)
+      #:researched-upgrades '()
+      #:open-prod-slots (hasheq 'townhall 2 'barracks 2 'barracks-techlab 1 'engineering-bay 2))))
+  (define p-cands-3bldg
+    (cand-ids
+     (generate-race-priority-candidates
+      #:race 'Protoss #:enemy-race 'Terran #:frame 8000
+      #:minerals 500 #:gas 500 #:supply-left 20 #:supply-cap 95 #:workers 44 #:active-bases 2
+      #:army-supply 31 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 2 'gateway 4 'cybernetics-core 1 'forge 1 'twilight-council 1 'templar-archive 1)
+      #:total-building-counts (hasheq 'nexus 2 'gateway 4 'cybernetics-core 1 'forge 1 'twilight-council 1 'templar-archive 1)
+      #:unit-counts (hasheq 'probe 44 'zealot 6 'stalker 6 'high-templar 2)
+      #:researched-upgrades '(warp-gate-research)
+      #:open-prod-slots (hasheq 'townhall 2 'gateway 4 'forge 1 'twilight-council 1 'templar-archive 1))))
+  (define z-cands-2evo
+    (cand-ids
+     (generate-race-priority-candidates
+      #:race 'Zerg #:enemy-race 'Terran #:frame 7800
+      #:minerals 500 #:gas 500 #:supply-left 20 #:supply-cap 102 #:workers 50 #:active-bases 3
+      #:army-supply 32 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'evolution-chamber 2)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'evolution-chamber 2)
+      #:unit-counts (hasheq 'drone 50 'queen 4 'roach 10 'zergling 12)
+      #:researched-upgrades '(metabolic-boost)
+      #:open-prod-slots (hasheq 'townhall 3 'larva 4 'roach-warren 1 'evolution-chamber 2))))
+  (check! (and (not (not (memq 'stimpack t-cands-2ebay)))
+               (not (not (memq 'terran-infantry-weapons-1 t-cands-2ebay)))
+               (not (not (memq 'terran-infantry-armor-1 t-cands-2ebay)))
+               (not (not (memq 'protoss-ground-weapons-1 p-cands-3bldg)))
+               (or (not (not (memq 'charge p-cands-3bldg)))
+                   (not (not (memq 'blink p-cands-3bldg))))
+               (not (not (memq 'psi-storm p-cands-3bldg)))
+               (not (not (memq 'glial-reconstitution z-cands-2evo)))
+               (>= (length (filter (lambda (u) (memq u z-cands-2evo))
+                                   '(zerg-missile-weapons-1 zerg-ground-armor-1 zerg-melee-weapons-1)))
+                   2))
+          (format "L61-PkgC(42) Parallel per-building upgrades failed: T=~s P=~s Z=~s"
+                  t-cands-2ebay p-cands-3bldg z-cands-2evo)))
+
 (reset-macro-escrow-tracker!)
 (printf "l49-stall-watchdog-test: ~a/~a passed (~a failed) [wd_8calls_avg=~a ms]\n"
         passed (+ passed failed) failed (~r avg-ms #:precision '(= 5)))

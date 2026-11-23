@@ -161,130 +161,23 @@
          mirror-classify-enemy-archetype
          counter-unit-for-archetype
          counter-unit-for-race
+         attribute-counter-unit-for-enemy
          archetype-signature-unit
          compute-calibrated-win-prob
          compute-calibrated-snowball-adv)
 
 ;; =============================================================================
-;; 1. Unit & Structure Cost Table (Minerals . Gas)
+;; 1. Unit & Structure Cost Lookup (Single-Source via `lib/sc2-game-constants.rkt`)
 ;; =============================================================================
-
-(define UNIT-COST-TABLE
-  (hash
-   ;; Zerg
-   'drone             (cons 50 0)
-   'zergling          (cons 25 0)
-   'baneling          (cons 50 25)
-   'queen             (cons 175 0)
-   'roach             (cons 75 25)
-   'ravager           (cons 100 100)
-   'hydralisk         (cons 100 50)
-   'lurker            (cons 150 150)
-   'mutalisk          (cons 100 100)
-   'corruptor         (cons 150 100)
-   'ultralisk         (cons 300 200)
-   'brood-lord        (cons 300 250)
-   'infestor          (cons 100 150)
-   'viper             (cons 100 200)
-   'overlord          (cons 100 0)
-   'overseer          (cons 150 50)
-   'hatchery          (cons 275 0)
-   'lair              (cons 450 100)
-   'hive              (cons 650 250)
-   'spawning-pool     (cons 200 0)
-   'extractor         (cons 25 0)
-   'roach-warren      (cons 150 0)
-   'baneling-nest     (cons 100 50)
-   'hydralisk-den     (cons 100 100)
-   'lurker-den        (cons 100 150)
-   'spire             (cons 200 200)
-   'infestation-pit   (cons 100 100)
-   'ultralisk-cavern  (cons 150 200)
-   'spine-crawler     (cons 100 0)
-   'spore-crawler     (cons 75 0)
-   ;; Terran
-   'scv               (cons 50 0)
-   'marine            (cons 50 0)
-   'marauder          (cons 100 25)
-   'reaper            (cons 50 50)
-   'ghost             (cons 150 125)
-   'hellion           (cons 100 0)
-   'hellbat           (cons 100 0)
-   'widow-mine        (cons 75 25)
-   'cyclone           (cons 150 100)
-   'siege-tank        (cons 150 125)
-   'siege-tank-sieged (cons 150 125)
-   'thor              (cons 300 200)
-   'viking            (cons 150 75)
-   'viking-fighter    (cons 150 75)
-   'viking-assault    (cons 150 75)
-   'medivac           (cons 100 100)
-   'liberator         (cons 150 125)
-   'banshee           (cons 150 100)
-   'raven             (cons 100 150)
-   'battlecruiser     (cons 400 300)
-   'command-center    (cons 400 0)
-   'orbital-command   (cons 550 0)
-   'planetary-fortress (cons 550 150)
-   'supply-depot      (cons 100 0)
-   'refinery          (cons 75 0)
-   'barracks          (cons 150 0)
-   'barracks-techlab  (cons 50 25)
-   'barracks-reactor  (cons 50 50)
-   'factory           (cons 150 100)
-   'factory-techlab   (cons 50 25)
-   'starport          (cons 150 100)
-   'starport-techlab  (cons 50 25)
-   'starport-reactor  (cons 50 50)
-   'engineering-bay   (cons 125 0)
-   'armory            (cons 150 100)
-   'fusion-core       (cons 150 150)
-   'bunker            (cons 100 0)
-   'missile-turret    (cons 100 0)
-   ;; Protoss
-   'probe             (cons 50 0)
-   'zealot            (cons 100 0)
-   'stalker           (cons 125 50)
-   'sentry            (cons 50 100)
-   'adept             (cons 100 25)
-   'high-templar      (cons 50 150)
-   'dark-templar      (cons 125 125)
-   'archon            (cons 175 275)
-   'observer          (cons 25 75)
-   'warp-prism        (cons 250 0)
-   'immortal          (cons 250 100)
-   'colossus          (cons 300 200)
-   'disruptor         (cons 150 150)
-   'phoenix           (cons 150 100)
-   'void-ray          (cons 250 150)
-   'oracle            (cons 150 150)
-   'tempest           (cons 250 175)
-   'carrier           (cons 350 250)
-   'mothership        (cons 400 400)
-   'nexus             (cons 400 0)
-   'pylon             (cons 100 0)
-   'assimilator       (cons 75 0)
-   'gateway           (cons 150 0)
-   'warpgate          (cons 150 0)
-   'forge             (cons 150 0)
-   'cybernetics-core  (cons 150 0)
-   'photon-cannon     (cons 150 0)
-   'shield-battery    (cons 100 0)
-   'twilight-council  (cons 150 100)
-   'stargate          (cons 150 150)
-   'robotics-facility (cons 150 100)
-   'robotics-bay      (cons 150 150)
-   'robotics-support-bay (cons 150 150)
-   'templar-archive   (cons 150 200)
-   'dark-shrine       (cons 150 150)
-   'fleet-beacon      (cons 300 200)))
+;; Phase 1 (`#1618`): Collapsed the former hardcoded cost table onto live-hydrated
+;; `sc2-unit-total-cost-pair` in `lib/sc2-game-constants.rkt`.
 
 (define DEFAULT-UNIT-COST (cons 100 25))
 (define ZERO-COST (cons 0 0))
 (define DEFAULT-UPG-COST (cons 100 100))
 
 (define (unit-resource-cost unit-sym)
-  (hash-ref UNIT-COST-TABLE unit-sym DEFAULT-UNIT-COST))
+  (sc2-unit-total-cost-pair unit-sym DEFAULT-UNIT-COST))
 
 (define (safe-frame f)
   (safe-nonneg-int f 0))
@@ -4181,96 +4074,104 @@
      (and (memq parent available-tech) (memq 'techlab available-tech))]
     [else #f]))
 
+(define (lotv-counter-min-cost unit-sym)
+  (let ([m (sc2-min-cost unit-sym 0)])
+    (if (> m 0) m (sc2-unit-total-min-cost unit-sym 0))))
+
+(define (lotv-counter-gas-cost unit-sym)
+  (let ([g (sc2-gas-cost unit-sym 0)])
+    (if (> g 0) g (sc2-unit-total-gas-cost unit-sym 0))))
+
 (define (lotv-pick-first-feasible candidates available-tech minerals gas)
   (for/or ([c (in-list candidates)])
     (define unit-sym (car c))
     (define req (cadr c))
-    (define min-m (if (pair? (cddr c)) (caddr c) 0))
-    (define min-g (if (and (pair? (cddr c)) (pair? (cdddr c))) (cadddr c) 0))
+    (define min-m (if (pair? (cddr c)) (caddr c) (lotv-counter-min-cost unit-sym)))
+    (define min-g (if (and (pair? (cddr c)) (pair? (cdddr c))) (cadddr c) (lotv-counter-gas-cost unit-sym)))
     (and (lotv-tech-prereq-ok? req available-tech)
          (>= minerals (min 250 min-m))
          (>= gas (min 150 min-g))
          unit-sym)))
 
 ;; Explicit LotV attribute-accurate counter preference lists:
-;;   ((candidate-unit required-tech min-minerals min-gas) ...)
+;;   ((candidate-unit required-tech) ...) — costs resolved dynamically via `sc2-game-constants.rkt`
 (define LOTV-UNIT-COUNTERS-TABLE
   (hasheq
    'immortal
    (hasheq
-    'Zerg    '((hydralisk hydralisk-den 100 50) (lurker lurker-den 150 150) (ravager roach-warren 100 100) (zergling spawning-pool 50 0))
-    'Terran  '((marauder barracks-techlab 100 25) (liberator starport 150 150) (marine barracks 50 0))
-    'Protoss '((zealot gateway 100 0) (immortal robotics-facility 275 100)))
+    'Zerg    '((hydralisk hydralisk-den) (lurker lurker-den) (ravager roach-warren) (zergling spawning-pool))
+    'Terran  '((marauder barracks-techlab) (liberator starport) (marine barracks))
+    'Protoss '((zealot gateway) (immortal robotics-facility)))
    'queen
    (hasheq
-    'Terran  '((ghost ghost-academy 150 125) (marauder barracks-techlab 100 25) (marine barracks 50 0))
-    'Zerg    '((ultralisk ultralisk-cavern 275 200) (hydralisk hydralisk-den 100 50) (ravager roach-warren 100 100))
-    'Protoss '((high-templar templar-archive 50 150) (archon templar-archive 100 150) (stalker cybernetics-core 125 50)))
+    'Terran  '((ghost ghost-academy) (marauder barracks-techlab) (marine barracks))
+    'Zerg    '((ultralisk ultralisk-cavern) (hydralisk hydralisk-den) (ravager roach-warren))
+    'Protoss '((high-templar templar-archive) (archon templar-archive) (stalker cybernetics-core)))
    'infestor
    (hasheq
-    'Terran  '((ghost ghost-academy 150 125) (marauder barracks-techlab 100 25) (marine barracks 50 0))
-    'Zerg    '((ultralisk ultralisk-cavern 275 200) (lurker lurker-den 150 150) (ravager roach-warren 100 100))
-    'Protoss '((high-templar templar-archive 50 150) (archon templar-archive 100 150) (immortal robotics-facility 275 100)))
+    'Terran  '((ghost ghost-academy) (marauder barracks-techlab) (marine barracks))
+    'Zerg    '((ultralisk ultralisk-cavern) (lurker lurker-den) (ravager roach-warren))
+    'Protoss '((high-templar templar-archive) (archon templar-archive) (immortal robotics-facility)))
    'siege-tank
    (hasheq
-    'Terran  '((raven starport-techlab 100 150) (liberator starport 150 150) (viking starport 150 75) (marauder barracks-techlab 100 25))
-    'Zerg    '((viper hive 100 200) (ravager roach-warren 100 100) (mutalisk spire 100 100))
-    'Protoss '((immortal robotics-facility 250 100) (disruptor robotics-bay 150 150) (phoenix stargate 150 100) (zealot gateway 100 0)))
+    'Terran  '((raven starport-techlab) (liberator starport) (viking starport) (marauder barracks-techlab))
+    'Zerg    '((viper hive) (ravager roach-warren) (mutalisk spire))
+    'Protoss '((immortal robotics-facility) (disruptor robotics-bay) (phoenix stargate) (zealot gateway)))
    'tempest
    (hasheq
-    'Terran  '((viking-fighter starport 150 75) (thor armory 300 200) (marine barracks 50 0))
-    'Zerg    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50) (queen spawning-pool 175 0))
-    'Protoss '((void-ray stargate 250 150) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
+    'Terran  '((viking-fighter starport) (thor armory) (marine barracks))
+    'Zerg    '((corruptor spire) (hydralisk hydralisk-den) (queen spawning-pool))
+    'Protoss '((void-ray stargate) (tempest fleet-beacon) (stalker cybernetics-core)))
    'battlecruiser
    (hasheq
-    'Terran  '((viking-fighter starport 150 75) (thor armory 300 200) (marine barracks 50 0))
-    'Zerg    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50) (queen spawning-pool 175 0))
-    'Protoss '((void-ray stargate 250 150) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
+    'Terran  '((viking-fighter starport) (thor armory) (marine barracks))
+    'Zerg    '((corruptor spire) (hydralisk hydralisk-den) (queen spawning-pool))
+    'Protoss '((void-ray stargate) (tempest fleet-beacon) (stalker cybernetics-core)))
    'carrier
    (hasheq
-    'Terran  '((viking-fighter starport 150 75) (thor armory 300 200) (marine barracks 50 0))
-    'Zerg    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50))
-    'Protoss '((void-ray stargate 250 150) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
+    'Terran  '((viking-fighter starport) (thor armory) (marine barracks))
+    'Zerg    '((corruptor spire) (hydralisk hydralisk-den))
+    'Protoss '((void-ray stargate) (tempest fleet-beacon) (stalker cybernetics-core)))
    'brood-lord
    (hasheq
-    'Terran  '((viking-fighter starport 150 75) (thor armory 300 200) (marine barracks 50 0))
-    'Zerg    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50))
-    'Protoss '((void-ray stargate 250 150) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
+    'Terran  '((viking-fighter starport) (thor armory) (marine barracks))
+    'Zerg    '((corruptor spire) (hydralisk hydralisk-den))
+    'Protoss '((void-ray stargate) (tempest fleet-beacon) (stalker cybernetics-core)))
    'mothership
    (hasheq
-    'Terran  '((viking-fighter starport 150 75) (thor armory 300 200) (marine barracks 50 0))
-    'Zerg    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50))
-    'Protoss '((void-ray stargate 250 150) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
+    'Terran  '((viking-fighter starport) (thor armory) (marine barracks))
+    'Zerg    '((corruptor spire) (hydralisk hydralisk-den))
+    'Protoss '((void-ray stargate) (tempest fleet-beacon) (stalker cybernetics-core)))
    'roach
    (hasheq
-    'Protoss '((immortal robotics-facility 250 100) (stalker cybernetics-core 125 50))
-    'Terran  '((marauder barracks-techlab 100 25) (siege-tank factory-techlab 150 125) (marine barracks 50 0))
-    'Zerg    '((lurker lurker-den 150 150) (ravager roach-warren 100 100) (roach roach-warren 75 25)))
+    'Protoss '((immortal robotics-facility) (stalker cybernetics-core))
+    'Terran  '((marauder barracks-techlab) (siege-tank factory-techlab) (marine barracks))
+    'Zerg    '((lurker lurker-den) (ravager roach-warren) (roach roach-warren)))
    'zealot
    (hasheq
-    'Zerg    '((baneling baneling-nest 50 25) (roach roach-warren 75 25))
-    'Terran  '((hellbat armory 100 0) (hellion factory 100 0) (marine barracks 50 0))
-    'Protoss '((archon templar-archive 100 150) (colossus robotics-bay 300 200) (adept cybernetics-core 100 25)))
+    'Zerg    '((baneling baneling-nest) (roach roach-warren))
+    'Terran  '((hellbat armory) (hellion factory) (marine barracks))
+    'Protoss '((archon templar-archive) (colossus robotics-bay) (adept cybernetics-core)))
    'zergling
    (hasheq
-    'Zerg    '((baneling baneling-nest 50 25) (roach roach-warren 75 25))
-    'Terran  '((hellbat armory 100 0) (hellion factory 100 0) (marine barracks 50 0))
-    'Protoss '((colossus robotics-bay 300 200) (archon templar-archive 100 150) (zealot gateway 100 0)))
+    'Zerg    '((baneling baneling-nest) (roach roach-warren))
+    'Terran  '((hellbat armory) (hellion factory) (marine barracks))
+    'Protoss '((colossus robotics-bay) (archon templar-archive) (zealot gateway)))
    'adept
    (hasheq
-    'Zerg    '((baneling baneling-nest 50 25) (roach roach-warren 75 25))
-    'Terran  '((hellbat armory 100 0) (marauder barracks-techlab 100 25) (marine barracks 50 0))
-    'Protoss '((archon templar-archive 100 150) (stalker cybernetics-core 125 50)))
+    'Zerg    '((baneling baneling-nest) (roach roach-warren))
+    'Terran  '((hellbat armory) (marauder barracks-techlab) (marine barracks))
+    'Protoss '((archon templar-archive) (stalker cybernetics-core)))
    'colossus
    (hasheq
-    'Terran  '((viking starport 150 75) (marauder barracks-techlab 100 25))
-    'Zerg    '((corruptor spire 150 100) (viper hive 100 200) (lurker lurker-den 150 150))
-    'Protoss '((immortal robotics-facility 250 100) (tempest fleet-beacon 250 175) (stalker cybernetics-core 125 50)))
+    'Terran  '((viking starport) (marauder barracks-techlab))
+    'Zerg    '((corruptor spire) (viper hive) (lurker lurker-den))
+    'Protoss '((immortal robotics-facility) (tempest fleet-beacon) (stalker cybernetics-core)))
    'mutalisk
    (hasheq
-    'Terran  '((thor armory 300 200) (viking starport 150 75) (marine barracks 50 0))
-    'Zerg    '((hydralisk hydralisk-den 100 50) (corruptor spire 150 100) (queen spawning-pool 175 0))
-    'Protoss '((phoenix stargate 150 100) (archon templar-archive 100 150) (stalker cybernetics-core 125 50)))))
+    'Terran  '((thor armory) (viking starport) (marine barracks))
+    'Zerg    '((hydralisk hydralisk-den) (corruptor spire) (queen spawning-pool))
+    'Protoss '((phoenix stargate) (archon templar-archive) (stalker cybernetics-core)))))
 
 (define (normalize-counter-enemy-key sym)
   (case sym
@@ -4307,21 +4208,21 @@
                    (cond
                      [massive?
                       (case race
-                        [(Terran)  '((viking starport 150 75) (thor armory 300 200) (marauder barracks-techlab 100 25))]
-                        [(Zerg)    '((corruptor spire 150 100) (hydralisk hydralisk-den 100 50))]
-                        [(Protoss) '((tempest fleet-beacon 250 175) (immortal robotics-facility 275 100) (stalker cybernetics-core 125 50))]
+                        [(Terran)  '((viking starport) (thor armory) (marauder barracks-techlab))]
+                        [(Zerg)    '((corruptor spire) (hydralisk hydralisk-den))]
+                        [(Protoss) '((tempest fleet-beacon) (immortal robotics-facility) (stalker cybernetics-core))]
                         [else      #f])]
                      [armored?
                       (case race
-                        [(Terran)  '((marauder barracks-techlab 100 25) (siege-tank factory-techlab 150 125))]
-                        [(Zerg)    '((hydralisk hydralisk-den 100 50) (lurker lurker-den 150 150) (ravager roach-warren 100 100))]
-                        [(Protoss) '((immortal robotics-facility 275 100) (stalker cybernetics-core 125 50))]
+                        [(Terran)  '((marauder barracks-techlab) (siege-tank factory-techlab))]
+                        [(Zerg)    '((hydralisk hydralisk-den) (lurker lurker-den) (ravager roach-warren))]
+                        [(Protoss) '((immortal robotics-facility) (stalker cybernetics-core))]
                         [else      #f])]
                      [(and light? bio?)
                       (case race
-                        [(Terran)  '((hellbat armory 100 0) (hellion factory 100 0) (siege-tank factory-techlab 150 125))]
-                        [(Zerg)    '((baneling baneling-nest 50 25) (roach roach-warren 75 25))]
-                        [(Protoss) '((archon templar-archive 100 150) (colossus robotics-bay 300 200) (adept cybernetics-core 100 25))]
+                        [(Terran)  '((hellbat armory) (hellion factory) (siege-tank factory-techlab))]
+                        [(Zerg)    '((baneling baneling-nest) (roach roach-warren))]
+                        [(Protoss) '((archon templar-archive) (colossus robotics-bay) (adept cybernetics-core))]
                         [else      #f])]
                      [else #f])])
              (and fallback-cands

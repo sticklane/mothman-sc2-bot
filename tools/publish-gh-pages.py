@@ -76,6 +76,15 @@ class ReportSpec:
 
 
 def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
+    retro_md_p = brain_dir / "scratch/loop/loop_flywheel_retro.md"
+    retro_runs = 41
+    if retro_md_p.is_file():
+        try:
+            m_rr = re.search(r"from\s+`?(\d+)`?\s+logged\s+runs", retro_md_p.read_text(encoding="utf-8"))
+            if m_rr:
+                retro_runs = int(m_rr.group(1))
+        except Exception:
+            pass
     return [
         ReportSpec(
             slug="loops-29-plus",
@@ -103,7 +112,7 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
             title="Speeding Up the Test & Release Cycle",
             short_title="Timing Review",
             section="Technical Notes",
-            summary="Where time went across 41 runs, why we moved the 2-minute head-to-head check first, and which rules kept flip-flopping.",
+            summary=f"Where time went across {retro_runs} runs, why we moved the 2-minute head-to-head check first, and which rules kept flip-flopping.",
             source_candidates=(brain_dir / "scratch/loop/loop_flywheel_retro.md",),
             required=False,
         ),
@@ -1494,6 +1503,7 @@ DEPLOY_LABELS: Dict[str, str] = {
     "nkxlrsuk_4e7c6f39": "Loop 51",
     "tppnrnpo_22f810ed": "Loop 57",
     "wywkqtpl_668f47f8": "Loop 59C",
+    "sqvvtrlm_acd7ad85": "Loop 60B",
 }
 
 BOT_META: Dict[str, Dict[str, str]] = {
@@ -3728,6 +3738,7 @@ _CALM_LOOP_TITLES: Dict[int, str] = {
     57: "Live release #10 (8-bot v1 & v2 ladder rollout)",
     58: "Ability mastery & non-combat drills (held)",
     59: "Live release #11 (Pro-matched EPM/SPM & 9–3 H2H)",
+    60: "Live release #12 (Live engine hydration, -75% P1 drops, PvP 4–4)",
 }
 
 
@@ -4187,8 +4198,8 @@ def _render_standings_tables(
             "AI Arena ratings start at 1600. The v2 accounts play Division 5 (~1600+ Elo) opponents and recorded zero crashes "
             "(the fetched standings above reflect games played prior to the latest rollout), while the older v1 "
             "accounts play Division 9 (~1350 Elo), where Release #9 went 19–9–3 (61.3% wins, 71.0% win-or-tie) across ranked games. "
-            'All eight bots now run <strong>Release #11</strong> (Build 59C, Competition #38, '
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45108531214" target="_blank" rel="noopener noreferrer">deploy run 45108531214</a>, '
+            'All eight bots now run <strong>Release #12</strong> (Build 60B, Competition #38, '
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45120681255" target="_blank" rel="noopener noreferrer">deploy run 45120681255</a>, '
             "8/8 verified active). Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
         )
@@ -4586,8 +4597,8 @@ def build_history_page(
     live_caption = (
         f"The first deployed build went 0–10 on AI Arena. Recent v1 builds win roughly 55–61% of their games: "
         f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
-        f"and Release #9 (Build 51) climbed to 19–9–3 (61.3% wins) before Release #10 (Build 57) and Release #11 "
-        f'(Build 59C, <a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45108531214" target="_blank" rel="noopener noreferrer">deploy run 45108531214</a>) '
+        f"and Release #9 (Build 51) climbed to 19–9–3 (61.3% wins) before Releases #10 (Build 57), #11 (Build 59C), and #12 "
+        f'(Build 60B, <a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45120681255" target="_blank" rel="noopener noreferrer">deploy run 45120681255</a>) '
         f"rolled out to all 8 ladder bots."
     )
 
@@ -4649,6 +4660,7 @@ def build_history_page(
         "iter51_ship9_full": 9,
         "iter57_ship10_full": 10,
         "iter59c_ship11_full": 11,
+        "iter60b_ship12_full": 12,
     }
 
     def _format_run_label(run_id: str, status_raw: str = "") -> str:
@@ -4704,6 +4716,40 @@ def build_history_page(
                     f'<td style="text-align:right">{sb_s}</td>'
                     f"</tr>"
                 )
+            cur_b = (rich or {}).get("current_build") or {}
+            cur_tag = str(cur_b.get("build_tag") or "").upper()
+            cur_cohorts = cur_b.get("cohorts") or {}
+            cur_ext = cur_cohorts.get("ext") or {}
+            cur_core = cur_cohorts.get("core") or {}
+            cur_unseen = cur_cohorts.get("unseen") or {}
+            cur_ship_n = int(cur_b.get("ship_num") or 0)
+            cur_is_ship = bool(cur_b.get("is_shipped"))
+            recent = list(reversed(iters[-18:]))
+            already_has_cur = bool(
+                cur_tag
+                and any(
+                    re.match(rf"^iter{re.escape(cur_tag)}(?=_|$|-)", str(it.get("id") or ""), flags=re.I)
+                    for it in recent
+                )
+            )
+            if cur_tag and cur_ext.get("n") and cur_is_ship and cur_ship_n and not already_has_cur:
+                cw, cl, ct = int(cur_ext.get("w", 0)), int(cur_ext.get("l", 0)), int(cur_ext.get("t", 0))
+                rec_cur = _format_ledger_record(f"{cw}W-{cl}L-{ct}T" if ct else f"{cw}W-{cl}L")
+                c14_cur = f"{float(cur_core['wr']):.1f}%" if isinstance(cur_core.get("wr"), (int, float)) and cur_core.get("n") else "—"
+                u12_cur = f"{int(cur_unseen['w'])} wins" if isinstance(cur_unseen.get("w"), (int, float)) and cur_unseen.get("n") else "—"
+                tr_cur = f"{float(cur_ext['tr']):.2f}×" if isinstance(cur_ext.get("tr"), (int, float)) else "—"
+                sb_cur = f"{float(cur_ext['sb']):.1f}%" if isinstance(cur_ext.get("sb"), (int, float)) else "—"
+                shipped_rows.insert(
+                    0,
+                    f"<tr>"
+                    f'<td class="nw"><strong>Release #{cur_ship_n} (Build {html.escape(cur_tag)})</strong></td>'
+                    f"<td>{html.escape(rec_cur)}</td>"
+                    f'<td style="text-align:right">{c14_cur}</td>'
+                    f'<td style="text-align:right">{u12_cur}</td>'
+                    f'<td style="text-align:right">{tr_cur}</td>'
+                    f'<td style="text-align:right">{sb_cur}</td>'
+                    f"</tr>",
+                )
             if shipped_rows:
                 shipped_table_html = f"""
   <div class="table-wrap" style="margin-bottom:1.1rem;">
@@ -4718,36 +4764,28 @@ def build_history_page(
           <th style="text-align:right">Supply-Blocked</th>
         </tr>
       </thead>
-      <tbody>{"".join(shipped_rows[:12])}</tbody>
+      <tbody>{"".join(shipped_rows[:14])}</tbody>
     </table>
   </div>
 """
-            recent = list(reversed(iters[-18:]))
             lrows = []
-            cur_b = (rich or {}).get("current_build") or {}
-            cur_tag = str(cur_b.get("build_tag") or "").upper()
-            cur_ext = (cur_b.get("cohorts") or {}).get("ext") or {}
-            already_has_cur = bool(
-                cur_tag
-                and any(
-                    re.match(rf"^iter{re.escape(cur_tag)}(?=_|$|-)", str(it.get("id") or ""), flags=re.I)
-                    for it in recent
-                )
-            )
             if cur_tag and cur_ext.get("n") and not already_has_cur:
                 cw, cl, ct = int(cur_ext.get("w", 0)), int(cur_ext.get("l", 0)), int(cur_ext.get("t", 0))
                 cn_cur = int(cur_ext.get("n", cw + cl + ct))
                 rec_cur = _format_ledger_record(f"{cw}W-{cl}L-{ct}T" if ct else f"{cw}W-{cl}L")
                 tr_cur = f"{float(cur_ext['tr']):.2f}×" if isinstance(cur_ext.get("tr"), (int, float)) else "—"
                 sb_cur = f"{float(cur_ext['sb']):.1f}%" if isinstance(cur_ext.get("sb"), (int, float)) else "—"
+                cur_lbl = f"Release #{cur_ship_n} (Build {html.escape(cur_tag)})" if (cur_is_ship and cur_ship_n) else f"Build {html.escape(cur_tag)}"
+                cur_st = "Shipped" if cur_is_ship else "Latest Benchmark"
+                cur_media = '<a href="./index.html#tactics-section">278 arena clips</a>' if cur_is_ship else "—"
                 lrows.append(
-                    f'<tr><td class="nw"><strong>Build {html.escape(cur_tag)}</strong></td>'
-                    f"<td>Latest Benchmark</td>"
+                    f'<tr><td class="nw"><strong>{cur_lbl}</strong></td>'
+                    f"<td>{cur_st}</td>"
                     f'<td style="text-align:right">{cn_cur}</td>'
                     f"<td>{html.escape(rec_cur)}</td>"
                     f'<td style="text-align:right">{tr_cur}</td>'
                     f'<td style="text-align:right">{sb_cur}</td>'
-                    f"<td>—</td></tr>"
+                    f"<td>{cur_media}</td></tr>"
                 )
             for it in recent:
                 raw_id = str(it.get("id", ""))
@@ -4774,7 +4812,7 @@ def build_history_page(
                             f'<a href="https://github.com/{repo_slug}/releases/tag/{tag}" '
                             f'target="_blank" rel="noopener noreferrer">{tag}</a>'
                         )
-                    elif lnum_it == 59:
+                    elif lnum_it in (59, 60):
                         rel_cell = '<a href="./index.html#tactics-section">278 arena clips</a>'
                 lrows.append(
                     f'<tr><td class="nw">{it_id}</td>'

@@ -348,41 +348,41 @@
 ;; 1. Calibrated Constants (#115 Pro Corpus)
 ;; -----------------------------------------------------------------------------
 
-(define PSI-STORM-CLAIM-RADIUS : Float 2.0)
-(define PSI-STORM-CLAIM-TTL : Integer 56)
+(define PSI-STORM-CLAIM-RADIUS : Float (sc2-spell-claim-radius 'psi-storm 2.0))
+(define PSI-STORM-CLAIM-TTL : Integer (sc2-spell-claim-ttl 'psi-storm 56))
 
-(define EMP-CLAIM-RADIUS : Float 1.5)
-(define EMP-CLAIM-TTL : Integer 24)
+(define EMP-CLAIM-RADIUS : Float (sc2-spell-claim-radius 'emp-round 1.5))
+(define EMP-CLAIM-TTL : Integer (sc2-spell-claim-ttl 'emp-round 24))
 
-(define FUNGAL-CLAIM-RADIUS : Float 2.25)
-(define FUNGAL-CLAIM-TTL : Integer 32)
+(define FUNGAL-CLAIM-RADIUS : Float (sc2-spell-claim-radius 'fungal-growth 2.25))
+(define FUNGAL-CLAIM-TTL : Integer (sc2-spell-claim-ttl 'fungal-growth 32))
 
-(define BLINDING-CLOUD-CLAIM-RADIUS : Float 2.0)
-(define BLINDING-CLOUD-CLAIM-TTL : Integer 48)
+(define BLINDING-CLOUD-CLAIM-RADIUS : Float (sc2-spell-claim-radius 'blinding-cloud 2.0))
+(define BLINDING-CLOUD-CLAIM-TTL : Integer (sc2-spell-claim-ttl 'blinding-cloud 48))
 
-(define GUARDIAN-SHIELD-CLAIM-RADIUS : Float 5.0)
-(define GUARDIAN-SHIELD-CLAIM-TTL : Integer 246)
+(define GUARDIAN-SHIELD-CLAIM-RADIUS : Float (sc2-spell-claim-radius 'guardian-shield 5.0))
+(define GUARDIAN-SHIELD-CLAIM-TTL : Integer (sc2-spell-claim-ttl 'guardian-shield 246))
 
-(define ORACLE-REVELATION-CLAIM-RADIUS : Float 6.0)
-(define ORACLE-REVELATION-CLAIM-TTL : Integer 448)
+(define ORACLE-REVELATION-CLAIM-RADIUS : Float (sc2-spell-claim-radius 'revelation 6.0))
+(define ORACLE-REVELATION-CLAIM-TTL : Integer (sc2-spell-claim-ttl 'revelation 448))
 
-(define FORCE-FIELD-CLAIM-RADIUS : Float 1.5)
-(define FORCE-FIELD-CLAIM-TTL : Integer 32)
+(define FORCE-FIELD-CLAIM-RADIUS : Float (sc2-spell-claim-radius 'force-field 1.5))
+(define FORCE-FIELD-CLAIM-TTL : Integer (sc2-spell-claim-ttl 'force-field 32))
 
-(define CORROSIVE-BILE-CLAIM-RADIUS : Float 0.55)
-(define CORROSIVE-BILE-CLAIM-TTL : Integer 36)
+(define CORROSIVE-BILE-CLAIM-RADIUS : Float (sc2-spell-claim-radius 'corrosive-bile 0.55))
+(define CORROSIVE-BILE-CLAIM-TTL : Nonnegative-Integer (sc2-spell-claim-ttl 'corrosive-bile 36))
 (define CORROSIVE-BILE-STAGGER-OFFSET : Float 0.75)
-(define CORROSIVE-BILE-COOLDOWN-FRAMES : Integer 157)
+(define CORROSIVE-BILE-COOLDOWN-FRAMES : Nonnegative-Integer (sc2-spell-cooldown-frames 'corrosive-bile 157))
 (define CORROSIVE-BILE-FF-CHECK-RADIUS : Float 1.75)
 ;; W10-TAC-1 / W10-TAC-2 / W10-TAC-5: Exact SC2 live per-unit ability cooldowns (22.4 fps).
-(define MEDIVAC-BOOST-COOLDOWN-FRAMES : Integer 320)
-(define CYCLONE-LOCK-ON-COOLDOWN-FRAMES : Integer 196)
-(define BC-TACTICAL-JUMP-COOLDOWN-FRAMES : Integer 1590)
-(define BC-YAMATO-COOLDOWN-FRAMES : Integer 1590)
-(define CORRUPTOR-CAUSTIC-SPRAY-COOLDOWN-FRAMES : Integer 1008)
+(define MEDIVAC-BOOST-COOLDOWN-FRAMES : Integer (sc2-spell-cooldown-frames 'medivac-boost 320))
+(define CYCLONE-LOCK-ON-COOLDOWN-FRAMES : Integer (sc2-spell-cooldown-frames 'lock-on 196))
+(define BC-TACTICAL-JUMP-COOLDOWN-FRAMES : Integer (sc2-spell-cooldown-frames 'tactical-jump 1590))
+(define BC-YAMATO-COOLDOWN-FRAMES : Integer (sc2-spell-cooldown-frames 'yamato-cannon 1590))
+(define CORRUPTOR-CAUSTIC-SPRAY-COOLDOWN-FRAMES : Integer (sc2-spell-cooldown-frames 'caustic-spray 1008))
 ;; L38-P0-1a / 1b: DT ShadowStride (`2700`, upg `141`) PF snipe & Widow Mine standoff constants
 ;; Use `7.65t` clamp so even after `0.5`-tile `safe-coord` rounding, cast range stays strictly `<= 8.0t`!
-(define SHADOW-STRIDE-COOLDOWN-FRAMES : Integer 314)
+(define SHADOW-STRIDE-COOLDOWN-FRAMES : Integer (sc2-spell-cooldown-frames 'shadow-stride 314))
 (define SHADOW-STRIDE-MAX-RANGE : Float 7.65)
 (define PF-PERIMETER-BLINK-INNER-RADIUS : Float 3.0)
 (define PF-PERIMETER-BLINK-OUTER-RADIUS : Float 3.5)
@@ -396,25 +396,25 @@
 (define WIDOW-MINE-TRIGGER-RADIUS : Float 5.0)
 (define WIDOW-MINE-MELEE-SAFE-RADIUS : Float 6.0)
 
-(define ANTI-ARMOR-CLAIM-RADIUS : Float 2.5)
-(define ANTI-ARMOR-CLAIM-TTL : Integer 48)
+(define ANTI-ARMOR-CLAIM-RADIUS : Float (sc2-spell-claim-radius 'anti-armor-missile 2.5))
+(define ANTI-ARMOR-CLAIM-TTL : Integer (sc2-spell-claim-ttl 'anti-armor-missile 48))
 
-(define MICROBIAL-SHROUD-CLAIM-RADIUS : Float 3.5)
-(define MICROBIAL-SHROUD-CLAIM-TTL : Integer 48)
+(define MICROBIAL-SHROUD-CLAIM-RADIUS : Float (sc2-spell-claim-radius 'microbial-shroud 3.5))
+(define MICROBIAL-SHROUD-CLAIM-TTL : Integer (sc2-spell-claim-ttl 'microbial-shroud 48))
 
-(define STASIS-WARD-CLAIM-RADIUS : Float 2.5)
-(define STASIS-WARD-CLAIM-TTL : Integer 64)
+(define STASIS-WARD-CLAIM-RADIUS : Float (sc2-spell-claim-radius 'stasis-ward 2.5))
+(define STASIS-WARD-CLAIM-TTL : Integer (sc2-spell-claim-ttl 'stasis-ward 64))
 
 (define UNIT-SPELL-CLAIM-TTL : Integer 36)
 
-(define SNIPE-CHANNEL-LOCKOUT-FRAMES : Integer 34)
+(define SNIPE-CHANNEL-LOCKOUT-FRAMES : Nonnegative-Integer (sc2-spell-lockout-frames 'steady-targeting 34))
 ;; SC2 5.0.14 Steady Targeting (Snipe): 130 base + 40 vs Psionic (170 vs Psionic, 130 vs non-Psionic).
-(define SNIPE-BASE-DAMAGE : Float 130.0)
-(define SNIPE-PSIONIC-BONUS : Float 40.0)
-(define SNIPE-DAMAGE : Float 130.0)
+(define SNIPE-BASE-DAMAGE : Float (sc2-spell-base-damage 'steady-targeting 130.0))
+(define SNIPE-PSIONIC-BONUS : Float (sc2-spell-bonus-damage 'steady-targeting 40.0))
+(define SNIPE-DAMAGE : Float (sc2-spell-base-damage 'steady-targeting 130.0))
 ;; SC2 5.0.14 Viper Abduct: 0.57s (`13` frames at 22.4 fps) post-cast lock on the casting Viper.
-(define VIPER-ABDUCT-LOCK-FRAMES : Integer 13)
-(define YAMATO-DAMAGE : Float 240.0)
+(define VIPER-ABDUCT-LOCK-FRAMES : Nonnegative-Integer (sc2-spell-lockout-frames 'abduct 13))
+(define YAMATO-DAMAGE : Float (sc2-spell-base-damage 'yamato-cannon 240.0))
 
 (define DISRUPTOR-NOVA-STAGGER-MIN-FRAMES : Integer 28)
 (define DISRUPTOR-NOVA-STAGGER-MAX-FRAMES : Integer 32)
@@ -1348,21 +1348,11 @@
 
 (: spell-point-default-radius (-> Symbol Float))
 (define (spell-point-default-radius ab)
-  (case (canonical-spell-key ab)
-    [(psi-storm) PSI-STORM-CLAIM-RADIUS]
-    [(emp-round) EMP-CLAIM-RADIUS]
-    [(fungal-growth) FUNGAL-CLAIM-RADIUS]
-    [(blinding-cloud) BLINDING-CLOUD-CLAIM-RADIUS]
-    [(guardian-shield) GUARDIAN-SHIELD-CLAIM-RADIUS]
-    [(oracle-revelation) ORACLE-REVELATION-CLAIM-RADIUS]
-    [(force-field) FORCE-FIELD-CLAIM-RADIUS]
-    [(corrosive-bile) CORROSIVE-BILE-CLAIM-RADIUS]
-    [(anti-armor-missile) ANTI-ARMOR-CLAIM-RADIUS]
-    [(microbial-shroud) MICROBIAL-SHROUD-CLAIM-RADIUS]
-    [(stasis-ward) STASIS-WARD-CLAIM-RADIUS]
+  (define key (canonical-spell-key ab))
+  (case key
     [(spawn-creep-tumor) 3.5]
     [(auto-turret) 2.0]
-    [else 2.0]))
+    [else (sc2-spell-claim-radius key 2.0)]))
 
 (: spell-point-default-ttl (-> Symbol Integer))
 (define (spell-point-default-ttl ab)
@@ -1551,10 +1541,12 @@
     [explicit-max explicit-max]
     [(eq? ab 'steady-targeting)
      ;; SC2 5.0.14 Steady Targeting: 130 base + 40 vs Psionic (170 vs Psionic, 130 vs non-Psionic).
+     (define snipe-base (sc2-spell-base-damage 'steady-targeting SNIPE-BASE-DAMAGE))
+     (define snipe-bonus (sc2-spell-bonus-damage 'steady-targeting SNIPE-PSIONIC-BONUS))
      (define snipe-dmg : Float
        (if (and target-sym (unit-attr-has-any? target-sym SC2-UNIT-ATTR-PSIONIC))
-           (+ SNIPE-BASE-DAMAGE SNIPE-PSIONIC-BONUS)
-           SNIPE-BASE-DAMAGE))
+           (+ snipe-base snipe-bonus)
+           snipe-base))
      (define eff (if (> (safe-fl target-hp 0.0) 0.0) (safe-fl target-hp snipe-dmg) snipe-dmg))
      (define c (safe-ceil-div eff snipe-dmg))
      (if (> c 0) c 1)]
@@ -2366,19 +2358,23 @@
              (cons 0.0 (- d-off))
              (cons (* 0.707 d-off) (* 0.707 d-off))
              (cons (* -0.707 d-off) (* 0.707 d-off))))
+     (define bile-rng (sc2-spell-cast-range 'corrosive-bile 9.0))
+     (define bile-claim-r (sc2-spell-claim-radius 'corrosive-bile CORROSIVE-BILE-CLAIM-RADIUS))
+     (define bile-ttl (sc2-spell-claim-ttl 'corrosive-bile CORROSIVE-BILE-CLAIM-TTL))
+     (define bile-cd (sc2-spell-cooldown-frames 'corrosive-bile CORROSIVE-BILE-COOLDOWN-FRAMES))
      (for/or : (Option spell-directive) ([off (in-list offsets)])
        (define cx (clamp-coord (+ bx (car off))))
        (define cy (clamp-coord (+ by (cdr off))))
-       (and (<= (dist2 rx ry cx cy) 9.0)
+       (and (<= (dist2 rx ry cx cy) bile-rng)
             (corrosive-bile-target-safe? cx cy allies)
             (spell-claim-point?! claims 'corrosive-bile cx cy
-                                 CORROSIVE-BILE-CLAIM-RADIUS
+                                 bile-claim-r
                                  current-frame
-                                 CORROSIVE-BILE-CLAIM-TTL)
+                                 bile-ttl)
             (begin
               (hash-set! (spell-claims-ravager-bile-ready-frame claims)
                          r-tag
-                         (+ current-frame CORROSIVE-BILE-COOLDOWN-FRAMES))
+                         (+ current-frame bile-cd))
               (spell-directive r-tag 'ravager 'corrosive-bile 'point 0 cx cy pattern))))]))
 
 (: infestor-neural-weight (-> Symbol Float))
@@ -2820,75 +2816,83 @@
                   ;;    over `>= 3` friendly ground combat units PRIORITIZED above Fungal Growth when
                   ;;    not deferring for Neural/Fungal opening split (`novel-116` safe!), so Infestors
                   ;;    protect Hydralisks from Carriers/Tempests before spending energy on Fungal!
-                  (and microbial-shroud-ok?
-                       (not defer-second-neural-for-opening-fungal?)
-                       (not neural-ok?)
-                       (>= en microbial-shroud-energy)
-                       (>= (count-units-within enemy-units ux uy 16.0 enemy-air-capital-or-ranged?) 3)
-                       (let-values ([(ok? sx sy _cnt)
-                                     (for/fold ([f? : Boolean #f] [bx : Float 0.0] [by : Float 0.0] [bc : Integer 2])
-                                               ([a (in-list ally-units)]
-                                                #:when (and (hash? a)
-                                                            (not (uh-flying? a))
-                                                            (unit-combat-relevant? a)
-                                                            (<= (dist2 ux uy (uh-x a) (uh-y a)) 9.0)))
-                                       (define ax (uh-x a))
-                                       (define ay (uh-y a))
-                                       (define cnt
-                                         (count-units-within
-                                          ally-units ax ay 3.5
-                                          (lambda ([b : Any]) (and (not (uh-flying? b)) (unit-combat-relevant? b)))))
-                                       (if (and (> cnt bc)
-                                                (not (spell-point-claimed? claims 'microbial-shroud ax ay MICROBIAL-SHROUD-CLAIM-RADIUS current-frame)))
-                                           (values #t ax ay cnt)
-                                           (values f? bx by bc)))])
-                         (and ok?
-                              (spell-claim-point?! claims 'microbial-shroud sx sy MICROBIAL-SHROUD-CLAIM-RADIUS current-frame MICROBIAL-SHROUD-CLAIM-TTL)
-                              (spell-directive tag 'infestor 'microbial-shroud 'point 0 sx sy 'infestor-microbial-shroud))))
-                  ;; 3. Fungal Growth (`0.5`-tile velocity lead, `r=2.25 ttl=32`)
-                  (and (>= en SC2-INFESTOR-FUNGAL-ENERGY)
-                       (let-values ([(ok? fx fy _s)
-                                     (best-enemy-cluster
-                                      ux uy SC2-INFESTOR-FUNGAL-CAST-RANGE enemy-units 2.25 0.5
-                                      (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
-                                        (define unbuffed
-                                          (for/list : (Listof Any) ([e (in-list cl)]
-                                                                    #:when (not (uh-has-buff? e 'fungal-growth)))
-                                            e))
-                                        (if (and (>= (length unbuffed) 2)
-                                                 (not (spell-point-claimed? claims 'fungal-growth cx cy FUNGAL-CLAIM-RADIUS current-frame)))
-                                            (sum-units-fl unbuffed
-                                                          (lambda ([e : Any])
-                                                            (* 25.0 (enemy-fungal-value-weight (uh-type e)))))
-                                            0.0)))])
-                         (and ok?
-                              (spell-claim-point?! claims 'fungal-growth fx fy FUNGAL-CLAIM-RADIUS current-frame FUNGAL-CLAIM-TTL)
-                              (spell-directive tag 'infestor 'fungal-growth 'point 0 fx fy 'infestor-fungal))))
-                  ;; 3b. Microbial Shroud fallback when Neural IS researched and no Fungal target is in range
-                  (and microbial-shroud-ok?
-                       neural-ok?
-                       (>= en microbial-shroud-energy)
-                       (>= (count-units-within enemy-units ux uy 16.0 enemy-air-capital-or-ranged?) 3)
-                       (let-values ([(ok? sx sy _cnt)
-                                     (for/fold ([f? : Boolean #f] [bx : Float 0.0] [by : Float 0.0] [bc : Integer 2])
-                                               ([a (in-list ally-units)]
-                                                #:when (and (hash? a)
-                                                            (not (uh-flying? a))
-                                                            (unit-combat-relevant? a)
-                                                            (<= (dist2 ux uy (uh-x a) (uh-y a)) 9.0)))
-                                       (define ax (uh-x a))
-                                       (define ay (uh-y a))
-                                       (define cnt
-                                         (count-units-within
-                                          ally-units ax ay 3.5
-                                          (lambda ([b : Any]) (and (not (uh-flying? b)) (unit-combat-relevant? b)))))
-                                       (if (and (> cnt bc)
-                                                (not (spell-point-claimed? claims 'microbial-shroud ax ay MICROBIAL-SHROUD-CLAIM-RADIUS current-frame)))
-                                           (values #t ax ay cnt)
-                                           (values f? bx by bc)))])
-                         (and ok?
-                              (spell-claim-point?! claims 'microbial-shroud sx sy MICROBIAL-SHROUD-CLAIM-RADIUS current-frame MICROBIAL-SHROUD-CLAIM-TTL)
-                              (spell-directive tag 'infestor 'microbial-shroud 'point 0 sx sy 'infestor-microbial-shroud))))
+                  (let ([shroud-rng (sc2-spell-cast-range 'microbial-shroud 9.0)]
+                        [shroud-rad (sc2-spell-effect-radius 'microbial-shroud 3.5)]
+                        [shroud-claim-r (sc2-spell-claim-radius 'microbial-shroud MICROBIAL-SHROUD-CLAIM-RADIUS)]
+                        [fungal-rng (sc2-spell-cast-range 'fungal-growth 10.0)]
+                        [fungal-rad (sc2-spell-effect-radius 'fungal-growth 2.25)]
+                        [fungal-claim-r (sc2-spell-claim-radius 'fungal-growth FUNGAL-CLAIM-RADIUS)]
+                        [fungal-en (sc2-spell-energy 'fungal-growth 75.0)])
+                    (or
+                     (and microbial-shroud-ok?
+                          (not defer-second-neural-for-opening-fungal?)
+                          (not neural-ok?)
+                          (>= en microbial-shroud-energy)
+                          (>= (count-units-within enemy-units ux uy 16.0 enemy-air-capital-or-ranged?) 3)
+                          (let-values ([(ok? sx sy _cnt)
+                                        (for/fold ([f? : Boolean #f] [bx : Float 0.0] [by : Float 0.0] [bc : Integer 2])
+                                                  ([a (in-list ally-units)]
+                                                   #:when (and (hash? a)
+                                                               (not (uh-flying? a))
+                                                               (unit-combat-relevant? a)
+                                                               (<= (dist2 ux uy (uh-x a) (uh-y a)) shroud-rng)))
+                                          (define ax (uh-x a))
+                                          (define ay (uh-y a))
+                                          (define cnt
+                                            (count-units-within
+                                             ally-units ax ay shroud-rad
+                                             (lambda ([b : Any]) (and (not (uh-flying? b)) (unit-combat-relevant? b)))))
+                                          (if (and (> cnt bc)
+                                                   (not (spell-point-claimed? claims 'microbial-shroud ax ay shroud-claim-r current-frame)))
+                                              (values #t ax ay cnt)
+                                              (values f? bx by bc)))])
+                            (and ok?
+                                 (spell-claim-point?! claims 'microbial-shroud sx sy shroud-claim-r current-frame MICROBIAL-SHROUD-CLAIM-TTL)
+                                 (spell-directive tag 'infestor 'microbial-shroud 'point 0 sx sy 'infestor-microbial-shroud))))
+                     ;; 3. Fungal Growth (`0.5`-tile velocity lead, live-hydrated cast range & radius)
+                     (and (>= en fungal-en)
+                          (let-values ([(ok? fx fy _s)
+                                        (best-enemy-cluster
+                                         ux uy fungal-rng enemy-units fungal-rad 0.5
+                                         (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
+                                           (define unbuffed
+                                             (for/list : (Listof Any) ([e (in-list cl)]
+                                                                       #:when (not (uh-has-buff? e 'fungal-growth)))
+                                               e))
+                                           (if (and (>= (length unbuffed) 2)
+                                                    (not (spell-point-claimed? claims 'fungal-growth cx cy fungal-claim-r current-frame)))
+                                               (sum-units-fl unbuffed
+                                                             (lambda ([e : Any])
+                                                               (* 25.0 (enemy-fungal-value-weight (uh-type e)))))
+                                               0.0)))])
+                            (and ok?
+                                 (spell-claim-point?! claims 'fungal-growth fx fy fungal-claim-r current-frame FUNGAL-CLAIM-TTL)
+                                 (spell-directive tag 'infestor 'fungal-growth 'point 0 fx fy 'infestor-fungal))))
+                     ;; 3b. Microbial Shroud fallback when Neural IS researched and no Fungal target is in range
+                     (and microbial-shroud-ok?
+                          neural-ok?
+                          (>= en microbial-shroud-energy)
+                          (>= (count-units-within enemy-units ux uy 16.0 enemy-air-capital-or-ranged?) 3)
+                          (let-values ([(ok? sx sy _cnt)
+                                        (for/fold ([f? : Boolean #f] [bx : Float 0.0] [by : Float 0.0] [bc : Integer 2])
+                                                  ([a (in-list ally-units)]
+                                                   #:when (and (hash? a)
+                                                               (not (uh-flying? a))
+                                                               (unit-combat-relevant? a)
+                                                               (<= (dist2 ux uy (uh-x a) (uh-y a)) shroud-rng)))
+                                          (define ax (uh-x a))
+                                          (define ay (uh-y a))
+                                          (define cnt
+                                            (count-units-within
+                                             ally-units ax ay shroud-rad
+                                             (lambda ([b : Any]) (and (not (uh-flying? b)) (unit-combat-relevant? b)))))
+                                          (if (and (> cnt bc)
+                                                   (not (spell-point-claimed? claims 'microbial-shroud ax ay shroud-claim-r current-frame)))
+                                              (values #t ax ay cnt)
+                                              (values f? bx by bc)))])
+                            (and ok?
+                                 (spell-claim-point?! claims 'microbial-shroud sx sy shroud-claim-r current-frame MICROBIAL-SHROUD-CLAIM-TTL)
+                                 (spell-directive tag 'infestor 'microbial-shroud 'point 0 sx sy 'infestor-microbial-shroud))))))
                   ;; 4. Low-energy (< 70, non-channeling) 10.0-tile retreat when threatened
                   (and (< en 70.0)
                        (any-unit-within? all-enemies ux uy 12.0 sc2-enemy-unit-targetable?)
@@ -2904,33 +2908,37 @@
                  #f]
                 [else
                  (or
-                  ;; 1. Blinding Cloud on >= 2 ground ranged clumps, prioritizing 'armored/'mechanical lines (`range 11.0`)
-                  (and (>= en 100.0)
-                       (let-values ([(ok? cx cy _s)
-                                     (best-enemy-cluster
-                                      ux uy 12.5 enemy-units 2.0 0.0
-                                      (lambda ([px : Float] [py : Float] [cl : (Listof Any)])
-                                        (define-values (rcnt score)
-                                          (for/fold ([cnt : Integer 0] [sc : Float 0.0])
-                                                    ([e (in-list cl)])
-                                            (if (and (viper-ranged-ground? e)
-                                                     (not (uh-has-buff? e 'blinding-cloud)))
-                                                (let* ([esym (uh-type e)]
-                                                       [pack (aoe-radius-packing-multiplier
-                                                              (unit-collision-radius esym) 2.0)]
-                                                       [w (* pack
-                                                             (+ 1.0
-                                                                (if (unit-attr-has-any? esym SC2-UNIT-ATTR-ARMORED) 0.40 0.0)
-                                                                (if (unit-attr-has-any? esym SC2-UNIT-ATTR-MECHANICAL) 0.40 0.0)))])
-                                                  (values (+ cnt 1) (+ sc w)))
-                                                (values cnt sc))))
-                                        (if (and (>= rcnt 2)
-                                                 (not (spell-point-claimed? claims 'blinding-cloud px py BLINDING-CLOUD-CLAIM-RADIUS current-frame)))
-                                            score
-                                            0.0)))])
-                         (and ok?
-                              (spell-claim-point?! claims 'blinding-cloud cx cy BLINDING-CLOUD-CLAIM-RADIUS current-frame BLINDING-CLOUD-CLAIM-TTL)
-                              (spell-directive tag 'viper 'blinding-cloud 'point 0 cx cy 'viper-blinding-cloud))))
+                  ;; 1. Blinding Cloud on >= 2 ground ranged clumps, prioritizing 'armored/'mechanical lines
+                  (let ([bc-rng (sc2-spell-cast-range 'blinding-cloud 11.0)]
+                        [bc-rad (sc2-spell-effect-radius 'blinding-cloud 2.0)]
+                        [bc-claim-r (sc2-spell-claim-radius 'blinding-cloud BLINDING-CLOUD-CLAIM-RADIUS)]
+                        [bc-en (sc2-spell-energy 'blinding-cloud 100.0)])
+                    (and (>= en bc-en)
+                         (let-values ([(ok? cx cy _s)
+                                       (best-enemy-cluster
+                                        ux uy (+ bc-rng 1.5) enemy-units bc-rad 0.0
+                                        (lambda ([px : Float] [py : Float] [cl : (Listof Any)])
+                                          (define-values (rcnt score)
+                                            (for/fold ([cnt : Integer 0] [sc : Float 0.0])
+                                                      ([e (in-list cl)])
+                                              (if (and (viper-ranged-ground? e)
+                                                       (not (uh-has-buff? e 'blinding-cloud)))
+                                                  (let* ([esym (uh-type e)]
+                                                         [pack (aoe-radius-packing-multiplier
+                                                                (unit-collision-radius esym) bc-rad)]
+                                                         [w (* pack
+                                                               (+ 1.0
+                                                                  (if (unit-attr-has-any? esym SC2-UNIT-ATTR-ARMORED) 0.40 0.0)
+                                                                  (if (unit-attr-has-any? esym SC2-UNIT-ATTR-MECHANICAL) 0.40 0.0)))])
+                                                    (values (+ cnt 1) (+ sc w)))
+                                                  (values cnt sc))))
+                                          (if (and (>= rcnt 2)
+                                                   (not (spell-point-claimed? claims 'blinding-cloud px py bc-claim-r current-frame)))
+                                              score
+                                              0.0)))])
+                           (and ok?
+                                (spell-claim-point?! claims 'blinding-cloud cx cy bc-claim-r current-frame BLINDING-CLOUD-CLAIM-TTL)
+                                (spell-directive tag 'viper 'blinding-cloud 'point 0 cx cy 'viper-blinding-cloud)))))
                   ;; 2. L27-P0-3 / L28-P0-3 / L29-P0-3 (`z07`/`z08`/`#16`): Prioritize Parasitic Bomb
                   ;;    (`energy >= 125`, `r=8.5`, `>= 2` air within `4.5t`) STRICTLY ABOVE Abduct AND
                   ;;    HOLD Abduct whenever an unbombed `>= 2` air clump sits inside `13.0t` so Vipers
@@ -2996,38 +3004,40 @@
                                                                         (not (uh-has-buff? o 'blinding-cloud)))))
                                              2)
                                          (not (spell-point-claimed? claims 'blinding-cloud (uh-x e) (uh-y e)
-                                                                    BLINDING-CLOUD-CLAIM-RADIUS current-frame))))))])
+                                                                    (sc2-spell-claim-radius 'blinding-cloud BLINDING-CLOUD-CLAIM-RADIUS)
+                                                                    current-frame))))))])
                        (and (not pbomb-clump-in-13t?)
                             (not bcloud-clump-in-15t?)
-                            (>= en 75.0)
+                            (>= en (sc2-spell-energy 'abduct 75.0))
                             (>= (count-units-within ally-units ux uy 9.0
                                                     (lambda ([a : Any]) (and (not (= (uh-tag a) tag)) (unit-combat-relevant? a))))
                                 4)
-                            (let-values ([(ok? tgt _w)
-                                          (best-unit-target
-                                           ux uy 13.0 enemy-units
-                                           (lambda ([e : Any])
-                                             (define et (uh-type e))
-                                             (define d-e (dist2 ux uy (uh-x e) (uh-y e)))
-                                             (and (not (unit-attr-has-any? et SC2-UNIT-ATTR-HEROIC))
-                                                  (> (viper-abduct-weight et) 0.0)
-                                                  ;; Keep `13.0t` Abduct approach for capital targets (Colossus/Carrier/
-                                                  ;; Tempest/BC/BroodLord/Thor), while keeping Sieged Tank Abduct at
-                                                  ;; native `<= 9.0t` cast range (never stealing `100e` from Blinding Cloud
-                                                  ;; at `9..13t`, and never abducting an already-blinded unit!).
-                                                  (or (<= d-e 9.0)
-                                                      (not (memq et '(siege-tank siege-tank-sieged))))
-                                                  (not (uh-has-buff? e 'blinding-cloud))
-                                                  (= (spell-unit-claim-count claims 'abduct (uh-tag e) current-frame) 0)))
-                                           (lambda ([e : Any]) (viper-abduct-weight (uh-type e))))])
-                              (and ok?
-                                   (spell-claim-unit?! claims 'abduct (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
-                                                       #:caster-tag tag)
-                                   (begin
-                                     (hash-set! (spell-claims-viper-abduct-lock-frame claims)
-                                                tag (+ current-frame VIPER-ABDUCT-LOCK-FRAMES))
-                                     (spell-directive tag 'viper 'abduct 'unit (uh-tag tgt)
-                                                      (uh-x tgt) (uh-y tgt) 'viper-abduct))))))))
+                            (let ([abduct-rng (sc2-spell-cast-range 'abduct 9.0)])
+                              (let-values ([(ok? tgt _w)
+                                            (best-unit-target
+                                             ux uy (+ abduct-rng 4.0) enemy-units
+                                             (lambda ([e : Any])
+                                               (define et (uh-type e))
+                                               (define d-e (dist2 ux uy (uh-x e) (uh-y e)))
+                                               (and (not (unit-attr-has-any? et SC2-UNIT-ATTR-HEROIC))
+                                                    (> (viper-abduct-weight et) 0.0)
+                                                    ;; Keep `abduct-rng + 4.0` Abduct approach for capital targets (Colossus/Carrier/
+                                                    ;; Tempest/BC/BroodLord/Thor), while keeping Sieged Tank Abduct at
+                                                    ;; native `<= abduct-rng` cast range (never stealing `100e` from Blinding Cloud
+                                                    ;; at `9..13t`, and never abducting an already-blinded unit!).
+                                                    (or (<= d-e abduct-rng)
+                                                        (not (memq et '(siege-tank siege-tank-sieged))))
+                                                    (not (uh-has-buff? e 'blinding-cloud))
+                                                    (= (spell-unit-claim-count claims 'abduct (uh-tag e) current-frame) 0)))
+                                             (lambda ([e : Any]) (viper-abduct-weight (uh-type e))))])
+                                (and ok?
+                                     (spell-claim-unit?! claims 'abduct (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
+                                                         #:caster-tag tag)
+                                     (begin
+                                       (hash-set! (spell-claims-viper-abduct-lock-frame claims)
+                                                  tag (+ current-frame (sc2-spell-lockout-frames 'abduct VIPER-ABDUCT-LOCK-FRAMES)))
+                                       (spell-directive tag 'viper 'abduct 'unit (uh-tag tgt)
+                                                        (uh-x tgt) (uh-y tgt) 'viper-abduct)))))))))
                   ;; 4. Safe Consume (`energy < 60`, `0` enemies within `12.0`, Zerg building `hp > 450`)
                   (and (< en 60.0)
                        (not (any-unit-within? all-enemies ux uy 12.0 sc2-enemy-unit-targetable?))
@@ -3549,10 +3559,14 @@
                    (and heavy-bio-target-in-10?
                         (not (any-unit-within? all-enemies ux uy snipe-danger-r sc2-enemy-unit-targetable?))))
                  (define (try-ghost-emp [require-heavy-shields? : Boolean]) : (Option spell-directive)
-                   (and (>= en 75.0)
+                   (define emp-rng (sc2-spell-cast-range 'emp-round 10.0))
+                   (define emp-rad (sc2-spell-effect-radius 'emp-round 1.5))
+                   (define emp-claim-r (sc2-spell-claim-radius 'emp-round EMP-CLAIM-RADIUS))
+                   (define emp-en (sc2-spell-energy 'emp-round 75.0))
+                   (and (>= en emp-en)
                         (let-values ([(ok? ex ey _s)
                                       (best-enemy-cluster
-                                       ux uy 10.0 enemy-units 1.5 0.25
+                                       ux uy emp-rng enemy-units emp-rad 0.25
                                        (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
                                          (define-values (shield-sum energy-sum score-sum prio? sh-psi-cnt)
                                            (for/fold ([sh-s : Float 0.0]
@@ -3583,18 +3597,23 @@
                                                       (or (>= shield-sum 120.0)
                                                           (>= energy-sum 100.0)
                                                           prio?))
-                                                  (not (spell-point-claimed? claims 'emp-round cx cy EMP-CLAIM-RADIUS current-frame)))
+                                                  (not (spell-point-claimed? claims 'emp-round cx cy emp-claim-r current-frame)))
                                              score-sum
                                              0.0)))])
                           (and ok?
-                               (spell-claim-point?! claims 'emp-round ex ey EMP-CLAIM-RADIUS current-frame EMP-CLAIM-TTL)
+                               (spell-claim-point?! claims 'emp-round ex ey emp-claim-r current-frame EMP-CLAIM-TTL)
                                (spell-directive tag 'ghost 'emp-round 'point 0 ex ey 'ghost-emp)))))
                  (define (try-ghost-snipe) : (Option spell-directive)
-                   (and (>= en 50.0)
+                   (define snipe-rng (sc2-spell-cast-range 'steady-targeting 10.0))
+                   (define snipe-en (sc2-spell-energy 'steady-targeting 50.0))
+                   (define snipe-base (sc2-spell-base-damage 'steady-targeting SNIPE-BASE-DAMAGE))
+                   (define snipe-bonus (sc2-spell-bonus-damage 'steady-targeting SNIPE-PSIONIC-BONUS))
+                   (define snipe-lock (sc2-spell-lockout-frames 'steady-targeting SNIPE-CHANNEL-LOCKOUT-FRAMES))
+                   (and (>= en snipe-en)
                         (not (any-unit-within? all-enemies ux uy snipe-danger-r sc2-enemy-unit-targetable?))
                         (let-values ([(ok? tgt _w)
                                       (best-unit-target
-                                       ux uy 10.0 enemy-units
+                                       ux uy snipe-rng enemy-units
                                        (lambda ([e : Any])
                                          (and (not (uh-hallucination? e))
                                               (> (ghost-snipe-weight e) 0.0)
@@ -3602,24 +3621,24 @@
                                                  (unit-claim-effective-cap 'steady-targeting (uh-total-hp e) 0.0 #f #t
                                                                            #:target-sym (uh-type e)))))
                                        (lambda ([e : Any])
-                                         ;; L58-P3 (`sc2-real-t04`) + L60 SC2 5.0.14: Focus-fire multi-Snipe targets
-                                         ;; (`> 130 HP` non-psionic or `> 170 HP` psionic, e.g. Roach/Lurker/Ultralisk)
+                                         ;; L58-P3 (`sc2-real-t04`) + L60/L61 SC2 5.0.14+: Focus-fire multi-Snipe targets
+                                         ;; (`> snipe-base` non-psionic or `> snipe-base + snipe-bonus` psionic)
                                          ;; already claimed below cap so primary target drops fast, while 1-shot targets
                                          ;; (`cap = 1`, e.g. Infestor/Viper/Ravager) still split cleanly via `< cap`!
                                          (define cur-cl (spell-unit-claim-count claims 'steady-targeting (uh-tag e) current-frame))
                                          (define one-shot-hp : Float
                                            (if (unit-attr-has-any? (uh-type e) SC2-UNIT-ATTR-PSIONIC)
-                                               (+ SNIPE-BASE-DAMAGE SNIPE-PSIONIC-BONUS)
-                                               SNIPE-BASE-DAMAGE))
+                                               (+ snipe-base snipe-bonus)
+                                               snipe-base))
                                          (if (and (> cur-cl 0) (> (uh-total-hp e) one-shot-hp))
                                              (+ (ghost-snipe-weight e) 12.0)
                                              (- (ghost-snipe-weight e) (* 8.0 (->float cur-cl))))))])
                           (and ok?
                                (spell-claim-unit?!
-                                claims 'steady-targeting (uh-tag tgt) current-frame SNIPE-CHANNEL-LOCKOUT-FRAMES
+                                claims 'steady-targeting (uh-tag tgt) current-frame snipe-lock
                                 #:caster-tag tag #:target-hp (uh-total-hp tgt) #:target-sym (uh-type tgt))
                                (begin
-                                 (lock-ghost-snipe-channel! claims tag current-frame SNIPE-CHANNEL-LOCKOUT-FRAMES)
+                                 (lock-ghost-snipe-channel! claims tag current-frame snipe-lock)
                                  (spell-directive tag 'ghost 'steady-targeting 'unit (uh-tag tgt)
                                                   (uh-x tgt) (uh-y tgt) 'ghost-snipe))))))
                  (or
@@ -4395,40 +4414,44 @@
                 [(spellcaster-channel-protected? u) #f]
                 [else
                  (or
-                  ;; 1. Psi Storm (`energy >= 75`, `r=2.0 ttl=56f`, `<= 1` ally within `1.5`, packing-weighted)
-                  (and storm-ok?
-                       (>= en 75.0)
-                       (let-values ([(ok? sx sy _s)
-                                     (best-enemy-cluster
-                                      ux uy 9.0 enemy-units 2.0 0.25
-                                      (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
-                                        (define n-cl (length cl))
-                                        (if (and (>= n-cl 2)
-                                                 (not (spell-point-claimed? claims 'psi-storm cx cy PSI-STORM-CLAIM-RADIUS current-frame))
-                                                 (count-within-at-most?
-                                                  ally-units cx cy 1.5 1
-                                                  (lambda ([a : Any]) (not (uh-hallucination? a)))))
-                                            (sum-units-fl
-                                             cl
-                                             (lambda ([e : Any])
-                                               (define pack
-                                                 (aoe-radius-packing-multiplier
-                                                  (unit-collision-radius (uh-type e)) 1.5))
-                                               (+ (* 35.0 pack)
-                                                  (* 0.08 (protoss-cached-hp e)))))
-                                            0.0)))])
-                         (and ok?
-                              (spell-claim-point?! claims 'psi-storm sx sy PSI-STORM-CLAIM-RADIUS current-frame PSI-STORM-CLAIM-TTL)
-                              (begin
-                                (hash-set! (spell-claims-ht-storm-frame claims) tag current-frame)
-                                (spell-directive tag 'high-templar 'psi-storm 'point 0 sx sy 'ht-psi-storm)))))
+                  ;; 1. Psi Storm (live-hydrated range, effect radius, claim radius, energy; `<= 1` ally within `storm-rad`)
+                  (let ([storm-rng (sc2-spell-cast-range 'psi-storm 9.0)]
+                        [storm-rad (sc2-spell-effect-radius 'psi-storm 1.5)]
+                        [storm-claim-r (sc2-spell-claim-radius 'psi-storm PSI-STORM-CLAIM-RADIUS)]
+                        [storm-en (sc2-spell-energy 'psi-storm 75.0)])
+                    (and storm-ok?
+                         (>= en storm-en)
+                         (let-values ([(ok? sx sy _s)
+                                       (best-enemy-cluster
+                                        ux uy storm-rng enemy-units storm-claim-r 0.25
+                                        (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
+                                          (define n-cl (length cl))
+                                          (if (and (>= n-cl 2)
+                                                   (not (spell-point-claimed? claims 'psi-storm cx cy storm-claim-r current-frame))
+                                                   (count-within-at-most?
+                                                    ally-units cx cy storm-rad 1
+                                                    (lambda ([a : Any]) (not (uh-hallucination? a)))))
+                                              (sum-units-fl
+                                               cl
+                                               (lambda ([e : Any])
+                                                 (define pack
+                                                   (aoe-radius-packing-multiplier
+                                                    (unit-collision-radius (uh-type e)) storm-rad))
+                                                 (+ (* 35.0 pack)
+                                                    (* 0.08 (protoss-cached-hp e)))))
+                                              0.0)))])
+                           (and ok?
+                                (spell-claim-point?! claims 'psi-storm sx sy storm-claim-r current-frame PSI-STORM-CLAIM-TTL)
+                                (begin
+                                  (hash-set! (spell-claims-ht-storm-frame claims) tag current-frame)
+                                  (spell-directive tag 'high-templar 'psi-storm 'point 0 sx sy 'ht-psi-storm))))))
                   ;; 2. Feedback (`Infestor -> Viper -> Ghost -> Medivac -> HT -> Raven -> Oracle`, 1/target)
-                  ;; L58-P3 (`sc2-ab-p03`): Scan up to `13.0t` so HTs step 1..3t forward to Feedback
-                  ;; backline Vipers/Infestors behind front Roaches instead of rear-leashing away!
-                  (and (>= en 50.0)
+                  ;; L58-P3 (`sc2-ab-p03`): Scan up to `feedback-rng + 3.0` (`13.0t` on 5.0.14) so HTs step 1..3t
+                  ;; forward to Feedback backline Vipers/Infestors behind front Roaches instead of rear-leashing away!
+                  (and (>= en (sc2-spell-energy 'feedback 50.0))
                        (let-values ([(ok? tgt _w)
                                      (best-unit-target
-                                      ux uy 13.0 enemy-units
+                                      ux uy (+ (sc2-spell-cast-range 'feedback 10.0) 3.0) enemy-units
                                       (lambda ([e : Any])
                                         (and (> (ht-feedback-priority e) 0.0)
                                              (= (spell-unit-claim-count claims 'feedback (uh-tag e) current-frame) 0)))
@@ -5921,7 +5944,7 @@
 ;;      Liberators (clamped `<= 7.5t` cast range!) to focus-fire snipe them!
 ;; =============================================================================
 
-(define STALKER-BLINK-COOLDOWN-FRAMES : Integer 157)
+(define STALKER-BLINK-COOLDOWN-FRAMES : Integer (sc2-spell-cooldown-frames 'blink 157))
 (define STALKER-BLINK-MAX-RANGE : Float 7.95)
 
 (: stalker-blink-researched? (-> (Listof Any) Boolean))

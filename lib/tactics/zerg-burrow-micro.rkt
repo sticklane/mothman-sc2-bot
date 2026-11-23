@@ -20,7 +20,8 @@
 
 (module dyn-hash-ops racket/base
   (require racket/flonum
-           racket/fixnum)
+           racket/fixnum
+           (only-in "../sc2-game-constants.rkt" sc2-unit-on-field-supply))
   (provide dyn-hash-ref
            dyn-hash-has-key?
            fast-units-have-any-type?
@@ -413,26 +414,6 @@
            [else base]))
        (if creep? (fl* adj 1.3) adj)]))
 
-  ;; LotV per-unit supply (1 zergling = 0.5 supply, 1 ravager/lurker = 3.0, etc.)
-  (define *splash-unit-supply-table*
-    (hasheq
-     'zergling 0.5 'zergling-burrowed 0.5 'baneling 0.5 'baneling-burrowed 0.5
-     'queen 2.0 'roach 2.0 'roach-burrowed 2.0 'ravager 3.0 'ravager-burrowed 3.0
-     'hydralisk 2.0 'hydralisk-burrowed 2.0 'lurker 3.0 'lurker-mp 3.0
-     'lurker-burrowed 3.0 'lurker-mp-burrowed 3.0 'infestor 2.0 'infestor-burrowed 2.0
-     'swarm-host 3.0 'swarm-host-burrowed 3.0 'mutalisk 2.0 'corruptor 2.0
-     'viper 3.0 'brood-lord 4.0 'ultralisk 6.0 'ultralisk-burrowed 6.0
-     'marine 1.0 'reaper 1.0 'marauder 2.0 'ghost 2.0
-     'hellion 2.0 'hellbat 2.0 'hellion-tank 2.0 'widow-mine 2.0 'widow-mine-burrowed 2.0
-     'siege-tank 3.0 'siege-tank-sieged 3.0 'cyclone 3.0 'thor 6.0 'thor-ap 6.0
-     'viking 2.0 'viking-fighter 2.0 'viking-assault 2.0 'medivac 2.0
-     'liberator 3.0 'liberator-ag 3.0 'raven 2.0 'banshee 3.0 'battlecruiser 6.0
-     'zealot 2.0 'stalker 2.0 'sentry 2.0 'adept 2.0
-     'high-templar 2.0 'dark-templar 2.0 'archon 4.0 'immortal 4.0
-     'colossus 6.0 'disruptor 3.0 'phoenix 2.0 'void-ray 4.0
-     'oracle 3.0 'carrier 6.0 'tempest 4.0 'mothership 8.0
-     'drone 1.0 'scv 1.0 'probe 1.0))
-
   ;; Combat power (ehp . dps) from sc2-game-constants for fallback Lanchester estimate
   (define *splash-unit-power-table*
     (hasheq
@@ -461,7 +442,7 @@
     (define raw (hash-ref u 'supply #f))
     (if (and (real? raw) (> raw 0.0))
         (splash-fl raw 1.0)
-        (hash-ref *splash-unit-supply-table* ut 1.0)))
+        (sc2-unit-on-field-supply ut 1.0)))
 
   (define (splash-upgrade-present? upgrades target-syms)
     (for/or ([up (in-list upgrades)])

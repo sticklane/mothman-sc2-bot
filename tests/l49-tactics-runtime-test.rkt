@@ -37,8 +37,19 @@
                   DISRUPTOR-NOVA-BASE-DAMAGE
                   DISRUPTOR-NOVA-SHIELD-BONUS
                   score-purification-nova-impact
-                  nova-impact-score-enemy-raw-value)
-         (only-in "../lib/sc2-game-constants.rkt" sc2-min-cost)
+                  nova-impact-score-enemy-raw-value
+                  nova-impact-score-enemy-hits)
+         (only-in "../lib/sc2-game-constants.rkt"
+                  sc2-min-cost
+                  sc2-gas-cost
+                  sc2-unit-on-field-supply
+                  sc2-spell-cast-range
+                  sc2-spell-effect-radius
+                  register-sc2-live-ability-data!
+                  register-sc2-live-effect-data!
+                  register-sc2-live-unit-data!
+                  finalize-sc2-live-unit-costs!
+                  reset-sc2-live-game-data!)
          (only-in "../lib/plan/map-elements-and-experiments.rkt"
                   plan-mineral-wall-and-worker-path-tactics
                   plan-destructible-rocks-and-rockslides
@@ -4781,6 +4792,306 @@
                       snipe-ok? cap-roach cap-ultra cap-viper sn-cnt
                       viper-ok? shroud-gate-ok? radius-ok? wb-pg-ok? nc-restore-ok?
                       nc09-rock-hits nc09-stim? nc09-live-rock-hits nc13-mw? nc13-live-mw?)))
+
+;; -----------------------------------------------------------------------------
+;; 88. L61 Package B (`#1618`): Live `SC2-SPELL-SPEC` / `EffectData` / Supply / Runtime Cost Hydration
+;; -----------------------------------------------------------------------------
+(let ()
+  (dynamic-wind
+   (lambda () (reset-sc2-live-game-data!) (reset-sc2-live-response-data!))
+   (lambda ()
+     ;; (a) Static 5.0.14 baseline vs live 5.0.15 Psi Storm (`1036` range `8.0t`, `EffectData` radius `2.0t`):
+     ;;     - Static (`9.0t` / `1.5t` FF): HT at (50,50) storms 3 Marines at (58.5,50) even w/ 2 Zealots at `1.8t`!
+     ;;     - Live 5.0.15 (`8.0t` / `2.0t` FF): rejects 8.5t cluster (out of range), rejects 7.5t cluster w/ 2 Zealots
+     ;;       at `1.8t` (caught by live 2.0t FF!), casts on clean 7.5t cluster, and `bot-runtime` HT standoff targets `7.8t`!
+     (define ht-1 (mk-u 91101 'high-templar 50.0 50.0 #:hp 40.0 #:shield 40.0 #:energy 100.0))
+     (define mar-85 (for/list ([i (in-range 3)]) (mk-u (+ 91110 i) 'marine 58.5 (+ 49.8 (* 0.2 i)) #:hp 45.0)))
+     (define zl-ff85 (list (mk-u 91120 'zealot 58.5 51.8 #:hp 100.0 #:shield 50.0)
+                           (mk-u 91121 'zealot 58.5 48.2 #:hp 100.0 #:shield 50.0)))
+     (define mar-75 (for/list ([i (in-range 3)]) (mk-u (+ 91130 i) 'marine 57.5 (+ 49.8 (* 0.2 i)) #:hp 45.0)))
+     (define zl-ff75 (list (mk-u 91140 'zealot 57.5 51.8 #:hp 100.0 #:shield 50.0)
+                           (mk-u 91141 'zealot 57.5 48.2 #:hp 100.0 #:shield 50.0)))
+     (define d-st-static
+       (plan-protoss-spellcaster-micro (cons ht-1 zl-ff85) mar-85 #:claims (make-spell-claims) #:current-frame 500
+                                       #:psi-storm-researched? #t))
+     ;; Static Nova miss at 1.65t (radius 0.0)
+     (define mar-nova165 (hash-set (mk-u 91150 'marine 51.65 50.0 #:hp 45.0) 'radius 0.0))
+     (define nova-hits-static (nova-impact-score-enemy-hits (score-purification-nova-impact 50.0 50.0 (list mar-nova165) '())))
+     ;; Static Tempest supply = 4.0 vs enemy Colossus (6.0): `4/6 = 0.67 < 0.90` -> `#f` in BOTH tactics modules!
+     (define tmp-u (mk-u 91160 'tempest 50.0 50.0 #:hp 200.0 #:shield 100.0 #:flying #t))
+     (define col-u (mk-u 91161 'colossus 58.0 50.0 #:hp 200.0 #:shield 150.0))
+     (define zbm-static? (should-commit-through-splash? (list tmp-u) (list col-u) #:lanchester-ratio 2.0))
+     (define am-static?
+       (arena-direct-should-commit-through-splash?
+        (list (unit-hash->tactical-sim-unit tmp-u 'ally))
+        (list (unit-hash->tactical-sim-unit col-u 'enemy))
+        (list col-u) #f 2.0 #t))
+
+     ;; Inject live 5.0.15 overlays: Storm range 8.0 / radius 2.0, Nova radius 1.75, Tempest food 9.0
+     (register-sc2-live-ability-data! 1036 'point 8.0 #f 0)
+     (register-sc2-live-effect-data! 'psi-storm 2.0)
+     (register-sc2-live-effect-data! 'purification-nova 1.75)
+     (register-sc2-live-unit-data! 'tempest 250 175 9.0 1344 0 #f 3.15 2.0 0.0 13.0 #f #f)
+     (finalize-sc2-live-unit-costs!)
+
+     (define d-st-live-far
+       (plan-protoss-spellcaster-micro (list ht-1) mar-85 #:claims (make-spell-claims) #:current-frame 500
+                                       #:psi-storm-researched? #t))
+     (define d-st-live-ff
+       (plan-protoss-spellcaster-micro (cons ht-1 zl-ff75) mar-75 #:claims (make-spell-claims) #:current-frame 500
+                                       #:psi-storm-researched? #t))
+     (define d-st-live-clean
+       (plan-protoss-spellcaster-micro (list ht-1) mar-75 #:claims (make-spell-claims) #:current-frame 500
+                                       #:psi-storm-researched? #t))
+     ;; `bot-runtime.rkt` HT standoff: HT at (50,50) vs Marine at (59.5,50) -> moves to `59.5 - 7.8 = 51.7` (NOT 50.7!)
+     (define rt-ht (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+     (define ht-acts
+       (run-l34 rt-ht
+                (mk-live-obs 'Protoss 'Terran 500 #:supply-used 4 #:supply-cap 23
+                             #:ally-units (list ht-1)
+                             #:ally-buildings (list (mk-u 91170 'nexus 32.5 32.5 #:hp 1000.0))
+                             #:enemy-units (list (mk-u 91171 'marine 59.5 50.0 #:hp 45.0))
+                             #:researched-upgrades '(psi-storm))))
+     (define ht-move (findf (lambda (a) (and (pair? a) (eq? (car a) 'move) (= (second a) 91101))) ht-acts))
+     (define ht-standoff-ok? (and ht-move (>= (third ht-move) 51.2) (<= (third ht-move) 52.2)))
+
+     (define nova-hits-live (nova-impact-score-enemy-hits (score-purification-nova-impact 50.0 50.0 (list mar-nova165) '())))
+     (define zbm-live? (should-commit-through-splash? (list tmp-u) (list col-u) #:lanchester-ratio 2.0))
+     (define am-live?
+       (arena-direct-should-commit-through-splash?
+        (list (unit-hash->tactical-sim-unit tmp-u 'ally))
+        (list (unit-hash->tactical-sim-unit col-u 'enemy))
+        (list col-u) #f 2.0 #t))
+
+     ;; (b) Templar Archive 200G gate (`bot-runtime.rkt:20648` bug fix: 170G rejected, 210G allowed)
+     (define busy-ord (list (hasheq 'ability-id 1006)))
+     (define p-base-bldgs
+       (list (mk-u 91180 'nexus 32.5 32.5 #:hp 1000.0 #:orders busy-ord #:order-ability-id 1006)
+             (mk-u 91181 'nexus 56.5 32.5 #:hp 1000.0 #:orders busy-ord #:order-ability-id 1006)
+             (mk-u 91182 'nexus 80.5 32.5 #:hp 1000.0 #:orders busy-ord #:order-ability-id 1006)
+             (mk-u 91196 'nexus 104.5 32.5 #:hp 1000.0 #:orders busy-ord #:order-ability-id 1006)
+             (mk-u 91183 'pylon 36.0 36.0 #:hp 200.0)
+             (mk-u 91184 'gateway 38.0 36.0 #:hp 500.0 #:orders busy-ord #:order-ability-id 916)
+             (mk-u 91187 'gateway 39.0 36.0 #:hp 500.0 #:orders busy-ord #:order-ability-id 916)
+             (mk-u 91188 'gateway 40.0 36.0 #:hp 500.0 #:orders busy-ord #:order-ability-id 916)
+             (mk-u 91189 'gateway 41.0 36.0 #:hp 500.0 #:orders busy-ord #:order-ability-id 916)
+             (mk-u 91185 'cybernetics-core 40.0 38.0 #:hp 550.0)
+             (mk-u 91186 'twilight-council 42.0 38.0 #:hp 500.0)
+             (mk-u 91190 'robotics-facility 44.0 38.0 #:hp 450.0 #:orders busy-ord #:order-ability-id 978)
+             (mk-u 91191 'robotics-facility 45.0 38.0 #:hp 450.0 #:orders busy-ord #:order-ability-id 978)
+             (mk-u 91192 'stargate 46.0 38.0 #:hp 600.0 #:orders busy-ord #:order-ability-id 950)
+             (mk-u 91193 'fleet-beacon 47.0 38.0 #:hp 500.0 #:orders busy-ord #:order-ability-id 1006)
+             (mk-u 91194 'forge 48.0 38.0 #:hp 400.0 #:orders busy-ord #:order-ability-id 1062)
+             (mk-u 91195 'assimilator 28.0 34.0 #:hp 450.0)
+             (mk-u 91197 'assimilator 28.0 30.0 #:hp 450.0)
+             (mk-u 91198 'assimilator 52.0 34.0 #:hp 450.0)
+             (mk-u 91199 'assimilator 52.0 30.0 #:hp 450.0)))
+     (define p-units-ta
+       (append (for/list ([i (in-range 60)]) (mk-u (+ 91200 i) 'probe 30.0 (+ 30.0 (* 0.2 i)) #:hp 20.0 #:shield 20.0))
+               (for/list ([i (in-range 20)]) (mk-u (+ 91300 i) 'stalker 50.0 (+ 30.0 (* 0.2 i)) #:hp 80.0 #:shield 80.0))
+               (list (mk-u 91350 'observer 52.0 34.0 #:hp 40.0 #:shield 20.0))))
+     (define ta-upgs '(warp-gate-research warpgate blink charge gravitic-booster gravitic-drive))
+     (define ta-170
+       (step-layer2-economy!
+        (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss)
+        (mk-live-obs 'Protoss 'Zerg 8000 #:minerals 900 #:gas 170 #:supply-used 104 #:supply-cap 140
+                     #:mineral-harvesters 48 #:vespene-harvesters 12
+                     #:ally-units p-units-ta #:ally-buildings p-base-bldgs #:researched-upgrades ta-upgs)))
+     (define ta-210
+       (step-layer2-economy!
+        (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss)
+        (mk-live-obs 'Protoss 'Zerg 8000 #:minerals 900 #:gas 210 #:supply-used 104 #:supply-cap 140
+                     #:mineral-harvesters 48 #:vespene-harvesters 12
+                     #:ally-units p-units-ta #:ally-buildings p-base-bldgs #:researched-upgrades ta-upgs)))
+     (define (has-ta? acts)
+       (ormap (lambda (a) (and (pair? a) (eq? (car a) 'build) (eq? (second a) 'templar-archive))) acts))
+
+     (define storm-ok?
+       (and (ormap (lambda (d) (eq? (spell-directive-ability d) 'psi-storm)) d-st-static)
+            (not (ormap (lambda (d) (eq? (spell-directive-ability d) 'psi-storm)) d-st-live-far))
+            (not (ormap (lambda (d) (eq? (spell-directive-ability d) 'psi-storm)) d-st-live-ff))
+            (ormap (lambda (d) (eq? (spell-directive-ability d) 'psi-storm)) d-st-live-clean)
+            ht-standoff-ok?))
+     (define nova-r-ok? (and (= nova-hits-static 0) (= nova-hits-live 1)))
+     (define sup-ok? (and (not zbm-static?) zbm-live? (not am-static?) am-live?))
+     (define ta-ok? (and (= (sc2-gas-cost 'templar-archive) 200) (not (has-ta? ta-170)) (has-ta? ta-210)))
+
+     (check-true "L61-PkgB-Phase1-Live-Spell-Supply-And-Cost-Hydration"
+                 (and storm-ok? nova-r-ok? sup-ok? ta-ok?)
+                 (format "storm=~a (ht-mv=~a) nova=~a (~a->~a) sup=~a (zbm=~a/~a am=~a/~a) ta=~a (~a/~a)"
+                         storm-ok? ht-move nova-r-ok? nova-hits-static nova-hits-live
+                         sup-ok? zbm-static? zbm-live? am-static? am-live?
+                         ta-ok? (has-ta? ta-170) (has-ta? ta-210))))
+   (lambda () (reset-sc2-live-game-data!) (reset-sc2-live-response-data!))))
+
+;; -----------------------------------------------------------------------------
+;; 89. L61 Lane B (`#1609`): Scout Retire, Live-Mode Dedup/Coalesce, Gas Switch CD & Mineral-Wall Skip
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) Opening Probe scout retires when returning home `<= 10.0t` at `< 22` EHP (ZERO further `mineral-walk`!),
+  ;;     AND retires at `frame >= 4032` (`3:00`) even when healthy at enemy base, while STILL mineral-walking
+  ;;     home when pinched at enemy base (`frame < 4032`)!
+  (define rt-sc (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define nx-sc (mk-u 92001 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0))
+  (define py-sc (mk-u 92002 'pylon 36.0 36.0 #:hp 200.0 #:shield 200.0))
+  (define gw-sc (mk-u 92003 'gateway 38.0 36.0 #:hp 500.0 #:shield 500.0))
+  (define sc-probes
+    (for/list ([i (in-range 14)])
+      (mk-u (+ 92100 i) 'probe (+ 28.0 (* 0.3 i)) 32.5 #:hp 20.0 #:shield 20.0)))
+  (void (step-live-bot-runtime!
+         rt-sc
+         (mk-live-obs 'Protoss 'Terran 720 #:minerals 100 #:gas 0 #:supply-used 16 #:supply-cap 23
+                      #:mineral-harvesters 14 #:vespene-harvesters 0
+                      #:ally-units sc-probes #:ally-buildings (list nx-sc py-sc gw-sc))))
+  (define sw1-id (hash-ref (live-bot-runtime-last-telemetry rt-sc) 'scout-worker-id #f))
+  ;; Pinched at enemy base -> MUST mineral-walk home!
+  (define a-pinched
+    (hash-ref (step-live-bot-runtime!
+               rt-sc
+               (mk-live-obs 'Protoss 'Terran 900 #:minerals 100 #:gas 0 #:supply-used 16 #:supply-cap 23
+                            #:mineral-harvesters 13 #:vespene-harvesters 0
+                            #:ally-units (for/list ([p (in-list sc-probes)])
+                                           (if (equal? (hash-ref p 'id) sw1-id)
+                                               (mk-u sw1-id 'probe 156.0 160.0 #:hp 10.0 #:shield 5.0)
+                                               p))
+                            #:ally-buildings (list nx-sc py-sc gw-sc)
+                            #:enemy-units (list (mk-u 92901 'marine 158.0 160.0 #:hp 45.0))))
+              'actions '()))
+  ;; Back home within `<= 10.0t` at `< 22` EHP -> MUST retire (`0` mineral-walk, `0` worker-scout)!
+  (define a-home-ret
+    (hash-ref (step-live-bot-runtime!
+               rt-sc
+               (mk-live-obs 'Protoss 'Terran 1100 #:minerals 100 #:gas 0 #:supply-used 16 #:supply-cap 23
+                            #:mineral-harvesters 14 #:vespene-harvesters 0
+                            #:ally-units (for/list ([p (in-list sc-probes)])
+                                           (if (equal? (hash-ref p 'id) sw1-id)
+                                               (mk-u sw1-id 'probe 35.0 32.5 #:hp 10.0 #:shield 5.0)
+                                               p))
+                            #:ally-buildings (list nx-sc py-sc gw-sc)))
+              'actions '()))
+  ;; Healthy scout at `frame = 4040` (`>= 4032`, `3:00`) -> MUST retire!
+  (define rt-sc3m (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (void (step-live-bot-runtime!
+         rt-sc3m
+         (mk-live-obs 'Protoss 'Terran 720 #:minerals 100 #:gas 0 #:supply-used 16 #:supply-cap 23
+                      #:mineral-harvesters 14 #:vespene-harvesters 0
+                      #:ally-units sc-probes #:ally-buildings (list nx-sc py-sc gw-sc))))
+  (define sw2-id (hash-ref (live-bot-runtime-last-telemetry rt-sc3m) 'scout-worker-id #f))
+  (define a-3min-ret
+    (hash-ref (step-live-bot-runtime!
+               rt-sc3m
+               (mk-live-obs 'Protoss 'Terran 4040 #:minerals 100 #:gas 0 #:supply-used 24 #:supply-cap 31
+                            #:mineral-harvesters 14 #:vespene-harvesters 0
+                            #:ally-units (for/list ([p (in-list sc-probes)])
+                                           (if (equal? (hash-ref p 'id) sw2-id)
+                                               (mk-u sw2-id 'probe 150.0 150.0 #:hp 20.0 #:shield 20.0)
+                                               p))
+                            #:ally-buildings (list nx-sc py-sc gw-sc)))
+              'actions '()))
+  (define scout-ret-ok?
+    (and sw1-id
+         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'mineral-walk) (equal? (second a) sw1-id))) a-pinched)
+         (not (ormap (lambda (a) (and (pair? a) (memq (car a) '(mineral-walk worker-scout)) (equal? (second a) sw1-id))) a-home-ret))
+         sw2-id
+         (not (ormap (lambda (a) (and (pair? a) (memq (car a) '(mineral-walk worker-scout)) (equal? (second a) sw2-id))) a-3min-ret))))
+
+  ;; (b) Live-mode `idle-return-workers` coalesces into 1 `(harvest-mineral idle-ids pid)` & throttles 24f;
+  ;;     `l2-rebalance-offline-mined-out-workers!` is skipped in live mode!
+  (define rt-idle (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define cc-idle1 (mk-u 92201 'command-center 32.5 32.5 #:hp 1500.0 #:assigned-harvesters 0 #:ideal-harvesters 0))
+  (define cc-idle2 (mk-u 92202 'command-center 56.5 32.5 #:hp 1500.0 #:assigned-harvesters 4 #:ideal-harvesters 16))
+  (define mps-idle (list (hasheq 'id 92290 'type 'mineral-field 'x 62.5 'y 32.5 'mineral-contents 1500)))
+  (define scvs-idle4 (for/list ([i (in-range 4)]) (mk-u (+ 92210 i) 'scv 30.0 (+ 31.0 (* 0.3 i)) #:hp 45.0 #:orders '())))
+  (define a-idle-0
+    (step-layer2-economy!
+     rt-idle
+     (mk-live-obs 'Terran 'Zerg 3000 #:minerals 100 #:gas 0 #:supply-used 14 #:supply-cap 23
+                  #:mineral-harvesters 10 #:vespene-harvesters 0 #:min-rate 400
+                  #:ally-units scvs-idle4 #:ally-buildings (list cc-idle1 cc-idle2) #:mineral-patches mps-idle)))
+  (define a-idle-4
+    (step-layer2-economy!
+     rt-idle
+     (mk-live-obs 'Terran 'Zerg 3004 #:minerals 100 #:gas 0 #:supply-used 14 #:supply-cap 23
+                  #:mineral-harvesters 10 #:vespene-harvesters 0 #:min-rate 400
+                  #:ally-units scvs-idle4 #:ally-buildings (list cc-idle1 cc-idle2) #:mineral-patches mps-idle)))
+  (define hm-0 (filter (lambda (a) (and (pair? a) (eq? (car a) 'harvest-mineral))) a-idle-0))
+  (define hm-4 (filter (lambda (a) (and (pair? a) (eq? (car a) 'harvest-mineral))) a-idle-4))
+  (define idle-coal-ok?
+    (and (= (length hm-0) 1)
+         (list? (second (car hm-0)))
+         (= (length (second (car hm-0))) 4)
+         (null? hm-4)))
+
+  ;; (c) `wd-gas-valve` opposite-direction `112f` cooldown prevents pull <-> fill oscillation
+  (define rt-gv (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define cc-gv (mk-u 92301 'command-center 32.5 32.5 #:hp 1500.0 #:assigned-harvesters 14 #:ideal-harvesters 16))
+  (define ref-gv-full (mk-u 92302 'refinery 28.5 36.5 #:hp 500.0 #:assigned-harvesters 3 #:ideal-harvesters 3 #:vespene-contents 1800))
+  (define ref-gv-empty (mk-u 92302 'refinery 28.5 36.5 #:hp 500.0 #:assigned-harvesters 0 #:ideal-harvesters 3 #:vespene-contents 1800))
+  (define mps-gv (list (hasheq 'id 92390 'type 'mineral-field 'x 26.5 'y 32.5 'mineral-contents 1500)))
+  (define scvs-gv
+    (append (for/list ([i (in-range 3)]) (mk-u (+ 92310 i) 'scv 29.0 (+ 35.5 (* 0.3 i)) #:hp 45.0 #:order-ability-id 3666 #:order-target-id 92302))
+            (for/list ([i (in-range 17)]) (mk-u (+ 92320 i) 'scv 28.0 (+ 30.0 (* 0.3 i)) #:hp 45.0 #:order-ability-id 3666 #:order-target-id 92390))))
+  (define gv-pull
+    (step-layer2-economy!
+     rt-gv
+     (mk-live-obs 'Terran 'Zerg 6000 #:minerals 120 #:gas 500 #:supply-used 90 #:supply-cap 110
+                  #:mineral-harvesters 17 #:vespene-harvesters 3 #:vesp-rate 160
+                  #:ally-units scvs-gv #:ally-buildings (list cc-gv ref-gv-full) #:mineral-patches mps-gv)))
+  (define gv-fill-early
+    (step-layer2-economy!
+     rt-gv
+     (mk-live-obs 'Terran 'Zerg 6040 #:minerals 300 #:gas 20 #:supply-used 90 #:supply-cap 110
+                  #:mineral-harvesters 20 #:vespene-harvesters 0 #:vesp-rate 0
+                  #:ally-units scvs-gv #:ally-buildings (list cc-gv ref-gv-empty) #:mineral-patches mps-gv)))
+  (define gv-fill-after
+    (step-layer2-economy!
+     rt-gv
+     (mk-live-obs 'Terran 'Zerg 6120 #:minerals 300 #:gas 20 #:supply-used 90 #:supply-cap 110
+                  #:mineral-harvesters 20 #:vespene-harvesters 0 #:vesp-rate 0
+                  #:ally-units scvs-gv #:ally-buildings (list cc-gv ref-gv-empty) #:mineral-patches mps-gv)))
+  ;; Loop 61B (`#1641`): backup `wd-gas-valve` triggers at `215G / 90M` (`> 3` gas harvesters), NOT at `195G / 90M`!
+  (define ref-gv2 (mk-u 92303 'refinery 36.5 36.5 #:hp 500.0 #:assigned-harvesters 2 #:ideal-harvesters 3 #:vespene-contents 1800))
+  (define scvs-gv5
+    (append (for/list ([i (in-range 3)]) (mk-u (+ 92310 i) 'scv 29.0 (+ 35.5 (* 0.3 i)) #:hp 45.0 #:order-ability-id 3666 #:order-target-id 92302))
+            (for/list ([i (in-range 2)]) (mk-u (+ 92315 i) 'scv 36.0 (+ 35.5 (* 0.3 i)) #:hp 45.0 #:order-ability-id 3666 #:order-target-id 92303))
+            (for/list ([i (in-range 17)]) (mk-u (+ 92320 i) 'scv 28.0 (+ 30.0 (* 0.3 i)) #:hp 45.0 #:order-ability-id 3666 #:order-target-id 92390))))
+  (define gv-195-no
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+     (mk-live-obs 'Terran 'Zerg 6000 #:minerals 90 #:gas 195 #:supply-used 90 #:supply-cap 110
+                  #:mineral-harvesters 17 #:vespene-harvesters 5 #:vesp-rate 160
+                  #:ally-units scvs-gv5 #:ally-buildings (list cc-gv ref-gv-full ref-gv2) #:mineral-patches mps-gv)))
+  (define gv-215-yes
+    (step-layer2-economy!
+     (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+     (mk-live-obs 'Terran 'Zerg 6000 #:minerals 90 #:gas 215 #:supply-used 90 #:supply-cap 110
+                  #:mineral-harvesters 17 #:vespene-harvesters 5 #:vesp-rate 160
+                  #:ally-units scvs-gv5 #:ally-buildings (list cc-gv ref-gv-full ref-gv2) #:mineral-patches mps-gv)))
+  (define gas-cd-ok?
+    (and (ormap (lambda (a) (and (pair? a) (eq? (car a) 'rebalance-gas-to-minerals))) gv-pull)
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'harvest-gas))) gv-fill-early))
+         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'harvest-gas))) gv-fill-after)
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'rebalance-gas-to-minerals))) gv-195-no))
+         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'rebalance-gas-to-minerals))) gv-215-yes)))
+
+  ;; (d) `open-mineral-wall-after-5min` skips workers already harvesting `lead-seam`
+  (define wall-100 (hasheq 'tag 92490 'type 'mineral-field-450 'unit-type-id 665 'x 80.0 'y 80.0 'mineral-contents 100))
+  (define ws-idle-w (list (hasheq 'tag 92401 'type 'probe 'x 78.0 'y 80.0 'hp 20.0 'shield 20.0 'orders '())
+                          (hasheq 'tag 92402 'type 'probe 'x 78.5 'y 80.0 'hp 20.0 'shield 20.0 'orders '())))
+  (define ws-busy-w (list (hasheq 'tag 92401 'type 'probe 'x 78.0 'y 80.0 'hp 20.0 'shield 20.0
+                                  'orders (list (hasheq 'ability-id 3666 'target-unit-tag 92490)))
+                          (hasheq 'tag 92402 'type 'probe 'x 78.5 'y 80.0 'hp 20.0 'shield 20.0
+                                  'orders (list (hasheq 'ability-id 3666 'target-unit-tag 92490)))))
+  (define mw-exc-idle (plan-mineral-wall-and-worker-path-tactics ws-idle-w '() (list wall-100) '() #:frame 7000 #:has-townhall? #f))
+  (define mw-exc-busy (plan-mineral-wall-and-worker-path-tactics ws-busy-w '() (list wall-100) '() #:frame 7000 #:has-townhall? #f))
+  (define mw-skip-ok?
+    (and (= (count (lambda (d) (eq? (MapElementDirective-kind d) 'excavate-mineral-wall-backdoor)) mw-exc-idle) 2)
+         (= (count (lambda (d) (eq? (MapElementDirective-kind d) 'excavate-mineral-wall-backdoor)) mw-exc-busy) 0)))
+
+  (check-true "L61-LaneB-Worker-Scout-Retire-Live-Dedup-And-Mineral-Wall-Guard"
+              (and scout-ret-ok? idle-coal-ok? gas-cd-ok? mw-skip-ok?)
+              (format "scout=~a idle=~a (hm0=~a hm4=~a) gascd=~a mwskip=~a"
+                      scout-ret-ok? idle-coal-ok? hm-0 hm-4 gas-cd-ok? mw-skip-ok?)))
 
 (printf "\n=== Loop 49 Suite Summary: ~a/~a passed, ~a failed ===\n"
         tests-passed tests-run tests-failed)

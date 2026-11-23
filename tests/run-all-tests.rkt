@@ -4090,8 +4090,11 @@
       (for/list ([i (in-range 16)])
         (mk-sc2-u (+ 200 i) 45 1 28.0 32.5 #:orders (list (sc2-unit-order 3666 #f 700 0.0)))))
      '() '() #f '() '() '() '() '() '()))
-  (assert-eq! (saturate-workers-and-gas-commands obs-exp-xfer) '()
-              "Expansion worker transfer must count in-flight worker 299 and emit 0 redundant gather resets")
+  (assert-eq! (filter (lambda (c) (and (sc2-raw-unit-command? c)
+                                       (= (sc2-raw-unit-command-ability-id c) 3666)))
+                      (saturate-workers-and-gas-commands obs-exp-xfer))
+              '()
+              "Expansion worker transfer must count in-flight worker 299 and emit 0 redundant 3666 gather resets")
 
   ;; 1d. Match #5129552 regression: depleted main Extractor (gas=0, ideal=0) & mined-out main minerals
   ;;     must NOT block saturating non-empty Extractor #502, and un-leased worker chasing >22t recalls to minerals!
@@ -18316,6 +18319,289 @@
                          (not (not (memq 'marine (macro-brain-decision-scheduled-ids l60-tvt-reapers-5m12)))))
                      (not (not (memq 'factory-techlab (macro-brain-decision-scheduled-ids l60-tvt-reapers-stabilized)))))
                 "L60-Macro(4) Early TvT (<5:30) >=3 Reapers MUST defer EBay & FactoryTechLab (incl. BO goal) until stabilized, then unlock FactoryTechLab")
+  (reset-macro-escrow-tracker!))
+
+(run-suite "51.41 Loop 61 Phase 1 Package C (Live Tech-DAG, Cost Collapse, Parallel Upgrades) + #1615 Top-3 Macro Fixes"
+  (define (l61-cand-u dec sym)
+    (define sched (macro-brain-decision-priority-schedule dec))
+    (define cat-ht (priority-schedule-result-category-utilities sched))
+    (define trace (if (hash? cat-ht) (hash-ref cat-ht 'decision-trace '()) '()))
+    (define hit (findf (lambda (e) (eq? (priority-decision-entry-id e) sym)) trace))
+    (if hit (priority-decision-entry-utility-score hit) -1.0))
+
+  ;; 1. Live SC2 5.0.15 Macro Hydration (`Spire 150M/150G` incl. Drone subtraction & `Cyclone` no TechLab prereq)
+  (dynamic-wind
+   (lambda ()
+     (reset-sc2-live-game-data!)
+     (reset-macro-escrow-tracker!))
+   (lambda ()
+     (register-sc2-live-unit-data! 'spire 200 150 0.0 1590 0 #f 0.0 1.0 0.0 0.0 #f #f)
+     (register-sc2-live-unit-data! 'cyclone 125 50 2.0 717 0 #f 4.725 1.0 5.0 0.0 #f #f)
+     (finalize-sc2-live-unit-costs!)
+     (define n-spire (lookup-sc2-tech-node 'spire))
+     (define n-cyc (lookup-sc2-tech-node 'cyclone))
+     (define z-spire-5015
+       (step-priority-macro-brain
+        (make-macro-world-state
+         #:race 'Zerg #:enemy-race 'Protoss #:frame 8400
+         #:minerals 160 #:gas 160 #:supply-used 74 #:supply-cap 102 #:supply-left 28 #:pending-supply 0
+         #:workers 48 #:active-bases 3 #:mineral-harvesters 36 #:gas-harvesters 12
+         #:army-supply 26 #:enemy-threat-supply 12 #:under-attack? #f #:requires-anti-air? #t
+         #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'hydralisk-den 1 'extractor 4)
+         #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'hydralisk-den 1 'extractor 4)
+         #:unit-counts (hasheq 'drone 48 'queen 4 'hydralisk 8 'overlord 10)
+         #:enemy-unit-counts (hasheq 'tempest 3)
+         #:enemy-building-counts (hasheq 'stargate 2 'fleet-beacon 1)
+         #:open-facility-slots (hasheq 'townhall 3 'larva 4))))
+     (assert-true! (and (= (sc2-tech-node-min-cost n-spire) 150)
+                        (= (sc2-tech-node-gas-cost n-spire) 150)
+                        (not (memq 'factory-techlab (sc2-tech-node-prereqs n-cyc)))
+                        (not (not (memq 'spire (macro-brain-decision-scheduled-ids z-spire-5015)))))
+                   "L61-PkgC(1) Live 5.0.15 overlay MUST drop Spire to 150M/150G (scheduling @160M/160G) & remove factory-techlab from Cyclone"))
+   (lambda ()
+     (reset-sc2-live-game-data!)
+     (reset-macro-escrow-tracker!)))
+  (assert-true! (and (= (sc2-tech-node-min-cost (lookup-sc2-tech-node 'spire)) 200)
+                     (= (sc2-tech-node-gas-cost (lookup-sc2-tech-node 'spire)) 200)
+                     (not (not (memq 'factory-techlab (sc2-tech-node-prereqs (lookup-sc2-tech-node 'cyclone))))))
+                "L61-PkgC(1b) reset-sc2-live-game-data! MUST cleanly restore static 5.0.14 Spire 200/200 & Cyclone factory-techlab")
+
+  ;; 2. Mirror-Mind single-source total-value & dynamic counter table parity
+  (assert-true! (and (equal? (unit-resource-cost 'immortal) (cons 250 100))
+                     (equal? (unit-resource-cost 'ultralisk) (cons 275 200))
+                     (equal? (unit-resource-cost 'ravager) (cons 100 100))
+                     (equal? (unit-resource-cost 'brood-lord) (cons 300 250))
+                     (equal? (unit-resource-cost 'archon) (cons 100 300))
+                     (eq? (attribute-counter-unit-for-enemy 'Protoss 'roach '(robotics-facility cybernetics-core) 250 100)
+                          'immortal))
+                "L61-PkgC(2) Mirror-Mind unit-resource-cost & LOTV counter table MUST use single-source 5.0.14 costs")
+
+  ;; 3. Parallel per-building upgrade emission across all 3 races (E-Bay+RaxTL, Forge+Twilight+Templar, 2xEvo+RoachWarren)
+  (let ()
+    (define t-cands
+      (map priority-candidate-id
+           (generate-race-priority-candidates
+            #:race 'Terran #:enemy-race 'Protoss #:frame 7500
+            #:minerals 350 #:gas 350 #:supply-left 20 #:supply-cap 90 #:workers 42 #:active-bases 2
+            #:army-supply 28 #:enemy-threat-supply 0 #:under-attack? #f
+            #:ready-building-counts (hasheq 'orbital-command 2 'barracks 3 'barracks-techlab 1 'engineering-bay 1 'factory 1)
+            #:total-building-counts (hasheq 'orbital-command 2 'barracks 3 'barracks-techlab 1 'engineering-bay 1 'factory 1)
+            #:unit-counts (hasheq 'scv 42 'marine 14 'marauder 4)
+            #:researched-upgrades '()
+            #:open-prod-slots (hasheq 'townhall 2 'barracks 2 'barracks-techlab 1 'engineering-bay 1))))
+    (define p-cands
+      (map priority-candidate-id
+           (generate-race-priority-candidates
+            #:race 'Protoss #:enemy-race 'Terran #:frame 8000
+            #:minerals 450 #:gas 450 #:supply-left 20 #:supply-cap 95 #:workers 44 #:active-bases 2
+            #:army-supply 31 #:enemy-threat-supply 0 #:under-attack? #f
+            #:ready-building-counts (hasheq 'nexus 2 'gateway 4 'cybernetics-core 1 'forge 1 'twilight-council 1 'templar-archive 1)
+            #:total-building-counts (hasheq 'nexus 2 'gateway 4 'cybernetics-core 1 'forge 1 'twilight-council 1 'templar-archive 1)
+            #:unit-counts (hasheq 'probe 44 'zealot 6 'stalker 6 'high-templar 2)
+            #:researched-upgrades '(warp-gate-research)
+            #:open-prod-slots (hasheq 'townhall 2 'gateway 4 'forge 1 'twilight-council 1 'templar-archive 1))))
+    (define z-cands
+      (map priority-candidate-id
+           (generate-race-priority-candidates
+            #:race 'Zerg #:enemy-race 'Terran #:frame 7800
+            #:minerals 450 #:gas 450 #:supply-left 20 #:supply-cap 102 #:workers 50 #:active-bases 3
+            #:army-supply 32 #:enemy-threat-supply 0 #:under-attack? #f
+            #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'evolution-chamber 2)
+            #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'evolution-chamber 2)
+            #:unit-counts (hasheq 'drone 50 'queen 4 'roach 10 'zergling 12)
+            #:researched-upgrades '(metabolic-boost)
+            #:open-prod-slots (hasheq 'townhall 3 'larva 4 'roach-warren 1 'evolution-chamber 2))))
+    (assert-true! (and (not (not (memq 'stimpack t-cands)))
+                       (not (not (memq 'terran-infantry-weapons-1 t-cands)))
+                       (not (not (memq 'protoss-ground-weapons-1 p-cands)))
+                       (or (not (not (memq 'charge p-cands))) (not (not (memq 'blink p-cands))))
+                       (not (not (memq 'psi-storm p-cands)))
+                       (not (not (memq 'glial-reconstitution z-cands)))
+                       (>= (length (filter (lambda (u) (memq u z-cands))
+                                           '(zerg-missile-weapons-1 zerg-ground-armor-1 zerg-melee-weapons-1)))
+                           2))
+                  "L61-PkgC(3) Parallel per-building upgrade slots MUST emit independent facility upgrades simultaneously for T/P/Z"))
+
+  ;; 4. `#1615` Anti-Cloak-Banshee (`#74 TvT who` & `#25 ZvT onlyfans`):
+  ;;    (a) Terran w/ 0 Turrets vs Cloak Banshees MUST lock MissileTurret#1 & Marine strictly ABOVE Starport/Tank escrow
+  ;;    (b) Zerg vs Terran at 5:00 w/ incomplete Lair & 0 Spores MUST schedule emergency Spore Crawler (>=1190)
+  (reset-macro-escrow-tracker!)
+  (define l61-t-74-banshee-turret-over-sp
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 6000
+      #:minerals 85 #:gas 120 #:supply-used 22 #:supply-cap 38 #:supply-left 16 #:pending-supply 0
+      #:workers 16 #:active-bases 2 #:mineral-harvesters 12 #:gas-harvesters 4
+      #:army-supply 4 #:enemy-threat-supply 9 #:under-attack? #t #:requires-anti-air? #t #:requires-detection? #t
+      #:ready-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 4 'barracks 1 'factory 1 'engineering-bay 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 4 'barracks 1 'factory 1 'engineering-bay 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 16 'marine 4)
+      #:enemy-unit-counts (hasheq 'banshee 3)
+      #:enemy-building-counts (hasheq 'starport-techlab 1)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1 'factory 1))))
+  (reset-macro-escrow-tracker!)
+  (define l61-z-25-late-lair-spore
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Terran #:frame 6750
+      #:minerals 95 #:gas 60 #:supply-used 46 #:supply-cap 66 #:supply-left 20 #:pending-supply 0
+      #:workers 34 #:active-bases 2 #:mineral-harvesters 28 #:gas-harvesters 6
+      #:army-supply 12 #:enemy-threat-supply 0 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'spawning-pool 1 'extractor 2)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'extractor 2)
+      #:unit-counts (hasheq 'drone 34 'queen 3 'zergling 12 'overlord 7)
+      #:open-facility-slots (hasheq 'townhall 2 'larva 4))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l61-t-74-banshee-turret-over-sp) 'missile-turret)
+                     (not (memq 'starport (macro-brain-decision-scheduled-ids l61-t-74-banshee-turret-over-sp)))
+                     (not (eq? (macro-brain-decision-saving-for l61-t-74-banshee-turret-over-sp) 'starport))
+                     (>= (l61-cand-u l61-t-74-banshee-turret-over-sp 'missile-turret) 1260.0)
+                     (>= (l61-cand-u l61-t-74-banshee-turret-over-sp 'marine) 1100.0)
+                     (not (not (memq 'spore-crawler (macro-brain-decision-scheduled-ids l61-z-25-late-lair-spore))))
+                     (>= (l61-cand-u l61-z-25-late-lair-spore 'spore-crawler) 1190.0))
+                "L61-Macro(4) Anti-Cloak-Banshee (#74/#25): Terran Turret#1/Marine MUST preempt Starport escrow & Zerg 5:00 incomplete-Lair MUST build Spore>=1190")
+
+  ;; 5. `#1615` Anti-Mass-Reaper (`#53 zig-reapers`): 1-base TvT w/ >=2 Reapers MUST defer FactoryTechLab, Factory#2 & BarracksReactor (<150M) until Marine+Hellion>=8
+  (reset-macro-escrow-tracker!)
+  (define l61-t-53-2reapers-1base
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 4300
+      #:minerals 130 #:gas 100 #:supply-used 26 #:supply-cap 39 #:supply-left 13 #:pending-supply 0
+      #:workers 19 #:active-bases 1 #:mineral-harvesters 15 #:gas-harvesters 4
+      #:army-supply 6 #:enemy-threat-supply 4 #:under-attack? #t
+      #:ready-building-counts (hasheq 'orbital-command 1 'supply-depot 3 'barracks 1 'factory 1 'bunker 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 1 'supply-depot 3 'barracks 1 'factory 1 'bunker 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 19 'marine 4 'hellion 1)
+      #:enemy-unit-counts (hasheq 'reaper 2)
+      #:open-facility-slots (hasheq 'townhall 1 'barracks 1 'factory 1))))
+  (assert-true! (and (not (memq 'factory-techlab (macro-brain-decision-scheduled-ids l61-t-53-2reapers-1base)))
+                     (not (memq 'factory (macro-brain-decision-scheduled-ids l61-t-53-2reapers-1base)))
+                     (not (memq 'barracks-reactor (macro-brain-decision-scheduled-ids l61-t-53-2reapers-1base)))
+                     (not (memq (macro-brain-decision-saving-for l61-t-53-2reapers-1base) '(factory-techlab factory barracks-reactor)))
+                     (or (not (not (memq 'hellion (macro-brain-decision-scheduled-ids l61-t-53-2reapers-1base))))
+                         (not (not (memq 'marine (macro-brain-decision-scheduled-ids l61-t-53-2reapers-1base))))))
+                "L61-Macro(5) 1-base TvT w/ >=2 Reapers (<8 Marine+Hellion) MUST defer FactoryTechLab/Factory#2/BarracksReactor & train Hellion/Marine")
+
+  ;; 6. `#1615` Anti-1-Base-Flood (`#42 Thessaloniki`, `#57 Mulebot`): <3:30 Protoss w/ <=4 combat under flood MUST defer Robo & build Battery + Stalker/Adept
+  (reset-macro-escrow-tracker!)
+  (define l61-p-57-marine-flood
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 4020
+      #:minerals 230 #:gas 110 #:supply-used 28 #:supply-cap 39 #:supply-left 11 #:pending-supply 0
+      #:workers 20 #:active-bases 1 #:mineral-harvesters 16 #:gas-harvesters 4
+      #:army-supply 8 #:enemy-threat-supply 10 #:under-attack? #t
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 2 'cybernetics-core 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 3 'gateway 2 'cybernetics-core 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 20 'zealot 4)
+      #:enemy-unit-counts (hasheq 'marine 10)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 2))))
+  (define l61-p57-bo (macro-brain-decision-bo-active-goal l61-p-57-marine-flood))
+  (assert-true! (and (not (memq 'robotics-facility (macro-brain-decision-scheduled-ids l61-p-57-marine-flood)))
+                     (not (eq? (macro-brain-decision-saving-for l61-p-57-marine-flood) 'robotics-facility))
+                     (or (not l61-p57-bo) (not (eq? (pro-bo-goal-target-sym l61-p57-bo) 'robotics-facility)))
+                     (not (not (memq 'shield-battery (macro-brain-decision-scheduled-ids l61-p-57-marine-flood))))
+                     (or (not (not (memq 'stalker (macro-brain-decision-scheduled-ids l61-p-57-marine-flood))))
+                         (not (not (memq 'adept (macro-brain-decision-scheduled-ids l61-p-57-marine-flood))))))
+                "L61-Macro(6) <3:30 Protoss w/ <=4 combat under Marine/Ling flood MUST defer RoboticsFacility & build ShieldBattery + Stalker/Adept")
+  (reset-macro-escrow-tracker!))
+
+(run-suite "Suite 51.42: Loop 61B Anti-Reaper Natural-FE + PvT Mid-Tech Deferral + Anti-Banshee EBay-Before-Viking"
+  (define (l61b-cand-u dec sym)
+    (hash-ref (hash-ref (priority-schedule-result-category-utilities
+                         (macro-brain-decision-priority-schedule dec))
+                        'candidate-utilities (hasheq))
+              sym 0.0))
+
+  ;; 1. `#53 TvT zig-reapers` after 1:30 Natural FE (`active-bases=2`, `marine=3`, `hellion=1`, `workers=19`):
+  ;;    >=2 Reapers <5:30 MUST defer factory-techlab / engineering-bay / barracks-techlab / armory even on 2 bases,
+  ;;    AND >=1 Reaper <4:00 with <20 workers under attack MUST also defer tech on 2 bases (while `l42-t-62-2reaper-factl`
+  ;;    at `marine=6, workers=22` remains untouched!).
+  (reset-macro-escrow-tracker!)
+  (define l61b-t-53-nat-2reapers
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 3524
+      #:minerals 130 #:gas 90 #:supply-used 24 #:supply-cap 38 #:supply-left 14 #:pending-supply 0
+      #:workers 19 #:active-bases 2 #:mineral-harvesters 15 #:gas-harvesters 4
+      #:army-supply 5 #:enemy-threat-supply 4 #:under-attack? #t
+      #:ready-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 3 'barracks 1 'factory 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 3 'barracks 1 'factory 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 19 'marine 3 'hellion 1)
+      #:enemy-unit-counts (hasheq 'reaper 2)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1 'factory 1))))
+  (reset-macro-escrow-tracker!)
+  (define l61b-t-53-nat-1reaper-attack
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 3600
+      #:minerals 125 #:gas 80 #:supply-used 22 #:supply-cap 38 #:supply-left 16 #:pending-supply 0
+      #:workers 17 #:active-bases 2 #:mineral-harvesters 13 #:gas-harvesters 4
+      #:army-supply 4 #:enemy-threat-supply 2 #:under-attack? #t
+      #:ready-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 3 'barracks 1 'factory 1 'refinery 2)
+      #:total-building-counts (hasheq 'orbital-command 1 'command-center 1 'supply-depot 3 'barracks 1 'factory 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 17 'marine 2 'hellion 1)
+      #:enemy-unit-counts (hasheq 'reaper 1)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 1 'factory 1))))
+  (assert-true! (and (not (memq 'factory-techlab (macro-brain-decision-scheduled-ids l61b-t-53-nat-2reapers)))
+                     (not (memq 'engineering-bay (macro-brain-decision-scheduled-ids l61b-t-53-nat-2reapers)))
+                     (not (memq (macro-brain-decision-saving-for l61b-t-53-nat-2reapers) '(factory-techlab engineering-bay barracks-techlab armory)))
+                     (or (not (not (memq 'hellion (macro-brain-decision-scheduled-ids l61b-t-53-nat-2reapers))))
+                         (not (not (memq 'marine (macro-brain-decision-scheduled-ids l61b-t-53-nat-2reapers)))))
+                     (not (memq 'factory-techlab (macro-brain-decision-scheduled-ids l61b-t-53-nat-1reaper-attack)))
+                     (not (memq (macro-brain-decision-saving-for l61b-t-53-nat-1reaper-attack) '(factory-techlab engineering-bay barracks-techlab armory))))
+                "L61B(1) #53 TvT after Natural FE: >=2 Reapers (<6 combat / <21W) & >=1 attacking Reaper (<20W) MUST defer FactoryTechLab/EBay even on 2 bases")
+
+  ;; 2. `#54 PvT zig-reapers` (`f=4000`, `Stalker:2 + Zealot:2 = 4` combat, `>=2` Reapers, `<6` Stalkers):
+  ;;    MUST defer `twilight-council`, `stargate`, `forge`, `robotics-bay`, `templar-archive`, `dark-shrine`, `nexus`
+  ;;    (incl. BO goal!) while keeping `stalker`, `gateway`, `warp-gate-research`, `shield-battery`, `pylon` active!
+  (reset-macro-escrow-tracker!)
+  (define l61b-p-54-reapers-no-twilight
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 4000
+      #:minerals 165 #:gas 105 #:supply-used 34 #:supply-cap 47 #:supply-left 13 #:pending-supply 0
+      #:workers 26 #:active-bases 2 #:mineral-harvesters 20 #:gas-harvesters 6
+      #:army-supply 8 #:enemy-threat-supply 6 #:under-attack? #t
+      #:ready-building-counts (hasheq 'nexus 2 'pylon 4 'gateway 2 'cybernetics-core 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 2 'pylon 4 'gateway 2 'cybernetics-core 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 26 'stalker 2 'zealot 2)
+      #:enemy-unit-counts (hasheq 'reaper 4)
+      #:open-facility-slots (hasheq 'townhall 2 'gateway 2 'cybernetics-core 1))))
+  (define l61b-p54-bo (macro-brain-decision-bo-active-goal l61b-p-54-reapers-no-twilight))
+  (assert-true! (and (not (memq 'twilight-council (macro-brain-decision-scheduled-ids l61b-p-54-reapers-no-twilight)))
+                     (not (memq 'stargate (macro-brain-decision-scheduled-ids l61b-p-54-reapers-no-twilight)))
+                     (not (memq 'forge (macro-brain-decision-scheduled-ids l61b-p-54-reapers-no-twilight)))
+                     (not (memq 'nexus (macro-brain-decision-scheduled-ids l61b-p-54-reapers-no-twilight)))
+                     (not (memq (macro-brain-decision-saving-for l61b-p-54-reapers-no-twilight)
+                                '(twilight-council stargate forge robotics-bay templar-archive dark-shrine nexus)))
+                     (or (not l61b-p54-bo)
+                         (not (memq (pro-bo-goal-target-sym l61b-p54-bo)
+                                    '(twilight-council stargate forge robotics-bay templar-archive dark-shrine nexus))))
+                     (not (not (memq 'stalker (macro-brain-decision-scheduled-ids l61b-p-54-reapers-no-twilight)))))
+                "L61B(2) #54 PvT <5:00 w/ >=2 Reapers & <6 Stalkers (even w/ 2S+2Z=4 combat) MUST defer Twilight/Stargate/Forge/Nexus & pump Stalkers")
+
+  ;; 3. `#74 TvT who` (`f=5340`, Banshee + StarportTL, ready Starport + Barracks, `0` EBays, `155M/110G`):
+  ;;    `engineering-bay@1255.0` MUST schedule/lock strictly AHEAD of `viking-fighter@940.0` & `stimpack` (even if OC==0)!
+  (reset-macro-escrow-tracker!)
+  (define l61b-t-74-ebay-before-viking
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Terran #:enemy-race 'Terran #:frame 5340
+      #:minerals 155 #:gas 110 #:supply-used 32 #:supply-cap 46 #:supply-left 14 #:pending-supply 0
+      #:workers 22 #:active-bases 2 #:mineral-harvesters 16 #:gas-harvesters 6
+      #:army-supply 10 #:enemy-threat-supply 6 #:under-attack? #t #:requires-anti-air? #t #:requires-detection? #t
+      #:ready-building-counts (hasheq 'command-center 2 'supply-depot 4 'barracks 2 'barracks-techlab 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:total-building-counts (hasheq 'command-center 2 'supply-depot 4 'barracks 2 'barracks-techlab 1 'factory 1 'factory-techlab 1 'starport 1 'refinery 2)
+      #:unit-counts (hasheq 'scv 22 'marine 6 'siege-tank 1)
+      #:enemy-unit-counts (hasheq 'banshee 1)
+      #:enemy-building-counts (hasheq 'starport-techlab 1)
+      #:open-facility-slots (hasheq 'townhall 2 'barracks 2 'barracks-techlab 1 'factory 1 'starport 1))))
+  (assert-true! (and (not (not (memq 'engineering-bay (macro-brain-decision-scheduled-ids l61b-t-74-ebay-before-viking))))
+                     (not (memq 'viking-fighter (macro-brain-decision-scheduled-ids l61b-t-74-ebay-before-viking)))
+                     (not (memq 'stimpack (macro-brain-decision-scheduled-ids l61b-t-74-ebay-before-viking)))
+                     (>= (l61b-cand-u l61b-t-74-ebay-before-viking 'engineering-bay) 1255.0))
+                "L61B(3) #74 TvT Banshee/StarportTL w/ 0 EBays MUST schedule engineering-bay@1255+ strictly ahead of viking-fighter & stimpack (even if OC==0)")
   (reset-macro-escrow-tracker!))
 
 (define total-elapsed-ms

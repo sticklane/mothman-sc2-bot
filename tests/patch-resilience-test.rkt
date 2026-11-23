@@ -24,13 +24,24 @@
 ;;      upgrade costs across ALL static aliases (`warp-gate-research`, `metabolic-boost`,
 ;;      `centrifical-hooks`, `terran-vehicle-and-ship-plating-1`, `psionic-storm`, etc.)
 ;;      while keeping `'pathogen-glands` absent and shifted `>= 290` IDs name-isolated.
+;;   6. Loop 61 Phase 1 (`#1603`): single-source total-value & on-field-supply static +
+;;      live hydration (`SC2-LIVE-RAW-COST-OVERLAY`), unified `SC2-SPELL-SPEC` registry
+;;      live hydration + aliases + defensive `EffectData` aliases.
+;;   7. Loop 61 Phase 1 (`#1603`): static anti-duplication guard verifying zero parallel
+;;      definitions of `UNIT-COST-TABLE`, `UNIT-RESOURCE-VALUE`, or `*splash-unit-supply-table*`
+;;      anywhere under `lib/`.
 
 (require racket/list
          racket/format
+         racket/file
+         racket/path
+         racket/runtime-path
          "../lib/sc2-game-constants.rkt"
          "../lib/sc2-typed-commands.rkt"
          "../lib/sc2-proto-wire-verifier.rkt"
          "../lib/sc2-protobuf-ws.rkt")
+
+(define-runtime-path repo-lib-dir "../lib")
 
 (define passed 0)
 (define failed 0)
@@ -195,7 +206,7 @@
 ;; -----------------------------------------------------------------------------
 ;; 1. Static SC2 5.0.14 Fallback Accuracy
 ;; -----------------------------------------------------------------------------
-(printf "[1/5] Verifying static 5.0.14 fallback constants...\n")
+(printf "[1/7] Verifying static 5.0.14 fallback constants...\n")
 (check-true  "offline-live-data-inactive" (not (unbox SC2-LIVE-DATA-ACTIVE?)))
 (check-equal "static-5014-hatchery-min"         (sc2-min-cost 'hatchery) 275)
 (check-equal "static-5014-queen-min"            (sc2-min-cost 'queen) 175)
@@ -221,7 +232,7 @@
 ;; -----------------------------------------------------------------------------
 ;; 2. Synthetic SC2 4.10 Protobuf `ResponseData` Hydration
 ;; -----------------------------------------------------------------------------
-(printf "[2/5] Verifying synthetic 4.10 ResponseData hydration & morph cost subtraction...\n")
+(printf "[2/7] Verifying synthetic 4.10 ResponseData hydration & morph cost subtraction...\n")
 (define data-410-bytes
   (encode-response-data
    #:units
@@ -259,7 +270,7 @@
 ;; -----------------------------------------------------------------------------
 ;; 3. Synthetic SC2 5.0.15 Protobuf `ResponseData` Hydration (via `decode-sc2-response`)
 ;; -----------------------------------------------------------------------------
-(printf "[3/5] Verifying synthetic 5.0.15 ResponseData hydration (Spire, Ghost Light, PsiStorm, Upgrades)...\n")
+(printf "[3/7] Verifying synthetic 5.0.15 ResponseData hydration (Spire, Ghost Light, PsiStorm, Upgrades)...\n")
 (define data-5015-bytes
   (encode-response-data
    #:abilities
@@ -319,7 +330,7 @@
 ;; -----------------------------------------------------------------------------
 ;; 4. Future Ability ID >= 4200 (`hasheqv` Unbounded) + `1766` Guard + Clean Reset
 ;; -----------------------------------------------------------------------------
-(printf "[4/5] Verifying future ability ID >= 4200 (4512) hydration, 1766 Archon guard, & clean reset...\n")
+(printf "[4/7] Verifying future ability ID >= 4200 (4512) hydration, 1766 Archon guard, & clean reset...\n")
 (define data-future-bytes
   (encode-response-data
    #:abilities
@@ -370,7 +381,7 @@
 ;; -----------------------------------------------------------------------------
 ;; 5. Loop 60B (`#1606`) SC2 5.0.14 CamelCase Upgrade Alias Fanout & >= 290 Isolation
 ;; -----------------------------------------------------------------------------
-(printf "[5/5] Verifying real SC2 5.0.14 CamelCase UpgradeData alias fanout & >=290 isolation...\n")
+(printf "[5/7] Verifying real SC2 5.0.14 CamelCase UpgradeData alias fanout & >=290 isolation...\n")
 (define data-5014-upgs-bytes
   (encode-response-data
    #:upgrades
@@ -466,6 +477,129 @@
             (not (sc2-upgrade-defined-in-live-data? 'warp-gate-research)))
 (check-true "reset-restores-offline-avail-warpgate"
             (sc2-upgrade-live-available? 'warp-gate-research))
+
+;; -----------------------------------------------------------------------------
+;; 6. Loop 61 Phase 1 (`#1603`): Total-Value, On-Field Supply, & SC2-SPELL-SPEC
+;; -----------------------------------------------------------------------------
+(printf "[6/7] Verifying Phase 1 total-value, on-field supply, & SC2-SPELL-SPEC live hydration...\n")
+
+;; 6a. Static 5.0.14 defaults for total-value & on-field supply
+(for ([spec (in-list '((zergling   25  0  25  0.5)
+                       (baneling   50  25 75  0.5)
+                       (ravager    100 100 200 3.0)
+                       (lurker-mp  150 150 300 3.0)
+                       (brood-lord 300 250 550 4.0)
+                       (archon     100 300 400 4.0)
+                       (hatchery   275 0  275 0.0)
+                       (lair       425 100 525 0.0)
+                       (hive       625 250 875 0.0)
+                       (spire      200 200 400 0.0)
+                       (ultralisk  275 200 475 6.0)
+                       (tempest    250 175 425 4.0)
+                       (mothership 400 400 800 8.0)))])
+  (define usym (first spec))
+  (define exp-m (second spec))
+  (define exp-g (third spec))
+  (define exp-v (fourth spec))
+  (define exp-s (fifth spec))
+  (check-equal  (format "p1-static-total-pair-~a" usym) (sc2-unit-total-cost-pair usym) (cons exp-m exp-g))
+  (check-equal  (format "p1-static-total-min-~a" usym)  (sc2-unit-total-min-cost usym)  exp-m)
+  (check-equal  (format "p1-static-total-gas-~a" usym)  (sc2-unit-total-gas-cost usym)  exp-g)
+  (check-equal  (format "p1-static-total-val-~a" usym)  (sc2-unit-total-value usym)     exp-v)
+  (check-approx (format "p1-static-field-sup-~a" usym)  (sc2-unit-on-field-supply usym) exp-s))
+
+(check-equal  "p1-unknown-total-pair-default" (sc2-unit-total-cost-pair 'nonexistent-unit (cons 100 25)) (cons 100 25))
+(check-equal  "p1-unknown-total-val-default"  (sc2-unit-total-value 'nonexistent-unit 0) 0)
+(check-approx "p1-unknown-field-sup-default"  (sc2-unit-on-field-supply 'nonexistent-unit 1.0) 1.0)
+
+;; 6b. Static 5.0.14 SC2-SPELL-SPEC defaults + alias normalization
+(check-approx "p1-static-storm-range"   (sc2-spell-cast-range 'psi-storm) 9.0)
+(check-approx "p1-static-storm-effect"  (sc2-spell-effect-radius 'psi-storm) 1.5)
+(check-approx "p1-static-storm-claim"   (sc2-spell-claim-radius 'psi-storm) 2.0)
+(check-approx "p1-static-storm-energy"  (sc2-spell-energy 'psi-storm) 75.0)
+(check-equal  "p1-static-storm-ttl"     (sc2-spell-claim-ttl 'psi-storm) 56)
+(check-equal  "p1-static-storm-dur"     (sc2-spell-duration-frames 'psi-storm) 64)
+(check-equal  "p1-static-storm-req-upg" (sc2-spell-required-upgrade 'psi-storm) 'psi-storm)
+(check-approx "p1-static-emp-range"     (sc2-spell-cast-range 'emp-round) 10.0)
+(check-approx "p1-static-emp-effect"    (sc2-spell-effect-radius 'emp-round) 1.5)
+(check-approx "p1-static-snipe-base"    (sc2-spell-base-damage 'steady-targeting) 130.0)
+(check-approx "p1-static-snipe-bonus"   (sc2-spell-bonus-damage 'steady-targeting) 40.0)
+(check-equal  "p1-static-snipe-lock"    (sc2-spell-lockout-frames 'steady-targeting) 34)
+(check-equal  "p1-static-nova-cd"       (sc2-spell-cooldown-frames 'purification-nova) 480)
+(check-approx "p1-static-nova-effect"   (sc2-spell-effect-radius 'purification-nova) 1.5)
+(check-approx "p1-static-nova-claim"    (sc2-spell-claim-radius 'purification-nova) 4.0)
+(check-approx "p1-static-nova-base"     (sc2-spell-base-damage 'purification-nova) 100.0)
+(check-approx "p1-static-nova-bonus"    (sc2-spell-bonus-damage 'purification-nova) 200.0)
+(check-equal  "p1-static-recharge-id"   (sc2-spell-ability-id 'nexus-energy-recharge) 4126)
+(check-equal  "p1-static-recharge-cd"   (sc2-spell-cooldown-frames 'nexus-energy-recharge) 1344)
+(check-approx "p1-static-recharge-en"   (sc2-spell-energy 'nexus-energy-recharge) 50.0)
+;; Alias checks
+(check-equal  "p1-alias-psionic-storm"        (sc2-spell-ability-id 'psionic-storm) 1036)
+(check-equal  "p1-alias-emp"                  (sc2-spell-ability-id 'emp) 1628)
+(check-equal  "p1-alias-snipe"                (sc2-spell-lockout-frames 'snipe) 34)
+(check-equal  "p1-alias-energy-recharge"      (sc2-spell-cooldown-frames 'energy-recharge) 1344)
+(check-equal  "p1-alias-amorphous-armorcloud" (sc2-spell-ability-id 'amorphous-armorcloud) 4111)
+(check-equal  "p1-alias-oracle-revelation"    (sc2-spell-ability-id 'oracle-revelation) 2146)
+(check-equal  "p1-alias-disruptor-nova"       (sc2-spell-cooldown-frames 'disruptor-nova) 480)
+
+;; 6c. Simulated SC2 5.0.15 ResponseData live hydration for total-value, field-supply, & spells
+(define data-p1-5015-bytes
+  (encode-response-data
+   #:abilities
+   (list
+    (encode-ability-data #:id 1036 #:link-name "PsiStorm" #:available #t #:target 2 #:cast-range 8.0))
+   #:units
+   (list
+    (encode-unit-type-data #:id 104 #:name "Drone" #:min 50 #:gas 0 #:food 1.0)
+    (encode-unit-type-data #:id 92  #:name "Spire" #:min 200 #:gas 150 #:food 0.0)
+    (encode-unit-type-data #:id 496 #:name "Tempest" #:min 250 #:gas 175 #:food 4.0)
+    (encode-unit-type-data #:id 141 #:name "Archon" #:min 0 #:gas 0 #:food 4.0))
+   #:effects
+   (list
+    (encode-effect-data #:id 1 #:name "PsiStormPersistent" #:radius 2.0)
+    (encode-effect-data #:id 2 #:name "EMPPulse" #:radius 1.75)
+    (encode-effect-data #:id 3 #:name "PurificationNova" #:radius 1.75)
+    (encode-effect-data #:id 4 #:name "FungalGrowth" #:radius 2.5))))
+
+(register-sc2-response-data! (decode-response-data-bytes data-p1-5015-bytes))
+
+(check-equal  "p1-live-5015-spire-total-val-300"    (sc2-unit-total-value 'spire) 300)
+(check-equal  "p1-live-5015-spire-total-pair"       (sc2-unit-total-cost-pair 'spire) '(150 . 150))
+(check-equal  "p1-live-5015-spire-inc-150-150"      (list (sc2-min-cost 'spire) (sc2-gas-cost 'spire)) '(150 150))
+(check-approx "p1-live-5015-tempest-field-sup-4.0"  (sc2-unit-on-field-supply 'tempest) 4.0)
+(check-equal  "p1-live-5015-archon-total-pair"      (sc2-unit-total-cost-pair 'archon) '(100 . 300))
+(check-approx "p1-live-5015-archon-field-sup-4.0"   (sc2-unit-on-field-supply 'archon) 4.0)
+(check-approx "p1-live-5015-storm-cast-range-8.0"   (sc2-spell-cast-range 'psi-storm) 8.0)
+(check-approx "p1-live-5015-storm-effect-rad-2.0"   (sc2-spell-effect-radius 'psi-storm) 2.0)
+(check-approx "p1-live-5015-storm-claim-rad-2.0"    (sc2-spell-claim-radius 'psi-storm) 2.0)
+(check-approx "p1-live-5015-alias-psionic-range"    (sc2-spell-cast-range 'psionic-storm) 8.0)
+(check-approx "p1-live-5015-alias-psionic-effect"   (sc2-spell-effect-radius 'psionic-storm) 2.0)
+(check-approx "p1-live-5015-emp-effect-rad-1.75"    (sc2-spell-effect-radius 'emp) 1.75)
+(check-approx "p1-live-5015-emp-claim-rad-1.75"     (sc2-spell-claim-radius 'emp) 1.75)
+(check-approx "p1-live-5015-nova-effect-rad-1.75"   (sc2-spell-effect-radius 'purification-nova) 1.75)
+(check-approx "p1-live-5015-nova-claim-floor-4.0"   (sc2-spell-claim-radius 'purification-nova) 4.0)
+(check-approx "p1-live-5015-fungal-effect-rad-2.5"  (sc2-spell-effect-radius 'fungal-growth) 2.5)
+(check-approx "p1-live-5015-fungal-claim-rad-2.5"   (sc2-spell-claim-radius 'fungal-growth) 2.5)
+
+(reset-sc2-live-response-data!)
+(check-equal  "p1-reset-spire-total-val-400"        (sc2-unit-total-value 'spire) 400)
+(check-approx "p1-reset-storm-cast-range-9.0"       (sc2-spell-cast-range 'psi-storm) 9.0)
+(check-approx "p1-reset-storm-effect-rad-1.5"       (sc2-spell-effect-radius 'psi-storm) 1.5)
+(check-approx "p1-reset-storm-claim-rad-2.0"        (sc2-spell-claim-radius 'psi-storm) 2.0)
+
+;; -----------------------------------------------------------------------------
+;; 7. Loop 61 Phase 1 (`#1603`): Static Anti-Duplication Guard (`lib/**/*.rkt`)
+;; -----------------------------------------------------------------------------
+(printf "[7/7] Verifying zero duplicate unit cost/supply tables across lib/**/*.rkt...\n")
+(define dup-table-rx
+  #px"\\(define\\s+(?:UNIT-COST-TABLE|UNIT-RESOURCE-VALUE|\\*splash-unit-supply-table\\*)\\b")
+(define dup-table-hits
+  (for/list ([p (in-directory repo-lib-dir)]
+             #:when (and (file-exists? p)
+                         (equal? (path-get-extension p) #".rkt")
+                         (regexp-match? dup-table-rx (file->string p))))
+    (path->string p)))
+(check-equal "p1-zero-duplicate-cost-or-supply-tables-in-lib" dup-table-hits '())
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Patch-Resilience & ResponseData Checks: ~a/~a passed (~a failed)\n"

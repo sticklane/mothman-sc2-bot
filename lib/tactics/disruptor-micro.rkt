@@ -492,10 +492,10 @@
 (define DISRUPTOR-PHASED-UNIT-TYPE-ID 733)
 
 (: PURIFICATION-NOVA-ABILITY-ID Integer)
-(define PURIFICATION-NOVA-ABILITY-ID 2346)
+(define PURIFICATION-NOVA-ABILITY-ID (sc2-spell-ability-id 'purification-nova 2346))
 
 (: DISRUPTOR-NOVA-SPLASH-RADIUS Float)
-(define DISRUPTOR-NOVA-SPLASH-RADIUS 1.5)
+(define DISRUPTOR-NOVA-SPLASH-RADIUS (sc2-spell-effect-radius 'purification-nova 1.5))
 
 (: DISRUPTOR-NOVA-FF-CHECK-RADIUS Float)
 (define DISRUPTOR-NOVA-FF-CHECK-RADIUS 2.2)
@@ -504,16 +504,16 @@
 (define DISRUPTOR-NOVA-FF-COMBAT-COUNT-RADIUS 2.0)
 
 (: DISRUPTOR-NOVA-BASE-DAMAGE Float)
-(define DISRUPTOR-NOVA-BASE-DAMAGE 100.0)
+(define DISRUPTOR-NOVA-BASE-DAMAGE (sc2-spell-base-damage 'purification-nova 100.0))
 
 (: DISRUPTOR-NOVA-SHIELD-BONUS Float)
-(define DISRUPTOR-NOVA-SHIELD-BONUS 200.0)
+(define DISRUPTOR-NOVA-SHIELD-BONUS (sc2-spell-bonus-damage 'purification-nova 200.0))
 
 (: DISRUPTOR-NOVA-LIFETIME-FRAMES Integer)
-(define DISRUPTOR-NOVA-LIFETIME-FRAMES 47)
+(define DISRUPTOR-NOVA-LIFETIME-FRAMES (sc2-spell-duration-frames 'purification-nova 47))
 
 (: DISRUPTOR-NOVA-COOLDOWN-FRAMES Integer)
-(define DISRUPTOR-NOVA-COOLDOWN-FRAMES 480)
+(define DISRUPTOR-NOVA-COOLDOWN-FRAMES (sc2-spell-cooldown-frames 'purification-nova 480))
 
 (: DISRUPTOR-NOVA-SPEED Float)
 (define DISRUPTOR-NOVA-SPEED 5.95)
@@ -522,7 +522,7 @@
 (define DISRUPTOR-NOVA-SPEED-PER-FRAME (/ 5.95 22.4))
 
 (: DISRUPTOR-CAST-RANGE Float)
-(define DISRUPTOR-CAST-RANGE 10.0)
+(define DISRUPTOR-CAST-RANGE (sc2-spell-cast-range 'purification-nova 10.0))
 
 (: DISRUPTOR-MAX-REACH-RANGE Float)
 (define DISRUPTOR-MAX-REACH-RANGE 13.0)
@@ -1068,12 +1068,13 @@
     [(>= acmb20 2) #t]
     [(= acnt22 0) #f]
     [else
+     (define nova-r (sc2-spell-effect-radius 'purification-nova DISRUPTOR-NOVA-SPLASH-RADIUS))
      (define esup : Float
        (for/fold ([sup : Float 0.0])
                  ([e (in-list enemy-units)]
                   #:when (ground-nova-vulnerable-unit? e))
          (define d (dist-2d ftx fty (unit-x e) (unit-y e)))
-         (if (<= d (+ DISRUPTOR-NOVA-SPLASH-RADIUS (unit-radius-bonus e 0.0)))
+         (if (<= d (+ nova-r (unit-radius-bonus e 0.0)))
              (+ sup (nova-unit-supply-from-sym (unit-type-sym e)))
              sup)))
      (>= asup esup)]))
@@ -1085,7 +1086,8 @@
       '()
       (let ([sr2 (* search-radius search-radius)]
             [extra-r (if ally? 0.25 0.0)]
-            [mult (if ally? 2.0 1.0)])
+            [mult (if ally? 2.0 1.0)]
+            [nova-r (sc2-spell-effect-radius 'purification-nova DISRUPTOR-NOVA-SPLASH-RADIUS)])
         (for/fold ([acc : (Listof nova-eval-unit) '()])
                   ([u (in-list units)])
           (define-values (ok? raw-ut uid-type ux uy hp sh rad)
@@ -1127,7 +1129,7 @@
                 (define frac (if (> ehp 0.0) (min 1.0 (/ nova-dmg ehp)) 1.0))
                 (define kill-mult (if (<= ehp nova-dmg) 1.15 0.85))
                 (define contrib (* mult (* uval frac kill-mult)))
-                (define hr (+ DISRUPTOR-NOVA-SPLASH-RADIUS (+ rad extra-r)))
+                (define hr (+ nova-r (+ rad extra-r)))
                 (define u-sup (nova-unit-supply-from-sym ut))
                 (define u-cmb? (nova-unit-combat-from-sym? ut))
                 (cons (nova-eval-unit ux uy hr (* hr hr) contrib u-sup u-cmb?) acc)])])))))
@@ -1179,6 +1181,8 @@
 (define (score-purification-nova-impact tx ty enemy-units ally-units)
   (define ftx (->float tx))
   (define fty (->float ty))
+  (define nova-r (sc2-spell-effect-radius 'purification-nova DISRUPTOR-NOVA-SPLASH-RADIUS))
+  (define bbox-r (+ nova-r 1.0))
   (define-values (enemy-raw enemy-hits)
     (for/fold ([acc : Float 0.0]
                [hits : Integer 0])
@@ -1186,10 +1190,10 @@
                #:when (ground-nova-vulnerable-unit? e))
       (define ex (unit-x e))
       (define ey (unit-y e))
-      (if (and (<= (abs (- ftx ex)) 2.5)
-               (<= (abs (- fty ey)) 2.5)
+      (if (and (<= (abs (- ftx ex)) bbox-r)
+               (<= (abs (- fty ey)) bbox-r)
                (<= (dist-2d ftx fty ex ey)
-                   (+ DISRUPTOR-NOVA-SPLASH-RADIUS (unit-radius-bonus e 0.0))))
+                   (+ nova-r (unit-radius-bonus e 0.0))))
           (let* ([uval (unit-nova-replacement-value e)]
                  [contrib (effective-nova-damage-fraction e uval)])
             (values (+ acc contrib) (+ hits 1)))
@@ -1202,10 +1206,10 @@
                #:when (ground-nova-vulnerable-unit? a))
       (define ax (unit-x a))
       (define ay (unit-y a))
-      (if (and (<= (abs (- ftx ax)) 2.5)
-               (<= (abs (- fty ay)) 2.5)
+      (if (and (<= (abs (- ftx ax)) bbox-r)
+               (<= (abs (- fty ay)) bbox-r)
                (<= (dist-2d ftx fty ax ay)
-                   (+ DISRUPTOR-NOVA-SPLASH-RADIUS (unit-radius-bonus a 0.25))))
+                   (+ nova-r (unit-radius-bonus a 0.25))))
           (let* ([uval (unit-nova-replacement-value a)]
                  [loss (effective-nova-damage-fraction a uval)])
             (values (+ acc (* 2.0 loss)) (+ hits 1)))
@@ -1683,8 +1687,9 @@
         (define nova-refs : (Listof (Pairof Float Float))
           (for/list : (Listof (Pairof Float Float)) ([n (in-list friendly-novas)])
             (cons (unit-x n) (unit-y n))))
+        (define nova-r (sc2-spell-effect-radius 'purification-nova DISRUPTOR-NOVA-SPLASH-RADIUS))
         (define max-reach-bound
-          (+ DISRUPTOR-NOVA-SPLASH-RADIUS
+          (+ nova-r
              (* (->float DISRUPTOR-NOVA-LIFETIME-FRAMES) DISRUPTOR-NOVA-SPEED-PER-FRAME)))
         (define eval-enemies (precompute-nova-eval-units enemy-units nova-refs (+ max-reach-bound 2.5) #f))
         (define eval-allies (precompute-nova-eval-units ally-units nova-refs (+ max-reach-bound 5.0) #t))
@@ -1717,7 +1722,7 @@
               [else DISRUPTOR-NOVA-LIFETIME-FRAMES]))
           ;; Reachable travel radius before detonation + splash margin
           (define travel-reach
-            (+ DISRUPTOR-NOVA-SPLASH-RADIUS
+            (+ nova-r
                (* (->float rem-frames) DISRUPTOR-NOVA-SPEED-PER-FRAME)))
           (define close-allies-22 : (Listof nova-eval-unit)
             (filter-nova-eval-units-within eval-allies nx ny DISRUPTOR-NOVA-FF-CHECK-RADIUS))

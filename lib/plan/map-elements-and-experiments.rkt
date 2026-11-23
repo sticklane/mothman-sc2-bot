@@ -1459,25 +1459,36 @@
                  (list 'harvest-mineral wid sid)))))
 
      ;; 1b. Excavate thicker backdoor mineral wall with up to 2 workers after 5:00 (`frame >= 6720`)
+     ;;     Loop 61 (`#1609` RC-7): Mirror `1a`'s `worker-harvesting-any-tag?` skip so workers ALREADY
+     ;;     excavating `lead-seam` are never re-issued `(harvest-mineral wid sid)` every 4 frames!
      (when (and (>= frame excavate-min-frame) (null? ultra-thin-seams))
        (define lead-seam (car sorted-seams))
        (define sx (u-x lead-seam))
        (define sy (u-y lead-seam))
        (define sid (u-tag lead-seam))
-       (define nearest-workers
-         (sort (filter (lambda ([w : Any])
-                         (not (hash-has-key? used-workers (u-tag w))))
-                       avail-workers)
-               (lambda ([a : Any] [b : Any])
-                 (< (dist-2d (u-x a) (u-y a) sx sy)
-                    (dist-2d (u-x b) (u-y b) sx sy)))))
-       (for ([w (in-list (take nearest-workers (min 2 (length nearest-workers))))])
-         (define wid (u-tag w))
-         (hash-set! used-workers wid #t)
-         (emit! (MapElementDirective
-                 'excavate-mineral-wall-backdoor wid sid sx sy 55.0
-                 'open-mineral-wall-after-5min
-                 (list 'harvest-mineral wid sid)))))
+       (define lead-tag-ht : (Mutable-HashTable Integer Boolean) (make-hasheqv))
+       (hash-set! lead-tag-ht sid #t)
+       (define lead-assigned : Integer 0)
+       (for ([w (in-list avail-workers)]
+             #:when (and (not (hash-has-key? used-workers (u-tag w)))
+                         (worker-harvesting-any-tag? w lead-tag-ht)))
+         (hash-set! used-workers (u-tag w) #t)
+         (set! lead-assigned (add1 lead-assigned)))
+       (when (< lead-assigned 2)
+         (define nearest-workers
+           (sort (filter (lambda ([w : Any])
+                           (not (hash-has-key? used-workers (u-tag w))))
+                         avail-workers)
+                 (lambda ([a : Any] [b : Any])
+                   (< (dist-2d (u-x a) (u-y a) sx sy)
+                      (dist-2d (u-x b) (u-y b) sx sy)))))
+         (for ([w (in-list (take nearest-workers (min (- 2 lead-assigned) (length nearest-workers))))])
+           (define wid (u-tag w))
+           (hash-set! used-workers wid #t)
+           (emit! (MapElementDirective
+                   'excavate-mineral-wall-backdoor wid sid sx sy 55.0
+                   'open-mineral-wall-after-5min
+                   (list 'harvest-mineral wid sid))))))
 
      ;; 2. Worker-only mineral-walk backdoor slip through 1-tile mineral seams (`nc-13`).
      ;;    NEVER run when `ultra-thin-seams` exist (`nc-07`/`nc-08` want excavation!) or in

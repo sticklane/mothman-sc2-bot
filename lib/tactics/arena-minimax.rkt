@@ -570,6 +570,7 @@
  compress-two-arena-sim-lists
  evaluate-arena-minimax-and-regret!
  resolve-committed-micro-action!
+ arena-direct-should-commit-through-splash?
  step-tactical-mirror-brain!)
 
 (define TACTICAL-MICRO-ACTION-SPACE
@@ -2683,26 +2684,11 @@
                      liberator liberator-ag scourge))])
     (values s #t)))
 
+;; Loop 61 Phase 1: Single-source on-field supply via `(sc2-unit-on-field-supply ut 1.0)`
+;; from `sc2-game-constants.rkt` (deleted duplicate 18-line `sup-ht` table).
+;; Vector slots: `#(dps not-excluded? not-worker-or-fly?)`
 (define *ARENA-SPLASH-UNIT-META-HT*
-  (let ([sup-ht
-         (hasheq
-          'zergling 0.5 'zergling-burrowed 0.5 'baneling 0.5 'baneling-burrowed 0.5
-          'queen 2.0 'roach 2.0 'roach-burrowed 2.0 'ravager 3.0 'ravager-burrowed 3.0
-          'hydralisk 2.0 'hydralisk-burrowed 2.0 'lurker 3.0 'lurker-mp 3.0
-          'lurker-burrowed 3.0 'lurker-mp-burrowed 3.0 'infestor 2.0 'infestor-burrowed 2.0
-          'swarm-host 3.0 'swarm-host-burrowed 3.0 'mutalisk 2.0 'corruptor 2.0
-          'viper 3.0 'brood-lord 4.0 'ultralisk 6.0 'ultralisk-burrowed 6.0
-          'marine 1.0 'reaper 1.0 'marauder 2.0 'ghost 2.0
-          'hellion 2.0 'hellbat 2.0 'hellion-tank 2.0 'widow-mine 2.0 'widow-mine-burrowed 2.0
-          'siege-tank 3.0 'siege-tank-sieged 3.0 'cyclone 3.0 'thor 6.0 'thor-ap 6.0
-          'viking 2.0 'viking-fighter 2.0 'viking-assault 2.0 'medivac 2.0
-          'liberator 3.0 'liberator-ag 3.0 'raven 2.0 'banshee 3.0 'battlecruiser 6.0
-          'zealot 2.0 'stalker 2.0 'sentry 2.0 'adept 2.0
-          'high-templar 2.0 'dark-templar 2.0 'archon 4.0 'immortal 4.0
-          'colossus 6.0 'disruptor 3.0 'phoenix 2.0 'void-ray 4.0
-          'oracle 3.0 'carrier 6.0 'tempest 4.0 'mothership 8.0
-          'drone 1.0 'scv 1.0 'probe 1.0)]
-        [pw-ht
+  (let ([pw-ht
          (hasheq
           'zergling '(35.0 . 10.0) 'baneling '(30.0 . 20.0) 'queen '(175.0 . 12.0)
           'roach '(145.0 . 11.2) 'ravager '(120.0 . 14.0) 'hydralisk '(90.0 . 20.4)
@@ -2725,23 +2711,20 @@
           'carrier '(450.0 . 37.5) 'tempest '(300.0 . 16.8)
           'drone '(40.0 . 4.7) 'scv '(45.0 . 4.7) 'probe '(40.0 . 4.7))]
         [ht (make-hasheq)])
-    (for ([k (in-hash-keys sup-ht)])
-      (define pw (hash-ref pw-ht k '(80.0 . 10.0)))
-      (hash-set! ht k (vector-immutable (hash-ref sup-ht k 1.0)
-                                        (cdr pw)
+    (for ([(k pw) (in-hash pw-ht)])
+      (hash-set! ht k (vector-immutable (cdr pw)
                                         (not (hash-ref *ARENA-SPLASH-EXCLUDED-HT* k #f))
                                         (not (hash-ref *ARENA-SPLASH-WORKER-OR-FLY-HT* k #f)))))
-    (for ([(k pw) (in-hash pw-ht)])
+    (for ([k (in-hash-keys *ARENA-SPLASH-WORKER-OR-FLY-HT*)])
       (unless (hash-has-key? ht k)
-        (hash-set! ht k (vector-immutable (hash-ref sup-ht k 1.0)
-                                          (cdr pw)
+        (hash-set! ht k (vector-immutable 10.0
                                           (not (hash-ref *ARENA-SPLASH-EXCLUDED-HT* k #f))
-                                          (not (hash-ref *ARENA-SPLASH-WORKER-OR-FLY-HT* k #f))))))
+                                          #f))))
     (for ([k (in-hash-keys *ARENA-SPLASH-EXCLUDED-HT*)])
-      (hash-set! ht k (vector-immutable 1.0 10.0 #f #f)))
+      (hash-set! ht k (vector-immutable 10.0 #f #f)))
     (for/hasheq ([(k v) (in-hash ht)]) (values k v))))
 
-(define *ARENA-DEFAULT-SPLASH-META* (vector-immutable 1.0 10.0 #t #t))
+(define *ARENA-DEFAULT-SPLASH-META* (vector-immutable 10.0 #t #t))
 
 (define (arena-compute-points-arc-deg xs ys cx cy)
   (define n (length xs))
@@ -2854,14 +2837,15 @@
           (define sh (tactical-sim-unit-shield su))
           (define ehp (fl+ hp sh))
           (when (fl> ehp 0.0)
+            (define ut (tactical-sim-unit-type su))
             (define meta (hash-ref *ARENA-SPLASH-UNIT-META-HT*
-                                   (tactical-sim-unit-type su)
+                                   ut
                                    *ARENA-DEFAULT-SPLASH-META*))
-            (when (vector-ref meta 2)
-              (set! f-sup (fl+ f-sup (vector-ref meta 0)))
+            (when (vector-ref meta 1)
+              (set! f-sup (fl+ f-sup (sc2-unit-on-field-supply ut 1.0)))
               (when need-eff?
                 (set! f-ehp (fl+ f-ehp ehp))
-                (set! f-dps (fl+ f-dps (vector-ref meta 1)))))))
+                (set! f-dps (fl+ f-dps (vector-ref meta 0)))))))
         (cond
           [(fl<= f-sup 0.0) #f]
           [else
@@ -2873,14 +2857,15 @@
              (define sh (tactical-sim-unit-shield su))
              (define ehp (fl+ hp sh))
              (when (fl> ehp 0.0)
+               (define ut (tactical-sim-unit-type su))
                (define meta (hash-ref *ARENA-SPLASH-UNIT-META-HT*
-                                      (tactical-sim-unit-type su)
+                                      ut
                                       *ARENA-DEFAULT-SPLASH-META*))
-               (when (vector-ref meta 2)
-                 (set! e-sup (fl+ e-sup (vector-ref meta 0)))
+               (when (vector-ref meta 1)
+                 (set! e-sup (fl+ e-sup (sc2-unit-on-field-supply ut 1.0)))
                  (when need-eff?
                    (set! e-ehp (fl+ e-ehp ehp))
-                   (set! e-dps (fl+ e-dps (vector-ref meta 1)))))))
+                   (set! e-dps (fl+ e-dps (vector-ref meta 0)))))))
            (define sup-ratio (fl/ f-sup (flmax 0.5 e-sup)))
            (define eff-ratio
              (if need-eff?
@@ -2916,7 +2901,7 @@
                     (define meta (hash-ref *ARENA-SPLASH-UNIT-META-HT*
                                            (tactical-sim-unit-type su)
                                            *ARENA-DEFAULT-SPLASH-META*))
-                    (when (vector-ref meta 3)
+                    (when (vector-ref meta 2)
                       (define ux (tactical-sim-unit-x su))
                       (define uy (tactical-sim-unit-y su))
                       (set! n-fg (fx+ n-fg 1))

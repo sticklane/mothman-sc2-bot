@@ -4900,14 +4900,15 @@
   (define live-game? (l2-ctx-live-obs-harvesters? ctx))
   (define frame (l2-ctx-frame ctx))
   (define cd-tracker (l2-ctx-cd-tracker ctx))
-  ;; Controlled 28-loop cadence in live games so active miners are never churned every tick.
-  (when (and (pair? step-mineral-patches)
+  ;; Loop 61 (`#1609` RC-4): In live matches, `saturate-workers-and-gas-commands` (Sec 0b + Sec 3)
+  ;; + TownHall `RALLY_WORKERS (3690)` are the single source of truth for mineral rebalancing with
+  ;; in-flight accounting & per-base coalescing. Keep this helper strictly for synthetic non-live tests!
+  (when (and (not live-game?)
+             (pair? step-mineral-patches)
              (pair? ready-bldgs)
              (pair? (cdr ready-bldgs))
              (pair? workers)
-             (not (l2-ctx-worker-rush-active? ctx))
-             (or (not live-game?)
-                 (refractory-allow-action?! cd-tracker '(worker-rebalance-cadence) frame 28)))
+             (not (l2-ctx-worker-rush-active? ctx)))
     (define ally-ths
       (for/list ([b (in-list ready-bldgs)]
                  #:when (and (hash? b)
@@ -6330,7 +6331,8 @@
         (define ord-ab  (hash-ref b 'order-ability-id 0))
         (define non-blocking-rally?
           (and (= ord-cnt 1)
-               (memv ord-ab '(195 211 212 3673 3690 3691))))
+               ;; Loop 61 (`#1609` RC-7): Fix rally list — remove `3691` (BUILD_CREEPTUMOR), add `199/203/207`.
+               (memv ord-ab '(195 199 203 207 211 212 3673 3690))))
         (if (and (hash? b)
                  (memq (fast-canonical-structure-sym (unit-type-sym b)) source-syms)
                  (or (and (<= ord-cnt 0) (= ord-ab 0))
@@ -11849,9 +11851,28 @@
     (hash-set! scout-st 'dispatched? #t)
     (hash-set! scout-st 'scout-id (hash-ref rush-retreating-scout 'id #f))
     (hash-set! scout-st 'aborted-rush? #t))
+  ;; Loop 61 (`#1609` RC-2): Retire the opening worker scout cleanly in live games once
+  ;; `frame >= 4032` (`3:00`) OR once a low-HP (`< 22` EHP) / evading scout safely returns within
+  ;; `<= 10.0t` of home `(base-x, base-y)`, releasing its `'scout` lease so it mines normally
+  ;; without ever entering a permanent P0 `mineral-walk` spam loop!
+  (define scout-retired?
+    (and live-obs-harvesters?
+         (or (eq? (hash-ref scout-st 'retired? #f) #t)
+             (and already-dispatched-scout? (>= frame 4032))
+             (and already-dispatched-scout?
+                  raw-scout-candidate
+                  (let ([sw-x (hash-ref raw-scout-candidate 'x base-x)]
+                        [sw-y (hash-ref raw-scout-candidate 'y base-y)]
+                        [sw-hp (unit-total-hp-and-shield raw-scout-candidate 40)]
+                        [ev? (< frame (hash-ref scout-st 'evading-until 0))])
+                    (and (or (< sw-hp 22) ev?)
+                         (<= (dist2d sw-x sw-y base-x base-y) 10.0)))))))
+  (when scout-retired?
+    (hash-set! scout-st 'retired? #t))
   (define scout-worker
     (cond
-      [(or rush-retreating-scout
+      [(or scout-retired?
+           rush-retreating-scout
            worker-rush-active?
            scout-rush-aborted-latch?
            in-base-proxy-detected?)
@@ -11974,9 +11995,12 @@
             (> wd-min-keep-gas-ws 0)
             (<= wd-cur-gas-harv wd-min-keep-gas-ws))
        'normal]
+      ;; Loop 61B (`#1640`/`#1641` GRMS cure): Keep `112f` (`5.0s`) opposite-direction cooldown &
+      ;; `> 3` gas-worker floor while backing up `saturate-workers-and-gas-commands` at `>= 210G & < 100M`
+      ;; so `210..299G / 60..99M` midgame pockets never stall in `gas_rich_min_starved`!
       [(and (eq? wd-gas-mode-raw 'normal)
             (pair? ready-gas-bldgs-wd)
-            (>= (l2-ctx-gas ctx) 200)
+            (>= (l2-ctx-gas ctx) 210)
             (< (l2-ctx-minerals ctx) 100)
             (< supply-used 175)
             (> wd-cur-gas-harv 3))
@@ -12023,7 +12047,7 @@
             (not worker-rush-active?)
             (or (not live-obs-harvesters?)
                 (and (pair? wd-gas-targeted-ws) wd-live-min-patch))
-            (refractory-allow-action?! cd-tracker '(wd-gas-valve-pull) frame 48))
+            (refractory-allow-action?! cd-tracker '(wd-gas-valve-switch) frame 112))
        (define pull-cands
          (if (pair? wd-gas-targeted-ws) wd-gas-targeted-ws harvest-workers-pool))
        (define raw-pull-cap (if (>= (l2-ctx-gas ctx) 650) 4 2))
@@ -12040,7 +12064,7 @@
       [(and (eq? wd-gas-mode 'force-saturate-gas)
             (pair? ready-gas-bldgs-wd)
             (not worker-rush-active?)
-            (refractory-allow-action?! cd-tracker '(wd-gas-valve-fill) frame 48))
+            (refractory-allow-action?! cd-tracker '(wd-gas-valve-switch) frame 112))
        (define empty-gb
          (findf (lambda (gb) (< (safe-nonneg-int (hash-ref gb 'assigned-harvesters 0) 0) 3))
                 ready-gas-bldgs-wd))
@@ -12180,7 +12204,11 @@
                                          (not (or (worker-near-enemy-list? wx wy enemy-units)
                                                   (worker-near-enemy-list? wx wy enemy-bldgs)))))))))
         w))
-    (when (not (null? idle-return-workers))
+    (when (and (not (null? idle-return-workers))
+               ;; Loop 61 (`#1609` RC-3/RC-6): Throttle live idle-worker return to `24f` and coalesce
+               ;; into ONE `(harvest-mineral idle-ids safe-idle-patch-id)` instead of `N` 4-frame retries!
+               (or (not live-obs-harvesters?)
+                   (refractory-allow-action?! cd-tracker '(l2-idle-return-gather) frame 24)))
       (define idle-ids (map (lambda (w) (hash-ref w 'id 10)) idle-return-workers))
       (l2-emit! ctx (list 'return-workers-to-gather idle-ids))
       (define safe-idle-patch-id
@@ -12237,10 +12265,13 @@
                         (argmax (lambda (mp) (hash-ref mp 'mineral-contents 1000)) near-th-mps))])
                 (hash-ref (or unsat-mp (argmax (lambda (mp) (hash-ref mp 'mineral-contents 1000)) cand-mps))
                           'id patch-id)))))
-      (for ([wid (in-list idle-ids)]
-            #:unless (and (not live-obs-harvesters?)
-                          (equal? wid (hash-ref (car harvest-workers-pool) 'id 10))))
-        (l2-emit! ctx (list 'harvest-mineral wid safe-idle-patch-id))))
+      (if live-obs-harvesters?
+          (l2-emit! ctx (list 'harvest-mineral
+                              (if (null? (cdr idle-ids)) (car idle-ids) idle-ids)
+                              safe-idle-patch-id))
+          (for ([wid (in-list idle-ids)]
+                #:unless (equal? wid (hash-ref (car harvest-workers-pool) 'id 10)))
+            (l2-emit! ctx (list 'harvest-mineral wid safe-idle-patch-id)))))
     ;; L49-W1 (Watchdog Law 2 — Zero-Income Recovery): If `workers >= 5` and `min-rate <= 0` for
     ;; `>= 48f` (not under worker rush), redistribute idle/stalled non-building workers to the
     ;; nearest live non-depleted mineral patch (eliminating multi-minute zero-income freezes!).
@@ -12420,15 +12451,20 @@
                  sw-low-hp?)
          (hash-set! scout-st 'evading-until (+ frame 40)))
        (define evading? (< frame (hash-ref scout-st 'evading-until 0)))
+       (define sw-home-dist (dist2d sw-x sw-y base-x base-y))
        (cond
          [evading?
-          (when (refractory-allow-action?! cd-tracker (list 'scout-evade sw-id) frame 12)
-            (if (or sw-low-hp? (> ranged-enemies-near 0) (>= pulled-workers-chasing 2))
-                (l2-emit! ctx (list 'mineral-walk sw-id base-x base-y))
-                (let* ([next-idx (modulo (+ (hash-ref scout-st 'orbit-idx 0) 2) 5)]
-                       [esc-wp (list-ref orbit-waypoints next-idx)])
-                  (hash-set! scout-st 'orbit-idx next-idx)
-                  (l2-emit! ctx (list 'move sw-id (car esc-wp) (cdr esc-wp))))))]
+          (cond
+            [(<= sw-home-dist 10.0)
+             ;; Already safely back at Main mineral line -> retire scout instead of P0 `mineral-walk` spam!
+             (hash-set! scout-st 'retired? #t)]
+            [(refractory-allow-action?! cd-tracker (list 'scout-evade sw-id) frame 12)
+             (if (or sw-low-hp? (> ranged-enemies-near 0) (>= pulled-workers-chasing 2))
+                 (l2-emit! ctx (list 'mineral-walk sw-id base-x base-y))
+                 (let* ([next-idx (modulo (+ (hash-ref scout-st 'orbit-idx 0) 2) 5)]
+                        [esc-wp (list-ref orbit-waypoints next-idx)])
+                   (hash-set! scout-st 'orbit-idx next-idx)
+                   (l2-emit! ctx (list 'move sw-id (car esc-wp) (cdr esc-wp)))))])]
          [else
           (define exposed-builder-scv
             (and (= ranged-enemies-near 0)
@@ -16584,10 +16620,11 @@
          (and worker-rush-active?
               (memq 'spawning-pool ready-bldg-types)
               (< (l2-unit-count ctx 'zergling) 6)))
-       (when (and (>= (l2-ctx-minerals ctx) (if (< frame 3600) (sc2-min-cost 'spine-crawler) 200))
+       (when (and (>= (l2-ctx-minerals ctx)
+                      (if (< frame 3600) (sc2-min-cost 'spine-crawler) (* 2 (sc2-min-cost 'spine-crawler))))
                   (>= total-workers 2)
                   (or (not zerg-wr-first6-lings-first?)
-                      (>= (l2-ctx-minerals ctx) 150))
+                      (>= (l2-ctx-minerals ctx) (+ (sc2-min-cost 'spine-crawler) (sc2-min-cost 'zergling))))
                   (or (null? enemy-units)
                       (ormap (lambda (e) (not (fast-unit-is-flying-sym? (unit-type-sym e)))) enemy-units))
                   (< cur-er-spine-cnt desired-er-spine-cnt)
@@ -16727,10 +16764,10 @@
                 (eq? prio-saving-for-sym 'lair)
                 (l2-plan-wants-now? ctx 'lair)
                 endgame-corner-hunt?
-                (and (>= (l2-ctx-gas ctx) 100)
+                (and (>= (l2-ctx-gas ctx) (sc2-gas-cost 'lair))
                      (or (not live-game?)
                          (not (l2-upgrade-needed? ctx 'metabolic-boost))
-                         (>= (l2-ctx-gas ctx) 200)
+                         (>= (l2-ctx-gas ctx) (+ (sc2-gas-cost 'lair) (sc2-gas-cost 'metabolic-boost)))
                          (>= eff-phase-supply 36)
                          (memq 'roach-warren (l2-ctx-bldg-types ctx)))))))
   (when (and (memq 'spawning-pool ready-bldg-types)
@@ -18299,7 +18336,7 @@
           (when (and (memq 'roach-warren ready-bldg-types)
                      (not (and zerg-real-anti-air-threat?
                                (not zerg-aa-tech-ready?)
-                               (< (l2-ctx-gas ctx) 150)))
+                               (< (l2-ctx-gas ctx) (+ (sc2-gas-cost 'hydralisk-den) (sc2-gas-cost 'hydralisk)))))
                      (or (not live-game?)
                          (and zerg-ground-threats-exist?
                               (or (< (l2-unit-count ctx 'roach) 8)
@@ -18536,10 +18573,11 @@
   ;; is within `10.0t` of a ready Nexus (`>= 50e`, off `1344f` global cooldown) during active enemy contact,
   ;; and holds `50e` on Nexuses within `14.0t` of such a dry caster so ChronoBoost never starves `4126`!
   (define recharge-splash-st (rt-splash-state rt))
+  (define recharge-cd (sc2-spell-cooldown-frames 'nexus-energy-recharge 1344))
   (define last-recharge-f (hash-ref recharge-splash-st 'last-nexus-recharge-frame -99999))
   (define recharge-cd-ready?
     (or (< frame last-recharge-f)
-        (>= (- frame last-recharge-f) 1344)))
+        (>= (- frame last-recharge-f) recharge-cd)))
   (define recharge-live-ok?
     (and (pair? enemy-units)
          recharge-cd-ready?
@@ -18595,7 +18633,7 @@
                (set! recharge-cast-done? #t)
                (set-add! recharge-claimed-nx-ids nx-id)
                (hash-set! recharge-splash-st 'last-nexus-recharge-frame frame)
-               (spell-claim-unit?! (rt-spell-claims rt) 'nexus-energy-recharge 1 frame 1344 #:caster-tag nx-id)
+               (spell-claim-unit?! (rt-spell-claims rt) 'nexus-energy-recharge 1 frame recharge-cd #:caster-tag nx-id)
                (l2-emit! ctx (list 'cast-spell nx-id 'nexus-energy-recharge tid)))]
             [(< nx-en 100.0)
              (set-add! recharge-hold-nx-ids nx-id)])))))
@@ -20612,7 +20650,7 @@
                              (>= eff-phase-supply 92))))
                 (not (l2-building-present-or-pending? ctx 'templar-archive))
                 (>= (length nexuses) SC2-MIN-DESIRED-BASES)
-                (>= (l2-ctx-gas ctx) 150)
+                (>= (l2-ctx-gas ctx) (sc2-gas-cost 'templar-archive))
                 (>= (l2-ctx-minerals ctx) (sc2-min-cost 'templar-archive))
                 (l2-non-combat-min-ok? ctx (sc2-min-cost 'templar-archive)))
        (let-values ([(tax tay) (l2-interior-offset ctx 6.5 -5.0)])
@@ -22898,7 +22936,7 @@
                      (or (not live-game?)
                          (and (>= (l2-building-present-or-pending-count ctx 'factory) 1)
                               (>= (length ccs) 2)
-                              (>= (l2-ctx-gas ctx) 100)
+                              (>= (l2-ctx-gas ctx) (sc2-gas-cost 'stimpack))
                               (not (memq (l2-ctx-prio-saving-for-sym ctx) '(siege-tank starport)))
                               (not (and (eq? effective-enemy-race 'Terran)
                                         (< (l2-unit-count ctx 'siege-tank) 3)
@@ -23726,8 +23764,8 @@
          (or enemy-capital-air? (>= im-enemy-air-cnt 2))
          (> (hash-ref open-prod-slots 'starport 0) 0)
          (l2-can-spend-supply? ctx (sc2-supply-cost 'viking))
-         (or (< (l2-ctx-minerals ctx) (+ 50 (sc2-min-cost 'viking)))
-             (< (l2-ctx-gas ctx) (+ 50 (sc2-gas-cost 'viking))))))
+         (or (< (l2-ctx-minerals ctx) (+ (sc2-min-cost 'interference-matrix) (sc2-min-cost 'viking)))
+             (< (l2-ctx-gas ctx) (+ (sc2-gas-cost 'interference-matrix) (sc2-gas-cost 'viking))))))
   (when (and (or (not crisis-tech-upgrade-deferral?)
                  (and (>= (l2-unit-count ctx 'raven) 1)
                       (not early-survival-crisis?)
@@ -23735,8 +23773,8 @@
              (not im-yield-for-viking?)
              (memq 'starport-techlab ready-bldg-types)
              (sc2-ability-live-available? 807)
-             (>= (l2-ctx-minerals ctx) 50)
-             (>= (l2-ctx-gas ctx) 50)
+             (>= (l2-ctx-minerals ctx) (sc2-min-cost 'interference-matrix))
+             (>= (l2-ctx-gas ctx) (sc2-gas-cost 'interference-matrix))
              (or (not live-game?)
                  (l2-plan-wants-now? ctx 'interference-matrix)
                  (>= (l2-unit-count ctx 'raven) 1))
@@ -23744,10 +23782,12 @@
     (define pre-im-cnt (length (l2-ctx-actions ctx)))
     (l2-emit-research-verified! ctx 'interference-matrix)
     (when (> (length (l2-ctx-actions ctx)) pre-im-cnt)
-      (when (< (sc2-min-cost 'interference-matrix) 50)
-        (l2-spend-resources-and-supply! ctx (- 50 (sc2-min-cost 'interference-matrix)) 0 0))
-      (when (< (sc2-gas-cost 'interference-matrix) 50)
-        (l2-spend-resources-and-supply! ctx 0 (- 50 (sc2-gas-cost 'interference-matrix)) 0))))
+      (define im-min (sc2-min-cost 'interference-matrix))
+      (define im-gas (sc2-gas-cost 'interference-matrix))
+      (when (< im-min 50)
+        (l2-spend-resources-and-supply! ctx (- 50 im-min) 0 0))
+      (when (< im-gas 50)
+        (l2-spend-resources-and-supply! ctx 0 (- 50 im-gas) 0))))
   ;; L48-W2 (`H2H #02 TvT`): Gate `ghost-academy` out of live TvT unless `enemy-capital-air?`!
   (when (and (not crisis-tech-upgrade-deferral?)
                 (not (l2-building-present-or-pending? ctx 'ghost-academy))
@@ -24466,7 +24506,8 @@
                         (and (or (not has-fac-tl?) (< (l2-ctx-gas ctx) (sc2-gas-cost 'siege-tank)))
                              (or (< (l2-unit-count ctx 'hellion) 4)
                                  (> (hash-ref open-prod-slots 'factory 0) 0)))
-                        (or (< (l2-ctx-gas ctx) (sc2-gas-cost 'siege-tank)) (>= (l2-ctx-minerals ctx) 250))))
+                        (or (< (l2-ctx-gas ctx) (sc2-gas-cost 'siege-tank))
+                            (>= (l2-ctx-minerals ctx) (+ (sc2-min-cost 'siege-tank) (* 2 (sc2-min-cost 'marine)))))))
            (l2-try-train-unit! ctx 'hellion 'factory 6 #:respect-bo-reserve? (and live-game? terran-bo-escrow-imminent?)))
          ;; Continuous Factory idle-slot fill when not waiting on an imminent (< 3s) priority escrow
          (when (and live-game?
@@ -32975,8 +33016,9 @@
                (pair? enemy-units)
                (or (not live-obs?) (sc2-ability-live-available? 4126)))
       (define splash-st-nx (rt-splash-state (l34-ctx-rt ctx)))
+      (define recharge-cd-p5 (sc2-spell-cooldown-frames 'nexus-energy-recharge 1344))
       (define last-nxf (hash-ref splash-st-nx 'last-nexus-recharge-frame -99999))
-      (when (and (or (< frame last-nxf) (>= (- frame last-nxf) 1344))
+      (when (and (or (< frame last-nxf) (>= (- frame last-nxf) recharge-cd-p5))
                  (= (spell-unit-claim-count spell-claims-rt 'nexus-energy-recharge 1 frame) 0))
         (define ready-nxs-p5
           (for/list ([b (in-list ally-bldgs)]
@@ -33021,7 +33063,7 @@
                     (values bnx bt bsc))))
             (when (and best-nx-id best-t-id)
               (hash-set! splash-st-nx 'last-nexus-recharge-frame frame)
-              (spell-claim-unit?! spell-claims-rt 'nexus-energy-recharge 1 frame 1344 #:caster-tag best-nx-id)
+              (spell-claim-unit?! spell-claims-rt 'nexus-energy-recharge 1 frame recharge-cd-p5 #:caster-tag best-nx-id)
               (l34-emit-preserved! ctx (list 'cast-spell best-nx-id 'nexus-energy-recharge best-t-id)))))))
     ;; W5-TAC-2 + L40-P0-1f + L48-P0-1b (`e02` Queen vs 2 Reapers, `rd01` Queen vs Widow Mine Drop):
     ;; Active frontline/defending Queens not casting Transfuse/Inject actively shoot nearby enemy
@@ -36853,14 +36895,17 @@
                                    (if (fl< d0 bd) d0 bd)
                                    (flmin nd d0))))
                        (values 0.0 0.0 +inf.0 +inf.0)))
+                 (define inf-fungal-rng (sc2-spell-cast-range 'fungal-growth 10.0))
+                 (define inf-hold-r (fl- inf-fungal-rng 0.8))
+                 (define inf-standoff-r (fl- inf-fungal-rng 1.2))
                  (cond
-                   [(and (fl< inf-d 22.0) (fl> inf-d 9.2) (fl> inf-near-d 7.5))
+                   [(and (fl< inf-d 22.0) (fl> inf-d inf-hold-r) (fl> inf-near-d 7.5))
                     (define fux (exact->inexact ux))
                     (define fuy (exact->inexact uy))
-                    (define stx (safe-coord (fl+ inf-tx (fl* 8.8 (fl/ (fl- fux inf-tx) inf-d))) ux))
-                    (define sty (safe-coord (fl+ inf-ty (fl* 8.8 (fl/ (fl- fuy inf-ty) inf-d))) uy))
+                    (define stx (safe-coord (fl+ inf-tx (fl* inf-standoff-r (fl/ (fl- fux inf-tx) inf-d))) ux))
+                    (define sty (safe-coord (fl+ inf-ty (fl* inf-standoff-r (fl/ (fl- fuy inf-ty) inf-d))) uy))
                     (l34-emit! ctx (list 'move uid stx sty))]
-                   [(and (fl<= inf-d 9.2) (fl>= inf-near-d 6.5))
+                   [(and (fl<= inf-d inf-hold-r) (fl>= inf-near-d 6.5))
                     (void)]
                    [else
                     (l34-emit-caster-rear-leash! ctx uid ux uy)]))
@@ -36904,12 +36949,15 @@
                                  (flmin nd d0)
                                  (if better? pri bpri)))
                        (values 0.0 0.0 +inf.0 +inf.0 0)))
+                 (define ht-storm-rng (sc2-spell-cast-range 'psi-storm 9.0))
+                 (define ht-hold-r (fl+ ht-storm-rng 0.2))
+                 (define ht-standoff-r (fl- ht-storm-rng 0.2))
                  (cond
-                   [(and (fl< ht-d 22.0) (fl> ht-d 9.2) (fl> ht-near-d 7.5))
-                    (define stx (safe-coord (fl+ ht-tx (fl* 8.8 (fl/ (fl- fux ht-tx) ht-d))) ux))
-                    (define sty (safe-coord (fl+ ht-ty (fl* 8.8 (fl/ (fl- fuy ht-ty) ht-d))) uy))
+                   [(and (fl< ht-d 22.0) (fl> ht-d ht-hold-r) (fl> ht-near-d 7.5))
+                    (define stx (safe-coord (fl+ ht-tx (fl* ht-standoff-r (fl/ (fl- fux ht-tx) ht-d))) ux))
+                    (define sty (safe-coord (fl+ ht-ty (fl* ht-standoff-r (fl/ (fl- fuy ht-ty) ht-d))) uy))
                     (l34-emit! ctx (list 'move uid stx sty))]
-                   [(and (fl<= ht-d 9.2) (fl>= ht-near-d 6.5))
+                   [(and (fl<= ht-d ht-hold-r) (fl>= ht-near-d 6.5))
                     (void)]
                    [else
                     (l34-emit-caster-rear-leash! ctx uid ux uy)]))

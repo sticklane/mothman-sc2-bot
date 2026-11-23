@@ -505,7 +505,7 @@
    (ab 'morph-archon            1766 'Protoss 'high-templar      'none  0    0   0.0 '(enemy-early-pool-or-worker-rush our-snowball-finish-window) "Merge depleted HTs/DTs into Archon")
    (ab 'shadow-stride           2700 'Protoss 'dark-templar      'point 0  314   8.0 '(our-eco-deficit-comeback-harass base-trade-race) "DT Blink into mineral lines or escape")
    (ab 'immortal-barrier        2328 'Protoss 'immortal          'none  0  717   0.0 '(opponent-proxy-all-in-defense enemy-siege-or-lurker-contain) "100-shield Barrier absorption")
-   (ab 'purification-nova       2346 'Protoss 'disruptor         'point 0  480  13.5 '(enemy-siege-or-lurker-contain enemy-cannon-or-bunker-contain late-game-spellcaster-standoff) "145(+55 vs shields) Nova breaks ground clumps")
+   (ab 'purification-nova       2346 'Protoss 'disruptor         'point 0  (sc2-spell-cooldown-frames 'purification-nova 480) (sc2-spell-cast-range 'purification-nova 10.0) '(enemy-siege-or-lurker-contain enemy-cannon-or-bunker-contain late-game-spellcaster-standoff) "100(+200 vs shields) Nova breaks ground clumps")
    (ab 'morph-observer-mode     3739 'Protoss 'observer-siege-mode 'none 0   0   0.0 '(our-snowball-finish-window) "Un-siege Observer")
    (ab 'morph-observer-siege-mode 3741 'Protoss 'observer        'none  0    0   0.0 '(enemy-cloaked-or-burrowed-threat enemy-multi-prong-drop-or-runby) "Anchor Surveillance Mode at choke/drop lane")
    (ab 'morph-warp-prism-phasing 1528 'Protoss 'warp-prism       'none  0    0   0.0 '(our-eco-deficit-comeback-harass opponent-unwalled-punish base-trade-race) "Deploy mobile Warp Gate field")
@@ -1632,9 +1632,10 @@
           [(1) 6.0]
           [(2) 3.5]
           [else 1.5]))
+      (define usym : Symbol (upgrade-catalog-entry-sym u))
       (define afford-bonus : Float
-        (if (and (>= minerals (upgrade-catalog-entry-mineral-cost u))
-                 (>= gas (upgrade-catalog-entry-gas-cost u)))
+        (if (and (>= minerals (sc2-min-cost usym (upgrade-catalog-entry-mineral-cost u)))
+                 (>= gas (sc2-gas-cost usym (upgrade-catalog-entry-gas-cost u))))
             2.5
             0.0))
       (define score : Float

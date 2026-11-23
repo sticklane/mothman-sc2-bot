@@ -3100,5 +3100,293 @@
   (and (unbox SC2-LIVE-DATA-ACTIVE?)
        (hash-ref SC2-LIVE-UPG-ABIL-OVERLAY upg-sym (lambda () #f))))
 
+;; =============================================================================
+;; 11. Loop 61 Phase 1: Single-Source Total-Value, On-Field Supply, & Spell Spec
+;; =============================================================================
+
+(: zerg-drone-consumed-ancestor? (-> Symbol Boolean))
+(define (zerg-drone-consumed-ancestor? s)
+  (let loop ([cur : Symbol s] [depth : Integer 0])
+    (cond
+      [(> depth 6) #f]
+      [(memq cur SC2-ZERG-DRONE-CONSUMED-STRUCTS) #t]
+      [else
+       (define parent (hash-ref SC2-UPGRADED-ZERO-SUPPLY-STRUCTS cur (lambda () #f)))
+       (if parent (loop parent (+ depth 1)) #f)])))
+
+(: static-unit-morph-base-for-total (-> Symbol (Option (U Symbol (List Integer Integer Real)))))
+(define (static-unit-morph-base-for-total canon)
+  (or (hash-ref SC2-UNIT-MORPH-BASE-MAP canon (lambda () #f))
+      (case canon
+        [(orbital-command-flying) 'command-center]
+        [(overseer-siege-mode overlord-cocoon overlord-transport transport-overlord-cocoon) 'overlord]
+        [(baneling-cocoon) '(25 0 0.5)]
+        [(ravager-cocoon) 'roach]
+        [(lurker-egg lurker-mp-egg) 'hydralisk]
+        [(brood-lord-cocoon) 'corruptor]
+        [else #f])))
+
+(: static-unit-on-field-supply-opt (-> Symbol Integer (Option Flonum)))
+(define (static-unit-on-field-supply-opt raw-sym depth)
+  (define canon (canonical-unit-type-sym raw-sym))
+  (cond
+    [(> depth 6) #f]
+    [(memq canon '(zergling zergling-burrowed baneling baneling-burrowed baneling-cocoon)) 0.5]
+    [(eq? canon 'archon) 4.0]
+    [(eq? canon 'mothership) 8.0]
+    [(or (memq canon SC2-ZERG-DRONE-CONSUMED-STRUCTS)
+         (hash-has-key? SC2-UPGRADED-ZERO-SUPPLY-STRUCTS canon))
+     0.0]
+    [else
+     (define entry
+       (or (hash-ref SC2-LOTV-COST-TABLE raw-sym (lambda () #f))
+           (and (not (eq? canon raw-sym))
+                (hash-ref SC2-LOTV-COST-TABLE canon (lambda () #f)))))
+     (and entry
+          (let ([base (static-unit-morph-base-for-total canon)])
+            (cond
+              [(or (not base) (eq? base 'drone))
+               (real->double-flonum (third entry))]
+              [(symbol? base)
+               (fl+ (real->double-flonum (third entry))
+                    (or (static-unit-on-field-supply-opt base (+ depth 1)) 0.0))]
+              [else
+               (fl+ (real->double-flonum (third entry))
+                    (real->double-flonum (third base)))])))]))
+
+(: sc2-unit-on-field-supply (->* (Any) (Flonum) Flonum))
+(define (sc2-unit-on-field-supply sym [default 1.0])
+  (cond
+    [(not (symbol? sym)) default]
+    [else
+     (define canon (canonical-unit-type-sym sym))
+     (define live-raw
+       (and (unbox SC2-LIVE-DATA-ACTIVE?)
+            (or (hash-ref SC2-LIVE-RAW-COST-OVERLAY sym (lambda () #f))
+                (and (not (eq? canon sym))
+                     (hash-ref SC2-LIVE-RAW-COST-OVERLAY canon (lambda () #f))))))
+     (if live-raw
+         (real->double-flonum (third live-raw))
+         (or (static-unit-on-field-supply-opt sym 0) default))]))
+
+(: static-unit-total-cost-pair-opt (-> Symbol Integer (Option (Pairof Integer Integer))))
+(define (static-unit-total-cost-pair-opt raw-sym depth)
+  (define canon (canonical-unit-type-sym raw-sym))
+  (cond
+    [(> depth 6) #f]
+    [(memq canon '(zergling zergling-burrowed)) (cons 25 0)]
+    [(eq? canon 'archon) (cons 100 300)]
+    [else
+     (define entry
+       (or (hash-ref SC2-LOTV-COST-TABLE raw-sym (lambda () #f))
+           (and (not (eq? canon raw-sym))
+                (hash-ref SC2-LOTV-COST-TABLE canon (lambda () #f)))))
+     (and entry
+          (let ([base (static-unit-morph-base-for-total canon)])
+            (cond
+              [(or (not base) (eq? base 'drone))
+               (cons (first entry) (second entry))]
+              [(symbol? base)
+               (define bp (or (static-unit-total-cost-pair-opt base (+ depth 1)) (cons 0 0)))
+               (cons (+ (first entry) (car bp))
+                     (+ (second entry) (cdr bp)))]
+              [else
+               (cons (+ (first entry) (first base))
+                     (+ (second entry) (second base)))])))]))
+
+(: sc2-unit-total-cost-pair-opt (-> Any (Option (Pairof Integer Integer))))
+(define (sc2-unit-total-cost-pair-opt sym)
+  (cond
+    [(not (symbol? sym)) #f]
+    [else
+     (define canon (canonical-unit-type-sym sym))
+     (define live-raw
+       (and (unbox SC2-LIVE-DATA-ACTIVE?)
+            (or (hash-ref SC2-LIVE-RAW-COST-OVERLAY sym (lambda () #f))
+                (and (not (eq? canon sym))
+                     (hash-ref SC2-LIVE-RAW-COST-OVERLAY canon (lambda () #f))))))
+     (cond
+       [live-raw
+        (define rm (first live-raw))
+        (define rg (second live-raw))
+        (cond
+          [(and (eq? canon 'archon) (= rm 0) (= rg 0))
+           (cons 100 300)]
+          [(zerg-drone-consumed-ancestor? canon)
+           (cons (max 0 (- rm 50)) (max 0 rg))]
+          [else
+           (cons (max 0 rm) (max 0 rg))])]
+       [else
+        (static-unit-total-cost-pair-opt sym 0)])]))
+
+(: sc2-unit-total-cost-pair (->* (Any) ((Pairof Integer Integer)) (Pairof Integer Integer)))
+(define (sc2-unit-total-cost-pair sym [default (cons 50 0)])
+  (or (sc2-unit-total-cost-pair-opt sym) default))
+
+(: sc2-unit-total-min-cost (->* (Any) (Integer) Integer))
+(define (sc2-unit-total-min-cost sym [default 50])
+  (define p (sc2-unit-total-cost-pair-opt sym))
+  (if p (car p) default))
+
+(: sc2-unit-total-gas-cost (->* (Any) (Integer) Integer))
+(define (sc2-unit-total-gas-cost sym [default 0])
+  (define p (sc2-unit-total-cost-pair-opt sym))
+  (if p (cdr p) default))
+
+(: sc2-unit-total-value (->* (Any) (Integer) Integer))
+(define (sc2-unit-total-value sym [default 0])
+  (define p (sc2-unit-total-cost-pair-opt sym))
+  (if p (+ (car p) (cdr p)) default))
+
+;; -----------------------------------------------------------------------------
+;; Unified Live-Hydrated `SC2-SPELL-SPEC` Registry
+;; -----------------------------------------------------------------------------
+
+(struct sc2-spell-spec
+  ([sym              : Symbol]
+   [ability-id       : Nonnegative-Integer]
+   [caster-sym       : Symbol]
+   [target-mode      : Symbol]          ;; 'point | 'unit | 'none | 'point-or-unit
+   [energy-cost      : Flonum]
+   [cooldown-frames  : Nonnegative-Integer] ;; 0 if none (at 22.4 fps)
+   [cast-range       : Flonum]          ;; static 5.0.14 fallback
+   [effect-radius    : Flonum]          ;; static 5.0.14 fallback
+   [claim-radius     : Flonum]          ;; tactical dedup floor (expands with live effect-radius)
+   [claim-ttl-frames : Nonnegative-Integer]
+   [duration-frames  : Nonnegative-Integer] ;; persistent effect / nova lifetime
+   [lockout-frames   : Nonnegative-Integer] ;; channel / post-cast caster lock
+   [base-damage      : Flonum]
+   [bonus-damage     : Flonum]
+   [bonus-attr-mask  : Fixnum]          ;; e.g., SC2-UNIT-ATTR-PSIONIC, 0 if shield/none
+   [required-upgrade : (Option Symbol)])
+  #:transparent)
+
+(: SC2-SPELL-SPEC-TABLE (Immutable-HashTable Symbol sc2-spell-spec))
+(define SC2-SPELL-SPEC-TABLE
+  (hasheq
+   'psi-storm             (sc2-spell-spec 'psi-storm             1036 'high-templar        'point 75.0  0    9.0   1.5  2.0  56   64  0  80.0  0.0   0                     'psi-storm)
+   'feedback              (sc2-spell-spec 'feedback              140  'high-templar        'unit  50.0  0    10.0  0.0  0.0  36   0   0  0.0   0.0   0                     #f)
+   'purification-nova     (sc2-spell-spec 'purification-nova     2346 'disruptor           'point 0.0   480  10.0  1.5  4.0  47   47  0  100.0 200.0 0                     #f)
+   'nexus-energy-recharge (sc2-spell-spec 'nexus-energy-recharge 4126 'nexus               'unit  50.0  1344 10.0  0.0  0.0  1344 0   0  0.0   0.0   0                     #f)
+   'guardian-shield       (sc2-spell-spec 'guardian-shield       76   'sentry              'none  75.0  0    0.0   4.5  5.0  246  246 0  0.0   0.0   0                     #f)
+   'force-field           (sc2-spell-spec 'force-field           1526 'sentry              'point 50.0  0    9.0   1.5  1.5  32   246 0  0.0   0.0   0                     #f)
+   'revelation            (sc2-spell-spec 'revelation            2146 'oracle              'point 25.0  0    9.0   6.0  6.0  448  448 0  0.0   0.0   0                     #f)
+   'stasis-ward           (sc2-spell-spec 'stasis-ward           2536 'oracle              'point 50.0  0    4.0   2.5  2.5  64   0   0  0.0   0.0   0                     #f)
+   'shadow-stride         (sc2-spell-spec 'shadow-stride         2700 'dark-templar        'point 0.0   314  8.0   0.0  0.0  0    0   0  0.0   0.0   0                     'shadow-stride)
+   'blink                 (sc2-spell-spec 'blink                 1442 'stalker             'point 0.0   157  8.0   0.0  0.0  0    0   0  0.0   0.0   0                     'blink)
+   'time-warp             (sc2-spell-spec 'time-warp             2244 'mothership          'point 100.0 0    9.0   3.5  3.5  224  224 0  0.0   0.0   0                     #f)
+   'emp-round             (sc2-spell-spec 'emp-round             1628 'ghost               'point 75.0  0    10.0  1.5  1.5  24   0   0  100.0 0.0   0                     #f)
+   'steady-targeting      (sc2-spell-spec 'steady-targeting      2714 'ghost               'unit  50.0  0    10.0  0.0  0.0  34   0   34 130.0 40.0  SC2-UNIT-ATTR-PSIONIC #f)
+   'anti-armor-missile    (sc2-spell-spec 'anti-armor-missile    3753 'raven               'unit  75.0  0    10.0  2.5  2.5  48   336 0  0.0   0.0   0                     #f)
+   'interference-matrix   (sc2-spell-spec 'interference-matrix   3747 'raven               'unit  75.0  0    9.0   0.0  0.0  36   179 0  0.0   0.0   0                     'interference-matrix)
+   'yamato-cannon         (sc2-spell-spec 'yamato-cannon         401  'battlecruiser       'unit  0.0   1590 10.0  0.0  0.0  36   0   0  240.0 0.0   0                     'weapon-refit)
+   'tactical-jump         (sc2-spell-spec 'tactical-jump         2358 'battlecruiser       'point 0.0   1590 256.0 0.0  0.0  0    0   0  0.0   0.0   0                     #f)
+   'medivac-boost         (sc2-spell-spec 'medivac-boost         2116 'medivac             'none  0.0   320  0.0   0.0  0.0  0    128 0  0.0   0.0   0                     #f)
+   'lock-on               (sc2-spell-spec 'lock-on               2350 'cyclone             'unit  0.0   196  7.0   0.0  0.0  0    134 0  0.0   0.0   0                     #f)
+   'widow-mine-splash     (sc2-spell-spec 'widow-mine-splash     0    'widow-mine-burrowed 'unit  0.0   648  5.0   1.5  1.5  0    0   0  40.0  25.0  0                     #f)
+   'scanner-sweep         (sc2-spell-spec 'scanner-sweep         399  'orbital-command     'point 50.0  0    256.0 13.0 13.0 268  268 0  0.0   0.0   0                     #f)
+   'fungal-growth         (sc2-spell-spec 'fungal-growth         74   'infestor            'point 75.0  0    10.0  2.25 2.25 32   67  0  30.0  0.0   0                     #f)
+   'neural-parasite       (sc2-spell-spec 'neural-parasite       249  'infestor            'unit  100.0 0    8.0   0.0  0.0  36   246 0  0.0   0.0   0                     'neural-parasite)
+   'microbial-shroud      (sc2-spell-spec 'microbial-shroud      4111 'infestor            'point 100.0 0    9.0   3.5  3.5  48   246 0  0.0   0.0   0                     #f)
+   'blinding-cloud        (sc2-spell-spec 'blinding-cloud        2063 'viper               'point 100.0 0    11.0  2.0  2.0  48   128 0  0.0   0.0   0                     #f)
+   'abduct                (sc2-spell-spec 'abduct                2067 'viper               'unit  75.0  0    9.0   0.0  0.0  36   0   13 0.0   0.0   0                     #f)
+   'parasitic-bomb        (sc2-spell-spec 'parasitic-bomb        2542 'viper               'unit  125.0 0    8.0   3.0  3.0  36   157 0  120.0 0.0   0                     #f)
+   'corrosive-bile        (sc2-spell-spec 'corrosive-bile        2338 'ravager             'point 0.0   157  9.0   0.5  0.55 36   56  0  60.0  0.0   0                     #f)
+   'caustic-spray         (sc2-spell-spec 'caustic-spray         2324 'corruptor           'unit  0.0   1008 6.0   0.0  0.0  36   0   0  0.0   0.0   0                     #f)
+   'transfusion           (sc2-spell-spec 'transfusion           1664 'queen               'unit  50.0  0    7.0   0.0  0.0  16   0   0  0.0   0.0   0                     #f)))
+
+(: normalize-sc2-spell-sym (-> Symbol Symbol))
+(define (normalize-sc2-spell-sym sym)
+  (case sym
+    [(psionic-storm psistorm) 'psi-storm]
+    [(emp)                    'emp-round]
+    [(snipe)                  'steady-targeting]
+    [(energy-recharge)        'nexus-energy-recharge]
+    [(amorphous-armorcloud)   'microbial-shroud]
+    [(disruptor-nova)         'purification-nova]
+    [(oracle-revelation)      'revelation]
+    [(anti-armor)             'anti-armor-missile]
+    [(fungal)                 'fungal-growth]
+    [(bile)                   'corrosive-bile]
+    [(yamato)                 'yamato-cannon]
+    [(stalker-blink)          'blink]
+    [else                     sym]))
+
+(: sc2-spell-spec-ref (-> Symbol (Option sc2-spell-spec)))
+(define (sc2-spell-spec-ref sym)
+  (hash-ref SC2-SPELL-SPEC-TABLE (normalize-sc2-spell-sym sym) (lambda () #f)))
+
+(: sc2-spell-ability-id (->* (Symbol) (Nonnegative-Integer) Nonnegative-Integer))
+(define (sc2-spell-ability-id sym [default 0])
+  (define spec (sc2-spell-spec-ref sym))
+  (if spec (sc2-spell-spec-ability-id spec) default))
+
+(: sc2-spell-cast-range (->* (Symbol) (Flonum) Flonum))
+(define (sc2-spell-cast-range sym [default 0.0])
+  (define spec (sc2-spell-spec-ref sym))
+  (cond
+    [(not spec) default]
+    [else
+     (define ab-id (sc2-spell-spec-ability-id spec))
+     (define live-rng (if (> ab-id 0) (sc2-ability-cast-range ab-id 0.0) 0.0))
+     (if (fl> live-rng 0.0) live-rng (sc2-spell-spec-cast-range spec))]))
+
+(: sc2-spell-effect-radius (->* (Symbol) (Flonum) Flonum))
+(define (sc2-spell-effect-radius sym [default 0.0])
+  (define spec (sc2-spell-spec-ref sym))
+  (cond
+    [(not spec) default]
+    [else
+     (define live-r (sc2-live-effect-radius (sc2-spell-spec-sym spec) 0.0))
+     (if (fl> live-r 0.0) live-r (sc2-spell-spec-effect-radius spec))]))
+
+(: sc2-spell-claim-radius (->* (Symbol) (Flonum) Flonum))
+(define (sc2-spell-claim-radius sym [default 0.0])
+  (define spec (sc2-spell-spec-ref sym))
+  (if spec
+      (flmax (sc2-spell-spec-claim-radius spec)
+             (sc2-spell-effect-radius (sc2-spell-spec-sym spec) 0.0))
+      default))
+
+(: sc2-spell-energy (->* (Symbol) (Flonum) Flonum))
+(define (sc2-spell-energy sym [default 0.0])
+  (define spec (sc2-spell-spec-ref sym))
+  (if spec (sc2-spell-spec-energy-cost spec) default))
+
+(: sc2-spell-cooldown-frames (->* (Symbol) (Nonnegative-Integer) Nonnegative-Integer))
+(define (sc2-spell-cooldown-frames sym [default 0])
+  (define spec (sc2-spell-spec-ref sym))
+  (if spec (sc2-spell-spec-cooldown-frames spec) default))
+
+(: sc2-spell-claim-ttl (->* (Symbol) (Nonnegative-Integer) Nonnegative-Integer))
+(define (sc2-spell-claim-ttl sym [default 0])
+  (define spec (sc2-spell-spec-ref sym))
+  (if spec (sc2-spell-spec-claim-ttl-frames spec) default))
+
+(: sc2-spell-duration-frames (->* (Symbol) (Nonnegative-Integer) Nonnegative-Integer))
+(define (sc2-spell-duration-frames sym [default 0])
+  (define spec (sc2-spell-spec-ref sym))
+  (if spec (sc2-spell-spec-duration-frames spec) default))
+
+(: sc2-spell-lockout-frames (->* (Symbol) (Nonnegative-Integer) Nonnegative-Integer))
+(define (sc2-spell-lockout-frames sym [default 0])
+  (define spec (sc2-spell-spec-ref sym))
+  (if spec (sc2-spell-spec-lockout-frames spec) default))
+
+(: sc2-spell-base-damage (->* (Symbol) (Flonum) Flonum))
+(define (sc2-spell-base-damage sym [default 0.0])
+  (define spec (sc2-spell-spec-ref sym))
+  (if spec (sc2-spell-spec-base-damage spec) default))
+
+(: sc2-spell-bonus-damage (->* (Symbol) (Flonum) Flonum))
+(define (sc2-spell-bonus-damage sym [default 0.0])
+  (define spec (sc2-spell-spec-ref sym))
+  (if spec (sc2-spell-spec-bonus-damage spec) default))
+
+(: sc2-spell-required-upgrade (-> Symbol (Option Symbol)))
+(define (sc2-spell-required-upgrade sym)
+  (define spec (sc2-spell-spec-ref sym))
+  (and spec (sc2-spell-spec-required-upgrade spec)))
+
 
 

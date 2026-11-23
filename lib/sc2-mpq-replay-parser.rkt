@@ -24,7 +24,8 @@
          racket/string
          file/gunzip
          "sc2-bayesian.rkt"
-         "sc2-common.rkt")
+         "sc2-common.rkt"
+         "sc2-game-constants.rkt")
 
 (provide STORM-CRYPT
          mpq-hash
@@ -424,25 +425,41 @@
     "ShieldBattery"
     "Hatchery"))
 
-;; Approximate mineral+gas resource values for engagement clustering & ROI
-(define UNIT-RESOURCE-VALUE
-  (hash "Drone" 50 "SCV" 50 "Probe" 50
-        "Zergling" 25 "Baneling" 50 "Queen" 175 "Roach" 100 "Ravager" 200
-        "Hydralisk" 150 "LurkerMP" 300 "Mutalisk" 200 "Corruptor" 250
-        "Infestor" 250 "SwarmHostMP" 200 "Ultralisk" 475 "Viper" 300 "BroodLord" 550
-        "Overlord" 100 "Overseer" 200 "SpawningPool" 200 "RoachWarren" 150
-        "BanelingNest" 150 "Hatchery" 275 "Lair" 550 "Hive" 900 "SpineCrawler" 100 "SporeCrawler" 75
-        "Marine" 50 "Marauder" 125 "Reaper" 100 "Ghost" 275 "Hellion" 100 "HellionTank" 100
-        "WidowMine" 100 "SiegeTank" 275 "SiegeTankSieged" 275 "Cyclone" 250 "Thor" 500 "ThorAP" 500
-        "VikingFighter" 225 "VikingAssault" 225 "Medivac" 200 "Liberator" 300 "LiberatorAG" 300
-        "Banshee" 250 "Raven" 250 "Battlecruiser" 700
-        "CommandCenter" 400 "OrbitalCommand" 550 "PlanetaryFortress" 650
-        "Barracks" 150 "Factory" 250 "Starport" 250 "Bunker" 100 "SupplyDepot" 100 "SupplyDepotLowered" 100
-        "Zealot" 100 "Stalker" 175 "Sentry" 150 "Adept" 125 "HighTemplar" 200 "DarkTemplar" 250
-        "Archon" 400 "Observer" 100 "WarpPrism" 250 "Immortal" 350 "Colossus" 500 "Disruptor" 300
-        "Phoenix" 250 "VoidRay" 400 "Oracle" 300 "Tempest" 425 "Carrier" 600 "Mothership" 800
-        "Nexus" 400 "Pylon" 100 "Gateway" 150 "WarpGate" 150 "CyberneticsCore" 150
-        "Forge" 150 "PhotonCannon" 150 "ShieldBattery" 100 "RoboticsFacility" 250 "Stargate" 300))
+;; Convert SC2 tracker CamelCase unit/building strings (e.g. "HighTemplar", "LurkerMP",
+;; "SwarmHostMP", "HellionTank") into canonical symbols for single-source `sc2-unit-total-value`.
+(define (tracker-unit-name->sym u-str)
+  (cond
+    [(not (string? u-str)) 'unknown]
+    [(string=? u-str "SCV") 'scv]
+    [(string=? u-str "HellionTank") 'hellbat]
+    [(string=? u-str "LurkerMP") 'lurker-mp]
+    [(string=? u-str "SwarmHostMP") 'swarm-host]
+    [(string=? u-str "LurkerDenMP") 'lurker-den]
+    [(string=? u-str "ThorAP") 'thor]
+    [(string=? u-str "LiberatorAG") 'liberator]
+    [(string=? u-str "WarpGate") 'warpgate]
+    [(string=? u-str "SiegeTankSieged") 'siege-tank]
+    [(string=? u-str "SupplyDepotLowered") 'supply-depot]
+    [else
+     (let* ([s (if (and (> (string-length u-str) 2) (string-suffix? u-str "MP"))
+                   (substring u-str 0 (- (string-length u-str) 2))
+                   u-str)]
+            [len (string-length s)]
+            [out
+             (for/fold ([acc '()]) ([i (in-range len)])
+               (define ch (string-ref s i))
+               (define prev-ch (and (> i 0) (string-ref s (sub1 i))))
+               (define add-hyphen?
+                 (and prev-ch
+                      (char-upper-case? ch)
+                      (or (char-lower-case? prev-ch)
+                          (and (< (add1 i) len)
+                               (char-lower-case? (string-ref s (add1 i)))))))
+               (define lo (char-downcase ch))
+               (if add-hyphen?
+                   (cons lo (cons #\- acc))
+                   (cons lo acc)))])
+       (string->symbol (list->string (reverse out))))]))
 
 ;; Swarmy's `is_morph_death` filter: in SC2 tracker streams, a Drone morphing into a
 ;; structure or HT/DT merging into an Archon emits SUnitDiedEvent with killerPlayerId = #f.
@@ -860,7 +877,7 @@
              (hash-update! mut-bases-lost p
                            (lambda (lst) (cons (list (round1 sec) u killer-unit) lst))))
            (define u-base (base-tracker-unit-name u))
-           (define res-cost (hash-ref UNIT-RESOURCE-VALUE u-base 0))
+           (define res-cost (sc2-unit-total-value (tracker-unit-name->sym u-base) 0))
            (when (> res-cost 0)
              (set! raw-deaths-rev (cons (list sec p u-base dx dy res-cost) raw-deaths-rev))))]
         [(5) ; SUpgradeEvent
