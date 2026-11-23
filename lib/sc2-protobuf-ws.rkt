@@ -35,7 +35,8 @@
                   sc2-ground-territory-margin)
          (only-in "sc2-common.rkt"
                   SC2-SINGLETON-TECH-BUILDINGS
-                  SC2-DUAL-CAP-TECH-BUILDINGS))
+                  SC2-DUAL-CAP-TECH-BUILDINGS)
+         "plan/macro-ability-policy.rkt")
 
 (provide
  ;; RFC 6455 WebSocket Client
@@ -2200,6 +2201,9 @@
       (sc2-upgrade-defined-in-live-data? sym)
       #t))
 
+;; Phase 2 (`#1662`): Single per-match macro-ability policy latch shared by Sec 6a & Case C.
+(define SC2-MACRO-POLICY-LATCH (make-macro-policy-latch))
+
 (define (reset-sc2-live-response-data!)
   (set-box! SC2-LIVE-DATA-LOADED? #f)
   (hash-clear! SC2-LIVE-AVAILABLE-ABILITIES)
@@ -2207,7 +2211,8 @@
   (hash-clear! SC2-LIVE-DEFINED-UPGRADE-IDS)
   (reset-sc2-live-game-data!)
   (reset-live-typed-ability-overrides!)
-  (reset-verifier-live-ability-modes!))
+  (reset-verifier-live-ability-modes!)
+  (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH))
 
 (struct sc2-response
   (id
@@ -4723,84 +4728,123 @@
            (set! clusters (cons (list cx cy members) clusters)))))
      (reverse clusters)]))
 
-(define SC2-MULE-HARMLESS-ENEMY-SYMS
-  (seteq 'drone 'scv 'probe 'overlord 'overlord-cocoon
-         'overseer 'overseer-siege-mode 'observer 'observer-siege-mode
-         'changeling 'changeling-zealot 'changeling-marine-shield
-         'changeling-marine 'changeling-zergling-wings 'changeling-zergling))
+;; Phase 2 (`#1662`): Thin wire-struct adapters delegating all Terran MULE-vs-Scan, safe mineral
+;; patch selection, and Protoss Nexus Chrono/Recharge policy to `lib/plan/macro-ability-policy.rkt`.
+(define (sc2-units->macro-th-infos ulist)
+  (for/list ([u (in-list ulist)]
+             #:when (sc2-unit-is-townhall? u))
+    (define p (sc2-unit-pos u))
+    (macro-th-info (sc2-unit-tag u)
+                   (sc2-id->unit-symbol (sc2-unit-unit-type u) 'unknown)
+                   (sc2-point3d-x p)
+                   (sc2-point3d-y p)
+                   (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                   (sc2-unit-is-flying u))))
+
+(define (sc2-mineral-fields->macro-mineral-infos mineral-fields)
+  (for/list ([m (in-list mineral-fields)])
+    (define p (sc2-unit-pos m))
+    (macro-mineral-info (sc2-unit-tag m)
+                        (sc2-point3d-x p)
+                        (sc2-point3d-y p)
+                        (sc2-unit-mineral-contents m)
+                        (= (sc2-unit-display-type m) 1))))
+
+(define (sc2-units->macro-enemy-infos enemy-units)
+  (for/list ([e (in-list enemy-units)])
+    (define p (sc2-unit-pos e))
+    (define tid (sc2-unit-unit-type e))
+    (macro-enemy-info (sc2-id->unit-symbol tid 'unknown)
+                      tid
+                      (sc2-point3d-x p)
+                      (sc2-point3d-y p)
+                      (sc2-point3d-z p)
+                      (sc2-unit-cloak e)
+                      (sc2-unit-is-burrowed e)
+                      (sc2-unit-is-flying e))))
+
+(define (sc2-units->macro-self-infos self-units)
+  (for/list ([u (in-list self-units)])
+    (define p (sc2-unit-pos u))
+    (define tid (sc2-unit-unit-type u))
+    (macro-self-unit-info (sc2-id->unit-symbol tid 'unknown)
+                          tid
+                          (sc2-point3d-x p)
+                          (sc2-point3d-y p)
+                          (sc2-point3d-z p)
+                          (sc2-unit-is-structure? u)
+                          (sc2-unit-is-worker? u)
+                          (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS))))
+
+(define (sc2-units->macro-oc-infos ready-ocs)
+  (for/list ([oc (in-list ready-ocs)])
+    (define p (sc2-unit-pos oc))
+    (macro-oc-info (sc2-unit-tag oc)
+                   (sc2-point3d-x p)
+                   (sc2-point3d-y p)
+                   (sc2-unit-energy oc))))
+
+(define (sc2-units->macro-nexus-infos ready-nexuses)
+  (for/list ([nx (in-list ready-nexuses)])
+    (define p (sc2-unit-pos nx))
+    (macro-nexus-info (sc2-unit-tag nx)
+                      (sc2-point3d-x p)
+                      (sc2-point3d-y p)
+                      (sc2-unit-energy nx)
+                      (and (ormap (lambda (o) (= (sc2-unit-order-ability-id o) 1006))
+                                  (sc2-unit-orders nx))
+                           #t)
+                      (and (memv 281 (sc2-unit-buff-ids nx)) #t))))
+
+(define (sc2-units->macro-caster-infos self-units)
+  (for/list ([u (in-list self-units)]
+             #:when (and (memv (sc2-unit-unit-type u) '(10 75 77 495))
+                         (> (sc2-unit-energy-max u) 0.0)))
+    (define p (sc2-unit-pos u))
+    (define sym
+      (case (sc2-unit-unit-type u)
+        [(10)  'mothership]
+        [(75)  'high-templar]
+        [(77)  'sentry]
+        [(495) 'oracle]
+        [else  (sc2-id->unit-symbol (sc2-unit-unit-type u) 'unknown)]))
+    (macro-caster-info (sc2-unit-tag u)
+                       sym
+                       (sc2-point3d-x p)
+                       (sc2-point3d-y p)
+                       (sc2-unit-energy u)
+                       (sc2-unit-is-hallucination u))))
+
+(define (sc2-game-info->enemy-race game-info obs)
+  (and (sc2-game-info? game-info)
+       (sc2-observation? obs)
+       (sc2-player-common? (sc2-observation-player-common obs))
+       (let ([my-pid (sc2-player-common-player-id (sc2-observation-player-common obs))])
+         (for/first ([pi (in-list (sc2-game-info-player-info game-info))]
+                     #:when (and (hash? pi)
+                                 (not (= (hash-ref pi 'player-id 0) my-pid))))
+           (or (let ([ra (hash-ref pi 'race-actual #f)])
+                 (and (memq ra '(Zerg Terran Protoss)) ra))
+               (hash-ref pi 'race-requested #f))))))
+
+(define (sc2-obs-has-blind-uphill-err? obs)
+  (and (sc2-observation? obs)
+       (let ([errs (sc2-observation-action-errors obs)])
+         (and (list? errs)
+              (ormap (lambda (ae)
+                       (and (hash? ae)
+                            (= (hash-ref ae 'ability-id 0) 23)
+                            (= (hash-ref ae 'result 0) 83)))
+                     errs)))))
 
 (define (pick-safe-mule-mineral-patch orbital-u self-units mineral-fields enemy-units)
-  (define completed-grounded-ths
-    (filter (lambda (u)
-              (and (sc2-unit-is-townhall? u)
-                   (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
-                   (not (sc2-unit-is-flying u))
-                   (not (memq (sc2-id->unit-symbol (sc2-unit-unit-type u))
-                              '(command-center-flying orbital-command-flying)))))
-            self-units))
-  (cond
-    [(or (null? completed-grounded-ths) (null? mineral-fields)) 0]
-    [else
-     (define danger-xys
-       (for/list ([e (in-list enemy-units)]
-                  #:when (not (set-member? SC2-MULE-HARMLESS-ENEMY-SYMS
-                                           (sc2-id->unit-symbol (sc2-unit-unit-type e) 'unknown))))
-         (define ep (sc2-unit-pos e))
-         (cons (sc2-point3d-x ep) (sc2-point3d-y ep))))
-     (define safe-ths
-       (filter (lambda (th)
-                 (define tp (sc2-unit-pos th))
-                 (define tx (sc2-point3d-x tp))
-                 (define ty (sc2-point3d-y tp))
-                 (for/and ([exy (in-list danger-xys)])
-                   (define dx (- tx (car exy)))
-                   (define dy (- ty (cdr exy)))
-                   (or (> (abs dx) 12.5)
-                       (> (abs dy) 12.5)
-                       (> (+ (* dx dx) (* dy dy)) 156.25))))
-               completed-grounded-ths))
-     (cond
-       [(null? safe-ths) 0]
-       [else
-        (define safe-th-xys
-          (for/list ([th (in-list safe-ths)])
-            (define tp (sc2-unit-pos th))
-            (cons (sc2-point3d-x tp) (sc2-point3d-y tp))))
-        (define ref-u
-          (or (and (sc2-unit? orbital-u) orbital-u)
-              (findf (lambda (u) (= (sc2-unit-unit-type u) 132)) safe-ths)
-              (first safe-ths)))
-        (define rp (sc2-unit-pos ref-u))
-        (define rx (sc2-point3d-x rp))
-        (define ry (sc2-point3d-y rp))
-        (define best-tag 0)
-        (define best-score +inf.0)
-        (for ([m (in-list mineral-fields)]
-              #:when (and (= (sc2-unit-display-type m) 1)
-                          (let ([mc (sc2-unit-mineral-contents m)])
-                            (or (= mc 0) (>= mc 150)))))
-          (define mp (sc2-unit-pos m))
-          (define mx (sc2-point3d-x mp))
-          (define my (sc2-point3d-y mp))
-          (when (and (for/or ([txy (in-list safe-th-xys)])
-                       (define dx (- mx (car txy)))
-                       (define dy (- my (cdr txy)))
-                       (and (<= (abs dx) 12.0)
-                            (<= (abs dy) 12.0)
-                            (<= (+ (* dx dx) (* dy dy)) 144.0)))
-                     (for/and ([exy (in-list danger-xys)])
-                       (define dx (- mx (car exy)))
-                       (define dy (- my (cdr exy)))
-                       (or (> (abs dx) 11.0)
-                           (> (abs dy) 11.0)
-                           (> (+ (* dx dx) (* dy dy)) 121.0))))
-            (define mc (sc2-unit-mineral-contents m))
-            (define sc (- (* 0.35 (pt-dist rx ry mx my))
-                          (* 0.002 (if (= mc 0) 1500 mc))))
-            (when (< sc best-score)
-              (set! best-score sc)
-              (set! best-tag (sc2-unit-tag m)))))
-        best-tag])]))
+  (define rp (and (sc2-unit? orbital-u) (sc2-unit-pos orbital-u)))
+  (select-safe-mule-mineral-patch-tag
+   (and rp (sc2-point3d-x rp))
+   (and rp (sc2-point3d-y rp))
+   (sc2-units->macro-th-infos self-units)
+   (sc2-mineral-fields->macro-mineral-infos mineral-fields)
+   (sc2-units->macro-enemy-infos enemy-units)))
 
 (define (worker-carrying-cargo? w)
   (cond
@@ -4902,7 +4946,6 @@
 (define SC2-WARPGATE-HARD-CD-UNTIL (make-hasheqv))
 (define SC2-WARPGATE-PREV-LIVE-READY (box 0))
 (define SC2-LAST-SCAN-REQUEST-LOOP (box -9999))
-(define SC2-LAST-BLIND-UPHILL-ERR-LOOP (box -9999))
 (define SC2-WARP-IN-ABILITY-IDS '(1413 1414 1416 1417 1418 1419))
 ;; W11-P0-3-wire: Reconcile client-side WarpGate cooldown estimates against SC2 `action-errors`
 ;; (rejected warp-ins must NEVER lock out a WarpGate for 23s!) and live `player_common.warp_gate_count`
@@ -5351,7 +5394,7 @@
     (hash-clear! SC2-WARPGATE-HARD-CD-UNTIL)
     (set-box! SC2-WARPGATE-PREV-LIVE-READY 0)
     (set-box! SC2-LAST-SCAN-REQUEST-LOOP -9999)
-    (set-box! SC2-LAST-BLIND-UPHILL-ERR-LOOP -9999)
+    (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
     (hash-clear! SC2-WORKER-BUILD-ORDER-START)
     (set-box! SC2-HOME-BASE-ANCHOR #f)
     (set-box! SC2-CLEARED-ENEMY-BASES '())
@@ -9902,10 +9945,6 @@
 (define SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP (box #f))
 (define SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP (box #f))
 (define SC2-GAS-BLDG-ZERO-WORKERS-SINCE (make-hasheqv))
-(define SC2-SAT-OBSERVED-ENEMY-RACE (box #f))
-(define SC2-SAT-SEEN-TERRAN-CLOAK-TECH? (box #f))
-(define SC2-SAT-SEEN-PROTOSS-DT-PRISM? (box #f))
-(define SC2-SAT-SEEN-ENEMY-CLOAK? (box #f))
 ;; L61 (`#1609`): 3-Race TownHall `RALLY_WORKERS (3690)` tracker & midgame harvest throttles
 (define SC2-TH-WORKER-RALLY-TARGET (make-hasheqv))     ;; th-tag -> (vector dst-th-tag patch-tag last-loop was-flying?)
 (define SC2-SAT-EVAC-LAST-LOOP (make-hasheqv))         ;; offline-th-tag (or 0) -> loop
@@ -9917,18 +9956,6 @@
 (define SC2-SAT-GAS-LAST-FILL-GLOBAL (box -1000))
 (define SC2-SAT-GAS-LAST-PULL-GLOBAL (box -1000))
 (define SC2-SAT-MULE-IDLE-LAST-LOOP (make-hasheqv))    ;; mule-tag -> loop
-
-(define (sc2-infer-race-from-units ulist)
-  (for/first ([e (in-list ulist)]
-              #:when (let ([ut (sc2-unit-unit-type e)])
-                       (or (memv ut '(86 89 90 91 92 93 95 96 97 98 100 101 104 105 106 107 108 109 110 111 112 114 126 129 688))
-                           (memv ut '(18 19 20 21 22 23 24 25 26 27 28 29 30 32 33 34 35 45 47 48 49 50 51 52 53 54 55 56 57 130 132 498 692))
-                           (memv ut '(59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 133 136 311 495 496 694 1910)))))
-    (define ut (sc2-unit-unit-type e))
-    (cond
-      [(memv ut '(86 89 90 91 92 93 95 96 97 98 100 101 104 105 106 107 108 109 110 111 112 114 126 129 688)) 'Zerg]
-      [(memv ut '(18 19 20 21 22 23 24 25 26 27 28 29 30 32 33 34 35 45 47 48 49 50 51 52 53 54 55 56 57 130 132 498 692)) 'Terran]
-      [else 'Protoss])))
 
 (define (saturate-workers-and-gas-commands obs
                                            #:excluded-worker-tags [excluded-worker-tags (seteqv)]
@@ -9953,10 +9980,7 @@
     (set-box! SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP #f)
     (set-box! SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP #f)
     (hash-clear! SC2-GAS-BLDG-ZERO-WORKERS-SINCE)
-    (set-box! SC2-SAT-OBSERVED-ENEMY-RACE #f)
-    (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #f)
-    (set-box! SC2-SAT-SEEN-PROTOSS-DT-PRISM? #f)
-    (set-box! SC2-SAT-SEEN-ENEMY-CLOAK? #f)
+    (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
     (hash-clear! SC2-TH-WORKER-RALLY-TARGET)
     (hash-clear! SC2-SAT-EVAC-LAST-LOOP)
     (hash-clear! SC2-SAT-IDLE-LAST-LOOP)
@@ -11594,266 +11618,62 @@
               (cons (if (<= cur-loop 2688) (mark-macro-econ-cmd! raw-mule-c) raw-mule-c)
                     cmds)))))
 
-  ;; 6. L23-P0-1: Unstarvable Tier-P1 Macro-Energy Safety Net (`Orbital Command MULE` 171 &
-  ;;    `0:00-5:00` Probe-training `Nexus ChronoBoost` 3755). Deduplicated with Layer 2 via
-  ;;    `SC2-MACRO-ABILITY-LAST-LOOP` (`16f` cooldown) so zero duplicate commands or rejects occur!
-  ;; 6a. Orbital Command MULE (`171`): cast at >= 50 energy when no cloaked/burrowed threat exists
-  ;;     (or >= 100 energy to preserve 50-energy Scan reserve under cloak threat).
-  ;;     L56-W2-1 (L55-W2b/L55-W3a): Scope proactive `100.0e` scan-bank guard (when `0` Ravens and
-  ;;     `0` ready Missile Turrets) to:
-  ;;     - `(memq sat-enemy-race '(Protoss Random))` with `cur-loop >= 5376` (4:00) on up to `2`
-  ;;       ready OCs (top-2 by energy; 3rd+ OC MULEs at `50.0e`, holding 2 back-to-back Scans),
-  ;;     - `TvT` ONLY on top-1 OC when enemy cloak/Banshee/Ghost tech (`41`/`26`/`50`/`55`) is
-  ;;       scouted — never starve unprovoked `TvT` MULEs on 1-OC or 2-OC!
+  ;; 6. Phase 2 (`#1662`): Thin Tier-P1 Macro-Energy Wire Safety Net delegating ALL Terran MULE
+  ;;    vs Scan and Protoss Early ChronoBoost vs Energy Recharge policy to
+  ;;    `lib/plan/macro-ability-policy.rkt`, keeping only wire cooldown dedup (`SC2-MACRO-ABILITY-LAST-LOOP`).
+  ;; 6a. Orbital Command MULE (`171`)
   (when (not (null? owned-base-minerals))
-    (define seen-enemy-race-now (sc2-infer-race-from-units enemy-units))
-    (when seen-enemy-race-now
-      (set-box! SC2-SAT-OBSERVED-ENEMY-RACE seen-enemy-race-now))
-    (define seen-terran-cloak-tech-now?
-      (ormap (lambda (e) (memv (sc2-unit-unit-type e) '(41 26 50 55))) enemy-units))
-    (when seen-terran-cloak-tech-now?
-      (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #t))
-    (define seen-protoss-dt-prism-now?
-      (ormap (lambda (e) (memv (sc2-unit-unit-type e) '(69 76 81 136))) enemy-units))
-    (when seen-protoss-dt-prism-now?
-      (set-box! SC2-SAT-SEEN-PROTOSS-DT-PRISM? #t))
-    (define gi-enemy-race
-      (and (sc2-game-info? game-info)
-           (let ([my-pid (sc2-player-common-player-id pc)])
-             (for/first ([pi (in-list (sc2-game-info-player-info game-info))]
-                         #:when (and (hash? pi)
-                                     (not (= (hash-ref pi 'player-id 0) my-pid))))
-               (or (let ([ra (hash-ref pi 'race-actual #f)])
-                     (and (memq ra '(Zerg Terran Protoss)) ra))
-                   (hash-ref pi 'race-requested #f))))))
-    (define sat-enemy-race
-      (or seen-enemy-race-now
-          (and (memq gi-enemy-race '(Zerg Terran Protoss)) gi-enemy-race)
-          (unbox SC2-SAT-OBSERVED-ENEMY-RACE)
-          gi-enemy-race))
-    (define enemy-cloak-threat?
-      (ormap (lambda (e)
-               (define et (sc2-unit-unit-type e))
-               (and (not (memv et '(87 137 138)))
-                    (or (memv (sc2-unit-cloak e) '(1 2))
-                        (sc2-unit-is-burrowed e)
-                        (memv et '(50 55 69 76 498 500 502 503 504)))))
-             enemy-units))
-    (when enemy-cloak-threat?
-      (set-box! SC2-SAT-SEEN-ENEMY-CLOAK? #t))
-    (define has-raven-now?
-      (ormap (lambda (u) (= (sc2-unit-unit-type u) 56)) self-units))
-    (define has-ready-turret-now?
-      (ormap (lambda (u)
-               (and (= (sc2-unit-unit-type u) 23)
-                    (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
-             self-units))
     (define ready-ocs
       (filter (lambda (th) (= (sc2-unit-unit-type th) 132)) ready-townhalls))
-    (define friendly-combat-cnt-now
-      (count (lambda (u)
-               (and (not (sc2-unit-is-structure? u))
-                    (not (sc2-unit-is-worker? u))
-                    (not (memv (sc2-unit-unit-type u)
-                               '(12 13 14 15 16 17 82 103 106 129 151 268 1911 1912)))))
-             self-units))
-    ;; L59-C (`#1565`/`#1566` Fix #3): Distinguish isolated Arena skirmishes (`sc2-ab-t10`:
-    ;; `<= 8` SCVs and `0` SupplyDepot/Refinery/Barracks/Factory/Starport macro structures)
-    ;; from live full ladder matches so unprovoked live TvT/TvZ NEVER lock MULEs to `101e`!
-    (define isolated-arena-skirmish?
-      (and (<= (length workers) 8)
-           (not (ormap (lambda (u)
-                         (memv (sc2-unit-unit-type u) '(19 20 21 27 28 47)))
-                       self-units))))
-    (define proactive-scan-oc-limit
-      (cond
-        ;; L60 (`#1580` Anti-DT `#74 TvP who`): Once enemy DarkShrine (69), DarkTemplar (76),
-        ;; or WarpPrism (81/136) is scouted in TvP, immediately reserve Scan on up to 2 ready OCs
-        ;; so a Warp Prism DT drop cannot exhaust a single Scan!
-        [(and (memq sat-enemy-race '(Protoss Random))
-              (or seen-protoss-dt-prism-now?
-                  (unbox SC2-SAT-SEEN-PROTOSS-DT-PRISM?)))
-         (if (>= (length ready-ocs) 2) 2 1)]
-        ;; L59-C (`#1565`/`#1566` Fix #3): In unprovoked TvP >= 4:00 (5376f), hold Scan on 1 OC ONLY
-        ;; until >= 3 ready OCs (then 2 OCs) so 2-base Terran OC #2 MULEs freely at 50e!
-        [(and (>= cur-loop 5376)
-              (memq sat-enemy-race '(Protoss Random)))
-         (if (>= (length ready-ocs) 3) 2 1)]
-        ;; Reserve top-1 OC Scan bank strictly when enemy cloak/burrow was explicitly sighted
-        ;; OR in an isolated Arena skirmish (`sc2-ab-t10`: <= 8 workers, 0 macro infra, >= 6 combat).
-        [(or (unbox SC2-SAT-SEEN-ENEMY-CLOAK?)
-             (and isolated-arena-skirmish?
-                  (>= friendly-combat-cnt-now 6)))
-         1]
-        [(and (eq? sat-enemy-race 'Terran)
-              (or seen-terran-cloak-tech-now?
-                  (unbox SC2-SAT-SEEN-TERRAN-CLOAK-TECH?)))
-         1]
-        [else 0]))
-    (define proactive-scan-oc-tags
-      (if (and (> proactive-scan-oc-limit 0)
-               (not has-raven-now?)
-               (not has-ready-turret-now?)
-               (pair? ready-ocs))
-          (let* ([sorted-ocs
-                  (sort ready-ocs
-                        (lambda (a b)
-                          (let ([ea (sc2-unit-energy a)]
-                                [eb (sc2-unit-energy b)])
-                            (if (= ea eb)
-                                (< (sc2-unit-tag a) (sc2-unit-tag b))
-                                (> ea eb)))))]
-                 [take-n (min proactive-scan-oc-limit (length sorted-ocs))])
-            (map sc2-unit-tag (take sorted-ocs take-n)))
-          '()))
-    ;; L58-P1: When an undetected cloaked (`cloak=1`) or burrowed combat enemy is within `32t`
-    ;; of friendly units, hard-block `L23-P0-1` MULE (`171`) even at `100e` so an Orbital Command
-    ;; NEVER steals energy from an immediate `Scanner Sweep (399)`!
-    (define active-uncovered-cloak-near-us?
-      (ormap (lambda (e)
-               (and (or (= (sc2-unit-cloak e) 1)
-                        (sc2-unit-is-burrowed e))
-                    (not (memv (sc2-unit-unit-type e) '(137 138 732)))
-                    (let ([ep (sc2-unit-pos e)])
-                      (ormap (lambda (u)
-                               (let ([up (sc2-unit-pos u)])
-                                 (<= (pt-dist (sc2-point3d-x ep) (sc2-point3d-y ep)
-                                              (sc2-point3d-x up) (sc2-point3d-y up))
-                                     32.0)))
-                             self-units))))
-             enemy-units))
-    ;; L59-P3 (`#1552`/`#1553` Fix #1B): Gate the `150.0` uphill-scan MULE energy floor strictly to:
-    ;;   1) Isolated Arena (`0` owned townhalls or `sc2-rmp-h06` 0-worker Tank+OC clash), OR
-    ;;   2) Explicit `83:MustTargetVisibleUnit` blind uphill attack error within the last `44f`, OR
-    ;;   3) Explicit `scanner-sweep (399)` requested in `actions` on this step, OR
-    ;;   4) A friendly Sieged Tank (`32`) with an uphill enemy (`dz >= 1.5`) within `<= 15.0t`
-    ;;      and `0` friendly air spotters within `<= 16.0t` of that Tank!
-    ;; NEVER raise `mule-energy-floor` to `150.0` for routine `3:00-6:00` pre-Starport Marines/Reapers!
-    (define sat-air-spotters
-      (filter (lambda (u) (memv (sc2-unit-unit-type u) '(35 54 55 56 57 689 692))) self-units))
-    (define sat-sieged-tanks
-      (filter (lambda (u) (= (sc2-unit-unit-type u) 32)) self-units))
-    (define sat-blind-uphill-err-now?
-      (let ([errs (sc2-observation-action-errors obs)])
-        (and (list? errs)
-             (ormap (lambda (ae)
-                      (and (hash? ae)
-                           (= (hash-ref ae 'ability-id 0) 23)
-                           (= (hash-ref ae 'result 0) 83))) ;; MustTargetVisibleUnit
-                    errs))))
-    (when sat-blind-uphill-err-now?
-      (set-box! SC2-LAST-BLIND-UPHILL-ERR-LOOP cur-loop))
-    (define sat-recent-blind-uphill-err?
-      (and (>= (unbox SC2-LAST-BLIND-UPHILL-ERR-LOOP) 0)
-           (<= (- cur-loop (unbox SC2-LAST-BLIND-UPHILL-ERR-LOOP)) 44)))
-    (define sat-sieged-tank-uphill-needs-scan?
-      (and (pair? sat-sieged-tanks)
-           (pair? enemy-units)
-           (ormap (lambda (tk)
-                    (define tp (sc2-unit-pos tk))
-                    (define tx (sc2-point3d-x tp))
-                    (define ty (sc2-point3d-y tp))
-                    (define tz (sc2-point3d-z tp))
-                    (and (not (ormap (lambda (sp)
-                                       (define sp-pos (sc2-unit-pos sp))
-                                       (<= (pt-dist tx ty (sc2-point3d-x sp-pos) (sc2-point3d-y sp-pos)) 16.0))
-                                     sat-air-spotters))
-                         (ormap (lambda (e)
-                                  (define ep (sc2-unit-pos e))
-                                  (and (not (sc2-unit-is-flying e))
-                                       (>= (- (sc2-point3d-z ep) tz) 1.5)
-                                       (<= (pt-dist tx ty (sc2-point3d-x ep) (sc2-point3d-y ep)) 15.0)))
-                                enemy-units)))
-                  sat-sieged-tanks)))
-    (define sat-isolated-arena-scan-clash?
-      (or (null? ready-townhalls)
-          (and (= (length ready-townhalls) 1)
-               (not (ormap sc2-unit-is-worker? self-units))
-               (pair? sat-sieged-tanks)
-               (null? sat-air-spotters))))
-    (define sat-scan-reserved-now?
-      (or (= cur-loop (unbox SC2-LAST-SCAN-REQUEST-LOOP))
-          sat-recent-blind-uphill-err?
-          sat-sieged-tank-uphill-needs-scan?
-          sat-isolated-arena-scan-clash?))
-    (unless active-uncovered-cloak-near-us?
-      (for ([oc (in-list ready-ocs)])
-        (define oc-tag (sc2-unit-tag oc))
-        (define mule-energy-floor
-          (cond
-            [sat-scan-reserved-now? 150.0]
-            [(and isolated-arena-skirmish?
-                  (>= friendly-combat-cnt-now 6)
-                  (pair? proactive-scan-oc-tags)
-                  (memv oc-tag proactive-scan-oc-tags))
-             101.0]
-            [(or enemy-cloak-threat?
-                 (and (pair? proactive-scan-oc-tags)
-                      (memv oc-tag proactive-scan-oc-tags)))
-             100.0]
-            [else 50.0]))
-        (when (and (>= (sc2-unit-energy oc) mule-energy-floor)
-                   (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule oc-tag) -1000)) 24))
-          (define safe-min-tag (pick-safe-mule-mineral-patch oc self-units mineral-fields enemy-units))
-          (when (and (exact-integer? safe-min-tag) (> safe-min-tag 0))
-            (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule oc-tag) cur-loop)
-            (set! cmds
-                  (cons (mark-macro-econ-cmd!
-                         (sc2-raw-unit-command 171 #f safe-min-tag (list oc-tag) #f))
-                        cmds)))))))
-  ;; 6b. Early Nexus ChronoBoost (`3755`): `0:00-5:00` (`< 6720f`) & `< 50` Probes — keep active
-  ;;     Probe-training Nexuses boosted at Tier P1 (`+4-5` Probes by `4:00`), yielding only when a
-  ;;     low-energy friendly spellcaster (`< 75e`, HT/Sentry/Oracle/Mothership) is within `15t`
-  ;;     during active enemy contact so `5.0.14` `Nexus Energy Recharge (4126)` fires first!
+    (define mule-policy
+      (evaluate-terran-mule-policy
+       #:latch SC2-MACRO-POLICY-LATCH
+       #:loop cur-loop
+       #:ready-ocs (sc2-units->macro-oc-infos ready-ocs)
+       #:self-units (sc2-units->macro-self-infos self-units)
+       #:enemy-units (sc2-units->macro-enemy-infos enemy-units)
+       #:townhalls (sc2-units->macro-th-infos ready-townhalls)
+       #:worker-count (count sc2-unit-is-worker? self-units)
+       #:known-enemy-race (sc2-game-info->enemy-race game-info obs)
+       #:step-has-scan-request? (= cur-loop (unbox SC2-LAST-SCAN-REQUEST-LOOP))
+       #:blind-uphill-err-now? (sc2-obs-has-blind-uphill-err? obs)))
+    (for ([oc (in-list ready-ocs)])
+      (define oc-tag (sc2-unit-tag oc))
+      (when (and (terran-oc-mule-allowed? mule-policy oc-tag (sc2-unit-energy oc))
+                 (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule oc-tag) -1000)) 24))
+        (define safe-min-tag (pick-safe-mule-mineral-patch oc self-units mineral-fields enemy-units))
+        (when (and (exact-integer? safe-min-tag) (> safe-min-tag 0))
+          (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule oc-tag) cur-loop)
+          (set! cmds
+                (cons (mark-macro-econ-cmd!
+                       (sc2-raw-unit-command 171 #f safe-min-tag (list oc-tag) #f))
+                      cmds))))))
+  ;; 6b. Early Nexus ChronoBoost (`3755`): delegates 0:00-5:00 Probe-training selection &
+  ;;     Energy Recharge (`4126`) yield arbitration to `select-early-probe-chrono-pairs`.
   (when (and (< cur-loop 6720)
              (< (length workers) 50))
     (define ready-nexuses
       (filter (lambda (th) (= (sc2-unit-unit-type th) 59)) ready-townhalls))
-    (define (low-energy-protoss-caster-near-nexus? nx)
-      (and (sc2-ability-live-available? 4126)
-           (pair? enemy-units)
-           (let ([np (sc2-unit-pos nx)])
-             (ormap (lambda (u)
-                      (and (memv (sc2-unit-unit-type u) '(10 75 77 495))
-                           (not (sc2-unit-is-hallucination u))
-                           (> (sc2-unit-energy-max u) 0.0)
-                           (< (sc2-unit-energy u) 75.0)
-                           (let ([up (sc2-unit-pos u)])
-                             (<= (pt-dist (sc2-point3d-x np) (sc2-point3d-y np)
-                                          (sc2-point3d-x up) (sc2-point3d-y up))
-                                 15.0))))
-                    self-units))))
-    (define probe-training-unboosted-nexuses
-      (filter (lambda (nx)
-                (define ntag (sc2-unit-tag nx))
-                (and (ormap (lambda (o) (= (sc2-unit-order-ability-id o) 1006)) (sc2-unit-orders nx))
-                     (not (memv 281 (sc2-unit-buff-ids nx)))
-                     (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono-tgt ntag) -1000)) 16)))
-              ready-nexuses))
-    (when (pair? probe-training-unboosted-nexuses)
-      (define claimed-chrono-tgts (mutable-seteqv))
-      (for ([caster-nx (in-list ready-nexuses)]
-            #:when (and (>= (sc2-unit-energy caster-nx) 50.0)
-                        (not (low-energy-protoss-caster-near-nexus? caster-nx))
-                        (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono (sc2-unit-tag caster-nx)) -1000)) 16)))
-        (define ctag (sc2-unit-tag caster-nx))
-        (define tgt-nx
-          (or (findf (lambda (nx)
-                       (and (= (sc2-unit-tag nx) ctag)
-                            (not (set-member? claimed-chrono-tgts ctag))))
-                     probe-training-unboosted-nexuses)
-              (findf (lambda (nx)
-                       (not (set-member? claimed-chrono-tgts (sc2-unit-tag nx))))
-                     probe-training-unboosted-nexuses)))
-        (when tgt-nx
-          (define ttag (sc2-unit-tag tgt-nx))
-          (set-add! claimed-chrono-tgts ttag)
-          (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono ctag) cur-loop)
-          (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono-tgt ttag) cur-loop)
-          (set! cmds
-                (cons (mark-macro-econ-cmd!
-                       (sc2-raw-unit-command 3755 #f ttag (list ctag) #f))
-                      cmds))))))
+    (for ([pair (in-list
+                 (select-early-probe-chrono-pairs
+                  #:loop cur-loop
+                  #:worker-count (length workers)
+                  #:ready-nexuses (sc2-units->macro-nexus-infos ready-nexuses)
+                  #:ally-casters (sc2-units->macro-caster-infos self-units)
+                  #:enemy-units-present? (pair? enemy-units)
+                  #:recharge-available? (sc2-ability-live-available? 4126)
+                  #:caster-ready? (lambda (ctag)
+                                    (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono ctag) -1000)) 16))
+                  #:target-ready? (lambda (ttag)
+                                    (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono-tgt ttag) -1000)) 16))))])
+      (define ctag (car pair))
+      (define ttag (cdr pair))
+      (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono ctag) cur-loop)
+      (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'chrono-tgt ttag) cur-loop)
+      (set! cmds
+            (cons (mark-macro-econ-cmd!
+                   (sc2-raw-unit-command 3755 #f ttag (list ctag) #f))
+                  cmds))))
 
   (reverse cmds))
 
@@ -12140,9 +11960,7 @@
       (set-box! SC2-BUILD-TAG-EMITTED? #f)
       (set-box! SC2-ACTIVE-RECALL-ZONES '())
       (set-box! SC2-NEXUS-RECALL-READY-LOOP -10000)
-      (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #f)
-      (set-box! SC2-SAT-SEEN-PROTOSS-DT-PRISM? #f)
-      (set-box! SC2-SAT-SEEN-ENEMY-CLOAK? #f))
+      (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH))
     (set-box! SC2-WIRE-LAST-LOOP-BOX cur-loop)
     (let ([rzs (unbox SC2-ACTIVE-RECALL-ZONES)])
       (when (pair? rzs)
@@ -12159,7 +11977,6 @@
       (hash-clear! SC2-WARPGATE-HARD-CD-UNTIL)
       (set-box! SC2-WARPGATE-PREV-LIVE-READY 0)
       (set-box! SC2-LAST-SCAN-REQUEST-LOOP -9999)
-      (set-box! SC2-LAST-BLIND-UPHILL-ERR-LOOP -9999)
       (hash-clear! SC2-DEPOT-TOGGLE-COOLDOWN)
       (hash-clear! SC2-MODE-TOGGLE-COOLDOWN)
       (hash-clear! SC2-MINE-CLEAR-SINCE-LOOP)
@@ -12198,9 +12015,7 @@
       (set-box! SC2-WIRE-OFFENSIVE-PUSH-STATE #f)
       (set-box! SC2-ACTIVE-RECALL-ZONES '())
       (set-box! SC2-NEXUS-RECALL-READY-LOOP -10000)
-      (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #f)
-      (set-box! SC2-SAT-SEEN-PROTOSS-DT-PRISM? #f)
-      (set-box! SC2-SAT-SEEN-ENEMY-CLOAK? #f)
+      (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
       (set-box! SC2-CACHED-MAP-BASE-CLUSTERS '())
       (set-box! SC2-TERRITORY-FIELD-CACHE #f)
       (set-box! SC2-CORNER-SCAN-LAST-LOOP -9999))
@@ -12211,7 +12026,7 @@
       (hash-clear! SC2-WARPGATE-HARD-CD-UNTIL)
       (set-box! SC2-WARPGATE-PREV-LIVE-READY 0)
       (set-box! SC2-LAST-SCAN-REQUEST-LOOP -9999)
-      (set-box! SC2-LAST-BLIND-UPHILL-ERR-LOOP -9999))
+      (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH))
     (set-box! SC2-WARPGATE-LAST-LOOP cur-loop)
     (define raw-dead (sc2-observation-dead-unit-tags obs))
     (when (list? raw-dead)
@@ -18483,191 +18298,43 @@
                         (set-add! used-tumors cid)))
                     (emit! (sc2-raw-unit-command ab-id verified-tumor-pt 0 caster-ids #f)))))]
 
-             ;; Case C: Orbital Command Calldown MULE (171) -> resolve ONLY to safe friendly-base mineral field tag (P1 macro-econ!)
-             ;; L58-P2/P3: Hard-block MULE when an uncovered cloaked/burrowed threat is within `32t` of
-             ;; friendly units, when the OC already scanned/MULEd within `24` loops or this step, OR on
-             ;; the top-1 OC at `<= 100.0e` when `>= 8` combat units exist with `0` Ravens/Turrets!
+             ;; Case C: Phase 2 (`#1662`): Orbital Command Calldown MULE (171) -> thin wire adapter
+             ;; delegating ALL Scan-reserve / cloak / DT-prism / uphill policy to the exact same
+             ;; `evaluate-terran-mule-policy` call as Sec 6a, retaining only wire-level dedup & patch resolution.
              [(= ab-id 171)
-              (define near-uncovered-stealth?
-                (and uncovered-stealth-present?
-                     (ormap (lambda (e)
-                              (define ep (sc2-unit-pos e))
-                              (ormap (lambda (u)
-                                       (define up (sc2-unit-pos u))
-                                       (<= (pt-dist (sc2-point3d-x ep) (sc2-point3d-y ep)
-                                                    (sc2-point3d-x up) (sc2-point3d-y up))
-                                           32.0))
-                                     self-units))
-                            uncovered-stealth-enemies)))
-              (define has-mobile-or-turret-det?
-                (ormap (lambda (u)
-                         (or (= (sc2-unit-unit-type u) 56)
-                             (and (= (sc2-unit-unit-type u) 23)
-                                  (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS))))
-                       self-units))
-              (define combat-cnt-case-c
-                (count (lambda (u)
-                         (and (not (sc2-unit-is-structure? u))
-                              (not (sc2-unit-is-worker? u))
-                              (not (memv (sc2-unit-unit-type u)
-                                         '(12 13 14 15 16 17 82 103 106 129 151 268 1911 1912)))))
-                       self-units))
-              (define case-c-seen-enemy-race (sc2-infer-race-from-units enemy-units))
-              (when case-c-seen-enemy-race
-                (set-box! SC2-SAT-OBSERVED-ENEMY-RACE case-c-seen-enemy-race))
-              (define case-c-seen-terran-cloak-tech?
-                (ormap (lambda (e) (memv (sc2-unit-unit-type e) '(41 26 50 55))) enemy-units))
-              (when case-c-seen-terran-cloak-tech?
-                (set-box! SC2-SAT-SEEN-TERRAN-CLOAK-TECH? #t))
-              (define case-c-seen-protoss-dt-prism?
-                (ormap (lambda (e) (memv (sc2-unit-unit-type e) '(69 76 81 136))) enemy-units))
-              (when case-c-seen-protoss-dt-prism?
-                (set-box! SC2-SAT-SEEN-PROTOSS-DT-PRISM? #t))
-              (define case-c-gi-enemy-race
-                (and (sc2-game-info? eff-game-info)
-                     (sc2-observation? obs)
-                     (sc2-player-common? (sc2-observation-player-common obs))
-                     (let ([my-pid (sc2-player-common-player-id (sc2-observation-player-common obs))])
-                       (for/first ([pi (in-list (sc2-game-info-player-info eff-game-info))]
-                                   #:when (and (hash? pi)
-                                               (not (= (hash-ref pi 'player-id 0) my-pid))))
-                         (or (let ([ra (hash-ref pi 'race-actual #f)])
-                               (and (memq ra '(Zerg Terran Protoss)) ra))
-                             (hash-ref pi 'race-requested #f))))))
-              (define case-c-enemy-race
-                (or case-c-seen-enemy-race
-                    (and (memq case-c-gi-enemy-race '(Zerg Terran Protoss)) case-c-gi-enemy-race)
-                    (unbox SC2-SAT-OBSERVED-ENEMY-RACE)
-                    case-c-gi-enemy-race))
-              (when (or uncovered-stealth-present?
-                        (ormap (lambda (e)
-                                 (define et (sc2-unit-unit-type e))
-                                 (and (not (memv et '(87 137 138)))
-                                      (or (memv (sc2-unit-cloak e) '(1 2))
-                                          (sc2-unit-is-burrowed e)
-                                          (memv et '(50 55 69 76 498 500 502 503 504)))))
-                               enemy-units))
-                (set-box! SC2-SAT-SEEN-ENEMY-CLOAK? #t))
-              (define case-c-isolated-arena-skirmish?
-                (and (<= (count sc2-unit-is-worker? self-units) 8)
-                     (not (ormap (lambda (u)
-                                   (memv (sc2-unit-unit-type u) '(19 20 21 27 28 47)))
-                                 self-units))))
               (define ready-ocs-c
                 (filter (lambda (u)
                           (and (= (sc2-unit-unit-type u) 132)
                                (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
                                (not (sc2-unit-is-flying u))))
                         self-units))
-              (define case-c-proactive-scan-oc-limit
-                (cond
-                  [(and (memq case-c-enemy-race '(Protoss Random))
-                        (or case-c-seen-protoss-dt-prism?
-                            (unbox SC2-SAT-SEEN-PROTOSS-DT-PRISM?)))
-                   (if (>= (length ready-ocs-c) 2) 2 1)]
-                  [(and (>= cur-loop 5376)
-                        (memq case-c-enemy-race '(Protoss Random)))
-                   (if (>= (length ready-ocs-c) 3) 2 1)]
-                  [(or (unbox SC2-SAT-SEEN-ENEMY-CLOAK?)
-                       (and case-c-isolated-arena-skirmish?
-                            (>= combat-cnt-case-c 6)))
-                   1]
-                  [(and (eq? case-c-enemy-race 'Terran)
-                        (or case-c-seen-terran-cloak-tech?
-                            (unbox SC2-SAT-SEEN-TERRAN-CLOAK-TECH?)))
-                   1]
-                  [else 0]))
-              (define reserved-scan-oc-tags
-                (if (and (> case-c-proactive-scan-oc-limit 0)
-                         (not has-mobile-or-turret-det?)
-                         (pair? ready-ocs-c))
-                    (let* ([sorted-ocs
-                            (sort ready-ocs-c
-                                  (lambda (a b)
-                                    (let ([ea (sc2-unit-energy a)]
-                                          [eb (sc2-unit-energy b)])
-                                      (if (= ea eb)
-                                          (< (sc2-unit-tag a) (sc2-unit-tag b))
-                                          (> ea eb)))))]
-                           [take-n (min case-c-proactive-scan-oc-limit (length sorted-ocs))])
-                      (map sc2-unit-tag (take sorted-ocs take-n)))
-                    '()))
-              (define case-c-scan-floor
-                (if (and case-c-isolated-arena-skirmish? (>= combat-cnt-case-c 6))
-                    101.0
-                    100.0))
-              ;; L59-P3 (`#1552`/`#1553` Fix #1B): Gate the `150.0` uphill-scan MULE energy floor
-              ;; strictly to isolated Arena, explicit `83:MustTargetVisibleUnit` in the last `44f`,
-              ;; explicit `399` scan request on this step, OR a friendly Sieged Tank (`32`) facing an
-              ;; uphill enemy (`dz >= 1.5`) within `<= 15.0t` with `0` air spotters within `<= 16.0t`!
-              (define case-c-air-spotters
-                (filter (lambda (u) (memv (sc2-unit-unit-type u) '(35 54 55 56 57 689 692))) self-units))
-              (define case-c-sieged-tanks
-                (filter (lambda (u) (= (sc2-unit-unit-type u) 32)) self-units))
-              (define case-c-blind-uphill-err-now?
-                (and (sc2-observation? obs)
-                     (let ([errs (sc2-observation-action-errors obs)])
-                       (and (list? errs)
-                            (ormap (lambda (ae)
-                                     (and (hash? ae)
-                                          (= (hash-ref ae 'ability-id 0) 23)
-                                          (= (hash-ref ae 'result 0) 83)))
-                                   errs)))))
-              (when case-c-blind-uphill-err-now?
-                (set-box! SC2-LAST-BLIND-UPHILL-ERR-LOOP cur-loop))
-              (define case-c-recent-blind-uphill-err?
-                (and (>= (unbox SC2-LAST-BLIND-UPHILL-ERR-LOOP) 0)
-                     (<= (- cur-loop (unbox SC2-LAST-BLIND-UPHILL-ERR-LOOP)) 44)))
-              (define case-c-sieged-tank-uphill-needs-scan?
-                (and (pair? case-c-sieged-tanks)
-                     (pair? enemy-units)
-                     (ormap (lambda (tk)
-                              (define tp (sc2-unit-pos tk))
-                              (define tx (sc2-point3d-x tp))
-                              (define ty (sc2-point3d-y tp))
-                              (define tz (sc2-point3d-z tp))
-                              (and (not (ormap (lambda (sp)
-                                                 (define sp-pos (sc2-unit-pos sp))
-                                                 (<= (pt-dist tx ty (sc2-point3d-x sp-pos) (sc2-point3d-y sp-pos)) 16.0))
-                                               case-c-air-spotters))
-                                   (ormap (lambda (e)
-                                            (define ep (sc2-unit-pos e))
-                                            (and (not (sc2-unit-is-flying e))
-                                                 (>= (- (sc2-point3d-z ep) tz) 1.5)
-                                                 (<= (pt-dist tx ty (sc2-point3d-x ep) (sc2-point3d-y ep)) 15.0)))
-                                          enemy-units)))
-                            case-c-sieged-tanks)))
-              (define case-c-isolated-arena-scan-clash?
-                (or (null? townhalls)
-                    (and (= (length townhalls) 1)
-                         (not (ormap sc2-unit-is-worker? self-units))
-                         (pair? case-c-sieged-tanks)
-                         (null? case-c-air-spotters))))
-              (define case-c-uphill-scan-reserve?
-                (or step-has-any-scan-request?
-                    case-c-recent-blind-uphill-err?
-                    case-c-sieged-tank-uphill-needs-scan?
-                    case-c-isolated-arena-scan-clash?))
+              (define case-c-policy
+                (evaluate-terran-mule-policy
+                 #:latch SC2-MACRO-POLICY-LATCH
+                 #:loop cur-loop
+                 #:ready-ocs (sc2-units->macro-oc-infos ready-ocs-c)
+                 #:self-units (sc2-units->macro-self-infos self-units)
+                 #:enemy-units (sc2-units->macro-enemy-infos enemy-units)
+                 #:townhalls (sc2-units->macro-th-infos townhalls)
+                 #:worker-count (count sc2-unit-is-worker? self-units)
+                 #:known-enemy-race (sc2-game-info->enemy-race eff-game-info obs)
+                 #:step-has-scan-request? step-has-any-scan-request?
+                 #:blind-uphill-err-now? (sc2-obs-has-blind-uphill-err? obs)))
               (define fresh-mule-ocs
-                (if near-uncovered-stealth?
+                (if (terran-mule-policy-result-hard-blocked? case-c-policy)
                     '()
                     (filter (lambda (cid)
                               (define ocu (hash-ref self-unit-by-tag cid #f))
                               (and (not (set-member? emitted-scan-oc-tags cid))
                                    (not (set-member? step-scan-requested-oc-tags cid))
-                                   (not (and case-c-uphill-scan-reserve?
-                                             ocu
-                                             (< (sc2-unit-energy ocu) 150.0)))
                                    (not (ormap (lambda (c)
                                                  (and (sc2-raw-unit-command? c)
                                                       (= (sc2-raw-unit-command-ability-id c) 171)
                                                       (memv cid (sc2-raw-unit-command-unit-tags c))))
                                                raw-cmds))
                                    (>= (- cur-loop (hash-ref SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule cid) -1000)) 24)
-                                   (not (and (pair? reserved-scan-oc-tags)
-                                             (memv cid reserved-scan-oc-tags)
-                                             ocu
-                                             (< (sc2-unit-energy ocu) case-c-scan-floor)))))
+                                   (or (not ocu)
+                                       (terran-oc-mule-allowed? case-c-policy cid (sc2-unit-energy ocu)))))
                             caster-ids)))
               (when (pair? fresh-mule-ocs)
                 (cond

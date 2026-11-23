@@ -1504,6 +1504,7 @@ DEPLOY_LABELS: Dict[str, str] = {
     "tppnrnpo_22f810ed": "Loop 57",
     "wywkqtpl_668f47f8": "Loop 59C",
     "sqvvtrlm_acd7ad85": "Loop 60B",
+    "pnzpwmuy_4b9ea037": "Loop 61C",
 }
 
 BOT_META: Dict[str, Dict[str, str]] = {
@@ -3739,6 +3740,7 @@ _CALM_LOOP_TITLES: Dict[int, str] = {
     58: "Ability mastery & non-combat drills (held)",
     59: "Live release #11 (Pro-matched EPM/SPM & 9–3 H2H)",
     60: "Live release #12 (Live engine hydration, -75% P1 drops, PvP 4–4)",
+    61: "Live release #13 (All-time benchmark highs, parallel upgrades & 3-race rallies)",
 }
 
 
@@ -4198,8 +4200,8 @@ def _render_standings_tables(
             "AI Arena ratings start at 1600. The v2 accounts play Division 5 (~1600+ Elo) opponents and recorded zero crashes "
             "(the fetched standings above reflect games played prior to the latest rollout), while the older v1 "
             "accounts play Division 9 (~1350 Elo), where Release #9 went 19–9–3 (61.3% wins, 71.0% win-or-tie) across ranked games. "
-            'All eight bots now run <strong>Release #12</strong> (Build 60B, Competition #38, '
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45120681255" target="_blank" rel="noopener noreferrer">deploy run 45120681255</a>, '
+            'All eight bots now run <strong>Release #13</strong> (Build 61C, Competition #38, '
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45153617708" target="_blank" rel="noopener noreferrer">deploy run 45153617708</a>, '
             "8/8 verified active). Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
         )
@@ -4597,8 +4599,8 @@ def build_history_page(
     live_caption = (
         f"The first deployed build went 0–10 on AI Arena. Recent v1 builds win roughly 55–61% of their games: "
         f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
-        f"and Release #9 (Build 51) climbed to 19–9–3 (61.3% wins) before Releases #10 (Build 57), #11 (Build 59C), and #12 "
-        f'(Build 60B, <a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45120681255" target="_blank" rel="noopener noreferrer">deploy run 45120681255</a>) '
+        f"and Release #9 (Build 51) climbed to 19–9–3 (61.3% wins) before Releases #10 through #13 "
+        f'(Build 61C, <a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45153617708" target="_blank" rel="noopener noreferrer">deploy run 45153617708</a>) '
         f"rolled out to all 8 ladder bots."
     )
 
@@ -4661,6 +4663,7 @@ def build_history_page(
         "iter57_ship10_full": 10,
         "iter59c_ship11_full": 11,
         "iter60b_ship12_full": 12,
+        "iter61c_ship13_full": 13,
     }
 
     def _format_run_label(run_id: str, status_raw: str = "") -> str:
@@ -4812,7 +4815,7 @@ def build_history_page(
                             f'<a href="https://github.com/{repo_slug}/releases/tag/{tag}" '
                             f'target="_blank" rel="noopener noreferrer">{tag}</a>'
                         )
-                    elif lnum_it in (59, 60):
+                    elif lnum_it in (59, 60, 61):
                         rel_cell = '<a href="./index.html#tactics-section">278 arena clips</a>'
                 lrows.append(
                     f'<tr><td class="nw">{it_id}</td>'

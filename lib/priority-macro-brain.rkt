@@ -17,6 +17,7 @@
  (struct-out sc2-tech-node)
  SC2-TECH-GRAPH
  lookup-sc2-tech-node
+ sc2-upgrade-researcher-slot
  sc2-tech-prereqs-ready?
  sc2-tech-already-satisfied?
  resolve-missing-prereq-chain
@@ -314,6 +315,8 @@
    (sc2-tech-node 'terran-vehicle-and-ship-plating-3 'Terran 'research 'tech-upgrade 250 250 0 0 3520 'armory     '(armory)                           #t)
    (sc2-tech-node 'infernal-pre-igniter 'Terran 'research 'tech-upgrade      100 100 0  0 1760 'factory-techlab   '(factory-techlab)                  #t)
    (sc2-tech-node 'drilling-claws      'Terran 'research 'tech-upgrade        75  75 0  0 1760 'factory-techlab   '(factory-techlab)                  #t)
+   (sc2-tech-node 'smart-servos        'Terran 'research 'tech-upgrade       100 100 0  0 1760 'factory-techlab   '(factory-techlab armory)           #t)
+   (sc2-tech-node 'hi-sec-auto-tracking 'Terran 'research 'tech-upgrade      100 100 0  0 1280 'engineering-bay   '(engineering-bay)                  #t)
    (sc2-tech-node 'banshee-cloak       'Terran 'research 'tech-upgrade       100 100 0  0 1760 'starport-techlab  '(starport-techlab)                 #t)
    (sc2-tech-node 'interference-matrix 'Terran 'research 'tech-upgrade        50  50 0  0 1280 'starport-techlab  '(starport-techlab)                 #t)
    (sc2-tech-node 'advanced-ballistics 'Terran 'research 'tech-upgrade       150 150 0  0 1280 'fusion-core       '(fusion-core)                      #t)
@@ -378,7 +381,9 @@
    (sc2-tech-node 'extended-thermal-lance   'Protoss 'research 'tech-upgrade  150 150 0  0 2240 'robotics-bay      '(robotics-bay)                     #t)
    (sc2-tech-node 'gravitic-booster         'Protoss 'research 'tech-upgrade  100 100 0  0 1280 'robotics-bay      '(robotics-bay)                     #t)
    (sc2-tech-node 'psi-storm                'Protoss 'research 'tech-upgrade  200 200 0  0 1760 'templar-archive   '(templar-archive)                  #t)
-   (sc2-tech-node 'shadow-strike            'Protoss 'research 'tech-upgrade  100 100 0  0 2240 'dark-shrine       '(dark-shrine)                      #t)))
+   (sc2-tech-node 'shadow-strike            'Protoss 'research 'tech-upgrade  100 100 0  0 2240 'dark-shrine       '(dark-shrine)                      #t)
+   (sc2-tech-node 'flux-vanes               'Protoss 'research 'tech-upgrade  100 100 0  0 1280 'fleet-beacon      '(fleet-beacon)                     #t)
+   (sc2-tech-node 'anion-pulse-crystals     'Protoss 'research 'tech-upgrade  150 150 0  0 1440 'fleet-beacon      '(fleet-beacon)                     #t)))
 
 (define SC2-TECH-GRAPH
   (for/hasheq ([n (in-list SC2-TECH-NODES-LIST)])
@@ -470,6 +475,13 @@
    'terran-vehicle-and-ship-armors-1 'terran-vehicle-and-ship-plating-1
    'terran-vehicle-and-ship-armors-2 'terran-vehicle-and-ship-plating-2
    'terran-vehicle-and-ship-armors-3 'terran-vehicle-and-ship-plating-3
+   'vehicle-weapons-1         'terran-vehicle-weapons-1
+   'vehicle-weapons-2         'terran-vehicle-weapons-2
+   'vehicle-weapons-3         'terran-vehicle-weapons-3
+   'psionic-storm             'psi-storm
+   'shadow-stride             'shadow-strike
+   'overlord-speed            'pneumatized-carapace
+   'lurker-range              'seismic-spines
    'hellion-tank              'hellbat
    'creeping-queen            'queen))
 
@@ -503,6 +515,19 @@
                (hash-set! *tech-node-cache* sym v)
                v)
              hit))))
+
+;; Single-source upgrade researcher slot authority (`Phase 2` P2.3).
+;; Maps legacy `'warp-gate` / `'warpgate` upgrade aliases ONLY in research-slot lookup
+;; (never in `*brain-sym-norm-ht*`, where `'warp-gate` remains a building symbol).
+(define (sc2-upgrade-researcher-slot upg-sym)
+  (define eff-sym
+    (if (memq upg-sym '(warp-gate warpgate))
+        'warp-gate-research
+        upg-sym))
+  (define node (lookup-sc2-tech-node eff-sym))
+  (and node
+       (eq? (sc2-tech-node-kind node) 'research)
+       (sc2-tech-node-producer-slot node)))
 
 (define current-ready-bldg-cache (make-parameter #f))
 (define current-total-bldg-cache (make-parameter #f))
@@ -5485,6 +5510,12 @@
                     (not protoss-pvz-12pool-block-nexus2?)
                     (or (>= minerals 250)
                         (and pvp-early-nat-nexus-due? (>= minerals 50))
+                        (and (eq? race 'Protoss)
+                             (>= minerals 150)
+                             (not under-early-rush-crisis?)
+                             (not early-ling-rush-defense-active?)
+                             (not early-proxy-marauder-rush-active?)
+                             (<= enemy-threat-supply (* 0.75 (max 4 army-supply))))
                         (and (>= minerals 150)
                              (not under-attack?)
                              (not under-early-rush-crisis?)
@@ -6231,6 +6262,22 @@
          (>= enemy-zergling-cnt 6)
          (<= (unit-count-equivalent unit-counts 'zealot) 2)
          (< minerals 275)))
+  ;; L62 (`#1660` `#72 PvZ 12PoolBot`, `pk=375M`, `sched=()` at `f=3808..4144`):
+  ;; Under `< 3:30` (`4704f`) early Ling rush with `>= 200M` banked and `0` open Gateway slots
+  ;; (all Gateways busy, building, or unpowered!), immediately force spend into `shield-battery`,
+  ;; `cybernetics-core` (if `0`), `gateway #3/#4`, or backup main `pylon` so Protoss never floats idle!
+  (define protoss-early-flood-idle-bank-break?
+    (and (eq? race 'Protoss)
+         (< frame 4704)
+         early-ling-rush-defense-active?
+         (>= minerals 200)
+         (or (and (hash? open-facility-slots)
+                  (<= (+ (hash-ref open-facility-slots 'gateway 0)
+                         (hash-ref open-facility-slots 'warp-gate 0))
+                      0))
+             (= (+ (bldg-count-equivalent ready-bldg-counts 'gateway)
+                   (bldg-count-equivalent ready-bldg-counts 'warp-gate))
+                0))))
   (define (early-ling-rush-suppressed-sym? nsym)
     (and early-ling-rush-defense-active?
          (or (eq? nsym race-expand-sym)
@@ -6248,6 +6295,10 @@
                            (= (unit-count-equivalent enemy-u-counts 'ravager) 0))))
              (and (eq? race 'Protoss)
                   (eq? nsym 'cybernetics-core)
+                  (not (and protoss-early-flood-idle-bank-break?
+                            (>= (unit-count-equivalent unit-counts 'zealot) 1)
+                            (> (+ (bldg-count-equivalent ready-bldg-counts 'gateway)
+                                  (bldg-count-equivalent ready-bldg-counts 'warp-gate)) 0)))
                   (not (and (>= (+ (bldg-count-equivalent total-bldg-counts 'gateway)
                                    (bldg-count-equivalent total-bldg-counts 'warp-gate)) 2)
                             (>= (unit-count-equivalent unit-counts 'zealot) 1)
@@ -6355,31 +6406,55 @@
                         (and (not protoss-12pool-2gate-cap-active?)
                              (= (+ (bldg-count-equivalent total-bldg-counts 'gateway)
                                    (bldg-count-equivalent total-bldg-counts 'warp-gate)) 2)
-                             (>= minerals 275))))
+                             (>= minerals (if protoss-early-flood-idle-bank-break? 200 275)))
+                        (and protoss-early-flood-idle-bank-break?
+                             (= (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                                   (bldg-count-equivalent total-bldg-counts 'warp-gate)) 3)
+                             (>= minerals 300))))
                (cons 925.0 #t)]
               [(and (eq? nsym 'cybernetics-core)
-                    (or protoss-12pool-2gate-cap-active?
-                        (and (eq? enemy-race 'Zerg)
-                             (< frame 3360)
-                             (>= enemy-zergling-cnt 6)
-                             (<= (unit-count-equivalent unit-counts 'zealot) 2)))
                     (= (bldg-count-equivalent total-bldg-counts 'cybernetics-core) 0)
-                    (>= (+ (bldg-count-equivalent total-bldg-counts 'gateway)
-                           (bldg-count-equivalent total-bldg-counts 'warp-gate)) 2)
-                    (>= (unit-count-equivalent unit-counts 'zealot) 1)
-                    (>= minerals 150)
-                    (hash? open-facility-slots)
-                    (= (+ (hash-ref open-facility-slots 'gateway 0)
-                          (hash-ref open-facility-slots 'warp-gate 0)) 0))
-               (cons 600.0 #t)]
+                    (or (and protoss-early-flood-idle-bank-break?
+                             (>= (unit-count-equivalent unit-counts 'zealot) 1)
+                             (> (+ (bldg-count-equivalent ready-bldg-counts 'gateway)
+                                   (bldg-count-equivalent ready-bldg-counts 'warp-gate)) 0)
+                             (> (bldg-count-equivalent ready-bldg-counts 'pylon) 0))
+                        (and (or protoss-12pool-2gate-cap-active?
+                                 (and (eq? enemy-race 'Zerg)
+                                      (< frame 3360)
+                                      (>= enemy-zergling-cnt 6)
+                                      (<= (unit-count-equivalent unit-counts 'zealot) 2)))
+                             (>= (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                                    (bldg-count-equivalent total-bldg-counts 'warp-gate)) 2)
+                             (>= (unit-count-equivalent unit-counts 'zealot) 1)
+                             (>= minerals 150)
+                             (hash? open-facility-slots)
+                             (= (+ (hash-ref open-facility-slots 'gateway 0)
+                                   (hash-ref open-facility-slots 'warp-gate 0)) 0))))
+               (cons (if protoss-early-flood-idle-bank-break? 910.0 600.0) #t)]
               [(and (eq? nsym 'shield-battery)
                     (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
+                    (> (bldg-count-equivalent ready-bldg-counts 'pylon) 0)
                     (< (bldg-count-equivalent total-bldg-counts 'shield-battery)
-                       (if (or protoss-12pool-2gate-cap-active? (< minerals 250)) 1 2))
-                    (or (>= (unit-count-equivalent unit-counts 'zealot) 1)
+                       (if (or (and protoss-12pool-2gate-cap-active? (not protoss-early-flood-idle-bank-break?))
+                               (< minerals 200))
+                           1
+                           2))
+                    (or protoss-early-flood-idle-bank-break?
+                        (>= (unit-count-equivalent unit-counts 'zealot) 1)
                         (>= minerals 100)))
-               (cons 915.0 (or (>= (unit-count-equivalent unit-counts 'zealot) 1)
-                               (>= minerals 100)))]
+               (cons (if protoss-early-flood-idle-bank-break? 930.0 915.0)
+                     (or protoss-early-flood-idle-bank-break?
+                         (>= (unit-count-equivalent unit-counts 'zealot) 1)
+                         (>= minerals 100)))]
+              [(and protoss-early-flood-idle-bank-break?
+                    (eq? nsym 'pylon)
+                    (< (bldg-count-equivalent total-bldg-counts 'pylon) 4)
+                    (or (<= (bldg-count-equivalent ready-bldg-counts 'pylon) 1)
+                        (and (>= (+ (bldg-count-equivalent total-bldg-counts 'gateway)
+                                    (bldg-count-equivalent total-bldg-counts 'warp-gate)) 2)
+                             (>= minerals 250))))
+               (cons 905.0 #t)]
               [else #f])]
            [else #f])))
   ;; W18-P0-3-belief (`#29 T v Creepy`): NEVER escrow or train Reaper past 2:30 (`frame >= 3360`)
@@ -6663,7 +6738,10 @@
                   (not eff-req-det?)))))
   (define (protoss-early-breach-suppressed-sym? nsym)
     (and (or protoss-early-breach-zealot-due? protoss-early-breach-no-tech?)
-         (not (and (eq? nsym 'cybernetics-core) pvz-ling-allow-cyber-now?))
+         (not (and (eq? nsym 'cybernetics-core)
+                   (or pvz-ling-allow-cyber-now?
+                       (and protoss-early-flood-idle-bank-break?
+                            (>= (unit-count-equivalent unit-counts 'zealot) 1)))))
          (or (eq? nsym 'nexus)
              (memq nsym '(cybernetics-core stargate twilight-council robotics-facility
                           robotics-bay forge templar-archive dark-shrine fleet-beacon
@@ -6920,13 +6998,16 @@
                   (and (> enemy-threat-supply 0)
                        (< army-supply (+ enemy-threat-supply 2))))
               #:enemy-race enemy-race))))
-  ;; W4-P0-1c + W5-P0-2-belief + L44-P0-2a: 620.0 hard opening escrow (< 5400f & < 36 supply, or < 46 supply
-  ;; in unpressured PvP natural window so Nexus never drops below Probe@575 / Robo mid-save!);
+  ;; W4-P0-1c + W5-P0-2-belief + L44-P0-2a + L62 (`#1660` `#63 SmoothBrain`) + L62B (`#1680` Fix 5):
+  ;; 620.0 hard opening escrow (< 5400f & < 36 supply, or < 46 supply for Protoss 1-base
+  ;; natural windows once >= 250M is banked so 0..249M early banks never stall Probe/Robo/Stalker
+  ;; production while >= 250M keeps Nexus above Immortal@562 at 36..45 supply!);
   ;; keep 1-base natural expansion at 560.0 up to 7200f (5:20) when not under-attack so PvP never stalls on 1 base.
   (define early-nat-exp-window?
     (and natural-exp-window?
          (< frame 5400)
          (or (< supply-used 36)
+             (and (eq? race 'Protoss) (< supply-used 46) (>= minerals 250))
              (and pvp-early-nat-nexus-due? (< supply-used 46)))))
   (define mid-nat-exp-window?
     (and natural-exp-window?
@@ -7005,13 +7086,20 @@
         (and (memq race '(Protoss Terran))
              (= active-bases 1)
              (<= total-townhalls-incl-pending 1)
-             (>= frame 4480)
-             (>= minerals 175)
-             (>= army-supply 10)
+             (or (and (>= frame 4480)
+                      (>= minerals 175)
+                      (>= army-supply (if (eq? race 'Protoss) 8 10)))
+                 (and (eq? race 'Protoss)
+                      (>= frame 4032)
+                      (>= minerals 250)
+                      (>= army-supply 8)))
              (not terran-1base-cc-lock-broken?)
              (not (and ws-natural-blocked? (< minerals 350)))
              (not terran-tvt-1base-tank-core-due?)
-             (not under-attack?)
+             (or (not under-attack?)
+                 (and (eq? race 'Protoss)
+                      (>= minerals 275)
+                      (<= enemy-threat-supply (* 0.75 (max 4 army-supply)))))
              (not under-early-rush-crisis?)
              (not early-ling-rush-defense-active?)
              (not early-proxy-marauder-rush-active?)
@@ -8257,9 +8345,23 @@
             (if terran-tvt-turrets-tank2-needed?
                 (max 1 enemy-banshee-cnt)
                 6))))
+  ;; L62 (`#1660` `#78 PvT VeTerran`): When on 1 base already at >=300M (within ~4s of 400M
+  ;; Natural Nexus!) with 0 active DTs/Banshees/Lurkers and non-overwhelming threat, let Nexus #2
+  ;; drop first instead of burning 380M of Nexus escrow on reactive Robo/Forge for a scouted Widow Mine!
+  (define protoss-1base-near-nat-defer-spec-det?
+    (and (eq? race 'Protoss)
+         (= active-bases 1)
+         (<= total-townhalls-incl-pending 1)
+         (>= minerals 300)
+         (= (unit-count-equivalent enemy-u-counts 'dark-templar) 0)
+         (= (unit-count-equivalent enemy-u-counts 'banshee) 0)
+         (= (unit-count-equivalent enemy-u-counts 'lurker) 0)
+         (= (unit-count-equivalent enemy-u-counts 'lurker-burrowed) 0)
+         (<= enemy-threat-supply army-supply)))
   (define protoss-det-forge-due?
     (and (eq? race 'Protoss)
          enemy-cloaked-threat-active?
+         (not protoss-1base-near-nat-defer-spec-det?)
          (= (bldg-count-equivalent total-bldg-counts 'forge) 0)
          (= (bldg-count-equivalent total-bldg-counts 'robotics-facility) 0)
          (> (bldg-count-equivalent ready-bldg-counts 'gateway) 0)))
@@ -8317,11 +8419,13 @@
                            (= cannon-cnt 0)
                            (or (>= gas 60) (> forge-cnt 0))
                            (> (bldg-count-equivalent ready-bldg-counts 'cybernetics-core) 0)
+                           (not protoss-1base-near-nat-defer-spec-det?)
                            (cons 1185.0 #t))]
                      [(forge)
                       (and enemy-cloaked-threat-active?
                            (= forge-cnt 0)
                            (= cannon-cnt 0)
+                           (not protoss-1base-near-nat-defer-spec-det?)
                            (> (bldg-count-equivalent ready-bldg-counts 'gateway) 0)
                            (or (and (= robo-cnt 0) (< gas 60))
                                (and (= ready-robo-cnt 0)
@@ -9989,6 +10093,45 @@
     (and (eq? race 'Zerg)
          (or (< active-bases 3)
              (< army-supply 24))))
+  ;; L62 (`#1660` `#64 ZvZ Clicadinha`): Against heavy ZvZ Roach/Ravager mass (`>= 8`, `0` air/cloak),
+  ;; cap Zergling over-investment and block BanelingNest/Baneling/MeleeWeapons/extra Spine#2+/Spore#2+,
+  ;; redirecting economy directly into Roach Warren + Roach/Ravager parity!
+  (define zerg-zvz-heavy-roach-enemy?
+    (and (eq? race 'Zerg)
+         (eq? enemy-race 'Zerg)
+         (>= enemy-roach-ravager-cnt 8)
+         (= enemy-air-combat-cnt 0)
+         (not enemy-cloaked-threat-active?)
+         (not enemy-air-dominated-now?)))
+  (define (zerg-zvz-heavy-roach-deferred-sym? nsym)
+    (and zerg-zvz-heavy-roach-enemy?
+         (not (emergency-cloak-det-boost-info nsym))
+         (or (memq nsym '(baneling-nest baneling
+                          zerg-melee-weapons-1 zerg-melee-weapons-2 zerg-melee-weapons-3))
+             (and (eq? nsym 'spine-crawler)
+                  (>= (bldg-count-equivalent total-bldg-counts 'spine-crawler) 1))
+             (and (eq? nsym 'spore-crawler)
+                  (>= (bldg-count-equivalent total-bldg-counts 'spore-crawler) 1))
+             (and (eq? nsym 'zergling)
+                  (> (bldg-count-equivalent ready-bldg-counts 'roach-warren) 0)
+                  (or (>= gas 25)
+                      (>= (unit-count-equivalent unit-counts 'zergling) 10))))))
+  (define zerg-zvz-heavy-roach-rw-due?
+    (and zerg-zvz-heavy-roach-enemy?
+         (= (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)
+         (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)))
+  ;; L62B (`#1680` Fix 4): Cap ZvZ Roach/Ravager parity boost once Zerg has >= 8 Roaches+Ravagers
+  ;; OR ready Hydralisk Den OR HydraDen transition due — and keep its floor strictly below
+  ;; `lair` (`472.0` / `585.0`), `hydralisk-den` (`468.0` / `560.0`), and `hydralisk` (`518.0`)!
+  (define zerg-zvz-heavy-roach-unit-due?
+    (and zerg-zvz-heavy-roach-enemy?
+         (> (bldg-count-equivalent ready-bldg-counts 'roach-warren) 0)
+         (< (+ (unit-count-equivalent unit-counts 'roach)
+               (unit-count-equivalent unit-counts 'ravager))
+            8)
+         (= (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0)
+         (not zerg-zvz-midgame-hydraden-due?)
+         (not supply-preempt-now?)))
   (define zerg-3rd-hatch-pro-due?
     (and (eq? race 'Zerg)
          (= active-bases 2)
@@ -10966,7 +11109,14 @@
                      (if protoss-banshee-gate3-due? '(gateway) '())
                      (if protoss-early-breach-zealot-due? '(zealot) '())
                      (if protoss-early-flood-battery-due? '(shield-battery) '())
+                     (if protoss-early-flood-idle-bank-break?
+                         '(shield-battery gateway cybernetics-core pylon)
+                         '())
                      (if protoss-early-flood-ranged-due? (list protoss-early-flood-ranged-sym) '())
+                     (if zerg-zvz-heavy-roach-rw-due? '(roach-warren) '())
+                     (if zerg-zvz-heavy-roach-unit-due?
+                         (if (>= (unit-count-equivalent unit-counts 'roach) 4) '(ravager roach) '(roach))
+                         '())
                      (if (or midgame-1base-natural-due? terran-1base-nat-cc-lock? terran-1base-past-315-nat-cc-due?)
                          (list race-expand-sym)
                          '())
@@ -12251,6 +12401,8 @@
             #t]
            [(zerg-cap-air-defer-gas-drain-sym? csym)
             #f]
+           [(zerg-zvz-heavy-roach-deferred-sym? csym)
+            #f]
            [(crisis-deferred-sym? csym crisis-defer?
                                   #:defer-stargate? defer-stargate?
                                   #:keep-ship-weapons? ship-weap-due?
@@ -12552,6 +12704,8 @@
            [(and keep-lair-aa? (eq? csym 'lair)) #t]
            [(and (or zerg-macro-lair-due? zerg-zvt-early-lair-due?) (eq? csym 'lair)) #t]
            [(and zerg-3rd-hatch-pro-due? (eq? csym 'hatchery)) #t]
+           [(and zerg-zvz-heavy-roach-rw-due? (eq? csym 'roach-warren)) #t]
+           [(and zerg-zvz-heavy-roach-unit-due? (memq csym '(roach ravager))) #t]
            [(and terran-3rd-cc-due? (eq? csym 'command-center)) #t]
            [(and terran-4th-cc-due? (eq? csym 'command-center)) #t]
            [(and protoss-early-rush-zealot-first?
@@ -14563,6 +14717,23 @@
               (min 220.0 u-after-gas-lock)]
              [(zerg-banshee-defer-ground-gas-sym? nsym)
               (min 380.0 u-after-gas-lock)]
+             [(zerg-zvz-heavy-roach-deferred-sym? nsym)
+              (min 220.0 u-after-gas-lock)]
+             [(and zerg-zvz-heavy-roach-rw-due? (eq? nsym 'roach-warren))
+              (max 740.0 plan-weight u0)]
+             [(and zerg-zvz-heavy-roach-unit-due?
+                   (not zerg-macro-lair-due?)
+                   (eq? nsym 'ravager)
+                   (>= (unit-count-equivalent unit-counts 'roach) 4)
+                   (< (unit-count-equivalent unit-counts 'ravager)
+                      (max 2 (quotient (unit-count-equivalent unit-counts 'roach) 2)))
+                   (>= gas 75))
+              (max 466.0 plan-weight u0)]
+             [(and zerg-zvz-heavy-roach-unit-due?
+                   (not zerg-macro-lair-due?)
+                   (eq? nsym 'roach)
+                   (>= gas 25))
+              (max 464.0 plan-weight u0)]
              [(terran-confirmed-cloak-defer-prod-sym? nsym)
               (min 420.0 u-after-gas-lock)]
              [(and terran-zero-air-suppress-viking? (eq? nsym 'viking-fighter))
@@ -15873,6 +16044,23 @@
             (min u 220.0)]
            [(zerg-banshee-defer-ground-gas-sym? nsym)
             (min u 380.0)]
+           [(zerg-zvz-heavy-roach-deferred-sym? nsym)
+            (min u 220.0)]
+           [(and zerg-zvz-heavy-roach-rw-due? (eq? nsym 'roach-warren))
+            (max u 740.0)]
+           [(and zerg-zvz-heavy-roach-unit-due?
+                 (not zerg-macro-lair-due?)
+                 (eq? nsym 'ravager)
+                 (>= (unit-count-equivalent unit-counts 'roach) 4)
+                 (< (unit-count-equivalent unit-counts 'ravager)
+                    (max 2 (quotient (unit-count-equivalent unit-counts 'roach) 2)))
+                 (>= gas 75))
+            (max u 466.0)]
+           [(and zerg-zvz-heavy-roach-unit-due?
+                 (not zerg-macro-lair-due?)
+                 (eq? nsym 'roach)
+                 (>= gas 25))
+            (max u 464.0)]
            [(terran-confirmed-cloak-defer-prod-sym? nsym)
             (min u 420.0)]
            [(terran-tvt-tank4-defer-air-sym? nsym)
@@ -16623,6 +16811,7 @@
                      (eq? nsym 'factory))
                 (protoss-pvt-robo-bay-defer-forge? nsym)
                 (and zerg-banshee-suppress-ground-t15-tech? (memq nsym '(roach-warren baneling-nest)))
+                (zerg-zvz-heavy-roach-deferred-sym? nsym)
                 (zerg-banshee-defer-ground-gas-sym? nsym)
                 (and (eq? nsym 'lurker-den)
                      (or (< gas 110)
@@ -17297,6 +17486,8 @@
         [(and zerg-banshee-suppress-ground-t15-tech? (memq csym '(roach-warren baneling-nest)))
          #f]
         [(zerg-banshee-defer-ground-gas-sym? csym)
+         #f]
+        [(zerg-zvz-heavy-roach-deferred-sym? csym)
          #f]
         [(zerg-heavy-air-frozen-sym? csym)
          #f]
@@ -18802,6 +18993,7 @@
                       0)))
          (not (and zvz-safe-pool-first-due? (eq? final-bo-goal-norm 'hatchery)))
          (not (and zvz-early-ling-wave2-hold? (eq? final-bo-goal-norm 'hatchery)))
+         (not (and zvz-hatchery-nonblocking-now? (eq? final-bo-goal-norm 'hatchery)))
          (not (and (eq? final-bo-goal-norm 'spore-crawler) zerg-spore-demoted-now?))
          (not (and zerg-cap-air-corruptor-priority-due? (memq final-bo-goal-norm '(hydralisk hydralisk-den))))
          (not (and tvz-early-wall-marine-before-cc-escrow? (< minerals 400) (eq? final-bo-goal-norm 'command-center)))
@@ -18837,6 +19029,7 @@
          (not (protoss-pvt-robo-bay-defer-forge? final-bo-goal-norm))
          (not (and zerg-banshee-suppress-ground-t15-tech? (memq final-bo-goal-norm '(roach-warren baneling-nest))))
          (not (zerg-banshee-defer-ground-gas-sym? final-bo-goal-norm))
+         (not (zerg-zvz-heavy-roach-deferred-sym? final-bo-goal-norm))
          (not (and (eq? final-bo-goal-norm 'lurker-den)
                    (or (< gas 110) (and (>= minerals 460) (< gas 150)))))
          (not (and (eq? final-bo-goal-norm 'overlord-transport)
@@ -19045,6 +19238,7 @@
                    (and protoss-early-flood-defer-robo?
                         (eq? gsym 'robotics-facility))
                    (protoss-early-mass-reaper-deferred-tech-sym? gsym)
+                   (zerg-zvz-heavy-roach-deferred-sym? gsym)
                    (and protoss-anti-dt-or-prism-obs1-urgent?
                         (eq? gsym 'immortal)))))
         #f

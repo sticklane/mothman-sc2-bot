@@ -2853,9 +2853,25 @@
                                           (mk-u 58004 'barracks 42.0 34.0 #:hp 1000.0))
                    #:mineral-patches mps-58
                    #:enemy-buildings (list (mk-u 58999 'nexus 140.0 140.0 #:hp 1000.0))))))
+  ;; Loop 62 Phase 2 (`macro-ability-policy.rkt` unified with L59-C): unprovoked 2-OC TvP >= 4:00
+  ;; reserves 100e on top-1 OC (`58001`) while OC #2 (`58002`) MULEs; DT/DarkShrine-scouted 2-OC
+  ;; TvP reserves BOTH (`'()`); 3-OC unprovoked TvP reserves top-2 (`58001`, `58002`) & 3rd (`58003`) MULEs!
+  (define m2-dt
+    (mule-ids
+     (step-layer2-economy!
+      (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran)
+      (mk-live-obs 'Terran 'Protoss 5712 #:minerals 100 #:gas 50 #:supply-used 34 #:supply-cap 54
+                   #:mineral-harvesters 20 #:vespene-harvesters 4
+                   #:ally-units scvs-24
+                   #:ally-buildings (list (mk-u 58001 'orbital-command 32.5 32.5 #:hp 1500.0 #:energy 75.0)
+                                          (mk-u 58002 'orbital-command 62.5 32.5 #:hp 1500.0 #:energy 65.0)
+                                          (mk-u 58004 'barracks 42.0 34.0 #:hp 1000.0))
+                   #:mineral-patches mps-58
+                   #:enemy-buildings (list (mk-u 58999 'nexus 140.0 140.0 #:hp 1000.0)
+                                           (mk-u 58998 'dark-shrine 144.0 140.0 #:hp 150.0))))))
   (check-true "R2-L55-T9-tvp-2oc-both-reserve-100e-scan-and-3rd-oc-mules"
-              (and (null? m2) (equal? m3 '(58003)))
-              (format "m2=~a m3=~a" m2 m3)))
+              (and (equal? m2 '(58002)) (null? m2-dt) (equal? m3 '(58003)))
+              (format "m2=~a m2-dt=~a m3=~a" m2 m2-dt m3)))
 
 ;; -----------------------------------------------------------------------------
 ;; 51. K4 (`L55-T10` + `L55-N1`): Anti-Nydus `PATROL` Gated on Safe XvZ Only
@@ -5092,6 +5108,356 @@
               (and scout-ret-ok? idle-coal-ok? gas-cd-ok? mw-skip-ok?)
               (format "scout=~a idle=~a (hm0=~a hm4=~a) gascd=~a mwskip=~a"
                       scout-ret-ok? idle-coal-ok? hm-0 hm-4 gas-cd-ok? mw-skip-ok?)))
+
+;; -----------------------------------------------------------------------------
+;; 90. L62 Phase 2 Lane C: Single Viper/Ravager/Recharge Authority, Live Range/CD & Siege/Zero-Fire
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) Single Viper Emitter (`live-obs? = #t`): in-range Viper emits EXACTLY 1 `parasitic-bomb`
+  ;;     (zero duplicate legacy casts!), while out-of-range Viper (`14t`) steps to standoff.
+  (define rt-vip1 (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define mutas-3
+    (for/list ([i (in-range 3)])
+      (hash-set (mk-u (+ 93101 i) 'mutalisk 70.0 (+ 50.0 (* 0.8 i)) #:hp 120.0 #:max-hp 120.0) 'flying? #t)))
+  (define vip-in (hash-set* (mk-u 93001 'viper 63.0 50.8 #:hp 150.0 #:max-hp 150.0) 'energy 150.0 'flying? #t))
+  (define hyds-4 (for/list ([i (in-range 4)]) (mk-u (+ 93010 i) 'hydralisk 60.0 (+ 49.0 (* 0.6 i)) #:hp 90.0 #:max-hp 90.0)))
+  (define a-vip-in
+    (hash-ref (step-live-bot-runtime!
+               rt-vip1
+               (mk-live-obs 'Zerg 'Zerg 5000 #:supply-used 40 #:supply-cap 60
+                            #:mineral-harvesters 20 #:vespene-harvesters 6
+                            #:ally-units (cons vip-in hyds-4)
+                            #:ally-buildings (list (mk-u 93090 'hatchery 32.5 32.5 #:hp 1500.0))
+                            #:enemy-units mutas-3))
+              'actions '()))
+  (define pbomb-casts
+    (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (equal? (second a) 93001) (eq? (third a) 'parasitic-bomb)))
+            a-vip-in))
+  (define rt-vip2 (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define vip-far (hash-set* (mk-u 93002 'viper 56.0 50.8 #:hp 150.0 #:max-hp 150.0) 'energy 150.0 'flying? #t))
+  (define a-vip-far
+    (hash-ref (step-live-bot-runtime!
+               rt-vip2
+               (mk-live-obs 'Zerg 'Zerg 5000 #:supply-used 40 #:supply-cap 60
+                            #:mineral-harvesters 20 #:vespene-harvesters 6
+                            #:ally-units (cons vip-far hyds-4)
+                            #:ally-buildings (list (mk-u 93090 'hatchery 32.5 32.5 #:hp 1500.0))
+                            #:enemy-units mutas-3))
+              'actions '()))
+  (define vip-far-mv (findf (lambda (a) (and (pair? a) (eq? (car a) 'move) (equal? (second a) 93002))) a-vip-far))
+  (define vip-ok? (and (= (length pbomb-casts) 1) vip-far-mv (> (third vip-far-mv) 56.0)))
+
+  ;; (b) Single Ravager Bile Emitter (`live-obs? = #t`): fires staggered Biles, respects 157f cd & 0.85t FF!
+  (define rt-rav (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define tks-3
+    (list (mk-u 93201 'siege-tank-sieged 80.0 50.0 #:hp 175.0 #:max-hp 175.0)
+          (mk-u 93202 'siege-tank-sieged 81.5 52.0 #:hp 175.0 #:max-hp 175.0)
+          (mk-u 93203 'siege-tank-sieged 81.5 48.0 #:hp 175.0 #:max-hp 175.0)))
+  (define ravs-3
+    (for/list ([i (in-range 3)]) (mk-u (+ 93210 i) 'ravager 72.5 (+ 49.0 i) #:hp 120.0 #:max-hp 120.0)))
+  (define roa-6
+    (for/list ([i (in-range 6)]) (mk-u (+ 93220 i) 'roach 71.0 (+ 47.5 (* 0.8 i)) #:hp 145.0 #:max-hp 145.0)))
+  (define obs-rav1
+    (mk-live-obs 'Zerg 'Terran 4000 #:supply-used 60 #:supply-cap 80
+                 #:mineral-harvesters 28 #:vespene-harvesters 6
+                 #:ally-units (append roa-6 ravs-3)
+                 #:ally-buildings (list (mk-u 93290 'hatchery 32.5 50.0 #:hp 1500.0))
+                 #:enemy-units tks-3))
+  (define biles-f1
+    (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (third a) 'corrosive-bile)))
+            (hash-ref (step-live-bot-runtime! rt-rav obs-rav1) 'actions '())))
+  ;; 20f later (< 157f cooldown): MUST emit 0 Biles!
+  (define biles-cd
+    (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (third a) 'corrosive-bile)))
+            (hash-ref (step-live-bot-runtime! rt-rav (hash-set obs-rav1 'frame 4020)) 'actions '())))
+  ;; Fresh runtime with 2 ally Roaches right on top of the lone Tank (`< 0.85t` FF): MUST emit 0 Biles!
+  (define rt-rav-ff (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define biles-ff
+    (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (third a) 'corrosive-bile)))
+            (hash-ref (step-live-bot-runtime!
+                       rt-rav-ff
+                       (mk-live-obs 'Zerg 'Terran 4000 #:supply-used 40 #:supply-cap 60
+                                    #:mineral-harvesters 20 #:vespene-harvesters 6
+                                    #:ally-units (append (list (mk-u 93251 'roach 79.8 50.0 #:hp 145.0)
+                                                               (mk-u 93252 'roach 80.2 50.0 #:hp 145.0))
+                                                         ravs-3)
+                                    #:ally-buildings (list (mk-u 93290 'hatchery 32.5 50.0 #:hp 1500.0))
+                                    #:enemy-units (list (car tks-3))))
+                      'actions '())))
+  (define rav-ok? (and (>= (length biles-f1) 2) (null? biles-cd) (null? biles-ff)))
+
+  ;; (c) Unified Nexus Energy Recharge cooldown & live 5.0.15 cast-range hydration across L2 & tactics
+  (define rech-ok?
+    (dynamic-wind
+      (lambda () (reset-sc2-live-game-data!) (reset-sc2-live-response-data!))
+      (lambda ()
+        (define nx-r (hash-set (mk-u 93301 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0) 'energy 100.0))
+        (define ht-112 (hash-set (mk-u 93302 'high-templar 43.7 32.5 #:hp 40.0 #:shield 40.0) 'energy 25.0)) ;; 11.2t away!
+        (define m-en (list (mk-u 93399 'marine 52.0 32.5 #:hp 45.0)))
+        (define obs-r (mk-live-obs 'Protoss 'Terran 1000 #:supply-used 10 #:supply-cap 23
+                                   #:ally-units (list ht-112) #:ally-buildings (list nx-r) #:enemy-units m-en
+                                   #:researched-upgrades '(psi-storm)))
+        ;; Static 10.0t range: 11.2t HT NOT recharged by L2 or tactics
+        (define l2-st (step-layer2-economy! (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss) obs-r))
+        (define sp-st (plan-protoss-spellcaster-micro (list ht-112) m-en #:ally-buildings (list nx-r)
+                                                      #:psi-storm-researched? #t #:current-frame 1000))
+        ;; Live 5.0.15 range = 12.0t: BOTH L2 and tactics recharge the 11.2t HT, and L2 shares 1344f cd!
+        (register-sc2-live-ability-data! 4126 'unit 12.0 #f 0)
+        (define rt-r (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+        (define l2-lv1 (step-layer2-economy! rt-r obs-r))
+        (define l2-lv-cd (step-layer2-economy! rt-r (hash-set obs-r 'frame 2000))) ;; +1000 < 1344 -> blocked!
+        (define l2-lv-ok (step-layer2-economy! rt-r (hash-set obs-r 'frame 2350))) ;; +1350 >= 1344 -> ready!
+        (define sp-lv (plan-protoss-spellcaster-micro (list ht-112) m-en #:ally-buildings (list nx-r)
+                                                      #:psi-storm-researched? #t #:current-frame 1000))
+        (define (has-rech-act? xs)
+          (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3) (eq? (third a) 'nexus-energy-recharge))) xs))
+        (define (has-rech-dir? ds)
+          (ormap (lambda (d) (eq? (spell-directive-ability d) 'nexus-energy-recharge)) ds))
+        (and (not (has-rech-act? l2-st))
+             (not (has-rech-dir? sp-st))
+             (has-rech-act? l2-lv1)
+             (not (has-rech-act? l2-lv-cd))
+             (has-rech-act? l2-lv-ok)
+             (has-rech-dir? sp-lv)))
+      (lambda () (reset-sc2-live-game-data!) (reset-sc2-live-response-data!))))
+
+  ;; (d) Loop 62B combat restoration: squad inside Sieged Tank 13.0t shelling range (`12.8t` & `11.0t`)
+  ;;     commits (`attack-unit`) instead of freezing in Loop 62's `12.5..13.0t` shell deathzone, while
+  ;;     outnumbered ranged Stalker on cooldown (`0.70s > kite-cd-min`) vs ranged Marauder stutters/kites!
+  (define rt-sg1 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define stks-shell (for/list ([i (in-range 4)]) (mk-u (+ 93401 i) 'stalker 87.2 (+ 79.0 (* 0.5 i)) #:hp 80.0 #:shield 80.0)))
+  (define tks-lip (for/list ([i (in-range 3)]) (mk-u (+ 93451 i) 'siege-tank-sieged 100.0 (+ 78.5 (* 1.2 i)) #:hp 175.0)))
+  (define a-shell
+    (run-l34 rt-sg1
+             (mk-live-obs 'Protoss 'Terran 7000 #:supply-used 28 #:supply-cap 40
+                          #:mineral-harvesters 18 #:vespene-harvesters 4
+                          #:ally-units stks-shell
+                          #:ally-buildings (list (mk-u 93490 'nexus 32.5 32.5 #:hp 1000.0))
+                          #:enemy-units tks-lip)))
+  (define shell-committed?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit))) a-shell))
+  (define rt-sg2 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define stks-in (for/list ([i (in-range 4)]) (mk-u (+ 93411 i) 'stalker 89.0 (+ 79.0 (* 0.5 i)) #:hp 80.0 #:shield 80.0)))
+  (define a-in
+    (run-l34 rt-sg2
+             (mk-live-obs 'Protoss 'Terran 7000 #:supply-used 28 #:supply-cap 40
+                          #:mineral-harvesters 18 #:vespene-harvesters 4
+                          #:ally-units stks-in
+                          #:ally-buildings (list (mk-u 93490 'nexus 32.5 32.5 #:hp 1000.0))
+                          #:enemy-units tks-lip)))
+  (define in-committed?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-unit))) a-in))
+  (define rt-kite (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define stk-cd (hash-set (mk-u 93501 'stalker 80.0 80.0 #:hp 80.0 #:max-hp 80.0 #:shield 80.0 #:max-shield 80.0)
+                           'weapon-cooldown 0.70))
+  (define mars-far (for/list ([i (in-range 4)]) (mk-u (+ 93551 i) 'marauder 84.5 (+ 79.0 (* 0.6 i)) #:hp 125.0 #:max-hp 125.0)))
+  (define a-kite
+    (run-l34 rt-kite
+             (mk-live-obs 'Protoss 'Terran 8000 #:supply-used 24 #:supply-cap 40
+                          #:mineral-harvesters 18 #:vespene-harvesters 4
+                          #:ally-units (list stk-cd)
+                          #:ally-buildings (list (mk-u 93590 'nexus 32.5 32.5 #:hp 1000.0))
+                          #:enemy-units mars-far)))
+  (define ranged-kite-ok?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'kite) (equal? (second a) 93501))) a-kite))
+
+  (check-true "L62-Phase2-Single-Spell-Authority-Policy-And-Restored-Combat"
+              (and vip-ok? rav-ok? rech-ok? shell-committed? in-committed? ranged-kite-ok?)
+              (format "vip=~a rav=~a (f1=~a cd=~a ff=~a) rech=~a shell=~a in=~a kite=~a"
+                      vip-ok? rav-ok? (length biles-f1) (length biles-cd) (length biles-ff)
+                      rech-ok? shell-committed? in-committed? ranged-kite-ok?)))
+
+;; -----------------------------------------------------------------------------
+;; Test 91: Loop 62B — Single-Authority Ravager Bile 0.85t FF Guard, Single
+;; High-HP Target (>= 120 HP), Expendable Zergling Exemption & Out-of-Range Flank
+;; -----------------------------------------------------------------------------
+(let ()
+  (define (bile-acts acts)
+    (filter (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3) (eq? (third a) 'corrosive-bile))) acts))
+
+  ;; 1. 1.1t friendly Roach clearance (> 0.85t CORROSIVE-BILE-FF-CHECK-RADIUS) FIRES Bile!
+  (define rt-c11 (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define biles-c11
+    (bile-acts
+     (hash-ref (step-live-bot-runtime!
+                rt-c11
+                (mk-live-obs 'Zerg 'Zerg 4100 #:supply-used 40 #:supply-cap 60
+                             #:mineral-harvesters 20 #:vespene-harvesters 6
+                             #:ally-units (list (mk-u 93601 'ravager 73.0 50.0 #:hp 120.0 #:max-hp 120.0)
+                                                (mk-u 93602 'roach   78.9 50.0 #:hp 145.0 #:max-hp 145.0)
+                                                (mk-u 93603 'roach   78.9 50.4 #:hp 145.0 #:max-hp 145.0))
+                             #:ally-buildings (list (mk-u 93690 'hatchery 32.5 50.0 #:hp 1500.0))
+                             #:enemy-units (list (mk-u 93651 'roach 80.0 50.0 #:hp 145.0 #:max-hp 145.0)
+                                                 (mk-u 93652 'roach 80.2 50.8 #:hp 145.0 #:max-hp 145.0))))
+               'actions '())))
+
+  ;; 2. < 0.85t friendly Roaches (0.4t away) STILL block Bile!
+  (define rt-ff85 (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define biles-ff85
+    (bile-acts
+     (hash-ref (step-live-bot-runtime!
+                rt-ff85
+                (mk-live-obs 'Zerg 'Zerg 4100 #:supply-used 40 #:supply-cap 60
+                             #:mineral-harvesters 20 #:vespene-harvesters 6
+                             #:ally-units (list (mk-u 93611 'ravager 73.0 50.0 #:hp 120.0 #:max-hp 120.0)
+                                                (mk-u 93612 'roach   79.6 50.0 #:hp 145.0 #:max-hp 145.0)
+                                                (mk-u 93613 'roach   80.4 50.0 #:hp 145.0 #:max-hp 145.0))
+                             #:ally-buildings (list (mk-u 93690 'hatchery 32.5 50.0 #:hp 1500.0))
+                             #:enemy-units (list (mk-u 93661 'roach 80.0 50.0 #:hp 145.0 #:max-hp 145.0))))
+               'actions '())))
+
+  ;; 3. Single 145 HP Roach (no >= 2 clump) FIRES Bile; single 35 HP Zergling holds Bile!
+  (define rt-sroa (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define biles-sroa
+    (bile-acts
+     (hash-ref (step-live-bot-runtime!
+                rt-sroa
+                (mk-live-obs 'Zerg 'Zerg 4100 #:supply-used 30 #:supply-cap 50
+                             #:mineral-harvesters 20 #:vespene-harvesters 6
+                             #:ally-units (list (mk-u 93621 'ravager 73.0 50.0 #:hp 120.0 #:max-hp 120.0))
+                             #:ally-buildings (list (mk-u 93690 'hatchery 32.5 50.0 #:hp 1500.0))
+                             #:enemy-units (list (mk-u 93671 'roach 80.0 50.0 #:hp 145.0 #:max-hp 145.0))))
+               'actions '())))
+  (define rt-sling (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define biles-sling
+    (bile-acts
+     (hash-ref (step-live-bot-runtime!
+                rt-sling
+                (mk-live-obs 'Zerg 'Zerg 4100 #:supply-used 30 #:supply-cap 50
+                             #:mineral-harvesters 20 #:vespene-harvesters 6
+                             #:ally-units (list (mk-u 93622 'ravager 73.0 50.0 #:hp 120.0 #:max-hp 120.0))
+                             #:ally-buildings (list (mk-u 93690 'hatchery 32.5 50.0 #:hp 1500.0))
+                             #:enemy-units (list (mk-u 93672 'zergling 80.0 50.0 #:hp 35.0 #:max-hp 35.0))))
+               'actions '())))
+
+  ;; 4. Expendable friendly Zerglings (< 0.85t) ignored when hitting >= 2 high-value enemy Roaches!
+  (define rt-ling-ign (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define biles-ling-ign
+    (bile-acts
+     (hash-ref (step-live-bot-runtime!
+                rt-ling-ign
+                (mk-live-obs 'Zerg 'Zerg 4100 #:supply-used 40 #:supply-cap 60
+                             #:mineral-harvesters 20 #:vespene-harvesters 6
+                             #:ally-units (list (mk-u 93631 'ravager  73.0 50.0 #:hp 120.0 #:max-hp 120.0)
+                                                (mk-u 93632 'zergling 79.8 50.2 #:hp 35.0 #:max-hp 35.0)
+                                                (mk-u 93633 'zergling 80.2 50.4 #:hp 35.0 #:max-hp 35.0))
+                             #:ally-buildings (list (mk-u 93690 'hatchery 32.5 50.0 #:hp 1500.0))
+                             #:enemy-units (list (mk-u 93681 'roach 80.0 50.0 #:hp 145.0 #:max-hp 145.0)
+                                                 (mk-u 93682 'roach 80.1 50.6 #:hp 145.0 #:max-hp 145.0))))
+               'actions '())))
+
+  ;; 5. Out-of-range (11.0t > 9.0t) Ravager facing >= 2 Sieged Tanks advances in `flank-units`!
+  (define rt-flank (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define acts-flank
+    (hash-ref (step-live-bot-runtime!
+               rt-flank
+               (mk-live-obs 'Zerg 'Terran 4200 #:supply-used 64 #:supply-cap 80
+                            #:mineral-harvesters 28 #:vespene-harvesters 6
+                            #:ally-units (append (list (mk-u 93701 'ravager 69.0 50.0 #:hp 120.0 #:max-hp 120.0))
+                                                 (for/list ([i (in-range 10)])
+                                                   (mk-u (+ 93710 i) 'roach 69.5 (+ 47.0 (* 0.6 i)) #:hp 145.0 #:max-hp 145.0)))
+                            #:ally-buildings (list (mk-u 93790 'hatchery 32.5 50.0 #:hp 1500.0))
+                            #:enemy-units (list (mk-u 93751 'siege-tank-sieged 80.0 50.0 #:hp 175.0 #:max-hp 175.0)
+                                                (mk-u 93752 'siege-tank-sieged 81.5 52.0 #:hp 175.0 #:max-hp 175.0))))
+              'actions '()))
+  (define rav-in-flank?
+    (ormap (lambda (a)
+             (and (pair? a) (eq? (car a) 'attack-pos) (list? (second a)) (memv 93701 (second a))))
+           acts-flank))
+
+  (check-true "L62B-Ravager-Single-Authority-Bile-085t-FF-Single-Roach-And-Flank"
+              (and (>= (length biles-c11) 1)
+                   (null? biles-ff85)
+                   (>= (length biles-sroa) 1)
+                   (null? biles-sling)
+                   (>= (length biles-ling-ign) 1)
+                   (not (not rav-in-flank?)))
+              (format "c11=~a ff85=~a sroa=~a sling=~a ling-ign=~a flank=~a"
+                      (length biles-c11) (length biles-ff85) (length biles-sroa)
+                      (length biles-sling) (length biles-ling-ign) (not (not rav-in-flank?)))))
+
+;; -----------------------------------------------------------------------------
+;; Test 92: Loop 62C — Layer 2 `l2-protoss-phase1-chrono-wall!` Out-of-Combat
+;; Nexus Energy Recharge (`4126`) with `enemy-units = '()`
+;; -----------------------------------------------------------------------------
+(let ()
+  (define (has-recharge? acts nx-id tgt-id)
+    (ormap (lambda (a)
+             (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 4)
+                  (equal? (second a) nx-id)
+                  (eq? (third a) 'nexus-energy-recharge)
+                  (equal? (fourth a) tgt-id)))
+           acts))
+  (define (has-any-recharge? acts)
+    (ormap (lambda (a)
+             (and (pair? a) (eq? (car a) 'cast-spell) (>= (length a) 3)
+                  (eq? (third a) 'nexus-energy-recharge)))
+           acts))
+
+  ;; 1. Dry Sentry (`50e`) at `6.0t <= 10t` from `100e` Nexus with `enemy-units = '()` MUST recharge!
+  (define rt-sen (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define nx-sen (hash-set (mk-u 93801 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0) 'energy 100.0))
+  (define sen-dry (hash-set (mk-u 93802 'sentry 38.5 32.5 #:hp 40.0 #:shield 40.0) 'energy 50.0))
+  (define obs-sen
+    (mk-live-obs 'Protoss 'Terran 4500 #:supply-used 24 #:supply-cap 39
+                 #:ally-units (list sen-dry)
+                 #:ally-buildings (list nx-sen)
+                 #:enemy-units '()))
+  (define acts-sen1 (step-layer2-economy! rt-sen obs-sen))
+  ;; Cooldown guard: +500f (< 1344f) MUST NOT re-cast; +1350f (>= 1344f) MUST cast again!
+  (define acts-sen-cd (step-layer2-economy! rt-sen (hash-set obs-sen 'frame 5000)))
+  (define acts-sen-ok (step-layer2-economy! rt-sen (hash-set obs-sen 'frame 5850)))
+
+  ;; 2. Dry Oracle (`30e`) & dry HT (`25e`) at `7.0t <= 10t` with `enemy-units = '()` MUST recharge!
+  (define rt-orc (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define orc-dry (hash-set (mk-u 93803 'oracle 39.5 32.5 #:hp 100.0 #:shield 60.0) 'energy 30.0))
+  (define acts-orc
+    (step-layer2-economy!
+     rt-orc
+     (mk-live-obs 'Protoss 'Zerg 4600 #:supply-used 24 #:supply-cap 39
+                  #:ally-units (list orc-dry)
+                  #:ally-buildings (list nx-sen)
+                  #:enemy-units '())))
+  (define rt-ht (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define ht-dry (hash-set (mk-u 93804 'high-templar 39.5 32.5 #:hp 40.0 #:shield 40.0) 'energy 25.0))
+  (define acts-ht
+    (step-layer2-economy!
+     rt-ht
+     (mk-live-obs 'Protoss 'Protoss 4700 #:supply-used 24 #:supply-cap 39
+                  #:ally-units (list ht-dry)
+                  #:ally-buildings (list nx-sen)
+                  #:enemy-units '())))
+
+  ;; 3. Out-of-range (`12.0t > 10t`) dry HT with `enemy-units = '()` does NOT recharge or hold Chrono!
+  (define rt-far (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define nx-busy (hash-set (hash-set (mk-u 93805 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0) 'energy 100.0)
+                            'busy? #t))
+  (define ht-far (hash-set (mk-u 93806 'high-templar 44.5 32.5 #:hp 40.0 #:shield 40.0) 'energy 25.0))
+  (define acts-far
+    (step-layer2-economy!
+     rt-far
+     (mk-live-obs 'Protoss 'Terran 4800 #:supply-used 24 #:supply-cap 39
+                  #:ally-units (list ht-far)
+                  #:ally-buildings (list nx-busy)
+                  #:enemy-units '())))
+  (define far-chrono-ok?
+    (and (not (has-any-recharge? acts-far))
+         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (eq? (third a) 'chrono-boost))) acts-far)))
+
+  (check-true "L62C-Protoss-L2-OutOfCombat-Nexus-Energy-Recharge-4126"
+              (and (has-recharge? acts-sen1 93801 93802)
+                   (not (has-any-recharge? acts-sen-cd))
+                   (has-recharge? acts-sen-ok 93801 93802)
+                   (has-recharge? acts-orc 93801 93803)
+                   (has-recharge? acts-ht 93801 93804)
+                   far-chrono-ok?)
+              (format "sen1=~a cd=~a ok=~a orc=~a ht=~a far-chrono=~a"
+                      (has-recharge? acts-sen1 93801 93802)
+                      (not (has-any-recharge? acts-sen-cd))
+                      (has-recharge? acts-sen-ok 93801 93802)
+                      (has-recharge? acts-orc 93801 93803)
+                      (has-recharge? acts-ht 93801 93804)
+                      far-chrono-ok?)))
 
 (printf "\n=== Loop 49 Suite Summary: ~a/~a passed, ~a failed ===\n"
         tests-passed tests-run tests-failed)

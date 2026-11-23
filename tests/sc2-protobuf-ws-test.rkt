@@ -13263,7 +13263,130 @@
                                            (= (sc2-raw-unit-command-target-unit-tag c) 81020)))
                           r-l61c-divert112)))
 
+  ;; (2h) Loop 62 Phase 2 (`#1662`): Sec 6a (`saturate-workers-and-gas-commands`) and Case C
+  ;;      (`translate-bot-actions->sc2-raw-commands` for `calldown-mule`) share `macro-ability-policy.rkt`
+  ;;      and agree 100% across TvP 2-OC DT/Prism (101e), unprovoked TvT (50e), active cloak=1 hard-block,
+  ;;      and isolated Arena `sc2-ab-t10` (100e hold / 101e allow)!
+  (define (mk-p2-u tag utype alliance x y
+                   #:hp [hp 100.0] #:en [en 0.0] #:en-max [en-max 0.0]
+                   #:rad [rad 1.0] #:cloak [cloak 0] #:mins [mins 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y 8.0) 0.0 rad 1.0 cloak #f #f #f
+              hp hp 0.0 0.0 en en-max mins 0 #f #f #f #t #f
+              '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define (mule-171-tags cmds)
+    (sort (append*
+           (for/list ([c (in-list cmds)]
+                      #:when (and (sc2-raw-unit-command? c)
+                                  (= (sc2-raw-unit-command-ability-id c) 171)))
+             (sc2-raw-unit-command-unit-tags c)))
+          <))
+  (define p2-gi-p (sc2-game-info "TestMap" '(160 . 160) '() #f #f #f
+                                 (list (hasheq 'player-id 1 'race-actual 'Terran)
+                                       (hasheq 'player-id 2 'race-actual 'Protoss))
+                                 '() #f))
+  (define p2-gi-t (sc2-game-info "TestMap" '(160 . 160) '() #f #f #f
+                                 (list (hasheq 'player-id 1 'race-actual 'Terran)
+                                       (hasheq 'player-id 2 'race-actual 'Terran))
+                                 '() #f))
+  (define p2-min1 (mk-p2-u 82010 341 3 23.0 30.0 #:mins 1500))
+  (define p2-min2 (mk-p2-u 82011 341 3 66.0 30.0 #:mins 1500))
+  (define p2-rax  (mk-p2-u 82020 21 1 35.0 30.0 #:hp 1000.0 #:rad 1.5))
+  (define p2-scvs12
+    (for/list ([i (in-range 12)])
+      (mk-p2-u (+ 82030 i) 45 1 (+ 24.0 (* 0.2 i)) 30.0 #:hp 45.0 #:rad 0.375)))
+  (define p2-mars6
+    (for/list ([i (in-range 6)])
+      (mk-p2-u (+ 82050 i) 48 1 (+ 40.0 (* 0.5 i)) 30.0 #:hp 45.0 #:rad 0.375)))
+  (define p2-e-wp  (mk-p2-u 82090 81 4 95.0 95.0 #:hp 80.0))
+  (define p2-e-mar (mk-p2-u 82091 48 4 95.0 95.0 #:hp 45.0))
+  (define p2-e-dt  (mk-p2-u 82092 76 4 44.0 30.0 #:hp 40.0 #:cloak 1))
+
+  ;; Case 1: TvP 2-OC DT/Prism reserve (101e floor on both OCs) + Unprovoked TvT (50e on both OCs)
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list p2-min1)) #:game-info p2-gi-p))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list p2-min1)) #:game-info p2-gi-p))
+  (define p2-oc1-100 (mk-p2-u 82001 132 1 28.5 30.0 #:hp 1500.0 #:en 100.0 #:en-max 200.0 #:rad 2.75))
+  (define p2-oc2-90  (mk-p2-u 82002 132 1 60.5 30.0 #:hp 1500.0 #:en 90.0  #:en-max 200.0 #:rad 2.75))
+  (define p2-oc1-101 (mk-p2-u 82001 132 1 28.5 30.0 #:hp 1500.0 #:en 101.0 #:en-max 200.0 #:rad 2.75))
+  (define p2-tvp-obs-100 (make-test-obs 4200 200 100 (append (list p2-oc1-100 p2-oc2-90 p2-rax p2-min1 p2-min2 p2-e-wp) p2-scvs12 p2-mars6)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define p2-tvp-sat-100 (mule-171-tags (saturate-workers-and-gas-commands p2-tvp-obs-100 #:game-info p2-gi-p)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define p2-tvp-cc-100
+    (mule-171-tags (translate-bot-actions->sc2-raw-commands
+                    '((cast-spell (82001 82002) calldown-mule 82010))
+                    p2-tvp-obs-100 #:game-info p2-gi-p)))
+  ;; Next tick (WP left vision, latch persists!): OC1=101e allowed, OC2=90e still held by both!
+  (define p2-tvp-obs-101 (make-test-obs 4240 200 100 (append (list p2-oc1-101 p2-oc2-90 p2-rax p2-min1 p2-min2) p2-scvs12 p2-mars6)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define p2-tvp-sat-101 (mule-171-tags (saturate-workers-and-gas-commands p2-tvp-obs-101 #:game-info p2-gi-p)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define p2-tvp-cc-101
+    (mule-171-tags (translate-bot-actions->sc2-raw-commands
+                    '((cast-spell (82001 82002) calldown-mule 82010))
+                    p2-tvp-obs-101 #:game-info p2-gi-p)))
+  ;; Rewind for Unprovoked TvT: both 55e & 50e OCs MULE freely in both Sec 6a and Case C!
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list p2-min1)) #:game-info p2-gi-t))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list p2-min1)) #:game-info p2-gi-t))
+  (define p2-oc1-55 (mk-p2-u 82001 132 1 28.5 30.0 #:hp 1500.0 #:en 55.0 #:en-max 200.0 #:rad 2.75))
+  (define p2-oc2-50 (mk-p2-u 82002 132 1 60.5 30.0 #:hp 1500.0 #:en 50.0 #:en-max 200.0 #:rad 2.75))
+  (define p2-tvt-obs (make-test-obs 5600 200 100 (append (list p2-oc1-55 p2-oc2-50 p2-rax p2-min1 p2-min2 p2-e-mar) p2-scvs12 p2-mars6)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define p2-tvt-sat (mule-171-tags (saturate-workers-and-gas-commands p2-tvt-obs #:game-info p2-gi-t)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define p2-tvt-cc
+    (mule-171-tags (translate-bot-actions->sc2-raw-commands
+                    '((cast-spell (82001 82002) calldown-mule 82010))
+                    p2-tvt-obs #:game-info p2-gi-t)))
+  (check-true "l62-p2-sec6a-and-casec-agree-tvp-dt-prism-101e-and-unprovoked-tvt-50e"
+              (and (null? p2-tvp-sat-100)
+                   (null? p2-tvp-cc-100)
+                   (equal? p2-tvp-sat-101 '(82001))
+                   (equal? p2-tvp-cc-101 '(82001))
+                   (equal? p2-tvt-sat '(82001 82002))
+                   (equal? p2-tvt-cc '(82001 82002))))
+
+  ;; Case 2: Active uncovered cloak=1 hard-block (even at 200e!) + isolated Arena `sc2-ab-t10` (100e hold / 101e allow)
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list p2-min1)) #:game-info p2-gi-p))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list p2-min1)) #:game-info p2-gi-p))
+  (define p2-oc1-200 (mk-p2-u 82001 132 1 28.5 30.0 #:hp 1500.0 #:en 200.0 #:en-max 200.0 #:rad 2.75))
+  (define p2-cloak-obs (make-test-obs 5800 200 100 (append (list p2-oc1-200 p2-rax p2-min1 p2-e-dt) p2-scvs12 p2-mars6)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define p2-cloak-sat (mule-171-tags (saturate-workers-and-gas-commands p2-cloak-obs #:game-info p2-gi-p)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define p2-cloak-cc
+    (mule-171-tags (translate-bot-actions->sc2-raw-commands
+                    '((cast-spell (82001) calldown-mule 82010))
+                    p2-cloak-obs #:game-info p2-gi-p)))
+  ;; Rewind for isolated Arena `sc2-ab-t10` (0 macro bldgs, <= 8 workers, >= 6 Marines, uncloaked enemy)
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list p2-min1)) #:game-info p2-gi-t))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 100 (list p2-min1)) #:game-info p2-gi-t))
+  (define p2-arena-obs-100 (make-test-obs 300 200 100 (append (list p2-oc1-100 p2-min1 p2-e-mar) p2-mars6)))
+  (define p2-arena-obs-101 (make-test-obs 340 200 100 (append (list p2-oc1-101 p2-min1 p2-e-mar) p2-mars6)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define p2-arena-sat-100 (mule-171-tags (saturate-workers-and-gas-commands p2-arena-obs-100 #:game-info p2-gi-t)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define p2-arena-cc-100
+    (mule-171-tags (translate-bot-actions->sc2-raw-commands
+                    '((cast-spell (82001) calldown-mule 82010))
+                    p2-arena-obs-100 #:game-info p2-gi-t)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define p2-arena-sat-101 (mule-171-tags (saturate-workers-and-gas-commands p2-arena-obs-101 #:game-info p2-gi-t)))
+  (hash-clear! SC2-MACRO-ABILITY-LAST-LOOP)
+  (define p2-arena-cc-101
+    (mule-171-tags (translate-bot-actions->sc2-raw-commands
+                    '((cast-spell (82001) calldown-mule 82010))
+                    p2-arena-obs-101 #:game-info p2-gi-t)))
+  (check-true "l62-p2-sec6a-and-casec-agree-active-cloak1-hardblock-and-ab-t10-arena"
+              (and (null? p2-cloak-sat)
+                   (null? p2-cloak-cc)
+                   (null? p2-arena-sat-100)
+                   (null? p2-arena-cc-100)
+                   (equal? p2-arena-sat-101 '(82001))
+                   (equal? p2-arena-cc-101 '(82001))))
+
   ;; Clean final rewind
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 0 (list l61-m1a))))
   (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l61-m1a)))))
 
 (printf "-----------------------------------------------------------------\n")

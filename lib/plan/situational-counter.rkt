@@ -1521,7 +1521,7 @@
         => (lambda ([hid : Integer])
              (emit! (list 'cast-spell hid 'psi-storm 88.0 88.0))
              (emit! (list 'cast-spell hid 'feedback 1)))]
-       [(find-unit1 'nexus 50.0)
+       [(and (not live-obs?) (find-unit1 'nexus 50.0))
         => (lambda ([nid : Integer])
              (define ht (find-unit-any '(high-templar oracle sentry) 0.0))
              (when ht (emit! (list 'cast-spell nid 'nexus-energy-recharge ht))))]

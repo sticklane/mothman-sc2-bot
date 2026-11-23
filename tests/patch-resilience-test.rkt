@@ -206,7 +206,7 @@
 ;; -----------------------------------------------------------------------------
 ;; 1. Static SC2 5.0.14 Fallback Accuracy
 ;; -----------------------------------------------------------------------------
-(printf "[1/7] Verifying static 5.0.14 fallback constants...\n")
+(printf "[1/8] Verifying static 5.0.14 fallback constants...\n")
 (check-true  "offline-live-data-inactive" (not (unbox SC2-LIVE-DATA-ACTIVE?)))
 (check-equal "static-5014-hatchery-min"         (sc2-min-cost 'hatchery) 275)
 (check-equal "static-5014-queen-min"            (sc2-min-cost 'queen) 175)
@@ -232,7 +232,7 @@
 ;; -----------------------------------------------------------------------------
 ;; 2. Synthetic SC2 4.10 Protobuf `ResponseData` Hydration
 ;; -----------------------------------------------------------------------------
-(printf "[2/7] Verifying synthetic 4.10 ResponseData hydration & morph cost subtraction...\n")
+(printf "[2/8] Verifying synthetic 4.10 ResponseData hydration & morph cost subtraction...\n")
 (define data-410-bytes
   (encode-response-data
    #:units
@@ -270,7 +270,7 @@
 ;; -----------------------------------------------------------------------------
 ;; 3. Synthetic SC2 5.0.15 Protobuf `ResponseData` Hydration (via `decode-sc2-response`)
 ;; -----------------------------------------------------------------------------
-(printf "[3/7] Verifying synthetic 5.0.15 ResponseData hydration (Spire, Ghost Light, PsiStorm, Upgrades)...\n")
+(printf "[3/8] Verifying synthetic 5.0.15 ResponseData hydration (Spire, Ghost Light, PsiStorm, Upgrades)...\n")
 (define data-5015-bytes
   (encode-response-data
    #:abilities
@@ -330,7 +330,7 @@
 ;; -----------------------------------------------------------------------------
 ;; 4. Future Ability ID >= 4200 (`hasheqv` Unbounded) + `1766` Guard + Clean Reset
 ;; -----------------------------------------------------------------------------
-(printf "[4/7] Verifying future ability ID >= 4200 (4512) hydration, 1766 Archon guard, & clean reset...\n")
+(printf "[4/8] Verifying future ability ID >= 4200 (4512) hydration, 1766 Archon guard, & clean reset...\n")
 (define data-future-bytes
   (encode-response-data
    #:abilities
@@ -381,7 +381,7 @@
 ;; -----------------------------------------------------------------------------
 ;; 5. Loop 60B (`#1606`) SC2 5.0.14 CamelCase Upgrade Alias Fanout & >= 290 Isolation
 ;; -----------------------------------------------------------------------------
-(printf "[5/7] Verifying real SC2 5.0.14 CamelCase UpgradeData alias fanout & >=290 isolation...\n")
+(printf "[5/8] Verifying real SC2 5.0.14 CamelCase UpgradeData alias fanout & >=290 isolation...\n")
 (define data-5014-upgs-bytes
   (encode-response-data
    #:upgrades
@@ -481,7 +481,7 @@
 ;; -----------------------------------------------------------------------------
 ;; 6. Loop 61 Phase 1 (`#1603`): Total-Value, On-Field Supply, & SC2-SPELL-SPEC
 ;; -----------------------------------------------------------------------------
-(printf "[6/7] Verifying Phase 1 total-value, on-field supply, & SC2-SPELL-SPEC live hydration...\n")
+(printf "[6/8] Verifying Phase 1 total-value, on-field supply, & SC2-SPELL-SPEC live hydration...\n")
 
 ;; 6a. Static 5.0.14 defaults for total-value & on-field supply
 (for ([spec (in-list '((zergling   25  0  25  0.5)
@@ -590,7 +590,7 @@
 ;; -----------------------------------------------------------------------------
 ;; 7. Loop 61 Phase 1 (`#1603`): Static Anti-Duplication Guard (`lib/**/*.rkt`)
 ;; -----------------------------------------------------------------------------
-(printf "[7/7] Verifying zero duplicate unit cost/supply tables across lib/**/*.rkt...\n")
+(printf "[7/8] Verifying zero duplicate unit cost/supply tables across lib/**/*.rkt...\n")
 (define dup-table-rx
   #px"\\(define\\s+(?:UNIT-COST-TABLE|UNIT-RESOURCE-VALUE|\\*splash-unit-supply-table\\*)\\b")
 (define dup-table-hits
@@ -600,6 +600,36 @@
                          (regexp-match? dup-table-rx (file->string p))))
     (path->string p)))
 (check-equal "p1-zero-duplicate-cost-or-supply-tables-in-lib" dup-table-hits '())
+
+;; -----------------------------------------------------------------------------
+;; 8. Loop 62 Phase 2 (`#1662`): Static Architectural Boundary Guards
+;; -----------------------------------------------------------------------------
+(printf "[8/8] Verifying Phase 2 transport cleanup, leaf policy purity, & single spell authority...\n")
+(define ws-src (file->string (build-path repo-lib-dir "sc2-protobuf-ws.rkt")))
+(define rt-src (file->string (build-path repo-lib-dir "bot-runtime.rkt")))
+(define macro-policy-path (build-path repo-lib-dir "plan" "macro-ability-policy.rkt"))
+(define ws-forbidden-policy-hits
+  (for/list ([tok (in-list '("proactive-scan-oc-limit"
+                             "case-c-uphill-scan-reserve?"
+                             "low-energy-protoss-caster-near-nexus?"))]
+             #:when (regexp-match? (regexp-quote tok) ws-src))
+    tok))
+(define rt-forbidden-spell-hits
+  (for/list ([tok (in-list '("l34-bc-find-yamato-tgt"
+                             "l23-viper-pbomb"
+                             "l27-viper-bcloud"
+                             "l23-viper-abduct"
+                             "last-nexus-recharge-frame"))]
+             #:when (regexp-match? (regexp-quote tok) rt-src))
+    tok))
+(define macro-policy-bad-require-hits
+  (if (file-exists? macro-policy-path)
+      (regexp-match* #px"\"[^\"]*(?:sc2-protobuf-ws|bot-runtime|priority-macro-brain)\\.rkt\""
+                     (file->string macro-policy-path))
+      '("missing-macro-ability-policy.rkt")))
+(check-equal "p2-zero-duplicated-mule-chrono-policy-in-protobuf-ws" ws-forbidden-policy-hits '())
+(check-equal "p2-zero-duplicate-spell-loops-in-bot-runtime" rt-forbidden-spell-hits '())
+(check-equal "p2-macro-ability-policy-pure-leaf-module" macro-policy-bad-require-hits '())
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Patch-Resilience & ResponseData Checks: ~a/~a passed (~a failed)\n"

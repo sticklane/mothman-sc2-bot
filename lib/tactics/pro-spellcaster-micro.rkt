@@ -373,7 +373,9 @@
 (define CORROSIVE-BILE-CLAIM-TTL : Nonnegative-Integer (sc2-spell-claim-ttl 'corrosive-bile 36))
 (define CORROSIVE-BILE-STAGGER-OFFSET : Float 0.75)
 (define CORROSIVE-BILE-COOLDOWN-FRAMES : Nonnegative-Integer (sc2-spell-cooldown-frames 'corrosive-bile 157))
-(define CORROSIVE-BILE-FF-CHECK-RADIUS : Float 1.75)
+;; Loop 62B: SC2 Corrosive Bile splash radius is 0.50t; 0.85t guards true friendly-fire overlap
+;; without starving ~70% of close-range ZvZ/ZvT Biles (1.75t was 3.5x wider than Bile splash!).
+(define CORROSIVE-BILE-FF-CHECK-RADIUS : Float 0.85)
 ;; W10-TAC-1 / W10-TAC-2 / W10-TAC-5: Exact SC2 live per-unit ability cooldowns (22.4 fps).
 (define MEDIVAC-BOOST-COOLDOWN-FRAMES : Integer (sc2-spell-cooldown-frames 'medivac-boost 320))
 (define CYCLONE-LOCK-ON-COOLDOWN-FRAMES : Integer (sc2-spell-cooldown-frames 'lock-on 196))
@@ -2299,8 +2301,11 @@
       (and (memq ut SC2-ALL-STRUCTURE-SYMS) #t)
       (and (memq uraw SC2-ALL-STRUCTURE-SYMS) #t)))
 
-(: corrosive-bile-target-safe? (-> Float Float (Listof Any) Boolean))
-(define (corrosive-bile-target-safe? tx ty allies)
+(: corrosive-bile-target-safe?
+   (->* (Float Float (Listof Any))
+        (#:ignore-expendable-lings? Boolean)
+        Boolean))
+(define (corrosive-bile-target-safe? tx ty allies #:ignore-expendable-lings? [ignore-lings? #f])
   (cond
     [(null? allies) #t]
     [else
@@ -2321,6 +2326,8 @@
              (loop (cdr rem) ground-cnt)]
             [(ally-immobile-or-burrowed? a)
              #f]
+            [(and ignore-lings? (eq? (uh-type a) 'zergling))
+             (loop (cdr rem) ground-cnt)]
             [(not (uh-flying? a))
              (define next-cnt (+ ground-cnt 1))
              (if (>= next-cnt 2)
@@ -2329,12 +2336,46 @@
             [else
              (loop (cdr rem) ground-cnt)])]))]))
 
+(: bile-high-value-enemy? (-> Any Boolean))
+(define (bile-high-value-enemy? e)
+  (and (hash? e)
+       (sc2-enemy-unit-targetable? e)
+       (not (memq (uh-type e)
+                  '(zergling larva egg cocoon baneling-cocoon ravager-cocoon
+                    lurker-cocoon lurker-mp-egg overlord-cocoon transport-overlord-cocoon
+                    broodling locust locust-flying interceptor
+                    changeling changeling-zealot changeling-zergling
+                    changeling-zergling-wings changeling-marine changeling-marine-shield
+                    drone probe scv)))
+       (>= (uh-total-hp e) 45.0)))
+
+(: count-high-value-enemies-in (-> (Listof Any) Integer))
+(define (count-high-value-enemies-in units)
+  (for/sum : Integer ([e (in-list units)])
+    (if (bile-high-value-enemy? e) 1 0)))
+
+(: bile-single-high-hp-ground-target? (-> Any Boolean))
+(define (bile-single-high-hp-ground-target? e)
+  (and (hash? e)
+       (not (uh-flying? e))
+       (sc2-enemy-unit-targetable? e)
+       (let ([t (uh-type e)])
+         (and (not (memq t SC2-ALL-STRUCTURE-SYMS))
+              (not (memq t '(drone probe scv larva egg cocoon
+                             baneling-cocoon ravager-cocoon lurker-cocoon lurker-mp-egg
+                             overlord-cocoon transport-overlord-cocoon
+                             broodling locust changeling changeling-zealot
+                             changeling-zergling changeling-zergling-wings
+                             changeling-marine changeling-marine-shield)))))
+       (>= (uh-total-hp e) 120.0)))
+
 (: ravager-try-bile-point!
    (->* (spell-claims Integer Float Float Float Float Float Boolean Integer Symbol)
-        (#:allies (Listof Any))
+        (#:allies (Listof Any) #:ignore-expendable-lings? Boolean)
         (Option spell-directive)))
 (define (ravager-try-bile-point! claims r-tag rx ry bx by cluster-hp force-field? current-frame pattern
-                               #:allies [allies (current-bile-allies)])
+                               #:allies [allies (current-bile-allies)]
+                               #:ignore-expendable-lings? [ignore-lings? #f])
   (define max-biles : Integer
     (if force-field?
         1
@@ -2347,7 +2388,9 @@
           1
           0)))
   (cond
-    [(>= existing-near max-biles) #f]
+    [(or (>= existing-near max-biles)
+         (not (corrosive-bile-target-safe? bx by allies #:ignore-expendable-lings? ignore-lings?)))
+     #f]
     [else
      (define d-off CORROSIVE-BILE-STAGGER-OFFSET)
      (define offsets : (Listof (Pairof Float Float))
@@ -2366,7 +2409,7 @@
        (define cx (clamp-coord (+ bx (car off))))
        (define cy (clamp-coord (+ by (cdr off))))
        (and (<= (dist2 rx ry cx cy) bile-rng)
-            (corrosive-bile-target-safe? cx cy allies)
+            (corrosive-bile-target-safe? cx cy allies #:ignore-expendable-lings? ignore-lings?)
             (spell-claim-point?! claims 'corrosive-bile cx cy
                                  bile-claim-r
                                  current-frame
@@ -2621,11 +2664,16 @@
               (define explicit-ready? (not (eq? (dyn-hash-ref u 'bile-ready? #t) #f)))
               (define explicit-cd (safe-int (dyn-hash-ref u 'corrosive-bile-cooldown 0) 0))
               (define ready? (and explicit-ready? (<= explicit-cd 0) (>= current-frame bile-unlock)))
+              (define bile-rng (sc2-spell-cast-range 'corrosive-bile 9.0))
+              (define ground-enemies
+                (if ready?
+                    (filter (lambda ([e : Any]) (and (hash? e) (not (uh-flying? e)))) enemy-units)
+                    '()))
               (and ready?
                    ;; Priority 1: Fungal -> Bile guaranteed 60-damage combo
                    (or (let-values ([(ok? fx fy _s)
                                      (best-enemy-cluster
-                                      ux uy 9.0 enemy-units 1.5 0.0
+                                      ux uy bile-rng enemy-units 1.5 0.0
                                       (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
                                         (define fungal-cnt
                                           (for/sum : Integer ([e (in-list cl)])
@@ -2633,25 +2681,36 @@
                                                     (unit-inside-point-claim? claims 'fungal-growth (uh-x e) (uh-y e) 0.5 current-frame)
                                                     (any-effect-within? effects 'fungal-growth (uh-x e) (uh-y e) 2.5 (lambda ([_ef : Any]) #t)))
                                                 1 0)))
-                                        (if (> fungal-cnt 0)
+                                        (define hv-cnt (count-high-value-enemies-in cl))
+                                        (if (and (> fungal-cnt 0)
+                                                 (corrosive-bile-target-safe? cx cy all-allies
+                                                                              #:ignore-expendable-lings? (>= hv-cnt 2)))
                                             (+ (* 100.0 (->float fungal-cnt)) (* 10.0 (->float (length cl))))
                                             0.0)))])
                          (and ok?
-                              (let ([hp-sum (sum-hp-within enemy-units fx fy 1.6)])
+                              (let ([hp-sum (sum-hp-within enemy-units fx fy 1.6)]
+                                    [ign-lings? (>= (count-units-within enemy-units fx fy 2.0 bile-high-value-enemy?) 2)])
                                 (ravager-try-bile-point! claims tag ux uy fx fy hp-sum #f current-frame
-                                                         'ravager-fungal-bile-combo))))
+                                                         'ravager-fungal-bile-combo
+                                                         #:ignore-expendable-lings? ign-lings?))))
                        ;; Priority 2: Enemy Force Fields
                        (for/or : (Option spell-directive) ([eff (in-list effects)])
                          (and (hash? eff)
                               (eq? (effect-type eff) 'force-field)
                               (not (effect-friendly? eff))
-                              (<= (dist2 ux uy (uh-x eff) (uh-y eff)) 9.0)
+                              (<= (dist2 ux uy (uh-x eff) (uh-y eff)) bile-rng)
                               (ravager-try-bile-point! claims tag ux uy (uh-x eff) (uh-y eff) 60.0 #t current-frame
                                                        'ravager-force-field-shatter)))
                        ;; Priority 2b: Enemy Siege / Static Defense targets
                        (let-values ([(ok? tgt _w)
                                      (best-unit-target
-                                      ux uy 9.0 all-enemies zerg-bile-siege-or-static?
+                                      ux uy bile-rng all-enemies
+                                      (lambda ([e : Any])
+                                        (and (zerg-bile-siege-or-static? e)
+                                             (corrosive-bile-target-safe?
+                                              (uh-x e) (uh-y e) all-allies
+                                              #:ignore-expendable-lings?
+                                              (>= (count-units-within all-enemies (uh-x e) (uh-y e) 1.6 bile-high-value-enemy?) 2))))
                                       (lambda ([e : Any])
                                         (case (uh-type e)
                                           [(siege-tank-sieged) 130.0]
@@ -2661,23 +2720,69 @@
                                           [(bunker photon-cannon shield-battery) 100.0]
                                           [else 85.0])))])
                          (and ok?
-                              (ravager-try-bile-point! claims tag ux uy (uh-x tgt) (uh-y tgt) (uh-total-hp tgt) #f
-                                                       current-frame 'ravager-siege-static-bile)))
+                              (let* ([tx (uh-x tgt)]
+                                     [ty (uh-y tgt)]
+                                     [ign-lings? (>= (count-units-within all-enemies tx ty 1.6 bile-high-value-enemy?) 2)])
+                                (ravager-try-bile-point! claims tag ux uy tx ty (uh-total-hp tgt) #f
+                                                         current-frame 'ravager-siege-static-bile
+                                                         #:ignore-expendable-lings? ign-lings?))))
                        ;; Priority 3: Velocity-led ground clumps (>= 2 within 1.5 tiles)
                        (let-values ([(ok? bx by _s)
                                      (best-enemy-cluster
-                                      ux uy 9.0
-                                      (filter (lambda ([e : Any]) (and (hash? e) (not (uh-flying? e)))) enemy-units)
-                                      1.5 1.1
+                                      ux uy bile-rng ground-enemies 1.5 1.1
                                       (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
-                                        (if (>= (length cl) 2)
+                                        (define hv-cnt (count-high-value-enemies-in cl))
+                                        (if (and (>= (length cl) 2)
+                                                 (corrosive-bile-target-safe? cx cy all-allies
+                                                                              #:ignore-expendable-lings? (>= hv-cnt 2)))
                                             (+ (* 30.0 (->float (length cl)))
+                                               (* 10.0 (->float hv-cnt))
                                                (* 0.1 (sum-units-fl cl uh-total-hp)))
                                             0.0)))])
                          (and ok?
-                              (let ([hp-sum (sum-hp-within enemy-units bx by 1.6)])
+                              (let ([hp-sum (sum-hp-within enemy-units bx by 1.6)]
+                                    [ign-lings? (>= (count-units-within ground-enemies bx by 2.6 bile-high-value-enemy?) 2)])
                                 (ravager-try-bile-point! claims tag ux uy bx by hp-sum #f current-frame
-                                                         'ravager-clump-bile))))))]
+                                                         'ravager-clump-bile
+                                                         #:ignore-expendable-lings? ign-lings?))))
+                       ;; Priority 4 (Loop 62B): Single high-HP ground target (`hp >= 120`:
+                       ;; Roach/Ravager/Stalker/Immortal/Tank/Queen) when no `>= 2`-unit clump exists!
+                       (let-values ([(ok? tgt _w)
+                                     (best-unit-target
+                                      ux uy bile-rng ground-enemies
+                                      (lambda ([e : Any])
+                                        (and (bile-single-high-hp-ground-target? e)
+                                             (corrosive-bile-target-safe? (uh-x e) (uh-y e) all-allies)))
+                                      (lambda ([e : Any])
+                                        (+ (case (uh-type e)
+                                             [(immortal colossus archon thor thor-ap siege-tank siege-tank-sieged lurker lurker-mp) 140.0]
+                                             [(ravager stalker blink-stalker marauder queen cyclone ultralisk disruptor) 120.0]
+                                             [(roach zealot adept hellbat swarm-host swarm-host-mp) 100.0]
+                                             [else 85.0])
+                                           (* 0.15 (uh-total-hp e))
+                                           (- (* 2.0 (dist2 ux uy (uh-x e) (uh-y e)))))))])
+                         (and ok?
+                              (let* ([ex0 (uh-x tgt)]
+                                     [ey0 (uh-y tgt)]
+                                     [evx (uh-vx tgt)]
+                                     [evy (uh-vy tgt)]
+                                     [spd2 (+ (* evx evx) (* evy evy))]
+                                     [tx0 (if (<= spd2 0.0625)
+                                              ex0
+                                              (let* ([spd (flsqrt spd2)]
+                                                     [lead (min 0.75 (* 0.20 spd))])
+                                                (clamp-coord (+ ex0 (* lead (/ evx spd))))))]
+                                     [ty0 (if (<= spd2 0.0625)
+                                              ey0
+                                              (let* ([spd (flsqrt spd2)]
+                                                     [lead (min 0.75 (* 0.20 spd))])
+                                                (clamp-coord (+ ey0 (* lead (/ evy spd))))))]
+                                     [use-led? (and (<= (dist2 ux uy tx0 ty0) bile-rng)
+                                                    (corrosive-bile-target-safe? tx0 ty0 all-allies))]
+                                     [fx (if use-led? tx0 ex0)]
+                                     [fy (if use-led? ty0 ey0)])
+                                (ravager-try-bile-point! claims tag ux uy fx fy (uh-total-hp tgt) #f
+                                                         current-frame 'ravager-single-target-bile))))))]
 
              ;; --- INFESTOR ---
              [(infestor infestor-burrowed)
@@ -4849,9 +4954,11 @@
              (cond
                [nx
                 (define d-nx (dist2 (uh-x ht) (uh-y ht) (uh-x nx) (uh-y nx)))
-                (if (<= d-nx 10.0)
+                (define rech-rng (sc2-spell-cast-range 'nexus-energy-recharge 10.0))
+                (define rech-cd (sc2-spell-cooldown-frames 'nexus-energy-recharge 1344))
+                (if (<= d-nx rech-rng)
                     (begin
-                      (spell-claim-unit?! claims 'nexus-energy-recharge 1 current-frame 1344 #:caster-tag (uh-tag nx))
+                      (spell-claim-unit?! claims 'nexus-energy-recharge 1 current-frame rech-cd #:caster-tag (uh-tag nx))
                       (loop-r (cdr rem)
                               (cons (spell-directive (uh-tag nx) 'nexus 'nexus-energy-recharge 'unit (uh-tag ht)
                                                      (uh-x ht) (uh-y ht) 'nexus-energy-recharge-ht)

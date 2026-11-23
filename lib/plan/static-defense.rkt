@@ -526,6 +526,7 @@
 ;; Single-pass pre-indexer (`sd-index`) eliminating 20x duplicate scans over 200v200 units
 (struct sd-index
   (frame
+   live-obs?
    bx by nx ny tx ty ex ey eex eey
    ally-units ally-bldgs enemy-units enemy-bldgs effects
    ally-u-by-type
@@ -765,6 +766,14 @@
 
 (define (build-sd-index raw-obs)
   (define obs (ensure-obs raw-obs))
+  (define live-obs?
+    (and (hash? raw-obs)
+         (or (hash-has-key? raw-obs 'raw-mineral-harvesters)
+             (hash-has-key? raw-obs 'ideal-mineral-harvesters)
+             (hash-has-key? raw-obs 'mineral-patches)
+             (hash-has-key? raw-obs 'dead-unit-tags)
+             (hash-has-key? raw-obs 'map-grids)
+             (eq? (hash-ref raw-obs 'live-obs? #f) #t))))
   (define frame (fast-safe-nonneg-int (obs-ref obs 'frame 0) 0))
   (define-values (bx by) (home-xy obs))
   (define-values (nx ny) (nat-xy obs))
@@ -832,7 +841,7 @@
   (finalize-buckets! enemy-u-ht)
   (finalize-buckets! enemy-b-ht)
 
-  (sd-index frame bx by nx ny tx ty ex ey eex eey
+  (sd-index frame live-obs? bx by nx ny tx ty ex ey eex eey
             ally-units ally-bldgs enemy-units enemy-bldgs effects
             ally-u-ht ally-b-ht enemy-u-ht enemy-b-ht
             (reverse workers-rev) (reverse combat-rev) (reverse ally-air-rev) (reverse air-rev)
@@ -2361,9 +2370,12 @@
                                [else (loop (fx+ i 1))])))))
                   (if overcharge-target-id
                       (emit! (list 'cast-spell nid 'battery-overcharge overcharge-target-id))
-                      (let ([lc (get-low-caster)])
-                        (when lc
-                          (emit! (list 'cast-spell nid 'nexus-energy-recharge (u-id lc))))))))
+                      ;; Phase 2: On live SC2 obs (`live-obs?`), Layer 2 + `pro-spellcaster-micro`
+                      ;; own `4126` via `lib/plan/macro-ability-policy.rkt` with cooldown & Chrono hold.
+                      (unless (sd-index-live-obs? idx)
+                        (let ([lc (get-low-caster)])
+                          (when lc
+                            (emit! (list 'cast-spell nid 'nexus-energy-recharge (u-id lc)))))))))
 
               (when (and (pair? damaged-25) (fx> n-bats 0))
                 (for ([d (in-list damaged-25)])

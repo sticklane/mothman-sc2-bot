@@ -18604,6 +18604,188 @@
                 "L61B(3) #74 TvT Banshee/StarportTL w/ 0 EBays MUST schedule engineering-bay@1255+ strictly ahead of viking-fighter & stimpack (even if OC==0)")
   (reset-macro-escrow-tracker!))
 
+(run-suite "Suite 51.43: Loop 62 Phase 2 Upgrade-Slot Authority + Protoss Natural/Flood + ZvZ Roach-Flood Cap"
+  (define (l62-cand-u dec sym)
+    (hash-ref (hash-ref (priority-schedule-result-category-utilities
+                         (macro-brain-decision-priority-schedule dec))
+                        'candidate-utilities (hasheq))
+              sym 0.0))
+
+  ;; 0. Phase 2 P2.3 `sc2-upgrade-researcher-slot` parity across previously missing aliases/nodes
+  (assert-true! (and (eq? (sc2-upgrade-researcher-slot 'hi-sec-auto-tracking) 'engineering-bay)
+                     (eq? (sc2-upgrade-researcher-slot 'smart-servos) 'factory-techlab)
+                     (eq? (sc2-upgrade-researcher-slot 'flux-vanes) 'fleet-beacon)
+                     (eq? (sc2-upgrade-researcher-slot 'anion-pulse-crystals) 'fleet-beacon)
+                     (eq? (sc2-upgrade-researcher-slot 'shadow-stride) 'dark-shrine)
+                     (eq? (sc2-upgrade-researcher-slot 'psionic-storm) 'templar-archive)
+                     (eq? (sc2-upgrade-researcher-slot 'vehicle-weapons-1) 'armory)
+                     (eq? (sc2-upgrade-researcher-slot 'warp-gate) 'cybernetics-core)
+                     (eq? (sc2-upgrade-researcher-slot 'warpgate) 'cybernetics-core)
+                     (eq? (sc2-upgrade-researcher-slot 'overlord-speed) 'townhall)
+                     (eq? (sc2-upgrade-researcher-slot 'lurker-range) 'lurker-den)
+                     (eq? (sc2-upgrade-researcher-slot 'adrenal-glands) 'spawning-pool))
+                "L62-P2.3(0) sc2-upgrade-researcher-slot MUST resolve all previously missing upgrade aliases/nodes cleanly")
+
+  ;; 1. `#63/#78` Protoss Natural Nexus Escrow-Reset Cure:
+  ;;    (a) 1-base PvT at 36..44 supply (`f=4704`, `175M/97G`) MUST hold `nexus` strictly above `immortal@562.0`!
+  ;;    (b) 1-base PvT already at `380M/150G` (`f=4252`) with a scouted Widow Mine (0 DTs/Banshees/Lurkers)
+  ;;        MUST NOT burn 380M of Natural Nexus escrow on reactive `robotics-facility@1185.0`!
+  (reset-macro-escrow-tracker!)
+  (define l62-p-63-nat-over-immortal
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 4704
+      #:minerals 185 #:gas 97 #:supply-used 38 #:supply-cap 47 #:supply-left 9 #:pending-supply 0
+      #:workers 24 #:active-bases 1 #:mineral-harvesters 18 #:gas-harvesters 6
+      #:army-supply 12 #:enemy-threat-supply 4 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 4 'gateway 2 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 4 'gateway 2 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 24 'stalker 4 'zealot 2)
+      #:enemy-unit-counts (hasheq 'marine 4)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 2 'robotics-facility 1))))
+  (reset-macro-escrow-tracker!)
+  (define l62-p-78-nat-380m-no-wm-robo
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 4252
+      #:minerals 380 #:gas 150 #:supply-used 35 #:supply-cap 47 #:supply-left 12 #:pending-supply 0
+      #:workers 23 #:active-bases 1 #:mineral-harvesters 17 #:gas-harvesters 6
+      #:army-supply 10 #:enemy-threat-supply 4 #:under-attack? #f #:requires-detection? #t
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 4 'gateway 2 'cybernetics-core 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 4 'gateway 2 'cybernetics-core 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 23 'stalker 3 'zealot 2)
+      #:enemy-unit-counts (hasheq 'widow-mine 1 'marine 2)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 2))))
+  (assert-true! (and (eq? (macro-brain-decision-saving-for l62-p-63-nat-over-immortal) 'nexus)
+                     (not (eq? (macro-brain-decision-saving-for l62-p-63-nat-over-immortal) 'immortal))
+                     (>= (l62-cand-u l62-p-63-nat-over-immortal 'nexus) 620.0)
+                     (eq? (macro-brain-decision-saving-for l62-p-78-nat-380m-no-wm-robo) 'nexus)
+                     (not (memq 'robotics-facility (macro-brain-decision-scheduled-ids l62-p-78-nat-380m-no-wm-robo)))
+                     (not (memq 'forge (macro-brain-decision-scheduled-ids l62-p-78-nat-380m-no-wm-robo))))
+                "L62(1) #63/#78 Protoss Natural Nexus MUST stay >=620 above Immortal@562 at 38 supply & not reset at 380M for non-DT/Banshee Robo/Forge")
+
+  ;; 2. `#72 PvZ 12PoolBot` (`f=3808`, `335M/228G`, `0` open Gateway slots, `3` Gateways) Idle-Bank Breaker:
+  ;;    MUST schedule `shield-battery` / `gateway` / `cybernetics-core` / `pylon` (NEVER float `335M` with `sched=()`)!
+  (reset-macro-escrow-tracker!)
+  (define l62-p-72-idle-bank-break
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Zerg #:frame 3808
+      #:minerals 335 #:gas 228 #:supply-used 18 #:supply-cap 39 #:supply-left 21 #:pending-supply 0
+      #:workers 14 #:active-bases 1 #:mineral-harvesters 10 #:gas-harvesters 4
+      #:army-supply 4 #:enemy-threat-supply 10 #:under-attack? #t
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 2 'gateway 3 'assimilator 2)
+      #:unit-counts (hasheq 'probe 14 'zealot 2)
+      #:enemy-unit-counts (hasheq 'zergling 14)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 0))))
+  (assert-true! (and (pair? (macro-brain-decision-scheduled-ids l62-p-72-idle-bank-break))
+                     (ormap (lambda (s) (memq s '(gateway cybernetics-core shield-battery pylon)))
+                            (macro-brain-decision-scheduled-ids l62-p-72-idle-bank-break)))
+                "L62(2) #72 PvZ <3:30 Ling flood w/ 335M & 0 open GW slots MUST break idle bank into gateway/cyber/battery/pylon")
+
+  ;; 3. `#64 ZvZ Clicadinha` (`>= 8` enemy Roaches, `0` air/cloak):
+  ;;    MUST hard-defer `baneling-nest`, `baneling`, `zerg-melee-weapons-1`, `spine-crawler #2`, `spore-crawler #2`,
+  ;;    cap `zergling`, and schedule `roach` / `ravager`!
+  (reset-macro-escrow-tracker!)
+  (define l62-z-64-zvz-roach-cap
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Zerg #:frame 7440
+      #:minerals 225 #:gas 150 #:supply-used 68 #:supply-cap 92 #:supply-left 24 #:pending-supply 0
+      #:workers 42 #:active-bases 3 #:mineral-harvesters 32 #:gas-harvesters 10
+      #:army-supply 26 #:enemy-threat-supply 24 #:under-attack? #t
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'evolution-chamber 1
+                                      'spine-crawler 1 'spore-crawler 1 'extractor 4)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'evolution-chamber 1
+                                      'spine-crawler 1 'spore-crawler 1 'extractor 4)
+      #:unit-counts (hasheq 'drone 42 'queen 4 'zergling 14 'roach 6 'overlord 10)
+      #:enemy-unit-counts (hasheq 'roach 12)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 5 'evolution-chamber 1))))
+  (define l62-z64-sched (macro-brain-decision-scheduled-ids l62-z-64-zvz-roach-cap))
+  (assert-true! (and (not (memq 'baneling-nest l62-z64-sched))
+                     (not (memq 'baneling l62-z64-sched))
+                     (not (memq 'zerg-melee-weapons-1 l62-z64-sched))
+                     (not (memq 'spine-crawler l62-z64-sched))
+                     (not (memq 'spore-crawler l62-z64-sched))
+                     (not (memq 'zergling l62-z64-sched))
+                     (not (memq (macro-brain-decision-saving-for l62-z-64-zvz-roach-cap)
+                                '(baneling-nest baneling zerg-melee-weapons-1 spine-crawler spore-crawler zergling)))
+                     (or (not (not (memq 'roach l62-z64-sched)))
+                         (not (not (memq 'ravager l62-z64-sched)))))
+                "L62(3) #64 ZvZ vs >=8 Roaches MUST defer BanelingNest/Melee/extra static-def/Zerglings & produce Roach/Ravager")
+
+  ;; 4. L62B (`#1680` Fix 4): Macro ZvZ with >= 8 own Roaches+Ravagers & ready Hydralisk Den MUST
+  ;;    keep `hydralisk` strictly above `roach`/`ravager` (NEVER lock out Lair/Hydras at 0 Hydras)!
+  (reset-macro-escrow-tracker!)
+  (define l62b-z-zvz-hydra-not-locked
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Zerg #:frame 9000
+      #:minerals 150 #:gas 75 #:supply-used 68 #:supply-cap 100 #:supply-left 32 #:pending-supply 0
+      #:workers 48 #:active-bases 3 #:mineral-harvesters 36 #:gas-harvesters 12
+      #:army-supply 20 #:enemy-threat-supply 24 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'extractor 4)
+      #:total-building-counts (hasheq 'hatchery 2 'lair 1 'spawning-pool 1 'roach-warren 1 'hydralisk-den 1 'extractor 4)
+      #:unit-counts (hasheq 'drone 48 'queen 4 'roach 8 'ravager 2 'overlord 12)
+      #:enemy-unit-counts (hasheq 'roach 12)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 5))))
+  (reset-macro-escrow-tracker!)
+  (define l62b-z-zvz-lair-not-locked
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Zerg #:enemy-race 'Zerg #:frame 6000
+      #:minerals 200 #:gas 100 #:supply-used 56 #:supply-cap 84 #:supply-left 28 #:pending-supply 0
+      #:workers 38 #:active-bases 3 #:mineral-harvesters 29 #:gas-harvesters 9
+      #:army-supply 18 #:enemy-threat-supply 18 #:under-attack? #f
+      #:ready-building-counts (hasheq 'hatchery 3 'spawning-pool 1 'roach-warren 1 'extractor 3)
+      #:total-building-counts (hasheq 'hatchery 3 'spawning-pool 1 'roach-warren 1 'extractor 3)
+      #:unit-counts (hasheq 'drone 38 'queen 3 'roach 7 'ravager 2 'overlord 8)
+      #:enemy-unit-counts (hasheq 'roach 10)
+      #:open-facility-slots (hasheq 'townhall 3 'larva 5))))
+  (assert-true! (and (not (not (memq 'hydralisk (macro-brain-decision-scheduled-ids l62b-z-zvz-hydra-not-locked))))
+                     (> (l62-cand-u l62b-z-zvz-hydra-not-locked 'hydralisk)
+                        (l62-cand-u l62b-z-zvz-hydra-not-locked 'roach))
+                     (> (l62-cand-u l62b-z-zvz-hydra-not-locked 'hydralisk)
+                        (l62-cand-u l62b-z-zvz-hydra-not-locked 'ravager))
+                     (not (not (memq 'lair (macro-brain-decision-scheduled-ids l62b-z-zvz-lair-not-locked)))))
+                "L62B(4) Macro ZvZ w/ >=8 Roaches+Ravagers MUST transition cleanly to Lair & Hydralisks (never locked on Roach/Ravager)")
+
+  ;; 5. L62B (`#1680` Fix 5): 1-base Protoss at 36..45 supply (`< 4480f`) with `< 250M` (`150M`)
+  ;;    MUST NOT lock `nexus@620.0` ahead of Probes/Stalkers/Immortal, while `>= 250M` (`260M`)
+  ;;    DOES hold `nexus >= 620.0`!
+  (reset-macro-escrow-tracker!)
+  (define l62b-p-early-low-bank-no-lock
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 3400
+      #:minerals 150 #:gas 100 #:supply-used 38 #:supply-cap 47 #:supply-left 9 #:pending-supply 0
+      #:workers 24 #:active-bases 1 #:mineral-harvesters 18 #:gas-harvesters 6
+      #:army-supply 12 #:enemy-threat-supply 4 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 4 'gateway 2 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 4 'gateway 2 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 24 'stalker 4 'zealot 2)
+      #:enemy-unit-counts (hasheq 'marine 4)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 2 'robotics-facility 1))))
+  (reset-macro-escrow-tracker!)
+  (define l62b-p-early-260m-holds-nat
+    (step-priority-macro-brain
+     (make-macro-world-state
+      #:race 'Protoss #:enemy-race 'Terran #:frame 3400
+      #:minerals 260 #:gas 100 #:supply-used 38 #:supply-cap 47 #:supply-left 9 #:pending-supply 0
+      #:workers 24 #:active-bases 1 #:mineral-harvesters 18 #:gas-harvesters 6
+      #:army-supply 12 #:enemy-threat-supply 4 #:under-attack? #f
+      #:ready-building-counts (hasheq 'nexus 1 'pylon 4 'gateway 2 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+      #:total-building-counts (hasheq 'nexus 1 'pylon 4 'gateway 2 'cybernetics-core 1 'robotics-facility 1 'assimilator 2)
+      #:unit-counts (hasheq 'probe 24 'stalker 4 'zealot 2)
+      #:enemy-unit-counts (hasheq 'marine 4)
+      #:open-facility-slots (hasheq 'townhall 1 'gateway 2 'robotics-facility 1))))
+  (assert-true! (and (< (l62-cand-u l62b-p-early-low-bank-no-lock 'nexus) 620.0)
+                     (>= (l62-cand-u l62b-p-early-260m-holds-nat 'nexus) 620.0)
+                     (eq? (macro-brain-decision-saving-for l62b-p-early-260m-holds-nat) 'nexus))
+                "L62B(5) 1-base Protoss at 38 supply (<4480f) MUST NOT lock nexus@620 at 150M, MUST hold nexus>=620 at >=250M")
+  (reset-macro-escrow-tracker!))
+
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))
 (printf "\n============================================================================\n")

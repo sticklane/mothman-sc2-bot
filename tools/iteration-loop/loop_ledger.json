@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "active_wave": "Loop 61 (Phase 1 Single-Source Costs/Spells + Parallel Per-Building Upgrades + 3-Race RALLY_WORKERS & Midgame Harvest Throttle)",
+  "active_wave": "Loop 62 (Phase 2 Single Spell-Planning Authority + Extracted Macro-Ability Policy + Protoss Nat Escrow/Flood & Siege Fixes)",
   "promotion_criteria": {
     "zero_crashes_and_rejects": true,
     "overall_wr_ge_50pct": 50.0,
@@ -6023,6 +6023,104 @@
         "remote_md5_match": "8/8",
         "competition_id": 38,
         "validation_matches": "5145784-5145791"
+      }
+    },
+    {
+      "id": "iter61c_ship13_full",
+      "status": "UNCONDITIONAL_LIVE_SHIP_13_PHASE1_PARALLEL_UPGRADES_RALLY_WORKERS_ALL84_34W_48_8PCT_NL_ATH_EXT78_30W_47_4PCT_NL_ATH_TERRAN_ATH_HARVEST_DROPS_MINUS_89_6PCT",
+      "campaign": "Loops 29+ Self-Play, Tactics Arena 3.1 & Expanded Roster Campaign (Loop 61 Live Release #13: commit pnzpwmuy d6c595db, BuildVersion pnzpwmuy_4b9ea037 live on all 8 v1+v2 bots)",
+      "loop_self_improvements": [
+        "L61-LOOP-1 (Three-Wave Surgical Convergence Caught Asymmetric P1/P3 Gas Ratchet Before Shipping): Wave A hit CORE14 23-19-0 ATH but spiked gas_rich_min_starved 8->31; Wave B fixed GRMS 31->11 but exposed an asymmetric P1 pull / P3 refill gas ratchet at 9:00; Wave C harmonized worker econ tiers & harvest cooldowns, smashing ALL-TIME HIGHS across ALL_84 (34W-43L-7T, 48.8% NL, 0.85x), EXT_78 (30W-41L-7T, 47.4% NL, 0.80x), UNSEEN12 (10W), and Terran EXT_78 (11-14-1, 0.98x / ALL 1.08x).",
+        "L61-LOOP-2 (Phase 1 Single-Source Costs/Spells + Parallel Per-Building Upgrades + 3-Race RALLY_WORKERS): Collapsing duplicate cost/supply/spell tables and splitting econ-ledger serial upg-sym into parallel per-building upgrade slots beat Pro GM on WarpGate (4:02), Terran +2 Inf Wep (10:24) & +1 Veh Wep (8:45), and Zerg +1 Missile (7:16), lifting ArmyMin +44.4% & ArmyGas +72.2% while live 3-race RALLY_WORKERS (963) + harvest throttling slashed 3666 drops -89.6% (70,080 -> 7,296) and P3 drops -90.4%."
+      ],
+      "spec_summary": "Loop 61C (Live Release #13, commit pnzpwmuy d6c595db, BuildVersion pnzpwmuy_4b9ea037, live on all 8 v1+v2 AI Arena bots via deploy-aiarena.yml run 45153617708): Phase 1 single-source costs/supply/tech-nodes & unified SC2-SPELL-SPEC registry + per-building parallel upgrade slots wired to due-pro-upgrade-timings + 3-race RALLY_WORKERS (3690) & midgame harvest throttling + anti-Banshee/Reaper/1-base-flood fixes. After 3 surgical waves (A: GRMS 8->31 caught; B: GRMS 31->11 & asymmetric P1/P3 gas ratchet caught; C: full convergence), Loop 61C beat Release #12 ZIPs 7W-5L-0T (58.3%, 0.99x agg / 1.37x med) and shattered all-time highs across ALL_84 34W-43L-7T (40.5% WR / 48.8% NL ATH, 0.85x, SB 4.0%, avgStep 11.81ms fastest ever), EXT_78 30W-41L-7T (38.5% WR / 47.4% NL ATH, 0.80x, SB 4.1%), CORE14 20W-19L-3T (47.6% WR / 54.8% NL, 1.08x; HIST12 19-15-2 1.16x), UNSEEN12 10W-22L-4T (27.8% WR / 38.9% NL, 0.57x; 10W ATH), SELF_6 4W-2L-0T (1.38x), and six 3-0 sweeps (titania, monsterbot, oberon, Creepy_strategies, Mulebot 3.63x, CryptBotRevival 29.25x) plus zig-reapers 2-1. Standout highs: Terran EXT_78 11W-14L-1T (42.3% WR ATH, 0.98x, ALL 13-14-1 1.08x, SB 2.1%, ALL PRO FLAGS OK); Zerg EXT_78 11W-11L-4T (42.3% WR / 57.7% NL, 0.75x, +4W vs R12); Protoss WG 4:02 (beats Pro 4:03), Charge 6:28 (-34s); EPM 148.9 (beats Pro GM 147.6), ArmyMin +44.4% (657 med / 2,100 pk ATH), ArmyGas +72.2% (241 med / 763 pk ATH), ColMin 1,077 (pk 2,127 ATH), ColGas 237 (pk 694 ATH); Terran +2 Inf Wep 10:24 (-212s, beats Pro 10:52) & +1 Veh Wep 8:45 (-197s, beats Pro 10:56), Zerg +1 Missile 7:16 (beats Pro 7:44); [APM_CAP_DROPS] 3666 slashed -89.6% (70,080 -> 7,296 ATL), P3 -90.4% (58,392 -> 5,630 ATL), P1 -38.0% vs R12 (-84.5% vs R11: 11,550), live RALLY_WORKERS 0 -> 963 (11.5/g across all 3 races); GRMS 7 ATL, EscrowLock 3 ATL, zero_fire_retreat 52 ATL, zero_kill 3 ATL, early_bunkers_4m 0.81 ATL, 4-Corner delta NL 7.4pp, Concave Wrap positive all 3 races, 0 crashes/faults/rejects/SELF_CANCEL/spikes >=500ms. 4-Race ELF ZIP Smoke vs titania: 4W-0L-0T (100.0%, 11.39x agg / 17.83x med, avgStep 9.21ms, 3666=44/g, 80 RALLY_WORKERS).",
+      "rev": "pnzpwmuy d6c595db (BuildVersion pnzpwmuy_4b9ea037, LIVE AI ARENA SHIP #13)",
+      "run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_092645_iter61c_ship13_full",
+      "baseline_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_092048_iter61c_h2h_12",
+      "wave1_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_065424_iter61_h2h_12",
+      "wave1_full_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_070453_iter61_ship13_full",
+      "wave2_h2h_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_081149_iter61b_h2h_12",
+      "wave2_full_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_081904_iter61b_ship13_full",
+      "zip_smoke_run_dir": "/home/sjaconette/sc2-local-arena/runs/20261123_100542_iter61c_ship13_zip_smoke",
+      "score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter61c_ship13_full_score.json",
+      "baseline_h2h_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter61c_h2h_12_score.json",
+      "zip_smoke_score_json": "/home/sjaconette/.gemini/antigravity/brain/d28d22f4-2d13-41e2-9b7b-32757f58523b/scratch/iter61c_ship13_zip_smoke_score.json",
+      "clean_n": 78,
+      "cohort_primary": "full_78_core14_plus_unseen12",
+      "record_clean": "30W-41L-7T (38.5% WR / 47.4% NL ATH, 0.80x; CORE14 20W-19L-3T 54.8% NL 1.08x, HIST12 19W-15L-2T 1.16x, UNSEEN12 10W-22L-4T 38.9% NL 0.57x [10W ATH]; ALL_84 34W-43L-7T 48.8% NL ATH 0.85x; SELF_6 4W-2L 1.38x; H2H_12 7W-5L 58.3%; ZIP Smoke 4W-0L 11.39x)",
+      "win_rate_pct": 38.5,
+      "non_loss_pct": 47.4,
+      "core14_wr_pct": 47.6,
+      "unseen12_wins": 10,
+      "h2h_record": "7W-5L-0T (58.3%, 0.99x agg / 1.37x med vs Rel #12; W1 H2H 7W-5L 1.17x, W2 H2H 8W-4L 1.34x)",
+      "trade_agg": 0.8,
+      "sup_blk_pct": 4.1,
+      "action_rejects": 0,
+      "crashes": 0,
+      "terran_111_opening_stall_matches": 5,
+      "prod_placement_stall_matches": 0,
+      "one_base_lockout_matches": 3,
+      "gas_rich_min_starved_matches": 7,
+      "cloaked_unit_damage_losses": 2,
+      "siege_range_zero_dps_losses": 12,
+      "zero_kill_collapse_matches": 3,
+      "drip_feed_collapse_matches": 31,
+      "wall_timeout_ties": 6,
+      "pro_mechanics_kpis": {
+        "apm_avg": 292.6,
+        "epm_avg": 148.9,
+        "epm_pro_ref": 147.6,
+        "spm_avg": 40.8,
+        "spm_pro_ref": 36.9,
+        "apm_cap_drops_total_84m": 543813,
+        "apm_cap_drops_p0_84m": 19990,
+        "apm_cap_drops_p1_84m": 11550,
+        "apm_cap_drops_p3_84m": 5630,
+        "apm_cap_drops_3666_84m": 7296,
+        "rally_workers_cmds_84m": 963
+      },
+      "stall_watchdog_kpis": {
+        "sup_cap_min_pct": 28.2,
+        "zero_income_matches": 10,
+        "zero_gas_matches": 17,
+        "wk_plateau_8m_pct": 30.3
+      },
+      "base_geometry_kpis": {
+        "pylon_clump_pct": 0.0,
+        "pylon_spacing_nn": 15.5,
+        "nat_supply_pct": 88.4,
+        "protoss_nat_supply_pct": 90.9,
+        "terran_nat_supply_pct": 85.7,
+        "zvz_nat_wall_pct": 12.5,
+        "early_bunkers_4m": 0.81
+      },
+      "by_race": {
+        "Protoss": {
+          "record": "EXT78 8W-16L-2T (30.8% WR / 38.5% NL, 0.66x, SB 5.3%), ALL84 10W-17L-2T (0.77x), WG 4:02 (beats Pro 4:03), Charge 6:28 (-34s), ArmyMin +43.5%, ArmyGas +38.3%, ColMin +22.2%, P1 drops -85.2%",
+          "trade_agg": 0.66,
+          "sup_blk": 5.3
+        },
+        "Terran": {
+          "record": "EXT78 11W-14L-1T (42.3% WR ATH / 46.2% NL, 0.98x/0.61x, SB 2.1%, ALL PRO FLAGS OK), ALL84 13W-14L-1T (1.08x), 3rd CC 6:32 (-79s), +2 Inf Wep 10:24 (beats Pro 10:52), +1 Veh Wep 8:45 (beats Pro 10:56), ArmyMin +72.5%, ArmyGas +131.5%",
+          "trade_agg": 0.98,
+          "sup_blk": 2.1
+        },
+        "Zerg": {
+          "record": "EXT78 11W-11L-4T (42.3% WR / 57.7% NL, 0.75x/0.48x, SB 4.9%, +4W vs R12), ZvT 5-2-2 (1.04x), +1 Missile 7:16 (beats Pro 7:44), Pool 1:12 (= Pro), ArmyMin +54.9%, ArmyGas +59.1%, zvz_nat_wall 12.5%",
+          "trade_agg": 0.75,
+          "sup_blk": 4.9
+        }
+      },
+      "aiarena_deploy": {
+        "workflow": "deploy-aiarena.yml",
+        "run_id": 45153617708,
+        "url": "https://github.com/sticklane/mothman-sc2-bot/actions/runs/45153617708",
+        "status": "GREEN",
+        "duration_sec": 105,
+        "bots_active": 8,
+        "remote_md5_match": "8/8",
+        "competition_id": 38,
+        "validation_matches": "5145805-5145812"
       }
     }
   ],
