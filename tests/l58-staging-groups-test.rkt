@@ -1187,6 +1187,458 @@
                       (staging-step-result-dispatched-groups r-2b-nat)
                       (staging-step-result-staging-groups r-2b-nat))))
 
+;; =============================================================================
+;; 11. Loop 65 (`#1829`): Concave Gaps C1, C2 & C5
+;; =============================================================================
+(let ()
+  ;; 11a (C1): Non-splash concave active for `>= 4` ranged units (0 enemy splash!), wider with splash,
+  ;;     and strictly respects `d-tgt <= wr + 1.0` (never pulls in-range units off DPS!)
+  (define hydras-4
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 9700 i) 'hydralisk 70.0 (+ 49.7 (* 0.2 i)) #:hp 90.0)))
+  (define hydras-inrange
+    (mk-u 9709 'hydralisk 75.5 50.0 #:hp 90.0)) ;; d=5.5t <= wr(5.0)+1.0
+  (define enemy-marines-nosplash
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 9720 i) 'marine 81.0 (+ 49.5 (* 0.3 i)) #:hp 45.0)))
+  (define ctx-nosplash (build-combat-positioning-context (cons hydras-inrange hydras-4) enemy-marines-nosplash))
+  (define ns-ys
+    (filter real?
+            (for/list ([u (in-list hydras-4)])
+              (define-values (ax ay) (compute-lateral-concave-spread-pt ctx-nosplash u 81.0 50.0 5.0))
+              (and ax ay ay))))
+  (define-values (ir-x _ir-y) (compute-lateral-concave-spread-pt ctx-nosplash hydras-inrange 81.0 50.0 5.0))
+  (define enemy-with-colossus
+    (cons (mk-u 9730 'colossus 81.0 50.0 #:hp 200.0 #:shield 150.0) enemy-marines-nosplash))
+  (define ctx-splash4 (build-combat-positioning-context hydras-4 enemy-with-colossus))
+  (define sp-ys
+    (filter real?
+            (for/list ([u (in-list hydras-4)])
+              (define-values (ax ay) (compute-lateral-concave-spread-pt ctx-splash4 u 81.0 50.0 5.0))
+              (and ax ay ay))))
+  (define ns-span (if (>= (length ns-ys) 2) (- (apply max ns-ys) (apply min ns-ys)) 0.0))
+  (define sp-span (if (>= (length sp-ys) 2) (- (apply max sp-ys) (apply min sp-ys)) 0.0))
+  (check-true "l65-c1-non-splash-concave-4units-wider-with-splash-and-no-dps-pull"
+              (and (>= (length ns-ys) 2)
+                   (>= ns-span 3.0)
+                   (> sp-span ns-span)
+                   (not ir-x))
+              (format "ns-ys=~a ns-span=~a sp-span=~a ir-x=~a" ns-ys ns-span sp-span ir-x))
+
+  ;; 11b (C2): Local clash centroid (`<= 22t`) immune to stray off-map enemy scout at `(180, 180)`
+  (define marines-6
+    (for/list ([i (in-range 6)]) (mk-u (+ 9740 i) 'marine 70.0 (+ 49.0 (* 0.4 i)) #:hp 45.0)))
+  (define clash-plus-stray
+    (append (for/list ([i (in-range 4)]) (mk-u (+ 9750 i) 'stalker 81.0 (+ 49.5 (* 0.3 i)) #:hp 80.0 #:shield 80.0))
+            (list (mk-u 9759 'stalker 180.0 180.0 #:hp 80.0 #:shield 80.0))))
+  (define ctx-local (build-combat-positioning-context marines-6 clash-plus-stray))
+  (check-true "l65-c2-local-clash-centroid-immune-to-stray-offmap-scout"
+              (and (<= (abs (- (combat-pos-ctx-enemy-cx ctx-local) 81.0)) 0.5)
+                   (<= (abs (- (combat-pos-ctx-enemy-cy ctx-local) 50.0)) 0.8)
+                   (>= (combat-pos-ctx-fwd-ux ctx-local) 0.98))
+              (format "ecx=~a ecy=~a fwd=(~a,~a)"
+                      (combat-pos-ctx-enemy-cx ctx-local)
+                      (combat-pos-ctx-enemy-cy ctx-local)
+                      (combat-pos-ctx-fwd-ux ctx-local)
+                      (combat-pos-ctx-fwd-uy ctx-local)))
+
+  ;; 11c (C5): All-race caster rear leash (Protoss HT/Sentry/Disruptor/Colossus + Zerg Infestor/Viper/Lurker;
+  ;;     burrowed Lurker NEVER pulled!)
+  (define p-core (list (mk-u 9760 'zealot 70.0 49.5 #:hp 100.0 #:shield 50.0)
+                       (mk-u 9761 'zealot 70.0 50.5 #:hp 100.0 #:shield 50.0)))
+  (define p-ht   (mk-u 9762 'high-templar 72.5 50.0 #:hp 40.0 #:shield 40.0))
+  (define p-sen  (mk-u 9763 'sentry 72.5 50.0 #:hp 40.0 #:shield 40.0))
+  (define p-dis  (mk-u 9764 'disruptor 72.5 50.0 #:hp 100.0 #:shield 100.0))
+  (define p-col  (mk-u 9765 'colossus 72.0 50.0 #:hp 200.0 #:shield 150.0))
+  (define e-far  (list (mk-u 9770 'marine 84.0 50.0 #:hp 45.0)
+                       (mk-u 9771 'marine 84.5 50.5 #:hp 45.0)))
+  (define ctx-pc (build-combat-positioning-context (append p-core (list p-ht p-sen p-dis p-col)) e-far))
+  (define-values (ht-lx _ht-ly) (compute-caster-rear-leash-pt ctx-pc p-ht))
+  (define-values (se-lx _se-ly) (compute-caster-rear-leash-pt ctx-pc p-sen))
+  (define-values (di-lx _di-ly) (compute-caster-rear-leash-pt ctx-pc p-dis))
+  (define-values (co-lx _co-ly) (compute-caster-rear-leash-pt ctx-pc p-col))
+
+  (define z-core (list (mk-u 9780 'roach 70.0 49.5 #:hp 145.0)
+                       (mk-u 9781 'roach 70.0 50.5 #:hp 145.0)))
+  (define z-inf  (mk-u 9782 'infestor 72.5 50.0 #:hp 90.0))
+  (define z-vip  (mk-u 9783 'viper 72.5 50.0 #:hp 150.0 #:flying #t))
+  (define z-lurk (mk-u 9784 'lurker 72.0 50.0 #:hp 200.0))
+  (define z-lbur (hash-set (mk-u 9785 'lurker-burrowed 72.0 50.0 #:hp 200.0) 'burrowed #t))
+  (define ctx-zc (build-combat-positioning-context (append z-core (list z-inf z-vip z-lurk z-lbur)) e-far))
+  (define-values (in-lx _in-ly) (compute-caster-rear-leash-pt ctx-zc z-inf))
+  (define-values (vi-lx _vi-ly) (compute-caster-rear-leash-pt ctx-zc z-vip))
+  (define-values (lu-lx _lu-ly) (compute-caster-rear-leash-pt ctx-zc z-lurk))
+  (define-values (lb-lx _lb-ly) (compute-caster-rear-leash-pt ctx-zc z-lbur))
+  (check-true "l65-c5-all-race-caster-rear-leash-protoss-zerg-and-burrowed-lurker-exempt"
+              (and ht-lx (< ht-lx 68.5)
+                   se-lx (< se-lx 68.5)
+                   di-lx (< di-lx 68.5)
+                   co-lx (< co-lx 68.5)
+                   in-lx (< in-lx 68.5)
+                   vi-lx (< vi-lx 68.5)
+                   lu-lx (< lu-lx 68.5)
+                   (not lb-lx))
+              (format "P=(~a,~a,~a,~a) Z=(~a,~a,~a,bur=~a)"
+                      ht-lx se-lx di-lx co-lx in-lx vi-lx lu-lx lb-lx))
+
+  ;; 11d (L65B `#1861`/`#1862`): Energy-ready Sentry (`>= 50` energy) within `<= 11.5t`
+  ;;     and `caster-proj <= 1.2` is EXEMPT from rear-leash so Force Field fires cleanly;
+  ;;     dry (`< 50` energy), far (`> 11.5t`), or way ahead (`> 1.2t`) still leashes back!
+  (define e-ff-rng (list (mk-u 9790 'marine 79.0 50.0 #:hp 45.0)
+                         (mk-u 9791 'marine 79.5 50.5 #:hp 45.0)))
+  (define sen-ready (mk-u 9792 'sentry 70.8 50.0 #:hp 40.0 #:shield 40.0 #:energy 75.0))
+  (define sen-dry   (mk-u 9793 'sentry 70.8 50.0 #:hp 40.0 #:shield 40.0 #:energy 30.0))
+  (define sen-way   (mk-u 9794 'sentry 71.6 50.0 #:hp 40.0 #:shield 40.0 #:energy 75.0))
+  (define ctx-ff (build-combat-positioning-context (append p-core (list sen-ready sen-dry sen-way)) e-ff-rng))
+  (define-values (s-rdy-x _s-rdy-y) (compute-caster-rear-leash-pt ctx-ff sen-ready))
+  (define-values (s-dry-x _s-dry-y) (compute-caster-rear-leash-pt ctx-ff sen-dry))
+  (define-values (s-way-x _s-way-y) (compute-caster-rear-leash-pt ctx-ff sen-way))
+  (define ctx-far-ff (build-combat-positioning-context (append p-core (list sen-ready)) e-far))
+  (define-values (s-far-x _s-far-y) (compute-caster-rear-leash-pt ctx-far-ff sen-ready))
+  (check-true "l65b-sentry-force-field-exempt-ge50-energy-within-11-5t"
+              (and (not s-rdy-x)
+                   s-dry-x (< s-dry-x 68.5)
+                   s-way-x (< s-way-x 68.5)
+                   s-far-x (< s-far-x 68.5))
+              (format "ready=~a dry=~a way=~a far=~a" s-rdy-x s-dry-x s-way-x s-far-x))
+
+  ;; 11e (L65C `#1874`/`#1875` — THE #1 KILLER FIX):
+  ;;     `compute-blind-uphill-retreat-pt` strictly requires `(and took-damage? uphill-gap?)`,
+  ;;     exempts `'stimpack`-buffed Marines/Marauders, and widens `visible-in-range?` to `>= 14.0t`!
+  (define m-flat (mk-u 9801 'marine 60.0 60.0 #:hp 35.0 #:max-hp 45.0 #:z 8.0))
+  (define m-stim (hash-set (mk-u 9802 'marine 60.0 60.0 #:hp 35.0 #:max-hp 45.0 #:z 8.0) 'buffs '(stimpack)))
+  (define m-undmg (mk-u 9803 'marine 60.0 60.0 #:hp 45.0 #:max-hp 45.0 #:z 8.0))
+  (define vis-tank-12t (list (mk-u 9804 'siege-tank-sieged 72.5 60.0 #:hp 175.0 #:z 10.0)))
+  (define-values (fg-x _fg-y)
+    (compute-blind-uphill-retreat-pt #f m-flat #:prev-hp 45.0 #:enemy-units '()
+                                     #:uphill-target-x 66.0 #:uphill-target-y 60.0 #:uphill-z 8.0))
+  (define-values (st-x _st-y)
+    (compute-blind-uphill-retreat-pt #f m-stim #:prev-hp 45.0 #:enemy-units '()
+                                     #:uphill-target-x 66.0 #:uphill-target-y 60.0 #:uphill-z 10.0))
+  (define-values (ud-x _ud-y)
+    (compute-blind-uphill-retreat-pt #f m-undmg #:prev-hp 45.0 #:enemy-units '()
+                                     #:uphill-target-x 66.0 #:uphill-target-y 60.0 #:uphill-z 10.0))
+  (define-values (tk-x _tk-y)
+    (compute-blind-uphill-retreat-pt #f m-flat #:prev-hp 45.0 #:enemy-units vis-tank-12t
+                                     #:uphill-target-x 66.0 #:uphill-target-y 60.0 #:uphill-z 10.0))
+  (check-true "l65c-blind-uphill-strict-and-stimpack-exempt-and-14t-visible-tank-guard"
+              (and (not fg-x) (not st-x) (not ud-x) (not tk-x))
+              (format "flat=~a stim=~a undmg=~a tank12t=~a" fg-x st-x ud-x tk-x))
+
+  ;; 11f (L65C `#1874`/`#1875`): `spotter-rank-for-race` NEVER leases `warp-prism`, `medivac`,
+  ;;     `phoenix`, `oracle`, `banshee`, or `mutalisk` (dedicated vision units ONLY!)
+  (define p-non-spot
+    (plan-high-ground-vision-actions
+     'Protoss
+     (list (mk-u 9811 'warp-prism 56.0 58.0 #:flying #t)
+           (mk-u 9812 'phoenix 57.0 58.0 #:flying #t)
+           (mk-u 9813 'oracle 58.0 58.0 #:flying #t))
+     '() '() #:uphill-x 66.0 #:uphill-y 60.0))
+  (define t-non-spot
+    (plan-high-ground-vision-actions
+     'Terran
+     (list (mk-u 9814 'medivac 56.0 58.0 #:flying #t)
+           (mk-u 9815 'banshee 57.0 58.0 #:flying #t))
+     '() '() #:uphill-x 66.0 #:uphill-y 60.0))
+  (define z-non-spot
+    (plan-high-ground-vision-actions
+     'Zerg
+     (list (mk-u 9816 'mutalisk 56.0 58.0 #:flying #t))
+     '() '() #:uphill-x 66.0 #:uphill-y 60.0))
+  (check-true "l65c-spotter-excludes-prism-medivac-phoenix-oracle-banshee-mutalisk"
+              (and (null? p-non-spot) (null? t-non-spot) (null? z-non-spot))
+              (format "P=~a T=~a Z=~a" p-non-spot t-non-spot z-non-spot))
+
+  ;; 11g (L65D `#1891`/`#1892`): `compute-blind-uphill-retreat-pt` rejects distant `> 16.0t`
+  ;;     uphill hints AND widens `visible-in-range?` sightline to `>= 16.5t`!
+  (define-values (far-uh-x _far-uh-y)
+    (compute-blind-uphill-retreat-pt #f m-flat #:prev-hp 45.0 #:enemy-units '()
+                                     #:uphill-target-x 80.0 #:uphill-target-y 60.0 #:uphill-z 10.0))
+  (define vis-en-15t (list (mk-u 9817 'siege-tank-sieged 75.5 60.0 #:hp 175.0 #:z 10.0)))
+  (define-values (vis15-x _vis15-y)
+    (compute-blind-uphill-retreat-pt #f m-flat #:prev-hp 45.0 #:enemy-units vis-en-15t
+                                     #:uphill-target-x 66.0 #:uphill-target-y 60.0 #:uphill-z 10.0))
+  (check-true "l65d-blind-uphill-rejects-gt16t-hint-and-16-5t-visible-enemy"
+              (and (not far-uh-x) (not vis15-x))
+              (format "far-uh=~a vis15=~a" far-uh-x vis15-x))
+
+  ;; 11h (L65E `#1907`/`#1908`): `'main-reinforce` releases immediately on 3+ base Natural threat
+  ;;     (`<= 28t`), NEVER captures during `defensive-muster-active?`, & respects `64f` no-prod cap!
+  (define bldgs-3b-e (list (mk-u 9851 'hatchery 32.5 32.5)
+                           (mk-u 9852 'hatchery 62.5 32.5)
+                           (mk-u 9853 'hatchery 95.0 32.5)))
+  (define front-e (for/list ([i (in-range 5)]) (mk-u (+ 9860 i) 'ravager 110.0 (+ 105.0 i) #:hp 120.0)))
+  (define main-roaches-e (list (mk-u 9871 'roach 35.0 32.5 #:hp 145.0)
+                               (mk-u 9872 'roach 36.0 32.5 #:hp 145.0)))
+  (define leases-3b-e (make-hasheqv))
+  (define mgr-3b-e (make-staging-group-manager))
+  ;; Step 1: Safe -> captures main Roaches into `'main-reinforce`
+  (define r-3b-cap
+    (step-staging-groups! mgr-3b-e #:frame 7000 #:live-obs? #t
+                          #:ally-units (append front-e main-roaches-e)
+                          #:combat-units (append front-e main-roaches-e)
+                          #:ally-buildings bldgs-3b-e #:enemy-units '()
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5
+                          #:role-leases leases-3b-e))
+  ;; Step 2: Substantive enemy push (`>= 6.0` sup / `>= 3` Roaches at `18t` of Nat `(80.5, 32.5)`) on 3 bases ->
+  ;;         `'main-reinforce` immediately releases & clears staging lease!
+  (define r-3b-nat-rel
+    (step-staging-groups! mgr-3b-e #:frame 7016 #:live-obs? #t
+                          #:ally-units (append front-e main-roaches-e)
+                          #:combat-units (append front-e main-roaches-e)
+                          #:ally-buildings bldgs-3b-e
+                          #:enemy-units (list (mk-u 9880 'roach 80.5 32.5 #:hp 145.0)
+                                              (mk-u 9881 'roach 80.5 33.0 #:hp 145.0)
+                                              (mk-u 9882 'roach 80.5 32.0 #:hp 145.0))
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5
+                          #:role-leases leases-3b-e))
+  ;; Step 3: Fresh manager with `#:defensive-muster-active? #t` -> NEVER captures `'main-reinforce`!
+  (define mgr-3b-must (make-staging-group-manager))
+  (define r-3b-must
+    (step-staging-groups! mgr-3b-must #:frame 7000 #:live-obs? #t
+                          #:ally-units (append front-e main-roaches-e)
+                          #:combat-units (append front-e main-roaches-e)
+                          #:ally-buildings bldgs-3b-e #:enemy-units '()
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5
+                          #:defensive-muster-active? #t))
+  ;; Step 4: Zerg keeps `64f` no-prod wait cap (`+68f` dispatches cleanly!)
+  (define mgr-3b-wait (make-staging-group-manager))
+  (step-staging-groups! mgr-3b-wait #:frame 7000 #:live-obs? #t
+                        #:ally-units (append front-e main-roaches-e)
+                        #:combat-units (append front-e main-roaches-e)
+                        #:ally-buildings bldgs-3b-e #:enemy-units '()
+                        #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                        #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5)
+  (define r-3b-wait68
+    (step-staging-groups! mgr-3b-wait #:frame 7068 #:live-obs? #t
+                          #:ally-units (append front-e main-roaches-e)
+                          #:combat-units (append front-e main-roaches-e)
+                          #:ally-buildings bldgs-3b-e #:enemy-units '()
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5))
+  (check-true "l65e-main-reinforce-releases-on-3base-nat-threat-and-never-captures-during-muster"
+              (and (memq 'main-reinforce (staging-step-result-staging-groups r-3b-cap))
+                   (not (memq 'main-reinforce (staging-step-result-staging-groups r-3b-nat-rel)))
+                   (not (set-member? (staging-step-result-handled-tags r-3b-nat-rel) 9871))
+                   (not (hash-has-key? leases-3b-e 9871))
+                   (not (memq 'main-reinforce (staging-step-result-staging-groups r-3b-must)))
+                   (not (set-member? (staging-step-result-handled-tags r-3b-must) 9871))
+                   (memq 'main-reinforce (staging-step-result-dispatched-groups r-3b-wait68)))
+              (format "cap=~a nat-rel=~a lease=~a must=~a wait68=~a"
+                      (staging-step-result-staging-groups r-3b-cap)
+                      (staging-step-result-staging-groups r-3b-nat-rel)
+                      (hash-ref leases-3b-e 9871 #f)
+                      (staging-step-result-staging-groups r-3b-must)
+                      (staging-step-result-dispatched-groups r-3b-wait68)))
+
+  ;; 11i (L65F/L65H `#1920`/`#1948`): Race-aware `'main-reinforce` wait caps:
+  ;;     Zerg `96f/64f`, Terran `168f/112f` (unchanged!), Protoss `268f/180f` (`12s/8s`),
+  ;;     AND lone scout Phoenix/Probe NEVER disables `'main-reinforce`!
+  (define bldgs-p-f (list (mk-u 9890 'nexus 32.5 32.5)
+                          (mk-u 9891 'nexus 62.5 32.5)
+                          (mk-u 9905 'gateway 38.0 34.0)
+                          (mk-u 9906 'gateway 41.0 34.0)))
+  (define front-p-f (for/list ([i (in-range 5)]) (mk-u (+ 9892 i) 'stalker 110.0 (+ 105.0 i) #:hp 80.0 #:shield 80.0)))
+  (define main-p-f (list (mk-u 9898 'stalker 35.0 32.5 #:hp 80.0 #:shield 80.0)
+                         (mk-u 9899 'stalker 36.0 32.5 #:hp 80.0 #:shield 80.0)))
+  (define mgr-p-f (make-staging-group-manager))
+  ;; Lone enemy Phoenix at 24t from Nat + Probe at 10t from Main -> MUST NOT disable `'main-reinforce`!
+  (define r-p-f0
+    (step-staging-groups! mgr-p-f #:frame 7000 #:live-obs? #t
+                          #:ally-units (append front-p-f main-p-f)
+                          #:combat-units (append front-p-f main-p-f)
+                          #:ally-buildings bldgs-p-f
+                          #:enemy-units (list (mk-u 9901 'phoenix 86.5 32.5 #:hp 120.0 #:shield 60.0 #:flying #t)
+                                              (mk-u 9902 'probe 42.5 32.5 #:hp 20.0 #:shield 20.0))
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5))
+  ;; Protoss no-prod wait is 180f (`8.0s`): STILL staging at `+68f` and `+116f`, dispatches at `+184f`!
+  (define r-p-f68
+    (step-staging-groups! mgr-p-f #:frame 7068 #:live-obs? #t
+                          #:ally-units (append front-p-f main-p-f)
+                          #:combat-units (append front-p-f main-p-f)
+                          #:ally-buildings bldgs-p-f #:enemy-units '()
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5))
+  (define r-p-f116
+    (step-staging-groups! mgr-p-f #:frame 7116 #:live-obs? #t
+                          #:ally-units (append front-p-f main-p-f)
+                          #:combat-units (append front-p-f main-p-f)
+                          #:ally-buildings bldgs-p-f #:enemy-units '()
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5))
+  (define r-p-f184
+    (step-staging-groups! mgr-p-f #:frame 7184 #:live-obs? #t
+                          #:ally-units (append front-p-f main-p-f)
+                          #:combat-units (append front-p-f main-p-f)
+                          #:ally-buildings bldgs-p-f #:enemy-units '()
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5))
+  ;; Protoss with active production (`268f` = `12.0s`): STILL staging at `+184f`, dispatches at `+272f`!
+  (define mgr-p-prod (make-staging-group-manager))
+  (step-staging-groups! mgr-p-prod #:frame 7000 #:live-obs? #t
+                        #:ally-units (append front-p-f main-p-f)
+                        #:combat-units (append front-p-f main-p-f)
+                        #:ally-buildings bldgs-p-f #:enemy-units '()
+                        #:in-production-counts (hasheq 'stalker 2)
+                        #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                        #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5)
+  (define r-p-prod184
+    (step-staging-groups! mgr-p-prod #:frame 7184 #:live-obs? #t
+                          #:ally-units (append front-p-f main-p-f)
+                          #:combat-units (append front-p-f main-p-f)
+                          #:ally-buildings bldgs-p-f #:enemy-units '()
+                          #:in-production-counts (hasheq 'stalker 2)
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5))
+  (define r-p-prod272
+    (step-staging-groups! mgr-p-prod #:frame 7272 #:live-obs? #t
+                          #:ally-units (append front-p-f main-p-f)
+                          #:combat-units (append front-p-f main-p-f)
+                          #:ally-buildings bldgs-p-f #:enemy-units '()
+                          #:in-production-counts (hasheq 'stalker 2)
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5))
+  ;; Terran preserves `168f/112f` BIT-FOR-BIT unchanged: STILL staging at `+68f`, dispatches at `+116f`!
+  (define bldgs-t-h (list (mk-u 9910 'command-center 32.5 32.5)
+                          (mk-u 9911 'orbital-command 62.5 32.5)
+                          (mk-u 9912 'barracks 38.0 34.0)
+                          (mk-u 9913 'barracks 41.0 34.0)))
+  (define front-t-h (for/list ([i (in-range 5)]) (mk-u (+ 9914 i) 'marauder 110.0 (+ 105.0 i) #:hp 125.0)))
+  (define main-t-h (list (mk-u 9920 'marauder 35.0 32.5 #:hp 125.0)
+                         (mk-u 9921 'marauder 36.0 32.5 #:hp 125.0)))
+  (define mgr-t-h (make-staging-group-manager))
+  (step-staging-groups! mgr-t-h #:frame 7000 #:live-obs? #t
+                        #:ally-units (append front-t-h main-t-h)
+                        #:combat-units (append front-t-h main-t-h)
+                        #:ally-buildings bldgs-t-h #:enemy-units '()
+                        #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                        #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5)
+  (define r-t-f68
+    (step-staging-groups! mgr-t-h #:frame 7068 #:live-obs? #t
+                          #:ally-units (append front-t-h main-t-h)
+                          #:combat-units (append front-t-h main-t-h)
+                          #:ally-buildings bldgs-t-h #:enemy-units '()
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5))
+  (define r-t-f116
+    (step-staging-groups! mgr-t-h #:frame 7116 #:live-obs? #t
+                          #:ally-units (append front-t-h main-t-h)
+                          #:combat-units (append front-t-h main-t-h)
+                          #:ally-buildings bldgs-t-h #:enemy-units '()
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5))
+  (check-true "l65h-race-wait-caps-zerg-64f-terran-112f-protoss-180f-268f-and-lone-scout-ok"
+              (and (memq 'main-reinforce (staging-step-result-staging-groups r-p-f0))
+                   (memq 'main-reinforce (staging-step-result-staging-groups r-p-f68))
+                   (memq 'main-reinforce (staging-step-result-staging-groups r-p-f116))
+                   (memq 'main-reinforce (staging-step-result-dispatched-groups r-p-f184))
+                   (memq 'main-reinforce (staging-step-result-staging-groups r-p-prod184))
+                   (memq 'main-reinforce (staging-step-result-dispatched-groups r-p-prod272))
+                   (memq 'main-reinforce (staging-step-result-staging-groups r-t-f68))
+                   (memq 'main-reinforce (staging-step-result-dispatched-groups r-t-f116)))
+              (format "p=~a/~a/~a/~a prod=~a/~a t=~a/~a"
+                      (staging-step-result-staging-groups r-p-f0)
+                      (staging-step-result-staging-groups r-p-f68)
+                      (staging-step-result-staging-groups r-p-f116)
+                      (staging-step-result-dispatched-groups r-p-f184)
+                      (staging-step-result-staging-groups r-p-prod184)
+                      (staging-step-result-dispatched-groups r-p-prod272)
+                      (staging-step-result-staging-groups r-t-f68)
+                      (staging-step-result-dispatched-groups r-t-f116)))
+
+  ;; 11j (L65H `#1948`): Protoss-only warp-in `(rec-complete? u)` gate, Natural warp-in capture
+  ;;     (`d-nat <= 16.0` when frontline centroid `> 28.0t` from Nat), AND Oracle removed from
+  ;;     `'air-harass-raider` (while Terran Banshee stays unchanged)!
+  (define mgr-p-h (make-staging-group-manager))
+  (define warpin-main
+    (list (hash-set (mk-u 9931 'stalker 35.0 32.5 #:hp 80.0 #:shield 80.0) 'build-progress 0.45)
+          (hash-set (mk-u 9932 'stalker 36.0 32.5 #:hp 80.0 #:shield 80.0) 'build-progress 0.55)))
+  ;; Incomplete warping-in Stalkers at Main MUST NOT be recorded in `first-seen` OR captured in `'main-reinforce`!
+  (define r-p-inc
+    (step-staging-groups! mgr-p-h #:frame 7500 #:live-obs? #t
+                          #:ally-units (append front-p-f warpin-main)
+                          #:combat-units (append front-p-f warpin-main)
+                          #:ally-buildings bldgs-p-f #:enemy-units '()
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5))
+  (define inc-not-tracked?
+    (and (not (hash-has-key? (staging-group-manager-unit-first-seen mgr-p-h) 9931))
+         (not (hash-has-key? (staging-group-manager-unit-first-seen mgr-p-h) 9932))
+         (not (memq 'main-reinforce (staging-step-result-staging-groups r-p-inc)))))
+  ;; Incomplete frontline Stalkers (`build-progress = 0.5`) MUST NOT count toward `front-cnt`!
+  (define mgr-p-inc-front (make-staging-group-manager))
+  (define inc-front-p
+    (for/list ([i (in-range 5)])
+      (hash-set (mk-u (+ 9935 i) 'stalker 110.0 (+ 105.0 i) #:hp 80.0 #:shield 80.0) 'build-progress 0.5)))
+  (define r-p-inc-front
+    (step-staging-groups! mgr-p-inc-front #:frame 7500 #:live-obs? #t
+                          #:ally-units (append inc-front-p main-p-f)
+                          #:combat-units (append inc-front-p main-p-f)
+                          #:ally-buildings bldgs-p-f #:enemy-units '()
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5))
+  ;; Completed Protoss units warped near Natural (`d-nat = 6.0 <= 16.0`, `d-home = 36.0 > 26.0`) while
+  ;; frontline centroid is `> 28.0t` from Natural ARE captured into `'main-reinforce`!
+  (define nat-warp-p (list (mk-u 9941 'stalker 68.5 32.5 #:hp 80.0 #:shield 80.0)
+                           (mk-u 9942 'stalker 67.5 34.5 #:hp 80.0 #:shield 80.0)))
+  (define mgr-p-nat (make-staging-group-manager))
+  (define r-p-nat
+    (step-staging-groups! mgr-p-nat #:frame 7540 #:live-obs? #t
+                          #:ally-units (append front-p-f nat-warp-p)
+                          #:combat-units (append front-p-f nat-warp-p)
+                          #:ally-buildings bldgs-p-f #:enemy-units '()
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5))
+  ;; Same Natural position for Terran MUST NOT be captured (Terran bit-for-bit unchanged)!
+  (define nat-t-h (list (mk-u 9943 'marauder 68.5 32.5 #:hp 125.0)
+                        (mk-u 9944 'marauder 67.5 34.5 #:hp 125.0)))
+  (define mgr-t-nat (make-staging-group-manager))
+  (define r-t-nat
+    (step-staging-groups! mgr-t-nat #:frame 7540 #:live-obs? #t
+                          #:ally-units (append front-t-h nat-t-h)
+                          #:combat-units (append front-t-h nat-t-h)
+                          #:ally-buildings bldgs-t-h #:enemy-units '()
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5))
+  ;; Protoss Oracle is NOT captured by `'air-harass-raider`, while Terran Banshee STILL IS!
+  (define mgr-ora (make-staging-group-manager))
+  (define r-ora
+    (step-staging-groups! mgr-ora #:frame 7600 #:live-obs? #t
+                          #:ally-units (list (mk-u 9945 'oracle 40.0 34.0 #:hp 100.0 #:shield 60.0 #:flying #t))
+                          #:combat-units (list (mk-u 9945 'oracle 40.0 34.0 #:hp 100.0 #:shield 60.0 #:flying #t))
+                          #:ally-buildings bldgs-p-f #:enemy-units '()
+                          #:in-production-counts (hasheq 'oracle 1)
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5))
+  (define mgr-ban (make-staging-group-manager))
+  (define r-ban
+    (step-staging-groups! mgr-ban #:frame 7600 #:live-obs? #t
+                          #:ally-units (list (mk-u 9946 'banshee 40.0 34.0 #:hp 140.0 #:flying #t))
+                          #:combat-units (list (mk-u 9946 'banshee 40.0 34.0 #:hp 140.0 #:flying #t))
+                          #:ally-buildings bldgs-t-h #:enemy-units '()
+                          #:in-production-counts (hasheq 'banshee 1)
+                          #:base-x 32.5 #:base-y 32.5 #:nat-x 62.5 #:nat-y 32.5
+                          #:enemy-anchor-x 167.5 #:enemy-anchor-y 167.5))
+  (check-true "l65h-protoss-warpin-complete-gate-nat-capture-and-oracle-excluded"
+              (and inc-not-tracked?
+                   (not (memq 'main-reinforce (staging-step-result-staging-groups r-p-inc-front)))
+                   (memq 'main-reinforce (staging-step-result-staging-groups r-p-nat))
+                   (set-member? (staging-step-result-handled-tags r-p-nat) 9941)
+                   (not (memq 'main-reinforce (staging-step-result-staging-groups r-t-nat)))
+                   (not (memq 'air-harass-raider (staging-step-result-staging-groups r-ora)))
+                   (memq 'air-harass-raider (staging-step-result-staging-groups r-ban)))
+              (format "inc=~a inc-f=~a p-nat=~a t-nat=~a ora=~a ban=~a"
+                      inc-not-tracked?
+                      (staging-step-result-staging-groups r-p-inc-front)
+                      (staging-step-result-staging-groups r-p-nat)
+                      (staging-step-result-staging-groups r-t-nat)
+                      (staging-step-result-staging-groups r-ora)
+                      (staging-step-result-staging-groups r-ban))))
+
 (printf "=== L58 Staging Groups & Concave Positioning Test Suite: ~a PASS, ~a FAIL ===\n"
         pass-cnt fail-cnt)
 (when (> fail-cnt 0)

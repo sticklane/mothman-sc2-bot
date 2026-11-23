@@ -1507,6 +1507,8 @@ DEPLOY_LABELS: Dict[str, str] = {
     "pnzpwmuy_4b9ea037": "Loop 61C",
     "nxsykszs_d6c595db": "Loop 62C",
     "rqsntsos_e5e69116": "Loop 63B",
+    "unlmxxko_ec044f2a": "Loop 64B",
+    "pxlouxrw_6c50ea86": "Loop 65H",
 }
 
 BOT_META: Dict[str, Dict[str, str]] = {
@@ -4223,9 +4225,11 @@ def _render_standings_tables(
             "crashes across 114 Division 6–7 games (4–9 on Release #13, 2.5× Release #12's win rate, with live wins over "
             "1575-Elo Snowbot and 1551-Elo Kira). Release #13 raised live external win rate 16.1 percentage points to 44.0% "
             "(6–2, 75.0% in v1 ranked matches), cut live harvest command drops by 93.0%, and averaged 3.99 ms per step. "
-            'All eight bots now run <strong>Release #15</strong> (Build 63B, Competition #38, '
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45218316184" target="_blank" rel="noopener noreferrer">deploy run 45218316184</a>, '
-            "8/8 verified active). Trade ratio divides enemy army and worker value destroyed by our own value lost."
+            'All eight ladder bots currently run Release #16 (Build 64B, Competition #38, '
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45252241181" target="_blank" rel="noopener noreferrer">deploy run 45252241181</a>, '
+            '8/8 verified active), while <strong>Release #17</strong> (Build 65H) has passed full 84-match validation '
+            'and 4–0 standalone BotZip smoke (10.79× trade, 10.04 ms/step) and is queued for AI Arena rollout. '
+            "Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
         )
         return "".join(blocks) + note_html
@@ -4324,7 +4328,7 @@ def build_index_page(
     latest_b_num = int(latest_num_m.group(1)) if latest_num_m else 45
     prev_b_num = int(prev_num_m.group(1)) if prev_num_m else 42
     if cb.get("is_shipped") and cb.get("ship_num"):
-        eyebrow_txt = f"AI Arena Ladder · Live Release #{cb['ship_num']} (Build {b_tag})"
+        eyebrow_txt = f"AI Arena Ladder · Release #{cb['ship_num']} (Build {b_tag})"
     else:
         eyebrow_txt = f"AI Arena Ladder · Live Release #{live_ship_num} (Build {live_loop_num}) · Local Benchmark: Build {b_tag}"
     recent_note_builds = f"Builds {prev_b_num} and {latest_b_num} ({comb_w} wins, {comb_l} losses across completed v1 games)"
@@ -4646,10 +4650,10 @@ def build_history_page(
         f"The first deployed build went 0–10 on AI Arena. Recent v1 builds win roughly 55–61% of their games: "
         f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
         f"Release #9 (Build 51) climbed to 19–9–3 (61.3% wins), and Release #13 (Build 61C) went 7–5 (58.3% external; "
-        f"6–2 in ranked v1 games, +106 combined v1 Elo across Releases #11–#13) before Release #14 "
-        f"(Build 62C) and Release #15 (Build 63B, "
-        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45218316184" target="_blank" rel="noopener noreferrer">deploy run 45218316184</a>) '
-        f"rolled out to all 8 ladder bots."
+        f"6–2 in ranked v1 games, +106 combined v1 Elo across Releases #11–#13) before Releases #14–#16 "
+        f"(Build 64B, "
+        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45252241181" target="_blank" rel="noopener noreferrer">deploy run 45252241181</a>) '
+        f"rolled out to all 8 ladder bots, with Release #17 (Build 65H) validated and packaged for the next rollout."
     )
 
     sec_loop = render_loop_diagram_section(rich, section_num="Section 2")
@@ -4714,6 +4718,8 @@ def build_history_page(
         "iter61c_ship13_full": 13,
         "iter62c_ship14_full": 14,
         "iter63b_ship15_full": 15,
+        "iter64b_ship16_full": 16,
+        "iter65h_ship17_full": 17,
     }
 
     def _format_run_label(run_id: str, status_raw: str = "") -> str:
@@ -4740,6 +4746,14 @@ def build_history_page(
         try:
             ld = json.loads(ledger_path.read_text(encoding="utf-8"))
             iters = ld.get("iterations", [])
+            cur_b = (rich or {}).get("current_build") or {}
+            cur_tag = str(cur_b.get("build_tag") or "").upper()
+            cur_cohorts = cur_b.get("cohorts") or {}
+            cur_ext = cur_cohorts.get("ext") or {}
+            cur_core = cur_cohorts.get("core") or {}
+            cur_unseen = cur_cohorts.get("unseen") or {}
+            cur_ship_n = int(cur_b.get("ship_num") or 0)
+            cur_is_ship = bool(cur_b.get("is_shipped"))
             shipped_rows = []
             for it in reversed(iters):
                 st = str(it.get("status") or "").upper()
@@ -4751,9 +4765,17 @@ def build_history_page(
                 raw_id = str(it.get("id", ""))
                 it_id = html.escape(_format_run_label(raw_id, st))
                 rec_short = _format_ledger_record(str(it.get("record_clean", "")))
+                is_cur_ship_row = bool(
+                    (cur_ship_n and _SHIP_RELEASE_NUMS.get(raw_id) == cur_ship_n)
+                    or (cur_tag and re.match(rf"^iter{re.escape(cur_tag)}(?=_|$|-)", raw_id, flags=re.I))
+                )
                 c14 = it.get("core14_wr_pct")
+                if not isinstance(c14, (int, float)) and is_cur_ship_row and cur_core.get("n"):
+                    c14 = cur_core.get("wr")
                 c14_s = f"{float(c14):.1f}%" if isinstance(c14, (int, float)) else "—"
                 u12 = it.get("unseen12_wins")
+                if not isinstance(u12, (int, float)) and is_cur_ship_row and cur_unseen.get("n"):
+                    u12 = cur_unseen.get("w")
                 u12_s = f"{int(u12)} wins" if isinstance(u12, (int, float)) else "—"
                 tr = it.get("trade_agg")
                 tr_s = f"{tr:.2f}×" if isinstance(tr, (int, float)) else "—"
@@ -4769,14 +4791,6 @@ def build_history_page(
                     f'<td style="text-align:right">{sb_s}</td>'
                     f"</tr>"
                 )
-            cur_b = (rich or {}).get("current_build") or {}
-            cur_tag = str(cur_b.get("build_tag") or "").upper()
-            cur_cohorts = cur_b.get("cohorts") or {}
-            cur_ext = cur_cohorts.get("ext") or {}
-            cur_core = cur_cohorts.get("core") or {}
-            cur_unseen = cur_cohorts.get("unseen") or {}
-            cur_ship_n = int(cur_b.get("ship_num") or 0)
-            cur_is_ship = bool(cur_b.get("is_shipped"))
             recent = list(reversed(iters[-18:]))
             already_has_cur = bool(
                 cur_tag
@@ -5024,15 +5038,18 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
         ("`runtime_heuristic_regression`", "Global micro heuristic"),
         ("`brain_runtime_split_brain`", "Planner vs. runtime cap mismatch"),
         ("`watchdog_escrow_and_tvp_regression`", "Expansion escrow & TvP stall"),
+        ("`mixed_regression`", "Mixed match regression"),
         # Section 3a summaries
         ("External/Arena improved but H2H mirror/cross-race regressed against live Ship baseline",
          "External and drill scores improved, while head-to-head against the live build regressed"),
+        ("Mixed H2H / external regression below Ship Gate threshold",
+         "Mixed head-to-head and external regression below release threshold"),
         ("Protoss macro/micro interaction (Blink-Forward into Tanks, Gateway overbuild, or 0-Colossus / PvP exclusion)",
          "Protoss macro/micro interaction (Blink into Tanks, Gateway overbuild, or missing Colossi)"),
         ("Global runtime heuristic (light-harass split) lacked posture/main-army parity guard -> Terran TvP 0-8",
          "Global light-harass split lacked a main-army strength guard (Terran TvP 0–8)"),
         ("Macro-brain vs runtime cap/urgency mismatch (Barracks 2*CC cap & Phoenix@860 > Colossus@760)",
-         "Macro planner vs. runtime cap mismatch (Barracks 2× Command Center cap and Phoenix priority above Colossus)"),
+         "Macro planner vs. runtime cap or unit-priority mismatch"),
         ("Expansion escrow flush & Starport gas-yield guard stalled Terran 1-1-1 / TvP (fixed in Loop 50)",
          "Expansion savings and Starport gas-yield guard stalled Terran 1-1-1 openings in TvP (fixed in Loop 50)"),
         # Section 3b fault codes & ability IDs
@@ -5067,6 +5084,10 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
          "Authors edit their own track tests directly; the verifier owns wall-clock timing checks on an idle CPU."),
         ("Each run appends to loop_trajectory_log.jsonl and produces Replay + Video trade review packs.",
          "Each run appends to the run timing log and produces replay and video trade review packs."),
+        (", reducing wall time per release from ", "; wall time per release drops from "),
+        (", reducing total wall time from ", "; total wall time drops from "),
+        (" and raising Gate-2 release rate from ", " and Gate-2 release rate rises from "),
+        (", lifting Gate-2 release rate ", " and lifts Gate-2 release rate "),
         ("-> ", "→ "),
         (" <= ", " ≤ "),
         (" >= ", " ≥ "),
@@ -5076,7 +5097,7 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
 
     # 5. Unwrap backtick pills around plain numbers, percentages, durations, ranges, records, and IF-* tags
     text = re.sub(
-        r"`((?:n=)?\d[\d.,]*\s*(?:%|min|m|h|hours|x|×)?|L\d+[–-](?:L)?\d+|\d+W[-–]\d+L|IF-\d+)`",
+        r"`((?:n=)?\d[\d.,]*\s*(?:%|min|m|h|hours|s|x|×)?|L\d+[–-](?:L)?\d+|\d+W[-–]\d+L|IF-\d+)`",
         r"\1",
         text,
     )
@@ -5085,6 +5106,168 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
         lambda m: f"(watchdog polling previously logged {m.group(1)} steps for {m.group(2)} {'alert' if m.group(2) == '1' else 'alerts'})",
         text,
     )
+    # Collapse repeated loop tokens in Table 4 Affected Loops (e.g., "L65, L65, L65" -> "L65 (×3)")
+    def _dedup_loop_list(m: re.Match[str]) -> str:
+        tok = m.group(1)
+        cnt = m.group(0).count(tok)
+        return f"{tok} (×{cnt})"
+
+    text = re.sub(r"\b(L\d+)(?:,\s*\1)+\b", _dedup_loop_list, text)
+
+    # 6. Sanitize Section 6 (Open-Ended Cycle-Time Bottleneck Audit) for cold readers:
+    # remove raw inline Python scripts, local scratch UUID paths, internal model names, and snake_case tags.
+    sec6_marker = "\n## 6. "
+    if sec6_marker in text:
+        head_part, sec6_raw = text.split(sec6_marker, 1)
+        sec6_lines = sec6_raw.splitlines()
+        # Extract sub-iteration -> wall_min mapping from Section 6b to disambiguate Table 3a held rows (e.g. L65 -> L65C..L65G)
+        sub_by_wall: Dict[Tuple[str, str], str] = {}
+        in_6b = False
+        for sln in sec6_lines:
+            ss = sln.strip()
+            if ss.startswith("### 6b."):
+                in_6b = True
+                continue
+            if ss.startswith("### 6c."):
+                in_6b = False
+                continue
+            if in_6b and ss.startswith("|") and not ss.startswith("| Loop") and not ss.startswith("|---"):
+                scells = [c.strip().strip("`") for c in ss.strip("|").split("|")]
+                if len(scells) >= 6:
+                    m_sub = re.fullmatch(r"(L\d+)([A-Z]+)", scells[0])
+                    if m_sub:
+                        sub_by_wall[(m_sub.group(1), scells[5])] = scells[0]
+        if sub_by_wall:
+            def _disambig_3a_row(m: re.Match[str]) -> str:
+                base_lp, mid, wall_s, rest = m.group(1), m.group(2), m.group(3), m.group(4)
+                rep_lp = sub_by_wall.get((base_lp, wall_s), base_lp)
+                return f"| {rep_lp} |{mid}| {wall_s} |{rest}"
+            head_part = re.sub(
+                r"^\| (L\d+) \|([^|\n]+\|[^|\n]+)\|\s*(\d+\.\d+)\s*\|(.*)$",
+                _disambig_3a_row,
+                head_part,
+                flags=re.M,
+            )
+        out6: List[str] = ["## 6. Cycle-Time Bottleneck Audit", ""]
+        sub = ""
+        churn_roles: List[str] = []
+        churn_peak = ("", 0, "")
+        other_findings: List[str] = []
+        kind_labels = {
+            "other": "Ad-hoc analysis",
+            "post_bench_serial": "Serial post-match",
+            "racket_minus_c": "Uncompiled test run",
+            "raco_make": "Full bytecode build",
+            "full_test_suite": "Full test suite",
+            "racket_test": "Unit test",
+        }
+
+        def _describe_slow_cmd(kind_raw: str, cmd_raw: str) -> str:
+            c = cmd_raw.lower()
+            if kind_raw == "post_bench_serial" or "run_id=" in c:
+                return "Serial scoring, database ingest, and pro-comparison script"
+            if "processpoolexecutor" in c:
+                return "Parallel replay feature audit script"
+            if "sqlite3" in c:
+                return "Ad-hoc SQLite and replay forensics query"
+            if "imp_mod" in c or "s2protocol" in c:
+                return "Ad-hoc replay protocol inspection script"
+            if kind_raw == "racket_minus_c" or "racket -c" in c:
+                return "Uncompiled Racket test run"
+            if kind_raw == "raco_make" or "raco make" in c:
+                return "Full-tree Racket bytecode build"
+            return "Long-running analysis script"
+
+        for ln in sec6_lines[1:]:
+            s = ln.strip()
+            if s.startswith("### 6a."):
+                sub = "6a"
+                out6.extend(["", "### 6a. Slowest Non-Match Commands", "",
+                             "| Rank | Iteration | Role | Duration (s) | Category | Task |",
+                             "|---:|---|---|---:|---|---|"])
+                continue
+            if s.startswith("### 6b."):
+                sub = "6b"
+                out6.extend(["", "### 6b. Benchmark Utilization and Scheduling", "",
+                             "| Iteration | Matches | Workers / Threads | CPU Util | Schedule | Wall Min | Ideal Min | Tail Overhead | Timeouts |",
+                             "|---|---:|---|---:|---|---:|---:|---:|---:|"])
+                continue
+            if s.startswith("### 6c."):
+                sub = "6c"
+                out6.extend(["", "### 6c. Role Think-Time vs. Tool-Time", "",
+                             "| Role | Think (s) | Tool (s) | Think Share | Turns/Sess | Cmds/Sess | Max Cmds/Sess | Max Post-Bench Turns |",
+                             "|---|---:|---:|---:|---:|---:|---:|---:|"])
+                continue
+            if s.startswith("### 6d."):
+                sub = "6d"
+                out6.extend(["", "### 6d. Key Bottleneck Findings and Fixes", ""])
+                continue
+
+            if not sub:
+                if s.startswith("- "):
+                    clean_b = re.sub(r"`([^`]+)`", r"\1", s)
+                    clean_b = clean_b.replace(">30s", "over 30 s").replace("Sub-Iterations", "Sub-iterations")
+                    out6.append(clean_b)
+                continue
+
+            if sub == "6a" and s.startswith("|") and not s.startswith("| Rank") and not s.startswith("|---"):
+                cells = [c.strip().strip("`") for c in s.strip("|").split("|")]
+                if len(cells) >= 7:
+                    rk, lp, role, dur, kind_k, _is_sc2, cmd_s = cells[:7]
+                    out6.append(f"| {rk} | {lp} | {role} | {dur} | {kind_labels.get(kind_k, kind_k)} | {_describe_slow_cmd(kind_k, cmd_s)} |")
+                continue
+
+            if sub == "6b" and s.startswith("|") and not s.startswith("| Loop") and not s.startswith("|---"):
+                cells = [c.strip().strip("`") for c in s.strip("|").split("|")]
+                if len(cells) >= 9:
+                    sched = "Longest-first (LPT)" if cells[4].lower() == "lpt" else ("Default" if cells[4].lower() == "unknown" else cells[4])
+                    cells[4] = sched
+                    out6.append("| " + " | ".join(cells[:9]) + " |")
+                continue
+
+            if sub == "6c" and s.startswith("|") and not s.startswith("| Agent") and not s.startswith("|---"):
+                cells = [c.strip().strip("`") for c in s.strip("|").split("|")]
+                if len(cells) >= 9:
+                    # Drop internal Model column (index 1) for public readability
+                    kept = [cells[0]] + cells[2:9]
+                    out6.append("| " + " | ".join(kept) + " |")
+                continue
+
+            if sub == "6d" and re.match(r"^\d+\.\s+", s):
+                if "`adhoc_command_session_churn`" in s:
+                    m_r = re.search(r":\*\*\s*([^`]+?)\s+ran\s+>15", s)
+                    if m_r:
+                        churn_roles.append(m_r.group(1).strip())
+                    for m_c in re.finditer(r"(L\d+[A-Z]?)\s*\((\d+)\s*cmds?\)", s):
+                        c_n = int(m_c.group(2))
+                        if c_n > churn_peak[1]:
+                            churn_peak = (m_r.group(1).strip() if m_r else "Role", c_n, m_c.group(1))
+                elif "`bench_low_concurrency`" in s:
+                    other_findings.append("**Benchmark concurrency:** Earlier runs used 10 of 32 threads (31.2% utilization). Full 84-match runs now target 12 concurrent workers (avoiding CPU-contention timeouts), and 26-match single-race canaries run at 14 workers.")
+                elif "`bench_non_lpt_schedule`" in s:
+                    other_findings.append("**Match scheduling:** Five earlier runs launched matches in fixed order. Longest-first (LPT) scheduling is now enabled by default so slow opponents start in Wave 1 and cut tail wait to 7.9% in L65H.")
+                elif "`mechanical_runner_multi_turn_post_bench`" in s:
+                    other_findings.append("**Post-match handoffs:** Multi-turn serial post-benchmark steps (up to 12 turns in L65C) were collapsed into a single parallel post-benchmark pipeline.")
+                elif "`slow_non_sc2_command`" in s and "`post_bench_serial`" in s:
+                    other_findings.append("**Serial post-match scripts:** Serial scoring and replay extraction took 56 to 61 s per run; the parallel pipeline now completes the full pass in ~42 s.")
+                elif "`slow_non_sc2_command`" in s and "`racket_minus_c`" in s:
+                    other_findings.append("**Uncompiled test runs:** Source-only Racket test runs reached 43 s; isolated per-lane bytecode caches eliminate repeated cold compilation.")
+                elif "`slow_non_sc2_command`" in s and "`raco_make`" in s:
+                    other_findings.append("**Full-tree builds:** Full bytecode rebuilds took 33 s; scoped lane test runners compile only edited modules and target tests.")
+                elif "`slow_non_sc2_command`" in s and "`other`" in s:
+                    other_findings.append("**Ad-hoc replay scripts:** Repeated 60 to 90 s inline replay analysis scripts are being replaced by cached reusable diff tools.")
+                elif "`bench_high_tail_waste`" in s:
+                    other_findings.append("**Short-gate tail wait:** Two 12-match runs spent over 25% of wall time waiting on the slowest match (worst 48.4% in L65F); longest-first ordering prioritizes historically long pairings first.")
+
+        if churn_roles:
+            other_findings.append(
+                f"**High-command sessions:** {len(churn_roles)} roles exceeded 15 shell commands in a single loop session "
+                f"(peak {churn_peak[1]} commands by {churn_peak[0]} in {churn_peak[2]}); reusable scoring and diff tools replace those manual loops."
+            )
+        for idx_f, f_txt in enumerate(other_findings, 1):
+            out6.append(f"{idx_f}. {f_txt}")
+        text = head_part + "\n" + "\n".join(out6) + "\n"
+
     # Normalize lowercase 'x' multipliers like 1.30x -> 1.30× and W-L records in Table 3a
     text = re.sub(r"(\d+\.\d+)x\b", r"\1×", text)
     text = re.sub(r"\b(\d+)W-(\d+)L\b", r"\1–\2", text)

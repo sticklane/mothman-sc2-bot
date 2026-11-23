@@ -1,9 +1,9 @@
-# Mothman SC2 Autonomous Improvement Loop — Swarm Playbook v2.0 (Trajectory Flywheel Edition)
+# Mothman SC2 Autonomous Improvement Loop: Swarm Playbook v2.1 (Fast-Cycle & Open-Ended Bottleneck Audit Edition)
 
 Operational playbook for running, gating, shipping, and continuously self-improving the multi-agent closed-loop optimization bench for `mothman-sc2-bot` (complements [`README.md`](./README.md)).
 
-> **v2.0 Flywheel Upgrade (Backed by Loops 19–47 Empirical Trajectory Audit):**
-> Every rule below is empirically derived from `31,701+` logged agent steps across `12` swarm transcripts (`loop_trajectory_log.jsonl`). Adopting `H2H-First` fail-fast gating, Gate 1 Brain↔Runtime contract checks, `25s` targeted Arena pre-checks, pre-granted sibling test ownership, and Step 4C automatic trajectory logging cuts wall time per live Ship by **`~30%` (`1.44×` throughput)** and lifts Gate-2 Ship Rate from **`43% → 55–67%`**.
+> **v2.1 Fast-Cycle Upgrade (Backed by Loops 19-65 Empirical Trajectory & Cycle-Time Audit):**
+> Every rule below is empirically derived from logged swarm transcripts (`loop_trajectory_log.jsonl`) and real-engine match timings. Combining isolated per-lane Racket compilation (`tools/racket-lane-test.sh`), Longest-Processing-Time-First bench scheduling (`--schedule-order lpt -j 14`), targeted single-race / 6-opponent `canary` pre-checks before `ALL_84`, one-command parallel post-bench automation (`tools/post-bench-pipeline.py` + `tools/forensics-diff.py`), fast model tiers on mechanical runner roles, single-mention author dispatches, and sub-iteration trajectory logging (`--sub-iter 65G`) removes build-compile stalls, straggler tails, and serial post-bench churn.
 
 ---
 
@@ -25,57 +25,54 @@ Every role operates asynchronously on the shared message board. **No two active 
 | `@reporter` | Living visual campaign report, phase log, GitHub Pages & Release media publishing | `tools/publish-gh-pages.py` (when directed), `scratch/loop/phase_reports.md`, campaign report artifact | Never blocks handoffs |
 | `@monitor-2` | Low-frequency stall watchdog (adaptive backoff during active GPU/benchmark phases to minimize empty polling turns) | None | Read-only |
 
-### Pre-Granted Ownership Rule (Eliminates Ownership Ping-Pongs)
-Authors do **not** need to pause coding to ask `@coordinator` for permission to update historical tests inside their own pre-granted column above when a new loop explicitly supersedes an older threshold. Any cross-track file edit (e.g., `@wire-author` touching `lib/bot-runtime.rkt`) still requires explicit `@coordinator` approval.
+### Pre-Granted Ownership & Single-Mention Dispatch Rule (Eliminates Ping-Pongs & Wakeup Fan-Out)
+- **Pre-Granted Track Tests:** Authors do **not** need to pause coding to ask `@coordinator` for permission to update historical tests inside their own pre-granted column above when a new loop explicitly supersedes an older threshold. Any cross-track file edit (e.g., `@wire-author` touching `lib/bot-runtime.rkt`) still requires explicit `@coordinator` approval.
+- **Single-Mention Author Dispatches:** `@name` is a wakeup doorbell, never a CC. Dispatch each parallel author lane in its own focused post naming only that author (and on peer-to-peer handoffs, mention only the next peer), avoiding unnecessary `@all` or multi-agent wakeups that burn idle turns.
+- **Model-Tier Hygiene for Mechanical Runners:** Run mechanical execution roles (`@harness`, `@verifier`, `@monitor-2`) on fast medium/flash model tiers (e.g., `gemini-4-neon-medium`) rather than slow `xhigh` reasoning models, reserving high-reasoning models for architecture, forensics, and complex code authoring.
 
 ---
 
-## 2. Fail-Fast Closed-Loop State Machine (v2.0)
+## 2. Fail-Fast Closed-Loop State Machine (v2.1 Fast-Cycle)
 
 ```text
-[Step 1: Parallel Disjoint Coding — @runtime-author || @belief-author || @wire-author]
-   - Pre-granted track test ownership; authors run targeted module tests (--skip-perf while GPU renders run)
+[Step 1: Parallel Disjoint Coding: @runtime-author || @belief-author || @wire-author]
+   - Single-mention dispatches; pre-granted track test ownership
+   - Isolated per-lane compile & test via `tools/racket-lane-test.sh <lane> --compile <srcs...> -- <tests...>`
+     (PLTCOMPILEDROOTS=/tmp/zo-<lane>-<pid>: writes ZERO .zo files to repo, never uses slow `racket -c`!)
    - Mandatory Main-Army Negative Guard test on every new global runtime heuristic
    - Mandatory Brain <-> Runtime Cap & Urgency parity check on every new production/tech cap
           |
           v
-[Step 2: Gate 1 Solo Verification — @verifier (~2m, CPU idle, ZERO Podman/SC2)]
+[Step 2: Gate 1 Solo Verification: @verifier (~2m, fast model, CPU idle, ZERO Podman/SC2)]
    - 10/10 gates: raco make, run-all-tests (incl. Brain<->Runtime contract + Suite 28 <5ms),
      sc2-protobuf-ws-test (incl. w5-p0-1a <4.5ms), typed-commands-test, l31..lN runtime suites,
      belief verifiers, tactics-unit-tester --all --strict, state-machine-verifier,
-     pro starvation (0/0/0/0) & divergence, Python/Arena-3.0/Replay-DB/Flywheel tests, hygiene=0
+     pro starvation (0/0/0/0) & divergence, Python/Arena-3.0/Replay-DB/Flywheel/Loop-Speedups tests, hygiene=0
           |
           v
-[Step 3a: FAIL-FAST GATE 2A — Targeted 25s Arena Pre-Check + 2m H2H-First (~2.5m GPU)]
+[Step 3a: FAIL-FAST GATE 2A: Targeted Pre-Check + Canary / Single-Race + 2m H2H-First]
    1) If any Flip-Flop-Guarded micro scenario was edited -> @tactics-tester runs 25s `--scenario`/`--category` A/B FIRST!
-      (Abort immediately to Step 1 if targeted scenario regresses — saves ~40m!)
-   2) @harness runs 6-match `baseline_h2h` vs currently live Ship BotZips (~2m GPU) FIRST!
-      - FAIL-FAST ABORT: If `baseline_h2h` finishes `<= 3W-3L` OR any race drops `0-2` ->
-        immediate `HOLD-ZIP`! Skip the 30m 84-match roster -> go straight to Step 4A forensics (saves ~29m/HOLD!).
-      - PASS (`>= 4W-2L`, no race collapse) -> proceed to full Gate 2B!
+   2) @harness (fast model, `--schedule-order lpt`):
+      - Single-race diff (e.g. Protoss-only): run `--bots Mothman-P --opponents all -j 14` (26m, ~10.4m, avgStep 13.5ms) or
+        `--bots Mothman-P --opponents canary -j 14` (6m) BEFORE paying for full 84-match ALL_84!
+      - Multi-race diff: run `--opponents canary -j 14` (18m across Z/T/P, ~4-5m) and/or `baseline_h2h` (~2m) FIRST!
+      - FAIL-FAST ABORT if pre-check or H2H regresses -> immediate `HOLD-ZIP` -> log via `--sub-iter` + forensics!
           |
           v
-[Step 3b: FULL GATE 2B — Tactics Arena 3.0 Core (132 MP4s, ~6m) + 84-Match Roster (~29m)]
-   - @tactics-tester: `--suite core` Dummy (66) + Self-Play (66) = 132 full-length live-HUD MP4s
-   - @harness: 84-match roster (`core_14` 42m + `unseen_12` 36m + `self_6` 6m)
+[Step 3b: FULL GATE 2B: Full LPT 84-Match Roster (`--schedule-order lpt -j 12`) + Tactics Arena Core]
+   - @harness: use `-j 12` for full 84-match `ALL_84` (sweet spot: 24 < 32 threads, avoids `-j 14` ~3ms CPU-contention wall-ties; keep `-j 14` for `<= 26`-match canaries!) with LPT default so 640s stragglers (AxeFighter/QueenBot/puck) start in Wave 1!
+   - @tactics-tester: `--suite core` Dummy (66) + Self-Play (66) = 132 full-length live-HUD MP4s (when micro/tactics changed)
    - If Ship Gate passes -> @coordinator rebuilds 4 BotZips -> @harness 4-race ELF ZIP smoke (~2.5m) -> LIVE SHIP!
           |
           v
-[Step 4A || Step 4B || Step 4C — Post-Run Replay + Video Trade Review, Archival & Trajectory Log]
-   - Step 4A (@analyzer, owns SQLite first): `sync-prod` + live AI Arena audit -> clears SQLite;
-     **MANDATORY Replay + Video Trade Review Gate**: after `@loop-architect` builds the Arena & Match
-     review packs (`tools/trade-review-pack.py`), `@analyzer` visually opens EVERY generated 6-frame
-     contact sheet (`.jpg`) alongside its replay telemetry card BEFORE drafting the Loop-(N+1) blueprint,
-     so trade fixes address what units actually do on screen (not just summary stats).
-   - Step 4B (@loop-architect, owns GPU): `compare-vs-pro.py` (with read-only SQLite Stall Watchdog &
-     Base Geometry KPIs), `loop_ledger.json`, Top-8 live-HUD MP4s (+ 90/90 full-length MP4s on SHIP-ZIP
-     loops), SQLite `ingest-runs` + `extract-raw` once `@analyzer` clears SQLite, and `trade-review-pack.py`
-     for both the Arena run and the real-match run (plus `pro-deep-comparison.py` whenever spatial/timing
-     baselines need refreshing).
-   - Step 4C (@loop-architect, <3s offline): `log-loop-trajectory.py --loop <N>` + `analyze-loop-flywheel.py`
-     -> appends Loop N trajectory to `loop_trajectory_log.jsonl` & refreshes `scratch/loop/loop_flywheel_retro.{md,json}`
-     -> feeds Flip-Flop warnings & top friction fixes directly into `@coordinator`'s Loop-(N+1) brief!
-   - (@reporter on SHIP-ZIP): updates living report & publishes GitHub Pages / Releases non-blockingly!
+[Step 4A || Step 4B || Step 4C: One-Command Parallel Post-Bench, Fast Diff Forensics & Open-Ended Retro]
+   - One-command post-bench (@harness, 1 turn): `tools/post-bench-pipeline.py <run_dir> --label <tag> --baseline-run <base>`
+     runs score-replay-batch, replay-db ingest + extract-raw, pro_deep, s2_features, trade_review_pack, and forensics-diff in parallel!
+   - Fast forensics (@analyzer, <15s): `tools/forensics-diff.py <new_run_dir> <base_run_dir> [--race P|T|Z]` + mandatory
+     visual inspection of `trade_review_pack` 6-frame `.jpg` contact sheets before drafting the next disjoint blueprint!
+   - Step 4C (@loop-architect, <3s offline): `log-loop-trajectory.py --loop <N>` (or `--sub-iter 65G` for held sub-iterations!)
+     + `analyze-loop-flywheel.py` -> refreshes `loop_trajectory_log.jsonl` & `loop_flywheel_retro.{md,json}` with all 4
+     open-ended cycle-time bottleneck detectors (slow commands >30s, bench CPU/tail/LPT audit, LLM think vs tool time, sub-iters)!
 ```
 
 ---
@@ -92,25 +89,58 @@ Authors do **not** need to pause coding to ask `@coordinator` for permission to 
 
 ---
 
-## 4. Exact Modern Commands (Loops 45+)
+## Temporary Local-Loop Policy: 25-Minute Match Cap & Game-State Scoring (Revisit Trigger)
+
+> **IMPORTANT (Temporary Fast-Iteration Policy):** Until late-game 25m+ endgames become a primary factor in our local benchmarks, the local test loop uses a **25-minute game-time cap** and **end-of-game state scoring** alongside raw `W-L-T` so every iteration turns around faster without 30m-45m stalemate tails distorting win/loss counts.
+
+- **25-Minute Local Match Cap:** All local bench runs default to `--max-game-time 33600` loops (`25.0` SC2 game minutes = `25 * 60 * 22.4`) in `tools/run-local-sc2-arena.py`.
+- **End-of-Game State Scoring (`tools/score-replay-batch.rkt` & `tools/post-bench-pipeline.py`):**
+  - Every match computes a continuous, ungameable **`game_state_score`** in `[0, 1]` (displayed as `0-100`) from final-frame live `SPlayerStatsEvent` telemetry: **Army Value `45%` + Income Rate `30%` + Minerals Collected `15%` + Trade Value `10%`**.
+  - **`state_adjudicated_wlt`** adjudicates 25m-cap and wall-timeout ties directly from the final state ratio (`state_ratio >= 1.15` -> Win, `state_ratio <= 0.87` -> Loss, else Tie) while keeping pre-cap eliminations as Win/Loss.
+  - Raw `W-L-T` is still reported side-by-side for strict AI Arena production and Release `#14-#16` baseline parity.
+- **Explicit Revisit Trigger:** Revisit this policy and raise `--max-game-time` back to `30m` (`40320`) / `45m` (`60480`) (and shift primary gating back toward elimination outcomes) once **either**:
+  1. More than **`15%` of external matches** hit the 25-minute cap regularly, **or**
+  2. We push into higher AI Arena divisions where 25m+ split-map / Tier-3 late-game endgames routinely decide matches.
+
+---
+
+## 4. Exact Modern Commands (Fast-Cycle v2.1)
 
 Run all commands from the `mothman-sc2-bot/` repository root (using `jj` as default VCS):
 
-### Step 3a — Targeted `25s` Arena Pre-Check & `2m` `H2H-First` Fail-Fast Gate
+### Step 1: Isolated Per-Lane Author Compile & Test (No `racket -c`, Zero Repo `.zo` Collisions)
 ```bash
+# Compiles ONLY edited files + target tests inside /tmp/zo-<lane>-<pid> and cleans up via EXIT trap
+tools/racket-lane-test.sh lane1 --compile lib/tactics/staging-groups.rkt lib/tactics/multiprong-coordinator.rkt -- tests/l58-staging-groups-test.rkt tests/l65-multiprong-coordinator-test.rkt
+tools/racket-lane-test.sh lane2 --compile lib/bot-runtime.rkt -- tests/l49-tactics-runtime-test.rkt
+tools/racket-lane-test.sh lane3 --compile lib/priority-macro-brain.rkt -- tests/l48-worker-rush-macro-test.rkt
+```
+
+### Step 3a: Targeted Pre-Check (`canary` / Single-Race / `2m` H2H) Before `ALL_84`
+```bash
+# Single-race pre-check on single-race diffs (e.g. Protoss-only: 6 canary matches or 26 external matches, LPT + -j 14)
+python3 tools/run-local-sc2-arena.py --bots Mothman-P --opponents canary -j 14 --schedule-order lpt --mothman-mode source --tag iter<N>_p_canary
+python3 tools/run-local-sc2-arena.py --bots Mothman-P --opponents all -j 14 --schedule-order lpt --mothman-mode source --tag iter<N>_p_ext26
+
+# 3-race high-signal 18-match canary (~4-5m at -j 14)
+python3 tools/run-local-sc2-arena.py --opponents canary -j 14 --schedule-order lpt --mothman-mode source --tag iter<N>_canary18
+
 # Targeted Arena 3.0 pre-check on edited scenarios/categories (~25s)
 python3 tools/sc2-tactics-arena.py --opponent dummy --category runby-offense --jobs 6 --max-loops 960
 python3 tools/sc2-tactics-arena.py --opponent self --scenario r02,r05,r06 --jobs 3 --max-loops 960
 
 # H2H-First Ship Gate vs currently live BotZips (~2m, fail-fast before 84-match roster!)
-python3 tools/run-local-sc2-arena.py \
-  --run-name iter<N>_baseline_h2h \
-  --baseline-h2h \
-  --mothman-mode source
+python3 tools/run-local-sc2-arena.py --opponents self_6 --selfplay-baseline --selfplay-matches 12 -j 14 --schedule-order lpt --mothman-mode source --tag iter<N>_h2h_12
 ```
 
-### Step 3b — Full Tactics Arena 3.0 Core (`66×2 = 132` MP4s) & `84`-Match Roster
+### Step 3b: Full LPT `84`-Match Roster (`--schedule-order lpt -j 12`) & Tactics Arena Core
 ```bash
+# Full 84-match roster (`core_14` 42m + `unseen_12` 36m + `self_6` 6m):
+# Use `-j 12` for full ALL_84 (24 < 32 threads, zero contention wall-ties) and `-j 14` for <= 26-match canaries!
+python3 tools/run-local-sc2-arena.py \
+  --opponents all --include-selfplay --selfplay-matches 6 \
+  -j 12 --schedule-order lpt --mothman-mode source --tag iter<N>_full
+
 # Tactics Arena 3.0 Core (Dummy + Self-Play, 132 full-length live-HUD MP4s)
 python3 tools/sc2-tactics-arena.py --opponent dummy --suite core --jobs 6 --max-loops 960 \
   --render-dir <scratch>/loop/visuals_iter<N>/arena \
@@ -118,12 +148,19 @@ python3 tools/sc2-tactics-arena.py --opponent dummy --suite core --jobs 6 --max-
 python3 tools/sc2-tactics-arena.py --opponent self --suite core --jobs 6 --max-loops 960 \
   --render-dir <scratch>/loop/visuals_iter<N>/selfplay \
   --json <scratch>/loop/tactics_sc2_selfplay_iter<N>.json
+```
 
-# Full 84-match roster (`core_14` 42m + `unseen_12` 36m + `self_6` 6m)
-python3 tools/run-local-sc2-arena.py \
-  --run-name iter<N>_wave<N>_full \
-  --roster full_84 \
-  --mothman-mode source
+### Step 4A/4B: One-Command Parallel Post-Bench Pipeline & `<15s` Forensics Diff
+```bash
+# One-command parallel post-bench (score, replay-db ingest + extract-raw, pro_deep, s2_features, trade_review_pack, forensics-diff, dashboard)
+python3 tools/post-bench-pipeline.py /path/to/runs/<run_id> \
+  --label iter<N>_full \
+  --baseline-run /path/to/runs/<base_run_id> \
+  --baseline-score <scratch>/<base_label>_score.json \
+  --workers 8
+
+# Fast parallel replay/log diff CLI (<15s; replace multi-command ad-hoc shell forensics!)
+python3 tools/forensics-diff.py /path/to/runs/<new_run_id> /path/to/runs/<base_run_id> --race P --workers 8
 ```
 
 ### Step 4B — Pro Comparison, Replay-DB Ingestion & 3D Video Archival
@@ -156,18 +193,20 @@ python3 tools/iteration-loop/render-replay-clips.py \
   --full-step 20 --full-fps 16 --jobs 6
 ```
 
-### Step 4C — Mandatory Self-Improving Loop Trajectory Flywheel (`< 3s` Offline!)
+### Step 4C: Mandatory Self-Improving Trajectory & Open-Ended Bottleneck Audit (`< 3s` Offline!)
 ```bash
-# 1. Stream swarm transcripts + ledger + read-only SQLite -> upsert Loop <N> into loop_trajectory_log.jsonl
+# 1. Log a shipped loop OR a held sub-iteration (e.g. 65C, 65G, 65H) into loop_trajectory_log.jsonl
 python3 tools/iteration-loop/log-loop-trajectory.py --loop <N>
+python3 tools/iteration-loop/log-loop-trajectory.py --sub-iter 65G --verdict HOLD-ZIP
 
-# 2. Refresh empirical Pareto, agent scorecard, flip-flop warnings & counterfactual simulator
+# 2. Refresh Pareto, agent scorecard, flip-flop warnings, counterfactual simulator, and all 4 open-ended bottleneck detectors
 python3 tools/iteration-loop/analyze-loop-flywheel.py \
   --out-md <scratch>/loop/loop_flywheel_retro.md \
   --out-json <scratch>/loop/loop_flywheel_retro.json
 
-# 3. Verify flywheel & comparator unit tests (runs in <1s, included in Gate 1!)
-python3 tests/test-loop-flywheel.py
+# 3. Verify flywheel, comparator & loop-speedup unit tests (runs in <2s, included in Gate 1!)
+python3 -m unittest tests/test-loop-flywheel.py
+python3 tests/test-loop-speedups.py
 ```
 
 ### Step 4D — Mandatory Post-Run Replay + Video Trade Review & Deep Pro Comparison

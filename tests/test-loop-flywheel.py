@@ -443,7 +443,8 @@ class TestLoopFlywheel(unittest.TestCase):
         rows = ANA_MOD.load_jsonl(LIVE_JSONL)
         self.assertGreaterEqual(len(rows), 32, "Expected Loops 19..50 logged (>=32 rows)")
         lids = [r["loop_id"] for r in rows]
-        self.assertEqual(lids, sorted(set(lids)), "loop_id must be strictly unique & ascending")
+        rkeys = [LOG_MOD.record_sort_key(r) for r in rows]
+        self.assertEqual(rkeys, sorted(set(rkeys)), "(loop_id, sub_iter) must be strictly unique & ascending")
         self.assertLessEqual(lids[0], 19)
         self.assertGreaterEqual(lids[-1], 50)
 
@@ -944,6 +945,361 @@ class CompareVsProSqliteKpiTests(unittest.TestCase):
             self.assertIsNone(rep2["sqlite_replay_db"])
             self.assertIsNone(rep2["stall_watchdog_kpis"])
             self.assertIsNone(rep2["base_geometry_kpis"])
+
+
+class OpenEndedBottleneckDetectorTests(unittest.TestCase):
+    def test_all_four_open_ended_detectors_and_sub_iter_logging(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            brain = root / "brain"
+            arena = root / "arena"
+            coord_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+            har_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+            ana_id = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+            rt_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+            (brain / coord_id / "scratch/loop").mkdir(parents=True, exist_ok=True)
+            (arena / "runs").mkdir(parents=True, exist_ok=True)
+
+            # Synthetic 84-match Protoss-only single-race diff run with bad scheduling,
+            # low concurrency (8 on 32-thread host), high tail waste, and 1 timeout straggler!
+            run_65g = arena / "runs" / "20261124_042100_iter65g_ship17_full"
+            run_65g.mkdir(parents=True, exist_ok=True)
+            matches_65g = []
+            for i in range(1, 85):
+                b1 = ["Mothman-P", "Mothman-T", "Mothman-Z"][(i - 1) % 3]
+                is_straggler = (i == 84)
+                matches_65g.append(
+                    {
+                        "index": i,
+                        "bot1": b1,
+                        "bot2": "AxeFighter" if is_straggler else f"opp{i % 10}",
+                        "wall_sec": 640.0 if is_straggler else 60.0,
+                        "timed_out": is_straggler,
+                        "outcome": "Tie" if is_straggler else "Win",
+                    }
+                )
+            (run_65g / "results.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": run_65g.name,
+                        "timestamp_utc": "2026-11-24T04:21:00Z",
+                        "concurrency": 8,
+                        "schedule_order": "interleaved",
+                        "wall_elapsed_sec": 1200.0,
+                        "by_bot": {"Mothman-P": {}, "Mothman-T": {}, "Mothman-Z": {}},
+                        "matches": matches_65g,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            # Clean LPT -j 14 precheck run for 65H (should NOT trigger bad bench findings)
+            run_65h = arena / "runs" / "20261124_053000_iter65h_protoss_ext26"
+            run_65h.mkdir(parents=True, exist_ok=True)
+            (run_65h / "results.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": run_65h.name,
+                        "timestamp_utc": "2026-11-24T05:30:00Z",
+                        "concurrency": 14,
+                        "schedule_order": "lpt",
+                        "wall_elapsed_sec": 420.0,
+                        "by_bot": {"Mothman-P": {}},
+                        "matches": [
+                            {"index": i, "bot1": "Mothman-P", "bot2": f"opp{i}", "wall_sec": 200.0, "timed_out": False}
+                            for i in range(1, 27)
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            # Empty ledger (verifies --sub-iter works cleanly even for held sub-iterations not in ledger!)
+            ledger_path = root / "loop_ledger.json"
+            ledger_path.write_text(json.dumps({"schema_version": 1, "iterations": []}), encoding="utf-8")
+            db_path = arena / "arena_replays.sqlite"
+
+            # Coordinator transcript assigns heavy xhigh model to mechanical runner `harness`
+            coord_steps = [
+                {
+                    "step_index": 0,
+                    "type": "SYSTEM_MESSAGE",
+                    "created_at": "2026-11-24T04:00:00Z",
+                    "content": f"sender={har_id} sender={ana_id} sender={rt_id}",
+                },
+                {
+                    "step_index": 1,
+                    "type": "PLANNER_RESPONSE",
+                    "created_at": "2026-11-24T04:01:00Z",
+                    "tool_calls": [
+                        {"name": "swarm", "args": {"action": '"add"', "name": '"harness"', "model": '"claude-opus-4-6-xhigh"'}},
+                        {"name": "swarm", "args": {"action": '"add"', "name": '"analyzer"', "model": '"claude-opus-4-6"'}},
+                        {"name": "post_message", "args": {"text": '"@runtime-author DISPATCH Loop 65G Protoss-only"'}},
+                    ],
+                },
+                {
+                    "step_index": 2,
+                    "type": "PLANNER_RESPONSE",
+                    "created_at": "2026-11-24T05:20:00Z",
+                    "tool_calls": [
+                        {"name": "post_message", "args": {"text": '"@runtime-author DISPATCH Loop 65H Protoss-only"'}},
+                    ],
+                },
+            ]
+            _write_jsonl(brain / coord_id / ".system_generated/logs/transcript.jsonl", coord_steps)
+
+            # Runtime-author transcript: slow `racket -c` (48s) and fast `racket-lane-test.sh` (1.5s)
+            rt_steps = [
+                {"step_index": 0, "type": "SYSTEM_MESSAGE", "created_at": "2026-11-24T04:00:00Z", "content": "@runtime-author own runtime"},
+                {
+                    "step_index": 1,
+                    "type": "PLANNER_RESPONSE",
+                    "created_at": "2026-11-24T04:05:00Z",
+                    "tool_calls": [
+                        {"name": "run_command", "args": {"CommandLine": '"racket -c /home/fakeuser/repos/mothman-sc2-bot/tests/l49-tactics-runtime-test.rkt"', "toolSummary": '"Uncompiled test run"'}},
+                    ],
+                },
+                {
+                    "step_index": 2,
+                    "type": "GENERIC",
+                    "created_at": "2026-11-24T04:05:06Z",
+                    "content": "Created At: 2026-11-24T04:05:06Z\nCompleted At: 2026-11-24T04:05:54Z\nOK",
+                },
+                {
+                    "step_index": 3,
+                    "type": "PLANNER_RESPONSE",
+                    "created_at": "2026-11-24T04:06:00Z",
+                    "tool_calls": [
+                        {"name": "run_command", "args": {"CommandLine": '"tools/racket-lane-test.sh lane2 -- tests/engine-arbiter-test.rkt"', "toolSummary": '"Isolated lane test"'}},
+                    ],
+                },
+                {
+                    "step_index": 4,
+                    "type": "GENERIC",
+                    "created_at": "2026-11-24T04:06:02Z",
+                    "content": "Created At: 2026-11-24T04:06:02Z\nCompleted At: 2026-11-24T04:06:04Z\nPASS",
+                },
+            ]
+            _write_jsonl(brain / rt_id / ".system_generated/logs/transcript.jsonl", rt_steps)
+
+            # Harness transcript: SC2 bench + 6 sequential post-bench turns (including 42s serial post-bench cmd)
+            har_steps = [
+                {"step_index": 0, "type": "SYSTEM_MESSAGE", "created_at": "2026-11-24T04:00:00Z", "content": "@harness run bench"},
+                {
+                    "step_index": 1,
+                    "type": "PLANNER_RESPONSE",
+                    "created_at": "2026-11-24T04:20:00Z",
+                    "tool_calls": [
+                        {"name": "run_command", "args": {"CommandLine": '"python3 tools/run-local-sc2-arena.py --opponents all"', "toolSummary": '"Run 84-match bench"'}},
+                    ],
+                },
+                {
+                    "step_index": 2,
+                    "type": "GENERIC",
+                    "created_at": "2026-11-24T04:20:30Z",
+                    "content": "Created At: 2026-11-24T04:20:30Z\nCompleted At: 2026-11-24T04:27:10Z\nDONE",
+                },
+            ]
+            # 6 post-bench turns (> 5 threshold) with 25s think each + 42s serial score-replay-batch on turn 1
+            base_min = 28
+            for k in range(6):
+                t_plan = f"2026-11-24T04:{base_min + k * 2:02d}:00Z"
+                t_start = f"2026-11-24T04:{base_min + k * 2:02d}:25Z"
+                t_end = f"2026-11-24T04:{base_min + k * 2 + 1:02d}:07Z" if k == 0 else f"2026-11-24T04:{base_min + k * 2:02d}:30Z"
+                cmd_s = "racket tools/score-replay-batch.rkt /tmp/replays" if k == 0 else f"python3 tools/replay-db.py stats --step {k}"
+                har_steps.append(
+                    {
+                        "step_index": 3 + k * 2,
+                        "type": "PLANNER_RESPONSE",
+                        "created_at": t_plan,
+                        "tool_calls": [{"name": "run_command", "args": {"CommandLine": json.dumps(cmd_s), "toolSummary": f'"Post-bench step {k}"'}}],
+                    }
+                )
+                har_steps.append(
+                    {
+                        "step_index": 4 + k * 2,
+                        "type": "GENERIC",
+                        "created_at": t_start,
+                        "content": f"Created At: {t_start}\nCompleted At: {t_end}\nOK",
+                    }
+                )
+            _write_jsonl(brain / har_id / ".system_generated/logs/transcript.jsonl", har_steps)
+
+            # Analyzer transcript: 17 ad-hoc shell commands in one session (> 15 threshold)
+            ana_steps = [
+                {"step_index": 0, "type": "SYSTEM_MESSAGE", "created_at": "2026-11-24T04:00:00Z", "content": "@analyzer run forensics"},
+            ]
+            for k in range(17):
+                sec = k * 3
+                mm, ss = divmod(sec, 60)
+                t_plan = f"2026-11-24T04:{42 + mm:02d}:{ss:02d}Z"
+                t_res = f"2026-11-24T04:{42 + mm:02d}:{min(59, ss + 1):02d}Z"
+                ana_steps.append(
+                    {
+                        "step_index": 1 + k * 2,
+                        "type": "PLANNER_RESPONSE",
+                        "created_at": t_plan,
+                        "tool_calls": [{"name": "run_command", "args": {"CommandLine": f'"python3 -c \\"print({k})\\""', "toolSummary": f'"Adhoc {k}"'}}],
+                    }
+                )
+                ana_steps.append(
+                    {
+                        "step_index": 2 + k * 2,
+                        "type": "GENERIC",
+                        "created_at": t_res,
+                        "content": f"Created At: {t_res}\nCompleted At: {t_res}\n{k}",
+                    }
+                )
+            _write_jsonl(brain / ana_id / ".system_generated/logs/transcript.jsonl", ana_steps)
+
+            out_jsonl = root / "loop_trajectory_log.jsonl"
+
+            # Log held sub-iterations 65C, 65G, and 65H via real CLI subprocesses!
+            for sub_tag, extra_args in [
+                ("65C", ["--verdict", "HOLD-ZIP", "--spec-summary", "Loop 65C held sub-iteration"]),
+                (
+                    "65G",
+                    [
+                        "--run-dir", str(run_65g),
+                        "--verdict", "HOLD-ZIP",
+                        "--spec-summary", "Loop 65G strictly Protoss-only hold",
+                        "--single-race-diff",
+                        "--host-cpus", "32",
+                    ],
+                ),
+                (
+                    "65H",
+                    [
+                        "--run-dir", str(run_65h),
+                        "--verdict", "SHIP-ZIP",
+                        "--spec-summary", "Loop 65H Protoss-only precheck green",
+                        "--single-race-diff",
+                        "--host-cpus", "32",
+                    ],
+                ),
+            ]:
+                proc = subprocess.run(
+                    [
+                        sys.executable,
+                        str(LOGGER_PATH),
+                        "--brain-root", str(brain),
+                        "--coordinator-id", coord_id,
+                        "--ledger", str(ledger_path),
+                        "--replay-db", str(db_path),
+                        "--arena-dir", str(arena),
+                        "--out-jsonl", str(out_jsonl),
+                        "--sub-iter", sub_tag,
+                    ]
+                    + extra_args,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(proc.returncode, 0, f"sub-iter {sub_tag} failed: {proc.stderr}\n{proc.stdout}")
+
+            # Idempotency check: re-logging 65G must keep exactly 3 distinct sub-iteration rows
+            proc_dup = subprocess.run(
+                [
+                    sys.executable,
+                    str(LOGGER_PATH),
+                    "--brain-root", str(brain),
+                    "--coordinator-id", coord_id,
+                    "--ledger", str(ledger_path),
+                    "--replay-db", str(db_path),
+                    "--arena-dir", str(arena),
+                    "--out-jsonl", str(out_jsonl),
+                    "--sub-iter", "65G",
+                    "--run-dir", str(run_65g),
+                    "--verdict", "HOLD-ZIP",
+                    "--spec-summary", "Loop 65G strictly Protoss-only hold",
+                    "--single-race-diff",
+                    "--host-cpus", "32",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(proc_dup.returncode, 0, proc_dup.stderr)
+
+            rows = ANA_MOD.load_jsonl(out_jsonl)
+            self.assertEqual([r.get("sub_iter") for r in rows], ["65C", "65G", "65H"])
+
+            # Analyze flywheel with all 4 new open-ended detectors!
+            out_md = root / "retro_open.md"
+            out_json = root / "retro_open.json"
+            rep = ANA_MOD.analyze_flywheel(out_jsonl, ledger_path, out_md, out_json, host_cpus=32)
+            bd = rep["bottleneck_detectors"]
+            self.assertEqual(bd["sub_iterations_logged"], ["65C", "65G", "65H"])
+
+            # Detector 1 assertions (slow commands >30s non-SC2 + Top-10 slowest + no home path leak)
+            sc = bd["slow_commands"]
+            self.assertGreaterEqual(sc["non_sc2_over_30s_count"], 2)
+            top_kinds = {c["cmd_kind"] for c in sc["top_10_non_sc2_commands"]}
+            self.assertIn("racket_minus_c", top_kinds)
+            self.assertIn("post_bench_serial", top_kinds)
+            self.assertFalse(any("/home/fakeuser" in c["cmd"] for c in sc["top_10_slowest_commands"]))
+
+            # Detector 2 assertions (bench utilization, tail waste, stragglers, LPT, unfiltered single-race)
+            bu = bd["bench_utilization"]
+            self.assertEqual(bu["runs_analyzed"], 2)
+            bu_detectors = {f["detector"] for f in bu["findings"]}
+            for expected_det in (
+                "bench_non_lpt_schedule",
+                "bench_low_concurrency",
+                "bench_high_tail_waste",
+                "bench_timeout_stragglers",
+                "bench_unfiltered_single_race_suite",
+            ):
+                self.assertIn(expected_det, bu_detectors, f"Missing bench detector {expected_det}: {bu_detectors}")
+
+            # Detector 3 assertions (LLM think vs tool time, heavy model on harness, >5 post-bench turns, >15 cmds)
+            llm = bd["llm_efficiency"]
+            llm_by_role = {a["role"]: a for a in llm["agents"]}
+            self.assertEqual(llm_by_role["harness"]["primary_model"], "claude-opus-4-6-xhigh")
+            self.assertGreaterEqual(llm_by_role["harness"]["max_post_bench_turns"], 6)
+            self.assertGreaterEqual(llm_by_role["harness"]["think_sec"], 150.0)
+            self.assertGreaterEqual(llm_by_role["analyzer"]["max_cmds_in_session"], 17)
+            llm_detectors = {f["detector"] for f in llm["findings"]}
+            for expected_det in (
+                "mechanical_runner_heavy_model",
+                "mechanical_runner_multi_turn_post_bench",
+                "adhoc_command_session_churn",
+            ):
+                self.assertIn(expected_det, llm_detectors, f"Missing LLM detector {expected_det}: {llm_detectors}")
+
+            # Markdown rendering verification (Section 6 + Top-10 + hygiene)
+            md = out_md.read_text(encoding="utf-8")
+            self.assertIn("6. Open-Ended Cycle-Time Bottleneck Audit", md)
+            self.assertIn("6a. Top-10 Slowest Single Shell Commands", md)
+            self.assertIn("6b. Bench Utilization, Tail-Waste & Straggler Audit", md)
+            self.assertIn("6c. LLM Think-Time vs Tool-Time & Turn Efficiency", md)
+            self.assertIn("6d. Auto-Detected Cycle-Time Findings", md)
+            self.assertIn("L65G", md)
+            self.assertNotIn("/home/fakeuser", md)
+
+            # Precision checks: fast model on mechanical runner clears heavy-model flag; pgrep podman is not sc2_bench
+            self.assertEqual(LOG_MOD.classify_cmd_kind("pgrep -cf '[p]odman'"), (False, "other"))
+            self.assertEqual(LOG_MOD.classify_cmd_kind("podman run --rm img"), (True, "sc2_bench"))
+            fast_only_rec = [
+                {
+                    "loop_id": 66,
+                    "agent_trajectories": {
+                        "harness": {
+                            "model": "gemini-4-neon-medium",
+                            "think_sec": 300.0,
+                            "tool_sec": 40.0,
+                            "planner_turns": 3,
+                            "run_command_calls": 2,
+                            "sessions_count": 1,
+                            "max_turns_in_session": 3,
+                            "max_cmds_in_session": 2,
+                            "post_bench_turns": 1,
+                        }
+                    },
+                }
+            ]
+            fast_llm = ANA_MOD.compute_llm_efficiency_audit(fast_only_rec)
+            self.assertEqual(fast_llm["findings"], [])
 
 
 if __name__ == "__main__":

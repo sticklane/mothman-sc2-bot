@@ -30,7 +30,8 @@
          racket/match
          racket/math
          "../lib/bot-runtime.rkt"
-         "../lib/tactics/pro-spellcaster-micro.rkt")
+         "../lib/tactics/pro-spellcaster-micro.rkt"
+         "../lib/tactics/concave-positioning.rkt")
 
 (define tests-run 0)
 (define tests-passed 0)
@@ -132,9 +133,9 @@
 ;; -----------------------------------------------------------------------------
 (let ()
   ;; 3-base Terran (`3` OCs, `6` busy Barracks = old `2 * CCs` cap!, `2` Factories + TL,
-  ;; `1` Starport + TL, `3` Siege Tanks, `54` SCVs, `230M/20G` at `f=10200` -> Macro Brain
-  ;; schedules `barracks` `#7` (`terran-midgame-rax-scale-due?`), and Runtime MUST emit
-  ;; `(build barracks ...)` instead of silently capping at `6`!).
+  ;; `1` Starport + TL, `3` Siege Tanks, `54` SCVs, `600M/20G` at `f=10200` -> clears L65's
+  ;; `< 500M` 4th-CC mineral save so Macro Brain schedules `barracks` `#7` (`terran-midgame-rax-scale-due?`),
+  ;; and Runtime MUST emit `(build barracks ...)` past `2 * CCs = 6`!).
   (define scvs-54
     (for/list ([i (in-range 54)])
       (mk-u (+ 1001 i) 'scv (+ 28.0 (* 0.25 (modulo i 9))) (+ 29.0 (* 0.5 (quotient i 9))) #:hp 45.0)))
@@ -183,7 +184,7 @@
     (step-layer2-economy!
      rt-rax7
      (mk-live-obs 'Terran 'Terran 10200
-                  #:minerals 230 #:gas 20 #:supply-used 80 #:supply-cap 140
+                  #:minerals 600 #:gas 20 #:supply-used 80 #:supply-cap 140
                   #:mineral-harvesters 42 #:vespene-harvesters 12
                   #:ally-units (append scvs-54 tanks-3 marines-12)
                   #:ally-buildings bldgs-3b-6rax
@@ -1506,6 +1507,37 @@
                       stat-late-3666 (length stat-late-pulled) (length r15-pulled-68)
                       scv0-dis-at-1200? scv0-reengaged-at-1232?
                       r16-9w-stole-probe? r16-4w-allowed-probe?)))
+
+;; Loop 65E (`#1907`/`#1908`): Zerg Roach skips natural (non-splash) lateral concave fanning
+;; so short-range Roaches charge ahead of Ravagers/Hydras, while keeping anti-splash spread vs Tanks!
+(let ()
+  (define roaches-6
+    (for/list ([i (in-range 6)])
+      (mk-u (+ 14900 i) 'roach 70.0 (+ 49.5 (* 0.2 i)) #:hp 145.0)))
+  (define ravagers-2
+    (list (mk-u 14910 'ravager 69.5 49.8 #:hp 120.0)
+          (mk-u 14911 'ravager 69.5 50.2 #:hp 120.0)))
+  (define en-nosplash
+    (for/list ([i (in-range 6)])
+      (mk-u (+ 14920 i) 'roach 79.0 (+ 49.4 (* 0.2 i)) #:hp 145.0)))
+  (define en-tank-splash
+    (cons (mk-u 14930 'siege-tank-sieged 81.0 50.0 #:hp 175.0) en-nosplash))
+  (define ctx-ns (build-combat-positioning-context (append roaches-6 ravagers-2) en-nosplash))
+  (define ctx-sp (build-combat-positioning-context (append roaches-6 ravagers-2) en-tank-splash))
+  (define roach-ns-pts
+    (filter real?
+            (for/list ([u (in-list roaches-6)])
+              (define-values (ax ay) (compute-lateral-concave-spread-pt ctx-ns u 79.0 50.0 4.0))
+              (and ax ay ax))))
+  (define roach-sp-pts
+    (filter real?
+            (for/list ([u (in-list roaches-6)])
+              (define-values (ax ay) (compute-lateral-concave-spread-pt ctx-sp u 79.0 50.0 4.0))
+              (and ax ay ay))))
+  (check-true "L65E-roach-skips-natural-lateral-concave-but-spreads-vs-tank-splash"
+              (and (null? roach-ns-pts)
+                   (>= (length roach-sp-pts) 4))
+              (format "roach-nosplash=~a roach-splash-cnt=~a" roach-ns-pts (length roach-sp-pts))))
 
 (printf "\n=== Loop 48 Suite Summary: ~a/~a passed, ~a failed ===\n"
         tests-passed tests-run tests-failed)

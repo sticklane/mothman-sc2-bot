@@ -952,15 +952,43 @@
             (list (terran-supply-drop-decision-oc-tag sd-cloak-105)
                   (terran-supply-drop-decision-depot-tag sd-cloak-105))
             '(101 302))
+  ;; Loop 65 (`#1831`/`#1833`): Fire SupplyDrop on real 4-12m supply blocks even when peaceful
+  ;; (skip only when a Depot is already nearly done peacefully or not supply-blocked)!
   (define sd-peace
     (evaluate-terran-supply-drop-policy
      #:loop 8000 #:supply-used 78 #:supply-cap 78
      #:ready-ocs (list (mk-oc 101 85.0))
      #:depots (list d-free)
      #:under-pressure? #f))
-  (check-eq "l64-supply-drop-skips-when-peaceful"
-            (terran-supply-drop-decision-oc-tag sd-peace)
+  (check-eq "l65-supply-drop-fires-on-midgame-block-without-pressure"
+            (list (terran-supply-drop-decision-oc-tag sd-peace)
+                  (terran-supply-drop-decision-depot-tag sd-peace))
+            '(101 302))
+  (define sd-peace-nearly-done
+    (evaluate-terran-supply-drop-policy
+     #:loop 8000 #:supply-used 78 #:supply-cap 78
+     #:ready-ocs (list (mk-oc 101 85.0))
+     #:depots (list d-free)
+     #:under-pressure? #f
+     #:depot-nearly-done? #t))
+  (check-eq "l65-supply-drop-skips-peaceful-when-depot-nearly-done"
+            (terran-supply-drop-decision-oc-tag sd-peace-nearly-done)
             #f)
+  (define sd-not-blocked
+    (evaluate-terran-supply-drop-policy
+     #:loop 8000 #:supply-used 76 #:supply-cap 78
+     #:ready-ocs (list (mk-oc 101 85.0))
+     #:depots (list d-free)
+     #:under-pressure? #f))
+  (check-eq "l65-supply-drop-skips-when-not-blocked"
+            (terran-supply-drop-decision-oc-tag sd-not-blocked)
+            #f)
+  (check-eq "l65-chrono-4m-under-breach-promotes-robo-over-forge"
+            (macro-chrono-candidate-info-tag
+             (select-protoss-chrono-target-policy
+              #:candidates (list c-nx c-fg c-rb c-gw)
+              #:loop 8000 #:worker-count 44 #:nexus-energy 60.0 #:under-pressure? #t #:main-base-breach? #t))
+            104)
   (define sd-cap192
     (evaluate-terran-supply-drop-policy
      #:loop 8000 #:supply-used 192 #:supply-cap 192

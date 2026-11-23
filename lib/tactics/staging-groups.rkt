@@ -82,6 +82,10 @@
 (define STAGE-FRONTLINE-SEPARATION-RADIUS 30.0)
 (define STAGE-REINFORCE-MAX-WAIT-FRAMES 168)
 (define STAGE-NO-PROD-MAX-WAIT-FRAMES 112)
+(define STAGE-ZERG-REINFORCE-MAX-WAIT-FRAMES 96)
+(define STAGE-ZERG-NO-PROD-MAX-WAIT-FRAMES 64)
+(define STAGE-PROTOSS-REINFORCE-MAX-WAIT-FRAMES 268)
+(define STAGE-PROTOSS-NO-PROD-MAX-WAIT-FRAMES 180)
 (define STAGE-LEASE-TTL-FRAMES 44)
 (define STAGE-STRIKE-LEASE-TTL-FRAMES 112)
 
@@ -953,6 +957,17 @@
        (filter (lambda (b) (and (hash? b) (memq (rec-type-sym b) TOWNHALL-SYMS)))
                (or ally-buildings '())))
 
+     ;; Loop 65F/65H (`#1920`/`#1948`): Detect Zerg/Protoss via existing `ally-townhalls` (zero new kwargs)
+     ;; so Zerg keeps `96f/64f`, Terran keeps `168f/112f`, and Protoss gets warp-in staging (`268f/180f`)!
+     (define zerg-race?
+       (and (list? ally-townhalls)
+            (ormap (lambda (b) (memq (rec-type-sym b) '(hatchery lair hive)))
+                   ally-townhalls)))
+     (define protoss-race?
+       (and (list? ally-townhalls)
+            (ormap (lambda (b) (eq? (rec-type-sym b) 'nexus))
+                   ally-townhalls)))
+
      (define enemy-combat-recs
        (filter (lambda (e)
                  (and (rec-xy? e)
@@ -972,6 +987,8 @@
 
      ;; Prune dead units from tracking maps & record first-seen frame
      ;; (`unit-first-seen`: positive frame = fresh unit; negative frame = graduated from `'main-reinforce`)
+     ;; Loop 65H (`#1948`): For Protoss ONLY, require `(rec-complete? u)` (`build-progress >= 0.999`)
+     ;; before recording `first-seen`, counting `front-cnt`, or entering `'main-reinforce`!
      (define first-seen (staging-group-manager-unit-first-seen mgr))
      (define (reinf-graduated? uid)
        (< (hash-ref first-seen uid 1) 0))
@@ -982,7 +999,8 @@
          (define uid (rec-id u))
          (if (> uid 0)
              (begin
-               (unless (hash-has-key? first-seen uid)
+               (when (and (or (not protoss-race?) (rec-complete? u))
+                          (not (hash-has-key? first-seen uid)))
                  (hash-set! first-seen uid (max 1 frame)))
                (set-add s uid))
              s)))
@@ -1004,18 +1022,22 @@
        (for/fold ([fc 0] [fs 0] [sx 0.0] [sy 0.0]) ([u (in-list combat-units)])
          (define sym (rec-type-sym u))
          (if (and (rec-xy? u)
+                  (or (not protoss-race?) (rec-complete? u))
                   (not (memq sym NON-REINFORCE-STAGING-SYMS)))
              (let ([ux (rec-x u fbx)] [uy (rec-y u fby)])
                (if (fl> (dist2d-fl ux uy fbx fby) 26.0)
                    (values (add1 fc) (+ fs (max 1 (sc2-supply-cost sym 1))) (fl+ sx ux) (fl+ sy uy))
                    (values fc fs sx sy)))
              (values fc fs sx sy))))
+     (define front-cx (if (> front-cnt 0) (fl/ front-sx (exact->inexact front-cnt)) fbx))
+     (define front-cy (if (> front-cnt 0) (fl/ front-sy (exact->inexact front-cnt)) fby))
      (define has-distant-frontline?
        (and (>= front-cnt 4)
-            (fl> (dist2d-fl (fl/ front-sx (exact->inexact front-cnt))
-                            (fl/ front-sy (exact->inexact front-cnt))
-                            fbx fby)
+            (fl> (dist2d-fl front-cx front-cy fbx fby)
                  STAGE-FRONTLINE-SEPARATION-RADIUS)))
+     (define front-far-from-nat?
+       (and (> front-cnt 0)
+            (fl> (dist2d-fl front-cx front-cy fnx fny) 28.0)))
 
      ;; Count matching units currently in production/morphing
      (define (prod-count-for syms)
@@ -1043,8 +1065,30 @@
        (define uid (rec-id u))
        (and (> uid 0)
             (rec-xy? u)
+            (or (not protoss-race?) (rec-complete? u))
             (not (set-member? skip-tags uid))
             (not (and role-leases (unit-leased-above? role-leases uid 'staging-group frame)))))
+
+     ;; Loop 65F (`#1920`/`#1921`): Require substantive non-worker combat threat (`>= 6.0` supply
+     ;; OR `>= 3` combat units within `<= 22.0t` of Main or `<= 20.0t` of Natural) so a lone scout
+     ;; Probe / Tempest / Phoenix / Banshee at `24-28t` NEVER disables `'main-reinforce`!
+     (define enemy-near-main-or-nat?
+       (let-values ([(cnt sup)
+                     (for/fold ([c 0] [s 0.0]) ([e (in-list enemy-combat-recs)])
+                       (define esym (rec-type-sym e))
+                       (if (memq esym WORKER-SYMS)
+                           (values c s)
+                           (let ([ex (rec-x e 9999.0)]
+                                 [ey (rec-y e 9999.0)])
+                             (if (or (fl<= (dist2d-fl ex ey fbx fby) 22.0)
+                                     (fl<= (dist2d-fl ex ey fnx fny) 20.0))
+                                 (values (add1 c)
+                                         (fl+ s (exact->inexact
+                                                 (if (eq? esym 'zergling)
+                                                     0.5
+                                                     (max 1 (sc2-supply-cost esym 1))))))
+                                 (values c s)))))])
+         (or (>= cnt 3) (fl>= sup 6.0))))
 
      (for ([u (in-list combat-units)]
            #:when (unit-eligible-for-staging? u))
@@ -1073,8 +1117,8 @@
                    (fl<= (dist2d-fl ux uy fnx fny) 24.0)
                    (eq? (hash-ref u2g uid #f) 'air-harass-muta)))
           (bucket-add! 'air-harass-muta u)]
-         [(and (memq sym '(oracle banshee))
-               (> (prod-count-for (list sym)) 0)
+         [(and (eq? sym 'banshee)
+               (> (prod-count-for '(banshee)) 0)
                (or (fl<= (dist2d-fl ux uy fbx fby) 36.0)
                    (fl<= (dist2d-fl ux uy fnx fny) 24.0)
                    (eq? (hash-ref u2g uid #f) 'air-harass-raider)))
@@ -1091,18 +1135,28 @@
                (or (fl<= (dist2d-fl ux uy fbx fby) 32.0)
                    (eq? (hash-ref u2g uid #f) 'ground-harass-adept)))
           (bucket-add! 'ground-harass-adept u)]
-         ;; Family 4: Main Ground Reinforce Wave (strictly home-spawn wave-batching `<= 24t` from home)
-         ;; NEVER capture or recapture units `> 26t` from home, NEVER recapture already-dispatched
-         ;; units, and NEVER trigger on `combat-suppress-attack?` (only `has-distant-frontline?`)!
+         ;; Family 4: Main Ground Reinforce Wave (strictly home-spawn wave-batching `<= 24t` from home;
+         ;; Loop 65H `#1948`: for Protoss ONLY, ALSO capture fresh non-graduated units warped near
+         ;; Natural `<= 16.0t` while frontline centroid is `> 28.0t` from Natural!)
+         ;; NEVER capture or recapture units `> 26t` from home (for Terran/Zerg), NEVER recapture
+         ;; already-dispatched units, and NEVER trigger on `combat-suppress-attack?` (only `has-distant-frontline?`)!
          [(and (not (memq sym NON-REINFORCE-STAGING-SYMS))
                (not (memq raw-sym NON-REINFORCE-STAGING-SYMS))
                (not under-home-attack?)
+               (not defensive-muster-active?)
+               (not enemy-near-main-or-nat?)
                has-distant-frontline?
                (not (reinf-graduated? uid))
-               (let ([d-home (dist2d-fl ux uy fbx fby)])
-                 (and (fl<= d-home 26.0)
-                      (or (fl<= d-home STAGE-HOME-REINFORCE-RADIUS)
-                          (eq? (hash-ref u2g uid #f) 'main-reinforce)))))
+               (let ([d-home (dist2d-fl ux uy fbx fby)]
+                     [d-nat (dist2d-fl ux uy fnx fny)])
+                 (or (and (fl<= d-home 26.0)
+                          (or (fl<= d-home STAGE-HOME-REINFORCE-RADIUS)
+                              (eq? (hash-ref u2g uid #f) 'main-reinforce)))
+                     (and protoss-race?
+                          front-far-from-nat?
+                          (or (fl<= d-nat 16.0)
+                              (and (fl<= d-nat 18.0)
+                                   (eq? (hash-ref u2g uid #f) 'main-reinforce)))))))
           (bucket-add! 'main-reinforce u)]))
 
      ;; Helper: release any staging/strike lease owned by staging-groups for `uid`
@@ -1165,7 +1219,7 @@
                   (if (> pc 0) 224 STAGE-NO-PROD-MAX-WAIT-FRAMES)
                   96 pc #f)]
          [(air-harass-raider)
-          (define pc (prod-count-for '(oracle banshee)))
+          (define pc (prod-count-for '(banshee)))
           (values 'air 2 4
                   (if (> pc 0) 112 44)
                   64 pc #f)]
@@ -1181,8 +1235,16 @@
                   64 pc #f)]
          [else ;; 'main-reinforce
           (define min-s (max 6 (if (> front-sup 0) (max 6 (quotient front-sup 4)) 6)))
+          (define reinf-wait
+            (cond [zerg-race? STAGE-ZERG-REINFORCE-MAX-WAIT-FRAMES]
+                  [protoss-race? STAGE-PROTOSS-REINFORCE-MAX-WAIT-FRAMES]
+                  [else STAGE-REINFORCE-MAX-WAIT-FRAMES]))
+          (define noprod-wait
+            (cond [zerg-race? STAGE-ZERG-NO-PROD-MAX-WAIT-FRAMES]
+                  [protoss-race? STAGE-PROTOSS-NO-PROD-MAX-WAIT-FRAMES]
+                  [else STAGE-NO-PROD-MAX-WAIT-FRAMES]))
           (values 'ground-front 4 min-s
-                  (if (> total-combat-in-prod 0) STAGE-REINFORCE-MAX-WAIT-FRAMES STAGE-NO-PROD-MAX-WAIT-FRAMES)
+                  (if (> total-combat-in-prod 0) reinf-wait noprod-wait)
                   84 total-combat-in-prod #f)]))
 
      (define actions-rev '())
@@ -1260,12 +1322,16 @@
        ;; scramble so staging packs consolidate, while ALWAYS scrambling on Main threat OR
        ;; `<= 2`-base Natural threat (`< 10.0t` of Natural)!
        (define home-scramble-override?
-         (and (or (and under-home-attack?
-                       (or (not defensive-muster-active?)
-                           enemy-near-main?
-                           enemy-near-nat-2base?))
-                  (and protect-vs-cap-air? cap-air-shelling-base?))
-              (not (and protect-vs-cap-air? (< n-members 6)))))
+         (or (and (eq? gid 'main-reinforce)
+                  (or under-home-attack?
+                      defensive-muster-active?
+                      enemy-near-main-or-nat?))
+             (and (or (and under-home-attack?
+                           (or (not defensive-muster-active?)
+                               enemy-near-main?
+                               enemy-near-nat-2base?))
+                      (and protect-vs-cap-air? cap-air-shelling-base?))
+                  (not (and protect-vs-cap-air? (< n-members 6))))))
 
        ;; Ready-to-commit condition (pack threshold + cohesion OR anti-stall / endgame / home-defense)
        (define pack-threshold-met?

@@ -13875,6 +13875,294 @@
   (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 0 (list l64-min))))
   (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l64-min)))))
 
+(printf "[Loop 65 Lane C] Testing #1830 Gap C7 cluster-centroid concave arc, 2-prong >=25t APM batching, Banshee-on-workers cloak priority, & Supply Drop 64f retry...\n")
+(let ()
+  (define (mk-l65-u tag utype alliance x y
+                    #:hp [hp 100.0] #:hp-max [hp-max hp] #:sh [sh 0.0] #:rad [rad 1.0]
+                    #:en [en 0.0] #:en-max [en-max 200.0] #:bp [bp 1.0]
+                    #:fly [fly? #f] #:burr [burr? #f] #:cloak [cloak 0] #:mins [mins 0])
+    (sc2-unit 1 alliance tag utype (if (= alliance 1) 1 2)
+              (sc2-point3d x y (if fly? 12.0 8.0)) 0.0 rad bp cloak #f #f burr?
+              hp hp-max sh sh en en-max mins 0 fly? #f #f #t #f
+              '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define l65-min (mk-l65-u 85001 341 3 23.0 30.0 #:mins 1500 #:en 0.0 #:en-max 0.0))
+
+  ;; L65-C1 (Gap C7): `'form-concave-arc` orients arc from approaching cluster centroid
+  ;;         (north of enemy `(90, 100)` -> `(90, 90)`) instead of hardcoded `home-x/y = (30, 30)`,
+  ;;         and triggers on `1.4t` neighbor spacing (`< 1.65t` new cap, `> 1.15t` old cap)!
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l65-min))))
+  (define l65-th-sw (mk-l65-u 85100 59 1 30.0 30.0 #:hp 1000.0 #:sh 1000.0 #:rad 2.75))
+  (define l65-stks-n
+    (list (mk-l65-u 85101 74 1 88.6 100.0 #:hp 80.0 #:sh 80.0)
+          (mk-l65-u 85102 74 1 90.0 100.0 #:hp 80.0 #:sh 80.0)
+          (mk-l65-u 85103 74 1 91.4 100.0 #:hp 80.0 #:sh 80.0)
+          (mk-l65-u 85104 74 1 90.0 101.4 #:hp 80.0 #:sh 80.0)))
+  (define l65-enemy-mid (mk-l65-u 85110 48 4 90.0 90.0 #:hp 45.0))
+  (define l65-arc-cmds
+    (filter (lambda (c)
+              (and (sc2-raw-unit-command? c)
+                   (= (sc2-raw-unit-command-ability-id c) 23)
+                   (sc2-point2d? (sc2-raw-unit-command-target-pos c))))
+            (translate-bot-actions->sc2-raw-commands
+             '((form-concave-arc 90.0 90.0 8.0 120))
+             (make-test-obs 7200 200 100 (append (list l65-th-sw l65-enemy-mid l65-min) l65-stks-n)))))
+  (check-true "l65-c1-form-concave-arc-uses-cluster-centroid-angle-and-1-65t-spacing"
+              (and (= (length l65-arc-cmds) 4)
+                   (andmap (lambda (c)
+                             (> (sc2-point2d-y (sc2-raw-unit-command-target-pos c)) 92.0))
+                           l65-arc-cmds)))
+
+  ;; L65-C2: Simultaneous 2-prong attacks (`>= 25t` apart: 10-unit Main Army at `(140, 40)` +
+  ;;         4-unit Runby at `(40, 140)`) NEVER coalesce AND BOTH emit in the SAME step even
+  ;;         under tight APM governor tokens (`tokens < 6.0` where old `max-count = 1` dropped Prong B)!
+  (define l65-prong-a (sc2-raw-unit-command 23 (sc2-point2d 140.0 40.0) 0 (for/list ([i (in-range 10)]) (+ 85200 i)) #f))
+  (define l65-prong-b (sc2-raw-unit-command 23 (sc2-point2d 40.0 140.0) 0 (for/list ([i (in-range 4)])  (+ 85220 i)) #f))
+  (define l65-coal (coalesce-sc2-raw-commands (list l65-prong-a l65-prong-b) (seteqv 16 23) #f))
+  (define l65-gov (make-wire-apm-governor #:target-apm 410.0 #:hard-cap-apm 485.0 #:burst-capacity 3.5))
+  ;; Warm P1 at loop 196 so `1a-pre` overdue P1 doesn't run before `1b`, leaving `tokens < 6.0`!
+  (void (govern-sc2-wire-actions! l65-gov (list (sc2-raw-unit-command 1343 #f 0 '(85239) #f)) 196))
+  (define l65-p1-noise
+    (for/list ([i (in-range 4)])
+      (sc2-raw-unit-command 1343 #f 0 (list (+ 85240 i)) #f)))
+  (define l65-gov-out
+    (govern-sc2-wire-actions! l65-gov (append l65-p1-noise (list l65-prong-a l65-prong-b)) 200))
+  (define l65-emitted-23
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 23))) l65-gov-out))
+  (check-true "l65-c2-two-prong-25t-apart-never-coalesce-and-both-emit-under-tight-tokens"
+              (and (= (length l65-coal) 2)
+                   (= (length l65-emitted-23) 2)
+                   (ormap (lambda (c) (= (sc2-point2d-x (sc2-raw-unit-command-target-pos c)) 140.0)) l65-emitted-23)
+                   (ormap (lambda (c) (= (sc2-point2d-x (sc2-raw-unit-command-target-pos c)) 40.0)) l65-emitted-23)))
+
+  ;; L65-C3: Live Cloaked Banshee (`55`) raiding workers beats distant Widow Mine (`500`) for
+  ;;         BOTH `12a` 1-detector intercept AND `399` 1-OC Scan; plus Supply Drop `255` `64f`
+  ;;         refractory allows retry when Depot is still `400.0` max-HP & blocks at `500.0` max-HP!
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l65-min))))
+  (define l65-oc   (mk-l65-u 85301 132 1 30.0 30.0 #:hp 1500.0 #:rad 2.75 #:en 60.0))
+  (define l65-scv  (mk-l65-u 85302 45  1 26.0 30.0 #:hp 45.0   #:rad 0.375 #:en 0.0 #:en-max 0.0))
+  (define l65-mar  (mk-l65-u 85303 48  1 54.0 30.0 #:hp 45.0   #:rad 0.375 #:en 0.0 #:en-max 0.0))
+  (define l65-obs  (mk-l65-u 85304 82  1 40.0 30.0 #:hp 40.0   #:sh 20.0   #:fly #t))
+  (define l65-bsh  (mk-l65-u 85311 55  4 26.0 34.0 #:hp 0.0    #:hp-max 0.0 #:fly #t #:cloak 1))
+  (define l65-wm   (mk-l65-u 85312 500 4 56.0 30.0 #:hp 0.0    #:hp-max 0.0 #:burr #t #:cloak 1))
+  (define l65-cloak-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '()
+     (make-test-obs 7400 200 100 (list l65-oc l65-scv l65-mar l65-obs l65-bsh l65-wm l65-min))))
+  (define l65-12a-mv (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 16))) l65-cloak-cmds))
+  (define l65-399-sc (findf (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 399))) l65-cloak-cmds))
+  (define l65-dep-400 (mk-l65-u 85320 19 1 34.0 30.0 #:hp 400.0 #:hp-max 400.0 #:en 0.0 #:en-max 0.0))
+  (define l65-dep-500 (mk-l65-u 85320 19 1 34.0 30.0 #:hp 500.0 #:hp-max 500.0 #:en 0.0 #:en-max 0.0))
+  (define (sd-cnt cmds)
+    (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 255))) cmds))
+  (define sd-t0 (sd-cnt (translate-bot-actions->sc2-raw-commands '((cast-spell 85301 calldown-extra-supplies 85320)) (make-test-obs 8000 200 100 (list l65-oc l65-dep-400 l65-min)))))
+  (define sd-t32 (sd-cnt (translate-bot-actions->sc2-raw-commands '((cast-spell 85301 calldown-extra-supplies 85320)) (make-test-obs 8032 200 100 (list l65-oc l65-dep-400 l65-min)))))
+  (define sd-t64 (sd-cnt (translate-bot-actions->sc2-raw-commands '((cast-spell 85301 calldown-extra-supplies 85320)) (make-test-obs 8064 200 100 (list l65-oc l65-dep-400 l65-min)))))
+  (define sd-t140-upg (sd-cnt (translate-bot-actions->sc2-raw-commands '((cast-spell 85301 calldown-extra-supplies 85320)) (make-test-obs 8140 200 100 (list l65-oc l65-dep-500 l65-min)))))
+  (check-true "l65-c3-banshee-on-workers-beats-mine-and-supply-drop-64f-retry"
+              (and l65-12a-mv
+                   (< (abs (- (sc2-point2d-x (sc2-raw-unit-command-target-pos l65-12a-mv)) 26.0)) 3.0)
+                   l65-399-sc
+                   (< (abs (- (sc2-point2d-x (sc2-raw-unit-command-target-pos l65-399-sc)) 26.0)) 1.0)
+                   (= sd-t0 1)
+                   (= sd-t32 0)
+                   (= sd-t64 1)
+                   (= sd-t140-upg 0)))
+
+  ;; L65-C4 (Addendum `#1844` — Steven's Directive): Pure `point-blocks-canonical-townhall?`
+  ;;         (`<= 3.6t` Chebyshev box) + BOTH Queen initial Creep Tumor (`1694`) AND Tumor-to-Tumor
+  ;;         spread (`1733`) reject coordinates inside a canonical expansion TownHall `3.6t` box
+  ;;         and cleanly pick a safe adjacent point outside the box (even across cached map pads)!
+  (define l65-exp-pad (cons 50.5 34.5))
+  (define l65-exp-locs (list l65-exp-pad (cons 80.5 34.5)))
+  (check-true "l65-c4a-point-blocks-canonical-townhall-helper"
+              (and (point-blocks-canonical-townhall? 50.5 34.5 l65-exp-locs)
+                   (point-blocks-canonical-townhall? 54.0 38.0 l65-exp-locs) ;; dx=3.5, dy=3.5 <= 3.6 -> blocked!
+                   (not (point-blocks-canonical-townhall? 54.5 34.5 l65-exp-locs)) ;; dx=4.0 > 3.6 -> clear!
+                   (not (point-blocks-canonical-townhall? 50.5 34.5 l65-exp-locs (list l65-exp-pad)))))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l65-min))))
+  (hash-clear! SC2-TUMOR-PLACEMENT-CACHE)
+  (set-box! SC2-CACHED-MAP-BASE-CLUSTERS (list (list 50.5 34.5 '()) (list 80.5 34.5 '())))
+  ;; Queen (`126`) near expansion `(50.5, 34.5)` instructed to place `1694` directly ON `(50.5, 34.5)`
+  ;; -> MUST NOT emit inside `3.6t` box and MUST pick a safe spot outside `3.6t`!
+  (define l65-ht-exp (mk-l65-u 85401 86  1 42.5 34.5 #:hp 1500.0 #:rad 2.75))
+  (define l65-qn-exp (mk-l65-u 85402 126 1 46.0 34.5 #:hp 175.0  #:rad 0.875 #:en 50.0))
+  (define l65-tm-exp (mk-l65-u 85403 137 1 44.0 34.5 #:hp 50.0   #:rad 0.5 #:burr #t))
+  (define l65-qn-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1694)))
+            (translate-bot-actions->sc2-raw-commands
+             '((cast 85402 spawn-creep-tumor 50.5 34.5))
+             (make-test-obs 7600 300 100 (list l65-ht-exp l65-qn-exp l65-min))
+             #:game-info w3-ginfo)))
+  (define l65-qn-pt (and (= (length l65-qn-cmds) 1) (sc2-raw-unit-command-target-pos (first l65-qn-cmds))))
+  ;; Burrowed Tumor (`137`) spreading `1733` directly ON `(50.5, 34.5)` (and `(52.5, 36.5)` inside box)
+  ;; -> MUST NOT emit inside `3.6t` box and MUST pick a safe spot outside `3.6t` (still `<= 9.8t`)!
+  (define l65-tm-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1733)))
+            (translate-bot-actions->sc2-raw-commands
+             '((cast 85403 spread-creep-tumor 50.5 34.5))
+             (make-test-obs 7648 300 100 (list l65-ht-exp l65-tm-exp l65-min))
+             #:game-info w3-ginfo)))
+  (define l65-tm-pt (and (= (length l65-tm-cmds) 1) (sc2-raw-unit-command-target-pos (first l65-tm-cmds))))
+  (check-true "l65-c4b-queen-1694-and-tumor-1733-never-block-canonical-expansion-3-6t-box"
+              (and (sc2-point2d? l65-qn-pt)
+                   (not (point-blocks-canonical-townhall? (sc2-point2d-x l65-qn-pt)
+                                                          (sc2-point2d-y l65-qn-pt)
+                                                          l65-exp-locs))
+                   (sc2-point2d? l65-tm-pt)
+                   (not (point-blocks-canonical-townhall? (sc2-point2d-x l65-tm-pt)
+                                                          (sc2-point2d-y l65-tm-pt)
+                                                          l65-exp-locs))
+                   (<= (sqrt (+ (sqr (- (sc2-point2d-x l65-tm-pt) 44.0))
+                                (sqr (- (sc2-point2d-y l65-tm-pt) 34.5))))
+                       9.8)))
+
+  ;; L65D Lane 3 (`#1891`/`#1892`):
+  ;;   1. `claim-combat-tags-for-order!` emits explicit per-unit combat/tactical orders for
+  ;;      `'strike-group` (55), `'staging-group` (50), and `'spotter` (68) leases while strictly
+  ;;      blocking non-combat utility leases (`'builder` 100, `'door-guard` 90, `'scout` 70, `'creep-queen` 65),
+  ;;      and keeping generic idle wire sweeps (`combat-units` at `'army`) from hijacking leased units!
+  ;;   2. Phased Warp Prism `(warp-in wgid 'zealot wx wy)` over Zerg creep (`pl-grid = 0, path-grid = 1`)
+  ;;      warps under the Prism instead of silently falling back to a home Pylon, while still rejecting
+  ;;      unpathable cliffs (`path-grid = 0`).
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l65-min))))
+  (define l65d-leases (make-hasheqv))
+  (acquire-unit-lease! l65d-leases 86001 'strike-group  8000 40 #:x 90.0 #:y 90.0)
+  (acquire-unit-lease! l65d-leases 86002 'staging-group 8000 40 #:x 88.0 #:y 88.0)
+  (acquire-unit-lease! l65d-leases 86003 'spotter       8000 40 #:x 95.0 #:y 95.0)
+  (acquire-unit-lease! l65d-leases 86004 'strike-group  8000 40 #:x 92.0 #:y 92.0)
+  (acquire-unit-lease! l65d-leases 86011 'builder       8000 40 #:x 30.0 #:y 30.0)
+  (acquire-unit-lease! l65d-leases 86012 'door-guard    8000 40 #:x 34.0 #:y 34.0)
+  (acquire-unit-lease! l65d-leases 86013 'scout         8000 40 #:x 70.0 #:y 70.0)
+  (acquire-unit-lease! l65d-leases 86014 'creep-queen   8000 40 #:x 40.0 #:y 40.0)
+  (define l65d-lease-units
+    (list (mk-l65-u 86000 59  1 24.0 24.0 #:hp 1000.0 #:rad 2.75) ;; Nexus
+          (mk-l65-u 86001 81  1 32.0 32.0 #:hp 80.0   #:rad 0.75 #:fly #t) ;; WarpPrism (strike-group)
+          (mk-l65-u 86002 74  1 34.0 32.0 #:hp 80.0   #:rad 0.625) ;; Stalker (staging-group)
+          (mk-l65-u 86003 82  1 36.0 32.0 #:hp 40.0   #:rad 0.5 #:fly #t) ;; Observer (spotter)
+          (mk-l65-u 86004 74  1 38.0 32.0 #:hp 80.0   #:rad 0.625) ;; Stalker (strike-group)
+          (mk-l65-u 86005 74  1 40.0 32.0 #:hp 80.0   #:rad 0.625) ;; Unleased Stalker
+          (mk-l65-u 86011 84  1 26.0 26.0 #:hp 20.0   #:rad 0.375) ;; Probe (builder)
+          (mk-l65-u 86012 73  1 30.0 30.0 #:hp 100.0  #:rad 0.5)   ;; Zealot (door-guard)
+          (mk-l65-u 86013 84  1 28.0 26.0 #:hp 20.0   #:rad 0.375) ;; Probe (scout)
+          (mk-l65-u 86014 126 1 32.0 26.0 #:hp 175.0  #:rad 0.875) ;; Queen (creep-queen)
+          (mk-l65-u 86999 74  4 50.0 50.0 #:hp 80.0   #:rad 0.625) ;; Visible enemy Stalker
+          l65-min))
+  (define l65d-lease-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((move 86001 90.0 90.0)
+       (attack-pos 86002 88.0 88.0)
+       (move 86003 95.0 95.0)
+       (attack-unit 86004 86999)
+       (move 86011 80.0 80.0)
+       (attack-pos 86012 85.0 85.0)
+       (move 86013 75.0 75.0)
+       (attack-pos 86014 85.0 85.0))
+     (make-test-obs 8000 400 200 l65d-lease-units)
+     #:game-info w3-ginfo
+     #:role-leases l65d-leases))
+  (define (l65d-has-cmd? cmds tag ab)
+    (ormap (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) ab)
+                  (memv tag (sc2-raw-unit-command-unit-tags c))))
+           cmds))
+  (define (l65d-any-cmd-for? cmds tag)
+    (ormap (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (memv tag (sc2-raw-unit-command-unit-tags c))))
+           cmds))
+  ;; Verify generic wire army sweep does NOT hijack leased tactical units (`combat-units` stays at `'army`)
+  (define l65d-sweep-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((attack-enemy 85.0 85.0))
+     (make-test-obs 8008 400 200 l65d-lease-units)
+     #:game-info w3-ginfo
+     #:role-leases l65d-leases))
+  (check-true "l65d-c1-tactical-leases-emit-explicit-orders-while-utility-leases-blocked"
+              (and (l65d-has-cmd? l65d-lease-cmds 86001 16)
+                   (l65d-has-cmd? l65d-lease-cmds 86002 23)
+                   (l65d-has-cmd? l65d-lease-cmds 86003 16)
+                   (l65d-has-cmd? l65d-lease-cmds 86004 23)
+                   (not (l65d-any-cmd-for? l65d-lease-cmds 86011))
+                   (not (l65d-any-cmd-for? l65d-lease-cmds 86012))
+                   (not (l65d-any-cmd-for? l65d-lease-cmds 86013))
+                   (not (l65d-any-cmd-for? l65d-lease-cmds 86014))
+                   (l65d-has-cmd? l65d-sweep-cmds 86005 23)
+                   (not (l65d-any-cmd-for? l65d-sweep-cmds 86001))
+                   (not (l65d-any-cmd-for? l65d-sweep-cmds 86002))
+                   (not (l65d-any-cmd-for? l65d-sweep-cmds 86003))
+                   (not (l65d-any-cmd-for? l65d-sweep-cmds 86004))))
+
+  ;; L65D-C2: Phased Warp Prism over Zerg creep (`pl-grid = 0, path-grid = 1`) warps under Prism,
+  ;; while unpathable chasm (`path-grid = 0`) remains strictly rejected!
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 100 (list l65-min))))
+  (define l65d-path-bytes (make-bytes (* 128 128) 1))
+  (define l65d-pl-bytes   (make-bytes (* 128 128) 0))
+  (for* ([y (in-range 128)] [x (in-range 128)])
+    (when (>= x 110) (bytes-set! l65d-path-bytes (+ x (* y 128)) 0)) ;; cliff/chasm at x >= 110
+    (when (< x 50)   (bytes-set! l65d-pl-bytes   (+ x (* y 128)) 1))) ;; creep (pl=0) for x >= 50
+  (define l65d-gi
+    (sc2-game-info "L65DCreepWarpMap" "" '() '(128 . 128) '(4 4 124 124) '()
+                   (sc2-image-grid 8 128 128 l65d-path-bytes #f #f)
+                   #f
+                   (sc2-image-grid 8 128 128 l65d-pl-bytes #f #f)))
+  (define l65d-warp-obs
+    (sc2-observation
+     8100
+     (sc2-player-common 1 600 200 60 100 30 30 0 10 2 0)
+     (list (mk-l65-u 86100 59  1 24.0 24.0 #:hp 1000.0 #:rad 2.75) ;; Home Nexus
+           (mk-l65-u 86102 60  1 28.0 24.0 #:hp 200.0  #:rad 1.0)  ;; Home Pylon (pl=1)
+           (mk-l65-u 86101 133 1 20.0 28.0 #:hp 500.0  #:rad 1.5)  ;; WarpGate #1
+           (mk-l65-u 86104 133 1 23.0 28.0 #:hp 500.0  #:rad 1.5)  ;; WarpGate #2
+           (mk-l65-u 86103 136 1 92.0 92.0 #:hp 80.0   #:rad 0.75 #:fly #t)) ;; Phased Prism on creep (pl=0, path=1)
+     '(84)
+     (list (sc2-power-source (sc2-point3d 28.0 24.0 8.0) 6.5  86102)
+           (sc2-power-source (sc2-point3d 92.0 92.0 8.0) 3.75 86103))
+     (sc2-point3d 24.0 24.0 0.0) '() '() '() '() '() '()))
+  (define l65d-warp-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1413)))
+            (translate-bot-actions->sc2-raw-commands
+             '((warp-in 86101 zealot 92.0 92.0))
+             l65d-warp-obs
+             #:game-info l65d-gi)))
+  (define l65d-warp-pt
+    (and (= (length l65d-warp-cmds) 1)
+         (sc2-raw-unit-command-target-pos (first l65d-warp-cmds))))
+  ;; Unpathable chasm prism at x=115 (`path=0, pl=0`) MUST NOT warp onto chasm (`x < 110`)
+  (define l65d-chasm-obs
+    (sc2-observation
+     8140
+     (sc2-player-common 1 600 200 60 100 30 30 0 10 2 0)
+     (list (mk-l65-u 86100 59  1 24.0 24.0 #:hp 1000.0 #:rad 2.75)
+           (mk-l65-u 86102 60  1 28.0 24.0 #:hp 200.0  #:rad 1.0)
+           (mk-l65-u 86104 133 1 23.0 28.0 #:hp 500.0  #:rad 1.5)
+           (mk-l65-u 86105 136 1 115.0 92.0 #:hp 80.0  #:rad 0.75 #:fly #t)) ;; Phased Prism over unpathable chasm!
+     '(84)
+     (list (sc2-power-source (sc2-point3d 28.0 24.0 8.0) 6.5  86102)
+           (sc2-power-source (sc2-point3d 115.0 92.0 8.0) 3.75 86105))
+     (sc2-point3d 24.0 24.0 0.0) '() '() '() '() '() '()))
+  (define l65d-chasm-cmds
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 1413)))
+            (translate-bot-actions->sc2-raw-commands
+             '((warp-in 86104 zealot 115.0 92.0))
+             l65d-chasm-obs
+             #:game-info l65d-gi)))
+  (define l65d-chasm-pt
+    (and (= (length l65d-chasm-cmds) 1)
+         (sc2-raw-unit-command-target-pos (first l65d-chasm-cmds))))
+  (check-true "l65d-c2-phased-warp-prism-over-creep-warps-at-prism-and-rejects-unpathable-chasm"
+              (and (sc2-point2d? l65d-warp-pt)
+                   (<= (sqrt (+ (sqr (- (sc2-point2d-x l65d-warp-pt) 92.0))
+                                (sqr (- (sc2-point2d-y l65d-warp-pt) 92.0))))
+                       3.5)
+                   (sc2-point2d? l65d-chasm-pt)
+                   (< (sc2-point2d-x l65d-chasm-pt) 110.0)))
+
+  ;; Clean final rewind
+  (reset-sc2-live-response-data!)
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 0 (list l65-min))))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l65-min)))))
+
 (printf "-----------------------------------------------------------------\n")
 (printf "Pure-Racket SC2 Protobuf + WebSocket Checks: ~a/~a passed (~a failed)\n"
         (- total-checks failed-checks)

@@ -275,6 +275,8 @@
  SC2-CREEP-TUMOR-FIRST-SEEN-LOOP
  SC2-CREEP-TUMOR-EMIT-COUNT
  SC2-SUPPLY-DROP-USED-DEPOTS
+ SC2-CACHED-MAP-BASE-CLUSTERS
+ point-blocks-canonical-townhall?
  make-bot-build-tag-chat-action)
 
 ;; =============================================================================
@@ -2206,6 +2208,38 @@
 (define SC2-CREEP-TUMOR-FIRST-SEEN-LOOP (make-hasheqv))
 (define SC2-CREEP-TUMOR-EMIT-COUNT (make-hasheqv))
 (define SC2-SUPPLY-DROP-USED-DEPOTS (make-hasheqv))
+
+;; Loop 65 Addendum (`#1844` Steven's Directive): Pure canonical expansion TownHall
+;; footprint guard — returns `#t` iff `(px, py)` lies within the `<= 3.6t` Chebyshev
+;; exclusion box (`2.5` TH half-width + `0.5` tumor radius + `0.6` safety margin) of any
+;; canonical expansion TownHall center `(ex, ey)`, so Queen `1694` and Tumor `1733` NEVER
+;; block canonical 2nd/3rd/4th/5th/6th/7th+ Hatchery/CC/Nexus locations!
+(define (point-blocks-canonical-townhall? px py expansion-locs [exclude-enemy-pts '()])
+  (define (extract-xy pt)
+    (cond
+      [(and (pair? pt) (real? (car pt)) (real? (cdr pt)))
+       (values (exact->inexact (car pt)) (exact->inexact (cdr pt)))]
+      [(and (list? pt) (>= (length pt) 2) (real? (first pt)) (real? (second pt)))
+       (values (exact->inexact (first pt)) (exact->inexact (second pt)))]
+      [(sc2-point2d? pt)
+       (values (exact->inexact (sc2-point2d-x pt)) (exact->inexact (sc2-point2d-y pt)))]
+      [(sc2-point3d? pt)
+       (values (exact->inexact (sc2-point3d-x pt)) (exact->inexact (sc2-point3d-y pt)))]
+      [(and (hash? pt) (real? (hash-ref pt 'x #f)) (real? (hash-ref pt 'y #f)))
+       (values (exact->inexact (hash-ref pt 'x)) (exact->inexact (hash-ref pt 'y)))]
+      [else (values #f #f)]))
+  (define (pt-excluded? ex ey)
+    (for/or ([ep (in-list exclude-enemy-pts)])
+      (define-values (rx ry) (extract-xy ep))
+      (and rx ry (<= (abs (- ex rx)) 2.0) (<= (abs (- ey ry)) 2.0))))
+  (define fx (exact->inexact px))
+  (define fy (exact->inexact py))
+  (for/or ([loc (in-list expansion-locs)])
+    (define-values (ex ey) (extract-xy loc))
+    (and ex ey
+         (not (pt-excluded? ex ey))
+         (<= (abs (- fx ex)) 3.6)
+         (<= (abs (- fy ey)) 3.6))))
 
 (define (reset-sc2-live-response-data!)
   (reset-sc2-live-availability-tables!)
@@ -12228,6 +12262,30 @@
       [else '()]))
   (when (> (length step-clusters) (length (unbox SC2-CACHED-MAP-BASE-CLUSTERS)))
     (set-box! SC2-CACHED-MAP-BASE-CLUSTERS step-clusters))
+  ;; Loop 65 Addendum (`#1844`): Complete map-agnostic canonical expansion TownHall centers
+  ;; across live solved bases, frame-0 cached clusters (persisting even after bases mine out!),
+  ;; and `game-info` start locations so Creep Tumors NEVER block any canonical TownHall spot.
+  (define canonical-townhall-expansion-locs
+    (let* ([from-cached
+            (for/list ([cl (in-list (unbox SC2-CACHED-MAP-BASE-CLUSTERS))]
+                       #:when (and (list? cl) (>= (length cl) 2)
+                                   (real? (first cl)) (real? (second cl))))
+              (cons (exact->inexact (first cl)) (exact->inexact (second cl))))]
+           [from-starts
+            (if (sc2-game-info? eff-game-info)
+                (for/list ([sl (in-list (or (sc2-game-info-start-locations eff-game-info) '()))]
+                           #:when (sc2-point2d? sl))
+                  (cons (exact->inexact (sc2-point2d-x sl))
+                        (exact->inexact (sc2-point2d-y sl))))
+                '())]
+           [raw-all (append all-expansion-pads from-cached from-starts)])
+      (for/fold ([acc '()] #:result (reverse acc)) ([pt (in-list raw-all)])
+        (if (ormap (lambda (prev)
+                     (and (<= (abs (- (car pt) (car prev))) 1.5)
+                          (<= (abs (- (cdr pt) (cdr prev))) 1.5)))
+                   acc)
+            acc
+            (cons pt acc)))))
   (define live-visible-enemy-tags (mutable-seteqv))
   ;; L59-P2/P3 (`nc-09`/`nc-10`, `#1553`): Visible attackable neutral units (real destructible rocks
   ;; & collapsible rock towers: `alliance=3, display-type=1, health-max > 0, health > 0`, strictly
@@ -13531,9 +13589,25 @@
          (let ([tp (sc2-unit-pos tu)])
            (sc2-point2d (sc2-point3d-x tp) (sc2-point3d-y tp)))))
 
+  ;; Loop 65D (`#1891`/`#1892` Lane 3): Non-combat utility lease guard for explicit per-unit combat
+  ;; orders. Combat tactical roles (`'army` 20, `'staging-group` 50, `'strike-group` 55, `'spotter` 68)
+  ;; MUST pass through `claim-combat-tags-for-order!` so explicit multiprong/staging/spotter orders
+  ;; are emitted to SC2 (while `combat-units` at L12514 stays at `'army` to protect them from wire sweeps!).
+  (define (unit-leased-non-combat-utility? t)
+    (and (hash? role-leases)
+         (exact-integer? t)
+         (> t 0)
+         (let ([existing (hash-ref role-leases t #f)])
+           (and (unit-role-lease? existing)
+                (> (unit-role-lease-expires-frame existing) cur-loop)
+                (memq (unit-role-lease-role existing)
+                      '(builder inject-queen door-guard mule evac
+                        cargo-returner detector-escort scout creep-queen))
+                #t))))
+
   ;; Filters a list of combat unit tags:
   ;;   1. Skips tags already commanded earlier in this step (`commanded-combat-tags`).
-  ;;   2. Skips units with protected active morph/channel/mode-switch/cast-walk orders or higher role leases.
+  ;;   2. Skips units with protected active morph/channel/mode-switch/cast-walk orders or active non-combat utility leases.
   ;;   3. Marks remaining tags as commanded so lower-priority maneuvers cannot overwrite them.
   ;;   4. Skips re-issuing an order that is already active on the unit in SC2.
   (define (claim-combat-tags-for-order! raw-ids ab-id target-pt target-unit-id)
@@ -13553,8 +13627,7 @@
                      (not (set-member? used-worker-tags t))
                      (not (and u (sc2-unit-is-worker? u) (worker-has-build-order? u cur-loop self-structures)))
                      (not (unit-has-protected-order? t))
-                     (not (and (hash? role-leases)
-                               (unit-leased-above? role-leases t 'army cur-loop)))))
+                     (not (unit-leased-non-combat-utility? t))))
               (if (list? raw-ids) raw-ids (list raw-ids))))
     (for/list ([t (in-list candidates)]
                #:when (begin
@@ -14169,7 +14242,7 @@
     (when (and (pair? oc-cands)
                (exact-integer? depot-id) (> depot-id 0)
                (sc2-ability-live-available? 255)
-               (not (hash-has-key? SC2-SUPPLY-DROP-USED-DEPOTS depot-id)))
+               (>= (- cur-loop (hash-ref SC2-SUPPLY-DROP-USED-DEPOTS depot-id -1000)) 64))
       (cond
         [(null? self-units)
          (define oc-id (first oc-cands))
@@ -14942,7 +15015,10 @@
               (and (>= wx SC2-MAP-PLAYABLE-MIN-COORD) (<= wx SC2-MAP-PLAYABLE-MAX-COORD)
                    (>= wy SC2-MAP-PLAYABLE-MIN-COORD) (<= wy SC2-MAP-PLAYABLE-MAX-COORD)
                    (>= adist min-r-anchor) (<= adist max-r)
-                   (warp-spot-grid-ok? wx wy require-pl?)
+                   ;; Loop 65D (`#1891`/`#1892` Lane 3): Phased Warp Prisms warp units onto pathable
+                   ;; Zerg creep / non-buildable terrain (`placement_grid = 0, pathing_grid = 1`);
+                   ;; skip `pl-ok?` ONLY for `is-prism?` while keeping pathability & collision strict!
+                   (warp-spot-grid-ok? wx wy (and require-pl? (not is-prism?)))
                    (for/and ([u (in-list units)]
                              #:when (not (sc2-unit-is-flying u)))
                      (define up (sc2-unit-pos u))
@@ -18355,8 +18431,7 @@
                          (or (not step-path-grid) (image-grid-pixel-set? step-path-grid px py))
                          (or (not step-pl-grid) (image-grid-pixel-set? step-pl-grid px py))
                          (point-on-creep? px py)
-                         (for/and ([ep (in-list all-expansion-pads)])
-                           (>= (max (abs (- px (car ep))) (abs (- py (cdr ep)))) 4.5))
+                         (not (point-blocks-canonical-townhall? px py canonical-townhall-expansion-locs))
                          (for/and ([rp (in-list step-reserved-build-pts)]
                                    #:when (any-point? rp))
                            (> (pt-dist px py (any-point-x rp) (any-point-y rp)) 1.5))
@@ -18377,26 +18452,34 @@
                       [else
                        (define stx (+ (floor tx) 0.5))
                        (define sty (+ (floor ty) 0.5))
+                       (define target-hits-exp?
+                         (point-blocks-canonical-townhall? stx sty canonical-townhall-expansion-locs))
                        (define target-cand
-                         (if (and (or (not (= ab-id 1733)) (<= (pt-dist ox oy stx sty) 9.8))
+                         (if (and (not target-hits-exp?)
+                                  (or (not (= ab-id 1733)) (<= (pt-dist ox oy stx sty) 9.8))
                                   (tumor-cand-clear? stx sty))
                              (list (sc2-point2d stx sty))
                              '()))
-                       ;; Compact <= 16 candidate fan (3 radii x 5 angles + target-cand);
-                       ;; L64 P0 #6 (`#1787`): strictly enforce `<= 9.8t` for `1733` Tumor spread!
+                       ;; Compact <= 16 candidate fan; when preferred target falls inside a canonical
+                       ;; expansion TownHall `3.6t` box (`#1844`), widen bypass angles/radii so Queen
+                       ;; `1694` and Tumor `1733` cleanly route around the pad!
                        (define fan-cands
                          (append
                           target-cand
                           (if (= ab-id 1733)
-                              (for*/list ([r (in-list '(9.0 7.5 6.0))]
-                                          [da (in-list '(0.0 0.35 -0.35 0.78 -0.78))]
+                              (for*/list ([r (in-list (if target-hits-exp? '(9.0 7.5 6.0 4.5) '(9.0 7.5 6.0)))]
+                                          [da (in-list (if target-hits-exp?
+                                                           '(0.35 -0.35 0.78 -0.78 1.25 -1.25 0.0)
+                                                           '(0.0 0.35 -0.35 0.78 -0.78)))]
                                           [px (in-value (+ (floor (+ ox (* r (cos (+ base-ang da))))) 0.5))]
                                           [py (in-value (+ (floor (+ oy (* r (sin (+ base-ang da))))) 0.5))]
                                           #:when (and (<= (pt-dist ox oy px py) 9.8)
                                                       (tumor-cand-clear? px py)))
                                 (sc2-point2d px py))
-                              (for*/list ([r (in-list '(3.5 2.5 4.2))]
-                                          [da (in-list '(0.0 0.78 -0.78 1.57 -1.57))]
+                              (for*/list ([r (in-list (if target-hits-exp? '(4.5 5.5 3.5 2.5) '(3.5 2.5 4.2)))]
+                                          [da (in-list (if target-hits-exp?
+                                                           '(0.78 -0.78 1.57 -1.57 2.35 -2.35 0.0)
+                                                           '(0.0 0.78 -0.78 1.57 -1.57)))]
                                           [px (in-value (+ (floor (+ ox (* r (cos (+ base-ang da))))) 0.5))]
                                           [py (in-value (+ (floor (+ oy (* r (sin (+ base-ang da))))) 0.5))]
                                           #:when (tumor-cand-clear? px py))
@@ -19870,7 +19953,10 @@
                (when (not (null? ctags))
                  (emit! (sc2-raw-unit-command 23 target-pt 0 ctags #f)))]))])]
 
-      ;; 10b. Pro Anti-Splash Pre-Split 3-Wing, Concave Arc, and Inside-Aura Splash-Spread Translation
+      ;; 10b. Legacy/Non-Live Fallback Decoders for Symbolic Pre-Split / Concave Arc Tokens
+      ;;      (Architecture Phase B / Loop 65 `#1830`: L2c `lib/tactics/concave-positioning.rkt` is
+      ;;       the single live concave authority; live Phase 6 emission is retired in `bot-runtime.rkt`.
+      ;;       Retained strictly for non-live synthetic/fuzzer compatibility with Gap C7 centroid angle fix.)
       [(list 'pre-split-wings lx ly mx my rx ry)
        (define splash-enemy-near?
          (ormap (lambda (e)
@@ -19933,12 +20019,21 @@
                                       (let ([op (sc2-unit-pos other)])
                                         (< (pt-dist (sc2-point3d-x up) (sc2-point3d-y up)
                                                     (sc2-point3d-x op) (sc2-point3d-y op))
-                                           1.15))))
+                                           1.65))))
                                combat-units)))
                  combat-units))
        (when (and (not (null? enemy-units)) (>= (length uncommitted) 4))
-         (define base-ang (atan (- home-y ey) (- home-x ex)))
+         ;; L65 Gap C7 (`#1830`): Compute arc orientation from the uncommitted cluster centroid
+         ;; `(mean-ux, mean-uy) -> (ex, ey)` instead of hardcoded `home-x/y`!
          (define n (length uncommitted))
+         (define mean-ux (/ (for/sum ([u (in-list uncommitted)]) (sc2-point3d-x (sc2-unit-pos u))) (exact->inexact n)))
+         (define mean-uy (/ (for/sum ([u (in-list uncommitted)]) (sc2-point3d-y (sc2-unit-pos u))) (exact->inexact n)))
+         (define cdx (- mean-ux ex))
+         (define cdy (- mean-uy ey))
+         (define base-ang
+           (if (> (+ (* cdx cdx) (* cdy cdy)) 1e-4)
+               (atan cdy cdx)
+               (atan (- home-y ey) (- home-x ex))))
          (for ([u (in-list uncommitted)]
                [i (in-naturals)])
            (define frac (- (/ (+ i 0.5) n) 0.5))
@@ -20434,9 +20529,21 @@
           (for/fold ([best +inf.0]) ([cu (in-list combat-units)])
             (define cp (sc2-unit-pos cu))
             (min best (pt-dist ex ey (sc2-point3d-x cp) (sc2-point3d-y cp)))))
-        ;; L64 P1 #4 (`#1787`): `-4.0t` priority bonus on burrowed Widow Mines (`500`)!
-        (- (min th-d army-d)
-           (if (= (sc2-unit-unit-type se) 500) 4.0 0.0)))
+        (define worker-d
+          (for/fold ([best +inf.0]) ([w (in-list workers)])
+            (define wp (sc2-unit-pos w))
+            (min best (pt-dist ex ey (sc2-point3d-x wp) (sc2-point3d-y wp)))))
+        (define se-ut (sc2-unit-unit-type se))
+        (define active-cloak-on-workers?
+          (and (memv se-ut '(55 76 50)) ;; Cloaked Banshee / Dark Templar / Ghost raiding workers
+               (<= worker-d 12.0)))
+        ;; L64/L65 (`#1787`/`#1830`): `-10.0t` priority bonus on live cloaked Banshee/DT/Ghost
+        ;; actively raiding workers (always beats `-4.0t` on a burrowed Widow Mine `500`!).
+        (- (min th-d army-d worker-d)
+           (cond
+             [active-cloak-on-workers? 10.0]
+             [(= se-ut 500) 4.0]
+             [else 0.0])))
       (define sorted-stealth
         (sort uncovered-stealth-enemies < #:key stealth-priority-dist))
       (for ([se (in-list sorted-stealth)])
@@ -20585,24 +20692,28 @@
                 uncovered-stealth-enemies))
       (when (pair? threat-stealth)
         (define (scan-threat-weight se)
-          (if (= (sc2-unit-unit-type se) 500)
-              (let* ([ep (sc2-unit-pos se)]
-                     [sx (sc2-point3d-x ep)]
-                     [sy (sc2-point3d-y ep)]
-                     [near-worker?
-                      (ormap (lambda (w)
-                               (define wp (sc2-unit-pos w))
-                               (<= (pt-dist sx sy (sc2-point3d-x wp) (sc2-point3d-y wp)) 12.0))
-                             workers)]
-                     [near-combat-cnt
-                      (if near-worker?
-                          0
-                          (count (lambda (cu)
-                                   (define cp (sc2-unit-pos cu))
-                                   (<= (pt-dist sx sy (sc2-point3d-x cp) (sc2-point3d-y cp)) 12.0))
-                                 combat-units))])
-                (if (or near-worker? (>= near-combat-cnt 3)) 1.5 1.0))
-              1.0))
+          (define se-ut (sc2-unit-unit-type se))
+          (define ep (sc2-unit-pos se))
+          (define sx (sc2-point3d-x ep))
+          (define sy (sc2-point3d-y ep))
+          (define (near-worker?)
+            (ormap (lambda (w)
+                     (define wp (sc2-unit-pos w))
+                     (<= (pt-dist sx sy (sc2-point3d-x wp) (sc2-point3d-y wp)) 12.0))
+                   workers))
+          (cond
+            [(and (memv se-ut '(55 76 50)) (near-worker?))
+             1.6] ;; Live Cloaked Banshee / DT / Ghost raiding workers always outranks a lone mine
+            [(= se-ut 500)
+             (if (or (near-worker?)
+                     (>= (count (lambda (cu)
+                                  (define cp (sc2-unit-pos cu))
+                                  (<= (pt-dist sx sy (sc2-point3d-x cp) (sc2-point3d-y cp)) 12.0))
+                                combat-units)
+                         3))
+                 1.5
+                 1.0)]
+            [else 1.0]))
         (define weighted-stealth
           (for/list ([se (in-list threat-stealth)])
             (define ep (sc2-unit-pos se))
@@ -21665,21 +21776,54 @@
   ;;     L60 (`#1580`): Tighten overdraft floor `-2.0 -> -1.0` and cap overdraft count to `<= 2`
   ;;     when tokens < 6.0 so P2 large rescues never starve P0 spells or P1 macro.
   (define p2-cmds (cmds-for-tier 2))
-  (define p2-large-cmds
+  (define p2-combat-move-atk
+    (filter (lambda (c)
+              (and (sc2-raw-unit-command? c)
+                   (memv (sc2-raw-unit-command-ability-id c) '(23 16))
+                   (>= (length (sc2-raw-unit-command-unit-tags c)) 3)))
+            p2-cmds))
+  (define p2-large-base
     (sort
-     (filter (lambda (c)
-               (and (sc2-raw-unit-command? c)
-                    (memv (sc2-raw-unit-command-ability-id c) '(23 16))
-                    (>= (length (sc2-raw-unit-command-unit-tags c)) 8)))
-             p2-cmds)
+     (filter (lambda (c) (>= (length (sc2-raw-unit-command-unit-tags c)) 8))
+             p2-combat-move-atk)
      >
      #:key (lambda (c) (length (sc2-raw-unit-command-unit-tags c)))))
+  ;; L65 Lane C (`#1830`): When a simultaneous 2-prong attack targets spatially separated
+  ;; fronts (`>= 25.0t` apart, e.g. Main Army at Base A + >=3-unit Runby at Base B), pair the
+  ;; largest secondary prong right after the primary prong and allow `max-count = 2` under
+  ;; tight tokens (`< 6.0`) so simultaneous prongs never cross-throttle each other!
+  (define p2-second-prong
+    (and (pair? p2-large-base)
+         (any-point? (sc2-raw-unit-command-target-pos (first p2-large-base)))
+         (let* ([p1-cmd (first p2-large-base)]
+                [p1-pt (sc2-raw-unit-command-target-pos p1-cmd)]
+                [p1x (any-point-x p1-pt)]
+                [p1y (any-point-y p1-pt)]
+                [far-cands
+                 (filter (lambda (c)
+                           (define tp (sc2-raw-unit-command-target-pos c))
+                           (and (not (eq? c p1-cmd))
+                                (any-point? tp)
+                                (>= (pt-dist p1x p1y (any-point-x tp) (any-point-y tp)) 25.0)))
+                         p2-combat-move-atk)])
+           (and (pair? far-cands)
+                (argmax (lambda (c) (length (sc2-raw-unit-command-unit-tags c))) far-cands)))))
+  (define p2-large-cmds
+    (if p2-second-prong
+        (cons (first p2-large-base)
+              (cons p2-second-prong
+                    (filter (lambda (c) (not (or (eq? c (first p2-large-base))
+                                                 (eq? c p2-second-prong))))
+                            p2-large-base)))
+        p2-large-base))
   (when (and (pair? p2-large-cmds)
              (>= (- cur-loop (hash-ref SC2-GOV-LAST-P2-LOOP gov -1000)) 8))
     (run-cmd-list! p2-large-cmds
                    (lambda (_) -1.5)
                    (lambda (_) 2.0)
-                   #:max-count (if (>= (wire-apm-governor-tokens gov) 6.0) 4 1)))
+                   #:max-count (if (>= (wire-apm-governor-tokens gov) 6.0)
+                                   4
+                                   (if p2-second-prong 2 1))))
 
   ;; 1c. L33-P0-1: Overdue P1 macro rescue (`>= 8` loops since `SC2-GOV-LAST-P1-LOOP`, `#:max-count 4`,
   ;;     `hr-floor = 0.0`) runs BEFORE non-urgent P0 mode switches (`1d`).

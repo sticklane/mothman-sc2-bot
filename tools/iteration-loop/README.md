@@ -2,7 +2,17 @@
 
 This directory powers the durable multi-agent closed-loop optimization system for `mothman-sc2-bot`. Every iteration fuses **real-`SC2_x64` 90-match gauntlets & Head-to-Head Ship Gates**, **213-scenario Tactics Arena 3.0 micro/runby drills**, **298-replay LotV Pro Corpus baselines**, **live AI Arena production feedback**, and a **Self-Improving Loop Trajectory Flywheel** that audits the swarm's own execution logs to make the loop faster and sharper every cycle.
 
-See [`SWARM_PLAYBOOK.md`](./SWARM_PLAYBOOK.md) (v2.0) for the full operational protocol, disjoint file ownership matrix, and fail-fast Ship Gate rules.
+See [`SWARM_PLAYBOOK.md`](./SWARM_PLAYBOOK.md) (v2.1) for the full operational protocol, disjoint file ownership matrix, fast-cycle tooling, and fail-fast Ship Gate rules.
+
+---
+
+## Temporary Local-Loop Policy: 25-Minute Match Cap & Game-State Scoring (Revisit Trigger)
+
+> **IMPORTANT (Temporary Fast-Iteration Policy):** Local benchmark runs cap matches at **`25` game minutes max (`--max-game-time 33600` loops)** and evaluate matches with **end-of-game state scoring** alongside raw `W-L-T`.
+
+- **25-Minute Match Cap:** `tools/run-local-sc2-arena.py` defaults to `--max-game-time 33600` (`25.0` SC2 minutes) for faster local iteration and fewer wall-clock stragglers.
+- **End-of-Game State Scoring:** `tools/score-replay-batch.rkt` computes `game_state_score` (`[0, 1]` / `0-100`) from final live **Army Value (`45%`) + Income Rate (`30%`) + Minerals Collected (`15%`) + Trade Value (`10%`)**, plus `state_adjudicated_wlt` adjudicating 25m-cap / wall-timeout ties at `state_ratio >= 1.15` (Win) and `<= 0.87` (Loss), displayed alongside raw `W-L-T` for AI Arena and Release `#14-#16` parity.
+- **Explicit Revisit Trigger:** Revisit and raise the cap back to `30m` (`40320`) / `45m` (`60480`) and switch primary gating back toward elimination outcome once longer late-game matches become common (e.g., `> 15%` of external matches hitting the 25m cap, or when pushing into higher AI Arena divisions where 25m+ split-map / Tier-3 endgames decide matches).
 
 ---
 

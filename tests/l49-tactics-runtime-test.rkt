@@ -50,7 +50,19 @@
                   score-purification-nova-impact
                   nova-impact-score-enemy-raw-value
                   nova-impact-score-enemy-hits)
+         (only-in "../lib/engine/arbiter.rkt"
+                  arbiter-ledger?
+                  arbiter-ledger-last-frame)
+         (only-in "../lib/tactics/multiprong-coordinator.rkt"
+                  multiprong-state?
+                  multiprong-state-active-mode
+                  multiprong-state-prism-tag)
          (only-in "../lib/sc2-game-constants.rkt"
+                  acquire-unit-lease!
+                  unit-role-lease?
+                  unit-role-lease-role
+                  unit-role-lease-priority
+                  unit-role-lease-expires-frame
                   sc2-min-cost
                   sc2-gas-cost
                   sc2-unit-on-field-supply
@@ -6069,8 +6081,8 @@
   (define enemy-push-12
     (for/list ([i (in-range 12)])
       (mk-u (+ 96200 i) 'stalker 78.0 (+ 30.0 (* 0.4 i)) #:hp 80.0 #:shield 80.0)))
-  (define marine-far   (mk-u 96120 'marine 52.0 48.0 #:hp 45.0))
-  (define marine-mid   (mk-u 96121 'marine 65.0 45.0 #:hp 45.0))
+  (define marine-far   (mk-u 96120 'marine 45.0 52.0 #:hp 45.0))
+  (define marine-mid   (mk-u 96121 'marine 72.0 55.5 #:hp 45.0))
   (define marine-front (mk-u 96122 'marine 71.0 32.0 #:hp 45.0))
   (define marine-rear  (mk-u 96123 'marine 62.5 32.0 #:hp 45.0))
   (define hg-tank      (mk-u 96150 'siege-tank 63.5 32.5 #:hp 175.0))
@@ -6546,6 +6558,1137 @@
                       creep-264-ok? ch-picked-forge? ch-no-gate-sink? ch-nexus-when-tech-buffed? supply-drop-ok?
                       queen-held-tumor? queen-transfuse-11.5t?
                       lurk-burrow-ok? lurk-unburrow-ok? sentry-ff3-ok?)))
+
+;; -----------------------------------------------------------------------------
+;; Test 105 (L65-B1 / L65D Gap C3): Concave Gaps C3, C4, C5, C6 & C7 Live Runtime Verification
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a1) Loop 65D Gap C3: `<= 14t` TownHall home-defense vs Reapers emits DIRECT `(attack-unit ...)`
+  ;;      focus-fire (NOT backward front-to-back `attack-pos`)!
+  (define rt-c3-home (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define bldgs-t2 (list (mk-u 97100 'orbital-command 32.5 32.5 #:hp 1500.0)
+                         (mk-u 97101 'orbital-command 62.5 32.5 #:hp 1500.0)))
+  (define marauders-home (for/list ([i (in-range 4)]) (mk-u (+ 97110 i) 'marauder 58.0 (+ 31.8 (* 0.5 i)) #:hp 125.0)))
+  (define mar-home-ahead (mk-u 97120 'marine 62.0 32.5 #:hp 45.0))
+  (define e-reapers-home (for/list ([i (in-range 3)]) (mk-u (+ 97130 i) 'reaper 66.5 (+ 32.0 (* 0.4 i)) #:hp 60.0)))
+  (define acts-c3-home
+    (run-l34 rt-c3-home
+             (mk-live-obs 'Terran 'Terran 6000 #:supply-used 52 #:supply-cap 70
+                          #:ally-units (cons mar-home-ahead marauders-home)
+                          #:ally-buildings bldgs-t2
+                          #:enemy-units e-reapers-home)))
+  (define c3-home-direct-atk?
+    (ormap (lambda (a)
+             (and (pair? a) (eq? (car a) 'attack-unit) (= (second a) 97120)
+                  (memv (third a) '(97130 97131 97132))))
+           acts-c3-home))
+
+  ;; (a2) Loop 65D Gap C3: `> 14t` mid-map keeps front-to-back layering ACTIVE — Marine ahead of
+  ;;      Marauders holds behind Marauders via `(attack-pos 97140 x y)` with `x < 88.0`!
+  (define rt-c3-mid (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define marauders-mid (for/list ([i (in-range 4)]) (mk-u (+ 97141 i) 'marauder 88.0 (+ 79.3 (* 0.5 i)) #:hp 125.0)))
+  (define mar-mid-ahead (mk-u 97140 'marine 91.0 80.0 #:hp 45.0))
+  (define e-mar-mid     (for/list ([i (in-range 4)]) (mk-u (+ 97150 i) 'marine 102.0 (+ 79.3 (* 0.5 i)) #:hp 45.0)))
+  (define acts-c3-mid
+    (run-l34 rt-c3-mid
+             (mk-live-obs 'Terran 'Terran 6000 #:supply-used 52 #:supply-cap 70
+                          #:ally-units (cons mar-mid-ahead marauders-mid)
+                          #:ally-buildings bldgs-t2
+                          #:enemy-units e-mar-mid)))
+  (define c3-mid-ftb-ok?
+    (ormap (lambda (a)
+             (and (pair? a) (eq? (car a) 'attack-pos) (= (second a) 97140)
+                  (real? (third a)) (< (third a) 88.0)))
+           acts-c3-mid))
+  (define c3-home-ftb-ok? (and c3-home-direct-atk? c3-mid-ftb-ok?))
+
+  ;; (b) Gap C6 + C5 (Protoss) + C7 (Zero live Phase 6 concave tokens):
+  ;;     Immortal ahead of Zealots layers behind Zealots BEFORE `mirrored-acts`,
+  ;;     dry High Templar ahead of Zealots rear-leashes behind Protoss core,
+  ;;     AND ZERO `'pre-split-wings` / `'form-concave-arc` tokens emitted in live mode!
+  (define rt-c6 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define bldgs-p2 (list (mk-u 97200 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                         (mk-u 97201 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)))
+  (define zealots-3 (for/list ([i (in-range 3)]) (mk-u (+ 97205 i) 'zealot 80.0 (+ 79.5 (* 0.5 i)) #:hp 100.0 #:shield 50.0)))
+  (define imm-ahead (mk-u 97210 'immortal 83.0 80.0 #:hp 200.0 #:shield 100.0))
+  (define ht-dry    (hash-set (mk-u 97211 'high-templar 82.5 80.0 #:hp 40.0 #:shield 40.0) 'energy 0.0))
+  (define e-stk-3   (for/list ([i (in-range 3)]) (mk-u (+ 97220 i) 'stalker 95.0 (+ 79.5 (* 0.5 i)) #:hp 80.0 #:shield 80.0)))
+  (define acts-c6
+    (run-l34 rt-c6
+             (mk-live-obs 'Protoss 'Protoss 6500 #:supply-used 60 #:supply-cap 80
+                          #:ally-units (append zealots-3 (list imm-ahead ht-dry))
+                          #:ally-buildings bldgs-p2
+                          #:enemy-units e-stk-3)))
+  (define c6-imm-behind-zealot?
+    (ormap (lambda (a)
+             (and (pair? a) (eq? (car a) 'attack-pos) (= (second a) 97210)
+                  (real? (third a)) (< (third a) 80.0)))
+           acts-c6))
+  (define c5-ht-rear-leashed?
+    (ormap (lambda (a)
+             (and (pair? a) (eq? (car a) 'move) (= (second a) 97211)
+                  (real? (third a)) (< (third a) 78.5)))
+           acts-c6))
+  (define c7-zero-live-phase6-tokens?
+    (not (ormap (lambda (a) (and (pair? a) (memq (car a) '(pre-split-wings form-concave-arc)))) acts-c6)))
+
+  ;; (c) Gap C5 (Zerg): Non-casting Infestor (`72e` >= 70e retreat floor, < 75e Fungal) ahead of Roaches rear-leashes behind Zerg frontline!
+  (define rt-c5z (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define bldgs-z2 (list (mk-u 97240 'hatchery 32.5 32.5 #:hp 1500.0)
+                         (mk-u 97241 'hatchery 62.5 32.5 #:hp 1500.0)))
+  (define roaches-3 (for/list ([i (in-range 3)]) (mk-u (+ 97245 i) 'roach 80.0 (+ 79.5 (* 0.5 i)) #:hp 145.0)))
+  (define inf-dry   (hash-set (mk-u 97250 'infestor 82.5 80.0 #:hp 90.0) 'energy 72.0))
+  (define acts-c5z
+    (run-l34 rt-c5z
+             (mk-live-obs 'Zerg 'Protoss 6500 #:supply-used 58 #:supply-cap 78
+                          #:ally-units (cons inf-dry roaches-3)
+                          #:ally-buildings bldgs-z2
+                          #:enemy-units e-stk-3)))
+  (define c5-inf-rear-leashed?
+    (ormap (lambda (a)
+             (and (pair? a) (eq? (car a) 'move) (= (second a) 97250)
+                  (real? (third a)) (< (third a) 78.5)))
+           acts-c5z))
+
+  ;; (d) Gap C4: Genuine uphill blind fire (`z=8.0` vs uphill `enemy-terrain-z=10.0` + `'uphill-blind-fire? #t`)
+  ;;     triggers blind uphill retreat + high-ground vision Observer `'spotter` lease (`24f` TTL) across 2 frames!
+  (define rt-c4 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define stk-s1 (hash-set (mk-u 97260 'stalker 80.0 80.0 #:hp 80.0 #:shield 80.0) 'z 8.0))
+  (define obs-u  (mk-u 97261 'observer 70.0 80.0 #:hp 40.0 #:shield 20.0 #:flying #t))
+  (run-l34 rt-c4
+           (hash-set* (mk-live-obs 'Protoss 'Terran 6200 #:supply-used 46 #:supply-cap 64
+                                   #:ally-units (list stk-s1 obs-u)
+                                   #:ally-buildings bldgs-p2
+                                   #:enemy-units '())
+                      'our-terrain-z 8.0 'enemy-terrain-z 10.0))
+  (define stk-s2 (hash-set (mk-u 97260 'stalker 80.0 80.0 #:hp 80.0 #:shield 35.0) 'z 8.0))
+  (define acts-c4
+    (run-l34 rt-c4
+             (hash-set* (mk-live-obs 'Protoss 'Terran 6204 #:supply-used 46 #:supply-cap 64
+                                     #:ally-units (list stk-s2 obs-u)
+                                     #:ally-buildings bldgs-p2
+                                     #:enemy-units '())
+                        'our-terrain-z 8.0 'enemy-terrain-z 10.0 'uphill-blind-fire? #t)))
+  (define c4-blind-retreat?
+    (ormap (lambda (a)
+             (and (pair? a) (eq? (car a) 'move) (= (second a) 97260)
+                  (real? (third a)) (< (third a) 79.0)))
+           acts-c4))
+  (define c4-obs-dispatched?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (= (second a) 97261))) acts-c4))
+  (define c4-obs-lease (hash-ref (rt-role-leases rt-c4) 97261 #f))
+  (define c4-spotter-leased?
+    (and (unit-role-lease? c4-obs-lease)
+         (eq? (unit-role-lease-role c4-obs-lease) 'spotter)
+         (= (unit-role-lease-expires-frame c4-obs-lease) (+ 6204 24))))
+
+  (check-true "L65-B1-Concave-HomeDefense-ProtossLayering-CasterLeash-UphillVision-And-NoLivePhase6Tokens"
+              (and c3-home-ftb-ok? c6-imm-behind-zealot? c5-ht-rear-leashed? c5-inf-rear-leashed?
+                   c7-zero-live-phase6-tokens? c4-blind-retreat? c4-obs-dispatched? c4-spotter-leased?)
+              (format "c3=~a c6Imm=~a c5HT=~a c5Inf=~a c7NoP6=~a c4Ret=~a c4Obs=~a c4Lease=~a"
+                      c3-home-ftb-ok? c6-imm-behind-zealot? c5-ht-rear-leashed? c5-inf-rear-leashed?
+                      c7-zero-live-phase6-tokens? c4-blind-retreat? c4-obs-dispatched? c4-spotter-leased?)))
+
+;; -----------------------------------------------------------------------------
+;; Test 106 (L65-B2): Phase B Arbiter Ledger + Thin `step-multiprong-coordinator!`
+;; Hook, Dual Tag/Lease Registration, & Arena / `< 4:00` Bypass
+;; -----------------------------------------------------------------------------
+(let ()
+  (define rt-mp (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define has-structs?
+    (and (arbiter-ledger? (rt-arbiter-ledger rt-mp))
+         (multiprong-state? (rt-multiprong-state rt-mp))))
+  (define bldgs-t2 (list (mk-u 97400 'orbital-command 32.5 32.5 #:hp 1500.0)
+                         (mk-u 97401 'orbital-command 62.5 32.5 #:hp 1500.0)))
+  (define main-army-far
+    (append
+     (for/list ([i (in-range 16)]) (mk-u (+ 97420 i) 'marine 120.0 (+ 116.0 (* 0.4 i)) #:hp 45.0))
+     (for/list ([i (in-range 4)])  (mk-u (+ 97450 i) 'marauder 118.0 (+ 117.0 (* 0.5 i)) #:hp 125.0))))
+  (define home-resp-4
+    (for/list ([i (in-range 4)]) (mk-u (+ 97410 i) 'marine 58.0 (+ 33.0 (* 0.4 i)) #:hp 45.0)))
+  (define harass-lings-4
+    (for/list ([i (in-range 4)]) (mk-u (+ 97480 i) 'zergling 38.0 (+ 32.0 (* 0.3 i)) #:hp 35.0)))
+
+  ;; (a) `< 4:00` (`frame=4000 < 5376`): multiprong MUST stay `'inactive`!
+  (define rt-early (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (run-l34 rt-early
+           (mk-live-obs 'Terran 'Zerg 4000 #:supply-used 64 #:supply-cap 80
+                        #:ally-units (append home-resp-4 main-army-far)
+                        #:ally-buildings bldgs-t2
+                        #:enemy-units harass-lings-4))
+  (define early-inactive? (eq? (multiprong-state-active-mode (rt-multiprong-state rt-early)) 'inactive))
+
+  ;; (b) Live `frame=6200` (`>= 5376`), `>= 2` THs, small harass (`4` Lings = 2 sup <= 12) at Main
+  ;;     while main army sits `>= 25t` away -> Mode 1 `'defensive-split` fires through `arbiter-ledger`,
+  ;;     registers responding tags in `(rt-role-leases rt)` (`>= 55`) & advances ledger frame to `6200`!
+  (run-l34 rt-mp
+           (mk-live-obs 'Terran 'Zerg 6200 #:supply-used 64 #:supply-cap 80
+                        #:ally-units (append home-resp-4 main-army-far)
+                        #:ally-buildings bldgs-t2
+                        #:enemy-units harass-lings-4))
+  (define mp-mode-ok? (eq? (multiprong-state-active-mode (rt-multiprong-state rt-mp)) 'defensive-split))
+  (define ledger-updated? (= (arbiter-ledger-last-frame (rt-arbiter-ledger rt-mp)) 6200))
+  (define any-resp-leased?
+    (for/or ([id (in-list '(97410 97411 97412 97413))])
+      (define l (hash-ref (rt-role-leases rt-mp) id #f))
+      (and (unit-role-lease? l) (>= (unit-role-lease-priority l) 55))))
+
+  (check-true "L65-B2-Multiprong-Coordinator-Arbiter-Ledger-Hook-And-RoleLeases"
+              (and has-structs? early-inactive? mp-mode-ok? ledger-updated? any-resp-leased?)
+              (format "structs=~a earlyOff=~a mode=~a ledgerF=~a leased=~a"
+                      has-structs? early-inactive?
+                      (multiprong-state-active-mode (rt-multiprong-state rt-mp))
+                      (arbiter-ledger-last-frame (rt-arbiter-ledger rt-mp))
+                      any-resp-leased?)))
+
+;; -----------------------------------------------------------------------------
+;; Test 107 (L65 Addendum `#1846`): Creep Tumor Canonical Expansion `3.6t` Box
+;; Clearance (Queen `1694` + Tumor `1733`) & Protoss Empty-Prism Chargelot Warp-In
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) Canonical expansion clearance: custom 4th pad `(55.0, 32.5)` sits directly along the
+  ;;     creep highway between `(46.0, 32.5)` and Natural `(62.5, 32.5)`!
+  (define exp-pads (list (cons 32.5 32.5) (cons 55.0 32.5) (cons 62.5 32.5) (cons 82.5 52.5)))
+  (define (clear-of-all-exp-boxes? px py)
+    (for/and ([p (in-list exp-pads)])
+      (or (> (abs (- px (car p))) 3.6)
+          (> (abs (- py (cdr p))) 3.6))))
+  ;; (a1) Queen `1694` (`spawn-creep-tumor`) nudges cleanly outside `(55.0, 32.5)` & `(62.5, 32.5)` 3.6t boxes!
+  (define rt-qc (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define h-inj (hash-set* (mk-u 97501 'hatchery 32.5 32.5 #:hp 1500.0) 'buffs '(queen-spawn-larva-timer)))
+  (define q-inj (hash-set* (mk-u 97503 'queen 33.5 32.5 #:hp 175.0) 'energy 10.0))
+  (define q-crp (hash-set* (mk-u 97502 'queen 49.5 32.5 #:hp 175.0) 'energy 55.0))
+  (define t-loc (mk-u 97504 'creep-tumor-burrowed 49.5 32.5 #:hp 50.0))
+  (define acts-qc
+    (step-layer2-economy!
+     rt-qc
+     (hash-set* (mk-live-obs 'Zerg 'Terran 4800 #:supply-used 40 #:supply-cap 60
+                             #:ally-units (list q-inj q-crp t-loc) #:ally-buildings (list h-inj))
+                'expansion-locations exp-pads)))
+  (define q-tumor-act
+    (findf (lambda (a) (and (pair? a) (eq? (car a) 'cast-spell) (= (second a) 97502) (eq? (third a) 'spawn-creep-tumor)))
+           acts-qc))
+  (define queen-clear-ok?
+    (and q-tumor-act (>= (length q-tumor-act) 5)
+         (clear-of-all-exp-boxes? (fourth q-tumor-act) (fifth q-tumor-act))))
+
+  ;; (a2) Mature Tumor `1733` (`spread-creep-tumor`) at `(46.0, 32.5)` (9t step would land dead-center on `(55.0, 32.5)`)!
+  (define rt-tc (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define ct-u  (mk-u 97505 'creep-tumor-burrowed 46.0 32.5 #:hp 50.0))
+  (define obs-tc0
+    (hash-set* (mk-live-obs 'Zerg 'Terran 5000 #:ally-units (list ct-u) #:ally-buildings (list h-inj))
+               'expansion-locations exp-pads))
+  (step-layer2-economy! rt-tc obs-tc0)
+  (define acts-tc
+    (step-layer2-economy!
+     rt-tc
+     (hash-set* (mk-live-obs 'Zerg 'Terran 5270 #:ally-units (list ct-u) #:ally-buildings (list h-inj))
+                'expansion-locations exp-pads)))
+  (define t-spread-act
+    (findf (lambda (a) (and (pair? a) (eq? (car a) 'cast) (= (second a) 97505) (eq? (third a) 'spread-creep-tumor)))
+           acts-tc))
+  (define tumor-clear-ok?
+    (and t-spread-act (>= (length t-spread-act) 5)
+         (clear-of-all-exp-boxes? (fourth t-spread-act) (fifth t-spread-act))))
+
+  ;; (b) Protoss Empty-Warp-Prism Chargelot Warp-In Backstab (`0` standing ground units!):
+  ;;     (b1) Phased empty Warp Prism at exposed enemy 3rd pocket `(135, 102)` + 4 ready Warp Gates + 450M + Charge
+  ;;          -> emits 4 `(warp-in wg-id 'zealot wx wy)` targeting the forward Prism power field!
+  (define rt-pw1 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define wgs-4
+    (for/list ([i (in-range 4)])
+      (hash-set* (mk-u (+ 97510 i) 'warp-gate (+ 38.0 (* 2.5 i)) 36.0 #:hp 500.0 #:shield 500.0)
+                 'order-count 0 'warp-ready? #t)))
+  (define bldgs-pw
+    (append (list (mk-u 97508 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                  (mk-u 97509 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0))
+            wgs-4))
+  (define prism-phased (mk-u 97520 'warp-prism-phasing 135.0 102.0 #:hp 80.0 #:shield 100.0 #:flying #t))
+  (define e-bldgs-pw (list (mk-u 97540 'nexus 142.5 138.5 #:hp 1000.0 #:shield 1000.0)
+                           (mk-u 97541 'nexus 135.0 110.0 #:hp 1000.0 #:shield 1000.0)))
+  (define e-army-far
+    (for/list ([i (in-range 8)])
+      (mk-u (+ 97550 i) 'stalker 85.0 (+ 85.0 (* 0.5 i)) #:hp 80.0 #:shield 80.0)))
+  (define acts-pw1
+    (run-l34 rt-pw1
+             (mk-live-obs 'Protoss 'Protoss 6400 #:minerals 450 #:gas 100 #:supply-used 40 #:supply-cap 70
+                          #:researched-upgrades '(warp-gate-research charge)
+                          #:ally-units (list prism-phased)
+                          #:ally-buildings bldgs-pw
+                          #:enemy-units e-army-far
+                          #:enemy-buildings e-bldgs-pw)))
+  (define prism-warps
+    (filter (lambda (a)
+              (and (pair? a) (eq? (car a) 'warp-in) (= (length a) 5)
+                   (eq? (third a) 'zealot)
+                   (real? (fourth a)) (real? (fifth a))
+                   (<= (sqrt (+ (sqr (- (fourth a) 135.0)) (sqr (- (fifth a) 102.0)))) 6.0)))
+            acts-pw1))
+  (define phased-warp-ok? (= (length prism-warps) 4))
+
+  ;;     (b2) Empty transport-mode Warp Prism at home `(45, 45)` + 0 standing ground units + 4 ready WGs + 450M
+  ;;          -> `step-multiprong-coordinator!` triggers `'prism-warp-backstab` and dispatches Prism flank move!
+  (define rt-pw2 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define prism-empty (mk-u 97530 'warp-prism 45.0 45.0 #:hp 80.0 #:shield 100.0 #:flying #t))
+  (define acts-pw2
+    (run-l34 rt-pw2
+             (mk-live-obs 'Protoss 'Protoss 6400 #:minerals 450 #:gas 100 #:supply-used 40 #:supply-cap 70
+                          #:researched-upgrades '(warp-gate-research charge)
+                          #:ally-units (list prism-empty)
+                          #:ally-buildings bldgs-pw
+                          #:enemy-units e-army-far
+                          #:enemy-buildings e-bldgs-pw)))
+  (define mp-prism-mode? (eq? (multiprong-state-active-mode (rt-multiprong-state rt-pw2)) 'prism-warp-backstab))
+  (define mp-prism-moved?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (= (second a) 97530))) acts-pw2))
+
+  ;;     (b3) Full `step-live-bot-runtime!` hoists forward phased-Prism `(warp-in ...)` ahead of `econ-acts`!
+  (define rt-pw3 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define res-pw3
+    (step-live-bot-runtime!
+     rt-pw3
+     (mk-live-obs 'Protoss 'Protoss 6400 #:minerals 450 #:gas 100 #:supply-used 40 #:supply-cap 70
+                  #:researched-upgrades '(warp-gate-research charge)
+                  #:ally-units (list prism-phased)
+                  #:ally-buildings bldgs-pw
+                  #:enemy-units e-army-far
+                  #:enemy-buildings e-bldgs-pw)))
+  (define acts-pw3 (hash-ref res-pw3 'actions '()))
+  (define hoisted-warps
+    (filter (lambda (a)
+              (and (pair? a) (eq? (car a) 'warp-in) (= (length a) 5)
+                   (eq? (third a) 'zealot)
+                   (<= (sqrt (+ (sqr (- (fourth a) 135.0)) (sqr (- (fifth a) 102.0)))) 6.0)))
+            acts-pw3))
+  (define first-warp-idx
+    (for/first ([a (in-list acts-pw3)] [idx (in-naturals)]
+                #:when (and (pair? a) (eq? (car a) 'warp-in) (eq? (third a) 'zealot)))
+      idx))
+  (define first-train-idx
+    (for/first ([a (in-list acts-pw3)] [idx (in-naturals)]
+                #:when (and (pair? a) (eq? (car a) 'train)))
+      idx))
+  (define hoist-ok?
+    (and (= (length hoisted-warps) 4)
+         (exact-integer? first-warp-idx)
+         (or (not first-train-idx) (< first-warp-idx first-train-idx))))
+
+  (check-true "L65-Addendum-CreepExp3.6tClearance-And-EmptyPrismChargelotWarpBackstab"
+              (and queen-clear-ok? tumor-clear-ok? phased-warp-ok? mp-prism-mode? mp-prism-moved? hoist-ok?)
+              (format "qClr=~a(~a) tClr=~a(~a) phWarp=~a mpMode=~a mpMove=~a hoist=~a(w=~a,tr=~a)"
+                      queen-clear-ok? q-tumor-act tumor-clear-ok? t-spread-act
+                      (length prism-warps)
+                      (multiprong-state-active-mode (rt-multiprong-state rt-pw2))
+                      mp-prism-moved?
+                      hoist-ok? first-warp-idx first-train-idx)))
+
+;; -----------------------------------------------------------------------------
+;; Test 108 (Loop 65B `#1863`): PvP Observer `#2+` Deferral & Continuous Robo
+;; Immortals, Midgame 3-Base Charge + >=4 WG Warp Prism (Non-Combat Air Unblocked),
+;; & Multiprong `24f` Offensive Lease TTL + `em-cleared-p` Surviving-TH Prism Backstab
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) PvP 2-base with `1` Observer, `1` Immortal (< 4), `army >= 20` (`desired-observers = 2`),
+  ;;     and `320M/150G`: MUST defer Observer `#2` and pump Immortal `#2`!
+  (define rt-pvp-imm (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define acts-pvp-imm
+    (step-layer2-economy!
+     rt-pvp-imm
+     (mk-live-obs 'Protoss 'Protoss 7200 #:minerals 320 #:gas 150 #:supply-used 62 #:supply-cap 86
+                  #:mineral-harvesters 32 #:vespene-harvesters 8
+                  #:ally-units (append
+                                (list (mk-u 97601 'observer 58.0 32.5 #:hp 40.0 #:shield 20.0 #:flying #t)
+                                      (mk-u 97602 'immortal 52.0 32.5 #:hp 200.0 #:shield 100.0))
+                                (for/list ([i (in-range 10)])
+                                  (mk-u (+ 97610 i) 'stalker 50.0 (+ 30.0 (* 0.4 i)) #:hp 80.0 #:shield 80.0)))
+                  #:ally-buildings (list (mk-u 97620 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                                         (mk-u 97621 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                                         (mk-u 97622 'pylon 36.0 34.0 #:hp 200.0 #:shield 200.0)
+                                         (mk-u 97623 'cybernetics-core 40.0 38.0 #:hp 550.0 #:shield 550.0)
+                                         (mk-u 97624 'robotics-facility 38.0 36.0 #:hp 450.0 #:shield 450.0)
+                                         (mk-u 97625 'gateway 42.0 34.0 #:hp 500.0 #:shield 500.0)))))
+  (define pvp-no-obs2?
+    (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'observer))) acts-pvp-imm)))
+  (define pvp-imm2-trained?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'immortal))) acts-pvp-imm))
+
+  ;; (b) Midgame 3-base Protoss with Charge + 4 ready Warp Gates + 2 Immortals + 1 Observer +
+  ;;     320M/150G vs Terran with 1 Medivac (non-combat air -> must NOT block Warp Prism!):
+  ;;     MUST train `(train warp-prism)`!
+  (define rt-mid-wp (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define wgs-mid
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 97640 i) 'warp-gate (+ 38.0 (* 2.5 i)) 34.0 #:hp 500.0 #:shield 500.0)))
+  (define acts-mid-wp
+    (step-layer2-economy!
+     rt-mid-wp
+     (mk-live-obs 'Protoss 'Terran 9200 #:minerals 320 #:gas 150 #:supply-used 96 #:supply-cap 130
+                  #:mineral-harvesters 48 #:vespene-harvesters 12
+                  #:researched-upgrades '(warp-gate-research charge)
+                  #:ally-units (append
+                                (list (mk-u 97630 'observer 58.0 32.5 #:hp 40.0 #:shield 20.0 #:flying #t)
+                                      (mk-u 97631 'immortal 52.0 32.5 #:hp 200.0 #:shield 100.0)
+                                      (mk-u 97632 'immortal 53.0 32.5 #:hp 200.0 #:shield 100.0))
+                                (for/list ([i (in-range 10)])
+                                  (mk-u (+ 97650 i) 'stalker 50.0 (+ 30.0 (* 0.4 i)) #:hp 80.0 #:shield 80.0)))
+                  #:ally-buildings (append
+                                    (list (mk-u 97660 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                                          (mk-u 97661 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                                          (mk-u 97662 'nexus 82.5 52.5 #:hp 1000.0 #:shield 1000.0)
+                                          (mk-u 97663 'pylon 36.0 34.0 #:hp 200.0 #:shield 200.0)
+                                          (mk-u 97664 'cybernetics-core 40.0 38.0 #:hp 550.0 #:shield 550.0)
+                                          (mk-u 97665 'twilight-council 44.0 38.0 #:hp 500.0 #:shield 500.0)
+                                          (mk-u 97666 'robotics-facility 38.0 36.0 #:hp 450.0 #:shield 450.0))
+                                    wgs-mid)
+                  #:enemy-units (list (mk-u 97670 'medivac 130.0 130.0 #:hp 150.0 #:flying #t)
+                                      (mk-u 97671 'marine 132.0 130.0 #:hp 45.0)))))
+  (define mid-wp-trained?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'warp-prism))) acts-mid-wp))
+
+  ;; (c) Multiprong `24f` offensive lease TTL + `enemy-main-cleared = #t` with surviving enemy TH!
+  (define rt-mp65b (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define wgs-65b
+    (for/list ([i (in-range 4)])
+      (hash-set* (mk-u (+ 97680 i) 'warp-gate (+ 38.0 (* 2.5 i)) 36.0 #:hp 500.0 #:shield 500.0)
+                 'order-count 0 'warp-ready? #t)))
+  (define bldgs-65b
+    (append (list (mk-u 97675 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                  (mk-u 97676 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0))
+            wgs-65b))
+  (define prism-65b (mk-u 97690 'warp-prism 45.0 45.0 #:hp 80.0 #:shield 100.0 #:flying #t))
+  (define e-th-surviving (list (mk-u 97695 'hatchery 135.0 110.0 #:hp 1500.0)))
+  (define e-far-65b
+    (for/list ([i (in-range 6)])
+      (mk-u (+ 97700 i) 'roach 85.0 (+ 85.0 (* 0.5 i)) #:hp 145.0)))
+  (define acts-mp65b
+    (run-l34 rt-mp65b
+             (hash-set*
+              (mk-live-obs 'Protoss 'Zerg 6400 #:minerals 450 #:gas 100 #:supply-used 40 #:supply-cap 70
+                           #:researched-upgrades '(warp-gate-research charge)
+                           #:ally-units (list prism-65b)
+                           #:ally-buildings bldgs-65b
+                           #:enemy-units e-far-65b
+                           #:enemy-buildings e-th-surviving)
+              'enemy-main-cleared #t)))
+  (define mp65b-mode-ok?
+    (eq? (multiprong-state-active-mode (rt-multiprong-state rt-mp65b)) 'prism-warp-backstab))
+  (define mp65b-moved?
+    (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (= (second a) 97690))) acts-mp65b))
+  (define mp65b-lease (hash-ref (rt-role-leases rt-mp65b) 97690 #f))
+  (define mp65b-ttl16?
+    (and (unit-role-lease? mp65b-lease)
+         (eq? (unit-role-lease-role mp65b-lease) 'strike-group)
+         (= (unit-role-lease-expires-frame mp65b-lease) (+ 6400 16))))
+
+  (check-true "L65B-PvPImmortalObsDefer-MidgameChargeWarpPrism-And-Multiprong24fEmClearedLease"
+              (and pvp-no-obs2? pvp-imm2-trained? mid-wp-trained?
+                   mp65b-mode-ok? mp65b-moved? mp65b-ttl16?)
+              (format "noObs2=~a imm2=~a midWP=~a mpMode=~a mpMove=~a ttl16=~a(~a)"
+                      pvp-no-obs2? pvp-imm2-trained? mid-wp-trained?
+                      (multiprong-state-active-mode (rt-multiprong-state rt-mp65b))
+                      mp65b-moved? mp65b-ttl16? mp65b-lease)))
+
+;; -----------------------------------------------------------------------------
+;; Test 109 (Loop 65C `#1876`): Flat-Ground Stim/Damage Zero H20 Flee/Spotter,
+;; WarpPrism Single Authority Zero Morph Thrash, Preserved `'warp-in`, Phase 6
+;; Harass Unblocked by `'strike-group`, & PvP Immortal `#1` Before Obs `#2`
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) Flat-ground Stimpack (`hp 45 -> 35`, `buffs '(stimpack)`, `z=8.0` vs enemy `z=8.0`):
+  ;;     MUST NOT trigger H20 `(move marine ...)` flee OR `'spotter` lease on Viking!
+  (define rt-flat (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define bldgs-ft (list (mk-u 97801 'orbital-command 32.5 32.5 #:hp 1500.0)
+                         (mk-u 97802 'orbital-command 62.5 32.5 #:hp 1500.0)))
+  (define mar-f1 (hash-set* (mk-u 97810 'marine 80.0 80.0 #:hp 45.0) 'z 8.0))
+  (define vik-f  (hash-set* (mk-u 97811 'viking-fighter 72.0 80.0 #:hp 135.0 #:flying #t) 'z 12.0))
+  (define e-tnk-flat (hash-set* (mk-u 97820 'siege-tank-sieged 91.0 80.0 #:hp 175.0) 'z 8.0))
+  (run-l34 rt-flat
+           (hash-set* (mk-live-obs 'Terran 'Terran 6200 #:supply-used 48 #:supply-cap 70
+                                   #:ally-units (list mar-f1 vik-f)
+                                   #:ally-buildings bldgs-ft
+                                   #:enemy-units (list e-tnk-flat))
+                      'our-terrain-z 8.0 'enemy-terrain-z 8.0))
+  (define mar-f2 (hash-set* (mk-u 97810 'marine 80.0 80.0 #:hp 35.0) 'z 8.0 'buffs '(stimpack)))
+  (define acts-flat
+    (run-l34 rt-flat
+             (hash-set* (mk-live-obs 'Terran 'Terran 6204 #:supply-used 48 #:supply-cap 70
+                                     #:ally-units (list mar-f2 vik-f)
+                                     #:ally-buildings bldgs-ft
+                                     #:enemy-units (list e-tnk-flat))
+                        'our-terrain-z 8.0 'enemy-terrain-z 8.0)))
+  (define flat-no-h20-flee?
+    (not (ormap (lambda (a)
+                  (and (pair? a) (eq? (car a) 'move) (eqv? (second a) 97810)
+                       (real? (third a)) (< (third a) 79.0)))
+                acts-flat)))
+  (define flat-no-spotter?
+    (let ([vl (hash-ref (rt-role-leases rt-flat) 97811 #f)])
+      (not (and (unit-role-lease? vl) (eq? (unit-role-lease-role vl) 'spotter)))))
+
+  ;; (b) Empty live Warp Prism at home with `< 200M` (`100M`) in 2-base midgame Protoss:
+  ;;     Phase 3 + Phase 7 MUST NOT emit `morph-warp-prism-phasing` or `morph-warp-prism-transport`!
+  ;;     AND `'warp-in` is in `PRESERVED-TACTIC-HEAD-SET`!
+  (define rt-wp0 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define bldgs-wp0 (list (mk-u 97830 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                          (mk-u 97831 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                          (mk-u 97832 'warp-gate 38.0 36.0 #:hp 500.0 #:shield 500.0)))
+  (define wp-home (mk-u 97835 'warp-prism 45.0 45.0 #:hp 80.0 #:shield 100.0 #:flying #t))
+  (define acts-wp0
+    (run-l34 rt-wp0
+             (mk-live-obs 'Protoss 'Terran 6400 #:minerals 100 #:gas 50 #:supply-used 40 #:supply-cap 70
+                          #:ally-units (list wp-home)
+                          #:ally-buildings bldgs-wp0
+                          #:enemy-units (list (mk-u 97839 'marine 135.0 135.0 #:hp 45.0)))))
+  (define wp-zero-thrash?
+    (not (ormap (lambda (a)
+                  (and (pair? a) (= (length a) 4) (eqv? (second a) 97835)
+                       (memq (third a) '(morph-warp-prism-phasing morph-warp-prism-transport))))
+                acts-wp0)))
+
+  ;; (c) Phase 6 raid NOT blocked by offensive `'strike-group` (`55`) lease (which MUST stay in
+  ;;     `combat-units` on frame N+1!), while high-priority `'door-guard` (`90 >= 'evac` `85`) IS protected!
+  (define rt-p6 (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define reapers-strike
+    (list (mk-u 97850 'reaper 90.0 90.0 #:hp 60.0)
+          (mk-u 97851 'reaper 91.0 90.0 #:hp 60.0)))
+  (define reapers-guard
+    (list (mk-u 97852 'reaper 92.0 90.0 #:hp 60.0)
+          (mk-u 97853 'reaper 93.0 90.0 #:hp 60.0)))
+  (define marines-p6-core
+    (for/list ([i (in-range 20)])
+      (mk-u (+ 97890 i) 'marine 85.0 (+ 80.0 (* 0.4 i)) #:hp 45.0)))
+  (for ([u (in-list reapers-strike)])
+    (acquire-unit-lease! (rt-role-leases rt-p6) (hash-ref u 'id) 'strike-group 6400 16))
+  (for ([u (in-list reapers-guard)])
+    (acquire-unit-lease! (rt-role-leases rt-p6) (hash-ref u 'id) 'door-guard 6400 20))
+  (define acts-p6
+    (run-l34 rt-p6
+             (hash-set*
+              (mk-live-obs 'Terran 'Zerg 6404 #:supply-used 72 #:supply-cap 90
+                           #:ally-units (append reapers-strike reapers-guard marines-p6-core)
+                           #:ally-buildings (list (mk-u 97845 'orbital-command 32.5 32.5 #:hp 1500.0)
+                                                  (mk-u 97846 'orbital-command 62.5 32.5 #:hp 1500.0))
+                           #:enemy-units (list (mk-u 97860 'zergling 140.0 138.0 #:hp 35.0))
+                           #:enemy-buildings (list (mk-u 97865 'hatchery 142.5 138.5 #:hp 1500.0)))
+              'enable-economic-disruption #t)
+             0.90))
+  (define p6-harass-tags
+    (for/fold ([acc '()]) ([a (in-list acts-p6)]
+                           #:when (and (pair? a) (eq? (car a) 'harass-workers)))
+      (define u (second a))
+      (cond [(exact-integer? u) (cons u acc)]
+            [(list? u) (append u acc)]
+            [else acc])))
+  (define p6-not-blocked-by-strike-lease?
+    (and (memv 97850 p6-harass-tags)
+         (memv 97851 p6-harass-tags)
+         (not (memv 97852 p6-harass-tags))
+         (not (memv 97853 p6-harass-tags))
+         #t))
+
+  ;; (d) PvP Immortal `#1` before replacement Observer `#2`: `obs-trained-cnt = 1`, `0` alive Obs,
+  ;;     `0` Immortals, no visible cloak -> MUST train `(train immortal)`, NOT `(train observer)`!
+  (define rt-pvp0 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (hash-set! (rt-door-state rt-pvp0) 'obs-trained-cnt 1)
+  (define acts-pvp0
+    (step-layer2-economy!
+     rt-pvp0
+     (mk-live-obs 'Protoss 'Protoss 7200 #:minerals 400 #:gas 150 #:supply-used 52 #:supply-cap 80
+                  #:mineral-harvesters 28 #:vespene-harvesters 8
+                  #:ally-units (for/list ([i (in-range 8)])
+                                 (mk-u (+ 97870 i) 'stalker 50.0 (+ 30.0 (* 0.4 i)) #:hp 80.0 #:shield 80.0))
+                  #:ally-buildings (list (mk-u 97880 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                                         (mk-u 97881 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                                         (mk-u 97882 'pylon 36.0 34.0 #:hp 200.0 #:shield 200.0)
+                                         (mk-u 97883 'cybernetics-core 40.0 38.0 #:hp 550.0 #:shield 550.0)
+                                         (mk-u 97884 'robotics-facility 38.0 36.0 #:hp 450.0 #:shield 450.0)
+                                         (mk-u 97885 'gateway 42.0 34.0 #:hp 500.0 #:shield 500.0)))))
+  (define pvp0-imm1-first?
+    (and (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'immortal))) acts-pvp0)
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'observer))) acts-pvp0))))
+
+  (check-true "L65C-FlatGroundNoH20Flee-WarpPrismSingleAuth-Phase6NotBlocked-PvPImm1BeforeObs2"
+              (and flat-no-h20-flee? flat-no-spotter? wp-zero-thrash?
+                   p6-not-blocked-by-strike-lease? pvp0-imm1-first?)
+              (format "flatNoFlee=~a flatNoSpot=~a wpNoThrash=~a p6Unblk=~a(tags=~a) pvpImm1=~a"
+                      flat-no-h20-flee? flat-no-spotter? wp-zero-thrash?
+                      p6-not-blocked-by-strike-lease? p6-harass-tags pvp0-imm1-first?)))
+
+;; -----------------------------------------------------------------------------
+;; Test 110 (Loop 65D `#1892`): Distant `> 20t` `vis-uh-siege` & Near Visible Combat
+;; Zero Blind-Uphill `'move` Retreat + Unconditional Phase 3 Warp Prism Single-Authority
+;; Suppression Under Base Attack (Zero Morph & Zero Legacy Phase 3 `'move` Hijack)
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a1) Distant `> 20t` uphill `siege-tank-sieged` at `(135, 135)` (`z=10.0`, 77.8t away!)
+  ;;      while a 12-Marine attacking squad at `(80, 80)` (`z=8.0`) has Marine `97910` take damage
+  ;;      (`45 -> 30`): MUST NOT emit blind-uphill `'move` retreat (distance-unbounded `vis-uh-siege` bug fixed)!
+  (define rt-far-uh (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define bldgs-t65d (list (mk-u 97901 'orbital-command 32.5 32.5 #:hp 1500.0)
+                           (mk-u 97902 'orbital-command 62.5 32.5 #:hp 1500.0)))
+  (define mar-far-escort
+    (for/list ([i (in-range 11)])
+      (hash-set* (mk-u (+ 97911 i) 'marine 80.0 (+ 78.0 (* 0.35 i)) #:hp 45.0) 'z 8.0)))
+  (define mar-far1 (hash-set* (mk-u 97910 'marine 80.0 80.0 #:hp 45.0) 'z 8.0))
+  (define e-tnk-far (hash-set* (mk-u 97920 'siege-tank-sieged 135.0 135.0 #:hp 175.0) 'z 10.0))
+  (run-l34 rt-far-uh
+           (hash-set* (mk-live-obs 'Terran 'Terran 6200 #:supply-used 60 #:supply-cap 80
+                                   #:ally-units (cons mar-far1 mar-far-escort)
+                                   #:ally-buildings bldgs-t65d
+                                   #:enemy-units (list e-tnk-far))
+                      'our-terrain-z 8.0 'enemy-terrain-z 10.0)
+           0.75)
+  (define mar-far2 (hash-set* (mk-u 97910 'marine 80.0 80.0 #:hp 30.0) 'z 8.0))
+  (define acts-far-uh
+    (run-l34 rt-far-uh
+             (hash-set* (mk-live-obs 'Terran 'Terran 6204 #:supply-used 60 #:supply-cap 80
+                                     #:ally-units (cons mar-far2 mar-far-escort)
+                                     #:ally-buildings bldgs-t65d
+                                     #:enemy-units (list e-tnk-far))
+                        'our-terrain-z 8.0 'enemy-terrain-z 10.0)
+             0.75))
+  (define far-siege-no-blind-retreat?
+    (not (ormap (lambda (a)
+                  (and (pair? a) (eq? (car a) 'move) (eqv? (second a) 97910)
+                       (real? (third a)) (< (third a) 79.0)))
+                acts-far-uh)))
+
+  ;; (a2) Visible non-snapshot enemy combat unit within `<= 18.0t` (`marine` at `(94, 80)`, `14t` away)
+  ;;      even with `'uphill-blind-fire? #t` + `enemy-terrain-z 10.0`:
+  ;;      MUST NOT emit blind-uphill `'move` retreat (0% DPS suppression during live fight fixed)!
+  (define rt-vis-cbt (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define bldgs-p65d (list (mk-u 97931 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                           (mk-u 97932 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)))
+  (define stk-vc-escort
+    (for/list ([i (in-range 5)])
+      (hash-set* (mk-u (+ 97941 i) 'stalker 80.0 (+ 79.0 (* 0.4 i)) #:hp 80.0 #:shield 80.0) 'z 8.0)))
+  (define stk-vc1 (hash-set* (mk-u 97940 'stalker 80.0 80.0 #:hp 80.0 #:shield 80.0) 'z 8.0))
+  (define e-mar-vis (hash-set* (mk-u 97948 'marine 94.0 80.0 #:hp 45.0) 'z 8.0 'display-type 1))
+  (run-l34 rt-vis-cbt
+           (hash-set* (mk-live-obs 'Protoss 'Terran 6200 #:supply-used 60 #:supply-cap 80
+                                   #:ally-units (cons stk-vc1 stk-vc-escort)
+                                   #:ally-buildings bldgs-p65d
+                                   #:enemy-units (list e-mar-vis))
+                      'our-terrain-z 8.0 'enemy-terrain-z 10.0)
+           0.75)
+  (define stk-vc2 (hash-set* (mk-u 97940 'stalker 80.0 80.0 #:hp 80.0 #:shield 35.0) 'z 8.0))
+  (define acts-vis-cbt
+    (run-l34 rt-vis-cbt
+             (hash-set* (mk-live-obs 'Protoss 'Terran 6204 #:supply-used 60 #:supply-cap 80
+                                     #:ally-units (cons stk-vc2 stk-vc-escort)
+                                     #:ally-buildings bldgs-p65d
+                                     #:enemy-units (list e-mar-vis))
+                        'our-terrain-z 8.0 'enemy-terrain-z 10.0 'uphill-blind-fire? #t)
+             0.75))
+  (define vis-combat-no-blind-retreat?
+    (not (ormap (lambda (a)
+                  (and (pair? a) (eq? (car a) 'move) (eqv? (second a) 97940)
+                       (real? (third a)) (< (third a) 79.0)))
+                acts-vis-cbt)))
+
+  ;; (b1) Unconditional Phase 3 Warp Prism single-authority suppression EVEN WHEN
+  ;;      `under-tactics-base-attack?` is `#t` (enemy attacking our Natural at `(60, 42)` <= 14t of Nexus,
+  ;;      injured Immortal at `(54, 45)` 9t from empty healthy transport Prism `97961` at `(45, 45)`,
+  ;;      only 1 Warp Gate & no Charge so `multiprong-coordinator` does not launch):
+  ;;      Phase 3 MUST NOT morph (`Phasing <-> Transport`) OR emit legacy `'move` toward `(54, 45)`!
+  (define rt-wp-atk (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define bldgs-wp-atk (list (mk-u 97950 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                             (mk-u 97951 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                             (mk-u 97952 'warp-gate 38.0 36.0 #:hp 500.0 #:shield 500.0)))
+  (define wp-atk-tr   (mk-u 97961 'warp-prism 45.0 45.0 #:hp 80.0 #:shield 100.0 #:flying #t))
+  (define imm-injured (hash-set* (mk-u 97962 'immortal 54.0 45.0 #:hp 50.0 #:shield 0.0)
+                                 'max-hp 200.0 'max-shields 100.0))
+  (define e-base-atk  (list (mk-u 97970 'marauder 60.0 42.0 #:hp 125.0)
+                            (mk-u 97971 'marine 61.0 42.0 #:hp 45.0)))
+  (define acts-wp-atk
+    (run-l34 rt-wp-atk
+             (mk-live-obs 'Protoss 'Terran 6400 #:minerals 100 #:gas 50 #:supply-used 46 #:supply-cap 70
+                          #:ally-units (list wp-atk-tr imm-injured)
+                          #:ally-buildings bldgs-wp-atk
+                          #:enemy-units e-base-atk)))
+  (define wp-atk-no-p3-morph-or-move?
+    (not (ormap (lambda (a)
+                  (and (pair? a) (>= (length a) 3) (eqv? (second a) 97961)
+                       (or (eq? (car a) 'move)
+                           (memq (third a) '(morph-warp-prism-phasing morph-warp-prism-transport)))))
+                acts-wp-atk)))
+
+  ;; (b2) Even when `under-tactics-base-attack?` is `#t`, Phase 3 leaves an empty healthy phased
+  ;;      Warp Prism `97960` UNCLAIMED so `step-multiprong-coordinator!` retains SOLE authority
+  ;;      (`multiprong-state-prism-tag = 97960` + `'strike-group` lease)!
+  (define rt-wp-atk2 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define wp-atk-phased (mk-u 97960 'warp-prism-phasing 45.0 45.0 #:hp 80.0 #:shield 100.0 #:flying #t))
+  (run-l34 rt-wp-atk2
+           (mk-live-obs 'Protoss 'Terran 6400 #:minerals 100 #:gas 50 #:supply-used 46 #:supply-cap 70
+                        #:ally-units (list wp-atk-phased imm-injured)
+                        #:ally-buildings bldgs-wp-atk
+                        #:enemy-units e-base-atk))
+  (define wp-atk-mp-sole-owner?
+    (let ([l (hash-ref (rt-role-leases rt-wp-atk2) 97960 #f)])
+      (and (eqv? (multiprong-state-prism-tag (rt-multiprong-state rt-wp-atk2)) 97960)
+           (unit-role-lease? l)
+           (eq? (unit-role-lease-role l) 'strike-group))))
+
+  (check-true "L65D-FarSiegeNoBlindRetreat-VisCombatNoBlindRetreat-And-UncondPhase3PrismSingleAuth"
+              (and far-siege-no-blind-retreat? vis-combat-no-blind-retreat?
+                   wp-atk-no-p3-morph-or-move? wp-atk-mp-sole-owner?)
+              (format "farNoRet=~a(a=~a) visNoRet=~a wpNoP3=~a(a=~a) mpOwner=~a(ptag=~a)"
+                      far-siege-no-blind-retreat?
+                      (filter (lambda (a) (and (pair? a) (eqv? (second a) 97910))) acts-far-uh)
+                      vis-combat-no-blind-retreat?
+                      wp-atk-no-p3-morph-or-move?
+                      (filter (lambda (a) (and (pair? a) (eqv? (second a) 97961))) acts-wp-atk)
+                      wp-atk-mp-sole-owner?
+                      (multiprong-state-prism-tag (rt-multiprong-state rt-wp-atk2)))))
+
+;; -----------------------------------------------------------------------------
+;; Test 111 (Loop 65E `#1909`): Muster `<= 24t` `'attack-pos` (Zero `zero_fire_retreat`),
+;; Phase 6 Harass Respects `'staging-group` & Defensive `'strike-group` (Preserves Offensive
+;; `'strike-group`), & Empty Protoss Warp Prism Runs Multiprong During `endgame-hunt-active?`
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) `l64-muster-cmd` at `20.4t` (`18.0 < 20.4 <= 24.0`) emits `'attack-pos` (NOT `'move`!)
+  ;;     while isolated unit at `29.3t` (`> 24.0`) still emits `'move`!
+  (define rt-m65e (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define bldgs-z65e (list (mk-u 98001 'hatchery 32.5 32.5 #:hp 1500.0)
+                           (mk-u 98002 'hatchery 62.5 32.5 #:hp 1500.0)))
+  (define e-push-65e
+    (for/list ([i (in-range 12)])
+      (mk-u (+ 98060 i) 'stalker 78.0 (+ 30.0 (* 0.4 i)) #:hp 80.0 #:shield 80.0)))
+  (define roach-20t (mk-u 98010 'roach 60.0 44.0 #:hp 145.0))
+  (define roach-29t (mk-u 98011 'roach 52.0 48.0 #:hp 145.0))
+  (define acts-m65e
+    (run-l34 rt-m65e
+             (mk-live-obs 'Zerg 'Protoss 7000 #:supply-used 48 #:supply-cap 70
+                          #:ally-units (list roach-20t roach-29t)
+                          #:ally-buildings bldgs-z65e
+                          #:enemy-units e-push-65e)))
+  (define muster-20t-attack-pos?
+    (and (hash-ref (rt-door-state rt-m65e) 'l64-def-muster-active? #f)
+         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-pos) (eqv? (second a) 98010))) acts-m65e)
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (eqv? (second a) 98010))) acts-m65e))
+         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (eqv? (second a) 98011))) acts-m65e)
+         #t))
+
+  ;; (b1) Phase 6 `harass-workers` skips `'staging-group` (`50`) leased units while preserving
+  ;;      offensive `'strike-group` (`55`) raid freedom when home is safe!
+  (define rt-p6-safe (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define r-stg (mk-u 98020 'reaper 90.0 90.0 #:hp 60.0))
+  (define r-off (mk-u 98021 'reaper 91.0 90.0 #:hp 60.0))
+  (define m-core-65e
+    (for/list ([i (in-range 20)])
+      (mk-u (+ 98100 i) 'marine 85.0 (+ 80.0 (* 0.4 i)) #:hp 45.0)))
+  (acquire-unit-lease! (rt-role-leases rt-p6-safe) 98020 'staging-group 6400 20)
+  (acquire-unit-lease! (rt-role-leases rt-p6-safe) 98021 'strike-group 6400 16)
+  (define acts-p6-safe
+    (run-l34 rt-p6-safe
+             (hash-set*
+              (mk-live-obs 'Terran 'Zerg 6404 #:supply-used 72 #:supply-cap 90
+                           #:ally-units (append (list r-stg r-off) m-core-65e)
+                           #:ally-buildings (list (mk-u 98025 'orbital-command 32.5 32.5 #:hp 1500.0)
+                                                  (mk-u 98026 'orbital-command 62.5 32.5 #:hp 1500.0))
+                           #:enemy-units (list (mk-u 98028 'zergling 140.0 138.0 #:hp 35.0))
+                           #:enemy-buildings (list (mk-u 98029 'hatchery 142.5 138.5 #:hp 1500.0)))
+              'enable-economic-disruption #t)
+             0.90))
+  (define (collect-harass-tags acts)
+    (for/fold ([acc '()]) ([a (in-list acts)]
+                           #:when (and (pair? a) (eq? (car a) 'harass-workers)))
+      (define u (second a))
+      (cond [(exact-integer? u) (cons u acc)]
+            [(list? u) (append u acc)]
+            [else acc])))
+  (define p6-safe-tags (collect-harass-tags acts-p6-safe))
+  (define p6-blocks-staging-allows-off-strike?
+    (and (not (memv 98020 p6-safe-tags))
+         (memv 98021 p6-safe-tags)
+         #t))
+
+  ;; (b2) Phase 6 `harass-workers` skips `'strike-group` (`55`) leased units when home is under
+  ;;      base attack (`enemy-within-14-of-th? = #t`), preventing home-defender hijacks!
+  (define rt-p6-def (make-live-bot-runtime #:bot-name 'Mothman-Z #:race 'Zerg))
+  (define ling-def-strike (mk-u 98030 'zergling 90.0 90.0 #:hp 35.0))
+  (define ling-free-other (mk-u 98031 'zergling 91.0 90.0 #:hp 35.0))
+  (define roach-core-65e
+    (for/list ([i (in-range 12)])
+      (mk-u (+ 98130 i) 'roach 56.0 (+ 31.0 (* 0.4 i)) #:hp 145.0)))
+  (acquire-unit-lease! (rt-role-leases rt-p6-def) 98030 'strike-group 6400 20)
+  (define acts-p6-def
+    (run-l34 rt-p6-def
+             (hash-set*
+              (mk-live-obs 'Zerg 'Zerg 6404 #:supply-used 72 #:supply-cap 90
+                           #:ally-units (append (list ling-def-strike ling-free-other) roach-core-65e)
+                           #:ally-buildings (list (mk-u 98035 'hatchery 32.5 32.5 #:hp 1500.0)
+                                                  (mk-u 98036 'hatchery 62.5 32.5 #:hp 1500.0))
+                           #:enemy-units (list (mk-u 98038 'roach 66.0 34.0 #:hp 145.0))
+                           #:enemy-buildings (list (mk-u 98039 'hatchery 142.5 138.5 #:hp 1500.0)))
+              'enable-economic-disruption #t)
+             0.90))
+  (define p6-def-tags (collect-harass-tags acts-p6-def))
+  (define p6-blocks-def-strike?
+    (not (memv 98030 p6-def-tags)))
+
+  ;; (c) Protoss empty Warp Prism STILL runs `step-multiprong-coordinator!` during
+  ;;     `endgame-hunt-active?` (`supply-used=170`, `>= 40` combat supply, `0` visible enemies)
+  ;;     whenever live enemy TownHalls still exist (`#5 PvZ` `233s` idle Prism fix)!
+  (define rt-eg-wp (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define wgs-eg
+    (for/list ([i (in-range 4)])
+      (hash-set* (mk-u (+ 98042 i) 'warp-gate (+ 38.0 (* 2.5 i)) 36.0 #:hp 500.0 #:shield 500.0)
+                 'order-count 0 'warp-ready? #t)))
+  (define bldgs-eg
+    (append (list (mk-u 98040 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                  (mk-u 98041 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0))
+            wgs-eg))
+  (define stalkers-eg
+    (for/list ([i (in-range 22)])
+      (mk-u (+ 98160 i) 'stalker 80.0 (+ 76.0 (* 0.35 i)) #:hp 80.0 #:shield 80.0)))
+  (define prism-eg (mk-u 98050 'warp-prism 45.0 45.0 #:hp 80.0 #:shield 100.0 #:flying #t))
+  (define e-ths-eg (list (mk-u 98055 'hatchery 142.5 138.5 #:hp 1500.0)
+                         (mk-u 98056 'hatchery 135.0 110.0 #:hp 1500.0)))
+  (define acts-eg-wp
+    (run-l34 rt-eg-wp
+             (mk-live-obs 'Protoss 'Zerg 10000 #:minerals 450 #:gas 100 #:supply-used 170 #:supply-cap 200
+                          #:researched-upgrades '(warp-gate-research charge)
+                          #:ally-units (cons prism-eg stalkers-eg)
+                          #:ally-buildings bldgs-eg
+                          #:enemy-units '()
+                          #:enemy-buildings e-ths-eg)))
+  (define eg-prism-active?
+    (and (eq? (multiprong-state-active-mode (rt-multiprong-state rt-eg-wp)) 'prism-warp-backstab)
+         (eqv? (multiprong-state-prism-tag (rt-multiprong-state rt-eg-wp)) 98050)
+         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (eqv? (second a) 98050))) acts-eg-wp)
+         #t))
+
+  (check-true "L65E-Muster20tAttackPos-Phase6StagingAndDefStrikeBlock-And-EndgameHuntPrismBackstab"
+              (and muster-20t-attack-pos? p6-blocks-staging-allows-off-strike?
+                   p6-blocks-def-strike? eg-prism-active?)
+              (format "m20=~a p6Safe=~a(tags=~a) p6Def=~a(tags=~a) egPrism=~a(mode=~a,ptag=~a)"
+                      muster-20t-attack-pos?
+                      p6-blocks-staging-allows-off-strike? p6-safe-tags
+                      p6-blocks-def-strike? p6-def-tags
+                      eg-prism-active?
+                      (multiprong-state-active-mode (rt-multiprong-state rt-eg-wp))
+                      (multiprong-state-prism-tag (rt-multiprong-state rt-eg-wp)))))
+
+;; -----------------------------------------------------------------------------
+;; Test 112 (Loop 65F/65G `#1922`/`#1938`): `combat-suppress-attack?` Clean `'move`
+;; Disengage Below `0.85x` & Above `22t` vs `'attack-pos` at `>= 0.85x` Within `<= 22t`
+;; / `<= 32f` Post-Contact, `l64-muster-cmd` `15t/22t` Cluster + `> 55t` Drop Guard,
+;; & Home Widow Mine Harass Block
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a1) Outgunned `0.625x` (`5` Stalkers vs `8` Stalkers, `< 0.85x`) at `20t` -> MUST cleanly disengage with `'move`!
+  ;;      Competitive `0.875x` (`7` Stalkers vs `8` Stalkers, `>= 0.85x`, suppressed by Lanchester)
+  ;;      at `18t` (`<= 22t`) -> MUST emit `'attack-pos` (NOT passive `'move`)!
+  (define bldgs-t65f (list (mk-u 98201 'orbital-command 32.5 32.5 #:hp 1500.0)
+                           (mk-u 98202 'orbital-command 62.5 32.5 #:hp 1500.0)))
+  (define bldgs-p65f (list (mk-u 98203 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                           (mk-u 98204 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)))
+  (define stk-sup-u (mk-u 98210 'stalker 100.0 100.0 #:hp 80.0 #:shield 80.0))
+  (define stk-outgunned-62
+    (cons stk-sup-u
+          (for/list ([i (in-range 4)]) (mk-u (+ 98211 i) 'stalker 99.5 (+ 98.5 (* 0.5 i)) #:hp 80.0 #:shield 80.0))))
+  (define stk-comp-88
+    (cons stk-sup-u
+          (for/list ([i (in-range 6)]) (mk-u (+ 98211 i) 'stalker 99.5 (+ 98.0 (* 0.5 i)) #:hp 80.0 #:shield 80.0))))
+  (define e-stk-20t
+    (for/list ([i (in-range 8)])
+      (mk-u (+ 98230 i) 'stalker 120.0 (+ 98.0 (* 0.5 i)) #:hp 80.0 #:shield 80.0)))
+  (define e-stk-18t
+    (for/list ([i (in-range 8)])
+      (mk-u (+ 98230 i) 'stalker 118.0 (+ 98.0 (* 0.5 i)) #:hp 80.0 #:shield 80.0)))
+  (define rt-outgun61 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define acts-outgun61
+    (run-l34 rt-outgun61
+             (mk-live-obs 'Protoss 'Protoss 7000 #:supply-used 46 #:supply-cap 70
+                          #:ally-units stk-outgunned-62
+                          #:ally-buildings bldgs-p65f
+                          #:enemy-units e-stk-20t)
+             0.20))
+  (define rt-comp18 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define acts-comp18
+    (run-l34 rt-comp18
+             (mk-live-obs 'Protoss 'Protoss 7000 #:supply-used 50 #:supply-cap 70
+                          #:ally-units stk-comp-88
+                          #:ally-buildings bldgs-p65f
+                          #:enemy-units e-stk-18t)
+             0.20))
+  (define sup-65g-ratio-ok?
+    (and (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (eqv? (second a) 98210))) acts-outgun61)
+         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-pos) (eqv? (second a) 98210))) acts-comp18)
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (eqv? (second a) 98210))) acts-comp18))))
+
+  ;; (a2) Post-contact `32f` window & `<= 22t` distance scoping for `0.875x` squad:
+  ;;      Frame `7100` has genuine close combat (`<= 9.0t`), stamping `'l65f-last-contact-frame = 7100`.
+  ;;      At `7116` (`+16f <= 32f`) with enemy at `20t` (`<= 22t`), emits `'attack-pos` (NOT `'move`).
+  ;;      At `7120` (`+20f <= 32f`) with enemy at `28t` (`> 22t`), emits `'move` (distant contact
+  ;;      NEVER blocks a separate retreating squad!).
+  (define rt-pc (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define e-near-8t (list (mk-u 98238 'stalker 108.0 100.0 #:hp 80.0 #:shield 80.0)))
+  (define e-stk-28t
+    (for/list ([i (in-range 8)])
+      (mk-u (+ 98230 i) 'stalker 128.0 (+ 98.0 (* 0.5 i)) #:hp 80.0 #:shield 80.0)))
+  (run-l34 rt-pc
+           (mk-live-obs 'Protoss 'Protoss 7100 #:supply-used 50 #:supply-cap 70
+                        #:ally-units stk-comp-88
+                        #:ally-buildings bldgs-p65f
+                        #:enemy-units e-near-8t)
+           0.20)
+  (define acts-pc-20t
+    (run-l34 rt-pc
+             (mk-live-obs 'Protoss 'Protoss 7116 #:supply-used 50 #:supply-cap 70
+                          #:ally-units stk-comp-88
+                          #:ally-buildings bldgs-p65f
+                          #:enemy-units e-stk-20t)
+             0.20))
+  (define acts-pc-28t
+    (run-l34 rt-pc
+             (mk-live-obs 'Protoss 'Protoss 7120 #:supply-used 50 #:supply-cap 70
+                          #:ally-units stk-comp-88
+                          #:ally-buildings bldgs-p65f
+                          #:enemy-units e-stk-28t)
+             0.20))
+  (define post-contact-ok?
+    (and (eqv? (hash-ref (rt-door-state rt-pc) 'l65f-last-contact-frame #f) 7100)
+         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'attack-pos) (eqv? (second a) 98210))) acts-pc-20t)
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (eqv? (second a) 98210))) acts-pc-20t))
+         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (eqv? (second a) 98210))) acts-pc-28t)))
+
+  ;; (b) `l64-muster-cmd` `15t/22t` anti-split cluster + `> 55t` forward push drop (`< 2400` val) guard:
+  ;;     - `98240` at `(65.0, 32.0)` is `13.0t <= 15.0t` from enemy drop (`12` Stalkers = `2100`, `1800 <= 2100 < 2400`)
+  ;;       at `(78.0, 32.0)` -> in `p5-allies-in-contact-pts`!
+  ;;     - `98241` at `(52.0, 44.0)` is `17.7t <= 22.0t` from `98240` (and `28.6t` from enemies) -> PROTECTED (NO `'move`!)
+  ;;     - `98242` at `(130.0, 120.0)` is `> 55t` from BOTH Main & Natural while `push-val = 2100 < 2400` -> PROTECTED (NO `'move`!)
+  (define rt-m65f (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define e-drop-12
+    (for/list ([i (in-range 12)])
+      (mk-u (+ 98250 i) 'stalker 78.0 (+ 30.0 (* 0.4 i)) #:hp 80.0 #:shield 80.0)))
+  (define mar-contact13 (mk-u 98240 'marine 65.0 32.0 #:hp 45.0))
+  (define mar-cluster18 (mk-u 98241 'marine 52.0 44.0 #:hp 45.0))
+  (define mar-forward90 (mk-u 98242 'marine 130.0 120.0 #:hp 45.0))
+  (define acts-m65f
+    (run-l34 rt-m65f
+             (mk-live-obs 'Terran 'Protoss 7000 #:supply-used 46 #:supply-cap 70
+                          #:ally-units (list mar-contact13 mar-cluster18 mar-forward90)
+                          #:ally-buildings bldgs-t65f
+                          #:enemy-units e-drop-12)))
+  (define muster-65f-protected?
+    (and (hash-ref (rt-door-state rt-m65f) 'l64-def-muster-active? #f)
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (eqv? (second a) 98241))) acts-m65f))
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'move) (eqv? (second a) 98242))) acts-m65f))
+         #t))
+
+  ;; (c) Home `'widow-mine` during early Reaper rush (`enemy-near-home? = #t`):
+  ;;     MUST NOT be sent across the map (`x > 80.0`) by Phase 7 `step-multitask-harass-and-proxy` (`#53`)!
+  (define rt-wm (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define wm-home (mk-u 98270 'widow-mine 38.0 34.0 #:hp 90.0))
+  (define scvs-home
+    (for/list ([i (in-range 12)])
+      (mk-u (+ 98275 i) 'scv (+ 30.0 (* 0.3 i)) 34.0 #:hp 45.0)))
+  (define reapers-rush
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 98290 i) 'reaper 42.0 (+ 33.0 (* 0.4 i)) #:hp 60.0)))
+  (define acts-wm
+    (run-l34 rt-wm
+             (mk-live-obs 'Terran 'Terran 4500 #:supply-used 22 #:supply-cap 30
+                          #:ally-units (cons wm-home scvs-home)
+                          #:ally-buildings (list (mk-u 98271 'orbital-command 32.5 32.5 #:hp 1500.0)
+                                                 (mk-u 98272 'factory 39.0 36.0 #:hp 1250.0))
+                          #:enemy-units reapers-rush
+                          #:enemy-buildings (list (mk-u 98298 'command-center 142.5 138.5 #:hp 1500.0)))))
+  (define wm-no-crossmap-harass?
+    (not (ormap (lambda (a)
+                  (and (pair? a) (memq (car a) '(move attack-pos)) (eqv? (second a) 98270)
+                       (>= (length a) 4) (real? (third a)) (> (third a) 80.0)))
+                acts-wm)))
+
+  (check-true "L65G-Suppress085Ratio22tAnd32fPostContact-MusterCluster22tAndForwardDrop-HomeWidowMineHold"
+              (and sup-65g-ratio-ok? post-contact-ok? muster-65f-protected? wm-no-crossmap-harass?)
+              (format "sup65g=~a(o61=~a,c18=~a) pc=~a(cf=~a,20t=~a,28t=~a) mProt=~a(a41=~a,a42=~a) wmHold=~a(a=~a)"
+                      sup-65g-ratio-ok?
+                      (filter (lambda (a) (and (pair? a) (eqv? (second a) 98210))) acts-outgun61)
+                      (filter (lambda (a) (and (pair? a) (eqv? (second a) 98210))) acts-comp18)
+                      post-contact-ok?
+                      (hash-ref (rt-door-state rt-pc) 'l65f-last-contact-frame #f)
+                      (filter (lambda (a) (and (pair? a) (eqv? (second a) 98210))) acts-pc-20t)
+                      (filter (lambda (a) (and (pair? a) (eqv? (second a) 98210))) acts-pc-28t)
+                      muster-65f-protected?
+                      (filter (lambda (a) (and (pair? a) (eqv? (second a) 98241))) acts-m65f)
+                      (filter (lambda (a) (and (pair? a) (eqv? (second a) 98242))) acts-m65f)
+                      wm-no-crossmap-harass?
+                      (filter (lambda (a) (and (pair? a) (eqv? (second a) 98270))) acts-wm))))
+
+;; -----------------------------------------------------------------------------
+;; Test 113 (Loop 65H `#1949`, Protoss-Only): Protoss Warp-Gate & Warping-In
+;; `in-prod-ht` Accounting, Natural Wall Door-Guard Release Under Base Attack /
+;; Main `<= 22t` / PvT Reaper-Marauder, & 2-Base Early Warp Prism #1 Unlock
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) Protoss `in-prod-ht`: counts warping-in Gateway combat units (`build-progress < 1.0`)
+  ;;     AND affordable ready `warp-gate`s (`minerals >= 100` & `supply-left >= 2`), dropping
+  ;;     cleanly to `0` when broke (`< 100M`) or supply-blocked (`< 2` supply-left)!
+  (define bldgs-wg3
+    (append (list (mk-u 98301 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                  (mk-u 98302 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0))
+            (for/list ([i (in-range 3)])
+              (hash-set* (mk-u (+ 98305 i) 'warp-gate (+ 38.0 (* 2.5 i)) 36.0 #:hp 500.0 #:shield 500.0)
+                         'order-count 0 'warp-ready? #t))))
+  (define stk-warping (mk-u 98310 'stalker 38.0 34.0 #:hp 80.0 #:shield 80.0 #:build-progress 0.45))
+  (define stk-ready   (mk-u 98311 'stalker 80.0 80.0 #:hp 80.0 #:shield 80.0))
+  (define rt-ip1 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (run-l34 rt-ip1
+           (mk-live-obs 'Protoss 'Protoss 6400 #:minerals 350 #:gas 100 #:supply-used 50 #:supply-cap 60
+                        #:ally-units (list stk-warping stk-ready)
+                        #:ally-buildings bldgs-wg3
+                        #:enemy-units '()))
+  (define ip1 (hash-ref (rt-door-state rt-ip1) 'l65h-last-in-prod-counts (hasheq)))
+  (define in-prod-rich-ok?
+    (and (= (hash-ref ip1 'stalker 0) 1)
+         (= (hash-ref ip1 'warp-gate-ready 0) 3)))
+  ;; Broke (`50M < 100M`) -> ready WGs drop cleanly to 0, warping-in Stalker still counted!
+  (define rt-ip2 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (run-l34 rt-ip2
+           (mk-live-obs 'Protoss 'Protoss 6400 #:minerals 50 #:gas 0 #:supply-used 50 #:supply-cap 60
+                        #:ally-units (list stk-warping stk-ready)
+                        #:ally-buildings bldgs-wg3
+                        #:enemy-units '()))
+  (define ip2 (hash-ref (rt-door-state rt-ip2) 'l65h-last-in-prod-counts (hasheq)))
+  ;; Supply-blocked (`59/60` -> `supply-left = 1 < 2`) -> ready WGs drop cleanly to 0!
+  (define rt-ip3 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (run-l34 rt-ip3
+           (mk-live-obs 'Protoss 'Protoss 6400 #:minerals 350 #:gas 100 #:supply-used 59 #:supply-cap 60
+                        #:ally-units (list stk-ready)
+                        #:ally-buildings bldgs-wg3
+                        #:enemy-units '()))
+  (define ip3 (hash-ref (rt-door-state rt-ip3) 'l65h-last-in-prod-counts (hasheq)))
+  (define in-prod-zero-when-broke-or-capped?
+    (and (= (hash-ref ip2 'stalker 0) 1)
+         (= (hash-ref ip2 'warp-gate-ready 0) 0)
+         (= (hash-ref ip3 'warp-gate-ready 0) 0)))
+
+  ;; (b) Protoss Natural wall door-guard release:
+  ;;     - Peaceful PvT -> Zealot gets `'door-guard` lease!
+  ;;     - PvT with enemy Reaper (or Marauder), OR non-flying enemy `<= 22t` of Main (`18t`),
+  ;;       OR `under-attack? = #t` -> Zealot released (NO `'door-guard` lease)!
+  (define bldgs-dg
+    (list (mk-u 98320 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+          (mk-u 98321 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)
+          (mk-u 98322 'pylon 58.0 34.0 #:hp 200.0 #:shield 200.0)
+          (mk-u 98323 'gateway 60.0 36.0 #:hp 500.0 #:shield 500.0)))
+  (define z-dg (mk-u 98325 'zealot 62.0 34.0 #:hp 100.0 #:shield 50.0))
+  (define (has-dg-lease? rt tag)
+    (let ([l (hash-ref (rt-role-leases rt) tag #f)])
+      (and (unit-role-lease? l) (eq? (unit-role-lease-role l) 'door-guard))))
+  (define rt-dg-ok (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (step-layer2-economy!
+   rt-dg-ok
+   (mk-live-obs 'Protoss 'Terran 3200 #:minerals 100 #:gas 50 #:supply-used 28 #:supply-cap 38
+                #:ally-units (list z-dg) #:ally-buildings bldgs-dg #:enemy-units '()))
+  (define rt-dg-reaper (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (step-layer2-economy!
+   rt-dg-reaper
+   (mk-live-obs 'Protoss 'Terran 3200 #:minerals 100 #:gas 50 #:supply-used 28 #:supply-cap 38
+                #:ally-units (list z-dg) #:ally-buildings bldgs-dg
+                #:enemy-units (list (mk-u 98329 'reaper 85.0 60.0 #:hp 60.0))))
+  (define rt-dg-main18 (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (step-layer2-economy!
+   rt-dg-main18
+   (mk-live-obs 'Protoss 'Protoss 3200 #:minerals 100 #:gas 50 #:supply-used 28 #:supply-cap 38
+                #:ally-units (list z-dg) #:ally-buildings bldgs-dg
+                #:enemy-units (list (mk-u 98330 'stalker 50.5 32.5 #:hp 80.0 #:shield 80.0))))
+  (define rt-dg-underatk (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (step-layer2-economy!
+   rt-dg-underatk
+   (hash-set (mk-live-obs 'Protoss 'Terran 3200 #:minerals 100 #:gas 50 #:supply-used 28 #:supply-cap 38
+                          #:ally-units (list z-dg) #:ally-buildings bldgs-dg #:enemy-units '())
+             'under-attack? #t))
+  ;; PvZ 1x1 doorway seal preserved when ONLY a Zergling stands `<= 10t` outside `wall-door-pt`!
+  (define rt-dg-pvz-seal (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (step-layer2-economy!
+   rt-dg-pvz-seal
+   (hash-set (mk-live-obs 'Protoss 'Zerg 3200 #:minerals 100 #:gas 50 #:supply-used 28 #:supply-cap 38
+                          #:ally-units (list z-dg) #:ally-buildings bldgs-dg
+                          #:enemy-units (list (mk-u 98331 'zergling 74.0 34.0 #:hp 35.0)))
+             'under-attack? #t))
+  (define dg-release-ok?
+    (and (has-dg-lease? rt-dg-ok 98325)
+         (not (has-dg-lease? rt-dg-reaper 98325))
+         (not (has-dg-lease? rt-dg-main18 98325))
+         (not (has-dg-lease? rt-dg-underatk 98325))
+         (has-dg-lease? rt-dg-pvz-seal 98325)))
+
+  ;; (c) Warp Prism #1 early 2-base unlock (`protoss-midgame-charge-prism-due?`):
+  ;;     (c1) PvT 2-base, Charge PENDING, 4 WGs, 1 Immortal, 1 Obs, 350M -> trains `(train warp-prism)`!
+  ;;     (c2) PvZ 2-base, `frame=6200 >= 6048`, NO Charge yet, 4 WGs, 1 Immortal, 1 Obs, 350M (even while saving for Nexus #3!) -> trains `(train warp-prism)`!
+  ;;     (c3) PvP 2-base, ONLY 1 Immortal (`< 2` PvP floor!), Charge researched, 4 WGs, 400M -> trains Immortal, NOT Prism!
+  (define wgs-4-65h
+    (for/list ([i (in-range 4)])
+      (mk-u (+ 98340 i) 'warp-gate (+ 38.0 (* 2.5 i)) 34.0 #:hp 500.0 #:shield 500.0)))
+  (define bldgs-2b-wp
+    (append (list (mk-u 98350 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                  (mk-u 98351 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                  (mk-u 98352 'pylon 36.0 34.0 #:hp 200.0 #:shield 200.0)
+                  (mk-u 98353 'cybernetics-core 40.0 38.0 #:hp 550.0 #:shield 550.0)
+                  (mk-u 98354 'twilight-council 44.0 38.0 #:hp 500.0 #:shield 500.0)
+                  (mk-u 98355 'robotics-facility 38.0 36.0 #:hp 450.0 #:shield 450.0)
+                  (mk-u 98359 'forge 46.0 36.0 #:hp 400.0 #:shield 400.0)
+                  (mk-u 98356 'assimilator 30.0 38.0 #:hp 300.0 #:shield 300.0)
+                  (mk-u 98357 'assimilator 38.0 28.0 #:hp 300.0 #:shield 300.0)
+                  (mk-u 98358 'assimilator 60.0 38.0 #:hp 300.0 #:shield 300.0)
+                  (mk-u 98362 'assimilator 66.0 28.0 #:hp 300.0 #:shield 300.0))
+            wgs-4-65h))
+  (define units-1imm
+    (append (list (mk-u 98360 'observer 58.0 32.5 #:hp 40.0 #:shield 20.0 #:flying #t)
+                  (mk-u 98361 'immortal 52.0 32.5 #:hp 200.0 #:shield 100.0))
+            (for/list ([i (in-range 8)])
+              (mk-u (+ 98370 i) 'stalker 50.0 (+ 30.0 (* 0.4 i)) #:hp 80.0 #:shield 80.0))))
+  (define rt-wp-pvt (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define acts-wp-pvt
+    (step-layer2-economy!
+     rt-wp-pvt
+     (hash-set (mk-live-obs 'Protoss 'Terran 5600 #:minerals 350 #:gas 100 #:supply-used 68 #:supply-cap 90
+                            #:mineral-harvesters 34 #:vespene-harvesters 8
+                            #:researched-upgrades '(warp-gate-research)
+                            #:ally-units units-1imm #:ally-buildings bldgs-2b-wp)
+               'pending-upgrades '(charge))))
+  (define rt-wp-pvz (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define acts-wp-pvz
+    (step-layer2-economy!
+     rt-wp-pvz
+     (mk-live-obs 'Protoss 'Zerg 6200 #:minerals 350 #:gas 100 #:supply-used 68 #:supply-cap 90
+                  #:mineral-harvesters 34 #:vespene-harvesters 8
+                  #:researched-upgrades '(warp-gate-research)
+                  #:ally-units units-1imm #:ally-buildings bldgs-2b-wp)))
+  (define rt-wp-pvp (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define acts-wp-pvp
+    (step-layer2-economy!
+     rt-wp-pvp
+     (mk-live-obs 'Protoss 'Protoss 6400 #:minerals 400 #:gas 150 #:supply-used 68 #:supply-cap 90
+                  #:mineral-harvesters 34 #:vespene-harvesters 8
+                  #:researched-upgrades '(warp-gate-research charge)
+                  #:ally-units units-1imm #:ally-buildings bldgs-2b-wp)))
+  (define wp-2b-unlock-ok?
+    (and (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'warp-prism))) acts-wp-pvt)
+         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'warp-prism))) acts-wp-pvz)
+         (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'immortal))) acts-wp-pvp)
+         (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'train) (eq? (second a) 'warp-prism))) acts-wp-pvp))))
+
+  (check-true "L65H-ProtossWarpGateInProd-NaturalDoorGuardRelease-And-2BaseWarpPrismUnlock"
+              (and in-prod-rich-ok? in-prod-zero-when-broke-or-capped? dg-release-ok? wp-2b-unlock-ok?)
+              (format "ipRich=~a(~a) ipZero=~a(~a,~a) dgRel=~a(ok=~a,r=~a,m18=~a,ua=~a,seal=~a) wp2b=~a(pvt=~a,pvz=~a,pvp=~a)"
+                      in-prod-rich-ok? ip1
+                      in-prod-zero-when-broke-or-capped? ip2 ip3
+                      dg-release-ok?
+                      (has-dg-lease? rt-dg-ok 98325)
+                      (has-dg-lease? rt-dg-reaper 98325)
+                      (has-dg-lease? rt-dg-main18 98325)
+                      (has-dg-lease? rt-dg-underatk 98325)
+                      (has-dg-lease? rt-dg-pvz-seal 98325)
+                      wp-2b-unlock-ok?
+                      (filter (lambda (a) (and (pair? a) (eq? (car a) 'train))) acts-wp-pvt)
+                      (filter (lambda (a) (and (pair? a) (eq? (car a) 'train))) acts-wp-pvz)
+                      (filter (lambda (a) (and (pair? a) (eq? (car a) 'train))) acts-wp-pvp))))
 
 (printf "\n=== Loop 49 Suite Summary: ~a/~a passed, ~a failed ===\n"
         tests-passed tests-run tests-failed)

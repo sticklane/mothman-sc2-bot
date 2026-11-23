@@ -1274,9 +1274,12 @@
       if (zTum && zSpr) {
         const tm = zTum.mothman || {}, tp = zTum.pros || {};
         const spCnt = (zSpr.mothman && zSpr.mothman.sum_casts) || 0;
+        const mAd = (zSpr.mothman && zSpr.mothman.adopt_pct) || 0;
+        const pAd = (zSpr.pros && zSpr.pros.adopt_pct) || 0;
+        const creepCol = mAd >= pAd * 0.9 ? T.good : (mAd >= pAd * 0.5 ? T.m : T.bad);
         creepHtml =
-          '<div class="obs-creep-strip">' +
-            '<div><strong>Zerg Creep Tumor Spread:</strong> Mothman <strong style="color:' + T.bad + '">' + fmt(zSpr.mothman && zSpr.mothman.adopt_pct, 1) + '%</strong> (' + spCnt + (spCnt === 1 ? ' spread' : ' spreads') + ') vs. Pro GM <strong style="color:' + T.good + '">' + fmt(zSpr.pros && zSpr.pros.adopt_pct, 1) + '%</strong> (' + fmt(zSpr.pros && zSpr.pros.per_min && zSpr.pros.per_min.mean, 2) + '/min)</div>' +
+          '<div class="obs-creep-strip" style="border-left-color:' + creepCol + ';">' +
+            '<div><strong>Zerg Creep Tumor Spread:</strong> Mothman <strong style="color:' + creepCol + '">' + fmt(mAd, 1) + '%</strong> (' + fmtInt(spCnt) + (spCnt === 1 ? ' spread' : ' spreads') + ') vs. Pro GM <strong style="color:' + T.p + '">' + fmt(pAd, 1) + '%</strong> (' + fmt(zSpr.pros && zSpr.pros.per_min && zSpr.pros.per_min.mean, 2) + '/min)</div>' +
             '<div class="obs-meds" style="margin-top:4px;"><span>Active Tumors @6m: <strong>' + fmt(tm['6m'] && tm['6m'].med, 0) + '</strong> vs Pro ' + fmt(tp['6m'] && tp['6m'].med, 0) + '</span><span>@10m: <strong>' + fmt(tm['10m'] && tm['10m'].med, 0) + '</strong> vs Pro ' + fmt(tp['10m'] && tp['10m'].med, 0) + '</span><span>@14m: <strong>' + fmt(tm['14m'] && tm['14m'].med, 0) + '</strong> vs Pro ' + fmt(tp['14m'] && tp['14m'].med, 0) + '</span></div>' +
           '</div>';
       }

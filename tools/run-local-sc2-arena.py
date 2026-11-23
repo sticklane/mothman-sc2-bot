@@ -30,6 +30,7 @@ import os
 import re
 import shutil
 import signal
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -109,6 +110,7 @@ class MatchTask:
     map_name: str
     slug: str
     cohort: str = "core"  # core | unseen | selfplay | custom
+    est_wall_sec: float | None = None
 
 
 ACTIVE_CONTAINERS: set[str] = set()
@@ -1061,6 +1063,7 @@ def format_summary_text(summary: dict[str, Any]) -> str:
         "=" * 96,
         f"LOCAL REAL-SC2 PARALLEL BENCHMARK SUMMARY | run_id={summary['run_id']}",
         f"commit={summary['repo_commit']} | mode={summary['mothman_mode']} | "
+        f"order={summary.get('schedule_order', 'unknown')} | "
         f"concurrency={summary['concurrency']} | wall={summary['wall_elapsed_sec']}s | "
         f"image={summary['image']}",
         "=" * 96,
@@ -1137,17 +1140,21 @@ def resolve_bot_spec(
     repo_dir: Path,
     mothman_cache: dict[tuple[str, str], Path],
     alias_name: str = "",
+    stage_mothman: bool = True,
 ) -> BotSpec:
     if name in MOTHMAN_VARIANTS:
-        ckey = (name, mothman_mode)
-        if ckey not in mothman_cache:
-            mothman_cache[ckey] = stage_mothman_cache(name, mothman_mode, arena_dir, repo_dir)
+        src_dir: Path | None = None
+        if stage_mothman:
+            ckey = (name, mothman_mode)
+            if ckey not in mothman_cache:
+                mothman_cache[ckey] = stage_mothman_cache(name, mothman_mode, arena_dir, repo_dir)
+            src_dir = mothman_cache[ckey]
         eff_name = alias_name or name
         return BotSpec(
             name=eff_name,
             race=MOTHMAN_VARIANTS[name]["race"],
             bot_type="cpplinux",
-            source_dir=mothman_cache[ckey],
+            source_dir=src_dir,
             is_mothman=True,
             source_bot_name=name,
             bot_mode=mothman_mode,
@@ -1165,6 +1172,170 @@ CORE_12_HISTORICAL = frozenset({
     "Thssprtssbt", "mini-puck", "monsterbot", "oberon", "puck",
     "sludgement2-revived", "titania",
 })
+
+# High-signal 6-opponent canary preset (18 matches across Z/T/P; 6 matches for single race)
+CANARY_6_OPPONENTS: tuple[str, ...] = (
+    "oberon",
+    "zig-reapers",
+    "AxeFighter",
+    "puck",
+    "Creepy_strategies",
+    "QueenBot",
+)
+
+# Built-in fallback wall-clock estimates (seconds) when no historical data exists.
+# Preserves known slow-tier priority:
+# QueenBot > AxeFighter > puck > Clicadinha > mini-puck > PolyMorph > onlyfans > RustyNikolaj
+BUILTIN_SLOW_TIER_WALL_SEC: dict[str, float] = {
+    "queenbot": 640.0,
+    "axefighter": 610.0,
+    "puck": 560.0,
+    "clicadinha": 460.0,
+    "mini-puck": 410.0,
+    "polymorph": 370.0,
+    "onlyfans": 310.0,
+    "rustynikolaj": 270.0,
+}
+DEFAULT_FALLBACK_WALL_SEC = 150.0
+
+
+def _percentile(values: list[float], pct: float) -> float:
+    ordered = sorted(values)
+    if not ordered:
+        return DEFAULT_FALLBACK_WALL_SEC
+    idx = int(round(pct * (len(ordered) - 1)))
+    idx = max(0, min(len(ordered) - 1, idx))
+    return float(ordered[idx])
+
+
+def load_historical_wall_estimates(
+    arena_dir: Path,
+    max_recent_runs: int = 20,
+    percentile: float = 0.75,
+) -> tuple[dict[tuple[str, str], float], dict[str, float]]:
+    """Load per-(bot1, bot2) and per-bot2 expected wall_sec estimates for LPT scheduling.
+
+    Sources (highest fidelity first):
+      1. Exact `wall_sec` from `arena_replays.sqlite` (read-only `?mode=ro`) if column exists.
+      2. Exact `wall_sec` from up to `max_recent_runs` most recent `<arena_dir>/runs/*/results.json`.
+      3. Scaled `duration_sec` fallback from `arena_replays.sqlite` (read-only `?mode=ro`) for pairs
+         or opponents absent from exact wall-clock logs.
+    Keys are normalized to lowercase strings for resilient lookup.
+    """
+    pair_wall_samples: dict[tuple[str, str], list[float]] = {}
+    opp_wall_samples: dict[str, list[float]] = {}
+    pair_dur_samples: dict[tuple[str, str], list[float]] = {}
+    opp_dur_samples: dict[str, list[float]] = {}
+
+    db_path = arena_dir / "arena_replays.sqlite"
+    if db_path.is_file():
+        con: sqlite3.Connection | None = None
+        try:
+            con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            cur = con.cursor()
+            cols = {str(row[1]).lower() for row in cur.execute("PRAGMA table_info(matches)").fetchall()}
+            has_wall = "wall_sec" in cols
+            has_dur = "duration_sec" in cols
+            if has_wall and "bot" in cols and "opponent" in cols:
+                rows = cur.execute(
+                    "SELECT bot, opponent, wall_sec FROM matches "
+                    "WHERE wall_sec IS NOT NULL AND wall_sec > 0 "
+                    "ORDER BY rowid DESC LIMIT 2500"
+                ).fetchall()
+                for b1, b2, ws in rows:
+                    if not b1 or not b2:
+                        continue
+                    try:
+                        val = float(ws)
+                    except Exception:
+                        continue
+                    if val > 0:
+                        k1, k2 = str(b1).strip().lower(), str(b2).strip().lower()
+                        pair_wall_samples.setdefault((k1, k2), []).append(val)
+                        opp_wall_samples.setdefault(k2, []).append(val)
+            if has_dur and "bot" in cols and "opponent" in cols:
+                rows = cur.execute(
+                    "SELECT bot, opponent, duration_sec FROM matches "
+                    "WHERE duration_sec IS NOT NULL AND duration_sec > 0 "
+                    "ORDER BY rowid DESC LIMIT 2500"
+                ).fetchall()
+                for b1, b2, ds in rows:
+                    if not b1 or not b2:
+                        continue
+                    try:
+                        val = float(ds) * 0.35
+                    except Exception:
+                        continue
+                    if val > 0:
+                        k1, k2 = str(b1).strip().lower(), str(b2).strip().lower()
+                        pair_dur_samples.setdefault((k1, k2), []).append(val)
+                        opp_dur_samples.setdefault(k2, []).append(val)
+        except Exception:
+            pass
+        finally:
+            if con is not None:
+                try:
+                    con.close()
+                except Exception:
+                    pass
+
+    runs_dir = arena_dir / "runs"
+    if runs_dir.is_dir():
+        run_results = sorted(
+            (p / "results.json" for p in runs_dir.iterdir() if p.is_dir() and (p / "results.json").is_file()),
+            key=lambda p: p.parent.name,
+            reverse=True,
+        )[:max_recent_runs]
+        for rp in run_results:
+            try:
+                data = json.loads(rp.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            matches = data.get("matches") if isinstance(data, dict) else None
+            if not isinstance(matches, list):
+                continue
+            for m in matches:
+                if not isinstance(m, dict):
+                    continue
+                b1 = str(m.get("bot1") or "").strip().lower()
+                b2 = str(m.get("bot2") or "").strip().lower()
+                ws = m.get("wall_sec")
+                if not b1 or not b2 or not isinstance(ws, (int, float)) or ws <= 0:
+                    continue
+                val = float(ws)
+                pair_wall_samples.setdefault((b1, b2), []).append(val)
+                opp_wall_samples.setdefault(b2, []).append(val)
+
+    pair_est: dict[tuple[str, str], float] = {}
+    opp_est: dict[str, float] = {}
+
+    for k, vals in pair_dur_samples.items():
+        pair_est[k] = _percentile(vals, percentile)
+    for k, vals in opp_dur_samples.items():
+        opp_est[k] = _percentile(vals, percentile)
+
+    # Exact wall_sec samples override duration_sec heuristic
+    for k, vals in pair_wall_samples.items():
+        pair_est[k] = _percentile(vals, percentile)
+    for k, vals in opp_wall_samples.items():
+        opp_est[k] = _percentile(vals, percentile)
+
+    return pair_est, opp_est
+
+
+def estimate_match_wall_sec(
+    bot1_name: str,
+    bot2_name: str,
+    pair_est: dict[tuple[str, str], float],
+    opp_est: dict[str, float],
+) -> float:
+    k1 = bot1_name.strip().lower()
+    k2 = bot2_name.strip().lower()
+    if (k1, k2) in pair_est:
+        return pair_est[(k1, k2)]
+    if k2 in opp_est:
+        return opp_est[k2]
+    return BUILTIN_SLOW_TIER_WALL_SEC.get(k2, DEFAULT_FALLBACK_WALL_SEC)
 
 
 def _infer_cohort(b2: BotSpec) -> str:
@@ -1195,6 +1366,7 @@ def build_match_tasks(
     maps: list[str],
     arena_dir: Path,
     repo_dir: Path,
+    stage_mothman: bool = True,
 ) -> list[MatchTask]:
     mothman_cache: dict[tuple[str, str], Path] = {}
     tasks: list[MatchTask] = []
@@ -1204,8 +1376,14 @@ def build_match_tasks(
         raw = json.loads(mf.read_text(encoding="utf-8"))
         entries = raw["matches"] if isinstance(raw, dict) and "matches" in raw else raw
         for idx, item in enumerate(entries, start=1):
-            b1 = resolve_bot_spec(item["bot"], roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache)
-            b2 = resolve_bot_spec(item["opponent"], roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache)
+            b1 = resolve_bot_spec(
+                item["bot"], roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
+                stage_mothman=stage_mothman,
+            )
+            b2 = resolve_bot_spec(
+                item["opponent"], roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
+                stage_mothman=stage_mothman,
+            )
             mp = item.get("map") or maps[(idx - 1) % len(maps)]
             mp = mp[:-7] if mp.lower().endswith(".sc2map") else mp
             coh = str(item.get("cohort") or _infer_cohort(b2))
@@ -1225,6 +1403,11 @@ def build_match_tasks(
         opp_names: list[str] = []
     elif opp_low == "all":
         opp_names = sorted(roster.keys(), key=lambda n: (roster[n].elo or 0, n))
+    elif opp_low in ("canary", "canary_6"):
+        ci = {k.lower(): k for k in roster}
+        opp_names = [ci[name.lower()] for name in CANARY_6_OPPONENTS if name.lower() in ci]
+        if not opp_names:
+            raise ValueError(f"Canary preset matched 0 bots in roster. Expected subset of {list(CANARY_6_OPPONENTS)}.")
     elif opp_low in ("core", "core_14"):
         opp_names = sorted([n for n, s in roster.items() if s.gauntlet_core], key=lambda n: (roster[n].elo or 0, n))
     elif opp_low == "core_12":
@@ -1237,16 +1420,98 @@ def build_match_tasks(
         opp_names = [x.strip() for x in opp_arg.split(",") if x.strip()]
 
     if not opp_names and not want_selfplay:
-        raise ValueError("No opponents selected. Specify --opponents <names|core|core_14|core_12|unseen|all|self_6>, --include-selfplay, or --match-file <path>.")
+        raise ValueError("No opponents selected. Specify --opponents <names|canary|core|core_14|core_12|unseen|all|self_6>, --include-selfplay, or --match-file <path>.")
+
+    schedule_order = str(getattr(args, "schedule_order", "lpt") or "lpt").lower()
+    race_priority = {"Z": 0, "T": 1, "P": 2, "R": 3}
+
+    if schedule_order == "lpt":
+        pair_est, opp_est = load_historical_wall_estimates(arena_dir)
+        raw_entries: list[tuple[BotSpec, BotSpec, int, str, float]] = []
+
+        if opp_names:
+            bot_specs = [
+                resolve_bot_spec(
+                    bname, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
+                    stage_mothman=stage_mothman,
+                )
+                for bname in bot_names
+            ]
+            opp_specs = [
+                resolve_bot_spec(
+                    oname, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
+                    stage_mothman=stage_mothman,
+                )
+                for oname in opp_names
+            ]
+            for rep in range(args.matches_per_pair):
+                for b2 in opp_specs:
+                    for b1 in bot_specs:
+                        est = estimate_match_wall_sec(b1.name, b2.name, pair_est, opp_est)
+                        raw_entries.append((b1, b2, rep, _infer_cohort(b2), est))
+
+        if want_selfplay:
+            sp_n = int(getattr(args, "selfplay_matches", 6) or 6)
+            sp_lim = getattr(args, "selfplay_limit", None)
+            if sp_lim is not None:
+                sp_n = min(sp_n, max(0, int(sp_lim)))
+            use_base = bool(getattr(args, "selfplay_baseline", False))
+            p2_mode = "zip" if use_base else args.mothman_mode
+            p2_suffix = "-Base" if use_base else "-SP"
+            for sp_i, (p1_var, p2_var) in enumerate(build_selfplay_pairs(sp_n)):
+                b1 = resolve_bot_spec(
+                    p1_var, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
+                    stage_mothman=stage_mothman,
+                )
+                b2 = resolve_bot_spec(
+                    p2_var,
+                    roster,
+                    p2_mode,
+                    arena_dir,
+                    repo_dir,
+                    mothman_cache,
+                    alias_name=f"{p2_var}{p2_suffix}",
+                    stage_mothman=stage_mothman,
+                )
+                est = estimate_match_wall_sec(b1.name, b2.name, pair_est, opp_est)
+                raw_entries.append((b1, b2, sp_i, "selfplay", est))
+
+        # Longest-Processing-Time-First: schedule slowest expected matches in Wave 1
+        # so 640s stragglers never sit at the tail of parallel runs.
+        raw_entries.sort(
+            key=lambda item: (
+                -item[4],
+                race_priority.get(item[0].race, 9),
+                item[1].name.lower(),
+                item[0].name,
+                item[2],
+            )
+        )
+        for idx, (b1, b2, _rep, coh, est) in enumerate(raw_entries, start=1):
+            mp = maps[(idx - 1) % len(maps)]
+            slug = f"{idx:03d}_{sanitize_slug(b1.name)}_vs_{sanitize_slug(b2.name)}_{sanitize_slug(mp)}"
+            tasks.append(MatchTask(idx, b1, b2, mp, slug, cohort=coh, est_wall_sec=round(est, 1)))
+        return tasks
 
     if opp_names:
-        bot_specs = [resolve_bot_spec(bname, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache) for bname in bot_names]
-        opp_specs = [resolve_bot_spec(oname, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache) for oname in opp_names]
+        bot_specs = [
+            resolve_bot_spec(
+                bname, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
+                stage_mothman=stage_mothman,
+            )
+            for bname in bot_names
+        ]
+        opp_specs = [
+            resolve_bot_spec(
+                oname, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
+                stage_mothman=stage_mothman,
+            )
+            for oname in opp_names
+        ]
 
         # Interleaved ordering spreads each Mothman race (with typically longer Zerg macro games first)
         # across waves so slow 20-30m matches start early instead of creating a late straggler tail.
-        if getattr(args, "schedule_order", "interleaved") == "interleaved":
-            race_priority = {"Z": 0, "T": 1, "P": 2, "R": 3}
+        if schedule_order == "interleaved":
             ordered_bots = sorted(bot_specs, key=lambda b: (race_priority.get(b.race, 9), b.name))
             pairs = [
                 (b1, b2, rep)
@@ -1278,7 +1543,10 @@ def build_match_tasks(
         p2_suffix = "-Base" if use_base else "-SP"
         for sp_i, (p1_var, p2_var) in enumerate(build_selfplay_pairs(sp_n)):
             idx = len(tasks) + 1
-            b1 = resolve_bot_spec(p1_var, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache)
+            b1 = resolve_bot_spec(
+                p1_var, roster, args.mothman_mode, arena_dir, repo_dir, mothman_cache,
+                stage_mothman=stage_mothman,
+            )
             b2 = resolve_bot_spec(
                 p2_var,
                 roster,
@@ -1287,6 +1555,7 @@ def build_match_tasks(
                 repo_dir,
                 mothman_cache,
                 alias_name=f"{p2_var}{p2_suffix}",
+                stage_mothman=stage_mothman,
             )
             mp = maps[(len(tasks)) % len(maps)]
             slug = f"{idx:03d}_{sanitize_slug(b1.name)}_vs_{sanitize_slug(b2.name)}_{sanitize_slug(mp)}"
@@ -1300,7 +1569,7 @@ def main() -> int:
     parser.add_argument("--bots", default="Mothman-Z,Mothman-T,Mothman-P",
                         help="Comma-separated Mothman variants (or 'all' for P,T,Z,X)")
     parser.add_argument("--opponents", default="core",
-                        help="Comma-separated opponent names from roster, 'core'/'core_14' (dynamic gauntlet_core), 'core_12' (historical 12-bot core), 'unseen'/'unseen_12' (non-core holdouts), 'active' (Comp#38), 'all', 'self_6' (6 full-game self-play matchups), or 'none'")
+                        help="Comma-separated opponent names from roster, 'canary' (6 swing opponents: oberon, zig-reapers, AxeFighter, puck, Creepy_strategies, QueenBot), 'core'/'core_14' (dynamic gauntlet_core), 'core_12' (historical 12-bot core), 'unseen'/'unseen_12' (non-core holdouts), 'active' (Comp#38), 'all', 'self_6' (6 full-game self-play matchups), or 'none'")
     parser.add_argument("--include-selfplay", action="store_true",
                         help="Append full-game Mothman-vs-Mothman Self-Play matches (default 6: ZvZ, TvT, PvP, PvT, PvZ, TvZ) tagged cohort='selfplay'")
     parser.add_argument("--selfplay-matches", type=int, default=6,
@@ -1319,12 +1588,15 @@ def main() -> int:
                         help="How to run Mothman: 'zip' (ladder/*.zip), 'elf' (standalone ELF), or 'source' (live repo .rkt)")
     parser.add_argument("-j", "--concurrency", type=int, default=14,
                         help="Number of concurrent real SC2 matches (default: 14; empirically tuned for 16C/32T 125GiB host)")
-    parser.add_argument("--schedule-order", choices=["interleaved", "sequential"], default="interleaved",
-                        help="Match queue order: 'interleaved' starts Z/T/P across opponents early to eliminate straggler tails (default: interleaved)")
+    parser.add_argument("--schedule-order", choices=["lpt", "interleaved", "sequential"], default="lpt",
+                        help="Match queue order: 'lpt' schedules longest expected matches first from historical wall_sec (default: lpt); 'interleaved' spreads Z/T/P; 'sequential' runs in bot-major order")
     parser.add_argument("--timeout-sec", type=int, default=480,
                         help="Per-match wall-clock timeout in seconds (default: 480)")
-    parser.add_argument("--max-game-time", type=int, default=60480,
-                        help="SC2 MAX_GAME_TIME in loops (60480=45m AI Arena std, 40320=30m, 26880=20m)")
+    # Temporary local-loop 25m cap (33600 = 25 * 60 * 22.4 loops) paired with end-of-game
+    # state scoring for faster iteration; revisit & raise to 40320 (30m) / 60480 (45m) once
+    # >15% of external matches reach 25m or late-game Tier-3 endgames dominate.
+    parser.add_argument("--max-game-time", type=int, default=33600,
+                        help="SC2 MAX_GAME_TIME in loops (default: 33600=25m temporary local-loop cap, revisit once >15%% of matches reach 25m or Tier-3 endgames dominate; 40320=30m, 60480=45m AI Arena std)")
     parser.add_argument("--max-frame-time", type=int, default=1000,
                         help="AI Arena MAX_FRAME_TIME in ms (default: 1000)")
     parser.add_argument("--strikes", type=int, default=10,
@@ -1352,7 +1624,7 @@ def main() -> int:
     parser.add_argument("--keep-workdirs", action="store_true",
                         help="Keep per-match cloned /bots workdirs after match finishes")
     parser.add_argument("--list", action="store_true",
-                        help="List discovered opponents and maps and exit")
+                        help="List discovered opponents, maps, and planned matches for current flags and exit")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print match plan and exit without running matches")
     args = parser.parse_args()
@@ -1368,23 +1640,37 @@ def main() -> int:
     if args.list:
         core_n = sum(1 for s in roster.values() if s.gauntlet_core)
         unseen_n = len(roster) - core_n
+        canary_set = {n.lower() for n in CANARY_6_OPPONENTS}
         print(f"Arena dir: {arena_dir}")
         print(f"Maps ({len(maps)}): {', '.join(maps)}")
         print(f"Opponents ({len(roster)} total: {core_n} CORE, {unseen_n} UNSEEN):")
         for name, spec in sorted(roster.items(), key=lambda kv: (kv[1].elo or 0, kv[0])):
             core_tag = " [CORE]" if spec.gauntlet_core else " [UNSEEN]"
-            print(f"  - {name:<22} race={spec.race} type={spec.bot_type:<10} elo={str(spec.elo):<5} id={str(spec.aiarena_id):<5}{core_tag} {spec.archetype}")
+            canary_tag = " [CANARY]" if name.lower() in canary_set else ""
+            print(f"  - {name:<22} race={spec.race} type={spec.bot_type:<10} elo={str(spec.elo):<5} id={str(spec.aiarena_id):<5}{core_tag}{canary_tag} {spec.archetype}")
+        tasks = build_match_tasks(args, roster, maps, arena_dir, repo_dir, stage_mothman=False)
+        print(f"Planned matches ({len(tasks)}): schedule_order={args.schedule_order} | bots={args.bots} | opponents={args.opponents}")
+        for t in tasks:
+            est_s = f" | est={t.est_wall_sec:.0f}s" if t.est_wall_sec is not None else ""
+            print(f"  [{t.index:03d}] [{t.cohort:<8}] {t.bot1.name}({t.bot1.race},{t.bot1.bot_mode or t.bot1.bot_type}) vs "
+                  f"{t.bot2.name}({t.bot2.race},{t.bot2.bot_mode or t.bot2.bot_type}) on {t.map_name}{est_s}")
+        return 0
+
+    if args.dry_run:
+        try:
+            runtime = detect_container_runtime(args.container_runtime)
+        except RuntimeError:
+            runtime = "unavailable"
+        tasks = build_match_tasks(args, roster, maps, arena_dir, repo_dir, stage_mothman=False)
+        print(f"Dry run: {len(tasks)} matches | mode={args.mothman_mode} | schedule_order={args.schedule_order} | j={args.concurrency} | max_game_time={args.max_game_time} | runtime={runtime}")
+        for t in tasks:
+            est_s = f" | est={t.est_wall_sec:.0f}s" if t.est_wall_sec is not None else ""
+            print(f"  [{t.index:03d}] [{t.cohort:<8}] {t.bot1.name}({t.bot1.race},{t.bot1.bot_mode or t.bot1.bot_type}) vs "
+                  f"{t.bot2.name}({t.bot2.race},{t.bot2.bot_mode or t.bot2.bot_type}) on {t.map_name}{est_s}")
         return 0
 
     runtime = detect_container_runtime(args.container_runtime)
     tasks = build_match_tasks(args, roster, maps, arena_dir, repo_dir)
-
-    if args.dry_run:
-        print(f"Dry run: {len(tasks)} matches | mode={args.mothman_mode} | j={args.concurrency} | runtime={runtime}")
-        for t in tasks:
-            print(f"  [{t.index:03d}] [{t.cohort:<8}] {t.bot1.name}({t.bot1.race},{t.bot1.bot_mode or t.bot1.bot_type}) vs "
-                  f"{t.bot2.name}({t.bot2.race},{t.bot2.bot_mode or t.bot2.bot_type}) on {t.map_name}")
-        return 0
 
     now_utc = dt.datetime.now(dt.timezone.utc)
     ts_str = now_utc.strftime("%Y%m%d_%H%M%S")
@@ -1411,8 +1697,8 @@ def main() -> int:
     concurrency = max(1, min(args.concurrency, len(tasks)))
     log(
         f"[SC2-ARENA] Starting {len(tasks)} real SC2 matches (concurrency={concurrency}, "
-        f"mode={args.mothman_mode}, commit={commit}, max_game_time={args.max_game_time}, "
-        f"timeout={args.timeout_sec}s)\n"
+        f"mode={args.mothman_mode}, schedule_order={args.schedule_order}, commit={commit}, "
+        f"max_game_time={args.max_game_time}, timeout={args.timeout_sec}s)\n"
         f"[SC2-ARENA] Run directory: {run_dir}"
     )
 
@@ -1501,6 +1787,7 @@ def main() -> int:
         "timestamp_utc": now_utc.isoformat(),
         "repo_commit": commit,
         "mothman_mode": args.mothman_mode,
+        "schedule_order": args.schedule_order,
         "image": args.image,
         "concurrency": concurrency,
         "max_game_time": args.max_game_time,

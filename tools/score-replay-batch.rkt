@@ -1074,6 +1074,7 @@
           (define gas-collected-acc (make-hasheqv '((1 . 0.0) (2 . 0.0))))
           (define last-cons-min (make-hasheqv '((1 . 0) (2 . 0))))
           (define last-cons-gas (make-hasheqv '((1 . 0) (2 . 0))))
+          (define last-pstat-ht (make-hasheqv)) ; pid -> exact final SPlayerStatsEvent snapshot
           (define unit-tier-rec (make-hasheqv)) ; tag -> (cons tier cost)
           (define tier-val-by-p (hasheqv 1 (vector 0 0 0 0) 2 (vector 0 0 0 0)))
           (define (record-tier-unit! p tag ut)
@@ -1234,6 +1235,12 @@
                                (hash-ref st 20 0) (hash-ref st 21 0) (hash-ref st 22 0))))
                    (hash-set! last-cons-min p cons-m)
                    (hash-set! last-cons-gas p cons-g)
+                   (hash-set! last-pstat-ht p
+                              (hasheq 'loop gl
+                                      'army_min (safe-num (hash-ref st 11 0) 0)
+                                      'army_gas (safe-num (hash-ref st 14 0) 0)
+                                      'min_rate mr-c
+                                      'gas_rate gr-c))
                    (cond
                      [(= p opp-pid)
                       (set! last-opp-asup cur-asup)]
@@ -1900,6 +1907,48 @@
           (define our-gas-collected (finalize-collected gas-collected-acc last-gas-rate last-cons-gas our-pid))
           (define opp-gas-collected (finalize-collected gas-collected-acc last-gas-rate last-cons-gas opp-pid))
           (define gas-collected-ratio (round2 (/ (+ our-gas-collected 50.0) (+ opp-gas-collected 50.0))))
+          ;; End-of-Game State Scoring (`#1968`): transparent, ungameable log-ratio over final live
+          ;; Army Value (45%), Income Rate (30%), Minerals Collected (15%), and Trade Value (10%).
+          (define our-end-pstat (hash-ref last-pstat-ht our-pid our-last))
+          (define opp-end-pstat (hash-ref last-pstat-ht opp-pid opp-last))
+          (define end-army-val
+            (max 0 (+ (safe-num (hash-ref our-end-pstat 'army_min 0) 0)
+                      (safe-num (hash-ref our-end-pstat 'army_gas 0) 0))))
+          (define opp-end-army-val
+            (max 0 (+ (safe-num (hash-ref opp-end-pstat 'army_min 0) 0)
+                      (safe-num (hash-ref opp-end-pstat 'army_gas 0) 0))))
+          (define end-income-raw
+            (max 0.0
+                 (+ (exact->inexact (safe-num (hash-ref our-end-pstat 'min_rate 0.0) 0.0))
+                    (* 1.25 (exact->inexact (safe-num (hash-ref our-end-pstat 'gas_rate 0.0) 0.0))))))
+          (define opp-end-income-raw
+            (max 0.0
+                 (+ (exact->inexact (safe-num (hash-ref opp-end-pstat 'min_rate 0.0) 0.0))
+                    (* 1.25 (exact->inexact (safe-num (hash-ref opp-end-pstat 'gas_rate 0.0) 0.0))))))
+          (define end-income (round1 end-income-raw))
+          (define opp-end-income (round1 opp-end-income-raw))
+          (define state-ratio-raw
+            (exp (+ (* 0.45 (log (/ (+ (exact->inexact end-army-val) 500.0)
+                                    (+ (exact->inexact opp-end-army-val) 500.0))))
+                    (* 0.30 (log (/ (+ end-income-raw 400.0)
+                                    (+ opp-end-income-raw 400.0))))
+                    (* 0.15 (log (/ (+ (exact->inexact (max 0 our-min-collected)) 1000.0)
+                                    (+ (exact->inexact (max 0 opp-min-collected)) 1000.0))))
+                    (* 0.10 (log (/ (+ (exact->inexact (max 0 killed-val)) 500.0)
+                                    (+ (exact->inexact (max 0 lost-val)) 500.0)))))))
+          (define state-ratio (/ (round (* state-ratio-raw 1000.0)) 1000.0))
+          (define game-state-score-raw (/ 1.0 (+ 1.0 (expt state-ratio-raw -2.0))))
+          (define game-state-score (/ (round (* game-state-score-raw 10000.0)) 10000.0))
+          (define state-outcome
+            (cond
+              [(>= state-ratio-raw 1.15) "win"]
+              [(<= state-ratio-raw (/ 1.0 1.15)) "loss"]
+              [else "tie"]))
+          (define adjudicated-outcome
+            (cond
+              [(eq? res 'win) "win"]
+              [(eq? res 'loss) "loss"]
+              [else state-outcome]))
           (define our-tv (hash-ref tier-val-by-p our-pid))
           (define opp-tv (hash-ref tier-val-by-p opp-pid))
           (define our-t1-val (vector-ref our-tv 1))
@@ -2616,6 +2665,7 @@
             (cond
               [(not (eq? res 'tie)) #f]
               [loop-cap-tie? "loop_cap_30m"]
+              [(and (not wall-timeout-tie?) (>= dur 1490.0)) "loop_cap_25m"]
               [(and wall-timeout-tie? (hash? endgame-stall-anomaly)) "cpu_wall_timeout_and_stall"]
               [wall-timeout-tie? "cpu_wall_timeout"]
               [(hash? endgame-stall-anomaly) "endgame_stall"]
@@ -2912,6 +2962,14 @@
                   'killed_val killed-val
                   'lost_val lost-val
                   'trade_ratio trade-ratio
+                  'end_army_val end-army-val
+                  'opp_end_army_val opp-end-army-val
+                  'end_income end-income
+                  'opp_end_income opp-end-income
+                  'state_ratio state-ratio
+                  'game_state_score game-state-score
+                  'state_outcome state-outcome
+                  'adjudicated_outcome adjudicated-outcome
                   'our_min_collected our-min-collected
                   'opp_min_collected opp-min-collected
                   'min_collected_ratio min-collected-ratio
@@ -3138,6 +3196,18 @@
         (define wins (count (lambda (r) (equal? (hash-ref r 'result "") "win")) rows))
         (define losses (count (lambda (r) (equal? (hash-ref r 'result "") "loss")) rows))
         (define ties (count (lambda (r) (equal? (hash-ref r 'result "") "tie")) rows))
+        (define gs-vals
+          (filter real? (map (lambda (r) (hash-ref r 'game_state_score #f)) rows)))
+        (define mean-gs-score
+          (and (pair? gs-vals)
+               (round1 (* 100.0 (/ (for/sum ([v (in-list gs-vals)]) (exact->inexact v))
+                                   (length gs-vals))))))
+        (define state-wins (count (lambda (r) (equal? (hash-ref r 'state_outcome "") "win")) rows))
+        (define state-losses (count (lambda (r) (equal? (hash-ref r 'state_outcome "") "loss")) rows))
+        (define state-ties (count (lambda (r) (equal? (hash-ref r 'state_outcome "") "tie")) rows))
+        (define adj-wins (count (lambda (r) (equal? (hash-ref r 'adjudicated_outcome "") "win")) rows))
+        (define adj-losses (count (lambda (r) (equal? (hash-ref r 'adjudicated_outcome "") "loss")) rows))
+        (define adj-ties (count (lambda (r) (equal? (hash-ref r 'adjudicated_outcome "") "tie")) rows))
         (define tot-k (for/sum ([r (in-list rows)]) (hash-ref r 'killed_val 0)))
         (define tot-l (for/sum ([r (in-list rows)]) (hash-ref r 'lost_val 0)))
         (define agg-tr (round2 (/ (+ tot-k 100.0) (+ tot-l 100.0))))
@@ -3209,6 +3279,11 @@
                 'wins wins 'losses losses 'ties ties
                 'win_rate_pct (round1 (* 100.0 (/ wins n)))
                 'non_loss_pct (round1 (* 100.0 (/ (+ wins ties) n)))
+                'mean_game_state_score mean-gs-score
+                'state_wins state-wins 'state_losses state-losses 'state_ties state-ties
+                'state_adjudicated_wlt (format "~a-~a-~a" state-wins state-losses state-ties)
+                'adjudicated_wins adj-wins 'adjudicated_losses adj-losses 'adjudicated_ties adj-ties
+                'adjudicated_wlt (format "~a-~a-~a" adj-wins adj-losses adj-ties)
                 'killed_val tot-k 'lost_val tot-l
                 'trade_agg agg-tr 'trade_med med-tr
                 'our_min_collected_avg (round1 (/ (exact->inexact tot-our-min) n))
@@ -3453,10 +3528,19 @@
           (format " | MinCol: agg=~ax med=~ax (~a/~a)"
                   (r2 min-agg) (if (real? min-med) (r2 min-med) "-") (r0 min-our) (r0 min-opp))
           ""))
-    (printf "  ~a (n=~a): ~aW-~aL-~aT (Win=~a%, NonLoss=~a%) | Trade: agg=~ax med=~ax (~a/~a)~a\n"
+    (define gs-mean (hash-ref agg 'mean_game_state_score #f))
+    (define gs-str
+      (if (real? gs-mean)
+          (format " | GS=~a/100 State=~aW-~aL-~aT Adj=~aW-~aL-~aT"
+                  (r1 gs-mean)
+                  (hash-ref agg 'state_wins 0) (hash-ref agg 'state_losses 0) (hash-ref agg 'state_ties 0)
+                  (hash-ref agg 'adjudicated_wins 0) (hash-ref agg 'adjudicated_losses 0) (hash-ref agg 'adjudicated_ties 0))
+          ""))
+    (printf "  ~a (n=~a): ~aW-~aL-~aT (Win=~a%, NonLoss=~a%)~a | Trade: agg=~ax med=~ax (~a/~a)~a\n"
             label (hash-ref agg 'n)
             (hash-ref agg 'wins) (hash-ref agg 'losses) (hash-ref agg 'ties)
             (r1 (hash-ref agg 'win_rate_pct)) (r1 (hash-ref agg 'non_loss_pct))
+            gs-str
             (r2 (hash-ref agg 'trade_agg)) (r2 (hash-ref agg 'trade_med))
             (hash-ref agg 'killed_val) (hash-ref agg 'lost_val)
             min-col-str)
@@ -3579,6 +3663,11 @@
        (case slice-key
          [(all) ms]
          [(clean) (filter clean-m? ms)]
+         [(external)
+          (filter (lambda (m)
+                    (and (clean-m? m)
+                         (not (equal? (hash-ref m 'opp_cohort "core_12") "selfplay"))))
+                  ms)]
          [(core_12 unseen_6 selfplay)
           (define want (symbol->string slice-key))
           (filter (lambda (m)
@@ -4213,12 +4302,14 @@
      #:key (lambda (o)
              (+ (abs (hash-ref o 'wr_delta_pp 0.0))
                 (* 15.0 (max 0.0 (- (hash-ref o 'sb_ratio 1.0) 1.0)))))))
-  ;; W9-LOOP-2 / L29-LOOP-2: Cohort split (`core_12` vs `unseen_6` vs `selfplay`)
+  ;; W9-LOOP-2 / L29-LOOP-2: Cohort split (`external` / `core_12` vs `unseen_6` vs `selfplay`)
+  (define ext-rows (filter (lambda (r) (not (equal? (hash-ref r 'opp_cohort "core_12") "selfplay"))) clean-scored))
   (define core12-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "core_12")) clean-scored))
   (define unseen6-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "unseen_6")) clean-scored))
   (define unseen6-all-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "unseen_6")) scored))
   (define selfplay-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "selfplay")) clean-scored))
   (define selfplay-all-rows (filter (lambda (r) (equal? (hash-ref r 'opp_cohort "core_12") "selfplay")) scored))
+  (define agg-external (aggregate-slice ext-rows))
   (define agg-core12 (aggregate-slice core12-rows))
   (define agg-unseen6 (aggregate-slice unseen6-rows))
   ;; L30-LOOP-2: Symmetric P2 Self-Play anomaly & telemetry aggregator
@@ -4250,7 +4341,7 @@
     (hash-set* (aggregate-slice selfplay-rows)
                'opp_supply_block_pct (hash-ref p2-selfplay-agg 'opp_supply_block_pct 0.0)
                'p2_summary p2-selfplay-agg))
-  (define by-cohort (hasheq 'core_12 agg-core12 'unseen_6 agg-unseen6 'selfplay agg-selfplay))
+  (define by-cohort (hasheq 'external agg-external 'core_12 agg-core12 'unseen_6 agg-unseen6 'selfplay agg-selfplay))
   ;; L29-LOOP-2 / L30-LOOP-2: Per-matchup `selfplay_breakdown` (full symmetric P1 vs P2 head-to-head metrics & anomalies)
   (define selfplay-mus
     (sort (remove-duplicates (map (lambda (r) (hash-ref r 'matchup "?v?")) selfplay-all-rows))
@@ -4273,6 +4364,15 @@
                       'ties (hash-ref agg 'ties 0)
                       'win_rate_pct (hash-ref agg 'win_rate_pct 0.0)
                       'non_loss_pct (hash-ref agg 'non_loss_pct 0.0)
+                      'mean_game_state_score (hash-ref agg 'mean_game_state_score #f)
+                      'state_wins (hash-ref agg 'state_wins 0)
+                      'state_losses (hash-ref agg 'state_losses 0)
+                      'state_ties (hash-ref agg 'state_ties 0)
+                      'state_adjudicated_wlt (hash-ref agg 'state_adjudicated_wlt #f)
+                      'adjudicated_wins (hash-ref agg 'adjudicated_wins 0)
+                      'adjudicated_losses (hash-ref agg 'adjudicated_losses 0)
+                      'adjudicated_ties (hash-ref agg 'adjudicated_ties 0)
+                      'adjudicated_wlt (hash-ref agg 'adjudicated_wlt #f)
                       'trade_agg (hash-ref agg 'trade_agg 0.0)
                       'trade_med (hash-ref agg 'trade_med 0.0)
                       'killed_val (hash-ref agg 'killed_val 0)
@@ -4340,6 +4440,15 @@
                       'ties (hash-ref agg 'ties 0)
                       'win_rate_pct (hash-ref agg 'win_rate_pct 0.0)
                       'non_loss_pct (hash-ref agg 'non_loss_pct 0.0)
+                      'mean_game_state_score (hash-ref agg 'mean_game_state_score #f)
+                      'state_wins (hash-ref agg 'state_wins 0)
+                      'state_losses (hash-ref agg 'state_losses 0)
+                      'state_ties (hash-ref agg 'state_ties 0)
+                      'state_adjudicated_wlt (hash-ref agg 'state_adjudicated_wlt #f)
+                      'adjudicated_wins (hash-ref agg 'adjudicated_wins 0)
+                      'adjudicated_losses (hash-ref agg 'adjudicated_losses 0)
+                      'adjudicated_ties (hash-ref agg 'adjudicated_ties 0)
+                      'adjudicated_wlt (hash-ref agg 'adjudicated_wlt #f)
                       'trade_agg (hash-ref agg 'trade_agg 0.0)
                       'trade_med (hash-ref agg 'trade_med 0.0)
                       'killed_val (hash-ref agg 'killed_val 0)
@@ -4357,6 +4466,8 @@
   (print-agg-line "ALL_MATCHES  " agg-all)
   (when (< (length clean-scored) (length scored))
     (print-agg-line "CLEAN_MATCHES" agg-clean))
+  (when (and (pair? ext-rows) (pair? selfplay-all-rows))
+    (print-agg-line "COHORT=EXT   " agg-external))
   (when (and (pair? core12-rows) (or (pair? unseen6-all-rows) (pair? selfplay-all-rows)))
     (print-agg-line "COHORT=CORE12" agg-core12))
   (when (pair? unseen6-all-rows)
@@ -4496,7 +4607,7 @@
                             'mirror_skip (length mirrors)
                             'parse_errors (length errors))
             'overall (hasheq 'all agg-all 'clean agg-clean)
-            'summary (hasheq 'core_12 agg-core12 'unseen_6 agg-unseen6 'selfplay agg-selfplay
+            'summary (hasheq 'external agg-external 'core_12 agg-core12 'unseen_6 agg-unseen6 'selfplay agg-selfplay
                              'unseen_6_breakdown unseen6-breakdown 'selfplay_breakdown selfplay-breakdown)
             'by_cohort by-cohort
             'unseen_6_breakdown unseen6-breakdown

@@ -35,6 +35,8 @@
 (define PROTOSS-FRONT-SYMS '(zealot archon))
 (define PROTOSS-MID-SYMS   '(stalker adept))
 (define PROTOSS-HEAVY-BACK-SYMS '(immortal colossus sentry high-templar))
+(define PROTOSS-CORE-SYMS  '(zealot archon stalker adept immortal))
+(define PROTOSS-CASTER-SYMS '(high-templar sentry disruptor colossus))
 
 (define TERRAN-FRONT-SYMS  '(marauder hellbat))
 (define TERRAN-MID-SYMS    '(marine))
@@ -46,6 +48,8 @@
 ;; (never pull ranged `roach`/`ravager`/`hydralisk` or `baneling` laterally into choke walls!)
 (define ZERG-SURROUND-SYMS '(zergling))
 (define ZERG-MID-SYMS      '(hydralisk ravager))
+(define ZERG-CORE-SYMS     '(zergling baneling roach ravager hydralisk ultralisk))
+(define ZERG-CASTER-SYMS   '(infestor viper lurker lurker-mp))
 (define ZERG-GROUND-HOLD-SYMS '(zergling baneling roach hydralisk ultralisk))
 (define ZERG-UPHILL-BREAKER-SYMS '(ravager viper brood-lord broodlord mutalisk corruptor swarm-host swarm-host-mp))
 
@@ -82,8 +86,10 @@
    p-front-cnt p-front-cx p-front-cy p-front-proj
    t-front-cnt t-front-cx t-front-cy t-front-proj
    z-front-cnt z-front-cx z-front-cy z-front-proj
-   ;; Terran Bio centroid & enemy-facing axis for caster rear leash
+   ;; Terran Bio + Protoss/Zerg combat core centroids for all-race caster rear leash
    t-bio-cnt t-bio-cx t-bio-cy
+   p-core-cnt p-core-cx p-core-cy
+   z-core-cnt z-core-cx z-core-cy
    ;; Splash, air & entrenched uphill siege records
    enemy-air-pts          ;; list of (cons ex ey) flying combat enemies
    enemy-splash-pts       ;; list of (cons ex ey)
@@ -201,20 +207,32 @@
   (define mw (flmax 64.0 (fl->safe map-w 200.0)))
   (define mh (flmax 64.0 (fl->safe map-h 200.0)))
 
-  ;; 1. Scan enemies once
-  (define-values (ecnt esx esy e-str air-pts splash-pts uphill-siege)
-    (for/fold ([c 0] [sx 0.0] [sy 0.0] [estr 0.0] [apts '()] [spts '()] [usge '()])
+  ;; 0. Rough ally combat centroid so Gap C2 anchors the enemy cluster to the nearest active clash
+  (define-values (rough-ac rough-asx rough-asy)
+    (for/fold ([c 0] [sx 0.0] [sy 0.0])
+              ([u (in-list (or combat-units '()))]
+               #:when (rec-xy? u))
+      (values (add1 c) (fl+ sx (rec-x u 0.0)) (fl+ sy (rec-y u 0.0)))))
+  (define rough-ax (if (> rough-ac 0) (fl/ rough-asx (exact->inexact rough-ac)) (fl->safe efx 100.0)))
+  (define rough-ay (if (> rough-ac 0) (fl/ rough-asy (exact->inexact rough-ac)) (fl->safe efy 100.0)))
+
+  ;; 1. Scan enemies once: collect visible points, air/splash/uphill records, and nearest clash anchor
+  (define-values (ecnt-all e-vecs near-ex near-ey _near-ed air-pts splash-pts uphill-siege)
+    (for/fold ([c 0] [evs '()] [nex #f] [ney #f] [ned +inf.0] [apts '()] [spts '()] [usge '()])
               ([e (in-list (or enemy-units '()))]
                #:when (and (rec-xy? e) (not (rec-snapshot? e))))
       (define raw (rec-raw-sym e))
       (define canon (sc2-canonical-unit-sym raw))
       (cond
         [(memq canon NON-COMBAT-IGNORE-SYMS)
-         (values c sx sy estr apts spts usge)]
+         (values c evs nex ney ned apts spts usge)]
         [else
          (define ex (rec-x e efx))
          (define ey (rec-y e efy))
          (define ez (rec-z e))
+         (define w (rec-supply-weight e))
+         (define d-rough (dist2d-fl ex ey rough-ax rough-ay))
+         (define closer? (or (not nex) (fl< d-rough ned)))
          (define is-air?
            (or (eq? (hash-ref e 'flying? #f) #t)
                (eq? (hash-ref e 'flying #f) #t)
@@ -232,29 +250,49 @@
                     (and (eq? canon 'siege-tank) (eq? (hash-ref e 'sieged #f) #t))
                     (and (eq? canon 'lurker) (eq? (hash-ref e 'burrowed #f) #t)))))
          (values (add1 c)
-                 (fl+ sx ex)
-                 (fl+ sy ey)
-                 (fl+ estr (rec-supply-weight e))
+                 (cons (vector ex ey w) evs)
+                 (if closer? ex nex)
+                 (if closer? ey ney)
+                 (if closer? d-rough ned)
                  (if is-air? (cons (cons ex ey) apts) apts)
                  (if is-splash? (cons (cons ex ey) spts) spts)
                  (if is-uphill-siege? (cons (vector ex ey ez raw) usge) usge))])))
 
+  ;; Loop 65 Gap C2: Compute engagement enemy centroid LOCALLY (`<= 22.0t` of nearest active clash)
+  ;; so stray off-map scouts/Overlords/drops NEVER skew `fwd-ux/fwd-uy` or concave arcs!
+  (define-values (ecnt esx esy e-str)
+    (if (and (> ecnt-all 0) near-ex near-ey)
+        (for/fold ([c 0] [sx 0.0] [sy 0.0] [estr 0.0]) ([ev (in-list e-vecs)])
+          (define ex (vector-ref ev 0))
+          (define ey (vector-ref ev 1))
+          (define ew (vector-ref ev 2))
+          (if (fl<= (dist2d-fl ex ey near-ex near-ey) 22.0)
+              (values (add1 c) (fl+ sx ex) (fl+ sy ey) (fl+ estr ew))
+              (values c sx sy estr)))
+        (values 0 0.0 0.0 0.0)))
+
   (define ecx (if (> ecnt 0) (fl/ esx (exact->inexact ecnt)) (fl->safe efx 100.0)))
   (define ecy (if (> ecnt 0) (fl/ esy (exact->inexact ecnt)) (fl->safe efy 100.0)))
 
-  ;; 2. Scan allies once to find overall army centroid + per-race frontlines + bio centroid
+  ;; 2. Scan allies once to find local/overall army centroid + per-race frontlines & core centroids
   (define-values (acnt asx asy a-str
+                  loc-ac loc-asx loc-asy
                   pfc pfx pfy
                   tfc tfx tfy
                   zfc zfx zfy
                   tbc tbx tby
+                  pcc pcx pcy pcc-all pcx-all pcy-all
+                  zcc zcx zcy zcc-all zcx-all zcy-all
                   has-breaker?
                   ranged-list zerg-surr-list)
     (for/fold ([ac 0] [asx 0.0] [asy 0.0] [astr 0.0]
+               [lac 0] [lasx 0.0] [lasy 0.0]
                [pfc 0] [pfx 0.0] [pfy 0.0]
                [tfc 0] [tfx 0.0] [tfy 0.0]
                [zfc 0] [zfx 0.0] [zfy 0.0]
                [tbc 0] [tbx 0.0] [tby 0.0]
+               [pcc 0] [pcx 0.0] [pcy 0.0] [pcca 0] [pcxa 0.0] [pcya 0.0]
+               [zcc 0] [zcx 0.0] [zcy 0.0] [zcca 0] [zcxa 0.0] [zcya 0.0]
                [brk? #f]
                [rng '()] [zsr '()])
               ([u (in-list (or combat-units '()))]
@@ -265,8 +303,14 @@
       (define uy (rec-y u 0.0))
       (define d-e (dist2d-fl ux uy ecx ecy))
       (define near-fight? (or (= ecnt 0) (fl<= d-e 26.0)))
-      (define in-approach? (and (> ecnt 0) (fl>= d-e 5.5) (fl<= d-e 18.0)))
+      (define loc-ally? (or (= ecnt 0) (fl<= d-e 28.0)))
+      (define in-approach? (and (> ecnt 0) (fl>= d-e 5.0) (fl<= d-e 18.5)))
+      (define is-pcore? (and (memq canon PROTOSS-CORE-SYMS) #t))
+      (define is-zcore? (and (memq canon ZERG-CORE-SYMS) #t))
       (values (add1 ac) (fl+ asx ux) (fl+ asy uy) (fl+ astr (rec-supply-weight u))
+              (if loc-ally? (add1 lac) lac)
+              (if loc-ally? (fl+ lasx ux) lasx)
+              (if loc-ally? (fl+ lasy uy) lasy)
               (if (and near-fight? (memq canon PROTOSS-FRONT-SYMS)) (add1 pfc) pfc)
               (if (and near-fight? (memq canon PROTOSS-FRONT-SYMS)) (fl+ pfx ux) pfx)
               (if (and near-fight? (memq canon PROTOSS-FRONT-SYMS)) (fl+ pfy uy) pfy)
@@ -279,12 +323,28 @@
               (if (memq canon TERRAN-BIO-SYMS) (add1 tbc) tbc)
               (if (memq canon TERRAN-BIO-SYMS) (fl+ tbx ux) tbx)
               (if (memq canon TERRAN-BIO-SYMS) (fl+ tby uy) tby)
+              (if (and near-fight? is-pcore?) (add1 pcc) pcc)
+              (if (and near-fight? is-pcore?) (fl+ pcx ux) pcx)
+              (if (and near-fight? is-pcore?) (fl+ pcy uy) pcy)
+              (if is-pcore? (add1 pcca) pcca)
+              (if is-pcore? (fl+ pcxa ux) pcxa)
+              (if is-pcore? (fl+ pcya uy) pcya)
+              (if (and near-fight? is-zcore?) (add1 zcc) zcc)
+              (if (and near-fight? is-zcore?) (fl+ zcx ux) zcx)
+              (if (and near-fight? is-zcore?) (fl+ zcy uy) zcy)
+              (if is-zcore? (add1 zcca) zcca)
+              (if is-zcore? (fl+ zcxa ux) zcxa)
+              (if is-zcore? (fl+ zcya uy) zcya)
               (or brk? (and near-fight? (not (not (memq canon ZERG-UPHILL-BREAKER-SYMS)))))
               (if (and in-approach? (memq canon RANGED-CONCAVE-SYMS)) (cons u rng) rng)
               (if (and in-approach? (memq canon ZERG-SURROUND-SYMS)) (cons u zsr) zsr))))
 
-  (define acx (if (> acnt 0) (fl/ asx (exact->inexact acnt)) (fl- ecx 10.0)))
-  (define acy (if (> acnt 0) (fl/ asy (exact->inexact acnt)) ecy))
+  (define acx (cond [(> loc-ac 0) (fl/ loc-asx (exact->inexact loc-ac))]
+                    [(> acnt 0)   (fl/ asx (exact->inexact acnt))]
+                    [else         (fl- ecx 10.0)]))
+  (define acy (cond [(> loc-ac 0) (fl/ loc-asy (exact->inexact loc-ac))]
+                    [(> acnt 0)   (fl/ asy (exact->inexact acnt))]
+                    [else         ecy]))
   (define dx (fl- ecx acx))
   (define dy (fl- ecy acy))
   (define dn (flmax 0.1 (flsqrt (fl+ (fl* dx dx) (fl* dy dy)))))
@@ -303,9 +363,24 @@
   (define zfcy (if (> zfc 0) (fl/ zfy (exact->inexact zfc)) acy))
   (define tbcx (if (> tbc 0) (fl/ tbx (exact->inexact tbc)) acx))
   (define tbcy (if (> tbc 0) (fl/ tby (exact->inexact tbc)) acy))
+  (define eff-pcc (if (> pcc 0) pcc pcc-all))
+  (define eff-pcx (cond [(> pcc 0) (fl/ pcx (exact->inexact pcc))]
+                        [(> pcc-all 0) (fl/ pcx-all (exact->inexact pcc-all))]
+                        [else acx]))
+  (define eff-pcy (cond [(> pcc 0) (fl/ pcy (exact->inexact pcc))]
+                        [(> pcc-all 0) (fl/ pcy-all (exact->inexact pcc-all))]
+                        [else acy]))
+  (define eff-zcc (if (> zcc 0) zcc zcc-all))
+  (define eff-zcx (cond [(> zcc 0) (fl/ zcx (exact->inexact zcc))]
+                        [(> zcc-all 0) (fl/ zcx-all (exact->inexact zcc-all))]
+                        [else acx]))
+  (define eff-zcy (cond [(> zcc 0) (fl/ zcy (exact->inexact zcc))]
+                        [(> zcc-all 0) (fl/ zcy-all (exact->inexact zcc-all))]
+                        [else acy]))
 
+  ;; Loop 65 Gap C1: Lower ranged concave minimum squad size `6 -> 4`
   (define ranged-ht
-    (if (>= (length ranged-list) 6)
+    (if (>= (length ranged-list) 4)
         (build-lateral-slot-table ranged-list ecx ecy perp-ux perp-uy)
         (hasheqv)))
   (define zerg-surr-ht
@@ -319,6 +394,8 @@
    tfc tfcx tfcy (proj tfcx tfcy)
    zfc zfcx zfcy (proj zfcx zfcy)
    tbc tbcx tbcy
+   eff-pcc eff-pcx eff-pcy
+   eff-zcc eff-zcx eff-zcy
    air-pts splash-pts uphill-siege
    has-breaker?
    (if (fl> e-str 0.01) (fl/ a-str e-str) 99.0)
@@ -411,11 +488,12 @@
             (values #f #f))])]))
 
 ;; =============================================================================
-;; 2. Terran Caster Rear Leash (Medivac / Raven / Ghost `-2.0..-3.0t` behind Bio)
+;; 2. All-Race Caster Rear Leash (`-2.0..-3.5t` behind Race Frontline / Core)
 ;; =============================================================================
-;; Keeps Medivacs, Ravens, and non-channeling Ghosts tethered `-2.0..-3.0t` behind
-;; our Bio centroid along the enemy-facing axis so casters NEVER drift ahead of
-;; Marines/Marauders even against non-AA melee armies (e.g. Zerglings/Banelings).
+;; Keeps Terran (`medivac`, `raven`, `ghost`), Protoss (`high-templar`, `sentry`,
+;; `disruptor`, `colossus`), and Zerg (`infestor`, `viper`, unburrowed `lurker`)
+;; tethered `-2.0..-3.5t` behind their race's frontline/combat core along the
+;; enemy-facing axis so high-value casters NEVER drift in front of meatshields!
 ;; Returns `(values leash-x leash-y)` or `(values #f #f)`.
 
 (define (compute-caster-rear-leash-pt pos-ctx u
@@ -424,60 +502,118 @@
                                       #:enemy-fallback-x [efx #f]
                                       #:enemy-fallback-y [efy #f])
   (cond
-    [(or (not (combat-pos-ctx? pos-ctx))
-         (< (combat-pos-ctx-t-bio-cnt pos-ctx) 2))
+    [(not (combat-pos-ctx? pos-ctx))
      (values #f #f)]
     [else
-     (define sym (rec-canon-sym u))
-     (define ux (rec-x u 0.0))
-     (define uy (rec-y u 0.0))
-     (define bcx (combat-pos-ctx-t-bio-cx pos-ctx))
-     (define bcy (combat-pos-ctx-t-bio-cy pos-ctx))
-     (define d-bio (dist2d-fl ux uy bcx bcy))
+     (define raw-sym (rec-raw-sym u))
+     (define sym (sc2-canonical-unit-sym raw-sym))
+     (define burrowed?
+       (and (hash? u)
+            (or (memq raw-sym '(lurker-burrowed lurker-mp-burrowed infestor-burrowed))
+                (eq? (hash-ref u 'burrowed #f) #t)
+                (eq? (hash-ref u 'is-burrowed #f) #t))))
+     (define-values (anchor-cnt bcx bcy)
+       (cond
+         [(memq sym TERRAN-CASTER-SYMS)
+          (if (>= (combat-pos-ctx-t-bio-cnt pos-ctx) 2)
+              (values (combat-pos-ctx-t-bio-cnt pos-ctx)
+                      (combat-pos-ctx-t-bio-cx pos-ctx)
+                      (combat-pos-ctx-t-bio-cy pos-ctx))
+              (values (combat-pos-ctx-t-front-cnt pos-ctx)
+                      (combat-pos-ctx-t-front-cx pos-ctx)
+                      (combat-pos-ctx-t-front-cy pos-ctx)))]
+         [(memq sym PROTOSS-CASTER-SYMS)
+          (if (>= (combat-pos-ctx-p-front-cnt pos-ctx) 2)
+              (values (combat-pos-ctx-p-front-cnt pos-ctx)
+                      (combat-pos-ctx-p-front-cx pos-ctx)
+                      (combat-pos-ctx-p-front-cy pos-ctx))
+              (values (combat-pos-ctx-p-core-cnt pos-ctx)
+                      (combat-pos-ctx-p-core-cx pos-ctx)
+                      (combat-pos-ctx-p-core-cy pos-ctx)))]
+         [(and (not burrowed?) (memq sym ZERG-CASTER-SYMS))
+          (if (>= (combat-pos-ctx-z-front-cnt pos-ctx) 2)
+              (values (combat-pos-ctx-z-front-cnt pos-ctx)
+                      (combat-pos-ctx-z-front-cx pos-ctx)
+                      (combat-pos-ctx-z-front-cy pos-ctx))
+              (values (combat-pos-ctx-z-core-cnt pos-ctx)
+                      (combat-pos-ctx-z-core-cx pos-ctx)
+                      (combat-pos-ctx-z-core-cy pos-ctx)))]
+         [else (values 0 0.0 0.0)]))
      (cond
-       [(fl> d-bio 18.0)
-        ;; Far across the map (e.g. separate drop/scout): do not yank back unless Medivac
+       [(< anchor-cnt 2)
         (values #f #f)]
        [else
-        (define ecx (if (> (combat-pos-ctx-enemy-cnt pos-ctx) 0)
-                        (combat-pos-ctx-enemy-cx pos-ctx)
-                        (fl->safe (or efx (+ bcx 10.0)) (+ bcx 10.0))))
-        (define ecy (if (> (combat-pos-ctx-enemy-cnt pos-ctx) 0)
-                        (combat-pos-ctx-enemy-cy pos-ctx)
-                        (fl->safe (or efy bcy) bcy)))
-        (define dx (fl- ecx bcx))
-        (define dy (fl- ecy bcy))
-        (define dn (flmax 0.1 (flsqrt (fl+ (fl* dx dx) (fl* dy dy)))))
-        (define fux (fl/ dx dn))
-        (define fuy (fl/ dy dn))
-        (define caster-proj (fl+ (fl* (fl- ux bcx) fux) (fl* (fl- uy bcy) fuy)))
-        (define d-enemy (dist2d-fl ux uy ecx ecy))
-        (define tol
-          (fl->safe (or max-ahead-tol
-                        (cond
-                          [(eq? sym 'medivac) -0.8]
-                          [(eq? sym 'raven)   -0.5]
-                          [else                1.0]))
-                    0.5))
-        (define rdist (clamp-fl (fl->safe rear-dist 2.5) 2.0 3.5))
-        (define lx (clamp-fl (fl- bcx (fl* rdist fux)) 4.0 (fl- (combat-pos-ctx-map-w pos-ctx) 4.0)))
-        (define ly (clamp-fl (fl- bcy (fl* rdist fuy)) 4.0 (fl- (combat-pos-ctx-map-h pos-ctx) 4.0)))
-        (define needs-leash?
-          (cond
-            [(eq? sym 'ghost)
-             ;; Pull Ghosts back ONLY when drifting > 1.0t ahead of Bio while approaching (> 6.5t)
-             (and (fl> caster-proj tol)
-                  (fl> d-enemy 6.5))]
-            [(eq? sym 'medivac)
-             ;; Medivacs always hold -2.5t behind Bio when ahead of tol or > 4.5t off leash
-             (or (fl> caster-proj tol)
-                 (fl> (dist2d-fl ux uy lx ly) 4.5))]
-            [(eq? sym 'raven)
-             (fl> caster-proj tol)]
-            [else #f]))
-        (if needs-leash?
-            (values lx ly)
-            (values #f #f))])]))
+        (define ux (rec-x u 0.0))
+        (define uy (rec-y u 0.0))
+        (define d-bio (dist2d-fl ux uy bcx bcy))
+        (cond
+          [(fl> d-bio 18.0)
+           ;; Far across the map (e.g. separate drop/scout): do not yank back
+           (values #f #f)]
+          [else
+           (define ecx (if (> (combat-pos-ctx-enemy-cnt pos-ctx) 0)
+                           (combat-pos-ctx-enemy-cx pos-ctx)
+                           (fl->safe (or efx (+ bcx 10.0)) (+ bcx 10.0))))
+           (define ecy (if (> (combat-pos-ctx-enemy-cnt pos-ctx) 0)
+                           (combat-pos-ctx-enemy-cy pos-ctx)
+                           (fl->safe (or efy bcy) bcy)))
+           (define dx (fl- ecx bcx))
+           (define dy (fl- ecy bcy))
+           (define dn (flmax 0.1 (flsqrt (fl+ (fl* dx dx) (fl* dy dy)))))
+           (define fux (fl/ dx dn))
+           (define fuy (fl/ dy dn))
+           (define caster-proj (fl+ (fl* (fl- ux bcx) fux) (fl* (fl- uy bcy) fuy)))
+           (define d-enemy (dist2d-fl ux uy ecx ecy))
+           (define tol
+             (fl->safe (or max-ahead-tol
+                           (cond
+                             [(eq? sym 'medivac) -0.8]
+                             [(memq sym '(raven high-templar disruptor infestor viper)) -0.5]
+                             [(eq? sym 'colossus) 0.0]
+                             [(memq sym '(sentry lurker lurker-mp)) 0.2]
+                             [else 1.0]))
+                       0.5))
+           (define rdist (clamp-fl (fl->safe rear-dist 2.5) 2.0 3.5))
+           (define lx (clamp-fl (fl- bcx (fl* rdist fux)) 4.0 (fl- (combat-pos-ctx-map-w pos-ctx) 4.0)))
+           (define ly (clamp-fl (fl- bcy (fl* rdist fuy)) 4.0 (fl- (combat-pos-ctx-map-h pos-ctx) 4.0)))
+           (define needs-leash?
+             (cond
+               [(eq? sym 'ghost)
+                ;; Pull Ghosts back ONLY when drifting > 1.0t ahead of Bio while approaching (> 6.5t)
+                (and (fl> caster-proj tol)
+                     (fl> d-enemy 6.5))]
+               [(eq? sym 'medivac)
+                ;; Medivacs always hold -2.5t behind Bio when ahead of tol or > 4.5t off leash
+                (or (fl> caster-proj tol)
+                    (fl> (dist2d-fl ux uy lx ly) 4.5))]
+               [(eq? sym 'raven)
+                (fl> caster-proj tol)]
+               [(memq sym '(high-templar disruptor))
+                (and (fl> caster-proj tol)
+                     (fl> d-enemy 6.0))]
+               [(eq? sym 'sentry)
+                ;; Loop 65B (`#1861`/`#1862`): Exempt energy-ready Sentries (`>= 50` energy) inside
+                ;; `<= 11.5t` unless drifting `> 1.2t` ahead of core, so Force Field (`<= 9.0t`) fires!
+                (define s-en (fl->safe (hash-ref u 'energy 50.0) 50.0))
+                (and (fl> d-enemy 6.5)
+                     (or (fl> caster-proj 1.2)
+                         (and (fl> caster-proj tol)
+                              (or (fl> d-enemy 11.5)
+                                  (fl< s-en 50.0)))))]
+               [(memq sym '(infestor viper))
+                (and (fl> caster-proj tol)
+                     (fl> d-enemy 6.5))]
+               [(eq? sym 'colossus)
+                (and (fl> caster-proj tol)
+                     (fl> d-enemy 8.0))]
+               [(memq sym '(lurker lurker-mp))
+                (and (not burrowed?)
+                     (fl> caster-proj tol)
+                     (fl> d-enemy 9.0))]
+               [else #f]))
+           (if needs-leash?
+               (values lx ly)
+               (values #f #f))])])]))
 
 ;; =============================================================================
 ;; 3a. Zerg Two-Wing Surround (`>= 8` Zerglings only, outer `40%` wings, `'attack-pos`)
@@ -600,19 +736,20 @@
               (values hx hy)))])]))
 
 ;; =============================================================================
-;; 4. Pre-Contact Lateral Concave Fan-Out & Anti-Splash Spread
+;; 4. Pre-Contact Lateral Concave Fan-Out & Anti-Splash Spread (Loop 65 Gap C1)
 ;; =============================================================================
-;; For ranged squads (`>= 6` units) approaching enemy splash (`Tank`/`Bane`/
-;; `Colossus`/`Storm`/`Disruptor`/`Lurker`/`Mine`/`Archon`) within `7..14t` and
-;; strictly outside immediate weapon range (`d > weapon-range + 1.0t`), fans slots
-;; laterally `±2.0..4.5t`+ perpendicular to enemy centroid (`>= 2.0t` spacing).
+;; For ranged squads (`>= 4` units) approaching ANY combat clash within `6.5..16.5t`
+;; and strictly outside immediate weapon range (`d-tgt > weapon-range + 1.0t`):
+;;   - Natural concave mode (0 nearby splash): `slot_step = 0.82t`, `half-span 2.2..6.0t`,
+;;     outer wings curve `+1.4t * t^2` into a max-DPS concave arc!
+;;   - Anti-splash mode (Tank/Bane/Colossus/Storm/Disruptor/Lurker/Mine/Archon <= 18t):
+;;     wider spread `slot_step = 1.20t`, `half-span 3.0..8.5t`, `arc-fwd = 1.2t * t^2`!
 ;; Returns `(values ax ay)` or `(values #f #f)`.
 
 (define (compute-lateral-concave-spread-pt pos-ctx u target-x target-y weapon-range)
   (cond
     [(or (not (combat-pos-ctx? pos-ctx))
-         (= (combat-pos-ctx-enemy-cnt pos-ctx) 0)
-         (null? (combat-pos-ctx-enemy-splash-pts pos-ctx)))
+         (= (combat-pos-ctx-enemy-cnt pos-ctx) 0))
      (values #f #f)]
     [else
      (define uid (rec-id u))
@@ -630,13 +767,17 @@
         (define d-tgt (dist2d-fl ux uy ftx fty))
         (define wr (fl->safe weapon-range 5.0))
         (define splash-near?
-          (for/or ([sp (in-list (combat-pos-ctx-enemy-splash-pts pos-ctx))])
-            (fl<= (dist2d-fl ux uy (car sp) (cdr sp)) 18.0)))
+          (let ([spts (combat-pos-ctx-enemy-splash-pts pos-ctx)])
+            (and (pair? spts)
+                 (for/or ([sp (in-list spts)])
+                   (fl<= (dist2d-fl ux uy (car sp) (cdr sp)) 18.0)))))
         (cond
-          [(or (not splash-near?)
-               (fl< d-ec 7.0)
-               (fl> d-ec 14.0)
-               (fl<= d-tgt (fl+ wr 1.0)))
+          [(or (fl< d-ec 6.5)
+               (fl> d-ec 16.5)
+               (fl<= d-tgt (fl+ wr 1.0))
+               ;; Loop 65E (`#1907`/`#1908`): Skip natural (non-splash) lateral fanning for short-range
+               ;; `'roach` so Roaches charge straight ahead of Ravagers/Hydras; keep anti-splash spread active!
+               (and (eq? (rec-canon-sym u) 'roach) (not splash-near?)))
            (values #f #f)]
           [else
            (define idx (car slot))
@@ -649,15 +790,18 @@
            (define t (if (> tot 1)
                          (fl- (fl* 2.0 (fl/ (exact->inexact idx) (exact->inexact (- tot 1)))) 1.0)
                          0.0))
-           ;; Guarantee `>= 2.0t` lateral slot spacing across `6+` ranged units (`±2.0..7.5t`)
-           (define half-span (clamp-fl (fl* 1.05 (exact->inexact (- tot 1))) 2.5 7.5))
+           ;; Wider anti-splash spread (`3.0..8.5t`) vs natural max-DPS concave (`2.2..6.0t`)
+           (define half-span
+             (if splash-near?
+                 (clamp-fl (fl* 1.20 (exact->inexact (- tot 1))) 3.0 8.5)
+                 (clamp-fl (fl* 0.82 (exact->inexact (- tot 1))) 2.2 6.0)))
            (define lat-target (fl* t half-span))
            (define cur-lat (fl+ (fl* (fl- ux ecx) pux) (fl* (fl- uy ecy) puy)))
            (if (fl< (flabs (fl- cur-lat lat-target)) 1.0)
                (values #f #f)
                (let* ([standoff (flmax (fl+ wr 0.25) (fl- d-ec 2.0))]
-                      ;; Outer wings curve `+1.2t` forward into a concave arc
-                      [arc-fwd (fl* 1.2 (fl* t t))]
+                      ;; Outer wings curve forward into a concave arc (`1.4t` natural / `1.2t` splash)
+                      [arc-fwd (fl* (if splash-near? 1.2 1.4) (fl* t t))]
                       [base-x (fl- ecx (fl* (fl- standoff arc-fwd) fux))]
                       [base-y (fl- ecy (fl* (fl- standoff arc-fwd) fuy))]
                       [ax (clamp-fl (fl+ base-x (fl* lat-target pux))
@@ -692,6 +836,26 @@
       (fl->safe (hash-ref u 'energy 0.0) 0.0)
       0.0))
 
+;; Loop 65C (`#1874`/`#1875`): Detect Stimpack-buffed Marines/Marauders (`'stimpack`,
+;; `'stimpack-marauder`, buff IDs `27`/`24`) so self-inflicted Stim HP loss NEVER
+;; triggers blind-uphill retreat!
+(define (rec-stimmed? u)
+  (and (hash? u)
+       (or (eq? (hash-ref u 'stimpack? #f) #t)
+           (eq? (hash-ref u 'stimmed? #f) #t)
+           (let ([has-stim?
+                  (lambda (xs)
+                    (and (list? xs)
+                         (ormap (lambda (b)
+                                  (or (eq? b 'stimpack)
+                                      (eq? b 'stimpack-marauder)
+                                      (eq? b 'stim)
+                                      (eqv? b 27)
+                                      (eqv? b 24)))
+                                xs)))])
+             (or (has-stim? (hash-ref u 'buffs #f))
+                 (has-stim? (hash-ref u 'buff-ids #f)))))))
+
 (define (compute-blind-uphill-retreat-pt pos-ctx u
                                          #:prev-hp [prev-hp #f]
                                          #:under-fire? [under-fire? #f]
@@ -705,7 +869,8 @@
                                          #:map-height [mh-arg #f])
   (cond
     [(or (not (hash? u))
-         (rec-flying? u))
+         (rec-flying? u)
+         (rec-stimmed? u))
      (values #f #f)]
     [else
      (define cur-ehp (rec-total-ehp u))
@@ -716,13 +881,20 @@
      (define uphill-gap?
        (and uz (real? uphill-z) (fl>= (fl- (fl->safe uphill-z uz) uz) 1.5)))
      (cond
-       [(not (or took-damage? uphill-gap?))
+       ;; Loop 65C (`#1874`/`#1875`): STRICT `(and took-damage? uphill-gap?)` — NEVER fire on flat ground!
+       [(not (and took-damage? uphill-gap?))
         (values #f #f)]
        [else
         (define ux (rec-x u 0.0))
         (define uy (rec-y u 0.0))
         (define wr (fl->safe weapon-range 5.5))
-        (define scan-r (flmax 7.5 (fl+ wr 1.5)))
+        ;; Loop 65D (`#1891`/`#1892`): Widen visible-enemy sightline scan to `>= 16.5t`
+        ;; and reject distant uphill hints `> 16.0t` away!
+        (define scan-r (flmax 16.5 (fl+ wr 3.0)))
+        (define uphill-hint-too-far?
+          (and (real? uphill-tx)
+               (real? uphill-ty)
+               (fl> (dist2d-fl ux uy (fl->safe uphill-tx ux) (fl->safe uphill-ty uy)) 16.0)))
         ;; If ANY visible non-snapshot enemy is already within firing sightline, fight — NEVER pull back!
         (define visible-in-range?
           (for/or ([e (in-list (if (list? enemy-units) enemy-units '()))])
@@ -731,7 +903,7 @@
                  (not (memq (rec-canon-sym e) NON-COMBAT-IGNORE-SYMS))
                  (fl<= (dist2d-fl ux uy (rec-x e 0.0) (rec-y e 0.0)) scan-r))))
         (cond
-          [visible-in-range? (values #f #f)]
+          [(or visible-in-range? uphill-hint-too-far?) (values #f #f)]
           [else
            (define mw (if (real? mw-arg)
                           (fl->safe mw-arg 200.0)
@@ -761,11 +933,12 @@
            (define ry (clamp-fl (fl+ uy (fl* rdist back-uy)) 4.0 (fl- mh 4.0)))
            (values rx ry)])])]))
 
-;; Multi-race High-Ground Vision Dispatcher:
-;;   - Protoss: cliff-edge `observer` / `phoenix` / `warp-prism` / `oracle`, or Sentry `hallucination-phoenix` (154, >= 75E)
-;;   - Terran : cliff-edge `medivac` / `viking-fighter` / `raven` / `banshee`, or OC `scanner-sweep` (399, >= 50E)
-;;   - Zerg   : cliff-edge `changeling*` / `overlord` / `overseer` / `mutalisk`
-;; Keeps air spotters perched at a safe cliff-edge standoff (`4.5t`, pushed to `7.5t` if visible AA sits nearby).
+;; Multi-race High-Ground Vision Dispatcher (Loop 65C `#1874`/`#1875` — dedicated vision units ONLY):
+;;   - Protoss: cliff-edge `observer` / `observer-siege-mode`, or Sentry `hallucination-phoenix` (154, >= 75E)
+;;   - Terran : cliff-edge `viking-fighter` / `raven`, or OC `scanner-sweep` (399, >= 50E)
+;;   - Zerg   : cliff-edge `changeling*` / `overlord` / `overseer`
+;; NEVER leases transports/harassers/combat air (`warp-prism`, `medivac`, `oracle`, `phoenix`, `banshee`, `mutalisk`).
+;; Keeps air spotters perched at a safe cliff-edge standoff (`4.0t`, pushed to `7.0t` if visible AA sits nearby).
 (define HIGH-GROUND-AA-THREAT-SYMS
   '(marine ghost thor thor-ap viking-fighter cyclone missile-turret widow-mine widow-mine-burrowed
     stalker phoenix archon void-ray tempest carrier photon-cannon sentry
@@ -775,22 +948,16 @@
   (case race
     [(Protoss protoss)
      (cond [(memq sym '(observer observer-siege-mode)) 1]
-           [(eq? sym 'phoenix) 2]
-           [(eq? sym 'warp-prism) 3]
-           [(eq? sym 'oracle) 4]
            [else #f])]
     [(Terran terran)
      (cond [(memq sym '(viking viking-fighter)) 1]
-           [(eq? sym 'medivac) 2]
-           [(eq? sym 'raven) 3]
-           [(eq? sym 'banshee) 4]
+           [(eq? sym 'raven) 2]
            [else #f])]
     [(Zerg zerg)
      (cond [(memq sym '(changeling changeling-zealot changeling-marine changeling-marine-shield
                         changeling-zergling changeling-zergling-wings)) 1]
            [(eq? sym 'overlord) 2]
            [(memq sym '(overseer overseer-siege-mode)) 3]
-           [(eq? sym 'mutalisk) 4]
            [else #f])]
     [else #f]))
 

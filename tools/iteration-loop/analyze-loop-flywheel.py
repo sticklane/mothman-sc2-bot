@@ -57,6 +57,29 @@ TRACKED_TOPICS: List[Tuple[str, str, re.Pattern]] = [
 ]
 
 
+MECHANICAL_RUNNER_ROLES = frozenset({"harness", "verifier", "monitor-2", "monitor", "tactics-tester"})
+HEAVY_MODEL_RE = re.compile(r"(xhigh|opus|pro-high|thinking-high|o1-pro|gpt-5-pro)", re.IGNORECASE)
+FAST_MODEL_RE = re.compile(r"(medium|flash|mini|haiku|fast|lite|low)", re.IGNORECASE)
+
+
+def _record_sort_key(r: Dict[str, Any]) -> Tuple[int, str]:
+    lid = int(r.get("loop_id") or 0)
+    sub = str(r.get("sub_iter") or "").strip().upper()
+    if sub:
+        m = re.match(r"^(\d+)([A-Z][A-Z0-9_-]*)$", sub)
+        if m:
+            return int(m.group(1)), m.group(2)
+        return lid, sub
+    return lid, ""
+
+
+def loop_label(r: Dict[str, Any]) -> str:
+    sub = r.get("sub_iter")
+    if sub:
+        return f"L{sub}"
+    return f"L{int(r.get('loop_id') or 0)}"
+
+
 def load_jsonl(path: Path) -> List[Dict[str, Any]]:
     rows = []
     if not path.is_file():
@@ -66,7 +89,7 @@ def load_jsonl(path: Path) -> List[Dict[str, Any]]:
         if not line:
             continue
         rows.append(json.loads(line))
-    rows.sort(key=lambda r: int(r.get("loop_id") or 0))
+    rows.sort(key=_record_sort_key)
     return rows
 
 
@@ -567,6 +590,376 @@ def run_counterfactual_simulator(
     }
 
 
+def compute_slow_commands_audit(records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Detector 1: Per-command wall-time profiling and >30s non-SC2 bottleneck detection."""
+    seen = set()
+    all_cmds: List[Dict[str, Any]] = []
+    for r in records:
+        lbl = loop_label(r)
+        sources: List[Dict[str, Any]] = list(r.get("slow_commands") or [])
+        for role, a in (r.get("agent_trajectories") or {}).items():
+            for c in a.get("slow_commands") or []:
+                item = dict(c)
+                item.setdefault("agent", role)
+                sources.append(item)
+        for c in sources:
+            if not isinstance(c, dict):
+                continue
+            dur = float(c.get("duration_sec") or 0.0)
+            cmd = str(c.get("cmd") or "").strip()
+            agent = re.sub(r"-legacy-[0-9a-f]+$", "", str(c.get("agent") or "unknown"))
+            ts = str(c.get("ts") or "")
+            key = (lbl, agent, ts, cmd)
+            if key in seen or not cmd:
+                continue
+            seen.add(key)
+            all_cmds.append(
+                {
+                    "loop": lbl,
+                    "loop_id": int(c.get("loop_id") or r.get("loop_id") or 0),
+                    "agent": agent,
+                    "duration_sec": round(dur, 1),
+                    "is_sc2_bench": bool(c.get("is_sc2_bench", False)),
+                    "cmd_kind": str(c.get("cmd_kind") or "other"),
+                    "tool_summary": str(c.get("tool_summary") or ""),
+                    "cmd": cmd,
+                }
+            )
+
+    all_cmds.sort(key=lambda x: x["duration_sec"], reverse=True)
+    non_sc2 = [c for c in all_cmds if not c["is_sc2_bench"]]
+    slow_non_sc2 = [c for c in non_sc2 if c["duration_sec"] > 30.0]
+
+    remediation_by_kind = {
+        "racket_minus_c": "Replace uncompiled `racket -c` with isolated `tools/racket-lane-test.sh <lane> --compile ... -- ...` (`PLTCOMPILEDROOTS`).",
+        "racket_test": "Run module tests through `tools/racket-lane-test.sh` so bytecode compiles into isolated `/tmp/zo-<lane>`.",
+        "full_test_suite": "Reserve `tests/run-all-tests.rkt` for solo `@verifier` Gate 1; authors should run targeted lane tests only.",
+        "raco_make": "Compile only edited modules + target tests via `tools/racket-lane-test.sh` instead of full-tree `raco make`.",
+        "post_bench_serial": "Collapse serial post-bench commands (`score-replay-batch`, `replay-db`, `pro-deep-comparison`, `trade-review-pack`) into `tools/post-bench-pipeline.py`.",
+        "other": "Profile or parallelize this >30s non-SC2 shell command into a cached/parallel script.",
+    }
+
+    findings: List[Dict[str, Any]] = []
+    by_kind: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for c in slow_non_sc2:
+        by_kind[c["cmd_kind"]].append(c)
+
+    for kind, items in sorted(by_kind.items(), key=lambda kv: sum(x["duration_sec"] for x in kv[1]), reverse=True):
+        worst = items[0]
+        tot_s = round(sum(x["duration_sec"] for x in items), 1)
+        findings.append(
+            {
+                "detector": "slow_non_sc2_command",
+                "severity": "high" if worst["duration_sec"] >= 90.0 or len(items) >= 3 else "medium",
+                "cmd_kind": kind,
+                "count": len(items),
+                "total_sec": tot_s,
+                "max_sec": worst["duration_sec"],
+                "summary": (
+                    f"{len(items)} non-SC2 `{kind}` command(s) exceeded 30s "
+                    f"(max {worst['duration_sec']:.1f}s by `{worst['agent']}` in {worst['loop']}, total {tot_s:.1f}s)."
+                ),
+                "recommendation": remediation_by_kind.get(kind, remediation_by_kind["other"]),
+            }
+        )
+
+    return {
+        "commands_profiled": len(all_cmds),
+        "non_sc2_over_30s_count": len(slow_non_sc2),
+        "non_sc2_over_30s_total_sec": round(sum(c["duration_sec"] for c in slow_non_sc2), 1),
+        "top_10_slowest_commands": all_cmds[:10],
+        "top_10_non_sc2_commands": non_sc2[:10],
+        "findings": findings,
+    }
+
+
+def compute_bench_utilization_audit(
+    records: List[Dict[str, Any]],
+    host_cpus: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Detector 2: Bench CPU utilization, tail-waste, timeout stragglers, LPT & precheck audit."""
+    default_nproc = int(host_cpus or os.cpu_count() or 1)
+    per_run: List[Dict[str, Any]] = []
+    findings: List[Dict[str, Any]] = []
+
+    for r in records:
+        bu = r.get("bench_utilization")
+        if not isinstance(bu, dict) or not bu.get("matches"):
+            continue
+        lbl = loop_label(r)
+        nproc = int(bu.get("host_cpus") or default_nproc)
+        conc = int(bu.get("concurrency") or 1)
+        wall = float(bu.get("wall_elapsed_sec") or 0.0)
+        sum_w = float(bu.get("sum_match_wall_sec") or 0.0)
+        ideal = sum_w / max(1, conc) if sum_w > 0 else float(bu.get("ideal_wall_sec") or 0.0)
+        tail_sec = max(0.0, wall - ideal) if wall > 0 else float(bu.get("tail_overhead_sec") or 0.0)
+        tail_pct = round(100.0 * tail_sec / max(1.0, wall), 1) if wall > 0 else float(bu.get("tail_overhead_pct") or 0.0)
+        cpu_pct = round(100.0 * conc / max(1, nproc), 1)
+        sched = str(bu.get("schedule_order") or "unknown")
+        to_cnt = int(bu.get("timeout_count") or 0)
+        to_sec = float(bu.get("timeout_straggler_sec") or 0.0)
+        unfiltered_sr = bool(bu.get("unfiltered_single_race_suite", False))
+
+        row = {
+            "loop": lbl,
+            "run_id": str(bu.get("run_id") or lbl),
+            "matches": int(bu.get("matches") or 0),
+            "concurrency": conc,
+            "host_cpus": nproc,
+            "cpu_util_pct": cpu_pct,
+            "schedule_order": sched,
+            "wall_min": round(wall / 60.0, 1),
+            "ideal_min": round(ideal / 60.0, 1),
+            "tail_overhead_sec": round(tail_sec, 1),
+            "tail_overhead_pct": tail_pct,
+            "timeout_count": to_cnt,
+            "timeout_straggler_sec": round(to_sec, 1),
+            "slowest_match": bu.get("slowest_match"),
+            "bots_tested": bu.get("bots_tested") or [],
+            "unfiltered_single_race_suite": unfiltered_sr,
+        }
+        per_run.append(row)
+
+    non_lpt = [x for x in per_run if x["schedule_order"] != "lpt"]
+    under_cpu = [x for x in per_run if x["host_cpus"] >= 24 and x["concurrency"] < 12]
+    high_tail = [x for x in per_run if x["tail_overhead_pct"] > 25.0]
+    timeout_runs = [x for x in per_run if x["timeout_straggler_sec"] > 0]
+    unfiltered_sr_runs = [x for x in per_run if x["unfiltered_single_race_suite"]]
+
+    if non_lpt:
+        findings.append(
+            {
+                "detector": "bench_non_lpt_schedule",
+                "severity": "high",
+                "affected_loops": [x["loop"] for x in non_lpt],
+                "summary": (
+                    f"{len(non_lpt)}/{len(per_run)} benchmark run(s) used non-LPT scheduling "
+                    f"({', '.join(sorted({x['schedule_order'] for x in non_lpt}))})."
+                ),
+                "recommendation": "Use default `--schedule-order lpt` in `tools/run-local-sc2-arena.py` so 640s stragglers start in Wave 1.",
+            }
+        )
+    if under_cpu:
+        findings.append(
+            {
+                "detector": "bench_low_concurrency",
+                "severity": "high",
+                "affected_loops": [x["loop"] for x in under_cpu],
+                "summary": (
+                    f"{len(under_cpu)} run(s) used concurrency < 12 on a >=24-thread host "
+                    f"(min j={min(x['concurrency'] for x in under_cpu)}, min CPU util={min(x['cpu_util_pct'] for x in under_cpu):.1f}%)."
+                ),
+                "recommendation": "Use `-j 12` for full 84-match ALL_84 (avoids CPU-contention wall-ties on 24-32 thread hosts) and `-j 14` for <=26-match canaries.",
+            }
+        )
+    if high_tail:
+        tot_tail_min = round(sum(x["tail_overhead_sec"] for x in high_tail) / 60.0, 1)
+        worst = max(high_tail, key=lambda x: x["tail_overhead_pct"])
+        findings.append(
+            {
+                "detector": "bench_high_tail_waste",
+                "severity": "medium",
+                "affected_loops": [x["loop"] for x in high_tail],
+                "summary": (
+                    f"{len(high_tail)} run(s) had >25% tail overhead (worst {worst['loop']} at "
+                    f"{worst['tail_overhead_pct']:.1f}%, {tot_tail_min:.1f} min total tail waste)."
+                ),
+                "recommendation": "Verify `--schedule-order lpt` historical wall_sec estimates cover the slowest opponent matchups.",
+            }
+        )
+    if timeout_runs:
+        tot_to_min = round(sum(x["timeout_straggler_sec"] for x in timeout_runs) / 60.0, 1)
+        tot_to_n = sum(x["timeout_count"] for x in timeout_runs)
+        findings.append(
+            {
+                "detector": "bench_timeout_stragglers",
+                "severity": "medium",
+                "affected_loops": [x["loop"] for x in timeout_runs],
+                "summary": f"{tot_to_n} timed-out straggler match(es) burned {tot_to_min:.1f} match-min across {len(timeout_runs)} run(s).",
+                "recommendation": "Inspect timed-out matchups for stalemate/endgame-hunt loops and ensure LPT launches them in Wave 1.",
+            }
+        )
+    if unfiltered_sr_runs:
+        findings.append(
+            {
+                "detector": "bench_unfiltered_single_race_suite",
+                "severity": "high",
+                "affected_loops": [x["loop"] for x in unfiltered_sr_runs],
+                "summary": (
+                    f"{len(unfiltered_sr_runs)} single-race diff(s) ({', '.join(x['loop'] for x in unfiltered_sr_runs)}) "
+                    f"ran an unfiltered 3-race >=78-match suite without a single-race pre-check."
+                ),
+                "recommendation": "Run `--bots Mothman-{P,T,Z} --opponents all` or `--opponents canary` before full ALL_84 on single-race diffs.",
+            }
+        )
+
+    return {
+        "runs_analyzed": len(per_run),
+        "avg_cpu_util_pct": mean_safe([x["cpu_util_pct"] for x in per_run]),
+        "avg_tail_overhead_pct": mean_safe([x["tail_overhead_pct"] for x in per_run]),
+        "total_tail_waste_min": round(sum(x["tail_overhead_sec"] for x in per_run) / 60.0, 1),
+        "total_timeout_straggler_min": round(sum(x["timeout_straggler_sec"] for x in per_run) / 60.0, 1),
+        "per_run": per_run,
+        "findings": findings,
+    }
+
+
+def compute_llm_efficiency_audit(records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Detector 3: Per-worker LLM think-time vs tool-time, model tier, and turn-count efficiency."""
+    by_role: Dict[str, Dict[str, Any]] = {}
+    for r in records:
+        lbl = loop_label(r)
+        for role, a in (r.get("agent_trajectories") or {}).items():
+            canon = re.sub(r"-legacy-[0-9a-f]+$", "", role)
+            if re.match(r"^worker-[0-9a-f]{6,}$", canon) or "browser" in canon.lower():
+                continue
+            if canon not in by_role:
+                by_role[canon] = {
+                    "role": canon,
+                    "loops_active": 0,
+                    "think_sec": 0.0,
+                    "tool_sec": 0.0,
+                    "planner_turns": 0,
+                    "run_command_calls": 0,
+                    "sessions_count": 0,
+                    "max_turns_in_session": 0,
+                    "max_cmds_in_session": 0,
+                    "max_post_bench_turns": 0,
+                    "models_seen": Counter(),
+                    "heavy_cmd_loops": [],
+                    "high_post_bench_loops": [],
+                }
+            b = by_role[canon]
+            b["loops_active"] += 1
+            b["think_sec"] += float(a.get("think_sec") or 0.0)
+            b["tool_sec"] += float(a.get("tool_sec") or 0.0)
+            b["planner_turns"] += int(a.get("planner_turns") or 0)
+            rc = int(a.get("run_command_calls") or (a.get("tool_calls_by_name") or {}).get("run_command") or 0)
+            b["run_command_calls"] += rc
+            sess = int(a.get("sessions_count") or (1 if int(a.get("planner_turns") or 0) > 0 else 0))
+            b["sessions_count"] += sess
+            mts = int(a.get("max_turns_in_session") or 0)
+            mcs = int(a.get("max_cmds_in_session") or 0)
+            pbt = int(a.get("post_bench_turns") or 0)
+            if mts > b["max_turns_in_session"]:
+                b["max_turns_in_session"] = mts
+            if mcs > b["max_cmds_in_session"]:
+                b["max_cmds_in_session"] = mcs
+            if pbt > b["max_post_bench_turns"]:
+                b["max_post_bench_turns"] = pbt
+            if mcs > 15 or rc > 15:
+                b["heavy_cmd_loops"].append((lbl, max(mcs, rc)))
+            if pbt > 5:
+                b["high_post_bench_loops"].append((lbl, pbt))
+            mod = a.get("model")
+            if isinstance(mod, str) and mod.strip():
+                b["models_seen"][mod.strip()] += 1
+
+    rows: List[Dict[str, Any]] = []
+    findings: List[Dict[str, Any]] = []
+    for canon, b in by_role.items():
+        tot_active = b["think_sec"] + b["tool_sec"]
+        think_pct = round(100.0 * b["think_sec"] / max(1.0, tot_active), 1) if tot_active > 0 else 0.0
+        sess_div = max(1, b["sessions_count"])
+        models = [m for m, _ in b["models_seen"].most_common()]
+        primary_model = models[0] if models else "unknown"
+        is_mech = canon in MECHANICAL_RUNNER_ROLES
+        rows.append(
+            {
+                "role": canon,
+                "is_mechanical_runner": is_mech,
+                "primary_model": primary_model,
+                "models_seen": models,
+                "loops_active": b["loops_active"],
+                "think_sec": round(b["think_sec"], 1),
+                "tool_sec": round(b["tool_sec"], 1),
+                "think_share_pct": think_pct,
+                "planner_turns": b["planner_turns"],
+                "run_command_calls": b["run_command_calls"],
+                "sessions_count": b["sessions_count"],
+                "turns_per_session": round(b["planner_turns"] / sess_div, 1),
+                "cmds_per_session": round(b["run_command_calls"] / sess_div, 1),
+                "max_turns_in_session": b["max_turns_in_session"],
+                "max_cmds_in_session": b["max_cmds_in_session"],
+                "max_post_bench_turns": b["max_post_bench_turns"],
+            }
+        )
+
+        # Flag 1: Mechanical runner burning xhigh/heavy reasoning latency
+        heavy_models = [m for m in models if HEAVY_MODEL_RE.search(m)]
+        all_fast_models = bool(models) and all(FAST_MODEL_RE.search(m) and not HEAVY_MODEL_RE.search(m) for m in models)
+        if is_mech and (heavy_models or (not all_fast_models and think_pct >= 65.0 and b["think_sec"] >= 120.0)):
+            findings.append(
+                {
+                    "detector": "mechanical_runner_heavy_model",
+                    "severity": "high",
+                    "role": canon,
+                    "models": heavy_models or models,
+                    "think_sec": round(b["think_sec"], 1),
+                    "think_share_pct": think_pct,
+                    "summary": (
+                        f"Mechanical runner `{canon}` burned {b['think_sec']:.0f}s think-time "
+                        f"({think_pct:.1f}% of active time; model={', '.join(heavy_models or models) or 'unknown'})."
+                    ),
+                    "recommendation": f"Switch `{canon}` to a fast medium/flash model tier (e.g. `gemini-4-neon-medium`) for mechanical command execution.",
+                }
+            )
+
+        # Flag 2: Mechanical runner multi-turn post-bench scripting (>5 post-bench turns)
+        if is_mech and b["max_post_bench_turns"] > 5:
+            lp_str = ", ".join(f"{l} ({n}t)" for l, n in b["high_post_bench_loops"][:5])
+            findings.append(
+                {
+                    "detector": "mechanical_runner_multi_turn_post_bench",
+                    "severity": "high",
+                    "role": canon,
+                    "max_post_bench_turns": b["max_post_bench_turns"],
+                    "summary": f"Mechanical runner `{canon}` spent >5 turns post-bench ({lp_str}).",
+                    "recommendation": "Replace sequential post-bench shell steps with one call to `tools/post-bench-pipeline.py`.",
+                }
+            )
+
+        # Flag 3: >15-command ad-hoc session that should be automated into a reusable CLI
+        if b["heavy_cmd_loops"]:
+            lp_str = ", ".join(f"{l} ({n} cmds)" for l, n in b["heavy_cmd_loops"][:5])
+            findings.append(
+                {
+                    "detector": "adhoc_command_session_churn",
+                    "severity": "medium",
+                    "role": canon,
+                    "max_cmds_in_session": max(n for _, n in b["heavy_cmd_loops"]),
+                    "summary": f"`{canon}` ran >15 shell commands in a single session/loop ({lp_str}).",
+                    "recommendation": "Automate repeated ad-hoc analysis into a reusable CLI (e.g. `tools/forensics-diff.py` or `tools/post-bench-pipeline.py`).",
+                }
+            )
+
+    rows.sort(key=lambda x: (x["think_sec"] + x["tool_sec"], x["planner_turns"]), reverse=True)
+    return {
+        "agents": rows,
+        "findings": findings,
+    }
+
+
+def compute_bottleneck_detectors(
+    records: List[Dict[str, Any]],
+    host_cpus: Optional[int] = None,
+) -> Dict[str, Any]:
+    slow_cmds = compute_slow_commands_audit(records)
+    bench_util = compute_bench_utilization_audit(records, host_cpus=host_cpus)
+    llm_eff = compute_llm_efficiency_audit(records)
+    sub_iters = [str(r["sub_iter"]) for r in records if r.get("sub_iter")]
+    sev_rank = {"high": 0, "medium": 1, "low": 2}
+    all_findings = list(slow_cmds["findings"]) + list(bench_util["findings"]) + list(llm_eff["findings"])
+    all_findings.sort(key=lambda f: (sev_rank.get(str(f.get("severity")), 9), str(f.get("detector"))))
+    return {
+        "slow_commands": slow_cmds,
+        "bench_utilization": bench_util,
+        "llm_efficiency": llm_eff,
+        "sub_iterations_logged": sub_iters,
+        "findings": all_findings,
+    }
+
+
 def build_ranked_patches(
     cf: Dict[str, Any],
     hold_tax: Dict[str, Any],
@@ -793,6 +1186,90 @@ def render_markdown(report: Dict[str, Any]) -> str:
         lines.append(f"   - **Impact:** {p['expected_impact']}")
         lines.append(f"   - **Check:** {p['verification']}")
     lines.append("")
+
+    # 6. Open-Ended Cycle-Time Bottleneck Audit
+    bd = report.get("bottleneck_detectors") or {}
+    sc_aud = bd.get("slow_commands") or {}
+    bu_aud = bd.get("bench_utilization") or {}
+    llm_aud = bd.get("llm_efficiency") or {}
+    bd_findings = bd.get("findings") or []
+    sub_iters = bd.get("sub_iterations_logged") or []
+
+    lines.append("## 6. Open-Ended Cycle-Time Bottleneck Audit")
+    lines.append("")
+    if sub_iters:
+        lines.append(f"- **Sub-Iterations Logged:** `{len(sub_iters)}` ({', '.join(f'L{s}' for s in sub_iters[-12:])})")
+    lines.append(
+        f"- **Profiled Shell Commands:** `{sc_aud.get('commands_profiled', 0)}` "
+        f"(`{sc_aud.get('non_sc2_over_30s_count', 0)}` non-SC2 commands >30s, "
+        f"total `{sc_aud.get('non_sc2_over_30s_total_sec', 0.0):.1f}s`) | "
+        f"**Bench Runs Audited:** `{bu_aud.get('runs_analyzed', 0)}` "
+        f"(avg CPU util `{bu_aud.get('avg_cpu_util_pct', 0.0):.1f}%`, "
+        f"avg tail overhead `{bu_aud.get('avg_tail_overhead_pct', 0.0):.1f}%`) | "
+        f"**Open-Ended Findings:** `{len(bd_findings)}`"
+    )
+    lines.append("")
+
+    lines.append("### 6a. Top-10 Slowest Single Shell Commands")
+    lines.append("")
+    top_cmds = sc_aud.get("top_10_slowest_commands") or []
+    if top_cmds:
+        lines.append("| Rank | Loop | Agent | Duration (s) | Kind | SC2 Bench? | Command |")
+        lines.append("|---:|---|---|---:|---|---|---|")
+        for idx, c in enumerate(top_cmds, start=1):
+            cmd_esc = str(c["cmd"]).replace("|", "\\|")
+            lines.append(
+                f"| {idx} | {c['loop']} | `{c['agent']}` | {c['duration_sec']:.1f} | "
+                f"`{c['cmd_kind']}` | {'yes' if c['is_sc2_bench'] else 'no'} | `{cmd_esc}` |"
+            )
+    else:
+        lines.append("_No per-command durations recorded in the current trajectory log._")
+    lines.append("")
+
+    lines.append("### 6b. Bench Utilization, Tail-Waste & Straggler Audit")
+    lines.append("")
+    per_run = bu_aud.get("per_run") or []
+    if per_run:
+        lines.append("| Loop | Matches | Concurrency / Threads | CPU Util | Schedule | Wall Min | Ideal Min | Tail Overhead | Timeouts |")
+        lines.append("|---|---:|---|---:|---|---:|---:|---:|---:|")
+        for row in per_run:
+            lines.append(
+                f"| {row['loop']} | {row['matches']} | {row['concurrency']}/{row['host_cpus']} | "
+                f"{row['cpu_util_pct']:.1f}% | `{row['schedule_order']}` | {row['wall_min']:.1f} | "
+                f"{row['ideal_min']:.1f} | {row['tail_overhead_pct']:.1f}% ({row['tail_overhead_sec']:.0f}s) | "
+                f"{row['timeout_count']} ({row['timeout_straggler_sec']:.0f}s) |"
+            )
+    else:
+        lines.append("_No benchmark `results.json` utilization telemetry attached yet._")
+    lines.append("")
+
+    lines.append("### 6c. LLM Think-Time vs Tool-Time & Turn Efficiency")
+    lines.append("")
+    eff_agents = llm_aud.get("agents") or []
+    if eff_agents:
+        lines.append("| Agent | Model | Think (s) | Tool (s) | Think Share | Turns/Sess | Cmds/Sess | Max Cmds/Sess | Max Post-Bench Turns |")
+        lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|")
+        for a in eff_agents:
+            lines.append(
+                f"| `{a['role']}` | `{a['primary_model']}` | {a['think_sec']:.1f} | {a['tool_sec']:.1f} | "
+                f"{a['think_share_pct']:.1f}% | {a['turns_per_session']:.1f} | {a['cmds_per_session']:.1f} | "
+                f"{a['max_cmds_in_session']} | {a['max_post_bench_turns']} |"
+            )
+    else:
+        lines.append("_No LLM think-time vs tool-time telemetry recorded yet._")
+    lines.append("")
+
+    lines.append("### 6d. Auto-Detected Cycle-Time Findings")
+    lines.append("")
+    if bd_findings:
+        for idx, fnd in enumerate(bd_findings, start=1):
+            lines.append(
+                f"{idx}. **[{str(fnd.get('severity', 'info')).upper()}] `{fnd.get('detector')}`:** "
+                f"{fnd.get('summary')} Action: {fnd.get('recommendation')}"
+            )
+    else:
+        lines.append("_No new cycle-time bottlenecks triggered across the audited logs._")
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -801,6 +1278,7 @@ def analyze_flywheel(
     ledger_path: Path,
     out_md: Optional[Path] = None,
     out_json: Optional[Path] = None,
+    host_cpus: Optional[int] = None,
 ) -> Dict[str, Any]:
     records = load_jsonl(jsonl_path)
     ledger = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path.is_file() else {"iterations": []}
@@ -815,6 +1293,7 @@ def analyze_flywheel(
     hold_tax = compute_hold_taxonomy_and_flipflops(records, ledger_by_loop)
     cf = run_counterfactual_simulator(records, hold_tax, agent_sc)
     patches = build_ranked_patches(cf, hold_tax, agent_sc)
+    bottlenecks = compute_bottleneck_detectors(records, host_cpus=host_cpus)
 
     loop_span = [records[0]["loop_id"], records[-1]["loop_id"]] if records else [0, 0]
     report = {
@@ -827,6 +1306,7 @@ def analyze_flywheel(
         "hold_taxonomy": hold_tax,
         "counterfactual_simulator": cf,
         "ranked_patches": patches,
+        "bottleneck_detectors": bottlenecks,
     }
 
     if out_json is not None:

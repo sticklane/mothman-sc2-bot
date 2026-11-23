@@ -758,6 +758,23 @@
           rt-requires))
 (check-equal "pA-runtime-no-wire-or-compiler-require" rt-forbidden-requires '())
 
+;; 9g. Architecture Phase B (`#1830`): `lib/tactics/multiprong-coordinator.rkt` must exist,
+;;     obey strict L2b/L0+L3 purity (zero imports of `bot-runtime.rkt`, `sc2-protobuf-ws.rkt`,
+;;     `priority-macro-brain.rkt`, `econ-ledger.rkt`, or `plan/*`), AND import `engine/arbiter.rkt`!
+(define mp-coord-path (build-path repo-lib-dir "tactics" "multiprong-coordinator.rkt"))
+(define mp-coord-exists? (file-exists? mp-coord-path))
+(define mp-coord-reqs (if mp-coord-exists? (extract-local-rkt-requires mp-coord-path) '()))
+(define mp-coord-forbidden-reqs
+  (filter (lambda (r)
+            (or (member r '("bot-runtime.rkt" "sc2-protobuf-ws.rkt"
+                            "priority-macro-brain.rkt" "econ-ledger.rkt"))
+                (regexp-match? #px"^plan/" r)))
+          mp-coord-reqs))
+(check-true  "pB-multiprong-coordinator-exists" mp-coord-exists?)
+(check-equal "pB-multiprong-coordinator-L2b-L0-L3-purity" mp-coord-forbidden-reqs '())
+(check-true  "pB-multiprong-coordinator-imports-arbiter"
+             (and (member "engine/arbiter.rkt" mp-coord-reqs) #t))
+
 ;; -----------------------------------------------------------------------------
 ;; 10. Architecture Phase A (`#1784`): Single-Authority & No-Wire-Policy Ratchets
 ;; -----------------------------------------------------------------------------
@@ -800,6 +817,69 @@
             (regexp-match? #px"\\(define \\(fast-units-have-any-type\\?(?=[ \t\r\n)])" common-src))
 (check-true "pA-wall-and-block-no-local-dyn-hash-ref"
             (not (regexp-match? #px"\\(define \\(dyn-hash-ref(?=[ \t\r\n)])" wall-src)))
+
+;; 10e. Architecture Phase B (`#1830`): `lib/bot-runtime.rkt` must NOT emit live Phase 6
+;;      `'pre-split-wings` or `'form-concave-arc` tokens (L2c `concave-positioning.rkt` is
+;;      the single live concave authority; any legacy synthetic fallback must be strictly gated
+;;      by a top-level `(not live-obs?)` or `(not live-game?)` conjunct, never `(or (not live-obs?) ...)`!).
+(define (sexp-contains-sym? form target-syms)
+  (cond
+    [(symbol? form) (and (memq form target-syms) #t)]
+    [(pair? form) (or (sexp-contains-sym? (car form) target-syms)
+                      (sexp-contains-sym? (cdr form) target-syms))]
+    [else #f]))
+(define (cond-strictly-non-live? c)
+  (cond
+    [(equal? c '(not live-obs?)) #t]
+    [(equal? c '(not live-game?)) #t]
+    [(and (pair? c) (eq? (car c) 'and))
+     (ormap cond-strictly-non-live? (cdr c))]
+    [else #f]))
+(define (find-live-concave-token-emits src)
+  (define nl-idx (for/first ([i (in-range (string-length src))]
+                             #:when (char=? (string-ref src i) #\newline))
+                   i))
+  (define body (if nl-idx (substring src (add1 nl-idx)) ""))
+  (define in (open-input-string body))
+  (define hits '())
+  (define (walk form gated-non-live?)
+    (cond
+      [(not (pair? form)) (void)]
+      [(and (memq (car form) '(when unless)) (>= (length form) 3))
+       (define c (cadr form))
+       (define next-gated?
+         (or gated-non-live?
+             (and (eq? (car form) 'when) (cond-strictly-non-live? c))
+             (and (eq? (car form) 'unless) (memq c '(live-obs? live-game?)))))
+       (for ([sub (in-list (cddr form))])
+         (walk sub next-gated?))]
+      [(and (eq? (car form) 'if) (>= (length form) 3))
+       (define c (cadr form))
+       (walk (caddr form) (or gated-non-live? (cond-strictly-non-live? c)))
+       (when (>= (length form) 4)
+         (walk (cadddr form) (or gated-non-live? (memq c '(live-obs? live-game?)))))]
+      [(and (eq? (car form) 'cond) (pair? (cdr form)))
+       (for ([cl (in-list (cdr form))])
+         (when (and (pair? cl) (pair? (cdr cl)))
+           (define next-gated? (or gated-non-live? (cond-strictly-non-live? (car cl))))
+           (for ([sub (in-list (cdr cl))])
+             (walk sub next-gated?))))]
+      [(and (eq? (car form) 'l34-emit!)
+            (sexp-contains-sym? form '(pre-split-wings form-concave-arc)))
+       (unless gated-non-live?
+         (set! hits (cons form hits)))]
+      [else
+       (walk (car form) gated-non-live?)
+       (walk (cdr form) gated-non-live?)]))
+  (let lp ()
+    (define d (with-handlers ([exn:fail:read? (lambda (_) eof)]) (read in)))
+    (unless (eof-object? d)
+      (walk d #f)
+      (lp)))
+  hits)
+(check-equal "pB-runtime-retires-live-phase6-concave-tokens"
+             (find-live-concave-token-emits rt-src)
+             '())
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Patch-Resilience & ResponseData Checks: ~a/~a passed (~a failed)\n"

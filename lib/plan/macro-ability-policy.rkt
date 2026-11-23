@@ -530,6 +530,7 @@
          #:depots depots
          #:under-pressure? [under-pressure? #f]
          #:cloak-seen? [cloak-seen? #f]
+         #:depot-nearly-done? [depot-nearly-done? #f]
          #:mule-policy [mule-policy #f])
   (define supply-left (- supply-cap supply-used))
   (define hard-blocked?
@@ -542,12 +543,15 @@
     (if (terran-mule-policy-result? mule-policy)
         (terran-mule-policy-result-proactive-scan-oc-tags mule-policy)
         '()))
+  ;; Loop 65 (`#1831`/`#1833`): Relax `under-pressure?` requirement on `4:00-12:00`
+  ;; real supply blocks (`supply-left <= 0`, `< 192` cap) while skipping if a Depot is
+  ;; already nearly done (`> 75%`) peacefully and keeping `100e` scan reserve on `cloak-seen?`!
   (cond
     [(or (< cur-loop 5376)
          (> cur-loop 16128)
          (> supply-left 0)
          (>= supply-cap 192)
-         (not under-pressure?)
+         (and depot-nearly-done? (not under-pressure?))
          hard-blocked?
          (null? ready-ocs)
          (null? depots))
@@ -911,7 +915,10 @@
        [else -1.0])]
     [else
      ;; Sharp 4:00 Pivot (`>= 5376f` OR `>= 34w`): TechUpgrades > Robo > Stargate > Nexus; suppress Gateway!
+     ;; Loop 65 (`#1831`): On active main-base breach under pressure, promote busy Robo (`958.0`) ahead of
+     ;; Forge upgrades so emergency Immortals/Colossi pop faster, while preserving peaceful Tech > Robo!
      (cond
+       [(and under-pressure? main-base-breach? (eq? sym 'robotics-facility)) 958.0]
        [(memq sym '(forge twilight-council templar-archive robotics-bay)) 955.0]
        [(eq? sym 'cybernetics-core) 952.0]
        [(set-member? PROTOSS-CHRONO-TECH-UPGRADE-SYMS sym) 950.0]
