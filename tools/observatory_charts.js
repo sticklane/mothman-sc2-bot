@@ -412,7 +412,7 @@
       return (
         '<article class="obs-card obs-span-2">' +
           '<div class="obs-card-head">' +
-            '<div><span class="obs-card-title">North Star: Minerals Collected Ratio × Trade Ratio</span>' +
+            '<div><span class="obs-card-title">Match Outcomes by Mining &amp; Trade Efficiency</span>' +
             '<div class="obs-card-sub">Every match plotted by resource economy (X) vs. combat trade efficiency (Y) · crosshairs at 1.0× even</div></div>' +
             '<span class="obs-badge">' + pts.length + ' matches · <span style="color:' + T.good + '">● Win</span> · <span style="color:' + T.bad + '">● Loss</span> · <span style="color:' + T.warn + '">● Tie</span></span>' +
           '</div>' +
@@ -439,11 +439,11 @@
           const t3 = rSlice.our_t3_pct != null ? Math.round(rSlice.our_t3_pct) : 0;
           html +=
             '<div class="obs-kpi-strip">' +
-              '<div class="obs-kpi obs-kpi-primary"><span class="obs-kpi-lbl">Primary · Trade</span><strong>' + fmt(rSlice.trade_agg, 2) + '×</strong><span class="obs-kpi-sub">med ' + fmt(rSlice.trade_med, 2) + '×</span></div>' +
-              '<div class="obs-kpi obs-kpi-primary"><span class="obs-kpi-lbl">Primary · Minerals</span><strong>' + fmt(rSlice.agg_min_ratio, 2) + '×</strong><span class="obs-kpi-sub">' + fmtInt(rSlice.our_min_collected_avg) + ' vs. ' + fmtInt(rSlice.opp_min_collected_avg) + ' avg</span></div>' +
-              '<div class="obs-kpi"><span class="obs-kpi-lbl">Secondary · Gas</span><strong>' + fmt(rSlice.agg_gas_ratio, 2) + '×</strong><span class="obs-kpi-sub">' + fmtInt(rSlice.our_gas_collected_avg) + ' vs. ' + fmtInt(rSlice.opp_gas_collected_avg) + ' avg</span></div>' +
-              '<div class="obs-kpi"><span class="obs-kpi-lbl">Secondary · Upgrades</span><strong>' + fmt(rSlice.our_upg_levels, 1) + ' / ' + fmt(rSlice.opp_upg_levels, 1) + '</strong><span class="obs-kpi-sub">us vs. opp (+1/+2/+3)</span></div>' +
-              '<div class="obs-kpi"><span class="obs-kpi-lbl">Secondary · Tier Mix</span><strong>' + t1 + '/' + t2 + '/' + t3 + '%</strong><span class="obs-kpi-sub">T1 / T2 / T3 value share</span></div>' +
+              '<div class="obs-kpi obs-kpi-primary"><span class="obs-kpi-lbl">Trade Ratio</span><strong>' + fmt(rSlice.trade_agg, 2) + '×</strong><span class="obs-kpi-sub">med ' + fmt(rSlice.trade_med, 2) + '×</span></div>' +
+              '<div class="obs-kpi obs-kpi-primary"><span class="obs-kpi-lbl">Minerals Collected</span><strong>' + fmt(rSlice.agg_min_ratio, 2) + '×</strong><span class="obs-kpi-sub">' + fmtInt(rSlice.our_min_collected_avg) + ' vs. ' + fmtInt(rSlice.opp_min_collected_avg) + ' avg</span></div>' +
+              '<div class="obs-kpi"><span class="obs-kpi-lbl">Gas Collected</span><strong>' + fmt(rSlice.agg_gas_ratio, 2) + '×</strong><span class="obs-kpi-sub">' + fmtInt(rSlice.our_gas_collected_avg) + ' vs. ' + fmtInt(rSlice.opp_gas_collected_avg) + ' avg</span></div>' +
+              '<div class="obs-kpi"><span class="obs-kpi-lbl">Upgrade Levels</span><strong>' + fmt(rSlice.our_upg_levels, 1) + ' / ' + fmt(rSlice.opp_upg_levels, 1) + '</strong><span class="obs-kpi-sub">us vs. opp (+1/+2/+3)</span></div>' +
+              '<div class="obs-kpi"><span class="obs-kpi-lbl">Unit Tier Mix</span><strong>' + t1 + '/' + t2 + '/' + t3 + '%</strong><span class="obs-kpi-sub">T1 / T2 / T3 value share</span></div>' +
             '</div>';
         }
       }
@@ -544,7 +544,7 @@
       return (
         '<div class="obs-card" style="margin-top:12px;">' +
           '<div class="obs-card-head">' +
-            '<div><span class="obs-card-title">Chart 8 · Key Expansion, Structure &amp; Upgrade Timings</span>' +
+            '<div><span class="obs-card-title">Key Expansion, Building &amp; Upgrade Timings</span>' +
             '<div class="obs-card-sub">25th–75th percentile whiskers with median dot · see Army Comp &amp; Upgrades tab for the exhaustive all-upgrade race</div></div>' +
             '<div class="obs-pills">' +
               ['Protoss', 'Terran', 'Zerg'].map(function (r) { return '<button type="button" class="obs-pill' + (state.timingRace === r ? ' is-active' : '') + '" data-obs-tm-race="' + r + '">' + r + '</button>'; }).join('') +
@@ -752,7 +752,7 @@
 
       const tsList = [];
       const fragCfg = {
-        svgKey: 'g9_frag', title: 'Graph 9a · Army Fragmentation % (outside 14t main cluster)',
+        svgKey: 'g9_frag', title: 'Army Spread (Units Outside 14t Main Group)',
         mPts: (cohSegC.army_fragmentation_pct || {}).mothman || [],
         pPts: (cohSegC.army_fragmentation_pct || {}).pros || [],
         oPts: (cohSegC.army_fragmentation_pct || {}).opponents || [],
@@ -760,7 +760,7 @@
         yFmt: function (v) { return Math.round(v) + '%'; },
       };
       const retCfg = {
-        svgKey: 'g9_ret', title: 'Graph 9b · Army Retention Ratio (Alive / Cumulative Built)',
+        svgKey: 'g9_ret', title: 'Army Survival Rate (Alive / Total Built)',
         mPts: (cohSegC.army_retention_ratio || {}).mothman || [],
         pPts: (cohSegC.army_retention_ratio || {}).pros || [],
         oPts: (cohSegC.army_retention_ratio || {}).opponents || [],
@@ -784,28 +784,28 @@
       bodyEl.innerHTML =
         '<div class="obs-grid">' +
           '<article class="obs-card">' +
-            '<div class="obs-card-head"><span class="obs-card-title">Graph 9a · Army Fragmentation %</span><span class="obs-badge">14t cluster</span></div>' +
+            '<div class="obs-card-head"><span class="obs-card-title">Army Spread (Units Outside Main Group)</span><span class="obs-badge">14t cluster</span></div>' +
             '<div class="obs-meds"><span><span class="obs-dot" style="background:' + T.m + '"></span>M ' + fmt(fS.mothman && fS.mothman.med, 1) + '%</span><span><span class="obs-dot" style="background:' + T.p + '"></span>Pro ' + fmt(fS.pros && fS.pros.med, 1) + '%</span><span><span class="obs-dot" style="background:' + T.o + '"></span>Opp ' + fmt(fS.opponents && fS.opponents.med, 1) + '%</span></div>' +
             renderTimeSeriesSvg(fragCfg) +
           '</article>' +
           '<article class="obs-card">' +
-            '<div class="obs-card-head"><span class="obs-card-title">Graph 9b · Army Retention (Alive / Cum)</span><span class="obs-badge">Survival</span></div>' +
+            '<div class="obs-card-head"><span class="obs-card-title">Army Survival Rate (Alive / Total Built)</span><span class="obs-badge">Survival</span></div>' +
             '<div class="obs-meds"><span><span class="obs-dot" style="background:' + T.m + '"></span>M ' + fmt(rS.mothman && rS.mothman.med, 2) + '</span><span><span class="obs-dot" style="background:' + T.p + '"></span>Pro ' + fmt(rS.pros && rS.pros.med, 2) + '</span><span><span class="obs-dot" style="background:' + T.o + '"></span>Opp ' + fmt(rS.opponents && rS.opponents.med, 2) + '</span></div>' +
             renderTimeSeriesSvg(retCfg) +
           '</article>' +
           '<article class="obs-card obs-span-2">' +
-            '<div class="obs-card-head"><div><span class="obs-card-title">Graph 10 · When Pros Engage vs. Retreat (Force Ratio Bins)</span><div class="obs-card-sub">Local army value ratio within 22 tiles at clash start · Bars show fight share, lines show disengage rate</div></div><span class="obs-badge">' + esc(seg === 'all' ? 'All Races' : seg) + '</span></div>' +
+            '<div class="obs-card-head"><div><span class="obs-card-title">Fights Taken &amp; Retreats by Army Odds</span><div class="obs-card-sub">Local army value ratio within 22 tiles at clash start · Bars show fight share, lines show disengage rate</div></div><span class="obs-badge">' + esc(seg === 'all' ? 'All Races' : seg) + '</span></div>' +
             renderEngageRetreatHistogram(erSeg) +
           '</article>' +
           '<article class="obs-card obs-span-2">' +
-            '<div class="obs-card-head"><div><span class="obs-card-title">Graph 15 · Concave Geometry &amp; Front-to-Back Layering</span><div class="obs-card-sub">Schematic scaled directly to measured lateral/depth aspect ratio, frontline-to-backline offset, and 2.5t splash clumping</div></div></div>' +
+            '<div class="obs-card-head"><div><span class="obs-card-title">Measured Firing-Arc Shape &amp; Melee Screening</span><div class="obs-card-sub">Schematic scaled directly to measured lateral/depth aspect ratio, frontline-to-backline offset, and 2.5t splash clumping</div></div></div>' +
             '<div class="obs-pills" style="margin-bottom:8px;">' +
               scopePills.map(function (sp) { return '<button type="button" class="obs-pill' + (state.combatScope === sp ? ' is-active' : '') + '" data-obs-cscope="' + sp + '">' + (sp === 'all' ? 'All' : sp) + '</button>'; }).join('') +
             '</div>' +
             renderConcaveSchematic(concObj.mothman, concObj.pros, scope === 'all' ? 'All Races' : scope) +
           '</article>' +
           '<article class="obs-card obs-span-2">' +
-            '<div class="obs-card-head"><div><span class="obs-card-title">Graphs 16–17 · Army Rotation, Multiprong &amp; Counter-Backstabs</span><div class="obs-card-sub">Bar = Mothman · Blue vertical target = Pro GM · Purple dot = Opponents (' + esc(scope === 'all' ? 'All Races' : scope) + ')</div></div></div>' +
+            '<div class="obs-card-head"><div><span class="obs-card-title">Defensive Response, Base Switches &amp; Multi-Prong Rate</span><div class="obs-card-sub">Bar = Mothman · Blue vertical target = Pro GM · Purple dot = Opponents (' + esc(scope === 'all' ? 'All Races' : scope) + ')</div></div></div>' +
             renderBulletGauges(gaugeRows) +
           '</article>' +
         '</div>';
@@ -922,13 +922,13 @@
 
       const tsList = [];
       const thCfg = {
-        svgKey: 'g11_th', title: 'Graph 11 · Active Townhalls Over Time (0–18m)',
+        svgKey: 'g11_th', title: 'Active Bases Over Time (0–18m)',
         mPts: thSeg.mothman || [], pPts: thSeg.pros || [], oPts: thSeg.opponents || [],
         buckets: e4.buckets_sec || [], maxT: 1080, valKey: 'mean', minYMax: 5,
         yFmt: function (v) { return Number(v).toFixed(1); },
       };
       const gasCfg = {
-        svgKey: 'g12_gas', title: 'Graph 12 · Active Gas Geysers Over Time (0–18m)',
+        svgKey: 'g12_gas', title: 'Active Gas Geysers Over Time (0–18m)',
         mPts: gsSeg.mothman || [], pPts: gsSeg.pros || [], oPts: gsSeg.opponents || [],
         buckets: g7.buckets_sec || [], maxT: 1080, valKey: 'mean', minYMax: 8,
         yFmt: function (v) { return Number(v).toFixed(1); },
@@ -941,21 +941,21 @@
       bodyEl.innerHTML =
         '<div class="obs-grid">' +
           '<article class="obs-card">' +
-            '<div class="obs-card-head"><span class="obs-card-title">Graph 11 · Active Townhalls (0–18m)</span><span class="obs-badge">4+ Reach (≥10m): M ' + fmt(r4Seg.mothman && r4Seg.mothman.pct_ge10m, 0) + '% vs Pro ' + fmt(r4Seg.pros && r4Seg.pros.pct_ge10m, 0) + '%</span></div>' +
+            '<div class="obs-card-head"><span class="obs-card-title">Active Bases Over Time (0–18m)</span><span class="obs-badge">4+ Reach (≥10m): M ' + fmt(r4Seg.mothman && r4Seg.mothman.pct_ge10m, 0) + '% vs Pro ' + fmt(r4Seg.pros && r4Seg.pros.pct_ge10m, 0) + '%</span></div>' +
             '<div class="obs-meds"><span>≥14m 4+ Bases: <strong style="color:' + T.m + '">' + fmt(r4Seg.mothman && r4Seg.mothman.pct_ge14m, 0) + '%</strong> vs Pro <strong style="color:' + T.p + '">' + fmt(r4Seg.pros && r4Seg.pros.pct_ge14m, 0) + '%</strong></span></div>' +
             renderTimeSeriesSvg(thCfg) +
           '</article>' +
           '<article class="obs-card">' +
-            '<div class="obs-card-head"><span class="obs-card-title">Graph 12 · Active Gas Geysers (0–18m)</span><span class="obs-badge">Gas/Base @4+: M ' + fmt(gpbSeg.mothman && gpbSeg.mothman.med, 2) + ' vs Pro ' + fmt(gpbSeg.pros && gpbSeg.pros.med, 2) + '</span></div>' +
+            '<div class="obs-card-head"><span class="obs-card-title">Active Gas Geysers Over Time (0–18m)</span><span class="obs-badge">Gas/Base @4+: M ' + fmt(gpbSeg.mothman && gpbSeg.mothman.med, 2) + ' vs Pro ' + fmt(gpbSeg.pros && gpbSeg.pros.med, 2) + '</span></div>' +
             '<div class="obs-meds"><span>Peak Geysers (med): <strong style="color:' + T.m + '">' + fmt(gpbSeg.mothman && gpbSeg.mothman.peak_gas && gpbSeg.mothman.peak_gas.med, 0) + '</strong> vs Pro <strong style="color:' + T.p + '">' + fmt(gpbSeg.pros && gpbSeg.pros.peak_gas && gpbSeg.pros.peak_gas.med, 0) + '</strong></span></div>' +
             renderTimeSeriesSvg(gasCfg) +
           '</article>' +
           '<article class="obs-card obs-span-2">' +
-            '<div class="obs-card-head"><div><span class="obs-card-title">Base #4–#6 &amp; Gas #7–#10 Timing Dumbbell &amp; Adoption Funnel</span><div class="obs-card-sub">Dot size scales with adoption % · Green = ahead of Pro · Red = behind Pro</div></div><span class="obs-badge">' + esc(seg === 'all' ? 'All Races' : seg) + '</span></div>' +
-            renderTimingDumbbell(btSeg.concat(gtSeg), 'Base 4+ and Gas 7+ timings', 1080) +
+            '<div class="obs-card-head"><div><span class="obs-card-title">Late-Game Base (#4–#6) &amp; Gas (#7–#10) Timings</span><div class="obs-card-sub">Dot size scales with adoption % · Green = ahead of Pro · Red = behind Pro</div></div><span class="obs-badge">' + esc(seg === 'all' ? 'All Races' : seg) + '</span></div>' +
+            renderTimingDumbbell(btSeg.concat(gtSeg), 'Late-game base and gas timings', 1080) +
           '</article>' +
           '<article class="obs-card obs-span-2">' +
-            '<div class="obs-card-head"><div><span class="obs-card-title">Graph 19 · Production Capacity vs. Utilization</span><div class="obs-card-sub">Separates under-built facilities (left) from idle buildings (right)</div></div>' +
+            '<div class="obs-card-head"><div><span class="obs-card-title">Production Buildings Built vs. Time Active</span><div class="obs-card-sub">Separates under-built facilities (left) from idle buildings (right)</div></div>' +
             '<div class="obs-pills">' + ['Protoss', 'Terran', 'Zerg'].map(function (r) { return '<button type="button" class="obs-pill' + (pRace === r ? ' is-active' : '') + '" data-obs-prace="' + r + '">' + r + '</button>'; }).join('') + '</div></div>' +
             renderProdUtilCard(puRace, pRace) +
           '</article>' +
@@ -1048,7 +1048,7 @@
       bodyEl.innerHTML =
         '<div class="obs-grid">' +
           '<article class="obs-card obs-span-2">' +
-            '<div class="obs-card-head"><div><span class="obs-card-title">Graph 13 · T1 / T2 / T3 Unit Value Mix (2m–18m)</span><div class="obs-card-sub">100% stacked active combat value share · <span style="color:' + T.tiers[0] + '">■ T1</span> · <span style="color:' + T.tiers[1] + '">■ T2</span> · <span style="color:' + T.tiers[2] + '">■ T3</span></div></div></div>' +
+            '<div class="obs-card-head"><div><span class="obs-card-title">Army Value by Tech Tier (T1 / T2 / T3)</span><div class="obs-card-sub">100% stacked active combat value share · <span style="color:' + T.tiers[0] + '">■ T1</span> · <span style="color:' + T.tiers[1] + '">■ T2</span> · <span style="color:' + T.tiers[2] + '">■ T3</span></div></div></div>' +
             '<div class="obs-pills" style="margin-bottom:8px;">' +
               ['all', 'Protoss', 'Terran', 'Zerg'].concat(MATCHUPS).map(function (s) {
                 return '<button type="button" class="obs-pill' + (tScope === s ? ' is-active' : '') + '" data-obs-tscope="' + s + '">' + (s === 'all' ? 'All' : s) + '</button>';
@@ -1061,7 +1061,7 @@
           '</article>' +
 
           '<article class="obs-card obs-span-2">' +
-            '<div class="obs-card-head"><div><span class="obs-card-title">Graph 18 · Per-Matchup Unit Composition &amp; Pro Archetype Clusters</span><div class="obs-card-sub">Nearest Pro Cluster: <strong>' + esc(simObj.label || '--') + '</strong> (cosine similarity <strong>' + fmt(simObj.cosine_similarity, 3) + '</strong>)</div></div></div>' +
+            '<div class="obs-card-head"><div><span class="obs-card-title">Unit Mix by Matchup vs. Common Pro Styles</span><div class="obs-card-sub">Nearest Pro Cluster: <strong>' + esc(simObj.label || '--') + '</strong> (cosine similarity <strong>' + fmt(simObj.cosine_similarity, 3) + '</strong>)</div></div></div>' +
             '<div class="obs-pills" style="margin-bottom:6px;">' +
               MATCHUPS.map(function (m) { return '<button type="button" class="obs-pill' + (mu === m ? ' is-active' : '') + '" data-obs-mu="' + m + '">' + m + '</button>'; }).join('') +
             '</div>' +
@@ -1080,13 +1080,13 @@
           '</article>' +
 
           '<article class="obs-card obs-span-2">' +
-            '<div class="obs-card-head"><div><span class="obs-card-title">Graph 14 · Exhaustive All-Upgrades Timing Race (0–18m)</span><div class="obs-card-sub">Dot size = adoption % · Green = faster than Pro · Red = later than Pro</div></div></div>' +
+            '<div class="obs-card-head"><div><span class="obs-card-title">Upgrade Timings &amp; Adoption vs. Pros</span><div class="obs-card-sub">Dot size = adoption % · Green = faster than Pro · Red = later than Pro</div></div></div>' +
             '<div class="obs-pills" style="margin-bottom:8px;">' +
               ['Protoss', 'Terran', 'Zerg'].concat(MATCHUPS).map(function (s) {
                 return '<button type="button" class="obs-pill' + (uScope === s ? ' is-active' : '') + '" data-obs-uscope="' + s + '">' + s + '</button>';
               }).join('') +
             '</div>' +
-            renderTimingDumbbell(uBuilt, 'All upgrades timing dumbbell', 1080) +
+            renderTimingDumbbell(uBuilt, 'Upgrade timings and adoption vs. Pros', 1080) +
             (uMissing.length
               ? '<div class="obs-missing-box"><span class="obs-missing-lbl">Missing / 0% Adoption Upgrades (Pro ≥8%):</span> ' +
                 uMissing.map(function (r) { return '<span class="obs-missing-pill">' + esc(humanize(r.label)) + ' <span style="opacity:.75">(Pro ' + Math.round((r.pros && r.pros.adopt_pct) || 0) + '% @ ' + esc((r.pros && r.pros.med_fmt) || mmss(r.pros && r.pros.med)) + ')</span></span>'; }).join(' ') +
@@ -1251,7 +1251,7 @@
         const obj = (me.by_caster && me.by_caster[ck]) || {};
         const m = obj.mothman || {}, p = obj.pros || {}, o = obj.opponents || {};
         const cfg = {
-          svgKey: 'g21_' + ck, title: 'Graph 21 · ' + (ck === 'OrbitalCommand' ? 'Orbital Command' : ck) + ' Energy (0–200e)',
+          svgKey: 'g21_' + ck, title: (ck === 'OrbitalCommand' ? 'Orbital Command' : ck) + ' Energy (0–200e)',
           mPts: m.mean_energy_curve_18m || [], pPts: p.mean_energy_curve_18m || [], oPts: o.mean_energy_curve_18m || [],
           buckets: me.buckets_sec || [], maxT: 1080, fixedYMax: 200, fixedTicks: [0, 50, 100, 150, 180, 200],
           dangerAbove: 180, dangerLabel: '≥180e Cap Waste', valKey: 'med',
@@ -1309,7 +1309,7 @@
       bodyEl.innerHTML =
         '<div class="obs-grid">' +
           '<article class="obs-card obs-span-2">' +
-            '<div class="obs-card-head"><div><span class="obs-card-title">Graph 20 · Macro Ability Targets &amp; Energy Allocation</span><div class="obs-card-sub">Paired 100% splits by game phase and combat pressure comparing Mothman vs. Grandmaster Pros</div></div><span class="obs-badge">' + esc(sliceTag) + '</span></div>' +
+            '<div class="obs-card-head"><div><span class="obs-card-title">Chrono Boost, Orbital Command &amp; Queen Energy Split</span><div class="obs-card-sub">Paired 100% splits by game phase and combat pressure comparing Mothman vs. Grandmaster Pros</div></div><span class="obs-badge">' + esc(sliceTag) + '</span></div>' +
             phasePillsHtml +
             (pCh ? renderPairedSplitBar('Protoss Chrono Boost Targets · ' + sliceTag, '(Nexus vs. Tech Upgrades vs. Gateway vs. Robotics vs. Stargate)', ['Nexus', 'TechUpgrades', 'Gateway', 'Robo', 'Stargate'], pCh.mothman && pCh.mothman.shares_pct, pCh.pros && pCh.pros.shares_pct) : '') +
             rechHtml +
@@ -1319,7 +1319,7 @@
           '</article>' +
           energyCards +
           '<article class="obs-card obs-span-2">' +
-            '<div class="obs-card-head"><div><span class="obs-card-title">Graph 22 · Combat Spell &amp; Active Ability Usage vs. Pros</span><div class="obs-card-sub">Casts per 10m of games where the caster was built · sorted from 0× blind spots (top) to overuse (bottom)</div></div>' +
+            '<div class="obs-card-head"><div><span class="obs-card-title">Combat Spell Casting Rate vs. Pros</span><div class="obs-card-sub">Casts per 10m of games where the caster was built · sorted from 0× blind spots (top) to overuse (bottom)</div></div>' +
             '<div class="obs-pills">' + ['all', 'Protoss', 'Terran', 'Zerg'].map(function (r) { return '<button type="button" class="obs-pill' + (spRace === r ? ' is-active' : '') + '" data-obs-sprace="' + r + '">' + (r === 'all' ? 'All' : r) + '</button>'; }).join('') + '</div></div>' +
             renderSpellsDiverging(cs.all_flat, spRace) +
           '</article>' +
@@ -1339,11 +1339,11 @@
 
     // ---------- Master Shell & Tab Dispatcher ----------
     const TABS = [
-      { id: 'mine_trade', label: '1. Mine × Trade' },
-      { id: 'combat', label: '2. Combat & Positioning' },
-      { id: 'bases_prod', label: '3. Bases, Gas & Prod' },
-      { id: 'comp_upg', label: '4. Army Comp & Upgrades' },
-      { id: 'abilities', label: '5. Abilities & Energy' },
+      { id: 'mine_trade', label: 'Economy & Trade' },
+      { id: 'combat', label: 'Combat & Positioning' },
+      { id: 'bases_prod', label: 'Bases & Production' },
+      { id: 'comp_upg', label: 'Army & Upgrades' },
+      { id: 'abilities', label: 'Spells & Energy' },
     ];
 
     function render() {
@@ -1377,7 +1377,7 @@
             '<span><span class="obs-line" style="background:' + T.m + '"></span>Mothman (' + mN + 'g)</span>' +
             '<span><span class="obs-line obs-dash" style="border-color:' + T.p + '"></span>Pro GM (' + pN + 'g)</span>' +
             '<span><span class="obs-line" style="background:' + T.o + '"></span>Opponents (' + oN + 'g)</span>' +
-            '<span class="obs-leg-note">22 Pro-comparison graphs · Hover curves &amp; dots for exact values</span>' +
+            '<span class="obs-leg-note">Hover any curve or dot for exact values</span>' +
           '</div>' +
           '<div class="obs-body"></div>' +
         '</div>';

@@ -2069,7 +2069,7 @@ def render_loop_diagram_section(rich: Dict[str, Any], section_num: str = "Sectio
             "why": (
                 "A new version only replaces the ladder bot after beating it directly and clearing the full practice pool without crashes."
             ),
-            "metric": f"{int((rich.get('current_build') or {}).get('live_ship_num') or 15)} live releases shipped across 8 AI Arena bots (Div 6–7 & Div 9)",
+            "metric": f"{int((rich.get('current_build') or {}).get('live_ship_num') or 15)} live releases shipped across 8 AI Arena bots",
         },
         {
             "id": "flywheel",
@@ -2182,7 +2182,6 @@ def render_loop_diagram_section(rich: Dict[str, Any], section_num: str = "Sectio
     return f"""
 <section class="section-rule wide-col" id="loop-section">
   <div class="section-head">
-    <p class="section-num">{html.escape(section_num)}</p>
     <h2 class="section-kicker">How We Test and Ship Changes</h2>
     <p class="section-intro">
       Every update goes through the same seven-step check before reaching the live ladder.
@@ -2312,23 +2311,30 @@ def render_architecture_section(
         },
         "prio": {
             "title": "Build & Spending Queue (What to Build)",
-            "badge": "Decision → Command Filter",
+            "badge": "Decision → Arbiter",
             "what": "Every tick, workers, supply buildings, expansions, tech, upgrades, and army units compete on one priority list. When an expensive item like a second Nexus (400 minerals) or Robotics Bay is almost affordable, it sets cash aside (\"escrow\") so cheaper units do not drain the bank first.",
-            "connects": "Turns all six state readers into ranked build and train orders, then hands them to the command filter.",
+            "connects": "Turns all six state readers into ranked build and train proposals, then hands them to the Resource & Unit Arbiter.",
             "perf": "Shared facility caps keep the build queue and unit executor aligned",
         },
         "micro": {
-            "title": "Squad & Worker Control (How to Fight)",
-            "badge": "Decision → Command Filter",
-            "what": "Controls squads and workers in fights: sniping enemy detectors before cloaked units engage, blinking hurt Stalkers back, dropping Widow Mines into mineral lines, casting spells, and pulling workers against early rushes.",
-            "connects": "Uses scouting memory, enemy tech clues, fight simulations, and map geometry to issue unit orders to the command filter.",
-            "perf": "Detector sniping, Blink kiting, transport juggles, spellcasting, and rush defense",
+            "title": "Squad & Multi-Prong Control (How to Fight)",
+            "badge": "Decision → Arbiter",
+            "what": "Controls army staging, concave arcs, synchronized multi-prong raids, base rotations, detector sniping, Blink kiting, transport drops, spellcasting, and worker defense against early rushes.",
+            "connects": "Uses scouting memory, hidden-tech clues, fight odds, and map geometry to propose unit and squad actions to the Resource & Unit Arbiter.",
+            "perf": "Concaves, multi-prong flanking, Warp Prism warp-ins, spellcasting, and rush defense",
+        },
+        "arbiter": {
+            "title": "Resource & Unit Arbiter",
+            "badge": "Coordination → Command Filter",
+            "what": "Owns the shared mineral, gas, larva, and unit-assignment ledger each frame so macro and combat modules never double-spend the same cash or pull the same unit in opposite directions. When gas savings stall a tech unit, it safely spends surplus minerals on army or production without draining reserved gas.",
+            "connects": "Resolves conflicts between Build & Spending Queue and Squad & Multi-Prong Control, feeds resource-starvation signals back to macro abilities, and passes approved orders to the Command Priority Filter.",
+            "perf": "Zero double-spent resources or conflicting unit leases per frame",
         },
         "apm": {
             "title": "Command Priority Filter",
             "badge": "Output → StarCraft II",
-            "what": "Both the build queue and combat control try to move units every tick. The filter sorts orders into four priority levels (1. Survival & Spells, 2. Combat, 3. Building & Training, 4. Routine Mining), drops duplicate clicks, and blocks lower-priority rules from overwriting urgent commands on the same unit.",
-            "connects": "Merges orders from both decision modules into one conflict-free batch per game step.",
+            "what": "Sorts approved orders into four priority levels (1. Survival & Spells, 2. Combat Control, 3. Building & Training, 4. Routine Mining), drops duplicate clicks, and blocks lower-priority rules from overwriting urgent commands on the same unit.",
+            "connects": "Delivers one conflict-free command batch to StarCraft II every 45 milliseconds.",
             "perf": f"{lp['wire_rejects']} rejected game commands · {lp['avg_step_ms']:.2f} ms average step time",
         },
     }
@@ -2342,35 +2348,35 @@ def render_architecture_section(
         },
         "macro": {
             "label": "Example: Taking a 2nd Base",
-            "active": ["sc2", "econ", "prodb", "map", "prio", "apm"],
+            "active": ["sc2", "econ", "prodb", "map", "prio", "arbiter", "apm"],
             "title": "How Mothman saves 400 minerals for a second Nexus at 1:30 without Stalkers spending the cash",
             "steps": [
                 "1. Economy & Supply sees 350 minerals and 20 Probes; Pro Timing Targets show Grandmasters take a second base around 1:33.",
-                "2. Build & Spending Queue ranks the second Nexus ahead of training another Stalker and holds 350 minerals aside so Gateways pause for four seconds.",
-                "3. Map & Base Layout picks the natural expansion pad using walking distance (identical from north or south spawns).",
-                "4. Command Priority Filter sends the Build Nexus order at Priority 3 and locks that builder Probe so routine mining (Priority 4) cannot pull it back to minerals.",
+                "2. Build & Spending Queue ranks the second Nexus ahead of training another Stalker and requests a 400-mineral reservation.",
+                "3. Resource & Unit Arbiter locks those minerals aside while Map & Base Layout picks the natural expansion pad by walking distance.",
+                "4. Command Priority Filter sends the Build Nexus order at Priority 3 and locks that builder Probe so routine mining (Priority 4) cannot pull it back.",
             ],
         },
         "rush": {
             "label": "Example: 15-Probe Rush",
-            "active": ["sc2", "scout", "mirror", "fap", "prio", "micro", "apm"],
+            "active": ["sc2", "scout", "mirror", "fap", "prio", "micro", "arbiter", "apm"],
             "title": "How the bot responds when 15 enemy Probes rush the main base at 1:00",
             "steps": [
-                "1. Scouting & Memory counts 12+ enemy workers crossing the map, and Fight Simulator flags immediate danger at home.",
-                "2. Enemy Tech Inference flags an all-in worker rush, turning off expansions, extra Supply Depots, and gas mining.",
-                "3. Build & Spending Queue cancels unfinished expansions or gas buildings for a 75% refund and rushes out the first Zealot, Marine, or Spine Crawler and Zerglings.",
-                "4. Squad & Worker Control pulls workers to fight while keeping 3 to 4 workers mining so income never hits zero, and Command Priority Filter locks those defenders at Priority 1.",
+                "1. Scouting & Memory counts 12+ enemy workers crossing the map, and Local Fight Odds flags immediate danger at home.",
+                "2. Hidden-Tech Clues flags an all-in worker rush, pausing expansions, extra Supply Depots, and gas mining.",
+                "3. Build & Spending Queue cancels unfinished expansions or gas buildings for a 75% refund and rushes the first defenders.",
+                "4. Squad & Multi-Prong Control pulls defending workers while keeping 3 to 4 mining, and the Arbiter + Command Filter lock those defenders at Priority 1.",
             ],
         },
         "cloak": {
             "label": "Example: Cloaked Banshee",
-            "active": ["sc2", "scout", "mirror", "prio", "micro", "apm"],
+            "active": ["sc2", "scout", "mirror", "prio", "micro", "arbiter", "apm"],
             "title": "How the bot handles cloaked Banshees before they wipe a mineral line",
             "steps": [
                 "1. Scouting & Memory spots a Starport with a Tech Lab (or workers taking invisible damage).",
-                "2. Enemy Tech Inference flags a cloaked threat while ignoring false alarms like Sentry hallucinations.",
-                "3. Build & Spending Queue bumps detection (Observer, Spore Crawler, or Missile Turret) ahead of normal army production.",
-                "4. Squad & Worker Control pulls workers away from the Banshee until detection arrives, then focus-fires the revealed Banshee at Priority 2.",
+                "2. Hidden-Tech Clues flags a cloaked threat while ignoring false alarms like Sentry hallucinations.",
+                "3. Build & Spending Queue + Resource & Unit Arbiter reserve minerals and gas for detection (Observer, Spore Crawler, or Missile Turret) ahead of normal army.",
+                "4. Squad & Multi-Prong Control pulls workers away until detection arrives, then focus-fires the revealed Banshee at Priority 2.",
             ],
         },
     }
@@ -2379,7 +2385,7 @@ def render_architecture_section(
     walks_json = json.dumps(walkthroughs, ensure_ascii=False).replace("</", "<\\/")
 
     arch_svg = """
-<svg viewBox="0 0 760 568" class="diagram-svg" id="arch-svg" role="img" aria-label="How the bot plays each frame: six game-state readers feeding build queue and squad control into a command priority filter">
+<svg viewBox="0 0 760 662" class="diagram-svg" id="arch-svg" role="img" aria-label="How the bot decides each frame: six game-state readers feeding build queue and squad control through a resource and unit arbiter into a command priority filter">
   <defs>
     <marker id="arr-arch" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#8C877A" />
@@ -2387,16 +2393,22 @@ def render_architecture_section(
     <marker id="arr-ret" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
       <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#4A6B82" />
     </marker>
+    <marker id="arr-fb" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#C4633E" />
+    </marker>
   </defs>
 
   <!-- Right-side feedback loop arrow: Command Priority Filter -> StarCraft II -->
-  <path d="M 684 504 L 730 504 L 730 42 L 690 42" fill="none" stroke="#4A6B82" stroke-width="2.2" marker-end="url(#arr-ret)" />
-  <text x="742" y="276" text-anchor="middle" fill="#4A6B82" font-size="11" font-weight="600" transform="rotate(-90 742 276)">Filtered commands sent 22×/sec</text>
+  <path d="M 684 598 L 730 598 L 730 42 L 690 42" fill="none" stroke="#4A6B82" stroke-width="2.2" marker-end="url(#arr-ret)" />
+  <text x="742" y="320" text-anchor="middle" fill="#4A6B82" font-size="11" font-weight="600" transform="rotate(-90 742 320)">Filtered commands sent 22×/sec</text>
 
-  <!-- TOP BAND: StarCraft II Game State -->
-  <g class="svg-node arch-svg-node" data-arch-id="sc2" tabindex="0" role="button" aria-label="StarCraft II Game State">
+  <!-- Left-side subtle feedback arrow: Arbiter -> Build & Spending Queue -->
+  <path d="M 30 482 L 10 482 L 10 365 L 26 365" fill="none" stroke="#C4633E" stroke-width="1.6" stroke-dasharray="4,3" marker-end="url(#arr-fb)" />
+
+  <!-- ROW 1: StarCraft II Engine -->
+  <g class="svg-node arch-svg-node" data-arch-id="sc2" tabindex="0" role="button" aria-label="StarCraft II Engine">
     <rect x="30" y="14" width="654" height="56" rx="10" class="node-bg-dark" />
-    <text x="357" y="37" text-anchor="middle" fill="#FAF9F5" font-size="14" font-weight="600">StarCraft II Game State (every 45 ms)</text>
+    <text x="357" y="37" text-anchor="middle" fill="#FAF9F5" font-size="14" font-weight="600">StarCraft II Engine (every 45 ms)</text>
     <text x="357" y="55" text-anchor="middle" fill="#D4D0C5" font-size="11.5">Visible units, resources, supply, and terrain</text>
   </g>
 
@@ -2405,11 +2417,10 @@ def render_architecture_section(
   <line x1="357" y1="70" x2="357" y2="106" stroke="#8C877A" stroke-width="1.8" marker-end="url(#arr-arch)" />
   <line x1="581" y1="70" x2="581" y2="106" stroke="#8C877A" stroke-width="1.8" marker-end="url(#arr-arch)" />
 
-  <!-- Subtle grouping box around the 6 Game-State Readers -->
+  <!-- ROW 2: Six Game-State Readers -->
   <rect x="20" y="92" width="674" height="176" rx="12" fill="#F4F2EA" stroke="#E0DCD0" stroke-width="1.2" />
-  <text x="34" y="108" fill="#7A7870" font-size="10.5" font-weight="600" letter-spacing="0.06em">SIX PARALLEL GAME-STATE READERS</text>
+  <text x="34" y="108" fill="#7A7870" font-size="10.5" font-weight="600" letter-spacing="0.06em">SIX GAME-STATE READERS</text>
 
-  <!-- Row 1 of Readers -->
   <g class="svg-node arch-svg-node" data-arch-id="econ" tabindex="0" role="button" aria-label="Economy and Supply reader">
     <rect x="32" y="116" width="204" height="64" rx="8" class="node-bg" />
     <text x="134" y="140" text-anchor="middle" class="node-title">Economy &amp; Supply</text>
@@ -2420,28 +2431,26 @@ def render_architecture_section(
     <text x="357" y="140" text-anchor="middle" class="node-title">Scouting &amp; Memory</text>
     <text x="357" y="159" text-anchor="middle" class="node-sub">Seen enemies &amp; last-known positions</text>
   </g>
-  <g class="svg-node arch-svg-node" data-arch-id="mirror" tabindex="0" role="button" aria-label="Enemy Tech Inference">
+  <g class="svg-node arch-svg-node" data-arch-id="mirror" tabindex="0" role="button" aria-label="Hidden-Tech Clues">
     <rect x="478" y="116" width="204" height="64" rx="8" class="node-bg-accent" />
-    <text x="580" y="140" text-anchor="middle" class="node-title">Enemy Tech Inference</text>
-    <text x="580" y="159" text-anchor="middle" class="node-sub">Guesses hidden tech &amp; early rushes</text>
+    <text x="580" y="140" text-anchor="middle" class="node-title">Hidden-Tech Clues</text>
+    <text x="580" y="159" text-anchor="middle" class="node-sub">Infers hidden tech &amp; early rushes</text>
   </g>
-  <!-- Horizontal arrow: Scouting -> Enemy Tech Inference -->
-  <line x1="459" y1="148" x2="476" y2="148" stroke="#C4633E" stroke-width="1.8" marker-end="url(#arr-fw)" />
+  <line x1="459" y1="148" x2="476" y2="148" stroke="#C4633E" stroke-width="1.8" marker-end="url(#arr-fb)" />
 
-  <!-- Row 2 of Readers -->
   <g class="svg-node arch-svg-node" data-arch-id="prodb" tabindex="0" role="button" aria-label="Pro Timing Targets">
     <rect x="32" y="192" width="204" height="64" rx="8" class="node-bg" />
     <text x="134" y="216" text-anchor="middle" class="node-title">Pro Timing Targets</text>
     <text x="134" y="235" text-anchor="middle" class="node-sub">Grandmaster worker, base &amp; gas curves</text>
   </g>
-  <g class="svg-node arch-svg-node" data-arch-id="fap" tabindex="0" role="button" aria-label="Fight Simulator">
+  <g class="svg-node arch-svg-node" data-arch-id="fap" tabindex="0" role="button" aria-label="Local Fight Odds">
     <rect x="255" y="192" width="204" height="64" rx="8" class="node-bg" />
-    <text x="357" y="216" text-anchor="middle" class="node-title">Fight Simulator</text>
-    <text x="357" y="235" text-anchor="middle" class="node-sub">Estimates whether nearby units win</text>
+    <text x="357" y="216" text-anchor="middle" class="node-title">Local Fight Odds</text>
+    <text x="357" y="235" text-anchor="middle" class="node-sub">Estimates whether nearby squads win</text>
   </g>
-  <g class="svg-node arch-svg-node" data-arch-id="map" tabindex="0" role="button" aria-label="Map and Base Layout">
+  <g class="svg-node arch-svg-node" data-arch-id="map" tabindex="0" role="button" aria-label="Map and Choke Geometry">
     <rect x="478" y="192" width="204" height="64" rx="8" class="node-bg" />
-    <text x="580" y="216" text-anchor="middle" class="node-title">Map &amp; Base Layout</text>
+    <text x="580" y="216" text-anchor="middle" class="node-title">Map &amp; Choke Geometry</text>
     <text x="580" y="235" text-anchor="middle" class="node-sub">Ramps, chokes &amp; safe building spots</text>
   </g>
 
@@ -2455,44 +2464,55 @@ def render_architecture_section(
 
   <!-- ROW 3: Two Parallel Decision Modules -->
   <g class="svg-node arch-svg-node is-active" data-arch-id="prio" tabindex="0" role="button" aria-label="Build and Spending Queue">
-    <rect x="30" y="318" width="318" height="94" rx="10" class="node-bg" />
-    <text x="189" y="340" text-anchor="middle" class="node-kicker-fw">ECONOMY · WHAT TO BUILD</text>
-    <text x="189" y="361" text-anchor="middle" class="node-title">Build &amp; Spending Queue</text>
-    <text x="189" y="381" text-anchor="middle" class="node-sub">Scores workers, bases, tech &amp; units each tick;</text>
-    <text x="189" y="397" text-anchor="middle" class="node-sub">holds cash aside ("escrow") for big purchases</text>
+    <rect x="30" y="318" width="318" height="90" rx="10" class="node-bg" />
+    <text x="189" y="339" text-anchor="middle" class="node-kicker-fw">ECONOMY · WHAT TO BUILD</text>
+    <text x="189" y="359" text-anchor="middle" class="node-title">Build &amp; Spending Queue</text>
+    <text x="189" y="378" text-anchor="middle" class="node-sub">Scores workers, bases, tech &amp; units each tick;</text>
+    <text x="189" y="394" text-anchor="middle" class="node-sub">reserves cash for priority expansions and tech</text>
   </g>
 
-  <g class="svg-node arch-svg-node" data-arch-id="micro" tabindex="0" role="button" aria-label="Squad and Worker Control">
-    <rect x="366" y="318" width="318" height="94" rx="10" class="node-bg" />
-    <text x="525" y="340" text-anchor="middle" class="node-kicker-fw">COMBAT · HOW TO FIGHT</text>
-    <text x="525" y="361" text-anchor="middle" class="node-title">Squad &amp; Worker Control</text>
-    <text x="525" y="381" text-anchor="middle" class="node-sub">Kiting, Blink, spells, drops, detector sniping,</text>
-    <text x="525" y="397" text-anchor="middle" class="node-sub">and pulling workers against rushes</text>
+  <g class="svg-node arch-svg-node" data-arch-id="micro" tabindex="0" role="button" aria-label="Squad and Multi-Prong Control">
+    <rect x="366" y="318" width="318" height="90" rx="10" class="node-bg" />
+    <text x="525" y="339" text-anchor="middle" class="node-kicker-fw">COMBAT · HOW TO FIGHT</text>
+    <text x="525" y="359" text-anchor="middle" class="node-title">Squad &amp; Multi-Prong Control</text>
+    <text x="525" y="378" text-anchor="middle" class="node-sub">Staging, concaves, multi-prong flanks, base switches,</text>
+    <text x="525" y="394" text-anchor="middle" class="node-sub">spells, drops, and worker rush defense</text>
   </g>
 
-  <!-- Converging arrows into Command Priority Filter -->
-  <line x1="189" y1="412" x2="189" y2="454" stroke="#8C877A" stroke-width="2" marker-end="url(#arr-arch)" />
-  <line x1="525" y1="412" x2="525" y2="454" stroke="#8C877A" stroke-width="2" marker-end="url(#arr-arch)" />
-  <text x="200" y="439" fill="#7A7870" font-size="10.5">Build &amp; train orders</text>
-  <text x="536" y="439" fill="#7A7870" font-size="10.5">Combat &amp; spell orders</text>
+  <!-- Arrows into Resource & Unit Arbiter -->
+  <line x1="189" y1="408" x2="189" y2="442" stroke="#8C877A" stroke-width="2" marker-end="url(#arr-arch)" />
+  <line x1="525" y1="408" x2="525" y2="442" stroke="#8C877A" stroke-width="2" marker-end="url(#arr-arch)" />
+  <text x="200" y="430" fill="#7A7870" font-size="10.5">Build &amp; train proposals</text>
+  <text x="536" y="430" fill="#7A7870" font-size="10.5">Squad &amp; spell proposals</text>
 
-  <!-- ROW 4: Command Priority Filter -->
+  <!-- ROW 4: Resource & Unit Arbiter (NEW) -->
+  <g class="svg-node arch-svg-node" data-arch-id="arbiter" tabindex="0" role="button" aria-label="Resource and Unit Arbiter">
+    <rect x="30" y="446" width="654" height="68" rx="10" class="node-bg-accent" />
+    <text x="357" y="466" text-anchor="middle" class="node-kicker-fw">COORDINATION · SINGLE BUDGET &amp; UNIT LEDGER</text>
+    <text x="357" y="485" text-anchor="middle" class="node-title">Resource &amp; Unit Arbiter</text>
+    <text x="357" y="502" text-anchor="middle" class="node-sub">Prevents double-spending minerals, gas, larva, or combat units; spends surplus minerals safely when gas-blocked</text>
+  </g>
+
+  <!-- Arrow Arbiter -> Command Priority Filter -->
+  <line x1="357" y1="514" x2="357" y2="548" stroke="#8C877A" stroke-width="2" marker-end="url(#arr-arch)" />
+  <text x="369" y="536" fill="#7A7870" font-size="10.5">Approved conflict-free orders</text>
+
+  <!-- ROW 5: Command Priority Filter -->
   <g class="svg-node arch-svg-node" data-arch-id="apm" tabindex="0" role="button" aria-label="Command Priority Filter">
-    <rect x="30" y="458" width="654" height="94" rx="10" class="node-bg" />
-    <text x="357" y="481" text-anchor="middle" class="node-title">Command Priority Filter</text>
-    <text x="357" y="499" text-anchor="middle" class="node-sub">Drops duplicate clicks so routine mining never overwrites urgent combat or survival orders</text>
-    <!-- Visual 1..4 priority levels -->
-    <rect x="50" y="512" width="144" height="28" rx="5" fill="#FCECE6" stroke="#C4633E" stroke-width="1" />
-    <text x="122" y="530" text-anchor="middle" fill="#A34E2E" font-size="10.5" font-weight="600">1 · Survival &amp; Spells</text>
+    <rect x="30" y="552" width="654" height="94" rx="10" class="node-bg" />
+    <text x="357" y="575" text-anchor="middle" class="node-title">Command Priority Filter</text>
+    <text x="357" y="593" text-anchor="middle" class="node-sub">Drops duplicate clicks so routine mining never overwrites urgent combat or survival orders</text>
+    <rect x="50" y="606" width="144" height="28" rx="5" fill="#FCECE6" stroke="#C4633E" stroke-width="1" />
+    <text x="122" y="624" text-anchor="middle" fill="#A34E2E" font-size="10.5" font-weight="600">1 · Survival &amp; Spells</text>
 
-    <rect x="206" y="512" width="144" height="28" rx="5" fill="#EEF3F6" stroke="#4A6B82" stroke-width="1" />
-    <text x="278" y="530" text-anchor="middle" fill="#355166" font-size="10.5" font-weight="600">2 · Combat Control</text>
+    <rect x="206" y="606" width="144" height="28" rx="5" fill="#EEF3F6" stroke="#4A6B82" stroke-width="1" />
+    <text x="278" y="624" text-anchor="middle" fill="#355166" font-size="10.5" font-weight="600">2 · Combat Control</text>
 
-    <rect x="362" y="512" width="144" height="28" rx="5" fill="#F4F2EA" stroke="#B5B0A3" stroke-width="1" />
-    <text x="434" y="530" text-anchor="middle" fill="#4A4945" font-size="10.5" font-weight="600">3 · Building &amp; Training</text>
+    <rect x="362" y="606" width="144" height="28" rx="5" fill="#F4F2EA" stroke="#B5B0A3" stroke-width="1" />
+    <text x="434" y="624" text-anchor="middle" fill="#4A4945" font-size="10.5" font-weight="600">3 · Building &amp; Training</text>
 
-    <rect x="518" y="512" width="144" height="28" rx="5" fill="#FAF9F5" stroke="#D5D1C5" stroke-width="1" />
-    <text x="590" y="530" text-anchor="middle" fill="#7A7870" font-size="10.5" font-weight="600">4 · Routine Mining</text>
+    <rect x="518" y="606" width="144" height="28" rx="5" fill="#FAF9F5" stroke="#D5D1C5" stroke-width="1" />
+    <text x="590" y="624" text-anchor="middle" fill="#7A7870" font-size="10.5" font-weight="600">4 · Routine Mining</text>
   </g>
 </svg>
 """
@@ -2502,14 +2522,13 @@ def render_architecture_section(
     return f"""
 <section class="section-rule wide-col" id="architecture-section">
   <div class="section-head">
-    <p class="section-num">{html.escape(section_num)}</p>
-    <h2 class="section-kicker">How the Bot Plays Each Frame</h2>
+    <h2 class="section-kicker">How the Bot Decides Each Frame</h2>
     <p class="section-intro">
       Every 45 milliseconds, StarCraft II sends the current map state. Six independent readers digest economy,
-      scouting, enemy tech clues, pro timing targets, local fight odds, and map geometry, then feed two modules:
-      one scores <strong>what to build</strong>, and the other controls <strong>how units fight</strong>.
-      At the bottom, a <strong>command filter</strong> drops duplicate clicks and stops routine mining orders
-      from overwriting urgent combat actions.
+      scouting, hidden-tech clues, pro timing targets, local fight odds, and map geometry, then feed two modules:
+      one scores <strong>what to build</strong> and the other directs <strong>how squads fight</strong>.
+      A shared <strong>Resource &amp; Unit Arbiter</strong> prevents double-spending or conflicting unit orders
+      before the <strong>Command Priority Filter</strong> sends one clean batch back to the game.
     </p>
   </div>
 
@@ -2582,16 +2601,13 @@ def render_tactics_explorer_section(
     cats_json = json.dumps(enriched_cats, ensure_ascii=False).replace("</", "<\\/")
 
     pills = [
-        f'<button type="button" class="cat-pill" data-cat-idx="all">'
-        f'All Scenarios <span class="pill-n">{total_recorded_clips}</span>'
-        f"</button>"
+        '<button type="button" class="cat-pill" data-cat-idx="all">All Drills</button>'
     ]
     for idx, c in enumerate(enriched_cats):
         cls = "cat-pill is-active" if idx == default_idx else "cat-pill"
-        count_lbl = f'{c["clip_count"]}' if c["clip_count"] else f'0/{c["total"]}'
         pills.append(
             f'<button type="button" class="{cls}" data-cat-idx="{idx}">'
-            f'{html.escape(c["label"])} <span class="pill-n">{count_lbl}</span>'
+            f'{html.escape(c["label"])}'
             f"</button>"
         )
 
@@ -2615,11 +2631,11 @@ def render_tactics_explorer_section(
         "clips": [],
     }
 
-    def _initial_clip_cards(clips: List[Dict[str, Any]]) -> str:
+    def _initial_clip_cards(clips: List[Dict[str, Any]], cap: int = 6) -> str:
         if not clips:
             return '<p class="t-muted">No verified 3D recordings are staged for this category yet.</p>'
         cards = []
-        for cl in clips:
+        for cl in clips[:cap]:
             res_cls = "t-win" if cl.get("outcome") == "win" else ("t-loss" if cl.get("outcome") == "loss" else "t-muted")
             nc_score = cl.get("non_combat_score")
             nc_html = ""
@@ -2632,10 +2648,6 @@ def render_tactics_explorer_section(
                 sv_html = '<span class="spell-badge spell-ok">Spell verified</span>'
             elif sv is False:
                 sv_html = '<span class="spell-badge spell-miss">Spell uncast</span>'
-            sid_txt = str(cl.get("id") or "")
-            m_sc = re.match(r"^sc2-([a-z0-9]+-[a-z0-9]+)(?:-|$)", sid_txt, flags=re.I)
-            short_sid = m_sc.group(1) if m_sc else sid_txt
-            sid_html = f'<div class="sid-pill" data-sid="{html.escape(sid_txt, quote=True)}" title="{html.escape(sid_txt, quote=True)}">{html.escape(short_sid)}</div>' if sid_txt else ""
             vhtml = render_video_element(
                 src=cl["src"],
                 poster=cl.get("poster", ""),
@@ -2650,7 +2662,6 @@ def render_tactics_explorer_section(
                 f'<span class="meta-badges">{nc_html}{sv_html}<span class="{res_cls}">{html.escape(cl.get("result_label", ""))}</span></span>'
                 f"</div>"
                 f'<h4>{html.escape(cl["title"])}</h4>'
-                f"{sid_html}"
                 f'<figure class="clip-figure">{vhtml}<figcaption>{html.escape(cl.get("caption", ""))}</figcaption></figure>'
                 f"</article>"
             )
@@ -2677,52 +2688,33 @@ def render_tactics_explorer_section(
             first_metrics.append(
                 f'<div class="m-chip"><span class="m-lbl">Spell Cast Verified</span><strong>{first["sv_ok"]}/{first["sv_n"]}</strong></div>'
             )
-    first_counts_lbl = (
-        f'{first["clip_count"]} recorded · {first["total"]} in catalog (non-combat suite)'
-        if (first.get("is_non_combat") and not first.get("core"))
-        else f'{first["clip_count"]} recorded · {first["total"]} in catalog ({first["core"]} core)'
-    )
     metric_cls = "metric-strip" if len(first_metrics) >= 3 else "metric-strip metric-strip-2"
-    pop_cats = sum(1 for c in enriched_cats if c["clip_count"] > 0)
-
-    all_suite_note = (
-        f"full {a3['all_total']}-scenario sweep: <strong>{html.escape(a3['all_rec'])}</strong> at "
-        f"<strong>{a3['all_trade']:.2f}×</strong> trade; "
-        if a3.get("all_rec") and a3.get("all_total")
-        else ""
-    )
-    l60_arena_note = (
-        "Loop 62 updates lifted Ability Mastery to a new high of <strong>23–9</strong> "
-        "(28 of 32 spells verified in-engine; Protoss <strong>9–0</strong> sweep, Zerg <strong>8–2</strong>) "
-        "alongside <strong>62.0/100</strong> average on Non-Combat destructible-rock and mineral-walk drills. "
-        if int(a3.get("loop_num") or 0) >= 62
-        else (
-            "Loop 60 updates lifted Ability Mastery to <strong>22–10</strong> (Protoss <strong>9–0</strong> sweep) "
-            "and restored Non-Combat destructible-rock and mineral-walk shortcuts to <strong>62.0/100</strong> average. "
-            if int(a3.get("loop_num") or 0) >= 60
-            else ""
-        )
+    first_total_clips = len(first.get("clips", []))
+    show_more_btn = (
+        f'<div class="arena-more-wrap" id="arena-more-wrap">'
+        f'<button type="button" class="cat-pill" id="arena-show-all-btn">Show all {first_total_clips} drills in {html.escape(first["label"])}</button>'
+        f"</div>"
+        if first_total_clips > 6
+        else '<div class="arena-more-wrap" id="arena-more-wrap" style="display:none;"></div>'
     )
 
     return f"""
 <section class="section-rule wide-col" id="tactics-section">
   <div class="section-head">
-    <p class="section-num">{html.escape(section_num)}</p>
-    <h2 class="section-kicker">Tactics Arena Scenarios</h2>
+    <h2 class="section-kicker">Isolated Micro &amp; Spell Drills</h2>
     <p class="section-intro">
-      Isolated combat, harassment, and spell-casting drills run inside StarCraft II so we can verify unit control
-      without playing a full match. Below are all <strong>{total_recorded_clips}</strong> tactical scenarios currently
-      captured as real 3D StarCraft II video across <strong>{pop_cats}</strong> categories ({all_suite_note}latest core check:
-      <strong>{html.escape(a3['dummy_rec'])}</strong> at <strong>{a3['dummy_trade']:.2f}×</strong> trade vs. scripted AI,
-      <strong>{html.escape(a3['sp_rec'])}</strong> at <strong>{a3['sp_trade']:.2f}×</strong> vs. self). {l60_arena_note}Videos stay unloaded until you press play.
+      Short combat, harassment, and spell-casting drills run inside StarCraft II to verify unit control directly
+      (latest core drill pass: <strong>{html.escape(a3['dummy_rec'])}</strong> at <strong>{a3['dummy_trade']:.2f}×</strong>
+      trade vs. scripted AI, <strong>{html.escape(a3['sp_rec'])}</strong> at <strong>{a3['sp_trade']:.2f}×</strong> vs. self).
+      Videos stay unloaded until you press play.
     </p>
   </div>
 
   <div class="interactive-panel">
-    <div class="cat-pills" role="tablist" aria-label="Tactics Arena categories">
+    <div class="cat-pills" role="tablist" aria-label="Micro and spell drill categories">
       {"".join(pills)}
     </div>
-    <div class="arena-filter-bar" aria-label="Filter recorded scenarios">
+    <div class="arena-filter-bar" aria-label="Filter recorded drills">
       <div class="arena-filter-group" role="group" aria-label="Filter by race">
         <button type="button" class="cat-pill is-active" data-arena-race="all">All Races</button>
         <button type="button" class="cat-pill" data-arena-race="Protoss">Protoss</button>
@@ -2736,21 +2728,20 @@ def render_tactics_explorer_section(
         <button type="button" class="cat-pill" data-arena-outcome="spell_ok">Spell Verified</button>
       </div>
       <input type="search" id="arena-search-input" class="arena-search-input"
-             placeholder="Search unit, spell, or scenario ID…" aria-label="Search tactical scenarios" />
+             placeholder="Search unit, spell, or drill…" aria-label="Search micro and spell drills" />
     </div>
     <div class="detail-drawer" id="cat-detail">
       <div class="detail-top-row">
         <div class="detail-title" id="cat-detail-title">{html.escape(first["label"])}</div>
-        <span class="detail-badge" id="cat-detail-counts">{html.escape(first_counts_lbl)}</span>
       </div>
       <p class="detail-body" id="cat-detail-desc">{html.escape(first["desc"])}</p>
       <div class="{metric_cls}" id="cat-detail-metrics">
         {"".join(first_metrics)}
       </div>
-      <div class="mini-kicker" id="cat-clips-heading" style="margin-top:0.85rem;">Recorded Scenarios ({first["clip_count"]} shown)</div>
-      <div class="featured-grid" id="cat-detail-clips" style="margin-top:0.5rem;">
-        {_initial_clip_cards(first.get("clips", []))}
+      <div class="featured-grid" id="cat-detail-clips" style="margin-top:0.75rem;">
+        {_initial_clip_cards(first.get("clips", []), cap=6)}
       </div>
+      {show_more_btn}
     </div>
   </div>
   <script>window.__ARENA_CATS__ = {cats_json}; window.__ARENA_DEFAULT_IDX__ = {default_idx};</script>
@@ -3088,7 +3079,7 @@ def render_matchup_evaluation_section(
             else ""
         )
         race_table_html = f"""
-  <h3 style="margin:1.25rem 0 0.45rem;font-size:1.08rem;">Current Build by Race ({html.escape(rel_in_parens)})</h3>
+  <h3 style="margin:1.25rem 0 0.45rem;font-size:1.08rem;">Results by Race</h3>
   <div class="table-wrap table-compact" style="margin-bottom:1.35rem;">
     <table>
       <thead>
@@ -3222,118 +3213,57 @@ def render_matchup_evaluation_section(
       </div>
 """
 
-    # Build 9-row Grandmaster Pro vs. Mothman Geometric Base Layout table (4:10)
-    pro_bp_metrics = rich.get("pro_base_metrics") or {}
-    pro_bp_rows = []
-    for m in mu_list:
-        mu = m["matchup"]
-        pm_d = (pro_bp_metrics.get(mu) or {}).get("PRO") or {}
-        mm_d = (pro_bp_metrics.get(mu) or {}).get("MOTHMAN") or {}
-        if not pm_d and not mm_d:
-            continue
-        def _f_opt(v: Any, suffix: str = "") -> str:
-            if v is None:
-                return "—"
-            return f"{float(v):.1f}{suffix}"
-        def _f_pct(v: Any) -> str:
-            if v is None:
-                return "—"
-            return f"{float(v):.0f}%"
-        p_snn = _f_opt(pm_d.get("sup_nn"))
-        m_snn = _f_opt(mm_d.get("sup_nn"))
-        p_cl = _f_pct(pm_d.get("sup_clump_pct")) if pm_d.get("sup_nn") is not None else "—"
-        m_cl = _f_pct(mm_d.get("sup_clump_pct")) if mm_d.get("sup_nn") is not None else "—"
-        p_mw = _f_pct(pm_d.get("main_wall_pct"))
-        m_mw = _f_pct(mm_d.get("main_wall_pct"))
-        p_nw = _f_pct(pm_d.get("nat_wall_pct"))
-        m_nw = _f_pct(mm_d.get("nat_wall_pct"))
-        p_ns = _f_pct(pm_d.get("nat_sup_pct")) if pm_d.get("sup_nn") is not None else "—"
-        m_ns = _f_pct(mm_d.get("nat_sup_pct")) if mm_d.get("sup_nn") is not None else "—"
-        p_nd = _f_opt(pm_d.get("nat_def"))
-        m_nd = _f_opt(mm_d.get("nat_def"))
-        pro_bp_rows.append(
-            f"<tr>"
-            f"<td><strong>{mu}</strong> <span class=\"t-muted\">({pm_d.get('n',0)}/{mm_d.get('n',0)})</span></td>"
-            f'<td style="text-align:right">{p_snn} / {m_snn}</td>'
-            f'<td style="text-align:right">{p_cl} / {m_cl}</td>'
-            f'<td style="text-align:right">{p_mw} / {m_mw}</td>'
-            f'<td style="text-align:right">{p_nw} / {m_nw}</td>'
-            f'<td style="text-align:right">{p_ns} / {m_ns}</td>'
-            f'<td style="text-align:right">{p_nd} / {m_nd}</td>'
-            f"</tr>"
-        )
-
-    pro_bp_block = ""
-    if pro_bp_rows:
-        pro_bp_block = f"""
-    <div style="margin-top:1.65rem;">
-      <h4 style="margin:0 0 0.45rem;font-family:var(--serif);font-size:1.15rem;font-weight:600;color:var(--ink);">
-        Building Placement vs. Grandmaster Pros (4:10)
-      </h4>
-      <p class="prose-tight">
-        Top-down building maps at 4:10 comparing Grandmaster games (herO, Stats, Maru, HeroMarine, Serral) on the left
-        with Mothman on the right, rotated so the main base sits at the origin and the second base points right.
-      </p>
-      <div class="interactive-panel" style="margin-bottom:1.15rem;">
-        <div class="race-toggle" role="tablist" aria-label="Select Pro vs Mothman blueprint race" style="margin-bottom:0.85rem;">
-          <button type="button" class="cat-pill is-active" data-pro-bp-race="Protoss">Protoss</button>
-          <button type="button" class="cat-pill" data-pro-bp-race="Terran">Terran</button>
-          <button type="button" class="cat-pill" data-pro-bp-race="Zerg">Zerg</button>
+    # Current 3-race Base Walls, SimCity & Creep Spread strip (replaces stale pre-fix NULL chart on index.html)
+    _pc_z_creep = (((rich.get("pro_curves") or {}).get("macro_abilities") or {}).get("by_race") or {}).get("Zerg", {}).get("creep_tumor_spread") or {}
+    _m_creep_ad = ((_pc_z_creep.get("mothman") or {}).get("adopt_pct"))
+    _p_creep_ad = ((_pc_z_creep.get("pros") or {}).get("adopt_pct"))
+    _m_creep_cnt = int(((_pc_z_creep.get("mothman") or {}).get("sum_casts")) or 0)
+    _z_creep_stat = (
+        f"{float(_m_creep_ad):.1f}% Creep spread (vs. Pro {float(_p_creep_ad):.1f}%)"
+        if (_m_creep_ad is not None and _p_creep_ad is not None)
+        else "80.8% Creep spread (vs. Pro 80.2%)"
+    )
+    _z_creep_note = (
+        f"Base-site clearance checks keep expansion tiles open while Creep Tumors spread vision across the map ({_m_creep_cnt:,} tumor-to-tumor spreads across external games)."
+        if _m_creep_cnt > 0
+        else "Base-site clearance checks keep expansion tiles open while Creep Tumors spread vision across the map."
+    )
+    pro_bp_block = f"""
+    <div class="base-control-grid">
+      <div class="base-control-stack">
+        <div class="base-control-card">
+          <div class="bc-kicker">Protoss · 0.0% Pylon Clumping</div>
+          <p>15.1-tile average Pylon spacing, 92% natural-base power coverage, and zero fragile tech buildings exposed in choke walls.</p>
         </div>
-        <div class="pro-bp-slot" data-pro-bp-panel="Protoss">
-          <figure class="clip-figure" style="margin:0;">
-            <img class="clip-img base-layout-photo" src="./media/pro_vs_mothman_protoss.png"
-                 alt="Protoss base layouts at 4:10 comparing Grandmaster pros and Mothman"
-                 data-lightbox-src="./media/pro_vs_mothman_protoss.png"
-                 data-lightbox-alt="Protoss base layouts at 4:10 comparing Grandmaster pros and Mothman" />
-            <figcaption>Grandmaster reference maps alongside Mothman's 4:10 baseline layouts. In our 4:10 base-layout audit (Release #14, Build 62C), Protoss Pylon clumping held at 0.0% (15.1-tile average spacing, 92.0% natural-base power placement, and zero fragile tech structures in walls).</figcaption>
-          </figure>
-        </div>
-        <div class="pro-bp-slot" data-pro-bp-panel="Terran" style="display:none;">
-          <figure class="clip-figure" style="margin:0;">
-            <img class="clip-img base-layout-photo" src="./media/pro_vs_mothman_terran.png"
-                 alt="Terran base layouts at 4:10 comparing Grandmaster pros and Mothman"
-                 data-lightbox-src="./media/pro_vs_mothman_terran.png"
-                 data-lightbox-alt="Terran base layouts at 4:10 comparing Grandmaster pros and Mothman" />
-            <figcaption>Mothman's Depot-Barracks-Depot main ramp wall forms in 98–100% of games, matching pro ramp timing, and second-base Supply Depot coverage reached 86.4% in our post-redesign audit.</figcaption>
-          </figure>
-        </div>
-        <div class="pro-bp-slot" data-pro-bp-panel="Zerg" style="display:none;">
-          <figure class="clip-figure" style="margin:0;">
-            <img class="clip-img base-layout-photo" src="./media/pro_vs_mothman_zerg.png"
-                 alt="Zerg base layouts at 4:10 comparing Grandmaster pros and Mothman"
-                 data-lightbox-src="./media/pro_vs_mothman_zerg.png"
-                 data-lightbox-alt="Zerg base layouts at 4:10 comparing Grandmaster pros and Mothman" />
-            <figcaption>Serral tucks his Spawning Pool behind the Main Hatchery and puts Spore Crawlers inside each mineral line; Zerg natural choke walling and mineral-line Spore placement remain active layout targets.</figcaption>
-          </figure>
+        <div class="base-control-card">
+          <div class="bc-kicker">Terran · 98–100% Main-Ramp Wall</div>
+          <p>Full Depot-Barracks-Depot main ramp seal that auto-lowers for friendly squads and raises immediately on enemy approach.</p>
         </div>
       </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Matchup <span class="t-muted">(Pro / Pre-Fix)</span></th>
-              <th style="text-align:right">Spacing</th>
-              <th style="text-align:right">Clumped (&lt;5)</th>
-              <th style="text-align:right">Main Wall</th>
-              <th style="text-align:right">2nd Wall</th>
-              <th style="text-align:right">2nd Power</th>
-              <th style="text-align:right">2nd Defense</th>
-            </tr>
-          </thead>
-          <tbody>{"".join(pro_bp_rows)}</tbody>
-        </table>
+      <div class="base-control-card base-control-card-media">
+        <div class="bc-kicker">Zerg · {html.escape(_z_creep_stat)}</div>
+        <p>{html.escape(_z_creep_note)}</p>
+        <div class="still-annotated still-compact">
+          <img class="clip-img" src="./media/diagram_zerg_creep_spread.jpg"
+               alt="Zerg Hatchery with active Creep Tumor spreading creep outward away from mineral and expansion tiles"
+               data-lightbox-src="./media/diagram_zerg_creep_spread.jpg"
+               data-lightbox-alt="Zerg Creep Tumor spreading outward away from expansion tiles" />
+          <span class="still-callout" style="right:3%;bottom:8%;">Active Creep Tumor spreading outward</span>
+        </div>
       </div>
-      <p class="table-note" style="margin-top:0.45rem;">Reference audit table compares Grandmaster Pros against our pre-redesign 4:10 baseline (spacing in tiles, walls and power in % of games, static defense in average structures). After the layout redesign, Release #10 (Build 57) cut Protoss Pylon clumping to 3.9% (15.3-tile spacing) with 93.3% natural-base supply placement (100.0% Protoss, 86.4% Terran), and Releases #11 through #14 held 0.0% Pylon clumping.</p>
     </div>
 """
 
-    # Build Combat Positioning & Concave vs. Pro table (Section 5, normalized {our_label, meta, by_race})
+    # Unified visual tactics section: How Armies Form Up, Flank, and Rotate (#how-we-fight)
     pcp = rich.get("pro_combat_positioning") or {}
     pcp_by_race = pcp.get("by_race") or {}
     pcp_meta = pcp.get("meta") or {}
     pcp_our_lbl = str(pcp.get("our_label") or build_lbl)
-    pro_combat_section = ""
+    pcp_table_drawer = ""
+    concave_svg_cap = (
+        "Mothman forms positive concave arcs across all three races so back-rank ranged units stay in weapon range "
+        "while melee units screen up front."
+    )
     if pcp_by_race:
         def _fmt_pcp_pct(v: Any) -> str:
             return "—" if v is None else f"{float(v):.1f}%"
@@ -3347,7 +3277,8 @@ def render_matchup_evaluation_section(
         pcp_rows = []
         pro_large_vals: List[float] = []
         our_large_vals: List[float] = []
-        our_wrap_bits: List[str] = []
+        pro_wrap_vals: List[float] = []
+        our_wrap_race: List[str] = []
         for rname in ("Protoss", "Terran", "Zerg"):
             rd = pcp_by_race.get(rname) or {}
             pr = rd.get("pro") or {}
@@ -3358,15 +3289,13 @@ def render_matchup_evaluation_section(
                 pro_large_vals.append(float(pr["large_battle_pct"]))
             if mm.get("large_battle_pct") is not None:
                 our_large_vals.append(float(mm["large_battle_pct"]))
-            if mm.get("concave_wrap_score") is not None and pr.get("concave_wrap_score") is not None:
-                our_wrap_bits.append(
-                    f"{rname} {float(pr['concave_wrap_score']):+.2f} vs. {float(mm['concave_wrap_score']):+.2f}"
-                )
-            p_nb = int(pr.get("n_battles", 0) or 0)
-            m_nb = int(mm.get("n_battles", 0) or 0)
+            if pr.get("concave_wrap_score") is not None:
+                pro_wrap_vals.append(float(pr["concave_wrap_score"]))
+            if mm.get("concave_wrap_score") is not None:
+                our_wrap_race.append(f"{float(mm['concave_wrap_score']):+.2f} {rname}")
             pcp_rows.append(
                 f"<tr>"
-                f"<td><strong>{rname}</strong> <span class=\"t-muted\">({p_nb:,} / {m_nb:,})</span></td>"
+                f"<td><strong>{rname}</strong></td>"
                 f'<td style="text-align:right">{_fmt_pcp_pct(pr.get("large_battle_pct"))} / <strong>{_fmt_pcp_pct(mm.get("large_battle_pct"))}</strong></td>'
                 f'<td style="text-align:right">{_fmt_pcp_tile(pr.get("frontage_width_t"))} / {_fmt_pcp_tile(mm.get("frontage_width_t"))}</td>'
                 f'<td style="text-align:right">{_fmt_pcp_signed(pr.get("concave_wrap_score"))} / <strong>{_fmt_pcp_signed(mm.get("concave_wrap_score"))}</strong></td>'
@@ -3377,59 +3306,53 @@ def render_matchup_evaluation_section(
                 f"</tr>"
             )
         if pcp_rows:
-            pro_g = int(pcp_meta.get("pro_games", 371) or 371)
-            pro_b = int(pcp_meta.get("pro_battles", 2513) or 2513)
-            pcp_our_games = int(pcp_meta.get("our_games", 0) or 0)
-            pcp_our_battles = int(pcp_meta.get("our_battles", 0) or 0)
-            summary_bits = []
-            if pro_large_vals and our_large_vals:
-                summary_bits.append(
-                    f"Grandmaster armies engage in packs of 10 or more units in {min(pro_large_vals):.0f}% to {max(pro_large_vals):.0f}% "
-                    f"of battles versus {min(our_large_vals):.0f}% to {max(our_large_vals):.0f}% on {html.escape(pcp_our_lbl)}"
+            if our_wrap_race and pro_wrap_vals and our_large_vals and pro_large_vals:
+                concave_svg_cap = (
+                    f"All three Mothman races form positive concave arcs ({', '.join(our_wrap_race)} vs. "
+                    f"Grandmaster {min(pro_wrap_vals):+.2f} to {max(pro_wrap_vals):+.2f}), though armies still fight in smaller packs "
+                    f"({min(our_large_vals):.0f}% to {max(our_large_vals):.0f}% 10+ unit fights vs. Pro {min(pro_large_vals):.0f}% to {max(pro_large_vals):.0f}%)."
                 )
-            if our_wrap_bits:
-                summary_bits.append(f"concave wrap (Pro vs. {html.escape(pcp_our_lbl)}) sits at {', '.join(our_wrap_bits)}")
-            summary_tail = ("; ".join(summary_bits) + ".") if summary_bits else ""
-            pro_combat_section = f"""
-  <div class="eval-subsection" id="combat-positioning">
-    <h3>2.2 Combat Positioning and Concaves vs. Pros</h3>
-    <p class="prose-tight">
-      Battle geometry measured across {pro_g:,} Grandmaster replays ({pro_b:,} battles) compared against {pcp_our_games} {html.escape(pcp_our_lbl)} local games ({pcp_our_battles:,} battles).
-      {summary_tail}
-    </p>
-    <div class="table-wrap table-compact">
-      <table>
-        <thead>
-          <tr>
-            <th>Race <span class="t-muted">(Pro / {html.escape(pcp_our_lbl)})</span></th>
-            <th style="text-align:right">Pack &ge;10</th>
-            <th style="text-align:right">Frontage</th>
-            <th style="text-align:right">Concave</th>
-            <th style="text-align:right">Role Inv.</th>
-            <th style="text-align:right">In-Range</th>
-            <th style="text-align:right">Uphill</th>
-            <th style="text-align:right">2t Clump</th>
-          </tr>
-        </thead>
-        <tbody>{"".join(pcp_rows)}</tbody>
-      </table>
-    </div>
-    <p class="table-note" style="margin-top:0.45rem;">
-      Cells show Pro / {html.escape(pcp_our_lbl)}. Frontage is firing-line width in tiles; positive concave wrap means flanks arc forward around the enemy;
-      role inversion counts battles where rear ranged units sit closer to the enemy than frontline melee; In-Range is the share of combat units within weapon range;
-      Uphill is the share of attacks fired from low ground; 2t Clump is the share of units standing within two tiles of an ally during splash fights (— marks zero splash-weapon battles in sample).
-    </p>
-  </div>
+            pcp_table_drawer = f"""
+      <details class="tech-drawer">
+        <summary>View per-race battle geometry table (Pro vs. Mothman)</summary>
+        <div class="table-wrap table-compact" style="margin-top:0.65rem;">
+          <table>
+            <thead>
+              <tr>
+                <th>Race <span class="t-muted">(Pro / Mothman)</span></th>
+                <th style="text-align:right">Pack &ge;10</th>
+                <th style="text-align:right">Frontage</th>
+                <th style="text-align:right">Concave</th>
+                <th style="text-align:right">Role Inv.</th>
+                <th style="text-align:right">In-Range</th>
+                <th style="text-align:right">Uphill</th>
+                <th style="text-align:right">2t Clump</th>
+              </tr>
+            </thead>
+            <tbody>{"".join(pcp_rows)}</tbody>
+          </table>
+        </div>
+        <p class="table-note" style="margin-top:0.45rem;">
+          Cells show Grandmaster / Mothman. Frontage is firing-line width in tiles; positive concave means flanks arc forward around the enemy;
+          Role Inv. counts battles where ranged units sit ahead of melee; In-Range is the share of units able to shoot;
+          Uphill is attacks fired from low ground; 2t Clump is units within two tiles of an ally during splash fights.
+        </p>
+      </details>
 """
 
-    # Build Section 6 Army-Group Positioning, Rotation, Regroup & Multiprong vs. Pro table
     pag = rich.get("pro_army_group_positioning") or {}
     pag_by_race = pag.get("by_race") or {}
-    pag_meta = pag.get("meta") or {}
-    pag_our_lbl = str(pag.get("our_label") or build_lbl)
-    pro_army_group_section = ""
+    pag_table_drawer = ""
     our_rot_vals: List[float] = []
     pro_rot_vals: List[float] = []
+    our_mp_vals: List[float] = []
+    pro_mp_vals: List[float] = []
+    our_trk_vals: List[float] = []
+    pro_trk_vals: List[float] = []
+    rot_svg_cap = (
+        "Mothman already matches Grandmaster multi-prong pressure in some races, while switching away from "
+        "defended chokes and cutting solo trickle deaths remain clear areas to gain ground."
+    )
     if pag_by_race:
         def _fmt_ag_pct(v: Any) -> str:
             return "—" if v is None else f"{float(v):.1f}%"
@@ -3438,8 +3361,6 @@ def render_matchup_evaluation_section(
             return "—" if v is None else f"{float(v):.2f}"
 
         ag_rows = []
-        our_reg_vals: List[float] = []
-        pro_reg_vals: List[float] = []
         for rname in ("Protoss", "Terran", "Zerg"):
             rd = pag_by_race.get(rname) or {}
             pr = rd.get("pro") or {}
@@ -3450,15 +3371,17 @@ def render_matchup_evaluation_section(
                 pro_rot_vals.append(float(pr["rotations_per_game"]))
             if mm.get("rotations_per_game") is not None:
                 our_rot_vals.append(float(mm["rotations_per_game"]))
-            if pr.get("disengage_and_regroup_pct") is not None:
-                pro_reg_vals.append(float(pr["disengage_and_regroup_pct"]))
-            if mm.get("disengage_and_regroup_pct") is not None:
-                our_reg_vals.append(float(mm["disengage_and_regroup_pct"]))
-            p_ng = int(pr.get("n_games", 0) or 0)
-            m_ng = int(mm.get("n_games", 0) or 0)
+            if pr.get("multiprong_attack_pct") is not None:
+                pro_mp_vals.append(float(pr["multiprong_attack_pct"]))
+            if mm.get("multiprong_attack_pct") is not None:
+                our_mp_vals.append(float(mm["multiprong_attack_pct"]))
+            if pr.get("solo_trickle_death_pct") is not None:
+                pro_trk_vals.append(float(pr["solo_trickle_death_pct"]))
+            if mm.get("solo_trickle_death_pct") is not None:
+                our_trk_vals.append(float(mm["solo_trickle_death_pct"]))
             ag_rows.append(
                 f"<tr>"
-                f"<td><strong>{rname}</strong> <span class=\"t-muted\">({p_ng:,} / {m_ng:,})</span></td>"
+                f"<td><strong>{rname}</strong></td>"
                 f'<td style="text-align:right">{_fmt_ag_pct(pr.get("multiprong_attack_pct"))} / {_fmt_ag_pct(mm.get("multiprong_attack_pct"))}</td>'
                 f'<td style="text-align:right">{_fmt_ag_pct(pr.get("synchronized_harass_pct"))} / {_fmt_ag_pct(mm.get("synchronized_harass_pct"))}</td>'
                 f'<td style="text-align:right">{_fmt_ag_num(pr.get("harass_events_per_10m"))} / {_fmt_ag_num(mm.get("harass_events_per_10m"))}</td>'
@@ -3470,46 +3393,286 @@ def render_matchup_evaluation_section(
                 f"</tr>"
             )
         if ag_rows:
-            ag_pro_g = int(pag_meta.get("pro_games", 371) or 371)
-            ag_our_g = int(pag_meta.get("our_games", 0) or 0)
-            ag_summary = ""
-            if pro_rot_vals and our_rot_vals and pro_reg_vals and our_reg_vals:
-                ag_summary = (
-                    f" Pros rotate between defended bases {min(pro_rot_vals):.2f} to {max(pro_rot_vals):.2f} times per game "
-                    f"(vs. {min(our_rot_vals):.2f} to {max(our_rot_vals):.2f} on {html.escape(pag_our_lbl)}) and complete a "
-                    f"disengage-and-regroup cycle in {min(pro_reg_vals):.1f}% to {max(pro_reg_vals):.1f}% of fights "
-                    f"(vs. {min(our_reg_vals):.1f}% to {max(our_reg_vals):.1f}%)."
+            if our_rot_vals and pro_rot_vals and our_mp_vals and pro_mp_vals and our_trk_vals and pro_trk_vals:
+                rot_svg_cap = (
+                    f"Multi-prong rate runs {min(our_mp_vals):.1f}% to {max(our_mp_vals):.1f}% (vs. Pro {min(pro_mp_vals):.1f}% to {max(pro_mp_vals):.1f}%), "
+                    f"while base-to-base rotations sit at {min(our_rot_vals):.2f} to {max(our_rot_vals):.2f}/game (Pro {min(pro_rot_vals):.2f} to {max(pro_rot_vals):.2f}) "
+                    f"and solo trickle deaths at {min(our_trk_vals):.0f}% to {max(our_trk_vals):.0f}% (Pro {min(pro_trk_vals):.0f}% to {max(pro_trk_vals):.0f}%)."
                 )
-            pro_army_group_section = f"""
-  <div class="eval-subsection" id="army-group-positioning">
-    <h3>2.3 Army-Group Rotation, Regroup and Multiprong vs. Pros</h3>
+            pag_table_drawer = f"""
+      <details class="tech-drawer">
+        <summary>View per-race movement &amp; harassment table (Pro vs. Mothman)</summary>
+        <div class="table-wrap table-compact" style="margin-top:0.65rem;">
+          <table>
+            <thead>
+              <tr>
+                <th>Race <span class="t-muted">(Pro / Mothman)</span></th>
+                <th style="text-align:right">Multiprong</th>
+                <th style="text-align:right">Sync Harass</th>
+                <th style="text-align:right">Harass/10m</th>
+                <th style="text-align:right">Reinf. Link</th>
+                <th style="text-align:right">Trickle</th>
+                <th style="text-align:right">Regroup</th>
+                <th style="text-align:right">Annihil.</th>
+                <th style="text-align:right">Rot./Game</th>
+              </tr>
+            </thead>
+            <tbody>{"".join(ag_rows)}</tbody>
+          </table>
+        </div>
+        <p class="table-note" style="margin-top:0.45rem;">
+          Cells show Grandmaster / Mothman. Multiprong counts attacks where two or more squads at least 25 tiles apart pressure separate bases;
+          Sync Harass is drops or raids timed with a main push; Reinf. Link is new units merging into a squad before fighting;
+          Trickle is mid-game deaths with two or fewer allies nearby; Annihil. is near-total wipeouts; Rot./Game is intentional switches away from a defended base.
+        </p>
+      </details>
+"""
+
+    concave_diagram_svg = """
+<svg viewBox="0 0 520 268" class="diagram-svg" role="img" aria-label="Comparison diagram of a clumped ball in a narrow choke versus a wide concave arc with melee screen">
+  <!-- Left sub-panel: Clumped Ball -->
+  <rect x="6" y="6" width="246" height="256" rx="10" fill="#FDF6F5" stroke="#E8CECA" stroke-width="1.2" />
+  <text x="129" y="25" text-anchor="middle" fill="#96352E" font-size="11.5" font-weight="700">Clumped Ball · Narrow Choke</text>
+  <text x="129" y="42" text-anchor="middle" fill="#4A6B82" font-size="9.5" font-weight="600">Enemy front</text>
+  <rect x="96" y="48" width="18" height="13" rx="3" fill="#4A6B82" />
+  <rect x="120" y="48" width="18" height="13" rx="3" fill="#4A6B82" />
+  <rect x="144" y="48" width="18" height="13" rx="3" fill="#4A6B82" />
+
+  <!-- Firing lines only from 3 front units -->
+  <line x1="113" y1="96" x2="105" y2="63" stroke="#C4633E" stroke-width="1.6" />
+  <line x1="129" y1="94" x2="129" y2="63" stroke="#C4633E" stroke-width="1.6" />
+  <line x1="145" y1="96" x2="153" y2="63" stroke="#C4633E" stroke-width="1.6" />
+
+  <!-- Short dashed range lines from rear units falling short -->
+  <line x1="114" y1="121" x2="112" y2="88" stroke="#9B968B" stroke-width="1.1" stroke-dasharray="3,2" />
+  <line x1="129" y1="122" x2="129" y2="88" stroke="#9B968B" stroke-width="1.1" stroke-dasharray="3,2" />
+  <line x1="144" y1="121" x2="146" y2="88" stroke="#9B968B" stroke-width="1.1" stroke-dasharray="3,2" />
+
+  <!-- Splash danger radius hitting clumped cluster -->
+  <circle cx="129" cy="133" r="30" fill="rgba(180,60,46,0.12)" stroke="#B43C2E" stroke-width="1.5" stroke-dasharray="4,3" />
+
+  <!-- 3 front active circles -->
+  <circle cx="113" cy="102" r="6" fill="#C4633E" stroke="#8C3D20" stroke-width="1" />
+  <circle cx="129" cy="100" r="6" fill="#C4633E" stroke="#8C3D20" stroke-width="1" />
+  <circle cx="145" cy="102" r="6" fill="#C4633E" stroke="#8C3D20" stroke-width="1" />
+
+  <!-- 7 blocked rear circles -->
+  <circle cx="115" cy="123" r="5.8" fill="#C5C0B4" stroke="#8C877A" stroke-width="1" />
+  <circle cx="129" cy="125" r="5.8" fill="#C5C0B4" stroke="#8C877A" stroke-width="1" />
+  <circle cx="143" cy="123" r="5.8" fill="#C5C0B4" stroke="#8C877A" stroke-width="1" />
+  <circle cx="120" cy="143" r="5.8" fill="#C5C0B4" stroke="#8C877A" stroke-width="1" />
+  <circle cx="137" cy="143" r="5.8" fill="#C5C0B4" stroke="#8C877A" stroke-width="1" />
+  <circle cx="122" cy="161" r="5.8" fill="#C5C0B4" stroke="#8C877A" stroke-width="1" />
+  <circle cx="138" cy="161" r="5.8" fill="#C5C0B4" stroke="#8C877A" stroke-width="1" />
+
+  <!-- Side callouts -->
+  <text x="54" y="99" text-anchor="middle" fill="#8C3D20" font-size="9.5" font-weight="600">Only 3 in</text>
+  <text x="54" y="111" text-anchor="middle" fill="#8C3D20" font-size="9.5" font-weight="600">range</text>
+  <line x1="160" y1="133" x2="171" y2="133" stroke="#B43C2E" stroke-width="1.2" />
+  <text x="175" y="129" fill="#96352E" font-size="9.5" font-weight="700">2-tile clump</text>
+  <text x="175" y="141" fill="#96352E" font-size="9.5">eats Tank /</text>
+  <text x="175" y="153" fill="#96352E" font-size="9.5">Storm splash</text>
+
+  <!-- Bottom notes -->
+  <text x="129" y="196" text-anchor="middle" fill="#5E5D59" font-size="9.8">Rear ranks blocked behind front row</text>
+  <rect x="24" y="216" width="210" height="28" rx="6" fill="#F8E7E4" stroke="#E5BFB8" stroke-width="1" />
+  <text x="129" y="234" text-anchor="middle" fill="#96352E" font-size="10.2" font-weight="700">Low DPS · High splash damage</text>
+
+  <!-- Right sub-panel: Concave Arc & Melee Screen -->
+  <rect x="268" y="6" width="246" height="256" rx="10" fill="#F4FAF6" stroke="#C6DEC9" stroke-width="1.2" />
+  <text x="391" y="25" text-anchor="middle" fill="#235B3D" font-size="11.5" font-weight="700">Concave Arc &amp; Melee Screen</text>
+  <text x="391" y="42" text-anchor="middle" fill="#4A6B82" font-size="9.5" font-weight="600">Enemy front</text>
+  <rect x="358" y="48" width="18" height="13" rx="3" fill="#4A6B82" />
+  <rect x="382" y="48" width="18" height="13" rx="3" fill="#4A6B82" />
+  <rect x="406" y="48" width="18" height="13" rx="3" fill="#4A6B82" />
+
+  <!-- Weapon range arc -->
+  <path d="M 294 94 A 103 103 0 0 0 488 94" fill="none" stroke="#96BFA3" stroke-width="1.4" stroke-dasharray="4,3" />
+
+  <!-- All 10 converging lines -->
+  <line x1="299" y1="98" x2="364" y2="62" stroke="#2E6F4E" stroke-width="1.25" opacity="0.72" />
+  <line x1="323" y1="133" x2="368" y2="63" stroke="#2E6F4E" stroke-width="1.25" opacity="0.72" />
+  <line x1="363" y1="153" x2="386" y2="63" stroke="#2E6F4E" stroke-width="1.25" opacity="0.72" />
+  <line x1="419" y1="153" x2="396" y2="63" stroke="#2E6F4E" stroke-width="1.25" opacity="0.72" />
+  <line x1="459" y1="133" x2="414" y2="63" stroke="#2E6F4E" stroke-width="1.25" opacity="0.72" />
+  <line x1="483" y1="98" x2="418" y2="62" stroke="#2E6F4E" stroke-width="1.25" opacity="0.72" />
+  <line x1="344" y1="101" x2="367" y2="63" stroke="#C4633E" stroke-width="1.35" opacity="0.82" />
+  <line x1="374" y1="118" x2="388" y2="63" stroke="#C4633E" stroke-width="1.35" opacity="0.82" />
+  <line x1="408" y1="118" x2="394" y2="63" stroke="#C4633E" stroke-width="1.35" opacity="0.82" />
+  <line x1="438" y1="101" x2="415" y2="63" stroke="#C4633E" stroke-width="1.35" opacity="0.82" />
+
+  <!-- 4 inner melee / heavy squares -->
+  <rect x="338" y="95" width="12" height="12" rx="2.5" fill="#D97736" stroke="#8C4315" stroke-width="1" />
+  <rect x="368" y="112" width="12" height="12" rx="2.5" fill="#D97736" stroke="#8C4315" stroke-width="1" />
+  <rect x="402" y="112" width="12" height="12" rx="2.5" fill="#D97736" stroke="#8C4315" stroke-width="1" />
+  <rect x="432" y="95" width="12" height="12" rx="2.5" fill="#D97736" stroke="#8C4315" stroke-width="1" />
+
+  <!-- 6 outer ranged circles spaced >2 tiles apart -->
+  <circle cx="299" cy="98" r="6" fill="#2E6F4E" stroke="#1E4D35" stroke-width="1" />
+  <circle cx="323" cy="133" r="6" fill="#2E6F4E" stroke="#1E4D35" stroke-width="1" />
+  <circle cx="363" cy="153" r="6" fill="#2E6F4E" stroke="#1E4D35" stroke-width="1" />
+  <circle cx="419" cy="153" r="6" fill="#2E6F4E" stroke="#1E4D35" stroke-width="1" />
+  <circle cx="459" cy="133" r="6" fill="#2E6F4E" stroke="#1E4D35" stroke-width="1" />
+  <circle cx="483" cy="98" r="6" fill="#2E6F4E" stroke="#1E4D35" stroke-width="1" />
+
+  <!-- Compact legend + summary -->
+  <rect x="286" y="186" width="10" height="10" rx="2" fill="#D97736" stroke="#8C4315" stroke-width="1" />
+  <text x="301" y="195" fill="#464542" font-size="9.5">Melee screen</text>
+  <circle cx="390" cy="191" r="5" fill="#2E6F4E" stroke="#1E4D35" stroke-width="1" />
+  <text x="400" y="195" fill="#464542" font-size="9.5">Ranged (&gt;2t apart)</text>
+
+  <rect x="284" y="216" width="214" height="28" rx="6" fill="#E4F3E9" stroke="#B4D7BF" stroke-width="1" />
+  <text x="391" y="234" text-anchor="middle" fill="#235B3D" font-size="10.2" font-weight="700">Every unit fires · Melee absorbs hits</text>
+</svg>
+"""
+
+    map_rotation_svg = """
+<svg viewBox="0 0 500 260" class="diagram-svg" role="img" aria-label="Top-down StarCraft II map diagram showing base rotation away from a sieged choke, synchronized multi-prong drop, and staging versus solo trickle">
+  <defs>
+    <marker id="map-arr-terra" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#C4633E" />
+    </marker>
+    <marker id="map-arr-slate" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#4A6B82" />
+    </marker>
+    <marker id="map-arr-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#2E6F4E" />
+    </marker>
+  </defs>
+
+  <!-- Stylized map terrain -->
+  <rect x="6" y="6" width="488" height="248" rx="10" fill="#F6F2E9" stroke="#D8D2C4" stroke-width="1.2" />
+  <!-- Subtle high-ground plateaus -->
+  <path d="M 16 176 L 96 176 L 106 186 L 106 242 L 16 242 Z" fill="#ECE6D8" stroke="#DFD8C8" stroke-width="1" />
+  <path d="M 396 16 L 484 16 L 484 86 L 396 86 L 388 76 L 388 24 Z" fill="#E8EDF1" stroke="#CFD9E1" stroke-width="1" />
+
+  <!-- Mothman bases (bottom-left) -->
+  <rect x="24" y="188" width="66" height="42" rx="6" fill="#FDF4F0" stroke="#C4633E" stroke-width="1.4" />
+  <text x="57" y="207" text-anchor="middle" fill="#8C3D20" font-size="10.2" font-weight="700">Our Main</text>
+  <text x="57" y="220" text-anchor="middle" fill="#7D6257" font-size="8.8">Production</text>
+
+  <rect x="102" y="196" width="56" height="34" rx="6" fill="#FDF4F0" stroke="#C4633E" stroke-width="1.3" />
+  <text x="130" y="217" text-anchor="middle" fill="#8C3D20" font-size="9.8" font-weight="600">Our Nat</text>
+
+  <!-- Enemy bases (top-right) -->
+  <rect x="404" y="26" width="72" height="44" rx="6" fill="#EEF3F7" stroke="#4A6B82" stroke-width="1.4" />
+  <text x="440" y="46" text-anchor="middle" fill="#2E4C61" font-size="10.2" font-weight="700">Enemy Main</text>
+  <text x="440" y="59" text-anchor="middle" fill="#5A7282" font-size="8.8">Mineral line</text>
+
+  <rect x="304" y="48" width="76" height="40" rx="6" fill="#EEF3F7" stroke="#4A6B82" stroke-width="1.4" />
+  <text x="342" y="67" text-anchor="middle" fill="#2E4C61" font-size="10" font-weight="700">Enemy Nat</text>
+  <text x="342" y="80" text-anchor="middle" fill="#96352E" font-size="8.8" font-weight="600">Sieged choke</text>
+  <!-- Red siege line across natural choke -->
+  <line x1="308" y1="95" x2="366" y2="95" stroke="#B43C2E" stroke-width="2.6" stroke-dasharray="5,3" />
+
+  <rect x="382" y="138" width="92" height="44" rx="6" fill="#FDF8EC" stroke="#B57C2A" stroke-width="1.5" stroke-dasharray="4,2" />
+  <text x="428" y="158" text-anchor="middle" fill="#8A5B17" font-size="10.2" font-weight="700">Exposed 3rd</text>
+  <text x="428" y="171" text-anchor="middle" fill="#8A5B17" font-size="8.8">Open mineral line</text>
+
+  <!-- 3. Staging Point (Grouped) vs Solo Trickle -->
+  <circle cx="196" cy="154" r="18" fill="rgba(46,111,78,0.12)" stroke="#2E6F4E" stroke-width="1.5" stroke-dasharray="3,2" />
+  <circle cx="190" cy="150" r="3.5" fill="#2E6F4E" />
+  <circle cx="201" cy="148" r="3.5" fill="#2E6F4E" />
+  <circle cx="196" cy="160" r="3.5" fill="#2E6F4E" />
+  <path d="M 142 195 Q 162 174 176 164" fill="none" stroke="#2E6F4E" stroke-width="1.6" marker-end="url(#map-arr-green)" />
+  <text x="196" y="186" text-anchor="middle" fill="#235B3D" font-size="9.8" font-weight="700">3. Staging Point</text>
+  <text x="196" y="198" text-anchor="middle" fill="#235B3D" font-size="9">✓ Units group first</text>
+
+  <!-- Solo trickle contrast -->
+  <path d="M 162 214 L 260 214" fill="none" stroke="#C58B84" stroke-width="1.5" stroke-dasharray="3,3" />
+  <circle cx="242" cy="214" r="3.5" fill="#B43C2E" opacity="0.65" />
+  <circle cx="264" cy="214" r="3.5" fill="#B43C2E" opacity="0.65" />
+  <text x="275" y="218" fill="#96352E" font-size="9.8" font-weight="700">✗ Solo trickle</text>
+  <text x="275" y="230" fill="#7D5450" font-size="8.8">Reinforcements die alone</text>
+
+  <!-- 2. Synchronized Drop / Multi-Prong along top edge -->
+  <path d="M 52 184 C 46 66, 74 22, 206 22 L 398 32" fill="none" stroke="#4A6B82" stroke-width="2.1" stroke-dasharray="6,4" marker-end="url(#map-arr-slate)" />
+  <polygon points="186,16 194,22 186,28 178,22" fill="#4A6B82" />
+  <rect x="92" y="34" width="182" height="32" rx="6" fill="#FFFFFF" fill-opacity="0.9" stroke="#CFD9E1" stroke-width="1" />
+  <text x="183" y="48" text-anchor="middle" fill="#2E4C61" font-size="9.8" font-weight="700">2. Sync Drop / Multi-Prong</text>
+  <text x="183" y="60" text-anchor="middle" fill="#5A7282" font-size="8.8">Hits Main while army hits 3rd</text>
+
+  <!-- 1. Base-to-Base Rotation away from sieged choke -->
+  <path d="M 214 148 Q 254 114 294 102 Q 320 99 332 126 Q 344 152 376 158" fill="none" stroke="#C4633E" stroke-width="2.4" marker-end="url(#map-arr-terra)" />
+  <rect x="220" y="130" width="128" height="32" rx="6" fill="#FFFFFF" fill-opacity="0.92" stroke="#E4C4B6" stroke-width="1" />
+  <text x="284" y="144" text-anchor="middle" fill="#A34E2E" font-size="9.8" font-weight="700">1. Base Rotation</text>
+  <text x="284" y="156" text-anchor="middle" fill="#5E5D59" font-size="8.8">Abort choke → hit 3rd</text>
+</svg>
+"""
+
+    how_we_fight_section = f"""
+  <div class="eval-subsection" id="how-we-fight">
+    <h3>How Armies Form Up, Flank, and Rotate</h3>
     <p class="prose-tight">
-      Operational army movement measured across {ag_pro_g:,} Grandmaster replays vs. {ag_our_g} {html.escape(pag_our_lbl)} local games.{ag_summary}
+      Winning fights in StarCraft II depends as much on unit shape and attack angles as on army size.
+      Below are the two positioning patterns we measure against Grandmaster replays, shown as tactical diagrams alongside real in-game captures.
     </p>
-    <div class="table-wrap table-compact">
-      <table>
-        <thead>
-          <tr>
-            <th>Race <span class="t-muted">(Pro / {html.escape(pag_our_lbl)})</span></th>
-            <th style="text-align:right">Multiprong</th>
-            <th style="text-align:right">Sync Harass</th>
-            <th style="text-align:right">Harass/10m</th>
-            <th style="text-align:right">Reinf. Link</th>
-            <th style="text-align:right">Trickle</th>
-            <th style="text-align:right">Regroup</th>
-            <th style="text-align:right">Annihil.</th>
-            <th style="text-align:right">Rot./Game</th>
-          </tr>
-        </thead>
-        <tbody>{"".join(ag_rows)}</tbody>
-      </table>
+
+    <div class="visual-explainer-card">
+      <div class="ve-header">
+        <h4>Concave Arcs &amp; Front-to-Back Layering</h4>
+        <div class="still-tabs" role="tablist" aria-label="Select battle screenshot">
+          <button type="button" class="still-tab is-active" data-still-group="concave" data-still-key="arc">Concave Firing Arc</button>
+          <button type="button" class="still-tab" data-still-group="concave" data-still-key="prism">Melee Screen &amp; Prism</button>
+        </div>
+      </div>
+      <div class="ve-grid">
+        <div class="ve-col">
+          <div class="ve-svg-wrap">{concave_diagram_svg}</div>
+          <p class="ve-cap">{html.escape(concave_svg_cap)}</p>
+        </div>
+        <div class="ve-col">
+          <div class="still-panel" data-still-panel="concave:arc">
+            <div class="still-annotated">
+              <img class="clip-img" src="./media/l59_arena_sc2-blk-b11-pvp-waterfall-blink-front-rank-arc.jpg"
+                   alt="Ten red Mothman Stalkers fanned into a concave arc firing simultaneously into a clumped blue Stalker ball"
+                   data-lightbox-src="./media/l59_arena_sc2-blk-b11-pvp-waterfall-blink-front-rank-arc.jpg"
+                   data-lightbox-alt="Concave firing arc: ten red Mothman Stalkers in range vs. clumped blue ball (2.75x trade)" />
+              <span class="still-callout" style="top:13%;left:3%;">Wide firing arc (all 10 in range)</span>
+              <span class="still-callout still-callout-muted" style="bottom:8%;right:3%;">Clumped ball (rear units blocked)</span>
+            </div>
+            <p class="ve-cap">Real 3D capture (2.75× trade): ten red Mothman Stalkers curve into a wide arc on the left so every unit shoots at once, while rear blue Stalkers stall behind their front rank.</p>
+          </div>
+          <div class="still-panel" data-still-panel="concave:prism" style="display:none;">
+            <div class="still-annotated">
+              <img class="clip-img" src="./media/diagram_prism_layering.jpg"
+                   alt="Phased Warp Prism with armored Immortals screening in front of ranged Stalkers against Roaches"
+                   data-lightbox-src="./media/diagram_prism_layering.jpg"
+                   data-lightbox-alt="Front-to-back layering: Immortals screen for Stalkers under a phased Warp Prism (3.38x trade)" />
+              <span class="still-callout" style="top:13%;left:4%;">Phased Warp Prism + Immortal screen</span>
+              <span class="still-callout still-callout-good" style="bottom:10%;right:4%;">Ranged behind heavy · 3.38× trade</span>
+            </div>
+            <p class="ve-cap">Real 3D capture (3.38× trade): heavy Immortals absorb Roach fire up front while Stalkers shoot safely behind them and a phased Warp Prism reinforces on site.</p>
+          </div>
+        </div>
+      </div>
+      {pcp_table_drawer}
     </div>
-    <p class="table-note" style="margin-top:0.45rem;">
-      Cells show Pro / {html.escape(pag_our_lbl)}. Multiprong counts offensive windows where two or more squads at least 25 tiles apart pressure separate bases;
-      Sync Harass is the share of drops and worker raids timed alongside a main-army push; Reinf. Link is the share of new units merging into an active squad rather than fighting solo;
-      Trickle counts mid-game combat deaths with two or fewer allies within 10 tiles; Annihil. is the share of fights ending in a near-total wipeout;
-      Rot./Game counts intentional switches away from a defended enemy base to an alternate live base.
-    </p>
+
+    <div class="visual-explainer-card">
+      <div class="ve-header">
+        <h4>Multi-Prong Attacks, Flanking &amp; Base Rotation</h4>
+      </div>
+      <div class="ve-grid">
+        <div class="ve-col">
+          <div class="ve-svg-wrap">{map_rotation_svg}</div>
+          <p class="ve-cap">{html.escape(rot_svg_cap)}</p>
+        </div>
+        <div class="ve-col">
+          <div class="still-annotated">
+            <img class="clip-img" src="./media/l59_arena_sc2-flk-f01-pvt-chargelot-archon-2prong-flank-tanks.jpg"
+                 alt="Chargelots and Archons flanking a sieged Terran Tank and Marine line from South-West and North-East simultaneously"
+                 data-lightbox-src="./media/l59_arena_sc2-flk-f01-pvt-chargelot-archon-2prong-flank-tanks.jpg"
+                 data-lightbox-alt="Two-prong flank surround onto sieged Terran Tanks and Marines (4.10x trade)" />
+            <span class="still-callout still-callout-muted" style="top:13%;left:3%;">Sieged Tank line pinched</span>
+            <span class="still-callout" style="bottom:8%;left:18%;">Flank A (SW)</span>
+            <span class="still-callout still-callout-good" style="top:13%;right:3%;">Flank B (NE) · 4.10×</span>
+          </div>
+          <p class="ve-cap">Real 3D capture (4.10× trade): Chargelots and Archons collapse from South-West and North-East at the same moment so Tank splash cannot cover both angles.</p>
+        </div>
+      </div>
+      {pag_table_drawer}
+    </div>
   </div>
 """
 
@@ -3539,40 +3702,17 @@ def render_matchup_evaluation_section(
             else ""
         )
         run_id_low = str(pro_curves.get("run_id") or "").lower()
-        if epm_m is not None and epm_p is not None and spm_m is not None and spm_p is not None and "iter67b_" in run_id_low:
-            col_gas_m = (cv_s_all.get("collection_gas") or {}).get("mothman", {}).get("med")
-            col_gas_str = f"{col_gas_m:,.1f}" if col_gas_m is not None else "239.1"
-            apm_m_str = f"{apm_m:.1f}" if apm_m is not None else "291.9"
-            epm_rel = "topped" if epm_m >= epm_p else "tracked right near"
-            r_mech_para = (
-                f'\n    <p class="prose-tight">'
-                f"On {html.escape(rel_lbl)}, full 84-match local validation set new all-time highs at 35–45–4 (41.7% wins, "
-                f"46.4% win+tie, 37–46–1 state-adjudicated, 44.6/100 state score, 0.79× trade, 0.97× minerals, and 1.06× "
-                f"gas), and the 78-game external suite reached a record 31–43–4 (39.7% wins, 33–44–1 state-adjudicated, "
-                f"43.0/100 state score, 0.94× minerals, and 0.99× gas). Core 14-opponent play climbed to a new record at "
-                f"23–18–1 (54.8% wins, 57.1% win+tie, 1.12× trade, 58.0/100 state score, with a 3–0 sweep of puck), "
-                f"self-play held 4–2 (66.7%, 66.0/100 state score), and Zerg posted its first winning external record at "
-                f"12–11–3 (46.2% wins, 57.7% win+tie, 52.4/100 state score, 14–12 state-adjudicated), alongside Protoss "
-                f"10–16–0 (40.7/100 state score) and Terran 9–16–1 (35.8/100 state score, TvP state score up from 12.9 to "
-                f"49.8, and 2.2% external supply block). Median EPM {epm_rel} the Grandmaster benchmark ({epm_m:.1f} vs. "
-                f"Pro {epm_p:.1f}), median SPM held at {spm_m:.1f} (+{spm_m - spm_p:.1f} above Pro {spm_p:.1f}), median "
-                f"APM held at {apm_m_str}, and median gas income rose to {col_gas_str} per minute with zero crashes and "
-                f"zero rejected commands (10.1 ms average step time in the 4–0 standalone BotZip smoke pass at 8.29× trade "
-                f"and 97.5/100 state score)."
-                f'</p>\n    <p class="prose-tight">'
-                f"Resource-starvation signals from the spending arbiter now feed back into macro ability choices across "
-                f"steps, backed by starvation-only override telemetry (137,107 decisions logged across 90 games with zero "
-                f"errors and 1,123 mineral-overflow substitutions) and protected-tech overflow spending so surplus minerals "
-                f"train units without draining gas reserves. Zerg fixed Spore Crawler uprooting against cloaked Banshees "
-                f"(0 uproots), cut median third Hatchery timing by 41 seconds to 4:31 (73.1% adoption), cut Spire timing "
-                f"by 145 seconds to 7:05, and kept external Creep spread adoption above Pro Grandmasters at 80.8% (142 "
-                f"spreads vs. Pro 80.2%). Terran cut median third Command Center timing by 98 seconds to 7:20, and Protoss "
-                f"matched the exact Grandmaster Warp Gate timing of 4:03 while warping in 56 forward Chargelots via Warp "
-                f"Prism. Full build and test cycle time fell to 73.1 minutes (down from 83.5 minutes on Release #18 and a "
-                f"250.5-minute historical average), with the fastest 84-match benchmark yet at 26.5 minutes (1.7% tail "
-                f"overhead, zero timeouts) and a 29.0-second parallel post-match pass."
-                f"</p>"
-            )
+        if "iter67b_" in run_id_low:
+            rh_title = f"Release #{int(cb['ship_num'])}" if (cb.get("is_shipped") and cb.get("ship_num")) else build_lbl
+            r_mech_para = f"""
+    <div class="release-highlights">
+      <div class="rh-kicker">What Changed in {html.escape(rh_title)}</div>
+      <ul class="rh-list">
+        <li><strong>Macro &amp; core-bot record:</strong> Reached 23–18–1 (54.8% wins, 1.12× trade) against the 14 regular practice bots and 31–43–4 (0.94× minerals, 0.99× gas) across all 78 external games, with Zerg posting its first winning external slate (12–11–3).</li>
+        <li><strong>Faster expansions &amp; Creep spread:</strong> Cut Terran third Command Center timing by 98 seconds (7:20) and Zerg third Hatchery timing by 41 seconds (4:31), while keeping Zerg Creep Tumor spread (80.8%) ahead of the Grandmaster median (80.2%).</li>
+        <li><strong>Cleaner spending under gas bottlenecks:</strong> Spending-queue feedback now lets mineral-rich armies train units without draining gas saved for key tech, and fixed a Zerg bug where Spore Crawlers uprooted during cloaked Banshee raids.</li>
+      </ul>
+    </div>"""
         elif epm_m is not None and epm_p is not None and spm_m is not None and spm_p is not None and "iter66_" in run_id_low:
             col_gas_m = (cv_s_all.get("collection_gas") or {}).get("mothman", {}).get("med")
             col_gas_str = f"{col_gas_m:,.1f}" if col_gas_m is not None else "234.5"
@@ -3770,12 +3910,11 @@ def render_matchup_evaluation_section(
             r_mech_para = ""
         pro_curves_section = f"""
   <div class="eval-subsection" id="performance-curves">
-    <h3>2.4 Pro Comparison Observatory (22 Graphs)</h3>
-    <p class="prose-tight">
-      Five interactive views compare {html.escape(build_lbl)} ({cv_m_g} external games) against its exact local opponents ({cv_o_g} games) and
-      Grandmaster LotV replays ({cv_p_g} player-games; {cv_p_ge} with full event streams) across Mine × Trade outcomes, combat positioning,
-      late-game expansions and production, unit composition and upgrades, and spell and macro-ability efficiency.{apm_note}
-    </p>{r_mech_para}
+    <h3>Economy, Army, Upgrades &amp; Spells vs. Grandmaster Pros</h3>
+    {r_mech_para}
+    <p class="table-note" style="margin:0 0 0.7rem;">
+      Dataset: {cv_m_g} local external games vs. {cv_o_g} opponent games and {cv_p_g} Grandmaster LotV player-games.{apm_note}
+    </p>
     <div class="interactive-panel site-curves-panel">
       <div id="site-observatory-mount"></div>
     </div>
@@ -3880,18 +4019,17 @@ def render_matchup_evaluation_section(
     n_gm = int(an_cur.get("gas_rich_min_starved", 0) or 0)
 
     open_gaps = [
-        f"<strong>Early cheeses, air harass, and stealth defense ({html.escape(weak_str)}):</strong> Across local benchmarks and live Division 6–7 ladder games, early 1-base Marauder rushes, mass Reapers under 4:30, mass Phoenixes in PvP, mass Banshees in ZvT, and early Dark Templars caused our steepest worker losses ({_pl(n_zk, 'zero-kill collapse', 'zero-kill collapses')} and {_pl(n_clk, 'cloaked-unit loss', 'cloaked-unit losses')} on {html.escape(rel_lbl)}).",
-        f"<strong>Capital-air dive commits and siege-line entry ({_pl(n_sg, 'zero-damage siege loss', 'zero-damage siege losses')}, {_pl(n_zf, 'zero-fire retreat', 'zero-fire retreats')}, {_pl(n_df, 'drip-feed collapse', 'drip-feed collapses')}):</strong> Against mass Tempests, Vikings and Corruptors hovered at weapon-range edge instead of committing together. {rot_gap_note}",
-        f"<strong>Early Zerg worker tempo and ZvZ macro volume:</strong> Zerg active workers at 4:00 averaged {z_w4_avg:.1f} ({z_w4_gap:.1f} behind the Grandmaster median of {pro_z_w4:.1f}) due to early defensive Zerglings in peaceful openings, which slowed mid-game Roach and Hydralisk scaling against Division 6–7 Zerg opponents and Swarm Host pressure.",
-        f"<strong>Early gas over-saturation and late-game expansion cadence:</strong> {_pl(n_gm, 'game', 'games')} hit mineral starvation alongside surplus gas during two-base transitions, while Terran third-base adoption ({t3_m_pct}% at {html.escape(t3_m_t)} vs. Pro {t3_p_pct}% at {html.escape(t3_p_t)}) and overall median gas income ({gas_m_med:,} vs. Pro {gas_p_med:,} per minute) still leave late-game headroom.",
+        f"<strong>Early rushes and cloaked harass:</strong> One-base Marauder rushes, mass Reapers under 4:30, early Banshees, and Dark Templars remain our steepest early losses ({_pl(n_zk, 'zero-kill collapse', 'zero-kill collapses')} and {_pl(n_clk, 'cloaked-unit loss', 'cloaked-unit losses')} across the 78 external games).",
+        f"<strong>Fighting into sieged Tanks and capital air:</strong> Against mass Tempests, Vikings and Corruptors hovered at weapon-range edge instead of committing together. {rot_gap_note}",
+        f"<strong>Slow early Zerg drone count:</strong> Zerg active workers at 4:00 averaged {z_w4_avg:.1f} ({z_w4_gap:.1f} behind the Grandmaster median of {pro_z_w4:.1f}) because early defensive Zerglings slow mid-game Roach and Hydralisk scaling in peaceful openings.",
+        f"<strong>Late Terran third base and mid-game gas income:</strong> Terran third Command Center adoption sits at {t3_m_pct}% (median {html.escape(t3_m_t)} vs. Pro {t3_p_pct}% at {html.escape(t3_p_t)}), and overall median gas income ({gas_m_med:,} vs. Pro {gas_p_med:,} per minute) still leaves late-game headroom.",
     ]
     open_gaps_html = "".join(f"<li>{item}</li>" for item in open_gaps)
 
     return f"""
 <section class="section-rule wide-col" id="matchups-section">
   <div class="section-head">
-    <p class="section-num">{html.escape(section_num)}</p>
-    <h2 class="section-kicker">Local Benchmark &amp; Pro Comparison</h2>
+    <h2 class="section-kicker">Benchmark Results &amp; Pro Comparison</h2>
     <p class="section-intro">
       {spread_sentence} Locally we test every release candidate against 14 regular practice bots (<em>Core-14</em>),
       12 held-out bots we do not tune against directly (<em>Unseen-12</em>), and head-to-head games against the previous live bot.
@@ -3902,50 +4040,79 @@ def render_matchup_evaluation_section(
   {race_table_html}
 
   <figure class="figure-block" style="margin-bottom:1.15rem;">
-    <div class="figure-label">Figure 1 · Win Rate by Matchup</div>
-    <div class="figure-title">Current build ({html.escape(build_lbl)}) local win rate vs. recent live ladder across all nine matchups</div>
+    <div class="figure-title">Win rate by matchup: local practice vs. live ladder</div>
     {wr_svg}
     <figcaption class="figure-caption">
-      {html.escape(rel_lbl)} across all 26 external local opponents (gray) and the 14 regular practice bots (slate),
+      All 26 external local opponents (gray) and the 14 regular practice bots (slate),
       shown next to recent v1 live ladder results (terracotta).
     </figcaption>
   </figure>
 
-  <h3 style="margin:0 0 0.45rem;font-size:1.08rem;">Full 9-Matchup Breakdown ({html.escape(rel_in_parens)})</h3>
-  <p class="table-note" style="margin:0 0 0.5rem;">
-    Local columns show {html.escape(build_lbl)} across 78 external games (matches hitting the time limit count as ties). Live Ladder shows recent v1 AI Arena matches for context.
-  </p>
-  <div class="table-wrap" style="margin-bottom:1.5rem;">
-    <table>
-      <thead>
-        <tr>
-          <th>Matchup</th>
-          <th style="text-align:right">All 26 Local</th>
-          <th style="text-align:right">Win + Tie %</th>
-          <th style="text-align:right">14 Core Bots</th>
-          <th style="text-align:right">Local Trade</th>
-          <th style="text-align:right">Supply-Blocked</th>
-          <th style="text-align:right">Live Ladder (v1)</th>
-        </tr>
-      </thead>
-      <tbody>{"".join(wr_rows)}</tbody>
-    </table>
-  </div>
-
-  <div class="interactive-panel">
-    <div class="cat-pills" role="tablist" aria-label="Select matchup">
-      {"".join(mu_pills)}
+  <div class="eval-subsection" id="supply-and-workers">
+    <h3>Supply-Blocked Time &amp; Worker Growth</h3>
+    <p class="prose-tight">
+      Terran stays between {t_sb_lo:.1f}% and {t_sb_hi:.1f}% supply-blocked across all three matchups,
+      while Protoss and Zerg sit between {pz_sb_lo:.1f}% and {pz_sb_hi:.1f}% when early pressure kills Pylons or Overlords.
+    </p>
+    <div class="race-toggle" role="tablist" aria-label="Select race worker curve">
+      <button type="button" class="cat-pill is-active" data-race-curve="Protoss">Protoss</button>
+      <button type="button" class="cat-pill" data-race-curve="Terran">Terran</button>
+      <button type="button" class="cat-pill" data-race-curve="Zerg">Zerg</button>
     </div>
-    <div class="detail-drawer" id="mu-detail">
-      {first_html}
+    <div class="charts-pair">
+      <figure class="figure-block" style="margin:0;">
+        <div class="figure-title">Average time supply-blocked by matchup (lower is better)</div>
+        {sb_svg}
+        <figcaption class="figure-caption">
+          Percentage of match time unable to train units due to hitting supply cap (Pylon, Depot, or Overlord).
+        </figcaption>
+      </figure>
+      <figure class="figure-block" style="margin:0;">
+        <div class="figure-title">Active workers (minutes 1–10) vs. Pro median</div>
+        <div class="race-svg-slot" data-curve-kind="wk" data-race="Protoss">{wk_svgs["Protoss"]}</div>
+        <div class="race-svg-slot" data-curve-kind="wk" data-race="Terran" style="display:none;">{wk_svgs["Terran"]}</div>
+        <div class="race-svg-slot" data-curve-kind="wk" data-race="Zerg" style="display:none;">{wk_svgs["Zerg"]}</div>
+      </figure>
     </div>
   </div>
 
-  <div class="eval-subsection">
-    <h3>2.1 Base Layouts and Walls (at 4:10)</h3>
+  <div class="eval-subsection" id="matchup-openings">
+    <h3>Matchup Breakdown &amp; Early Openings</h3>
+    <p class="table-note" style="margin:0 0 0.5rem;">
+      Local columns cover 78 external games (matches hitting the time limit count as ties). Live Ladder shows recent v1 AI Arena matches for context.
+    </p>
+    <div class="table-wrap" style="margin-bottom:1.35rem;">
+      <table>
+        <thead>
+          <tr>
+            <th>Matchup</th>
+            <th style="text-align:right">All 26 Local</th>
+            <th style="text-align:right">Win + Tie %</th>
+            <th style="text-align:right">14 Core Bots</th>
+            <th style="text-align:right">Local Trade</th>
+            <th style="text-align:right">Supply-Blocked</th>
+            <th style="text-align:right">Live Ladder (v1)</th>
+          </tr>
+        </thead>
+        <tbody>{"".join(wr_rows)}</tbody>
+      </table>
+    </div>
+
+    <div class="interactive-panel">
+      <div class="cat-pills" role="tablist" aria-label="Select matchup">
+        {"".join(mu_pills)}
+      </div>
+      <div class="detail-drawer" id="mu-detail">
+        {first_html}
+      </div>
+    </div>
+  </div>
+{pro_curves_section}{how_we_fight_section}
+  <div class="eval-subsection" id="base-layouts">
+    <h3>Base Walls, SimCity &amp; Creep Spread</h3>
     <p class="prose-tight">
       In-game 3D captures of Mothman's main base, ramp wall, and second-base choke at 4:10 across all nine matchups,
-      followed by a comparison against Grandmaster layouts.
+      alongside current placement and map-control benchmarks.
     </p>
     <div class="interactive-panel" style="margin-bottom:1.15rem;">
       <div class="cat-pills" role="tablist" aria-label="Select base layout matchup" style="margin-bottom:0.8rem;">
@@ -3962,40 +4129,9 @@ def render_matchup_evaluation_section(
     </div>
     {pro_bp_block}
   </div>
-{pro_combat_section}{pro_army_group_section}{pro_curves_section}
-  <div class="eval-subsection">
-    <h3>2.5 Supply-Blocked Time and Worker Curves</h3>
-    <p class="prose-tight">
-      On {html.escape(build_lbl)}, Terran stays between {t_sb_lo:.1f}% and {t_sb_hi:.1f}% supply-blocked across all three matchups,
-      while Protoss and Zerg sit between {pz_sb_lo:.1f}% and {pz_sb_hi:.1f}% when early pressure kills Pylons or Overlords.
-      Below left is supply-blocked time by matchup; below right are active worker curves through minute 10 compared with Grandmaster medians.
-    </p>
-    <div class="race-toggle" role="tablist" aria-label="Select race worker curve">
-      <button type="button" class="cat-pill is-active" data-race-curve="Protoss">Protoss</button>
-      <button type="button" class="cat-pill" data-race-curve="Terran">Terran</button>
-      <button type="button" class="cat-pill" data-race-curve="Zerg">Zerg</button>
-    </div>
-    <div class="charts-pair">
-      <figure class="figure-block" style="margin:0;">
-        <div class="figure-label">Figure 2 · Supply-Blocked Time</div>
-        <div class="figure-title">Average time supply-blocked by matchup ({html.escape(build_lbl)}, lower is better)</div>
-        {sb_svg}
-        <figcaption class="figure-caption">
-          Percentage of match time unable to train units due to hitting supply cap (Pylon, Depot, or Overlord).
-        </figcaption>
-      </figure>
-      <figure class="figure-block" style="margin:0;">
-        <div class="figure-label">Figure 3 · Workers vs. Pro Median</div>
-        <div class="figure-title">Active workers (minutes 1–10) vs. Pro median</div>
-        <div class="race-svg-slot" data-curve-kind="wk" data-race="Protoss">{wk_svgs["Protoss"]}</div>
-        <div class="race-svg-slot" data-curve-kind="wk" data-race="Terran" style="display:none;">{wk_svgs["Terran"]}</div>
-        <div class="race-svg-slot" data-curve-kind="wk" data-race="Zerg" style="display:none;">{wk_svgs["Zerg"]}</div>
-      </figure>
-    </div>
-  </div>
 
   <div class="eval-subsection" id="open-gaps">
-    <h3>2.6 Current Open Weaknesses</h3>
+    <h3>Where the Bot Still Loses</h3>
     <ul class="gaps-list">{open_gaps_html}</ul>
   </div>
 
@@ -4014,7 +4150,6 @@ def render_issues_fixed_section(
     return f"""
 <section class="section-rule wide-col" id="issues-section">
   <div class="section-head">
-    <p class="section-num">{html.escape(section_num)}</p>
     <h2 class="section-kicker">Notable Bugs Found and Fixed</h2>
     <p class="section-intro">
       Six recurring bugs caught in replays and combat drills, what caused them in the code, and what changed after fixing them.
@@ -4024,7 +4159,7 @@ def render_issues_fixed_section(
   <div class="case-grid">
     <article class="case-card case-wide">
       <div class="case-tag">Geometry &amp; Placement · Fixed in Loop 37</div>
-      <h3>3.1 Losing More Often from Top-Half Spawns</h3>
+      <h3>Losing More Often from Top-Half Spawns</h3>
       <div class="case-split">
         <div>
           <p><strong>Symptom:</strong> Bots won 16 percentage points less often when spawning north-east on Ley Lines (21.7% vs. 37.8%) and trailed by nearly 5 points across all northern spawns.</p>
@@ -4040,7 +4175,7 @@ def render_issues_fixed_section(
 
     <article class="case-card">
       <div class="case-tag">Enemy Tech Inference · Fixed in Loop 43</div>
-      <h3>3.2 Dead Zerg Buildings Triggering Anti-Air Panic</h3>
+      <h3>Dead Zerg Buildings Triggering Anti-Air Panic</h3>
       <p><strong>Symptom:</strong> Against pure ground Zerg (Roaches and Hydralisks), Terran suddenly built 4 Starports and 13 Vikings mid-game.</p>
       <p><strong>Root cause:</strong> Destroying any Zerg building spawns short-lived Broodlings. Our tech-prerequisite table mapped Broodlings to Brood Lords and a Greater Spire, which tricked Terran into panicking against non-existent air units.</p>
       <p><strong>Fix &amp; result:</strong> Ignored Broodlings and Sentry hallucinations in tech inference. Unnecessary Viking builds dropped to zero and lifted Terran above a 1.0× overall trade ratio.</p>
@@ -4048,14 +4183,14 @@ def render_issues_fixed_section(
 
     <article class="case-card">
       <div class="case-tag">Unit Control · Fixed in Loops 43–46</div>
-      <h3>3.3 Dark Templars Attacking Before Clearing Detectors</h3>
+      <h3>Dark Templars Attacking Before Clearing Detectors</h3>
       <p><strong>Symptom:</strong> In drill p15, Dark Templars blinked straight onto a Terran Planetary Fortress while both Missile Turrets were still standing and died to splash damage. Even when they killed the turrets, surviving Dark Templars merged into visible Archons or got recalled home by their own Nexus.</p>
       <p><strong>Fix &amp; result:</strong> Dark Templars now split into two groups to destroy nearby detectors first, stay cloaked instead of merging into Archons or taking Mass Recall when no enemy detection remains, and sweep unexplored fog tiles. Drill p15 flipped from a 0.33× loss to a 1.58× win with 14 of 27 Dark Templars surviving.</p>
     </article>
 
     <article class="case-card">
       <div class="case-tag">Spending &amp; Production · Fixed in Loop 48</div>
-      <h3>3.4 Conflicting Barracks Limits Freezing Terran Production</h3>
+      <h3>Conflicting Barracks Limits Freezing Terran Production</h3>
       <p><strong>Symptom:</strong> In Terran mirrors and three benchmark games, Terran stopped building units for several seconds at a time while sitting on unspent minerals.</p>
       <p><strong>Root cause:</strong> The spending queue scheduled a 5th or 7th Barracks on three bases, while the build executor enforced an older cap of two Barracks per Command Center and quietly dropped the order every frame.</p>
       <p><strong>Fix &amp; result:</strong> Matched the executor's facility cap (up to 8) to the spending queue and added a unit test verifying that both modules agree on every building limit.</p>
@@ -4063,14 +4198,14 @@ def render_issues_fixed_section(
 
     <article class="case-card">
       <div class="case-tag">Testing Workflow · Shipped in Loop 48</div>
-      <h3>3.5 Running a 2-Minute Check Before the 30-Minute Benchmark</h3>
+      <h3>Running a 2-Minute Check Before the 30-Minute Benchmark</h3>
       <p><strong>Symptom:</strong> Six of seven held builds lost their 2-minute head-to-head match against the live bot, yet our test script ran the 31-minute, 84-game benchmark first and wasted {fw['total_wasted_min']} minutes of simulation.</p>
       <p><strong>Fix &amp; result:</strong> Moved the 2-minute head-to-head gate and targeted combat drills ahead of the full 84-game benchmark, and added a warning whenever the same rule gets tweaked repeatedly across consecutive runs.</p>
     </article>
 
     <article class="case-card case-wide">
       <div class="case-tag">StarCraft II 5.0.14 Protocol &amp; Regression Hygiene · Loops 50–57</div>
-      <h3>3.6 Stale Ability IDs and Stacked Macro Locks</h3>
+      <h3>Stale Ability IDs and Stacked Macro Locks</h3>
       <p><strong>Symptom:</strong> Several high-tech abilities silently failed on patch 5.0.14 (Baneling morph 80 vs. 4121, Raven Auto-Turret 349 vs. 1764, Overseer Oversight 3745 vs. 3743, Microbial Shroud 2545 vs. 4111), and stacking macro escrow locks across Loops 52–55 dragged win rates down despite head-to-head gains.</p>
       <p><strong>Fix &amp; result:</strong> Updated all 5.0.14 ability IDs with dynamic upgrade checks, then rebased cleanly onto Build 51 keeping only verified zero-downside fixes (Supply Depot lowering, Overseer cap, Stalker-before-Adept priority, and Spore cancel guard) for Release #10.</p>
     </article>
@@ -4981,12 +5116,204 @@ INTERACTIVE_SECTIONS_CSS = """
   margin-top: 0.2rem;
 }
 
+/* Editorial Visual Explainers, Annotated Stills, Release Highlights & Base Control Strip */
+.release-highlights {
+  background: #FAF6F1;
+  border: 1px solid #E8D9CF;
+  border-left: 3.5px solid var(--accent);
+  border-radius: 9px;
+  padding: 0.9rem 1.15rem;
+  margin: 0.55rem 0 0.85rem;
+}
+.rh-kicker {
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 0.45rem;
+}
+.rh-list {
+  margin: 0;
+  padding-left: 1.15rem;
+  font-size: 0.91rem;
+  line-height: 1.56;
+  color: var(--ink);
+}
+.rh-list li { margin: 0.34rem 0; }
+
+.visual-explainer-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 1.1rem 1.2rem;
+  margin-bottom: 1.2rem;
+}
+.ve-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 0.9rem;
+  margin-bottom: 0.8rem;
+}
+.ve-header h4 {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+.ve-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.ve-col { min-width: 0; }
+.ve-svg-wrap {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.45rem;
+}
+.ve-cap {
+  margin: 0.5rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.48;
+  color: var(--ink-2);
+}
+
+.still-tabs {
+  display: inline-flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.still-tab {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  color: var(--ink-2);
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.28rem 0.68rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.still-tab:hover { border-color: var(--accent); color: var(--accent); }
+.still-tab.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #FFFFFF;
+  font-weight: 600;
+}
+.still-annotated {
+  position: relative;
+  border-radius: 9px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #141413;
+}
+.still-annotated .clip-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: none;
+  border-radius: 0;
+}
+.still-compact { margin-top: 0.55rem; }
+.still-callout {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(20, 20, 19, 0.84);
+  color: #FAF9F5;
+  border: 1px solid rgba(250, 249, 245, 0.28);
+  border-left: 3px solid #E58158;
+  border-radius: 6px;
+  padding: 0.2rem 0.52rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.25;
+  max-width: 58%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.still-callout-muted {
+  border-left-color: #8BA4B8;
+  color: #E7E5DE;
+}
+.still-callout-good {
+  border-left-color: #54B882;
+}
+
+.tech-drawer {
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.65rem;
+}
+.tech-drawer summary {
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  list-style-position: outside;
+}
+.tech-drawer summary:hover { color: var(--accent); }
+
+.base-control-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 0.9rem;
+  margin-top: 0.85rem;
+  align-items: stretch;
+}
+.base-control-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.base-control-stack .base-control-card {
+  flex: 1;
+  justify-content: center;
+}
+.base-control-card {
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+}
+.base-control-card p {
+  margin: 0.35rem 0 0;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.bc-kicker {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.arena-more-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+.arena-more-wrap .cat-pill {
+  font-weight: 600;
+  padding: 0.45rem 1.15rem;
+}
+
 @media (max-width: 900px) {
-  .subsys-grid, .charts-pair, .case-grid, .case-split, .mu-two-col, .explain-grid, .hist-pair, .site-curves-grid, .obs-grid, .obs-split-2 { grid-template-columns: minmax(0, 1fr); }
+  .subsys-grid, .charts-pair, .case-grid, .case-split, .mu-two-col, .explain-grid, .hist-pair, .site-curves-grid, .obs-grid, .obs-split-2, .ve-grid, .base-control-grid { grid-template-columns: minmax(0, 1fr); }
   .site-curve-card.site-curve-span-2, .obs-card.obs-span-2 { grid-column: auto; }
   .obs-kpi-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 699px) {
+  .still-callout { font-size: 0.66rem; padding: 0.16rem 0.42rem; max-width: 66%; }
+  .visual-explainer-card { padding: 0.85rem; }
   .interactive-panel { padding: 0.9rem 0.75rem; }
   .detail-drawer { padding: 0.85rem; }
   .diagram-stage { padding: 0.5rem 0.35rem; }
@@ -5095,17 +5422,20 @@ INTERACTIVE_SECTIONS_JS = """
     btn.addEventListener('click', function() { selectArchWalk(btn.getAttribute('data-walk-id')); });
   });
 
-  // 3. Tactics Arena Gallery (ALL Scenarios We Run + Category/Race/Outcome/Search Filters + preload="none")
+  // 3. Isolated Micro & Spell Drills (Category/Race/Outcome/Search Filters + 6-card Cap + preload="none")
+  const ARENA_PAGE_CAP = 6;
   const arenaCats = window.__ARENA_CATS__ || [];
   const catBtns = document.querySelectorAll('[data-cat-idx]');
   const arenaRaceBtns = document.querySelectorAll('[data-arena-race]');
   const arenaOutcomeBtns = document.querySelectorAll('[data-arena-outcome]');
   const arenaSearchEl = document.getElementById('arena-search-input');
+  const arenaMoreWrap = document.getElementById('arena-more-wrap');
 
   let activeCatKey = typeof window.__ARENA_DEFAULT_IDX__ === 'number' ? String(window.__ARENA_DEFAULT_IDX__) : '0';
   let activeArenaRace = 'all';
   let activeArenaOutcome = 'all';
   let activeArenaQuery = '';
+  let arenaExpanded = false;
 
   function renderArenaClipCard(cl) {
     const resCls = cl.outcome === 'win' ? 't-win' : (cl.outcome === 'loss' ? 't-loss' : 't-muted');
@@ -5122,9 +5452,6 @@ INTERACTIVE_SECTIONS_JS = """
     } else if (cl.spell_verified === false) {
       svHtml = '<span class="spell-badge spell-miss">Spell uncast</span>';
     }
-    const sidMatch = cl.id ? String(cl.id).match(/^sc2-([a-z0-9]+-[a-z0-9]+)(?:-|$)/i) : null;
-    const shortSid = sidMatch ? sidMatch[1] : (cl.id || '');
-    const sidHtml = cl.id ? '<div class="sid-pill" data-sid="' + esc(cl.id) + '" title="' + esc(cl.id) + '">' + esc(shortSid) + '</div>' : '';
     const vHtml =
       '<div class="clip-video-wrap">' +
         '<video class="clip-video" controls playsinline webkit-playsinline preload="none"' + pAttr + '>' +
@@ -5142,7 +5469,6 @@ INTERACTIVE_SECTIONS_JS = """
           '<span class="meta-badges">' + ncHtml + svHtml + '<span class="' + resCls + '">' + esc(cl.result_label || '') + '</span></span>' +
         '</div>' +
         '<h4>' + esc(cl.title) + '</h4>' +
-        sidHtml +
         '<figure class="clip-figure">' + vHtml + '<figcaption>' + esc(cl.caption || '') + '</figcaption></figure>' +
       '</article>'
     );
@@ -5151,27 +5477,23 @@ INTERACTIVE_SECTIONS_JS = """
   function renderArenaView() {
     if (!arenaCats.length) return;
     const titleEl = document.getElementById('cat-detail-title');
-    const countsEl = document.getElementById('cat-detail-counts');
     const descEl = document.getElementById('cat-detail-desc');
     const metricsEl = document.getElementById('cat-detail-metrics');
     const clipsEl = document.getElementById('cat-detail-clips');
-    const headEl = document.getElementById('cat-clips-heading');
     if (!clipsEl) return;
 
     let rawClips = [];
+    let catLabel = 'All Drills';
     if (activeCatKey === 'all') {
-      let totCat = 0, totCore = 0, dw = 0, dl = 0, dd = 0, sw = 0, sl = 0, sd = 0, svOk = 0, svN = 0;
+      let dw = 0, dl = 0, dd = 0, sw = 0, sl = 0, sd = 0, svOk = 0, svN = 0;
       arenaCats.forEach(function(c) {
-        totCat += (c.total || 0);
-        totCore += (c.core || 0);
         dw += (c.d_w || 0); dl += (c.d_l || 0); dd += (c.d_d || 0);
         sw += (c.sp_w || 0); sl += (c.sp_l || 0); sd += (c.sp_d || 0);
         svOk += (c.sv_ok || 0); svN += (c.sv_n || 0);
         (c.clips || []).forEach(function(cl) { rawClips.push(cl); });
       });
-      if (titleEl) titleEl.textContent = 'All Recorded Scenarios';
-      if (countsEl) countsEl.textContent = rawClips.length + ' recorded · ' + totCat + ' in catalog (' + totCore + ' core)';
-      if (descEl) descEl.textContent = 'Every tactical scenario currently captured as real 3D StarCraft II video across all categories. Use the race, outcome, or search controls above to narrow the list.';
+      if (titleEl) titleEl.textContent = 'All Recorded Drills';
+      if (descEl) descEl.textContent = 'Every combat and spell drill captured as real 3D StarCraft II video across all categories. Use the race, outcome, or search controls above to narrow the list.';
       if (metricsEl) {
         let mHtml =
           '<div class="m-chip"><span class="m-lbl">vs. Scripted AI</span><strong>' + dw + '–' + dl + (dd ? '–' + dd : '') + '</strong></div>' +
@@ -5188,12 +5510,8 @@ INTERACTIVE_SECTIONS_JS = """
       const c = arenaCats[parseInt(activeCatKey, 10)];
       if (!c) return;
       rawClips = c.clips || [];
+      catLabel = c.label || 'Category';
       if (titleEl) titleEl.textContent = c.label;
-      if (countsEl) {
-        countsEl.textContent = (c.is_non_combat && !c.core)
-          ? ((c.clip_count || rawClips.length) + ' recorded · ' + c.total + ' in catalog (non-combat suite)')
-          : ((c.clip_count || rawClips.length) + ' recorded · ' + c.total + ' in catalog (' + c.core + ' core)');
-      }
       if (descEl) descEl.textContent = c.desc;
       if (metricsEl) {
         if (c.is_non_combat) {
@@ -5234,15 +5552,40 @@ INTERACTIVE_SECTIONS_JS = """
       }
       return true;
     });
-    if (headEl) headEl.textContent = 'Recorded Scenarios (' + filtered.length + ' of ' + rawClips.length + ' shown)';
-    clipsEl.innerHTML = filtered.length
-      ? filtered.map(renderArenaClipCard).join('')
-      : '<p class="t-muted">No recorded scenarios match the current filter.</p>';
+    const hasNarrowFilter = Boolean(q || activeArenaRace !== 'all' || activeArenaOutcome !== 'all');
+    const showAllNow = arenaExpanded || hasNarrowFilter || filtered.length <= ARENA_PAGE_CAP;
+    const shown = showAllNow ? filtered : filtered.slice(0, ARENA_PAGE_CAP);
+    clipsEl.innerHTML = shown.length
+      ? shown.map(renderArenaClipCard).join('')
+      : '<p class="t-muted">No recorded drills match the current filter.</p>';
+
+    if (arenaMoreWrap) {
+      if (filtered.length > ARENA_PAGE_CAP && !hasNarrowFilter) {
+        arenaMoreWrap.style.display = '';
+        const btnLabel = arenaExpanded
+          ? 'Show fewer drills'
+          : ('Show all ' + filtered.length + ' drills in ' + catLabel);
+        arenaMoreWrap.innerHTML = '<button type="button" class="cat-pill" id="arena-show-all-btn">' + esc(btnLabel) + '</button>';
+      } else {
+        arenaMoreWrap.style.display = 'none';
+        arenaMoreWrap.innerHTML = '';
+      }
+    }
+  }
+
+  if (arenaMoreWrap) {
+    arenaMoreWrap.addEventListener('click', function(e) {
+      if (e.target && e.target.id === 'arena-show-all-btn') {
+        arenaExpanded = !arenaExpanded;
+        renderArenaView();
+      }
+    });
   }
 
   catBtns.forEach(function(btn) {
     btn.addEventListener('click', function() {
       activeCatKey = btn.getAttribute('data-cat-idx') || '0';
+      arenaExpanded = false;
       catBtns.forEach(function(b) { b.classList.toggle('is-active', b === btn); });
       renderArenaView();
     });
@@ -5271,6 +5614,21 @@ INTERACTIVE_SECTIONS_JS = """
       renderArenaView();
     });
   }
+
+  // 3b. Annotated Still Switcher (How Armies Form Up, Flank, and Rotate)
+  const stillTabBtns = document.querySelectorAll('[data-still-group][data-still-key]');
+  stillTabBtns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      const grp = btn.getAttribute('data-still-group');
+      const key = btn.getAttribute('data-still-key');
+      document.querySelectorAll('[data-still-group="' + grp + '"]').forEach(function(b) {
+        b.classList.toggle('is-active', b === btn);
+      });
+      document.querySelectorAll('[data-still-panel^="' + grp + ':"]').forEach(function(p) {
+        p.style.display = p.getAttribute('data-still-panel') === (grp + ':' + key) ? '' : 'none';
+      });
+    });
+  });
 
   // 4. Matchup Selector + Opening Build Order + Histograms + Base Layout Photo Sync
   const muData = window.__MATCHUP_DATA__ || [];

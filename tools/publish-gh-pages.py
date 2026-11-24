@@ -109,8 +109,8 @@ def build_report_specs(brain_dir: Path, analyzer_dir: Path) -> List[ReportSpec]:
         ReportSpec(
             slug="loop-flywheel-retro",
             out_file="loop-flywheel-retro.html",
-            title="Speeding Up the Test & Release Cycle",
-            short_title="Timing Review",
+            title="Development & Testing Speed",
+            short_title="Testing Speed",
             section="Technical Notes",
             summary=f"Where time went across {retro_runs} runs, why we moved the 2-minute head-to-head check first, and which rules kept flip-flopping.",
             source_candidates=(brain_dir / "scratch/loop/loop_flywheel_retro.md",),
@@ -1298,7 +1298,7 @@ class MarkdownRenderer:
                     self.toc.append((lvl, slug, plain_label))
                 out.append(
                     f'<h{lvl} id="{slug}">{rendered_h}'
-                    f' <a class="anchor" href="#{slug}" aria-label="Link to section">#</a></h{lvl}>'
+                    f'<a class="anchor" href="#{slug}" aria-label="Link to section"></a></h{lvl}>'
                 )
                 i += 1
                 continue
@@ -1516,35 +1516,35 @@ DEPLOY_LABELS: Dict[str, str] = {
 BOT_META: Dict[str, Dict[str, str]] = {
     "Mothman-P": {
         "race": "Protoss",
-        "highlight": "Climbed +16 Elo to 1346; went 2–1 on Release #13.",
+        "highlight": "Highest long-running win rate (32.0%, +34 Elo since Release #13).",
     },
     "Mothman-T": {
         "race": "Terran",
-        "highlight": "Highest v1 rating at 1373 (+12 Elo); went 2–1 on Release #13.",
+        "highlight": "Highest long-running rating at 1408 (+35 Elo since Release #13).",
     },
     "Mothman-Z": {
         "race": "Zerg",
-        "highlight": "Biggest v1 Elo jump (+41 to 1304) behind clean macro wins.",
+        "highlight": "Climbed +27 Elo to 1331 across 437 Division 9 matches.",
     },
     "Mothman-X": {
         "race": "Random",
-        "highlight": "Gained +37 Elo to 1348; went 6–3 across recent external games.",
+        "highlight": "Climbed +23 Elo to 1371 across 438 Division 9 matches.",
     },
     "Mothman-P2": {
         "race": "Protoss",
-        "highlight": "Went 2–1 on Release #13 with wins over 1551-Elo Kira and titania.",
+        "highlight": "Zero crashes across 58 games; recent wins over Bastok and titania.",
     },
     "Mothman-T2": {
         "race": "Terran",
-        "highlight": "Leads v2 in Division 6 (1535 Elo) with wins over 1575-Elo Snowbot and oberon.",
+        "highlight": "Tied for top v2 rating (1508); recent wins over EmperorOfAllYarn (1524), SwarmVibe (1521), and oberon.",
     },
     "Mothman-Z2": {
         "race": "Zerg",
-        "highlight": "Zero crashes across 29 games; beat onlyfans on Releases #12 and #13.",
+        "highlight": "Tied for top v2 rating (1508); recent wins over SwarmVibe (1517), Bastok, and onlyfans.",
     },
     "Mothman-X2": {
         "race": "Random",
-        "highlight": "Zero crashes across 28 games; holds a live win over 1624-Elo Enyo.",
+        "highlight": "Zero crashes across 58 games; recent wins over CtrlZedTerran, Bastok, and who.",
     },
 }
 
@@ -1569,6 +1569,12 @@ def load_aiarena_live_summary(brain_dir: Path, sqlite_path: Path) -> Dict[str, A
     }
     cand_dirs: List[Path] = []
     for p in sorted(Path("/tmp").glob("aiarena_v1_v2_fetch*")):
+        if p.is_dir():
+            if (p / "aiarena-replays" / "all_bots_summary.json").is_file():
+                cand_dirs.append(p / "aiarena-replays")
+            if (p / "all_bots_summary.json").is_file():
+                cand_dirs.append(p)
+    for p in sorted((brain_dir / "scratch").glob("aiarena_live_*")):
         if p.is_dir():
             if (p / "aiarena-replays" / "all_bots_summary.json").is_file():
                 cand_dirs.append(p / "aiarena-replays")
@@ -3076,11 +3082,13 @@ li { margin: 0.4rem 0; }
   opacity: 0;
   font-family: var(--sans);
   font-size: 0.76em;
-  margin-left: 0.3rem;
+  margin-left: 0.35rem;
   font-weight: 400;
   text-decoration: none;
+  transition: opacity 0.15s ease;
 }
-h1:hover .anchor, h2:hover .anchor, h3:hover .anchor { opacity: 0.65; }
+.anchor::after { content: "#"; }
+h1:hover .anchor, h2:hover .anchor, h3:hover .anchor, h4:hover .anchor, .anchor:focus { opacity: 0.55; }
 hr { border: 0; border-top: 1px solid var(--border); margin: 2.5rem 0; }
 
 /* Editorial Opening (Front Page & Subpages) */
@@ -4119,16 +4127,16 @@ def _render_standings_tables(
             v2_div_lbl = (
                 f"Division {v2_divs[0]}–{v2_divs[-1]}"
                 if len(v2_divs) > 1
-                else (f"Division {v2_divs[0]}" if v2_divs else "Division 6–7")
+                else (f"Division {v2_divs[0]}" if v2_divs else "Division 8")
             )
             v2_tag = (
-                f"{v2_div_lbl} · avg opponent Elo {ai_live['v2_opp_elo_avg']:.0f} ({ai_live['v2_opp_elo_min']}–{ai_live['v2_opp_elo_max']})"
+                f"v2 accounts · avg opponent Elo {ai_live['v2_opp_elo_avg']:.0f} ({ai_live['v2_opp_elo_min']}–{ai_live['v2_opp_elo_max']})"
                 if ai_live.get("v2_opp_elo_avg")
-                else v2_div_lbl
+                else "v2 accounts"
             )
             blocks.append(f"""
   <div class="cohort-heading">
-    <h3>v2 Cohort ({html.escape(v2_div_lbl)})</h3>
+    <h3>Current Season Bots ({html.escape(v2_div_lbl)})</h3>
     <span class="cohort-tag">{html.escape(v2_tag)}</span>
   </div>
   <div class="table-wrap standings-desktop">
@@ -4177,6 +4185,7 @@ def _render_standings_tables(
                     f"<td>{html.escape(b['highlight'])}</td>"
                     f"</tr>"
                 )
+                opp_mob = f" · Opp avg {opp_s}" if opp_s != "—" else ""
                 v1_mob.append(
                     f'<div class="standing-row">'
                     f'<div class="standing-top">'
@@ -4184,18 +4193,18 @@ def _render_standings_tables(
                     f'<span class="standing-race">· {html.escape(b["race"])} · Div {b["division"]}</span></span>'
                     f'<span class="standing-elo">{b["elo"]}</span>'
                     f"</div>"
-                    f'<div class="standing-stats">{wr_s} · <span class="{tr_cls}">{tr_s} recent trade</span> · Opp avg {opp_s}</div>'
+                    f'<div class="standing-stats">{wr_s} · <span class="{tr_cls}">{tr_s} recent trade</span>{opp_mob}</div>'
                     f'<p class="standing-note">{html.escape(b["highlight"])}</p>'
                     f"</div>"
                 )
             v1_tag = (
-                f"Division 9 · avg opponent Elo {ai_live['v1_opp_elo_avg']:.0f} ({ai_live['v1_opp_elo_min']}–{ai_live['v1_opp_elo_max']})"
+                f"v1 accounts · avg opponent Elo {ai_live['v1_opp_elo_avg']:.0f} ({ai_live['v1_opp_elo_min']}–{ai_live['v1_opp_elo_max']})"
                 if ai_live.get("v1_opp_elo_avg")
-                else "Division 9"
+                else "v1 accounts"
             )
             blocks.append(f"""
   <div class="cohort-heading">
-    <h3>v1 Cohort (Division 9)</h3>
+    <h3>Long-Running Bots (Division 9)</h3>
     <span class="cohort-tag">{html.escape(v1_tag)}</span>
   </div>
   <div class="table-wrap standings-desktop">
@@ -4220,18 +4229,24 @@ def _render_standings_tables(
   </div>
 """)
 
+        v2_tot_games = sum(int(b.get("w", 0)) + int(b.get("l", 0)) + int(b.get("t", 0)) for b in v2_bots)
+        v2_tot_crashes = sum(int(b.get("crashes", 0)) for b in v2_bots)
+        v2_divs_note = sorted({int(b["division"]) for b in v2_bots if b.get("division")})
+        v2_div_note_lbl = (
+            f"Division {v2_divs_note[0]}–{v2_divs_note[-1]}"
+            if len(v2_divs_note) > 1
+            else (f"Division {v2_divs_note[0]}" if v2_divs_note else "Division 8")
+        )
+        crash_phrase = (
+            f"zero career crashes across {v2_tot_games} {v2_div_note_lbl} games"
+            if v2_tot_crashes == 0
+            else f"{v2_tot_crashes} crashes across {v2_tot_games} {v2_div_note_lbl} games"
+        )
         note_html = (
             '<p class="table-note">'
-            "AI Arena ratings start at 1600. Across the latest 80-match production fetch (Releases #11–#13), all four v1 "
-            "accounts gained Elo (+106 combined; 19–15–1, 54.3% wins in Division 9), while v2 accounts recorded zero career "
-            "crashes across 114 Division 6–7 games (4–9 on Release #13, 2.5× Release #12's win rate, with live wins over "
-            "1575-Elo Snowbot and 1551-Elo Kira). Release #13 raised live external win rate 16.1 percentage points to 44.0% "
-            "(6–2, 75.0% in v1 ranked matches), cut live harvest command drops by 93.0%, and averaged 3.99 ms per step. "
-            'All eight ladder bots now run <strong>Release #19</strong> (Build 67B, Competition #38, '
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45379956983" target="_blank" rel="noopener noreferrer">deploy run 45379956983</a>, '
-            '8/8 verified active, following Release #18 '
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45358551282" target="_blank" rel="noopener noreferrer">deploy run 45358551282</a>) '
-            'after passing 4–0 standalone BotZip smoke (8.29× trade, 97.5/100 state score, 10.1 ms/step). '
+            "AI Arena ratings start at 1600. All eight ladder accounts currently run "
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45379956983" target="_blank" rel="noopener noreferrer"><strong>Release #19 (Build 67B)</strong></a>, '
+            f"with {html.escape(crash_phrase)} and +119 combined Elo gained across all four Division 9 accounts since Release #13. "
             "Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
         )
@@ -4500,10 +4515,10 @@ def build_index_page(
         replays_strip = f"""
 <section class="section-rule wide-col" aria-labelledby="replays-heading">
   <div class="section-head">
-    <h2 id="replays-heading" class="section-kicker">Selected Full-Match Replays</h2>
+    <h2 id="replays-heading" class="section-kicker">Full-Match Replays</h2>
     <p class="section-intro">
       Full-length games playable directly in your browser.
-      <a href="./video-gallery.html">Browse all {len(gallery_items):,} recorded matches and combat drills →</a>
+      <a href="./video-gallery.html">Browse the full replay archive →</a>
     </p>
   </div>
   <div class="featured-grid">{"".join(featured_cards)}</div>
@@ -4514,7 +4529,7 @@ def build_index_page(
     v2_div_lead = (
         f"Division {v2_lead_divs[0]}–{v2_lead_divs[-1]}"
         if len(v2_lead_divs) > 1
-        else (f"Division {v2_lead_divs[0]}" if v2_lead_divs else "Division 6–7")
+        else (f"Division {v2_lead_divs[0]}" if v2_lead_divs else "Division 8")
     )
     body = f"""
 <header class="masthead wide-col">
@@ -4522,22 +4537,22 @@ def build_index_page(
   <h1>Mothman StarCraft II Bots</h1>
   <p class="lead" style="max-width:740px;">
     Eight StarCraft II bots written in Racket play Protoss, Terran, Zerg, and Random across AI Arena's
-    {html.escape(v2_div_lead)} (v2) and Division 9 (v1) ladders. This page covers where the live build stands right now;
+    {html.escape(v2_div_lead)} (current season) and Division 9 (long-running) ladders. This page covers where the live build stands right now;
     past releases, bug write-ups, and iteration history live on <a href="./history.html">History &amp; Fixes</a>.
   </p>
   <nav class="jump-bar" aria-label="Current state sections">
-    <a href="#standings-heading">1. Live AI Arena</a>
-    <a href="#matchups-section">2. Local Benchmark</a>
-    <a href="#tactics-section">3. Tactics Arena</a>
-    <a href="#architecture-section">4. How It Plays</a>
+    <a href="#standings-heading">Ladder Standings</a>
+    <a href="#matchups-section">Benchmark vs. Pros</a>
+    <a href="#how-we-fight">How We Fight</a>
+    <a href="#tactics-section">Combat Drills</a>
+    <a href="#architecture-section">Frame Loop</a>
     <a href="./history.html">History &amp; Fixes →</a>
   </nav>
 </header>
 
 <section class="wide-col" aria-labelledby="standings-heading">
   <div class="section-head">
-    <p class="section-num">Section 1</p>
-    <h2 id="standings-heading" class="section-kicker">Live AI Arena Standings (v2 &amp; v1)</h2>
+    <h2 id="standings-heading" class="section-kicker">Live AI Arena Ladder Standings</h2>
   </div>
   {standings_html}
   <details style="margin-top:0.75rem;">
@@ -4850,7 +4865,7 @@ def build_history_page(
                 sb_cur = f"{float(cur_ext['sb']):.1f}%" if isinstance(cur_ext.get("sb"), (int, float)) else "—"
                 cur_lbl = f"Release #{cur_ship_n} (Build {html.escape(cur_tag)})" if (cur_is_ship and cur_ship_n) else f"Build {html.escape(cur_tag)}"
                 cur_st = "Shipped" if cur_is_ship else "Latest Benchmark"
-                cur_media = '<a href="./index.html#tactics-section">278 arena clips</a>' if cur_is_ship else "—"
+                cur_media = '<a href="./index.html#tactics-section">Combat drills</a>' if cur_is_ship else "—"
                 lrows.append(
                     f'<tr><td class="nw"><strong>{cur_lbl}</strong></td>'
                     f"<td>{cur_st}</td>"
@@ -4886,7 +4901,7 @@ def build_history_page(
                             f'target="_blank" rel="noopener noreferrer">{tag}</a>'
                         )
                     elif lnum_it in (59, 60, 61, 62):
-                        rel_cell = '<a href="./index.html#tactics-section">278 arena clips</a>'
+                        rel_cell = '<a href="./index.html#tactics-section">Combat drills</a>'
                 lrows.append(
                     f'<tr><td class="nw">{it_id}</td>'
                     f"<td>{html.escape(st_lbl)}</td>"
@@ -4919,24 +4934,22 @@ def build_history_page(
     <a href="./index.html">Current State</a>.
   </p>
   <nav class="jump-bar" aria-label="History sections">
-    <a href="#ladder-history">1. Ladder History</a>
-    <a href="#loop-section">2. Testing Loop</a>
-    <a href="#issues-section">3. Bugs Fixed</a>
-    <a href="#releases-section">4. Releases &amp; Runs</a>
-    <a href="#technical-notes">5. Archive &amp; Notes</a>
+    <a href="#ladder-history">Ladder History</a>
+    <a href="#loop-section">Testing Loop</a>
+    <a href="#issues-section">Bugs Fixed</a>
+    <a href="#releases-section">Releases &amp; Runs</a>
+    <a href="#technical-notes">Archive &amp; Notes</a>
   </nav>
 </header>
 
 <section class="wide-col" id="ladder-history">
   <div class="section-head">
-    <p class="section-num">Section 1</p>
     <h2 class="section-kicker">Live Ladder Progression</h2>
     <p class="section-intro">
       Win rate and trade ratio across live AI Arena builds from the initial release through our recent v1 deployments.
     </p>
   </div>
   <figure class="figure-block" style="margin-top:0.5rem;">
-    <div class="figure-label">Figure 1 · Ladder History</div>
     <div class="figure-title">Win rate and trade ratio across live AI Arena builds</div>
     {chart_live_svg}
     <figcaption class="figure-caption">{live_caption}</figcaption>
@@ -4948,7 +4961,6 @@ def build_history_page(
 
 <section class="section-rule wide-col" id="releases-section">
   <div class="section-head">
-    <p class="section-num">Section 4</p>
     <h2 class="section-kicker">Shipped Releases &amp; Practice Runs</h2>
     <p class="section-intro">
       Every shipped release passed our head-to-head gate, full local benchmark, and standalone 4-race package check before going live.
@@ -4961,7 +4973,6 @@ def build_history_page(
 
 <section class="section-rule prose-col" id="technical-notes">
   <div class="section-head">
-    <p class="section-num">Section 5</p>
     <h2 class="section-kicker">Campaign Logs &amp; Technical Notes</h2>
   </div>
   <h3 style="margin:0.25rem 0 0.6rem;font-size:1.06rem;">Campaign Updates</h3>
@@ -4995,6 +5006,12 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
         if not re.match(r"^\s*-\s+\*\*Files:\*\*", ln)
     ]
     text = "\n".join(lines)
+    text = re.sub(
+        r"^#\s+Build and Test Cycle Timing Review\s*\([^)]+\)",
+        "# Development & Testing Speed",
+        text,
+        count=1,
+    )
 
     # 2. Strip internal *(Owner: @...)* suffixes on Section 5 items
     text = re.sub(r"\s*\*\(Owner:[^)]+\)\*", "", text)
@@ -5448,14 +5465,52 @@ def build_static_site(
         max_workers=4,
     )
 
-    # Also copy rendered 3D Base & Ramp-Wall Layout photos (~740 KB) + Pro vs Mothman Blueprints (~730 KB) into out_dir/media/
+    # Also copy rendered 3D Base & Ramp-Wall Layout photos (~740 KB) into out_dir/media/
+    media_out = out_dir / "media"
+    media_out.mkdir(parents=True, exist_ok=True)
     base_layout_src = brain_dir / "scratch" / "base_layouts"
     if base_layout_src.is_dir():
-        (out_dir / "media").mkdir(parents=True, exist_ok=True)
         for bf in sorted(base_layout_src.glob("base_layout_*.jpg")):
-            shutil.copy2(bf, out_dir / "media" / bf.name)
-        for pf in sorted(base_layout_src.glob("pro_vs_mothman_*.png")):
-            shutil.copy2(pf, out_dir / "media" / pf.name)
+            shutil.copy2(bf, media_out / bf.name)
+
+    # Extract key editorial diagram stills from staged 3D SC2 videos (idempotent)
+    diagram_extracts = [
+        (
+            "l62_arena_sc2-ab-p08-warp-prism-phasing-mode-deploy.mp4",
+            "diagram_prism_layering.jpg",
+            ["-ss", "3.5"],
+        ),
+        (
+            "l60_arena_sc2-nc-16-queen-creep-tumor-highway-and-pillar-vision.mp4",
+            "diagram_zerg_creep_spread.jpg",
+            ["-sseof", "-1.5"],
+        ),
+    ]
+    for src_mp4_name, dst_jpg_name, seek_args in diagram_extracts:
+        src_mp4 = media_out / src_mp4_name
+        dst_jpg = media_out / dst_jpg_name
+        if src_mp4.is_file() and not dst_jpg.is_file():
+            try:
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-loglevel",
+                        "error",
+                        *seek_args,
+                        "-i",
+                        str(src_mp4),
+                        "-frames:v",
+                        "1",
+                        "-q:v",
+                        "3",
+                        str(dst_jpg),
+                    ],
+                    check=True,
+                    timeout=30,
+                )
+            except Exception as exc:
+                print(f"[warn] diagram still extract failed for {dst_jpg_name}: {exc}")
 
     # Rewrite gallery items to use same-origin playable MP4s & JPG posters, stripping private local keys
     # Never emit links to unpublished GitHub Release tags (> media-iter51 when self-hosted via --skip-media).
