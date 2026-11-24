@@ -44,6 +44,13 @@ See [`SWARM_PLAYBOOK.md`](./SWARM_PLAYBOOK.md) (v2.1) for the full operational p
      (+ 90/90 full-match MP4s on SHIP-ZIP), SQLite `ingest-runs` + `extract-raw`
    - Step 4C (@loop-architect, <3s): `log-loop-trajectory.py` + `analyze-loop-flywheel.py`
      -> feeds phase Pareto, agent churn, flip-flop warnings & counterfactual patches into Loop N+1!
+        |
+        v
+[Step 5: Carbon Report Review Phase & Live Publish: @reporter -> @prose-reviewer (Carbon) -> @reporter]
+   - @reporter consults `CARBON_REPORT_GUIDE.md` and stages local preview (no `--push`)
+   - @prose-reviewer (`gemini-4-carbon-high`) audits copy, IA, KPIs, diagrams/screenshots, numeric parity,
+     and Playwright desktop (`1440px`) + mobile (`390px`) renders; appends new lessons to `CARBON_REPORT_GUIDE.md`
+   - Only after Carbon posts explicit `GREEN` does @reporter push `gh-pages` and verify live HTTP `200`
 ```
 
 ---
@@ -52,7 +59,8 @@ See [`SWARM_PLAYBOOK.md`](./SWARM_PLAYBOOK.md) (v2.1) for the full operational p
 
 | File | Owner | Purpose |
 |---|---|---|
-| `SWARM_PLAYBOOK.md` | `@loop-architect` | v2.0 operational playbook: disjoint ownership, pre-granted track tests, `H2H-First` fail-fast gate, Flip-Flop Guard, and Step 4C flywheel commands. |
+| `SWARM_PLAYBOOK.md` | `@loop-architect` | v2.1 operational playbook: disjoint ownership, pre-granted track tests, `H2H-First` fail-fast gate, Flip-Flop Guard, Step 4C flywheel commands, and Step 5 Carbon Report Review Phase. |
+| `CARBON_REPORT_GUIDE.md` | `@prose-reviewer` | Living editorial and visual quality bar (`gemini-4-carbon-high`) covering reader-first headings, KPI signal-vs-noise, spatial diagrams & SC2 screenshots, responsive visual hygiene, and the Living Lessons Log. |
 | `pro_baselines.json` | `@loop-architect` | Canonical Pro LotV medians by Race & all 9 Matchups (`W@2/4/6/8/10m`, `Nat@`, `3rd@`, `Gas1/2@`, `Prod1@`, `Tech1@`, `ArmyVal/Worker@6m`). |
 | `compare-vs-pro.py` | `@loop-architect` | Fast (`<1s`) comparator fusing match scorecards + Tactics Arena JSON vs `pro_baselines.json`, flagging systemic divergences & evaluating 9 promotion gates. |
 | `loop_ledger.json` | `@loop-architect` | Durable repo ledger (`#1..#50+`) recording every loop's revision, cohorts, H2H, Tactics Arena summary, latency, anomalies, and Visual QA highlights. |
@@ -85,3 +93,14 @@ python3 tests/test-loop-flywheel.py
 1. **Zero Opponent-Name Hacks, Map-Name Hacks, Replay-ID Branches, or Speed-Mining.**
 2. **General SC2 Physics & Macro Laws Only:** Every fix must pass Gate 1's formal invariants (`state-machine-verifier.rkt` 24/24), pro starvation (`0/0/0/0`), pro divergence, Brain↔Runtime contract checks, and `HYGIENE_CODE_HITS=0`.
 3. **Secret & Path Hygiene:** `log-loop-trajectory.py` auto-discovers brain paths dynamically (zero hardcoded credentials/tokens) and strips local home prefixes from `edited_files` before writing `loop_trajectory_log.jsonl`.
+
+---
+
+## 5. Carbon Report Review Phase (Pre-Publish Gate)
+
+Every release update to the public GitHub Pages report follows a mandatory 4-step editorial and visual gate:
+
+1. **Draft & Local Stage (`@reporter`):** Consult [`CARBON_REPORT_GUIDE.md`](./CARBON_REPORT_GUIDE.md) while updating the report generators and stage a local preview build without `--push`.
+2. **Pre-Publish Review (`@prose-reviewer`, `gemini-4-carbon-high`):** Review the staged site against [`CARBON_REPORT_GUIDE.md`](./CARBON_REPORT_GUIDE.md) across prose, information architecture, headline vs. meta KPIs, spatial diagrams/screenshots, cross-section numeric parity, and Playwright desktop (`1440px`) + mobile (`390px`) renders.
+3. **Living Guide Update (`@prose-reviewer`):** Whenever a review catches a new recurring flaw, visual pattern, or reader-clarity lesson, Carbon appends a concise entry to the Living Lessons Log in [`CARBON_REPORT_GUIDE.md`](./CARBON_REPORT_GUIDE.md).
+4. **Live Publish (`@reporter`):** Only after Carbon posts explicit `GREEN` does `@reporter` publish to `gh-pages` (`--push`) and verify live HTTP `200`.

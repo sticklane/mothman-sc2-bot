@@ -22,7 +22,8 @@ Every role operates asynchronously on the shared message board. **No two active 
 | `@harness` | Exclusive GPU/Podman runner: **`H2H-First` (`6`m vs live Ship ZIPs)**, `84`-match roster (`core_14` + `unseen_12` + `self_6`), and `4`-race ELF ZIP smoke | `tools/run-local-sc2-arena.py`, `tools/sc2-match-proxy.py`, `scratch/iter*_score.json` | — |
 | `@analyzer` | Live AI Arena `sync-prod`, SQLite forensics, **mandatory Replay + Video Trade Review** (reads contact-sheet `.jpg` + telemetry cards), disjoint next-loop blueprints | `tools/score-replay-batch.rkt`, `scratch/loop/*_audit.md` | Owns SQLite during Step 4A (`sync-prod`) |
 | `@loop-architect` | Pro-Corpus comparison (`compare-vs-pro.py`, `pro-deep-comparison.py`), `trade-review-pack.py` contact sheets, `loop_ledger.json`, 3D match MP4s, SQLite ingestion, Arena 3.1 harness, Step 4C trajectory logs | `tools/iteration-loop/*`, `tools/pro-deep-comparison.py`, `tools/trade-review-pack.py`, `tools/sc2-tactics-arena.py`, `tools/arena-scenarios.json`, `.agents/skills/add-arena-scenario/**`, `tools/replay-db.py`, `tests/test-replay-db.py`, `tests/test-loop-flywheel.py` | Owns SQLite during Step 4B (`ingest-runs` + `extract-raw`) |
-| `@reporter` | Living visual campaign report, phase log, GitHub Pages & Release media publishing | `tools/publish-gh-pages.py` (when directed), `scratch/loop/phase_reports.md`, campaign report artifact | Never blocks handoffs |
+| `@reporter` | Living visual campaign report, phase log, GitHub Pages & Release media publishing (stages local preview without `--push` until Carbon `GREEN`) | `tools/publish-gh-pages.py`, `tools/site_report_sections.py`, `tools/observatory_charts.js`, `scratch/loop/phase_reports.md` | Consults `CARBON_REPORT_GUIDE.md` before staging |
+| `@prose-reviewer` | **Carbon Report Review Phase** (`gemini-4-carbon-high`): pre-publish editorial, information-architecture, and desktop `1440px` + mobile `390px` Playwright visual gate | `tools/iteration-loop/CARBON_REPORT_GUIDE.md`, `scratch/loop/*_redesign_brief.md` | Appends new visual/editorial lessons to `CARBON_REPORT_GUIDE.md` |
 | `@monitor-2` | Low-frequency stall watchdog (adaptive backoff during active GPU/benchmark phases to minimize empty polling turns) | None | Read-only |
 
 ### Pre-Granted Ownership & Single-Mention Dispatch Rule (Eliminates Ping-Pongs & Wakeup Fan-Out)
@@ -73,6 +74,16 @@ Every role operates asynchronously on the shared message board. **No two active 
    - Step 4C (@loop-architect, <3s offline): `log-loop-trajectory.py --loop <N>` (or `--sub-iter 65G` for held sub-iterations!)
      + `analyze-loop-flywheel.py` -> refreshes `loop_trajectory_log.jsonl` & `loop_flywheel_retro.{md,json}` with all 4
      open-ended cycle-time bottleneck detectors (slow commands >30s, bench CPU/tail/LPT audit, LLM think vs tool time, sub-iters)!
+          |
+          v
+[Step 5: Carbon Report Review Phase & Live Publish: @reporter -> @prose-reviewer (Carbon) -> @reporter]
+   - 1) @reporter consults `tools/iteration-loop/CARBON_REPORT_GUIDE.md`, updates report generators, and stages
+        a local preview without `--push`.
+   - 2) @prose-reviewer (`gemini-4-carbon-high`) runs mandatory pre-publish editorial, IA, and Playwright
+        desktop (`1440px`) + mobile (`390px`) visual review against `CARBON_REPORT_GUIDE.md`.
+   - 3) If the pass uncovers a new recurring flaw, visual pattern, or clarity principle, Carbon appends a
+        concise entry to the Living Lessons Log in `tools/iteration-loop/CARBON_REPORT_GUIDE.md`.
+   - 4) Only after Carbon posts explicit `GREEN` does @reporter push `gh-pages` (`--push`) and verify live HTTP `200`.
 ```
 
 ---
@@ -86,6 +97,7 @@ Every role operates asynchronously on the shared message board. **No two active 
 5. **Solo Perf Gate Discipline:** While `@loop-architect` runs heavy H.264 3D renders (`loadavg > 8`), authors run targeted functional unit tests and defer wall-clock microbenches (`Suite 28 <5ms`, `w5-p0-1a <4.5ms`) to `@verifier`'s solo Gate 1 pass.
 6. **Zero Hacks & Plain Copy:** Zero opponent-name hacks, map-name hacks, replay-ID branches, or speed-mining. Reader-facing reports use plain, direct English (no hype adjectives, vanity counts, or cute internal nicknames). Never commit credentials or personal paths into tracked repo files.
 7. **Mandatory Post-Run Replay + Video Trade Review Gate:** Every Arena batch (`tactics_sc2_*.json` + MP4s) and every real-match batch (`run_id` in SQLite + rendered match MP4s) MUST produce a `trade-review-pack.py` bundle (6-frame `.jpg` contact sheets + replay telemetry cards for the worst-trading fights). `@analyzer` MUST visually inspect the contact sheets alongside replay stats before finalizing the next loop's combat or micro fixes, extracting generalizable rules rather than one-off patches.
+8. **Mandatory Pre-Publish Carbon Report Review Gate:** Public GitHub Pages report updates MUST NOT run `--push` until `@prose-reviewer` (`gemini-4-carbon-high`) reviews the staged local build (desktop `1440px` + mobile `390px` Playwright checks + copy/IA audit against [`CARBON_REPORT_GUIDE.md`](./CARBON_REPORT_GUIDE.md)) and posts explicit `GREEN`. Any newly discovered visual or editorial lesson is appended to the Living Lessons Log in `CARBON_REPORT_GUIDE.md`.
 
 ---
 
@@ -234,3 +246,16 @@ python3 tools/pro-deep-comparison.py \
 ```
 
 **Required Handoff:** `@analyzer` opens `<out-dir>/trade_review_pack.md` AND visually inspects the generated `sheets/*.jpg` contact sheets before writing the next loop's combat or micro blueprint.
+
+### Step 5: Carbon Report Review Phase (Pre-Publish Editorial & Visual Gate)
+
+Every public release or structural update to the GitHub Pages engineering report passes through this 4-step gate:
+
+1. **Draft & Local Stage (`@reporter`):** Consult [`CARBON_REPORT_GUIDE.md`](./CARBON_REPORT_GUIDE.md) while updating `tools/publish-gh-pages.py`, `tools/site_report_sections.py`, and `tools/observatory_charts.js`, then generate a local preview directory (e.g., `/tmp/site_preview_r<N>`) **without** `--push`.
+2. **Carbon Report Review Phase (`@prose-reviewer`, `gemini-4-carbon-high`):** Run a mandatory pre-publish editorial, information-architecture, and visual review (Playwright renders at desktop `1440px` and mobile `390px`) against [`CARBON_REPORT_GUIDE.md`](./CARBON_REPORT_GUIDE.md). Verify:
+   - Reader-first headings (no internal spec IDs, chart counts, stacked decimal prefixes, or `Primary/Secondary` label prefixes).
+   - Signal-vs-noise KPI placement (cut or demote meta/vanity counts; keep true headline metrics prominent).
+   - Diagrams and real SC2 screenshots for spatial/tactical concepts (concaves, front-to-back layering, multiprong flanking, creep spread, architecture pipeline), with dense multi-column tables tucked into `<details>`.
+   - Cross-section numeric parity across `index.html`, `history.html`, and `loop-flywheel-retro.html`, plus visual hygiene (`0` JS console errors, `0` broken assets, `0px` horizontal overflow, zero SVG text overlap).
+3. **Living Guide Update (`@prose-reviewer`):** At the end of any review pass that discovers a new recurring flaw, visual pattern, or reader-clarity principle, Carbon appends a concise dated entry to the Living Lessons Log in [`CARBON_REPORT_GUIDE.md`](./CARBON_REPORT_GUIDE.md).
+4. **Live Publish (`@reporter`):** Only after Carbon posts explicit `GREEN` does `@reporter` publish to `gh-pages` (`--push`) and verify live HTTP `200` on the deployed site.

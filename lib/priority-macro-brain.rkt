@@ -3390,6 +3390,9 @@
       [(Zerg)
        (when (and (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
                   (= (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)
+                  ;; Loop 68 A2.2: Never schedule a fresh Roach Warren ahead of Lair/Spire/HydraDen
+                  ;; when Mass Banshees or Capital Air are already scouted!
+                  (not (or zerg-mass-banshee-plan? enemy-cap-air?))
                   ;; W7-P0-4-belief: At most ONE of roach-warren / baneling-nest while active-bases < 3
                   (or (>= active-bases 3)
                       (= (bldg-count-equivalent total-bldg-counts 'baneling-nest) 0))
@@ -7449,11 +7452,16 @@
          (or (>= enemy-banshee-cnt 1)
              (and (>= enemy-starport-tl-cnt 1) (<= frame 8064))
              (>= enemy-starport-tl-cnt 2))))
+  ;; Loop 68C (`#2121`): Keep >=1 Banshee and >=2 StarportTechLabs unconditional; for a lone
+  ;; StarportTechLab (0 Banshees) at <= 6:00, suppress when Raven or >= 12 enemy ground combat is seen!
   (define zerg-zvt-banshee-aa-rush?
     (and (eq? race 'Zerg)
          (or (>= enemy-banshee-cnt 1)
              (>= enemy-starport-tl-cnt 2)
-             (and (>= enemy-starport-tl-cnt 1) (<= frame 8064)))))
+             (and (= enemy-starport-tl-cnt 1)
+                  (<= frame 8064)
+                  (not (or (> (unit-count-equivalent enemy-u-counts 'raven) 0)
+                           (>= enemy-ground-combat-cnt 12)))))))
   ;; L63 (`#1704` ZvT Mass-Banshee AA Escalation): Against >= 3 Banshees (or >= 2 w/ >= 2
   ;; Starports/TechLabs), escalate Spore/base (up to 5), >= 6 Queens, high Hydra target (up to 24),
   ;; fast Spire + Corruptor pivot, and keep AA gas protection active even alongside Marines!
@@ -7550,11 +7558,29 @@
              (< (bldg-count-equivalent total-bldg-counts 'spore-crawler)
                 (min (if zerg-mass-banshee-escalation? 5 3) (max 1 active-bases))))
         zerg-anti-muta-spore-due?))
+  ;; Loop 68 Gate 1 (`#2089`): Once >= 4 Queens exist and ready HydraDen/Spire can immediately
+  ;; train Hydralisk/Corruptor, yield Queen #5+ priority to T2 AA (still surging < 4 Queens or
+  ;; whenever T2 AA tech is not ready/affordable, including early anti-BC 6-Queen surge!).
+  (define zerg-ready-t2-aa-affordable-now?
+    (and (>= (unit-count-equivalent unit-counts 'queen) 4)
+         (or (and (> (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0)
+                  (>= minerals 100)
+                  (>= gas 50))
+             (and (> (+ (bldg-count-equivalent ready-bldg-counts 'spire)
+                        (bldg-count-equivalent ready-bldg-counts 'greater-spire))
+                     0)
+                  (>= minerals 150)
+                  (>= gas 100)))))
   (define zerg-banshee-queen5-floor-needed?
-    (and (or zerg-zvt-banshee-aa-rush? zerg-anti-muta-escalation?)
+    (and (or zerg-zvt-banshee-aa-rush?
+             zerg-anti-muta-escalation?
+             (and (eq? race 'Zerg) enemy-cap-air?))
          (> (bldg-count-equivalent ready-bldg-counts 'spawning-pool) 0)
+         (not zerg-ready-t2-aa-affordable-now?)
          (< (unit-count-equivalent unit-counts 'queen)
-            (if (and (or zerg-mass-banshee-escalation? zerg-anti-muta-escalation?)
+            (if (and (or zerg-mass-banshee-escalation?
+                         zerg-anti-muta-escalation?
+                         (and (eq? race 'Zerg) enemy-cap-air?))
                      (or (not has-lair-or-hive-ready?)
                          (> (bldg-count-equivalent total-bldg-counts 'hydralisk-den) 0)
                          (> (bldg-count-equivalent total-bldg-counts 'spire) 0)))
@@ -7587,6 +7613,9 @@
              (> (bldg-count-equivalent total-bldg-counts 'hydralisk-den) 0)
              (> (bldg-count-equivalent total-bldg-counts 'spire) 0))))
   (define (zerg-banshee-defer-ground-gas-sym? nsym)
+    (define cur-zerg-aa-units
+      (+ (unit-count-equivalent unit-counts 'hydralisk)
+         (unit-count-equivalent unit-counts 'corruptor)))
     (or (and zerg-banshee-aa-gas-protect?
              (or (< gas 250)
                  (< minerals 225)
@@ -7599,12 +7628,26 @@
              (memq nsym '(baneling roach ravager evolution-chamber
                           zerg-melee-weapons-1 zerg-missile-weapons-1 zerg-ground-armor-1
                           centrifugical-hooks glial-reconstitution)))
+        ;; Loop 68 A2.2: Under mass Banshee escalation (>= 3 Banshees or >= 2 Banshees + >= 2 Starports/TLs),
+        ;; defer baneling-nest / roach-warren / roach / ravager / burrow until AA hits target unless
+        ;; facing heavy Marine bio (>= 18 Marines AND >= 6 AA units).
+        (and zerg-mass-banshee-escalation?
+             (< cur-zerg-aa-units zerg-banshee-hydra-target)
+             (memq nsym '(baneling-nest roach-warren roach ravager burrow))
+             (not (and (>= (unit-count-equivalent enemy-u-counts 'marine) 18)
+                       (>= cur-zerg-aa-units 6))))
+        ;; Loop 68 A2.2: Under enemy Capital Air (BC/Tempest/Carrier/BroodLord), defer ground-only
+        ;; tech & units until Spire/HydraDen + >= 8 Corruptors/Hydralisks are online!
+        (and (eq? race 'Zerg)
+             enemy-cap-air?
+             (< cur-zerg-aa-units 8)
+             (memq nsym '(roach ravager roach-warren baneling baneling-nest burrow
+                          evolution-chamber zerg-melee-weapons-1 zerg-missile-weapons-1
+                          zerg-ground-armor-1 centrifugical-hooks glial-reconstitution)))
         ;; L44-P0-2b (`#73 Z v who` CloakLoss -> 0): Strictly defer BanelingNest, RoachWarren, Baneling morphs,
         ;; and SpineCrawler #2+ once Banshees / <= 6m StarportTechLab are scouted until Hydralisks >= 8!
         (and zerg-zvt-banshee-aa-rush?
-             (< (+ (unit-count-equivalent unit-counts 'hydralisk)
-                   (unit-count-equivalent unit-counts 'corruptor))
-                zerg-banshee-hydra-target)
+             (< cur-zerg-aa-units zerg-banshee-hydra-target)
              (or (and (memq nsym '(baneling baneling-nest roach-warren))
                       (< enemy-ground-combat-cnt 12))
                  (and (eq? nsym 'spine-crawler)
@@ -7621,7 +7664,10 @@
          (or (>= enemy-real-air-harass-cnt 1)
              zerg-zvt-banshee-aa-rush?
              (and enemy-cloaked-threat-active?
-                  (or eff-req-aa? (>= enemy-air-combat-cnt 1)))
+                  (or (>= enemy-air-combat-cnt 1)
+                      (and eff-req-aa?
+                           (= (hash-count enemy-u-counts) 0)
+                           (= (hash-count enemy-b-counts) 0))))
              enemy-cap-air?)))
   ;; L40-P0-2a + L42-P0-2a (`#75 PvT who` 10 Banshees@209s):
   ;; Detect confirmed Banshee / <= 6m StarportTechLab for Stalker >= 8 + Phoenix >= 3 priority,
@@ -8423,6 +8469,11 @@
          (or zerg-cloaked-air-crisis? enemy-cap-air? opp-cap-air-override? enemy-bc-present?)
          (or (not (eq? zerg-cloak-air-aa-unit-sym 'corruptor))
              (not zerg-corruptor-capped?))
+         (or (not (eq? zerg-cloak-air-aa-unit-sym 'hydralisk))
+             (< (unit-count-equivalent unit-counts 'hydralisk)
+                (if zerg-mass-banshee-escalation?
+                    zerg-mass-banshee-aa-target
+                    (min 16 (max 8 (* 2 (max 1 enemy-real-air-harass-cnt enemy-air-combat-cnt)))))))
          (or (> (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0)
              (> (bldg-count-equivalent ready-bldg-counts 'spire) 0)
              (> (bldg-count-equivalent ready-bldg-counts 'greater-spire) 0))
@@ -8821,16 +8872,19 @@
   (define terran-zero-air-suppress-viking?
     (and (eq? race 'Terran)
          (not terran-viking-justified?)))
+  ;; Loop 68 A2.3: Scale Terran Vikings (`>= 6`, up to `12`) against Banshees and real combat air
+  ;; (`>= 2` Banshees or `>= 3` enemy combat air) so Brain and Runtime agree on AA scaling!
   (define terran-det-viking-due?
-    (and terran-cloaked-det-crisis?
+    (and (or terran-cloaked-det-crisis?
+             (and (eq? race 'Terran)
+                  (or (>= enemy-banshee-cnt 2)
+                      (>= enemy-air-combat-cnt 3))))
          terran-viking-justified?
-         (or eff-req-aa? (>= enemy-banshee-cnt 1) terran-enemy-banshee-starport-tl?)
+         (or eff-req-aa? (>= enemy-banshee-cnt 1) (>= enemy-air-combat-cnt 3) terran-enemy-banshee-starport-tl?)
          (> (bldg-count-equivalent ready-bldg-counts 'starport) 0)
          (or (not (hash? open-facility-slots)) (> open-starport-slots 0))
          (< (unit-count-equivalent unit-counts 'viking-fighter)
-            (if terran-tvt-turrets-tank2-needed?
-                (max 1 enemy-banshee-cnt)
-                6))))
+            (min 12 (max 6 (+ 2 (max enemy-banshee-cnt enemy-air-combat-cnt)))))))
   ;; L62 (`#1660` `#78 PvT VeTerran`): When on 1 base already at >=300M (within ~4s of 400M
   ;; Natural Nexus!) with 0 active DTs/Banshees/Lurkers and non-overwhelming threat, let Nexus #2
   ;; drop first instead of burning 380M of Nexus escrow on reactive Robo/Forge for a scouted Widow Mine!
@@ -16144,6 +16198,7 @@
                                       [else 4]))
                  (min u0 485.0)]
                 [(and zerg-banshee-queen5-floor-needed?
+                      (not (and zerg-air-lair-remorph-due? (>= gas 60) (< minerals 325)))
                       (or (= (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0)
                           (and (or zerg-mass-banshee-escalation? zerg-anti-muta-escalation?)
                                (>= (unit-count-equivalent unit-counts 'hydralisk) 4)))
@@ -16155,7 +16210,10 @@
                  (min u0 520.0)]
                 [else (max 960.0 plan-weight u0)])]
              [terran-det-starport-boost? (max 945.0 plan-weight u0)]
-             [terran-det-viking-boost? (max 940.0 plan-weight u0)]
+             [(and terran-det-viking-boost?
+                   (not (and effective-bo-goal?
+                             (memq plan-reason '(anti-capital-air opp-cap-air-override)))))
+              (max 940.0 plan-weight u0)]
              [(and protoss-aa-stargate-boost?
                    (or (not protoss-urgent-aa-reaper-stalker-due?)
                        (>= (unit-count-equivalent unit-counts 'stalker) 6))
@@ -17514,6 +17572,7 @@
                          [else 4]))
                (min u 485.0)]
               [(and zerg-banshee-queen5-floor-needed?
+                    (not (and zerg-air-lair-remorph-due? (>= gas 60) (< minerals 325)))
                     (or (= (bldg-count-equivalent ready-bldg-counts 'hydralisk-den) 0)
                         (and (or zerg-mass-banshee-escalation? zerg-anti-muta-escalation?)
                              (>= (unit-count-equivalent unit-counts 'hydralisk) 4)))

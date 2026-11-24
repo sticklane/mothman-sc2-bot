@@ -1058,10 +1058,10 @@
         (define reinf-rad-sq (fast->fl (* SC2-TACTICAL-REINFORCE-RADIUS SC2-TACTICAL-REINFORCE-RADIUS)))
         (define cluster-rad-sq2 (fast->fl (* SC2-TACTICAL-ARENA-CLUSTER-RADIUS SC2-TACTICAL-ARENA-CLUSTER-RADIUS)))
         (define eng-rad-sq-fl (fast->fl eng-rad-sq))
-        ;; W11-P0-4-rt (`w11-tac-6` / `#30 P v Creepy`): Tempest weapon range is 15.0 + 1.9 = 16.9t!
-        ;; Extend arena engage discovery to 18.5t (`342.25` sq-dist) for long-range capital/siege
-        ;; enemies so armies being shelled at 16.0t enter arena-minimax instead of rally-retreating!
-        (define siege-cap-eng-rad-sq-fl (flmax eng-rad-sq-fl 342.25))
+        ;; Loop 68 C2: Extend arena engage discovery to 21.0t (`441.0` sq-dist) for long-range
+        ;; capital/siege enemies (range-14/15 Tempests poking frontline units at 15-17t, ~19-20t
+        ;; from squad centroid) so armies under siege enter arena-minimax instead of dropping out!
+        (define siege-cap-eng-rad-sq-fl (flmax eng-rad-sq-fl 441.0))
         (define (get-ally-sim vi)
           (or (vector-ref vi 4)
               (let ([su (unit-hash->tactical-sim-unit (vector-ref vi 0) 'ally)])
@@ -1122,8 +1122,12 @@
                     (let* ([ev (car rem)]
                            [dx (fl- (fast->fl (vector-ref ev 1)) cx-fl)]
                            [dy (fl- (fast->fl (vector-ref ev 2)) cy-fl)]
-                           [d2 (fl+ (fl* dx dx) (fl* dy dy))])
-                      (if (and (fl> d2 eng-rad-sq-fl) (fl<= d2 reinf-rad-sq))
+                           [d2 (fl+ (fl* dx dx) (fl* dy dy))]
+                           [lim-sq (if (memq (vector-ref ev 3)
+                                             '(tempest carrier brood-lord broodlord battlecruiser siege-tank-sieged))
+                                       siege-cap-eng-rad-sq-fl
+                                       eng-rad-sq-fl)])
+                      (if (and (fl> d2 lim-sq) (fl<= d2 reinf-rad-sq))
                           (let* ([base-su (get-enemy-sim ev)]
                                  [spd (flmax 2.0 (tactical-sim-unit-speed base-su))]
                                  [d (flsqrt d2)])
@@ -3700,7 +3704,7 @@
              (cond
                [(eq? et 'siege-tank-sieged) 196.0] ;; 14.0t active shell zone
                [(eq? et 'colossus) 132.25]         ;; 11.5t ETL Colossus firing/approach band
-               [else 342.25]))                     ;; 18.5t Tempest/Capital siege band
+               [else 441.0]))                      ;; 21.0t Tempest/Capital siege band
            (vector et (tactical-sim-unit-x e) (tactical-sim-unit-y e) r2)))
        ;; L33-P0-3 (`t02` Tank-Screen Bio Priority & `p01` Melee-Engaged Ranged Focus-Fire):
        ;; Precompute once per arena:
@@ -3933,8 +3937,8 @@
                          (or (nearest-hittable-enemy-for su)
                              (and (not (eq? utype 'siege-tank-sieged)) first-arena-enemy))]
                         [else #f])])])))
-         ;; W18-P0-3-rt: Check whether this unit is already inside active Sieged Tank (<=14t),
-         ;; Colossus (<=11.5t), or Tempest/Capital (<=18.5t) firing range!
+         ;; W18-P0-3-rt / Loop 68 C2: Check whether this unit is already inside active Sieged Tank
+         ;; (<=14t), Colossus (<=11.5t), or Tempest/Capital (<=21.0t) firing range!
          (define-values (unit-in-tank-or-colossus-fire? unit-in-any-siege-fire?)
            (if (null? arena-enemy-siege-shellers)
                (values #f #f)
@@ -3946,8 +3950,11 @@
                        (values (or tc? (eq? st 'siege-tank-sieged) (eq? st 'colossus)) #t))
                      (values tc? any?)))))
          (define trapped-in-siege-zone?
-           (and unit-in-tank-or-colossus-fire?
-                (or kw-defending-home? (>= arena-ally-cnt 4))))
+           (and (or unit-in-tank-or-colossus-fire?
+                    (and unit-in-any-siege-fire?
+                         (fl> (tactical-sim-unit-air-dps su) 0.0)))
+                (or kw-defending-home?
+                    (>= arena-ally-cnt (if (tactical-sim-unit-flying? su) 2 3)))))
          ;; W11-P0-4-rt / W18-P0-3-rt (`w11-tac-1` / `novel-137` / `w18-tac-3` / `Siege0DPS`):
          ;; Allow ready-weapon units to fire before stepping in splash avoidance AND commit-close
          ;; when already trapped inside active Sieged Tank (<=14t) or Colossus (<=11.5t) fire
@@ -4164,16 +4171,20 @@
                           (define dx (fl- ux (car pt)))
                           (define dy (fl- uy (cdr pt)))
                           (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 100.0))))
-                 ;; W9-P0-2-rt / W10-P0-3-rt / W11-P0-4-rt / W18-P0-3-rt (`Siege0DPS` `#17/#18/#25/#26/#31/#32/#33`):
-                 ;; When trapped inside active Sieged Tank (<=14t), Colossus (<=11.5t), or Tempest/Capital (<=18.5t)
-                 ;; firing arcs (including while targeting their Marine/Stalker screeners!), commit-close & shoot
-                 ;; instead of 0-DPS backward kiting inside enemy range!
+                 ;; W9-P0-2-rt / W10-P0-3-rt / W11-P0-4-rt / W18-P0-3-rt / Loop 68 C2:
+                 ;; When trapped inside active Sieged Tank (<=14t), Colossus (<=11.5t), or Tempest/Capital
+                 ;; (<=22.0t for AA-capable units) firing arcs, commit-close & shoot instead of 0-DPS
+                 ;; backward kiting inside enemy range (preserving clean ground-vs-ground DisengageRetreat).
                  (define capital-siege-dive?
                    (and has-weap? (fl> wr 1.5)
                         (or (and (memq (tactical-sim-unit-type target-su)
                                        '(tempest carrier brood-lord broodlord battlecruiser))
-                                 (>= arena-ally-cnt 3)
-                                 (fl<= edist 18.5))
+                                 (fl> (tactical-sim-unit-air-dps su) 0.0)
+                                 (>= arena-ally-cnt
+                                     (if (memq utype '(viking-fighter corruptor void-ray phoenix tempest))
+                                         2
+                                         3))
+                                 (fl<= edist 22.0))
                             (and (eq? (tactical-sim-unit-type target-su) 'colossus)
                                  (>= arena-ally-cnt 3)
                                  (fl<= edist 12.0))

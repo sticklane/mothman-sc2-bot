@@ -3220,8 +3220,36 @@
 
              ;; --- OVERSEER (Contaminate 1825/182, SpawnChangeling 181, Oversight 3743/1912) ---
              [(overseer overseer-siege-mode)
+              ;; Use `uh-raw-type` because `uh-type` canonicalizes `'overseer-siege-mode` and
+              ;; `'overlord-cocoon` to `'overseer`; raw type preserves rooted vs mobile mode!
+              (define raw-sym (uh-raw-type u))
+              (define is-overseer-siege? (eq? raw-sym 'overseer-siege-mode))
+              (define is-overseer-mobile? (eq? raw-sym 'overseer))
               (define aa-near? (any-unit-within? all-enemies ux uy 10.8 enemy-anti-air-or-air-threat?))
               (define oversight-wanted? (eq? (dyn-hash-ref u 'oversight-desired? #f) #t))
+              ;; Loop 68 C1: Map-wide cloak/burrow/stealth threat detection across ALL enemies
+              ;; (excluding Creep Tumors) so Overseers never root into static Oversight while
+              ;; mobile detection is needed anywhere on the map and immediately unmorph if rooted.
+              (define any-enemy-cloak-or-burrow?
+                (for/or : Boolean ([e (in-list all-enemies)])
+                  (define raw-et (uh-raw-type e))
+                  (define et (uh-type e))
+                  (and (not (memq raw-et '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
+                       (not (memq et '(creep-tumor creep-tumor-burrowed creep-tumor-queen)))
+                       (or (and (memq raw-et '(banshee dark-templar ghost widow-mine widow-mine-burrowed
+                                               lurker lurker-burrowed lurker-mp lurker-mp-burrowed
+                                               roach-burrowed infestor-burrowed swarm-host-burrowed
+                                               zergling-burrowed baneling-burrowed hydralisk-burrowed
+                                               ravager-burrowed ultralisk-burrowed queen-burrowed drone-burrowed
+                                               observer observer-siege-mode mothership))
+                                #t)
+                           (and (memq et '(banshee dark-templar ghost widow-mine lurker observer mothership))
+                                #t)
+                           (eq? (dyn-hash-ref e 'cloaked #f) #t)
+                           (eq? (dyn-hash-ref e 'cloaked? #f) #t)
+                           (dyn-u-burrowed-flag e)
+                           (and (memv (dyn-hash-ref e 'cloak 0) '(1 2 cloaked cloaked-detected)) #t)
+                           (= (safe-int (dyn-hash-ref e 'display-type 1) 1) 3)))))
               (: contam-weight (-> Any Float))
               (define (contam-weight b)
                 (define bt (uh-type b))
@@ -3248,9 +3276,12 @@
                        (- (contam-weight b) (* 2.5 (dist2 ux uy (uh-x b) (uh-y b))))))
                     (values #f #f 0.0)))
               (cond
-                [(spellcaster-channel-protected? u) #f]
-                [(and (eq? sym 'overseer-siege-mode) aa-near?)
-                 (spell-directive tag sym 'morph-overseer-mode 'none 0 ux uy 'overseer-unmorph-mobile-follow)]
+                [(or (not (or is-overseer-mobile? is-overseer-siege?))
+                     (spellcaster-channel-protected? u))
+                 #f]
+                [(and is-overseer-siege?
+                      (or aa-near? any-enemy-cloak-or-burrow? (not oversight-wanted?)))
+                 (spell-directive tag raw-sym 'morph-overseer-mode 'none 0 ux uy 'overseer-unmorph-mobile-follow)]
                 [else
                  (define nydus-needs-changeling?
                    (and (>= en 50.0)
@@ -3267,17 +3298,19 @@
                   ;;    immediately cast Spawn Changeling (`181`) for Nydus vision scouting!
                   (and nydus-needs-changeling?
                        (spell-claim-unit?! claims 'spawn-changeling tag current-frame 336 #:caster-tag tag)
-                       (spell-directive tag sym 'spawn-changeling 'none 0 ux uy 'overseer-changeling-nydus-vision))
+                       (spell-directive tag raw-sym 'spawn-changeling 'none 0 ux uy 'overseer-changeling-nydus-vision))
+                  ;; Explicit opt-in Oversight only (never when AA is near or any cloak/burrow threat is active).
                   (and oversight-wanted?
-                       (eq? sym 'overseer)
+                       is-overseer-mobile?
                        (not aa-near?)
-                       (spell-directive tag sym 'morph-oversight-mode 'none 0 ux uy 'overseer-oversight-ring-watch))
+                       (not any-enemy-cloak-or-burrow?)
+                       (spell-directive tag raw-sym 'morph-oversight-mode 'none 0 ux uy 'overseer-oversight-ring-watch))
                   ;; 1. Contaminate enemy upgrade / tech / production building (`en >= 125`, approach up to `22.0t`)
                   (and (>= en 125.0)
                        contam-cand-ok?
                        (let ([btag (uh-tag contam-cand)])
                          (and (spell-claim-unit?! claims 'contaminate btag current-frame 64 #:caster-tag tag)
-                              (spell-directive tag sym 'contaminate 'unit btag
+                              (spell-directive tag raw-sym 'contaminate 'unit btag
                                                (uh-x contam-cand) (uh-y contam-cand) 'overseer-contaminate-upgrade-tech))))
                   ;; 2. Spawn Changeling (`en >= 50`, `336f` per-Overseer cooldown), held back when
                   ;;    `>= 100e` next to an uncontaminated production/tech building OR active frontline
@@ -3287,19 +3320,7 @@
                        (not (and (>= en 100.0)
                                  (any-unit-within? all-enemies ux uy 16.0 unit-combat-relevant?)))
                        (spell-claim-unit?! claims 'spawn-changeling tag current-frame 336 #:caster-tag tag)
-                       (spell-directive tag sym 'spawn-changeling 'none 0 ux uy 'overseer-changeling-ramp-block))
-                  ;; 3. Oversight static vision anchor when `< 50` energy, safe from AA, AND no active
-                  ;; nearby combat/enemy engagement (`<= 22t`) so Overseer stays mobile to detect
-                  ;; cloaked Observers/DTs/Banshees during fights instead of spamming Oversight!
-                  (and (eq? sym 'overseer)
-                       (not aa-near?)
-                       (not (any-unit-within? all-enemies ux uy 22.0 unit-combat-relevant?))
-                       (not (any-unit-within? all-enemies ux uy 22.0
-                                              (lambda ([e : Any])
-                                                (and (memq (uh-type e) '(observer observer-siege-mode dark-templar banshee ghost)) #t))))
-                       (> (dist2 ux uy home-x home-y) 8.0)
-                       (spell-claim-unit?! claims 'morph-oversight-mode tag current-frame 160 #:caster-tag tag)
-                       (spell-directive tag sym 'morph-oversight-mode 'none 0 ux uy 'overseer-oversight-ring-watch)))])]
+                       (spell-directive tag raw-sym 'spawn-changeling 'none 0 ux uy 'overseer-changeling-ramp-block)))])]
 
              ;; --- SWARM HOST (Spawn Locusts 2704) ---
              [(swarm-host swarm-host-mp)
