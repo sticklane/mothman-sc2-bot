@@ -44,7 +44,11 @@
                   plan-dropperlord-queen-creep-expedition)
          (only-in "../ladder/build-aiarena-zip.rkt"
                   detect-build-version-metadata
-                  build-bot-config-json-bytes))
+                  build-bot-config-json-bytes)
+         (only-in "../lib/plan/worker-saturation-policy.rkt"
+                  worker-sat-state-zero-gas-rescue-rotation-idx)
+         (only-in "../lib/engine/arbiter.rkt"
+                  make-arbiter-ledger))
 
 (define total-checks 0)
 (define failed-checks 0)
@@ -7094,7 +7098,7 @@
   (set-box! SC2-ZERO-GAS-STREAK-START-LOOP #f)
   (set-box! SC2-ZERO-GAS-LAST-VESPENE #f)
   (set-box! SC2-ZERO-GAS-RESCUE-LATCH #f)
-  (set-box! SC2-ZERO-GAS-RESCUE-ROTATION-IDX 0)
+  (set-box! (worker-sat-state-zero-gas-rescue-rotation-idx SC2-DEFAULT-WORKER-SAT-STATE) 0)
   (set-box! SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP #f)
   (define h-off-1 (mk-l32-u 12101 86 1 28.5 28.5 #:hp 400.0 #:hp-max 1500.0 #:rad 2.75 #:assigned 0 #:ideal 16))
   (define e-per-1 (mk-l32-u 12105 74 4 41.0 28.5 #:hp 160.0 #:rad 0.625))
@@ -7137,7 +7141,7 @@
   ;; At +524f (`21300 + 224` with still 0 gas gain!): rotates round-robin (`rot-idx -> 1`) so
   ;; active = E2 (`12103`, topped up from 2->3) AND backup = E3 (`12104`, assigned 2 workers!)!
   (define cmds-rr-1 (saturate-workers-and-gas-commands (mk-1b32-obs 21524 19 #:a1 3 #:a2 2 #:e1-e2-active? #t)))
-  (define rot-after-224 (unbox SC2-ZERO-GAS-RESCUE-ROTATION-IDX))
+  (define rot-after-224 (unbox (worker-sat-state-zero-gas-rescue-rotation-idx SC2-DEFAULT-WORKER-SAT-STATE)))
   (define rr1-e2 (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 12103))) cmds-rr-1))
   (define rr1-e3 (count (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-target-unit-tag c) 12104))) cmds-rr-1))
   (check-true "l32-p0-1b-round-robin-step0a-rotates-after-224f-and-protects-2-live-geysers"
@@ -14157,6 +14161,148 @@
                        3.5)
                    (sc2-point2d? l65d-chasm-pt)
                    (< (sc2-point2d-x l65d-chasm-pt) 110.0)))
+
+  ;; Loop 66 Lane C (`#1989`): Pre-translation Scan-vs-MULE upfront preemption (emergency + auto-pick),
+  ;; scout-vs-detector upfront preemption (zero stale scout MOVE 16), & `#:gas-starvation-boost? #t`
+  ;; end-to-end through `saturate-workers-and-gas-commands`!
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 0 (list l65-min))))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l65-min))))
+
+  ;; L66-C1: Same-step explicit MULE + Emergency Scan (and symbol auto-pick Scan) on same OC
+  ;;         emits ONLY `399` Scan and NEVER emits `171` MULE (zero retroactive wire-buffer strip).
+  (define l66-oc   (mk-l65-u 86601 132 1 30.0 30.0 #:hp 1500.0 #:rad 2.75 #:en 55.0))
+  (define l66-mar  (mk-l65-u 86602 48  1 34.0 30.0 #:hp 45.0   #:rad 0.375 #:en 0.0 #:en-max 0.0))
+  (define l66-dt   (mk-l65-u 86603 76  4 39.0 30.0 #:hp 0.0    #:hp-max 40.0 #:en 0.0 #:en-max 0.0 #:cloak 1))
+  (define l66-min1 (sc2-unit 1 3 86609 341 0 (sc2-point3d 25.0 30.0 8.0) 0.0 1.0 1.0 0 #f #t #f
+                             1000.0 1000.0 0.0 0.0 0.0 0.0 1500 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define l66-emerg-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 86601 calldown-mule 86609))
+     (make-test-obs 9000 200 100 (list l66-oc l66-mar l66-dt l66-min1))
+     #:arbiter-ledger (make-arbiter-ledger)))
+  (define l66-autopick-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 86601 calldown-mule 86609)
+       (cast-spell orbital-command scanner-sweep 42.0 30.0))
+     (make-test-obs 9200 200 100 (list l66-oc l66-mar l66-min1))
+     #:arbiter-ledger (make-arbiter-ledger)))
+  (check-true "l66-c1-same-step-mule-and-scan-upfront-preemption-emergency-and-autopick"
+              (and (= (count (lambda (c) (and (sc2-raw-unit-command? c)
+                                              (= (sc2-raw-unit-command-ability-id c) 399)
+                                              (urgent-survival-cmd? c)
+                                              (equal? (sc2-raw-unit-command-unit-tags c) '(86601))))
+                             l66-emerg-cmds)
+                      1)
+                   (= (count (lambda (c) (and (sc2-raw-unit-command? c)
+                                              (= (sc2-raw-unit-command-ability-id c) 171)))
+                             l66-emerg-cmds)
+                      0)
+                   (= (count (lambda (c) (and (sc2-raw-unit-command? c)
+                                              (= (sc2-raw-unit-command-ability-id c) 399)
+                                              (equal? (sc2-raw-unit-command-unit-tags c) '(86601))))
+                             l66-autopick-cmds)
+                      1)
+                   (= (count (lambda (c) (and (sc2-raw-unit-command? c)
+                                              (= (sc2-raw-unit-command-ability-id c) 171)))
+                             l66-autopick-cmds)
+                      0)))
+
+  ;; L66-C2: Same-step scout `MOVE 16` (`overlord-scout` / `periodic-scout` / `cast-deception-and-scout-spells`)
+  ;;         + uncovered cloaked Banshee/DT emits ONLY P0 detector intercept (zero stale scout `MOVE 16`!).
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 0 (list l65-min))))
+  (define l66-hatch (mk-l65-u 86620 86  1 30.0 30.0 #:hp 1500.0 #:rad 2.75))
+  (define l66-ovs   (mk-l65-u 86621 129 1 36.0 32.0 #:hp 200.0  #:rad 1.0  #:fly #t #:en 50.0))
+  (define l66-obs   (mk-l65-u 86622 82  1 38.0 32.0 #:hp 40.0   #:sh 20.0  #:rad 0.5 #:fly #t))
+  (define l66-ban   (mk-l65-u 86623 55  4 34.0 36.0 #:hp 0.0    #:hp-max 140.0 #:fly #t #:cloak 1))
+  (define l66-dt2   (mk-l65-u 86624 76  4 60.0 36.0 #:hp 0.0    #:hp-max 40.0  #:cloak 1))
+  (define l66-det-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((overlord-scout 86621 160.0 160.0)
+       (periodic-scout 86622 160.0 160.0)
+       (cast-deception-and-scout-spells))
+     (make-test-obs 9300 300 200 (list l66-hatch l66-ovs l66-obs l66-ban l66-dt2 l66-min1))
+     #:arbiter-ledger (make-arbiter-ledger)))
+  (define l66-det-moves
+    (filter (lambda (c) (and (sc2-raw-unit-command? c) (= (sc2-raw-unit-command-ability-id c) 16)))
+            l66-det-cmds))
+  ;; Also verify a `'detector-escort`-leased Overseer receiving `(move ...)` + `(cast-spell ... morph-oversight-mode)`
+  ;; is NOT blocked by `explicit-combat-tags` and emits P0 urgent intercept `MOVE 16` toward the cloaked Banshee!
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 0 (list l65-min))))
+  (define l66-leased-det-cmds
+    (translate-bot-actions->sc2-raw-commands
+     '((cast-spell 86621 morph-oversight-mode)
+       (move 86621 105.5 116.5))
+     (make-test-obs 9320 300 200 (list l66-hatch l66-ovs l66-ban l66-min1))
+     #:role-leases (hasheqv 86621 (unit-role-lease 'detector-escort 75 0 34.0 36.0 9360))
+     #:arbiter-ledger (make-arbiter-ledger)))
+  (define l66-leased-det-mv
+    (findf (lambda (c) (and (sc2-raw-unit-command? c)
+                            (= (sc2-raw-unit-command-ability-id c) 16)
+                            (memv 86621 (sc2-raw-unit-command-unit-tags c))))
+           l66-leased-det-cmds))
+  (check-true "l66-c2-same-step-scout-move-and-cloaked-threat-upfront-preemption"
+              (and (= (length l66-det-moves) 2)
+                   (for/and ([c (in-list l66-det-moves)])
+                     (and (urgent-survival-cmd? c)
+                          (sc2-point2d? (sc2-raw-unit-command-target-pos c))
+                          (< (sc2-point2d-x (sc2-raw-unit-command-target-pos c)) 100.0)))
+                   (sc2-raw-unit-command? l66-leased-det-mv)
+                   (urgent-survival-cmd? l66-leased-det-mv)
+                   (<= (sqrt (+ (sqr (- (sc2-point2d-x (sc2-raw-unit-command-target-pos l66-leased-det-mv)) 34.0))
+                                (sqr (- (sc2-point2d-y (sc2-raw-unit-command-target-pos l66-leased-det-mv)) 36.0))))
+                       12.0)))
+
+  ;; L66-C3: `#:gas-starvation-boost? #t` flows end-to-end through `saturate-workers-and-gas-commands`:
+  ;;         (a) suppresses `< 300G` gas pullback even with hysteresis latch latched,
+  ;;         (b) refills `>= 2` workers/step onto a live empty Refinery at `< 300G`!
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l66-min1))))
+  (define l66-cc1   (sc2-unit 1 1 86640 18 1 (sc2-point3d 30.0 30.0 8.0) 0.0 2.75 1.0 0 #f #t #f
+                              1500.0 1500.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 15 16 0.0 0 0 0 0 '() 0 0))
+  (define l66-cc2   (sc2-unit 1 1 86641 18 1 (sc2-point3d 62.0 30.0 8.0) 0.0 2.75 1.0 0 #f #t #f
+                              1500.0 1500.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f '() 0 '() 10 16 0.0 0 0 0 0 '() 0 0))
+  (define l66-min2  (sc2-unit 1 3 86642 341 0 (sc2-point3d 68.0 30.0 8.0) 0.0 1.0 1.0 0 #f #t #f
+                              1000.0 1000.0 0.0 0.0 0.0 0.0 1500 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define l66-ref-3 (sc2-unit 1 1 86643 20 1 (sc2-point3d 25.0 24.0 8.0) 0.0 1.5 1.0 0 #f #t #f
+                              500.0 500.0 0.0 0.0 0.0 0.0 0 1800 #f #f #f #t #f '() 0 '() 3 3 0.0 0 0 0 0 '() 0 0))
+  (define l66-ref-0 (sc2-unit 1 1 86643 20 1 (sc2-point3d 25.0 24.0 8.0) 0.0 1.5 1.0 0 #f #t #f
+                              500.0 500.0 0.0 0.0 0.0 0.0 0 1800 #f #f #f #t #f '() 0 '() 0 3 0.0 0 0 0 0 '() 0 0))
+  (define l66-gws
+    (for/list ([i (in-range 3)])
+      (sc2-unit 1 1 (+ 86650 i) 45 1 (sc2-point3d (+ 25.0 (* 0.2 i)) 25.0 8.0) 0.0 0.375 1.0 0 #f #t #f
+                45.0 45.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f
+                (list (sc2-unit-order 295 #f 86643 0.0)) 0 '() 0 0 0.0 0 0 0 0 '() 0 0)))
+  (define l66-mws
+    (for/list ([i (in-range 16)])
+      (sc2-unit 1 1 (+ 86660 i) 45 1 (sc2-point3d (+ 26.0 (* 0.25 (modulo i 4))) (+ 30.0 (* 0.3 (quotient i 4))) 8.0)
+                0.0 0.375 1.0 0 #f #t #f
+                45.0 45.0 0.0 0.0 0.0 0.0 0 0 #f #f #f #t #f
+                (list (sc2-unit-order 295 #f 86609 0.0)) 0 '() 0 0 0.0 0 0 0 0 '() 0 0)))
+  (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #t)
+  (define l66-boost-no-pull
+    (saturate-workers-and-gas-commands
+     (make-test-obs 9400 95 210 (append (list l66-cc1 l66-cc2 l66-ref-3 l66-min1 l66-min2) l66-gws l66-mws))
+     #:gas-starvation-boost? #t))
+  (define l66-boost-pulled-gas?
+    (ormap (lambda (c)
+             (and (sc2-raw-unit-command? c)
+                  (= (sc2-raw-unit-command-ability-id c) 3666)
+                  (ormap (lambda (wt) (memv wt '(86650 86651 86652)))
+                         (sc2-raw-unit-command-unit-tags c))))
+           l66-boost-no-pull))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l66-min1))))
+  (define l66-boost-refill
+    (saturate-workers-and-gas-commands
+     (make-test-obs 9500 150 80 (append (list l66-cc1 l66-cc2 l66-ref-0 l66-min1 l66-min2) l66-mws))
+     #:gas-starvation-boost? #t))
+  (define l66-boost-refill-cnt
+    (for/sum ([c (in-list l66-boost-refill)]
+              #:when (and (sc2-raw-unit-command? c)
+                          (= (sc2-raw-unit-command-ability-id c) 3666)
+                          (= (sc2-raw-unit-command-target-unit-tag c) 86643)))
+      (length (sc2-raw-unit-command-unit-tags c))))
+  (check-true "l66-c3-gas-starvation-boost-end-to-end-suppresses-pull-and-refills-2plus"
+              (and (not l66-boost-pulled-gas?)
+                   (>= l66-boost-refill-cnt 2)))
 
   ;; Clean final rewind
   (reset-sc2-live-response-data!)

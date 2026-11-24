@@ -1058,6 +1058,9 @@
                      (define step-reserved-aabbs (hash-ref step-res 'wall-reserved-aabbs '()))
                      (define step-watchdog-expand-ring-syms
                        (hash-ref step-res 'watchdog-expand-ring-syms '()))
+                     (define step-arbiter-ledger (hash-ref step-res 'arbiter-ledger #f))
+                     (define step-gas-boost? (hash-ref step-res 'gas-starvation-boost? #f))
+                     (define step-apm-backoff? (hash-ref step-res 'apm-pressure-backoff? #f))
                      (define action-cmds
                        (translate-bot-actions->sc2-raw-commands
                         bot-actions
@@ -1069,14 +1072,17 @@
                         #:role-leases step-role-leases
                         #:reserved-aabbs step-reserved-aabbs
                         #:game-info game-info
-                        #:watchdog-expand-ring-syms step-watchdog-expand-ring-syms))
+                        #:watchdog-expand-ring-syms step-watchdog-expand-ring-syms
+                        #:arbiter-ledger step-arbiter-ledger))
                      (define sat-cmds
                        (saturate-workers-and-gas-commands
                         obs
                         #:excluded-worker-tags commanded-workers
                         #:role-leases step-role-leases
                         #:reserved-aabbs step-reserved-aabbs
-                        #:game-info game-info))
+                        #:game-info game-info
+                        #:gas-starvation-boost? step-gas-boost?
+                        #:apm-pressure-backoff? step-apm-backoff?))
                      (define raw-cmds0 (append split-cmds action-cmds sat-cmds))
                      (define rcmds
                        (govern-sc2-wire-actions! wire-apm-gov raw-cmds0 last-game-loop obs))

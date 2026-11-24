@@ -1259,6 +1259,59 @@
                   (multiprong-result-actions r-h-def-aa))))
 
 ;; =============================================================================
+;; L66-C1: Cross-Step Arbiter Feedback on >= 3 `'unit-claimed-higher-priority`
+;;         Overrides in 224f (and Ignored at <= 2 for Anti-Oscillation Hysteresis)
+;; =============================================================================
+(let ()
+  (define (seed-claim-preempts! ledger base-frame n)
+    (for ([k (in-range n)])
+      (define f (+ base-frame (* k 16)))
+      (arbiter-resolve!
+       ledger f (make-arbiter-budget-snapshot)
+       (list (make-proposal (list 'hd k) 'home-defense 'micro 900.0 '(attack-pos 9501 30.0 30.0)
+                            #:claim (make-proposal-claim '(9501) #:role 'home-defense #:lease-ttl 0))
+             (make-proposal (list 'mp k) 'multiprong-coordinator 'micro 600.0 '(attack-pos 9501 155.0 155.0)
+                            #:claim (make-proposal-claim '(9501) #:role 'strike-group #:lease-ttl 0))))))
+
+  (define mp-army
+    (append (for/list ([i (in-range 16)]) (mk-u (+ 9500 i) 'stalker 120.0 140.0))
+            (for/list ([i (in-range 4)]) (mk-u (+ 9540 i) 'zealot 142.0 108.0))))
+  (define mp-enemies
+    (list (mk-u 9601 'stalker 155.0 155.0) (mk-u 9602 'stalker 154.0 154.0)))
+
+  ;; 2 claim preemptions (< 3 threshold) -> NO cooldown, `'two-prong-sync` launches cleanly!
+  (define st-2 (make-multiprong-state))
+  (define led-2 (make-arbiter-ledger))
+  (seed-claim-preempts! led-2 9000 2)
+  (define r-2
+    (step-multiprong-coordinator!
+     st-2 #:frame 9064 #:live-obs? #t #:race 'Protoss
+     #:ally-units mp-army #:combat-units mp-army #:ally-townhalls ally-ths-2
+     #:enemy-units mp-enemies #:enemy-townhalls enemy-ths-2
+     #:base-x 30.0 #:base-y 30.0 #:enemy-x 155.0 #:enemy-y 155.0
+     #:arbiter-ledger led-2))
+
+  ;; 3 claim preemptions (>= 3 in 224f) -> bounded 168f cooldown suppresses `'two-prong-sync`!
+  (define st-3 (make-multiprong-state))
+  (define led-3 (make-arbiter-ledger))
+  (seed-claim-preempts! led-3 9000 3)
+  (define r-3
+    (step-multiprong-coordinator!
+     st-3 #:frame 9064 #:live-obs? #t #:race 'Protoss
+     #:ally-units mp-army #:combat-units mp-army #:ally-townhalls ally-ths-2
+     #:enemy-units mp-enemies #:enemy-townhalls enemy-ths-2
+     #:base-x 30.0 #:base-y 30.0 #:enemy-x 155.0 #:enemy-y 155.0
+     #:arbiter-ledger led-3))
+
+  (check! (and (eq? (multiprong-result-mode r-2) 'two-prong-sync)
+               (< (multiprong-state-def-cooldown-until st-2) 0)
+               (eq? (multiprong-result-mode r-3) 'inactive)
+               (>= (multiprong-state-def-cooldown-until st-3) (+ 9064 168)))
+          (format "L66-C1: >=3 'unit-claimed-higher-priority in 224f cools 2-prong while <=2 does not (2:~a/~a 3:~a/~a)"
+                  (multiprong-result-mode r-2) (multiprong-state-def-cooldown-until st-2)
+                  (multiprong-result-mode r-3) (multiprong-state-def-cooldown-until st-3))))
+
+;; =============================================================================
 ;; L65-A5: Frame-Rewind Auto-Reset Hygiene & < 0.25 ms/step Performance Budget
 ;; =============================================================================
 (let ()

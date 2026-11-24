@@ -52,7 +52,13 @@
                   nova-impact-score-enemy-hits)
          (only-in "../lib/engine/arbiter.rkt"
                   arbiter-ledger?
-                  arbiter-ledger-last-frame)
+                  arbiter-ledger-last-frame
+                  arbiter-recent-override-count
+                  arbiter-feedback-for
+                  arbiter-resolve!
+                  make-arbiter-budget-snapshot
+                  make-proposal
+                  make-proposal-cost)
          (only-in "../lib/tactics/multiprong-coordinator.rkt"
                   multiprong-state?
                   multiprong-state-active-mode
@@ -7689,6 +7695,144 @@
                       (filter (lambda (a) (and (pair? a) (eq? (car a) 'train))) acts-wp-pvt)
                       (filter (lambda (a) (and (pair? a) (eq? (car a) 'train))) acts-wp-pvz)
                       (filter (lambda (a) (and (pair? a) (eq? (car a) 'train))) acts-wp-pvp))))
+
+;; -----------------------------------------------------------------------------
+;; Test 114 (Loop 66 / Architecture Phase C1): L2 Macro Arbiter Spend Funnel,
+;; Structured `'budget-gas` & `'facility-busy` Override Recording, Macro Cache
+;; Vector `86` (`mc-cv[84..85]`), & `step-live-bot-runtime!` Feedback Flags
+;; -----------------------------------------------------------------------------
+(let ()
+  ;; (a) Live Protoss midgame with idle Forge & Twilight Council + idle Robo, plenty of minerals (500M)
+  ;;     but starved gas (10G): `l2-emit-research-verified!` & `l2-try-train-unit!` record `'budget-gas`
+  ;;     overrides into `(rt-arbiter-ledger rt)` and `mc-cv` has length 86 with clean slots 84..85!
+  (define rt-gas (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define bldgs-gas-starve
+    (list (mk-u 98401 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+          (mk-u 98402 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)
+          (mk-u 98403 'pylon 36.0 34.0 #:hp 200.0 #:shield 200.0)
+          (mk-u 98404 'cybernetics-core 40.0 38.0 #:hp 550.0 #:shield 550.0)
+          (mk-u 98405 'twilight-council 44.0 38.0 #:hp 500.0 #:shield 500.0)
+          (mk-u 98406 'forge 46.0 36.0 #:hp 400.0 #:shield 400.0)
+          (mk-u 98407 'robotics-facility 38.0 36.0 #:hp 450.0 #:shield 450.0)
+          (mk-u 98408 'assimilator 30.0 38.0 #:hp 300.0 #:shield 300.0)
+          (mk-u 98409 'warp-gate 42.0 34.0 #:hp 500.0 #:shield 500.0)))
+  (define obs-gas-starve
+    (mk-live-obs 'Protoss 'Terran 5800 #:minerals 500 #:gas 10 #:supply-used 52 #:supply-cap 78
+                 #:mineral-harvesters 32 #:vespene-harvesters 3
+                 #:researched-upgrades '(warp-gate-research)
+                 #:ally-units (list (mk-u 98410 'stalker 50.0 34.0 #:hp 80.0 #:shield 80.0)
+                                    (mk-u 98411 'observer 58.0 32.5 #:hp 40.0 #:shield 20.0 #:flying #t))
+                 #:ally-buildings bldgs-gas-starve))
+  (define res-g1 (step-live-bot-runtime! rt-gas obs-gas-starve))
+  ;; Step again 8 frames later so >= 3 `'budget-gas` overrides accumulate within 224f
+  (define res-g2
+    (step-live-bot-runtime!
+     rt-gas
+     (hash-set obs-gas-starve 'frame 5808)))
+  (define res-g3
+    (step-live-bot-runtime!
+     rt-gas
+     (hash-set obs-gas-starve 'frame 5816)))
+  (define led-gas (hash-ref res-g3 'arbiter-ledger #f))
+  (define gas-ov-cnt
+    (if (arbiter-ledger? led-gas)
+        (arbiter-recent-override-count led-gas 'l2-macro-runtime 'budget-gas 5816 #:window-frames 224)
+        0))
+  (define mc-pair (unbox (rt-macro-bundle-cache rt-gas)))
+  (define mc-cv-len (and (pair? mc-pair) (vector? (cdr mc-pair)) (vector-length (cdr mc-pair))))
+  (define mc-cv-84 (and (= mc-cv-len 86) (vector-ref (cdr mc-pair) 84)))
+  (define tel-g3 (hash-ref res-g3 'telemetry (hash)))
+  (define gas-starve-ok?
+    (and (arbiter-ledger? led-gas)
+         (eq? led-gas (rt-arbiter-ledger rt-gas))
+         (>= gas-ov-cnt 3)
+         (eq? (hash-ref res-g3 'gas-starvation-boost? #f) #t)
+         (eq? (hash-ref res-g3 'apm-pressure-backoff? #t) #f)
+         (> (hash-ref tel-g3 'arbiter-overrides 0) 0)
+         (symbol? (hash-ref tel-g3 'arbiter-top-reason #f))
+         (= mc-cv-len 86)
+         (boolean? mc-cv-84)))
+
+  ;; (b) Live Protoss midgame with ALL production slots busy (`order-count = 1`) and 600M/300G:
+  ;;     `l2-try-train-unit!` / `l2-emit-research-verified!` records `'facility-busy` overrides!
+  (define rt-fac (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define bldgs-fac-busy
+    (list (mk-u 98421 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+          (mk-u 98422 'nexus 62.5 32.5 #:hp 1000.0 #:shield 1000.0)
+          (mk-u 98423 'pylon 36.0 34.0 #:hp 200.0 #:shield 200.0)
+          (mk-u 98424 'cybernetics-core 40.0 38.0 #:hp 550.0 #:shield 550.0)
+          (hash-set (mk-u 98425 'twilight-council 44.0 38.0 #:hp 500.0 #:shield 500.0) 'order-count 1)
+          (hash-set (mk-u 98426 'forge 46.0 36.0 #:hp 400.0 #:shield 400.0) 'order-count 1)
+          (hash-set (mk-u 98427 'robotics-facility 38.0 36.0 #:hp 450.0 #:shield 450.0) 'order-count 1)
+          (hash-set (mk-u 98428 'gateway 42.0 34.0 #:hp 500.0 #:shield 500.0) 'order-count 1)))
+  (step-layer2-economy!
+   rt-fac
+   (mk-live-obs 'Protoss 'Terran 6000 #:minerals 600 #:gas 300 #:supply-used 52 #:supply-cap 78
+                #:mineral-harvesters 32 #:vespene-harvesters 6
+                #:researched-upgrades '(warp-gate-research)
+                #:ally-units (list (mk-u 98430 'stalker 50.0 34.0 #:hp 80.0 #:shield 80.0)
+                                   (mk-u 98431 'observer 58.0 32.5 #:hp 40.0 #:shield 20.0 #:flying #t))
+                #:ally-buildings bldgs-fac-busy))
+  (define fac-ov-cnt
+    (arbiter-recent-override-count (rt-arbiter-ledger rt-fac) 'l2-macro-runtime 'facility-busy 6000 #:window-frames 336))
+
+  ;; (c) Anti-oscillation hysteresis on `'apm-pressure-backoff?`: 2 overrides -> #f, 3 overrides -> #t!
+  (define rt-apm (make-live-bot-runtime #:bot-name 'Mothman-T #:race 'Terran))
+  (define led-apm (rt-arbiter-ledger rt-apm))
+  (define obs-apm
+    (mk-live-obs 'Terran 'Zerg 4200 #:minerals 100 #:gas 50 #:supply-used 30 #:supply-cap 46
+                 #:mineral-harvesters 18 #:vespene-harvesters 3
+                 #:ally-buildings (list (mk-u 98440 'orbital-command 32.5 32.5 #:hp 1500.0)
+                                        (mk-u 98441 'barracks 40.0 34.0 #:hp 1000.0))))
+  (for ([k (in-range 2)])
+    (arbiter-resolve! led-apm (+ 4180 (* k 4))
+                      (make-arbiter-budget-snapshot #:apm-tokens-available 0.0)
+                      (list (make-proposal (list 'apm-t k) 'l2-macro-runtime 'macro 500.0 '(train marine)))))
+  (define res-apm-2 (step-live-bot-runtime! rt-apm (hash-set obs-apm 'frame 4192)))
+  (arbiter-resolve! led-apm 4196
+                    (make-arbiter-budget-snapshot #:apm-tokens-available 0.0)
+                    (list (make-proposal 'apm-t-3 'l2-macro-runtime 'macro 500.0 '(train marine))))
+  (define res-apm-3 (step-live-bot-runtime! rt-apm (hash-set obs-apm 'frame 4200)))
+  (define apm-hyst-ok?
+    (and (eq? (hash-ref res-apm-2 'apm-pressure-backoff? #t) #f)
+         (eq? (hash-ref res-apm-3 'apm-pressure-backoff? #f) #t)))
+
+  ;; (d) Active escrow block (`l2-arbiter-authorize-spend!`): 1-base Protoss saving 400M for Natural
+  ;;     Nexus (`active-escrow-sym = 'nexus`, `minerals = 300`) blocks unguarded non-essential
+  ;;     `(research protoss-ground-weapons-1)` (`100M/100G`) and logs `'budget-mineral` into ledger!
+  (define rt-esc (make-live-bot-runtime #:bot-name 'Mothman-P #:race 'Protoss))
+  (define acts-esc
+    (step-layer2-economy!
+     rt-esc
+     (mk-live-obs 'Protoss 'Zerg 2800 #:minerals 300 #:gas 150 #:supply-used 22 #:supply-cap 30
+                  #:mineral-harvesters 16 #:vespene-harvesters 3
+                  #:ally-units (list (mk-u 98450 'zealot 50.0 34.0 #:hp 100.0 #:shield 50.0))
+                  #:ally-buildings (list (mk-u 98451 'nexus 32.5 32.5 #:hp 1000.0 #:shield 1000.0)
+                                         (mk-u 98452 'pylon 36.0 34.0 #:hp 200.0 #:shield 200.0)
+                                         (mk-u 98453 'gateway 40.0 34.0 #:hp 500.0 #:shield 500.0)
+                                         (mk-u 98454 'cybernetics-core 44.0 34.0 #:hp 550.0 #:shield 550.0)
+                                         (mk-u 98455 'forge 48.0 34.0 #:hp 400.0 #:shield 400.0)
+                                         (mk-u 98456 'assimilator 30.0 38.0 #:hp 300.0 #:shield 300.0)))))
+  (define esc-min-ov
+    (arbiter-recent-override-count (rt-arbiter-ledger rt-esc) 'l2-macro-runtime 'budget-mineral 2800 #:window-frames 224))
+  (define escrow-block-ok?
+    (and (not (ormap (lambda (a) (and (pair? a) (eq? (car a) 'research) (eq? (second a) 'protoss-ground-weapons-1)))
+                     acts-esc))
+         (> esc-min-ov 0)))
+
+  (check-true "L66-C1-MacroArbiterSpendFunnel-GasFacilityOverrides-FeedbackAndCache86"
+              (and gas-starve-ok? (> fac-ov-cnt 0) apm-hyst-ok? escrow-block-ok?)
+              (format "gasOk=~a(ov=~a boost=~a mcLen=~a mc84=~a telOv=~a top=~a) facOv=~a apmOk=~a(2=~a 3=~a) escOk=~a(ov=~a res=~a)"
+                      gas-starve-ok? gas-ov-cnt
+                      (hash-ref res-g3 'gas-starvation-boost? #f)
+                      mc-cv-len mc-cv-84
+                      (hash-ref tel-g3 'arbiter-overrides 0)
+                      (hash-ref tel-g3 'arbiter-top-reason #f)
+                      fac-ov-cnt apm-hyst-ok?
+                      (hash-ref res-apm-2 'apm-pressure-backoff? #f)
+                      (hash-ref res-apm-3 'apm-pressure-backoff? #f)
+                      escrow-block-ok? esc-min-ov
+                      (filter (lambda (a) (and (pair? a) (eq? (car a) 'research))) acts-esc))))
 
 (printf "\n=== Loop 49 Suite Summary: ~a/~a passed, ~a failed ===\n"
         tests-passed tests-run tests-failed)

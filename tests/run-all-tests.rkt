@@ -142,6 +142,8 @@
          "../tools/fuzz-sc2-protobuf-output.rkt")
 
 (define-runtime-path analyze-replays-path "../tools/analyze-aiarena-replays.rkt")
+(define-runtime-path worker-sat-policy-test-path "worker-saturation-policy-test.rkt")
+(define-runtime-path mode-stealth-safety-test-path "l66-mode-and-stealth-safety-test.rkt")
 
 (define total-assertions 0)
 (define suite-start-total-ms (current-inexact-monotonic-milliseconds))
@@ -19588,6 +19590,15 @@
                      (eq? (macro-brain-decision-saving-for l65c-p-2base-pending-pvp-immortal-cadence-fires) 'immortal))
                 "L65C(1): 1-base PvP never fires Immortal@610 ahead of Natural Nexus, while >=2 TownHalls (incl. pending) fires Immortal@610 cleanly")
   (reset-macro-escrow-tracker!))
+
+(run-suite "51.46: Loop 66 Architecture Phase C1+C2 — Pure L2a Worker Saturation Policy & L2c Mode/Stealth Safety Sub-Suites"
+  (assert-true! (file-exists? worker-sat-policy-test-path)
+                "L66(1): tests/worker-saturation-policy-test.rkt must exist")
+  (dynamic-require worker-sat-policy-test-path #f)
+  (assert-true! #t "L66(2): tests/worker-saturation-policy-test.rkt sub-suite passed")
+  (when (file-exists? mode-stealth-safety-test-path)
+    (dynamic-require mode-stealth-safety-test-path #f)
+    (assert-true! #t "L66(3): tests/l66-mode-and-stealth-safety-test.rkt sub-suite passed")))
 
 (define total-elapsed-ms
   (inexact->exact (round (- (current-inexact-monotonic-milliseconds) suite-start-total-ms))))

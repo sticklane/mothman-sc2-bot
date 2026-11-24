@@ -1509,6 +1509,7 @@ DEPLOY_LABELS: Dict[str, str] = {
     "rqsntsos_e5e69116": "Loop 63B",
     "unlmxxko_ec044f2a": "Loop 64B",
     "pxlouxrw_6c50ea86": "Loop 65H",
+    "tlrrltvx_ea56f6f1": "Loop 66",
 }
 
 BOT_META: Dict[str, Dict[str, str]] = {
@@ -4225,10 +4226,10 @@ def _render_standings_tables(
             "crashes across 114 Division 6–7 games (4–9 on Release #13, 2.5× Release #12's win rate, with live wins over "
             "1575-Elo Snowbot and 1551-Elo Kira). Release #13 raised live external win rate 16.1 percentage points to 44.0% "
             "(6–2, 75.0% in v1 ranked matches), cut live harvest command drops by 93.0%, and averaged 3.99 ms per step. "
-            'All eight ladder bots currently run Release #16 (Build 64B, Competition #38, '
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45252241181" target="_blank" rel="noopener noreferrer">deploy run 45252241181</a>, '
-            '8/8 verified active), while <strong>Release #17</strong> (Build 65H) has passed full 84-match validation '
-            'and 4–0 standalone BotZip smoke (10.79× trade, 10.04 ms/step) and is queued for AI Arena rollout. '
+            'All eight ladder bots currently run Release #17 (Build 65H, Competition #38, '
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45343681227" target="_blank" rel="noopener noreferrer">deploy run 45343681227</a>, '
+            '8/8 verified active), while <strong>Release #18</strong> (Build 66) has passed full 84-match validation '
+            'and 4–0 standalone BotZip smoke (8.09× trade, 9.69 ms/step) and is queued for AI Arena rollout. '
             "Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
         )
@@ -4650,10 +4651,10 @@ def build_history_page(
         f"The first deployed build went 0–10 on AI Arena. Recent v1 builds win roughly 55–61% of their games: "
         f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
         f"Release #9 (Build 51) climbed to 19–9–3 (61.3% wins), and Release #13 (Build 61C) went 7–5 (58.3% external; "
-        f"6–2 in ranked v1 games, +106 combined v1 Elo across Releases #11–#13) before Releases #14–#16 "
-        f"(Build 64B, "
-        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45252241181" target="_blank" rel="noopener noreferrer">deploy run 45252241181</a>) '
-        f"rolled out to all 8 ladder bots, with Release #17 (Build 65H) validated and packaged for the next rollout."
+        f"6–2 in ranked v1 games, +106 combined v1 Elo across Releases #11–#13) before Releases #14–#17 "
+        f"(Build 65H, "
+        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45343681227" target="_blank" rel="noopener noreferrer">deploy run 45343681227</a>) '
+        f"rolled out to all 8 ladder bots, with Release #18 (Build 66) validated and packaged for the next rollout."
     )
 
     sec_loop = render_loop_diagram_section(rich, section_num="Section 2")
@@ -4720,6 +4721,7 @@ def build_history_page(
         "iter63b_ship15_full": 15,
         "iter64b_ship16_full": 16,
         "iter65h_ship17_full": 17,
+        "iter66_ship18_full": 18,
     }
 
     def _format_run_label(run_id: str, status_raw: str = "") -> str:
@@ -5245,7 +5247,7 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
                 elif "`bench_low_concurrency`" in s:
                     other_findings.append("**Benchmark concurrency:** Earlier runs used 10 of 32 threads (31.2% utilization). Full 84-match runs now target 12 concurrent workers (avoiding CPU-contention timeouts), and 26-match single-race canaries run at 14 workers.")
                 elif "`bench_non_lpt_schedule`" in s:
-                    other_findings.append("**Match scheduling:** Five earlier runs launched matches in fixed order. Longest-first (LPT) scheduling is now enabled by default so slow opponents start in Wave 1 and cut tail wait to 7.9% in L65H.")
+                    other_findings.append("**Match scheduling:** Five earlier runs launched matches in fixed order. Longest-first (LPT) scheduling is now enabled by default so slow opponents start in Wave 1 and cut tail wait to 7.9% in L65H and 2.9% in L66.")
                 elif "`mechanical_runner_multi_turn_post_bench`" in s:
                     other_findings.append("**Post-match handoffs:** Multi-turn serial post-benchmark steps (up to 12 turns in L65C) were collapsed into a single parallel post-benchmark pipeline.")
                 elif "`slow_non_sc2_command`" in s and "`post_bench_serial`" in s:

@@ -36,7 +36,9 @@
          (only-in "sc2-common.rkt"
                   SC2-SINGLETON-TECH-BUILDINGS
                   SC2-DUAL-CAP-TECH-BUILDINGS)
-         "plan/macro-ability-policy.rkt")
+         "plan/macro-ability-policy.rkt"
+         "plan/worker-saturation-policy.rkt"
+         "tactics/mode-and-stealth-safety.rkt")
 
 (provide
  ;; RFC 6455 WebSocket Client
@@ -219,10 +221,11 @@
  SC2-PROTOSS-POWER-PLACEMENT-FAIL-LOOP
  SC2-GAS-PULL-HYSTERESIS-LATCH
  SC2-HEAVY-WORKER-RUSH-LATCH
+ SC2-DEFAULT-WORKER-SAT-STATE
+ SC2-DEFAULT-MODE-STEALTH-STATE
  SC2-ZERO-GAS-STREAK-START-LOOP
  SC2-ZERO-GAS-LAST-VESPENE
  SC2-ZERO-GAS-RESCUE-LATCH
- SC2-ZERO-GAS-RESCUE-ROTATION-IDX
  SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP
  SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP
  SC2-GAS-BLDG-ZERO-WORKERS-SINCE
@@ -9981,68 +9984,50 @@
 
 (define compute-initial-worker-split-commands frame0-pro-worker-split-commands)
 
-(define SC2-WORKER-TRANSFER-LAST-LOOP (box 0))
-(define SC2-WORKER-TRANSFER-COOLDOWN-UNTIL (make-hasheqv))
-(define SC2-GAS-PULL-HYSTERESIS-LATCH (box #f))
+(define SC2-DEFAULT-WORKER-SAT-STATE (make-worker-sat-state))
+;; Legacy compatibility aliases backed directly by `SC2-DEFAULT-WORKER-SAT-STATE`
+(define SC2-GAS-PULL-HYSTERESIS-LATCH
+  (worker-sat-gas-pull-latch-box SC2-DEFAULT-WORKER-SAT-STATE))
 (define SC2-HEAVY-WORKER-RUSH-LATCH (box #f))
-(define SC2-ZERO-GAS-STREAK-START-LOOP (box #f))
-(define SC2-ZERO-GAS-LAST-VESPENE (box #f))
-(define SC2-ZERO-GAS-RESCUE-LATCH (box #f))
-(define SC2-ZERO-GAS-RESCUE-ROTATION-IDX (box 0))
-(define SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP (box #f))
-(define SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP (box #f))
-(define SC2-GAS-BLDG-ZERO-WORKERS-SINCE (make-hasheqv))
-;; L61 (`#1609`): 3-Race TownHall `RALLY_WORKERS (3690)` tracker & midgame harvest throttles
-(define SC2-TH-WORKER-RALLY-TARGET (make-hasheqv))     ;; th-tag -> (vector dst-th-tag patch-tag last-loop was-flying?)
-(define SC2-SAT-EVAC-LAST-LOOP (make-hasheqv))         ;; offline-th-tag (or 0) -> loop
-(define SC2-SAT-IDLE-LAST-LOOP (make-hasheqv))         ;; worker-tag -> loop
-(define SC2-SAT-XFER-BASE-COOLDOWN (make-hasheqv))     ;; src-th-tag -> loop
-(define SC2-SAT-GAS-RESCUE-LAST-LOOP (make-hasheqv))   ;; gas-tag -> loop
-(define SC2-SAT-GAS-FILL-LAST-LOOP (make-hasheqv))     ;; gas-tag -> (cons loop eff-assigned)
-(define SC2-SAT-GAS-PULL-LAST-LOOP (box (cons -1000 0))) ;; (cons loop eff-active-gas-workers)
-(define SC2-SAT-GAS-LAST-FILL-GLOBAL (box -1000))
-(define SC2-SAT-GAS-LAST-PULL-GLOBAL (box -1000))
-(define SC2-SAT-MULE-IDLE-LAST-LOOP (make-hasheqv))    ;; mule-tag -> loop
+(define SC2-ZERO-GAS-STREAK-START-LOOP
+  (worker-sat-state-zero-gas-streak-start-loop SC2-DEFAULT-WORKER-SAT-STATE))
+(define SC2-ZERO-GAS-LAST-VESPENE
+  (worker-sat-state-zero-gas-last-vespene SC2-DEFAULT-WORKER-SAT-STATE))
+(define SC2-ZERO-GAS-RESCUE-LATCH
+  (worker-sat-state-zero-gas-rescue-latch SC2-DEFAULT-WORKER-SAT-STATE))
+(define SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP
+  (worker-sat-state-zero-gas-rescue-last-rotate SC2-DEFAULT-WORKER-SAT-STATE))
+(define SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP
+  (worker-sat-state-zero-gas-rescue-last-refresh SC2-DEFAULT-WORKER-SAT-STATE))
+(define SC2-GAS-BLDG-ZERO-WORKERS-SINCE
+  (worker-sat-state-gas-bldg-zero-workers-since SC2-DEFAULT-WORKER-SAT-STATE))
+(define SC2-TH-WORKER-RALLY-TARGET
+  (worker-sat-state-th-worker-rally-target SC2-DEFAULT-WORKER-SAT-STATE))
 
+;; Architecture Phase C2 (Loop 66): Thin wire codec adapter delegating ALL worker/gas/rally/MULE
+;; saturation decisions (`Sec 0`..`Sec 5`) to pure L2a leaf `lib/plan/worker-saturation-policy.rkt`,
+;; preserving `Sec 6` MULE/Chrono wire safety net & opening anti-bounce close-patch lock.
 (define (saturate-workers-and-gas-commands obs
                                            #:excluded-worker-tags [excluded-worker-tags (seteqv)]
                                            #:role-leases [role-leases #f]
                                            #:reserved-aabbs [reserved-aabbs '()]
-                                           #:game-info [game-info #f])
+                                           #:game-info [game-info #f]
+                                           #:gas-starvation-boost? [gas-starvation-boost? #f]
+                                           #:apm-pressure-backoff? [apm-pressure-backoff? #f])
   (void reserved-aabbs)
   (define cur-loop (sc2-observation-game-loop obs))
-  (define prev-sat-loop (unbox SC2-WORKER-TRANSFER-LAST-LOOP))
+  (define prev-sat-loop (unbox (worker-sat-state-last-loop SC2-DEFAULT-WORKER-SAT-STATE)))
   (when (or (< cur-loop prev-sat-loop)
             (and (<= cur-loop 8) (> prev-sat-loop 8)))
-    (hash-clear! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL)
     (for ([k (in-list (hash-keys SC2-MACRO-ABILITY-LAST-LOOP))])
       (unless (= (hash-ref SC2-MACRO-ABILITY-LAST-LOOP k -1) cur-loop)
         (hash-remove! SC2-MACRO-ABILITY-LAST-LOOP k)))
-    (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)
     (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f)
-    (set-box! SC2-ZERO-GAS-STREAK-START-LOOP #f)
-    (set-box! SC2-ZERO-GAS-LAST-VESPENE #f)
-    (set-box! SC2-ZERO-GAS-RESCUE-LATCH #f)
-    (set-box! SC2-ZERO-GAS-RESCUE-ROTATION-IDX 0)
-    (set-box! SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP #f)
-    (set-box! SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP #f)
-    (hash-clear! SC2-GAS-BLDG-ZERO-WORKERS-SINCE)
     (reset-macro-policy-latch! SC2-MACRO-POLICY-LATCH)
     (reset-sc2-nexus-recharge-cooldown!)
-    (hash-clear! SC2-SUPPLY-DROP-USED-DEPOTS)
-    (hash-clear! SC2-TH-WORKER-RALLY-TARGET)
-    (hash-clear! SC2-SAT-EVAC-LAST-LOOP)
-    (hash-clear! SC2-SAT-IDLE-LAST-LOOP)
-    (hash-clear! SC2-SAT-XFER-BASE-COOLDOWN)
-    (hash-clear! SC2-SAT-GAS-RESCUE-LAST-LOOP)
-    (hash-clear! SC2-SAT-GAS-FILL-LAST-LOOP)
-    (set-box! SC2-SAT-GAS-PULL-LAST-LOOP (cons -1000 0))
-    (set-box! SC2-SAT-GAS-LAST-FILL-GLOBAL -1000)
-    (set-box! SC2-SAT-GAS-LAST-PULL-GLOBAL -1000)
-    (hash-clear! SC2-SAT-MULE-IDLE-LAST-LOOP))
+    (hash-clear! SC2-SUPPLY-DROP-USED-DEPOTS))
   (when (> (- cur-loop prev-sat-loop) 64)
     (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f))
-  (set-box! SC2-WORKER-TRANSFER-LAST-LOOP cur-loop)
   (when (< cur-loop (unbox SC2-WORKER-ASSIGN-LAST-LOOP))
     (hash-clear! SC2-WORKER-PATCH-ASSIGNMENT)
     (hash-clear! SC2-WORKER-ANTIBOUNCE-COOLDOWN))
@@ -10089,15 +10074,16 @@
                (and (th-is-nonflying? u)
                     (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
              self-units)))
+  (define flying-townhalls
+    (filter (lambda (u)
+              (and (sc2-unit-is-townhall? u)
+                   (not (th-is-nonflying? u))))
+            self-units))
   (define all-ready-gas-bldgs
     (filter (lambda (u)
               (and (sc2-unit-is-gas-building? u)
                    (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)))
             self-units))
-  ;; L31-P0-1 (`GasZeroFreeze -> 0`): Strictly filter depleted `vespene-contents == 0` geysers out
-  ;; of `ready-gas-bldgs` (and into `depleted-gas-tags`) whenever ANY ready gas building reports live
-  ;; `vespene-contents > 0` (even if SC2 transiently leaves `ideal-harvesters > 0`), while preserving
-  ;; synthetic fixtures where all geysers omit `vespene-contents` (`has-live-gas-contents? = #f`).
   (define has-live-gas-contents?
     (ormap (lambda (u) (> (sc2-unit-vespene-contents u) 0)) all-ready-gas-bldgs))
   (define (gas-bldg-depleted? u)
@@ -10107,14 +10093,7 @@
              (<= (sc2-unit-ideal-harvesters u) 0))))
   (define ready-gas-bldgs
     (filter (lambda (u) (not (gas-bldg-depleted? u))) all-ready-gas-bldgs))
-  (define depleted-gas-tags
-    (for/seteqv ([u (in-list all-ready-gas-bldgs)]
-                 #:when (gas-bldg-depleted? u))
-      (sc2-unit-tag u)))
   (define all-gas-tags (list->seteqv (map sc2-unit-tag ready-gas-bldgs)))
-
-  (define (worker-returning-cargo? w)
-    (worker-carrying-cargo? w))
 
   (define thin-wall-mineral-tags
     (for/seteqv ([m (in-list mineral-fields)]
@@ -10126,38 +10105,19 @@
                   (and (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666))
                        (set-member? thin-wall-mineral-tags (sc2-unit-order-target-unit-tag o))))
                 (sc2-unit-orders w))))
-  (define sat-self-structures
-    (filter sc2-unit-is-structure? self-units))
+  (define sat-self-structures (filter sc2-unit-is-structure? self-units))
+  (define all-self-workers (filter sc2-unit-is-worker? self-units))
   (define workers
     (filter (lambda (w)
               (define wtag (sc2-unit-tag w))
-              (and (sc2-unit-is-worker? w)
-                   (not (memv 57 (sc2-unit-buff-ids w)))
+              (and (not (memv 57 (sc2-unit-buff-ids w)))
                    (not (set-member? excluded-worker-tags wtag))
                    (not (worker-excavating-thin-wall? w))
                    (not (and (hash? role-leases)
                              (unit-leased-above? role-leases wtag 'harvester cur-loop)))
                    (not (worker-has-build-order? w cur-loop sat-self-structures))))
-            self-units))
-  (define idle-workers
-    (filter (lambda (w)
-              (or (null? (sc2-unit-orders w))
-                  (worker-build-order-stuck? w cur-loop)))
-            workers))
-  ;; L35-P0-1: Single-pass worker target index + memoized per-townhall mineral/unsafe tables
-  ;; + hoisted enemy-ground lists (eliminates 4x redundant mineral sorts & 10x enemy filters/step!).
-  (define in-flight-target-counts (make-hasheqv))
-  (for ([w (in-list workers)])
-    (define seen-t (mutable-seteqv))
-    (for ([o (in-list (sc2-unit-orders w))])
-      (define tt (sc2-unit-order-target-unit-tag o))
-      (when (and (> tt 0) (not (set-member? seen-t tt)))
-        (set-add! seen-t tt)
-        (hash-set! in-flight-target-counts tt (add1 (hash-ref in-flight-target-counts tt 0))))))
-  (define (in-flight-workers-targeting-tag tag)
-    (hash-ref in-flight-target-counts tag 0))
+            all-self-workers))
 
-  ;; Helper: live mineral fields strictly near a specific TownHall (<= 11.5 tiles, capped to 8 patches).
   (define th-mins-classified-ht (make-hasheqv))
   (define (classify-th-mins-cached th)
     (define ttag (sc2-unit-tag th))
@@ -10174,14 +10134,9 @@
     (define ttag (sc2-unit-tag th))
     (hash-ref! th-unsafe-ht ttag
                (lambda () (townhall-combat-unsafe-eval? th enemy-combat-units ally-combat-units))))
-
   (define (th-local-offline? th)
     (or (null? (minerals-near-townhall th))
         (th-combat-unsafe? th)))
-
-  (define safe-gas-ready-townhalls
-    (filter (lambda (th) (not (th-combat-unsafe? th))) ready-townhalls))
-
   (define (th-coming-online-safe? th)
     (define bp (sc2-unit-build-progress th))
     (and (th-is-nonflying? th)
@@ -10192,108 +10147,26 @@
                        (townhall-combat-metrics th enemy-combat-units ally-combat-units 12.0)])
            (or (= e-cnt 0)
                (and (< e-cnt 2) (<= e-hp (max 80.0 (* 1.0 a-hp))))))))
-
   (define (th-safety-score th)
     (define-values (e-cnt e-hp a-hp)
       (townhall-combat-metrics th enemy-combat-units ally-combat-units 12.0))
     (+ (* 1000.0 e-cnt) (max 0.0 (- e-hp (* 0.5 a-hp)))))
 
-  (define-values (offline-townhalls online-ready-townhalls)
-    (let lp ([rem ready-townhalls] [off '()] [on '()])
-      (cond
-        [(null? rem) (values (reverse off) (reverse on))]
-        [(th-local-offline? (car rem))
-         (lp (cdr rem) (cons (car rem) off) on)]
-        [else
-         (lp (cdr rem) off (cons (car rem) on))])))
-
+  (define online-ready-townhalls
+    (filter (lambda (th) (not (th-local-offline? th))) ready-townhalls))
   (define coming-online-townhalls
     (sort-townhalls-main-first (filter th-coming-online-safe? self-units)))
-
   (define online-townhalls
     (append online-ready-townhalls coming-online-townhalls))
-  (define safe-online-townhalls
-    (sort online-townhalls < #:key th-safety-score))
-
   (define owned-base-minerals
     (cond
       [(not (null? online-townhalls))
        (remove-duplicates (append* (map minerals-near-townhall online-townhalls)))]
       [(null? ready-townhalls) mineral-fields]
       [else '()]))
-
-  (define th-near-ht (make-hasheqv))
-  (define th-far-ht (make-hasheqv))
-  (define th-min-tags-ht (make-hasheqv))
-  (define min-is-far-ht (make-hasheqv))
-  (define min-th-dist-online (make-hasheqv))
-  (for ([th (in-list online-townhalls)])
-    (define th-tag (sc2-unit-tag th))
-    (define tp (sc2-unit-pos th))
-    (define tx (sc2-point3d-x tp))
-    (define ty (sc2-point3d-y tp))
-    (define mc-v (classify-th-mins-cached th))
-    (define near-m (vector-ref mc-v 0))
-    (define far-m (vector-ref mc-v 1))
-    (define all-m (vector-ref mc-v 2))
-    (hash-set! th-near-ht th-tag near-m)
-    (hash-set! th-far-ht th-tag far-m)
-    (hash-set! th-min-tags-ht th-tag (list->seteqv (map sc2-unit-tag all-m)))
-    (for ([m (in-list all-m)])
-      (define mtag (sc2-unit-tag m))
-      (define mp (sc2-unit-pos m))
-      (define d (pt-dist tx ty (sc2-point3d-x mp) (sc2-point3d-y mp)))
-      (define prev-d (hash-ref min-th-dist-online mtag +inf.0))
-      (when (< d prev-d)
-        (hash-set! min-th-dist-online mtag d)
-        (hash-set! min-is-far-ht mtag (and (memq m far-m) #t)))))
-
-  (define (th-effective-ideal th)
-    (define ih (sc2-unit-ideal-harvesters th))
-    (if (> ih 0)
-        ih
-        (min SC2-IDEAL-WORKERS-PER-MINERAL-LINE
-             (* 2 (length (minerals-near-townhall th))))))
-
-  (define (th-workers-targeting-mins th)
-    (define tset (hash-ref th-min-tags-ht (sc2-unit-tag th) (seteqv)))
-    (count (lambda (w)
-             (ormap (lambda (o)
-                      (and (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666))
-                           (set-member? tset (sc2-unit-order-target-unit-tag o))))
-                    (sc2-unit-orders w)))
-           workers))
-
-  (define (th-effective-assigned th)
-    (if (< (sc2-unit-build-progress th) SC2-BUILD-COMPLETE-PROGRESS)
-        (max (sc2-unit-assigned-harvesters th)
-             (th-workers-targeting-mins th))
-        (sc2-unit-assigned-harvesters th)))
-
-  (define (gas-eff-assigned u)
-    (max (sc2-unit-assigned-harvesters u)
-         (in-flight-workers-targeting-tag (sc2-unit-tag u))))
-
-  (define active-gas-worker-count
-    (count (lambda (w)
-             (or (ormap (lambda (bid) (memv bid '(273 274 275))) (sc2-unit-buff-ids w))
-                 (ormap (lambda (o)
-                          (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
-                        (sc2-unit-orders w))))
-           workers))
-  (define eff-active-gas-workers
-    (max active-gas-worker-count
-         (for/sum ([g (in-list ready-gas-bldgs)]) (gas-eff-assigned g))))
-
-  (define (gas-near-any-th? gb th-list)
-    (or (null? ready-townhalls)
-        (let ([gp (sc2-unit-pos gb)])
-          (ormap (lambda (th)
-                   (define tp (sc2-unit-pos th))
-                   (<= (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
-                                (sc2-point3d-x tp) (sc2-point3d-y tp))
-                       SC2-BASE-RESOURCE-RADIUS))
-                 th-list))))
+  (define owned-min-by-tag
+    (for/hasheqv ([m (in-list owned-base-minerals)])
+      (values (sc2-unit-tag m) m)))
 
   (define enemy-gnd-combat
     (filter (lambda (e) (not (sc2-unit-is-flying e))) enemy-combat-units))
@@ -10307,25 +10180,20 @@
     (define-values (close-gnd-cnt _cghp _cahp)
       (townhall-combat-metrics gb enemy-gnd-combat ally-combat-units 7.0))
     (+ (* 5000.0 close-gnd-cnt) (* 1000.0 e-cnt) (max 0.0 (- e-hp (* 0.5 a-hp)))))
-
   (define (gas-bldg-lethal-slaughter? gb)
-    ;; Lethal only when >= 3 ground-damaging enemy combat units sit right on top of the geyser (<= 7.0t)
-    ;; with uncontested HP advantage (> 1.3x nearby ally combat HP). Peripheral enemies (> 7.0t)
-    ;; and flying/non-ground harass units are non-lethal and must not block zero-gas-freeze rescue!
     (define-values (c-cnt c-hp a-hp)
       (townhall-combat-metrics gb enemy-gnd-killers ally-combat-units 7.0))
     (and (>= c-cnt 3)
          (> c-hp (* 1.3 a-hp))))
 
-  ;; During an early worker rush (`>= 5` enemy workers within 22 tiles of TownHall, `food-army < 4`),
-  ;; evacuate gas geysers to minerals so workers never vanish inside Assimilators/Refineries/Extractors!
+  ;; Worker-rush gas evacuation & heavy worker-rush latch
+  (define cur-food-army (sc2-player-common-food-army pc))
   (define worker-rush-evacuate-gas?
     (and (< cur-loop 3600)
-         (< (sc2-player-common-food-army pc) 4)
+         (< cur-food-army 4)
          (not (null? ready-townhalls))
          (>= (count (lambda (u)
-                      (and (= (sc2-unit-alliance u) 4)
-                           (sc2-unit-is-worker? u)
+                      (and (sc2-unit-is-worker? u)
                            (let ([up (sc2-unit-pos u)])
                              (ormap (lambda (th)
                                       (define tp (sc2-unit-pos th))
@@ -10333,13 +10201,8 @@
                                                    (sc2-point3d-x tp) (sc2-point3d-y tp))
                                           22.0))
                                     ready-townhalls))))
-                    units)
+                    enemy-units)
              5)))
-
-  ;; L41-P0-3a (`r02`/`r05` 3666 auto-saturate leak): When >= 6 enemy workers invade within <= 14t of a
-  ;; ready TownHall while `food-army < 4`, suppress idle-worker / anti-bounce / expansion / gas-resat
-  ;; `HARVEST_GATHER (3666)` emission (and latch until < 3 enemy workers remain within <= 16t or
-  ;; `food-army >= 4`), stopping 1-frame kill-transition gathers from yanking fighting workers off combat!
   (define-values (enemy-workers-near-th-14 enemy-workers-near-th-16)
     (if (null? ready-townhalls)
         (values 0 0)
@@ -10354,7 +10217,6 @@
               (min best (pt-dist ux uy (sc2-point3d-x tp) (sc2-point3d-y tp)))))
           (values (if (<= min-d 14.0) (add1 c14) c14)
                   (if (<= min-d 16.0) (add1 c16) c16)))))
-  (define cur-food-army (sc2-player-common-food-army pc))
   (cond
     [(and (< cur-food-army 4)
           (pair? ready-townhalls)
@@ -10366,181 +10228,14 @@
      (set-box! SC2-HEAVY-WORKER-RUSH-LATCH #f)])
   (define heavy-worker-rush-at-base? (unbox SC2-HEAVY-WORKER-RUSH-LATCH))
 
-  ;; L31-P0-1 + L32-P0-1 + L43-P0-3a (`GasZeroFreeze -> 0`): Track consecutive zero-gas-harvest
-  ;; frames whenever `cur-gas < 150`, `workers >= 12`, and at least one live ready gas building
-  ;; exists. After `>= 300f` (~13.4s) without gas gain, latch rescue until `cur-gas >= 150`;
-  ;; rotate every `180f` (~8.0s) if gas gain stays 0, AND force-refresh stuck harvesters if
-  ;; `assigned >= 3` yields 0 gas for `>= 180f` (`#59` 121.4s freeze!).
-  (define zero-gas-monitor-active?
-    (and (< cur-gas 150)
-         (>= (length workers) 12)
-         (pair? ready-gas-bldgs)
-         (not worker-rush-evacuate-gas?)
-         (not heavy-worker-rush-at-base?)))
-  (define prev-zero-gas-vespene (unbox SC2-ZERO-GAS-LAST-VESPENE))
-  (cond
-    [(not zero-gas-monitor-active?)
-     (set-box! SC2-ZERO-GAS-STREAK-START-LOOP #f)
-     (set-box! SC2-ZERO-GAS-RESCUE-LATCH #f)
-     (set-box! SC2-ZERO-GAS-RESCUE-ROTATION-IDX 0)
-     (set-box! SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP #f)
-     (set-box! SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP #f)
-     (set-box! SC2-ZERO-GAS-LAST-VESPENE cur-gas)]
-    [(and (real? prev-zero-gas-vespene) (> cur-gas prev-zero-gas-vespene))
-     (set-box! SC2-ZERO-GAS-STREAK-START-LOOP #f)
-     (set-box! SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP #f)
-     (when (unbox SC2-ZERO-GAS-RESCUE-LATCH)
-       (set-box! SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP cur-loop))
-     (set-box! SC2-ZERO-GAS-LAST-VESPENE cur-gas)]
-    [else
-     (define start-loop
-       (or (unbox SC2-ZERO-GAS-STREAK-START-LOOP)
-           (begin
-             (set-box! SC2-ZERO-GAS-STREAK-START-LOOP cur-loop)
-             cur-loop)))
-     (cond
-       [(not (unbox SC2-ZERO-GAS-RESCUE-LATCH))
-        (when (>= (- cur-loop start-loop) 300)
-          (set-box! SC2-ZERO-GAS-RESCUE-LATCH #t)
-          (set-box! SC2-ZERO-GAS-RESCUE-ROTATION-IDX 0)
-          (set-box! SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP cur-loop)
-          (set-box! SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP cur-loop))]
-       [else
-        (define rot-base
-          (or (unbox SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP) start-loop))
-        (when (>= (- cur-loop rot-base) 224)
-          (set-box! SC2-ZERO-GAS-RESCUE-ROTATION-IDX
-                    (add1 (unbox SC2-ZERO-GAS-RESCUE-ROTATION-IDX)))
-          (set-box! SC2-ZERO-GAS-RESCUE-LAST-ROTATE-LOOP cur-loop))])
-     (set-box! SC2-ZERO-GAS-LAST-VESPENE cur-gas)])
-  (define non-lethal-ready-gas-bldgs
-    (filter (lambda (gb) (not (gas-bldg-lethal-slaughter? gb))) ready-gas-bldgs))
-  (define sorted-rescue-gas-bldgs
-    (if (and (unbox SC2-ZERO-GAS-RESCUE-LATCH)
-             (pair? non-lethal-ready-gas-bldgs))
-        (sort non-lethal-ready-gas-bldgs
-              (lambda (a b)
-                (define sa (gas-bldg-threat-score a))
-                (define sb (gas-bldg-threat-score b))
-                (cond
-                  [(not (= sa sb)) (< sa sb)]
-                  [else
-                   (define na (if (gas-near-any-th? a ready-townhalls) 0 1))
-                   (define nb (if (gas-near-any-th? b ready-townhalls) 0 1))
-                   (if (not (= na nb))
-                       (< na nb)
-                       (< (sc2-unit-tag a) (sc2-unit-tag b)))])))
-        '()))
-  (define-values (gas-zero-freeze-rescue-bldg
-                  gas-zero-freeze-backup-bldg
-                  gas-zero-freeze-protected-bldgs)
+  (define race-sym
     (cond
-      [(null? sorted-rescue-gas-bldgs) (values #f #f '())]
-      [else
-       (define n-res (length sorted-rescue-gas-bldgs))
-       (define rot-idx (unbox SC2-ZERO-GAS-RESCUE-ROTATION-IDX))
-       (define act-idx (modulo rot-idx n-res))
-       (define act-gb (list-ref sorted-rescue-gas-bldgs act-idx))
-       (define bkp-cand
-         (and (>= n-res 2)
-              (list-ref sorted-rescue-gas-bldgs (modulo (add1 act-idx) n-res))))
-       ;; Assign 2 workers to the backup geyser immediately when it is not actively ground-camped
-       ;; (`threat < 5000.0`) OR after rotation (`rot-idx > 0`) proves earlier geyser(s) yielded 0 gas.
-       (define bkp-gb
-         (and bkp-cand
-              (or (> rot-idx 0)
-                  (< (gas-bldg-threat-score bkp-cand) 5000.0))
-              bkp-cand))
-       (define top2-safe (take sorted-rescue-gas-bldgs (min 2 n-res)))
-       (define prot-list
-         (remove-duplicates
-          (append top2-safe
-                  (filter values (list act-gb bkp-gb)))))
-       (values act-gb bkp-gb prot-list)]))
-  (define gas-zero-freeze-rescue? (and gas-zero-freeze-rescue-bldg #t))
+      [(ormap (lambda (u) (memv (sc2-unit-unit-type u) '(86 100 101 104 88))) self-units) 'Zerg]
+      [(ormap (lambda (u) (memv (sc2-unit-unit-type u) '(59 84 61 60))) self-units) 'Protoss]
+      [else 'Terran]))
 
-  (define safe-ready-gas-bldgs
-    (filter (lambda (u) (gas-near-any-th? u safe-gas-ready-townhalls))
-            ready-gas-bldgs))
-  ;; L25-P0-1 (`#33` GasZeroFreeze 1 -> 0): Sort `safe-under-gas` by `gas-bldg-threat-score`
-  ;; FIRST (200-pt buckets, matching `emergency-gas-score`!) and tie-break by `gas-eff-assigned`,
-  ;; so a camped Natural geyser NEVER steals gas assignments from a zero-threat Main geyser!
-  (define safe-under-gas
-    (sort
-     (filter (lambda (u)
-               (< (gas-eff-assigned u)
-                  (max SC2-IDEAL-WORKERS-PER-GEYSER (sc2-unit-ideal-harvesters u))))
-             safe-ready-gas-bldgs)
-     (lambda (a b)
-       (define sa (gas-bldg-threat-score a))
-       (define sb (gas-bldg-threat-score b))
-       (if (< (abs (- sa sb)) 200.0)
-           (< (gas-eff-assigned a) (gas-eff-assigned b))
-           (< sa sb)))))
-
-  ;; W17-P0-3 / L20-P0-1 (`#28` `GasZeroFreeze` 1 -> 0): When no ready gas building sits at a
-  ;; combat-safe TownHall and vespene is critically low, score ALL live `ready-gas-bldgs` with a
-  ;; unified threat score (`+150.0` mild preference for geysers near a surviving TownHall) so
-  ;; zero-threat live Extractors/Refineries/Assimilators (`150`) ALWAYS beat enemy-camped geysers
-  ;; (`26,000+`), and protect those fallback geysers from `0b` evacuation up to 300G.
-  (define (emergency-gas-score gb)
-    (+ (gas-bldg-threat-score gb)
-       (if (gas-near-any-th? gb ready-townhalls) 0.0 150.0)))
-  (define emergency-protected-gas-bldgs
-    (if (and (null? safe-ready-gas-bldgs)
-             (< cur-gas 300)
-             (not (null? ready-gas-bldgs)))
-        (let ([sorted (sort ready-gas-bldgs < #:key emergency-gas-score)])
-          (take sorted (min 2 (length sorted))))
-        '()))
-  (define under-gas
-    (cond
-      [(pair? safe-under-gas) safe-under-gas]
-      [(and (< cur-gas 250)
-            (< eff-active-gas-workers 3)
-            (pair? emergency-protected-gas-bldgs))
-       (sort
-        (filter (lambda (u)
-                  (< (gas-eff-assigned u)
-                     (max SC2-IDEAL-WORKERS-PER-GEYSER (sc2-unit-ideal-harvesters u))))
-                emergency-protected-gas-bldgs)
-        (lambda (a b)
-          (define sa (emergency-gas-score a))
-          (define sb (emergency-gas-score b))
-          (if (< (abs (- sa sb)) 200.0)
-              (< (gas-eff-assigned a) (gas-eff-assigned b))
-              (< sa sb))))]
-      [else '()]))
-  (define under-townhalls
-    (sort
-     (filter (lambda (th)
-               (and (not (null? (minerals-near-townhall th)))
-                    (< (th-effective-assigned th) (th-effective-ideal th))))
-             online-townhalls)
-     <
-     #:key th-safety-score))
-  (define over-townhalls
-    (filter (lambda (th)
-              (> (sc2-unit-assigned-harvesters th) (th-effective-ideal th)))
-            online-ready-townhalls))
-
-  (define commanded-this-frame (mutable-seteqv))
-  (define cmds '())
-  (define (issue-gather! w target-tag
-                         #:macro-econ? [macro-econ? #f]
-                         #:allow-carrying-mineral? [allow-carrying-mineral? #f]
-                         #:allow-carrying-gas? [allow-carrying-gas? #f])
-    (when (or (not (worker-carrying-cargo? w))
-              (and allow-carrying-mineral? (not (worker-carrying-gas? w)))
-              allow-carrying-gas?)
-      (set-add! commanded-this-frame (sc2-unit-tag w))
-      (define raw-c (sc2-raw-unit-command 3666 #f target-tag (list (sc2-unit-tag w)) #f))
-      (set! cmds
-            (cons (if macro-econ? (mark-macro-econ-cmd! raw-c) raw-c)
-                  cmds))))
   (define (worker-carrying-gas? w)
-    (or (ormap (lambda (bid) (memv bid '(273 274 275)))
-               (sc2-unit-buff-ids w))
+    (or (ormap (lambda (bid) (memv bid '(273 274 275))) (sc2-unit-buff-ids w))
         (ormap (lambda (o)
                  (and (eq? (sc2-canonical-order-ability (sc2-unit-order-ability-id o))
                            'harvest-return)
@@ -10548,630 +10243,293 @@
                (sc2-unit-orders w))))
   (define (worker-carrying-mineral? w)
     (and (not (worker-carrying-gas? w))
-         (or (ormap (lambda (bid) (memv bid '(271 272 276)))
-                    (sc2-unit-buff-ids w))
+         (or (ormap (lambda (bid) (memv bid '(271 272 276))) (sc2-unit-buff-ids w))
              (ormap (lambda (o)
                       (eq? (sc2-canonical-order-ability (sc2-unit-order-ability-id o))
                            'harvest-return))
                     (sc2-unit-orders w)))))
-  (define owned-min-by-tag
-    (for/hasheqv ([m (in-list owned-base-minerals)])
-      (values (sc2-unit-tag m) m)))
 
-  ;; 0. L61 (`#1609` A1): 3-Race Automatic TownHall Worker-Rally Manager (`RALLY_WORKERS = 3690`):
-  ;;    Sets unit-tag worker rallies onto live (`display-type = 1`, `mineral-contents > 0`) mineral
-  ;;    patches for Nexus (`59`), CC/OC/PF (`18/132/130`), and Hatchery/Lair/Hive (`86/100/101`,
-  ;;    Drone-only rally leaving combat rally `211/3673` untouched!). Handles initial completion,
-  ;;    mined-out patch re-rally, saturated->under-saturated expansion routing with `-2` hysteresis,
-  ;;    flying CC/OC landing reset, and combat-unsafe diversion with `>= 64f` per-TH cooldown.
-  (for ([u (in-list self-units)]
-        #:when (and (sc2-unit-is-townhall? u)
-                    (not (th-is-nonflying? u))))
-    (hash-set! SC2-TH-WORKER-RALLY-TARGET (sc2-unit-tag u) (vector 0 0 -1000 #t)))
-  (when (and (not heavy-worker-rush-at-base?)
-             (pair? ready-townhalls)
-             (pair? online-townhalls))
-    (define has-live-min-contents?
-      (ormap (lambda (m) (> (sc2-unit-mineral-contents m) 0)) mineral-fields))
-    (define live-rally-min-by-tag
-      (for/hasheqv ([m (in-list mineral-fields)]
-                    #:when (and (= (sc2-unit-display-type m) 1)
-                                (or (not has-live-min-contents?)
-                                    (> (sc2-unit-mineral-contents m) 0))))
-        (values (sc2-unit-tag m) m)))
-    (define under-th-by-tag
-      (for/hasheqv ([u (in-list under-townhalls)])
-        (values (sc2-unit-tag u) u)))
-    ;; L63 (`#1704`): Tighten routine RALLY_WORKERS (`17.7/g -> ~5-6/g`, Pro GM pace):
-    ;;   - Require own excess `>= 2` (`th-asgn >= th-idl + 2`) before routing a saturated base elsewhere
-    ;;   - Require target base to have `>= 3` open slots (`idl - asgn >= 3`), not be `th` itself,
-    ;;     and NOT be currently rallied onto `th` (anti-ping-pong!)
-    ;;   - Keep `prev-dst-th-tag` sticky while still under-saturated (`-3` return hysteresis -> 5w band!)
-    (define (th-not-rallied-to? cand-th src-tag)
-      (define cprev (hash-ref SC2-TH-WORKER-RALLY-TARGET (sc2-unit-tag cand-th) #f))
-      (not (and cprev (= (vector-ref cprev 0) src-tag))))
-    (define open3-under-townhalls
-      (filter (lambda (u)
-                (>= (- (th-effective-ideal u) (th-effective-assigned u)) 3))
-              under-townhalls))
-    (define (pick-best-under-for src-th-tag)
-      (define cands
-        (filter (lambda (u)
-                  (and (not (= (sc2-unit-tag u) src-th-tag))
-                       (th-not-rallied-to? u src-th-tag)))
-                open3-under-townhalls))
-      (and (pair? cands)
-           (argmin (lambda (u)
-                     (+ (* 1000.0 (th-safety-score u))
-                        (exact->inexact (th-effective-assigned u))))
-                   cands)))
-    (define safe-online-by-tag
-      (for/hasheqv ([u (in-list safe-online-townhalls)])
-        (values (sc2-unit-tag u) u)))
-    (define best-safe-th
-      (or (and (pair? under-townhalls)
-               (argmin (lambda (u)
-                         (+ (* 1000.0 (th-safety-score u))
-                            (exact->inexact (th-effective-assigned u))))
-                       under-townhalls))
-          (and (pair? safe-online-townhalls) (first safe-online-townhalls))))
-    (for ([th (in-list ready-townhalls)])
-      (define th-tag (sc2-unit-tag th))
-      (define prev (hash-ref SC2-TH-WORKER-RALLY-TARGET th-tag #f))
-      (define prev-dst-th-tag (if prev (vector-ref prev 0) 0))
-      (define cur-ptag (if prev (vector-ref prev 1) 0))
-      (define last-set-loop (if prev (vector-ref prev 2) -1000))
-      (define was-flying? (and prev (vector-ref prev 3)))
-      (define rallied-elsewhere? (and (> prev-dst-th-tag 0) (not (= prev-dst-th-tag th-tag))))
-      (define sticky-under-th
-        (let ([u (and rallied-elsewhere? (hash-ref under-th-by-tag prev-dst-th-tag #f))])
-          (and u (th-not-rallied-to? u th-tag) u)))
-      (define best-under-for-th (pick-best-under-for th-tag))
-      (define best-safe-for-th
-        (or best-under-for-th
-            (let ([safe-others
-                   (filter (lambda (u)
-                             (and (not (= (sc2-unit-tag u) th-tag))
-                                  (th-not-rallied-to? u th-tag)))
-                           safe-online-townhalls)])
-              (and (pair? safe-others) (first safe-others)))
-            best-safe-th))
-      (define th-asgn (th-effective-assigned th))
-      (define th-idl (th-effective-ideal th))
-      (define th-off? (th-local-offline? th))
-      (define dst-th
-        (cond
-          [th-off?
-           (or sticky-under-th
-               (and rallied-elsewhere?
-                    (let ([su (hash-ref safe-online-by-tag prev-dst-th-tag #f)])
-                      (and su (th-not-rallied-to? su th-tag) su)))
-               best-safe-for-th)]
-          [(and (>= (- th-asgn th-idl) 2)
-                (or sticky-under-th best-under-for-th))
-           (or sticky-under-th best-under-for-th)]
-          [(and rallied-elsewhere?
-                (or sticky-under-th best-under-for-th)
-                (> th-asgn (max 0 (- th-idl 3))))
-           (or sticky-under-th best-under-for-th)]
-          [else th]))
-      (when dst-th
-        (define dst-th-tag (sc2-unit-tag dst-th))
-        (define dst-min-tags (hash-ref th-min-tags-ht dst-th-tag (seteqv)))
-        (define cur-valid?
-          (and (not was-flying?)
-               (> cur-ptag 0)
-               (set-member? dst-min-tags cur-ptag)
-               (hash-has-key? live-rally-min-by-tag cur-ptag)))
-        (unless cur-valid?
-          (define dst-live-mins
-            (filter (lambda (m) (hash-has-key? live-rally-min-by-tag (sc2-unit-tag m)))
-                    (minerals-near-townhall dst-th)))
-          (define prev-patch-dead?
-            (and (> cur-ptag 0)
-                 (not (hash-has-key? live-rally-min-by-tag cur-ptag))))
-          ;; L61C (`#1651`/`#1652`): 3-tier rally cooldown (`0f`/`32f` initial/land/dead-patch,
-          ;; `112f` `5s` combat-unsafe `th-off?`, `224f` `10s` routine saturation -> `~5-6/g`).
-          (define urgent-rerally?
-            (or (not prev)
-                was-flying?
-                (= cur-ptag 0)
-                prev-patch-dead?))
-          (define rally-cd
-            (cond
-              [urgent-rerally? 32]
-              [th-off? 112]
-              [else 224]))
-          (when (and (pair? dst-live-mins)
-                     (>= (- cur-loop last-set-loop) rally-cd))
-            (define dst-near-set
-              (list->seteqv (map sc2-unit-tag (hash-ref th-near-ht dst-th-tag '()))))
-            (define best-rally-min
-              (argmax (lambda (m)
-                        (define mtag (sc2-unit-tag m))
-                        (+ (* 10.0 (exact->inexact (sc2-unit-mineral-contents m)))
-                           (if (set-member? dst-near-set mtag) 500.0 0.0)))
-                      dst-live-mins))
-            (define dst-ptag (sc2-unit-tag best-rally-min))
-            (hash-set! SC2-TH-WORKER-RALLY-TARGET th-tag (vector dst-th-tag dst-ptag cur-loop #f))
-            (set! cmds
-                  (cons (sc2-raw-unit-command 3690 #f dst-ptag (list th-tag) #f)
-                        cmds)))))))
-  (define min-th-dist
-    (for/hasheqv ([m (in-list owned-base-minerals)])
-      (define mtag (sc2-unit-tag m))
-      (define mp (sc2-unit-pos m))
-      (define mx (sc2-point3d-x mp))
-      (define my (sc2-point3d-y mp))
-      (define th-d
-        (if (hash-has-key? min-th-dist-online mtag)
-            (hash-ref min-th-dist-online mtag)
-            (if (null? ready-townhalls)
-                0.0
-                (apply min
-                       (map (lambda (th)
-                              (define tp (sc2-unit-pos th))
-                              (pt-dist (sc2-point3d-x tp) (sc2-point3d-y tp) mx my))
-                            ready-townhalls)))))
-      (values mtag th-d)))
-  (define patch-worker-counts (make-hasheqv))
-  (for ([w (in-list workers)])
-    (define wtag (sc2-unit-tag w))
-    (define ord-tgt
-      (for/first ([o (in-list (sc2-unit-orders w))]
-                  #:when (and (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666))
-                              (hash-has-key? owned-min-by-tag (sc2-unit-order-target-unit-tag o))))
-        (sc2-unit-order-target-unit-tag o)))
-    (define eff-tgt
-      (or ord-tgt
-          (let ([a (hash-ref SC2-WORKER-PATCH-ASSIGNMENT wtag #f)])
-            (and a (hash-has-key? owned-min-by-tag a) a))))
-    (when eff-tgt
-      (hash-set! patch-worker-counts eff-tgt (add1 (hash-ref patch-worker-counts eff-tgt 0)))))
+  (define commanded-this-frame (mutable-seteqv))
+  (define cmds '())
 
-  ;; Priority slot selector: 1st Near -> 1st Far -> 2nd Near -> 2nd Far
-  (define (pick-best-slot-patch w cand-mins)
-    (define wp (sc2-unit-pos w))
-    (define wx (sc2-point3d-x wp))
-    (define wy (sc2-point3d-y wp))
-    (define under2-mins
-      (filter (lambda (m) (< (hash-ref patch-worker-counts (sc2-unit-tag m) 0) 2))
-              cand-mins))
-    (if (pair? under2-mins)
+  ;; Early worker-rush gas evacuation (keep workers out of geysers while defending worker rush)
+  (when (and worker-rush-evacuate-gas? (pair? owned-base-minerals))
+    (for ([w (in-list workers)]
+          #:when (and (not (worker-carrying-cargo? w))
+                      (ormap (lambda (o)
+                               (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
+                             (sc2-unit-orders w))))
+      (define wp (sc2-unit-pos w))
+      (define best-min
         (argmin (lambda (m)
-                  (define mtag (sc2-unit-tag m))
                   (define mp (sc2-unit-pos m))
-                  (define cnt (hash-ref patch-worker-counts mtag 0))
-                  (define far? (hash-ref min-is-far-ht mtag #f))
-                  (+ (* 100.0 (exact->inexact cnt))
-                     (if far? 25.0 0.0)
-                     (* 1.0 (hash-ref min-th-dist mtag 0.0))
-                     (* 0.05 (pt-dist wx wy (sc2-point3d-x mp) (sc2-point3d-y mp)))))
-                under2-mins)
-        (argmin (lambda (m)
-                  (define mtag (sc2-unit-tag m))
-                  (define mp (sc2-unit-pos m))
-                  (define cnt (hash-ref patch-worker-counts mtag 0))
-                  (define far? (hash-ref min-is-far-ht mtag #f))
-                  (+ (* 100.0 (exact->inexact cnt))
-                     (if far? 25.0 0.0)
-                     (* 0.1 (pt-dist wx wy (sc2-point3d-x mp) (sc2-point3d-y mp)))))
-                cand-mins)))
+                  (pt-dist (sc2-point3d-x wp) (sc2-point3d-y wp)
+                           (sc2-point3d-x mp) (sc2-point3d-y mp)))
+                owned-base-minerals))
+      (define wtag (sc2-unit-tag w))
+      (set-add! commanded-this-frame wtag)
+      (define raw-c (sc2-raw-unit-command 3666 #f (sc2-unit-tag best-min) (list wtag) #f))
+      (set! cmds (cons (if (<= cur-loop 2688) (mark-macro-econ-cmd! raw-c) raw-c) cmds))))
 
-  ;; L43-P0-3a (`#59` GasZero 1 -> 0): Track every live non-depleted, non-ground-camped gas
-  ;; building sitting at `0` effective harvesters while `workers >= 12` and gas isn't over-banked;
-  ;; after `>= 180` loops (`8.0s`), immediately auto-resaturate `3` workers in ONE step & protect
-  ;; those gas buildings in `online-gas-tags`!
-  (define midgame-multi-base-gas?
-    (and (> cur-loop 4032) (>= (length online-townhalls) 2)))
-  (define gas-8s-resat-blocked?
-    (or worker-rush-evacuate-gas?
-        heavy-worker-rush-at-base?
-        (and (<= (length workers) 12) (>= cur-gas 150) (< cur-min 120))
-        (and (null? owned-base-minerals) (>= cur-gas 500) (< cur-min 200))
-        (if midgame-multi-base-gas?
-            (or (and (>= cur-gas 200) (< cur-min 110))
-                (and (>= cur-gas 260) (< cur-min 160))
-                (and (>= cur-gas 400) (< cur-min 250)))
-            (or (and (>= cur-gas 180) (< cur-min 160))
-                (and (>= cur-gas SC2-GAS-FLOAT-REBALANCE-THRESH) (< cur-min 250))))
-        (and (> cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD) (< cur-min 450))
-        (and (>= cur-gas (if midgame-multi-base-gas? 140 130))
-             (unbox SC2-GAS-PULL-HYSTERESIS-LATCH))))
-  (define live-ready-gas-tag-set (list->seteqv (map sc2-unit-tag ready-gas-bldgs)))
-  (for ([k (in-list (hash-keys SC2-GAS-BLDG-ZERO-WORKERS-SINCE))]
-        #:unless (set-member? live-ready-gas-tag-set k))
-    (hash-remove! SC2-GAS-BLDG-ZERO-WORKERS-SINCE k))
-  (define zero-worker-8s-resat-bldgs
-    (for/list ([gb (in-list ready-gas-bldgs)]
-               #:when (let* ([gtag (sc2-unit-tag gb)]
-                             [eligible?
-                              (and (= (gas-eff-assigned gb) 0)
-                                   (>= (length workers) 12)
-                                   (not gas-8s-resat-blocked?)
-                                   (not (gas-bldg-lethal-slaughter? gb))
-                                   (< (gas-bldg-threat-score gb) 5000.0)
-                                   (or (< cur-gas 150)
-                                       (gas-near-any-th? gb safe-gas-ready-townhalls)))])
-                        (cond
-                          [eligible?
-                           (define since-l (hash-ref! SC2-GAS-BLDG-ZERO-WORKERS-SINCE gtag cur-loop))
-                           (>= (- cur-loop since-l) 180)]
-                          [else
-                           (hash-remove! SC2-GAS-BLDG-ZERO-WORKERS-SINCE gtag)
-                           #f])))
-      gb))
+  ;; Build lightweight L2a descriptors (`sat-base-info`, `sat-gas-info`, `sat-mineral-info`,
+  ;; `sat-worker-info`, `sat-mule-info`) for `evaluate-worker-saturation-policy!`
+  (define all-policy-ths (append ready-townhalls coming-online-townhalls flying-townhalls))
+  (define base-infos
+    (for/list ([th (in-list all-policy-ths)])
+      (define tp (sc2-unit-pos th))
+      (define nonfly? (th-is-nonflying? th))
+      (define rdy? (and nonfly? (>= (sc2-unit-build-progress th) SC2-BUILD-COMPLETE-PROGRESS)))
+      (sat-base-info
+       (sc2-unit-tag th)
+       (sc2-unit-unit-type th)
+       (sc2-point3d-x tp)
+       (sc2-point3d-y tp)
+       rdy?
+       (not nonfly?)
+       (sc2-unit-assigned-harvesters th)
+       (sc2-unit-ideal-harvesters th)
+       (if (and nonfly? (th-combat-unsafe? th))
+           (max 1.0 (th-safety-score th))
+           #f)
+       (if nonfly? (map sc2-unit-tag (minerals-near-townhall th)) '()))))
 
-  (define online-gas-tags
-    (for/seteqv ([gb (in-list (append safe-ready-gas-bldgs
-                                      emergency-protected-gas-bldgs
-                                      gas-zero-freeze-protected-bldgs
-                                      zero-worker-8s-resat-bldgs))])
-      (sc2-unit-tag gb)))
+  (define gas-infos
+    (if worker-rush-evacuate-gas?
+        '()
+        (for/list ([gb (in-list all-ready-gas-bldgs)])
+          (define gp (sc2-unit-pos gb))
+          (define gx (sc2-point3d-x gp))
+          (define gy (sc2-point3d-y gp))
+          (define nearest-th
+            (for/fold ([best-tag #f] [best-d SC2-BASE-RESOURCE-RADIUS] #:result best-tag)
+                      ([th (in-list ready-townhalls)])
+              (define tp (sc2-unit-pos th))
+              (define d (pt-dist gx gy (sc2-point3d-x tp) (sc2-point3d-y tp)))
+              (if (<= d best-d) (values (sc2-unit-tag th) d) (values best-tag best-d))))
+          (define raw-sc (gas-bldg-threat-score gb))
+          (define eff-threat (if (gas-bldg-lethal-slaughter? gb) (max 15000.0 raw-sc) raw-sc))
+          (sat-gas-info
+           (sc2-unit-tag gb)
+           (sc2-unit-unit-type gb)
+           gx
+           gy
+           #t
+           (sc2-unit-vespene-contents gb)
+           (sc2-unit-assigned-harvesters gb)
+           (sc2-unit-ideal-harvesters gb)
+           nearest-th
+           (if (> eff-threat 0.0) eff-threat #f)))))
 
-  ;; 0a. L31-P0-1 + L32-P0-1 + L43-P0-3a (`#12/#28/#59` GasZeroFreeze -> 0):
-  ;;     (i) When `gas-zero-freeze-rescue?` is latched (`>= 300f` without gas gain, `workers >= 12`),
-  ;;         force-assign up to 3 workers to active + 2 to backup geyser; if `cur-assigned >= target-w`
-  ;;         yet STILL `0` gas gained for `>= 180f` (`8.0s`), override stuck/trapped harvesters by
-  ;;         dispatching up to 3 fresh mineral workers!
-  ;;     (ii) Whenever ANY non-camped live gas building sits at `0` workers for `>= 180f` (`8.0s`)
-  ;;          while `workers >= 12` and gas is not over-banked, immediately assign `3` workers!
-  (define rescue-issued-this-frame? #f)
-  (define (assign-rescue-workers! rgb cap #:force-stuck-refresh? [force-stuck-refresh? #f])
-    (when rgb
-      (define rtag (sc2-unit-tag rgb))
-      (define rgp (sc2-unit-pos rgb))
-      (define target-w (min cap (max SC2-IDEAL-WORKERS-PER-GEYSER (sc2-unit-ideal-harvesters rgb))))
-      (define cur-assigned (gas-eff-assigned rgb))
-      (define need (if force-stuck-refresh? target-w (max 0 (- target-w cur-assigned))))
-      (define last-res-loop (hash-ref SC2-SAT-GAS-RESCUE-LAST-LOOP rtag -1000))
-      (when (and (> need 0)
-                 (or force-stuck-refresh?
-                     (>= (- cur-loop last-res-loop) 48)))
-        (define rescue-cands
-          (filter (lambda (w)
-                    (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
-                         (not (worker-carrying-gas? w))
-                         (not (ormap (lambda (o)
-                                       (if force-stuck-refresh?
-                                           (= (sc2-unit-order-target-unit-tag o) rtag)
-                                           (set-member? online-gas-tags (sc2-unit-order-target-unit-tag o))))
-                                     (sc2-unit-orders w)))))
-                  workers))
-        (define ranked-rescue
-          (sort rescue-cands
-                <
-                #:key (lambda (w)
-                        (define wp (sc2-unit-pos w))
-                        (+ (cond
-                             [(and (not (worker-carrying-cargo? w)) (null? (sc2-unit-orders w))) 0.0]
-                             [(not (worker-carrying-cargo? w)) 100.0]
-                             [else 500.0])
-                           (pt-dist (sc2-point3d-x rgp) (sc2-point3d-y rgp)
-                                    (sc2-point3d-x wp) (sc2-point3d-y wp))))))
-        (define chosen-rescue (take ranked-rescue (min need (length ranked-rescue))))
-        (when (pair? chosen-rescue)
-          (hash-set! SC2-SAT-GAS-RESCUE-LAST-LOOP rtag cur-loop)
-          (define rescue-p1?
-            (or (<= cur-loop 2688)
-                (and gas-zero-freeze-rescue? (= eff-active-gas-workers 0))))
-          (for ([rw (in-list chosen-rescue)])
-            (set! rescue-issued-this-frame? #t)
-            (issue-gather! rw rtag
-                           #:macro-econ? rescue-p1?
-                           #:allow-carrying-mineral? #t))))))
-  (when gas-zero-freeze-rescue?
-    (define stuck-refresh-due?
-      (let ([ref-base (or (unbox SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP)
-                          (unbox SC2-ZERO-GAS-STREAK-START-LOOP))])
-        (and (real? ref-base)
-             (>= (- cur-loop ref-base) 180)
-             (>= (gas-eff-assigned gas-zero-freeze-rescue-bldg)
-                 (min 3 (max SC2-IDEAL-WORKERS-PER-GEYSER
-                             (sc2-unit-ideal-harvesters gas-zero-freeze-rescue-bldg)))))))
-    (assign-rescue-workers! gas-zero-freeze-rescue-bldg 3 #:force-stuck-refresh? stuck-refresh-due?)
-    (when stuck-refresh-due?
-      (set-box! SC2-ZERO-GAS-RESCUE-LAST-REFRESH-LOOP cur-loop))
-    (assign-rescue-workers! gas-zero-freeze-backup-bldg 2))
-  (when (and (pair? zero-worker-8s-resat-bldgs) (not gas-zero-freeze-rescue?))
-    (define sorted-8s
-      (sort zero-worker-8s-resat-bldgs < #:key gas-bldg-threat-score))
-    (for ([gb (in-list sorted-8s)])
-      (assign-rescue-workers! gb 3)))
-
-  ;; 0b. Offline Base Evacuation & Orphaned Worker Recovery:
-  ;;     Evacuate mineral workers from combat-offline or mined-out TownHalls and orphaned
-  ;;     harvest workers to the safest online under-saturated TownHall.
-  ;;     L61 (`#1609` A2): Throttle to `>= 24f` per offline base (or orphan group `0`) and
-  ;;     coalesce each group into 1 `3666` command (eliminates 8-16x uncoalesced 4f drop storms!).
-  (when (and (not heavy-worker-rush-at-base?)
-             (not (null? owned-base-minerals))
-             (not (null? safe-online-townhalls)))
-    (define evac-dst-th
-      (if (not (null? under-townhalls)) (first under-townhalls) (first safe-online-townhalls)))
-    (define evac-cand-mins (minerals-near-townhall evac-dst-th))
-    (define offline-min-tags
-      (for/fold ([s (seteqv)]) ([oth (in-list offline-townhalls)])
-        (for/fold ([s2 s]) ([m (in-list (minerals-near-townhall oth))])
-          (define mtag (sc2-unit-tag m))
-          (if (hash-has-key? owned-min-by-tag mtag)
-              s2
-              (set-add s2 mtag)))))
-    (define all-owned-ths (append ready-townhalls coming-online-townhalls))
-    (when (not (null? evac-cand-mins))
-      (define evac-groups (make-hasheqv))
-      (for ([w (in-list workers)]
-            #:when (let* ([wtag (sc2-unit-tag w)]
-                          [wp (sc2-unit-pos w)]
-                          [wx (sc2-point3d-x wp)]
-                          [wy (sc2-point3d-y wp)]
-                          [orders (sc2-unit-orders w)]
-                          [targeting-online-min?
-                           (ormap (lambda (o)
-                                    (and (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666))
-                                         (hash-has-key? owned-min-by-tag (sc2-unit-order-target-unit-tag o))))
-                                  orders)]
-                          [targeting-online-gas?
-                           (ormap (lambda (o) (set-member? online-gas-tags (sc2-unit-order-target-unit-tag o)))
-                                  orders)]
-                          [targeting-depleted-gas?
-                           (ormap (lambda (o) (set-member? depleted-gas-tags (sc2-unit-order-target-unit-tag o)))
-                                  orders)]
-                          [unleashed-attack-chase?
-                           (and (not (null? all-owned-ths))
-                                (ormap (lambda (o)
-                                         (memv (sc2-unit-order-ability-id o) '(23 3674 3675)))
-                                       orders)
-                                (for/and ([th (in-list all-owned-ths)])
-                                  (define tp (sc2-unit-pos th))
-                                  (> (pt-dist wx wy (sc2-point3d-x tp) (sc2-point3d-y tp)) 22.0)))]
-                          [targeting-offline-or-orphan-min?
-                           (ormap (lambda (o)
-                                    (define ab (sc2-unit-order-ability-id o))
-                                    (define tgt (sc2-unit-order-target-unit-tag o))
-                                    (and (memv ab '(166 295 298 1183 3666))
-                                         (or (set-member? offline-min-tags tgt)
-                                             (and (> tgt 0)
-                                                  (not (set-member? all-gas-tags tgt))
-                                                  (not (hash-has-key? owned-min-by-tag tgt))))))
-                                  orders)]
-                          [near-offline-th?
-                           (and (not (null? offline-townhalls))
-                                (ormap (lambda (oth)
-                                         (define tp (sc2-unit-pos oth))
-                                         (<= (pt-dist wx wy (sc2-point3d-x tp) (sc2-point3d-y tp))
-                                             SC2-BASE-RESOURCE-RADIUS))
-                                       offline-townhalls)
-                                (for/and ([onth (in-list online-townhalls)])
-                                  (define tp (sc2-unit-pos onth))
-                                  (> (pt-dist wx wy (sc2-point3d-x tp) (sc2-point3d-y tp))
-                                     SC2-BASE-RESOURCE-RADIUS)))])
-                     (and (not (set-member? commanded-this-frame wtag))
-                          (not (worker-carrying-cargo? w))
-                          (not (worker-carrying-gas? w))
-                          (not targeting-online-gas?)
-                          (not targeting-online-min?)
-                          (or targeting-offline-or-orphan-min?
-                              targeting-depleted-gas?
-                              unleashed-attack-chase?
-                              (and near-offline-th? (not (worker-returning-cargo? w)))))))
-        (define wp (sc2-unit-pos w))
-        (define wx (sc2-point3d-x wp))
-        (define wy (sc2-point3d-y wp))
-        (define src-oth
-          (for/first ([oth (in-list offline-townhalls)]
-                      #:when (let ([tp (sc2-unit-pos oth)])
-                               (<= (pt-dist wx wy (sc2-point3d-x tp) (sc2-point3d-y tp))
-                                   SC2-BASE-RESOURCE-RADIUS)))
-            (sc2-unit-tag oth)))
-        (define grp-key (or src-oth 0))
-        (hash-update! evac-groups grp-key (lambda (prev) (cons w prev)) '()))
-      ;; L61C (`#1651`/`#1652`): Midgame (`> 4032f`) retry cd `32f` and Tier `P1` on the single
-      ;; coalesced per-base evac command so evacuated workers return to mining during combat.
-      (define evac-cd (if (> cur-loop 4032) 32 24))
-      (for ([(grp-key grp-ws-rev) (in-hash evac-groups)])
-        (when (>= (- cur-loop (hash-ref SC2-SAT-EVAC-LAST-LOOP grp-key -1000)) evac-cd)
-          (define grp-ws (reverse grp-ws-rev))
-          (define best-min (pick-best-slot-patch (first grp-ws) evac-cand-mins))
-          (define bmtag (sc2-unit-tag best-min))
-          (define evac-wtags
-            (for/list ([w (in-list grp-ws)])
-              (define wtag (sc2-unit-tag w))
-              (set-add! commanded-this-frame wtag)
-              (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
-              (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wtag bmtag)
-              wtag))
-          (when (pair? evac-wtags)
-            (hash-set! SC2-SAT-EVAC-LAST-LOOP grp-key cur-loop)
-            (set! cmds
-                  (cons (mark-macro-econ-cmd!
-                         (sc2-raw-unit-command 3666 #f bmtag evac-wtags #f))
-                        cmds)))))))
-
-  ;; L32-P0-1 (`#10` 2.69x WallTie -> WIN): Whenever ALL owned bases are mined out
-  ;; (`owned-base-minerals = '()`), find all safe available map mineral patches (`display-type = 1`
-  ;; visible live patches AND `display-type = 2` fog-of-war snapshots, excluding enemies <= 12.0t)
-  ;; with NO `>= 500G` gate! Issue `MOVE (16)` to `(mx, my)` for `display-type = 2` fog snapshots
-  ;; to gain vision first, and `SMART (3666)` once visible (`display-type = 1`).
-  (define safe-map-minerals
-    (if (null? owned-base-minerals)
-        (let* ([all-m (filter (lambda (m)
-                                (and (sc2-unit-is-mineral-field? m)
-                                     (memv (sc2-unit-display-type m) '(1 2))))
-                              neutral-units)]
-               [vis-m (filter (lambda (m) (= (sc2-unit-display-type m) 1)) all-m)]
-               [has-live-vis? (ormap (lambda (m) (> (sc2-unit-mineral-contents m) 0)) vis-m)]
-               [e-pts (for/list ([e (in-list enemy-units)]
-                                 #:when (not (sc2-unit-is-worker? e)))
-                        (define ep (sc2-unit-pos e))
-                        (cons (sc2-point3d-x ep) (sc2-point3d-y ep)))])
-          (filter (lambda (m)
-                    (define mp (sc2-unit-pos m))
-                    (define mx (sc2-point3d-x mp))
-                    (define my (sc2-point3d-y mp))
-                    (and (or (= (sc2-unit-display-type m) 2)
-                             (not has-live-vis?)
-                             (> (sc2-unit-mineral-contents m) 0))
-                         (not (ormap (lambda (ep) (<= (pt-dist mx my (car ep) (cdr ep)) 12.0))
-                                     e-pts))))
-                  all-m))
-        '()))
-  (define (pick-nearest-safe-map-mineral w cand-mins)
-    (define wp (sc2-unit-pos w))
-    (define wx (sc2-point3d-x wp))
-    (define wy (sc2-point3d-y wp))
-    (argmin (lambda (m)
-              (define mp (sc2-unit-pos m))
-              (define cnt (hash-ref patch-worker-counts (sc2-unit-tag m) 0))
-              (+ (pt-dist wx wy (sc2-point3d-x mp) (sc2-point3d-y mp))
-                 (* 1.5 (exact->inexact cnt))
-                 (if (= (sc2-unit-display-type m) 1) -6.0 0.0)))
-            cand-mins))
-  (define (issue-long-distance-mine! w best-min
-                                     #:macro-econ? [macro-econ? #t]
-                                     #:allow-carrying-gas? [allow-carrying-gas? #f])
-    (define bmtag (sc2-unit-tag best-min))
-    (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
+  ;; Mineral descriptors: use visible (`display-type = 1`) patches when owned bases have minerals;
+  ;; when all owned bases are mined out, include fog snapshots (`display-type = 2`) for LDM `MOVE 16`!
+  (define mined-out-ldm-mode?
+    (and (null? owned-base-minerals)
+         (or (pair? ready-townhalls) (null? mineral-fields))))
+  (define fog-mineral-pos-by-tag (make-hasheqv))
+  (define vis-safe-ldm-mins '())
+  (define min-infos
     (cond
-      [(= (sc2-unit-display-type best-min) 2)
-       (when (or (not (worker-carrying-cargo? w)) allow-carrying-gas?)
-         (define mp (sc2-unit-pos best-min))
-         (define pt (sc2-point2d (sc2-point3d-x mp) (sc2-point3d-y mp)))
-         (set-add! commanded-this-frame (sc2-unit-tag w))
-         (define raw-c (sc2-raw-unit-command 16 pt 0 (list (sc2-unit-tag w)) #f))
-         (set! cmds
-               (cons (if macro-econ? (mark-macro-econ-cmd! raw-c) raw-c)
-                     cmds)))]
+      [mined-out-ldm-mode?
+       (define e-nonworker-pts
+         (for/list ([e (in-list enemy-units)] #:when (not (sc2-unit-is-worker? e)))
+           (define ep (sc2-unit-pos e))
+           (cons (sc2-point3d-x ep) (sc2-point3d-y ep))))
+       (define all-map-m
+         (filter (lambda (m)
+                   (and (sc2-unit-is-mineral-field? m)
+                        (memv (sc2-unit-display-type m) '(1 2))))
+                 neutral-units))
+       (define has-live-vis?
+         (ormap (lambda (m) (and (= (sc2-unit-display-type m) 1)
+                                 (> (sc2-unit-mineral-contents m) 0)))
+                all-map-m))
+       (for/list ([m (in-list all-map-m)])
+         (define mtag (sc2-unit-tag m))
+         (define mp (sc2-unit-pos m))
+         (define mx (sc2-point3d-x mp))
+         (define my (sc2-point3d-y mp))
+         (define dt (sc2-unit-display-type m))
+         (define safe?
+           (and (or (= dt 2) (not has-live-vis?) (> (sc2-unit-mineral-contents m) 0))
+                (not (ormap (lambda (ep) (<= (pt-dist mx my (car ep) (cdr ep)) 12.0))
+                            e-nonworker-pts))))
+         (when (= dt 2)
+           (hash-set! fog-mineral-pos-by-tag mtag (cons mx my)))
+         (when (and (= dt 1) safe?)
+           (set! vis-safe-ldm-mins (cons m vis-safe-ldm-mins)))
+         (sat-mineral-info
+          mtag mx my
+          (if (= dt 2) 1 (sc2-unit-mineral-contents m))
+          #f
+          safe?))]
       [else
-       (issue-gather! w bmtag
-                      #:macro-econ? macro-econ?
-                      #:allow-carrying-gas? allow-carrying-gas?)]))
+       (define owner-th-by-mtag (make-hasheqv))
+       (for ([th (in-list (append ready-townhalls coming-online-townhalls))])
+         (define th-tag (sc2-unit-tag th))
+         (for ([m (in-list (minerals-near-townhall th))])
+           (hash-ref! owner-th-by-mtag (sc2-unit-tag m) th-tag)))
+       (for/list ([m (in-list mineral-fields)])
+         (define mtag (sc2-unit-tag m))
+         (define mp (sc2-unit-pos m))
+         (sat-mineral-info
+          mtag
+          (sc2-point3d-x mp)
+          (sc2-point3d-y mp)
+          (sc2-unit-mineral-contents m)
+          (hash-ref owner-th-by-mtag mtag #f)
+          #t))]))
 
-  ;; 1. Send idle workers to mineral patches at under-saturated online TownHalls first
-  ;;    using capacity-aware per-patch pairing (1st Near -> 1st Far -> 2nd Near -> 2nd Far);
-  ;;    if no online mineral patches exist, cancel any expired stuck build order via Stop (3665)
-  ;;    and long-distance mine the nearest safe map mineral patch (MOVE 16 for fog snapshots,
-  ;;    SMART 3666 once visible!).
-  (cond
-    [(and (not heavy-worker-rush-at-base?) (not (null? idle-workers)) (not (null? owned-base-minerals)))
-     (cond
-       [(<= cur-loop 2688)
-        (define candidate-mins
-          (if (not (null? under-townhalls))
-              (minerals-near-townhall (first under-townhalls))
-              owned-base-minerals))
-        (define sorted-cand-mins
-          (sort candidate-mins < #:key (lambda (m) (hash-ref min-th-dist (sc2-unit-tag m) 999.0))))
-        (for ([w (in-list idle-workers)]
-              #:when (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
-                          (not (worker-returning-cargo? w))))
-          (define wtag (sc2-unit-tag w))
-          (define best-min (pick-best-slot-patch w sorted-cand-mins))
-          (define bmtag (sc2-unit-tag best-min))
-          (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
-          (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wtag bmtag)
-          (issue-gather! w bmtag #:macro-econ? #t))]
-       [else
-        ;; L61C (`#1651`/`#1652`): Midgame (`cur-loop > 2688`) idle workers throttled
-        ;; `>= 24f`/worker (`>= 32f` after `3:00` `cur-loop > 4032`), coalesced into 1 `3666` cmd/base
-        ;; at Tier `P1` (`mark-macro-econ-cmd!`) so idle workers never sit behind `P3` during combat.
-        (define idle-cd (if (> cur-loop 4032) 32 24))
-        (define idle-by-dst (make-hasheqv))
-        (define dst-cand-mins-ht (make-hasheqv))
-        (for ([w (in-list idle-workers)]
-              #:when (let ([wtag (sc2-unit-tag w)])
-                       (and (not (set-member? commanded-this-frame wtag))
-                            (not (worker-carrying-cargo? w))
-                            (not (worker-returning-cargo? w))
-                            (>= (- cur-loop (hash-ref SC2-SAT-IDLE-LAST-LOOP wtag -1000)) idle-cd))))
-          (define dst-th
-            (cond
-              [(pair? under-townhalls) (first under-townhalls)]
-              [(pair? safe-online-townhalls)
-               (define wp (sc2-unit-pos w))
-               (argmin (lambda (th)
-                         (define tp (sc2-unit-pos th))
-                         (pt-dist (sc2-point3d-x wp) (sc2-point3d-y wp)
-                                  (sc2-point3d-x tp) (sc2-point3d-y tp)))
-                       safe-online-townhalls)]
-              [else #f]))
-          (define dkey (if dst-th (sc2-unit-tag dst-th) 0))
-          (unless (hash-has-key? dst-cand-mins-ht dkey)
-            (hash-set! dst-cand-mins-ht dkey
-                       (if (and dst-th (pair? (minerals-near-townhall dst-th)))
-                           (minerals-near-townhall dst-th)
-                           owned-base-minerals)))
-          (hash-update! idle-by-dst dkey (lambda (prev) (cons w prev)) '()))
-        (for ([(dkey grp-rev) (in-hash idle-by-dst)])
-          (define grp (reverse grp-rev))
-          (define cmins (hash-ref dst-cand-mins-ht dkey owned-base-minerals))
-          (when (and (pair? grp) (pair? cmins))
-            (define best-min (pick-best-slot-patch (first grp) cmins))
-            (define bmtag (sc2-unit-tag best-min))
-            (define wtags
-              (for/list ([w (in-list grp)])
-                (define wtag (sc2-unit-tag w))
-                (set-add! commanded-this-frame wtag)
-                (hash-set! SC2-SAT-IDLE-LAST-LOOP wtag cur-loop)
-                (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
-                (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wtag bmtag)
-                wtag))
-            (set! cmds
-                  (cons (mark-macro-econ-cmd!
-                         (sc2-raw-unit-command 3666 #f bmtag wtags #f))
-                        cmds))))])]
-    [(and (not heavy-worker-rush-at-base?) (null? owned-base-minerals))
-     (for ([w (in-list idle-workers)])
-       (define wtag (sc2-unit-tag w))
-       (cond
-         [(worker-build-order-stuck? w cur-loop)
-          (set-add! commanded-this-frame wtag)
-          (set! cmds
-                (cons (sc2-raw-unit-command 3665 #f 0 (list wtag) #f)
-                      cmds))]
-         [(and (pair? safe-map-minerals)
-               (not (set-member? commanded-this-frame wtag))
-               (not (worker-returning-cargo? w))
-               (or (<= cur-loop 2688)
-                   (>= (- cur-loop (hash-ref SC2-SAT-IDLE-LAST-LOOP wtag -1000)) 24)))
-          (hash-set! SC2-SAT-IDLE-LAST-LOOP wtag cur-loop)
-          (define best-min (pick-nearest-safe-map-mineral w safe-map-minerals))
-          (issue-long-distance-mine! w best-min #:macro-econ? #f)]))
-     ;; Upgrade workers already `MOVE (16)`-ing toward a snapshot mineral patch the instant vision
-     ;; reveals `display-type = 1` nearby so they begin mining immediately via `SMART (3666)`!
-     (define vis-safe-map-mins
-       (filter (lambda (m) (= (sc2-unit-display-type m) 1)) safe-map-minerals))
-     (when (pair? vis-safe-map-mins)
-       (for ([w (in-list workers)]
-             #:when (let ([wtag (sc2-unit-tag w)]
-                          [ords (sc2-unit-orders w)])
-                      (and (not (set-member? commanded-this-frame wtag))
-                           (not (worker-carrying-cargo? w))
-                           (not (worker-returning-cargo? w))
-                           (pair? ords)
-                           (= (sc2-unit-order-ability-id (car ords)) 16)
-                           (let ([tp (sc2-unit-order-target-pos (car ords))]
-                                 [wp (sc2-unit-pos w)])
-                             (and (any-point? tp)
-                                  (ormap (lambda (m)
-                                           (define mp (sc2-unit-pos m))
-                                           (and (<= (pt-dist (any-point-x tp) (any-point-y tp)
-                                                             (sc2-point3d-x mp) (sc2-point3d-y mp))
-                                                    4.0)
-                                                (<= (pt-dist (sc2-point3d-x wp) (sc2-point3d-y wp)
-                                                             (sc2-point3d-x mp) (sc2-point3d-y mp))
-                                                    14.0)))
-                                         vis-safe-map-mins))))))
-         (define best-min (pick-nearest-safe-map-mineral w vis-safe-map-mins))
-         (issue-long-distance-mine! w best-min #:macro-econ? #f)))])
+  (define worker-infos
+    (for/list ([w (in-list all-self-workers)])
+      (define wtag (sc2-unit-tag w))
+      (define wp (sc2-unit-pos w))
+      (define wx (sc2-point3d-x wp))
+      (define wy (sc2-point3d-y wp))
+      (define ords (sc2-unit-orders w))
+      (define stuck-build? (worker-build-order-stuck? w cur-loop))
+      (define lease-prot?
+        (and (hash? role-leases)
+             (unit-leased-above? role-leases wtag 'harvester cur-loop)
+             #t))
+      (define base-excl?
+        (or (and (memv 57 (sc2-unit-buff-ids w)) #t)
+            (set-member? excluded-worker-tags wtag)
+            (set-member? commanded-this-frame wtag)
+            (worker-excavating-thin-wall? w)
+            (and (worker-has-build-order? w cur-loop sat-self-structures)
+                 (not stuck-build?))))
+      (define stuck-stopped?
+        (and (not base-excl?)
+             (not lease-prot?)
+             (not heavy-worker-rush-at-base?)
+             (null? owned-base-minerals)
+             stuck-build?))
+      (when stuck-stopped?
+        (set-add! commanded-this-frame wtag)
+        (set! cmds (cons (sc2-raw-unit-command 3665 #f 0 (list wtag) #f) cmds)))
+      (define ldm-move-revealed?
+        (and (not base-excl?)
+             (not lease-prot?)
+             (not heavy-worker-rush-at-base?)
+             mined-out-ldm-mode?
+             (pair? vis-safe-ldm-mins)
+             (not (worker-carrying-cargo? w))
+             (pair? ords)
+             (= (sc2-unit-order-ability-id (car ords)) 16)
+             (let ([tp (sc2-unit-order-target-pos (car ords))])
+               (and (any-point? tp)
+                    (ormap (lambda (m)
+                             (define mp (sc2-unit-pos m))
+                             (and (<= (pt-dist (any-point-x tp) (any-point-y tp)
+                                               (sc2-point3d-x mp) (sc2-point3d-y mp))
+                                      4.0)
+                                  (<= (pt-dist wx wy (sc2-point3d-x mp) (sc2-point3d-y mp)) 14.0)))
+                           vis-safe-ldm-mins)))))
+      (define-values (oab otgt)
+        (cond
+          [(or (null? ords)
+               (and stuck-build? (pair? owned-base-minerals))
+               ldm-move-revealed?)
+           (values 0 0)]
+          [else
+           (define primary-o
+             (or (findf (lambda (o) (> (sc2-unit-order-target-unit-tag o) 0)) ords)
+                 (car ords)))
+           (values (sc2-unit-order-ability-id primary-o)
+                   (sc2-unit-order-target-unit-tag primary-o))]))
+      (sat-worker-info
+       wtag
+       (sc2-unit-unit-type w)
+       wx
+       wy
+       oab
+       otgt
+       (and (worker-carrying-mineral? w) #t)
+       (and (worker-carrying-gas? w) #t)
+       (or base-excl? stuck-stopped?)
+       lease-prot?)))
+
+  (define mule-infos
+    (for/list ([u (in-list self-units)]
+               #:when (= (sc2-unit-unit-type u) 268))
+      (define up (sc2-unit-pos u))
+      (sat-mule-info
+       (sc2-unit-tag u)
+       (sc2-point3d-x up)
+       (sc2-point3d-y up)
+       (null? (sc2-unit-orders u)))))
+
+  (define policy-directives
+    (evaluate-worker-saturation-policy!
+     SC2-DEFAULT-WORKER-SAT-STATE
+     #:loop cur-loop
+     #:race race-sym
+     #:minerals cur-min
+     #:gas cur-gas
+     #:workers worker-infos
+     #:bases base-infos
+     #:gas-buildings gas-infos
+     #:minerals-fields min-infos
+     #:mules mule-infos
+     #:heavy-worker-rush-active? heavy-worker-rush-at-base?
+     #:gas-starvation-boost? gas-starvation-boost?
+     #:apm-pressure-backoff? apm-pressure-backoff?))
+
+  ;; 1:1 Wire codec translation of `sat-directive` -> `sc2-raw-unit-command`
+  (for ([dir (in-list policy-directives)])
+    (define kind (sat-directive-kind dir))
+    (define tags (sat-directive-unit-tags dir))
+    (define tgt (sat-directive-target-tag dir))
+    (define urg? (sat-directive-urgent? dir))
+    (when (pair? tags)
+      (case kind
+        [(rally-workers)
+         (set! cmds (cons (sc2-raw-unit-command 3690 #f tgt tags #f) cmds))]
+        [(harvest-gather)
+         (for ([wt (in-list tags)])
+           (set-add! commanded-this-frame wt)
+           (when (hash-has-key? owned-min-by-tag tgt)
+             (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wt tgt)))
+         (define fog-pt (hash-ref fog-mineral-pos-by-tag tgt #f))
+         (define raw-c
+           (if fog-pt
+               (sc2-raw-unit-command 16 (sc2-point2d (car fog-pt) (cdr fog-pt)) 0 tags #f)
+               (sc2-raw-unit-command 3666 #f tgt tags #f)))
+         (set! cmds (cons (if urg? (mark-macro-econ-cmd! raw-c) raw-c) cmds))])))
 
   ;; 1b. Opening Anti-Bounce Close-Patch Lock (`cur-loop <= 336`):
-  ;;     Prevent SC2 auto-bounce from kicking Frame-0 workers off their assigned close patch.
-  (when (and (not heavy-worker-rush-at-base?) (> cur-loop 4) (<= cur-loop 336) (not (null? owned-base-minerals)))
+  ;;     Preserves Frame-0 close-patch pairing assigned by `frame0-pro-worker-split-commands`.
+  (when (and (not heavy-worker-rush-at-base?) (> cur-loop 4) (<= cur-loop 336) (pair? owned-base-minerals))
+    (define min-th-dist
+      (for/hasheqv ([m (in-list owned-base-minerals)])
+        (define mp (sc2-unit-pos m))
+        (define mx (sc2-point3d-x mp))
+        (define my (sc2-point3d-y mp))
+        (define th-d
+          (if (null? ready-townhalls)
+              0.0
+              (for/fold ([best +inf.0]) ([th (in-list ready-townhalls)])
+                (define tp (sc2-unit-pos th))
+                (min best (pt-dist (sc2-point3d-x tp) (sc2-point3d-y tp) mx my)))))
+        (values (sc2-unit-tag m) th-d)))
+    (define patch-worker-counts (make-hasheqv))
+    (for ([w (in-list workers)])
+      (define wtag (sc2-unit-tag w))
+      (define ord-tgt
+        (for/first ([o (in-list (sc2-unit-orders w))]
+                    #:when (and (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666))
+                                (hash-has-key? owned-min-by-tag (sc2-unit-order-target-unit-tag o))))
+          (sc2-unit-order-target-unit-tag o)))
+      (define eff-tgt
+        (or ord-tgt
+            (let ([a (hash-ref SC2-WORKER-PATCH-ASSIGNMENT wtag #f)])
+              (and a (hash-has-key? owned-min-by-tag a) a))))
+      (when eff-tgt
+        (hash-set! patch-worker-counts eff-tgt (add1 (hash-ref patch-worker-counts eff-tgt 0)))))
     (for ([w (in-list workers)]
           #:when (let ([wtag (sc2-unit-tag w)])
                    (and (not (set-member? commanded-this-frame wtag))
-                        (not (worker-returning-cargo? w))
+                        (not (worker-carrying-cargo? w))
                         (>= cur-loop (hash-ref SC2-WORKER-ANTIBOUNCE-COOLDOWN wtag 0)))))
       (define wtag (sc2-unit-tag w))
       (define assigned-ptag (hash-ref SC2-WORKER-PATCH-ASSIGNMENT wtag #f))
@@ -11193,515 +10551,6 @@
                 (cons (mark-urgent-survival-cmd!
                        (sc2-raw-unit-command 3666 #f assigned-ptag (list wtag) #f))
                       cmds))))))
-
-  ;; 2. Assign 1 worker per step to under-saturated gas building, unified with 350G/600G float caps
-  ;;    and graduated mineral-worker floor (0 gas -> >= 6 min workers, 1 gas -> >= 8, >= 2 gas -> >= 10).
-  (when (and worker-rush-evacuate-gas? (not (null? owned-base-minerals)))
-    (for ([w (in-list workers)]
-          #:when (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
-                      (not (worker-carrying-cargo? w))
-                      (ormap (lambda (o)
-                               (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
-                             (sc2-unit-orders w))))
-      (define wp (sc2-unit-pos w))
-      (define best-min
-        (argmin (lambda (m)
-                  (define mp (sc2-unit-pos m))
-                  (pt-dist (sc2-point3d-x wp) (sc2-point3d-y wp)
-                           (sc2-point3d-x mp) (sc2-point3d-y mp)))
-                owned-base-minerals))
-      (issue-gather! w (sc2-unit-tag best-min) #:macro-econ? (<= cur-loop 2688))))
-
-  (define self-is-zerg?
-    (ormap (lambda (u) (memv (sc2-unit-unit-type u) '(86 100 101 104 88))) self-units))
-  ;; L22-P0-1 + L61B (`#1640`/`#1641`): Gas-to-mineral hysteresis latch:
-  ;;   1-base / early (`<= 4032` or 1 online TH):
-  ;;     Pull ON:  (>= 180G & < 160M) OR (>= 350G & < 250M) OR (> 600G & < 450M)
-  ;;     Pull OFF: (>= 450M) OR (<= 600G & (< 130G OR >= 280M))
-  ;;   2+ bases midgame (`cur-loop > 4032`): catches GRMS (`>= 200G & < 110M`) cleanly while keeping `112f` opp-cd:
-  ;;     Pull ON:  (>= 200G & < 110M) OR (>= 260G & < 160M) OR (>= 400G & < 250M) OR (> 600G & < 450M)
-  ;;     Pull OFF: (>= 450M) OR (<= 600G & (< 140G OR >= 280M))
-  (cond
-    [(if midgame-multi-base-gas?
-         (or (and (>= cur-gas 200) (< cur-min 110))
-             (and (>= cur-gas 260) (< cur-min 160))
-             (and (>= cur-gas 400) (< cur-min 250))
-             (and (> cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD) (< cur-min 450)))
-         (or (and (>= cur-gas 180) (< cur-min 160))
-             (and (>= cur-gas SC2-GAS-FLOAT-REBALANCE-THRESH) (< cur-min 250))
-             (and (> cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD) (< cur-min 450))))
-     (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #t)]
-    [(or (>= cur-min 450)
-         (and (<= cur-gas SC2-GAS-FLOAT-PULL-THRESHOLD)
-              (if midgame-multi-base-gas?
-                  (or (< cur-gas 140)
-                      (>= cur-min 280))
-                  (or (< cur-gas 130)
-                      (>= cur-min 280)))))
-     (set-box! SC2-GAS-PULL-HYSTERESIS-LATCH #f)])
-  ;; Zerg Post-Ling-Speed Mineral Surge: below 28 Drones on 2+ bases (< 3:45), once >= 108G is banked
-  ;; while minerals < 250M, keep 1 Drone on gas and pull 2 back to minerals; auto-resaturate to 3/3
-  ;; once workers >= 28, cur-gas < 75, or cur-min >= 325!
-  (define zerg-post-speed-surge-active?
-    (and self-is-zerg?
-         (< cur-loop 5040)
-         (>= (length online-townhalls) 2)
-         (< (length workers) 28)
-         (< cur-min 250)
-         (>= cur-gas 108)))
-  ;; L20-P0-1 (`#29` crushed worker economy `<= 12w`): when worker count is crushed (`<= 12`)
-  ;; with `>= 150G` banked and `< 120M`, evacuate gas all the way to `0` so every surviving
-  ;; worker rebuilds minerals/economy instead of stranding 20% of workers on unneeded gas!
-  (define worker-crisis-gas-evac?
-    (and (<= (length workers) 12)
-         (>= cur-gas 150)
-         (< cur-min 120)))
-  ;; L30-P0-1 + L32-P0-1 (`#38/#10`): When all owned bases are mined out (`owned-base-minerals = '()`)
-  ;; while `gas >= 500` & `minerals < 200`, block Refinery resaturation and evacuate gas workers onto
-  ;; the nearest safe available map mineral patch (`MOVE 16` for fog snapshots, `SMART 3666` if visible)!
-  (define mined-out-safe-map-minerals
-    (if (and (null? owned-base-minerals) (>= cur-gas 500) (< cur-min 200))
-        safe-map-minerals
-        '()))
-  (define mined-out-gas-starved?
-    (and (null? owned-base-minerals)
-         (>= cur-gas 500)
-         (< cur-min 200)))
-  (define mined-out-gas-evac?
-    (and mined-out-gas-starved?
-         (pair? mined-out-safe-map-minerals)))
-  (define gas-over-banked?
-    (or worker-rush-evacuate-gas?
-        worker-crisis-gas-evac?
-        mined-out-gas-starved?
-        (unbox SC2-GAS-PULL-HYSTERESIS-LATCH)))
-  (define gas-pull-to-zero-now?
-    (or worker-rush-evacuate-gas?
-        worker-crisis-gas-evac?
-        mined-out-gas-starved?
-        (and gas-over-banked?
-             (or (>= cur-gas 300)
-                 (and (>= cur-gas 260) (< cur-min 120))))))
-  (define gas-resaturate-blocked?
-    (or gas-pull-to-zero-now?
-        heavy-worker-rush-at-base?
-        (and gas-over-banked? (>= eff-active-gas-workers 1))
-        (and zerg-post-speed-surge-active? (>= eff-active-gas-workers 1))))
-  ;; L19-P0-1: Protect mineral saturation on 1-2 bases using `eff-active-gas-workers`
-  ;; (counting workers currently inside refineries!): 2nd geyser (slots 3..5) requires >= 18
-  ;; mineral workers when < 300M, and 3rd+ geyser (slots 6+) requires >= 28 when < 400M.
-  (define min-mineral-workers-for-next-gas
-    (cond
-      [(= eff-active-gas-workers 0) 6]
-      [(= eff-active-gas-workers 1) 8]
-      [(= eff-active-gas-workers 2) 10]
-      [(< eff-active-gas-workers 6) (if (>= cur-min 300) 10 18)]
-      [else                         (if (>= cur-min 400) 14 28)]))
-  (when (and (not rescue-issued-this-frame?)
-             (not (null? under-gas))
-             (or (and (null? owned-base-minerals) (not mined-out-gas-starved?))
-                 (>= (- (length workers) active-gas-worker-count)
-                     min-mineral-workers-for-next-gas))
-             (not gas-resaturate-blocked?))
-    (define gb (first under-gas))
-    (define gtag (sc2-unit-tag gb))
-    (define gb-asgn (gas-eff-assigned gb))
-    (define gp (sc2-unit-pos gb))
-    (define zero-gas-workers-now? (= eff-active-gas-workers 0))
-    (define prev-fill (hash-ref SC2-SAT-GAS-FILL-LAST-LOOP gtag #f))
-    ;; L61 (`#1609` A2): `>= 32f` per-geyser retry cooldown when `eff-assigned` didn't progress
-    ;; (`24f` when `0` gas workers & `< 100G` emergency gas rescue, matching `w18-tac-1`),
-    ;; plus `>= 112f` (`5.0s`) opposite-direction cooldown after a gas pull (unless 0 gas workers & <100G).
-    (define fill-retry-cd (if (and zero-gas-workers-now? (< cur-gas 100)) 24 32))
-    (define fill-retry-throttled?
-      (and prev-fill
-           (< (- cur-loop (car prev-fill)) fill-retry-cd)
-           (<= gb-asgn (cdr prev-fill))))
-    (define fill-opp-throttled?
-      (and (< (- cur-loop (unbox SC2-SAT-GAS-LAST-PULL-GLOBAL)) 112)
-           (not (and zero-gas-workers-now? (< cur-gas 100)))))
-    (when (and (not fill-retry-throttled?) (not fill-opp-throttled?))
-      (define (eligible-for-gas? w)
-        (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
-             (not (worker-carrying-cargo? w))
-             (not (worker-returning-cargo? w))
-             (not (ormap (lambda (o)
-                           (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
-                         (sc2-unit-orders w)))
-             (or zero-gas-workers-now?
-                 (null? (sc2-unit-orders w))
-                 (for/and ([other-gb (in-list ready-gas-bldgs)])
-                   (define ogp (sc2-unit-pos other-gb))
-                   (define wp (sc2-unit-pos w))
-                   (> (pt-dist (sc2-point3d-x ogp) (sc2-point3d-y ogp)
-                               (sc2-point3d-x wp) (sc2-point3d-y wp))
-                      SC2-GAS-HARVESTER-EXCLUSION-RADIUS)))))
-      (define eligible-idle (filter eligible-for-gas? idle-workers))
-      (define eligible-all (filter eligible-for-gas? workers))
-      (define fallback-carrying-min
-        (if (and (null? eligible-idle)
-                 (null? eligible-all)
-                 zero-gas-workers-now?
-                 (< cur-gas 180))
-            (filter (lambda (w)
-                      (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
-                           (not (worker-carrying-gas? w))
-                           (not (ormap (lambda (o)
-                                         (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
-                                       (sc2-unit-orders w)))))
-                    workers)
-            '()))
-      (define-values (candidate-workers allow-carry?)
-        (cond
-          [(not (null? eligible-idle)) (values eligible-idle #f)]
-          [(not (null? eligible-all)) (values eligible-all #f)]
-          [else (values fallback-carrying-min #t)]))
-      (when (not (null? candidate-workers))
-        ;; L61C (`#1651`/`#1652`): Coalesce up to `min(3, ideal - gb-asgn)` eligible workers into ONE
-        ;; `3666` command (respecting mineral-worker floor & `1`-worker cap on `gas-over-banked?` /
-        ;; `fallback-carrying-min`) and mark `P1` symmetrically with Sec 4 whenever
-        ;; `(<= cur-loop 2688)`, `zero-gas-workers-now?`, or `(< cur-gas 180)`!
-        (define gb-ideal (max SC2-IDEAL-WORKERS-PER-GEYSER (sc2-unit-ideal-harvesters gb)))
-        (define gb-need (min 3 (max 0 (- gb-ideal gb-asgn))))
-        (define cur-min-workers (- (length workers) active-gas-worker-count))
-        (define max-fill-by-floor
-          (if (null? owned-base-minerals)
-              gb-need
-              (let loop ([k 0] [g eff-active-gas-workers] [m cur-min-workers])
-                (define req-m
-                  (cond
-                    [(= g 0) 6]
-                    [(= g 1) 8]
-                    [(= g 2) 10]
-                    [(< g 6) (if (>= cur-min 300) 10 18)]
-                    [else    (if (>= cur-min 400) 14 28)]))
-                (if (and (< k gb-need) (>= m req-m))
-                    (loop (add1 k) (add1 g) (sub1 m))
-                    k))))
-        (define fill-cap
-          (if (or allow-carry? gas-over-banked? zerg-post-speed-surge-active?)
-              (min 1 max-fill-by-floor)
-              max-fill-by-floor))
-        (when (> fill-cap 0)
-          (define ranked-gas-ws
-            (sort candidate-workers
-                  <
-                  #:key (lambda (w)
-                          (define wp (sc2-unit-pos w))
-                          (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
-                                   (sc2-point3d-x wp) (sc2-point3d-y wp)))))
-          (define chosen-gas-ws (take ranked-gas-ws (min fill-cap (length ranked-gas-ws))))
-          (define fill-wtags
-            (for/list ([w (in-list chosen-gas-ws)]
-                       #:when (or (not (worker-carrying-cargo? w))
-                                  (and allow-carry? (not (worker-carrying-gas? w)))))
-              (define wtag (sc2-unit-tag w))
-              (set-add! commanded-this-frame wtag)
-              wtag))
-          (when (pair? fill-wtags)
-            (hash-set! SC2-SAT-GAS-FILL-LAST-LOOP gtag (cons cur-loop gb-asgn))
-            (set-box! SC2-SAT-GAS-LAST-FILL-GLOBAL cur-loop)
-            (define raw-fill (sc2-raw-unit-command 3666 #f gtag fill-wtags #f))
-            (define fill-p1?
-              (or (<= cur-loop 2688)
-                  zero-gas-workers-now?
-                  (and (< cur-gas 180) (not gas-resaturate-blocked?))))
-            (set! cmds
-                  (cons (if fill-p1? (mark-macro-econ-cmd! raw-fill) raw-fill)
-                        cmds)))))))
-
-  ;; 3. L23-P0-1 + L61 (`#1609` A2): Transfer workers from over-saturated TownHall (or early-game
-  ;;    `<= 6048` donor base) to the safest MOST-UNDER-SATURATED expansion (`bp >= 0.85` included).
-  ;;    After `4:30` (`cur-loop > 6048`): disable `donor-candidates` stripping, require strict
-  ;;    over-saturation (`assigned >= ideal + 2`), throttle `>= 48f` per donor base + `96f` per
-  ;;    worker, and coalesce each `(src, dst)` batch into 1 `3666` command at Tier `P3`!
-  (when (and (not heavy-worker-rush-at-base?)
-             (not (null? under-townhalls))
-             (not (null? owned-base-minerals)))
-    (define dst-th
-      (argmin (lambda (th)
-                (+ (* 1000.0 (th-safety-score th))
-                   (exact->inexact (th-effective-assigned th))))
-              under-townhalls))
-    (define dp (sc2-unit-pos dst-th))
-    (define dst-ih (th-effective-ideal dst-th))
-    (define dst-deficit (max 0 (- dst-ih (th-effective-assigned dst-th))))
-    (define dst-mins (minerals-near-townhall dst-th))
-    (define dst-near-mins (hash-ref th-near-ht (sc2-unit-tag dst-th) '()))
-    (define dst-min-tags (list->seteqv (map sc2-unit-tag dst-mins)))
-    (define in-flight-to-dst
-      (count (lambda (w)
-               (define wp (sc2-unit-pos w))
-               (and (> (pt-dist (sc2-point3d-x dp) (sc2-point3d-y dp)
-                                (sc2-point3d-x wp) (sc2-point3d-y wp))
-                       8.0)
-                    (ormap (lambda (o)
-                             (set-member? dst-min-tags (sc2-unit-order-target-unit-tag o)))
-                           (sc2-unit-orders w))))
-             workers))
-    (define dst-near-slots-needed
-      (for/sum ([m (in-list dst-near-mins)])
-        (max 0 (- 2 (hash-ref patch-worker-counts (sc2-unit-tag m) 0)))))
-    (define early-natural-split?
-      (and (<= cur-loop 6048)
-           (>= (length dst-mins) 4)
-           (< (th-effective-assigned dst-th) 8)))
-    (define donor-min-workers (if early-natural-split? 12 14))
-    (define donor-keep-workers (if early-natural-split? 10 13))
-    (define donor-candidates
-      (if (<= cur-loop 6048)
-          (filter (lambda (th)
-                    (and (not (= (sc2-unit-tag th) (sc2-unit-tag dst-th)))
-                         (>= (th-effective-assigned th) donor-min-workers)))
-                  online-ready-townhalls)
-          '()))
-    (define-values (src-th src-surplus transfer-limit transfer-eligible?)
-      (cond
-        [(not (null? over-townhalls))
-         (define sth (first over-townhalls))
-         (define sth-surp (max 0 (- (sc2-unit-assigned-harvesters sth) (th-effective-ideal sth))))
-         (define rem-surp (max 0 (- sth-surp in-flight-to-dst)))
-         (define rem-def (max 0 (- dst-deficit in-flight-to-dst)))
-         (define lim (min (if (or early-natural-split? (>= rem-surp 2)) 2 1) rem-surp rem-def))
-         (values sth
-                 sth-surp
-                 lim
-                 (and (not (= (sc2-unit-tag sth) (sc2-unit-tag dst-th)))
-                      (if (> cur-loop 6048)
-                          (>= sth-surp 2)
-                          (>= (+ sth-surp dst-deficit) 2))
-                      (> lim 0)))]
-        [(and (<= cur-loop 6048) (pair? donor-candidates) (> dst-near-slots-needed 0))
-         (define sth (argmax th-effective-assigned donor-candidates))
-         (define sth-surp (max 0 (- (th-effective-assigned sth) donor-keep-workers)))
-         (define rem-near (max 0 (- dst-near-slots-needed in-flight-to-dst)))
-         (define rem-surp (max 0 (- sth-surp in-flight-to-dst)))
-         (define rem-def (max 0 (- dst-deficit in-flight-to-dst)))
-         (define lim (min (if (or early-natural-split? (>= rem-surp 2)) 2 1) rem-near rem-surp rem-def))
-         (values sth sth-surp lim (> lim 0))]
-        [else (values #f 0 0 #f)]))
-    (when (and src-th
-               transfer-eligible?
-               (not (null? dst-mins))
-               (>= (- cur-loop (hash-ref SC2-SAT-XFER-BASE-COOLDOWN (sc2-unit-tag src-th) -1000)) 48))
-      (define sp (sc2-unit-pos src-th))
-      (define transferable
-        (filter (lambda (w)
-                  (define wp (sc2-unit-pos w))
-                  (define wtag (sc2-unit-tag w))
-                  (and (not (set-member? commanded-this-frame wtag))
-                       (>= cur-loop (hash-ref SC2-WORKER-TRANSFER-COOLDOWN-UNTIL wtag 0))
-                       (not (worker-carrying-cargo? w))
-                       (not (worker-returning-cargo? w))
-                       (not (ormap (lambda (o)
-                                     (or (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o))
-                                         (set-member? dst-min-tags (sc2-unit-order-target-unit-tag o))))
-                                   (sc2-unit-orders w)))
-                       (<= (pt-dist (sc2-point3d-x sp) (sc2-point3d-y sp)
-                                    (sc2-point3d-x wp) (sc2-point3d-y wp))
-                           SC2-BASE-RESOURCE-RADIUS)
-                       (for/and ([gb (in-list ready-gas-bldgs)])
-                         (define gp (sc2-unit-pos gb))
-                         (> (pt-dist (sc2-point3d-x gp) (sc2-point3d-y gp)
-                                     (sc2-point3d-x wp) (sc2-point3d-y wp))
-                            SC2-GAS-HARVESTER-EXCLUSION-RADIUS))))
-                workers))
-      (when (not (null? transferable))
-        (define (xfer-worker-score w)
-          (define wp (sc2-unit-pos w))
-          (define wtag (sc2-unit-tag w))
-          (define ord-tgt
-            (for/first ([o (in-list (sc2-unit-orders w))]
-                        #:when (memv (sc2-unit-order-ability-id o) '(166 295 298 1183 3666)))
-              (sc2-unit-order-target-unit-tag o)))
-          (define eff-tgt (or ord-tgt (hash-ref SC2-WORKER-PATCH-ASSIGNMENT wtag #f)))
-          (define patch-far?
-            (if (and eff-tgt (hash-has-key? min-is-far-ht eff-tgt))
-                (hash-ref min-is-far-ht eff-tgt #f)
-                (>= (pt-dist (sc2-point3d-x sp) (sc2-point3d-y sp)
-                             (sc2-point3d-x wp) (sc2-point3d-y wp))
-                    6.75)))
-          (+ (if patch-far? -25.0 25.0)
-             (if (null? (sc2-unit-orders w)) -5.0 0.0)
-             (* 0.1 (pt-dist (sc2-point3d-x dp) (sc2-point3d-y dp)
-                             (sc2-point3d-x wp) (sc2-point3d-y wp)))))
-        (define ranked-xfers (sort transferable < #:key xfer-worker-score))
-        (define chosen-xfers (take ranked-xfers (min transfer-limit (length ranked-xfers))))
-        (when (pair? chosen-xfers)
-          (hash-set! SC2-SAT-XFER-BASE-COOLDOWN (sc2-unit-tag src-th) cur-loop)
-          (cond
-            [early-natural-split?
-             (for ([chosen-w (in-list chosen-xfers)])
-               (define best-dst-min (pick-best-slot-patch chosen-w dst-mins))
-               (define bmtag (sc2-unit-tag best-dst-min))
-               (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
-               (hash-set! SC2-WORKER-PATCH-ASSIGNMENT (sc2-unit-tag chosen-w) bmtag)
-               (hash-set! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL (sc2-unit-tag chosen-w) (+ cur-loop 96))
-               (issue-gather! chosen-w bmtag #:macro-econ? #t))]
-            [else
-             (define best-dst-min (pick-best-slot-patch (first chosen-xfers) dst-mins))
-             (define bmtag (sc2-unit-tag best-dst-min))
-             (define xfer-wtags
-               (for/list ([chosen-w (in-list chosen-xfers)])
-                 (define wtag (sc2-unit-tag chosen-w))
-                 (set-add! commanded-this-frame wtag)
-                 (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
-                 (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wtag bmtag)
-                 (hash-set! SC2-WORKER-TRANSFER-COOLDOWN-UNTIL wtag (+ cur-loop 96))
-                 wtag))
-             (set! cmds (cons (sc2-raw-unit-command 3666 #f bmtag xfer-wtags #f) cmds))])))))
-
-  ;; 4. Pull up to 2 gas workers/step (up to 3/step when >= 4 active gas workers!) back to owned
-  ;;    minerals when floating gas while mineral-starved, keeping >= 1 harvester strictly below 260G
-  ;;    (and < 300G when >= 120M) so `GasZeroFreeze = 0` holds, and pulling to 0 at >= 260G & < 120M
-  ;;    (or >= 300G latched / worker-crisis); pulls non-carrying gas workers first, and also pulls
-  ;;    carrying gas workers (`buff 273/274/275`) whenever `>= 200G & < 120M` or worker-crisis!
-  ;;    L61 (`#1609` A2): `>= 32f` retry cooldown when `eff-active-gas-workers` didn't decrease,
-  ;;    `>= 112f` opposite-direction cooldown after gas fill, midgame coalesced at Tier `P3`.
-  (define grms-urgent-pull?
-    (and gas-over-banked? (>= cur-gas 200) (< cur-min 110)))
-  (define gas-pull-target-floor
-    (cond
-      [gas-pull-to-zero-now? 0]
-      [(or gas-over-banked? zerg-post-speed-surge-active?) 1]
-      [else eff-active-gas-workers]))
-  (define max-gas-pulls-this-step
-    (if (and (not gas-zero-freeze-rescue?)
-             (or gas-over-banked? zerg-post-speed-surge-active?))
-        (let ([per-step-cap (if (>= eff-active-gas-workers 4) 3 2)])
-          (min per-step-cap (max 0 (- eff-active-gas-workers gas-pull-target-floor))))
-        0))
-  (define gas-pull-cand-mins
-    (cond
-      [(and (not (null? under-townhalls)) (not (null? owned-base-minerals)))
-       (minerals-near-townhall (first under-townhalls))]
-      [(not (null? owned-base-minerals)) owned-base-minerals]
-      [mined-out-gas-evac? mined-out-safe-map-minerals]
-      [else '()]))
-  (define prev-pull-state (unbox SC2-SAT-GAS-PULL-LAST-LOOP))
-  (define pull-retry-throttled?
-    (and (< (- cur-loop (car prev-pull-state)) 32)
-         (>= eff-active-gas-workers (cdr prev-pull-state))))
-  ;; L63 (`#1704`): Never block genuine `grms-urgent-pull?` (`>= 200G & < 110M`, P1) behind a recent
-  ;; geyser-fill `112f` opposite-direction cd (Sec 2's `112f` PULL->FILL cd + hysteresis latch prevent
-  ;; oscillation while letting fresh 3rd/4th-geyser crunches evacuate immediately!).
-  (define pull-opp-throttled?
-    (and (< (- cur-loop (unbox SC2-SAT-GAS-LAST-FILL-GLOBAL)) 112)
-         (not grms-urgent-pull?)
-         (not worker-rush-evacuate-gas?)
-         (not worker-crisis-gas-evac?)
-         (not mined-out-gas-evac?)))
-  (when (and (> max-gas-pulls-this-step 0)
-             (not pull-retry-throttled?)
-             (not pull-opp-throttled?)
-             (not (null? gas-pull-cand-mins))
-             (not (null? ready-gas-bldgs)))
-    (define cand-mins gas-pull-cand-mins)
-    (when (not (null? cand-mins))
-      (define (targeting-gas-bldg? w)
-        (ormap (lambda (o)
-                 (set-member? all-gas-tags (sc2-unit-order-target-unit-tag o)))
-               (sc2-unit-orders w)))
-      (define allow-carrying-gas-pull?
-        (or (and (>= cur-gas 200) (< cur-min 120))
-            worker-crisis-gas-evac?
-            mined-out-gas-evac?))
-      (define non-carrying-gas-workers
-        (filter (lambda (w)
-                  (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
-                       (not (worker-carrying-cargo? w))
-                       (not (worker-returning-cargo? w))
-                       (targeting-gas-bldg? w)))
-                workers))
-      (define carrying-gas-workers
-        (if allow-carrying-gas-pull?
-            (filter (lambda (w)
-                      (and (not (set-member? commanded-this-frame (sc2-unit-tag w)))
-                           (or (worker-carrying-gas? w)
-                               (and (or (worker-carrying-cargo? w) (worker-returning-cargo? w))
-                                    (targeting-gas-bldg? w)))))
-                    workers)
-            '()))
-      (define pull-candidates
-        (append non-carrying-gas-workers carrying-gas-workers))
-      (define chosen-pulls
-        (take pull-candidates (min max-gas-pulls-this-step (length pull-candidates))))
-      (when (pair? chosen-pulls)
-        (set-box! SC2-SAT-GAS-PULL-LAST-LOOP (cons cur-loop eff-active-gas-workers))
-        (set-box! SC2-SAT-GAS-LAST-PULL-GLOBAL cur-loop)
-        (cond
-          [(and (null? owned-base-minerals) mined-out-gas-evac?)
-           (for ([gw (in-list chosen-pulls)])
-             (define best-min (pick-nearest-safe-map-mineral gw cand-mins))
-             (issue-long-distance-mine! gw best-min
-                                        #:macro-econ? (<= cur-loop 2688)
-                                        #:allow-carrying-gas? allow-carrying-gas-pull?))]
-          [(<= cur-loop 2688)
-           (for ([gw (in-list chosen-pulls)])
-             (define best-min (pick-best-slot-patch gw cand-mins))
-             (define bmtag (sc2-unit-tag best-min))
-             (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
-             (hash-set! SC2-WORKER-PATCH-ASSIGNMENT (sc2-unit-tag gw) bmtag)
-             (issue-gather! gw bmtag
-                            #:macro-econ? #t
-                            #:allow-carrying-gas? allow-carrying-gas-pull?))]
-          [else
-           (define best-min (pick-best-slot-patch (first chosen-pulls) cand-mins))
-           (define bmtag (sc2-unit-tag best-min))
-           (define pull-wtags
-             (for/list ([gw (in-list chosen-pulls)]
-                        #:when (or (not (worker-carrying-cargo? gw))
-                                   allow-carrying-gas-pull?))
-               (define wtag (sc2-unit-tag gw))
-               (set-add! commanded-this-frame wtag)
-               (hash-set! patch-worker-counts bmtag (add1 (hash-ref patch-worker-counts bmtag 0)))
-               (hash-set! SC2-WORKER-PATCH-ASSIGNMENT wtag bmtag)
-               wtag))
-           (when (pair? pull-wtags)
-             ;; L61B/L63 (`#1640`/`#1704`): Elevate Sec 4's single coalesced gas-pull to Tier `P1`
-             ;; ONLY during genuine `gas_rich_min_starved` (`gas >= 200 & min < 110`) so combat
-             ;; tokens never starve gas-to-mineral rescue, while keeping routine pulls at `P3`.
-             (define raw-pull (sc2-raw-unit-command 3666 #f bmtag pull-wtags #f))
-             (set! cmds
-                   (cons (if grms-urgent-pull? (mark-macro-econ-cmd! raw-pull) raw-pull)
-                         cmds)))]))))
-
-  ;; 5. Idle MULE Re-Tasking: re-task idle MULEs (268) ONLY onto live mineral patches within 12 tiles
-  ;;    of a completed grounded friendly TownHall and within 14 tiles of the MULE (never cross-map!).
-  ;;    L61 (`#1609` A2): Per-MULE `>= 24f` throttle & Tier `P3` after `2:00` (`cur-loop > 2688`).
-  (when (not (null? owned-base-minerals))
-    (for ([u (in-list self-units)]
-          #:when (let ([utag (sc2-unit-tag u)])
-                   (and (= (sc2-unit-unit-type u) 268)
-                        (null? (sc2-unit-orders u))
-                        (>= (- cur-loop (hash-ref SC2-SAT-MULE-IDLE-LAST-LOOP utag -1000)) 24))))
-      (define up (sc2-unit-pos u))
-      (define ux (sc2-point3d-x up))
-      (define uy (sc2-point3d-y up))
-      (define near-owned-mins
-        (filter (lambda (m)
-                  (define mp (sc2-unit-pos m))
-                  (define mx (sc2-point3d-x mp))
-                  (define my (sc2-point3d-y mp))
-                  (and (<= (pt-dist ux uy mx my) 14.0)
-                       (or (null? ready-townhalls)
-                           (ormap (lambda (th)
-                                    (define tp (sc2-unit-pos th))
-                                    (<= (pt-dist mx my (sc2-point3d-x tp) (sc2-point3d-y tp)) 12.0))
-                                  ready-townhalls))))
-                owned-base-minerals))
-      (when (not (null? near-owned-mins))
-        (define best-m
-          (argmin (lambda (m)
-                    (define mp (sc2-unit-pos m))
-                    (pt-dist ux uy (sc2-point3d-x mp) (sc2-point3d-y mp)))
-                  near-owned-mins))
-        (hash-set! SC2-SAT-MULE-IDLE-LAST-LOOP (sc2-unit-tag u) cur-loop)
-        (define raw-mule-c
-          (sc2-raw-unit-command 3666 #f (sc2-unit-tag best-m) (list (sc2-unit-tag u)) #f))
-        (set! cmds
-              (cons (if (<= cur-loop 2688) (mark-macro-econ-cmd! raw-mule-c) raw-mule-c)
-                    cmds)))))
 
   ;; 6. Phase 2 (`#1662`): Thin Tier-P1 Macro-Energy Wire Safety Net delegating ALL Terran MULE
   ;;    vs Scan and Protoss Early ChronoBoost vs Energy Recharge policy to
@@ -11778,9 +10627,7 @@
 (define SC2-LAST-KNOWN-ENEMY-META (make-hasheqv))
 (define SC2-ENEMY-POS-LAST-LOOP (box 0))
 (define SC2-DEPOT-TOGGLE-COOLDOWN (make-hasheqv))
-(define SC2-MODE-TOGGLE-COOLDOWN (make-hasheqv))
-(define SC2-MINE-CLEAR-SINCE-LOOP (make-hasheqv))
-(define SC2-MINE-LAST-TYPE (make-hasheqv))
+(define SC2-DEFAULT-MODE-STEALTH-STATE (make-mode-stealth-state))
 (define SC2-CREEP-TUMOR-COOLDOWN (make-hasheqv))
 (define SC2-WIRE-NONSTACK-CMD-COOLDOWN (make-hash))
 (define SC2-WIRE-LAST-LOOP-BOX (box -1))
@@ -11812,13 +10659,62 @@
        (<= (pt-dist px py (sc2-point3d-x p) (sc2-point3d-y p)) rad))]
     [else #f]))
 
+(define (sc2-unit->ms-unit-info u [unit-pos-by-tag #f] [combat-tag-set #f])
+  (define p (sc2-unit-pos u))
+  (define ut (sc2-unit-unit-type u))
+  (define ords (sc2-unit-orders u))
+  (define-values (oab otx oty)
+    (if (pair? ords)
+        (let* ([o (car ords)]
+               [ab (sc2-unit-order-ability-id o)]
+               [tp (sc2-unit-order-target-pos o)]
+               [tt (sc2-unit-order-target-unit-tag o)])
+          (cond
+            [(any-point? tp) (values ab (any-point-x tp) (any-point-y tp))]
+            [(and unit-pos-by-tag (> tt 0) (hash-has-key? unit-pos-by-tag tt))
+             (let ([pt (hash-ref unit-pos-by-tag tt)])
+               (values ab (car pt) (cdr pt)))]
+            [else (values ab #f #f)]))
+        (values 0 #f #f)))
+  (define is-struct? (sc2-unit-is-structure? u))
+  (define is-w? (sc2-unit-is-worker? u))
+  (define is-th? (sc2-unit-is-townhall? u))
+  (define is-comb?
+    (if combat-tag-set
+        (set-member? combat-tag-set (sc2-unit-tag u))
+        (and (not is-struct?)
+             (not is-w?)
+             (not (memv ut '(151 103 106 129 1912 82 1911 85 136 268 12 13 14 15 16 17))))))
+  ;; Never treat hallucinated detector types as real detectors in `mode-and-stealth-safety.rkt`
+  (define eff-prog
+    (if (and (sc2-unit-is-hallucination u) (memv ut '(82 1911 129 1912 56 23 66 99)))
+        0.0
+        (sc2-unit-build-progress u)))
+  (ms-unit-info
+   (sc2-unit-tag u)
+   ut
+   (sc2-point3d-x p)
+   (sc2-point3d-y p)
+   0.0
+   0.0
+   (sc2-unit-radius u)
+   (sc2-unit-is-flying u)
+   (sc2-unit-is-burrowed u)
+   (= (sc2-unit-cloak u) 1)
+   (= (sc2-unit-cloak u) 2)
+   (sc2-unit-energy u)
+   eff-prog
+   oab
+   otx
+   oty
+   is-struct?
+   is-w?
+   is-th?
+   is-comb?))
+
 (define (friendly-unit-on-depot-footprint? dx dy self-units)
-  (for/or ([u (in-list self-units)])
-    (and (not (sc2-unit-is-structure? u))
-         (not (sc2-unit-is-flying u))
-         (let ([up (sc2-unit-pos u)])
-           (and (<= (abs (- (sc2-point3d-x up) dx)) 1.40)
-                (<= (abs (- (sc2-point3d-y up) dy)) 1.40))))))
+  (friendly-unit-on-depot-footprint-info?
+   dx dy (map sc2-unit->ms-unit-info self-units)))
 
 (define (friendly-unit-requesting-depot-transit? dx dy self-units
                                                  [builder-worker-tags (seteqv)]
@@ -11829,51 +10725,17 @@
         (for/hasheqv ([u (in-list self-units)])
           (define p (sc2-unit-pos u))
           (values (sc2-unit-tag u) (cons (sc2-point3d-x p) (sc2-point3d-y p))))))
-  (define (unit-active-non-hold-worker-transit? u ux uy)
-    (define ords (sc2-unit-orders u))
-    (and (pair? ords)
-         (let* ([o (car ords)]
-                [ab (sc2-unit-order-ability-id o)]
-                [tp (sc2-unit-order-target-pos o)]
-                [tt (sc2-unit-order-target-unit-tag o)]
-                [is-transit-ab?
-                 (or (memv ab '(16 23 295 296 298 299 1183 1184 3666 3667))
-                     (eq? (sc2-order-protection-class (sc2-canonical-order-ability ab))
-                          'build-structure)
-                     (worker-has-build-order? u))])
-           (and (not (= ab 18))
-                is-transit-ab?
-                (let-values ([(tx ty)
-                              (cond
-                                [(any-point? tp) (values (any-point-x tp) (any-point-y tp))]
-                                [(and (> tt 0) (hash-has-key? unit-pos-by-tag tt))
-                                 (let ([p (hash-ref unit-pos-by-tag tt)])
-                                   (values (car p) (cdr p)))]
-                                [else (values #f #f)])])
-                  (or (not (and tx ty))
-                      (> (pt-dist ux uy tx ty) 2.0)
-                      (< (+ (* (- tx dx) (- ux dx))
-                            (* (- ty dy) (- uy dy)))
-                         0.0)))))))
-  (for/or ([u (in-list self-units)])
-    (and (not (sc2-unit-is-structure? u))
-         (not (sc2-unit-is-flying u))
-         (let* ([up (sc2-unit-pos u)]
-                [ux (sc2-point3d-x up)]
-                [uy (sc2-point3d-y up)]
-                [utag (sc2-unit-tag u)]
-                [ords (sc2-unit-orders u)])
-           (and (<= (pt-dist ux uy dx dy) 4.2)
-                (or (and (<= (abs (- ux dx)) 1.45)
-                         (<= (abs (- uy dy)) 1.45))
-                    (and (sc2-unit-is-worker? u)
-                         (or (set-member? builder-worker-tags utag)
-                             (worker-has-build-order? u)
-                             (unit-active-non-hold-worker-transit? u ux uy)))
-                    (and (or (set-member? commanded-combat-tags utag)
-                             (pair? ords))
-                         (or (null? ords)
-                             (not (= (sc2-unit-order-ability-id (car ords)) 18))))))))))
+  (define eff-builders
+    (for/fold ([bs (if (set? builder-worker-tags) builder-worker-tags (seteqv))])
+              ([u (in-list self-units)]
+               #:when (and (sc2-unit-is-worker? u)
+                           (worker-has-build-order? u)))
+      (set-add bs (sc2-unit-tag u))))
+  (friendly-unit-requesting-depot-transit-info?
+   dx dy
+   (map (lambda (u) (sc2-unit->ms-unit-info u unit-pos-by-tag)) self-units)
+   eff-builders
+   commanded-combat-tags))
 
 (define (get-last-bot-action-rejects)
   (unbox SC2-LAST-BOT-ACTION-REJECTS))
@@ -11898,7 +10760,8 @@
                                                  #:suppress-attack? [suppress-attack-kw #f]
                                                  #:tactical-posture [tactical-posture-kw #f]
                                                  #:endgame-cleanup? [endgame-cleanup-kw #f]
-                                                 #:watchdog-expand-ring-syms [watchdog-expand-ring-syms '()])
+                                                 #:watchdog-expand-ring-syms [watchdog-expand-ring-syms '()]
+                                                 #:arbiter-ledger [arbiter-ledger #f])
   (define (normalize-warp-in-unit-sym u)
     (case u
       [(warp-in-zealot)       'zealot]
@@ -11908,6 +10771,26 @@
       [(warp-in-high-templar) 'high-templar]
       [(warp-in-dark-templar) 'dark-templar]
       [else u]))
+  (define pre-auto-scan-ocs
+    (if (sc2-observation? obs)
+        (sort (filter (lambda (u)
+                        (and (sc2-unit? u)
+                             (= (sc2-unit-alliance u) 1)
+                             (not (= (sc2-unit-display-type u) 4))
+                             (= (sc2-unit-unit-type u) 132)
+                             (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                             (not (sc2-unit-is-flying u))
+                             (>= (sc2-unit-energy u) 50.0)))
+                      (sc2-observation-units obs))
+              > #:key sc2-unit-energy)
+        '()))
+  (define pre-used-auto-scan-ocs (mutable-seteqv))
+  (define (resolve-auto-scan-oc-tag)
+    (for/first ([u (in-list pre-auto-scan-ocs)]
+                #:unless (set-member? pre-used-auto-scan-ocs (sc2-unit-tag u)))
+      (define t (sc2-unit-tag u))
+      (set-add! pre-used-auto-scan-ocs t)
+      t))
   (define normalized-raw-actions
     (if (list? raw-actions)
         (for/list ([a (in-list raw-actions)])
@@ -11925,6 +10808,16 @@
              (list 'cast-spell caster 'supply-drop target)]
             [(list (or 'calldown-extra-supplies 'supply-drop 'extra-supplies) oc-id depot-id)
              (list 'cast-spell oc-id 'supply-drop depot-id)]
+            [(list (or 'cast 'cast-spell) caster (or 'scanner-sweep 'scan 399) rest ...)
+             (if (or (symbol? caster) (null? caster))
+                 (let ([auto-t (resolve-auto-scan-oc-tag)])
+                   (if auto-t (list* 'cast-spell auto-t 'scanner-sweep rest) a))
+                 a)]
+            [(list (or 'scanner-sweep 'scan) caster rest ...)
+             (if (or (symbol? caster) (null? caster))
+                 (let ([auto-t (resolve-auto-scan-oc-tag)])
+                   (if auto-t (list* 'cast-spell auto-t 'scanner-sweep rest) a))
+                 (list* 'cast-spell caster 'scanner-sweep rest))]
             [_ a]))
         '()))
   (define-values (actions step-action-rejects)
@@ -12025,7 +10918,7 @@
     (when (and (>= prev-wire-loop 0)
                (or (< cur-loop prev-wire-loop)
                    (and (<= cur-loop 8) (> prev-wire-loop 8))))
-      (hash-clear! SC2-MODE-TOGGLE-COOLDOWN)
+      (reset-mode-stealth-state! SC2-DEFAULT-MODE-STEALTH-STATE)
       (hash-clear! SC2-WIRE-NONSTACK-CMD-COOLDOWN)
       (hash-clear! SC2-PLACEMENT-NEG-COOLDOWN)
       (hash-clear! SC2-PLACEMENT-POS-CACHE)
@@ -12075,9 +10968,7 @@
       (set-box! SC2-WARPGATE-PREV-LIVE-READY 0)
       (set-box! SC2-LAST-SCAN-REQUEST-LOOP -9999)
       (hash-clear! SC2-DEPOT-TOGGLE-COOLDOWN)
-      (hash-clear! SC2-MODE-TOGGLE-COOLDOWN)
-      (hash-clear! SC2-MINE-CLEAR-SINCE-LOOP)
-      (hash-clear! SC2-MINE-LAST-TYPE)
+      (reset-mode-stealth-state! SC2-DEFAULT-MODE-STEALTH-STATE)
       (hash-clear! SC2-CREEP-TUMOR-COOLDOWN)
       (hash-clear! SC2-BUILDER-RESERVATION)
       (hash-clear! SC2-WIRE-NONSTACK-CMD-COOLDOWN)
@@ -13035,7 +11926,6 @@
   (define builder-worker-tags (mutable-seteqv))
   (define used-geyser-tags (mutable-seteqv))
   (define commanded-combat-tags (mutable-seteqv))
-  (define low-prio-scout-move-tags (mutable-seteqv))
   ;; Per-step placement RPC budget (<= 2 RPCs/step normally; 3 when >= 2 distinct Protoss or Terran
   ;; structures queue in one step so neither Protoss `gateway` nor Terran `0.5t` spillover starves
   ;; at budget=0!) and Creep Tumor throttle (<= 1 fan search/step & <= 1 RPC per 8 loops).
@@ -13911,26 +12801,98 @@
     (set-box! SC2-BUILD-TAG-EMITTED? #t)
     (emit! (make-bot-build-tag-chat-action)))
 
-  ;; W9-TAC-3 & W9-TAC-4: Per-step deduplication for Orbital Scanner Sweep (399) and Overseer Spawn Changeling (181)
-  ;; L59-P2 (`sc2-rmp-h06`): Pre-scan `actions` for any explicit `399` Scanner Sweep request so
-  ;; competing same-step `171` MULE actions NEVER steal that Orbital Command's energy, and strip any
-  ;; already-emitted `171` on `chosen-oc` when `emit-scanner-sweep-deduped!` fires!
+  ;; W9-TAC-3 & W9-TAC-4 + Architecture Phase C2 (`#1989`):
+  ;; Pre-translation arbitration for Scanner Sweep (`399`), Mode Toggles (`Sec 12`), and Emergency
+  ;; Stealth Safety (`Sec 12a`) via `lib/tactics/mode-and-stealth-safety.rkt` BEFORE the main
+  ;; `actions` loop runs — eliminates all retroactive wire-buffer stripping!
   (define step-scan-requested-oc-tags (mutable-seteqv))
   (define step-has-any-scan-request? #f)
+  (define explicit-scan-pts '())
+  (define auto-scan-oc-by-action (make-hasheq))
+  (define (pick-best-free-scan-oc-tag)
+    (define cands
+      (filter (lambda (u)
+                (define utag (sc2-unit-tag u))
+                (and (= (sc2-unit-unit-type u) 132)
+                     (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
+                     (not (sc2-unit-is-flying u))
+                     (>= (sc2-unit-energy u) 50.0)
+                     (not (set-member? step-scan-requested-oc-tags utag))))
+              self-units))
+    (and (pair? cands)
+         (sc2-unit-tag (argmax sc2-unit-energy cands))))
+  (define explicit-combat-tags (mutable-seteqv))
+  (define explicit-depot-tags (mutable-seteqv))
+  (define explicit-det-heading-pts '())
+  (define (add-int-tags-to-set! st uid #:skip-utility-leased? [skip-util? #f])
+    (for ([t (in-list (if (list? uid) uid (list uid)))]
+          #:when (and (exact-integer? t)
+                      (> t 0)
+                      (or (not skip-util?)
+                          (not (unit-leased-non-combat-utility? t)))))
+      (set-add! st t)))
   (for ([a (in-list actions)] #:when (pair? a))
     (match a
-      [(or (list (or 'cast 'cast-spell) uid (or 'scanner-sweep 'scan 399) _ ...)
-           (list (or 'scanner-sweep 'scan) uid _ ...))
+      [(or (list (or 'cast 'cast-spell) uid (or 'scanner-sweep 'scan 399) rest ...)
+           (list (or 'scanner-sweep 'scan) uid rest ...)
+           (list 'blind-skillshot-shimmer uid 'scanner-sweep rest ...))
        (set! step-has-any-scan-request? #t)
-       (for ([t (in-list (if (list? uid) uid (list uid)))]
-             #:when (and (exact-integer? t) (> t 0)))
-         (set-add! step-scan-requested-oc-tags t))]
+       (define explicit-int-tags
+         (filter (lambda (t) (and (exact-integer? t) (> t 0)))
+                 (if (list? uid) uid (list uid))))
+       (if (pair? explicit-int-tags)
+           (for ([t (in-list explicit-int-tags)])
+             (set-add! step-scan-requested-oc-tags t))
+           (let ([auto-oc (pick-best-free-scan-oc-tag)])
+             (when auto-oc
+               (set-add! step-scan-requested-oc-tags auto-oc)
+               (hash-set! auto-scan-oc-by-action a auto-oc))))
+       (when (and (>= (length rest) 2) (real? (first rest)) (real? (second rest)))
+         (set! explicit-scan-pts
+               (cons (cons (scale-bot-coord-to-world (first rest) home-x)
+                           (scale-bot-coord-to-world (second rest) home-y))
+                     explicit-scan-pts)))]
+      [(list (or 'cast 'cast-spell) uid spell-sym _ ...)
+       (define nsp (if (symbol? spell-sym) (normalize-sc2-name->symbol spell-sym) spell-sym))
+       (cond
+         [(memv nsp '(morph-supply-depot-lower morph-supply-depot-raise
+                      supply-depot-lower supply-depot-raise lower-depot raise-depot 556 558))
+          (add-int-tags-to-set! explicit-depot-tags uid)]
+         [(memv nsp '(calldown-mule mule 171 calldown-extra-supplies extra-supplies supply-drop 255
+                      spawn-changeling 181 1353
+                      morph-observer-mode morph-observer-siege-mode observer-surveillance surveillance-mode
+                      morph-oversight-mode morph-overseer-mode overseer-oversight
+                      3739 3741 3743 3745
+                      chrono-boost inject-larva))
+          (void)]
+         [else
+          (add-int-tags-to-set! explicit-combat-tags uid #:skip-utility-leased? #t)])]
+      [(list (or 'attack-move 'attack-unit 'focus-fire 'move 'move-units 'patrol 'hold-position
+                 'retreat 'kite-back 'stutter-step 'harass-workers 'patrol-block-expansion
+                 'burrow-block 'burrow-unit 'unburrow-unit 'burrow 'unburrow
+                 'widow-mine-retarget 'siege-tank-mode 'tactical-move 'micro-move)
+             uid rest ...)
+       (add-int-tags-to-set! explicit-combat-tags uid #:skip-utility-leased? #t)
+       (when (and (memq (car a) '(move move-units retreat attack-move tactical-move micro-move))
+                  (>= (length rest) 2)
+                  (real? (first rest))
+                  (real? (second rest))
+                  (ormap (lambda (t)
+                           (define u (and (exact-integer? t) (hash-ref self-unit-by-tag t #f)))
+                           (and u
+                                (memv (sc2-unit-unit-type u) '(82 129))
+                                (not (unit-leased-non-combat-utility? t))))
+                         (if (list? uid) uid (list uid))))
+         (set! explicit-det-heading-pts
+               (cons (cons (scale-bot-coord-to-world (first rest) home-x)
+                           (scale-bot-coord-to-world (second rest) home-y))
+                     explicit-det-heading-pts)))]
       [_ (void)]))
-  (when step-has-any-scan-request?
-    (set-box! SC2-LAST-SCAN-REQUEST-LOOP cur-loop))
+
+  (define uncovered-stealth-present? #f)
   (define emitted-scan-oc-tags (mutable-seteqv))
   (define emitted-scan-pts '())
-  (define (emit-scanner-sweep-deduped! oc-tags tx ty)
+  (define (emit-scanner-sweep-deduped! oc-tags tx ty #:urgent? [force-urgent? #f])
     (define fresh-ocs
       (filter (lambda (t) (and (exact-integer? t) (> t 0) (not (set-member? emitted-scan-oc-tags t))))
               (if (list? oc-tags) oc-tags (list oc-tags))))
@@ -13944,67 +12906,86 @@
     (when (and (pair? fresh-ocs) (not near-existing-scan?))
       (define chosen-oc (first fresh-ocs))
       (set-add! emitted-scan-oc-tags chosen-oc)
+      (set-add! step-scan-requested-oc-tags chosen-oc)
       (set! emitted-scan-pts (cons (cons tx ty) emitted-scan-pts))
       (hash-set! SC2-MACRO-ABILITY-LAST-LOOP (cons 'mule chosen-oc) cur-loop)
       (set-box! SC2-LAST-SCAN-REQUEST-LOOP cur-loop)
-      ;; Strip any competing same-step `171` MULE on `chosen-oc` so Scan owns the energy!
-      (set! raw-cmds
-            (filter-map
-             (lambda (c)
-               (cond
-                 [(and (sc2-raw-unit-command? c)
-                       (= (sc2-raw-unit-command-ability-id c) 171)
-                       (memv chosen-oc (sc2-raw-unit-command-unit-tags c)))
-                  (define rem (remv chosen-oc (sc2-raw-unit-command-unit-tags c)))
-                  (and (pair? rem)
-                       (mark-macro-econ-cmd!
-                        (sc2-raw-unit-command 171
-                                              (sc2-raw-unit-command-target-pos c)
-                                              (sc2-raw-unit-command-target-unit-tag c)
-                                              rem
-                                              (sc2-raw-unit-command-queue? c))))]
-                 [else c]))
-             raw-cmds))
       (define raw-scan (sc2-raw-unit-command 399 (sc2-point2d tx ty) 0 (list chosen-oc) #f))
-      (emit! (if uncovered-stealth-present?
+      (emit! (if (or force-urgent? uncovered-stealth-present?)
                  (mark-urgent-survival-cmd! raw-scan)
                  raw-scan))))
 
+  ;; Pre-translation L2c Mode & Stealth Safety Plan (`Sec 12` + `Sec 12a`):
+  ;; Runs BEFORE the `actions` loop so winning emergency Scans (`claimed-scan-oc-tags`) block
+  ;; competing MULE `171` upfront and winning emergency detector intercepts (`claimed-detector-tags`)
+  ;; block competing scout `MOVE 16` upfront with ZERO retroactive wire-buffer stripping!
+  (define active-scan-effect-pts
+    (if (sc2-observation? obs)
+        (for/fold ([pts '()]) ([eff (in-list (sc2-observation-effects obs))]
+                               #:when (= (sc2-effect-effect-id eff) 6))
+          (for/fold ([acc pts]) ([pt (in-list (sc2-effect-positions eff))])
+            (cons (cons (sc2-point2d-x pt) (sc2-point2d-y pt)) acc)))
+        '()))
+  (define combat-unit-tag-set
+    (for/seteqv ([cu (in-list combat-units)]) (sc2-unit-tag cu)))
+  (define pre-builder-worker-tags
+    (for/seteqv ([w (in-list workers)]
+                 #:when (worker-has-build-order? w cur-loop self-structures))
+      (sc2-unit-tag w)))
+  (define ms-self-infos
+    (for/list ([u (in-list self-units)])
+      (sc2-unit->ms-unit-info u self-unit-pos-by-tag combat-unit-tag-set)))
+  (define ms-enemy-infos
+    (for/list ([e (in-list enemy-units)])
+      (sc2-unit->ms-unit-info e)))
+  (define ms-plan
+    (plan-mode-and-stealth-safety!
+     SC2-DEFAULT-MODE-STEALTH-STATE
+     #:loop cur-loop
+     #:self-units ms-self-infos
+     #:enemy-units ms-enemy-infos
+     #:explicit-combat-tags explicit-combat-tags
+     #:explicit-scan-oc-tags step-scan-requested-oc-tags
+     #:explicit-depot-tags explicit-depot-tags
+     #:role-leases (if (hash? role-leases) role-leases (hasheqv))
+     #:arbiter-ledger arbiter-ledger
+     #:depot-cooldown-ht SC2-DEPOT-TOGGLE-COOLDOWN
+     #:map-min-coord SC2-MAP-PLAYABLE-MIN-COORD
+     #:map-max-coord SC2-MAP-PLAYABLE-MAX-COORD
+     #:active-scan-pts active-scan-effect-pts
+     #:emitted-scan-pts explicit-scan-pts
+     #:builder-worker-tags pre-builder-worker-tags
+     #:already-heading-pts explicit-det-heading-pts))
+  (set! uncovered-stealth-present?
+        (mode-stealth-plan-uncovered-stealth-present? ms-plan))
+  (define preempted-detector-tags
+    (mode-stealth-plan-claimed-detector-tags ms-plan))
+  (for ([t (in-set (mode-stealth-plan-claimed-scan-oc-tags ms-plan))])
+    (set-add! step-scan-requested-oc-tags t)
+    (set! step-has-any-scan-request? #t))
+  (when step-has-any-scan-request?
+    (set-box! SC2-LAST-SCAN-REQUEST-LOOP cur-loop))
+  (for ([t (in-set preempted-detector-tags)])
+    (set-add! commanded-combat-tags t))
+  (for ([t (in-set (mode-stealth-plan-claimed-mode-unit-tags ms-plan))])
+    (set-add! commanded-combat-tags t))
+  (for ([dir (in-list (mode-stealth-plan-directives ms-plan))])
+    (define ab (ms-directive-ability-id dir))
+    (define tags (ms-directive-unit-tags dir))
+    (define tx (ms-directive-target-x dir))
+    (define ty (ms-directive-target-y dir))
+    (define urg? (ms-directive-urgent? dir))
+    (when (pair? tags)
+      (cond
+        [(= ab 399)
+         (when (and (real? tx) (real? ty))
+           (emit-scanner-sweep-deduped! tags tx ty #:urgent? urg?))]
+        [else
+         (define tpos (and (real? tx) (real? ty) (sc2-point2d tx ty)))
+         (define raw-c (sc2-raw-unit-command ab tpos 0 tags #f))
+         (emit! (if urg? (mark-urgent-survival-cmd! raw-c) raw-c))])))
+
   (define emitted-changeling-tags (mutable-seteqv))
-  ;; W11-P0-4-wire (`w11-tac-4`): Active uncovered cloaked (`cloak=1`) or undetected burrowed
-  ;; combat threats (excluding Creep Tumors / Larva) demand mobile detector flight — NEVER
-  ;; freeze Overseers/Observers in Oversight/Siege mode (3745/3741) or waste an Overseer's turn
-  ;; on Spawn Changeling (181) while an active stealth threat is uncovered!
-  (define ally-detector-units
-    (filter (lambda (u)
-              (and (memv (sc2-unit-unit-type u) '(82 1911 129 1912 56 23 66 99))
-                   (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
-                   (not (sc2-unit-is-hallucination u))
-                   (not (= (sc2-unit-display-type u) 4))))
-            self-units))
-  (define (enemy-covered-by-ally-detector? e)
-    (or (= (sc2-unit-cloak e) 2)
-        (and (not (= (sc2-unit-cloak e) 1))
-             (let* ([ep (sc2-unit-pos e)]
-                    [ex (sc2-point3d-x ep)]
-                    [ey (sc2-point3d-y ep)])
-               (ormap (lambda (d)
-                        (define dp (sc2-unit-pos d))
-                        (define dx (- ex (sc2-point3d-x dp)))
-                        (define dy (- ey (sc2-point3d-y dp)))
-                        (and (<= (abs dx) 10.5) (<= (abs dy) 10.5)
-                             (<= (+ (* dx dx) (* dy dy)) 110.25)))
-                      ally-detector-units)))))
-  (define uncovered-stealth-enemies
-    (filter (lambda (e)
-              (define etype (sc2-unit-unit-type e))
-              (and (not (= (sc2-unit-display-type e) 4))
-                   (not (memv etype '(87 137 138 151)))
-                   (or (= (sc2-unit-cloak e) 1)
-                       (and (sc2-unit-is-burrowed e)
-                            (not (enemy-covered-by-ally-detector? e))))))
-            enemy-units))
-  (define uncovered-stealth-present? (pair? uncovered-stealth-enemies))
 
   ;; L58-P2: Do not drain Overseer energy on Spawn Changeling (`181`, 50e) when an uncontaminated
   ;; (`buff 36` absent) enemy production/tech/townhall structure is within `24.0t` — preserve `125e`
@@ -18199,13 +17180,18 @@
       ;;    and verifies creep tumor placement & MULE mineral patch targets.
       [(list (or 'cast 'cast-spell) raw-caster-id spell-sym rest ...)
        (define caster-ids
-         (remove-duplicates
-          (filter (lambda (t)
-                    (and (exact-integer? t) (> t 0)
-                         ;; L58-P1: Hallucinated units CANNOT cast any SC2 ability (`2:NotSupported`)!
-                         (let ([u (hash-ref self-unit-by-tag t #f)])
-                           (not (and u (sc2-unit-is-hallucination u))))))
-                  (if (list? raw-caster-id) raw-caster-id (list raw-caster-id)))))
+         (let ([explicit-ids
+                (remove-duplicates
+                 (filter (lambda (t)
+                           (and (exact-integer? t) (> t 0)
+                                ;; L58-P1: Hallucinated units CANNOT cast any SC2 ability (`2:NotSupported`)!
+                                (let ([u (hash-ref self-unit-by-tag t #f)])
+                                  (not (and u (sc2-unit-is-hallucination u))))))
+                         (if (list? raw-caster-id) raw-caster-id (list raw-caster-id))))])
+           (if (pair? explicit-ids)
+               explicit-ids
+               (let ([auto-oc (hash-ref auto-scan-oc-by-action act #f)])
+                 (if auto-oc (list auto-oc) '())))))
        (when (not (null? caster-ids))
          (define caster-id (first caster-ids))
          (define norm-spell (normalize-sc2-name->symbol spell-sym))
@@ -18297,24 +17283,26 @@
                    (emit! (sc2-raw-unit-command ab-id #f 0 caster-ids #f)))]
                 ;; Mode-toggle hysteresis cooldown (>= 44 game loops; 66 loops clear before unburrowing WidowMine)
                 [(memv ab-id '(388 390 2095 2097))
+                 (define mode-cd-ht (mode-stealth-state-mode-toggle-cooldown SC2-DEFAULT-MODE-STEALTH-STATE))
+                 (define mine-clr-ht (mode-stealth-state-mine-clear-since-loop SC2-DEFAULT-MODE-STEALTH-STATE))
                  (define burrow-ok-ids
                    (if (memv ab-id '(2095 2097))
                        (filter-valid-burrow-tags! caster-ids ab-id)
                        caster-ids))
                  (define ready-ids
                    (filter (lambda (cid)
-                             (and (>= cur-loop (hash-ref SC2-MODE-TOGGLE-COOLDOWN cid -1))
+                             (and (>= cur-loop (hash-ref mode-cd-ht cid -1))
                                   (or (not (= ab-id 2097))
-                                      (let ([cs (hash-ref SC2-MINE-CLEAR-SINCE-LOOP cid #f)])
+                                      (let ([cs (hash-ref mine-clr-ht cid #f)])
                                         (or (not cs) (>= (- cur-loop cs) 66))))))
                            burrow-ok-ids))
                  (when (pair? ready-ids)
                    (for ([cid (in-list ready-ids)])
                      (set-add! commanded-combat-tags cid)
-                     (hash-set! SC2-MODE-TOGGLE-COOLDOWN cid (+ cur-loop 44))
+                     (hash-set! mode-cd-ht cid (+ cur-loop 44))
                      (cond
-                       [(= ab-id 2095) (hash-set! SC2-MINE-CLEAR-SINCE-LOOP cid cur-loop)]
-                       [(= ab-id 2097) (hash-remove! SC2-MINE-CLEAR-SINCE-LOOP cid)]))
+                       [(= ab-id 2095) (hash-set! mine-clr-ht cid cur-loop)]
+                       [(= ab-id 2097) (hash-remove! mine-clr-ht cid)]))
                    (emit! (sc2-raw-unit-command ab-id #f 0 ready-ids #f)))]
                 ;; L58-P2: Guard all remaining burrow-down / burrow-up abilities against wrong polarity
                 ;; (`2:NotSupported` on already-burrowed Lurker 503) & active transitions (`4:CantQueueThatOrder`).
@@ -19196,9 +18184,10 @@
                 (or cloaked-or-burrowed-threat-present?
                     uncovered-stealth-present?
                     enemy-combat-near-own-base?)))
-         (unless suppress-det-scout?
+         (unless (or suppress-det-scout?
+                     (set-member? preempted-detector-tags oid)
+                     (set-member? commanded-combat-tags oid))
            (record-unit-used! oid)
-           (set-add! low-prio-scout-move-tags oid)
            (define tx (scale-bot-coord-to-world raw-x home-x))
            (define ty (scale-bot-coord-to-world raw-y home-y))
            (define target-pt (sc2-point2d tx ty))
@@ -19234,6 +18223,7 @@
                     enemy-combat-near-own-base?)))
          (unless (or suppress-rush-worker-scout?
                      suppress-detector-scout?
+                     (set-member? preempted-detector-tags uid)
                      (set-member? commanded-combat-tags uid)
                      (unit-has-protected-order? uid)
                      (and is-worker?
@@ -19243,9 +18233,7 @@
                               (and uh (hash-ref uh 'has-build-order? #f)))))
            (if is-worker?
                (record-worker-used! uid)
-               (begin
-                 (record-unit-used! uid)
-                 (set-add! low-prio-scout-move-tags uid)))
+               (record-unit-used! uid))
            (define target-pt (sc2-point2d tx ty))
            (unless (unit-already-executing-order? uid 16 target-pt 0)
              (emit! (sc2-raw-unit-command 16 target-pt 0 (list uid) #f)))))]
@@ -19428,6 +18416,7 @@
                           [utag (sc2-unit-tag u)])
                       (and (memv utype '(82 12 13 14 15 16 17))
                            (null? (sc2-unit-orders u))
+                           (not (set-member? preempted-detector-tags utag))
                            (not (set-member? commanded-combat-tags utag))
                            (not (set-member? used-producer-tags utag))
                            (not (and (= utype 82)
@@ -19436,7 +18425,6 @@
                                          enemy-combat-near-own-base?))))))
          (define utag (sc2-unit-tag u))
          (record-unit-used! utag)
-         (set-add! low-prio-scout-move-tags utag)
          (emit! (sc2-raw-unit-command 16 (sc2-point2d eb-x eb-y) 0 (list utag) #f)))
        ;; 4. Orbital Command Scanner Sweep (399) at enemy base when energy >= 125 and 0 enemies visible
        (when (null? enemy-units)
@@ -20361,419 +19349,7 @@
       (unless (unit-already-executing-order? utag 16 clear-pt 0)
         (emit! (sc2-raw-unit-command 16 clear-pt 0 (list utag) #f)))))
 
-  ;; 12. Automatic Terran Supply Depot Hysteresis, Siege Tank Unsiege, & Lurker / Widow Mine Unburrow
-  ;; L54-W1: Batch all clear raised depots (`utype=19`) to lower into ONE multi-tag `556` command
-  ;; (`2` APM total instead of N single-tag cmds), promoted to P1 (and P0 urgent-survival when
-  ;; `friendly-transit?`) so trapped-army MOVE/ATTACK spam can NEVER starve ramp lowering!
-  (define depot-lower-tags '())
-  (define depot-lower-urgent? #f)
-  (for ([u (in-list self-mode-toggle-units)]
-        #:when (and (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
-                    (null? (sc2-unit-orders u))))
-    (define utype (sc2-unit-unit-type u))
-    (define utag (sc2-unit-tag u))
-    (when (and (or (= utype 19) (= utype 47)) ;; 19 = SupplyDepot (raised), 47 = SupplyDepotLowered
-               (not (set-member? commanded-combat-tags utag))
-               (>= cur-loop (hash-ref SC2-DEPOT-TOGGLE-COOLDOWN utag 0)))
-      (define dp (sc2-unit-pos u))
-      (define dx (sc2-point3d-x dp))
-      (define dy (sc2-point3d-y dp))
-      (define min-ground-enemy-dist
-        (for/fold ([best +inf.0])
-                  ([e (in-list enemy-ground-units)])
-          (define ep (sc2-unit-pos e))
-          (min best (pt-dist dx dy (sc2-point3d-x ep) (sc2-point3d-y ep)))))
-      (define fast-breach-near?
-        (for/or ([e (in-list enemy-fast-breach-units)])
-          (define ep (sc2-unit-pos e))
-          (<= (pt-dist dx dy (sc2-point3d-x ep) (sc2-point3d-y ep)) 17.0)))
-      (define depot-raise-dist (if fast-breach-near? 16.0 14.0))
-      (define depot-lower-clear-dist (if fast-breach-near? 17.5 15.5))
-      (define friendly-on-footprint?
-        (friendly-unit-on-depot-footprint? dx dy self-ground-nonstruct-units))
-      (define friendly-transit?
-        (friendly-unit-requesting-depot-transit?
-         dx dy self-ground-nonstruct-units builder-worker-tags commanded-combat-tags
-         #:unit-pos-by-tag self-unit-pos-by-tag))
-      (cond
-        [(and (= utype 19)
-              (> min-ground-enemy-dist depot-lower-clear-dist))
-         (hash-set! SC2-DEPOT-TOGGLE-COOLDOWN utag (+ cur-loop (if friendly-transit? 36 44)))
-         (set! depot-lower-tags (cons utag depot-lower-tags))
-         (when friendly-transit?
-           (set! depot-lower-urgent? #t))]
-        [(and (= utype 47)
-              (<= min-ground-enemy-dist depot-raise-dist)
-              (not friendly-on-footprint?)
-              (or (<= min-ground-enemy-dist 5.5) (not friendly-transit?)))
-         (hash-set! SC2-DEPOT-TOGGLE-COOLDOWN utag (+ cur-loop (if (<= min-ground-enemy-dist 5.5) 40 44)))
-         (emit! (sc2-raw-unit-command 558 #f 0 (list utag) #f))])) ;; MORPH_SUPPLYDEPOT_RAISE
-    ;; Automatically unsiege idle `siege-tank-sieged` (32) with >= 44-loop cooldown when no enemy within 15.5 tiles
-    (when (and (= utype 32)
-               (not (set-member? commanded-combat-tags utag))
-               (>= cur-loop (hash-ref SC2-MODE-TOGGLE-COOLDOWN utag -1)))
-      (define tp (sc2-unit-pos u))
-      (define enemy-in-siege-range?
-        (ormap (lambda (e)
-                 (define ep (sc2-unit-pos e))
-                 (<= (pt-dist (sc2-point3d-x tp) (sc2-point3d-y tp)
-                              (sc2-point3d-x ep) (sc2-point3d-y ep))
-                     15.5))
-               enemy-units))
-      (unless enemy-in-siege-range?
-        (hash-set! SC2-MODE-TOGGLE-COOLDOWN utag (+ cur-loop 44))
-        (set-add! commanded-combat-tags utag)
-        (emit! (sc2-raw-unit-command 390 #f 0 (list utag) #f))))
-    ;; Automatically unburrow idle `lurker-burrowed` (503 -> 2110) only when no ground enemy is within 12.5 tiles
-    (when (and (= utype 503)
-               (not (set-member? commanded-combat-tags utag))
-               (>= cur-loop (hash-ref SC2-MODE-TOGGLE-COOLDOWN utag -1)))
-      (define lp (sc2-unit-pos u))
-      (define ground-enemy-in-lurker-range?
-        (ormap (lambda (e)
-                 (define ep (sc2-unit-pos e))
-                 (<= (pt-dist (sc2-point3d-x lp) (sc2-point3d-y lp)
-                              (sc2-point3d-x ep) (sc2-point3d-y ep))
-                     12.5))
-               enemy-ground-units))
-      (unless ground-enemy-in-lurker-range?
-        (hash-set! SC2-MODE-TOGGLE-COOLDOWN utag (+ cur-loop 44))
-        (set-add! commanded-combat-tags utag)
-        (emit! (sc2-raw-unit-command 2110 #f 0 (list utag) #f))))
-    ;; WidowMine (498 / 500) hysteresis: burrow <= 11.0 tiles; unburrow (2097) only when no enemy <= 15.5
-    ;; continuously for >= 66 loops AND no friendly TownHall <= 12.0, with >= 44-loop toggle cooldown.
-    (when (or (= utype 498) (= utype 500))
-      (define prev-mine-type (hash-ref SC2-MINE-LAST-TYPE utag #f))
-      (hash-set! SC2-MINE-LAST-TYPE utag utype)
-      (define mp (sc2-unit-pos u))
-      (define mx (sc2-point3d-x mp))
-      (define my (sc2-point3d-y mp))
-      (define min-enemy-dist
-        (for/fold ([best +inf.0]) ([e (in-list enemy-units)])
-          (define ep (sc2-unit-pos e))
-          (min best (pt-dist mx my (sc2-point3d-x ep) (sc2-point3d-y ep)))))
-      (when (and (= utype 500)
-                 (or (<= min-enemy-dist 15.5)
-                     (and (eqv? prev-mine-type 498)
-                          (not (hash-has-key? SC2-MINE-CLEAR-SINCE-LOOP utag)))))
-        (hash-set! SC2-MINE-CLEAR-SINCE-LOOP utag cur-loop))
-      (cond
-        [(and (= utype 498)
-              (not (set-member? commanded-combat-tags utag))
-              (>= cur-loop (hash-ref SC2-MODE-TOGGLE-COOLDOWN utag -1))
-              (<= min-enemy-dist 11.0))
-         (hash-set! SC2-MODE-TOGGLE-COOLDOWN utag (+ cur-loop 44))
-         (hash-set! SC2-MINE-CLEAR-SINCE-LOOP utag cur-loop)
-         (set-add! commanded-combat-tags utag)
-         (emit! (sc2-raw-unit-command 2095 #f 0 (list utag) #f))]
-        [(and (= utype 500)
-              (not (set-member? commanded-combat-tags utag))
-              (>= cur-loop (hash-ref SC2-MODE-TOGGLE-COOLDOWN utag -1))
-              (> min-enemy-dist 15.5))
-         (define clear-since (hash-ref SC2-MINE-CLEAR-SINCE-LOOP utag #f))
-         (define clear-duration-ok? (or (not clear-since) (>= (- cur-loop clear-since) 66)))
-         (define defending-mineral-line?
-           (ormap (lambda (th)
-                    (define tp (sc2-unit-pos th))
-                    (<= (pt-dist mx my (sc2-point3d-x tp) (sc2-point3d-y tp)) 12.0))
-                  townhalls))
-         (when (and clear-duration-ok? (not defending-mineral-line?))
-           (hash-set! SC2-MODE-TOGGLE-COOLDOWN utag (+ cur-loop 44))
-           (hash-set! SC2-MINE-CLEAR-SINCE-LOOP utag cur-loop)
-           (set-add! commanded-combat-tags utag)
-           (emit! (sc2-raw-unit-command 2097 #f 0 (list utag) #f)))])))
-  (when (pair? depot-lower-tags)
-    (define lower-cmd (sc2-raw-unit-command 556 #f 0 (reverse depot-lower-tags) #f))
-    (emit! (if depot-lower-urgent?
-               (mark-urgent-survival-cmd! lower-cmd)
-               lower-cmd)))
-
-  ;; 12a. W11-P0-4-wire (`w11-tac-4`): Emergency mobile detector intercept!
-  ;;      When any uncovered cloaked (`cloak=1`) or undetected burrowed combat enemy is active,
-  ;;      immediately fly the closest uncommanded (or low-priority-scout-preempted, L54-W2)
-  ;;      mobile detector (`Overseer 129` / `Observer 82`) directly to reveal it (or unmorph
-  ;;      stationary `OverseerSiege 1912` / `ObserverSiege 1911`) as a P0 urgent survival order!
-  (when uncovered-stealth-present?
-    (define mobile-or-sieged-detectors
-      (filter (lambda (u) (memv (sc2-unit-unit-type u) '(129 82 1912 1911)))
-              ally-detector-units))
-    (when (pair? mobile-or-sieged-detectors)
-      (define det-tag-set (for/seteqv ([d (in-list mobile-or-sieged-detectors)]) (sc2-unit-tag d)))
-      (define already-heading-pts
-        (for/fold ([pts '()]) ([c (in-list raw-cmds)]
-                               #:when (and (sc2-raw-unit-command? c)
-                                           (= (sc2-raw-unit-command-ability-id c) 16)
-                                           (any-point? (sc2-raw-unit-command-target-pos c))
-                                           (ormap (lambda (t)
-                                                    (and (set-member? det-tag-set t)
-                                                         (not (set-member? low-prio-scout-move-tags t))))
-                                                  (sc2-raw-unit-command-unit-tags c))))
-          (define tp (sc2-raw-unit-command-target-pos c))
-          (cons (cons (any-point-x tp) (any-point-y tp)) pts)))
-      (define assigned-det-tags (mutable-seteqv))
-      (for ([d (in-list mobile-or-sieged-detectors)])
-        (define dt (sc2-unit-tag d))
-        ;; L54-W2: Allow 12a detector cover to preempt low-priority scout moves!
-        (when (and (set-member? commanded-combat-tags dt)
-                   (not (set-member? low-prio-scout-move-tags dt)))
-          (set-add! assigned-det-tags dt)))
-      (define (stealth-priority-dist se)
-        (define ep (sc2-unit-pos se))
-        (define ex (sc2-point3d-x ep))
-        (define ey (sc2-point3d-y ep))
-        (define th-d
-          (for/fold ([best +inf.0]) ([th (in-list townhalls)])
-            (define tp (sc2-unit-pos th))
-            (min best (pt-dist ex ey (sc2-point3d-x tp) (sc2-point3d-y tp)))))
-        (define army-d
-          (for/fold ([best +inf.0]) ([cu (in-list combat-units)])
-            (define cp (sc2-unit-pos cu))
-            (min best (pt-dist ex ey (sc2-point3d-x cp) (sc2-point3d-y cp)))))
-        (define worker-d
-          (for/fold ([best +inf.0]) ([w (in-list workers)])
-            (define wp (sc2-unit-pos w))
-            (min best (pt-dist ex ey (sc2-point3d-x wp) (sc2-point3d-y wp)))))
-        (define se-ut (sc2-unit-unit-type se))
-        (define active-cloak-on-workers?
-          (and (memv se-ut '(55 76 50)) ;; Cloaked Banshee / Dark Templar / Ghost raiding workers
-               (<= worker-d 12.0)))
-        ;; L64/L65 (`#1787`/`#1830`): `-10.0t` priority bonus on live cloaked Banshee/DT/Ghost
-        ;; actively raiding workers (always beats `-4.0t` on a burrowed Widow Mine `500`!).
-        (- (min th-d army-d worker-d)
-           (cond
-             [active-cloak-on-workers? 10.0]
-             [(= se-ut 500) 4.0]
-             [else 0.0])))
-      (define sorted-stealth
-        (sort uncovered-stealth-enemies < #:key stealth-priority-dist))
-      (for ([se (in-list sorted-stealth)])
-        (define ep (sc2-unit-pos se))
-        (define ex (sc2-point3d-x ep))
-        (define ey (sc2-point3d-y ep))
-        (define covered-by-heading?
-          (ormap (lambda (pt) (<= (pt-dist ex ey (car pt) (cdr pt)) 10.5))
-                 already-heading-pts))
-        (unless covered-by-heading?
-          (define free-dets
-            (filter (lambda (d) (not (set-member? assigned-det-tags (sc2-unit-tag d))))
-                    mobile-or-sieged-detectors))
-          (when (pair? free-dets)
-            (define chosen-det
-              (argmin (lambda (d)
-                        (define dp (sc2-unit-pos d))
-                        (define base-d (pt-dist ex ey (sc2-point3d-x dp) (sc2-point3d-y dp)))
-                        (if (memv (sc2-unit-unit-type d) '(129 82)) base-d (+ base-d 15.0)))
-                      free-dets))
-            (define dtag (sc2-unit-tag chosen-det))
-            (define dutype (sc2-unit-unit-type chosen-det))
-            (set-add! assigned-det-tags dtag)
-            (set-add! commanded-combat-tags dtag)
-            ;; L54-W2: If `12a` preempted a low-priority scout move on `dtag`, strip that stale
-            ;; scout MOVE `16` from `raw-cmds` so SC2 receives ONLY the P0 stealth intercept!
-            (when (set-member? low-prio-scout-move-tags dtag)
-              (set-remove! low-prio-scout-move-tags dtag)
-              (set! raw-cmds
-                    (filter-map
-                     (lambda (c)
-                       (if (and (sc2-raw-unit-command? c)
-                                (= (sc2-raw-unit-command-ability-id c) 16)
-                                (not (urgent-survival-cmd? c))
-                                (memv dtag (sc2-raw-unit-command-unit-tags c)))
-                           (let ([rem (filter (lambda (t) (not (= t dtag)))
-                                              (sc2-raw-unit-command-unit-tags c))])
-                             (and (pair? rem)
-                                  (sc2-raw-unit-command 16
-                                                        (sc2-raw-unit-command-target-pos c)
-                                                        (sc2-raw-unit-command-target-unit-tag c)
-                                                        rem
-                                                        (sc2-raw-unit-command-queue? c))))
-                           c))
-                     raw-cmds)))
-            (cond
-              [(= dutype 1912)
-               (set! already-heading-pts (cons (cons ex ey) already-heading-pts))
-               (emit! (mark-urgent-survival-cmd!
-                       (sc2-raw-unit-command 3745 #f 0 (list dtag) #f)))]
-              [(= dutype 1911)
-               (set! already-heading-pts (cons (cons ex ey) already-heading-pts))
-               (emit! (mark-urgent-survival-cmd!
-                       (sc2-raw-unit-command 3739 #f 0 (list dtag) #f)))]
-              [else
-               ;; L64 P1 #4 (`#1787`): When multiple uncovered stealth enemies cluster within `<= 9.5t`,
-               ;; aim the detector at their verified centroid (all cluster members `<= 9.5t`) while
-               ;; updating `already-heading-pts` in-loop so additional detectors spread across separate fronts!
-               (define cluster-members
-                 (filter (lambda (o)
-                           (define op (sc2-unit-pos o))
-                           (define ox (sc2-point3d-x op))
-                           (define oy (sc2-point3d-y op))
-                           (and (<= (pt-dist ex ey ox oy) 9.5)
-                                (not (ormap (lambda (pt) (<= (pt-dist ox oy (car pt) (cdr pt)) 10.5))
-                                            already-heading-pts))))
-                         sorted-stealth))
-               (define-values (aim-x aim-y)
-                 (if (> (length cluster-members) 1)
-                     (let* ([n (exact->inexact (length cluster-members))]
-                            [cx (/ (for/sum ([o (in-list cluster-members)]) (sc2-point3d-x (sc2-unit-pos o))) n)]
-                            [cy (/ (for/sum ([o (in-list cluster-members)]) (sc2-point3d-y (sc2-unit-pos o))) n)])
-                       (if (for/and ([o (in-list cluster-members)])
-                             (define op (sc2-unit-pos o))
-                             (<= (pt-dist cx cy (sc2-point3d-x op) (sc2-point3d-y op)) 9.5))
-                           (values cx cy)
-                           (values ex ey)))
-                     (values ex ey)))
-               ;; Aim directly over stealth enemy / cluster centroid (pulled <= 2.0t toward nearby allied
-               ;; combat only if all cluster members remain inside <= 10.0t detection radius)
-               (define near-ally
-                 (for/fold ([best-u #f] [best-d 20.0] #:result best-u)
-                           ([cu (in-list combat-units)])
-                   (define cp (sc2-unit-pos cu))
-                   (define cd (pt-dist aim-x aim-y (sc2-point3d-x cp) (sc2-point3d-y cp)))
-                   (if (< cd best-d) (values cu cd) (values best-u best-d))))
-               (define-values (tx ty)
-                 (if near-ally
-                     (let* ([ap (sc2-unit-pos near-ally)]
-                            [ax (sc2-point3d-x ap)]
-                            [ay (sc2-point3d-y ap)]
-                            [d (max 1.0 (pt-dist aim-x aim-y ax ay))]
-                            [pull (min 2.0 (* 0.4 d))]
-                            [px (max SC2-MAP-PLAYABLE-MIN-COORD
-                                     (min SC2-MAP-PLAYABLE-MAX-COORD (+ aim-x (* pull (/ (- ax aim-x) d)))))]
-                            [py (max SC2-MAP-PLAYABLE-MIN-COORD
-                                     (min SC2-MAP-PLAYABLE-MAX-COORD (+ aim-y (* pull (/ (- ay aim-y) d)))))])
-                       (if (for/and ([o (in-list cluster-members)])
-                             (define op (sc2-unit-pos o))
-                             (<= (pt-dist px py (sc2-point3d-x op) (sc2-point3d-y op)) 10.0))
-                           (values px py)
-                           (values (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD aim-x))
-                                   (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD aim-y)))))
-                     (values (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD aim-x))
-                             (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD aim-y)))))
-               (define dest-pt (sc2-point2d tx ty))
-               (set! already-heading-pts (cons (cons tx ty) already-heading-pts))
-               (unless (unit-already-executing-order? dtag 16 dest-pt 0)
-                 (emit! (mark-urgent-survival-cmd!
-                         (sc2-raw-unit-command 16 dest-pt 0 (list dtag) #f))))])))))
-    ;; L58-P2 / L64 P1 #4 (`#1787`): Emergency Terran Orbital Command Scanner Sweep (`399`)!
-    ;; Scores each uncovered stealth cluster (`<= 11.0t`, guaranteed `<= 10.5t` from weighted centroid
-    ;; inside SC2's `13.0t` Scan radius) with `1.5x` weight on burrowed Widow Mines (`500`) near
-    ;; friendly workers (`<= 12.0t`) or `>= 3` combat units (`<= 12.0t`), dropping ONE P0 Scan on the
-    ;; highest-value cluster centroid and stripping any competing same-step `171` MULE on that OC!
-    (define ready-scan-ocs
-      (sort (filter (lambda (u)
-                      (and (= (sc2-unit-unit-type u) 132)
-                           (>= (sc2-unit-build-progress u) SC2-BUILD-COMPLETE-PROGRESS)
-                           (not (sc2-unit-is-flying u))
-                           (>= (sc2-unit-energy u) 50.0)
-                           (not (set-member? emitted-scan-oc-tags (sc2-unit-tag u)))))
-                    self-units)
-            > #:key sc2-unit-energy))
-    (when (pair? ready-scan-ocs)
-      (define active-scan-effect-pts
-        (if (sc2-observation? obs)
-            (for/fold ([pts '()]) ([eff (in-list (sc2-observation-effects obs))]
-                                   #:when (= (sc2-effect-effect-id eff) 6))
-              (for/fold ([acc pts]) ([pt (in-list (sc2-effect-positions eff))])
-                (cons (cons (sc2-point2d-x pt) (sc2-point2d-y pt)) acc)))
-            '()))
-      (define threat-stealth
-        (filter (lambda (se)
-                  (define ep (sc2-unit-pos se))
-                  (define ex (sc2-point3d-x ep))
-                  (define ey (sc2-point3d-y ep))
-                  (and (ormap (lambda (su)
-                                (define sp (sc2-unit-pos su))
-                                (<= (pt-dist ex ey (sc2-point3d-x sp) (sc2-point3d-y sp)) 18.0))
-                              self-units)
-                       (not (ormap (lambda (pt) (<= (pt-dist ex ey (car pt) (cdr pt)) 10.5))
-                                   active-scan-effect-pts))
-                       (not (ormap (lambda (pt) (<= (pt-dist ex ey (car pt) (cdr pt)) 10.0))
-                                   emitted-scan-pts))))
-                uncovered-stealth-enemies))
-      (when (pair? threat-stealth)
-        (define (scan-threat-weight se)
-          (define se-ut (sc2-unit-unit-type se))
-          (define ep (sc2-unit-pos se))
-          (define sx (sc2-point3d-x ep))
-          (define sy (sc2-point3d-y ep))
-          (define (near-worker?)
-            (ormap (lambda (w)
-                     (define wp (sc2-unit-pos w))
-                     (<= (pt-dist sx sy (sc2-point3d-x wp) (sc2-point3d-y wp)) 12.0))
-                   workers))
-          (cond
-            [(and (memv se-ut '(55 76 50)) (near-worker?))
-             1.6] ;; Live Cloaked Banshee / DT / Ghost raiding workers always outranks a lone mine
-            [(= se-ut 500)
-             (if (or (near-worker?)
-                     (>= (count (lambda (cu)
-                                  (define cp (sc2-unit-pos cu))
-                                  (<= (pt-dist sx sy (sc2-point3d-x cp) (sc2-point3d-y cp)) 12.0))
-                                combat-units)
-                         3))
-                 1.5
-                 1.0)]
-            [else 1.0]))
-        (define weighted-stealth
-          (for/list ([se (in-list threat-stealth)])
-            (define ep (sc2-unit-pos se))
-            (vector (sc2-point3d-x ep) (sc2-point3d-y ep) (scan-threat-weight se))))
-        (define-values (best-cx best-cy _best-sc _best-d)
-          (for/fold ([bcx 0.0] [bcy 0.0] [bsc -1.0] [bd +inf.0])
-                    ([anchor (in-list weighted-stealth)])
-            (define ax (vector-ref anchor 0))
-            (define ay (vector-ref anchor 1))
-            (define raw-cl
-              (filter (lambda (v)
-                        (<= (pt-dist ax ay (vector-ref v 0) (vector-ref v 1)) 11.0))
-                      weighted-stealth))
-            (define wsum (for/sum ([v (in-list raw-cl)]) (vector-ref v 2)))
-            (define cx (/ (for/sum ([v (in-list raw-cl)]) (* (vector-ref v 0) (vector-ref v 2))) (max 1e-6 wsum)))
-            (define cy (/ (for/sum ([v (in-list raw-cl)]) (* (vector-ref v 1) (vector-ref v 2))) (max 1e-6 wsum)))
-            ;; Verify members stay strictly inside <= 10.5t of centroid (SC2 Scan radius = 13.0t)
-            (define in-cl
-              (filter (lambda (v)
-                        (<= (pt-dist cx cy (vector-ref v 0) (vector-ref v 1)) 10.5))
-                      raw-cl))
-            (define eff-cl (if (pair? in-cl) in-cl (list anchor)))
-            (define eff-wsum (for/sum ([v (in-list eff-cl)]) (vector-ref v 2)))
-            (define ecx (/ (for/sum ([v (in-list eff-cl)]) (* (vector-ref v 0) (vector-ref v 2))) (max 1e-6 eff-wsum)))
-            (define ecy (/ (for/sum ([v (in-list eff-cl)]) (* (vector-ref v 1) (vector-ref v 2))) (max 1e-6 eff-wsum)))
-            (define near-d
-              (for/fold ([md +inf.0]) ([u (in-list (if (pair? townhalls) townhalls self-units))])
-                (define up (sc2-unit-pos u))
-                (min md (pt-dist ecx ecy (sc2-point3d-x up) (sc2-point3d-y up)))))
-            (if (or (> eff-wsum bsc)
-                    (and (= eff-wsum bsc) (< near-d bd)))
-                (values ecx ecy eff-wsum near-d)
-                (values bcx bcy bsc bd))))
-        (define ex (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD best-cx)))
-        (define ey (max SC2-MAP-PLAYABLE-MIN-COORD (min SC2-MAP-PLAYABLE-MAX-COORD best-cy)))
-        (define scan-cell-key
-          (list 'wire-emerg-scan
-                (quotient (inexact->exact (round ex)) 6)
-                (quotient (inexact->exact (round ey)) 6)))
-        (when (wire-nonstack-allow?! scan-cell-key 160)
-          (define chosen-oc-tag (sc2-unit-tag (first ready-scan-ocs)))
-          ;; Strip any competing same-step `171` MULE on `chosen-oc-tag` so Scan owns the energy!
-          (set! raw-cmds
-                (filter-map
-                 (lambda (c)
-                   (if (and (sc2-raw-unit-command? c)
-                            (= (sc2-raw-unit-command-ability-id c) 171)
-                            (memv chosen-oc-tag (sc2-raw-unit-command-unit-tags c)))
-                       (let ([rem (filter (lambda (t) (not (= t chosen-oc-tag)))
-                                          (sc2-raw-unit-command-unit-tags c))])
-                         (and (pair? rem)
-                              (mark-macro-econ-cmd!
-                               (sc2-raw-unit-command 171
-                                                     (sc2-raw-unit-command-target-pos c)
-                                                     (sc2-raw-unit-command-target-unit-tag c)
-                                                     rem
-                                                     (sc2-raw-unit-command-queue? c)))))
-                       c))
-                 raw-cmds))
-          (emit-scanner-sweep-deduped! (list chosen-oc-tag) ex ey)))))
+  ;; 12 & 12a: Delegated pre-translation to `lib/tactics/mode-and-stealth-safety.rkt` (`plan-mode-and-stealth-safety!`).
 
   (define idle-combat-units
     (filter (lambda (u)
@@ -21900,7 +20476,8 @@
                     (memv (sc2-raw-unit-command-ability-id c) '(556 558))
                     (not (hash-has-key? emitted-set c))))
     (for ([t (in-list (sc2-raw-unit-command-unit-tags c))])
-      (hash-remove! SC2-DEPOT-TOGGLE-COOLDOWN t)))
+      (hash-remove! SC2-DEPOT-TOGGLE-COOLDOWN t)
+      (clear-mode-stealth-depot-cooldown! SC2-DEFAULT-MODE-STEALTH-STATE t)))
 
   (when (not (null? new-events))
     (set-wire-apm-governor-rolling-events!

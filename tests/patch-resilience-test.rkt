@@ -613,7 +613,12 @@
 (define ws-forbidden-policy-hits
   (for/list ([tok (in-list '("proactive-scan-oc-limit"
                              "case-c-uphill-scan-reserve?"
-                             "low-energy-protoss-caster-near-nexus?"))]
+                             "low-energy-protoss-caster-near-nexus?"
+                             "SC2-SAT-EVAC-LAST-LOOP"
+                             "SC2-SAT-GAS-FILL-LAST-LOOP"
+                             "SC2-ZERO-GAS-RESCUE-ROTATION-IDX"
+                             "low-prio-scout-move-tags"
+                             "SC2-MINE-CLEAR-SINCE-LOOP"))]
              #:when (regexp-match? (regexp-quote tok) ws-src))
     tok))
 (define rt-forbidden-spell-hits
@@ -775,16 +780,49 @@
 (check-true  "pB-multiprong-coordinator-imports-arbiter"
              (and (member "engine/arbiter.rkt" mp-coord-reqs) #t))
 
+;; 9h. Architecture Phase C2 (`#1989`): `lib/plan/worker-saturation-policy.rkt` must exist
+;;     and obey strict L0-only purity (ONLY `L0-MODULES`; zero imports of `bot-runtime.rkt`,
+;;     `sc2-protobuf-ws.rkt`, `priority-macro-brain.rkt`, `econ-ledger.rkt`, `engine/*`,
+;;     `tactics/*`, or `plan/*`).
+(define worker-sat-path (build-path repo-lib-dir "plan" "worker-saturation-policy.rkt"))
+(define worker-sat-exists? (file-exists? worker-sat-path))
+(define worker-sat-reqs (if worker-sat-exists? (extract-local-rkt-requires worker-sat-path) '()))
+(define worker-sat-forbidden-reqs
+  (filter (lambda (r)
+            (or (not (member r L0-MODULES))
+                (member r '("bot-runtime.rkt" "sc2-protobuf-ws.rkt"
+                            "priority-macro-brain.rkt" "econ-ledger.rkt"))
+                (regexp-match? #px"^(?:engine|tactics|plan)/" r)))
+          worker-sat-reqs))
+(check-true  "pC-worker-saturation-policy-exists" worker-sat-exists?)
+(check-equal "pC-worker-saturation-policy-L0-only" worker-sat-forbidden-reqs '())
+
+;; 9i. Architecture Phase C2 (`#1989`): `lib/tactics/mode-and-stealth-safety.rkt` must exist,
+;;     import `engine/arbiter.rkt`, and obey strict L2c purity (zero imports of `bot-runtime.rkt`,
+;;     `sc2-protobuf-ws.rkt`, `priority-macro-brain.rkt`, `econ-ledger.rkt`, or `plan/*`).
+(define mode-stealth-path (build-path repo-lib-dir "tactics" "mode-and-stealth-safety.rkt"))
+(define mode-stealth-exists? (file-exists? mode-stealth-path))
+(define mode-stealth-reqs (if mode-stealth-exists? (extract-local-rkt-requires mode-stealth-path) '()))
+(define mode-stealth-forbidden-reqs
+  (filter (lambda (r)
+            (or (member r '("bot-runtime.rkt" "sc2-protobuf-ws.rkt"
+                            "priority-macro-brain.rkt" "econ-ledger.rkt"))
+                (regexp-match? #px"^plan/" r)))
+          mode-stealth-reqs))
+(check-true  "pC-mode-and-stealth-safety-exists" mode-stealth-exists?)
+(check-equal "pC-mode-and-stealth-safety-L2c-purity" mode-stealth-forbidden-reqs '())
+(check-true  "pC-mode-and-stealth-safety-imports-arbiter"
+             (and (member "engine/arbiter.rkt" mode-stealth-reqs) #t))
+
 ;; -----------------------------------------------------------------------------
-;; 10. Architecture Phase A (`#1784`): Single-Authority & No-Wire-Policy Ratchets
+;; 10. Architecture Phase A/C (`#1784`/`#1989`): Single-Authority & No-Wire-Policy Ratchets
 ;; -----------------------------------------------------------------------------
 (printf "[10/10] Verifying single-authority ratchets, OWM L1 order, & L0 common ownership...\n")
 
-;; 10a. Retroactive `set! raw-cmds` stripping ratchet in `sc2-protobuf-ws.rkt` (<= 3 in Phase A/B -> 0 in Phase C3)
+;; 10a. Retroactive `set! raw-cmds` stripping ratchet in `sc2-protobuf-ws.rkt` (`== 0` in Phase C2!)
 (define ws-retro-strip-hits
   (regexp-match* #px"\\(set!\\s+raw-cmds\\s+\\(filter" ws-src))
-(check-true (format "pA-ws-retroactive-strip-ratchet<=3 (got ~a)" (length ws-retro-strip-hits))
-            (<= (length ws-retro-strip-hits) 3))
+(check-equal "pC-ws-zero-retroactive-raw-cmds-strips" ws-retro-strip-hits '())
 
 ;; 10b. No new ad-hoc `*-handled-tags` or `*-claimed-ht` mutable claim tables in runtime or tactics
 (define tag-claim-allowlist '("wave3-handled-tags" "disruptor-handled-tags" "direct-claimed-ht"))

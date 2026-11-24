@@ -4874,7 +4874,9 @@
 ;; scheduler with dual-resource (mineral + gas) and facility-slot reservations.
 (define (step-priority-macro-brain state
                                    #:enemy-unit-counts [override-enemy-unit-counts #f]
-                                   #:enemy-building-counts [override-enemy-building-counts #f])
+                                   #:enemy-building-counts [override-enemy-building-counts #f]
+                                   #:arbiter-gas-override-count [arbiter-gas-overrides 0]
+                                   #:arbiter-facility-override-count [arbiter-fac-overrides 0])
   (define enemy-u-counts
     (or (and (hash? override-enemy-unit-counts) override-enemy-unit-counts)
         (macro-world-state-enemy-unit-counts state)))
@@ -12495,7 +12497,12 @@
                                        (memq enemy-race '(Protoss Random))
                                        (= total-gas-bldgs 1)
                                        (>= workers 17)
-                                       (< gas 250)))
+                                       (< gas 250))
+                                  (and (exact-integer? arbiter-gas-overrides)
+                                       (>= arbiter-gas-overrides 3)
+                                       (< gas 150)
+                                       (< total-gas-bldgs (* 2 (max 1 active-bases)))
+                                       (not (and bo-raw-goal (<= (pro-bo-goal-min-supply bo-raw-goal) 19)))))
                               (gas-building-cap-ok? total-gas-bldgs active-bases)
                               (>= workers 14)
                               (not early-zero-army-attack?)
@@ -18542,6 +18549,53 @@
                        [utility-score u2-final]
                        [blocking-allowed? blk2-final]))))
 
+  ;; Loop 66 / Architecture Phase C1 (`#1987` Section 2.3): Bounded `+20.0` cross-step
+  ;; arbiter override-feedback boosts (strictly non-disruptive to P0 survival/supply
+  ;; and opening BO step 1-3 invariants).
+  (define arbiter-bo-early-lock?
+    (and bo-raw-goal
+         (<= (pro-bo-goal-min-supply bo-raw-goal) 19)))
+  (define arbiter-p0-safe-window?
+    (and (not supply-lockout-active?)
+         (not emergency-supply-deficit-active?)
+         (not zero-townhall-rebuild-due?)
+         (not early-worker-rush-active?)
+         (not under-early-rush-crisis?)
+         (not arbiter-bo-early-lock?)))
+  (define arbiter-gas-boost-due?
+    (and arbiter-p0-safe-window?
+         (exact-integer? arbiter-gas-overrides)
+         (>= arbiter-gas-overrides 3)
+         (< gas 150)
+         (< total-gas-bldgs (* 2 (max 1 active-bases)))))
+  (define arbiter-primary-prod-sym
+    (case race
+      [(Zerg) 'hatchery]
+      [(Protoss) 'gateway]
+      [else 'barracks]))
+  (define arbiter-fac-boost-due?
+    (and arbiter-p0-safe-window?
+         (exact-integer? arbiter-fac-overrides)
+         (>= arbiter-fac-overrides 4)
+         (>= minerals 400)
+         (not under-attack?)))
+  (define arbiter-adjusted-cands
+    (if (or arbiter-gas-boost-due? arbiter-fac-boost-due?)
+        (for/list ([c (in-list slice15-adjusted-cands)])
+          (define csym (normalize-brain-sym (priority-candidate-id c)))
+          (define u (priority-candidate-utility-score c))
+          (cond
+            [(and arbiter-gas-boost-due?
+                  (> u 0.0)
+                  (eq? csym gas-bldg-sym))
+             (struct-copy priority-candidate c [utility-score (+ u 20.0)])]
+            [(and arbiter-fac-boost-due?
+                  (> u 0.0)
+                  (eq? csym arbiter-primary-prod-sym))
+             (struct-copy priority-candidate c [utility-score (+ u 20.0)])]
+            [else c]))
+        slice15-adjusted-cands))
+
   ;; 5. Filter out candidates that are ALREADY satisfied (e.g. researched/pending upgrades or unique buildings)
   ;;    and deduplicate by canonical candidate `id` (keeping highest utility).
   (define seen-ids (make-hasheq))
@@ -18552,7 +18606,7 @@
               (and (not (hash-has-key? seen-ids cid))
                    (not (step-already-satisfied? cid))
                    (begin (hash-set! seen-ids cid #t) #t)))
-            (sort slice15-adjusted-cands > #:key priority-candidate-utility-score)))
+            (sort arbiter-adjusted-cands > #:key priority-candidate-utility-score)))
 
   (define sorted-cands active-cands)
 

@@ -853,11 +853,17 @@
      (define-values (main-ax main-ay)
        (centroid-of (if (pair? all-mobile-combat) all-mobile-combat combat-units) base-x base-y))
 
-     ;; Check cross-step arbiter feedback hysteresis (`>= 3` threat vetoes in 224f -> 168f cooldown)
+     ;; Check cross-step arbiter feedback hysteresis (`>= 3` threat vetoes OR `>= 3` higher-priority
+     ;; unit claims in `224f` -> bounded `168f` offensive cooldown so multiprong does not oscillate
+     ;; against active home defense or detector escort!)
      (define recent-vetoes
        (arbiter-recent-override-count active-ledger 'multiprong-coordinator 'threat-veto cur-frame
                                       #:window-frames 224))
-     (when (>= recent-vetoes 3)
+     (define recent-claim-preempts
+       (arbiter-recent-override-count active-ledger 'multiprong-coordinator 'unit-claimed-higher-priority cur-frame
+                                      #:window-frames 224))
+     (when (or (>= recent-vetoes 3)
+               (>= recent-claim-preempts 3))
        (set-multiprong-state-def-cooldown-until!
         st (max (multiprong-state-def-cooldown-until st)
                 (+ cur-frame MULTIPRONG-DEF-COOLDOWN-FRAMES))))
