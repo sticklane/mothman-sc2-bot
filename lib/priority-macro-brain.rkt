@@ -2639,7 +2639,8 @@
       [(not root-combat-facility-ready?)
        (case race
          [(Zerg)
-          (add-goal-spec! 'spawning-pool 'survival-supply 'build 1 590.0 'emergency-rush-defense)]
+          (when (= (bldg-count-equivalent total-bldg-counts 'spawning-pool) 0)
+            (add-goal-spec! 'spawning-pool 'survival-supply 'build 1 590.0 'emergency-rush-defense))]
          [(Terran)
           (when (= (bldg-count-equivalent total-bldg-counts 'supply-depot) 0)
             (add-goal-spec! 'supply-depot 'survival-supply 'build 1 595.0 'emergency-rush-defense))
@@ -10667,8 +10668,12 @@
   ;; Keeps `protoss-3rd-nexus-pro-due?` true on safe 2-base midgame (preserving Robo Twilight cap @ 535.0),
   ;; while `exp-u` 595/625 boost yields to `protoss-colossus-core2-due?`, `protoss-midgame-colossus-due?`,
   ;; and `protoss-robo-immortal-due?` so Colossus #1/#2 & Immortal #1 are never starved!
-  (define protoss-3rd-nexus-pro-due?
+  ;; Loop 67 Phase D (`#2020`): Peaceful PvZ 3rd Nexus timing (>= 5:00 / 6720f, >= 36 probes,
+  ;; >= 10 army, >= 3 Gateways, >= 250M, safe, not mass-roach-immortal-lock?, and >= 1 Immortal
+  ;; or >= 5:30 / 7392f) pulls PvZ 3rd Nexus from 6:51 toward 5:05-5:30!
+  (define protoss-pvz-peaceful-3rd-nexus-due?
     (and (eq? race 'Protoss)
+         (eq? enemy-race 'Zerg)
          (= active-bases 2)
          (= total-townhalls-incl-pending 2)
          (not under-attack?)
@@ -10682,12 +10687,35 @@
          (not (and (>= (unit-count-equivalent enemy-u-counts 'mutalisk) 2)
                    (< (unit-count-equivalent unit-counts 'phoenix) 3)))
          (<= enemy-threat-supply (* 1.25 (max 10 army-supply)))
-         (>= frame 6048)
-         (>= workers 34)
-         (>= army-supply 12)
+         (>= frame 6720)
+         (>= workers 36)
+         (>= army-supply 10)
          (>= (bldg-count-equivalent total-bldg-counts 'gateway) 3)
-         ;; Loop 64B (`#1811`/`#1812` Bug #2): Restore >= 275M escrow gate (zero 0M bank locks!).
-         (>= minerals 275)))
+         (>= minerals 250)
+         (or (>= (unit-count-equivalent unit-counts 'immortal) 1)
+             (>= frame 7392))))
+  (define protoss-3rd-nexus-pro-due?
+    (or protoss-pvz-peaceful-3rd-nexus-due?
+        (and (eq? race 'Protoss)
+             (= active-bases 2)
+             (= total-townhalls-incl-pending 2)
+             (not under-attack?)
+             (not under-early-rush-crisis?)
+             (not early-rush-override-active?)
+             (not early-proxy-marauder-rush-active?)
+             (not early-enemy-combat-arrived?)
+             (not protoss-cloaked-air-crisis?)
+             (not protoss-confirmed-banshee-or-sptl?)
+             (not protoss-pvz-mass-roach-immortal-lock?)
+             (not (and (>= (unit-count-equivalent enemy-u-counts 'mutalisk) 2)
+                       (< (unit-count-equivalent unit-counts 'phoenix) 3)))
+             (<= enemy-threat-supply (* 1.25 (max 10 army-supply)))
+             (>= frame 6048)
+             (>= workers 34)
+             (>= army-supply 12)
+             (>= (bldg-count-equivalent total-bldg-counts 'gateway) 3)
+             ;; Loop 64B (`#1811`/`#1812` Bug #2): Restore >= 275M escrow gate (zero 0M bank locks!).
+             (>= minerals 275))))
   ;; L59 + L64B (`#1811`/`#1812`): On safe 2-base Protoss at 5:00-5:30, 3rd Nexus yields to
   ;; Colossus #1/#2, PvP Immortal cadence, armored-ground Immortal counter, Immortal #1 (w/ >=100G),
   ;; AND Robotics Bay #1 in PvP/PvT when Robo is ready + >= 150G (preventing +160s late RoboBay!).
@@ -10703,7 +10731,8 @@
              (>= gas 150))
         (and protoss-robo-immortal-due?
              (or protoss-heavy-armored-ground-immortal-needed?
-                 (and (= (unit-count-equivalent unit-counts 'immortal) 0)
+                 (and (not protoss-pvz-peaceful-3rd-nexus-due?)
+                      (= (unit-count-equivalent unit-counts 'immortal) 0)
                       (>= gas 100))))))
   ;; L49-W2 (`#1173`/`#1174` `#05 PvZ` 74 Probes trapped on 2 mined-out bases 6:32->10:40) +
   ;; L50-W1 (`#1200`/`#1201` Fix 1C `#12 PvP` 73 Probes trapped on 2 bases) +
@@ -10932,13 +10961,29 @@
          (>= frame 9072)
          (>= workers 54)
          (>= army-supply 28)))
+  ;; Loop 67 Phase D (`#2020`): In peaceful ZvP (>= 3:15 / 4368f, >= 28w, safe,
+  ;; enemy-threat <= 0.75 * army), promote 3rd Hatchery (`608.0`, `blk = #t` at >= 180M)
+  ;; once roach-warren is started/ready OR >= 3:30 (4704f) & minerals >= 180!
+  (define zerg-zvp-peaceful-3rd-hatch-ready?
+    (and (eq? race 'Zerg)
+         (eq? enemy-race 'Protoss)
+         zerg-3rd-hatch-pro-due?
+         (not under-attack?)
+         (not under-early-rush-crisis?)
+         (not early-rush-override-active?)
+         (>= frame 4368)
+         (>= workers 28)
+         (<= enemy-threat-supply (* 0.75 army-supply))
+         (or (> (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)
+             (and (>= frame 4704) (>= minerals 180)))))
   ;; L49-W1B + L59 + L59C (`#1566` Fix #3 — `#011 ZeroKill`):
-  ;; In ZvP/ZvT, require `roach-warren` built/in-progress (or early safe `< 2:00` / `2688f`) BEFORE
-  ;; boosting 3rd Hatch (`u=608.0`) above `roach-warren` (`555`) — never starve `roach-warren` until 6:00!
+  ;; In ZvP/ZvT, require `roach-warren` built/in-progress (or early safe `< 2:00` / `2688f`, or peaceful ZvP `>= 3:30` & `>= 180M`)
+  ;; BEFORE boosting 3rd Hatch (`u=608.0`) above `roach-warren` (`555`) — never starve `roach-warren`!
   (define zerg-3rd-hatch-rw-ready-or-early?
     (or (eq? enemy-race 'Zerg)
         (< frame 2688)
-        (> (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)))
+        (> (bldg-count-equivalent total-bldg-counts 'roach-warren) 0)
+        zerg-zvp-peaceful-3rd-hatch-ready?))
   (define zerg-3rd-hatch-pro-u
     (if (and zerg-3rd-hatch-pro-due?
              zerg-3rd-hatch-rw-ready-or-early?
@@ -11590,6 +11635,18 @@
                   (or (> ws-depleting-bases 0) (>= gas 400) (>= minerals 350)))
              (and (>= frame 9408) (>= workers 18)))
          (<= enemy-threat-supply (* 1.35 (max 10 army-supply)))))
+  ;; Loop 67 Phase D (`#2020`): In peaceful TvP (>= 5:15 / 7056f, >= 34w, >= 10 army, >= 2 Rax,
+  ;; not under-attack?, threat <= 0.75 * army), promote 3rd CC (`u = 615.0`, `blk = #t` at >= 225M)
+  ;; ahead of redundant barracks/engineering-bay/stimpack without touching TvT Tank4 locks!
+  (define terran-tvp-3rd-cc-priority-now?
+    (and terran-3rd-cc-due?
+         (eq? enemy-race 'Protoss)
+         (not under-attack?)
+         (>= frame 7056)
+         (>= workers 34)
+         (>= army-supply 10)
+         (>= (bldg-count-equivalent total-bldg-counts 'barracks) 2)
+         (<= enemy-threat-supply (* 0.75 army-supply))))
   ;; L30-P0-2 (`#38 TvT SP` 30m mineral depletion): Guarantee Terran 4th (and late 5th) CC
   ;; expansion past 7:00 on depleting bases or past 8:30 so Terran never mines out on 3 bases!
   ;; L48-W2 (`H2H #02 TvT`): Defer TvT GhostAcademy/Ghost when under-attack, SiegeTank < 2, or
@@ -11688,6 +11745,7 @@
             (>= (unit-count-equivalent unit-counts 'siege-tank) 2)
             (>= workers 40))
        200]
+      [terran-tvp-3rd-cc-priority-now? 225]
       [(>= workers 42) 225]
       [else 250]))
   (define terran-4th-cc-min-floor
@@ -11821,7 +11879,9 @@
         (append
          (if (not root-combat-facility-ready?)
              (case race
-               [(Zerg) '(spawning-pool)]
+               [(Zerg) (if (= (bldg-count-equivalent total-bldg-counts 'spawning-pool) 0)
+                           '(spawning-pool)
+                           '())]
                [(Terran) (if (> (bldg-count-equivalent total-bldg-counts 'supply-depot) 0)
                              '(barracks)
                              '(supply-depot barracks))]
@@ -13781,7 +13841,10 @@
                           (not early-worker-rush-active?)
                           (<= supply-left 4))))
             #t]
-           [(and zvz-early-ling-defense-due? (memq csym '(spawning-pool zergling spine-crawler))) #t]
+           [(and zvz-early-ling-defense-due?
+                 (or (and (eq? csym 'spawning-pool)
+                          (= (bldg-count-equivalent total-bldg-counts 'spawning-pool) 0))
+                     (memq csym '(zergling spine-crawler)))) #t]
            [(and (eq? race 'Zerg)
                  (eq? csym 'infestation-pit)
                  (not (or eff-req-aa?
@@ -14045,9 +14108,15 @@
                       0)
             0)))
 
+  (define all-wanted-cands
+    (filter cand-wanted-now? (append raw-cands extra-cands)))
+  ;; Loop 67B (`#2037`): Genuine gas starvation only (>= 480M AND < 50G); never fire at gas = 140
+  ;; while waiting on a 200G Colossus!
+  (define min-overflow-gas-wait?
+    (and (>= minerals 480)
+         (< gas 50)))
   (define all-adjusted-cands
-    (for/list ([c (in-list (append raw-cands extra-cands))]
-               #:when (cand-wanted-now? c))
+    (for/list ([c (in-list all-wanted-cands)])
       (define sym (priority-candidate-id c))
       (define cat (priority-candidate-category c))
       (define u0 (priority-candidate-utility-score c))
@@ -14267,12 +14336,15 @@
                 (>= workers 20)
                 (< total-townhalls-incl-pending (if (eq? race 'Zerg) 5 6))))
          (define protoss-3rd-army-ok?
-           (or (>= army-supply 14)
+           (or protoss-pvz-peaceful-3rd-nexus-due?
+               (>= army-supply 14)
                (and has-protoss-mid-tech? (>= workers 40) (>= army-supply 10))))
          (define protoss-3rd-nexus-pro-boost-now?
            (and protoss-3rd-nexus-pro-due?
                 (not protoss-3rd-nexus-yields-to-robo?)
-                (or (>= minerals 275) (>= army-supply 20))))
+                (or protoss-pvz-peaceful-3rd-nexus-due?
+                    (>= minerals 275)
+                    (>= army-supply 20))))
          (define premature-3rd-base-starving-army?
            (and (not terran-contained-breakout-cc?)
                 (not depletion-or-mirror-exp?)
@@ -14386,7 +14458,7 @@
                     (and step-post-t3-tech-expand-due? (>= minerals (if (eq? race 'Zerg) 150 200)))
                     (and zerg-3rd-hatch-pro-due?
                          zerg-3rd-hatch-rw-ready-or-early?
-                         (>= minerals 185))
+                         (>= minerals (if zerg-zvp-peaceful-3rd-hatch-ready? 180 185)))
                     (and zerg-4th-hatch-pro-due?
                          (>= minerals 200))
                     (and terran-3rd-cc-due?
@@ -14396,8 +14468,8 @@
                     (and terran-4th-cc-due?
                          (>= minerals terran-4th-cc-min-floor))
                     (and protoss-3rd-nexus-pro-boost-now?
-                         ;; Loop 64B (`#1811`/`#1812` Bug #2): Restore >= 275M escrow floor!
-                         (>= minerals 275))
+                         ;; Loop 64B (`#1811`/`#1812` Bug #2) + L67 Phase D (`#2020`): >= 250M peaceful PvZ, >= 275M otherwise.
+                         (>= minerals (if protoss-pvz-peaceful-3rd-nexus-due? 250 275)))
                     (and protoss-3rd-nexus-oversat-urgent? (or (>= minerals 125) (> ws-depleting-bases 0)))
                     (can-fund-within-frames?
                      minerals gas (priority-candidate-min-cost c) (priority-candidate-gas-cost c)
@@ -14457,6 +14529,7 @@
                      [terran-3rd-cc-mined-out-air-rescue? 960.0]
                      [terran-3rd-cc-urgent-rescue-now? 920.0]
                      [terran-tvt-3rd-cc-priority-now? 675.0]
+                     [terran-tvp-3rd-cc-priority-now? 615.0]
                      ;; Loop 64B (`#1811`/`#1812` Bug #3): Cap 5:00-6:30 (< 8736f) 3rd CC at 560.0 (below scv@575)!
                      [(< frame 8736) 560.0]
                      [else 620.0])
@@ -14465,11 +14538,15 @@
               (max (if (or (>= workers 58) (> ws-depleting-bases 0) (>= gas 500) (>= frame 12096)) 915.0 705.0)
                    plan-weight u0)]
              [protoss-3rd-nexus-oversat-urgent? (max 970.0 plan-weight u0)]
-             ;; Loop 64B (`#1811`/`#1812` Bug #2): Cap 3rd Nexus at 555.0 while saving (<400M, strictly
-             ;; below probe@575, immortal@585, stalker@586, robobay@590); once >=400M affordable, drop at
-             ;; 587.0 (still below robobay@590 & pvz-immortal@588, ahead of stalker@586 so 450M drops 3rd!).
+             ;; Loop 64B (`#1811`/`#1812` Bug #2) + L67 Phase D (`#2020`): Cap PvT/PvP 3rd Nexus at 555.0
+             ;; while saving (<400M) / 587.0 (>=400M); in peaceful PvZ (>=5:00, >=36w, >=10 army, >=3 GW,
+             ;; >=250M, >=1 Immortal or >=5:30), promote to 595.0 ahead of redundant gateway/immortal loops!
              [protoss-3rd-nexus-pro-boost-now?
-              (max (if (>= minerals 400) 587.0 555.0) plan-weight u0)]
+              (max (cond
+                     [protoss-pvz-peaceful-3rd-nexus-due? 595.0]
+                     [(>= minerals 400) 587.0]
+                     [else 555.0])
+                   plan-weight u0)]
              [natural-exp-window? (max 484.0 plan-weight u0)]
              [terran-contained-breakout-cc? (max 484.0 plan-weight u0)]
              [(and depletion-or-mirror-exp? exp-ok?) (max 484.0 plan-weight u0)]
@@ -14997,6 +15074,8 @@
            (and (hash? open-facility-slots)
                 (eq? cat 'combat-unit)
                 (memq sym '(zergling marine zealot hellion))
+                (not (and min-overflow-gas-wait?
+                          (memq sym '(zealot marine zergling))))
                 (not under-attack?)
                 (<= enemy-threat-supply 0)
                 (>= gas 80)
@@ -17546,6 +17625,7 @@
                      [terran-3rd-cc-mined-out-air-rescue? 960.0]
                      [terran-3rd-cc-urgent-rescue? 920.0]
                      [terran-tvt-3rd-cc-priority-now? 675.0]
+                     [terran-tvp-3rd-cc-priority-now? 615.0]
                      [(< frame 8736) 560.0]
                      [else 620.0]))]
            [(and terran-4th-cc-due? (eq? nsym 'command-center))
@@ -17597,7 +17677,11 @@
            [zerg-anti-bio-baneling-nest-post? (max u 506.0)]
            [(and terran-midgame-rax-post? (= (bldg-count-equivalent total-bldg-counts 'barracks) 1))
             (max u 556.0)]
-           [(and protoss-3rd-nexus-pro-due? (eq? nsym 'nexus)) (max u 555.0)]
+           [(and protoss-3rd-nexus-pro-due? (eq? nsym 'nexus))
+            (max u (if (and protoss-pvz-peaceful-3rd-nexus-due?
+                            (not protoss-3rd-nexus-yields-to-robo?))
+                       595.0
+                       555.0))]
            [(and protoss-root-cyber-due?
                  (memq nsym (if (or pvz-first-zealot-wall-due? pvz-early-ling-zealot-pump?)
                                 '(gateway assimilator)
@@ -18207,7 +18291,7 @@
            [(and zerg-3rd-hatch-pro-due?
                  zerg-3rd-hatch-rw-ready-or-early?
                  (eq? nsym 'hatchery)
-                 (>= minerals 185)) #t]
+                 (>= minerals (if zerg-zvp-peaceful-3rd-hatch-ready? 180 185))) #t]
            [(and zerg-4th-hatch-pro-due?
                  (eq? nsym 'hatchery)
                  (>= minerals 200)) #t]
@@ -18215,7 +18299,7 @@
                  (not zerg-late-low-min-high-gas-3rd-hatch-due?)
                  (eq? nsym 'hatchery)
                  (or (not zerg-3rd-hatch-rw-ready-or-early?)
-                     (< minerals 185))) #f]
+                     (< minerals (if zerg-zvp-peaceful-3rd-hatch-ready? 180 185)))) #f]
            [(and step-post-t3-tech-expand-due?
                  (eq? nsym race-expand-sym)
                  (>= minerals (if (eq? race 'Zerg) 150 200))
@@ -18229,7 +18313,7 @@
            [(and protoss-3rd-nexus-pro-due?
                  (eq? nsym 'nexus)
                  (not protoss-3rd-nexus-yields-to-robo?)
-                 (>= minerals 275))
+                 (>= minerals (if protoss-pvz-peaceful-3rd-nexus-due? 250 275)))
             #t]
            [(and (eq? race 'Protoss)
                  (= active-bases 2)
@@ -18237,7 +18321,7 @@
                  (not protoss-3rd-nexus-oversat-urgent?)
                  (eq? nsym 'nexus)
                  (or (and protoss-3rd-nexus-pro-due? protoss-3rd-nexus-yields-to-robo?)
-                     (< minerals 275)))
+                     (< minerals (if protoss-pvz-peaceful-3rd-nexus-due? 250 275))))
             #f]
            [(and terran-3rd-cc-due?
                  (eq? nsym 'command-center)
@@ -18638,6 +18722,9 @@
   (define reserved-cand #f)
   (define reserved-pure-gas-starved? #f)
   (define reserved-gas-blocked? #f)
+  (define reserved-emergency-gas-near-ready? #f)
+  (define protected-core-gas-syms
+    '(colossus siege-tank robotics-bay robotics-facility spire lair immortal warp-prism))
   (define decision-entries '())
   (define escrowed-entries '())
 
@@ -19163,7 +19250,11 @@
       (or (high-bank-unlock-allowed? minerals 600 rem-sup reserved-cand)
           (and (high-bank-unlock-allowed? minerals 450 rem-sup reserved-cand)
                (or (not reserved-cand)
-                   (not (eq? (priority-candidate-category reserved-cand) 'expansion))))))
+                   (and (not (eq? (priority-candidate-category reserved-cand) 'expansion))
+                        (not (and (< minerals 480)
+                                  reserved-gas-blocked?
+                                  (memq (normalize-brain-sym (priority-candidate-id reserved-cand))
+                                        protected-core-gas-syms))))))))
 
     ;; W4-P0-4a + W5-P0-4-belief: Never let Factory-only mineral escrow starve early Terran Marines or SCVs
     (define factory-only-min-escrow?
@@ -19554,6 +19645,9 @@
                                                 (eq? rid 'command-center)
                                                 (or (> ws-depleting-bases 0) (>= gas 500)))
                                            150]
+                                          [(and zerg-zvp-peaceful-3rd-hatch-ready?
+                                                (eq? rid 'hatchery))
+                                           180]
                                           [else 200]))))
                   (not (emergency-cloak-det-boost-info rid))
                   (not (memq rid '(engineering-bay missile-turret forge photon-cannon
@@ -19904,10 +19998,10 @@
               rem-min rem-gas m-cost g-cost
               mineral-harvesters gas-harvesters
               workers ready-bldg-counts race
-              #:frames (if (or (and zerg-3rd-hatch-pro-due? zerg-3rd-hatch-rw-ready-or-early? (>= minerals 185))
+              #:frames (if (or (and zerg-3rd-hatch-pro-due? zerg-3rd-hatch-rw-ready-or-early? (>= minerals (if zerg-zvp-peaceful-3rd-hatch-ready? 180 185)))
                                terran-3rd-cc-due?
                                terran-4th-cc-due?
-                               (and protoss-3rd-nexus-pro-due? (>= minerals 275))
+                               (and protoss-3rd-nexus-pro-due? (>= minerals (if protoss-pvz-peaceful-3rd-nexus-due? 250 275)))
                                protoss-3rd-nexus-oversat-urgent?
                                step-post-t3-tech-expand-due?)
                            320
@@ -19937,31 +20031,54 @@
        (define escrowed-now? #f)
        (when (and tech-cap-ok? unit-cap-ok? prereq-ok? slot-ok? worker-slot-escrow-ok? blk-ok? supply-ok?
                   rem-escrow-plausible?
+                  (not (and (eq? csym 'spawning-pool)
+                            (> (bldg-count-equivalent total-bldg-counts 'spawning-pool) 0)))
                   (not unbuildable-immortal-escrow?)
                   (not skip-exp-behind-gas-starved?)
                   (not high-bank-skip-tech-escrow?)
                   (not static-def-skip-escrow?)
                   (or (< rem-min m-cost) (< rem-gas g-cost)))
-         ;; W2-P1-1a + W5-P0-4-belief + W8-P0-3-belief (#29): Whenever a gas-costing item lacks gas AND
-         ;; either has no gas income, is >= 30G short on gas, OR already has >= m-cost + 150M banked,
-         ;; lock gas-floor ONLY (`min-escrow-amt = 0`) so 0-gas production/CCs never mineral-lock!
+         ;; W2-P1-1a + W5-P0-4-belief + W8-P0-3-belief (#29) + L67B (`#2037`):
+         ;; Protect core tech/power units (`colossus`, `siege-tank`, `robotics-bay`, `robotics-facility`,
+         ;; `immortal`, `warp-prism`, `spire`, `lair`, urgent AA `viking-fighter`/`stalker`) from losing
+         ;; mineral escrow while gas is close; keep `gas-deficit-min-overflow?` strictly INSIDE the
+         ;; protected-tech guard and gated on genuine gas starvation (`< g-cost - 35`, `>= m-cost + 250`,
+         ;; `>= 480M`)!
+         (define gas-deficit-emergency-near-ready?
+           (and has-gas-income?
+                (>= rem-gas (- g-cost 15))
+                (or (and (emergency-cloak-det-boost-info csym) #t)
+                    (and (eq? csym 'viking-fighter) terran-det-viking-due? terran-enemy-banshee-starport-tl?)
+                    (and (eq? csym 'spire) zerg-cap-air-spire-due?)
+                    (and (eq? csym 'lair) zerg-air-lair-remorph-due?)
+                    (and (eq? csym 'stalker) protoss-urgent-aa-reaper-stalker-due?))))
+         (define gas-deficit-min-overflow?
+           (and (> g-cost 0)
+                (< rem-gas (- g-cost 35))
+                (>= rem-min (+ m-cost 250))
+                (>= minerals 480)
+                (not gas-deficit-emergency-near-ready?)))
          (define pure-gas-starved?
            (and (> g-cost 0)
                 (< rem-gas g-cost)
                 (not (and has-gas-income?
-                          (or (and (eq? csym 'colossus) protoss-colossus-core2-due? (>= rem-gas 100))
+                          (or (and (eq? csym 'colossus) (>= rem-gas 100))
+                              (and (eq? csym 'immortal) (>= rem-gas 50))
+                              (and (eq? csym 'robotics-facility) (>= rem-gas 50))
+                              (eq? csym 'warp-prism)
                               (and (eq? csym 'siege-tank)
                                    terran-tvt-tank4-lock-due?
                                    (< (unit-count-equivalent unit-counts 'siege-tank) 2)
                                    (>= rem-gas 95))
                               (and (eq? csym 'viking-fighter) terran-det-viking-due? terran-enemy-banshee-starport-tl? (>= rem-gas 25))
-                              (and (eq? csym 'robotics-bay) protoss-midgame-robo-bay-due? (>= rem-gas 125))
+                              (and (eq? csym 'robotics-bay) (>= rem-gas 100))
                               (and (eq? csym 'spire) zerg-cap-air-spire-due? (>= rem-gas (max 100 (- spire-gas 60))))
                               (and (eq? csym 'lair) zerg-air-lair-remorph-due? (>= rem-gas 60))
                               (and (eq? csym 'stalker) protoss-urgent-aa-reaper-stalker-due?
                                    (or (>= rem-gas 25)
                                        (and protoss-confirmed-banshee-or-sptl? (>= rem-gas 10)))))))
-                (or (not has-gas-income?)
+                (or gas-deficit-min-overflow?
+                    (not has-gas-income?)
                     (<= rem-gas (- g-cost 30))
                     (and (eq? csym 'corruptor) (>= minerals 350))
                     (>= rem-min (+ m-cost 150)))))
@@ -19982,7 +20099,9 @@
            (when pure-gas-starved?
              (set! reserved-pure-gas-starved? #t))
            (when (and (> g-cost 0) (< rem-gas g-cost))
-             (set! reserved-gas-blocked? #t))))
+             (set! reserved-gas-blocked? #t))
+           (when gas-deficit-emergency-near-ready?
+             (set! reserved-emergency-gas-near-ready? #t))))
 
        (define outcome-sym
          (cond
@@ -20002,12 +20121,28 @@
                                             app-min-floor app-gas-floor blocked-by-id)
                    decision-entries))]))
 
-  ;; High-bank deadlock guard (L20-P0-2: lower non-expansion/non-supply floor release 600M -> 460M!)
+  ;; High-bank deadlock guard (L20-P0-2: lower non-expansion/non-supply floor release 600M -> 460M;
+  ;; L67B `#2037`: release min-floor -> 0 for gas-blocked non-expansion, non-protected-core-tech
+  ;; reserves only under genuine gas starvation: `< g-cost - 35` & `>= max(480, m-cost + 250)`!)
+  (define high-bank-gas-blocked-release?
+    (and reserved-gas-blocked?
+         reserved-cand
+         (not reserved-emergency-gas-near-ready?)
+         (not (eq? (priority-candidate-category reserved-cand) 'expansion))
+         (not (eq? (priority-candidate-category reserved-cand) 'supply))
+         (let ([rid (normalize-brain-sym (priority-candidate-id reserved-cand))]
+               [rg  (priority-candidate-gas-cost reserved-cand)]
+               [rm  (priority-candidate-min-cost reserved-cand)])
+           (and (not (memq rid protected-core-gas-syms))
+                (< gas (- rg 35))
+                (>= minerals (max 480 (+ rm 250)))
+                (high-bank-unlock-allowed? minerals 480 supply-left reserved-cand)))))
   (define high-bank-release?
     (or (high-bank-unlock-allowed? minerals 600 supply-left reserved-cand)
         (and (high-bank-unlock-allowed? minerals 460 supply-left reserved-cand)
              (or (not reserved-cand)
-                 (not (eq? (priority-candidate-category reserved-cand) 'expansion))))))
+                 (not (eq? (priority-candidate-category reserved-cand) 'expansion))))
+        high-bank-gas-blocked-release?))
   (when high-bank-release?
     (set! min-floor 0)
     (when (>= gas 400)
@@ -20409,11 +20544,15 @@
       [supply-preempt-saving? 100]
       [fallback-saving?
        (let ([fg-cost (sc2-gas-cost raw-saving-id 0)]
-             [fm-cost (sc2-min-cost raw-saving-id 0)])
+             [fm-cost (sc2-min-cost raw-saving-id 0)]
+             [fnorm   (normalize-brain-sym raw-saving-id)])
          (if (and (> fg-cost 0)
                   (< gas fg-cost)
                   (or (not has-gas-income?)
-                      (<= gas (- fg-cost 30))))
+                      (and (not (memq fnorm protected-core-gas-syms))
+                           (or (<= gas (- fg-cost 30))
+                               (and (< gas (- fg-cost 35))
+                                    (>= minerals (max 480 (+ fm-cost 250))))))))
              min-floor
              (max min-floor
                   (if (< minerals fm-cost) fm-cost 0))))]

@@ -31,7 +31,9 @@
          json
          "../lib/sc2-common.rkt"
          "../lib/bot-runtime.rkt"
-         "../lib/sc2-protobuf-ws.rkt")
+         "../lib/sc2-protobuf-ws.rkt"
+         (only-in "../lib/engine/arbiter.rkt"
+                  arbiter-telemetry-summary))
 
 (provide
  infer-bot-race-and-posture
@@ -44,8 +46,64 @@
  connect-sc2-ws-with-retry
  start-embedded-sc2-protobuf-server!
  spawn-local-headless-sc2!
+ format-scbot-arbiter-summary-line
  run-racket-sc2-match
  run-racket-sc2-cli)
+
+;; Architecture Phase D (Loop 67 Contract 1): Deterministic single-line `[SCBOT_ARBITER]`
+;; end-of-game telemetry summary parsed by `tools/post-bench-pipeline.py`.
+(define (format-scbot-arbiter-summary-line arb-sum)
+  (define h (if (hash? arb-sum) arb-sum (hasheq)))
+  (define total
+    (let ([v (hash-ref h 'total-overrides 0)])
+      (if (and (exact-integer? v) (>= v 0)) v 0)))
+  (define by-r-raw (hash-ref h 'by-reason (hasheq)))
+  (define by-r-pairs
+    (if (hash? by-r-raw)
+        (sort (for/list ([(k v) (in-hash by-r-raw)]
+                         #:when (and (exact-integer? v) (> v 0)))
+                (cons k v))
+              (lambda (a b)
+                (if (= (cdr a) (cdr b))
+                    (string<? (format "~a" (car a)) (format "~a" (car b)))
+                    (> (cdr a) (cdr b)))))
+        '()))
+  (define by-r-str
+    (if (null? by-r-pairs)
+        "none"
+        (string-join
+         (for/list ([kv (in-list by-r-pairs)])
+           (format "~a:~a" (car kv) (cdr kv)))
+         ",")))
+  (define top-raw (hash-ref h 'top-pairs '()))
+  (define top-sorted
+    (if (list? top-raw)
+        (let* ([valid
+                (filter (lambda (it)
+                          (and (list? it)
+                               (= (length it) 3)
+                               (exact-integer? (third it))
+                               (> (third it) 0)))
+                        top-raw)]
+               [ordered
+                (sort valid
+                      (lambda (a b)
+                        (cond
+                          [(not (= (third a) (third b))) (> (third a) (third b))]
+                          [(not (equal? (first a) (first b)))
+                           (string<? (format "~a" (first a)) (format "~a" (first b)))]
+                          [else
+                           (string<? (format "~a" (second a)) (format "~a" (second b)))])))])
+          (take ordered (min 8 (length ordered))))
+        '()))
+  (define top-str
+    (if (null? top-sorted)
+        "none"
+        (string-join
+         (for/list ([it (in-list top-sorted)])
+           (format "~a:~a:~a" (first it) (second it) (third it)))
+         ",")))
+  (format "[SCBOT_ARBITER] total=~a by_reason=~a top=~a" total by-r-str top-str))
 
 (define (infer-bot-race-and-posture bot-rkt-path [bot-name-hint #f])
   (define name-up
@@ -1061,6 +1119,8 @@
                      (define step-arbiter-ledger (hash-ref step-res 'arbiter-ledger #f))
                      (define step-gas-boost? (hash-ref step-res 'gas-starvation-boost? #f))
                      (define step-apm-backoff? (hash-ref step-res 'apm-pressure-backoff? #f))
+                     (define step-min-override-pressure?
+                       (hash-ref step-res 'mineral-override-pressure? #f))
                      (define action-cmds
                        (translate-bot-actions->sc2-raw-commands
                         bot-actions
@@ -1073,7 +1133,8 @@
                         #:reserved-aabbs step-reserved-aabbs
                         #:game-info game-info
                         #:watchdog-expand-ring-syms step-watchdog-expand-ring-syms
-                        #:arbiter-ledger step-arbiter-ledger))
+                        #:arbiter-ledger step-arbiter-ledger
+                        #:mineral-override-pressure? step-min-override-pressure?))
                      (define sat-cmds
                        (saturate-workers-and-gas-commands
                         obs
@@ -1082,7 +1143,8 @@
                         #:reserved-aabbs step-reserved-aabbs
                         #:game-info game-info
                         #:gas-starvation-boost? step-gas-boost?
-                        #:apm-pressure-backoff? step-apm-backoff?))
+                        #:apm-pressure-backoff? step-apm-backoff?
+                        #:mineral-override-pressure? step-min-override-pressure?))
                      (define raw-cmds0 (append split-cmds action-cmds sat-cmds))
                      (define rcmds
                        (govern-sc2-wire-actions! wire-apm-gov raw-cmds0 last-game-loop obs))
@@ -1191,6 +1253,11 @@
                  (hash-ref apm-drop-tier 'P3 0)
                  (hash-ref apm-drop-tier 'P4 0)
                  top-str)
+        (flush-output (current-error-port)))
+
+      (with-handlers ([exn:fail? void])
+        (define arb-sum (arbiter-telemetry-summary (rt-arbiter-ledger runtime)))
+        (fprintf (current-error-port) "~a\n" (format-scbot-arbiter-summary-line arb-sum))
         (flush-output (current-error-port)))
 
       (define summary

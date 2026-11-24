@@ -42,6 +42,7 @@
          "../lib/sc2-protobuf-ws.rkt")
 
 (define-runtime-path repo-lib-dir "../lib")
+(define-runtime-path repo-sim-dir "../sim")
 
 (define passed 0)
 (define failed 0)
@@ -918,6 +919,15 @@
 (check-equal "pB-runtime-retires-live-phase6-concave-tokens"
              (find-live-concave-token-emits rt-src)
              '())
+
+;; 10f. Architecture Phase D (`#2023`, Spec Guard `10d`): `sim/racket-sc2-ladder-main.rkt`
+;;      must emit the structured `[SCBOT_ARBITER]` end-of-game telemetry summary line!
+(define ladder-main-src (file->string (build-path repo-sim-dir "racket-sc2-ladder-main.rkt")))
+(check-true "pD-ladder-main-emits-scbot-arbiter-telemetry"
+            (and (regexp-match? #px"\\[SCBOT_ARBITER\\]" ladder-main-src)
+                 (regexp-match? #px"format-scbot-arbiter-summary-line" ladder-main-src)
+                 (regexp-match? #px"arbiter-telemetry-summary" ladder-main-src)
+                 #t))
 
 (printf "-----------------------------------------------------------------\n")
 (printf "Patch-Resilience & ResponseData Checks: ~a/~a passed (~a failed)\n"

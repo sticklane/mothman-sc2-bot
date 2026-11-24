@@ -6,6 +6,7 @@ Runs all independent post-bench steps in parallel (DAG-scheduled):
   Stage A (parallel):
     - tools/score-replay-batch.rkt -> <out_root>/<label>_score.json
     - s2protocol full-run ability/feature audit -> <out_root>/loop/<label>/s2_features.json
+    - bot log telemetry rollup ([APM_CAP_DROPS], [SCBOT_ARBITER], [SCBOT_BUILD], health)
   Stage B (after score, parallel):
     - tools/replay-db.py ingest-runs -> tools/replay-db.py extract-raw (chained on <replay_db>)
     - tools/iteration-loop/compare-vs-pro.py -> <out_root>/loop/<label>/compare_vs_pro.json
@@ -329,6 +330,325 @@ def run_s2_features_audit(
     }
 
 
+_RE_BUILD_VER = re.compile(r"\bversion=([^\s]+)")
+_RE_BUILD_MODE = re.compile(r"\bmode=([^\s]+)")
+_RE_APM_KV = re.compile(r"\b(total|tok|cap|P0|P1|P2|P3|P4)=(\d+)")
+_RE_APM_TOP = re.compile(r"\btop=([^\s]+)")
+_RE_ARB_TOTAL = re.compile(r"\btotal=(\d+)")
+_RE_ARB_BY_REASON = re.compile(r"\bby_reason=([^\s]+)")
+_RE_ARB_TOP = re.compile(r"\btop=([^\s]+)")
+_RE_ERR_KV = re.compile(r"\b([A-Za-z0-9_.-]+)=(\d+)")
+_RE_MOTHMAN_LOG_SUFFIX = re.compile(r"_Mothman-[A-Za-z0-9-]+(?:-SP)?\.log$")
+_KEY_APM_ABILITIES = ("3666", "3685", "558")
+_CRASH_TOKENS = ("error", "exception", "contract", "crash", "context...")
+
+
+def _resolve_log_path(run_dir: Path, raw_path: str | None) -> Path | None:
+    if not raw_path:
+        return None
+    p = Path(raw_path)
+    if p.is_file():
+        return p
+    rel = run_dir / raw_path
+    if rel.is_file():
+        return rel
+    in_logs = run_dir / "logs" / p.name
+    if in_logs.is_file():
+        return in_logs
+    return None
+
+
+def _log_has_mothman_marker(path: Path) -> bool:
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as fh:
+            for i, ln in enumerate(fh):
+                if (
+                    "[SCBOT_BUILD]" in ln
+                    or "[APM_CAP_DROPS]" in ln
+                    or "[SCBOT_ARBITER]" in ln
+                    or "[SCBOT_PRIORITY]" in ln
+                ):
+                    return True
+                if i >= 64:
+                    break
+            # Check tail for end-of-game summary markers if header didn't have one
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - 8192))
+            tail = fh.read()
+            return "[APM_CAP_DROPS]" in tail or "[SCBOT_ARBITER]" in tail or "[SCBOT_BUILD]" in tail
+    except Exception:
+        return False
+
+
+def _discover_mothman_bot_logs(run_dir: Path) -> list[Path]:
+    """Discover Mothman bot logs for both arena logs/ and synthetic match_*/bot*.log layouts."""
+    seen: set[Path] = set()
+    out: list[Path] = []
+
+    def _add(p: Path | None) -> None:
+        if p is None or not p.is_file():
+            return
+        rp = p.resolve()
+        if rp not in seen:
+            seen.add(rp)
+            out.append(p)
+
+    # 1) Prefer results.json explicit log pointers when available (exact Mothman P1 + selfplay P2)
+    results_json = run_dir / "results.json"
+    if results_json.is_file():
+        try:
+            rj = json.loads(results_json.read_text(encoding="utf-8"))
+            matches = rj.get("matches") if isinstance(rj, dict) else rj
+            if isinstance(matches, list):
+                for m in matches:
+                    if not isinstance(m, dict):
+                        continue
+                    _add(_resolve_log_path(run_dir, m.get("our_log_path")))
+                    b2 = str(m.get("bot2") or "")
+                    if m.get("cohort") == "self" or m.get("is_selfplay") or b2.startswith("Mothman"):
+                        _add(_resolve_log_path(run_dir, m.get("opp_log_path")))
+        except Exception:
+            pass
+
+    # 2) Also support synthetic match_*/bot1.log (and match_*/bot2.log for Mothman selfplay)
+    for mdir in sorted(run_dir.glob("match_*")):
+        if not mdir.is_dir():
+            continue
+        b1 = mdir / "bot1.log"
+        if b1.is_file():
+            _add(b1)
+        b2 = mdir / "bot2.log"
+        if b2.is_file() and _log_has_mothman_marker(b2):
+            _add(b2)
+
+    # 3) Fallback to logs/*_Mothman-*.log when results.json and match_* are absent
+    if not out:
+        logs_dir = run_dir / "logs"
+        if logs_dir.is_dir():
+            for lp in sorted(logs_dir.glob("*.log")):
+                if _RE_MOTHMAN_LOG_SUFFIX.search(lp.name):
+                    _add(lp)
+
+    return out
+
+
+def _parse_one_bot_log(log_path: Path) -> dict[str, Any]:
+    res: dict[str, Any] = {
+        "log": str(log_path),
+        "ok": False,
+        "error": None,
+        "build_versions": collections.Counter(),
+        "build_modes": collections.Counter(),
+        "build_logged": False,
+        "apm_logged": False,
+        "apm_total": 0,
+        "apm_tok": 0,
+        "apm_cap": 0,
+        "apm_priorities": {f"P{i}": 0 for i in range(5)},
+        "apm_abilities": collections.Counter(),
+        "arbiter_logged": False,
+        "arbiter_total": 0,
+        "arbiter_by_reason": collections.Counter(),
+        "arbiter_top_pairs": collections.Counter(),
+        "arbiter_errors": 0,
+        "wire_rejects": 0,
+        "crash_lines": 0,
+        "crash_samples": [],
+    }
+    try:
+        with log_path.open("r", encoding="utf-8", errors="ignore") as fh:
+            for raw_ln in fh:
+                ln = raw_ln.strip()
+                if not ln:
+                    continue
+                if ln.startswith("[SCBOT_BUILD]"):
+                    res["build_logged"] = True
+                    mv = _RE_BUILD_VER.search(ln)
+                    if mv:
+                        res["build_versions"][mv.group(1)] += 1
+                    mm = _RE_BUILD_MODE.search(ln)
+                    if mm:
+                        res["build_modes"][mm.group(1)] += 1
+                elif ln.startswith("[APM_CAP_DROPS]"):
+                    res["apm_logged"] = True
+                    for k, v_s in _RE_APM_KV.findall(ln):
+                        v = int(v_s)
+                        if k == "total":
+                            res["apm_total"] += v
+                        elif k == "tok":
+                            res["apm_tok"] += v
+                        elif k == "cap":
+                            res["apm_cap"] += v
+                        else:
+                            res["apm_priorities"][k] += v
+                    mt = _RE_APM_TOP.search(ln)
+                    if mt:
+                        top_str = mt.group(1)
+                        if top_str and top_str.lower() != "none":
+                            for item in top_str.split(","):
+                                if ":" not in item:
+                                    continue
+                                ab_k, ab_v = item.rsplit(":", 1)
+                                if ab_k and ab_v.isdigit():
+                                    res["apm_abilities"][ab_k] += int(ab_v)
+                elif ln.startswith("[SCBOT_ARBITER]"):
+                    res["arbiter_logged"] = True
+                    mtot = _RE_ARB_TOTAL.search(ln)
+                    if mtot:
+                        res["arbiter_total"] += int(mtot.group(1))
+                    mbr = _RE_ARB_BY_REASON.search(ln)
+                    if mbr:
+                        br_str = mbr.group(1)
+                        if br_str and br_str.lower() != "none":
+                            for item in br_str.split(","):
+                                if ":" not in item:
+                                    continue
+                                rk, rv = item.rsplit(":", 1)
+                                if rk and rv.isdigit():
+                                    res["arbiter_by_reason"][rk] += int(rv)
+                    mtop = _RE_ARB_TOP.search(ln)
+                    if mtop:
+                        tp_str = mtop.group(1)
+                        if tp_str and tp_str.lower() != "none":
+                            for item in tp_str.split(","):
+                                if ":" not in item:
+                                    continue
+                                pk, pv = item.rsplit(":", 1)
+                                if pk and pv.isdigit():
+                                    res["arbiter_top_pairs"][pk] += int(pv)
+                elif ln.startswith("[SCBOT_ACTION_ERR]"):
+                    for ek, ev_s in _RE_ERR_KV.findall(ln):
+                        if ek in ("f", "total", "loop"):
+                            continue
+                        ev = int(ev_s)
+                        if ev > 0:
+                            res["wire_rejects"] += ev
+                elif not ln.startswith("[SCBOT_") and not ln.startswith("{") and not ln.startswith("Tag:"):
+                    low = ln.lower()
+                    if any(tok in low for tok in _CRASH_TOKENS):
+                        res["crash_lines"] += 1
+                        if len(res["crash_samples"]) < 3:
+                            res["crash_samples"].append(ln[:160])
+                        if "arbiter" in low:
+                            res["arbiter_errors"] += 1
+        res["ok"] = True
+    except Exception as exc:
+        res["error"] = f"{type(exc).__name__}: {exc}"
+    return res
+
+
+def parse_run_bot_logs(run_dir: Path, *, workers: int = 8) -> dict[str, Any]:
+    """Parse Mothman bot logs in parallel for [APM_CAP_DROPS], [SCBOT_ARBITER], [SCBOT_BUILD], and health."""
+    t0 = time.monotonic()
+    log_paths = _discover_mothman_bot_logs(run_dir)
+    rows: list[dict[str, Any]] = []
+    if log_paths:
+        max_w = max(1, min(workers, len(log_paths)))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_w) as pool:
+            rows = list(pool.map(_parse_one_bot_log, log_paths))
+
+    build_versions: collections.Counter[str] = collections.Counter()
+    build_modes: collections.Counter[str] = collections.Counter()
+    build_games = 0
+
+    apm_games = 0
+    apm_total = 0
+    apm_tok = 0
+    apm_cap = 0
+    apm_priorities = {f"P{i}": 0 for i in range(5)}
+    apm_abilities: collections.Counter[str] = collections.Counter()
+
+    arb_games = 0
+    arb_total = 0
+    arb_by_reason: collections.Counter[str] = collections.Counter()
+    arb_top_pairs: collections.Counter[str] = collections.Counter()
+    arb_errors = 0
+
+    wire_rejects = 0
+    crash_games = 0
+    crash_lines = 0
+    crash_samples: list[str] = []
+    ok_cnt = 0
+    err_cnt = 0
+
+    for row in rows:
+        if not row["ok"]:
+            err_cnt += 1
+            continue
+        ok_cnt += 1
+        if row["build_logged"]:
+            build_games += 1
+            build_versions.update(row["build_versions"])
+            build_modes.update(row["build_modes"])
+        if row["apm_logged"]:
+            apm_games += 1
+            apm_total += row["apm_total"]
+            apm_tok += row["apm_tok"]
+            apm_cap += row["apm_cap"]
+            for pk in apm_priorities:
+                apm_priorities[pk] += row["apm_priorities"][pk]
+            apm_abilities.update(row["apm_abilities"])
+        if row["arbiter_logged"]:
+            arb_games += 1
+            arb_total += row["arbiter_total"]
+            arb_by_reason.update(row["arbiter_by_reason"])
+            arb_top_pairs.update(row["arbiter_top_pairs"])
+        arb_errors += row["arbiter_errors"]
+        wire_rejects += row["wire_rejects"]
+        if row["crash_lines"] > 0:
+            crash_games += 1
+            crash_lines += row["crash_lines"]
+            for samp in row["crash_samples"]:
+                if len(crash_samples) < 5:
+                    crash_samples.append(samp)
+
+    sorted_reasons = sorted(arb_by_reason.items(), key=lambda kv: (-kv[1], kv[0]))
+    sorted_pairs = sorted(arb_top_pairs.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+    sorted_abilities = sorted(apm_abilities.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
+    elapsed = round(time.monotonic() - t0, 3)
+
+    payload = {
+        "logs_scanned": len(log_paths),
+        "logs_ok": ok_cnt,
+        "logs_err": err_cnt,
+        "elapsed_sec": elapsed,
+        "build_games_logged": build_games,
+        "build_versions": dict(sorted(build_versions.items(), key=lambda kv: (-kv[1], kv[0]))),
+        "build_modes": dict(sorted(build_modes.items(), key=lambda kv: (-kv[1], kv[0]))),
+        "apm_cap_drops": {
+            "games_logged": apm_games,
+            "total": apm_total,
+            "tok": apm_tok,
+            "cap": apm_cap,
+            "priorities": apm_priorities,
+            "key_abilities": {k: int(apm_abilities.get(k, 0)) for k in _KEY_APM_ABILITIES},
+            "top_abilities": [[k, int(v)] for k, v in sorted_abilities],
+        },
+        "arbiter": {
+            "games_logged": arb_games,
+            "total": arb_total,
+            "by_reason": {k: int(v) for k, v in sorted_reasons},
+            "top_pairs": [[k, int(v)] for k, v in sorted_pairs],
+            "errors": arb_errors,
+        },
+        "health": {
+            "crash_games": crash_games,
+            "crash_lines": crash_lines,
+            "crash_samples": crash_samples,
+            "wire_rejects": wire_rejects,
+        },
+    }
+    return {
+        "step": "bot_log_telemetry",
+        "ok": err_cnt == 0,
+        "returncode": 0 if err_cnt == 0 else 1,
+        "elapsed_sec": elapsed,
+        "out_path": f"{ok_cnt}/{len(log_paths)} logs",
+        "payload": payload,
+    }
+
+
 def _run_subprocess_step(step_name: str, cmd: list[str], cwd: Path = REPO_ROOT) -> dict[str, Any]:
     t0 = time.monotonic()
     try:
@@ -447,6 +767,56 @@ def _render_board_summary(summary: dict[str, Any]) -> str:
             f"`W->L: {fd_ov['w_to_l']}` | `L->W: {fd_ov['l_to_w']}` | `other: {fd_ov['other']}`"
         )
 
+    blt = summary.get("bot_log_telemetry")
+    sc_ties = (sc or {}).get("ties") or {}
+    sc_health = (sc or {}).get("health") or {}
+    if blt or sc_ties or sc_health:
+        # Line 1: Health, Builds & Tie Causes (cap25 vs wallTies)
+        bvers = (blt or {}).get("build_versions") or {}
+        b_str = ",".join(f"{k}:{v}" for k, v in bvers.items()) if bvers else "none"
+        log_h = (blt or {}).get("health") or {}
+        crashes = max(int(sc_health.get("crashes", 0) or 0), int(log_h.get("crash_games", 0) or 0))
+        wire_rej = max(int(sc_health.get("wire_rejects", 0) or 0), int(log_h.get("wire_rejects", 0) or 0))
+        self_can = int(sc_health.get("self_cancel", 0) or 0)
+        t_tot = int(sc_ties.get("total", 0) or 0)
+        t_cap25 = int(sc_ties.get("cap25", 0) or 0)
+        t_wall = int(sc_ties.get("wall_ties", 0) or 0)
+        step_part = ""
+        if sc_health.get("avg_step_ms") is not None:
+            step_part = (
+                f" | step=`{sc_health['avg_step_ms']:.2f}ms` "
+                f"(p95 `{sc_health.get('p95_step_ms', 0.0):.2f}ms`, max `{sc_health.get('max_step_ms', 0.0):.1f}ms`)"
+            )
+        lines.append(
+            f"- **Health & Ties:** builds=`{b_str}` | crashes=`{crashes}` | wire_rejects=`{wire_rej}` | "
+            f"self_cancel=`{self_can}` | ties=`{t_tot}` (`cap25={t_cap25}`, `wallTies={t_wall}`){step_part}"
+        )
+
+        # Line 2: [APM_CAP_DROPS]
+        if blt:
+            apm = blt.get("apm_cap_drops") or {}
+            pr = apm.get("priorities") or {}
+            ka = apm.get("key_abilities") or {}
+            lines.append(
+                f"- **`[APM_CAP_DROPS]` (`{apm.get('games_logged', 0)}g`):** "
+                f"total=`{apm.get('total', 0):,}` (`tok={apm.get('tok', 0):,} cap={apm.get('cap', 0):,}`) | "
+                f"`P0={pr.get('P0', 0):,} P1={pr.get('P1', 0):,} P2={pr.get('P2', 0):,} "
+                f"P3={pr.get('P3', 0):,} P4={pr.get('P4', 0):,}` | "
+                f"`3666={ka.get('3666', 0):,} 3685={ka.get('3685', 0):,} 558={ka.get('558', 0):,}`"
+            )
+
+            # Line 3: [SCBOT_ARBITER]
+            arb = blt.get("arbiter") or {}
+            br = arb.get("by_reason") or {}
+            tp = arb.get("top_pairs") or []
+            br_str = ",".join(f"{k}:{v}" for k, v in list(br.items())[:6]) if br else "none"
+            tp_str = ",".join(f"{k}:{v}" for k, v in tp[:5]) if tp else "none"
+            lines.append(
+                f"- **`[SCBOT_ARBITER]` (`{arb.get('games_logged', 0)}g`):** "
+                f"total=`{arb.get('total', 0):,}` | errors=`{arb.get('errors', 0)}` | "
+                f"by_reason=`{br_str}` | top=`{tp_str}`"
+            )
+
     lines.append("")
     lines.append("| Step | Status | Elapsed (s) | Artifact / Note |")
     lines.append("|---|---|---:|---|")
@@ -552,7 +922,59 @@ def _extract_score_overview(score_json: Path) -> dict[str, Any] | None:
                 "state_adjudicated_wlt": ra["state_adjudicated_wlt"],
                 "adjudicated_wlt": ra["adjudicated_wlt"],
             }
-        return {"overall": ov, "by_race": by_race}
+
+        # Ties (cap25 vs wallTies) and health/perf summary across all matches in score_json
+        ties_total = 0
+        cap25_cnt = 0
+        wall_ties_cnt = 0
+        other_ties_cnt = 0
+        crash_matches = 0
+        wire_rejects_total = 0
+        self_cancel_cnt = 0
+        avg_steps: list[float] = []
+        p95_steps: list[float] = []
+        max_steps: list[float] = []
+        for m in matches:
+            if m.get("result") == "tie":
+                ties_total += 1
+                tc = str(m.get("tie_cause") or "")
+                if tc == "loop_cap_25m":
+                    cap25_cnt += 1
+                elif tc.startswith("cpu_wall_timeout") or m.get("wall_timeout_tie"):
+                    wall_ties_cnt += 1
+                else:
+                    other_ties_cnt += 1
+            if m.get("crashes") or m.get("p2_crashes"):
+                crash_matches += 1
+            wire_rejects_total += int(m.get("action_rejects") or 0) + int(m.get("p2_action_err_total") or 0)
+            an = m.get("anomalies")
+            if isinstance(an, dict) and an.get("self_cancel_loops"):
+                self_cancel_cnt += 1
+            if isinstance(m.get("avg_step_ms"), (int, float)) and float(m["avg_step_ms"]) > 0:
+                avg_steps.append(float(m["avg_step_ms"]))
+            if isinstance(m.get("p95_step_ms"), (int, float)) and float(m["p95_step_ms"]) > 0:
+                p95_steps.append(float(m["p95_step_ms"]))
+            if isinstance(m.get("max_step_ms"), (int, float)) and float(m["max_step_ms"]) > 0:
+                max_steps.append(float(m["max_step_ms"]))
+
+        return {
+            "overall": ov,
+            "by_race": by_race,
+            "ties": {
+                "total": ties_total,
+                "cap25": cap25_cnt,
+                "wall_ties": wall_ties_cnt,
+                "other": other_ties_cnt,
+            },
+            "health": {
+                "crashes": crash_matches,
+                "wire_rejects": wire_rejects_total,
+                "self_cancel": self_cancel_cnt,
+                "avg_step_ms": round(sum(avg_steps) / len(avg_steps), 2) if avg_steps else None,
+                "p95_step_ms": round(sum(p95_steps) / len(p95_steps), 2) if p95_steps else None,
+                "max_step_ms": round(max(max_steps), 1) if max_steps else None,
+            },
+        }
     except Exception:
         return None
 
@@ -661,8 +1083,8 @@ def run_pipeline(
 
     steps_log: list[dict[str, Any]] = []
 
-    # Stage A: score-replay-batch.rkt + full-run s2protocol features audit in parallel!
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as stage_a:
+    # Stage A: score-replay-batch.rkt + s2protocol features audit + bot log telemetry in parallel!
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as stage_a:
         score_cmd = [
             "racket",
             str(TOOLS_DIR / "score-replay-batch.rkt"),
@@ -680,10 +1102,12 @@ def run_pipeline(
             workers=workers,
             pylibs_dir=pylibs_dir,
         )
+        fut_logs = stage_a.submit(parse_run_bot_logs, run_dir, workers=workers)
         res_score = fut_score.result()
         res_score["out_path"] = str(score_json)
         res_s2 = fut_s2.result()
-        steps_log.extend([res_score, res_s2])
+        res_logs = fut_logs.result()
+        steps_log.extend([res_score, res_s2, res_logs])
 
     # Stage B: (db_ingest -> db_extract_raw) + compare-vs-pro in parallel (both depend on score_json)
     res_ingest: dict[str, Any] | None = None
@@ -873,6 +1297,7 @@ def run_pipeline(
 
     # Build final summary payload
     s2_payload = res_s2.get("payload") or {}
+    logs_payload = res_logs.get("payload") or {}
     fd_overview = None
     if diff_json.is_file():
         try:
@@ -898,6 +1323,7 @@ def run_pipeline(
         "all_ok": all_ok,
         "steps": clean_steps,
         "score_overview": _extract_score_overview(score_json),
+        "bot_log_telemetry": logs_payload,
         "s2_summary": {
             "replays_total": s2_payload.get("replays_total", 0),
             "replays_ok": s2_payload.get("replays_ok", 0),

@@ -48,7 +48,12 @@
          (only-in "../lib/plan/worker-saturation-policy.rkt"
                   worker-sat-state-zero-gas-rescue-rotation-idx)
          (only-in "../lib/engine/arbiter.rkt"
-                  make-arbiter-ledger))
+                  make-arbiter-ledger
+                  make-arbiter-budget-snapshot
+                  make-proposal
+                  make-proposal-cost
+                  arbiter-resolve!
+                  arbiter-telemetry-summary))
 
 (define total-checks 0)
 (define failed-checks 0)
@@ -14303,6 +14308,112 @@
   (check-true "l66-c3-gas-starvation-boost-end-to-end-suppresses-pull-and-refills-2plus"
               (and (not l66-boost-pulled-gas?)
                    (>= l66-boost-refill-cnt 2)))
+
+  ;; Loop 67 Lane C (`#2023`): Contract 1 `[SCBOT_ARBITER]` formatting & `#:mineral-override-pressure?`
+  ;; pass-through (`saturate-workers-and-gas-commands` Sec 6a + `translate-bot-actions->sc2-raw-commands` Case C).
+  ;; L67-C1: Exact Contract 1 formatting (empty -> `none`, populated -> desc sort + alpha tie-break + top-8 cap,
+  ;;         plus real `arbiter-telemetry-summary` round-trip!).
+  (define l67-empty-line
+    (format-scbot-arbiter-summary-line
+     (hasheq 'total-overrides 0 'by-reason (hasheq) 'top-pairs '())))
+  (define l67-pop-line
+    (format-scbot-arbiter-summary-line
+     (hasheq 'total-overrides 42
+             'by-reason (hasheq 'facility-busy 10 'budget-gas 10 'budget-mineral 22)
+             'top-pairs '((mod-b budget-gas 5)
+                          (mod-a budget-gas 5)
+                          (l2-macro-runtime budget-mineral 22)
+                          (mod-c facility-busy 3)
+                          (mod-d facility-busy 2)
+                          (mod-e budget-larva 2)
+                          (mod-f threat-veto 1)
+                          (mod-g apm-cap-deferred 1)
+                          (mod-h energy-reserved 1)
+                          (mod-i superseded-by-alternative 1)))))
+  (define l67-live-ledger (make-arbiter-ledger))
+  (void (arbiter-resolve!
+         l67-live-ledger
+         100
+         (make-arbiter-budget-snapshot #:minerals 50 #:gas 0 #:supply-left 10)
+         (list (make-proposal 'test-stalker 'l2-macro-runtime 'macro 500.0 '(train stalker)
+                              #:cost (make-proposal-cost #:minerals 125 #:gas 50 #:supply 2)))))
+  (define l67-live-line
+    (format-scbot-arbiter-summary-line (arbiter-telemetry-summary l67-live-ledger)))
+  (check-true "l67-c1-scbot-arbiter-summary-line-formatting"
+              (and (string=? l67-empty-line "[SCBOT_ARBITER] total=0 by_reason=none top=none")
+                   (string=? l67-pop-line
+                             (string-append
+                              "[SCBOT_ARBITER] total=42 "
+                              "by_reason=budget-mineral:22,budget-gas:10,facility-busy:10 "
+                              "top=l2-macro-runtime:budget-mineral:22,mod-a:budget-gas:5,"
+                              "mod-b:budget-gas:5,mod-c:facility-busy:3,mod-d:facility-busy:2,"
+                              "mod-e:budget-larva:2,mod-f:threat-veto:1,mod-g:apm-cap-deferred:1"))
+                   (string=? l67-live-line
+                             "[SCBOT_ARBITER] total=1 by_reason=budget-mineral:1 top=l2-macro-runtime:budget-mineral:1")))
+
+  ;; L67-C2: `#:mineral-override-pressure?` pass-through in `saturate-workers-and-gas-commands` (Sec 6a)
+  ;;         & `translate-bot-actions->sc2-raw-commands` (Case C):
+  ;;         (a) Peaceful non-cloak >=8:00 2-OC TvZ with OC1=100e & OC2=65e emits BOTH MULEs under `#t`,
+  ;;         (b) Never weakens `< 100.0e` phase Scan floor (OC1=85e holds while OC2=65e MULEs),
+  ;;         (c) Never weakens cloak Scan reserve when cloaked enemy DT is present!
+  (define l67-gi-z
+    (sc2-game-info "L67TestMap" "" (list (cons 1 'Terran) (cons 2 'Zerg))
+                   '(128 128) '(0 0 128 128) '() #f #f #f))
+  (define l67-oc1-100 (mk-l65-u 86701 132 1 30.0 30.0 #:hp 1500.0 #:rad 2.75 #:en 100.0))
+  (define l67-oc1-85  (mk-l65-u 86701 132 1 30.0 30.0 #:hp 1500.0 #:rad 2.75 #:en 85.0))
+  (define l67-oc2-65  (mk-l65-u 86702 132 1 62.0 30.0 #:hp 1500.0 #:rad 2.75 #:en 65.0))
+  (define l67-rax     (mk-l65-u 86703 21  1 34.0 34.0 #:hp 1000.0 #:rad 1.5))
+  (define l67-min1    (sc2-unit 1 3 86708 341 0 (sc2-point3d 25.0 30.0 8.0) 0.0 1.0 1.0 0 #f #t #f
+                                1000.0 1000.0 0.0 0.0 0.0 0.0 1500 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define l67-min2    (sc2-unit 1 3 86709 341 0 (sc2-point3d 67.0 30.0 8.0) 0.0 1.0 1.0 0 #f #t #f
+                                1000.0 1000.0 0.0 0.0 0.0 0.0 1500 0 #f #f #f #t #f '() 0 '() 0 0 0.0 0 0 0 0 '() 0 0))
+  (define l67-scvs-16
+    (for/list ([i (in-range 16)])
+      (mk-l65-u (+ 86710 i) 45 1 (+ 26.0 (* 0.25 (modulo i 4))) (+ 30.0 (* 0.3 (quotient i 4)))
+                #:hp 45.0 #:rad 0.375 #:en 0.0 #:en-max 0.0)))
+  (define (l67-mule-oc-tags cmds)
+    (sort (apply append
+                 (for/list ([c (in-list cmds)]
+                            #:when (and (sc2-raw-unit-command? c)
+                                        (= (sc2-raw-unit-command-ability-id c) 171)))
+                   (sc2-raw-unit-command-unit-tags c)))
+          <))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l67-min1)) #:game-info l67-gi-z))
+  (define l67-sat-100-mules
+    (l67-mule-oc-tags
+     (saturate-workers-and-gas-commands
+      (make-test-obs 11000 100 50 (append (list l67-oc1-100 l67-oc2-65 l67-rax l67-min1 l67-min2) l67-scvs-16))
+      #:game-info l67-gi-z
+      #:mineral-override-pressure? #t)))
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l67-min1)) #:game-info l67-gi-z))
+  (define l67-sat-85-mules
+    (l67-mule-oc-tags
+     (saturate-workers-and-gas-commands
+      (make-test-obs 11000 100 50 (append (list l67-oc1-85 l67-oc2-65 l67-rax l67-min1 l67-min2) l67-scvs-16))
+      #:game-info l67-gi-z
+      #:mineral-override-pressure? #t)))
+  (void (translate-bot-actions->sc2-raw-commands '() (make-test-obs 4 200 0 (list l67-min1)) #:game-info l67-gi-z))
+  (define l67-casec-mules
+    (l67-mule-oc-tags
+     (translate-bot-actions->sc2-raw-commands
+      '((cast-spell 86701 calldown-mule 86708))
+      (make-test-obs 11000 100 50 (append (list l67-oc1-100 l67-oc2-65 l67-rax l67-min1 l67-min2) l67-scvs-16))
+      #:game-info l67-gi-z
+      #:mineral-override-pressure? #t)))
+  ;; Under cloaked enemy DT, `#:mineral-override-pressure? #t` STILL blocks MULE!
+  (void (saturate-workers-and-gas-commands (make-test-obs 4 200 0 (list l67-min1)) #:game-info l67-gi-z))
+  (define l67-dt-enemy (mk-l65-u 86799 76 4 38.0 30.0 #:hp 0.0 #:hp-max 40.0 #:cloak 1))
+  (define l67-cloak-mules
+    (l67-mule-oc-tags
+     (saturate-workers-and-gas-commands
+      (make-test-obs 11000 100 50 (append (list l67-oc1-100 l67-oc2-65 l67-rax l67-min1 l67-min2 l67-dt-enemy) l67-scvs-16))
+      #:game-info l67-gi-z
+      #:mineral-override-pressure? #t)))
+  (check-true "l67-c2-mineral-override-pressure-pass-through-mule-and-cloak-guard"
+              (and (equal? l67-sat-100-mules '(86701 86702))
+                   (equal? l67-sat-85-mules '(86702))
+                   (equal? l67-casec-mules '(86701))
+                   (null? l67-cloak-mules)))
 
   ;; Clean final rewind
   (reset-sc2-live-response-data!)

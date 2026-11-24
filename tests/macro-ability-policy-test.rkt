@@ -997,7 +997,170 @@
      #:under-pressure? #t))
   (check-eq "l64-supply-drop-skips-at-192-plus-cap"
             (terran-supply-drop-decision-oc-tag sd-cap192)
-            #f))
+            #f)
+
+  ;; ---------------------------------------------------------------------------
+  ;; Loop 67 Phase D (Contract 2): Bounded Arbiter Override-Signal Awareness
+  ;; ---------------------------------------------------------------------------
+  ;; 1. Terran MULE: `#:mineral-override-pressure? #t` relaxes non-cloak `phase-proactive-oc-limit`
+  ;;    (1 -> 0) ONLY when peaceful, non-cloak (`cloak-proactive-oc-limit == 0`), >= 2 ready OCs,
+  ;;    AND >= 1 OC already holds >= 100.0e.
+  (define l67-oc-100 (mk-oc 201 100.0))
+  (define l67-oc-65  (mk-oc 202 65.0))
+  (define l67-oc-85  (mk-oc 203 85.0))
+  (define l67-th1 (mk-th 201 'orbital-command 32.0 32.0))
+  (define l67-th2 (mk-th 202 'orbital-command 52.0 36.0))
+  (define l67-mule-baseline
+    (evaluate-terran-mule-policy
+     #:latch (make-macro-policy-latch)
+     #:loop 11200 #:known-enemy-race 'Zerg #:active-bases 2 #:worker-count 44
+     #:ready-ocs (list l67-oc-100 l67-oc-65)
+     #:self-units '() #:enemy-units '()
+     #:townhalls (list l67-th1 l67-th2)
+     #:under-pressure? #f #:cloak-threat-known? #f #:mineral-override-pressure? #f))
+  (check-eq "l67-mule-baseline-8m-holds-proactive-oc"
+            (terran-mule-policy-result-proactive-scan-oc-tags l67-mule-baseline)
+            '(201))
+  (check-eq "l67-mule-baseline-8m-top-oc-floor-100"
+            (hash-ref (terran-mule-policy-result-oc-energy-floor-ht l67-mule-baseline) 201)
+            100.0)
+
+  (define l67-mule-min-ovr
+    (evaluate-terran-mule-policy
+     #:latch (make-macro-policy-latch)
+     #:loop 11200 #:known-enemy-race 'Zerg #:active-bases 2 #:worker-count 44
+     #:ready-ocs (list l67-oc-100 l67-oc-65)
+     #:self-units '() #:enemy-units '()
+     #:townhalls (list l67-th1 l67-th2)
+     #:under-pressure? #f #:cloak-threat-known? #f #:mineral-override-pressure? #t))
+  (check-eq "l67-mule-min-override-relaxes-phase-oc-when-peaceful-noncloak-100e"
+            (terran-mule-policy-result-proactive-scan-oc-tags l67-mule-min-ovr)
+            '())
+  (check-eq "l67-mule-min-override-lowers-top-oc-floor-to-50"
+            (hash-ref (terran-mule-policy-result-oc-energy-floor-ht l67-mule-min-ovr) 201)
+            50.0)
+
+  ;; Guard: NEVER weaken cloak reserve when cloak-threat-known? is #t or vs Protoss DT window without detection!
+  (define l67-mule-cloak-guard
+    (evaluate-terran-mule-policy
+     #:latch (make-macro-policy-latch)
+     #:loop 11200 #:known-enemy-race 'Zerg #:active-bases 2 #:worker-count 44
+     #:ready-ocs (list l67-oc-100 l67-oc-65)
+     #:self-units '() #:enemy-units '()
+     #:townhalls (list l67-th1 l67-th2)
+     #:under-pressure? #f #:cloak-threat-known? #t #:mineral-override-pressure? #t))
+  (check-eq "l67-mule-min-override-never-weakens-cloak-reserve"
+            (terran-mule-policy-result-proactive-scan-oc-tags l67-mule-cloak-guard)
+            '(201 202))
+  (define l67-mule-tvp-dt-guard
+    (evaluate-terran-mule-policy
+     #:latch (make-macro-policy-latch)
+     #:loop 11200 #:known-enemy-race 'Protoss #:active-bases 2 #:worker-count 44
+     #:ready-ocs (list l67-oc-100 l67-oc-65)
+     #:self-units '() #:enemy-units '()
+     #:townhalls (list l67-th1 l67-th2)
+     #:under-pressure? #f #:cloak-threat-known? #f #:mineral-override-pressure? #t))
+  (check-eq "l67-mule-min-override-preserves-tvp-anti-dt-reserve-without-turret"
+            (terran-mule-policy-result-proactive-scan-oc-tags l67-mule-tvp-dt-guard)
+            '(201))
+
+  ;; Guard: NEVER weaken < 100e reserve when no OC holds >= 100.0e!
+  (define l67-mule-lt100-guard
+    (evaluate-terran-mule-policy
+     #:latch (make-macro-policy-latch)
+     #:loop 11200 #:known-enemy-race 'Zerg #:active-bases 2 #:worker-count 44
+     #:ready-ocs (list l67-oc-85 l67-oc-65)
+     #:self-units '() #:enemy-units '()
+     #:townhalls (list (mk-th 203 'orbital-command 32.0 32.0) l67-th2)
+     #:under-pressure? #f #:cloak-threat-known? #f #:mineral-override-pressure? #t))
+  (check-eq "l67-mule-min-override-never-weakens-below-100e"
+            (terran-mule-policy-result-proactive-scan-oc-tags l67-mule-lt100-guard)
+            '(203))
+  (check-eq "l67-mule-lt100-blocks-85e-oc"
+            (terran-oc-mule-allowed? l67-mule-lt100-guard 203 85.0)
+            #f)
+
+  ;; Guard: NEVER weaken under pressure or on 1 OC!
+  (define l67-mule-pressure-guard
+    (evaluate-terran-mule-policy
+     #:latch (make-macro-policy-latch)
+     #:loop 11200 #:known-enemy-race 'Zerg #:active-bases 2 #:worker-count 44
+     #:ready-ocs (list l67-oc-100 l67-oc-65)
+     #:self-units '() #:enemy-units '()
+     #:townhalls (list l67-th1 l67-th2)
+     #:under-pressure? #t #:cloak-threat-known? #f #:mineral-override-pressure? #t))
+  (check-eq "l67-mule-min-override-never-weakens-under-pressure"
+            (terran-mule-policy-result-proactive-scan-oc-tags l67-mule-pressure-guard)
+            '(201))
+  (define l67-mule-1oc-guard
+    (evaluate-terran-mule-policy
+     #:latch (make-macro-policy-latch)
+     #:loop 11200 #:known-enemy-race 'Zerg #:active-bases 1 #:worker-count 22
+     #:ready-ocs (list l67-oc-100)
+     #:self-units '() #:enemy-units '()
+     #:townhalls (list l67-th1)
+     #:under-pressure? #f #:cloak-threat-known? #f #:mineral-override-pressure? #t))
+  (check-eq "l67-mule-min-override-requires-at-least-2-ocs"
+            (terran-mule-policy-result-proactive-scan-oc-tags l67-mule-1oc-guard)
+            '(201))
+
+  ;; 2. Protoss Chrono: bounded +25.0 for busy Robo (900 -> 925) & Stargate (860 -> 885) under
+  ;;    `#:facility-override-pressure? #t` (still below Forge/Twilight 955 & never unlocking
+  ;;    post-4m Gateway below energy floor!), plus +25.0 for Nexus (600 -> 625) under
+  ;;    `#:mineral-override-pressure? #t` when < 60 workers and no busy tech/Robo.
+  (define sc-rb-base
+    (score-protoss-chrono-target-policy
+     'robotics-facility #:loop 8000 #:worker-count 44 #:nexus-energy 60.0 #:has-busy-tech-or-robo? #t))
+  (define sc-rb-fac
+    (score-protoss-chrono-target-policy
+     'robotics-facility #:loop 8000 #:worker-count 44 #:nexus-energy 60.0 #:has-busy-tech-or-robo? #t
+     #:facility-override-pressure? #t))
+  (define sc-sg-base
+    (score-protoss-chrono-target-policy
+     'stargate #:loop 8000 #:worker-count 44 #:nexus-energy 60.0 #:has-busy-tech-or-robo? #t))
+  (define sc-sg-fac
+    (score-protoss-chrono-target-policy
+     'stargate #:loop 8000 #:worker-count 44 #:nexus-energy 60.0 #:has-busy-tech-or-robo? #t
+     #:facility-override-pressure? #t))
+  (define sc-fg-fac
+    (score-protoss-chrono-target-policy
+     'forge #:loop 8000 #:worker-count 44 #:nexus-energy 60.0 #:has-busy-tech-or-robo? #t
+     #:facility-override-pressure? #t))
+  (define sc-gw-fac-low-en
+    (score-protoss-chrono-target-policy
+     'gateway #:loop 8000 #:worker-count 44 #:nexus-energy 60.0 #:has-busy-tech-or-robo? #f
+     #:facility-override-pressure? #t))
+  (check-eq "l67-chrono-robo-bounded-plus-25" (- sc-rb-fac sc-rb-base) 25.0)
+  (check-eq "l67-chrono-robo-925-below-forge-955" (< sc-rb-fac sc-fg-fac) #t)
+  (check-eq "l67-chrono-stargate-bounded-plus-25" (- sc-sg-fac sc-sg-base) 25.0)
+  (check-eq "l67-chrono-stargate-885-below-forge-955" (< sc-sg-fac sc-fg-fac) #t)
+  (check-eq "l67-chrono-gateway-still-blocked-below-energy-floor" (<= sc-gw-fac-low-en 0.0) #t)
+  (check-eq "l67-chrono-select-keeps-forge-ahead-of-boosted-robo"
+            (macro-chrono-candidate-info-tag
+             (select-protoss-chrono-target-policy
+              #:candidates (list c-nx c-fg c-rb c-sg c-gw)
+              #:loop 8000 #:worker-count 44 #:nexus-energy 60.0
+              #:facility-override-pressure? #t))
+            103)
+
+  (define sc-nx-base
+    (score-protoss-chrono-target-policy
+     'nexus #:loop 8000 #:worker-count 44 #:nexus-energy 60.0 #:has-busy-tech-or-robo? #f))
+  (define sc-nx-min
+    (score-protoss-chrono-target-policy
+     'nexus #:loop 8000 #:worker-count 44 #:nexus-energy 60.0 #:has-busy-tech-or-robo? #f
+     #:mineral-override-pressure? #t))
+  (define sc-nx-min-60w
+    (score-protoss-chrono-target-policy
+     'nexus #:loop 8000 #:worker-count 60 #:nexus-energy 60.0 #:has-busy-tech-or-robo? #f
+     #:mineral-override-pressure? #t))
+  (define sc-nx-min-busy-robo
+    (score-protoss-chrono-target-policy
+     'nexus #:loop 8000 #:worker-count 44 #:nexus-energy 60.0 #:has-busy-tech-or-robo? #t
+     #:mineral-override-pressure? #t))
+  (check-eq "l67-chrono-nexus-bounded-plus-25-under-60w" (- sc-nx-min sc-nx-base) 25.0)
+  (check-eq "l67-chrono-nexus-no-boost-at-60w" sc-nx-min-60w 600.0)
+  (check-eq "l67-chrono-nexus-no-boost-when-tech-busy" (<= sc-nx-min-busy-robo 0.0) #t))
 
 (printf "macro-ability-policy-test: ~a/~a passed (~a failed)\n"
         passed (+ passed failed) failed)

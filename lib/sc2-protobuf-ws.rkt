@@ -10013,7 +10013,8 @@
                                            #:reserved-aabbs [reserved-aabbs '()]
                                            #:game-info [game-info #f]
                                            #:gas-starvation-boost? [gas-starvation-boost? #f]
-                                           #:apm-pressure-backoff? [apm-pressure-backoff? #f])
+                                           #:apm-pressure-backoff? [apm-pressure-backoff? #f]
+                                           #:mineral-override-pressure? [mineral-override-pressure? #f])
   (void reserved-aabbs)
   (define cur-loop (sc2-observation-game-loop obs))
   (define prev-sat-loop (unbox (worker-sat-state-last-loop SC2-DEFAULT-WORKER-SAT-STATE)))
@@ -10570,7 +10571,8 @@
        #:worker-count (count sc2-unit-is-worker? self-units)
        #:known-enemy-race (sc2-game-info->enemy-race game-info obs)
        #:step-has-scan-request? (= cur-loop (unbox SC2-LAST-SCAN-REQUEST-LOOP))
-       #:blind-uphill-err-now? (sc2-obs-has-blind-uphill-err? obs)))
+       #:blind-uphill-err-now? (sc2-obs-has-blind-uphill-err? obs)
+       #:mineral-override-pressure? mineral-override-pressure?))
     (for ([oc (in-list ready-ocs)])
       (define oc-tag (sc2-unit-tag oc))
       (when (and (terran-oc-mule-allowed? mule-policy oc-tag (sc2-unit-energy oc))
@@ -10761,7 +10763,8 @@
                                                  #:tactical-posture [tactical-posture-kw #f]
                                                  #:endgame-cleanup? [endgame-cleanup-kw #f]
                                                  #:watchdog-expand-ring-syms [watchdog-expand-ring-syms '()]
-                                                 #:arbiter-ledger [arbiter-ledger #f])
+                                                 #:arbiter-ledger [arbiter-ledger #f]
+                                                 #:mineral-override-pressure? [mineral-override-pressure? #f])
   (define (normalize-warp-in-unit-sym u)
     (case u
       [(warp-in-zealot)       'zealot]
@@ -17550,7 +17553,8 @@
                  #:worker-count (count sc2-unit-is-worker? self-units)
                  #:known-enemy-race (sc2-game-info->enemy-race eff-game-info obs)
                  #:step-has-scan-request? step-has-any-scan-request?
-                 #:blind-uphill-err-now? (sc2-obs-has-blind-uphill-err? obs)))
+                 #:blind-uphill-err-now? (sc2-obs-has-blind-uphill-err? obs)
+                 #:mineral-override-pressure? mineral-override-pressure?))
               (define fresh-mule-ocs
                 (if (terran-mule-policy-result-hard-blocked? case-c-policy)
                     '()

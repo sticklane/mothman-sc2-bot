@@ -343,6 +343,7 @@ class TestPostBenchPipelineTools(unittest.TestCase):
                 {
                     "score_replay_batch",
                     "s2_features",
+                    "bot_log_telemetry",
                     "db_ingest",
                     "db_extract_raw",
                     "compare_vs_pro",
@@ -352,6 +353,14 @@ class TestPostBenchPipelineTools(unittest.TestCase):
                     "log_trajectory",
                 },
             )
+            blt = ps.get("bot_log_telemetry") or {}
+            self.assertGreaterEqual(int(blt.get("logs_scanned") or 0), 12)
+            self.assertEqual(int(blt.get("logs_err") or 0), 0)
+            self.assertGreater(int((blt.get("apm_cap_drops") or {}).get("total") or 0), 0)
+            self.assertEqual(int((blt.get("health") or {}).get("crash_games") or 0), 0)
+            self.assertIn("- **Health & Ties:**", proc.stdout)
+            self.assertIn("- **`[APM_CAP_DROPS]`", proc.stdout)
+            self.assertIn("- **`[SCBOT_ARBITER]`", proc.stdout)
 
     @unittest.skipUnless(FULL_65G.is_dir(), "Full 84m arena run not present")
     def test_post_bench_pipeline_extract_raw_populates_pro_deep_nonzero_rows(self) -> None:
@@ -438,6 +447,189 @@ class TestPostBenchPipelineTools(unittest.TestCase):
                 if ag.get("reinforce_linked_pct") is not None:
                     has_ag = True
             self.assertTrue(has_ag, msg="Expected non-null army_group_positioning in pro_deep.json after extract-raw")
+
+    def test_parse_run_bot_logs_synthetic_match_dirs_and_board_summary(self) -> None:
+        pb = _load_mod("pb_unit_test_logs", POST_BENCH)
+        with tempfile.TemporaryDirectory() as td:
+            run_dir = Path(td) / "20261124_090000_synth_run"
+            m1 = run_dir / "match_001"
+            m2 = run_dir / "match_002"
+            m3 = run_dir / "match_003"
+            for d in (m1, m2, m3):
+                d.mkdir(parents=True)
+
+            # Match 1: populated [SCBOT_ARBITER] + [APM_CAP_DROPS] + [SCBOT_BUILD] on bot1,
+            # plus Mothman selfplay bot2 with empty [SCBOT_ARBITER] (by_reason=none top=none)
+            (m1 / "bot1.log").write_text(
+                "\n".join(
+                    [
+                        "[SCBOT_BUILD] bot=Mothman-T race=Terran version=tlrrltvx_ea56f6f1 mode=zip",
+                        "[APM_CAP_DROPS] total=1000 tok=950 cap=50 P0=40 P1=60 P2=850 P3=45 P4=5 top=23:400,3666:120,3685:200,558:80",
+                        "[SCBOT_ARBITER] total=17 by_reason=budget-mineral:10,budget-gas:7 top=l2-macro-runtime:budget-mineral:10,l2-macro-runtime:budget-gas:7",
+                        "[SCBOT_ACTION_ERR] f=224 CantBuildLocationInvalid=2 total=2",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (m1 / "bot2.log").write_text(
+                "\n".join(
+                    [
+                        "[SCBOT_BUILD] bot=Mothman-T-SP race=Terran version=tlrrltvx_ea56f6f1 mode=zip",
+                        "[APM_CAP_DROPS] total=500 tok=500 cap=0 P0=10 P1=20 P2=450 P3=20 P4=0 top=16:300,558:40",
+                        "[SCBOT_ARBITER] total=0 by_reason=none top=none",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            # Match 2: populated bot1 + non-Mothman opponent bot2 (must NOT be scanned!)
+            (m2 / "bot1.log").write_text(
+                "\n".join(
+                    [
+                        "[SCBOT_BUILD] bot=Mothman-P race=Protoss version=dev mode=source",
+                        "[APM_CAP_DROPS] total=250 tok=250 cap=0 P0=5 P1=10 P2=235 P3=0 P4=0 top=3666:30,23:100",
+                        "[SCBOT_ARBITER] total=5 by_reason=budget-mineral:3,facility-busy:2 top=l2-macro-runtime:budget-mineral:3,l2-macro-runtime:facility-busy:2",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (m2 / "bot2.log").write_text(
+                "OpponentBot crash error: simulated opponent exception\n",
+                encoding="utf-8",
+            )
+
+            # Match 3: Mothman log with an arbiter runtime exception line
+            (m3 / "bot1.log").write_text(
+                "\n".join(
+                    [
+                        "[SCBOT_BUILD] bot=Mothman-Z race=Zerg version=dev mode=source",
+                        "arbiter contract violation error at step 440",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            res = pb.parse_run_bot_logs(run_dir, workers=4)
+            self.assertTrue(res["ok"])
+            self.assertEqual(res["step"], "bot_log_telemetry")
+            blt = res["payload"]
+            self.assertEqual(blt["logs_scanned"], 4)
+            self.assertEqual(blt["logs_ok"], 4)
+            self.assertEqual(blt["logs_err"], 0)
+            self.assertEqual(blt["build_games_logged"], 4)
+            self.assertEqual(blt["build_versions"], {"dev": 2, "tlrrltvx_ea56f6f1": 2})
+            self.assertEqual(blt["build_modes"], {"source": 2, "zip": 2})
+
+            apm = blt["apm_cap_drops"]
+            self.assertEqual(apm["games_logged"], 3)
+            self.assertEqual(apm["total"], 1750)
+            self.assertEqual(apm["tok"], 1700)
+            self.assertEqual(apm["cap"], 50)
+            self.assertEqual(apm["priorities"], {"P0": 55, "P1": 90, "P2": 1535, "P3": 65, "P4": 5})
+            self.assertEqual(apm["key_abilities"], {"3666": 150, "3685": 200, "558": 120})
+            self.assertEqual(apm["top_abilities"][0], ["23", 500])
+
+            arb = blt["arbiter"]
+            self.assertEqual(arb["games_logged"], 3)
+            self.assertEqual(arb["total"], 22)
+            self.assertEqual(
+                arb["by_reason"],
+                {"budget-mineral": 13, "budget-gas": 7, "facility-busy": 2},
+            )
+            self.assertEqual(arb["top_pairs"][0], ["l2-macro-runtime:budget-mineral", 13])
+            self.assertEqual(arb["errors"], 1)
+
+            hlth = blt["health"]
+            self.assertEqual(hlth["crash_games"], 1)
+            self.assertEqual(hlth["wire_rejects"], 2)
+
+            # Verify ties (cap25 vs wallTies) + health extraction and board rendering
+            sc_path = Path(td) / "score.json"
+            sc_path.write_text(
+                json.dumps(
+                    {
+                        "matches": [
+                            {
+                                "our_race": "Terran",
+                                "result": "tie",
+                                "tie_cause": "loop_cap_25m",
+                                "is_selfplay": False,
+                                "killed_val": 3000,
+                                "lost_val": 4000,
+                                "our_min_collected": 10000,
+                                "opp_min_collected": 12000,
+                                "our_gas_collected": 3000,
+                                "opp_gas_collected": 3500,
+                                "game_state_score": 0.25,
+                                "state_outcome": "loss",
+                                "adjudicated_outcome": "loss",
+                                "avg_step_ms": 12.0,
+                                "p95_step_ms": 20.0,
+                                "max_step_ms": 150.0,
+                                "crashes": [],
+                                "action_rejects": 0,
+                                "anomalies": {"self_cancel_loops": []},
+                            },
+                            {
+                                "our_race": "Protoss",
+                                "result": "tie",
+                                "tie_cause": "cpu_wall_timeout",
+                                "wall_timeout_tie": True,
+                                "is_selfplay": False,
+                                "killed_val": 6000,
+                                "lost_val": 3000,
+                                "our_min_collected": 14000,
+                                "opp_min_collected": 11000,
+                                "our_gas_collected": 4000,
+                                "opp_gas_collected": 3000,
+                                "game_state_score": 0.85,
+                                "state_outcome": "win",
+                                "adjudicated_outcome": "win",
+                                "avg_step_ms": 14.0,
+                                "p95_step_ms": 24.0,
+                                "max_step_ms": 190.0,
+                                "crashes": [],
+                                "action_rejects": 2,
+                                "anomalies": {"self_cancel_loops": [{"unit": "hatchery"}]},
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            sc_ov = pb._extract_score_overview(sc_path)
+            self.assertEqual(sc_ov["ties"], {"total": 2, "cap25": 1, "wall_ties": 1, "other": 0})
+            self.assertEqual(sc_ov["health"]["crashes"], 0)
+            self.assertEqual(sc_ov["health"]["wire_rejects"], 2)
+            self.assertEqual(sc_ov["health"]["self_cancel"], 1)
+            self.assertAlmostEqual(sc_ov["health"]["avg_step_ms"], 13.0, places=2)
+            self.assertAlmostEqual(sc_ov["health"]["max_step_ms"], 190.0, places=1)
+
+            md = pb._render_board_summary(
+                {
+                    "label": "synth_run",
+                    "run_dir": str(run_dir),
+                    "total_elapsed_sec": 3.5,
+                    "all_ok": True,
+                    "score_overview": sc_ov,
+                    "bot_log_telemetry": blt,
+                    "steps": [],
+                }
+            )
+            self.assertIn("ties=`2` (`cap25=1`, `wallTies=1`)", md)
+            self.assertIn("crashes=`1`", md)
+            self.assertIn("wire_rejects=`2`", md)
+            self.assertIn("self_cancel=`1`", md)
+            self.assertIn("`[APM_CAP_DROPS]` (`3g`):** total=`1,750`", md)
+            self.assertIn("`3666=150 3685=200 558=120`", md)
+            self.assertIn(
+                "`[SCBOT_ARBITER]` (`3g`):** total=`22` | errors=`1` | by_reason=`budget-mineral:13,budget-gas:7,facility-busy:2`",
+                md,
+            )
 
 
 if __name__ == "__main__":

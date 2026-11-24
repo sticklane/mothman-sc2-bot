@@ -2440,6 +2440,22 @@
 ;; 3i. Spore Crawler & Spine Crawler Tactics <-> Counters
 ;; -----------------------------------------------------------------------------
 
+(define (offset-spore-root-xy base-x base-y)
+  (values (clamp-coord (+ base-x (if (>= base-x 80.0) -3.5 3.5)))
+          (clamp-coord (+ base-y (if (>= base-y 80.0) -3.5 3.5)))))
+
+(define (enemy-unit-cloaked-or-burrowed? e)
+  (and (hash? e)
+       (let ([clk (hash-ref e 'cloak #f)])
+         (or (and (integer? clk) (or (= clk 1) (= clk 2)))
+             (memq clk '(cloaked cloaked-detected cloaked-allied))
+             (eq? (hash-ref e 'cloaked #f) #t)
+             (eq? (hash-ref e 'cloaked? #f) #t)
+             (eq? (hash-ref e 'is-cloaked? #f) #t)
+             (eq? (hash-ref e 'burrowed #f) #t)
+             (eq? (hash-ref e 'burrowed? #f) #t)
+             (eq? (hash-ref e 'is-burrowed? #f) #t)))))
+
 (define (plan-spore-crawler-tactics/idx idx)
   (define ab-ht (sd-index-ally-b-by-type idx))
   (define au-ht (sd-index-ally-u-by-type idx))
@@ -2457,82 +2473,147 @@
         (define tx (sd-index-tx idx))
         (define ty (sd-index-ty idx))
         (define air-threats (sd-index-enemy-air idx))
-        (define spu0-id (and (pair? uprooted-spores) (u-id (first uprooted-spores))))
-        (define multi-spores? (and (not spu0-id) (pair? spores) (pair? (cdr spores))))
+        (define active-townhalls (bucket-pos-ids ab-ht '(hatchery lair hive)))
+        (define n-th (length active-townhalls))
+        (define n-sp (length spores))
+        (define sp-ids (make-vector n-sp 0))
+        (define sp-xs (make-flvector n-sp 0.0))
+        (define sp-ys (make-flvector n-sp 0.0))
+        (define sp-hp-ok (make-vector n-sp #t))
+        (for ([sp (in-list spores)] [i (in-naturals)])
+          (vector-set! sp-ids i (u-id sp))
+          (flvector-set! sp-xs i (real->double-flonum (u-x sp bx)))
+          (flvector-set! sp-ys i (real->double-flonum (u-y sp by)))
+          (vector-set! sp-hp-ok i (>= (u-hp-frac sp) 0.95)))
         (define actions '())
         (define (emit! a) (set! actions (cons a actions)))
 
-        (when (and (pair? air-threats) (or spu0-id multi-spores?))
-          (define n-sp (length spores))
-          (define sp-ids (make-vector n-sp 0))
-          (define sp-xs (make-flvector n-sp 0.0))
-          (define sp-ys (make-flvector n-sp 0.0))
-          (for ([sp (in-list spores)] [i (in-naturals)])
-            (vector-set! sp-ids i (u-id sp))
-            (flvector-set! sp-xs i (real->double-flonum (u-x sp bx)))
-            (flvector-set! sp-ys i (real->double-flonum (u-y sp by))))
-          (define fnx (real->double-flonum nx))
-          (define fny (real->double-flonum ny))
-          (define ftx (real->double-flonum tx))
-          (define fty (real->double-flonum ty))
-          (define rbx (clamp-coord bx))
-          (define rby (clamp-coord by))
-          (define rnx (clamp-coord nx))
-          (define rny (clamp-coord ny))
-          (define rtx (clamp-coord tx))
-          (define rty (clamp-coord ty))
-          (define max-pairs (fx* 3 n-sp))
-          (let loop-at ([rem air-threats] [spu-mask 0] [seen-up '()] [seen-pairs '()] [n-pairs 0])
-            (unless (or (null? rem)
-                        (and spu0-id (fx= spu-mask 7))
-                        (and (not spu0-id) (fx>= n-pairs max-pairs)))
-              (define at (car rem))
-              (define ax (real->double-flonum (u-x at bx)))
-              (define ay (real->double-flonum (u-y at by)))
-              (define dxn (fl- ax fnx))
-              (define dyn (fl- ay fny))
-              (define bkt
-                (if (fl<= (fl+ (fl* dxn dxn) (fl* dyn dyn)) 144.0)
-                    0
-                    (let ([dxt (fl- ax ftx)] [dyt (fl- ay fty)])
-                      (if (fl<= (fl+ (fl* dxt dxt) (fl* dyt dyt)) 144.0) 1 2))))
-              (define bkt-bit (fxlshift 1 bkt))
-              (if (and spu0-id (not (fx= (fxand spu-mask bkt-bit) 0)))
-                  (loop-at (cdr rem) spu-mask seen-up seen-pairs n-pairs)
-                  (let ([res
-                         (let loop-sp ([i 0] [bid #f] [bd2 -1.0])
-                           (if (fx>= i n-sp)
-                               bid
-                               (let* ([dx (fl- (flvector-ref sp-xs i) ax)]
-                                      [dy (fl- (flvector-ref sp-ys i) ay)]
-                                      [d2 (fl+ (fl* dx dx) (fl* dy dy))])
-                                 (cond
-                                   [(fl<= d2 56.25) 'covered]
-                                   [(fl> d2 bd2) (loop-sp (fx+ i 1) (vector-ref sp-ids i) d2)]
-                                   [else (loop-sp (fx+ i 1) bid bd2)]))))])
-                    (if (eq? res 'covered)
-                        (loop-at (cdr rem) spu-mask seen-up seen-pairs n-pairs)
-                        (let ([root-x (case bkt [(0) rnx] [(1) rtx] [else rbx])]
-                              [root-y (case bkt [(0) rny] [(1) rty] [else rby])])
+        (define (air-threat-covered? ax ay)
+          (let loop ([i 0])
+            (and (fx< i n-sp)
+                 (let* ([dx (fl- (flvector-ref sp-xs i) ax)]
+                        [dy (fl- (flvector-ref sp-ys i) ay)])
+                   (or (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 121.0)
+                       (loop (fx+ i 1)))))))
+
+        ;; Loop 67 Phase D (Fix 1 & 2): Unconditionally re-root ALL uprooted Spores
+        ;; even when air-threats is empty, using safe +/-3.5t offset coordinates (NEVER Hatchery center!).
+        (when (pair? uprooted-spores)
+          (define th-pts
+            (if (pair? active-townhalls)
+                (for/list ([th (in-list active-townhalls)])
+                  (cons (real->double-flonum (u-x th bx))
+                        (real->double-flonum (u-y th by))))
+                (list (cons (real->double-flonum bx) (real->double-flonum by)))))
+          (define threat-base-pts
+            (if (pair? active-townhalls)
+                th-pts
+                (list (cons (real->double-flonum bx) (real->double-flonum by))
+                      (cons (real->double-flonum nx) (real->double-flonum ny))
+                      (cons (real->double-flonum tx) (real->double-flonum ty)))))
+          (define (nearest-pt-to x y pts)
+            (for/fold ([best (car pts)] [best-d2 +inf.0] #:result best)
+                      ([pt (in-list pts)])
+              (define d2 (fast-dist2 x y (car pt) (cdr pt)))
+              (if (< d2 best-d2) (values pt d2) (values best best-d2))))
+          (define uncovered-threat-pt
+            (and (pair? air-threats)
+                 (let loop ([rem air-threats])
+                   (cond
+                     [(null? rem) #f]
+                     [else
+                      (define at (car rem))
+                      (define ax (real->double-flonum (u-x at bx)))
+                      (define ay (real->double-flonum (u-y at by)))
+                      (if (air-threat-covered? ax ay)
+                          (loop (cdr rem))
+                          (nearest-pt-to ax ay threat-base-pts))]))))
+          (define unguarded-th-pts
+            (if (pair? active-townhalls)
+                (filter (lambda (pt)
+                          (define tx0 (car pt))
+                          (define ty0 (cdr pt))
+                          (not (let loop ([i 0])
+                                 (and (fx< i n-sp)
+                                      (let* ([dx (fl- (flvector-ref sp-xs i) tx0)]
+                                             [dy (fl- (flvector-ref sp-ys i) ty0)])
+                                        (or (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 144.0)
+                                            (loop (fx+ i 1))))))))
+                        th-pts)
+                '()))
+          (define seen-spu-ids '())
+          (for ([spu (in-list uprooted-spores)])
+            (define sid (u-id spu))
+            (unless (memv sid seen-spu-ids)
+              (set! seen-spu-ids (cons sid seen-spu-ids))
+              (define sx (real->double-flonum (u-x spu bx)))
+              (define sy (real->double-flonum (u-y spu by)))
+              (define target-pt
+                (cond
+                  [uncovered-threat-pt uncovered-threat-pt]
+                  [(pair? unguarded-th-pts) (nearest-pt-to sx sy unguarded-th-pts)]
+                  [else (nearest-pt-to sx sy th-pts)]))
+              (define-values (rx ry) (offset-spore-root-xy (car target-pt) (cdr target-pt)))
+              (emit! (list 'spore-crawler-root sid rx ry)))))
+
+        ;; Loop 67 Phase D (Fix 3 & 4): Cloak & base-floor uproot guard + 11.0t coverage check
+        ;; + NO same-frame uproot+root (max 1 surplus uproot per step).
+        (when (and (null? uprooted-spores)
+                   (pair? air-threats)
+                   (> n-sp (max 2 n-th)))
+          (define eu-ht (sd-index-enemy-u-by-type idx))
+          (define enemy-cloak-or-burrow-threat?
+            (or (has-bucket? eu-ht '(banshee dark-templar ghost
+                                     widow-mine widow-mine-burrowed
+                                     lurker lurker-mp lurker-burrowed lurker-mp-burrowed
+                                     mothership))
+                (ormap enemy-unit-cloaked-or-burrowed? (sd-index-enemy-units idx))
+                (ormap (lambda (at)
+                         (or (memq (u-sym at) '(banshee mothership))
+                             (enemy-unit-cloaked-or-burrowed? at)))
+                       air-threats)))
+          (unless enemy-cloak-or-burrow-threat?
+            ;; Never uproot a Spore that is the sole rooted Spore within 12.0t of an active TownHall.
+            (define sp-sole-base? (make-vector n-sp #f))
+            (for ([th (in-list active-townhalls)])
+              (define thx (real->double-flonum (u-x th bx)))
+              (define thy (real->double-flonum (u-y th by)))
+              (define-values (near-cnt sole-idx)
+                (let loop ([i 0] [cnt 0] [last-i -1])
+                  (if (fx>= i n-sp)
+                      (values cnt last-i)
+                      (let* ([dx (fl- (flvector-ref sp-xs i) thx)]
+                             [dy (fl- (flvector-ref sp-ys i) thy)])
+                        (if (fl<= (fl+ (fl* dx dx) (fl* dy dy)) 144.0)
+                            (loop (fx+ i 1) (fx+ cnt 1) i)
+                            (loop (fx+ i 1) cnt last-i))))))
+              (when (and (fx= near-cnt 1) (fx>= sole-idx 0))
+                (vector-set! sp-sole-base? sole-idx #t)))
+            ;; Find the first uncovered air threat (> 11.0t from all rooted Spores) and uproot
+            ;; at most ONE eligible surplus Spore on this step (no same-frame root).
+            (let loop-at ([rem air-threats])
+              (unless (null? rem)
+                (define at (car rem))
+                (define ax (real->double-flonum (u-x at bx)))
+                (define ay (real->double-flonum (u-y at by)))
+                (define res
+                  (let loop-sp ([i 0] [bid #f] [bd2 -1.0])
+                    (if (fx>= i n-sp)
+                        bid
+                        (let* ([dx (fl- (flvector-ref sp-xs i) ax)]
+                               [dy (fl- (flvector-ref sp-ys i) ay)]
+                               [d2 (fl+ (fl* dx dx) (fl* dy dy))])
                           (cond
-                            [spu0-id
-                             (emit! (list 'spore-crawler-root spu0-id root-x root-y))
-                             (loop-at (cdr rem) (fxior spu-mask bkt-bit) seen-up seen-pairs n-pairs)]
-                            [res
-                             (define n-up
-                               (if (memv res seen-up)
-                                   seen-up
-                                   (begin
-                                     (emit! (list 'spore-crawler-uproot res))
-                                     (cons res seen-up))))
-                             (define pair-key (+ bkt (* 4 res)))
-                             (if (memv pair-key seen-pairs)
-                                 (loop-at (cdr rem) spu-mask n-up seen-pairs n-pairs)
-                                 (begin
-                                   (emit! (list 'spore-crawler-root res root-x root-y))
-                                   (loop-at (cdr rem) spu-mask n-up (cons pair-key seen-pairs) (fx+ n-pairs 1))))]
-                            [else
-                             (loop-at (cdr rem) spu-mask seen-up seen-pairs n-pairs)]))))))))
+                            [(fl<= d2 121.0) 'covered]
+                            [(and (vector-ref sp-hp-ok i)
+                                  (not (vector-ref sp-sole-base? i))
+                                  (fl> d2 bd2))
+                             (loop-sp (fx+ i 1) (vector-ref sp-ids i) d2)]
+                            [else (loop-sp (fx+ i 1) bid bd2)])))))
+                (cond
+                  [(eq? res 'covered) (loop-at (cdr rem))]
+                  [res (emit! (list 'spore-crawler-uproot res))]
+                  [else (loop-at (cdr rem))])))))
 
         (when (pair? spores)
           (define queens (bucket-pos-ids au-ht '(queen)))

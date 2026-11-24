@@ -258,7 +258,10 @@
          #:blind-uphill-err-now? [blind-uphill-err-now? #f]
          #:under-pressure? [under-pressure? #f]
          #:cloak-threat-known? [cloak-threat-known? #f]
-         #:active-bases [active-bases #f])
+         #:active-bases [active-bases #f]
+         #:mineral-override-pressure? [mineral-override-pressure? #f]
+         #:gas-override-pressure? [gas-override-pressure? #f])
+  (void gas-override-pressure?)
   (define seen-enemy-race-now (infer-enemy-race-from-infos enemy-units))
   (when (and (macro-policy-latch? latch) seen-enemy-race-now)
     (set-macro-policy-latch-observed-enemy-race! latch seen-enemy-race-now))
@@ -388,10 +391,29 @@
             seen-terran-cloak-latched?)
        1]
       [else 0]))
+  (define mineral-override-relax-phase-oc?
+    ;; Loop 67 / Phase D (`#2020` Contract 2.2): Under sustained mineral override pressure in a
+    ;; peaceful non-cloak >=2-OC game, relax the non-cloak phase proactive reserve (1 -> 0) ONLY
+    ;; when an OC already sits at >= 100.0e (preserving instant 50e Scan & never weakening cloak/
+    ;; uphill/<100e safety reserves!).
+    (and mineral-override-pressure?
+         (not cloak-seen?)
+         (not seen-dt-prism-latched?)
+         (not seen-terran-cloak-latched?)
+         (not step-has-scan-request?)
+         (not blind-uphill-err-now?)
+         (not under-pressure?)
+         (>= (length ready-ocs) 2)
+         (= cloak-proactive-oc-limit 0)
+         (ormap (lambda (oc)
+                  (and (macro-oc-info? oc)
+                       (>= (exact->inexact (macro-oc-info-energy oc)) 100.0)))
+                ready-ocs)))
   (define phase-proactive-oc-limit
     ;; Loop 64 A5 (`#1755`): At >= 8:00 (10752f) OR under pressure on >= 2 bases, top-1 OC holds
     ;; 100.0e for proactive map/army/creep Scans (closing -17.4pp 8-12m Scan gap vs Pro 46.4%).
     (if (and (not isolated-arena-skirmish?)
+             (not mineral-override-relax-phase-oc?)
              (or (>= cur-loop 10752)
                  (and under-pressure? (>= eff-active-bases 2))))
         1
@@ -886,7 +908,9 @@
          #:early-gate-defenders [early-gate-defenders 0]
          #:under-pressure? [under-pressure? #f]
          #:main-base-breach? [main-base-breach? #f]
-         #:army-supply [army-supply 0.0])
+         #:army-supply [army-supply 0.0]
+         #:facility-override-pressure? [facility-override-pressure? #f]
+         #:mineral-override-pressure? [mineral-override-pressure? #f])
   (define sym (if (symbol? target-sym) target-sym 'unknown))
   (define nx-en (exact->inexact nexus-energy))
   (define army-sup (exact->inexact army-supply))
@@ -922,17 +946,21 @@
        [(memq sym '(forge twilight-council templar-archive robotics-bay)) 955.0]
        [(eq? sym 'cybernetics-core) 952.0]
        [(set-member? PROTOSS-CHRONO-TECH-UPGRADE-SYMS sym) 950.0]
-       [(eq? sym 'robotics-facility) 900.0]
-       [(eq? sym 'stargate) 860.0]
+       [(eq? sym 'robotics-facility) (if facility-override-pressure? 925.0 900.0)]
+       [(eq? sym 'stargate) (if facility-override-pressure? 885.0 860.0)]
        [(eq? sym 'nexus)
         (cond
-          ;; L64B (`#1814` Bug #4): Lift post-4m Nexus worker cap `< 56 -> < 66` when no unbuffed
-          ;; Tech/Robo needs Chrono, plus cap-bleed at `>= 125.0e` up to `< 72w` so Nexus #2/#3
-          ;; never sit idle on 100-149e while Tech/Robo is already Chrono-buffed!
+          ;; L64B (`#1814` Bug #4) + L67 Phase D (`#2020` Contract 2.2): Lift post-4m Nexus worker cap
+          ;; `< 56 -> < 66` when no unbuffed Tech/Robo needs Chrono, add bounded `+25.0` bias under
+          ;; `mineral-override-pressure?` when `< 60w` & `(not dry-caster-near?)`, plus cap-bleed at `>= 125.0e`.
           [(and (< worker-count 66)
                 (not has-busy-tech-or-robo?)
                 (or (>= nx-en 100.0) (not dry-caster-near?)))
-           600.0]
+           (if (and mineral-override-pressure?
+                    (< worker-count 60)
+                    (not dry-caster-near?))
+               625.0
+               600.0)]
           [(and (>= nx-en 125.0) (< worker-count 72))
            580.0]
           [else -1.0])]
@@ -960,7 +988,9 @@
          #:early-gate-defenders [early-gate-defenders 0]
          #:under-pressure? [under-pressure? #f]
          #:main-base-breach? [main-base-breach? #f]
-         #:army-supply [army-supply 0.0])
+         #:army-supply [army-supply 0.0]
+         #:facility-override-pressure? [facility-override-pressure? #f]
+         #:mineral-override-pressure? [mineral-override-pressure? #f])
   (define valid-cands
     (filter macro-chrono-candidate-info? candidates))
   (cond
@@ -987,7 +1017,9 @@
             #:early-gate-defenders early-gate-defenders
             #:under-pressure? under-pressure?
             #:main-base-breach? main-base-breach?
-            #:army-supply army-supply))
+            #:army-supply army-supply
+            #:facility-override-pressure? facility-override-pressure?
+            #:mineral-override-pressure? mineral-override-pressure?))
          (if (and (> sc 0.0)
                   (or (not bc)
                       (> sc bs)

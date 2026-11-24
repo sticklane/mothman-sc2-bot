@@ -3269,6 +3269,7 @@
    brain-scheduled-worker-util
    terran-morphed-th-open-slots
    terran-saving-for-cc-expand?
+   terran-protect-oc1-base?
    arbiter-budget
    arbiter-escrow-prop)
   #:mutable)
@@ -3280,6 +3281,7 @@
 
 (define (l2-clear-ctx-refs! ctx)
   (set-l2-ctx-actions! ctx #f)
+  (set-l2-ctx-terran-protect-oc1-base?! ctx #f)
   (set-l2-ctx-arbiter-budget! ctx #f)
   (set-l2-ctx-arbiter-escrow-prop! ctx #f)
   (set-l2-ctx-bldg-types! ctx #f)
@@ -5602,6 +5604,42 @@
           [(starport-techlab) (and (memq 'starport rtypes) #t)]
           [else (and (memq producer-key rtypes) #t)]))))
 
+;; Loop 67 Phase D: Hysteresis-guarded (`>= 3` in `224f`) cross-step arbiter pressure check
+(define (l2-arbiter-override-pressure? ctx reason [window-frames 224] [threshold 3])
+  (define rt (l2-ctx-rt ctx))
+  (define ledger (and rt (rt-arbiter-ledger rt)))
+  (and ledger
+       (>= (arbiter-recent-override-count
+            ledger 'l2-macro-runtime reason (safe-nonneg-int (l2-ctx-frame ctx) 0)
+            #:window-frames window-frames)
+           threshold)))
+
+;; Loop 67 Phase D: True when enemy fields capital air or pure air army (>= 4 air combat, 0 ground combat)
+(define (l2-enemy-air-dominated? ctx)
+  (or (and (l2-ctx-enemy-capital-air? ctx) #t)
+      (let ([eus (or (l2-ctx-enemy-units ctx) '())])
+        (define-values (air-c gnd-c)
+          (for/fold ([ac 0] [gc 0]) ([e (in-list eus)] #:when (hash? e))
+            (define fly? (or (eq? (hash-ref e 'flying? #f) #t)
+                             (eq? (hash-ref e 'is-flying #f) #t)))
+            (cond
+              [(and fly?
+                    (not (memq (fast-canonical-unit-sym (unit-type-sym e))
+                               '(overlord overseer observer warp-prism warp-prism-phasing medivac))))
+               (values (add1 ac) gc)]
+              [(and (not fly?) (combat-unit-record? e))
+               (values ac (add1 gc))]
+              [else (values ac gc)])))
+        (and (>= air-c 4) (= gnd-c 0)))))
+
+;; Loop 67 Phase D: Dynamic OC #1 mineral protection (< 250M while unmorphed completed CC exists
+;; and OC #1 has not started yet, even while the CC is finishing an SCV with order-count=1!)
+(define (l2-terran-protect-oc1-min? ctx)
+  (and (l2-ctx-terran-protect-oc1-base? ctx)
+       (< (l2-ctx-minerals ctx) 250)
+       (= (l2-cur-ally-canon-bldg-count ctx 'orbital-command) 0)
+       (= (order-ledger-pending-count-for-type (l2-ctx-oledger ctx) 'orbital-command (l2-ctx-frame ctx)) 0)))
+
 (define (l2-arbiter-authorize-spend! ctx id-sym domain priority
                                      #:minerals m
                                      #:gas g
@@ -5639,6 +5677,19 @@
                       (or (eq? id-sym active-escrow-sym)
                           (eq? (sc2-canonical-structure-sym id-sym)
                                (sc2-canonical-structure-sym active-escrow-sym)))))))
+     ;; Loop 67B Phase D: Release active escrow mineral floor -> 0 ONLY on genuine deep gas
+     ;; starvation (`res-gas - cur-gas > 35` & `cur-min >= max(480, res-min + 250)`) while
+     ;; strictly protecting core tech/power units and keeping `res-gas` 100% locked!
+     (define eff-escrow-min
+       (if (and enforce-escrow?
+                (> (- res-gas cur-gas) 35)
+                (>= cur-min (max 480 (+ res-min 250)))
+                (not (and (symbol? active-escrow-sym)
+                          (memq active-escrow-sym
+                                '(colossus siege-tank robotics-bay robotics-facility
+                                  immortal warp-prism spire lair)))))
+           0
+           res-min))
      (define slot-ok? (or (not fslot) (> (hash-ref open-slots fslot 0) 0)))
      (define raw-afford?
        (and slot-ok?
@@ -5646,57 +5697,87 @@
             (or (= eff-sup 0) (<= eff-sup cur-sup))
             (or (= eff-min 0) (<= eff-min cur-min))
             (or (= eff-gas 0) (<= eff-gas cur-gas))))
-     ;; Zero-allocation fast path when essential (or no active escrow) AND affordable + slot open
-     (if (and (not enforce-escrow?) raw-afford?)
-         #t
-         (let ()
-           (define budget
-             (make-arbiter-budget-snapshot
-              #:minerals cur-min
-              #:gas cur-gas
-              #:supply-left cur-sup
-              #:larva-count cur-larva
-              #:open-facility-slots open-slots))
-           (define spend-prop
-             (make-proposal
-              (list 'l2-spend id-sym)
-              'l2-macro-runtime
-              domain
-              priority
-              (list 'authorize id-sym)
-              #:cost (make-proposal-cost
-                      #:minerals eff-min
-                      #:gas eff-gas
-                      #:supply eff-sup
-                      #:larva eff-larv
-                      #:facility-slot fslot)
-              #:attention-tier (if essential? 0 2)
-              #:alternatives (if (list? alts) alts '())
-              #:rationale (if enforce-escrow? 'l2-escrow-checked-spend 'l2-macro-spend)))
-           (define escrow-props
-             (if enforce-escrow?
-                 (list (make-proposal
-                        (list 'l2-escrow (or active-escrow-sym 'bo-reserve))
-                        'l2-macro-escrow
-                        'macro
-                        (max (+ (exact->inexact priority) 100.0) 850.0)
-                        (list 'escrow (or active-escrow-sym 'bo-reserve))
-                        #:cost (make-proposal-cost #:minerals res-min #:gas res-gas)
-                        #:attention-tier 1
-                        #:rationale 'active-macro-escrow
-                        #:blocking-escrow? #t))
-                 '()))
-           (define res
-             (arbiter-resolve! ledger frame budget (append escrow-props (list spend-prop))))
-           (define accepted-acts (arbiter-result-approved-actions res))
-           (cond
-             [(ormap (lambda (a) (and (pair? a) (eq? (car a) 'authorize) (eq? (second a) id-sym)))
-                     accepted-acts)
-              #t]
-             [(and (pair? alts)
-                   (ormap (lambda (a) (and (pair? a) (not (eq? (car a) 'escrow)))) accepted-acts))
-              => (lambda (alt-act) alt-act)]
-             [else #f])))]))
+     ;; Loop 67B: Qualify starvation recording so routine broke/busy frames do NOT spam the
+     ;; arbiter ledger (eliminating false-positive permanently-`#t` override pressure!).
+     (define larva-starved-now?
+       (and (> eff-larv cur-larva) (>= cur-min 300)))
+     (define fac-starved-now?
+       (and (not slot-ok?)
+            (or (>= cur-min 350)
+                (and (>= cur-gas 200)
+                     (>= cur-min eff-min)))
+            (or (= eff-gas 0) (>= cur-gas eff-gas))))
+     (define gas-starved-now?
+       (and slot-ok?
+            (<= eff-larv cur-larva)
+            (> eff-gas cur-gas)
+            (>= cur-min (max 250 (+ eff-min 100)))))
+     (define min-starved-gas-rich?
+       (and slot-ok?
+            (<= eff-larv cur-larva)
+            (> eff-min cur-min)
+            (>= cur-gas 200)))
+     ;; Fast paths:
+     ;;   1. Essential (or no active escrow) AND raw-affordable + slot open -> `#t` (zero-alloc)
+     ;;   2. Routine unaffordable/busy frame with no alternatives and no genuine starvation -> `#f`
+     (cond
+       [(and (not enforce-escrow?) raw-afford?) #t]
+       [(and (not raw-afford?)
+             (null? alts)
+             (not larva-starved-now?)
+             (not fac-starved-now?)
+             (not gas-starved-now?)
+             (not min-starved-gas-rich?))
+        #f]
+       [else
+        (let ()
+          (define budget
+            (make-arbiter-budget-snapshot
+             #:minerals cur-min
+             #:gas cur-gas
+             #:supply-left cur-sup
+             #:larva-count cur-larva
+             #:open-facility-slots open-slots))
+          (define spend-prop
+            (make-proposal
+             (list 'l2-spend id-sym)
+             'l2-macro-runtime
+             domain
+             priority
+             (list 'authorize id-sym)
+             #:cost (make-proposal-cost
+                     #:minerals eff-min
+                     #:gas eff-gas
+                     #:supply eff-sup
+                     #:larva eff-larv
+                     #:facility-slot fslot)
+             #:attention-tier (if essential? 0 2)
+             #:alternatives (if (list? alts) alts '())
+             #:rationale (if enforce-escrow? 'l2-escrow-checked-spend 'l2-macro-spend)))
+          (define escrow-props
+            (if enforce-escrow?
+                (list (make-proposal
+                       (list 'l2-escrow (or active-escrow-sym 'bo-reserve))
+                       'l2-macro-escrow
+                       'macro
+                       (max (+ (exact->inexact priority) 100.0) 850.0)
+                       (list 'escrow (or active-escrow-sym 'bo-reserve))
+                       #:cost (make-proposal-cost #:minerals eff-escrow-min #:gas res-gas)
+                       #:attention-tier 1
+                       #:rationale 'active-macro-escrow
+                       #:blocking-escrow? #t))
+                '()))
+          (define res
+            (arbiter-resolve! ledger frame budget (append escrow-props (list spend-prop))))
+          (define accepted-acts (arbiter-result-approved-actions res))
+          (cond
+            [(ormap (lambda (a) (and (pair? a) (eq? (car a) 'authorize) (eq? (second a) id-sym)))
+                    accepted-acts)
+             #t]
+            [(and (pair? alts)
+                  (ormap (lambda (a) (and (pair? a) (not (eq? (car a) 'escrow)))) accepted-acts))
+             => (lambda (alt-act) alt-act)]
+            [else #f]))])]))
 
 (define (l2-brain-scheduled-now? ctx sym)
   (define md (l2-ctx-macro-decision ctx))
@@ -6572,9 +6653,24 @@
              (l2-spend-resources-and-supply! ctx m-cost g-cost s-cost)
              (loop (add1 trained))]
             [else
-             ;; Loop 66 Phase C1: Record structured `'budget-gas` / `'facility-busy` overrides in
-             ;; `(rt-arbiter-ledger rt)` when a live combat unit train fails due to gas or full slots
-             ;; (and honor optional mineral-only `#:alternatives` fallback proposals when provided!).
+             ;; Loop 66 Phase C1 + Loop 67B Phase D: Record structured `'budget-gas` / `'budget-larva` /
+             ;; `'facility-busy` overrides in `(rt-arbiter-ledger rt)` ONLY on genuine starvation
+             ;; bottlenecks (never routine spent-out/busy frames!), and synthesize a BO-respecting
+             ;; mineral-only fallback `proposal` at `>= 500M` during deep gas deficits (`> 35G` short).
+             (define trained-alt? #f)
+             (define larva-empty? (and (eq? producer-key 'larva) (<= avail-slots 0)))
+             (define train-larva-starved?
+               (and larva-empty? (>= (l2-ctx-minerals ctx) 300)))
+             (define train-fac-starved?
+               (and (not larva-empty?)
+                    (<= avail-slots 0)
+                    (>= (l2-ctx-minerals ctx) 350)
+                    (or (<= g-cost 0) (>= (l2-ctx-gas ctx) g-cost))))
+             (define train-gas-starved?
+               (and (> avail-slots 0)
+                    (> g-cost 0)
+                    (< eff-gas g-cost)
+                    (>= (l2-ctx-minerals ctx) (max 250 (+ m-cost 100)))))
              (when (and live-game?
                         (= trained 0)
                         (> eff-max-batch 0)
@@ -6582,10 +6678,62 @@
                         (not (eq? unit-sym 'overlord))
                         (l2-can-spend-supply? ctx s-cost)
                         (l2-has-ready-producer-owner? ctx producer-key)
-                        (or (<= avail-slots 0)
-                            (and (> g-cost 0)
-                                 (< eff-gas g-cost)
-                                 (or (<= m-cost 0) (>= eff-min m-cost)))))
+                        (or train-larva-starved?
+                            train-fac-starved?
+                            train-gas-starved?
+                            (pair? alts)))
+               (define eff-alts
+                 (cond
+                   [(pair? alts) alts]
+                   [(and (> avail-slots 0)
+                         (> g-cost 0)
+                         (< eff-gas (- g-cost 35))
+                         (>= (l2-ctx-minerals ctx) 500)
+                         (not (memq unit-sym '(colossus siege-tank immortal warp-prism)))
+                         (l2-can-spend-supply? ctx 2))
+                    (define race-cur (l2-ctx-race ctx))
+                    (define rtypes-cur (or (l2-ctx-ready-bldg-types ctx) '()))
+                    (define air-dom? (l2-enemy-air-dominated? ctx))
+                    (define alt-spec
+                      (case race-cur
+                        [(Protoss)
+                         (and (> (hash-ref open-prod-slots 'gateway 0) 0)
+                              (not (l2-unit-suppressed-by-counter-pivot? ctx 'zealot))
+                              (not air-dom?)
+                              (list 'zealot 'gateway 100 2 0))]
+                        [(Terran)
+                         (and (> (hash-ref open-prod-slots 'barracks 0) 0)
+                              (not (l2-unit-suppressed-by-counter-pivot? ctx 'marine))
+                              (list 'marine 'barracks 50 1 0))]
+                        [(Zerg)
+                         (and (>= (hash-ref open-prod-slots 'larva 0) 2)
+                              (memq 'spawning-pool rtypes-cur)
+                              (not (l2-unit-suppressed-by-counter-pivot? ctx 'zergling))
+                              (not air-dom?)
+                              (list 'zergling 'larva 50 1 1))]
+                        [else #f]))
+                    (if alt-spec
+                        (let ([asym (first alt-spec)]
+                              [apk  (second alt-spec)]
+                              [amin (third alt-spec)]
+                              [asup (fourth alt-spec)]
+                              [alar (fifth alt-spec)])
+                          (list (make-proposal
+                                 (list 'l2-gas-overflow-alt asym)
+                                 'l2-macro-runtime
+                                 'macro
+                                 560.0
+                                 (list 'train asym apk)
+                                 #:cost (make-proposal-cost
+                                         #:minerals amin
+                                         #:gas 0
+                                         #:supply asup
+                                         #:larva alar
+                                         #:facility-slot (if (eq? apk 'larva) #f apk))
+                                 #:attention-tier 2
+                                 #:rationale 'gas-deficit-mineral-overflow)))
+                        '())]
+                   [else '()]))
                (define arb-auth
                  (l2-arbiter-authorize-spend!
                   ctx unit-sym 'macro (if (or (not respect-bo?) bo-res-bypass?) 740.0 580.0)
@@ -6593,17 +6741,22 @@
                   #:gas g-cost
                   #:supply s-cost
                   #:larva (if (eq? producer-key 'larva) 1 0)
-                  #:facility-slot producer-key
+                  #:facility-slot (if larva-empty? #f producer-key)
                   #:essential? (or (not respect-bo?) bo-res-bypass?)
-                  #:alternatives alts))
+                  #:alternatives eff-alts))
                (when (and (pair? arb-auth)
                           (eq? (car arb-auth) 'train)
                           (symbol? (second arb-auth)))
                  (define alt-sym (second arb-auth))
-                 (l2-try-train-unit! ctx alt-sym producer-key recall-group
-                                     #:respect-bo-reserve? respect-bo?
-                                     #:max-batch 1)))
-             (> trained 0)]))))
+                 (define alt-pk (if (and (>= (length arb-auth) 3) (symbol? (third arb-auth)))
+                                    (third arb-auth)
+                                    producer-key))
+                 (set! trained-alt?
+                       (and (l2-try-train-unit! ctx alt-sym alt-pk recall-group
+                                                #:respect-bo-reserve? #t
+                                                #:max-batch 1)
+                            #t))))
+             (or (> trained 0) trained-alt?)]))))
 
 (define (l2-emit-building-morph-verified! ctx target-sym source-syms [recall-group 4])
   (define base-x (l2-ctx-base-x ctx))
@@ -15481,8 +15634,9 @@
           #:rationale 'active-macro-escrow
           #:blocking-escrow? #t)))
   (set-l2-ctx-arbiter-escrow-prop! ctx arb-escrow-prop-p8)
-  (when (and arb-escrow-prop-p8 arb-ledger-p8)
-    (arbiter-resolve! arb-ledger-p8 frame arb-budget-p8 (list arb-escrow-prop-p8)))
+  ;; Loop 67B: Do NOT resolve `arb-escrow-prop-p8` alone without a competing spend proposal —
+  ;; `l2-arbiter-authorize-spend!` already enforces `escrow-props` on contested spends, and
+  ;; solo escrow resolution spammed `l2-macro-escrow:budget-mineral` on every routine broke step!
   (define orphaned-prereqs
     (if (and live-game?
              (> frame 60)
@@ -16228,6 +16382,13 @@
   (define base-inject-queen-ids (mutable-seteqv))
   (define dedicated-creeping-queen-ids (mutable-seteqv))
   (define all-ready-hatches-injected? (null? uninjected-hatches))
+  ;; Loop 67 Phase D: Suppress non-dedicated Queen `25e` creep (and base-Queen fallback promotion)
+  ;; when `'budget-larva` override pressure is active (`>= 3` in `224f`) and uninjected Hatcheries
+  ;; exist (base Queens inject at `25e` first and only drop creep at `>= 50e` surplus!).
+  (define step-larva-override-pressure?
+    (and live-game? (l2-arbiter-override-pressure? ctx 'budget-larva)))
+  (define suppress-non-ded-creep-25?
+    (and step-larva-override-pressure? (pair? uninjected-hatches)))
   (define ready-hatch-count (length ready-hatcheries))
   (set-l2-ctx-ready-hatch-count! ctx ready-hatch-count)
   (when (pair? queens)
@@ -16272,7 +16433,8 @@
        (when (and (= (set-count dedicated-creeping-queen-ids) 0)
                   (not creep-self-sustaining?)
                   (or all-ready-hatches-injected?
-                      (and (null? active-creep-tumors)
+                      (and (not suppress-non-ded-creep-25?)
+                           (null? active-creep-tumors)
                            (>= frame 2400)
                            (pair? (cdr queens)))))
          (define promo-q
@@ -16355,9 +16517,10 @@
        (define dedicated-creeper? (set-member? dedicated-creeping-queen-ids qid))
        (define can-creep-at-25?
          (or dedicated-creeper?
-             (and (not creep-self-sustaining?) all-ready-hatches-injected?)
-             (and (not pass1-dispatched-emergency-tumor?)
-                  (or zero-tumors-2plus-queens? base-inject-catchup-tumor-ok?))))
+             (and (not suppress-non-ded-creep-25?)
+                  (or (and (not creep-self-sustaining?) all-ready-hatches-injected?)
+                      (and (not pass1-dispatched-emergency-tumor?)
+                           (or zero-tumors-2plus-queens? base-inject-catchup-tumor-ok?))))))
        (define req-energy
          (if can-creep-at-25?
              SC2-QUEEN-INJECT-ENERGY
@@ -18947,7 +19110,15 @@
                (or (not zerg-early-peaceful-drone-tempo?)
                    (< (l2-unit-count ctx 'roach) 2))
                (>= (- (l2-ctx-minerals ctx) zerg-spire-res-min) (sc2-min-cost 'roach))
-               (>= (- (l2-ctx-gas ctx) (+ (if (< (l2-unit-count ctx 'roach) 4) 0 zerg-ultra-res-gas) zerg-spire-res-gas)) (sc2-gas-cost 'roach)))
+               (or (>= (- (l2-ctx-gas ctx) (+ (if (< (l2-unit-count ctx 'roach) 4) 0 zerg-ultra-res-gas) zerg-spire-res-gas))
+                       (sc2-gas-cost 'roach))
+                   ;; Loop 67B Phase D: Enter gas-deficit `#:alternatives` cascade (`roach` -> `'zergling`)
+                   ;; ONLY at `>= 500M`, `< 25G`, and `>= 2` larvae while keeping gas 100% untouched!
+                   (and live-game?
+                        (>= (l2-ctx-minerals ctx) 500)
+                        (< (l2-ctx-gas ctx) 25)
+                        (memq 'spawning-pool ready-bldg-types)
+                        (>= (hash-ref (l2-ctx-open-prod-slots ctx) 'larva 0) 2))))
           (define peaceful-roach-max-batch
             (if zerg-early-peaceful-drone-tempo?
                 (max 0 (- 2 (l2-unit-count ctx 'roach)))
@@ -19248,6 +19419,13 @@
                              (< (exact->inexact (macro-caster-info-energy c)) 100.0)
                              (<= (dist2d nxx nxy (macro-caster-info-x c) (macro-caster-info-y c)) 22.0)))
                       recharge-caster-infos)))))
+  (define step-chrono-fac-pressure?
+    (and live-game? (l2-arbiter-override-pressure? ctx 'facility-busy)))
+  (define step-chrono-min-pressure?
+    (and live-game?
+         (l2-arbiter-override-pressure? ctx 'budget-mineral 224 6)
+         (>= (l2-ctx-gas ctx) 200)
+         (< (l2-ctx-minerals ctx) 150)))
   (define (chrono-prio-score nx b)
     (define bsym (fast-canonical-structure-sym (unit-type-sym b)))
     (score-protoss-chrono-target-policy
@@ -19261,7 +19439,9 @@
      #:early-gate-defenders protoss-early-gate-defenders
      #:under-pressure? (or early-survival-crisis? under-base-attack?)
      #:main-base-breach? protoss-main-base-breach?
-     #:army-supply live-army-supply))
+     #:army-supply live-army-supply
+     #:facility-override-pressure? step-chrono-fac-pressure?
+     #:mineral-override-pressure? step-chrono-min-pressure?))
   (if live-game?
          (fast-dispatch-macro-energy!
           chrono-eligible-nexuses
@@ -22341,6 +22521,13 @@
                          (macro-th-info-completed? th)
                          (not (macro-th-info-flying? th))))
                   l2-mule-th-infos)))
+  (define step-mule-min-pressure?
+    (and live-game?
+         (l2-arbiter-override-pressure? ctx 'budget-mineral 224 6)
+         (>= (l2-ctx-gas ctx) 200)
+         (< (l2-ctx-minerals ctx) 150)))
+  (define step-mule-gas-pressure?
+    (and live-game? (l2-arbiter-override-pressure? ctx 'budget-gas)))
   (define l2-mule-policy
     (if (pair? l2-mule-ready-oc-infos)
         (evaluate-terran-mule-policy
@@ -22356,7 +22543,9 @@
          #:under-pressure? l2-terran-oc-under-pressure?
          #:cloak-threat-known? (or owm-cloak-threat-known?
                                    (and tech-obs (enemy-tech-observation-requires-detection? tech-obs)))
-         #:active-bases l2-terran-active-bases)
+         #:active-bases l2-terran-active-bases
+         #:mineral-override-pressure? step-mule-min-pressure?
+         #:gas-override-pressure? step-mule-gas-pressure?)
         #f))
   (define enemy-cloaked-or-burrowed-active?
     (or (pair? scan-cands-now)
@@ -22611,19 +22800,22 @@
                 (< (l2-unit-count ctx 'viking) 8)
                 (l2-can-spend-supply? ctx (sc2-supply-cost 'viking)))
        (l2-try-train-unit! ctx 'viking 'starport 6 #:respect-bo-reserve? #f))
-  (define-values (unmorphed-ready-cc-cnt morphed-ready-oc-open-cnt)
-       (for/fold ([unm 0] [mor 0]) ([cc (in-list ccs)])
+  (define-values (unmorphed-ready-cc-cnt morphed-ready-oc-open-cnt unmorphed-completed-cc-cnt)
+       (for/fold ([unm 0] [mor 0] [unm-all 0]) ([cc (in-list ccs)])
          (define ct (unit-type-sym cc))
-         (define idle-ready?
+         (define completed-grounded?
            (and (l2-building-grounded-and-powered? ctx cc)
-                (>= (hash-ref cc 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)
+                (>= (hash-ref cc 'build-progress 1.0) SC2-BUILD-COMPLETE-PROGRESS)))
+         (define idle-ready?
+           (and completed-grounded?
                 (<= (hash-ref cc 'order-count 0) 0)
                 (= (hash-ref cc 'order-ability-id 0) 0)
                 (not (order-ledger-facility-busy? oledger cc frame))))
+         (define next-unm-all (if (and completed-grounded? (eq? ct 'command-center)) (add1 unm-all) unm-all))
          (cond
-           [(and idle-ready? (eq? ct 'command-center)) (values (add1 unm) mor)]
-           [(and idle-ready? (memq ct '(orbital-command planetary-fortress))) (values unm (add1 mor))]
-           [else (values unm mor)])))
+           [(and idle-ready? (eq? ct 'command-center)) (values (add1 unm) mor next-unm-all)]
+           [(and idle-ready? (memq ct '(orbital-command planetary-fortress))) (values unm (add1 mor) next-unm-all)]
+           [else (values unm mor next-unm-all)])))
   (set-l2-ctx-terran-morphed-th-open-slots! ctx morphed-ready-oc-open-cnt)
   ;; Scope orbital saving ONLY to unmorphed CCs at >= 100M (< 150M) — or from >= 50M when
   ;; Brain is explicitly saving for OC #1 (`0` OCs built yet, `#11/#20` `OC #1` drain fix!) —
@@ -22646,6 +22838,18 @@
             (>= (l2-ctx-minerals ctx) (if brain-saving-oc1-p1? 50 100))
             (< (l2-ctx-minerals ctx) (sc2-min-cost 'orbital-command))))
   (set-l2-ctx-terran-saving-for-orbital?! ctx terran-saving-for-orbital?)
+  ;; Loop 67 Phase D (`#2019 (a)`): Protect `150..249M` for OC #1 even while CC is busy
+  ;; finishing an SCV (`order-count=1`), preventing Bunker/Ref#2/RaxTL/RaxRx/FacTL drain!
+  (set-l2-ctx-terran-protect-oc1-base?!
+   ctx
+   (and live-game?
+        (> unmorphed-completed-cc-cnt 0)
+        (= (l2-cur-ally-canon-bldg-count ctx 'orbital-command) 0)
+        (= (order-ledger-pending-count-for-type oledger 'orbital-command frame) 0)
+        (memq 'barracks ready-bldg-types)
+        (or (not under-base-attack?)
+            (<= live-enemy-threat-supply 2.0))
+        (not early-survival-crisis?)))
   ;; Reserve only the unmorphed CC slot(s) for Orbital morph while keeping morphed Orbitals open for SCVs.
   (when terran-saving-for-orbital?
     (hash-set! open-prod-slots 'townhall
@@ -22794,17 +22998,23 @@
                       [(l2-ctx-bldg-actively-damaged? ctx) 1400]
                       [else 750]))
                 (not early-survival-crisis?))))
-  ;; W11-P0-2-rt (`#2 T v titania 12.33x`): Never let Cyclone/Viking priority starve 3rd CC
-  ;; past 4:30 (6048f) into a 2-base mined-out 0M/2,187G deadlock!
+  ;; W11-P0-2-rt + Loop 67 Phase D: Never let Cyclone/Viking priority starve 3rd CC past 4:30
+  ;; (6048f), AND promote peaceful midgame 3rd CC at >= 5:15 (7056f, >= 34w, >= 10 army sup)!
   (define terran-3rd-cc-overdue-override?
     (and live-game?
          (= (length ccs) 2)
-         (>= frame 6048)
-         (>= total-workers 24)
          (not under-base-attack?)
          (not early-survival-crisis?)
          (>= (l2-ctx-minerals ctx) (sc2-min-cost 'command-center))
-         (memq (l2-ctx-prio-saving-for-sym ctx) '(cyclone viking viking-fighter none #f))))
+         (or (and (>= frame 6048)
+                  (>= total-workers 24)
+                  (memq (l2-ctx-prio-saving-for-sym ctx) '(cyclone viking viking-fighter none #f)))
+             (and (>= frame 7056)
+                  (>= total-workers 34)
+                  (>= live-army-supply 10)
+                  (<= live-enemy-threat-supply (* 0.85 live-army-supply))
+                  (not (memq (l2-ctx-prio-saving-for-sym ctx)
+                             '(supply-depot missile-turret raven siege-tank)))))))
   ;; L19-P0-3 (`#029`/`#047` 1BaseLock): Never let light poke (`enemy-threat <= army`),
   ;; blocked-nat flags, or L2 surcharges silently veto a Brain-scheduled 1-base Terran CC!
   (define terran-light-poke-ok?
@@ -23017,6 +23227,16 @@
   (define pending-cc-count
        (order-ledger-pending-count-for-type oledger 'command-center frame))
   (set-l2-ctx-pending-cc-count! ctx pending-cc-count)
+  ;; Loop 67 Phase D: Keep 1-base Natural CC mineral reserve alive while actively saving >= 150M
+  ;; for 'command-center in peaceful < 4:00 (5376f) openings so timeout expiry never drains Nat CC!
+  (define terran-1base-nat-cc-escrow-keep?
+    (and (= (length ccs) 1)
+         (= pending-cc-count 0)
+         (< frame 5376)
+         (not under-base-attack?)
+         (not early-survival-crisis?)
+         (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center)
+         (>= (l2-ctx-minerals ctx) 150)))
   (define reserved-expansion-minerals
        (if live-game?
            (compute-natural-expansion-mineral-reserve
@@ -23031,7 +23251,8 @@
             #:escrow-expired? (or escrow-suppressed-active?
                                   early-survival-crisis?
                                   (l2-macro-brain-expand-backed-off? ctx)
-                                  (>= cur-escrow-age-frames max-escrow-timeout-frames)
+                                  (and (not terran-1base-nat-cc-escrow-keep?)
+                                       (>= cur-escrow-age-frames max-escrow-timeout-frames))
                                   urgent-combat-or-intel-need?
                                   (not (null? orphaned-prereqs))))
            0))
@@ -23118,6 +23339,9 @@
                          (<= (dist2d nat-x nat-y (hash-ref e 'x 9999.0) (hash-ref e 'y 9999.0)) 30.0)))))))
   (when (and (not terran-zero-threat-early-zerg?)
              (not l2-terran-protect-early-nat-cc-bunker?)
+             (not (and (l2-terran-protect-oc1-min? ctx)
+                       (not under-early-cheese?)
+                       (not (l2-ctx-worker-rush-active? ctx))))
              l2-terran-bunker-marine-ok?
              (or early-survival-crisis?
                     under-early-cheese?
@@ -23272,6 +23496,12 @@
                 (or terran-cannon-breakout-mode? (not crisis-freeze-expand-or-gas?))
                 (l2-save-cancel-rebuild-ready? ctx 'refinery 60)
                 (or (null? active-refineries) (not terran-saving-for-expand?) terran-cannon-breakout-mode?)
+                (or (null? active-refineries) (not (l2-terran-protect-oc1-min? ctx)) terran-cannon-breakout-mode?)
+                (or (null? active-refineries)
+                    terran-cannon-breakout-mode?
+                    (not (and (= (length ccs) 1)
+                              terran-saving-for-cc-expand?
+                              (< (l2-ctx-minerals ctx) 475))))
                 ;; W6-P0-3-rt: Defer Refinery #2+ until Factory #1 drops once 100G is banked
                 (or (null? active-refineries)
                     terran-cannon-breakout-mode?
@@ -23657,6 +23887,7 @@
   (define rax-tl-claimed? #f)
   (when (and bare-rax-for-tl
                 (not terran-saving-for-expand?)
+                (not (l2-terran-protect-oc1-min? ctx))
                 (not (and terran-early-rush-defer-rax-addon?
                           (<= (length barracks-list) 1)))
                 (not has-rax-techlab?)
@@ -23854,7 +24085,9 @@
          (l2-emit-build-verified! ctx 'starport spx spy
                                   #:bypass-escrow? (or endgame-corner-hunt?
                                                        terran-heavy-air-or-colossus-sp?
-                                                       brain-sched-sp-now?))))
+                                                       (and brain-sched-sp-now?
+                                                            (not (and (= (length ccs) 1)
+                                                                      (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center))))))))
   (define terran-ideal-worker-cap
        (l2-compute-race-ideal-worker-cap ctx ccs))
   (set-l2-ctx-terran-ideal-worker-cap! ctx terran-ideal-worker-cap)
@@ -24120,6 +24353,7 @@
        (+ (count (lambda (t) (memq t '(barracks-reactor reactor))) (l2-ctx-bldg-types ctx))
           (order-ledger-pending-count-for-type oledger 'barracks-reactor frame)))
   (when (and (not terran-saving-for-expand?)
+                (not (l2-terran-protect-oc1-min? ctx))
                 (not terran-early-rush-defer-rax-addon?)
                 (>= (length barracks-list) 2)
                 bare-rax-for-rx
@@ -24195,6 +24429,7 @@
             (not (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center))))
   (define fac-tl-claimed? #f)
   (when (and (not p2-reaper-or-ling-swarm-override?)
+                (not (l2-terran-protect-oc1-min? ctx))
                 (not (and p2-fast-rush-override?
                           (not tvt-first-fac-tl-now?)
                           (<= (length factories-list) 1)
@@ -24205,7 +24440,7 @@
                     (and (or first-fac-tl-priority-now? tvt-second-fac-tl-priority-now?)
                          (>= (length ccs) 2)
                          (>= total-workers 22)
-                         (not (eq? (l2-ctx-prio-saving-for-sym ctx) 'command-center))))
+                         (not (memq (l2-ctx-prio-saving-for-sym ctx) '(command-center orbital-command)))))
                 bare-fac-for-tl
                 (or terran-cannon-breakout-mode?
                     first-fac-tl-priority-now?
@@ -44941,6 +45176,12 @@
     (if (pair? arb-top-pairs) (second (first arb-top-pairs)) 'none))
   (define step-gas-starvation-boost?
     (>= (arbiter-recent-override-count arb-ledger-step 'l2-macro-runtime 'budget-gas step-frame #:window-frames 224) 3))
+  (define step-obs-min (safe-nonneg-int (hash-ref obs 'minerals 0) 0))
+  (define step-obs-gas (safe-nonneg-int (hash-ref obs 'gas 0) 0))
+  (define step-min-override-pressure?
+    (and (>= (arbiter-recent-override-count arb-ledger-step 'l2-macro-runtime 'budget-mineral step-frame #:window-frames 224) 6)
+         (>= step-obs-gas 200)
+         (< step-obs-min 150)))
   (define step-apm-pressure-backoff?
     (>= (arbiter-recent-override-count arb-ledger-step 'l2-macro-runtime 'apm-cap-deferred step-frame #:window-frames 112) 3))
   (define telemetry
@@ -44960,6 +45201,7 @@
         'wall-reserved-aabbs step-wall-aabbs
         'watchdog-expand-ring-syms (hash-ref door-st-cache 'watchdog-expand-ring-syms '())
         'gas-starvation-boost? step-gas-starvation-boost?
+        'mineral-override-pressure? step-min-override-pressure?
         'apm-pressure-backoff? step-apm-pressure-backoff?
         'arbiter-ledger arb-ledger-step))
 
