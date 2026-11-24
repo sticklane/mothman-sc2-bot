@@ -1510,6 +1510,7 @@ DEPLOY_LABELS: Dict[str, str] = {
     "unlmxxko_ec044f2a": "Loop 64B",
     "pxlouxrw_6c50ea86": "Loop 65H",
     "tlrrltvx_ea56f6f1": "Loop 66",
+    "wqqmqyvl_161ad430": "Loop 67B",
 }
 
 BOT_META: Dict[str, Dict[str, str]] = {
@@ -4226,10 +4227,11 @@ def _render_standings_tables(
             "crashes across 114 Division 6–7 games (4–9 on Release #13, 2.5× Release #12's win rate, with live wins over "
             "1575-Elo Snowbot and 1551-Elo Kira). Release #13 raised live external win rate 16.1 percentage points to 44.0% "
             "(6–2, 75.0% in v1 ranked matches), cut live harvest command drops by 93.0%, and averaged 3.99 ms per step. "
-            'All eight ladder bots currently run Release #17 (Build 65H, Competition #38, '
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45343681227" target="_blank" rel="noopener noreferrer">deploy run 45343681227</a>, '
-            '8/8 verified active), while <strong>Release #18</strong> (Build 66) has passed full 84-match validation '
-            'and 4–0 standalone BotZip smoke (8.09× trade, 9.69 ms/step) and is queued for AI Arena rollout. '
+            'All eight ladder bots now run <strong>Release #19</strong> (Build 67B, Competition #38, '
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45379956983" target="_blank" rel="noopener noreferrer">deploy run 45379956983</a>, '
+            '8/8 verified active, following Release #18 '
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45358551282" target="_blank" rel="noopener noreferrer">deploy run 45358551282</a>) '
+            'after passing 4–0 standalone BotZip smoke (8.29× trade, 97.5/100 state score, 10.1 ms/step). '
             "Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
         )
@@ -4329,7 +4331,7 @@ def build_index_page(
     latest_b_num = int(latest_num_m.group(1)) if latest_num_m else 45
     prev_b_num = int(prev_num_m.group(1)) if prev_num_m else 42
     if cb.get("is_shipped") and cb.get("ship_num"):
-        eyebrow_txt = f"AI Arena Ladder · Release #{cb['ship_num']} (Build {b_tag})"
+        eyebrow_txt = f"AI Arena Ladder · Live Release #{cb['ship_num']} (Build {b_tag})"
     else:
         eyebrow_txt = f"AI Arena Ladder · Live Release #{live_ship_num} (Build {live_loop_num}) · Local Benchmark: Build {b_tag}"
     recent_note_builds = f"Builds {prev_b_num} and {latest_b_num} ({comb_w} wins, {comb_l} losses across completed v1 games)"
@@ -4651,10 +4653,11 @@ def build_history_page(
         f"The first deployed build went 0–10 on AI Arena. Recent v1 builds win roughly 55–61% of their games: "
         f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
         f"Release #9 (Build 51) climbed to 19–9–3 (61.3% wins), and Release #13 (Build 61C) went 7–5 (58.3% external; "
-        f"6–2 in ranked v1 games, +106 combined v1 Elo across Releases #11–#13) before Releases #14–#17 "
-        f"(Build 65H, "
-        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45343681227" target="_blank" rel="noopener noreferrer">deploy run 45343681227</a>) '
-        f"rolled out to all 8 ladder bots, with Release #18 (Build 66) validated and packaged for the next rollout."
+        f"6–2 in ranked v1 games, +106 combined v1 Elo across Releases #11–#13) before Releases #14–#18 "
+        f'(Build 66, <a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45358551282" target="_blank" rel="noopener noreferrer">deploy run 45358551282</a>) '
+        f"and Release #19 (Build 67B, "
+        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45379956983" target="_blank" rel="noopener noreferrer">deploy run 45379956983</a>) '
+        f"rolled out to all 8 ladder bots."
     )
 
     sec_loop = render_loop_diagram_section(rich, section_num="Section 2")
@@ -4722,6 +4725,7 @@ def build_history_page(
         "iter64b_ship16_full": 16,
         "iter65h_ship17_full": 17,
         "iter66_ship18_full": 18,
+        "iter67b_ship19_full": 19,
     }
 
     def _format_run_label(run_id: str, status_raw: str = "") -> str:
@@ -5097,9 +5101,9 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
     for old, new in replacements:
         text = text.replace(old, new)
 
-    # 5. Unwrap backtick pills around plain numbers, percentages, durations, ranges, records, and IF-* tags
+    # 5. Unwrap backtick pills around plain numbers, percentages, durations, ranges, records, n/a, and IF-* tags
     text = re.sub(
-        r"`((?:n=)?\d[\d.,]*\s*(?:%|min|m|h|hours|s|x|×)?|L\d+[–-](?:L)?\d+|\d+W[-–]\d+L|IF-\d+)`",
+        r"`((?:n=)?\d[\d.,]*\s*(?:%|min|m|h|hours|s|x|×)?|L\d+[–-](?:L)?\d+|\d+W[-–]\d+L|IF-\d+|n/a)`",
         r"\1",
         text,
     )
@@ -5162,6 +5166,7 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
             "raco_make": "Full bytecode build",
             "full_test_suite": "Full test suite",
             "racket_test": "Unit test",
+            "forensics_diff": "Replay forensics diff",
         }
 
         def _describe_slow_cmd(kind_raw: str, cmd_raw: str) -> str:
@@ -5247,19 +5252,23 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
                 elif "`bench_low_concurrency`" in s:
                     other_findings.append("**Benchmark concurrency:** Earlier runs used 10 of 32 threads (31.2% utilization). Full 84-match runs now target 12 concurrent workers (avoiding CPU-contention timeouts), and 26-match single-race canaries run at 14 workers.")
                 elif "`bench_non_lpt_schedule`" in s:
-                    other_findings.append("**Match scheduling:** Five earlier runs launched matches in fixed order. Longest-first (LPT) scheduling is now enabled by default so slow opponents start in Wave 1 and cut tail wait to 7.9% in L65H and 2.9% in L66.")
+                    other_findings.append("**Match scheduling:** Five earlier runs launched matches in fixed order. Longest-first (LPT) scheduling is now enabled by default so slow opponents start in Wave 1 and cut tail wait to 7.9% in L65H, 2.9% in L66, and 1.7% in L67B.")
                 elif "`mechanical_runner_multi_turn_post_bench`" in s:
-                    other_findings.append("**Post-match handoffs:** Multi-turn serial post-benchmark steps (up to 12 turns in L65C) were collapsed into a single parallel post-benchmark pipeline.")
+                    other_findings.append("**Post-match handoffs:** Multi-turn serial post-benchmark steps (12 turns in L65C and 6 in L66) were collapsed into a single parallel post-benchmark pipeline; extra runner turns fell to 0 in L67B.")
                 elif "`slow_non_sc2_command`" in s and "`post_bench_serial`" in s:
-                    other_findings.append("**Serial post-match scripts:** Serial scoring and replay extraction took 56 to 61 s per run; the parallel pipeline now completes the full pass in ~42 s.")
+                    other_findings.append("**Serial post-match scripts:** Serial scoring and replay extraction took 56 to 61 s per run; the parallel pipeline now completes the full pass in 29.0 s.")
                 elif "`slow_non_sc2_command`" in s and "`racket_minus_c`" in s:
                     other_findings.append("**Uncompiled test runs:** Source-only Racket test runs reached 43 s; isolated per-lane bytecode caches eliminate repeated cold compilation.")
                 elif "`slow_non_sc2_command`" in s and "`raco_make`" in s:
                     other_findings.append("**Full-tree builds:** Full bytecode rebuilds took 33 s; scoped lane test runners compile only edited modules and target tests.")
+                elif "`slow_non_sc2_command`" in s and "`forensics_diff`" in s:
+                    other_findings.append("**Replay forensics diffs:** One replay diff pass took 37.0 s in L67B; caching per-match features keeps future diffs under 10 s.")
                 elif "`slow_non_sc2_command`" in s and "`other`" in s:
                     other_findings.append("**Ad-hoc replay scripts:** Repeated 60 to 90 s inline replay analysis scripts are being replaced by cached reusable diff tools.")
                 elif "`bench_high_tail_waste`" in s:
-                    other_findings.append("**Short-gate tail wait:** Two 12-match runs spent over 25% of wall time waiting on the slowest match (worst 48.4% in L65F); longest-first ordering prioritizes historically long pairings first.")
+                    m_tw = re.search(r"(\d+)\s+run\(s\)\s+had\s+>25%\s+tail\s+overhead", s)
+                    n_tw = int(m_tw.group(1)) if m_tw else 3
+                    other_findings.append(f"**Short-gate tail wait:** {n_tw} short canary or head-to-head runs spent over 25% of wall time waiting on the slowest match (worst 48.4% in L65F); longest-first ordering prioritizes historically long pairings first.")
 
         if churn_roles:
             other_findings.append(
