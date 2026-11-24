@@ -1511,6 +1511,7 @@ DEPLOY_LABELS: Dict[str, str] = {
     "pxlouxrw_6c50ea86": "Loop 65H",
     "tlrrltvx_ea56f6f1": "Loop 66",
     "wqqmqyvl_161ad430": "Loop 67B",
+    "mkmrwtny_b6ab8e0e": "Loop 68C",
 }
 
 BOT_META: Dict[str, Dict[str, str]] = {
@@ -4245,7 +4246,7 @@ def _render_standings_tables(
         note_html = (
             '<p class="table-note">'
             "AI Arena ratings start at 1600. All eight ladder accounts currently run "
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45379956983" target="_blank" rel="noopener noreferrer"><strong>Release #19 (Build 67B)</strong></a>, '
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45439370512" target="_blank" rel="noopener noreferrer"><strong>Release #20 (Build 68C)</strong></a>, '
             f"with {html.escape(crash_phrase)} and +119 combined Elo gained across all four Division 9 accounts since Release #13. "
             "Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
@@ -4476,8 +4477,8 @@ def build_index_page(
             "Terran · Held-Out Bot",
             "Mothman-T vs. who (TvP · 23.75×)",
             "Terran win against held-out bot who, finished under nine minutes with 1.8% supply-blocked time.",
-            "Mothman-T vs. <code>who</code> (TvP · 23.75×)",
-            "Terran win against held-out bot <code>who</code>, finished under nine minutes with 1.8% supply-blocked time.",
+            None,
+            None,
         ),
         (
             "showcase:h2h002",
@@ -4668,10 +4669,8 @@ def build_history_page(
         f"The first deployed build went 0–10 on AI Arena. Recent v1 builds win roughly 55–61% of their games: "
         f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
         f"Release #9 (Build 51) climbed to 19–9–3 (61.3% wins), and Release #13 (Build 61C) went 7–5 (58.3% external; "
-        f"6–2 in ranked v1 games, +106 combined v1 Elo across Releases #11–#13) before Releases #14–#18 "
-        f'(Build 66, <a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45358551282" target="_blank" rel="noopener noreferrer">deploy run 45358551282</a>) '
-        f"and Release #19 (Build 67B, "
-        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45379956983" target="_blank" rel="noopener noreferrer">deploy run 45379956983</a>) '
+        f"6–2 in ranked v1 games) before Releases #14–#19 and "
+        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45439370512" target="_blank" rel="noopener noreferrer">Release #20 (Build 68C)</a> '
         f"rolled out to all 8 ladder bots."
     )
 
@@ -4741,6 +4740,7 @@ def build_history_page(
         "iter65h_ship17_full": 17,
         "iter66_ship18_full": 18,
         "iter67b_ship19_full": 19,
+        "iter68c_ship20_full": 20,
     }
 
     def _format_run_label(run_id: str, status_raw: str = "") -> str:
@@ -5143,8 +5143,9 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
     if sec6_marker in text:
         head_part, sec6_raw = text.split(sec6_marker, 1)
         sec6_lines = sec6_raw.splitlines()
-        # Extract sub-iteration -> wall_min mapping from Section 6b to disambiguate Table 3a held rows (e.g. L65 -> L65C..L65G)
+        # Extract sub-iteration -> wall_min mapping and Stage 1 Canary-18 runs from Section 6b to disambiguate Table 3a
         sub_by_wall: Dict[Tuple[str, str], str] = {}
+        canary18_subs: set[str] = set()
         in_6b = False
         for sln in sec6_lines:
             ss = sln.strip()
@@ -5160,10 +5161,14 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
                     m_sub = re.fullmatch(r"(L\d+)([A-Z]+)", scells[0])
                     if m_sub:
                         sub_by_wall[(m_sub.group(1), scells[5])] = scells[0]
+                    if scells[1] == "18":
+                        canary18_subs.add(scells[0])
         if sub_by_wall:
             def _disambig_3a_row(m: re.Match[str]) -> str:
                 base_lp, mid, wall_s, rest = m.group(1), m.group(2), m.group(3), m.group(4)
                 rep_lp = sub_by_wall.get((base_lp, wall_s), base_lp)
+                if rep_lp in canary18_subs:
+                    return f"| {rep_lp} | Canary-18 | YES | {wall_s} | Stage 1 canary gate | Stopped at the 18-match canary gate before the 84-match roster |"
                 return f"| {rep_lp} |{mid}| {wall_s} |{rest}"
             head_part = re.sub(
                 r"^\| (L\d+) \|([^|\n]+\|[^|\n]+)\|\s*(\d+\.\d+)\s*\|(.*)$",
@@ -5267,7 +5272,7 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
                         if c_n > churn_peak[1]:
                             churn_peak = (m_r.group(1).strip() if m_r else "Role", c_n, m_c.group(1))
                 elif "`bench_low_concurrency`" in s:
-                    other_findings.append("**Benchmark concurrency:** Earlier runs used 10 of 32 threads (31.2% utilization). Full 84-match runs now target 12 concurrent workers (avoiding CPU-contention timeouts), and 26-match single-race canaries run at 14 workers.")
+                    other_findings.append("**Benchmark concurrency:** Earlier runs used 10 of 32 threads (31.2% utilization). Both 18-match 3-race canaries and full 84-match runs now target 12 concurrent workers to avoid CPU-contention timeouts.")
                 elif "`bench_non_lpt_schedule`" in s:
                     other_findings.append("**Match scheduling:** Five earlier runs launched matches in fixed order. Longest-first (LPT) scheduling is now enabled by default so slow opponents start in Wave 1 and cut tail wait to 7.9% in L65H, 2.9% in L66, and 1.7% in L67B.")
                 elif "`mechanical_runner_multi_turn_post_bench`" in s:
@@ -5292,6 +5297,7 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
                 f"**High-command sessions:** {len(churn_roles)} roles exceeded 15 shell commands in a single loop session "
                 f"(peak {churn_peak[1]} commands by {churn_peak[0]} in {churn_peak[2]}); reusable scoring and diff tools replace those manual loops."
             )
+        other_findings = list(dict.fromkeys(other_findings))
         for idx_f, f_txt in enumerate(other_findings, 1):
             out6.append(f"{idx_f}. {f_txt}")
         text = head_part + "\n" + "\n".join(out6) + "\n"
@@ -5300,6 +5306,11 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
     text = re.sub(r"(\d+\.\d+)x\b", r"\1×", text)
     text = re.sub(r"\b(\d+)W-(\d+)L\b", r"\1–\2", text)
     text = re.sub(r"\bL(\d+)[–-]L(\d+)\b", r"Loops \1–\2", text)
+    text = re.sub(
+        r"Across (Loops \d+–\d+), Engineering changes \(([^)]+)\) and 84-match benchmark \(([^)]+)\) account for most wall time, while Head-to-head gate averages \*\*([^*]+)\*\* and catches most held regressions early\.",
+        r"Across \1, engineering changes (\2) and the 84-match benchmark (\3) are the two largest active phases, while the head-to-head gate averages **\4** when run and catches most held regressions early.",
+        text,
+    )
     text = re.sub(r"Across (Loops \d+–\d+), Engineering changes", r"Across \1, engineering changes", text)
     return text
 

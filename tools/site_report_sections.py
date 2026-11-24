@@ -395,6 +395,7 @@ def load_rich_report_telemetry(
             or (it_n == 65 and suf.lower() == "h" and sh_n == 17)
             or (it_n == 66 and not suf and sh_n == 18)
             or (it_n == 67 and suf.lower() == "b" and sh_n == 19)
+            or (it_n == 68 and suf.lower() == "c" and sh_n == 20)
         )
 
     # A2. Load Combat Positioning (Section 5) & Army-Group Positioning (Section 6) vs. Pro
@@ -1327,7 +1328,7 @@ def load_rich_report_telemetry(
                  OR m.run_id LIKE '%iter61c_ship13_full%' OR m.run_id LIKE '%iter62c_ship14_full%'
                  OR m.run_id LIKE '%iter63b_ship15_full%' OR m.run_id LIKE '%iter64b_ship16_full%'
                  OR m.run_id LIKE '%iter65h_ship17_full%' OR m.run_id LIKE '%iter66_ship18_full%'
-                 OR m.run_id LIKE '%iter67b_ship19_full%')
+                 OR m.run_id LIKE '%iter67b_ship19_full%' OR m.run_id LIKE '%iter68c_ship20_full%')
         """
 
         # Per-matchup Local stats (All 26 external opponents)
@@ -3278,7 +3279,7 @@ def render_matchup_evaluation_section(
         pro_large_vals: List[float] = []
         our_large_vals: List[float] = []
         pro_wrap_vals: List[float] = []
-        our_wrap_race: List[str] = []
+        our_wrap_pairs: List[Tuple[str, float]] = []
         for rname in ("Protoss", "Terran", "Zerg"):
             rd = pcp_by_race.get(rname) or {}
             pr = rd.get("pro") or {}
@@ -3292,7 +3293,7 @@ def render_matchup_evaluation_section(
             if pr.get("concave_wrap_score") is not None:
                 pro_wrap_vals.append(float(pr["concave_wrap_score"]))
             if mm.get("concave_wrap_score") is not None:
-                our_wrap_race.append(f"{float(mm['concave_wrap_score']):+.2f} {rname}")
+                our_wrap_pairs.append((rname, float(mm["concave_wrap_score"])))
             pcp_rows.append(
                 f"<tr>"
                 f"<td><strong>{rname}</strong></td>"
@@ -3306,10 +3307,22 @@ def render_matchup_evaluation_section(
                 f"</tr>"
             )
         if pcp_rows:
-            if our_wrap_race and pro_wrap_vals and our_large_vals and pro_large_vals:
+            if our_wrap_pairs and pro_wrap_vals and our_large_vals and pro_large_vals:
+                pos_w = [f"{r} ({v:+.2f})" for r, v in our_wrap_pairs if v > 0.0]
+                neg_w = [f"{r} ({v:+.2f})" for r, v in our_wrap_pairs if v <= 0.0]
+                if len(pos_w) == len(our_wrap_pairs):
+                    wrap_clause = f"All three Mothman races form positive concave arcs ({', '.join(pos_w)} vs. Grandmaster {min(pro_wrap_vals):+.2f} to {max(pro_wrap_vals):+.2f})"
+                elif pos_w and neg_w:
+                    pos_join = " and ".join(pos_w) if len(pos_w) == 2 else ", ".join(pos_w)
+                    neg_join = " and ".join(neg_w) if len(neg_w) == 2 else ", ".join(neg_w)
+                    verb_pos = "form" if len(pos_w) > 1 else "forms"
+                    verb_neg = "sit" if len(neg_w) > 1 else "sits"
+                    wrap_clause = f"{pos_join} {verb_pos} positive concave arcs (vs. Grandmaster {min(pro_wrap_vals):+.2f} to {max(pro_wrap_vals):+.2f}) while {neg_join} {verb_neg} narrower"
+                else:
+                    all_join = ", ".join(f"{r} ({v:+.2f})" for r, v in our_wrap_pairs)
+                    wrap_clause = f"Measured concave wrap sits at {all_join} (vs. Grandmaster {min(pro_wrap_vals):+.2f} to {max(pro_wrap_vals):+.2f})"
                 concave_svg_cap = (
-                    f"All three Mothman races form positive concave arcs ({', '.join(our_wrap_race)} vs. "
-                    f"Grandmaster {min(pro_wrap_vals):+.2f} to {max(pro_wrap_vals):+.2f}), though armies still fight in smaller packs "
+                    f"{wrap_clause}, and armies still engage in smaller packs "
                     f"({min(our_large_vals):.0f}% to {max(our_large_vals):.0f}% 10+ unit fights vs. Pro {min(pro_large_vals):.0f}% to {max(pro_large_vals):.0f}%)."
                 )
             pcp_table_drawer = f"""
@@ -3702,7 +3715,18 @@ def render_matchup_evaluation_section(
             else ""
         )
         run_id_low = str(pro_curves.get("run_id") or "").lower()
-        if "iter67b_" in run_id_low:
+        if "iter68c_" in run_id_low:
+            rh_title = f"Release #{int(cb['ship_num'])}" if (cb.get("is_shipped") and cb.get("ship_num")) else build_lbl
+            r_mech_para = f"""
+    <div class="release-highlights">
+      <div class="rh-kicker">What Changed in {html.escape(rh_title)}</div>
+      <ul class="rh-list">
+        <li><strong>Detection &amp; anti-air across all three races:</strong> Stopped Zerg Overseers from locking into immobile Oversight mode during stealth threats and halted ground-only Roach and Baneling spending against Banshees and Battlecruisers, which flipped Zerg matches against who and Mulebot to wins. Terran and Protoss now track capital air in scouting memory and close on long-range Tempests instead of hovering at weapon-range edge.</li>
+        <li><strong>Faster natural and third-base expansions:</strong> Unified 1-base expansion savings eliminated PvP second-base delays (Protoss natural 1:41; Terran natural 1:34). Third-base adoption rose 15.4 percentage points for both Terran and Zerg, while wasted Observer Speed upgrades fell from 42.3% to 7.7%.</li>
+        <li><strong>Higher trade efficiency &amp; cleaner armies:</strong> Overall local trade hit a record 0.93× (54.8% win+tie), led by Terran climbing +0.23× to 0.93×. Median army value rose from 648 to 760 minerals, and zero-kill collapses dropped from 7 to 1.</li>
+      </ul>
+    </div>"""
+        elif "iter67b_" in run_id_low:
             rh_title = f"Release #{int(cb['ship_num'])}" if (cb.get("is_shipped") and cb.get("ship_num")) else build_lbl
             r_mech_para = f"""
     <div class="release-highlights">
@@ -4019,10 +4043,10 @@ def render_matchup_evaluation_section(
     n_gm = int(an_cur.get("gas_rich_min_starved", 0) or 0)
 
     open_gaps = [
-        f"<strong>Early rushes and cloaked harass:</strong> One-base Marauder rushes, mass Reapers under 4:30, early Banshees, and Dark Templars remain our steepest early losses ({_pl(n_zk, 'zero-kill collapse', 'zero-kill collapses')} and {_pl(n_clk, 'cloaked-unit loss', 'cloaked-unit losses')} across the 78 external games).",
-        f"<strong>Fighting into sieged Tanks and capital air:</strong> Against mass Tempests, Vikings and Corruptors hovered at weapon-range edge instead of committing together. {rot_gap_note}",
+        f"<strong>Early rushes and cloaked harass:</strong> One-base Marauder rushes, mass Reapers under 4:30, early Banshees, and Dark Templars remain our sharpest early losses ({_pl(n_zk, 'zero-kill collapse', 'zero-kill collapses')} and {_pl(n_clk, 'cloaked-unit loss', 'cloaked-unit losses')} across the 78 external games).",
+        f"<strong>Fighting into sieged lines and rotating between bases:</strong> {rot_gap_note}",
         f"<strong>Slow early Zerg drone count:</strong> Zerg active workers at 4:00 averaged {z_w4_avg:.1f} ({z_w4_gap:.1f} behind the Grandmaster median of {pro_z_w4:.1f}) because early defensive Zerglings slow mid-game Roach and Hydralisk scaling in peaceful openings.",
-        f"<strong>Late Terran third base and mid-game gas income:</strong> Terran third Command Center adoption sits at {t3_m_pct}% (median {html.escape(t3_m_t)} vs. Pro {t3_p_pct}% at {html.escape(t3_p_t)}), and overall median gas income ({gas_m_med:,} vs. Pro {gas_p_med:,} per minute) still leaves late-game headroom.",
+        f"<strong>Mid-game production, upgrades, and gas income:</strong> Terran third Command Center adoption ({t3_m_pct}% at {html.escape(t3_m_t)} vs. Pro {t3_p_pct}% at {html.escape(t3_p_t)}), overall median gas income ({gas_m_med:,} vs. Pro {gas_p_med:,} per minute), late-game production building counts, and +2 combat upgrade adoption still trail Grandmaster benchmarks.",
     ]
     open_gaps_html = "".join(f"<li>{item}</li>" for item in open_gaps)
 
