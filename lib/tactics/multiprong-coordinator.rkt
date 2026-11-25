@@ -92,6 +92,9 @@
  multiprong-live-eligible?
  compute-flank-waypoint
  compute-prism-warp-pocket
+ compute-liberator-deadspace-spot
+ plan-liberator-multiprong-harass
+ select-minimal-liberator-aa-peel
  step-multiprong-coordinator!)
 
 ;; =============================================================================
@@ -2014,3 +2017,418 @@
       arbiter-claimed
       final-mode
       final-target)]))
+
+;; =============================================================================
+;; Loop 79 A2: Dead-Space Multi-Prong Liberator Harass & Minimal AA Peel
+;; =============================================================================
+
+(define LIBERATOR-PREFERRED-AA-PEEL-SYMS
+  (seteq 'queen 'corruptor 'stalker 'phoenix 'viking 'viking-fighter
+         'hydralisk 'marine 'cyclone 'void-ray 'voidray 'mutalisk))
+
+(define LIBERATOR-STATIC-AA-SYMS
+  (seteq 'missile-turret 'bunker 'photon-cannon 'spore-crawler))
+
+;; Projects along the ray from TownHall `(th-x, th-y)` through mineral centroid
+;; `(mineral-cx, mineral-cy)`:
+;; - `(siege-x, siege-y)` sits `1.5t` toward `(th-x, th-y)` from `(mineral-cx, mineral-cy)`
+;;   (directly on the mining worker arc!).
+;; - `(park-x, park-y)` sits `4.5t` past `(siege-x, siege-y)` away from `(th-x, th-y)`
+;;   (`7.5t` with Advanced Ballistics), so the Liberator parks over behind-mineral dead
+;;   space while keeping `(siege-x, siege-y)` strictly INSIDE its `4.8t` (`7.8t`) cast
+;;   range so the `5.0t` Defender Zone covers the entire mining lane!
+;; Returns `(values park-x park-y siege-x siege-y)`.
+(define (compute-liberator-deadspace-spot th-x th-y mineral-cx mineral-cy
+                                          [map-w 200.0] [map-h 200.0] [has-range-upg? #f])
+  (define mw (flmax 40.0 (exact->inexact map-w)))
+  (define mh (flmax 40.0 (exact->inexact map-h)))
+  (define ftx (exact->inexact th-x))
+  (define fty (exact->inexact th-y))
+  (define fmx (exact->inexact mineral-cx))
+  (define fmy (exact->inexact mineral-cy))
+  (define dx (fl- fmx ftx))
+  (define dy (fl- fmy fty))
+  (define d (flsqrt (fl+ (fl* dx dx) (fl* dy dy))))
+  (define-values (ux uy)
+    (if (fl> d 0.25)
+        (values (fl/ dx d) (fl/ dy d))
+        ;; Fallback outward toward nearest map border if TH and minerals coincide
+        (let* ([ox (if (fl< ftx (fl* 0.5 mw)) -1.0 1.0)]
+               [oy (if (fl< fty (fl* 0.5 mh)) -1.0 1.0)]
+               [on (flsqrt (fl+ (fl* ox ox) (fl* oy oy)))])
+          (values (fl/ ox on) (fl/ oy on)))))
+  ;; Place Defender Zone center 1.5t toward TownHall from mineral centroid (mining worker arc!)
+  (define pull-toward-th (if (fl> d 0.25) (flmin 1.5 (fl* 0.4 d)) 0.0))
+  (define siege-x (clamp-fl (fl- fmx (fl* pull-toward-th ux)) 4.0 (fl- mw 4.0)))
+  (define siege-y (clamp-fl (fl- fmy (fl* pull-toward-th uy)) 4.0 (fl- mh 4.0)))
+  ;; Park 4.5t past siege center away from TH (`7.5t` w/ Advanced Ballistics) -> strictly inside
+  ;; `4.8t` (`7.8t`) cast range while staying ~3.0t (`~6.0t`) behind the mineral patches!
+  (define park-offset (if has-range-upg? 7.5 4.5))
+  (define park-x (clamp-fl (fl+ siege-x (fl* park-offset ux)) 4.0 (fl- mw 4.0)))
+  (define park-y (clamp-fl (fl+ siege-y (fl* park-offset uy)) 4.0 (fl- mh 4.0)))
+  (values park-x park-y siege-x siege-y))
+
+(define (lib-base-extract b mw mh)
+  (cond
+    [(hash? b)
+     (define tx (hash-ref b 'th-x (lambda () (hash-ref b 'x #f))))
+     (define ty (hash-ref b 'th-y (lambda () (hash-ref b 'y #f))))
+     (and (real? tx) (real? ty)
+          (let* ([ftx (exact->inexact tx)]
+                 [fty (exact->inexact ty)]
+                 [raw-mx (hash-ref b 'mineral-cx (lambda () (hash-ref b 'min-x #f)))]
+                 [raw-my (hash-ref b 'mineral-cy (lambda () (hash-ref b 'min-y #f)))]
+                 [ox (if (fl< ftx (fl* 0.5 mw)) -1.0 1.0)]
+                 [oy (if (fl< fty (fl* 0.5 mh)) -1.0 1.0)]
+                 [on (flmax 1.0 (flsqrt (fl+ (fl* ox ox) (fl* oy oy))))]
+                 [mcx (if (real? raw-mx) (exact->inexact raw-mx) (clamp-fl (fl+ ftx (fl* 5.5 (fl/ ox on))) 6.0 (fl- mw 6.0)))]
+                 [mcy (if (real? raw-my) (exact->inexact raw-my) (clamp-fl (fl+ fty (fl* 5.5 (fl/ oy on))) 6.0 (fl- mh 6.0)))]
+                 [aa-cnt (let ([v (hash-ref b 'aa-cnt 0)]) (if (real? v) (exact->inexact v) 0.0))]
+                 [workers (let ([v (hash-ref b 'workers 0)]) (if (real? v) (exact->inexact v) 0.0))])
+            (vector ftx fty mcx mcy aa-cnt workers)))]
+    [(and (pair? b) (real? (car b)) (real? (cdr b)))
+     (define ftx (exact->inexact (car b)))
+     (define fty (exact->inexact (cdr b)))
+     (define ox (if (fl< ftx (fl* 0.5 mw)) -1.0 1.0))
+     (define oy (if (fl< fty (fl* 0.5 mh)) -1.0 1.0))
+     (define on (flsqrt (fl+ (fl* ox ox) (fl* oy oy))))
+     (vector ftx fty
+             (clamp-fl (fl+ ftx (fl* 5.5 (fl/ ox on))) 6.0 (fl- mw 6.0))
+             (clamp-fl (fl+ fty (fl* 5.5 (fl/ oy on))) 6.0 (fl- mh 6.0))
+             0.0 0.0)]
+    [else #f]))
+
+(define (lib-hp-ratio u)
+  (define hp (and (hash? u) (hash-ref u 'hp (lambda () (hash-ref u 'health #f)))))
+  (define mhp (and (hash? u) (hash-ref u 'max-hp (lambda () (hash-ref u 'max_health 180.0)))))
+  (if (and (real? hp) (real? mhp) (> mhp 0))
+      (fl/ (exact->inexact hp) (exact->inexact mhp))
+      1.0))
+
+;; Detaches 1 harass Liberator when >= 2 exist (2 when >= 3, up to 3 when >= 5, never
+;; stripping the last Liberator from home defense in mixed armies; or ALL 1-2 when the
+;; entire combat squad is pure harass Liberators), assigns each to a distinct enemy
+;; mineral base (>= 20t apart, preferring unguarded/outer bases away from enemy AA),
+;; and computes edge-avoiding flank waypoints (>= 18t clear of enemy army centroid)
+;; while going directly to `'park`/`'siege` when already <= 16t from park or when
+;; `enemy-army` is simply local base defense (<= 12t of that same base).
+(define (plan-liberator-multiprong-harass
+         liberators enemy-bases ally-army-cx ally-army-cy enemy-army-cx enemy-army-cy frame
+         [map-w 200.0] [map-h 200.0] [has-range-upg? #f] [frontline-pushing? #f]
+         #:pure-harass-squad? [pure-harass-squad? #f]
+         #:enemy-units [enemy-units '()])
+  (define mw (flmax 40.0 (exact->inexact map-w)))
+  (define mh (flmax 40.0 (exact->inexact map-h)))
+  (define acx (exact->inexact ally-army-cx))
+  (define acy (exact->inexact ally-army-cy))
+  (define ecx (exact->inexact enemy-army-cx))
+  (define ecy (exact->inexact enemy-army-cy))
+  (define valid-libs
+    (filter (lambda (u)
+              (and (hash? u)
+                   (rec-id u)
+                   (real? (hash-ref u 'x #f))
+                   (real? (hash-ref u 'y #f))
+                   (let ([raw (hash-ref u 'type (lambda () (hash-ref u 'unit-type 'unknown)))])
+                     (or (eq? raw 'liberator)
+                         (eq? raw 'liberator-ag)
+                         (eq? (rec-sym u) 'liberator)))))
+            (or liberators '())))
+  (define n-libs (length valid-libs))
+  (define valid-bases
+    (filter values (map (lambda (b) (lib-base-extract b mw mh)) (or enemy-bases '()))))
+  (define inferred-pure-harass?
+    (or pure-harass-squad?
+        (and (>= n-libs 1)
+             (<= n-libs 2)
+             (pair? valid-bases)
+             (let-values ([(sx sy)
+                           (for/fold ([sx 0.0] [sy 0.0]) ([u (in-list valid-libs)])
+                             (values (fl+ sx (rec-x u)) (fl+ sy (rec-y u))))])
+               (define lcx (fl/ sx (exact->inexact n-libs)))
+               (define lcy (fl/ sy (exact->inexact n-libs)))
+               (and (fl<= (dist2d-fl lcx lcy acx acy) 2.5)
+                    (for/or ([b (in-list valid-bases)])
+                      (fl<= (dist2d-fl lcx lcy (vector-ref b 0) (vector-ref b 1)) 24.0)))))))
+  (cond
+    [(or (null? valid-bases)
+         (= n-libs 0)
+         (and (< n-libs 2) (not inferred-pure-harass?)))
+     '()]
+    [else
+     (define detach-k
+       (cond
+         [inferred-pure-harass? (min n-libs 3)]
+         [(>= n-libs 5) 3]
+         [(>= n-libs 3) 2]
+         [else 1]))
+     ;; Rank enemy bases: prefer unguarded/outer bases further from enemy army centroid
+     (define scored-bases
+       (sort valid-bases
+             (lambda (a b)
+               (define sa (fl+ (dist2d-fl (vector-ref a 0) (vector-ref a 1) ecx ecy)
+                               (fl+ (fl* -15.0 (vector-ref a 4))
+                                    (fl* 0.5 (vector-ref a 5)))))
+               (define sb (fl+ (dist2d-fl (vector-ref b 0) (vector-ref b 1) ecx ecy)
+                               (fl+ (fl* -15.0 (vector-ref b 4))
+                                    (fl* 0.5 (vector-ref b 5)))))
+               (fl> sa sb))))
+     ;; Select up to `detach-k` distinct enemy bases separated by >= 20.0t
+     (define distinct-bases
+       (reverse
+        (for/fold ([picked '()]) ([b (in-list scored-bases)])
+          (cond
+            [(>= (length picked) detach-k) picked]
+            [(for/and ([p (in-list picked)])
+               (fl>= (dist2d-fl (vector-ref b 0) (vector-ref b 1)
+                                (vector-ref p 0) (vector-ref p 1))
+                     20.0))
+             (cons b picked)]
+            [else picked]))))
+     (cond
+       [(null? distinct-bases) '()]
+       [else
+        ;; Prefer healthy Liberators furthest from ally army core (never strip the home guard)
+        (define ranked-libs
+          (sort valid-libs
+                (lambda (a b)
+                  (define ahp (lib-hp-ratio a))
+                  (define bhp (lib-hp-ratio b))
+                  (define da (dist2d-fl (rec-x a) (rec-y a) acx acy))
+                  (define db (dist2d-fl (rec-x b) (rec-y b) acx acy))
+                  (define sa (fl+ da (if (fl>= ahp 0.50) 25.0 -25.0)))
+                  (define sb (fl+ db (if (fl>= bhp 0.50) 25.0 -25.0)))
+                  (or (fl> sa sb) (and (fl= sa sb) (< (rec-id a) (rec-id b)))))))
+        (define n-assign
+          (if inferred-pure-harass?
+              (min detach-k (length ranked-libs))
+              (min (length distinct-bases) (length ranked-libs))))
+        (define chosen-libs (take ranked-libs n-assign))
+        ;; Pair each chosen Liberator to its nearest remaining distinct base; if a pure
+        ;; harass squad has more Liberators than distinct bases (e.g. 2 solo Liberators
+        ;; hitting 1 mineral line), assign the remainder to the best base with deterministic
+        ;; lateral crescent spread by ascending unit ID so there is zero swap oscillation.
+        (define-values (assignments _rem-bases)
+          (for/fold ([acc '()] [rem distinct-bases])
+                    ([lu (in-list chosen-libs)])
+            (define pool (if (null? rem) distinct-bases rem))
+            (define lx (rec-x lu))
+            (define ly (rec-y lu))
+            (define best-b
+              (car (sort pool
+                         (lambda (a b)
+                           (fl< (dist2d-fl lx ly (vector-ref a 2) (vector-ref a 3))
+                                (dist2d-fl lx ly (vector-ref b 2) (vector-ref b 3)))))))
+            (values (cons (cons lu best-b) acc)
+                    (if (null? rem) '() (remove best-b rem)))))
+        (define ordered-assignments (reverse assignments))
+        ;; Compute deterministic lateral spread offset when multiple Liberators share one base
+        (define base-group-uids (make-hash))
+        (for ([pair-lb (in-list ordered-assignments)])
+          (define b (cdr pair-lb))
+          (hash-set! base-group-uids b (cons (rec-id (car pair-lb)) (hash-ref base-group-uids b '()))))
+        (define uid-spread-offset (make-hasheqv))
+        (for ([(b uids) (in-hash base-group-uids)])
+          (define suids (sort uids <))
+          (define m (length suids))
+          (when (> m 1)
+            (for ([u (in-list suids)] [idx (in-naturals)])
+              (define step (if (= m 2) 2.0 2.25))
+              (define off (fl* step (fl- (exact->inexact idx) (fl* 0.5 (exact->inexact (sub1 m))))))
+              (hash-set! uid-spread-offset u off))))
+        (for/list ([pair-lb (in-list ordered-assignments)])
+          (define lu (car pair-lb))
+          (define b (cdr pair-lb))
+          (define uid (rec-id lu))
+          (define lx (rec-x lu))
+          (define ly (rec-y lu))
+          (define raw-t (hash-ref lu 'type (lambda () (hash-ref lu 'unit-type 'liberator))))
+          (define hp-r (lib-hp-ratio lu))
+          (define b-thx (vector-ref b 0))
+          (define b-thy (vector-ref b 1))
+          (define b-mcx (vector-ref b 2))
+          (define b-mcy (vector-ref b 3))
+          (define-values (base-px0 base-py0 base-sx0 base-sy0)
+            (compute-liberator-deadspace-spot b-thx b-thy b-mcx b-mcy
+                                              mw mh has-range-upg?))
+          ;; When live enemy workers are visible (`#:enemy-units`) within <= 9.5t of the
+          ;; target base's mineral centroid, refine `(siege-x, siege-y)` directly onto the
+          ;; live worker centroid and recompute `(park-x, park-y)` 4.5t/7.5t behind it away from TH!
+          (define-values (w-sum-x w-sum-y w-near-cnt)
+            (for/fold ([sx-acc 0.0] [sy-acc 0.0] [wc 0])
+                      ([e (in-list (or enemy-units '()))])
+              (if (and (hash? e)
+                       (not (eq? (hash-ref e 'snapshot? #f) #t))
+                       (real? (hash-ref e 'x #f))
+                       (real? (hash-ref e 'y #f))
+                       (memq (rec-sym e) '(drone scv probe))
+                       (let ([ex (exact->inexact (hash-ref e 'x 0.0))]
+                             [ey (exact->inexact (hash-ref e 'y 0.0))])
+                         (fl<= (dist2d-fl ex ey b-mcx b-mcy) 9.5)))
+                  (values (fl+ sx-acc (exact->inexact (hash-ref e 'x 0.0)))
+                          (fl+ sy-acc (exact->inexact (hash-ref e 'y 0.0)))
+                          (add1 wc))
+                  (values sx-acc sy-acc wc))))
+          (define-values (px0 py0 sx0 sy0)
+            (if (> w-near-cnt 0)
+                (let* ([wsx (clamp-fl (fl/ w-sum-x (exact->inexact w-near-cnt)) 4.0 (fl- mw 4.0))]
+                       [wsy (clamp-fl (fl/ w-sum-y (exact->inexact w-near-cnt)) 4.0 (fl- mh 4.0))]
+                       [wdx (fl- wsx b-thx)]
+                       [wdy (fl- wsy b-thy)]
+                       [wd (flsqrt (fl+ (fl* wdx wdx) (fl* wdy wdy)))]
+                       [rdx (if (fl> wd 0.5) wdx (fl- b-mcx b-thx))]
+                       [rdy (if (fl> wd 0.5) wdy (fl- b-mcy b-thy))]
+                       [rd (flmax 1e-4 (flsqrt (fl+ (fl* rdx rdx) (fl* rdy rdy))))]
+                       [ux (fl/ rdx rd)]
+                       [uy (fl/ rdy rd)]
+                       [park-off (if has-range-upg? 7.5 4.5)])
+                  (values (clamp-fl (fl+ wsx (fl* park-off ux)) 4.0 (fl- mw 4.0))
+                          (clamp-fl (fl+ wsy (fl* park-off uy)) 4.0 (fl- mh 4.0))
+                          wsx
+                          wsy))
+                (values base-px0 base-py0 base-sx0 base-sy0)))
+          (define spread-off (hash-ref uid-spread-offset uid 0.0))
+          (define-values (px py sx sy)
+            (if (fl= spread-off 0.0)
+                (values px0 py0 sx0 sy0)
+                (let* ([rdx (fl- b-mcx b-thx)]
+                       [rdy (fl- b-mcy b-thy)]
+                       [rd (flmax 1e-4 (flsqrt (fl+ (fl* rdx rdx) (fl* rdy rdy))))]
+                       [perp-x (fl/ (fl- 0.0 rdy) rd)]
+                       [perp-y (fl/ rdx rd)])
+                  (values (clamp-fl (fl+ px0 (fl* spread-off perp-x)) 4.0 (fl- mw 4.0))
+                          (clamp-fl (fl+ py0 (fl* spread-off perp-y)) 4.0 (fl- mh 4.0))
+                          (clamp-fl (fl+ sx0 (fl* spread-off perp-x)) 4.0 (fl- mw 4.0))
+                          (clamp-fl (fl+ sy0 (fl* spread-off perp-y)) 4.0 (fl- mh 4.0))))))
+          ;; Count live enemy AA units within <= 8.0t of this Liberator (when `enemy-units` supplied)
+          (define local-aa-near-lib
+            (for/fold ([cnt 0]) ([e (in-list (or enemy-units '()))])
+              (if (and (hash? e)
+                       (not (eq? (hash-ref e 'snapshot? #f) #t))
+                       (real? (hash-ref e 'x #f))
+                       (real? (hash-ref e 'y #f))
+                       (let ([esym (rec-sym e)])
+                         (or (set-member? ANTI-AIR-UNIT-SYMS esym)
+                             (set-member? LIBERATOR-STATIC-AA-SYMS esym)))
+                       (fl<= (dist2d-fl lx ly
+                                        (exact->inexact (hash-ref e 'x 0.0))
+                                        (exact->inexact (hash-ref e 'y 0.0)))
+                             8.0))
+                  (add1 cnt)
+                  cnt)))
+          ;; Compute edge-avoiding flank waypoint guaranteed >= 18.0t away from enemy army centroid
+          (define-values (raw-wx raw-wy)
+            (compute-flank-waypoint lx ly px py ecx ecy mw mh #:clearance 20.0))
+          (define-values (wx wy)
+            (if (fl>= (dist2d-fl raw-wx raw-wy ecx ecy) 18.0)
+                (values raw-wx raw-wy)
+                ;; Push cleanly to the map edge away from `(ecx, ecy)` so waypoint stays >= 18.0t clear
+                (let* ([edge-cands
+                        (list (cons 6.0 py) (cons (fl- mw 6.0) py)
+                              (cons px 6.0) (cons px (fl- mh 6.0))
+                              (cons 6.0 6.0) (cons (fl- mw 6.0) (fl- mh 6.0))
+                              (cons 6.0 (fl- mh 6.0)) (cons (fl- mw 6.0) 6.0))]
+                       [best-e
+                        (car (sort edge-cands
+                                   (lambda (p1 p2)
+                                     (define d1 (dist2d-fl (car p1) (cdr p1) ecx ecy))
+                                     (define d2 (dist2d-fl (car p2) (cdr p2) ecx ecy))
+                                     (define c1 (fl+ (dist2d-fl lx ly (car p1) (cdr p1))
+                                                     (dist2d-fl (car p1) (cdr p1) px py)))
+                                     (define c2 (fl+ (dist2d-fl lx ly (car p2) (cdr p2))
+                                                     (dist2d-fl (car p2) (cdr p2) px py)))
+                                     (cond
+                                       [(and (fl>= d1 18.0) (fl< d2 18.0)) #t]
+                                       [(and (fl< d1 18.0) (fl>= d2 18.0)) #f]
+                                       [(and (fl>= d1 18.0) (fl>= d2 18.0)) (fl< c1 c2)]
+                                       [else (fl> d1 d2)]))))])
+                  (values (car best-e) (cdr best-e)))))
+          (define d-park (dist2d-fl lx ly px py))
+          (define d-siege (dist2d-fl lx ly sx sy))
+          (define cast-r (if has-range-upg? 7.8 4.8))
+          (define enemy-army-is-local-base-def?
+            (or (fl<= (dist2d-fl ecx ecy b-thx b-thy) 12.0)
+                (fl<= (dist2d-fl ecx ecy sx sy) 12.0)))
+          (define direct-seg-clear?
+            (fl>= (point-to-segment-dist-fl ecx ecy lx ly px py) 18.0))
+          ;; Trigger `'siege` immediately whenever inside cast range `<= 4.8t` (`<= 7.8t` w/ range upg)
+          ;; of `(siege-x, siege-y)` (never looping `'park` moves when already in cast range!).
+          (define stage
+            (cond
+              [(or (fl< hp-r 0.42) (>= local-aa-near-lib 3)) 'evade]
+              [(or (fl<= d-siege cast-r)
+                   (and (fl<= d-park 2.5)
+                        (fl<= d-siege (if has-range-upg? 8.5 5.5)))
+                   (and (eq? raw-t 'liberator-ag)
+                        (fl<= d-siege (if has-range-upg? 10.0 7.0))))
+               'siege]
+              [(or (fl<= d-park 16.0) enemy-army-is-local-base-def? direct-seg-clear?) 'park]
+              [else 'flank]))
+          (define-values (out-wx out-wy)
+            (case stage
+              [(evade)
+               (define use-lib-vec? (fl< (dist2d-fl acx acy ecx ecy) 4.0))
+               (define ex-dx (fl- (if use-lib-vec? lx acx) ecx))
+               (define ex-dy (fl- (if use-lib-vec? ly acy) ecy))
+               (define ex-dn (flmax 1.0 (flsqrt (fl+ (fl* ex-dx ex-dx) (fl* ex-dy ex-dy)))))
+               (values (clamp-fl (fl+ lx (fl* 10.0 (fl/ ex-dx ex-dn))) 4.0 (fl- mw 4.0))
+                       (clamp-fl (fl+ ly (fl* 10.0 (fl/ ex-dy ex-dn))) 4.0 (fl- mh 4.0)))]
+              [(flank) (values wx wy)]
+              [else (values px py)]))
+          (hasheq 'id uid
+                  'stage stage
+                  'park-x px
+                  'park-y py
+                  'siege-x sx
+                  'siege-y sy
+                  'waypoint-x out-wx
+                  'waypoint-y out-wy
+                  'synced? (and frontline-pushing? #t)))])]))
+
+;; Selects a minimal local AA response squad against a harassing Liberator so the main
+;; army is never yanked off a frontline engagement (`<= 4` nearest AA AND `<= 12%` of
+;; `total-combat-supply`, with a floor of `3` AA units when available while fighting;
+;; up to `6` nearest AA units when not actively fighting elsewhere).
+(define (select-minimal-liberator-aa-peel aa-units lib-x lib-y main-army-fighting? total-combat-supply)
+  (define flx (exact->inexact lib-x))
+  (define fly (exact->inexact lib-y))
+  (define mobile-aa
+    (filter (lambda (u)
+              (and (hash? u)
+                   (real? (hash-ref u 'x #f))
+                   (real? (hash-ref u 'y #f))
+                   (let ([sym (rec-sym u)])
+                     (and (set-member? ANTI-AIR-UNIT-SYMS sym)
+                          (not (set-member? LIBERATOR-STATIC-AA-SYMS sym))))))
+            (or aa-units '())))
+  (cond
+    [(null? mobile-aa) '()]
+    [else
+     (define ranked
+       (sort mobile-aa
+             (lambda (a b)
+               (define sa (rec-sym a))
+               (define sb (rec-sym b))
+               (define da (fl+ (dist2d-fl (rec-x a) (rec-y a) flx fly)
+                               (if (set-member? LIBERATOR-PREFERRED-AA-PEEL-SYMS sa) 0.0 4.0)))
+               (define db (fl+ (dist2d-fl (rec-x b) (rec-y b) flx fly)
+                               (if (set-member? LIBERATOR-PREFERRED-AA-PEEL-SYMS sb) 0.0 4.0)))
+               (or (fl< da db)
+                   (and (fl= da db)
+                        (< (or (rec-id a) 0) (or (rec-id b) 0)))))))
+     (cond
+       [(not main-army-fighting?)
+        (take ranked (min 6 (length ranked)))]
+       [else
+        (define max-sup (fl* 0.12 (flmax 0.0 (exact->inexact total-combat-supply))))
+        (let loop ([rem ranked] [picked '()] [cnt 0] [sup 0.0])
+          (cond
+            [(or (null? rem) (>= cnt 4))
+             (reverse picked)]
+            [else
+             (define u (car rem))
+             (define usup (flmax 1.0 (fast-sym-supply (rec-sym u))))
+             (if (or (fl<= (fl+ sup usup) (fl+ max-sup 1e-6))
+                     (< cnt 3))
+                 (loop (cdr rem) (cons u picked) (+ cnt 1) (fl+ sup usup))
+                 (loop (cdr rem) picked cnt sup))]))])]))

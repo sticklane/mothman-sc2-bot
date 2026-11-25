@@ -217,11 +217,54 @@ class TestArenaPositioningTelemetry(unittest.TestCase):
         specs = self.arena.load_scenarios(str(SCENARIOS_JSON), REPO_ROOT)
         errs = self.arena.validate_scenarios(specs)
         self.assertEqual(errs, [], f"Scenario validation errors: {errs}")
-        self.assertEqual(len(specs), 280)
-        self.assertEqual(len(raw["scenarios"]), 280)
+        self.assertEqual(len(specs), 286)
+        self.assertEqual(len(raw["scenarios"]), 286)
+        self.assertEqual(sum(1 for s in specs if s.fast_core), 106)
+
+        # Verify Loop 79 Locust unit registration (free spawned ground + flying)
+        self.assertEqual(self.arena.UNIT_IDS["locust"], 489)
+        self.assertEqual(self.arena.UNIT_IDS["locust-mp"], 489)
+        self.assertEqual(self.arena.UNIT_IDS["locust-flying"], 693)
+        self.assertEqual(self.arena.UNIT_IDS["locust-mp-flying"], 693)
+        self.assertEqual(self.arena.UNIT_VALUES[489], 0.0)
+        self.assertEqual(self.arena.UNIT_VALUES[693], 0.0)
+        self.assertIn(489, self.arena.COMBAT_IDS)
+        self.assertIn(693, self.arena.AIR_UNIT_IDS)
 
         by_id = {s.id: s for s in specs}
         self.assertEqual(len(by_id), len(specs), "Duplicate scenario IDs found")
+
+        loop79_pro_drills = {
+            "sc2-sh-d01-pvz-colossi-archon-stand-clear-locusts": ("Protoss", "Zerg", "kiting-concave", "combat"),
+            "sc2-sh-d02-pvz-stalker-immortal-retreat-locusts": ("Protoss", "Zerg", "kiting-concave", "combat"),
+            "sc2-sh-d03-tvz-hellbat-tank-clear-locusts": ("Terran", "Zerg", "kiting-concave", "combat"),
+            "sc2-lib-m01-tvz-dual-liberator-deadspace-harass": ("Terran", "Zerg", "runby-offense", "worker-runby"),
+            "sc2-car-b01-zvp-hydras-viper-interceptor-burn": ("Zerg", "Protoss", "air-superiority", "combat"),
+            "sc2-car-b02-tvp-bio-viking-binary-carrier-snipe": ("Terran", "Protoss", "air-superiority", "combat"),
+        }
+        for sid, (our_r, en_r, cat, smode) in loop79_pro_drills.items():
+            self.assertIn(sid, by_id)
+            sc = by_id[sid]
+            self.assertTrue(sc.fast_core, f"{sid} must be fast_core=True")
+            self.assertEqual(sc.our_race, our_r)
+            self.assertEqual(sc.enemy_race, en_r)
+            self.assertEqual(sc.category, cat)
+            self.assertEqual(sc.scoring_mode, smode)
+        self.assertTrue(by_id["sc2-lib-m01-tvz-dual-liberator-deadspace-harass"].use_p2_main_base)
+        self.assertIn(2558, by_id["sc2-lib-m01-tvz-dual-liberator-deadspace-harass"].expected_abilities)
+        self.assertIn(2542, by_id["sc2-car-b01-zvp-hydras-viper-interceptor-burn"].expected_abilities)
+        # Verify Swarm Host drills spawn strictly swarm-host (authentic single 20-Locust wave, no pre-spawned double-wave) at >= 15t separation
+        for sh_sid in (
+            "sc2-sh-d01-pvz-colossi-archon-stand-clear-locusts",
+            "sc2-sh-d02-pvz-stalker-immortal-retreat-locusts",
+            "sc2-sh-d03-tvz-hellbat-tank-clear-locusts",
+        ):
+            sc_sh = by_id[sh_sid]
+            self.assertEqual([u[0] for u in sc_sh.p2_units], ["swarm-host"])
+            self.assertEqual(sc_sh.p2_units[0][1], 10)
+            p1_max_dx = max(u[2] for u in sc_sh.p1_units)
+            p2_min_dx = min(u[2] for u in sc_sh.p2_units)
+            self.assertGreaterEqual(p2_min_dx - p1_max_dx, 15.0)
 
         promoted_core = [
             "sc2-kit-k01-tvp-cyclone-lockon-kite-vs-stalker-immortal",

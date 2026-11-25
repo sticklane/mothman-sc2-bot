@@ -571,6 +571,9 @@
  evaluate-arena-minimax-and-regret!
  resolve-committed-micro-action!
  arena-direct-should-commit-through-splash?
+ compute-anti-light-locust-splash-score
+ army-has-strong-anti-light-locust-splash?
+ evaluate-carrier-engagement-mode
  step-tactical-mirror-brain!)
 
 (define TACTICAL-MICRO-ACTION-SPACE
@@ -2730,6 +2733,136 @@
 
 (define *ARENA-DEFAULT-SPLASH-META* (vector-immutable 10.0 #t #t))
 
+;; =============================================================================
+;; Loop 79 A3: Swarm Host Anti-Light Splash Evaluator & Anti-Carrier Binary Mode
+;; =============================================================================
+
+(define (arena-entry-alive? u)
+  (cond
+    [(tactical-sim-unit? u)
+     (fl> (fl+ (tactical-sim-unit-hp u) (tactical-sim-unit-shield u)) 0.0)]
+    [(hash? u)
+     (and (not (eq? (hash-ref u 'snapshot? #f) #t))
+          (not (eqv? (hash-ref u 'display-type 1) 2))
+          (let ([hp (hash-ref u 'hp (lambda () (hash-ref u 'health 1.0)))])
+            (or (not (real? hp)) (> hp 0))))]
+    [else #f]))
+
+(define (arena-entry-raw-type u)
+  (cond
+    [(tactical-sim-unit? u) (tactical-sim-unit-type u)]
+    [(hash? u)
+     (define raw (hash-ref u 'type (lambda () (hash-ref u 'unit-type 'unknown))))
+     (if (symbol? raw) raw 'unknown)]
+    [else 'unknown]))
+
+(define (arena-entry-energy u)
+  (cond
+    [(tactical-sim-unit? u) (tactical-sim-unit-energy u)]
+    [(hash? u)
+     (define en (hash-ref u 'energy 0.0))
+     (if (real? en) (exact->inexact en) 0.0)]
+    [else 0.0]))
+
+;; Computes pro-calibrated anti-light Locust splash readiness score (`>= 1.0` -> stand & clear).
+;; Thresholds: 2 Colossi (1.10), 2 HT w/ >=70e (1.00), 2 Disruptors (1.00), 3 Archons (1.05),
+;; 3 Siege Tanks (1.05), 3 Lurkers (1.05), 4 Hellbats (1.04), 6 Banelings (1.08);
+;; pure Stalkers / Immortals / Roaches / Marines -> 0.0.
+(define (compute-anti-light-locust-splash-score ally-combat-units)
+  (for/fold ([sc 0.0]) ([u (in-list (or ally-combat-units '()))])
+    (if (not (arena-entry-alive? u))
+        sc
+        (let* ([raw (arena-entry-raw-type u)]
+               [canon (sc2-canonical-unit-sym raw)]
+               [w (cond
+                    [(eq? canon 'colossus) 0.55]
+                    [(eq? canon 'high-templar)
+                     (if (fl>= (arena-entry-energy u) 70.0) 0.50 0.0)]
+                    [(eq? canon 'disruptor) 0.50]
+                    [(eq? canon 'archon) 0.35]
+                    [(memq raw '(siege-tank siege-tank-sieged)) 0.35]
+                    [(eq? canon 'siege-tank) 0.35]
+                    [(memq raw '(lurker lurker-burrowed lurker-mp lurker-mp-burrowed)) 0.35]
+                    [(memq canon '(lurker lurker-mp)) 0.35]
+                    [(memq raw '(hellbat hellion-tank hellion)) 0.26]
+                    [(memq canon '(hellbat hellion)) 0.26]
+                    [(eq? canon 'baneling) 0.18]
+                    [else 0.0])])
+          (fl+ sc w)))))
+
+(define (army-has-strong-anti-light-locust-splash? ally-combat-units)
+  (fl>= (compute-anti-light-locust-splash-score ally-combat-units) 1.0))
+
+;; Strict binary Anti-Carrier commitment (`'carrier-snipe` | `'interceptor-burn` | `'none`).
+;; Never mixes targeting: commits 100% to sniping Carriers when anti-armored burst is sufficient
+;; (`>= 0.85`), Interceptors are already depleted (`<= 2 * live-carriers`), or burn score `< 0.75`;
+;; otherwise commits 100% to melting the Interceptor cloud (`>= 4` live Interceptors) first!
+(define (evaluate-carrier-engagement-mode ally-combat-units enemy-units)
+  (define-values (live-carriers live-interceptors)
+    (for/fold ([cc 0] [ic 0]) ([e (in-list (or enemy-units '()))])
+      (if (not (arena-entry-alive? e))
+          (values cc ic)
+          (let* ([raw (arena-entry-raw-type e)]
+                 [canon (sc2-canonical-unit-sym raw)])
+            (cond
+              [(eq? canon 'carrier) (values (+ cc 1) ic)]
+              [(eq? canon 'interceptor) (values cc (+ ic 1))]
+              [else (values cc ic)])))))
+  (cond
+    [(and (= live-carriers 0) (< live-interceptors 4))
+     'none]
+    [else
+     (define-values (burst-sc burn-sc)
+       (for/fold ([bst 0.0] [brn 0.0]) ([a (in-list (or ally-combat-units '()))])
+         (if (not (arena-entry-alive? a))
+             (values bst brn)
+             (let* ([raw (arena-entry-raw-type a)]
+                    [canon (sc2-canonical-unit-sym raw)])
+               (cond
+                 [(eq? raw 'thor-ap)
+                  (values (fl+ bst (/ 1.0 3.0)) brn)]
+                 [(eq? raw 'thor)
+                  (values bst (fl+ brn (/ 1.0 3.0)))]
+                 [(eq? canon 'corruptor)
+                  (values (fl+ bst (/ 1.0 8.0)) brn)]
+                 [(memq raw '(viking-fighter viking))
+                  (values (fl+ bst (/ 1.0 8.0)) brn)]
+                 [(eq? canon 'tempest)
+                  (values (fl+ bst (/ 1.0 4.0)) brn)]
+                 [(memq canon '(void-ray voidray))
+                  (values (fl+ bst (/ 1.0 5.0)) brn)]
+                 [(eq? canon 'stalker)
+                  (values (fl+ bst (/ 1.0 16.0)) brn)]
+                 [(eq? canon 'battlecruiser)
+                  (values (fl+ bst (/ 1.0 3.0)) brn)]
+                 [(eq? canon 'marine)
+                  (values bst (fl+ brn (/ 1.0 12.0)))]
+                 [(eq? canon 'hydralisk)
+                  (values bst (fl+ brn (/ 1.0 10.0)))]
+                 [(eq? canon 'archon)
+                  (values bst (fl+ brn (/ 1.0 3.0)))]
+                 [(eq? canon 'high-templar)
+                  (values bst (fl+ brn (/ 1.0 2.0)))]
+                 [(eq? canon 'viper)
+                  (values bst (fl+ brn (/ 1.0 1.5)))]
+                 [(eq? canon 'infestor)
+                  (values bst (fl+ brn (/ 1.0 2.0)))]
+                 [(memq raw '(liberator liberator-ag))
+                  (values bst (fl+ brn (/ 1.0 3.0)))]
+                 [else
+                  (values bst brn)])))))
+     (cond
+       [(and (> live-carriers 0)
+             (or (fl>= burst-sc 0.85)
+                 (<= live-interceptors (* 2 live-carriers))
+                 (fl< burn-sc 0.75)))
+        'carrier-snipe]
+       [(and (>= live-interceptors 4)
+             (fl>= burn-sc 0.75))
+        'interceptor-burn]
+       [else
+        'carrier-snipe])]))
+
 (define (arena-compute-points-arc-deg xs ys cx cy)
   (define n (length xs))
   (cond
@@ -3346,6 +3479,8 @@
                    'burrowed? (not (not (memq etype '(lurker-burrowed lurker-mp-burrowed))))
                    'sieged (eq? etype 'siege-tank-sieged))))
        (define arena-enemy-sims (tactical-arena-enemy-units arena))
+       (define arena-carrier-mode
+         (evaluate-carrier-engagement-mode arena-ally-units arena-enemy-sims))
        (define arena-ally-has-det? (or kw-has-detector? (tactical-arena-ally-has-detection? arena)))
        ;; W11-P0-4-rt (`w11-tac-2`): Never unit-target ATTACK (23) undetected `cloak=1` enemies
        ;; (SC2 strictly rejects them!). Still target detected `cloak=2` & visible `cloak=3` enemies.
@@ -3454,9 +3589,26 @@
                                                      (fl<= (fl+ (fl* gdx gdx) (fl* gdy gdy)) 12.25))))
                                             4.5
                                             1.0)]
-                                       [pconst (fl* (fl* (fl* (fast-enemy-priority-const etype arena-has-stealth? e) tact-mult)
-                                                         air-a2g-mult)
-                                                    ghost-peel-mult)]
+                                       ;; Loop 79 A3: Binary Anti-Carrier focus-fire commitment inside arena minimax
+                                       ;; (`'carrier-snipe` boosts Carriers & ignores Interceptors; `'interceptor-burn`
+                                       ;; lifts dense Interceptors and avoids chasing out-of-range Carriers!)
+                                       [carrier-mode-mult
+                                        (cond
+                                          [(eq? arena-carrier-mode 'carrier-snipe)
+                                           (cond
+                                             [(eq? etype 'carrier) 3.2]
+                                             [(eq? etype 'interceptor) 0.05]
+                                             [else 1.0])]
+                                          [(eq? arena-carrier-mode 'interceptor-burn)
+                                           (cond
+                                             [(eq? etype 'interceptor) 3.5]
+                                             [(eq? etype 'carrier) 0.30]
+                                             [else 1.0])]
+                                          [else 1.0])]
+                                       [pconst (fl* (fl* (fl* (fl* (fast-enemy-priority-const etype arena-has-stealth? e) tact-mult)
+                                                              air-a2g-mult)
+                                                         ghost-peel-mult)
+                                                    carrier-mode-mult)]
                                        [ehp (flmax 1e-6 (fl+ (tactical-sim-unit-hp e) (tactical-sim-unit-shield e)))]
                                        [tidx (vector-ref (fast-unit-stat-vec etype) 19)]
                                        [eflags (tactical-sim-unit-attr-flags e)]

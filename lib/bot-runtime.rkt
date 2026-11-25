@@ -571,6 +571,11 @@
 (define RUNTIME-LOCUST-SET
   (hasheq 'locust #t 'locust-mp #t 'locustmp #t 'locust-flying #t 'locust-mp-flying #t
           'locust-precursor #t 'locustmpprecursor #t))
+(define RUNTIME-LOCUST-FLYING-SET
+  (hasheq 'locust-flying #t 'locust-mp-flying #t))
+(define RUNTIME-SWARM-HOST-AIR-INTERCEPT-SET
+  (hasheq 'mutalisk #t 'phoenix #t 'void-ray #t 'voidray #t 'banshee #t
+          'liberator #t 'liberator-ag #t 'viking #t 'viking-fighter #t 'corruptor #t))
 (define RUNTIME-SWARM-HOST-SET
   (hasheq 'swarm-host #t 'swarm-host-mp #t 'swarm-host-burrowed #t 'swarm-host-burrowed-mp #t))
 (define RUNTIME-PASSIVE-DECOY-SET
@@ -599,7 +604,8 @@
           'lurker #t 'lurker-mp #t 'lurker-burrowed #t 'lurker-mp-burrowed #t))
 (define RUNTIME-UNIT-MODE-SET
   (hasheq 'thor #t 'thor-ap #t 'hellion #t 'hellbat #t 'viking #t
-          'viking-fighter #t 'viking-assault #t 'cyclone #t))
+          'viking-fighter #t 'viking-assault #t 'cyclone #t
+          'liberator #t 'liberator-ag #t))
 (define RUNTIME-STATIC-DEFENSE-SET
   (hasheq 'spine-crawler #t 'photon-cannon #t 'bunker #t 'planetary-fortress #t))
 (define RUNTIME-SHORT-BIO-SET
@@ -27029,7 +27035,34 @@
 (define PREP-LIGHT-XS (make-flvector 256))
 (define PREP-LIGHT-YS (make-flvector 256))
 
-(define (prep-enemy-target-descriptors enemy-units include-nearby-light?)
+(define (prep-enemy-target-descriptors enemy-units include-nearby-light?
+                                       [carrier-mode 'none]
+                                       [locust-clear? #f])
+  ;; Loop 79 B3: Anti-Carrier Binary Commitment pre-pass (`'carrier-snipe` vs `'interceptor-burn`).
+  ;; Zero overhead when `carrier-mode` is `'none`.
+  (define-values (live-interceptor-cnt primary-snipe-carrier-id)
+    (if (eq? carrier-mode 'none)
+        (values 0 #f)
+        (for/fold ([icnt 0] [best-cid #f] [best-cehp +inf.0] #:result (values icnt best-cid))
+                  ([e (in-list enemy-units)] #:when (hash? e))
+          (define et (fast-canonical-unit-sym (unit-type-sym e)))
+          (cond
+            [(or (eq? (hash-ref e 'hallucination #f) #t)
+                 (eq? (hash-ref e 'snapshot? #f) #t))
+             (values icnt best-cid best-cehp)]
+            [(eq? et 'interceptor)
+             (values (add1 icnt) best-cid best-cehp)]
+            [(and (eq? carrier-mode 'carrier-snipe) (eq? et 'carrier))
+             (define cid (hash-ref e 'id -1))
+             (define cehp (exact->inexact (unit-total-hp-and-shield e)))
+             (if (and (exact-integer? cid) (> cid 0)
+                      (or (not best-cid)
+                          (fl< cehp (fl- best-cehp 1.0))
+                          (and (fl<= (flabs (fl- cehp best-cehp)) 1.0)
+                               (< cid best-cid))))
+                 (values icnt cid cehp)
+                 (values icnt best-cid best-cehp))]
+            [else (values icnt best-cid best-cehp)]))))
   (define-values (light-xs light-ys light-cnt)
     (if include-nearby-light?
         (let* ([n (length enemy-units)]
@@ -27077,7 +27110,16 @@
                           (eq? (hash-ref e 'changeling? #f) #t))]
                      [mobile-det? (bitwise-bit-set? flags 2)]
                      [static-det? (bitwise-bit-set? flags 3)]
-                     [passive? (bitwise-bit-set? flags 4)]
+                     [passive-raw? (bitwise-bit-set? flags 4)]
+                     [is-interceptor? (eq? et 'interceptor)]
+                     [is-carrier? (eq? et 'carrier)]
+                     [is-locust? (hash-has-key? RUNTIME-LOCUST-SET et)]
+                     [is-flying-locust? (hash-has-key? RUNTIME-LOCUST-FLYING-SET et)]
+                     [passive?
+                      (and passive-raw?
+                           (not (and (eq? carrier-mode 'interceptor-burn) is-interceptor?))
+                           (not (and locust-clear? is-locust?))
+                           (not is-flying-locust?))]
                      [struct? (bitwise-bit-set? flags 5)]
                      [light-bio? (bitwise-bit-set? flags 6)]
                      [armored? (bitwise-bit-set? flags 7)]
@@ -27085,15 +27127,29 @@
                      [is-detector? (or mobile-det? static-det?)]
                      [combat-threat?
                       (and (not worker?) (not struct?) (not passive?) (not changeling?))]
+                     [carrier-locust-adj
+                      (cond
+                        [(and (eq? carrier-mode 'carrier-snipe) is-carrier?)
+                         (if (and primary-snipe-carrier-id
+                                  (eqv? (hash-ref e 'id -1) primary-snipe-carrier-id))
+                             -240.0
+                             -180.0)]
+                        [(and (eq? carrier-mode 'interceptor-burn) is-interceptor?)
+                         -140.0]
+                        [(and (eq? carrier-mode 'interceptor-burn) is-carrier? (>= live-interceptor-cnt 4))
+                         180.0]
+                        [is-flying-locust? -40.0]
+                        [else 0.0])]
                      [base-adj
-                      (fl+ (if changeling? -220.0 0.0)
-                           (fl+ (if struct? 30.0 0.0)
-                                ;; L55-T12: Focus revealed Dark Templars (`-45.0`) ahead of Warp Prisms;
-                                ;; Loop 63: Focus exposed Swarm Hosts (`-60.0`) ahead of screening units/Locusts!
-                                (cond
-                                  [(eq? et 'dark-templar) -45.0]
-                                  [(hash-has-key? RUNTIME-SWARM-HOST-SET et) -60.0]
-                                  [else 0.0])))]
+                      (fl+ carrier-locust-adj
+                           (fl+ (if changeling? -220.0 0.0)
+                                (fl+ (if struct? 30.0 0.0)
+                                     ;; L55-T12: Focus revealed Dark Templars (`-45.0`) ahead of Warp Prisms;
+                                     ;; Loop 63: Focus exposed Swarm Hosts (`-60.0`) ahead of screening units/Locusts!
+                                     (cond
+                                       [(eq? et 'dark-templar) -45.0]
+                                       [(hash-has-key? RUNTIME-SWARM-HOST-SET et) -60.0]
+                                       [else 0.0]))))]
                      [adj-plain
                       (if passive? (fl+ base-adj 250.0) base-adj)]
                      ;; L43-P0-1a + L44-P0-1c (General Detector-First Across ALL 3 Races & `d01`/`d02`):
@@ -27372,9 +27428,10 @@
                                     (loop (cdr rem) best-valid best-valid-sc best-any best-any-sc))))))))
               (loop (cdr rem) best-valid best-valid-sc best-any best-any-sc))))))
 
-(define (select-target-enemy-for-unit ux uy enemy-units [attacker-type 'marine] [ally-has-stealth? #f])
+(define (select-target-enemy-for-unit ux uy enemy-units [attacker-type 'marine] [ally-has-stealth? #f]
+                                      [carrier-mode 'none] [locust-clear? #f])
   (define baneling-attacker? (eq? attacker-type 'baneling))
-  (define prepped (prep-enemy-target-descriptors enemy-units baneling-attacker?))
+  (define prepped (prep-enemy-target-descriptors enemy-units baneling-attacker? carrier-mode locust-clear?))
   (define-values (tgt _valid?)
     (select-target-enemy-from-prepped ux uy prepped attacker-type ally-has-stealth?))
   tgt)
@@ -27589,15 +27646,193 @@
   (or (not (l34-ctx-live-upgrades-tracked? ctx))
       (and (memq upg-sym (l34-ctx-researched-upgs ctx)) #t)))
 
-(define (l34-emit! ctx act)
+;; Loop 79 Pass 2 + Pass 3 (Zero `ability 23` Rejects for Liberator / Liberator-AG / SiegeTankSieged):
+;; 1) SC2 rejects `attack`/`attack-unit`/`attack-pos` (`ability 23`) on sieged `liberator-ag`
+;;    (auto-fires inside its Defender Zone) AND ground-target `attack`/`attack-pos` on fighter-mode
+;;    `liberator` (air-to-air weapon only).
+;; 2) SC2 rejects `attack-unit`/`attack-pos` (`ability 23`) from rooted `siege-tank-sieged` onto
+;;    flying enemies (e.g. `locust-mp-flying`), targets inside minimum firing range (`< 3.25t`
+;;    center-to-center = `< 2.0t` edge-to-edge), or targets outside `16.5t` max range (covers
+;;    `13.0` range + `0.875` tank radius + `2.75` `5x5` TownHall/Ultralisk radius!).
+;; Cached O(1) per-step lookup; zero-alloc bypass whenever no Liberators or sieged Tanks exist.
+(define (l34-get-liberator-sanitize-info ctx)
+  (define l34-sc (l34-ctx-l34-sc ctx))
+  (define au (l34-ctx-ally-units ctx))
+  (define eu (l34-ctx-enemy-units ctx))
+  (define cached (and (hash? l34-sc) (hash-ref l34-sc 'l79-lib-sanitize-cache #f)))
+  (if (and (vector? cached)
+           (eq? (vector-ref cached 0) au)
+           (eq? (vector-ref cached 1) eu))
+      (vector-ref cached 2)
+      (let ([lib-ht #f]
+            [stank-ht #f])
+        (for ([u (in-list (or au '()))] #:when (hash? u))
+          (define ut (unit-type-sym u))
+          (cond
+            [(or (eq? ut 'liberator) (eq? ut 'liberator-ag))
+             (define uid (hash-ref u 'id -1))
+             (when (and (exact-integer? uid) (> uid 0))
+               (unless lib-ht (set! lib-ht (make-hasheqv)))
+               (hash-set! lib-ht uid ut))]
+            [(eq? ut 'siege-tank-sieged)
+             (define uid (hash-ref u 'id -1))
+             (when (and (exact-integer? uid) (> uid 0)
+                        (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f)))
+               (unless stank-ht (set! stank-ht (make-hasheqv)))
+               (hash-set! stank-ht uid
+                          (cons (exact->inexact (hash-ref u 'x 0.0))
+                                (exact->inexact (hash-ref u 'y 0.0)))))]))
+        (define info
+          (if (and (not lib-ht) (not stank-ht))
+              #f
+              (let ([fly-ht (make-hasheqv)]
+                    [xy-ht (make-hasheqv)])
+                (for ([e (in-list (or eu '()))] #:when (hash? e))
+                  (define eid (hash-ref e 'id -1))
+                  (when (and (exact-integer? eid) (> eid 0))
+                    (define efly?
+                      (or (eq? (hash-ref e 'flying #f) #t)
+                          (eq? (hash-ref e 'flying? #f) #t)
+                          (eq? (hash-ref e 'is-flying #f) #t)
+                          (fast-unit-is-flying-sym? (unit-type-sym e))))
+                    (when efly? (hash-set! fly-ht eid #t))
+                    (when (and (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f)))
+                      (hash-set! xy-ht eid
+                                 (cons (exact->inexact (hash-ref e 'x 0.0))
+                                       (exact->inexact (hash-ref e 'y 0.0)))))))
+                (for ([eb (in-list (or (l34-ctx-enemy-bldgs ctx) '()))] #:when (hash? eb))
+                  (define bid (hash-ref eb 'id -1))
+                  (when (and (exact-integer? bid) (> bid 0)
+                             (real? (hash-ref eb 'x #f)) (real? (hash-ref eb 'y #f)))
+                    (hash-set! xy-ht bid
+                               (cons (exact->inexact (hash-ref eb 'x 0.0))
+                                     (exact->inexact (hash-ref eb 'y 0.0))))))
+                (vector lib-ht fly-ht xy-ht stank-ht))))
+        (when (hash? l34-sc)
+          (hash-set! l34-sc 'l79-lib-sanitize-cache (vector au eu info)))
+        info)))
+
+(define (l34-emit-raw! ctx act preserved?)
   (unless (runtime-suppressed-live-ability-action? act)
+    (when preserved?
+      (set-add! (l34-ctx-wave3-preserved-set ctx) act))
     (order-ledger-record-issued! (l34-ctx-oledger ctx) (l34-ctx-frame ctx) act)
     (set-l34-ctx-actions! ctx (cons act (l34-ctx-actions ctx)))))
 
+(define (l34-emit-sanitized! ctx act preserved?)
+  (define head (and (pair? act) (car act)))
+  (cond
+    [(or (not (l34-ctx-live-obs? ctx))
+         (not (memq head '(attack attack-unit attack-pos)))
+         (null? (cdr act)))
+     (l34-emit-raw! ctx act preserved?)]
+    [else
+     (define info (l34-get-liberator-sanitize-info ctx))
+     (cond
+       [(not info)
+        (l34-emit-raw! ctx act preserved?)]
+       [else
+        (define lib-ht (vector-ref info 0))
+        (define fly-ht (vector-ref info 1))
+        (define xy-ht (vector-ref info 2))
+        (define stank-ht (vector-ref info 3))
+        (define arg1 (cadr act))
+        (define air-attack-unit?
+          (and (eq? head 'attack-unit)
+               (>= (length act) 3)
+               (exact-integer? (caddr act))
+               (hash-ref fly-ht (caddr act) #f)))
+        (define (ground-move-coords)
+          (cond
+            [(and (memq head '(attack-pos attack))
+                  (>= (length act) 4)
+                  (real? (caddr act))
+                  (real? (cadddr act)))
+             (cons (caddr act) (cadddr act))]
+            [(and (eq? head 'attack-unit)
+                  (>= (length act) 3)
+                  (exact-integer? (caddr act)))
+             (hash-ref xy-ht (caddr act) #f)]
+            [else #f]))
+        ;; True iff rooted `siege-tank-sieged` at `tpt` cannot legally execute this `ability 23`
+        ;; (flying target, `< 3.25t` center-to-center = `< 2.0t` min range, or `> 16.5t` max range).
+        (define (stank-attack-invalid? tpt)
+          (cond
+            [(eq? head 'attack-unit)
+             (or air-attack-unit?
+                 (let ([ep (and (>= (length act) 3) (exact-integer? (caddr act))
+                                (hash-ref xy-ht (caddr act) #f))])
+                   (and ep
+                        (let ([d (fast-dist2d (car tpt) (cdr tpt) (car ep) (cdr ep))])
+                          (or (fl< d 3.25) (fl> d 16.5))))))]
+            [else
+             (define pt (ground-move-coords))
+             (or (not pt)
+                 (let ([d (fast-dist2d (car tpt) (cdr tpt)
+                                       (exact->inexact (car pt))
+                                       (exact->inexact (cdr pt)))])
+                   (or (fl< d 3.25) (fl> d 16.5))))]))
+        (cond
+          [(exact-integer? arg1)
+           (define lt (and lib-ht (hash-ref lib-ht arg1 #f)))
+           (define stpt (and (not lt) stank-ht (hash-ref stank-ht arg1 #f)))
+           (cond
+             [lt
+              (cond
+                [(eq? lt 'liberator-ag)
+                 ;; Sieged Liberator-AG auto-fires inside Defender Zone; drop invalid `ability 23`!
+                 (void)]
+                [air-attack-unit?
+                 (l34-emit-raw! ctx act preserved?)]
+                [else
+                 (define pt (ground-move-coords))
+                 (when pt
+                   (l34-emit-raw! ctx (list 'move arg1 (car pt) (cdr pt)) preserved?))])]
+             [stpt
+              (unless (stank-attack-invalid? stpt)
+                (l34-emit-raw! ctx act preserved?))]
+             [else
+              (l34-emit-raw! ctx act preserved?)])]
+          [(pair? arg1)
+           (define needs-filter?
+             (for/or ([uid (in-list arg1)])
+               (and (exact-integer? uid)
+                    (or (and lib-ht (hash-has-key? lib-ht uid))
+                        (and stank-ht (hash-has-key? stank-ht uid))))))
+           (if (not needs-filter?)
+               (l34-emit-raw! ctx act preserved?)
+               (let-values ([(keep-rev move-rev)
+                             (for/fold ([k '()] [m '()]) ([uid (in-list arg1)])
+                               (define lt (and (exact-integer? uid) lib-ht (hash-ref lib-ht uid #f)))
+                               (define stpt (and (not lt) (exact-integer? uid) stank-ht (hash-ref stank-ht uid #f)))
+                               (cond
+                                 [lt
+                                  (cond
+                                    [(eq? lt 'liberator-ag) (values k m)]
+                                    [air-attack-unit? (values (cons uid k) m)]
+                                    [else (values k (cons uid m))])]
+                                 [stpt
+                                  (if (stank-attack-invalid? stpt)
+                                      (values k m)
+                                      (values (cons uid k) m))]
+                                 [else (values (cons uid k) m)]))])
+                 (when (pair? keep-rev)
+                   (l34-emit-raw! ctx (cons head (cons (reverse keep-rev) (cddr act))) preserved?))
+                 (when (pair? move-rev)
+                   (define pt (ground-move-coords))
+                   (when pt
+                     (define mids (reverse move-rev))
+                     (l34-emit-raw! ctx
+                                    (list 'move (if (null? (cdr mids)) (car mids) mids) (car pt) (cdr pt))
+                                    preserved?)))))]
+          [else
+           (l34-emit-raw! ctx act preserved?)])])]))
+
+(define (l34-emit! ctx act)
+  (l34-emit-sanitized! ctx act #f))
+
 (define (l34-emit-preserved! ctx act)
-  (unless (runtime-suppressed-live-ability-action? act)
-    (set-add! (l34-ctx-wave3-preserved-set ctx) act)
-    (l34-emit! ctx act)))
+  (l34-emit-sanitized! ctx act #t))
 
 (define (l34-quantize-cell-2.5 ctx v fallback)
   (geo:quantize-cell-2.5 v (if (real? fallback) fallback 32.5) (l34-ctx-live-tactics-obs? ctx)))
@@ -28915,10 +29150,21 @@
      (define l64-def-muster-here?
        (and (hash? l34-sc-here)
             (hash-ref l34-sc-here 'l64-defensive-muster-active? #f)))
+     ;; Loop 79 B3: Keep strict binary Carrier focus (`'carrier-snipe` -> direct `attack-unit` on
+     ;; Carrier; `'interceptor-burn` -> direct `attack-unit` on Interceptor) so SC2 `attack-pos`
+     ;; never redirects Carrier-sniping units onto Interceptors!
+     (define l79-carrier-focus-direct?
+       (and (hash? l34-sc-here)
+            (hash? target-enemy)
+            (let ([cm (hash-ref l34-sc-here 'l79-carrier-mode 'none)]
+                  [et (fast-canonical-unit-sym (unit-type-sym target-enemy))])
+              (or (and (eq? cm 'carrier-snipe) (eq? et 'carrier))
+                  (and (eq? cm 'interceptor-burn) (eq? et 'interceptor))))))
      (define pos-ctx-eng
        (and (l34-ctx-live-obs? ctx)
             (not home-def-preserve?)
             (not l64-def-muster-here?)
+            (not l79-carrier-focus-direct?)
             (hash? u)
             (hash? l34-sc-here)
             (hash-ref l34-sc-here 'l58-pos-ctx #f)))
@@ -30144,25 +30390,56 @@
   (define active-locust-wave? (or owm-locust-wave? vis-locust-wave?))
   (define owm-sh-cooldown?
     (and owm-tactics (opponent-world-summary-swarm-host-cooldown-window? owm-tactics)))
+  ;; Loop 79 Pass 2 (Anomaly 2 — `sh-d02` No-Splash Locust Retreat): Only override `locust-kite-retreat?`
+  ;; when a visible Swarm Host is genuinely exposed (`<= 8.0t` point-blank, OR `<= 12.0t` with `0` live
+  ;; Locusts within `<= 9.0t` of our army, OR `<= 14.5t` small-remnant `<= 6` Locusts & `<= 4` SH) —
+  ;; NEVER at `15-22t` behind a live 20-Locust wave!
+  (define live-locusts-eval
+    (if vis-locust-wave?
+        (for/list ([e (in-list enemy-units)]
+                   #:when (and (hash? e)
+                               (not (eq? (hash-ref e 'snapshot? #f) #t))
+                               (hash-has-key? RUNTIME-LOCUST-SET (unit-type-sym e))
+                               (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))))
+          e)
+        '()))
+  (define live-sh-eval
+    (if active-locust-wave?
+        (for/list ([e (in-list enemy-units)]
+                   #:when (and (hash? e)
+                               (not (eq? (hash-ref e 'snapshot? #f) #t))
+                               (hash-has-key? RUNTIME-SWARM-HOST-SET (unit-type-sym e))
+                               (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))))
+          e)
+        '()))
   (define exposed-swarm-host-near?
     (and active-locust-wave?
          (pair? combat-units)
-         (let ([cx (exact->inexact (l34-ctx-prelim-army-cx ctx))]
-               [cy (exact->inexact (l34-ctx-prelim-army-cy ctx))])
-           (for/or ([e (in-list enemy-units)])
-             (and (hash? e)
-                  (not (eq? (hash-ref e 'snapshot? #f) #t))
-                  (hash-has-key? RUNTIME-SWARM-HOST-SET (unit-type-sym e))
-                  (let ([ex0 (exact->inexact (hash-ref e 'x 9999.0))]
-                        [ey0 (exact->inexact (hash-ref e 'y 9999.0))])
-                    (or (<= (dist2d cx cy ex0 ey0) 22.0)
-                        (for/or ([u (in-list combat-units)])
-                          (and (hash? u)
-                               (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f))
-                               (<= (dist2d (exact->inexact (hash-ref u 'x 9999.0))
-                                           (exact->inexact (hash-ref u 'y 9999.0))
-                                           ex0 ey0)
-                                   18.0))))))))))
+         (pair? live-sh-eval)
+         (let* ([cx (exact->inexact (l34-ctx-prelim-army-cx ctx))]
+                [cy (exact->inexact (l34-ctx-prelim-army-cy ctx))]
+                [locust-wall-within-9?
+                 (for/or ([loc (in-list live-locusts-eval)])
+                   (define lx (exact->inexact (hash-ref loc 'x 9999.0)))
+                   (define ly (exact->inexact (hash-ref loc 'y 9999.0)))
+                   (or (fl<= (fast-dist2d cx cy lx ly) 9.0)
+                       (for/or ([u (in-list combat-units)])
+                         (and (hash? u)
+                              (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f))
+                              (fl<= (fast-dist2d (exact->inexact (hash-ref u 'x 9999.0))
+                                                 (exact->inexact (hash-ref u 'y 9999.0))
+                                                 lx ly)
+                                    9.0)))))]
+                [small-remnant-sh?
+                 (and (<= (length live-locusts-eval) 6)
+                      (<= (length live-sh-eval) 4))])
+           (for/or ([e (in-list live-sh-eval)])
+             (define ex0 (exact->inexact (hash-ref e 'x 9999.0)))
+             (define ey0 (exact->inexact (hash-ref e 'y 9999.0)))
+             (define d-sh (fast-dist2d cx cy ex0 ey0))
+             (or (fl<= d-sh 8.0)
+                 (and (fl<= d-sh 12.0) (not locust-wall-within-9?))
+                 (and small-remnant-sh? (fl<= d-sh 14.5)))))))
   ;; Loop 63 (Anti-SwarmHost No-Locust-Chase): Treat timed-life Locusts near outer bases without
   ;; any permanent enemy combat units within 14t of our TownHalls as locust-only so our army kites
   ;; out the 18s timed-life wave instead of chasing Locusts away from bases into traps!
@@ -30178,8 +30455,40 @@
                       [ey0 (exact->inexact (hash-ref e 'y 9999.0))])
                   (for/or ([tc (in-list th-coords)])
                     (fl<= (fast-dist2d ex0 ey0 (car tc) (cdr tc)) 14.0)))))))
+  ;; Loop 79 B1 & B3: Compute Anti-Light Locust Splash Score & Anti-Carrier Binary Mode ONCE per step!
+  (define l79-locust-splash-score
+    (if active-locust-wave?
+        (compute-anti-light-locust-splash-score combat-units)
+        0.0))
+  (define l79-locust-near-owned-th-12?
+    (and active-locust-wave?
+         (pair? th-coords)
+         (for/or ([e (in-list enemy-units)])
+           (and (hash? e)
+                (not (eq? (hash-ref e 'snapshot? #f) #t))
+                (hash-has-key? RUNTIME-LOCUST-SET (unit-type-sym e))
+                (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                (let ([ex0 (exact->inexact (hash-ref e 'x 9999.0))]
+                      [ey0 (exact->inexact (hash-ref e 'y 9999.0))])
+                  (for/or ([tc (in-list th-coords)])
+                    (fl<= (fast-dist2d ex0 ey0 (car tc) (cdr tc)) 12.0)))))))
+  ;; Loop 79 B1: Stand & clear Locusts when anti-light splash >= 1.0 (>=2 Colossi/HT/Disruptor,
+  ;; >=3 Archons/Tanks/Lurkers, >=4 Hellbats, >=6 Banelings), OR base-snipe override when
+  ;; Locusts hit <= 12.0t of an owned TownHall with splash >= 0.50!
+  (define l79-locust-stand-and-clear?
+    (and active-locust-wave?
+         (or (>= l79-locust-splash-score 1.0)
+             (and l79-locust-near-owned-th-12?
+                  (>= l79-locust-splash-score 0.50)))))
+  (define l79-carrier-mode-now
+    (evaluate-carrier-engagement-mode combat-units enemy-units))
+  (when (hash? (l34-ctx-l34-sc ctx))
+    (hash-set! (l34-ctx-l34-sc ctx) 'l79-locust-splash-score l79-locust-splash-score)
+    (hash-set! (l34-ctx-l34-sc ctx) 'l79-locust-stand-and-clear? l79-locust-stand-and-clear?)
+    (hash-set! (l34-ctx-l34-sc ctx) 'l79-carrier-mode l79-carrier-mode-now))
   (define locust-kite-retreat?
     (and active-locust-wave?
+         (not l79-locust-stand-and-clear?)
          (not exposed-swarm-host-near?)
          (not perm-enemy-within-14-of-th?)))
   (define sweep-st-eval (and rt (rt-endgame-sweep-state rt)))
@@ -31092,42 +31401,185 @@
                         [ey0 (exact->inexact (hash-ref e 'y 9999.0))])
                     (for/or ([tp (in-list p2-th-pts)])
                       (fl<= (fast-dist2d ex0 ey0 (car tp) (cdr tp)) 14.0)))))))
+    (define p2-vis-swarm-hosts
+      (for/list ([e (in-list enemy-units)]
+                 #:when (and (hash? e)
+                             (not (eq? (hash-ref e 'snapshot? #f) #t))
+                             (hash-has-key? RUNTIME-SWARM-HOST-SET (unit-type-sym e))
+                             (let ([cv (hash-ref e 'cloak #f)])
+                               (not (or (eqv? cv 1) (eq? cv 'cloaked))))
+                             (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))))
+        e))
+    ;; Loop 79 Pass 2 (Anomaly 2 — `sh-d02`): Tighten `exposed-sh?` to match `exposed-swarm-host-near?`
+    ;; (`<= 8.0t` point-blank, OR `<= 12.0t` with `0` Locusts `<= 9.0t`, OR `<= 14.5t` small-remnant).
+    (define p2-locust-wall-within-9?
+      (let ([fcx (exact->inexact prelim-army-cx)]
+            [fcy (exact->inexact prelim-army-cy)])
+        (for/or ([loc (in-list p2-locust-units)])
+          (and (real? (hash-ref loc 'x #f)) (real? (hash-ref loc 'y #f))
+               (let ([lx (exact->inexact (hash-ref loc 'x 9999.0))]
+                     [ly (exact->inexact (hash-ref loc 'y 9999.0))])
+                 (or (fl<= (fast-dist2d fcx fcy lx ly) 9.0)
+                     (for/or ([u (in-list combat-units)])
+                       (and (hash? u)
+                            (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f))
+                            (fl<= (fast-dist2d (exact->inexact (hash-ref u 'x 9999.0))
+                                               (exact->inexact (hash-ref u 'y 9999.0))
+                                               lx ly)
+                                  9.0)))))))))
+    (define p2-small-remnant-sh?
+      (and (<= (length p2-locust-units) 6)
+           (<= (length p2-vis-swarm-hosts) 4)))
     (define exposed-sh?
-      (for/or ([e (in-list enemy-units)])
-        (and (hash? e)
-             (not (eq? (hash-ref e 'snapshot? #f) #t))
-             (hash-has-key? RUNTIME-SWARM-HOST-SET (unit-type-sym e))
-             (let ([ex0 (exact->inexact (hash-ref e 'x 9999.0))]
-                   [ey0 (exact->inexact (hash-ref e 'y 9999.0))])
-               (or (<= (dist2d prelim-army-cx prelim-army-cy ex0 ey0) 22.0)
-                   (for/or ([u (in-list combat-units)])
-                     (and (hash? u)
-                          (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f))
-                          (<= (dist2d (exact->inexact (hash-ref u 'x 9999.0))
-                                      (exact->inexact (hash-ref u 'y 9999.0))
-                                      ex0 ey0)
-                              18.0))))))))
-    (when (and (not p2-perm-near-th?) (not exposed-sh?))
-      (define kite-ids
-        (for/list ([u (in-list combat-units)]
-                   #:when (let ([uid (hash-ref u 'id -1)]
-                                [ux (hash-ref u 'x base-x)]
-                                [uy (hash-ref u 'y base-y)])
-                            (and (exact-integer? uid)
-                                 (> uid 0)
-                                 (not (set-member? wave3-handled-tags uid))
-                                 (> (dist2d ux uy nat-x nat-y) 8.0)
-                                 (not (for/or ([tp (in-list p2-th-pts)])
-                                        (<= (dist2d ux uy (car tp) (cdr tp)) 8.0)))
-                                 (ormap (lambda (loc)
-                                          (<= (dist2d ux uy (hash-ref loc 'x 9999.0) (hash-ref loc 'y 9999.0))
-                                              16.0))
-                                        p2-locust-units))))
+      (let ([fcx (exact->inexact prelim-army-cx)]
+            [fcy (exact->inexact prelim-army-cy)])
+        (for/or ([e (in-list p2-vis-swarm-hosts)])
+          (define ex0 (exact->inexact (hash-ref e 'x 9999.0)))
+          (define ey0 (exact->inexact (hash-ref e 'y 9999.0)))
+          (define d-sh (fast-dist2d fcx fcy ex0 ey0))
+          (or (fl<= d-sh 8.0)
+              (and (fl<= d-sh 12.0) (not p2-locust-wall-within-9?))
+              (and p2-small-remnant-sh? (fl<= d-sh 14.5))))))
+    (define p2-locust-stand-clear?
+      (and (hash? l34-sc)
+           (hash-ref l34-sc 'l79-locust-stand-and-clear? #f)))
+    (define p2-flying-locusts
+      (filter (lambda (loc) (hash-has-key? RUNTIME-LOCUST-FLYING-SET (unit-type-sym loc)))
+              p2-locust-units))
+    ;; Loop 79 B1 + Pass 2 (`sh-d02`): No-splash ground armies kite-retreat away from Locusts
+    ;; (batch `move` to `nat` in multi-base games, AND radial `(kite uid rx ry)` away from visible
+    ;; Locust centroid in `0`-TH Arena drills like `sh-d02`!), while mobile air units swoop-intercept!
+    (when (and (not p2-locust-stand-clear?) (not p2-perm-near-th?) (not exposed-sh?))
+      (define-values (loc-sx loc-sy loc-cnt)
+        (for/fold ([sx 0.0] [sy 0.0] [c 0]) ([loc (in-list p2-locust-units)])
+          (if (and (real? (hash-ref loc 'x #f)) (real? (hash-ref loc 'y #f)))
+              (values (fl+ sx (exact->inexact (hash-ref loc 'x 0.0)))
+                      (fl+ sy (exact->inexact (hash-ref loc 'y 0.0)))
+                      (add1 c))
+              (values sx sy c))))
+      (define loc-cx (if (> loc-cnt 0) (fl/ loc-sx (exact->inexact loc-cnt)) (exact->inexact enemy-x)))
+      (define loc-cy (if (> loc-cnt 0) (fl/ loc-sy (exact->inexact loc-cnt)) (exact->inexact enemy-y)))
+      (define mw-loc (exact->inexact (max 64.0 (safe-finite-real (hash-ref obs 'map-width 200.0) 200.0))))
+      (define mh-loc (exact->inexact (max 64.0 (safe-finite-real (hash-ref obs 'map-height 200.0) 200.0))))
+      (define fnx-loc (exact->inexact nat-x))
+      (define fny-loc (exact->inexact nat-y))
+      (define d-nat-loc (fast-dist2d fnx-loc fny-loc loc-cx loc-cy))
+      (define has-owned-th-p2? (pair? p2-th-pts))
+      (define blink-ready-upg? (l34-has-upgrade? ctx 'blink))
+      (define kite-to-nat-rev '())
+      (for ([u (in-list combat-units)])
+        (define uid (hash-ref u 'id -1))
+        (define ut (unit-type-sym u))
+        (when (and (exact-integer? uid)
+                   (> uid 0)
+                   (not (set-member? wave3-handled-tags uid))
+                   (not (hash-has-key? RUNTIME-SWARM-HOST-AIR-INTERCEPT-SET ut))
+                   (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f)))
+          (define ux (exact->inexact (hash-ref u 'x base-x)))
+          (define uy (exact->inexact (hash-ref u 'y base-y)))
+          (define min-loc-d
+            (for/fold ([bd +inf.0]) ([loc (in-list p2-locust-units)])
+              (if (and (real? (hash-ref loc 'x #f)) (real? (hash-ref loc 'y #f)))
+                  (flmin bd (fast-dist2d ux uy
+                                         (exact->inexact (hash-ref loc 'x 9999.0))
+                                         (exact->inexact (hash-ref loc 'y 9999.0))))
+                  bd)))
+          (when (fl<= min-loc-d 20.0)
+            (define near-owned-th?
+              (and has-owned-th-p2?
+                   (for/or ([tp (in-list p2-th-pts)])
+                     (fl<= (fast-dist2d ux uy (car tp) (cdr tp)) 8.0))))
+            (cond
+              [(and has-owned-th-p2?
+                    (not near-owned-th?)
+                    (fl> (fast-dist2d ux uy fnx-loc fny-loc) 8.0)
+                    (fl> d-nat-loc (fl+ (fast-dist2d ux uy loc-cx loc-cy) 2.0)))
+               (set-add! wave3-handled-tags uid)
+               (set! kite-to-nat-rev (cons uid kite-to-nat-rev))]
+              [(not near-owned-th?)
+               ;; Radial retreat `6.5t` away from visible Locust centroid (with perpendicular edge-slide
+               ;; fallback if clamped near arena boundary), plus emergency Blink if a Stalker gets clipped!
+               (define dx (fl- ux loc-cx))
+               (define dy (fl- uy loc-cy))
+               (define dn (flsqrt (fl+ (fl* dx dx) (fl* dy dy))))
+               (define-values (vx vy)
+                 (if (fl> dn 0.05)
+                     (values (fl/ dx dn) (fl/ dy dn))
+                     (values -1.0 0.0)))
+               (define lo-x 8.0)
+               (define hi-x (flmax 16.0 (fl- mw-loc 8.0)))
+               (define lo-y 8.0)
+               (define hi-y (flmax 16.0 (fl- mh-loc 8.0)))
+               (define rx0 (flmax lo-x (flmin hi-x (fl+ ux (fl* 6.5 vx)))))
+               (define ry0 (flmax lo-y (flmin hi-y (fl+ uy (fl* 6.5 vy)))))
+               (define-values (rx ry)
+                 (if (fl>= (fast-dist2d ux uy rx0 ry0) 4.0)
+                     (values rx0 ry0)
+                     (let* ([p1x (flmax lo-x (flmin hi-x (fl+ ux (fl* 6.5 (fl- 0.0 vy)))))]
+                            [p1y (flmax lo-y (flmin hi-y (fl+ uy (fl* 6.5 vx))))]
+                            [p2x (flmax lo-x (flmin hi-x (fl+ ux (fl* 6.5 vy))))]
+                            [p2y (flmax lo-y (flmin hi-y (fl+ uy (fl* 6.5 (fl- 0.0 vx)))))]
+                            [d1 (fast-dist2d p1x p1y loc-cx loc-cy)]
+                            [d2 (fast-dist2d p2x p2y loc-cx loc-cy)])
+                       (if (fl>= d1 d2) (values p1x p1y) (values p2x p2y)))))
+               (define qx (safe-coord rx ux))
+               (define qy (safe-coord ry uy))
+               (set-add! wave3-handled-tags uid)
+               (if (and (eq? ut 'stalker)
+                        blink-ready-upg?
+                        (fl<= min-loc-d 6.5)
+                        (fl< (exact->inexact (hash-ref u 'shield (hash-ref u 'shields 80.0))) 30.0)
+                        (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
+                                                   (list 'stalker-blink uid)
+                                                   frame
+                                                   157))
+                   (l34-emit-preserved! ctx (list 'cast-spell uid 'blink qx qy))
+                   (l34-emit-preserved! ctx (list 'kite uid qx qy)))]))))
+      (when (pair? kite-to-nat-rev)
+        (l34-emit-preserved! ctx (list 'move (reverse kite-to-nat-rev) nat-x nat-y)))
+      ;; Swoop-intercept flying Locusts / hunt visible Swarm Hosts with mobile air units!
+      (when (or (pair? p2-flying-locusts) (pair? p2-vis-swarm-hosts))
+        (for ([u (in-list combat-units)])
           (define uid (hash-ref u 'id -1))
-          (set-add! wave3-handled-tags uid)
-          uid))
-      (when (pair? kite-ids)
-        (l34-emit-preserved! ctx (list 'move kite-ids nat-x nat-y)))))
+          (define ut (unit-type-sym u))
+          (when (and (exact-integer? uid)
+                     (> uid 0)
+                     (not (set-member? wave3-handled-tags uid))
+                     (hash-has-key? RUNTIME-SWARM-HOST-AIR-INTERCEPT-SET ut)
+                     (not (eq? ut 'liberator-ag))
+                     (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f)))
+            (define fux (exact->inexact (hash-ref u 'x base-x)))
+            (define fuy (exact->inexact (hash-ref u 'y base-y)))
+            (define near-fl
+              (and (pair? p2-flying-locusts)
+                   (fast-can-attack-air? ut)
+                   (for/fold ([best #f] [bd 22.0] #:result best) ([fl (in-list p2-flying-locusts)])
+                     (define d (fast-dist2d fux fuy
+                                            (exact->inexact (hash-ref fl 'x 9999.0))
+                                            (exact->inexact (hash-ref fl 'y 9999.0))))
+                     (if (fl< d bd) (values fl d) (values best bd)))))
+            (cond
+              [(and near-fl (exact-integer? (hash-ref near-fl 'id #f)) (> (hash-ref near-fl 'id 0) 0))
+               (set-add! wave3-handled-tags uid)
+               (l34-emit-preserved! ctx (list 'attack-unit uid (hash-ref near-fl 'id)))]
+              [(pair? p2-vis-swarm-hosts)
+               (define near-sh
+                 (for/fold ([best #f] [bd +inf.0] #:result best) ([sh (in-list p2-vis-swarm-hosts)])
+                   (define d (fast-dist2d fux fuy
+                                          (exact->inexact (hash-ref sh 'x 9999.0))
+                                          (exact->inexact (hash-ref sh 'y 9999.0))))
+                   (if (fl< d bd) (values sh d) (values best bd))))
+               (when near-sh
+                 (define sh-id (hash-ref near-sh 'id -1))
+                 (define shx (exact->inexact (hash-ref near-sh 'x enemy-x)))
+                 (define shy (exact->inexact (hash-ref near-sh 'y enemy-y)))
+                 (cond
+                   [(and (fast-can-attack-ground? ut) (exact-integer? sh-id) (> sh-id 0))
+                    (set-add! wave3-handled-tags uid)
+                    (l34-emit-preserved! ctx (list 'attack-unit uid sh-id))]
+                   [(memq ut '(liberator phoenix))
+                    (set-add! wave3-handled-tags uid)
+                    (l34-emit-preserved! ctx (list 'attack-pos uid (safe-coord shx fux) (safe-coord shy fuy)))]))]))))))
   ;; ---------------------------------------------------------------------------
   ;; Multi-Depth Mirrored Tactical Micro Brain (0.5s, 2.0s, 5.0s Horizons)
   ;; ---------------------------------------------------------------------------
@@ -31223,6 +31675,168 @@
                 (acquire-unit-lease! leases-nk uid 'survival frame 32 #:x sx #:y sy))
               (l34-emit-preserved! ctx (list 'move uid sx sy)))
             (l34-emit! ctx (list 'kite uid sx sy))))))
+
+  ;; ---------------------------------------------------------------------------
+  ;; Loop 79 B2: Anti-Liberator Worker Evacuation (All 3 Races)
+  ;; Whenever an enemy `liberator-ag` (or active `liberator-defender-zone` /
+  ;; `liberator-defender-zone-setup` effect) threatens an owned mineral line,
+  ;; immediately pull workers within `<= 5.8t` of the Defender Zone center to a
+  ;; safe mineral patch or base edge `>= 7.5t` away from every active Freedom Zone!
+  ;; ---------------------------------------------------------------------------
+  (define enemy-lib-zone-pts
+    (let* ([ally-lib-pts
+            (for/list ([u (in-list ally-units)]
+                       #:when (and (hash? u)
+                                   (memq (unit-type-sym u) '(liberator liberator-ag))
+                                   (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f))))
+              (cons (exact->inexact (hash-ref u 'x 0.0))
+                    (exact->inexact (hash-ref u 'y 0.0))))]
+           [enemy-lib-units
+            (for/list ([e (in-list enemy-units)]
+                       #:when (and (hash? e)
+                                   (not (eq? (hash-ref e 'snapshot? #f) #t))
+                                   (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                         '(liberator liberator-ag))
+                                   (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))))
+              e)]
+           [eff-zones
+            (for/list ([ef (in-list (or effects '()))]
+                       #:when (and (hash? ef)
+                                   (let ([et (hash-ref ef 'type #f)]
+                                         [eid0 (hash-ref ef 'effect-id (hash-ref ef 'id 0))]
+                                         [al (hash-ref ef 'alliance #f)])
+                                     (and (or (memq et '(liberator-defender-zone liberator-defender-zone-setup))
+                                              (memv eid0 '(8 9)))
+                                          (not (or (eq? al 'self) (eqv? al 1)))))
+                                   (real? (hash-ref ef 'x #f)) (real? (hash-ref ef 'y #f))
+                                   (let ([zx (exact->inexact (hash-ref ef 'x 0.0))]
+                                         [zy (exact->inexact (hash-ref ef 'y 0.0))])
+                                     (or (for/or ([el (in-list enemy-lib-units)])
+                                           (fl<= (fast-dist2d zx zy
+                                                              (exact->inexact (hash-ref el 'x 9999.0))
+                                                              (exact->inexact (hash-ref el 'y 9999.0)))
+                                                 14.5))
+                                         (not (for/or ([al (in-list ally-lib-pts)])
+                                                (fl<= (fast-dist2d zx zy (car al) (cdr al)) 12.5)))))))
+              (cons (exact->inexact (hash-ref ef 'x 0.0))
+                    (exact->inexact (hash-ref ef 'y 0.0))))]
+           [owned-th-pts-lz
+            (for/list ([b (in-list ally-bldgs)]
+                       #:when (and (hash? b)
+                                   (real? (hash-ref b 'x #f)) (real? (hash-ref b 'y #f))
+                                   (memq (fast-canonical-structure-sym (unit-type-sym b))
+                                         '(hatchery lair hive nexus command-center orbital-command planetary-fortress))))
+              (cons (exact->inexact (hash-ref b 'x base-x))
+                    (exact->inexact (hash-ref b 'y base-y))))]
+           [inferred-zones
+            (for/fold ([acc eff-zones]) ([el (in-list enemy-lib-units)])
+              (if (not (eq? (fast-canonical-unit-sym (unit-type-sym el)) 'liberator-ag))
+                  acc
+                  (let ([lx (exact->inexact (hash-ref el 'x 0.0))]
+                        [ly (exact->inexact (hash-ref el 'y 0.0))])
+                    (if (for/or ([zp (in-list acc)])
+                          (fl<= (fast-dist2d lx ly (car zp) (cdr zp)) 12.5))
+                        acc
+                        (let ([near-th
+                               (for/fold ([bt #f] [bd 16.0] #:result bt) ([tp (in-list owned-th-pts-lz)])
+                                 (define d (fast-dist2d lx ly (car tp) (cdr tp)))
+                                 (if (fl< d bd) (values tp d) (values bt bd)))])
+                          (if (not near-th)
+                              acc
+                              ;; Estimate Defender Zone center from workers clustered near that base within <= 11t of Liberator-AG
+                              (let-values ([(wsx wsy wcnt)
+                                            (for/fold ([sx 0.0] [sy 0.0] [c 0]) ([u (in-list ally-units)])
+                                              (if (and (hash? u)
+                                                       (hash-has-key? RUNTIME-WORKER-SET (unit-type-sym u))
+                                                       (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f)))
+                                                  (let ([wx (exact->inexact (hash-ref u 'x 0.0))]
+                                                        [wy (exact->inexact (hash-ref u 'y 0.0))])
+                                                    (if (and (fl<= (fast-dist2d wx wy lx ly) 11.0)
+                                                             (fl<= (fast-dist2d wx wy (car near-th) (cdr near-th)) 11.0))
+                                                        (values (fl+ sx wx) (fl+ sy wy) (add1 c))
+                                                        (values sx sy c)))
+                                                  (values sx sy c)))])
+                                (if (> wcnt 0)
+                                    (cons (cons (fl/ wsx (exact->inexact wcnt))
+                                                (fl/ wsy (exact->inexact wcnt)))
+                                          acc)
+                                    (let* ([dx (fl- (car near-th) lx)]
+                                           [dy (fl- (cdr near-th) ly)]
+                                           [dn (flmax 1.0 (flsqrt (fl+ (fl* dx dx) (fl* dy dy))))])
+                                      (cons (cons (fl+ lx (fl* (flmin 6.0 dn) (fl/ dx dn)))
+                                                  (fl+ ly (fl* (flmin 6.0 dn) (fl/ dy dn))))
+                                            acc))))))))))])
+      inferred-zones))
+  (when (pair? enemy-lib-zone-pts)
+    (define mw-lz (exact->inexact (max 64.0 (safe-finite-real (hash-ref obs 'map-width 200.0) 200.0))))
+    (define mh-lz (exact->inexact (max 64.0 (safe-finite-real (hash-ref obs 'map-height 200.0) 200.0))))
+    (define leases-lz (l34-ctx-leases ctx))
+    (define (clamp-lz-x x) (flmax 4.0 (flmin (fl- mw-lz 4.0) x)))
+    (define (clamp-lz-y y) (flmax 4.0 (flmin (fl- mh-lz 4.0) y)))
+    (define (pt-safe-from-lib-zones? px py min-r)
+      (for/and ([zp (in-list enemy-lib-zone-pts)])
+        (fl>= (fast-dist2d px py (car zp) (cdr zp)) min-r)))
+    (define safe-min-patches
+      (for/list ([mp (in-list (let ([v (hash-ref obs 'mineral-patches '())]) (if (list? v) v '())))]
+                 #:when (and (hash? mp)
+                             (real? (hash-ref mp 'x #f)) (real? (hash-ref mp 'y #f))
+                             (pt-safe-from-lib-zones? (exact->inexact (hash-ref mp 'x 0.0))
+                                                      (exact->inexact (hash-ref mp 'y 0.0))
+                                                      7.5)))
+        (cons (exact->inexact (hash-ref mp 'x 0.0))
+              (exact->inexact (hash-ref mp 'y 0.0)))))
+    (for ([u (in-list ally-units)]
+          #:when (and (hash? u)
+                      (hash-has-key? RUNTIME-WORKER-SET (unit-type-sym u))
+                      (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f))))
+      (define uid (hash-ref u 'id -1))
+      (when (and (exact-integer? uid) (> uid 0) (not (set-member? wave3-handled-tags uid)))
+        (define ux (exact->inexact (hash-ref u 'x base-x)))
+        (define uy (exact->inexact (hash-ref u 'y base-y)))
+        (define nearest-zp
+          (for/fold ([best #f] [bd 5.81] #:result best) ([zp (in-list enemy-lib-zone-pts)])
+            (define d (fast-dist2d ux uy (car zp) (cdr zp)))
+            (if (fl< d bd) (values zp d) (values best bd))))
+        (when nearest-zp
+          (define best-safe-mp
+            (for/fold ([best #f] [bd 32.0] #:result best) ([sp (in-list safe-min-patches)])
+              (define d (fast-dist2d ux uy (car sp) (cdr sp)))
+              (if (fl< d bd) (values sp d) (values best bd))))
+          (define-values (esc-x esc-y)
+            (if best-safe-mp
+                (values (car best-safe-mp) (cdr best-safe-mp))
+                (let* ([zx (car nearest-zp)]
+                       [zy (cdr nearest-zp)]
+                       [dx (fl- ux zx)]
+                       [dy (fl- uy zy)]
+                       [d (flsqrt (fl+ (fl* dx dx) (fl* dy dy)))]
+                       [ux-d (if (fl>= d 0.4) (fl/ dx d)
+                                 (let* ([bx0 (fl- (exact->inexact base-x) zx)]
+                                        [by0 (fl- (exact->inexact base-y) zy)]
+                                        [bn (flmax 1.0 (flsqrt (fl+ (fl* bx0 bx0) (fl* by0 by0))))])
+                                   (fl/ bx0 bn)))]
+                       [uy-d (if (fl>= d 0.4) (fl/ dy d)
+                                 (let* ([bx0 (fl- (exact->inexact base-x) zx)]
+                                        [by0 (fl- (exact->inexact base-y) zy)]
+                                        [bn (flmax 1.0 (flsqrt (fl+ (fl* bx0 bx0) (fl* by0 by0))))])
+                                   (fl/ by0 bn)))]
+                       [cx0 (clamp-lz-x (fl+ zx (fl* 8.5 ux-d)))]
+                       [cy0 (clamp-lz-y (fl+ zy (fl* 8.5 uy-d)))])
+                  (if (pt-safe-from-lib-zones? cx0 cy0 7.5)
+                      (values cx0 cy0)
+                      (let ([p1x (clamp-lz-x (fl+ zx (fl* 8.5 (fl- 0.0 uy-d))))]
+                            [p1y (clamp-lz-y (fl+ zy (fl* 8.5 ux-d)))]
+                            [p2x (clamp-lz-x (fl+ zx (fl* 8.5 uy-d)))]
+                            [p2y (clamp-lz-y (fl+ zy (fl* 8.5 (fl- 0.0 ux-d))))])
+                        (if (fl>= (fast-dist2d p1x p1y zx zy) (fast-dist2d p2x p2y zx zy))
+                            (values p1x p1y)
+                            (values p2x p2y)))))))
+          (define sx (safe-coord esc-x base-x))
+          (define sy (safe-coord esc-y base-y))
+          (set-add! wave3-handled-tags uid)
+          (when (hash? leases-lz)
+            (acquire-unit-lease! leases-lz uid 'survival frame 24 #:x sx #:y sy))
+          (l34-emit-preserved! ctx (list 'move uid sx sy))))))
 
   ;; ---------------------------------------------------------------------------
   ;; Scenario 4: Hidden / Corner Flying Building Search when Enemy Base Cleared
@@ -34904,7 +35518,8 @@
                 #:enemy-base-x (exact->inexact enemy-x)
                 #:enemy-base-y (exact->inexact enemy-y)
                 #:inject-queen-tags inject-q-tags
-                #:exclude-tags spell-excl-tags)
+                #:exclude-tags spell-excl-tags
+                #:carrier-mode (if (hash? l34-sc) (hash-ref l34-sc 'l79-carrier-mode 'auto) 'auto))
                '()))
          (define t-dirs
            (if has-terran-caster?
@@ -35008,7 +35623,8 @@
                 #:enemy-base-x (exact->inexact enemy-x)
                 #:enemy-base-y (exact->inexact enemy-y)
                 #:choke-points (list (cons nat-x nat-y) (cons enemy-exp-x enemy-exp-y))
-                #:exclude-tags spell-excl-tags)
+                #:exclude-tags spell-excl-tags
+                #:carrier-mode (if (hash? l34-sc) (hash-ref l34-sc 'l79-carrier-mode 'auto) 'auto))
                '()))
          (cond
            [(and (null? t-dirs) (null? p-dirs)) z-dirs]
@@ -35451,7 +36067,9 @@
       (define has-viking? #f)
       (define viking-needs-eval? #f)
       (define has-cyclone? #f)
+      (define has-liberator? #f)
       (define eligible-mode-rev '())
+      (define eligible-libs-rev '())
       (for ([u (in-list mode-candidates)]
             #:when (um-eligible? u))
         (define ut (unit-type-sym u))
@@ -35480,7 +36098,11 @@
           [(eq? ut 'cyclone)
            (set! has-cyclone? #t)
            (set! eligible-mode-rev (cons u eligible-mode-rev))
-           (hash-set! um-cyclone-seen (hash-ref u 'id -1) #t)]))
+           (hash-set! um-cyclone-seen (hash-ref u 'id -1) #t)]
+          [(or (eq? ut 'liberator) (eq? ut 'liberator-ag))
+           (set! has-liberator? #t)
+           (set! eligible-libs-rev (cons u eligible-libs-rev))
+           (set! eligible-mode-rev (cons u eligible-mode-rev))]))
       (define um-allies
         (cond
           [(or has-hellion? (and has-viking? viking-needs-eval?))
@@ -35499,13 +36121,235 @@
                                        (um-eligible? u))))
               u)
             '()))
+      (define p5a-carrier-mode
+        (if (hash? l34-sc)
+            (hash-ref l34-sc 'l79-carrier-mode 'none)
+            'none))
       (when has-thor?
-        (for ([td (in-list (plan-thor-modes um-allies enemy-units #:tracker unit-mode-tr #:current-frame frame))])
+        (for ([td (in-list (plan-thor-modes um-allies enemy-units
+                                            #:tracker unit-mode-tr
+                                            #:current-frame frame
+                                            #:carrier-mode p5a-carrier-mode))])
           (define uid (unit-mode-directive-unit-tag td))
           (hash-set! splash-thor-dwell-ht uid frame)
           (set-add! wave3-thor-morphed-tags uid)
           (set-add! wave3-handled-tags uid)
           (l34-emit-preserved! ctx (unit-mode-directive->sexp td))))
+      ;; Loop 79 B2: Terran Dead-Space Multi-Prong Liberator Harass (`plan-liberator-multiprong-harass`)
+      ;; + Liberator Defender Mode (`plan-liberator-modes`, `2558`/`2560`, `0` wire rejects!).
+      (when has-liberator?
+        (define eligible-libs (reverse eligible-libs-rev))
+        (define splash-lib-dwell-p5a (l34-ctx-splash-lib-dwell-ht ctx))
+        (define mw-lib (exact->inexact (max 64.0 (safe-finite-real (hash-ref obs 'map-width 200.0) 200.0))))
+        (define mh-lib (exact->inexact (max 64.0 (safe-finite-real (hash-ref obs 'map-height 200.0) 200.0))))
+        (define has-lib-range?
+          (or (l34-has-upgrade? ctx 'advanced-ballistics)
+              (l34-has-upgrade? ctx 'liberator-ag-range-upgrade)))
+        (define mps-lib (let ([v (hash-ref obs 'mineral-patches '())]) (if (list? v) v '())))
+        (define (mk-enemy-base-rec tx0 ty0)
+          (define ftx (exact->inexact tx0))
+          (define fty (exact->inexact ty0))
+          (define-values (msx msy mcnt)
+            (for/fold ([sx 0.0] [sy 0.0] [c 0]) ([mp (in-list mps-lib)])
+              (if (and (hash? mp) (real? (hash-ref mp 'x #f)) (real? (hash-ref mp 'y #f)))
+                  (let ([mx (exact->inexact (hash-ref mp 'x 0.0))]
+                        [my (exact->inexact (hash-ref mp 'y 0.0))])
+                    (if (fl<= (fast-dist2d ftx fty mx my) 12.0)
+                        (values (fl+ sx mx) (fl+ sy my) (add1 c))
+                        (values sx sy c)))
+                  (values sx sy c))))
+          (define-values (wsx wsy wcnt)
+            (for/fold ([sx 0.0] [sy 0.0] [c 0]) ([e (in-list enemy-units)])
+              (if (and (hash? e)
+                       (hash-has-key? RUNTIME-WORKER-SET (unit-type-sym e))
+                       (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f)))
+                  (let ([wx (exact->inexact (hash-ref e 'x 0.0))]
+                        [wy (exact->inexact (hash-ref e 'y 0.0))])
+                    (if (fl<= (fast-dist2d ftx fty wx wy) 11.5)
+                        (values (fl+ sx wx) (fl+ sy wy) (add1 c))
+                        (values sx sy c)))
+                  (values sx sy c))))
+          (define aa-c
+            (for/sum ([e (in-list (if (null? enemy-bldgs) enemy-units (append enemy-units enemy-bldgs)))]
+                      #:when (and (hash? e)
+                                  (fast-can-attack-air? (unit-type-sym e))
+                                  (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                                  (fl<= (fast-dist2d ftx fty
+                                                     (exact->inexact (hash-ref e 'x 9999.0))
+                                                     (exact->inexact (hash-ref e 'y 9999.0)))
+                                        15.0)))
+              1))
+          (define-values (mcx mcy)
+            (cond
+              [(> mcnt 0) (values (fl/ msx (exact->inexact mcnt)) (fl/ msy (exact->inexact mcnt)))]
+              [(> wcnt 0) (values (fl/ wsx (exact->inexact wcnt)) (fl/ wsy (exact->inexact wcnt)))]
+              [else
+               (define ox (if (fl< ftx (fl* 0.5 mw-lib)) -1.0 1.0))
+               (define oy (if (fl< fty (fl* 0.5 mh-lib)) -1.0 1.0))
+               (define on (flsqrt (fl+ (fl* ox ox) (fl* oy oy))))
+               (values (flmax 6.0 (flmin (fl- mw-lib 6.0) (fl+ ftx (fl* 5.5 (fl/ ox on)))))
+                       (flmax 6.0 (flmin (fl- mh-lib 6.0) (fl+ fty (fl* 5.5 (fl/ oy on))))))]))
+          (hasheq 'th-x ftx 'th-y fty 'x ftx 'y fty
+                  'mineral-cx mcx 'mineral-cy mcy
+                  'aa-cnt aa-c 'workers wcnt))
+        (define spotted-enemy-ths-lib
+          (for/list ([b (in-list enemy-bldgs)]
+                     #:when (and (hash? b)
+                                 (real? (hash-ref b 'x #f)) (real? (hash-ref b 'y #f))
+                                 (memq (fast-canonical-structure-sym (unit-type-sym b))
+                                       '(hatchery lair hive nexus command-center orbital-command planetary-fortress))))
+            (mk-enemy-base-rec (hash-ref b 'x enemy-x) (hash-ref b 'y enemy-y))))
+        (define lib-enemy-bases
+          (let* ([fex0 (exact->inexact enemy-x)]
+                 [fey0 (exact->inexact enemy-y)]
+                 [has-main?
+                  (for/or ([eb (in-list spotted-enemy-ths-lib)])
+                    (fl<= (fast-dist2d fex0 fey0 (hash-ref eb 'th-x 0.0) (hash-ref eb 'th-y 0.0)) 10.0))]
+                 [with-main
+                  (if (or has-main? (hash-ref obs 'enemy-main-cleared #f))
+                      spotted-enemy-ths-lib
+                      (append spotted-enemy-ths-lib (list (mk-enemy-base-rec fex0 fey0))))]
+                 [fex-exp (exact->inexact enemy-exp-x)]
+                 [fey-exp (exact->inexact enemy-exp-y)]
+                 [owm-lib (and (l34-ctx-rt ctx)
+                               (opponent-world-model-last-summary (rt-opponent-world-model (l34-ctx-rt ctx))))]
+                 [enemy-multi-base?
+                  (or (>= (length spotted-enemy-ths-lib) 2)
+                      (and owm-lib (>= (opponent-world-summary-confirmed-bases owm-lib) 2)))]
+                 [has-exp?
+                  (for/or ([eb (in-list with-main)])
+                    (fl<= (fast-dist2d fex-exp fey-exp (hash-ref eb 'th-x 0.0) (hash-ref eb 'th-y 0.0)) 14.0))])
+            (if (and enemy-multi-base? (not has-exp?)
+                     (fl>= (fast-dist2d fex0 fey0 fex-exp fey-exp) 20.0))
+                (append with-main (list (mk-enemy-base-rec fex-exp fey-exp)))
+                with-main)))
+        (define-values (ec-sx ec-sy ec-cnt)
+          (for/fold ([sx 0.0] [sy 0.0] [c 0]) ([e (in-list enemy-units)])
+            (if (and (hash? e) (combat-unit-record? e)
+                     (not (eq? (hash-ref e 'snapshot? #f) #t))
+                     (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f)))
+                (values (fl+ sx (exact->inexact (hash-ref e 'x 0.0)))
+                        (fl+ sy (exact->inexact (hash-ref e 'y 0.0)))
+                        (add1 c))
+                (values sx sy c))))
+        (define e-army-cx (if (> ec-cnt 0) (fl/ ec-sx (exact->inexact ec-cnt)) (exact->inexact enemy-x)))
+        (define e-army-cy (if (> ec-cnt 0) (fl/ ec-sy (exact->inexact ec-cnt)) (exact->inexact enemy-y)))
+        (define a-army-cx (exact->inexact (l34-ctx-prelim-army-cx ctx)))
+        (define a-army-cy (exact->inexact (l34-ctx-prelim-army-cy ctx)))
+        (define frontline-pushing-lib?
+          (and (l34-ctx-combat-should-engage? ctx)
+               (not (l34-ctx-combat-suppress-attack? ctx))
+               (> (dist2d a-army-cx a-army-cy base-x base-y) 24.0)))
+        (define urgent-home-def-lib?
+          (and (l34-ctx-enemy-within-14-of-th? ctx)
+               (<= (length eligible-libs) 2)))
+        (define pure-lib-harass-squad?
+          (and (pair? eligible-libs)
+               (= (length eligible-libs) (length (l34-ctx-combat-units ctx)))
+               (pair? spotted-enemy-ths-lib)))
+        (define lib-harass-dirs
+          (if (and (or (>= (length eligible-libs) 2) pure-lib-harass-squad?)
+                   (pair? lib-enemy-bases)
+                   (not urgent-home-def-lib?))
+              (plan-liberator-multiprong-harass
+               eligible-libs lib-enemy-bases
+               a-army-cx a-army-cy e-army-cx e-army-cy
+               frame mw-lib mh-lib has-lib-range? frontline-pushing-lib?
+               #:pure-harass-squad? pure-lib-harass-squad?
+               #:enemy-units enemy-units)
+              '()))
+        (define harass-zt-ht (make-hasheqv))
+        (define harass-move-tags (mutable-seteqv))
+        (define harass-hold-tags (mutable-seteqv))
+        (define lib-by-id
+          (for/hasheqv ([lu (in-list eligible-libs)])
+            (values (hash-ref lu 'id -1) lu)))
+        (for ([hd (in-list lib-harass-dirs)])
+          (define uid (hash-ref hd 'id -1))
+          (define lu (hash-ref lib-by-id uid #f))
+          (when (and (exact-integer? uid) (> uid 0) (hash? lu))
+            (define ut (unit-type-sym lu))
+            (define stage (hash-ref hd 'stage 'flank))
+            (define lux0 (exact->inexact (hash-ref lu 'x base-x)))
+            (define luy0 (exact->inexact (hash-ref lu 'y base-y)))
+            ;; Loop 79 Pass 2: If a fighter-mode Liberator has a live flying combat enemy within <= 10t
+            ;; (e.g. Mutalisks/Phoenixes intercepting mid-flight), let Phase 5b fight air-to-air instead
+            ;; of passively flying through them on a `'flank`/`'park` move!
+            (define fighter-air-duel-near?
+              (and (eq? ut 'liberator)
+                   (memq stage '(flank park))
+                   (for/or ([e (in-list enemy-units)])
+                     (and (hash? e)
+                          (combat-unit-record? e)
+                          (not (eq? (hash-ref e 'snapshot? #f) #t))
+                          (let ([es (fast-canonical-unit-sym (unit-type-sym e))])
+                            (and (not (memq es '(overlord overseer overseer-siege-mode observer observer-siege-mode)))
+                                 (or (eq? (hash-ref e 'flying #f) #t)
+                                     (eq? (hash-ref e 'flying? #f) #t)
+                                     (eq? (hash-ref e 'is-flying #f) #t)
+                                     (fast-unit-is-flying-sym? es))))
+                          (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                          (fl<= (fast-dist2d lux0 luy0
+                                             (exact->inexact (hash-ref e 'x 9999.0))
+                                             (exact->inexact (hash-ref e 'y 9999.0)))
+                                10.0)))))
+            (define px (hash-ref hd 'park-x (hash-ref hd 'siege-x enemy-x)))
+            (define py (hash-ref hd 'park-y (hash-ref hd 'siege-y enemy-y)))
+            (define sx (hash-ref hd 'siege-x px))
+            (define sy (hash-ref hd 'siege-y py))
+            (define wx (hash-ref hd 'waypoint-x px))
+            (define wy (hash-ref hd 'waypoint-y py))
+            (cond
+              [fighter-air-duel-near? (void)]
+              [(eq? stage 'siege)
+               (hash-set! harass-zt-ht uid (cons sx sy))
+               ;; Loop 79 Pass 2 (`ro25`/`lib-m01`): Protect BOTH `liberator` & `liberator-ag`
+               ;; harassers in `'siege` stage so generic retreat/ground-attack never overwrites them!
+               (set-add! harass-hold-tags uid)]
+              [(eq? ut 'liberator-ag)
+               ;; Harass Liberator needs to relocate/evade -> unsiege cleanly via 2560; protect
+               ;; while waiting for dwell cooldown so Phase 5b/6/7 never emits `attack`/`move`!
+               (set-add! harass-hold-tags uid)
+               (when (>= (unit-mode-tracker-liberator-dwell-elapsed unit-mode-tr uid frame)
+                         (if (eq? stage 'evade) 24 LIBERATOR-MODE-COOLDOWN-FRAMES))
+                 (hash-set! splash-lib-dwell-p5a uid frame)
+                 (set-add! harass-move-tags uid)
+                 (set-add! wave3-handled-tags uid)
+                 (l34-emit-preserved! ctx (list 'cast-spell uid 'morph-liberator-aa)))]
+              [else
+               (set-add! harass-move-tags uid)
+               (set-add! wave3-handled-tags uid)
+               (l34-emit-preserved! ctx
+                                    (list 'move uid
+                                          (safe-coord wx (exact->inexact (hash-ref lu 'x base-x)))
+                                          (safe-coord wy (exact->inexact (hash-ref lu 'y base-y)))))])))
+        (define lib-mode-allies
+          (for/list ([u (in-list ally-units)]
+                     #:when (and (hash? u)
+                                 (or (not (memq (unit-type-sym u) '(liberator liberator-ag)))
+                                     (and (um-eligible? u)
+                                          (not (set-member? harass-move-tags (hash-ref u 'id -1)))))))
+            u))
+        (for ([ld (in-list (plan-liberator-modes
+                            lib-mode-allies enemy-units
+                            #:tracker unit-mode-tr
+                            #:current-frame frame
+                            #:harass-zone-targets (and (> (hash-count harass-zt-ht) 0) harass-zt-ht)
+                            #:has-range-upg? has-lib-range?))])
+          (define uid (unit-mode-directive-unit-tag ld))
+          (hash-set! splash-lib-dwell-p5a uid frame)
+          (set-add! wave3-handled-tags uid)
+          (l34-emit-preserved! ctx (unit-mode-directive->sexp ld)))
+        ;; Loop 79 Pass 3 (`ro25`/`lib-m01`): Hold `'siege`-stage harass Liberators in
+        ;; `wave3-handled-tags` WITHOUT emitting `(move ...)` so an in-progress `2558` morph is
+        ;; never cancelled, and protect EVERY sieged `liberator-ag` from Phase 5b/6/7 `attack`!
+        (for ([uid (in-set harass-hold-tags)])
+          (set-add! wave3-handled-tags uid))
+        (for ([lu (in-list eligible-libs)])
+          (when (eq? (unit-type-sym lu) 'liberator-ag)
+            (define uid (hash-ref lu 'id -1))
+            (when (and (exact-integer? uid) (> uid 0))
+              (set-add! wave3-handled-tags uid)))))
       (when has-hellion?
         (for ([hd (in-list (plan-hellion-modes um-allies enemy-units
                                                #:tracker unit-mode-tr
@@ -36734,6 +37578,103 @@
              (set-add! w3-ht uid)))
          (when (hash? sc-p)
            (hash-set! sc-p 'l58-staging-active? (and stg-res (staging-step-result-active? stg-res) #t)))
+         ;; Loop 79 B2: Anti-Liberator Minimal Local AA Peel (`select-minimal-liberator-aa-peel`).
+         ;; Runs BEFORE `step-multiprong-coordinator!` so `defensive-split` never piles extra units
+         ;; past the `<= 4` (`<= 12%` supply) pro minimal-AA cap while our main army fights `>= 25t` away!
+         (define lib-peel-harass-ids (mutable-seteqv))
+         (define lib-peel-harass-ths '())
+         (define lib-peel-unit-ids (mutable-seteqv))
+         (when (and live-p (pair? cu-p) (pair? eu-p) (pair? ab-p))
+           (define th-pts-aa
+             (for/list ([b (in-list ab-p)]
+                        #:when (and (hash? b)
+                                    (real? (hash-ref b 'x #f)) (real? (hash-ref b 'y #f))
+                                    (memq (fast-canonical-structure-sym (unit-type-sym b))
+                                          '(hatchery lair hive nexus command-center orbital-command planetary-fortress))))
+               (cons (exact->inexact (hash-ref b 'x (l34-ctx-base-x ctx)))
+                     (exact->inexact (hash-ref b 'y (l34-ctx-base-y ctx))))))
+           (when (pair? th-pts-aa)
+             (define harassing-elibs
+               (for/list ([e (in-list eu-p)]
+                          #:when (and (hash? e)
+                                      (not (eq? (hash-ref e 'snapshot? #f) #t))
+                                      (memq (fast-canonical-unit-sym (unit-type-sym e)) '(liberator liberator-ag))
+                                      (exact-integer? (hash-ref e 'id #f)) (> (hash-ref e 'id 0) 0)
+                                      (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                                      (let ([ex0 (exact->inexact (hash-ref e 'x 9999.0))]
+                                            [ey0 (exact->inexact (hash-ref e 'y 9999.0))])
+                                        (for/or ([tp (in-list th-pts-aa)])
+                                          (fl<= (fast-dist2d ex0 ey0 (car tp) (cdr tp)) 18.0)))))
+                 e))
+             (when (pair? harassing-elibs)
+               (define tot-csup-aa
+                 (for/sum ([cu (in-list cu-p)] #:when (hash? cu))
+                   (flmax 0.5 (exact->inexact (sc2-supply-cost (fast-canonical-unit-sym (unit-type-sym cu)) 1)))))
+               (for ([elib (in-list harassing-elibs)])
+                 (define elib-id (hash-ref elib 'id -1))
+                 (define elx (exact->inexact (hash-ref elib 'x (l34-ctx-base-x ctx))))
+                 (define ely (exact->inexact (hash-ref elib 'y (l34-ctx-base-y ctx))))
+                 (define near-th
+                   (for/fold ([bt #f] [bd 18.5] #:result bt) ([tp (in-list th-pts-aa)])
+                     (define d (fast-dist2d elx ely (car tp) (cdr tp)))
+                     (if (fl< d bd) (values tp d) (values bt bd))))
+                 (when near-th
+                   (define distant-allies
+                     (for/list ([cu (in-list cu-p)]
+                                #:when (and (hash? cu)
+                                            (real? (hash-ref cu 'x #f)) (real? (hash-ref cu 'y #f))
+                                            (fl>= (fast-dist2d (exact->inexact (hash-ref cu 'x (l34-ctx-base-x ctx)))
+                                                               (exact->inexact (hash-ref cu 'y (l34-ctx-base-y ctx)))
+                                                               (car near-th) (cdr near-th))
+                                                  25.0)))
+                       cu))
+                   (define main-army-fighting?
+                     (and (>= (length distant-allies) 4)
+                          (or (for/or ([e2 (in-list eu-p)])
+                                (and (hash? e2)
+                                     (combat-unit-record? e2)
+                                     (not (eq? (hash-ref e2 'snapshot? #f) #t))
+                                     (not (eqv? (hash-ref e2 'id -2) elib-id))
+                                     (real? (hash-ref e2 'x #f)) (real? (hash-ref e2 'y #f))
+                                     (let ([e2x (exact->inexact (hash-ref e2 'x 9999.0))]
+                                           [e2y (exact->inexact (hash-ref e2 'y 9999.0))])
+                                       (for/or ([da (in-list distant-allies)])
+                                         (fl<= (fast-dist2d (exact->inexact (hash-ref da 'x 0.0))
+                                                            (exact->inexact (hash-ref da 'y 0.0))
+                                                            e2x e2y)
+                                               22.0)))))
+                              (and (>= (length distant-allies) 6)
+                                   (l34-ctx-combat-should-engage? ctx)))))
+                   (define aa-cands
+                     (for/list ([u (in-list au-p)]
+                                #:when (and (hash? u)
+                                            (real? (hash-ref u 'x #f)) (real? (hash-ref u 'y #f))
+                                            (let ([uid (hash-ref u 'id -1)]
+                                                  [ut (unit-type-sym u)])
+                                              (and (exact-integer? uid) (> uid 0)
+                                                   (fast-can-attack-air? ut)
+                                                   (not (hash-has-key? RUNTIME-WORKER-SET ut))
+                                                   (not (memq ut '(siege-tank-sieged liberator-ag lurker-burrowed
+                                                                   widow-mine-burrowed medivac warp-prism warp-prism-phasing
+                                                                   observer overseer overseer-siege-mode)))
+                                                   (not (set-member? w3-ht uid))
+                                                   (not (set-member? skip-p uid))
+                                                   (not (set-member? lib-peel-unit-ids uid))))))
+                       u))
+                   (define peeled-aa
+                     (select-minimal-liberator-aa-peel aa-cands elx ely main-army-fighting? tot-csup-aa))
+                   (for ([pu (in-list peeled-aa)])
+                     (define pid (hash-ref pu 'id -1))
+                     (when (and (exact-integer? pid) (> pid 0))
+                       (set-add! w3-ht pid)
+                       (set-add! lib-peel-unit-ids pid)
+                       (l34-emit-preserved! ctx (list 'attack-unit pid elib-id))))
+                   (when (and main-army-fighting? (pair? peeled-aa))
+                     (set-add! lib-peel-harass-ids elib-id)
+                     (set! lib-peel-harass-ths (cons near-th lib-peel-harass-ths))))))))
+         (when (hash? sc-p)
+           (hash-set! sc-p 'l79-lib-peel-harass-ids lib-peel-harass-ids)
+           (hash-set! sc-p 'l79-lib-peel-harass-ths lib-peel-harass-ths))
          ;; Loop 65 + Phase B + Loop 65B + Loop 65E (`#1828`/`#1846`/`#1863`/`#1909`): Thin operational
          ;; multiprong/rotate/backstab/defensive-split + Protoss empty-Prism Chargelot warp-in hook!
          (let* ([th-syms '(hatchery lair hive nexus command-center orbital-command planetary-fortress)]
@@ -36775,17 +37716,26 @@
                          sup-used-p)))
              (define mp-charge-ok? (and (eq? mp-race 'Protoss) (l34-has-upgrade? ctx 'charge)))
              (define mp-claimed
-               (if stg-res
-                   (for/fold ([s skip-p]) ([id (in-set (staging-step-result-handled-tags stg-res))])
-                     (set-add s id))
-                   skip-p))
+               (let ([s0 (if stg-res
+                             (for/fold ([s skip-p]) ([id (in-set (staging-step-result-handled-tags stg-res))])
+                               (set-add s id))
+                             skip-p)])
+                 (for/fold ([s s0]) ([id (in-set lib-peel-unit-ids)])
+                   (set-add s id))))
+             (define mp-eu-p
+               (if (zero? (set-count lib-peel-harass-ids))
+                   eu-p
+                   (filter (lambda (e)
+                             (not (and (hash? e)
+                                       (set-member? lib-peel-harass-ids (hash-ref e 'id -1)))))
+                           eu-p)))
              (define mp-suppress? (l34-ctx-combat-suppress-attack? ctx))
              (define mp-res
                (step-multiprong-coordinator!
                 (rt-multiprong-state rt-p)
                 #:frame fr-p #:live-obs? live-p #:race mp-race
                 #:ally-units au-p #:combat-units cu-p #:ally-townhalls ally-ths-mp
-                #:enemy-units eu-p #:enemy-townhalls enemy-ths-mp
+                #:enemy-units mp-eu-p #:enemy-townhalls enemy-ths-mp
                 #:base-x (l34-ctx-base-x ctx) #:base-y (l34-ctx-base-y ctx)
                 #:enemy-x (l34-ctx-enemy-x ctx) #:enemy-y (l34-ctx-enemy-y ctx)
                 #:map-width mw-p #:map-height mh-p
@@ -37495,8 +38445,31 @@
     (define wave3-handled-tags (l34-ctx-wave3-handled-tags ctx))
     (define wave3-marauder-target-tags (l34-ctx-wave3-marauder-target-tags ctx))
     (define wave3-thor-morphed-tags (l34-ctx-wave3-thor-morphed-tags ctx))
+    (define p5-carrier-mode
+      (if (hash? l34-sc)
+          (hash-ref l34-sc 'l79-carrier-mode 'none)
+          'none))
+    (define p5-locust-stand-clear?
+      (and (hash? l34-sc)
+           (hash-ref l34-sc 'l79-locust-stand-and-clear? #f)))
+    ;; Loop 79 B2: Read peeled harassing Liberators from pre-multiprong minimal AA peel pass!
+    (define p5-lib-peel-harass-lib-ids
+      (or (and (hash? l34-sc) (hash-ref l34-sc 'l79-lib-peel-harass-ids #f))
+          (seteqv)))
+    (define p5-lib-peel-harass-th-pts
+      (or (and (hash? l34-sc) (hash-ref l34-sc 'l79-lib-peel-harass-ths #f))
+          '()))
+    (define eff-p5-engagement-enemies
+      (if (zero? (set-count p5-lib-peel-harass-lib-ids))
+          engagement-enemies
+          (let ([rem (filter (lambda (e)
+                               (not (and (hash? e)
+                                         (set-member? p5-lib-peel-harass-lib-ids (hash-ref e 'id -1)))))
+                             engagement-enemies)])
+            (if (pair? rem) rem engagement-enemies))))
     (define prepped-eng-enemies
-      (prep-enemy-target-descriptors engagement-enemies any-ally-baneling?))
+      (prep-enemy-target-descriptors eff-p5-engagement-enemies any-ally-baneling?
+                                     p5-carrier-mode p5-locust-stand-clear?))
     (define has-siege-supporters? (not (null? ally-siege-supporters)))
     (define combat-th-limit? (>= live-owned-townhalls 3))
 
@@ -38365,6 +39338,40 @@
                                  (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))))
             e)
           '()))
+    (define p5-live-locusts
+      (if (and live-obs? (pair? enemy-units))
+          (for/list ([e (in-list enemy-units)]
+                     #:when (and (hash? e)
+                                 (not (p5-snapshot-entity? e))
+                                 (hash-has-key? RUNTIME-LOCUST-SET (unit-type-sym e))
+                                 (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))))
+            e)
+          '()))
+    (define p5-live-locust-cnt (length p5-live-locusts))
+    (define p5-exposed-sh-cnt (length p5-exposed-swarm-hosts))
+    ;; Loop 79 Pass 2 (`sh-d03` Tank-Behind-Hellbat Role Layering): Precompute friendly Hellbat/Bio
+    ;; frontline centroid once/step so unsieged Siege Tanks stay behind Hellbats/Bio (`inv -> 0%`)!
+    (define p5-tank-screen-centroid
+      (if live-obs?
+          (let-values ([(sx sy c)
+                        (for/fold ([sx 0.0] [sy 0.0] [c 0]) ([cu (in-list combat-units)])
+                          (if (and (hash? cu)
+                                   (memq (unit-type-sym cu) '(hellbat marine marauder))
+                                   (real? (hash-ref cu 'x #f)) (real? (hash-ref cu 'y #f)))
+                              (values (fl+ sx (exact->inexact (hash-ref cu 'x 0.0)))
+                                      (fl+ sy (exact->inexact (hash-ref cu 'y 0.0)))
+                                      (add1 c))
+                              (values sx sy c)))])
+            (and (> c 0)
+                 (cons (fl/ sx (exact->inexact c))
+                       (fl/ sy (exact->inexact c)))))
+          #f))
+    (define p5-pure-liberator-squad?
+      (and live-obs?
+           (pair? combat-units)
+           (for/and ([cu (in-list combat-units)])
+             (and (hash? cu)
+                  (memq (unit-type-sym cu) '(liberator liberator-ag))))))
 
     ;; L59 Tier-1A (`#1499` + `#1523`): Run `plan-siege-tank-targets` (`#:only-on-splash-risk? #t`)
     ;; AFTER `p5-light-harass-split-active?` / `p5-home-guard-tags` so dominant counter-wave Sieged
@@ -38709,15 +39716,29 @@
                            [ty (safe-coord (fl+ p5-muta-anchor-y (fl* tether-r (fl/ dy dn))) p5-muta-anchor-y)])
                       (l34-emit-preserved! ctx (list 'move uid tx ty))))
                 #t]
-               ;; Loop 63 (Anti-SwarmHost Flank/Snipe & No-Locust-Chase): Snipe exposed Swarm Hosts
-               ;; within `<= 22t`; otherwise NEVER chase timed-life Locusts outside base perimeter!
+               ;; Loop 63 + Loop 79 Pass 2 (`sh-d02`/`sh-d03`): Snipe genuinely exposed Swarm Hosts
+               ;; (`<= 8.0t` point-blank, OR `<= 12.0t` with `0` Locusts `<= 9.0t`, OR `<= 14.5t`
+               ;; small-remnant `<= 6` Locusts & `<= 4` SH) — NEVER hijack unsieged `siege-tank`
+               ;; (must reach `siege-mode` `388`) or stand-and-clear bio (`stimpack` `3675`) while
+               ;; a live Locust wave is active!
                [(and (pair? p5-exposed-swarm-hosts)
+                     (not (and p5-locust-stand-clear? (> p5-live-locust-cnt 0)))
                      (fast-can-attack-ground? ut)
-                     (not (memq ut '(siege-tank-sieged liberator-ag lurker-burrowed lurker-mp-burrowed
+                     (not (memq ut '(siege-tank siege-tank-sieged liberator-ag lurker-burrowed lurker-mp-burrowed
                                      widow-mine-burrowed medivac warp-prism warp-prism-phasing
                                      observer overseer overseer-siege-mode)))
                      (let* ([fux (exact->inexact ux)]
                             [fuy (exact->inexact uy)]
+                            [unit-locust-within-9?
+                             (and (> p5-live-locust-cnt 0)
+                                  (for/or ([loc (in-list p5-live-locusts)])
+                                    (fl<= (fast-dist2d fux fuy
+                                                       (exact->inexact (hash-ref loc 'x 9999.0))
+                                                       (exact->inexact (hash-ref loc 'y 9999.0)))
+                                          9.0)))]
+                            [small-remnant-p5?
+                             (and (<= p5-live-locust-cnt 6)
+                                  (<= p5-exposed-sh-cnt 4))]
                             [sh-tgt
                              (for/fold ([best #f] [best-sc +inf.0] #:result best)
                                        ([sh (in-list p5-exposed-swarm-hosts)])
@@ -38725,7 +39746,10 @@
                                (define shx (exact->inexact (hash-ref sh 'x 9999.0)))
                                (define shy (exact->inexact (hash-ref sh 'y 9999.0)))
                                (define d (fast-dist2d fux fuy shx shy))
-                               (if (and (exact-integer? sid) (> sid 0) (fl<= d 22.0))
+                               (if (and (exact-integer? sid) (> sid 0)
+                                        (or (fl<= d 8.0)
+                                            (and (fl<= d 12.0) (not unit-locust-within-9?))
+                                            (and small-remnant-p5? (fl<= d 14.5))))
                                    (let* ([hp (exact->inexact (unit-total-hp-and-shield sh))]
                                           [sc (fl+ d (fl* 0.02 hp))])
                                      (if (fl< sc best-sc) (values sh sc) (values best best-sc)))
@@ -38737,8 +39761,12 @@
                               #t))))
                 #t]
                [(and live-obs?
+                     (not p5-locust-stand-clear?)
                      (hash? target-enemy)
                      (hash-has-key? RUNTIME-LOCUST-SET (unit-type-sym target-enemy))
+                     (not (and (hash-has-key? RUNTIME-SWARM-HOST-AIR-INTERCEPT-SET ut)
+                               (or (hash-has-key? RUNTIME-LOCUST-FLYING-SET (unit-type-sym target-enemy))
+                                   (not (fast-can-attack-ground? ut)))))
                      (not (memq ut '(siege-tank-sieged liberator-ag lurker-burrowed lurker-mp-burrowed
                                      widow-mine-burrowed)))
                      (let ([lx (exact->inexact (hash-ref target-enemy 'x 9999.0))]
@@ -39087,6 +40115,10 @@
                (not muster-exempt-unit?)
                (let ([fux (exact->inexact ux)] [fuy (exact->inexact uy)])
                  (and (fl> (fast-dist2d fux fuy (exact->inexact p5-ground-muster-x) (exact->inexact p5-ground-muster-y)) 5.5)
+                      (not (and (pair? p5-lib-peel-harass-th-pts)
+                                (< p5-l64-local-push-val 1200)
+                                (for/and ([tp (in-list p5-lib-peel-harass-th-pts)])
+                                  (fl>= (fast-dist2d fux fuy (car tp) (cdr tp)) 25.0))))
                       (not (and (< p5-l64-local-push-val 2400)
                                 (fl> (fast-dist2d fux fuy fbase-x fbase-y) 55.0)
                                 (fl> (fast-dist2d fux fuy fnat-x fnat-y) 55.0)))
@@ -39132,6 +40164,7 @@
                    ;; Detector-First sniping, pull raiding Adepts off workers, or pull defenders
                    ;; off revealed Dark Templars onto a Warp Prism during Scan #1!
                    (not detector-snipe-override?)
+                   (eq? p5-carrier-mode 'none)
                    (not (eq? (fast-canonical-unit-sym etype) 'dark-templar))
                    (not (and (eq? ut 'adept)
                              (memq (fast-canonical-unit-sym etype) '(scv probe drone mule))))
@@ -39336,16 +40369,26 @@
            (define lib-r (if is-ag? 11.5 9.0))
            (define lib-r2 (if is-ag? 132.25 81.0))
            (define first-ground-enemy-near
-             (for/first ([r (in-list (l34-get-ground-eng-enemy-recs ctx))]
-                         #:when (l34-within-r2? ux uy
-                                            (or (vector-ref r 1) 9999.0)
-                                            (or (vector-ref r 2) 9999.0)
-                                            lib-r2 lib-r))
-               (vector-ref r 0)))
+             (and (not live-obs?)
+                  (for/first ([r (in-list (l34-get-ground-eng-enemy-recs ctx))]
+                              #:when (l34-within-r2? ux uy
+                                                 (or (vector-ref r 1) 9999.0)
+                                                 (or (vector-ref r 2) 9999.0)
+                                                 lib-r2 lib-r))
+                    (vector-ref r 0))))
            (define lib-dwell-ready?
              (>= (- frame (hash-ref splash-lib-dwell-ht uid -1000)) 48))
            (cond
-             [(and (not is-ag?) first-ground-enemy-near lib-dwell-ready?)
+             [(and (exact-integer? u-ab-id) (memv u-ab-id '(2558 2560)))
+              (void)]
+             ;; Loop 79 B2 + Pass 2 (`lib-m01`/`ro25` `rej(23)=0`): In live games (`live-obs?`),
+             ;; Phase 5a `plan-liberator-modes` + `plan-liberator-multiprong-harass` is the single
+             ;; authority for `2558`/`2560`. NEVER emit `attack` for `liberator-ag` or ground `attack`
+             ;; for fighter-mode `liberator` (air-to-air only -> move to `4.5t` siege standoff instead)!
+             [(and live-obs? is-ag?)
+              (set-add! wave3-handled-tags uid)
+              (void)]
+             [(and (not live-obs?) (not is-ag?) first-ground-enemy-near lib-dwell-ready?)
               (define ge first-ground-enemy-near)
               (define gx (hash-ref ge 'x ex))
               (define gy (hash-ref ge 'y ey))
@@ -39354,9 +40397,41 @@
               (define zy (safe-coord (+ uy (* (min 4.0 gd) (/ (- gy uy) gd))) gy))
               (hash-set! splash-lib-dwell-ht uid frame)
               (l34-emit! ctx (list 'cast-spell uid 'morph-liberator-ag zx zy))]
-             [(and is-ag? (not first-ground-enemy-near) lib-dwell-ready?)
+             [(and (not live-obs?) is-ag? (not first-ground-enemy-near) lib-dwell-ready?)
               (hash-set! splash-lib-dwell-ht uid frame)
               (l34-emit! ctx (list 'cast-spell uid 'morph-liberator-aa uid))]
+             [(and live-obs? (not is-ag?))
+              (define target-flying-lib?
+                (and (hash? target-enemy)
+                     (or (eq? (hash-ref target-enemy 'flying #f) #t)
+                         (eq? (hash-ref target-enemy 'flying? #f) #t)
+                         (eq? (hash-ref target-enemy 'is-flying #f) #t)
+                         (fast-unit-is-flying-sym? (unit-type-sym target-enemy)))))
+              (cond
+                [(and target-flying-lib? can-hit-target?)
+                 (l34-emit-engage-or-rally! ctx uid ux uy ex ey eid nearest-enemy-tank zergling-hold-off-pf-siege? tank-supporting-vs-static? unit-should-engage-target? u ut can-hit-target? edist2 target-enemy)]
+                [else
+                 (define fux (exact->inexact ux))
+                 (define fuy (exact->inexact uy))
+                 (define fex (exact->inexact ex))
+                 (define fey (exact->inexact ey))
+                 (define lib-retreat?
+                   (and combat-suppress-attack?
+                        (not p5-pure-liberator-squad?)))
+                 (define-values (ltx lty)
+                   (if lib-retreat?
+                       (values (exact->inexact nat-x) (exact->inexact nat-y))
+                       (let* ([dx (fl- fex fux)]
+                              [dy (fl- fey fuy)]
+                              [d (flsqrt (fl+ (fl* dx dx) (fl* dy dy)))])
+                         (if (fl> d 4.5)
+                             (let ([step (fl- d 4.5)])
+                               (values (fl+ fux (fl* step (fl/ dx d)))
+                                       (fl+ fuy (fl* step (fl/ dy d)))))
+                             (values fux fuy)))))
+                 (set-add! wave3-handled-tags uid)
+                 (when (fl> (fast-dist2d fux fuy ltx lty) 1.0)
+                   (l34-emit! ctx (list 'move uid (safe-coord ltx ux) (safe-coord lty uy))))])]
              [(not is-ag?)
               (l34-emit-engage-or-rally! ctx uid ux uy ex ey eid nearest-enemy-tank zergling-hold-off-pf-siege? tank-supporting-vs-static? unit-should-engage-target? u ut can-hit-target? edist2 target-enemy)])]
           [(viking viking-fighter viking-assault)
@@ -39505,6 +40580,7 @@
            (define fuy-th (exact->inexact uy))
            (define thor-hi-cap-tgt
              (and live-obs? is-high-impact?
+                  (not (eq? p5-carrier-mode 'interceptor-burn))
                   (for/fold ([best #f] [best-sc -1e9] #:result best) ([e (in-list enemy-units)])
                     (if (and (hash? e)
                              (not (p5-snapshot-entity? e))
@@ -39524,21 +40600,24 @@
                         (values best best-sc)))))
            (define thor-expl-light-tgt
              (and live-obs? (not is-high-impact?)
-                  (let ([lights
-                         (for/list ([e (in-list enemy-units)]
-                                    #:when (and (hash? e)
-                                                (not (p5-snapshot-entity? e))
-                                                (exact-integer? (hash-ref e 'id #f))
-                                                (> (hash-ref e 'id 0) 0)
-                                                (memq (fast-canonical-unit-sym (unit-type-sym e))
-                                                      '(mutalisk phoenix banshee))
-                                                (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
-                                                (<= (fast-dist2d fux-th fuy-th
-                                                                 (exact->inexact (hash-ref e 'x 9999.0))
-                                                                 (exact->inexact (hash-ref e 'y 9999.0)))
-                                                    14.0)))
-                           e)])
-                    (and (>= (length lights) 3)
+                  (let* ([expl-syms (if (eq? p5-carrier-mode 'interceptor-burn)
+                                        '(interceptor mutalisk phoenix banshee)
+                                        '(mutalisk phoenix banshee))]
+                         [lights
+                          (for/list ([e (in-list enemy-units)]
+                                     #:when (and (hash? e)
+                                                 (not (p5-snapshot-entity? e))
+                                                 (exact-integer? (hash-ref e 'id #f))
+                                                 (> (hash-ref e 'id 0) 0)
+                                                 (memq (fast-canonical-unit-sym (unit-type-sym e))
+                                                       expl-syms)
+                                                 (real? (hash-ref e 'x #f)) (real? (hash-ref e 'y #f))
+                                                 (<= (fast-dist2d fux-th fuy-th
+                                                                  (exact->inexact (hash-ref e 'x 9999.0))
+                                                                  (exact->inexact (hash-ref e 'y 9999.0)))
+                                                     14.0)))
+                            e)])
+                    (and (>= (length lights) (if (eq? p5-carrier-mode 'interceptor-burn) 4 3))
                          (argmax (lambda (e)
                                    (define ex0 (exact->inexact (hash-ref e 'x fux-th)))
                                    (define ey0 (exact->inexact (hash-ref e 'y fuy-th)))
@@ -39556,13 +40635,23 @@
              [(and (exact-integer? u-ab-id) (memv u-ab-id '(2362 2364)))
               (void)]
              [(and (not is-high-impact?)
+                   (not (eq? p5-carrier-mode 'interceptor-burn))
                    (not (null? enemy-massive-air-or-colossus))
-                   (or (not live-obs?) (null? enemy-mutalisks) (null? (cdr enemy-mutalisks)) (null? (cddr enemy-mutalisks)))
+                   (or (not live-obs?)
+                       (eq? p5-carrier-mode 'carrier-snipe)
+                       (null? enemy-mutalisks) (null? (cdr enemy-mutalisks)) (null? (cddr enemy-mutalisks)))
                    thor-dwell-ready?
                    thor-safe-ok?
                    (not (set-member? wave3-thor-morphed-tags uid)))
               (hash-set! splash-thor-dwell-ht uid frame)
               (l34-emit! ctx (list 'cast-spell uid 'morph-thor-high-impact uid))]
+             [(and is-high-impact?
+                   (eq? p5-carrier-mode 'interceptor-burn)
+                   thor-dwell-ready?
+                   thor-safe-ok?
+                   (not (set-member? wave3-thor-morphed-tags uid)))
+              (hash-set! splash-thor-dwell-ht uid frame)
+              (l34-emit! ctx (list 'cast-spell uid 'morph-thor-explosive uid))]
              [(and (not live-obs?)
                    is-high-impact?
                    (null? enemy-massive-air-or-colossus)
@@ -39613,6 +40702,12 @@
                    [else
                     (define pbomb-rng (sc2-spell-cast-range 'parasitic-bomb 8.0))
                     (define abduct-rng (sc2-spell-cast-range 'abduct 9.0))
+                    (define viper-pbomb-excl-syms
+                      (if (eq? p5-carrier-mode 'interceptor-burn)
+                          '(overlord overlord-transport overseer
+                            overseer-siege-mode observer parasitic-bomb-dummy)
+                          '(overlord overlord-transport overseer
+                            overseer-siege-mode observer parasitic-bomb-dummy interceptor)))
                     (define air-clump-tgt
                       (and (>= u-energy 125)
                            (for/first ([e (in-list enemy-units)]
@@ -39624,9 +40719,7 @@
                                                      (or (eq? (hash-ref e 'flying #f) #t)
                                                          (eq? (hash-ref e 'is-flying #f) #t)
                                                          (fast-unit-is-flying-sym? et0))
-                                                     (not (memq et0 '(overlord overlord-transport overseer
-                                                                      overseer-siege-mode observer
-                                                                      parasitic-bomb-dummy interceptor)))
+                                                     (not (memq et0 viper-pbomb-excl-syms))
                                                      (not (and (list? ebs)
                                                                (or (memv 132 ebs) (memq 'parasitic-bomb ebs))))
                                                      (or (<= (fast-dist2d army-fx army-fy ex0 ey0) 36.0)
@@ -39639,12 +40732,10 @@
                                                                                  (or (eq? (hash-ref o 'flying #f) #t)
                                                                                      (eq? (hash-ref o 'is-flying #f) #t)
                                                                                      (fast-unit-is-flying-sym? ot0))
-                                                                                 (not (memq ot0 '(overlord overlord-transport overseer
-                                                                                                  overseer-siege-mode observer
-                                                                                                  parasitic-bomb-dummy interceptor)))
+                                                                                 (not (memq ot0 viper-pbomb-excl-syms))
                                                                                  (<= (fast-dist2d ex0 ey0 ox0 oy0) 4.5))))
                                                            1)
-                                                         2))))
+                                                         (if (eq? et0 'interceptor) 4 2)))))
                              e)))
                     (define cloud-tgt
                       (and (not air-clump-tgt)
@@ -40587,25 +41678,76 @@
                                               (exact->inexact (hash-ref e 'x 9999.0))
                                               (exact->inexact (hash-ref e 'y 9999.0)))
                                  14.5))))))
+           ;; Loop 79 Pass 2 (`sh-d03`): When `p5-locust-stand-clear?` (`splash-score >= 1.0`),
+           ;; live Locusts/Swarm Hosts within `<= 13.5t` immediately trigger `siege-mode` (`388`)
+           ;; behind Hellbats/Bio (and keep sieged Tanks deployed while Locusts remain in range)!
+           (define tank-locust-clear-near?
+             (and live-obs?
+                  p5-locust-stand-clear?
+                  (let ([fux (exact->inexact ux)] [fuy (exact->inexact uy)])
+                    (for/or ([e (in-list enemy-units)])
+                      (and (hash? e)
+                           (not (p5-snapshot-entity? e))
+                           (let ([et0 (unit-type-sym e)])
+                             (or (hash-has-key? RUNTIME-LOCUST-SET et0)
+                                 (hash-has-key? RUNTIME-SWARM-HOST-SET et0)))
+                           (real? (hash-ref e 'x #f))
+                           (real? (hash-ref e 'y #f))
+                           (fl<= (fast-dist2d fux fuy
+                                              (exact->inexact (hash-ref e 'x 9999.0))
+                                              (exact->inexact (hash-ref e 'y 9999.0)))
+                                 13.5))))))
+           (define-values (tank-rear-step-x tank-rear-step-y)
+             (if (and live-obs?
+                      (not is-sieged?)
+                      p5-tank-screen-centroid
+                      (or p5-locust-stand-clear? (> p5-exposed-sh-cnt 0)))
+                 (let* ([scx (car p5-tank-screen-centroid)]
+                        [scy (cdr p5-tank-screen-centroid)]
+                        [fux (exact->inexact ux)]
+                        [fuy (exact->inexact uy)]
+                        [dx (fl- (exact->inexact ex) scx)]
+                        [dy (fl- (exact->inexact ey) scy)]
+                        [dn (flsqrt (fl+ (fl* dx dx) (fl* dy dy)))])
+                   (if (fl> dn 0.5)
+                       (let* ([vx (fl/ dx dn)]
+                              [vy (fl/ dy dn)]
+                              [ahead (fl+ (fl* (fl- fux scx) vx)
+                                          (fl* (fl- fuy scy) vy))])
+                         (if (and (fl> ahead (if tank-locust-clear-near? 1.5 1.0))
+                                  (> min-enemy-dist (if tank-locust-clear-near? 9.5 7.5)))
+                             (values (safe-coord (fl- scx (fl* 2.5 vx)) ux)
+                                     (safe-coord (fl- scy (fl* 2.5 vy)) uy))
+                             (values #f #f)))
+                       (values #f #f)))
+                 (values #f #f)))
            (define eff-tank-unsiege-range
              (if tank-defending-home? 17.5 SC2-SIEGE-TANK-UNSIEGE-RANGE))
            (define tank-dwell-ready?
              (or (not live-obs?)
                  (>= (- frame (hash-ref splash-tank-dwell-ht uid -1000)) 48)))
            (cond
-             [(and is-sieged? (> min-enemy-dist eff-tank-unsiege-range) tank-dwell-ready?)
+             [(and is-sieged? (not tank-locust-clear-near?) (> min-enemy-dist eff-tank-unsiege-range) tank-dwell-ready?)
               (hash-set! splash-tank-dwell-ht uid frame)
               ;; W9-TAC-2: Omit spurious target tag so `human-cortex.rkt:1687` box-select coalesces full squad!
               (l34-emit! ctx (list 'cast-spell uid 'unsiege-mode))
               (unless live-upgrades-tracked?
                 (l34-emit-engage-or-rally! ctx uid ux uy ex ey eid nearest-enemy-tank zergling-hold-off-pf-siege? tank-supporting-vs-static? unit-should-engage-target? u ut can-hit-target? edist2 target-enemy))]
+             [(and (not is-sieged?) tank-rear-step-x tank-rear-step-y)
+              (set-add! wave3-handled-tags uid)
+              (l34-emit-preserved! ctx (list 'move uid tank-rear-step-x tank-rear-step-y))]
              [(and (not is-sieged?)
-                   (or (<= min-enemy-dist SC2-SIEGE-TANK-SIEGE-RANGE)
+                   (or tank-locust-clear-near?
+                       (<= min-enemy-dist SC2-SIEGE-TANK-SIEGE-RANGE)
                        tank-def-enemy-ground-near?)
                    tank-dwell-ready?)
               (hash-set! splash-tank-dwell-ht uid frame)
               ;; W9-TAC-2: Omit spurious enemy `eid` so `human-cortex.rkt:1687` box-select coalesces all Siege Tanks!
-              (l34-emit! ctx (list 'cast-spell uid 'siege-mode))
+              (if tank-locust-clear-near?
+                  (begin
+                    (set-add! wave3-handled-tags uid)
+                    (l34-emit-preserved! ctx (list 'cast-spell uid 'siege-mode)))
+                  (l34-emit! ctx (list 'cast-spell uid 'siege-mode)))
               (unless live-upgrades-tracked?
                 (l34-emit-engage-or-rally! ctx uid ux uy ex ey eid nearest-enemy-tank zergling-hold-off-pf-siege? tank-supporting-vs-static? unit-should-engage-target? u ut can-hit-target? edist2 target-enemy))]
              [(and is-sieged?
@@ -40632,10 +41774,29 @@
                      (l34-emit! ctx (list 'cast-spell uid 'snipe eid))))
                  (l34-emit-engage-or-rally! ctx uid ux uy ex ey eid nearest-enemy-tank zergling-hold-off-pf-siege? tank-supporting-vs-static? unit-should-engage-target? u ut can-hit-target? edist2 target-enemy)))]
           [(marine marauder)
-           ;; L30-P0-3 (`t04` Bio Re-Stim): Re-cast Stimpack immediately once buff expires when
-           ;; healthy (`>= SC2-MARINE-STIM-MIN-HP`) OR while Medivac healing is active nearby (`hp > 50%`)!
+           ;; L30-P0-3 (`t04` Bio Re-Stim) + Loop 79 Pass 2 (`sh-d03` Locust Stand-Clear Stim `3675`):
+           ;; Re-cast Stimpack immediately once buff expires when healthy (`>= SC2-MARINE-STIM-MIN-HP`),
+           ;; while Medivac healing is active nearby (`hp > 50%`), OR when standing & clearing live Locusts!
+           (define bio-locust-clear-near?
+             (and live-obs?
+                  p5-locust-stand-clear?
+                  (let ([fux (exact->inexact ux)] [fuy (exact->inexact uy)])
+                    (for/or ([e (in-list enemy-units)])
+                      (and (hash? e)
+                           (not (p5-snapshot-entity? e))
+                           (let ([et0 (unit-type-sym e)])
+                             (or (hash-has-key? RUNTIME-LOCUST-SET et0)
+                                 (hash-has-key? RUNTIME-SWARM-HOST-SET et0)))
+                           (real? (hash-ref e 'x #f))
+                           (real? (hash-ref e 'y #f))
+                           (fl<= (fast-dist2d fux fuy
+                                              (exact->inexact (hash-ref e 'x 9999.0))
+                                              (exact->inexact (hash-ref e 'y 9999.0)))
+                                 13.0))))))
            (when (and (l34-has-upgrade? ctx 'stimpack)
-                      (or (not live-upgrades-tracked?) (fl<= edist2 100.0)))
+                      (or (not live-upgrades-tracked?)
+                          (fl<= edist2 100.0)
+                          bio-locust-clear-near?))
              (define u-hp (exact->inexact (hash-ref u 'hp 100)))
              (define u-max-hp
                (exact->inexact
@@ -40662,7 +41823,9 @@
                             (not (memv 24 u-buffs))
                             (not (memv 27 u-buffs)))
                    ;; W9-TAC-2: Omit spurious enemy `eid` so `human-cortex.rkt:1687` coalesces all Stimpack units!
-                   (l34-emit! ctx (list 'cast-spell uid 'stimpack))))))
+                   (if bio-locust-clear-near?
+                       (l34-emit-preserved! ctx (list 'cast-spell uid 'stimpack))
+                       (l34-emit! ctx (list 'cast-spell uid 'stimpack)))))))
            (unless (and live-obs? (set-member? wave3-marauder-target-tags uid))
              ;; L43-P0-1d (`e03` Marine continuous focus-fire + outrange stutter-step vs 3 Adepts) +
              ;; L48-W2 (Marine `5.0`-range kiting vs melee worker rushes — zero-damage Probe wipe!):
@@ -41261,6 +42424,7 @@
              (and live-obs?
                   p5-pos-ctx
                   unit-should-engage-target?
+                  (eq? p5-carrier-mode 'none)
                   (not (l34-ctx-enemy-within-14-of-th? ctx))
                   (not p5-l64-defensive-muster?)
                   (not used-peel-tgt?)
@@ -41328,6 +42492,7 @@
            (define mirrored-acts
              (if (and (not else-pos-handled?)
                       has-tbrain-acts?
+                      (eq? p5-carrier-mode 'none)
                       (not used-peel-tgt?)
                       (not detector-snipe-override?)
                       (not nearest-enemy-tank)
@@ -41743,7 +42908,7 @@
                                (not (set-member? splash-evading-tags uid))
                                (not (set-member? disruptor-handled-tags uid))
                                (not (set-member? tbrain-committed-tags uid))
-                               (not (memq ut '(overlord overseer observer warp-prism warp-prism-phasing medivac queen)))
+                               (not (memq ut '(overlord overseer observer warp-prism warp-prism-phasing medivac queen liberator liberator-ag)))
                                (> (+ (* dx dx) (* dy dy)) 36.0))))
         u))
     (when (pair? bo-march-units)
@@ -41820,7 +42985,9 @@
                                          frame
                                          44))))
     (define idle-rally-candidates
-      (filter (lambda (u) (not (set-member? wave3-handled-tags (hash-ref u 'id -1))))
+      (filter (lambda (u)
+                (and (not (set-member? wave3-handled-tags (hash-ref u 'id -1)))
+                     (not (memq (unit-type-sym u) '(liberator liberator-ag)))))
               combat-units))
     (when (and (>= (length idle-rally-candidates) 2)
                (or (not live-obs?)
@@ -41893,7 +43060,7 @@
                                (not (l34-solo-harass-exempt-unit? ctx u))
                                (not (memq ut '(overlord overseer observer warp-prism warp-prism-phasing medivac queen
                                                carrier swarm-host swarm-host-mp
-                                               siege-tank-sieged widow-mine-burrowed lurker-burrowed liberator-ag)))
+                                               siege-tank-sieged widow-mine-burrowed lurker-burrowed liberator liberator-ag)))
                                (not (for/or ([ep (in-list stage-vis-enemy-pts)])
                                       (fl<= (fast-dist2d ux uy (car ep) (cdr ep)) 14.0)))
                                (not (l34-within-r2? ux uy fstage-x fstage-y 100.0 10.0)))))
@@ -42179,10 +43346,21 @@
     (l34-emit! ctx (list 'pre-split-wings left-x left-y mid-x mid-y right-x right-y))
     (l34-emit! ctx (list 'form-concave-arc target-ex target-ey 10 120)))
 
+  ;; Loop 79 Pass 3 (`lib-m01` Marine restore + `ro25` `rej(23)=0`): ONLY skip ground-ramp
+  ;; `high-ground-tactics` & generic `execute-spatial-maneuver` when 100% of combat units are
+  ;; flying Liberators (`ro25` pure-Liberator squad); NEVER suppress for mixed Bio+Liberators (`lib-m01`)!
+  (define pure-liberator-combat-p6?
+    (and live-obs?
+         (pair? combat-units)
+         (for/and ([cu (in-list combat-units)])
+           (and (hash? cu)
+                (memq (unit-type-sym cu) '(liberator liberator-ag))))))
+
   ;; High-Ground Terrain & Vision Mastery
   (define our-z our-z-early)
   (define enemy-z enemy-z-early)
   (when (and (not endgame-hunt-active?)
+             (not pure-liberator-combat-p6?)
              (or (not (= our-z enemy-z))
                  (not (null? enemy-units))
                  (hash-ref obs 'high-ground-check #f))
@@ -42299,6 +43477,7 @@
                (values bo-rally-tx bo-rally-ty)
                (values target-ex target-ey))])))
   (when (and (not endgame-hunt-active?)
+             (not pure-liberator-combat-p6?)
              (or (not live-obs?)
                  (refractory-allow-action?! (live-bot-runtime-cooldown-tracker rt)
                                             '(spatial-maneuver)

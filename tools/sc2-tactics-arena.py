@@ -194,6 +194,10 @@ UNIT_IDS: dict[str, int] = {
     "infestor-burrowed": 127,
     "swarm-host": 494,
     "swarm-host-burrowed": 493,
+    "locust": 489,
+    "locust-mp": 489,
+    "locust-flying": 693,
+    "locust-mp-flying": 693,
     "viper": 499,
     "brood-lord": 114,
     "lurker-mp": 502,
@@ -315,6 +319,8 @@ UNIT_VALUES: dict[int, float] = {
     127: 325.0,   # infestor-burrowed
     494: 212.5,   # swarm-host
     493: 212.5,   # swarm-host-burrowed
+    489: 0.0,     # locust (free spawned)
+    693: 0.0,     # locust-flying (free spawned)
     499: 400.0,   # viper
     114: 675.0,   # brood-lord
     502: 375.0,   # lurker-mp
@@ -370,7 +376,7 @@ COMBAT_IDS = set(UNIT_VALUES) - WORKER_IDS
 AIR_UNIT_IDS = {
     54, 35, 55, 56, 689, 734, 57,                  # Terran air
     78, 495, 80, 79, 496, 10, 82, 1911, 81, 136,   # Protoss air
-    108, 112, 499, 114, 129, 1912, 106, 893,       # Zerg air
+    108, 112, 499, 114, 129, 1912, 106, 893, 693,  # Zerg air (incl. locust-flying)
 }
 MINERAL_IDS = {146, 147, 341, 483, 665, 666, 796, 797, 884, 885, 886, 887, 1996, 1997, 1998}
 COLLAPSIBLE_TOWER_IDS = {
@@ -443,7 +449,7 @@ ENERGY_CASTER_CAPS: dict[int, tuple[float, bool, bool]] = {
 GROUND_ONLY_WEAPON_IDS = {
     51, 33, 32, 53, 484, 49, 55, 45, 130,                                        # Terran G-only (incl. planetary-fortress)
     73, 311, 83, 4, 694, 76, 84,                                                 # Protoss G-only
-    105, 119, 9, 115, 110, 118, 109, 131, 114, 502, 503, 494, 493, 98, 104, 116, # Zerg G-only (incl. spine-crawler)
+    105, 119, 9, 115, 110, 118, 109, 131, 114, 502, 503, 494, 493, 489, 98, 104, 116, # Zerg G-only (incl. locust & spine-crawler)
 }
 AIR_ONLY_WEAPON_IDS = {112, 23, 99}  # corruptor, missile-turret, spore-crawler
 BOTH_WEAPON_IDS = {
@@ -616,7 +622,7 @@ POS_PURE_CASTER_NO_AUTO_IDS: set[int] = {111, 127, 499, 694, 56}  # infestor, vi
 POS_WEAPON_RANGES: dict[int, float] = {
     # Melee / short-range
     73: 1.0, 76: 1.0, 105: 1.0, 9: 1.0, 109: 1.0, 484: 2.0,
-    141: 3.0, 108: 3.0,
+    141: 3.0, 108: 3.0, 489: 3.0,
     110: 4.0, 311: 4.0, 495: 4.0,
     # Mid-range
     48: 5.0, 49: 5.0, 53: 5.0, 77: 5.0, 78: 5.0, 126: 5.0,
@@ -4777,6 +4783,44 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                     )
                                                 )
                                             ))
+                                    # MicroDummy Swarm Host SpawnLocusts (`2704`) & Flying Locust Swoop (`2387`)
+                                    if en_gnd_sp:
+                                        sh_tags = [
+                                            u.tag for u in my_u
+                                            if u.unit_type == 494
+                                            and any(math.hypot(e.pos.x - u.pos.x, e.pos.y - u.pos.y) <= 22.0 for e in en_gnd_sp)
+                                        ]
+                                        if sh_tags:
+                                            special_p2_tags.update(sh_tags)
+                                            tgt_sh = min(en_gnd_sp, key=lambda e: e.health + e.shield)
+                                            acts_p2.append(sc2api_pb2.Action(
+                                                action_raw=raw_pb2.ActionRaw(
+                                                    unit_command=raw_pb2.ActionRawUnitCommand(
+                                                        ability_id=2704,
+                                                        target_world_space_pos=common_pb2.Point2D(
+                                                            x=float(tgt_sh.pos.x),
+                                                            y=float(tgt_sh.pos.y),
+                                                        ),
+                                                        unit_tags=sh_tags,
+                                                    )
+                                                )
+                                            ))
+                                        for fl_u in my_u:
+                                            if fl_u.unit_type == 693:
+                                                tgt_fl = min(en_gnd_sp, key=lambda e: math.hypot(e.pos.x - fl_u.pos.x, e.pos.y - fl_u.pos.y))
+                                                special_p2_tags.add(fl_u.tag)
+                                                acts_p2.append(sc2api_pb2.Action(
+                                                    action_raw=raw_pb2.ActionRaw(
+                                                        unit_command=raw_pb2.ActionRawUnitCommand(
+                                                            ability_id=2387,
+                                                            target_world_space_pos=common_pb2.Point2D(
+                                                                x=float(tgt_fl.pos.x),
+                                                                y=float(tgt_fl.pos.y),
+                                                            ),
+                                                            unit_tags=[fl_u.tag],
+                                                        )
+                                                    )
+                                                ))
 
                                 mobile_my_u = [
                                     u for u in my_u
@@ -6975,7 +7019,8 @@ async def run_in_container(args: argparse.Namespace) -> int:
                                                     end_reason, ko_side = "ko_incapable_survivors", 2
 
                                             if end_reason is None and scen.scoring_mode not in ("mineral-defense", "worker-runby", "non-combat"):
-                                                if fight_elapsed >= STALEMATE_NO_DAMAGE_LOOPS and no_dmg_elapsed >= STALEMATE_NO_DAMAGE_LOOPS:
+                                                has_live_locust_wave = any(u.unit_type in (489, 693) for u in p2u)
+                                                if fight_elapsed >= STALEMATE_NO_DAMAGE_LOOPS and no_dmg_elapsed >= STALEMATE_NO_DAMAGE_LOOPS and not has_live_locust_wave:
                                                     end_reason = "no_damage_stalemate"
                                                 elif fight_elapsed >= scen.max_loops:
                                                     end_reason = "max_loops"

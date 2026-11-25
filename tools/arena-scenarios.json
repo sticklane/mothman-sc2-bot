@@ -15928,6 +15928,320 @@
         ]
       ],
       "max_loops": 960
+    },
+    {
+      "id": "sc2-sh-d01-pvz-colossi-archon-stand-clear-locusts",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "kiting-concave",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "swarm-host-locust-wave",
+        "anti-light-splash-stand-clear",
+        "cooldown-punish",
+        "concave-spread"
+      ],
+      "p1_upgrades": [
+        "ThermalLance"
+      ],
+      "description": "Loop 79 Pro Study (PvZ Stand-Clear Locust Wave): 3 Thermal-Lance Colossi + 3 Archons + 8 Stalkers holding ground with strong anti-light splash to delete an authentic 20-Locust swoop wave and punish 10 Swarm Hosts on cooldown",
+      "p1_units": [
+        [
+          "archon",
+          3,
+          -7.8,
+          0.0
+        ],
+        [
+          "stalker",
+          8,
+          -8.8,
+          0.0
+        ],
+        [
+          "colossus",
+          3,
+          -9.8,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "swarm-host",
+          10,
+          8.0,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-sh-d02-pvz-stalker-immortal-retreat-locusts",
+      "our_race": "Protoss",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "kiting-concave",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "swarm-host-locust-wave",
+        "no-splash-locust-retreat",
+        "blink-kite",
+        "cooldown-punish"
+      ],
+      "p1_upgrades": [
+        "Blink"
+      ],
+      "description": "Loop 79 Pro Study (PvZ No-Splash Locust Retreat): 10 Blink Stalkers + 4 Immortals (zero anti-light splash) kiting/retreating out of an authentic 20-Locust swoop wave before counter-punishing 10 Swarm Hosts on cooldown",
+      "p1_units": [
+        [
+          "immortal",
+          4,
+          -8.0,
+          0.0
+        ],
+        [
+          "stalker",
+          10,
+          -9.0,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "swarm-host",
+          10,
+          8.0,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-sh-d03-tvz-hellbat-tank-clear-locusts",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "tier": "canonical",
+      "category": "kiting-concave",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "swarm-host-locust-wave",
+        "hellbat-tank-splash-clear",
+        "cooldown-punish",
+        "role-layering"
+      ],
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "description": "Loop 79 Pro Study (TvZ GuMiho Hellbat-Tank Locust Clear): 6 Hellbats + 12 Stim/CombatShield Marines + 4 Siege Tanks deleting an authentic 20-Locust swoop wave with layered anti-light splash and punishing 10 Swarm Hosts on cooldown",
+      "p1_units": [
+        [
+          "hellbat",
+          6,
+          -7.6,
+          0.0
+        ],
+        [
+          "marine",
+          12,
+          -8.6,
+          0.0
+        ],
+        [
+          "siege-tank",
+          4,
+          -9.8,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "swarm-host",
+          10,
+          8.0,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-lib-m01-tvz-dual-liberator-deadspace-harass",
+      "our_race": "Terran",
+      "enemy_race": "Zerg",
+      "tier": "econ-harass",
+      "category": "runby-offense",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "mineral-line-harass",
+      "scoring_mode": "worker-runby",
+      "pass_workers_killed_min": 6,
+      "use_p2_main_base": true,
+      "patterns": [
+        "worker-runby",
+        "liberator-deadspace-harass",
+        "synchronized-multiprong-flank",
+        "spore-avoidance"
+      ],
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "expected_abilities": [
+        2558
+      ],
+      "description": "Loop 79 Pro Study (TvZ Dual-Liberator Deadspace Harass + Flank): 2 Liberators + 8 Stim/CombatShield Marines + 1 Medivac hitting Zerg main mineral line (16 Drones, 2 Queens, 4 Hydralisks, 1 Spore Crawler) with dead-space Defender Mode + synchronized bio flank",
+      "p1_units": [
+        [
+          "liberator",
+          2,
+          8.8,
+          -3.2
+        ],
+        [
+          "marine",
+          8,
+          9.2,
+          2.5
+        ],
+        [
+          "medivac",
+          1,
+          10.2,
+          2.5
+        ]
+      ],
+      "p2_units": [
+        [
+          "drone",
+          16,
+          -3.2,
+          0.0
+        ],
+        [
+          "queen",
+          2,
+          2.4,
+          0.0
+        ],
+        [
+          "hydralisk",
+          4,
+          3.4,
+          1.5
+        ],
+        [
+          "spore-crawler",
+          1,
+          -2.0,
+          -2.2
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-car-b01-zvp-hydras-viper-interceptor-burn",
+      "our_race": "Zerg",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "air-superiority",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "carrier-binary-commitment",
+        "interceptor-burn",
+        "viper-parasitic-bomb",
+        "concave-spread"
+      ],
+      "p1_upgrades": [
+        "MuscularAugments",
+        "GroovedSpines"
+      ],
+      "expected_abilities": [
+        2542
+      ],
+      "p1_energy": 160.0,
+      "description": "Loop 79 Pro Study (ZvP Serral Interceptor-Burn): 24 Speed/Range Hydralisks + 2 Vipers vs 6 Carriers committing strictly to pure Interceptor burn + Parasitic Bomb instead of split targeting",
+      "p1_units": [
+        [
+          "hydralisk",
+          24,
+          -4.5,
+          0.0
+        ],
+        [
+          "viper",
+          2,
+          -6.2,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "carrier",
+          6,
+          5.2,
+          0.0
+        ]
+      ],
+      "max_loops": 960
+    },
+    {
+      "id": "sc2-car-b02-tvp-bio-viking-binary-carrier-snipe",
+      "our_race": "Terran",
+      "enemy_race": "Protoss",
+      "tier": "canonical",
+      "category": "air-superiority",
+      "fast_core": true,
+      "source": "pattern-coverage",
+      "terrain": "open",
+      "patterns": [
+        "carrier-binary-commitment",
+        "carrier-snipe-focus",
+        "viking-air-superiority",
+        "bio-focus-fire"
+      ],
+      "p1_upgrades": [
+        "Stim",
+        "CombatShield"
+      ],
+      "description": "Loop 79 Pro Study (TvP Binary Carrier-Snipe): 14 Vikings + 12 Stim/CombatShield Marines + 2 Medivacs vs 6 Carriers committing strictly to pure Carrier hull focus-fire (zero mixed Interceptor splitting)",
+      "p1_units": [
+        [
+          "marine",
+          12,
+          -4.2,
+          0.0
+        ],
+        [
+          "viking-fighter",
+          14,
+          -5.0,
+          0.0
+        ],
+        [
+          "medivac",
+          2,
+          -6.4,
+          0.0
+        ]
+      ],
+      "p2_units": [
+        [
+          "carrier",
+          6,
+          5.2,
+          0.0
+        ]
+      ],
+      "max_loops": 960
     }
   ]
 }

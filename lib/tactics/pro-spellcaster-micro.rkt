@@ -2463,6 +2463,59 @@
                     interceptor)))
        (sc2-enemy-unit-targetable? e)))
 
+;; Loop 79 A3: Leaf-pure binary Anti-Carrier commitment helper matching `arena-minimax.rkt`
+;; (`evaluate-carrier-engagement-mode`), gating Psi Storm / Parasitic Bomb / Fungal Growth
+;; on dense Interceptor clouds (`>= 4`) strictly to `'interceptor-burn` mode!
+(: spellcaster-carrier-engagement-mode (-> (Listof Any) (Listof Any) Symbol))
+(define (spellcaster-carrier-engagement-mode ally-units enemy-units)
+  (define-values (live-carriers live-interceptors)
+    (for/fold ([cc : Integer 0] [ic : Integer 0])
+              ([e (in-list enemy-units)]
+               #:when (and (hash? e) (sc2-enemy-unit-targetable? e)))
+      (define sym (uh-type e))
+      (cond
+        [(eq? sym 'carrier) (values (add1 cc) ic)]
+        [(eq? sym 'interceptor) (values cc (add1 ic))]
+        [else (values cc ic)])))
+  (cond
+    [(and (= live-carriers 0) (< live-interceptors 4))
+     'none]
+    [else
+     (define-values (burst-sc burn-sc)
+       (for/fold ([bst : Float 0.0] [brn : Float 0.0])
+                 ([a (in-list ally-units)]
+                  #:when (and (hash? a) (not (uh-hallucination? a)) (> (uh-total-hp a) 0.0)))
+         (define raw (uh-raw-type a))
+         (define sym (uh-type a))
+         (cond
+           [(eq? raw 'thor-ap) (values (+ bst (/ 1.0 3.0)) brn)]
+           [(eq? raw 'thor)    (values bst (+ brn (/ 1.0 3.0)))]
+           [(eq? sym 'corruptor) (values (+ bst (/ 1.0 8.0)) brn)]
+           [(memq raw '(viking-fighter viking)) (values (+ bst (/ 1.0 8.0)) brn)]
+           [(eq? sym 'tempest) (values (+ bst (/ 1.0 4.0)) brn)]
+           [(memq sym '(void-ray voidray)) (values (+ bst (/ 1.0 5.0)) brn)]
+           [(eq? sym 'stalker) (values (+ bst (/ 1.0 16.0)) brn)]
+           [(eq? sym 'battlecruiser) (values (+ bst (/ 1.0 3.0)) brn)]
+           [(eq? sym 'marine) (values bst (+ brn (/ 1.0 12.0)))]
+           [(eq? sym 'hydralisk) (values bst (+ brn (/ 1.0 10.0)))]
+           [(eq? sym 'archon) (values bst (+ brn (/ 1.0 3.0)))]
+           [(eq? sym 'high-templar) (values bst (+ brn (/ 1.0 2.0)))]
+           [(eq? sym 'viper) (values bst (+ brn (/ 1.0 1.5)))]
+           [(eq? sym 'infestor) (values bst (+ brn (/ 1.0 2.0)))]
+           [(memq raw '(liberator liberator-ag)) (values bst (+ brn (/ 1.0 3.0)))]
+           [else (values bst brn)])))
+     (cond
+       [(and (> live-carriers 0)
+             (or (>= burst-sc 0.85)
+                 (<= live-interceptors (* 2 live-carriers))
+                 (< burn-sc 0.75)))
+        'carrier-snipe]
+       [(and (>= live-interceptors 4)
+             (>= burn-sc 0.75))
+        'interceptor-burn]
+       [else
+        'carrier-snipe])]))
+
 (: viper-abduct-weight (-> Symbol Float))
 (define (viper-abduct-weight sym)
   ;; Strictly requires not 'frenzied, not 'heroic (SC2 5.0.14 Mothership is Heroic -> immune to Abduct),
@@ -2529,7 +2582,7 @@
    (->* ((Listof Any) (Listof Any) (Listof Any) spell-claims Integer
          (Listof Any) (Listof Any) (Listof Any) Float Float Float Float
          (Listof Integer) (Listof Integer))
-        ((Listof Any) Boolean Boolean Float)
+        ((Listof Any) Boolean Boolean Float Symbol)
         (Listof spell-directive)))
 (define (run-zerg-spellcaster-micro
          caster-units ally-units enemy-units
@@ -2539,11 +2592,17 @@
          [researched-upgrades '()]
          [neural-parasite-researched? #t]
          [microbial-shroud-ok? #t]
-         [microbial-shroud-energy 75.0])
+         [microbial-shroud-energy 75.0]
+         [carrier-mode-arg 'auto])
   (define all-enemies (if (null? enemy-buildings) enemy-units (append enemy-units enemy-buildings)))
   (define all-allies (if (null? ally-buildings) ally-units (append ally-units ally-buildings)))
   ;; W8-TAC-2: Gate Infestor Neural Parasite (249) on 'neural-parasite upgrade
   (define neural-ok? (zerg-upgrade-ready? researched-upgrades 'neural-parasite neural-parasite-researched?))
+  (define eff-carrier-mode : Symbol
+    (if (eq? carrier-mode-arg 'auto)
+        (spellcaster-carrier-engagement-mode ally-units enemy-units)
+        carrier-mode-arg))
+  (define interceptor-burn-mode? : Boolean (eq? eff-carrier-mode 'interceptor-burn))
 
   (define-values (dirs-rev _)
     (parameterize ([current-bile-allies all-allies])
@@ -2955,20 +3014,26 @@
                                  (spell-claim-point?! claims 'microbial-shroud sx sy shroud-claim-r current-frame MICROBIAL-SHROUD-CLAIM-TTL)
                                  (spell-directive tag 'infestor 'microbial-shroud 'point 0 sx sy 'infestor-microbial-shroud))))
                      ;; 3. Fungal Growth (`0.5`-tile velocity lead, live-hydrated cast range & radius)
+                     ;;    Loop 79 A3: Allow scoring dense Interceptor clouds (`>= 4`) ONLY in `'interceptor-burn` mode!
                      (and (>= en fungal-en)
                           (let-values ([(ok? fx fy _s)
                                         (best-enemy-cluster
                                          ux uy fungal-rng enemy-units fungal-rad 0.5
                                          (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
-                                           (define unbuffed
-                                             (for/list : (Listof Any) ([e (in-list cl)]
-                                                                       #:when (not (uh-has-buff? e 'fungal-growth)))
-                                               e))
-                                           (if (and (>= (length unbuffed) 2)
+                                           (define-values (unbuffed-non-int int-cnt)
+                                             (for/fold ([non-i : (Listof Any) '()] [ic : Integer 0])
+                                                       ([e (in-list cl)]
+                                                        #:when (not (uh-has-buff? e 'fungal-growth)))
+                                               (if (eq? (uh-type e) 'interceptor)
+                                                   (values non-i (add1 ic))
+                                                   (values (cons e non-i) ic))))
+                                           (define burn-int-ok? (and interceptor-burn-mode? (>= int-cnt 4)))
+                                           (if (and (or (>= (length unbuffed-non-int) 2) burn-int-ok?)
                                                     (not (spell-point-claimed? claims 'fungal-growth cx cy fungal-claim-r current-frame)))
-                                               (sum-units-fl unbuffed
-                                                             (lambda ([e : Any])
-                                                               (* 25.0 (enemy-fungal-value-weight (uh-type e)))))
+                                               (+ (sum-units-fl unbuffed-non-int
+                                                                (lambda ([e : Any])
+                                                                  (* 25.0 (enemy-fungal-value-weight (uh-type e)))))
+                                                  (if burn-int-ok? (* 24.0 (->float int-cnt)) 0.0))
                                                0.0)))])
                             (and ok?
                                  (spell-claim-point?! claims 'fungal-growth fx fy fungal-claim-r current-frame FUNGAL-CLAIM-TTL)
@@ -3044,48 +3109,51 @@
                            (and ok?
                                 (spell-claim-point?! claims 'blinding-cloud cx cy bc-claim-r current-frame BLINDING-CLOUD-CLAIM-TTL)
                                 (spell-directive tag 'viper 'blinding-cloud 'point 0 cx cy 'viper-blinding-cloud)))))
-                  ;; 2. L27-P0-3 / L28-P0-3 / L29-P0-3 (`z07`/`z08`/`#16`): Prioritize Parasitic Bomb
-                  ;;    (`energy >= 125`, `r=8.5`, `>= 2` air within `4.5t`) STRICTLY ABOVE Abduct AND
-                  ;;    HOLD Abduct whenever an unbombed `>= 2` air clump sits inside `13.0t` so Vipers
-                  ;;    step in and drop ParasiticBomb instead of burning 75e (`140 -> 65 < 125`)!
-                  (let ([pbomb-clump-in-13t?
-                         (and (>= en 125.0)
-                              (any-unit-within?
-                               enemy-units ux uy 13.0
-                               (lambda ([e : Any])
-                                 (and (enemy-air-capital-or-ranged? e)
-                                      (not (uh-has-buff? e 'parasitic-bomb))
-                                      (>= (count-units-within enemy-units (uh-x e) (uh-y e) 4.5 enemy-air-capital-or-ranged?) 2)
-                                      (not (any-unit-within?
-                                            enemy-units (uh-x e) (uh-y e) 4.0
-                                            (lambda ([d : Any])
-                                              (or (eq? (uh-type d) 'parasitic-bomb-dummy)
-                                                  (= (safe-int (dyn-hash-ref d 'unit-type-id 0) 0) 824)
-                                                  (= (safe-int (dyn-hash-ref d 'type 0) 0) 824)
-                                                  (uh-has-buff? d 'parasitic-bomb)))))
-                                      (not (spell-point-claimed? claims 'parasitic-bomb-zone (uh-x e) (uh-y e) 3.5 current-frame))))))])
+                  ;; 2. L27-P0-3 / L28-P0-3 / L29-P0-3 (`z07`/`z08`/`#16`) + Loop 79 A3: Prioritize Parasitic Bomb
+                  ;;    (`energy >= 125`, `r=8.5`, `>= 2` air within `4.5t`, OR `>= 4` Interceptors within `3.5t`
+                  ;;    strictly in `'interceptor-burn` mode!) ABOVE Abduct AND HOLD Abduct whenever an unbombed
+                  ;;    clump sits inside `13.0t`!
+                  (let* ([pbomb-eligible?
+                          (lambda ([e : Any]) : Boolean
+                            (and (not (uh-has-buff? e 'parasitic-bomb))
+                                 (or (and (enemy-air-capital-or-ranged? e)
+                                          (>= (count-units-within enemy-units (uh-x e) (uh-y e) 4.5 enemy-air-capital-or-ranged?) 2))
+                                     (and interceptor-burn-mode?
+                                          (eq? (uh-type e) 'interceptor)
+                                          (sc2-enemy-unit-targetable? e)
+                                          (>= (count-units-within enemy-units (uh-x e) (uh-y e) 3.5
+                                                                  (lambda ([o : Any])
+                                                                    (and (eq? (uh-type o) 'interceptor)
+                                                                         (sc2-enemy-unit-targetable? o))))
+                                              4)))
+                                 (not (any-unit-within?
+                                       enemy-units (uh-x e) (uh-y e) 4.0
+                                       (lambda ([d : Any])
+                                         (or (eq? (uh-type d) 'parasitic-bomb-dummy)
+                                             (= (safe-int (dyn-hash-ref d 'unit-type-id 0) 0) 824)
+                                             (= (safe-int (dyn-hash-ref d 'type 0) 0) 824)
+                                             (uh-has-buff? d 'parasitic-bomb)))))
+                                 (not (spell-point-claimed? claims 'parasitic-bomb-zone (uh-x e) (uh-y e) 3.5 current-frame))))]
+                         [pbomb-clump-in-13t?
+                          (and (>= en 125.0)
+                               (any-unit-within? enemy-units ux uy 13.0 pbomb-eligible?))])
                     (or
                      (and (>= en 125.0)
                           (let-values ([(ok? tgt _w)
                                         (best-unit-target
                                          ux uy 8.5 enemy-units
+                                         pbomb-eligible?
                                          (lambda ([e : Any])
-                                           (and (enemy-air-capital-or-ranged? e)
-                                                (not (uh-has-buff? e 'parasitic-bomb))
-                                                (>= (count-units-within enemy-units (uh-x e) (uh-y e) 4.5 enemy-air-capital-or-ranged?) 2)
-                                                (not (any-unit-within?
-                                                      enemy-units (uh-x e) (uh-y e) 4.0
-                                                      (lambda ([d : Any])
-                                                        (or (eq? (uh-type d) 'parasitic-bomb-dummy)
-                                                            (= (safe-int (dyn-hash-ref d 'unit-type-id 0) 0) 824)
-                                                            (= (safe-int (dyn-hash-ref d 'type 0) 0) 824)
-                                                            (uh-has-buff? d 'parasitic-bomb)))))
-                                                (not (spell-point-claimed? claims 'parasitic-bomb-zone (uh-x e) (uh-y e) 3.5 current-frame))))
-                                         (lambda ([e : Any])
-                                           (define air-cnt (count-units-within enemy-units (uh-x e) (uh-y e) 4.5 enemy-air-capital-or-ranged?))
-                                           (define pack (aoe-radius-packing-multiplier (unit-collision-radius (uh-type e)) 3.0))
-                                           (+ (* 20.0 pack (->float air-cnt))
-                                              (min 100.0 (* 0.2 (uh-total-hp e))))))])
+                                           (if (eq? (uh-type e) 'interceptor)
+                                               (let ([int-cnt (count-units-within enemy-units (uh-x e) (uh-y e) 3.5
+                                                                                  (lambda ([o : Any])
+                                                                                    (and (eq? (uh-type o) 'interceptor)
+                                                                                         (sc2-enemy-unit-targetable? o))))])
+                                                 (* 22.0 (->float int-cnt)))
+                                               (let ([air-cnt (count-units-within enemy-units (uh-x e) (uh-y e) 4.5 enemy-air-capital-or-ranged?)]
+                                                     [pack (aoe-radius-packing-multiplier (unit-collision-radius (uh-type e)) 3.0)])
+                                                 (+ (* 20.0 pack (->float air-cnt))
+                                                    (min 100.0 (* 0.2 (uh-total-hp e))))))))])
                             (and ok?
                                  (spell-claim-unit?! claims 'parasitic-bomb (uh-tag tgt) current-frame UNIT-SPELL-CLAIM-TTL
                                                      #:caster-tag tag)
@@ -3415,7 +3483,8 @@
          #:enemy-base-x Float
          #:enemy-base-y Float
          #:inject-queen-tags (Listof Integer)
-         #:exclude-tags (Listof Integer))
+         #:exclude-tags (Listof Integer)
+         #:carrier-mode Symbol)
         (Listof spell-directive)))
 (define (plan-zerg-spellcaster-micro
          ally-units enemy-units
@@ -3433,7 +3502,8 @@
          #:enemy-base-x [enemy-base-x SC2-DEFAULT-ENEMY-BASE-X]
          #:enemy-base-y [enemy-base-y SC2-DEFAULT-ENEMY-BASE-Y]
          #:inject-queen-tags [inject-queen-tags '()]
-         #:exclude-tags [exclude-tags '()])
+         #:exclude-tags [exclude-tags '()]
+         #:carrier-mode [carrier-mode 'auto])
   (define casters
     (for/fold ([acc : (Listof Any) '()] #:result (reverse acc))
               ([u (in-list ally-units)]
@@ -3452,7 +3522,7 @@
        ally-buildings enemy-buildings effects home-x home-y
        enemy-base-x enemy-base-y inject-queen-tags exclude-tags
        researched-upgrades neural-parasite-researched?
-       microbial-shroud-ok? microbial-shroud-energy)))
+       microbial-shroud-ok? microbial-shroud-energy carrier-mode)))
 
 ;; -----------------------------------------------------------------------------
 ;; 7. Terran Spellcaster Patterns (Ghost, Raven, Battlecruiser)
@@ -4409,18 +4479,25 @@
        (not (spellcaster-channel-protected? u))))
 
 (: run-protoss-spellcaster-micro
-   (-> (Listof Any) (Listof Any) (Listof Any) (Listof Any)
-       spell-claims Integer (Listof Any) (Listof Any) (Listof Any) (Listof Any)
-       Boolean Float Float Float Float Float Float (Listof (Pairof Real Real)) (Listof Integer)
-       (Listof spell-directive)))
+   (->* ((Listof Any) (Listof Any) (Listof Any) (Listof Any)
+         spell-claims Integer (Listof Any) (Listof Any) (Listof Any) (Listof Any)
+         Boolean Float Float Float Float Float Float (Listof (Pairof Real Real)) (Listof Integer))
+        (Symbol)
+        (Listof spell-directive)))
 (define (run-protoss-spellcaster-micro
          caster-units friendly-hts ally-units enemy-units
          claims current-frame ally-buildings enemy-buildings effects
          researched-upgrades psi-storm-researched?
          home-x home-y natural-x natural-y enemy-base-x enemy-base-y
-         choke-points exclude-tags)
+         choke-points exclude-tags
+         [carrier-mode-arg 'auto])
   (define all-enemies (if (null? enemy-buildings) enemy-units (append enemy-units enemy-buildings)))
   (define all-allies (if (null? ally-buildings) ally-units (append ally-units ally-buildings)))
+  (define eff-carrier-mode : Symbol
+    (if (eq? carrier-mode-arg 'auto)
+        (spellcaster-carrier-engagement-mode ally-units enemy-units)
+        carrier-mode-arg))
+  (define interceptor-burn-mode? : Boolean (eq? eff-carrier-mode 'interceptor-burn))
   (define storm-ok?
     (or psi-storm-researched?
         (for/or : Boolean ([up (in-list researched-upgrades)])
@@ -4548,6 +4625,8 @@
                 [else
                  (or
                   ;; 1. Psi Storm (live-hydrated range, effect radius, claim radius, energy; `<= 1` ally within `storm-rad`)
+                  ;;    Loop 79 A3: Allow Storming dense Interceptor clouds (`>= 4`) ONLY in `'interceptor-burn` mode;
+                  ;;    exclude Interceptors during `'carrier-snipe` or `< 4` counts!
                   (let ([storm-rng (sc2-spell-cast-range 'psi-storm 9.0)]
                         [storm-rad (sc2-spell-effect-radius 'psi-storm 1.5)]
                         [storm-claim-r (sc2-spell-claim-radius 'psi-storm PSI-STORM-CLAIM-RADIUS)]
@@ -4558,20 +4637,27 @@
                                        (best-enemy-cluster
                                         ux uy storm-rng enemy-units storm-claim-r 0.25
                                         (lambda ([cx : Float] [cy : Float] [cl : (Listof Any)])
-                                          (define n-cl (length cl))
-                                          (if (and (>= n-cl 2)
+                                          (define-values (non-int int-cnt)
+                                            (for/fold ([ni : (Listof Any) '()] [ic : Integer 0])
+                                                      ([e (in-list cl)])
+                                              (if (eq? (uh-type e) 'interceptor)
+                                                  (values ni (add1 ic))
+                                                  (values (cons e ni) ic))))
+                                          (define burn-int-ok? (and interceptor-burn-mode? (>= int-cnt 4)))
+                                          (if (and (or (>= (length non-int) 2) burn-int-ok?)
                                                    (not (spell-point-claimed? claims 'psi-storm cx cy storm-claim-r current-frame))
                                                    (count-within-at-most?
                                                     ally-units cx cy storm-rad 1
                                                     (lambda ([a : Any]) (not (uh-hallucination? a)))))
-                                              (sum-units-fl
-                                               cl
-                                               (lambda ([e : Any])
-                                                 (define pack
-                                                   (aoe-radius-packing-multiplier
-                                                    (unit-collision-radius (uh-type e)) storm-rad))
-                                                 (+ (* 35.0 pack)
-                                                    (* 0.08 (protoss-cached-hp e)))))
+                                              (+ (sum-units-fl
+                                                  non-int
+                                                  (lambda ([e : Any])
+                                                    (define pack
+                                                      (aoe-radius-packing-multiplier
+                                                       (unit-collision-radius (uh-type e)) storm-rad))
+                                                    (+ (* 35.0 pack)
+                                                       (* 0.08 (protoss-cached-hp e)))))
+                                                 (if burn-int-ok? (* 28.0 (->float int-cnt)) 0.0))
                                               0.0)))])
                            (and ok?
                                 (spell-claim-point?! claims 'psi-storm sx sy storm-claim-r current-frame PSI-STORM-CLAIM-TTL)
@@ -5086,7 +5172,8 @@
          #:enemy-base-x Float
          #:enemy-base-y Float
          #:choke-points (Listof (Pairof Real Real))
-         #:exclude-tags (Listof Integer))
+         #:exclude-tags (Listof Integer)
+         #:carrier-mode Symbol)
         (Listof spell-directive)))
 (define (plan-protoss-spellcaster-micro
          ally-units enemy-units
@@ -5104,7 +5191,8 @@
          #:enemy-base-x [enemy-base-x SC2-DEFAULT-ENEMY-BASE-X]
          #:enemy-base-y [enemy-base-y SC2-DEFAULT-ENEMY-BASE-Y]
          #:choke-points [choke-points '()]
-         #:exclude-tags [exclude-tags '()])
+         #:exclude-tags [exclude-tags '()]
+         #:carrier-mode [carrier-mode 'auto])
   (define-values (casters friendly-hts)
     (for/fold ([cs : (Listof Any) '()]
                [hts : (Listof Any) '()]
@@ -5124,7 +5212,7 @@
        casters friendly-hts ally-units enemy-units claims current-frame
        ally-buildings enemy-buildings effects researched-upgrades psi-storm-researched?
        home-x home-y natural-x natural-y enemy-base-x enemy-base-y
-       choke-points exclude-tags)))
+       choke-points exclude-tags carrier-mode)))
 
 ;; -----------------------------------------------------------------------------
 ;; 9. Unified Multi-Race Spellcaster Entrypoints
@@ -5155,7 +5243,8 @@
          #:enemy-base-y Float
          #:inject-queen-tags (Listof Integer)
          #:choke-points (Listof (Pairof Real Real))
-         #:exclude-tags (Listof Integer))
+         #:exclude-tags (Listof Integer)
+         #:carrier-mode Symbol)
         (Listof spell-directive)))
 (define (step-pro-spellcaster-micro!
          ally-units enemy-units
@@ -5180,7 +5269,8 @@
          #:enemy-base-y [enemy-base-y SC2-DEFAULT-ENEMY-BASE-Y]
          #:inject-queen-tags [inject-queen-tags '()]
          #:choke-points [choke-points '()]
-         #:exclude-tags [exclude-tags '()])
+         #:exclude-tags [exclude-tags '()]
+         #:carrier-mode [carrier-mode 'auto])
   (prune-spell-claims! claims current-frame)
   (define-values (z-casters t-casters t-scvs dmg-units p-casters p-hts)
     (for/fold ([zs : (Listof Any) '()]
@@ -5237,7 +5327,7 @@
                  ally-buildings enemy-buildings effects home-x home-y
                  enemy-base-x enemy-base-y inject-queen-tags exclude-tags
                  researched-upgrades neural-parasite-researched?
-                 microbial-shroud-ok? microbial-shroud-energy))
+                 microbial-shroud-ok? microbial-shroud-energy carrier-mode))
             (if (null? eff-t-casters)
                 '()
                 (run-terran-spellcaster-micro
@@ -5251,7 +5341,7 @@
                  p-casters p-hts ally-units enemy-units claims current-frame
                  ally-buildings enemy-buildings effects researched-upgrades psi-storm-researched?
                  home-x home-y natural-x natural-y enemy-base-x enemy-base-y
-                 choke-points exclude-tags)))))
+                 choke-points exclude-tags carrier-mode)))))
        (cond
          [(and (null? z-dirs) (null? t-dirs)) p-dirs]
          [(and (null? t-dirs) (null? p-dirs)) z-dirs]
@@ -5282,7 +5372,8 @@
          #:enemy-base-y Float
          #:inject-queen-tags (Listof Integer)
          #:choke-points (Listof (Pairof Real Real))
-         #:exclude-tags (Listof Integer))
+         #:exclude-tags (Listof Integer)
+         #:carrier-mode Symbol)
         (Listof (Listof Any))))
 (define (step-pro-spellcaster-sexps!
          ally-units enemy-units
@@ -5307,7 +5398,8 @@
          #:enemy-base-y [enemy-base-y SC2-DEFAULT-ENEMY-BASE-Y]
          #:inject-queen-tags [inject-queen-tags '()]
          #:choke-points [choke-points '()]
-         #:exclude-tags [exclude-tags '()])
+         #:exclude-tags [exclude-tags '()]
+         #:carrier-mode [carrier-mode 'auto])
   (map spell-directive->sexp
        (step-pro-spellcaster-micro!
         ally-units enemy-units
@@ -5323,6 +5415,7 @@
         #:interference-matrix-researched? interference-matrix-researched?
         #:neural-parasite-researched? neural-parasite-researched?
         #:microbial-shroud-ok? microbial-shroud-ok?
+        #:carrier-mode carrier-mode
         #:microbial-shroud-energy microbial-shroud-energy
         #:home-x home-x
         #:home-y home-y
