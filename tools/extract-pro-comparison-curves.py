@@ -52,8 +52,8 @@ DEFAULT_SCRATCH_DIR = Path(
 DEFAULT_PRO_CACHE = DEFAULT_SCRATCH_DIR / "pro_curves_cache.json"
 DEFAULT_OUT_JSON = DEFAULT_SCRATCH_DIR / "pro_curves_and_timings.json"
 
-SCHEMA_VERSION = 4
-CACHE_SCHEMA_VERSION = 6
+SCHEMA_VERSION = 5
+CACHE_SCHEMA_VERSION = 7
 
 GAME_LOOPS_PER_SEC = 22.4
 GAME_LOOPS_PER_MIN = 60.0 * GAME_LOOPS_PER_SEC  # 1344.0
@@ -65,8 +65,25 @@ MATCHUPS = ("PvP", "PvT", "PvZ", "TvP", "TvT", "TvZ", "ZvP", "ZvT", "ZvZ")
 COHORTS = ("mothman", "opponents", "pros")
 
 BUCKETS_16M_SEC = list(range(0, 16 * 60 + 1, 30))   # 0:00..16:00 (30s) for Graph 9
-BUCKETS_18M_SEC = list(range(0, 18 * 60 + 1, 60))   # 0:00..18:00 (60s) for Graphs 11 & 12
+BUCKETS_18M_SEC = list(range(0, 18 * 60 + 1, 60))   # 0:00..18:00 (60s) for Graphs 19-22
+BUCKETS_24M_SEC = list(range(0, 24 * 60 + 1, 60))   # 0:00..24:00 (60s) for Graphs 11 & 12
 BUCKETS_TIER_SEC = [120, 240, 360, 480, 600, 720, 840, 960, 1080]  # 2m..18m for Graph 13
+
+# Canonical mining cluster & TownHall role classification constants (schema v5)
+MINERAL_CLUSTER_LINK_DIST = 5.5
+MINERAL_CLUSTER_MIN_PATCHES = 4
+TH_MINERAL_PATCH_MAX_DIST = 8.0
+TH_MINERAL_CENTROID_MAX_DIST = 10.5
+TERRAN_FLYING_TH_TYPES = frozenset({"CommandCenterFlying", "OrbitalCommandFlying"})
+TERRAN_GROUND_TH_TYPES = frozenset({"CommandCenter", "OrbitalCommand", "PlanetaryFortress"})
+NON_MINING_TH_ROLES: tuple[tuple[str, str], ...] = (
+    ("macro_hatchery", "Macro Hatchery"),
+    ("macro_oc", "Macro OC / CC"),
+    ("macro_nexus", "Macro Nexus"),
+    ("mining_pf", "Mining PF"),
+    ("defensive_pf", "Defensive PF"),
+    ("rebuilds", "Canonical Base Rebuilds"),
+)
 
 FORCE_RATIO_BINS: tuple[tuple[str, float, float], ...] = (
     ("<0.5x", 0.0, 0.5),
@@ -976,6 +993,413 @@ def _friendly_upgrade_label(uname: str) -> str:
 
 def _canon_combat_unit(ut: str) -> str:
     return CANONICAL_COMBAT_UNIT.get(ut, ut)
+
+
+def is_neutral_mineral_field(unit_type: str) -> bool:
+    """True for neutral SC2 mineral patch unit names (normal, rich, purifier, lab, opaque)."""
+    return (
+        "Mineral" in unit_type
+        and "Vespene" not in unit_type
+        and "Shield" not in unit_type
+        and "Crystal" not in unit_type
+    )
+
+
+def cluster_mineral_fields(
+    mineral_pts: list[tuple[float, float]],
+    link_dist: float = MINERAL_CLUSTER_LINK_DIST,
+    min_patches: int = MINERAL_CLUSTER_MIN_PATCHES,
+) -> list[dict[str, Any]]:
+    """
+    Cluster loop-0 neutral mineral patches into canonical base mineral lines via BFS.
+    Uses `link_dist <= 5.5t` and `min_patches >= 4` so adjacent mineral lines stay
+    distinct and 1-3 patch mineral walls are excluded.
+    """
+    n = len(mineral_pts)
+    if n < min_patches:
+        return []
+    r2 = float(link_dist) * float(link_dist)
+    visited = [False] * n
+    raw_clusters: list[tuple[float, float, list[tuple[float, float]]]] = []
+    for i in range(n):
+        if visited[i]:
+            continue
+        visited[i] = True
+        queue = [i]
+        head = 0
+        comp: list[tuple[float, float]] = []
+        while head < len(queue):
+            cur = queue[head]
+            head += 1
+            cx_p, cy_p = mineral_pts[cur]
+            comp.append((float(cx_p), float(cy_p)))
+            for j in range(n):
+                if not visited[j]:
+                    dx = cx_p - mineral_pts[j][0]
+                    dy = cy_p - mineral_pts[j][1]
+                    if dx * dx + dy * dy <= r2:
+                        visited[j] = True
+                        queue.append(j)
+        if len(comp) >= min_patches:
+            mx = sum(p[0] for p in comp) / len(comp)
+            my = sum(p[1] for p in comp) / len(comp)
+            raw_clusters.append((mx, my, comp))
+    raw_clusters.sort(key=lambda c: (round(c[0], 3), round(c[1], 3)))
+    return [
+        {"id": idx, "cx": c[0], "cy": c[1], "patches": c[2]}
+        for idx, c in enumerate(raw_clusters)
+    ]
+
+
+def match_townhall_to_mineral_cluster(
+    x: float,
+    y: float,
+    clusters: list[dict[str, Any]],
+    max_patch_dist: float = TH_MINERAL_PATCH_MAX_DIST,
+    max_centroid_dist: float = TH_MINERAL_CENTROID_MAX_DIST,
+) -> int | None:
+    """
+    Match TownHall coordinates `(x, y)` to a canonical mineral cluster iff
+    nearest patch `dp_min <= 8.0t` and cluster centroid `dc_cen <= 10.5t`.
+    Returns best cluster id or `None` if off-mineral.
+    """
+    best_key: tuple[float, float, int] | None = None
+    best_id: int | None = None
+    for cl in clusters:
+        dc_cen = math.hypot(x - cl["cx"], y - cl["cy"])
+        if dc_cen > max_centroid_dist:
+            continue
+        dp_min = min(math.hypot(x - px, y - py) for px, py in cl["patches"])
+        if dp_min <= max_patch_dist:
+            key = (dc_cen, dp_min, int(cl["id"]))
+            if best_key is None or key < best_key:
+                best_key = key
+                best_id = int(cl["id"])
+    return best_id
+
+
+def resolve_terran_flying_th_positions(
+    th_records: list[dict[str, Any]],
+    land_cmds: list[tuple[int, float, float, tuple[int, ...]]],
+) -> None:
+    """
+    Fallback for Terran flying CCs/OCs whose final landing occurred after their last
+    `SUnitPositionsEvent` (`last_pos_lp < landed_lp`): resolve landed `(x, y)` from
+    matching Terran Land `SCmdEvent` target points in `replay.game.events`.
+    """
+    if not land_cmds:
+        return
+    for th in th_records:
+        if not th.get("flew") or not th.get("ever_landed"):
+            continue
+        landed_lp = int(th.get("landed_lp", -1))
+        last_pos_lp = int(th.get("last_pos_lp", -1))
+        if landed_lp < 0 or last_pos_lp >= landed_lp:
+            continue
+        tag = th.get("tag")
+        cx, cy = th.get("cur_xy", th["init_xy"])
+
+        # Priority 1: exact selected unit tag match before landing
+        best_exact: tuple[int, float, float] | None = None
+        if tag is not None:
+            for gl, lx, ly, sel_tags in land_cmds:
+                if gl <= landed_lp + 16 and (landed_lp - gl) <= 1200 and tag in sel_tags:
+                    if best_exact is None or gl > best_exact[0]:
+                        best_exact = (gl, lx, ly)
+        if best_exact is not None:
+            th["cur_xy"] = (best_exact[1], best_exact[2])
+            th["used_land_cmd_fallback"] = True
+            continue
+
+        # Priority 2: latest Terran Land command within window before landing
+        best_win: tuple[int, float, float, float] | None = None
+        for gl, lx, ly, _sel in land_cmds:
+            if (landed_lp - 900) <= gl <= (landed_lp + 16):
+                dist = math.hypot(lx - cx, ly - cy)
+                cand = (gl, -dist, lx, ly)
+                if best_win is None or cand > best_win:
+                    best_win = cand
+        if best_win is not None:
+            th["cur_xy"] = (best_win[2], best_win[3])
+            th["used_land_cmd_fallback"] = True
+
+
+def classify_player_townhalls(
+    th_records: list[dict[str, Any]],
+    clusters: list[dict[str, Any]],
+    race: str,
+    dur_sec: float,
+    buckets_sec: list[int] | None = None,
+    max_patch_dist: float = TH_MINERAL_PATCH_MAX_DIST,
+    max_centroid_dist: float = TH_MINERAL_CENTROID_MAX_DIST,
+) -> dict[str, Any]:
+    """
+    Classify every non-self-canceled TownHall into 5 mutually exclusive primary roles:
+      - `canonical_mining_expansion` (1st..8th+, distinct unoccupied never-before-occupied cluster;
+        Terran PFs here also carry `is_mining_pf = True`)
+      - `canonical_rebuild` (unoccupied cluster previously occupied by a destroyed TH of this player;
+        Terran PFs here also carry `is_mining_pf = True`)
+      - `macro_hatchery` (Zerg Hatchery at already-occupied cluster or off-mineral)
+      - `macro_oc` / `macro_nexus` (T/P non-PF TH at already-occupied cluster or off-mineral)
+      - `defensive_pf` (Terran PlanetaryFortress NOT at an unoccupied mineral cluster)
+
+    Returns `active_canonical_bases`, `canonical_base_timings` (fourth..eighth),
+    `peak_canonical_bases`, `total_canonical_bases`, `non_mining_counts`,
+    `non_mining_first_sec`, and `classified` per-TH metadata.
+    """
+    bsec = BUCKETS_24M_SEC if buckets_sec is None else buckets_sec
+    valid_ths = sorted(
+        (th for th in th_records if not th.get("self_canceled")),
+        key=lambda th: (float(th.get("init_sec", 0.0)), int(th.get("tag", 0))),
+    )
+
+    ever_occupied: set[int] = set()
+    cluster_claim_intervals: dict[int, list[tuple[float, float]]] = defaultdict(list)
+    cluster_active_intervals: dict[int, list[tuple[float, float]]] = defaultdict(list)
+    canonical_open_secs: list[float] = []
+    classified: list[dict[str, Any]] = []
+
+    non_mining_counts: dict[str, int] = {k: 0 for k, _lbl in NON_MINING_TH_ROLES}
+    non_mining_first_sec: dict[str, float | None] = {k: None for k, _lbl in NON_MINING_TH_ROLES}
+
+    def _bump_non_mining(key: str, event_sec: float) -> None:
+        non_mining_counts[key] += 1
+        prev = non_mining_first_sec[key]
+        if prev is None or event_sec < prev:
+            non_mining_first_sec[key] = event_sec
+
+    def _cluster_occupied_at(ci: int, t: float) -> bool:
+        return any(s <= t < e for s, e in cluster_claim_intervals.get(ci, ()))
+
+    # Fallback synthetic cluster centroids when a replay lacks loop-0 neutral minerals
+    synth_clusters: list[tuple[int, float, float]] = []
+
+    def _match_cluster(xy: tuple[float, float]) -> int | None:
+        if clusters:
+            return match_townhall_to_mineral_cluster(
+                xy[0], xy[1], clusters, max_patch_dist, max_centroid_dist
+            )
+        for cid, sx, sy in synth_clusters:
+            if math.hypot(xy[0] - sx, xy[1] - sy) <= 12.0:
+                return cid
+        cid = len(synth_clusters)
+        synth_clusters.append((cid, xy[0], xy[1]))
+        return cid
+
+    for th in valid_ths:
+        init_sec = float(th.get("init_sec", 0.0))
+        done_raw = th.get("done_sec")
+        done_sec = float(done_raw) if done_raw is not None else None
+        died_sec = float(th.get("died_sec", float("inf")))
+        init_xy = (float(th["init_xy"][0]), float(th["init_xy"][1]))
+        cur_xy_raw = th.get("cur_xy", init_xy)
+        cur_xy = (float(cur_xy_raw[0]), float(cur_xy_raw[1]))
+        flew = bool(th.get("flew", False))
+        ever_landed = bool(th.get("ever_landed", False))
+        first_lift_raw = th.get("first_lift_sec")
+        first_lift_sec = float(first_lift_raw) if first_lift_raw is not None else None
+        landed_raw = th.get("landed_sec")
+        landed_sec = float(landed_raw) if landed_raw is not None else None
+        morphed_pf = bool(th.get("morphed_pf", False))
+        pf_raw = th.get("pf_sec")
+        pf_sec = float(pf_raw) if pf_raw is not None else init_sec
+        is_starting = bool(th.get("is_starting", init_sec <= 5.0))
+        ut_init = str(th.get("ut_init", ""))
+
+        is_zerg_th = (race == "Zerg") or (ut_init in ("Hatchery", "Lair", "Hive"))
+        is_protoss_th = (race == "Protoss") or (ut_init == "Nexus")
+        is_terran_th = not is_zerg_th and not is_protoss_th
+
+        init_ci = _match_cluster(init_xy)
+        cur_ci = _match_cluster(cur_xy) if flew else init_ci
+
+        role = ""
+        assigned_ci: int | None = None
+        is_mining_pf = False
+
+        if is_starting:
+            role = "canonical_mining_expansion"
+            assigned_ci = init_ci if init_ci is not None else -1
+            ever_occupied.add(assigned_ci)
+            canonical_open_secs.append(0.0)
+            if (
+                is_terran_th
+                and flew
+                and ever_landed
+                and cur_ci is not None
+                and cur_ci != init_ci
+                and first_lift_sec is not None
+                and landed_sec is not None
+            ):
+                # Starting OC migrated off mined-out main to another mineral cluster
+                lift_end = min(first_lift_sec, died_sec)
+                cluster_claim_intervals[assigned_ci].append((0.0, lift_end))
+                cluster_active_intervals[assigned_ci].append((0.0, lift_end))
+                if not _cluster_occupied_at(cur_ci, landed_sec):
+                    cluster_claim_intervals[cur_ci].append((landed_sec, died_sec))
+                    cluster_active_intervals[cur_ci].append((landed_sec, died_sec))
+                    if cur_ci not in ever_occupied:
+                        ever_occupied.add(cur_ci)
+                        canonical_open_secs.append(landed_sec)
+            else:
+                cluster_claim_intervals[assigned_ci].append((0.0, died_sec))
+                cluster_active_intervals[assigned_ci].append((0.0, died_sec))
+            is_mining_pf = is_terran_th and morphed_pf
+
+        elif not flew:
+            eff_ci = init_ci
+            at_unoccupied = (eff_ci is not None) and (not _cluster_occupied_at(eff_ci, init_sec))
+            if at_unoccupied:
+                assert eff_ci is not None
+                assigned_ci = eff_ci
+                if eff_ci not in ever_occupied:
+                    role = "canonical_mining_expansion"
+                    ever_occupied.add(eff_ci)
+                    canonical_open_secs.append(init_sec)
+                else:
+                    role = "canonical_rebuild"
+                cluster_claim_intervals[eff_ci].append((init_sec, died_sec))
+                if done_sec is not None and done_sec < died_sec:
+                    cluster_active_intervals[eff_ci].append((done_sec, died_sec))
+                is_mining_pf = is_terran_th and morphed_pf
+            else:
+                if is_terran_th and morphed_pf:
+                    role = "defensive_pf"
+                elif is_zerg_th:
+                    role = "macro_hatchery"
+                elif is_protoss_th:
+                    role = "macro_nexus"
+                else:
+                    role = "macro_oc"
+
+        else:
+            # Non-starting Terran CC/OC that lifted off at least once
+            built_at_unoccupied = (
+                init_ci is not None
+                and not _cluster_occupied_at(init_ci, init_sec)
+                and (not ever_landed or cur_ci != init_ci)
+            )
+            if built_at_unoccupied:
+                assert init_ci is not None
+                assigned_ci = init_ci
+                if init_ci not in ever_occupied:
+                    role = "canonical_mining_expansion"
+                    ever_occupied.add(init_ci)
+                    canonical_open_secs.append(init_sec)
+                else:
+                    role = "canonical_rebuild"
+                lift_end = (
+                    min(first_lift_sec, died_sec)
+                    if (first_lift_sec is not None and first_lift_sec > init_sec)
+                    else died_sec
+                )
+                cluster_claim_intervals[init_ci].append((init_sec, lift_end))
+                if done_sec is not None and done_sec < lift_end:
+                    cluster_active_intervals[init_ci].append((done_sec, lift_end))
+                if (
+                    ever_landed
+                    and cur_ci is not None
+                    and cur_ci != init_ci
+                    and landed_sec is not None
+                    and not _cluster_occupied_at(cur_ci, landed_sec)
+                ):
+                    cluster_claim_intervals[cur_ci].append((landed_sec, died_sec))
+                    act_start = max(done_sec if done_sec is not None else landed_sec, landed_sec)
+                    if done_sec is not None and act_start < died_sec:
+                        cluster_active_intervals[cur_ci].append((act_start, died_sec))
+                    if cur_ci not in ever_occupied:
+                        ever_occupied.add(cur_ci)
+                        canonical_open_secs.append(landed_sec)
+                is_mining_pf = morphed_pf
+            elif ever_landed:
+                eff_ci = cur_ci
+                land_t = landed_sec if landed_sec is not None else init_sec
+                at_unoccupied = (eff_ci is not None) and (not _cluster_occupied_at(eff_ci, land_t))
+                if at_unoccupied:
+                    assert eff_ci is not None
+                    assigned_ci = eff_ci
+                    if eff_ci not in ever_occupied:
+                        role = "canonical_mining_expansion"
+                        ever_occupied.add(eff_ci)
+                        canonical_open_secs.append(init_sec)
+                    else:
+                        role = "canonical_rebuild"
+                    cluster_claim_intervals[eff_ci].append((land_t, died_sec))
+                    act_start = max(done_sec if done_sec is not None else land_t, land_t)
+                    if done_sec is not None and act_start < died_sec:
+                        cluster_active_intervals[eff_ci].append((act_start, died_sec))
+                    is_mining_pf = morphed_pf
+                else:
+                    role = "defensive_pf" if morphed_pf else "macro_oc"
+            else:
+                role = "defensive_pf" if morphed_pf else "macro_oc"
+
+        if role == "macro_hatchery":
+            _bump_non_mining("macro_hatchery", init_sec)
+        elif role == "macro_oc":
+            _bump_non_mining("macro_oc", init_sec)
+        elif role == "macro_nexus":
+            _bump_non_mining("macro_nexus", init_sec)
+        elif role == "defensive_pf":
+            _bump_non_mining("defensive_pf", pf_sec)
+        elif role == "canonical_rebuild":
+            _bump_non_mining("rebuilds", init_sec)
+        if is_mining_pf:
+            _bump_non_mining("mining_pf", pf_sec)
+
+        classified.append({
+            "tag": th.get("tag"),
+            "role": role,
+            "cluster_id": assigned_ci,
+            "is_mining_pf": is_mining_pf,
+            "init_sec": round(init_sec, 1),
+        })
+
+    def _active_canonical_at(t: float) -> int:
+        cnt = 0
+        for ivs in cluster_active_intervals.values():
+            if any(s <= t < e for s, e in ivs):
+                cnt += 1
+        return cnt
+
+    active_canonical_bases: list[int | None] = [
+        _active_canonical_at(float(t)) if float(t) <= dur_sec else None
+        for t in bsec
+    ]
+
+    # Exact peak simultaneously active canonical mining bases over all event timestamps <= dur_sec
+    sample_ts: set[float] = {0.0}
+    for t in bsec:
+        if float(t) <= dur_sec:
+            sample_ts.add(float(t))
+    for ivs in cluster_active_intervals.values():
+        for s, _e in ivs:
+            if 0.0 <= s <= dur_sec:
+                sample_ts.add(s)
+    peak_canonical_bases = max((_active_canonical_at(ts) for ts in sample_ts), default=0)
+
+    canonical_open_secs.sort()
+    canonical_base_timings: dict[str, float | None] = {
+        "fourth": round(canonical_open_secs[3], 1) if len(canonical_open_secs) >= 4 else None,
+        "fifth": round(canonical_open_secs[4], 1) if len(canonical_open_secs) >= 5 else None,
+        "sixth": round(canonical_open_secs[5], 1) if len(canonical_open_secs) >= 6 else None,
+        "seventh": round(canonical_open_secs[6], 1) if len(canonical_open_secs) >= 7 else None,
+        "eighth": round(canonical_open_secs[7], 1) if len(canonical_open_secs) >= 8 else None,
+    }
+    first_sec_rounded: dict[str, float | None] = {
+        k: (round(v, 1) if v is not None else None)
+        for k, v in non_mining_first_sec.items()
+    }
+
+    return {
+        "active_canonical_bases": active_canonical_bases,
+        "canonical_base_timings": canonical_base_timings,
+        "peak_canonical_bases": int(peak_canonical_bases),
+        "total_canonical_bases": len(canonical_open_secs),
+        "non_mining_counts": non_mining_counts,
+        "non_mining_first_sec": first_sec_rounded,
+        "classified": classified,
+    }
 
 
 def _compute_army_fragmentation(
@@ -2028,6 +2452,10 @@ def _decode_game_events_metrics(
     scmd_spells: dict[int, dict[str, int]] = {p: defaultdict(int) for p in target_pids}
     cd_map: dict[int, dict[Any, float]] = {p: {} for p in target_pids}
     supply_drop_depots: dict[int, set[int]] = {p: set() for p in target_pids}
+    # Terran CC/OC Land command target points (gl, x, y, selected_tags) for flying-TH fallback
+    terran_land_cmds: dict[int, list[tuple[int, float, float, tuple[int, ...]]]] = {
+        p: [] for p in target_pids
+    }
 
     def _cd_ok(pid: int, key: Any, sec_now: float, cd_sec: float) -> bool:
         prev_s = cd_map[pid].get(key, -999.0)
@@ -2151,6 +2579,10 @@ def _decode_game_events_metrics(
                 return
 
         elif race == "Terran":
+            # Terran CC/OC Land command target point (fallback when flying CC lands after last SUnitPositionsEvent)
+            if link in ((148, 233, 367, 1453) if hi else (146, 231, 367, 1453)) and idx == 0 and has_pt:
+                terran_land_cmds[pid].append((gl, px, py, tuple(sel_now[:16])))
+                return
             # Macro: Scanner Sweep
             if link == (141 if hi else 139) and idx == 0 and has_pt:
                 if _cd_ok(pid, ("scan_pt", bx4, by4), sec_now, 10.0) and _cd_ok(pid, "scan_any", sec_now, 0.8):
@@ -2392,6 +2824,7 @@ def _decode_game_events_metrics(
             "spm_game": round(spm_tot[pid] / dur_min, 1),
             "macro_casts": macro_casts[pid],
             "scmd_spells": dict(scmd_spells[pid]),
+            "terran_land_cmds": terran_land_cmds[pid],
         }
     return bool(out), out
 
@@ -2562,6 +2995,11 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
         # TownHall lifetimes per player: [start_sec, end_sec, x, y, tag]
         th_lifetimes_raw: dict[int, list[list[Any]]] = {1: [], 2: []}
         th_rec_by_idx: dict[int, list[Any]] = {}
+        # Schema v5 canonical mineral clusters & tag-reuse-safe TownHall classifier state
+        neutral_minerals: list[tuple[float, float]] = []
+        th_cls_records: dict[int, list[dict[str, Any]]] = {1: [], 2: []}
+        th_cls_by_idx: dict[int, dict[str, Any]] = {}
+        live_flying_th_idx: dict[int, dict[str, Any]] = {}
         home_xy: dict[int, tuple[float, float]] = {}
         combat_deaths: list[tuple[float, int, int, float, float]] = []
         all_deaths: list[tuple[float, int, int, bool, bool, bool, float, float]] = []
@@ -2570,17 +3008,17 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
         # Periodic bucketed samples captured along the single linear tracker pass
         frag_pct_b: dict[int, list[float | None]] = {1: [None] * len(BUCKETS_16M_SEC), 2: [None] * len(BUCKETS_16M_SEC)}
         clusters_b: dict[int, list[int | None]] = {1: [None] * len(BUCKETS_16M_SEC), 2: [None] * len(BUCKETS_16M_SEC)}
-        th_active_b: dict[int, list[int | None]] = {1: [None] * len(BUCKETS_18M_SEC), 2: [None] * len(BUCKETS_18M_SEC)}
-        gas_active_b: dict[int, list[int | None]] = {1: [None] * len(BUCKETS_18M_SEC), 2: [None] * len(BUCKETS_18M_SEC)}
+        th_active_b: dict[int, list[int | None]] = {1: [None] * len(BUCKETS_24M_SEC), 2: [None] * len(BUCKETS_24M_SEC)}
+        gas_active_b: dict[int, list[int | None]] = {1: [None] * len(BUCKETS_24M_SEC), 2: [None] * len(BUCKETS_24M_SEC)}
         tier_mix_b: dict[int, list[list[float] | None]] = {1: [None] * len(BUCKETS_TIER_SEC), 2: [None] * len(BUCKETS_TIER_SEC)}
         unit_comp_b: dict[int, list[dict[str, int] | None]] = {1: [None] * len(BUCKETS_TIER_SEC), 2: [None] * len(BUCKETS_TIER_SEC)}
-        gas_per_base_4plus_samples: dict[int, list[float]] = {1: [], 2: []}
         peak_active_ths: dict[int, int] = {1: 1, 2: 1}
         peak_active_gas: dict[int, int] = {1: 0, 2: 0}
 
         next_snap_sec = 30.0
         next_16m_idx = 0
         next_18m_idx = 0
+        next_24m_idx = 0
         next_tier_idx = 0
 
         def _record_special_unit(p_id: int, uname: str, utag: int, sec_s: float) -> None:
@@ -2654,7 +3092,7 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
             return out_c
 
         def _advance_time_samples(cur_sec: float) -> None:
-            nonlocal next_snap_sec, next_16m_idx, next_18m_idx, next_tier_idx
+            nonlocal next_snap_sec, next_16m_idx, next_18m_idx, next_24m_idx, next_tier_idx
             need_combat = (
                 (cur_sec >= next_snap_sec)
                 or (next_16m_idx < len(BUCKETS_16M_SEC) and cur_sec >= BUCKETS_16M_SEC[next_16m_idx])
@@ -2676,14 +3114,6 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
                 next_16m_idx += 1
 
             while next_18m_idx < len(BUCKETS_18M_SEC) and cur_sec >= BUCKETS_18M_SEC[next_18m_idx]:
-                th_c = {1: 0, 2: 0}
-                gas_c = {1: 0, 2: 0}
-                for u in live_by_idx.values():
-                    if u[9]:  # active completed structure
-                        if u[6]:
-                            th_c[u[0]] += 1
-                        elif u[7]:
-                            gas_c[u[0]] += 1
                 # Graph 19 active completed production facility counts (excluding Reactor addons from building count)
                 pc_now: dict[int, dict[str, int]] = {
                     p: {fg: 0 for fg in RACE_FACILITY_GROUPS[race_by_pid[p]]} for p in (1, 2)
@@ -2697,14 +3127,6 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
                     tum_c[tp] += 1
 
                 for p in (1, 2):
-                    th_active_b[p][next_18m_idx] = th_c[p]
-                    gas_active_b[p][next_18m_idx] = gas_c[p]
-                    if th_c[p] > peak_active_ths[p]:
-                        peak_active_ths[p] = th_c[p]
-                    if gas_c[p] > peak_active_gas[p]:
-                        peak_active_gas[p] = gas_c[p]
-                    if th_c[p] >= 4:
-                        gas_per_base_4plus_samples[p].append(gas_c[p] / float(th_c[p]))
                     for fg, cnt_fg in pc_now[p].items():
                         prod_counts_18m[p][fg][next_18m_idx] = cnt_fg
                         if cnt_fg > peak_prod_counts[p][fg]:
@@ -2713,6 +3135,24 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
                     if tum_c[p] > peak_active_tumors[p]:
                         peak_active_tumors[p] = tum_c[p]
                 next_18m_idx += 1
+
+            while next_24m_idx < len(BUCKETS_24M_SEC) and cur_sec >= BUCKETS_24M_SEC[next_24m_idx]:
+                th_c = {1: 0, 2: 0}
+                gas_c = {1: 0, 2: 0}
+                for u in live_by_idx.values():
+                    if u[9]:  # active completed structure
+                        if u[6]:
+                            th_c[u[0]] += 1
+                        elif u[7]:
+                            gas_c[u[0]] += 1
+                for p in (1, 2):
+                    th_active_b[p][next_24m_idx] = th_c[p]
+                    gas_active_b[p][next_24m_idx] = gas_c[p]
+                    if th_c[p] > peak_active_ths[p]:
+                        peak_active_ths[p] = th_c[p]
+                    if gas_c[p] > peak_active_gas[p]:
+                        peak_active_gas[p] = gas_c[p]
+                next_24m_idx += 1
 
             while next_tier_idx < len(BUCKETS_TIER_SEC) and cur_sec >= BUCKETS_TIER_SEC[next_tier_idx]:
                 assert c_by_pid is not None
@@ -2763,11 +3203,15 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
                 ret_series[pid].append((sec, am + ag, la))
 
             elif et == "NNet.Replay.Tracker.SUnitInitEvent":
+                uidx = int(ev.get("m_unitTagIndex", 0))
+                # Tag-reuse safety: clear stale TownHall / flying-TH index slots before any reuse
+                live_flying_th_idx.pop(uidx, None)
+                th_cls_by_idx.pop(uidx, None)
+                th_rec_by_idx.pop(uidx, None)
                 pid = int(ev.get("m_controlPlayerId") or 0)
                 if pid not in (1, 2):
                     continue
                 ut = rdb._decode_str(ev.get("m_unitTypeName", b""))
-                uidx = int(ev.get("m_unitTagIndex", 0))
                 tag = (uidx << 18) | int(ev.get("m_unitTagRecycle", 0))
                 tag_owner[tag] = pid
                 tag_ut[tag] = ut
@@ -2806,6 +3250,34 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
                     th_rec = [sec, float("inf"), ux, uy, tag]
                     th_lifetimes_raw[pid].append(th_rec)
                     th_rec_by_idx[uidx] = th_rec
+                    cls_th: dict[str, Any] = {
+                        "tag": tag,
+                        "uidx": uidx,
+                        "init_sec": sec,
+                        "done_sec": None,
+                        "died_sec": float("inf"),
+                        "init_xy": (ux, uy),
+                        "cur_xy": (ux, uy),
+                        "ut_init": ut,
+                        "ut_final": ut,
+                        "morphed_oc": ut == "OrbitalCommand",
+                        "morphed_pf": ut == "PlanetaryFortress",
+                        "pf_sec": sec if ut == "PlanetaryFortress" else None,
+                        "flew": ut in TERRAN_FLYING_TH_TYPES,
+                        "first_lift_sec": sec if ut in TERRAN_FLYING_TH_TYPES else None,
+                        "ever_landed": False,
+                        "landed_lp": -1,
+                        "landed_sec": None,
+                        "first_landed_sec": None,
+                        "last_pos_lp": -1,
+                        "alive": True,
+                        "self_canceled": False,
+                        "is_starting": False,
+                    }
+                    th_cls_records[pid].append(cls_th)
+                    th_cls_by_idx[uidx] = cls_th
+                    if cls_th["flew"]:
+                        live_flying_th_idx[uidx] = cls_th
                 if cspec is not None or is_th or is_gas:
                     live_by_idx[uidx] = [
                         pid,
@@ -2828,6 +3300,9 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
                 u = live_by_idx.get(uidx)
                 if u is not None:
                     u[9] = True
+                cls_th_done = th_cls_by_idx.get(uidx)
+                if cls_th_done is not None and cls_th_done["tag"] == tag:
+                    cls_th_done["done_sec"] = sec
                 pinfo = prod_pending_init.pop(uidx, None)
                 if pinfo is not None:
                     prod_active_units[uidx] = pinfo
@@ -2848,20 +3323,26 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
                         casters_built[wpid].add(wut)
 
             elif et == "NNet.Replay.Tracker.SUnitBornEvent":
+                uidx = int(ev.get("m_unitTagIndex", 0))
+                # Tag-reuse safety: clear stale TownHall / flying-TH index slots before any reuse
+                live_flying_th_idx.pop(uidx, None)
+                th_cls_by_idx.pop(uidx, None)
+                th_rec_by_idx.pop(uidx, None)
                 pid = int(ev.get("m_controlPlayerId") or 0)
                 if pid not in (1, 2):
                     ut_neut = rdb._decode_str(ev.get("m_unitTypeName", b""))
-                    if ut_neut == "ForceField":
+                    if gl == 0 and is_neutral_mineral_field(ut_neut):
+                        neutral_minerals.append((float(ev.get("m_x", 0.0)), float(ev.get("m_y", 0.0))))
+                    elif ut_neut == "ForceField":
                         cidx = ev.get("m_creatorUnitTagIndex")
                         crec = ev.get("m_creatorUnitTagRecycle")
                         if cidx is not None and crec is not None:
                             cpid = tag_owner.get((int(cidx) << 18) | int(crec), 0)
                             if cpid in (1, 2):
-                                ftag = (int(ev.get("m_unitTagIndex", 0)) << 18) | int(ev.get("m_unitTagRecycle", 0))
+                                ftag = (uidx << 18) | int(ev.get("m_unitTagRecycle", 0))
                                 _record_special_unit(cpid, ut_neut, ftag, sec)
                     continue
                 ut = rdb._decode_str(ev.get("m_unitTypeName", b""))
-                uidx = int(ev.get("m_unitTagIndex", 0))
                 tag = (uidx << 18) | int(ev.get("m_unitTagRecycle", 0))
                 tag_owner[tag] = pid
                 tag_ut[tag] = ut
@@ -2911,6 +3392,34 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
                     th_rec = [sec, float("inf"), ux, uy, tag]
                     th_lifetimes_raw[pid].append(th_rec)
                     th_rec_by_idx[uidx] = th_rec
+                    cls_th_b: dict[str, Any] = {
+                        "tag": tag,
+                        "uidx": uidx,
+                        "init_sec": sec,
+                        "done_sec": sec,
+                        "died_sec": float("inf"),
+                        "init_xy": (ux, uy),
+                        "cur_xy": (ux, uy),
+                        "ut_init": ut,
+                        "ut_final": ut,
+                        "morphed_oc": ut == "OrbitalCommand",
+                        "morphed_pf": ut == "PlanetaryFortress",
+                        "pf_sec": sec if ut == "PlanetaryFortress" else None,
+                        "flew": ut in TERRAN_FLYING_TH_TYPES,
+                        "first_lift_sec": sec if ut in TERRAN_FLYING_TH_TYPES else None,
+                        "ever_landed": False,
+                        "landed_lp": -1,
+                        "landed_sec": None,
+                        "first_landed_sec": None,
+                        "last_pos_lp": -1,
+                        "alive": True,
+                        "self_canceled": False,
+                        "is_starting": sec <= 5.0,
+                    }
+                    th_cls_records[pid].append(cls_th_b)
+                    th_cls_by_idx[uidx] = cls_th_b
+                    if cls_th_b["flew"]:
+                        live_flying_th_idx[uidx] = cls_th_b
                 if cspec is not None or is_th or is_gas:
                     live_by_idx[uidx] = [
                         pid,
@@ -2933,6 +3442,11 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
                     owner = tag_owner.get(tag)
                     if k_pid is None or k_pid == owner:
                         self_canceled_tags.add(tag)
+                live_flying_th_idx.pop(uidx, None)
+                cls_th_dead = th_cls_by_idx.pop(uidx, None)
+                if cls_th_dead is not None and cls_th_dead["tag"] == tag:
+                    cls_th_dead["alive"] = False
+                    cls_th_dead["died_sec"] = sec
                 prod_pending_init.pop(uidx, None)
                 prod_active_units.pop(uidx, None)
                 warpin_init_by_uidx.pop(uidx, None)
@@ -2978,6 +3492,29 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
                         mc_rec = [sec, float("inf"), uidx, MACRO_CASTER_START_ENERGY["OrbitalCommand"]]
                         macro_caster_lifetimes[pid]["OrbitalCommand"].append(mc_rec)
                         macro_caster_by_idx[uidx] = mc_rec
+                    # Tag-reuse-safe Terran CC/OC/PF morph & flight/landing state
+                    cls_th_tc = th_cls_by_idx.get(uidx)
+                    if cls_th_tc is not None and cls_th_tc["tag"] == tag and cls_th_tc["alive"]:
+                        cls_th_tc["ut_final"] = ut
+                        if ut == "OrbitalCommand":
+                            cls_th_tc["morphed_oc"] = True
+                        elif ut == "PlanetaryFortress":
+                            cls_th_tc["morphed_pf"] = True
+                            if cls_th_tc["pf_sec"] is None:
+                                cls_th_tc["pf_sec"] = sec
+                            live_flying_th_idx.pop(uidx, None)
+                        if ut in TERRAN_FLYING_TH_TYPES:
+                            cls_th_tc["flew"] = True
+                            if cls_th_tc["first_lift_sec"] is None:
+                                cls_th_tc["first_lift_sec"] = sec
+                            live_flying_th_idx[uidx] = cls_th_tc
+                        elif ut in ("CommandCenter", "OrbitalCommand") and cls_th_tc["flew"]:
+                            cls_th_tc["ever_landed"] = True
+                            cls_th_tc["landed_lp"] = gl
+                            cls_th_tc["landed_sec"] = sec
+                            if cls_th_tc["first_landed_sec"] is None:
+                                cls_th_tc["first_landed_sec"] = sec
+                            live_flying_th_idx[uidx] = cls_th_tc
                     # Graph 22 tracker-exact tactical mode morphs
                     if (old_ut == "SiegeTank" and ut == "SiegeTankSieged") or (old_ut == "SiegeTankSieged" and ut == "SiegeTank"):
                         tracker_spells[pid]["siege_morph"] += 1
@@ -3028,17 +3565,25 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
                 k = 0
                 while k + 2 < n_it:
                     idx_cur += int(items[k])
+                    nx = float(items[k + 1])
+                    ny = float(items[k + 2])
                     u = live_by_idx.get(idx_cur)
                     if u is not None:
-                        nx = float(items[k + 1])
-                        ny = float(items[k + 2])
-                        u[2] = nx
-                        u[3] = ny
-                        if u[6]:
+                        if not u[6]:
+                            u[2] = nx
+                            u[3] = ny
+                        elif idx_cur in live_flying_th_idx:
+                            # Only update live Terran flying CC/OC positions; NEVER Nexus/Hatchery!
+                            u[2] = nx
+                            u[3] = ny
                             tr = th_rec_by_idx.get(idx_cur)
                             if tr is not None:
                                 tr[2] = nx
                                 tr[3] = ny
+                    fth = live_flying_th_idx.get(idx_cur)
+                    if fth is not None and fth["alive"] and fth["flew"]:
+                        fth["cur_xy"] = (nx, ny)
+                        fth["last_pos_lp"] = gl
                     k += 3
 
             elif et == "NNet.Replay.Tracker.SUpgradeEvent":
@@ -3105,6 +3650,9 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
             if mode == "pro" and ge_ok and len(ge_by_pid) < 2:
                 return results
 
+        # Cluster loop-0 neutral mineral patches into canonical mining spots (<= 5.5t BFS, >= 4 patches)
+        mineral_clusters = cluster_mineral_fields(neutral_minerals)
+
         half_win = max(15.0, bucket_sec * 0.5)
         for pid in (1, 2):
             opp_pid = 2 if pid == 1 else 1
@@ -3155,28 +3703,41 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
                 if fin_act + fin_lost >= 400.0:
                     peak_to_cum_ret = round(pk_act / (fin_act + fin_lost), 3)
 
-            # Graph 11 & 12 Base #4/#5/#6 & Gas #7/#8/#9/#10 timings (excluding self-cancels)
-            valid_th = sorted(s for s, t in th_inits[pid] if t not in self_canceled_tags)
+            ge_p = ge_by_pid.get(pid) if ge_ok else None
+
+            # Graph 11 & 12: Canonical mining bases (4th..8th), non-mining TH roles, & Gas #7..#12
+            for cls_th in th_cls_records[pid]:
+                if cls_th["tag"] in self_canceled_tags:
+                    cls_th["self_canceled"] = True
+            if race == "Terran" and ge_p is not None and ge_p.get("terran_land_cmds"):
+                resolve_terran_flying_th_positions(th_cls_records[pid], ge_p["terran_land_cmds"])
+            th_cls = classify_player_townhalls(
+                th_cls_records[pid], mineral_clusters, race, dur_sec, BUCKETS_24M_SEC
+            )
+            active_canonical_b = th_cls["active_canonical_bases"]
+            base_4plus_timings = th_cls["canonical_base_timings"]
+
             valid_gas = sorted(s for s, t in gas_inits[pid] if t not in self_canceled_tags)
-            base_4plus_timings = {
-                "fourth": round(valid_th[2], 1) if len(valid_th) >= 3 else None,
-                "fifth": round(valid_th[3], 1) if len(valid_th) >= 4 else None,
-                "sixth": round(valid_th[4], 1) if len(valid_th) >= 5 else None,
-            }
             gas_7plus_timings = {
                 "gas_7": round(valid_gas[6], 1) if len(valid_gas) >= 7 else None,
                 "gas_8": round(valid_gas[7], 1) if len(valid_gas) >= 8 else None,
                 "gas_9": round(valid_gas[8], 1) if len(valid_gas) >= 9 else None,
                 "gas_10": round(valid_gas[9], 1) if len(valid_gas) >= 10 else None,
+                "gas_11": round(valid_gas[10], 1) if len(valid_gas) >= 11 else None,
+                "gas_12": round(valid_gas[11], 1) if len(valid_gas) >= 12 else None,
             }
-            reached_4plus = (peak_active_ths[pid] >= 4) or (len(valid_th) >= 3)
-            gpb4 = (
-                round(sum(gas_per_base_4plus_samples[pid]) / len(gas_per_base_4plus_samples[pid]), 2)
-                if gas_per_base_4plus_samples[pid]
-                else None
-            )
-
-            ge_p = ge_by_pid.get(pid) if ge_ok else None
+            peak_canon = int(th_cls["peak_canonical_bases"])
+            tot_canon = int(th_cls["total_canonical_bases"])
+            reached_4plus = (peak_canon >= 4) or (tot_canon >= 4)
+            reached_5plus = (peak_canon >= 5) or (tot_canon >= 5)
+            reached_6plus = (peak_canon >= 6) or (tot_canon >= 6)
+            reached_7plus = (peak_canon >= 7) or (tot_canon >= 7)
+            gpb4_samples = [
+                gas_active_b[pid][bi] / float(cb)
+                for bi, cb in enumerate(active_canonical_b)
+                if cb is not None and cb >= 4 and gas_active_b[pid][bi] is not None
+            ]
+            gpb4 = round(sum(gpb4_samples) / len(gpb4_samples), 2) if gpb4_samples else None
 
             # Graph 19: Production facility counts & utilization
             fac_groups = RACE_FACILITY_GROUPS[race]
@@ -3414,8 +3975,13 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
                 "army_retention_ratio": round(sum(rvals) / len(rvals), 3) if rvals else None,
                 "peak_to_cum_retention": peak_to_cum_ret,
                 "peak_active_bases": peak_active_ths[pid],
+                "peak_canonical_bases": peak_canon,
+                "total_canonical_bases": tot_canon,
                 "peak_active_gas": peak_active_gas[pid],
                 "reached_4plus_bases": reached_4plus,
+                "reached_5plus_bases": reached_5plus,
+                "reached_6plus_bases": reached_6plus,
+                "reached_7plus_bases": reached_7plus,
                 "gas_per_base_4plus": gpb4,
             }
             timings_rec = _extract_timings(
@@ -3448,9 +4014,12 @@ def _parse_single_replay(args_tuple: tuple[Any, ...]) -> list[dict[str, Any]]:
                 "clashes": clashes_by_pid[pid],
                 "expansions_18m": {
                     "active_townhalls": th_active_b[pid],
+                    "active_canonical_bases": active_canonical_b,
                     "active_gas_geysers": gas_active_b[pid],
                     "base_4plus_timings": base_4plus_timings,
                     "gas_7plus_timings": gas_7plus_timings,
+                    "non_mining_counts": th_cls["non_mining_counts"],
+                    "non_mining_first_sec": th_cls["non_mining_first_sec"],
                 },
                 "tier_mix": tier_mix_b[pid],
                 "all_upgrades": all_upgrades[pid],
@@ -3832,18 +4401,42 @@ def aggregate_all(
     }
 
     # -------------------------------------------------------------------------
-    # Graph 11: Expansions & Base 4+ Scaling (0:00..18:00 + Base #4/#5/#6 Timings)
+    # Graph 11: Canonical Expansions (4th-8th+) & Non-Mining TownHalls (0:00..24:00)
     # -------------------------------------------------------------------------
     exp_active_th: dict[str, Any] = {}
+    exp_active_canon: dict[str, Any] = {}
     exp_reach_4plus: dict[str, Any] = {}
+
+    def _reach_stats(crecs: list[dict[str, Any]], flag_key: str) -> dict[str, Any]:
+        n_all = len(crecs)
+        r_all = sum(1 for r in crecs if r.get("summary", {}).get(flag_key))
+        g10 = [r for r in crecs if float(r.get("duration_sec", 0.0)) >= 600.0]
+        r10 = sum(1 for r in g10 if r.get("summary", {}).get(flag_key))
+        g14 = [r for r in crecs if float(r.get("duration_sec", 0.0)) >= 840.0]
+        r14 = sum(1 for r in g14 if r.get("summary", {}).get(flag_key))
+        g16 = [r for r in crecs if float(r.get("duration_sec", 0.0)) >= 960.0]
+        r16 = sum(1 for r in g16 if r.get("summary", {}).get(flag_key))
+        return {
+            "n_all": n_all,
+            "pct_all": round(100.0 * r_all / n_all, 1) if n_all > 0 else 0.0,
+            "n_ge10m": len(g10),
+            "pct_ge10m": round(100.0 * r10 / len(g10), 1) if g10 else 0.0,
+            "n_ge14m": len(g14),
+            "pct_ge14m": round(100.0 * r14 / len(g14), 1) if g14 else 0.0,
+            "n_ge16m": len(g16),
+            "pct_ge16m": round(100.0 * r16 / len(g16), 1) if g16 else 0.0,
+        }
+
     for seg in SEGMENTS:
         exp_active_th[seg] = {}
+        exp_active_canon[seg] = {}
         exp_reach_4plus[seg] = {}
         for c in COHORTS:
             crecs = [r for r in by_cohort[c] if seg == "all" or r["race"] == seg]
-            pts: list[dict[str, Any]] = []
-            for idx, t in enumerate(BUCKETS_18M_SEC):
-                vals = [
+            pts_th: list[dict[str, Any]] = []
+            pts_cn: list[dict[str, Any]] = []
+            for idx, t in enumerate(BUCKETS_24M_SEC):
+                vals_th = [
                     float(r["expansions_18m"]["active_townhalls"][idx])
                     for r in crecs
                     if r.get("expansions_18m")
@@ -3851,34 +4444,45 @@ def aggregate_all(
                     and idx < len(r["expansions_18m"]["active_townhalls"])
                     and r["expansions_18m"]["active_townhalls"][idx] is not None
                 ]
-                pts.append({"t": t, **_pctiles(vals, prec=2)})
-            exp_active_th[seg][c] = pts
+                pts_th.append({"t": t, **_pctiles(vals_th, prec=2)})
+                vals_cn = [
+                    float(r["expansions_18m"]["active_canonical_bases"][idx])
+                    for r in crecs
+                    if r.get("expansions_18m")
+                    and r["expansions_18m"].get("active_canonical_bases")
+                    and idx < len(r["expansions_18m"]["active_canonical_bases"])
+                    and r["expansions_18m"]["active_canonical_bases"][idx] is not None
+                ]
+                pts_cn.append({"t": t, **_pctiles(vals_cn, prec=2)})
+            exp_active_th[seg][c] = pts_th
+            exp_active_canon[seg][c] = pts_cn
 
-            n_all = len(crecs)
-            r_all = sum(1 for r in crecs if r.get("summary", {}).get("reached_4plus_bases"))
-            g10 = [r for r in crecs if float(r.get("duration_sec", 0.0)) >= 600.0]
-            r10 = sum(1 for r in g10 if r.get("summary", {}).get("reached_4plus_bases"))
-            g14 = [r for r in crecs if float(r.get("duration_sec", 0.0)) >= 840.0]
-            r14 = sum(1 for r in g14 if r.get("summary", {}).get("reached_4plus_bases"))
+            r4 = _reach_stats(crecs, "reached_4plus_bases")
             pk_b = [
                 float(r["summary"]["peak_active_bases"])
                 for r in crecs
                 if r.get("summary", {}).get("peak_active_bases") is not None
             ]
+            pk_cn = [
+                float(r["summary"]["peak_canonical_bases"])
+                for r in crecs
+                if r.get("summary", {}).get("peak_canonical_bases") is not None
+            ]
             exp_reach_4plus[seg][c] = {
-                "n_all": n_all,
-                "pct_all": round(100.0 * r_all / n_all, 1) if n_all > 0 else 0.0,
-                "n_ge10m": len(g10),
-                "pct_ge10m": round(100.0 * r10 / len(g10), 1) if g10 else 0.0,
-                "n_ge14m": len(g14),
-                "pct_ge14m": round(100.0 * r14 / len(g14), 1) if g14 else 0.0,
+                **r4,
                 "peak_bases": _pctiles(pk_b, prec=2),
+                "peak_canonical_bases": _pctiles(pk_cn, prec=2),
+                "reach_5plus": _reach_stats(crecs, "reached_5plus_bases"),
+                "reach_6plus": _reach_stats(crecs, "reached_6plus_bases"),
+                "reach_7plus": _reach_stats(crecs, "reached_7plus_bases"),
             }
 
     base_4plus_milestones = (
-        ("fourth", "4th Base"),
-        ("fifth", "5th Base"),
-        ("sixth", "6th Base"),
+        ("fourth", "4th Canonical Base"),
+        ("fifth", "5th Canonical Base"),
+        ("sixth", "6th Canonical Base"),
+        ("seventh", "7th Canonical Base"),
+        ("eighth", "8th Canonical Base"),
     )
     base_4plus_timings_out: dict[str, list[dict[str, Any]]] = {}
     for seg in SEGMENTS:
@@ -3903,16 +4507,53 @@ def aggregate_all(
             brows.append(entry)
         base_4plus_timings_out[seg] = brows
 
+    non_mining_th_out: dict[str, dict[str, Any]] = {}
+    for seg in SEGMENTS:
+        non_mining_th_out[seg] = {}
+        for rkey, rlbl in NON_MINING_TH_ROLES:
+            role_entry: dict[str, Any] = {"key": rkey, "label": rlbl}
+            for c in COHORTS:
+                crecs = [r for r in by_cohort[c] if seg == "all" or r["race"] == seg]
+                total = len(crecs)
+                cnts = [
+                    int(r.get("expansions_18m", {}).get("non_mining_counts", {}).get(rkey, 0) or 0)
+                    for r in crecs
+                ]
+                pos_cnts = [v for v in cnts if v > 0]
+                n_used = len(pos_cnts)
+                tot_cnt = int(sum(cnts))
+                f_secs = [
+                    float(r["expansions_18m"]["non_mining_first_sec"][rkey])
+                    for r in crecs
+                    if r.get("expansions_18m", {}).get("non_mining_first_sec", {}).get(rkey) is not None
+                ]
+                fst = _pctiles(f_secs, prec=1)
+                role_entry[c] = {
+                    "n": n_used,
+                    "total": total,
+                    "adopt_pct": round(100.0 * n_used / total, 1) if total > 0 else 0.0,
+                    "mean_count": round(tot_cnt / total, 2) if total > 0 else 0.0,
+                    "mean_when_used": round(tot_cnt / n_used, 2) if n_used > 0 else None,
+                    "total_count": tot_cnt,
+                    "first_p25_s": fst["p25"],
+                    "first_med_s": fst["med"],
+                    "first_p75_s": fst["p75"],
+                    "first_med_fmt": _fmt_sec(fst["med"]),
+                }
+            non_mining_th_out[seg][rkey] = role_entry
+
     expansions_4plus_out = {
-        "buckets_sec": BUCKETS_18M_SEC,
-        "buckets_label": [_fmt_sec(float(t)) for t in BUCKETS_18M_SEC],
+        "buckets_sec": BUCKETS_24M_SEC,
+        "buckets_label": [_fmt_sec(float(t)) for t in BUCKETS_24M_SEC],
+        "active_canonical_bases": exp_active_canon,
         "active_townhalls": exp_active_th,
         "reach_4plus": exp_reach_4plus,
         "base_timings": base_4plus_timings_out,
+        "non_mining_townhalls": non_mining_th_out,
     }
 
     # -------------------------------------------------------------------------
-    # Graph 12: Gas Geysers (7+, Bases 4+) Over Time & Timings (0:00..18:00)
+    # Graph 12: Gas Geysers (7-12, Bases 4-6) Over Time & Timings (0:00..24:00)
     # -------------------------------------------------------------------------
     gas_active_out: dict[str, Any] = {}
     gas_per_base_4plus_out: dict[str, Any] = {}
@@ -3922,7 +4563,7 @@ def aggregate_all(
         for c in COHORTS:
             crecs = [r for r in by_cohort[c] if seg == "all" or r["race"] == seg]
             pts = []
-            for idx, t in enumerate(BUCKETS_18M_SEC):
+            for idx, t in enumerate(BUCKETS_24M_SEC):
                 vals = [
                     float(r["expansions_18m"]["active_gas_geysers"][idx])
                     for r in crecs
@@ -3953,6 +4594,8 @@ def aggregate_all(
         ("gas_8", "Gas #8 (4th Base)"),
         ("gas_9", "Gas #9 (5th Base)"),
         ("gas_10", "Gas #10 (5th Base)"),
+        ("gas_11", "Gas #11 (6th Base)"),
+        ("gas_12", "Gas #12 (6th Base)"),
     )
     gas_7plus_timings_out: dict[str, list[dict[str, Any]]] = {}
     for seg in SEGMENTS:
@@ -3978,8 +4621,8 @@ def aggregate_all(
         gas_7plus_timings_out[seg] = grows
 
     gas_7plus_out = {
-        "buckets_sec": BUCKETS_18M_SEC,
-        "buckets_label": [_fmt_sec(float(t)) for t in BUCKETS_18M_SEC],
+        "buckets_sec": BUCKETS_24M_SEC,
+        "buckets_label": [_fmt_sec(float(t)) for t in BUCKETS_24M_SEC],
         "active_gas_geysers": gas_active_out,
         "gas_per_base_4plus": gas_per_base_4plus_out,
         "gas_timings": gas_7plus_timings_out,
@@ -5223,6 +5866,7 @@ def main() -> int:
             "SPM Caveat: Most raw-API opponent bots never issue SCameraUpdateEvent camera moves (0.0 SPM), whereas Mothman actively drives its camera (~20-35 SPM) and human Pros actively jump screens (~15-30 SPM; >=12 map tiles per jump).",
             "Pro Baseline: Valid LotV 1v1 human non-arcade replays (base_build >= 38215, duration >= 250s) from replays/pro_corpus/. Replays whose newer game-event wire schema cannot be decoded by s2protocol are excluded from APM/EPM/SPM while retained for tracker-based Army Value, Collection Rate, and Upgrade/Structure Timings.",
             "Timing Conventions: Expansions and structures record start time (SUnitInitEvent, excluding self-canceled Extractor/Hatch tricks); Morphs (Orbital, Lair, Hive) and Upgrades (SUpgradeEvent) record completion time.",
+            "Canonical Mining Bases (schema v5): Loop-0 neutral mineral patches are clustered via <=5.5t BFS (>=4 patches) per replay. Non-self-canceled TownHalls are matched (nearest patch <=8.0t and centroid <=10.5t) with tag-reuse-safe Terran flying-CC tracking (plus SCmdEvent Land fallback) into 5 mutually exclusive roles: canonical mining expansions (1st-8th+, sub-tagged mining_pf when morphed to PF), canonical rebuilds, macro hatcheries, macro OCs/Nexuses, and defensive PFs.",
         ],
     }
 

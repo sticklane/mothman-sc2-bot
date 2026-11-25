@@ -910,30 +910,137 @@
       return svg;
     }
 
+    function renderNonMiningTownHallsCard(nmBySeg, seg) {
+      if (!nmBySeg) return '';
+      const specsBySeg = {
+        all: [
+          ['macro_hatchery', 'Zerg', 'Macro Hatchery (Zerg)', 'In-base / off-mineral larva'],
+          ['macro_oc', 'Terran', 'Macro Orbital (Terran)', 'Extra in-main MULE / scan CC'],
+          ['mining_pf', 'Terran', 'Mining Planetary (Terran)', 'PF at canonical mineral cluster'],
+          ['defensive_pf', 'Terran', 'Defensive Planetary (Terran)', 'PF at choke or occupied base'],
+          ['rebuilds', 'all', 'Canonical Base Rebuilds (All)', 'Rebuilt destroyed mining spot'],
+        ],
+        Zerg: [
+          ['macro_hatchery', 'Zerg', 'Macro Hatchery', 'In-base / off-mineral larva'],
+          ['rebuilds', 'Zerg', 'Canonical Base Rebuilds', 'Rebuilt destroyed mining spot'],
+        ],
+        Terran: [
+          ['macro_oc', 'Terran', 'Macro Orbital Command', 'Extra in-main MULE / scan CC'],
+          ['mining_pf', 'Terran', 'Mining Planetary Fortress', 'PF at canonical mineral cluster'],
+          ['defensive_pf', 'Terran', 'Defensive Planetary Fortress', 'PF at choke or occupied base'],
+          ['rebuilds', 'Terran', 'Canonical Base Rebuilds', 'Rebuilt destroyed mining spot'],
+        ],
+        Protoss: [
+          ['macro_nexus', 'Protoss', 'Macro Nexus', 'Off-mineral or duplicate Nexus'],
+          ['rebuilds', 'Protoss', 'Canonical Base Rebuilds', 'Rebuilt destroyed mining spot'],
+        ],
+      };
+      const specs = specsBySeg[seg] || specsBySeg.all;
+      const rows = [];
+      let maxAdopt = 40;
+      specs.forEach(function (sp) {
+        const roleKey = sp[0], srcSeg = sp[1], lbl = sp[2], sub = sp[3];
+        const segObj = nmBySeg[srcSeg] || nmBySeg[seg] || nmBySeg.all;
+        const entry = segObj && segObj[roleKey];
+        if (!entry) return;
+        const m = entry.mothman || {}, p = entry.pros || {};
+        maxAdopt = Math.max(maxAdopt, Number(m.adopt_pct) || 0, Number(p.adopt_pct) || 0);
+        rows.push({ lbl: lbl, sub: sub, m: m, p: p });
+      });
+      if (!rows.length) return '';
+      const scaleMax = Math.min(100, Math.max(40, Math.ceil((maxAdopt * 1.15) / 10) * 10));
+      const W = 760, PL = 212, barW = 246, statX = 524, PT = 24, PB = 10, rowH = 44;
+      const H = PT + rows.length * rowH + PB;
+      let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" class="obs-svg" role="img" aria-label="Non-mining bases and Planetary Fortresses">';
+      svg += '<text x="6" y="14" fill="' + T.ink2 + '" font-size="10" font-weight="600">Base Structure Role</text>';
+      svg += '<text x="' + (PL + barW / 2).toFixed(1) + '" y="14" text-anchor="middle" fill="' + T.ink2 + '" font-size="10" font-weight="600">Games Built % (Mothman vs Pro)</text>';
+      svg += '<text x="' + statX + '" y="14" fill="' + T.ink2 + '" font-size="10" font-weight="600">Avg / Game &amp; 1st Median</text>';
+      rows.forEach(function (r, i) {
+        const yTop = PT + i * rowH, yMid = yTop + rowH / 2;
+        if (i > 0) svg += '<line x1="0" y1="' + yTop + '" x2="' + W + '" y2="' + yTop + '" stroke="' + T.gridSub + '" stroke-width="0.8" />';
+        svg += '<text x="6" y="' + (yMid - 1.5).toFixed(1) + '" fill="' + T.ink + '" font-size="10.4" font-weight="600">' + esc(r.lbl) + '</text>';
+        svg += '<text x="6" y="' + (yMid + 10.5).toFixed(1) + '" fill="' + T.muted + '" font-size="8.6">' + esc(r.sub) + '</text>';
+        const mPct = Number(r.m.adopt_pct) || 0, pPct = Number(r.p.adopt_pct) || 0;
+        const mw = Math.max(mPct > 0 ? 3 : 1.5, (Math.min(scaleMax, mPct) / scaleMax) * barW);
+        const pw = Math.max(pPct > 0 ? 3 : 1.5, (Math.min(scaleMax, pPct) / scaleMax) * barW);
+        svg += '<rect x="' + PL + '" y="' + (yMid - 11).toFixed(1) + '" width="' + mw.toFixed(1) + '" height="9" rx="2" fill="' + T.m + '" />';
+        svg += '<text x="' + (PL + mw + 6).toFixed(1) + '" y="' + (yMid - 3).toFixed(1) + '" fill="' + T.m + '" font-size="9.5" font-family="var(--mono,monospace)">' + fmt(mPct, 1) + '%</text>';
+        svg += '<rect x="' + PL + '" y="' + (yMid + 2).toFixed(1) + '" width="' + pw.toFixed(1) + '" height="9" rx="2" fill="' + T.p + '" opacity="0.82" />';
+        svg += '<text x="' + (PL + pw + 6).toFixed(1) + '" y="' + (yMid + 10).toFixed(1) + '" fill="' + T.p + '" font-size="9.5" font-family="var(--mono,monospace)">' + fmt(pPct, 1) + '%</text>';
+        const fmtStat = function (prefix, d) {
+          const mc = fmt(d.mean_count || 0, 2) + '/g';
+          return (d.n > 0 && d.first_med_fmt) ? (prefix + ' ' + mc + ' · 1st ' + d.first_med_fmt) : (prefix + ' ' + mc);
+        };
+        svg += '<text x="' + statX + '" y="' + (yMid - 2.5).toFixed(1) + '" fill="' + T.m + '" font-size="9.4" font-family="var(--mono,monospace)">' + esc(fmtStat('M', r.m)) + '</text>';
+        svg += '<text x="' + statX + '" y="' + (yMid + 10.5).toFixed(1) + '" fill="' + T.p + '" font-size="9.4" font-family="var(--mono,monospace)">' + esc(fmtStat('Pro', r.p)) + '</text>';
+      });
+      svg += '</svg>';
+      return svg;
+    }
+
     function renderTabBasesProd(bodyEl) {
       const seg = state.race;
       const e4 = data.expansions_4plus || {}, g7 = data.gas_7plus || {}, pu = data.production_utilization || {};
-      const thSeg = (e4.active_townhalls && (e4.active_townhalls[seg] || e4.active_townhalls.all)) || {};
+      const hasCanon = !!(e4.active_canonical_bases && (e4.active_canonical_bases[seg] || e4.active_canonical_bases.all));
+      const thMap = hasCanon ? e4.active_canonical_bases : e4.active_townhalls;
+      const thSeg = (thMap && (thMap[seg] || thMap.all)) || {};
       const r4Seg = (e4.reach_4plus && (e4.reach_4plus[seg] || e4.reach_4plus.all)) || {};
       const btSeg = (e4.base_timings && (e4.base_timings[seg] || e4.base_timings.all)) || [];
       const gsSeg = (g7.active_gas_geysers && (g7.active_gas_geysers[seg] || g7.active_gas_geysers.all)) || {};
       const gpbSeg = (g7.gas_per_base_4plus && (g7.gas_per_base_4plus[seg] || g7.gas_per_base_4plus.all)) || {};
       const gtSeg = (g7.gas_timings && (g7.gas_timings[seg] || g7.gas_timings.all)) || [];
 
+      const baseMaxT = (e4.buckets_sec && e4.buckets_sec.length) ? e4.buckets_sec[e4.buckets_sec.length - 1] : 1080;
+      const gasMaxT = (g7.buckets_sec && g7.buckets_sec.length) ? g7.buckets_sec[g7.buckets_sec.length - 1] : 1080;
+      const baseMaxM = Math.round(baseMaxT / 60), gasMaxM = Math.round(gasMaxT / 60);
+      const baseTitle = hasCanon
+        ? ('Active Canonical Mining Bases (0–' + baseMaxM + 'm)')
+        : ('Active Bases Over Time (0–' + baseMaxM + 'm)');
+      const gasTitle = 'Active Gas Geysers Over Time (0–' + gasMaxM + 'm)';
+
       const tsList = [];
       const thCfg = {
-        svgKey: 'g11_th', title: 'Active Bases Over Time (0–18m)',
+        svgKey: 'g11_th', title: baseTitle,
         mPts: thSeg.mothman || [], pPts: thSeg.pros || [], oPts: thSeg.opponents || [],
-        buckets: e4.buckets_sec || [], maxT: 1080, valKey: 'mean', minYMax: 5,
+        buckets: e4.buckets_sec || [], maxT: baseMaxT, valKey: 'mean', minYMax: 6,
         yFmt: function (v) { return Number(v).toFixed(1); },
       };
       const gasCfg = {
-        svgKey: 'g12_gas', title: 'Active Gas Geysers Over Time (0–18m)',
+        svgKey: 'g12_gas', title: gasTitle,
         mPts: gsSeg.mothman || [], pPts: gsSeg.pros || [], oPts: gsSeg.opponents || [],
-        buckets: g7.buckets_sec || [], maxT: 1080, valKey: 'mean', minYMax: 8,
+        buckets: g7.buckets_sec || [], maxT: gasMaxT, valKey: 'mean', minYMax: 8,
         yFmt: function (v) { return Number(v).toFixed(1); },
       };
       tsList.push(thCfg, gasCfg);
+
+      const mR4 = r4Seg.mothman || {}, pR4 = r4Seg.pros || {};
+      let reachStripHtml = '<span>≥14m 4+ Bases: <strong style="color:' + T.m + '">' + fmt(mR4.pct_ge14m, 0) + '%</strong> vs Pro <strong style="color:' + T.p + '">' + fmt(pR4.pct_ge14m, 0) + '%</strong></span>';
+      if (mR4.reach_5plus && pR4.reach_5plus) {
+        reachStripHtml =
+          '<span>≥16m Reach:</span>' +
+          '<span><strong>5+</strong> <strong style="color:' + T.m + '">' + fmt(mR4.reach_5plus.pct_ge16m, 0) + '%</strong>/<strong style="color:' + T.p + '">' + fmt(pR4.reach_5plus.pct_ge16m, 0) + '%</strong></span>' +
+          '<span><strong>6+</strong> <strong style="color:' + T.m + '">' + fmt(mR4.reach_6plus && mR4.reach_6plus.pct_ge16m, 0) + '%</strong>/<strong style="color:' + T.p + '">' + fmt(pR4.reach_6plus && pR4.reach_6plus.pct_ge16m, 0) + '%</strong></span>' +
+          '<span><strong>7+</strong> <strong style="color:' + T.m + '">' + fmt(mR4.reach_7plus && mR4.reach_7plus.pct_ge16m, 0) + '%</strong>/<strong style="color:' + T.p + '">' + fmt(pR4.reach_7plus && pR4.reach_7plus.pct_ge16m, 0) + '%</strong></span>';
+      }
+
+      const maxBaseN = btSeg.length >= 5 ? 8 : 6;
+      const maxGasN = gtSeg.length >= 6 ? 12 : 10;
+      const dumbTitle = hasCanon
+        ? ('Late-Game Canonical Bases (#4–#' + maxBaseN + ') &amp; Gas (#7–#' + maxGasN + ') Timings')
+        : ('Late-Game Base (#4–#' + maxBaseN + ') &amp; Gas (#7–#' + maxGasN + ') Timings');
+      const dumbSub = hasCanon
+        ? 'Distinct mineral-cluster expansions only (excludes macro &amp; defensive town halls) · Dot size = adoption % · Green = ahead of Pro · Red = behind Pro'
+        : 'Dot size scales with adoption % · Green = ahead of Pro · Red = behind Pro';
+
+      const nmCardSvg = e4.non_mining_townhalls ? renderNonMiningTownHallsCard(e4.non_mining_townhalls, seg) : '';
+      const nmCardHtml = nmCardSvg
+        ? ('<article class="obs-card obs-span-2">' +
+            '<div class="obs-card-head"><div><span class="obs-card-title">Non-Mining Bases &amp; Planetary Fortresses</span>' +
+            '<div class="obs-card-sub">In-base Macro Hatcheries, extra Orbital Commands, Mining vs. Defensive Planetaries, and rebuilt bases tracked separately from mining expansions</div></div>' +
+            '<span class="obs-badge">' + esc(seg === 'all' ? 'Per-Race Share' : seg) + '</span></div>' +
+            nmCardSvg +
+          '</article>')
+        : '';
 
       const pRace = (seg !== 'all') ? seg : state.prodRace;
       const puRace = pu.by_race && pu.by_race[pRace];
@@ -941,19 +1048,24 @@
       bodyEl.innerHTML =
         '<div class="obs-grid">' +
           '<article class="obs-card">' +
-            '<div class="obs-card-head"><span class="obs-card-title">Active Bases Over Time (0–18m)</span><span class="obs-badge">4+ Reach (≥10m): M ' + fmt(r4Seg.mothman && r4Seg.mothman.pct_ge10m, 0) + '% vs Pro ' + fmt(r4Seg.pros && r4Seg.pros.pct_ge10m, 0) + '%</span></div>' +
-            '<div class="obs-meds"><span>≥14m 4+ Bases: <strong style="color:' + T.m + '">' + fmt(r4Seg.mothman && r4Seg.mothman.pct_ge14m, 0) + '%</strong> vs Pro <strong style="color:' + T.p + '">' + fmt(r4Seg.pros && r4Seg.pros.pct_ge14m, 0) + '%</strong></span></div>' +
+            '<div class="obs-card-head"><div><span class="obs-card-title">' + esc(baseTitle) + '</span>' +
+            (hasCanon ? '<div class="obs-card-sub">Mineral-cluster expansions only (excludes macro &amp; defensive town halls)</div>' : '') +
+            '</div><span class="obs-badge">4+ Reach (≥10m): M ' + fmt(mR4.pct_ge10m, 0) + '% vs Pro ' + fmt(pR4.pct_ge10m, 0) + '%</span></div>' +
+            '<div class="obs-meds">' + reachStripHtml + '</div>' +
             renderTimeSeriesSvg(thCfg) +
           '</article>' +
           '<article class="obs-card">' +
-            '<div class="obs-card-head"><span class="obs-card-title">Active Gas Geysers Over Time (0–18m)</span><span class="obs-badge">Gas/Base @4+: M ' + fmt(gpbSeg.mothman && gpbSeg.mothman.med, 2) + ' vs Pro ' + fmt(gpbSeg.pros && gpbSeg.pros.med, 2) + '</span></div>' +
+            '<div class="obs-card-head"><div><span class="obs-card-title">' + esc(gasTitle) + '</span>' +
+            (hasCanon ? '<div class="obs-card-sub">Active gas extractors across canonical mining bases</div>' : '') +
+            '</div><span class="obs-badge">Gas/Base @4+: M ' + fmt(gpbSeg.mothman && gpbSeg.mothman.med, 2) + ' vs Pro ' + fmt(gpbSeg.pros && gpbSeg.pros.med, 2) + '</span></div>' +
             '<div class="obs-meds"><span>Peak Geysers (med): <strong style="color:' + T.m + '">' + fmt(gpbSeg.mothman && gpbSeg.mothman.peak_gas && gpbSeg.mothman.peak_gas.med, 0) + '</strong> vs Pro <strong style="color:' + T.p + '">' + fmt(gpbSeg.pros && gpbSeg.pros.peak_gas && gpbSeg.pros.peak_gas.med, 0) + '</strong></span></div>' +
             renderTimeSeriesSvg(gasCfg) +
           '</article>' +
           '<article class="obs-card obs-span-2">' +
-            '<div class="obs-card-head"><div><span class="obs-card-title">Late-Game Base (#4–#6) &amp; Gas (#7–#10) Timings</span><div class="obs-card-sub">Dot size scales with adoption % · Green = ahead of Pro · Red = behind Pro</div></div><span class="obs-badge">' + esc(seg === 'all' ? 'All Races' : seg) + '</span></div>' +
-            renderTimingDumbbell(btSeg.concat(gtSeg), 'Late-game base and gas timings', 1080) +
+            '<div class="obs-card-head"><div><span class="obs-card-title">' + dumbTitle + '</span><div class="obs-card-sub">' + dumbSub + '</div></div><span class="obs-badge">' + esc(seg === 'all' ? 'All Races' : seg) + '</span></div>' +
+            renderTimingDumbbell(btSeg.concat(gtSeg), 'Late-game canonical base and gas timings', Math.max(baseMaxT, gasMaxT, 1080)) +
           '</article>' +
+          nmCardHtml +
           '<article class="obs-card obs-span-2">' +
             '<div class="obs-card-head"><div><span class="obs-card-title">Production Buildings Built vs. Time Active</span><div class="obs-card-sub">Separates under-built facilities (left) from idle buildings (right)</div></div>' +
             '<div class="obs-pills">' + ['Protoss', 'Terran', 'Zerg'].map(function (r) { return '<button type="button" class="obs-pill' + (pRace === r ? ' is-active' : '') + '" data-obs-prace="' + r + '">' + r + '</button>'; }).join('') + '</div></div>' +

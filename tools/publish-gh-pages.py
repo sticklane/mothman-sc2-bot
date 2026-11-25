@@ -1512,40 +1512,41 @@ DEPLOY_LABELS: Dict[str, str] = {
     "tlrrltvx_ea56f6f1": "Loop 66",
     "wqqmqyvl_161ad430": "Loop 67B",
     "mkmrwtny_b6ab8e0e": "Loop 68C",
+    "mnttolso_f3a00720": "Loop 73",
 }
 
 BOT_META: Dict[str, Dict[str, str]] = {
     "Mothman-P": {
         "race": "Protoss",
-        "highlight": "Highest long-running win rate (32.0%, +34 Elo since Release #13).",
+        "highlight": "Highest long-running win rate (33.6%); went 6–2 external on Release #20.",
     },
     "Mothman-T": {
         "race": "Terran",
-        "highlight": "Highest long-running rating at 1408 (+35 Elo since Release #13).",
+        "highlight": "Highest long-running rating at 1413; went 6–3 external on Release #20.",
     },
     "Mothman-Z": {
         "race": "Zerg",
-        "highlight": "Climbed +27 Elo to 1331 across 437 Division 9 matches.",
+        "highlight": "Undefeated 9–0 against external Division 9 bots on Release #20 (+73 Elo since Release #13).",
     },
     "Mothman-X": {
         "race": "Random",
-        "highlight": "Climbed +23 Elo to 1371 across 438 Division 9 matches.",
+        "highlight": "Went 5–2 external on Release #20 (+48 Elo since Release #13).",
     },
     "Mothman-P2": {
         "race": "Protoss",
-        "highlight": "Zero crashes across 58 games; recent wins over Bastok and titania.",
+        "highlight": "Zero crashes across 71 Division 8 games; recent wins over TestTripel and titania.",
     },
     "Mothman-T2": {
         "race": "Terran",
-        "highlight": "Tied for top v2 rating (1508); recent wins over EmperorOfAllYarn (1524), SwarmVibe (1521), and oberon.",
+        "highlight": "Top current-season rating (1507); went 5–4 external on Release #20 with wins over ZergBot (1503) and LegioIXHispana (1500).",
     },
     "Mothman-Z2": {
         "race": "Zerg",
-        "highlight": "Tied for top v2 rating (1508); recent wins over SwarmVibe (1517), Bastok, and onlyfans.",
+        "highlight": "Zero crashes across 71 games; recent wins over PlatinumPrototype (1503), TankTripel, and GhostProtocol.",
     },
     "Mothman-X2": {
         "race": "Random",
-        "highlight": "Zero crashes across 58 games; recent wins over CtrlZedTerran, Bastok, and who.",
+        "highlight": "Zero crashes across 71 games; recent wins over LegioIXHispana (1500) and ValkyrieTerran.",
     },
 }
 
@@ -4245,9 +4246,9 @@ def _render_standings_tables(
         )
         note_html = (
             '<p class="table-note">'
-            "AI Arena ratings start at 1600. All eight ladder accounts currently run "
-            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45439370512" target="_blank" rel="noopener noreferrer"><strong>Release #20 (Build 68C)</strong></a>, '
-            f"with {html.escape(crash_phrase)} and +119 combined Elo gained across all four Division 9 accounts since Release #13. "
+            "AI Arena ratings start at 1600. All eight ladder accounts now run "
+            '<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45549748140" target="_blank" rel="noopener noreferrer"><strong>Release #21 (Build 73)</strong></a> '
+            f"after a Release #20 live run went 37–31–1 (53.6%) in ranked external play (26–7, 78.8% in Division 9) with {html.escape(crash_phrase)}. "
             "Trade ratio divides enemy army and worker value destroyed by our own value lost."
             "</p>"
         )
@@ -4668,9 +4669,9 @@ def build_history_page(
     live_caption = (
         f"The first deployed build went 0–10 on AI Arena. Recent v1 builds win roughly 55–61% of their games: "
         f"Build {prev_b_num} went {prev_rec_str}, Build {latest_b_num} went {latest_rec_str} ({latest_tr:.2f}× trade), "
-        f"Release #9 (Build 51) climbed to 19–9–3 (61.3% wins), and Release #13 (Build 61C) went 7–5 (58.3% external; "
-        f"6–2 in ranked v1 games) before Releases #14–#19 and "
-        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45439370512" target="_blank" rel="noopener noreferrer">Release #20 (Build 68C)</a> '
+        f"Release #9 (Build 51) climbed to 19–9–3 (61.3% wins), and Release #20 (Build 68C) reached 26–7 (78.8%) in "
+        f"Division 9 external play before "
+        f'<a href="https://github.com/sticklane/mothman-sc2-bot/actions/runs/45549748140" target="_blank" rel="noopener noreferrer">Release #21 (Build 73)</a> '
         f"rolled out to all 8 ladder bots."
     )
 
@@ -4741,6 +4742,7 @@ def build_history_page(
         "iter66_ship18_full": 18,
         "iter67b_ship19_full": 19,
         "iter68c_ship20_full": 20,
+        "iter73_ship21_full": 21,
     }
 
     def _format_run_label(run_id: str, status_raw: str = "") -> str:
@@ -5143,8 +5145,8 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
     if sec6_marker in text:
         head_part, sec6_raw = text.split(sec6_marker, 1)
         sec6_lines = sec6_raw.splitlines()
-        # Extract sub-iteration -> wall_min mapping and Stage 1 Canary-18 runs from Section 6b to disambiguate Table 3a
-        sub_by_wall: Dict[Tuple[str, str], str] = {}
+        # Extract sub-iteration -> wall_min FIFO queue and Stage 1 Canary-18 runs from Section 6b to disambiguate Table 3a
+        sub_by_wall: Dict[Tuple[str, str], List[str]] = {}
         canary18_subs: set[str] = set()
         in_6b = False
         for sln in sec6_lines:
@@ -5158,17 +5160,24 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
             if in_6b and ss.startswith("|") and not ss.startswith("| Loop") and not ss.startswith("|---"):
                 scells = [c.strip().strip("`") for c in ss.strip("|").split("|")]
                 if len(scells) >= 6:
-                    m_sub = re.fullmatch(r"(L\d+)([A-Z]+)", scells[0])
+                    m_sub = re.fullmatch(r"(L\d+)([A-Z]*)", scells[0])
                     if m_sub:
-                        sub_by_wall[(m_sub.group(1), scells[5])] = scells[0]
+                        sub_by_wall.setdefault((m_sub.group(1), scells[5]), []).append(scells[0])
                     if scells[1] == "18":
                         canary18_subs.add(scells[0])
-        if sub_by_wall:
+        if sub_by_wall or canary18_subs:
             def _disambig_3a_row(m: re.Match[str]) -> str:
                 base_lp, mid, wall_s, rest = m.group(1), m.group(2), m.group(3), m.group(4)
-                rep_lp = sub_by_wall.get((base_lp, wall_s), base_lp)
+                q = sub_by_wall.get((base_lp, wall_s))
+                rep_lp = q.pop(0) if q else base_lp
                 if rep_lp in canary18_subs:
                     return f"| {rep_lp} | Canary-18 | YES | {wall_s} | Stage 1 canary gate | Stopped at the 18-match canary gate before the 84-match roster |"
+                if mid.strip().startswith("n/a"):
+                    mid = re.sub(r"\bn/a\b", "Canary pass", mid, count=1)
+                    rest = rest.replace(
+                        "Mixed match regression | Mixed head-to-head and external regression below release threshold",
+                        "Full-roster benchmark gate | Passed 18-match canary, then fell short of release threshold on full 84-match roster",
+                    )
                 return f"| {rep_lp} |{mid}| {wall_s} |{rest}"
             head_part = re.sub(
                 r"^\| (L\d+) \|([^|\n]+\|[^|\n]+)\|\s*(\d+\.\d+)\s*\|(.*)$",
@@ -5283,6 +5292,8 @@ def _sanitize_flywheel_retro_md(md: str) -> str:
                     other_findings.append("**Uncompiled test runs:** Source-only Racket test runs reached 43 s; isolated per-lane bytecode caches eliminate repeated cold compilation.")
                 elif "`slow_non_sc2_command`" in s and "`raco_make`" in s:
                     other_findings.append("**Full-tree builds:** Full bytecode rebuilds took 33 s; scoped lane test runners compile only edited modules and target tests.")
+                elif "`slow_non_sc2_command`" in s and "`full_test_suite`" in s:
+                    other_findings.append("**Full test suite:** One author run of the full test suite took 32.0 s; authors now run targeted lane tests while the verifier runs the full suite once per pass.")
                 elif "`slow_non_sc2_command`" in s and "`forensics_diff`" in s:
                     other_findings.append("**Replay forensics diffs:** One replay diff pass took 37.0 s in L67B; caching per-match features keeps future diffs under 10 s.")
                 elif "`slow_non_sc2_command`" in s and "`other`" in s:

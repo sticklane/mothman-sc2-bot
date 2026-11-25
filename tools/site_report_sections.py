@@ -396,6 +396,7 @@ def load_rich_report_telemetry(
             or (it_n == 66 and not suf and sh_n == 18)
             or (it_n == 67 and suf.lower() == "b" and sh_n == 19)
             or (it_n == 68 and suf.lower() == "c" and sh_n == 20)
+            or (it_n == 73 and not suf and sh_n == 21)
         )
 
     # A2. Load Combat Positioning (Section 5) & Army-Group Positioning (Section 6) vs. Pro
@@ -1328,7 +1329,8 @@ def load_rich_report_telemetry(
                  OR m.run_id LIKE '%iter61c_ship13_full%' OR m.run_id LIKE '%iter62c_ship14_full%'
                  OR m.run_id LIKE '%iter63b_ship15_full%' OR m.run_id LIKE '%iter64b_ship16_full%'
                  OR m.run_id LIKE '%iter65h_ship17_full%' OR m.run_id LIKE '%iter66_ship18_full%'
-                 OR m.run_id LIKE '%iter67b_ship19_full%' OR m.run_id LIKE '%iter68c_ship20_full%')
+                 OR m.run_id LIKE '%iter67b_ship19_full%' OR m.run_id LIKE '%iter68c_ship20_full%'
+                 OR m.run_id LIKE '%iter73_ship21_full%')
         """
 
         # Per-matchup Local stats (All 26 external opponents)
@@ -3315,9 +3317,9 @@ def render_matchup_evaluation_section(
                 elif pos_w and neg_w:
                     pos_join = " and ".join(pos_w) if len(pos_w) == 2 else ", ".join(pos_w)
                     neg_join = " and ".join(neg_w) if len(neg_w) == 2 else ", ".join(neg_w)
-                    verb_pos = "form" if len(pos_w) > 1 else "forms"
+                    pos_phrase = "form positive concave arcs" if len(pos_w) > 1 else "forms a positive concave arc"
                     verb_neg = "sit" if len(neg_w) > 1 else "sits"
-                    wrap_clause = f"{pos_join} {verb_pos} positive concave arcs (vs. Grandmaster {min(pro_wrap_vals):+.2f} to {max(pro_wrap_vals):+.2f}) while {neg_join} {verb_neg} narrower"
+                    wrap_clause = f"{pos_join} {pos_phrase} (vs. Grandmaster {min(pro_wrap_vals):+.2f} to {max(pro_wrap_vals):+.2f}) while {neg_join} {verb_neg} narrower"
                 else:
                     all_join = ", ".join(f"{r} ({v:+.2f})" for r, v in our_wrap_pairs)
                     wrap_clause = f"Measured concave wrap sits at {all_join} (vs. Grandmaster {min(pro_wrap_vals):+.2f} to {max(pro_wrap_vals):+.2f})"
@@ -3715,7 +3717,18 @@ def render_matchup_evaluation_section(
             else ""
         )
         run_id_low = str(pro_curves.get("run_id") or "").lower()
-        if "iter68c_" in run_id_low:
+        if "iter73_" in run_id_low:
+            rh_title = f"Release #{int(cb['ship_num'])}" if (cb.get("is_shipped") and cb.get("ship_num")) else build_lbl
+            r_mech_para = f"""
+    <div class="release-highlights">
+      <div class="rh-kicker">What Changed in {html.escape(rh_title)}</div>
+      <ul class="rh-list">
+        <li><strong>Supply blocks cut in half across all three races:</strong> Earlier Pylon, Depot, and Overlord preemption plus post-4:30 mineral worker transfers dropped overall supply-blocked time from 4.2% to 2.2%, with Protoss falling from 6.1% to a record 1.8%.</li>
+        <li><strong>Cleaner command pacing &amp; faster Zerg spending:</strong> A command-rate governor and batched Zerg larva spending eliminated worker and rally command drops completely and cut larva budget conflicts by 70%.</li>
+        <li><strong>Record win rates &amp; first positive overall trade:</strong> Full 84-match local play hit new highs at 39–40–5 (46.4% wins, 1.03× trade), and held-out Unseen-12 jumped to 13–21–2 (36.1%). Zerg posted a record 14–9–3 external slate (1.43× trade), and Protoss climbed to 12–14.</li>
+      </ul>
+    </div>"""
+        elif "iter68c_" in run_id_low:
             rh_title = f"Release #{int(cb['ship_num'])}" if (cb.get("is_shipped") and cb.get("ship_num")) else build_lbl
             r_mech_para = f"""
     <div class="release-highlights">
@@ -3949,10 +3962,27 @@ def render_matchup_evaluation_section(
     # Current-build Supply-Blocked SVG + dynamic prose
     sb_source = {m["matchup"]: {"local": m["cur_local"]} for m in mu_list}
     sb_svg = render_supply_block_svg(sb_source)
+    p_sbs = [sb_source[mu]["local"]["sb"] for mu in ("PvP", "PvT", "PvZ") if mu in sb_source]
     t_sbs = [sb_source[mu]["local"]["sb"] for mu in ("TvP", "TvT", "TvZ") if mu in sb_source]
-    pz_sbs = [sb_source[mu]["local"]["sb"] for mu in ("PvP", "PvT", "PvZ", "ZvP", "ZvT", "ZvZ") if mu in sb_source]
-    t_sb_lo, t_sb_hi = (min(t_sbs), max(t_sbs)) if t_sbs else (2.1, 2.7)
+    z_sbs = [sb_source[mu]["local"]["sb"] for mu in ("ZvP", "ZvT", "ZvZ") if mu in sb_source]
+    pz_sbs = p_sbs + z_sbs
+    all_sbs = p_sbs + t_sbs + z_sbs
+    p_sb_lo, p_sb_hi = (min(p_sbs), max(p_sbs)) if p_sbs else (1.4, 2.7)
+    t_sb_lo, t_sb_hi = (min(t_sbs), max(t_sbs)) if t_sbs else (1.9, 2.5)
+    z_sb_lo, z_sb_hi = (min(z_sbs), max(z_sbs)) if z_sbs else (2.4, 2.8)
     pz_sb_lo, pz_sb_hi = (min(pz_sbs), max(pz_sbs)) if pz_sbs else (4.1, 5.6)
+    all_sb_hi = max(all_sbs) if all_sbs else max(p_sb_hi, t_sb_hi, z_sb_hi)
+    if all_sb_hi <= 3.5 or pz_sb_lo <= t_sb_lo:
+        sb_prose = (
+            f"All nine matchups stay at or below {all_sb_hi:.1f}% supply-blocked: "
+            f"Protoss runs {p_sb_lo:.1f}% to {p_sb_hi:.1f}%, Terran {t_sb_lo:.1f}% to {t_sb_hi:.1f}%, "
+            f"and Zerg {z_sb_lo:.1f}% to {z_sb_hi:.1f}%."
+        )
+    else:
+        sb_prose = (
+            f"Terran stays between {t_sb_lo:.1f}% and {t_sb_hi:.1f}% supply-blocked across all three matchups, "
+            f"while Protoss and Zerg sit between {pz_sb_lo:.1f}% and {pz_sb_hi:.1f}% when early pressure kills Pylons or Overlords."
+        )
 
     # Current-build Worker & Army Curves SVGs + dynamic prose
     wk_data = cb["worker_curves"] if (has_cb and cb.get("worker_curves", {}).get("Protoss")) else rich["worker_curves"]
@@ -4075,8 +4105,7 @@ def render_matchup_evaluation_section(
   <div class="eval-subsection" id="supply-and-workers">
     <h3>Supply-Blocked Time &amp; Worker Growth</h3>
     <p class="prose-tight">
-      Terran stays between {t_sb_lo:.1f}% and {t_sb_hi:.1f}% supply-blocked across all three matchups,
-      while Protoss and Zerg sit between {pz_sb_lo:.1f}% and {pz_sb_hi:.1f}% when early pressure kills Pylons or Overlords.
+      {html.escape(sb_prose)}
     </p>
     <div class="race-toggle" role="tablist" aria-label="Select race worker curve">
       <button type="button" class="cat-pill is-active" data-race-curve="Protoss">Protoss</button>
